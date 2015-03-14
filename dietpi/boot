@@ -1,0 +1,235 @@
+#!/bin/bash
+#////////////////////////////////////
+# DietPi Boot Script
+#
+#////////////////////////////////////
+# Created by Dan Knight / daniel_haze@hotmail.com / fuzon.co.uk
+#
+#////////////////////////////////////
+#
+# Info:
+# - filename /boot/dietpi/boot
+# - activates on boot via /etc/rc.local
+# - requires /boot/dietpi/.install_stage to exist with a value of -3 for it to run all setup stages
+#////////////////////////////////////
+
+#/////////////////////////////////////////////////////////////////////////////////////
+#Obtain Install Stage Index
+#/////////////////////////////////////////////////////////////////////////////////////
+# -3 = first boot / -2 = partition / -1 = filesystem / 0 = run dietpi-software at login / 1 = completed
+
+DIETPI_INSTALL_STAGE=0
+#Check .install_stage file exists
+if [ -f /boot/dietpi/.install_stage ]; then
+	DIETPI_INSTALL_STAGE=$(cat /boot/dietpi/.install_stage)
+else
+    #Set to first boot
+	DIETPI_INSTALL_STAGE=-3
+	echo -e "$DIETPI_INSTALL_STAGE" >> /boot/dietpi/.install_stage
+fi
+
+#/////////////////////////////////////////////////////////////////////////////////////
+#Obtain Pi version 1/2 by checking memory size
+#/////////////////////////////////////////////////////////////////////////////////////
+
+/boot/dietpi/dietpi-obtain_pi_version
+
+PIMODEL=$(sed -n 1p /boot/dietpi/.pi_model)
+PIMODEL_DESCRIPTION=$(sed -n 2p /boot/dietpi/.pi_model)
+
+PiVersion_Print(){
+    echo -e " Pi Model Detected : $PIMODEL_DESCRIPTION \n --------------------------------"
+}
+
+#/////////////////////////////////////////////////////////////////////////////////////
+# Set Initital overclocking profile for Current Pi version (Pi1 and Pi2)
+#/////////////////////////////////////////////////////////////////////////////////////
+PiVersion_Overclocking_Set(){
+    if [ "$PIMODEL" = 2 ]; then
+        sed -i '/over_voltage=/c\#over_voltage=0' /boot/config.txt
+        sed -i '/arm_freq=/c\#arm_freq=900' /boot/config.txt
+    else
+        sed -i '/over_voltage=/c\over_voltage=2' /boot/config.txt
+        sed -i '/arm_freq=/c\arm_freq=900' /boot/config.txt
+    fi
+	sed -i '/core_freq=/c\#core_freq=250' /boot/config.txt
+	sed -i '/sdram_freq=/c\#sdram_freq=400' /boot/config.txt
+}
+
+#/////////////////////////////////////////////////////////////////////////////////////
+# Print Credits
+#/////////////////////////////////////////////////////////////////////////////////////
+Credits_Print(){
+ echo -e "\n Thanks for using Diet Pi! \n
+ Created by: Dan Knight
+ Website: fuzon.co.uk
+ Email: daniel_haze@hotmail.com \n
+ "
+}
+
+#/////////////////////////////////////////////////////////////////////////////////////
+# Partition_SD
+#/////////////////////////////////////////////////////////////////////////////////////
+Partition_SD(){
+    #Stop Services
+    /boot/dietpi/dietpi-services stop
+	
+	# Get starting partition sector for partition 2 / ext4
+	local partition_start=$(parted /dev/mmcblk0 -ms unit s p | grep ':ext4::;' | sed 's/:/ /g' | sed 's/s//g' | awk '{ print $2 }')
+ 
+    #Recreate partition to full size of MicroSd card
+    echo -e "p
+    d
+    2
+    n
+    p
+    2
+    $partition_start
+ 
+    p
+    w
+    " | fdisk /dev/mmcblk0
+    # Set Pi Version overclocking profile)
+    PiVersion_Overclocking_Set
+}
+
+#/////////////////////////////////////////////////////////////////////////////////////
+# Expand_SD
+#/////////////////////////////////////////////////////////////////////////////////////
+Expand_SD(){
+    # Stop Services
+    /boot/dietpi/dietpi-services stop
+
+    # Resize Filesystem to new partition size
+    resize2fs /dev/mmcblk0p2
+}
+
+DietPi_Bootloader_Settings(){
+
+    #Grab user requested settings from /dietpi.txt
+	local filepath="/boot/dietpi.txt"
+	local Ethernet_Enabled=$(cat $filepath | grep -ci -m1 'Ethernet_Enabled=1')
+	local Wifi_Enabled=$(cat $filepath | grep -ci -m1 'Wifi_Enabled=1')
+
+	local Wifi_SSID=$(cat $filepath | grep Wifi_SSID | sed 's/Wifi_SSID=//g')
+	local Wifi_KEY=$(cat $filepath | grep Wifi_KEY | sed 's/Wifi_KEY=//g')
+
+	local Use_Static=$(cat $filepath | grep -ci -m1 'Use_Static=1')
+	local Static_IP=$(cat $filepath | grep Static_IP | sed 's/Static_IP=//g')
+	local Static_Mask=$($filepath | grep Static_Mask | sed 's/Static_Mask=//g')
+	local Static_Gateway=$($filepath | grep Static_Gateway | sed 's/Static_Gateway=//g')
+	
+    #Apply The Requested Settings
+	
+	#Wifi
+	if [ "$Wifi_Enabled" = 1 ]; then
+	    #Enable Wlan, disable Eth
+		sed -i '/auto wlan0/c\auto wlan0' /etc/network/interfaces
+		sed -i '/auto eth0/c\#auto eth0' /etc/network/interfaces
+		#Set SSid
+		sed -i "/wireless-essid/c\wireless-essid $Wifi_SSID" /etc/network/interfaces
+		sed -i "/wpa-ssid/c\wpa-ssid $Wifi_SSID" /etc/network/interfaces
+		#Set Key
+		sed -i "/wireless-key/c\wireless-key $Wifi_KEY" /etc/network/interfaces
+		sed -i "/wpa-psk/c\wpa-psk $Wifi_KEY" /etc/network/interfaces
+    #Ethernet		
+	elif [ "$Ethernet_Enabled" = 1 ]; then
+	    #Enable Eth, disable Wlan
+		sed -i '/auto eth0/c\auto eth0' /etc/network/interfaces
+		sed -i '/auto wlan0/c\#auto wlan0' /etc/network/interfaces
+	fi
+	
+	#Static IPs
+	if [ "$Use_Static" = 1 ]; then
+		if [ "$Wifi_Enabled" = 1 ]; then
+			sed -i '/iface wlan0 inet/c\iface wlan0 inet static' /etc/network/interfaces
+		elif [ "$Ethernet_Enabled" = 1 ]; then
+			sed -i '/iface eth0 inet/c\iface eth0 inet static' /etc/network/interfaces
+		fi
+	
+		sed -i "/address/c\address $Static_IP" /etc/network/interfaces
+		sed -i "/netmask/c\netmask $Static_Mask" /etc/network/interfaces
+	    sed -i "/gateway/c\gateway $Static_Gateway" /etc/network/interfaces
+	fi
+	
+	#Start Networking (disabled after /boot/dietpi/finalize
+	/etc/init.d/networking restart
+}
+
+#/////////////////////////////////////////////////////////////////////////////////////
+# Boot_Banner Print
+#/////////////////////////////////////////////////////////////////////////////////////
+Boot_Banner(){
+    clear
+    echo -e " --------------------------------\n \e[1mD I E T - P I\e[0m\n --------------------------------"
+    PiVersion_Print
+    Credits_Print
+}
+
+#/////////////////////////////////////////////////////////////////////////////////////
+# Main Loop
+#/////////////////////////////////////////////////////////////////////////////////////
+
+#Apply DietPi CPU (Governer) Settings
+/boot/dietpi/dietpi-cpu_set
+
+#Normal Boot
+if [ "$DIETPI_INSTALL_STAGE" = 1 ]; then
+
+   Boot_Banner
+
+#Filesystem prep, stage 1/2
+elif [ "$DIETPI_INSTALL_STAGE" = -3 ]; then
+    Partition_SD
+
+    clear
+    echo -e " --------------------------------\n D I E T - P I \n Setup \n --------------------------------"
+    PiVersion_Print
+    echo -e " The system will reboot to start the filesystem prep. \n Nearly done. \n"
+	
+	rm /boot/dietpi/.install_stage
+	echo -e "-2" >> /boot/dietpi/.install_stage
+	
+    reboot
+	
+#Filesystem prep, stage 2/2
+elif [ "$DIETPI_INSTALL_STAGE" = -2 ]; then
+    Expand_SD
+		
+	clear
+    echo -e " --------------------------------\n D I E T - P I \n Setup \n --------------------------------"
+    PiVersion_Print
+    echo -e " The system will reboot, This will complete the filesystem expansion \n"
+
+	rm /boot/dietpi/.install_stage
+	echo -e "-1" >> /boot/dietpi/.install_stage
+
+	reboot
+	
+#Finish up, set .install_stage to 0 (runs dietpi-software on login)
+elif [ "$DIETPI_INSTALL_STAGE" = -1 ]; then
+
+	#stop all services.
+	/boot/dietpi/dietpi-services stop
+
+    #Activate DietPi Boot Loader User Settings /dietpi.txt
+	DietPi_Bootloader_Settings
+
+    #Enable Swap file (disabled until partition/filesystem ajustments have been completed)
+	sed -i '/\/sbin\/dphys-swapfile setup/c\\/sbin\/dphys-swapfile setup' /etc/init.d/dphys-swapfile
+	sed -i '/\/sbin\/dphys-swapfile swapon/c\\/sbin\/dphys-swapfile swapon' /etc/init.d/dphys-swapfile
+	
+	#Setup swap file
+    dphys-swapfile setup
+    dphys-swapfile swapon
+	
+	#start all services
+	/boot/dietpi/dietpi-services start
+	
+	#Finished
+    Boot_Banner
+	
+	#Set Install Stage index to trigger DietPi-Software installation on login
+	rm /boot/dietpi/.install_stage
+	echo -e "0" >> /boot/dietpi/.install_stage
+fi
