@@ -37,5 +37,8 @@ All the tweaks and initial setup is done for you to ensure your Pi runs at its b
 - Only 13~ running processes after boot
 - <20MB of memory usage after boot
 
-#Download DietPi Image / More Info:
+#Download DietPi Image
+http://goo.gl/yX7Wl5
+
+#More Info:
 http://fuzon.co.uk/phpbb/viewtopic.php?f=8&t=6
