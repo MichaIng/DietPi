@@ -19,7 +19,7 @@ Only the software you select will be installed with none of the bloatware found 
 - Web Server (Apache2 + mysql + php5 + phpmyadmin)
 - FTP server (Proftpd)
 - Music Server Beta (Mopidy)
-- RetroPie (Advanced users - user configuration required)
+- Gaming (RetroPie)
 
 If you choose to install nothing, you will be left with DietPi-Core (a bare minimal Raspbian server installation).
 
