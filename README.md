@@ -1,7 +1,7 @@
 # DietPi
 Minimal Raspbian with optional optimized "ready to run" software.
 
-#At its core, DietPi is the goto image for a minimal Rasbian Server install. 
+#At its core, DietPi is the goto image for a minimal Rasbian install. 
 We've stripped down and removed everything from the official Raspbian image to give us a bare minimal Raspbian server image that we call "DietPi-Core".
 DietPi is a netinstall image, so no resources are wasted on unneeded software. 
 
