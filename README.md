@@ -1,13 +1,11 @@
 # DietPi for Raspberry Pi's
 http://fuzon.co.uk/phpbb/viewtopic.php?f=8&t=6
 
-# DietPi for oDroid C1
+DietPi for oDroid C1
 http://fuzon.co.uk/phpbb/viewtopic.php?f=8&t=11
 
 # DietPi GPLv2 License
-DietPi Copyright (C) 2015 Daniel Knight 
-Contact: daniel_haze@hotmail.com
-Website: fuzon.co.uk
+DietPi Copyright (C) 2015 Daniel Knight , daniel_haze@hotmail.com , fuzon.co.uk
 
 This program is free software: you can redistribute it and/or modify
 it under the terms of the GNU General Public License as published by
@@ -21,17 +19,17 @@ GNU General Public License for more details.
 You should have received a copy of the GNU General Public License
 along with this program.  If not, see http://www.gnu.org/licenses/
 
-# Links to DietPi Source
+Links to DietPi Source
 - Source : https://github.com/Fourdee/DietPi
 - Build : Not applicable (As DietPi currently uses Bash scripts, no building or compiling is required).
 
-# DietPi file list (The above GPLv2 documentation also applies to all files listed below):
+DietPi file list (The above GPLv2 documentation also applies to all files listed below):
 - All files located in /boot/dietpi (recursive)
 - /boot/dietpi.txt
 - /boot/config.txt
 - /boot/boot.ini
 
-# Links to additional software used in DietPi, and, their source and build instructions (where applicable):
+Links to additional software used in DietPi, and, their source and build instructions (where applicable):
 
 Raspberry Pi 
 - https://github.com/raspberrypi
