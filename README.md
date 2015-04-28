@@ -1,5 +1,5 @@
 # DietPi
-Leightweight justice for your Raspberry Pi
+Lightweight justice for your Raspberry Pi.
 
 DietPi for Raspberry Pi's
 http://fuzon.co.uk/phpbb/viewtopic.php?f=8&t=6
@@ -61,7 +61,7 @@ YMPD
 PHPBB
 - https://github.com/phpbb/phpbb
 
-Apache 2
+Apache2
 - https://github.com/apache
 
 MySql
@@ -87,3 +87,6 @@ RetroPie Setup Script
 
 SoftEther VPN Server
 - https://github.com/SoftEtherVPN
+
+OpenTyrian
+- https://bitbucket.org/opentyrian/opentyrian/wiki/Home
