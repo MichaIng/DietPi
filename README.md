@@ -8,10 +8,10 @@ Lightweight justice for your Raspberry Pi.
 <hr>
 
 ### DietPi Project Contribution. Are you able to:
-* Create a modern and clean website for DietPi
-* Compile software for Odroid C1 and RPi systems
 * Provide feedback and/or test areas of DietPi, to improve the user experience.
 * Report bugs
+* Create a modern and clean website for DietPi
+* Compile software for Odroid C1 and RPi systems
 * Create a logo for DietPi.
 * Contribute to DietPi with programming on git hub.
 * Suggest new software that we can add to the dietpi-software install system 
@@ -22,6 +22,11 @@ We are always looking for talented people who believe in the DietPi project, and
 * Send me an Email: daniel_haze@hotmail.com
 * Join our forums: http://fuzon.co.uk
 * Git Hub: https://github.com/Fourdee/DietPi
+
+<hr>
+
+### The DietPi Project Team:
+* Dan Knight daniel_haze@hotmail.com
 
 <hr>
 
