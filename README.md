@@ -1,13 +1,13 @@
 # DietPi
 Lightweight justice for your Raspberry Pi.
 
-DietPi for Raspberry Pi's
+##### DietPi for Raspberry Pi's
 http://fuzon.co.uk/phpbb/viewtopic.php?f=8&t=6
 
-DietPi for oDroid C1
+##### DietPi for oDroid C1
 http://fuzon.co.uk/phpbb/viewtopic.php?f=8&t=11
 
-# DietPi GPLv2 License
+### DietPi GPLv2 License
 DietPi Copyright (C) 2015 Daniel Knight , daniel_haze@hotmail.com , fuzon.co.uk
 
 This program is free software: you can redistribute it and/or modify
