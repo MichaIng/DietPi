@@ -5,8 +5,9 @@ Lightweight justice for your Raspberry Pi.
 
 ##### DietPi for oDroid C1 http://fuzon.co.uk/phpbb/viewtopic.php?f=8&t=11
 
+<hr>
 
-### The DietPi project needs your input. Are you able to:
+### DietPi Project Contribution. Are you able to:
 * Create a modern and clean website for DietPi
 * Compile software for Odroid C1 and RPi systems
 * Provide feedback and/or test areas of DietPi, to improve the user experience.
@@ -21,6 +22,8 @@ We are always looking for talented people who believe in the DietPi project, and
 * Send me an Email: daniel_haze@hotmail.com
 * Join our forums: http://fuzon.co.uk
 * Git Hub: https://github.com/Fourdee/DietPi
+
+<hr>
 
 ### DietPi GPLv2 License
 DietPi Copyright (C) 2015 Daniel Knight
