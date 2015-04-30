@@ -7,7 +7,9 @@ Lightweight justice for your Raspberry Pi.
 
 
 ### DietPi GPLv2 License
-DietPi Copyright (C) 2015 Daniel Knight , daniel_haze@hotmail.com , fuzon.co.uk
+DietPi Copyright (C) 2015 Daniel Knight
+* Email daniel_haze@hotmail.com
+* Web http://fuzon.co.uk
 
 This program is free software: you can redistribute it and/or modify
 it under the terms of the GNU General Public License as published by
