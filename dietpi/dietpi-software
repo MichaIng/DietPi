@@ -77,6 +77,7 @@
 	SMBSERVER=0
 	VPNSERVER=0
 	OPENTYRIAN=0
+	DIETPICAM_MASTER=0
 
 	#Linux Software
 	INSTALL_LINUX_CHOICESMADE=false
@@ -121,6 +122,7 @@
 		echo -e "SMBSERVER $SMBSERVER" >> /boot/dietpi/.installed
 		echo -e "VPNSERVER $VPNSERVER" >> /boot/dietpi/.installed
 		echo -e "OPENTYRIAN $OPENTYRIAN" >> /boot/dietpi/.installed
+		echo -e "DIETPICAM_MASTER $DIETPICAM_MASTER" >> /boot/dietpi/.installed
 
 		echo -e "#Additional Linux Software" >> /boot/dietpi/.installed
 		echo -e "VIMFULL $VIMFULL" >> /boot/dietpi/.installed
@@ -157,6 +159,7 @@
 		SMBSERVER=$(cat /boot/dietpi/.installed | grep 'SMBSERVER ' | awk '{print $2}')
 		VPNSERVER=$(cat /boot/dietpi/.installed | grep 'VPNSERVER ' | awk '{print $2}')
 		OPENTYRIAN=$(cat /boot/dietpi/.installed | grep 'OPENTYRIAN ' | awk '{print $2}')
+		DIETPICAM_MASTER=$(cat /boot/dietpi/.installed | grep 'DIETPICAM_MASTER ' | awk '{print $2}')
 
 		#Linux
 		VIMFULL=$(cat /boot/dietpi/.installed | grep 'VIMFULL ' | awk '{print $2}')
@@ -198,14 +201,14 @@
 			PROFTP=1
 		fi
 
-		# Installs that require WEBSERVER_LAMP (WEBSERVER_APACHE / WEBSERVER_MYSQL / WEBSERVER_PHP / WEBSERVER_PHPMYADMIN)
+		# Installs that require WEBSERVER_LAMP
 		if (( $OWNCLOUD == 1 )); then
 			WEBSERVER_LAMP=1
 		elif (( $PHPBB == 1 )); then
 			WEBSERVER_LAMP=1
 		fi
 		
-		#define extra DietPi flags for WEBSERVER_LAMP (WEBSERVER_APACHE / WEBSERVER_MYSQL / WEBSERVER_PHP / WEBSERVER_PHPMYADMIN)
+		#Define extra DietPi install flags for WEBSERVER_LAMP (WEBSERVER_APACHE + WEBSERVER_MYSQL + WEBSERVER_PHP + WEBSERVER_PHPMYADMIN)
 		if (( $WEBSERVER_LAMP == 1 )); then
 			WEBSERVER_APACHE=1
 			WEBSERVER_MYSQL=1
@@ -213,6 +216,11 @@
 			WEBSERVER_PHPMYADMIN=1
 		fi
 
+		#DietPiCam | Installs that require WEBSERVER_APACHE + WEBSERVER_PHP
+		if (( $DIETPICAM_MASTER == 1 )); then
+			WEBSERVER_APACHE=1
+			WEBSERVER_PHP=1
+		fi
 		
 		#--------------------------------------------------------------
 		#Install Software
@@ -539,6 +547,56 @@
 				OPENTYRIAN=0
 			fi
 		fi
+
+		if (( $DIETPICAM_MASTER == 1 )); then
+			INSTALL_DESCRIPTION='RPi Camera Surveillance (DietPi-Cam)'
+			Banner_Installing
+
+			#check source is online
+			INTERNET_ADDRESS='https://github.com/Fourdee/RPi_Cam_Web_Interface/archive/master.zip'
+			/boot/dietpi/func/check_connection 5 2 "$INTERNET_ADDRESS"
+
+			#Install
+			if (( $? == 0 )); then
+
+				#Install pre-reqs
+				apt-get install gpac motion zip -y
+
+				#Get source/binaries and extract
+				wget https://github.com/Fourdee/RPi_Cam_Web_Interface/archive/master.zip
+				unzip master.zip
+				rm master.zip
+
+				#work form inside RPi_Cam folder
+				cd RPi_Cam*
+
+				#Setup /var/www/dietpicam
+				mkdir -p /var/www/dietpicam/media
+				cp -R www/* /var/www/dietpicam/
+				chmod +x /var/www/dietpicam/raspizip.sh
+				mknod /var/www/dietpicam/FIFO p
+				mknod /var/www/dietpicam/FIFO1 p
+
+				#Temp cam.jpg file symlink
+				ln -sf /run/shm/mjpeg/cam.jpg /var/www/dietpicam/cam.jpg
+
+				#Setup Raspimjpeg binary
+				cp bin/raspimjpeg /opt/vc/bin/raspimjpeg
+				chmod +x /opt/vc/bin/raspimjpeg
+				ln -s /opt/vc/bin/raspimjpeg /usr/bin/raspimjpeg
+
+				#Cleanup / remove extracted source
+				cd ~/
+				rm -R ~/RPi_Cam*
+				
+			else
+				Info_NoConnection_NoInstall
+
+				#Abort Install, prevent configs being applied
+				DIETPICAM_MASTER=0
+			fi
+
+		fi
 	}
 
 	Install_Linux_Software(){
@@ -709,8 +767,6 @@
 
 		#WEBSERVER_LAMP
 		if (( $WEBSERVER_LAMP == 1 )); then
-			#mkdir -p /var/www
-			#chown -R www-data:www-data /var/www
 		
 			WEBSERVER_LAMP=2
 		fi		
@@ -1070,6 +1126,42 @@
 			ln -s /usr/share/applications/opentyrian.desktop ~/Desktop/opentyrian.desktop
 
 			OPENTYRIAN=2
+		fi
+		
+		if (( $DIETPICAM_MASTER == 1 )); then
+
+			#raspimjpeg Conf
+			cp /boot/dietpi/conf/dietpicam_raspimjpeg /etc/raspimjpeg
+			chmod +x /etc/raspimjpeg
+			ln -s /etc/raspimjpeg /var/www/dietpicam/raspimjpeg
+
+			#raspimjpeg/php schedule startup and control script
+			cp /boot/dietpi/conf/dietpicam_raspimjpeg_init /etc/raspimjpeg_init
+			chmod +x /etc/raspimjpeg_init
+
+			#Motion config file
+			mkdir -p /etc/motion
+			cp /boot/dietpi/conf/dietpicam_motion /etc/motion/motion.conf
+			chgrp www-data /etc/motion/motion.conf
+			chmod 777 /etc/motion/motion.conf
+			usermod -a -G video www-data
+
+			#Set web permissions for dietpicam base directory
+			chown -R www-data:www-data /var/www/dietpicam
+
+			#usbdrive install, create symlink to new data location.
+			if (( $USBDRIVE > 0 )); then
+				
+				rm -R /var/www/dietpicam/media
+				mkdir -p /mnt/usb_1/dietpicam/cam_master
+				ln -s /mnt/usb_1/dietpicam/cam_master /var/www/dietpicam/media
+				chown -R www-data:www-data /mnt/usb_1/dietpicam/cam_master
+			fi
+
+			#Enable RPi Camera module
+			sed -i '/start_x=/c\start_x=1' /boot/config.txt
+
+			DIETPICAM_MASTER=2
 		fi
 
 		#Apply GPU Memory Splits
@@ -1489,7 +1581,17 @@
 				OPENTYRIAN=0
 			fi
 		fi
+		
+		local dietpicam_master_w="off"
+		if (( $DIETPICAM_MASTER > 0 )); then
+			dietpicam_master_w="on"
+			#Reset to 0. Menu checklists will apply back to 1
+			if (( $DIETPICAM_MASTER == 1 )); then
+				DIETPICAM_MASTER=0
+			fi
+		fi
 
+		#-----------------------------------------------------------------------------
 		#Odroid C1 Software Installation
 		if (( $HW_MODEL == 10 )); then
 			WHIP_TITLE='DietPi - Software Selection'
@@ -1503,6 +1605,7 @@
 			"12" "File Server (Samba)" $smbserver_w \
 			"13" "VPN Server (SoftEther)" $vpnserver_w \
 			"14" "Website URL Address (No-Ip)" $noipdyndns_w 2>results
+		#-----------------------------------------------------------------------------
 		#Rpi
 		elif (( $HW_MODEL <= 2 )); then
 			WHIP_TITLE='DietPi - Software Selection'
@@ -1513,14 +1616,15 @@
 			"4" "Gaming (OpenTyrian Game)" $opentyrian_w \
 			"5" "BitTorrent (Transmission)" $transmission_w \
 			"6" "OwnCloud" $owncloud_w \
-			"7" "DLNA/UPnP Media Server (MiniDLNA)" $minidlna_w \
+			"7" "DLNA / UPnP Media Server (MiniDLNA)" $minidlna_w \
 			"8" "HiFi / Web Interface Music Player (Mpd Ympd)" $ympd_w \
 			"9" "Forums (PHPBB)" $phpbb_w \
 			"10" "WebServer (Apache2/mysql/php5/phpmyadmin)" $webserver_lamp_w \
 			"11" "FTP Server (Proftp)" $proftp_w \
 			"12" "File Server (Samba)" $smbserver_w \
 			"13" "VPN Server (SoftEther)" $vpnserver_w \
-			"14" "Website URL Address (No-Ip)" $noipdyndns_w 2>results
+			"14" "Website URL Address (No-Ip)" $noipdyndns_w \
+			"15" "RPi Camera Surveillance (DietPi-Cam)" $dietpicam_master_w 2>results
 		fi
 
 		while read choice
@@ -1618,13 +1722,19 @@
 					INSTALL_DIETPI_CHOICESMADE=true
 				fi
 			;;
+			15)
+				if (( $DIETPICAM_MASTER == 0 )); then
+					DIETPICAM_MASTER=1
+					INSTALL_DIETPI_CHOICESMADE=true
+				fi
+			;;
 			esac
-		#done < results
-		#rm results
-		done
+		done < results
+		rm results
 
-
+		#-----------------------------------------------------------------------------
 		#Install Info/Warnings
+
 		#oDroid c1
 		if (( $HW_MODEL == 10 )); then
 			echo -e "Nothing here"
@@ -1645,9 +1755,11 @@
 			fi
 		fi
 
+		#-----------------------------------------------------------------------------
 		#Update Install file
 		Write_InstallFileList
 		
+		#-----------------------------------------------------------------------------
 		#Boot Choices
 		local bootchoices_available=false
 		if (( $DESKTOP == 1 )); then
