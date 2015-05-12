@@ -77,7 +77,7 @@
 	SMBSERVER=0
 	VPNSERVER=0
 	OPENTYRIAN=0
-	DIETPICAM_MASTER=0
+	DIETPICAM=0
 
 	#Linux Software
 	INSTALL_LINUX_CHOICESMADE=false
@@ -123,7 +123,7 @@
 		echo -e "SMBSERVER $SMBSERVER" >> /boot/dietpi/.installed
 		echo -e "VPNSERVER $VPNSERVER" >> /boot/dietpi/.installed
 		echo -e "OPENTYRIAN $OPENTYRIAN" >> /boot/dietpi/.installed
-		echo -e "DIETPICAM_MASTER $DIETPICAM_MASTER" >> /boot/dietpi/.installed
+		echo -e "DIETPICAM $DIETPICAM" >> /boot/dietpi/.installed
 
 		echo -e "#Additional Linux Software" >> /boot/dietpi/.installed
 		echo -e "VIMFULL $VIMFULL" >> /boot/dietpi/.installed
@@ -161,7 +161,7 @@
 		SMBSERVER=$(cat /boot/dietpi/.installed | grep 'SMBSERVER ' | awk '{print $2}')
 		VPNSERVER=$(cat /boot/dietpi/.installed | grep 'VPNSERVER ' | awk '{print $2}')
 		OPENTYRIAN=$(cat /boot/dietpi/.installed | grep 'OPENTYRIAN ' | awk '{print $2}')
-		DIETPICAM_MASTER=$(cat /boot/dietpi/.installed | grep 'DIETPICAM_MASTER ' | awk '{print $2}')
+		DIETPICAM=$(cat /boot/dietpi/.installed | grep 'DIETPICAM ' | awk '{print $2}')
 
 		#Linux
 		VIMFULL=$(cat /boot/dietpi/.installed | grep 'VIMFULL ' | awk '{print $2}')
@@ -220,7 +220,7 @@
 		fi
 
 		#DietPiCam | Installs that require WEBSERVER_APACHE + WEBSERVER_PHP
-		if (( $DIETPICAM_MASTER == 1 )); then
+		if (( $DIETPICAM == 1 )); then
 			WEBSERVER_APACHE=1
 			WEBSERVER_PHP=1
 		fi
@@ -551,8 +551,8 @@
 			fi
 		fi
 
-		if (( $DIETPICAM_MASTER == 1 )); then
-			INSTALL_DESCRIPTION='RPi Camera Surveillance (DietPi-Cam)'
+		if (( $DIETPICAM == 1 )); then
+			INSTALL_DESCRIPTION='RPi Camera / Web Interface Surveillance (DietPi-Cam)'
 			Banner_Installing
 
 			#check source is online
@@ -596,7 +596,7 @@
 				Info_NoConnection_NoInstall
 
 				#Abort Install, prevent configs being applied
-				DIETPICAM_MASTER=0
+				DIETPICAM=0
 			fi
 
 		fi
@@ -704,13 +704,13 @@
 			if (( $HW_MODEL <= 2 )); then
 				INSTALL_DESCRIPTION='Xserver / Xorg (fbturbo)'
 				Banner_Installing
-				apt-get install xinit xauth xserver-xorg xfonts-base xserver-xorg-video-fbturbo xserver-xorg-video-fbdev --no-install-recommends -y
+				apt-get install xinit xauth xserver-xorg xfonts-base xserver-xorg-video-fbturbo xserver-xorg-video-fbdev x11-xserver-utils --no-install-recommends -y
 
 			elif (( $HW_MODEL == 10 )); then
 				INSTALL_DESCRIPTION='Xserver / Xorg (mali)'
 				Banner_Installing
 				#Mali is already on DietOdroid image
-				apt-get install xinit xauth xserver-xorg xfonts-base --no-install-recommends -y
+				apt-get install xinit xauth xserver-xorg xfonts-base x11-xserver-utils --no-install-recommends -y
 			
 			fi
 			
@@ -1009,7 +1009,8 @@
 		if (( $KODI == 1 )); then
 			#odroid c1
 			if (( $HW_MODEL == 10 )); then
-				echo -e "x"
+				echo -e "alias startkodi='kodi'" >> /etc/bash.bashrc
+
 			#rpi
 			elif (( $HW_MODEL <= 2 )); then
 				#Remove Kodi user (Whilst waving)
@@ -1024,6 +1025,18 @@
 		 
 				#Enable Dedicated PWM pll
 				sed -i '/avoid_pwm_pll=/c\avoid_pwm_pll=0' /boot/config.txt
+				
+				#Copy kodi.desktop entries to menu
+				cp /boot/dietpi/conf/desktop/kodi.desktop /usr/share/applications/kodi.desktop
+
+				#Create Desktop Folder SymLinks
+				mkdir -p ~/Desktop
+				ln -s /usr/share/applications/kodi.desktop ~/Desktop/kodi.desktop
+
+				#Black Screen on exit fix
+				echo -e "alias startkodi='/boot/dietpi/misc/rpi_kodi_noblackscreen_run'" >> /etc/bash.bashrc
+				sed -i "/Exec=/c\Exec=startkodi" /usr/share/applications/kodi.desktop
+
 			fi
 			
 			KODI=2
@@ -1138,7 +1151,8 @@
 			OPENTYRIAN=2
 		fi
 		
-		if (( $DIETPICAM_MASTER == 1 )); then
+		#DietPi-Cam
+		if (( $DIETPICAM == 1 )); then
 
 			#raspimjpeg Conf
 			cp /boot/dietpi/conf/dietpicam_raspimjpeg /etc/raspimjpeg
@@ -1156,27 +1170,60 @@
 			chmod 777 /etc/motion/motion.conf
 			usermod -a -G video www-data
 
-			#Set web permissions for dietpicam base directory
+			#Set web permissions for local dietpicam web directory
 			chown -R www-data:www-data /var/www/dietpicam
 
-			#usbdrive install, create symlink to new data location.
-			if (( $USBDRIVE > 0 )); then
+			#-------------- Maybe move below to another script for configuring dietpicam's modes etc.
+			#get DietPi-Cam details/settings
+			local dietpicam_mode=$(cat /boot/dietpi.txt | grep 'dietpicam_mode=' | sed 's/dietpicam_mode=//g')
+			local dietpicam_name=$(cat /boot/dietpi.txt | grep 'dietpicam_name=' | sed 's/dietpicam_name=//g')
+			local dietpicam_connection_mode=$(cat /boot/dietpi.txt | grep 'dietpicam_connection_mode=' | sed 's/dietpicam_connection_mode=//g')
+			local dietpicam_data_directory='/dietpi/dietpicam'
+			
+			#Standalone / Server install
+			if (( $dietpicam_mode <= 1 )); then
+
+				#usbdrive install
+				if (( $USBDRIVE > 0 )); then
+					dietpicam_data_directory='/mnt/usb_1/dietpicam'
+				fi
 				
-				mkdir -p /mnt/usb_1/dietpicam/cam_master
-				rm -R /var/www/dietpicam/media
-				ln -s /mnt/usb_1/dietpicam/cam_master /var/www/dietpicam/media
-				chown -R www-data:www-data /mnt/usb_1/dietpicam/cam_master
-			#create symlink to user folder
-			else
-				mkdir -p ~/dietpicam/cam_master
-				ln -s ~/dietpicam/cam_master /var/www/dietpicam/media
-				chown -R www-data:www-data ~/dietpicam/cam_master
+				#Create data directories
+				mkdir -p "$dietpicam_data_directory"
+				
+			#Client Install (not yet implimented or functional)
+			elif (( $dietpicam_mode == 2 )); then
+
+				if (( $dietpicam_connection_mode == 0 )); then
+					dietpicam_data_directory='/mnt/ftp_client/dietpicam'
+
+				elif (( $dietpicam_connection_mode == 1 )); then
+					dietpicam_data_directory='/mnt/samba/dietpicam'
+				fi
+
 			fi
 
+			#Remove existing data folder to make way for its symlink
+			rm -R /var/www/dietpicam/media
+			
+			## | CLIENTS MUST BE CONNECTED |
+			
+			#create symlink to data directory
+			ln -s "$dietpicam_data_directory" /var/www/dietpicam/media
+
+			##update filenames for /etc/raspimjpeg
+			#sed -i "/image_path /c\image_path /var/www/dietpicam/media/$dietpicam_name-im_%i_%Y%M%D_%h%m%s.jpg" /etc/raspimjpeg
+			#sed -i "/lapse_path /c\lapse_path /var/www/dietpicam/media/$dietpicam_name-tl_%i_%t_%Y%M%D_%h%m%s.jpg" /etc/raspimjpeg
+			#sed -i "/video_path /c\video_path /var/www/dietpicam/media/$dietpicam_name-vi_%v_%Y%M%D_%h%m%s.mp4" /etc/raspimjpeg
+
+			#Set permissions to data directory
+			chown -R www-data:www-data "$dietpicam_data_directory"
+			chmod -R 777 "$dietpicam_data_directory"
+			
 			#Enable RPi Camera module
 			sed -i '/start_x=/c\start_x=1' /boot/config.txt
 
-			DIETPICAM_MASTER=2
+			DIETPICAM=2
 		fi
 
 	}
@@ -1595,79 +1642,80 @@
 			fi
 		fi
 		
-		local dietpicam_master_w="off"
-		if (( $DIETPICAM_MASTER > 0 )); then
-			dietpicam_master_w="on"
+		local dietpicam_w="off"
+		if (( $DIETPICAM > 0 )); then
+			dietpicam_w="on"
 			#Reset to 0. Menu checklists will apply back to 1
-			if (( $DIETPICAM_MASTER == 1 )); then
-				DIETPICAM_MASTER=0
+			if (( $DIETPICAM == 1 )); then
+				DIETPICAM=0
 			fi
 		fi
 
 		#-----------------------------------------------------------------------------
 		#Odroid C1 Software Installation
 		if (( $HW_MODEL == 10 )); then
-			WHIP_TITLE='DietPi - Software Selection'
-			whiptail --title "$WHIP_TITLE" --checklist --separate-output "Please Select the Software you wish to install \n - Press the SpaceBar to select/unselect" --backtitle "$WHIP_TITLE" 18 64 10 \
-			"2" "Kodi / XBMC" $kodi_w \
-			"5" "BitTorrent (Transmission)" $transmission_w \
-			"6" "OwnCloud" $owncloud_w \
-			"9" "Forums (PHPBB)" $phpbb_w \
-			"10" "WebServer (Apache2/mysql/php5/phpmyadmin)" $webserver_lamp_w \
-			"11" "FTP Server (Proftp)" $proftp_w \
-			"12" "File Server (Samba)" $smbserver_w \
-			"13" "VPN Server (SoftEther)" $vpnserver_w \
-			"14" "Website URL Address (No-Ip)" $noipdyndns_w 2>results
+			WHIP_TITLE='DietPi Optimized Software Selection'
+			whiptail --title "$WHIP_TITLE" --checklist --separate-output "Please Select the Software you wish to install \n - Press the SpaceBar to select/unselect" --backtitle "$WHIP_TITLE" 18 72 10 \
+			"Kodi" "Your very own media centre/player." $kodi_w \
+			"Transmission" "BitTorrent server with web interface." $transmission_w \
+			"OwnCloud" "Your very own cloud (eg: dropbox)." $owncloud_w \
+			"Forums" "Your very own website forums (Phpbb3)." $phpbb_w \
+			"Webserver" "LAMPP (Apache2/mysql/php5/phpmyadmin)." $webserver_lamp_w \
+			"Proftp" "FTP server (lightweight)." $proftp_w \
+			"Samba" "File server." $smbserver_w \
+			"SoftEther" "VPN server." $vpnserver_w \
+			"NoIp" "URL website address for your device." $noipdyndns_w 2>results
+
 		#-----------------------------------------------------------------------------
 		#Rpi
 		elif (( $HW_MODEL <= 2 )); then
-			WHIP_TITLE='DietPi - Software Selection'
-			whiptail --title "$WHIP_TITLE" --checklist --separate-output "Please Select the Software you wish to install \n - Press the SpaceBar to select/unselect" --backtitle "$WHIP_TITLE" 18 70 10 \
-			"1" "Desktop (LXDE)" $desktop_w \
-			"2" "Kodi / XBMC (Michael Gorven Repo)" $kodi_w \
-			"3" "Gaming (RetroPie)" $retropie_w \
-			"4" "Gaming (OpenTyrian Game)" $opentyrian_w \
-			"5" "BitTorrent (Transmission)" $transmission_w \
-			"6" "OwnCloud" $owncloud_w \
-			"7" "DLNA / UPnP Media Server (MiniDLNA)" $minidlna_w \
-			"8" "HiFi / Web Interface Music Player (Mpd Ympd)" $ympd_w \
-			"9" "Forums (PHPBB)" $phpbb_w \
-			"10" "WebServer (Apache2/mysql/php5/phpmyadmin)" $webserver_lamp_w \
-			"11" "FTP Server (Proftp)" $proftp_w \
-			"12" "File Server (Samba)" $smbserver_w \
-			"13" "VPN Server (SoftEther)" $vpnserver_w \
-			"14" "Website URL Address (No-Ip)" $noipdyndns_w \
-			"15" "RPi Camera Surveillance (DietPi-Cam)" $dietpicam_master_w 2>results
+			WHIP_TITLE='DietPi Optimized Software Selection'
+			whiptail --title "$WHIP_TITLE" --checklist --separate-output "Please use the spacebar to select the software you wish to install.\nSoftware details: http://fuzon.co.uk/phpbb/viewtopic.php?f=8&t=5" --backtitle "$WHIP_TITLE" 20 75 12 \
+			"Desktop" "LXDE: Ultra lightweight desktop." $desktop_w \
+			"Kodi" "Your very own media centre / player." $kodi_w \
+			"RetroPie" "Gaming: Turn your RPi into a gaming system." $retropie_w \
+			"OpenTyrian" "Gaming: A classic retro game, addictive." $opentyrian_w \
+			"Transmission" "BitTorrent server with web interface." $transmission_w \
+			"OwnCloud" "Your very own cloud (eg: dropbox)." $owncloud_w \
+			"DietPiCam" "RPi Cam Control / Web Interface Surveillance." $dietpicam_w \
+			"MiniDLNA" "Media streaming server (DLNA, UPnP)." $minidlna_w \
+			"HiFi" "Web interface music / radio player." $ympd_w \
+			"Forums" "Your very own website forums (Phpbb3)." $phpbb_w \
+			"Webserver" "LAMP (Apache2/mysql/php5/phpmyadmin)." $webserver_lamp_w \
+			"Proftp" "Lightweight FTP and file server." $proftp_w \
+			"Samba" "File server." $smbserver_w \
+			"SoftEther" "VPN server." $vpnserver_w \
+			"NoIp" "URL website address for your device." $noipdyndns_w 2>results
 		fi
 
 		while read choice
 		do
 			case $choice in
-			1)
+			Desktop)
 				if (( $DESKTOP == 0 )); then
 					DESKTOP=1
 					INSTALL_DIETPI_CHOICESMADE=true
 				fi
 			;;
-			2)
+			Kodi)
 				if (( $KODI == 0 )); then
 					KODI=1
 					INSTALL_DIETPI_CHOICESMADE=true
 				fi
 			;;
-			3)
+			RetroPie)
 				if (( $RETROPIE == 0 )); then
 					RETROPIE=1
 					INSTALL_DIETPI_CHOICESMADE=true
 				fi
 			;;
-			4)
+			OpenTyrian)
 				if (( $OPENTYRIAN == 0 )); then
 					OPENTYRIAN=1
 					INSTALL_DIETPI_CHOICESMADE=true
 				fi
 			;;
-			5)
+			Transmission)
 				if (( $USBDRIVE > 0 )); then
 					if (( $TRANSMISSION == 0 )); then
 						TRANSMISSION=1
@@ -1677,7 +1725,7 @@
 					Info_UsbDrive_Required "BitTorrent"
 				fi
 			;;
-			6)
+			OwnCloud)
 				if (( $USBDRIVE > 0 )); then
 					if (( $OWNCLOUD == 0 )); then
 						OWNCLOUD=1
@@ -1687,57 +1735,57 @@
 					Info_UsbDrive_Required "OwnCloud"
 				fi
 			;;
-			7)
+			DietPiCam)
+				if (( $DIETPICAM == 0 )); then
+					DIETPICAM=1
+					INSTALL_DIETPI_CHOICESMADE=true
+				fi
+			;;
+			MiniDLNA)
 				if (( $MINIDLNA == 0 )); then
 					MINIDLNA=1
 					INSTALL_DIETPI_CHOICESMADE=true
 				fi
 			;;
-			8)
+			HiFi)
 				if (( $YMPD == 0 )); then
 					YMPD=1
 					INSTALL_DIETPI_CHOICESMADE=true
 				fi
 			;;
-			9)
+			Forums)
 				if (( $PHPBB == 0 )); then
 					PHPBB=1
 					INSTALL_DIETPI_CHOICESMADE=true
 				fi
 			;;
-			10)
+			Webserver)
 				if (( $WEBSERVER_LAMP == 0 )); then
 					WEBSERVER_LAMP=1
 					INSTALL_DIETPI_CHOICESMADE=true
 				fi
 			;;
-			11)
+			Proftp)
 				if (( $PROFTP == 0 )); then
 					PROFTP=1
 					INSTALL_DIETPI_CHOICESMADE=true
 				fi
 			;;
-			12)
+			Samba)
 				if (( $SMBSERVER == 0 )); then
 					SMBSERVER=1
 					INSTALL_DIETPI_CHOICESMADE=true
 				fi
 			;;
-			13)
+			SoftEther)
 				if (( $VPNSERVER == 0 )); then
 					VPNSERVER=1
 					INSTALL_DIETPI_CHOICESMADE=true
 				fi
 			;;
-			14)
+			NoIp)
 				if (( $NOIPDYNDNS == 0 )); then
 					NOIPDYNDNS=1
-					INSTALL_DIETPI_CHOICESMADE=true
-				fi
-			;;
-			15)
-				if (( $DIETPICAM_MASTER == 0 )); then
-					DIETPICAM_MASTER=1
 					INSTALL_DIETPI_CHOICESMADE=true
 				fi
 			;;
@@ -1899,6 +1947,7 @@
 		fi
 		
 
+		#-----------------------------------------------------------------------------
 		#Odroid C1 Software Installation
 		if (( $HW_MODEL == 10 )); then
 			WHIP_TITLE='Linux - Software Selection'
@@ -1911,6 +1960,7 @@
 			"7" "Git" $gitclient_w \
 			"8" "ALSA (Sound)" $alsabase_w \
 			"9" "Xserver / Xinit / Xauth(Display)" $xserverxorg_w 2>results
+		#-----------------------------------------------------------------------------
 		#Rpi
 		elif (( $HW_MODEL <= 2 )); then
 
@@ -1988,6 +2038,7 @@
 		done < results
 		rm results
 		
+		#-----------------------------------------------------------------------------
 		#Update Install file
 		Write_InstallFileList
 		
