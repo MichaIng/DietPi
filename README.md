@@ -115,3 +115,6 @@ SoftEther VPN Server
 
 OpenTyrian
 - https://bitbucket.org/opentyrian/opentyrian/wiki/Home
+
+DietPiCam 
+- https://github.com/Fourdee/RPi_Cam_Web_Interface
