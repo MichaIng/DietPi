@@ -118,3 +118,9 @@ OpenTyrian
 
 DietPiCam 
 - https://github.com/Fourdee/RPi_Cam_Web_Interface
+
+PHP OPcache GUI 
+- https://github.com/amnuts/opcache-gui
+
+Nginx 
+- https://github.com/nginx/nginx
