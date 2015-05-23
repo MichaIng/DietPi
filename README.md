@@ -124,3 +124,6 @@ PHP OPcache GUI
 
 Nginx 
 - https://github.com/nginx/nginx
+
+Deluge
+- http://dev.deluge-torrent.org/wiki/Development#SourceCode
