@@ -102,6 +102,7 @@
 	SSHSERVER_OPENSSH=0
 	
 	#Installation Indexs
+	INSTALL_INDEX_CHOICESMADE=false
 	INDEX_SSHSERVER_CURRENT=0
 	INDEX_SSHSERVER_TARGET=0
 	
@@ -109,6 +110,10 @@
 		
 		#Set all Install States from 1 to 0
 		sed -i 's/ 1/ 0/g' /boot/dietpi/.installed
+		
+		#Reset Indexs
+		INDEX_SSHSERVER_TARGET=$INDEX_SSHSERVER_CURRENT
+		sed -i "/INDEX_SSHSERVER_TARGET /c\INDEX_SSHSERVER_TARGET $INDEX_SSHSERVER_TARGET" /boot/dietpi/.installed
 	}
 
 	Write_InstallFileList(){
@@ -1513,6 +1518,40 @@
 
 	}
 
+	Install_Apply_SshServer_Choice(){
+	
+		#Check for changes
+		if (( $INDEX_SSHSERVER_TARGET != $INDEX_SSHSERVER_CURRENT )); then
+		
+			#Uninstall all non-selected SSH Servers.
+			local remove_dropbear=0
+			local remove_openssh=0
+			if (( $INDEX_SSHSERVER_TARGET == 0 )); then
+				remove_openssh=1
+				remove_dropbear=1
+			elif (( $INDEX_SSHSERVER_TARGET == -1 )); then
+				remove_openssh=1
+			elif (( $INDEX_SSHSERVER_TARGET == -2 )); then
+				remove_dropbear=1
+			fi
+			
+			if (( $remove_dropbear == 1 )) && (( $SSHSERVER_DROPBEAR == 2 )); then
+				/boot/dietpi/dietpi-uninstall SSHSERVER_DROPBEAR
+				SSHSERVER_DROPBEAR=0
+			fi
+			
+			if (( $remove_openssh == 1 )) && (( $SSHSERVER_OPENSSH == 2 )); then
+				/boot/dietpi/dietpi-uninstall SSHSERVER_OPENSSH
+				SSHSERVER_OPENSSH=0
+			fi
+
+			#Update Current Index
+			INDEX_SSHSERVER_CURRENT=$INDEX_SSHSERVER_TARGET
+
+		fi
+	
+	}
+	
 	USB_HDD_CONNECTED=0
 	Check_Usb_Hdd_Connected(){
 
@@ -1539,7 +1578,14 @@
 
 	Menu_Main(){
 	
-		#Data for storing SSH server
+		##Update current choices
+		#Install_ReloadChoices
+		
+		#We only need to update Index Choices here so lets reduce filesystem IO and menu delay.
+		INDEX_SSHSERVER_CURRENT=$(cat /boot/dietpi/.installed | grep 'INDEX_SSHSERVER_CURRENT ' | awk '{print $2}')
+		INDEX_SSHSERVER_TARGET=$(cat /boot/dietpi/.installed | grep 'INDEX_SSHSERVER_TARGET ' | awk '{print $2}')
+
+		#Data for storing SSH server index info
 		local index_sshserver_text="None"
 		if (( $INDEX_SSHSERVER_TARGET == -1 )); then
 			index_sshserver_text="Dropbear"
@@ -1548,7 +1594,7 @@
 		fi
 
 		WHIP_TITLE='---------- DietPi - Software Setup ----------'
-		OPTION=$(whiptail --title "$WHIP_TITLE" --backtitle "$WHIP_TITLE" --menu " Hardware Detected : $HW_MODEL_DESCRIPTION" --cancel-button "Exit Setup" 14 60 5 \
+		OPTION=$(whiptail --title "$WHIP_TITLE" --backtitle "$WHIP_TITLE" --menu " Hardware Detected : $HW_MODEL_DESCRIPTION" --cancel-button "Exit Setup" 14 60 6 \
 		"1" "Select DietPi Optimized Software." \
 		"2" "Select Additional Linux Software." \
 		"3" "SSH Server: $index_sshserver_text" \
@@ -1566,8 +1612,36 @@
 				TARGETMENUID=2
 				;;
 			  3)
-				TARGETMENUID=3
-				;;
+				WHIP_TITLE='SSH Server Selection'
+				OPTION=$(whiptail --title "$WHIP_TITLE" --menu "Please select your SSH Server preference:" --cancel-button "Back" --default-item "$index_sshserver_text" 11 75 3 \
+				"None" "Select if you do NOT require network terminal access." \
+				"Dropbear" "Lightweight SSH Server (Recommended)." \
+				"OpenSSH" "Feature Rich SSH Server with SFTP/SCP support." 3>&1 1>&2 2>&3)
+
+				if [ "$OPTION" = "None" ]; then
+					INDEX_SSHSERVER_TARGET=0
+				elif [ "$OPTION" = "Dropbear" ]; then
+					INDEX_SSHSERVER_TARGET=-1
+				elif [ "$OPTION" = "OpenSSH" ]; then
+					INDEX_SSHSERVER_TARGET=-2
+				fi
+				
+				#Check for changes
+				INSTALL_INDEX_CHOICESMADE=false
+				if (( $INDEX_SSHSERVER_TARGET != $INDEX_SSHSERVER_CURRENT )); then
+
+					#Inform user
+					WHIP_TITLE="SSH Server Change"
+					WHIP_QUESTION="$OPTION has been flagged to be installed (if applicable):\n- You must use Go Start Install to commit and apply the changes.\n- All other SSH Server installations will be automatically uninstalled."
+					whiptail --title "$WHIP_TITLE" --msgbox "$WHIP_QUESTION" --backtitle "$WHIP_BACKTITLE" 11 75
+					
+					INSTALL_INDEX_CHOICESMADE=true
+
+				fi
+
+				#Update .installed file
+				Write_InstallFileList
+			  ;;
 			  4)
 				/boot/dietpi/dietpi-config
 				;;
@@ -1624,9 +1698,9 @@
 	Menu_ConfirmInstall(){
 
 		#Confirm Software install
-		WHIP_TITLE='Begin DietPi Install?'
-		WHIP_QUESTION=' DietPi is now ready to install your software choices. Would you like to begin? '
-		whiptail --title "$WHIP_TITLE" --yesno "$WHIP_QUESTION" --backtitle "$WHIP_TITLE" --yes-button "Start Install" --no-button "Back To Menu" 12 65
+		WHIP_TITLE='DietPi - Start Installation?'
+		WHIP_QUESTION='DietPi is now ready to install your software choices. \nWould you like to begin?'
+		whiptail --title "$WHIP_TITLE" --yesno "$WHIP_QUESTION" --backtitle "$WHIP_TITLE" --yes-button "Start Install" --no-button "Back To Menu" 10 70
 		CHOICE=$?
 		if (( $CHOICE == 0 )); then
 			#exit menu system
@@ -1644,7 +1718,7 @@
 	Menu_StartInstall(){
 
 		#No Software selected / No changes Made / nothing to install
-		if [ "$INSTALL_DIETPI_CHOICESMADE" = false ] && [ "$INSTALL_LINUX_CHOICESMADE" = false ]; then
+		if [ "$INSTALL_DIETPI_CHOICESMADE" = false ] && [ "$INSTALL_LINUX_CHOICESMADE" = false ] && [ "$INSTALL_INDEX_CHOICESMADE" = false ]; then
 			#1st run install
 			if (( $DIETPI_INSTALL_STAGE == 0 )); then
 				WHIP_TITLE='No Software Selected!'
@@ -2420,39 +2494,6 @@
 		TARGETMENUID=0
 	}
 
-	#TARGETMENUID=3
-	Menu_SSH_Server_Selection(){
-	
-		WHIP_TITLE='SSH Server Selection'
-		OPTION=$(whiptail --title "$WHIP_TITLE" --menu "Current : " --cancel-button "Back" 14 75 3 \
-		"None" "Select this if you do not require remote terminal access" \
-		"Dropbear" "Lightweight SSH Server (Recommended)" \
-		"OpenSSH" "Feature Rich SSH Server with SFTP/SCP support" 3>&1 1>&2 2>&3)
-
-		CHOICE=$?
-		if (( $CHOICE == 0 )); then
-			if [ "$OPTION" = "None" ]; then
-				INDEX_SSHSERVER_TARGET=0
-			elif [ "$OPTION" = "Dropbear" ]; then
-				INDEX_SSHSERVER_TARGET=-1
-			elif [ "$OPTION" = "OpenSSH" ]; then
-				INDEX_SSHSERVER_TARGET=-2
-			fi
-		fi
-		
-		#Check for changes
-		if (( $INDEX_SSHSERVER_TARGET != $INDEX_SSHSERVER_CURRENT )); then
-
-			#Inform user
-			WHIP_TITLE="SSH Server Change"
-			WHIP_QUESTION="$OPTION has been flagged to be installed\n\n- You must use Go Start Install to commit and apply the changes.\n- All other SSH Server installations will be automatically uninstalled."
-			whiptail --title "$WHIP_TITLE" --msgbox "$WHIP_QUESTION" --backtitle "$WHIP_BACKTITLE" 14 70
-			
-			Write_InstallFileList
-		fi
-	
-	}
-	
 	#/////////////////////////////////////////////////////////////////////////////////////
 	# Banner Print
 	#/////////////////////////////////////////////////////////////////////////////////////
@@ -2614,8 +2655,6 @@
 				Menu_Dietpi_Software
 			elif (( $TARGETMENUID == 2 )); then
 				Menu_Linux_Software
-			elif (( $TARGETMENUID == 3 )); then
-				Menu_SSH_Server_Selection
 			fi
 		done
 		
@@ -2651,6 +2690,9 @@
 				#Apply DietPi Configuration and Optimization Files
 				Banner_Configs
 				Install_Apply_Configs
+				
+				#Apply SSH Server choice
+				Install_Apply_SshServer_Choice
 				
 				#Apply GPU Memory Splits
 				Install_Apply_Memory_Split
