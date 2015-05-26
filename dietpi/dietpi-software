@@ -98,13 +98,23 @@
 	ALSABASE=0
 	XSERVERXORG=0
 	CURLFTPFS=0
+	
+	#SSH Server Software
+	INSTALL_SSHSERVER_CHOICESMADE=false
 	SSHSERVER_DROPBEAR=2
 	SSHSERVER_OPENSSH=0
+	#SSH Server choice index (0=none / -1=dropbear / -2=openssh)
+	# Pos+ numbers are reserved for installed states (eg: Write_InstallFileList_AbortChanges sets 1 to 0).
+	INDEX_SSHSERVER_CURRENT=-1
+	INDEX_SSHSERVER_TARGET=-1
 	
 	Write_InstallFileList_AbortChanges(){
 		
 		#Set all Install States from 1 to 0
 		sed -i 's/ 1/ 0/g' /boot/dietpi/.installed
+		
+		#Reset SSH index to current.
+		sed -i "/INDEX_SSHSERVER_TARGET /c\INDEX_SSHSERVER_TARGET $INDEX_SSHSERVER_CURRENT" /boot/dietpi/.installed
 	}
 
 	Write_InstallFileList(){
@@ -148,8 +158,12 @@
 		echo -e "ALSABASE $ALSABASE" >> /boot/dietpi/.installed
 		echo -e "XSERVERXORG $XSERVERXORG" >> /boot/dietpi/.installed
 		echo -e "CURLFTPFS $CURLFTPFS" >> /boot/dietpi/.installed
+
+		echo -e "#SSH Server Software" >> /boot/dietpi/.installed
 		echo -e "SSHSERVER_DROPBEAR $SSHSERVER_DROPBEAR" >> /boot/dietpi/.installed
 		echo -e "SSHSERVER_OPENSSH $SSHSERVER_OPENSSH" >> /boot/dietpi/.installed
+		echo -e "INDEX_SSHSERVER_CURRENT $INDEX_SSHSERVER_CURRENT" >> /boot/dietpi/.installed
+		echo -e "INDEX_SSHSERVER_TARGET $INDEX_SSHSERVER_TARGET" >> /boot/dietpi/.installed
 		
 	}
 
@@ -191,8 +205,12 @@
 		ALSABASE=$(cat /boot/dietpi/.installed | grep 'ALSABASE ' | awk '{print $2}')
 		XSERVERXORG=$(cat /boot/dietpi/.installed | grep 'XSERVERXORG ' | awk '{print $2}')
 		CURLFTPFS=$(cat /boot/dietpi/.installed | grep 'CURLFTPFS ' | awk '{print $2}')
+
+		#SSH Server Software
 		SSHSERVER_DROPBEAR=$(cat /boot/dietpi/.installed | grep 'SSHSERVER_DROPBEAR ' | awk '{print $2}')
 		SSHSERVER_OPENSSH=$(cat /boot/dietpi/.installed | grep 'SSHSERVER_OPENSSH ' | awk '{print $2}')
+		INDEX_SSHSERVER_CURRENT=$(cat /boot/dietpi/.installed | grep 'INDEX_SSHSERVER_CURRENT ' | awk '{print $2}')
+		INDEX_SSHSERVER_TARGET=$(cat /boot/dietpi/.installed | grep 'INDEX_SSHSERVER_TARGET ' | awk '{print $2}')
 
 		
 		#Take note of the extra space used at the end of each grep quote 'MYSOFTWARE '
@@ -804,25 +822,81 @@
 			CURLFTPFS=2
 		fi
 
+	}
+
+	Install_SSHServer_Software(){
+	
+		local temp_ssh_uninstall_file="/boot/dietpi/.dietpi_temp_ssh_uninstall"
+
+		#Work out which SSH Server needs installing from Indexs (if any)
+		#Work out which SSH server needs removing and create a temp script file (if any)
+		if (( $INDEX_SSHSERVER_TARGET != $INDEX_SSHSERVER_CURRENT )); then
+		
+			if (( $INDEX_SSHSERVER_TARGET == 0 )); then
+				echo -e "/boot/dietpi/dietpi-uninstall SSHSERVER_DROPBEAR" > "$temp_ssh_uninstall_file"
+				echo -e "/boot/dietpi/dietpi-uninstall SSHSERVER_OPENSSH" >> "$temp_ssh_uninstall_file"
+
+			elif (( $INDEX_SSHSERVER_TARGET == -1 )); then
+			
+				SSHSERVER_DROPBEAR=1
+				echo -e "/boot/dietpi/dietpi-uninstall SSHSERVER_OPENSSH" > "$temp_ssh_uninstall_file"
+
+			elif (( $INDEX_SSHSERVER_TARGET == -2 )); then
+
+				SSHSERVER_OPENSSH=1
+				echo -e "/boot/dietpi/dietpi-uninstall SSHSERVER_DROPBEAR" > "$temp_ssh_uninstall_file"
+
+			fi
+
+		fi
+
 		#Install Selected SSH Server
 		if (( $SSHSERVER_DROPBEAR == 1 )); then
+
 			INSTALL_DESCRIPTION='Dropbear (SSH Server)'
 			Banner_Installing
 			apt-get install dropbear -y
 			
 			#set to start on next boot
 			sed -i '/NO_START=/c\NO_START=0' /etc/default/dropbear
-			
+
 			SSHSERVER_DROPBEAR=2
 
 		elif (( $SSHSERVER_OPENSSH == 1 )); then
+
 			INSTALL_DESCRIPTION='OpenSSH (SSH Server)'
 			Banner_Installing
 			apt-get install openssh-server -y
 
 			SSHSERVER_OPENSSH=2
+
+			#SSH server package also installs client.
+			SSHCLIENT=2
+
 		fi
+
+		#Uninstall non-selected SSH servers, using our temp uninstall file script
+		if [ -f "$temp_ssh_uninstall_file" ]; then
+
+			chmod +x "$temp_ssh_uninstall_file"
+
+			echo -e "Stopping SSH Servers"
 			
+			#stop all SSH server services
+			service ssh stop &> /dev/null
+			service dropbear stop &> /dev/null
+			#/etc/init.d/ssh stop
+			#/etc/init.d/dropbear stop
+			
+			#Run the temp uninstall script
+			$temp_ssh_uninstall_file
+			rm "$temp_ssh_uninstall_file"
+
+			#Update Current SSHSERVER index
+			INDEX_SSHSERVER_CURRENT=$INDEX_SSHSERVER_TARGET
+
+		fi
+
 	}
 
 	Install_Apply_Configs(){
@@ -1524,17 +1598,17 @@
 	TARGETMENUID=0
 
 	Menu_Main(){
-	
-		##Update current choices
-		#Install_ReloadChoices
+
+		#Install_ReloadChoices (we only need to refresh SSH server target, reduces menu load time)
+		INDEX_SSHSERVER_TARGET=$(cat /boot/dietpi/.installed | grep 'INDEX_SSHSERVER_TARGET ' | awk '{print $2}')
 		
 		#Data for storing SSH server index info
 		local index_sshserver_text="None"
-		#if (( $INDEX_SSHSERVER_TARGET == -1 )); then
-		#	index_sshserver_text="Dropbear"
-		#elif (( $INDEX_SSHSERVER_TARGET == -2 )); then
-		#	index_sshserver_text="OpenSSH"
-		#fi
+		if (( $INDEX_SSHSERVER_TARGET == -1 )); then
+			index_sshserver_text="Dropbear"
+		elif (( $INDEX_SSHSERVER_TARGET == -2 )); then
+			index_sshserver_text="OpenSSH"
+		fi
 
 		WHIP_TITLE='---------- DietPi - Software Setup ----------'
 		OPTION=$(whiptail --title "$WHIP_TITLE" --backtitle "$WHIP_TITLE" --menu " Hardware Detected : $HW_MODEL_DESCRIPTION" --cancel-button "Exit Setup" 14 60 6 \
@@ -1561,25 +1635,28 @@
 				"Dropbear" "Lightweight SSH Server (Recommended)." \
 				"OpenSSH" "Feature Rich SSH Server with SFTP/SCP support." 3>&1 1>&2 2>&3)
 
+				#-1 means no longer required, uninstall it.
 				if [ "$OPTION" = "None" ]; then
-					echo -e "0"
+					INDEX_SSHSERVER_TARGET=0
 				elif [ "$OPTION" = "Dropbear" ]; then
-					echo -e "1"
+					INDEX_SSHSERVER_TARGET=-1
 				elif [ "$OPTION" = "OpenSSH" ]; then
-					echo -e "2"
+					INDEX_SSHSERVER_TARGET=-2
 				fi
 				
 				#Check for changes
-				#if (( $INDEX_SSHSERVER_TARGET != $INDEX_SSHSERVER_CURRENT )); then
-				# INSTALL_LINUX_CHOICESMADE=true
+				INSTALL_SSHSERVER_CHOICESMADE=false
+				if (( $INDEX_SSHSERVER_TARGET != $INDEX_SSHSERVER_CURRENT )); then
+					INSTALL_SSHSERVER_CHOICESMADE=true
 
 					#Inform user
-				#	WHIP_TITLE="SSH Server Change"
-				#	WHIP_QUESTION="$OPTION has been flagged to be installed (if applicable):\n- You must use Go Start Install to commit and apply the changes.\n- All other SSH Server installations will be automatically uninstalled."
-				#	whiptail --title "$WHIP_TITLE" --msgbox "$WHIP_QUESTION" --backtitle "$WHIP_BACKTITLE" 11 75
+					WHIP_TITLE="SSH Server Change"
+					WHIP_QUESTION="$OPTION has been flagged to be installed (if applicable):\n- You must use Go Start Install to commit and apply the changes.\n- All other SSH Server installations will be automatically uninstalled."
+					whiptail --title "$WHIP_TITLE" --msgbox "$WHIP_QUESTION" --backtitle "$WHIP_BACKTITLE" 11 75
 					
-
-				#fi
+				fi
+				#Write .Install File
+				Write_InstallFileList
 			  ;;
 			  4)
 				/boot/dietpi/dietpi-config
@@ -1657,7 +1734,7 @@
 	Menu_StartInstall(){
 
 		#No Software selected / No changes Made / nothing to install
-		if [ "$INSTALL_DIETPI_CHOICESMADE" = false ] && [ "$INSTALL_LINUX_CHOICESMADE" = false ]; then
+		if [ "$INSTALL_DIETPI_CHOICESMADE" = false ] && [ "$INSTALL_LINUX_CHOICESMADE" = false ] && [ "$INSTALL_SSHSERVER_CHOICESMADE" = false ]; then
 			#1st run install
 			if (( $DIETPI_INSTALL_STAGE == 0 )); then
 				WHIP_TITLE='No Software Selected!'
@@ -2262,27 +2339,6 @@
 			fi
 		fi
 		
-		#SSHSERVER_DROPBEAR
-		local sshserver_dropbear_w="off"
-		if (( $SSHSERVER_DROPBEAR > 0 )); then
-			sshserver_dropbear_w="on"
-			#Reset to 0. Menu checklists will apply back to 1
-			if (( $SSHSERVER_DROPBEAR == 1 )); then
-				SSHSERVER_DROPBEAR=0
-			fi
-		fi
-
-		#SSHSERVER_OPENSSH
-		local sshserver_openssh_w="off"
-		if (( $SSHSERVER_OPENSSH > 0 )); then
-			sshserver_openssh_w="on"
-			#Reset to 0. Menu checklists will apply back to 1
-			if (( $SSHSERVER_OPENSSH == 1 )); then
-				SSHSERVER_OPENSSH=0
-			fi
-		fi
-		
-
 		#-----------------------------------------------------------------------------
 		#Odroid C1 Software Installation
 		if (( $HW_MODEL == 10 )); then
@@ -2541,10 +2597,13 @@
 		clear
 
 		#--------------------------------------------------------------------------------------
-		#Generate blank .install file. Doesnt exist on a fresh image.
+		#Generate blank .installed file. Doesnt exist on a fresh image.
 		if [ ! -f /boot/dietpi/.installed ]; then
 			Write_InstallFileList
-		fi
+		#load .installed file, update vars
+		else
+			Install_ReloadChoices
+		fi		
 		
 		#--------------------------------------------------------------------------------------
 		#Ask our inital questions, before allowing access to the software selection menus.
@@ -2552,9 +2611,6 @@
 		
 			WHIP_TITLE='DietPi - Welcome'
 			whiptail --title "$WHIP_TITLE" --msgbox "Welcome to the DietPi Installation System. \n \nBefore we can begin, we need to ask you a few questions regarding this installation. \n \nPress Enter to begin." 14 70
-			
-			#Reload Installed States file
-			Install_ReloadChoices
 
 			#Request for Dedicated External Drive installation.
 			if (( $USBDRIVE == 0 )); then
@@ -2633,6 +2689,9 @@
 				#Apply GPU Memory Splits
 				Install_Apply_Memory_Split
 
+				#Install SSHserver Software (must be last as it kills current SSH connections if user changes their SSH server choice)
+				Install_SSHServer_Software
+
 				#Write .Install File
 				Write_InstallFileList
 
@@ -2642,12 +2701,13 @@
 				#Upload DietPi-Survey Data
 				/boot/dietpi/dietpi-survey &> /dev/null
 
-				#clear log files (prevents waiting for ramlog to save /var/log to disk)
+				#clear log files (prevents extra waiting for ramlog to save /var/log to disk on reboot)
 				logclear
 
 				#Reboot
 				Banner_Reboot
 				reboot
+
 			#Failed Install (E01)
 			else
 				clear
