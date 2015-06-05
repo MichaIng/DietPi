@@ -14,11 +14,12 @@
 	# eg: Removing Xserver will also remove Kodi/Desktop etc....
 	#
 	# Usage:
-	# - /boot/dietpi/dietpi-uninstall sNAME
+	# - /boot/dietpi/dietpi-uninstall menu (runs menu)
+	# - /boot/dietpi/dietpi-uninstall sNAME sNAME (uninstalls software)
 	#////////////////////////////////////
 	
 	INPUT=$1
-	bVALIDINPUT=true
+	VALIDINPUT=1
 	
 	#Count what we have uninstalled. If >=1 autoremove will be run.
 	UNINSTALLED_COUNT=0
@@ -27,9 +28,75 @@
 	#Obtain Pi/Odroid Model
 	#/////////////////////////////////////////////////////////////////////////////////////
 
-	HW_MODEL=$(sed -n 1p /boot/dietpi/.hw_model)
-	HW_MODEL_DESCRIPTION=$(sed -n 2p /boot/dietpi/.hw_model)
-	DISTRO=$(sed -n 3p /boot/dietpi/.hw_model)
+	HW_MODEL=$(sed -n 1p /tmp/.hw_model)
+	HW_MODEL_DESCRIPTION=$(sed -n 2p /tmp/.hw_model)
+	DISTRO=$(sed -n 3p /tmp/.hw_model)
+	
+	#/////////////////////////////////////////////////////////////////////////////////////
+	#Menu
+	#/////////////////////////////////////////////////////////////////////////////////////
+	WHIP_TITLE='------ DietPi-Uninstall ------'
+
+	Menu_Uninstall(){
+
+		#Final string which will hold all software to be removed. This can then be used as dietpi-uninstall "$string_output"
+		local string_output=""
+
+		#create temp file with list of .installed software
+		cat /boot/dietpi/.installed | grep ' 2' | sed 's/ 2//g'  > /tmp/dietpi-uninstall_temp
+		
+		#Delete software lines not available for removal
+		sed -i '/USBDRIVE/d' /tmp/dietpi-uninstall_temp
+		
+		#Read into array
+		readarray installed_list_array < /tmp/dietpi-uninstall_temp
+
+		#Create List for Whiptail
+		local whiptail_list_array=()
+		for ((i=0; i<${#installed_list_array[@]}; i++))
+		do
+			whiptail_list_array+=(${installed_list_array[$i]} "                        " "off")
+		done
+
+		#Run menu
+		whiptail --title "$WHIP_TITLE" --checklist --separate-output "Use the spacebar to select the software you would like to remove." --cancel-button "Exit" --backtitle "$WHIP_TITLE" 18 60 10 "${whiptail_list_array[@]}" 2>/tmp/dietpi-uninstall_results
+		while read choice
+		do
+			case $choice in
+				*)
+					#Convert lined list into a 1 line string.
+					string_output+="$choice "
+				;;
+			esac
+				
+		done < /tmp/dietpi-uninstall_results
+		
+		#output string isnt empty.
+		if [ "$string_output" != "" ]; then
+			
+			#Ask for confirmation
+			whiptail --title "$WHIP_TITLE" --yesno "The following software will be removed:\n\n$string_output\n\nDo you wish to continue?" --defaultno --yes-button "Continue" --no-button "Abort" --backtitle "$WHIP_TITLE" 13 65
+			CHOICE=$?
+			
+			#Run uninstall
+			if (( $CHOICE == 0 )); then
+				/boot/dietpi/dietpi-uninstall $string_output
+			
+				#inform user
+				/tmp/dietpi-banner 0
+				echo -e "\n DietPi-Uninstall completed.\n"
+			fi
+		fi
+
+		#Clean up tmp files
+		rm /tmp/dietpi-uninstall_temp &> /dev/null
+		rm /tmp/dietpi-uninstall_results &> /dev/null
+
+		#delete[] arrays
+		unset installed_list_array
+		unset whiptail_list_array
+
+	}
 	
 	#/////////////////////////////////////////////////////////////////////////////////////
 	# Main Loop
@@ -43,22 +110,19 @@
 		fi
 
 		#----------------------------------------------------------------------
-		#list mode
-		if [ "$INPUT" = "" ]; then
-			/boot/dietpi/dietpi-banner 0
-			echo -e "\n DietPi Installed Software List. To uninstall software, use:\n dietpi-uninstall NAME\n"
-			cat /boot/dietpi/.installed | grep ' 2' | tr -d '2'
-			echo -e ""
+		#Menu mode
+		if [ "$INPUT" = "menu" ]; then
+			Menu_Uninstall
 
-		#Process all inputs
+		#Process all inputs and apply removal.
 		else
 			for INPUT in "$@"
 			do
 				#reset valid input
-				bVALIDINPUT=true
+				VALIDINPUT=1
 				
 				#Inform User
-				/boot/dietpi/dietpi-banner 0
+				/tmp/dietpi-banner 0
 				echo -e "\n Uninstalling: $INPUT \n"
 			
 				#DIETPI SOFTWARE
@@ -150,7 +214,7 @@
 					rm /usr/share/applications/opentyrian.desktop
 					rm ~/Desktop/opentyrian.desktop
 				elif [ "$INPUT" = "DIETPICAM" ]; then
-					apt-get purge gpac motion zip -y
+					apt-get purge gpac motion -y
 					rm -R /var/www/dietpicam
 					rm /opt/vc/bin/raspimjpeg
 					rm /usr/bin/raspimjpeg
@@ -166,7 +230,13 @@
 				elif [ "$INPUT" = "VIMFULL" ]; then
 					apt-get purge vim vim-full -y
 				elif [ "$INPUT" = "SSHCLIENT" ]; then
-					apt-get purge openssh-client -y
+					#This also removes OpenSSH server. So lets check OpenSSH server isnt installed before hand.
+					if (( $(dpkg -l | grep -ci -m1 'openssh-server') == 0 )); then
+						apt-get purge openssh-client -y
+					#Dont remove
+					else
+						VALIDINPUT=0
+					fi
 				elif [ "$INPUT" = "SMBCLIENT" ]; then
 					apt-get purge smbclient -y
 				elif [ "$INPUT" = "RPIGPIO" ]; then
@@ -191,12 +261,12 @@
 					apt-get purge openssh-server openssh-blacklist* -y
 				#No Matching software
 				else
-					bVALIDINPUT=false
-					whiptail --title "DietPi-Uninstall" --msgbox "Invalid usage:\n- >> $INPUT << is unknown and/or not removable.\n\n- For more information and usage of DietPi-Uninstall:\nhttp://fuzon.co.uk/phpbb/viewtopic.php?f=8&t=24&p=60#p60" 12 65
+					VALIDINPUT=0
+					whiptail --title "DietPi-Uninstall" --msgbox "Invalid usage:\n- >> $INPUT << is unknown and/or not removable.\n\n- For more information and usage of DietPi-Uninstall:\nhttp://fuzon.co.uk/phpbb/viewtopic.php?f=8&t=24&p=60#p60" 12 70
 				fi
 			
-				#Valid input. Set to 0 in Dietpi's .installed file, and, log to .uninstalled file
-				if [ "$bVALIDINPUT" = "true" ]; then
+				#Valid input. Set 0 in Dietpi's .installed file, and, log to .uninstalled file
+				if (( $VALIDINPUT == 1 )); then
 				
 					#Update our uninstalled count
 					((UNINSTALLED_COUNT++))
@@ -218,7 +288,7 @@
 	#Purge
 	if (( $UNINSTALLED_COUNT > 0 )); then
 		#Inform User
-		/boot/dietpi/dietpi-banner 0
+		/tmp/dietpi-banner 0
 		echo -e "\n Removing packages that are no longer required.\n"
 		apt-get autoremove --purge -y
 	fi
