@@ -13,7 +13,9 @@
 	# - Uses patch_file for online pactching
 	#
 	# Usage:
+	# - dietpi-update   = Normal
 	# - dietpi-update 1 = forced update
+	# - dietpi-update 2 = Check for updates. print server_version to /tmp/dietpi/.update_available (-1=new image required)
 	#////////////////////////////////////
 	INPUT=0
 	
@@ -29,12 +31,12 @@
 	#/////////////////////////////////////////////////////////////////////////////////////
 	#Obtain Hardware Details
 	#/////////////////////////////////////////////////////////////////////////////////////
-	HW_MODEL=$(sed -n 1p /boot/dietpi/.hw_model)
-	HW_MODEL_DESCRIPTION=$(sed -n 2p /boot/dietpi/.hw_model)
-	DISTRO=$(sed -n 3p /boot/dietpi/.hw_model)
+	HW_MODEL=$(sed -n 1p /tmp/dietpi/.hw_model)
+	HW_MODEL_DESCRIPTION=$(sed -n 2p /tmp/dietpi/.hw_model)
+	DISTRO=$(sed -n 3p /tmp/dietpi/.hw_model)
 
 	#/////////////////////////////////////////////////////////////////////////////////////
-	#VERSION CODES
+	#UPDATE Vars
 	#/////////////////////////////////////////////////////////////////////////////////////
 	DIETPIUPDATE_VERSION_CURRENT=3 # Version of dietpi-update / set server_version line two to value++ and obsolete previous dietpi-update scripts
 	DIETPIUPDATE_VERSION_REQUIRED=0
@@ -46,8 +48,15 @@
 		VERSION_CURRENT=$(cat /boot/dietpi/.version)
 	}
 
-	SERVER_ONLINE=false
-	RUN_UPDATE=false
+	UPDATE_CHECKONLY=0
+	if (( $INPUT == 2 )); then
+		UPDATE_CHECKONLY=1
+	fi
+
+	SERVER_ONLINE=0
+	UPDATE_AVAILABLE=0
+	UPDATE_REQUIRESNEWIMAGE=0
+	RUN_UPDATE=0
 
 	#/////////////////////////////////////////////////////////////////////////////////////
 	# MENUS
@@ -65,7 +74,7 @@
 		CHOICE=$?
 		#Confirm action
 		if (( $CHOICE == 0 )); then
-			RUN_UPDATE=true
+			RUN_UPDATE=1
 		fi
 	}
 
@@ -82,14 +91,14 @@
 		#Remove Files from git that are not to be updated
 		rm ~/DietPi-"$GITBRANCH"/dietpi/.* &> /dev/null
 
-		#Copy to Fat16/32 partition
+		#Copy to DietPi to boot partition
 		cp -Rf ~/DietPi-"$GITBRANCH"/dietpi /boot
 		
 		#Run Patch file
 		while (( $VERSION_CURRENT < $VERSION_SERVER )); do	
 			
 			clear
-			/boot/dietpi/dietpi-banner 0
+			/tmp/dietpi/dietpi-banner 0
 			
 			echo -e "DietPi-Update is running the update process, please wait.... \n \n - Current Version : $VERSION_CURRENT \n - Server Version  : $VERSION_SERVER \n "
 					
@@ -98,6 +107,7 @@
 			#Update Local Version ID
 			((VERSION_CURRENT++))
 			echo -e "$VERSION_CURRENT" > /boot/dietpi/.version
+
 			Get_Current_Version
 				
 		done
@@ -109,14 +119,14 @@
 		#Remove temp files
 		rm -R ~/DietPi-"$GITBRANCH" &> /dev/null
 
-		RUN_UPDATE=false
+		RUN_UPDATE=0
 		
 	}
 
 	#/////////////////////////////////////////////////////////////////////////////////////
 	# Main Loop
 	#/////////////////////////////////////////////////////////////////////////////////////
-	/boot/dietpi/dietpi-banner 0
+	/tmp/dietpi/dietpi-banner 0
 	echo -e " DietPi-Update: \n Checking for DietPi updates, Please wait..."
 
 	#Get Local Version
@@ -125,7 +135,8 @@
 	#Check gitbranch is online
 	/boot/dietpi/func/check_connection 5 2 https://raw.githubusercontent.com/Fourdee/DietPi/"$GITBRANCH"/dietpi/server_version
 	if (( $? == 0 )); then
-		SERVER_ONLINE=true
+
+		SERVER_ONLINE=1
 
 		#Work from home directory
 		cd ~/
@@ -137,72 +148,123 @@
 		VERSION_SERVER=$(sed -n 1p ~/server_version)
 		DIETPIUPDATE_VERSION_REQUIRED=$(sed -n 2p ~/server_version)
 		
+		#Check if server_version is a valid interger.
+		if [[ $VERSION_SERVER =~ ^-?[0-9]+$ ]]; then
+
+			#Update Requires new image?
+			if (( $DIETPIUPDATE_VERSION_CURRENT < $DIETPIUPDATE_VERSION_REQUIRED )); then
+				UPDATE_REQUIRESNEWIMAGE=1
+			#Update available
+			elif (( $VERSION_CURRENT < $VERSION_SERVER )); then 
+				UPDATE_AVAILABLE=1
+			fi
+
+		else
+			echo -e "\nError: Obtained server version value from github is invalid. Please try running dietpi-update again.\n"
+			exit
+		fi
+
 		#Remove temp file
 		rm server_version
+
 	fi
 
-	if [ "$SERVER_ONLINE" = false ]; then
-		whiptail --title "Error - Server Offline" --msgbox "http://github.com is either offline, or, unable to connect \n \n No updates applied." 12 60
-
-	elif (( $DIETPIUPDATE_VERSION_CURRENT < $DIETPIUPDATE_VERSION_REQUIRED )); then 
-		#Cannot update, Image required
-		whiptail --title "Unable to update image" --msgbox " Your version of DietPi is now obsolete and cannot be updated. \n Please download the latest DietPi image:\n http://fuzon.co.uk/phpbb/viewtopic.php?f=8&t=6 \n\n - Current Version : $VERSION_CURRENT \n - Server Version  : $VERSION_SERVER \n " 18 70
-
-		clear
-		/boot/dietpi/dietpi-banner 0
-		echo -e " Your version of DietPi is now obsolete and cannot be updated. \n Please download the latest DietPi image:\n http://fuzon.co.uk/phpbb/viewtopic.php?f=8&t=6 \n\n - Current Version : $VERSION_CURRENT \n - Server Version  : $VERSION_SERVER \n "
-
-	elif (( $VERSION_CURRENT < $VERSION_SERVER )); then 
-		#Forced update
-		if (( $INPUT == 1 )); then
-			clear
-			/boot/dietpi/dietpi-banner 0
-			
-			echo -e "Updates have been found and are being applied, please wait.... \n \n - Current Version : $VERSION_CURRENT \n - Server Version  : $VERSION_SERVER \n "
-			sleep 2
-			RUN_UPDATE=true
-		
-		#Ask for update
-		else
-			Menu_Update
-		fi
-	else
-		#No Updates
-		clear
-		/boot/dietpi/dietpi-banner 0
-		echo -e " DietPi Update - No updates required \n Your DietPi installation is upto date \n \n - Current Version : $VERSION_CURRENT \n - Server Version  : $VERSION_SERVER \n "
-		sleep 2
-	fi
-
-	#Run Update
-	if [ "$RUN_UPDATE" = true ]; then
+	#----------------------------------------------------------------
+	#Check for updates only
+	if (( $UPDATE_CHECKONLY == 1 )); then
 	
-		#Stop Services
-		/boot/dietpi/dietpi-services stop
+		#Clear previous .update_available file
+		rm /tmp/dietpi/.update_available &> /dev/null
 		
-		#Update Apt
-		apt-get update
+		#Write update available version to file.
+		if (( $UPDATE_AVAILABLE == 1 )); then
+			echo -e "$VERSION_SERVER" > /tmp/dietpi/.update_available
+		elif (( $UPDATE_REQUIRESNEWIMAGE == 1 )); then
+			echo -e "-1" > /tmp/dietpi/.update_available
+		fi
+
+	#----------------------------------------------------------------
+	#Run menus / prompts / update core.
+	else
+
+		#----------------------------------------------------------------
+		#Server offline
+		if (( $SERVER_ONLINE == 0 )); then
+			whiptail --title "Error - Server Offline" --msgbox "http://github.com is either offline, or, unable to connect \n \n No updates applied." 12 60
+
+		#Update requires new DietPi image
+		elif (( $UPDATE_REQUIRESNEWIMAGE == 1 )); then 
+			#Cannot update, Image required
+			whiptail --title "Unable to update image" --msgbox " Your version of DietPi is now obsolete and cannot be updated. \n Please download the latest DietPi image:\n http://fuzon.co.uk/phpbb/viewtopic.php?f=8&t=6 \n\n - Current Version : $VERSION_CURRENT \n - Server Version  : $VERSION_SERVER \n " 18 70
+
+			clear
+			/tmp/dietpi/dietpi-banner 0
+			echo -e " Your version of DietPi is now obsolete and cannot be updated. \n Please download the latest DietPi image:\n http://fuzon.co.uk/phpbb/viewtopic.php?f=8&t=6 \n\n - Current Version : $VERSION_CURRENT \n - Server Version  : $VERSION_SERVER \n "
+
+		#Update available
+		elif (( $UPDATE_AVAILABLE == 1 )); then 
+			#Forced update
+			if (( $INPUT == 1 )); then
+				clear
+				/tmp/dietpi/dietpi-banner 0
+				
+				echo -e "Updates have been found and are being applied, please wait.... \n \n - Current Version : $VERSION_CURRENT \n - Server Version  : $VERSION_SERVER \n "
+				sleep 2
+				RUN_UPDATE=1
+			
+			#Ask for update
+			else
+				Menu_Update
+			fi
+		else
+			#No Updates
+			clear
+			/tmp/dietpi/dietpi-banner 0
+			echo -e " DietPi Update - No updates required \n Your DietPi installation is upto date \n \n - Current Version : $VERSION_CURRENT \n - Server Version  : $VERSION_SERVER \n "
+			sleep 2
+		fi
+
+		#----------------------------------------------------------------
+		#Run Update
+		if (( $RUN_UPDATE == 1 )); then
 		
-		#Run update and patcher
-		clear
-		Run_DietPi_Update
-		
-		#.update file stage (only used on 1st run of dietpi-software to check/apply updates, 0 tells dietpi-software to reboot)
-		echo 0 > /boot/dietpi/.update_stage		
-		
-		#Done
-		clear
-		/boot/dietpi/dietpi-banner 0
-		
-		echo -e "DietPi Update Completed. \n \n - Current Version : $VERSION_CURRENT \n - Server Version  : $VERSION_SERVER \n "
-		echo -e "Please reboot your system, using the command reboot"
+			#Stop Services
+			/boot/dietpi/dietpi-services stop
+			
+			#Update Apt
+			apt-get update
+			
+			#Run update and patcher
+			clear
+			Run_DietPi_Update
+			
+			#.update file stage (only used on 1st run of dietpi-software to check/apply updates, 0 tells dietpi-software to reboot)
+			echo 0 > /boot/dietpi/.update_stage
+			
+			#update dietpi-copy_to_ram
+			/boot/dietpi/dietpi-copy_to_ram
+			
+			#Remove update_available file
+			rm /tmp/dietpi/.update_available &> /dev/null
+			
+			#Done
+			clear
+			/tmp/dietpi/dietpi-banner 0
+			
+			echo -e "DietPi Update Completed. \n \n - Current Version : $VERSION_CURRENT \n - Server Version  : $VERSION_SERVER \n "
+			echo -e "Please reboot your system, using the command reboot"
+		fi
+
+		#----------------------------------------------------------------
+		#Desktop Run, exit key prompt
+		if (( $(ps aux | grep -ci -m1 '[l]xpanel') == 1 )); then
+			read -p "Press any key to exit DietPi-Update..."
+		fi
+
 	fi
 
-	#Desktop Run, exit key prompt
-	if (( $(ps aux | grep -ci -m1 '[l]xpanel') == 1 )); then
-		read -p "Press any key to exit DietPi-Update..."
-	fi
-
+	#----------------------------------------------------------------
 	#Run whole script inside a function. Loads into memory, allows for online file patching.
 	exit
+	#----------------------------------------------------------------
 }
