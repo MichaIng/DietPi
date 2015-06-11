@@ -14,17 +14,23 @@
 	#////////////////////////////////////
 	
 	DATE_CURRENT=$(date +"%d-%m-%Y")
+	
+	ONLINE_BUG_REPORT=1
+	CREATE_BUG_REPORT=0
+	BUG_REPORT_COMPLETED=0
 
-	UNIQUE_ID_HW="x"
+	UNIQUE_ID_HW="failed"
 	UNIQUE_ID_BUGNUMBER=0
 
 	FTP_ADDR="fuzon.co.uk"
 	FTP_USER="dietpi-survey"
 	FTP_PASS="raspberry13"
 	
-	FILENAME_GENERATED_ZIP="filename"
-	FILENAME_BUGREPORT_TEXT="bugreport.txt"
-	FILENAME_BUG_NUMBER="/boot/dietpi/.bug_id"
+	FILEPATH_TEMP="/tmp/dietpi-bugreport"
+	
+	FILE_GENERATED_ZIP="bugreport.zip"
+	FILE_BUGREPORT_TEXT="bugreport.txt"
+	FILE_BUG_NUMBER="/boot/dietpi/.bug_id"
 
 	Generate_Zip_File(){
 	
@@ -32,92 +38,112 @@
 		#Define zip settings (level 9 compression etc)
 		local zip_settings="-9"
 
-		#Update file name format to send
-		FILENAME_GENERATED_ZIP="_BugReport-$UNIQUE_ID_HW-$UNIQUE_ID_BUGNUMBER.zip"
+		#Online - Update file name format to send
+		if (( $ONLINE_BUG_REPORT == 1 )); then
+			FILE_GENERATED_ZIP="bugreport-$UNIQUE_ID_HW-$UNIQUE_ID_BUGNUMBER.zip"
+		#Offline
+		else
+			FILE_GENERATED_ZIP="bugreport.zip"
+		fi
 
 		#----------------------------------------------------------------
 		#Add User's text document
-		zip "$zip_settings" "$FILENAME_GENERATED_ZIP" "$FILENAME_BUGREPORT_TEXT"
+		zip "$zip_settings" "$FILE_GENERATED_ZIP" "$FILE_BUGREPORT_TEXT"
 		
 		#Logs (recursive)
-		zip -r "$zip_settings" "$FILENAME_GENERATED_ZIP" /var/log/*
+		zip -r "$zip_settings" "$FILE_GENERATED_ZIP" /var/log/*
 		
 		#DietPi settings
-		zip "$zip_settings" "$FILENAME_GENERATED_ZIP" /boot/dietpi/.*
-		zip "$zip_settings" "$FILENAME_GENERATED_ZIP" /boot/dietpi.txt
-		zip "$zip_settings" "$FILENAME_GENERATED_ZIP" /tmp/dietpi/*
+		zip "$zip_settings" "$FILE_GENERATED_ZIP" /boot/dietpi/.*
+		zip "$zip_settings" "$FILE_GENERATED_ZIP" /boot/dietpi.txt
+		zip "$zip_settings" "$FILE_GENERATED_ZIP" /tmp/dietpi/*
 		
 		#Config.txt/boot.ini
-		zip "$zip_settings" "$FILENAME_GENERATED_ZIP" /boot/config.txt
-		zip "$zip_settings" "$FILENAME_GENERATED_ZIP" /boot/boot.ini
+		zip "$zip_settings" "$FILE_GENERATED_ZIP" /boot/config.txt
+		zip "$zip_settings" "$FILE_GENERATED_ZIP" /boot/boot.ini
 
 		#Installed Packages
 		dpkg -l > dpkg.txt
-		zip "$zip_settings" "$FILENAME_GENERATED_ZIP" dpkg.txt
+		zip "$zip_settings" "$FILE_GENERATED_ZIP" dpkg.txt
 		rm dpkg.txt
 		
 		#X11 conf
-		zip "$zip_settings" "$FILENAME_GENERATED_ZIP" /etc/X11/xorg.conf
+		zip "$zip_settings" "$FILE_GENERATED_ZIP" /etc/X11/xorg.conf
 		
 		#bash / rclocal
-		zip "$zip_settings" "$FILENAME_GENERATED_ZIP" /etc/bash.bashrc
-		zip "$zip_settings" "$FILENAME_GENERATED_ZIP" /etc/rc.local
+		zip "$zip_settings" "$FILE_GENERATED_ZIP" /etc/bash.bashrc
+		zip "$zip_settings" "$FILE_GENERATED_ZIP" /etc/rc.local
 		
 		#networking
-		zip "$zip_settings" "$FILENAME_GENERATED_ZIP" /etc/network/interfaces
+		zip "$zip_settings" "$FILE_GENERATED_ZIP" /etc/network/interfaces
 
 	}
 
-	#/////////////////////////////////////////////////////////////////////////////////////
-	# Main Loop
-	#/////////////////////////////////////////////////////////////////////////////////////
-
-	#----------------------------------------------------------------
-	#create file and send over FTP
-	while true; do
-	
-		#----------------------------------------------------------------
+	Generate_Unique_Id(){
 		#Get unique ID by using eth0 mac address
 		if (( $(ifconfig | grep -ci -m1 'eth0') == 1 )); then
 			UNIQUE_ID_HW=$(ifconfig | grep eth0 | awk '{print $NF}' | sed 's/://g')
 		#Get unique ID by using wlan0 mac address
 		elif (( $(ifconfig | grep -ci -m1 'wlan0') == 1 )); then
 			UNIQUE_ID_HW=$(ifconfig | grep wlan0 | awk '{print $NF}' | sed 's/://g')
-		#No Network hardware found, unable to use MAC address as UUID, abort.
+		#No Network hardware found, unable to use MAC address as UUID.
 		else
-			clear
-			whiptail --title "Bug Report Error" --msgbox "Error: Unable to generate Unique ID based on Mac address.\n- Make sure a network device is installed.\n- Check your network connection is functional." --backtitle "DietPi Bug Report" 12 70
-			break
+			UNIQUE_ID_HW="failed"
 		fi
 
-		#----------------------------------------------------------------
-		#Prompt user if they wish to continue
+	}
+	
+	#/////////////////////////////////////////////////////////////////////////////////////
+	# Main Loop
+	#/////////////////////////////////////////////////////////////////////////////////////
+
+	#----------------------------------------------------------------
+	#Make Directory
+	#we need to work inside the directory as Wput cant accept /paths
+	mkdir -p "$FILEPATH_TEMP"
+	cd "$FILEPATH_TEMP"
+	#----------------------------------------------------------------
+	Generate_Unique_Id
+	#----------------------------------------------------------------
+	#Prompt user if they wish to continue. Offline mode. No Network / UUID. 
+	if [ "$UNIQUE_ID_HW" = "failed" ]; then
+		clear
+		whiptail --title "Offline" --yesno "Error: Unable to generate Unique ID based on Mac address.\n- Make sure a network device is installed.\n- Check your network connection is functional.\n\n Would you like to generate an offline bug report?\n - /boot/bugreport.zip" --defaultno --backtitle "DietPi Bug Report" 14 70
+		CHOICE=$?
+		if (( $CHOICE == 0 )); then
+			ONLINE_BUG_REPORT=0
+			CREATE_BUG_REPORT=1
+		fi
+	#Prompt user if they wish to continue. Online Upload.
+	else
 		whiptail --title "DietPi Bug Reporter" --yesno "DietPi will generate and upload a bug report for your system.\n\nThis file will contain:\n- Your description of the bug/issue.\n- DietPi settings.\n- Log files.\n- Config files specific to DietPi.\n\nDo you wish to continue?" --defaultno --yes-button "Send" --no-button "Abort" --backtitle "DietPi Bug Report" 15 70
 		CHOICE=$?
-		
-		#Aborted
-		if (( $CHOICE != 0 )); then
-			clear
-			echo -e "Bug report aborted by user\n"
-			break
+		if (( $CHOICE == 0 )); then
+			ONLINE_BUG_REPORT=1
+			CREATE_BUG_REPORT=1
 		fi
-		
+	fi
+	
+	#----------------------------------------------------------------
+	#Create Bug Report
+	if (( $CREATE_BUG_REPORT == 1 )); then
+	
 		#----------------------------------------------------------------
 		#Copy template if a previous bugreport.txt file does not exists.
-		if [ ! -f "$FILENAME_BUGREPORT_TEXT" ]; then
-			cp /boot/dietpi/conf/dietpi-bugreport_template.txt "$FILENAME_BUGREPORT_TEXT"
+		if [ ! -f "$FILE_BUGREPORT_TEXT" ]; then
+			cp /boot/dietpi/conf/dietpi-bugreport_template.txt "$FILE_BUGREPORT_TEXT"
 
 			#Set date inside bugreport text
-			sed -i "/#Date/c\ $DATE_CURRENT" "$FILENAME_BUGREPORT_TEXT"
+			sed -i "/#Date/c\ $DATE_CURRENT" "$FILE_BUGREPORT_TEXT"
 		fi
 		
 		#Load up template text file for user to input information
-		nano "$FILENAME_BUGREPORT_TEXT"
+		nano "$FILE_BUGREPORT_TEXT"
 
 		#----------------------------------------------------------------
 		#Load .bug_id
-		if [ -f "$FILENAME_BUG_NUMBER" ]; then
-			UNIQUE_ID_BUGNUMBER=$(cat "$FILENAME_BUG_NUMBER")
+		if [ -f "$FILE_BUG_NUMBER" ]; then
+			UNIQUE_ID_BUGNUMBER=$(cat "$FILE_BUG_NUMBER")
 		fi
 
 		#----------------------------------------------------------------
@@ -125,47 +151,69 @@
 		Generate_Zip_File
 		
 		#----------------------------------------------------------------
-		#Check upload location is online
-		/boot/dietpi/func/check_connection 5 2 "http://$FTP_ADDR"
-		if (( $? == 0 )); then
+		#Offline Mode - store zip to /boot/bugreport.zip
+		if (( $ONLINE_BUG_REPORT == 0 )); then
 
-			#upload to server
-			wput --timeout=10th-4 --tries=1 --waitretry=2 -q -B -u "$FILENAME_GENERATED_ZIP" ftp://"$FTP_USER":"$FTP_PASS"@"$FTP_ADDR"
+			#copy offline bug report to /boot
+			rm /boot/bugreport.zip  &> /dev/null
+			cp "$FILE_GENERATED_ZIP" /boot/bugreport.zip &> /dev/null
 
-			#Remove user text file
-			rm "$FILENAME_BUGREPORT_TEXT" &> /dev/null
+			BUG_REPORT_COMPLETED=1
 
+		#Online Mode, Upload .zip to server.
 		else
 
-			clear
-			whiptail --title "Bug Report Error" --msgbox "Error: Unable to upload Bug report file. Connection to $FTP_ADDR has failed\n- Check your network connection is functional.\n- Please try again later." --backtitle --backtitle "DietPi Bug Report" 12 70
-			break
-		fi		
+			#Check upload location is online
+			/boot/dietpi/func/check_connection 5 2 "http://$FTP_ADDR"
+			if (( $? == 0 )); then
 
-		#----------------------------------------------------------------
-		#inform user of their unique ID that can be used to track issue
-		whiptail --title "Bug Report Sent" --msgbox "Your bug report has been sent.\nPlease make note of your reference code below. This will need to be used when contacting DietPi for support.\n\n Reference CODE: $UNIQUE_ID_HW-$UNIQUE_ID_BUGNUMBER \n\nContact DietPi for support using one of the below:\n- Github Issue : https://github.com/Fourdee/DietPi/issues\n- RPi Forum    : https://goo.gl/QzyTVm\n- Odroid Forum : http://goo.gl/26owYc\n- DietPi Forum : http://fuzon.co.uk/phpbb/viewforum.php?f=9" --backtitle "DietPi Bug Report" 18 70
+				#upload to server
+				wput --timeout=10th-4 --tries=1 --waitretry=2 -q -B -u "$FILE_GENERATED_ZIP" ftp://"$FTP_USER":"$FTP_PASS"@"$FTP_ADDR"
+				BUG_REPORT_COMPLETED=1
+			else
+				BUG_REPORT_COMPLETED=-1
+			fi
+		fi
 
-		#Print to terminal aswell
-		clear
-		/tmp/dietpi/dietpi-banner 0
-		echo -e "\n Bug report Sent. Thank you.\n Your reference code: $UNIQUE_ID_HW-$UNIQUE_ID_BUGNUMBER "
-
-		#----------------------------------------------------------------
-		#Update local Bug number Id
-		((UNIQUE_ID_BUGNUMBER++))
-		echo -e "$UNIQUE_ID_BUGNUMBER" > "$FILENAME_BUG_NUMBER"
-
-		#----------------------------------------------------------------
-		#Done
-		break
-
-	done
+	fi
 
 	#----------------------------------------------------------------
-	#remove generated temp files
-	rm "$FILENAME_GENERATED_ZIP" &> /dev/null
+	#Bug report generated / sent. Inform user
+	if (( $BUG_REPORT_COMPLETED == 1 )); then
 
+		#Inform user
+		if (( $ONLINE_BUG_REPORT == 0 )); then
+			whiptail --title "Bug Report Created" --msgbox "Your offline bug report has been generated:\n - /boot/bugreport.zip\n\nContact DietPi for support using one of the below:\n- Github Issue : https://github.com/Fourdee/DietPi/issues\n- RPi Forum    : https://goo.gl/QzyTVm\n- Odroid Forum : http://goo.gl/26owYc\n- DietPi Forum : http://fuzon.co.uk/phpbb/viewforum.php?f=9" --backtitle "DietPi Bug Report" 16 70
+			/tmp/dietpi/dietpi-banner 1
+			echo -e "\n Bug report generated. /boot/bugreport.zip \n "
+		else
+			#inform user of their unique ID that can be used to track issue
+			whiptail --title "Bug Report Sent" --msgbox "Your bug report has been sent.\nPlease make note of your reference code below. This will need to be used when contacting DietPi for support.\n\n Reference CODE: $UNIQUE_ID_HW-$UNIQUE_ID_BUGNUMBER \n\nContact DietPi for support using one of the below:\n- Github Issue : https://github.com/Fourdee/DietPi/issues\n- RPi Forum    : https://goo.gl/QzyTVm\n- Odroid Forum : http://goo.gl/26owYc\n- DietPi Forum : http://fuzon.co.uk/phpbb/viewforum.php?f=9" --backtitle "DietPi Bug Report" 18 70
+
+			#Print to terminal aswell
+			/tmp/dietpi/dietpi-banner 1
+			echo -e "\n Bug report Sent. Thank you.\n Your reference code: $UNIQUE_ID_HW-$UNIQUE_ID_BUGNUMBER \n"
+
+		fi
+
+		#Update local Bug number Id
+		((UNIQUE_ID_BUGNUMBER++))
+		echo -e "$UNIQUE_ID_BUGNUMBER" > "$FILE_BUG_NUMBER"
+
+	#Failed to upload
+	elif (( $BUG_REPORT_COMPLETED == -1 )); then
+			whiptail --title "Bug Report Error" --msgbox "Error: Unable to upload Bug report file. Connection to $FTP_ADDR has failed\n- Check your network connection is functional.\n- Please try again later." --backtitle --backtitle "DietPi Bug Report" 12 70
+			/tmp/dietpi/dietpi-banner 1
+	#Aborted
+	elif (( $CREATE_BUG_REPORT == 0 )); then
+		/tmp/dietpi/dietpi-banner 1
+		echo -e "\nBug report aborted by user.\n"
+	fi
+
+	#----------------------------------------------------------------
+	#remove temp folder and all generated temp files
+	cd "$HOME"
+	rm -R "$FILEPATH_TEMP" &> /dev/null
 	#----------------------------------------------------------------
 	exit
 	#----------------------------------------------------------------
