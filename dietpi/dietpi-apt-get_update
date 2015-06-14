@@ -1,0 +1,219 @@
+#!/bin/bash
+{
+	#////////////////////////////////////
+	# DietPi Function:
+	# - dietpi-apt-get_update
+	#
+	#////////////////////////////////////
+	# Created by Dan Knight / daniel_haze@hotmail.com / fuzon.co.uk
+	#
+	#////////////////////////////////////
+	#
+	# Info:
+	# - Allows the running of apt-get update as a seperate background thead/process
+	# - Uses $STATE_CURRENT which contains current state and hours since last update.
+	#
+	# Usage:
+	# - /tmp/dietpi/dietpi-apt-get_update -1 (clears the state file if its not in use. New updates can then be run)
+	# - /tmp/dietpi/dietpi-apt-get_update 0  (starts a new update as another process, if $STATE_CURRENT is -2/-1)
+	# - /tmp/dietpi/dietpi-apt-get_update 1  (blocking/check/visual mode, starts if it is -2/-1, else, waits for a "done" state)
+	# - /tmp/dietpi/dietpi-apt-get_update 2  (blocking/check/visual mode, waits for "done", resets STATE_FILE , waits for a "done" state)
+	# - /tmp/dietpi/dietpi-apt-get_update 3  (returns hours since last successful update.)
+	#
+	# $STATE_FILE_TEMP values:
+	# line 1
+	# - $STATE_CURRENT   0 = apt-get update is running
+	# - $STATE_CURRENT   1 = apt-get updated and completed
+	# - $STATE_CURRENT  -1 = failed (error and/or warning from apt)
+	# - $STATE_CURRENT  -2 = apt-get update has never been run, and/or, ready to be run.
+	# line 2:
+	# - Hours since last successful update.
+	#////////////////////////////////////
+
+	INPUT=0
+	if [[ $1 =~ ^-?[0-9]+$ ]]; then
+		INPUT=$1
+	fi
+	
+	#/////////////////////////////////////////////////////////////////////////////////////
+	# Globals
+	#/////////////////////////////////////////////////////////////////////////////////////
+	
+	TEMP_OUTPUT="/tmp/dietpi/apt_update_temp"
+	STATE_FILE_TEMP="/tmp/dietpi/.dietpi-apt-get_update"
+	#Master used for next boot.
+	STATE_FILE_MASTER="/boot/dietpi/.dietpi-apt-get_update"
+	
+	#-2 | Has never been run, and/or, ready to be run.
+	STATE_CURRENT=-2
+	
+	HOURS_SINCE_1970=0
+	HOURS_SINCE_1970_TO_LASTUPDATE=1337
+	
+	Get_Current_State(){
+	
+		#Obtain values from file
+		if [ -f "$STATE_FILE_TEMP" ]; then
+			STATE_CURRENT=$(sed -n 1p "$STATE_FILE_TEMP")
+			HOURS_SINCE_1970_TO_LASTUPDATE=$(sed -n 2p "$STATE_FILE_TEMP")
+		fi
+
+	}
+	
+	Get_Hours_Since_Last_Update(){
+
+		Get_Current_State
+
+		#Get current
+		HOURS_SINCE_1970=$(( $(date +'%s') / 60 / 60 ))		
+
+		#Use return value
+		STATE_CURRENT=$(( $HOURS_SINCE_1970 - $HOURS_SINCE_1970_TO_LASTUPDATE ))
+	}
+	
+	Update_Apt(){
+	
+		#Run only if: -2 (ready to run) / -1 (ready, but failed previously).
+		if (( $STATE_CURRENT == -2 )) || 
+			(( $STATE_CURRENT == -1 )); then
+
+			# 0 = running
+			STATE_CURRENT=0
+
+			#Update state file
+			Write_StateFile_Temp
+
+			#Update apt, output to temp file
+			apt-get update > "$TEMP_OUTPUT"
+
+			#read temp file
+			if (( $(cat "$TEMP_OUTPUT" | grep -ci -m1 '[WE]: ') == 0 )); then
+				#ok
+				STATE_CURRENT=1
+				#Reset hours since update to current.
+				HOURS_SINCE_1970_TO_LASTUPDATE=$(( $(date +'%s') / 60 / 60 ))
+			else
+				#failed
+				STATE_CURRENT=-1
+			fi
+
+			#Update state file
+			Write_StateFile_Temp
+			
+			#Update master for next boot.
+			Write_StateFile_Master
+
+			#clean up
+			rm "$TEMP_OUTPUT"
+
+		fi
+
+	}
+	
+	Wait_For_Completion(){
+	
+		local info_cpu=$(grep 'cpu ' /proc/stat | awk '{usage=($2+$4)*100/($2+$4+$5)} END {print usage "%"}')
+		
+		Get_Current_State
+		
+		#Currently running
+		while (( $STATE_CURRENT == 0 )); do
+
+			/tmp/dietpi/dietpi-banner 0
+			echo -e "\n Waiting for apt-get update to finish. Please wait..."
+			echo -e "\n Status: | Running | CPU usage: $cpu_usage\n"
+			
+			#2+ cores, use one thread for making it look pretty :P
+			if (( $(nproc) > 1 )); then
+			
+				/tmp/dietpi/dietpi-funtime
+
+			#1 core, go easy on it ;)
+			else
+				sleep 2
+			fi
+			
+			Get_Current_State
+		
+		done
+	
+	}
+	
+	
+	Write_StateFile_Temp(){
+
+		#Update state file
+		echo -e "$STATE_CURRENT" > "$STATE_FILE_TEMP"
+		echo -e "$HOURS_SINCE_1970_TO_LASTUPDATE" >> "$STATE_FILE_TEMP"
+	
+	}
+
+	Write_StateFile_Master(){
+
+		#Update master state file which will be loaded on next boot.
+		echo -e "$STATE_CURRENT" > "$STATE_FILE_MASTER"
+		echo -e "$HOURS_SINCE_1970_TO_LASTUPDATE" >> "$STATE_FILE_MASTER"
+	
+	}
+	
+	Reset_StateFile(){
+
+		STATE_CURRENT=-2
+		Write_StateFile_Temp
+	
+	}
+
+	#/////////////////////////////////////////////////////////////////////////////////////
+	# Main Loop
+	#/////////////////////////////////////////////////////////////////////////////////////
+	
+	#Reset STATE file if not currently updating (allows a new update)
+	if (( $INPUT == -1 )); then
+
+		Get_Current_State
+		if (( $STATE_CURRENT != 0 )); then
+			Reset_StateFile
+		fi
+		
+	#Default input | Run update as another process.
+	elif (( $INPUT == 0 )); then
+	
+		Get_Current_State
+		Update_Apt &
+
+	#Visual Blocking mode - Starts update if required
+	elif (( $INPUT == 1 )); then
+		
+		Get_Current_State
+		Update_Apt
+		
+		#Wait / inform user
+		Wait_For_Completion
+
+	#Visual Blocking mode with rerun - Waits for existing updates, resets, starts update again, waits for "done".
+	elif (( $INPUT == 2 )); then
+		
+		#Wait for previous if running
+		Wait_For_Completion
+		
+		#Reset
+		Reset_StateFile
+	
+		#Run again
+		Update_Apt
+		
+		#Wait / inform user
+		Wait_For_Completion
+
+	#Return hours since last update
+	elif (( $INPUT == 3 )); then
+		
+		Get_Hours_Since_Last_Update
+
+	fi
+
+	#-------------------------------------------------------------------------------------
+	echo -e "$STATE_CURRENT"
+	exit
+	#-------------------------------------------------------------------------------------
+}
