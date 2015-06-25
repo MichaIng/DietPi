@@ -52,10 +52,10 @@ Links to DietPi Source
 - Build : Not applicable (As DietPi currently uses Bash scripts, no building or compiling is required).
 
 DietPi file list (The above GPLv2 documentation also applies to all files listed below):
-- All files located in /boot/dietpi (recursive)
-- /boot/dietpi.txt
-- /boot/config.txt
-- /boot/boot.ini
+- All files located in /DietPi/dietpi (recursive)
+- /DietPi/dietpi.txt
+- /DietPi/config.txt
+- /DietPi/boot.ini
 
 Links to additional software used in DietPi, and, their source and build instructions (where applicable):
 
