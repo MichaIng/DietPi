@@ -1738,72 +1738,92 @@
 	RAM_WRITE='Not Tested'
 	RAM_READ='Not Tested'
 	
-	Get_FilesystemBenchmark_Test_Size(){
-		OPTION=$(whiptail --inputbox "Please Enter a filesize test value (MB). A value of 100 is recommended." 8 60 "100" --title "Benchmark File Size (MB)" 3>&1 1>&2 2>&3)
-		if [[ $OPTION =~ ^-?[0-9]+$ ]] &&
-			(( $OPTION > 0 )); then
-			echo -e "valid range" &> /dev/null
-		else
-			OPTION=1
-		fi
-		
-	}
-
 	Run_FilesystemBenchmark(){
 
 		local device_index=$1
-		local test_size_mb=$2
 		local benchmark_temp_file=""
+		local read_speed=0
+		local write_speed=0
+		local run_benchmark=1
+		local benchmark_filesize=0
+		local benchmark_filesystem_freespace=0
+		local benchmark_filesystem_offset=10
+		local text_info_test_name=""
+		local min_benchmark_size=10
 
 		clear
 		
+		#Define test locations / info and extras.
 		if (( $device_index == 0 )); then
-
+			text_info_test_name="SDcard"
 			benchmark_temp_file="$HOME/benchmark.file"
-			echo -e "Please wait, performing SDcard Benchmark...."
-			echo -e "Testing Seq Write Speed ($test_size_mb MB)"
-			SD_WRITE=$(dd bs=1M count=$test_size_mb if=/dev/zero of=$benchmark_temp_file conv=fdatasync 2>&1 | awk '/copied/ {print $8 " "  $9}')
-
-			#Clear Cache
-			sh -c "sync && echo 3 > /proc/sys/vm/drop_caches"
-			
-			echo -e "Testing Seq Read Speed ($test_size_mb MB)"
-			SD_READ=$(dd bs=1M count=$test_size_mb if=$benchmark_temp_file of=/dev/zero conv=fdatasync 2>&1 | awk '/copied/ {print $8 " "  $9}')
-
+			benchmark_filesystem_freespace=$(( $(df -m | grep 'rootfs' | awk '{print $4}') - $benchmark_filesystem_offset ))
 		elif (( $device_index == 1 )); then
-
+			text_info_test_name="USB harddrive"
 			benchmark_temp_file="/mnt/usb_1/benchmark.file"
-			echo -e "Please wait, performing USB harddrive benchmark...."
-			echo -e "Testing Seq Write Speed ($test_size_mb MB)"
-			USB_WRITE=$(dd bs=1M count=$test_size_mb if=/dev/zero of=$benchmark_temp_file conv=fdatasync 2>&1 | awk '/copied/ {print $8 " "  $9}')
-			
+			benchmark_filesystem_freespace=$(( $(df -m | grep '/mnt/usb_1' | awk '{print $4}') - $benchmark_filesystem_offset ))
+		elif (( $device_index == 2 )); then
+			text_info_test_name="RAM"			
+			benchmark_temp_file="/tmp/benchmark.file"
+			benchmark_filesystem_freespace=$(( $(df -m | grep '/tmp' | awk '{print $4}') - $benchmark_filesystem_offset ))
+		fi
+	
+		#Not enough free space
+		if (( $benchmark_filesystem_freespace < $min_benchmark_size )); then
+			run_benchmark=0
+			echo -e "(EE): Insufficient space to run $text_info_test_name filesystem benchmark.\n - Available space: $benchmark_filesystem_freespace MB\n - Space required: $min_benchmark_size MB"
+			echo -e ""
+			read -p "Press any key to continue....."
+		#Obtain user benchmark size.
+		else
+			benchmark_filesize=$(whiptail --inputbox "Please enter a filesize test value (MB). A value of 100 is recommended.\n- Minimum value: $min_benchmark_size\n- Maximum possible value: $benchmark_filesystem_freespace" 10 70 "100" --title "Benchmark File Size (MB)" 3>&1 1>&2 2>&3)
+			CHOICE=$?
+			if (( $CHOICE == 0 )); then
+				#Check for valid interger/entry
+				if [[ $benchmark_filesize =~ ^-?[0-9]+$ ]] && (( $benchmark_filesize > 0 )); then
+					#Disable test if not enough free space.
+					if (( $benchmark_filesystem_freespace < $benchmark_filesize )); then
+						run_benchmark=0
+						echo -e "(EE): Insufficient space to run $text_info_test_name filesystem benchmark.\n - Requested benchmark size: $benchmark_filesize MB\n - Available space for benchmark: $benchmark_filesystem_freespace MB"
+						echo -e ""
+						read -p "Press any key to continue....."
+					#Value too small
+					elif (( $benchmark_filesize < $min_benchmark_size )); then
+						run_benchmark=0
+						echo -e "(EE): Your requested benchmark size of $benchmark_filesize MB is too small."
+						echo -e ""
+						read -p "Press any key to continue....."
+					fi
+				else
+					#invalid value
+					run_benchmark=0
+				fi
+			#User aborted.
+			else
+				run_benchmark=0
+			fi
+		fi
+		
+		#Run benchmark
+		if (( $run_benchmark == 1 )); then
+			echo -e "Please wait, performing $text_info_test_name benchmark...."
+			echo -e "Testing Seq Write Speed ($benchmark_filesize MB)"
+			read_speed=$(dd bs=1M count=$benchmark_filesize if=/dev/zero of=$benchmark_temp_file conv=fdatasync 2>&1 | awk '/copied/ {print $8 " "  $9}')
 			#Clear Cache
 			sh -c "sync && echo 3 > /proc/sys/vm/drop_caches"
-			
-			echo -e "Testing Seq Read Speed ($test_size_mb MB)"
-			USB_READ=$(dd bs=1M count=$test_size_mb if=$benchmark_temp_file of=/dev/zero conv=fdatasync 2>&1 | awk '/copied/ {print $8 " "  $9}')
+			echo -e "Testing Seq Read Speed ($benchmark_filesize MB)"
+			write_speed=$(dd bs=1M count=$benchmark_filesize if=$benchmark_temp_file of=/dev/zero conv=fdatasync 2>&1 | awk '/copied/ {print $8 " "  $9}')
 
-		elif (( $device_index == 2 )); then
-			benchmark_temp_file="/tmp/benchmark.file"
-			echo -e "Please wait, performing RAM benchmark...."
-
-			#Cap to max free available memory if required.
-			local free_memory_available=$(awk '/MemTotal/ {printf( "%.0f\n", $2 / 1024 )}' /proc/meminfo)
-			if (( $free_memory_available <= $test_size_mb )); then
-				test_size_mb=$(( $free_memory_available - 25 ))
-				echo -e "(WW): Capped test size to free available memory."
-			fi
-			
-			#Run if we have enough memory.
-			if (( $test_size_mb > 0 )); then
-				echo -e "Testing Seq Write Speed ($test_size_mb MB)"
-				RAM_WRITE=$(dd bs=1M count=$test_size_mb if=/dev/zero of=$benchmark_temp_file conv=fdatasync 2>&1 | awk '/copied/ {print $8 " "  $9}')
-				
-				#Clear Cache
-				sh -c "sync && echo 3 > /proc/sys/vm/drop_caches"
-				
-				echo -e "Testing Seq Read Speed ($test_size_mb MB)"
-				RAM_READ=$(dd bs=1M count=$test_size_mb if=$benchmark_temp_file of=/dev/zero conv=fdatasync 2>&1 | awk '/copied/ {print $8 " "  $9}')
+			#Update global values.
+			if (( $device_index == 0 )); then
+				SD_WRITE=$write_speed
+				SD_READ=$read_speed
+			elif (( $device_index == 1 )); then
+				USB_WRITE=$write_speed
+				USB_READ=$read_speed
+			elif (( $device_index == 2 )); then
+				RAM_WRITE=$write_speed
+				RAM_READ=$read_speed
 			fi
 		fi
 
@@ -1824,29 +1844,15 @@
 
 		case "$OPTION" in
 		  SDcard)
-			Get_FilesystemBenchmark_Test_Size
-			CHOICE=$?
-			if (( $CHOICE == 0 )); then
-				
-				Run_FilesystemBenchmark 0 $OPTION
-				
-			fi
-			
+			Run_FilesystemBenchmark 0
+
 			#Return to this menu
 			TARGETMENUID=12
 			;;
 		  USBHDD)
 			#Check USB is connected and mounted
 			if (( $(df -h | grep -ci -m1 '/dev/sda1') == 1 )); then
-
-				Get_FilesystemBenchmark_Test_Size
-				CHOICE=$?
-				if (( $CHOICE == 0 )); then
-
-					Run_FilesystemBenchmark 1 $OPTION
-					
-				fi
-
+				Run_FilesystemBenchmark 1
 			#No Drive
 			else
 				whiptail --title "No USB Drive was found" --msgbox " No USB Drive was found, and/or, /dev/sda1 isnt mounted to /mnt/usb_1. \n The test has been aborted." --backtitle "$WHIP_BACKTITLE" 10 60
@@ -1856,13 +1862,7 @@
 			TARGETMENUID=12
 			;;
 		  RAM)
-			Get_FilesystemBenchmark_Test_Size
-			CHOICE=$?
-			if (( $CHOICE == 0 )); then
-				
-				Run_FilesystemBenchmark 2 $OPTION
-				
-			fi
+			Run_FilesystemBenchmark 2
 			
 			#Return to this menu
 			TARGETMENUID=12
