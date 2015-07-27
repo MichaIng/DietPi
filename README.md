@@ -1,5 +1,5 @@
 # DietPi
-![DietPi](http://fuzon.co.uk/downloads/dietpi-logo1.png)
+![DietPi](http://fuzon.co.uk/downloads/dietpi-logo1_icon.png)
 
 #### Lightweight justice for your Raspberry Pi:
 - Minimal and optimized Raspbian Image.
