@@ -1,9 +1,19 @@
 # DietPi
-Lightweight justice for your Raspberry Pi.
+![DietPi](http://fuzon.co.uk/downloads/dietpi-logo1_icon.png)
+
+#### Lightweight justice for your Raspberry Pi:
+- Minimal and optimized Raspbian Image.
+- Optional "ready to run" optimized software choices with dietpi-software.
+- Feature rich configuration tool for your device with dietpi-config.
 
 ##### DietPi for Raspberry Pi's http://fuzon.co.uk/phpbb/viewtopic.php?f=8&t=6
 
 ##### DietPi for oDroid C1 http://fuzon.co.uk/phpbb/viewtopic.php?f=8&t=11
+
+<hr>
+
+### The DietPi Project Team:
+* Dan Knight daniel_haze@hotmail.com
 
 <hr>
 
@@ -22,11 +32,6 @@ We are always looking for talented people who believe in the DietPi project, and
 * Send me an Email: daniel_haze@hotmail.com
 * Join our forums: http://fuzon.co.uk
 * Git Hub: https://github.com/Fourdee/DietPi
-
-<hr>
-
-### The DietPi Project Team:
-* Dan Knight daniel_haze@hotmail.com
 
 <hr>
 
@@ -129,4 +134,7 @@ Deluge
 - http://dev.deluge-torrent.org/wiki/Development#SourceCode
 
 Grasshopper
-- https://sourceforge.net/projects/grasshopperwebapp/
+- https://sourceforge.net/projects/grasshopperwebapp/Grasshopper
+
+Pi-hole
+- https://github.com/jacobsalmela/pi-hole
