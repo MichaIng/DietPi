@@ -134,4 +134,7 @@ Deluge
 - http://dev.deluge-torrent.org/wiki/Development#SourceCode
 
 Grasshopper
-- https://sourceforge.net/projects/grasshopperwebapp/
+- https://sourceforge.net/projects/grasshopperwebapp/Grasshopper
+
+Pi-hole
+- https://github.com/jacobsalmela/pi-hole
