@@ -10,8 +10,19 @@
 	#
 	# Info:
 	# - TBA
+	#
+	# Usage:
+	# dietpi-cloudshell   = Normal
+	# dietpi-cloudshell 1 = Skip intro
+	# 
 	#////////////////////////////////////
 	
+	#Grab Input (valid interger)
+	INPUT=0
+	if [[ $1 =~ ^-?[0-9]+$ ]]; then
+		INPUT=$1
+	fi
+
 	#Set Nice to +5 (not critical)
 	renice -n 5 $$ &> /dev/null
 	
@@ -44,6 +55,7 @@
 	#4 BLUE
 	#5 PURPLE
 	#6 CYAN
+	#7 TEST
 	declare -a aCOLOUR=(
 		"\e[39m"
 		"\e[31m"
@@ -52,6 +64,7 @@
 		"\e[34m"
 		"\e[35m"
 		"\e[36m"
+		"\e[2m"
 	)
 	#${#aCOLOUR[@]}
 
@@ -66,7 +79,7 @@
 		#$C_PERCENT_GRAPH = return text
 	
 		#Work out a percentage based graph
-		#min - max / 18
+		#18 step split (18 / 100)
 		if (( $1 >= 95 )); then
 			C_PERCENT_GRAPH=" $1% [$C_REVERSE${aCOLOUR[1]}------WARNING-----$C_RESET]"
 		elif (( $1 >= 90 )); then
@@ -110,17 +123,10 @@
 	#/////////////////////////////////////////////////////////////////////////////////////
 	# Obtain Data
 	#/////////////////////////////////////////////////////////////////////////////////////
-	TIME=0
-	Obtain_TIME(){
+	DATE_TIME=0
+	Obtain_DATE_TIME(){
 
-		TIME=$(date +"%R")
-
-	}
-	
-	DATE=0
-	Obtain_DATE(){
-
-		DATE=$(date +"%a %x")
+		DATE_TIME=$(date +"%a %x - %R")
 
 	}
 	
@@ -165,12 +171,12 @@
 	}
 
 	#Storage
-	STORAGE_FLASH_PATH=0
+	STORAGE_FLASH_TOTAL=0
 	STORAGE_FLASH_USED=0
 	STORAGE_FLASH_FREE=0
 	STORAGE_FLASH_PERCENT=0
 	
-	STORAGE_USB_PATH=0
+	STORAGE_USB_TOTAL=0
 	STORAGE_USB_USED=0
 	STORAGE_USB_FREE=0
 	STORAGE_USB_PERCENT=0
@@ -180,11 +186,11 @@
 		df -h > $TEMP_FILE
 
 		local target_dev="/dev/mmcblk0p2"
-	
+
+		STORAGE_FLASH_TOTAL="$( cat $TEMP_FILE | grep $target_dev | awk '{print $2}')B"
 		STORAGE_FLASH_USED="$( cat $TEMP_FILE | grep $target_dev | awk '{print $3}')B"
 		STORAGE_FLASH_FREE="$( cat $TEMP_FILE | grep $target_dev | awk '{print $4}')B"
 		STORAGE_FLASH_PERCENT="$( cat $TEMP_FILE | grep $target_dev | awk '{print $5}' | sed 's/%//g')"
-		#STORAGE_FLASH_PATH="$( cat $TEMP_FILE | grep $target_dev | awk '{print $6}')"
 
 		Percent_To_Graph $STORAGE_FLASH_PERCENT
 		STORAGE_FLASH_PERCENT=$C_PERCENT_GRAPH
@@ -192,17 +198,18 @@
 		#check for USB mount
 		target_dev="/dev/sda1"
 		if (( $(cat $TEMP_FILE | grep -ci -m1 "$target_dev" ) == 1 )); then
+			STORAGE_USB_TOTAL="$( cat $TEMP_FILE | grep $target_dev | awk '{print $2}')B"
 			STORAGE_USB_USED="$( cat $TEMP_FILE | grep $target_dev | awk '{print $3}')B"
 			STORAGE_USB_FREE="$( cat $TEMP_FILE | grep $target_dev | awk '{print $4}')B"
 			STORAGE_USB_PERCENT="$( cat $TEMP_FILE | grep $target_dev | awk '{print $5}' | sed 's/%//g')"
-			#STORAGE_USB_PATH="$( cat $TEMP_FILE | grep $target_dev | awk '{print $6}')"
 
 			Percent_To_Graph $STORAGE_USB_PERCENT
 			STORAGE_USB_PERCENT=$C_PERCENT_GRAPH
 		else
-			STORAGE_USB_USED="Not Found"
-			STORAGE_USB_FREE="Not Found"
-			STORAGE_USB_PERCENT="Not Found"
+			STORAGE_USB_TOTAL="N/A"
+			STORAGE_USB_USED="N/A"
+			STORAGE_USB_FREE="N/A"
+			STORAGE_USB_PERCENT=" Not installed."
 		fi
 		
 		rm $TEMP_FILE
@@ -229,26 +236,32 @@
 			
 			local update_version=$(cat /DietPi/dietpi/.update_available)
 			if (( $update_version > 0 )); then
-				DIETPI_UPDATE_AVAILABLE="${aCOLOUR[2]} YES $update_version$C_RESET"
+				DIETPI_UPDATE_AVAILABLE="${aCOLOUR[2]}$update_version$C_RESET"
 				
 			elif (( $update_version == -1 )); then
-				DIETPI_UPDATE_AVAILABLE="${aCOLOUR[2]} New Image$C_RESET"
+				DIETPI_UPDATE_AVAILABLE="${aCOLOUR[2]}New Image$C_RESET"
 			fi
 		fi
 		
 	
 	}
-
-	#Network
+	
+	#Network Details
 	NETWORK_ADAPTER=0
 	NETWORK_IP_INT=0
 	NETWORK_MAC_ADDRESS=0
 	NETWORK_SIGNAL_STRENGTH=0
 	NETWORK_DUPLEXSPEED=0
+	NETWORK_HOSTNAME=0
+	NETWORK_MODE=0 #1=dhcp, 0=static
 	Obtain_NETWORK(){
-	
+
 		TEMP_FILE="/tmp/.ifconfig"
 	
+		#Hostname
+		NETWORK_HOSTNAME=$(hostname)
+
+		#Active network adapater.
 		#DietPi system
 		if (( $DIETPI_DISTRO == 1 )); then
 			NETWORK_ADAPTER=$(sed -n 3p /DietPi/dietpi/.network)
@@ -258,38 +271,90 @@
 			NETWORK_ADAPTER="eth0"
 		fi
 		
+		#Mode (dhcp/static)
+		if (( $(cat /etc/network/interfaces | grep -ci -m1 "iface $NETWORK_ADAPTER inet dhcp") )); then
+			NETWORK_MODE="Dhcp"
+		else
+			NETWORK_MODE="Static"
+		fi
+		
 		#Ifconfig to /tmp
 		ifconfig $NETWORK_ADAPTER > $TEMP_FILE
-
+		
+		#IP / MAC addresses
 		NETWORK_IP_INT=$(cat /tmp/.ifconfig | grep 'inet addr:'| cut -d: -f2 | awk '{ print $1}')
 		NETWORK_MAC_ADDRESS=$(cat /tmp/.ifconfig | grep 'HWaddr ' | awk '{ print $5}')
 		
+		#Speed/Strength
 		#Wifi
 		if (( $(echo $NETWORK_ADAPTER | grep -ci -m1 'wlan') == 1 )); then
-			NETWORK_SIGNAL_STRENGTH=$(iwconfig $NETWORK_ADAPTER | grep 'Signal level=' | awk '{ print $4 }' | sed 's/level=//g' | cut -f1 -d "/")
-			Percent_To_Graph $NETWORK_SIGNAL_STRENGTH
-			NETWORK_SIGNAL_STRENGTH=$C_PERCENT_GRAPH
-
+			NETWORK_SIGNAL_STRENGTH="$(iwconfig $NETWORK_ADAPTER | grep 'Signal level=' | awk '{ print $4 }' | sed 's/level=//g' | cut -f1 -d "/")%"
 			NETWORK_DUPLEXSPEED="$(iwconfig $NETWORK_ADAPTER | grep 'Bit Rate:' | awk '{ print $2 }' | sed 's/Rate://g')Mbit"
 		#Lan
 		else
 			NETWORK_DUPLEXSPEED=$(mii-tool | awk '{print $3}')
-			NETWORK_SIGNAL_STRENGTH=" N/A"
+			NETWORK_SIGNAL_STRENGTH="N/A"
 		fi
 		
 		rm $TEMP_FILE
 	
 	}
 	
+	#NETWORK USAGE SENT and RECIEVED MB
+	#Requires sysstat
+	#/etc/default/sysstat enable
+	#sar -n IP
+	#sar -n DEV
+	
+	#Memory
+	MEMORY_TOTAL=0
+	MEMORY_FREE=0
+	MEMORY_USED=0
+	MEMORY_PERCENT=0
+	MEMORY_SWAPTOTAL=0
+	MEMORY_SWAPUSED=0
+	MEMORY_SWAPFREE=0
+	MEMORY_SWAPERCENT=0
+	Obtain_MEMORY(){
+	
+		#RAM MB
+		MEMORY_TOTAL=$(( $(cat /proc/meminfo | grep 'MemTotal:' | awk '{print $2}') / 1000 ))
+		MEMORY_FREE=$(( $(cat /proc/meminfo | grep 'MemFree:' | awk '{print $2}') / 1000 ))
+		MEMORY_USED=$(( $MEMORY_TOTAL - $MEMORY_FREE))
+		MEMORY_PERCENT=$(free | grep Mem | awk '{print $3 / $2 * 100}')
+	
+		#convert to interger and graph it
+		Percent_To_Graph $(printf %.0f $MEMORY_PERCENT)
+		MEMORY_PERCENT=$C_PERCENT_GRAPH
+		
+		#SWAP MB
+		MEMORY_SWAPTOTAL=$(( $(cat /proc/swaps | grep 'swap' | awk '{print $3}') / 1000 ))
+		MEMORY_SWAPUSED=$(( $(cat /proc/swaps | grep 'swap' | awk '{print $4}') / 1000 ))
+		MEMORY_SWAPFREE=$(( $MEMORY_SWAPTOTAL - $MEMORY_SWAPUSED ))
+		MEMORY_SWAPERCENT=$( echo -e "$MEMORY_SWAPUSED $MEMORY_SWAPTOTAL" | awk '{print $1 / $2 * 100}')
+		
+		#convert to interger and graph it
+		Percent_To_Graph $(printf %.0f $MEMORY_SWAPERCENT)
+		MEMORY_SWAPERCENT=$C_PERCENT_GRAPH
+
+	}
+	
+	#TO DO:
+	#PI-HOLE STATS!
+	
 	#/////////////////////////////////////////////////////////////////////////////////////
 	# Scene Settings
 	#/////////////////////////////////////////////////////////////////////////////////////
 	#Run
 	RUN_UPDATE=1
+	RUN_INTRO=0
+	if (( $INPUT == 0 )); then
+		RUN_INTRO=1
+	fi
 	
 	#SCENE INDEXS
-	SCENE_CURRENT=0
-	SCENE_MAX=4
+	SCENE_CURRENT=1
+	SCENE_MAX=5
 	
 	#Refresh rate (seconds)
 	REFRESH_RATE=4
@@ -315,18 +380,15 @@
 		if (( $BANNER_MODE == 0 )); then
 			BANNER_PRINT="DietPi - Cloudshell v$DIETPI_CLOUDSHELL_VERSION"
 		elif (( $BANNER_MODE == 1 )); then
-			Obtain_TIME
-			BANNER_PRINT=$TIME
-		elif (( $BANNER_MODE == 2 )); then
-			Obtain_DATE
-			BANNER_PRINT=$DATE
+			Obtain_DATE_TIME
+			BANNER_PRINT=$DATE_TIME
 		fi
 		
 		#Set next index
 		BANNER_MODE=$(( $BANNER_MODE + 1 ))
 		
 		#Cap
-		if (( $BANNER_MODE >= 3 )); then
+		if (( $BANNER_MODE >= 2 )); then
 			BANNER_MODE=0
 		fi
 	
@@ -344,13 +406,13 @@
 		#Banner
 		echo -e "$C_RESET $BANNER_PRINT"
 		#
-		echo -e "$C_RESET$C_REVERSE CPU Usage:               "
+		echo -e "$C_RESET${aCOLOUR[$USER_COLOUR_INDEX]}$C_REVERSE CPU Usage:               "
 		echo -e "$C_RESET$CPU_USAGE"
-		echo -e "$C_RESET$C_REVERSE CPU Stats:               "
-		echo -e "$C_RESET${aCOLOUR[$USER_COLOUR_INDEX]} Temp      $C_REVERSE${aCOLOUR[$USER_COLOUR_INDEX]} $C_RESET  $C_CPUTEMP$CPU_TEMP'c"
-		echo -e "$C_RESET${aCOLOUR[$USER_COLOUR_INDEX]} Processes $C_REVERSE${aCOLOUR[$USER_COLOUR_INDEX]} $C_RESET  $CPU_TOTALPROCESSES"
-		echo -e "$C_RESET${aCOLOUR[$USER_COLOUR_INDEX]} Governor  $C_REVERSE${aCOLOUR[$USER_COLOUR_INDEX]} $C_RESET  $CPU_GOV"
-		echo -e "$C_RESET${aCOLOUR[$USER_COLOUR_INDEX]} Freq      $C_REVERSE${aCOLOUR[$USER_COLOUR_INDEX]} $C_RESET  $CPU_FREQ mhz"
+		echo -e "$C_RESET${aCOLOUR[$USER_COLOUR_INDEX]}$C_REVERSE CPU Stats:               "
+		echo -e "$C_RESET${aCOLOUR[$USER_COLOUR_INDEX]} Temp      ${aCOLOUR[$USER_COLOUR_INDEX]}:$C_RESET  $C_CPUTEMP$CPU_TEMP'c"
+		echo -e "$C_RESET${aCOLOUR[$USER_COLOUR_INDEX]} Processes ${aCOLOUR[$USER_COLOUR_INDEX]}:$C_RESET  $CPU_TOTALPROCESSES"
+		echo -e "$C_RESET${aCOLOUR[$USER_COLOUR_INDEX]} Governor  ${aCOLOUR[$USER_COLOUR_INDEX]}:$C_RESET  $CPU_GOV"
+		echo -e "$C_RESET${aCOLOUR[$USER_COLOUR_INDEX]} Freq      ${aCOLOUR[$USER_COLOUR_INDEX]}:$C_RESET  $CPU_FREQ mhz"
 		
 	}
 
@@ -366,13 +428,13 @@
 		#Banner
 		echo -e "$C_RESET $BANNER_PRINT"
 		#
-		echo -e "$C_RESET$C_REVERSE Flash Storage:           "
+		echo -e "$C_RESET${aCOLOUR[$USER_COLOUR_INDEX]}$C_REVERSE Flash Storage:           "
 		echo -e "$C_RESET$STORAGE_FLASH_PERCENT"
-		echo -e "$C_RESET${aCOLOUR[$USER_COLOUR_INDEX]} Used: $C_RESET$STORAGE_FLASH_USED"
+		echo -e "$C_RESET${aCOLOUR[$USER_COLOUR_INDEX]} Used: $C_RESET$STORAGE_FLASH_USED / $STORAGE_FLASH_TOTAL"
 		echo -e "$C_RESET${aCOLOUR[$USER_COLOUR_INDEX]} Free: $C_RESET$STORAGE_FLASH_FREE"
-		echo -e "$C_RESET$C_REVERSE USB Storage:             "
+		echo -e "$C_RESET${aCOLOUR[$USER_COLOUR_INDEX]}$C_REVERSE USB Storage:             "
 		echo -e "$C_RESET$STORAGE_USB_PERCENT"
-		echo -e "$C_RESET${aCOLOUR[$USER_COLOUR_INDEX]} Used: $C_RESET$STORAGE_USB_USED"
+		echo -e "$C_RESET${aCOLOUR[$USER_COLOUR_INDEX]} Used: $C_RESET$STORAGE_USB_USED / $STORAGE_USB_TOTAL"
 		echo -e "$C_RESET${aCOLOUR[$USER_COLOUR_INDEX]} Free: $C_RESET$STORAGE_USB_FREE"
 
 	}
@@ -392,18 +454,18 @@
 			#Banner
 			echo -e "$C_RESET $BANNER_PRINT"
 			#
-			echo -e "$C_RESET$C_REVERSE DietPi:                  "
-			echo -e "$C_RESET${aCOLOUR[$USER_COLOUR_INDEX]} Version   $C_REVERSE${aCOLOUR[$USER_COLOUR_INDEX]} $C_RESET  $DIETPI_VERSION_CURRENT"
-			echo -e "$C_RESET${aCOLOUR[$USER_COLOUR_INDEX]} Update?   $C_REVERSE${aCOLOUR[$USER_COLOUR_INDEX]} $C_RESET  $DIETPI_UPDATE_AVAILABLE"
-			echo -e "$C_RESET${aCOLOUR[$USER_COLOUR_INDEX]} Device    $C_REVERSE${aCOLOUR[$USER_COLOUR_INDEX]} $C_RESET  $DIETPI_HW_MODEL"
-			echo -e "$C_RESET${aCOLOUR[$USER_COLOUR_INDEX]} Website   $C_REVERSE${aCOLOUR[$USER_COLOUR_INDEX]} $C_RESET  $DIETPI_WEBSITE"
+			echo -e "$C_RESET${aCOLOUR[$USER_COLOUR_INDEX]}$C_REVERSE DietPi:                  "
+			echo -e "$C_RESET${aCOLOUR[$USER_COLOUR_INDEX]} Version   ${aCOLOUR[$USER_COLOUR_INDEX]}:$C_RESET  $DIETPI_VERSION_CURRENT"
+			echo -e "$C_RESET${aCOLOUR[$USER_COLOUR_INDEX]} Update?   ${aCOLOUR[$USER_COLOUR_INDEX]}:$C_RESET  $DIETPI_UPDATE_AVAILABLE"
+			echo -e "$C_RESET${aCOLOUR[$USER_COLOUR_INDEX]} Device    ${aCOLOUR[$USER_COLOUR_INDEX]}:$C_RESET  $DIETPI_HW_MODEL"
+			echo -e "$C_RESET${aCOLOUR[$USER_COLOUR_INDEX]} Website   ${aCOLOUR[$USER_COLOUR_INDEX]}:$C_RESET  $DIETPI_WEBSITE"
 		
 		else
 			#Banner
 			echo -e "$C_RESET $BANNER_PRINT"
 			#
-			echo -e "$C_RESET$C_REVERSE DietPi                   "
-			echo -e "$C_RESET${aCOLOUR[$USER_COLOUR_INDEX]} Website   $C_REVERSE${aCOLOUR[$USER_COLOUR_INDEX]} $C_RESET  $DIETPI_WEBSITE"
+			echo -e "$C_RESET${aCOLOUR[$USER_COLOUR_INDEX]}$C_REVERSE DietPi:                  "
+			echo -e "$C_RESET${aCOLOUR[$USER_COLOUR_INDEX]} Website   ${aCOLOUR[$USER_COLOUR_INDEX]}:$C_RESET  $DIETPI_WEBSITE"
 		
 		fi
 
@@ -421,15 +483,38 @@
 		#Banner
 		echo -e "$C_RESET $BANNER_PRINT"
 		#
-		echo -e "$C_RESET$C_REVERSE Network:                 "
-		echo -e "$C_RESET${aCOLOUR[$USER_COLOUR_INDEX]} Adapter: $C_RESET$NETWORK_ADAPTER"
-		echo -e "$C_RESET${aCOLOUR[$USER_COLOUR_INDEX]} IP (int): $C_RESET$NETWORK_IP_INT"
+		echo -e "$C_RESET${aCOLOUR[$USER_COLOUR_INDEX]}$C_REVERSE Network Details:         "
+		echo -e "$C_RESET${aCOLOUR[$USER_COLOUR_INDEX]} IP      : $C_RESET$NETWORK_IP_INT"
+		echo -e "$C_RESET${aCOLOUR[$USER_COLOUR_INDEX]} Mode    : $C_RESET$NETWORK_MODE"
+		echo -e "$C_RESET${aCOLOUR[$USER_COLOUR_INDEX]} Adapter : $C_RESET$NETWORK_ADAPTER"
+		echo -e "$C_RESET${aCOLOUR[$USER_COLOUR_INDEX]} Duplex  : $C_RESET$NETWORK_DUPLEXSPEED"
+		echo -e "$C_RESET${aCOLOUR[$USER_COLOUR_INDEX]} Signal  : $C_RESET$NETWORK_SIGNAL_STRENGTH"
+		echo -e "$C_RESET${aCOLOUR[$USER_COLOUR_INDEX]} Hostname: $C_RESET$NETWORK_HOSTNAME"
 		echo -e "$C_RESET${aCOLOUR[$USER_COLOUR_INDEX]} MAC: $C_RESET$NETWORK_MAC_ADDRESS"
-		echo -e "$C_RESET${aCOLOUR[$USER_COLOUR_INDEX]} Duplex: $C_RESET$NETWORK_DUPLEXSPEED"
-
-		echo -e "$C_RESET$C_REVERSE Signal Strength:         "
-		echo -e "$C_RESET$NETWORK_SIGNAL_STRENGTH"
 		
+	}
+
+	#Memory
+	Update_Scene_4(){
+		
+		#Update data
+		Obtain_MEMORY
+		
+		#Clear screen
+		clear
+
+		#Banner
+		echo -e "$C_RESET $BANNER_PRINT"
+		#
+		echo -e "$C_RESET${aCOLOUR[$USER_COLOUR_INDEX]}$C_REVERSE Memory Usage (RAM):      "
+		echo -e "$C_RESET$MEMORY_PERCENT"
+		echo -e "$C_RESET${aCOLOUR[$USER_COLOUR_INDEX]} Used: $C_RESET$MEMORY_USED MB / $MEMORY_TOTAL MB"
+		echo -e "$C_RESET${aCOLOUR[$USER_COLOUR_INDEX]} Free: $C_RESET$MEMORY_FREE MB"
+		echo -e "$C_RESET${aCOLOUR[$USER_COLOUR_INDEX]}$C_REVERSE Memory Usage (SWAP):     "
+		echo -e "$C_RESET$MEMORY_SWAPERCENT"
+		echo -e "$C_RESET${aCOLOUR[$USER_COLOUR_INDEX]} Used: $C_RESET$MEMORY_SWAPUSED MB / $MEMORY_SWAPTOTAL MB"
+		echo -e "$C_RESET${aCOLOUR[$USER_COLOUR_INDEX]} Free: $C_RESET$MEMORY_SWAPFREE MB"
+
 	}
 
 	#/////////////////////////////////////////////////////////////////////////////////////
@@ -445,7 +530,6 @@
 	Read_Settings_File(){
 		#read lines
 		REFRESH_RATE=$(sed -n 1p $FILEPATH_SETTINGS)
-		MYVALUE=$(sed -n 2p $FILEPATH_SETTINGS)
 	}
 
 	Write_Settings_File(){
@@ -477,8 +561,10 @@
 		#setfont /usr/share/consolefonts/Lat7-Terminus28x14.psf
 		#setfont /usr/share/consolefonts/Lat7-Terminus32x16.psf
 
-		#Start Intro
-		Run_Intro
+		if (( $RUN_INTRO == 1 )); then
+			#Start Intro
+			Run_Intro
+		fi
 	
 	}
 
