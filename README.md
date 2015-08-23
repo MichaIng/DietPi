@@ -10,6 +10,8 @@
 
 ##### DietPi for oDroid C1 http://fuzon.co.uk/phpbb/viewtopic.php?f=8&t=11
 
+##### DietPi for oDroid XU3/4 http://fuzon.co.uk/phpbb/viewtopic.php?f=8&t=57
+
 <hr>
 
 ### The DietPi Project Team:

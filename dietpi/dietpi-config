@@ -621,94 +621,126 @@
 
 		TARGETMENUID=0
 		
-		local current_cpu_throttle_up=$(cat /DietPi/dietpi.txt | grep 'cpu_usage_throttle_up' | sed 's/cpu_usage_throttle_up=//g')
+		#All devices
 		local current_cpu_governor=$(cat /DietPi/dietpi.txt | grep 'cpu_governor=' | sed 's/cpu_governor=//g')
-
 		local frequency_min_cpu_governor=$(( $(cat /sys/devices/system/cpu/cpu0/cpufreq/scaling_min_freq) / 1000 ))
 		local frequency_max_cpu_governor=$(( $(cat /sys/devices/system/cpu/cpu0/cpufreq/scaling_max_freq) / 1000 ))
-		
-		local current_arm_temp_limit="$(cat /DietPi/config.txt | grep 'temp_limit' | sed 's/temp_limit=//g')'c"
-		local current_initial_turbo=$(cat /DietPi/config.txt | grep 'initial_turbo' | sed 's/initial_turbo=//g')
 
 		local arm_temp=$(cat /sys/class/thermal/thermal_zone0/temp | awk '{print $1/1000}' | xargs printf "%0.1f" )
-		#local arm_temp_fahrenheit=$(( $arm_temp / 1000.0f * 9.0f / 5.0f + 32.0f ))
+
 		local memory_total=$(( $(cat /proc/meminfo | grep 'MemTotal:' | awk '{print $2}') / 1000 ))
 		local memory_free=$(( $(cat /proc/meminfo | grep 'MemFree:' | awk '{print $2}') / 1000 ))
 		local memory_usage=$(($memory_total - $memory_free))
-		
-		local text_current_initial_turbo="$current_initial_turbo seconds"
-		if (( $current_initial_turbo == 0 )); then
-			text_current_initial_turbo="Disabled"
+
+		#Create Menu List for Whiptail
+		# - this will list the menu options available for each device.
+		local whiptail_menu_array=()
+
+		#Overclocking
+		if (( $HW_MODEL < 10 )); then
+			whiptail_menu_array+=("Overclocking" "Set Profile")
 		fi
 
-		#non-rpi
-		if (( $HW_MODEL >= 10 )); then
-			current_arm_temp_limit=$HW_MSG_NOTSUPPORTED
-			current_initial_turbo=$HW_MSG_NOTSUPPORTED
-			text_current_initial_turbo=$HW_MSG_NOTSUPPORTED
+		#CPU GOV
+		whiptail_menu_array+=("Change CPU Governor" ": $current_cpu_governor")
+
+		#Ondemand Throttle up menu
+		if [ "$current_cpu_governor" = ondemand ] || [ "$current_cpu_governor" = conservative ]; then
+			local current_cpu_throttle_up=$(cat /DietPi/dietpi.txt | grep 'cpu_usage_throttle_up' | sed 's/cpu_usage_throttle_up=//g')
+			whiptail_menu_array+=("CPU Throttle Up" ": $current_cpu_throttle_up%")
+		fi
+		
+		#RPi extras
+		if (( $HW_MODEL < 10 )); then
+		
+			local current_arm_temp_limit=$(cat /DietPi/config.txt | grep 'temp_limit' | sed 's/temp_limit=//g')
+			local current_initial_turbo=$(cat /DietPi/config.txt | grep 'initial_turbo' | sed 's/initial_turbo=//g')
+			
+			local text_current_initial_turbo="$current_initial_turbo seconds"
+			if (( $current_initial_turbo == 0 )); then
+				text_current_initial_turbo="Disabled"
+			fi
+			whiptail_menu_array+=("ARM Initial Turbo" ": $text_current_initial_turbo")
+			whiptail_menu_array+=("ARM Temp Limit   " ": $current_arm_temp_limit 'c")
+
 		fi
 		
 		WHIP_TITLE='---------- DietPi - Performance Options ----------'
-		OPTION=$(whiptail --title "$WHIP_TITLE" --menu " Hardware : $HW_MODEL_DESCRIPTION \n ARM Temp: $arm_temp 'c\n RAM: $memory_total MB | Used: $memory_usage MB | Free: $memory_free MB" --cancel-button "$TEXT_MENU_BACK" --backtitle "$WHIP_BACKTITLE" 16 60 5 \
-		"1" "Change Overclocking Profile" \
-		"2" "CPU Governor     : $current_cpu_governor" \
-		"3" "CPU Throttle Up  : $current_cpu_throttle_up%" \
-		"4" "ARM Initial Turbo: $text_current_initial_turbo" \
-		"5" "ARM Temp Limit   : $current_arm_temp_limit" 3>&1 1>&2 2>&3)
-
+		OPTION=$(whiptail --title "$WHIP_TITLE" --menu " Hardware : $HW_MODEL_DESCRIPTION \n ARM Temp: $arm_temp 'c\n RAM: $memory_total MB | Used: $memory_usage MB | Free: $memory_free MB" --cancel-button "$TEXT_MENU_BACK" --backtitle "$WHIP_BACKTITLE" 16 60 5 "${whiptail_menu_array[@]}" 3>&1 1>&2 2>&3)
+		
 		CHOICE=$?
+
+		#delete[] array
+		unset whiptail_menu_array
+
 		if (( $CHOICE == 0 )); then
-
-			if (( $OPTION == 1 )); then
-
-				#rpi
-				if (( $HW_MODEL < 10 )); then
+			case "$OPTION" in
+				"Overclocking"*)
 					TARGETMENUID=13
-				else
-					HW_OptionNotSupported
+				;;
+				"Change CPU Governor"*)
+					
+					#Obtain available Govs. Setup their menu and description.
+					local Description="Change CPU Governor:"
+					local whiptail_menu_array=()				
+					if (( $(cat /sys/devices/system/cpu/cpu0/cpufreq/scaling_available_governors | grep -ci -m1 'interactive') == 1 )); then
+						whiptail_menu_array+=("interactive" "Scales CPU frequency between $frequency_min_cpu_governor Mhz and $frequency_max_cpu_governor Mhz.")
+						Description+="\nInteractive  | Dynamic CPU frequency based on usage (recommended)"
+					fi
+					
+					if (( $(cat /sys/devices/system/cpu/cpu0/cpufreq/scaling_available_governors | grep -ci -m1 'ondemand') == 1 )); then
+						whiptail_menu_array+=("ondemand" "Scales CPU frequency between $frequency_min_cpu_governor Mhz and $frequency_max_cpu_governor Mhz.")
+						Description+="\nOndemand     | Dynamic CPU frequency based on usage."
+					fi
+					
+					if (( $(cat /sys/devices/system/cpu/cpu0/cpufreq/scaling_available_governors | grep -ci -m1 'conservative') == 1 )); then
+						whiptail_menu_array+=("conservative" "Scales CPU frequency between $frequency_min_cpu_governor Mhz and $frequency_max_cpu_governor Mhz.")
+						Description+="\nConservative | Same as ondemand. Bias towards powersaving, slower scaling. "
+					fi
+					
+					if (( $(cat /sys/devices/system/cpu/cpu0/cpufreq/scaling_available_governors | grep -ci -m1 'powersave') == 1 )); then
+						whiptail_menu_array+=("powersave" "Limits CPU frequency to $frequency_min_cpu_governor Mhz.")
+						Description+="\nPowersave    | Static. Reduces energy consumption, heat, performance."
+					fi
+					
+					if (( $(cat /sys/devices/system/cpu/cpu0/cpufreq/scaling_available_governors | grep -ci -m1 'performance') == 1 )); then
+						whiptail_menu_array+=("performance" "Forces CPU frequency to $frequency_max_cpu_governor Mhz.")
+						Description+="\nPerformance  | Static. Increases energy consumption, heat, performance."
+					fi
+
+					OPTION=$(whiptail --title "$WHIP_TITLE" --menu "$Description" --cancel-button "$TEXT_MENU_BACK" --backtitle "$WHIP_BACKTITLE" 17 80 5 "${whiptail_menu_array[@]}" 3>&1 1>&2 2>&3)
+					CHOICE=$?
+
+					#delete[] array
+					unset whiptail_menu_array
+
+					if (( $CHOICE == 0 )); then
+						sed -i "/cpu_governor=/c\cpu_governor=$OPTION" /DietPi/dietpi.txt
+						/DietPi/dietpi/dietpi-cpu_set
+					fi
+					
 					#Return to This Menu
 					TARGETMENUID=4
-				fi
-
-			elif (( $OPTION == 2 )); then
-
-				OPTION=$(whiptail --title "$WHIP_TITLE" --menu "Change CPU Governor: \nOndemand     | Dynamic CPU frequency based on usage (recommended). \nConservative | Same as ondemand. Bias towards powersaving, slower scaling. \nPowersave    | Static. Reduces energy consumption, heat, performance. \nPerformance  | Static. Increases energy consumption, heat, performance." --cancel-button "$TEXT_MENU_BACK" --backtitle "$WHIP_BACKTITLE" 16 80 4 \
-				"ondemand" "Scales CPU frequency between $frequency_min_cpu_governor Mhz and $frequency_max_cpu_governor Mhz." \
-				"conservative" "Scales CPU frequency between $frequency_min_cpu_governor Mhz and $frequency_max_cpu_governor Mhz." \
-				"powersave" "Limits CPU frequency to $frequency_min_cpu_governor Mhz." \
-				"performance" "Forces CPU frequency to $frequency_max_cpu_governor Mhz." 3>&1 1>&2 2>&3)
-				CHOICE=$?
-				if (( $CHOICE == 0 )); then
-					sed -i "/cpu_governor=/c\cpu_governor=$OPTION" /DietPi/dietpi.txt
-					/DietPi/dietpi/dietpi-cpu_set
-				fi
-				
-				#Return to This Menu
-				TARGETMENUID=4
-
-			elif (( $OPTION == 3 )); then
-
-				MIN_VALUE=30
-				MAX_VALUE=95			
-				OPTION=$(whiptail --inputbox "When the CPU usage (%) is greater than this value, the CPU frequency will increase from $frequency_min_cpu_governor Mhz to $frequency_max_cpu_governor Mhz. \n - Recommended value | 60 (server) | 40 (desktop) \n - Valid range $MIN_VALUE - $MAX_VALUE \n - Applied when CPU governor is ondemand or conservative" 11 70 "$current_cpu_throttle_up" --title "CPU Throttle Up %" 3>&1 1>&2 2>&3)
-				CHOICE=$?
-				if (( $CHOICE == 0 )); then
-					if [[ $OPTION =~ ^-?[0-9]+$ ]] && (($OPTION <= $MAX_VALUE)) && (($OPTION >= $MIN_VALUE)); then
-						sed -i "/cpu_usage_throttle_up=/c\cpu_usage_throttle_up=$OPTION" /DietPi/dietpi.txt
-						#Apply changes
-						/DietPi/dietpi/dietpi-cpu_set
-					else
-						whiptail --title "Invalid Value" --msgbox "$OPTION is an invalid value. No changes have been applied" --backtitle "$WHIP_BACKTITLE" 10 60
+				;;
+				"CPU Throttle Up"*)
+					MIN_VALUE=30
+					MAX_VALUE=95			
+					OPTION=$(whiptail --inputbox "When the CPU usage (%) is greater than this value, the CPU frequency will increase from $frequency_min_cpu_governor Mhz to $frequency_max_cpu_governor Mhz. \n - Recommended value | 60 (server) | 40 (desktop) \n - Valid range $MIN_VALUE - $MAX_VALUE \n - Applied when CPU governor is ondemand or conservative" 11 70 "$current_cpu_throttle_up" --title "CPU Throttle Up %" 3>&1 1>&2 2>&3)
+					CHOICE=$?
+					if (( $CHOICE == 0 )); then
+						if [[ $OPTION =~ ^-?[0-9]+$ ]] && (($OPTION <= $MAX_VALUE)) && (($OPTION >= $MIN_VALUE)); then
+							sed -i "/cpu_usage_throttle_up=/c\cpu_usage_throttle_up=$OPTION" /DietPi/dietpi.txt
+							#Apply changes
+							/DietPi/dietpi/dietpi-cpu_set
+						else
+							whiptail --title "Invalid Value" --msgbox "$OPTION is an invalid value. No changes have been applied" --backtitle "$WHIP_BACKTITLE" 10 60
+						fi
 					fi
-				fi
 
-				#Return to this menu
-				TARGETMENUID=4
-
-			 elif (( $OPTION == 4 )); then
-
-				#rpi
-				if (( $HW_MODEL < 10 )); then
+					#Return to this menu
+					TARGETMENUID=4
+				;;
+				"ARM Initial Turbo"*)
 					MIN_VALUE=0
 					MAX_VALUE=60			
 					OPTION=$(whiptail --inputbox "Activates turbo mode during boot ($frequency_max_cpu_governor Mhz), for the duration of value in seconds. \n - Recommended value is 20 \n - Valid range $MIN_VALUE (disabled) - $MAX_VALUE" 12 60 "$current_initial_turbo" --title "ARM Initial Turbo Duration" 3>&1 1>&2 2>&3)
@@ -721,17 +753,11 @@
 							whiptail --title "Invalid Value" --msgbox "$OPTION is an invalid value. No changes have been applied" --backtitle "$WHIP_BACKTITLE" 10 60
 						fi
 					fi
-				else
-					HW_OptionNotSupported
-				fi
 
-				#Return to this menu
-				TARGETMENUID=4
-
-		   elif (( $OPTION == 5 )); then
-
-				#rpi
-				if (( $HW_MODEL < 10 )); then
+					#Return to this menu
+					TARGETMENUID=4
+				;;
+				"ARM Temp Limit"*)
 					MIN_VALUE=45
 					MAX_VALUE=85			
 					OPTION=$(whiptail --inputbox "When the ARM temprature ('c) reaches this value, the ARM will underclock to reduce heat. \n - Recommended value is 65  \n - Valid range $MIN_VALUE - $MAX_VALUE" 11 60 "$current_arm_temp_limit" --title "ARM Temprature Limit" 3>&1 1>&2 2>&3)
@@ -745,14 +771,12 @@
 						fi
 					fi
 
-				else
-					HW_OptionNotSupported
-				fi
-
-				#Return to this menu
-				TARGETMENUID=4
-			fi
+					#Return to this menu
+					TARGETMENUID=4
+				;;
+			esac
 		fi
+
 	}
 
 	Change_Password(){
