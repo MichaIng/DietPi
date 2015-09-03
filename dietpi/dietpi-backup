@@ -1,0 +1,398 @@
+#!/bin/bash
+{
+	#////////////////////////////////////
+	# DietPi Backup
+	#
+	#////////////////////////////////////
+	# Created by Dan Knight / daniel_haze@hotmail.com / fuzon.co.uk
+	#
+	#////////////////////////////////////
+	#
+	# Info:
+	# - filename /DietPi/dietpi/dietpi-backup
+	#
+	# Usage:
+	# - /DietPi/dietpi/dietpi-backup -1 = Restore
+	# - /DietPi/dietpi/dietpi-backup    = Menu
+	# - /DietPi/dietpi/dietpi-backup  1 = Backup
+	#////////////////////////////////////
+	
+	#Grab Input (valid interger)
+	INPUT=0
+	if [[ $1 =~ ^-?[0-9]+$ ]]; then
+		INPUT=$1
+	fi
+
+	#/////////////////////////////////////////////////////////////////////////////////////
+	# MENUS
+	#/////////////////////////////////////////////////////////////////////////////////////
+	WHIP_BACKTITLE='DietPi-Backup'
+	WHIP_TITLE='------- DietPi-Backup -------'
+	CHOICE=0
+	OPTION=0
+	TARGETMENUID=0
+	
+	USB_DRIVE_AVAILABLE=0
+	USB_DRIVE_TEXT="Not available"
+
+	#TARGETMENUID=0
+	Menu_Main(){
+
+
+		OPTION=$(whiptail --title "$WHIP_TITLE" --menu "Choose your option." --cancel-button "Back" --backtitle "$WHIP_BACKTITLE" 12 50 3 \
+		"Backup" "Create a backup of this system." \
+		"Restore" "Restore from a previous backup." 3>&1 1>&2 2>&3)
+
+		CHOICE=$?
+		if (( $CHOICE == 0 )); then
+
+			case "$OPTION" in
+				Backup)
+					TARGETMENUID=1
+				;;
+				Restore)
+					TARGETMENUID=2
+				;;
+			esac
+			
+		else
+			#Exit
+			TARGETMENUID=-1
+		fi
+		
+	}
+
+	#TARGETMENUID=1
+	Menu_Backup(){
+
+		Check_Available_DietPi_Mounts
+		
+		OPTION=$(whiptail --title "Create backup." --menu "Please select your target backup directory. When you are ready, select Go to start the backup.\n\nYour backup will be saved to:\n$FP_TARGET" --cancel-button "Back" --backtitle "$WHIP_BACKTITLE" 16 75 3 \
+		"Manual" "Manually type your backup target directory." \
+		"USB HDD" "$USB_DRIVE_TEXT" \
+		"Go" "Start BACKUP." 3>&1 1>&2 2>&3)
+		CHOICE=$?
+		
+		if (( $CHOICE == 0 )); then
+
+			case "$OPTION" in
+				Manual)
+					Input_User_Directory
+				;;
+				Go)
+					Run_Backup
+				;;
+				"USB HDD")
+					FP_TARGET="/mnt/usb_1/dietpi-backup"
+				;;
+			esac
+			
+		else
+			#Return to main menu
+			TARGETMENUID=0
+		fi
+		
+	}
+
+	#TARGETMENUID=2
+	Menu_Restore(){
+
+		Check_Available_DietPi_Mounts
+		
+		OPTION=$(whiptail --title "Restore previous backup" --menu "Please select a previous backup directory for restore. When you are ready, select Go to start the restore process.\n\nYour system will be restored from:\n$FP_TARGET" --cancel-button "Back" --backtitle "$WHIP_BACKTITLE" 16 75 4 \
+		"Search" "Find all previous backups in /mnt/*" \
+		"Manual" "Manually type your target directory for restore." \
+		"USB HDD" "$USB_DRIVE_TEXT" \
+		"Go" "Start RESTORE." 3>&1 1>&2 2>&3)
+		CHOICE=$?
+		
+		if (( $CHOICE == 0 )); then
+
+			case "$OPTION" in
+				Search)
+					local fp_search_results="/tmp/.dietpi-backup_search_results"
+					find /mnt/* -name "$BACKUP_STATS_FILENAME" | sed 's/\/'"$BACKUP_STATS_FILENAME"'//g' > "$fp_search_results"
+					
+					#Do we have any results?
+					if (( $(cat "$fp_search_results" | wc -l) > 0 )); then					
+						readarray search_results_list < "$fp_search_results"
+						#Create List for Whiptail
+						local search_results_whiptail=()
+						for ((i=0; i<${#search_results_list[@]}; i++))
+						do
+							search_results_whiptail+=("${search_results_list[$i]}" "")
+						done
+
+						OPTION=$(whiptail --title "Backups found." --menu "Please select a previous backup for restore:" --cancel-button "Back" --backtitle "$WHIP_BACKTITLE" 12 70 3 "${search_results_whiptail[@]}" 3>&1 1>&2 2>&3)
+						CHOICE=$?
+						if (( $CHOICE == 0 )); then
+							FP_TARGET="$OPTION"
+						fi
+						
+						#delete[] array
+						unset search_results_list
+						unset search_results_whiptail
+						rm "$fp_search_results" &> /dev/null
+					else
+						whiptail --title "No results" --msgbox "No previous backups were found in /mnt/*" --backtitle "$WHIP_BACKTITLE" 10 60
+					fi
+				;;
+				Manual)
+					Input_User_Directory
+				;;
+				"USB HDD")
+					FP_TARGET="/mnt/usb_1/dietpi-backup"
+				;;
+				Go)
+					Run_Restore
+				;;
+			esac
+			
+		else
+			#Return to main menu
+			TARGETMENUID=0
+		fi
+
+	}
+
+	Input_User_Directory(){
+
+		OPTION=$(whiptail --inputbox "Please enter the filepath to your directory. \neg: /mnt/usb_1/dietpi-backup\n - Must be located inside /mnt/* \n - Must be symlink compatible filesystem (ext4)" 10 70 "$FP_TARGET" --title "Manual backup directory" --backtitle "$WHIP_BACKTITLE" 3>&1 1>&2 2>&3)
+		CHOICE=$?
+		if (( $CHOICE == 0 )); then
+			FP_TARGET="$OPTION"
+		fi
+
+	}
+
+	#/////////////////////////////////////////////////////////////////////////////////////
+	# Backup System
+	#/////////////////////////////////////////////////////////////////////////////////////
+	#Backup Filepaths
+	FP_SOURCE="/"
+	FP_TARGET="/mnt/usb_1/dietpi-backup"
+	
+	#file applied to successful backups (stored in "$FP_TARGET/$BACKUP_STATS_FILENAME"
+	BACKUP_STATS_FILENAME=".dietpi-backup_stats"
+
+	#Exclude/include file
+	FP_EXCLUDE_GLOBAL="/tmp/.dietpi-backup_exclude"
+	FP_INCLUDE_GLOBAL="/tmp/.dietpi-backup_include"
+	FP_EXCLUDE_USER="/DietPi/dietpi/.dietpi-backup_exclude"
+	FP_INCLUDE_USER="/DietPi/dietpi/.dietpi-backup_include"
+
+	Create_Exclude_File(){
+
+		#Generate new
+		rm "$FP_EXCLUDE_GLOBAL" &> /dev/null
+
+		#Global - Folders
+		echo -e "/mnt/*" > "$FP_EXCLUDE_GLOBAL"
+		echo -e "/media/*" >> "$FP_EXCLUDE_GLOBAL"
+		echo -e "/boot/dietpi/*" >> "$FP_EXCLUDE_GLOBAL"
+		echo -e "/dev/*" >> "$FP_EXCLUDE_GLOBAL"
+		echo -e "/proc/*" >> "$FP_EXCLUDE_GLOBAL"
+		echo -e "/sys/*" >> "$FP_EXCLUDE_GLOBAL"
+		echo -e "/tmp/*" >> "$FP_EXCLUDE_GLOBAL"
+		echo -e "/run/*" >> "$FP_EXCLUDE_GLOBAL"
+
+		#Global - Files
+		echo -e "$FP_DIETPIBACKUP_SETTINGS" >> "$FP_EXCLUDE_GLOBAL"
+		echo -e "$FP_EXCLUDE_USER" >> "$FP_EXCLUDE_GLOBAL"
+		echo -e "$FP_INCLUDE_USER" >> "$FP_EXCLUDE_GLOBAL"
+		echo -e "$BACKUP_STATS_FILENAME" >> "$FP_EXCLUDE_GLOBAL"
+		echo -e "/var/swap" >> "$FP_EXCLUDE_GLOBAL"
+		
+		#Add users additional list
+		if [ -f "$FP_EXCLUDE_USER" ]; then
+
+			cat "$FP_EXCLUDE_USER" >> "$FP_EXCLUDE_GLOBAL"
+
+		fi
+
+	}
+	
+	Create_Include_File(){
+
+		#Generate new
+		rm "$FP_INCLUDE_GLOBAL" &> /dev/null
+
+		#Global - Folders
+		echo -e "" > "$FP_INCLUDE_GLOBAL"
+
+		#Global - Files
+		
+		#Add users additional list
+		if [ -f "$FP_INCLUDE_USER" ]; then
+
+			cat "$FP_INCLUDE_USER" >> "$FP_INCLUDE_GLOBAL"
+
+		fi
+
+	}
+
+	Services_Stop(){
+		/DietPi/dietpi/dietpi-services stop
+	}
+	
+	Services_Start(){
+		/DietPi/dietpi/dietpi-services start
+	}
+
+	Run_Backup(){
+	
+		# echo -e "\n \e[38;5;93m─────────────────────────────────────────────────────\e[0m\n \e[1mDietPi-Backup\e[0m\n\e[90m Running Backup \e[0m\n \e[38;5;93m─────────────────────────────────────────────────────\e[0m\n"
+		# sleep 1
+
+		Services_Stop
+	
+		#Generate Exclude/Include lists
+		Create_Exclude_File
+		Create_Include_File
+
+		#Generate target dir.
+		mkdir -p "$FP_TARGET"
+
+		#Start Backup
+		if [ -d "$FP_TARGET" ]; then
+			#Backup
+			rsync -laHv --delete --include-from="$FP_INCLUDE_GLOBAL" --exclude-from="$FP_EXCLUDE_GLOBAL" "$FP_SOURCE" "$FP_TARGET"/
+			echo -e "Backup Completed: $(date +"%d-%m-%Y_%H%M")" >> "$FP_TARGET/$BACKUP_STATS_FILENAME"
+
+			if (( $INPUT == 0 )); then
+				whiptail --title "Backup completed" --msgbox "Your backup was saved to:\n$FP_TARGET" --backtitle "$WHIP_BACKTITLE" 10 60
+			fi
+
+		#(error) Folder not found
+		elif (( $INPUT == 0 )); then
+			whiptail --title "Backup failed." --msgbox "Unable to create $FP_TARGET" --backtitle "$WHIP_BACKTITLE" 10 60
+		fi
+
+	
+		Services_Start
+
+	}
+	
+	Run_Restore(){
+
+		Services_Stop
+
+		#Generate Exclude/Include lists
+		Create_Exclude_File
+		Create_Include_File
+
+		#Restore
+		if [ -f "$FP_TARGET/$BACKUP_STATS_FILENAME" ]; then
+			rsync -laHv --delete --include-from="$FP_INCLUDE_GLOBAL" --exclude-from="$FP_EXCLUDE_GLOBAL" "$FP_TARGET"/ "$FP_SOURCE" 
+			echo -e "Restore Completed: $(date +"%d-%m-%Y_%H%M")" >> "$FP_TARGET/$BACKUP_STATS_FILENAME"
+
+			if (( $INPUT == 0 )); then
+				whiptail --title "Restore completed" --msgbox "Your system has been restored from:\n$FP_TARGET" --backtitle "$WHIP_BACKTITLE" 10 60
+			fi
+
+		#failed
+		elif (( $INPUT == 0 )); then
+			whiptail --title "Restore failed." --msgbox "$FP_TARGET/$BACKUP_STATS_FILENAME does not exist" --backtitle "$WHIP_BACKTITLE" 10 70
+		fi
+
+		Services_Start
+	}
+
+	Check_Install_PreReqs(){
+
+		#Rsync
+		if (( $(dpkg -l | grep -ci -m1 ' rsync ') == 0 )); then
+			echo -e "\n\nInstalling Rsync, please wait....\n\n"
+			sleep 1
+			apt-get install rsync -y
+		fi
+	
+	}
+	
+	Check_Available_DietPi_Mounts(){
+	
+		local temp_file_mounts="/tmp/.dietpi-backup_dietpi_mounts"
+		df -h > "$temp_file_mounts"
+		
+		#USB
+		USB_DRIVE_AVAILABLE=0
+		USB_DRIVE_TEXT="Not available"
+		if (( $(cat "$temp_file_mounts" | grep -ci -m1 "/mnt/usb_1") == 1 )); then
+			USB_DRIVE_AVAILABLE=1
+			USB_DRIVE_TEXT="Size: $(df -h | grep /mnt/usb_1 | awk '{print $2}')B | Available: $(df -h | grep /mnt/usb_1 | awk '{print $4}')B"
+		fi
+
+		rm "$temp_file_mounts"
+		
+	}
+
+	#/////////////////////////////////////////////////////////////////////////////////////
+	# Settings File
+	#/////////////////////////////////////////////////////////////////////////////////////
+	#Settings File
+	FP_DIETPIBACKUP_SETTINGS="/DietPi/dietpi/.dietpi-backup_settings"
+	
+	Write_Settings_File(){
+
+		rm "$FP_DIETPIBACKUP_SETTINGS" &> /dev/null
+		
+		echo -e "$FP_TARGET" >> "$FP_DIETPIBACKUP_SETTINGS"
+		
+	}
+	
+	Read_Settings_File(){
+
+		if [ -f "$FP_DIETPIBACKUP_SETTINGS" ]; then
+			FP_TARGET=$(sed -n 1p "$FP_DIETPIBACKUP_SETTINGS")
+		fi
+
+	}
+
+	#/////////////////////////////////////////////////////////////////////////////////////
+	# Main Loop
+	#/////////////////////////////////////////////////////////////////////////////////////
+	
+	#pre-reqs, install if required.
+	Check_Install_PreReqs
+	
+	#Read settings file
+	Read_Settings_File
+	
+	#-----------------------------------------------------------------------------
+	#Run Backup
+	if (( $INPUT == 1 )); then
+
+		Run_Backup
+
+	#Run Restore
+	elif (( $INPUT == -1 )); then
+
+		Run_Restore
+
+	#-----------------------------------------------------------------------------
+	#Run menu
+	else
+
+		while (( $TARGETMENUID > -1 )); do
+
+			clear
+			
+			if (( $TARGETMENUID == 0 )); then
+				Menu_Main
+			elif (( $TARGETMENUID == 1 )); then
+				Menu_Backup
+			elif (( $TARGETMENUID == 2 )); then
+				Menu_Restore
+			fi
+
+		done
+		
+	fi
+	
+	#-----------------------------------------------------------------------------------
+	#Save settings
+	Write_Settings_File
+	#-----------------------------------------------------------------------------------
+	exit
+	#-----------------------------------------------------------------------------------
+}
