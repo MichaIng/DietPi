@@ -1,10 +1,14 @@
 # DietPi
-![DietPi](http://fuzon.co.uk/downloads/dietpi-logo1_icon.png)
+![DietPi](http://dietpi.net/images/dietpi-logo_black_150.png)
 
-#### Lightweight justice for your Raspberry Pi:
-- Minimal and optimized Raspbian Image.
+#### Lightweight justice for your single-board computer:
+- Optimized
+- Simplified
+- For everyone
 - Optional "ready to run" optimized software choices with dietpi-software.
 - Feature rich configuration tool for your device with dietpi-config.
+
+#####http://dietpi.net
 
 ##### DietPi for Raspberry Pi's http://fuzon.co.uk/phpbb/viewtopic.php?f=8&t=6
 
