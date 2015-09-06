@@ -1,0 +1,443 @@
+#!/bin/bash
+{
+	#////////////////////////////////////
+	# DietPi Sync
+	#
+	#////////////////////////////////////
+	# Created by Dan Knight / daniel_haze@hotmail.com / fuzon.co.uk
+	#
+	#////////////////////////////////////
+	#
+	# Info:
+	# - filename /DietPi/dietpi/dietpi-sync
+	# - Allows user to sync a Source and Target directory.
+	#
+	# Usage:
+	# - /DietPi/dietpi/dietpi-sync  0 = Menu
+	# - /DietPi/dietpi/dietpi-sync  1 = Sync
+	#////////////////////////////////////
+	
+	#Grab Input (valid interger)
+	INPUT=0
+	if [[ $1 =~ ^-?[0-9]+$ ]]; then
+		INPUT=$1
+	fi
+
+	#/////////////////////////////////////////////////////////////////////////////////////
+	# MENUS
+	#/////////////////////////////////////////////////////////////////////////////////////
+	WHIP_BACKTITLE='DietPi-Backup'
+	WHIP_TITLE=''
+	CHOICE=0
+	OPTION=0
+	TARGETMENUID=0
+	
+	USB_DRIVE_AVAILABLE=0
+	USB_DRIVE_TEXT="Not available"
+	
+	SYNC_MODE_TEXT="Disabled"
+
+	#TARGETMENUID=0
+	Menu_Main(){
+
+		SYNC_MODE_TEXT="Disabled"
+		if (( $SYNC_DELETE_MODE == 1 )); then
+			SYNC_MODE_TEXT="Enabled"
+		fi
+
+		WHIP_TITLE='--- DietPi-Sync ---'
+		OPTION=$(whiptail --title "$WHIP_TITLE" --menu "Source location:\n$FP_SOURCE\n\nTarget location:\n$FP_TARGET" --cancel-button "Exit" --backtitle "$WHIP_BACKTITLE" 16 73 4 \
+		"Source Location" "Change the Source directory." \
+		"Target Location" "Change the Target directory." \
+		"Delete Mode" "$SYNC_MODE_TEXT" \
+		"Sync" "Sync the Source location to the Target location." 3>&1 1>&2 2>&3)
+
+		CHOICE=$?
+		if (( $CHOICE == 0 )); then
+
+			case "$OPTION" in
+				"Source Location")
+					TARGETMENUID=2
+				;;
+				"Target Location")
+					TARGETMENUID=1
+				;;
+				Sync)
+					WHIP_TITLE=' Start Sync? '
+					whiptail --title "$WHIP_TITLE" --yesno "Source location:\n$FP_SOURCE/*\n\nTarget location:\n$FP_TARGET/*\n\nA copy of all the files and folders inside your Source location, will be created at the Target location.\n\nDo you wish to continue?" --yes-button "Ok" --no-button "Back" --defaultno --backtitle "$WHIP_BACKTITLE" 16 72
+					CHOICE=$?
+					if (( $CHOICE == 0 )); then
+						Run_Sync
+					fi
+				;;
+				"Delete Mode")
+					TARGETMENUID=3
+				;;
+			esac
+			
+		else
+			Menu_Exit
+		fi
+		
+	}
+
+	Menu_Exit(){
+
+		WHIP_TITLE=' Exit DietPi-Sync? '
+		whiptail --title "$WHIP_TITLE" --yesno "$WHIP_TITLE" --yes-button "Ok" --no-button "Back" --defaultno --backtitle "$WHIP_BACKTITLE" 10 50
+		CHOICE=$?
+		
+		#Exit
+		if (( $CHOICE == 0 )); then
+			TARGETMENUID=-1
+		fi
+
+	}
+
+	#TARGETMENUID=1
+	Menu_Set_Target_Directory(){
+	
+		local current_directory="$FP_TARGET"
+
+		Check_Available_DietPi_Mounts
+		
+		WHIP_TITLE='Select your Sync Target location'
+		OPTION=$(whiptail --title "$WHIP_TITLE" --menu "Please select the Target location.\nA copy of all the files and folders in the Source location will be created here.\n\nCurrent Target location:\n$FP_TARGET" --cancel-button "Back" --backtitle "$WHIP_BACKTITLE" 15 75 2 \
+		"Manual" "Manually type your Target directory." \
+		"USB HDD" "$USB_DRIVE_TEXT" 3>&1 1>&2 2>&3)
+		CHOICE=$?
+		
+		if (( $CHOICE == 0 )); then
+
+			case "$OPTION" in
+				Manual)
+					Input_User_Directory
+				;;
+				"USB HDD")
+					if (( $USB_DRIVE_AVAILABLE == 1 )); then
+						FP_TARGET="$FP_USB_HDD_TARGET"
+					else
+						whiptail --title "Error" --msgbox "$USB_DRIVE_TEXT" --backtitle "$WHIP_BACKTITLE" 8 60
+						FP_TARGET="$current_directory"
+					fi
+				;;
+			esac
+			
+		else
+			#Return to main menu
+			TARGETMENUID=0
+		fi
+		
+	}
+
+	#TARGETMENUID=2
+	Menu_Set_Source_Directory(){
+	
+		local current_directory="$FP_SOURCE"
+
+		Check_Available_DietPi_Mounts
+
+		WHIP_TITLE='Select your Sync Source location'
+		OPTION=$(whiptail --title "$WHIP_TITLE" --menu "Please select the Source location.\nA copy of all the files and folder in this Source location, will be created at the Target location.\n\nCurrent Source location:\n$FP_SOURCE" --cancel-button "Back" --backtitle "$WHIP_BACKTITLE" 15 75 2 \
+		"Manual" "Manually type your Source directory." \
+		"USB HDD" "$USB_DRIVE_TEXT" 3>&1 1>&2 2>&3)
+		CHOICE=$?
+		
+		if (( $CHOICE == 0 )); then
+
+			case "$OPTION" in
+				Manual)
+					Input_User_Directory
+				;;
+				"USB HDD")
+					if (( $USB_DRIVE_AVAILABLE == 1 )); then
+						FP_SOURCE="$FP_USB_HDD_SOURCE"
+					else
+						whiptail --title "Error" --msgbox "$USB_DRIVE_TEXT" --backtitle "$WHIP_BACKTITLE" 8 60
+						FP_SOURCE="$current_directory"
+					fi
+				;;
+			esac
+			
+		else
+			#Return to main menu
+			TARGETMENUID=0
+		fi
+		
+	}
+
+	#TARGETMENUID=3
+	Menu_Set_Sync_Delete_Mode(){
+
+		WHIP_TITLE=' Sync Delete Mode '
+		OPTION=$(whiptail --title "$WHIP_TITLE" --menu "Please select the Sync delete mode.\n\nDisabled: (safe)\nIf files and folders exist in the Target location, that are not in the Source, they will be left alone.\n\nEnabled: (WARNING, if in doubt, DO NOT SELECT)\nAn exact copy of the Source location will be created at the Target location. If files are in the Target location that dont exist in the Source, they will be DELETED." --cancel-button "Back" --default-item "$SYNC_MODE_TEXT" --backtitle "$WHIP_BACKTITLE" 19 75 2 \
+		"Disabled" "Ignores data that exists at Target Location and not Source." \
+		"Enabled" "Deletes data at Target location if not in Source Location." 3>&1 1>&2 2>&3)
+		CHOICE=$?
+		
+		if (( $CHOICE == 0 )); then
+
+			case "$OPTION" in
+				Disabled)
+					SYNC_DELETE_MODE=0
+				;;
+				Enabled)
+					SYNC_DELETE_MODE=1
+				;;
+			esac
+			
+		fi
+		
+		#Return to main menu
+		TARGETMENUID=0
+
+	}
+	
+	Input_User_Directory(){
+	
+		#Target
+		if (( $TARGETMENUID == 1 )); then
+			OPTION=$(whiptail --inputbox "Please enter the filepath to your Target directory. \neg: $FP_USB_HDD_TARGET" 8 70 "$FP_TARGET" --title "Manual sync directory" --backtitle "$WHIP_BACKTITLE" 3>&1 1>&2 2>&3)
+			CHOICE=$?
+			if (( $CHOICE == 0 )); then
+				FP_TARGET="$OPTION"
+			fi
+		
+		#Source
+		elif (( $TARGETMENUID == 2 )); then
+			OPTION=$(whiptail --inputbox "Please enter the filepath to your Source directory. \neg: $FP_USB_HDD_SOURCE" 8 70 "$FP_SOURCE" --title "Manual sync directory" --backtitle "$WHIP_BACKTITLE" 3>&1 1>&2 2>&3)
+			CHOICE=$?
+			if (( $CHOICE == 0 )); then
+				FP_SOURCE="$OPTION"
+			fi
+		fi
+
+	}
+
+	#/////////////////////////////////////////////////////////////////////////////////////
+	# Sync System
+	#/////////////////////////////////////////////////////////////////////////////////////
+	#Sync Filepaths
+	FP_SOURCE="/mnt/Source"
+	FP_TARGET="/mnt/Target"
+	FP_USB_HDD_SOURCE="/mnt/usb_1"
+	FP_USB_HDD_TARGET="/mnt/usb_1/dietpi-sync"
+	
+	#file applied to successful Sync (stored in "$FP_TARGET/$SYNC_STATS_FILENAME"
+	SYNC_STATS_FILENAME=".dietpi-sync_stats"
+
+	#Exclude/include file
+	FP_EXCLUDE_GLOBAL="/tmp/.dietpi-sync_exclude"
+	FP_INCLUDE_GLOBAL="/tmp/.dietpi-sync_include"
+	FP_EXCLUDE_USER="/DietPi/dietpi/.dietpi-sync_exclude"
+	FP_INCLUDE_USER="/DietPi/dietpi/.dietpi-sync_include"
+	
+	#Sync Delete mode (0=update 1=--delete)
+	SYNC_DELETE_MODE=0
+
+	Create_Exclude_File(){
+
+		#Generate new
+		rm "$FP_EXCLUDE_GLOBAL" &> /dev/null
+
+		#Global - Folders
+		echo -e "/boot/dietpi/*" >> "$FP_EXCLUDE_GLOBAL"
+		echo -e "/DietPi/*" >> "$FP_EXCLUDE_GLOBAL"
+		echo -e "/dev/*" >> "$FP_EXCLUDE_GLOBAL"
+		echo -e "/proc/*" >> "$FP_EXCLUDE_GLOBAL"
+		echo -e "/sys/*" >> "$FP_EXCLUDE_GLOBAL"
+		echo -e "/tmp/*" >> "$FP_EXCLUDE_GLOBAL"
+		echo -e "/run/*" >> "$FP_EXCLUDE_GLOBAL"
+
+		#Global - Files
+		echo -e "$FP_DIETPISYNC_SETTINGS" >> "$FP_EXCLUDE_GLOBAL"
+		echo -e "$FP_EXCLUDE_USER" >> "$FP_EXCLUDE_GLOBAL"
+		echo -e "$FP_INCLUDE_USER" >> "$FP_EXCLUDE_GLOBAL"
+		echo -e "$SYNC_STATS_FILENAME" >> "$FP_EXCLUDE_GLOBAL"
+		echo -e "/var/swap" >> "$FP_EXCLUDE_GLOBAL"
+		
+		#Add users additional list
+		if [ -f "$FP_EXCLUDE_USER" ]; then
+
+			cat "$FP_EXCLUDE_USER" >> "$FP_EXCLUDE_GLOBAL"
+
+		fi
+
+	}
+	
+	Create_Include_File(){
+
+		#Generate new
+		rm "$FP_INCLUDE_GLOBAL" &> /dev/null
+
+		#Global - Folders
+		echo -e "" > "$FP_INCLUDE_GLOBAL"
+
+		#Global - Files
+		
+		#Add users additional list
+		if [ -f "$FP_INCLUDE_USER" ]; then
+
+			cat "$FP_INCLUDE_USER" >> "$FP_INCLUDE_GLOBAL"
+
+		fi
+
+	}
+
+	Services_Stop(){
+		/DietPi/dietpi/dietpi-services stop
+	}
+	
+	Services_Start(){
+		/DietPi/dietpi/dietpi-services start
+	}
+
+	Run_Sync(){
+
+		#Services_Stop
+	
+		#Generate Exclude/Include lists
+		Create_Exclude_File
+		Create_Include_File
+
+		#Generate Target dir.
+		mkdir -p "$FP_TARGET"
+	
+		#Start sync
+		if [ -d "$FP_TARGET" ]; then
+		
+			#add / to end of source
+			local source_ending_in_slash="$FP_SOURCE"
+			source_ending_in_slash+="/"
+			
+			#Are we deleteing?
+			local delete_flag=""
+			if (( $SYNC_DELETE_MODE == 1 )); then
+				delete_flag="--delete"
+			fi
+
+			#Sync
+			rsync -aHv "$delete_flag" --exclude-from="$FP_EXCLUDE_GLOBAL" --include-from="$FP_INCLUDE_GLOBAL" "$source_ending_in_slash" "$FP_TARGET"/
+			echo -e "Sync Completed: $(date +"%d-%m-%Y_%H%M")" >> "$FP_TARGET/$SYNC_STATS_FILENAME"
+
+			#Menu
+			if (( $INPUT == 0 )); then
+				whiptail --title "Sync completed" --msgbox "$FP_SOURCE\n\nHas been synced to:\n$FP_TARGET" --backtitle "$WHIP_BACKTITLE" 11 60
+				#return to main menu
+				TARGETMENUID=0
+			fi
+
+		#error Folder not found
+		else
+			if (( $INPUT == 0 )); then
+				whiptail --title "Sync failed." --msgbox "Unable to create Target directory $FP_TARGET" --backtitle "$WHIP_BACKTITLE" 10 60
+			fi
+		fi
+	
+		#Services_Start
+
+	}
+
+	Check_Install_PreReqs(){
+
+		#Rsync
+		if (( $(dpkg -l | grep -ci -m1 ' rsync ') == 0 )); then
+			echo -e "\n\nInstalling Rsync, please wait....\n\n"
+			sleep 1
+			apt-get install rsync -y
+		fi
+	
+	}
+	
+	Check_Available_DietPi_Mounts(){
+	
+		local temp_file_mounts="/tmp/.dietpi-sync_dietpi_mounts"
+		df -h > "$temp_file_mounts"
+		
+		#USB
+		USB_DRIVE_AVAILABLE=0
+		USB_DRIVE_TEXT="No USB HDD was found or mounted (/mnt/usb_1)."
+		if (( $(cat "$temp_file_mounts" | grep -ci -m1 "/mnt/usb_1") == 1 )); then
+			USB_DRIVE_AVAILABLE=1
+			USB_DRIVE_TEXT="Size: $(df -h | grep /mnt/usb_1 | awk '{print $2}')B | Available: $(df -h | grep /mnt/usb_1 | awk '{print $4}')B"
+		fi
+
+		rm "$temp_file_mounts"
+
+	}
+	
+	#/////////////////////////////////////////////////////////////////////////////////////
+	# Settings File
+	#/////////////////////////////////////////////////////////////////////////////////////
+	#Settings File
+	FP_DIETPISYNC_SETTINGS="/DietPi/dietpi/.dietpi-sync_settings"
+	
+	Write_Settings_File(){
+
+		rm "$FP_DIETPISYNC_SETTINGS" &> /dev/null
+		
+		echo -e "$FP_SOURCE" >> "$FP_DIETPISYNC_SETTINGS"
+		echo -e "$FP_TARGET" >> "$FP_DIETPISYNC_SETTINGS"
+		echo -e "$SYNC_DELETE_MODE" >> "$FP_DIETPISYNC_SETTINGS"
+		
+	}
+
+	Read_Settings_File(){
+
+		if [ -f "$FP_DIETPISYNC_SETTINGS" ]; then
+			FP_SOURCE=$(sed -n 1p "$FP_DIETPISYNC_SETTINGS")
+			FP_TARGET=$(sed -n 2p "$FP_DIETPISYNC_SETTINGS")
+			SYNC_DELETE_MODE=$(sed -n 3p "$FP_DIETPISYNC_SETTINGS")
+		fi
+
+	}
+
+	#/////////////////////////////////////////////////////////////////////////////////////
+	# Main Loop
+	#/////////////////////////////////////////////////////////////////////////////////////
+	
+	#pre-reqs, install if required.
+	Check_Install_PreReqs
+	
+	#Read settings file
+	Read_Settings_File
+	
+	#-----------------------------------------------------------------------------
+	#Run Sync
+	if (( $INPUT == 1 )); then
+
+		Run_Sync
+
+	#-----------------------------------------------------------------------------
+	#Run menu
+	else
+
+		while (( $TARGETMENUID > -1 )); do
+
+			clear
+			
+			if (( $TARGETMENUID == 0 )); then
+				Menu_Main
+			elif (( $TARGETMENUID == 1 )); then
+				Menu_Set_Target_Directory
+			elif (( $TARGETMENUID == 2 )); then
+				Menu_Set_Source_Directory
+			elif (( $TARGETMENUID == 3 )); then
+				Menu_Set_Sync_Delete_Mode
+			fi
+
+		done
+		
+	fi
+	
+	#-----------------------------------------------------------------------------------
+	#Cleaup left over tmp files
+	rm "$FP_INCLUDE_GLOBAL" &> /dev/null
+	rm "$FP_EXCLUDE_GLOBAL" &> /dev/null
+	#-----------------------------------------------------------------------------------
+	#Save settings
+	Write_Settings_File
+	#-----------------------------------------------------------------------------------
+	exit
+	#-----------------------------------------------------------------------------------
+}
