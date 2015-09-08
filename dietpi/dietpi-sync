@@ -35,6 +35,8 @@
 	USB_DRIVE_AVAILABLE=0
 	USB_DRIVE_TEXT="Not available"
 	
+	SYNC_DRY_RUN=0
+	
 	SYNC_MODE_TEXT="Disabled"
 
 	#TARGETMENUID=0
@@ -46,10 +48,11 @@
 		fi
 
 		WHIP_TITLE='--- DietPi-Sync ---'
-		OPTION=$(whiptail --title "$WHIP_TITLE" --menu "Source location:\n$FP_SOURCE\n\nTarget location:\n$FP_TARGET" --cancel-button "Exit" --backtitle "$WHIP_BACKTITLE" 16 73 4 \
+		OPTION=$(whiptail --title "$WHIP_TITLE" --menu "Source location:\n$FP_SOURCE\n\nTarget location:\n$FP_TARGET" --cancel-button "Exit" --backtitle "$WHIP_BACKTITLE" 17 73 5 \
 		"Source Location" "Change the Source directory." \
 		"Target Location" "Change the Target directory." \
 		"Delete Mode" "$SYNC_MODE_TEXT" \
+		"Dry Run" "Run a test Sync without modifying any data." \
 		"Sync" "Sync the Source location to the Target location." 3>&1 1>&2 2>&3)
 
 		CHOICE=$?
@@ -62,11 +65,21 @@
 				"Target Location")
 					TARGETMENUID=1
 				;;
+				"Dry Run")
+					WHIP_TITLE=' Test Dry Run Sync? '
+					whiptail --title "$WHIP_TITLE" --yesno "Source location:\n$FP_SOURCE/*\n\nTarget location:\n$FP_TARGET/*\n\nThis is a Dry Run for testing. No data will be modified.\n\nDo you wish to continue?" --yes-button "Ok" --no-button "Back" --defaultno --backtitle "$WHIP_BACKTITLE" 16 72
+					CHOICE=$?
+					if (( $CHOICE == 0 )); then
+						SYNC_DRY_RUN=1
+						Run_Sync
+					fi
+				;;
 				Sync)
 					WHIP_TITLE=' Start Sync? '
 					whiptail --title "$WHIP_TITLE" --yesno "Source location:\n$FP_SOURCE/*\n\nTarget location:\n$FP_TARGET/*\n\nA copy of all the files and folders inside your Source location, will be created at the Target location.\n\nDo you wish to continue?" --yes-button "Ok" --no-button "Back" --defaultno --backtitle "$WHIP_BACKTITLE" 16 72
 					CHOICE=$?
 					if (( $CHOICE == 0 )); then
+						SYNC_DRY_RUN=0
 						Run_Sync
 					fi
 				;;
@@ -170,7 +183,7 @@
 	Menu_Set_Sync_Delete_Mode(){
 
 		WHIP_TITLE=' Sync Delete Mode '
-		OPTION=$(whiptail --title "$WHIP_TITLE" --menu "Please select the Sync delete mode.\n\nDisabled: (safe)\nIf files and folders exist in the Target location, that are not in the Source, they will be left alone.\n\nEnabled: (WARNING, if in doubt, DO NOT SELECT)\nAn exact copy of the Source location will be created at the Target location. If files are in the Target location that dont exist in the Source, they will be DELETED." --cancel-button "Back" --default-item "$SYNC_MODE_TEXT" --backtitle "$WHIP_BACKTITLE" 19 75 2 \
+		OPTION=$(whiptail --title "$WHIP_TITLE" --menu "Please select the Sync delete mode.\n\nDisabled: (safe)\nIf files and folders exist in the Target location, that are not in the Source, they will be left alone.\n\nEnabled: (WARNING, if in doubt, DO NOT enable)\nAn exact copy of the Source location will be created at the Target location. If files are in the Target location that dont exist in the Source, they will be DELETED." --cancel-button "Back" --default-item "$SYNC_MODE_TEXT" --backtitle "$WHIP_BACKTITLE" 19 75 2 \
 		"Disabled" "Ignores data that exists at Target Location and not Source." \
 		"Enabled" "Deletes data at Target location if not in Source Location." 3>&1 1>&2 2>&3)
 		CHOICE=$?
@@ -217,6 +230,9 @@
 	#/////////////////////////////////////////////////////////////////////////////////////
 	# Sync System
 	#/////////////////////////////////////////////////////////////////////////////////////
+	#LOGFILE
+	LOGFILE="/var/log/dietpi-sync.log"
+	
 	#Sync Filepaths
 	FP_SOURCE="/mnt/Source"
 	FP_TARGET="/mnt/Target"
@@ -251,6 +267,7 @@
 		echo -e "/run/*" >> "$FP_EXCLUDE_GLOBAL"
 
 		#Global - Files
+		echo -e "$LOGFILE" >> "$FP_EXCLUDE_GLOBAL"
 		echo -e "$FP_DIETPISYNC_SETTINGS" >> "$FP_EXCLUDE_GLOBAL"
 		echo -e "$FP_EXCLUDE_USER" >> "$FP_EXCLUDE_GLOBAL"
 		echo -e "$FP_INCLUDE_USER" >> "$FP_EXCLUDE_GLOBAL"
@@ -309,18 +326,51 @@
 		#Start sync
 		if [ -d "$FP_TARGET" ]; then
 		
-			#Sync
-			if (( $SYNC_DELETE_MODE == 1 )); then
-				rsync -av --delete --exclude-from="$FP_EXCLUDE_GLOBAL" --include-from="$FP_INCLUDE_GLOBAL" "$FP_SOURCE"/ "$FP_TARGET"/
-			else
-				rsync -av --exclude-from="$FP_EXCLUDE_GLOBAL" --include-from="$FP_INCLUDE_GLOBAL" "$FP_SOURCE"/ "$FP_TARGET"/			
+			#Archive mode
+			local rync_options="-a"
+
+			#verbose
+			rync_options+="v"
+			
+			#Itemize summary
+			#rync_options+="i"
+			
+			#Prefer IPv4
+			rync_options+="4"
+			
+			#Checksum mode (extremly slow, sends and recieves in blocks, allows resuming. Always ensures files are exact copies using 128bit hash)
+			#rync_options+="c"
+			
+			#Dry Run?
+			if (( $SYNC_DRY_RUN == 1 )); then
+				rync_options+="n"
 			fi
+			
+			#Keep partial files (eg: if file is interupted, it will resume where it left off, rather than resending the whole file.
+			rync_options+=" --partial"
+			
+			if (( $SYNC_DELETE_MODE == 1 )); then
+				rync_options+=" --delete"
+			fi
+			
+			#Remove previous logfile
+			rm "$LOGFILE" &> /dev/null
+
+			echo -e "DietPi-Sync Log File.\n$(date +%d-%m-%Y_%H%M)\nSYNC_DRY_RUN=$SYNC_DRY_RUN\n\n" > "$LOGFILE"
+
+			#Sync
+			rsync $rync_options --log-file=$LOGFILE --exclude-from="$FP_EXCLUDE_GLOBAL" --include-from="$FP_INCLUDE_GLOBAL" "$FP_SOURCE"/ "$FP_TARGET"/			
 
 			echo -e "Sync Completed: $(date +"%d-%m-%Y_%H%M")" >> "$FP_TARGET/$SYNC_STATS_FILENAME"
 
 			#Menu
 			if (( $INPUT == 0 )); then
-				whiptail --title "Sync completed" --msgbox "$FP_SOURCE\n\nHas been synced to:\n$FP_TARGET" --backtitle "$WHIP_BACKTITLE" 11 60
+			
+				if (( $SYNC_DRY_RUN == 0 )); then
+					whiptail --title "Sync completed" --msgbox "$FP_SOURCE\n\nHas been synced to:\n$FP_TARGET\n\nLog file: $LOGFILE" --backtitle "$WHIP_BACKTITLE" 13 60
+				else
+					whiptail --title "Dry Run Sync completed" --msgbox "$FP_SOURCE\n\nHas been synced with a Dry Run (NO modifications) to:\n$FP_TARGET\n\nLog file: $LOGFILE" --backtitle "$WHIP_BACKTITLE" 13 60
+				fi
 				#return to main menu
 				TARGETMENUID=0
 			fi
