@@ -74,9 +74,9 @@
 		TEXT_MENU_BACK="Exit"
 	fi
 
-	WHIP_BACKTITLE='DietPi - Config'
-	WHIP_TITLE='DietPi - Config'
-	WHIP_QUESTION='DietPi - Config'
+	WHIP_BACKTITLE='DietPi-Config'
+	WHIP_TITLE='DietPi-Config'
+	WHIP_QUESTION='DietPi-Config'
 	CHOICE=0
 	OPTION=0
 	REBOOT_REQUIRED=false
@@ -137,7 +137,7 @@
 		# The good old "Are you really sure" question.
 		WHIP_TITLE=' Exit DietPi-Config? '
 		WHIP_QUESTION=' Exit DietPi-Config? '
-		whiptail --title "$WHIP_TITLE" --yesno "$WHIP_QUESTION" --yes-button "Ok" --no-button "Back" --backtitle "$WHIP_BACKTITLE" 10 50
+		whiptail --title "$WHIP_TITLE" --yesno "$WHIP_QUESTION" --yes-button "Ok" --no-button "Back" --defaultno --backtitle "$WHIP_BACKTITLE" 10 50
 		CHOICE=$?
 		
 		#Exit
@@ -661,15 +661,13 @@
 		fi
 
 		# User Scaling Max Freq limit.
-		# local user_frequency_max_current=$(cat /DietPi/dietpi.txt | grep -m1 'cpu_max_frequency==' | sed 's/cpu_max_frequency==//g')
-		# local user_frequency_max_text="$user_frequency_max_current"
-		# if [ "$current_cpu_governor" = ondemand ] || [ "$current_cpu_governor" = conservative ] || [ "$current_cpu_governor" = interactive ]; then
-			
-			# if (( $user_frequency_max_current == 0 )); then
-				# user_frequency_max_text="Disabled"
-			# fi
-			# whiptail_menu_array+=("Max Freq Limit" ": $user_frequency_max_text")
-		# fi
+		local user_frequency_max_current=$(cat /DietPi/dietpi.txt | grep -m1 'cpu_max_frequency=' | sed 's/cpu_max_frequency=//g')
+		local user_frequency_max_text="$user_frequency_max_current Mhz"
+		if (( $user_frequency_max_current == 0 )); then
+			user_frequency_max_text="Disabled"
+		fi
+		
+		whiptail_menu_array+=("CPU Max Freq Limit" ": $user_frequency_max_text")
 
 		#RPi extras
 		if (( $HW_MODEL < 10 )); then
@@ -687,7 +685,7 @@
 		fi
 		
 		WHIP_TITLE='---------- DietPi - Performance Options ----------'
-		OPTION=$(whiptail --title "$WHIP_TITLE" --menu " Hardware : $HW_MODEL_DESCRIPTION \n ARM Temp: $arm_temp 'c\n RAM: $memory_total MB | Used: $memory_usage MB | Free: $memory_free MB" --cancel-button "$TEXT_MENU_BACK" --backtitle "$WHIP_BACKTITLE" 16 60 5 "${whiptail_menu_array[@]}" 3>&1 1>&2 2>&3)
+		OPTION=$(whiptail --title "$WHIP_TITLE" --menu " Hardware : $HW_MODEL_DESCRIPTION \n ARM Temp: $arm_temp 'c\n RAM: $memory_total MB | Used: $memory_usage MB | Free: $memory_free MB" --cancel-button "$TEXT_MENU_BACK" --backtitle "$WHIP_BACKTITLE" 16 60 6 "${whiptail_menu_array[@]}" 3>&1 1>&2 2>&3)
 		
 		CHOICE=$?
 
@@ -696,6 +694,56 @@
 
 		if (( $CHOICE == 0 )); then
 			case "$OPTION" in
+				"CPU Max Freq Limit"*)
+
+					local fp_available_freq="/tmp/.dietpi-config_available_freq"
+
+					#Generate a list of available freqs
+					if [ -f /sys/devices/system/cpu/cpu0/cpufreq/scaling_available_frequencies ]; then
+						cat /sys/devices/system/cpu/cpu0/cpufreq/scaling_available_frequencies | tr ' ' '\n' | sed -e 's/[^0-9]//g' | sed '/^$/d' > "$fp_available_freq"
+					#Odroid XU3/4
+					elif [ -f /sys/devices/system/cpu/cpufreq/mp-cpufreq/cpu_freq_table ]; then
+						cat /sys/devices/system/cpu/cpufreq/mp-cpufreq/cpu_freq_table | tr ' ' '\n' | sed -e 's/[^0-9]//g' | sed '/^$/d' > "$fp_available_freq"
+					#No list available.
+					else
+						whiptail --title "Not Available" --msgbox "Your processor does not support this feature." --backtitle "$WHIP_BACKTITLE" 10 60
+					fi
+					
+					#List available, read to array
+					if [ -f "$fp_available_freq" ]; then
+						
+						#Convert to Mhz | generate whiptail menu
+						local whiptail_menu_list=()
+						local available_frequency_array=()
+						readarray available_frequency_array < "$fp_available_freq"
+						
+						for ((i=0; i<${#available_frequency_array[@]}; i++))
+						do
+							whiptail_menu_list+=("$(( ${available_frequency_array[$i]} / 1000 ))" "Mhz")
+						done
+
+						#Add disable option
+						whiptail_menu_list+=("0" "Disabled")
+						
+						#Run menu
+						OPTION=$(whiptail --title "$WHIP_TITLE" --menu "Limit the maximum frequency that your processor can reach.\nThis can be useful for lowering temprature and saving power.\n\nCurrent setting: $user_frequency_max_text" --cancel-button "Back" --backtitle "$WHIP_BACKTITLE" --default-item "$user_frequency_max_current" 18 65 7 "${whiptail_menu_list[@]}" 3>&1 1>&2 2>&3)
+						CHOICE=$?
+						if (( $CHOICE == 0 )); then
+							sed -i "/cpu_max_frequency=/c\cpu_max_frequency=$OPTION" /DietPi/dietpi.txt
+							/DietPi/dietpi/dietpi-cpu_set
+						fi
+
+						#delete[] arrays
+						unset whiptail_menu_list
+						unset available_frequency_array
+					fi
+					
+					rm "$fp_available_freq" &> /dev/null
+
+					#Return to This Menu
+					TARGETMENUID=4
+
+				;;
 				"Overclocking"*)
 					TARGETMENUID=13
 				;;
@@ -1871,18 +1919,36 @@
 		TARGETMENUID=0
 		
 		WHIP_TITLE='--- DietPi - Tools ---'
-		OPTION=$(whiptail --title "$WHIP_TITLE" --menu " Make a Selection" --cancel-button "$TEXT_MENU_BACK" --backtitle "$WHIP_BACKTITLE" 13 60 2 \
-		"1" "Filesystem IO benchmarks." \
-		"2" "Send a bug beport to DietPi." 3>&1 1>&2 2>&3)
+		OPTION=$(whiptail --title "$WHIP_TITLE" --menu " Make a Selection" --cancel-button "$TEXT_MENU_BACK" --backtitle "$WHIP_BACKTITLE" 13 70 4 \
+		"Benchmarks" "Filesystem and RAM benchmarks." \
+		"DietPi-Backup" "Backup and restore your DietPi system." \
+		"DietPi-Sync" "Sync (backup) a directory to another location." \
+		"DietPi-BugReport" "Send a bug beport to DietPi." 3>&1 1>&2 2>&3)
 	 
 	 CHOICE=$?
 		if (( $CHOICE == 0 )); then
-			if (( $OPTION == 1 )); then
-				TARGETMENUID=12
-			elif (( $OPTION == 2 )); then
-				/DietPi/dietpi/dietpi-bugreport
-			fi
+			case "$OPTION" in
+				Benchmarks)
+					TARGETMENUID=12
+				;;
+				"DietPi-Backup")
+					/DietPi/dietpi/dietpi-backup 0
+					#return to this menu
+					TARGETMENUID=11
+				;;
+				"DietPi-Sync")
+					/DietPi/dietpi/dietpi-sync 0
+					#return to this menu
+					TARGETMENUID=11
+				;;
+				"DietPi-BugReport")
+					/DietPi/dietpi/dietpi-bugreport
+					#return to this menu
+					TARGETMENUID=11
+				;;
+			esac
 		fi
+
 	}
 
 	#Benchmark Scores
