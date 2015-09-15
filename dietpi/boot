@@ -10,23 +10,22 @@
 	#
 	# Info:
 	# - filename /DietPi/dietpi/boot
-	# - activates on boot via /etc/rc.local
-	# - requires /DietPi/dietpi/.install_stage to exist with a value of -3 for it to run all setup stages
+	# - activates on boot from /etc/init.d/dietpi-service
 	#////////////////////////////////////
-	
+
 	#/////////////////////////////////////////////////////////////////////////////////////
 	#Pi/Odroid Model
 	#/////////////////////////////////////////////////////////////////////////////////////
 	HW_MODEL=0
 	HW_MODEL_DESCRIPTION=""
 	DISTRO=0
-	
+
 	Read_Hw_Model(){
 
 		HW_MODEL=$(sed -n 1p /DietPi/dietpi/.hw_model)
 		HW_MODEL_DESCRIPTION=$(sed -n 2p /DietPi/dietpi/.hw_model)
 		DISTRO=$(sed -n 3p /DietPi/dietpi/.hw_model)
-	
+
 	}
 
 	#/////////////////////////////////////////////////////////////////////////////////////
@@ -35,16 +34,9 @@
 	# -3 = first boot / -2 = partition / -1 = filesystem / 0 = run dietpi-software at login / 1 = completed
 	DIETPI_INSTALL_STAGE=$(cat /DietPi/dietpi/.install_stage)
 
-	Initial_Overclocking_Set(){
+	Set_Initial_Overclock(){
 
-		if (( $HW_MODEL == 10 )); then
-			echo -e "Set Initial Overclocking"
-		elif (( $HW_MODEL == 2 )); then
-			sed -i '/over_voltage=/c\#over_voltage=0' /DietPi/config.txt
-			sed -i '/arm_freq=/c\#arm_freq=900' /DietPi/config.txt
-			sed -i '/core_freq=/c\#core_freq=250' /DietPi/config.txt
-			sed -i '/sdram_freq=/c\#sdram_freq=400' /DietPi/config.txt
-		elif (( $HW_MODEL <= 1 )); then
+		if (( $HW_MODEL <= 1 )); then
 			sed -i '/over_voltage=/c\over_voltage=2' /DietPi/config.txt
 			sed -i '/arm_freq=/c\arm_freq=900' /DietPi/config.txt
 			sed -i '/core_freq=/c\#core_freq=250' /DietPi/config.txt
@@ -55,10 +47,10 @@
 	Partition_SD(){
 		#Stop Services
 		/DietPi/dietpi/dietpi-services stop
-		
+
 		# Get starting partition sector for partition 2 / ext4
 		local partition_start=$(parted /dev/mmcblk0 -ms unit s p | grep ':ext4::;' | sed 's/:/ /g' | sed 's/s//g' | awk '{ print $2 }')
-	 
+
 		#Recreate partition to full size of MicroSd card
 		echo -e "p
 		d
@@ -67,13 +59,11 @@
 		p
 		2
 		$partition_start
-	 
+
 		p
 		w
 		" | fdisk /dev/mmcblk0
-		
-		# Set Pi Version overclocking profile)
-		Initial_Overclocking_Set
+
 	}
 
 	Expand_SD(){
@@ -86,7 +76,7 @@
 	}
 
 	Apply_DietPi_FirstRun_Settings(){
-	
+
 		#----------------------------------------------------------------
 		# Network
 
@@ -104,9 +94,9 @@
 		local Static_IP=$(cat /DietPi/dietpi.txt | grep Static_IP | sed 's/Static_IP=//g')
 		local Static_Mask=$(cat /DietPi/dietpi.txt | grep Static_Mask | sed 's/Static_Mask=//g')
 		local Static_Gateway=$(cat /DietPi/dietpi.txt | grep Static_Gateway | sed 's/Static_Gateway=//g')
-		
+
 		#Apply The Requested Settings
-		
+
 		#Wifi
 		if (( $Wifi_Enabled == 1 )); then
 			#Enable Wlan, disable Eth
@@ -119,14 +109,14 @@
 			#Set Key
 			sed -i "/wireless-key/c\wireless-key $Wifi_KEY" /etc/network/interfaces
 			sed -i "/wpa-psk/c\wpa-psk $Wifi_KEY" /etc/network/interfaces
-		#Ethernet		
+		#Ethernet
 		elif (( $Ethernet_Enabled == 1 )); then
 			#Enable Eth, disable Wlan
 			Wifi_Enabled=0
 			sed -i "/auto eth/c\auto eth$index_eth" /etc/network/interfaces
 			sed -i "/auto wlan/c\#auto wlan$index_wlan" /etc/network/interfaces
 		fi
-		
+
 		#Static IPs
 		if (( $Use_Static == 1 )); then
 			if (( $Wifi_Enabled == 1 )); then
@@ -134,12 +124,12 @@
 			elif (( $Ethernet_Enabled == 1 )); then
 				sed -i "/iface eth/c\iface eth$index_eth inet static" /etc/network/interfaces
 			fi
-		
+
 			sed -i "/address/c\address $Static_IP" /etc/network/interfaces
 			sed -i "/netmask/c\netmask $Static_Mask" /etc/network/interfaces
 			sed -i "/gateway/c\gateway $Static_Gateway" /etc/network/interfaces
 		fi
-		
+
 		#Kill dhclient
 		killall dhclient &> /dev/null
 
@@ -158,9 +148,9 @@
 			elif (( $Ethernet_Enabled == 1 )); then
 				ifup eth"$index_eth"
 			fi
-		fi	
+		fi
 	}
-	
+
 	Run_Init(){
 
 		#----------------------------------------------------------------
@@ -186,19 +176,19 @@
 
 		fi
 		#----------------------------------------------------------------
-		#Apply DietPi CPU Governor and settings
-		/DietPi/dietpi/dietpi-cpu_set
+		#Apply DietPi CPU Governor and settings (+thread)
+		/DietPi/dietpi/dietpi-cpu_set &
 		#----------------------------------------------------------------
 
 	}
-	
+
 	#/////////////////////////////////////////////////////////////////////////////////////
 	# Main Loop
 	#/////////////////////////////////////////////////////////////////////////////////////
 	#----------------------------------------------------------------
 	# Init
 	Run_Init
-	
+
 	#----------------------------------------------------------------
 	#Normal Boot
 	if (( $DIETPI_INSTALL_STAGE == 1 )); then
@@ -207,56 +197,60 @@
 			#Check for DietPi updates (+thread)
 			/DietPi/dietpi/dietpi-update 2 &> /dev/null &
 		fi
-	
+
 		#Start DietPi software services (+thread)
 		/DietPi/dietpi/dietpi-services start &> /dev/null &
-		
+
 		/DietPi/dietpi/dietpi-banner 1
 
 	#----------------------------------------------------------------
 	#Filesystem prep, stage 1/2
 	elif (( $DIETPI_INSTALL_STAGE == -3 )); then
+
+		# Set RPi v1 safe overclocking profile (900mhz)
+		Set_Initial_Overclock
+
 		Partition_SD
-		
+
 		/DietPi/dietpi/dietpi-banner 0
 		echo -e " The system will reboot to start the filesystem prep. \n Nearly done. \n"
-		
+
 		echo -e "-2" > /DietPi/dietpi/.install_stage
 		
 		reboot
-		
+
 	#----------------------------------------------------------------
 	#Filesystem prep, stage 2/2
 	elif (( $DIETPI_INSTALL_STAGE == -2 )); then
 		Expand_SD
-			
+
 		/DietPi/dietpi/dietpi-banner 0
 		echo -e " The system will reboot, This will complete the filesystem expansion \n"
 
 		echo -e "-1" > /DietPi/dietpi/.install_stage
 
 		reboot
-		
+
 	#----------------------------------------------------------------
 	#Finish up, set .install_stage to 0 (runs dietpi-software on login)
 	elif (( $DIETPI_INSTALL_STAGE == -1 )); then
 
 		#stop all services.
 		/DietPi/dietpi/dietpi-services stop
-		
+
 		#Enable Swap file (disabled until partition/filesystem ajustments have been completed)
 		sed -i '/\/sbin\/dphys-swapfile setup/c\\/sbin\/dphys-swapfile setup' /etc/init.d/dphys-swapfile
 		sed -i '/\/sbin\/dphys-swapfile swapon/c\\/sbin\/dphys-swapfile swapon' /etc/init.d/dphys-swapfile
 		dphys-swapfile setup
 		dphys-swapfile swapon
-		
+
 		#Generate unique Dropbear host-key:
 		rm /etc/dropbear/*key &> /dev/null
 		dropbearkey -t rsa -f /etc/dropbear/dropbear_rsa_host_key &> /dev/null
 
 		#Activate DietPi Boot Loader User Settings and bring up network (dietpi.txt)
 		Apply_DietPi_FirstRun_Settings
-		
+
 		#run apt-get update as another process allows for reduced install time.
 		#This also runs in dietpi-software when internet is confirmed, and, a previous attempt failed.
 		/DietPi/dietpi/dietpi-apt-get_update 0 &> /dev/null
@@ -264,10 +258,10 @@
 		#Finished
 		/DietPi/dietpi/dietpi-banner 0
 		echo -e " Default Login:\n Username = root\n Password = dietpi\n"
-		
+
 		#Set Install Stage index to trigger DietPi-Software installation on login
 		echo -e "0" > /DietPi/dietpi/.install_stage
-		
+
 	fi
 
 	#-----------------------------------------------------------------------------------
