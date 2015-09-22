@@ -33,27 +33,13 @@
 		echo $$ > $PID_FILE
 	fi
 
-	HW_MODEL=-1 #Generic/unknown hardware
-	#Is this a DietPi distro?
-	DIETPI_DISTRO=0
-	if [ -f /DietPi/dietpi.txt ]; then
-		DIETPI_DISTRO=1
-
-		#Obtain hwmodel from dietpi system
-		HW_MODEL=$(sed -n 1p /DietPi/dietpi/.hw_model)
-
-	else
-		#Check for XU3/4 (allows extra octo quad set readouts)
-		if (( $(cat /proc/cpuinfo | grep -ci -m1 'ODROID-XU3') == 1 )); then
-			HW_MODEL=11
-		fi
-
-	fi
+	#Obtain hwmodel from dietpi system
+	HW_MODEL=$(sed -n 1p /DietPi/dietpi/.hw_model)
 
 	CPU_CORES=$(nproc)
 
 	#Version
-	DIETPI_CLOUDSHELL_VERSION=2
+	DIETPI_CLOUDSHELL_VERSION=3
 
 	#/tmp/.* files used throughout this script.
 	TEMP_FILE=0
@@ -221,8 +207,18 @@
 			CPU_FREQ_2=$(( $(cat /sys/devices/system/cpu/cpu4/cpufreq/scaling_cur_freq) / 1000 ))
 		fi
 
-		CPU_USAGE=$(mpstat | grep ' all ' | awk '{print $NF - 100.f}')
+		CPU_USAGE=0
+		TEMP_FILE="/tmp/.cpu_usage"
+		#exclude top from results? risky pattern match | sed '/top/d'
+		ps -xo %cpu | sed '1d' > "$TEMP_FILE"
+		while read -r line
+		do
+			CPU_USAGE=$(echo | awk "{print $CPU_USAGE + $line}")
+		done < $TEMP_FILE
+		rm $TEMP_FILE
 
+		#ps returns usage of each core, so we devide the total by #n cores
+		CPU_USAGE=$(echo | awk "{print $CPU_USAGE / $CPU_CORES}")
 		#convert to interger and graph it
 		Percent_To_Graph $(printf %.0f $CPU_USAGE)
 		CPU_USAGE=$C_PERCENT_GRAPH
@@ -234,11 +230,7 @@
 	STORAGE_FLASH_USED=0
 	STORAGE_FLASH_FREE=0
 	STORAGE_FLASH_PERCENT=0
-	STORAGE_FLASH_PATH="/dev/root"
-	if (( $HW_MODEL >= 10 )) && (( $HW_MODEL < 20 )); then
-		#Odroid
-		STORAGE_FLASH_PATH="/dev/mmcblk0p2"
-	fi
+	STORAGE_FLASH_PATH=0
 
 	STORAGE_USB_TOTAL=0
 	STORAGE_USB_USED=0
@@ -247,6 +239,17 @@
 	STORAGE_USB_PATH="/mnt/usb_1"
 
 	Obtain_STORAGE(){
+
+		#RPi
+		if (( $HW_MODEL < 10 )); then
+			STORAGE_FLASH_PATH="/dev/root"
+		#Odroid
+		elif (( $HW_MODEL >= 10 )) && (( $HW_MODEL < 20 )); then
+			STORAGE_FLASH_PATH="/dev/mmcblk0p2"
+		#VM
+		elif (( $HW_MODEL == 20 )); then
+			STORAGE_FLASH_PATH="rootfs"
+		fi
 
 		TEMP_FILE="/tmp/.df"
 		df -h > $TEMP_FILE
@@ -326,10 +329,7 @@
 		NETWORK_DETAILS_HOSTNAME=$(hostname)
 
 		#Active network adapater.
-		#DietPi system?
-		if (( $DIETPI_DISTRO == 1 )); then
-			NETWORK_DETAILS_ADAPTER=$(sed -n 3p /DietPi/dietpi/.network)
-		fi
+		NETWORK_DETAILS_ADAPTER=$(sed -n 3p /DietPi/dietpi/.network)
 
 		#Mode (dhcp/static)
 		if (( $(cat /etc/network/interfaces | grep -ci -m1 "iface $NETWORK_DETAILS_ADAPTER inet dhcp") )); then
@@ -412,7 +412,7 @@
 		MEMORY_CACHED=$(cat $TEMP_FILE | grep -m1 'Mem: ' | awk '{print $7}')
 		MEMORY_USED=$(( $(cat $TEMP_FILE | grep -m1 'Mem: ' | awk '{print $3}') - $MEMORY_CACHED ))
 		MEMORY_FREE=$(( $(cat $TEMP_FILE | grep -m1 'Mem: ' | awk '{print $4}') + $MEMORY_CACHED ))
-		MEMORY_PERCENT=$(echo -e "$MEMORY_USED $MEMORY_TOTAL" | awk '{print $1 / $2 * 100}')
+		MEMORY_PERCENT=$(echo | awk "{print $MEMORY_USED / $MEMORY_TOTAL * 100}")
 
 		#convert to interger and graph it
 		Percent_To_Graph $(printf %.0f $MEMORY_PERCENT)
@@ -422,7 +422,7 @@
 		MEMORY_SWAPTOTAL=$(cat $TEMP_FILE | grep -m1 'Swap: ' | awk '{print $2}')
 		MEMORY_SWAPUSED=$(cat $TEMP_FILE | grep -m1 'Swap: ' | awk '{print $3}')
 		MEMORY_SWAPFREE=$(cat $TEMP_FILE | grep -m1 'Swap: ' | awk '{print $4}')
-		MEMORY_SWAPERCENT=$( echo -e "$MEMORY_SWAPUSED $MEMORY_SWAPTOTAL" | awk '{print $1 / $2 * 100}')
+		MEMORY_SWAPERCENT=$( echo | awk "{print $MEMORY_SWAPUSED / $MEMORY_SWAPTOTAL * 100}")
 
 		#convert to interger and graph it
 		Percent_To_Graph $(printf %.0f $MEMORY_SWAPERCENT)
@@ -456,12 +456,12 @@
 
 		PIHOLE_QUERY_COUNT=$(cat "$pihole_log_file" | grep "$today" | awk '/query/ {print $7}' | wc -l)
 		#Prevent / 0 on percentage
-		if (( $PIHOLE_QUERY_COUNT == 0 )); then
+		if (( $PIHOLE_QUERY_COUNT <= 0 )); then
 			PIHOLE_QUERY_COUNT=1
 		fi
 
 		PIHOLE_TOTAL_ADS=$(cat "$pihole_log_file" | grep "$today" | awk '/\/etc\/pihole\/gravity.list/ {print $7}' | wc -l)
-		PIHOLE_PERCENT_ADS=$(echo -e "$PIHOLE_TOTAL_ADS $PIHOLE_QUERY_COUNT" | awk '{print $1 / $2 * 100}')
+		PIHOLE_PERCENT_ADS=$(echo | awk "{print $PIHOLE_TOTAL_ADS / $PIHOLE_QUERY_COUNT * 100}")
 
 		#convert to interger and graph it
 		Percent_To_Graph $(printf %.0f $PIHOLE_PERCENT_ADS)
@@ -481,9 +481,9 @@
 	#/////////////////////////////////////////////////////////////////////////////////////
 	#Run
 	RUN_LOOP=1
-	RUN_INTRO=1
-	if (( $INPUT == 1 )); then
-		RUN_INTRO=0
+	RUN_INTRO=0
+	if (( $INPUT == 0 )); then
+		RUN_INTRO=1
 	fi
 
 	#SCENE INDEXS
@@ -585,7 +585,7 @@
 		fi
 
 		#Set next index
-		BANNER_MODE=$(( $BANNER_MODE + 1 ))
+		((BANNER_MODE++))
 
 		#Cap
 		if (( $BANNER_MODE >= 3 )); then
@@ -651,35 +651,20 @@
 	#DietPi
 	Update_Scene_2(){
 
-		#DietPi Distro?
-		if (( $DIETPI_DISTRO == 1 )); then
+		#Update data
+		Obtain_DIETPIINFO
 
-			#Update data
-			Obtain_DIETPIINFO
+		#Clear screen
+		clear
 
-			#Clear screen
-			clear
-
-			#Banner
-			echo -e "$C_RESET $BANNER_PRINT"
-			#
-			echo -e "$C_RESET${aCOLOUR[$USER_COLOUR_INDEX]}$C_REVERSE DietPi:                  "
-			echo -e "$C_RESET${aCOLOUR[$USER_COLOUR_INDEX]} Version   ${aCOLOUR[$USER_COLOUR_INDEX]}:$C_RESET  $DIETPI_VERSION_CURRENT"
-			echo -e "$C_RESET${aCOLOUR[$USER_COLOUR_INDEX]} Updates   ${aCOLOUR[$USER_COLOUR_INDEX]}:$C_RESET  $DIETPI_UPDATE_AVAILABLE"
-			echo -e "$C_RESET${aCOLOUR[$USER_COLOUR_INDEX]} Device    ${aCOLOUR[$USER_COLOUR_INDEX]}:$C_RESET  $DIETPI_HW_DESCRIPTION"
-			echo -e "$C_RESET${aCOLOUR[$USER_COLOUR_INDEX]} Website   ${aCOLOUR[$USER_COLOUR_INDEX]}:$C_RESET  $DIETPI_WEBSITE"
-
-		else
-			#Clear screen
-			clear
-
-			#Banner
-			echo -e "$C_RESET $BANNER_PRINT"
-			#
-			echo -e "$C_RESET${aCOLOUR[$USER_COLOUR_INDEX]}$C_REVERSE DietPi:                  "
-			echo -e "$C_RESET${aCOLOUR[$USER_COLOUR_INDEX]} Website   ${aCOLOUR[$USER_COLOUR_INDEX]}:$C_RESET  $DIETPI_WEBSITE"
-
-		fi
+		#Banner
+		echo -e "$C_RESET $BANNER_PRINT"
+		#
+		echo -e "$C_RESET${aCOLOUR[$USER_COLOUR_INDEX]}$C_REVERSE DietPi:                  "
+		echo -e "$C_RESET${aCOLOUR[$USER_COLOUR_INDEX]} Version   ${aCOLOUR[$USER_COLOUR_INDEX]}:$C_RESET  $DIETPI_VERSION_CURRENT"
+		echo -e "$C_RESET${aCOLOUR[$USER_COLOUR_INDEX]} Updates   ${aCOLOUR[$USER_COLOUR_INDEX]}:$C_RESET  $DIETPI_UPDATE_AVAILABLE"
+		echo -e "$C_RESET${aCOLOUR[$USER_COLOUR_INDEX]} Device    ${aCOLOUR[$USER_COLOUR_INDEX]}:$C_RESET  $DIETPI_HW_DESCRIPTION"
+		echo -e "$C_RESET${aCOLOUR[$USER_COLOUR_INDEX]} Website   ${aCOLOUR[$USER_COLOUR_INDEX]}:$C_RESET  $DIETPI_WEBSITE"
 
 	}
 
@@ -777,11 +762,7 @@
 	# Settings File
 	#/////////////////////////////////////////////////////////////////////////////////////
 	#Define Location
-	if (( $DIETPI_DISTRO == 1 )); then
-		FILEPATH_SETTINGS="/DietPi/dietpi/.dietpi-cloudshell"
-	else
-		FILEPATH_SETTINGS="$HOME/.dietpi-cloudshell"
-	fi
+	FILEPATH_SETTINGS="/DietPi/dietpi/.dietpi-cloudshell"
 
 	Read_Settings_File(){
 
@@ -886,8 +867,8 @@
 				Run_Intro
 			fi
 
-			#Set Nice to +5 (not critical)
-			renice -n 5 $$ &> /dev/null
+			#Set Nice to +10 (not critical)
+			renice -n 10 $$ &> /dev/null
 		fi
 
 	}
