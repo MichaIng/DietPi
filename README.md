@@ -8,13 +8,14 @@
 - Optional "ready to run" optimized software choices with dietpi-software.
 - Feature rich configuration tool for your device with dietpi-config.
 
-## http://dietpi.net
+#### Find out more:
+#### http://dietpi.net
 
 ##### DietPi is available for:
-Raspberry Pi's: http://fuzon.co.uk/phpbb/viewtopic.php?f=8&t=6
-Odroid C1: http://fuzon.co.uk/phpbb/viewtopic.php?f=8&t=11
-ODroid XU3/4: http://fuzon.co.uk/phpbb/viewtopic.php?f=8&t=57
-VMware (Virtual Machine): http://fuzon.co.uk/phpbb/viewtopic.php?f=8&t=90
+- Raspberry Pi's: http://fuzon.co.uk/phpbb/viewtopic.php?f=8&t=6
+- Odroid C1: http://fuzon.co.uk/phpbb/viewtopic.php?f=8&t=11
+- ODroid XU3/4: http://fuzon.co.uk/phpbb/viewtopic.php?f=8&t=57
+- VMware (Virtual Machine): http://fuzon.co.uk/phpbb/viewtopic.php?f=8&t=90
 
 <hr>
 
