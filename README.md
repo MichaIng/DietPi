@@ -8,13 +8,13 @@
 - Optional "ready to run" optimized software choices with dietpi-software.
 - Feature rich configuration tool for your device with dietpi-config.
 
-#####http://dietpi.net
+## http://dietpi.net
 
-##### DietPi for Raspberry Pi's http://fuzon.co.uk/phpbb/viewtopic.php?f=8&t=6
-
-##### DietPi for oDroid C1 http://fuzon.co.uk/phpbb/viewtopic.php?f=8&t=11
-
-##### DietPi for oDroid XU3/4 http://fuzon.co.uk/phpbb/viewtopic.php?f=8&t=57
+##### DietPi is available for:
+Raspberry Pi's: http://fuzon.co.uk/phpbb/viewtopic.php?f=8&t=6
+Odroid C1: http://fuzon.co.uk/phpbb/viewtopic.php?f=8&t=11
+ODroid XU3/4: http://fuzon.co.uk/phpbb/viewtopic.php?f=8&t=57
+VMware (Virtual Machine): http://fuzon.co.uk/phpbb/viewtopic.php?f=8&t=90
 
 <hr>
 
@@ -30,7 +30,7 @@
 * Compile software for Odroid C1 and RPi systems
 * Create a logo for DietPi.
 * Contribute to DietPi with programming on git hub.
-* Suggest new software that we can add to the dietpi-software install system 
+* Suggest new software that we can add to the dietpi-software install system
 
 If so, let us know!
 We are always looking for talented people who believe in the DietPi project, and, wish to contribute in any way you can.
@@ -70,7 +70,7 @@ DietPi file list (The above GPLv2 documentation also applies to all files listed
 
 Links to additional software used in DietPi, and, their source and build instructions (where applicable):
 
-Raspberry Pi 
+Raspberry Pi
 - https://github.com/raspberrypi
 
 LXDE
@@ -103,7 +103,7 @@ Apache2
 MySql
 - https://github.com/mysql
 
-Php5 
+Php5
 - http://git.php.net/
 
 PhpMyAdmin
@@ -127,13 +127,13 @@ SoftEther VPN Server
 OpenTyrian
 - https://bitbucket.org/opentyrian/opentyrian/wiki/Home
 
-DietPiCam 
+DietPiCam
 - https://github.com/Fourdee/RPi_Cam_Web_Interface
 
-PHP OPcache GUI 
+PHP OPcache GUI
 - https://github.com/amnuts/opcache-gui
 
-Nginx 
+Nginx
 - https://github.com/nginx/nginx
 
 Deluge
