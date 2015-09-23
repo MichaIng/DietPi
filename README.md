@@ -8,8 +8,7 @@
 - Optional "ready to run" optimized software choices with dietpi-software.
 - Feature rich configuration tool for your device with dietpi-config.
 
-#### Find out more:
-#### http://dietpi.net
+#### Find out more: http://dietpi.net
 
 ##### DietPi is available for:
 - Raspberry Pi's: http://fuzon.co.uk/phpbb/viewtopic.php?f=8&t=6
