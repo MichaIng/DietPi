@@ -11,7 +11,7 @@
 #### Find out more: http://dietpi.net
 
 ##### DietPi is available for:
-- Raspberry Pi's: http://fuzon.co.uk/phpbb/viewtopic.php?f=8&t=6
+- Raspberry Pi's: http://dietpi.net
 - Odroid C1: http://fuzon.co.uk/phpbb/viewtopic.php?f=8&t=11
 - ODroid XU3/4: http://fuzon.co.uk/phpbb/viewtopic.php?f=8&t=57
 - VMware (Virtual Machine): http://fuzon.co.uk/phpbb/viewtopic.php?f=8&t=90
@@ -25,12 +25,11 @@
 
 ### DietPi Project Contribution. Are you able to:
 * Provide feedback and/or test areas of DietPi, to improve the user experience.
-* Report bugs
-* Create a modern and clean website for DietPi
-* Compile software for Odroid C1 and RPi systems
-* Create a logo for DietPi.
+* Report bugs.
+* Improve/Add more features to the DietPi website (dietpi.net).
+* Compile software for Odroid C1 and RPi systems.
 * Contribute to DietPi with programming on git hub.
-* Suggest new software that we can add to the dietpi-software install system
+* Suggest new software that we can add to the dietpi-software install system.
 
 If so, let us know!
 We are always looking for talented people who believe in the DietPi project, and, wish to contribute in any way you can.
