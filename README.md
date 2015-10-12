@@ -1,5 +1,5 @@
 # DietPi
-![DietPi](http://dietpi.net/images/dietpi-logo_black_150.png)
+![DietPi](http://dietpi.com/images/dietpi-logo_black_150.png)
 
 #### Lightweight justice for your single-board computer:
 - Optimized
@@ -8,7 +8,7 @@
 - Optional "ready to run" optimized software choices with dietpi-software.
 - Feature rich configuration tool for your device with dietpi-config.
 
-#### Find out more: http://dietpi.net
+#### Find out more: http://dietpi.com
 
 ##### DietPi is available for:
 - Raspberry Pi's: http://dietpi.net
@@ -26,7 +26,7 @@
 ### DietPi Project Contribution. Are you able to:
 * Provide feedback and/or test areas of DietPi, to improve the user experience.
 * Report bugs.
-* Improve/Add more features to the DietPi website (dietpi.net).
+* Improve/Add more features to the DietPi website (dietpi.com).
 * Compile software for Odroid C1 and RPi systems.
 * Contribute to DietPi with programming on git hub.
 * Suggest new software that we can add to the dietpi-software install system.
