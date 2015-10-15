@@ -19,7 +19,8 @@
 <hr>
 
 ### The DietPi Project Team:
-* Dan Knight daniel_haze@hotmail.com
+* Dan Knight (Creator, coder and project lead of DietPi)
+* Pilovali - Joined 10/10/2015 (Forum moderator, testing & bug reporting)
 
 <hr>
 
