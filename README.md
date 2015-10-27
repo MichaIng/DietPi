@@ -20,7 +20,7 @@
 
 ### The DietPi Project Team:
 * Dan Knight (Creator, coder and project lead of DietPi)
-* Pilovali - Joined 10/10/2015 (Forum moderator, testing, bug reporting)
+* Pilovali - Joined 10/10/2015 (DietPi.com web hosting, forum moderator, testing, bug reporting)
 
 <hr>
 
@@ -144,3 +144,15 @@ Grasshopper
 
 Pi-hole
 - https://github.com/jacobsalmela/pi-hole
+
+SubSonic
+- NA
+
+SqueezeBox
+- https://github.com/Logitech/slimserver
+
+Ampache
+- https://github.com/ampache/ampache
+
+FFmpeg
+- https://github.com/FFmpeg/FFmpeg
