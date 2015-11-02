@@ -73,6 +73,12 @@ Links to additional software used in DietPi, and, their source and build instruc
 Raspberry Pi
 - https://github.com/raspberrypi
 
+Odroid
+- https://github.com/hardkernel?tab=repositories
+
+Orange Pi
+- https://github.com/orangepi-xunlong?tab=repositories
+
 LXDE
 - https://github.com/LXDE
 
