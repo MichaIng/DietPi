@@ -14,7 +14,7 @@
 - Raspberry Pi's: http://dietpi.net
 - Odroid C1: http://fuzon.co.uk/phpbb/viewtopic.php?f=8&t=11
 - ODroid XU3/4: http://fuzon.co.uk/phpbb/viewtopic.php?f=8&t=57
-- Orange Pi: http://fuzon.co.uk/phpbb/viewtopic.php?f=8&t=164#p612
+- Orange Pi PC: http://fuzon.co.uk/phpbb/viewtopic.php?f=8&t=164#p612
 - VMware (Virtual Machine): http://fuzon.co.uk/phpbb/viewtopic.php?f=8&t=90
 
 <hr>
