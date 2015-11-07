@@ -586,6 +586,44 @@
 				;;
 			esac
 
+		#OrangePi
+		elif (( $HW_MODEL == 30 )); then
+
+			#Get Current Values
+			local device_id="OPI-PC"
+			local refresh_rate=60
+
+			#Create a global var for this in dietpi.txt ?
+			local current_resolution="Unknown"
+
+			WHIP_TITLE="---------- DietPi - Resolution ----------"
+			OPTION=$(whiptail --title "$WHIP_TITLE" --menu " Hardware : $HW_MODEL_DESCRIPTION \n Current: $current_resolution" --cancel-button "$TEXT_MENU_BACK" 13 60 3 \
+			"1080p" "1920 x 1080" \
+			"720p" "1280 x 720" \
+			"480p" "720 x 480" 3>&1 1>&2 2>&3)
+
+			CHOICE=$?
+			if (( $CHOICE == 0 )); then
+
+				local target_file="/boot/script.bin."
+				target_file+="$device_id"
+				target_file+="_$OPTION"
+
+				#target_file+="_dvi"
+				#target_file+="_hmdi"
+
+				#480p files dont have refresh rate option.
+				if [ "$OPTION" != "480p" ]; then
+					target_file+="$refresh_rate"
+				fi
+
+				cp "$target_file" /boot/script.bin
+
+				REBOOT_REQUIRED=true
+				#Return to This Menu
+				TARGETMENUID=2
+			fi
+
 		else
 			Info_HW_OptionNotSupported
 		fi
@@ -714,10 +752,14 @@
 
 		local arm_temp=$(cat /sys/class/thermal/thermal_zone0/temp | awk '{print $1/1000}' | xargs printf "%0.1f" )
 
+		#OrangePi, returns 'c and int
+		if (( $HW_MODEL >= 30 )) && (( $HW_MODEL < 40 )); then
+			arm_temp=$(cat /sys/class/thermal/thermal_zone0/temp)
+		fi
+
 		local memory_total=$(( $(cat /proc/meminfo | grep -m1 'MemTotal:' | awk '{print $2}') / 1000 ))
 		local memory_free=$(( $(cat /proc/meminfo | grep -m1 'MemFree:' | awk '{print $2}') / 1000 ))
 		local memory_usage=$(($memory_total - $memory_free))
-
 
 		#Create Menu List for Whiptail
 		# - this will list the menu options available for each device.
@@ -822,7 +864,7 @@
 						cat /sys/devices/system/cpu/cpufreq/mp-cpufreq/cpu_freq_table | tr ' ' '\n' | sed -e 's/[^0-9]//g' | sed '/^$/d' > "$fp_available_freq"
 					#No list available.
 					else
-						whiptail --title "Not Available" --msgbox "Your processor does not support this feature." --backtitle "$WHIP_BACKTITLE" 10 60
+						whiptail --title "Not Available" --msgbox "Your processor, or kernel, does not support this feature.\n\n(Info): Scaling_available_frequencies does not exist." --backtitle "$WHIP_BACKTITLE" 10 65
 					fi
 
 					#List available, read to array
@@ -893,7 +935,7 @@
 						Description+="\nPerformance  | Static. Increases energy consumption, heat, performance."
 					fi
 
-					OPTION=$(whiptail --title "$WHIP_TITLE" --menu "$Description" --cancel-button "$TEXT_MENU_BACK" --backtitle "$WHIP_BACKTITLE" 17 80 5 "${whiptail_menu_array[@]}" 3>&1 1>&2 2>&3)
+					OPTION=$(whiptail --title "$WHIP_TITLE" --menu "$Description" --cancel-button "$TEXT_MENU_BACK" --backtitle "$WHIP_BACKTITLE" 18 80 5 "${whiptail_menu_array[@]}" 3>&1 1>&2 2>&3)
 					CHOICE=$?
 
 					#delete[] array
@@ -1234,9 +1276,12 @@
 		  Keyboard)
 			REBOOT_REQUIRED=true
 
-			#Wheezy
-			if (( $DISTRO == 1 )); then
+			#Debian
+			if (( $DISTRO == 1 )) || (( $DISTRO == 3 )); then
+
+				#This is broken for Raspbian Jessie. Does not display menu.
 				dpkg-reconfigure keyboard-configuration
+
 				invoke-rc.d keyboard-setup start
 			else
 				dpkg-reconfigure console-data
@@ -2050,10 +2095,11 @@
 		TARGETMENUID=0
 
 		WHIP_TITLE='--- DietPi - Tools ---'
-		OPTION=$(whiptail --title "$WHIP_TITLE" --menu " Make a Selection" --cancel-button "$TEXT_MENU_BACK" --backtitle "$WHIP_BACKTITLE" 14 70 5 \
+		OPTION=$(whiptail --title "$WHIP_TITLE" --menu " Make a Selection" --cancel-button "$TEXT_MENU_BACK" --backtitle "$WHIP_BACKTITLE" 14 70 6 \
 		"Benchmarks" "Filesystem and RAM benchmarks." \
 		"DietPi-Backup" "Backup and restore your DietPi system." \
 		"DietPi-Sync" "Sync (backup) a directory to another location." \
+		"DietPi-Cleaner" "Removes unwanted junk from your system." \
 		"DietPi-Nice" "Tweak software process priorities (nice level)." \
 		"DietPi-BugReport" "Send a bug beport to DietPi." 3>&1 1>&2 2>&3)
 
@@ -2081,6 +2127,11 @@
 				;;
 				"DietPi-Sync")
 					/DietPi/dietpi/dietpi-sync 0
+					#return to this menu
+					TARGETMENUID=11
+				;;
+				"DietPi-Cleaner")
+					/DietPi/dietpi/dietpi-cleaner 0
 					#return to this menu
 					TARGETMENUID=11
 				;;
@@ -2178,12 +2229,14 @@
 		#Run benchmark
 		if (( $run_benchmark == 1 )); then
 			echo -e "Please wait, performing $text_info_test_name benchmark...."
+
 			echo -e "Testing Seq Write Speed ($benchmark_filesize MB)"
-			read_speed=$(dd bs=1M count=$benchmark_filesize if=/dev/zero of=$benchmark_temp_file conv=fdatasync 2>&1 | awk '/copied/ {print $8 " "  $9}')
-			#Clear Cache
-			sh -c "sync && echo 3 > /proc/sys/vm/drop_caches"
+			write_speed=$(dd bs=4K count=$(( $benchmark_filesize * 1024 / 4 )) if=/dev/zero of=$benchmark_temp_file conv=fdatasync 2>&1 | awk '/copied/ {print $8 " "  $9}')
+
+			#Clear cache
+			sync && echo 3 > /proc/sys/vm/drop_caches
 			echo -e "Testing Seq Read Speed ($benchmark_filesize MB)"
-			write_speed=$(dd bs=1M count=$benchmark_filesize if=$benchmark_temp_file of=/dev/zero conv=fdatasync 2>&1 | awk '/copied/ {print $8 " "  $9}')
+			read_speed=$(dd bs=4K count=$(( $benchmark_filesize * 1024 / 4 )) if=$benchmark_temp_file of=/dev/zero conv=fdatasync 2>&1 | awk '/copied/ {print $8 " "  $9}')
 
 			#Update global values.
 			if (( $device_index == 0 )); then
@@ -2243,7 +2296,7 @@
 
 	Reset_Overclocking(){
 		sed -i '/over_voltage=/c\#over_voltage=0' /DietPi/config.txt
-		if [ "$HW_MODEL" = 2 ]; then
+		if (( $HW_MODEL == 2 )); then
 			sed -i '/arm_freq=/c\#arm_freq=900' /DietPi/config.txt #Although not applied, we can use this for current values
 		else
 			sed -i '/arm_freq=/c\#arm_freq=700' /DietPi/config.txt #Although not applied, we can use this for current values
@@ -2419,20 +2472,20 @@
 			fi
 		fi
 
-		WHIP_TITLE='---------- DietPi - Audio Options ----------'
+		WHIP_TITLE='------ DietPi - Audio Options ------'
 		OPTION=$(whiptail --title "$WHIP_TITLE" --menu "Make a Selection" --cancel-button "$TEXT_MENU_BACK" 13 60 3 \
-		"1" "Change Soundcard  : $soundcard_current" \
+		"1" "Change Default Audio Output (Hdmi / 3.5mm)" \
 		"2" "HQ Analogue Audio : $hq_analogue_audio_current_text" \
-		"3" "Switch Audio Output" 3>&1 1>&2 2>&3)
+		"3" "Addon Soundcards  : $soundcard_current" 3>&1 1>&2 2>&3)
 
 		CHOICE=$?
 		if (( $CHOICE == 0 )); then
-			if (( $OPTION == 1 )); then
+			if (( $OPTION == 3 )); then
 
 				#RPI Only
 				if (( $HW_MODEL < 10 )); then
 
-					WHIP_TITLE='---------- DietPi - Change Soundcard ----------'
+					WHIP_TITLE='------ DietPi - Addon Soundcards ------'
 					OPTION=$(whiptail --title "$WHIP_TITLE" --menu "Current : $soundcard_current" --cancel-button "$TEXT_MENU_BACK" 14 60 5 \
 					"rpi-bcm2835" "Raspberry Pi - Broadcom (Default)" \
 					"hifiberry-dac" "HifiBerry DAC" \
@@ -2504,18 +2557,70 @@ _EOF_
 				#Return to This Menu
 				TARGETMENUID=14
 
-			elif (( $OPTION == 3 )); then
+			elif (( $OPTION == 1 )); then
 
-				#RPI only
+				WHIP_TITLE='---- DietPi - Default Audio Output ----'
+
+				#RPI
 				if (( $HW_MODEL < 10 )); then
-					OPTION=$(whiptail --title "Switch Audio Output" --menu "" --cancel-button "$TEXT_MENU_BACK" 10 60 3 \
+
+					OPTION=$(whiptail --title "$WHIP_TITLE" --menu "" --cancel-button "$TEXT_MENU_BACK" 10 60 3 \
 					"0" "Auto (HDMI if connected, else 3.5mm Analogue)" \
 					"1" "Force 3.5mm Analogue Output" \
 					"2" "Force HDMI Output" 3>&1 1>&2 2>&3)
+
 					CHOICE=$?
 					if (( $CHOICE == 0 )); then
 						amixer cset numid=3 "$OPTION"
 					fi
+
+				#OrangePi
+				elif (( $HW_MODEL == 30 )); then
+
+					OPTION=$(whiptail --title "$WHIP_TITLE" --menu "" --cancel-button "$TEXT_MENU_BACK" 9 60 2 \
+					"Hdmi" "Sets default audio output to hdmi." \
+					"3.5mm" "Sets default audio output to 3.5mm lineout." 3>&1 1>&2 2>&3)
+					CHOICE=$?
+					if (( $CHOICE == 0 )); then
+
+						if [ "$OPTION" = "Hdmi" ]; then
+
+							amixer set -c 0 'Audio lineout' mute &> /dev/null
+
+						#asound HDMI
+						cat << _EOF_ > /etc/asound.conf
+pcm.!default {
+   type hw
+   card 1
+}
+
+ctl.!default {
+   type hw
+   card 1
+}
+_EOF_
+
+						elif [ "$OPTION" = "3.5mm" ]; then
+
+							amixer set -c 0 'Audio lineout' unmute &> /dev/null
+
+							#asound 3.5mm
+							cat << _EOF_ > /etc/asound.conf
+pcm.!default {
+   type hw
+   card 0
+}
+
+ctl.!default {
+   type hw
+   card 0
+}
+_EOF_
+
+						fi
+
+					fi
+
 				else
 					Info_HW_OptionNotSupported
 				fi

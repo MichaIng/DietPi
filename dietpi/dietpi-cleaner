@@ -1,0 +1,580 @@
+#!/bin/bash
+{
+	#////////////////////////////////////
+	# DietPi
+	#
+	#////////////////////////////////////
+	# Created by Dan Knight / daniel_haze@hotmail.com / fuzon.co.uk
+	#////////////////////////////////////
+	#
+	# Info:
+	# - Cleans "crap" on users system :)
+	#
+	# - Usage
+	# /DietPi/dietpi/dietpi-cleaner no-input	= menu
+	# /DietPi/dietpi/dietpi-cleaner 1 			= Run Enabled cleaners (no menu).
+	# /DietPi/dietpi/dietpi-cleaner 2 			= Run All cleaners (no menu).
+	#////////////////////////////////////
+	#Grab Input (valid interger)
+	INPUT=0
+	if [[ $1 =~ ^-?[0-9]+$ ]]; then
+		INPUT=$1
+	fi
+
+	#/////////////////////////////////////////////////////////////////////////////////////
+	# Globals
+	#/////////////////////////////////////////////////////////////////////////////////////
+	#Obtain hwmodel
+	HW_MODEL=$(sed -n 1p /DietPi/dietpi/.hw_model)
+	STORAGE_ROOT_PATH=$(sed -n 4p /DietPi/dietpi/.hw_model)
+
+	FP_TEMP="/tmp/.dietpi-cleaner"
+
+	#/////////////////////////////////////////////////////////////////////////////////////
+	# Banners
+	#/////////////////////////////////////////////////////////////////////////////////////
+	Banner_Cleaning(){
+
+		echo -e "\n\n"
+		echo -e "\e[38;5;93m───────────────────────────────────────\e[0m\n\e[1mDietPi-Cleaner\e[0m\n - $INFO_CLEAN_NAME\n\e[38;5;93m───────────────────────────────────────\e[0m"
+
+	}
+
+	#/////////////////////////////////////////////////////////////////////////////////////
+	# Menu
+	#/////////////////////////////////////////////////////////////////////////////////////
+	#Whippy Whoopy Whiptail!
+	WHIP_BACKTITLE='- DietPi-Cleaner -'
+	WHIP_TITLE='- DietPi-Cleaner -'
+	WHIP_QUESTION=0
+	CHOICE=0
+	TARGETMENUID=0
+
+	Menu_Exit(){
+			WHIP_TITLE='Exit DietPi-Cleaner?'
+			WHIP_QUESTION='Exit DietPi-Cleaner?'
+			whiptail --title "$WHIP_TITLE" --yesno "$WHIP_QUESTION" --backtitle "$WHIP_TITLE" --yes-button "Ok" --no-button "Back" --defaultno 9 55
+			CHOICE=$?
+			if (( $CHOICE == 0 )); then
+				#exit
+				TARGETMENUID=-1
+			else
+				#Return to Main Menu
+				TARGETMENUID=0
+			fi
+	}
+
+	#TARGETMENUID=0
+	Menu_Main(){
+
+		#Get current RootFS usage
+		Update_Space_Used
+
+		TARGETMENUID=0
+		WHIP_QUESTION="Free up used space and system resources:\n - RootFS usage current = $ROOT_SPACE_USED_CURRENT MB\n - RootFS space cleared = $ROOT_SPACE_FREE_DELTA MB"
+
+		OPTION=$(whiptail --title "$WHIP_TITLE" --backtitle "$WHIP_BACKTITLE" --menu "$WHIP_QUESTION" --cancel-button "Exit" 15 75 5 \
+		"Help" "What does DietPi-Cleaner do?" \
+		"Cleaners" "Control which cleaners are enabled." \
+		"Files" "Set file scan cleaner options." \
+		"Test" "Simulate the cleaning process, without modifying any data." \
+		"Run" "Run enabled cleaners." 3>&1 1>&2 2>&3)
+
+		CHOICE=$?
+		if (( $CHOICE == 0 )); then
+			case "$OPTION" in
+				Help)
+					whiptail --title "DietPi-Cleaner Help" --msgbox "DietPi-Cleaner is a program that allows you to remove unwanted junk from your DietPi system, freeing up filesystem space in the process.\n\nSimply enable the cleaners you require, then select Test to see what will happen, without modifying your system.\nOnce your satisfied with the Test results, select Run to clean your system.\n\nMore information:\n - http://fuzon.co.uk/phpbb/viewtopic.php?f=8&t=5&p=623#p623" --backtitle "$WHIP_BACKTITLE" 16 75
+				;;
+				Files)
+					TARGETMENUID=2
+				;;
+				Cleaners)
+					TARGETMENUID=1
+				;;
+				Test)
+					#Enable test
+					DRY_RUN=1
+					#check for at least 1 enabled.
+					local at_least_one_cleaner_is_enabled=0
+					for ((i=0; i<$MAX_CLEANERS; i++))
+					do
+						if (( ${aEnabledCleaners[$i]} == 1 )); then
+							at_least_one_cleaner_is_enabled=1
+							break
+						fi
+					done
+
+					if (( $at_least_one_cleaner_is_enabled == 1 )); then
+						#Yes/No
+						whiptail --title "Run DietPi-Cleaner?" --yesno "DietPi-Cleaner will now simulate your enabled cleaners.\n\n(Notice): No data will be modified.\n\nContinue with test run?" --backtitle "$WHIP_BACKTITLE" --defaultno 12 70
+						CHOICE=$?
+						if (( $CHOICE == 0 )); then
+							Run_Cleaners
+						fi
+					else
+						whiptail --title "No cleaner jobs enabled" --msgbox "DietPi-Cleaner could not be run as there are no enabled cleaners. Please go to cleaners, then select which you would like to enable." 10 70
+					fi
+				;;
+				Run)
+					#Disable test
+					DRY_RUN=0
+					#check for at least 1 enabled.
+					local at_least_one_cleaner_is_enabled=0
+					for ((i=0; i<$MAX_CLEANERS; i++))
+					do
+						if (( ${aEnabledCleaners[$i]} == 1 )); then
+							at_least_one_cleaner_is_enabled=1
+							break
+						fi
+					done
+
+					if (( $at_least_one_cleaner_is_enabled == 1 )); then
+						#Yes/No
+						whiptail --title "Run DietPi-Cleaner?" --yesno "DietPi-Cleaner will now run your enabled cleaners.\n\n(Notice): If you are unsure what this program will do, I would recommend creating a backup with dietpi-backup before proceeding.\n\nWould you like to continue and start the cleaning process?" --backtitle "$WHIP_BACKTITLE" --defaultno 13 70
+						CHOICE=$?
+						if (( $CHOICE == 0 )); then
+							Run_Cleaners
+						fi
+					else
+						whiptail --title "No cleaner jobs enabled" --msgbox "DietPi-Cleaner could not be run as there are no enabled cleaners. Please go to cleaners, then select which you would like to enable." 10 70
+					fi
+				;;
+			esac
+		else
+			Menu_Exit
+		fi
+
+	}
+
+	#TARGETMENUID=1
+	Menu_Cleaners(){
+
+		#Return to main menu
+		TARGETMENUID=0
+
+		#Get on/off whilptail status
+		local aWhiptailLine=()
+		local OnOff_Status="on"
+		for ((i=0; i<$MAX_CLEANERS; i++))
+		do
+			#On/Off status
+			OnOff_Status="on"
+			if (( ${aEnabledCleaners[$i]} == 0 )); then
+				OnOff_Status="off"
+			fi
+
+			#Define options
+			if (( $i == 0 )); then
+				aWhiptailLine+=("$i " "Dev - Uninstalls all dev packages (eg: git, lib123-dev)." "$OnOff_Status")
+			elif (( $i == 1 )); then
+				aWhiptailLine+=("$i " "Manpages - Removes offline documentation." "$OnOff_Status")
+			elif (( $i == 2 )); then
+				aWhiptailLine+=("$i " "Files - Scan and remove files matching user include list." "$OnOff_Status")
+			elif (( $i == 3 )); then
+				aWhiptailLine+=("$i " "Logs - Clears the log file directory (/var/log)." "$OnOff_Status")
+			elif (( $i == 4 )); then
+				aWhiptailLine+=("$i " "Apt - Clears the apt cache and runs a fresh update." "$OnOff_Status")
+			else
+				aWhiptailLine+=("New " "Unknown" "$OnOff_Status")
+			fi
+
+		done
+
+		WHIP_TITLE='- Options : Cleaner Selection -'
+		WHIP_QUESTION='Please use the spacebar to toggle which cleaners are enabled.'
+		whiptail --title "$WHIP_TITLE" --checklist "$WHIP_QUESTION" --backtitle "$WHIP_TITLE" --separate-output 14 75 5 "${aWhiptailLine[@]}" 2> "$FP_TEMP"
+		CHOICE=$?
+
+		if (( $CHOICE == 0 )); then
+
+			for ((i=0; i<$MAX_CLEANERS; i++))
+			do
+				aEnabledCleaners[$i]=0
+				if (( $(cat "$FP_TEMP" | grep -ci -m1 "$i ") == 1 )); then
+					aEnabledCleaners[$i]=1
+				fi
+
+			done
+
+		fi
+
+		#Clean up temp files
+		rm "$FP_TEMP" &> /dev/null
+
+		#Delete[] array
+		unset aWhiptailLine
+
+	}
+
+	#TARGETMENUID=2
+	Menu_Options_Files(){
+
+		#Return to main menu
+		TARGETMENUID=0
+
+		local option_1_text="Include mount directory (/mnt/*) during file scan"
+		local include_mnt_status="Disabled"
+		if (( $INCLUDE_MNT == 1 )); then
+			include_mnt_status="Enabled"
+		fi
+
+		local option_2_text="Modify filenames/extensions to include during scan."
+
+		WHIP_QUESTION="Files: Cleaner options.\n(NB) The cleaner named 'Files' must be enabled for this to work."
+		WHIP_TITLE='- Files: Cleaner options -'
+
+		OPTION=$(whiptail --title "$WHIP_TITLE" --backtitle "$WHIP_BACKTITLE" --menu "$WHIP_QUESTION" --cancel-button "Exit" 12 68 2 \
+		"$option_1_text" ": $include_mnt_status" \
+		"$option_2_text" "" 3>&1 1>&2 2>&3)
+
+		CHOICE=$?
+		if (( $CHOICE == 0 )); then
+			case "$OPTION" in
+				"$option_1_text")
+					if (( $INCLUDE_MNT == 1 )); then
+						INCLUDE_MNT=0
+					else
+						INCLUDE_MNT=1
+					fi
+					TARGETMENUID=2
+				;;
+				"$option_2_text")
+					nano "$FILEPATH_CUSTOMFILES"
+					TARGETMENUID=2
+				;;
+			esac
+		fi
+
+	}
+
+	#/////////////////////////////////////////////////////////////////////////////////////
+	# Cleaner stats
+	#/////////////////////////////////////////////////////////////////////////////////////
+	# Space free after running cleaner
+	ROOT_SPACE_USED_BEFORE=0
+	ROOT_SPACE_USED_AFTER=0
+	ROOT_SPACE_USED_CURRENT=0
+	ROOT_SPACE_FREE_DELTA="Cleaner has not been run - 0"
+
+	Update_Space_Used(){
+
+		ROOT_SPACE_USED_CURRENT=$(df --block-size MB | grep "$STORAGE_ROOT_PATH" | awk '{ print $3 }' | tr -d 'MB')
+	}
+
+	#/////////////////////////////////////////////////////////////////////////////////////
+	# Cleaner Funcs
+	#/////////////////////////////////////////////////////////////////////////////////////
+	MAX_CLEANERS=5
+	aEnabledCleaners=()
+	for ((i=0; i<$MAX_CLEANERS; i++))
+	do
+		aEnabledCleaners[$i]=0
+	done
+
+	INCLUDE_MNT=0
+	DRY_RUN=0
+
+	INFO_CLEAN_NAME=""
+
+	Run_Cleaners(){
+
+		#stop services
+		/DietPi/dietpi/dietpi-services stop
+
+		#wait for apt-get update if its currently running.
+		/DietPi/dietpi/dietpi-apt-get_update 1
+
+		Update_Space_Used
+		ROOT_SPACE_USED_BEFORE=$ROOT_SPACE_USED_CURRENT
+
+		#Run enabled cleaners
+		for ((i=0; i<$MAX_CLEANERS; i++))
+		do
+			if (( ${aEnabledCleaners[$i]} == 1 )); then
+				Run_Cleaner_"$i"
+			fi
+		done
+
+		Update_Space_Used
+		ROOT_SPACE_USED_AFTER=$ROOT_SPACE_USED_CURRENT
+
+		#start services
+		/DietPi/dietpi/dietpi-services start
+
+		#inform user of space cleared.
+		ROOT_SPACE_FREE_DELTA=$(( $ROOT_SPACE_USED_BEFORE - $ROOT_SPACE_USED_AFTER))
+		WHIP_QUESTION="DietPi-Cleaner has finished cleaning RootFS ($STORAGE_ROOT_PATH):\n - $ROOT_SPACE_FREE_DELTA MB of space has been cleared."
+		if (( $INPUT == 0 )); then
+			whiptail --title "DietPi-Cleaner completed." --msgbox "$WHIP_QUESTION" 10 70
+		elif (( $INPUT == 1 )); then
+			echo -e "\n$WHIP_QUESTION\n"
+		fi
+
+	}
+
+	# Dev Packages
+	Run_Cleaner_0(){
+
+		INFO_CLEAN_NAME="Dev packages"
+		Banner_Cleaning
+
+		local string_package_names=""
+		while read line
+		do
+			#Convert lined list into a 1 line string.
+			string_package_names+="$line "
+
+		done < <(dpkg -l | grep '\-dev:' | awk '{ print $2 }' | cut -f1 -d":")
+
+		#add other dev packages
+		string_package_names+="build-essential git"
+
+		#Purge
+		local Yes_or_Simulate="-y"
+		if (( $DRY_RUN == 1 )); then
+			Yes_or_Simulate="-s"
+		fi
+
+		apt-get purge $string_package_names $Yes_or_Simulate
+		apt-get autoremove --purge $Yes_or_Simulate
+
+		#Update DietPi .installed
+		if (( $DRY_RUN == 0 )); then
+			sed -i "/BUILDESSENTIAL /c\BUILDESSENTIAL 0" /DietPi/dietpi/.installed
+			sed -i "/GITCLIENT /c\GITCLIENT 0" /DietPi/dietpi/.installed
+		fi
+
+	}
+
+	# Man pages / doc
+	Run_Cleaner_1(){
+
+		INFO_CLEAN_NAME="Man pages and docs"
+		Banner_Cleaning
+
+		local Yes_or_Simulate="-y"
+		if (( $DRY_RUN == 1 )); then
+			Yes_or_Simulate="-s"
+		fi
+
+		apt-get purge man manpages $Yes_or_Simulate
+		apt-get autoremove --purge $Yes_or_Simulate
+
+		#Remove files
+		if (( $DRY_RUN == 0 )); then
+			rm -R /usr/share/man
+			rm -R /usr/share/doc
+		fi
+
+	}
+
+	# Files
+	Run_Cleaner_2(){
+
+		INFO_CLEAN_NAME="Files"
+		Banner_Cleaning
+
+		#generate list of files to include. Remove lines with (#) or (space) or (empty) from list
+		cat "$FILEPATH_CUSTOMFILES" | sed '/#/d' | sed '/ /d' | sed '/^$/d' > "$FP_TEMP"
+
+		#Check include file has at least one value/line to process.
+		local line_count=$(cat "$FP_TEMP" | wc -l)
+		if (( $line_count == 0 )); then
+
+			echo -e "\nNo files to find. Have you setup the Files options and added filename entries to match?\n"
+
+		else
+
+			#Create array to hold user includes
+			local aCustomFiles=()
+			readarray aCustomFiles < "$FP_TEMP"
+
+			#Generate the find string
+			local find_string=""
+			echo -e "\nSearching for filenames matching:"
+			for ((i=0; i<${#aCustomFiles[@]}; i++))
+			do
+				echo -e "- ${aCustomFiles[$i]}"
+
+				if (( $i == 0 )); then
+					find_string="-name ${aCustomFiles[$i]}"
+				else
+					find_string+=" -or -name ${aCustomFiles[$i]}"
+				fi
+
+			done
+
+			echo -e "Please wait...."
+
+			#Find all matching filenames.
+			find / -type f $find_string > "$FP_TEMP"
+
+			#Remove /mnt from find list
+			if (( $INCLUDE_MNT == 0 )); then
+				sed -i '/\/mnt/d' "$FP_TEMP"
+			fi
+
+			line_count=$(cat "$FP_TEMP" | wc -l)
+			if (( $line_count == 0 )); then
+				echo -e "\nNo matching filenames were found.\n"
+			else
+				echo -e "\nFound the following matching files:\n"
+			fi
+
+			#Remove files
+			while read line
+			do
+				echo -e "- Filepath: $line"
+				if (( $DRY_RUN == 0 )); then
+					echo -e "Deleted.\n"
+					rm "$line"
+				fi
+
+			done < "$FP_TEMP"
+
+			#delete[]
+			unset aCustomFiles
+
+		fi
+
+		rm "$FP_TEMP" &> /dev/null
+
+	}
+
+	# Logs
+	Run_Cleaner_3(){
+
+		INFO_CLEAN_NAME="Log files"
+		Banner_Cleaning
+
+		if (( $DRY_RUN == 0 )); then
+			/DietPi/dietpi/dietpi-logclear 1
+		fi
+
+	}
+
+	# Apt caches
+	Run_Cleaner_4(){
+
+		INFO_CLEAN_NAME="Apt cache and update"
+		Banner_Cleaning
+
+		if (( $DRY_RUN == 0 )); then
+			rm /var/lib/apt/lists/* -vf
+			/DietPi/dietpi/dietpi-apt-get_update 2
+		fi
+
+	}
+
+	#/////////////////////////////////////////////////////////////////////////////////////
+	# Settings File
+	#/////////////////////////////////////////////////////////////////////////////////////
+	#Define Location
+	FILEPATH_SETTINGS="/DietPi/dietpi/.dietpi-cleaner"
+	FILEPATH_CUSTOMFILES="/DietPi/dietpi/.dietpi-cleaner_custom_files"
+
+	Read_Settings_File(){
+
+		if [ -f "$FILEPATH_SETTINGS" ]; then
+
+			#Get line count
+			local line_count=$(cat "$FILEPATH_SETTINGS" | wc -l)
+
+			#Load settings
+			for ((i=0; i<$line_count; i++))
+			do
+				aEnabledCleaners[$i]=$(sed -n $(( $i + 1 ))p $FILEPATH_SETTINGS)
+			done
+
+		fi
+
+		#Custom filescan options
+		if [ ! -f "$FILEPATH_CUSTOMFILES" ]; then
+			cat << _EOF_ > "$FILEPATH_CUSTOMFILES"
+# ------------------------------------------------------------------
+# Specify filenames or extentions to match during filescan removals.
+#
+# One item per line.
+#
+# Examples:
+# *.tmp
+# ThisFileWillBeDeleted.mp3
+# *AnyFilenameContainingThisTextWillBeDeleted*
+#
+# To save and exit:
+# - Press CTRL+X
+# - Press Y
+# - Press Enter
+# ------------------------------------------------------------------
+# Uncomment line below to include temp files during scan.
+#*.tmp
+
+# Uncomment line below to include Windows Thumbnail cache during scan.
+#Thumbs.db
+_EOF_
+		fi
+
+	}
+
+	Write_Settings_File(){
+
+		#Enabled/Disabled Cleaner Settings
+		rm $FILEPATH_SETTINGS &> /dev/null
+		for ((i=0; i<$MAX_CLEANERS; i++))
+		do
+			echo -e "${aEnabledCleaners[$i]}" >> $FILEPATH_SETTINGS
+		done
+
+	}
+
+	#/////////////////////////////////////////////////////////////////////////////////////
+	#Main
+	#/////////////////////////////////////////////////////////////////////////////////////
+	Read_Settings_File
+	#-----------------------------------------------------------------------------------
+	#Run Menu
+	if (( $INPUT == 0 )); then
+
+		#Start DietPi Menu
+		while (( $TARGETMENUID > -1 )); do
+
+			clear
+
+			if (( $TARGETMENUID == 0 )); then
+				Menu_Main
+			elif (( $TARGETMENUID == 1 )); then
+				Menu_Cleaners
+			elif (( $TARGETMENUID == 2 )); then
+				Menu_Options_Files
+			fi
+
+		done
+
+		Write_Settings_File
+
+	#-----------------------------------------------------------------------------------
+	#Run Enabled cleaners (no menu)
+	elif (( $INPUT == 1 )); then
+
+		Run_Cleaners
+
+	#-----------------------------------------------------------------------------------
+	#Run ALL cleaners (no menu)
+	elif (( $INPUT == 2 )); then
+
+		for ((i=0; i<$MAX_CLEANERS; i++))
+		do
+			aEnabledCleaners[$i]=1
+		done
+
+		Run_Cleaners
+
+	fi
+	#-----------------------------------------------------------------------------------
+	#delete[]
+	unset aEnabledCleaners
+	#-----------------------------------------------------------------------------------
+	exit
+	#-----------------------------------------------------------------------------------
+}

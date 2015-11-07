@@ -14,6 +14,7 @@
 - Raspberry Pi's: http://dietpi.net
 - Odroid C1: http://fuzon.co.uk/phpbb/viewtopic.php?f=8&t=11
 - ODroid XU3/4: http://fuzon.co.uk/phpbb/viewtopic.php?f=8&t=57
+- Orange Pi PC: http://fuzon.co.uk/phpbb/viewtopic.php?f=8&t=164#p612
 - VMware (Virtual Machine): http://fuzon.co.uk/phpbb/viewtopic.php?f=8&t=90
 
 <hr>
@@ -72,6 +73,12 @@ Links to additional software used in DietPi, and, their source and build instruc
 
 Raspberry Pi
 - https://github.com/raspberrypi
+
+Odroid
+- https://github.com/hardkernel?tab=repositories
+
+Orange Pi
+- https://github.com/orangepi-xunlong?tab=repositories
 
 LXDE
 - https://github.com/LXDE
