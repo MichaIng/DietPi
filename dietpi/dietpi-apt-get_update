@@ -38,6 +38,7 @@
 	#/////////////////////////////////////////////////////////////////////////////////////
 	FP_LOGFILE="/var/log/dietpi-apt-get_update"
 	STATE_FILE="/DietPi/dietpi/.dietpi-apt-get_update"
+	APT_PROCESS_RUNNING=0
 
 	#-2 | Has never been run, and/or, ready to be run.
 	STATE_CURRENT=-2
@@ -53,6 +54,11 @@
 		if [ -f "$STATE_FILE" ]; then
 			STATE_CURRENT=$(sed -n 1p "$STATE_FILE")
 			HOURS_SINCE_1970_TO_LASTUPDATE=$(sed -n 2p "$STATE_FILE")
+		fi
+
+		APT_PROCESS_RUNNING=0
+		if (( $(ps ax | grep -ci -m1 ' [a]pt-get') == 1 )); then
+			APT_PROCESS_RUNNING=1
 		fi
 
 	}
@@ -78,7 +84,7 @@
 			#Wait for NTPD to finish.
 			local ntp_timer=0
 			local ntp_timer_max=8
-			while (( $(ps aux | grep -ci -m1 '[n]tpd') == 1 )); do
+			while (( $(ps ax | grep -ci -m1 '[n]tpd') == 1 )); do
 
 				sleep 1
 				((ntp_timer++))
@@ -109,15 +115,11 @@
 
 		Get_Current_State
 
-		#not running
-		#if (( $(ps aux | grep -ci -m1 [a]pt-get) == 0 )); then
-		#STATE_CURRENT=1
-
 		#Currently running
 		while (( $STATE_CURRENT == 0 )); do
 
 			/DietPi/dietpi/dietpi-banner 0
-			if (( $(ps aux | grep -ci -m1 '[n]tpd') == 1 )); then
+			if (( $(ps ax | grep -ci -m1 ' [n]tpd') == 1 )); then
 				echo -e "\n Waiting for NTPd to finish: Please wait..."
 			else
 				local cache_folder_size=$(ls -l /var/cache/apt | grep 'total ' | sed 's/total //g')
@@ -161,51 +163,57 @@
 	#/////////////////////////////////////////////////////////////////////////////////////
 	Get_Current_State
 	#-----------------------------------------------------------------------------------
-	#If not running, check for reset.
-	if (( $STATE_CURRENT != 0 )); then
+	#If apt-get is not running, check for reset, run new update if required.
+	if (( $APT_PROCESS_RUNNING == 0 )); then
 
+		#check for resets
 		Get_Hours_Since_Last_Update
 
 		#Mode 2. Force reset
 		if (( $INPUT == 2 )); then
+
 			Reset_StateFile
+
 		#>X days since last update, reset
 		elif (( $HOURS_SINCE_1970_TO_LASTUPDATE >= $MAX_HOURS )); then
+
 			Reset_StateFile
+
+		#Clear state if 0 and apt-get is not running.
+		# - This can occur if dietpi-apt-get_update is terminated before completion (eg: user, reboot etc).
+		# - Assumes apt-cache may be corrupt, so new update required.
+		# - Prevents STATE file staying at 0.
+		elif (( $STATE_CURRENT == 0 )); then
+
+			Reset_StateFile
+
+		fi
+
+		#Do we need to Run an update?
+		Get_Current_State
+
+		#Update required. Start apt-get update thread.
+		if (( $STATE_CURRENT <= -1 )); then
+
+			# 0 = running
+			STATE_CURRENT=0
+
+			#Update state file
+			Write_StateFile
+
+			Update_Apt &
+
 		fi
 
 	fi
 	#-----------------------------------------------------------------------------------
-	#Run update?
-	#Check for current active apt-get process
-	if (( $(ps aux | grep -ci -m1 '[a]pt-get update') == 1 )); then
-
-		echo -e "Do nothing" &> /dev/null
-
-	#Run only if: -2 / -1.
-	elif (( $STATE_CURRENT == -2 )) ||
-		(( $STATE_CURRENT == -1 )); then
-
-		# 0 = running
-		STATE_CURRENT=0
-
-		#Update state file
-		Write_StateFile
-
-		Update_Apt &
-	fi
-	#-----------------------------------------------------------------------------------
-	#Visual Blocking modes
-	if (( $INPUT == 1 )) ||
-		(( $INPUT == 2 )); then
+	#Visual Updates/Blocking
+	if (( $INPUT >= 1 )); then
 
 		#Wait / inform user
 		Wait_For_Completion
 
 	fi
-	#-----------------------------------------------------------------------------------
-	##Debugging
-	#echo -e "$STATE_CURRENT"
 	#-----------------------------------------------------------------------------------
 	exit
 	#-----------------------------------------------------------------------------------
