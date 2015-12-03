@@ -104,7 +104,7 @@
 		"5" "Language/Regional Options" \
 		"6" "Security Options" \
 		"7" "Networking Options" \
-		"8" "AutoBoot Options" \
+		"8" "AutoStart Options" \
 		"9" "Tools" 3>&1 1>&2 2>&3)
 
 		CHOICE=$?
@@ -137,7 +137,7 @@
 			elif (( $OPTION == 7 )); then
 				 TARGETMENUID=8
 		   elif (( $OPTION == 8 )); then
-				/DietPi/dietpi/dietpi-boot_order
+				/DietPi/dietpi/dietpi-autostart
 				REBOOT_REQUIRED=true
 			elif (( $OPTION == 9 )); then
 				TARGETMENUID=11
@@ -164,8 +164,8 @@
 		if (( $CHOICE == 0 )); then
 			TARGETMENUID=-1
 
-			#1st run install, disable prompt for reboot.
-			if(( $DIETPI_INSTALL_STAGE == 0 )); then
+			#Disable Reboot when run from dietpi-software
+			if (( $(ps aux | grep -ci -m1 '/DietPi/dietpi/[d]ietpi-software') == 1 )); then
 				REBOOT_REQUIRED=false
 			fi
 
@@ -637,37 +637,88 @@
 
 		#Get Current Settings
 		local swap_size=$(cat /etc/dphys-swapfile | sed 's/CONF_SWAPSIZE=//g')
+		local swap_text="$swap_size MB"
+		if (( $swap_size == 0 )); then
+			swap_text="Disabled"
+		fi
 
+		#NTPD
+		local ntpd_mode_current=$(cat /DietPi/dietpi.txt | grep -m1 'ntpd_update_mode=' | sed 's/ntpd_update_mode=//g')
+		local ntpd_mode_text=""
+		if (( $ntpd_mode_current == 0 )); then
+			ntpd_mode_text="Disabled"
+		elif (( $ntpd_mode_current == 1 )); then
+			ntpd_mode_text="Boot Only"
+		elif (( $ntpd_mode_current == 2 )); then
+			ntpd_mode_text="Boot + Daily"
+		elif (( $ntpd_mode_current == 3 )); then
+			ntpd_mode_text="Boot + Hourly"
+		elif (( $ntpd_mode_current == 4 )); then
+			ntpd_mode_text="Daemon + Drift"
+		fi
+
+		#RPi ONly
 		local usb_max_current_enabled=$(cat /DietPi/config.txt | grep -ci -m1 'max_usb_current=1')
 		local usb_max_current_text='Disabled'
 		if [ "$usb_max_current_enabled" = 1 ]; then
 			usb_max_current_text='Enabled'
 		fi
 
-		#Non RPI
 		if (( $HW_MODEL >= 10 )); then
 			usb_max_current_text=$HW_MSG_NOTSUPPORTED
 		fi
 
-		#local apt_source=$(cat /etc/apt/sources.list | grep -m1 'http://' | awk '{print $2}')
-
 		WHIP_TITLE='---------- DietPi - Advanced Options ----------'
-		OPTION=$(whiptail --title "$WHIP_TITLE" --menu "Make a Selection" --cancel-button "$TEXT_MENU_BACK" 13 60 3 \
-		"1" "Swapfile Size: $swap_size MB" \
-		"2" "Update Firmware" \
-		"3" "Max Usb Current: $usb_max_current_text" 3>&1 1>&2 2>&3)
+		OPTION=$(whiptail --title "$WHIP_TITLE" --menu "Make a Selection" --cancel-button "$TEXT_MENU_BACK" 13 60 4 \
+		"1" "Swapfile Size    : $swap_text" \
+		"2" "Time sync (ntpd) : $ntpd_mode_text" \
+		"3" "Max Usb Current  : $usb_max_current_text" \
+		"4" "Update Firmware" 3>&1 1>&2 2>&3)
 
 		CHOICE=$?
 		if (( $CHOICE == 0 )); then
 			if (( $OPTION == 1 )); then
-				MIN_VALUE=100
+				MIN_VALUE=0
 				MAX_VALUE=2000
-				OPTION=$(whiptail --inputbox "This will set the size of your swap file in MB.\n - Swapfile has a swapiness setting of 1 \n - Swapfile is used only to prevent out of memory errors \n - Recommended value = 100 \n - Valid range $MIN_VALUE - $MAX_VALUE" 13 65 "$swap_size" --title "SwapFile Size (MB)" 3>&1 1>&2 2>&3)
+				OPTION=$(whiptail --inputbox "This will set the size of your swap file in MB:\n - Swapfile has a swapiness setting of 1.\n - Swapfile is used only to prevent out of memory errors.\n - Recommended value = 100 \n - Valid range $MIN_VALUE - $MAX_VALUE\n - 0 = Disable Swapfile." 13 65 "$swap_size" --title "SwapFile Size (MB)" 3>&1 1>&2 2>&3)
 				CHOICE=$?
 				if (( $CHOICE == 0 )); then
-					if [[ $OPTION =~ ^-?[0-9]+$ ]] && (($OPTION <= $MAX_VALUE)) && (($OPTION >= $MIN_VALUE)); then
-						sed -i "/CONF_SWAPSIZE/c\CONF_SWAPSIZE=$OPTION" /etc/dphys-swapfile
-						REBOOT_REQUIRED=true
+					if [[ $OPTION =~ ^-?[0-9]+$ ]] &&
+						(( $OPTION >= $MIN_VALUE )) && (( $OPTION <= $MAX_VALUE )); then
+
+						#Generate new swapfile now if size has changed, rather than during boot.
+						if (( $OPTION != $swap_size )); then
+
+							#Update conf
+							sed -i "/CONF_SWAPSIZE/c\CONF_SWAPSIZE=$OPTION" /etc/dphys-swapfile
+
+							local service_mode="disable"
+
+							#Disabled
+							if (( $OPTION == 0 )); then
+								service_mode="disable"
+								dphys-swapfile swapoff
+								rm /var/swap
+
+							#Enabled
+							else
+								service_mode="enable"
+								echo -e "\nDietPi:\n - Generating new swapfile with size $OPTION MB, please wait...\n"
+								dphys-swapfile swapoff
+								dphys-swapfile setup
+								dphys-swapfile swapon
+							fi
+
+							#Service
+							# - wheezy
+							if (( $DISTRO == 1 )); then
+								service dphys-swapfile "$service_mode"
+							# - Jessie
+							elif (( $DISTRO == 3 )); then
+								systemctl "$service_mode" dphys-swapfile
+							fi
+
+						fi
 					else
 						Info_Input_Not_Valid_Integer
 					fi
@@ -677,6 +728,23 @@
 				TARGETMENUID=3
 
 			elif (( $OPTION == 2 )); then
+
+				OPTION=$(whiptail --title "Time Sync (NTPD)" --menu "Here you can adjust the frequency of NTPD time syncs.\n\n - Modes 1-3:\nDietPi will launch NTPD as a program, rather than a daemon. Once the time has been updated on your system, NTPD will exit to reduce resource usage.\n\n - Mode 4:\nNTPD will run as a background daemon/service. Differences in time will be gradually adjusted over time, rather than instantly." --cancel-button "$TEXT_MENU_BACK" --default-item "$ntpd_mode_current" 22 70 5 \
+				"0" "Disabled" \
+				"1" "Boot Only" \
+				"2" "Boot + Daily (Recommended)" \
+				"3" "Boot + Hourly" \
+				"4" "Daemon + Drift" 3>&1 1>&2 2>&3)
+
+				CHOICE=$?
+				if (( $CHOICE == 0 )); then
+					sed -i "/ntpd_update_mode=/c\ntpd_update_mode=$OPTION" /DietPi/dietpi.txt
+				fi
+
+				#Return to This Menu
+				TARGETMENUID=3
+
+			elif (( $OPTION == 4 )); then
 
 				#RPI
 				if (( $HW_MODEL < 10 )); then
@@ -698,6 +766,18 @@
 						apt-get update
 						apt-get dist-upgrade --no-install-recommends -y
 						REBOOT_REQUIRED=true
+					fi
+
+				#OrangePi
+				elif (( $HW_MODEL >= 30 )) && (( $HW_MODEL < 40 )); then
+					WHIP_QUESTION=" Would you like to update the firmware on your $HW_MODEL_DESCRIPTION? \n - This will run Loboris's update script."
+					whiptail --title "$WHIP_TITLE" --yesno "$WHIP_QUESTION" --yes-button "Ok" --no-button "Back" --defaultno --backtitle "$WHIP_BACKTITLE" 12 60
+					CHOICE=$?
+					if (( $CHOICE == 0 )); then
+						wget https://raw.githubusercontent.com/loboris/OrangePi-BuildLinux/master/update_kernel.sh
+						chmod +x update_kernel.sh
+						./update_kernel.sh
+						rm update_kernel.sh
 					fi
 
 				else
@@ -1278,17 +1358,9 @@
 		  Keyboard)
 			REBOOT_REQUIRED=true
 
-			#Debian
-			if (( $DISTRO == 1 )) || (( $DISTRO == 3 )); then
-
-				#This is broken for Raspbian Jessie. Does not display menu.
-				dpkg-reconfigure keyboard-configuration
-
-				invoke-rc.d keyboard-setup start
-			else
-				dpkg-reconfigure console-data
-				service keyboard-setup restart
-			fi
+			#This is broken for Raspbian Jessie. Does not display menu.
+			dpkg-reconfigure keyboard-configuration
+			invoke-rc.d keyboard-setup start
 
 			#Return to this menu
 			TARGETMENUID=7
@@ -1358,16 +1430,18 @@
 		ifdown wlan$WIFI_INDEX &> /dev/null
 
 		#Restart Networking
-		/etc/init.d/networking reload
-		/etc/init.d/networking restart
+		if (( $DISTRO == 3 )); then
+			systemctl restart network.service
+		else
+			/etc/init.d/networking reload
+			/etc/init.d/networking restart
+		fi
 
-		#Ubuntu - Manually bring up adapters
-		if (( $DISTRO == 2 )); then
-			if (( $WIFI_DISABLED == 0 )); then
-				ifup wlan$WIFI_INDEX
-			elif (( $ETH_DISABLED == 0 )); then
-				ifup eth$ETH_INDEX
-			fi
+		#Manually bring up adapters (just incase)
+		if (( $WIFI_DISABLED == 0 )); then
+			ifup wlan$WIFI_INDEX
+		elif (( $ETH_DISABLED == 0 )); then
+			ifup eth$ETH_INDEX
 		fi
 
 	}
@@ -1513,7 +1587,7 @@
 		INTERNET_ONLINE=0 #Not tested
 
 		#Check for connection
-		/DietPi/dietpi/func/check_connection 10 2 "$INTERNET_URL"
+		/DietPi/dietpi/func/check_connection "$INTERNET_URL"
 		if (( $? == 0 )); then
 			INTERNET_ONLINE=2 #Online
 		else
@@ -1870,7 +1944,7 @@
 						else
 							local noip_url_address="http://dietpi.com/downloads/binaries/all/noip_armhf.zip"
 						fi
-						/DietPi/dietpi/func/check_connection 5 2 "$noip_url_address"
+						/DietPi/dietpi/func/check_connection "$noip_url_address"
 
 						#Install
 						if (( $? == 0 )); then
@@ -2097,50 +2171,13 @@
 		TARGETMENUID=0
 
 		WHIP_TITLE='--- DietPi - Tools ---'
-		OPTION=$(whiptail --title "$WHIP_TITLE" --menu " Make a Selection" --cancel-button "$TEXT_MENU_BACK" --backtitle "$WHIP_BACKTITLE" 14 70 6 \
-		"Benchmarks" "Filesystem and RAM benchmarks." \
-		"DietPi-Backup" "Backup and restore your DietPi system." \
-		"DietPi-Sync" "Sync (backup) a directory to another location." \
-		"DietPi-Cleaner" "Removes unwanted junk from your system." \
-		"DietPi-Nice" "Tweak software process priorities (nice level)." \
-		"DietPi-BugReport" "Send a bug beport to DietPi." 3>&1 1>&2 2>&3)
-
-	#	"Stress Test" "Check the stability of your system." \
-	 CHOICE=$?
+		OPTION=$(whiptail --title "$WHIP_TITLE" --menu " Make a Selection" --cancel-button "$TEXT_MENU_BACK" --backtitle "$WHIP_BACKTITLE" 9 70 1 \
+		"Benchmarks" "Filesystem and RAM benchmarks." 3>&1 1>&2 2>&3)
+		CHOICE=$?
 		if (( $CHOICE == 0 )); then
 			case "$OPTION" in
-				"Stress Test")
-					/DietPi/dietpi/dietpi-stress_test
-					#return to this menu
-					TARGETMENUID=11
-				;;
-				DietPi-Nice)
-					/DietPi/dietpi/dietpi-nice 0
-					#return to this menu
-					TARGETMENUID=11
-				;;
 				Benchmarks)
 					TARGETMENUID=12
-				;;
-				"DietPi-Backup")
-					/DietPi/dietpi/dietpi-backup 0
-					#return to this menu
-					TARGETMENUID=11
-				;;
-				"DietPi-Sync")
-					/DietPi/dietpi/dietpi-sync 0
-					#return to this menu
-					TARGETMENUID=11
-				;;
-				"DietPi-Cleaner")
-					/DietPi/dietpi/dietpi-cleaner 0
-					#return to this menu
-					TARGETMENUID=11
-				;;
-				"DietPi-BugReport")
-					/DietPi/dietpi/dietpi-bugreport
-					#return to this menu
-					TARGETMENUID=11
 				;;
 			esac
 		fi
@@ -2331,10 +2368,10 @@
 		if (( $HW_MODEL <= 1 )); then
 
 			OPTION=$(whiptail --title "$WHIP_TITLE" --menu " Hardware : $HW_MODEL_DESCRIPTION \n Current: $arm_freq_value MHz ARM | $core_freq_value MHz core | $sdram_freq_value MHz SDRAM | $over_voltage_value overvolt" --cancel-button "$TEXT_MENU_BACK" --backtitle "$WHIP_BACKTITLE" 14 70 4 \
-			"none" "700 MHz ARM | 250 MHz core | 400 MHz SDRAM | 0 overvolt" \
-			"safe" "900 MHz ARM | 250 MHz core | 400 MHz SDRAM | 2 overvolt" \
-			"high" "1000 MHz ARM | 375 MHz core | 400 MHz SDRAM | 5 overvolt" \
-			"extreme" "1000 MHz ARM | 500 MHz core | 500 MHz SDRAM | 6 overvolt" 3>&1 1>&2 2>&3)
+			"none" " 700 MHz ARM | 250 MHz core | 400 MHz SDRAM | 0 overvolt" \
+			"safe" " 900 MHz ARM | 250 MHz core | 400 MHz SDRAM | 2 overvolt" \
+			"high" " 900 MHz ARM | 500 MHz core | 400 MHz SDRAM | 4 overvolt" \
+			"extreme" "1000 MHz ARM | 500 MHz core | 400 MHz SDRAM | 6 overvolt" 3>&1 1>&2 2>&3)
 
 			case "$OPTION" in
 			  none)
@@ -2360,9 +2397,9 @@
 				CHOICE=$?
 				if (( $CHOICE == 0 )); then
 					Reset_Overclocking
-					sed -i '/over_voltage=/c\over_voltage=5' /DietPi/config.txt
-					sed -i '/arm_freq=/c\arm_freq=1000' /DietPi/config.txt
-					sed -i '/core_freq=/c\core_freq=375' /DietPi/config.txt
+					sed -i '/over_voltage=/c\over_voltage=4' /DietPi/config.txt
+					sed -i '/arm_freq=/c\arm_freq=900' /DietPi/config.txt
+					sed -i '/core_freq=/c\core_freq=500' /DietPi/config.txt
 				fi
 
 				#Return to this menu
@@ -2377,7 +2414,6 @@
 					sed -i '/over_voltage=/c\over_voltage=6' /DietPi/config.txt
 					sed -i '/arm_freq=/c\arm_freq=1000' /DietPi/config.txt
 					sed -i '/core_freq=/c\core_freq=500' /DietPi/config.txt
-					sed -i '/sdram_freq=/c\sdram_freq=500' /DietPi/config.txt
 				fi
 
 				#Return to this menu
@@ -2390,10 +2426,10 @@
 		elif (( $HW_MODEL == 2 )); then
 
 			OPTION=$(whiptail --title "$WHIP_TITLE" --menu " Hardware : $HW_MODEL_DESCRIPTION \n Current: $arm_freq_value MHz ARM | $core_freq_value MHz core | $sdram_freq_value MHz SDRAM | $over_voltage_value overvolt" --cancel-button "$TEXT_MENU_BACK" --backtitle "$WHIP_BACKTITLE" 13 75 4 \
-			"none" "900 MHz  ARM  | 250 MHz core | 400 MHz SDRAM | 0 overvolt" \
+			"none" " 900 MHz ARM | 250 MHz core | 400 MHz SDRAM | 0 overvolt" \
 			"low" "1000 MHz ARM | 250 MHz core | 400 MHz SDRAM | 3 overvolt" \
 			"med" "1000 MHz ARM | 500 MHz core | 400 MHz SDRAM | 5 overvolt" \
-			"extreme" "1100 MHz ARM | 500 MHz core | 450 MHz SDRAM | 6 overvolt" 3>&1 1>&2 2>&3)
+			"extreme" "1100 MHz ARM | 500 MHz core | 400 MHz SDRAM | 6 overvolt" 3>&1 1>&2 2>&3)
 
 			case "$OPTION" in
 			  none)
@@ -2440,7 +2476,7 @@
 					sed -i '/over_voltage=/c\over_voltage=6' /DietPi/config.txt
 					sed -i '/arm_freq=/c\arm_freq=1100' /DietPi/config.txt
 					sed -i '/core_freq=/c\core_freq=500' /DietPi/config.txt
-					sed -i '/sdram_freq=/c\sdram_freq=450' /DietPi/config.txt
+					#sed -i '/sdram_freq=/c\sdram_freq=450' /DietPi/config.txt
 				fi
 
 				#Return to this menu
@@ -2488,7 +2524,7 @@
 				if (( $HW_MODEL < 10 )); then
 
 					WHIP_TITLE='------ DietPi - Soundcards ------'
-					OPTION=$(whiptail --title "$WHIP_TITLE" --menu "Current : $soundcard_current" --cancel-button "$TEXT_MENU_BACK" 14 60 6 \
+					OPTION=$(whiptail --title "$WHIP_TITLE" --menu "Current : $soundcard_current" --default-item "$soundcard_current" --cancel-button "$TEXT_MENU_BACK" 14 60 6 \
 					"none" "Disables snd-bcm2835 module." \
 					"rpi-bcm2835" "Raspberry Pi - Internal (Default)." \
 					"hifiberry-dac" "HifiBerry DAC." \
