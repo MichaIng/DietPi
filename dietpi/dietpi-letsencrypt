@@ -1,0 +1,299 @@
+#!/bin/bash
+{
+	#////////////////////////////////////
+	# DietPi Lets Encrypt
+	#
+	#////////////////////////////////////
+	# Created by Dan Knight / daniel_haze@hotmail.com / fuzon.co.uk
+	#
+	#////////////////////////////////////
+	#
+	# Info:
+	# - filename /DietPi/dietpi/dietpi-letsencrypt
+	# - Menu Frontend for Letsencrypt with CLI options for use on DietPi systems.
+	#
+	# usage:
+	# - /DietPi/dietpi/dietpi-letsencrypt   = Menu
+	# - /DietPi/dietpi/dietpi-letsencrypt 1 = Create/Renew/Apply cert
+	#////////////////////////////////////
+
+	#Grab Input (valid interger)
+	INPUT=0
+	if [[ $1 =~ ^-?[0-9]+$ ]]; then
+		INPUT=$1
+	fi
+
+	#/////////////////////////////////////////////////////////////////////////////////////
+	#Globals
+	#/////////////////////////////////////////////////////////////////////////////////////
+	FP_LOGFILE="/var/log/dietpi-letsencrypt.log"
+	FP_MONTHLY_CRON="/etc/cron.monthly/dietpi-letsencrypt"
+	DP_LETSENCRYPT_SCRIPTS="/etc/letsencrypt_scripts"
+
+	LETSENCRYPT_INSTALLED=0
+	if [ -d "$DP_LETSENCRYPT_SCRIPTS" ]; then
+		LETSENCRYPT_INSTALLED=1
+	fi
+
+	LETSENCRYPT_DOMAIN="mydomain.com"
+	LETSENCRYPT_EMAIL="myemail@email.com"
+	LETSENCRYPT_REDIRECT=0
+	LETSENCRYPT_AUTORENEW=0
+	LETSENCRYPT_KEYSIZE=2048
+
+	Run_Lets_Encrypt(){
+
+		#Conditions that must be met before allowing run
+		local run_conditions_met=1
+
+		#Apache installed and running
+		if (( $( ps ax | grep -ci -m1 [a]pache) == 0 )); then
+			run_conditions_met=0
+			echo -e "Error: Apache2 is not running. Aborting." >> "$FP_LOGFILE"
+		fi
+
+		#Run
+		if (( $run_conditions_met == 1 )); then
+
+			#Add ServerName if it doesnt exist. This is required to prevent letsencrypt compaining about vhost with no domain.
+			if (( $(cat /etc/apache2/sites-available/000-default.conf | grep -ci -m1 'ServerName') == 0 )); then
+				sed -i "/ServerAdmin /a ServerName" /etc/apache2/sites-available/000-default.conf
+
+				#log
+				echo -e "ServerName entry not found in /etc/apache2/sites-available/000-default.conf. Adding it now." >> "$FP_LOGFILE"
+			fi
+
+			#Apply domain name
+			sed -i "/ServerName/c\        ServerName $LETSENCRYPT_DOMAIN" /etc/apache2/sites-available/000-default.conf
+
+			#Restart apache2 to apply ServerName changes.
+			service apache2 restart
+
+			local cli_redirect="--no-redirect"
+			if (( $LETSENCRYPT_REDIRECT == 1 )); then
+				cli_redirect="--redirect"
+			fi
+
+			cd "$DP_LETSENCRYPT_SCRIPTS"
+			./letsencrypt-auto --duplicate --agree-tos $cli_redirect --rsa-key-size $LETSENCRYPT_KEYSIZE --email $LETSENCRYPT_EMAIL -d $LETSENCRYPT_DOMAIN
+
+			#Create cron job
+			if (( $LETSENCRYPT_AUTORENEW == 1 )); then
+
+				cat << _EOF_ > "$FP_MONTHLY_CRON"
+#!/bin/bash
+{
+	#////////////////////////////////////
+	# DietPi-LetsEncrypt Autorenew script
+	#
+	#////////////////////////////////////
+	#
+	# Info:
+	# - Location $FP_MONTHLY_CRON
+	#
+	#////////////////////////////////////
+
+	#----------------------------------------------------------------
+	# Main Loop
+	#----------------------------------------------------------------
+	/DietPi/dietpi/dietpi-letsencrypt 1 &>> $FP_LOGFILE
+	#----------------------------------------------------------------
+	exit
+	#----------------------------------------------------------------
+}
+_EOF_
+				chmod +x "$FP_MONTHLY_CRON"
+
+			fi
+
+			if (( $INPUT == 0 )); then
+				echo -e ""
+				read -p "Press any key to continue..."
+				echo -e ""
+			fi
+
+		fi
+
+	}
+
+	#/////////////////////////////////////////////////////////////////////////////////////
+	# Settings File
+	#/////////////////////////////////////////////////////////////////////////////////////
+	FP_SETTINGS="/DietPi/dietpi/.dietpi-letsencrypt"
+
+	Read_Settings_File(){
+
+		local sed_index=1
+
+		LETSENCRYPT_DOMAIN=$(sed -n "$sed_index"p $FP_SETTINGS);((sed_index++))
+		LETSENCRYPT_EMAIL=$(sed -n "$sed_index"p $FP_SETTINGS);((sed_index++))
+		LETSENCRYPT_REDIRECT=$(sed -n "$sed_index"p $FP_SETTINGS);((sed_index++))
+		LETSENCRYPT_AUTORENEW=$(sed -n "$sed_index"p $FP_SETTINGS);((sed_index++))
+		LETSENCRYPT_KEYSIZE=$(sed -n "$sed_index"p $FP_SETTINGS);((sed_index++))
+
+	}
+
+	Write_Settings_File(){
+
+		cat << _EOF_ > "$FP_SETTINGS"
+$LETSENCRYPT_DOMAIN
+$LETSENCRYPT_EMAIL
+$LETSENCRYPT_REDIRECT
+$LETSENCRYPT_AUTORENEW
+$LETSENCRYPT_KEYSIZE
+_EOF_
+
+	}
+
+	#/////////////////////////////////////////////////////////////////////////////////////
+	# MENUS
+	#/////////////////////////////////////////////////////////////////////////////////////
+	PROGRAM_NAME="DietPi-LetsEncrypt"
+
+	CHOICE=0
+	OPTION=0
+	TARGETMENUID=0
+	PREVIOUS_MENU_SELECTION=""
+
+	Menu_Exit(){
+
+		whiptail --title "Exit $PROGRAM_NAME?" --yesno "Exit $PROGRAM_NAME?" --backtitle "$PROGRAM_NAME" --yes-button "Ok" --no-button "Back" --defaultno 9 55
+		CHOICE=$?
+		if (( $CHOICE == 0 )); then
+			#exit
+			TARGETMENUID=-1
+		else
+			#Return to Main Menu
+			TARGETMENUID=0
+		fi
+	}
+
+	#TARGETMENUID=0
+	Menu_Main(){
+
+		local auto_renew_text="Disabled | Manual renewal every 90 days"
+		if (( $LETSENCRYPT_AUTORENEW == 1 )); then
+			auto_renew_text="Enabled | Automatic cron.monthly renewals"
+		fi
+
+		local redirect_text="Disabled | Allows http and https usage"
+		if (( $LETSENCRYPT_REDIRECT == 1 )); then
+			redirect_text="Enabled | Forces http redirects to https"
+		fi
+
+		OPTION=$(whiptail --title "$PROGRAM_NAME" --menu "Please select a option." --cancel-button "Exit" --default-item "$PREVIOUS_MENU_SELECTION" --backtitle "$PROGRAM_NAME" 14 70 6 \
+		"Domain" ": $LETSENCRYPT_DOMAIN" \
+		"Email" ": $LETSENCRYPT_EMAIL" \
+		"Redirect" ": $redirect_text" \
+		"Auto Renew" ": $auto_renew_text" \
+		"Key Size" ": $LETSENCRYPT_KEYSIZE" \
+		"Apply" "Runs Lets Encrypt with your chosen options." 3>&1 1>&2 2>&3)
+
+		CHOICE=$?
+		if (( $CHOICE == 0 )); then
+
+			PREVIOUS_MENU_SELECTION=$OPTION
+
+			case "$OPTION" in
+				Domain)
+					LETSENCRYPT_DOMAIN="$(Input_Box $LETSENCRYPT_DOMAIN Website-Domain)"
+				;;
+				Email)
+					LETSENCRYPT_EMAIL="$(Input_Box $LETSENCRYPT_EMAIL Email-Address)"
+				;;
+				"Key Size")
+					if (( $LETSENCRYPT_KEYSIZE == 2048 )); then
+						LETSENCRYPT_KEYSIZE=4096
+					else
+						LETSENCRYPT_KEYSIZE=2048
+					fi
+				;;
+				"Auto Renew")
+					((LETSENCRYPT_AUTORENEW++))
+					if (( $LETSENCRYPT_AUTORENEW > 1 )); then
+						LETSENCRYPT_AUTORENEW=0
+					fi
+				;;
+				Redirect)
+					((LETSENCRYPT_REDIRECT++))
+					if (( $LETSENCRYPT_REDIRECT > 1 )); then
+						LETSENCRYPT_REDIRECT=0
+					fi
+				;;
+				Apply)
+					whiptail --title "Run Lets Encrypt?" --yesno "Running Lets Encrypt will now be run. This will:\n- Create your free SSL cert.\n- Automatically apply and enable your SSL cert\n- NB: This process can take a long time, please be patient.\n\nWould you like to continue?" --backtitle "$PROGRAM_NAME" --yes-button "Ok" --no-button "Back" --defaultno 13 65
+					CHOICE=$?
+					if (( $CHOICE == 0 )); then
+						Write_Settings_File
+						Run_Lets_Encrypt
+					fi
+				;;
+			esac
+
+		else
+			#Exit
+			Menu_Exit
+		fi
+
+	}
+
+	Input_Box(){
+
+		local input_value=$1
+		local input_desc=$2
+
+		OPTION=$(whiptail --inputbox "Please enter your $input_desc" 9 50 "$input_value" --title "Input $input_desc" 3>&1 1>&2 2>&3)
+		CHOICE=$?
+		if (( $CHOICE == 0 )); then
+			input_value=$OPTION
+		fi
+		echo -e "$input_value"
+
+	}
+
+	#/////////////////////////////////////////////////////////////////////////////////////
+	# Main Loop
+	#/////////////////////////////////////////////////////////////////////////////////////
+	#Load Settings file. Generate if required.
+	if [ ! -f "$FP_SETTINGS" ]; then
+		Write_Settings_File
+	else
+		Read_Settings_File
+	fi
+
+	#-----------------------------------------------------------------------------------
+	#Check installed
+	if (( $LETSENCRYPT_INSTALLED == 0 )); then
+			#Menu
+			if (( $INPUT == 0 )); then
+				echo -e "\nError: Lets encrypt scripts not installed ( $DP_LETSENCRYPT_SCRIPTS ).\nPlease install LetsEncrypt with DietPi-Software before running this program.\n"
+				read -p "Press any key to continue....."
+			else
+				echo -e "Error: Lets encrypt scripts not installed ( $DP_LETSENCRYPT_SCRIPTS )." >> "$FP_LOGFILE"
+			fi
+	#-----------------------------------------------------------------------------------
+	#Menu
+	elif (( $INPUT == 0 )); then
+
+		while (( $TARGETMENUID > -1 )); do
+
+			#Clear Screen buffer
+			clear
+
+			if (( $TARGETMENUID == 0 )); then
+				Menu_Main
+			fi
+		done
+
+	#-----------------------------------------------------------------------------------
+	#Run
+	elif (( $INPUT == 1 )); then
+
+		Run_Lets_Encrypt
+
+	fi
+
+	#-----------------------------------------------------------------------------------
+	exit
+	#-----------------------------------------------------------------------------------
+}

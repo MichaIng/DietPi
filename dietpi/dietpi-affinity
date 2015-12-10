@@ -1,7 +1,7 @@
 #!/bin/bash
 {
 	#////////////////////////////////////
-	# DietPi Nice
+	# DietPi Affinity
 	#
 	#////////////////////////////////////
 	# Created by Dan Knight / daniel_haze@hotmail.com / fuzon.co.uk
@@ -9,12 +9,12 @@
 	#////////////////////////////////////
 	#
 	# Info:
-	# - Menu system that allows users to set process priority levels (nice)
-	# - Called from /DietPi/dietpi/dietpi-services start (eg: after all installed dietpi-software has been started)
+	# - Menu system that allows users to set cpu affinity for processes
+	# - Called from /DietPi/dietpi/dietpi-services start
 	#
 	# Usage:
-	# dietpi-nice 0/no input	= Menu
-	# dietpi-nice 1				= Apply nice levels
+	# dietpi-affinity 0/no input	= Menu
+	# dietpi-affinity 1				= Apply affinity levels
 	#////////////////////////////////////
 
 	#Grab Input (valid interger)
@@ -27,18 +27,16 @@
 	# Settings File
 	#/////////////////////////////////////////////////////////////////////////////////////
 	#Define Location
-	FP_SETTINGS="/DietPi/dietpi/.dietpi-nice"
-	FP_TEMP="/tmp/.dietpi-nice_temp"
+	FP_SETTINGS="/DietPi/dietpi/.dietpi-affinity"
+	FP_TEMP="/tmp/.dietpi-affinity_temp"
 
 	Read_Settings_File(){
 
 		for ((i=0; i<$MAX_PROGRAMS; i++))
 		do
 			local sed_index=$(( $i + 1 ))
-			local value=$(sed -n "$sed_index"p $FP_SETTINGS)
-			if [[ $value =~ ^-?[0-9]+$ ]]; then
-				aNICE[$i]=$value
-			fi
+			aAFFINITY[$i]=$(sed -n "$sed_index"p $FP_SETTINGS)
+
 		done
 
 	}
@@ -49,7 +47,7 @@
 
 		for ((i=0; i<$MAX_PROGRAMS; i++))
 		do
-			echo -e "${aNICE[$i]}" >> $FP_SETTINGS
+			echo -e "${aAFFINITY[$i]}" >> $FP_SETTINGS
 		done
 
 	}
@@ -60,7 +58,7 @@
 	Init(){
 
 		#--------------------------------------------------------------------------------
-		#Init array
+		#Init Software array
 		TEMP=0
 		aNAME[$TEMP]="Cron";aPROCESS_NAME[$TEMP]="[c]ron";((TEMP++))
 		aNAME[$TEMP]="Deluge (Daemon)";aPROCESS_NAME[$TEMP]="[d]eluged";((TEMP++))
@@ -87,15 +85,31 @@
 		# - Find out which programs are running (impies installed)
 		ps aux > "$FP_TEMP"
 
+		#Enable affinity for all cores and all programs by default
+		local init_affinity_value=0
+		if (( $(nproc --all) > 1 )); then
+			init_affinity_value="0-$(( $(nproc --all) - 1))"
+		fi
+
 		for ((i=0; i<$MAX_PROGRAMS; i++))
 		do
-			#Continue the init array from above (saves having to process another for loop)
-			aNICE[$i]=0
+			#Create our additional arrays
+			aAFFINITY[$i]=$init_affinity_value
+			aPID[$i]=0
 			aAVAILABLE[$i]=0
 
+			#Obtain list of available programs and their PID's
 			if (( $(cat "$FP_TEMP" | grep -ci -m1 "${aPROCESS_NAME[$i]}") == 1 )); then
 				aAVAILABLE[$i]=1
+
+				#Obtain PID
+				aPID[$i]=$(cat "$FP_TEMP" | grep -m1 "${aPROCESS_NAME[$i]}" | awk '{print $2}')
+
+				#Obtain affinity (this pulls in 0 values for mysql/apache2 etc)
+				#aAFFINITY[$i]=$(taskset -c -p ${aPID[$i]} | awk '{print $6}')
+
 			fi
+
 		done
 
 		#--------------------------------------------------------------------------------
@@ -109,16 +123,17 @@
 	}
 
 	#/////////////////////////////////////////////////////////////////////////////////////
-	# Nice
+	# Globals
 	#/////////////////////////////////////////////////////////////////////////////////////
 	MAX_PROGRAMS=0
 
-	aNICE=()
+	aAFFINITY=()
+	aPID=()
 	aNAME=()
 	aPROCESS_NAME=()
 	aAVAILABLE=()
 
-	Apply_Nice(){
+	Apply_Affinity(){
 
 		local status_text="OK"
 
@@ -126,21 +141,14 @@
 		do
 			if (( ${aAVAILABLE[$i]} == 1 )); then
 
-				#Find multiple matches
-				cat "$FP_TEMP" | grep "${aPROCESS_NAME[$i]}" | awk '{print $2}' > /tmp/.dietpi-nice_pid
-				while read -r line
-				do
-					renice -n ${aNICE[$i]} "$line" &> /dev/null
-					if (( $? == 0 )); then
-						status_text="Ok"
-					else
-						status_text="FAILED"
-					fi
+				taskset -pc ${aAFFINITY[$i]} ${aPID[$i]} &> /dev/null
+				if (( $? == 0 )); then
+					status_text="Ok"
+				else
+					status_text="FAILED"
+				fi
+				echo -e " - Affinity ${aAFFINITY[$i]} applied to ${aPID[$i]} (${aNAME[$i]}) | $status_text"
 
-					echo -e " - Nice ${aNICE[$i]} applied to ${aPROCESS_NAME[$i]} (${aNAME[$i]}) | $status_text"
-
-				done < /tmp/.dietpi-nice_pid
-				rm /tmp/.dietpi-nice_pid
 
 			fi
 		done
@@ -149,7 +157,7 @@
 	#/////////////////////////////////////////////////////////////////////////////////////
 	# Menu System
 	#/////////////////////////////////////////////////////////////////////////////////////
-	PROGRAM_NAME="DietPi-Nice"
+	PROGRAM_NAME="DietPi-Affinity"
 	WHIP_QUESTION=0
 	CHOICE=0
 	TARGETMENUID=0
@@ -177,7 +185,7 @@
 		for ((i=0; i<$MAX_PROGRAMS; i++))
 		do
 			if (( ${aAVAILABLE[$i]} == 1 )); then
-				whiptail_menu_array+=("${aNAME[$i]}" ": ${aNICE[$i]}")
+				whiptail_menu_array+=("${aNAME[$i]}" ": ${aAFFINITY[$i]}")
 			else
 				whiptail_menu_array+=("${aNAME[$i]}" ": Not available.")
 			fi
@@ -207,51 +215,52 @@
 
 				whiptail --title "Not available." --msgbox "${aNAME[$index_current]} is not running and/or installed." 8 70
 
-			#Change nice
+			#Change affinity
 			else
 
-				#Get existing nice level
-				local nice_current=0
-				#Whiptail will not work with negative numbers. The string cannot start with "-" as it throws subscript error.
-				nice_current="Nice : ${aNICE[$index_current]}"
-
+				#Get existing affinity
 				local whiptail_menu_array=()
 
-				for ((i=-20; i<20; i++))
+				for ((i=0; i<$(nproc --all); i++))
 				do
-					local desc=""
-					if (( $i == -20 )); then
-						desc="(Highest priority)"
-					elif (( $i == -10 )); then
-						desc="(Higher priority)"
-					elif (( $i == -5 )); then
-						desc="(High priority)"
-					elif (( $i == 0 )); then
-						desc="(Default priority)"
-					elif (( $i == 5 )); then
-						desc="(Low priority)"
-					elif (( $i == 10 )); then
-						desc="(Lower priority)"
-					elif (( $i == 19 )); then
-						desc="(Lowest priority)"
-					fi
-					whiptail_menu_array+=("Nice : $i" " $desc")
+					whiptail_menu_array+=("$i" "CPU                           " "on")
 				done
 
-				WHIP_QUESTION="Please select your nice level for:\n${aNAME[$index_current]}\n\nInfo:\n - Negative values have a higher priority (eg: -10).\n - Positive values have a lower priority (eg: 15).\n - The default value is 0."
-				OPTION=$(whiptail --title "$PROGRAM_NAME" --backtitle "$PROGRAM_NAME" --menu "$WHIP_QUESTION" --cancel-button "Back" --default-item "$nice_current" 19 60 5 "${whiptail_menu_array[@]}" 3>&1 1>&2 2>&3)
+				WHIP_QUESTION="Please select your CPU affinity for:\n${aNAME[$index_current]}\n\n- Use the spacebar to enable/disable access to specific cores, for this program.\n- The default value is to enable all items."
+				whiptail --title "$PROGRAM_NAME" --backtitle "$PROGRAM_NAME" --checklist --separate-output "$WHIP_QUESTION" --cancel-button "Back" 18 65 6 "${whiptail_menu_array[@]}" 2>/tmp/dietpi-affinity_results
 				CHOICE=$?
 
 				unset whiptail_menu_array
 
-				if (( $CHOICE == 0 )); then
-					#Convert back to int
-					aNICE[$index_current]=$(echo "$OPTION" | sed 's/[A-Za-z :]*//g')
+				local new_affinity=""
+				local loop_count=0
 
-					#Apply nice
-					Apply_Nice
+				while read choice
+				do
+					if [ "$choice" != "" ]; then
 
+						#taskset requires , (comma) seperated cpu index indexs after 1st entry.
+						if (( $loop_count == 0 )); then
+							new_affinity+="$choice"
+
+						#Add comma for future entries
+						else
+							new_affinity+=",$choice"
+						fi
+						((loop_count++))
+
+					fi
+				done < /tmp/dietpi-affinity_results
+				rm /tmp/dietpi-affinity_results &> /dev/null
+
+				#Update affinity array with new value, if at least 1 item was selected.
+				if [ "$new_affinity" != "" ] ; then
+					aAFFINITY[$index_current]="$new_affinity"
 				fi
+
+				#Apply
+				Apply_Affinity
+
 			fi
 
 		else
@@ -283,16 +292,18 @@
 		#Save settings
 		Write_Settings_File
 
-	#Apply nice
+	#Apply
 	elif (( $INPUT == 1 )); then
-		Apply_Nice
+		Apply_Affinity
 	fi
+
 	#-----------------------------------------------------------------------------------
 	#Del tmp files
 	rm "$FP_TEMP" &> /dev/null
 	#-----------------------------------------------------------------------------------
 	#Delete[] Global arrays
-	unset aNICE
+	unset aAFFINITY
+	unset aPID
 	unset aNAME
 	unset aPROCESS_NAME
 	unset aAVAILABLE
