@@ -163,3 +163,6 @@ Ampache
 
 FFmpeg
 - https://github.com/FFmpeg/FFmpeg
+
+Lets Encrypt
+- https://github.com/letsencrypt/letsencrypt
