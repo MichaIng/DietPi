@@ -15,9 +15,6 @@
 	# - Generates and uses /DietPi/dietpi/.installed (software list) # 0=not installed, 1=selected for install, 2=installed
 	#////////////////////////////////////
 
-	#/////////////////////////////////////////////////////////////////////////////////////
-	#Exit Paths
-	#/////////////////////////////////////////////////////////////////////////////////////
 	#Exit path for non-root logins.
 	if (( $UID != 0 )); then
 		clear
@@ -980,8 +977,8 @@
 			AGI python
 
 			#Download Grasshopper
-			local grasshopper_directory=$(cat /DietPi/dietpi.txt | grep -m1 'grasshopper_directory=' | sed 's/grasshopper_directory=//g')
-			INSTALL_URL_ADDRESS=$(cat /DietPi/dietpi.txt | grep -m1 'grasshopper_url=' | sed 's/grasshopper_url=//g')
+			local grasshopper_directory=$(cat /DietPi/dietpi.txt | grep -m1 '^grasshopper_directory=' | sed 's/.*=//')
+			INSTALL_URL_ADDRESS=$(cat /DietPi/dietpi.txt | grep -m1 '^grasshopper_url=' | sed 's/.*=//')
 			/DietPi/dietpi/func/check_connection "$INSTALL_URL_ADDRESS"
 			if (( $? == 0 )); then
 				wget "$INSTALL_URL_ADDRESS" -O grasshopper.zip
@@ -1067,7 +1064,7 @@
 				#Check free available memory. Increase swapfile size to prevent gravity running out of mem.
 				if (( $(free -m -o | grep -m1 'Mem:' | awk '{print $4}') < 512 )); then
 					if [ -f /etc/dphys-swapfile ] &&
-						(( $(cat /etc/dphys-swapfile | grep 'CONF_SWAPSIZE=' | sed 's/CONF_SWAPSIZE=//g') < 500 )); then
+						(( $(cat /etc/dphys-swapfile | grep 'CONF_SWAPSIZE=' | sed 's/.*=//') < 500 )); then
 						echo -e "\nDietPi:\nIncreasing swapfile size before running gravity.sh, please wait.....\n"
 						dphys-swapfile swapoff
 						echo -e "CONF_SWAPSIZE=500" > /etc/dphys-swapfile
@@ -1698,6 +1695,9 @@ _EOF_
 			#Jessie, must enable root login
 			if (( $DISTRO == 3 )); then
 				sed -i '/PermitRootLogin/c\PermitRootLogin yes' /etc/ssh/sshd_config
+
+				#Restart ssh server now so root users can login during setup.
+				systemctl restart ssh
 			fi
 
 			SSHSERVER_OPENSSH=2
@@ -3339,6 +3339,48 @@ _EOF_
 		#Write to .install File
 		Write_InstallFileList
 
+		#Automation
+		if (( $DIETPI_INSTALL_STAGE == 0 )); then
+
+			#Exec Custom 1st run Script
+			if [ "$AUTOINSTALL_CUSTOMSCRIPTURL" != "0" ]; then
+
+				local fp_automation_script_log="/root/AUTO_CustomScriptURL.log"
+
+				INSTALL_DESCRIPTION='Automation - Custom 1st run Script'
+				Banner_Installing
+
+				#check source is online
+				INSTALL_URL_ADDRESS=$AUTOINSTALL_CUSTOMSCRIPTURL
+				/DietPi/dietpi/func/check_connection "$INSTALL_URL_ADDRESS"
+
+				echo -e "Automated custom script executed succesfully:\nURL = $AUTOINSTALL_CUSTOMSCRIPTURL" > "$fp_automation_script_log"
+
+				#Install
+				if (( $? == 0 )); then
+
+					#Get script and execute
+					wget "$INSTALL_URL_ADDRESS" -O /root/AUTO_CustomScriptURL.sh
+					chmod +x /root/AUTO_CustomScriptURL.sh
+					/root/AUTO_CustomScriptURL.sh
+					local result=$?
+					if (( $result != 0 )); then
+						echo -e "Automated Custom Script Error:\n - Exit code = $result\n - URL = $AUTOINSTALL_CUSTOMSCRIPTURL" > "$fp_automation_script_log"
+					fi
+
+				else
+					echo -e "Automated Custom Script URL Error:\n $AUTOINSTALL_CUSTOMSCRIPTURL is offline and/or unreachable" > "$fp_automation_script_log"
+				fi
+			fi
+
+			#Automation done - Disable autologin if used.
+			if (( $AUTOINSTALL_AUTOLOGIN == 1 )) &&
+				(( $(cat /DietPi/dietpi/.auto_boot_index) == 7 )); then
+				/DietPi/dietpi/dietpi-autostart 0
+			fi
+
+		fi
+
 		#Set Install Stage to Finished
 		echo 1 > /DietPi/dietpi/.install_stage
 
@@ -3348,15 +3390,34 @@ _EOF_
 	# First Run functions (eg: on a fresh install)
 	#/////////////////////////////////////////////////////////////////////////////////////
 
-	AUTOINSTALL_INDEX=$(cat /DietPi/dietpi.txt | grep -m1 'AUTO_Install_Index=' | sed 's/AUTO_Install_Index=//g')
-	AUTOINSTALL_SKIPUPDATEREBOOTPROMPT=$(cat /DietPi/dietpi.txt | grep -m1 'AUTO_DietpiSoftware_SkipUpdateRebootPrompt=' | sed 's/AUTO_DietpiSoftware_SkipUpdateRebootPrompt=//g')
-	AUTOINSTALL_SKIPUSBDRIVE=$(cat /DietPi/dietpi.txt | grep -m1 'AUTO_DietpiSoftware_SkipUsbDrive=' | sed 's/AUTO_DietpiSoftware_SkipUsbDrive=//g')
-	AUTOINSTALL_SKIPQUESTIONS=$(cat /DietPi/dietpi.txt | grep -m1 'AUTO_DietpiSoftware_SkipQuestions=' | sed 's/AUTO_DietpiSoftware_SkipQuestions=//g')
-	AUTOINSTALL_SSHINDEX=$(cat /DietPi/dietpi.txt | grep -m1 'AUTO_DietpiSoftware_SSHServerIndex=' | sed 's/AUTO_DietpiSoftware_SSHServerIndex=//g')
-	AUTOINSTALL_FILESERVERINDEX=$(cat /DietPi/dietpi.txt | grep -m1 'AUTO_DietpiSoftware_FileServerIndex=' | sed 's/AUTO_DietpiSoftware_FileServerIndex=//g')
-	AUTOINSTALL_LOGGINGINDEX=$(cat /DietPi/dietpi.txt | grep -m1 'AUTO_DietpiSoftware_LoggingIndex=' | sed 's/AUTO_DietpiSoftware_LoggingIndex=//g')
+	AUTOINSTALL_INDEX=0
+	AUTOINSTALL_CUSTOMSCRIPTURL=0
+
+	AUTOINSTALL_AUTOLOGIN=0
+
+	AUTOINSTALL_SKIPUPDATEREBOOTPROMPT=0
+	AUTOINSTALL_SKIPUSBDRIVE=0
+	AUTOINSTALL_SKIPQUESTIONS=0
+
+	AUTOINSTALL_SSHINDEX=0
+	AUTOINSTALL_FILESERVERINDEX=0
+	AUTOINSTALL_LOGGINGINDEX=0
 
 	FirstRun_Automated_Install(){
+
+		#Get settings
+		AUTOINSTALL_INDEX=$(cat /DietPi/dietpi.txt | grep -m1 '^AUTO_Install_Index=' | sed 's/.*=//')
+		AUTOINSTALL_CUSTOMSCRIPTURL=$(cat /DietPi/dietpi.txt | grep -m1 '^AUTO_CustomScriptURL=' | sed 's/AUTO_CustomScriptURL=//')
+
+		AUTOINSTALL_AUTOLOGIN=$(cat /DietPi/dietpi.txt | grep -m1 '^AUTO_AutoLogin=' | sed 's/.*=//')
+
+		AUTOINSTALL_SKIPUPDATEREBOOTPROMPT=$(cat /DietPi/dietpi.txt | grep -ci -m1 '^AUTO_DietpiSoftware_SkipUpdateRebootPrompt=1')
+		AUTOINSTALL_SKIPUSBDRIVE=$(cat /DietPi/dietpi.txt | grep -ci -m1 '^AUTO_DietpiSoftware_SkipUsbDrive=1')
+		AUTOINSTALL_SKIPQUESTIONS=$(cat /DietPi/dietpi.txt | grep -ci -m1 '^AUTO_DietpiSoftware_SkipQuestions=1')
+
+		AUTOINSTALL_SSHINDEX=$(cat /DietPi/dietpi.txt | grep -m1 '^AUTO_DietpiSoftware_SSHServerIndex=' | sed 's/.*=//')
+		AUTOINSTALL_FILESERVERINDEX=$(cat /DietPi/dietpi.txt | grep -m1 '^AUTO_DietpiSoftware_FileServerIndex=' | sed 's/.*=//')
+		AUTOINSTALL_LOGGINGINDEX=$(cat /DietPi/dietpi.txt | grep -m1 '^AUTO_DietpiSoftware_LoggingIndex=' | sed 's/.*=//')
 
 		#Automated install based on index
 		if (( $AUTOINSTALL_INDEX > 0 )); then
