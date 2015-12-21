@@ -11,6 +11,11 @@
 	# Info: - Formats and Mounts /dev/sda1 /mnt/usb_1
 	#
 	# Notes: Script does not support VM image.
+	# This script needs a complete rewrite, messy. Support multiple drives etc.
+	#
+	# Usage:
+	# 	  = Menu
+	#	1 = Automated format and mounting of /dev/sda
 	#////////////////////////////////////
 
 	#Prevent VM image from running this script
@@ -21,16 +26,21 @@
 		exit
 	fi
 
-	usb_hdd_filesystem="None"
-	usb_hdd_mounted=0
-	CheckDriveConnected(){
+	#Grab Input (valid interger)
+	INPUT=0
+	if [[ $1 =~ ^-?[0-9]+$ ]]; then
+		INPUT=$1
+	fi
 
-		usb_hdd_filesystem=$(blkid -o list | grep '/dev/sda1' | awk '{ print $2 }')
-		usb_hdd_mounted=$(df -h | grep -ci -m1 '/mnt/usb_1')
+	USB_FILESYSTEM_TYPE="None"
+	USB_MOUNTED=0
+	Check_Drive_Mounted(){
+
+		USB_FILESYSTEM_TYPE=$(blkid -o list | grep '/dev/sda1' | awk '{ print $2 }')
+		USB_MOUNTED=$(df -h | grep -ci -m1 '/mnt/usb_1')
 	}
 
-	RUNNING_SETUP=1
-	Run_Setup(){
+	Wait_For_Drive_Connection(){
 
 		clear
 		# Stop Services
@@ -43,32 +53,51 @@
 		clear
 		echo -e " --------------------------------\n D I E T - P I \n External Drive Setup \n --------------------------------"
 		echo -e " Please Insert a USB Drive into your $HW_NAME."
+		if (( $INPUT == 1 )); then
+			echo -e " \n AUTOMATION FORMAT WARNING:-------------------------\n Format automation flag is enabled.\n The USB drive will be formatted to ext4 when plugged in.\n All data on /dev/sda will be DELETED.\n AUTOMATION FORMAT WARNING:-------------------------\n"
+		fi
+
 		echo -e " \n Waiting for a device to be connected.\n - Press CTRL+C to abort.\n\n If aborted, you can restart the DietPi Installation by running:\n dietpi-software\n"
 
 		while true; do
 			if [ -d /sys/block/sda ]; then
+				# - uncomment and enable ntfs-3g and ext4 fstab entires
+				sed -i -E '/\/mnt\/usb_1[[:space:]]+ntfs-3g/s/^##*//' /etc/fstab
+				sed -i -E '/\/mnt\/usb_1[[:space:]]+ext4/s/^##*//' /etc/fstab
+
 				break
 			else
 				sleep 1
 			fi
 		done
 
+	}
+
+	RUNNING_SETUP=1
+	Run_Setup(){
+
+		Wait_For_Drive_Connection
+
+		Attempt_Mount_Existing_Drive
+
+		Finish_Setup
+
+	}
+
+	Attempt_Mount_Existing_Drive(){
 
 		#Check if filesystem already exists and is mountable
-		# - uncomment and enable ntfs-3g and ext4 fstab entires
-		sed -i -E '/\/mnt\/usb_1[[:space:]]+ntfs-3g/s/^##*//' /etc/fstab
-		sed -i -E '/\/mnt\/usb_1[[:space:]]+ext4/s/^##*//' /etc/fstab
 		# - Attempt to mount
 		mount -a
-		CheckDriveConnected
-		if (( $usb_hdd_mounted == 1 )); then
+		Check_Drive_Mounted
+		if (( $USB_MOUNTED == 1 )); then
 			clear
 			echo -e " --------------------------------\n D I E T - P I \n External Drive Setup \n --------------------------------"
-			echo -e " An Existing $usb_hdd_filesystem Drive has Been Found \n"
+			echo -e " An Existing $USB_FILESYSTEM_TYPE Drive has Been Found \n"
 			df /dev/sda1 -h
 			echo -e ""
 
-			if [ "$usb_hdd_filesystem" = "ntfs" ]; then
+			if [ "$USB_FILESYSTEM_TYPE" = "ntfs" ]; then
 				echo -e " (WARNING): \n - NTFS is not recommended as it requires higher cpu usage \n - EXT4 will maximise the filesystem performance of your Pi \n \n If you have data (eg: movies) on this drive you want to keep, press enter \n "
 				read -r -p " Would you like to format this drive to EXT4? [y/N] " response
 			else
@@ -77,19 +106,23 @@
 
 			case $response in
 				[yY][eE][sS]|[yY])
-					Run_Format
-					;;
+					Menu_Format
+				;;
 			esac
 
 		#Format drive
 		else
-			Run_Format
+			Menu_Format
 		fi
 
-		#Test the new drive
+	}
+
+	Finish_Setup(){
+
+		#Finish setup, add mount to fstab
 		clear
-		CheckDriveConnected
-		if (( $usb_hdd_mounted == 1 )); then
+		Check_Drive_Mounted
+		if (( $USB_MOUNTED == 1 )); then
 
 			#Add root delay to RPi (Prevents slow powering external drives, from failing to be ready and mountable during boot.)
 			if (( $HW_MODEL < 10 )) &&
@@ -98,22 +131,29 @@
 			fi
 
 			#Disable the unused /dev/sda mount entries, else, SystemD has a "hissy fit"....
-			if [ "$usb_hdd_filesystem" = "ext4" ]; then
+			if [ "$USB_FILESYSTEM_TYPE" = "ext4" ]; then
 				sed -i -E '/\/mnt\/usb_1[[:space:]]+ntfs-3g/s/^/#/' /etc/fstab
-			elif [ "$usb_hdd_filesystem" = "ntfs" ]; then
+			elif [ "$USB_FILESYSTEM_TYPE" = "ntfs" ]; then
 				sed -i -E '/\/mnt\/usb_1[[:space:]]+ext4/s/^/#/' /etc/fstab
 			fi
 
-			whiptail --title "Dedicated Drive Completed" --msgbox "Dedicated USB harddrive setup completed successfully:\n\nFilesystem      Size  Used Avail Use% Mounted on\n$(df -h | grep '/mnt/usb_1')" --backtitle "DietPi-External Drive Setup" 12 70
+			if (( $INPUT == 0 )); then
+				whiptail --title "Dedicated Drive Completed" --msgbox "Dedicated USB harddrive setup completed successfully:\n\nFilesystem      Size  Used Avail Use% Mounted on\n$(df -h | grep '/mnt/usb_1')" --backtitle "DietPi-External Drive Setup" 12 70
+			fi
 			RUNNING_SETUP=0
+
+		#Failed to mount
 		else
 
-			whiptail --title "Error - Not Mounted" --yesno "DietPi was unable to complete the external USB harddrive setup. The drive may have incompatible partitions and/or filesystem. Formatting the drive may resolve the issue.\n\nWould you like to try again?" --defaultno --backtitle "DietPi-External Drive Setup" 11 70
-			CHOICE=$?
-			if (( $CHOICE == 0 )); then
-				RUNNING_SETUP=1
-			else
-				RUNNING_SETUP=0
+			if (( $INPUT == 0 )); then
+				whiptail --title "Error - Not Mounted" --yesno "DietPi was unable to complete the external USB harddrive setup. The drive may have incompatible partitions and/or filesystem. Formatting the drive may resolve the issue.\n\nWould you like to try again?" --defaultno --backtitle "DietPi-External Drive Setup" 11 70
+				CHOICE=$?
+				if (( $CHOICE == 0 )); then
+					#Run again
+					RUNNING_SETUP=1
+				else
+					RUNNING_SETUP=0
+				fi
 			fi
 		fi
 
@@ -121,6 +161,25 @@
 
 	Run_Format(){
 
+		#Unmount all connected drives
+		umount /dev/sd[a-z][1-9]
+		#Clear MBR and partition table from device
+		dd if=/dev/zero of=/dev/sda bs=512 count=1
+
+		#Create New partition on /dev/sda
+		echo -e "o\nn\np\n1\n\n\nw" | fdisk /dev/sda
+
+		#Format ext4
+		umount /dev/sd[a-z][1-9]
+		echo -e "y" | mkfs.ext4 /dev/sda1
+		resize2fs /dev/sda1
+		mount -a
+		chown -R root:root /mnt/usb_1
+
+	}
+
+	#Menus
+	Menu_Format(){
 		#Confirm user wants to wipe this drive
 		clear
 		echo -e " --------------------------------\n D I E T - P I \n External Drive Setup \n --------------------------------"
@@ -129,31 +188,26 @@
 		read -r -p " Do you wish to Format this drive? [y/N] " response
 		case $response in
 			[yY][eE][sS]|[yY])
-
-				#Unmount all connected drives
-				umount /dev/sd[a-z][1-9]
-				#Clear MBR and all partitions from device
-				dd if=/dev/zero of=/dev/sda bs=512 count=1
-
-				#Create New partition on /dev/sda
-				echo -e "o\nn\np\n1\n\n\nw" | fdisk /dev/sda
-				#Format ext4
-				umount /dev/sd[a-z][1-9]
-				echo -e "y" | mkfs.ext4 /dev/sda1
-				resize2fs /dev/sda1
-				mount -a
-				chown -R root:root /mnt/usb_1
+				Run_Format
 			;;
 		esac
-
 	}
 
 	#/////////////////////////////////////////////////////////////////////////////////////
 	# Main Loop
 	#/////////////////////////////////////////////////////////////////////////////////////
-	while (( $RUNNING_SETUP == 1 )); do
-		Run_Setup
-	done
+	#Menu
+	if (( $INPUT == 0 )); then
+		while (( $RUNNING_SETUP == 1 )); do
+			Run_Setup
+		done
+
+	#Automated format
+	elif (( $INPUT == 1 )); then
+		Wait_For_Drive_Connection
+		Run_Format
+
+	fi
 
 	#-----------------------------------------------------------------------------------
 	exit
