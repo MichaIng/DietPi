@@ -1,0 +1,401 @@
+#! /bin/bash
+### BEGIN INIT INFO
+# Provides:          Squeezelite
+# Required-Start:	 dietpi-service
+# Required-Stop:
+# Should-Start:
+# Default-Start:     2 3 4 5
+# Default-Stop:      0 1 6
+# Short-Description: Squeezelite
+# Description:       Light weight streaming audio player for Logitech's Squeezebox audio server
+#                    See: http://code.google.com/p/squeezelite/
+#                    and: http://forums.slimdevices.com/showthread.php?97046-Announce-Squeezelite-a-small-headless-squeezeplay-emulator-for-linux-%28alsa-only%29
+### END INIT INFO
+
+# Script version 1.4
+
+# See for full install instructions:  http://www.gerrelt.nl/RaspberryPi/wordpress/tutorial-installing-squeezelite-player-on-raspbian/
+# Uninstall Instructions :  update-rc.d squeezelitehf remove
+
+# PATH should only include /usr/* if it runs after the mountnfs.sh script
+PATH=/sbin:/usr/sbin:/bin:/usr/bin
+DESC="Squeezebox client"
+NAME=squeezelite-armv6hf
+
+LINUX_DISTRO=$(uname -r)
+if [[ $LINUX_DISTRO == *"piCore"* ]]
+then
+  DAEMON=/mnt/mmcblk0p2/tce/${NAME}
+else
+  DAEMON=/usr/bin/${NAME}
+fi
+
+PIDFILE=/var/run/${NAME}.pid
+SCRIPTNAME=/etc/init.d/squeezelite
+# get mac address from wifi adapter or on board network card
+SL_MAC_ADDRESS=$(ifconfig | grep '^wlan0 ' | tr -s ' ' | rev | sed -e 's/^[ \t]*//' | cut -d ' ' -f1 | rev)
+[ -n "$SL_MAC_ADDRESS" ] || SL_MAC_ADDRESS=$(ifconfig | grep 'eth0' | tr -s ' ' | rev | sed -e 's/^[ \t]*//' | cut -d ' ' -f1 | rev)
+# get hostname which can be used as hostname
+# watch out, on raspbian, you can only use letters, numbers and hyphens (minus sign, "-"). And nothing else!
+SL_NAME=$(hostname -s)
+[ -n "$SL_NAME" ] || SL_NAME=SqueezelitePlayer
+# Get squeezelite version, for logging and update procedure
+SL_VERSION=$(sudo $DAEMON -t | grep "Squeezelite v" | tr -s ' ' | cut -d ',' -f1 | cut -d ' ' -f2)
+# Squeezebox server port for sending play and power off commands
+SB_SERVER_CLI_PORT="9090"
+
+# Exit if the package is not installed
+if [ ! -x "$DAEMON" ]
+then
+  echo "Error: $DAEMON not found."
+  exit 2
+fi
+
+# Get user settings for squeezelite (it should contain settings like SL_SOUNDCARD, SB_SERVER_IP, SL_ALSA_PARAMS etc.)
+# For the default script, see: http://www.gerrelt.nl/RaspberryPi/squeezelite_settings.sh
+SL_SETTINGS=/usr/local/bin/squeezelite_settings.sh
+if [ ! -x "$SL_SETTINGS" ]
+then
+  echo "Error: script $SL_SETTINGS not found."
+  exit 2
+else
+  . $SL_SETTINGS
+fi
+
+# Read configuration variable file if it is present
+[ -r /etc/default/$NAME ] && . /etc/default/$NAME
+
+# Load the VERBOSE setting and other rcS variables
+[ -r /lib/init/vars.sh ] && . /lib/init/vars.sh
+
+# Define LSB log_* functions.
+# Depend on lsb-base (>= 3.2-14) to ensure that this file is present
+# and status_of_proc is working.
+[ -r /lib/lsb/init-functions ] && . /lib/lsb/init-functions
+
+#
+# Function that starts the daemon/service
+#
+do_start()
+{
+
+    # Return
+    #   0 if daemon has been started
+    #   1 if daemon was already running
+    #   2 if daemon could not be started
+
+    # check if squeezelite is allready running
+    start-stop-daemon -K --quiet --pidfile $PIDFILE --test
+    if [ "$?" == 0 ]; then
+      echo "Squeezelite already running (checked pidfile: $PIDFILE)."
+      return 1
+    fi
+
+    DAEMON_START_ARGS=""
+
+    # set the working directory for squeezelite
+    if [ ! -z "$SL_WORKING_DIR" ]; then
+       DAEMON_START_ARGS="${DAEMON_START_ARGS} --chdir ${SL_WORKING_DIR}"
+    fi
+
+    # set the user which will be used to start squeezelite
+    if [ ! -z "$SL_USER" ]; then
+       DAEMON_START_ARGS="${DAEMON_START_ARGS} --chuid ${SL_USER}"
+    fi
+
+    DAEMON_ARGS=""
+
+    # add souncard setting if set
+    if [ ! -z "$SL_SOUNDCARD" ]; then
+       DAEMON_ARGS="${DAEMON_ARGS} -o ${SL_SOUNDCARD}"
+    fi
+
+    # add squeezelite name if set
+    if [ ! -z "$SL_NAME" ]; then
+       DAEMON_ARGS="${DAEMON_ARGS} -n ${SL_NAME}"
+    fi
+
+    # add mac address if set
+    if [ ! -z "$SL_MAC_ADDRESS" ]; then
+       DAEMON_ARGS="${DAEMON_ARGS} -m ${SL_MAC_ADDRESS}"
+    fi
+
+    # add squeezebox server ip address if set
+    if [ ! -z "$SB_SERVER_IP" ]; then
+       DAEMON_ARGS="${DAEMON_ARGS} -s ${SB_SERVER_IP}"
+    fi
+
+    # set ALSA parameters if set
+    if [ ! -z "$SL_ALSA_PARAMS" ]; then
+       DAEMON_ARGS="${DAEMON_ARGS} -a ${SL_ALSA_PARAMS}"
+    fi
+
+    # add logging if set
+    if [ ! -z "$SL_LOGFILE" ]; then
+       if [ -f ${SL_LOGFILE} ]; then
+          rm ${SL_LOGFILE}
+       fi
+       DAEMON_ARGS="${DAEMON_ARGS} -f ${SL_LOGFILE}"
+    fi
+
+    # add log level setting if set
+    if [ ! -z "$SL_LOGLEVEL" ]; then
+       DAEMON_ARGS="${DAEMON_ARGS} -d ${SL_LOGLEVEL}"
+    fi
+
+    echo "Starting: $DAEMON $DAEMON_ARGS"
+    echo "with pidfile: $PIDFILE"
+    start-stop-daemon --start --quiet --make-pidfile --pidfile $PIDFILE --background $DAEMON_START_ARGS --exec $DAEMON -- $DAEMON_ARGS || return 2
+
+    # next commands can only be done if Squeezebox server IP is set
+    if  [ ! -z "$SB_SERVER_IP" ]; then
+      echo "Wait until player is connected to Squeezebox server before sending play command"
+      for i in $(seq 1 10)
+      do
+        PLAYERCONNECTED=$(printf "$SL_NAME connected ?\nexit\n" | nc $SB_SERVER_IP $SB_SERVER_CLI_PORT  | tr -s ' '| cut -d ' ' -f3)
+        if [ "$PLAYERCONNECTED" == "1" ]
+        then
+          echo "Player connected to Squeezebox server after $i seconds"
+          break
+        fi
+        echo "Not connected after $i seconds..."
+        sleep 1
+      done
+
+      if [ "$PLAYERCONNECTED" == "1" ]
+      then
+        # connected
+
+        # First send power-on command to squeezebox server
+        echo "Sending power on command for player ${SL_NAME} (${SL_MAC_ADDRESS}) to Squeezebox server (${SB_SERVER_IP} ${SB_SERVER_CLI_PORT})"
+        printf "$SL_MAC_ADDRESS power 1\nexit\n" | nc $SB_SERVER_IP $SB_SERVER_CLI_PORT > /dev/null
+
+        # check if auto play is set
+        if [ ! -z "$SL_AUTO_PLAY" ] && [ "${SL_AUTO_PLAY^^}" == "YES" ]; then
+          do_play
+        fi
+      else
+        echo "Could not send play command to player $SL_NAME on Squeezebox server $SB_SERVER_IP"
+      fi
+
+    fi
+}
+
+#
+# Function that stops the daemon/service
+#
+do_stop()
+{
+    # First send power-off command to squeezebox server, can only be done if Squeezebox server IP is set
+    if  [ ! -z "$SB_SERVER_IP" ]; then
+      echo "Sending power off command for player ${SL_NAME} (${SL_MAC_ADDRESS}) to Squeezebox server (${SB_SERVER_IP} ${SB_SERVER_CLI_PORT})"
+      printf "$SL_MAC_ADDRESS power 0\nexit\n" | nc $SB_SERVER_IP $SB_SERVER_CLI_PORT > /dev/null
+    fi
+
+    # Return
+    #   0 if daemon has been stopped
+    #   1 if daemon was already stopped
+    #   2 if daemon could not be stopped
+    #   other if a failure occurred
+    start-stop-daemon --stop --quiet --retry=TERM/30/KILL/5 --pidfile $PIDFILE --exec $DAEMON
+    RETVAL="$?"
+    [ "$RETVAL" = 2 ] && return 2
+    # Wait for children to finish too if this is a daemon that forks
+    # and if the daemon is only ever run from this initscript.
+    # If the above conditions are not satisfied then add some other code
+    # that waits for the process to drop all resources that could be
+    # needed by services started subsequently.  A last resort is to
+    # sleep for some time.
+    start-stop-daemon --stop --quiet --oknodo --retry=0/30/KILL/5 --exec $DAEMON
+    [ "$?" = 2 ] && return 2
+    # Many daemons don't delete their pidfiles when they exit.
+    rm -f $PIDFILE
+    return "$RETVAL"
+}
+
+#
+# Function that updates squeezelite
+#
+do_update()
+{
+    wget -P /tmp http://squeezelite-downloads.googlecode.com/git/${NAME}
+    sudo cp $DAEMON /tmp/${NAME}.old
+    sudo mv /tmp/${NAME} $DAEMON
+    sudo chmod u+x $DAEMON
+    # get the new version
+    SL_VERSION=$(sudo $DAEMON -t | grep "Squeezelite v" | tr -s ' ' | cut -d ',' -f1 | cut -d ' ' -f2)
+}
+
+#
+# Function for telling the player to start playing at a certain volume (optional)
+#
+# cronjob:
+#0 7 * * 1-5 sudo /etc/init.d/squeezelite play 40
+#
+do_play()
+{
+    VOLUME=$1
+    # This function only works if the Squeezebox server IP is set
+    if  [ ! -z "$SB_SERVER_IP" ]; then
+      echo "Sending play command to Squeezebox server"
+      printf "$SL_NAME play\nexit\n" | nc $SB_SERVER_IP $SB_SERVER_CLI_PORT > /dev/null
+      if  [ ! -z "$1" ]; then
+         # volume has to be set
+         do_set_volume "$VOLUME"
+      fi
+    else
+      echo "The IP address of the Squeezebox server is not set (variable: SB_SERVER_IP should be set). This is needed for the play function."
+    fi
+}
+
+#
+# Function to play something from the favorite list at a certain volume (optional)
+# Note: replace all spaces in the favorite name with %20
+#
+# cronjob:
+#0 7 * * 1-5 sudo /etc/init.d/squeezelite play_fav "Q-music" 40
+#
+do_play_fav()
+{
+    SEARCHFOR=$1
+    VOLUME=$2
+    # This function only works if the Squeezebox server IP is set
+    if  [ ! -z "$SB_SERVER_IP" ]; then
+      FAV_ID=$(printf "$SL_NAME favorites items 0 1000\nexit\n" | nc $SB_SERVER_IP $SB_SERVER_CLI_PORT  | sed 's/%3A/:/g' | sed 's/ id:/\'$'\n/g' | grep -i "${SEARCHFOR}" | cut -d ':' -f1 | cut -d ' ' -f1 | head -n 1)
+      echo $FAV_ID
+      printf "$SL_NAME favorites playlist play item_id:${FAV_ID}\nexit\n" | nc $SB_SERVER_IP $SB_SERVER_CLI_PORT
+      if  [ ! -z "$2" ]; then
+         # volume has to be set
+         do_set_volume "$VOLUME"
+      fi
+    else
+      echo "The IP address of the Squeezebox server is not set (variable: SB_SERVER_IP should be set). This is needed for the play_fav function."
+    fi
+}
+
+#
+# Function for telling the player to stop playing
+#
+# cronjob:
+#0 7 * * 1-5 sudo /etc/init.d/squeezelite stop_playing
+#
+do_stop_playing()
+{
+    # This function only works if the Squeezebox server IP is set
+    if  [ ! -z "$SB_SERVER_IP" ]; then
+      echo "Sending stop playing command to Squeezebox server"
+      printf "$SL_NAME stop\nexit\n" | nc $SB_SERVER_IP $SB_SERVER_CLI_PORT > /dev/null
+    else
+      echo "The IP address of the Squeezebox server is not set (variable: SB_SERVER_IP should be set). This is needed for the stop_playing function."
+    fi
+}
+
+#
+# Function to set the volume
+#
+# cronjob:
+#0 7 * * 1-5 sudo /etc/init.d/squeezelite set_volume 40
+#
+do_set_volume()
+{
+    VOLUME=$1
+    # This function only works if the Squeezebox server IP is set
+    if  [ ! -z "$SB_SERVER_IP" ]; then
+      if  [ ! -z "$1" ]; then
+         # volume has to be set
+         printf "$SL_NAME mixer volume ${VOLUME}\nexit\n" | nc $SB_SERVER_IP $SB_SERVER_CLI_PORT
+      else
+         echo "ERROR: set_volume needs a volume as a parameter, for example: /etc/init.d/squeezelite set_volume 40"
+      fi
+    else
+      echo "The IP address of the Squeezebox server is not set (variable: SB_SERVER_IP should be set). This is needed for the play_fav function."
+    fi
+}
+
+#
+# Function that sends a SIGHUP to the daemon/service
+#
+do_reload() {
+    #
+    # If the daemon can reload its configuration without
+    # restarting (for example, when it is sent a SIGHUP),
+    # then implement that here.
+    #
+    start-stop-daemon --stop --signal 1 --quiet --pidfile $PIDFILE --name $NAME
+    return 0
+}
+
+case "$1" in
+  start)
+    [ "$VERBOSE" != no ] && echo "Starting $DESC" "$NAME"
+    do_start
+    case "$?" in
+        0|1) [ "$VERBOSE" != no ] && echo "Squeezelite running"; exit 0 ;;
+        *) [ "$VERBOSE" != no ] && echo "Error trying to start squeezelite"; exit 1 ;;
+    esac
+    ;;
+  stop)
+    [ "$VERBOSE" != no ] && echo "Stopping $DESC" "$NAME"
+    do_stop
+    case "$?" in
+        0|1) [ "$VERBOSE" != no ] && echo "Squeezelite stopped"; exit 0 ;;
+        *) [ "$VERBOSE" != no ] && echo "Error trying to stop squeezelite"; exit 1 ;;
+    esac
+    ;;
+  update)
+    echo "Update Squeezelite $SL_VERSION to latest version"
+    do_stop
+    do_update
+    do_start
+    echo "Squeezelite updated to version: $SL_VERSION"
+    ;;
+  play)
+    echo "Play with volume $2"
+    do_play "$2"
+    ;;
+  play_fav)
+    echo "Play favorite $2 with volume $3"
+    do_play_fav "$2" "$3"
+    ;;
+  stop_playing)
+    echo "Stop playing"
+    do_stop_playing
+    ;;
+  set_volume)
+    echo "Set volume to $2"
+    do_set_volume "$2"
+    ;;
+  status)
+       status_of_proc "$DAEMON" "$NAME" && exit 0 || exit $?
+       ;;
+  restart|force-reload)
+    #
+    # If the "reload" option is implemented then remove the
+    # 'force-reload' alias
+    #
+    echo "Restarting $DESC" "$NAME"
+    echo " "
+    do_stop
+    case "$?" in
+      0|1)
+        do_start
+        case "$?" in
+           0) [ "$VERBOSE" != no ] && echo "Squeezelite restarted"; exit 0 ;;
+           1) [ "$VERBOSE" != no ] && echo "Error trying to restart squeezelite, it couldn't be stopped"; exit 1 ;;
+           *) [ "$VERBOSE" != no ] && echo "Error trying to restart squeezelite"; exit 1 ;;
+        esac
+        ;;
+      *)
+          # Failed to stop
+        echo "Error trying to restart squeezelite, it couldn't be stopped"
+        exit 1
+        ;;
+    esac
+    ;;
+  *)
+    echo "Usage: $SCRIPTNAME {start|stop|update|play|play_fav|stop_playing|set_volume|status|restart|force-reload}" >&2
+    exit 3
+    ;;
+esac
+
+:
