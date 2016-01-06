@@ -179,6 +179,7 @@
 	WIRINGPI=0
 	RPIGPIO=0
 	RPII2C=0
+	WIFIHOTSPOT=0
 
 	#Linux Software
 	INSTALL_LINUX_CHOICESMADE=false
@@ -292,6 +293,7 @@
 		echo -e "WIRINGPI $WIRINGPI" >> "$FP_INSTALLED_FILE"
 		echo -e "RPIGPIO $RPIGPIO" >> "$FP_INSTALLED_FILE"
 		echo -e "RPII2C $RPII2C" >> "$FP_INSTALLED_FILE"
+		echo -e "WIFIHOTSPOT $WIFIHOTSPOT" >> "$FP_INSTALLED_FILE"
 
 		echo -e "#Additional Linux Software" >> "$FP_INSTALLED_FILE"
 		echo -e "VIMFULL $VIMFULL" >> "$FP_INSTALLED_FILE"
@@ -377,6 +379,7 @@
 		WIRINGPI=$(cat "$FP_INSTALLED_FILE" | grep -m1 'WIRINGPI ' | awk '{print $2}')
 		RPIGPIO=$(cat "$FP_INSTALLED_FILE" | grep -m1 'RPIGPIO ' | awk '{print $2}')
 		RPII2C=$(cat "$FP_INSTALLED_FILE" | grep -m1 'RPII2C ' | awk '{print $2}')
+		WIFIHOTSPOT=$(cat "$FP_INSTALLED_FILE" | grep -m1 'WIFIHOTSPOT ' | awk '{print $2}')
 
 		#Linux
 		VIMFULL=$(cat "$FP_INSTALLED_FILE" | grep -m1 'VIMFULL ' | awk '{print $2}')
@@ -850,15 +853,11 @@
 			if (( $? == 0 )); then
 				AGI ibsdl1.2debian libsdl-net1.2 --no-install-recommends
 
-				#Download binaries and source
-				wget "$INSTALL_URL_ADDRESS"
-				unzip -o dietpi-opentyrian.zip -d /
-				rm dietpi-opentyrian.zip
+				#Download binaries
+				wget "$INSTALL_URL_ADDRESS" -O package.zip
+				unzip package.zip -d /
+				rm package.zip
 				chmod +x /usr/local/games/opentyrian/opentyrian
-
-				#Copy the DietPi run file for OpenTyrian
-				cp /DietPi/dietpi/conf/opentyrian_run /usr/local/games/opentyrian/run
-				chmod +x /usr/local/games/opentyrian/run
 
 			else
 				Error_NoConnection_NoInstall
@@ -1261,7 +1260,7 @@
 			INSTALL_DESCRIPTION='SqueezeBox / Logitech Media Server'
 			Banner_Installing
 
-			INSTALL_URL_ADDRESS='http://dietpi.com/downloads/binaries/all/logitechmediaserver_7.9.0-1449829896_all.deb'
+			INSTALL_URL_ADDRESS='http://dietpi.com/downloads/binaries/all/logitechmediaserver_7.9.0_all.deb'
 			/DietPi/dietpi/func/check_connection "$INSTALL_URL_ADDRESS"
 
 			#Install
@@ -1439,6 +1438,35 @@
 
 				#Abort Install, prevent configs being applied
 				LETSENCRYPT=0
+			fi
+
+		fi
+
+		#WIFIHOTSPOT
+		if (( $WIFIHOTSPOT == 1 )); then
+			INSTALL_DESCRIPTION='Wifi Hotspot'
+			Banner_Installing
+
+			#check source is online
+			INSTALL_URL_ADDRESS='http://dietpi.com/downloads/binaries/all/hostapd_14128.zip'
+			/DietPi/dietpi/func/check_connection "$INSTALL_URL_ADDRESS"
+
+			#Install
+			if (( $? == 0 )); then
+
+				# - Prereqs
+				AGI hostapd isc-dhcp-server iptables
+
+				wget "$INSTALL_URL_ADDRESS" -O package.zip
+				unzip -o package.zip -d /usr/sbin
+				rm package.zip
+				chmod +x /usr/sbin/hostapd
+
+			else
+				Error_NoConnection_NoInstall
+
+				#Abort Install, prevent configs being applied
+				WIFIHOTSPOT=0
 			fi
 
 		fi
@@ -2499,6 +2527,10 @@ _EOF_
 		#OpenTyrian
 		if (( $OPENTYRIAN == 1 )); then
 
+			#Copy the DietPi run file for OpenTyrian
+			cp /DietPi/dietpi/conf/opentyrian_run /usr/local/games/opentyrian/run
+			chmod +x /usr/local/games/opentyrian/run
+
 			#Create .Desktop SymLinks
 			mkdir -p "$HOME"/Desktop
 			rm /usr/share/applications/opentyrian.desktop &> /dev/null
@@ -2843,12 +2875,6 @@ _EOF_
 			#Grab our test media for user
 			Download_Test_Media
 
-			#Setup squeezebox directories.
-			sed -i "/playlistdir: ''/c\playlistdir: $TARGET_DIRECTORY/$FOLDER_MUSIC" /var/lib/squeezeboxserver/prefs/server.prefs
-			sed -i "/mediadirs: \[\]/a - $TARGET_DIRECTORY/$FOLDER_MUSIC" /var/lib/squeezeboxserver/prefs/server.prefs
-			sed -i "/mediadirs: \[\]/a - $TARGET_DIRECTORY/$FOLDER_VIDEO" /var/lib/squeezeboxserver/prefs/server.prefs
-			sed -i "/mediadirs: \[\]/c\mediadirs:" /var/lib/squeezeboxserver/prefs/server.prefs
-
 			SQUEEZEBOXSERVER=2
 
 		fi
@@ -3100,6 +3126,99 @@ _EOF_
 		if (( $LETSENCRYPT == 1 )); then
 
 			LETSENCRYPT=2
+
+		fi
+
+		#WIFIHOTSPOT
+		if (( $WIFIHOTSPOT == 1 )); then
+
+			local eth_index=$(sed -n 1p /DietPi/dietpi/.network)
+			local wifi_index=$(sed -n 2p /DietPi/dietpi/.network)
+
+			# - DHCPD Config
+			cat << _EOF_ > /etc/dhcp/dhcpd.conf
+ddns-update-style none;
+default-lease-time 600;
+max-lease-time 7200;
+authoritative;
+log-facility local7;
+
+subnet 192.168.42.0 netmask 255.255.255.0 {
+        range 192.168.42.10 192.168.42.50;
+        option broadcast-address 192.168.42.255;
+        option routers 192.168.42.1;
+        option domain-name "local";
+        option domain-name-servers 8.8.8.8, 8.8.4.4;
+}
+_EOF_
+
+			# - Assign wlan as interface for dhcp server.
+			cat << _EOF_ > /etc/default/isc-dhcp-server
+INTERFACES="wlan$wifi_index"
+_EOF_
+
+			# - Remove all entries below wlan, so we can recreate them.
+			sed -i '/auto wlan/q0' /etc/network/interfaces
+
+			# - enable up wlan
+			sed -i "/auto wlan/c\auto wlan$wifi_index" /etc/network/interfaces
+
+			# - Add wifi settings to network interfaces config
+			cat << _EOF_ >> /etc/network/interfaces
+iface wlan$wifi_index inet static
+address 192.168.42.1
+netmask 255.255.255.0
+#gateway 192.168.0.1
+#wireless-essid FuzonWifi
+#wireless-key abcde12345
+#wireless-mode Managed
+wireless-power off
+#wpa-ssid FuzonWifi
+#wpa-psk abcde12345
+#dns-nameservers 8.8.8.8 8.8.4.4
+
+# IP tables
+up iptables-restore < /etc/iptables.ipv4.nat
+_EOF_
+
+			# - Assign static IP for wlan now
+			ifconfig wlan$wifi_index 192.168.42.1
+
+			# - Create access point config
+			cat << _EOF_ > /etc/hostapd/hostapd.conf
+interface=wlan$wifi_index
+driver=rtl871xdrv
+ssid=$(cat /DietPi/dietpi.txt | grep -m1 '^wifi_hotspot_ssid=' | sed 's/.*=//')
+hw_mode=g
+channel=$(cat /DietPi/dietpi.txt | grep -m1 '^wifi_hotspot_channel=' | sed 's/.*=//')
+macaddr_acl=0
+auth_algs=1
+ignore_broadcast_ssid=0
+wpa=2
+wpa_passphrase=$(cat /DietPi/dietpi.txt | grep -m1 '^wifi_hotspot_key=' | sed 's/.*=//')
+wpa_key_mgmt=WPA-PSK
+wpa_pairwise=TKIP
+rsn_pairwise=CCMP
+_EOF_
+
+			# - Enable access point config
+			cat << _EOF_ > /etc/default/hostapd
+DAEMON_CONF="/etc/hostapd/hostapd.conf"
+_EOF_
+
+			# - Enable IPv4 forwarding
+			sed -i "/net.ipv4.ip_forward=/c\net.ipv4.ip_forward=1" /etc/sysctl.conf
+			echo 1 > /proc/sys/net/ipv4/ip_forward
+
+			# - Apply iptables
+			iptables -t nat -A POSTROUTING -o eth$eth_index -j MASQUERADE
+			iptables -A FORWARD -i eth$eth_index -o wlan$wifi_index -m state --state RELATED,ESTABLISHED -j ACCEPT
+			iptables -A FORWARD -i wlan$wifi_index -o eth$eth_index -j ACCEPT
+
+			# - Save IP tables, applied during ifup in /etc/network/interfaces.
+			iptables-save > /etc/iptables.ipv4.nat
+
+			WIFIHOTSPOT=2
 
 		fi
 
@@ -3382,7 +3501,6 @@ _EOF_
 
 	AUTOINSTALL_INDEX=0
 
-	AUTOINSTALL_SKIPUPDATEREBOOTPROMPT=0
 	AUTOINSTALL_SKIPUSBDRIVEPROMPT=0
 	AUTOINSTALL_SKIPQUESTIONS=0
 	AUTOINSTALL_IGNOREERRORS=0
@@ -3406,7 +3524,6 @@ _EOF_
 		#Get settings
 		AUTOINSTALL_INDEX=$(cat /DietPi/dietpi.txt | grep -m1 '^AUTO_Install_Index=' | sed 's/.*=//')
 
-		AUTOINSTALL_SKIPUPDATEREBOOTPROMPT=$(cat /DietPi/dietpi.txt | grep -ci -m1 '^AUTO_DietpiSoftware_SkipUpdateRebootPrompt=1')
 		AUTOINSTALL_SKIPUSBDRIVEPROMPT=$(cat /DietPi/dietpi.txt | grep -ci -m1 '^AUTO_DietpiSoftware_SkipUsbDrive=1')
 		AUTOINSTALL_SKIPQUESTIONS=$(cat /DietPi/dietpi.txt | grep -ci -m1 '^AUTO_DietpiSoftware_SkipQuestions=1')
 		AUTOINSTALL_IGNOREERRORS=$(cat /DietPi/dietpi.txt | grep -ci -m1 '^AUTO_DietpiSoftware_IgnoreErrors=1')
@@ -3491,7 +3608,6 @@ _EOF_
 				GRASSHOPPER=1
 
 				#Override automation options
-				AUTOINSTALL_SKIPUPDATEREBOOTPROMPT=1
 				AUTOINSTALL_SKIPUSBDRIVEPROMPT=1
 				AUTOINSTALL_SKIPQUESTIONS=1
 				AUTOINSTALL_SSHINDEX=-2
@@ -3516,7 +3632,6 @@ _EOF_
 				PIHOLE=1
 
 				#Override automation options
-				AUTOINSTALL_SKIPUPDATEREBOOTPROMPT=1
 				AUTOINSTALL_SKIPUSBDRIVEPROMPT=1
 				AUTOINSTALL_SKIPQUESTIONS=1
 
@@ -3563,7 +3678,8 @@ _EOF_
 			/DietPi/dietpi/dietpi-banner 0
 			WHIP_TITLE='DietPi Update Completed'
 
-			if (( $AUTOINSTALL_SKIPUPDATEREBOOTPROMPT == 0 )); then
+			#Prompt user for reboot, if not overridden by automation flag
+			if (( $(cat /DietPi/dietpi.txt | grep -ci -m1 '^AUTO_DietpiSoftware_SkipUpdateRebootPrompt=1') == 0 )); then
 				whiptail --title "$WHIP_TITLE" --msgbox "DietPi has been updated to the latest version.\nYour system will now reboot. Once completed, simply login to resume DietPi Setup. \n\nPress Enter to Continue." 13 65
 			fi
 
@@ -4304,6 +4420,14 @@ _EOF_
 			fi
 		fi
 
+		local wifihotspot_w="off"
+		if (( $WIFIHOTSPOT > 0 )); then
+			wifihotspot_w="on"
+			#Reset to 0. Menu checklists will apply back to 1
+			if (( $WIFIHOTSPOT == 1 )); then
+				WIFIHOTSPOT=0
+			fi
+		fi
 		#-----------------------------------------------------------------------------
 		WHIP_TITLE='DietPi Optimized Software Selection'
 
@@ -4424,6 +4548,8 @@ _EOF_
 			"Forums" "Your very own website forums (Phpbb3)." $phpbb_w \
 			"Wordpress" "Website Blog and Publishing platform." $wordpress_w \
 			"Image Gallery" "Website to host / browse your images." $phpimagegallery_w \
+			"" "────WiFi Hotspot────────────────────────────" "off" \
+			"WiFi Hotspot" "Turn your device into a wifi hotspot." $wifihotspot_w \
 			"" "────Remote Access───────────────────────────" "off" \
 			"Weaved" "Access your device over the internet." $weaved_w \
 			"" "────System Stats / Management──────────────" "off" \
@@ -4483,6 +4609,8 @@ _EOF_
 				"Image Gallery" "Website to host / browse your images." $phpimagegallery_w \
 				"" "────Camera / Surveillance───────────────────" "off" \
 				"DietPiCam" "RPi Cam Control / Web Interface Surveillance." $dietpicam_w \
+				"" "────WiFi Hotspot────────────────────────────" "off" \
+				"WiFi Hotspot" "Turn your device into a wifi hotspot." $wifihotspot_w \
 				"" "────Home Automation─────────────────────────" "off" \
 				"Grasshopper" "Web App to control Bticino MyHome." $grasshopper_w \
 				"" "────RPi Hardware Projects───────────────────" "off" \
@@ -4545,6 +4673,8 @@ _EOF_
 				"Image Gallery" "Website to host / browse your images." $phpimagegallery_w \
 				"" "────Camera / Surveillance───────────────────" "off" \
 				"DietPiCam" "RPi Cam Control / Web Interface Surveillance." $dietpicam_w \
+				"" "────WiFi Hotspot────────────────────────────" "off" \
+				"WiFi Hotspot" "Turn your device into a wifi hotspot." $wifihotspot_w \
 				"" "────Home Automation─────────────────────────" "off" \
 				"Grasshopper" "Web App to control Bticino MyHome." $grasshopper_w \
 				"" "────RPi Hardware Projects───────────────────" "off" \
@@ -4588,6 +4718,12 @@ _EOF_
 		do
 			case $choice in
 
+			"WiFi Hotspot")
+				if (( $WIFIHOTSPOT == 0 )); then
+					WIFIHOTSPOT=1
+					INSTALL_LINUX_CHOICESMADE=true
+				fi
+			;;
 			RPi.GPIO)
 				if (( $RPIGPIO == 0 )); then
 					RPIGPIO=1
@@ -4852,6 +4988,56 @@ _EOF_
 			fi
 		fi
 
+		#Wifi Hotspot Criteria
+		if (( $WIFIHOTSPOT == 1 )); then
+
+			local check_criteria=1
+			while (( $check_criteria == 1 )); do
+
+				local criteria_passed=1
+
+				WHIP_TITLE="WiFi Hotspot Criteria"
+				WHIP_QUESTION="The following criteria must be met for this installation to succeed:"
+
+				local ethernet_active_state=$(ip r | grep -ci -m1 "eth$(sed -n 1p /DietPi/dietpi/.network)")
+				if (( $ethernet_active_state == 1 )); then
+					WHIP_QUESTION+="\n\n - Ethernet online: PASSED"
+				else
+					criteria_passed=0
+					WHIP_QUESTION+="\n\n - Ethernet online: FAILED.\nUse dietpi-config to connect and configure ethernet."
+				fi
+
+				if [ -d /sys/class/net/wlan$(sed -n 2p /DietPi/dietpi/.network) ]; then
+					WHIP_QUESTION+="\n\n - Wifi adapter detected: PASSED"
+				else
+					criteria_passed=0
+					WHIP_QUESTION+="\n\n - Wifi adapter detected: FAILED.\nPlease connect a WiFi adapter and try again."
+				fi
+
+				#Passed
+				if (( $criteria_passed == 1 )); then
+					WHIP_QUESTION+="\n\nPASSED: Criteria met. Good to go."
+					whiptail --title "$WHIP_TITLE" --msgbox "$WHIP_QUESTION" --backtitle "$WHIP_BACKTITLE" 14 75
+					check_criteria=0
+
+				#Failed, retry?
+				else
+					WHIP_QUESTION+="\n\nFAILED: Criteria not met. Would you like to check again?"
+					whiptail --title "$WHIP_TITLE" --yesno "$WHIP_QUESTION" --yes-button "Ok" --no-button "Back" --defaultno --backtitle "$WHIP_BACKTITLE" 16 75
+					CHOICE=$?
+					if (( $CHOICE == 0 )); then
+						echo "retry" &> /dev/null
+					else
+						check_criteria=0
+						WIFIHOTSPOT=0
+						whiptail --title "WiFi Hotspot Failed" --msgbox "WiFi Hotspot criteria was not met. Your selection has been removed." --backtitle "$WHIP_BACKTITLE" 10 65
+					fi
+				fi
+
+			done
+
+		fi
+
 		#Weaved
 		if (( $WEAVED == 1 )); then
 			WHIP_TITLE=' Weaved - 1st run setup'
@@ -4878,6 +5064,14 @@ _EOF_
 				fi
 			fi
 
+		fi
+
+		#RPi ARMv6 LMS
+		if (( $HW_MODEL <= 1 )); then
+			if (( $SQUEEZEBOXSERVER == 1 )); then
+				whiptail --title "SqueezeBox Server" --msgbox "Squeezebox Server (LMS) for RPi ARMv6 is not currently supported and has been disabled.\n\nMore Info:\nhttps://github.com/Fourdee/DietPi/issues/155" --backtitle "$WHIP_BACKTITLE" 14 70
+				SQUEEZEBOXSERVER=0
+			fi
 		fi
 
 		#-----------------------------------------------------------------------------

@@ -1341,10 +1341,10 @@
 		esac
 	}
 
-	SHARED_IP_STATIC="0.0.0.0"
-	SHARED_GATEWAY_STATIC="0.0.0.0"
-	SHARED_MASK_STATIC="0.0.0.0"
-	SHARED_DNS_STATIC="0.0.0.0"
+	ETH_IP_STATIC="0.0.0.0"
+	ETH_GATEWAY_STATIC="0.0.0.0"
+	ETH_MASK_STATIC="0.0.0.0"
+	ETH_DNS_STATIC="0.0.0.0"
 
 	ETH_INDEX=0
 	ETH_DISABLED=0
@@ -1357,6 +1357,11 @@
 	ETH_MODE=0 #0=static 1=dhcp
 	ETH_MODE_TARGET=0
 
+	WIFI_IP_STATIC="0.0.0.0"
+	WIFI_GATEWAY_STATIC="0.0.0.0"
+	WIFI_MASK_STATIC="0.0.0.0"
+	WIFI_DNS_STATIC="0.0.0.0"
+
 	WIFI_INDEX=0
 	WIFI_DISABLED=0
 	WIFI_HARDWARE=false
@@ -1367,34 +1372,38 @@
 	WIFI_DNS="0.0.0.0"
 	WIFI_MODE=0 #0=static 1=dhcp
 	WIFI_MODE_TARGET=0
-	WIFI_SSID=""
-	WIFI_KEY=""
+	WIFI_SSID="WifiSSID"
+	WIFI_KEY="WifiKey"
 	WIFI_BITRATE=0
 	WIFI_SIGNALSTRENGTH=0
+	WIFI_HOTSPOT=0
 
 	Network_ETH_CopyCurrentToStatic(){
 
-		#Apply, Only if we have a connection (prevent blank details which breaks networking)
+		#Apply, Only if we have a connection
 		if (( $ETH_CONNECTED == 1 )); then
-			sed -i "/address/c\address $ETH_IP" /etc/network/interfaces
-			sed -i "/gateway/c\gateway $ETH_GATEWAY" /etc/network/interfaces
-			sed -i "/netmask/c\netmask $ETH_MASK" /etc/network/interfaces
-			sed -i "/dns-nameservers/c\dns-nameservers $ETH_DNS" /etc/network/interfaces
+			ETH_IP_STATIC=$ETH_IP
+			ETH_GATEWAY_STATIC=$ETH_GATEWAY
+			ETH_MASK_STATIC=$ETH_MASK
+			ETH_DNS_STATIC=$ETH_DNS
 		fi
 	}
 
 	Network_WIFI_CopyCurrentToStatic(){
 
-		#Apply, Only if we have a connection (prevent blank details which breaks networking)
+		#Apply, Only if we have a connection
 		if (( $WIFI_CONNECTED == 1 )); then
-			sed -i "/address/c\address $WIFI_IP" /etc/network/interfaces
-			sed -i "/gateway/c\gateway $WIFI_GATEWAY" /etc/network/interfaces
-			sed -i "/netmask/c\netmask $WIFI_MASK" /etc/network/interfaces
-			sed -i "/dns-nameservers/c\dns-nameservers $WIFI_DNS" /etc/network/interfaces
+			WIFI_IP_STATIC=$WIFI_IP
+			WIFI_GATEWAY_STATIC=$WIFI_GATEWAY
+			WIFI_MASK_STATIC=$WIFI_MASK
+			WIFI_DNS_STATIC=$WIFI_DNS
 		fi
 	}
 
 	Network_Restart(){
+
+		#Stop all services (required for hotspot)
+		/DietPi/dietpi/dietpi-services stop
 
 		#Release all DHCP leases (too slow, quicker to allow router to decide leases)
 		#dhclient -r
@@ -1402,12 +1411,15 @@
 		#Kill dhclient
 		killall dhclient &> /dev/null
 
+		echo -e "\n - Dropping connections.."
 		#Drop Connections
 		ifdown eth$ETH_INDEX &> /dev/null
 		ifdown wlan$WIFI_INDEX &> /dev/null
 
+		echo -e "\n - Restarting networking services..."
 		#Restart Networking
 		if (( $DISTRO == 3 )); then
+			systemctl daemon-reload
 			systemctl restart networking
 		else
 			/etc/init.d/networking reload
@@ -1415,17 +1427,38 @@
 		fi
 
 		#Manually bring up adapters (just incase)
-		if (( $WIFI_DISABLED == 0 )); then
-			ifup wlan$WIFI_INDEX
-		elif (( $ETH_DISABLED == 0 )); then
+		if (( $ETH_DISABLED == 0 )); then
 			ifup eth$ETH_INDEX
 		fi
+
+		if (( $WIFI_DISABLED == 0 )); then
+			ifup wlan$WIFI_INDEX
+		fi
+
+		#Stop all services (required for hotspot)
+		/DietPi/dietpi/dietpi-services start
+
+		#Update network data
+		Network_GetData
 
 	}
 
 	Network_ApplyChanges(){
 
-		#Eth Mode change
+		#Enable/disable adapters
+		sed -i "/auto eth/c\#auto eth$ETH_INDEX" /etc/network/interfaces
+		sed -i "/auto wlan/c\#auto wlan$WIFI_INDEX" /etc/network/interfaces
+
+		if (( $ETH_DISABLED == 0 )); then
+			sed -i "/auto eth/c\auto eth$ETH_INDEX" /etc/network/interfaces
+		fi
+
+		if (( $WIFI_DISABLED == 0 )); then
+			sed -i "/auto wlan/c\auto wlan$WIFI_INDEX" /etc/network/interfaces
+		fi
+
+		#Save STATIC/DHCP
+		# - eth
 		if (( $ETH_MODE_TARGET == 0 )); then
 			#Change to STATIC
 			sed -i "/iface eth/c\iface eth$ETH_INDEX inet static" /etc/network/interfaces
@@ -1438,7 +1471,7 @@
 		#Update Current Mode for network restart
 		ETH_MODE=$ETH_MODE_TARGET
 
-		#Wifi Mode change
+		# - Wifi
 		if (( $WIFI_MODE_TARGET == 0 )); then
 			#Change to STATIC
 			sed -i "/iface wlan/c\iface wlan$WIFI_INDEX inet static" /etc/network/interfaces
@@ -1449,19 +1482,39 @@
 		#Update Current Mode for network restart
 		WIFI_MODE=$WIFI_MODE_TARGET
 
-
-		#Enable/Disable shared dns-nameservers (If static IP. dns-nameservers MUST be enabled)
-		local dnsnameservers_required=0
+		#dns-nameservers (If static IP. dns-nameservers MUST be enabled)
+		# - Disable all
+		sed -i 's/^dns-nameservers/#dns-nameservers/g' /etc/network/interfaces
+		# - Enable eth
+		if (( $ETH_DISABLED == 0 )) && (( $ETH_MODE == 0 )); then
+			sed -i "$(cat -n /etc/network/interfaces | grep 'dns-nameservers ' | sed -n 1p | awk '{print $1}')s/^#dns-nameservers/dns-nameservers/g" /etc/network/interfaces
+		fi
+		# - Enable Wifi
 		if (( $WIFI_DISABLED == 0 )) && (( $WIFI_MODE == 0 )); then
-				dnsnameservers_required=1
-		elif (( $ETH_DISABLED == 0 )) && (( $ETH_MODE == 0 )); then
-				dnsnameservers_required=1
+			sed -i "$(cat -n /etc/network/interfaces | grep 'dns-nameservers ' | sed -n 2p | awk '{print $1}')s/^#dns-nameservers/dns-nameservers/g" /etc/network/interfaces
 		fi
 
-		if (( $dnsnameservers_required == 1 )); then
-			sed -i 's/^#dns-nameservers/dns-nameservers/g' /etc/network/interfaces
-		else
-			sed -i 's/^dns-nameservers/#dns-nameservers/g' /etc/network/interfaces
+		#Save Static IPs (not applied to # disabled lines)
+		# - eth
+		sed -i "$(cat -n /etc/network/interfaces | grep 'address ' | sed -n 1p | awk '{print $1}')s/address.*/address $ETH_IP_STATIC/" /etc/network/interfaces
+		sed -i "$(cat -n /etc/network/interfaces | grep 'gateway ' | sed -n 1p | awk '{print $1}')s/gateway.*/gateway $ETH_GATEWAY_STATIC/" /etc/network/interfaces
+		sed -i "$(cat -n /etc/network/interfaces | grep 'netmask ' | sed -n 1p | awk '{print $1}')s/netmask.*/netmask $ETH_MASK_STATIC/" /etc/network/interfaces
+		sed -i "$(cat -n /etc/network/interfaces | grep 'dns-nameservers ' | sed -n 1p | awk '{print $1}')s/dns-nameservers.*/dns-nameservers $ETH_DNS_STATIC/" /etc/network/interfaces
+		# - wifi | If not running in hotspot mode, as these are disabled in the file.
+		if (( $WIFI_HOTSPOT == 0 )); then
+			sed -i "$(cat -n /etc/network/interfaces | grep 'address ' | sed -n 2p | awk '{print $1}')s/address.*/address $WIFI_IP_STATIC/" /etc/network/interfaces
+			sed -i "$(cat -n /etc/network/interfaces | grep 'gateway ' | sed -n 2p | awk '{print $1}')s/gateway.*/gateway $WIFI_GATEWAY_STATIC/" /etc/network/interfaces
+			sed -i "$(cat -n /etc/network/interfaces | grep 'netmask ' | sed -n 2p | awk '{print $1}')s/netmask.*/netmask $WIFI_MASK_STATIC/" /etc/network/interfaces
+			sed -i "$(cat -n /etc/network/interfaces | grep 'dns-nameservers ' | sed -n 2p | awk '{print $1}')s/dns-nameservers.*/dns-nameservers $WIFI_DNS_STATIC/" /etc/network/interfaces
+		fi
+
+		#Save WiFi creds
+		# - If not running in hotspot mode,  as these are disabled in the file.
+		if (( $WIFI_HOTSPOT == 0 )); then
+			sed -i "/wireless-essid/c\wireless-essid $WIFI_SSID" /etc/network/interfaces
+			sed -i "/wpa-ssid/c\wpa-ssid $WIFI_SSID" /etc/network/interfaces
+			sed -i "/wireless-key/c\wireless-key $WIFI_KEY" /etc/network/interfaces
+			sed -i "/wpa-psk/c\wpa-psk $WIFI_KEY" /etc/network/interfaces
 		fi
 
 		#restart net
@@ -1469,35 +1522,75 @@
 	}
 
 	Change_StaticIp(){
+
 		#Ethernet
-		OPTION=$(whiptail --inputbox "Enter Your New Ip Address" 8 60 "$SHARED_IP_STATIC" --title "Set Static Ip Address" 3>&1 1>&2 2>&3)
-		CHOICE=$?
-		if (( $CHOICE == 0 )); then
-			sed -i "/address/c\address $OPTION" /etc/network/interfaces
+		if (( $1 == 0 )); then
+			OPTION=$(whiptail --inputbox "Enter Your New Ip Address" 8 60 "$ETH_IP_STATIC" --title "Set Static Ip Address" 3>&1 1>&2 2>&3)
+			CHOICE=$?
+			if (( $CHOICE == 0 )); then
+				ETH_IP_STATIC=$OPTION
+			fi
+		#wifi
+		elif (( $1 == 1 )); then
+			OPTION=$(whiptail --inputbox "Enter Your New Ip Address" 8 60 "$WIFI_IP_STATIC" --title "Set Static Ip Address" 3>&1 1>&2 2>&3)
+			CHOICE=$?
+			if (( $CHOICE == 0 )); then
+				WIFI_IP_STATIC=$OPTION
+			fi
 		fi
 	}
 
 	Change_StaticGateway(){
-		OPTION=$(whiptail --inputbox "Enter Your New Gateway Address" 8 60 "$SHARED_GATEWAY_STATIC" --title "Set Static Gateway Address" 3>&1 1>&2 2>&3)
-		CHOICE=$?
-		if (( $CHOICE == 0 )); then
-			sed -i "/gateway/c\gateway $OPTION" /etc/network/interfaces
+		#Ethernet
+		if (( $1 == 0 )); then
+			OPTION=$(whiptail --inputbox "Enter Your New Gateway Address" 8 60 "$ETH_GATEWAY_STATIC" --title "Set Static Gateway Address" 3>&1 1>&2 2>&3)
+			CHOICE=$?
+			if (( $CHOICE == 0 )); then
+				ETH_GATEWAY_STATIC=$OPTION
+			fi
+		#wifi
+		elif (( $1 == 1 )); then
+			OPTION=$(whiptail --inputbox "Enter Your New Gateway Address" 8 60 "$WIFI_GATEWAY_STATIC" --title "Set Static Gateway Address" 3>&1 1>&2 2>&3)
+			CHOICE=$?
+			if (( $CHOICE == 0 )); then
+				WIFI_GATEWAY_STATIC=$OPTION
+			fi
 		fi
 	}
 
 	Change_StaticMask(){
-		OPTION=$(whiptail --inputbox "Enter Your New Mask Address" 8 60 "$SHARED_MASK_STATIC" --title "Set Static Mask Address" 3>&1 1>&2 2>&3)
-		CHOICE=$?
-		if (( $CHOICE == 0 )); then
-			sed -i "/netmask/c\netmask $OPTION" /etc/network/interfaces
+		#Ethernet
+		if (( $1 == 0 )); then
+			OPTION=$(whiptail --inputbox "Enter Your New Mask Address" 8 60 "$ETH_MASK_STATIC" --title "Set Static Mask Address" 3>&1 1>&2 2>&3)
+			CHOICE=$?
+			if (( $CHOICE == 0 )); then
+				ETH_MASK_STATIC=$OPTION
+			fi
+		#wifi
+		elif (( $1 == 1 )); then
+			OPTION=$(whiptail --inputbox "Enter Your New Mask Address" 8 60 "$WIFI_MASK_STATIC" --title "Set Static Mask Address" 3>&1 1>&2 2>&3)
+			CHOICE=$?
+			if (( $CHOICE == 0 )); then
+				WIFI_MASK_STATIC=$OPTION
+			fi
 		fi
 	}
 
 	Change_StaticDns(){
-		OPTION=$(whiptail --inputbox "Enter Your DNS Server Address\n - 2 maximum, seperated by a space.\n - eg: 8.8.8.8 8.8.4.4" 10 60 "$SHARED_DNS_STATIC" --title "Set Static Mask Address" 3>&1 1>&2 2>&3)
-		CHOICE=$?
-		if (( $CHOICE == 0 )); then
-			sed -i "/dns-nameservers/c\dns-nameservers $OPTION" /etc/network/interfaces
+		#Ethernet
+		if (( $1 == 0 )); then
+			OPTION=$(whiptail --inputbox "Enter Your DNS Server Address\n - 2 maximum, seperated by a space.\n - eg: 8.8.8.8 8.8.4.4" 10 60 "$ETH_DNS_STATIC" --title "Set Static DNS Address" 3>&1 1>&2 2>&3)
+			CHOICE=$?
+			if (( $CHOICE == 0 )); then
+				ETH_DNS_STATIC=$OPTION
+			fi
+		#wifi
+		elif (( $1 == 1 )); then
+			OPTION=$(whiptail --inputbox "Enter Your DNS Server Address\n - 2 maximum, seperated by a space.\n - eg: 8.8.8.8 8.8.4.4" 10 60 "$WIFI_DNS_STATIC" --title "Set Static DNS Address" 3>&1 1>&2 2>&3)
+			CHOICE=$?
+			if (( $CHOICE == 0 )); then
+				WIFI_DNS_STATIC=$OPTION
+			fi
 		fi
 	}
 
@@ -1505,17 +1598,15 @@
 		OPTION=$(whiptail --inputbox "Enter the SSID name to connect to." 8 60 "$WIFI_SSID" --title "Set Your SSID" 3>&1 1>&2 2>&3)
 		CHOICE=$?
 		if (( $CHOICE == 0 )); then
-			sed -i "/wireless-essid/c\wireless-essid $OPTION" /etc/network/interfaces
-			sed -i "/wpa-ssid/c\wpa-ssid $OPTION" /etc/network/interfaces
+			WIFI_SSID=$OPTION
 		fi
 	}
 
 	Change_WifiKey(){
-		OPTION=$(whiptail --inputbox "Enter the Access Key (WPA/WEP)." 8 60 "$WIFI_KEY" --title "Set Your Acccess Key" 3>&1 1>&2 2>&3)
+		OPTION=$(whiptail --inputbox "Enter the Access Key (WPA/WEP)." 8 60 "$WIFI_KEY" --title "Set Your Access Key" 3>&1 1>&2 2>&3)
 		CHOICE=$?
 		if (( $CHOICE == 0 )); then
-			sed -i "/wireless-key/c\wireless-key $OPTION" /etc/network/interfaces
-			sed -i "/wpa-psk/c\wpa-psk $OPTION" /etc/network/interfaces
+			WIFI_KEY=$OPTION
 		fi
 	}
 
@@ -1542,8 +1633,6 @@
 		CHOICE=$?
 		if (( $CHOICE == 0 )); then
 			WIFI_SSID=${wifi_ssid_array[$OPTION]}
-			sed -i "/wireless-essid/c\wireless-essid $WIFI_SSID" /etc/network/interfaces
-			sed -i "/wpa-ssid/c\wpa-ssid $WIFI_SSID" /etc/network/interfaces
 			Change_WifiKey
 		fi
 
@@ -1602,14 +1691,17 @@
 		#Obtain network details (network indexs)
 		/DietPi/dietpi/func/obtain_network_details
 
+		#Copy /etc/network/interfaces to /tmp (tmpfs) and pull data from it.
+		cp /etc/network/interfaces /tmp/net_interfaces
+
 		#Reset
-		SHARED_IP_STATIC="0.0.0.0"
-		SHARED_GATEWAY_STATIC="0.0.0.0"
-		SHARED_MASK_STATIC="0.0.0.0"
-		SHARED_DNS_STATIC="0.0.0.0"
+		ETH_IP_STATIC=$(cat -n /tmp/net_interfaces | grep 'address ' | sed -n 1p | awk '{print $3}')
+		ETH_GATEWAY_STATIC=$(cat -n /tmp/net_interfaces | grep 'gateway ' | sed -n 1p | awk '{print $3}')
+		ETH_MASK_STATIC=$(cat -n /tmp/net_interfaces | grep 'netmask ' | sed -n 1p | awk '{print $3}')
+		ETH_DNS_STATIC=$(cat -n /tmp/net_interfaces | grep 'dns-nameservers ' | sed -n 1p | awk '{print $3,$4}')
 
 		ETH_INDEX=$(sed -n 1p /DietPi/dietpi/.network)
-		ETH_DISABLED=$(cat /etc/network/interfaces | grep -ci -m1 "#auto eth$ETH_INDEX")
+		ETH_DISABLED=$(cat /tmp/net_interfaces | grep -ci -m1 "#auto eth$ETH_INDEX")
 		ETH_HARDWARE=false
 		ETH_CONNECTED=0
 		ETH_IP="0.0.0.0"
@@ -1617,9 +1709,15 @@
 		ETH_MASK="0.0.0.0"
 		ETH_DNS="0.0.0.0"
 		ETH_MODE=0
+		ETH_MODE_TARGET=$ETH_MODE
+
+		WIFI_IP_STATIC=$(cat -n /tmp/net_interfaces | grep 'address ' | sed -n 2p | awk '{print $3}')
+		WIFI_GATEWAY_STATIC=$(cat -n /tmp/net_interfaces | grep 'gateway ' | sed -n 2p | awk '{print $3}')
+		WIFI_MASK_STATIC=$(cat -n /tmp/net_interfaces | grep 'netmask ' | sed -n 2p | awk '{print $3}')
+		WIFI_DNS_STATIC=$(cat -n /tmp/net_interfaces | grep 'dns-nameservers ' | sed -n 2p | awk '{print $3,$4}')
 
 		WIFI_INDEX=$(sed -n 2p /DietPi/dietpi/.network)
-		WIFI_DISABLED=$(cat /etc/network/interfaces | grep -ci -m1 "#auto wlan$WIFI_INDEX")
+		WIFI_DISABLED=$(cat /tmp/net_interfaces | grep -ci -m1 "#auto wlan$WIFI_INDEX")
 		WIFI_HARDWARE=false
 		WIFI_CONNECTED=0
 		WIFI_IP="0.0.0.0"
@@ -1627,17 +1725,17 @@
 		WIFI_MASK="0.0.0.0"
 		WIFI_DNS="0.0.0.0"
 		WIFI_MODE=0
+		WIFI_MODE_TARGET=$WIFI_MODE
 		WIFI_SSID="Not_Set"
 		WIFI_KEY="Not_Set"
 		#Get extra wifi stats
 		WIFI_BITRATE=0
 		WIFI_SIGNALSTRENGTH=0
-
-		#Grab static address from /etc/network/interfaces
-		SHARED_IP_STATIC=$(cat /etc/network/interfaces  | grep -m1 'address' | awk '{ print $2 }')
-		SHARED_GATEWAY_STATIC=$(cat /etc/network/interfaces  | grep -m1 'gateway' | awk '{ print $2 }')
-		SHARED_MASK_STATIC=$(cat /etc/network/interfaces  | grep -m1 'netmask' | awk '{ print $2 }')
-		SHARED_DNS_STATIC=$(cat /etc/network/interfaces | grep -m1 'dns-nameservers' | awk '{ print $2,$3 }')
+		# - Hotspot enabled?
+		WIFI_HOTSPOT=0
+		if [ -f /usr/sbin/hostapd ]; then
+			WIFI_HOTSPOT=1
+		fi
 
 		#eth
 		if [ -d /sys/class/net/eth$ETH_INDEX ]; then
@@ -1645,7 +1743,7 @@
 			ETH_HARDWARE=true
 
 			#Static or Dhcp?
-			ETH_MODE=$(cat /etc/network/interfaces | grep -ci -m1 "iface eth$ETH_INDEX inet dhcp")
+			ETH_MODE=$(cat /tmp/net_interfaces | grep -ci -m1 "iface eth$ETH_INDEX inet dhcp")
 
 			#Connected and Valid IP?
 			ETH_CONNECTED=$(ip r | grep -ci -m1 "eth$ETH_INDEX")
@@ -1659,22 +1757,20 @@
 			fi
 		fi
 
-		# static ip is shared for both Wifi and Ethernet
-
 		#wlan
 		if [ -d /sys/class/net/wlan$WIFI_INDEX ]; then
 			#Hardware
 			WIFI_HARDWARE=true
 
 			#Static or Dhcp?
-			WIFI_MODE=$(cat /etc/network/interfaces | grep -ci -m1 "iface wlan$WIFI_INDEX inet dhcp")
+			WIFI_MODE=$(cat /tmp/net_interfaces | grep -ci -m1 "iface wlan$WIFI_INDEX inet dhcp")
 
 			#Connected and Valid IP?
 			WIFI_CONNECTED=$(ip r | grep -ci -m1 "wlan$WIFI_INDEX")
 
 			#Wifi Extras
-			WIFI_SSID=$(cat /etc/network/interfaces | grep -m1 'wireless-essid' | sed 's/^[^\ ]\+\ //')
-			WIFI_KEY=$(cat /etc/network/interfaces | grep -m1 'wireless-key' | sed 's/^[^\ ]\+\ //')
+			WIFI_SSID=$(cat /tmp/net_interfaces | grep -m1 'wireless-essid' | sed 's/^[^\ ]\+\ //')
+			WIFI_KEY=$(cat /tmp/net_interfaces | grep -m1 'wireless-key' | sed 's/^[^\ ]\+\ //')
 
 			#Enabled and Connected
 			if (( $WIFI_DISABLED == 0 )) && (( $WIFI_CONNECTED == 1 )); then
@@ -1687,6 +1783,10 @@
 				WIFI_SIGNALSTRENGTH=$(iwconfig wlan$WIFI_INDEX | grep -m1 'Signal level=' | awk '{ print $4 }' | sed 's/level=//g' | cut -f1 -d "/")
 			fi
 		fi
+
+		#cleanup tmp
+		rm /tmp/net_interfaces &> /dev/null
+
 	}
 
 	Menu_SambaClientSetup(){
@@ -1708,10 +1808,6 @@
 
 		#Check Network
 		Network_GetData
-
-		#Reset any Target Modes to Current (DHCP/STATIC)
-		ETH_MODE_TARGET=$ETH_MODE
-		WIFI_MODE_TARGET=$WIFI_MODE
 
 		#Obtain enabled/disabled status
 		local eth_disabled_text='Enabled'
@@ -1744,6 +1840,9 @@
 		local wlan_connected_text='Disconnected'
 		if (( $WIFI_CONNECTED == 1 )); then
 			wlan_connected_text='Connected'
+			if (( $WIFI_HOTSPOT == 1 )); then
+				wlan_connected_text="Wifi Hotspot Mode"
+			fi
 		fi
 
 		#Internet Connection Status
@@ -1764,7 +1863,8 @@
 		local sambaclient_mounted_size="unknown"
 		local sambaclient_mounted_used="unknown"
 		local sambaclient_mounted_free="unknown"
-		if (( $(cat /DietPi/dietpi/.installed | grep -m1 'SMBCLIENT ' | awk '{print $2}') == 2 )); then
+		if [ -f /DietPi/dietpi/.installed ] &&
+			(( $(cat /DietPi/dietpi/.installed | grep -m1 'SMBCLIENT ' | awk '{print $2}') == 2 )); then
 
 			sambaclient_installed=1
 			sambaclient_status="Unable to connect and/or incorrect details"
@@ -1784,7 +1884,8 @@
 		local curlftpfs_installed=0
 		local curlftpfs_status="Not Installed"
 		local curlftpfs_menutext="Install now to access FTP as filesystem mount"
-		if (( $(cat /DietPi/dietpi/.installed | grep -m1 'CURLFTPFS ' | awk '{print $2}') == 2 )); then
+		if [ -f /DietPi/dietpi/.installed ] &&
+			(( $(cat /DietPi/dietpi/.installed | grep -m1 'CURLFTPFS ' | awk '{print $2}') == 2 )); then
 
 			curlftpfs_installed=1
 			curlftpfs_status="Unable to connect and/or incorrect details"
@@ -1801,7 +1902,8 @@
 		local noip_installed=0
 		local noip_status="Not Installed"
 		local noip_menutext="Install No-Ip now"
-		if (( $(cat /DietPi/dietpi/.installed | grep -m1 'NOIPDYNDNS ' | awk '{print $2}') == 2 )); then
+		if [ -f /DietPi/dietpi/.installed ] &&
+			(( $(cat /DietPi/dietpi/.installed | grep -m1 'NOIPDYNDNS ' | awk '{print $2}') == 2 )); then
 
 			noip_installed=1
 			noip_status="Offline - Please Enter No-Ip Details"
@@ -1814,11 +1916,10 @@
 			fi
 		fi
 
-
 		WHIP_TITLE='--- DietPi - Network Options ---'
 		OPTION=$(whiptail --title "$WHIP_TITLE" --menu " \n Ethernet     : $eth_hardware_text | $eth_disabled_text | $eth_connected_text \n Wifi         : $wlan_hardware_text | $wlan_disabled_text | $wlan_connected_text \n Internet     : $Internet_connected_text \n Samba client : $sambaclient_status \n FTP client   : $curlftpfs_status\n NoIp status  : $noip_status" --cancel-button "$TEXT_MENU_BACK" --backtitle "$WHIP_BACKTITLE" 20 75 6 \
 		"Ethernet" "Change Wired Network Settings" \
-		"Wifi" "Change Wireless Network Settings" \
+		"WiFi" "Change Wireless Network Settings" \
 		"Test" "Run the Internet Connection Test" \
 		"Samba Client" "$sambaclient_menutext" \
 		"Ftp Client" "$curlftpfs_menutext" \
@@ -1831,7 +1932,7 @@
 				#No hardware found
 				if [ "$ETH_HARDWARE" = false ]; then
 					WHIP_TITLE=' Error: No Ethernet Hardware was found.'
-					WHIP_QUESTION=' No Ethernet Hardware was found. Your most likely running a Pi Model A'
+					WHIP_QUESTION=' No Ethernet Hardware was found. You are most likely running a Pi Model A'
 					whiptail --title "$WHIP_TITLE" --msgbox "$WHIP_QUESTION" --backtitle "$WHIP_BACKTITLE" 12 60
 					#Return to this Menu
 					TARGETMENUID=8
@@ -1841,8 +1942,8 @@
 					CHOICE=$?
 					#Confirm action
 					if (( $CHOICE == 0 )); then
-						sed -i "/auto eth/c\auto eth$ETH_INDEX" /etc/network/interfaces
-						sed -i "/auto wlan/c\#auto wlan$WIFI_INDEX" /etc/network/interfaces
+						ETH_DISABLED=0
+						WIFI_DISABLED=1
 						Network_ApplyChanges
 						TARGETMENUID=9
 					else
@@ -1853,23 +1954,29 @@
 					TARGETMENUID=9
 				fi
 				;;
-			  Wifi)
+			  WiFi)
 				#No hardware found
 				if [ "$WIFI_HARDWARE" = false ]; then
 					WHIP_TITLE=' Error: No Wifi Hardware was found. '
 					WHIP_QUESTION=' No Wifi Hardware was found. '
-					whiptail --title "$WHIP_TITLE" --msgbox "$WHIP_QUESTION" --backtitle "$WHIP_BACKTITLE" 12 60
+					whiptail --title "$WHIP_TITLE" --msgbox "$WHIP_QUESTION" --backtitle "$WHIP_BACKTITLE" 10 60
 
 					#Return to this Menu
 					TARGETMENUID=8
+
+				#Running as Wifi Hotspot
+				elif (( $WIFI_HOTSPOT == 1 )); then
+
+					TARGETMENUID=15
+
 				#Disabled
 				elif (( $WIFI_DISABLED == 1 )); then
 					whiptail --title "Wifi is Disabled" --yesno " Wifi must be enabled before settings can be changed. \n \n Would you like to Enable Wifi now? \n - (NOTICE) All connections will drop! \n - (NOTICE) This will disable Ethernet" --yes-button "Ok" --no-button "Back" --defaultno --backtitle "$WHIP_BACKTITLE" 14 60
 					CHOICE=$?
 					#Confirm action
 					if (( $CHOICE == 0 )); then
-						sed -i "/auto wlan/c\auto wlan$WIFI_INDEX" /etc/network/interfaces
-						sed -i "/auto eth/c\#auto eth$ETH_INDEX" /etc/network/interfaces
+						ETH_DISABLED=1
+						WIFI_DISABLED=0
 						Network_ApplyChanges
 						TARGETMENUID=10
 					else
@@ -2006,9 +2113,6 @@
 
 		TARGETMENUID=8
 
-		#Check Network
-		Network_GetData
-
 		#Get current Mode details
 		local mode_current='DHCP'
 		if (( $ETH_MODE == 0 )); then
@@ -2027,10 +2131,10 @@
 		OPTION=$(whiptail --title "$WHIP_TITLE" --menu " Current Details: \n - Mode    = $mode_current \n - Ip      = $ETH_IP \n - Mask    = $ETH_MASK\n - Gateway = $ETH_GATEWAY\n - DNS     = $ETH_DNS" --cancel-button "$TEXT_MENU_BACK" --backtitle "$WHIP_BACKTITLE" 20 60 7 \
 		"Change Mode" "$mode_target" \
 		"Copy" "Copy Current address to Static" \
-		"Static Ip" "$SHARED_IP_STATIC"  \
-		"Static Mask" "$SHARED_MASK_STATIC"  \
-		"Static Gateway" "$SHARED_GATEWAY_STATIC"  \
-		"Static DNS" "$SHARED_DNS_STATIC" \
+		"Static Ip" "$ETH_IP_STATIC"  \
+		"Static Mask" "$ETH_MASK_STATIC"  \
+		"Static Gateway" "$ETH_GATEWAY_STATIC"  \
+		"Static DNS" "$ETH_DNS_STATIC" \
 		"Apply" "Save Changes (Restart Networking)" 3>&1 1>&2 2>&3)
 
 		CHOICE=$?
@@ -2046,6 +2150,7 @@
 				;;
 				Apply)
 					Ethernet_Reconnect
+
 					#Return to this menu
 					TARGETMENUID=9
 				;;
@@ -2055,30 +2160,26 @@
 					TARGETMENUID=9
 				;;
 				"Static Ip")
-					Change_StaticIp
+					Change_StaticIp 0
 					#Return to this menu
 					TARGETMENUID=9
 				;;
 				"Static Gateway")
-					Change_StaticGateway
+					Change_StaticGateway 0
 					#Return to this menu
 					TARGETMENUID=9
 				;;
 				"Static Mask")
-					Change_StaticMask
+					Change_StaticMask 0
 					#Return to this menu
 					TARGETMENUID=9
 				;;
 				"Static DNS")
-					Change_StaticDns
+					Change_StaticDns 0
 					#Return to this menu
 					TARGETMENUID=9
 				;;
 			esac
-		#Cancel
-		else
-			#Copy Current to Static (just incase user changed value, and didnt apply)
-			Network_ETH_CopyCurrentToStatic
 
 		fi
 
@@ -2088,9 +2189,6 @@
 	Menu_NetworkOptions_Wifi(){
 
 		TARGETMENUID=8
-
-		#Check Network
-		Network_GetData
 
 		#Get current Mode details
 		local mode_current='DHCP'
@@ -2112,10 +2210,10 @@
 		"Manual" "Manually Set Wireless Details" \
 		"Change Mode" "$mode_target" \
 		"Copy" "Copy Current address to Static" \
-		"Static Ip" "$SHARED_IP_STATIC"  \
-		"Static Mask" "$SHARED_MASK_STATIC"  \
-		"Static Gateway" "$SHARED_GATEWAY_STATIC"  \
-		"Static DNS" "$SHARED_DNS_STATIC" \
+		"Static Ip" "$WIFI_IP_STATIC"  \
+		"Static Mask" "$WIFI_MASK_STATIC"  \
+		"Static Gateway" "$WIFI_GATEWAY_STATIC"  \
+		"Static DNS" "$WIFI_DNS_STATIC" \
 		"Apply" "Save Changes (Restart Networking)" 3>&1 1>&2 2>&3)
 
 		CHOICE=$?
@@ -2153,30 +2251,26 @@
 					TARGETMENUID=10
 				;;
 				"Static Ip")
-					Change_StaticIp
+					Change_StaticIp 1
 					#Return to this menu
 					TARGETMENUID=10
 				;;
 				"Static Gateway")
-					Change_StaticGateway
+					Change_StaticGateway 1
 					#Return to this menu
 					TARGETMENUID=10
 				;;
 				"Static Mask")
-					Change_StaticMask
+					Change_StaticMask 1
 					#Return to this menu
 					TARGETMENUID=10
 				;;
 				"Static DNS")
-					Change_StaticDns
+					Change_StaticDns 1
 					#Return to this menu
 					TARGETMENUID=10
 				;;
 			esac
-		else
-			#Copy Current to Static (just incase user changed value, and didnt apply)
-			Network_WIFI_CopyCurrentToStatic
-
 		fi
 
 	}
@@ -2692,6 +2786,97 @@ _EOF_
 		fi
 	}
 
+	HOTSPOT_SSID=""
+	HOTSPOT_CHANNEL=""
+	HOTSPOT_KEY=""
+
+	#TARGETMENUID=15
+	Menu_WifiHotspot(){
+
+		TARGETMENUID=8
+
+		#Load current details into global vars, once.
+		if [ "$HOTSPOT_SSID" = "" ]; then
+			HOTSPOT_SSID=$(cat /etc/hostapd/hostapd.conf | grep -m1 '^ssid=' | sed 's/.*=//')
+			HOTSPOT_CHANNEL=$(cat /etc/hostapd/hostapd.conf | grep -m1 '^channel=' | sed 's/.*=//')
+			HOTSPOT_KEY=$(cat /etc/hostapd/hostapd.conf | grep -m1 '^wpa_passphrase=' | sed 's/.*=//')
+		fi
+
+		WHIP_TITLE='--- DietPi - WiFi Hotspot ---'
+		OPTION=$(whiptail --title "$WHIP_TITLE" --menu "SSID    : $HOTSPOT_SSID\nChannel : $HOTSPOT_CHANNEL\nKey     : $HOTSPOT_KEY" --backtitle "$WHIP_BACKTITLE" 14 60 4 \
+		"SSID" "Change the wireless hotspot name" \
+		"Channel" "Change the wireless channel" \
+		"Key" "Change the access key required to connect" \
+		"Apply" "Save Changes (Restart Networking)" 3>&1 1>&2 2>&3)
+
+		case "$OPTION" in
+		  Apply)
+			#update dietpi.txt
+			sed -i "/wifi_hotspot_ssid=/c\wifi_hotspot_ssid=$HOTSPOT_SSID" /DietPi/dietpi.txt
+			sed -i "/wifi_hotspot_channel=/c\wifi_hotspot_channel=$HOTSPOT_CHANNEL" /DietPi/dietpi.txt
+			sed -i "/wifi_hotspot_key=/c\wifi_hotspot_key=$HOTSPOT_KEY" /DietPi/dietpi.txt
+
+			#upate hostapd conf
+			sed -i "/ssid=/c\ssid=$HOTSPOT_SSID" /etc/hostapd/hostapd.conf
+			sed -i "/channel=/c\channel=$HOTSPOT_CHANNEL" /etc/hostapd/hostapd.conf
+			sed -i "/wpa_passphrase=/c\wpa_passphrase=$HOTSPOT_KEY" /etc/hostapd/hostapd.conf
+
+			#Apply/Restart network
+			Network_ApplyChanges
+
+			#Return to this menu
+			TARGETMENUID=15
+			;;
+		  SSID)
+			OPTION=$(whiptail --inputbox "Please enter a SSID for the WiFi hotspot" 8 65 "$HOTSPOT_SSID" --title "Change Hotspot SSID" 3>&1 1>&2 2>&3)
+			CHOICE=$?
+			if (( $CHOICE == 0 )); then
+				HOTSPOT_SSID=$OPTION
+			fi
+
+			#Return to this menu
+			TARGETMENUID=15
+			;;
+		  Channel)
+
+			local whiptail_menu_array=()
+
+			local channel_mhz=2412
+			local channel_min=1
+			local channel_max=13
+			for ((i=$channel_min; i<=$channel_max; i++))
+			do
+				whiptail_menu_array+=("$i " "$channel_mhz Mhz")
+				((channel_mhz += 5 ))
+			done
+
+			OPTION=$(whiptail --title "Change Hotspot Channel" --menu "Please select a WiFi channel for the hotspot." --cancel-button "$TEXT_MENU_BACK" --backtitle "$WHIP_BACKTITLE" 16 60 7 "${whiptail_menu_array[@]}" 3>&1 1>&2 2>&3)
+			#OPTION=$(whiptail --inputbox "Please enter a channel for the WiFi hotspot\n - 0-14" 9 65 "$HOTSPOT_CHANNEL" --title "Change Hotspot Channel" 3>&1 1>&2 2>&3)
+			CHOICE=$?
+
+			unset whiptail_menu_array
+
+			if (( $CHOICE == 0 )); then
+				HOTSPOT_CHANNEL=$OPTION
+			fi
+
+			#Return to this menu
+			TARGETMENUID=15
+			;;
+		  Key)
+			OPTION=$(whiptail --inputbox "Please enter a key/password for the WiFi hotspot\n - NB: Minimum of 8 characters" 9 70 "$HOTSPOT_KEY" --title "Change Hotspot Access Key" 3>&1 1>&2 2>&3)
+			CHOICE=$?
+			if (( $CHOICE == 0 )); then
+				HOTSPOT_KEY=$OPTION
+			fi
+
+			#Return to this menu
+			TARGETMENUID=15
+			;;
+		esac
+
+	}
+
 	#/////////////////////////////////////////////////////////////////////////////////////
 	# Main Loop
 	#/////////////////////////////////////////////////////////////////////////////////////
@@ -2732,6 +2917,8 @@ _EOF_
 				Menu_Overclock
 			elif (( $TARGETMENUID == 14 )); then
 				Menu_AudioOptions
+			elif (( $TARGETMENUID == 15 )); then
+				Menu_WifiHotspot
 			fi
 		done
 	else
