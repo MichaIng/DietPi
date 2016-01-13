@@ -166,3 +166,6 @@ FFmpeg
 
 Lets Encrypt
 - https://github.com/letsencrypt/letsencrypt
+
+Shairport-Sync
+- https://github.com/mikebrady/shairport-sync
