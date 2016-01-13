@@ -20,7 +20,7 @@
 <hr>
 
 ### The DietPi Project Team:
-* Dan Knight (Creator, coder and project lead of DietPi)
+* Daniel Knight (Creator, programmer and project lead of DietPi)
 * Pilovali - Joined 10/10/2015 (DietPi.com web hosting, forum moderator, testing, bug reporting)
 
 <hr>
@@ -166,3 +166,6 @@ FFmpeg
 
 Lets Encrypt
 - https://github.com/letsencrypt/letsencrypt
+
+Shairport-Sync
+- https://github.com/mikebrady/shairport-sync
