@@ -11,7 +11,7 @@
 #### Find out more: http://dietpi.com
 
 ##### DietPi is available for:
-- Raspberry Pi's: http://dietpi.net
+- Raspberry Pi's: http://dietpi.com
 - Odroid C1: http://fuzon.co.uk/phpbb/viewtopic.php?f=8&t=11
 - ODroid XU3/4: http://fuzon.co.uk/phpbb/viewtopic.php?f=8&t=57
 - Orange Pi PC: http://fuzon.co.uk/phpbb/viewtopic.php?f=8&t=164#p612
