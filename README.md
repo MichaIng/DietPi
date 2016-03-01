@@ -43,7 +43,7 @@ We are always looking for talented people who believe in the DietPi project, and
 <hr>
 
 ### DietPi GPLv2 License
-DietPi Copyright (C) 2015 Daniel Knight
+DietPi Copyright (C) 2016 Daniel Knight
 * Email daniel_haze@hotmail.com
 * Web http://fuzon.co.uk
 
