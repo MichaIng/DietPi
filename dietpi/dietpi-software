@@ -205,6 +205,7 @@
 	XSERVERXORG=0
 	CURLFTPFS=0
 	FFMPEG=0
+	ORACLEJAVA=0
 	SSHSERVER_DROPBEAR=2
 	SSHSERVER_OPENSSH=0
 	LOGGING_LOGROTATE=0
@@ -333,6 +334,7 @@ ALSABASE $ALSABASE
 XSERVERXORG $XSERVERXORG
 CURLFTPFS $CURLFTPFS
 FFMPEG $FFMPEG
+ORACLEJAVA $ORACLEJAVA
 
 SSHSERVER_DROPBEAR $SSHSERVER_DROPBEAR
 SSHSERVER_OPENSSH $SSHSERVER_OPENSSH
@@ -437,6 +439,7 @@ _EOF_
 		XSERVERXORG=$(cat "$FP_INSTALLED_FILE" | grep -m1 'XSERVERXORG ' | awk '{print $2}')
 		CURLFTPFS=$(cat "$FP_INSTALLED_FILE" | grep -m1 'CURLFTPFS ' | awk '{print $2}')
 		FFMPEG=$(cat "$FP_INSTALLED_FILE" | grep -m1 'FFMPEG ' | awk '{print $2}')
+		ORACLEJAVA=$(cat "$FP_INSTALLED_FILE" | grep -m1 'ORACLEJAVA ' | awk '{print $2}')
 
 		SSHSERVER_DROPBEAR=$(cat "$FP_INSTALLED_FILE" | grep -m1 'SSHSERVER_DROPBEAR ' | awk '{print $2}')
 		SSHSERVER_OPENSSH=$(cat "$FP_INSTALLED_FILE" | grep -m1 'SSHSERVER_OPENSSH ' | awk '{print $2}')
@@ -805,7 +808,7 @@ _EOF_
 					echo "deb $INSTALL_URL_ADDRESS /" > /etc/apt/sources.list.d/owncloud.list
 					wget "$INSTALL_URL_ADDRESS"Release.key
 					apt-key add - < Release.key
-					/DietPi/dietpi/dietpi-apt-get_update 1
+
 					apt-get update
 				fi
 
@@ -871,8 +874,6 @@ _EOF_
 							apt-key adv --keyserver keyserver.ubuntu.com --recv-key 5243CDED
 						fi
 
-						#run apt-get update
-						/DietPi/dietpi/dietpi-apt-get_update 1
 						apt-get update
 
 						INSTALL_DESCRIPTION='Kodi (Michael Gorven Repo)'
@@ -1176,15 +1177,7 @@ _EOF_
 			/DietPi/dietpi/func/check_connection "$INSTALL_URL_ADDRESS"
 			if (( $? == 0 )); then
 
-				#Add Oracle Java 8 Repo
-				if [ ! -f /etc/apt/sources.list.d/oracle_java.list ]; then
-					/DietPi/dietpi/dietpi-apt-get_update 1
-					echo "deb http://ppa.launchpad.net/webupd8team/java/ubuntu precise main" > /etc/apt/sources.list.d/oracle_java.list
-					apt-key adv --keyserver hkp://keyserver.ubuntu.com:80 --recv-keys EEA14886
-					apt-get update
-				fi
-
-				AGI oracle-java8-installer lame
+				AGI lame
 
 				#Install SubSonic
 				wget "$INSTALL_URL_ADDRESS" -O package.deb
@@ -1793,9 +1786,15 @@ _EOF_
 			Banner_Installing
 			AGI alsa-base alsa-utils
 
-			#rpi , enable HQ audio
+			#RPI
 			if (( $HW_MODEL < 10 )); then
-				sed -i '/avoid_pwm_pll=/c\avoid_pwm_pll=0' /DietPi/config.txt
+
+				#enable snd-bcm2835 if no other soundcard is configured.
+				if (( $(cat /DietPi/config.txt | grep -ci -m1 '#dtoverlay') == 1 )); then
+
+					/DietPi/dietpi/func/dietpi-set_soundcard rpi-bcm2835
+
+				fi
 
 			#OrangePi PC (HDMI)
 			elif (( $HW_MODEL == 30 )); then
@@ -1991,16 +1990,16 @@ _EOF_
 					#Install pre-reqs
 					AGI libogg0 libvorbisenc2 libtheora0 libspeex1 libopencore-amrwb0 libopencore-amrnb0 libass5
 
-				#rpi2
-				elif (( $HW_MODEL == 2 )); then
+				#rpi 2/3
+				elif (( $HW_MODEL == 2 )) || (( $HW_MODEL == 3 )); then
 					#Add Deb Multimedia repo for ffmpeg
 					if (( $(cat /etc/apt/sources.list | grep -ci -m1 "http://www.deb-multimedia.org") == 0 )); then
 
-						/DietPi/dietpi/dietpi-apt-get_update 1
 						echo -e "deb http://www.deb-multimedia.org jessie main non-free" >> /etc/apt/sources.list
 						apt-get update
 						AGI deb-multimedia-keyring --force-yes
 						apt-get update
+
 						AGI ffmpeg
 
 						#Done. Remove deb http://www.deb-multimedia.org from apt sources
@@ -2019,6 +2018,42 @@ _EOF_
 			FFMPEG=2
 
 		fi
+
+		#ORACLEJAVA
+		# - Software that requires JRE/JDK
+		if (( $SUBSONIC == 1 )); then
+			ORACLEJAVA=1
+		fi
+
+		if (( $ORACLEJAVA == 1 )); then
+
+			INSTALL_DESCRIPTION='Oracle Java 8 jdk'
+			Banner_Installing
+
+			# - Raspbian
+			if (( $HW_MODEL < 10 )); then
+
+				AGI oracle-java8-jdk
+
+			# - Debian. Add repo
+			else
+
+				cat << _EOF_ > /etc/apt/sources.list.d/webupd8team-java.list
+deb http://ppa.launchpad.net/webupd8team/java/ubuntu trusty main
+deb-src http://ppa.launchpad.net/webupd8team/java/ubuntu trusty main
+_EOF_
+
+				apt-key adv --keyserver keyserver.ubuntu.com --recv-keys EEA14886
+				apt-get update
+
+				AGI oracle-java8-installer
+
+			fi
+
+			ORACLEJAVA=2
+
+		fi
+
 
 	}
 
@@ -2351,22 +2386,21 @@ _EOF_
 
 			#Wheezy
 			elif (( $DISTRO == 1 )); then
+
 				#Rpi apache2 confs
 				cp /DietPi/dietpi/conf/apache2_wheezy.conf /etc/apache2/apache2.conf
 
-				if (( $HW_MODEL == 2 )); then
-					sed -i "/StartServers /c\StartServers 4" /etc/apache2/apache2.conf
-					sed -i "/MinSpareServers /c\MinSpareServers 1" /etc/apache2/apache2.conf
-					sed -i "/MaxSpareServers /c\MaxSpareServers 4" /etc/apache2/apache2.conf
-					sed -i "/MinSpareThreads /c\MinSpareThreads 1" /etc/apache2/apache2.conf
-					sed -i "/MaxSpareThreads /c\MaxSpareThreads 8" /etc/apache2/apache2.conf
-					sed -i "/MaxClients /c\MaxClients 50" /etc/apache2/apache2.conf
-					sed -i "/MaxRequestsPerChild /c\MaxRequestsPerChild 0" /etc/apache2/apache2.conf
-					sed -i "/ThreadLimit /c\ThreadLimit 16" /etc/apache2/apache2.conf
-					sed -i "/ThreadsPerChild /c\ThreadsPerChild 8" /etc/apache2/apache2.conf
-					sed -i "/MaxKeepAliveRequests /c\MaxKeepAliveRequests 10" /etc/apache2/apache2.conf
+				sed -i "/StartServers /c\StartServers $CPU_CORES_TOTAL" /etc/apache2/apache2.conf
+				sed -i "/MinSpareServers /c\MinSpareServers 1" /etc/apache2/apache2.conf
+				sed -i "/MaxSpareServers /c\MaxSpareServers $CPU_CORES_TOTAL" /etc/apache2/apache2.conf
+				sed -i "/MinSpareThreads /c\MinSpareThreads 1" /etc/apache2/apache2.conf
+				sed -i "/MaxSpareThreads /c\MaxSpareThreads 8" /etc/apache2/apache2.conf
+				sed -i "/MaxClients /c\MaxClients 50" /etc/apache2/apache2.conf
+				sed -i "/MaxRequestsPerChild /c\MaxRequestsPerChild 0" /etc/apache2/apache2.conf
+				sed -i "/ThreadLimit /c\ThreadLimit 16" /etc/apache2/apache2.conf
+				sed -i "/ThreadsPerChild /c\ThreadsPerChild 8" /etc/apache2/apache2.conf
+				sed -i "/MaxKeepAliveRequests /c\MaxKeepAliveRequests 10" /etc/apache2/apache2.conf
 
-				fi
 			fi
 
 			#Sites-Available settings. Disable access log, set error log level
@@ -2686,19 +2720,28 @@ _EOF_
 				peer_limit_torrent=10
 				upload_slots=3
 
-			#Rpi
+			#RPi v3
+			elif (( $HW_MODEL == 3 )); then
+				peer_limit=14
+				max_peers=14
+				peer_limit_torrent=8
+				upload_slots=2
+
+			#RPi v2
 			elif (( $HW_MODEL == 2 )); then
 				peer_limit=12
 				max_peers=12
 				peer_limit_torrent=7
 				upload_slots=2
 
+			#RPi v1 512
 			elif (( $HW_MODEL == 1 )); then
 				peer_limit=10
 				max_peers=10
 				peer_limit_torrent=6
 				upload_slots=2
 
+			#RPi v1 256
 			elif (( $HW_MODEL == 0 )); then
 				peer_limit=7
 				max_peers=7
@@ -5967,8 +6010,18 @@ _EOF_
 			fi
 		fi
 
+		#ORACLEJAVA
+		local oraclejava_w="off"
+		if (( $ORACLEJAVA > 0 )); then
+			oraclejava_w="on"
+			#Reset to 0. Menu checklists will apply back to 1
+			if (( $ORACLEJAVA == 1 )); then
+				ORACLEJAVA=0
+			fi
+		fi
+
 		WHIP_TITLE='Linux - Software Selection'
-		whiptail --title "$WHIP_TITLE" --checklist --separate-output "Please Select Additional Software you Require \n - Press the SpaceBar to select/unselect" --backtitle "$WHIP_BACKTITLE" 20 71 12 \
+		whiptail --title "$WHIP_TITLE" --checklist --separate-output "Press the spacebar to select additional software for installation." --backtitle "$WHIP_BACKTITLE" 19 71 12 \
 		"" "────SSH Clients──────────────────────────────" "off" \
 		"OpenSSH" "SSH Client: OpenSSH." $sshclient_w \
 		"" "────Fileserver Clients───────────────────────" "off" \
@@ -5980,6 +6033,7 @@ _EOF_
 		"Git" "Git Client." $gitclient_w \
 		"" "────Shared Libraries──────────────────────────" "off" \
 		"FFmpeg" "Audio / Visual libary." $ffmpeg_w \
+		"Java" "Oracle Java 8 jdk/jre libary." $oraclejava_w \
 		"" "────System───────────────────────────────────" "off" \
 		"ALSA" "Linux Sound System" $alsabase_w \
 		"Xserver" "Xinit / Xauth." $xserverxorg_w 2>/tmp/dietpi-software_results
@@ -5987,6 +6041,12 @@ _EOF_
 		while read choice
 		do
 			case $choice in
+				Java)
+					if (( $ORACLEJAVA == 0 )); then
+						ORACLEJAVA=1
+						INSTALL_LINUX_CHOICESMADE=true
+					fi
+				;;
 				FFmpeg)
 					if (( $FFMPEG == 0 )); then
 						FFMPEG=1
