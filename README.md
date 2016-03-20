@@ -25,7 +25,12 @@
 
 <hr>
 
-### DietPi Project Contribution. Are you able to:
+### DietPi Project Contribution.
+
+Coders (Git):
+Please use the active development branch "testing": https://github.com/Fourdee/DietPi/tree/testing
+
+Are you able to:
 * Provide feedback and/or test areas of DietPi, to improve the user experience.
 * Report bugs.
 * Improve/Add more features to the DietPi website (dietpi.com).
