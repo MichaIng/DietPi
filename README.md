@@ -13,15 +13,17 @@
 ##### DietPi is available for:
 - Raspberry Pi's: http://dietpi.com
 - Odroid C1: http://fuzon.co.uk/phpbb/viewtopic.php?f=8&t=11
+- Odroid C2: http://fuzon.co.uk/phpbb/viewtopic.php?f=8&t=339&p=1492#p1492
 - ODroid XU3/4: http://fuzon.co.uk/phpbb/viewtopic.php?f=8&t=57
 - Orange Pi PC: http://fuzon.co.uk/phpbb/viewtopic.php?f=8&t=164#p612
-- VMware (Virtual Machine): http://fuzon.co.uk/phpbb/viewtopic.php?f=8&t=90
+- VMware x64 (Virtual Machine): http://fuzon.co.uk/phpbb/viewtopic.php?f=8&t=90
 
 <hr>
 
 ### The DietPi Project Team:
 * Daniel Knight (Creator, programmer and project lead of DietPi)
 * Pilovali - Joined 10/10/2015 (DietPi.com web hosting, forum moderator, testing, bug reporting)
+* ZombieVirus - Joined 20/03/2016 (DietPi forum moderator and version history maintainer on forums).
 
 <hr>
 
