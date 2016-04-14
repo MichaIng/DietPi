@@ -3,5 +3,5 @@
 
 1. Write the DietPi image to SD card.
 2. Open the file on the 1st partition ```/boot/dietpi.txt```
-3. Change ```gitbranch=master``` to ```gitbranch=testing```
+3. Change ```gitbranch=master``` to ```gitbranch=testing``` (located at the bottom of file)
 4. Save the file, eject media and power on.
