@@ -20,8 +20,7 @@
 
 <hr>
 
-### MyVirtualServer.com:
-DietPi's web hosting is powered by http://MyVirtualServer.com.
+### DietPi's web hosting is powered by http://MyVirtualServer.com
 
 ![MVS](http://dietpi.com/images/mvs_logo_150.jpg)
 
