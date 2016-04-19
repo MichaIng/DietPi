@@ -17,9 +17,9 @@
 	# - iEXITONBACK - 1=Exit DietPi-Config when going back to previous menu (applied to TARGETMENUINDEX 8 only!!)
 	#////////////////////////////////////
 
-	#/////////////////////////////////////////////////////////////////////////////////////
-	#Exit Paths
-	#/////////////////////////////////////////////////////////////////////////////////////
+	#Force en_GB Locale for whole script. Prevents incorrect parsing with non-english locales.
+	LANG=en_GB.UTF-8
+
 	#Exit path for non-root logins.
 	if (( $UID != 0 )); then
 		clear
@@ -96,16 +96,17 @@
 	Menu_Main(){
 
 		WHIP_TITLE='DietPi-Config'
-		OPTION=$(whiptail --title "$WHIP_TITLE" --menu " Hardware : $HW_MODEL_DESCRIPTION" --cancel-button "Exit" --backtitle "$WHIP_BACKTITLE" 17 50 9 \
+		OPTION=$(whiptail --title "$WHIP_TITLE" --menu " Hardware : $HW_MODEL_DESCRIPTION" --cancel-button "Exit" --backtitle "$WHIP_BACKTITLE" 18 50 10 \
 		"1" "Display Options" \
 		"2" "Audio Options" \
 		"3" "Performance Options" \
 		"4" "Advanced Options" \
 		"5" "Language/Regional Options" \
 		"6" "Security Options" \
-		"7" "Networking Options" \
-		"8" "AutoStart Options" \
-		"9" "Tools" 3>&1 1>&2 2>&3)
+		"7" "Network Options: Adapters" \
+		"8" "Network Options: NAS/Misc" \
+		"9" "AutoStart Options" \
+		"10" "Tools" 3>&1 1>&2 2>&3)
 
 		CHOICE=$?
 		if (( $CHOICE == 0 )); then
@@ -136,10 +137,12 @@
 				TARGETMENUID=5
 			elif (( $OPTION == 7 )); then
 				 TARGETMENUID=8
-		   elif (( $OPTION == 8 )); then
+			elif (( $OPTION == 8 )); then
+				 TARGETMENUID=16
+		   elif (( $OPTION == 9 )); then
 				/DietPi/dietpi/dietpi-autostart
 				REBOOT_REQUIRED=1
-			elif (( $OPTION == 9 )); then
+			elif (( $OPTION == 10 )); then
 				TARGETMENUID=11
 		   else
 				Menu_Exit
@@ -473,7 +476,8 @@
 			"1080p" "1920 x 1080" \
 			"720p" "1280 x 720" \
 			"480p" "720 x 480" \
-			"PC1" "1024 x 768" 3>&1 1>&2 2>&3)
+			"PC1" "1024 x 768" \
+			"Reserved" "1024 x 600" 3>&1 1>&2 2>&3)
 
 			case "$OPTION" in
 			  1080p)
@@ -496,6 +500,12 @@
 				;;
 			  PC1)
 				sed -i '/setenv m /c\setenv m "1024x768"' /DietPi/boot.ini
+				REBOOT_REQUIRED=1
+				#Return to This Menu
+				TARGETMENUID=2
+				;;
+			  Reserved)
+				sed -i '/setenv m /c\setenv m "1024x600"' /DietPi/boot.ini
 				REBOOT_REQUIRED=1
 				#Return to This Menu
 				TARGETMENUID=2
@@ -603,7 +613,7 @@
 				;;
 			esac
 
-		#OrangePi - Disabled due to
+		#OrangePi - Disabled due to vcore/stability patch
 		# elif (( $HW_MODEL == 30 )); then
 
 			## Get Current Values
@@ -736,7 +746,11 @@
 
 				CHOICE=$?
 				if (( $CHOICE == 0 )); then
+
 					sed -i "/ntpd_update_mode=/c\ntpd_update_mode=$OPTION" /DietPi/dietpi.txt
+
+					REBOOT_REQUIRED=1
+
 				fi
 
 				#Return to This Menu
@@ -1386,6 +1400,10 @@
 		case "$OPTION" in
 		  Locale)
 			REBOOT_REQUIRED=1
+
+			# - Warn user that DietPi requires en_GB to be installed, to ensure all DietPi script parsing is correct.
+			whiptail --title "DietPi Locale" --msgbox "DietPi requires en_GB.UTF-8 to be installed. This ensures all DietPi scripts can parse correctly.\n\nPlease do NOT remove en_GB.UTF-8 from the system, when selecting your Locale." --backtitle "$WHIP_BACKTITLE" 12 65
+
 			dpkg-reconfigure locales
 
 			#Return to this menu
@@ -1478,13 +1496,13 @@
 		#Release all DHCP leases (too slow, quicker to allow router to decide leases)
 		#dhclient -r
 
-		#Kill dhclient
-		killall dhclient &> /dev/null
-
-		echo -e "\n - Dropping connections.."
 		#Drop Connections
+		echo -e "\n - Dropping connections.."
 		ifdown eth$ETH_INDEX &> /dev/null
 		ifdown wlan$WIFI_INDEX &> /dev/null
+
+		#Kill dhclient
+		killall dhclient &> /dev/null
 
 		echo -e "\n - Restarting networking services..."
 		#Restart Networking
@@ -1515,10 +1533,11 @@
 
 	Network_ApplyChanges(){
 
-		#Enable/disable adapters
+		#Disable all adapters
 		sed -i "/auto eth/c\#auto eth$ETH_INDEX" /etc/network/interfaces
 		sed -i "/auto wlan/c\#auto wlan$WIFI_INDEX" /etc/network/interfaces
 
+		#Enable adapters
 		if (( $ETH_DISABLED == 0 )); then
 			sed -i "/auto eth/c\auto eth$ETH_INDEX" /etc/network/interfaces
 		fi
@@ -1647,21 +1666,63 @@
 	}
 
 	Change_StaticDns(){
-		#Ethernet
+
+		#$1 = Adapater type | 0=Eth, 1=WiFi
+
+		#Store current into var
+		local current_value=0
+
+		# - Ethernet
 		if (( $1 == 0 )); then
-			OPTION=$(whiptail --inputbox "Enter Your DNS Server Address\n - 2 maximum, seperated by a space.\n - eg: 8.8.8.8 8.8.4.4" 10 60 "$ETH_DNS_STATIC" --title "Set Static DNS Address" 3>&1 1>&2 2>&3)
-			CHOICE=$?
-			if (( $CHOICE == 0 )); then
-				ETH_DNS_STATIC=$OPTION
-			fi
-		#wifi
+			current_value=$ETH_DNS_STATIC
+		# - WiFi
 		elif (( $1 == 1 )); then
-			OPTION=$(whiptail --inputbox "Enter Your DNS Server Address\n - 2 maximum, seperated by a space.\n - eg: 8.8.8.8 8.8.4.4" 10 60 "$WIFI_DNS_STATIC" --title "Set Static DNS Address" 3>&1 1>&2 2>&3)
-			CHOICE=$?
-			if (( $CHOICE == 0 )); then
-				WIFI_DNS_STATIC=$OPTION
-			fi
+			current_value=$WIFI_DNS_STATIC
 		fi
+
+		local return_value=$current_value
+
+		#Create Menu List for Whiptail
+		local whiptail_menu_array=(
+			"Custom" "Manually enter your DNS server"
+			"8.8.8.8 8.8.4.4" ": Google"
+			"208.67.222.222 208.67.220.220" ": OpenDNS"
+			"209.244.0.3 209.244.0.4" ": Level3"
+			"216.146.35.35 216.146.36.36" ": Dyn"
+			"37.235.1.174 37.235.1.177" ": FreeDNS"
+			"64.6.64.6 64.6.65.6" ": Verisign"
+			"84.200.69.80 84.200.70.40" ": DNS Watch"
+		)
+
+		OPTION=$(whiptail --title "Choose DNS server" --menu "Please select a DNS server, or choose custom for manual entry." --default-item "$current_value" --cancel-button "$TEXT_MENU_BACK" --backtitle "$WHIP_BACKTITLE" 16 70 8 "${whiptail_menu_array[@]}" 3>&1 1>&2 2>&3)
+		CHOICE=$?
+		if (( $CHOICE == 0 )); then
+			case $OPTION in
+				Custom)
+					OPTION=$(whiptail --inputbox "Enter Your DNS Server Address\n - 2 maximum, seperated by a space.\n - eg: 8.8.8.8 8.8.4.4" 10 60 "$current_value" --title "Set Static DNS Address" 3>&1 1>&2 2>&3)
+					CHOICE=$?
+					if (( $CHOICE == 0 )); then
+						return_value=$OPTION
+					fi
+				;;
+				*)
+					return_value=$OPTION
+				;;
+			esac
+		fi
+
+		#delete []
+		unset whiptail_menu_array
+
+		#Apply new value
+		# - Ethernet
+		if (( $1 == 0 )); then
+			ETH_DNS_STATIC=$return_value
+		# - WiFi
+		elif (( $1 == 1 )); then
+			WIFI_DNS_STATIC=$return_value
+		fi
+
 	}
 
 	Change_WifiSsid(){
@@ -1717,7 +1778,7 @@
 	}
 
 	Wifi_Reconnect(){
-		WHIP_QUESTION="SSID: $WIFI_SSID \nKEY: $WIFI_KEY \n\nConnect now? \n\n(NOTICE) All connections will be dropped!"
+		WHIP_QUESTION="SSID: $WIFI_SSID \nKEY: $WIFI_KEY \n\nConnect now? \n\n(NOTICE) All WiFi connections will be dropped!"
 		whiptail --title "$WHIP_TITLE" --yesno "$WHIP_QUESTION" --yes-button "Ok" --no-button "Back" --defaultno --backtitle "$WHIP_BACKTITLE" 14 60
 		CHOICE=$?
 		if (( $CHOICE == 0 )); then
@@ -1729,7 +1790,7 @@
 	}
 
 	Ethernet_Reconnect(){
-		WHIP_QUESTION="Do you wish to apply settings and reconnect network now? \n\n(NOTICE) All connections will be dropped!"
+		WHIP_QUESTION="Do you wish to apply settings and reconnect network now? \n\n(NOTICE) All Ethernet connections will be dropped!"
 		whiptail --title "$WHIP_TITLE" --yesno "$WHIP_QUESTION" --yes-button "Ok" --no-button "Back" --defaultno --backtitle "$WHIP_BACKTITLE" 12 60
 		CHOICE=$?
 		if (( $CHOICE == 0 )); then
@@ -1862,20 +1923,8 @@
 
 	}
 
-	Menu_SambaClientSetup(){
-
-		/DietPi/dietpi/func/dietpi-set_smbclient
-
-	}
-
-	Menu_CurlftpFsSetup(){
-
-		/DietPi/dietpi/func/dietpi-set_curlftpfs
-
-	}
-
 	#TARGETMENUID=8
-	Menu_NetworkOptions(){
+	Menu_NetworkAdapters(){
 
 		TARGETMENUID=0
 
@@ -1937,75 +1986,23 @@
 			ipv6_status_text='Disabled'
 		fi
 
-		#Samba Client
-		local sambaclient_installed=0
-		local sambaclient_status="Not Installed"
-		local sambaclient_menutext="Install now to access Windows shares and NAS devices"
-		local sambaclient_mounted_size="unknown"
-		local sambaclient_mounted_used="unknown"
-		local sambaclient_mounted_free="unknown"
-		if [ -f /DietPi/dietpi/.installed ] &&
-			(( $(cat /DietPi/dietpi/.installed | grep -m1 'SMBCLIENT ' | awk '{print $2}') == 2 )); then
+		#Proxy settings (global vars, force an int to obtain current values stored in dietpi.txt)
+		Load_Proxy_Vars
 
-			sambaclient_installed=1
-			sambaclient_status="Unable to connect and/or incorrect details"
-			sambaclient_menutext="Input/Modify Details"
-
-			#Check if mount exists and is valid
-			if (( $(df -h | grep -ci -m1 '/mnt/samba') == 1 )); then
-				#Get stats
-				sambaclient_mounted_size=$(df -h | grep -m1 '/mnt/samba' | awk '{ print $2 }')
-				sambaclient_mounted_used=$(df -h | grep -m1 '/mnt/samba' | awk '{ print $3 }')
-				sambaclient_mounted_free=$(df -h | grep -m1 '/mnt/samba' | awk '{ print $4 }')
-				sambaclient_status="/mnt/samba | Size $sambaclient_mounted_size | Used $sambaclient_mounted_used | Free $sambaclient_mounted_free"
-			fi
+		local proxy_state_text='Disabled'
+		if (( $PROXY_ENABLED == 1 )); then
+			proxy_state_text="Enabled | $PROXY_ADDRESS:$PROXY_PORT"
 		fi
+		# - Reset init flag. Ensures Menu_Proxy() reloads current settings.
+		PROXY_ENABLED=-1
 
-		#ftp Client mount, curlftpfs
-		local curlftpfs_installed=0
-		local curlftpfs_status="Not Installed"
-		local curlftpfs_menutext="Install now to access FTP as filesystem mount"
-		if [ -f /DietPi/dietpi/.installed ] &&
-			(( $(cat /DietPi/dietpi/.installed | grep -m1 'CURLFTPFS ' | awk '{print $2}') == 2 )); then
-
-			curlftpfs_installed=1
-			curlftpfs_status="Unable to connect and/or incorrect details"
-			curlftpfs_menutext="Input/Modify Details"
-
-			#Check if mount exists and is valid
-			if (( $(df -h | grep -ci -m1 '/mnt/ftp_client') == 1 )); then
-				#Get stats
-				curlftpfs_status="/mnt/ftp_client | Connected"
-			fi
-		fi
-
-		#NoIp Client
-		local noip_installed=0
-		local noip_status="Not Installed"
-		local noip_menutext="Install No-Ip now"
-		if [ -f /DietPi/dietpi/.installed ] &&
-			(( $(cat /DietPi/dietpi/.installed | grep -m1 'NOIPDYNDNS ' | awk '{print $2}') == 2 )); then
-
-			noip_installed=1
-			noip_status="Offline - Please Enter No-Ip Details"
-			noip_menutext="Enter/Setup NoIp Details"
-
-			#Check if noip is running (indicates login details are valid)
-			if (( $(ps aux | grep -ci -m1 '/usr/local/bin/[n]oip2') == 1 )); then
-				noip_status="Online / Active"
-				noip_menutext="Change NoIp Details"
-			fi
-		fi
-
-		WHIP_TITLE='DietPi - Network Options'
-		OPTION=$(whiptail --title "$WHIP_TITLE" --menu " \n Ethernet     : $eth_hardware_text | $eth_disabled_text | $eth_connected_text \n Wifi         : $wlan_hardware_text | $wlan_disabled_text | $wlan_connected_text\n IPv6         : $ipv6_status_text\n Internet     : $Internet_connected_text \n Samba client : $sambaclient_status \n FTP client   : $curlftpfs_status\n NoIp status  : $noip_status" --cancel-button "$TEXT_MENU_BACK" --backtitle "$WHIP_BACKTITLE" 22 75 7 \
+		WHIP_TITLE='DietPi - Network Options: Adapters'
+		OPTION=$(whiptail --title "$WHIP_TITLE" --menu " \n Ethernet     : $eth_hardware_text | $eth_disabled_text | $eth_connected_text \n Wifi         : $wlan_hardware_text | $wlan_disabled_text | $wlan_connected_text\n IPv6         : $ipv6_status_text\n Internet     : $Internet_connected_text\n Proxy        : $proxy_state_text" --cancel-button "$TEXT_MENU_BACK" --backtitle "$WHIP_BACKTITLE" 19 65 5 \
 		"Ethernet" "Change Wired Network Settings" \
 		"WiFi" "Change Wireless Network Settings" \
 		"IPv6" "Toggle IPv6 Support" \
 		"Test" "Run the Internet Connection Test" \
-		"Samba Client" "$sambaclient_menutext" \
-		"Ftp Client" "$curlftpfs_menutext" \
-		"NoIp" "$noip_menutext" 3>&1 1>&2 2>&3)
+		"Proxy" "Configure proxy settings" 3>&1 1>&2 2>&3)
 
 		CHOICE=$?
 		if (( $CHOICE == 0 )); then
@@ -2045,18 +2042,17 @@
 				#No hardware found
 				if [ "$ETH_HARDWARE" = false ]; then
 					WHIP_TITLE=' Error: No Ethernet Hardware was found.'
-					WHIP_QUESTION=' No Ethernet Hardware was found. You are most likely running a Pi Model A'
+					WHIP_QUESTION=' No Ethernet Hardware was found. You are most likely running a Pi Model A.'
 					whiptail --title "$WHIP_TITLE" --msgbox "$WHIP_QUESTION" --backtitle "$WHIP_BACKTITLE" 12 60
 					#Return to this Menu
 					TARGETMENUID=8
 				#Disabled
 				elif (( $ETH_DISABLED == 1 )); then
-					whiptail --title "Ethernet is Disabled" --yesno "Ethernet must be enabled before settings can be changed. \n \n Would you like to Enable Ethernet now? \n - (NOTICE) All connections will drop! \n - (NOTICE) This will disable Wifi" --yes-button "Ok" --no-button "Back" --defaultno --backtitle "$WHIP_BACKTITLE" 14 60
+					whiptail --title "Ethernet is Disabled" --yesno "Ethernet must be enabled before settings can be changed.\n\nWould you like to enable Ethernet now?\n - (NOTICE) Connections may drop!" --yes-button "Ok" --no-button "Back" --defaultno --backtitle "$WHIP_BACKTITLE" 12 60
 					CHOICE=$?
 					#Confirm action
 					if (( $CHOICE == 0 )); then
 						ETH_DISABLED=0
-						WIFI_DISABLED=1
 						Network_ApplyChanges
 						TARGETMENUID=9
 					else
@@ -2084,16 +2080,15 @@
 
 				#Disabled
 				elif (( $WIFI_DISABLED == 1 )); then
-					whiptail --title "Wifi is Disabled" --yesno "Wifi must be enabled before settings can be changed. \n \n Would you like to Enable Wifi now? \n - (NOTICE) All connections will drop! \n - (NOTICE) This will disable Ethernet" --yes-button "Ok" --no-button "Back" --defaultno --backtitle "$WHIP_BACKTITLE" 14 60
+					whiptail --title "WiFi is Disabled" --yesno "WiFi must be enabled before settings can be changed.\n\nWould you like to enable WiFi now? \n - (NOTICE) Connections may drop!" --yes-button "Ok" --no-button "Back" --defaultno --backtitle "$WHIP_BACKTITLE" 12 60
 					CHOICE=$?
-					#Confirm action
+					# Confirm action
 					if (( $CHOICE == 0 )); then
-						ETH_DISABLED=1
 						WIFI_DISABLED=0
 						Network_ApplyChanges
 						TARGETMENUID=10
 					else
-						#Return to this Menu
+						# Return to this Menu
 						TARGETMENUID=8
 					fi
 				else
@@ -2111,101 +2106,8 @@
 				#Return to this Menu
 				TARGETMENUID=8
 				;;
-			  Samba*)
-				#Installed?
-				if (( $sambaclient_installed == 0 )); then
-					whiptail --title "Install Samba Client?" --yesno "Samba Client is not installed, would you like to install it now?\n\nThis will allow you access Windows shared folders, NAS and CIFS capable devices." --yes-button "Ok" --no-button "Back" --defaultno --backtitle "$WHIP_BACKTITLE" 12 65
-					CHOICE=$?
-					if (( $CHOICE == 0 )); then
-						#install smbclient
-						/DietPi/dietpi/dietpi-apt-get_update 1
-						apt-get install smbclient cifs-utils ntfs-3g -y --no-install-recommends
-
-						#Check its installed. Update DietPi .installed
-						if (( $(dpkg -l | grep -ci -m1 'smbclient') == 1 )); then
-							sed -i '/SMBCLIENT/c\SMBCLIENT 2' /DietPi/dietpi/.installed
-						fi
-					fi
-				else
-					Menu_SambaClientSetup
-				fi
-
-				#Return to this Menu
-				TARGETMENUID=8
-				;;
-			  Ftp*)
-				#Installed?
-				if (( $curlftpfs_installed == 0 )); then
-					whiptail --title "Install FTP Client?" --yesno "FTP Client (curlftpfs) is not installed, would you like to install it now? \n \n - This is required to mount an FTP connection to filesystem" --yes-button "Ok" --no-button "Back" --defaultno --backtitle "$WHIP_BACKTITLE" 12 65
-					CHOICE=$?
-					if (( $CHOICE == 0 )); then
-						#install curlftpfs
-						/DietPi/dietpi/dietpi-apt-get_update 1
-						apt-get install curlftpfs -y
-
-						#Check its installed. Update DietPi .installed
-						if (( $(dpkg -l | grep -ci -m1 'curlftpfs') == 1 )); then
-							sed -i '/CURLFTPFS/c\CURLFTPFS 2' /DietPi/dietpi/.installed
-						fi
-					fi
-				else
-					Menu_CurlftpFsSetup
-				fi
-
-				#Return to this Menu
-				TARGETMENUID=8
-				;;
-			  NoIp)
-				#Installed?
-				if (( $noip_installed == 0 )); then
-					whiptail --title "Install NoIp Client?" --yesno "NoIp Client is not installed, would you like to install it now?\n\n- NoIp will allow you to use a fixed web address, regardless of your internet IP\neg: MySuperDooperWebsite.noip2.biz would point to this device!" --yes-button "Ok" --no-button "Back" --defaultno --backtitle "$WHIP_BACKTITLE" 13 70
-					CHOICE=$?
-					if (( $CHOICE == 0 )); then
-						#x32 x64
-						if (( $HW_MODEL == 20 )); then
-							local noip_url_address="http://dietpi.com/downloads/binaries/all/noip_x32_x64.zip"
-						#ARM
-						else
-							local noip_url_address="http://dietpi.com/downloads/binaries/all/noip_armhf.zip"
-						fi
-						/DietPi/dietpi/func/check_connection "$noip_url_address"
-
-						#Install
-						if (( $? == 0 )); then
-
-							#NoIp Binary install
-							wget "$noip_url_address" -O dietpi-noip.zip
-							unzip dietpi-noip.zip
-							rm dietpi-noip.zip
-							mv noip_binary /usr/local/bin/noip2
-							chmod +x /usr/local/bin/noip2
-
-							#noip2 service file
-							cp /DietPi/dietpi/conf/noip_init /etc/init.d/noip2
-							chmod +x /etc/init.d/noip2
-							update-rc.d noip2 defaults
-
-							#Disable service autostart (controlled by DietPi-Services)
-							/DietPi/dietpi/dietpi-services disable
-
-							#Update DietPi .installed
-							sed -i '/NOIPDYNDNS/c\NOIPDYNDNS 2' /DietPi/dietpi/.installed
-
-						else
-							WHIP_TITLE='Error - Unable to Connect'
-							whiptail --title "$WHIP_TITLE" --msgbox "Unable to Install NoIp client \n $noip_url_address is offline and/or unreachable" 12 60
-						fi
-					fi
-				else
-					clear
-					service noip2 stop
-					noip2 -C
-					read -p "Press any key to continue....."
-					service noip2 start
-				fi
-
-				#Return to this Menu
-				TARGETMENUID=8
+			  Proxy)
+				TARGETMENUID=17
 				;;
 			esac
 
@@ -2222,7 +2124,7 @@
 	}
 
 	#TARGETMENUID=9
-	Menu_NetworkOptions_Ethernet(){
+	Menu_NetworkAdapters_Ethernet(){
 
 		TARGETMENUID=8
 
@@ -2239,13 +2141,14 @@
 		fi
 
 		WHIP_TITLE='DietPi - Ethernet Network Options'
-		OPTION=$(whiptail --title "$WHIP_TITLE" --menu " Current Details: \n - Mode    = $mode_current \n - Ip      = $ETH_IP \n - Mask    = $ETH_MASK\n - Gateway = $ETH_GATEWAY\n - DNS     = $ETH_DNS" --cancel-button "$TEXT_MENU_BACK" --backtitle "$WHIP_BACKTITLE" 20 60 7 \
+		OPTION=$(whiptail --title "$WHIP_TITLE" --menu " Current Details: \n - Mode    = $mode_current \n - Ip      = $ETH_IP \n - Mask    = $ETH_MASK\n - Gateway = $ETH_GATEWAY\n - DNS     = $ETH_DNS" --cancel-button "$TEXT_MENU_BACK" --backtitle "$WHIP_BACKTITLE" 21 60 8 \
 		"Change Mode" "$mode_target" \
 		"Copy" "Copy Current address to Static" \
 		"Static Ip" "$ETH_IP_STATIC"  \
 		"Static Mask" "$ETH_MASK_STATIC"  \
 		"Static Gateway" "$ETH_GATEWAY_STATIC"  \
 		"Static DNS" "$ETH_DNS_STATIC" \
+		"Disable" "Disable Ethernet adapter" \
 		"Apply" "Save Changes (Restart Networking)" 3>&1 1>&2 2>&3)
 
 		CHOICE=$?
@@ -2258,6 +2161,19 @@
 					fi
 					#Return to this menu
 					TARGETMENUID=9
+				;;
+				Disable)
+					whiptail --title "Ethernet is Enabled" --yesno "Would you like to disable the Ethernet adapter?\n - (NOTICE) All Ethernet connections will be dropped." --yes-button "Ok" --no-button "Back" --defaultno --backtitle "$WHIP_BACKTITLE" 10 60
+					CHOICE=$?
+					#Confirm action
+					if (( $CHOICE == 0 )); then
+						ETH_DISABLED=1
+						Network_ApplyChanges
+						TARGETMENUID=8
+					else
+						#Return to this Menu
+						TARGETMENUID=9
+					fi
 				;;
 				Apply)
 					Ethernet_Reconnect
@@ -2297,7 +2213,7 @@
 	}
 
 	#TARGETMENUID=10
-	Menu_NetworkOptions_Wifi(){
+	Menu_NetworkAdapters_Wifi(){
 
 		TARGETMENUID=8
 
@@ -2314,7 +2230,7 @@
 		fi
 
 		WHIP_TITLE='DietPi - Wireless Network Options'
-		OPTION=$(whiptail --title "$WHIP_TITLE" --menu " Current Details: \n - SSID    = $WIFI_SSID | $WIFI_BITRATE Mbit | Strength: $WIFI_SIGNALSTRENGTH%\n - KEY     = $WIFI_KEY \n - Mode    = $mode_current \n - Ip      = $WIFI_IP\n - Mask    = $WIFI_MASK\n - DNS     = $WIFI_DNS" --cancel-button "$TEXT_MENU_BACK" --backtitle "$WHIP_BACKTITLE" 23 65 9 \
+		OPTION=$(whiptail --title "$WHIP_TITLE" --menu " Current Details: \n - SSID    = $WIFI_SSID | $WIFI_BITRATE Mbit | Strength: $WIFI_SIGNALSTRENGTH%\n - KEY     = $WIFI_KEY \n - Mode    = $mode_current \n - Ip      = $WIFI_IP\n - Mask    = $WIFI_MASK\n - DNS     = $WIFI_DNS" --cancel-button "$TEXT_MENU_BACK" --backtitle "$WHIP_BACKTITLE" 24 65 10 \
 		"Scan" "Scan and Connect" \
 		"Manual" "Manually Set Wireless Details" \
 		"Change Mode" "$mode_target" \
@@ -2323,11 +2239,25 @@
 		"Static Mask" "$WIFI_MASK_STATIC"  \
 		"Static Gateway" "$WIFI_GATEWAY_STATIC"  \
 		"Static DNS" "$WIFI_DNS_STATIC" \
+		"Disable" "Disable WiFi adapter" \
 		"Apply" "Save Changes (Restart Networking)" 3>&1 1>&2 2>&3)
 
 		CHOICE=$?
 		if (( $CHOICE == 0 )); then
 			case "$OPTION" in
+				Disable)
+					whiptail --title "WiFi is Enabled" --yesno "Would you like to disable the WiFi adapter?\n - (NOTICE) All WiFi connections will be dropped." --yes-button "Ok" --no-button "Back" --defaultno --backtitle "$WHIP_BACKTITLE" 10 60
+					CHOICE=$?
+					#Confirm action
+					if (( $CHOICE == 0 )); then
+						WIFI_DISABLED=1
+						Network_ApplyChanges
+						TARGETMENUID=8
+					else
+						#Return to this Menu
+						TARGETMENUID=10
+					fi
+				;;
 				Scan)
 					Scan_Wifi
 					#Return to this menu
@@ -2960,7 +2890,6 @@ _EOF_
 			done
 
 			OPTION=$(whiptail --title "Change Hotspot Channel" --menu "Please select a WiFi channel for the hotspot." --cancel-button "$TEXT_MENU_BACK" --backtitle "$WHIP_BACKTITLE" 16 60 7 "${whiptail_menu_array[@]}" 3>&1 1>&2 2>&3)
-			#OPTION=$(whiptail --inputbox "Please enter a channel for the WiFi hotspot\n - 0-14" 9 65 "$HOTSPOT_CHANNEL" --title "Change Hotspot Channel" 3>&1 1>&2 2>&3)
 			CHOICE=$?
 
 			unset whiptail_menu_array
@@ -2983,6 +2912,351 @@ _EOF_
 			TARGETMENUID=15
 			;;
 		esac
+
+	}
+
+	#TARGETMENUID=16
+	Menu_Network_Nas_Misc(){
+
+		TARGETMENUID=0
+
+		#Check Network
+		#Network_GetData
+
+		#Samba Client
+		local sambaclient_installed=0
+		local sambaclient_status="Not Installed"
+		local sambaclient_menutext="Install now to access Windows shares and NAS devices"
+		local sambaclient_mounted_size="unknown"
+		local sambaclient_mounted_used="unknown"
+		local sambaclient_mounted_free="unknown"
+		if [ -f /DietPi/dietpi/.installed ] &&
+			(( $(cat /DietPi/dietpi/.installed | grep -m1 'SMBCLIENT ' | awk '{print $2}') == 2 )); then
+
+			sambaclient_installed=1
+			sambaclient_status="Unable to connect and/or incorrect details"
+			sambaclient_menutext="Input/Modify Details"
+
+			#Check if mount exists and is valid
+			if (( $(df -h | grep -ci -m1 '/mnt/samba') == 1 )); then
+				#Get stats
+				sambaclient_mounted_size=$(df -h | grep -m1 '/mnt/samba' | awk '{ print $2 }')
+				sambaclient_mounted_used=$(df -h | grep -m1 '/mnt/samba' | awk '{ print $3 }')
+				sambaclient_mounted_free=$(df -h | grep -m1 '/mnt/samba' | awk '{ print $4 }')
+				sambaclient_status="/mnt/samba | Size $sambaclient_mounted_size | Used $sambaclient_mounted_used | Free $sambaclient_mounted_free"
+			fi
+		fi
+
+		#ftp Client mount, curlftpfs
+		local curlftpfs_installed=0
+		local curlftpfs_status="Not Installed"
+		local curlftpfs_menutext="Install now to access FTP as filesystem mount"
+		if [ -f /DietPi/dietpi/.installed ] &&
+			(( $(cat /DietPi/dietpi/.installed | grep -m1 'CURLFTPFS ' | awk '{print $2}') == 2 )); then
+
+			curlftpfs_installed=1
+			curlftpfs_status="Unable to connect and/or incorrect details"
+			curlftpfs_menutext="Input/Modify Details"
+
+			#Check if mount exists and is valid
+			if (( $(df -h | grep -ci -m1 '/mnt/ftp_client') == 1 )); then
+				#Get stats
+				curlftpfs_status="/mnt/ftp_client | Connected"
+			fi
+		fi
+
+		#NoIp Client
+		local noip_installed=0
+		local noip_status="Not Installed"
+		local noip_menutext="Install No-Ip now"
+		if [ -f /DietPi/dietpi/.installed ] &&
+			(( $(cat /DietPi/dietpi/.installed | grep -m1 'NOIPDYNDNS ' | awk '{print $2}') == 2 )); then
+
+			noip_installed=1
+			noip_status="Offline - Please Enter No-Ip Details"
+			noip_menutext="Enter/Setup NoIp Details"
+
+			#Check if noip is running (indicates login details are valid)
+			if (( $(ps aux | grep -ci -m1 '/usr/local/bin/[n]oip2') == 1 )); then
+				noip_status="Online / Active"
+				noip_menutext="Change NoIp Details"
+			fi
+		fi
+
+		WHIP_TITLE='DietPi - Network Options: NAS/Misc'
+		OPTION=$(whiptail --title "$WHIP_TITLE" --menu "\n Samba client : $sambaclient_status \n FTP client   : $curlftpfs_status\n NoIp status  : $noip_status" --cancel-button "$TEXT_MENU_BACK" --backtitle "$WHIP_BACKTITLE" 15 75 3 \
+		"Samba Client" "$sambaclient_menutext" \
+		"FTP Client" "$curlftpfs_menutext" \
+		"NoIp" "$noip_menutext" 3>&1 1>&2 2>&3)
+
+		CHOICE=$?
+		if (( $CHOICE == 0 )); then
+			case "$OPTION" in
+
+			  Samba*)
+				#Installed?
+				if (( $sambaclient_installed == 0 )); then
+					whiptail --title "Install Samba Client?" --yesno "Samba Client is not installed, would you like to install it now?\n\nThis will allow you access Windows shared folders, NAS and CIFS capable devices." --yes-button "Ok" --no-button "Back" --defaultno --backtitle "$WHIP_BACKTITLE" 12 65
+					CHOICE=$?
+					if (( $CHOICE == 0 )); then
+						#install smbclient
+						/DietPi/dietpi/dietpi-apt-get_update 1
+						apt-get install smbclient cifs-utils ntfs-3g -y --no-install-recommends
+
+						#Check its installed. Update DietPi .installed
+						if (( $(dpkg -l | grep -ci -m1 'smbclient') == 1 )); then
+							sed -i '/SMBCLIENT/c\SMBCLIENT 2' /DietPi/dietpi/.installed
+						fi
+					fi
+				else
+					/DietPi/dietpi/func/dietpi-set_smbclient
+				fi
+
+				#Return to this Menu
+				TARGETMENUID=16
+				;;
+			  FTP*)
+				#Installed?
+				if (( $curlftpfs_installed == 0 )); then
+					whiptail --title "Install FTP Client?" --yesno "FTP Client (curlftpfs) is not installed, would you like to install it now? \n \n - This is required to mount an FTP connection to filesystem" --yes-button "Ok" --no-button "Back" --defaultno --backtitle "$WHIP_BACKTITLE" 12 65
+					CHOICE=$?
+					if (( $CHOICE == 0 )); then
+						#install curlftpfs
+						/DietPi/dietpi/dietpi-apt-get_update 1
+						apt-get install curlftpfs -y
+
+						#Check its installed. Update DietPi .installed
+						if (( $(dpkg -l | grep -ci -m1 'curlftpfs') == 1 )); then
+							sed -i '/CURLFTPFS/c\CURLFTPFS 2' /DietPi/dietpi/.installed
+						fi
+					fi
+				else
+					/DietPi/dietpi/func/dietpi-set_curlftpfs
+				fi
+
+				#Return to this Menu
+				TARGETMENUID=16
+				;;
+			  NoIp)
+				#Installed?
+				if (( $noip_installed == 0 )); then
+					whiptail --title "Install NoIp Client?" --yesno "NoIp Client is not installed, would you like to install it now?\n\n- NoIp will allow you to use a fixed web address, regardless of your internet IP\neg: MySuperDooperWebsite.noip2.biz would point to this device!" --yes-button "Ok" --no-button "Back" --defaultno --backtitle "$WHIP_BACKTITLE" 13 70
+					CHOICE=$?
+					if (( $CHOICE == 0 )); then
+						#x32 x64
+						if (( $HW_MODEL == 20 )); then
+							local noip_url_address="http://dietpi.com/downloads/binaries/all/noip_x32_x64.zip"
+						#ARM
+						else
+							local noip_url_address="http://dietpi.com/downloads/binaries/all/noip_armhf.zip"
+						fi
+						/DietPi/dietpi/func/check_connection "$noip_url_address"
+
+						#Install
+						if (( $? == 0 )); then
+
+							#NoIp Binary install
+							wget "$noip_url_address" -O dietpi-noip.zip
+							unzip dietpi-noip.zip
+							rm dietpi-noip.zip
+							mv noip_binary /usr/local/bin/noip2
+							chmod +x /usr/local/bin/noip2
+
+							#noip2 service file
+							cp /DietPi/dietpi/conf/noip_init /etc/init.d/noip2
+							chmod +x /etc/init.d/noip2
+							update-rc.d noip2 defaults
+
+							#Disable service autostart (controlled by DietPi-Services)
+							/DietPi/dietpi/dietpi-services disable
+
+							#Update DietPi .installed
+							sed -i '/NOIPDYNDNS/c\NOIPDYNDNS 2' /DietPi/dietpi/.installed
+
+						else
+							WHIP_TITLE='Error - Unable to Connect'
+							whiptail --title "$WHIP_TITLE" --msgbox "Unable to Install NoIp client \n $noip_url_address is offline and/or unreachable" 12 60
+						fi
+					fi
+				else
+					clear
+					service noip2 stop
+					noip2 -C
+					read -p "Press any key to continue....."
+					service noip2 start
+				fi
+
+				#Return to this Menu
+				TARGETMENUID=16
+				;;
+			esac
+
+		#Cancel
+		else
+
+			#Exit DietPi-Config on back to previous menu?
+			if (( $EXITONBACK == 1 )); then
+				#Return to this menu
+				TARGETMENUID=16
+				Menu_Exit
+			fi
+		fi
+	}
+
+
+	PROXY_ENABLED=-1
+	PROXY_ADDRESS=''
+	PROXY_PORT=''
+	PROXY_USERNAME=''
+	PROXY_PASSWORD=''
+
+	#So we can call this in other menus (eg: submenu of this)
+	Load_Proxy_Vars(){
+
+		PROXY_ENABLED=$(cat /DietPi/dietpi.txt | grep -m1 '^proxy_enabled=' | sed 's/.*=//')
+		PROXY_ADDRESS=$(cat /DietPi/dietpi.txt | grep -m1 '^proxy_address=' | sed 's/.*=//')
+		PROXY_PORT=$(cat /DietPi/dietpi.txt | grep -m1 '^proxy_port=' | sed 's/.*=//')
+		PROXY_USERNAME=$(cat /DietPi/dietpi.txt | grep -m1 '^proxy_username=' | sed 's/.*=//')
+		PROXY_PASSWORD=$(cat /DietPi/dietpi.txt | grep -m1 '^proxy_password=' | sed 's/.*=//')
+
+	}
+
+	#TARGETMENUID=17
+	Menu_NetworkAdapters_Proxy(){
+
+		TARGETMENUID=8
+
+		#Get current details on first menu init (PROXY_ENABLED=-1)
+		if (( $PROXY_ENABLED == -1 )); then
+
+			Load_Proxy_Vars
+
+			proxy_state_text='Disabled'
+			if (( $PROXY_ENABLED == 1 )); then
+				proxy_state_text='Enabled'
+			fi
+		fi
+
+		proxy_state_text_new='No'
+		if (( $PROXY_ENABLED == 1 )); then
+			proxy_state_text_new='Yes'
+		fi
+
+		WHIP_TITLE='DietPi - Proxy Network Options'
+		OPTION=$(whiptail --title "$WHIP_TITLE" --menu "\n Current Details:\n - Status: $proxy_state_text\n - Address: $PROXY_ADDRESS\n - Port: $PROXY_PORT\n - Username: $PROXY_USERNAME\n - Password: $PROXY_PASSWORD" --cancel-button "$TEXT_MENU_BACK" --backtitle "$WHIP_BACKTITLE" 21 60 6 \
+		"Toggle" "Use Proxy?: $proxy_state_text_new" \
+		"Address" "Enter Proxy server IP/URL" \
+		"Port" "Enter Proxy server port" \
+		"Username" "Enter Proxy server username" \
+		"Password" "Enter Proxy server password" \
+		"Apply" "Save Changes" 3>&1 1>&2 2>&3)
+
+		CHOICE=$?
+		if (( $CHOICE == 0 )); then
+			case "$OPTION" in
+				Toggle)
+					((PROXY_ENABLED++))
+					if (( $PROXY_ENABLED >= 2 )); then
+						PROXY_ENABLED=0
+					fi
+
+					#Return to this menu
+					TARGETMENUID=17
+				;;
+				Address)
+					OPTION=$(whiptail --inputbox "Please enter the proxy URL or IP address\n - eg: MyProxy.com" 9 65 "$PROXY_ADDRESS" --title "$WHIP_BACKTITLE" 3>&1 1>&2 2>&3)
+					CHOICE=$?
+					if (( $CHOICE == 0 )); then
+						PROXY_ADDRESS=$OPTION
+					fi
+
+					#Return to this Menu
+					TARGETMENUID=17
+				;;
+				Port)
+					OPTION=$(whiptail --inputbox "Please enter the proxy port number\n - eg: 1234" 9 65 "$PROXY_PORT" --title "$WHIP_BACKTITLE" 3>&1 1>&2 2>&3)
+					CHOICE=$?
+					if (( $CHOICE == 0 )); then
+						PROXY_PORT=$OPTION
+					fi
+
+					#Return to this Menu
+					TARGETMENUID=17
+				;;
+				Username)
+					OPTION=$(whiptail --inputbox "Please enter the proxy username\n - eg: JoeBloggs\n - Leave blank if not required" 10 65 "$PROXY_USERNAME" --title "$WHIP_BACKTITLE" 3>&1 1>&2 2>&3)
+					CHOICE=$?
+					if (( $CHOICE == 0 )); then
+						PROXY_USERNAME=$OPTION
+					fi
+
+					#Return to this Menu
+					TARGETMENUID=17
+				;;
+				Password)
+					OPTION=$(whiptail --inputbox "Please enter the proxy password\n - eg: LetMeIn\n - Leave blank if not required" 10 65 "$PROXY_PASSWORD" --title "$WHIP_BACKTITLE" 3>&1 1>&2 2>&3)
+					CHOICE=$?
+					if (( $CHOICE == 0 )); then
+						PROXY_PASSWORD=$OPTION
+					fi
+
+					#Return to this Menu
+					TARGETMENUID=17
+				;;
+				Apply)
+
+					# - Save settings to dietpi.txt
+					sed -i "/^proxy_enabled=/c\proxy_enabled=$PROXY_ENABLED" /DietPi/dietpi.txt
+					sed -i "/^proxy_address=/c\proxy_address=$PROXY_ADDRESS" /DietPi/dietpi.txt
+					sed -i "/^proxy_port=/c\proxy_port=$PROXY_PORT" /DietPi/dietpi.txt
+					sed -i "/^proxy_username=/c\proxy_username=$PROXY_USERNAME" /DietPi/dietpi.txt
+					sed -i "/^proxy_password=/c\proxy_password=$PROXY_PASSWORD" /DietPi/dietpi.txt
+
+					# - Delete active export vars
+					#unset {http,https,ftp}_proxy #Does not apply to system when running from a bash script.
+
+					# - Delete any existing export settings from /etc/bash.bashrc
+					sed -i '/{http,https,ftp}_proxy=/d' /etc/bash.bashrc
+
+					# - Add export settings
+					if (( $PROXY_ENABLED == 1 )); then
+
+						if [ -n "$PROXY_USERNAME" ] && [ -n "$PROXY_PASSWORD" ]; then
+							cat << _EOF_ >> /etc/bash.bashrc
+export {http,https,ftp}_proxy="http://$PROXY_USERNAME:$PROXY_PASSWORD@$PROXY_ADDRESS:$PROXY_PORT"
+_EOF_
+						else
+							cat << _EOF_ >> /etc/bash.bashrc
+export {http,https,ftp}_proxy="http://$PROXY_ADDRESS:$PROXY_PORT"
+_EOF_
+						fi
+
+
+					fi
+
+					# - Ask user for reboot now to activate/disable proxy
+					REBOOT_REQUIRED=1
+
+					WHIP_TITLE='Proxy: Reboot required'
+					WHIP_QUESTION='Your proxy settings have been saved.\n\nNB: You must reboot your system, before the new proxy settings will take effect.\n\nReboot system now?'
+					whiptail --title "$WHIP_TITLE" --yesno "$WHIP_QUESTION" --yes-button "Ok" --no-button "Back" --defaultno --backtitle "$WHIP_BACKTITLE" 13 65
+					CHOICE=$?
+					if (( $CHOICE == 0 )); then
+						reboot
+					fi
+
+					# - Reset init flag to force a reload of setings next time this menu is run.
+					PROXY_ENABLED=-1
+
+					#Return to this menu
+					TARGETMENUID=17
+				;;
+			esac
+
+		#Reset init flag to force a reload of setings next time this menu is run.
+		else
+			PROXY_ENABLED=-1
+		fi
 
 	}
 
@@ -3013,11 +3287,11 @@ _EOF_
 			elif (( $TARGETMENUID == 7 )); then
 				Menu_LanguageOptions
 			elif (( $TARGETMENUID == 8 )); then
-				Menu_NetworkOptions
+				Menu_NetworkAdapters
 			elif (( $TARGETMENUID == 9 )); then
-				Menu_NetworkOptions_Ethernet
+				Menu_NetworkAdapters_Ethernet
 			elif (( $TARGETMENUID == 10 )); then
-				Menu_NetworkOptions_Wifi
+				Menu_NetworkAdapters_Wifi
 			elif (( $TARGETMENUID == 11 )); then
 				Menu_Tools
 			elif (( $TARGETMENUID == 12 )); then
@@ -3028,6 +3302,10 @@ _EOF_
 				Menu_AudioOptions
 			elif (( $TARGETMENUID == 15 )); then
 				Menu_WifiHotspot
+			elif (( $TARGETMENUID == 16 )); then
+				Menu_Network_Nas_Misc
+			elif (( $TARGETMENUID == 17 )); then
+				Menu_NetworkAdapters_Proxy
 			fi
 		done
 	else

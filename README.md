@@ -20,10 +20,17 @@
 
 <hr>
 
+### DietPi's web hosting is powered by http://MyVirtualServer.com
+
+![MVS](http://dietpi.com/images/mvs_logo_150.jpg)
+
+<hr>
+
 ### The DietPi Project Team:
 * Daniel Knight (Creator, programmer and project lead of DietPi)
-* Pilovali - Joined 10/10/2015 (DietPi.com web hosting, forum moderator, testing, bug reporting)
+* Pilovali - Joined 10/10/2015 (Provided DietPi.com web hosting until April 17th 2016, forum moderator, testing, bug reporting)
 * ZombieVirus - Joined 20/03/2016 (DietPi forum moderator and version history maintainer on forums).
+* Rhkean - Joined 01/03/2016 (Contributions to the DietPi sourcecode and testing. Forum moderator)
 
 <hr>
 

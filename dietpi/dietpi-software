@@ -15,6 +15,9 @@
 	# - Generates and uses /DietPi/dietpi/.installed (software list) # 0=not installed, 1=selected for install, 2=installed
 	#////////////////////////////////////
 
+	#Force en_GB Locale for whole script. Prevents incorrect parsing with non-english locales.
+	LANG=en_GB.UTF-8
+
 	#Exit path for non-root logins.
 	if (( $UID != 0 )); then
 		clear
@@ -202,6 +205,7 @@
 	EMONCMS=0
 	EMONHUB=0
 	RPIMONITOR=0
+	NETDATA=0
 	BAIKAL=0
 
 	#Linux Software
@@ -344,6 +348,7 @@ SQUEEZELITE $SQUEEZELITE
 EMONHUB $EMONHUB
 EMONCMS $EMONCMS
 RPIMONITOR $RPIMONITOR
+NETDATA $NETDATA
 BAIKAL $BAIKAL
 
 
@@ -462,6 +467,7 @@ _EOF_
 		EMONHUB=$(cat "$FP_INSTALLED_FILE" | grep -m1 'EMONHUB ' | awk '{print $2}')
 		EMONCMS=$(cat "$FP_INSTALLED_FILE" | grep -m1 'EMONCMS ' | awk '{print $2}')
 		RPIMONITOR=$(cat "$FP_INSTALLED_FILE" | grep -m1 'RPIMONITOR ' | awk '{print $2}')
+		NETDATA=$(sed -nr 's/^NETDATA\s+(.*)/\1/p' "$FP_INSTALLED_FILE")
 		BAIKAL=$(cat "$FP_INSTALLED_FILE" | grep -m1 'BAIKAL ' | awk '{print $2}')
 
 		#Linux
@@ -1357,8 +1363,8 @@ _EOF_
 			INSTALL_DESCRIPTION='Wiring Pi'
 			Banner_Installing
 
-			#check source is online
-			INSTALL_URL_ADDRESS='http://dietpi.com/downloads/sourcebuild/wiringPi_2.31.tar.gz'
+			#check source is online | https://git.drogon.net/?p=wiringPi;a=shortlog;h=refs/heads/master snapshot
+			INSTALL_URL_ADDRESS='https://git.drogon.net/?p=wiringPi;a=snapshot;h=b0a60c3302973ca1878d149d61f2f612c8f27fac;sf=tgz'
 			/DietPi/dietpi/func/check_connection "$INSTALL_URL_ADDRESS"
 
 			#Install
@@ -1932,6 +1938,42 @@ _EOF_
 
 		fi
 
+		#NETDATA
+		if (( $NETDATA == 1 )); then
+			INSTALL_DESCRIPTION='netdata'
+			Banner_Installing
+
+			#Rpi 1
+			if (( $HW_MODEL < 2 )); then
+				INSTALL_URL_ADDRESS='http://dietpi.com/downloads/binaries/all/netdata_1.0.0_armv6.tgz'
+			#ARM64
+			elif (( $HW_MODEL == 12 )); then
+				INSTALL_URL_ADDRESS='http://dietpi.com/downloads/binaries/all/netdata_1.0.0_arm64.tgz'
+			#all others
+			else
+				INSTALL_URL_ADDRESS='http://dietpi.com/downloads/binaries/all/netdata_1.0.0_armv7.tgz'
+			fi
+
+			#check, is online
+			/DietPi/dietpi/func/check_connection "$INSTALL_URL_ADDRESS"
+
+			#Install
+			if (( $? == 0 )); then
+
+				AGI --no-install-recommends zlib1g-dev
+				wget "$INSTALL_URL_ADDRESS" -O package.tgz
+				tar -xzvf package.tgz -C /
+				rm package.tgz
+
+			else
+				Error_NoConnection_NoInstall
+
+				#Abort failed install
+				NETDATA=0
+			fi
+
+		fi
+
 		#BAIKAL
 		if (( $BAIKAL == 1 )); then
 			INSTALL_DESCRIPTION='BaiKal'
@@ -2351,35 +2393,68 @@ _EOF_
 
 		fi
 
+		#Programs that require NODEJS
+		if (( $NETDATA == 1 )); then
+			NODEJS=1
+		fi
+
 		#NODEJS
 		if (( $NODEJS == 1 )); then
 			INSTALL_DESCRIPTION='NodeJS - Javascript Runtime'
 			Banner_Installing
 
-			#check, is online
-			INSTALL_URL_ADDRESS='https://deb.nodesource.com/gpgkey/nodesource.gpg.key'
-			/DietPi/dietpi/func/check_connection "$INSTALL_URL_ADDRESS"
+			#ARM64 (Odroid C2) - Not currently available via nodesource.com
+			if (( $HW_MODEL == 12 )); then
 
-			#Install
-			if (( $? == 0 )); then
+				#check, is online
+				INSTALL_URL_ADDRESS='http://dietpi.com/downloads/binaries/c2/nodejs_5-1_arm64.deb'
+				/DietPi/dietpi/func/check_connection "$INSTALL_URL_ADDRESS"
 
-				# - Preqs
-				AGI apt-transport-https
+				#Install
+				if (( $? == 0 )); then
 
-				# - Add repo
-				curl -s "$INSTALL_URL_ADDRESS" | apt-key add -
-				echo -e "deb https://deb.nodesource.com/node_5.x jessie main" > /etc/apt/sources.list.d/nodesource_nodejs.list
-				/DietPi/dietpi/dietpi-apt-get_update 1
-				apt-get update
+					# - Preqs
+					wget "$INSTALL_URL_ADDRESS" -O package.deb
+					dpkg -i package.deb
+					rm package.deb
 
-				# - install
-				AGI nodejs
+					NODEJS=2
 
+				else
+					Error_NoConnection_NoInstall
+
+					#Abort failed install
+					NODEJS=0
+				fi
+
+			#Everything else
 			else
-				Error_NoConnection_NoInstall
 
-				#Abort failed install
-				NODEJS=0
+				#check, is online
+				INSTALL_URL_ADDRESS='https://deb.nodesource.com/setup_5.x'
+				/DietPi/dietpi/func/check_connection "$INSTALL_URL_ADDRESS"
+
+				#Install
+				if (( $? == 0 )); then
+
+					# - Preqs
+					AGI apt-transport-https
+
+					# - Add repo (use their install script)
+					curl -sL "$INSTALL_URL_ADDRESS" | -E bash -
+
+					# - install
+					AGI nodejs
+
+					NODEJS=2
+
+				else
+					Error_NoConnection_NoInstall
+
+					#Abort failed install
+					NODEJS=0
+				fi
+
 			fi
 
 		fi
@@ -4238,6 +4313,25 @@ _EOF_
 
 		fi
 
+		#NETDATA
+		if (( $NETDATA == 1 )); then
+
+			getent group netdata > /dev/null || groupadd -r netdata
+			getent passwd netdata > /dev/null || useradd -r -g netdata -c netdata -s /sbin/nologin -d / netdata
+
+			for x in /var/cache/netdata /usr/share/netdata/web /etc/netdata /var/log/netdata; do
+				chown -R netdata.netdata $x
+				chmod 0755 $x
+			done
+
+			# - Workaround to prevent update checks and the "distracting update flashing button": https://github.com/firehol/netdata/issues/233#issuecomment-210468649
+			echo 0 > /usr/share/netdata/web/version.txt
+
+
+			NETDATA=2
+
+		fi
+
 		#BAIKAL
 		if (( $BAIKAL == 1 )); then
 
@@ -4385,6 +4479,10 @@ _EOF_
 	}
 
 	Run_Installations(){
+
+		#------------------------------------------------------------
+		#Disable powersaving on Main screen during installation
+		setterm -blank 0 -powersave off 2> /dev/null
 
 		#------------------------------------------------------------
 		#Set target user/personal data base directory
@@ -4705,9 +4803,6 @@ _EOF_
 				#Launch DietPi-config networking menu
 				/DietPi/dietpi/dietpi-config 8 1
 
-				#Launch DietPi-config networking menu
-				/DietPi/dietpi/dietpi-config 8 1
-
 			elif (( $AUTOINSTALL_INDEX == 3 )); then
 				echo -e " - Pi-hole\n"
 				/DietPi/dietpi/dietpi-funtime 0
@@ -4745,6 +4840,9 @@ _EOF_
 	}
 
 	FirstRun_DietPi_Update(){
+
+		#Disable powersaving on main screen
+		setterm -blank 0 -powersave off 2> /dev/null
 
 		#-1 = 1st run | 0 = Reboot, updates applied | 1 = Idle, No updates
 		#Update .update_stage file to completed
@@ -5810,6 +5908,16 @@ _EOF_
 			fi
 		fi
 
+		#NETDATA
+		local netdata_w="off"
+		if (( $NETDATA > 0 )); then
+			netdata_w="on"
+			#Reset to 0.  Menu checklists will apply back to 1
+			if (( $NETDATA == 1 )); then
+				NETDATA=0
+			fi
+		fi
+
 		#-----------------------------------------------------------------------------
 		WHIP_TITLE='DietPi Optimized Software Selection'
 
@@ -5843,6 +5951,7 @@ _EOF_
 			"DietPi-Cloudshell" "System stats for your LCD display or monitor." $dietpicloudshell_w \
 			"LinuxDash" "Web interface system stats." $linuxdash_w \
 			"PhpSysInfo" "Web interface system stats." $phpsysinfo_w \
+			"netdata" "real-time performance monitoring" $netdata_w \
 			"" "────System Security────────────────────────" "off" \
 			"Fail2Ban" "Prevents brute-force attacks with IP ban." $fail2ban_w \
 			"" "────Webserver Stacks───────────────────────" "off" \
@@ -5956,6 +6065,7 @@ _EOF_
 			"DietPi-Cloudshell" "System stats for your LCD display or monitor." $dietpicloudshell_w \
 			"LinuxDash" "Web interface system stats." $linuxdash_w \
 			"PhpSysInfo" "Web interface system stats." $phpsysinfo_w \
+			"netdata" "real-time performance monitoring" $netdata_w \
 			"" "────System Security────────────────────────" "off" \
 			"Fail2Ban" "Prevents brute-force attacks with IP ban." $fail2ban_w \
 			"" "────Webserver Stacks───────────────────────" "off" \
@@ -6036,6 +6146,7 @@ _EOF_
 				"DietPi-Cloudshell" "System stats for your LCD display or monitor." $dietpicloudshell_w \
 				"LinuxDash" "Web interface system stats." $linuxdash_w \
 				"PhpSysInfo" "Web interface system stats." $phpsysinfo_w \
+				"netdata" "real-time performance monitoring" $netdata_w \
 				"RPi-Monitor" "Web interface system stats." $rpimonitor_w \
 				"" "────System Security────────────────────────" "off" \
 				"Fail2Ban" "Prevents brute-force attacks with IP ban." $fail2ban_w \
@@ -6478,6 +6589,12 @@ _EOF_
 					INSTALL_DIETPI_CHOICESMADE=true
 				fi
 			;;
+			netdata)
+				if (( $NETDATA == 0 )); then
+					NETDATA=1
+					INSTALL_DIETPI_CHOICESMADE=true
+				fi
+			;;
 			esac
 		done < /tmp/dietpi-software_results
 		rm /tmp/dietpi-software_results &> /dev/null
@@ -6648,7 +6765,7 @@ _EOF_
 			CHOICE=$?
 			if (( $CHOICE == 0 )); then
 				#Launch DietPi-config
-				/DietPi/dietpi/dietpi-config 8 1
+				/DietPi/dietpi/dietpi-config 16 1
 
 				#DietPi-Config will change .installed file, so reload new value into var
 				NOIPDYNDNS=$(cat "$FP_INSTALLED_FILE" | grep -m1 'NOIPDYNDNS ' | awk '{print $2}')
@@ -6929,7 +7046,7 @@ _EOF_
 			CHOICE=$?
 			if (( $CHOICE == 0 )); then
 				#Launch DietPi-config
-				/DietPi/dietpi/dietpi-config 8 1
+				/DietPi/dietpi/dietpi-config 16 1
 
 				#DietPi-Config will change .installed file, so reload new value into var
 				CURLFTPFS=$(cat "$FP_INSTALLED_FILE" | grep -m1 'CURLFTPFS ' | awk '{print $2}')
@@ -6945,7 +7062,7 @@ _EOF_
 			CHOICE=$?
 			if (( $CHOICE == 0 )); then
 				#Launch DietPi-config
-				/DietPi/dietpi/dietpi-config 8 1
+				/DietPi/dietpi/dietpi-config 16 1
 
 				#DietPi-Config will change .installed file, so reload new value into var
 				SMBCLIENT=$(cat "$FP_INSTALLED_FILE" | grep -m1 'SMBCLIENT ' | awk '{print $2}')
