@@ -12,11 +12,11 @@
 
 ##### DietPi is available for:
 - Raspberry Pi's: http://dietpi.com
-- Odroid C1: http://fuzon.co.uk/phpbb/viewtopic.php?f=8&t=11
-- Odroid C2: http://fuzon.co.uk/phpbb/viewtopic.php?f=8&t=339&p=1492#p1492
-- ODroid XU3/4: http://fuzon.co.uk/phpbb/viewtopic.php?f=8&t=57
-- Orange Pi PC: http://fuzon.co.uk/phpbb/viewtopic.php?f=8&t=164#p612
-- VMware x64 (Virtual Machine): http://fuzon.co.uk/phpbb/viewtopic.php?f=8&t=90
+- Odroid C1: http://dietpi.com/phpbb/viewtopic.php?f=8&t=11
+- Odroid C2: http://dietpi.com/phpbb/viewtopic.php?f=8&t=339&p=1492#p1492
+- ODroid XU3/4: http://dietpi.com/phpbb/viewtopic.php?f=8&t=57
+- Orange Pi PC: http://dietpi.com/phpbb/viewtopic.php?f=8&t=164#p612
+- VMware x64 (Virtual Machine): http://dietpi.com/phpbb/viewtopic.php?f=8&t=90
 
 <hr>
 
@@ -51,7 +51,7 @@ If so, let us know!
 We are always looking for talented people who believe in the DietPi project, and, wish to contribute in any way you can.
 
 * Send me an Email: daniel_haze@hotmail.com
-* Join our forums: http://fuzon.co.uk
+* Join our forums: http://dietpi.com/phpbb
 * Git Hub: https://github.com/Fourdee/DietPi
 
 <hr>
@@ -59,7 +59,7 @@ We are always looking for talented people who believe in the DietPi project, and
 ### DietPi GPLv2 License
 DietPi Copyright (C) 2016 Daniel Knight
 * Email daniel_haze@hotmail.com
-* Web http://fuzon.co.uk
+* Web http://dietpi.com
 
 This program is free software: you can redistribute it and/or modify
 it under the terms of the GNU General Public License as published by
