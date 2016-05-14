@@ -240,6 +240,7 @@ WEBSERVER_PHP=${WEBSERVER_PHP:=0}
 WEBSERVER_MYADMINPHP=${WEBSERVER_MYADMINPHP:=0}
 WEBSERVER_REDIS=${WEBSERVER_REDIS:=0}
 
+OPENBAZAAR=${OPENBAZAAR:=0}
 OWNCLOUD=${OWNCLOUD:=0}
 TRANSMISSION=${TRANSMISSION:=0}
 PHPBB=${PHPBB:=0}
@@ -256,7 +257,8 @@ FILESERVER_VSFTPD=${FILESERVER_VSFTPD:=0}
 RASPCONTROL=${RASPCONTROL:=0}
 LINUXDASH=${LINUXDASH:=0}
 PIHOLE=${PIHOLE:=0}
-SUBSONIC=${SUBSONIC:=0}
+SUBSONIC5=${SUBSONIC5:=0}
+SUBSONIC6=${SUBSONIC6:=0}
 WEAVED=${WEAVED:=0}
 WEBIOPI=${WEBIOPI:=0}
 DIETPICLOUDSHELL=${DIETPICLOUDSHELL:=0}
@@ -285,7 +287,7 @@ RPIMONITOR=${RPIMONITOR:=0}
 NETDATA=${NETDATA:=0}
 BAIKAL=${BAIKAL:=0}
 MUMBLESERVER=${MUMBLESERVER:=0}
-
+EMBYSERVER=${EMBYSERVER:=0}
 
 #Additional Linux Software
 VIMFULL=${VIMFULL:=0}
@@ -407,7 +409,7 @@ INDEX_WEBSERVER_TARGET=${INDEX_WEBSERVER_TARGET:=-2}
 		fi
 
 		# - Installs that require a MySQL stack:  WEBSERVER_L?[MA]P
-		if (( $OWNCLOUD || $PHPBB || $WORDPRESS || $AMPACHE || $PYDIO || $EMONCMS || $BAIKAL )); then
+		if (( $OWNCLOUD || $PHPBB || $WORDPRESS || $AMPACHE || $PYDIO || $EMONCMS || $BAIKAL || $WEBSERVER_MYADMINPHP )); then
 
 			# - Check for existing installations
 			if (( ! $WEBSERVER_LAMP && ! $WEBSERVER_LAAP && \
@@ -605,11 +607,18 @@ INDEX_WEBSERVER_TARGET=${INDEX_WEBSERVER_TARGET:=-2}
 		if (( $WEBSERVER_MYSQL == 1 )); then
 			INSTALL_DESCRIPTION="$info_1: $info_2 / ($info_3) / $info_4"
 			Banner_Installing
+				
+			echo -e "mysql-server mysql-server/root_password password 'dietpi'" | debconf-set-selections
+			echo -e "mysql-server mysql-server/root_password_again password 'dietpi'" | debconf-set-selections
+			
+			AGI mysql-server mysql-client
 
-			echo -e "mysql-server mysql-server/root_password password dietpi" | debconf-set-selections
-			echo -e "mysql-server mysql-server/root_password_again password dietpi" | debconf-set-selections
+			# Fix depricated key_buffer -> key_buffer_size per MySQL 5.x notification
+			sed -i 's/key_buffer/key_buffer_size/g' /etc/mysql/my.cnf
 
-			AGI mysql-server
+			# Restart the service and install the client
+			service mysql restart
+
 		fi
 
 		#WEBSERVER_MARIADB
@@ -678,7 +687,6 @@ INDEX_WEBSERVER_TARGET=${INDEX_WEBSERVER_TARGET:=-2}
 			else
 				AGI php5-apcu
 			fi
-
 		fi
 
 		#WEBSERVER_MYADMINPHP
@@ -687,26 +695,23 @@ INDEX_WEBSERVER_TARGET=${INDEX_WEBSERVER_TARGET:=-2}
 			Banner_Installing
 
 			#Mysql must be running during install to allow debconf setup.
-			service mysql start &> /dev/null
+			service mysql restart
 
-			debconf-set-selections <<< "phpmyadmin	phpmyadmin/dbconfig-install		 boolean true"
-			debconf-set-selections <<< "phpmyadmin	phpmyadmin/database-type		  select mysql"
-			debconf-set-selections <<< "phpmyadmin	phpmyadmin/app-password-confirm		password dietpi"
-			debconf-set-selections <<< "phpmyadmin	phpmyadmin/mysql/admin-pass		password dietpi"
-			debconf-set-selections <<< "phpmyadmin	phpmyadmin/password-confirm		password dietpi"
-			debconf-set-selections <<< "phpmyadmin	phpmyadmin/setup-password		password dietpi"
-			debconf-set-selections <<< "phpmyadmin	phpmyadmin/mysql/app-pass		password dietpi"
+			# Set password parameters before installing
+			echo "phpmyadmin phpmyadmin/dbconfig-install boolean true" | debconf-set-selections
+			echo "phpmyadmin phpmyadmin/app-password-confirm password dietpi" | debconf-set-selections
+			echo "phpmyadmin phpmyadmin/mysql/admin-pass password dietpi" | debconf-set-selections
+			echo "phpmyadmin phpmyadmin/mysql/app-pass password dietpi" | debconf-set-selections
 
 			if (( $WEBSERVER_APACHE == 1 )); then
-				debconf-set-selections <<< "phpmyadmin	phpmyadmin/reconfigure-webserver	multiselect apache2"
+				echo "phpmyadmin phpmyadmin/reconfigure-webserver multiselect apache2" | debconf-set-selections
 			elif (( $WEBSERVER_LIGHTTPD == 1 )); then
-				debconf-set-selections <<< "phpmyadmin	phpmyadmin/reconfigure-webserver	multiselect lighttpd"
+				echo "phpmyadmin phpmyadmin/reconfigure-webserver multiselect lighttpd" | debconf-set-selections
 			else
-				debconf-set-selections <<< "phpmyadmin	phpmyadmin/reconfigure-webserver	multiselect none"
+				echo "phpmyadmin phpmyadmin/reconfigure-webserver multiselect none" | debconf-set-selections
 			fi
 
 			AGI phpmyadmin
-
 		fi
 
 		#Forums PHPBB
@@ -731,6 +736,36 @@ INDEX_WEBSERVER_TARGET=${INDEX_WEBSERVER_TARGET:=-2}
 			fi
 
 		fi
+		
+		#OPENBAZAAR
+		if (( $OPENBAZAAR == 1 )); then
+		
+			INSTALL_DESCRIPTION='OpenBazaar'
+			Banner_Installing
+		    
+			AGI libssl-dev libffi-dev python-dev openssl python-pip libzmq3-dev
+			add-apt-repository ppa:chris-lea/libsodium
+			AGI libsodium-dev
+			pip install cryptography
+			AGI autoconf pkg-config libtool
+			cd
+			git clone https://github.com/zeromq/libzmq
+			git clone https://github.com/pyca/pynacl/
+			git clone https://github.com/OpenBazaar/OpenBazaar-Server.git
+			cd
+			cd libzmq
+			./autogen.sh && ./configure && make -j 4
+			make check && make install && ldconfig
+			cd
+			cd pynacl
+			python setup.py build && python setup.py install
+			cd
+			cd OpenBazaar-Server
+			pip install -r requirements.txt
+			
+		fi
+		
+		
 
 		#OwnCloud
 		if (( $OWNCLOUD == 1 )); then
@@ -1116,9 +1151,9 @@ INDEX_WEBSERVER_TARGET=${INDEX_WEBSERVER_TARGET:=-2}
 
 		fi
 
-		#SUBSONIC
-		if (( $SUBSONIC == 1 )); then
-			INSTALL_DESCRIPTION='SubSonic (Web interface media streamer)'
+		#SUBSONIC 5
+		if (( $SUBSONIC5 == 1 )); then
+			INSTALL_DESCRIPTION='SubSonic 5 (Web interface media streamer)'
 			Banner_Installing
 
 			INSTALL_URL_ADDRESS='http://sourceforge.net/projects/subsonic/files/subsonic/5.3/subsonic-5.3.deb/download'
@@ -1127,16 +1162,37 @@ INDEX_WEBSERVER_TARGET=${INDEX_WEBSERVER_TARGET:=-2}
 
 				AGI lame
 
-				#Install SubSonic
+				#Install SubSonic 5.3
 				wget "$INSTALL_URL_ADDRESS" -O package.deb
 				dpkg -i package.deb
 				rm package.deb
 
 			else
 				Error_NoConnection_NoInstall
-				SUBSONIC=0
+				SUBSONIC5=0
 			fi
+		fi
 
+		#SUBSONIC 6
+		if (( $SUBSONIC6 == 1 )); then
+			INSTALL_DESCRIPTION='SubSonic 6 (Web interface media streamer)'
+			Banner_Installing
+
+			INSTALL_URL_ADDRESS='https://sourceforge.net/projects/subsonic/files/subsonic/6.0/subsonic-6.0.deb/download'
+			/DietPi/dietpi/func/check_connection "$INSTALL_URL_ADDRESS"
+			if (( $? == 0 )); then
+				
+				AGI lame
+				
+				#Install SubSonic 6.0
+				wget "$INSTALL_URL_ADDRESS" -O package.deb
+				dpkg -i package.deb
+				rm package.deb
+
+			else
+				Error_NoConnection_NoInstall
+				SUBSONIC6=0
+			fi
 		fi
 
 		#WEAVED
@@ -1853,6 +1909,55 @@ INDEX_WEBSERVER_TARGET=${INDEX_WEBSERVER_TARGET:=-2}
 
 		fi
 
+		#EMBYSERVER
+		if (( $EMBYSERVER == 1 )); then
+			INSTALL_DESCRIPTION='Emby Server'
+			Banner_Installing
+
+			local url_tests=0
+
+			#check is online
+			INSTALL_URL_ADDRESS='http://download.opensuse.org/repositories/home:/emby/Debian_8.0'
+			/DietPi/dietpi/func/check_connection "$INSTALL_URL_ADDRESS"
+
+			if (( $? == 0 )); then
+
+				INSTALL_URL_ADDRESS='http://download.mono-project.com/repo/debian'
+				/DietPi/dietpi/func/check_connection "$INSTALL_URL_ADDRESS"
+
+				if (( $? == 0 )); then
+
+					url_tests=1
+
+				fi
+
+			fi
+
+			#install
+			if (( $url_tests == 1 )); then
+
+				# - Alternative mono repo: https://github.com/Fourdee/DietPi/issues/310#issuecomment-216247879
+				apt-key adv --keyserver hkp://keyserver.ubuntu.com:80 --recv-keys 3FA7E0328081BFF6A14DA29AA6A19B38D3D831EF
+				echo -e "deb http://download.mono-project.com/repo/debian wheezy main" > /etc/apt/sources.list.d/mono-xamarin.list
+				echo -e "deb http://download.mono-project.com/repo/debian wheezy-libjpeg62-compat main" >> /etc/apt/sources.list.d/mono-xamarin.list
+
+
+				# - Emby repo
+				wget http://download.opensuse.org/repositories/home:emby/Debian_8.0/Release.key
+				apt-key add - < Release.key
+				echo -e "deb http://download.opensuse.org/repositories/home:/emby/Debian_8.0/ /" > /etc/apt/sources.list.d/emby-server.list
+				apt-get update
+
+				AGI emby-server
+
+			else
+				Error_NoConnection_NoInstall
+
+				#Abort failed install
+				EMBYSERVER=0
+			fi
+
+		fi
 
 	}
 
@@ -1966,6 +2071,8 @@ INDEX_WEBSERVER_TARGET=${INDEX_WEBSERVER_TARGET:=-2}
 			BUILDESSENTIAL=1
 		elif (( $WIRINGPI == 1 )); then
 			BUILDESSENTIAL=1
+		elif (( $OPENBAZAAR == 1 )); then
+			BUILDESSENTIAL=1
 		fi
 
 		if (( $BUILDESSENTIAL == 1 )); then
@@ -1980,6 +2087,8 @@ INDEX_WEBSERVER_TARGET=${INDEX_WEBSERVER_TARGET:=-2}
 		if (( $EMONCMS == 1 )); then
 			GITCLIENT=1
 		elif (( $AMPACHE == 1 )); then
+			GITCLIENT=1
+		elif (( $OPENBAZAAR == 1 )); then
 			GITCLIENT=1
 		fi
 
@@ -2002,7 +2111,9 @@ INDEX_WEBSERVER_TARGET=${INDEX_WEBSERVER_TARGET:=-2}
 			ALSABASE=1
 		elif (( $OPENTYRIAN == 1 )); then
 			ALSABASE=1
-		elif (( $SUBSONIC == 1 )); then
+		elif (( $SUBSONIC5 == 1 )); then
+			ALSABASE=1
+		elif (( $SUBSONIC6 == 1 )); then
 			ALSABASE=1
 		elif (( $TIGHTVNCSERVER == 1 )); then
 			ALSABASE=1
@@ -2221,7 +2332,9 @@ _EOF_
 		fi
 
 		#Software that requires ffmpeg
-		if (( $SUBSONIC == 1 )); then
+		if (( $SUBSONIC5 == 1 )); then
+			FFMPEG=1
+		elif (( $SUBSONIC6 == 1 )); then
 			FFMPEG=1
 		elif (( $AMPACHE == 1 )); then
 			FFMPEG=1
@@ -2286,7 +2399,9 @@ _EOF_
 
 		#ORACLEJAVA
 		# - Software that requires JRE/JDK
-		if (( $SUBSONIC == 1 )); then
+		if (( $SUBSONIC5 == 1 )); then
+			ORACLEJAVA=1
+		elif (( $SUBSONIC6 == 1 )); then
 			ORACLEJAVA=1
 		fi
 
@@ -2988,6 +3103,14 @@ _EOF_
 			WEBSERVER_REDIS=2
 		fi
 
+		
+		#OPENBAZAAR
+		if (( $OPENBAZAAR == 1 )); then
+	
+			OPENBAZAAR=2
+		fi
+		
+		
 		#OwnCloud
 		if (( $OWNCLOUD == 1 )); then
 
@@ -3329,6 +3452,7 @@ _EOF_
 			DIETPICAM=2
 		fi
 
+
 		#Deluge
 		if (( $DELUGE == 1 )); then
 
@@ -3430,8 +3554,42 @@ _EOF_
 			PIHOLE=2
 		fi
 
+		#SUBSONIC 5
+		if (( $SUBSONIC5 == 1 )); then
+
+			#Generate user dir
+			Create_UserContent_Folders
+
+			#Optimize memory limit
+			local subsonic_memory_max=$(( $(free -m -o | grep -m1 'Mem:' | awk '{print $2}') / 5 ))
+			#Minimum cap 150mb
+			if (( $subsonic_memory_max < 150 )); then
+				subsonic_memory_max=150
+			fi
+
+			cat << _EOF_ > /etc/default/subsonic
+SUBSONIC_USER=root
+SUBSONIC_ARGS="--quiet --pidfile=/run/subsonic.pid --max-memory=$subsonic_memory_max --default-music-folder=$TARGET_DIRECTORY/$FOLDER_MUSIC --default-podcast-folder=$TARGET_DIRECTORY/$FOLDER_MUSIC --default-playlist-folder=$TARGET_DIRECTORY/$FOLDER_MUSIC"
+_EOF_
+
+			#Grab our test media for user
+			Download_Test_Media
+
+			#Symlink ffmpeg to subsonic transcoder
+			#rpi armv6 jessie (using compiled ffmpeg)
+			if (( $HW_MODEL < 2 )) &&
+				(( $DISTRO == 3 )); then
+				ln -fs /usr/local/bin/ffmpeg /var/subsonic/transcode
+
+			#ARMv7
+			else
+				ln -fs /usr/bin/ffmpeg /var/subsonic/transcode
+			fi
+			SUBSONIC5=2
+		fi
+		
 		#SUBSONIC
-		if (( $SUBSONIC == 1 )); then
+		if (( $SUBSONIC6 == 1 )); then
 
 			#Generate user dir
 			Create_UserContent_Folders
@@ -3462,9 +3620,7 @@ _EOF_
 				ln -fs /usr/bin/ffmpeg /var/subsonic/transcode
 			fi
 
-
-			SUBSONIC=2
-
+			SUBSONIC6=2
 		fi
 
 		#RPIGPIO
@@ -3968,7 +4124,10 @@ _EOF_
 			#RPi 3 - WiFi hotspot. Internal Wifi fix.
 			# - Disable driver definition
 			if (( $HW_MODEL == 3 )); then
-				sed -i '/driver=/c\#driver=rtl871xdrv' /etc/hostapd/hostapd.conf
+				sed -i '/driver=/c\#driver=none' /etc/hostapd/hostapd.conf
+
+				# - Add Wireless N support
+				echo -e "ieee80211n=1" >> /etc/hostapd/hostapd.conf
 			fi
 
 
@@ -4299,6 +4458,13 @@ _EOF_
 			sed -i '/logdays=/c\logdays=-1' /etc/mumble-server.ini
 
 			MUMBLESERVER=2
+
+		fi
+
+		#EMBYSERVER
+		if (( $EMBYSERVER == 1 )); then
+
+			EMBYSERVER=2
 
 		fi
 
@@ -5360,6 +5526,16 @@ _EOF_
 			fi
 		fi
 
+		
+		local openbazaar_w="off"
+		if (( $OPENBAZAAR > 0 )); then
+			openbazaar_w="on"
+			#Reset to 0. Menu checklists will apply back to 1
+			if (( $OPENBAZAAR == 1 )); then
+				OPENBAZAAR=0
+			fi
+		fi
+		
 		local owncloud_w="off"
 		if (( $OWNCLOUD > 0 )); then
 			owncloud_w="on"
@@ -5368,6 +5544,7 @@ _EOF_
 				OWNCLOUD=0
 			fi
 		fi
+		
 
 		local phpbb_w="off"
 		if (( $PHPBB > 0 )); then
@@ -5594,15 +5771,24 @@ _EOF_
 			fi
 		fi
 
-		local subsonic_w="off"
-		if (( $SUBSONIC > 0 )); then
-			subsonic_w="on"
+		local subsonic5_w="off"
+		if (( $SUBSONIC5 > 0 )); then
+			subsonic5_w="on"
 			#Reset to 0. Menu checklists will apply back to 1
-			if (( $SUBSONIC == 1 )); then
-				SUBSONIC=0
+			if (( $SUBSONIC5 == 1 )); then
+				SUBSONIC5=0
 			fi
 		fi
-
+		
+		local subsonic6_w="off"
+		if (( $SUBSONIC6 > 0 )); then
+			subsonic6_w="on"
+			#Reset to 0. Menu checklists will apply back to 1
+			if (( $SUBSONIC6 == 1 )); then
+				SUBSONIC6=0
+			fi
+		fi
+		
 		local webiopi_w="off"
 		if (( $WEBIOPI > 0 )); then
 			webiopi_w="on"
@@ -5842,6 +6028,16 @@ _EOF_
 			fi
 		fi
 
+		#EMBYSERVER
+		local embyserver_w="off"
+		if (( $EMBYSERVER > 0 )); then
+			embyserver_w="on"
+			#Reset to 0.  Menu checklists will apply back to 1
+			if (( $EMBYSERVER == 1 )); then
+				EMBYSERVER=0
+			fi
+		fi
+
 		#-----------------------------------------------------------------------------
 		WHIP_TITLE='DietPi Optimized Software Selection'
 
@@ -5855,7 +6051,8 @@ _EOF_
 			"" "────Media Systems───────────────────────────" "off" \
 			"HiFi" "Web interface music / radio player." $hifi_w \
 			"MiniDLNA" "Media streaming server (DLNA, UPnP)." $minidlna_w \
-			"SubSonic" "Web interface media streaming server." $subsonic_w \
+			"SubSonic 5" "Web interface media streaming server." $subsonic5_w \
+			"SubSonic 6" "(NEW) Web interface media streaming server." $subsonic6_w \
 			"Ampache" "Web interface media streaming server." $ampache_w \
 			"Shairport Sync" "AirPlay audio player with multiroom sync" $shairportsync_w \
 			"Murmur" "Mumble VoIP server." $mumbleserver_w \
@@ -5863,6 +6060,7 @@ _EOF_
 			"Transmission" "BitTorrent server with web interface." $transmission_w \
 			"Deluge" "BitTorrent server with web interface." $deluge_w \
 			"" "────Cloud / Backups─────────────────────────" "off" \
+			"OpenBazaar" "Your very own store (eg: ebay)." $openbazaar_w \
 			"OwnCloud" "Your very own cloud (eg: dropbox)." $owncloud_w \
 			"Pydio" "Feature-rich backup and sync server" $pydio_w \
 			"" "────Social Media───────────────────────────" "off" \
@@ -5913,13 +6111,16 @@ _EOF_
 			"LXDE: VNC Server" "LXDE Desktop for remote connection." $tightvncserver_w \
 			"" "────Media Systems──────────────────────────" "off" \
 			"MiniDLNA" "Media streaming server (DLNA, UPnP)." $minidlna_w \
-			"SubSonic" "Web interface media streaming server." $subsonic_w \
+			"SubSonic 5" "Web interface media streaming server." $subsonic5_w \
+			"SubSonic 6" "(NEW) Web interface media streaming server." $subsonic6_w \
 			"Ampache" "Web interface media streaming server." $ampache_w \
 			"Murmur" "Mumble VoIP server." $mumbleserver_w \
+			"Emby Server" "Web interface media streaming server." $embyserver_w \
 			"" "────BitTorrent─────────────────────────────" "off" \
 			"Transmission" "BitTorrent server with web interface." $transmission_w \
 			"Deluge" "BitTorrent server with web interface." $deluge_w \
 			"" "────Cloud / Backups────────────────────────" "off" \
+			"OpenBazaar" "Your very own store (eg: ebay)." $openbazaar_w \
 			"OwnCloud" "Your very own cloud (eg: dropbox)." $owncloud_w \
 			"Pydio" "Feature-rich backup and sync server" $pydio_w \
 			"" "────Social Media───────────────────────────" "off" \
@@ -5968,14 +6169,17 @@ _EOF_
 			"" "────Media Systems───────────────────────────" "off" \
 			"Kodi" "Your very own media centre / player." $kodi_w \
 			"MiniDLNA" "Media streaming server (DLNA, UPnP)." $minidlna_w \
-			"SubSonic" "Web interface media streaming server." $subsonic_w \
+			"SubSonic 5" "Web interface media streaming server." $subsonic5_w \
+			"SubSonic 6" "(NEW) Web interface media streaming server." $subsonic6_w \
 			"Ampache" "Web interface media streaming server." $ampache_w \
 			"Shairport Sync" "AirPlay audio player with multiroom sync" $shairportsync_w \
 			"Murmur" "Mumble VoIP server." $mumbleserver_w \
+			"Emby Server" "Web interface media streaming server." $embyserver_w \
 			"" "────BitTorrent──────────────────────────────" "off" \
 			"Transmission" "BitTorrent server with web interface." $transmission_w \
 			"Deluge" "BitTorrent server with web interface." $deluge_w \
 			"" "────Cloud / Backups─────────────────────────" "off" \
+			"OpenBazaar" "Your very own store (eg: ebay)." $openbazaar_w \
 			"OwnCloud" "Your very own cloud (eg: dropbox)." $owncloud_w \
 			"Pydio" "Feature-rich backup and sync server" $pydio_w \
 			"" "────Social Media───────────────────────────" "off" \
@@ -6035,17 +6239,20 @@ _EOF_
 				"Kodi" "Your very own media centre / player." $kodi_w \
 				"HiFi" "Web interface music / radio player." $hifi_w \
 				"MiniDLNA" "Media streaming server (DLNA, UPnP)." $minidlna_w \
-				"SubSonic" "Web interface media streaming server." $subsonic_w \
+				"SubSonic 5" "Web interface media streaming server." $subsonic5_w \
+				"SubSonic 6" "(NEW) Web interface media streaming server." $subsonic6_w \
 				"SqueezeBox" "Logitech Media Server (LMS)." $squeezeboxserver_w \
 				"SqueezeLite" "Audio player for LMS" $squeezelite_w \
 				"Ampache" "Web interface media streaming server." $ampache_w \
 				"Shairport Sync" "AirPlay audio player with multiroom sync" $shairportsync_w \
 				"BruteFIR" "EQ and Digital Room Correction via ALSA." $brutefir_w \
 				"Murmur" "Mumble VoIP server." $mumbleserver_w \
+				"Emby Server" "Web interface media streaming server." $embyserver_w \
 				"" "────BitTorrent──────────────────────────────" "off" \
 				"Transmission" "BitTorrent server with web interface." $transmission_w \
 				"Deluge" "BitTorrent server with web interface." $deluge_w \
 				"" "────Cloud / Backups─────────────────────────" "off" \
+				"OpenBazaar" "Your very own store (eg: ebay)." $openbazaar_w \
 				"OwnCloud" "Your very own cloud (eg: dropbox)." $owncloud_w \
 				"Pydio" "Feature-rich backup and sync server" $pydio_w \
 				"" "────Gaming──────────────────────────────────" "off" \
@@ -6115,7 +6322,8 @@ _EOF_
 				"Kodi" "Your very own media centre / player." $kodi_w \
 				"HiFi" "Web interface music / radio player." $hifi_w \
 				"MiniDLNA" "Media streaming server (DLNA, UPnP)." $minidlna_w \
-				"SubSonic" "Web interface media streaming server." $subsonic_w \
+				"SubSonic 5" "Web interface media streaming server." $subsonic5_w \
+				"SubSonic 6" "(NEW) Web interface media streaming server." $subsonic6_w \
 				"SqueezeBox" "Logitech Media Server (LMS)." $squeezeboxserver_w \
 				"Ampache" "Web interface media streaming server." $ampache_w \
 				"" "────BitTorrent──────────────────────────────" "off" \
@@ -6124,6 +6332,7 @@ _EOF_
 				"" "────Gaming──────────────────────────────────" "off" \
 				"OpenTyrian" "Gaming: A classic retro game, addictive." $opentyrian_w \
 				"" "────Cloud / Backups─────────────────────────" "off" \
+				"OpenBazaar" "Your very own store (eg: ebay)." $openbazaar_w \
 				"OwnCloud" "Your very own cloud (eg: dropbox)." $owncloud_w \
 				"" "────Social Media───────────────────────────" "off" \
 				"Forums" "Your very own website forums (Phpbb3)." $phpbb_w \
@@ -6180,88 +6389,94 @@ _EOF_
 		do
 			case $choice in
 
+			"Emby Server")
+				if (( $EMBYSERVER == 0 )); then
+					EMBYSERVER=1
+					INSTALL_DIETPI_CHOICESMADE=true
+				fi
+			;;
 			Murmur)
 				if (( $MUMBLESERVER == 0 )); then
 					MUMBLESERVER=1
-					INSTALL_LINUX_CHOICESMADE=true
+					INSTALL_DIETPI_CHOICESMADE=true
 				fi
 			;;
 			"Tor Hotspot")
 				if (( $TORHOTSPOT == 0 )); then
 					TORHOTSPOT=1
-					INSTALL_LINUX_CHOICESMADE=true
+					INSTALL_DIETPI_CHOICESMADE=true
 				fi
 			;;
 			BaiKal)
 				if (( $BAIKAL == 0 )); then
 					BAIKAL=1
-					INSTALL_LINUX_CHOICESMADE=true
+					INSTALL_DIETPI_CHOICESMADE=true
 				fi
 			;;
 			"RPi-Monitor")
 				if (( $RPIMONITOR == 0 )); then
 					RPIMONITOR=1
-					INSTALL_LINUX_CHOICESMADE=true
+					INSTALL_DIETPI_CHOICESMADE=true
 				fi
 			;;
 			EmonHUB|EmonPi)
 				if (( $EMONHUB == 0 )); then
 					EMONHUB=1
-					INSTALL_LINUX_CHOICESMADE=true
+					INSTALL_DIETPI_CHOICESMADE=true
 				fi
 			;;
 			EmonCMS)
 				if (( $EMONCMS == 0 )); then
 					EMONCMS=1
-					INSTALL_LINUX_CHOICESMADE=true
+					INSTALL_DIETPI_CHOICESMADE=true
 				fi
 			;;
 			Redis)
 				if (( $WEBSERVER_REDIS == 0 )); then
 					WEBSERVER_REDIS=1
-					INSTALL_LINUX_CHOICESMADE=true
+					INSTALL_DIETPI_CHOICESMADE=true
 				fi
 			;;
 			SqueezeLite)
 				if (( $SQUEEZELITE == 0 )); then
 					SQUEEZELITE=1
-					INSTALL_LINUX_CHOICESMADE=true
+					INSTALL_DIETPI_CHOICESMADE=true
 				fi
 			;;
 			Pydio)
 				if (( $PYDIO == 0 )); then
 					PYDIO=1
-					INSTALL_LINUX_CHOICESMADE=true
+					INSTALL_DIETPI_CHOICESMADE=true
 				fi
 			;;
 			BruteFIR)
 				if (( $BRUTEFIR == 0 )); then
 					BRUTEFIR=1
-					INSTALL_LINUX_CHOICESMADE=true
+					INSTALL_DIETPI_CHOICESMADE=true
 				fi
 			;;
 			"Shairport Sync")
 				if (( $SHAIRPORTSYNC == 0 )); then
 					SHAIRPORTSYNC=1
-					INSTALL_LINUX_CHOICESMADE=true
+					INSTALL_DIETPI_CHOICESMADE=true
 				fi
 			;;
 			"WiFi Hotspot")
 				if (( $WIFIHOTSPOT == 0 )); then
 					WIFIHOTSPOT=1
-					INSTALL_LINUX_CHOICESMADE=true
+					INSTALL_DIETPI_CHOICESMADE=true
 				fi
 			;;
 			RPi.GPIO)
 				if (( $RPIGPIO == 0 )); then
 					RPIGPIO=1
-					INSTALL_LINUX_CHOICESMADE=true
+					INSTALL_DIETPI_CHOICESMADE=true
 				fi
 			;;
 			I2c)
 				if (( $RPII2C == 0 )); then
 					RPII2C=1
-					INSTALL_LINUX_CHOICESMADE=true
+					INSTALL_DIETPI_CHOICESMADE=true
 				fi
 			;;
 			WiringPi)
@@ -6402,6 +6617,12 @@ _EOF_
 					INSTALL_DIETPI_CHOICESMADE=true
 				fi
 			;;
+			OpenBazaar)
+				if (( $OPENBAZAAR == 0 )); then
+					OPENBAZAAR=1
+					INSTALL_DIETPI_CHOICESMADE=true
+				fi
+			;;
 			OwnCloud)
 				if (( $OWNCLOUD == 0 )); then
 					OWNCLOUD=1
@@ -6534,6 +6755,16 @@ _EOF_
 
 		#-----------------------------------------------------------------------------
 		#Install Info/Warnings
+
+		#Emby server (mono libary), not available for ARM64: https://github.com/Fourdee/DietPi/issues/310#issuecomment-217946474
+		if (( $EMBYSERVER == 1 && $HW_MODEL == 12 )); then
+			WHIP_TITLE='Emby Server'
+			WHIP_QUESTION='Emby Server is not currently available for ARM64 (Odroid C2) and will not be installed. Your choice has been removed.\n\nhttps://github.com/Fourdee/DietPi/issues/310#issuecomment-217946474'
+			whiptail --title "$WHIP_TITLE" --msgbox "$WHIP_QUESTION" --backtitle "$WHIP_BACKTITLE" 13 75
+
+			EMBYSERVER=0
+
+		fi
 
 		#Webserver stacks, please let DietPi install them for you...
 		# - == 1 to prevent installed stacks appearing
@@ -6724,6 +6955,8 @@ _EOF_
 			elif (( $SUBSONIC == 1 )); then
 				inform_user_fileserver=1
 			elif (( $AMPACHE == 1 )); then
+				inform_user_fileserver=1
+			elif (( $EMBYSERVER == 1 )); then
 				inform_user_fileserver=1
 			fi
 
@@ -6974,7 +7207,7 @@ _EOF_
 		"Emacs" "GNU Emacs editor." $gnuemacs_w \
 		"Jed" "Editor for programmers." $jed_w \
 		"Vim" "Vi Enhanced Text Editor." $vimfull_w \
-                "Vim-Tiny" "Compact release of Vim." $vimtiny_w \
+		"Vim-Tiny" "Compact release of Vim." $vimtiny_w \
 		"" "────File Managers────────────────────────────" "off" \
 		"MC" "Midnight Commander - a powerful file manager." $midnightcommander_w \
 		"" "────SSH Clients──────────────────────────────" "off" \
@@ -6985,7 +7218,7 @@ _EOF_
 		"" "────Development / Programming────────────────" "off" \
 		"Build" "Build-Essentials." $buildessential_w \
 		"Git" "Git Client." $gitclient_w \
-                "" "────Network Tools─────────────────────────────" "off" \
+		"" "────Network Tools─────────────────────────────" "off" \
 		"iftop" "Displays bandwidth usage information." $iftop_w \
 		"IPTraf" "Interactive Colorful IP LAN Monitor." $iptraf_w \
 		"Iperf" "Internet Protocol bandwidth measuring tool." $iperf_w \
@@ -7009,42 +7242,42 @@ _EOF_
 						INSTALL_LINUX_CHOICESMADE=true
 					fi
 				;;
-                                IPTraf)
-                                        if (( $IPTRAF == 0 )); then
-                                                IPTRAF=1
-                                                INSTALL_LINUX_CHOICESMADE=true
-                                        fi
-                                ;;
-                                "MTR-Tiny")
-                                        if (( $MTRTINY == 0 )); then
-                                                MTRTINY=1
-                                                INSTALL_LINUX_CHOICESMADE=true
-                                        fi
-                                ;;
-                                nLoad)
-                                        if (( $NLOAD == 0 )); then
-                                                NLOAD=1
-                                                INSTALL_LINUX_CHOICESMADE=true
-                                        fi
-                                ;;
-                                tcpdump)
-                                        if (( $TCPDUMP == 0 )); then
-                                                TCPDUMP=1
-                                                INSTALL_LINUX_CHOICESMADE=true
-                                        fi
-                                ;;
-                                "Node.js")
-                                        if (( $NODEJS == 0 )); then
-                                                NODEJS=1
-                                                INSTALL_LINUX_CHOICESMADE=true
-                                        fi
-                                ;;
-                                MC)
-                                        if (( $MIDNIGHTCOMMANDER == 0 )); then
-                                                MIDNIGHTCOMMANDER=1
-                                                INSTALL_LINUX_CHOICESMADE=true
-                                        fi
-                                ;;
+				IPTraf)
+					if (( $IPTRAF == 0 )); then
+						IPTRAF=1
+						INSTALL_LINUX_CHOICESMADE=true
+					fi
+				;;
+				"MTR-Tiny")
+					if (( $MTRTINY == 0 )); then
+						MTRTINY=1
+						INSTALL_LINUX_CHOICESMADE=true
+					fi
+				;;
+				nLoad)
+					if (( $NLOAD == 0 )); then
+						NLOAD=1
+						INSTALL_LINUX_CHOICESMADE=true
+					fi
+				;;
+				tcpdump)
+					if (( $TCPDUMP == 0 )); then
+						TCPDUMP=1
+						INSTALL_LINUX_CHOICESMADE=true
+					fi
+				;;
+				"Node.js")
+					if (( $NODEJS == 0 )); then
+						NODEJS=1
+						INSTALL_LINUX_CHOICESMADE=true
+					fi
+				;;
+				MC)
+					if (( $MIDNIGHTCOMMANDER == 0 )); then
+						MIDNIGHTCOMMANDER=1
+						INSTALL_LINUX_CHOICESMADE=true
+					fi
+				;;
 				Java)
 					if (( $ORACLEJAVA == 0 )); then
 						ORACLEJAVA=1
@@ -7063,12 +7296,12 @@ _EOF_
 						INSTALL_LINUX_CHOICESMADE=true
 					fi
 				;;
-                                Jed)
-                                        if (( $JED == 0 )); then
-                                                JED=1
-                                                INSTALL_LINUX_CHOICESMADE=true
-                                        fi
-                                ;;
+				Jed)
+					if (( $JED == 0 )); then
+						JED=1
+						INSTALL_LINUX_CHOICESMADE=true
+					fi
+				;;
 				Vim)
 					if (( $VIMFULL == 0 )); then
 						VIMFULL=1
@@ -7076,11 +7309,11 @@ _EOF_
 					fi
 				;;
 				"Vim-Tiny")
-                                        if (( $VIMTINY == 0 )); then
-                                                VIMTINY=1
-                                                INSTALL_LINUX_CHOICESMADE=true
-                                        fi
-                                ;;
+					if (( $VIMTINY == 0 )); then
+						VIMTINY=1
+						INSTALL_LINUX_CHOICESMADE=true
+					fi
+				;;
 				OpenSSH)
 					if (( $SSHCLIENT == 0 )); then
 						SSHCLIENT=1

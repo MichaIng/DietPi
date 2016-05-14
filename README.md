@@ -28,10 +28,26 @@
 <hr>
 
 ### The DietPi Project Team:
-* Daniel Knight (Creator, programmer and project lead of DietPi)
-* Pilovali - Joined 10/10/2015 (Provided DietPi.com web hosting until April 17th 2016, forum moderator, testing, bug reporting)
-* ZombieVirus - Joined 20/03/2016 (DietPi forum moderator and version history maintainer on forums).
-* Rhkean - Joined 01/03/2016 (Contributions to the DietPi sourcecode and testing. Forum moderator)
+Creator, programmer and project lead of DietPi.
+* Daniel Knight (Fourdee)
+
+Current contributors:
+* Rhkean - Joined 01/03/2016
+Contributions to the DietPi in general, including sourcecode, testing, new devices. Forum moderator.
+* K-Plan - Joined 01/01/2016
+Contributions to the DietPi in general, including In-depth testing, bug finding and valuable feedback. Forum moderator.
+* xenfomation - Joined 01/04/2016
+Contributions to the DietPi in general, including sourcecode, virtualBox image creation/conversion.
+* ZombieVirus - Joined 20/03/2016
+DietPi forum moderator and version history maintainer on forums.
+
+Previous contributors:
+* Pilovali - Joined 10/10/2015
+Provided DietPi.com web hosting for 1 year until April 17th 2016, forum moderator, testing, bug reporting.
+
+Honourable mentions/thanks:
+* A personal thanks to Pilovali for helping DietPi during our early days with desperately needed webhosting.
+
 
 <hr>
 
@@ -184,3 +200,6 @@ Lets Encrypt
 
 Shairport-Sync
 - https://github.com/mikebrady/shairport-sync
+
+ARMbian Build Tools:
+- https://github.com/igorpecovnik/lib
