@@ -97,6 +97,12 @@
 	WHIP_QUESTION='DietPi-Config'
 	CHOICE=0
 	OPTION=0
+
+	WHIP_SELECTION_PREVIOUS=''
+
+	# - Whiptail sizes
+	WHIP_OPTIONS_MAX_DISPLAY=9
+
 	REBOOT_REQUIRED=0
 
 	#Interger min/max value holders
@@ -185,7 +191,7 @@
 
 			# Reboot Required
 			if(( $REBOOT_REQUIRED == 1 )); then
-				WHIP_TITLE=' Changes Made - Reboot Now? '
+				WHIP_TITLE='Changes Made - Reboot Now?'
 				WHIP_QUESTION=' A reboot is required to apply your new settings.\n Would you like to reboot now?'
 				whiptail --title "$WHIP_TITLE" --yesno "$WHIP_QUESTION" --defaultno --backtitle "$WHIP_BACKTITLE" 9 65
 				CHOICE=$?
@@ -819,6 +825,16 @@
 						rm update_kernel.sh
 					fi
 
+				#PineA64
+				elif (( $HW_MODEL >= 40 )) && (( $HW_MODEL < 50 )); then
+					WHIP_QUESTION=" Would you like to update the firmware on your $HW_MODEL_DESCRIPTION? \n - This will run longsleep's update scripts to update the U-Boot and kernel."
+					whiptail --title "$WHIP_TITLE" --yesno "$WHIP_QUESTION" --yes-button "Ok" --no-button "Back" --defaultno --backtitle "$WHIP_BACKTITLE" 12 60
+					CHOICE=$?
+					if (( $CHOICE == 0 )); then
+						/usr/local/sbin/pine64_update_uboot.sh
+						/usr/local/sbin/pine64_update_kernel.sh
+					fi
+
 				else
 					Info_HW_OptionNotSupported
 				fi
@@ -916,8 +932,8 @@
 
 		local arm_temp=$(cat /sys/class/thermal/thermal_zone0/temp | awk '{print $1/1000}' | xargs printf "%0.1f" )
 
-		#OrangePi, returns 'c and int
-		if (( $HW_MODEL >= 30 )) && (( $HW_MODEL < 40 )); then
+		#OrangePi and PineA64 return 'c and int
+		if (( $HW_MODEL >= 30 && $HW_MODEL < 40 )) || (( $HW_MODEL >= 40 && $HW_MODEL < 50 )); then
 			arm_temp=$(cat /sys/class/thermal/thermal_zone0/temp)
 		fi
 
@@ -1101,7 +1117,7 @@
 						Description+="\nPerformance  | Static. Increases energy consumption, heat, performance."
 					fi
 
-					OPTION=$(whiptail --title "$WHIP_TITLE" --menu "$Description" --cancel-button "$TEXT_MENU_BACK" --backtitle "$WHIP_BACKTITLE" 18 80 5 "${whiptail_menu_array[@]}" 3>&1 1>&2 2>&3)
+					OPTION=$(whiptail --title "$WHIP_TITLE" --menu "$Description" --cancel-button "$TEXT_MENU_BACK" --backtitle "$WHIP_BACKTITLE" --default-item "$current_cpu_governor" 18 80 5 "${whiptail_menu_array[@]}" 3>&1 1>&2 2>&3)
 					CHOICE=$?
 
 					#delete[] array
@@ -1492,6 +1508,7 @@
 	WIFI_BITRATE=0
 	WIFI_SIGNALSTRENGTH=0
 	WIFI_HOTSPOT=0
+	WIFI_COUNTRYCODE="Unknown"
 
 	Network_ETH_CopyCurrentToStatic(){
 
@@ -1768,6 +1785,60 @@
 		fi
 	}
 
+	Change_WifiCountryCode(){
+
+		local wifi_country_code_target=$WIFI_COUNTRYCODE
+
+		#2.4GHZ
+		local whiptail_menu_array=()
+		whiptail_menu_array+=("GB" "Europe / Great Britain")
+		whiptail_menu_array+=("US" "United States")
+		whiptail_menu_array+=("JP" "Japan")
+		whiptail_menu_array+=("CN" "China")
+		whiptail_menu_array+=("Manual" "Enter a custom country code")
+
+		local description_text="Choose a country, to enable WiFi channels and power ratings allowed in your country."
+
+		WHIP_TITLE='Change WiFi country code'
+
+		OPTION=$(whiptail --title "$WHIP_TITLE" --menu "$description_text" --cancel-button "$TEXT_MENU_BACK" --backtitle "$WHIP_BACKTITLE" --default-item "$WIFI_COUNTRYCODE" 15 60 5 "${whiptail_menu_array[@]}" 3>&1 1>&2 2>&3)
+		CHOICE=$?
+
+		#delete []
+		unset whiptail_menu_array
+
+		if (( $CHOICE == 0 )); then
+
+			case "$OPTION" in
+				Manual)
+					OPTION=$(whiptail --inputbox "Please enter a 2 character country code: https://en.wikipedia.org/wiki/ISO_3166-1_alpha-2" 8 60 "$WIFI_COUNTRYCODE" --title "WiFi Country Code" 3>&1 1>&2 2>&3)
+					CHOICE=$?
+					if (( $CHOICE == 0 )); then
+						wifi_country_code_target=$OPTION
+					fi
+				;;
+				*)
+					wifi_country_code_target=$OPTION
+				;;
+			esac
+
+			#Apply
+			/DietPi/dietpi/func/dietpi-set_wificountrycode "$wifi_country_code_target"
+
+			# - Manually update var, else, not updated until Network_GetData() is run.
+			#   "iw reg get" will sometimes return the previous value, even after its been succesfully changed. So add little delay before running "iw reg get".
+			sleep 1
+			WIFI_COUNTRYCODE=$(iw reg get | grep -m1 'country' | awk '{print $2}' | tr -d ':')
+
+			# - Check if country code was successfully applied
+			if [ "$WIFI_COUNTRYCODE" != "$wifi_country_code_target" ]; then
+				whiptail --title "Error: Country Code" --msgbox "Country code ($wifi_country_code_target) could not been applied. Please check the country code and try again." --backtitle "$WHIP_BACKTITLE" 8 55
+			fi
+
+		fi
+
+	}
+
 	Scan_Wifi(){
 
 		#Get all ssids
@@ -1895,6 +1966,7 @@
 		if [ -f /usr/sbin/hostapd ]; then
 			WIFI_HOTSPOT=1
 		fi
+		WIFI_COUNTRYCODE=$(iw reg get | grep -m1 'country' | awk '{print $2}' | tr -d ':')
 
 		#eth
 		if [ -d /sys/class/net/eth$ETH_INDEX ]; then
@@ -2100,11 +2172,6 @@
 					#Return to this Menu
 					TARGETMENUID=8
 
-				#Running as Wifi Hotspot
-				elif (( $WIFI_HOTSPOT == 1 )); then
-
-					TARGETMENUID=15
-
 				#Disabled
 				elif (( $WIFI_DISABLED == 1 )); then
 					whiptail --title "WiFi is Disabled" --yesno "WiFi must be enabled before settings can be changed.\n\nWould you like to enable WiFi now? \n - (NOTICE) Connections may drop!" --yes-button "Ok" --no-button "Back" --defaultno --backtitle "$WHIP_BACKTITLE" 12 60
@@ -2155,31 +2222,54 @@
 
 		TARGETMENUID=8
 
-		#Get current Mode details
+		# - Get current Mode details
 		local mode_current='DHCP'
 		if (( $ETH_MODE == 0 )); then
 			mode_current='STATIC'
 		fi
 
-		#Target Details
+		# - Target Details
 		local mode_target='DHCP'
 		if (( $ETH_MODE_TARGET == 0 )); then
 			mode_target='STATIC'
 		fi
 
+		local whip_options_total=0
+		local description_text=''
+		local whiptail_menu_array=()
+
 		WHIP_TITLE='DietPi - Ethernet Network Options'
-		OPTION=$(whiptail --title "$WHIP_TITLE" --menu " Current Details: \n - Mode    = $mode_current \n - Ip      = $ETH_IP \n - Mask    = $ETH_MASK\n - Gateway = $ETH_GATEWAY\n - DNS     = $ETH_DNS" --cancel-button "$TEXT_MENU_BACK" --backtitle "$WHIP_BACKTITLE" 21 60 8 \
-		"Change Mode" "$mode_target" \
-		"Copy" "Copy Current address to Static" \
-		"Static Ip" "$ETH_IP_STATIC"  \
-		"Static Mask" "$ETH_MASK_STATIC"  \
-		"Static Gateway" "$ETH_GATEWAY_STATIC"  \
-		"Static DNS" "$ETH_DNS_STATIC" \
-		"Disable" "Disable Ethernet adapter" \
-		"Apply" "Save Changes (Restart Networking)" 3>&1 1>&2 2>&3)
+
+		whiptail_menu_array+=("Change Mode" "$mode_target"); ((whip_options_total++))
+		# - show static options
+		if (( $ETH_MODE_TARGET == 0 )); then
+			whiptail_menu_array+=("Copy" "Copy Current address to Static"); ((whip_options_total++))
+			whiptail_menu_array+=("Static Ip" "$ETH_IP_STATIC"); ((whip_options_total++))
+			whiptail_menu_array+=("Static Mask" "$ETH_MASK_STATIC"); ((whip_options_total++))
+			whiptail_menu_array+=("Static Gateway" "$ETH_GATEWAY_STATIC"); ((whip_options_total++))
+			whiptail_menu_array+=("Static DNS" "$ETH_DNS_STATIC"); ((whip_options_total++))
+		fi
+		whiptail_menu_array+=("Disable" "Disable Ethernet adapter"); ((whip_options_total++))
+		whiptail_menu_array+=("Apply" "Save Changes (Restart Networking)"); ((whip_options_total++))
+
+		description_text="  Current Details: \n - Mode    = $mode_current \n - Ip      = $ETH_IP \n - Mask    = $ETH_MASK\n - Gateway = $ETH_GATEWAY\n - DNS     = $ETH_DNS"
+
+		if (( $whip_options_total > $WHIP_OPTIONS_MAX_DISPLAY )); then
+			whip_options_total=$WHIP_OPTIONS_MAX_DISPLAY
+		fi
+
+		local description_line_count=$(( 7 + $(echo -e "$description_text" | wc -l) )) # 7 is the minimal height of whiptail with no data/entries
+
+		OPTION=$(whiptail --title "$WHIP_TITLE" --menu "$description_text" --cancel-button "$TEXT_MENU_BACK" --backtitle "$WHIP_BACKTITLE" --default-item "$WHIP_SELECTION_PREVIOUS" $(( $description_line_count + $whip_options_total )) 65 $whip_options_total "${whiptail_menu_array[@]}" 3>&1 1>&2 2>&3)
+
+		#delete []
+		unset whiptail_menu_array
 
 		CHOICE=$?
 		if (( $CHOICE == 0 )); then
+
+			WHIP_SELECTION_PREVIOUS=$OPTION
+
 			case "$OPTION" in
 				"Change Mode")
 					((ETH_MODE_TARGET++))
@@ -2239,39 +2329,147 @@
 
 	}
 
+	HOTSPOT_SSID=""
+	HOTSPOT_CHANNEL=""
+	HOTSPOT_KEY=""
+
 	#TARGETMENUID=10
 	Menu_NetworkAdapters_Wifi(){
 
 		TARGETMENUID=8
 
-		#Get current Mode details
-		local mode_current='DHCP'
-		if (( $WIFI_MODE == 0 )); then
-			mode_current='STATIC'
+		local whip_options_total=0
+		local description_text=''
+		local whiptail_menu_array=()
+
+		#WiFi Hotspot Menu
+		if (( WIFI_HOTSPOT == 1 )); then
+
+			WHIP_TITLE='DietPi - WiFi Hotspot'
+
+			# - Load current details into global vars, once.
+			if [ "$HOTSPOT_SSID" = "" ]; then
+				HOTSPOT_SSID=$(cat /etc/hostapd/hostapd.conf | grep -m1 '^ssid=' | sed 's/.*=//')
+				HOTSPOT_CHANNEL=$(cat /etc/hostapd/hostapd.conf | grep -m1 '^channel=' | sed 's/.*=//')
+				HOTSPOT_KEY=$(cat /etc/hostapd/hostapd.conf | grep -m1 '^wpa_passphrase=' | sed 's/.*=//')
+			fi
+
+			whiptail_menu_array+=("SSID" "Change the wireless hotspot name"); ((whip_options_total++))
+			whiptail_menu_array+=("Channel" "Change the wireless channel"); ((whip_options_total++))
+			whiptail_menu_array+=("Key" "Change the access key required to connect"); ((whip_options_total++))
+			#whiptail_menu_array+=("Country" "$WIFI_COUNTRYCODE"); ((whip_options_total++)) # Has no effect on hostapd
+
+			description_text="SSID    : $HOTSPOT_SSID\nChannel : $HOTSPOT_CHANNEL\nKey     : $HOTSPOT_KEY"
+
+		#WiFi Menu
+		else
+
+			WHIP_TITLE='DietPi - Wireless Network Options'
+
+			# - Get current Mode details
+			local mode_current='DHCP'
+			if (( $WIFI_MODE == 0 )); then
+				mode_current='STATIC'
+			fi
+
+			# - Target Details
+			local mode_target='DHCP'
+			if (( $WIFI_MODE_TARGET == 0 )); then
+				mode_target='STATIC'
+			fi
+
+			whiptail_menu_array+=("Scan" "Scan and Connect"); ((whip_options_total++))
+			whiptail_menu_array+=("Manual" "Manually Set Wireless Details"); ((whip_options_total++))
+			whiptail_menu_array+=("Change Mode" "$mode_target"); ((whip_options_total++))
+			# - show static options
+			if (( $WIFI_MODE_TARGET == 0 )); then
+				whiptail_menu_array+=("Copy" "Copy Current address to Static"); ((whip_options_total++))
+				whiptail_menu_array+=("Static Ip" "$WIFI_IP_STATIC"); ((whip_options_total++))
+				whiptail_menu_array+=("Static Mask" "$WIFI_MASK_STATIC"); ((whip_options_total++))
+				whiptail_menu_array+=("Static Gateway" "$WIFI_GATEWAY_STATIC"); ((whip_options_total++))
+				whiptail_menu_array+=("Static DNS" "$WIFI_DNS_STATIC"); ((whip_options_total++))
+			fi
+
+			# - Unset country code?
+			if [ "$WIFI_COUNTRYCODE" = "00" ]; then
+				whiptail_menu_array+=("Country" "Not set, please configure ($WIFI_COUNTRYCODE)"); ((whip_options_total++))
+			else
+				whiptail_menu_array+=("Country" "$WIFI_COUNTRYCODE"); ((whip_options_total++))
+			fi
+
+			whiptail_menu_array+=("Disable" "Disable WiFi adapter"); ((whip_options_total++))
+
+			description_text=" Current Details: \n - SSID    = $WIFI_SSID | $WIFI_BITRATE Mbit | Strength: $WIFI_SIGNALSTRENGTH%\n - KEY     = $WIFI_KEY \n - Mode    = $mode_current \n - Ip      = $WIFI_IP\n - Mask    = $WIFI_MASK\n - DNS     = $WIFI_DNS"
+
 		fi
 
-		#Target Details
-		local mode_target='DHCP'
-		if (( $WIFI_MODE_TARGET == 0 )); then
-			mode_target='STATIC'
+		whiptail_menu_array+=("Apply" "Save Changes (Restart Networking)"); ((whip_options_total++))
+
+		if (( $whip_options_total > $WHIP_OPTIONS_MAX_DISPLAY )); then
+			whip_options_total=$WHIP_OPTIONS_MAX_DISPLAY
 		fi
 
-		WHIP_TITLE='DietPi - Wireless Network Options'
-		OPTION=$(whiptail --title "$WHIP_TITLE" --menu " Current Details: \n - SSID    = $WIFI_SSID | $WIFI_BITRATE Mbit | Strength: $WIFI_SIGNALSTRENGTH%\n - KEY     = $WIFI_KEY \n - Mode    = $mode_current \n - Ip      = $WIFI_IP\n - Mask    = $WIFI_MASK\n - DNS     = $WIFI_DNS" --cancel-button "$TEXT_MENU_BACK" --backtitle "$WHIP_BACKTITLE" 24 65 10 \
-		"Scan" "Scan and Connect" \
-		"Manual" "Manually Set Wireless Details" \
-		"Change Mode" "$mode_target" \
-		"Copy" "Copy Current address to Static" \
-		"Static Ip" "$WIFI_IP_STATIC"  \
-		"Static Mask" "$WIFI_MASK_STATIC"  \
-		"Static Gateway" "$WIFI_GATEWAY_STATIC"  \
-		"Static DNS" "$WIFI_DNS_STATIC" \
-		"Disable" "Disable WiFi adapter" \
-		"Apply" "Save Changes (Restart Networking)" 3>&1 1>&2 2>&3)
+		local description_line_count=$(( 7 + $(echo -e "$description_text" | wc -l) )) # 7 is the minimal height of whiptail with no data/entries
+
+		OPTION=$(whiptail --title "$WHIP_TITLE" --menu "$description_text" --cancel-button "$TEXT_MENU_BACK" --backtitle "$WHIP_BACKTITLE" --default-item "$WHIP_SELECTION_PREVIOUS" $(( $description_line_count + $whip_options_total )) 65 $whip_options_total "${whiptail_menu_array[@]}" 3>&1 1>&2 2>&3)
+
+		#delete []
+		unset whiptail_menu_array
 
 		CHOICE=$?
 		if (( $CHOICE == 0 )); then
+
+			WHIP_SELECTION_PREVIOUS=$OPTION
+
 			case "$OPTION" in
+				Key)
+					OPTION=$(whiptail --inputbox "Please enter a key/password for the WiFi hotspot\n - NB: Minimum of 8 characters" 9 70 "$HOTSPOT_KEY" --title "Change Hotspot Access Key" 3>&1 1>&2 2>&3)
+					CHOICE=$?
+					if (( $CHOICE == 0 )); then
+						HOTSPOT_KEY=$OPTION
+					fi
+					#Return to this menu
+					TARGETMENUID=10
+				;;
+				SSID)
+					OPTION=$(whiptail --inputbox "Please enter a SSID for the WiFi hotspot" 8 65 "$HOTSPOT_SSID" --title "Change Hotspot SSID" 3>&1 1>&2 2>&3)
+					CHOICE=$?
+					if (( $CHOICE == 0 )); then
+						HOTSPOT_SSID=$OPTION
+					fi
+
+					#Return to this menu
+					TARGETMENUID=10
+				;;
+				Channel)
+					#2.4ghz only atm
+					local whiptail_menu_array=()
+					local channel_mhz=2412
+					local channel_min=1
+					local channel_max=13
+					for ((i=$channel_min; i<=$channel_max; i++))
+					do
+						whiptail_menu_array+=("$i " "$channel_mhz Mhz")
+						((channel_mhz += 5 ))
+					done
+
+					OPTION=$(whiptail --title "Change Hotspot Channel" --menu "Please select a WiFi channel for the hotspot." --cancel-button "$TEXT_MENU_BACK" --backtitle "$WHIP_BACKTITLE" 16 60 7 "${whiptail_menu_array[@]}" 3>&1 1>&2 2>&3)
+					CHOICE=$?
+
+					unset whiptail_menu_array
+
+					if (( $CHOICE == 0 )); then
+						HOTSPOT_CHANNEL=$OPTION
+					fi
+
+					#Return to this menu
+					TARGETMENUID=10
+				;;
+				Country)
+					Change_WifiCountryCode
+					#Return to this Menu
+					TARGETMENUID=10
+				;;
 				Disable)
 					whiptail --title "WiFi is Enabled" --yesno "Would you like to disable the WiFi adapter?\n - (NOTICE) All WiFi connections will be dropped." --yes-button "Ok" --no-button "Back" --defaultno --backtitle "$WHIP_BACKTITLE" 10 60
 					CHOICE=$?
@@ -2306,7 +2504,24 @@
 					TARGETMENUID=10
 				;;
 				Apply)
-					Wifi_Reconnect
+					if (( WIFI_HOTSPOT == 1 )); then
+						# - update dietpi.txt
+						sed -i "/wifi_hotspot_ssid=/c\wifi_hotspot_ssid=$HOTSPOT_SSID" /DietPi/dietpi.txt
+						sed -i "/wifi_hotspot_channel=/c\wifi_hotspot_channel=$HOTSPOT_CHANNEL" /DietPi/dietpi.txt
+						sed -i "/wifi_hotspot_key=/c\wifi_hotspot_key=$HOTSPOT_KEY" /DietPi/dietpi.txt
+
+						# - update hostapd conf
+						sed -i "/ssid=/c\ssid=$HOTSPOT_SSID" /etc/hostapd/hostapd.conf
+						sed -i "/channel=/c\channel=$HOTSPOT_CHANNEL" /etc/hostapd/hostapd.conf
+						sed -i "/wpa_passphrase=/c\wpa_passphrase=$HOTSPOT_KEY" /etc/hostapd/hostapd.conf
+
+						# - Apply/Restart network
+						Network_ApplyChanges
+
+					else
+						Wifi_Reconnect
+					fi
+
 					#Return to this menu
 					TARGETMENUID=10
 				;;
@@ -2852,95 +3067,7 @@ _EOF_
 		fi
 	}
 
-	HOTSPOT_SSID=""
-	HOTSPOT_CHANNEL=""
-	HOTSPOT_KEY=""
-
 	#TARGETMENUID=15
-	Menu_WifiHotspot(){
-
-		TARGETMENUID=8
-
-		#Load current details into global vars, once.
-		if [ "$HOTSPOT_SSID" = "" ]; then
-			HOTSPOT_SSID=$(cat /etc/hostapd/hostapd.conf | grep -m1 '^ssid=' | sed 's/.*=//')
-			HOTSPOT_CHANNEL=$(cat /etc/hostapd/hostapd.conf | grep -m1 '^channel=' | sed 's/.*=//')
-			HOTSPOT_KEY=$(cat /etc/hostapd/hostapd.conf | grep -m1 '^wpa_passphrase=' | sed 's/.*=//')
-		fi
-
-		WHIP_TITLE='DietPi - WiFi Hotspot'
-		OPTION=$(whiptail --title "$WHIP_TITLE" --menu "SSID    : $HOTSPOT_SSID\nChannel : $HOTSPOT_CHANNEL\nKey     : $HOTSPOT_KEY" --backtitle "$WHIP_BACKTITLE" 14 60 4 \
-		"SSID" "Change the wireless hotspot name" \
-		"Channel" "Change the wireless channel" \
-		"Key" "Change the access key required to connect" \
-		"Apply" "Save Changes (Restart Networking)" 3>&1 1>&2 2>&3)
-
-		case "$OPTION" in
-		  Apply)
-			#update dietpi.txt
-			sed -i "/wifi_hotspot_ssid=/c\wifi_hotspot_ssid=$HOTSPOT_SSID" /DietPi/dietpi.txt
-			sed -i "/wifi_hotspot_channel=/c\wifi_hotspot_channel=$HOTSPOT_CHANNEL" /DietPi/dietpi.txt
-			sed -i "/wifi_hotspot_key=/c\wifi_hotspot_key=$HOTSPOT_KEY" /DietPi/dietpi.txt
-
-			#upate hostapd conf
-			sed -i "/ssid=/c\ssid=$HOTSPOT_SSID" /etc/hostapd/hostapd.conf
-			sed -i "/channel=/c\channel=$HOTSPOT_CHANNEL" /etc/hostapd/hostapd.conf
-			sed -i "/wpa_passphrase=/c\wpa_passphrase=$HOTSPOT_KEY" /etc/hostapd/hostapd.conf
-
-			#Apply/Restart network
-			Network_ApplyChanges
-
-			#Return to this menu
-			TARGETMENUID=15
-			;;
-		  SSID)
-			OPTION=$(whiptail --inputbox "Please enter a SSID for the WiFi hotspot" 8 65 "$HOTSPOT_SSID" --title "Change Hotspot SSID" 3>&1 1>&2 2>&3)
-			CHOICE=$?
-			if (( $CHOICE == 0 )); then
-				HOTSPOT_SSID=$OPTION
-			fi
-
-			#Return to this menu
-			TARGETMENUID=15
-			;;
-		  Channel)
-
-			local whiptail_menu_array=()
-
-			local channel_mhz=2412
-			local channel_min=1
-			local channel_max=13
-			for ((i=$channel_min; i<=$channel_max; i++))
-			do
-				whiptail_menu_array+=("$i " "$channel_mhz Mhz")
-				((channel_mhz += 5 ))
-			done
-
-			OPTION=$(whiptail --title "Change Hotspot Channel" --menu "Please select a WiFi channel for the hotspot." --cancel-button "$TEXT_MENU_BACK" --backtitle "$WHIP_BACKTITLE" 16 60 7 "${whiptail_menu_array[@]}" 3>&1 1>&2 2>&3)
-			CHOICE=$?
-
-			unset whiptail_menu_array
-
-			if (( $CHOICE == 0 )); then
-				HOTSPOT_CHANNEL=$OPTION
-			fi
-
-			#Return to this menu
-			TARGETMENUID=15
-			;;
-		  Key)
-			OPTION=$(whiptail --inputbox "Please enter a key/password for the WiFi hotspot\n - NB: Minimum of 8 characters" 9 70 "$HOTSPOT_KEY" --title "Change Hotspot Access Key" 3>&1 1>&2 2>&3)
-			CHOICE=$?
-			if (( $CHOICE == 0 )); then
-				HOTSPOT_KEY=$OPTION
-			fi
-
-			#Return to this menu
-			TARGETMENUID=15
-			;;
-		esac
-
-	}
 
 	#TARGETMENUID=16
 	Menu_Network_Nas_Misc(){
@@ -3075,7 +3202,7 @@ _EOF_
 						if (( $HW_MODEL == 20 )); then
 							noip_url_address="http://dietpi.com/downloads/binaries/all/noip_x32_x64.zip"
 						#arm64
-						elif (( $HW_MODEL == 12 )); then
+						elif (( ( $HW_MODEL == 12 ) || ( $HW_MODEL >= 40 && $HW_MODEL < 50 ) )); then
 							noip_url_address="http://dietpi.com/downloads/binaries/all/noip_arm64.zip"
 						#armv6+
 						else
@@ -3332,7 +3459,7 @@ _EOF_
 			elif (( $TARGETMENUID == 14 )); then
 				Menu_AudioOptions
 			elif (( $TARGETMENUID == 15 )); then
-				Menu_WifiHotspot
+				echo "Nothing here"
 			elif (( $TARGETMENUID == 16 )); then
 				Menu_Network_Nas_Misc
 			elif (( $TARGETMENUID == 17 )); then
