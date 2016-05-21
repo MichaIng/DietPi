@@ -16,6 +16,7 @@
 - Odroid C2: http://dietpi.com/phpbb/viewtopic.php?f=8&t=339&p=1492#p1492
 - ODroid XU3/4: http://dietpi.com/phpbb/viewtopic.php?f=8&t=57
 - Orange Pi PC: http://dietpi.com/phpbb/viewtopic.php?f=8&t=164#p612
+- BananaPi M2+:
 - VMware x64 (Virtual Machine): http://dietpi.com/phpbb/viewtopic.php?f=8&t=90
 - VirtualBox x64 (Virtual Machine): http://dietpi.com/phpbb/viewtopic.php?f=8&t=390&p=1683#p1683
 
