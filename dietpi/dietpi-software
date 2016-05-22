@@ -265,6 +265,7 @@ HAPROXY=${HAPROXY:=0}
 SQUEEZEBOXSERVER=${SQUEEZEBOXSERVER:=0}
 WORDPRESS=${WORDPRESS:=0}
 TIGHTVNCSERVER=${TIGHTVNCSERVER:=0}
+VNC4SERVER=${VNC4SERVER:=0}
 FAIL2BAN=${FAIL2BAN:=0}
 PHPSYSINFO=${PHPSYSINFO:=0}
 PHPIMAGEGALLERY=${PHPIMAGEGALLERY:=0}
@@ -531,6 +532,8 @@ INDEX_WEBSERVER_TARGET=${INDEX_WEBSERVER_TARGET:=-2}
 
 		#Installs that require DESKTOP_LXDE
 		if (( $TIGHTVNCSERVER == 1 )); then
+			DESKTOP_LXDE=1
+		elif (( $VNC4SERVER == 1 )); then
 			DESKTOP_LXDE=1
 		fi
 
@@ -1479,15 +1482,20 @@ INDEX_WEBSERVER_TARGET=${INDEX_WEBSERVER_TARGET:=-2}
 
 		#TIGHTVNCSERVER
 		if (( $TIGHTVNCSERVER == 1 )); then
-			INSTALL_DESCRIPTION='VNC Server (TightVNC)'
+			INSTALL_DESCRIPTION='TightVNC Server'
 			Banner_Installing
 
-			#arm64
-			if (( $HW_MODEL == 12 || ( $HW_MODEL >= 40 && $HW_MODEL < 50 ) )); then
-				AGI vnc4server --no-install-recommends
-			else
-				AGI tightvncserver --no-install-recommends
-			fi
+			AGI tightvncserver --no-install-recommends
+
+		fi
+
+		#VNC4SERVER
+		if (( $VNC4SERVER == 1 )); then
+			INSTALL_DESCRIPTION='VNC4 Server'
+			Banner_Installing
+
+			AGI vnc4server --no-install-recommends
+
 		fi
 
 		#FAIL2BAN
@@ -2124,6 +2132,8 @@ INDEX_WEBSERVER_TARGET=${INDEX_WEBSERVER_TARGET:=-2}
 			ALSABASE=1
 		elif (( $TIGHTVNCSERVER == 1 )); then
 			ALSABASE=1
+		elif (( $VNC4SERVER == 1 )); then
+			ALSABASE=1
 		elif (( $SQUEEZEBOXSERVER == 1 )); then
 			ALSABASE=1
 		elif (( $AMPACHE == 1 )); then
@@ -2189,6 +2199,8 @@ _EOF_
 		elif (( $OPENTYRIAN == 1 )); then
 			XSERVERXORG=1
 		elif (( $TIGHTVNCSERVER == 1 )); then
+			XSERVERXORG=1
+		elif (( $VNC4SERVER == 1 )); then
 			XSERVERXORG=1
 		fi
 
@@ -3815,8 +3827,35 @@ _EOF_
 				fi
 			done
 
-			if (( ( $HW_MODEL == 12 ) || ( $HW_MODEL >= 40 && $HW_MODEL < 50 ) )); then
-				cat << _EOF_ > "$HOME"/.vnc/xstartup
+
+			TIGHTVNCSERVER=2
+
+		fi
+
+		#VNC4SERVER
+		if (( $VNC4SERVER == 1 )); then
+
+			#User, enter PW
+			WHIP_QUESTION='A password is required for your VNC Server.\n\nThe next screen will allow you to set your password, this password will be used when connecting from a VNC client/viewer.\n\nPress Ok/Enter when ready.'
+			whiptail --title "VNC Server Password" --msgbox "$WHIP_QUESTION" --backtitle "$WHIP_BACKTITLE" 13 70
+			local entering_pw=1
+			local loop_count=0
+			while (( $entering_pw == 1 )); do
+
+				vncpasswd
+				((loop_count++))
+
+				#Password file created
+				if [ -f "$HOME"/.vnc/passwd ]; then
+					entering_pw=0
+				#Endless loop
+				elif (( $loop_count >= 30 )); then
+					entering_pw=0
+				fi
+
+			done
+
+			cat << _EOF_ > "$HOME"/.vnc/xstartup
 [ -x /etc/vnc/xstartup ] && exec /etc/vnc/xstartup
 [ -r /root/.Xresources ] && xrdb /root/.Xresources
 xsetroot -solid grey
@@ -3825,23 +3864,39 @@ vncconfig -iconic &
 lxterminal &
 /usr/bin/lxsession -s LXDE &
 _EOF_
-				chmod +x "$HOME"/.vnc/xstartup
+			chmod +x "$HOME"/.vnc/xstartup
 
-				cat << _EOF_ > /usr/local/bin/vncserver
+			cat << _EOF_ > /usr/local/bin/vncserver
 #!/bin/bash
-PATH="\$PATH:/usr/bin/"
-DISPLAY="1"
-DEPTH="24"
-GEOMETRY="1024x768"
-OPTIONS="-depth \${DEPTH} -geometry \${GEOMETRY} :\${DISPLAY}"
+
+#Globals
+VNC_INSTALLED=0
+BINARY_FP=0
+
+WIDTH=\$(cat /DietPi/dietpi.txt | grep -m1 '^dietpi_vncserver_width=' | sed 's/.*=//')
+HEIGHT=\$(cat /DietPi/dietpi.txt | grep -m1 '^dietpi_vncserver_height=' | sed 's/.*=//')
+DEPTH=\$(cat /DietPi/dietpi.txt | grep -m1 '^dietpi_vncserver_depth=' | sed 's/.*=//')
+DISPLAY=\$(cat /DietPi/dietpi.txt | grep -m1 '^dietpi_vncserver_display=' | sed 's/.*=//')
+
+#TightVNC or VNC4server?
+if [ -f /usr/bin/vnc4server ]; then
+    BINARY_FP='/usr/bin/vnc4server'
+    VNC_INSTALLED=1
+elif  [ -f /usr/bin/vncserver ]; then
+    BINARY_FP='/usr/bin/vncserver'
+    VNC_INSTALLED=1
+fi
+
 
 case "\$1" in
     start)
-        /usr/bin/vnc4server \${OPTIONS}
+        if (( \$VNC_INSTALLED )); then
+            \$BINARY_FP :\$DISPLAY -geometry \$WIDTH'x'\$HEIGHT -depth \$DEPTH
+        fi
         ;;
 
     stop)
-        /usr/bin/vnc4server -kill :\${DISPLAY}
+        /usr/bin/vnc4server -kill :\$DISPLAY
         ;;
 
     restart)
@@ -3849,11 +3904,12 @@ case "\$1" in
         \$0 start
         ;;
 esac
+
 exit 0
 _EOF_
-				chmod +x /usr/local/bin/vncserver
+			chmod +x /usr/local/bin/vncserver
 
-				cat << _EOF_ > /etc/systemd/system/vncserver.service
+			cat << _EOF_ > /etc/systemd/system/vncserver.service
 [Unit]
 Description=Manage VNC Server
 
@@ -3868,13 +3924,13 @@ User=root
 WantedBy=multi-user.target
 _EOF_
 
-				systemctl daemon-reload
+			systemctl daemon-reload
 
-			fi
 
-			TIGHTVNCSERVER=2
+			VNC4SERVER=2
 
 		fi
+
 
 		#FAIL2BAN
 		if (( $FAIL2BAN == 1 )); then
@@ -5860,6 +5916,15 @@ _EOF_
 			fi
 		fi
 
+		local vnc4server_w="off"
+		if (( $VNC4SERVER > 0 )); then
+			vnc4server_w="on"
+			#Reset to 0. Menu checklists will apply back to 1
+			if (( $VNC4SERVER == 1 )); then
+				VNC4SERVER=0
+			fi
+		fi
+
 		local fail2ban_w="off"
 		if (( $FAIL2BAN > 0 )); then
 			fail2ban_w="on"
@@ -6055,7 +6120,7 @@ _EOF_
 			whiptail --title "$WHIP_TITLE" --checklist --separate-output "Please use the spacebar to select the software you wish to install.\nSoftware details: http://dietpi.com/software" --backtitle "$WHIP_BACKTITLE" 20 78 12 \
 			"" "────Desktops────────────────────────────────" "off" \
 			"LXDE: Desktop" "Ultra lightweight desktop." $desktop_w \
-			"LXDE: VNC Server" "LXDE Desktop for remote connection. **WIP**" $tightvncserver_w \
+			"LXDE: VNC4 Server" "LXDE Desktop for remote connection." $vnc4server_w \
 			"" "────Media Systems───────────────────────────" "off" \
 			"Kodi" "Your very own media centre / player. **WIP**" $kodi_w \
 			"MiniDLNA" "Media streaming server (DLNA, UPnP)." $minidlna_w \
@@ -6119,7 +6184,8 @@ _EOF_
 			whiptail --title "$WHIP_TITLE" --checklist --separate-output "Please use the spacebar to select the software you wish to install.\nSoftware details: http://dietpi.com/software" --backtitle "$WHIP_BACKTITLE" 20 78 12 \
 			"" "────Desktops────────────────────────────────" "off" \
 			"LXDE: Desktop" "Ultra lightweight desktop." $desktop_w \
-			"LXDE: VNC Server" "LXDE Desktop for remote connection." $tightvncserver_w \
+			"LXDE: TightVNC Server" "LXDE Desktop for remote connection." $tightvncserver_w \
+			"LXDE: VNC4 Server" "LXDE Desktop for remote connection." $vnc4server_w \
 			"" "────Media Systems───────────────────────────" "off" \
 			"HiFi" "Web interface music / radio player." $hifi_w \
 			"MiniDLNA" "Media streaming server (DLNA, UPnP)." $minidlna_w \
@@ -6180,7 +6246,8 @@ _EOF_
 			whiptail --title "$WHIP_TITLE" --checklist --separate-output "Please use the spacebar to select the software you wish to install.\nSoftware details: http://dietpi.com/software" --backtitle "$WHIP_BACKTITLE" 20 78 12 \
 			"" "────Desktops───────────────────────────────" "off" \
 			"LXDE: Desktop" "Ultra lightweight desktop." $desktop_w \
-			"LXDE: VNC Server" "LXDE Desktop for remote connection." $tightvncserver_w \
+			"LXDE: TightVNC Server" "LXDE Desktop for remote connection." $tightvncserver_w \
+			"LXDE: VNC4 Server" "LXDE Desktop for remote connection." $vnc4server_w \
 			"" "────Media Systems──────────────────────────" "off" \
 			"MiniDLNA" "Media streaming server (DLNA, UPnP)." $minidlna_w \
 			"SubSonic 5" "Web interface media streaming server." $subsonic5_w \
@@ -6237,7 +6304,7 @@ _EOF_
 			whiptail --title "$WHIP_TITLE" --checklist --separate-output "Please use the spacebar to select the software you wish to install.\nSoftware details: http://dietpi.com/software" --backtitle "$WHIP_BACKTITLE" 20 78 12 \
 			"" "────Desktops────────────────────────────────" "off" \
 			"LXDE: Desktop" "Ultra lightweight desktop." $desktop_w \
-			"LXDE: VNC Server" "LXDE Desktop for remote connection. **WIP**" $tightvncserver_w \
+			"LXDE: VNC4 Server" "LXDE Desktop for remote connection." $vnc4server_w \
 			"" "────Media Systems───────────────────────────" "off" \
 			"Kodi" "Your very own media centre / player." $kodi_w \
 			"MiniDLNA" "Media streaming server (DLNA, UPnP)." $minidlna_w \
@@ -6301,7 +6368,8 @@ _EOF_
 			whiptail --title "$WHIP_TITLE" --checklist --separate-output "Please use the spacebar to select the software you wish to install.\nSoftware details: http://dietpi.com/software" --backtitle "$WHIP_BACKTITLE" 20 78 12 \
 			"" "────Desktops────────────────────────────────" "off" \
 			"LXDE: Desktop" "Ultra lightweight desktop." $desktop_w \
-			"LXDE: VNC Server" "LXDE Desktop for remote connection." $tightvncserver_w \
+			"LXDE: TightVNC Server" "LXDE Desktop for remote connection." $tightvncserver_w \
+			"LXDE: VNC4 Server" "LXDE Desktop for remote connection." $vnc4server_w \
 			"" "────Media Systems───────────────────────────" "off" \
 			"Kodi" "Your very own media centre / player." $kodi_w \
 			"MiniDLNA" "Media streaming server (DLNA, UPnP)." $minidlna_w \
@@ -6370,7 +6438,8 @@ _EOF_
 				whiptail --title "$WHIP_TITLE" --checklist --separate-output "Please use the spacebar to select the software you wish to install.\nSoftware details: http://dietpi.com/software" --backtitle "$WHIP_BACKTITLE" 20 78 12 \
 				"" "────Desktops────────────────────────────────" "off" \
 				"LXDE: Desktop" "Ultra lightweight desktop." $desktop_w \
-				"LXDE: VNC Server" "LXDE Desktop for remote connection." $tightvncserver_w \
+				"LXDE: TightVNC Server" "LXDE Desktop for remote connection." $tightvncserver_w \
+				"LXDE: VNC4 Server" "LXDE Desktop for remote connection." $vnc4server_w \
 				"" "────Media Systems───────────────────────────" "off" \
 				"Kodi" "Your very own media centre / player." $kodi_w \
 				"HiFi" "Web interface music / radio player." $hifi_w \
@@ -6453,7 +6522,7 @@ _EOF_
 				whiptail --title "$WHIP_TITLE" --checklist --separate-output "Please use the spacebar to select the software you wish to install.\nSoftware details: http://dietpi.com/software" --backtitle "$WHIP_BACKTITLE" 20 78 12 \
 				"" "────Desktops────────────────────────────────" "off" \
 				"LXDE: Desktop" "Ultra lightweight desktop." $desktop_w \
-				"LXDE: VNC Server" "LXDE Desktop for remote connection." $tightvncserver_w \
+				"LXDE: TightVNC Server" "LXDE Desktop for remote connection." $tightvncserver_w \
 				"" "────Media Systems───────────────────────────" "off" \
 				"Kodi" "Your very own media centre / player." $kodi_w \
 				"HiFi" "Web interface music / radio player." $hifi_w \
@@ -6662,9 +6731,15 @@ _EOF_
 					INSTALL_DIETPI_CHOICESMADE=true
 				fi
 			;;
-			"LXDE: VNC Server")
+			"LXDE: TightVNC Server")
 				if (( $TIGHTVNCSERVER == 0 )); then
 					TIGHTVNCSERVER=1
+					INSTALL_DIETPI_CHOICESMADE=true
+				fi
+			;;
+			"LXDE: VNC4 Server")
+				if (( $VNC4SERVER == 0 )); then
+					VNC4SERVER=1
 					INSTALL_DIETPI_CHOICESMADE=true
 				fi
 			;;
@@ -7114,8 +7189,6 @@ _EOF_
 		elif (( $KODI == 1 )); then
 			bootchoices_available=1
 		elif (( $OPENTYRIAN == 1 )); then
-			bootchoices_available=1
-		elif (( $TIGHTVNCSERVER == 1 )); then
 			bootchoices_available=1
 		fi
 
