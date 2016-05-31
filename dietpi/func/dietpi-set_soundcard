@@ -10,8 +10,8 @@
 	#////////////////////////////////////
 	#
 	# Usage:
-	# - /DietPi/dietpi/func/dietpi-set_soundcard none 			= Disable all soundcards
-	# - /DietPi/dietpi/func/dietpi-set_soundcard matching_name 	= Enable soundcard
+	# - /DietPi/dietpi/func/dietpi-set_soundcard *  			= Disable all soundcards
+	# - /DietPi/dietpi/func/dietpi-set_soundcard matching_name 	= Enable specific soundcard
 	#////////////////////////////////////
 
 	#Force en_GB Locale for whole script. Prevents incorrect parsing with non-english locales.
@@ -29,27 +29,94 @@
 	#/////////////////////////////////////////////////////////////////////////////////////
 	# Func
 	#/////////////////////////////////////////////////////////////////////////////////////
-	#RPi - Disable all soundcards
+	#Disable all soundcards and revert back to HDMI output if available.
+
+	Reset_All(){
+
+		#Update DietPi global soundcard var
+		sed -i "/soundcard=/c\soundcard=$INPUT" /DietPi/dietpi.txt
+
+		#Remove previous asound.conf
+		rm /etc/asound.conf &> /dev/null
+
+		#HW specific
+		# - RPI
+		if (( $HW_MODEL < 10 )); then
+
+			Reset_RPi
+
+		# - Odroid
+		elif (( $HW_MODEL >= 10 && $HW_MODEL < 20 )); then
+
+			Reset_Odroid
+
+		# - OrangePi
+		elif (( $HW_MODEL == 30 )); then
+
+			Reset_OPi_PC
+
+		fi
+
+	}
+
 	Reset_RPi(){
 
-		# - Sanity | Add snd-bcm2835 module reference if it doesnt exist
-		if (( $(cat /etc/modules | grep -ci -m1 'snd-bcm2835') == 0 )); then
-			echo -e "#snd-bcm2835" >> /etc/modules
-		fi
-
-		# - Sanity | Add dtparam=audio= reference if it doesnt exist
+		# - Add dtparam=audio=off
+		#	as of 4.4 kernel: https://github.com/Fourdee/DietPi/issues/327
 		if (( $(cat /DietPi/config.txt | grep -ci -m1 'dtparam=audio=') == 0 )); then
 			echo -e "dtparam=audio=off" >> /DietPi/config.txt
+		else
+			sed -i '/dtparam=audio=/c\dtparam=audio=off' /DietPi/config.txt
 		fi
 
-		# - Disable snd-bcm2835 + HQ audio
-		sed -i "/snd-bcm2835/c\#snd-bcm2835" /etc/modules
-		sed -i '/avoid_pwm_pll=/c\avoid_pwm_pll=1' /DietPi/config.txt
-		#	 as of 4.4 kernel: https://github.com/Fourdee/DietPi/issues/327
-		sed -i '/dtparam=audio=/c\dtparam=audio=off' /DietPi/config.txt
+		# - Disable dtoverlay= (We need a better way to check for dtoverlay entires are actually soundcards, rather than assume dtoverlay= is only used for soundcards by user.)
+		sed -i '/dtoverlay=/d' /DietPi/config.txt
 
-		# - Remove previous asound.conf
-		rm /etc/asound.conf &> /dev/null
+		# - Disable snd-bcm2835 module + HQ audio
+		sed -i '/snd-bcm2835/d' /etc/modules
+		sed -i '/avoid_pwm_pll=/c\avoid_pwm_pll=1' /DietPi/config.txt
+
+	}
+
+	Reset_Odroid(){
+
+		# - hifi shield plus
+		sed -i '/snd-soc-pcm5102/d' /etc/modules
+		sed -i '/snd-soc-odroid-dac/d' /etc/modules
+
+		#C2 - hdmi asound.conf
+		if (( $HW_MODEL == 12 )); then
+
+			cat << _EOF_ > /etc/asound.conf
+pcm.!default {
+    type plug
+    slave {
+        pcm "hw:0,0"
+        format S32_LE
+    }
+}
+_EOF_
+
+		fi
+
+	}
+
+	Reset_OPi_PC(){
+
+		#hdmi
+		amixer set -c 0 'Audio lineout' mute &> /dev/null
+
+		cat << _EOF_ > /etc/asound.conf
+pcm.!default {
+   type hw
+   card 1
+}
+
+ctl.!default {
+   type hw
+   card 1
+}
+_EOF_
 
 	}
 
@@ -57,34 +124,44 @@
 	# Main Loop
 	#/////////////////////////////////////////////////////////////////////////////////////
 	#-----------------------------------------------------------------------------
-	#RPI
-	if (( $HW_MODEL < 10 )); then
+	#Always reset soundcards and revert back to HDMI
+	Reset_All
+	#-----------------------------------------------------------------------------
+	#Apply specific asound.confs and additional settings
+	case "$INPUT" in
 
-		# - Always reset soundcards
-		Reset_RPi
+		#RPi -------------------------------------------------------------------------------
 
-		# - Always apply selected soundcard
-		sed -i "/dtoverlay=/c\dtoverlay=$INPUT" /DietPi/config.txt
+		#rpi-bcm2835-UltraHQ
+		rpi-bcm2835*)
 
-		# - Apply hardware specific asound.confs and additional settings
-		case "$INPUT" in
+			# - Add snd-bcm2835 module
+			echo -e "snd-bcm2835" >> /etc/modules
 
-			rpi-bcm2835)
-				# - Enable snd-bcm2835 + HQ audio
-				sed -i "/snd-bcm2835/c\snd-bcm2835" /etc/modules
+			# - Enable dtparam audio
+			sed -i '/dtparam=audio=/c\dtparam=audio=on' /DietPi/config.txt
+
+			# - Expermental UltraHQ audio: https://www.raspberrypi.org/forums/viewtopic.php?p=907075#p907075
+			if [ "$INPUT" = "rpi-bcm2835-UltraHQ" ]; then
+
+				sed -i '/avoid_pwm_pll=/c\avoid_pwm_pll=2' /DietPi/config.txt
+
+			# - HQ audio
+			else
+
 				sed -i '/avoid_pwm_pll=/c\avoid_pwm_pll=0' /DietPi/config.txt
-				sed -i '/dtparam=audio=/c\dtparam=audio=on' /DietPi/config.txt
 
-				# - Comment out dtoverlay for internal
-				sed -i "/dtoverlay=/c\#dtoverlay=$INPUT" /DietPi/config.txt
-			;;
+			fi
 
-			#hifiberry-dac
-			#hifiberry-dacplus
-			#hifiberry-digi
-			#hifiberry-amp
-			hifiberry-*)
-				cat << _EOF_ > /etc/asound.conf
+		;;
+
+		#hifiberry-dac
+		#hifiberry-dacplus
+		#hifiberry-digi
+		#hifiberry-amp
+		hifiberry-*)
+
+			cat << _EOF_ > /etc/asound.conf
 pcm.!default {
 type hw
 card 0
@@ -94,10 +171,60 @@ type hw
 card 0
 }
 _EOF_
-			;;
+			# - enable dtoverlay
+			echo -e "dtoverlay=$INPUT" >> /DietPi/config.txt
 
-		esac
-	fi
+		;;
+
+		iqaudio-dacplus)
+
+			# - enable dtoverlay
+			echo -e "dtoverlay=$INPUT" >> /DietPi/config.txt
+
+		;;
+
+		#Odroid -------------------------------------------------------------------------------
+
+		odroid-hifishield-plus)
+
+			echo -e "snd-soc-pcm5102" >> /etc/modules
+			echo -e "snd-soc-odroid-dac" >> /etc/modules
+
+			cat << _EOF_ > /etc/asound.conf
+pcm.!default {
+   type hw
+   card 1
+}
+
+ctl.!default {
+   type hw
+   card 1
+}
+_EOF_
+
+		;;
+
+		#OPi PC -------------------------------------------------------------------------------
+
+		opipc-analogue)
+
+			amixer set -c 0 'Audio lineout' unmute &> /dev/null
+
+			cat << _EOF_ > /etc/asound.conf
+pcm.!default {
+   type hw
+   card 0
+}
+
+ctl.!default {
+   type hw
+   card 0
+}
+_EOF_
+
+		;;
+
+	esac
 
 	#-----------------------------------------------------------------------------------
 	exit
