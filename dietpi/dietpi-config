@@ -65,7 +65,7 @@
 	Info_HW_OptionNotSupported(){
 
 		WHIP_QUESTION="This option is not available for $HW_MODEL_DESCRIPTION"
-		whiptail --title "$WHIP_TITLE" --msgbox "$WHIP_QUESTION" --backtitle "$WHIP_BACKTITLE" 8 55
+		whiptail --title "$WHIP_TITLE" --msgbox "$WHIP_QUESTION" --backtitle "$WHIP_BACKTITLE" 8 65
 
 	}
 
@@ -717,7 +717,7 @@
 			ntpd_mode_text="Daemon + Drift"
 		fi
 
-		#RPi - i2c
+		#i2c
 		local rpi_i2c_enabled=$(cat /DietPi/config.txt | grep -ci -m1 'dtparam=i2c_arm=on')
 		local rpi_i2c_text='Disabled'
 		if (( $rpi_i2c_enabled == 1 )); then
@@ -736,14 +736,22 @@
 			usb_max_current_text=$HW_MSG_NOTSUPPORTED
 		fi
 
+		serialconsole_state=$(cat /DietPi/dietpi.txt | grep -m1 '^serial_console_enabled=' | sed 's/.*=//')
+		serialconsole_text='Disabled'
+		if (( $serialconsole_state == 1 )); then
+			serialconsole_text='Enabled'
+		fi
+
+
 		WHIP_TITLE='DietPi - Advanced Options'
-		OPTION=$(whiptail --title "$WHIP_TITLE" --menu "Choose an option" --cancel-button "$TEXT_MENU_BACK" 15 60 6 \
+		OPTION=$(whiptail --title "$WHIP_TITLE" --menu "Choose an option" --cancel-button "$TEXT_MENU_BACK" 16 60 7 \
 		"1" "Swapfile Size    : $swap_text" \
 		"2" "Time sync (ntpd) : $ntpd_mode_text" \
 		"3" "Max Usb Current  : $usb_max_current_text" \
 		"4" "Update Firmware" \
-		"5" "RPI i2c          : $rpi_i2c_text" \
-		"6" "RPI i2c freq     : $rpi_i2cbaudrate_hz" 3>&1 1>&2 2>&3)
+		"5" "i2c state        : $rpi_i2c_text" \
+		"6" "i2c freq         : $rpi_i2cbaudrate_hz" \
+		"7" "Serial console   : $serialconsole_text" 3>&1 1>&2 2>&3)
 
 		CHOICE=$?
 		if (( $CHOICE == 0 )); then
@@ -879,10 +887,10 @@
 				if (( $HW_MODEL < 10 )); then
 
 					if (( $rpi_i2c_enabled == 0 )); then
-						/DietPi/dietpi/func/dietpi-rpi_i2c_control 1
+						/DietPi/dietpi/func/dietpi-i2c_control 1
 						REBOOT_REQUIRED=1
 					else
-						/DietPi/dietpi/func/dietpi-rpi_i2c_control -1
+						/DietPi/dietpi/func/dietpi-i2c_control -1
 						REBOOT_REQUIRED=1
 					fi
 				else
@@ -903,7 +911,7 @@
 					if (( $CHOICE == 0 )); then
 						#check valid int
 						if [[ $OPTION =~ ^-?[0-9]+$ ]]; then
-							/DietPi/dietpi/func/dietpi-rpi_i2c_control "$OPTION"
+							/DietPi/dietpi/func/dietpi-i2c_control "$OPTION"
 							REBOOT_REQUIRED=1
 						else
 							Info_Input_Not_Valid_Integer
@@ -916,7 +924,35 @@
 
 				#Return to This Menu
 				TARGETMENUID=3
+
+			elif (( $OPTION == 7 )); then
+
+				# - Disable for VM's
+				if (( $HW_MODEL == 20 )); then
+
+					Info_HW_OptionNotSupported
+
+				# - SBC lovin' ;)
+				else
+
+					if (( $serialconsole_state == 0 )); then
+
+						/DietPi/dietpi/func/dietpi-set_serialconsole 1
+						REBOOT_REQUIRED=1
+
+					else
+
+						/DietPi/dietpi/func/dietpi-set_serialconsole -1
+						REBOOT_REQUIRED=1
+
+					fi
+
+				fi
+
+				#Return to This Menu
+				TARGETMENUID=3
 			fi
+
 		fi
 	}
 
@@ -930,11 +966,11 @@
 		local frequency_min_cpu_governor=$(( $(cat /sys/devices/system/cpu/cpu0/cpufreq/scaling_min_freq) / 1000 ))
 		local frequency_max_cpu_governor=$(( $(cat /sys/devices/system/cpu/cpu0/cpufreq/scaling_max_freq) / 1000 ))
 
-		local arm_temp=$(cat /sys/class/thermal/thermal_zone0/temp | awk '{print $1/1000}' | xargs printf "%0.1f" )
-
-		#OrangePi and PineA64 return 'c and int
-		if (( $HW_MODEL >= 30 && $HW_MODEL < 40 )) || (( $HW_MODEL >= 40 && $HW_MODEL < 50 )); then
-			arm_temp=$(cat /sys/class/thermal/thermal_zone0/temp)
+		local arm_temp=$(cat /sys/class/thermal/thermal_zone0/temp)
+		# - Some devices (pine) provide 2 digit output, some provide a 5 digit ouput.
+		# 	So, If the value is over 1000, we can assume it needs converting to 1'c
+		if (( $arm_temp >= 1000 )); then
+			arm_temp=$(echo -e "$arm_temp" | awk '{print $1/1000}' | xargs printf "%0.1f" )
 		fi
 
 		local memory_total=$(( $(cat /proc/meminfo | grep -m1 'MemTotal:' | awk '{print $2}') / 1000 ))
@@ -2909,45 +2945,58 @@
 
 		TARGETMENUID=0
 
-		local soundcard_current=$HW_MSG_NOTSUPPORTED
-		local hq_analogue_audio_current_text=$HW_MSG_NOTSUPPORTED
-		local hq_analogue_audio_enabled=0
-
-		#RPi
-		if (( $HW_MODEL < 10 )); then
-
-			#Get soundcard Info
-			soundcard_current=$(cat /DietPi/config.txt | grep -m1 'dtoverlay=' | sed 's/.*=//' | sed 's/#//g')
-
-			hq_analogue_audio_enabled=$(cat /DietPi/config.txt | grep -ci -m1 'avoid_pwm_pll=0')
-			hq_analogue_audio_current_text='Disabled'
-			if (( $hq_analogue_audio_enabled == 1 )); then
-				hq_analogue_audio_current_text='Enabled'
-			fi
-		fi
+		local soundcard_current=$(cat /DietPi/dietpi.txt | grep -m1 'soundcard=' | sed 's/.*=//')
 
 		WHIP_TITLE='DietPi - Audio Options'
-		OPTION=$(whiptail --title "$WHIP_TITLE" --menu "Choose an option" --cancel-button "$TEXT_MENU_BACK" 11 60 3 \
+		OPTION=$(whiptail --title "$WHIP_TITLE" --menu "Choose an option" --cancel-button "$TEXT_MENU_BACK" 10 60 2 \
 		"1" "Set Default Audio Output (Hdmi / 3.5mm)" \
-		"2" "Soundcard         : $soundcard_current" \
-		"3" "HQ Analogue Audio : $hq_analogue_audio_current_text" 3>&1 1>&2 2>&3)
+		"2" "Soundcard         : $soundcard_current" 3>&1 1>&2 2>&3)
 
 		CHOICE=$?
 		if (( $CHOICE == 0 )); then
+
 			if (( $OPTION == 2 )); then
 
-				#RPI Only
+				WHIP_TITLE='DietPi - Soundcards'
+
+				#RPI
 				if (( $HW_MODEL < 10 )); then
 
-					WHIP_TITLE='DietPi - Soundcards'
-					OPTION=$(whiptail --title "$WHIP_TITLE" --menu "Current : $soundcard_current" --default-item "$soundcard_current" --cancel-button "$TEXT_MENU_BACK" 15 60 7 \
-					"none" "Disables snd-bcm2835 module." \
-					"rpi-bcm2835" "Raspberry Pi - Internal (Default)." \
-					"hifiberry-dac" "HifiBerry DAC." \
-					"hifiberry-dacplus" "HifiBerry DAC+." \
-					"hifiberry-digi" "HifiBerry DIGI / DIGI+." \
-					"hifiberry-amp" "HifiBerry AMP / AMP+." \
-					"iqaudio-dacplus" "Pi-DAC+." 3>&1 1>&2 2>&3)
+					OPTION=$(whiptail --title "$WHIP_TITLE" --menu "Current : $soundcard_current" --default-item "$soundcard_current" --cancel-button "$TEXT_MENU_BACK" 16 75 8 \
+					"none" "Disables HDMI + Analogue" \
+					"rpi-bcm2835" "HDMI + Analogue - Internal (Default)" \
+					"rpi-bcm2835-UltraHQ" "HDMI + Analogue - Internal UltraHQ (Experimental)" \
+					"hifiberry-dac" "HifiBerry DAC" \
+					"hifiberry-dacplus" "HifiBerry DAC+" \
+					"hifiberry-digi" "HifiBerry DIGI / DIGI+" \
+					"hifiberry-amp" "HifiBerry AMP / AMP+" \
+					"iqaudio-dacplus" "Pi-DAC+" 3>&1 1>&2 2>&3)
+
+					CHOICE=$?
+					if (( $CHOICE == 0 )); then
+						/DietPi/dietpi/func/dietpi-set_soundcard "$OPTION"
+						REBOOT_REQUIRED=1
+					fi
+
+				#C1/C2
+				elif (( $HW_MODEL == 10 || $HW_MODEL == 12 )); then
+
+					OPTION=$(whiptail --title "$WHIP_TITLE" --menu "Current : $soundcard_current" --default-item "$soundcard_current" --cancel-button "$TEXT_MENU_BACK" 13 60 2 \
+					"none" "HDMI (Default)" \
+					"odroid-hifishield-plus" "Odroid HiFi Shield+" 3>&1 1>&2 2>&3)
+
+					CHOICE=$?
+					if (( $CHOICE == 0 )); then
+						/DietPi/dietpi/func/dietpi-set_soundcard "$OPTION"
+						REBOOT_REQUIRED=1
+					fi
+
+				#OPi PC
+				elif (( $HW_MODEL == 30 )); then
+
+					OPTION=$(whiptail --title "$WHIP_TITLE" --menu "Current : $soundcard_current" --default-item "$soundcard_current" --cancel-button "$TEXT_MENU_BACK" 13 60 2 \
+					"none" "HDMI (Default)" \
+					"opipc-analogue" "3.5mm analogue" 3>&1 1>&2 2>&3)
 
 					CHOICE=$?
 					if (( $CHOICE == 0 )); then
@@ -2962,36 +3011,6 @@
 				#Return to This Menu
 				TARGETMENUID=14
 
-			elif (( $OPTION == 3 )); then
-
-				#RPI Only
-				if (( $HW_MODEL < 10 )); then
-
-					#Enabled
-					if (( $hq_analogue_audio_enabled == 1 )); then
-						WHIP_QUESTION=" Current setting: $hq_analogue_audio_current_text \n Would you like to disable this setting ? \n \n Once Disabled: \n - No dedicated pll to PWM audio \n - Reduces analogue audio quality \n - Allows core_freq to be set independently from the GPU"
-						whiptail --title "$WHIP_TITLE" --yesno "$WHIP_QUESTION" --yes-button "Ok" --no-button "Back" --defaultno --backtitle "$WHIP_BACKTITLE" 14 60
-						CHOICE=$?
-						if (( $CHOICE == 0 )); then
-							sed -i '/avoid_pwm_pll=/c\avoid_pwm_pll=1' /DietPi/config.txt
-							REBOOT_REQUIRED=1
-						fi
-					#Disabled
-					elif (( $hq_analogue_audio_enabled == 0 )); then
-						WHIP_QUESTION=" Current setting: $hq_analogue_audio_current_text \n Would you like to enable this setting ? \n \n Once Enabled: \n - Dedicated pll to PWM audio \n - Maximum analogue audio quality \n - Any core_freq overclocking will also effect GPU clock"
-						whiptail --title "$WHIP_TITLE" --yesno "$WHIP_QUESTION" --yes-button "Ok" --no-button "Back" --defaultno --backtitle "$WHIP_BACKTITLE" 14 60
-						CHOICE=$?
-						if (( $CHOICE == 0 )); then
-							sed -i '/avoid_pwm_pll=/c\avoid_pwm_pll=0' /DietPi/config.txt
-							REBOOT_REQUIRED=1
-						fi
-					fi
-				else
-					Info_HW_OptionNotSupported
-				fi
-
-				#Return to This Menu
-				TARGETMENUID=14
 
 			elif (( $OPTION == 1 )); then
 
@@ -3010,52 +3029,6 @@
 						amixer cset numid=3 "$OPTION"
 					fi
 
-				#OrangePi
-				elif (( $HW_MODEL == 30 )); then
-
-					OPTION=$(whiptail --title "$WHIP_TITLE" --menu "" --cancel-button "$TEXT_MENU_BACK" 9 60 2 \
-					"Hdmi" "Sets default audio output to hdmi." \
-					"3.5mm" "Sets default audio output to 3.5mm lineout." 3>&1 1>&2 2>&3)
-					CHOICE=$?
-					if (( $CHOICE == 0 )); then
-
-						if [ "$OPTION" = "Hdmi" ]; then
-
-							amixer set -c 0 'Audio lineout' mute &> /dev/null
-
-						#asound HDMI
-						cat << _EOF_ > /etc/asound.conf
-pcm.!default {
-   type hw
-   card 1
-}
-
-ctl.!default {
-   type hw
-   card 1
-}
-_EOF_
-
-						elif [ "$OPTION" = "3.5mm" ]; then
-
-							amixer set -c 0 'Audio lineout' unmute &> /dev/null
-
-							#asound 3.5mm
-							cat << _EOF_ > /etc/asound.conf
-pcm.!default {
-   type hw
-   card 0
-}
-
-ctl.!default {
-   type hw
-   card 0
-}
-_EOF_
-
-						fi
-
-					fi
 
 				else
 					Info_HW_OptionNotSupported

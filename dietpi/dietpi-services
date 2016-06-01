@@ -8,7 +8,7 @@
 	#
 	# Info:
 	# - Allows service control for all listed programs used in dietpi-software
-	# - Disable removes the autostart from init.d and systemD. This allows DietPi to control startup services.
+	# - Disable removes the autostart from init.d and systemD. This allows DietPi to control program services below.
 	#
 	# Usage:
 	# - /DietPi/dietpi/dietpi-services start/stop/restart/disable
@@ -16,6 +16,8 @@
 
 	#Force en_GB Locale for whole script. Prevents incorrect parsing with non-english locales.
 	LANG=en_GB.UTF-8
+
+	INPUT_MODE="$1"
 
 	DISTRO=$(sed -n 3p /DietPi/dietpi/.hw_model)
 
@@ -51,6 +53,7 @@
 		"netdata"
 		"mumble-server"
 		"emby-server"
+		"plexmediaserver"
 	)
 
 	aSERVICE_AVAILABLE=0
@@ -61,24 +64,57 @@
 	done
 
 	#Check if service name is available on system.
-	Populate_Available_Array(){
+	Populate_Available_Array()
+	{
+
+		#Find dpkg program names
+		dpkg --get-selections | awk '{print $1}' > "$FP_TEMP"
 
 		for ((i=0; i<${#aSERVICE_NAME[@]}; i++))
 		do
 
-			# - Check dpkg for matching packages.
-			if (( $(grep -ci -m1 "${aSERVICE_NAME[$i]}" "$FP_TEMP") == 1 )); then
+			if [ -f /etc/systemd/system/"${aSERVICE_NAME[$i]}".service ]; then
 				aSERVICE_AVAILABLE[$i]=1
 
-			# - check /etc/init.d for matching service files
 			elif [ -f /etc/init.d/"${aSERVICE_NAME[$i]}" ]; then
 				aSERVICE_AVAILABLE[$i]=1
 
-			elif [ -f /etc/systemd/system/"${aSERVICE_NAME[$i]}".service ]; then
+			# - Check dpkg for matching packages.
+			elif (( $(grep -ci -m1 "${aSERVICE_NAME[$i]}$" "$FP_TEMP") == 1 )); then
 				aSERVICE_AVAILABLE[$i]=1
+
 			fi
 
 		done
+
+	}
+
+	Print_Status()
+	{
+
+		#$1 = name
+		#$2 = exit code
+
+		#ok
+		if (( $2 == 0 )); then
+
+			echo -e "\e[1A\e[32mOk\e[0m \e[90m|\e[0m $1"
+
+		#failed
+		else
+
+			echo -e "\e[1A\e[31Failed\e[0m \e[90m|\e[0m $1"
+
+		fi
+
+	}
+
+	Print_Banner()
+	{
+
+		echo -e "\n \e[38;5;93mDietPi-Services\e[0m"
+		echo -e " \e[90mMode:\e[0m $INPUT_MODE"
+		echo -e " \e[90mPlease wait...\e[0m"
 
 	}
 
@@ -88,20 +124,15 @@
 	# Main
 	#/////////////////////////////////////////////////////////////////////////////////////
 	#Info
-	echo -e "\n DietPi-Services"
-	echo -e " Mode: $1"
-	echo -e " Please wait..."
+	Print_Banner
 
-	#Find installed services
-	dpkg --get-selections > "$FP_TEMP"
+	#Obtain an array of available services installed on system.
+	Populate_Available_Array
 
 	#-----------------------------------------------------------------------------------
 	#disable/enable
-	if [ "$1" = "disable" ] ||
-		[ "$1" = "enable" ]; then
-
-		#Check if service name is available on system.
-		Populate_Available_Array
+	if [ "$INPUT_MODE" = "disable" ] ||
+		[ "$INPUT_MODE" = "enable" ]; then
 
 		for ((i=0; i<${#aSERVICE_NAME[@]}; i++))
 		do
@@ -109,13 +140,17 @@
 			#Apply
 			if (( ${aSERVICE_AVAILABLE[$i]} == 1 )); then
 
+				echo -e "${aSERVICE_NAME[$i]}"
+
 				# - LSB
 				if (( $DISTRO == 1 )); then
 					update-rc.d -f ${aSERVICE_NAME[$i]} $1 &> /dev/null
+					Print_Status ${aSERVICE_NAME[$i]} $?
 
 				# - SystemD
 				elif (( $DISTRO == 3 )); then
 					systemctl $1 ${aSERVICE_NAME[$i]} &> /dev/null
+					Print_Status ${aSERVICE_NAME[$i]} $?
 
 				fi
 
@@ -128,22 +163,42 @@
 			systemctl daemon-reload &> /dev/null
 		fi
 
-		echo -e " Completed"
+		echo -e ""
 
 	#-----------------------------------------------------------------------------------
 	#start/stop/restart
-	elif [ "$1" = "start" ] ||
-		[ "$1" = "stop" ] ||
-		[ "$1" = "restart" ]; then
+	elif [ "$INPUT_MODE" = "start" ] ||
+		[ "$INPUT_MODE" = "stop" ] ||
+		[ "$INPUT_MODE" = "restart" ]; then
 
+		#????????????????????????????????????????????????????????????????????????
+		# Although this allows for simple service control without using SystemD, we really should convert these to SystemD services. To keep everything consistent, clean, and obtain a correct exit code.
 		#DietPi: Non-service based control for specific dietpi-software installed programs.
 		# - Start order first
-		/etc/dietpi/dietpi-software/services/brutefir.service $1 &> /dev/null
-		/etc/dietpi/dietpi-software/services/jackd.service $1 &> /dev/null
-		/etc/dietpi/dietpi-software/services/jconvolver.service $1 &> /dev/null
+		index=0
+		aDIETPISERVICE_FP=()
+		aDIETPISERVICE_NAME=()
+		aDIETPISERVICE_NAME[$index]='BruteFIR';aDIETPISERVICE_FP[$index]='/etc/dietpi/dietpi-software/services/brutefir.service';((index++));
+		aDIETPISERVICE_NAME[$index]='JackD';aDIETPISERVICE_FP[$index]='/etc/dietpi/dietpi-software/services/jackd.service';((index++));
+		aDIETPISERVICE_NAME[$index]='Jconvolver';aDIETPISERVICE_FP[$index]='/etc/dietpi/dietpi-software/services/jconvolver.service';((index++));
 
-		#Check if service name is available on system.
-		Populate_Available_Array
+		for ((i=0; i<${#aDIETPISERVICE_NAME[@]}; i++))
+		do
+
+			if [ -f ${aDIETPISERVICE_FP[$i]} ]; then
+
+				echo -e "${aDIETPISERVICE_NAME[$i]}"
+
+				${aDIETPISERVICE_FP[$i]} $1 &> /dev/null
+				Print_Status ${aDIETPISERVICE_NAME[$i]} $?
+
+			fi
+
+		done
+
+		unset aDIETPISERVICE_NAME
+		unset aDIETPISERVICE_FP
+		#????????????????????????????????????????????????????????????????????????
 
 		#Linux: installed services
 		for ((i=0; i<${#aSERVICE_NAME[@]}; i++))
@@ -152,35 +207,64 @@
 			#Apply
 			if (( ${aSERVICE_AVAILABLE[$i]} == 1 )); then
 
+				echo -e "${aSERVICE_NAME[$i]}"
+
 				# - LSB
 				if (( $DISTRO == 1 )); then
-					update-rc.d -f ${aSERVICE_NAME[$i]} $1 &> /dev/null
+
+					service ${aSERVICE_NAME[$i]} $1 &> /dev/null
 
 				# - SystemD
 				elif (( $DISTRO == 3 )); then
+
 					systemctl $1 ${aSERVICE_NAME[$i]} &> /dev/null
 
 				fi
+
+				Print_Status ${aSERVICE_NAME[$i]} $?
 
 			fi
 
 		done
 
+		#????????????????????????????????????????????????????????????????????????
+		# Although this allows for simple service control without using SystemD, we really should convert these to SystemD services. To keep everything consistent, clean, and obtain a correct exit code.
 		#DietPi: Non-service based control for specific dietpi-software installed programs.
 		# - Start prority last
-		/etc/dietpi/dietpi-software/services/raspimjpeg.service $1 &> /dev/null
-		/etc/dietpi/dietpi-software/services/deluge.service $1 &> /dev/null
-		/etc/dietpi/dietpi-software/services/squeezeboxserver.service $1 &> /dev/null
-		/etc/dietpi/dietpi-software/services/openbazaar-server.service $1 &> /dev/null
+		index=0
+		aDIETPISERVICE_FP=()
+		aDIETPISERVICE_NAME=()
+		aDIETPISERVICE_NAME[$index]='RaspimJpeg';aDIETPISERVICE_FP[$index]='/etc/dietpi/dietpi-software/services/raspimjpeg.service';((index++));
+		aDIETPISERVICE_NAME[$index]='Deluge';aDIETPISERVICE_FP[$index]='/etc/dietpi/dietpi-software/services/deluge.service';((index++));
+		aDIETPISERVICE_NAME[$index]='SqueezeBox Server';aDIETPISERVICE_FP[$index]='/etc/dietpi/dietpi-software/services/squeezeboxserver.service';((index++));
+		aDIETPISERVICE_NAME[$index]='OpenBazaar';aDIETPISERVICE_FP[$index]='/etc/dietpi/dietpi-software/services/openbazaar-server.service';((index++));
 
-		echo -e " Completed"
+		for ((i=0; i<${#aDIETPISERVICE_NAME[@]}; i++))
+		do
+
+			if [ -f ${aDIETPISERVICE_FP[$i]} ]; then
+
+				echo -e "${aDIETPISERVICE_NAME[$i]}"
+
+				${aDIETPISERVICE_FP[$i]} $1 &> /dev/null
+				Print_Status ${aDIETPISERVICE_NAME[$i]} $?
+
+			fi
+
+		done
+
+		unset aDIETPISERVICE_NAME
+		unset aDIETPISERVICE_FP
+		#????????????????????????????????????????????????????????????????????????
+
+		echo -e ""
 
 		#Apply process tool settings
 		if [ "$1" = "start" ] ||
 			[ "$1" = "restart" ]; then
-			echo -e "\n DietPi-Process Tool\n Applying settings, please wait...\n"
+
 			/DietPi/dietpi/dietpi-process_tool 1
-			echo -e " Completed\n"
+
 		fi
 
 	#-----------------------------------------------------------------------------------

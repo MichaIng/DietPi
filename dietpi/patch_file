@@ -620,10 +620,215 @@ _EOF_
 			sed -i 's/^SUBSONIC=/SUBSONIC5=/' /DietPi/dietpi/.installed
 		fi
 		#-------------------------------------------------------------------------------
+		#Patch PineA64 to include xz-utils for firmware upgrades (only needed w/ alpha v118 image
+		if (( $HW_MODEL >= 40 && $HW_MODEL < 50 )); then
+			apt-get update
+			apt-get install -y --no-install-recommends xz-utils
+
+			/usr/local/sbin/pine64_update_uboot.sh
+			/usr/local/sbin/pine64_update_kernel.sh
+			/usr/local/sbin/pine64_fix_whatever.sh
+		fi
+		#-------------------------------------------------------------------------------
+
+	elif (( $VERSION_CURRENT == 118 )); then
+		#-------------------------------------------------------------------------------
+		#Transmission, service starts before network via SystemD, instead of "dietpi-services start": https://github.com/Fourdee/DietPi/issues/350
+		if [ -f /DietPi/dietpi/.installed ] &&
+			(( $DISTRO == 3 )) &&
+			(( $( cat /DietPi/dietpi/.installed | grep -ci -m1 '^TRANSMISSION=2' ) )); then
+
+			rm /etc/init.d/transmission-daemon
+			rm /etc/systemd/system/transmission-daemon.service
+			cat << _EOF_ > /etc/systemd/system/transmission-daemon.service
+[Unit]
+Description=Barebones transmission-daemon service
+DefaultDependencies=no
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/usr/bin/transmission-daemon --config-dir /var/lib/transmission-daemon/info
+ExecStop=/usr/bin/killall -w transmission-daemon
+StandardOutput=tty
+
+[Install]
+WantedBy=multi-user.target
+_EOF_
+			systemctl enable transmission-daemon.service
+			systemctl daemon-reload
+			/DietPi/dietpi/dietpi-services disable
+
+		fi
+		#-------------------------------------------------------------------------------
+		#dietpi.txt global vnc settings
+		if (( ! $(cat /DietPi/dietpi.txt | grep -ci -m1 '^dietpi_vncserver_height=') )); then
+			echo -e "\n#VNC Server Options\ndietpi_vncserver_width=1280\ndietpi_vncserver_height=720\ndietpi_vncserver_depth=16\ndietpi_vncserver_display=0" >> /DietPi/dietpi.txt
+		fi
+		#-------------------------------------------------------------------------------
+		#VNC servers, now start automatically during boot via service.
+		if [ -f /DietPi/dietpi/.installed ] &&
+			(( $( cat /DietPi/dietpi/.installed | grep -ci -m1 '^TIGHTVNCSERVER=2' ) )); then
+
+			#Wheezy
+			if (( $DISTRO == 1 )); then
+
+				cat << _EOF_ > /etc/init.d/vncserver
+#!/bin/bash -e
+### BEGIN INIT INFO
+# Provides:          VNC server
+# Required-Start:    \$all
+# Should-Start:
+# Required-Stop:	 \$local_fs \$network
+# Should-Stop:
+# Default-Start:     2 3 4 5
+# Default-Stop:      0 1 6
+# Description:       DietPi VNC server control
+### END INIT INFO
+
+#Wheezy, to prevent "vncserver: The HOME/USER environment variable is not set"
+export USER=root
+export HOME='/root'
+
+start(){
+
+	/usr/local/bin/vncserver start
+
+}
+
+stop(){
+
+	/usr/local/bin/vncserver stop
+
+}
+
+case "\$1" in
+	start)
+		start
+	;;
+	stop)
+		stop
+	;;
+	restart)
+		stop
+		start
+	;;
+	*)
+		echo "Usage: \$0 {start|stop|restart}"
+	;;
+esac
+_EOF_
+
+				chmod +x /etc/init.d/vncserver
+				update-rc.d vncserver defaults 00 80
+
+
+			#Jessie
+			elif (( $DISTRO == 3 )); then
+
+				cat << _EOF_ > /etc/systemd/system/vncserver.service
+[Unit]
+Description=Manage VNC Server
+After=dietpi-service.service
+After=rc.local.service
+
+[Service]
+Type=idle
+RemainAfterExit=yes
+ExecStart=/bin/bash /usr/local/bin/vncserver start
+ExecStop=/bin/bash /usr/local/bin/vncserver stop
+User=root
+
+[Install]
+WantedBy=multi-user.target
+_EOF_
+
+				systemctl enable vncserver.service
+				systemctl daemon-reload
+
+			fi
+
+			# - Both
+			cat << _EOF_ > /usr/local/bin/vncserver
+#!/bin/bash
+
+#Globals
+VNC_INSTALLED=0
+BINARY_FP=0
+
+WIDTH=\$(cat /DietPi/dietpi.txt | grep -m1 '^dietpi_vncserver_width=' | sed 's/.*=//')
+HEIGHT=\$(cat /DietPi/dietpi.txt | grep -m1 '^dietpi_vncserver_height=' | sed 's/.*=//')
+DEPTH=\$(cat /DietPi/dietpi.txt | grep -m1 '^dietpi_vncserver_depth=' | sed 's/.*=//')
+DISPLAY=\$(cat /DietPi/dietpi.txt | grep -m1 '^dietpi_vncserver_display=' | sed 's/.*=//')
+
+#TightVNC or VNC4server?
+if [ -f /usr/bin/vnc4server ]; then
+    BINARY_FP='/usr/bin/vnc4server'
+    VNC_INSTALLED=1
+elif  [ -f /usr/bin/vncserver ]; then
+    BINARY_FP='/usr/bin/vncserver'
+    VNC_INSTALLED=1
+fi
+
+#Exit if no VNC binary found
+if (( ! \$VNC_INSTALLED )); then
+    exit 1
+fi
+
+case "\$1" in
+    start)
+        \$BINARY_FP :\$DISPLAY -geometry \$WIDTH'x'\$HEIGHT -depth \$DEPTH
+        ;;
+
+    stop)
+        \$BINARY_FP -kill :\$DISPLAY
+        ;;
+
+esac
+
+exit 0
+_EOF_
+			chmod +x /usr/local/bin/vncserver
+
+		fi
+		#-------------------------------------------------------------------------------
+		#Removal of VNC server from DietPi-Autostart. Reset to console, manual login.
+		if (( $(cat /DietPi/dietpi/.dietpi-autostart_index) == 6 )); then
+			echo 0 > /DietPi/dietpi/.dietpi-autostart_index
+		fi
+		#-------------------------------------------------------------------------------
+		#dietpi.txt | Serial console global var
+		# - Set this to 0 disabled (the previous default for all DietPi images). Future images will have this enabled by default.
+		if (( $(cat /DietPi/dietpi.txt | grep -ci -m1 'serial_console_enabled=') == 0 )); then
+			echo -e "\n#Serial Console: If you dont know what this is, you can safely disable it (=0) to reduce system resource usage.\nserial_console_enabled=0" >> /DietPi/dietpi.txt
+		fi
+		#-------------------------------------------------------------------------------
+		#dietpi.txt | Soundcard global var
+		if (( $(cat /DietPi/dietpi.txt | grep -ci -m1 'soundcard=') == 0 )); then
+			echo -e "\n#Soundcard\nsoundcard=none" >> /DietPi/dietpi.txt
+		fi
+		#-------------------------------------------------------------------------------
+		#Odroid C2 boot.ini changes: https://github.com/Fourdee/DietPi/issues/366#issue-157399983
+		#	I dont want to risk patching these additional options in, so lets overwrite the users boot.ini with the new one.
+		if (( $HW_MODEL == 12 )); then
+
+			DEBIAN_FRONTEND='noninteractive' apt-get upgrade -y linux-headers-arm64-odroid-c2 linux-image-arm64-odroid-c2
+
+			whiptail --title "Kernel Upgrade" --msgbox "If the next screen shows a Yes/No prompt. Select No." 8 60
+			DEBIAN_FRONTEND='noninteractive' apt-get autoremove --purge -y
+
+			# - Because removing 3.14.29 also removes 3.14.65 (most likley same locations) we need to reinstall 3.14.65+
+			DEBIAN_FRONTEND='noninteractive' apt-get install -y --reinstall linux-headers-3.14.65+ linux-image-3.14.65+
+
+			wget https://raw.githubusercontent.com/Fourdee/DietPi/e8e0edf7193c61d6084bf252397561081e335dc5/boot_c2.ini -O /DietPi/boot.ini
+
+		fi
+		#-------------------------------------------------------------------------------
+
 	fi
 
 		#-------------------------------------------------------------------------------
-		#NB: all if statements must contain at least one command. Prevents bash error.
+		#NB: all if statements must contain at least one command. Prevents bash having a hissy fit :)
 		#-------------------------------------------------------------------------------
 
 	#-------------------------------------------------------------------------------

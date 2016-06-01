@@ -282,7 +282,12 @@
 
 		CPU_TOTALPROCESSES=$(ps --ppid 2 -p 2 --deselect | wc -l)
 		CPU_GOV=$(cat /sys/devices/system/cpu/cpu0/cpufreq/scaling_governor)
-		CPU_TEMP=$(( $(cat /sys/class/thermal/thermal_zone0/temp) / 1000 ))
+		CPU_TEMP=$(cat /sys/class/thermal/thermal_zone0/temp)
+		# - Some devices (pine) provide 2 digit output, some provide a 5 digit ouput.
+		# 	So, If the value is over 1000, we can assume it needs converting to 1'c
+		if (( $CPU_TEMP >= 1000 )); then
+			CPU_TEMP=$(echo -e "$CPU_TEMP" | awk '{print $1/1000}' | xargs printf "%0.0f" )
+		fi
 
 		#Obtain colour for temps
 		if (( $CPU_TEMP >= 65 )); then
@@ -470,56 +475,78 @@
 
 	Obtain_NETWORK_USAGE(){
 
-		#Store previous totals
-		local total_previous_sent=$NETWORK_USAGE_TOTAL_CURRENT_SENT
-		local total_previous_recieved=$NETWORK_USAGE_TOTAL_CURRENT_RECIEVED
+		#Check for valid integer scrapes from netstat, before running calculations: http://dietpi.com/phpbb/viewtopic.php?f=11&t=441&p=1927#p1927 | https://github.com/Fourdee/DietPi/issues/355
+		local run_update=1
 
-		#Update current totals
 		local mtu_size=$(netstat -N -i | grep "$NETWORK_DETAILS_ADAPTER" | awk '{print $2}')
-		NETWORK_USAGE_TOTAL_CURRENT_RECIEVED=$(( $(netstat -N -i | grep "$NETWORK_DETAILS_ADAPTER" | awk '{print $4}') * $mtu_size ))
-		NETWORK_USAGE_TOTAL_CURRENT_SENT=$(( $(netstat -N -i | grep "$NETWORK_DETAILS_ADAPTER" | awk '{print $8}') * $mtu_size ))
-
-		#Current usage
-		# - Work out seconds since last update
-		local seconds_since_last_update=$(( $(date +%s) - $NETWORK_USAGE_SECONDS_SINCE_LAST_UPDATE ))
-
-		# - Init - Override current usage to 0, on first run of scene.
-		if (( $NETWORK_USAGE_NOW_INIT == 0 )); then
-			NETWORK_USAGE_NOW_CURRENT_SENT=0
-			NETWORK_USAGE_NOW_CURRENT_RECIEVED=0
-
-			NETWORK_USAGE_NOW_INIT=1
-
-		# - Obtain current usage
-		else
-			NETWORK_USAGE_NOW_CURRENT_SENT=$(( ( $NETWORK_USAGE_TOTAL_CURRENT_SENT - $total_previous_sent ) / $seconds_since_last_update ))
-			NETWORK_USAGE_NOW_CURRENT_RECIEVED=$(( ( $NETWORK_USAGE_TOTAL_CURRENT_RECIEVED - $total_previous_recieved ) / $seconds_since_last_update ))
+		if [[ ! $mtu_size =~ ^-?[0-9]+$ ]]; then
+			run_update=0
 		fi
 
-		# - Update timestamp
-		NETWORK_USAGE_SECONDS_SINCE_LAST_UPDATE=$(date +%s)
-
-		# - Ifconfig to /tmp
-		#ifconfig $NETWORK_DETAILS_ADAPTER > $FP_TEMP
-		#/sys/class/net/ values are being reset by system/kernel when they reach X size. Some sort of "cap".
-		#NETWORK_USAGE_TOTAL_CURRENT_SENT=$(( $(cat /sys/class/net/$NETWORK_DETAILS_ADAPTER/statistics/tx_bytes) / 1024 / 1024 ))
-		#NETWORK_USAGE_TOTAL_CURRENT_RECIEVED=$(( $(cat /sys/class/net/$NETWORK_DETAILS_ADAPTER/statistics/rx_bytes) / 1024 / 1024 ))
-
-		#Usage today
-		# - Has the day changed? Also runs on init.
-		#	String if statement, to prevent "leading zero integer error" from $(date): https://github.com/Fourdee/DietPi/issues/272
-		local dayofmonth=$(date +"%d")
-		if [ "$NETWORK_USAGE_DAY_OF_MONTH" != "$dayofmonth" ]; then
-			#Update previous day values to current
-			NETWORK_USAGE_DAY_PREVIOUS_SENT=$NETWORK_USAGE_TOTAL_CURRENT_SENT
-			NETWORK_USAGE_DAY_PREVIOUS_RECIEVED=$NETWORK_USAGE_TOTAL_CURRENT_RECIEVED
-			NETWORK_USAGE_DAY_OF_MONTH=$dayofmonth
-
+		local network_usage_current_recieved=$(netstat -N -i | grep "$NETWORK_DETAILS_ADAPTER" | awk '{print $4}')
+		if [[ ! $network_usage_current_recieved =~ ^-?[0-9]+$ ]]; then
+			run_update=0
 		fi
 
-		# - Work out todays usage
-		NETWORK_USAGE_DAY_CURRENT_SENT=$(( $NETWORK_USAGE_TOTAL_CURRENT_SENT - $NETWORK_USAGE_DAY_PREVIOUS_SENT ))
-		NETWORK_USAGE_DAY_CURRENT_RECIEVED=$(( $NETWORK_USAGE_TOTAL_CURRENT_RECIEVED - $NETWORK_USAGE_DAY_PREVIOUS_RECIEVED ))
+		local network_usage_current_sent=$(netstat -N -i | grep "$NETWORK_DETAILS_ADAPTER" | awk '{print $8}')
+		if [[ ! $network_usage_current_sent =~ ^-?[0-9]+$ ]]; then
+			run_update=0
+		fi
+
+
+		if (( $run_update == 1 )); then
+
+			#Store previous totals
+			local total_previous_sent=$NETWORK_USAGE_TOTAL_CURRENT_SENT
+			local total_previous_recieved=$NETWORK_USAGE_TOTAL_CURRENT_RECIEVED
+
+			#Update current totals
+			NETWORK_USAGE_TOTAL_CURRENT_RECIEVED=$(( $network_usage_current_recieved * $mtu_size ))
+			NETWORK_USAGE_TOTAL_CURRENT_SENT=$(( $network_usage_current_sent * $mtu_size ))
+
+			#Current usage
+			# - Work out seconds since last update
+			local seconds_since_last_update=$(( $(date +%s) - $NETWORK_USAGE_SECONDS_SINCE_LAST_UPDATE ))
+
+			# - Init - Override current usage to 0, on first run of scene.
+			if (( $NETWORK_USAGE_NOW_INIT == 0 )); then
+				NETWORK_USAGE_NOW_CURRENT_SENT=0
+				NETWORK_USAGE_NOW_CURRENT_RECIEVED=0
+
+				NETWORK_USAGE_NOW_INIT=1
+
+			# - Obtain current usage
+			else
+				NETWORK_USAGE_NOW_CURRENT_SENT=$(( ( $NETWORK_USAGE_TOTAL_CURRENT_SENT - $total_previous_sent ) / $seconds_since_last_update ))
+				NETWORK_USAGE_NOW_CURRENT_RECIEVED=$(( ( $NETWORK_USAGE_TOTAL_CURRENT_RECIEVED - $total_previous_recieved ) / $seconds_since_last_update ))
+			fi
+
+			# - Update timestamp
+			NETWORK_USAGE_SECONDS_SINCE_LAST_UPDATE=$(date +%s)
+
+			# - Ifconfig to /tmp
+			#ifconfig $NETWORK_DETAILS_ADAPTER > $FP_TEMP
+			#/sys/class/net/ values are being reset by system/kernel when they reach X size. Some sort of "cap".
+			#NETWORK_USAGE_TOTAL_CURRENT_SENT=$(( $(cat /sys/class/net/$NETWORK_DETAILS_ADAPTER/statistics/tx_bytes) / 1024 / 1024 ))
+			#NETWORK_USAGE_TOTAL_CURRENT_RECIEVED=$(( $(cat /sys/class/net/$NETWORK_DETAILS_ADAPTER/statistics/rx_bytes) / 1024 / 1024 ))
+
+			#Usage today
+			# - Has the day changed? Also runs on init.
+			#	String if statement, to prevent "leading zero integer error" from $(date): https://github.com/Fourdee/DietPi/issues/272
+			local dayofmonth=$(date +"%d")
+			if [ "$NETWORK_USAGE_DAY_OF_MONTH" != "$dayofmonth" ]; then
+				#Update previous day values to current
+				NETWORK_USAGE_DAY_PREVIOUS_SENT=$NETWORK_USAGE_TOTAL_CURRENT_SENT
+				NETWORK_USAGE_DAY_PREVIOUS_RECIEVED=$NETWORK_USAGE_TOTAL_CURRENT_RECIEVED
+				NETWORK_USAGE_DAY_OF_MONTH=$dayofmonth
+
+			fi
+
+			# - Work out todays usage
+			NETWORK_USAGE_DAY_CURRENT_SENT=$(( $NETWORK_USAGE_TOTAL_CURRENT_SENT - $NETWORK_USAGE_DAY_PREVIOUS_SENT ))
+			NETWORK_USAGE_DAY_CURRENT_RECIEVED=$(( $NETWORK_USAGE_TOTAL_CURRENT_RECIEVED - $NETWORK_USAGE_DAY_PREVIOUS_RECIEVED ))
+
+		fi
 
 	}
 
@@ -1026,6 +1053,10 @@
 			Write_Settings_File
 
 		fi
+
+		#--------------------------------------------------------------------------------
+		#Update DietPi network shared data: https://github.com/Fourdee/DietPi/issues/359
+		/DietPi/dietpi/func/obtain_network_details
 
 	}
 
