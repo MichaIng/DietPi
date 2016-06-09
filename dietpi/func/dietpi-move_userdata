@@ -9,21 +9,20 @@
 	#////////////////////////////////////
 	#
 	# Info:
-	# - Allows automated moving of dietpi_userdata directory. Automatically generates a symlink from dietpi_userdata to target directory if needed.
+	# - Allows automated moving of user data in DietPi. Automatically generates a symlink from /mnt/dietpi_userdata to target directory if needed.
 	# - Also moves the Dphys swapfile to $TARGET_DIRECTORY. Required to prevent locked .swapfile from allow us to delete $SOURCE_DIRECTORY.
 	#
 	# Usage:
-	# - /DietPi/dietpi/func/dietpi-move_userdata sTARGET_DIRECTORY
+	# - /DietPi/dietpi/func/dietpi-move_userdata sSOURCE_DIRECTORY sTARGET_DIRECTORY
 	#////////////////////////////////////
 
 	#Force en_GB Locale for whole script. Prevents incorrect parsing with non-english locales.
 	LANG=en_GB.UTF-8
 
-	TEMP_DIRECTORY='/mnt/dietpi-move_userdata_tmp'
-	DIETPI_USERDATA_DIRECTORY='/mnt/dietpi_userdata'
+	DIETPI_USERDATA_DIRECTORY='/mnt/dietpi_userdata' # Global, must match same var in dietpi-software
 
-	SOURCE_DIRECTORY=$DIETPI_USERDATA_DIRECTORY
-	TARGET_DIRECTORY="$1"
+	SOURCE_DIRECTORY="$1"
+	TARGET_DIRECTORY="$2"
 
 	SWAPFILE_SIZE=$(/DietPi/dietpi/func/dietpi-set_dphys-swapfile | awk '{print $1}')
 
@@ -32,9 +31,67 @@
 	#/////////////////////////////////////////////////////////////////////////////////////
 	# Main Loop
 	#/////////////////////////////////////////////////////////////////////////////////////
+	#init
+
+	#If there is no directory or symlink for $DIETPI_USERDATA_DIRECTORY, always create a directory.
+	if [ ! -d "$DIETPI_USERDATA_DIRECTORY" ] && [ ! -L "$DIETPI_USERDATA_DIRECTORY" ]; then
+		mkdir -p "$DIETPI_USERDATA_DIRECTORY"
+	fi
 
 	#-------------------------------------------------------------------------------------
-	if [ -d "$SOURCE_DIRECTORY" ]; then
+	# Sanity checks
+
+	# - Check if symlink is already pointing to target directory.
+	if [ "$(readlink -f $DIETPI_USERDATA_DIRECTORY)" = "$TARGET_DIRECTORY" ]; then
+
+		echo -e "INFO: $DIETPI_USERDATA_DIRECTORY is already symlinked to target directory."
+		EXIT_CODE=-1
+
+
+	# - Missing both inputs
+	elif [ -z "$SOURCE_DIRECTORY" ] || [ -z "$TARGET_DIRECTORY" ]; then
+
+		echo -e "ERROR: You must provide a source directory and target directory."
+		EXIT_CODE=-1
+
+	# - Check if source directory exists
+	elif [ ! -d "$SOURCE_DIRECTORY" ]; then
+
+		echo -e "ERROR: source directory $SOURCE_DIRECTORY does not exist."
+		EXIT_CODE=-1
+
+
+	# - Check for disallowed directory match
+	elif (( $(echo -e "$SOURCE_DIRECTORY" | grep -ci -m1 "$TARGET_DIRECTORY") ||
+		$(echo -e "$TARGET_DIRECTORY" | grep -ci -m1 "$SOURCE_DIRECTORY") )); then
+
+		echo -e "ERROR: $SOURCE_DIRECTORY and $TARGET_DIRECTORY cannot be within each other. Disallowed directory match."
+		EXIT_CODE=-1
+
+	# - Only allow full filepaths
+	elif [ "${SOURCE_DIRECTORY:0:1}" != "/" ] || [ "${TARGET_DIRECTORY:0:1}" != "/" ]; then
+
+		echo -e "ERROR: Both source and target directories must contain the full filepath (eg: /mnt/drive1)"
+		EXIT_CODE=-1
+
+	# - Attempt to create the target directory and test
+	elif [ ! -d "$TARGET_DIRECTORY" ]; then
+
+		mkdir -p "$TARGET_DIRECTORY"
+
+		if [ ! -d "$TARGET_DIRECTORY" ]; then
+			echo -e "ERROR: Unable to create target directory $TARGET_DIRECTORY."
+			EXIT_CODE=-1
+
+		else
+			rm -R "$TARGET_DIRECTORY"
+		fi
+
+	fi
+
+	#-------------------------------------------------------------------------------------
+	#Run, attempt to move data.
+	if (( $EXIT_CODE == 0 )); then
 
 		# - stop all running services.
 		/DietPi/dietpi/dietpi-services stop
@@ -42,31 +99,32 @@
 		# - move swap out the way
 		/DietPi/dietpi/func/dietpi-set_dphys-swapfile 0 /mnt/.swapfile
 
-		# - setup tmp dir
-		rm -R "$TEMP_DIRECTORY" &> /dev/null
-		mkdir -p "$TEMP_DIRECTORY"
+		# - setup target directory. Remove directory if its currently a symlink.
+		if [ -L "$TARGET_DIRECTORY" ]; then
 
-		# - Copy source to tmp
+			rm -R "$TARGET_DIRECTORY"
+
+		fi
+
+		mkdir -p "$TARGET_DIRECTORY"
+
+		# - Copy source to target
 		echo -e "\n DietPi is moving your existing data from $SOURCE_DIRECTORY to $TARGET_DIRECTORY. Please wait...\n"
-		cp -R "$SOURCE_DIRECTORY"/* "$TEMP_DIRECTORY"/
+		cp -R "$SOURCE_DIRECTORY"/* "$TARGET_DIRECTORY"/
 
 		# - check for completion
 		EXIT_CODE=$?
 		if (( $? == 0 )); then
 
-			# - Remove all files in source, then its symlink (if it has one). Either way, all good.
+			# - Remove all files in source
 			rm -R "$SOURCE_DIRECTORY"/*
-			rm -R "$SOURCE_DIRECTORY"
 
-			# - Generate target directory
-			if [ "$TARGET_DIRECTORY" = "$DIETPI_USERDATA_DIRECTORY" ]; then
-				rm -R "$TARGET_DIRECTORY" &> /dev/null
+			# - Remove source base folder if its a symlink
+			if [ -L "$SOURCE_DIRECTORY" ]; then
+
+				rm -R "$SOURCE_DIRECTORY"
+
 			fi
-			mkdir -p "$TARGET_DIRECTORY" &> /dev/null
-
-			# - Mv temp data over
-			mv "$TEMP_DIRECTORY"/* "$TARGET_DIRECTORY"
-			rm -R "$TEMP_DIRECTORY"
 
 			# - Create symlink to DIETPI_USERDATA_DIRECTORY if required
 			if [ "$TARGET_DIRECTORY" != "$DIETPI_USERDATA_DIRECTORY" ]; then
@@ -81,17 +139,9 @@
 
 		else
 
-			# - remove tmp folder
-			rm -R "$TEMP_DIRECTORY"
-
-			echo -e "ERROR: Failed to copy $SOURCE_DIRECTORY/* to $TEMP_DIRECTORY (tmp directory)."
+			echo -e "ERROR: Failed to copy $SOURCE_DIRECTORY/* to $TARGET_DIRECTORY."
 
 		fi
-
-	else
-
-		echo -e "ERROR: $SOURCE_DIRECTORY does not exist."
-		EXIT_CODE=2
 
 	fi
 
