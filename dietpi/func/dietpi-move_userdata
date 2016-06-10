@@ -13,85 +13,28 @@
 	# - Also moves the Dphys swapfile to $TARGET_DIRECTORY. Required to prevent locked .swapfile from allow us to delete $SOURCE_DIRECTORY.
 	#
 	# Usage:
-	# - /DietPi/dietpi/func/dietpi-move_userdata sSOURCE_DIRECTORY sTARGET_DIRECTORY
+	# - /DietPi/dietpi/func/dietpi-move_userdata return_source							| Return current source directory
+	# - /DietPi/dietpi/func/dietpi-move_userdata sSOURCE_DIRECTORY sTARGET_DIRECTORY	| Move data
 	#////////////////////////////////////
 
 	#Force en_GB Locale for whole script. Prevents incorrect parsing with non-english locales.
 	LANG=en_GB.UTF-8
 
-	DIETPI_USERDATA_DIRECTORY='/mnt/dietpi_userdata' # Global, must match same var in dietpi-software
+	DIETPI_USERDATA_DIRECTORY='/mnt/dietpi_userdata' # Global, must match same var in dietpi-software in dietpi-uninstall. Probably a good idea to never change this.
 
 	SOURCE_DIRECTORY="$1"
 	TARGET_DIRECTORY="$2"
 
+	LOGFILE_OUTPUT_TEXT=''
+	FP_LOGFILE='/var/log/dietpi-move_userdata.log'
+
 	SWAPFILE_SIZE=$(/DietPi/dietpi/func/dietpi-set_dphys-swapfile | awk '{print $1}')
 
-	EXIT_CODE=0
+	FREESPACE_AVAILABLE_TARGET=0
+	FREESPACE_REQUIRED_SOURCE=0
 
-	#/////////////////////////////////////////////////////////////////////////////////////
-	# Main Loop
-	#/////////////////////////////////////////////////////////////////////////////////////
-	#init
-
-	#If there is no directory or symlink for $DIETPI_USERDATA_DIRECTORY, always create a directory.
-	if [ ! -d "$DIETPI_USERDATA_DIRECTORY" ] && [ ! -L "$DIETPI_USERDATA_DIRECTORY" ]; then
-		mkdir -p "$DIETPI_USERDATA_DIRECTORY"
-	fi
-
-	#-------------------------------------------------------------------------------------
-	# Sanity checks
-
-	# - Check if symlink is already pointing to target directory.
-	if [ "$(readlink -f $DIETPI_USERDATA_DIRECTORY)" = "$TARGET_DIRECTORY" ]; then
-
-		echo -e "INFO: $DIETPI_USERDATA_DIRECTORY is already symlinked to target directory."
-		EXIT_CODE=-1
-
-
-	# - Missing both inputs
-	elif [ -z "$SOURCE_DIRECTORY" ] || [ -z "$TARGET_DIRECTORY" ]; then
-
-		echo -e "ERROR: You must provide a source directory and target directory."
-		EXIT_CODE=-1
-
-	# - Check if source directory exists
-	elif [ ! -d "$SOURCE_DIRECTORY" ]; then
-
-		echo -e "ERROR: source directory $SOURCE_DIRECTORY does not exist."
-		EXIT_CODE=-1
-
-
-	# - Check for disallowed directory match
-	elif (( $(echo -e "$SOURCE_DIRECTORY" | grep -ci -m1 "$TARGET_DIRECTORY") ||
-		$(echo -e "$TARGET_DIRECTORY" | grep -ci -m1 "$SOURCE_DIRECTORY") )); then
-
-		echo -e "ERROR: $SOURCE_DIRECTORY and $TARGET_DIRECTORY cannot be within each other. Disallowed directory match."
-		EXIT_CODE=-1
-
-	# - Only allow full filepaths
-	elif [ "${SOURCE_DIRECTORY:0:1}" != "/" ] || [ "${TARGET_DIRECTORY:0:1}" != "/" ]; then
-
-		echo -e "ERROR: Both source and target directories must contain the full filepath (eg: /mnt/drive1)"
-		EXIT_CODE=-1
-
-	# - Attempt to create the target directory and test
-	elif [ ! -d "$TARGET_DIRECTORY" ]; then
-
-		mkdir -p "$TARGET_DIRECTORY"
-
-		if [ ! -d "$TARGET_DIRECTORY" ]; then
-			echo -e "ERROR: Unable to create target directory $TARGET_DIRECTORY."
-			EXIT_CODE=-1
-
-		else
-			rm -R "$TARGET_DIRECTORY"
-		fi
-
-	fi
-
-	#-------------------------------------------------------------------------------------
-	#Run, attempt to move data.
-	if (( $EXIT_CODE == 0 )); then
+	RUN_MOVE_DATA=1
+	Run_Move_Data(){
 
 		# - stop all running services.
 		/DietPi/dietpi/dietpi-services stop
@@ -108,44 +51,157 @@
 
 		mkdir -p "$TARGET_DIRECTORY"
 
-		# - Copy source to target
-		echo -e "\n DietPi is moving your existing data from $SOURCE_DIRECTORY to $TARGET_DIRECTORY. Please wait...\n"
-		cp -R "$SOURCE_DIRECTORY"/* "$TARGET_DIRECTORY"/
+		# - Copy source to target, if it contains any files/folders
+		if [ -z "$(find $SOURCE_DIRECTORY -maxdepth 0 -empty)" ]; then
 
-		# - check for completion
-		EXIT_CODE=$?
-		if (( $? == 0 )); then
+			echo -e "\n DietPi is moving your existing data from $SOURCE_DIRECTORY to $TARGET_DIRECTORY. Please wait...\n"
+			sleep 1
+			cp -vR "$SOURCE_DIRECTORY"/* "$TARGET_DIRECTORY"/
 
 			# - Remove all files in source
-			rm -R "$SOURCE_DIRECTORY"/*
+			if (( $? == 0 )); then
 
-			# - Remove source base folder if its a symlink
-			if [ -L "$SOURCE_DIRECTORY" ]; then
+				rm -R "$SOURCE_DIRECTORY"/*
 
-				rm -R "$SOURCE_DIRECTORY"
+			else
 
-			fi
-
-			# - Create symlink to DIETPI_USERDATA_DIRECTORY if required
-			if [ "$TARGET_DIRECTORY" != "$DIETPI_USERDATA_DIRECTORY" ]; then
-
-				rm -R "$DIETPI_USERDATA_DIRECTORY" &> /dev/null
-				ln -sf "$TARGET_DIRECTORY" "$DIETPI_USERDATA_DIRECTORY"
+				LOGFILE_OUTPUT_TEXT="ERROR: Failed to copy $SOURCE_DIRECTORY/* to $TARGET_DIRECTORY."
+				break
 
 			fi
-
-			# - move swapfile
-			/DietPi/dietpi/func/dietpi-set_dphys-swapfile "$SWAPFILE_SIZE" "$TARGET_DIRECTORY"/.swapfile
-
-		else
-
-			echo -e "ERROR: Failed to copy $SOURCE_DIRECTORY/* to $TARGET_DIRECTORY."
 
 		fi
 
+		#If no previous errors, remove source directory and setup symlink if required.
+		# - Remove source base folder if its a symlink
+		if [ -L "$SOURCE_DIRECTORY" ]; then
+
+			rm -R "$SOURCE_DIRECTORY"
+
+		fi
+
+		# - Create symlink to DIETPI_USERDATA_DIRECTORY if required
+		if [ "$TARGET_DIRECTORY" != "$DIETPI_USERDATA_DIRECTORY" ]; then
+
+			rm -R "$DIETPI_USERDATA_DIRECTORY" &> /dev/null
+			ln -sf "$TARGET_DIRECTORY" "$DIETPI_USERDATA_DIRECTORY"
+
+		fi
+
+		# - move swapfile
+		/DietPi/dietpi/func/dietpi-set_dphys-swapfile "$SWAPFILE_SIZE" "$TARGET_DIRECTORY"/.swapfile
+
+	}
+
+	#/////////////////////////////////////////////////////////////////////////////////////
+	# Main Loop
+	#/////////////////////////////////////////////////////////////////////////////////////
+	#init
+
+	# - If there is no directory or symlink for $DIETPI_USERDATA_DIRECTORY, always create a directory.
+	if [ ! -d "$DIETPI_USERDATA_DIRECTORY" ] && [ ! -L "$DIETPI_USERDATA_DIRECTORY" ]; then
+		mkdir -p "$DIETPI_USERDATA_DIRECTORY"
 	fi
 
+	#-------------------------------------------------------------------------------------
+	#Returns
+	# - Return current source dir
+	if [ "$1" = "return_source" ]; then
+
+		echo -e "$(readlink -f $DIETPI_USERDATA_DIRECTORY)"
+		exit
+
+	fi
+
+	#-------------------------------------------------------------------------------------
+	#Run
+	while (( $RUN_MOVE_DATA ));
+	do
+
+		# Sanity checks
+		# - Check for both inputs
+		if [ -z "$SOURCE_DIRECTORY" ] || [ -z "$TARGET_DIRECTORY" ]; then
+
+			LOGFILE_OUTPUT_TEXT="ERROR: Please provide a source and target directory for input."
+			break
+
+		# - Check if symlink is already pointing to target directory.
+		elif [ "$(readlink -f $DIETPI_USERDATA_DIRECTORY)" = "$TARGET_DIRECTORY" ]; then
+
+			LOGFILE_OUTPUT_TEXT="INFO: $DIETPI_USERDATA_DIRECTORY is already symlinked to target directory."
+			break
+
+
+		# - Check if source directory exists
+		elif [ ! -d "$SOURCE_DIRECTORY" ]; then
+
+			LOGFILE_OUTPUT_TEXT="ERROR: source directory $SOURCE_DIRECTORY does not exist."
+			break
+
+
+		# - Check for disallowed directory match
+		elif (( $(echo -e "$SOURCE_DIRECTORY" | grep -ci -m1 "$TARGET_DIRECTORY") ||
+			$(echo -e "$TARGET_DIRECTORY" | grep -ci -m1 "$SOURCE_DIRECTORY") )); then
+
+			LOGFILE_OUTPUT_TEXT="ERROR: $SOURCE_DIRECTORY and $TARGET_DIRECTORY cannot be within each other. Disallowed directory match."
+			break
+
+		# - Only allow full filepaths
+		elif [ "${SOURCE_DIRECTORY:0:1}" != "/" ] || [ "${TARGET_DIRECTORY:0:1}" != "/" ]; then
+
+			LOGFILE_OUTPUT_TEXT="ERROR: Both source and target directories must contain the full filepath (eg: /mnt/drive1)"
+			break
+
+		# - Attempt to create the target directory and test
+		elif [ ! -d "$TARGET_DIRECTORY" ]; then
+
+			mkdir -p "$TARGET_DIRECTORY"
+
+			if [ ! -d "$TARGET_DIRECTORY" ]; then
+
+				LOGFILE_OUTPUT_TEXT="ERROR: Unable to create target directory $TARGET_DIRECTORY."
+				break
+
+			fi
+
+		fi
+
+		#Ensure enough freespace in target
+		FREESPACE_AVAILABLE_TARGET=$(( $(df -Pk "$TARGET_DIRECTORY" | awk '{print $4}' | sed -n 2p) * 1024 )) #bytes
+
+		echo -e "INFO: Calculating space required for moving data, please wait..."
+		FREESPACE_REQUIRED_SOURCE=$(du -cbs "$SOURCE_DIRECTORY" | awk '{print $1}' | sed -n 1p) #bytes
+
+		echo -e " - Available $FREESPACE_AVAILABLE_TARGET"
+		echo -e " - Required $FREESPACE_REQUIRED_SOURCE"
+
+		if (( $FREESPACE_AVAILABLE_TARGET < $FREESPACE_REQUIRED_SOURCE )); then
+
+			LOGFILE_OUTPUT_TEXT="ERROR: Not enough free space in target directory $TARGET_DIRECTORY.\n - Available $FREESPACE_AVAILABLE_TARGET\n - Required $FREESPACE_REQUIRED_SOURCE"
+			break
+
+		fi
+
+		#Run, attempt to move data.
+		Run_Move_Data
+
+		#Done
+		RUN_MOVE_DATA=0
+
+	done
+
 	#-----------------------------------------------------------------------------------
-	exit $EXIT_CODE
+	#Print any errors and send to logfile
+	rm "$FP_LOGFILE" &> /dev/null
+	if [ -n "$LOGFILE_OUTPUT_TEXT" ]; then
+
+		echo -e "$LOGFILE_OUTPUT_TEXT"
+
+		# + send to logfile
+		echo -e "$LOGFILE_OUTPUT_TEXT" > "$FP_LOGFILE"
+
+	fi
+	#-----------------------------------------------------------------------------------
+	exit
 	#-----------------------------------------------------------------------------------
 }
