@@ -2452,6 +2452,14 @@ INDEX_WEBSERVER_TARGET=${INDEX_WEBSERVER_TARGET:=-2}
 			GNUEMACS=2
 		fi
 
+		if (( $IPERF == 1 )); then
+			INSTALL_DESCRIPTION='Iperf'
+			Banner_Installing
+			AGI iperf
+
+			IPERF=2
+		fi
+
 		if (( $MIDNIGHTCOMMANDER == 1 )); then
 			INSTALL_DESCRIPTION='Midnight Commander'
 			Banner_Installing
@@ -5099,41 +5107,31 @@ _EOF_
 		setterm -blank 0 -powersave off 2> /dev/null
 
 		#------------------------------------------------------------
-		#Attempt to create user data directory
-		mkdir -p "$DIETPI_USERDATA_DIRECTORY" &> /dev/null
-
-		#Check if we need to setup different userdata directory for the 1st time.
-		local current_userdata_dir=$(/DietPi/dietpi/func/dietpi-move_userdata return_source)
+		#Check if we need to setup different userdata directory for this run.
+		local current_userdata_dir=$(/DietPi/dietpi/func/dietpi-set_userdata return_source)
 		local target_userdata_dir=$DIETPI_USERDATA_DIRECTORY
 
-		# - custom directory
-		dietpi_userdata_basedirectory=$(cat /DietPi/dietpi.txt | grep -m1 'dietpi_userdata_basedirectory=' | sed 's/.*=//' | tr '[:upper:]' '[:lower:]')
-		if [ "$dietpi_userdata_basedirectory" != "auto" ]; then
-
-			target_userdata_dir=$dietpi_userdata_basedirectory
-
 		# - Auto | flash is default value, set to USB drive if available
-		elif (( $USBDRIVE == 2 )); then
+		dietpi_userdata_basedirectory=$(cat /DietPi/dietpi.txt | grep -m1 'dietpi_userdata_basedirectory=' | sed 's/.*=//' | tr '[:upper:]' '[:lower:]')
+		if [ "$dietpi_userdata_basedirectory" = "auto" ]; then
 
-			target_userdata_dir=$DIETPI_USBDRIVE_DIRECTORY
+			if (( $USBDRIVE == 2 )); then
+				target_userdata_dir=$DIETPI_USBDRIVE_DIRECTORY
+			fi
 
+		# - custom directory
+		else
+			target_userdata_dir=$dietpi_userdata_basedirectory
 		fi
 
-		# - Permissions test | Generate a test file inside the target directory, and check it exists.
-		local test_file_name=".testfile_dietpi_userdata_basedirectory"
-		echo 0 > "$target_userdata_dir"/"$test_file_name"
-
-		if [ -f "$target_userdata_dir"/"$test_file_name" ]; then
-			rm "$target_userdata_dir"/"$test_file_name"
-		else
+		# - Setup user directory and move existing userdata if required
+		/DietPi/dietpi/func/dietpi-set_userdata "$current_userdata_dir" "$target_userdata_dir"
+		# - Check for failure
+		if (( $? != 0 )); then
 			Error_Create_UserDataDirectory
 			exit
 		fi
 
-		# - move data?
-		if [ "$current_userdata_dir" != "$target_userdata_dir" ]; then
-			/DietPi/dietpi/func/dietpi-move_userdata "$current_userdata_dir" "$target_userdata_dir"
-		fi
 
 		#------------------------------------------------------------
 		#Set current path to home folder
@@ -5547,7 +5545,7 @@ _EOF_
 
 	Error_Create_UserDataDirectory(){
 
-		ERROR_TEXT="DietPi was unable to create your user data directory ($(cat /DietPi/dietpi.txt | grep -m1 'dietpi_userdata_basedirectory=' | sed 's/.*=//'))\n\nDietPi-Software will now exit. Please contact us on the DietPi forums for support http://dietpi.com/forum"
+		ERROR_TEXT="DietPi was unable to create your user data directory:\n\n $(cat /var/log/dietpi-move_userdata.log)\n\nDietPi-Software will now exit."
 		Error_Display
 	}
 
@@ -5608,7 +5606,7 @@ _EOF_
 		local user_data_mode=$(cat /DietPi/dietpi.txt | grep -m1 '^dietpi_userdata_basedirectory=' | sed 's/.*=//' | tr '[:upper:]' '[:lower:]')
 
 		# - Get current location of userdata
-		local user_data_location_actual=$(/DietPi/dietpi/func/dietpi-move_userdata return_source)
+		local user_data_location_actual=$(/DietPi/dietpi/func/dietpi-set_userdata return_source)
 		local user_data_mode_description='Custom'
 		if [ "$user_data_location_actual" = "$DIETPI_USBDRIVE_DIRECTORY" ]; then
 			user_data_mode_description="USB Drive"
@@ -5760,7 +5758,7 @@ _EOF_
 				WHIP_TITLE='User Data Location'
 
 				# - Vars if we need to move data.
-				local move_data_source=$(/DietPi/dietpi/func/dietpi-move_userdata return_source)
+				local move_data_source=$(/DietPi/dietpi/func/dietpi-set_userdata return_source)
 				local move_data_target=$move_data_source
 				local dietpi_txt_entry='Auto'
 				local custom_location=1 #As we are now replacing Auto when the user selects Force DRIVE, we need to know what is considered a custom location.
@@ -5857,22 +5855,21 @@ _EOF_
 					if [ "$move_data_source" != "$move_data_target" ]; then
 
 						# - Ask before we begin
-						whiptail --title "Data move required" --yesno "DietPi will now attempt to move your data from $move_data_source to $move_data_target\n\nWould you like to begin?" --backtitle "$WHIP_BACKTITLE" --defaultno 12 70
+						whiptail --title "Data move required" --yesno "DietPi will now attempt to move any existing user data from $move_data_source to $move_data_target\n\nWould you like to begin?" --backtitle "$WHIP_BACKTITLE" --defaultno 12 70
 						CHOICE=$?
 						if (( $CHOICE == 0 )); then
 
 							# - Move data, setup symlinks
-							/DietPi/dietpi/func/dietpi-move_userdata "$move_data_source" "$move_data_target"
-
+							/DietPi/dietpi/func/dietpi-set_userdata "$move_data_source" "$move_data_target"
 							# - If sucessful, apply updated user data directory var.
-							if [ "$(/DietPi/dietpi/func/dietpi-move_userdata return_source)" = "$move_data_target" ]; then
+							if (( $? == 0 )); then
 
 								sed -i "/^dietpi_userdata_basedirectory=/c\dietpi_userdata_basedirectory=$dietpi_txt_entry" /DietPi/dietpi.txt
 								whiptail --title "$WHIP_TITLE" --msgbox "Your userdata has been sucessfuly moved from $move_data_source to $move_data_target" 12 70
 
 							else
 
-								whiptail --title "Data move failed:" --msgbox "$(cat /var/log/dietpi-move_userdata.log)\nNo changes have been applied." 10 70
+								whiptail --title "Data move failed:" --msgbox "$(cat /var/log/dietpi-move_userdata.log)\nNo changes have been applied." 12 70
 
 							fi
 
