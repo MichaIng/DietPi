@@ -30,16 +30,43 @@
 	CPU_CORES=$(nproc --all)
 
 	#Version
-	DIETPI_CLOUDSHELL_VERSION=5
+	DIETPI_CLOUDSHELL_VERSION=6
 
 	#/tmp/.* files used throughout this script.
 	FP_TEMP="/tmp/dietpi-cloudshell"
 
 	PROGRAM_NAME="DietPi-Cloudshell"
 
-	#/////////////////////////////////////////////////////////////////////////////////////
-	#Global misc functions
-	#/////////////////////////////////////////////////////////////////////////////////////
+	BLANK_SCREEN_ACTIVE=0
+	BLANK_SCREEN_AT_SPECIFIC_TIME_ENABLED=0
+	BLANK_SCREEN_TIME_HOUR_START=0
+	BLANK_SCREEN_TIME_HOUR_END=0
+
+	#This will only work if dietpi-cloudshell was started by autostart (login script), as the setterm power options can only be applied when the command originates from the same terminal (no redirects).
+	RUN_BLANK_SCREEN_AT_SPECIFIC_TIME(){
+
+		local current_hour=$(date +%-H)
+
+		#Turn screen off
+		if (( ! $BLANK_SCREEN_ACTIVE )); then
+
+			if (( $BLANK_SCREEN_TIME_HOUR_START == $current_hour )); then
+				clear
+				echo -e "\n\nScreen will be powered down in under 1 minute\n"
+				setterm --blank 1 --powersave on &> /dev/tty1 #blank after 1 minute as force requires a poke to bring it back up.
+				BLANK_SCREEN_ACTIVE=1
+			fi
+
+		#Turn screen on
+		elif (( $BLANK_SCREEN_TIME_HOUR_END == $current_hour )); then
+			setterm --blank poke &> /dev/tty1
+			setterm --reset &> /dev/tty1
+			setterm --blank 0 --powersave off &> /dev/tty1
+			BLANK_SCREEN_ACTIVE=0
+
+		fi
+
+	}
 
 	#BC does not allow for printing leading zeros.
 	BC_ADD_LEADING_ZERO(){
@@ -126,6 +153,24 @@
 		echo "$return_value"
 
     }
+
+	#Apply fonts and powersave options
+	Enable_Term_Options(){
+
+		setterm --blank 0 --powersave off #must originate from source tty (currently via autostart login): https://github.com/Fourdee/DietPi/issues/379#issuecomment-225637243
+		setfont /usr/share/consolefonts/Uni3-TerminusBold24x12.psf
+		tput civis
+
+	}
+
+	Disable_Term_Options(){
+
+		setterm --reset &> /dev/tty1
+		setfont /usr/share/consolefonts/Uni3-Terminus16.psf.gz &> /dev/tty1
+		clear &> /dev/tty1
+		tput reset &> /dev/tty1
+
+	}
 
 	#/////////////////////////////////////////////////////////////////////////////////////
 	# Colours
@@ -644,8 +689,6 @@
 	#/////////////////////////////////////////////////////////////////////////////////////
 	# Scene Settings
 	#/////////////////////////////////////////////////////////////////////////////////////
-	#Run
-	RUN_LOOP=1
 	RUN_INTRO=0
 	if (( $INPUT == 1 )); then
 		RUN_INTRO=1
@@ -970,6 +1013,9 @@
 		TEMPERATURE_OUTPUT_TYPE=$(sed -n 4p $FILEPATH_SETTINGS)
 		OUTPUT_DISPLAY_INDEX=$(sed -n 5p $FILEPATH_SETTINGS)
 		NETWORK_USAGE_CURRENT_OUTPUT_TYPE=$(sed -n 6p $FILEPATH_SETTINGS)
+		BLANK_SCREEN_AT_SPECIFIC_TIME_ENABLED=$(sed -n 7p $FILEPATH_SETTINGS)
+		BLANK_SCREEN_TIME_HOUR_START=$(sed -n 8p $FILEPATH_SETTINGS)
+		BLANK_SCREEN_TIME_HOUR_END=$(sed -n 9p $FILEPATH_SETTINGS)
 
 		#10-19	Enabled Scenes
 		local sed_index=11
@@ -990,9 +1036,9 @@
 		echo -e "$TEMPERATURE_OUTPUT_TYPE" >> $FILEPATH_SETTINGS
 		echo -e "$OUTPUT_DISPLAY_INDEX" >> $FILEPATH_SETTINGS
 		echo -e "$NETWORK_USAGE_CURRENT_OUTPUT_TYPE" >> $FILEPATH_SETTINGS
-		echo -e "" >> $FILEPATH_SETTINGS
-		echo -e "" >> $FILEPATH_SETTINGS
-		echo -e "" >> $FILEPATH_SETTINGS
+		echo -e "$BLANK_SCREEN_AT_SPECIFIC_TIME_ENABLED" >> $FILEPATH_SETTINGS
+		echo -e "$BLANK_SCREEN_TIME_HOUR_START" >> $FILEPATH_SETTINGS
+		echo -e "$BLANK_SCREEN_TIME_HOUR_END" >> $FILEPATH_SETTINGS
 		echo -e "" >> $FILEPATH_SETTINGS
 
 		#10-19	Enabled Scenes
@@ -1053,7 +1099,6 @@
 			Write_Settings_File
 
 		fi
-
 		#--------------------------------------------------------------------------------
 		#Update DietPi network shared data: https://github.com/Fourdee/DietPi/issues/359
 		/DietPi/dietpi/func/obtain_network_details
@@ -1075,12 +1120,8 @@
 			kill $line &> /dev/null
 		done < $FP_TEMP
 
-		#Reset screens
-		setfont /usr/share/consolefonts/Uni3-Terminus16.psf.gz &> /dev/tty1
-		clear
-		clear &> /dev/tty1
-		#Cursor
-		tput reset &> /dev/tty1
+		#Reset term options for main screen
+		Disable_Term_Options
 
 	}
 
@@ -1100,10 +1141,6 @@
 			echo -e "$C_RESET"
 			read -p "Use CTRL+C to exit. Press any key to launch $PROGRAM_NAME..."
 		fi
-
-		setterm -blank 0 -powersave off &> /dev/tty1
-		setfont /usr/share/consolefonts/Uni3-TerminusBold24x12.psf &> /dev/tty1
-		tput civis &> /dev/tty1
 
 		#Launch in blocking mode
 		if (( $output_current_screen == 1 )); then
@@ -1163,13 +1200,19 @@
 			bitbyte_output_text="Byte (KB, MB, GB)"
 		fi
 
-		OPTION=$(whiptail --title "$WHIP_TITLE" --backtitle "$WHIP_BACKTITLE" --menu "" --cancel-button "Exit" --default-item "$LASTSELECTED_ITEM" 15 75 8 \
+		local autoscreenoff="Disabled"
+		if (( $BLANK_SCREEN_AT_SPECIFIC_TIME_ENABLED )); then
+			autoscreenoff="Enabled"
+		fi
+
+		OPTION=$(whiptail --title "$WHIP_TITLE" --backtitle "$WHIP_BACKTITLE" --menu "" --cancel-button "Exit" --default-item "$LASTSELECTED_ITEM" 16 75 9 \
 		"Colour" "Setting: Change the colour scheme." \
 		"Update Rate" "Setting: Control the time between screen updates." \
 		"Scenes" "Setting: Toggle which scenes are shown." \
 		"Temperature" "Setting: Output = $temp_output_text" \
 		"Net Usage Current" "Setting: Output = $bitbyte_output_text" \
 		"Output Display" "Setting: $target_output_text." \
+		"Auto screen off" "Setting: $autoscreenoff | Start $BLANK_SCREEN_TIME_HOUR_START h | End $BLANK_SCREEN_TIME_HOUR_END h" \
 		"Start / Restart" "Apply settings. Launch on $target_output_text." \
 		"Stop" "Stops $PROGRAM_NAME."  3>&1 1>&2 2>&3)
 
@@ -1180,6 +1223,9 @@
 
 			case "$OPTION" in
 
+				"Auto screen off")
+					TARGETMENUID=4
+				;;
 				"Net Usage Current")
 					((NETWORK_USAGE_CURRENT_OUTPUT_TYPE++))
 					if (( $NETWORK_USAGE_CURRENT_OUTPUT_TYPE > 1 )); then
@@ -1357,6 +1403,72 @@
 
 	}
 
+	#TARGETMENUID=4
+	Menu_BlankScreenAtTime(){
+
+		#Return to main menu
+		TARGETMENUID=0
+
+		#generate 24 hour array
+		local aWhipHour=()
+		for ((i=0; i<24; i++))
+		do
+			aWhipHour+=("$i" "Hour")
+
+		done
+
+		local blank_screen_at_specific_time_enabled_text='Disabled'
+		if (( $BLANK_SCREEN_AT_SPECIFIC_TIME_ENABLED )); then
+			blank_screen_at_specific_time_enabled_text='Enabled'
+		fi
+
+		WHIP_TITLE='- Options : Auto screen off -'
+		WHIP_QUESTION='Automatically power down the screen and disable DietPi-Cloudshell processing during a specific time.\n\nNB: This feature will only work if DietPi-Cloudshell was launched with the DietPi-Autostart option, or, launched from the main screen (tty1).'
+		OPTION=$(whiptail --title "$WHIP_TITLE" --backtitle "$WHIP_BACKTITLE" --menu "$WHIP_QUESTION" --cancel-button "Back" --default-item "$REFRESH_RATE" 16 60 3 \
+		"Toggle" "$blank_screen_at_specific_time_enabled_text" \
+		"Start time" "Set which hour to power off screen ($BLANK_SCREEN_TIME_HOUR_START)." \
+		"End time" "Set which hour to power on screen ($BLANK_SCREEN_TIME_HOUR_END)." 3>&1 1>&2 2>&3)
+
+		CHOICE=$?
+		if (( $CHOICE == 0 )); then
+
+			if [ "$OPTION" = "Toggle" ];then
+
+				((BLANK_SCREEN_AT_SPECIFIC_TIME_ENABLED++))
+				if (( $BLANK_SCREEN_AT_SPECIFIC_TIME_ENABLED > 1 )); then
+					BLANK_SCREEN_AT_SPECIFIC_TIME_ENABLED=0
+				fi
+
+			elif [ "$OPTION" = "Start time" ];then
+
+				WHIP_QUESTION='Please select which hour (24h) you would like to screen to power off.'
+				OPTION=$(whiptail --title "$WHIP_TITLE" --menu "$WHIP_QUESTION" --default-item "$BLANK_SCREEN_TIME_HOUR_START" --backtitle "$WHIP_BACKTITLE" 16 55 7 "${aWhipHour[@]}" 3>&1 1>&2 2>&3)
+				CHOICE=$?
+				if (( $CHOICE == 0 )); then
+					BLANK_SCREEN_TIME_HOUR_START=$OPTION
+				fi
+
+			elif [ "$OPTION" = "End time" ];then
+
+				WHIP_QUESTION='Please select which hour (24h) you would like to screen to power on.'
+				OPTION=$(whiptail --title "$WHIP_TITLE" --menu "$WHIP_QUESTION" --default-item "$BLANK_SCREEN_TIME_HOUR_END" --backtitle "$WHIP_BACKTITLE" 16 55 7 "${aWhipHour[@]}" 3>&1 1>&2 2>&3)
+				CHOICE=$?
+				if (( $CHOICE == 0 )); then
+					BLANK_SCREEN_TIME_HOUR_END=$OPTION
+				fi
+
+			fi
+
+			TARGETMENUID=4
+
+		fi
+
+		unset aHour
+
+		Write_Settings_File
+
+	}
+
 	#/////////////////////////////////////////////////////////////////////////////////////
 	# MAIN
 	#/////////////////////////////////////////////////////////////////////////////////////
@@ -1370,10 +1482,9 @@
 		Read_Settings_File
 
 		#Start Menu
-		while (( $TARGETMENUID > -1 )); do
+		while (( $TARGETMENUID >= 0 )); do
 
 			clear
-
 
 			if (( $TARGETMENUID == 0 )); then
 				Menu_Main
@@ -1383,16 +1494,16 @@
 				Menu_UpdateRate
 			elif (( $TARGETMENUID == 3 )); then
 				Menu_SceneSelection
+			elif (( $TARGETMENUID == 4 )); then
+				Menu_BlankScreenAtTime
 			fi
 		done
 
 	#-----------------------------------------------------------------------------------
 	#Run DietPi-Cloudshell
-	else
+	elif (( $INPUT == 1 )); then
 
-		#prevent sleep - moved to login
-		#set font - moved to login
-		#Disable Cursor - moved to login
+		Enable_Term_Options
 
 		#Start Intro
 		if (( $RUN_INTRO == 1 )); then
@@ -1403,26 +1514,42 @@
 		renice -n 10 $$ &> /dev/null
 
 		#Start display updates
-		while (( $RUN_LOOP == 1 ))
+		while true
 		do
 
-			#Update enabled scenes
-			if (( ${aEnabledScenes[$SCENE_CURRENT]} == 1 )); then
+			if (( $BLANK_SCREEN_AT_SPECIFIC_TIME_ENABLED )); then
 
-				Update_Banner
-				Update_Scene_$SCENE_CURRENT
-
-				#Apply refresh rate delay
-				sleep $REFRESH_RATE
+				RUN_BLANK_SCREEN_AT_SPECIFIC_TIME
 
 			fi
 
-			#Scene Switcher
-			((SCENE_CURRENT++))
+			#Disable updates when screen is blanked
+			if (( $BLANK_SCREEN_ACTIVE )); then
 
-			#Cap
-			if (( $SCENE_CURRENT >= $SCENE_MAX )); then
-				SCENE_CURRENT=0
+				sleep 60
+
+			#Update enabled scenes
+			else
+
+				if (( ${aEnabledScenes[$SCENE_CURRENT]} == 1 )); then
+
+					Update_Banner
+					Update_Scene_$SCENE_CURRENT
+
+					#Apply refresh rate delay
+					sleep $REFRESH_RATE
+
+				fi
+
+				#Scene Switcher
+				((SCENE_CURRENT++))
+
+				#Cap
+				if (( $SCENE_CURRENT >= $SCENE_MAX )); then
+					SCENE_CURRENT=0
+				fi
+
+
 			fi
 
 		done
