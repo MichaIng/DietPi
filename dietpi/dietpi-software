@@ -950,13 +950,13 @@ INDEX_WEBSERVER_TARGET=${INDEX_WEBSERVER_TARGET:=-2}
 			INSTALL_DESCRIPTION='Hifi / Web Interface Music Player (Mpd Ympd)'
 			Banner_Installing
 
-			#check source is online
+			#ympd
 			# - armhf
 			if (( $HW_ARCH >= 1 && $HW_ARCH < 10 )); then
 
 				INSTALL_URL_ADDRESS='http://www.ympd.org/downloads/ympd-1.2.3-armhf.tar.bz2'
 
-			# - arm64 #mpd package for arm64 is not available. Only in sid.
+			# - arm64
 			elif (( $HW_ARCH >= 10 && $HW_ARCH < 20 )); then
 
 				INSTALL_URL_ADDRESS='http://dietpi.com/downloads/binaries/all/ympd-1.2.3-arm64.tar.bz2'
@@ -967,14 +967,36 @@ INDEX_WEBSERVER_TARGET=${INDEX_WEBSERVER_TARGET:=-2}
 			#Install
 			if (( $? == 0 )); then
 
-				#Install MPD
-				AGI mpd libmpdclient2
-
-				#Setup ympd
+				#Install ympd
 				wget "$INSTALL_URL_ADDRESS"
 				tar -xvf ympd-*
 				rm ympd-*
 				mv ympd /usr/bin/ympd
+
+				#Install MPD
+				AGI libmpdclient2
+
+				# - arm64
+				if (( $HW_ARCH >= 10 && $HW_ARCH < 20 )); then
+
+					# - additional preqs
+					#AGI libsmbclient libcurl4-gnutls-dev libmodplug1 libfaad2 libmpcdec6 libavformat56 libupnp6 libnfs4 libflac8 libyajl2 libvorbisfile3 libsndfile1 libaudiofile1 libgme0 libsidplay2 libresid-builder0c2a libsidutils0 libfluidsynth1 libWildMidi1 libwavpack1 libmad0 libmpg123-0
+
+					# - Install same dev packages as per a compile to ensure libary's are available.
+					AGI libmad0-dev libmpg123-dev libid3tag0-dev libflac-dev libvorbis-dev libopus-dev libaudiofile-dev libsndfile1-dev libfaad-dev libfluidsynth-dev libgme-dev libmikmod2-dev libmodplug-dev libmpcdec-dev libwavpack-dev libwildmidi-dev libsidplay2-dev libsidutils-dev libresid-builder-dev libavcodec-dev libavformat-dev libmp3lame-dev libsamplerate0-dev libsoxr-dev libbz2-dev libcdio-paranoia-dev libiso9660-dev libmms-dev libzzip-dev libcurl4-gnutls-dev libyajl-dev libexpat-dev libasound2-dev libao-dev libjack-jackd2-dev libopenal-dev libpulse-dev libroar-dev libshout3-dev libnfs-dev libsmbclient-dev libupnp-dev libavahi-client-dev libsqlite3-dev libsystemd-daemon-dev libwrap0-dev libcppunit-dev xmlto libboost-dev libicu-dev
+
+
+					wget http://dietpi.com/downloads/binaries/all/mpd_0.19.16_arm64.deb -O package.deb
+					dpkg -i package.deb
+					rm package.deb
+
+				# - everything else
+				else
+
+					AGI mpd
+
+				fi
+
 
 			else
 				Error_NoConnection_NoInstall
@@ -1843,6 +1865,9 @@ INDEX_WEBSERVER_TARGET=${INDEX_WEBSERVER_TARGET:=-2}
 
 				# - Prereqs
 				AGI openssl avahi-daemon libsoxr0 libavahi-client3 libtool libconfig9 libpopt0 libdaemon0 --no-install-recommends
+
+				# This occured on C2: shairport-sync : Depends: libpopt-dev but it is not installed
+				AGI libpopt-dev
 
 				wget "$INSTALL_URL_ADDRESS" -O package.deb
 				dpkg -i package.deb
@@ -3617,6 +3642,49 @@ _EOF_
 			chmod +x /etc/init.d/ympd
 			update-rc.d ympd defaults
 
+			# + arm64 MPD using our compiled mpd binary.
+			if (( $HW_ARCH >= 10 && $HW_ARCH < 20 )); then
+
+				cat << _EOF_ > /etc/default/mpd
+## Defaults for the MPD init script, sourced by /etc/init.d/mpd on Debian
+## systems.  Uncomment (remove the leading '#') and change values as needed.
+
+## If you don't want MPD to be started as a system service (for example, if
+## you want to run it from a regular user account), disable it using the
+## command 'update-rc.d mpd disable'
+
+## The configuration file location for mpd:
+MPDCONF=/etc/mpd.conf
+_EOF_
+
+
+				cat << _EOF_ > /lib/systemd/system/mpd.service
+[Unit]
+Description=Music Player Daemon
+After=network.target sound.target
+
+[Service]
+User=root
+EnvironmentFile=/etc/default/mpd
+ExecStartPre=/bin/mkdir -p /var/lib/mpd
+ExecStartPre=/bin/mkdir -p /var/log/mpd
+ExecStartPre=/bin/mkdir -p /var/run/mpd
+ExecStartPre=/bin/mkdir -p /var/lib/mpd
+ExecStart=/usr/local/bin/mpd --no-daemon /etc/mpd.conf
+
+# allow MPD to use real-time priority 50
+LimitRTPRIO=50
+LimitRTTIME=-1
+
+[Install]
+WantedBy=multi-user.target
+
+_EOF_
+
+				systemctl daemon-reload
+
+			fi
+
 			#Copy default config
 			cp /DietPi/dietpi/conf/mpd.conf /etc/mpd.conf
 
@@ -3625,31 +3693,20 @@ _EOF_
 audio_output {
 	type							"alsa"
 	name							"My ALSA Device"
-	device							"hw:0,0"
+#	device							"hw:0,0"
 	format							"44100:16:2"
 	mixer_device					"default"
-	mixer_control					"PCM"
-	mixer_index						"0"
+#	mixer_control					"PCM"
+#	mixer_index						"0"
 }
 #HDMI - Set format and audio_output_format to 48000hz
 #audio_output_format				"48000:16:2"
 #samplerate_converter			"Fastest Sinc Interpolator"
 _EOF_
 
-			#OrangePi , unmute 3.5mm and add mixer controls
-			if (( $HW_MODEL >= 30 )) && (( $HW_MODEL < 40 )); then
-				amixer set -c 0 'Audio lineout' unmute &> /dev/null
-
-				sed -i '/mixer_device/c\mixer_device "hw:0"' /etc/mpd.conf
-				sed -i '/mixer_control/c\mixer_control "Lineout volume control"' /etc/mpd.conf
-			fi
-
 			#Setup data locations
 			Create_UserContent_Folders
-			sed -i '/music_directory/c\music_directory "'$DIETPI_USERDATA_DIRECTORY/$FOLDER_MUSIC'"' /etc/mpd.conf
-			sed -i '/playlist_directory/c\playlist_directory "'$DIETPI_USERDATA_DIRECTORY/$FOLDER_MUSIC'"' /etc/mpd.conf
 			mkdir -p "$DIETPI_USERDATA_DIRECTORY"/.mpd_cache
-			sed -i '/db_file/c\db_file "'$DIETPI_USERDATA_DIRECTORY'/.mpd_cache/db_file"' /etc/mpd.conf
 
 			#Grab our test music for the user.
 			Download_Test_Media
@@ -6756,6 +6813,7 @@ _EOF_
 			"XRDP" "Remote Desktop Protocol (RDP) server." $xrdp_w \
 			"" "────Media Systems───────────────────────────" "off" \
 			"Kodi" "Your very own media centre / player." $kodi_w \
+			"HiFi" "Web interface music / radio player." $hifi_w \
 			"SubSonic 5" "Web interface media streaming server." $subsonic5_w \
 			"SubSonic 6" "(NEW) Web interface media streaming server." $subsonic6_w \
 			"Shairport Sync" "AirPlay audio player with multiroom sync" $shairportsync_w \
