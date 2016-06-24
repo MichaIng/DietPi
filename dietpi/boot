@@ -19,6 +19,8 @@
 	#/////////////////////////////////////////////////////////////////////////////////////
 	#Globals
 	#/////////////////////////////////////////////////////////////////////////////////////
+	FP_LOGFILE='/var/log/dietpi-boot.log'
+
 	HW_MODEL=0
 	DISTRO=0
 
@@ -61,6 +63,8 @@
 					sed -i '/arm_freq=/c\#arm_freq=1200' /DietPi/config.txt
 					sed -i '/core_freq=/c\#core_freq=400' /DietPi/config.txt
 					sed -i '/sdram_freq=/c\#sdram_freq=400' /DietPi/config.txt
+					sed -i "/temp_limit=/c\temp_limit=75" /DietPi/config.txt # https://github.com/Fourdee/DietPi/issues/356
+
 				fi
 
 			fi
@@ -133,6 +137,10 @@ _EOF_
 			#Set Key
 			sed -i "/wireless-key/c\wireless-key $Wifi_KEY" /etc/network/interfaces
 			sed -i "/wpa-psk/c\wpa-psk $Wifi_KEY" /etc/network/interfaces
+
+			#Enable wifi modules
+			/DietPi/dietpi/func/dietpi-set_wifi_bt wifi 1
+
 		# - Ethernet
 		elif (( $Ethernet_Enabled == 1 )); then
 			#Enable Eth, disable Wlan
@@ -181,8 +189,35 @@ _EOF_
 			ifup eth"$index_eth"
 		fi
 
-		#Update network details
-		/DietPi/dietpi/func/obtain_network_details
+		#Wait for active connection, then update network details file
+		Wait_For_Valid_Network_Connection
+
+	}
+
+	Wait_For_Valid_Network_Connection(){
+
+		#Attempt to wait for a valid network connection
+		local max_loops=10
+		local loop_count=0
+		while true
+		do
+
+			if (( $loop_count >= $max_loops )); then
+				echo -e "$(date) | Valid connection wait timed out." >> "$FP_LOGFILE"
+				break
+			elif (( ! $(route | awk '{print $4}' | grep -ci -m1 'UG') )); then
+				echo -e "$(date) | Waiting for valid connection." >> "$FP_LOGFILE"
+				sleep 1
+			else
+				# - Update network details (for IP in dietpi-banner etc..)
+				echo -e "$(date) | Valid connection found." >> "$FP_LOGFILE"
+				/DietPi/dietpi/func/obtain_network_details
+				break
+			fi
+
+			((loop_count++))
+
+		done
 
 	}
 
@@ -218,13 +253,12 @@ _EOF_
 		/DietPi/dietpi/func/obtain_network_details
 		#----------------------------------------------------------------
 		#Disable RPi hdmi output if set in dietpi.txt
-		if (( $HW_MODEL < 10 )); then
+		if (( $HW_MODEL < 10 &&
+			$(cat /DietPi/dietpi.txt | grep -ci -m1 '^rpi_hdmi_output=0'))); then
 
 			#FBset value below allows for reduced memory bandwidth usage from VideoCore (eg: Faster RAM bandwidth/performance)
-			if (( $(cat /DietPi/dietpi.txt | grep -ci -m1 'rpi_hdmi_output=0') == 1 )); then
-				fbset -xres 16 -yres 16 -vxres 16 -vyres 16 -depth 8 &> /dev/null
-				/opt/vc/bin/tvservice -o &> /dev/null
-			fi
+			fbset -xres 16 -yres 16 -vxres 16 -vyres 16 -depth 8 &> /dev/null
+			/opt/vc/bin/tvservice -o &> /dev/null
 
 		fi
 		#----------------------------------------------------------------
@@ -248,8 +282,11 @@ _EOF_
 	#Normal Boot
 	if (( $DIETPI_INSTALL_STAGE == 1 )); then
 
-		if (( $( cat /DietPi/dietpi.txt | grep -ci -m1 'dietpi_check_for_updates=1') == 1 )); then
+		Wait_For_Valid_Network_Connection
+
+		if (( $( cat /DietPi/dietpi.txt | grep -ci -m1 '^dietpi_check_for_updates=1') )); then
 			#Check for DietPi updates (+thread)
+			echo -e "$(date) | +Thread: checking for DietPi-Updates" >> "$FP_LOGFILE"
 			/DietPi/dietpi/dietpi-update 2 &> /dev/null &
 		fi
 
@@ -268,13 +305,13 @@ _EOF_
 		/DietPi/dietpi/func/change_hostname "$(cat /DietPi/dietpi.txt | grep -m1 '^Hostname=' | sed 's/.*=//')"
 
 		#Automation - Set auto login for next bootup
-		if (( $(cat /DietPi/dietpi.txt | grep -ci -m1 '^AUTO_AutoLogin=1') == 1 )); then
+		if (( $(cat /DietPi/dietpi.txt | grep -ci -m1 '^AUTO_AutoLogin=1') )); then
 			/DietPi/dietpi/dietpi-autostart 7
 		fi
 
-		#Disable serial console? (enabled by default)
-		if (( $(cat /DietPi/dietpi.txt | grep -ci -m1 '^serial_console_enabled=0') )); then
-			/DietPi/dietpi/dietpi-set_serialconsole -1
+		#Enable serial console?
+		if (( $(cat /DietPi/dietpi.txt | grep -ci -m1 '^serial_console_enabled=1') )); then
+			/DietPi/dietpi/func/dietpi-set_serialconsole 1
 		fi
 
 		echo -e " Expanding SD/Flash partition. Please wait..."
