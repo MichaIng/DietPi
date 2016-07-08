@@ -231,6 +231,98 @@
 		fi
 	}
 
+	#Return optimization values for BitTorrent servers based on device and hardware capabilities.
+	Optimize_BitTorrent(){
+
+		local output=0
+
+		local gigabit_device=1
+		# - Lets hope the next RPi device is finally gigabit capable. I'll cry if it is not.
+		if (( $HW_MODEL <= 3 || $HW_MODEL == 30 || $HW_MODEL == 40 )); then
+
+			gigabit_device=0
+
+		fi
+
+		#Cache size 1/7th of total mem
+		if (( $1 == 0 )); then
+
+			output=$(( $(free -m -o | grep -m1 'Mem:' | awk '{print $2}') / 7 ))
+
+		#Max active downloads
+		elif (( $1 == 1 )); then
+
+			output=2
+
+			# - Bump up for VM's
+			if (( $HW_MODEL == 20 )); then
+
+				output=3
+
+			fi
+
+		#Max global connections
+		elif (( $1 == 2 )); then
+
+			output=20
+
+			# - Bump up for VM's
+			if (( $HW_MODEL == 20 )); then
+
+				output=40
+
+			# - 1Gbit SBC's
+			elif (( $gigabit_device )); then
+
+				output=30
+
+			# - Reduce for RPi's. This is due to the USB bus ethernet in the ARM SoC, which cripples network throughput/performance/latency.
+			# - RPi v3
+			elif (( $HW_MODEL == 3 )); then
+
+				output=15
+
+			# - RPi v2
+			elif (( $HW_MODEL == 2 )); then
+
+				output=13
+
+			# - RPi v1 256/512
+			elif (( $HW_MODEL <= 1 )); then
+
+				output=7
+
+			fi
+
+		#Max upload slots
+		elif (( $1 == 3 )); then
+
+			output=3
+
+			# - Bump up for VM's
+			if (( $HW_MODEL == 20 )); then
+
+				output=5
+
+			# - 1Gbit devices
+			elif (( $gigabit_device )); then
+
+				output=4
+
+			# - Reduce for RPi's. This is due to the USB bus ethernet in the ARM SoC, which cripples network throughput/performance/latency.
+			elif (( $HW_MODEL <= 3 )); then
+
+				output=2
+
+			fi
+
+		fi
+
+		echo $output
+
+	}
+
+
 	Write_InstallFileList(){
 
 		##Write_InstallFileList   = write to /DietPi/dietpi/.installed
@@ -333,7 +425,7 @@ PLEXMEDIASERVER=${PLEXMEDIASERVER:=0}
 CUBERITE=${CUBERITE:=0}
 MINEOS=${MINEOS:=0}
 GOGS=${GOGS:=0}
-
+QBITTORRENT=${QBITTORRENT:=0}
 
 #Additional Linux Software
 VIMFULL=${VIMFULL:=0}
@@ -1083,6 +1175,10 @@ INDEX_WEBSERVER_TARGET=${INDEX_WEBSERVER_TARGET:=-2}
 				fi
 
 			fi
+
+			# - Add NFS support for kodi
+			AGI libnfs4
+
 		fi
 
 		#MINIDLNA
@@ -1343,7 +1439,7 @@ INDEX_WEBSERVER_TARGET=${INDEX_WEBSERVER_TARGET:=-2}
 				if (( $(free -m -o | grep -m1 'Mem:' | awk '{print $4}') < 512 )); then
 					if [ -f /etc/dphys-swapfile ] &&
 						(( $(cat /etc/dphys-swapfile | grep 'CONF_SWAPSIZE=' | sed 's/.*=//') < 512 )); then
-						echo -e "\nDietPi:\nIncreasing swapfile size to 512MB before running gravity.sh, please wait.....\n"
+						/DietPi/dietpi/func/dietpi-notify 2 "Increasing swapfile size to 512MB before running gravity.sh, please wait...\n"
 						/DietPi/dietpi/func/dietpi-set_dphys-swapfile 512
 					fi
 				fi
@@ -2315,6 +2411,12 @@ INDEX_WEBSERVER_TARGET=${INDEX_WEBSERVER_TARGET:=-2}
 				#Abort failed install
 				GOGS=0
 			fi
+
+		fi
+
+		if (( $QBITTORRENT == 1 )); then
+
+			AGI qbittorrent-nox
 
 		fi
 
@@ -3635,62 +3737,14 @@ _EOF_
 			cp /DietPi/dietpi/conf/transmission_settings /etc/transmission-daemon/settings.json
 
 			Create_UserContent_Folders
-			sed -i '/"download-dir":/c\"download-dir": "'$DIETPI_USERDATA_DIRECTORY/$FOLDER_DOWNLOADS'",' /etc/transmission-daemon/settings.json
-
-			#total mem / 7
-			# - Generally a good allround setting for > RPi3 devices
-			local cache_size=$(( $(free -m -o | grep -m1 'Mem:' | awk '{print $2}') / 7 ))
-			local peer_limit=20
-			local max_peers=20
-			local peer_limit_torrent=10
-			local upload_slots=3
-
-			#Bump up for VM's
-			if (( $HW_MODEL == 20 )); then
-				peer_limit=40
-				max_peers=40
-				peer_limit_torrent=20
-				upload_slots=5
-
-			fi
-
-			#Reduce for RPi's below. This is due to the USB bus ethernet in the ARM SoC, which cripples network throughput/performance/latency.
-			# - RPi v3
-			if (( $HW_MODEL == 3 )); then
-				peer_limit=14
-				max_peers=14
-				peer_limit_torrent=8
-				upload_slots=2
-
-			# - RPi v2
-			elif (( $HW_MODEL == 2 )); then
-				peer_limit=12
-				max_peers=12
-				peer_limit_torrent=7
-				upload_slots=2
-
-			# - RPi v1 512
-			elif (( $HW_MODEL == 1 )); then
-				peer_limit=10
-				max_peers=10
-				peer_limit_torrent=6
-				upload_slots=2
-
-			# - RPi v1 256
-			elif (( $HW_MODEL == 0 )); then
-				peer_limit=7
-				max_peers=7
-				peer_limit_torrent=5
-				upload_slots=2
-
-			fi
 
 			#Apply optimized settings
-			sed -i '/cache-size-mb/c\    "cache-size-mb": '$cache_size',' /etc/transmission-daemon/settings.json
-			sed -i '/peer-limit-global/c\    "peer-limit-global": '$peer_limit',' /etc/transmission-daemon/settings.json
-			sed -i '/max-peers-global/c\    "max-peers-global": '$max_peers',' /etc/transmission-daemon/settings.json
-			sed -i '/peer-limit-per-torrent/c\    "peer-limit-per-torrent": '$peer_limit_torrent',' /etc/transmission-daemon/settings.json
-			sed -i '/upload-slots-per-torrent/c\    "upload-slots-per-torrent": '$upload_slots',' /etc/transmission-daemon/settings.json
+			sed -i '/cache-size-mb/c\    "cache-size-mb": '$(Optimize_BitTorrent 0)',' /etc/transmission-daemon/settings.json
+			sed -i '/download-queue-size/c\    "download-queue-size": '$(Optimize_BitTorrent 1)',' /etc/transmission-daemon/settings.json
+			sed -i '/peer-limit-global/c\    "peer-limit-global": '$(Optimize_BitTorrent 2)',' /etc/transmission-daemon/settings.json
+			sed -i '/max-peers-global/c\    "max-peers-global": '$(Optimize_BitTorrent 2)',' /etc/transmission-daemon/settings.json
+			sed -i '/peer-limit-per-torrent/c\    "peer-limit-per-torrent": '$(Optimize_BitTorrent 2)',' /etc/transmission-daemon/settings.json
+			sed -i '/upload-slots-per-torrent/c\    "upload-slots-per-torrent": '$(Optimize_BitTorrent 3)',' /etc/transmission-daemon/settings.json
 
 			TRANSMISSION=2
 		fi
@@ -3838,9 +3892,10 @@ _EOF_
 
 		#MINIDLNA
 		if (( $MINIDLNA == 1 )); then
+
 			#Run as root
 			sed -i '/USER=m/c\USER=root' /etc/init.d/minidlna
-			# + SystemD (incase minidlna package updates to systemd)
+			# + SystemD
 			sed -i '/User=m/c\User=root' /lib/systemd/system/minidlna.service &> /dev/null
 			sed -i '/Group=m/c\Group=root' /lib/systemd/system/minidlna.service &> /dev/null
 
@@ -3851,12 +3906,9 @@ _EOF_
 			Create_UserContent_Folders
 			mkdir -p "$DIETPI_USERDATA_DIRECTORY"/.MiniDLNA_Cache
 
-			sed -i "/media_dir=A,/c\media_dir=A,$DIETPI_USERDATA_DIRECTORY/$FOLDER_MUSIC" /etc/minidlna.conf
-			sed -i "/media_dir=P,/c\media_dir=P,$DIETPI_USERDATA_DIRECTORY/$FOLDER_PICTURES" /etc/minidlna.conf
-			sed -i "/media_dir=V,/c\media_dir=V,$DIETPI_USERDATA_DIRECTORY/$FOLDER_VIDEO" /etc/minidlna.conf
-			sed -i "/db_dir=/c\db_dir=$DIETPI_USERDATA_DIRECTORY/.MiniDLNA_Cache" /etc/minidlna.conf
 
 			MINIDLNA=2
+
 		fi
 
 		#NoIp
@@ -3933,15 +3985,17 @@ _EOF_
 
 			#Setup data directory
 			Create_UserContent_Folders
-			sed -i '/"move_completed_path": /c\"move_completed_path": "'$DIETPI_USERDATA_DIRECTORY/$FOLDER_DOWNLOADS'",' "$HOME"/.config/deluge/core.conf
-			sed -i '/"download_location": /c\"download_location": "'$DIETPI_USERDATA_DIRECTORY/$FOLDER_DOWNLOADS'",' "$HOME"/.config/deluge/core.conf
-			sed -i '/"torrentfiles_location": /c\"torrentfiles_location": "'$DIETPI_USERDATA_DIRECTORY/$FOLDER_DOWNLOADS'",' "$HOME"/.config/deluge/core.conf
 
-			#Applied Optimized settings
+			#Apply Optimized settings
 			# - Cache size is in steps of 16 KiB. (Cachesize * 16 = total KiB)
-			local deluge_cache_size=$(( $(free -m -o | grep -m1 'Mem:' | awk '{print $2}') * 1000 / 9 / 16 ))
-
+			local deluge_cache_size=$(( $(echo -e "scale=0; $(Optimize_BitTorrent 0) * 1024 / 16" | bc -l ) ))
 			sed -i '/"cache_size": /c\ "cache_size": '"$deluge_cache_size"',' "$HOME"/.config/deluge/core.conf
+
+			sed -i '/"max_active_limit": /c\ "max_active_limit": '"$(Optimize_BitTorrent 1)"',' "$HOME"/.config/deluge/core.conf
+			sed -i '/"max_active_downloading": /c\ "max_active_downloading": '"$(Optimize_BitTorrent 1)"',' "$HOME"/.config/deluge/core.conf
+			sed -i '/"max_connections_global": /c\ "max_connections_global": '"$(Optimize_BitTorrent 2)"',' "$HOME"/.config/deluge/core.conf
+			sed -i '/"max_upload_slots_global": /c\ "max_upload_slots_global": '"$(Optimize_BitTorrent 3)"',' "$HOME"/.config/deluge/core.conf
+
 
 			DELUGE=2
 		fi
@@ -4583,7 +4637,7 @@ export KEY_NAME="DietPi_OpenVPN_Server"
 _EOF_
 
 			#Create Server Cert Auth
-			echo -e "\nDietPi:\nGenerating unique OpenVPN certificates and keys. Please wait....\n"
+			/DietPi/dietpi/func/dietpi-notify 2 "Generating unique OpenVPN certificates and keys. Please wait....\n"
 			openssl dhparam -out /etc/openvpn/dh"$key_size".pem "$key_size"
 
 			#Build Server certs/keys
@@ -5284,6 +5338,115 @@ _EOF_
 
 		fi
 
+		#QBITTORRENT
+		if (( $QBITTORRENT == 1 )); then
+
+			Create_UserContent_Folders
+
+			# - conf.
+			mkdir -p "$HOME"/.config/qBittorrent
+			cat << _EOF_ > "$HOME"/.config/qBittorrent/qBittorrent.conf
+[General]
+ported_to_new_savepath_system=true
+
+[Preferences]
+Downloads\DiskWriteCacheSize=$(Optimize_BitTorrent 0)
+Downloads\DiskWriteCacheTTL=60
+Queueing\MaxActiveDownloads=$(Optimize_BitTorrent 1)
+Queueing\MaxActiveTorrents=$(Optimize_BitTorrent 1)
+Queueing\MaxActiveUploads=1
+Queueing\IgnoreSlowTorrents=false
+Bittorrent\MaxConnecs=$(Optimize_BitTorrent 2)
+Bittorrent\MaxConnecsPerTorrent=$(Optimize_BitTorrent 2)
+Bittorrent\MaxUploads=$(Optimize_BitTorrent 3)
+Bittorrent\MaxUploadsPerTorrent=$(Optimize_BitTorrent 3)
+WebUI\Port=1340
+WebUI\Enabled=true
+General\Locale=en_GB
+Downloads\SavePath=/mnt/dietpi_userdata/downloads
+Downloads\TempPathEnabled=false
+Downloads\TempPath=/mnt/dietpi_userdata/downloads
+Downloads\ScanDirs=@Invalid()
+Downloads\DownloadInScanDirs=@Invalid()
+Downloads\TorrentExportDir=
+MailNotification\enabled=false
+MailNotification\email=
+MailNotification\smtp_server=smtp.changeme.com
+MailNotification\req_ssl=false
+MailNotification\req_auth=false
+MailNotification\username=
+MailNotification\password=
+Downloads\PreAllocation=false
+Queueing\QueueingEnabled=false
+Downloads\UseIncompleteExtension=false
+Connection\PortRangeMin=6881
+Connection\UPnP=true
+Connection\GlobalDLLimit=-1
+Connection\GlobalUPLimit=-1
+Bittorrent\uTP=true
+Bittorrent\uTP_rate_limited=false
+Advanced\IncludeOverhead=false
+Connection\GlobalDLLimitAlt=10
+Connection\GlobalUPLimitAlt=10
+Scheduler\Enabled=false
+Bittorrent\DHT=true
+Bittorrent\sameDHTPortAsBT=true
+Bittorrent\DHTPort=6881
+Bittorrent\PeX=true
+Bittorrent\LSD=true
+Bittorrent\Encryption=1
+Advanced\AnonymousMode=false
+Connection\ProxyType=-1
+Connection\Proxy\IP=0.0.0.0
+Connection\Proxy\Port=8080
+Connection\ProxyPeerConnections=false
+Connection\Proxy\Authentication=false
+Connection\Proxy\Username=
+Connection\Proxy\Password=
+IPFilter\Enabled=false
+IPFilter\File=
+WebUI\Username=root
+WebUI\LocalHostAuth=true
+WebUI\HTTPS\Enabled=false
+DynDNS\Enabled=false
+DynDNS\Service=0
+DynDNS\Username=
+DynDNS\Password=
+DynDNS\DomainName=changeme.dyndns.org
+WebUI\Password_ha1=@ByteArray(5e434b0004be6970cf8878fcf929baba)
+
+[LegalNotice]
+Accepted=true
+
+[AutoRun]
+enabled=false
+program=
+_EOF_
+
+			# - service
+			cat << _EOF_ > /etc/systemd/system/qbittorrent.service
+[Unit]
+Description=qBittorrent Daemon Service
+After=network.target
+
+[Service]
+Type=oneshot
+User=root
+RemainAfterExit=yes
+ExecStart=/usr/bin/qbittorrent-nox -d --webui-port=1340
+ExecStop=/usr/bin/killall -w qbittorrent-nox
+
+[Install]
+WantedBy=multi-user.target
+_EOF_
+
+			systemctl daemon-reload
+
+
+			QBITTORRENT=2
+
+		fi
+
 	}
 
 	Install_Apply_GPU_Settings(){
@@ -5486,12 +5649,12 @@ _EOF_
 		apt-get update
 
 		#Simluated apt installation to check for failures related to apt-cache.
-		echo -e "\nDietPi: Running apt simulation to check for errors, please wait...\n"
+		/DietPi/dietpi/func/dietpi-notify 2 "Running apt simulation to check for errors, please wait..."
 		local package_to_test="bash-doc"
 		apt-get install $package_to_test -s -y &> /dev/null
 		local result=$?
 		if (( $result != 0 )); then
-			echo -e "\nError: Apt simulation failed.\n - The apt cache may be corrupt\nDietPi-Software will now exit\n"
+			/DietPi/dietpi/func/dietpi-notify 1 "Apt simulation failed. The apt cache may be corrupt. DietPi-Software will now exit."
 			exit
 
 		fi
@@ -5549,7 +5712,7 @@ _EOF_
 
 			#Apply Language (Locale)
 			if [ "$AUTOINSTALL_LANGUAGE" != "en_GB" ]; then
-				echo -e "\nDietPi: Setting Locale = $AUTOINSTALL_LANGUAGE"
+				/DietPi/dietpi/func/dietpi-notify 2 "Setting Locale $AUTOINSTALL_LANGUAGE. Please wait....\n"
 
 				#Disable en_GB
 				sed -i "/en_GB.UTF-8/c\# en_GB.UTF-8 UTF-8" /etc/locale.gen
@@ -5564,7 +5727,7 @@ _EOF_
 
 			#Apply Keyboard
 			if [ "$AUTOINSTALL_KEYBOARD" != "gb" ]; then
-				echo -e "\nDietPi: Setting Keyboard = $AUTOINSTALL_KEYBOARD"
+				/DietPi/dietpi/func/dietpi-notify 2 "Setting Keyboard $AUTOINSTALL_KEYBOARD. Please wait....\n"
 				sed -i '/XKBLAYOUT=/c XKBLAYOUT="'"$AUTOINSTALL_KEYBOARD"'"' /etc/default/keyboard
 				#systemctl restart keyboard-setup
 
@@ -7049,6 +7212,15 @@ _EOF_
 			fi
 		fi
 
+		local qbittorrent_w="off"
+		if (( $QBITTORRENT > 0 )); then
+			qbittorrent_w="on"
+			#Reset to 0. Menu checklists will apply back to 1
+			if (( $QBITTORRENT == 1 )); then
+				QBITTORRENT=0
+			fi
+		fi
+
 		#-----------------------------------------------------------------------------
 		WHIP_TITLE='DietPi Optimized Software Selection'
 
@@ -7076,6 +7248,7 @@ _EOF_
 			"" "────BitTorrent──────────────────────────────" "off" \
 			"Transmission" "BitTorrent server with web interface." $transmission_w \
 			"Deluge" "BitTorrent server with web interface." $deluge_w \
+			"qBitTorrent" "BitTorrent server with web interface." $qbittorrent_w \
 			"" "────Cloud / Backups─────────────────────────" "off" \
 			"OwnCloud" "Your very own cloud (eg: dropbox)." $owncloud_w \
 			"Pydio" "Feature-rich backup and sync server" $pydio_w \
@@ -7150,6 +7323,7 @@ _EOF_
 			"" "────BitTorrent──────────────────────────────" "off" \
 			"Transmission" "BitTorrent server with web interface." $transmission_w \
 			"Deluge" "BitTorrent server with web interface." $deluge_w \
+			"qBitTorrent" "BitTorrent server with web interface." $qbittorrent_w \
 			"" "────Cloud / Backups─────────────────────────" "off" \
 			"OwnCloud" "Your very own cloud (eg: dropbox)." $owncloud_w \
 			"Pydio" "Feature-rich backup and sync server" $pydio_w \
@@ -7222,6 +7396,7 @@ _EOF_
 			"" "────BitTorrent─────────────────────────────" "off" \
 			"Transmission" "BitTorrent server with web interface." $transmission_w \
 			"Deluge" "BitTorrent server with web interface." $deluge_w \
+			"qBitTorrent" "BitTorrent server with web interface." $qbittorrent_w \
 			"" "────Cloud / Backups────────────────────────" "off" \
 			"OwnCloud" "Your very own cloud (eg: dropbox)." $owncloud_w \
 			"Pydio" "Feature-rich backup and sync server" $pydio_w \
@@ -7293,6 +7468,7 @@ _EOF_
 			"" "────BitTorrent──────────────────────────────" "off" \
 			"Transmission" "BitTorrent server with web interface." $transmission_w \
 			"Deluge" "BitTorrent server with web interface." $deluge_w \
+			"qBitTorrent" "BitTorrent server with web interface." $qbittorrent_w \
 			"" "────Cloud / Backups─────────────────────────" "off" \
 			"OwnCloud" "Your very own cloud (eg: dropbox)." $owncloud_w \
 			"Pydio" "Feature-rich backup and sync server" $pydio_w \
@@ -7378,6 +7554,7 @@ _EOF_
 				"" "────BitTorrent──────────────────────────────" "off" \
 				"Transmission" "BitTorrent server with web interface." $transmission_w \
 				"Deluge" "BitTorrent server with web interface." $deluge_w \
+				"qBitTorrent" "BitTorrent server with web interface." $qbittorrent_w \
 				"" "────Cloud / Backups─────────────────────────" "off" \
 				"OwnCloud" "Your very own cloud (eg: dropbox)." $owncloud_w \
 				"Pydio" "Feature-rich backup and sync server" $pydio_w \
@@ -7515,6 +7692,12 @@ _EOF_
 		do
 			case $choice in
 
+			qBitTorrent)
+				if (( $QBITTORRENT == 0 )); then
+					QBITTORRENT=1
+					INSTALL_DIETPI_CHOICESMADE=1
+				fi
+			;;
 			"XFCE: Desktop")
 				if (( $DESKTOP_XFCE == 0 )); then
 					DESKTOP_XFCE=1
@@ -8694,7 +8877,6 @@ _EOF_
 	#/////////////////////////////////////////////////////////////////////////////////////
 	# Main Loop
 	#/////////////////////////////////////////////////////////////////////////////////////
-
 	#--------------------------------------------------------------------------------------
 	Banner_Setup
 
