@@ -1,0 +1,791 @@
+#!/bin/bash
+{
+	#////////////////////////////////////
+	# DietPi Function:
+	# - Enables control and applies settings for specific hardware.
+	#
+	#////////////////////////////////////
+	# Created by Daniel Knight / daniel_haze@hotmail.com / dietpi.com
+	#
+	#////////////////////////////////////
+	#
+	# Usage:
+	#
+	# - /DietPi/dietpi/func/dietpi-set_hardware 		i2c				enable/disable/khz
+	# - /DietPi/dietpi/func/dietpi-set_hardware 		wificountrycode	code
+	# - /DietPi/dietpi/func/dietpi-set_hardware 		wifi 			enable/disable
+	# - /DietPi/dietpi/func/dietpi-set_hardware 		bluetooth 		enable/disable
+	# - /DietPi/dietpi/func/dietpi-set_hardware 		serialconsole	enable/disable
+	# - /DietPi/dietpi/func/dietpi-set_hardware 		soundcard 		target_card (non-matching name for reset to default)
+	#////////////////////////////////////
+
+	#Force en_GB Locale for whole script. Prevents incorrect parsing with non-english locales.
+	LANG=en_GB.UTF-8
+
+	INPUT_DEVICE_NAME=$(echo -e "$1" | tr '[:upper:]' '[:lower:]')
+	INPUT_DEVICE_VALUE=$(echo -e "$2" | tr '[:upper:]' '[:lower:]')
+
+	#support for 0/1 inputs for enable/disable
+	if [ "$INPUT_DEVICE_VALUE" = "1" ]; then
+
+		INPUT_DEVICE_VALUE='enable'
+
+	elif [ "$INPUT_DEVICE_VALUE" = "0" ]; then
+
+		INPUT_DEVICE_VALUE='disable'
+
+	fi
+
+	EXIT_CODE=0
+
+	HW_MODEL=$(sed -n 1p /DietPi/dietpi/.hw_model)
+	DISTRO=$(sed -n 3p /DietPi/dietpi/.hw_model)
+
+	Unknown_Input_Name(){
+
+		EXIT_CODE=1
+		/DietPi/dietpi/func/dietpi-notify 2 "Unknown input name ($INPUT_DEVICE_NAME). Nothing has been applied."
+
+	}
+
+	Unknown_Input_Mode(){
+
+		EXIT_CODE=1
+		/DietPi/dietpi/func/dietpi-notify 2 "Unknown input value ($INPUT_DEVICE_VALUE). Nothing has been applied."
+
+	}
+
+	#/////////////////////////////////////////////////////////////////////////////////////
+	# i2c
+	#/////////////////////////////////////////////////////////////////////////////////////
+	# Currently only for RPi
+	I2c_Main(){
+
+		if [ "$INPUT_DEVICE_VALUE" = "enable" ]; then
+
+			#Check/install pre-reqs
+			if (( $(dpkg -l | grep -ci -m1 'i2c-tools') == 0 )); then
+
+				/DietPi/dietpi/dietpi-apt-get_update 1
+				/DietPi/dietpi/func/dietpi-notify 2 "Installing Python-smbus, i2c-tools, pre-reqs.\nPlease wait...\n"
+				sleep 1
+				apt-get install python-smbus i2c-tools -y
+
+			fi
+
+			#Kernel modules
+			# - Remove all previous line references (includes commented ones)
+			sed -i '/i2c-bcm2708/d' /etc/modules &> /dev/null
+			sed -i '/i2c-dev/d' /etc/modules &> /dev/null
+			# - Add modules
+			echo -e "i2c-bcm2708" >> /etc/modules
+			echo -e "i2c-dev" >> /etc/modules
+
+			#Remove from blacklist (Wheezy only. Jessie doesnt exist)
+			sed -i '/blacklist spi-bcm2708/d' /etc/modprobe.d/raspi-blacklist.conf &> /dev/null
+			sed -i '/blacklist i2c-bcm2708/d' /etc/modprobe.d/raspi-blacklist.conf &> /dev/null
+
+			#config.txt
+			sed -i "/dtparam=i2c_arm=/c\dtparam=i2c_arm=on" /DietPi/config.txt
+			sed -i "/dtparam=i2c1=/c\dtparam=i2c1=on" /DietPi/config.txt
+
+			#DietPi, set installed
+			sed -i '/RPII2C=/c\RPII2C=2' /DietPi/dietpi/.installed &> /dev/null
+
+		elif [ "$INPUT_DEVICE_VALUE" = "disable" ]; then
+
+			sed -i '/i2c-bcm2708/d' /etc/modules &> /dev/null
+			sed -i '/i2c-dev/d' /etc/modules &> /dev/null
+			sed -i "/dtparam=i2c_arm=/c\dtparam=i2c_arm=off" /DietPi/config.txt
+			sed -i "/dtparam=i2c1=/c\dtparam=i2c1=off" /DietPi/config.txt
+			sed -i "/i2c_arm_baudrate=/c\i2c_arm_baudrate=100000" /DietPi/config.txt
+
+		#Set baudrate (khz) | valid int
+		elif [[ $INPUT_DEVICE_VALUE =~ ^-?[0-9]+$ ]] && (( $INPUT_DEVICE_VALUE >= 2 )); then
+
+			sed -i "/i2c_arm_baudrate=/c\i2c_arm_baudrate=$(( $INPUT_DEVICE_VALUE * 1000 ))" /DietPi/config.txt
+
+			#inform user
+			INPUT_DEVICE_VALUE+="Khz"
+
+		else
+
+			Unknown_Input_Mode
+
+		fi
+
+	}
+
+	#/////////////////////////////////////////////////////////////////////////////////////
+	# bluetooth
+	#/////////////////////////////////////////////////////////////////////////////////////
+
+	Bluetooth_Main(){
+
+		local aBLUETOOTH_MODULES=()
+
+		aBLUETOOTH_MODULES=("bluetooth")
+		aBLUETOOTH_MODULES+=("bnep")
+
+		aBLUETOOTH_MODULES+=("btbcm") # rpi3 broadcom onboard
+
+		aBLUETOOTH_MODULES+=("rfcomm") # BPi pro
+		aBLUETOOTH_MODULES+=("hidp") # BPi pro
+
+		aBLUETOOTH_MODULES+=("hci_uart")
+
+		# - Disable
+		if [ "$INPUT_DEVICE_VALUE" = "disable" ]; then
+
+			# + RPi 3
+			if (( $HW_MODEL == 3 )); then
+
+				systemctl stop hciuart
+				systemctl disable hciuart
+
+			fi
+
+			#bluetooth last
+			for ((i=$(( ${#aBLUETOOTH_MODULES[@]} - 1 )); i>=0; i--))
+			do
+
+				modprobe -rf "${aBLUETOOTH_MODULES[$i]}" 2> /dev/null
+				echo -e "blacklist ${aBLUETOOTH_MODULES[$i]}" >> /etc/modprobe.d/disable_bt.conf
+
+			done
+
+		# - Enable
+		elif [ "$INPUT_DEVICE_VALUE" = "enable" ]; then
+
+			rm /etc/modprobe.d/disable_bt.conf &> /dev/null
+
+			#bluetooth first
+			for ((i=0; i<${#aBLUETOOTH_MODULES[@]}; i++))
+			do
+
+				modprobe "${aBLUETOOTH_MODULES[$i]}" 2> /dev/null
+
+			done
+
+			systemctl enable bluetooth 2> /dev/null
+			systemctl start bluetooth 2> /dev/null
+			if (( $? != 0 )); then
+
+				/DietPi/dietpi/func/dietpi-notify 2 "Bluetooth service failed to start. Is it installed?"
+				EXIT_CODE=1
+
+			fi
+
+			# + RPi 3
+			if (( $HW_MODEL == 3 )); then
+
+				systemctl enable hciuart
+
+				#Start service again, if it fails: https://github.com/Fourdee/DietPi/issues/376#issuecomment-230149754
+				loop_count=0
+				max_count=3
+				while (( $(systemctl start hciuart;echo $?) != 0 ))
+				do
+
+					if (( $loop_count >= $max_count )); then
+
+						/DietPi/dietpi/func/dietpi-notify 1 "hciuart failed to start after $loop_count attempts."
+						EXIT_CODE=1
+						break
+
+					else
+
+						/DietPi/dietpi/func/dietpi-notify 2 "hciuart failed to start. Attempting to restart it, please wait..."
+						((loop_count++))
+						sleep 1
+
+					fi
+
+				done
+
+			fi
+
+		else
+			Unknown_Input_Mode
+		fi
+
+		unset aBLUETOOTH_MODULES
+
+	}
+
+	#/////////////////////////////////////////////////////////////////////////////////////
+	# wifi
+	#/////////////////////////////////////////////////////////////////////////////////////
+
+	Wifi_Main(){
+
+		local aWIFI_MODULES=()
+
+		# - All
+		aWIFI_MODULES=("cfg80211")
+
+		# + RPi 3
+		aWIFI_MODULES+=("brcmfmac") #onboard WiFi
+		aWIFI_MODULES+=("brcmutil") #oonboard WiFi
+
+		# + Pine A64
+		aWIFI_MODULES+=("8723bs") #addon WiFi/BT board.
+
+		# + BPi Pro
+		aWIFI_MODULES+=("ap6211") #onboard
+
+		# - Disable
+		if [ "$INPUT_DEVICE_VALUE" = "disable" ]; then
+
+			#cfg80211 last
+			for ((i=$(( ${#aWIFI_MODULES[@]} - 1 )); i>=0; i--))
+			do
+				modprobe -rf "${aWIFI_MODULES[$i]}" 2> /dev/null
+				echo -e "blacklist ${aWIFI_MODULES[$i]}" >> /etc/modprobe.d/disable_wifi.conf
+			done
+
+		# - Enable
+		elif [ "$INPUT_DEVICE_VALUE" = "enable" ]; then
+
+			rm /etc/modprobe.d/disable_wifi.conf &> /dev/null
+
+			#cfg80211 first
+			for ((i=0; i<${#aWIFI_MODULES[@]}; i++))
+			do
+				modprobe "${aWIFI_MODULES[$i]}" 2> /dev/null
+			done
+
+			# - Delay. Without this, kernel reports wifi device not found with RPi 3 and Pine A64 addon board, when ran straight after this script.
+			/DietPi/dietpi/func/dietpi-notify 2 "Please wait, enabling WiFi Modules..."
+			sleep 3
+
+			#Update our networking file (refresh active wlan index)
+			/DietPi/dietpi/func/obtain_network_details
+
+		else
+			Unknown_Input_Mode
+		fi
+
+		unset aWIFI_MODULES
+
+	}
+
+	#/////////////////////////////////////////////////////////////////////////////////////
+	# wificountrycode
+	#/////////////////////////////////////////////////////////////////////////////////////
+
+	Wifi_Countrycode_Main(){
+
+		#Pull saved country code from dietpi.txt if set.
+		local wifi_countrycode=$(cat /DietPi/dietpi.txt | grep -m1 '^wifi_country_code=' | sed 's/.*=//')
+		local wifi_countrycode=${wifi_countrycode:-00}
+
+		#Use country code from command input. Implies new setting.
+		if [ -n "$INPUT_DEVICE_VALUE" ]; then
+			wifi_countrycode="$INPUT_DEVICE_VALUE"
+
+			# - Apply value to DietPi.txt
+			sed -i "/^wifi_country_code=/c\wifi_country_code=$wifi_countrycode" /DietPi/dietpi.txt
+
+			#save country code to known system configs.
+			#	/etc/default/crda | Seems to have no effect, but we will do it for consistency.
+			#	/etc/modprobe.d/cfg80211.conf | Kernel/udev seems to apply this setting during boot. Although we call this script to override any set country code, no harm being consistent: https://github.com/Fourdee/DietPi/issues/313#issuecomment-217716104
+			echo -e "REGDOMAIN=$wifi_countrycode" > /etc/default/crda
+			echo -e "options cfg80211 ieee80211_regdom=$wifi_countrycode" > /etc/modprobe.d/cfg80211.conf
+
+			#Activate country code
+			iw reg set "$wifi_countrycode"
+
+		else
+			Unknown_Input_Mode
+		fi
+
+	}
+
+	#/////////////////////////////////////////////////////////////////////////////////////
+	# serialconsole
+	#/////////////////////////////////////////////////////////////////////////////////////
+
+	Serial_Main(){
+
+		#-------------------------------------------------------------------------------------
+		#Enable
+		if [ "$INPUT_DEVICE_VALUE" = "enable" ]; then
+
+			#Distro specific:
+			# - Wheezy
+			if (( $DISTRO == 1 )); then
+
+				sed -i '/T0:23:respawn:\/sbin\/getty -L ttyAMA0 115200 vt100/c\T0:23:respawn:\/sbin\/getty -L ttyAMA0 115200 vt100' /etc/inittab
+
+			# - SystemD (enable all serial-getty services)
+			elif (( $DISTRO == 3 )); then
+
+				systemctl enable serial-getty@.service
+				systemctl enable serial-getty@ttyAMA0.service
+				systemctl enable serial-getty@ttySAC2.service
+				systemctl enable serial-getty@ttyS0.service
+
+			fi
+
+			#Device Specific:
+			# - RPi
+			if (( $HW_MODEL < 10 )); then
+
+				# - RPi 1/2, AMA0
+				if (( $HW_MODEL < 3 )); then
+
+					if (( ! $(cat /boot/cmdline.txt | grep -ci -m1 'console=ttyAMA0,115200 ') )); then
+
+						sed -i 's/console=tty1 /console=tty1 console=ttyAMA0,115200 /' /boot/cmdline.txt
+
+					fi
+
+				# - RPi 3, uses S0.
+				elif (( $HW_MODEL == 3 )); then
+
+					# - Both S0 or AMA0 in cmdline.txt enables serial console, so check for both.
+					if (( ! $(cat /boot/cmdline.txt | grep -ci -m1 'console=ttyS0,115200 ') &&
+						! $(cat /boot/cmdline.txt | grep -ci -m1 'console=ttyAMA0,115200 ' ) )); then
+
+						sed -i 's/console=tty1 /console=tty1 console=ttyS0,115200 /' /boot/cmdline.txt
+
+					fi
+
+					# - disable AMA0 to prevent process using 100% cpu: https://github.com/Fourdee/DietPi/issues/306#issuecomment-222304202
+					systemctl disable serial-getty@ttyAMA0.service
+
+					# - Must use 250mhz core frequency, else, corrupt characters: https://github.com/Fourdee/DietPi/issues/306#issuecomment-222304202
+					sed -i '/core_freq=/c\core_freq=250' /DietPi/config.txt
+
+				fi
+
+			# - Odroid C1
+			elif (( $HW_MODEL == 10 )); then
+
+				sed -i '/^setenv condev/c\setenv condev "console=tty0 console=ttyS0,115200n8"' /DietPi/boot.ini
+
+			# - Odroid XU4
+			elif (( $HW_MODEL == 11 )); then
+
+				if (( ! $(cat /DietPi/boot.ini | grep -ci -m1 'console=ttySAC2,115200n8 ') )); then
+
+					sed -i 's/console=tty1 /console=tty1 console=ttySAC2,115200n8 /' /DietPi/boot.ini
+
+				fi
+
+			# - Odroid C2
+			elif (( $HW_MODEL == 12 )); then
+
+				sed -i '/^setenv condev/c\setenv condev "console=tty0 console=ttyS0,115200n8"' /DietPi/boot.ini
+
+			# - Pine A64
+			elif (( $HW_MODEL >= 40 && $HW_MODEL < 50 )); then
+
+				if (( ! $(cat /DietPi/uEnv.txt | grep -ci -m1 'console=ttyS0,115200n8 ') )); then
+
+					sed -i 's/console=tty0 /console=tty0 console=ttyS0,115200n8 /' /DietPi/uEnv.txt
+
+				fi
+
+			fi
+
+			# - Update dietpi.txt global var
+			sed -i '/^serial_console_enabled=/c\serial_console_enabled=1' /DietPi/dietpi.txt
+
+
+		#-------------------------------------------------------------------------------------
+		#Disable
+		elif [ "$INPUT_DEVICE_VALUE" = "disable" ]; then
+
+			#Distro specific:
+			# - Wheezy
+			if (( $DISTRO == 1 )); then
+
+				sed -i '/T0:23:respawn:\/sbin\/getty -L ttyAMA0 115200 vt100/c\T0:23:respawn:\/sbin\/getty -L ttyAMA0 115200 vt100' /etc/inittab
+
+			# - SystemD
+			elif (( $DISTRO == 3 )); then
+
+				#Disable services. Although, this seems to have no effect on the cmdline.txt boot.ini etc serial console entries. They run regardless. But lets do it for consistency.
+				systemctl disable serial-getty@.service
+				systemctl disable serial-getty@ttyAMA0.service
+				systemctl disable serial-getty@ttySAC2.service
+				systemctl disable serial-getty@ttyS0.service
+
+			fi
+
+			#Device Specific:
+			# - RPi
+			if (( $HW_MODEL < 10 )); then
+
+				# RPi 1/2
+				sed -i 's/console=ttyAMA0,115200 //' /boot/cmdline.txt
+
+				# + RPi 3
+				sed -i 's/console=ttyS0,115200 //' /boot/cmdline.txt
+
+				# RPi 3 - Put core freq back to default (400mhz), if set to 250mhz.
+				if (( $HW_MODEL == 3 &&
+					$(cat /DietPi/config.txt | grep -m1 'core_freq=' | sed 's/.*=//') == 250 )); then
+
+					sed -i '/core_freq=/c\#core_freq=400' /DietPi/config.txt
+
+				fi
+
+			# - Odroid C1
+			elif (( $HW_MODEL == 10 )); then
+
+				sed -i '/^setenv condev/c\setenv condev "console=tty0"' /DietPi/boot.ini
+
+			# - Odroid XU4
+			elif (( $HW_MODEL == 11 )); then
+
+				sed -i 's/console=ttySAC2,115200n8 //' /DietPi/boot.ini
+
+			# - Odroid C2
+			elif (( $HW_MODEL == 12 )); then
+
+				sed -i '/^setenv condev/c\setenv condev "console=tty0"' /DietPi/boot.ini
+
+			# - Pine A64
+			elif (( $HW_MODEL >= 40 && $HW_MODEL < 50 )); then
+
+				sed -i 's/console=ttyS0,115200n8 //' /DietPi/uEnv.txt
+
+			fi
+
+			# - Update dietpi.txt global var
+			sed -i '/^serial_console_enabled=/c\serial_console_enabled=0' /DietPi/dietpi.txt
+
+		else
+			Unknown_Input_Mode
+		fi
+
+	}
+
+	#/////////////////////////////////////////////////////////////////////////////////////
+	# soundcard
+	#/////////////////////////////////////////////////////////////////////////////////////
+
+	#Disable all soundcards and revert back to HDMI output if available.
+	Soundcard_Reset_All(){
+
+		#Update DietPi global soundcard var
+		sed -i "/^soundcard=/c\soundcard=$INPUT_DEVICE_VALUE" /DietPi/dietpi.txt
+
+		#Remove previous asound.conf
+		rm /etc/asound.conf &> /dev/null
+
+		#HW specific
+		# - RPI
+		if (( $HW_MODEL < 10 )); then
+
+			Soundcard_Reset_RPi
+
+		# - Odroid
+		elif (( $HW_MODEL >= 10 && $HW_MODEL < 20 )); then
+
+			Soundcard_Reset_Odroid
+
+		# - OrangePi
+		elif (( $HW_MODEL == 30 )); then
+
+			Soundcard_Reset_OPi_PC
+
+		# - Pine a64
+		elif (( $HW_MODEL >= 40 && $HW_MODEL < 50 )); then
+
+			Soundcard_Reset_PineA64
+
+		elif (( $HW_MODEL == 51 )); then
+
+			Soundcard_Reset_BPi_Pro
+
+		fi
+
+	}
+
+	Soundcard_Reset_RPi(){
+
+		# - Add dtparam=audio=off
+		#	as of 4.4 kernel: https://github.com/Fourdee/DietPi/issues/327
+		if (( $(cat /DietPi/config.txt | grep -ci -m1 'dtparam=audio=') == 0 )); then
+			echo -e "dtparam=audio=off" >> /DietPi/config.txt
+		else
+			sed -i '/dtparam=audio=/c\dtparam=audio=off' /DietPi/config.txt
+		fi
+
+		# - Disable dtoverlay= (We need a better way to check for dtoverlay entires are actually soundcards, rather than assume dtoverlay= is only used for soundcards by user.)
+		sed -i '/dtoverlay=/d' /DietPi/config.txt
+
+		# - Disable snd-bcm2835 module + HQ audio
+		sed -i '/snd-bcm2835/d' /etc/modules
+		sed -i '/avoid_pwm_pll=/c\avoid_pwm_pll=1' /DietPi/config.txt
+
+	}
+
+	Soundcard_Reset_Odroid(){
+
+		# - hifi shield plus
+		sed -i '/snd-soc-pcm5102/d' /etc/modules
+		sed -i '/snd-soc-odroid-dac/d' /etc/modules
+
+		#C2 - hdmi asound.conf
+		if (( $HW_MODEL == 12 )); then
+
+			cat << _EOF_ > /etc/asound.conf
+pcm.!default {
+    type plug
+    slave {
+        pcm "hw:0,0"
+        format S32_LE
+    }
+}
+
+ctl.!default {
+   type hw
+   card 0
+}
+_EOF_
+
+		fi
+
+	}
+
+	Soundcard_Reset_OPi_PC(){
+
+		#set hdmi
+		amixer set -c 0 'Audio lineout' mute &> /dev/null
+
+		cat << _EOF_ > /etc/asound.conf
+pcm.!default {
+   type hw
+   card 1
+}
+
+ctl.!default {
+   type hw
+   card 1
+}
+_EOF_
+
+	}
+
+	Soundcard_Reset_PineA64(){
+
+		rm /etc/modules-load.d/pine64-audiojack.conf
+
+	}
+
+	Soundcard_Reset_BPi_Pro(){
+
+		#HDMI
+		cat << _EOF_ > /etc/asound.conf
+pcm.!default {
+type hw
+card 2
+}
+
+ctl.!default {
+type hw
+card 2
+}
+_EOF_
+
+	}
+
+	Soundcard_Main(){
+
+		#-----------------------------------------------------------------------------
+		#Always reset soundcards and revert back to HDMI
+		Soundcard_Reset_All
+		#-----------------------------------------------------------------------------
+		#Apply specific asound.confs and additional settings
+		case "$INPUT_DEVICE_VALUE" in
+
+			#RPi -------------------------------------------------------------------------------
+			#rpi-bcm2835
+			#rpi-bcm2835-UltraHQ
+			rpi-bcm2835*)
+
+				# - Add snd-bcm2835 module
+				echo -e "snd-bcm2835" >> /etc/modules
+
+				# - Enable dtparam audio
+				sed -i '/dtparam=audio=/c\dtparam=audio=on' /DietPi/config.txt
+
+				# - Expermental UltraHQ audio: https://www.raspberrypi.org/forums/viewtopic.php?p=907075#p907075
+				if [ "$INPUT_DEVICE_NAME" = "rpi-bcm2835-ultrahq" ]; then
+
+					sed -i '/avoid_pwm_pll=/c\avoid_pwm_pll=2' /DietPi/config.txt
+
+				# - HQ audio
+				else
+
+					sed -i '/avoid_pwm_pll=/c\avoid_pwm_pll=0' /DietPi/config.txt
+
+				fi
+
+			;;
+
+			#hifiberry-dac
+			#hifiberry-dacplus
+			#hifiberry-digi
+			#hifiberry-amp
+			hifiberry-*)
+
+				cat << _EOF_ > /etc/asound.conf
+pcm.!default {
+type hw
+card 0
+}
+ctl.!default {
+type hw
+card 0
+}
+_EOF_
+				# - enable dtoverlay
+				echo -e "dtoverlay=$INPUT_DEVICE_NAME" >> /DietPi/config.txt
+
+			;;
+
+			iqaudio-dacplus)
+
+				# - enable dtoverlay
+				echo -e "dtoverlay=$INPUT_DEVICE_NAME" >> /DietPi/config.txt
+
+			;;
+
+			#Odroid -------------------------------------------------------------------------------
+			odroid-hifishield-plus)
+
+				echo -e "snd-soc-pcm5102" >> /etc/modules
+				echo -e "snd-soc-odroid-dac" >> /etc/modules
+
+				cat << _EOF_ > /etc/asound.conf
+pcm.!default {
+   type hw
+   card 1
+}
+
+ctl.!default {
+   type hw
+   card 1
+}
+_EOF_
+
+			;;
+
+			#OPi PC -------------------------------------------------------------------------------
+			opipc-analogue)
+
+				amixer set -c 0 'Audio lineout' unmute &> /dev/null
+
+				cat << _EOF_ > /etc/asound.conf
+pcm.!default {
+   type hw
+   card 0
+}
+
+ctl.!default {
+   type hw
+   card 0
+}
+_EOF_
+
+			;;
+
+			#Pine A64 -------------------------------------------------------------------------------
+			pine64-analogue)
+
+				cat << _EOF_ > /etc/modules-load.d/pine64-audiojack.conf
+sunxi_codec
+sunxi_i2s
+sunxi_sndcodec
+_EOF_
+
+				cat << _EOF_ > /etc/asound.conf
+pcm.!default {
+type hw
+card 1
+}
+
+ctl.!default {
+type hw
+card 1
+}
+_EOF_
+
+				#wget https://raw.githubusercontent.com/longsleep/build-pine64-image/master/blobs/asound.state -O /var/lib/alsa/asound.state
+
+			;;
+
+			#BPi Pro -------------------------------------------------------------------------------
+			bpipro-analogue)
+
+				cat << _EOF_ > /etc/asound.conf
+pcm.!default {
+type hw
+card 0
+}
+
+ctl.!default {
+type hw
+card 0
+}
+_EOF_
+
+
+			;;
+
+		esac
+
+	}
+
+
+	#/////////////////////////////////////////////////////////////////////////////////////
+	# Main Loop
+	#/////////////////////////////////////////////////////////////////////////////////////
+	#-----------------------------------------------------------------------------------
+	#info
+
+	/DietPi/dietpi/func/dietpi-notify 3 DietPi-Set_Hardware "$INPUT_DEVICE_NAME | $INPUT_DEVICE_VALUE"
+
+	#-----------------------------------------------------------------------------------
+	if [ "$INPUT_DEVICE_NAME" = "soundcard" ]; then
+
+		Soundcard_Main
+
+	elif [ "$INPUT_DEVICE_NAME" = "serialconsole" ]; then
+
+		Serial_Main
+
+	elif [ "$INPUT_DEVICE_NAME" = "bluetooth" ]; then
+
+		Bluetooth_Main
+
+	elif [ "$INPUT_DEVICE_NAME" = "wifi" ]; then
+
+		Wifi_Main
+
+	elif [ "$INPUT_DEVICE_NAME" = "wificountrycode" ]; then
+
+		Wifi_Countrycode_Main
+
+	elif [ "$INPUT_DEVICE_NAME" = "i2c" ]; then
+
+		I2c_Main
+
+	else
+
+		Unknown_Input_Name
+
+	fi
+
+	#-----------------------------------------------------------------------------------
+	/DietPi/dietpi/func/dietpi-notify -1 $EXIT_CODE "$INPUT_DEVICE_NAME $INPUT_DEVICE_VALUE |"
+	#-----------------------------------------------------------------------------------
+	exit
+	#-----------------------------------------------------------------------------------
+}
