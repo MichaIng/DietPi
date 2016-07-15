@@ -17,6 +17,7 @@
 	# - /DietPi/dietpi/func/dietpi-set_hardware 		bluetooth 		enable/disable
 	# - /DietPi/dietpi/func/dietpi-set_hardware 		serialconsole	enable/disable
 	# - /DietPi/dietpi/func/dietpi-set_hardware 		soundcard 		target_card (non-matching name for reset to default)
+	# - /DietPi/dietpi/func/dietpi-set_hardware 		lcdpanel 		target_panel (none to remove all)
 	#////////////////////////////////////
 
 	#Force en_GB Locale for whole script. Prevents incorrect parsing with non-english locales.
@@ -52,6 +53,140 @@
 
 		EXIT_CODE=1
 		/DietPi/dietpi/func/dietpi-notify 2 "Unknown input value ($INPUT_DEVICE_VALUE). Nothing has been applied."
+
+	}
+
+	#/////////////////////////////////////////////////////////////////////////////////////
+	# lcdpanel eg: All non-HDMI/VGA based displays and monitors.
+	#/////////////////////////////////////////////////////////////////////////////////////
+
+	Lcd_Panel_Not_Available_For_Device(){
+
+		EXIT_CODE=1
+		/DietPi/dietpi/func/dietpi-notify 2 "$INPUT_DEVICE_VALUE is not available for this device. Nothing has been applied."
+
+	}
+
+	Lcd_Panel_Main(){
+
+		if [ "$INPUT_DEVICE_VALUE" = "waveshare32" ]; then
+
+			Waveshare32_Enable
+
+		#disable all
+		elif [ "$INPUT_DEVICE_VALUE" = "none" ]; then
+
+			Waveshare32_Disable
+
+		else
+
+			Unknown_Input_Mode
+
+		fi
+
+	}
+
+	Waveshare32_Enable(){
+
+		#Disable 1st to reset any existing installations:
+		Waveshare32_Disable # Due to vast user available options, consider disabling this feature and make it "one time install, cant be undone"?
+
+		#RPi
+		# we can check if this is enabled by ci m1 : ^dtoverlay=waveshare32b config.txt
+		if (( $HW_MODEL < 10 )); then
+
+			local url='http://www.waveshare.com/w/upload/2/24/LCD-show-160520.tar.gz'
+
+			wget "$url" -O package.tar
+			tar xzvf package.tar
+			rm package.tar
+
+			cd LCD-show
+			cp waveshare32b-overlay.dtb /boot/overlays/waveshare32b.dtbo
+
+			sed -i 's/rootwait /rootwait consoleblank=0 fbcon=map:10 fbcon=font:ProFont6x11 logo.nologo /' /boot/cmdline.txt
+
+			sed -i "/dtparam=i2c_arm=/c\dtparam=i2c_arm=on" /DietPi/config.txt
+			sed -i "/dtparam=spi=/c\dtparam=spi=on" /DietPi/config.txt
+
+
+			cat << _EOF_ >> /DietPi/config.txt
+
+#Waveshare 32 LCD
+dtoverlay=waveshare32b:rotate=270
+dtoverlay=ads7846,cs=1,penirq=17,penirq_pull=2,speed=1000000,keep_vref_on=1,swapxy=0,pmax=255,xohms=60,xmin=200,xmax=3900,ymin=200,ymax=3900
+dtoverlay=w1-gpio-pullup,gpiopin=4,extpullup=1
+_EOF_
+
+			#X11 support
+			dpkg -i xinput-calibrator_0.7.5-1_armhf.deb
+			apt-get install -y -f # incase xserver isnt installed, install depends.
+
+			# - FBturbo driver doesnt work. use fbdev for jessie
+			#apt-get install -y xserver-xorg-video-fbturbo
+			mkdir -p /etc/X11/xorg.conf.d
+			cp -rf etc/X11/xorg.conf.d/99-calibration.conf-32 /etc/X11/xorg.conf.d/99-waveshare32_calibration.conf
+
+			cat << _EOF_ > /etc/X11/xorg.conf.d/99-waveshare32_xorg.conf
+Section "Device"
+	Identifier      "FBDEV"
+	Driver          "fbdev"
+	Option          "fbdev" "/dev/fb1"
+
+	Option          "SwapbuffersWait" "true"
+EndSection
+
+_EOF_
+
+
+			# - Create desktop icon for xcalibration
+			mkdir -p "$HOME"/Desktop
+			cat << _EOF_ > "$HOME"/Desktop/xinput_calibrator.desktop
+[Desktop Entry]
+Version=1.0
+Name=xinput_calibrator
+Type=Application
+Comment=xinput_calibrator
+Terminal=true
+Exec=xinput_calibrator
+#Icon=/DietPi/dietpi/conf/desktop/dietpi-icon.png
+Categories=System;
+GenericName=xinput_calibrator
+_EOF_
+
+			cd ..
+			rm -R LCD-show
+
+		else
+
+			Lcd_Panel_Not_Available_For_Device
+
+		fi
+
+	}
+
+	Waveshare32_Disable(){
+
+		#RPi
+		if (( $HW_MODEL < 10 )); then
+
+			rm /boot/overlays/waveshare32b.dtbo
+			rm /etc/X11/xorg.conf.d/99-waveshare32_calibration.conf
+			rm /etc/X11/xorg.conf.d/99-waveshare32_xorg.conf
+			rm /usr/share/applications/xinput_calibrator.desktop
+
+			sed -i 's/ consoleblank=0 fbcon=map:10 fbcon=font:ProFont6x11 logo.nologo//' /boot/cmdline.txt
+
+			sed -i '/Waveshare 32 LCD/d' /DietPi/config.txt
+			sed -i '/dtoverlay=waveshare32b/d' /DietPi/config.txt
+			sed -i '/dtoverlay=ads7846,cs=1,penirq=17/d' /DietPi/config.txt
+			sed -i '/dtoverlay=w1-gpio-pullup,gpiopin=4,extpullup=1/d' /DietPi/config.txt
+
+			# - Leave these enabled, just incase the user has other hardware that may use them.
+			#sed -i "/dtparam=i2c_arm=/c\dtparam=i2c_arm=on" /DietPi/config.txt
+			#sed -i "/dtparam=spi=/c\dtparam=spi=on" /DietPi/config.txt
+
+		fi
 
 	}
 
@@ -516,8 +651,11 @@
 			sed -i '/dtparam=audio=/c\dtparam=audio=off' /DietPi/config.txt
 		fi
 
-		# - Disable dtoverlay= (We need a better way to check for dtoverlay entires are actually soundcards, rather than assume dtoverlay= is only used for soundcards by user.)
-		sed -i '/dtoverlay=/d' /DietPi/config.txt
+		# - Disable dtoverlay=
+		sed -i '/dtoverlay=rpi-bcm2835/d' /DietPi/config.txt
+		sed -i '/dtoverlay=hifiberry/d' /DietPi/config.txt
+		sed -i '/dtoverlay=iqaudio/d' /DietPi/config.txt
+
 
 		# - Disable snd-bcm2835 module + HQ audio
 		sed -i '/snd-bcm2835/d' /etc/modules
@@ -605,6 +743,8 @@ _EOF_
 		case "$INPUT_DEVICE_VALUE" in
 
 			#RPi -------------------------------------------------------------------------------
+			#NB: If we add another soundcard, add sed -i '/dtoverlay=cardname/d' /DietPi/config.txt to Soundcard_Reset_RPi
+
 			#rpi-bcm2835
 			#rpi-bcm2835-UltraHQ
 			rpi-bcm2835*)
@@ -615,15 +755,13 @@ _EOF_
 				# - Enable dtparam audio
 				sed -i '/dtparam=audio=/c\dtparam=audio=on' /DietPi/config.txt
 
+				# - Enable HQ audio
+				sed -i '/avoid_pwm_pll=/c\avoid_pwm_pll=1' /DietPi/config.txt
+
 				# - Expermental UltraHQ audio: https://www.raspberrypi.org/forums/viewtopic.php?p=907075#p907075
-				if [ "$INPUT_DEVICE_NAME" = "rpi-bcm2835-ultrahq" ]; then
+				if [ "$INPUT_DEVICE_VALUE" = "rpi-bcm2835-ultrahq" ]; then
 
 					sed -i '/avoid_pwm_pll=/c\avoid_pwm_pll=2' /DietPi/config.txt
-
-				# - HQ audio
-				else
-
-					sed -i '/avoid_pwm_pll=/c\avoid_pwm_pll=0' /DietPi/config.txt
 
 				fi
 
@@ -646,14 +784,14 @@ card 0
 }
 _EOF_
 				# - enable dtoverlay
-				echo -e "dtoverlay=$INPUT_DEVICE_NAME" >> /DietPi/config.txt
+				echo -e "dtoverlay=$INPUT_DEVICE_VALUE" >> /DietPi/config.txt
 
 			;;
 
 			iqaudio-dacplus)
 
 				# - enable dtoverlay
-				echo -e "dtoverlay=$INPUT_DEVICE_NAME" >> /DietPi/config.txt
+				echo -e "dtoverlay=$INPUT_DEVICE_VALUE" >> /DietPi/config.txt
 
 			;;
 
@@ -750,7 +888,7 @@ _EOF_
 	#-----------------------------------------------------------------------------------
 	#info
 
-	/DietPi/dietpi/func/dietpi-notify 3 DietPi-Set_Hardware "$INPUT_DEVICE_NAME | $INPUT_DEVICE_VALUE"
+	/DietPi/dietpi/func/dietpi-notify 3 DietPi-Set_Hardware "$INPUT_DEVICE_NAME ($INPUT_DEVICE_VALUE)"
 
 	#-----------------------------------------------------------------------------------
 	if [ "$INPUT_DEVICE_NAME" = "soundcard" ]; then
@@ -776,6 +914,10 @@ _EOF_
 	elif [ "$INPUT_DEVICE_NAME" = "i2c" ]; then
 
 		I2c_Main
+
+	elif [ "$INPUT_DEVICE_NAME" = "lcdpanel" ]; then
+
+		Lcd_Panel_Main
 
 	else
 
