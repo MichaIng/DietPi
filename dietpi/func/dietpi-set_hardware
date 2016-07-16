@@ -86,25 +86,73 @@
 
 	}
 
+	# - X11 support for all devices
+	Waveshare32_Enable_X11(){
+
+		#X11 support
+		apt-get install -y xinput-calibrator
+
+		mkdir -p /etc/X11/xorg.conf.d
+
+		cat << _EOF_ > /etc/X11/xorg.conf.d/99-waveshare32_xorg.conf
+Section "Device"
+Identifier      "FBDEV"
+Driver          "fbdev"
+Option          "fbdev" "/dev/fb1"
+
+Option          "SwapbuffersWait" "true"
+EndSection
+
+_EOF_
+
+		cat << _EOF_ > /etc/X11/xorg.conf.d/99-waveshare32_calibration.conf
+Section "InputClass"
+        Identifier      "calibration"
+        MatchProduct    "ADS7846 Touchscreen"
+        Option  "Calibration"   "219 3835 3984 219"
+        Option  "SwapAxes"      "0"
+EndSection
+_EOF_
+
+
+		# - Create desktop icon for xcalibration
+		mkdir -p "$HOME"/Desktop
+		cat << _EOF_ > "$HOME"/Desktop/xinput_calibrator.desktop
+[Desktop Entry]
+Version=1.0
+Name=xinput_calibrator
+Type=Application
+Comment=xinput_calibrator
+Terminal=true
+Exec=xinput_calibrator
+#Icon=/DietPi/dietpi/conf/desktop/dietpi-icon.png
+Categories=System;
+GenericName=xinput_calibrator
+_EOF_
+
+	}
+
 	Waveshare32_Enable(){
 
+	#IMPLIMENT console for Odroids
+	#con2fbmap 1 2
+	#Where to put it? during boot?
+
+	#Then test installations on C1/C2/RPi
+
 		#Disable 1st to reset any existing installations:
-		Waveshare32_Disable # Due to vast user available options, consider disabling this feature and make it "one time install, cant be undone"?
+		Waveshare32_Disable
 
 		#RPi
-		# we can check if this is enabled by ci m1 : ^dtoverlay=waveshare32b config.txt
 		if (( $HW_MODEL < 10 )); then
 
-			local url='http://www.waveshare.com/w/upload/2/24/LCD-show-160520.tar.gz'
+			# + X11
+			Waveshare32_Enable_X11
 
-			wget "$url" -O package.tar
-			tar xzvf package.tar
-			rm package.tar
+			wget http://dietpi.com/downloads/conf/waveshare32b-overlay.dtb -O /boot/overlays/waveshare32b.dtbo
 
-			cd LCD-show
-			cp waveshare32b-overlay.dtb /boot/overlays/waveshare32b.dtbo
-
-			sed -i 's/rootwait /rootwait consoleblank=0 fbcon=map:10 fbcon=font:ProFont6x11 logo.nologo /' /boot/cmdline.txt
+			#consoleblank=0 no effect
+			sed -i 's/rootwait /rootwait fbcon=map:10 fbcon=font:ProFont6x11 logo.nologo /' /boot/cmdline.txt
 
 			sed -i "/dtparam=i2c_arm=/c\dtparam=i2c_arm=on" /DietPi/config.txt
 			sed -i "/dtparam=spi=/c\dtparam=spi=on" /DietPi/config.txt
@@ -118,44 +166,53 @@ dtoverlay=ads7846,cs=1,penirq=17,penirq_pull=2,speed=1000000,keep_vref_on=1,swap
 dtoverlay=w1-gpio-pullup,gpiopin=4,extpullup=1
 _EOF_
 
-			#X11 support
-			dpkg -i xinput-calibrator_0.7.5-1_armhf.deb
-			apt-get install -y -f # incase xserver isnt installed, install depends.
+			# - Swap input axis
+			sed -i '/"SwapAxes"/c\        Option  "SwapAxes"      "1"' /etc/X11/xorg.conf.d/99-waveshare32_calibration.conf
 
-			# - FBturbo driver doesnt work. use fbdev for jessie
-			#apt-get install -y xserver-xorg-video-fbturbo
-			mkdir -p /etc/X11/xorg.conf.d
-			cp -rf etc/X11/xorg.conf.d/99-calibration.conf-32 /etc/X11/xorg.conf.d/99-waveshare32_calibration.conf
+		#Odroids
+		elif (( $HW_MODEL >= 10 && $HW_MODEL < 20 )); then
 
+			# + X11
+			Waveshare32_Enable_X11
+
+			#con2fbmap, maps console (1) to panel(2). Run during boot.
+			# NB: Stopping this service to reset fbmaps before running startx has no effect, X fails to load.
+			cat << _EOF_ > /etc/systemd/system/con2fbmap.service
+[Unit]
+Description=con2fbmap
+
+[Service]
+Type=oneshot
+ExecStart=/bin/con2fbmap 1 2
+ExecStop=/bin/con2fbmap 1 0
+
+RemainAfterExit=yes
+User=root
+
+[Install]
+WantedBy=multi-user.target
+_EOF_
+			systemctl enable con2fbmap.service
+			systemctl daemon-reload
+
+			echo -e "spicc" >> /etc/modules
+			echo -e "fbtft_device" >> /etc/modules
+
+			cat << _EOF_ > /etc/modprobe.d/waveshare32.conf
+options fbtft_device name=odroidc_tft32 rotate=270 gpios=reset:116,dc:115 speed=32000000 cs=0
+_EOF_
+
+			#x11
 			cat << _EOF_ > /etc/X11/xorg.conf.d/99-waveshare32_xorg.conf
 Section "Device"
 	Identifier      "FBDEV"
 	Driver          "fbdev"
-	Option          "fbdev" "/dev/fb1"
+	Option          "fbdev" "/dev/fb2"
 
-	Option          "SwapbuffersWait" "true"
+	#Option          "SwapbuffersWait" "true"
 EndSection
 
 _EOF_
-
-
-			# - Create desktop icon for xcalibration
-			mkdir -p "$HOME"/Desktop
-			cat << _EOF_ > "$HOME"/Desktop/xinput_calibrator.desktop
-[Desktop Entry]
-Version=1.0
-Name=xinput_calibrator
-Type=Application
-Comment=xinput_calibrator
-Terminal=true
-Exec=xinput_calibrator
-#Icon=/DietPi/dietpi/conf/desktop/dietpi-icon.png
-Categories=System;
-GenericName=xinput_calibrator
-_EOF_
-
-			cd ..
-			rm -R LCD-show
 
 		else
 
@@ -163,19 +220,21 @@ _EOF_
 
 		fi
 
+
 	}
 
 	Waveshare32_Disable(){
+
+		#all
+		rm /etc/X11/xorg.conf.d/99-waveshare32_calibration.conf
+		rm /etc/X11/xorg.conf.d/99-waveshare32_xorg.conf
+		rm /usr/share/applications/xinput_calibrator.desktop
 
 		#RPi
 		if (( $HW_MODEL < 10 )); then
 
 			rm /boot/overlays/waveshare32b.dtbo
-			rm /etc/X11/xorg.conf.d/99-waveshare32_calibration.conf
-			rm /etc/X11/xorg.conf.d/99-waveshare32_xorg.conf
-			rm /usr/share/applications/xinput_calibrator.desktop
-
-			sed -i 's/ consoleblank=0 fbcon=map:10 fbcon=font:ProFont6x11 logo.nologo//' /boot/cmdline.txt
+			sed -i 's/ fbcon=map:10 fbcon=font:ProFont6x11 logo.nologo//' /boot/cmdline.txt
 
 			sed -i '/Waveshare 32 LCD/d' /DietPi/config.txt
 			sed -i '/dtoverlay=waveshare32b/d' /DietPi/config.txt
@@ -185,6 +244,16 @@ _EOF_
 			# - Leave these enabled, just incase the user has other hardware that may use them.
 			#sed -i "/dtparam=i2c_arm=/c\dtparam=i2c_arm=on" /DietPi/config.txt
 			#sed -i "/dtparam=spi=/c\dtparam=spi=on" /DietPi/config.txt
+
+		#Odroids
+		elif (( $HW_MODEL >= 10 && $HW_MODEL < 20 )); then
+
+			rm /etc/systemd/system/con2fbmap.service
+			systemctl daemon-reload
+
+			rm /etc/modprobe.d/waveshare32.conf
+			sed -i '/^spicc/d' /etc/modules
+			sed -i '/^fbtft_device/d' /etc/modules
 
 		fi
 
