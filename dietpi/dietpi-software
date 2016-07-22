@@ -78,6 +78,7 @@
 	#Special installation Vars
 	USER_EMONHUB_APIKEY_COMPLETED=0
 	USER_EMONHUB_APIKEY_CURRENT=0
+	WIFIHOTSPOT_RTL8188C_DEVICE=0
 
 	#DietPi Software
 	INSTALL_DIETPI_CHOICESMADE=0
@@ -1933,14 +1934,7 @@ INDEX_WEBSERVER_TARGET=${INDEX_WEBSERVER_TARGET:=-2}
 			INSTALL_DESCRIPTION='Wifi Hotspot'
 			Banner_Installing
 
-			#check source is online
-			# - NB: These are hostapd binaries with RTL drivers enabled.
-			# - armv6+
-			INSTALL_URL_ADDRESS='http://dietpi.com/downloads/binaries/all/hostapd_14128.zip'
-			# - arm64
-			if (( $HW_ARCH >= 10 && $HW_ARCH < 20 )); then
-				INSTALL_URL_ADDRESS='http://dietpi.com/downloads/binaries/all/hostapd_2.5-arm64.zip'
-			fi
+			INSTALL_URL_ADDRESS='http://dietpi.com/downloads/binaries/all/hostapd_2.5_all.zip'
 
 			/DietPi/dietpi/func/check_connection "$INSTALL_URL_ADDRESS"
 
@@ -1948,15 +1942,60 @@ INDEX_WEBSERVER_TARGET=${INDEX_WEBSERVER_TARGET:=-2}
 			if (( $? == 0 )); then
 
 				# - Prereqs
-				AGI hostapd isc-dhcp-server iptables
+				AGI hostapd isc-dhcp-server iptables libnl-3-200
 
-				# - For all devices, excluding RPi 3 inbuilt wifi, Install modified hostapd binary with RTL drivers enabled.
-				if (( $HW_MODEL != 3 )); then
-					wget "$INSTALL_URL_ADDRESS" -O package.zip
-					unzip -o package.zip -d /usr/sbin
-					rm package.zip
-					chmod +x /usr/sbin/hostapd
+				wget "$INSTALL_URL_ADDRESS" -O package.zip
+				unzip package.zip
+				rm package.zip
+
+				# - Check for RTL8188C* device, use the patched binary I compiled: https://github.com/pritambaral/hostapd-rtl871xdrv#why
+				if (( $(lsusb | grep -ci -m1 'RTL8188C') )); then
+
+					WIFIHOTSPOT_RTL8188C_DEVICE=1
+
 				fi
+
+				#Which binary to install
+				local filename_hostapd=''
+				local filename_hostapd_cli=''
+
+				# - armv6
+				if (( $HW_ARCH == 1 )); then
+
+					filename_hostapd='hostapd-nl80211-armv6'
+					filename_hostapd_cli='hostapd_cli-armv6'
+					if (( $WIFIHOTSPOT_RTL8188C_DEVICE )); then
+						filename_hostapd='hostapd-rtl8188c-armv6'
+					fi
+
+				# - armv7+
+				elif (( $HW_ARCH >= 2 && $HW_ARCH < 10 )); then
+
+					filename_hostapd='hostapd-nl80211-armv7'
+					filename_hostapd_cli='hostapd_cli-armv7'
+					if (( $WIFIHOTSPOT_RTL8188C_DEVICE )); then
+						filename_hostapd='hostapd-rtl8188c-armv7'
+					fi
+
+				# - arm64
+				elif (( $HW_ARCH >= 10 && $HW_ARCH < 20 )); then
+
+					filename_hostapd='hostapd-nl80211-arm64'
+					filename_hostapd_cli='hostapd_cli-arm64'
+					if (( $WIFIHOTSPOT_RTL8188C_DEVICE )); then
+						filename_hostapd='hostapd-rtl8188c-arm64'
+					fi
+
+				fi
+
+				mv "$filename_hostapd" /usr/sbin/hostapd
+				mv "$filename_hostapd_cli" /usr/sbin/hostapd_cli
+
+				chmod +x /usr/sbin/hostapd
+				chmod +x /usr/sbin/hostapd_cli
+
+				rm hostapd-*
+
 
 				#Enable wifi modules
 				/DietPi/dietpi/func/dietpi-set_hardware wifi enable
@@ -4886,7 +4925,7 @@ _EOF_
 			# - Create access point config
 			cat << _EOF_ > /etc/hostapd/hostapd.conf
 interface=wlan$wifi_index
-driver=rtl871xdrv
+driver=nl80211
 ssid=$(cat /DietPi/dietpi.txt | grep -m1 '^wifi_hotspot_ssid=' | sed 's/.*=//')
 hw_mode=g
 channel=$(cat /DietPi/dietpi.txt | grep -m1 '^wifi_hotspot_channel=' | sed 's/.*=//')
@@ -4899,6 +4938,13 @@ wpa_key_mgmt=WPA-PSK
 wpa_pairwise=TKIP
 rsn_pairwise=CCMP
 _EOF_
+
+			# - Check for RTL8188C* device, use the patched driver with compiled binary: https://github.com/pritambaral/hostapd-rtl871xdrv#why
+			if (( $WIFIHOTSPOT_RTL8188C_DEVICE )); then
+
+				sed -i "/^driver=/c\driver=rtl871xdrv" /etc/hostapd/hostapd.conf
+
+			fi
 
 			# - Enable access point config
 			cat << _EOF_ > /etc/default/hostapd
@@ -4917,14 +4963,12 @@ _EOF_
 			# - Save IP tables, applied during ifup in /etc/network/interfaces.
 			iptables-save > /etc/iptables.ipv4.nat
 
-
-			#RPi 3 - WiFi hotspot. Internal Wifi fix.
-			# - Disable driver definition
-			if (( $HW_MODEL == 3 )); then
-				sed -i '/driver=/c\#driver=none' /etc/hostapd/hostapd.conf
+			# - RPi 3 - onboard wifi, enable N
+			if (( $HW_MODEL == 3 && ! $WIFIHOTSPOT_RTL8188C_DEVICE )); then
 
 				# - Add Wireless N support
 				echo -e "ieee80211n=1" >> /etc/hostapd/hostapd.conf
+
 			fi
 
 
