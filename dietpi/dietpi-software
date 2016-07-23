@@ -78,6 +78,7 @@
 	#Special installation Vars
 	USER_EMONHUB_APIKEY_COMPLETED=0
 	USER_EMONHUB_APIKEY_CURRENT=0
+	WIFIHOTSPOT_RTL8188C_DEVICE=0
 
 	#DietPi Software
 	INSTALL_DIETPI_CHOICESMADE=0
@@ -426,6 +427,7 @@ CUBERITE=${CUBERITE:=0}
 MINEOS=${MINEOS:=0}
 GOGS=${GOGS:=0}
 QBITTORRENT=${QBITTORRENT:=0}
+SYNCTHING=${SYNCTHING:=0}
 
 #Additional Linux Software
 VIMFULL=${VIMFULL:=0}
@@ -1932,14 +1934,7 @@ INDEX_WEBSERVER_TARGET=${INDEX_WEBSERVER_TARGET:=-2}
 			INSTALL_DESCRIPTION='Wifi Hotspot'
 			Banner_Installing
 
-			#check source is online
-			# - NB: These are hostapd binaries with RTL drivers enabled.
-			# - armv6+
-			INSTALL_URL_ADDRESS='http://dietpi.com/downloads/binaries/all/hostapd_14128.zip'
-			# - arm64
-			if (( $HW_ARCH >= 10 && $HW_ARCH < 20 )); then
-				INSTALL_URL_ADDRESS='http://dietpi.com/downloads/binaries/all/hostapd_2.5-arm64.zip'
-			fi
+			INSTALL_URL_ADDRESS='http://dietpi.com/downloads/binaries/all/hostapd_2.5_all.zip'
 
 			/DietPi/dietpi/func/check_connection "$INSTALL_URL_ADDRESS"
 
@@ -1947,15 +1942,60 @@ INDEX_WEBSERVER_TARGET=${INDEX_WEBSERVER_TARGET:=-2}
 			if (( $? == 0 )); then
 
 				# - Prereqs
-				AGI hostapd isc-dhcp-server iptables
+				AGI hostapd isc-dhcp-server iptables libnl-3-200
 
-				# - For all devices, excluding RPi 3 inbuilt wifi, Install modified hostapd binary with RTL drivers enabled.
-				if (( $HW_MODEL != 3 )); then
-					wget "$INSTALL_URL_ADDRESS" -O package.zip
-					unzip -o package.zip -d /usr/sbin
-					rm package.zip
-					chmod +x /usr/sbin/hostapd
+				wget "$INSTALL_URL_ADDRESS" -O package.zip
+				unzip package.zip
+				rm package.zip
+
+				# - Check for RTL8188C* device, use the patched binary I compiled: https://github.com/pritambaral/hostapd-rtl871xdrv#why
+				if (( $(lsusb | grep -ci -m1 'RTL8188C') )); then
+
+					WIFIHOTSPOT_RTL8188C_DEVICE=1
+
 				fi
+
+				#Which binary to install
+				local filename_hostapd=''
+				local filename_hostapd_cli=''
+
+				# - armv6
+				if (( $HW_ARCH == 1 )); then
+
+					filename_hostapd='hostapd-nl80211-armv6'
+					filename_hostapd_cli='hostapd_cli-armv6'
+					if (( $WIFIHOTSPOT_RTL8188C_DEVICE )); then
+						filename_hostapd='hostapd-rtl8188c-armv6'
+					fi
+
+				# - armv7+
+				elif (( $HW_ARCH >= 2 && $HW_ARCH < 10 )); then
+
+					filename_hostapd='hostapd-nl80211-armv7'
+					filename_hostapd_cli='hostapd_cli-armv7'
+					if (( $WIFIHOTSPOT_RTL8188C_DEVICE )); then
+						filename_hostapd='hostapd-rtl8188c-armv7'
+					fi
+
+				# - arm64
+				elif (( $HW_ARCH >= 10 && $HW_ARCH < 20 )); then
+
+					filename_hostapd='hostapd-nl80211-arm64'
+					filename_hostapd_cli='hostapd_cli-arm64'
+					if (( $WIFIHOTSPOT_RTL8188C_DEVICE )); then
+						filename_hostapd='hostapd-rtl8188c-arm64'
+					fi
+
+				fi
+
+				mv "$filename_hostapd" /usr/sbin/hostapd
+				mv "$filename_hostapd_cli" /usr/sbin/hostapd_cli
+
+				chmod +x /usr/sbin/hostapd
+				chmod +x /usr/sbin/hostapd_cli
+
+				rm hostapd-*
+
 
 				#Enable wifi modules
 				/DietPi/dietpi/func/dietpi-set_hardware wifi enable
@@ -2442,6 +2482,54 @@ INDEX_WEBSERVER_TARGET=${INDEX_WEBSERVER_TARGET:=-2}
 
 		fi
 
+		#SYNCTHING
+		if (( $SYNCTHING == 1 )); then
+
+			INSTALL_DESCRIPTION='Syncthing'
+			Banner_Installing
+
+			#armv6+
+			if (( $HW_ARCH >= 1 && $HW_ARCH < 10 )); then
+
+				INSTALL_URL_ADDRESS='http://github.com/syncthing/syncthing/releases/download/v0.14.0/syncthing-linux-arm-v0.14.0.tar.gz'
+
+			#arm64
+			elif (( $HW_ARCH == 10 )); then
+
+				INSTALL_URL_ADDRESS='http://github.com/syncthing/syncthing/releases/download/v0.14.0/syncthing-linux-arm64-v0.14.0.tar.gz'
+
+			#x86_64
+			elif (( $HW_ARCH == 21 )); then
+
+				INSTALL_URL_ADDRESS='http://github.com/syncthing/syncthing/releases/download/v0.14.0/syncthing-linux-amd64-v0.14.0.tar.gz'
+			fi
+
+			#??
+			#For some reason checking connection (spider) against the files above fails.
+
+			#/DietPi/dietpi/func/check_connection "$INSTALL_URL_ADDRESS"
+			/DietPi/dietpi/func/check_connection http://github.com/syncthing/syncthing
+
+			#Install
+			if (( $? == 0 )); then
+
+				wget "$INSTALL_URL_ADDRESS" -O package.tar
+				tar xzvf package.tar
+				rm package.tar
+
+				mv syncthing-*/syncthing /usr/bin/
+				rm -R syncthing-*
+
+			else
+				Error_NoConnection_NoInstall
+
+				#Abort failed install
+				SYNCTHING=0
+			fi
+
+
+		fi
+
 	}
 
 	Install_Linux_Software(){
@@ -2886,6 +2974,8 @@ _EOF_
 		elif (( $SUBSONIC6 == 1 )); then
 			FFMPEG=1
 		elif (( $AMPACHE == 1 )); then
+			FFMPEG=1
+		elif (( $EMBYSERVER == 1 )); then
 			FFMPEG=1
 		fi
 
@@ -4837,7 +4927,7 @@ _EOF_
 			# - Create access point config
 			cat << _EOF_ > /etc/hostapd/hostapd.conf
 interface=wlan$wifi_index
-driver=rtl871xdrv
+driver=nl80211
 ssid=$(cat /DietPi/dietpi.txt | grep -m1 '^wifi_hotspot_ssid=' | sed 's/.*=//')
 hw_mode=g
 channel=$(cat /DietPi/dietpi.txt | grep -m1 '^wifi_hotspot_channel=' | sed 's/.*=//')
@@ -4850,6 +4940,13 @@ wpa_key_mgmt=WPA-PSK
 wpa_pairwise=TKIP
 rsn_pairwise=CCMP
 _EOF_
+
+			# - Check for RTL8188C* device, use the patched driver with compiled binary: https://github.com/pritambaral/hostapd-rtl871xdrv#why
+			if (( $WIFIHOTSPOT_RTL8188C_DEVICE )); then
+
+				sed -i "/^driver=/c\driver=rtl871xdrv" /etc/hostapd/hostapd.conf
+
+			fi
 
 			# - Enable access point config
 			cat << _EOF_ > /etc/default/hostapd
@@ -4868,14 +4965,12 @@ _EOF_
 			# - Save IP tables, applied during ifup in /etc/network/interfaces.
 			iptables-save > /etc/iptables.ipv4.nat
 
-
-			#RPi 3 - WiFi hotspot. Internal Wifi fix.
-			# - Disable driver definition
-			if (( $HW_MODEL == 3 )); then
-				sed -i '/driver=/c\#driver=none' /etc/hostapd/hostapd.conf
+			# - RPi 3 - onboard wifi, enable N
+			if (( $HW_MODEL == 3 && ! $WIFIHOTSPOT_RTL8188C_DEVICE )); then
 
 				# - Add Wireless N support
 				echo -e "ieee80211n=1" >> /etc/hostapd/hostapd.conf
+
 			fi
 
 
@@ -5235,6 +5330,7 @@ _EOF_
 			Create_UserContent_Folders
 			Download_Test_Media
 
+
 			EMBYSERVER=2
 
 		fi
@@ -5498,6 +5594,47 @@ _EOF_
 
 
 			QBITTORRENT=2
+
+		fi
+
+		#SYNCTHING
+		if (( $SYNCTHING == 1 )); then
+
+			# - run syncthing to create cert/config and exit
+			syncthing -generate="/$HOME/.config/syncthing"
+
+			# - Disable automatic upgrades
+			sed -i '/<\/autoUpgradeIntervalH>/c\        <autoUpgradeIntervalH>0<\/autoUpgradeIntervalH>' "$HOME"/.config/syncthing/config.xml
+
+			# - Allow external access (LAN).
+			sed -i '/:8384<\/address>/c\        <address>0.0.0.0:8384<\/address>' "$HOME"/.config/syncthing/config.xml
+
+			# - Set default folder
+			sed -i '/label=\"Default Folder/c\    <folder id=\"0000-0000\" label=\"DietPi user data\" path=\"/mnt/dietpi_userdata/\" type=\"readwrite\" rescanIntervalS=\"60\" ignorePerms=\"false\" autoNormalize=\"true\">' "$HOME"/.config/syncthing/config.xml
+
+			# - Disable browser starting
+			sed -i '/<\/startBrowser>/c\        <startBrowser>false<\/startBrowser>' "$HOME"/.config/syncthing/config.xml
+
+			# service
+			cat << _EOF_ > /etc/systemd/system/syncthing.service
+[Unit]
+Description=Syncthing
+
+[Service]
+Type=oneshot
+ExecStart=/bin/bash -c '/usr/bin/syncthing > /var/log/syncthing.log &'
+ExecStop=/usr/bin/killall -w syncthing
+RemainAfterExit=yes
+User=root
+
+[Install]
+WantedBy=multi-user.target
+_EOF_
+systemctl enable syncthing.service
+systemctl daemon-reload
+
+
+			SYNCTHING=2
 
 		fi
 
@@ -7273,6 +7410,15 @@ _EOF_
 			fi
 		fi
 
+		local syncthing_w="off"
+		if (( $SYNCTHING > 0 )); then
+			syncthing_w="on"
+			#Reset to 0. Menu checklists will apply back to 1
+			if (( $SYNCTHING == 1 )); then
+				SYNCTHING=0
+			fi
+		fi
+
 		#-----------------------------------------------------------------------------
 		WHIP_TITLE='DietPi Optimized Software Selection'
 
@@ -7304,6 +7450,7 @@ _EOF_
 			"" "────Cloud / Backups─────────────────────────" "off" \
 			"OwnCloud" "Your very own cloud (eg: dropbox)." $owncloud_w \
 			"Pydio" "Feature-rich backup and sync server" $pydio_w \
+			"Syncthing" "Backup and sync server with web interface." $syncthing_w \
 			"" "────Gaming──────────────────────────────────" "off" \
 			"MineOS" "Minecraft Servers with web interface (Java)" $mineos_w \
 			"" "────Social Media───────────────────────────" "off" \
@@ -7380,6 +7527,7 @@ _EOF_
 			"OwnCloud" "Your very own cloud (eg: dropbox)." $owncloud_w \
 			"Pydio" "Feature-rich backup and sync server" $pydio_w \
 			"Gogs" "Personal GitHub server with web interface" $gogs_w \
+			"Syncthing" "Backup and sync server with web interface." $syncthing_w \
 			"" "────Gaming──────────────────────────────────" "off" \
 			"Cuberite" "Minecraft Server with web interface (C++)" $cuberite_w \
 			"MineOS" "Minecraft Servers with web interface (Java)" $mineos_w \
@@ -7456,6 +7604,7 @@ _EOF_
 			"OwnCloud" "Your very own cloud (eg: dropbox)." $owncloud_w \
 			"Pydio" "Feature-rich backup and sync server" $pydio_w \
 			"Gogs" "Personal GitHub server with web interface" $gogs_w \
+			"Syncthing" "Backup and sync server with web interface." $syncthing_w \
 			"" "────Gaming──────────────────────────────────" "off" \
 			"Cuberite" "Minecraft Server with web interface (C++)" $cuberite_w \
 			"MineOS" "Minecraft Servers with web interface (Java)" $mineos_w \
@@ -7528,6 +7677,7 @@ _EOF_
 			"OwnCloud" "Your very own cloud (eg: dropbox)." $owncloud_w \
 			"Pydio" "Feature-rich backup and sync server" $pydio_w \
 			"Gogs" "Personal GitHub server with web interface" $gogs_w \
+			"Syncthing" "Backup and sync server with web interface." $syncthing_w \
 			"" "────Gaming──────────────────────────────────" "off" \
 			"Cuberite" "Minecraft Server with web interface (C++)" $cuberite_w \
 			"MineOS" "Minecraft Servers with web interface (Java)" $mineos_w \
@@ -7614,6 +7764,7 @@ _EOF_
 				"OwnCloud" "Your very own cloud (eg: dropbox)." $owncloud_w \
 				"Pydio" "Feature-rich backup and sync server" $pydio_w \
 				"Gogs" "Personal GitHub server with web interface" $gogs_w \
+				"Syncthing" "Backup and sync server with web interface." $syncthing_w \
 				"" "────Gaming──────────────────────────────────" "off" \
 				"OpenTyrian" "Gaming: A classic retro game, addictive." $opentyrian_w \
 				"Cuberite" "Minecraft Server with web interface (C++)" $cuberite_w \
@@ -7747,6 +7898,12 @@ _EOF_
 		do
 			case $choice in
 
+			Syncthing)
+				if (( $SYNCTHING == 0 )); then
+					SYNCTHING=1
+					INSTALL_DIETPI_CHOICESMADE=1
+				fi
+			;;
 			qBitTorrent)
 				if (( $QBITTORRENT == 0 )); then
 					QBITTORRENT=1
