@@ -70,7 +70,7 @@ Are you able to:
 If so, let us know!
 We are always looking for talented people who believe in the DietPi project, and, wish to contribute in any way you can.
 
-* Send me an Email: daniel_haze@hotmail.com
+* Send me an Email: daniel.knight@dietpi.com
 * Join our forums: http://dietpi.com/phpbb
 * Git Hub: https://github.com/Fourdee/DietPi
 
@@ -78,7 +78,7 @@ We are always looking for talented people who believe in the DietPi project, and
 
 ### DietPi GPLv2 License
 DietPi Copyright (C) 2016 Daniel Knight
-* Email daniel_haze@hotmail.com
+* Email daniel.knight@dietpi.com
 * Web http://dietpi.com
 
 This program is free software: you can redistribute it and/or modify
