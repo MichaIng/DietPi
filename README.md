@@ -19,6 +19,7 @@
 - Orange Pi PC: http://dietpi.com/phpbb/viewtopic.php?f=8&t=164#p612
 - BananaPi Pro: http://dietpi.com/phpbb/viewtopic.php?f=8&t=534
 - BananaPi M2+: http://dietpi.com/phpbb/viewtopic.php?f=8&t=431
+- NanoPi NEO: http://dietpi.com/phpbb/viewtopic.php?f=8&t=574#p2480
 - VMware x64 (Virtual Machine): http://dietpi.com/phpbb/viewtopic.php?f=8&t=90
 - VirtualBox x64 (Virtual Machine): http://dietpi.com/phpbb/viewtopic.php?f=8&t=390&p=1683#p1683
 
