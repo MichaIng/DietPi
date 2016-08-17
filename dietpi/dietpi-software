@@ -660,7 +660,7 @@ _EOF_
 			aSOFTWARE_CATEGORY_INDEX[$index_current]=3
 					  aSOFTWARE_TYPE[$index_current]=0
 		aSOFTWARE_REQUIRES_WEBSERVER[$index_current]=1
-		   aSOFTWARE_REQUIRES_FFMPEG[$index_current]=1
+		   #aSOFTWARE_REQUIRES_FFMPEG[$index_current]=1
 
 
 		#Cloud / Backups
@@ -4080,7 +4080,9 @@ _EOF_
 			#Install
 			if (( $? == 0 )); then
 
-				AGI rtorrent screen mediainfo
+				AGI rtorrent screen php5-curl #mediainfo
+
+				AGI unrar #https://github.com/Fourdee/DietPi/issues/176#issuecomment-240101365
 
 				wget "$INSTALL_URL_ADDRESS" -O package.zip
 				unzip package.zip
@@ -6823,51 +6825,93 @@ _EOF_
 			# - Apache2
 			if (( ${aSOFTWARE_INSTALL_STATE[83]} >= 1 )); then
 
-				echo 0
+				# - Allow overrides redirects and .htaccess
+				sed -i "/AllowOverride /c\    AllowOverride All" /etc/apache2/sites-enabled/000-default*
+				sed -i "/AllowOverride /c\    AllowOverride All" /etc/apache2/apache2.conf
+
+				a2enmod rewrite
+
+				#install scgi module
+				AGI libapache2-mod-scgi
+
+				htpasswd -cb /etc/.rutorrent-htaccess root dietpi
+				cat << _EOF_ > /var/www/rutorrent/.htaccess
+AuthUserFile /etc/.rutorrent-htaccess
+AuthName "ruTorrent_login"
+AuthType Basic
+require user root
+_EOF_
+
+				cat << _EOF_ > /etc/apache2/sites-available/rutorrent.conf
+SCGIMount /RPC2 127.0.0.1:5000
+<location /RPC2>
+AuthName "rTorrent secure access"
+AuthType Basic
+AuthBasicProvider file
+AuthUserFile /etc/.rutorrent-htaccess
+Require user root
+</location>
+_EOF_
+				ln -s /etc/apache2/sites-available/rutorrent.conf /etc/apache2/sites-enabled/rutorrent.conf
 
 			# - Lighttpd
 			elif (( ${aSOFTWARE_INSTALL_STATE[84]} >= 1 )); then
 
-				echo -e "root:rtorrent:$(echo -n "root:rtorrent:dietpi" | md5sum | cut -b -32)" > /etc/lighttpd/lighttpd-htdigest.user
-				chown www-data:www-data /etc/lighttpd/lighttpd-htdigest.user
-				chmod 400 /etc/lighttpd/lighttpd-htdigest.user
+				echo -e "root:rtorrent:$(echo -n "root:rtorrent:dietpi" | md5sum | cut -b -32)" > /etc/.rutorrent-htaccess
 
 				# - add to /etc/lighttpd/lighttpd.conf
-				cat << _EOF_ >> /etc/lighttpd/lighttpd.conf
+				if (( ! $(cat /etc/lighttpd/lighttpd.conf | grep -ci -m1 '^#RUTORRENT_DIETPI') )); then
+
+					cat << _EOF_ >> /etc/lighttpd/lighttpd.conf
 #RUTORRENT_DIETPI
+server.modules += ( "mod_fastcgi" )
+server.modules += ( "mod_scgi" )
 server.modules += ( "mod_auth" )
-   auth.debug = 0
-   auth.backend = "htdigest"
-   auth.backend.htdigest.userfile = "/etc/lighttpd/lighttpd-htdigest.user"
+auth.debug = 0
+auth.backend = "htdigest"
+auth.backend.htdigest.userfile = "/etc/.rutorrent-htaccess"
 
 auth.require = ( "/rutorrent/" => (
                     "method"  => "digest",
                     "realm"   => "rtorrent",
                     "require" => "valid-user"
-                  ))
+               ))
+
+scgi.server = ( "/RPC2" =>
+    ( "127.0.0.1" =>
+        (
+            "host" => "127.0.0.1",
+            "port" => 5000,
+            "check-local" => "disable"
+        )
+    )
+)
 #RUTORRENT_DIETPI
 _EOF_
+
+				fi
 
 			# - Nginx
 			elif (( ${aSOFTWARE_INSTALL_STATE[85]} >= 1 )); then
 
-cat << _EOF_ > /etc/nginx/sites-dietpi/rutorrent.config
-#RUTORRENT
+				echo "root:$(openssl passwd -crypt dietpi)" > /etc/.rutorrent-htaccess
+
+				cat << _EOF_ > /etc/nginx/sites-dietpi/rutorrent.config
 location /rutorrent {
     auth_basic "Restricted Content";
-    auth_basic_user_file /etc/nginx/.htpasswd;
+    auth_basic_user_file /etc/.rutorrent-htaccess;
 }
 
 location /RPC2 {
     include scgi_params;
     scgi_pass 127.0.0.1:5000;
 }
-#RUTORRENT
 _EOF_
 
-				echo "root:$(openssl passwd -crypt dietpi)" > /etc/nginx/.htpasswd
-
 			fi
+
+			chown www-data:www-data /etc/.rutorrent-htaccess
+			chmod 400 /etc/.rutorrent-htaccess
 
 			chown -R www-data:www-data /var/www/rutorrent
 
@@ -7733,13 +7777,17 @@ _EOF_
 			rm /etc/systemd/system/rtorrent.service
 
 			# - webserver rutorrent user/pw settings
+			rm /etc/.rutorrent-htaccess
+
 			#	lighttpd
-			rm /etc/lighttpd/lighttpd-htdigest.user
 			#Remove from
 			#RUTORRENT_DIETPI to #RUTORRENT_DIETPI in /etc/lighttpd/lighttpd.conf
 
 			#	nginx
 			rm /etc/nginx/sites-dietpi/rutorrent.config
+
+			#	apache2
+			rm /etc/apache2/sites-available/rutorrent.conf
 
 		#----------------------------------------------------------------------
 		#LINUX SOFTWARE
