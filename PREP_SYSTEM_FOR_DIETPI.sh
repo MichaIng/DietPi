@@ -3,9 +3,9 @@
 # Setup a Debian installation, for DietPi.
 #------------------------------------------------------------------------------------------------
 # NOTICE: Images created by non-DietPi staff, will NOT be officially supported by DietPi, unless authorized by DietPi.
-# NOTICE: There is no offical support for using this script/notes. However, expections may be made.
+# NOTICE: There is no offical support for using these script/notes. However, expections may be made.
 #------------------------------------------------------------------------------------------------
-# Before starting, copy the following files to /boot/ https://github.com/Fourdee/DietPi
+# Before starting, copy the following files and folders to /boot/ https://github.com/Fourdee/DietPi
 #  - /boot/dietpi.txt (file)
 #  - /boot/config.txt (file)
 #  - /boot/dietpi (folder)
@@ -350,7 +350,7 @@ _EOF_
 # If you are not creating a pull request for this, then:
 #
 # Email:
-#	daniel.knight@dietpi.com
+#	Address='daniel.knight@dietpi.com'
 #	Subject title='Unique HW_MODEL Index Request [DEVICENAME]' | Where DEVICENAME could be 'Odroid C3'
 #------------------------------------------------------------------------------------------------
 
