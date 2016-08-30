@@ -107,6 +107,9 @@ apt-get install -y bluetooth
 #firmware
 apt-get install -y firmware-realtek firmware-ralink firmware-brcm80211 firmware-atheros -y --no-install-recommends
 
+#Delete any non-root user (eg: pi)
+userdel -f pi
+
 #Remove folders
 rm -R /home
 rm -R /media
@@ -125,7 +128,7 @@ echo -e "FTP client mount can be installed and setup by DietPi-Config.\nSimply r
 /boot/dietpi/dietpi-logclear 2
 
 #FSTAB
-# - Check if /boot is vfat, else change accordingly
+# - Check if /boot is vfat. If not, change fstab accordingly
 blkid | grep '/dev/mmcblk0p1'
 cp /boot/dietpi/conf/fstab /etc/fstab
 
@@ -159,7 +162,7 @@ _EOF_
 rm /etc/cron.daily/ntp &> /dev/null
 rm /etc/init.d/ntp &> /dev/null
 
-#/etc/sysctl.conf | Check for a previous entry before running this
+#/etc/sysctl.conf | Check for a previous entry before adding this
 echo -e "vm.swappiness=1" >> /etc/sysctl.conf
 
 #----------------------------------------------------
