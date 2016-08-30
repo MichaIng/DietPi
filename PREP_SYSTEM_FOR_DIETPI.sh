@@ -354,3 +354,13 @@ _EOF_
 #	Subject title='Unique HW_MODEL Index Request [DEVICENAME]' | Where DEVICENAME could be 'Odroid C3'
 #------------------------------------------------------------------------------------------------
 
+#Once you have the updated sourcecode, update the file '/DietPi/dietpi/dietpi-obtain_hw_model'
+
+#Finalise system
+/DietPi/dietpi/finalise
+
+#Power off system
+
+#Read image
+
+#Resize 2nd parition to mininum size +50MB
