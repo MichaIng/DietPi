@@ -41,14 +41,19 @@ Current contributors:
 Contributions to the DietPi in general, including sourcecode, testing, new devices. Forum moderator.
 * K-Plan - Joined 01/01/2016
 Contributions to the DietPi in general, including In-depth testing, bug finding and valuable feedback. Forum moderator.
-* xenfomation - Joined 01/04/2016
-Contributions to the DietPi in general, including sourcecode, virtualBox image creation/conversion.
 * ZombieVirus - Joined 20/03/2016
 DietPi forum moderator and version history maintainer on forums.
+
+Collaborations:
+* DietPi + AmiBerry 02/09/2016
+Joint venture to bring you the ultimate Amiga experience on your SBC, running lightweight and optmized DietPi at its core.
+https://github.com/Fourdee/DietPi/issues/474
 
 Previous contributors:
 * Pilovali - Joined 10/10/2015
 Provided DietPi.com web hosting for 1 year until April 17th 2016, forum moderator, testing, bug reporting.
+* xenfomation - Joined 01/04/2016
+Contributions to the DietPi in general, including sourcecode, virtualBox image creation/conversion.
 
 Honourable mentions/thanks:
 * A personal thanks to Pilovali for helping DietPi during our early days with desperately needed webhosting.
