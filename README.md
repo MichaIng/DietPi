@@ -65,6 +65,7 @@ Honourable mentions/thanks:
 
 Coders (Git):
 Please use the active development branch "testing": https://github.com/Fourdee/DietPi/tree/testing
+* Adding new software installation options to DietPi-Software: https://github.com/Fourdee/DietPi/issues/490#issuecomment-244416570
 
 Are you able to:
 * Provide feedback and/or test areas of DietPi, to improve the user experience.
