@@ -1,4 +1,6 @@
 # DietPi
+
+[![Join the chat at https://gitter.im/DietPi/Lobby](https://badges.gitter.im/DietPi/Lobby.svg)](https://gitter.im/DietPi/Lobby?utm_source=badge&utm_medium=badge&utm_campaign=pr-badge&utm_content=badge)
 ![DietPi](http://dietpi.com/images/dietpi-logo_black_150.png)
 
 #### Lightweight justice for your single-board computer:
