@@ -100,7 +100,7 @@ apt-get autoremove --purge -y
 
 #install
 echo -e "CONF_SWAPSIZE=0" > /etc/dphys-swapfile
-apt-get install -y usbmount iw debconf-utils xz-utils ifmetric fbset wpasupplicant resolvconf bc dbus bzip2 psmisc bash-completion cron whiptail sudo ntp ntfs-3g dosfstools parted hdparm pciutils usbutils zip htop wput wget fake-hwclock dphys-swapfile curl unzip ca-certificates console-setup console-data console-common keyboard-configuration wireless-tools wireless-regdb crda --no-install-recommends
+apt-get install -y iw debconf-utils xz-utils ifmetric fbset wpasupplicant resolvconf bc dbus bzip2 psmisc bash-completion cron whiptail sudo ntp ntfs-3g dosfstools parted hdparm pciutils usbutils zip htop wput wget fake-hwclock dphys-swapfile curl unzip ca-certificates console-setup console-data console-common keyboard-configuration wireless-tools wireless-regdb crda --no-install-recommends
 #??? bluetooth if onboard device
 apt-get install -y bluetooth
 
@@ -120,6 +120,10 @@ rm -R /tmp/*
 mkdir /DietPi
 mkdir -p /mnt/dietpi_userdata
 mkdir -p /mnt/usb_1
+mkdir -p /mnt/usb_2
+mkdir -p /mnt/usb_3
+mkdir -p /mnt/usb_4
+mkdir -p /mnt/usb_5
 mkdir -p /mnt/samba
 mkdir -p /mnt/ftp_client
 echo -e "Samba client can be installed and setup by DietPi-Config.\nSimply run: dietpi-config" > /mnt/samba/readme.txt
