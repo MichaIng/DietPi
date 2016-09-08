@@ -100,7 +100,7 @@ apt-get autoremove --purge -y
 
 #install
 echo -e "CONF_SWAPSIZE=0" > /etc/dphys-swapfile
-apt-get install -y iw debconf-utils xz-utils ifmetric fbset wpasupplicant resolvconf bc dbus bzip2 psmisc bash-completion cron whiptail sudo ntp ntfs-3g dosfstools parted hdparm pciutils usbutils zip htop wput wget fake-hwclock dphys-swapfile curl unzip ca-certificates console-setup console-data console-common keyboard-configuration wireless-tools wireless-regdb crda --no-install-recommends
+apt-get install -y hfsplus iw debconf-utils xz-utils ifmetric fbset wpasupplicant resolvconf bc dbus bzip2 psmisc bash-completion cron whiptail sudo ntp ntfs-3g dosfstools parted hdparm pciutils usbutils zip htop wput wget fake-hwclock dphys-swapfile curl unzip ca-certificates console-setup console-data console-common keyboard-configuration wireless-tools wireless-regdb crda --no-install-recommends
 #??? bluetooth if onboard device
 apt-get install -y bluetooth
 
