@@ -124,33 +124,54 @@
 
 			#Add root delay to RPi (Prevents slow powering external drives, from failing to be ready and mountable during boot.)
 			if (( $HW_MODEL < 10 )) &&
-				(( $(cat /boot/cmdline.txt | grep -ci -m1 'rootdelay=') == 0 )); then
+				(( ! $(cat /boot/cmdline.txt | grep -ci -m1 'rootdelay=') )); then
+
 				sed -i "s/rootwait/rootwait rootdelay=10/g" /boot/cmdline.txt &> /dev/null
+
 			fi
+
+			#Set UUID
+			local current_device_location=$(cat /etc/fstab | grep -m1 "/mnt/usb_1" | awk '{print $1}')
+			local uuid_device_location=$(blkid /dev/sda1 -s UUID -o value)
+			sed -i "s@^$current_device_location@UUID=$uuid_device_location@g" /etc/fstab
+
+			systemctl daemon-reload
 
 			#Update .installed file
 			if [ -f /DietPi/dietpi/.installed ]; then
+
 				sed -i '/USBDRIVE=/c\USBDRIVE=2' /DietPi/dietpi/.installed
+
 			fi
 
 			if (( $INPUT == 0 )); then
+
 				whiptail --title "Dedicated Drive Completed" --msgbox "Dedicated USB harddrive setup completed successfully:\n\nFilesystem      Size  Used Avail Use% Mounted on\n$(df -Ph | grep '/mnt/usb_1')" --backtitle "DietPi-External Drive Setup" 12 70
+
 			fi
+
 			RUNNING_SETUP=0
 
 		#Failed to mount
 		else
 
 			if (( $INPUT == 0 )); then
+
 				whiptail --title "Error - Not Mounted" --yesno "DietPi was unable to complete the external USB harddrive setup. The drive may have incompatible partitions and/or filesystem. Formatting the drive may resolve the issue.\n\nWould you like to try again?" --defaultno --backtitle "DietPi-External Drive Setup" 11 70
 				CHOICE=$?
 				if (( $CHOICE == 0 )); then
+
 					#Run again
 					RUNNING_SETUP=1
+
 				else
+
 					RUNNING_SETUP=0
+
 				fi
+
 			fi
+
 		fi
 
 	}
@@ -176,6 +197,7 @@
 
 	#Menus
 	Menu_Format(){
+
 		#Confirm user wants to wipe this drive
 		clear
 		echo -e " --------------------------------\n D I E T - P I \n External Drive Setup \n --------------------------------"
@@ -183,10 +205,377 @@
 		echo -e " \n WARNING: This will delete all data on the USB drive \n \n"
 		read -r -p " Do you wish to Format this drive? [y/N] " response
 		case $response in
+
 			[yY][eE][sS]|[yY])
+
 				Run_Format
+
 			;;
+
 		esac
+
+	}
+
+	TARGETMENUID=0
+	MENU_LASTITEM=''
+
+	MAXDRIVES=5
+
+	INDEX_DRIVE_BEING_EDITED=0
+
+
+	aDRIVE_UUID=()
+	aDRIVE_MOUNT_SOURCE=()
+	aDRIVE_MOUNT_TARGET=()
+	aDRIVE_FSTYPE=()
+	aDRIVE_SIZE_TOTAL=()
+	aDRIVE_SIZE_USED=()
+	aDRIVE_SIZE_PERCENTUSED=()
+	aDRIVE_SIZE_FREE=()
+
+	aDRIVE_ISAVAILABLE=()
+	aDRIVE_ISMOUNTED=()
+	aDRIVE_ISUUIDMOUNT=()
+
+
+	Refresh_Drives(){
+
+		for ((i=0; i<$MAXDRIVES; i++))
+		do
+
+			local drive_mount_source_char_index=$(( 97 + $i )) #a-z char index
+			local drive_mount_source_char_target=$(printf "\x$(printf %x $drive_mount_source_char_index)") #get char output from index
+
+			aDRIVE_MOUNT_SOURCE[$i]="/dev/sd$drive_mount_source_char_target"'1'
+			aDRIVE_MOUNT_TARGET[$i]="/mnt/usb_$(( $i + 1 ))"
+
+			# - init
+			aDRIVE_UUID[$i]='NULL'
+			aDRIVE_FSTYPE[$i]='NULL'
+			aDRIVE_SIZE_TOTAL[$i]='NULL'
+			aDRIVE_SIZE_USED[$i]='NULL'
+			aDRIVE_SIZE_FREE[$i]='NULL'
+			aDRIVE_SIZE_PERCENTUSED[$i]='NULL'
+
+			aDRIVE_ISMOUNTED[$i]=0
+			aDRIVE_ISAVAILABLE[$i]=0
+			aDRIVE_ISUUIDMOUNT[$i]=0
+
+			# - Is the drive available (listed in blkid)?
+			local cmd_scrape_string=$(blkid "${aDRIVE_MOUNT_SOURCE[$i]}")
+			if [ -n "$cmd_scrape_string" ]; then
+
+				aDRIVE_ISAVAILABLE[$i]=1
+
+			fi
+
+			# - UUID
+			local cmd_scrape_string=$(blkid "${aDRIVE_MOUNT_SOURCE[$i]}" -s UUID -o value)
+			if [ -n "$cmd_scrape_string" ]; then
+
+				aDRIVE_UUID[$i]="$cmd_scrape_string"
+
+			fi
+
+			cmd_scrape_string=$(blkid "${aDRIVE_MOUNT_SOURCE[$i]}" -s TYPE -o value)
+			if [ -n "$cmd_scrape_string" ]; then
+
+				aDRIVE_FSTYPE[$i]="$cmd_scrape_string"
+
+			fi
+
+			#Mount method: UUID or /dev/sd?
+			local current_mount_location=$(cat /etc/fstab | grep -m1 "${aDRIVE_MOUNT_TARGET[$i]}" | awk '{print $1}' | sed 's/.*=//')
+			if [ "$current_mount_location" = "${aDRIVE_UUID[$i]}" ]; then
+
+				aDRIVE_ISUUIDMOUNT[$i]=1
+
+			fi
+
+			#mounted drive, pull size data
+			cmd_scrape_string=$(df -Ph | grep -m1 "${aDRIVE_MOUNT_TARGET[$i]}" | awk '{print $2}')
+			if [ -n "$cmd_scrape_string" ]; then
+
+				aDRIVE_SIZE_TOTAL[$i]="$cmd_scrape_string"
+				aDRIVE_ISMOUNTED[$i]=1
+
+			fi
+
+			cmd_scrape_string=$(df -Ph | grep -m1 "${aDRIVE_MOUNT_TARGET[$i]}" | awk '{print $3}')
+			if [ -n "$cmd_scrape_string" ]; then
+
+				aDRIVE_SIZE_USED[$i]="$cmd_scrape_string"
+
+			fi
+
+			cmd_scrape_string=$(df -Ph | grep -m1 "${aDRIVE_MOUNT_TARGET[$i]}" | awk '{print $4}')
+			if [ -n "$cmd_scrape_string" ]; then
+
+				aDRIVE_SIZE_FREE[$i]="$cmd_scrape_string"
+
+			fi
+
+			cmd_scrape_string=$(df -Ph | grep -m1 "${aDRIVE_MOUNT_TARGET[$i]}" | awk '{print $5}')
+			if [ -n "$cmd_scrape_string" ]; then
+
+				aDRIVE_SIZE_PERCENTUSED[$i]="$cmd_scrape_string"
+
+			fi
+
+		done
+
+	}
+
+	Menu_Main_Drive_Manager(){
+
+		Refresh_Drives
+
+		#Generate menu
+		local whiptail_menu_array=()
+		local drive_available=0
+		for ((i=0; i<$MAXDRIVES; i++))
+		do
+
+			if (( ${aDRIVE_ISAVAILABLE[$i]} )); then
+
+				drive_available=1
+
+				#Drive is fully mounted:
+				if (( ${aDRIVE_ISMOUNTED[$i]} )); then
+
+					#| ${aDRIVE_UUID[$i]}
+					whiptail_menu_array+=("${aDRIVE_MOUNT_TARGET[$i]}" "${aDRIVE_MOUNT_SOURCE[$i]} | ${aDRIVE_FSTYPE[$i]} | Size: ${aDRIVE_SIZE_TOTAL[$i]} | Used: ${aDRIVE_SIZE_USED[$i]} (${aDRIVE_SIZE_PERCENTUSED[$i]})")
+
+				#Not mounted, why?
+				else
+
+					#Drive has no FS:
+					if [ "${aDRIVE_FSTYPE[$i]}" == "NULL" ]; then
+
+						whiptail_menu_array+=("${aDRIVE_MOUNT_TARGET[$i]}" "${aDRIVE_MOUNT_SOURCE[$i]} | No filesystem / format required")
+
+					#Drive is not mounted:
+					else
+
+						whiptail_menu_array+=("${aDRIVE_MOUNT_TARGET[$i]}" "${aDRIVE_MOUNT_SOURCE[$i]} | ${aDRIVE_FSTYPE[$i]} | Not mounted")
+
+					fi
+
+				fi
+
+			fi
+
+		done
+
+		if (( ! $drive_available )); then
+
+			whiptail_menu_array+=("Refresh" "No drives found. Insert a drive and select this option")
+
+		else
+
+			whiptail_menu_array+=("Refresh" "Scan for recently added/removed drives")
+
+		fi
+
+		WHIP_TITLE='DietPi - External Drive Manager'
+		OPTION=$(whiptail --title "$WHIP_TITLE" --menu "Please select a drive to see available options:" --default-item "$MENU_LASTITEM" --cancel-button "Exit" 16 80 5 "${whiptail_menu_array[@]}" 3>&1 1>&2 2>&3)
+
+		CHOICE=$?
+
+		unset whiptail_menu_array
+
+		if (( $CHOICE == 0 )); then
+
+			MENU_LASTITEM="$OPTION"
+
+			#Refresh
+			if [ "$OPTION" = "Refresh" ]; then
+
+				echo -e "do nothing" &> /dev/null
+
+			#Edit drive
+			else
+
+				Refresh_Drives
+
+				#Match selected mount target against index
+				for ((i=0; i<$MAXDRIVES; i++))
+				do
+
+					if [ "$OPTION" = "${aDRIVE_MOUNT_TARGET[$i]}" ]; then
+
+						# - Check if drive is still attached and available
+						if (( ${aDRIVE_ISAVAILABLE[$i]} )); then
+
+							INDEX_DRIVE_BEING_EDITED=$i
+							TARGETMENUID=1
+							break
+
+						else
+
+							whiptail --title "Info: No drive" --msgbox "This drive is no longer available" 8 60
+							break
+
+						fi
+
+					fi
+
+				done
+
+			fi
+
+		#Exit
+		else
+
+			TARGETMENUID=-1
+
+		fi
+
+	}
+
+	Menu_Drive_Manager_Edit_Drive(){
+
+		Refresh_Drives
+
+		#Return to this menu
+		TARGETMENUID=1
+
+		#Generate menu
+		local whiptail_desc=()
+		local whiptail_menu_array=()
+		local current_userdata_dir=$(/DietPi/dietpi/func/dietpi-set_userdata return_source)
+
+		whiptail_desc+="Mount target: ${aDRIVE_MOUNT_TARGET[$INDEX_DRIVE_BEING_EDITED]}\n"
+		whiptail_desc+="Mount source: ${aDRIVE_MOUNT_SOURCE[$INDEX_DRIVE_BEING_EDITED]}\n"
+
+		if (( ${aDRIVE_ISUUIDMOUNT[$INDEX_DRIVE_BEING_EDITED]} )); then
+
+			whiptail_desc+="Mount method: UUID (Permanent: Drive will always mount to ${aDRIVE_MOUNT_TARGET[$INDEX_DRIVE_BEING_EDITED]})\n"
+
+		else
+
+			whiptail_desc+="Mount method: /dev/sd (Warning: mount location not permanent, use UUID)\n"
+
+		fi
+
+		whiptail_desc+="Filesystem:   ${aDRIVE_FSTYPE[$INDEX_DRIVE_BEING_EDITED]}\n"
+		whiptail_desc+="UUID:         ${aDRIVE_UUID[$INDEX_DRIVE_BEING_EDITED]}\n"
+
+		if (( ${aDRIVE_ISMOUNTED[$INDEX_DRIVE_BEING_EDITED]} )); then
+
+			whiptail_desc+="Capacity:     ${aDRIVE_SIZE_TOTAL[$INDEX_DRIVE_BEING_EDITED]}b\n"
+			whiptail_desc+="Used:         ${aDRIVE_SIZE_USED[$INDEX_DRIVE_BEING_EDITED]}b (${aDRIVE_SIZE_PERCENTUSED[$INDEX_DRIVE_BEING_EDITED]})\n"
+
+			whiptail_menu_array+=("Unmount" ": Allows you to psyhically remove the drive")
+
+			# if [ "$current_userdata_dir" = "${aDRIVE_MOUNT_TARGET[$INDEX_DRIVE_BEING_EDITED]}" ]; then
+
+				# whiptail_menu_array+=("Userdata" ": Your user data is currently located on this drive")
+
+			# else
+
+				# whiptail_menu_array+=("Move userdata" ": Move your DietPi userdata to this drive")
+
+			# fi
+
+		else
+
+			whiptail_desc+="Status:       Drive is not mounted and can be unplugged\n"
+
+			whiptail_menu_array+=("Mount" ": Mount the drive to ${aDRIVE_MOUNT_TARGET[$INDEX_DRIVE_BEING_EDITED]}")
+
+		fi
+
+
+		if (( ${aDRIVE_ISUUIDMOUNT[$INDEX_DRIVE_BEING_EDITED]} )); then
+
+			whiptail_menu_array+=("Mount Method" ": Change from UUID to /dev/sd")
+
+		else
+
+			whiptail_menu_array+=("Mount Method" ": Change from /dev/sd to UUID")
+
+		fi
+
+		whiptail_menu_array+=("Format" ": Wipe all data and format drive with ext4")
+
+		WHIP_TITLE='DietPi - External Drive Manager'
+		OPTION=$(whiptail --title "$WHIP_TITLE" --menu "$whiptail_desc" --default-item "$MENU_LASTITEM" --cancel-button "Back" 18 80 4 "${whiptail_menu_array[@]}" 3>&1 1>&2 2>&3)
+
+		CHOICE=$?
+
+		unset whiptail_desc
+		unset whiptail_menu_array
+
+		if (( $CHOICE == 0 )); then
+
+			if [ "$OPTION" = "Mount" ]; then
+
+				mount -a
+
+			elif [ "$OPTION" = "Unmount" ]; then
+
+				umount "UUID=${aDRIVE_UUID[$INDEX_DRIVE_BEING_EDITED]}"
+
+			elif [ "$OPTION" = "Mount Method" ]; then
+
+				if (( ${aDRIVE_ISUUIDMOUNT[$INDEX_DRIVE_BEING_EDITED]} )); then
+
+					sed -i "s@^UUID=${aDRIVE_UUID[$INDEX_DRIVE_BEING_EDITED]}@${aDRIVE_MOUNT_SOURCE[$INDEX_DRIVE_BEING_EDITED]}@g" /etc/fstab
+
+				else
+
+					sed -i "s@^${aDRIVE_MOUNT_SOURCE[$INDEX_DRIVE_BEING_EDITED]}@UUID=${aDRIVE_UUID[$INDEX_DRIVE_BEING_EDITED]}@g" /etc/fstab
+
+				fi
+
+				systemctl daemon-reload
+
+			elif [ "$OPTION" = "Move userdata" ]; then
+
+				whiptail --title "Move user data" --yesno "Your user data will be moved:\n - From: $current_userdata_dir/dietpi_userdata\n - To: ${aDRIVE_MOUNT_TARGET[$INDEX_DRIVE_BEING_EDITED]}/dietpi_userdata\n\nDo you wish to continue?" --backtitle "DietPi" --defaultno 12 70
+				if (( $CHOICE == 0 )); then
+
+					/DietPi/dietpi/func/dietpi-set_userdata "$current_userdata_dir" "${aDRIVE_MOUNT_TARGET[$INDEX_DRIVE_BEING_EDITED]}"
+					sleep 1
+
+				fi
+
+			elif [ "$OPTION" = "Format" ]; then
+
+				whiptail --title "Format" --yesno "Format Drive:\n - ${aDRIVE_MOUNT_SOURCE[$INDEX_DRIVE_BEING_EDITED]}\n - UUID=${aDRIVE_UUID[$INDEX_DRIVE_BEING_EDITED]}\n\nDo you wish to continue and DELETE ALL DATA ON THIS DRIVE?" --backtitle "DietPi" --defaultno 12 70
+				CHOICE=$?
+				if (( $CHOICE == 0 )); then
+
+					# - Unmount drive
+					umount ${aDRIVE_MOUNT_SOURCE[$INDEX_DRIVE_BEING_EDITED]}
+
+					# - Clear MBR and partition table from device
+					local drivepath_no_partitions=$(echo -e "${aDRIVE_MOUNT_SOURCE[$INDEX_DRIVE_BEING_EDITED]}" | sed 's/[0-9]*//g')
+					dd if=/dev/zero of=$drivepath_no_partitions bs=512 count=1
+
+					# - Create New partition on /dev/sda
+					echo -e "o\nn\np\n1\n\n\nw" | fdisk $drivepath_no_partitions
+					#partprobe
+
+					# - Format ext4
+					umount ${aDRIVE_MOUNT_SOURCE[$INDEX_DRIVE_BEING_EDITED]}
+					echo -e "y" | mkfs.ext4 ${aDRIVE_MOUNT_SOURCE[$INDEX_DRIVE_BEING_EDITED]}
+					resize2fs ${aDRIVE_MOUNT_SOURCE[$INDEX_DRIVE_BEING_EDITED]}
+					mount -a
+					chown -R root:root ${aDRIVE_MOUNT_TARGET[$INDEX_DRIVE_BEING_EDITED]}
+
+				fi
+
+			fi
+
+		#Exit
+		else
+
+			TARGETMENUID=0
+
+		fi
+
 	}
 
 	#/////////////////////////////////////////////////////////////////////////////////////
@@ -194,17 +583,55 @@
 	#/////////////////////////////////////////////////////////////////////////////////////
 	#Menu
 	if (( $INPUT == 0 )); then
+
 		while (( $RUNNING_SETUP == 1 )); do
+
 			Run_Setup
+
 		done
 
 	#Automated format
 	elif (( $INPUT == 1 )); then
+
 		Wait_For_Drive_Connection
 		Run_Format
 		Finish_Setup
-	fi
 
+
+	#Testing
+	elif (( $INPUT == 2 )); then
+
+		while (( $TARGETMENUID > -1 )); do
+
+			clear
+
+			if (( $TARGETMENUID == 0 )); then
+
+				Menu_Main_Drive_Manager
+
+			elif (( $TARGETMENUID == 1 )); then
+
+				Menu_Drive_Manager_Edit_Drive
+
+			fi
+
+		done
+
+		#Delete []
+		unset aDRIVE_MOUNT_SOURCE
+		unset aDRIVE_MOUNT_TARGET
+		unset aDRIVE_FSTYPE
+		unset aDRIVE_SIZE_TOTAL
+		unset aDRIVE_SIZE_USED
+		unset aDRIVE_SIZE_PERCENTUSED
+		unset aDRIVE_SIZE_FREE
+		unset aDRIVE_UUID
+
+		unset aDRIVE_ISMOUNTED
+		unset aDRIVE_ISAVAILABLE
+		unset aDRIVE_ISUUIDMOUNT
+
+	fi
 	#-----------------------------------------------------------------------------------
 	exit
 	#-----------------------------------------------------------------------------------
