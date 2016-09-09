@@ -118,16 +118,21 @@ rm -R /tmp/*
 #DIETPI STUFF
 #Create folders
 mkdir /DietPi
+
 mkdir -p /mnt/dietpi_userdata
+
 mkdir -p /mnt/usb_1
 mkdir -p /mnt/usb_2
 mkdir -p /mnt/usb_3
 mkdir -p /mnt/usb_4
 mkdir -p /mnt/usb_5
+
 mkdir -p /mnt/samba
 mkdir -p /mnt/ftp_client
-echo -e "Samba client can be installed and setup by DietPi-Config.\nSimply run: dietpi-config" > /mnt/samba/readme.txt
-echo -e "FTP client mount can be installed and setup by DietPi-Config.\nSimply run: dietpi-config" > /mnt/ftp_client/readme.txt
+mkdir -p /mnt/nfs_client
+echo -e "Samba client can be installed and setup by DietPi-Config.\nSimply run: dietpi-config and select the Networking Options: NAS/Misc menu" > /mnt/samba/readme.txt
+echo -e "FTP client mount can be installed and setup by DietPi-Config.\nSimply run: dietpi-config and select the Networking Options: NAS/Misc menu" > /mnt/ftp_client/readme.txt
+echo -e "NFS client can be installed and setup by DietPi-Config.\nSimply run: dietpi-config and select the Networking Options: NAS/Misc menu" > /mnt/nfs_client/readme.txt
 
 /boot/dietpi/dietpi-logclear 2
 
