@@ -259,6 +259,7 @@ alias dietpi-services='/DietPi/dietpi/dietpi-services'
 alias dietpi-config='/DietPi/dietpi/dietpi-config'
 alias dietpi-software='/DietPi/dietpi/dietpi-software'
 alias dietpi-update='/DietPi/dietpi/dietpi-update'
+alias dietpi-drive_manager='/DietPi/dietpi/dietpi-drive_manager'
 alias emulationstation='/opt/retropie/supplementary/emulationstation/emulationstation'
 alias opentyrian='/usr/local/games/opentyrian/run'
 
