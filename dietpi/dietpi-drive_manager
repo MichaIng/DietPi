@@ -37,7 +37,7 @@
 
 	PROGRAM_NAME='DietPi-Drive Manager'
 
-	MAXDRIVES=5
+	MAX_DRIVES=5
 	FORMAT_GPT=0
 
 	INDEX_DRIVE_BEING_EDITED=0
@@ -58,17 +58,10 @@
 
 	Init_and_Refresh_Drives(){
 
-		for ((i=0; i<$MAXDRIVES; i++))
+		for ((i=0; i<$MAX_DRIVES; i++))
 		do
-
-			local drive_mount_source_char_index=$(( 97 + $i )) #a-z char index
-			local drive_mount_source_char_target=$(printf "\x$(printf %x $drive_mount_source_char_index)") #get char output from index
-
-			aDRIVE_MOUNT_SOURCE[$i]="/dev/sd$drive_mount_source_char_target"'1'
-			aDRIVE_MOUNT_TARGET[$i]="/mnt/usb_$(( $i + 1 ))"
-
 			# - init
-			aDRIVE_UUID[$i]='Unknown'
+			aDRIVE_UUID[$i]='None'
 			aDRIVE_FSTYPE[$i]='No filesystem'
 			aDRIVE_SIZE_TOTAL[$i]='NULL'
 			aDRIVE_SIZE_USED[$i]='NULL'
@@ -80,68 +73,88 @@
 			aDRIVE_ISAVAILABLE[$i]=0
 			aDRIVE_ISUUIDMOUNT[$i]=0
 
-			# - Is the drive available (via sys block)?
+			#Enable automount on all slots (disable unused on exit)
+			# - Grab slot number
+			local line_number=$(cat /etc/fstab | grep -n -m1 "/mnt/usb_$(( $i + 1 )) " | cut -f1 -d:)
+
+			# - Enable slot
+			sed -i ''"$line_number"' s/^#//' /etc/fstab
+
+			#Create mount points
+			mkdir -p /mnt/usb_$(( $i + 1 )) &> /dev/null
+
+			local drive_mount_source_char_index=$(( 97 + $i )) #a-z char index
+			local drive_mount_source_char_target=$(printf "\x$(printf %x $drive_mount_source_char_index)") #get char output from index
+
+			aDRIVE_MOUNT_SOURCE[$i]="/dev/sd$drive_mount_source_char_target"'1'
+			aDRIVE_MOUNT_TARGET[$i]="/mnt/usb_$(( $i + 1 ))"
+
+			#Is the drive available (via sys block)?
 			if [ -d /sys/block/sd"$drive_mount_source_char_target" ]; then
 
 				aDRIVE_ISAVAILABLE[$i]=1
 
-			fi
+				#Only scrape data if drive is available:
+				# - UUID
+				local cmd_scrape_string=$(blkid "${aDRIVE_MOUNT_SOURCE[$i]}" -s UUID -o value)
+				if [ -n "$cmd_scrape_string" ]; then
 
-			# - UUID
-			local cmd_scrape_string=$(blkid "${aDRIVE_MOUNT_SOURCE[$i]}" -s UUID -o value)
-			if [ -n "$cmd_scrape_string" ]; then
+					aDRIVE_UUID[$i]="$cmd_scrape_string"
 
-				aDRIVE_UUID[$i]="$cmd_scrape_string"
+				fi
 
-			fi
+				cmd_scrape_string=$(blkid "${aDRIVE_MOUNT_SOURCE[$i]}" -s TYPE -o value)
+				if [ -n "$cmd_scrape_string" ]; then
 
-			cmd_scrape_string=$(blkid "${aDRIVE_MOUNT_SOURCE[$i]}" -s TYPE -o value)
-			if [ -n "$cmd_scrape_string" ]; then
+					aDRIVE_ISFILESYSTEM[$i]=1
+					aDRIVE_FSTYPE[$i]="$cmd_scrape_string"
 
-				aDRIVE_ISFILESYSTEM[$i]=1
-				aDRIVE_FSTYPE[$i]="$cmd_scrape_string"
+				fi
 
-			fi
+				#Mount method: UUID or /dev/sd?
+				local current_mount_location=$(cat /etc/fstab | grep -m1 "${aDRIVE_MOUNT_TARGET[$i]}" | awk '{print $1}' | sed 's/.*=//')
+				if [ "$current_mount_location" = "${aDRIVE_UUID[$i]}" ]; then
 
-			#Mount method: UUID or /dev/sd?
-			local current_mount_location=$(cat /etc/fstab | grep -m1 "${aDRIVE_MOUNT_TARGET[$i]}" | awk '{print $1}' | sed 's/.*=//')
-			if [ "$current_mount_location" = "${aDRIVE_UUID[$i]}" ]; then
+					aDRIVE_ISUUIDMOUNT[$i]=1
 
-				aDRIVE_ISUUIDMOUNT[$i]=1
+				fi
 
-			fi
+				#mounted drive, pull size data
+				cmd_scrape_string=$(df -Ph | grep -m1 "${aDRIVE_MOUNT_TARGET[$i]}" | awk '{print $2}')
+				if [ -n "$cmd_scrape_string" ]; then
 
-			#mounted drive, pull size data
-			cmd_scrape_string=$(df -Ph | grep -m1 "${aDRIVE_MOUNT_TARGET[$i]}" | awk '{print $2}')
-			if [ -n "$cmd_scrape_string" ]; then
+					aDRIVE_SIZE_TOTAL[$i]="$cmd_scrape_string"
+					aDRIVE_ISMOUNTED[$i]=1
 
-				aDRIVE_SIZE_TOTAL[$i]="$cmd_scrape_string"
-				aDRIVE_ISMOUNTED[$i]=1
+				fi
 
-			fi
+				cmd_scrape_string=$(df -Ph | grep -m1 "${aDRIVE_MOUNT_TARGET[$i]}" | awk '{print $3}')
+				if [ -n "$cmd_scrape_string" ]; then
 
-			cmd_scrape_string=$(df -Ph | grep -m1 "${aDRIVE_MOUNT_TARGET[$i]}" | awk '{print $3}')
-			if [ -n "$cmd_scrape_string" ]; then
+					aDRIVE_SIZE_USED[$i]="$cmd_scrape_string"
 
-				aDRIVE_SIZE_USED[$i]="$cmd_scrape_string"
+				fi
 
-			fi
+				cmd_scrape_string=$(df -Ph | grep -m1 "${aDRIVE_MOUNT_TARGET[$i]}" | awk '{print $4}')
+				if [ -n "$cmd_scrape_string" ]; then
 
-			cmd_scrape_string=$(df -Ph | grep -m1 "${aDRIVE_MOUNT_TARGET[$i]}" | awk '{print $4}')
-			if [ -n "$cmd_scrape_string" ]; then
+					aDRIVE_SIZE_FREE[$i]="$cmd_scrape_string"
 
-				aDRIVE_SIZE_FREE[$i]="$cmd_scrape_string"
+				fi
 
-			fi
+				cmd_scrape_string=$(df -Ph | grep -m1 "${aDRIVE_MOUNT_TARGET[$i]}" | awk '{print $5}')
+				if [ -n "$cmd_scrape_string" ]; then
 
-			cmd_scrape_string=$(df -Ph | grep -m1 "${aDRIVE_MOUNT_TARGET[$i]}" | awk '{print $5}')
-			if [ -n "$cmd_scrape_string" ]; then
+					aDRIVE_SIZE_PERCENTUSED[$i]="$cmd_scrape_string"
 
-				aDRIVE_SIZE_PERCENTUSED[$i]="$cmd_scrape_string"
+				fi
 
 			fi
 
 		done
+
+		#Refresh SystemD for enabled auto mounts
+		systemctl daemon-reload
 
 	}
 
@@ -175,6 +188,7 @@
 		# - Reset FStab UUID. It changes after a format.
 		local current_fstab_source=$(cat /etc/fstab | grep -m1 "${aDRIVE_MOUNT_TARGET[$INDEX_DRIVE_BEING_EDITED]}" | awk '{print $1}')
 		sed -i "s@^$current_fstab_source@${aDRIVE_MOUNT_SOURCE[$INDEX_DRIVE_BEING_EDITED]}@g" /etc/fstab
+
 		systemctl daemon-reload
 
 		mount -a
@@ -357,10 +371,15 @@
 		#Generate menu
 		local whiptail_menu_array=()
 		local drive_available=0
-		for ((i=0; i<$MAXDRIVES; i++))
+		for ((i=0; i<$MAX_DRIVES; i++))
 		do
 
-			if (( ${aDRIVE_ISAVAILABLE[$i]} )); then
+			#Empty slot
+			if (( ! ${aDRIVE_ISAVAILABLE[$i]} )); then
+
+				whiptail_menu_array+=("Slot $i" ": No drive attached. Insert a drive and select Refresh")
+
+			else
 
 				drive_available=1
 
@@ -368,20 +387,20 @@
 				if (( ${aDRIVE_ISMOUNTED[$i]} )); then
 
 					#| ${aDRIVE_UUID[$i]}
-					whiptail_menu_array+=("${aDRIVE_MOUNT_TARGET[$i]}" "${aDRIVE_MOUNT_SOURCE[$i]} | ${aDRIVE_FSTYPE[$i]} | Size: ${aDRIVE_SIZE_TOTAL[$i]} | Used: ${aDRIVE_SIZE_USED[$i]} (${aDRIVE_SIZE_PERCENTUSED[$i]})")
+					whiptail_menu_array+=("${aDRIVE_MOUNT_TARGET[$i]}" ": ${aDRIVE_MOUNT_SOURCE[$i]} | ${aDRIVE_FSTYPE[$i]} | Size: ${aDRIVE_SIZE_TOTAL[$i]} | Used: ${aDRIVE_SIZE_USED[$i]} (${aDRIVE_SIZE_PERCENTUSED[$i]})")
 
 				#Not mounted, why?
 				else
 
 					#Drive has no FS:
-					if (( ${aDRIVE_ISFILESYSTEM[$i]} )); then
+					if (( ! ${aDRIVE_ISFILESYSTEM[$i]} )); then
 
-						whiptail_menu_array+=("${aDRIVE_MOUNT_TARGET[$i]}" "${aDRIVE_MOUNT_SOURCE[$i]} | No filesystem / format required")
+						whiptail_menu_array+=("${aDRIVE_MOUNT_TARGET[$i]}" ": ${aDRIVE_MOUNT_SOURCE[$i]} | No filesystem / format required")
 
 					#Drive is not mounted:
 					else
 
-						whiptail_menu_array+=("${aDRIVE_MOUNT_TARGET[$i]}" "${aDRIVE_MOUNT_SOURCE[$i]} | ${aDRIVE_FSTYPE[$i]} | Not mounted")
+						whiptail_menu_array+=("${aDRIVE_MOUNT_TARGET[$i]}" ": ${aDRIVE_MOUNT_SOURCE[$i]} | ${aDRIVE_FSTYPE[$i]} | Not mounted")
 
 					fi
 
@@ -389,20 +408,21 @@
 
 			fi
 
+
 		done
 
 		if (( ! $drive_available )); then
 
-			whiptail_menu_array+=("Refresh" "No drives found. Insert a drive and select this option")
+			whiptail_menu_array+=("Refresh" ": No drives found. Insert a drive and select this option")
 
 		else
 
-			whiptail_menu_array+=("Refresh" "Scan for recently added/removed drives")
+			whiptail_menu_array+=("Refresh" ": Scan for recently added/removed drives")
 
 		fi
 
 		WHIP_TITLE="$PROGRAM_NAME"
-		OPTION=$(whiptail --title "$WHIP_TITLE" --menu "Please select a drive to see available options:" --default-item "$MENU_LASTITEM" --cancel-button "Exit" --backtitle "$PROGRAM_NAME" 16 80 5 "${whiptail_menu_array[@]}" 3>&1 1>&2 2>&3)
+		OPTION=$(whiptail --title "$WHIP_TITLE" --menu "Please select a drive to see available options:" --default-item "$MENU_LASTITEM" --cancel-button "Exit" --backtitle "$PROGRAM_NAME" 16 80 8 "${whiptail_menu_array[@]}" 3>&1 1>&2 2>&3)
 
 		CHOICE=$?
 
@@ -423,7 +443,7 @@
 				Init_and_Refresh_Drives
 
 				#Match selected mount target against index
-				for ((i=0; i<$MAXDRIVES; i++))
+				for ((i=0; i<$MAX_DRIVES; i++))
 				do
 
 					if [ "$OPTION" = "${aDRIVE_MOUNT_TARGET[$i]}" ]; then
@@ -672,6 +692,8 @@
 
 
 	fi
+	#-----------------------------------------------------------------------------------
+	#Destroy
 
 	#Delete []
 	unset aDRIVE_MOUNT_SOURCE
@@ -687,6 +709,34 @@
 	unset aDRIVE_ISFILESYSTEM
 	unset aDRIVE_ISAVAILABLE
 	unset aDRIVE_ISUUIDMOUNT
+
+	#Disable automount on all unsused slots
+	/DietPi/dietpi/func/dietpi-notify 2 "Disabling auto mount for unused slots, please wait..."
+
+	Init_and_Refresh_Drives
+
+	#Remount all drives
+	mount -a
+
+	for ((i=0; i<$MAX_DRIVES; i++))
+	do
+
+		if (( ! ${aDRIVE_ISAVAILABLE[$i]} )); then
+
+			# - Grab slot number
+			line_number=$(cat /etc/fstab | grep -n -m1 "/mnt/usb_$(( $i + 1 )) " | cut -f1 -d:)
+
+			# - Disable slot
+			sed -i ''"$line_number"' s/^/#/' /etc/fstab
+
+		fi
+
+	done
+
+	systemctl daemon-reload
+
+	/DietPi/dietpi/func/dietpi-notify 0 "Completed"
+
 	#-----------------------------------------------------------------------------------
 	exit
 	#-----------------------------------------------------------------------------------

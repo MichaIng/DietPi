@@ -122,10 +122,6 @@ mkdir /DietPi
 mkdir -p /mnt/dietpi_userdata
 
 mkdir -p /mnt/usb_1
-mkdir -p /mnt/usb_2
-mkdir -p /mnt/usb_3
-mkdir -p /mnt/usb_4
-mkdir -p /mnt/usb_5
 
 mkdir -p /mnt/samba
 mkdir -p /mnt/ftp_client
