@@ -174,6 +174,7 @@ echo -e "vm.swappiness=1" >> /etc/sysctl.conf
 #rc.local
 cat << _EOF_ > /etc/rc.local
 #!/bin/bash
+echo -e "\$(cat /proc/uptime | awk '{print \$1}') Seconds" > /var/log/boottime
 if (( \$(cat /DietPi/dietpi/.install_stage) == 1 )); then
 
     /DietPi/dietpi/dietpi-services start
