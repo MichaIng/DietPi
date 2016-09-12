@@ -34,6 +34,7 @@
 	FP_LOGFILE="/var/log/dietpi-letsencrypt.log"
 	FP_MONTHLY_CRON="/etc/cron.monthly/dietpi-letsencrypt"
 	DP_LETSENCRYPT_SCRIPTS="/etc/certbot_scripts"
+	DP_WEBSERVER_INDEX=0 #0=apache2 1=lighttpd 2=nginx
 
 	LETSENCRYPT_INSTALLED=0
 	if [ -d "$DP_LETSENCRYPT_SCRIPTS" ]; then
@@ -48,50 +49,130 @@
 
 	Run_Lets_Encrypt(){
 
+		/DietPi/dietpi/func/dietpi-notify 3 "$PROGRAM_NAME" "Running cert"
+
+		cd "$DP_LETSENCRYPT_SCRIPTS"
+
 		#Conditions that must be met before allowing run
 		local run_conditions_met=1
 
-		#Apache installed?
-		# - attempt to start apache2
-		systemctl start apache2
+		/DietPi/dietpi/dietpi-services start
 
-		#- Check Apache is running
-		if (( ! $( ps ax | grep -ci -m1 [a]pache) )); then
+		# - Obtain installed and running webserver index
+		if (( $(ps aux | grep -ci -m1 '[a]pache') )); then
+
+			DP_WEBSERVER_INDEX=0
+			/DietPi/dietpi/func/dietpi-notify 0 "Apache2 webserver detected"
+
+		elif (( $(ps aux | grep -ci -m1 '[l]ighttpd') )); then
+
+			DP_WEBSERVER_INDEX=1
+			/DietPi/dietpi/func/dietpi-notify 0 "Lighttpd webserver detected"
+
+		# elif (( $(ps aux | grep -ci -m1 '[n]ginx') )); then
+
+			#/DietPi/dietpi/func/dietpi-notify 0 "Nginx webserver detected"
+			# DP_WEBSERVER_INDEX=2
+
+		else
+
 			run_conditions_met=0
-			echo -e "Error: Failed to start Apache2 service. Aborting." >> "$FP_LOGFILE"
+
 		fi
 
-		#Run
-		if (( $run_conditions_met == 1 )); then
+		#Failed. No compatible webserver is currently running
+		if (( ! $run_conditions_met )); then
 
-			local fp_defaultsite="/etc/apache2/sites-available/000-default.conf"
+			echo -e "Error: No compatible and/or active webserver was found. Aborting." >> "$FP_LOGFILE"
+			if (( $INPUT == 0 )); then
 
-			#Add ServerName if it doesnt exist. This is required to prevent letsencrypt compaining about vhost with no domain.
-			if (( ! $(cat "$fp_defaultsite" | grep -ci -m1 'ServerName') )); then
-				sed -i "/ServerAdmin /a ServerName" "$fp_defaultsite"
+				whiptail --title "Error" --msgbox "Error: No compatible and/or active webserver was found. Aborting." --backtitle "$PROGRAM_NAME" 8 60
 
-				#log
-				echo -e "ServerName entry not found in $fp_defaultsite. Adding it now." >> "$FP_LOGFILE"
 			fi
 
-			#Apply domain name
-			sed -i "/ServerName/c\        ServerName $LETSENCRYPT_DOMAIN" "$fp_defaultsite"
+		#Cert up
+		else
 
-			#Restart apache2 to apply ServerName changes.
-			service apache2 restart
+			#------------------------------------------------------------------------------------------------------
+			#apache2
+			if (( $DP_WEBSERVER_INDEX == 0 )); then
 
-			local cli_redirect="--no-redirect"
-			if (( $LETSENCRYPT_REDIRECT == 1 )); then
-				cli_redirect="--redirect"
+				local fp_defaultsite="/etc/apache2/sites-available/000-default.conf"
+
+				#Add ServerName if it doesnt exist. This is required to prevent letsencrypt compaining about vhost with no domain.
+				if (( ! $(cat "$fp_defaultsite" | grep -ci -m1 'ServerName') )); then
+
+					sed -i "/ServerAdmin /a ServerName" "$fp_defaultsite"
+
+					#log
+					echo -e "ServerName entry not found in $fp_defaultsite. Adding it now." >> "$FP_LOGFILE"
+
+				fi
+
+				#Apply domain name
+				sed -i "/ServerName/c\        ServerName $LETSENCRYPT_DOMAIN" "$fp_defaultsite"
+
+				#Restart apache2 to apply ServerName changes.
+				systemctl restart apache2
+
+				local cli_redirect="--no-redirect"
+				if (( $LETSENCRYPT_REDIRECT )); then
+
+					cli_redirect="--redirect"
+
+				fi
+
+				#Cert me up Apache2
+				./certbot-auto --duplicate --agree-tos $cli_redirect --rsa-key-size $LETSENCRYPT_KEYSIZE --email $LETSENCRYPT_EMAIL -d $LETSENCRYPT_DOMAIN
+
+			#------------------------------------------------------------------------------------------------------
+			#Lighttpd
+			elif (( $DP_WEBSERVER_INDEX == 1 )); then
+
+				# - Cert me up
+				/DietPi/dietpi/dietpi-services stop
+
+				./certbot-auto certonly --standalone --duplicate --agree-tos $cli_redirect --rsa-key-size $LETSENCRYPT_KEYSIZE --email $LETSENCRYPT_EMAIL -d $LETSENCRYPT_DOMAIN
+
+				# - Create combined key
+				cd /etc/letsencrypt/live/"$LETSENCRYPT_DOMAIN"
+				cat privkey.pem cert.pem > combined.pem
+
+				cat << _EOF_ > /etc/lighttpd/conf-enabled/letsencrypt.conf
+\$SERVER["socket"] == ":443" {
+		ssl.engine = "enable"
+		ssl.pemfile = "/etc/letsencrypt/live/$LETSENCRYPT_DOMAIN/combined.pem"
+		ssl.ca-file =  "/etc/letsencrypt/live/$LETSENCRYPT_DOMAIN/fullchain.pem"
+		ssl.cipher-list = "ECDHE-RSA-AES256-SHA384:AES256-SHA256:HIGH:!MD5:!aNULL:!EDH:!AESGCM"
+		ssl.honor-cipher-order = "enable"
+		ssl.use-sslv2 = "disable"
+		ssl.use-sslv3 = "disable"
+}
+_EOF_
+
+				#Redirect
+				rm /etc/lighttpd/conf-enabled/redirect.conf
+				if (( $LETSENCRYPT_REDIRECT )); then
+
+					cat << _EOF_ > /etc/lighttpd/conf-enabled/redirect.conf
+\$HTTP["scheme"] == "http" {
+	# capture vhost name with regex conditiona -> %0 in redirect pattern
+	# must be the most inner block to the redirect rule
+	\$HTTP["host"] =~ ".*" {
+		url.redirect = (".*" => "https://%0\$0")
+	}
+}
+_EOF_
+
+				fi
+
+				/etc/init.d/lighttpd force-reload
+
 			fi
 
-			cd "$DP_LETSENCRYPT_SCRIPTS"
-
-			#Cert me up ...
-			./certbot-auto --duplicate --agree-tos $cli_redirect --rsa-key-size $LETSENCRYPT_KEYSIZE --email $LETSENCRYPT_EMAIL -d $LETSENCRYPT_DOMAIN
-
-			#Create cron job
-			if (( $LETSENCRYPT_AUTORENEW == 1 )); then
+			#------------------------------------------------------------------------------------------------------
+			#ALL | Create cron job
+			if (( $LETSENCRYPT_AUTORENEW )); then
 
 				cat << _EOF_ > "$FP_MONTHLY_CRON"
 #!/bin/bash
@@ -120,10 +201,15 @@ _EOF_
 			fi
 
 			if (( $INPUT == 0 )); then
+
 				echo -e ""
 				read -p "Press any key to continue..."
 				echo -e ""
+
 			fi
+
+			#Restart services
+			/DietPi/dietpi/dietpi-services restart
 
 		fi
 
@@ -185,12 +271,12 @@ _EOF_
 	Menu_Main(){
 
 		local auto_renew_text="Disabled | Manual renewal every 90 days"
-		if (( $LETSENCRYPT_AUTORENEW == 1 )); then
+		if (( $LETSENCRYPT_AUTORENEW )); then
 			auto_renew_text="Enabled | Automatic cron.monthly renewals"
 		fi
 
 		local redirect_text="Disabled | Allows http and https usage"
-		if (( $LETSENCRYPT_REDIRECT == 1 )); then
+		if (( $LETSENCRYPT_REDIRECT )); then
 			redirect_text="Enabled | Forces http redirects to https"
 		fi
 
@@ -269,21 +355,32 @@ _EOF_
 	#/////////////////////////////////////////////////////////////////////////////////////
 	#Load Settings file. Generate if required.
 	if [ ! -f "$FP_SETTINGS" ]; then
+
 		Write_Settings_File
+
 	else
+
 		Read_Settings_File
+
 	fi
 
 	#-----------------------------------------------------------------------------------
 	#Check installed
-	if (( $LETSENCRYPT_INSTALLED == 0 )); then
-			#Menu
-			if (( $INPUT == 0 )); then
-				echo -e "\nError: Lets encrypt scripts not installed ( $DP_LETSENCRYPT_SCRIPTS ).\nPlease install LetsEncrypt with DietPi-Software before running this program.\n"
-				read -p "Press any key to continue....."
-			else
-				echo -e "Error: Lets encrypt scripts not installed ( $DP_LETSENCRYPT_SCRIPTS )." >> "$FP_LOGFILE"
-			fi
+	if (( ! $LETSENCRYPT_INSTALLED )); then
+
+		#Menu
+		if (( $INPUT == 0 )); then
+
+			/DietPi/dietpi/func/dietpi-notify 1 "Certbot scripts not found ( $DP_LETSENCRYPT_SCRIPTS )"
+			/DietPi/dietpi/func/dietpi-notify 2 "Please install Certbot with DietPi-Software before running this program."
+			read -p "Press any key to continue....."
+
+		else
+
+			echo -e "Error: Lets encrypt scripts not installed ( $DP_LETSENCRYPT_SCRIPTS )." >> "$FP_LOGFILE"
+
+		fi
+
 	#-----------------------------------------------------------------------------------
 	#Menu
 	elif (( $INPUT == 0 )); then
@@ -294,8 +391,11 @@ _EOF_
 			clear
 
 			if (( $TARGETMENUID == 0 )); then
+
 				Menu_Main
+
 			fi
+
 		done
 
 	#-----------------------------------------------------------------------------------
