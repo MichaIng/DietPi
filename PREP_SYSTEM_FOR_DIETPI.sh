@@ -346,9 +346,9 @@ systemctl enable kill-ssh-user-sessions-before-network
 systemctl daemon-reload
 
 
-dpkg-reconfigure tzdata
+dpkg-reconfigure tzdata #Europe > London
 dpkg-reconfigure keyboard-configuration #Keyboard must be plugged in for this to work!
-dpkg-reconfigure locales
+dpkg-reconfigure locales # en_GB.UTF8
 
 #??? RPI ONLY: Scroll lock fix for RPi by Midwan: https://github.com/Fourdee/DietPi/issues/474#issuecomment-243215674
 cat << _EOF_ > /etc/udev/rules.d/50-leds.rules
