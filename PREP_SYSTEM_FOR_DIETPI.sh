@@ -133,6 +133,8 @@ echo -e "NFS client can be installed and setup by DietPi-Config.\nSimply run: di
 /boot/dietpi/dietpi-logclear 2
 
 #FSTAB
+# - Check if /boot is vfat. If not, change fstab accordingly
+blkid | grep '/dev/mmcblk0p1'
 cp /boot/dietpi/conf/fstab /etc/fstab
 
 #setup dietpi service
