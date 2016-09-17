@@ -215,7 +215,7 @@ _EOF_
 	# - Software
 	#NB: All software has a unique index that must not be changed (eg: DESKTOP_LXDE = 23)
 	TOTAL_SOFTWARE_INDEXS=0
-	TOTAL_SOFTWARE_INDEXS_HARDLIMIT=111 #Increase as needed. Must be higher than TOTAL_SOFTWARE_INDEXS once calculated in Software_Arrays_Init
+	TOTAL_SOFTWARE_INDEXS_HARDLIMIT=112 #Increase as needed. Must be higher than TOTAL_SOFTWARE_INDEXS once calculated in Software_Arrays_Init
 
 	INSTALLING_INDEX=0					#Which software index is currently being installed?
 
@@ -722,6 +722,18 @@ _EOF_
 		aSOFTWARE_REQUIRES_WEBSERVER[$index_current]=1
 			aSOFTWARE_REQUIRES_MYSQL[$index_current]=1
 			 aSOFTWARE_ONLINEDOC_URL[$index_current]='f=8&t=5&p=1064#p1064'
+
+		#------------------
+		index_current=111
+
+				 aSOFTWARE_WHIP_NAME[$index_current]='UrBackup server'
+				 aSOFTWARE_WHIP_DESC[$index_current]='complete system backup server'
+			aSOFTWARE_CATEGORY_INDEX[$index_current]=4
+					  aSOFTWARE_TYPE[$index_current]=0
+			 aSOFTWARE_ONLINEDOC_URL[$index_current]='xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx'
+
+		#ARMv7+ only
+		aSOFTWARE_AVAIL_HW_ARCH[$index_current,1]=0
 
 		#------------------
 		index_current=49
@@ -2894,6 +2906,81 @@ _EOF_
 
 		fi
 
+		#urbackup server
+		INSTALLING_INDEX=111
+		if (( ${aSOFTWARE_INSTALL_STATE[$INSTALLING_INDEX]} == 1 )); then
+
+			Banner_Installing
+
+			if (( $HW_ARCH == 21 )); then
+
+				INSTALL_URL_ADDRESS="http://hndl.urbackup.org/Server/2.0.33/urbackup-server_2.0.33_amd64.deb"
+
+			elif (( $HW_ARCH >= 1 && $HW_ARCH < 10 )); then
+
+				INSTALL_URL_ADDRESS="http://hndl.urbackup.org/Server/2.0.33/urbackup-server_2.0.33_armhf.deb"
+
+			#ARM64 sourcebuild
+			elif (( $HW_ARCH == 10 )); then
+
+				INSTALL_URL_ADDRESS="http://hndl.urbackup.org/Server/2.0.33/urbackup-server-2.0.33.tar.gz"
+
+			fi
+
+
+			/DietPi/dietpi/func/check_connection "$INSTALL_URL_ADDRESS"
+
+			#Install
+			if (( $? == 0 )); then
+
+
+				#ARM64 source build
+				if (( $HW_ARCH == 10 )); then
+
+					AGI build-essential zlib1g-dev libcurl4-openssl-dev libcrypto++-dev
+
+					wget "$INSTALL_URL_ADDRESS" -O package.tar
+					tar xzvf package.tar
+					rm package.tar
+
+					cd urbackup-server-*
+
+					./configure
+					make -j $(nproc --all)
+					make install
+
+					cp urbackup-server.service /etc/systemd/system/urbackupsrv.service
+					cp defaults_server /etc/default/urbackupsrv
+					cp logrotate_urbackupsrv /etc/logrotate.d/urbackupsrv
+
+					cd ..
+
+					rm -R urbackup-server-*
+
+					sed -i "/ExecStart=/c ExecStart=/usr/local/bin/urbackupsrv run --config /etc/default/urbackupsrv --no-consoletime" /etc/systemd/system/urbackupsrv.service
+
+				#Deb
+				else
+
+					wget "$INSTALL_URL_ADDRESS" -O package.deb
+
+					echo -e "urbackup-server urbackup/backuppath string $FP_DIETPI_USERDATA_DIRECTORY/urbackup" | debconf-set-selections
+					dpkg -i package.deb
+
+					apt-get -f install -y
+
+					rm package.deb
+
+				fi
+
+			else
+
+				Error_NoConnection_NoInstall
+
+			fi
+
+		fi
+
 		#OpenTyrian
 		INSTALLING_INDEX=51
 		if (( ${aSOFTWARE_INSTALL_STATE[$INSTALLING_INDEX]} == 1 )); then
@@ -3368,7 +3455,7 @@ _EOF_
 			Banner_Installing
 
 			#check source is online
-			INSTALL_URL_ADDRESS='http://www.haproxy.org/download/1.6/src/haproxy-1.6.2.tar.gz'
+			INSTALL_URL_ADDRESS='http://www.haproxy.org/download/1.6/src/haproxy-1.6.9.tar.gz'
 			/DietPi/dietpi/func/check_connection "$INSTALL_URL_ADDRESS"
 
 			#Install
@@ -7379,8 +7466,21 @@ User=root
 [Install]
 WantedBy=multi-user.target
 _EOF_
-systemctl enable syncthing.service
-systemctl daemon-reload
+			systemctl enable syncthing.service
+			systemctl daemon-reload
+
+		fi
+
+		#Urbackup server
+		INSTALLING_INDEX=111
+		if (( ${aSOFTWARE_INSTALL_STATE[$INSTALLING_INDEX]} == 1 )); then
+
+			#
+			mkdir -p /mnt/dietpi_userdata/urbackup/urbackup_tmp_files
+			chown -R urbackup:urbackup /mnt/dietpi_userdata/urbackup
+
+			#As we have /tmp mounted to RAM, change tmp locations
+			sed -i '/DAEMON_TMPDIR=/c\DAEMON_TMPDIR="/var/tmp"' /etc/default/urbackupsrv
 
 		fi
 
@@ -8306,30 +8406,22 @@ _EOF_
 		# Stop Services
 		/DietPi/dietpi/dietpi-services stop
 		#------------------------------------------------------------
-		#Check if we need to setup different userdata directory for this run.
-		local current_userdata_dir=$(/DietPi/dietpi/func/dietpi-set_userdata return_source)
-		local target_userdata_dir=$FP_DIETPI_USERDATA_DIRECTORY
+		#First run: Move userdata location. Auto and/or custom
+		if (( $DIETPI_INSTALL_STAGE == 0 )); then
 
-		# - Apply userdata dir changes if required.
-		dietpi_userdata_basedirectory=$(cat /DietPi/dietpi.txt | grep -m1 'dietpi_userdata_basedirectory=' | sed 's/.*=//' | tr '[:upper:]' '[:lower:]')
-		if [ "$dietpi_userdata_basedirectory" = "auto" ]; then
+			local current_userdata_dir=$(/DietPi/dietpi/func/dietpi-set_userdata return_source)
 
-			target_userdata_dir='auto'
+			# - Run the script to move user data location if required (now accepts Auto
+			local dietpi_userdata_basedirectory=$(cat /DietPi/dietpi.txt | grep -m1 'dietpi_userdata_basedirectory=' | sed 's/.*=//' | tr '[:upper:]' '[:lower:]')
+			/DietPi/dietpi/func/dietpi-set_userdata "$current_userdata_dir" "$target_userdata_dir"
 
-		# - custom directory
-		else
+			# - Check for failure
+			if (( $? != 0 )); then
 
-			target_userdata_dir=$dietpi_userdata_basedirectory
+				Error_Create_UserDataDirectory
+				Exit_Destroy
 
-		fi
-
-		# - Setup user directory and move existing userdata if required
-		/DietPi/dietpi/func/dietpi-set_userdata "$current_userdata_dir" "$target_userdata_dir"
-		# - Check for failure
-		if (( $? != 0 )); then
-
-			Error_Create_UserDataDirectory
-			Exit_Destroy
+			fi
 
 		fi
 
