@@ -17,6 +17,7 @@
 - Odroid C2: http://dietpi.com/phpbb/viewtopic.php?f=8&t=339&p=1492#p1492
 - ODroid XU3/4: http://dietpi.com/phpbb/viewtopic.php?f=8&t=57
 - Orange Pi PC: http://dietpi.com/phpbb/viewtopic.php?f=8&t=164#p612
+- Orange Pi One: http://dietpi.com/phpbb/viewtopic.php?f=8&t=676#p2913
 - BananaPi Pro: http://dietpi.com/phpbb/viewtopic.php?f=8&t=534
 - BananaPi M2+: http://dietpi.com/phpbb/viewtopic.php?f=8&t=431
 - NanoPi NEO: http://dietpi.com/phpbb/viewtopic.php?f=8&t=574#p2480
