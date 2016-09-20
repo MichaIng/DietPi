@@ -15,6 +15,11 @@
 #  - Sections with '#???', are optional, depending on the device and its specs. (eg: does it need bluetooth?)
 #------------------------------------------------------------------------------------------------
 
+
+#------------------------------------------------------------------------------------------------
+#Packages
+#------------------------------------------------------------------------------------------------
+
 #Jessie , unified apt sources.
 rm /etc/apt/sources.list.d/deb-multimedia.list
 
@@ -57,7 +62,7 @@ rm /etc/apt/sources.list.d/deb-multimedia.list
 # deb-src http://ftp.debian.org/debian jessie-backports main contrib non-free
 # deb-src http://ftp.debian.org/debian jessie-proposed-updates contrib non-free main
 
-# - Everything else (not including RPi)
+# - Everything else (excluding RPi!)
 cat << _EOF_ > /etc/apt/sources.list
 deb http://ftp.debian.org/debian jessie main contrib non-free
 deb http://ftp.debian.org/debian jessie-updates main contrib non-free
@@ -66,16 +71,16 @@ deb http://ftp.debian.org/debian jessie-backports main contrib non-free
 _EOF_
 
 # RPI UK for my testing, mirror director is slow, unstable and unreliable -------------------------
-# cat << _EOF_ > /etc/apt/sources.list
-# deb http://mirror.ox.ac.uk/sites/archive.raspbian.org/archive/raspbian jessie main contrib non-free rpi
-# _EOF_
+cat << _EOF_ > /etc/apt/sources.list
+deb http://mirror.ox.ac.uk/sites/archive.raspbian.org/archive/raspbian jessie main contrib non-free rpi
+_EOF_
 # RPI UK for my testing, mirror director is slow, unstable and unreliable -------------------------
 
 
 #Remove following Jessie
 apt-get clean
 apt-get update
-apt-get purge cpp-* cpp ntpdate bluez bluetooth rsync dialog dhcpcd5 libsqlite* libxapian22 lua5.1 netcat-* make makedev ncdu plymouth openresolv shared-mime-in* tcpd strace tasksel* wireless-* xdg-user-dirs triggerhappy python* v4l-utils traceroute xz-utils ucf xauth zlib1g-dev xml-core aptitude* avahi-daemon rsyslog logrotate man-db manpages vim vim-common vim-runtime vim-tiny mc mc-data
+apt-get purge libpng* cpp-* cpp ntpdate bluez bluetooth rsync dialog dhcpcd5 libsqlite* libxapian22 lua5.1 netcat-* make makedev ncdu plymouth openresolv shared-mime-in* tcpd strace tasksel* wireless-* xdg-user-dirs triggerhappy python* v4l-utils traceroute xz-utils ucf xauth zlib1g-dev xml-core aptitude* avahi-daemon rsyslog logrotate man-db manpages vim vim-common vim-runtime vim-tiny mc mc-data
 
 #+Desktop images:
 apt-get purge libpod-* libpeas-* isc-dhcp-server gnome-* fonts-dejavu* eject dnsmasq* dns-root-data colord-data libturbojpeg1 libjasper* libjson* libwbclient* libwayland* golang-* libavahi* libtext* libweb* libpcsclite1 libxau6* libvpx1 libxc* dictionaries-* libgtk* miscfiles minicom lrzsz lxmenu-* x11-* zenity* yelp-*
@@ -84,6 +89,9 @@ apt-get purge libpod-* libpeas-* isc-dhcp-server gnome-* fonts-dejavu* eject dns
 apt-get purge toilet toilet-fonts w-scan vlan weather-util* sysbench stress apt-transport-* cmake cmake-data device-tree-co* fping hddtemp haveged hostapd i2c-tools iperf ir-keytable libasound2* libmtp* libusb-dev lirc lsof ncurses-term pkg-config unicode-data rfkill pv mtp-tools m4 screen alsa-utils armbian-* autotools-dev bind9-host btrfs-tools bridge-utils cpufrequtils dvb-apps dtv-scan-table* evtest f3 figlet gcc gcc-4.8-* git git-man iozone3 ifenslave
 apt-get purge -y linux-jessie-root-*
 
+#+RPi
+apt-get purge libraspberrypi-doc
+
 #rm /etc/apt/sources.list.d/armbian.list
 rm /etc/init.d/resize2fs
 systemctl daemon-reload
@@ -91,21 +99,27 @@ rm /etc/update-motd.d/*
 
 
 #+ dev packages
-apt-get purge '\-dev$'
-apt-get purge linux-headers*
+apt-get purge '\-dev$' linux-headers*
 
 
 apt-get autoremove --purge -y
 
 
-#install
+#install packages
 echo -e "CONF_SWAPSIZE=0" > /etc/dphys-swapfile
-apt-get install -y iw debconf-utils xz-utils ifmetric fbset wpasupplicant resolvconf bc dbus bzip2 psmisc bash-completion cron whiptail sudo ntp ntfs-3g dosfstools parted hdparm pciutils usbutils zip htop wput wget fake-hwclock dphys-swapfile curl unzip ca-certificates console-setup console-data console-common keyboard-configuration wireless-tools wireless-regdb crda --no-install-recommends
+apt-get install -y hfsplus iw debconf-utils xz-utils ifmetric fbset wpasupplicant resolvconf bc dbus bzip2 psmisc bash-completion cron whiptail sudo ntp ntfs-3g dosfstools parted hdparm pciutils usbutils zip htop wput wget fake-hwclock dphys-swapfile curl unzip ca-certificates console-setup console-data console-common keyboard-configuration wireless-tools wireless-regdb crda --no-install-recommends
+
 #??? bluetooth if onboard device
 apt-get install -y bluetooth
 
+#FOURDEE: apt-get install pi-bluetooth #for desktop in dietpi-software?
+
 #firmware
 apt-get install -y firmware-realtek firmware-ralink firmware-brcm80211 firmware-atheros -y --no-install-recommends
+
+#------------------------------------------------------------------------------------------------
+#DIETPI STUFF
+#------------------------------------------------------------------------------------------------
 
 #Delete any non-root user (eg: pi)
 userdel -f pi
@@ -114,22 +128,25 @@ userdel -f pi
 rm -R /home
 rm -R /media
 rm -R /tmp/*
+rm -R /selinux
 
-#DIETPI STUFF
-#Create folders
+#Create DietPi common folders
 mkdir /DietPi
+
 mkdir -p /mnt/dietpi_userdata
+
 mkdir -p /mnt/usb_1
+
 mkdir -p /mnt/samba
 mkdir -p /mnt/ftp_client
-echo -e "Samba client can be installed and setup by DietPi-Config.\nSimply run: dietpi-config" > /mnt/samba/readme.txt
-echo -e "FTP client mount can be installed and setup by DietPi-Config.\nSimply run: dietpi-config" > /mnt/ftp_client/readme.txt
+mkdir -p /mnt/nfs_client
+echo -e "Samba client can be installed and setup by DietPi-Config.\nSimply run: dietpi-config and select the Networking Options: NAS/Misc menu" > /mnt/samba/readme.txt
+echo -e "FTP client mount can be installed and setup by DietPi-Config.\nSimply run: dietpi-config and select the Networking Options: NAS/Misc menu" > /mnt/ftp_client/readme.txt
+echo -e "NFS client can be installed and setup by DietPi-Config.\nSimply run: dietpi-config and select the Networking Options: NAS/Misc menu" > /mnt/nfs_client/readme.txt
 
 /boot/dietpi/dietpi-logclear 2
 
 #FSTAB
-# - Check if /boot is vfat. If not, change fstab accordingly
-blkid | grep '/dev/mmcblk0p1'
 cp /boot/dietpi/conf/fstab /etc/fstab
 
 #setup dietpi service
@@ -165,10 +182,10 @@ rm /etc/init.d/ntp &> /dev/null
 #/etc/sysctl.conf | Check for a previous entry before adding this
 echo -e "vm.swappiness=1" >> /etc/sysctl.conf
 
-#----------------------------------------------------
 #rc.local
 cat << _EOF_ > /etc/rc.local
 #!/bin/bash
+echo -e "\$(cat /proc/uptime | awk '{print \$1}') Seconds" > /var/log/boottime
 if (( \$(cat /DietPi/dietpi/.install_stage) == 1 )); then
 
     /DietPi/dietpi/dietpi-services start
@@ -250,6 +267,7 @@ alias dietpi-services='/DietPi/dietpi/dietpi-services'
 alias dietpi-config='/DietPi/dietpi/dietpi-config'
 alias dietpi-software='/DietPi/dietpi/dietpi-software'
 alias dietpi-update='/DietPi/dietpi/dietpi-update'
+alias dietpi-drive_manager='/DietPi/dietpi/dietpi-drive_manager'
 alias emulationstation='/opt/retropie/supplementary/emulationstation/emulationstation'
 alias opentyrian='/usr/local/games/opentyrian/run'
 
@@ -286,7 +304,6 @@ echo -e "options 8188eu rtw_power_mgnt=0" > /etc/modprobe.d/8188eu.conf
 #Set swapfile size
 echo -e "CONF_SWAPSIZE=0" > /etc/dphys-swapfile
 
-#--------SYSTEMD---------
 #nano /etc/systemd/logind.conf
 #NAutoVTs=1
 
@@ -339,9 +356,9 @@ systemctl enable kill-ssh-user-sessions-before-network
 systemctl daemon-reload
 
 
-dpkg-reconfigure tzdata
+dpkg-reconfigure tzdata #Europe > London
 dpkg-reconfigure keyboard-configuration #Keyboard must be plugged in for this to work!
-dpkg-reconfigure locales
+dpkg-reconfigure locales # en_GB.UTF8 as default and only installed locale
 
 #??? RPI ONLY: Scroll lock fix for RPi by Midwan: https://github.com/Fourdee/DietPi/issues/474#issuecomment-243215674
 cat << _EOF_ > /etc/udev/rules.d/50-leds.rules
