@@ -112,8 +112,6 @@ apt-get install -y p7zip-full hfsplus iw debconf-utils xz-utils ifmetric fbset w
 #??? bluetooth if onboard device
 apt-get install -y bluetooth
 
-#FOURDEE: apt-get install pi-bluetooth #for desktop in dietpi-software?
-
 #firmware
 apt-get install -y firmware-realtek firmware-ralink firmware-brcm80211 firmware-atheros -y --no-install-recommends
 
