@@ -107,12 +107,10 @@ apt-get autoremove --purge -y
 
 #install packages
 echo -e "CONF_SWAPSIZE=0" > /etc/dphys-swapfile
-apt-get install -y hfsplus iw debconf-utils xz-utils ifmetric fbset wpasupplicant resolvconf bc dbus bzip2 psmisc bash-completion cron whiptail sudo ntp ntfs-3g dosfstools parted hdparm pciutils usbutils zip htop wput wget fake-hwclock dphys-swapfile curl unzip ca-certificates console-setup console-data console-common keyboard-configuration wireless-tools wireless-regdb crda --no-install-recommends
+apt-get install -y p7zip-full hfsplus iw debconf-utils xz-utils ifmetric fbset wpasupplicant resolvconf bc dbus bzip2 psmisc bash-completion cron whiptail sudo ntp ntfs-3g dosfstools parted hdparm pciutils usbutils zip htop wput wget fake-hwclock dphys-swapfile curl unzip ca-certificates console-setup console-data console-common keyboard-configuration wireless-tools wireless-regdb crda --no-install-recommends
 
 #??? bluetooth if onboard device
 apt-get install -y bluetooth
-
-#FOURDEE: apt-get install pi-bluetooth #for desktop in dietpi-software?
 
 #firmware
 apt-get install -y firmware-realtek firmware-ralink firmware-brcm80211 firmware-atheros -y --no-install-recommends
