@@ -70,11 +70,11 @@ deb http://security.debian.org jessie/updates main contrib non-free
 deb http://ftp.debian.org/debian jessie-backports main contrib non-free
 _EOF_
 
-# RPI UK for my testing, mirror director is slow, unstable and unreliable -------------------------
+# RPI UK mirror director is slow, unstable and unreliable -------------------------
 cat << _EOF_ > /etc/apt/sources.list
 deb http://mirror.ox.ac.uk/sites/archive.raspbian.org/archive/raspbian jessie main contrib non-free rpi
 _EOF_
-# RPI UK for my testing, mirror director is slow, unstable and unreliable -------------------------
+# RPI UK mirror director is slow, unstable and unreliable -------------------------
 
 
 #Remove following Jessie
