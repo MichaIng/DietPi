@@ -62,6 +62,10 @@ rm /etc/apt/sources.list.d/deb-multimedia.list
 # deb-src http://ftp.debian.org/debian jessie-backports main contrib non-free
 # deb-src http://ftp.debian.org/debian jessie-proposed-updates contrib non-free main
 
+
+#NOTE:
+#Apt mirror will get overwritten by: /DietPi/dietpi/func/dietpi-set_software apt-mirror default : during finalize.
+
 # - Everything else (excluding RPi!)
 cat << _EOF_ > /etc/apt/sources.list
 deb http://ftp.debian.org/debian jessie main contrib non-free
