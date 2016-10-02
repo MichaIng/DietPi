@@ -1044,10 +1044,24 @@
 			whiptail_menu_array+=("CPU Throttle Up" ": $current_cpu_throttle_up%")
 		fi
 
+
+		#Ondemand extras
+		if [ "$current_cpu_governor" = ondemand ]; then
+
+			local current_cpu_sample_rate=$(( $(cat /DietPi/dietpi.txt | grep -m1 '^cpu_ondemand_sampling_rate=' | sed 's/.*=//') / 1000 )) #convert to ms
+			whiptail_menu_array+=("Ondemand Sample Rate" ": $current_cpu_sample_rate ms")
+
+			local current_cpu_down_factor=$(cat /DietPi/dietpi.txt | grep -m1 '^cpu_ondemand_sampling_down_factor=' | sed 's/.*=//')
+			local current_cpu_down_factor_ms=$(( $current_cpu_down_factor * $current_cpu_sample_rate ))
+			whiptail_menu_array+=("Ondemand Down Factor" ": $current_cpu_down_factor ($current_cpu_down_factor_ms ms)")
+
+		fi
+
+
 		# User Scaling Max Freq limit.
 		local user_frequency_max_current=$(cat /DietPi/dietpi.txt | grep -m1 '^cpu_max_frequency=' | sed 's/.*=//')
 		local user_frequency_max_text="$user_frequency_max_current Mhz"
-		if (( $user_frequency_max_current == 0 )); then
+		if (( ! $user_frequency_max_current	)); then
 			user_frequency_max_text="Disabled"
 		fi
 
@@ -1080,7 +1094,7 @@
 		fi
 
 		WHIP_TITLE='DietPi - Performance Options'
-		OPTION=$(whiptail --title "$WHIP_TITLE" --menu " Hardware : $HW_MODEL_DESCRIPTION \n ARM Temp: $arm_temp\n RAM: $memory_total MB | Used: $memory_usage MB | Free: $memory_free MB" --cancel-button "$TEXT_MENU_BACK" --backtitle "$WHIP_BACKTITLE" 16 60 6 "${whiptail_menu_array[@]}" 3>&1 1>&2 2>&3)
+		OPTION=$(whiptail --title "$WHIP_TITLE" --menu " Hardware : $HW_MODEL_DESCRIPTION \n ARM Temp: $arm_temp\n RAM: $memory_total MB | Used: $memory_usage MB | Free: $memory_free MB" --cancel-button "$TEXT_MENU_BACK" --backtitle "$WHIP_BACKTITLE" 18 60 8 "${whiptail_menu_array[@]}" 3>&1 1>&2 2>&3)
 
 		CHOICE=$?
 
@@ -1089,6 +1103,42 @@
 
 		if (( $CHOICE == 0 )); then
 			case "$OPTION" in
+				"Ondemand Down Factor"*)
+					MIN_VALUE=1
+					MAX_VALUE=200
+					OPTION=$(whiptail --inputbox "After Ondemand throttles up, how long before the next sample to check if CPU clocks can be reduced.\n\n - This value * 'Ondemand Sample Rate' = total miliseconds\n - Lower values may help reduce power consumption, however, a 500-1000ms value is recommended to prevent excessive sampling.\n - Valid range: $MIN_VALUE - $MAX_VALUE\n\nIf unsure, set any value, 'Ondemand Down Factor' option on the next screen will list the calculated miliseconds." 17 70 "$current_cpu_down_factor" --title "$OPTION" 3>&1 1>&2 2>&3)
+					CHOICE=$?
+					if (( $CHOICE == 0 )); then
+						if [[ $OPTION =~ ^-?[0-9]+$ ]] && (($OPTION <= $MAX_VALUE)) && (($OPTION >= $MIN_VALUE)); then
+							sed -i "/cpu_ondemand_sampling_down_factor=/c\cpu_ondemand_sampling_down_factor=$OPTION" /DietPi/dietpi.txt
+							#Apply changes
+							/DietPi/dietpi/dietpi-cpu_set
+						else
+							Info_Input_Not_Valid_Integer
+						fi
+					fi
+
+					#Return to this menu
+					TARGETMENUID=4
+				;;
+				"Ondemand Sample Rate"*)
+					MIN_VALUE=$(( $(cat /sys/devices/system/cpu/cpufreq/ondemand/sampling_rate_min) / 1000 ))
+					MAX_VALUE=300
+					OPTION=$(whiptail --inputbox "Sample rate in miliseconds, for Ondemand to check if it needs to increase CPU clocks.\nA lower value will make the system more responsive.\n - valid range: $MIN_VALUE - $MAX_VALUE" 10 70 "$current_cpu_sample_rate" --title "$OPTION (ms)" 3>&1 1>&2 2>&3)
+					CHOICE=$?
+					if (( $CHOICE == 0 )); then
+						if [[ $OPTION =~ ^-?[0-9]+$ ]] && (($OPTION <= $MAX_VALUE)) && (($OPTION >= $MIN_VALUE)); then
+							sed -i "/cpu_ondemand_sampling_rate=/c\cpu_ondemand_sampling_rate=$(($OPTION * 1000))" /DietPi/dietpi.txt
+							#Apply changes
+							/DietPi/dietpi/dietpi-cpu_set
+						else
+							Info_Input_Not_Valid_Integer
+						fi
+					fi
+
+					#Return to this menu
+					TARGETMENUID=4
+				;;
 				"Lower Idle Frequencies"*)
 					WHIP_QUESTION="Toggle the use of lower idle frequencies for CPU, CORE and RAM.\n\nAs the lower frequencies are active only when the device is idle, enabling this feature allows for potential power saving without impacting performance.\n\nCurrent Setting: $rpi_freq_min_text\n\nEnable: (Allows for potential power saving)\nSets arm_freq_min=100, core_freq_min=75 and sdram_freq_min=200.\n\nDisable: (Default)\nSets arm_freq_min=700, core_freq_min=250 and sdram_freq_min=400."
 					local whiptail_menu_array=()
@@ -1309,28 +1359,6 @@
 			WHIP_TITLE='Password Aborted'
 			whiptail --title "$WHIP_TITLE" --msgbox " Password change has been aborted. No changes have been applied" 8 60
 		fi
-
-		##Whiptail password box always returns exit code 0. No way to obtain if a choice was made.
-		#local passw1=$(whiptail --passwordbox "Please Enter Your New Password" 8 60 --title "Change PW" 3>&1 1>&2 2>&3)
-		#CHOICE=$?
-		#if (( $CHOICE == 0 )); then
-		#
-		#	local passw2=$(whiptail --passwordbox "Please Confirm Your New Password" 8 60 --title "Confirm PW" 3>&1 1>&2 2>&3)
-		#	CHOICE=$?
-		#	if (( $CHOICE == 0 )); then
-		#
-		#		#Password Mismatch
-		#		if [ "$passw1" != "$passw2" ]; then
-		#			WHIP_TITLE='Error - Password Mismatch'
-		#			whiptail --title "$WHIP_TITLE" --msgbox " The Passwords you have entered do not match, therefor, no changes have been applied. Please try again" 8 60
-		#		#Apply Password
-		#		else
-		#			echo -e "$passw1\n$passw1" | passwd -q root
-		#			WHIP_TITLE='Password Applied'
-		#			whiptail --title "$WHIP_TITLE" --msgbox " Your new password has successfully been applied." 8 60
-		#		fi
-		#	fi
-		#fi
 
 	}
 
