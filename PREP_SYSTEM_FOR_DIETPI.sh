@@ -62,6 +62,10 @@ rm /etc/apt/sources.list.d/deb-multimedia.list
 # deb-src http://ftp.debian.org/debian jessie-backports main contrib non-free
 # deb-src http://ftp.debian.org/debian jessie-proposed-updates contrib non-free main
 
+
+#NOTE:
+#Apt mirror will get overwritten by: /DietPi/dietpi/func/dietpi-set_software apt-mirror default : during finalize.
+
 # - Everything else (excluding RPi!)
 cat << _EOF_ > /etc/apt/sources.list
 deb http://ftp.debian.org/debian jessie main contrib non-free
@@ -70,11 +74,11 @@ deb http://security.debian.org jessie/updates main contrib non-free
 deb http://ftp.debian.org/debian jessie-backports main contrib non-free
 _EOF_
 
-# RPI UK for my testing, mirror director is slow, unstable and unreliable -------------------------
+# RPI UK mirror director is slow, unstable and unreliable -------------------------
 cat << _EOF_ > /etc/apt/sources.list
 deb http://mirror.ox.ac.uk/sites/archive.raspbian.org/archive/raspbian jessie main contrib non-free rpi
 _EOF_
-# RPI UK for my testing, mirror director is slow, unstable and unreliable -------------------------
+# RPI UK mirror director is slow, unstable and unreliable -------------------------
 
 
 #Remove following Jessie
@@ -82,21 +86,20 @@ apt-get clean
 apt-get update
 apt-get purge libpng* cpp-* cpp ntpdate bluez bluetooth rsync dialog dhcpcd5 libsqlite* libxapian22 lua5.1 netcat-* make makedev ncdu plymouth openresolv shared-mime-in* tcpd strace tasksel* wireless-* xdg-user-dirs triggerhappy python* v4l-utils traceroute xz-utils ucf xauth zlib1g-dev xml-core aptitude* avahi-daemon rsyslog logrotate man-db manpages vim vim-common vim-runtime vim-tiny mc mc-data
 
-#+Desktop images:
+#+Desktop images (Mostly desktop packages, but apply to non-desktop images also):
 apt-get purge libpod-* libpeas-* isc-dhcp-server gnome-* fonts-dejavu* eject dnsmasq* dns-root-data colord-data libturbojpeg1 libjasper* libjson* libwbclient* libwayland* golang-* libavahi* libtext* libweb* libpcsclite1 libxau6* libvpx1 libxc* dictionaries-* libgtk* miscfiles minicom lrzsz lxmenu-* x11-* zenity* yelp-*
 
 #+armbian
 apt-get purge toilet toilet-fonts w-scan vlan weather-util* sysbench stress apt-transport-* cmake cmake-data device-tree-co* fping hddtemp haveged hostapd i2c-tools iperf ir-keytable libasound2* libmtp* libusb-dev lirc lsof ncurses-term pkg-config unicode-data rfkill pv mtp-tools m4 screen alsa-utils armbian-* autotools-dev bind9-host btrfs-tools bridge-utils cpufrequtils dvb-apps dtv-scan-table* evtest f3 figlet gcc gcc-4.8-* git git-man iozone3 ifenslave
 apt-get purge -y linux-jessie-root-*
 
-#+RPi
-apt-get purge libraspberrypi-doc
-
 #rm /etc/apt/sources.list.d/armbian.list
 rm /etc/init.d/resize2fs
 systemctl daemon-reload
 rm /etc/update-motd.d/*
 
+#+RPi
+apt-get purge libraspberrypi-doc
 
 #+ dev packages
 apt-get purge '\-dev$' linux-headers*
@@ -107,7 +110,7 @@ apt-get autoremove --purge -y
 
 #install packages
 echo -e "CONF_SWAPSIZE=0" > /etc/dphys-swapfile
-apt-get install -y p7zip-full hfsplus iw debconf-utils xz-utils ifmetric fbset wpasupplicant resolvconf bc dbus bzip2 psmisc bash-completion cron whiptail sudo ntp ntfs-3g dosfstools parted hdparm pciutils usbutils zip htop wput wget fake-hwclock dphys-swapfile curl unzip ca-certificates console-setup console-data console-common keyboard-configuration wireless-tools wireless-regdb crda --no-install-recommends
+apt-get install -y ethtool p7zip-full hfsplus iw debconf-utils xz-utils ifmetric fbset wpasupplicant resolvconf bc dbus bzip2 psmisc bash-completion cron whiptail sudo ntp ntfs-3g dosfstools parted hdparm pciutils usbutils zip htop wput wget fake-hwclock dphys-swapfile curl unzip ca-certificates console-setup console-data console-common keyboard-configuration wireless-tools wireless-regdb crda --no-install-recommends
 
 #??? bluetooth if onboard device
 apt-get install -y bluetooth
@@ -376,6 +379,9 @@ _EOF_
 
 #Finalise system
 /DietPi/dietpi/finalise
+
+#??? Does this device have a unique HW ID index and file? check /DietPi/dietpi/dietpi-obtain_hw_model
+echo ID > /etc/.dietpi_hw_model_identifier
 
 #Power off system
 
