@@ -3,7 +3,7 @@
 # Setup a Debian installation, for DietPi.
 #------------------------------------------------------------------------------------------------
 # NOTICE: Images created by non-DietPi staff, will NOT be officially supported by DietPi, unless authorized by DietPi.
-# NOTICE: There is no offical support for using these script/notes. However, expections may be made.
+# NOTICE: There is no offical support for using these script/notes. However, exceptions may be made.
 #------------------------------------------------------------------------------------------------
 # Before starting, copy the following files and folders to /boot/ https://github.com/Fourdee/DietPi
 #  - /boot/dietpi.txt (file)
@@ -78,6 +78,11 @@ _EOF_
 cat << _EOF_ > /etc/apt/sources.list
 deb http://mirror.ox.ac.uk/sites/archive.raspbian.org/archive/raspbian jessie main contrib non-free rpi
 _EOF_
+
+#Stretch
+# cat << _EOF_ > /etc/apt/sources.list
+# deb http://mirror.ox.ac.uk/sites/archive.raspbian.org/archive/raspbian stretch main contrib non-free rpi
+# _EOF_
 # RPI UK mirror director is slow, unstable and unreliable -------------------------
 
 
