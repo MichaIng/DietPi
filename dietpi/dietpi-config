@@ -1427,10 +1427,10 @@
 			ram_mem_current=$((1024-gpu_mem_current))
 			ram_mem_total=1024
 		elif (( $HW_MODEL == 10 )); then
-			ram_mem_current=$(free -m -o | grep -m1 'Mem:' | awk '{print $2}')
+			ram_mem_current=$(free -m | grep -m1 'Mem:' | awk '{print $2}')
 			gpu_mem_current=$((1024-ram_mem_current))
 		elif (( $HW_MODEL == 12 )); then
-			ram_mem_current=$(free -m -o | grep -m1 'Mem:' | awk '{print $2}')
+			ram_mem_current=$(free -m | grep -m1 'Mem:' | awk '{print $2}')
 			gpu_mem_current=$((2048-ram_mem_current))
 		fi
 
@@ -2817,7 +2817,7 @@ _EOF_
 		WHIP_TITLE='DietPi - Tools'
 		OPTION=$(whiptail --title "$WHIP_TITLE" --menu "Choose an option" --cancel-button "$TEXT_MENU_BACK" --backtitle "$WHIP_BACKTITLE" 10 70 2 \
 		"Benchmarks" "Filesystem and RAM benchmarks." \
-		"Stress Test" "Tests system stability (CPU/IO/RAM)" 3>&1 1>&2 2>&3)
+		"Stress Test" "CPU Burn and system stability tests (CPU/IO/RAM)" 3>&1 1>&2 2>&3)
 		CHOICE=$?
 		if (( $CHOICE == 0 )); then
 
@@ -2831,57 +2831,7 @@ _EOF_
 
 				'Stress Test')
 
-					local cores=$(nproc --all)
-					local memory_per_thread=$(( $(free -m | awk '/^Mem:/{print $2}') / ( $cores * 2 ) ))
-
-					WHIP_TITLE='DietPi - Stress Test'
-					OPTION=$(whiptail --title "$WHIP_TITLE" --menu "Stess test will test CPU, RAM and Disk IO for overall system stability.\nPlease select a duration for the test.\n\nInfo:\n - Cores = $cores\n - Memory per thread = $memory_per_thread MB" --cancel-button "$TEXT_MENU_BACK" --backtitle "$WHIP_BACKTITLE" 19 60 5 \
-					"60" "1 Minute" \
-					"300" "5 Minutes" \
-					"1800" "30 Minutes" \
-					"3600" "1 Hour" \
-					"21600" "6 Hours" 3>&1 1>&2 2>&3)
-					CHOICE=$?
-					if (( $CHOICE == 0 )); then
-
-						#install stress
-						if (( ! $(dpkg --get-selections | grep -ci -m1 '^stress') )); then
-
-							/DietPi/dietpi/func/dietpi-notify 2 'Installing Stress'
-							/DietPi/dietpi/func/dietpi-notify 2 'Please wait...'
-
-							apt-get install -y stress
-
-						fi
-
-						/DietPi/dietpi/func/dietpi-notify 3 Stress_Test "Running stress test for $OPTION seconds"
-						/DietPi/dietpi/func/dietpi-notify 2 'To terminate, type: killall -w stress'
-
-						local start_time=$(date)
-						local start_time_epoch=$(date +%s)
-
-						stress -c $cores -i 2 -m $cores --vm-bytes "$memory_per_thread"M -d 1 -t "$OPTION"s &
-
-						while (( $(ps aux | grep -ci -m1 '[s]tress') == 1 ))
-						do
-							echo -e "$(date) | $(/DietPi/dietpi/dietpi-cpuinfo 1)'c"
-							sleep 1
-
-						done
-
-						local end_time=$(date)
-						local end_time_epoch=$(date +%s)
-						local duration_seconds=$(( $end_time_epoch - $start_time_epoch ))
-
-						/DietPi/dietpi/func/dietpi-notify 2 "Start Time: $start_time"
-						/DietPi/dietpi/func/dietpi-notify 2 "End Time: $end_time"
-						/DietPi/dietpi/func/dietpi-notify 2 "Duration: $duration_seconds seconds"
-
-						/DietPi/dietpi/func/dietpi-notify 0 'Stress Test Completed'
-
-						whiptail --title "$WHIP_TITLE" --msgbox "Stress test completed:\n - Start Time: $start_time\n - End Time: $end_time\n - Duration: $duration_seconds seconds" --backtitle "$WHIP_BACKTITLE" 10 65
-
-					fi
+					TARGETMENUID=15
 
 				;;
 
@@ -2975,13 +2925,13 @@ _EOF_
 			/DietPi/dietpi/func/dietpi-notify 2 "Performing $text_info_test_name benchmark, please wait..."
 
 			/DietPi/dietpi/func/dietpi-notify 2 "Testing Seq Write Speed ($benchmark_filesize MB)"
-			write_speed=$(dd bs=4K count=$(( $benchmark_filesize * 1024 / 4 )) if=/dev/zero of=$benchmark_temp_file conv=fdatasync 2>&1 | grep 'MB)' | awk '{print $8, $9}')
+			write_speed=$(dd bs=4K count=$(( $benchmark_filesize * 1024 / 4 )) if=/dev/zero of=$benchmark_temp_file conv=fdatasync 2>&1 | grep 'MB' | awk '{print $8, $9}')
 
 			#Clear cache
 			sync
 			echo 3 > /proc/sys/vm/drop_caches
 			/DietPi/dietpi/func/dietpi-notify 2 "Testing Seq Read Speed ($benchmark_filesize MB)"
-			read_speed=$(dd bs=4K count=$(( $benchmark_filesize * 1024 / 4 )) if=$benchmark_temp_file of=/dev/zero conv=fdatasync 2>&1 | grep 'MB)' | awk '{print $8, $9}')
+			read_speed=$(dd bs=4K count=$(( $benchmark_filesize * 1024 / 4 )) if=$benchmark_temp_file of=/dev/zero conv=fdatasync 2>&1 | grep 'MB' | awk '{print $8, $9}')
 
 			#Update global values.
 			if (( $device_index == 0 )); then
@@ -3005,6 +2955,7 @@ _EOF_
 
 		#Delete Test File
 		rm "$benchmark_temp_file" &> /dev/null
+
 	}
 
 	#TARGETMENUID=12
@@ -3434,6 +3385,168 @@ _EOF_
 	}
 
 	#TARGETMENUID=15
+	STRESS_TEST_MODE=0 #0=CPU only | 1=CPU/RAM 2=CPU/RAM/IO
+	STRESS_TEST_DURATION=60
+	STRESS_TEST_RESULTS_TEMP_MIN=0
+	STRESS_TEST_RESULTS_TEMP_MAX=0
+
+	Menu_StressTest(){
+
+		TARGETMENUID=11
+
+		local stress_test_mode_text='CPU Burn: (CPU only)'
+		if (( $STRESS_TEST_MODE == 1 )); then
+
+			stress_test_mode_text='CPU & RAM: (CPU, RAM)'
+
+		elif (( $STRESS_TEST_MODE == 2 )); then
+
+			stress_test_mode_text='Full: (CPU, DISK, RAM)'
+
+		fi
+
+		WHIP_TITLE='DietPi - Stress Test'
+		OPTION=$(whiptail --title "$WHIP_TITLE" --menu "Please select an option:" --cancel-button "$TEXT_MENU_BACK" --backtitle "$WHIP_BACKTITLE" 11 60 3 \
+		"Mode" "$stress_test_mode_text" \
+		"Duration" "$(( $STRESS_TEST_DURATION / 60 )) Minutes" \
+		"Start" "Launch the stress test" 3>&1 1>&2 2>&3)
+		CHOICE=$?
+		if (( $CHOICE == 0 )); then
+
+			if [ "$OPTION" = "Duration" ]; then
+
+				OPTION=$(whiptail --title "$WHIP_TITLE" --menu "Please select a duration for the test" --cancel-button "$TEXT_MENU_BACK" --default-item "$STRESS_TEST_DURATION" --backtitle "$WHIP_BACKTITLE" 13 60 5 \
+				"60" "1 Minute" \
+				"300" "5 Minutes" \
+				"1800" "30 Minutes" \
+				"3600" "1 Hour" \
+				"21600" "6 Hours" 3>&1 1>&2 2>&3)
+				CHOICE=$?
+				if (( $CHOICE == 0 )); then
+
+					STRESS_TEST_DURATION=$OPTION
+					TARGETMENUID=15
+
+				fi
+
+			elif [ "$OPTION" = "Mode" ]; then
+
+				OPTION=$(whiptail --title "$WHIP_TITLE" --menu "Please select a stress test type" --cancel-button "$TEXT_MENU_BACK" --default-item "$STRESS_TEST_MODE" --backtitle "$WHIP_BACKTITLE" 12 60 3 \
+				"0" "CPU Burn: (CPU only)" \
+				"1" "CPU & RAM: (CPU, RAM)" \
+				"2" "Full: (CPU, DISK, RAM)" 3>&1 1>&2 2>&3)
+				CHOICE=$?
+				if (( $CHOICE == 0 )); then
+
+					STRESS_TEST_MODE=$OPTION
+					TARGETMENUID=15
+
+				fi
+
+			elif [ "$OPTION" = "Start" ]; then
+
+				#install stress
+				if (( ! $(dpkg --get-selections | grep -ci -m1 '^stress') )); then
+
+					/DietPi/dietpi/func/dietpi-notify 2 'Installing Stress'
+					/DietPi/dietpi/func/dietpi-notify 2 'Please wait...'
+
+					apt-get install -y stress
+
+				fi
+
+				/DietPi/dietpi/func/dietpi-notify 3 Stress_Test "Running stress test for $STRESS_TEST_DURATION seconds"
+				/DietPi/dietpi/func/dietpi-notify 2 'To terminate, type: killall -w stress'
+
+				local start_time=$(date)
+				local start_time_epoch=$(date +%s)
+				local cores=$(nproc --all) # double up cpu threads, maximize overheads.
+				local memory_per_thread=$(( $(free -m | awk '/^Mem:/{print $2}') / ( $cores * 2 ) ))
+				local fp_log="$HOME/dietpi-config_stress.log"
+				rm "$fp_log" &> /dev/null
+
+				if (( $STRESS_TEST_MODE == 0 )); then
+
+					stress -c $(( $cores * 2 )) -t "$STRESS_TEST_DURATION"s &
+
+				elif (( $STRESS_TEST_MODE == 1 )); then
+
+					stress -c $(( $cores * 2 )) -i $cores -m $cores --vm-bytes "$memory_per_thread"M -t "$STRESS_TEST_DURATION"s &
+
+				elif (( $STRESS_TEST_MODE == 2 )); then
+
+					stress -c $(( $cores * 2 )) -i $cores -m $cores --vm-bytes "$memory_per_thread"M -d 2 -t "$STRESS_TEST_DURATION"s &
+
+				fi
+
+				# - Reset
+				STRESS_TEST_RESULTS_TEMP_MIN=1000
+				STRESS_TEST_RESULTS_TEMP_MAX=0
+
+				# - Check if system supports temp readouts
+				local cpu_supports_temp=0
+				local cpu_temp=$(/DietPi/dietpi/dietpi-cpuinfo 1)
+				if [[ $cpu_temp =~ ^-?[0-9]+$ ]]; then
+
+					cpu_supports_temp=1
+
+				fi
+
+				# - Loop until stress completed
+				local remaning_time=0
+				while (( $(ps aux | grep -ci -m1 '[s]tress') == 1 ))
+				do
+
+					cpu_temp=$(/DietPi/dietpi/dietpi-cpuinfo 1)
+					remaning_time=$(( $STRESS_TEST_DURATION + ( $start_time_epoch - $(date +%s) ) ))
+
+					echo -e "$(date) | $cpu_temp'c | $remaning_time seconds remaining"
+					echo -e "$(date) | $cpu_temp'c" >> "$fp_log"
+
+					if (( $cpu_supports_temp )); then
+
+						if (( $cpu_temp > $STRESS_TEST_RESULTS_TEMP_MAX )); then
+
+							STRESS_TEST_RESULTS_TEMP_MAX=$cpu_temp
+
+						fi
+
+						if (( $cpu_temp < $STRESS_TEST_RESULTS_TEMP_MIN )); then
+
+							STRESS_TEST_RESULTS_TEMP_MIN=$cpu_temp
+
+						fi
+
+					fi
+
+					sleep 1
+					((time_since_start++))
+
+				done
+
+				local end_time=$(date)
+				local end_time_epoch=$(date +%s)
+				local duration_seconds=$(( $end_time_epoch - $start_time_epoch ))
+
+				local output_string=" - Start Time: $start_time
+ - End Time  : $end_time
+ - Duration  : $duration_seconds seconds
+ - Min Temp  : $STRESS_TEST_RESULTS_TEMP_MIN 'c
+ - Max Temp  : $STRESS_TEST_RESULTS_TEMP_MAX 'c
+ - log       : $fp_log"
+
+				/DietPi/dietpi/func/dietpi-notify 0 'Stress Test Completed'
+				/DietPi/dietpi/func/dietpi-notify 2 "$output_string"
+
+				whiptail --title "$WHIP_TITLE" --msgbox "Stress test results:\n$output_string" --backtitle "$WHIP_BACKTITLE" 14 65
+
+				TARGETMENUID=15
+
+			fi
+
+		fi
+
+	}
 
 	#TARGETMENUID=16
 	Menu_Network_Nas_Misc(){
@@ -3933,7 +4046,7 @@ _EOF_
 			elif (( $TARGETMENUID == 14 )); then
 				Menu_AudioOptions
 			elif (( $TARGETMENUID == 15 )); then
-				echo "Nothing here"
+				Menu_StressTest
 			elif (( $TARGETMENUID == 16 )); then
 				Menu_Network_Nas_Misc
 			elif (( $TARGETMENUID == 17 )); then
