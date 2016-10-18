@@ -136,6 +136,9 @@ rm -R /media
 rm -R /tmp/*
 rm -R /selinux
 
+#Remove files
+rm /etc/init.d/cpu_governor # Meveric XU4
+
 #Create DietPi common folders
 mkdir /DietPi
 
