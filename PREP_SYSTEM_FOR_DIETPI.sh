@@ -129,6 +129,7 @@ apt-get install -y firmware-realtek firmware-ralink firmware-brcm80211 firmware-
 
 #Delete any non-root user (eg: pi)
 userdel -f pi
+userdel -f test #armbian
 
 #Remove folders
 rm -R /home
@@ -157,12 +158,15 @@ echo -e "NFS client can be installed and setup by DietPi-Config.\nSimply run: di
 
 #FSTAB
 cp /boot/dietpi/conf/fstab /etc/fstab
+systemctl daemon-reload
+mount -a
 
 #setup dietpi service
 echo 1 > /boot/dietpi/.install_stage
 cp /boot/dietpi/conf/dietpi-service /etc/init.d/dietpi-service
 chmod +x /etc/init.d/dietpi-service
 update-rc.d dietpi-service defaults 00 80
+systemctl daemon-reload
 service dietpi-service start
 
 #Cron jobs
