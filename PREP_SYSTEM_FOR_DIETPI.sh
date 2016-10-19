@@ -5,11 +5,6 @@
 # NOTICE: Images created by non-DietPi staff, will NOT be officially supported by DietPi, unless authorized by DietPi.
 # NOTICE: There is no offical support for using these script/notes. However, exceptions may be made.
 #------------------------------------------------------------------------------------------------
-# Before starting, copy the following files and folders to /boot/ https://github.com/Fourdee/DietPi
-#  - /boot/dietpi.txt (file)
-#  - /boot/config.txt (file)
-#  - /boot/dietpi (folder)
-#------------------------------------------------------------------------------------------------
 # Legend:
 #  - Items that are commented out should not be used.
 #  - Sections with '#???', are optional, depending on the device and its specs. (eg: does it need bluetooth?)
@@ -126,6 +121,16 @@ apt-get install -y firmware-realtek firmware-ralink firmware-brcm80211 firmware-
 #------------------------------------------------------------------------------------------------
 #DIETPI STUFF
 #------------------------------------------------------------------------------------------------
+
+#Mandatory DietPi Files
+wget https://github.com/Fourdee/DietPi/archive/master.zip -O /tmp/master.zip
+mkdir -p /boot/
+(cd /boot && unzip -oj /tmp/master.zip DietPi-master/dietpi.txt)
+(cd /boot && unzip -oj /tmp/master.zip DietPi-master/config.txt)
+unzip -o /tmp/master.zip -d /boot/  DietPi-master/dietpi/*
+mv /boot/DietPi-master/* /boot/
+rm -rf /boot/DietPi-master
+rm /tmp/master.zip
 
 #Delete any non-root user (eg: pi)
 userdel -f pi
