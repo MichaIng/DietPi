@@ -15,6 +15,8 @@
 #  - Sections with '#???', are optional, depending on the device and its specs. (eg: does it need bluetooth?)
 #------------------------------------------------------------------------------------------------
 
+#This is not currently a executable script. Please manually run through the commands:
+exit 0 #prevent continuation of this script.
 
 #------------------------------------------------------------------------------------------------
 #Packages
