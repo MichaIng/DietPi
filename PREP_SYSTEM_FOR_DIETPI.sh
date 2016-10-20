@@ -5,11 +5,6 @@
 # NOTICE: Images created by non-DietPi staff, will NOT be officially supported by DietPi, unless authorized by DietPi.
 # NOTICE: There is no offical support for using these script/notes. However, exceptions may be made.
 #------------------------------------------------------------------------------------------------
-# Before starting, copy the following files and folders to /boot/ https://github.com/Fourdee/DietPi
-#  - /boot/dietpi.txt (file)
-#  - /boot/config.txt (file)
-#  - /boot/dietpi (folder)
-#------------------------------------------------------------------------------------------------
 # Legend:
 #  - Items that are commented out should not be used.
 #  - Sections with '#???', are optional, depending on the device and its specs. (eg: does it need bluetooth?)
@@ -21,7 +16,7 @@
 #------------------------------------------------------------------------------------------------
 
 #Jessie , unified apt sources.
-rm /etc/apt/sources.list.d/deb-multimedia.list
+rm -f /etc/apt/sources.list.d/deb-multimedia.list
 
 #  - C2
 # cat << _EOF_ > /etc/apt/sources.list
@@ -99,9 +94,9 @@ apt-get purge toilet toilet-fonts w-scan vlan weather-util* sysbench stress apt-
 apt-get purge -y linux-jessie-root-*
 
 #rm /etc/apt/sources.list.d/armbian.list
-rm /etc/init.d/resize2fs
+rm -f /etc/init.d/resize2fs
 systemctl daemon-reload
-rm /etc/update-motd.d/*
+rm -f /etc/update-motd.d/*
 
 #+RPi
 apt-get purge libraspberrypi-doc
@@ -127,14 +122,25 @@ apt-get install -y firmware-realtek firmware-ralink firmware-brcm80211 firmware-
 #DIETPI STUFF
 #------------------------------------------------------------------------------------------------
 
+#Mandatory DietPi Files
+wget https://github.com/Fourdee/DietPi/archive/master.zip -O /tmp/master.zip
+mkdir -p /boot/
+(cd /boot && unzip -ojq /tmp/master.zip DietPi-master/dietpi.txt)
+(cd /boot && unzip -ojq /tmp/master.zip DietPi-master/config.txt)
+unzip -oq /tmp/master.zip -d /boot/  DietPi-master/dietpi/*
+mv /boot/DietPi-master/* /boot/
+rm -rf /boot/DietPi-master
+rm /tmp/master.zip
+
+
 #Delete any non-root user (eg: pi)
 userdel -f pi
 
 #Remove folders
-rm -R /home
-rm -R /media
-rm -R /tmp/*
-rm -R /selinux
+rm -Rf /home
+rm -Rf /media
+rm -Rf /tmp/*
+rm -Rf /selinux
 
 #Create DietPi common folders
 mkdir /DietPi
@@ -150,6 +156,7 @@ echo -e "Samba client can be installed and setup by DietPi-Config.\nSimply run: 
 echo -e "FTP client mount can be installed and setup by DietPi-Config.\nSimply run: dietpi-config and select the Networking Options: NAS/Misc menu" > /mnt/ftp_client/readme.txt
 echo -e "NFS client can be installed and setup by DietPi-Config.\nSimply run: dietpi-config and select the Networking Options: NAS/Misc menu" > /mnt/nfs_client/readme.txt
 
+chmod +x /boot/dietpi/dietpi-logclear
 /boot/dietpi/dietpi-logclear 2
 
 #FSTAB
@@ -159,6 +166,7 @@ cp /boot/dietpi/conf/fstab /etc/fstab
 echo 1 > /boot/dietpi/.install_stage
 cp /boot/dietpi/conf/dietpi-service /etc/init.d/dietpi-service
 chmod +x /etc/init.d/dietpi-service
+chmod +x /boot/dietpi/dietpi-ramdisk
 update-rc.d dietpi-service defaults 00 80
 service dietpi-service start
 
