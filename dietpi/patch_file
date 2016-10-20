@@ -1665,7 +1665,118 @@ _EOF_
 
 	elif (( $VERSION_CURRENT == 134 )); then
 		#-------------------------------------------------------------------------------
-		echo 0
+		#DietPi services updated to SystemD:
+
+		# - Stop and remove old service
+		dietpi-services stop
+		systemctl stop dietpi-service
+
+		systemctl disable dietpi-service
+		update-rc.d dietpi-service remove
+		rm /etc/init.d/dietpi-service
+
+		# - Install new services
+		cat << _EOF_ > /etc/systemd/system/dietpi-ramdisk.service
+[Unit]
+Description=DietPi-RAMdisk
+
+[Service]
+Type=forking
+RemainAfterExit=yes
+ExecStart=/bin/bash -c '/boot/dietpi/dietpi-ramdisk 0'
+ExecStop=/bin/bash -c '/DietPi/dietpi/dietpi-ramdisk 1'
+
+[Install]
+WantedBy=local-fs.target
+_EOF_
+		systemctl enable dietpi-ramdisk.service
+		systemctl daemon-reload
+		systemctl start dietpi-ramdisk.service
+
+		#	DietPi-Ramlog
+cat << _EOF_ > /etc/systemd/system/dietpi-ramlog.service
+[Unit]
+Description=DietPi-RAMlog
+Before=rsyslog.service syslog.service
+
+[Service]
+Type=forking
+RemainAfterExit=yes
+ExecStart=/bin/bash -c '/boot/dietpi/dietpi-ramlog 0'
+ExecStop=/bin/bash -c '/DietPi/dietpi/dietpi-ramlog 1'
+
+[Install]
+WantedBy=local-fs.target
+_EOF_
+		systemctl enable dietpi-ramlog.service
+		systemctl daemon-reload
+		systemctl start dietpi-ramlog.service
+
+		#	Boot
+		cat << _EOF_ > /etc/systemd/system/dietpi-boot.service
+[Unit]
+Description=DietPi-Boot
+After=network-online.target network.target networking.service dietpi-ramdisk.service dietpi-ramlog.service
+Requires=dietpi-ramdisk.service
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/bin/bash -c '/DietPi/dietpi/boot'
+StandardOutput=tty
+
+[Install]
+WantedBy=multi-user.target
+_EOF_
+		systemctl enable dietpi-boot.service
+
+		cat << _EOF_ > /etc/systemd/system/rc-local.service
+[Unit]
+Description=/etc/rc.local Compatibility
+After=dietpi-boot.service dietpi-ramdisk.service dietpi-ramlog.service
+Requires=dietpi-boot.service dietpi-ramdisk.service
+
+[Service]
+Type=idle
+ExecStart=/etc/rc.local
+StandardOutput=tty
+RemainAfterExit=yes
+
+[Install]
+WantedBy=multi-user.target
+_EOF_
+		systemctl enable rc-local.service
+
+		if [ -f /DietPi/dietpi/.installed ]; then
+
+			mv /etc/rc.local /etc/rc.local.bak
+			whiptail --title "/etc/rc.local updated" --msgbox "/etc/rc.local has been overwritten with an updated version. A backup of your previous rc.local can be found below:\n\n/etc/rc.local.bak" 11 70
+
+		fi
+
+		cat << _EOF_ > /etc/rc.local
+#!/bin/bash
+#Precaution: Wait for DietPi Ramdisk to finish
+while [ ! -f /DietPi/.ramdisk ]
+do
+
+    /DietPi/dietpi/func/dietpi-notify 2 "Waiting for DietPi-RAMDISK to finish mounting DietPi to RAM..."
+    sleep 1
+
+done
+
+echo -e "\$(cat /proc/uptime | awk '{print \$1}') Seconds" > /var/log/boottime
+if (( \$(cat /DietPi/dietpi/.install_stage) == 1 )); then
+
+    /DietPi/dietpi/dietpi-services start
+
+fi
+/DietPi/dietpi/dietpi-banner 0
+echo -e " Default Login:\n Username = root\n Password = dietpi\n"
+exit 0
+_EOF_
+		chmod +x /etc/rc.local
+		systemctl daemon-reload
 		#-------------------------------------------------------------------------------
 
 	fi
