@@ -153,10 +153,16 @@ _EOF_
 
 	Lcd_Panel_Main(){
 
-		if [ "$INPUT_DEVICE_VALUE" = "waveshare32" ]; then
+		if [ "$INPUT_DEVICE_VALUE" = "odroid-lcd35" ]; then
+
+			Lcd_Panel_OdroidLCD35_Enable
+			PANEL_UPDATE_DIETPITXT=1
+
+		elif [ "$INPUT_DEVICE_VALUE" = "waveshare32" ]; then
 
 			Lcd_Panel_Waveshare32_Enable
 			PANEL_UPDATE_DIETPITXT=1
+
 
 		elif [ "$INPUT_DEVICE_VALUE" = "odroid-cloudshell" ]; then
 
@@ -168,6 +174,7 @@ _EOF_
 
 			Lcd_Panel_Waveshare32_Disable
 			Lcd_Panel_Odroidcloudshell_Disable
+			Lcd_Panel_OdroidLCD35_Disable
 			PANEL_UPDATE_DIETPITXT=1
 
 		else
@@ -185,13 +192,32 @@ _EOF_
 
 	}
 
-	# - Waveshare32
-	Lcd_Panel_Waveshare32_Enable_X11(){
+	Lcd_Panel_Xorg_All_Enable(){
 
-		#X11 support
+		#Xinput calibrator
 		apt-get install -y xinput-calibrator
 
 		mkdir -p /etc/X11/xorg.conf.d
+
+		# - Create desktop icon for xcalibration
+		mkdir -p "$HOME"/Desktop
+		cat << _EOF_ > "$HOME"/Desktop/xinput_calibrator.desktop
+[Desktop Entry]
+Version=1.0
+Name=xinput_calibrator
+Type=Application
+Comment=xinput_calibrator
+Terminal=true
+Exec=xinput_calibrator
+#Icon=/DietPi/dietpi/conf/desktop/dietpi-icon.png
+Categories=System;
+GenericName=xinput_calibrator
+_EOF_
+
+	}
+
+	# - Waveshare32
+	Lcd_Panel_Waveshare32_Enable_X11(){
 
 		cat << _EOF_ > /etc/X11/xorg.conf.d/99-waveshare32_xorg.conf
 Section "Device"
@@ -213,22 +239,6 @@ Section "InputClass"
 EndSection
 _EOF_
 
-
-		# - Create desktop icon for xcalibration
-		mkdir -p "$HOME"/Desktop
-		cat << _EOF_ > "$HOME"/Desktop/xinput_calibrator.desktop
-[Desktop Entry]
-Version=1.0
-Name=xinput_calibrator
-Type=Application
-Comment=xinput_calibrator
-Terminal=true
-Exec=xinput_calibrator
-#Icon=/DietPi/dietpi/conf/desktop/dietpi-icon.png
-Categories=System;
-GenericName=xinput_calibrator
-_EOF_
-
 	}
 
 	Lcd_Panel_Waveshare32_Enable(){
@@ -240,6 +250,7 @@ _EOF_
 		if (( $HW_MODEL < 10 )); then
 
 			# + X11
+			Lcd_Panel_Xorg_All_Enable
 			Lcd_Panel_Waveshare32_Enable_X11
 
 			wget http://dietpi.com/downloads/conf/waveshare32b-overlay.dtb -O /boot/overlays/waveshare32b.dtbo
@@ -266,10 +277,10 @@ _EOF_
 		elif (( $HW_MODEL >= 10 && $HW_MODEL < 20 )); then
 
 			# + X11
+			Lcd_Panel_Xorg_All_Enable
 			Lcd_Panel_Waveshare32_Enable_X11
 
 			#con2fbmap, maps console (1) to panel(2). Run during boot.
-			# NB: Stopping this service to reset fbmaps before running startx has no effect, X fails to load.
 			cat << _EOF_ > /etc/systemd/system/con2fbmap.service
 [Unit]
 Description=con2fbmap
@@ -280,7 +291,6 @@ ExecStart=/bin/con2fbmap 1 2
 ExecStop=/bin/con2fbmap 1 0
 
 RemainAfterExit=yes
-User=root
 
 [Install]
 WantedBy=multi-user.target
@@ -374,6 +384,140 @@ _EOF_
 		#root@DietPi-XU4:~# modprobe -rf spi_s3c64xx
 		#root@DietPi-XU4:~# modprobe -rf fbtft_device
 		#Segmentation fault
+
+	}
+
+	# - Odroid LCD 3.5
+	Lcd_Panel_OdroidLCD35_Enable(){
+
+		if (( $HW_MODEL >= 10 && $HW_MODEL < 20 )); then
+
+			#Reset to disabled:
+			Lcd_Panel_OdroidLCD35_Disable
+
+			Lcd_Panel_Xorg_All_Enable
+
+			cat << _EOF_ > /etc/modprobe.d/odroid-lcd35.conf
+options fbtft_device name=flexpfb rotate=90
+options flexfb chip=ili9488
+_EOF_
+
+			if (( ! $(cat /etc/modules | grep -ci -m1 'flexfb') )); then
+
+				# - XU4
+				if (( $HW_MODEL == 11 )); then
+
+					cat << _EOF_ >> /etc/modules
+fbtft_device
+flexfb
+sx865x
+_EOF_
+
+				# - C1/2
+				else
+
+					cat << _EOF_ >> /etc/modules
+aml_i2c
+pwm-meson
+pwm-ctrl
+fbtft_device
+flexfb
+sx865x
+_EOF_
+
+				fi
+
+			fi
+
+			#Service
+			# - XU4
+			if (( $HW_MODEL == 11 )); then
+
+				cat << _EOF_ > /etc/systemd/system/odroid-lcd35.service
+[Unit]
+Description=Odroid LCD 3.5
+
+[Path]
+PathExists=/dev/fb2
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/usr/bin/setterm -blank 0 -powersave off
+ExecStart=/bin/con2fbmap 1 2
+StandardOutput=tty
+
+[Install]
+WantedBy=multi-user.target
+_EOF_
+
+			# - C1/2
+			else
+
+				cat << _EOF_ > /etc/systemd/system/odroid-lcd35.service
+[Unit]
+Description=Odroid LCD 3.5
+
+[Path]
+PathExists=/dev/fb2
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/bin/bash -c 'echo 500000 > /sys/devices/platform/pwm-ctrl/freq0'
+ExecStart=/bin/bash -c 'echo 1 > /sys/devices/platform/pwm-ctrl/enable0'
+ExecStart=/bin/bash -c 'echo 1023 > /sys/devices/platform/pwm-ctrl/duty0'
+ExecStart=/usr/bin/setterm -blank 0 -powersave off
+ExecStart=/bin/con2fbmap 1 2
+StandardOutput=tty
+
+[Install]
+WantedBy=multi-user.target
+_EOF_
+
+			fi
+
+			systemctl enable odroid-lcd35.service
+			systemctl daemon-reload
+
+			#XORG
+			rm /etc/X11/xorg.conf.d/exynos.conf #XU4
+
+			mkdir -p /etc/X11/xorg.conf.d
+			cat << _EOF_ > /etc/X11/xorg.conf.d/99-odroid-lcd35.conf
+Section "Device"
+    Identifier    "C fbdev"
+    Driver        "fbdev"
+    Option        "fbdev" "/dev/fb2"
+EndSection
+_EOF_
+
+			# - default calibration
+			cat << _EOF_ > /etc/X11/xorg.conf.d/99-calibration.conf
+Section "InputClass"
+        Identifier      "calibration"
+        MatchProduct    "SX865X Touchscreen"
+        Option  "Calibration"   "3854 155 3880 262"
+        Option  "SwapAxes"      "0"
+EndSection
+_EOF_
+
+		else
+
+			Lcd_Panel_Not_Available_For_Device
+
+		fi
+
+
+	}
+
+	Lcd_Panel_OdroidLCD35_Disable(){
+
+		rm /etc/X11/xorg.conf.d/99-calibration.conf
+		rm /etc/modprobe.d/odroid-lcd35.conf
+		rm /etc/systemd/system/odroid-lcd35.service
+		rm /etc/X11/xorg.conf.d/99-odroid-lcd35.conf
+		systemctl daemon-reload
 
 	}
 
