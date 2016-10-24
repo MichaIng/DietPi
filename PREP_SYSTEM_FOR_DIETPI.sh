@@ -134,11 +134,7 @@ chmod +x -R /boot
 userdel -f pi
 userdel -f test #armbian
 
-#Remove folders
-rm -R /home
-rm -R /media
-rm -R /tmp/*
-rm -R /selinux
+#Remove folders (now in finalise script)
 
 #Remove files
 rm /etc/init.d/cpu_governor # Meveric XU4
@@ -327,12 +323,6 @@ net.ipv6.conf.all.disable_ipv6 = 0
 net.ipv6.conf.default.disable_ipv6 = 0
 net.ipv6.conf.lo.disable_ipv6 = 0
 _EOF_
-
-#Netplug: Now installed and configured on demand by dietpi-config
-# cat << _EOF_ > /etc/netplug/netplugd.conf
-# eth*
-# wlan*
-# _EOF_
 
 #htop cfg
 mkdir -p /root/.config/htop
