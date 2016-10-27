@@ -9,8 +9,7 @@
 	#////////////////////////////////////
 	#
 	# Info:
-	# -
-
+	# - Tweak your high-end JustBoom soundcard
 	# Usage:
 	# - /DietPi/dietpi/misc/dietpi-justboom
 	#////////////////////////////////////
@@ -21,19 +20,84 @@
 	#/////////////////////////////////////////////////////////////////////////////////////
 	#Globals
 	#/////////////////////////////////////////////////////////////////////////////////////
-	OUTPUT_FREQ=192000
-	OUTPUT_BITRATE=32
-	SOXR_ENABLED=1
-	SOXR_QUALITY='very high'
-	EQ_ENABLED=1
+	FP_MPD_CONF='/etc/mpd.conf'
+	OUTPUT_FREQ_CURRENT=0
+	OUTPUT_FREQ_TARGET=0 #So we can search and replace previous value with new
+	OUTPUT_BITRATE_CURRENT=0
+	OUTPUT_BITRATE_TARGET=0 #So we can search and replace previous value with new
+	SOXR_ENABLED=0
+	SOXR_QUALITY=0
+	EQ_ENABLED=0
+
+	Reset_Globals(){
+
+		OUTPUT_FREQ_TARGET=192000
+		OUTPUT_BITRATE_TARGET=32
+		SOXR_ENABLED=1
+		SOXR_QUALITY='very high'
+		EQ_ENABLED=1
+
+	}
 
 	Read_Globals(){
 
-		OUTPUT_FREQ=$(cat /etc/mpd.conf | grep -m1 '^format' | sed 's/\"//g' | sed 's/:/ /g' | awk '{print $2}')
-		OUTPUT_BITRATE=$(cat /etc/mpd.conf | grep -m1 '^format' | sed 's/\"//g' | sed 's/:/ /g' | awk '{print $3}')
-		SOXR_ENABLED=$(cat /etc/mpd.conf | grep -ci -m1 '^samplerate_converter \"soxr')
-		SOXR_QUALITY=$(cat /etc/mpd.conf | grep -m1 '^samplerate_converter \"soxr' | sed 's/\"//g' | awk '{for(i=3;i<=NF;i++){printf "%s ", $i}; printf "\n"}')
+		#MPD specific
+		if [ -f "$FP_MPD_CONF" ]; then
+
+			OUTPUT_FREQ_CURRENT=$(cat $FP_MPD_CONF | grep -m1 '^format' | sed 's/\"//g' | sed 's/:/ /g' | awk '{print $2}')
+			OUTPUT_FREQ_TARGET=$OUTPUT_FREQ_CURRENT
+			OUTPUT_BITRATE_CURRENT=$(cat $FP_MPD_CONF | grep -m1 '^format' | sed 's/\"//g' | sed 's/:/ /g' | awk '{print $3}')
+			OUTPUT_BITRATE_TARGET=$OUTPUT_BITRATE_CURRENT
+			SOXR_ENABLED=$(cat $FP_MPD_CONF | grep -ci -m1 '^samplerate_converter \"soxr')
+			SOXR_QUALITY=$(cat $FP_MPD_CONF | grep -m1 'samplerate_converter \"soxr' | sed 's/\"//g' | awk '{for(i=3;i<=NF;i++){printf "%s ", $i}; printf "\n"}')
+
+		fi
+
 		EQ_ENABLED=$(cat /etc/asound.conf | grep -ci -m1 '^pcm.plugequal')
+
+	}
+
+	Write_Apply_Globals(){
+
+		if (( ! $EQ_ENABLED )); then
+
+			/DietPi/dietpi/func/dietpi-set_hardware soundcard justboom-dac-noeq
+
+		else
+
+			/DietPi/dietpi/func/dietpi-set_hardware soundcard justboom-dac
+
+		fi
+
+		#MPD specific
+		if [ -f "$FP_MPD_CONF" ]; then
+
+			# - Output freq
+			sed -i "s/\"$OUTPUT_FREQ_CURRENT/\"$OUTPUT_FREQ_TARGET/g"  "$FP_MPD_CONF"
+
+			# - Output bitrate
+			sed -i "s/:$OUTPUT_BITRATE_CURRENT:/:$OUTPUT_BITRATE_TARGET:/g"  "$FP_MPD_CONF"
+
+			if (( $SOXR_ENABLED )); then
+
+				# - SOXR quality
+				sed -i "/samplerate_converter \"/c\samplerate_converter \"soxr $SOXR_QUALITY\"" "$FP_MPD_CONF"
+
+				sed -i '/samplerate_converter \"/s/^#//g' "$FP_MPD_CONF"
+				sed -i '/audio_output_format \"/s/^#//g' "$FP_MPD_CONF"
+
+			else
+
+				sed -i '/samplerate_converter \"/s/^/#/g' "$FP_MPD_CONF"
+				sed -i '/audio_output_format \"/s/^/#/g' "$FP_MPD_CONF"
+
+			fi
+
+			systemctl restart mpd
+
+		fi
+
+		Read_Globals
 
 	}
 
@@ -85,23 +149,33 @@
 
 		local whiptail_menu_array=()
 
-		whiptail_menu_array+=("Output Frequency" ": $OUTPUT_FREQ Hz | Select to change")
-		whiptail_menu_array+=("Output BitRate" ": $OUTPUT_BITRATE Bit | Select to change")
+		whiptail_menu_array+=("" "────Global Options──────────────────────────")
 		whiptail_menu_array+=("EQ Enable" ": $eq_enabled_text | Select to toggle EQ")
 		if (( $EQ_ENABLED )); then
 
 			whiptail_menu_array+=("EQ Configure" ": Launches AlsaMixer to configure EQ settings")
 
 		fi
-		whiptail_menu_array+=("SOXR Enable" ": $soxr_enabled_text | Select to toggle SOXR up-sampling")
-		if (( $SOXR_ENABLED )); then
 
-			whiptail_menu_array+=("SOXR Quality" ": $SOXR_QUALITY | Select SOXR quality level")
+		#MPD specific
+		if [ -f "$FP_MPD_CONF" ]; then
+
+			whiptail_menu_array+=("" "────MPD Specific────────────────────────────")
+			whiptail_menu_array+=("Output Frequency" ": $OUTPUT_FREQ_CURRENT Hz | Select to change")
+			whiptail_menu_array+=("Output BitRate" ": $OUTPUT_BITRATE_CURRENT Bit | Select to change")
+
+			whiptail_menu_array+=("SOXR Enable" ": $soxr_enabled_text | Select to toggle SOXR up-sampling")
+			if (( $SOXR_ENABLED )); then
+
+				whiptail_menu_array+=("SOXR Quality" ": $SOXR_QUALITY | Select SOXR quality level")
+
+			fi
 
 		fi
+		whiptail_menu_array+=("Reset" ": Reset all options to defaults")
 
-		WHIP_QUESTION='Select an option:'
-		OPTION=$(whiptail --title "$PROGRAM_NAME" --backtitle "$PROGRAM_NAME" --menu "$WHIP_QUESTION" --cancel-button "Exit" --default-item "$LAST_SELECTED_NAME" 14 70 6 "${whiptail_menu_array[@]}" 3>&1 1>&2 2>&3)
+		WHIP_QUESTION='Tweak your High-End Audiophile JustBoom soundcard:'
+		OPTION=$(whiptail --title "$PROGRAM_NAME" --backtitle "$PROGRAM_NAME" --menu "$WHIP_QUESTION" --cancel-button "Exit" --default-item "$LAST_SELECTED_NAME" 17 70 9 "${whiptail_menu_array[@]}" 3>&1 1>&2 2>&3)
 		CHOICE=$?
 
 		unset whiptail_menu_array
@@ -128,17 +202,7 @@
 
 				fi
 
-				if (( ! $EQ_ENABLED )); then
-
-					/DietPi/dietpi/func/dietpi-set_hardware soundcard justboom-dac-noeq
-
-				else
-
-					/DietPi/dietpi/func/dietpi-set_hardware soundcard justboom-dac
-
-				fi
-
-				systemctl restart mpd
+				Write_Apply_Globals
 
 			elif [ "$OPTION" = "SOXR Enable" ]; then
 
@@ -149,19 +213,7 @@
 
 				fi
 
-				if (( $SOXR_ENABLED )); then
-
-					sed -i '/samplerate_converter \"/s/^#//g' /etc/mpd.conf
-					sed -i '/audio_output_format \"/s/^#//g' /etc/mpd.conf
-
-				else
-
-					sed -i '/samplerate_converter \"/s/^/#/g' /etc/mpd.conf
-					sed -i '/audio_output_format \"/s/^/#/g' /etc/mpd.conf
-
-				fi
-
-				systemctl restart mpd
+				Write_Apply_Globals
 
 			elif [ "$OPTION" = "SOXR Quality" ]; then
 
@@ -179,8 +231,8 @@
 
 				if (( $CHOICE == 0 )); then
 
-					sed -i "/samplerate_converter \"/c\samplerate_converter \"soxr $OPTION\"" /etc/mpd.conf
-					systemctl restart mpd
+					SOXR_QUALITY=$OPTION
+					Write_Apply_Globals
 
 				fi
 
@@ -203,9 +255,8 @@
 
 				if (( $CHOICE == 0 )); then
 
-					sed -i "s/\"$OUTPUT_FREQ/\"$OPTION/g"  /etc/mpd.conf
-
-					systemctl restart mpd
+					OUTPUT_FREQ_TARGET=$OPTION
+					Write_Apply_Globals
 
 				fi
 
@@ -225,11 +276,15 @@
 
 				if (( $CHOICE == 0 )); then
 
-					sed -i "s/:$OUTPUT_BITRATE:/:$OPTION:/g"  /etc/mpd.conf
-
-					systemctl restart mpd
+					OUTPUT_BITRATE_TARGET=$OPTION
+					Write_Apply_Globals
 
 				fi
+
+			elif [ "$OPTION" = "Reset" ]; then
+
+				Reset_Globals
+				Write_Apply_Globals
 
 			fi
 
@@ -245,6 +300,9 @@
 	#/////////////////////////////////////////////////////////////////////////////////////
 	# Main Loop
 	#/////////////////////////////////////////////////////////////////////////////////////
+	#-----------------------------------------------------------------------------------
+	Read_Globals
+
 	#-----------------------------------------------------------------------------------
 	while (( $TARGETMENUID >= 0 ))
 	do
