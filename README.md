@@ -16,12 +16,13 @@
 - Odroid C1: http://dietpi.com/phpbb/viewtopic.php?f=8&t=11
 - Odroid C2: http://dietpi.com/phpbb/viewtopic.php?f=8&t=339&p=1492#p1492
 - ODroid XU3/4: http://dietpi.com/phpbb/viewtopic.php?f=8&t=57
+- NanoPi NEO: http://dietpi.com/phpbb/viewtopic.php?f=8&t=574#p2480
+- NanoPi M2/T2: http://dietpi.com/phpbb/viewtopic.php?f=8&t=620#p2664
+- NanoPi M3/T3: http://dietpi.com/phpbb/viewtopic.php?f=8&t=784&p=3482#p3482
 - Orange Pi PC: http://dietpi.com/phpbb/viewtopic.php?f=8&t=164#p612
 - Orange Pi One: http://dietpi.com/phpbb/viewtopic.php?f=8&t=676#p2913
 - BananaPi Pro: http://dietpi.com/phpbb/viewtopic.php?f=8&t=534
 - BananaPi M2+: http://dietpi.com/phpbb/viewtopic.php?f=8&t=431
-- NanoPi NEO: http://dietpi.com/phpbb/viewtopic.php?f=8&t=574#p2480
-- NanoPi M2: http://dietpi.com/phpbb/viewtopic.php?f=8&t=620#p2664
 - VMware x64 (Virtual Machine): http://dietpi.com/phpbb/viewtopic.php?f=8&t=90
 - VirtualBox x64 (Virtual Machine): http://dietpi.com/phpbb/viewtopic.php?f=8&t=390&p=1683#p1683
 
@@ -38,8 +39,8 @@ Creator, programmer and project lead of DietPi.
 * Daniel Knight (Fourdee)
 
 Current contributors:
-* Rhkean - Joined 01/03/2016
-Contributions to the DietPi in general, including sourcecode, testing, new devices. Forum moderator.
+* AWL29 - Joined 01/10/2016
+Created the DietPi image for NanoPi M3/T3.
 * K-Plan - Joined 01/01/2016
 Contributions to the DietPi in general, including In-depth testing, bug finding and valuable feedback. Forum moderator.
 * ZombieVirus - Joined 20/03/2016
@@ -50,7 +51,9 @@ Collaborations:
 Joint venture to bring you the ultimate Amiga experience on your SBC, running lightweight and optmized DietPi at its core.
 https://github.com/Fourdee/DietPi/issues/474
 
-Previous contributors:
+Previous/inactive contributors:
+* Rhkean - Joined 01/03/2016
+Contributions to the DietPi in general, including sourcecode, testing, new devices. Forum moderator.
 * Pilovali - Joined 10/10/2015
 Provided DietPi.com web hosting for 1 year until April 17th 2016, forum moderator, testing, bug reporting.
 * xenfomation - Joined 01/04/2016

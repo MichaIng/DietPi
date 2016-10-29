@@ -15,6 +15,9 @@
 #  - Sections with '#???', are optional, depending on the device and its specs. (eg: does it need bluetooth?)
 #------------------------------------------------------------------------------------------------
 
+#This is not currently a executable script. Please manually run through the commands:
+exit 0 #prevent continuation of this script.
+
 
 #------------------------------------------------------------------------------------------------
 #Packages
@@ -126,15 +129,16 @@ apt-get install -y firmware-realtek firmware-ralink firmware-brcm80211 firmware-
 #------------------------------------------------------------------------------------------------
 #DIETPI STUFF
 #------------------------------------------------------------------------------------------------
+chmod +x -R /boot
 
 #Delete any non-root user (eg: pi)
 userdel -f pi
+userdel -f test #armbian
 
-#Remove folders
-rm -R /home
-rm -R /media
-rm -R /tmp/*
-rm -R /selinux
+#Remove folders (now in finalise script)
+
+#Remove files
+rm /etc/init.d/cpu_governor # Meveric XU4
 
 #Create DietPi common folders
 mkdir /DietPi
@@ -154,13 +158,130 @@ echo -e "NFS client can be installed and setup by DietPi-Config.\nSimply run: di
 
 #FSTAB
 cp /boot/dietpi/conf/fstab /etc/fstab
+systemctl daemon-reload
+mount -a
 
-#setup dietpi service
-echo 1 > /boot/dietpi/.install_stage
-cp /boot/dietpi/conf/dietpi-service /etc/init.d/dietpi-service
-chmod +x /etc/init.d/dietpi-service
-update-rc.d dietpi-service defaults 00 80
-service dietpi-service start
+#Setup DietPi services
+#	DietPi-Ramdisk
+cat << _EOF_ > /etc/systemd/system/dietpi-ramdisk.service
+[Unit]
+Description=DietPi-RAMdisk
+
+[Service]
+Type=forking
+RemainAfterExit=yes
+ExecStart=/bin/bash -c '/boot/dietpi/dietpi-ramdisk 0'
+ExecStop=/bin/bash -c '/DietPi/dietpi/dietpi-ramdisk 1'
+
+[Install]
+WantedBy=local-fs.target
+_EOF_
+systemctl enable dietpi-ramdisk.service
+systemctl daemon-reload
+systemctl start dietpi-ramdisk.service
+
+#	DietPi-Ramlog
+cat << _EOF_ > /etc/systemd/system/dietpi-ramlog.service
+[Unit]
+Description=DietPi-RAMlog
+Before=rsyslog.service syslog.service
+
+[Service]
+Type=forking
+RemainAfterExit=yes
+ExecStart=/bin/bash -c '/boot/dietpi/dietpi-ramlog 0'
+ExecStop=/bin/bash -c '/DietPi/dietpi/dietpi-ramlog 1'
+
+[Install]
+WantedBy=local-fs.target
+_EOF_
+systemctl enable dietpi-ramlog.service
+systemctl daemon-reload
+systemctl start dietpi-ramlog.service
+
+#	Boot
+cat << _EOF_ > /etc/systemd/system/dietpi-boot.service
+[Unit]
+Description=DietPi-Boot
+After=network-online.target network.target networking.service dietpi-ramdisk.service dietpi-ramlog.service
+Requires=dietpi-ramdisk.service
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/bin/bash -c '/DietPi/dietpi/boot'
+StandardOutput=tty
+
+[Install]
+WantedBy=multi-user.target
+_EOF_
+systemctl enable dietpi-boot.service
+systemctl daemon-reload
+
+#	Remove rc.local from /etc/init.d
+update-rc.d -f rc.local remove
+rm /etc/init.d/rc.local
+rm /lib/systemd/system/rc-local.service
+
+cat << _EOF_ > /etc/systemd/system/rc-local.service
+[Unit]
+Description=/etc/rc.local Compatibility
+After=dietpi-boot.service dietpi-ramdisk.service dietpi-ramlog.service
+Requires=dietpi-boot.service dietpi-ramdisk.service
+
+[Service]
+Type=idle
+ExecStart=/etc/rc.local
+StandardOutput=tty
+RemainAfterExit=yes
+
+[Install]
+WantedBy=multi-user.target
+_EOF_
+systemctl enable rc-local.service
+systemctl daemon-reload
+
+cat << _EOF_ > /etc/rc.local
+#!/bin/bash
+#Precaution: Wait for DietPi Ramdisk to finish
+while [ ! -f /DietPi/.ramdisk ]
+do
+
+    /DietPi/dietpi/func/dietpi-notify 2 "Waiting for DietPi-RAMDISK to finish mounting DietPi to RAM..."
+    sleep 1
+
+done
+
+echo -e "\$(cat /proc/uptime | awk '{print \$1}') Seconds" > /var/log/boottime
+if (( \$(cat /DietPi/dietpi/.install_stage) == 1 )); then
+
+    /DietPi/dietpi/dietpi-services start
+
+fi
+/DietPi/dietpi/dietpi-banner 0
+echo -e " Default Login:\n Username = root\n Password = dietpi\n"
+exit 0
+_EOF_
+chmod +x /etc/rc.local
+systemctl daemon-reload
+
+#	Shutdown SSH/Dropbear before reboot
+cat << _EOF_ > /etc/systemd/system/kill-ssh-user-sessions-before-network.service
+[Unit]
+Description=Shutdown all ssh sessions before network
+DefaultDependencies=no
+Before=network.target shutdown.target
+
+[Service]
+Type=oneshot
+ExecStart=/usr/bin/killall sshd && /usr/bin/killall dropbear
+
+[Install]
+WantedBy=poweroff.target halt.target reboot.target
+_EOF_
+systemctl enable kill-ssh-user-sessions-before-network
+systemctl daemon-reload
+
 
 #Cron jobs
 cp /DietPi/dietpi/conf/cron.daily_dietpi /etc/cron.daily/dietpi
@@ -188,21 +309,6 @@ rm /etc/init.d/ntp &> /dev/null
 #/etc/sysctl.conf | Check for a previous entry before adding this
 echo -e "vm.swappiness=1" >> /etc/sysctl.conf
 
-#rc.local
-cat << _EOF_ > /etc/rc.local
-#!/bin/bash
-echo -e "\$(cat /proc/uptime | awk '{print \$1}') Seconds" > /var/log/boottime
-if (( \$(cat /DietPi/dietpi/.install_stage) == 1 )); then
-
-    /DietPi/dietpi/dietpi-services start
-
-fi
-/DietPi/dietpi/dietpi-banner 0
-echo -e " Default Login:\n Username = root\n Password = dietpi\n"
-exit 0
-_EOF_
-chmod +x /etc/rc.local
-
 #login,
 #echo -e "\n/DietPi/dietpi/login" >> /root/.bashrc
 
@@ -218,12 +324,6 @@ net.ipv6.conf.all.disable_ipv6 = 0
 net.ipv6.conf.default.disable_ipv6 = 0
 net.ipv6.conf.lo.disable_ipv6 = 0
 _EOF_
-
-#Netplug: Now installed and configured on demand by dietpi-config
-# cat << _EOF_ > /etc/netplug/netplugd.conf
-# eth*
-# wlan*
-# _EOF_
 
 #htop cfg
 mkdir -p /root/.config/htop
@@ -322,44 +422,6 @@ systemctl disable getty@tty[2-6].service
 #NTPd - remove systemd's version
 systemctl disable systemd-timesync
 
-#Remove rc.local from /etc/init.d
-update-rc.d -f rc.local remove
-rm /etc/init.d/rc.local
-rm /lib/systemd/system/rc-local.service
-
-cat << _EOF_ > /etc/systemd/system/rc-local.service
-[Unit]
-Description=/etc/rc.local Compatibility
-After=dietpi-service.service
-
-[Service]
-Type=idle
-ExecStart=/etc/rc.local
-StandardOutput=tty
-RemainAfterExit=yes
-
-[Install]
-WantedBy=multi-user.target
-_EOF_
-systemctl enable rc-local.service
-systemctl daemon-reload
-
-#Shutdown SSH/Dropbear before reboot
-cat << _EOF_ > /etc/systemd/system/kill-ssh-user-sessions-before-network.service
-[Unit]
-Description=Shutdown all ssh sessions before network
-DefaultDependencies=no
-Before=network.target shutdown.target
-
-[Service]
-Type=oneshot
-ExecStart=/usr/bin/killall sshd && /usr/bin/killall dropbear
-
-[Install]
-WantedBy=poweroff.target halt.target reboot.target
-_EOF_
-systemctl enable kill-ssh-user-sessions-before-network
-systemctl daemon-reload
 
 
 dpkg-reconfigure tzdata #Europe > London

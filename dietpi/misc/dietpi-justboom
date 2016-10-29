@@ -1,0 +1,320 @@
+#!/bin/bash
+{
+	#////////////////////////////////////
+	# DietPi JustBoom
+	#
+	#////////////////////////////////////
+	# Created by Daniel Knight / daniel.knight@dietpi.com / dietpi.com
+	#
+	#////////////////////////////////////
+	#
+	# Info:
+	# - Tweak your high-end JustBoom soundcard
+	# Usage:
+	# - /DietPi/dietpi/misc/dietpi-justboom
+	#////////////////////////////////////
+
+	#Force en_GB Locale for whole script. Prevents incorrect parsing with non-english locales.
+	LANG=en_GB.UTF-8
+
+	#/////////////////////////////////////////////////////////////////////////////////////
+	#Globals
+	#/////////////////////////////////////////////////////////////////////////////////////
+	FP_MPD_CONF='/etc/mpd.conf'
+	OUTPUT_FREQ_CURRENT=0
+	OUTPUT_FREQ_TARGET=0 #So we can search and replace previous value with new
+	OUTPUT_BITRATE_CURRENT=0
+	OUTPUT_BITRATE_TARGET=0 #So we can search and replace previous value with new
+	SOXR_ENABLED=0
+	SOXR_QUALITY=0
+	EQ_ENABLED=0
+
+	Reset_Globals(){
+
+		OUTPUT_FREQ_TARGET=192000
+		OUTPUT_BITRATE_TARGET=32
+		SOXR_ENABLED=1
+		SOXR_QUALITY='very high'
+		EQ_ENABLED=1
+
+	}
+
+	Read_Globals(){
+
+		#MPD specific
+		if [ -f "$FP_MPD_CONF" ]; then
+
+			OUTPUT_FREQ_CURRENT=$(cat $FP_MPD_CONF | grep -m1 '^format' | sed 's/\"//g' | sed 's/:/ /g' | awk '{print $2}')
+			OUTPUT_FREQ_TARGET=$OUTPUT_FREQ_CURRENT
+			OUTPUT_BITRATE_CURRENT=$(cat $FP_MPD_CONF | grep -m1 '^format' | sed 's/\"//g' | sed 's/:/ /g' | awk '{print $3}')
+			OUTPUT_BITRATE_TARGET=$OUTPUT_BITRATE_CURRENT
+			SOXR_ENABLED=$(cat $FP_MPD_CONF | grep -ci -m1 '^samplerate_converter \"soxr')
+			SOXR_QUALITY=$(cat $FP_MPD_CONF | grep -m1 'samplerate_converter \"soxr' | sed 's/\"//g' | awk '{for(i=3;i<=NF;i++){printf "%s ", $i}; printf "\n"}' | sed 's/ *$//')
+
+		fi
+
+		EQ_ENABLED=$(cat /etc/asound.conf | grep -ci -m1 '^pcm.plugequal')
+
+	}
+
+	Write_Apply_Globals(){
+
+		if (( ! $EQ_ENABLED )); then
+
+			/DietPi/dietpi/func/dietpi-set_hardware soundcard justboom-dac-noeq
+
+		else
+
+			/DietPi/dietpi/func/dietpi-set_hardware soundcard justboom-dac
+
+		fi
+
+		#MPD specific
+		if [ -f "$FP_MPD_CONF" ]; then
+
+			# - Output freq
+			sed -i "s/\"$OUTPUT_FREQ_CURRENT/\"$OUTPUT_FREQ_TARGET/g"  "$FP_MPD_CONF"
+
+			# - Output bitrate
+			sed -i "s/:$OUTPUT_BITRATE_CURRENT:/:$OUTPUT_BITRATE_TARGET:/g"  "$FP_MPD_CONF"
+
+			if (( $SOXR_ENABLED )); then
+
+				# - SOXR quality
+				sed -i "/samplerate_converter \"/c\samplerate_converter \"soxr $SOXR_QUALITY\"" "$FP_MPD_CONF"
+
+				sed -i '/audio_output_format \"/s/^#//g' "$FP_MPD_CONF"
+
+			else
+
+				sed -i '/samplerate_converter \"/s/^/#/g' "$FP_MPD_CONF"
+				sed -i '/audio_output_format \"/s/^/#/g' "$FP_MPD_CONF"
+
+			fi
+
+			systemctl restart mpd
+
+		fi
+
+		Read_Globals
+
+	}
+
+	#/////////////////////////////////////////////////////////////////////////////////////
+	# Whip
+	#/////////////////////////////////////////////////////////////////////////////////////
+	PROGRAM_NAME="DietPi-JustBoom"
+	WHIP_QUESTION=0
+	WHIP_TITLE=0
+	CHOICE=0
+	TARGETMENUID=0
+	LAST_SELECTED_NAME=0
+
+	Menu_Exit(){
+
+		whiptail --title "Exit $PROGRAM_NAME?" --yesno "Exit $PROGRAM_NAME?" --backtitle "$PROGRAM_NAME" --yes-button "Ok" --no-button "Back" --defaultno 9 55
+		CHOICE=$?
+		if (( $CHOICE == 0 )); then
+
+			#exit
+			TARGETMENUID=-1
+
+		else
+
+			#Return to Main Menu
+			TARGETMENUID=0
+
+		fi
+	}
+
+	#TARGETMENUID=0
+	Menu_Main(){
+
+		Read_Globals
+
+		local eq_enabled_text='Disabled'
+		if (( $EQ_ENABLED )); then
+
+			eq_enabled_text='Enabled'
+
+		fi
+
+		local soxr_enabled_text='Disabled'
+		if (( $SOXR_ENABLED )); then
+
+			soxr_enabled_text='Enabled'
+
+		fi
+
+		local whiptail_menu_array=()
+
+		whiptail_menu_array+=("" "──── Global Options ──────────────────────────")
+		whiptail_menu_array+=("EQ Enable" ": $eq_enabled_text | Select to toggle EQ")
+		if (( $EQ_ENABLED )); then
+
+			whiptail_menu_array+=("EQ Configure" ": Launches AlsaMixer to configure EQ settings")
+
+		fi
+
+		#MPD specific
+		if [ -f "$FP_MPD_CONF" ]; then
+
+			whiptail_menu_array+=("" "──── MPD Specific ────────────────────────────")
+			whiptail_menu_array+=("Output Frequency" ": $OUTPUT_FREQ_CURRENT Hz | Select to change")
+			whiptail_menu_array+=("Output BitRate" ": $OUTPUT_BITRATE_CURRENT Bit | Select to change")
+
+			whiptail_menu_array+=("SOXR Enable" ": $soxr_enabled_text | Select to toggle SOXR resampling")
+			if (( $SOXR_ENABLED )); then
+
+				whiptail_menu_array+=("SOXR Quality" ": $SOXR_QUALITY | Select SOXR quality level")
+
+			fi
+
+		fi
+		whiptail_menu_array+=("Reset" ": Reset all options to defaults")
+
+		WHIP_QUESTION='Tweak your High-End Audiophile JustBoom soundcard:'
+		OPTION=$(whiptail --title "$PROGRAM_NAME" --backtitle "$PROGRAM_NAME" --menu "$WHIP_QUESTION" --cancel-button "Exit" --default-item "$LAST_SELECTED_NAME" 17 70 9 "${whiptail_menu_array[@]}" 3>&1 1>&2 2>&3)
+		CHOICE=$?
+
+		unset whiptail_menu_array
+
+		if (( $CHOICE == 0 )); then
+
+			LAST_SELECTED_NAME="$OPTION"
+
+			if [ "$OPTION" = "EQ Configure" ]; then
+
+				if (( $EQ_ENABLED == 1 )); then
+
+					whiptail --title "ALSA EQ" --msgbox "The ALSA EQ mixer will now be launched, when finished, press F10 to exit." 8 60
+					alsamixer -D eq
+
+				fi
+
+			elif [ "$OPTION" = "EQ Enable" ]; then
+
+				((EQ_ENABLED++))
+				if (( $EQ_ENABLED > 1 )); then
+
+					EQ_ENABLED=0
+
+				fi
+
+				Write_Apply_Globals
+
+			elif [ "$OPTION" = "SOXR Enable" ]; then
+
+				((SOXR_ENABLED++))
+				if (( $SOXR_ENABLED > 1 )); then
+
+					SOXR_ENABLED=0
+
+				fi
+
+				Write_Apply_Globals
+
+			elif [ "$OPTION" = "SOXR Quality" ]; then
+
+				local whiptail_menu_array=()
+
+				whiptail_menu_array+=("very high" ": Highest quality, highest CPU usage")
+				whiptail_menu_array+=("high" ": Default quality, medium CPU usage")
+				whiptail_menu_array+=("low" ": Lowest quality, minimal CPU usage")
+
+				WHIP_QUESTION='Select a SOXR Quality level:'
+				OPTION=$(whiptail --title "$PROGRAM_NAME" --backtitle "$PROGRAM_NAME" --menu "$WHIP_QUESTION" --cancel-button "Exit" --default-item "$LAST_SELECTED_NAME" 11 70 3 "${whiptail_menu_array[@]}" 3>&1 1>&2 2>&3)
+				CHOICE=$?
+
+				unset whiptail_menu_array
+
+				if (( $CHOICE == 0 )); then
+
+					SOXR_QUALITY=$OPTION
+					Write_Apply_Globals
+
+				fi
+
+			elif [ "$OPTION" = "Output Frequency" ]; then
+
+				local whiptail_menu_array=()
+
+				whiptail_menu_array+=("192000" ": 192kHz (highest quality, recommended)")
+				whiptail_menu_array+=("96000" ": 96kHz")
+				whiptail_menu_array+=("88200" ": 88.2kHz")
+				whiptail_menu_array+=("64000" ": 64kHz")
+				whiptail_menu_array+=("48000" ": 48kHz (HDMI standard)")
+				whiptail_menu_array+=("44100" ": 44.1kHz (music standard)")
+
+				WHIP_QUESTION='Select an Output Frequency:'
+				OPTION=$(whiptail --title "$PROGRAM_NAME" --backtitle "$PROGRAM_NAME" --menu "$WHIP_QUESTION" --cancel-button "Exit" --default-item "$LAST_SELECTED_NAME" 14 70 6 "${whiptail_menu_array[@]}" 3>&1 1>&2 2>&3)
+				CHOICE=$?
+
+				unset whiptail_menu_array
+
+				if (( $CHOICE == 0 )); then
+
+					OUTPUT_FREQ_TARGET=$OPTION
+					Write_Apply_Globals
+
+				fi
+
+			elif [ "$OPTION" = "Output BitRate" ]; then
+
+				local whiptail_menu_array=()
+
+				whiptail_menu_array+=("32" ": (highest quality, recommended)")
+				whiptail_menu_array+=("24" ": ")
+				whiptail_menu_array+=("16" ": (CD audio quality)")
+
+				WHIP_QUESTION='Select an Output BitRate:'
+				OPTION=$(whiptail --title "$PROGRAM_NAME" --backtitle "$PROGRAM_NAME" --menu "$WHIP_QUESTION" --cancel-button "Exit" --default-item "$LAST_SELECTED_NAME" 11 70 3 "${whiptail_menu_array[@]}" 3>&1 1>&2 2>&3)
+				CHOICE=$?
+
+				unset whiptail_menu_array
+
+				if (( $CHOICE == 0 )); then
+
+					OUTPUT_BITRATE_TARGET=$OPTION
+					Write_Apply_Globals
+
+				fi
+
+			elif [ "$OPTION" = "Reset" ]; then
+
+				Reset_Globals
+				Write_Apply_Globals
+
+			fi
+
+		else
+
+			Menu_Exit
+
+		fi
+
+	}
+
+
+	#/////////////////////////////////////////////////////////////////////////////////////
+	# Main Loop
+	#/////////////////////////////////////////////////////////////////////////////////////
+	#-----------------------------------------------------------------------------------
+	Read_Globals
+
+	#-----------------------------------------------------------------------------------
+	while (( $TARGETMENUID >= 0 ))
+	do
+
+		if (( $TARGETMENUID == 0 )); then
+
+			Menu_Main
+
+		fi
+
+	done
+
+	#-----------------------------------------------------------------------------------
+	exit
+	#-----------------------------------------------------------------------------------
+}
