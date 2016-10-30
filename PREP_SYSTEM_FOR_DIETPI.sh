@@ -306,6 +306,16 @@ _EOF_
 rm /etc/cron.daily/ntp &> /dev/null
 rm /etc/init.d/ntp &> /dev/null
 
+#Apt
+# - Force use existing installed configs if available, else install new. Also disables end user prompt from dpkg
+cat << _EOF_ > /etc/apt/apt.conf.d/local
+Dpkg::Options {
+   "--force-confdef";
+   "--force-confold";
+}
+_EOF_
+
+
 #/etc/sysctl.conf | Check for a previous entry before adding this
 echo -e "vm.swappiness=1" >> /etc/sysctl.conf
 
