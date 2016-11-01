@@ -115,6 +115,7 @@ apt-get purge '\-dev$' linux-headers*
 
 apt-get autoremove --purge -y
 
+apt-get dist-upgrade -y
 
 #install packages
 echo -e "CONF_SWAPSIZE=0" > /etc/dphys-swapfile
