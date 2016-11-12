@@ -51,6 +51,8 @@
 	ROOTFS_SIZE_PERCENTUSED=0
 	ROOTFS_SIZE_FREE=0
 	ROOTFS_FSTYPE=''
+	ROOTFS_MOUNT_SOURCE=''
+	ROOTFS_ON_SD=0
 
 	#EXTERNAL
 	MAX_DRIVES=5
@@ -60,6 +62,7 @@
 	INDEX_DRIVE_BEING_EDITED=0
 
 	aDRIVE_UUID=()
+	aDRIVE_PART_UUID=()
 	aDRIVE_MOUNT_SOURCE=()
 	aDRIVE_MOUNT_TARGET=()
 	aDRIVE_FSTYPE=()
@@ -87,6 +90,8 @@
 		ROOTFS_SIZE_FREE=$(df -Ph | grep -m1 "/$" | awk '{print $4}')
 		ROOTFS_SIZE_PERCENTUSED=$(df -Ph | grep -m1 "/$" | awk '{print $5}')
 		ROOTFS_FSTYPE=$(blkid /dev/mmcblk0p2 -s TYPE -o value)
+		ROOTFS_MOUNT_SOURCE=$(cat /etc/fstab | grep -m1 "[[:space:]]/[[:space:]]" | awk '{print $1}')
+		ROOTFS_ON_SD=$(cat /etc/fstab | grep -m1 "[[:space:]]/[[:space:]]" | grep -ci -m1 '^/dev/mmc') #/dev/mmc for SD / UUID= for USB transfered
 
 		#EXTERNAL
 		#Enable automount on all slots (disable unused on exit)
@@ -120,6 +125,7 @@
 		do
 			# - init
 			aDRIVE_UUID[$i]='NULL'
+			aDRIVE_PART_UUID[$i]='NULL'
 			aDRIVE_FSTYPE[$i]='No filesystem'
 			aDRIVE_SIZE_TOTAL[$i]='NULL'
 			aDRIVE_SIZE_USED[$i]='NULL'
@@ -148,6 +154,14 @@
 				if [ -n "$cmd_scrape_string" ]; then
 
 					aDRIVE_UUID[$i]="$cmd_scrape_string"
+
+				fi
+
+				# - PARTUUID
+				local cmd_scrape_string=$(blkid "${aDRIVE_MOUNT_SOURCE[$i]}" -s PARTUUID -o value)
+				if [ -n "$cmd_scrape_string" ]; then
+
+					aDRIVE_PART_UUID[$i]="$cmd_scrape_string"
 
 				fi
 
@@ -458,15 +472,20 @@
 		local whiptail_menu_array=()
 
 		#SD
-		whiptail_menu_array+=("SD/EMMC" ": / (rootfs)| $ROOTFS_FSTYPE | Size: $ROOTFS_SIZE_TOTAL | Used: $ROOTFS_SIZE_USED ($ROOTFS_SIZE_PERCENTUSED)")
+		whiptail_menu_array+=("RootFS" ": / (rootfs)| $ROOTFS_FSTYPE | Size: $ROOTFS_SIZE_TOTAL | Used: $ROOTFS_SIZE_USED ($ROOTFS_SIZE_PERCENTUSED)")
 
 		#EXTERNAL
 		local drive_available=0
 		for ((i=0; i<$MAX_DRIVES; i++))
 		do
 
+			#Drive is currently RootFS, disable
+			if [ "$ROOTFS_MOUNT_SOURCE" = "UUID=${aDRIVE_UUID[$i]}" ]; then
+
+				echo "do nothing" &> /dev/null
+
 			#Empty slot
-			if (( ! ${aDRIVE_ISAVAILABLE[$i]} )); then
+			elif (( ! ${aDRIVE_ISAVAILABLE[$i]} )); then
 
 				whiptail_menu_array+=("Slot $(( $i + 1 ))" ": No drive attached. Insert a drive and select Refresh")
 
@@ -513,7 +532,7 @@
 		fi
 
 		# - User data
-		local userdata_location_text="SD/EMMC ($FP_USERDATA_CURRENT)"
+		local userdata_location_text="RootFS ($FP_USERDATA_CURRENT)"
 
 		if [ "$FP_USERDATA_CURRENT" != "/mnt/dietpi_userdata" ]; then
 
@@ -536,7 +555,7 @@
 				echo -e "do nothing" &> /dev/null
 
 			#Edit SD
-			elif [ "$OPTION" = "SD/EMMC" ]; then
+			elif [ "$OPTION" = "RootFS" ]; then
 
 				TARGETMENUID=3
 
@@ -645,7 +664,6 @@
 
 				fi
 
-
 			else
 
 				whiptail_desc+="Status:       Drive is not mounted and can be unplugged\n"
@@ -658,8 +676,16 @@
 
 		whiptail_menu_array+=("Format" ": Wipe all data and format drive with ext4")
 
+		#Move to USB
+		if (( $ROOTFS_ON_SD &&
+			$HW_MODEL < 10 )); then
+
+			whiptail_menu_array+=("Transfer RootFS" ": Transfer RootFS to this drive")
+
+		fi
+
 		WHIP_TITLE="$PROGRAM_NAME"
-		OPTION=$(whiptail --title "$WHIP_TITLE" --menu "$whiptail_desc" --default-item "$MENU_LASTITEM" --cancel-button "Back" --backtitle "$PROGRAM_NAME" 19 80 4 "${whiptail_menu_array[@]}" 3>&1 1>&2 2>&3)
+		OPTION=$(whiptail --title "$WHIP_TITLE" --menu "$whiptail_desc" --default-item "$MENU_LASTITEM" --cancel-button "Back" --backtitle "$PROGRAM_NAME" 20 80 5 "${whiptail_menu_array[@]}" 3>&1 1>&2 2>&3)
 
 		CHOICE=$?
 
@@ -741,6 +767,11 @@
 
 				fi
 
+			#Transfer RootFS
+			elif [ "$OPTION" = "Transfer RootFS" ]; then
+
+				Menu_MoveSDtoUSB
+
 			fi
 
 		#Exit
@@ -764,7 +795,7 @@
 		local whiptail_menu_array=()
 
 		whiptail_desc+="Mount target: / (rootfs)\n"
-		whiptail_desc+="Mount source: SD/EMMC\n"
+		whiptail_desc+="Mount source: $ROOTFS_MOUNT_SOURCE\n"
 
 		whiptail_desc+="Filesystem:   $ROOTFS_FSTYPE\n"
 
@@ -796,7 +827,7 @@
 
 			if [ "$OPTION" = "Move User data" ]; then
 
-				whiptail --title "Move user data" --yesno "Your user data will be moved:\n - From: $FP_USERDATA_CURRENT\n - To: /mnt/dietpi_userdata (SD/EMMC)\n\nDo you wish to continue?" --backtitle "$PROGRAM_NAME" --defaultno 12 70
+				whiptail --title "Move user data" --yesno "Your user data will be moved:\n - From: $FP_USERDATA_CURRENT\n - To: /mnt/dietpi_userdata (RootFS)\n\nDo you wish to continue?" --backtitle "$PROGRAM_NAME" --defaultno 12 70
 				CHOICE=$?
 				if (( $CHOICE == 0 )); then
 
@@ -956,6 +987,83 @@
 
 	}
 
+	Menu_MoveSDtoUSB(){
+
+		whiptail --title "Move RootFS to USB" --yesno --defaultno "This process will move RootFS data to a USB drive, however, there are limitations after this is completed:\n\n - This process is permanent and can NOT be reverted\n - This process can only be done ONCE\n - The SD/EMMC card is still required for the boot process\n - All data on the USB drive will be deleted\n\nDo you wish to continue?" --backtitle "$PROGRAM_NAME" 15 77
+		CHOICE=$?
+
+		if (( $CHOICE == 0 )); then
+
+			#Check criteria
+			# - Userdata on SD card
+			if [ "$FP_USERDATA_CURRENT" != "/mnt/dietpi_userdata" ]; then
+
+				whiptail --title "Criteria not met" --msgbox "Your user data must be located on the RootFS prior to moving RootFS.\n\nFrom the main menu:\n - Select 'RootFS'\n - Select 'Move User data'" --backtitle "$PROGRAM_NAME" 11 77
+
+			#Do it
+			else
+
+				whiptail --title "Format" --yesno --defaultno "Drive will now be formatted to ext4\n\nWARNING:\nALL DATA on ${aDRIVE_MOUNT_TARGET[$INDEX_DRIVE_BEING_EDITED]} will be deleted\n\nDo you wish to continue?" --backtitle "$PROGRAM_NAME" 14 77
+				CHOICE=$?
+
+				if (( $CHOICE == 0 )); then
+
+					# - disable swap
+					/DietPi/dietpi/func/dietpi-set_dphys-swapfile 0 /var/swap
+
+					# - Format
+					FORMAT_GPT=1
+					FORMAT_FILESYSTEM_TYPE=0
+
+					Run_Format
+
+					# - Update drive data (UUID changed due to format)
+					Init_Drives_and_Refresh
+
+					# - install rsync
+					if (( ! $(dpkg --get-selections | grep -ci -m1 '^rsync[[[:space:]]') )); then
+
+						/DietPi/dietpi/func/dietpi-notify 2 "Installing Rsync, please wait...\n"
+						sleep 1
+
+						apt-get install rsync -y
+
+					fi
+
+					# - Copy
+					rsync -paxv --exclude '/mnt/usb_*' / "${aDRIVE_MOUNT_TARGET[$INDEX_DRIVE_BEING_EDITED]}"/
+
+					# - Set fstab
+					sed -i "s@^$ROOTFS_MOUNT_SOURCE[[:space:]]@UUID=${aDRIVE_UUID[$INDEX_DRIVE_BEING_EDITED]} @g" "${aDRIVE_MOUNT_TARGET[$INDEX_DRIVE_BEING_EDITED]}"/etc/fstab
+
+					#RPi | cmdline.txt
+					if (( $HW_MODEL < 10 )); then
+
+						sed -i "s#root=$ROOTFS_MOUNT_SOURCE#root=PARTUUID=${aDRIVE_PART_UUID[$INDEX_DRIVE_BEING_EDITED]}#g" /boot/cmdline.txt
+
+						# - Add root delay
+						if (( ! $(cat /boot/cmdline.txt | grep -ci -m1 '[[:space:]]rootdelay=') )); then
+
+							sed -i "s#console=tty1#console=tty1 rootdelay=10#g" /boot/cmdline.txt
+
+						fi
+
+					fi
+
+					#C2 | /DietPi/boot.ini
+					# sed -i 's#root=UUID=e139ce78-9841-40fe-8823-96a304a09859#root=UUID=${aDRIVE_UUID[$INDEX_DRIVE_BEING_EDITED]} rootdelay=10#g' /DietPi/boot.ini
+
+					whiptail --title "RootFS transfer completed" --msgbox "RootFS transfer completed. Press enter to reboot system." --backtitle "$PROGRAM_NAME" 8 60
+					reboot
+
+				fi
+
+			fi
+
+		fi
+
+	}
+
 	#/////////////////////////////////////////////////////////////////////////////////////
 	# Main Loop
 	#/////////////////////////////////////////////////////////////////////////////////////
@@ -1025,19 +1133,15 @@
 	for ((i=0; i<$MAX_DRIVES; i++))
 	do
 
+		# - Grab slot number
+		line_number=$(cat /etc/fstab | grep -n -m1 "/mnt/usb_$(( $i + 1 )) " | cut -f1 -d:)
+
 		if (( ! ${aDRIVE_ISMOUNTED[$i]} )); then
 
-			#index 0. Always have 1 usb drive mount enabled, for auto mount.
-			if (( $i == 0 )); then
+			Disable_Fstab_UUID $i
 
-				Disable_Fstab_UUID $i
-
-			else
-
-				Disable_Fstab_UUID $i
-
-				# - Grab slot number
-				line_number=$(cat /etc/fstab | grep -n -m1 "/mnt/usb_$(( $i + 1 )) " | cut -f1 -d:)
+			# - Always keep 1st slot enabled
+			if (( $i >= 1 )); then
 
 				# - Disable slot
 				sed -i ''"$line_number"' s/^/#/' /etc/fstab
@@ -1060,6 +1164,7 @@
 	unset aDRIVE_SIZE_USED
 	unset aDRIVE_SIZE_PERCENTUSED
 	unset aDRIVE_SIZE_FREE
+	unset aDRIVE_PART_UUID
 	unset aDRIVE_UUID
 
 	unset aDRIVE_ISMOUNTED
