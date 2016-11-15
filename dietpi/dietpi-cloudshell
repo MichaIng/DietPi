@@ -20,6 +20,14 @@
 	#Force en_GB Locale for whole script. Prevents incorrect parsing with non-english locales.
 	LANG=en_GB.UTF-8
 
+	#Exit path for non-root logins.
+	if (( $UID != 0 )); then
+		clear
+		echo -e "\n ERROR: You do not have root privileges.\n Please login as root, or, use sudo \n"
+
+		exit
+	fi
+
 	#Grab Input (valid interger)
 	INPUT=0
 	if [[ $1 =~ ^-?[0-9]+$ ]]; then
@@ -30,7 +38,7 @@
 	CPU_CORES=$(nproc --all)
 
 	#Version
-	DIETPI_CLOUDSHELL_VERSION=7
+	DIETPI_CLOUDSHELL_VERSION=8
 
 	#/tmp/.* files used throughout this script.
 	FP_TEMP="/tmp/dietpi-cloudshell"
@@ -157,7 +165,7 @@
 	#Apply fonts and powersave options
 	Enable_Term_Options(){
 
-		setterm --blank 0 --powersave off #must originate from source tty (currently via autostart login): https://github.com/Fourdee/DietPi/issues/379#issuecomment-225637243
+		#setterm --blank 0 --powersave off #must originate from source tty (currently via autostart login): https://github.com/Fourdee/DietPi/issues/379#issuecomment-225637243
 
 		# - Set large font 1st (480x320+)
 		setfont /usr/share/consolefonts/Uni3-TerminusBold32x16
@@ -401,19 +409,58 @@
 	}
 
 	#Storage
-	STORAGE_FLASH_TOTAL=0
-	STORAGE_FLASH_USED=0
-	STORAGE_FLASH_FREE=0
-	STORAGE_FLASH_PERCENT=0
-	STORAGE_FLASH_PATH=$(sed -n 4p /DietPi/dietpi/.hw_model)
+	# - array
+	MAX_STORAGE=6
+	STORAGE_TOTAL=()
+	STORAGE_USED=()
+	STORAGE_FREE=()
+	STORAGE_PERCENT=()
+	STORAGE_PATH=()
+	STORAGE_NAME=()
 
-	STORAGE_USB_TOTAL=0
-	STORAGE_USB_USED=0
-	STORAGE_USB_FREE=0
-	STORAGE_USB_PERCENT=0
-	STORAGE_USB_PATH="/mnt/usb_1"
+	Init_STORAGE(){
 
+		for ((i=0; i<$MAX_STORAGE; i++))
+		do
+			STORAGE_TOTAL[$i]='N/A'
+			STORAGE_USED[$i]='N/A'
+			STORAGE_FREE[$i]='N/A'
+			STORAGE_PERCENT[$i]=' Not installed'
+			STORAGE_NAME[$i]=0
+
+			# 0 reserved for flash storage
+			if (( $i == 0 )); then
+
+				STORAGE_PATH[$i]='/'
+				STORAGE_NAME[$i]='Flash/RootFS Storage:    '
+
+			else
+
+				STORAGE_PATH[$i]="/mnt/usb_$i"
+				STORAGE_NAME[$i]="USB Storage $i:           "
+
+			fi
+
+		done
+
+	}
+
+	Destroy_STORAGE(){
+
+		unset STORAGE_TOTAL
+		unset STORAGE_USED
+		unset STORAGE_FREE
+		unset STORAGE_PERCENT
+		unset STORAGE_PATH
+		unset STORAGE_NAME
+
+	}
+
+	# $1 $2 = Range of indexs to update (eg: 0-1)
 	Obtain_STORAGE(){
+
+		local index_start=$1
+		local index_end=$2
 
 		FP_TEMP="/tmp/.df"
 		rm "$FP_TEMP"
@@ -432,19 +479,16 @@
 
 			if (( $current_seconds >= $max_seconds )); then
 
-				#init to null
-				STORAGE_FLASH_TOTAL=0
-				STORAGE_FLASH_USED=0
-				STORAGE_FLASH_FREE=0
-				STORAGE_FLASH_PERCENT='DF failed'
-				STORAGE_USB_TOTAL=0
-				STORAGE_USB_USED=0
-				STORAGE_USB_FREE=0
-				STORAGE_USB_PERCENT='DF failed'
+				#kill
+
+				/DietPi/dietpi/func/dietpi-notify 1 "DF failed, unable to obtain drive data"
+				sleep 2
 
 				kill $pid
 
 				df_failed=1
+
+				echo -e "$(date) | df failed to respond" >> /var/log/dietpi-cloudshell.log
 
 				break
 
@@ -457,35 +501,44 @@
 
 		done
 
-		if (( ! $df_failed )); then
+		if (( $df_failed )); then
 
-			STORAGE_FLASH_TOTAL="$( cat $FP_TEMP | grep -m1 $STORAGE_FLASH_PATH | awk '{print $2}')B"
-			STORAGE_FLASH_USED="$( cat $FP_TEMP | grep -m1 $STORAGE_FLASH_PATH | awk '{print $3}')B"
-			STORAGE_FLASH_FREE="$( cat $FP_TEMP | grep -m1 $STORAGE_FLASH_PATH | awk '{print $4}')B"
-			STORAGE_FLASH_PERCENT=$( cat $FP_TEMP | grep -m1 $STORAGE_FLASH_PATH | awk '{print $5}' | sed 's/%//g')
+			for ((i=$index_start; i<=$index_end; i++))
+			do
 
-			Percent_To_Graph $STORAGE_FLASH_PERCENT
-			STORAGE_FLASH_PERCENT=$C_PERCENT_GRAPH
+				STORAGE_PERCENT[$i]="${STORAGE_PATH[$i]}"
+				STORAGE_FREE[$i]='DF failed'
 
-			#check for USB mount
-			if (( $(cat $FP_TEMP | grep -ci -m1 "$STORAGE_USB_PATH" ) == 1 )); then
+			done
 
-				STORAGE_USB_TOTAL="$( cat $FP_TEMP | grep -m1 $STORAGE_USB_PATH | awk '{print $2}')B"
-				STORAGE_USB_USED="$( cat $FP_TEMP | grep -m1 $STORAGE_USB_PATH | awk '{print $3}')B"
-				STORAGE_USB_FREE="$( cat $FP_TEMP | grep -m1 $STORAGE_USB_PATH | awk '{print $4}')B"
-				STORAGE_USB_PERCENT=$( cat $FP_TEMP | grep -m1 $STORAGE_USB_PATH | awk '{print $5}' | sed 's/%//g')
+		else
 
-				Percent_To_Graph $STORAGE_USB_PERCENT
-				STORAGE_USB_PERCENT=$C_PERCENT_GRAPH
+			for ((i=$index_start; i<=$index_end; i++))
+			do
 
-			else
+				if (( $(cat $FP_TEMP | grep -ci -m1 "${STORAGE_PATH[$i]}$") )); then
 
-				STORAGE_USB_TOTAL="N/A"
-				STORAGE_USB_USED="N/A"
-				STORAGE_USB_FREE="N/A"
-				STORAGE_USB_PERCENT=" Not installed"
+					STORAGE_TOTAL[$i]="$( cat $FP_TEMP | grep -m1 ${STORAGE_PATH[$i]} | awk '{print $2}')B"
+					STORAGE_USED[$i]="$( cat $FP_TEMP | grep -m1 ${STORAGE_PATH[$i]} | awk '{print $3}')B"
+					STORAGE_FREE[$i]="$( cat $FP_TEMP | grep -m1 ${STORAGE_PATH[$i]} | awk '{print $4}')B"
+					STORAGE_PERCENT[$i]=$( cat $FP_TEMP | grep -m1 ${STORAGE_PATH[$i]} | awk '{print $5}' | sed 's/%//g')
 
-			fi
+					Percent_To_Graph ${STORAGE_PERCENT[$i]}
+					STORAGE_PERCENT[$i]=$C_PERCENT_GRAPH
+
+				else
+
+					#DEBUG John:
+					echo -e "$(date) | Mount not found\n" >> /var/log/dietpi-cloudshell.log
+					cat $FP_TEMP >> /var/log/dietpi-cloudshell.log
+					echo -e "\n" >> /var/log/dietpi-cloudshell.log
+
+					STORAGE_PERCENT[$i]="${STORAGE_PATH[$i]}"
+					STORAGE_FREE[$i]='Mount not active'
+
+				fi
+
+			done
 
 		fi
 
@@ -763,8 +816,7 @@
 
 	#SCENE INDEXS
 	SCENE_CURRENT=2
-	SCENE_MAX=7
-	SCENE_HARDLIMIT=10 # This must be higher than SCENE_MAX. If we need more than 10, modify save/read file, and whiptail scenes menu
+	MAX_SCENES=9
 
 	#Refresh rate (every X seconds)
 	REFRESH_RATE=5
@@ -777,7 +829,7 @@
 
 	#Enabled Scenes
 	aEnabledScenes=()
-	for ((i=0; i<$SCENE_HARDLIMIT; i++))
+	for ((i=0; i<$MAX_SCENES; i++))
 	do
 		aEnabledScenes[$i]=1
 	done
@@ -906,11 +958,14 @@
 
 	}
 
-	#Storage
+	#$1 $2 = Storage index's to update and display (must be a range of 1 , eg: 0-1 1-2 3-4)
 	Update_Scene_1(){
 
+		local index_1=$1
+		local index_2=$2
+
 		#Update data
-		Obtain_STORAGE
+		Obtain_STORAGE $index_1 $index_2
 
 		#Clear screen
 		clear
@@ -918,19 +973,19 @@
 		#Banner
 		echo -e "$C_RESET $BANNER_PRINT"
 		#
-		echo -e "$C_RESET${aCOLOUR[$USER_COLOUR_INDEX]}$C_REVERSE Flash Storage:           "
-		echo -e "$C_RESET$STORAGE_FLASH_PERCENT"
-		echo -e "$C_RESET${aCOLOUR[$USER_COLOUR_INDEX]} Used: $C_RESET$STORAGE_FLASH_USED / $STORAGE_FLASH_TOTAL"
-		echo -e "$C_RESET${aCOLOUR[$USER_COLOUR_INDEX]} Free: $C_RESET$STORAGE_FLASH_FREE"
-		echo -e "$C_RESET${aCOLOUR[$USER_COLOUR_INDEX]}$C_REVERSE USB Storage:             "
-		echo -e "$C_RESET$STORAGE_USB_PERCENT"
-		echo -e "$C_RESET${aCOLOUR[$USER_COLOUR_INDEX]} Used: $C_RESET$STORAGE_USB_USED / $STORAGE_USB_TOTAL"
-		echo -e "$C_RESET${aCOLOUR[$USER_COLOUR_INDEX]} Free: $C_RESET$STORAGE_USB_FREE"
+		echo -e "$C_RESET${aCOLOUR[$USER_COLOUR_INDEX]}$C_REVERSE ${STORAGE_NAME[$index_1]}"
+		echo -e "$C_RESET${STORAGE_PERCENT[$index_1]}"
+		echo -e "$C_RESET${aCOLOUR[$USER_COLOUR_INDEX]} Used: $C_RESET${STORAGE_USED[$index_1]} / ${STORAGE_TOTAL[$index_1]}"
+		echo -e "$C_RESET${aCOLOUR[$USER_COLOUR_INDEX]} Free: $C_RESET${STORAGE_FREE[$index_1]}"
+		echo -e "$C_RESET${aCOLOUR[$USER_COLOUR_INDEX]}$C_REVERSE ${STORAGE_NAME[$index_2]}"
+		echo -e "$C_RESET${STORAGE_PERCENT[$index_2]}"
+		echo -e "$C_RESET${aCOLOUR[$USER_COLOUR_INDEX]} Used: $C_RESET${STORAGE_USED[$index_2]} / ${STORAGE_TOTAL[$index_2]}"
+		echo -e "$C_RESET${aCOLOUR[$USER_COLOUR_INDEX]} Free: $C_RESET${STORAGE_FREE[$index_2]}"
 
 	}
 
 	#DietPi
-	Update_Scene_2(){
+	Update_Scene_4(){
 
 		#Update data
 		Obtain_DIETPIINFO
@@ -952,7 +1007,7 @@
 	}
 
 	#NETWORK DETAILS
-	Update_Scene_3(){
+	Update_Scene_5(){
 
 		#Update data
 		Obtain_NETWORK_DETAILS
@@ -975,7 +1030,7 @@
 	}
 
 	#NETWORK USAGE
-	Update_Scene_4(){
+	Update_Scene_6(){
 
 		#Update data
 		Obtain_NETWORK_USAGE
@@ -1022,7 +1077,7 @@
 	}
 
 	#Memory
-	Update_Scene_5(){
+	Update_Scene_7(){
 
 		#Update data
 		Obtain_MEMORY
@@ -1045,7 +1100,7 @@
 	}
 
 	#Pi-hole
-	Update_Scene_6(){
+	Update_Scene_8(){
 
 		#Update data
 		Obtain_PIHOLE
@@ -1075,45 +1130,45 @@
 
 	Read_Settings_File(){
 
-		#0-9	Core Settings
-		REFRESH_RATE=$(sed -n 1p $FILEPATH_SETTINGS)
-		USER_COLOUR_INDEX=$(sed -n 2p $FILEPATH_SETTINGS)
-		STORAGE_USB_PATH=$(sed -n 3p $FILEPATH_SETTINGS)
-		TEMPERATURE_OUTPUT_TYPE=$(sed -n 4p $FILEPATH_SETTINGS)
-		OUTPUT_DISPLAY_INDEX=$(sed -n 5p $FILEPATH_SETTINGS)
-		NETWORK_USAGE_CURRENT_OUTPUT_TYPE=$(sed -n 6p $FILEPATH_SETTINGS)
-		BLANK_SCREEN_AT_SPECIFIC_TIME_ENABLED=$(sed -n 7p $FILEPATH_SETTINGS)
-		BLANK_SCREEN_TIME_HOUR_START=$(sed -n 8p $FILEPATH_SETTINGS)
-		BLANK_SCREEN_TIME_HOUR_END=$(sed -n 9p $FILEPATH_SETTINGS)
+		if [ -f "$FILEPATH_SETTINGS" ]; then
 
-		#10-19	Enabled Scenes
-		local sed_index=11
-		for ((i=0; i<$SCENE_MAX; i++))
-		do
-			aEnabledScenes[$i]=$(sed -n "$sed_index"p $FILEPATH_SETTINGS)
-			((sed_index++))
-		done
+			. "$FILEPATH_SETTINGS"
+
+		fi
 
 	}
 
 	Write_Settings_File(){
 
-		#0-9	Core Settings
-		echo -e "$REFRESH_RATE" > $FILEPATH_SETTINGS
-		echo -e "$USER_COLOUR_INDEX" >> $FILEPATH_SETTINGS
-		echo -e "$STORAGE_USB_PATH" >> $FILEPATH_SETTINGS
-		echo -e "$TEMPERATURE_OUTPUT_TYPE" >> $FILEPATH_SETTINGS
-		echo -e "$OUTPUT_DISPLAY_INDEX" >> $FILEPATH_SETTINGS
-		echo -e "$NETWORK_USAGE_CURRENT_OUTPUT_TYPE" >> $FILEPATH_SETTINGS
-		echo -e "$BLANK_SCREEN_AT_SPECIFIC_TIME_ENABLED" >> $FILEPATH_SETTINGS
-		echo -e "$BLANK_SCREEN_TIME_HOUR_START" >> $FILEPATH_SETTINGS
-		echo -e "$BLANK_SCREEN_TIME_HOUR_END" >> $FILEPATH_SETTINGS
-		echo -e "" >> $FILEPATH_SETTINGS
+		cat << _EOF_ > "$FILEPATH_SETTINGS"
+REFRESH_RATE=$REFRESH_RATE
+USER_COLOUR_INDEX=$USER_COLOUR_INDEX
+TEMPERATURE_OUTPUT_TYPE=$TEMPERATURE_OUTPUT_TYPE
+OUTPUT_DISPLAY_INDEX=$OUTPUT_DISPLAY_INDEX
 
-		#10-19	Enabled Scenes
-		for ((i=0; i<$SCENE_HARDLIMIT; i++))
+NETWORK_USAGE_CURRENT_OUTPUT_TYPE=$NETWORK_USAGE_CURRENT_OUTPUT_TYPE
+
+BLANK_SCREEN_AT_SPECIFIC_TIME_ENABLED=$BLANK_SCREEN_AT_SPECIFIC_TIME_ENABLED
+BLANK_SCREEN_TIME_HOUR_START=$BLANK_SCREEN_TIME_HOUR_START
+BLANK_SCREEN_TIME_HOUR_END=$BLANK_SCREEN_TIME_HOUR_END
+
+_EOF_
+
+		#Add enabled scenes
+		for ((i=0; i<$MAX_SCENES; i++))
 		do
-			echo -e "${aEnabledScenes[$i]}" >> $FILEPATH_SETTINGS
+
+			echo -e "aEnabledScenes[$i]=${aEnabledScenes[$i]}" >> $FILEPATH_SETTINGS
+
+		done
+
+		#Add Drive Paths and Names
+		for ((i=0; i<$MAX_STORAGE; i++))
+		do
+
+			echo -e "STORAGE_PATH[$i]='${STORAGE_PATH[$i]}'" >> $FILEPATH_SETTINGS
+			echo -e "STORAGE_NAME[$i]='${STORAGE_NAME[$i]}'" >> $FILEPATH_SETTINGS
+
 		done
 
 	}
@@ -1124,12 +1179,12 @@
 	Init(){
 
 		#--------------------------------------------------------------------------------
-		#Load Settings file. Generate if required.
-		if [ ! -f "$FILEPATH_SETTINGS" ]; then
-			Write_Settings_File
-		else
-			Read_Settings_File
-		fi
+		#Storage array
+		Init_STORAGE
+
+		#--------------------------------------------------------------------------------
+		#Load Settings file.
+		Read_Settings_File
 
 		#--------------------------------------------------------------------------------
 		#VM disable CPU scene
@@ -1141,18 +1196,17 @@
 		#Check and disable scenes if software is not installed:
 		# 6 Pi-hole
 		if [ ! -f /etc/pihole/gravity.list ]; then
-			aEnabledScenes[6]=0
 
-			#Save settings to disable scene
-			Write_Settings_File
+			aEnabledScenes[8]=0
+
 		fi
 
 		#--------------------------------------------------------------------------------
 		#Ensure we have at least 1 Scene enabled in the settings file.
 		local enabled_scene=0
-		for ((i=0; i<$SCENE_MAX; i++))
+		for ((i=0; i<$MAX_SCENES; i++))
 		do
-			if (( "${aEnabledScenes[$i]}" == 1 )); then
+			if (( ${aEnabledScenes[$i]} )); then
 				enabled_scene=1
 				break
 			fi
@@ -1161,11 +1215,8 @@
 		#No Scenes selected! Override user setting and enable at least 1 scene (dietpi)
 		if (( $enabled_scene == 0 )); then
 
-			aEnabledScenes[2]=1
-			SCENE_CURRENT=2
-
-			#Save settings to prevent re-occuring
-			Write_Settings_File
+			aEnabledScenes[4]=1
+			SCENE_CURRENT=4
 
 		fi
 		#--------------------------------------------------------------------------------
@@ -1182,15 +1233,15 @@
 
 	Stop(){
 
+		#Service if started.
+		systemctl stop dietpi-cloudshell
+
 		#Kill all , excluding Menu.
 		ps ax | grep '[d]ietpi-cloudshell [1-9]' | awk '{print $1}' > "$FP_TEMP"
 		while read -r line
 		do
 			kill $line &> /dev/null
 		done < $FP_TEMP
-
-		#Reset term options for main screen
-		Disable_Term_Options
 
 	}
 
@@ -1213,10 +1264,14 @@
 
 		#Launch in blocking mode
 		if (( $output_current_screen == 1 )); then
+
 			/DietPi/dietpi/dietpi-cloudshell 1
-		#Launch as another process.
+
+		#Launch as service on main screen
 		else
-			/DietPi/dietpi/dietpi-cloudshell 1 &> /dev/tty1 &
+
+			systemctl start dietpi-cloudshell
+
 		fi
 
 		sleep 0.1
@@ -1234,17 +1289,26 @@
 	LASTSELECTED_ITEM=""
 
 	Menu_Exit(){
-			WHIP_TITLE="Exit $PROGRAM_NAME"
-			WHIP_QUESTION="Exit $PROGRAM_NAME configuration tool?"
-			whiptail --title "$WHIP_TITLE" --yesno "$WHIP_QUESTION" --backtitle "$WHIP_TITLE" --yes-button "Ok" --no-button "Back" --defaultno 9 55
-			CHOICE=$?
-			if (( $CHOICE == 0 )); then
-				#exit
-				TARGETMENUID=-1
-			else
-				#Return to Main Menu
-				TARGETMENUID=0
-			fi
+
+		WHIP_TITLE="Exit $PROGRAM_NAME"
+		WHIP_QUESTION="Exit $PROGRAM_NAME configuration tool?"
+		whiptail --title "$WHIP_TITLE" --yesno "$WHIP_QUESTION" --backtitle "$WHIP_TITLE" --yes-button "Ok" --no-button "Back" --defaultno 9 55
+		CHOICE=$?
+		if (( $CHOICE == 0 )); then
+
+			#Save changes
+			Write_Settings_File
+
+			#exit
+			TARGETMENUID=-1
+
+		else
+
+			#Return to Main Menu
+			TARGETMENUID=0
+
+		fi
+
 	}
 
 	#TARGETMENUID=0
@@ -1274,10 +1338,11 @@
 			autoscreenoff="Enabled"
 		fi
 
-		OPTION=$(whiptail --title "$WHIP_TITLE" --backtitle "$WHIP_BACKTITLE" --menu "" --cancel-button "Exit" --default-item "$LASTSELECTED_ITEM" 16 75 9 \
+		OPTION=$(whiptail --title "$WHIP_TITLE" --backtitle "$WHIP_BACKTITLE" --menu "" --cancel-button "Exit" --default-item "$LASTSELECTED_ITEM" 17 75 10 \
 		"Colour" "Setting: Change the colour scheme." \
 		"Update Rate" "Setting: Control the time between screen updates." \
 		"Scenes" "Setting: Toggle which scenes are shown." \
+		"Storage" "Setting: Set mount locations used for storage stats" \
 		"Temperature" "Setting: Output = $temp_output_text" \
 		"Net Usage Current" "Setting: Output = $bitbyte_output_text" \
 		"Output Display" "Setting: $target_output_text." \
@@ -1292,6 +1357,9 @@
 
 			case "$OPTION" in
 
+				"Storage")
+					TARGETMENUID=5
+				;;
 				"Auto screen off")
 					TARGETMENUID=4
 				;;
@@ -1365,11 +1433,7 @@
 		CHOICE=$?
 		if (( $CHOICE == 0 )); then
 
-			if (( $OPTION != $USER_COLOUR_INDEX )); then
-				USER_COLOUR_INDEX=$OPTION
-
-				Write_Settings_File
-			fi
+			USER_COLOUR_INDEX=$OPTION
 
 		fi
 
@@ -1397,11 +1461,7 @@
 		CHOICE=$?
 		if (( $CHOICE == 0 )); then
 
-			if (( $OPTION != $REFRESH_RATE )); then
-				REFRESH_RATE=$OPTION
-
-				Write_Settings_File
-			fi
+			REFRESH_RATE=$OPTION
 
 		fi
 
@@ -1416,59 +1476,59 @@
 		FP_TEMP="/tmp/.dietpi-cloudshell_scenelist"
 
 		#Get on/off whilptail status
-		local aWhiptailLine=()
-		local OnOff_Status="on"
-		for ((i=0; i<$SCENE_MAX; i++))
+		local aWhiptailArray=()
+		local aWhip_OnOff_Status=()
+		for ((i=0; i<$MAX_SCENES; i++))
 		do
 			#On/Off status
-			OnOff_Status="on"
-			if (( ${aEnabledScenes[$i]} == 0 )); then
-				OnOff_Status="off"
-			fi
+			aWhip_OnOff_Status[$i]='on'
+			if (( ! ${aEnabledScenes[$i]} )); then
 
-			#Define options (space added to $i to prevent single digit being picked up with double digits, during grep match check.)
-			if (( $i == 0 )); then
-				aWhiptailLine+=("$i " "CPU: Temperatures, Usage, frequency and more." "$OnOff_Status")
-			elif (( $i == 1 )); then
-				aWhiptailLine+=("$i " "Storage: Usage information for Flash and USB drives" "$OnOff_Status")
-			elif (( $i == 2 )); then
-				aWhiptailLine+=("$i " "DietPi: Information, stats and updates for DietPi." "$OnOff_Status")
-			elif (( $i == 3 )); then
-				aWhiptailLine+=("$i " "Network Details: Ip address, Speeds, Signal and more." "$OnOff_Status")
-			elif (( $i == 4 )); then
-				aWhiptailLine+=("$i " "Network Usage: Bandwidth usage (sent / recieved)." "$OnOff_Status")
-			elif (( $i == 5 )); then
-				aWhiptailLine+=("$i " "Memory: Stats for RAM and Swapfile usage." "$OnOff_Status")
-			elif (( $i == 6 )); then
-				aWhiptailLine+=("$i " "Pi-hole: Stats for Pi-hole. Total Ads blocked etc." "$OnOff_Status")
-			else
-				aWhiptailLine+=("New " "Unknown" "$OnOff_Status")
+				aWhip_OnOff_Status[$i]='off'
+
 			fi
 
 		done
 
+		#Define options
+		local index=0
+		index=0;aWhiptailArray+=("$index" "CPU: Temperatures, Usage, frequency and more." "${aWhip_OnOff_Status[$index]}")
+		index=1;aWhiptailArray+=("$index" "Storage: Usage information for Flash and USB drives" "${aWhip_OnOff_Status[$index]}")
+		index=2;aWhiptailArray+=("$index" " - Additional Storage (USB_2/3)" "${aWhip_OnOff_Status[$index]}")
+		index=3;aWhiptailArray+=("$index" " - Additional Storage (USB_4/5)" "${aWhip_OnOff_Status[$index]}")
+		index=4;aWhiptailArray+=("$index" "DietPi: Information, stats and updates for DietPi." "${aWhip_OnOff_Status[$index]}")
+		index=5;aWhiptailArray+=("$index" "Network Details: Ip address, Speeds, Signal and more." "${aWhip_OnOff_Status[$index]}")
+		index=6;aWhiptailArray+=("$index" "Network Usage: Bandwidth usage (sent / recieved)." "${aWhip_OnOff_Status[$index]}")
+		index=7;aWhiptailArray+=("$index" "Memory: Stats for RAM and Swapfile usage." "${aWhip_OnOff_Status[$index]}")
+		index=8;aWhiptailArray+=("$index" "Pi-hole: Stats for Pi-hole. Total Ads blocked etc." "${aWhip_OnOff_Status[$index]}")
+
 		WHIP_TITLE='- Options : Scene Selection -'
 		WHIP_QUESTION='Please use the spacebar to toggle which scenes are active.'
-		whiptail --title "$WHIP_TITLE" --checklist "$WHIP_QUESTION" --backtitle "$WHIP_TITLE" --separate-output 14 75 7 "${aWhiptailLine[@]}" 2> "$FP_TEMP"
+		whiptail --title "$WHIP_TITLE" --checklist "$WHIP_QUESTION" --backtitle "$WHIP_TITLE" --separate-output 16 75 9 "${aWhiptailArray[@]}" 2> "$FP_TEMP"
 		CHOICE=$?
 
+		#Delete[] array
+		unset aWhiptailArray
+		unset aWhip_OnOff_Status
+
+		# - Reset all scenes to 0
 		if (( $CHOICE == 0 )); then
-			for ((i=0; i<$SCENE_HARDLIMIT; i++))
+
+			for ((i=0; i<$MAX_SCENES; i++))
 			do
 				aEnabledScenes[$i]=0
-				if (( $(cat "$FP_TEMP" | grep -ci -m1 "$i ") == 1 )); then
-					aEnabledScenes[$i]=1
-				fi
 
 			done
 
-			#Save
-			Write_Settings_File
-
 		fi
 
-		#Delete[] array
-		unset aWhiptailLine
+		# - Enable required scenes
+		while read -r line
+		do
+
+			aEnabledScenes[$line]=1
+
+		done < "$FP_TEMP"
 
 	}
 
@@ -1528,8 +1588,6 @@
 
 			fi
 
-			Write_Settings_File
-
 			TARGETMENUID=4
 
 		fi
@@ -1537,6 +1595,49 @@
 		unset aWhipHour
 
 	}
+
+	#TARGETMENUID=5
+	Menu_Storage(){
+
+		#Return to main menu
+		TARGETMENUID=0
+
+		local aWhiptailArray=()
+
+		for ((i=1; i<$MAX_STORAGE; i++))
+		do
+
+			#aWhiptailArray+=("Name $i" "${STORAGE_NAME[$i]}.")
+			aWhiptailArray+=("$i" ": Drive $i | ${STORAGE_PATH[$i]}")
+
+		done
+
+		WHIP_TITLE='- Options : Storage Device Mount Location -'
+		WHIP_QUESTION='DietPi-Cloudshell pulls the storage stats from the drive mount location. If you have custom drives/mounts, please set them here to be displayed during storage scene updates.\n\n - Drive 1 = Displayed during main storage scene\n - Drive 2/3 = Displayed during additional storage scene "USB 2/3"\n - Drive 4/5 = Displayed during additional storage scene "USB 4/5"'
+		OPTION=$(whiptail --title "$WHIP_TITLE" --backtitle "$PROGRAM_NAME" --menu "$WHIP_QUESTION" --cancel-button "Back" 19 75 5 "${aWhiptailArray[@]}" 3>&1 1>&2 2>&3)
+
+		CHOICE=$?
+
+		unset aWhiptailArray
+
+		if (( $CHOICE == 0 )); then
+
+			local index=$OPTION
+
+			TARGETMENUID=5
+
+			OPTION=$(whiptail --inputbox "Please input the mount location for USB Drive $index\n - eg: /mnt/MyDrive" 11 60 "${STORAGE_PATH[$index]}" --title "" --backtitle "$PROGRAM_NAME" 3>&1 1>&2 2>&3)
+			CHOICE=$?
+			if (( $CHOICE == 0 )); then
+
+				STORAGE_PATH[$index]=$OPTION
+
+			fi
+
+		fi
+
+	}
+
 
 	#/////////////////////////////////////////////////////////////////////////////////////
 	# MAIN
@@ -1547,8 +1648,6 @@
 	#-----------------------------------------------------------------------------------
 	#Run menu
 	if (( $INPUT == 0 )); then
-
-		Read_Settings_File
 
 		#Start Menu
 		while (( $TARGETMENUID >= 0 )); do
@@ -1565,6 +1664,8 @@
 				Menu_SceneSelection
 			elif (( $TARGETMENUID == 4 )); then
 				Menu_BlankScreenAtTime
+			elif (( $TARGETMENUID == 5 )); then
+				Menu_Storage
 			fi
 
 		done
@@ -1576,7 +1677,7 @@
 		Enable_Term_Options
 
 		#Start Intro
-		if (( $RUN_INTRO == 1 )); then
+		if (( $RUN_INTRO )); then
 			Run_Intro
 		fi
 
@@ -1601,10 +1702,31 @@
 			#Update enabled scenes
 			else
 
-				if (( ${aEnabledScenes[$SCENE_CURRENT]} == 1 )); then
+				if (( ${aEnabledScenes[$SCENE_CURRENT]} )); then
 
 					Update_Banner
-					Update_Scene_$SCENE_CURRENT
+
+					# - Input mode scene update (storage array)
+					if (( $SCENE_CURRENT == 1 )); then
+
+						Update_Scene_1 0 1
+
+					# - Input mode scene update (storage array)
+					elif (( $SCENE_CURRENT == 2 )); then
+
+						Update_Scene_1 2 3
+
+					# - Input mode scene update (storage array)
+					elif (( $SCENE_CURRENT == 3 )); then
+
+						Update_Scene_1 4 5
+
+					# - Normal scene update
+					else
+
+						Update_Scene_$SCENE_CURRENT
+
+					fi
 
 					#Apply refresh rate delay
 					sleep $REFRESH_RATE
@@ -1615,7 +1737,7 @@
 				((SCENE_CURRENT++))
 
 				#Cap
-				if (( $SCENE_CURRENT >= $SCENE_MAX )); then
+				if (( $SCENE_CURRENT >= $MAX_SCENES )); then
 					SCENE_CURRENT=0
 				fi
 
@@ -1632,6 +1754,7 @@
 	#Delete[] Global arrays
 	unset aCOLOUR
 	unset aEnabledScenes
+	Destroy_STORAGE
 	#-----------------------------------------------------------------------------------
 	exit
 	#-----------------------------------------------------------------------------------
