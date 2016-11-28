@@ -12,19 +12,8 @@
 #### Download image: http://dietpi.com/download
 
 ##### DietPi is available for:
-- Raspberry Pi's: http://dietpi.com
-- Odroid C1: http://dietpi.com/phpbb/viewtopic.php?f=8&t=11
-- Odroid C2: http://dietpi.com/phpbb/viewtopic.php?f=8&t=339&p=1492#p1492
-- ODroid XU3/4: http://dietpi.com/phpbb/viewtopic.php?f=8&t=57
-- NanoPi NEO: http://dietpi.com/phpbb/viewtopic.php?f=8&t=574#p2480
-- NanoPi M2/T2: http://dietpi.com/phpbb/viewtopic.php?f=8&t=620#p2664
-- NanoPi M3/T3: http://dietpi.com/phpbb/viewtopic.php?f=8&t=784&p=3482#p3482
-- Orange Pi PC: http://dietpi.com/phpbb/viewtopic.php?f=8&t=164#p612
-- Orange Pi One: http://dietpi.com/phpbb/viewtopic.php?f=8&t=676#p2913
-- BananaPi Pro: http://dietpi.com/phpbb/viewtopic.php?f=8&t=534
-- BananaPi M2+: http://dietpi.com/phpbb/viewtopic.php?f=8&t=431
-- VMware x64 (Virtual Machine): http://dietpi.com/phpbb/viewtopic.php?f=8&t=90
-- VirtualBox x64 (Virtual Machine): http://dietpi.com/phpbb/viewtopic.php?f=8&t=390&p=1683#p1683
+A wide range of SBC's and Virtual Machines, please see the below link for a full list:
+- http://dietpi.com/download
 
 <hr>
 
