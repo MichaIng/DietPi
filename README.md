@@ -1,5 +1,5 @@
 # DietPi
-![DietPi](http://dietpi.com/images/dietpi-logo_black_150.png)
+![DietPi](http://dietpi.com/images/dietpi-logo_150.png)
 
 #### Lightweight justice for your single-board computer:
 - Optimized
