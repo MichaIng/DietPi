@@ -17,6 +17,8 @@
 	#Force en_GB Locale for whole script. Prevents incorrect parsing with non-english locales.
 	LANG=en_GB.UTF-8
 
+	HW_MODEL=$(sed -n 1p /DietPi/dietpi/.hw_model)
+
 	#/////////////////////////////////////////////////////////////////////////////////////
 	#Globals
 	#/////////////////////////////////////////////////////////////////////////////////////
@@ -30,6 +32,7 @@
 	OUTPUT_BITRATE_TARGET=0
 	SOXR_ENABLED=0
 	SOXR_QUALITY=0
+	MPD_AUDIO_BUFFER_SIZE=0
 
 	FP_MPD_CONF='/etc/mpd.conf'
 	MPD_INSTALLED=0
@@ -40,16 +43,48 @@
 
 	fi
 
+	# - CAVA
+	CAVA_ENABLED=1
+	CAVA_FRAMERATE=0
+	CAVA_COLOUR_FG=0
+	CAVA_COLOUR_BG=0
+	CAVA_BAR_GRAVITY=0
+	CAVA_BAR_WIDTH=0
+	CAVA_MAINSCREENINUSE_DISPLAYED=0
+
+	FP_CAVA_CONF="$HOME/.config/cava/config"
+	CAVA_INSTALLED=0
+
+	if [ -f "$FP_CAVA_CONF" ]; then
+
+		CAVA_INSTALLED=1
+
+	fi
+
 	Reset_Globals(){
 
-		OUTPUT_FREQ_TARGET=192000
-		OUTPUT_BITRATE_TARGET=32
-		SOXR_ENABLED=1
+		OUTPUT_FREQ_TARGET=44100
+		OUTPUT_BITRATE_TARGET=16
+		SOXR_ENABLED=0
 		SOXR_QUALITY='very high'
-		EQ_ENABLED=1
+		EQ_ENABLED=0
+		MPD_AUDIO_BUFFER_SIZE=2048
 
 		# - Reset ALSA EQ levels
 		rm "$HOME"/.alsaequal.bin &> /dev/null
+
+		# - Reset CAVA config
+		cp /DietPi/dietpi/conf/cava.conf "$HOME"/.config/cava/config
+
+		CAVA_ENABLED=1
+		CAVA_FRAMERATE=30
+		CAVA_COLOUR_FG='green'
+		CAVA_COLOUR_BG='black'
+		CAVA_BAR_GRAVITY='1.75'
+		CAVA_BAR_WIDTH=2
+
+		# - Save changes
+		Write_Apply_Globals
 
 	}
 
@@ -68,6 +103,18 @@
 			OUTPUT_BITRATE_TARGET=$OUTPUT_BITRATE_CURRENT
 			SOXR_ENABLED=$(cat $FP_MPD_CONF | grep -ci -m1 '^samplerate_converter \"soxr')
 			SOXR_QUALITY=$(cat $FP_MPD_CONF | grep -m1 'samplerate_converter \"soxr' | sed 's/\"//g' | awk '{for(i=3;i<=NF;i++){printf "%s ", $i}; printf "\n"}' | sed 's/ *$//')
+			MPD_AUDIO_BUFFER_SIZE=$(cat $FP_MPD_CONF | grep -m1 '^audio_buffer_size' | awk '{print $2}' | sed 's/\"//g')
+
+		fi
+
+		#CAVA specific
+		if (( $CAVA_INSTALLED )); then
+
+			CAVA_FRAMERATE=$(cat "$FP_CAVA_CONF" | grep -m1 '^framerate =' | awk '{print $3}')
+			CAVA_COLOUR_BG=$(cat "$FP_CAVA_CONF" | grep -m1 '^background =' | awk '{print $3}')
+			CAVA_COLOUR_FG=$(cat "$FP_CAVA_CONF" | grep -m1 '^foreground =' | awk '{print $3}')
+			CAVA_BAR_GRAVITY=$(cat "$FP_CAVA_CONF" | grep -m1 '^gravity =' | awk '{print $3}')
+			CAVA_BAR_WIDTH=$(cat "$FP_CAVA_CONF" | grep -m1 '^bar_width =' | awk '{print $3}')
 
 		fi
 
@@ -103,11 +150,56 @@
 
 			fi
 
+			# - Buffer
+			sed -i "/^audio_buffer_size \"/c\audio_buffer_size \"$MPD_AUDIO_BUFFER_SIZE\"" "$FP_MPD_CONF"
+
 			systemctl restart mpd
 
 		fi
 
+		#CAVA specific
+		if (( $CAVA_INSTALLED )); then
+
+			sed -i "/^framerate =/c\framerate = $CAVA_FRAMERATE" "$FP_CAVA_CONF"
+			sed -i "/^background =/c\background = $CAVA_COLOUR_BG" "$FP_CAVA_CONF"
+			sed -i "/^foreground =/c\foreground = $CAVA_COLOUR_FG" "$FP_CAVA_CONF"
+			sed -i "/^gravity =/c\gravity = $CAVA_BAR_GRAVITY" "$FP_CAVA_CONF"
+			sed -i "/^bar_width =/c\bar_width = $CAVA_BAR_WIDTH" "$FP_CAVA_CONF"
+
+			Cava_Start
+
+		fi
+
 		Read_Globals
+
+	}
+
+	Cava_Start(){
+
+		killall -w cava &> /dev/null
+
+		# - Running on current screen
+		if (( $CAVA_ENABLED )); then
+
+			if [ "$(tty)" = "/dev/tty1" ]; then
+
+				# - display this warning once only
+				if (( ! $CAVA_MAINSCREENINUSE_DISPLAYED )); then
+
+					whiptail --title "Main screen in use" --msgbox "To launch CAVA on the main screen, please exit $PROGRAM_NAME and run the following command:\n - cava\n\nNB: Press CTRL+C to exit cava." 12 60
+
+					CAVA_MAINSCREENINUSE_DISPLAYED=1
+
+				fi
+
+			else
+
+				setterm -blank 0 -powersave off <> /dev/fb2 >&0 2>&1 #Odroid 3.5 inch
+				cava <> /dev/console >&0 2>&1 &
+
+			fi
+
+		fi
 
 	}
 
@@ -174,6 +266,7 @@
 			whiptail_menu_array+=("" "──── MPD Specific ────────────────────────────")
 			whiptail_menu_array+=("Output Frequency" ": $OUTPUT_FREQ_CURRENT Hz | Select to change")
 			whiptail_menu_array+=("Output BitRate" ": $OUTPUT_BITRATE_CURRENT Bit | Select to change")
+			whiptail_menu_array+=("Audio Buffer" ": $MPD_AUDIO_BUFFER_SIZE Bytes | Select to change")
 
 			whiptail_menu_array+=("SOXR Enable" ": $soxr_enabled_text | Select to toggle SOXR resampling")
 			if (( $SOXR_ENABLED )); then
@@ -184,8 +277,28 @@
 
 		fi
 
+		#CAVA specific
+		if (( $CAVA_INSTALLED )); then
+
+			whiptail_menu_array+=("" "──── CAVA Specific ───────────────────────────")
+			whiptail_menu_array+=("Cava Start/Restart" ": Launch Cava on main screen")
+
+			if (( $(ps aux | grep -ci -m1 '[c]ava') )); then
+
+				whiptail_menu_array+=("Cava Stop" ": Stop Cava")
+
+			fi
+
+			whiptail_menu_array+=("Cava Framerate" ": $CAVA_FRAMERATE fps | Select to change")
+			whiptail_menu_array+=("Cava FG Colour" ": $CAVA_COLOUR_FG | Select to change")
+			whiptail_menu_array+=("Cava BG Colour" ": $CAVA_COLOUR_BG | Select to change")
+			whiptail_menu_array+=("Cava Bar Width" ": $CAVA_BAR_WIDTH | Select to change")
+			whiptail_menu_array+=("Cava Bar Gravity" ": $CAVA_BAR_GRAVITY | Select to change")
+
+		fi
+
 		WHIP_QUESTION='Tweak your High-End Audiophile JustBoom soundcard:'
-		OPTION=$(whiptail --title "$PROGRAM_NAME" --backtitle "$PROGRAM_NAME" --menu "$WHIP_QUESTION" --cancel-button "Exit" --default-item "$LAST_SELECTED_NAME" 17 70 9 "${whiptail_menu_array[@]}" 3>&1 1>&2 2>&3)
+		OPTION=$(whiptail --title "$PROGRAM_NAME" --backtitle "$PROGRAM_NAME" --menu "$WHIP_QUESTION" --cancel-button "Exit" --default-item "$LAST_SELECTED_NAME" 20 75 12 "${whiptail_menu_array[@]}" 3>&1 1>&2 2>&3)
 		CHOICE=$?
 
 		unset whiptail_menu_array
@@ -194,11 +307,141 @@
 
 			LAST_SELECTED_NAME="$OPTION"
 
-			if [ "$OPTION" = "EQ Configure" ]; then
+			if [ "$OPTION" = "Cava Start/Restart" ]; then
+
+				Cava_Start
+
+			elif [ "$OPTION" = "Cava Stop" ]; then
+
+				killall -w cava
+
+			elif [ "$OPTION" = "Cava Framerate" ]; then
+
+				local whiptail_menu_array=()
+
+				whiptail_menu_array+=("10" ": Lowest CPU usage")
+				whiptail_menu_array+=("20" "")
+				whiptail_menu_array+=("30" ": Default")
+				whiptail_menu_array+=("40" "")
+				whiptail_menu_array+=("50" "")
+				whiptail_menu_array+=("60" "")
+				whiptail_menu_array+=("80" "")
+				whiptail_menu_array+=("100" "")
+				whiptail_menu_array+=("120" ": Highest CPU usage")
+
+				WHIP_QUESTION='Please select a framerate:'
+				OPTION=$(whiptail --title "$PROGRAM_NAME" --backtitle "$PROGRAM_NAME" --menu "$WHIP_QUESTION" --cancel-button "Exit" --default-item "$CAVA_FRAMERATE" 17 65 8 "${whiptail_menu_array[@]}" 3>&1 1>&2 2>&3)
+				CHOICE=$?
+
+				unset whiptail_menu_array
+
+				if (( $CHOICE == 0 )); then
+
+					CAVA_FRAMERATE=$OPTION
+					Write_Apply_Globals
+
+				fi
+
+			elif [ "$OPTION" = "Cava Bar Width" ]; then
+
+				local whiptail_menu_array=()
+
+				whiptail_menu_array+=("1" ": Thin (Increases total bar count)")
+				whiptail_menu_array+=("2" ": Default")
+				whiptail_menu_array+=("3" "")
+				whiptail_menu_array+=("4" "")
+				whiptail_menu_array+=("5" "")
+				whiptail_menu_array+=("6" "")
+				whiptail_menu_array+=("8" ": Thick (Lowers total bar count)")
+
+				WHIP_QUESTION='Please select a bar width:\n - The size of the bars affects how many are displayed'
+				OPTION=$(whiptail --title "$PROGRAM_NAME" --backtitle "$PROGRAM_NAME" --menu "$WHIP_QUESTION" --cancel-button "Exit" --default-item "$CAVA_BAR_WIDTH" 17 65 8 "${whiptail_menu_array[@]}" 3>&1 1>&2 2>&3)
+				CHOICE=$?
+
+				unset whiptail_menu_array
+
+				if (( $CHOICE == 0 )); then
+
+					CAVA_BAR_WIDTH=$OPTION
+					Write_Apply_Globals
+
+				fi
+
+			elif [ "$OPTION" = "Cava FG Colour" ] || [ "$OPTION" = "Cava BG Colour" ] ; then
+
+				local apply_fg_colour=0
+				local default_item="$CAVA_COLOUR_BG"
+				if [ "$OPTION" = "Cava FG Colour" ]; then
+
+					apply_fg_colour=1
+					default_item="$CAVA_COLOUR_FG"
+
+				fi
+
+				local whiptail_menu_array=()
+				whiptail_menu_array+=("green" "")
+				whiptail_menu_array+=("red" "")
+				whiptail_menu_array+=("yellow" "")
+				whiptail_menu_array+=("magenta" "")
+				whiptail_menu_array+=("cyan" "")
+				whiptail_menu_array+=("white" "")
+				whiptail_menu_array+=("blue" "")
+				whiptail_menu_array+=("black" "")
+
+				WHIP_QUESTION='Please select a colour:'
+				OPTION=$(whiptail --title "$PROGRAM_NAME" --backtitle "$PROGRAM_NAME" --menu "$WHIP_QUESTION" --cancel-button "Exit" --default-item "$default_item" 17 65 8 "${whiptail_menu_array[@]}" 3>&1 1>&2 2>&3)
+				CHOICE=$?
+
+				unset whiptail_menu_array
+
+				if (( $CHOICE == 0 )); then
+
+					if (( $apply_fg_colour )); then
+
+						CAVA_COLOUR_FG="$OPTION"
+
+					else
+
+						CAVA_COLOUR_BG="$OPTION"
+
+					fi
+
+					Write_Apply_Globals
+
+				fi
+
+			elif [ "$OPTION" = "Cava Bar Gravity" ]; then
+
+				local whiptail_menu_array=()
+
+				whiptail_menu_array+=("0.1" ": Slow drop off speed")
+				whiptail_menu_array+=("0.25" "")
+				whiptail_menu_array+=("0.5" "")
+				whiptail_menu_array+=("0.75" "")
+				whiptail_menu_array+=("1" "")
+				whiptail_menu_array+=("1.25" "")
+				whiptail_menu_array+=("1.5" "")
+				whiptail_menu_array+=("1.75" ": Default")
+				whiptail_menu_array+=("2" ": High drop off speed")
+
+				WHIP_QUESTION='Please select a gravity level (drop off speed) for the bars:\n - Higher values means bars will drop faster.'
+				OPTION=$(whiptail --title "$PROGRAM_NAME" --backtitle "$PROGRAM_NAME" --menu "$WHIP_QUESTION" --cancel-button "Exit" --default-item "$CAVA_BAR_GRAVITY" 17 65 8 "${whiptail_menu_array[@]}" 3>&1 1>&2 2>&3)
+				CHOICE=$?
+
+				unset whiptail_menu_array
+
+				if (( $CHOICE == 0 )); then
+
+					CAVA_BAR_GRAVITY=$OPTION
+					Write_Apply_Globals
+
+				fi
+
+			elif [ "$OPTION" = "EQ Configure" ]; then
 
 				if (( $EQ_ENABLED == 1 )); then
 
-					whiptail --title "ALSA EQ" --msgbox "The ALSA EQ mixer will now be launched, when finished, press F10 to exit." 8 60
+					whiptail --title "ALSA EQ" --msgbox "The ALSA EQ mixer will now be launched, when finished, press F10 or ESC to exit." 8 60
 					alsamixer -D eq
 
 				fi
@@ -246,11 +489,46 @@
 
 				fi
 
+			elif [ "$OPTION" = "Audio Buffer" ]; then
+
+				local whiptail_menu_array=()
+
+				whiptail_menu_array+=("128" ": Lowest latency (may cause buffer under/overruns)")
+				whiptail_menu_array+=("192" ":")
+				whiptail_menu_array+=("256" ":")
+				whiptail_menu_array+=("384" ":")
+				whiptail_menu_array+=("512" ":")
+				whiptail_menu_array+=("1024" ":")
+				whiptail_menu_array+=("2048" ": Default")
+				whiptail_menu_array+=("4096" ": Highest latency")
+
+				WHIP_QUESTION='Select an Audio buffer size (bytes):'
+				OPTION=$(whiptail --title "$PROGRAM_NAME" --backtitle "$PROGRAM_NAME" --menu "$WHIP_QUESTION" --cancel-button "Exit" --default-item "$MPD_AUDIO_BUFFER_SIZE" 16 70 8 "${whiptail_menu_array[@]}" 3>&1 1>&2 2>&3)
+				CHOICE=$?
+
+				unset whiptail_menu_array
+
+				if (( $CHOICE == 0 )); then
+
+					MPD_AUDIO_BUFFER_SIZE=$OPTION
+					Write_Apply_Globals
+
+				fi
+
 			elif [ "$OPTION" = "Output Frequency" ]; then
 
 				local whiptail_menu_array=()
 
-				whiptail_menu_array+=("192000" ": 192kHz (highest quality, recommended)")
+				# - RPi 2/3 only using 384khz kernel
+				if (( $HW_MODEL == 2 || $HW_MODEL == 3 )) &&
+					[ -f /etc/dietpi/.384khz_rpi ]; then
+
+					whiptail_menu_array+=("384000" ": 384kHz (highest quality)")
+					whiptail_menu_array+=("352800" ": 352kHz")
+
+				fi
+
+				whiptail_menu_array+=("192000" ": 192kHz")
 				whiptail_menu_array+=("96000" ": 96kHz")
 				whiptail_menu_array+=("88200" ": 88.2kHz")
 				whiptail_menu_array+=("64000" ": 64kHz")
@@ -258,7 +536,7 @@
 				whiptail_menu_array+=("44100" ": 44.1kHz (music standard)")
 
 				WHIP_QUESTION='Select an Output Frequency:'
-				OPTION=$(whiptail --title "$PROGRAM_NAME" --backtitle "$PROGRAM_NAME" --menu "$WHIP_QUESTION" --cancel-button "Exit" --default-item "$OUTPUT_FREQ_CURRENT" 14 70 6 "${whiptail_menu_array[@]}" 3>&1 1>&2 2>&3)
+				OPTION=$(whiptail --title "$PROGRAM_NAME" --backtitle "$PROGRAM_NAME" --menu "$WHIP_QUESTION" --cancel-button "Exit" --default-item "$OUTPUT_FREQ_CURRENT" 16 70 8 "${whiptail_menu_array[@]}" 3>&1 1>&2 2>&3)
 				CHOICE=$?
 
 				unset whiptail_menu_array
@@ -294,7 +572,6 @@
 			elif [ "$OPTION" = "Reset" ]; then
 
 				Reset_Globals
-				Write_Apply_Globals
 
 			fi
 

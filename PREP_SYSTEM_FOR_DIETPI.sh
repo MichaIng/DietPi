@@ -88,6 +88,8 @@ _EOF_
 # _EOF_
 # RPI UK mirror director is slow, unstable and unreliable -------------------------
 
+#WiFi only boards, predownload packages
+#apt-get install -d --reinstall -y ethtool p7zip-full hfsplus iw debconf-utils xz-utils fbset wpasupplicant resolvconf bc dbus bzip2 psmisc bash-completion cron whiptail sudo ntp ntfs-3g dosfstools parted hdparm pciutils usbutils zip htop wput wget fake-hwclock dphys-swapfile curl unzip ca-certificates console-setup console-data console-common keyboard-configuration wireless-tools wireless-regdb crda --no-install-recommends
 
 #Remove following Jessie
 apt-get clean
@@ -98,7 +100,7 @@ apt-get purge libpng* cpp-* cpp ntpdate bluez bluetooth rsync dialog dhcpcd5 lib
 apt-get purge libpod-* libpeas-* isc-dhcp-server gnome-* fonts-dejavu* eject dnsmasq* dns-root-data colord-data libturbojpeg1 libjasper* libjson* libwbclient* libwayland* golang-* libavahi* libtext* libweb* libpcsclite1 libxau6* libvpx1 libxc* dictionaries-* libgtk* miscfiles minicom lrzsz lxmenu-* x11-* zenity* yelp-*
 
 #+armbian
-apt-get purge toilet toilet-fonts w-scan vlan weather-util* sysbench stress apt-transport-* cmake cmake-data device-tree-co* fping hddtemp haveged hostapd i2c-tools iperf ir-keytable libasound2* libmtp* libusb-dev lirc lsof ncurses-term pkg-config unicode-data rfkill pv mtp-tools m4 screen alsa-utils armbian-* autotools-dev bind9-host btrfs-tools bridge-utils cpufrequtils dvb-apps dtv-scan-table* evtest f3 figlet gcc gcc-4.8-* git git-man iozone3 ifenslave
+apt-get purge toilet toilet-fonts w-scan vlan weather-util* sysbench stress apt-transport-* cmake cmake-data device-tree-co* fping hddtemp haveged hostapd i2c-tools iperf ir-keytable libasound2* libmtp* libusb-dev lirc lsof ncurses-term pkg-config unicode-data rfkill pv mtp-tools m4 screen alsa-utils autotools-dev bind9-host btrfs-tools bridge-utils cpufrequtils dvb-apps dtv-scan-table* evtest f3 figlet gcc gcc-4.8-* git git-man iozone3 ifenslave
 apt-get purge -y linux-jessie-root-*
 
 #rm /etc/apt/sources.list.d/armbian.list
@@ -120,6 +122,9 @@ apt-get dist-upgrade -y
 #install packages
 echo -e "CONF_SWAPSIZE=0" > /etc/dphys-swapfile
 apt-get install -y ethtool p7zip-full hfsplus iw debconf-utils xz-utils fbset wpasupplicant resolvconf bc dbus bzip2 psmisc bash-completion cron whiptail sudo ntp ntfs-3g dosfstools parted hdparm pciutils usbutils zip htop wput wget fake-hwclock dphys-swapfile curl unzip ca-certificates console-setup console-data console-common keyboard-configuration wireless-tools wireless-regdb crda --no-install-recommends
+
+#??? NanoPi Neo Air, required for ap6212 bt firmware service: https://github.com/Fourdee/DietPi/issues/602#issuecomment-262806470
+apt-get install rfkill
 
 #??? bluetooth if onboard device
 apt-get install -y bluetooth
