@@ -468,7 +468,7 @@ _EOF_
 echo ID > /etc/.dietpi_hw_model_identifier
 
 #wifi for orangepi zero
-sed '/iface wlan0 inet dhcp/apre-up modprobe xradio_wlan\npre-up iwconfig wlan0 power off' /etc/network/interfaces
+sed -i '/iface wlan0 inet dhcp/apre-up modprobe xradio_wlan\npre-up iwconfig wlan0 power off' /etc/network/interfaces
 
 #Power off system
 
