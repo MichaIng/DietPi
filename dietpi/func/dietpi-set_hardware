@@ -10,6 +10,7 @@
 	#////////////////////////////////////
 	#
 	# Usage:
+	# - /DietPi/dietpi/func/dietpi-set_hardware 		remoteir		odroid_remote
 	# - /DietPi/dietpi/func/dietpi-set_hardware 		kernel			??see sourcode
 	# - /DietPi/dietpi/func/dietpi-set_hardware 		eth-forcespeed	10/100/1000/disable
 	# - /DietPi/dietpi/func/dietpi-set_hardware 		rpi-opengl		enable/disable
@@ -56,6 +57,137 @@
 
 		EXIT_CODE=1
 		/DietPi/dietpi/func/dietpi-notify 2 "Unknown input value ($INPUT_DEVICE_VALUE). Nothing has been applied."
+
+	}
+
+	#/////////////////////////////////////////////////////////////////////////////////////
+	#remoteir
+	#/////////////////////////////////////////////////////////////////////////////////////
+	RemoteIR_Main(){
+
+		if [ "$INPUT_DEVICE_VALUE" = "odroid_remote" ]; then
+
+			# - LIRC
+			if (( ! $(dpkg --get-selections | grep -ci -m1 '^lirc') )); then
+
+				apt-get update
+				apt-get install -y lirc
+				if (( $? != 0 )); then
+
+					/DietPi/dietpi/func/dietpi-notify 1 "apt-get install lirc"
+					EXIT_CODE=1
+
+				fi
+
+			fi
+
+			# - xu4 Cloudshell
+			if (( $HW_MODEL == 11 )); then
+
+				# - modules
+				local string="options gpioplug_ir_recv gpio_nr=24 active_low=1"
+				if (( ! $(cat /etc/modprobe.d/odroid-cloudshell.conf | grep -ci -m1 "^$string") )); then
+
+					echo "$string" >> /etc/modprobe.d/odroid-cloudshell.conf
+
+				fi
+
+				string="gpio-ir-recv"
+				if (( ! $(cat /etc/modules | grep -ci -m1 "^$string") )); then
+
+					echo "$string" >> /etc/modules
+
+				fi
+
+				string="gpioplug-ir-recv"
+				if (( ! $(cat /etc/modules | grep -ci -m1 "^$string") )); then
+
+					echo "$string" >> /etc/modules
+
+				fi
+
+			# - c1/c2
+			elif (( $HW_MODEL == 10 || $HW_MODEL == 12 )); then
+
+				# - Module
+				if (( ! $(cat /etc/modules | grep -ci -m1 '^meson_ir') )); then
+
+					echo -e "meson_ir" >> /etc/modules
+
+				fi
+
+			fi
+
+			# - All
+			# - SystemD
+			systemctl disable lirc
+			rm /etc/init.d/lirc
+			cat << _EOF_ > /etc/systemd/system/odroid-remote.service
+[Unit]
+Description=Odroid Remote C1/C2/XU4
+
+[Service]
+Type=forking
+ExecStartPre=/bin/bash -c 'mkdir -p /var/run/lirc'
+ExecStart=/usr/sbin/lircd --output=/run/lirc/lircd --driver=default --device=/dev/lirc0 --uinput
+
+[Install]
+WantedBy=multi-user.target
+_EOF_
+			systemctl daemon-reload
+			systemctl enable odroid-remote.service
+
+			#	Lircd conf for Odroid Remote
+			cat << _EOF_ > /etc/lirc/lircd.conf
+begin remote
+
+  name lircd.conf
+  bits 16
+  flags SPACE_ENC|CONST_LENGTH
+  eps 30
+  aeps 100
+
+  header 9000 4500
+  one 563 1688
+  zero 563 564
+  ptrail 563
+  pre_data_bits 16
+  pre_data 0x4DB2
+  repeat 9000 2250
+  toggle_bit_mask 0x0
+      begin codes
+
+          KEY_LEFT 0x9966
+          KEY_RIGHT 0x837C
+          KEY_UP 0x53AC
+          KEY_DOWN 0x4BB4
+          KEY_ENTER 0x738C
+          KEY_HOME 0x41BE
+          KEY_MUTE 0x11EE
+          KEY_MENU 0xA35C
+          KEY_BACK 0x59A6
+          KEY_VOLUMEDOWN 0x817E
+          KEY_VOLUMEUP 0x01FE
+          KEY_POWER 0x3BC4
+
+      end codes
+
+end remote
+_EOF_
+
+
+		elif [ "$INPUT_DEVICE_VALUE" = "none" ]; then
+
+			# - Disable odroids
+			systemctl stop odroid-remote
+			systemctl disable odroid-remote
+			rm /etc/systemd/system/odroid-remote.service
+
+		else
+
+			Unknown_Input_Mode
+
+		fi
 
 	}
 
@@ -785,18 +917,35 @@ _EOF_
 		# - All
 		aWIFI_MODULES=("cfg80211")
 
+		#NB: we need to start doing these device specific via $HW_MODEL index. This prevents unnecessary modules getting loaded.
 		# + RPi 3
 		aWIFI_MODULES+=("brcmfmac") #onboard WiFi
 		aWIFI_MODULES+=("brcmutil") #onboard WiFi
 
-		# + Pine A64
-		aWIFI_MODULES+=("8723bs") #addon WiFi/BT board.
-
 		# + BPi Pro
 		aWIFI_MODULES+=("ap6211") #onboard
 
-		# + BPi M2+ / NanoPi NEO Air
-		aWIFI_MODULES+=("dhd") #Hangs on v133 M2 image with updated ARMbian build
+		# + OrangePi Zero
+		if (( $HW_MODEL == 32 )); then
+
+			aWIFI_MODULES+=("xradio_wlan")
+
+		# + OrangePi Plus
+		elif (( $HW_MODEL == 34 )); then
+
+			aWIFI_MODULES+=("8189es")
+
+		# + Pine A64
+		elif (( $HW_MODEL >= 40 && $HW_MODEL < 50 )); then
+
+			aWIFI_MODULES+=("8723bs") #addon WiFi/BT board.
+
+		# + NanoPi NEO Air
+		elif (( $HW_MODEL == 64 )); then
+
+			aWIFI_MODULES+=("dhd")
+
+		fi
 
 		# + NanoPi T3
 		aWIFI_MODULES+=("bcmdhd")
@@ -819,6 +968,12 @@ _EOF_
 		elif [ "$INPUT_DEVICE_VALUE" = "enable" ]; then
 
 			rm /etc/modprobe.d/disable_wifi.conf &> /dev/null
+
+			# - Disable known powersaving options for specific chipsets
+			echo -e "options 8192cu rtw_power_mgnt=0" > /etc/modprobe.d/8192cu.conf
+			echo -e "options 8188eu rtw_power_mgnt=0" > /etc/modprobe.d/8188eu.conf
+			echo -e "options 8189es rtw_power_mgnt=0" > /etc/modprobe.d/8189es.conf #OPi Plus
+			echo -e "options 8723bs rtw_power_mgnt=0" > /etc/modprobe.d/8723bs.conf #PineA64
 
 			#cfg80211 first
 			for ((i=0; i<${#aWIFI_MODULES[@]}; i++))
@@ -1097,6 +1252,7 @@ _EOF_
 		sed -i '/dtoverlay=hifiberry/d' /DietPi/config.txt
 		sed -i '/dtoverlay=iqaudio/d' /DietPi/config.txt
 		sed -i '/dtoverlay=justboom/d' /DietPi/config.txt
+		sed -i '/dtoverlay=allo-piano-dac-pcm512x-audio/d' /DietPi/config.txt
 
 		#	onboard blacklist module
 		echo -e "blacklist snd-bcm2835" > /etc/modprobe.d/rpi-bcm2708.conf
@@ -1216,6 +1372,14 @@ _EOF_
 			#JustBoom-dac: DAC HAT, Amp HAT, DAC Zero and Amp Zero
 			#JustBoom-digi: Digi HAT and Digi Zero
 			justboom-*)
+
+				# - enable dtoverlay
+				echo -e "\ndtoverlay=$INPUT_DEVICE_VALUE" >> /DietPi/config.txt
+
+			;;
+
+			#allo-piano-dac-pcm512x-audio
+			allo-piano-dac-pcm512x-audio)
 
 				# - enable dtoverlay
 				echo -e "\ndtoverlay=$INPUT_DEVICE_VALUE" >> /DietPi/config.txt
@@ -1400,6 +1564,10 @@ _EOF_
 	elif [ "$INPUT_DEVICE_NAME" = "kernel" ]; then
 
 		Kernel_Main
+
+	elif [ "$INPUT_DEVICE_NAME" = "remoteir" ]; then
+
+		RemoteIR_Main
 
 	else
 

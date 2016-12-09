@@ -88,9 +88,6 @@ _EOF_
 # _EOF_
 # RPI UK mirror director is slow, unstable and unreliable -------------------------
 
-#WiFi only boards, predownload packages
-#apt-get install -d --reinstall -y ethtool p7zip-full hfsplus iw debconf-utils xz-utils fbset wpasupplicant resolvconf bc dbus bzip2 psmisc bash-completion cron whiptail sudo ntp ntfs-3g dosfstools parted hdparm pciutils usbutils zip htop wput wget fake-hwclock dphys-swapfile curl unzip ca-certificates console-setup console-data console-common keyboard-configuration wireless-tools wireless-regdb crda --no-install-recommends
-
 #Remove following Jessie
 apt-get clean
 apt-get update
@@ -123,7 +120,7 @@ apt-get dist-upgrade -y
 echo -e "CONF_SWAPSIZE=0" > /etc/dphys-swapfile
 apt-get install -y ethtool p7zip-full hfsplus iw debconf-utils xz-utils fbset wpasupplicant resolvconf bc dbus bzip2 psmisc bash-completion cron whiptail sudo ntp ntfs-3g dosfstools parted hdparm pciutils usbutils zip htop wput wget fake-hwclock dphys-swapfile curl unzip ca-certificates console-setup console-data console-common keyboard-configuration wireless-tools wireless-regdb crda --no-install-recommends
 
-#??? NanoPi Neo Air, required for ap6212 bt firmware service: https://github.com/Fourdee/DietPi/issues/602#issuecomment-262806470
+#??? NanoPi Neo Air (and possibily other ap62xx chipsets), required for ap6212 bt firmware service: https://github.com/Fourdee/DietPi/issues/602#issuecomment-262806470
 apt-get install rfkill
 
 #??? bluetooth if onboard device
@@ -420,9 +417,10 @@ _EOF_
 #fakehwclock - allow times in the past
 sed -i "/FORCE=/c\FORCE=force" /etc/default/fake-hwclock
 
-#wifi dongles
-echo -e "options 8192cu rtw_power_mgnt=0" > /etc/modprobe.d/8192cu.conf
-echo -e "options 8188eu rtw_power_mgnt=0" > /etc/modprobe.d/8188eu.conf
+#wifi dongles | move to dietpi-set_hardware wifi
+# echo -e "options 8192cu rtw_power_mgnt=0" > /etc/modprobe.d/8192cu.conf
+# echo -e "options 8188eu rtw_power_mgnt=0" > /etc/modprobe.d/8188eu.conf
+# echo -e "options 8189es rtw_power_mgnt=0" > /etc/modprobe.d/8189es.conf
 
 #Set swapfile size
 echo -e "CONF_SWAPSIZE=0" > /etc/dphys-swapfile
@@ -461,11 +459,11 @@ _EOF_
 
 #Once you have the updated sourcecode, update the file '/DietPi/dietpi/dietpi-obtain_hw_model'
 
-#Finalise system
-/DietPi/dietpi/finalise
-
 #??? Does this device have a unique HW ID index and file? check /DietPi/dietpi/dietpi-obtain_hw_model
 echo ID > /etc/.dietpi_hw_model_identifier
+
+#Finalise system
+/DietPi/dietpi/finalise
 
 #Power off system
 
