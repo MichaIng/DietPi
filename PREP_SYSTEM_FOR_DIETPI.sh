@@ -142,6 +142,7 @@ userdel -f test #armbian
 
 #Remove files
 rm /etc/init.d/cpu_governor # Meveric XU4
+rm /etc/systemd/system/cpu_governor.service # Meveric XU4
 
 #Create DietPi common folders
 mkdir /DietPi
