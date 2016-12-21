@@ -86,6 +86,7 @@ _EOF_
 # cat << _EOF_ > /etc/apt/sources.list
 # deb http://mirror.ox.ac.uk/sites/archive.raspbian.org/archive/raspbian stretch main contrib non-free rpi
 # _EOF_
+# #echo -e "deb http://archive.raspberrypi.org/debian/ stretch main ui" > /etc/apt/sources.list.d/raspi.list #Does not currently support Stretch
 # RPI UK mirror director is slow, unstable and unreliable -------------------------
 
 #Remove following Jessie
@@ -142,6 +143,7 @@ userdel -f test #armbian
 
 #Remove files
 rm /etc/init.d/cpu_governor # Meveric XU4
+rm /etc/systemd/system/cpu_governor.service # Meveric XU4
 
 #Create DietPi common folders
 mkdir /DietPi

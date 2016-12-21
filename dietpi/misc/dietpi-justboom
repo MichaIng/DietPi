@@ -24,6 +24,21 @@
 	#/////////////////////////////////////////////////////////////////////////////////////
 	EQ_ENABLED=0
 	SOUNDCARD_CURRENT=0
+	SOUNDCARD_CARD_INDEX=0
+	if [ -f /etc/asound.conf ]; then
+
+		SOUNDCARD_CARD_INDEX=$(cat /etc/asound.conf | grep -m1 'card ' | awk '{print $2}')
+
+	fi
+
+	# - ALSA DSP filters
+	DSP_FILTER_CURRENT=0
+	DSP_FILTER_TARGET_INDEX=0
+	DSP_FILTER_CONTROL_NAME="'DSP Program'"
+	DSP_FILTER_CONTROL_NUMID=0
+	DSP_FILTERS_AVAILABLE=0
+	aDSP_FILTER_INDEX=()
+	aDSP_FILTER_LIST=()
 
 	# - MPD
 	OUTPUT_FREQ_CURRENT=0
@@ -63,15 +78,20 @@
 
 	Reset_Globals(){
 
+
+		#ALSA EQ levels
+		rm "$HOME"/.alsaequal.bin &> /dev/null
+
+		#DSP
+		DSP_FILTER_TARGET_INDEX=0
+
+		#MPD
 		OUTPUT_FREQ_TARGET=44100
 		OUTPUT_BITRATE_TARGET=16
 		SOXR_ENABLED=0
 		SOXR_QUALITY='very high'
 		EQ_ENABLED=0
 		MPD_AUDIO_BUFFER_SIZE=2048
-
-		# - Reset ALSA EQ levels
-		rm "$HOME"/.alsaequal.bin &> /dev/null
 
 		# - Reset CAVA config
 		cp /DietPi/dietpi/conf/cava.conf "$HOME"/.config/cava/config
@@ -93,6 +113,34 @@
 		SOUNDCARD_CURRENT=$(cat /DietPi/dietpi.txt | grep -m1 'soundcard=' | sed 's/.*=//')
 
 		EQ_ENABLED=$(cat /etc/asound.conf | grep -ci -m1 '^pcm.plugequal')
+
+		#DSP Filters
+		# - Check for DSP Program availability
+		DSP_FILTERS_AVAILABLE=0
+		DSP_FILTER_CURRENT=0
+		if (( $( amixer -c $SOUNDCARD_CARD_INDEX controls | grep -ci -m1 "$DSP_FILTER_CONTROL_NAME") )); then
+
+			DSP_FILTERS_AVAILABLE=1
+
+			# - Get index for DSP program
+			DSP_FILTER_CONTROL_NUMID=$(amixer -c $SOUNDCARD_CARD_INDEX  cget name="$DSP_FILTER_CONTROL_NAME" | grep 'numid=' | sed 's/[^0-9]//g')
+
+			# - Get current filter
+			DSP_FILTER_CURRENT=$(amixer -c $SOUNDCARD_CARD_INDEX sget "$DSP_FILTER_CONTROL_NAME" | grep 'Item0:' | sed 's/.*Item0: //')
+
+			# - Get list for available filters
+			amixer -c $SOUNDCARD_CARD_INDEX cget numid=$DSP_FILTER_CONTROL_NUMID | grep 'Item #' | sed 's/.*#//g' > /tmp/.dietpi-justboom_dsp_filters
+			for ((i=0; i<$(cat /tmp/.dietpi-justboom_dsp_filters | wc -l); i++))
+			do
+
+				aDSP_FILTER_LIST[$i]=$(cat /tmp/.dietpi-justboom_dsp_filters | sed -n $(($i + 1))p | sed 's/^[0-9][[:space:]]//g')
+				aDSP_FILTER_INDEX[$i]=$(cat /tmp/.dietpi-justboom_dsp_filters | sed -n $(($i + 1))p | awk '{print $1}')
+
+			done
+
+			rm /tmp/.dietpi-justboom_dsp_filters
+
+		fi
 
 		#MPD specific
 		if (( $MPD_INSTALLED )); then
@@ -129,6 +177,13 @@
 		else
 
 			/DietPi/dietpi/func/dietpi-set_hardware soundcard "$SOUNDCARD_CURRENT"
+
+		fi
+
+		#DSP Filters
+		if (( $DSP_FILTERS_AVAILABLE )); then
+
+			amixer -c $SOUNDCARD_CARD_INDEX cset numid=$DSP_FILTER_CONTROL_NUMID $DSP_FILTER_TARGET_INDEX
 
 		fi
 
@@ -258,6 +313,15 @@
 			whiptail_menu_array+=("EQ Configure" ": Launches AlsaMixer to configure EQ settings")
 
 		fi
+
+		if (( $DSP_FILTERS_AVAILABLE )); then
+
+			whiptail_menu_array+=("DSP Filter" ": $DSP_FILTER_CURRENT")
+
+		fi
+
+		whiptail_menu_array+=("ALSA Output Info" ": View info on current ALSA playback stream")
+
 		whiptail_menu_array+=("Reset" ": Reset all options to defaults")
 
 		#MPD specific
@@ -307,7 +371,47 @@
 
 			LAST_SELECTED_NAME="$OPTION"
 
-			if [ "$OPTION" = "Cava Start/Restart" ]; then
+			if [ "$OPTION" = "ALSA Output Info" ]; then
+
+				/DietPi/dietpi/func/dietpi-notify 3 DietPi-JustBoom "ALSA Output Info"
+				local stream_result=$(cat /proc/asound/card*/pcm0p/sub0/hw_params)
+				echo -e "$stream_result"
+				echo -e ""
+
+				if [ "$stream_result" = "closed" ]; then
+
+					/DietPi/dietpi/func/dietpi-notify 1 "Detailed info is only available when audio is being played, play some music first!"
+
+				fi
+
+				/DietPi/dietpi/func/dietpi-notify 0 "Completed, press any key to exit...\n"
+				read -p "Press any key to exit..."
+
+			elif [ "$OPTION" = "DSP Filter" ]; then
+
+				local whiptail_menu_array=()
+
+				for ((i=0; i<${#aDSP_FILTER_LIST[@]}; i++))
+				do
+
+					whiptail_menu_array+=("${aDSP_FILTER_INDEX[$i]}" "${aDSP_FILTER_LIST[$i]}")
+
+				done
+
+				WHIP_QUESTION='Please select a DSP Filter:'
+				OPTION=$(whiptail --title "$PROGRAM_NAME" --backtitle "$PROGRAM_NAME" --menu "$WHIP_QUESTION" --cancel-button "Exit" --default-item "$DSP_FILTER_TARGET_INDEX" 17 65 8 "${whiptail_menu_array[@]}" 3>&1 1>&2 2>&3)
+				CHOICE=$?
+
+				unset whiptail_menu_array
+
+				if (( $CHOICE == 0 )); then
+
+					DSP_FILTER_TARGET_INDEX="$OPTION"
+					Write_Apply_Globals
+
+				fi
+
+			elif [ "$OPTION" = "Cava Start/Restart" ]; then
 
 				Cava_Start
 
@@ -602,6 +706,9 @@
 
 	done
 
+	#-----------------------------------------------------------------------------------
+	unset aDSP_FILTER_LIST
+	unset aDSP_FILTER_INDEX
 	#-----------------------------------------------------------------------------------
 	exit
 	#-----------------------------------------------------------------------------------
