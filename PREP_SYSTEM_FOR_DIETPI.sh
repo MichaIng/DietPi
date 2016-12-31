@@ -24,7 +24,6 @@ exit 0 #prevent continuation of this script.
 #------------------------------------------------------------------------------------------------
 
 #Jessie , unified apt sources.
-rm /etc/apt/sources.list.d/deb-multimedia.list
 
 #  - C2
 # cat << _EOF_ > /etc/apt/sources.list
@@ -88,6 +87,9 @@ _EOF_
 # _EOF_
 # #echo -e "deb http://archive.raspberrypi.org/debian/ stretch main ui" > /etc/apt/sources.list.d/raspi.list #Does not currently support Stretch
 # RPI UK mirror director is slow, unstable and unreliable -------------------------
+
+#+Meveric images
+rm /etc/apt/sources.list.d/deb-multimedia.list
 
 #Remove following Jessie
 apt-get clean
