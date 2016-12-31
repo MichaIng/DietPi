@@ -24,7 +24,6 @@ exit 0 #prevent continuation of this script.
 #------------------------------------------------------------------------------------------------
 
 #Jessie , unified apt sources.
-rm /etc/apt/sources.list.d/deb-multimedia.list
 
 #  - C2
 # cat << _EOF_ > /etc/apt/sources.list
@@ -89,6 +88,9 @@ _EOF_
 # #echo -e "deb http://archive.raspberrypi.org/debian/ stretch main ui" > /etc/apt/sources.list.d/raspi.list #Does not currently support Stretch
 # RPI UK mirror director is slow, unstable and unreliable -------------------------
 
+#+Meveric images
+rm /etc/apt/sources.list.d/deb-multimedia.list
+
 #Remove following Jessie
 apt-get clean
 apt-get update
@@ -99,7 +101,7 @@ apt-get purge libpod-* libpeas-* isc-dhcp-server gnome-* fonts-dejavu* eject dns
 
 #+armbian
 apt-get purge toilet toilet-fonts w-scan vlan weather-util* sysbench stress apt-transport-* cmake cmake-data device-tree-co* fping hddtemp haveged hostapd i2c-tools iperf ir-keytable libasound2* libmtp* libusb-dev lirc lsof ncurses-term pkg-config unicode-data rfkill pv mtp-tools m4 screen alsa-utils autotools-dev bind9-host btrfs-tools bridge-utils cpufrequtils dvb-apps dtv-scan-table* evtest f3 figlet gcc gcc-4.8-* git git-man iozone3 ifenslave
-apt-get purge -y linux-jessie-root-*
+#apt-get purge -y linux-jessie-root-*
 
 #rm /etc/apt/sources.list.d/armbian.list
 rm /etc/init.d/resize2fs
@@ -119,9 +121,9 @@ apt-get dist-upgrade -y
 
 #install packages
 echo -e "CONF_SWAPSIZE=0" > /etc/dphys-swapfile
-apt-get install -y ethtool p7zip-full hfsplus iw debconf-utils xz-utils fbset wpasupplicant resolvconf bc dbus bzip2 psmisc bash-completion cron whiptail sudo ntp ntfs-3g dosfstools parted hdparm pciutils usbutils zip htop wput wget fake-hwclock dphys-swapfile curl unzip ca-certificates console-setup console-data console-common keyboard-configuration wireless-tools wireless-regdb crda --no-install-recommends
+apt-get install -y apt-transport-https ethtool p7zip-full hfsplus iw debconf-utils xz-utils fbset wpasupplicant resolvconf bc dbus bzip2 psmisc bash-completion cron whiptail sudo ntp ntfs-3g dosfstools parted hdparm pciutils usbutils zip htop wput wget fake-hwclock dphys-swapfile curl unzip ca-certificates console-setup console-data console-common keyboard-configuration wireless-tools wireless-regdb crda --no-install-recommends
 
-#??? NanoPi Neo Air (and possibily other ap62xx chipsets), required for ap6212 bt firmware service: https://github.com/Fourdee/DietPi/issues/602#issuecomment-262806470
+#??? NanoPi Neo Air 3.x kernel only (and possibily other ap62xx chipsets), required for ap6212 bt firmware service: https://github.com/Fourdee/DietPi/issues/602#issuecomment-262806470
 apt-get install rfkill
 
 #??? bluetooth if onboard device
@@ -320,6 +322,8 @@ Dpkg::Options {
 }
 _EOF_
 
+#Stretch, disable automatic updates and management of apt cache. Prevents unexpected lock on Apt cache and therefore failed apt installations.
+systemctl mask apt-daily.service
 
 #/etc/sysctl.conf | Check for a previous entry before adding this
 echo -e "vm.swappiness=1" >> /etc/sysctl.conf
