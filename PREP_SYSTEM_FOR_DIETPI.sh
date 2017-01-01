@@ -94,25 +94,28 @@ rm /etc/apt/sources.list.d/deb-multimedia.list
 #Remove following Jessie
 apt-get clean
 apt-get update
-apt-get purge libpng* cpp-* cpp ntpdate bluez bluetooth rsync dialog dhcpcd5 libsqlite* libxapian22 lua5.1 netcat-* make makedev ncdu plymouth openresolv shared-mime-in* tcpd strace tasksel* wireless-* xdg-user-dirs triggerhappy python* v4l-utils traceroute xz-utils ucf xauth zlib1g-dev xml-core aptitude* avahi-daemon rsyslog logrotate man-db manpages vim vim-common vim-runtime vim-tiny mc mc-data
+apt-get purge -y libboost-iostreams* sgml-base xml-core usb-modeswitch* libpng* cpp-* cpp ntpdate bluez bluetooth rsync dialog dhcpcd5 libsqlite* libxapian22 lua5.1 netcat-* make makedev ncdu plymouth openresolv shared-mime-in* tcpd strace tasksel* wireless-* xdg-user-dirs triggerhappy python* v4l-utils traceroute xz-utils ucf xauth zlib1g-dev xml-core aptitude* avahi-daemon rsyslog logrotate man-db manpages vim vim-common vim-runtime vim-tiny mc mc-data
 
 #+Desktop images (Mostly desktop packages, but apply to non-desktop images also):
-apt-get purge libpod-* libpeas-* isc-dhcp-server gnome-* fonts-dejavu* eject dnsmasq* dns-root-data colord-data libturbojpeg1 libjasper* libjson* libwbclient* libwayland* golang-* libavahi* libtext* libweb* libpcsclite1 libxau6* libvpx1 libxc* dictionaries-* libgtk* miscfiles minicom lrzsz lxmenu-* x11-* zenity* yelp-*
+apt-get purge -y libpod-* libpeas-* isc-dhcp-server gnome-* fonts-dejavu* eject dnsmasq* dns-root-data colord-data libturbojpeg1 libjasper* libjson* libwbclient* libwayland* golang-* libavahi* libtext* libweb* libpcsclite1 libxau6* libvpx1 libxc* dictionaries-* libgtk* miscfiles minicom lrzsz lxmenu-* x11-* zenity* yelp-*
 
 #+armbian
-apt-get purge toilet toilet-fonts w-scan vlan weather-util* sysbench stress apt-transport-* cmake cmake-data device-tree-co* fping hddtemp haveged hostapd i2c-tools iperf ir-keytable libasound2* libmtp* libusb-dev lirc lsof ncurses-term pkg-config unicode-data rfkill pv mtp-tools m4 screen alsa-utils autotools-dev bind9-host btrfs-tools bridge-utils cpufrequtils dvb-apps dtv-scan-table* evtest f3 figlet gcc gcc-4.8-* git git-man iozone3 ifenslave
+apt-get purge -y toilet toilet-fonts w-scan vlan weather-util* sysbench stress apt-transport-* cmake cmake-data device-tree-co* fping hddtemp haveged hostapd i2c-tools iperf ir-keytable libasound2* libmtp* libusb-dev lirc lsof ncurses-term pkg-config unicode-data rfkill pv mtp-tools m4 screen alsa-utils autotools-dev bind9-host btrfs-tools bridge-utils cpufrequtils dvb-apps dtv-scan-table* evtest f3 figlet gcc gcc-4.8-* git git-man iozone3 ifenslave
 #apt-get purge -y linux-jessie-root-*
 
+#+ dev packages
+apt-get purge -y '\-dev$' linux-headers*
+
+#+ Misc
 #rm /etc/apt/sources.list.d/armbian.list
 rm /etc/init.d/resize2fs
 systemctl daemon-reload
 rm /etc/update-motd.d/*
 
-#+RPi
-apt-get purge libraspberrypi-doc
-
-#+ dev packages
-apt-get purge '\-dev$' linux-headers*
+#??? RPI
+apt-get purge -y libraspberrypi-doc
+#??? RPI (remove older version packages marked as manual): https://github.com/Fourdee/DietPi/issues/598#issuecomment-25919922
+apt-get purge gcc-4.6-base gcc-4.7-base gcc-4.8-base libsigc++-1.2-5c2
 
 
 apt-get autoremove --purge -y
@@ -129,7 +132,7 @@ apt-get install rfkill
 #??? bluetooth if onboard device
 apt-get install -y bluetooth
 
-#firmware
+#??? Non-ARMbian images only: firmware
 apt-get install -y firmware-realtek firmware-ralink firmware-brcm80211 firmware-atheros -y --no-install-recommends
 
 #------------------------------------------------------------------------------------------------
