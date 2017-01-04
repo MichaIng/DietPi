@@ -131,6 +131,8 @@ apt-get install rfkill
 
 #??? bluetooth if onboard device
 apt-get install -y bluetooth
+#??? RPi - bluetooth/firmware for RPi 3
+apt-get install -y pi-bluetooth
 
 #??? Non-ARMbian images only: firmware
 apt-get install -y firmware-realtek firmware-ralink firmware-brcm80211 firmware-atheros -y --no-install-recommends
