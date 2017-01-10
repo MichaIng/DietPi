@@ -454,6 +454,18 @@ dpkg-reconfigure tzdata #Europe > London
 dpkg-reconfigure keyboard-configuration #Keyboard must be plugged in for this to work!
 dpkg-reconfigure locales # en_GB.UTF8 as default and only installed locale
 
+#??? Sparky SBC ONLY: Blacklist GPU and touch screen modules: https://github.com/Fourdee/DietPi/issues/699#issuecomment-271362441
+cat << _EOF_ > /etc/modprobe.d/disable_sparkysbc_touchscreen.conf
+blacklist ctp_gsl3680
+_EOF_
+
+cat << _EOF_ > /etc/modprobe.d/disable_sparkysbc_gpu.conf
+blacklist pvrsrvkm
+blacklist drm
+blacklist videobuf2_vmalloc
+blacklist bc_example
+_EOF_
+
 #??? RPI ONLY: Scroll lock fix for RPi by Midwan: https://github.com/Fourdee/DietPi/issues/474#issuecomment-243215674
 cat << _EOF_ > /etc/udev/rules.d/50-leds.rules
 ACTION=="add", SUBSYSTEM=="leds", ENV{DEVPATH}=="*/input*::scrolllock", ATTR{trigger}="kbd-scrollock"
