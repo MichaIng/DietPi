@@ -134,6 +134,10 @@ apt-get install -y bluetooth
 #??? RPi - bluetooth/firmware for RPi 3
 apt-get install -y pi-bluetooth
 
+#??? RPi - common rpi specific binaries (eg: raspistill)
+apt-get install -y libraspberrypi-bin
+
+
 #??? Non-ARMbian images only: firmware
 apt-get install -y firmware-realtek firmware-ralink firmware-brcm80211 firmware-atheros -y --no-install-recommends
 
