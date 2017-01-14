@@ -129,10 +129,10 @@ apt-get install -y apt-transport-https ethtool p7zip-full hfsplus iw debconf-uti
 #??? NanoPi Neo Air 3.x kernel only (and possibily other ap62xx chipsets), required for ap6212 bt firmware service: https://github.com/Fourdee/DietPi/issues/602#issuecomment-262806470
 apt-get install rfkill
 
-#??? bluetooth if onboard device
+#??? bluetooth if onboard device / RPI
 apt-get install -y bluetooth
 
-#??? RPi - bluetooth/firmware for RPi 3
+#??? RPi - bluetooth/firmware for RPi 3 (ALL)
 apt-get install -y pi-bluetooth
 #??? RPi - common rpi specific binaries (eg: raspistill)
 apt-get install -y libraspberrypi-bin
