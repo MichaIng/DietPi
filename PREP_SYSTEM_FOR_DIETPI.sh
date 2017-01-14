@@ -131,12 +131,11 @@ apt-get install rfkill
 
 #??? bluetooth if onboard device
 apt-get install -y bluetooth
+
 #??? RPi - bluetooth/firmware for RPi 3
 apt-get install -y pi-bluetooth
-
 #??? RPi - common rpi specific binaries (eg: raspistill)
 apt-get install -y libraspberrypi-bin
-
 
 #??? Non-ARMbian images only: firmware
 apt-get install -y firmware-realtek firmware-ralink firmware-brcm80211 firmware-atheros -y --no-install-recommends
@@ -153,8 +152,8 @@ userdel -f test #armbian
 #Remove folders (now in finalise script)
 
 #Remove files
-rm /etc/init.d/cpu_governor # Meveric XU4
-rm /etc/systemd/system/cpu_governor.service # Meveric XU4
+rm /etc/init.d/cpu_governor # Meveric
+rm /etc/systemd/system/cpu_governor.service # Meveric
 
 #Create DietPi common folders
 mkdir /DietPi
