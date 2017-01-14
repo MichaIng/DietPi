@@ -10,6 +10,9 @@
 	#////////////////////////////////////
 	#
 	# Usage:
+
+	# - /DietPi/dietpi/func/dietpi-set_hardware 		rpi-camera		enable/disable
+	# - /DietPi/dietpi/func/dietpi-set_hardware 		gpumemsplit		64/128/256 #RPi only
 	# - /DietPi/dietpi/func/dietpi-set_hardware 		remoteir		odroid_remote
 	# - /DietPi/dietpi/func/dietpi-set_hardware 		kernel			??see sourcode
 	# - /DietPi/dietpi/func/dietpi-set_hardware 		eth-forcespeed	10/100/1000/disable
@@ -45,6 +48,7 @@
 
 	HW_MODEL=$(sed -n 1p /DietPi/dietpi/.hw_model)
 	DISTRO=$(sed -n 3p /DietPi/dietpi/.hw_model)
+	HW_CPUID=$(sed -n 9p /DietPi/dietpi/.hw_model)
 
 	Unknown_Input_Name(){
 
@@ -57,6 +61,56 @@
 
 		EXIT_CODE=1
 		/DietPi/dietpi/func/dietpi-notify 2 "Unknown input value ($INPUT_DEVICE_VALUE). Nothing has been applied."
+
+	}
+
+	#/////////////////////////////////////////////////////////////////////////////////////
+	#rpi-camera
+	#/////////////////////////////////////////////////////////////////////////////////////
+	RPi_Camera_Main(){
+
+		# - int, assume RPi
+		if [ "$INPUT_DEVICE_VALUE" = "enable" ]; then
+
+			# - Enable RPi Camera module
+			sed -i '/start_x=/c\start_x=1' /DietPi/config.txt
+
+			# - requires 128MB memory split min.
+			if (( $(cat /DietPi/config.txt | grep -m1 'gpu_mem_' | sed 's/.*=//g') < 128 )); then
+
+				/DietPi/dietpi/func/dietpi-set_hardware gpumemsplit 128
+
+			fi
+
+		elif [ "$INPUT_DEVICE_VALUE" = "disable" ]; then
+
+			sed -i '/start_x=/c\start_x=0' /DietPi/config.txt
+
+		else
+
+			Unknown_Input_Mode
+
+		fi
+
+	}
+
+	#/////////////////////////////////////////////////////////////////////////////////////
+	#gpumemsplit
+	#/////////////////////////////////////////////////////////////////////////////////////
+	Gpu_Memory_Split_Main(){
+
+		# - int, assume RPi
+		if [[ $INPUT_DEVICE_VALUE =~ ^-?[0-9]+$ ]]; then
+
+			sed -i "/gpu_mem_256=/c\gpu_mem_256=$INPUT_DEVICE_VALUE" /DietPi/config.txt
+			sed -i "/gpu_mem_512=/c\gpu_mem_512=$INPUT_DEVICE_VALUE" /DietPi/config.txt
+			sed -i "/gpu_mem_1024=/c\gpu_mem_1024=$INPUT_DEVICE_VALUE" /DietPi/config.txt
+
+		else
+
+			Unknown_Input_Mode
+
+		fi
 
 	}
 
@@ -782,8 +836,8 @@ _EOF_
 
 			fi
 
-			# + RPi 3
-			if (( $HW_MODEL == 3 )); then
+			# + RPi 3 (apply to all, as pi-bluetooth package is default installed on all RPi's now)
+			if (( $HW_MODEL < 10 )); then
 
 				systemctl stop hciuart
 				systemctl disable hciuart
@@ -846,6 +900,14 @@ _EOF_
 
 			# + RPi 3
 			if (( $HW_MODEL == 3 )); then
+
+				#pi-bluetooth contains hciuart service and also pulls in firmware: https://github.com/Fourdee/DietPi/issues/693
+				#	Installed by default as of v142
+				if (( ! $(dpkg --get-selections | grep -ci -m1 '^pi-bluetooth') )); then
+
+					apt-get install -y pi-bluetooth
+
+				fi
 
 				systemctl enable hciuart
 
@@ -1213,6 +1275,19 @@ _EOF_
 		#Remove previous asound.conf
 		rm /etc/asound.conf &> /dev/null
 
+		# - Pre-Reqs for any soundcard
+		if (( ! $(dpkg --get-selections | grep -ci -m1 '^alsa-utils') )); then
+
+			/DietPi/dietpi/func/dietpi-notify 2 "Installing alsa-utils. Please wait..."
+			apt-get install -y alsa-utils
+			if (( $? != 0 )); then
+
+				/DietPi/dietpi/func/dietpi-notify 1 "Unable to install alsa-utils."
+
+			fi
+
+		fi
+
 		#HW specific
 		# - RPI
 		if (( $HW_MODEL < 10 )); then
@@ -1225,7 +1300,7 @@ _EOF_
 			Soundcard_Reset_Odroid
 
 		# - H3
-		elif (( $HW_MODEL == 30 || $HW_MODEL == 31 || $HW_MODEL == 50 )); then
+		elif (( $HW_CPUID == 1 )); then
 
 			Soundcard_Reset_H3
 
@@ -1234,9 +1309,15 @@ _EOF_
 
 			Soundcard_Reset_PineA64
 
+		# - BPi Pro
 		elif (( $HW_MODEL == 51 )); then
 
 			Soundcard_Reset_BPi_Pro
+
+		#Sparky SBC
+		elif (( $HW_MODEL == 70 )); then
+
+			Soundcard_Reset_SparkySBC
 
 		fi
 
@@ -1257,12 +1338,17 @@ _EOF_
 		sed -i '/dtoverlay=hifiberry/d' /DietPi/config.txt
 		sed -i '/dtoverlay=iqaudio/d' /DietPi/config.txt
 		sed -i '/dtoverlay=justboom/d' /DietPi/config.txt
-		sed -i '/dtoverlay=allo-piano-dac-pcm512x-audio/d' /DietPi/config.txt
+		sed -i '/dtoverlay=allo-piano-dac/d' /DietPi/config.txt
 
 		#	onboard blacklist module
 		echo -e "blacklist snd-bcm2835" > /etc/modprobe.d/rpi-bcm2708.conf
 
 		sed -i '/avoid_pwm_pll=/c\avoid_pwm_pll=1' /DietPi/config.txt
+
+		# - forced analogue out
+		systemctl disable rpi-bcm2835_forced_3.5mm.service &> /dev/null
+		rm /etc/systemd/system/rpi-bcm2835_forced_3.5mm.service &> /dev/null
+		systemctl daemon-reload
 
 	}
 
@@ -1292,6 +1378,16 @@ _EOF_
 		amixer set -c 0 'Audio lineout' mute &> /dev/null
 
 		SOUNDCARD_TARGET_CARD=1
+
+	}
+
+	Soundcard_Reset_SparkySBC(){
+
+		sed -i '/snd-soc-allo-piano-dac/d' /etc/modules
+
+		# - HDMI
+		SOUNDCARD_TARGET_DEVICE=1
+		amixer -c 0 sset 'audio output mode switch' 'hdmi'
 
 	}
 
@@ -1340,12 +1436,33 @@ _EOF_
 		#Cards
 		case "$INPUT_DEVICE_VALUE" in
 
+			#ALL: ----------------------------------------------------------------------
+			usb-dac)
+
+				# - detect card
+				local usb_detection_card_index=$(aplay -l | grep -m1 'USB Audio' | awk '{print $2}' | sed 's/://g')
+				if [[ $usb_detection_card_index =~ ^-?[0-9]+$ ]]; then
+
+					SOUNDCARD_TARGET_CARD=$usb_detection_card_index
+
+				# - Not found
+				else
+
+					/DietPi/dietpi/func/dietpi-notify 1 "Unable to find a USB-DAC on system."
+					EXIT_CODE=1
+
+				fi
+
+				SOUNDCARD_TARGET_DEVICE=0
+
+			;;
+
 			#RPi -------------------------------------------------------------------------------
 
 			#rpi-bcm2835
 			#rpi-bcm2835-ultrahq
-			#rpi-bcm2835-hdmi
-			#rpi-bcm2835-ultrahq-hdmi
+			#rpi-bcm2835-3.5mm
+			#rpi-bcm2835-ultrahq-3.5mm
 			rpi-bcm2835*)
 
 				# - remove from blacklist to enable:
@@ -1355,9 +1472,33 @@ _EOF_
 				sed -i '/avoid_pwm_pll=/c\avoid_pwm_pll=0' /DietPi/config.txt
 
 				# - Expermental UltraHQ audio: https://www.raspberrypi.org/forums/viewtopic.php?p=907075#p907075
-				if [[ $INPUT_DEVICE_VALUE == *ultrahq ]]; then
+				if [[ $INPUT_DEVICE_VALUE == *ultrahq* ]]; then
 
 					sed -i '/avoid_pwm_pll=/c\avoid_pwm_pll=2' /DietPi/config.txt
+
+				fi
+
+				# - Force 3.5mm out?
+				if [[ $INPUT_DEVICE_VALUE == *3.5mm* ]]; then
+
+					cat << _EOF_ > /etc/systemd/system/rpi-bcm2835_forced_3.5mm.service
+[Unit]
+Description=Forces sound through 3.5mm analogue
+Before=sound.target
+After=dietpi-boot.service dietpi-ramdisk.service dietpi-ramlog.service
+
+[Service]
+Type=simple
+RemainAfterExit=yes
+
+ExecStart=/usr/bin/amixer -c 0 cset numid=3 1
+
+[Install]
+WantedBy=multi-user.target
+_EOF_
+					systemctl daemon-reload
+					systemctl enable rpi-bcm2835_forced_3.5mm.service
+					systemctl start rpi-bcm2835_forced_3.5mm.service
 
 				fi
 
@@ -1366,6 +1507,7 @@ _EOF_
 			#hifiberry-dac
 			#hifiberry-dacplus
 			#hifiberry-digi
+			#hifiberry-digi-pro
 			#hifiberry-amp
 			hifiberry-*)
 
@@ -1383,11 +1525,49 @@ _EOF_
 
 			;;
 
-			#allo-piano-dac-pcm512x-audio
-			allo-piano-dac-pcm512x-audio)
+			#RPi (dtoverlay)
+			#	allo-piano-dac-pcm512x-audio
+			#	allo-piano-dac-plus-pcm512x-audio (2.1)
+			#Sparky SBC (module)
+			#	snd-soc-allo-piano-dac
+			#	snd-soc-allo-piano-dac-plus (2.1)
+			*allo-piano-dac*)
 
 				# - enable dtoverlay
 				echo -e "\ndtoverlay=$INPUT_DEVICE_VALUE" >> /DietPi/config.txt
+
+				# + Sparky SBC
+				if (( $HW_MODEL == 70 )); then
+
+					echo -e "$INPUT_DEVICE_VALUE" >> /etc/modules
+					SOUNDCARD_TARGET_CARD=1
+					SOUNDCARD_TARGET_DEVICE=0
+					amixer -c 0 sset 'audio output mode switch' 'i2s'
+
+				fi
+
+			;;
+
+			#Sparky SBC
+			#allo-cheapo-analogue	#3.5mm/RCA
+			#allo-cheapo-optical	#Optical out
+			allo-cheapo*)
+
+				SOUNDCARD_TARGET_CARD=0
+				SOUNDCARD_TARGET_DEVICE=0
+
+				# - Vol
+				amixer –c 0 set 'DAC PA' 35
+
+				if [ "$INPUT_DEVICE_VALUE" = "allo-cheapo-analogue" ]; then
+
+					amixer -c 0 sset 'audio output mode switch' 'i2s'
+
+				else
+
+					amixer -c 0 sset 'audio output mode switch' 'spdif'
+
+				fi
 
 			;;
 
@@ -1461,6 +1641,13 @@ _EOF_
 
 			;;
 
+			#NanoPi M2/M3 -------------------------------------------------------------------------------
+			s5pxx18-hdmi)
+
+				SOUNDCARD_TARGET_CARD=1
+
+			;;
+
 		esac
 
 		# - Apply asound.conf
@@ -1487,7 +1674,6 @@ pcm.!default {
 ctl.!default {
     type hw
     card $SOUNDCARD_TARGET_CARD
-    device $SOUNDCARD_TARGET_DEVICE
 }
 _EOF_
 
@@ -1508,7 +1694,6 @@ pcm.!default {
 ctl.!default {
     type hw
     card $SOUNDCARD_TARGET_CARD
-    device $SOUNDCARD_TARGET_DEVICE
 }
 _EOF_
 
@@ -1573,6 +1758,14 @@ _EOF_
 	elif [ "$INPUT_DEVICE_NAME" = "remoteir" ]; then
 
 		RemoteIR_Main
+
+	elif [ "$INPUT_DEVICE_NAME" = "gpumemsplit" ]; then
+
+		Gpu_Memory_Split_Main
+
+	elif [ "$INPUT_DEVICE_NAME" = "rpi-camera" ]; then
+
+		RPi_Camera_Main
 
 	else
 
