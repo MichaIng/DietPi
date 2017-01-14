@@ -346,16 +346,22 @@ cp /boot/dietpi/conf/network_interfaces /etc/network/interfaces
 # - enable allow-hotplug eth0 after copying.
 sed -i "/allow-hotplug eth/c\allow-hotplug eth$(sed -n 1p /DietPi/dietpi/.network)" /etc/network/interfaces
 
+#Reduce DHCP request retry count and timeouts: https://github.com/Fourdee/DietPi/issues/711
+sed -i '/^#timeout /d' /etc/dhcp/dhclient.conf
+sed -i '/^#retry /d' /etc/dhcp/dhclient.conf
+sed -i '/^timeout /d' /etc/dhcp/dhclient.conf
+sed -i '/^retry /d' /etc/dhcp/dhclient.conf
+cat << _EOF_ >> /etc/dhcp/dhclient.conf
+timeout 10;
+retry 4;
+_EOF_
+
 #Add ipv6 flags DietPi uses to disable IPV6 if set.
 cat << _EOF_ >> /etc/sysctl.conf
 net.ipv6.conf.all.disable_ipv6 = 0
 net.ipv6.conf.default.disable_ipv6 = 0
 net.ipv6.conf.lo.disable_ipv6 = 0
 _EOF_
-
-#htop cfg
-mkdir -p /root/.config/htop
-cp /boot/dietpi/conf/htoprc /root/.config/htop/htoprc
 
 #Hosts
 cat << _EOF_ > /etc/hosts
@@ -369,6 +375,10 @@ _EOF_
 cat << _EOF_ > /etc/hostname
 DietPi
 _EOF_
+
+#htop cfg
+mkdir -p /root/.config/htop
+cp /boot/dietpi/conf/htoprc /root/.config/htop/htoprc
 
 #hdparm
 cat << _EOF_ >> /etc/hdparm.conf
