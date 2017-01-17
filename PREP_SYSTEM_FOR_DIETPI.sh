@@ -110,7 +110,10 @@ apt-get purge -y '\-dev$' linux-headers*
 #rm /etc/apt/sources.list.d/armbian.list
 rm /etc/init.d/resize2fs
 systemctl daemon-reload
-rm /etc/update-motd.d/*
+rm /etc/update-motd.d/* # ARMbian
+systemctl disable firstrun
+rm /etc/init.d/firstrun # ARMbian
+
 
 #??? RPI
 apt-get purge -y libraspberrypi-doc
