@@ -111,6 +111,7 @@ apt-get purge -y '\-dev$' linux-headers*
 rm /etc/init.d/resize2fs
 systemctl daemon-reload
 rm /etc/update-motd.d/* # ARMbian
+
 systemctl disable firstrun
 rm /etc/init.d/firstrun # ARMbian
 
