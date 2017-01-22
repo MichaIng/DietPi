@@ -488,6 +488,14 @@ cat << _EOF_ > /etc/udev/rules.d/50-leds.rules
 ACTION=="add", SUBSYSTEM=="leds", ENV{DEVPATH}=="*/input*::scrolllock", ATTR{trigger}="kbd-scrollock"
 _EOF_
 
+#??? PINE (and possibily others): Cursor fix for FB
+cat << _EOF_ >> "$HOME"/.bashrc
+infocmp > terminfo.txt
+sed -i -e 's/?0c/?112c/g' -e 's/?8c/?48;0;64c/g' terminfo.txt
+tic terminfo.txt
+tput cnorm
+_EOF_
+
 #------------------------------------------------------------------------------------------------
 #A Unique HW_MODEL index will need to be assigned and coded into the DietPi sourcecode.
 # If you are not creating a pull request for this, then:
