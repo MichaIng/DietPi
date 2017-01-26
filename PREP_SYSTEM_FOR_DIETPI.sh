@@ -185,6 +185,7 @@ mount -a
 cat << _EOF_ > /etc/systemd/system/dietpi-ramdisk.service
 [Unit]
 Description=DietPi-RAMdisk
+After=local-fs.target
 
 [Service]
 Type=forking
@@ -205,6 +206,7 @@ cat << _EOF_ > /etc/systemd/system/dietpi-ramlog.service
 [Unit]
 Description=DietPi-RAMlog
 Before=rsyslog.service syslog.service
+After=local-fs.target
 
 [Service]
 Type=forking
