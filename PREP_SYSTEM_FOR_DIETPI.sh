@@ -110,7 +110,11 @@ apt-get purge -y '\-dev$' linux-headers*
 #rm /etc/apt/sources.list.d/armbian.list
 rm /etc/init.d/resize2fs
 systemctl daemon-reload
-rm /etc/update-motd.d/*
+rm /etc/update-motd.d/* # ARMbian
+
+systemctl disable firstrun
+rm /etc/init.d/firstrun # ARMbian
+
 
 #??? RPI
 apt-get purge -y libraspberrypi-doc
@@ -181,12 +185,14 @@ mount -a
 cat << _EOF_ > /etc/systemd/system/dietpi-ramdisk.service
 [Unit]
 Description=DietPi-RAMdisk
+After=local-fs.target
 
 [Service]
 Type=forking
 RemainAfterExit=yes
-ExecStart=/bin/bash -c '/boot/dietpi/dietpi-ramdisk 0'
-ExecStop=/bin/bash -c '/DietPi/dietpi/dietpi-ramdisk 1'
+ExecStartPre=/bin/mkdir -p /etc/dietpi/logs
+ExecStart=/bin/bash -c '/boot/dietpi/dietpi-ramdisk 0 &>> /etc/dietpi/logs/dietpi-ramdisk.log'
+ExecStop=/bin/bash -c '/DietPi/dietpi/dietpi-ramdisk 1 &>> /etc/dietpi/logs/dietpi-ramdisk.log'
 
 [Install]
 WantedBy=local-fs.target
@@ -200,6 +206,7 @@ cat << _EOF_ > /etc/systemd/system/dietpi-ramlog.service
 [Unit]
 Description=DietPi-RAMlog
 Before=rsyslog.service syslog.service
+After=local-fs.target
 
 [Service]
 Type=forking
@@ -482,6 +489,14 @@ _EOF_
 #??? RPI ONLY: Scroll lock fix for RPi by Midwan: https://github.com/Fourdee/DietPi/issues/474#issuecomment-243215674
 cat << _EOF_ > /etc/udev/rules.d/50-leds.rules
 ACTION=="add", SUBSYSTEM=="leds", ENV{DEVPATH}=="*/input*::scrolllock", ATTR{trigger}="kbd-scrollock"
+_EOF_
+
+#??? PINE (and possibily others): Cursor fix for FB
+cat << _EOF_ >> "$HOME"/.bashrc
+infocmp > terminfo.txt
+sed -i -e 's/?0c/?112c/g' -e 's/?8c/?48;0;64c/g' terminfo.txt
+tic terminfo.txt
+tput cnorm
 _EOF_
 
 #------------------------------------------------------------------------------------------------
