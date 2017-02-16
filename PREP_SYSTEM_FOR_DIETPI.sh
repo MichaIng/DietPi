@@ -142,7 +142,7 @@ apt-get install -y pi-bluetooth
 apt-get install -y libraspberrypi-bin
 
 #??? Non-ARMbian images only: firmware
-apt-get install -y firmware-realtek firmware-ralink firmware-brcm80211 firmware-atheros -y --no-install-recommends
+apt-get install -y firmware-realtek firmware-ralink firmware-brcm80211 firmware-atheros --no-install-recommends
 
 #------------------------------------------------------------------------------------------------
 #DIETPI STUFF
