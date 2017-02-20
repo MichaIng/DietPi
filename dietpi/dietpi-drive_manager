@@ -582,7 +582,7 @@
 		fi
 
 		WHIP_TITLE="$PROGRAM_NAME"
-		OPTION=$(whiptail --title "$WHIP_TITLE" --menu "Please select a drive to see available options.\n - User data location: $userdata_location_text" --default-item "$MENU_LASTITEM" --cancel-button "Exit" --backtitle "$PROGRAM_NAME" 18 110 9 "${whiptail_menu_array[@]}" 3>&1 1>&2 2>&3)
+		OPTION=$(whiptail --title "$WHIP_TITLE" --menu "Please select a drive to see available options.\n - User data location: $userdata_location_text" --default-item "$MENU_LASTITEM" --cancel-button "Exit" --backtitle "$PROGRAM_NAME" 20 110 11 "${whiptail_menu_array[@]}" 3>&1 1>&2 2>&3)
 
 		CHOICE=$?
 
@@ -724,8 +724,8 @@
 
 		fi
 
-		#Move to USB
-		if [[ ${aDRIVE_MOUNT_SOURCE[$INDEX_DRIVE_BEING_EDITED]} != $FP_ROOTFS_SOURCE ]]
+		#Transfer RootFS
+		if [[ ${aDRIVE_MOUNT_SOURCE[$INDEX_DRIVE_BEING_EDITED]} != $FP_ROOTFS_SOURCE ]] &&
 			(( $HW_MODEL < 10 || $HW_MODEL == 10 || $HW_MODEL == 11 || $HW_MODEL == 12 )); then
 
 			whiptail_menu_array+=("Transfer RootFS" ": Transfer RootFS to this drive")
@@ -833,7 +833,7 @@
 			#Transfer RootFS
 			elif [ "$OPTION" = "Transfer RootFS" ]; then
 
-				whiptail --title "Move RootFS" --yesno --defaultno "This process will move RootFS data to another location. This may increase filesystem performance when using a USB drive over SD card, however, there are some limitations:\n\n - This process is permanent and can NOT be reverted\n - This process can only be done ONCE\n - The SD/EMMC card is still required for the boot process\n - All data on the USB drive will be deleted\n\nNB: As this feature is still in testing, we recommend you use this feature on a fresh installation only.\n\nDo you wish to continue?" --backtitle "$PROGRAM_NAME" 20 77
+				whiptail --title "Move RootFS" --yesno --defaultno "This process will move RootFS data to another location. This may increase filesystem performance when using a USB drive over SD card, however, there are some limitations:\n\n - The SD/EMMC card is still required for the boot process\n - ALL data on the target PARTITION will be deleted\n\nNB: As this feature is still in testing, we recommend you use this feature on a fresh installation only.\n\nDo you wish to continue?" --backtitle "$PROGRAM_NAME" 18 77
 				CHOICE=$?
 
 				if (( $CHOICE == 0 )); then
@@ -843,12 +843,10 @@
 
 					if (( $CHOICE == 0 )); then
 
-						local drivepath_no_partitions=$(Return_Drive_Without_Partitions ${aDRIVE_MOUNT_SOURCE[$INDEX_DRIVE_BEING_EDITED]})
+						#	user must unmount partition before format
+						if (( $(df -Ph | grep -ci -m1 "^${aDRIVE_MOUNT_SOURCE[$INDEX_DRIVE_BEING_EDITED]}" ) )); then
 
-						#	user must unmount all partitions on this drive, before we can format
-						if (( $(df -Ph | grep -ci -m1 "^$drivepath_no_partitions" ) )); then
-
-							whiptail --title "Notice:" --msgbox "As DietPi will format the entire drive with 1 partition, you must unmount ALL partitions on this disk, before formatting is available." --backtitle "$PROGRAM_NAME" 10 70
+							whiptail --title "Notice:" --msgbox "Partition must be unmounted, before format and RootFS transfer can begin.\n\nPlease unmount the partition, then try again." --backtitle "$PROGRAM_NAME" 10 70
 
 						else
 
@@ -1018,19 +1016,21 @@
 		/DietPi/dietpi/func/dietpi-set_dphys-swapfile 0 /var/swap
 
 		# - Format
-		FORMAT_GPT=1
-		FORMAT_FILESYSTEM_TYPE=0
+		mkfs.ext4 -F ${aDRIVE_MOUNT_SOURCE[$INDEX_DRIVE_BEING_EDITED]}
+		resize2fs ${aDRIVE_MOUNT_SOURCE[$INDEX_DRIVE_BEING_EDITED]}
 
-		#	Must re-detect INDEX_DRIVE_BEING_EDITED, may change after format if multiple partitions...
-		local drivepath_no_partitions=$(Return_Drive_Without_Partitions ${aDRIVE_MOUNT_SOURCE[$INDEX_DRIVE_BEING_EDITED]})
+		#Remove previous fstab entry and mount location
+		cp /etc/fstab /etc/fstab.bak #incase of Rsync fail
+		rm -R "${aDRIVE_MOUNT_TARGET[$INDEX_DRIVE_BEING_EDITED]}"
+		sed -i "\@${aDRIVE_MOUNT_TARGET[$INDEX_DRIVE_BEING_EDITED]}[[:space:]]@d" /etc/fstab
 
-		Run_Format
+		Init_Drives_and_Refresh
 
 		#	redetect index
 		for ((i=0; i<$MAX_DRIVES; i++))
 		do
 
-			if [[ ${aDRIVE_MOUNT_SOURCE[$i]} == "$drivepath_no_partitions"* ]]; then
+			if [ "${aDRIVE_MOUNT_SOURCE[$i]}" = "${aDRIVE_MOUNT_SOURCE[$INDEX_DRIVE_BEING_EDITED]}" ]; then
 
 				INDEX_DRIVE_BEING_EDITED=$i
 				break
@@ -1038,6 +1038,12 @@
 			fi
 
 		done
+
+		#	Remove automatic entry for new uuid
+		sed -i "\@${aDRIVE_MOUNT_TARGET[$INDEX_DRIVE_BEING_EDITED]}[[:space:]]@d" /etc/fstab
+
+		#	Add new rootfs entry
+		sed -i "\@[[:space:]]/[[:space:]]@c UUID=${aDRIVE_UUID[$INDEX_DRIVE_BEING_EDITED]} / auto defaults,noatime,discard 0 1" /etc/fstab
 
 		# - install rsync
 		if (( ! $(dpkg --get-selections | grep -ci -m1 '^rsync[[[:space:]]') )); then
@@ -1049,16 +1055,12 @@
 
 		fi
 
-		# - Set fstab
-		#	remove old entry
-		sed -i "\@[[:space:]]${aDRIVE_MOUNT_TARGET[$INDEX_DRIVE_BEING_EDITED]}[[:space:]]@d" /etc/fstab
-		#	Add new rootfs entry
-		sed -i "\@[[:space:]]/[[:space:]]@c UUID=${aDRIVE_UUID[$INDEX_DRIVE_BEING_EDITED]} / auto defaults,noatime,discard 0 1" /etc/fstab
-
 		rsync -paxv --exclude '/lost+found' / "${aDRIVE_MOUNT_TARGET[$INDEX_DRIVE_BEING_EDITED]}"/
 		if (( $? != 0 )); then
 
 			/DietPi/dietpi/func/dietpi-notify 1 'Rsync has failed, RootFS transfer has been aborted.'
+			#	revert FSTAB changes
+			cp /etc/fstab.bak /etc/fstab
 			exit
 
 		fi
