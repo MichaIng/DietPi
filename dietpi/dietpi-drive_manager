@@ -8,14 +8,15 @@
 	#
 	#////////////////////////////////////
 	#
-	# Info: - Formats and Mounts /dev/sdX1 /mnt/usb_1
+	# Info: Drive Manager for DietPi
 	#
 	# Notes: Script does not support VM image.
 	#
 	# Usage:
 	# 	  = Drive Manager
 	#	1 = Automated format and mounting of /dev/sda
-	#	2 = Old system to allow for user to setup 1 dedicated USB drive (/dev/sda)
+	#	2 = Old system to allow for user to setup 1 dedicated USB drive (/dev/sda) | Not to be run after 1st run setup completed/more than once.
+	#	3 = Selectadrive! Provides a list of available drive mount locations, with value on selection saved to: /tmp/dietpi-drive_manager_selmnt
 	#////////////////////////////////////
 
 	#Force en_GB Locale for whole script. Prevents incorrect parsing with non-english locales.
@@ -44,6 +45,12 @@
 	fi
 
 	PROGRAM_NAME='DietPi-Drive Manager'
+
+	#Service control for script
+	SERVICE_CONTROL=1
+
+	#Return values
+	FP_DRIVE_MANAGER_SELECTION='/tmp/dietpi-drive_manager_selmnt'
 
 	#FP
 	FP_TEMP_FSTAB='/tmp/.fstab'
@@ -334,12 +341,12 @@
 
 	#---OLD SYSTEM START--------------------------------------------------------------------------------
 
-	USB_FILESYSTEM_TYPE="None"
+	USB_FILESYSTEM_TYPE=0
 	USB_MOUNTED=0
 	Check_Drive_Mounted(){
 
 		USB_FILESYSTEM_TYPE=$(blkid -o list | grep '/dev/sda1' | awk '{ print $2 }')
-		USB_MOUNTED=$(df -P | grep -ci -m1 '/mnt/usb_1')
+		USB_MOUNTED=$(df -P | grep -ci -m1 '^/dev/sda1')
 	}
 
 	Wait_For_Drive_Connection(){
@@ -416,6 +423,7 @@
 
 		#Finish setup
 		clear
+
 		Check_Drive_Mounted
 		if (( $USB_MOUNTED )); then
 
@@ -427,21 +435,17 @@
 
 			fi
 
-			#Add mount to fstab
-			# - Set UUID
-			local current_device_location=$(cat /etc/fstab | grep -m1 "/mnt/usb_1" | awk '{print $1}')
-			local uuid_device_location=$(blkid /dev/sda1 -s UUID -o value)
-			sed -i "s@^$current_device_location@UUID=$uuid_device_location@g" /etc/fstab
+			#Move userdata
+			local user_data_location_current=$(/DietPi/dietpi/func/dietpi-set_userdata return_source)
+			if [ "$user_data_location_current" != "${aDRIVE_MOUNT_TARGET[$INDEX_DRIVE_BEING_EDITED]}" ]; then
 
-			systemctl daemon-reload
+				/DietPi/dietpi/func/dietpi-set_userdata "$user_data_location_current" "${aDRIVE_MOUNT_TARGET[$INDEX_DRIVE_BEING_EDITED]}"
 
-			#Move user data location to USBDRIVE
-			#Done in DietPi-Software under Auto setting
-			# /DietPi/dietpi/func/dietpi-set_userdata "$(/DietPi/dietpi/func/dietpi-set_userdata return_source)" /mnt/usb_1
+			fi
 
 			if (( $INPUT == 2 )); then
 
-				whiptail --title "Dedicated Drive Completed" --msgbox "Dedicated USB harddrive setup completed successfully:\n\nFilesystem      Size  Used Avail Use% Mounted on\n$(df -Ph | grep '/mnt/usb_1')" --backtitle "$PROGRAM_NAME" 12 70
+				whiptail --title "Dedicated Drive Completed" --msgbox "Dedicated USB harddrive setup completed successfully:\n\nFilesystem      Size  Used Avail Use% Mounted on\n$(df -Ph | grep -m1 '^/dev/sda1')" --backtitle "$PROGRAM_NAME" 12 90
 
 			fi
 
@@ -529,7 +533,8 @@
 				#Seperate list if 1st partition on drive
 				if (( $(echo -e "${aDRIVE_MOUNT_SOURCE[$i]}" | grep -ci -m1 '1$') )); then
 
-					whiptail_menu_array+=("" "───────────────────────────────────────────────────────")
+					local drivepath_no_partitions=$(Return_Drive_Without_Partitions ${aDRIVE_MOUNT_SOURCE[$i]})
+					whiptail_menu_array+=('' "─($drivepath_no_partitions)────────────────────────────────────────")
 
 				fi
 
@@ -615,7 +620,7 @@
 							TARGETMENUID=1
 							break
 
-						else
+						elif [ -n "$OPTION" ]; then
 
 							whiptail --title "Info: No drive" --msgbox "This drive is no longer available" --backtitle "$PROGRAM_NAME" 8 60
 							break
@@ -644,7 +649,7 @@
 		#Return to this menu
 		TARGETMENUID=1
 
-		local drive_contains_userdata=0
+		local partition_contains_userdata=0
 
 		#Generate menu
 		local whiptail_desc=()
@@ -686,10 +691,11 @@
 
 				fi
 
-				if [[ ${aDRIVE_MOUNT_TARGET[$INDEX_DRIVE_BEING_EDITED]} =~ $FP_USERDATA_CURRENT ]]; then
+				if ( [ "${aDRIVE_MOUNT_TARGET[$INDEX_DRIVE_BEING_EDITED]}" != "/" ] && [[ $FP_USERDATA_CURRENT == "${aDRIVE_MOUNT_TARGET[$INDEX_DRIVE_BEING_EDITED]}"* ]] ) || #off rootfs
+					( [ "${aDRIVE_MOUNT_TARGET[$INDEX_DRIVE_BEING_EDITED]}" = "/" ] && [ "$FP_USERDATA_CURRENT" = "/mnt/dietpi_userdata" ] ); then #on rootfs
 
 					whiptail_menu_array+=("User data" ": Your user data is currently located on this drive")
-					drive_contains_userdata=1
+					partition_contains_userdata=1
 
 				else
 
@@ -755,9 +761,9 @@
 			elif [ "$OPTION" = "Unmount" ]; then
 
 				# - Disallow if userdata is located on this drive!
-				if (( $drive_contains_userdata )); then
+				if (( $partition_contains_userdata )); then
 
-					whiptail --title "Info: dismount prevented" --msgbox "Your DietPi user data is currently located on this drive:\n - $FP_USERDATA_CURRENT/dietpi_userdata\n\nDismounting the drive at this time is not possible.\n\nPlease move your user data elsewhere, before trying again:\nhttp://dietpi.com/phpbb/viewtopic.php?f=8&t=478" --backtitle "$PROGRAM_NAME" 13 70
+					whiptail --title "Info: dismount prevented" --msgbox "Your DietPi user data is currently located on this drive:\n - $FP_USERDATA_CURRENT/dietpi_userdata\n\nDismounting the drive at this time is not possible.\n\nPlease move your user data elsewhere, before trying again:\nhttp://dietpi.com/phpbb/viewtopic.php?f=8&t=478" --backtitle "$PROGRAM_NAME" 13 80
 
 				else
 
@@ -801,11 +807,21 @@
 
 				fi
 
-				whiptail --title "Move user data" --yesno "Your user data will be moved:\n - From: $FP_USERDATA_CURRENT\n - To: ${aDRIVE_MOUNT_TARGET[$INDEX_DRIVE_BEING_EDITED]}/dietpi_userdata\n\nDo you wish to continue?" --backtitle "$PROGRAM_NAME" --defaultno 12 70
+				local target_userdata_dir="${aDRIVE_MOUNT_TARGET[$INDEX_DRIVE_BEING_EDITED]}"
+				#	Assign location if under RootFS
+				if [ "${aDRIVE_MOUNT_TARGET[$INDEX_DRIVE_BEING_EDITED]}" = "/" ]; then
+
+					target_userdata_dir='/mnt'
+
+				fi
+
+				target_userdata_dir+='/dietpi_userdata'
+
+				whiptail --title "Move user data" --yesno "Your user data will be moved:\n - From: $FP_USERDATA_CURRENT\n - To: $target_userdata_dir\n\nDo you wish to continue?" --backtitle "$PROGRAM_NAME" --defaultno 12 70
 				CHOICE=$?
 				if (( $CHOICE == 0 )); then
 
-					/DietPi/dietpi/func/dietpi-set_userdata "$FP_USERDATA_CURRENT" "${aDRIVE_MOUNT_TARGET[$INDEX_DRIVE_BEING_EDITED]}"
+					/DietPi/dietpi/func/dietpi-set_userdata "$FP_USERDATA_CURRENT" "$target_userdata_dir"
 					sleep 1
 
 				fi
@@ -815,9 +831,9 @@
 				local drivepath_no_partitions=$(Return_Drive_Without_Partitions ${aDRIVE_MOUNT_SOURCE[$INDEX_DRIVE_BEING_EDITED]})
 
 				# - Disallow if userdata is located on this drive!
-				if (( $drive_contains_userdata )); then
+				if (( $partition_contains_userdata )); then
 
-					whiptail --title "Info: format prevented" --msgbox "Your DietPi user data is currently located on this drive:\n - $FP_USERDATA_CURRENT/dietpi_userdata\n\nFormatting the drive at this time is not possible.\n\nPlease move your user data elsewhere, before trying again:\nhttp://dietpi.com/phpbb/viewtopic.php?f=8&t=478" --backtitle "$PROGRAM_NAME" 13 70
+					whiptail --title "Info: format prevented" --msgbox "Your DietPi user data is currently located on this drive:\n - $FP_USERDATA_CURRENT/dietpi_userdata\n\nFormatting the drive at this time is not possible.\n\nPlease move your user data elsewhere, before trying again:\nhttp://dietpi.com/phpbb/viewtopic.php?f=8&t=478" --backtitle "$PROGRAM_NAME" 13 80
 
 				#	user must unmount all partitions on this drive, before we can format
 				elif (( $(df -Ph | grep -ci -m1 "^$drivepath_no_partitions" ) )); then
@@ -833,22 +849,22 @@
 			#Transfer RootFS
 			elif [ "$OPTION" = "Transfer RootFS" ]; then
 
-				whiptail --title "Move RootFS" --yesno --defaultno "This process will move RootFS data to another location. This may increase filesystem performance when using a USB drive over SD card, however, there are some limitations:\n\n - The SD/EMMC card is still required for the boot process\n - ALL data on the target PARTITION will be deleted\n\nNB: As this feature is still in testing, we recommend you use this feature on a fresh installation only.\n\nDo you wish to continue?" --backtitle "$PROGRAM_NAME" 18 77
-				CHOICE=$?
+				#	user must unmount partition before format
+				if (( $(df -Ph | grep -ci -m1 "^${aDRIVE_MOUNT_SOURCE[$INDEX_DRIVE_BEING_EDITED]}" ) )); then
 
-				if (( $CHOICE == 0 )); then
+					whiptail --title "Notice:" --msgbox "Partition must be unmounted, before format and RootFS transfer can begin.\n\nPlease unmount the partition, then try again." --backtitle "$PROGRAM_NAME" 10 70
 
-					whiptail --title "Format" --yesno --defaultno "Drive will now be formatted to ext4\n\nWARNING:\nALL DATA on ${aDRIVE_MOUNT_TARGET[$INDEX_DRIVE_BEING_EDITED]} will be deleted\n\nDo you wish to continue?" --backtitle "$PROGRAM_NAME" 14 77
+				else
+
+					whiptail --title "Move RootFS" --yesno --defaultno "This process will move RootFS data to another location. This may increase filesystem performance when using a USB drive over SD card, however, there are some limitations:\n\n - The SD/EMMC card is still required for the boot process\n - ALL data on the target PARTITION will be deleted\n\nNB: As this feature is still in testing, we recommend you use this feature on a fresh installation only.\n\nDo you wish to continue?" --backtitle "$PROGRAM_NAME" 18 77
 					CHOICE=$?
 
 					if (( $CHOICE == 0 )); then
 
-						#	user must unmount partition before format
-						if (( $(df -Ph | grep -ci -m1 "^${aDRIVE_MOUNT_SOURCE[$INDEX_DRIVE_BEING_EDITED]}" ) )); then
+						whiptail --title "Format" --yesno --defaultno "Drive will now be formatted to ext4\n\nWARNING:\nALL DATA on ${aDRIVE_MOUNT_TARGET[$INDEX_DRIVE_BEING_EDITED]} will be deleted\n\nDo you wish to continue?" --backtitle "$PROGRAM_NAME" 14 77
+						CHOICE=$?
 
-							whiptail --title "Notice:" --msgbox "Partition must be unmounted, before format and RootFS transfer can begin.\n\nPlease unmount the partition, then try again." --backtitle "$PROGRAM_NAME" 10 70
-
-						else
+						if (( $CHOICE == 0 )); then
 
 							Menu_MoveRootFS
 
@@ -990,6 +1006,45 @@
 
 	}
 
+	Menu_Select_Mount_Location(){
+
+		#Generate menu
+		local whiptail_menu_array=()
+
+		df -Ph | tail -n +2 | grep -v '^tmpfs' | grep -v '^udev' > /tmp/dietpi-drive_manager_selmnt
+
+		while read line
+		do
+
+			whiptail_menu_array+=("$(echo -e $line | awk '{print $6}')" ": $(echo -e $line | awk '{print $1}') | size: $(echo -e $line | awk '{print $2}') | available: $(echo -e $line | awk '{print $4}')")
+
+		done < /tmp/dietpi-drive_manager_selmnt
+		rm /tmp/dietpi-drive_manager_selmnt
+
+
+		WHIP_TITLE="$PROGRAM_NAME"
+		OPTION=$(whiptail --title "$WHIP_TITLE" --menu "Please select a mount location to use:" --default-item "$MENU_LASTITEM" --cancel-button "Exit" --backtitle "$PROGRAM_NAME" 16 110 7 "${whiptail_menu_array[@]}" 3>&1 1>&2 2>&3)
+
+		CHOICE=$?
+
+		unset whiptail_menu_array
+
+		if (( $CHOICE == 0 )); then
+
+			local drive_manager_selection="$OPTION"
+			if [ "$drive_manager_selection" = "/" ]; then
+
+				drive_manager_selection='/mnt'
+
+			fi
+
+			echo -e "$drive_manager_selection" > "$FP_DRIVE_MANAGER_SELECTION"
+
+		fi
+
+	}
+
+
 	Menu_Exit(){
 
 		WHIP_TITLE="Exit $PROGRAM_NAME?"
@@ -1101,14 +1156,28 @@
 	#/////////////////////////////////////////////////////////////////////////////////////
 	# Main Loop
 	#/////////////////////////////////////////////////////////////////////////////////////
+	if (( $INPUT == 3 )); then
+
+		SERVICE_CONTROL=0
+
+	fi
 	#-----------------------------------------------------------------------------------
 	# Stop Services
-	/DietPi/dietpi/dietpi-services stop
+	if (( $SERVICE_CONTROL )); then
+
+		/DietPi/dietpi/dietpi-services stop
+
+	fi
 	#-----------------------------------------------------------------------------------
 	Init_Drives_and_Refresh
 	#-----------------------------------------------------------------------------------
+	#Menu system for user to select an active mount and return value
+	if (( $INPUT == 3 )); then
+
+		Menu_Select_Mount_Location
+
 	#Old system - setup 1 drive
-	if (( $INPUT == 2 )); then
+	elif (( $INPUT == 2 )); then
 
 		while (( $RUNNING_SETUP == 1 )); do
 
@@ -1125,7 +1194,6 @@
 		Wait_For_Drive_Connection
 		Run_Format
 		Finish_Setup
-
 
 	#-----------------------------------------------------------------------------------
 	#Drive Manager
@@ -1160,9 +1228,6 @@
 	#Destroy
 	Init_Drives_and_Refresh
 
-	#Cleanup:
-	#	Remove any entries in in fstab that dont exist... This will break network mounts?!?!?
-
 	#Delete []
 	unset aDRIVE_MOUNT_SOURCE
 	unset aDRIVE_MOUNT_TARGET
@@ -1181,7 +1246,11 @@
 
 	#-----------------------------------------------------------------------------------
 	# Start Services
-	/DietPi/dietpi/dietpi-services start
+	if (( $SERVICE_CONTROL )); then
+
+		/DietPi/dietpi/dietpi-services start
+
+	fi
 	#-----------------------------------------------------------------------------------
 	exit
 	#-----------------------------------------------------------------------------------

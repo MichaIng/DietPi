@@ -164,8 +164,6 @@ mkdir /DietPi
 
 mkdir -p /mnt/dietpi_userdata
 
-mkdir -p /mnt/usb_1
-
 mkdir -p /mnt/samba
 mkdir -p /mnt/ftp_client
 mkdir -p /mnt/nfs_client
