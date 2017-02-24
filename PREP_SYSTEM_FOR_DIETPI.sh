@@ -27,20 +27,20 @@ exit 0 #prevent continuation of this script.
 
 #  - C2
 # cat << _EOF_ > /etc/apt/sources.list
-# deb http://ftp.debian.org/debian jessie main contrib non-free
-# deb http://ftp.debian.org/debian jessie-updates main contrib non-free
+# deb http://ftp.debian.org/debian/ jessie main contrib non-free
+# deb http://ftp.debian.org/debian/ jessie-updates main contrib non-free
 # deb http://security.debian.org jessie/updates main contrib non-free
-# deb http://ftp.debian.org/debian jessie-backports main contrib non-free
-# deb http://ftp.debian.org/debian jessie-proposed-updates contrib non-free main
+# deb http://ftp.debian.org/debian/ jessie-backports main contrib non-free
+# deb http://ftp.debian.org/debian/ jessie-proposed-updates contrib non-free main
 # _EOF_
 
 # 	C2	stretch
 # cat << _EOF_ > /etc/apt/sources.list
-# deb http://ftp.debian.org/debian stretch main contrib non-free
-# deb http://ftp.debian.org/debian stretch-updates main contrib non-free
+# deb http://ftp.debian.org/debian/ stretch main contrib non-free
+# deb http://ftp.debian.org/debian/ stretch-updates main contrib non-free
 # deb http://security.debian.org stretch/updates main contrib non-free
-# deb http://ftp.debian.org/debian stretch-backports main contrib non-free
-# deb http://ftp.debian.org/debian stretch-proposed-updates contrib non-free main
+# deb http://ftp.debian.org/debian/ stretch-backports main contrib non-free
+# deb http://ftp.debian.org/debian/ stretch-proposed-updates contrib non-free main
 # _EOF_
 # apt-get update
 # apt-get install busybox-static
@@ -58,11 +58,11 @@ exit 0 #prevent continuation of this script.
 # apt-get autoremove --purge -y
 
 
-# deb-src http://ftp.debian.org/debian jessie main contrib non-free
-# deb-src http://ftp.debian.org/debian jessie-updates main contrib non-free
+# deb-src http://ftp.debian.org/debian/ jessie main contrib non-free
+# deb-src http://ftp.debian.org/debian/ jessie-updates main contrib non-free
 # deb-src http://security.debian.org jessie/updates main contrib non-free
-# deb-src http://ftp.debian.org/debian jessie-backports main contrib non-free
-# deb-src http://ftp.debian.org/debian jessie-proposed-updates contrib non-free main
+# deb-src http://ftp.debian.org/debian/ jessie-backports main contrib non-free
+# deb-src http://ftp.debian.org/debian/ jessie-proposed-updates contrib non-free main
 
 
 #NOTE:
@@ -70,10 +70,10 @@ exit 0 #prevent continuation of this script.
 
 # - Everything else (excluding RPi!)
 cat << _EOF_ > /etc/apt/sources.list
-deb http://ftp.debian.org/debian jessie main contrib non-free
-deb http://ftp.debian.org/debian jessie-updates main contrib non-free
+deb http://ftp.debian.org/debian/ jessie main contrib non-free
+deb http://ftp.debian.org/debian/ jessie-updates main contrib non-free
 deb http://security.debian.org jessie/updates main contrib non-free
-deb http://ftp.debian.org/debian jessie-backports main contrib non-free
+deb http://ftp.debian.org/debian/ jessie-backports main contrib non-free
 _EOF_
 
 # RPI UK mirror director is slow, unstable and unreliable -------------------------
