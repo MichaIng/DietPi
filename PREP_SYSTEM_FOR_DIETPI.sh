@@ -472,6 +472,11 @@ dpkg-reconfigure tzdata #Europe > London
 dpkg-reconfigure keyboard-configuration #Keyboard must be plugged in for this to work!
 dpkg-reconfigure locales # en_GB.UTF8 as default and only installed locale
 
+#??? ARMbian images: Disable ARMbian's log2ram: https://github.com/Fourdee/DietPi/issues/781
+systemctl disable log2ram.service
+rm /usr/local/sbin/log2ram
+rm /etc/systemd/system/log2ram.service
+
 #??? Sparky SBC ONLY: Blacklist GPU and touch screen modules: https://github.com/Fourdee/DietPi/issues/699#issuecomment-271362441
 cat << _EOF_ > /etc/modprobe.d/disable_sparkysbc_touchscreen.conf
 blacklist ctp_gsl3680
