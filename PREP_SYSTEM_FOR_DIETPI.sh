@@ -106,16 +106,6 @@ apt-get purge -y toilet toilet-fonts w-scan vlan weather-util* sysbench stress a
 #+ dev packages
 apt-get purge -y '\-dev$' linux-headers*
 
-#+ Misc
-#rm /etc/apt/sources.list.d/armbian.list
-rm /etc/init.d/resize2fs
-systemctl daemon-reload
-rm /etc/update-motd.d/* # ARMbian
-
-systemctl disable firstrun
-rm /etc/init.d/firstrun # ARMbian
-
-
 #??? RPI
 apt-get purge -y libraspberrypi-doc
 #??? RPI (remove older version packages marked as manual): https://github.com/Fourdee/DietPi/issues/598#issuecomment-25919922
@@ -155,9 +145,26 @@ userdel -f test #armbian
 
 #Remove folders (now in finalise script)
 
-#Remove files
+#+Remove files
+#rm /etc/apt/sources.list.d/armbian.list
+rm /etc/init.d/resize2fs
+rm /etc/update-motd.d/* # ARMbian
+
+systemctl disable firstrun
+rm /etc/init.d/firstrun # ARMbian
+
+#	Disable ARMbian's log2ram: https://github.com/Fourdee/DietPi/issues/781
+systemctl disable log2ram.service
+rm /usr/local/sbin/log2ram
+rm /etc/systemd/system/log2ram.service
+systemctl daemon-reload
+
 rm /etc/init.d/cpu_governor # Meveric
 rm /etc/systemd/system/cpu_governor.service # Meveric
+
+#	Disable ARMbian's resize service (not automatically removed by ARMbian scripts...)
+systemctl disable resize2fs &> /dev/null
+rm /etc/systemd/system/resize2fs.service &> /dev/null
 
 #Create DietPi common folders
 mkdir /DietPi
@@ -335,7 +342,7 @@ Dpkg::Options {
 }
 _EOF_
 
-#Stretch, disable automatic updates and management of apt cache. Prevents unexpected lock on Apt cache and therefore failed apt installations.
+#Disable automatic updates and management of apt cache. Prevents unexpected lock on Apt cache and therefore failed apt installations.
 systemctl mask apt-daily.service
 
 #/etc/sysctl.conf | Check for a previous entry before adding this
@@ -472,10 +479,6 @@ dpkg-reconfigure tzdata #Europe > London
 dpkg-reconfigure keyboard-configuration #Keyboard must be plugged in for this to work!
 dpkg-reconfigure locales # en_GB.UTF8 as default and only installed locale
 
-#??? ARMbian images: Disable ARMbian's log2ram: https://github.com/Fourdee/DietPi/issues/781
-systemctl disable log2ram.service
-rm /usr/local/sbin/log2ram
-rm /etc/systemd/system/log2ram.service
 
 #??? Sparky SBC ONLY: Blacklist GPU and touch screen modules: https://github.com/Fourdee/DietPi/issues/699#issuecomment-271362441
 cat << _EOF_ > /etc/modprobe.d/disable_sparkysbc_touchscreen.conf
