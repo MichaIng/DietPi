@@ -27,20 +27,20 @@ exit 0 #prevent continuation of this script.
 
 #  - C2
 # cat << _EOF_ > /etc/apt/sources.list
-# deb http://ftp.debian.org/debian jessie main contrib non-free
-# deb http://ftp.debian.org/debian jessie-updates main contrib non-free
+# deb http://ftp.debian.org/debian/ jessie main contrib non-free
+# deb http://ftp.debian.org/debian/ jessie-updates main contrib non-free
 # deb http://security.debian.org jessie/updates main contrib non-free
-# deb http://ftp.debian.org/debian jessie-backports main contrib non-free
-# deb http://ftp.debian.org/debian jessie-proposed-updates contrib non-free main
+# deb http://ftp.debian.org/debian/ jessie-backports main contrib non-free
+# deb http://ftp.debian.org/debian/ jessie-proposed-updates contrib non-free main
 # _EOF_
 
 # 	C2	stretch
 # cat << _EOF_ > /etc/apt/sources.list
-# deb http://ftp.debian.org/debian stretch main contrib non-free
-# deb http://ftp.debian.org/debian stretch-updates main contrib non-free
+# deb http://ftp.debian.org/debian/ stretch main contrib non-free
+# deb http://ftp.debian.org/debian/ stretch-updates main contrib non-free
 # deb http://security.debian.org stretch/updates main contrib non-free
-# deb http://ftp.debian.org/debian stretch-backports main contrib non-free
-# deb http://ftp.debian.org/debian stretch-proposed-updates contrib non-free main
+# deb http://ftp.debian.org/debian/ stretch-backports main contrib non-free
+# deb http://ftp.debian.org/debian/ stretch-proposed-updates contrib non-free main
 # _EOF_
 # apt-get update
 # apt-get install busybox-static
@@ -58,11 +58,11 @@ exit 0 #prevent continuation of this script.
 # apt-get autoremove --purge -y
 
 
-# deb-src http://ftp.debian.org/debian jessie main contrib non-free
-# deb-src http://ftp.debian.org/debian jessie-updates main contrib non-free
+# deb-src http://ftp.debian.org/debian/ jessie main contrib non-free
+# deb-src http://ftp.debian.org/debian/ jessie-updates main contrib non-free
 # deb-src http://security.debian.org jessie/updates main contrib non-free
-# deb-src http://ftp.debian.org/debian jessie-backports main contrib non-free
-# deb-src http://ftp.debian.org/debian jessie-proposed-updates contrib non-free main
+# deb-src http://ftp.debian.org/debian/ jessie-backports main contrib non-free
+# deb-src http://ftp.debian.org/debian/ jessie-proposed-updates contrib non-free main
 
 
 #NOTE:
@@ -70,10 +70,10 @@ exit 0 #prevent continuation of this script.
 
 # - Everything else (excluding RPi!)
 cat << _EOF_ > /etc/apt/sources.list
-deb http://ftp.debian.org/debian jessie main contrib non-free
-deb http://ftp.debian.org/debian jessie-updates main contrib non-free
+deb http://ftp.debian.org/debian/ jessie main contrib non-free
+deb http://ftp.debian.org/debian/ jessie-updates main contrib non-free
 deb http://security.debian.org jessie/updates main contrib non-free
-deb http://ftp.debian.org/debian jessie-backports main contrib non-free
+deb http://ftp.debian.org/debian/ jessie-backports main contrib non-free
 _EOF_
 
 # RPI UK mirror director is slow, unstable and unreliable -------------------------
@@ -105,16 +105,6 @@ apt-get purge -y toilet toilet-fonts w-scan vlan weather-util* sysbench stress a
 
 #+ dev packages
 apt-get purge -y '\-dev$' linux-headers*
-
-#+ Misc
-#rm /etc/apt/sources.list.d/armbian.list
-rm /etc/init.d/resize2fs
-systemctl daemon-reload
-rm /etc/update-motd.d/* # ARMbian
-
-systemctl disable firstrun
-rm /etc/init.d/firstrun # ARMbian
-
 
 #??? RPI
 apt-get purge -y libraspberrypi-doc
@@ -155,16 +145,31 @@ userdel -f test #armbian
 
 #Remove folders (now in finalise script)
 
-#Remove files
+#+Remove files
+#rm /etc/apt/sources.list.d/armbian.list
+rm /etc/init.d/resize2fs
+rm /etc/update-motd.d/* # ARMbian
+
+systemctl disable firstrun
+rm /etc/init.d/firstrun # ARMbian
+
+#	Disable ARMbian's log2ram: https://github.com/Fourdee/DietPi/issues/781
+systemctl disable log2ram.service
+rm /usr/local/sbin/log2ram
+rm /etc/systemd/system/log2ram.service
+systemctl daemon-reload
+
 rm /etc/init.d/cpu_governor # Meveric
 rm /etc/systemd/system/cpu_governor.service # Meveric
+
+#	Disable ARMbian's resize service (not automatically removed by ARMbian scripts...)
+systemctl disable resize2fs &> /dev/null
+rm /etc/systemd/system/resize2fs.service &> /dev/null
 
 #Create DietPi common folders
 mkdir /DietPi
 
 mkdir -p /mnt/dietpi_userdata
-
-mkdir -p /mnt/usb_1
 
 mkdir -p /mnt/samba
 mkdir -p /mnt/ftp_client
@@ -337,7 +342,7 @@ Dpkg::Options {
 }
 _EOF_
 
-#Stretch, disable automatic updates and management of apt cache. Prevents unexpected lock on Apt cache and therefore failed apt installations.
+#Disable automatic updates and management of apt cache. Prevents unexpected lock on Apt cache and therefore failed apt installations.
 systemctl mask apt-daily.service
 
 #/etc/sysctl.conf | Check for a previous entry before adding this
@@ -473,6 +478,7 @@ systemctl disable systemd-timesync
 dpkg-reconfigure tzdata #Europe > London
 dpkg-reconfigure keyboard-configuration #Keyboard must be plugged in for this to work!
 dpkg-reconfigure locales # en_GB.UTF8 as default and only installed locale
+
 
 #??? Sparky SBC ONLY: Blacklist GPU and touch screen modules: https://github.com/Fourdee/DietPi/issues/699#issuecomment-271362441
 cat << _EOF_ > /etc/modprobe.d/disable_sparkysbc_touchscreen.conf
