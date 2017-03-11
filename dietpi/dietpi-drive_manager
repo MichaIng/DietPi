@@ -58,7 +58,10 @@
 	#EXTERNAL
 	MAX_DRIVES=5
 	FORMAT_GPT=1 # default GPT: https://github.com/Fourdee/DietPi/issues/531. 0=MBR
-	FORMAT_FILESYSTEM_TYPE=0 #0=ext4 1=ntfs 2=fat32 3=hfs+ 4=btrfs
+	FORMAT_FILESYSTEM_TYPE=0 #0=ext4 1=ntfs 2=fat32 3=hfs+ 4=btrfs 5=f2fs
+	FORMAT_RECREATE_PARTITION_TABLE=1 #0=for rootfs transfer
+	FORMAT_COMPLETED=0
+	FORMAT_PREVIOUS_MOUNT_SOURCE=0 #Used to obtain previous mount source fp, before a format, for rootfs transfer
 
 	INDEX_DRIVE_BEING_EDITED=0
 
@@ -273,29 +276,38 @@
 		# - Unmount drive
 		umount ${aDRIVE_MOUNT_SOURCE[$INDEX_DRIVE_BEING_EDITED]}
 
-		# - Clear MBR and partition table from device, and then some.
-		dd if=/dev/zero of=$drivepath_no_partitions bs=5M count=1
+		if (( $FORMAT_RECREATE_PARTITION_TABLE )); then
 
-		# - Create partition table type
-		local parition_table_type='msdos'
-		if (( $FORMAT_GPT )); then
+			# - Clear MBR and partition table from device, and then some.
+			dd if=/dev/zero of=$drivepath_no_partitions bs=5M count=1
 
-			parition_table_type='gpt'
+			# - Create partition table type
+			local parition_table_type='msdos'
+			if (( $FORMAT_GPT )); then
+
+				parition_table_type='gpt'
+
+			fi
+
+			/DietPi/dietpi/func/dietpi-notify 2 "Partition table target: $parition_table_type"
+
+			parted -s "$drivepath_no_partitions" mklabel "$parition_table_type"
+			parted -a optimal "$drivepath_no_partitions" mkpart primary 0% 100%
+
+			# parted -s "${aDRIVE_MOUNT_SOURCE[$INDEX_DRIVE_BEING_EDITED]}" mklabel "$parition_table_type"
+			# parted -a optimal "${aDRIVE_MOUNT_SOURCE[$INDEX_DRIVE_BEING_EDITED]}" mkpart primary 0% 100%
+
+			#partprobe #this mounts all drives
+
+			sleep 1 # due to systemD automount, wait for it.
+			umount ${aDRIVE_MOUNT_SOURCE[$INDEX_DRIVE_BEING_EDITED]}
+
+		else
+
+			# - Clear partition from device
+			dd if=/dev/zero of=${aDRIVE_MOUNT_SOURCE[$INDEX_DRIVE_BEING_EDITED]} bs=5M count=1
 
 		fi
-
-		/DietPi/dietpi/func/dietpi-notify 2 "Partition table target: $parition_table_type"
-
-		parted -s "$drivepath_no_partitions" mklabel "$parition_table_type"
-		parted -a optimal "$drivepath_no_partitions" mkpart primary 0% 100%
-
-		# parted -s "${aDRIVE_MOUNT_SOURCE[$INDEX_DRIVE_BEING_EDITED]}" mklabel "$parition_table_type"
-		# parted -a optimal "${aDRIVE_MOUNT_SOURCE[$INDEX_DRIVE_BEING_EDITED]}" mkpart primary 0% 100%
-
-		#partprobe #this mounts all drives
-
-		sleep 1 # due to systemD automount, wait for it.
-		umount ${aDRIVE_MOUNT_SOURCE[$INDEX_DRIVE_BEING_EDITED]}
 
 		# - Format ext4
 		if (( $FORMAT_FILESYSTEM_TYPE == 0 )); then
@@ -327,13 +339,100 @@
 			# force
 			mkfs.btrfs -f ${aDRIVE_MOUNT_SOURCE[$INDEX_DRIVE_BEING_EDITED]}
 
+		# - Format f2fs
+		elif (( $FORMAT_FILESYSTEM_TYPE == 5 )); then
+
+			mkfs.f2fs ${aDRIVE_MOUNT_SOURCE[$INDEX_DRIVE_BEING_EDITED]}
+
 		fi
 
 		#Remove previous fstab entry and mount location
 		rm -R "${aDRIVE_MOUNT_TARGET[$INDEX_DRIVE_BEING_EDITED]}"
 		sed -i "\@${aDRIVE_MOUNT_TARGET[$INDEX_DRIVE_BEING_EDITED]}[[:space:]]@d" /etc/fstab
 
+		FORMAT_COMPLETED=1
+		FORMAT_PREVIOUS_MOUNT_SOURCE=${aDRIVE_MOUNT_SOURCE[$INDEX_DRIVE_BEING_EDITED]}
+
 		Init_Drives_and_Refresh
+
+	}
+
+	RootFS_Move(){
+
+		#Remove previous fstab entry and mount location
+		cp /etc/fstab /etc/fstab.bak #incase of Rsync fail
+
+		#	redetect index, after format
+		for ((i=0; i<$MAX_DRIVES; i++))
+		do
+
+			if [ "${aDRIVE_MOUNT_SOURCE[$i]}" = "$FORMAT_PREVIOUS_MOUNT_SOURCE" ]; then
+
+				INDEX_DRIVE_BEING_EDITED=$i
+				break
+
+			fi
+
+		done
+
+		#	Remove automatic entry for new uuid
+		sed -i "\@${aDRIVE_MOUNT_TARGET[$INDEX_DRIVE_BEING_EDITED]}[[:space:]]@d" /etc/fstab
+
+		#	Add new rootfs entry
+		sed -i "\@[[:space:]]/[[:space:]]@c UUID=${aDRIVE_UUID[$INDEX_DRIVE_BEING_EDITED]} / auto defaults,noatime,discard 0 1" /etc/fstab
+
+		# - install rsync
+		if (( ! $(dpkg --get-selections | grep -ci -m1 '^rsync[[[:space:]]') )); then
+
+			/DietPi/dietpi/func/dietpi-notify 2 "Installing Rsync, please wait...\n"
+			sleep 1
+
+			apt-get install rsync -y
+
+		fi
+
+		rsync -paxv --exclude '/lost+found' / "${aDRIVE_MOUNT_TARGET[$INDEX_DRIVE_BEING_EDITED]}"/
+		if (( $? != 0 )); then
+
+			/DietPi/dietpi/func/dietpi-notify 1 'Rsync has failed, RootFS transfer has been aborted.'
+			#	revert FSTAB changes
+			cp /etc/fstab.bak /etc/fstab
+			exit
+
+		fi
+
+		#RPi | cmdline.txt
+		if (( $HW_MODEL < 10 )); then
+
+			#	find current root= and replace
+			local rootfs_current=$(awk '{for(i=1;i<=NF;i++) {print $i} }' /boot/cmdline.txt | grep -m1 'root=')
+			sed -i "s#$rootfs_current#root=PARTUUID=${aDRIVE_PART_UUID[$INDEX_DRIVE_BEING_EDITED]}#g" /boot/cmdline.txt
+
+			#	Add root delay
+			if (( ! $(cat /boot/cmdline.txt | grep -ci -m1 '[[:space:]]rootdelay=') )); then
+
+				sed -i "s#console=tty1#console=tty1 rootdelay=10#g" /boot/cmdline.txt
+
+			fi
+
+			#	set FS type
+			local rootfstype_current=$(awk '{for(i=1;i<=NF;i++) {print $i} }' /boot/cmdline.txt | grep -m1 'rootfstype=')
+			sed -i "s#$rootfstype_current#rootfstype=${aDRIVE_FSTYPE[$INDEX_DRIVE_BEING_EDITED]}#g" /boot/cmdline.txt
+
+		#C1/C2/XU4 | /DietPi/boot.ini
+		elif (( $HW_MODEL == 10 || $HW_MODEL == 11 || $HW_MODEL == 12 )); then
+
+			#	find current root= to replace
+			local rootfs_current=$(awk '{for(i=1;i<=NF;i++) {print $i} }' /DietPi/boot.ini | grep -m1 'root=' | sed 's/\"//')
+			sed -i "s#$rootfs_current#root=UUID=${aDRIVE_UUID[$INDEX_DRIVE_BEING_EDITED]}#g" /DietPi/boot.ini
+
+		fi
+
+		systemctl daemon-reload
+
+		whiptail --title "RootFS transfer completed" --msgbox "RootFS transfer completed. Press enter to reboot system." --backtitle "$PROGRAM_NAME" 8 60
+
+		reboot
 
 	}
 
@@ -654,6 +753,8 @@
 
 			elif [ "$OPTION" = "Format" ]; then
 
+				FORMAT_RECREATE_PARTITION_TABLE=1
+
 				local drivepath_no_partitions=$(Return_Drive_Without_Partitions ${aDRIVE_MOUNT_SOURCE[$INDEX_DRIVE_BEING_EDITED]})
 
 				# - Disallow if userdata is located on this drive!
@@ -675,8 +776,10 @@
 			#Transfer RootFS
 			elif [ "$OPTION" = "Transfer RootFS" ]; then
 
+				FORMAT_RECREATE_PARTITION_TABLE=0
+
 				#	user must unmount partition before format
-				if (( $(df -Ph | grep -ci -m1 "^${aDRIVE_MOUNT_SOURCE[$INDEX_DRIVE_BEING_EDITED]}" ) )); then
+				if (( $(df -Ph | grep -ci -m1 "^${aDRIVE_MOUNT_SOURCE[$INDEX_DRIVE_BEING_EDITED]}") )); then
 
 					whiptail --title "Notice:" --msgbox "Partition must be unmounted, before format and RootFS transfer can begin.\n\nPlease unmount the partition, then try again." --backtitle "$PROGRAM_NAME" 10 70
 
@@ -684,15 +787,15 @@
 
 					whiptail --title "Move RootFS" --yesno --defaultno "This process will move RootFS data to another location. This may increase filesystem performance when using a USB drive over SD card, however, there are some limitations:\n\n - The SD/EMMC card is still required for the boot process\n - ALL data on the target PARTITION will be deleted\n\nNB: As this feature is still in testing, we recommend you use this feature on a fresh installation only.\n\nDo you wish to continue?" --backtitle "$PROGRAM_NAME" 18 77
 					CHOICE=$?
-
 					if (( $CHOICE == 0 )); then
 
-						whiptail --title "Format" --yesno --defaultno "Drive will now be formatted to ext4\n\nWARNING:\nALL DATA on ${aDRIVE_MOUNT_TARGET[$INDEX_DRIVE_BEING_EDITED]} will be deleted\n\nDo you wish to continue?" --backtitle "$PROGRAM_NAME" 14 77
-						CHOICE=$?
+						whiptail --title "Info:" --msgbox "On the next screen, you will be asked to format the target partition.\n\nPlease see the following recommendations for RootFS target filesystem type:\n\n - Odroid\nRootFS transfer supports ONLY EXT4 format\n\n - RPi\nRootFS transfer supports EXT4, BTRFS and F2FS" --backtitle "$PROGRAM_NAME" 16 75
 
-						if (( $CHOICE == 0 )); then
+						Menu_Format
 
-							Menu_MoveRootFS
+						if (( $FORMAT_COMPLETED )); then
+
+							RootFS_Move
 
 						fi
 
@@ -714,6 +817,11 @@
 	Menu_Format(){
 
 		TARGETMENUID=2
+
+		FORMAT_COMPLETED=0
+
+		# - disable swap
+		/DietPi/dietpi/func/dietpi-set_dphys-swapfile 0 /var/swap
 
 		local partition_table_text='MBR'
 		if (( $FORMAT_GPT )); then
@@ -738,6 +846,10 @@
 		elif (( $FORMAT_FILESYSTEM_TYPE == 4 )); then
 
 			format_type_text='BTRFS'
+
+		elif (( $FORMAT_FILESYSTEM_TYPE == 5 )); then
+
+			format_type_text='F2FS'
 
 		fi
 
@@ -778,6 +890,7 @@
 				whiptail_menu_array+=("2" ": FAT32  | All OS (4GB filesize limit)")
 				whiptail_menu_array+=("3" ": HFS+   | Mac OS X (Intel Mac default file system)")
 				whiptail_menu_array+=("4" ": BTRFS  | Linux (Modern filesystem)")
+				whiptail_menu_array+=("5" ": F2FS   | Linux (Flash filesystem)")
 
 				WHIP_TITLE='Filesystem Type?'
 				OPTION=$(whiptail --title "$WHIP_TITLE" --menu "Please select a filesystem type for this format:\n\nEXT4:\nHighly recommended if you plan to use this drive solely on this system (dedicated drive).\n\nNTFS:\nRecommended if you plan to use this drive on a Windows system. High CPU usage during transfers.\n\nFull list of different filesystem types:\nhttp://dietpi.com/phpbb/viewtopic.php?f=8&t=673&p=2898#p2898" --cancel-button "Back" --default-item "$FORMAT_FILESYSTEM_TYPE" --backtitle "$PROGRAM_NAME" 24 70 5 "${whiptail_menu_array[@]}" 3>&1 1>&2 2>&3)
@@ -801,6 +914,13 @@
 						/DietPi/dietpi/func/dietpi-notify 2 "Installing additional packages for BTRFS support, please wait..."
 						apt-get install -y btrfs-tools
 
+					# - f2fs install packages
+					elif (( $OPTION == 5 &&
+						! $(dpkg --get-selections | grep -ci -m1 '^f2fs-tools') )); then
+
+						/DietPi/dietpi/func/dietpi-notify 2 "Installing additional packages for F2FS support, please wait..."
+						apt-get install -y f2fs-tools
+
 					fi
 
 					FORMAT_FILESYSTEM_TYPE=$OPTION
@@ -810,9 +930,16 @@
 			elif [ "$OPTION" = "Format" ]; then
 
 				local drivepath_no_partitions=$(Return_Drive_Without_Partitions ${aDRIVE_MOUNT_SOURCE[$INDEX_DRIVE_BEING_EDITED]})
+				local text_desc="Format Drive:\n - $drivepath_no_partitions\n - UUID=${aDRIVE_UUID[$INDEX_DRIVE_BEING_EDITED]}\n - Partition table: $partition_table_text\n - Filesystem type: $format_type_text\n\nALL DATA and PARTITIONS on this drive will be DELETED.\nDo you wish to continue?"
+
+				if (( ! $FORMAT_RECREATE_PARTITION_TABLE )); then
+
+					text_desc="Format partition:\n - ${aDRIVE_MOUNT_SOURCE[$INDEX_DRIVE_BEING_EDITED]}\n - UUID=${aDRIVE_UUID[$INDEX_DRIVE_BEING_EDITED]}\n - Partition table: $partition_table_text\n - Filesystem type: $format_type_text\n\nALL DATA on this partition will be DELETED.\nDo you wish to continue?"
+
+				fi
 
 				WHIP_TITLE='Start Format?'
-				whiptail --title "$WHIP_TITLE" --yesno "Format Drive:\n - $drivepath_no_partitions\n - UUID=${aDRIVE_UUID[$INDEX_DRIVE_BEING_EDITED]}\n - Partition table: $partition_table_text\n - Filesystem type: $format_type_text\n\nALL DATA and PARTITIONS on this drive will be DELETED.\nDo you wish to continue?" --backtitle "$PROGRAM_NAME" --defaultno 14 75
+				whiptail --title "$WHIP_TITLE" --yesno "$text_desc" --backtitle "$PROGRAM_NAME" --defaultno 14 75
 				CHOICE=$?
 				if (( $CHOICE == 0 )); then
 
@@ -870,7 +997,6 @@
 
 	}
 
-
 	Menu_Exit(){
 
 		WHIP_TITLE="Exit $PROGRAM_NAME?"
@@ -888,94 +1014,6 @@
 			TARGETMENUID=0
 
 		fi
-
-	}
-
-	Menu_MoveRootFS(){
-
-		# - disable swap
-		/DietPi/dietpi/func/dietpi-set_dphys-swapfile 0 /var/swap
-
-		# - Format
-		mkfs.ext4 -F ${aDRIVE_MOUNT_SOURCE[$INDEX_DRIVE_BEING_EDITED]}
-		resize2fs ${aDRIVE_MOUNT_SOURCE[$INDEX_DRIVE_BEING_EDITED]}
-
-		#Remove previous fstab entry and mount location
-		cp /etc/fstab /etc/fstab.bak #incase of Rsync fail
-		rm -R "${aDRIVE_MOUNT_TARGET[$INDEX_DRIVE_BEING_EDITED]}"
-		sed -i "\@${aDRIVE_MOUNT_TARGET[$INDEX_DRIVE_BEING_EDITED]}[[:space:]]@d" /etc/fstab
-
-		Init_Drives_and_Refresh
-
-		#	redetect index
-		for ((i=0; i<$MAX_DRIVES; i++))
-		do
-
-			if [ "${aDRIVE_MOUNT_SOURCE[$i]}" = "${aDRIVE_MOUNT_SOURCE[$INDEX_DRIVE_BEING_EDITED]}" ]; then
-
-				INDEX_DRIVE_BEING_EDITED=$i
-				break
-
-			fi
-
-		done
-
-		#	Remove automatic entry for new uuid
-		sed -i "\@${aDRIVE_MOUNT_TARGET[$INDEX_DRIVE_BEING_EDITED]}[[:space:]]@d" /etc/fstab
-
-		#	Add new rootfs entry
-		sed -i "\@[[:space:]]/[[:space:]]@c UUID=${aDRIVE_UUID[$INDEX_DRIVE_BEING_EDITED]} / auto defaults,noatime,discard 0 1" /etc/fstab
-
-		# - install rsync
-		if (( ! $(dpkg --get-selections | grep -ci -m1 '^rsync[[[:space:]]') )); then
-
-			/DietPi/dietpi/func/dietpi-notify 2 "Installing Rsync, please wait...\n"
-			sleep 1
-
-			apt-get install rsync -y
-
-		fi
-
-		rsync -paxv --exclude '/lost+found' / "${aDRIVE_MOUNT_TARGET[$INDEX_DRIVE_BEING_EDITED]}"/
-		if (( $? != 0 )); then
-
-			/DietPi/dietpi/func/dietpi-notify 1 'Rsync has failed, RootFS transfer has been aborted.'
-			#	revert FSTAB changes
-			cp /etc/fstab.bak /etc/fstab
-			exit
-
-		fi
-
-		#RPi | cmdline.txt
-		if (( $HW_MODEL < 10 )); then
-
-			#	find current root= to replace
-			local rootfs_current=$(awk '{for(i=1;i<=NF;i++) {print $i} }' /boot/cmdline.txt | grep -m1 'root=')
-
-			sed -i "s#$rootfs_current#root=PARTUUID=${aDRIVE_PART_UUID[$INDEX_DRIVE_BEING_EDITED]}#g" /boot/cmdline.txt
-
-			# - Add root delay
-			if (( ! $(cat /boot/cmdline.txt | grep -ci -m1 '[[:space:]]rootdelay=') )); then
-
-				sed -i "s#console=tty1#console=tty1 rootdelay=10#g" /boot/cmdline.txt
-
-			fi
-
-		#C1/C2/XU4 | /DietPi/boot.ini
-		elif (( $HW_MODEL == 10 || $HW_MODEL == 11 || $HW_MODEL == 12 )); then
-
-			#	find current root= to replace
-			local rootfs_current=$(awk '{for(i=1;i<=NF;i++) {print $i} }' /DietPi/boot.ini | grep -m1 'root=' | sed 's/\"//')
-
-			sed -i "s#$rootfs_current#root=UUID=${aDRIVE_UUID[$INDEX_DRIVE_BEING_EDITED]}#g" /DietPi/boot.ini
-
-		fi
-
-		systemctl daemon-reload
-
-		whiptail --title "RootFS transfer completed" --msgbox "RootFS transfer completed. Press enter to reboot system." --backtitle "$PROGRAM_NAME" 8 60
-
-		reboot
 
 	}
 
