@@ -163,8 +163,11 @@ rm /etc/init.d/cpu_governor # Meveric
 rm /etc/systemd/system/cpu_governor.service # Meveric
 
 #	Disable ARMbian's resize service (not automatically removed by ARMbian scripts...)
-systemctl disable resize2fs &> /dev/null
-rm /etc/systemd/system/resize2fs.service &> /dev/null
+systemctl disable resize2fs
+rm /etc/systemd/system/resize2fs.service
+
+#Set UID bit for sudo: https://github.com/Fourdee/DietPi/issues/794
+chmod 4755 /usr/bin/sudo
 
 #Create DietPi common folders
 mkdir /DietPi
