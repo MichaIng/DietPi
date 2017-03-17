@@ -256,11 +256,11 @@ rm /lib/systemd/system/rc-local.service
 cat << _EOF_ > /etc/systemd/system/rc-local.service
 [Unit]
 Description=/etc/rc.local Compatibility
-After=dietpi-boot.service dietpi-ramdisk.service dietpi-ramlog.service multi-user.target
-Requires=dietpi-boot.service dietpi-ramdisk.service multi-user.target
+After=dietpi-boot.service dietpi-ramdisk.service dietpi-ramlog.service
+Requires=dietpi-boot.service dietpi-ramdisk.service
 
 [Service]
-Type=oneshot
+Type=idle
 ExecStart=/etc/rc.local
 StandardOutput=tty
 RemainAfterExit=yes
