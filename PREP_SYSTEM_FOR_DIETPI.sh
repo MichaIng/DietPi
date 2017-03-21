@@ -485,6 +485,11 @@ dpkg-reconfigure tzdata #Europe > London
 dpkg-reconfigure keyboard-configuration #Keyboard must be plugged in for this to work!
 dpkg-reconfigure locales # en_GB.UTF8 as default and only installed locale
 
+#Pump default locale into sys env: https://github.com/Fourdee/DietPi/issues/825
+cat << _EOF_ > /etc/environment
+LC_ALL=en_GB.UTF-8
+LANG=en_GB.UTF-8
+_EOF_
 
 #??? Sparky SBC ONLY: Blacklist GPU and touch screen modules: https://github.com/Fourdee/DietPi/issues/699#issuecomment-271362441
 cat << _EOF_ > /etc/modprobe.d/disable_sparkysbc_touchscreen.conf
