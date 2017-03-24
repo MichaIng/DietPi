@@ -94,10 +94,13 @@ rm /etc/apt/sources.list.d/deb-multimedia.list
 #Remove following Jessie
 apt-get clean
 apt-get update
-apt-get purge -y libboost-iostreams* sgml-base xml-core usb-modeswitch* libpng* cpp-* cpp ntpdate bluez bluetooth rsync dialog dhcpcd5 libsqlite* libxapian22 lua5.1 netcat-* make makedev ncdu plymouth openresolv shared-mime-in* tcpd strace tasksel* wireless-* xdg-user-dirs triggerhappy python* v4l-utils traceroute xz-utils ucf xauth zlib1g-dev xml-core aptitude* avahi-daemon rsyslog logrotate man-db manpages vim vim-common vim-runtime vim-tiny mc mc-data
+apt-get purge -y gpsd ppp libboost-iostreams* sgml-base xml-core usb-modeswitch* libpng* cpp-* cpp ntpdate bluez bluetooth rsync dialog dhcpcd5 libsqlite* libxapian22 lua5.1 netcat-* make makedev ncdu plymouth openresolv shared-mime-in* tcpd strace tasksel* wireless-* xdg-user-dirs triggerhappy python* v4l-utils traceroute xz-utils ucf xauth zlib1g-dev xml-core aptitude* avahi-daemon rsyslog logrotate man-db manpages vim vim-common vim-runtime vim-tiny mc mc-data
 
 #+Desktop images (Mostly desktop packages, but apply to non-desktop images also):
 apt-get purge -y libpod-* libpeas-* isc-dhcp-server gnome-* fonts-dejavu* eject dnsmasq* dns-root-data colord-data libturbojpeg1 libjasper* libjson* libwbclient* libwayland* golang-* libavahi* libtext* libweb* libpcsclite1 libxau6* libvpx1 libxc* dictionaries-* libgtk* miscfiles minicom lrzsz lxmenu-* x11-* zenity* yelp-*
+rm -R /usr/share/fonts/*
+rm -R /usr/share/icons/*
+
 
 #+armbian
 apt-get purge -y toilet toilet-fonts w-scan vlan weather-util* sysbench stress apt-transport-* cmake cmake-data device-tree-co* fping hddtemp haveged hostapd i2c-tools iperf ir-keytable libasound2* libmtp* libusb-dev lirc lsof ncurses-term pkg-config unicode-data rfkill pv mtp-tools m4 screen alsa-utils autotools-dev bind9-host btrfs-tools bridge-utils cpufrequtils dvb-apps dtv-scan-table* evtest f3 figlet gcc gcc-4.8-* git git-man iozone3 ifenslave
@@ -124,7 +127,7 @@ apt-get install -y apt-transport-https ethtool p7zip-full hfsplus iw debconf-uti
 apt-get install rfkill
 
 #??? bluetooth if onboard device / RPI
-apt-get install -y bluetooth
+apt-get install -y bluetooth bluez-firmware
 
 #??? RPi - bluetooth/firmware for RPi 3 (ALL)
 apt-get install -y pi-bluetooth
@@ -474,7 +477,7 @@ systemctl disable getty@tty[2-6].service
 #systemctl disable serial-getty@ttyS0.service
 
 #NTPd - remove systemd's version
-systemctl disable systemd-timesync
+systemctl disable systemd-timesyncd
 
 
 
@@ -482,6 +485,11 @@ dpkg-reconfigure tzdata #Europe > London
 dpkg-reconfigure keyboard-configuration #Keyboard must be plugged in for this to work!
 dpkg-reconfigure locales # en_GB.UTF8 as default and only installed locale
 
+#Pump default locale into sys env: https://github.com/Fourdee/DietPi/issues/825
+cat << _EOF_ > /etc/environment
+LC_ALL=en_GB.UTF-8
+LANG=en_GB.UTF-8
+_EOF_
 
 #??? Sparky SBC ONLY: Blacklist GPU and touch screen modules: https://github.com/Fourdee/DietPi/issues/699#issuecomment-271362441
 cat << _EOF_ > /etc/modprobe.d/disable_sparkysbc_touchscreen.conf
