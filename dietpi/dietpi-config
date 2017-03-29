@@ -43,6 +43,8 @@
 	HW_CPUID=$(sed -n 9p /DietPi/dietpi/.hw_model)
 	HW_ONBOARD_WIFI=$(sed -n 10p /DietPi/dietpi/.hw_model)
 
+	FP_CPU_SCALING_GOV='/sys/devices/system/cpu/cpu0/cpufreq/scaling_available_governors'
+
 	#/////////////////////////////////////////////////////////////////////////////////////
 	#Obtain Install Stage Index
 	#/////////////////////////////////////////////////////////////////////////////////////
@@ -1122,8 +1124,22 @@
 
 		#All devices
 		local current_cpu_governor=$(cat /DietPi/dietpi.txt | grep -m1 '^cpu_governor=' | sed 's/.*=//')
-		local frequency_min_cpu_governor=$(( $(cat /sys/devices/system/cpu/cpu0/cpufreq/scaling_min_freq) / 1000 ))
-		local frequency_max_cpu_governor=$(( $(cat /sys/devices/system/cpu/cpu0/cpufreq/scaling_max_freq) / 1000 ))
+
+		local frequency_min_cpu_governor=1
+		local fp_frequency_min_cpu_governor='/sys/devices/system/cpu/cpu0/cpufreq/scaling_min_freq'
+		if [ -f "$fp_frequency_min_cpu_governor" ]; then
+
+			frequency_min_cpu_governor=$(( $(cat "$fp_frequency_min_cpu_governor") / 1000 ))
+
+		fi
+
+		local frequency_max_cpu_governor=2
+		local fp_frequency_max_cpu_governor='/sys/devices/system/cpu/cpu0/cpufreq/scaling_max_freq'
+		if [ -f "$fp_frequency_max_cpu_governor" ]; then
+
+			frequency_max_cpu_governor=$(( $(cat "$fp_frequency_max_cpu_governor") / 1000 ))
+
+		fi
 
 		local arm_temp=$(/DietPi/dietpi/dietpi-cpuinfo 1)
 		if [[ $arm_temp =~ ^-?[0-9]+$ ]]; then
@@ -1334,49 +1350,59 @@
 				;;
 				"Change CPU Governor"*)
 
-					#Obtain available Govs. Setup their menu and description.
-					local Description="Change CPU Governor:"
-					local whiptail_menu_array=()
-					if (( $(cat /sys/devices/system/cpu/cpu0/cpufreq/scaling_available_governors | grep -ci -m1 'interactive') == 1 )); then
-						whiptail_menu_array+=("interactive" "Scales CPU frequency between $frequency_min_cpu_governor MHz and $frequency_max_cpu_governor MHz.")
-						Description+="\nInteractive  | Dynamic CPU frequency based on usage (recommended)"
-					fi
+					# - Scaling govs not available
+					if [ ! -f "$FP_CPU_SCALING_GOV" ]; then
 
-					# - C1 | disable ondemand: https://github.com/Fourdee/DietPi/issues/248
-					if (( $(cat /sys/devices/system/cpu/cpu0/cpufreq/scaling_available_governors | grep -ci -m1 'ondemand') == 1 )) &&
-						(( $HW_MODEL != 10 )); then
-						whiptail_menu_array+=("ondemand" "Scales CPU frequency between $frequency_min_cpu_governor MHz and $frequency_max_cpu_governor MHz.")
-						Description+="\nOndemand     | Dynamic CPU frequency based on usage."
-					fi
+						whiptail --title "Not Available" --msgbox "Your processor, or kernel, does not support this feature.\n\n(Info): scaling_available_governors does not exist." --backtitle "$WHIP_BACKTITLE" 10 65
 
-					if (( $(cat /sys/devices/system/cpu/cpu0/cpufreq/scaling_available_governors | grep -ci -m1 'conservative') == 1 )); then
-						whiptail_menu_array+=("conservative" "Scales CPU frequency between $frequency_min_cpu_governor MHz and $frequency_max_cpu_governor MHz.")
-						Description+="\nConservative | Same as ondemand. Bias towards powersaving, slower scaling. "
-					fi
+					# - Obtain available Govs. Setup their menu and description.
+					else
 
-					if (( $(cat /sys/devices/system/cpu/cpu0/cpufreq/scaling_available_governors | grep -ci -m1 'powersave') == 1 )); then
-						whiptail_menu_array+=("powersave" "Limits CPU frequency to $frequency_min_cpu_governor MHz.")
-						Description+="\nPowersave    | Static. Reduces energy consumption, heat, performance."
-					fi
+						local Description="Change CPU Governor:"
+						local whiptail_menu_array=()
+						if (( $(cat "$FP_CPU_SCALING_GOV" | grep -ci -m1 'interactive') == 1 )); then
+							whiptail_menu_array+=("interactive" "Scales CPU frequency between $frequency_min_cpu_governor MHz and $frequency_max_cpu_governor MHz.")
+							Description+="\nInteractive  | Dynamic CPU frequency based on usage (recommended)"
+						fi
 
-					if (( $(cat /sys/devices/system/cpu/cpu0/cpufreq/scaling_available_governors | grep -ci -m1 'performance') == 1 )); then
-						whiptail_menu_array+=("performance" "Forces CPU frequency to $frequency_max_cpu_governor MHz.")
-						Description+="\nPerformance  | Static. Increases energy consumption, heat, performance."
-					fi
+						# - C1 | disable ondemand: https://github.com/Fourdee/DietPi/issues/248
+						if (( $(cat "$FP_CPU_SCALING_GOV" | grep -ci -m1 'ondemand') == 1 )) &&
+							(( $HW_MODEL != 10 )); then
+							whiptail_menu_array+=("ondemand" "Scales CPU frequency between $frequency_min_cpu_governor MHz and $frequency_max_cpu_governor MHz.")
+							Description+="\nOndemand     | Dynamic CPU frequency based on usage."
+						fi
 
-					OPTION=$(whiptail --title "$WHIP_TITLE" --menu "$Description" --cancel-button "$TEXT_MENU_BACK" --backtitle "$WHIP_BACKTITLE" --default-item "$current_cpu_governor" 18 80 5 "${whiptail_menu_array[@]}" 3>&1 1>&2 2>&3)
-					CHOICE=$?
+						if (( $(cat "$FP_CPU_SCALING_GOV" | grep -ci -m1 'conservative') == 1 )); then
+							whiptail_menu_array+=("conservative" "Scales CPU frequency between $frequency_min_cpu_governor MHz and $frequency_max_cpu_governor MHz.")
+							Description+="\nConservative | Same as ondemand. Bias towards powersaving, slower scaling. "
+						fi
 
-					#delete[] array
-					unset whiptail_menu_array
+						if (( $(cat "$FP_CPU_SCALING_GOV" | grep -ci -m1 'powersave') == 1 )); then
+							whiptail_menu_array+=("powersave" "Limits CPU frequency to $frequency_min_cpu_governor MHz.")
+							Description+="\nPowersave    | Static. Reduces energy consumption, heat, performance."
+						fi
 
-					if (( $CHOICE == 0 )); then
-						sed -i "/cpu_governor=/c\cpu_governor=$OPTION" /DietPi/dietpi.txt
-						/DietPi/dietpi/dietpi-cpu_set
+						if (( $(cat "$FP_CPU_SCALING_GOV" | grep -ci -m1 'performance') == 1 )); then
+							whiptail_menu_array+=("performance" "Forces CPU frequency to $frequency_max_cpu_governor MHz.")
+							Description+="\nPerformance  | Static. Increases energy consumption, heat, performance."
+						fi
+
+						OPTION=$(whiptail --title "$WHIP_TITLE" --menu "$Description" --cancel-button "$TEXT_MENU_BACK" --backtitle "$WHIP_BACKTITLE" --default-item "$current_cpu_governor" 18 80 5 "${whiptail_menu_array[@]}" 3>&1 1>&2 2>&3)
+						CHOICE=$?
+
+						#delete[] array
+						unset whiptail_menu_array
+
+						if (( $CHOICE == 0 )); then
+							sed -i "/cpu_governor=/c\cpu_governor=$OPTION" /DietPi/dietpi.txt
+							/DietPi/dietpi/dietpi-cpu_set
+						fi
+
 					fi
 
 					#Return to This Menu
 					TARGETMENUID=4
+
 				;;
 				"CPU Throttle Up"*)
 					MIN_VALUE=30
