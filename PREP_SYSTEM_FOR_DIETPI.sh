@@ -163,6 +163,7 @@ systemctl disable log2ram.service
 rm /usr/local/sbin/log2ram
 rm /etc/systemd/system/log2ram.service
 systemctl daemon-reload
+rm /etc/cron.hourly/log2ram
 
 rm /etc/init.d/cpu_governor # Meveric
 rm /etc/systemd/system/cpu_governor.service # Meveric
