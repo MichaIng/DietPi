@@ -245,7 +245,7 @@ _EOF_
 	# - Software
 	#NB: All software has a unique index that must not be changed (eg: DESKTOP_LXDE = 23)
 	TOTAL_SOFTWARE_INDEXS=0
-	TOTAL_SOFTWARE_INDEXS_HARDLIMIT=135	#Increase as needed. Must be higher than TOTAL_SOFTWARE_INDEXS once calculated in Software_Arrays_Init
+	TOTAL_SOFTWARE_INDEXS_HARDLIMIT=136	#Increase as needed. Must be higher than TOTAL_SOFTWARE_INDEXS once calculated in Software_Arrays_Init
 
 	INSTALLING_INDEX=0					#Which software index is currently being installed?
 
@@ -803,11 +803,24 @@ _EOF_
 		aSOFTWARE_REQUIRES_WEBSERVER[$index_current]=1
  			aSOFTWARE_REQUIRES_MYSQL[$index_current]=1
 
-		# - Disabled for HW_ARCH
+		# - Disabled for VM
+		aSOFTWARE_AVAIL_HW_ARCH[$index_current,21]=0
+
+		#------------------
+		index_current=135
+
+				 aSOFTWARE_WHIP_NAME[$index_current]='IceCast'
+				 aSOFTWARE_WHIP_DESC[$index_current]='Shoutcast streaming server (+DarkIce)'
+			aSOFTWARE_CATEGORY_INDEX[$index_current]=2
+					  aSOFTWARE_TYPE[$index_current]=0
+			 aSOFTWARE_REQUIRES_ALSA[$index_current]=1
+			 aSOFTWARE_ONLINEDOC_URL[$index_current]='f=8&t=5&p=6526#p6526'
+
+		# - Disabled for VM
 		aSOFTWARE_AVAIL_HW_ARCH[$index_current,21]=0
 
 
-		#BitTorrent
+		 #BitTorrent
 		#--------------------------------------------------------------------------------
 		index_current=44
 
@@ -3972,6 +3985,16 @@ _EOF_
 				Error_NoConnection_NoInstall
 
 			fi
+
+		fi
+
+		#IceCast + DarkIce
+		INSTALLING_INDEX=135
+		if (( ${aSOFTWARE_INSTALL_STATE[$INSTALLING_INDEX]} == 1 )); then
+
+			Banner_Installing
+
+			AGI darkice icecast2
 
 		fi
 
@@ -7144,7 +7167,6 @@ StandardOutput=tty
 [Install]
 WantedBy=multi-user.target
 _EOF_
-			systemctl enable transmission-daemon.service
 
 			cat << _EOF_ > /etc/transmission-daemon/settings.json
 {
@@ -7161,7 +7183,7 @@ _EOF_
     "blocklist-url": "http://www.example.com/blocklist",
     "cache-size-mb": 48,
     "dht-enabled": true,
-    "download-dir": "/mnt/dietpi_userdata/downloads",
+    "download-dir": "$FP_DIETPI_USERDATA_DIRECTORY/downloads",
     "download-limit": 100,
     "download-limit-enabled": false,
     "download-queue-enabled": true,
@@ -7169,7 +7191,7 @@ _EOF_
     "encryption": 2,
     "idle-seeding-limit": 1,
     "idle-seeding-limit-enabled": true,
-    "incomplete-dir": "/mnt/dietpi_userdata/bt-inprogress",
+    "incomplete-dir": "$FP_DIETPI_USERDATA_DIRECTORY/bt-inprogress",
     "incomplete-dir-enabled": false,
     "lpd-enabled": false,
     "max-peers-global": 8,
@@ -7679,7 +7701,7 @@ _EOF_
 
 			#Uae4arm does not support browsing symlinks (https://github.com/Fourdee/DietPi/issues/474#issuecomment-242973839)
 			#	So we need to change config file default paths to actual userdata location:
-			local fp_userdata_actual=$(readlink /mnt/dietpi_userdata) # Only returns a value if symlink exists (eg: off SDcard)
+			local fp_userdata_actual=$(readlink "$FP_DIETPI_USERDATA_DIRECTORY") # Only returns a value if symlink exists (eg: off SDcard)
 			if [ -n "$fp_userdata_actual" ]; then
 
 				sed -i "s:$FP_DIETPI_USERDATA_DIRECTORY:$fp_userdata_actual:g" "$FP_DIETPI_USERDATA_DIRECTORY"/uae4arm-rpi/conf/adfdir.conf
@@ -9694,6 +9716,78 @@ _EOF_
 
 		fi
 
+		#IceCast + DarkIce
+		INSTALLING_INDEX=135
+		if (( ${aSOFTWARE_INSTALL_STATE[$INSTALLING_INDEX]} == 1 )); then
+
+			#icecast set passwords:
+			sed -i '/\<source-password\>/c\\<source-password\>dietpi\<\/source-password\>' /etc/icecast2/icecast.xml
+			sed -i '/\<relay-password\>/c\\<relay-password\>dietpi\<\/relay-password\>' /etc/icecast2/icecast.xml
+
+			#	Create random password
+			local admin_password=$(tr -cd '[:alnum:]' < /dev/urandom | fold -w10 | head -n1)
+			sed -i "/\<admin-password\>/c\\<admin-password\>$admin_password\<\/admin-password\>" /etc/icecast2/icecast.xml
+
+			sed -i '/ENABLE=/c\ENABLE=true' /etc/default/icecast2
+
+			#Configure for ALSA loopback?
+			# echo -e "options snd_aloop pcm_substreams=2 #index=10# breaks module loading..." > /etc/modprobe.d/snd_aloop_index.conf
+			# modprobe snd-aloop
+			# if (( ! $(cat /etc/modules | grep -ci -m1 '^snd-aloop') )); then
+
+				# echo -e "snd-aloop" >> /etc/modules
+
+			# fi
+
+			#Darkice
+			local input_device_index=$(arecord -l | grep -m1 'card' | awk '{print $2}' | sed 's/://')
+
+			cat << _EOF_ > /etc/darkice.cfg
+[general]
+duration      = 0
+bufferSecs    = 5
+reconnect     = yes
+
+[input]
+device        = hw:$input_device_index,0
+sampleRate    = 44100
+bitsPerSample = 16
+channel       = 1
+
+[icecast2-0]
+bitrateMode   = vbr
+format        = vorbis
+quality       = 0.6
+server        = dietpi
+port          = 8000
+password      = dietpi
+mountPoint    = DietPi
+name          = DietPi
+description   = DarkIce on DietPi
+url           = http://localhost
+genre         = none
+public        = no
+localDumpFile = $FP_DIETPI_USERDATA_DIRECTORY/darkice_recording.ogg
+_EOF_
+
+			#SystemD service for Darkice
+			rm /etc/init.d/darkice
+			cat << _EOF_ > /etc/systemd/system/darkice.service
+[Unit]
+Description=DarkIce - DietPi
+After=icecast2.service
+Requires=icecast2.service
+
+[Service]
+Type=simple
+ExecStart=$(which darkice)
+
+[Install]
+WantedBy=multi-user.target
+_EOF_
+
+		fi
+
 		#Blynk
 		INSTALLING_INDEX=131
 		if (( ${aSOFTWARE_INSTALL_STATE[$INSTALLING_INDEX]} == 1 )); then
@@ -10045,6 +10139,12 @@ _EOF_
 			rm "$HOME"/tonido
 			rm "$HOME"/TonidoSync
 			rm "$HOME"/TonidoSyncData
+
+		elif (( $1 == 135 )); then
+
+			AGP darkice icecast2
+			rm /etc/systemd/system/darkice.service
+			systemctl daemon-reload
 
 		elif (( $1 == 119 )); then
 
