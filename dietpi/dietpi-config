@@ -43,6 +43,8 @@
 	HW_CPUID=$(sed -n 9p /DietPi/dietpi/.hw_model)
 	HW_ONBOARD_WIFI=$(sed -n 10p /DietPi/dietpi/.hw_model)
 
+	FP_CPU_SCALING_GOV='/sys/devices/system/cpu/cpu0/cpufreq/scaling_available_governors'
+
 	#/////////////////////////////////////////////////////////////////////////////////////
 	#Obtain Install Stage Index
 	#/////////////////////////////////////////////////////////////////////////////////////
@@ -1122,8 +1124,22 @@
 
 		#All devices
 		local current_cpu_governor=$(cat /DietPi/dietpi.txt | grep -m1 '^cpu_governor=' | sed 's/.*=//')
-		local frequency_min_cpu_governor=$(( $(cat /sys/devices/system/cpu/cpu0/cpufreq/scaling_min_freq) / 1000 ))
-		local frequency_max_cpu_governor=$(( $(cat /sys/devices/system/cpu/cpu0/cpufreq/scaling_max_freq) / 1000 ))
+
+		local frequency_min_cpu_governor=1
+		local fp_frequency_min_cpu_governor='/sys/devices/system/cpu/cpu0/cpufreq/scaling_min_freq'
+		if [ -f "$fp_frequency_min_cpu_governor" ]; then
+
+			frequency_min_cpu_governor=$(( $(cat "$fp_frequency_min_cpu_governor") / 1000 ))
+
+		fi
+
+		local frequency_max_cpu_governor=2
+		local fp_frequency_max_cpu_governor='/sys/devices/system/cpu/cpu0/cpufreq/scaling_max_freq'
+		if [ -f "$fp_frequency_max_cpu_governor" ]; then
+
+			frequency_max_cpu_governor=$(( $(cat "$fp_frequency_max_cpu_governor") / 1000 ))
+
+		fi
 
 		local arm_temp=$(/DietPi/dietpi/dietpi-cpuinfo 1)
 		if [[ $arm_temp =~ ^-?[0-9]+$ ]]; then
@@ -1334,49 +1350,59 @@
 				;;
 				"Change CPU Governor"*)
 
-					#Obtain available Govs. Setup their menu and description.
-					local Description="Change CPU Governor:"
-					local whiptail_menu_array=()
-					if (( $(cat /sys/devices/system/cpu/cpu0/cpufreq/scaling_available_governors | grep -ci -m1 'interactive') == 1 )); then
-						whiptail_menu_array+=("interactive" "Scales CPU frequency between $frequency_min_cpu_governor MHz and $frequency_max_cpu_governor MHz.")
-						Description+="\nInteractive  | Dynamic CPU frequency based on usage (recommended)"
-					fi
+					# - Scaling govs not available
+					if [ ! -f "$FP_CPU_SCALING_GOV" ]; then
 
-					# - C1 | disable ondemand: https://github.com/Fourdee/DietPi/issues/248
-					if (( $(cat /sys/devices/system/cpu/cpu0/cpufreq/scaling_available_governors | grep -ci -m1 'ondemand') == 1 )) &&
-						(( $HW_MODEL != 10 )); then
-						whiptail_menu_array+=("ondemand" "Scales CPU frequency between $frequency_min_cpu_governor MHz and $frequency_max_cpu_governor MHz.")
-						Description+="\nOndemand     | Dynamic CPU frequency based on usage."
-					fi
+						whiptail --title "Not Available" --msgbox "Your processor, or kernel, does not support this feature.\n\n(Info): scaling_available_governors does not exist." --backtitle "$WHIP_BACKTITLE" 10 65
 
-					if (( $(cat /sys/devices/system/cpu/cpu0/cpufreq/scaling_available_governors | grep -ci -m1 'conservative') == 1 )); then
-						whiptail_menu_array+=("conservative" "Scales CPU frequency between $frequency_min_cpu_governor MHz and $frequency_max_cpu_governor MHz.")
-						Description+="\nConservative | Same as ondemand. Bias towards powersaving, slower scaling. "
-					fi
+					# - Obtain available Govs. Setup their menu and description.
+					else
 
-					if (( $(cat /sys/devices/system/cpu/cpu0/cpufreq/scaling_available_governors | grep -ci -m1 'powersave') == 1 )); then
-						whiptail_menu_array+=("powersave" "Limits CPU frequency to $frequency_min_cpu_governor MHz.")
-						Description+="\nPowersave    | Static. Reduces energy consumption, heat, performance."
-					fi
+						local Description="Change CPU Governor:"
+						local whiptail_menu_array=()
+						if (( $(cat "$FP_CPU_SCALING_GOV" | grep -ci -m1 'interactive') == 1 )); then
+							whiptail_menu_array+=("interactive" "Scales CPU frequency between $frequency_min_cpu_governor MHz and $frequency_max_cpu_governor MHz.")
+							Description+="\nInteractive  | Dynamic CPU frequency based on usage (recommended)"
+						fi
 
-					if (( $(cat /sys/devices/system/cpu/cpu0/cpufreq/scaling_available_governors | grep -ci -m1 'performance') == 1 )); then
-						whiptail_menu_array+=("performance" "Forces CPU frequency to $frequency_max_cpu_governor MHz.")
-						Description+="\nPerformance  | Static. Increases energy consumption, heat, performance."
-					fi
+						# - C1 | disable ondemand: https://github.com/Fourdee/DietPi/issues/248
+						if (( $(cat "$FP_CPU_SCALING_GOV" | grep -ci -m1 'ondemand') == 1 )) &&
+							(( $HW_MODEL != 10 )); then
+							whiptail_menu_array+=("ondemand" "Scales CPU frequency between $frequency_min_cpu_governor MHz and $frequency_max_cpu_governor MHz.")
+							Description+="\nOndemand     | Dynamic CPU frequency based on usage."
+						fi
 
-					OPTION=$(whiptail --title "$WHIP_TITLE" --menu "$Description" --cancel-button "$TEXT_MENU_BACK" --backtitle "$WHIP_BACKTITLE" --default-item "$current_cpu_governor" 18 80 5 "${whiptail_menu_array[@]}" 3>&1 1>&2 2>&3)
-					CHOICE=$?
+						if (( $(cat "$FP_CPU_SCALING_GOV" | grep -ci -m1 'conservative') == 1 )); then
+							whiptail_menu_array+=("conservative" "Scales CPU frequency between $frequency_min_cpu_governor MHz and $frequency_max_cpu_governor MHz.")
+							Description+="\nConservative | Same as ondemand. Bias towards powersaving, slower scaling. "
+						fi
 
-					#delete[] array
-					unset whiptail_menu_array
+						if (( $(cat "$FP_CPU_SCALING_GOV" | grep -ci -m1 'powersave') == 1 )); then
+							whiptail_menu_array+=("powersave" "Limits CPU frequency to $frequency_min_cpu_governor MHz.")
+							Description+="\nPowersave    | Static. Reduces energy consumption, heat, performance."
+						fi
 
-					if (( $CHOICE == 0 )); then
-						sed -i "/cpu_governor=/c\cpu_governor=$OPTION" /DietPi/dietpi.txt
-						/DietPi/dietpi/dietpi-cpu_set
+						if (( $(cat "$FP_CPU_SCALING_GOV" | grep -ci -m1 'performance') == 1 )); then
+							whiptail_menu_array+=("performance" "Forces CPU frequency to $frequency_max_cpu_governor MHz.")
+							Description+="\nPerformance  | Static. Increases energy consumption, heat, performance."
+						fi
+
+						OPTION=$(whiptail --title "$WHIP_TITLE" --menu "$Description" --cancel-button "$TEXT_MENU_BACK" --backtitle "$WHIP_BACKTITLE" --default-item "$current_cpu_governor" 18 80 5 "${whiptail_menu_array[@]}" 3>&1 1>&2 2>&3)
+						CHOICE=$?
+
+						#delete[] array
+						unset whiptail_menu_array
+
+						if (( $CHOICE == 0 )); then
+							sed -i "/cpu_governor=/c\cpu_governor=$OPTION" /DietPi/dietpi.txt
+							/DietPi/dietpi/dietpi-cpu_set
+						fi
+
 					fi
 
 					#Return to This Menu
 					TARGETMENUID=4
+
 				;;
 				"CPU Throttle Up"*)
 					MIN_VALUE=30
@@ -3610,8 +3636,6 @@ _EOF_
 					whiptail_menu_array+=("rpi-bcm2835-3.5mm" "Onboard: 3.5mm forced output")
 					whiptail_menu_array+=("rpi-bcm2835-ultrahq" "Onboard HQ: HDMI (if plugged in, else 3.5mm)")
 					whiptail_menu_array+=("rpi-bcm2835-ultrahq-3.5mm" "Onboard HQ: 3.5mm forced output")
-					whiptail_menu_array+=("justboom-dac" "JustBoom: DAC HAT, Amp HAT, DAC Zero and Amp Zero")
-					whiptail_menu_array+=("justboom-digi" "JustBoom: Digi HAT and Digi Zero")
 					whiptail_menu_array+=("allo-boss-dac-pcm512x-audio" "Allo Boss DAC")
 					whiptail_menu_array+=("allo-piano-dac-pcm512x-audio" "Allo Piano DAC")
 					whiptail_menu_array+=("allo-piano-dac-plus-pcm512x-audio" "Allo Piano DAC 2.1")
@@ -3620,12 +3644,14 @@ _EOF_
 					whiptail_menu_array+=("hifiberry-dacplus" "HifiBerry DAC+")
 					whiptail_menu_array+=("hifiberry-digi" "HifiBerry DIGI / DIGI+")
 					whiptail_menu_array+=("hifiberry-digi-pro" "HifiBerry DIGI Pro")
+					whiptail_menu_array+=("i-sabre-k2m" "AudioPhonics I-Sabre-K2M (9018K2M)")
 					whiptail_menu_array+=("iqaudio-dacplus" "Pi-DAC+, Pi-DACZero, Pi-DAC Pro, Pi-DigiAMP+")
 					whiptail_menu_array+=("iqaudio-digi-wm8804-audio" "Pi-DIGI+")
 					whiptail_menu_array+=("iqaudio-dacplus,auto_mute_amp" "Pi-DigiAMP+")
 					whiptail_menu_array+=("iqaudio-dacplus,unmute_amp" "Pi-DigiAMP+")
+					whiptail_menu_array+=("justboom-dac" "JustBoom: DAC HAT, Amp HAT, DAC Zero and Amp Zero")
+					whiptail_menu_array+=("justboom-digi" "JustBoom: Digi HAT and Digi Zero")
 					whiptail_menu_array+=("rpi-dac" "Soekris DAM1021 (pcm1794a)")
-
 
 				# - C1/C2
 				elif (( $HW_MODEL == 10 || $HW_MODEL == 12 )); then
@@ -3979,17 +4005,59 @@ _EOF_
 
 		fi
 
+		#Network boot wait
+		local boot_wait_for_network=$(cat /DietPi/dietpi.txt | grep -m1 '^boot_wait_for_network=' | sed 's/.*=//')
+		local boot_wait_for_network_text=': '
+		if (( $boot_wait_for_network == 0 )); then
+
+			boot_wait_for_network_text+='Disabled'
+
+		elif (( $boot_wait_for_network == 1 )); then
+
+			boot_wait_for_network_text+='10 Seconds MAX (default)'
+
+		elif (( $boot_wait_for_network == 2 )); then
+
+			boot_wait_for_network_text+='Infinite wait'
+		fi
+
 		WHIP_TITLE='DietPi - Network Options: NAS/Misc'
-		OPTION=$(whiptail --title "$WHIP_TITLE" --menu "\n Apt mirror   : $apt_mirror_current\n Samba client : $sambaclient_status\n FTP client   : $curlftpfs_status\n NFS client   : $nfsclient_status\n NoIp status  : $noip_status" --cancel-button "$TEXT_MENU_BACK" --backtitle "$WHIP_BACKTITLE" 18 100 5 \
+		OPTION=$(whiptail --title "$WHIP_TITLE" --menu "\n Apt mirror   : $apt_mirror_current\n Samba client : $sambaclient_status\n FTP client   : $curlftpfs_status\n NFS client   : $nfsclient_status\n NoIp status  : $noip_status" --cancel-button "$TEXT_MENU_BACK" --backtitle "$WHIP_BACKTITLE" 19 100 6 \
 		"Apt Mirror" "Select a different Apt mirror for sources.list" \
 		"Samba Client" "$sambaclient_menutext" \
 		"FTP Client" "$curlftpfs_menutext" \
 		"NFS Client" "$nfsclient_menutext" \
-		"NoIp" "$noip_menutext" 3>&1 1>&2 2>&3)
+		"NoIp" "$noip_menutext" \
+		"Boot Net Wait" "$boot_wait_for_network_text" 3>&1 1>&2 2>&3)
 
 		CHOICE=$?
 		if (( $CHOICE == 0 )); then
 			case "$OPTION" in
+
+				"Boot Net Wait")
+
+					#Create Menu List for Whiptail
+					local whiptail_menu_array=()
+
+					whiptail_menu_array+=('0' ': Disabled')
+					whiptail_menu_array+=('1' ': Wait 10 Seconds MAX for network, before continuing boot (default)')
+					whiptail_menu_array+=('2' ': Infinite wait for network, before continuing boot')
+
+					OPTION=$(whiptail --title "Wait for network during boot" --menu "The following options will allow you to delay boot, until a valid network connection is available:" --default-item "$boot_wait_for_network" --cancel-button "$TEXT_MENU_BACK" --backtitle "$WHIP_BACKTITLE" 12 80 3 "${whiptail_menu_array[@]}" 3>&1 1>&2 2>&3)
+					CHOICE=$?
+					if (( $CHOICE == 0 )); then
+
+						sed -i "/^boot_wait_for_network=/c boot_wait_for_network=$OPTION" /DietPi/dietpi.txt
+
+						#Return to this Menu
+						TARGETMENUID=16
+
+					fi
+
+					#delete []
+					unset whiptail_menu_array
+
+				;;
 
 				"Apt Mirror")
 
