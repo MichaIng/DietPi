@@ -124,8 +124,8 @@ Kodi / Xbmc
 Transmission
 - http://www.transmissionbt.com/download/
 
-OwnCloud
-- https://github.com/owncloud
+Nextcloud
+- https://github.com/nextcloud/server
 
 MiniDLNA
 - http://sourceforge.net/p/minidlna/git/ci/master/tree/
