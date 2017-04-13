@@ -124,6 +124,9 @@ Kodi / Xbmc
 Transmission
 - http://www.transmissionbt.com/download/
 
+Nextcloud
+- https://github.com/nextcloud/server
+ 
 OwnCloud
 - https://github.com/owncloud
 
