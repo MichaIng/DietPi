@@ -485,6 +485,9 @@ systemctl disable getty@tty[2-6].service
 #NTPd - remove systemd's version
 systemctl disable systemd-timesyncd
 
+#+ARMbian increase console verbose
+sed -i '/verbosity=/c\verbosity=7' /boot/armbianEnv.txt
+
 
 
 dpkg-reconfigure tzdata #Europe > London
