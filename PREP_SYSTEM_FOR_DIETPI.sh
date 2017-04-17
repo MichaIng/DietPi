@@ -500,6 +500,9 @@ LC_ALL=en_GB.UTF-8
 LANG=en_GB.UTF-8
 _EOF_
 
+#??? ARMbian OPi Zero 2: https://github.com/Fourdee/DietPi/issues/876#issuecomment-294350580
+echo -e "blacklist bmp085" > /etc/modprobe.d/bmp085.conf
+
 #??? Sparky SBC ONLY: Blacklist GPU and touch screen modules: https://github.com/Fourdee/DietPi/issues/699#issuecomment-271362441
 cat << _EOF_ > /etc/modprobe.d/disable_sparkysbc_touchscreen.conf
 blacklist ctp_gsl3680
