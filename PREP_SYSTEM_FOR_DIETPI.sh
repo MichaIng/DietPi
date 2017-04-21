@@ -102,7 +102,6 @@ apt-get purge -y libpod-* libpeas-* isc-dhcp-server gnome-* fonts-dejavu* eject 
 rm -R /usr/share/fonts/*
 rm -R /usr/share/icons/*
 
-
 #+armbian
 apt-get purge -y expect tcl-expect toilet toilet-fonts w-scan vlan weather-util* sysbench stress cmake cmake-data device-tree-co* fping hddtemp haveged hostapd i2c-tools iperf ir-keytable libasound2* libmtp* libusb-dev lirc lsof ncurses-term pkg-config unicode-data rfkill pv mtp-tools m4 screen alsa-utils autotools-dev bind9-host btrfs-tools bridge-utils cpufrequtils dvb-apps dtv-scan-table* evtest f3 figlet gcc gcc-4.8-* git git-man iozone3 ifenslave
 #apt-get purge -y linux-jessie-root-*
