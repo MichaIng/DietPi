@@ -159,6 +159,7 @@ rm /etc/init.d/firstrun # ARMbian
 
 #	Disable ARMbian's log2ram: https://github.com/Fourdee/DietPi/issues/781
 systemctl disable log2ram.service
+systemctl stop log2ram.service
 rm /usr/local/sbin/log2ram
 rm /etc/systemd/system/log2ram.service
 systemctl daemon-reload
