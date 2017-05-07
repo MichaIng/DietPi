@@ -205,8 +205,8 @@ After=local-fs.target
 Type=forking
 RemainAfterExit=yes
 ExecStartPre=/bin/mkdir -p /etc/dietpi/logs
-ExecStart=/bin/bash -c '/boot/dietpi/dietpi-ramdisk 0 &>> /etc/dietpi/logs/dietpi-ramdisk.log'
-ExecStop=/bin/bash -c '/DietPi/dietpi/dietpi-ramdisk 1 &>> /etc/dietpi/logs/dietpi-ramdisk.log'
+ExecStart=/bin/bash -c '/boot/dietpi/dietpi-ramdisk 0'
+ExecStop=/bin/bash -c '/DietPi/dietpi/dietpi-ramdisk 1'
 
 [Install]
 WantedBy=local-fs.target
