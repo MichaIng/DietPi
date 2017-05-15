@@ -15,10 +15,15 @@
 	# Usage:
 	# 	  = Drive Manager
 	#	1 = Selectadrive! Provides a list of available drive mount locations, with value on selection saved to: /tmp/dietpi-drive_manager_selmnt
+	#	2 = Returns exit 1 if low on freespace
+	#	3 = Returns exit 1 if rootfs is currently RO (NB: simple check via mount cmd, does not init full drive manager vars, for quicker loading/processing)
 	#////////////////////////////////////
 
 	#Force en_GB Locale for whole script. Prevents incorrect parsing with non-english locales.
 	LANG=en_GB.UTF-8
+
+	#Ensure we are in users home dir: https://github.com/Fourdee/DietPi/issues/905#issuecomment-298223705
+	cd "$HOME"
 
 	#Exit path for non-root logins.
 	if (( $UID != 0 )); then
@@ -33,6 +38,7 @@
 	HW_NAME=$(sed -n 2p /DietPi/dietpi/.hw_model)
 	if (( $HW_MODEL == 20 )); then
 		echo -e "\nThis script does not support the Virtual Machine image.\n"
+		Destroy
 		exit
 	fi
 
@@ -41,6 +47,8 @@
 	if [[ $1 =~ ^-?[0-9]+$ ]]; then
 		INPUT=$1
 	fi
+
+	EXIT_CODE=0
 
 	PROGRAM_NAME='DietPi-Drive Manager'
 
@@ -55,8 +63,8 @@
 
 	FP_ROOTFS_SOURCE=0
 
-	#EXTERNAL
-	MAX_DRIVES=5
+	#Drives
+	MAX_DRIVES=0
 	FORMAT_GPT=1 # default GPT: https://github.com/Fourdee/DietPi/issues/531. 0=MBR
 	FORMAT_FILESYSTEM_TYPE=0 #0=ext4 1=ntfs 2=fat32 3=hfs+ 4=btrfs 5=f2fs
 	FORMAT_RECREATE_PARTITION_TABLE=1 #0=for rootfs transfer
@@ -64,6 +72,8 @@
 	FORMAT_PREVIOUS_MOUNT_SOURCE=0 #Used to obtain previous mount source fp, before a format, for rootfs transfer
 
 	INDEX_DRIVE_BEING_EDITED=0
+
+	ROOTFS_RW_CHECKED=0
 
 	aDRIVE_UUID=()
 	aDRIVE_PART_UUID=()
@@ -79,6 +89,8 @@
 	aDRIVE_ISFILESYSTEM=()
 	aDRIVE_ISMOUNTED=()
 	aDRIVE_ISUUIDMOUNT=()
+	aDRIVE_ISREADONLY_FSTAB=()
+	aDRIVE_ISREADONLY_CURRENTLY=()
 
 	INIT_FSTAB_SLOTS_ENABLED=0
 
@@ -87,169 +99,258 @@
 	Init_Drives_and_Refresh(){
 
 		#---------------------------------------------------------------
-		/DietPi/dietpi/func/dietpi-notify 2 "Detecting drives, please wait..."
+		local init=1
 
-		#Copy FSTAB to ram, faster exe
-		cp /etc/fstab "$FP_TEMP_FSTAB"
-
-		#Get list of all attached drives:
-		MAX_DRIVES=$(blkid -o device | wc -l)
-		local fp_temp='/tmp/.dietpi-drive_manager_devlist'
-		blkid -o device > $fp_temp
-		readarray -t aDRIVE_MOUNT_SOURCE < $fp_temp
-
-		#	UUID
-		blkid -s UUID -o value > $fp_temp
-		readarray -t aDRIVE_UUID < $fp_temp
-
-		#	PARTUUID
-		blkid -s PARTUUID -o value > $fp_temp
-		readarray -t aDRIVE_PART_UUID < $fp_temp
-
-		#	TYPE
-		blkid -s TYPE -o value > $fp_temp
-		readarray -t aDRIVE_FSTYPE < $fp_temp
-
-		# - Check fstab for existing entries and mount locations
-		local mount_index=1
-		for ((i=0; i<$MAX_DRIVES; i++))
+		while (( $init ))
 		do
 
-			aDRIVE_ISAVAILABLE[$i]=0
-			aDRIVE_ISUUIDMOUNT[$i]=0
-			aDRIVE_MOUNT_TARGET[$i]='NULL'
+			init=0
 
-			# - check /dev/sdX
-			aDRIVE_MOUNT_TARGET[$i]=$(cat "$FP_TEMP_FSTAB" | grep -m1 "${aDRIVE_MOUNT_SOURCE[$i]}[[:space:]]" | awk '{print $2}')
-			if [ -n "${aDRIVE_MOUNT_TARGET[$i]}" ]; then
+			/DietPi/dietpi/func/dietpi-notify 2 "Detecting drives, please wait..."
 
-				aDRIVE_ISAVAILABLE[$i]=1
+			#Copy FSTAB to ram, faster exe
+			cp /etc/fstab "$FP_TEMP_FSTAB"
 
-				#DEBUG
-				/DietPi/dietpi/func/dietpi-notify 2 "Detected non-UUID mount: ${aDRIVE_MOUNT_SOURCE[$i]}"
+			#Get list of all attached drives:
+			MAX_DRIVES=$(blkid -o device | wc -l)
+			local fp_temp='/tmp/.dietpi-drive_manager_devlist'
+			blkid -o device > $fp_temp
+			readarray -t aDRIVE_MOUNT_SOURCE < $fp_temp
 
-			# - check UUID
-			else
+			#	UUID
+			blkid -s UUID -o value > $fp_temp
+			readarray -t aDRIVE_UUID < $fp_temp
 
-				aDRIVE_MOUNT_TARGET[$i]=$(cat "$FP_TEMP_FSTAB" | grep -m1 "UUID=${aDRIVE_UUID[$i]}[[:space:]]" | awk '{print $2}')
+			#	PARTUUID
+			blkid -s PARTUUID -o value > $fp_temp
+			readarray -t aDRIVE_PART_UUID < $fp_temp
+
+			#	TYPE
+			blkid -s TYPE -o value > $fp_temp
+			readarray -t aDRIVE_FSTYPE < $fp_temp
+
+			# - Check fstab for existing entries and mount locations
+			local mount_index=1
+			for ((i=0; i<$MAX_DRIVES; i++))
+			do
+
+				aDRIVE_ISAVAILABLE[$i]=0
+				aDRIVE_ISUUIDMOUNT[$i]=0
+				aDRIVE_MOUNT_TARGET[$i]='NULL'
+
+				# - check /dev/sdX
+				aDRIVE_MOUNT_TARGET[$i]=$(grep -m1 "${aDRIVE_MOUNT_SOURCE[$i]}[[:space:]]" "$FP_TEMP_FSTAB" | awk '{print $2}')
 				if [ -n "${aDRIVE_MOUNT_TARGET[$i]}" ]; then
+
+					aDRIVE_ISAVAILABLE[$i]=1
+
+					#DEBUG
+					/DietPi/dietpi/func/dietpi-notify 2 "Detected non-UUID mount: ${aDRIVE_MOUNT_SOURCE[$i]}"
+
+				# - check UUID
+				else
+
+					aDRIVE_MOUNT_TARGET[$i]=$(grep -m1 "UUID=${aDRIVE_UUID[$i]}[[:space:]]" "$FP_TEMP_FSTAB" | awk '{print $2}')
+					if [ -n "${aDRIVE_MOUNT_TARGET[$i]}" ]; then
+
+						aDRIVE_ISAVAILABLE[$i]=1
+						aDRIVE_ISUUIDMOUNT[$i]=1
+
+						#DEBUG
+						/DietPi/dietpi/func/dietpi-notify 2 "Detected UUID mount: ${aDRIVE_MOUNT_SOURCE[$i]}"
+
+					fi
+
+				fi
+
+				#	Drive mount does not exist
+				if (( ! ${aDRIVE_ISAVAILABLE[$i]} )) &&
+					[ -n "${aDRIVE_UUID[$i]}" ]; then #Ignore master partition tables / drives with no UUID
+
+					#	create one
+					local fp_target="/mnt/${aDRIVE_UUID[$i]}"
+
+					#DEBUG
+					/DietPi/dietpi/func/dietpi-notify 2 "Creating UUID fstab entry: ${aDRIVE_MOUNT_SOURCE[$i]}"
+
+					#	remove any previous/disabled entries for drive
+					sed -i "\@^${aDRIVE_MOUNT_SOURCE[$i]}[[:space:]]@d" "$FP_TEMP_FSTAB"
+					sed -i "\@^UUID=${aDRIVE_UUID[$i]}[[:space:]]@d" "$FP_TEMP_FSTAB"
+
+					echo -e "UUID=${aDRIVE_UUID[$i]}       $fp_target      auto     defaults,noatime,nofail,x-systemd.automount  0 0" >> "$FP_TEMP_FSTAB"
+
+					aDRIVE_MOUNT_TARGET[$i]="$fp_target"
 
 					aDRIVE_ISAVAILABLE[$i]=1
 					aDRIVE_ISUUIDMOUNT[$i]=1
 
-					#DEBUG
-					/DietPi/dietpi/func/dietpi-notify 2 "Detected UUID mount: ${aDRIVE_MOUNT_SOURCE[$i]}"
+				fi
+
+				#create mount folders
+				if (( ${aDRIVE_ISAVAILABLE[$i]} )) &&
+					[ ! -d "${aDRIVE_MOUNT_TARGET[$i]}" ]; then
+
+					/DietPi/dietpi/func/dietpi-notify 2 "Creating mount folder for ${aDRIVE_MOUNT_TARGET[$i]}"
+					mkdir -p "${aDRIVE_MOUNT_TARGET[$i]}"
 
 				fi
 
+				#debug
+				#echo -e "${aDRIVE_MOUNT_SOURCE[$i]} | ${aDRIVE_UUID[$i]} | ${aDRIVE_MOUNT_TARGET[$i]}"
+
+			done
+
+			cp "$FP_TEMP_FSTAB" /etc/fstab
+			systemctl daemon-reload
+
+			rm "$FP_TEMP_FSTAB"
+
+			mount -a
+
+			#---------------------------------------------------------------
+
+			/DietPi/dietpi/func/dietpi-notify 2 "Processing drive information, please wait..."
+
+			#ROOTFS location
+			FP_ROOTFS_SOURCE=$(df -P | grep -m1 '[[:space:]]/$' | awk '{print $1}')
+
+			#Get data on mounted drives
+			for ((i=0; i<$MAX_DRIVES; i++))
+			do
+				# - init
+				aDRIVE_FSTYPE[$i]='No filesystem'
+				aDRIVE_SIZE_TOTAL[$i]='NULL'
+				aDRIVE_SIZE_USED[$i]='NULL'
+				aDRIVE_SIZE_FREE[$i]='NULL'
+				aDRIVE_SIZE_PERCENTUSED[$i]='NULL'
+
+				aDRIVE_ISMOUNTED[$i]=0
+				aDRIVE_ISFILESYSTEM[$i]=0
+				aDRIVE_ISREADONLY_FSTAB[$i]=0
+				aDRIVE_ISREADONLY_CURRENTLY[$i]=0
+
+				cmd_scrape_string=$(blkid "${aDRIVE_MOUNT_SOURCE[$i]}" -s TYPE -o value)
+				if [ -n "$cmd_scrape_string" ]; then
+
+					aDRIVE_ISFILESYSTEM[$i]=1
+					aDRIVE_FSTYPE[$i]="$cmd_scrape_string"
+
+				fi
+
+				#mounted drive, pull size data
+				cmd_scrape_string=$(df -Ph | grep -m1 "${aDRIVE_MOUNT_TARGET[$i]}$" | awk '{print $2}')
+				if [ -n "$cmd_scrape_string" ]; then
+
+					aDRIVE_SIZE_TOTAL[$i]="$cmd_scrape_string"
+					aDRIVE_ISMOUNTED[$i]=1
+
+				fi
+
+				cmd_scrape_string=$(df -Ph | grep -m1 "${aDRIVE_MOUNT_TARGET[$i]}$" | awk '{print $3}')
+				if [ -n "$cmd_scrape_string" ]; then
+
+					aDRIVE_SIZE_USED[$i]="$cmd_scrape_string"
+
+				fi
+
+				cmd_scrape_string=$(df -Ph | grep -m1 "${aDRIVE_MOUNT_TARGET[$i]}$" | awk '{print $4}')
+				if [ -n "$cmd_scrape_string" ]; then
+
+					aDRIVE_SIZE_FREE[$i]="$cmd_scrape_string"
+
+				fi
+
+				cmd_scrape_string=$(df -Ph | grep -m1 "${aDRIVE_MOUNT_TARGET[$i]}$" | awk '{print $5}')
+				if [ -n "$cmd_scrape_string" ]; then
+
+					aDRIVE_SIZE_PERCENTUSED[$i]="$cmd_scrape_string"
+
+				fi
+
+				cmd_scrape_string=$(grep -m1 "[[:space:]]${aDRIVE_MOUNT_TARGET[$i]}[[:space:]]" /etc/fstab | grep -m1 ',ro,')
+				if [ -n "$cmd_scrape_string" ]; then
+
+					aDRIVE_ISREADONLY_FSTAB[$i]=1
+
+				fi
+
+				cmd_scrape_string=$(grep -m1 "^${aDRIVE_MOUNT_SOURCE[$i]}" /proc/mounts | grep '[[:space:]]ro,')
+				if [ -n "$cmd_scrape_string" ]; then
+
+					aDRIVE_ISREADONLY_CURRENTLY[$i]=1
+
+				fi
+
+			done
+
+			#Check for RO on rootfs and enable RW before this script can run
+			if (( ! $ROOTFS_RW_CHECKED )); then
+
+				ROOTFS_RW_CHECKED=1
+
+				for ((i=0; i<$MAX_DRIVES; i++))
+				do
+
+					if [ "${aDRIVE_MOUNT_TARGET[$i]}" = "/" ] &&
+						(( ${aDRIVE_ISREADONLY_CURRENTLY[$i]} )); then
+
+						INDEX_DRIVE_BEING_EDITED=$i
+
+						/DietPi/dietpi/func/dietpi-notify 2 "RootFS is currently set to R/O. $PROGRAM_NAME requires R/W access."
+
+						whiptail --title "RootFS is R/O" --yesno "RootFS is currently set to 'Read Only'. DietPi-Drive_Manager requires 'Read Write' access to function.\n\nWould you like to renable 'Read Write' access on RootFS?" --backtitle "$PROGRAM_NAME" --defaultno 14 75
+						if (( $? == 0 )); then
+
+							Toggle_WriteMode
+							/DietPi/dietpi/func/dietpi-notify 0 "RootFS R/W now enabled."
+
+							#	reinit
+							init=1
+
+						else
+
+							/DietPi/dietpi/dietpi-services start
+
+							/DietPi/dietpi/func/dietpi-notify 0 "RootFS currently set to R/O."
+							/DietPi/dietpi/func/dietpi-notify 2 "Please run 'dietpi-drive_manager' again, if you want to re-enable RootFS R/W."
+
+							Destroy
+							exit
+
+						fi
+
+					fi
+
+				done
+
 			fi
 
-			#	Drive mount does not exist
-			if (( ! ${aDRIVE_ISAVAILABLE[$i]} )) &&
-				[ -n "${aDRIVE_UUID[$i]}" ]; then #Ignore master partition tables / drives with no UUID
-
-				#	create one
-				local fp_target="/mnt/${aDRIVE_UUID[$i]}"
-
-				#DEBUG
-				/DietPi/dietpi/func/dietpi-notify 2 "Creating UUID fstab entry: ${aDRIVE_MOUNT_SOURCE[$i]}"
-
-				#	remove any previous/disabled entries for drive
-				sed -i "\@^${aDRIVE_MOUNT_SOURCE[$i]}[[:space:]]@d" "$FP_TEMP_FSTAB"
-				sed -i "\@^UUID=${aDRIVE_UUID[$i]}[[:space:]]@d" "$FP_TEMP_FSTAB"
-
-				echo -e "UUID=${aDRIVE_UUID[$i]}       $fp_target      auto     defaults,noatime,nofail,x-systemd.automount  0 0" >> "$FP_TEMP_FSTAB"
-
-				aDRIVE_MOUNT_TARGET[$i]="$fp_target"
-
-				aDRIVE_ISAVAILABLE[$i]=1
-				aDRIVE_ISUUIDMOUNT[$i]=1
-
-			fi
-
-			#create mount folders
-			if (( ${aDRIVE_ISAVAILABLE[$i]} )) &&
-				[ ! -d "${aDRIVE_MOUNT_TARGET[$i]}" ]; then
-
-				/DietPi/dietpi/func/dietpi-notify 2 "Creating mount folder for ${aDRIVE_MOUNT_TARGET[$i]}"
-				mkdir -p "${aDRIVE_MOUNT_TARGET[$i]}"
-
-			fi
-
-			#debug
-			#echo -e "${aDRIVE_MOUNT_SOURCE[$i]} | ${aDRIVE_UUID[$i]} | ${aDRIVE_MOUNT_TARGET[$i]}"
+			#User data location
+			FP_USERDATA_CURRENT=$(/DietPi/dietpi/func/dietpi-set_userdata return_source)
 
 		done
 
-		cp "$FP_TEMP_FSTAB" /etc/fstab
-		systemctl daemon-reload
+	}
 
-		rm "$FP_TEMP_FSTAB"
+	Destroy(){
 
-		mount -a
+		#Delete []
+		unset aDRIVE_MOUNT_SOURCE
+		unset aDRIVE_MOUNT_TARGET
+		unset aDRIVE_FSTYPE
+		unset aDRIVE_SIZE_TOTAL
+		unset aDRIVE_SIZE_USED
+		unset aDRIVE_SIZE_PERCENTUSED
+		unset aDRIVE_SIZE_FREE
+		unset aDRIVE_PART_UUID
+		unset aDRIVE_UUID
 
-		#---------------------------------------------------------------
-
-		/DietPi/dietpi/func/dietpi-notify 2 "Processing drive information, please wait..."
-
-		#ROOTFS location
-		FP_ROOTFS_SOURCE=$(df -P | grep -m1 '[[:space:]]/$' | awk '{print $1}')
-
-		#Get data on mounted drives
-		for ((i=0; i<$MAX_DRIVES; i++))
-		do
-			# - init
-			aDRIVE_FSTYPE[$i]='No filesystem'
-			aDRIVE_SIZE_TOTAL[$i]='NULL'
-			aDRIVE_SIZE_USED[$i]='NULL'
-			aDRIVE_SIZE_FREE[$i]='NULL'
-			aDRIVE_SIZE_PERCENTUSED[$i]='NULL'
-
-			aDRIVE_ISMOUNTED[$i]=0
-			aDRIVE_ISFILESYSTEM[$i]=0
-
-			cmd_scrape_string=$(blkid "${aDRIVE_MOUNT_SOURCE[$i]}" -s TYPE -o value)
-			if [ -n "$cmd_scrape_string" ]; then
-
-				aDRIVE_ISFILESYSTEM[$i]=1
-				aDRIVE_FSTYPE[$i]="$cmd_scrape_string"
-
-			fi
-
-			#mounted drive, pull size data
-			cmd_scrape_string=$(df -Ph | grep -m1 "${aDRIVE_MOUNT_TARGET[$i]}$" | awk '{print $2}')
-			if [ -n "$cmd_scrape_string" ]; then
-
-				aDRIVE_SIZE_TOTAL[$i]="$cmd_scrape_string"
-				aDRIVE_ISMOUNTED[$i]=1
-
-			fi
-
-			cmd_scrape_string=$(df -Ph | grep -m1 "${aDRIVE_MOUNT_TARGET[$i]}$" | awk '{print $3}')
-			if [ -n "$cmd_scrape_string" ]; then
-
-				aDRIVE_SIZE_USED[$i]="$cmd_scrape_string"
-
-			fi
-
-			cmd_scrape_string=$(df -Ph | grep -m1 "${aDRIVE_MOUNT_TARGET[$i]}$" | awk '{print $4}')
-			if [ -n "$cmd_scrape_string" ]; then
-
-				aDRIVE_SIZE_FREE[$i]="$cmd_scrape_string"
-
-			fi
-
-			cmd_scrape_string=$(df -Ph | grep -m1 "${aDRIVE_MOUNT_TARGET[$i]}$" | awk '{print $5}')
-			if [ -n "$cmd_scrape_string" ]; then
-
-				aDRIVE_SIZE_PERCENTUSED[$i]="$cmd_scrape_string"
-
-			fi
-
-		done
-
-		#User data location
-		FP_USERDATA_CURRENT=$(/DietPi/dietpi/func/dietpi-set_userdata return_source)
+		unset aDRIVE_ISMOUNTED
+		unset aDRIVE_ISFILESYSTEM
+		unset aDRIVE_ISAVAILABLE
+		unset aDRIVE_ISUUIDMOUNT
+		unset aDRIVE_ISREADONLY_FSTAB
+		unset aDRIVE_ISREADONLY_CURRENTLY
 
 	}
 
@@ -397,6 +498,8 @@
 			/DietPi/dietpi/func/dietpi-notify 1 'Rsync has failed, RootFS transfer has been aborted.'
 			#	revert FSTAB changes
 			cp /etc/fstab.bak /etc/fstab
+
+			Destroy
 			exit
 
 		fi
@@ -409,7 +512,7 @@
 			sed -i "s#$rootfs_current#root=PARTUUID=${aDRIVE_PART_UUID[$INDEX_DRIVE_BEING_EDITED]}#g" /boot/cmdline.txt
 
 			#	Add root delay
-			if (( ! $(cat /boot/cmdline.txt | grep -ci -m1 '[[:space:]]rootdelay=') )); then
+			if (( ! $(grep -ci -m1 '[[:space:]]rootdelay=' /boot/cmdline.txt) )); then
 
 				sed -i "s#console=tty1#console=tty1 rootdelay=10#g" /boot/cmdline.txt
 
@@ -435,6 +538,114 @@
 		reboot
 
 	}
+
+	RootFS_Low_Free_Space_Check(){
+
+		#	global min limit (MB)
+		local free_space_limit=500
+
+		/DietPi/dietpi/func/dietpi-notify 2 'Checking available free space on RootFS, please wait...'
+
+		#Find rootfs
+		for ((i=0; i<$MAX_DRIVES; i++))
+		do
+
+			if [ "/" = "${aDRIVE_MOUNT_TARGET[$i]}" ]; then
+
+				INDEX_DRIVE_BEING_EDITED=$i
+
+				#	Obtain free space (MB)
+				local free_space_current=$(df -B M | grep -m1 "${aDRIVE_MOUNT_TARGET[$i]}$" | awk '{print $4}' | sed 's/[^0-9]//g')
+
+				if (( $free_space_current < $free_space_limit )); then
+
+					local message="Error:\n\nAvailable free space on RootFS is low ($free_space_current MB). To prevent potential issues due to running out of free space, this script will now be terminated.\n\nPlease free up at least $free_space_limit MB of free space, then try again."
+
+					whiptail --title "Insufficient free space" --msgbox "$message" --backtitle "$PROGRAM_NAME" 14 70
+
+					/DietPi/dietpi/func/dietpi-notify 1 "Insufficient free space on RootFS. $free_space_current MB available, $free_space_limit MB required"
+					/DietPi/dietpi/func/dietpi-notify 1 'Aborting'
+
+					#	export
+					EXIT_CODE=1
+
+				else
+
+					/DietPi/dietpi/func/dietpi-notify 0 "$free_space_current MB available, $free_space_limit MB required"
+
+				fi
+
+				break
+
+			fi
+
+		done
+
+		#Still waiting for Freespace 3 :(
+
+	}
+
+	RootFS_RW_Check(){
+
+		# local fp_test_file="$HOME/dietpi-drive_manager_rw_test"
+		# echo 0 > "$fp_test_file"
+		# if (( $? != 0 )); then
+
+			# /DietPi/dietpi/func/dietpi-notify 1 "RootFS is currently set to R/O."
+			# EXIT_CODE=1
+
+		# fi
+
+		# rm "$fp_test_file" &> /dev/null
+
+		/DietPi/dietpi/func/dietpi-notify 2 "Checking RootFS R/W access. Please wait..."
+		if (( $(mount | grep -m1 '[[:space:]]/[[:space:]]' | grep -ci -m1 '(ro,') )); then
+
+			/DietPi/dietpi/func/dietpi-notify 1 "RootFS is currently set to R/O."
+			/DietPi/dietpi/func/dietpi-notify 2 "DietPi requires RootFS R/W access. Please run 'dietpi-drive_manager' to re-enable."
+			EXIT_CODE=1
+
+		else
+
+			/DietPi/dietpi/func/dietpi-notify 0 "RootFS R/W access."
+
+		fi
+
+	}
+
+	Toggle_WriteMode(){
+
+		local line_number=$(grep -m1 -n "[[:space:]]${aDRIVE_MOUNT_TARGET[$INDEX_DRIVE_BEING_EDITED]}[[:space:]]" /etc/fstab |cut -f1 -d:)
+		local exit_status=0
+		local message_result=0
+		if (( ${aDRIVE_ISREADONLY_FSTAB[$INDEX_DRIVE_BEING_EDITED]} || ${aDRIVE_ISREADONLY_CURRENTLY[$INDEX_DRIVE_BEING_EDITED]} )); then
+
+			message_result=$(mount -v -o rw,remount "${aDRIVE_MOUNT_SOURCE[$INDEX_DRIVE_BEING_EDITED]}" 2>&1)
+			exit_status=$?
+
+			#	Apply this only if no ,ro, exists?
+			sed -i "${line_number}s/[[:space:]]defaults,ro,/ defaults,/" /etc/fstab
+
+		else
+
+			sed -i "${line_number}s/[[:space:]]defaults,/ defaults,ro,/" /etc/fstab
+
+			message_result=$(mount -v -o ro,remount "${aDRIVE_MOUNT_SOURCE[$INDEX_DRIVE_BEING_EDITED]}" 2>&1)
+			exit_status=$?
+
+		fi
+
+		systemctl daemon-reload
+		mount -a
+
+		if (( $exit_status != 0 )); then
+
+			whiptail --title "Failed to apply now" --msgbox "Due to:\n - $message_result\n\nIf you have set to read only, this will be active on next reboot." --backtitle "$PROGRAM_NAME" 14 70
+
+		fi
+
+	}
+
 
 	TARGETMENUID=0
 	MENU_LASTITEM=''
@@ -607,7 +818,7 @@
 
 				whiptail_desc+="Capacity:     ${aDRIVE_SIZE_TOTAL[$INDEX_DRIVE_BEING_EDITED]}b\n"
 				whiptail_desc+="Used:         ${aDRIVE_SIZE_USED[$INDEX_DRIVE_BEING_EDITED]}b (${aDRIVE_SIZE_PERCENTUSED[$INDEX_DRIVE_BEING_EDITED]})\n"
-				whiptail_desc+="Status:       Drive is online and ready for use (${aDRIVE_MOUNT_TARGET[$INDEX_DRIVE_BEING_EDITED]})"
+				whiptail_desc+="Status:       Drive is online and ready for use"
 
 				# - Disable mount control for /boot /rootfs
 				if [ "${aDRIVE_MOUNT_TARGET[$INDEX_DRIVE_BEING_EDITED]}" != "/" ] && [ "${aDRIVE_MOUNT_TARGET[$INDEX_DRIVE_BEING_EDITED]}" != "/boot" ]; then
@@ -638,6 +849,20 @@
 
 				fi
 
+				#Read only?
+				if (( ${aDRIVE_ISREADONLY_FSTAB[$INDEX_DRIVE_BEING_EDITED]} )); then
+
+					whiptail_menu_array+=("Read Only" ": Enabled | Select to allow R/W")
+					whiptail_desc+="\nRead only:    Enabled"
+
+				else
+
+					whiptail_menu_array+=("Read Only" ": Disabled | Select to set read only")
+					whiptail_desc+="\nRead only:    Disabled"
+
+				fi
+
+
 			else
 
 				whiptail_desc+="Status:       Drive is not mounted and can be unplugged\n"
@@ -664,7 +889,7 @@
 		fi
 
 		WHIP_TITLE="$PROGRAM_NAME"
-		OPTION=$(whiptail --title "$WHIP_TITLE" --menu "$whiptail_desc" --default-item "$MENU_LASTITEM" --cancel-button "Back" --backtitle "$PROGRAM_NAME" 20 90 5 "${whiptail_menu_array[@]}" 3>&1 1>&2 2>&3)
+		OPTION=$(whiptail --title "$WHIP_TITLE" --menu "$whiptail_desc" --default-item "$MENU_LASTITEM" --cancel-button "Back" --backtitle "$PROGRAM_NAME" 22 90 6 "${whiptail_menu_array[@]}" 3>&1 1>&2 2>&3)
 
 		CHOICE=$?
 
@@ -791,7 +1016,14 @@
 
 						whiptail --title "Info:" --msgbox "On the next screen, you will be asked to format the target partition.\n\nPlease see the following recommendations for RootFS target filesystem type:\n\n - Odroid\nRootFS transfer supports ONLY EXT4 format\n\n - RPi\nRootFS transfer supports EXT4, BTRFS and F2FS" --backtitle "$PROGRAM_NAME" 16 75
 
-						Menu_Format
+						#NB: We dont enter main loop in this func
+						TARGETMENUID=2
+						while (( $TARGETMENUID == 2 ))
+						do
+
+							Menu_Format
+
+						done
 
 						if (( $FORMAT_COMPLETED )); then
 
@@ -802,6 +1034,11 @@
 					fi
 
 				fi
+
+			elif [ "$OPTION" = "Read Only" ]; then
+
+				Toggle_WriteMode
+				ROOTFS_RW_CHECKED=0
 
 			fi
 
@@ -1033,16 +1270,27 @@
 
 	fi
 	#-----------------------------------------------------------------------------------
-	Init_Drives_and_Refresh
-	#-----------------------------------------------------------------------------------
-	#Menu system for user to select an active mount and return value
-	if (( $INPUT == 1 )); then
+	#Return 1 if RootFS is RO
+	if (( $INPUT == 3 )); then
 
+		RootFS_RW_Check
+
+	#Return for low free space check
+	elif (( $INPUT == 2 )); then
+
+		Init_Drives_and_Refresh
+		RootFS_Low_Free_Space_Check
+
+	#Menu system for user to select an active mount and return value
+	elif (( $INPUT == 1 )); then
+
+		Init_Drives_and_Refresh
 		Menu_Select_Mount_Location
 
-	#-----------------------------------------------------------------------------------
 	#Drive Manager
 	else
+
+		Init_Drives_and_Refresh
 
 		while (( $TARGETMENUID > -1 )); do
 
@@ -1071,23 +1319,7 @@
 	fi
 	#-----------------------------------------------------------------------------------
 	#Destroy
-	Init_Drives_and_Refresh
-
-	#Delete []
-	unset aDRIVE_MOUNT_SOURCE
-	unset aDRIVE_MOUNT_TARGET
-	unset aDRIVE_FSTYPE
-	unset aDRIVE_SIZE_TOTAL
-	unset aDRIVE_SIZE_USED
-	unset aDRIVE_SIZE_PERCENTUSED
-	unset aDRIVE_SIZE_FREE
-	unset aDRIVE_PART_UUID
-	unset aDRIVE_UUID
-
-	unset aDRIVE_ISMOUNTED
-	unset aDRIVE_ISFILESYSTEM
-	unset aDRIVE_ISAVAILABLE
-	unset aDRIVE_ISUUIDMOUNT
+	Destroy
 
 	#-----------------------------------------------------------------------------------
 	# Start Services
@@ -1097,6 +1329,6 @@
 
 	fi
 	#-----------------------------------------------------------------------------------
-	exit
+	exit $EXIT_CODE
 	#-----------------------------------------------------------------------------------
 }

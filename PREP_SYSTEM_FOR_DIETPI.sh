@@ -69,11 +69,12 @@ exit 0 #prevent continuation of this script.
 #Apt mirror will get overwritten by: /DietPi/dietpi/func/dietpi-set_software apt-mirror default : during finalize.
 
 # - Everything else (excluding RPi!)
+DISTRO='jessie'
 cat << _EOF_ > /etc/apt/sources.list
-deb http://ftp.debian.org/debian/ jessie main contrib non-free
-deb http://ftp.debian.org/debian/ jessie-updates main contrib non-free
-deb http://security.debian.org jessie/updates main contrib non-free
-deb http://ftp.debian.org/debian/ jessie-backports main contrib non-free
+deb http://ftp.debian.org/debian/ $DISTRO main contrib non-free
+deb http://ftp.debian.org/debian/ $DISTRO-updates main contrib non-free
+deb http://security.debian.org $DISTRO/updates main contrib non-free
+deb http://ftp.debian.org/debian/ $DISTRO-backports main contrib non-free
 _EOF_
 
 # RPI UK mirror director is slow, unstable and unreliable -------------------------
@@ -94,7 +95,7 @@ rm /etc/apt/sources.list.d/deb-multimedia.list
 #Remove following Jessie
 apt-get clean
 apt-get update
-apt-get purge -y gpsd ppp libboost-iostreams* sgml-base xml-core usb-modeswitch* libpng* cpp-* cpp ntpdate bluez bluetooth rsync dialog dhcpcd5 libsqlite* libxapian22 lua5.1 netcat-* make makedev ncdu plymouth openresolv shared-mime-in* tcpd strace tasksel* wireless-* xdg-user-dirs triggerhappy python* v4l-utils traceroute xz-utils ucf xauth zlib1g-dev xml-core aptitude* avahi-daemon rsyslog logrotate man-db manpages vim vim-common vim-runtime vim-tiny mc mc-data
+apt-get purge -y libxapian22 gpsd ppp libboost-iostreams* sgml-base xml-core usb-modeswitch* libpng* cpp-* cpp ntpdate bluez bluetooth rsync dialog dhcpcd5 libsqlite* lua5.1 netcat-* make makedev ncdu plymouth openresolv shared-mime-in* tcpd strace tasksel* wireless-* xdg-user-dirs triggerhappy python* v4l-utils traceroute xz-utils ucf xauth zlib1g-dev xml-core aptitude* avahi-daemon rsyslog logrotate man-db manpages vim vim-common vim-runtime vim-tiny mc mc-data
 
 #+Desktop images (Mostly desktop packages, but apply to non-desktop images also):
 apt-get purge -y libpod-* libpeas-* isc-dhcp-server gnome-* fonts-dejavu* eject dnsmasq* dns-root-data colord-data libturbojpeg1 libjasper* libjson* libwbclient* libwayland* golang-* libavahi* libtext* libweb* libpcsclite1 libxau6* libvpx1 libxc* dictionaries-* libgtk* miscfiles minicom lrzsz lxmenu-* x11-* zenity* yelp-*
@@ -122,10 +123,7 @@ apt-get dist-upgrade -y
 
 #install packages
 echo -e "CONF_SWAPSIZE=0" > /etc/dphys-swapfile
-apt-get install -y ca-certificates keyboard-configuration locales apt-transport-https ethtool p7zip-full hfsplus iw debconf-utils xz-utils fbset wpasupplicant resolvconf bc dbus bzip2 psmisc bash-completion cron whiptail sudo ntp ntfs-3g dosfstools parted hdparm pciutils usbutils zip htop wput wget fake-hwclock dphys-swapfile curl unzip ca-certificates console-setup console-data console-common keyboard-configuration wireless-tools wireless-regdb crda --no-install-recommends
-
-#??? NanoPi Neo Air 3.x kernel only (and possibily other ap62xx chipsets), required for ap6212 bt firmware service: https://github.com/Fourdee/DietPi/issues/602#issuecomment-262806470
-apt-get install rfkill
+apt-get install -y cron rfkill ca-certificates locales apt-transport-https ethtool p7zip-full hfsplus iw debconf-utils xz-utils fbset wpasupplicant resolvconf bc dbus bzip2 psmisc bash-completion cron whiptail sudo ntp ntfs-3g dosfstools parted hdparm pciutils usbutils zip htop wput wget fake-hwclock dphys-swapfile curl unzip console-setup console-data console-common keyboard-configuration wireless-tools wireless-regdb crda --no-install-recommends
 
 #??? bluetooth if onboard device / RPI
 apt-get install -y bluetooth bluez-firmware
@@ -208,8 +206,8 @@ After=local-fs.target
 Type=forking
 RemainAfterExit=yes
 ExecStartPre=/bin/mkdir -p /etc/dietpi/logs
-ExecStart=/bin/bash -c '/boot/dietpi/dietpi-ramdisk 0 &>> /etc/dietpi/logs/dietpi-ramdisk.log'
-ExecStop=/bin/bash -c '/DietPi/dietpi/dietpi-ramdisk 1 &>> /etc/dietpi/logs/dietpi-ramdisk.log'
+ExecStart=/bin/bash -c '/boot/dietpi/dietpi-ramdisk 0'
+ExecStop=/bin/bash -c '/DietPi/dietpi/dietpi-ramdisk 1'
 
 [Install]
 WantedBy=local-fs.target

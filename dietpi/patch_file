@@ -19,6 +19,9 @@
 	#Force en_GB Locale for whole script. Prevents incorrect parsing with non-english locales.
 	LANG=en_GB.UTF-8
 
+	#Ensure we are in users home dir: https://github.com/Fourdee/DietPi/issues/905#issuecomment-298223705
+	cd "$HOME"
+
 	#/////////////////////////////////////////////////////////////////////////////////////
 	#Globals
 	#/////////////////////////////////////////////////////////////////////////////////////
@@ -29,6 +32,14 @@
 	HW_MODEL_DESCRIPTION=$(sed -n 2p /DietPi/dietpi/.hw_model)
 	DISTRO=$(sed -n 3p /DietPi/dietpi/.hw_model)
 	HW_ARCH=$(sed -n 6p /DietPi/dietpi/.hw_model)
+
+	AUTOINSTALL_ENABLED=$(cat /DietPi/dietpi.txt | grep -m1 '^AUTO_Install_Enable=' | sed 's/.*=//')
+	USER_INPUTS=1
+	if (( $AUTOINSTALL_ENABLED == 1 && $(cat /DietPi/dietpi/.install_stage) <= 0 )); then #Automated
+
+		USER_INPUTS=0
+
+	fi
 
 	#Apt-get upgrade, noninteractive func
 	AGU(){
@@ -2363,13 +2374,6 @@ _EOF_
 		cp /DietPi/dietpi/conf/cron.hourly_dietpi /etc/cron.hourly/dietpi
 		chmod +x /etc/cron.hourly/dietpi
 		#-------------------------------------------------------------------------------
-		#NanoPi M3 update DietPi kernel: https://github.com/Fourdee/DietPi/issues/763
-		if (( $HW_MODEL == 62 )); then
-
-			/DietPi/dietpi/func/dietpi-set_hardware kernel nanopim3
-
-		fi
-		#-------------------------------------------------------------------------------
 
 	elif (( $VERSION_CURRENT == 146 )); then
 		#-------------------------------------------------------------------------------
@@ -2473,6 +2477,97 @@ _EOF_
 		if (( $SWAP_SIZE == 100 )); then
 
 			/DietPi/dietpi/func/dietpi-set_dphys-swapfile 1
+
+		fi
+		#-------------------------------------------------------------------------------
+
+	elif (( $VERSION_CURRENT == 149 )); then
+		#-------------------------------------------------------------------------------
+		#DietPi-Config MPG2 VC1: https://github.com/Fourdee/DietPi/issues/885
+		if (( $HW_MODEL < 10 )); then
+
+			if (( ! $(cat /DietPi/config.txt | grep -ci -m1 'decode_MPG2=') )); then
+
+				echo -e "\ndecode_MPG2=0x00000000" >> /DietPi/config.txt
+
+			fi
+
+			if (( ! $(cat /DietPi/config.txt | grep -ci -m1 'decode_WVC1=') )); then
+
+				echo -e "\ndecode_WVC1=0x00000000" >> /DietPi/config.txt
+
+			fi
+
+		fi
+		#-------------------------------------------------------------------------------
+		#Remove ARMbian-config left on Neo image:
+		rm /etc/profile.d/check_first_login_reboot.sh &> /dev/null
+		#-------------------------------------------------------------------------------
+		#XU4 kernel 4.9 prep: https://github.com/Fourdee/DietPi/issues/899
+		if (( $HW_MODEL == 11 && $(uname -r | grep -ci -m1 '^3.' ) )); then
+
+			# - Replace /dev/mmcblk0p* in /etc/fstab + boot.ini with UUID as required by 4.9 kernel+uboot
+			#	MMC0p1
+			UUID_CURRENT=$(blkid /dev/mmcblk0p1 -s UUID -o value)
+			sed -i "s#^/dev/mmcblk0p1#UUID=$UUID_CURRENT#g" /etc/fstab
+
+			#	MMC0p2
+			UUID_CURRENT=$(blkid /dev/mmcblk0p2 -s UUID -o value)
+			sed -i "s#^/dev/mmcblk0p2#UUID=$UUID_CURRENT#g" /etc/fstab
+			systemctl daemon-reload
+
+			sed -i "s#root=/dev/mmcblk0p2#root=UUID=$UUID_CURRENT#g" /DietPi/boot.ini
+
+			# - XU3/4 DTBs are now unique, but, we have no known way of knowing if XU3 or XU4 is current board via system cmds:
+			#	Copy xu3 dtb to xu4 dtb so we can prep for this now when 4.9 arrives
+			cp /boot/exynos5422-odroidxu3.dtb /boot/exynos5422-odroidxu4.dtb
+
+			#	Assume XU4
+			if (( ! $USER_INPUTS )); then
+
+				sed -i "s#exynos5422-odroidxu3.dtb#exynos5422-odroidxu4.dtb#g" /DietPi/boot.ini
+
+			#	Request
+			else
+
+				whiptail --title "XU4 4.9 Prep" --yesno "In preperation for the XU4 4.9 kernel, DTB's will be unique for XU3/4 boards.\n\nIs this board an Odroid XU4 (eg: NOT XU3)?" --backtitle "DietPi-Update" 12 70
+				if (( $? == 0 )); then
+
+					sed -i "s#exynos5422-odroidxu3.dtb#exynos5422-odroidxu4.dtb#g" /DietPi/boot.ini
+
+				fi
+
+			fi
+
+		fi
+		#-------------------------------------------------------------------------------
+		#Minor tweaks to cron.hourly
+		cp /DietPi/dietpi/conf/cron.hourly_dietpi /etc/cron.hourly/dietpi
+		chmod +x /etc/cron.hourly/dietpi
+		#-------------------------------------------------------------------------------
+		#DietPi-Drive_Manager RO under '/':
+		cat << _EOF_ > /etc/systemd/system/dietpi-ramdisk.service
+[Unit]
+Description=DietPi-RAMdisk
+After=local-fs.target
+
+[Service]
+Type=forking
+RemainAfterExit=yes
+ExecStartPre=/bin/mkdir -p /etc/dietpi/logs
+ExecStart=/bin/bash -c '/boot/dietpi/dietpi-ramdisk 0'
+ExecStop=/bin/bash -c '/DietPi/dietpi/dietpi-ramdisk 1'
+
+[Install]
+WantedBy=local-fs.target
+_EOF_
+		systemctl enable dietpi-ramdisk.service
+		systemctl daemon-reload
+		#-------------------------------------------------------------------------------
+		#NanoPi M3 update DietPi kernel: https://github.com/Fourdee/DietPi/issues/763 + https://github.com/Fourdee/DietPi/issues/920
+		if (( $HW_MODEL == 62 )); then
+
+			/DietPi/dietpi/func/dietpi-set_hardware kernel nanopim3
 
 		fi
 		#-------------------------------------------------------------------------------

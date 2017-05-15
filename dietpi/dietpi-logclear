@@ -19,6 +19,9 @@
 	#Force en_GB Locale for whole script. Prevents incorrect parsing with non-english locales.
 	LANG=en_GB.UTF-8
 
+	#Ensure we are in users home dir: https://github.com/Fourdee/DietPi/issues/905#issuecomment-298223705
+	cd "$HOME"
+
 	INPUT=-1
 	if [[ $1 =~ ^-?[0-9]+$ ]]; then
 
@@ -82,8 +85,7 @@
 
 			#Special Filetypes
 			#PiHole logs (contains dns stats) | FILE_TYPE 2
-			if [ "${ARRAY_LOG_FILEPATH[$i]}" = "/var/log/pihole.log" ] ||
-				[ "${ARRAY_LOG_FILEPATH[$i]}" = "/var/log/pihole-FTL.log" ]; then
+			if [ "${ARRAY_LOG_FILEPATH[$i]}" = "/var/log/pihole.log" ]; then
 
 				FILE_TYPE=2
 
@@ -106,35 +108,51 @@
 				#PiHole
 				if (( $FILE_TYPE == 2 )); then
 
-					#Restart dnsmasq when we modify the log file (9/10 times dnsmasq allows it, but 1/10 times it just stops writing to log file)
-					local pihole_logfile_changed=0
+					local pihole_restart_required=0
 
-					#Find all non-matching lines with todays date (eg: find all lines not generated today)
-					# NB: day is space padded without trailling 0 (eg: Sep  1, Sep 11)
-					# NB: Force english dates to match english dates that dnsmasq always logs with: https://github.com/Fourdee/DietPi/issues/233#issuecomment-196407135
+					#Find all non-matching lines with todays date
+					#	 NB: day is space padded without trailling 0 (eg: Sep  1, Sep 11)
+					#	 NB: Force english dates to match english dates that dnsmasq always logs with: https://github.com/Fourdee/DietPi/issues/233#issuecomment-196407135
 					local month_day_today=$(LC_ALL=en_GB.UTF-8 date +'%b %e')
 
-					# - Check for at least 1 non-matching line before applying (so we can enable the dnsmasq restart flag)
-					# - Remove all lines in logfile for all other days, excluding today.
+					# - Check for at least 1 non-matching line before applying. Remove all lines in logfile for all other days, excluding today.
 					if (( $(grep -v -ci -m1 "$month_day_today" /var/log/pihole.log) == 1 )); then
 
+						#	RAMlog mode 2:
+						if (( $INPUT == 0 )); then
+
+							cat "${ARRAY_LOG_FILEPATH[$i]}" | sed '/'"$month_day_today"'/d' >> "$FILEPATH_BACKUPFOLDER"/"$FILE_NAME"
+							((INFO_BACKUPS_MADE++))
+
+						fi
+
+						/DietPi/dietpi/func/dietpi-notify 2 'Clearing log entries for PiHole, that are not from today, please wait...'
 						sed -i '/'"$month_day_today"'/!d' /var/log/pihole.log
-						pihole_logfile_changed=1
+						pihole_restart_required=1
 
 					fi
 
-					#recheck size again
+					#	recheck size again
 					FILESIZE_BYTES=$(stat -c%s "${ARRAY_LOG_FILEPATH[$i]}")
 
-					#Clear all entries if over 5MB (this should NEVER occur, however, we have to limit and prevent /var/log hitting the 20mb tmpfs limit)
+					#Clear all entries if over 5MB (we have to limit and prevent /var/log hitting the 20mb tmpfs limit)
 					# - 5mb should be more than enough for 1+ days of pihole logs
 					if (( $FILESIZE_BYTES >= 5242880 )); then
 
-						#Clear file contents
+						/DietPi/dietpi/func/dietpi-notify 2 "${ARRAY_LOG_FILEPATH[$i]} has exceeded 5MB, clearing, please wait..."
+
+						#	RAMlog mode 2:
+						if (( $INPUT == 0 )); then
+
+							cat "${ARRAY_LOG_FILEPATH[$i]}" >> "$FILEPATH_BACKUPFOLDER"/"$FILE_NAME"
+							((INFO_BACKUPS_MADE++))
+
+						fi
+
 						echo -e "" > "${ARRAY_LOG_FILEPATH[$i]}"
 						((INFO_LOGS_CLEARED++))
 
-						pihole_logfile_changed=1
+						pihole_restart_required=1
 
 					#Prevent size effecting results
 					else
@@ -143,11 +161,17 @@
 
 					fi
 
-					#restart dnsmasq if we modified the log file
-					if (( $pihole_logfile_changed == 1 )); then
+					#restart PiHole if we modified the log file
+					if (( $pihole_restart_required )); then
 
-						service dnsmasq restart
-						#Reapply DietPi-Process_Tool
+						/DietPi/dietpi/func/dietpi-notify 2 'PiHole logs have been changed, restarting, please wait...'
+						systemctl stop pihole-FTL
+						systemctl stop dnsmasq
+						sleep 1
+						systemctl start dnsmasq
+						systemctl start pihole-FTL
+
+						#	Reapply DietPi-Process_Tool
 						/DietPi/dietpi/dietpi-process_tool 1
 
 					fi
