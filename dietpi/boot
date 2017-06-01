@@ -92,58 +92,38 @@
 		fi
 	}
 
-	TARGET_MMCBLK='/dev/mmcblk0'
-	Find_Target_Mmcblk(){
-
-		local target_index=0
-		while true
-		do
-
-			#if [ -f "/dev/mmcblk$target_index" ]; then # -f -d -h -L fails detection...
-			ls /dev/mmcblk"$target_index"
-			if (( $? == 0 )); then
-
-				TARGET_MMCBLK="/dev/mmcblk$target_index"
-				/DietPi/dietpi/func/dietpi-notify 0 "$(date) | Found valid block device location $TARGET_MMCBLK" | tee -a "$FP_LOGFILE"
-				break
-
-			else
-
-				((target_index++))
-
-			fi
-
-			if (( $target_index > 10 )); then
-
-				/DietPi/dietpi/func/dietpi-notify 1 "$(date) | Failed to find a valid /dev/mmcblk* device" | tee -a "$FP_LOGFILE"
-				exit
-
-			fi
-
-		done
-
-	}
-
 	Partition_SD(){
-
-		Find_Target_Mmcblk
 
 		local rootfs_resize_limit=$(cat /DietPi/dietpi.txt | grep -m1 '^rootfs_resize_limit=' | sed 's/.*=//')
 
+		local target_dev=$(findmnt / -o source -n)
+
+		# - MMCBLK[0-9]p[0-9] scrape
+		if [[ "$target_dev" = *"mmcblk"* ]]; then
+
+			target_dev=$(findmnt / -o source -n | sed 's/p[0-9]$//')
+
+		# - Everything else scrape (eg: /dev/sda1)
+		else
+
+			target_dev=$(findmnt / -o source -n | sed 's/[0-9]$//')
+
+		fi
+
 		if (( $rootfs_resize_limit < 100 )); then
 
-			parted -s $TARGET_MMCBLK unit % resizepart 2 $rootfs_resize_limit% || parted $TARGET_MMCBLK unit % resizepart 2 Yes $rootfs_resize_limit%
+			parted -s $target_dev unit % resizepart 2 $rootfs_resize_limit% || parted $target_dev unit % resizepart 2 Yes $rootfs_resize_limit%
 
 		else
 
-			cat << _EOF_ | fdisk $TARGET_MMCBLK
+			cat << _EOF_ | fdisk $target_dev
 p
 d
 2
 n
 p
 2
-$(parted $TARGET_MMCBLK -ms unit s p | grep ':ext4::;' | sed 's/:/ /g' | sed 's/s//g' | awk '{ print $2 }')
+$(parted $target_dev -ms unit s p | grep ':ext4::;' | sed 's/:/ /g' | sed 's/s//g' | awk '{ print $2 }')
 
 p
 w
@@ -156,11 +136,9 @@ _EOF_
 
 	Expand_SD(){
 
-		Find_Target_Mmcblk
-
 		#Resize RootFS to new partition size
-		TARGET_MMCBLK+='p2'
-		resize2fs $TARGET_MMCBLK
+		local target_dev=$(findmnt / -o source -n)
+		resize2fs $target_dev
 
 	}
 
@@ -333,13 +311,8 @@ _EOF_
 		#Read Hw model
 		Read_Hw_Model
 		#----------------------------------------------------------------
-		#Enable LED heartbeat for H3/H5, BPi Pro
-		if (( $HW_CPUID == 1 || $HW_CPUID == 2 || $HW_MODEL == 51 )); then
-
-			echo -e "heartbeat" > /sys/class/leds/*red*/trigger & #OPi one
-			echo -e "heartbeat" > /sys/class/leds/*blue*/trigger & #NanoPi M1
-
-		fi
+		#Apply LED triggers if set
+		/DietPi/dietpi/func/dietpi-led_control 1 &
 		#----------------------------------------------------------------
 		#Set CRDA Country code
 		local wifi_country_code=$(cat /DietPi/dietpi.txt | grep -m1 '^wifi_country_code=' | sed 's/.*=//')

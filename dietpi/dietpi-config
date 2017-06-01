@@ -276,6 +276,7 @@
 
 		local lcdpanel_text=$(cat /DietPi/dietpi.txt | grep -m1 '^lcdpanel=' | sed 's/.*=//')
 		whiptail_menu_array+=("3" "LCD Panel addon: $lcdpanel_text")
+		whiptail_menu_array+=("14" "LED Control")
 
 		#RPi only
 		if (( $HW_MODEL < 10 )); then
@@ -712,6 +713,11 @@
 				#Return to This Menu
 				TARGETMENUID=1
 
+			elif (( $OPTION == 14 )); then
+
+				/DietPi/dietpi/func/dietpi-led_control
+				TARGETMENUID=1
+
 			fi
 
 		fi
@@ -1092,6 +1098,20 @@
 				rpi_usbmaxcurrent_text='Enabled'
 			fi
 
+			if (( $HW_MODEL == 3 )); then
+
+				local rpi3_usb_boot_bit_enabled=$(vcgencmd otp_dump | grep -m1 '17:' | grep -ci -m1 '3020000a')
+				local rpi3_usb_boot_bit_enabled_text='Disabled'
+				if (( $rpi3_usb_boot_bit_enabled )); then
+
+					rpi3_usb_boot_bit_enabled_text='Enabled'
+
+				fi
+
+				whiptail_menu_array+=("USB boot support" ": $rpi3_usb_boot_bit_enabled_text")
+
+			fi
+
 			whiptail_menu_array+=("Max USB current" ": $rpi_usbmaxcurrent_text")
 			whiptail_menu_array+=("I2c state" ": $rpi_i2c_text")
 			whiptail_menu_array+=("I2c frequency" ": $rpi_i2cbaudrate_hz")
@@ -1320,9 +1340,39 @@
 				#Return to This Menu
 				TARGETMENUID=3
 
+			elif [ "$OPTION" = "USB boot support" ]; then
+
+				if (( ! $rpi3_usb_boot_bit_enabled )); then
+
+					WHIP_QUESTION='The following will enable the RPi 3 to boot from USB mass storage devices. A hardware bit "17:3020000a", specific to the device is set to enable the feature.\n\nNB:\n - Not all USB mass storage devices are supported\n - The HW bit which enables this setting is non-reversible\n\nDo you wish to enable USB mass storage boot support?'
+					whiptail --title "$WHIP_TITLE" --yesno "$WHIP_QUESTION" --yes-button "Ok" --no-button "Back" --defaultno --backtitle "$WHIP_BACKTITLE" 16 70
+					CHOICE=$?
+					if (( $CHOICE == 0 )); then
+
+						/DietPi/dietpi/func/dietpi-set_hardware rpi3_usb_boot enable
+						REBOOT_REQUIRED=1
+
+						# Reboot now?
+						WHIP_QUESTION='A reboot is required to apply this setting.\n\nPlease reboot this system once, the HW bit which allows USB boot support will then be set. After which, USB mass storage devices can be used for booting.\n\nWould you like to reboot the system now?'
+						whiptail --title "$WHIP_TITLE" --yesno "$WHIP_QUESTION" --defaultno --backtitle "$WHIP_BACKTITLE" 14 75
+						CHOICE=$?
+						if (( $CHOICE == 0 )); then
+
+							reboot
+
+						fi
+
+					fi
+
+				fi
+
+				#Return to This Menu
+				TARGETMENUID=3
+
 			fi
 
 		fi
+
 	}
 
 	#TARGETMENUID=4
@@ -1373,11 +1423,13 @@
 		whiptail_menu_array+=("Change CPU Governor" ": $current_cpu_governor")
 
 		#Ondemand/Interactive Throttle up menu
-		if [ "$current_cpu_governor" = ondemand ] ||
-			[ "$current_cpu_governor" = conservative ] ||
-			[ "$current_cpu_governor" = interactive ]; then
+		if [ "$current_cpu_governor" = "ondemand" ] ||
+			[ "$current_cpu_governor" = "conservative" ] ||
+			[ "$current_cpu_governor" = "interactive" ]; then
+
 			local current_cpu_throttle_up=$(cat /DietPi/dietpi.txt | grep -m1 '^cpu_usage_throttle_up' | sed 's/.*=//')
 			whiptail_menu_array+=("CPU Throttle Up" ": $current_cpu_throttle_up%")
+
 		fi
 
 
@@ -1554,47 +1606,47 @@
 
 				"CPU Max Freq Limit"*)
 
-					local fp_available_freq="/tmp/.dietpi-config_available_freq"
+					/DietPi/dietpi/dietpi-cpuinfo 2
 
-					#Generate a list of available freqs
-					if [ -f /sys/devices/system/cpu/cpu0/cpufreq/scaling_available_frequencies ]; then
+					if [ ! -f /tmp/dietpi-available_cpu_freqs ]; then
 
-						cat /sys/devices/system/cpu/cpu0/cpufreq/scaling_available_frequencies | tr ' ' '\n' | sed -e 's/[^0-9]//g' | sed '/^$/d' > "$fp_available_freq"
+						whiptail --title "Not Available" --msgbox "Your processor / kernel, does not support this feature.\n\n(Info): Scaling_available_frequencies does not exist." --backtitle "$WHIP_BACKTITLE" 10 65
 
-					#Odroid XU3/4
-					elif [ -f /sys/devices/system/cpu/cpufreq/mp-cpufreq/cpu_freq_table ]; then
-
-						cat /sys/devices/system/cpu/cpufreq/mp-cpufreq/cpu_freq_table | tr ' ' '\n' | sed -e 's/[^0-9]//g' | sed '/^$/d' > "$fp_available_freq"
-
-					#No list available.
 					else
 
-						whiptail --title "Not Available" --msgbox "Your processor, or kernel, does not support this feature.\n\n(Info): Scaling_available_frequencies does not exist." --backtitle "$WHIP_BACKTITLE" 10 65
-
-					fi
-
-					#List available, read to array
-					if [ -f "$fp_available_freq" ]; then
-
-						#Convert to MHz | generate whiptail menu
 						local whiptail_menu_list=()
+						local max_clock=0
 						local available_frequency_array=()
-						readarray available_frequency_array < "$fp_available_freq"
+
+						readarray available_frequency_array < /tmp/dietpi-available_cpu_freqs
 
 						for ((i=0; i<${#available_frequency_array[@]}; i++))
 						do
 
 							whiptail_menu_list+=("$(( ${available_frequency_array[$i]} / 1000 ))" "MHz")
+							if (( ${available_frequency_array[$i]} > $max_clock )); then
+
+								max_clock=$(( ${available_frequency_array[$i]} / 1000 ))
+
+							fi
 
 						done
 
 						#Add disable option
-						whiptail_menu_list+=("0" "Disabled")
+						whiptail_menu_list+=("Disabled" "Returns clocks to default")
 
 						#Run menu
 						OPTION=$(whiptail --title "$WHIP_TITLE" --menu "Limit the maximum frequency that your processor can reach.\nThis can be useful for lowering temperature and saving power.\n\nCurrent setting: $user_frequency_max_text" --cancel-button "Back" --backtitle "$WHIP_BACKTITLE" --default-item "$user_frequency_max_current" 18 65 7 "${whiptail_menu_list[@]}" 3>&1 1>&2 2>&3)
 						CHOICE=$?
 						if (( $CHOICE == 0 )); then
+
+							#	Set max > return to default
+							if [ "$OPTION" = "Disabled" ]; then
+
+								sed -i "/cpu_max_frequency=/c\cpu_max_frequency=$max_clock" /DietPi/dietpi.txt
+								/DietPi/dietpi/dietpi-cpu_set
+
+							fi
 
 							sed -i "/cpu_max_frequency=/c\cpu_max_frequency=$OPTION" /DietPi/dietpi.txt
 							/DietPi/dietpi/dietpi-cpu_set
@@ -1606,8 +1658,6 @@
 						unset available_frequency_array
 
 					fi
-
-					rm "$fp_available_freq" &> /dev/null
 
 					#Return to This Menu
 					TARGETMENUID=4
@@ -3451,6 +3501,9 @@ _EOF_
 	USB_READ='Not Tested'
 	RAM_WRITE='Not Tested'
 	RAM_READ='Not Tested'
+	CUSTOM_WRITE='Not Tested'
+	CUSTOM_READ='Not Tested'
+	FP_CUSTOM_MOUNT=''
 
 	Run_FilesystemBenchmark(){
 
@@ -3469,24 +3522,34 @@ _EOF_
 
 		#Define test locations / info and extras.
 		if (( $device_index == 0 )); then
-			text_info_test_name='SDcard'
+
+			text_info_test_name='RootFS'
 			benchmark_temp_file="$HOME/benchmark.file"
 			benchmark_filesystem_freespace=$(( $(df -m | grep -m1 "$(sed -n 4p /DietPi/dietpi/.hw_model)" | awk '{print $4}') - $benchmark_filesystem_offset ))
 
 		elif (( $device_index == 1 )); then
+
 			text_info_test_name='USB harddrive'
 			benchmark_temp_file="$(df -P | grep -m1 '^/dev/sda1' | awk '{print $6}')/benchmark.file"
 			benchmark_filesystem_freespace=$(( $(df -m | grep -m1 '^/dev/sda1' | awk '{print $4}') - $benchmark_filesystem_offset ))
 
 		elif (( $device_index == 2 )); then
+
 			text_info_test_name='RAM'
 			benchmark_temp_file='/tmp/benchmark.file'
 			benchmark_filesystem_freespace=$(( $(df -m | grep -m1 '/tmp' | awk '{print $4}') - $benchmark_filesystem_offset ))
+
+		elif (( $device_index == 3 )); then
+
+			text_info_test_name='Custom'
+			benchmark_temp_file="$FP_CUSTOM_MOUNT/benchmark.file"
+			benchmark_filesystem_freespace=$(( $(df -m | grep -m1 "$FP_CUSTOM_MOUNT$" | awk '{print $4}') - $benchmark_filesystem_offset ))
 
 		fi
 
 		#Not enough free space
 		if (( $benchmark_filesystem_freespace < $min_benchmark_size )); then
+
 			run_benchmark=0
 			echo -e "(EE): Insufficient space to run $text_info_test_name filesystem benchmark.\n - Available space: $benchmark_filesystem_freespace MB\n - Space required: $min_benchmark_size MB"
 			echo -e ""
@@ -3494,32 +3557,46 @@ _EOF_
 
 		#Obtain user benchmark size.
 		else
+
 			benchmark_filesize=$(whiptail --inputbox "Please enter a filesize test value (MB). A value of 100 is recommended.\n- Minimum value: $min_benchmark_size\n- Maximum possible value: $benchmark_filesystem_freespace" 10 70 "100" --title "Benchmark File Size (MB)" 3>&1 1>&2 2>&3)
 			CHOICE=$?
 			if (( $CHOICE == 0 )); then
+
 				#Check for valid interger/entry
 				if [[ $benchmark_filesize =~ ^-?[0-9]+$ ]] && (( $benchmark_filesize > 0 )); then
+
 					#Disable test if not enough free space.
 					if (( $benchmark_filesystem_freespace < $benchmark_filesize )); then
+
 						run_benchmark=0
 						echo -e "(EE): Insufficient space to run $text_info_test_name filesystem benchmark.\n - Requested benchmark size: $benchmark_filesize MB\n - Available space for benchmark: $benchmark_filesystem_freespace MB"
 						echo -e ""
 						read -p "Press any key to continue....."
+
 					#Value too small
 					elif (( $benchmark_filesize < $min_benchmark_size )); then
+
 						run_benchmark=0
 						echo -e "(EE): Your requested benchmark size of $benchmark_filesize MB is too small."
 						echo -e ""
 						read -p "Press any key to continue....."
+
 					fi
+
 				else
+
 					#invalid value
 					run_benchmark=0
+
 				fi
+
 			#User aborted.
 			else
+
 				run_benchmark=0
+
 			fi
+
 		fi
 
 		#Run benchmark
@@ -3570,6 +3647,11 @@ _EOF_
 				RAM_WRITE=$write_speed
 				RAM_READ=$read_speed
 
+			elif (( $device_index == 3 )); then
+
+				CUSTOM_WRITE=$write_speed
+				CUSTOM_READ=$read_speed
+
 			fi
 
 		fi
@@ -3585,36 +3667,67 @@ _EOF_
 		TARGETMENUID=11
 
 		WHIP_TITLE='DietPi - Filesystem benchmarks'
-		OPTION=$(whiptail --title "$WHIP_TITLE" --menu " Flash Storage : Write = $SD_WRITE | Read = $SD_READ \n USB Drive     : Write = $USB_WRITE | Read = $USB_READ\n RAM           : Write = $RAM_WRITE | Read = $RAM_READ" --cancel-button "$TEXT_MENU_BACK" --backtitle "$WHIP_BACKTITLE" 13 65 3 \
-		"Flash Storage" "Benchmark SD/EMMC IO performance." \
+		OPTION=$(whiptail --title "$WHIP_TITLE" --menu " RootFS        : Write = $SD_WRITE | Read = $SD_READ \n USB Drive     : Write = $USB_WRITE | Read = $USB_READ\n Custom        : Write = $CUSTOM_WRITE | Read = $CUSTOM_READ\n RAM           : Write = $RAM_WRITE | Read = $RAM_READ" --cancel-button "$TEXT_MENU_BACK" --backtitle "$WHIP_BACKTITLE" 15 65 4 \
+		"RootFS" "Benchmark SD/EMMC IO performance." \
 		"USB Drive" "Benchmark USB drive IO performance." \
+		"Custom" "Benchmark from a selection of mounted devices." \
 		"RAM" "Benchmark RAM IO performance." 3>&1 1>&2 2>&3)
 
 		case "$OPTION" in
-		  "Flash Storage")
-			Run_FilesystemBenchmark 0
 
-			#Return to this menu
-			TARGETMENUID=12
-			;;
-		  "USB Drive")
-			#Check USB is connected and mounted
-			if (( $(df -P | grep -ci -m1 '^/dev/sda1') )); then
-				Run_FilesystemBenchmark 1
-			#No Drive
-			else
-				whiptail --title "No USB Drive was found" --msgbox "No USB Drive was found, /dev/sda1 is not available.\nThe test has been aborted." --backtitle "$WHIP_BACKTITLE" 10 60
-			fi
+			"RootFS")
 
-			#Return to this menu
-			TARGETMENUID=12
-			;;
-		  RAM)
-			Run_FilesystemBenchmark 2
+				Run_FilesystemBenchmark 0
 
-			#Return to this menu
-			TARGETMENUID=12
+				#Return to this menu
+				TARGETMENUID=12
+
 			;;
+
+			"USB Drive")
+
+				#Check USB is connected and mounted
+				if (( $(df -P | grep -ci -m1 '^/dev/sda1') )); then
+
+					Run_FilesystemBenchmark 1
+
+				#No Drive
+				else
+
+					whiptail --title "No USB Drive was found" --msgbox "No USB Drive was found, /dev/sda1 is not available.\nThe test has been aborted." --backtitle "$WHIP_BACKTITLE" 10 60
+
+				fi
+
+				#Return to this menu
+				TARGETMENUID=12
+
+			;;
+
+			"Custom")
+
+				/DietPi/dietpi/dietpi-drive_manager 1
+				FP_CUSTOM_MOUNT="$(cat /tmp/dietpi-drive_manager_selmnt)"
+
+				if [ -n "$FP_CUSTOM_MOUNT" ]; then
+
+					Run_FilesystemBenchmark 3
+
+				fi
+
+				#Return to this menu
+				TARGETMENUID=12
+
+			;;
+
+			"RAM")
+
+				Run_FilesystemBenchmark 2
+
+				#Return to this menu
+				TARGETMENUID=12
+
+			;;
+
 		esac
 	}
 
