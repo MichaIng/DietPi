@@ -1,24 +1,27 @@
 ## Creating a bug report/issue:
 
-### Required Information:
-- SBC Device (EG: RPi 3):
-- Distro (EG: Jessie) | ```uname -a```:
-- DietPi Version | ```cat /DietPi/dietpi/.version```:
 
-### Additional Information (if applicable):
-- Software title:
+#### Required Information:
+- SBC Device (EG: RPi 3)?
+- Distro (EG: Jessie) | ```uname -a```?
+- DietPi Version | ```cat /DietPi/dietpi/.version```?
 
-### Expected behaviour:
+#### Additional Information (if applicable):
+- Software title?
+- Can this issue be replicated on a fresh installation of DietPi?
+
+
+#### Expected behaviour:
 <!-- What SHOULD be happening? -->
 
-### Actual behaviour:
+#### Actual behaviour:
 <!-- What IS happening? -->
 
-### Steps to reproduce:
+#### Steps to reproduce:
 <!-- Explain how to reproduce the issue -->
 
-### Did you submit a ```dietpi-bugreport```?
+#### Did you submit a ```dietpi-bugreport```?
 <!-- Please post the bug report ID -->
 
-### Extra details:
+#### Extra details:
 <!-- Please post any extra details that might help solve the issue -->
