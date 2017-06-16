@@ -2,9 +2,11 @@
 
 
 #### Required Information:
-- SBC Device (EG: RPi 3)?
-- Distro (EG: Jessie) | ```uname -a```?
 - DietPi Version | ```cat /DietPi/dietpi/.version```?
+- SBC Device (EG: RPi 3)?
+- Power supply used (EG: 5v 1A RAVpower)?
+- SD card used (EG: Sandisk ultra)?
+- Distro (EG: Jessie) | ```uname -a```?
 
 #### Additional Information (if applicable):
 - Software title?
