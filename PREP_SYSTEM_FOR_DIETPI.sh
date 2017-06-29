@@ -355,6 +355,7 @@ _EOF_
 
 #Disable automatic updates and management of apt cache. Prevents unexpected lock on Apt cache and therefore failed apt installations.
 systemctl mask apt-daily.service
+systemctl mask apt-daily-upgrade.timer
 
 #/etc/sysctl.conf | Check for a previous entry before adding this
 echo -e "vm.swappiness=1" >> /etc/sysctl.conf
