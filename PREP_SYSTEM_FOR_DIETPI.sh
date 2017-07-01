@@ -69,7 +69,7 @@ exit 0 #prevent continuation of this script.
 #Apt mirror will get overwritten by: /DietPi/dietpi/func/dietpi-set_software apt-mirror default : during finalize.
 
 # - Everything else (excluding RPi!)
-DISTRO='jessie'
+DISTRO='stretch'
 cat << _EOF_ > /etc/apt/sources.list
 deb http://ftp.debian.org/debian/ $DISTRO main contrib non-free
 deb http://ftp.debian.org/debian/ $DISTRO-updates main contrib non-free
@@ -98,7 +98,7 @@ apt-get update
 apt-get purge -y gpsd ppp libboost-iostreams* sgml-base xml-core usb-modeswitch* libpng* cpp-* cpp ntpdate bluez bluetooth rsync dialog dhcpcd5 libsqlite* lua5.1 netcat-* make makedev ncdu plymouth openresolv shared-mime-in* tcpd strace tasksel* wireless-* xdg-user-dirs triggerhappy python* v4l-utils traceroute xz-utils ucf xauth zlib1g-dev xml-core aptitude* avahi-daemon rsyslog logrotate man-db manpages vim vim-common vim-runtime vim-tiny mc mc-data
 
 #+Desktop images (Mostly desktop packages, but apply to non-desktop images also):
-apt-get purge -y libpod-* libpeas-* isc-dhcp-server gnome-* fonts-dejavu* eject dnsmasq* dns-root-data colord-data libturbojpeg1 libjasper* libjson* libwbclient* libwayland* golang-* libavahi* libtext* libweb* libpcsclite1 libxau6* libvpx1 libxc* dictionaries-* libgtk* miscfiles minicom lrzsz lxmenu-* x11-* zenity* yelp-*
+apt-get purge -y libpod-* libpeas-* isc-dhcp-server gnome-* fonts-dejavu* eject dnsmasq* dns-root-data colord-data libjasper* libjson* libwbclient* libwayland* golang-* libavahi* libtext* libweb* libpcsclite1 libxau6* libxc* dictionaries-* libgtk* miscfiles minicom lrzsz lxmenu-* x11-* zenity* yelp-*
 
 rm -R /usr/share/fonts/*
 rm -R /usr/share/icons/*
@@ -124,6 +124,9 @@ apt-get dist-upgrade -y
 #install packages
 echo -e "CONF_SWAPSIZE=0" > /etc/dphys-swapfile
 apt-get install -y gnupg net-tools cron rfkill ca-certificates locales apt-transport-https ethtool p7zip-full hfsplus iw debconf-utils xz-utils fbset wpasupplicant resolvconf bc dbus bzip2 psmisc bash-completion cron whiptail sudo ntp ntfs-3g dosfstools parted hdparm pciutils usbutils zip htop wput wget fake-hwclock dphys-swapfile curl unzip console-setup console-data console-common keyboard-configuration wireless-tools wireless-regdb crda --no-install-recommends
+
+#??? Grub x86_64 native
+apt-get install -y grub2
 
 #??? bluetooth if onboard device / RPI
 apt-get install -y bluetooth bluez-firmware
