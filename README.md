@@ -28,8 +28,6 @@ Creator, programmer and project lead of DietPi.
 * Daniel Knight (Fourdee)
 
 Current contributors:
-* AWL29 - Joined 01/10/2016
-Created the DietPi image for NanoPi M3/T3.
 * K-Plan - Joined 01/01/2016
 Contributions to the DietPi in general, including In-depth testing, bug finding and valuable feedback. Forum moderator.
 * ZombieVirus - Joined 20/03/2016
@@ -47,6 +45,8 @@ Contributions to the DietPi in general, including sourcecode, testing, new devic
 Provided DietPi.com web hosting for 1 year until April 17th 2016, forum moderator, testing, bug reporting.
 * xenfomation - Joined 01/04/2016
 Contributions to the DietPi in general, including sourcecode, virtualBox image creation/conversion.
+* AWL29 - Joined 01/10/2016
+Created the DietPi image for NanoPi M3/T3.
 
 Honourable mentions/thanks:
 * A personal thanks to Pilovali for helping DietPi during our early days with desperately needed webhosting.
@@ -126,7 +126,7 @@ Transmission
 
 Nextcloud
 - https://github.com/nextcloud/server
- 
+
 OwnCloud
 - https://github.com/owncloud
 
