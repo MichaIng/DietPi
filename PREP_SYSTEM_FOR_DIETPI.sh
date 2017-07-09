@@ -111,10 +111,14 @@ apt-get purge -y expect tcl-expect toilet toilet-fonts w-scan vlan weather-util*
 #	On ARMbian DEV branch images, manually do this as triggers '*-dev' image/uboot etc
 apt-get purge -y '\-dev$' linux-headers*
 
+#+ Meveric's repo | Renders patch for removal in apt
+# apt-get purge setup-odroid # not compat with DietPi
+
 #??? RPI
 apt-get purge -y libraspberrypi-doc
 #??? RPI (remove older version packages marked as manual): https://github.com/Fourdee/DietPi/issues/598#issuecomment-25919922
 apt-get purge gcc-4.6-base gcc-4.7-base gcc-4.8-base libsigc++-1.2-5c2
+
 
 
 apt-get autoremove --purge -y
