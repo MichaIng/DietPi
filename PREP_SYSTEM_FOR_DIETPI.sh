@@ -23,52 +23,20 @@ exit 0 #prevent continuation of this script.
 #Packages
 #------------------------------------------------------------------------------------------------
 
-#Jessie , unified apt sources.
-
-#  - C2
-# cat << _EOF_ > /etc/apt/sources.list
-# deb http://ftp.debian.org/debian/ jessie main contrib non-free
-# deb http://ftp.debian.org/debian/ jessie-updates main contrib non-free
-# deb http://security.debian.org jessie/updates main contrib non-free
-# deb http://ftp.debian.org/debian/ jessie-backports main contrib non-free
-# deb http://ftp.debian.org/debian/ jessie-proposed-updates contrib non-free main
-# _EOF_
-
-# 	C2	stretch
-# cat << _EOF_ > /etc/apt/sources.list
-# deb http://ftp.debian.org/debian/ stretch main contrib non-free
-# deb http://ftp.debian.org/debian/ stretch-updates main contrib non-free
-# deb http://security.debian.org stretch/updates main contrib non-free
-# deb http://ftp.debian.org/debian/ stretch-backports main contrib non-free
-# deb http://ftp.debian.org/debian/ stretch-proposed-updates contrib non-free main
-# _EOF_
-# apt-get update
-# apt-get install busybox-static
-# apt-get upgrade -y
-# apt-get dist-upgrade -y
-# apt-get autoremove --purge -y
-
-# rpi stretch
-# cat << _EOF_ > /etc/apt/sources.list
-# deb http://archive.raspbian.org/raspbian stretch main contrib non-free rpi
-# _EOF_
-# apt-get update
-# apt-get upgrade -y
-# apt-get dist-upgrade -y
-# apt-get autoremove --purge -y
-
-
-# deb-src http://ftp.debian.org/debian/ jessie main contrib non-free
-# deb-src http://ftp.debian.org/debian/ jessie-updates main contrib non-free
-# deb-src http://security.debian.org jessie/updates main contrib non-free
-# deb-src http://ftp.debian.org/debian/ jessie-backports main contrib non-free
-# deb-src http://ftp.debian.org/debian/ jessie-proposed-updates contrib non-free main
-
-
 #NOTE:
 #Apt mirror will get overwritten by: /DietPi/dietpi/func/dietpi-set_software apt-mirror default : during finalize.
 
-# - Everything else (excluding RPi!)
+#??? RPI
+DISTRO='stretch'
+cat << _EOF_ > /etc/apt/sources.list
+deb https://www.mirrorservice.org/sites/archive.raspbian.org/raspbian $DISTRO main contrib non-free rpi
+_EOF_
+
+cat << _EOF_ > /etc/apt/sources.list.d/raspi.list
+deb https://archive.raspberrypi.org/debian/ $DISTRO main ui
+_EOF_
+
+#??? Everything else (excluding RPi!)
 DISTRO='stretch'
 cat << _EOF_ > /etc/apt/sources.list
 deb http://ftp.debian.org/debian/ $DISTRO main contrib non-free
@@ -77,17 +45,6 @@ deb http://security.debian.org $DISTRO/updates main contrib non-free
 deb http://ftp.debian.org/debian/ $DISTRO-backports main contrib non-free
 _EOF_
 
-# RPI UK mirror director is slow, unstable and unreliable -------------------------
-cat << _EOF_ > /etc/apt/sources.list
-deb http://mirror.ox.ac.uk/sites/archive.raspbian.org/archive/raspbian jessie main contrib non-free rpi
-_EOF_
-
-#Stretch
-# cat << _EOF_ > /etc/apt/sources.list
-# deb http://mirror.ox.ac.uk/sites/archive.raspbian.org/archive/raspbian stretch main contrib non-free rpi
-# _EOF_
-# #echo -e "deb http://archive.raspberrypi.org/debian/ stretch main ui" > /etc/apt/sources.list.d/raspi.list #Does not currently support Stretch
-# RPI UK mirror director is slow, unstable and unreliable -------------------------
 
 #+Meveric images
 rm /etc/apt/sources.list.d/deb-multimedia.list
