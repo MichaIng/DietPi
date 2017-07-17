@@ -465,6 +465,9 @@ LANG=en_GB.UTF-8
 _EOF_
 
 
+#??? Native PC, add i386 support by default
+dpkg --add-architecture i386
+apt-get update
 
 #??? ARMbian OPi Zero 2: https://github.com/Fourdee/DietPi/issues/876#issuecomment-294350580
 echo -e "blacklist bmp085" > /etc/modprobe.d/bmp085.conf
