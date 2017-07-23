@@ -23,52 +23,20 @@ exit 0 #prevent continuation of this script.
 #Packages
 #------------------------------------------------------------------------------------------------
 
-#Jessie , unified apt sources.
-
-#  - C2
-# cat << _EOF_ > /etc/apt/sources.list
-# deb http://ftp.debian.org/debian/ jessie main contrib non-free
-# deb http://ftp.debian.org/debian/ jessie-updates main contrib non-free
-# deb http://security.debian.org jessie/updates main contrib non-free
-# deb http://ftp.debian.org/debian/ jessie-backports main contrib non-free
-# deb http://ftp.debian.org/debian/ jessie-proposed-updates contrib non-free main
-# _EOF_
-
-# 	C2	stretch
-# cat << _EOF_ > /etc/apt/sources.list
-# deb http://ftp.debian.org/debian/ stretch main contrib non-free
-# deb http://ftp.debian.org/debian/ stretch-updates main contrib non-free
-# deb http://security.debian.org stretch/updates main contrib non-free
-# deb http://ftp.debian.org/debian/ stretch-backports main contrib non-free
-# deb http://ftp.debian.org/debian/ stretch-proposed-updates contrib non-free main
-# _EOF_
-# apt-get update
-# apt-get install busybox-static
-# apt-get upgrade -y
-# apt-get dist-upgrade -y
-# apt-get autoremove --purge -y
-
-# rpi stretch
-# cat << _EOF_ > /etc/apt/sources.list
-# deb http://archive.raspbian.org/raspbian stretch main contrib non-free rpi
-# _EOF_
-# apt-get update
-# apt-get upgrade -y
-# apt-get dist-upgrade -y
-# apt-get autoremove --purge -y
-
-
-# deb-src http://ftp.debian.org/debian/ jessie main contrib non-free
-# deb-src http://ftp.debian.org/debian/ jessie-updates main contrib non-free
-# deb-src http://security.debian.org jessie/updates main contrib non-free
-# deb-src http://ftp.debian.org/debian/ jessie-backports main contrib non-free
-# deb-src http://ftp.debian.org/debian/ jessie-proposed-updates contrib non-free main
-
-
 #NOTE:
 #Apt mirror will get overwritten by: /DietPi/dietpi/func/dietpi-set_software apt-mirror default : during finalize.
 
-# - Everything else (excluding RPi!)
+#??? RPI
+DISTRO='stretch'
+cat << _EOF_ > /etc/apt/sources.list
+deb https://www.mirrorservice.org/sites/archive.raspbian.org/raspbian $DISTRO main contrib non-free rpi
+_EOF_
+
+cat << _EOF_ > /etc/apt/sources.list.d/raspi.list
+deb https://archive.raspberrypi.org/debian/ $DISTRO main ui
+_EOF_
+
+#??? Everything else (excluding RPi!)
 DISTRO='stretch'
 cat << _EOF_ > /etc/apt/sources.list
 deb http://ftp.debian.org/debian/ $DISTRO main contrib non-free
@@ -77,17 +45,6 @@ deb http://security.debian.org $DISTRO/updates main contrib non-free
 deb http://ftp.debian.org/debian/ $DISTRO-backports main contrib non-free
 _EOF_
 
-# RPI UK mirror director is slow, unstable and unreliable -------------------------
-cat << _EOF_ > /etc/apt/sources.list
-deb http://mirror.ox.ac.uk/sites/archive.raspbian.org/archive/raspbian jessie main contrib non-free rpi
-_EOF_
-
-#Stretch
-# cat << _EOF_ > /etc/apt/sources.list
-# deb http://mirror.ox.ac.uk/sites/archive.raspbian.org/archive/raspbian stretch main contrib non-free rpi
-# _EOF_
-# #echo -e "deb http://archive.raspberrypi.org/debian/ stretch main ui" > /etc/apt/sources.list.d/raspi.list #Does not currently support Stretch
-# RPI UK mirror director is slow, unstable and unreliable -------------------------
 
 #+Meveric images
 rm /etc/apt/sources.list.d/deb-multimedia.list
@@ -111,10 +68,14 @@ apt-get purge -y expect tcl-expect toilet toilet-fonts w-scan vlan weather-util*
 #	On ARMbian DEV branch images, manually do this as triggers '*-dev' image/uboot etc
 apt-get purge -y '\-dev$' linux-headers*
 
+#+ Meveric's repo | Renders patch for removal in apt
+# apt-get purge setup-odroid # not compat with DietPi
+
 #??? RPI
 apt-get purge -y libraspberrypi-doc
 #??? RPI (remove older version packages marked as manual): https://github.com/Fourdee/DietPi/issues/598#issuecomment-25919922
 apt-get purge gcc-4.6-base gcc-4.7-base gcc-4.8-base libsigc++-1.2-5c2
+
 
 
 apt-get autoremove --purge -y
@@ -123,7 +84,7 @@ apt-get dist-upgrade -y
 
 #install packages
 echo -e "CONF_SWAPSIZE=0" > /etc/dphys-swapfile
-apt-get install -y gnupg net-tools cron rfkill ca-certificates locales apt-transport-https ethtool p7zip-full hfsplus iw debconf-utils xz-utils fbset wpasupplicant resolvconf bc dbus bzip2 psmisc bash-completion cron whiptail sudo ntp ntfs-3g dosfstools parted hdparm pciutils usbutils zip htop wput wget fake-hwclock dphys-swapfile curl unzip console-setup console-data console-common keyboard-configuration wireless-tools wireless-regdb crda --no-install-recommends
+apt-get install -y gnupg net-tools cron rfkill ca-certificates locales apt-transport-https ethtool p7zip-full hfsplus iw debconf-utils xz-utils fbset wpasupplicant resolvconf bc dbus bzip2 psmisc bash-completion cron whiptail sudo ntp ntfs-3g dosfstools parted hdparm usbutils zip htop wput wget fake-hwclock dphys-swapfile curl unzip console-setup console-data console-common keyboard-configuration wireless-tools wireless-regdb crda --no-install-recommends
 
 #??? Grub/intel+amd microcode firmware x86_64 native
 apt-get install -y grub2
@@ -504,6 +465,9 @@ LANG=en_GB.UTF-8
 _EOF_
 
 
+#??? Native PC, add i386 support by default
+dpkg --add-architecture i386
+apt-get update
 
 #??? ARMbian OPi Zero 2: https://github.com/Fourdee/DietPi/issues/876#issuecomment-294350580
 echo -e "blacklist bmp085" > /etc/modprobe.d/bmp085.conf
