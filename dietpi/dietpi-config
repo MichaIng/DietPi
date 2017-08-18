@@ -2353,6 +2353,7 @@ _EOF_
 	WIFI_SIGNALSTRENGTH=0
 	WIFI_HOTSPOT=0
 	WIFI_COUNTRYCODE="Unknown"
+	WIFI_AUTO_RECONNECT_ACTIVE=0
 
 	Network_ETH_CopyCurrentToStatic(){
 
@@ -2435,7 +2436,6 @@ _EOF_
 	}
 
 	Network_ApplyChanges(){
-
 
 		#Disable all adapters
 		sed -i "/allow-hotplug eth/c\#allow-hotplug eth$ETH_INDEX" /etc/network/interfaces
@@ -3372,6 +3372,71 @@ _EOF_
 	HOTSPOT_CHANNEL=""
 	HOTSPOT_KEY=""
 
+	WiFi_Monitor_Disable(){
+
+		if [ -f /etc/systemd/system/dietpi-wifi-monitor.service ]; then
+
+			systemctl stop dietpi-wifi-monitor.service
+			rm /etc/systemd/system/dietpi-wifi-monitor.service
+			rm /etc/dietpi/dietpi-wifi-monitor.sh
+			systemctl daemon-reload
+
+		fi
+
+	}
+
+	WiFi_Monitor_Enable(){
+
+		cat << _EOF_ > /etc/dietpi/dietpi-wifi-monitor.sh
+#!/bin/bash
+{
+URL_PING="$WIFI_GATEWAY"
+ADAPTER="wlan$WIFI_INDEX"
+TICKRATE=10
+while true
+do
+/DietPi/dietpi/func/dietpi-notify 2 "Checking connnection for: \$ADAPTER"
+ping -I \$ADAPTER -c 1 \$URL_PING
+if (( \$? != 0 )); then
+
+/DietPi/dietpi/func/dietpi-notify 2 "Detected connection loss: \$ADAPTER. Reconnecting"
+ifdown "\$ADAPTER"
+sleep 1
+ifup "\$ADAPTER"
+/DietPi/dietpi/func/dietpi-notify 0 'Completed'
+
+else
+
+/DietPi/dietpi/func/dietpi-notify 0 "Connection \$ADAPTER"
+
+fi
+
+sleep \$TICKRATE
+
+done
+
+exit 0
+}
+_EOF_
+
+		chmod +x /etc/dietpi/dietpi-wifi-monitor.sh
+
+		cat << _EOF_ > /etc/systemd/system/dietpi-wifi-monitor.service
+[Unit]
+Description=Monitors loss of WiFi connection and automatically reconnects
+After=network.target network-online.target
+[Service]
+Type=simple
+ExecStart=/bin/bash -c /etc/dietpi/dietpi-wifi-monitor.sh
+[Install]
+WantedBy=multi-user.target
+_EOF_
+		systemctl daemon-reload
+		systemctl enable dietpi-wifi-monitor.service
+		systemctl start dietpi-wifi-monitor.service
+
+	}
+
 	#TARGETMENUID=10
 	Menu_NetworkAdapters_Wifi(){
 
@@ -3407,7 +3472,7 @@ _EOF_
 			whiptail_menu_array+=("SSID" "Change the wireless hotspot name"); ((whip_options_total++))
 			whiptail_menu_array+=("Channel" "Change the wireless channel"); ((whip_options_total++))
 			whiptail_menu_array+=("Key" "Change the access key required to connect"); ((whip_options_total++))
-			whiptail_menu_array+=("State" "$hotspot_active_state_text"); ((whip_options_total++))
+			whiptail_menu_array+=("State" ": $hotspot_active_state_text"); ((whip_options_total++))
 
 			description_text="SSID    : $HOTSPOT_SSID\nChannel : $HOTSPOT_CHANNEL\nKey     : $HOTSPOT_KEY\nStatus  : $hotspot_status_text"
 
@@ -3419,25 +3484,48 @@ _EOF_
 			# - Get current Mode details
 			local mode_current='DHCP'
 			if (( $WIFI_MODE == 0 )); then
+
 				mode_current='STATIC'
+
 			fi
 
 			# - Target Details
 			local mode_target='DHCP'
 			if (( $WIFI_MODE_TARGET == 0 )); then
+
 				mode_target='STATIC'
+
 			fi
 
 			whiptail_menu_array+=("Scan" "Scan and Connect"); ((whip_options_total++))
 			whiptail_menu_array+=("Manual" "Manually Set Wireless Details"); ((whip_options_total++))
-			whiptail_menu_array+=("Change Mode" "$mode_target"); ((whip_options_total++))
+			whiptail_menu_array+=("Change Mode" ": $mode_target"); ((whip_options_total++))
+
+			if (( $WIFI_CONNECTED ||
+				$(systemctl is-active dietpi-wifi-monitor.service | grep -ci -m1 '^active') )); then
+
+				local wifi_auto_reconnect_text='Disabled'
+				WIFI_AUTO_RECONNECT_ACTIVE=0
+				if (( $(systemctl is-active dietpi-wifi-monitor.service | grep -ci -m1 '^active') )); then
+
+					WIFI_AUTO_RECONNECT_ACTIVE=1
+					wifi_auto_reconnect_text='Enabled'
+
+				fi
+
+				whiptail_menu_array+=("Auto Reconnect" ": $wifi_auto_reconnect_text"); ((whip_options_total++))
+
+			fi
+
 			# - show static options
 			if (( $WIFI_MODE_TARGET == 0 )); then
+
 				whiptail_menu_array+=("Copy" "Copy Current address to Static"); ((whip_options_total++))
-				whiptail_menu_array+=("Static Ip" "$WIFI_IP_STATIC"); ((whip_options_total++))
-				whiptail_menu_array+=("Static Mask" "$WIFI_MASK_STATIC"); ((whip_options_total++))
-				whiptail_menu_array+=("Static Gateway" "$WIFI_GATEWAY_STATIC"); ((whip_options_total++))
-				whiptail_menu_array+=("Static DNS" "$WIFI_DNS_STATIC"); ((whip_options_total++))
+				whiptail_menu_array+=("Static Ip" ": $WIFI_IP_STATIC"); ((whip_options_total++))
+				whiptail_menu_array+=("Static Mask" ": $WIFI_MASK_STATIC"); ((whip_options_total++))
+				whiptail_menu_array+=("Static Gateway" ": $WIFI_GATEWAY_STATIC"); ((whip_options_total++))
+				whiptail_menu_array+=("Static DNS" ": $WIFI_DNS_STATIC"); ((whip_options_total++))
+
 			fi
 
 			whiptail_menu_array+=("Disable" "Disable WiFi adapter"); ((whip_options_total++))
@@ -3450,7 +3538,7 @@ _EOF_
 		if [ "$WIFI_COUNTRYCODE" = "00" ]; then
 			whiptail_menu_array+=("Country" "Not set, please configure ($WIFI_COUNTRYCODE)"); ((whip_options_total++))
 		else
-			whiptail_menu_array+=("Country" "$WIFI_COUNTRYCODE"); ((whip_options_total++))
+			whiptail_menu_array+=("Country" ": $WIFI_COUNTRYCODE"); ((whip_options_total++))
 		fi
 
 		whiptail_menu_array+=("Apply" "Save Changes (Restart Networking)"); ((whip_options_total++))
@@ -3472,6 +3560,22 @@ _EOF_
 			WHIP_SELECTION_PREVIOUS=$OPTION
 
 			case "$OPTION" in
+				'Auto Reconnect')
+
+					if (( ! $WIFI_AUTO_RECONNECT_ACTIVE )); then
+
+						WiFi_Monitor_Enable
+
+					else
+
+						WiFi_Monitor_Disable
+
+					fi
+
+					#Return to this menu
+					TARGETMENUID=10
+
+				;;
 				Key)
 					OPTION=$(whiptail --inputbox "Please enter a key/password for the WiFi hotspot\n - NB: Minimum of 8 characters" 9 70 "$HOTSPOT_KEY" --title "Change Hotspot Access Key" 3>&1 1>&2 2>&3)
 					CHOICE=$?
@@ -3527,6 +3631,7 @@ _EOF_
 					if (( $CHOICE == 0 )); then
 
 						WIFI_DISABLED=1
+						WiFi_Monitor_Disable
 						Network_ApplyChanges
 
 						TARGETMENUID=8
