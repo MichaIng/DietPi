@@ -49,10 +49,10 @@ _EOF_
 #+Meveric images
 rm /etc/apt/sources.list.d/deb-multimedia.list
 
-#Remove following Jessie
+#Remove following All
 apt-get clean
 apt-get update
-apt-get purge -y gpsd ppp libboost-iostreams* sgml-base xml-core usb-modeswitch* libpng* cpp-* cpp ntpdate bluez bluetooth rsync dialog dhcpcd5 libsqlite* lua5.1 netcat-* make makedev ncdu plymouth openresolv shared-mime-in* tcpd strace tasksel* wireless-* xdg-user-dirs triggerhappy python* v4l-utils traceroute xz-utils ucf xauth zlib1g-dev xml-core aptitude* avahi-daemon rsyslog logrotate man-db manpages vim vim-common vim-runtime vim-tiny mc mc-data
+apt-get purge -y jq xxd iperf3 gdisk gpsd ppp libboost-iostreams* sgml-base xml-core usb-modeswitch* libpng* cpp-* cpp ntpdate bluez bluetooth rsync dialog dhcpcd5 libsqlite* lua5.1 netcat-* make makedev ncdu plymouth openresolv shared-mime-in* tcpd strace tasksel* wireless-* xdg-user-dirs triggerhappy python* v4l-utils traceroute xz-utils ucf xauth zlib1g-dev xml-core aptitude* avahi-daemon rsyslog logrotate man-db manpages vim vim-common vim-runtime vim-tiny mc mc-data
 
 #+Desktop images (Mostly desktop packages, but apply to non-desktop images also):
 apt-get purge -y libpod-* libpeas-* isc-dhcp-server gnome-* fonts-dejavu* eject dnsmasq* dns-root-data colord-data libjasper* libjson* libwbclient* libwayland* golang-* libavahi* libtext* libweb* libpcsclite1 libxau6* libxc* dictionaries-* libgtk* miscfiles minicom lrzsz lxmenu-* x11-* zenity* yelp-*
@@ -110,6 +110,7 @@ chmod +x -R /boot
 userdel -f pi
 userdel -f test #armbian
 userdel -f odroid
+userdel -f rock64
 
 #Remove folders (now in finalise script)
 
@@ -467,7 +468,11 @@ echo -e "blacklist bmp085" > /etc/modprobe.d/bmp085.conf
 
 #??? Sparky SBC ONLY: Blacklist GPU and touch screen modules: https://github.com/Fourdee/DietPi/issues/699#issuecomment-271362441
 cat << _EOF_ > /etc/modprobe.d/disable_sparkysbc_touchscreen.conf
-blacklist ctp_gsl3680
+blacklist owl_camera
+blacklist gsensor_stk8313
+blacklist ctp_ft5x06
+blacklist gsensor_bma222
+blacklist gsensor_mir3da
 _EOF_
 
 cat << _EOF_ > /etc/modprobe.d/disable_sparkysbc_gpu.conf
