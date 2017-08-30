@@ -475,7 +475,11 @@ echo -e "blacklist bmp085" > /etc/modprobe.d/bmp085.conf
 
 #??? Sparky SBC ONLY: Blacklist GPU and touch screen modules: https://github.com/Fourdee/DietPi/issues/699#issuecomment-271362441
 cat << _EOF_ > /etc/modprobe.d/disable_sparkysbc_touchscreen.conf
-blacklist ctp_gsl3680
+blacklist owl_camera
+blacklist gsensor_stk8313
+blacklist ctp_ft5x06
+blacklist gsensor_bma222
+blacklist gsensor_mir3da
 _EOF_
 
 cat << _EOF_ > /etc/modprobe.d/disable_sparkysbc_gpu.conf
