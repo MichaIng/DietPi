@@ -346,13 +346,6 @@ timeout 10;
 retry 4;
 _EOF_
 
-#Add ipv6 flags DietPi uses to disable IPV6 if set.
-cat << _EOF_ >> /etc/sysctl.conf
-net.ipv6.conf.all.disable_ipv6 = 0
-net.ipv6.conf.default.disable_ipv6 = 0
-net.ipv6.conf.lo.disable_ipv6 = 0
-_EOF_
-
 #Hosts
 cat << _EOF_ > /etc/hosts
 127.0.0.1    localhost
