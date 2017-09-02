@@ -458,6 +458,9 @@ LC_ALL=en_GB.UTF-8
 LANG=en_GB.UTF-8
 _EOF_
 
+#Prefer to use wlan/eth naming for networked devices (eg: stretch)
+ln -s /dev/null /etc/systemd/network/99-default.link
+
 
 #??? Native PC, add i386 support by default
 dpkg --add-architecture i386
