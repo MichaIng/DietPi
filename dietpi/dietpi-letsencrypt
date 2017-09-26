@@ -45,7 +45,7 @@
 	FP_LOGFILE="/var/log/dietpi-letsencrypt.log"
 	FP_MONTHLY_CRON="/etc/cron.monthly/dietpi-letsencrypt"
 	DP_LETSENCRYPT_SCRIPTS="/etc/certbot_scripts"
-	DP_WEBSERVER_INDEX=0 #0=apache2 1=lighttpd 2=nginx
+	DP_WEBSERVER_INDEX=0 #0=apache2 1=lighttpd 2=nginx 3=minio
 
 	LETSENCRYPT_INSTALLED=0
 	if [ -d "$DP_LETSENCRYPT_SCRIPTS" ]; then
@@ -84,6 +84,11 @@
 
 			#/DietPi/dietpi/func/dietpi-notify 0 "Nginx webserver detected"
 			# DP_WEBSERVER_INDEX=2
+
+		elif (( $(ps aux | grep -ci -m1 '[m]inio') )); then
+
+			/DietPi/dietpi/func/dietpi-notify 0 "Minio S3 server detected"
+			 DP_WEBSERVER_INDEX=3
 
 		else
 
@@ -180,7 +185,53 @@ _EOF_
 
 				/etc/init.d/lighttpd force-reload
 
+			elif (( $DP_WEBSERVER_INDEX == 3 )); then
+				# - Cert me up
+				/DietPi/dietpi/dietpi-services stop
+
+				./certbot-auto certonly --standalone --preferred-challenges tls-sni --staple-ocsp --agree-tos $cli_redirect --rsa-key-size $LETSENCRYPT_KEYSIZE --email $LETSENCRYPT_EMAIL -d $LETSENCRYPT_DOMAIN
+
+				# Locate them correctly (THIS didn't work as symlinks)
+				cp /etc/letsencrypt/live/$LETSENCRYPT_DOMAIN/fullchain.pem /home/minio-user/.minio/certs/public.crt
+				cp /etc/letsencrypt/live/$LETSENCRYPT_DOMAIN/privkey.pem /home/minio-user/.minio/certs/private.key
+
+				# Own those certs!
+				chown minio-user:minio-user /home/minio-user/.minio/certs/public.crt
+				chown minio-user:minio-user /home/minio-user/.minio/certs/private.key
+
+				# Add SSL to config file
+				grep -v "MINIO_OPTS" /etc/default/minio > /etc/default/minio.temp1
+				grep -v "port" /etc/default/minio.temp1 > /etc/default/minio.temp2
+				rm /etc/default/minio.temp1
+				mv /etc/default/minio.temp2 /etc/default/minio
+				cat << _EOF_ >> /etc/default/minio
+# Use if you want to run Minio on a custom port.
+MINIO_OPTS="--address :443"
+_EOF_
+
+				# Allow SSL binding for non root user
+				setcap CAP_NET_BIND_SERVICE=+eip /usr/local/bin/minio
+
+				# Create renewl script
+				cat << _EOF_ > /home/minio-user/.minio/dietpi-cert-renewl.sh
+# Minio only works with copied and owned certs. Upon renewal the new certs needs to be copied and re-owned
+systemctl stop minio.service
+
+# Copy to correct Location
+cp /etc/letsencrypt/live/$LETSENCRYPT_DOMAIN/fullchain.pem /home/minio-user/.minio/certs/public.crt
+cp /etc/letsencrypt/live/$LETSENCRYPT_DOMAIN/privkey.pem /home/minio-user/.minio/certs/private.key
+
+# Re-Own those certs!
+chown minio-user:minio-user /home/minio-user/.minio/certs/public.crt
+chown minio-user:minio-user /home/minio-user/.minio/certs/private.key
+
+systemctl start minio.service
+_EOF_
+
+			# Change permissions on renewal script
+			chmod +x /home/minio-user/.minio/dietpi-cert-renewl.sh
 			fi
+
 
 			#------------------------------------------------------------------------------------------------------
 			#ALL | Create cron job
@@ -203,6 +254,12 @@ _EOF_
 	# Main Loop
 	#----------------------------------------------------------------
 	/DietPi/dietpi/dietpi-letsencrypt 1 &>> $FP_LOGFILE
+
+	# Minio specific applications
+	if (( $(ps aux | grep -ci -m1 '[m]inio') )); then
+		/home/minio-user/.minio/dietpi-cert-renewl.sh
+	fi
+
 	#----------------------------------------------------------------
 	exit
 	#----------------------------------------------------------------
