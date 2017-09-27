@@ -298,7 +298,7 @@ _EOF_
 	# - Software
 	#NB: All software has a unique index that must not be changed (eg: DESKTOP_LXDE = 23)
 	TOTAL_SOFTWARE_INDEXS=0
-	TOTAL_SOFTWARE_INDEXS_HARDLIMIT=159	#Increase as needed. Must be higher than TOTAL_SOFTWARE_INDEXS once calculated in Software_Arrays_Init
+	TOTAL_SOFTWARE_INDEXS_HARDLIMIT=160	#Increase as needed. Must be higher than TOTAL_SOFTWARE_INDEXS once calculated in Software_Arrays_Init
 
 	INSTALLING_INDEX=0					#Which software index is currently being installed?
 
@@ -911,7 +911,7 @@ _EOF_
 			aSOFTWARE_CATEGORY_INDEX[$index_current]=2
 					  aSOFTWARE_TYPE[$index_current]=0
 			 aSOFTWARE_REQUIRES_ALSA[$index_current]=1
-			 aSOFTWARE_ONLINEDOC_URL[$index_current]='xxxxxxxxx'
+			 aSOFTWARE_ONLINEDOC_URL[$index_current]=''
 
 		# - x86_64
 		aSOFTWARE_AVAIL_HW_ARCH[$index_current,10]=0
@@ -1032,6 +1032,18 @@ _EOF_
 		done
 
 		aSOFTWARE_AVAIL_HW_ARCH[$index_current,21]=1
+
+		#------------------
+		index_current=159
+
+				 aSOFTWARE_WHIP_NAME[$index_current]='Allo'
+				 aSOFTWARE_WHIP_DESC[$index_current]='web interface'
+			aSOFTWARE_CATEGORY_INDEX[$index_current]=2
+					  aSOFTWARE_TYPE[$index_current]=-1
+			 aSOFTWARE_ONLINEDOC_URL[$index_current]=''
+			 aSOFTWARE_REQUIRES_ALSA[$index_current]=1
+		aSOFTWARE_REQUIRES_WEBSERVER[$index_current]=1
+ 			aSOFTWARE_REQUIRES_MYSQL[$index_current]=1
 
 
 		#BitTorrent
@@ -2937,6 +2949,26 @@ _EOF_
 		#------------
 		#Specials
 		local index=0
+
+		#Additional Software required by Allo Web Interface
+		if (( ${aSOFTWARE_INSTALL_STATE[159]} == 1 )); then
+
+			aSOFTWARE_INSTALL_STATE[37]=1 # Shairport Sync
+
+			if (( $HW_MODEL == 70 )); then
+
+				aSOFTWARE_INSTALL_STATE[60]=1 # WiFi Hotspot
+
+			fi
+
+			#aSOFTWARE_INSTALL_STATE[80]=1 # LLMP
+			aSOFTWARE_INSTALL_STATE[121]=1 # Roon Bridge
+			aSOFTWARE_INSTALL_STATE[124]=1 # NAA Daemon
+			#aSOFTWARE_INSTALL_STATE[128]=1 # MPD
+			aSOFTWARE_INSTALL_STATE[129]=1 # O!MPD
+			#aSOFTWARE_INSTALL_STATE[152]=1 # Avahi (pulled in by O!MPD)
+
+		fi
 
 		#Software that requires Avahi-Daemon
 		index=152
@@ -6519,7 +6551,7 @@ _EOF_
 
 			Banner_Installing
 
-			local version='2.2.1'
+			local version='2.3.0'
 
 			INSTALL_URL_ADDRESS="https://github.com/sabnzbd/sabnzbd/archive/$version.zip"
 
@@ -6966,6 +6998,28 @@ _EOF_
 			# Create default data directory & grant minio-user proper access
 			mkdir "$FP_DIETPI_USERDATA_DIRECTORY"/minio-data
 
+
+			fi
+
+		fi
+
+		#Allo Web Interface
+		INSTALLING_INDEX=159
+		if (( ${aSOFTWARE_INSTALL_STATE[$INSTALLING_INDEX]} == 1 )); then
+
+			Banner_Installing
+
+			INSTALL_URL_ADDRESS='http://dietpi.com/downloads/binaries/all/allo_web_interface_sparky.7z'
+			/DietPi/dietpi/func/check_connection "$INSTALL_URL_ADDRESS"
+			if (( $? == 0 )); then
+
+				wget "$INSTALL_URL_ADDRESS" -O package.7z
+				7z x -y package.7z -o/var/www/
+				rm package.7z
+
+			else
+
+				Error_NoConnection_NoInstall
 
 			fi
 
@@ -11496,6 +11550,7 @@ _EOF_
 			# when service is started at /home/homeassistant/.homeassistant
 			mkdir "$FP_DIETPI_USERDATA_DIRECTORY"/homeassistant
 			ln -sf "$FP_DIETPI_USERDATA_DIRECTORY"/homeassistant /home/homeassistant/.homeassistant
+
 		fi
 		#-------------------------------------------------------------------
 
@@ -11525,6 +11580,75 @@ _EOF_
 
 		fi
 
+		#Allo Config
+		INSTALLING_INDEX=159
+		if (( ${aSOFTWARE_INSTALL_STATE[$INSTALLING_INDEX]} == 1 )); then
+
+			/DietPi/dietpi/func/create_mysql_db allo_db dietpi root dietpi
+			mysql -u root -pdietpi allo_db < /var/www/allo_db.sql
+			rm /var/www/allo_db.sql
+
+			# - Redirect to web interface by default:
+			rm /var/www/index.htm*
+			cat << _EOF_ > /var/www/index.php
+<?php
+/* Redirect to allo web interface */
+\$host  = \$_SERVER['HTTP_HOST'];
+\$uri   = rtrim(dirname(\$_SERVER['PHP_SELF']), '/\\\\');
+\$extra = 'index.php';
+header("Location: http://\$host\$uri/allo/public/\$extra");
+exit;
+?>
+_EOF_
+
+			#SPARKY ONLY - Auto detect eth adapter
+			if (( $HW_MODEL == 70 )); then
+
+				# - Disable onboard ETH if adapter found
+				cat << _EOF_ > /etc/systemd/system/sparky_eth_controller.service
+[Unit]
+Description=Sparky auto detect and set onboard ETH/USB ETH
+After=network.target networking.service
+
+[Service]
+Type=simple
+RemainAfterExit=yes
+ExecStart=/bin/bash -c '/usr/local/bin/sparky_eth_controller.sh'
+
+[Install]
+WantedBy=multi-user.target
+_EOF_
+				systemctl daemon-reload
+				systemctl enable sparky_eth_controller.service
+
+				cat << _EOF_ > /usr/local/bin/sparky_eth_controller.sh
+#!/bin/bash
+#We need to wait until USB eth is established on USB bus. This takes much longer than onboard init and network.target network-pre.target
+sleep 20
+# - Set USB ETH if found
+if (( \$(ifconfig -a | grep -ci -m1 'eth1') )); then
+
+	echo -e "blacklist ethernet" > /etc/modprobe.d/disable_sparkysbc_ethernet.conf
+	rm /etc/udev/rules.d/70-persistent-net.rules &> /dev/null
+	rm /etc/udev/rules.d/70-persistant-net.rules &> /dev/null
+	reboot
+
+# - Enable onboard ETH if no adapter found
+elif (( ! \$(ifconfig -a | grep -ci -m1 'eth0') )); then
+
+	rm /etc/modprobe.d/disable_sparkysbc_ethernet.conf &> /dev/null
+	rm /etc/udev/rules.d/70-persistent-net.rules &> /dev/null
+	rm /etc/udev/rules.d/70-persistant-net.rules &> /dev/null
+	reboot
+
+fi
+_EOF_
+
+				chmod +x /usr/local/bin/sparky_eth_controller.sh
+
+			fi
+
+		fi
 
 	}
 
@@ -12465,6 +12589,10 @@ _EOF_
 			grep -v "minio" /DietPi/dietpi/.dietpi-services_include > /DietPi/dietpi/.dietpi-services_include.temp
 			mv /DietPi/dietpi/.dietpi-services_include.temp /DietPi/dietpi/.dietpi-services_include
 
+		elif (( $1 == 159 )); then
+
+			rm -R /var/www/allo
+			mysqladmin -u root -p"$GLOBAL_PW" drop allo -f
 
 
 		#----------------------------------------------------------------------
