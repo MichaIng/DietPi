@@ -247,7 +247,7 @@ _EOF_
 
 	fi
 
-	#Run Instalation Flag (1 = run installs)
+	#Run Installation Flag (1 = run installs)
 	GOSTARTINSTALL=0
 	INSTALL_URL_ADDRESS=""
 	INSTALL_DESCRIPTION='DietPi'
@@ -1197,8 +1197,8 @@ _EOF_
 		#------------------
 		index_current=114
 
-				 aSOFTWARE_WHIP_NAME[$index_current]='NextCloud'
-				 aSOFTWARE_WHIP_DESC[$index_current]='your very own cloud (eg: dropbox)'
+				 aSOFTWARE_WHIP_NAME[$index_current]='Nextcloud'
+				 aSOFTWARE_WHIP_DESC[$index_current]='A safe home for all your data'
 			aSOFTWARE_CATEGORY_INDEX[$index_current]=4
 					  aSOFTWARE_TYPE[$index_current]=0
 		aSOFTWARE_REQUIRES_WEBSERVER[$index_current]=1
@@ -3194,7 +3194,7 @@ _EOF_
 	#apt-get install -f
 	AGF(){
 
-		DEBIAN_FRONTEND=noninteractive $APT_BINARY install -f -y --force-yes 2>&1 | tee "$FP_APT_LOG"
+		DEBIAN_FRONTEND=noninteractive $APT_BINARY install -f -y $force_options 2>&1 | tee "$FP_APT_LOG"
 
 		local result=${PIPESTATUS[0]}
 		if (( $result != 0 )); then
@@ -3577,7 +3577,7 @@ _EOF_
 			debconf-set-selections <<< "mysql-server mysql-server/root_password password $GLOBAL_PW"
 			debconf-set-selections <<< "mysql-server mysql-server/root_password_again password $GLOBAL_PW"
 
-			AGI mysql-server mysql-client
+			AGI mysql-server
 
 			# Fix depricated key_buffer -> key_buffer_size per MySQL 5.x notification
 			sed -i 's/^key_buffer[[:space:]]/key_buffer_size /g' /etc/mysql/my.cnf
@@ -3596,7 +3596,7 @@ _EOF_
 			debconf-set-selections <<< "mysql-server mysql-server/root_password password $GLOBAL_PW"
 			debconf-set-selections <<< "mysql-server mysql-server/root_password_again password $GLOBAL_PW"
 
-			AGI mariadb-server mariadb-client
+			AGI mariadb-server
 
 		fi
 
@@ -3666,8 +3666,16 @@ _EOF_
 			fi
 
 			if (( ${aSOFTWARE_INSTALL_STATE[88]} >= 1 )); then
-
-				AGI "$php_package_name"-mysqlnd
+				
+				if (( $DISTRO < 4 )); then
+					#For <= Jessie, php5-mysqlnd provides the newer mysql client libraries compared to php5-mysql.
+					AGI "$php_package_name"-mysqlnd
+				
+				else
+					#For >= Stretch, php(7.X)-mysqlnd does not exist, thus php-mysql need to be installed: https://packages.debian.org/de/stretch/php-mysql
+					AGI "$php_package_name"-mysql
+					
+				fi
 
 			fi
 
@@ -8377,10 +8385,185 @@ _EOF_
 
 		fi
 
-		#NextCloud
+		#Nextcloud
 		INSTALLING_INDEX=114
 		if (( ${aSOFTWARE_INSTALL_STATE[$INSTALLING_INDEX]} == 1 )); then
+		
+			#If Apache webserver is used, make sure all necessary Apache modules are enabled: https://docs.nextcloud.com/server/12/admin_manual/installation/source_installation.html#additional-apache-configurations
+			if (( ${aSOFTWARE_INSTALL_STATE[83]} >= 1 )); then
+				a2enmod rewrite headers env dir mime
+			fi
+			
+			#Make sure all necessary PHP modules are enabled: https://docs.nextcloud.com/server/12/admin_manual/installation/source_installation.html#prerequisites-for-manual-installation
+			AGI "$php_package_name"-intl
+			${php_package_name}enmod ctype curl dom fileinfo gd iconv intl json mbstring posix simplexml xmlwriter xmlreader zip pdo_mysql exif opcache apcu
+			
+			#Create Nextcloud specific webserver + PHP config.
+			#Apache: https://docs.nextcloud.com/server/12/admin_manual/installation/source_installation.html#apache-web-server-configuration
+			if (( ${aSOFTWARE_INSTALL_STATE[83]} >= 1 )); then
+				cat << _EOF_ > /etc/apache2/sites-available/nextcloud.conf
+Alias /nextcloud "/var/www/nextcloud/"
 
+<Directory /var/www/nextcloud/>
+        Options +FollowSymlinks
+        AllowOverride All
+
+        <IfModule mod_dav.c>
+                Dav off
+        </IfModule>
+
+        SetEnv HOME /var/www/nextcloud
+        SetEnv HTTP_HOME /var/www/nextcloud
+
+	# OPCache configuration: https://docs.nextcloud.com/server/12/admin_manual/configuration_server/server_tuning.html?highlight=opcache#enable-php-opcache
+	#php_admin_value opcache.enable 1 //This would produce an error here and is enabled by default anyway: https://support.plesk.com/hc/en-us/articles/115001622189-A-lot-of-errors-in-php-fpm-log-ERROR-Unable-to-set-php-value-opcache-enable-
+	php_admin_value opcache.enable_cli 1
+	php_admin_value opcache.interned_strings_buffer 8
+	php_admin_value opcache.max_accelerated_files 10000
+	php_admin_value opcache.memory_consumption 128
+	php_admin_value opcache.save_comments 1
+	php_admin_value opcache.revalidate_freq 1
+
+	# MySQL/MariaDB configuration: https://docs.nextcloud.com/server/12/admin_manual/configuration_database/linux_database_configuration.html#configuring-a-mysql-or-mariadb-database
+	php_admin_value mysql.allow_local_infile 1
+	php_admin_value mysql.allow_persistent 1
+	php_admin_value mysql.cache_size 2000
+	php_admin_value mysql.max_persistent -1
+	php_admin_value mysql.max_links -1
+	php_admin_value mysql.default_port 0
+	php_admin_value mysql.default_socket /var/run/mysqld/mysqld.sock
+	#php_admin_value mysql.default_host
+	#php_admin_value mysql.default_user
+	#php_admin_value mysql.default_password
+	php_admin_value mysql.connect_timeout 60
+	php_admin_value mysql.trace_mode 0
+
+	# APCu configuration
+	php_admin_value apc.enable_cli 1 #Otherwise cron.php would produce an info entry in Nextcloud log.
+
+</Directory>
+_EOF_
+
+				a2ensite nextcloud
+			
+			fi
+			
+			#Nginx
+			if (( ${aSOFTWARE_INSTALL_STATE[85]} >= 1 )); then
+				cat << _EOF_ > /etc/nginx/sites-available/nextcloud.conf
+    location = /.well-known/carddav {
+      return 301 $scheme://$host/nextcloud/remote.php/dav;
+    }
+    location = /.well-known/caldav {
+      return 301 $scheme://$host/nextcloud/remote.php/dav;
+    }
+
+    location /.well-known/acme-challenge { }
+
+    location ^~ /nextcloud {
+
+        # set max upload size
+        client_max_body_size 512M;
+        fastcgi_buffers 64 4K;
+
+        # Enable gzip but do not remove ETag headers
+        gzip on;
+        gzip_vary on;
+        gzip_comp_level 4;
+        gzip_min_length 256;
+        gzip_proxied expired no-cache no-store private no_last_modified no_etag auth;
+        gzip_types application/atom+xml application/javascript application/json application/ld+json application/manifest+json application/rss+xml application/vnd.geo+json application/vnd.ms-fontobject application/x-font-ttf application/x-web-app-manifest+json application/xhtml+xml application/xml font/opentype image/bmp image/svg+xml image/x-icon text/cache-manifest text/css text/plain text/vcard text/vnd.rim.location.xloc text/vtt text/x-component text/x-cross-domain-policy;
+
+        # Uncomment if your server is build with the ngx_pagespeed module
+        # This module is currently not supported.
+        #pagespeed off;
+
+        location /nextcloud {
+            rewrite ^ /nextcloud/index.php$uri;
+        }
+
+        location ~ ^/nextcloud/(?:build|tests|config|lib|3rdparty|templates|data)/ {
+            deny all;
+        }
+        location ~ ^/nextcloud/(?:\.|autotest|occ|issue|indie|db_|console) {
+            deny all;
+        }
+
+        location ~ ^/nextcloud/(?:index|remote|public|cron|core/ajax/update|status|ocs/v[12]|updater/.+|ocs-provider/.+)\.php(?:$|/) {
+            fastcgi_split_path_info ^(.+\.php)(/.*)$;
+            include fastcgi_params;
+            fastcgi_param SCRIPT_FILENAME $document_root$fastcgi_script_name;
+            fastcgi_param PATH_INFO $fastcgi_path_info;
+            fastcgi_param HTTPS on;
+            #Avoid sending the security headers twice
+            fastcgi_param modHeadersAvailable true;
+            fastcgi_param front_controller_active true;
+            fastcgi_pass php-handler;
+            fastcgi_intercept_errors on;
+            fastcgi_request_buffering off;
+        }
+
+        location ~ ^/nextcloud/(?:updater|ocs-provider)(?:$|/) {
+            try_files $uri/ =404;
+            index index.php;
+        }
+
+        # Adding the cache control header for js and css files
+        # Make sure it is BELOW the PHP block
+        location ~ \.(?:css|js|woff|svg|gif)$ {
+            try_files $uri /nextcloud/index.php$uri$is_args$args;
+            add_header Strict-Transport-Security "max-age=15768000; includeSubDomains; preload;";
+            add_header Cache-Control "public, max-age=15778463";
+	    add_header X-Content-Type-Options nosniff;
+            add_header X-XSS-Protection "1; mode=block";
+            add_header X-Robots-Tag none;
+            add_header X-Download-Options noopen;
+            add_header X-Permitted-Cross-Domain-Policies none;
+            # Optional: Don't log access to assets
+            access_log off;
+        }
+
+        location ~ \.(?:png|html|ttf|ico|jpg|jpeg)$ {
+            try_files $uri /nextcloud/index.php$uri$is_args$args;
+            # Optional: Don't log access to other assets
+            access_log off;
+        }
+	
+	# Setting PHP values by using this method: http://php.net/manual/en/install.fpm.configuration.php Example #2
+	# OPCache configuration: https://docs.nextcloud.com/server/12/admin_manual/configuration_server/server_tuning.html?highlight=opcache#enable-php-opcache
+	#set $php_value "opcache.enable=1"; //This would produce an error here and is enabled by default anyway: https://support.plesk.com/hc/en-us/articles/115001622189-A-lot-of-errors-in-php-fpm-log-ERROR-Unable-to-set-php-value-opcache-enable-
+	set $php_value "opcache.enable_cli=1";
+	set $php_value "$php_value \n opcache.interned_strings_buffer=8";
+	set $php_value "$php_value \n opcache.max_accelerated_files=10000";
+	set $php_value "$php_value \n opcache.memory_consumption=128";
+	set $php_value "$php_value \n opcache.save_comments=1";
+	set $php_value "$php_value \n opcache.revalidate_freq=1";
+
+	# MySQL/MariaDB configuration: https://docs.nextcloud.com/server/12/admin_manual/configuration_database/linux_database_configuration.html#configuring-a-mysql-or-mariadb-database
+	set $php_value "$php_value \n mysql.allow_local_infile=1";
+	set $php_value "$php_value \n mysql.allow_persistent=1";
+	set $php_value "$php_value \n mysql.cache_size=2000";
+	set $php_value "$php_value \n mysql.max_persistent=-1";
+	set $php_value "$php_value \n mysql.max_links=-1";
+	set $php_value "$php_value \n mysql.default_port=0";
+	set $php_value "$php_value \n mysql.default_socket=/var/run/mysqld/mysqld.sock";
+	#set $php_value "$php_value \n mysql.default_host=";
+	#set $php_value "$php_value \n mysql.default_user=";
+	#set $php_value "$php_value \n mysql.default_password=";
+	set $php_value "$php_value \n mysql.connect_timeout=60";
+	set $php_value "$php_value \n mysql.trace_mode=0";
+
+	# APCu configuration
+	set $php_value "$php_value \n apc.enable_cli=1"; #Otherwise cron.php would produce an info entry in Nextcloud log.
+	
+	fastcgi_param PHP_ADMIN_VALUE $php_value;
+    }
+_EOF_
+
+				ln -s /etc/nginx/sites-available/nextcloud.conf /etc/nginx/sites-enabled/
+
+			fi
+			
 			mkdir -p "$FP_DIETPI_USERDATA_DIRECTORY"/nextcloud_data
 
 			Install_Apply_Permissions &> /dev/null
@@ -8397,9 +8580,7 @@ _EOF_
 			# - Create DB v11: https://github.com/Fourdee/DietPi/issues/647#issuecomment-267019815
 			/DietPi/dietpi/func/create_mysql_db nextcloud "$GLOBAL_PW" root "$GLOBAL_PW"
 
-			cd /var/www/nextcloud
-			sudo -u www-data php occ maintenance:install --no-interaction --database "mysql" --database-name "nextcloud" --database-user "root" --database-pass "$GLOBAL_PW" --admin-user "$username" --admin-pass "$GLOBAL_PW" --data-dir "$FP_DIETPI_USERDATA_DIRECTORY/nextcloud_data"
-			cd "$HOME"
+			sudo -u www-data php /var/www/nextcloud/occ maintenance:install --no-interaction --database "mysql" --database-name "nextcloud" --database-user "root" --database-pass "$GLOBAL_PW" --admin-user "$username" --admin-pass "$GLOBAL_PW" --data-dir "$FP_DIETPI_USERDATA_DIRECTORY/nextcloud_data"
 
 			#Disable trusted_domains.
 			if (( ! $(cat /var/www/nextcloud/config/config.php | grep -ci -m1 "1 => '*'") )); then
@@ -8422,7 +8603,7 @@ _EOF_
 			# - APCu Memcache
 			if (( ! $(cat /var/www/nextcloud/config/config.php | grep -ci -m1 "'memcache.local'") )); then
 
-				sed -i "/'version'/a 'memcache.local' => '\\\OC\\\Memcache\\\APCu'," /var/www/nextcloud/config/config.php
+				sed -i "/'version'/a 'memcache.local' => '\OC\Memcache\APCu'," /var/www/nextcloud/config/config.php
 
 			fi
 
@@ -11907,6 +12088,10 @@ _EOF_
 			systemctl start mysql
 			mysqladmin -u root -p"$GLOBAL_PW" drop nextcloud -f
 			rm -R /var/www/nextcloud
+			a2dissite nextcloud 2>/dev/null
+			rm /etc/apache2/sites-available/nextcloud.conf 2>/dev/null
+			rm /etc/nginx/sites-enabled/nextcloud.conf 2>/dev/null
+			rm /etc/nginx/sites-available/nextcloud.conf 2>/dev/null
 
 		elif (( $1 == 115 )); then
 
