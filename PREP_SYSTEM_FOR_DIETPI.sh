@@ -87,7 +87,11 @@ echo -e "CONF_SWAPSIZE=0" > /etc/dphys-swapfile
 apt-get install -y gnupg net-tools cron rfkill ca-certificates locales apt-transport-https ethtool p7zip-full hfsplus iw debconf-utils xz-utils fbset wpasupplicant resolvconf bc dbus bzip2 psmisc bash-completion cron whiptail sudo ntp ntfs-3g dosfstools parted hdparm usbutils zip htop wput wget fake-hwclock dphys-swapfile curl unzip console-setup console-data console-common keyboard-configuration wireless-tools wireless-regdb crda --no-install-recommends
 
 #??? Grub/intel+amd microcode firmware x86_64 native
-apt-get install -y grub2 #grub-efi-amd64-bin
+#	MBR
+apt-get install -y grub2
+#	UEFI
+apt-get install -y grub-common grub-efi-amd64 grub-efi-amd64-bin grub2-common
+
 apt-get install firmware-linux-nonfree -y
 
 #??? bluetooth if onboard device / RPI
@@ -112,6 +116,7 @@ userdel -f test #armbian
 userdel -f odroid
 userdel -f rock64
 userdel -f linaro #ASUS TB
+userdel -f dietpi
 
 #Remove folders (now in finalise script)
 
@@ -460,7 +465,11 @@ LANG=en_GB.UTF-8
 _EOF_
 
 #Prefer to use wlan/eth naming for networked devices (eg: stretch)
-ln -s /dev/null /etc/systemd/network/99-default.link
+ln -sf /dev/null /etc/systemd/network/99-default.link
+#??? x86_64
+#	kernel cmd line with GRUB
+#	/etc/default/grub [replace] GRUB_CMDLINE_LINUX="net.ifnames=0"
+#								GRUB_TIMEOUT=0
 
 
 #??? Native PC, add i386 support by default
