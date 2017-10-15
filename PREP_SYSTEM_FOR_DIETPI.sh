@@ -80,6 +80,9 @@ apt-get purge gcc-4.6-base gcc-4.7-base gcc-4.8-base libsigc++-1.2-5c2
 
 apt-get autoremove --purge -y
 
+#??? ROCK64, reinstall kernel packages:
+apt-get install linux-rock64-package
+
 apt-get dist-upgrade -y
 
 #install packages
