@@ -42,14 +42,21 @@
 	#/////////////////////////////////////////////////////////////////////////////////////
 	#Globals
 	#/////////////////////////////////////////////////////////////////////////////////////
-	FP_LOGFILE="/var/log/dietpi-letsencrypt.log"
-	FP_MONTHLY_CRON="/etc/cron.monthly/dietpi-letsencrypt"
+	DP_LOGFILE="/var/log/dietpi-letsencrypt.log"
+	DP_MONTHLY_CRON="/etc/cron.monthly/dietpi-letsencrypt"
+	DP_LETSENCRYPT_BINARY="/usr/bin/certbot"
 	DP_LETSENCRYPT_SCRIPTS="/etc/certbot_scripts"
-	DP_WEBSERVER_INDEX=0 #0=apache2 1=lighttpd 2=nginx
+	DP_WEBSERVER_INDEX=0 #0=apache2 1=lighttpd 2=nginx 3=minio
 
 	LETSENCRYPT_INSTALLED=0
-	if [ -d "$DP_LETSENCRYPT_SCRIPTS" ]; then
-		LETSENCRYPT_INSTALLED=1
+	if [[ $DISTRO == 4 ]]; then
+		if [ -f "$DP_LETSENCRYPT_BINARY" ]; then
+			LETSENCRYPT_INSTALLED=1
+		fi
+	else
+		if [ -d "$DP_LETSENCRYPT_SCRIPTS" ]; then
+			LETSENCRYPT_INSTALLED=1
+		fi
 	fi
 
 	LETSENCRYPT_DOMAIN="mydomain.com"
@@ -62,7 +69,11 @@
 
 		/DietPi/dietpi/func/dietpi-notify 3 "$PROGRAM_NAME" "Running cert"
 
-		cd "$DP_LETSENCRYPT_SCRIPTS"
+		if [[ ! $DISTRO == 4 ]]; then
+		
+			cd "$DP_LETSENCRYPT_SCRIPTS"
+		
+		fi
 
 		#Conditions that must be met before allowing run
 		local run_conditions_met=1
@@ -80,10 +91,15 @@
 			DP_WEBSERVER_INDEX=1
 			/DietPi/dietpi/func/dietpi-notify 0 "Lighttpd webserver detected"
 
-		# elif (( $(ps aux | grep -ci -m1 '[n]ginx') )); then
+		elif (( $(ps aux | grep -ci -m1 '[n]ginx') )); then
 
-			#/DietPi/dietpi/func/dietpi-notify 0 "Nginx webserver detected"
-			# DP_WEBSERVER_INDEX=2
+			DP_WEBSERVER_INDEX=2
+			/DietPi/dietpi/func/dietpi-notify 0 "Nginx webserver detected"
+
+		elif (( $(ps aux | grep -ci -m1 '[m]inio') )); then
+
+			DP_WEBSERVER_INDEX=3
+			/DietPi/dietpi/func/dietpi-notify 0 "Minio S3 server detected"
 
 		else
 
@@ -94,7 +110,7 @@
 		#Failed. No compatible webserver is currently running
 		if (( ! $run_conditions_met )); then
 
-			echo -e "Error: No compatible and/or active webserver was found. Aborting." >> "$FP_LOGFILE"
+			echo -e "Error: No compatible and/or active webserver was found. Aborting." >> "$DP_LOGFILE"
 			if (( $INPUT == 0 )); then
 
 				whiptail --title "Error" --msgbox "Error: No compatible and/or active webserver was found. Aborting." --backtitle "$PROGRAM_NAME" 8 60
@@ -108,20 +124,20 @@
 			#apache2
 			if (( $DP_WEBSERVER_INDEX == 0 )); then
 
-				local fp_defaultsite="/etc/apache2/sites-available/000-default.conf"
+				local dp_defaultsite="/etc/apache2/sites-available/000-default.conf"
 
 				#Add ServerName if it doesnt exist. This is required to prevent letsencrypt compaining about vhost with no domain.
-				if (( ! $(cat "$fp_defaultsite" | grep -ci -m1 'ServerName') )); then
+				if (( ! $(cat "$dp_defaultsite" | grep -ci -m1 'ServerName') )); then
 
-					sed -i "/ServerAdmin /a ServerName" "$fp_defaultsite"
+					sed -i "/ServerAdmin /a ServerName" "$dp_defaultsite"
 
 					#log
-					echo -e "ServerName entry not found in $fp_defaultsite. Adding it now." >> "$FP_LOGFILE"
+					echo -e "ServerName entry not found in $dp_defaultsite. Adding it now." >> "$DP_LOGFILE"
 
 				fi
 
 				#Apply domain name
-				sed -i "/ServerName/c\        ServerName $LETSENCRYPT_DOMAIN" "$fp_defaultsite"
+				sed -i "/ServerName/c\        ServerName $LETSENCRYPT_DOMAIN" "$dp_defaultsite"
 
 				#Restart apache2 to apply ServerName changes.
 				systemctl restart apache2
@@ -180,13 +196,87 @@ _EOF_
 
 				/etc/init.d/lighttpd force-reload
 
+
+			#------------------------------------------------------------------------------------------------------
+			# Nginx
+			
+			elif (( $DP_WEBSERVER_INDEX == 2 )); then
+			
+				local nginx_defaultsite="/etc/nginx/sites-available/default"
+				
+				# Apply domain name
+				sed -i "/server_name/c\        server_name $LETSENCRYPT_DOMAIN;" "$nginx_defaultsite"
+				
+				#Restart nginx to apply ServerName changes.
+				systemctl restart nginx
+
+				local cli_redirect="--no-redirect"
+			
+				if (( $LETSENCRYPT_REDIRECT )); then
+
+					cli_redirect="--redirect"
+
+				fi
+
+				#Cert me up Nginx
+				certbot --nginx --duplicate --agree-tos $cli_redirect --rsa-key-size $LETSENCRYPT_KEYSIZE --email $LETSENCRYPT_EMAIL -d $LETSENCRYPT_DOMAIN
+				
+				
+			#------------------------------------------------------------------------------------------------------
+			#Minio
+			elif (( $DP_WEBSERVER_INDEX == 3 )); then
+				# - Cert me up
+				/DietPi/dietpi/dietpi-services stop
+
+				./certbot-auto certonly --standalone --preferred-challenges tls-sni --staple-ocsp --agree-tos $cli_redirect --rsa-key-size $LETSENCRYPT_KEYSIZE --email $LETSENCRYPT_EMAIL -d $LETSENCRYPT_DOMAIN
+
+				# Locate them correctly (THIS didn't work as symlinks)
+				cp /etc/letsencrypt/live/$LETSENCRYPT_DOMAIN/fullchain.pem /home/minio-user/.minio/certs/public.crt
+				cp /etc/letsencrypt/live/$LETSENCRYPT_DOMAIN/privkey.pem /home/minio-user/.minio/certs/private.key
+
+				# Own those certs!
+				chown minio-user:minio-user /home/minio-user/.minio/certs/public.crt
+				chown minio-user:minio-user /home/minio-user/.minio/certs/private.key
+
+				# Add SSL to config file
+				grep -v "MINIO_OPTS" /etc/default/minio > /etc/default/minio.temp1
+				grep -v "port" /etc/default/minio.temp1 > /etc/default/minio.temp2
+				rm /etc/default/minio.temp1
+				mv /etc/default/minio.temp2 /etc/default/minio
+				cat << _EOF_ >> /etc/default/minio
+# Use if you want to run Minio on a custom port.
+MINIO_OPTS="--address :443"
+_EOF_
+
+				# Allow SSL binding for non root user
+				setcap CAP_NET_BIND_SERVICE=+eip /usr/local/bin/minio
+
+				# Create renewl script
+				cat << _EOF_ > /home/minio-user/.minio/dietpi-cert-renewl.sh
+# Minio only works with copied and owned certs. Upon renewal the new certs needs to be copied and re-owned
+systemctl stop minio.service
+
+# Copy to correct Location
+cp /etc/letsencrypt/live/$LETSENCRYPT_DOMAIN/fullchain.pem /home/minio-user/.minio/certs/public.crt
+cp /etc/letsencrypt/live/$LETSENCRYPT_DOMAIN/privkey.pem /home/minio-user/.minio/certs/private.key
+
+# Re-Own those certs!
+chown minio-user:minio-user /home/minio-user/.minio/certs/public.crt
+chown minio-user:minio-user /home/minio-user/.minio/certs/private.key
+
+systemctl start minio.service
+_EOF_
+
+			# Change permissions on renewal script
+			chmod +x /home/minio-user/.minio/dietpi-cert-renewl.sh
 			fi
+
 
 			#------------------------------------------------------------------------------------------------------
 			#ALL | Create cron job
 			if (( $LETSENCRYPT_AUTORENEW )); then
 
-				cat << _EOF_ > "$FP_MONTHLY_CRON"
+				cat << _EOF_ > "$DP_MONTHLY_CRON"
 #!/bin/bash
 {
 	#////////////////////////////////////
@@ -195,20 +285,26 @@ _EOF_
 	#////////////////////////////////////
 	#
 	# Info:
-	# - Location $FP_MONTHLY_CRON
+	# - Location $DP_MONTHLY_CRON
 	#
 	#////////////////////////////////////
 
 	#----------------------------------------------------------------
 	# Main Loop
 	#----------------------------------------------------------------
-	/DietPi/dietpi/dietpi-letsencrypt 1 &>> $FP_LOGFILE
+	/DietPi/dietpi/dietpi-letsencrypt 1 &>> $DP_LOGFILE
+
+	# Minio specific applications
+	if (( $(ps aux | grep -ci -m1 '[m]inio') )); then
+		/home/minio-user/.minio/dietpi-cert-renewl.sh
+	fi
+
 	#----------------------------------------------------------------
 	exit
 	#----------------------------------------------------------------
 }
 _EOF_
-				chmod +x "$FP_MONTHLY_CRON"
+				chmod +x "$DP_MONTHLY_CRON"
 
 			fi
 
@@ -230,23 +326,23 @@ _EOF_
 	#/////////////////////////////////////////////////////////////////////////////////////
 	# Settings File
 	#/////////////////////////////////////////////////////////////////////////////////////
-	FP_SETTINGS="/DietPi/dietpi/.dietpi-letsencrypt"
+	DP_SETTINGS="/DietPi/dietpi/.dietpi-letsencrypt"
 
 	Read_Settings_File(){
 
 		local sed_index=1
 
-		LETSENCRYPT_DOMAIN=$(sed -n "$sed_index"p $FP_SETTINGS);((sed_index++))
-		LETSENCRYPT_EMAIL=$(sed -n "$sed_index"p $FP_SETTINGS);((sed_index++))
-		LETSENCRYPT_REDIRECT=$(sed -n "$sed_index"p $FP_SETTINGS);((sed_index++))
-		LETSENCRYPT_AUTORENEW=$(sed -n "$sed_index"p $FP_SETTINGS);((sed_index++))
-		LETSENCRYPT_KEYSIZE=$(sed -n "$sed_index"p $FP_SETTINGS);((sed_index++))
+		LETSENCRYPT_DOMAIN=$(sed -n "$sed_index"p $DP_SETTINGS);((sed_index++))
+		LETSENCRYPT_EMAIL=$(sed -n "$sed_index"p $DP_SETTINGS);((sed_index++))
+		LETSENCRYPT_REDIRECT=$(sed -n "$sed_index"p $DP_SETTINGS);((sed_index++))
+		LETSENCRYPT_AUTORENEW=$(sed -n "$sed_index"p $DP_SETTINGS);((sed_index++))
+		LETSENCRYPT_KEYSIZE=$(sed -n "$sed_index"p $DP_SETTINGS);((sed_index++))
 
 	}
 
 	Write_Settings_File(){
 
-		cat << _EOF_ > "$FP_SETTINGS"
+		cat << _EOF_ > "$DP_SETTINGS"
 $LETSENCRYPT_DOMAIN
 $LETSENCRYPT_EMAIL
 $LETSENCRYPT_REDIRECT
@@ -370,7 +466,7 @@ _EOF_
 	# Main Loop
 	#/////////////////////////////////////////////////////////////////////////////////////
 	#Load Settings file. Generate if required.
-	if [ ! -f "$FP_SETTINGS" ]; then
+	if [ ! -f "$DP_SETTINGS" ]; then
 
 		Write_Settings_File
 
@@ -393,7 +489,7 @@ _EOF_
 
 		else
 
-			echo -e "Error: Lets encrypt scripts not installed ( $DP_LETSENCRYPT_SCRIPTS )." >> "$FP_LOGFILE"
+			echo -e "Error: Lets encrypt scripts not installed ( $DP_LETSENCRYPT_SCRIPTS )." >> "$DP_LOGFILE"
 
 		fi
 
