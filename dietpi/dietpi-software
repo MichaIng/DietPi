@@ -7900,28 +7900,56 @@ _EOF_
 		INSTALLING_INDEX=157
 		if (( ${aSOFTWARE_INSTALL_STATE[$INSTALLING_INDEX]} == 1 )); then
 
-			Banner_Installing
+            Banner_Installing
 
-			AGI python3 python3-pip libssl-dev cmake libc-ares-dev uuid-dev daemon curl libgnutls28-dev libgnutlsxx28 nmap net-tools sudo libglib2.0-dev cython3 libudev-dev python3-sphinx python3-setuptools libmysqlclient-dev swig libssl-dev python-dev libusb-1.0-0 gcc python3-dev libssl-dev libffi-dev
+            HA_USER="homeassistant"
+            HA_USERROOT="/home/$HA_USER"
+            HA_SRVROOT="/srv/homeassistant"
+            HA_PYENV_ACTIVATION="export PATH=\"$HA_USERROOT/.pyenv/bin:\$PATH\"; eval \"\$(pyenv init -)\"; eval \"\$(pyenv virtualenv-init -)\""
+            HA_PYTHON_VERSION="3.6.3"
 
-			pip3 install --upgrade virtualenv
+            /DietPi/dietpi/func/dietpi-notify 2 "HA_USER: $HA_USER"
+            /DietPi/dietpi/func/dietpi-notify 2 "HA_USERROOT: $HA_USERROOT"
+            /DietPi/dietpi/func/dietpi-notify 2 "HA_SRVROOT: $HA_SRVROOT"
+            /DietPi/dietpi/func/dietpi-notify 2 "HA_PYENV_ACTIVATION: $HA_PYENV_ACTIVATION"
+            /DietPi/dietpi/func/dietpi-notify 2 "HA_PYTHON_VERSION: $HA_PYTHON_VERSION"
 
-			adduser --system homeassistant
-			addgroup homeassistant
-			usermod -G dialout -a homeassistant
-			# this allows the dietpi user to edit the files along with HA.
-			usermod -G dietpi -a homeassistant
-			mkdir /srv/homeassistant
-			chown homeassistant:homeassistant /srv/homeassistant
+            # Install needed libraries
+            AGI libssl-dev git cmake libc-ares-dev uuid-dev daemon curl libgnutls28-dev libgnutlsxx28 nmap net-tools sudo libglib2.0-dev libudev-dev libmysqlclient-dev swig libssl-dev libusb-1.0-0 gcc libssl-dev libffi-dev libbz2-dev zlib1g-dev libreadline-dev libsqlite3-dev libncurses5-dev libncursesw5-dev
 
-			su -s /bin/bash homeassistant <<EOF
-virtualenv -p python3 /srv/homeassistant
-EOF
-			su -s /bin/bash homeassistant <<EOF
-source /srv/homeassistant/bin/activate
-pip3 install colorlog PyMySQL mysqlclient
-pip3 install --upgrade homeassistant
-EOF
+            # Setup the user account information
+            adduser --system $HA_USER
+            addgroup $HA_USER
+            usermod -G dialout -a $HA_USER
+            # this allows the dietpi user to edit the files along with HA.
+            usermod -G dietpi -a $HA_USER
+            mkdir $HA_SRVROOT
+            chown $HA_USER:$HA_USER $HA_SRVROOT
+
+            # Install pyenv
+            su --shell /bin/bash --command "cd $HA_USERROOT; curl -L https://raw.githubusercontent.com/pyenv/pyenv-installer/master/bin/pyenv-installer | bash" $HA_USER
+
+            # Install Python which is needed for HA. 
+            su --shell /bin/bash --command "cd $HA_USERROOT; $HA_PYENV_ACTIVATION; pyenv install $HA_PYTHON_VERSION" $HA_USER
+
+            # Make the virtual environment. 
+            su --shell /bin/bash --command "cd $HA_SRVROOT; $HA_PYENV_ACTIVATION; pyenv virtualenv $HA_PYTHON_VERSION homeassistant-$HA_PYTHON_VERSION" $HA_USER
+            su --shell /bin/bash --command "cd $HA_SRVROOT; $HA_PYENV_ACTIVATION; pyenv local homeassistant-$HA_PYTHON_VERSION" $HA_USER
+            su --shell /bin/bash --command "cd $HA_SRVROOT; $HA_PYENV_ACTIVATION; pyenv local" $HA_USER
+            
+            # Install Home Assistant and extra modules. 
+            su --shell /bin/bash --command "cd $HA_SRVROOT; $HA_PYENV_ACTIVATION; pyenv activate homeassistant-$HA_PYTHON_VERSION; pip3 install colorlog PyMySQL mysqlclient" $HA_USER
+            su --shell /bin/bash --command "cd $HA_SRVROOT; $HA_PYENV_ACTIVATION; pyenv activate homeassistant-$HA_PYTHON_VERSION; pip3 install --upgrade homeassistant" $HA_USER
+
+            # Generate the scripts to launch HA using pyenv. 
+            echo '#!/bin/bash' > $HA_SRVROOT/homeassistant-start.sh
+            echo "cd $HA_SRVROOT" >> $HA_SRVROOT/homeassistant-start.sh
+            echo "$HA_PYENV_ACTIVATION" >> $HA_SRVROOT/homeassistant-start.sh
+            echo "pyenv activate homeassistant-$HA_PYTHON_VERSION" >> $HA_SRVROOT/homeassistant-start.sh
+            echo "hass -c \"$HA_USERROOT/.homeassistant\"" >> $HA_SRVROOT/homeassistant-start.sh
+            #su --shell /bin/bash --command "/srv/homeassistant/homeassistant-start.sh" homeassistant
+            chmod +x /srv/homeassistant/homeassistant-start.sh
+
 		fi
 
 		#-------------------------------------------------------------------
@@ -11855,15 +11883,15 @@ _EOF_
 		INSTALLING_INDEX=157
 		if (( ${aSOFTWARE_INSTALL_STATE[$INSTALLING_INDEX]} == 1 )); then
 
-			cat << _EOF_ > /etc/systemd/system/home-assistant.service
+            cat << _EOF_ > /etc/systemd/system/home-assistant.service
 [Unit]
 Description=Home Assistant
 After=network.target
 
 [Service]
 Type=simple
-User=%i
-ExecStart=/srv/homeassistant/bin/hass -c "/home/homeassistant/.homeassistant"
+User=homeassistant
+ExecStart=/srv/homeassistant/homeassistant-start.sh
 
 [Install]
 WantedBy=multi-user.target
@@ -12980,8 +13008,15 @@ _EOF_
 
 		elif (( $1 == 157)); then
 
-			rm -R /srv/homeassistant
-			userdel -r -f homeassistant
+            # Remove installationof HA. 
+            rm -R /srv/homeassistant
+
+            # Remove the user and all files. This removed pyenv for this user as well. 
+            userdel -r -f homeassistant
+            groupdel homeassistant
+
+            # Remove the service. 
+            rm /etc/systemd/system/home-assistant.service
 
 		elif (( $1 == 165)); then
 
