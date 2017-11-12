@@ -287,7 +287,7 @@ Before=network.target shutdown.target
 
 [Service]
 Type=oneshot
-ExecStart=/usr/bin/killall sshd && /usr/bin/killall dropbear
+ExecStart=/bin/bash -c 'killall sshd &> /dev/null; killall dropbear &> /dev/null'
 
 [Install]
 WantedBy=poweroff.target halt.target reboot.target
@@ -437,6 +437,7 @@ sed -i "/FORCE=/c\FORCE=force" /etc/default/fake-hwclock
 # echo -e "options 8192cu rtw_power_mgnt=0" > /etc/modprobe.d/8192cu.conf
 # echo -e "options 8188eu rtw_power_mgnt=0" > /etc/modprobe.d/8188eu.conf
 # echo -e "options 8189es rtw_power_mgnt=0" > /etc/modprobe.d/8189es.conf
+
 
 #Set swapfile size
 echo -e "CONF_SWAPSIZE=0" > /etc/dphys-swapfile
