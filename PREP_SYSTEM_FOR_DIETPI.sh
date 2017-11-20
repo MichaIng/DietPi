@@ -333,7 +333,7 @@ systemctl mask apt-daily.service
 systemctl mask apt-daily-upgrade.timer
 
 #/etc/sysctl.conf | Check for a previous entry before adding this
-echo -e "vm.swappiness=1" >> /etc/sysctl.d/97-dietpi.conf
+echo -e "vm.swappiness=1" > /etc/sysctl.d/97-dietpi.conf
 
 #login,
 echo -e "\n/DietPi/dietpi/login" >> /root/.bashrc
