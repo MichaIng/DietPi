@@ -1240,7 +1240,7 @@ _EOF_
 		#--------------------------------------------------------------------------------
 		index_current=47
 
-				 aSOFTWARE_WHIP_NAME[$index_current]='OwnCloud'
+				 aSOFTWARE_WHIP_NAME[$index_current]='ownCloud'
 				 aSOFTWARE_WHIP_DESC[$index_current]='your very own cloud (eg: dropbox)'
 			aSOFTWARE_CATEGORY_INDEX[$index_current]=4
 					  aSOFTWARE_TYPE[$index_current]=0
@@ -4099,13 +4099,25 @@ _EOF_
 
 		fi
 
-		#OwnCloud
+		#ownCloud
 		INSTALLING_INDEX=47
 		if (( ${aSOFTWARE_INSTALL_STATE[$INSTALLING_INDEX]} == 1 )); then
 
 			Banner_Installing
 
-			INSTALL_URL_ADDRESS='https://download.owncloud.org/download/repositories/stable/Debian_8.0/Release.key'
+			if (( $DISTRO == 3 )); then
+
+				INSTALL_URL_ADDRESS='https://download.owncloud.org/download/repositories/stable/Debian_8.0/Release.key'
+
+			elif (( $DISTRO == 4 )); then
+
+				INSTALL_URL_ADDRESS='https://download.owncloud.org/download/repositories/stable/Debian_9.0/Release.key'
+
+			else
+
+				INSTALL_URL_ADDRESS='https://download.owncloud.org/community/owncloud-latest.zip'
+
+			fi
 
 			/DietPi/dietpi/func/check_connection "$INSTALL_URL_ADDRESS"
 			#Install
@@ -4113,17 +4125,26 @@ _EOF_
 
 				if [ ! -f /etc/apt/sources.list.d/owncloud.list ]; then
 
-					wget "$INSTALL_URL_ADDRESS" -O owncloud.key
-					apt-key add - < owncloud.key
-					rm owncloud.key
+					wget "$INSTALL_URL_ADDRESS" -O owncloud.key_or_zip
+					apt-key add - < owncloud.key_or_zip &> /dev/null
+					unzip -o owncloud.key_or_zip -d /var/www &> /dev/null
+					rm owncloud.key_or_zip
 
-					echo -e "deb http://download.owncloud.org/download/repositories/stable/Debian_8.0/ /" > /etc/apt/sources.list.d/owncloud.list
+					if (( $DISTRO == 3 )); then
 
-					apt-get update
+						echo -e "deb https://download.owncloud.org/download/repositories/stable/Debian_8.0/ /" > /etc/apt/sources.list.d/owncloud.list
+						apt-get update
+
+					elif (( $DISTRO == 4 )); then
+
+						echo -e "deb https://download.owncloud.org/download/repositories/stable/Debian_9.0/ /" > /etc/apt/sources.list.d/owncloud.list
+						apt-get update
+
+					fi
 
 				fi
 
-				AGI owncloud
+				AGI owncloud-files &> /dev/null
 
 			else
 
@@ -9068,16 +9089,12 @@ _EOF_
 		INSTALLING_INDEX=47
 		if (( ${aSOFTWARE_INSTALL_STATE[$INSTALLING_INDEX]} == 1 )); then
 
-			#Symlink /usr/share/owncloud to /var/www/owncloud: https://github.com/Fourdee/DietPi/issues/1225#issuecomment-343263082
-			rm -R /var/www/owncloud &> /dev/null
-			ln -fs /usr/share/owncloud /var/www/owncloud
-
 			#Setup Data directory
 			local target_data_dir="$FP_DIETPI_USERDATA_DIRECTORY/owncloud_data"
 			mkdir -p "$target_data_dir"
 
 			#Create symlink from default owncloud/data to FP_DIETPI_USERDATA_DIRECTORY
-			local target_data_symlink="/usr/share/owncloud/data"
+			local target_data_symlink="/var/www/owncloud/data"
 			mkdir -p "$target_data_symlink" &> /dev/null
 
 			# - Copy existing data to our data location
@@ -9296,10 +9313,15 @@ _EOF_
 
 			fi
 
-			sudo -u www-data php /var/www/nextcloud/occ maintenance:install --no-interaction --database "mysql" --database-name "nextcloud" --database-user "root" --database-pass "$GLOBAL_PW" --admin-user "$username" --admin-pass "$GLOBAL_PW" --data-dir "$FP_DIETPI_USERDATA_DIRECTORY/nextcloud_data"
+			# Terminal installation:
+			# For MariaDB, temporary database admin user needs to be created, as 'root' uses unix_socket login, which cannot be accessed by sudo -u www-data.
+			mysql -uroot -p"$GLOBAL_PW" -e "grant all privileges on *.* to 'tmp_root'@'localhost' identified by '$GLOBAL_PW' with grant option"
+			sudo -u www-data php /var/www/nextcloud/occ maintenance:install --no-interaction --database "mysql" --database-name "nextcloud" --database-user "tmp_root" --database-pass "$GLOBAL_PW" --admin-user "$username" --admin-pass "$GLOBAL_PW" --data-dir "$FP_DIETPI_USERDATA_DIRECTORY/nextcloud_data"
+			mysql -uroot -p"$GLOBAL_PW" -e "drop user 'tmp_root'@'localhost'"
 
-			# Remove obsolete 'oc_admin'@'%' MySQL user:
-			mysql -uroot -p"$GLOBAL_PW" -e "drop user $(grep -m1 "'dbuser'" /var/www/nextcloud/config/config.php | awk '{print $3}' | sed "s/,//")"
+			# Removing MySQL parent user 'oc_admin'@'%' could be done, but then privileges on database has to be granted to child user 'oc_admin'@'localhost' first.
+			# We leave it, as limitation to localhost database could limit extended Nextcloud features.
+			#mysql -uroot -p"$GLOBAL_PW" -e "drop user $(grep -m1 "'dbuser'" /var/www/nextcloud/config/config.php | awk '{print $3}' | sed "s/,//")"
 
 			# Disable trusted_domains.
 			if (( ! $(cat /var/www/nextcloud/config/config.php | grep -ci -m1 "1 => '*'") )); then
@@ -9309,7 +9331,7 @@ _EOF_
 			fi
 
 			# Set CLI URL to Nextcloud sub directory:
-			sed -i "s#'http://localhost'#'http://localhost/nextcloud'#g"
+			sed -i "s#'http://localhost'#'http://localhost/nextcloud'#g" /var/www/nextcloud/config/config.php
 
 			# Owncloud/Nextcloud ignores system wide php.ini settings. Use their own config.
 			# - max upload size
@@ -13124,10 +13146,10 @@ _EOF_
 
 		elif (( $1 == 47 )); then
 
-			AGP owncloud
+			AGP owncloud-files owncloud owncloud-deps
 			systemctl start mysql
 			mysqladmin -u root -p"$GLOBAL_PW" drop owncloud -f
-			rm /etc/apt/sources.list.d/owncloud.list
+			rm /etc/apt/sources.list.d/owncloud.list $> /dev/null
 			apt-get update
 			rm -R /var/www/owncloud
 
@@ -13136,6 +13158,7 @@ _EOF_
 			systemctl start mysql
 			mysqladmin -u root -p"$GLOBAL_PW" drop nextcloud -f
 			mysql -uroot -p"$GLOBAL_PW" -e "drop user $(grep -m1 "'dbuser'" /var/www/nextcloud/config/config.php | awk '{print $3}' | sed "s/,//")@$(grep -m1 "'dbhost'" /var/www/nextcloud/config/config.php | awk '{print $3}' | sed "s/,//")"
+			mysql -uroot -p"$GLOBAL_PW" -e "drop user $(grep -m1 "'dbuser'" /var/www/nextcloud/config/config.php | awk '{print $3}' | sed "s/,//")"
 			rm -R /var/www/nextcloud
 			a2dissite nextcloud &>/dev/null
 			rm /etc/apache2/sites-available/nextcloud.conf &>/dev/null
