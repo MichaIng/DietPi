@@ -3499,8 +3499,8 @@ _EOF_
 	#   This has to be the same number as index_current for the software list above.
 	#
 	# - INSTALL_URL_ADDRESS:
-	#   This can be used to check conectivity to items you need to download later. A
-	#   good example would also be a git repo.
+	#   This can be used to check conectivity to items you need to download later.
+	#   A good example would also be a git repo.
 	#
 	# Example:
 	#	#------------------ Bittorrent: HTPC Manager ------------------
@@ -4132,8 +4132,8 @@ _EOF_
 				if [ ! -f /etc/apt/sources.list.d/owncloud.list ]; then
 
 					wget "$INSTALL_URL_ADDRESS" -O owncloud.key_or_zip
-					apt-key add - < owncloud.key_or_zip &> /dev/null
-					unzip -o owncloud.key_or_zip -d /var/www &> /dev/null
+					apt-key add - < owncloud.key_or_zip 2> /dev/null
+					unzip -o owncloud.key_or_zip -d /var/www 2> /dev/null
 					rm owncloud.key_or_zip
 
 					if (( $DISTRO == 3 )); then
@@ -4150,7 +4150,7 @@ _EOF_
 
 				fi
 
-				AGI owncloud-files &> /dev/null
+				AGI owncloud-files 2> /dev/null
 
 			else
 
@@ -9090,57 +9090,108 @@ _EOF_
 
 		fi
 
-		#OWNCLOUD
+		#ownCloud
 		INSTALLING_INDEX=47
 		if (( ${aSOFTWARE_INSTALL_STATE[$INSTALLING_INDEX]} == 1 )); then
 
-			#Setup Data directory
-			local target_data_dir="$FP_DIETPI_USERDATA_DIRECTORY/owncloud_data"
-			mkdir -p "$target_data_dir"
+			# Install/Enable necessary PHP modules: https://doc.owncloud.org/server/latest/admin_manual/installation/source_installation.html#php-extensions
+			AGI "$PHP_APT_PACKAGE_NAME"-intl
+			${PHP_APT_PACKAGE_NAME}enmod curl gd intl json pdo_mysql opcache apcu
+			# Following modules are not always enabled since Stretch:
+			if (( $DISTRO >= 4 )); then
 
-			#Create symlink from default owncloud/data to FP_DIETPI_USERDATA_DIRECTORY
-			local target_data_symlink="/var/www/owncloud/data"
-			mkdir -p "$target_data_symlink" &> /dev/null
+				phpenmod ctype dom fileinfo iconv mbstring posix simplexml xmlwriter xmlreader zip exif
 
-			# - Copy existing data to our data location
-			cp -R "$target_data_symlink" "$target_data_dir"
+			fi
 
-			# - Create symlink
-			rm -R "$target_data_symlink" &> /dev/null
-			ln -fs "$target_data_dir" "$target_data_symlink"
+			# APCu configuration: To prevent cli (cron.php) producing ownCloud log entries.
+			grep -q 'apc.enable_cli=' $FP_PHP_BASE_DIR/mods-available/apcu.ini && sed -i '/apc.enable_cli=/c\apc.enable_cli=1' $FP_PHP_BASE_DIR/mods-available/apcu.ini || echo 'apc.enable_cli=1' >> $FP_PHP_BASE_DIR/mods-available/apcu.ini
 
-##################################################################################################
-			#Currently in user docs:
+			# Create ownCloud specific webserver config.
+			# Apache: https://doc.owncloud.org/server/latest/admin_manual/installation/source_installation.html#configure-apache-web-server
+			if (( ${aSOFTWARE_INSTALL_STATE[83]} >= 1 )); then
 
-			#Unless https://github.com/owncloud/core/issues/25773 has a solution,
-			#User will need to apply this after 1st run setup wizard, else, non-removable failed integrity check warning....
+				a2enmod rewrite headers env dir mime
+				cp /DietPi/dietpi/conf/apache.ownnextcloud.conf /etc/apache2/sites-available/owncloud.conf
+				sed -i "s/nextcloud/owncloud/g" /etc/apache2/sites-available/owncloud.conf
+				# OPCache adjustment is just forced by Nextcloud
+				sed -i "s/php_admin_value/#php_admin_value/" /etc/apache2/sites-available/owncloud.conf
+				a2ensite owncloud
 
+			fi
 
-			#NB: When applied prior to 1st run end-user setup, following creates failed integrity check
-			#Set max upload size
-			# sed -i "/upload_max_filesize=/c\upload_max_filesize=2048M" /var/www/owncloud/.user.ini
-			# sed -i "/post_max_size=/c\post_max_size=2048M" /var/www/owncloud/.user.ini
-
-			# local memory_limit_max="$(( $RAM_TOTAL / 4 ))M"
-			# sed -i "/memory_limit=/c\memory_limit=$(( $RAM_TOTAL / 4 ))M" /var/www/owncloud/.user.ini
-
-			#APCu Memcache
-			#NB: /var/www/owncloud/config/config.php does not exist until after 1st run setup.
-			#NB: Has no effect.
-			# if (( ! $(cat /var/www/owncloud/config/config.php | grep -ci -m1 "'memcache.local'") )); then
-
-				# sed -i "/'version'/a 'memcache.local' => '\\\OC\\\Memcache\\\APCu'," /var/www/owncloud/config/config.php
-
-			# fi
-
-##################################################################################################
-
-			#NGINX setup default site
+			# NGINX: https://doc.owncloud.org/server/latest/admin_manual/installation/nginx_configuration.html#owncloud-in-a-subdir-of-nginx
 			if (( ${aSOFTWARE_INSTALL_STATE[85]} >= 1 )); then
 
 				cp /DietPi/dietpi/conf/nginx.sites-dietpi.owncloud.config /etc/nginx/sites-dietpi/owncloud.config
 
+				# Stretch: Use PHP7.0 socket and set 'fastcgi_request_buffering off';
+				if (( $DISTRO >= 4 )); then
+
+					sed -i "s#/run/php5-fpm.sock#/run/php/php7.0-fpm.sock#g" /etc/nginx/sites-dietpi/owncloud.config
+					sed -i "s/#fastcgi_request_buffering off;/fastcgi_request_buffering off;/g" /etc/nginx/sites-dietpi/owncloud.config
+
+				fi
+
+				# Set HTTPS on, if SSL connection is available, even with self-signed/untrusted certificate.
+				DietPi/dietpi/func/check_connection https://localhost &> /dev/null
+				if (( $? == 0 || $? == 5)); then
+
+					sed -i "s/#fastcgi_param HTTPS on;/fastcgi_param HTTPS on;/g" /etc/nginx/sites-dietpi/owncloud.config
+
+				fi
+
 			fi
+			
+			# Terminal installation:
+			mkdir -p "$FP_DIETPI_USERDATA_DIRECTORY"/owncloud_data
+			Install_Apply_Permissions &> /dev/null
+			local username=$(cat /DietPi/dietpi.txt | grep -m1 '^dietpi_nextcloud_username=' | sed 's/.*=//')
+			if [ ! -n "$username" ]; then
+
+				username='admin'
+
+			fi
+			systemctl start mysql
+			# For MariaDB, temporary database admin user needs to be created, as 'root' uses unix_socket login, which cannot be accessed by sudo -u www-data.
+			mysql -uroot -p"$GLOBAL_PW" -e "grant all privileges on *.* to 'tmp_root'@'localhost' identified by '$GLOBAL_PW' with grant option"
+			sudo -u www-data php /var/www/owncloud/occ maintenance:install --no-interaction --database "mysql" --database-name "owncloud" --database-user "tmp_root" --database-pass "$GLOBAL_PW" --admin-user "$username" --admin-pass "$GLOBAL_PW" --data-dir "$FP_DIETPI_USERDATA_DIRECTORY/owncloud_data"
+			mysql -uroot -p"$GLOBAL_PW" -e "drop user 'tmp_root'@'localhost'"
+			
+			# Removing MySQL parent user 'oc_admin'@'%' could be done, but then privileges on database has to be granted to child user 'oc_admin'@'localhost' first.
+			# We leave it, as limitation to localhost database could limit extended Nextcloud features.
+			#mysql -uroot -p"$GLOBAL_PW" -e "drop user $(grep -m1 "'dbuser'" /var/www/nextcloud/config/config.php | awk '{print $3}' | sed "s/,//")"
+			
+			local config_php="/var/www/owncloud/config/config.php"
+			
+			# Add local IP and hostname to trusted domains.
+			# If "1 => '" does not exist, the config.php is not copied e.g. from older instance, so we add entries.
+			if (( ! $(cat $config_php | grep -ci -m1 "1 => '") )); then
+
+				sed -i "/0 => 'localhost'/a     1 => '$(sed -n 4p /DietPi/dietpi/.network)'," $config_php
+				sed -i "/1 => '/a     2 => '$(cat /etc/hostname)'," $config_php
+
+			fi
+
+			# Set CLI URL to ownCloud sub directory:
+			sed -i "s#'http://localhost'#'http://localhost/owncloud'#g" $config_php
+
+			# APCu Memcache
+			if (( ! $(cat $config_php | grep -ci -m1 "'memcache.local'") )); then
+
+				sed -i "/'version'/a 'memcache.local' => '\\\OC\\\Memcache\\\APCu'," $config_php
+
+			fi
+
+			# ownCloud/Nextcloud ignores system wide php.ini settings. Use their own config.
+			# Set max upload size
+			local php_max_upload_size="$(( $(php -r 'print(PHP_INT_MAX);') / 1024 / 1024))M"
+			sed -i "/upload_max_filesize=/c\upload_max_filesize=$php_max_upload_size" /var/www/owncloud/.user.ini
+			sed -i "/post_max_size=/c\post_max_size=$php_max_upload_size" /var/www/owncloud/.user.ini
+
+			# Set memory limit: total / 4
+			local memory_limit_max="$(( $RAM_TOTAL / 4 ))M"
+			sed -i "/memory_limit=/c\memory_limit=$memory_limit_max" /var/www/owncloud/.user.ini
 
 		fi
 
@@ -9174,26 +9225,7 @@ _EOF_
 			if (( ${aSOFTWARE_INSTALL_STATE[83]} >= 1 )); then
 
 				a2enmod rewrite headers env dir mime
-				cat << _EOF_ > /etc/apache2/sites-available/nextcloud.conf
-Alias /nextcloud "/var/www/nextcloud/"
-
-<Directory /var/www/nextcloud/>
-        Options +FollowSymlinks
-        AllowOverride All
-
-        <IfModule mod_dav.c>
-                Dav off
-        </IfModule>
-
-        SetEnv HOME /var/www/nextcloud
-        SetEnv HTTP_HOME /var/www/nextcloud
-
-        # Hard coding 128M OPCache size, only for /nextcloud, to suppress warning on nextcloud admin panel.
-        php_admin_value opcache.memory_consumption 128
-
-</Directory>
-_EOF_
-
+				cp /DietPi/dietpi/conf/apache.ownnextcloud.conf /etc/apache2/sites-available/nextcloud.conf
 				a2ensite nextcloud
 
 			fi
@@ -9201,97 +9233,13 @@ _EOF_
 			# Nginx: https://docs.nextcloud.com/server/12/admin_manual/installation/nginx.html#nextcloud-in-a-subdir-of-nginx
 			if (( ${aSOFTWARE_INSTALL_STATE[85]} >= 1 )); then
 
-				cat << _EOF_ > /etc/nginx/sites-dietpi/nextcloud.config
-location ^~ /nextcloud {
+				cp /DietPi/dietpi/conf/nginx.sites-dietpi.nextcloud.config /etc/nginx/sites-dietpi/nextcloud.config
 
-	# Security headers
-	add_header Strict-Transport-Security "max-age=15768000; includeSubDomains; preload;";
-	add_header X-Content-Type-Options nosniff;
-	add_header X-XSS-Protection "1; mode=block";
-	add_header X-Robots-Tag none;
-	add_header X-Download-Options noopen;
-	add_header X-Permitted-Cross-Domain-Policies none;
-
-	# set max upload size
-	client_max_body_size $(( $(php -r 'print(PHP_INT_MAX);') / 1024 / 1024))M;
-	fastcgi_buffers 64 4K;
-
-	# Enable gzip but do not remove ETag headers
-	gzip on;
-	gzip_vary on;
-	gzip_comp_level 4;
-	gzip_min_length 256;
-	gzip_proxied expired no-cache no-store private no_last_modified no_etag auth;
-	gzip_types application/atom+xml application/javascript application/json application/ld+json application/manifest+json application/rss+xml application/vnd.geo+json application/vnd.ms-fontobject application/x-font-ttf application/x-web-app-manifest+json application/xhtml+xml application/xml font/opentype image/bmp image/svg+xml image/x-icon text/cache-manifest text/css text/plain text/vcard text/vnd.rim.location.xloc text/vtt text/x-component text/x-cross-domain-policy;
-
-	# Uncomment if your server is build with the ngx_pagespeed module
-	# This module is currently not supported.
-	#pagespeed off;
-
-	location /nextcloud {
-		rewrite ^ /nextcloud/index.php\$request_uri;
-	}
-
-	location ~ ^/nextcloud/(?:build|tests|config|lib|3rdparty|templates|data)/ {
-		deny all;
-	}
-
-	location ~ ^/nextcloud/(?:\.|autotest|occ|issue|indie|db_|console) {
-		deny all;
-	}
-
-	location ~ ^/nextcloud/(?:index|remote|public|cron|core/ajax/update|status|ocs/v[12]|updater/.+|ocs-provider/.+)\.php(?:$|/) {
-		include fastcgi_params;
-		fastcgi_split_path_info ^(.+\.php)(/.+)$;
-		fastcgi_param SCRIPT_FILENAME \$request_filename;
-		fastcgi_param PATH_INFO \$fastcgi_path_info;
-		# HTTPS forces redirection from http://, thus has to be enabled only on active HTTPS environment.
-		#fastcgi_param HTTPS on;
-		# Avoid sending the security headers twice
-		fastcgi_param modHeadersAvailable true;
-		fastcgi_param REMOTE_USER \$remote_user;
-		fastcgi_pass unix:/var/run/php5-fpm.sock;
-		fastcgi_intercept_errors on;
-		# Disable because Jessie Nginx does not support that parameter
-		#fastcgi_request_buffering off;
-		# Hard coding 128M OPCache size, only for /nextcloud, to suppress warning on nextcloud admin panel.
-		fastcgi_param PHP_ADMIN_VALUE "opcache.memory_consumption=128";
-	}
-
-	location ~ ^/nextcloud/(?:updater|ocs-provider)(?:$|/) {
-		try_files \$uri/ =404;
-		index index.php;
-	}
-
-	# Adding the cache control header for js and css files
-	# Make sure it is BELOW the PHP block
-	location ~ \.(?:css|js|woff|svg|gif)$ {
-		try_files \$uri /nextcloud/index.php\$uri\$is_args\$args;
-		add_header Strict-Transport-Security "max-age=15768000; includeSubDomains; preload;";
-		add_header Cache-Control "public, max-age=15778463";
-		add_header X-Content-Type-Options nosniff;
-		add_header X-XSS-Protection "1; mode=block";
-		add_header X-Robots-Tag none;
-		add_header X-Download-Options noopen;
-		add_header X-Permitted-Cross-Domain-Policies none;
-		# Optional: Don't log access to assets
-		access_log off;
-	}
-
-	location ~ \.(?:png|html|ttf|ico|jpg|jpeg)$ {
-		try_files \$uri /nextcloud/index.php\$uri$is_args\$args;
-		# Optional: Don't log access to other assets
-		access_log off;
-	}
-
-}
-_EOF_
-
-				# - Stretch, set php7.0 and fastcgi_request_buffering off;
+				# Stretch: Use PHP7.0 socket and set 'fastcgi_request_buffering off';
 				if (( $DISTRO >= 4 )); then
 
 					sed -i "s#/run/php5-fpm.sock#/run/php/php7.0-fpm.sock#g" /etc/nginx/sites-dietpi/nextcloud.config
-					sed -i "s#\#fastcgi_request_buffering off;#fastcgi_request_buffering off;#g" /etc/nginx/sites-dietpi/nextcloud.config
+					sed -i "s/#fastcgi_request_buffering off;/fastcgi_request_buffering off;/g" /etc/nginx/sites-dietpi/nextcloud.config
 
 				fi
 
@@ -9299,31 +9247,27 @@ _EOF_
 				DietPi/dietpi/func/check_connection https://localhost &> /dev/null
 				if (( $? == 0 || $? == 5)); then
 
-					sed -i "s#\#fastcgi_param HTTPS on;#fastcgi_param HTTPS on;#g" /etc/nginx/sites-dietpi/nextcloud.config
+					sed -i "s/#fastcgi_param HTTPS on;/fastcgi_param HTTPS on;/g" /etc/nginx/sites-dietpi/nextcloud.config
 
 				fi
 
 			fi
 
+			# Terminal installation:
 			mkdir -p "$FP_DIETPI_USERDATA_DIRECTORY"/nextcloud_data
-
 			Install_Apply_Permissions &> /dev/null
-
-			systemctl start mysql
-
 			local username=$(cat /DietPi/dietpi.txt | grep -m1 '^dietpi_nextcloud_username=' | sed 's/.*=//')
 			if [ ! -n "$username" ]; then
 
 				username='admin'
 
 			fi
-
-			# Terminal installation:
+			systemctl start mysql
 			# For MariaDB, temporary database admin user needs to be created, as 'root' uses unix_socket login, which cannot be accessed by sudo -u www-data.
 			mysql -uroot -p"$GLOBAL_PW" -e "grant all privileges on *.* to 'tmp_root'@'localhost' identified by '$GLOBAL_PW' with grant option"
 			sudo -u www-data php /var/www/nextcloud/occ maintenance:install --no-interaction --database "mysql" --database-name "nextcloud" --database-user "tmp_root" --database-pass "$GLOBAL_PW" --admin-user "$username" --admin-pass "$GLOBAL_PW" --data-dir "$FP_DIETPI_USERDATA_DIRECTORY/nextcloud_data"
 			mysql -uroot -p"$GLOBAL_PW" -e "drop user 'tmp_root'@'localhost'"
-
+			
 			# Removing MySQL parent user 'oc_admin'@'%' could be done, but then privileges on database has to be granted to child user 'oc_admin'@'localhost' first.
 			# We leave it, as limitation to localhost database could limit extended Nextcloud features.
 			#mysql -uroot -p"$GLOBAL_PW" -e "drop user $(grep -m1 "'dbuser'" /var/www/nextcloud/config/config.php | awk '{print $3}' | sed "s/,//")"
@@ -9338,23 +9282,22 @@ _EOF_
 			# Set CLI URL to Nextcloud sub directory:
 			sed -i "s#'http://localhost'#'http://localhost/nextcloud'#g" /var/www/nextcloud/config/config.php
 
-			# Owncloud/Nextcloud ignores system wide php.ini settings. Use their own config.
-			# - max upload size
-			local php_max_upload_size="$(( $(php -r 'print(PHP_INT_MAX);') / 1024 / 1024))M"
-
-			sed -i "/upload_max_filesize=/c\upload_max_filesize=$php_max_upload_size" /var/www/nextcloud/.user.ini
-			sed -i "/post_max_size=/c\post_max_size=$php_max_upload_size" /var/www/nextcloud/.user.ini
-
-			# - Memory limit, total / 4
-			local memory_limit_max="$(( $RAM_TOTAL / 4 ))M"
-			sed -i "/memory_limit=/c\memory_limit=$(( $RAM_TOTAL / 4 ))M" /var/www/nextcloud/.user.ini
-
-			# - APCu Memcache
+			# APCu Memcache
 			if (( ! $(cat /var/www/nextcloud/config/config.php | grep -ci -m1 "'memcache.local'") )); then
 
 				sed -i "/'version'/a 'memcache.local' => '\\\OC\\\Memcache\\\APCu'," /var/www/nextcloud/config/config.php
 
 			fi
+
+			# ownCloud/Nextcloud ignores system wide php.ini settings. Use their own config.
+			# Set max upload size
+			local php_max_upload_size="$(( $(php -r 'print(PHP_INT_MAX);') / 1024 / 1024))M"
+			sed -i "/upload_max_filesize=/c\upload_max_filesize=$php_max_upload_size" /var/www/nextcloud/.user.ini
+			sed -i "/post_max_size=/c\post_max_size=$php_max_upload_size" /var/www/nextcloud/.user.ini
+
+			# Set memory limit: total / 4
+			local memory_limit_max="$(( $RAM_TOTAL / 4 ))M"
+			sed -i "/memory_limit=/c\memory_limit=$memory_limit_max" /var/www/nextcloud/.user.ini
 
 		fi
 
@@ -13151,23 +13094,28 @@ _EOF_
 
 		elif (( $1 == 47 )); then
 
+			a2dissite owncloud 2>/dev/null
+			rm /etc/apache2/sites-available/owncloud.conf 2>/dev/null
+			rm /etc/nginx/sites-dietpi/owncloud.config 2>/dev/null
 			AGP owncloud-files owncloud owncloud-deps
-			systemctl start mysql
-			mysqladmin -u root -p"$GLOBAL_PW" drop owncloud -f
-			rm /etc/apt/sources.list.d/owncloud.list $> /dev/null
-			apt-get update
 			rm -R /var/www/owncloud
+			systemctl start mysql
+			mysql -uroot -p"$GLOBAL_PW" -e "drop user $(grep -m1 "'dbuser'" /var/www/owncloud/config/config.php | awk '{print $3}' | sed "s/,//")@$(grep -m1 "'dbhost'" /var/www/owncloud/config/config.php | awk '{print $3}' | sed "s/,//")"
+			mysql -uroot -p"$GLOBAL_PW" -e "drop user $(grep -m1 "'dbuser'" /var/www/owncloud/config/config.php | awk '{print $3}' | sed "s/,//")"
+			mysqladmin -u root -p"$GLOBAL_PW" drop owncloud -f
+			rm /etc/apt/sources.list.d/owncloud.list 2> /dev/null
+			apt-get update
 
 		elif (( $1 == 114 )); then
 
+			a2dissite nextcloud 2>/dev/null
+			rm /etc/apache2/sites-available/nextcloud.conf 2>/dev/null
+			rm /etc/nginx/sites-dietpi/nextcloud.config 2>/dev/null
+			rm -R /var/www/nextcloud
 			systemctl start mysql
-			mysqladmin -u root -p"$GLOBAL_PW" drop nextcloud -f
 			mysql -uroot -p"$GLOBAL_PW" -e "drop user $(grep -m1 "'dbuser'" /var/www/nextcloud/config/config.php | awk '{print $3}' | sed "s/,//")@$(grep -m1 "'dbhost'" /var/www/nextcloud/config/config.php | awk '{print $3}' | sed "s/,//")"
 			mysql -uroot -p"$GLOBAL_PW" -e "drop user $(grep -m1 "'dbuser'" /var/www/nextcloud/config/config.php | awk '{print $3}' | sed "s/,//")"
-			rm -R /var/www/nextcloud
-			a2dissite nextcloud &>/dev/null
-			rm /etc/apache2/sites-available/nextcloud.conf &>/dev/null
-			rm /etc/nginx/sites-dietpi/nextcloud.config &>/dev/null
+			mysqladmin -u root -p"$GLOBAL_PW" drop nextcloud -f
 
 		elif (( $1 == 115 )); then
 
