@@ -532,6 +532,20 @@ tput cnorm
 _EOF_
 #???
 
+#??? x86_64
+#	Disable nouveau: https://github.com/Fourdee/DietPi/issues/1244 // http://dietpi.com/phpbb/viewtopic.php?f=11&t=2462&p=9688#p9688
+cat << _EOF_ > /etc/modprobe.d/blacklist-nouveau.conf
+blacklist nouveau
+blacklist lbm-nouveau
+options nouveau modeset=0
+alias nouveau off
+alias lbm-nouveau off
+_EOF_
+echo -e "options nouveau modeset=0" > /etc/modprobe.d/nouveau-kms.conf
+update-initramfs -u
+#???
+
+
 #------------------------------------------------------------------------------------------------
 #A Unique HW_MODEL index will need to be assigned and coded into the DietPi sourcecode.
 # If you are not creating a pull request for this, then:
