@@ -8832,15 +8832,18 @@ _EOF_
 			# - Apache2 has its own PHP module
 			if (( ${aSOFTWARE_INSTALL_STATE[83]} >= 1 )); then
 
-				echo -e "nothing here" &> /dev/null
+				# https://github.com/Fourdee/DietPi/issues/1144
+				local php_service=/lib/systemd/system/apache2.service
 
 			# - All other webservers (eg: Nginx/Lighttpd) use PHP-FPM
 			else
 
-				# - Php-FPM confs
+				local php_service=/lib/systemd/system/php*-fpm.service
+				
+				# - PHP-FPM confs
 				sed -i '/cgi.fix_pathinfo=/c\cgi.fix_pathinfo=1' "$FP_PHP_BASE_DIR"/fpm/php.ini
 
-				# - PHP-fpm optimizations based on total cores
+				# - PHP-FPM optimizations based on total cores
 				sed -i "/pm.max_children = /c\pm.max_children = $CPU_CORES_TOTAL" "$FP_PHP_BASE_DIR"/fpm/pool.d/www.conf
 				sed -i "/pm.start_servers = /c\pm.start_servers = $CPU_CORES_TOTAL" "$FP_PHP_BASE_DIR"/fpm/pool.d/www.conf
 				sed -i "/pm.min_spare_servers = /c\pm.min_spare_servers = $CPU_CORES_TOTAL" "$FP_PHP_BASE_DIR"/fpm/pool.d/www.conf
@@ -8857,11 +8860,7 @@ _EOF_
 
 			fi
 
-			#Enable all installed and available php modules
-			local modules_to_enable=$(ls "$FP_PHP_BASE_DIR"/mods-available | grep '.ini' | sed 's/.ini//')
-			${PHP_APT_PACKAGE_NAME}enmod "$modules_to_enable"
-
-			#php APC/u settings
+			# PHP cache settings
 			local target_php_ini=0
 			local target_php_cachesize=$(( $RAM_TOTAL / 30 ))
 			if (( $target_php_cachesize < 10 )); then
@@ -8870,11 +8869,7 @@ _EOF_
 
 			fi
 
-			# - 3days TTL
-			local target_apc_ttl='259200'
-
-			#PHP OPcache
-
+			# - OPcache
 			if (( ${aSOFTWARE_INSTALL_STATE[83]} >= 1 )); then
 
 				target_php_ini="$FP_PHP_BASE_DIR/apache2/php.ini"
@@ -8889,12 +8884,12 @@ _EOF_
 			sed -i "/opcache.memory_consumption=/c\opcache.memory_consumption=$target_php_cachesize" $target_php_ini
 			sed -i "/opcache.revalidate_freq=/c\opcache.revalidate_freq=60" $target_php_ini
 
-			wget https://raw.githubusercontent.com/rlerdorf/opcache-status/master/opcache.php -O /var/www/opcache.php
-
-			#APCu
-			# - apc.shm_size= requires M at end to prevent warning: https://github.com/Fourdee/DietPi/issues/218
-			target_php_cachesize+="M"
+			# - APCu
 			target_php_ini="$FP_PHP_BASE_DIR/mods-available/apcu.ini"
+			# - - apc.shm_size= requires M at end to prevent warning: https://github.com/Fourdee/DietPi/issues/218
+			target_php_cachesize+="M"
+			# - - 3days TTL
+			local target_apc_ttl='259200'
 
 			cat << _EOF_ > "$target_php_ini"
 extension=apcu.so
@@ -8902,59 +8897,65 @@ apc.shm_size=$target_php_cachesize
 apc.ttl=$target_apc_ttl
 _EOF_
 
-			#APC info page
-			wget https://github.com/krakjoe/apcu/raw/master/apc.php -O /var/www/apc.php
 
-			#Array to store known locations of php.ini, so we can apply same settings to all of them.
-			local afp_php_ini=(
-				"$FP_PHP_BASE_DIR/apache2/php.ini"
-				"$FP_PHP_BASE_DIR/cli/php.ini"
-				"$FP_PHP_BASE_DIR/cgi/php.ini"
-				"$FP_PHP_BASE_DIR/fpm/php.ini"
-			)
+			# We create our own PHP mod to add DietPi specific configs.
+			local dietpi_php_ini="$FP_PHP_BASE_DIR/mods-available/dietpi.ini"
+			touch $dietpi_php_ini
 
-			# - temp dir
-			local tmp_upload_dir="/var/tmp/php_upload_tmp"
-			mkdir -p "$tmp_upload_dir"
-			chown -R www-data:www-data "$tmp_upload_dir"
+			# - Set tmp_upload_dir to sd. Can't be /tmp as its ramdisk and limited size. Also used by ownCloud/Nextcloud uploads
+			# - If PHP uses PrivateTmp, we must not use own subfolder: https://github.com/Fourdee/DietPi/issues/1144
+			if grep -q '^\s*PrivateTmp=true' $php_service &> /dev/null; then
+
+				local tmp_upload_dir="/var/tmp"
+
+			else
+
+				local tmp_upload_dir="/var/tmp/php_upload_tmp"
+				mkdir -p "$tmp_upload_dir"
+				chown -R www-data:www-data "$tmp_upload_dir"
+
+			fi
+			grep -q 'upload_tmp_dir' $dietpi_php_ini &&
+			sed -i "/upload_tmp_dir/c\upload_tmp_dir = $tmp_upload_dir" $dietpi_php_ini ||
+			echo "upload_tmp_dir = $tmp_upload_dir" >> $dietpi_php_ini
 
 			# - max upload size
 			local php_max_upload_size="$(( $(php -r 'print(PHP_INT_MAX);') / 1024 / 1024))M"
-			#	Nginx - Set client_max_body_size to avoid 2MB upload error: https://github.com/Fourdee/DietPi/issues/546
+
+			# - - upload_max_filesize
+			grep -q 'upload_max_filesize' $dietpi_php_ini &&
+			sed -i "/upload_max_filesize/c\upload_max_filesize = $php_max_upload_size" $dietpi_php_ini ||
+			echo "upload_max_filesize = $php_max_upload_size" >> $dietpi_php_ini
+
+			# - - post_max_size
+			grep -q 'post_max_size' $dietpi_php_ini &&
+			sed -i "/post_max_size/c\post_max_size = $php_max_upload_size" $dietpi_php_ini ||
+			echo "post_max_size = $php_max_upload_size" >> $dietpi_php_ini
+
+			# - - Nginx - Set client_max_body_size to avoid 2MB upload error: https://github.com/Fourdee/DietPi/issues/546
 			if (( ${aSOFTWARE_INSTALL_STATE[85]} >= 1 )); then
 
 				sed -i "/client_max_body_size/c\    client_max_body_size $php_max_upload_size;" /etc/nginx/nginx.conf
 
 			fi
 
-			#Set all PHP.INI
-			for ((i=0; i<${#afp_php_ini[@]}; i++))
-			do
+			# - Set UTF-8
+			grep -q 'default_charset' $dietpi_php_ini &&
+			sed -i '/default_charset/c\default_charset = "UTF-8"' $dietpi_php_ini ||
+			echo 'default_charset = "UTF-8"' >> $dietpi_php_ini
 
-				if [ -f "${afp_php_ini[$i]}" ]; then
+			# Enable all installed and available PHP modules.
+			local modules_to_enable=$(ls "$FP_PHP_BASE_DIR"/mods-available | grep '.ini' | sed 's/.ini//')
+			${PHP_APT_PACKAGE_NAME}enmod "$modules_to_enable"
 
-					# - Set UTF-8
-					sed -i '/default_charset/c\default_charset = "UTF-8"' "${afp_php_ini[$i]}"
+			# PHP info page
+			echo "<?php phpinfo(); ?>" > /var/www/phpinfo.php
+		
+			# OPcache info page
+			wget https://raw.githubusercontent.com/rlerdorf/opcache-status/master/opcache.php -O /var/www/opcache.php
 
-					# - Set tmp_upload_dir to sd (cant be /tmp as its ramdisk and limited size. Also used by Owncloud uploads
-					sed -i "/upload_tmp_dir =/c\upload_tmp_dir = $tmp_upload_dir" "${afp_php_ini[$i]}"
-
-					# - Set max upload sizes.
-					sed -i "/upload_max_filesize =/c\upload_max_filesize = $php_max_upload_size" "${afp_php_ini[$i]}"
-					sed -i "/post_max_size =/c\post_max_size = $php_max_upload_size" "${afp_php_ini[$i]}"
-
-				fi
-
-			done
-
-			unset afp_php_ini
-
-			#PHP info web file
-			cat << _EOF_ > /var/www/phpinfo.php
-<?php
-phpinfo();
-?>
-_EOF_
+			# APC info page
+			wget https://github.com/krakjoe/apcu/raw/master/apc.php -O /var/www/apc.php
 
 		fi
 
