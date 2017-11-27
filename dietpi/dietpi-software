@@ -2843,6 +2843,20 @@ _EOF_
 
 		fi
 
+		#Software that requires Redis
+		if (( ${aSOFTWARE_INSTALL_STATE[47]} == 1 ||
+			${aSOFTWARE_INSTALL_STATE[114]} == 1 )); then
+
+			if (( ${aSOFTWARE_INSTALL_STATE[91]} == 0 )); then
+
+				aSOFTWARE_INSTALL_STATE[91]=1
+
+				/DietPi/dietpi/func/dietpi-notify 2 "Redis will be installed"
+
+			fi
+
+		fi
+
 		#-------------------------------------------------------------------------
 		#Pre-req software, for items that do DO have their own array aSOFTWARE_REQUIRES_SOFTWARENAME
 		#	WEBSERVER - Manual stack install
@@ -9026,8 +9040,8 @@ _EOF_
 		INSTALLING_INDEX=91
 		if (( ${aSOFTWARE_INSTALL_STATE[$INSTALLING_INDEX]} == 1 )); then
 
-			#Enable redis extension for all webstacks:
-			"$PHP_APT_PACKAGE_NAME"enmod redis
+			# Enable redis php module, if installed:
+			"$PHP_APT_PACKAGE_NAME"enmod redis 2> /dev/null
 
 		fi
 
@@ -9082,8 +9096,8 @@ _EOF_
 		if (( ${aSOFTWARE_INSTALL_STATE[$INSTALLING_INDEX]} == 1 )); then
 
 			# Install/Enable necessary PHP modules: https://doc.owncloud.org/server/latest/admin_manual/installation/source_installation.html#php-extensions
-			AGI "$PHP_APT_PACKAGE_NAME"-intl
-			${PHP_APT_PACKAGE_NAME}enmod curl gd intl json pdo_mysql opcache apcu
+			AGI "$PHP_APT_PACKAGE_NAME"-intl "$PHP_APT_PACKAGE_NAME"-redis
+			${PHP_APT_PACKAGE_NAME}enmod curl gd intl json pdo_mysql opcache apcu redis
 			# Following modules are not always enabled since Stretch:
 			if (( $DISTRO >= 4 )); then
 
@@ -9145,10 +9159,7 @@ _EOF_
 			sudo -u www-data php /var/www/owncloud/occ maintenance:install --no-interaction --database "mysql" --database-name "owncloud" --database-user "tmp_root" --database-pass "$GLOBAL_PW" --admin-user "$username" --admin-pass "$GLOBAL_PW" --data-dir "$FP_DIETPI_USERDATA_DIRECTORY/owncloud_data"
 			mysql -uroot -p"$GLOBAL_PW" -e "drop user 'tmp_root'@'localhost'"
 
-			# Removing MySQL parent user 'oc_admin'@'%' could be done, but then privileges on database has to be granted to child user 'oc_admin'@'localhost' first.
-			# We leave it, as limitation to localhost database could limit extended Nextcloud features.
-			#mysql -uroot -p"$GLOBAL_PW" -e "drop user $(grep -m1 "'dbuser'" /var/www/nextcloud/config/config.php | awk '{print $3}' | sed "s/,//")"
-
+			# Adjusting config file:
 			local config_php="/var/www/owncloud/config/config.php"
 
 			# Add local IP and hostname to trusted domains.
@@ -9170,6 +9181,25 @@ _EOF_
 
 			fi
 
+			# Redis for transactional file locking:
+			# https://doc.owncloud.org/server/latest/admin_manual/configuration/server/caching_configura$
+			# - Enable Redis socket and grant www-data access to it:
+			sed -i "\#unixsocket /#c\unixsocket /var/run/redis/redis.sock" /etc/redis/redis*.conf
+			sed -i "\#unixsocketperm#c\unixsocketperm 770" /etc/redis/redis*.conf
+			usermod -a -G redis www-data
+			# - Enable ownCloud to use Redis socket:
+			if (( ! $(cat $config_php | grep -ci -m1 "'memcache.locking'") )); then
+
+				sed -i "\#'memcache.local'#a \ \ 'filelocking.enabled' => true,\n\
+  'memcache.locking' => '\\\OC\\\Memcache\\\Redis',\n\
+  'redis' => [\n\
+    'host' => '/var/run/redis/redis.sock',\n\
+    'port' => 0,\n\
+  ]," $config_php
+
+			fi
+
+
 			# ownCloud/Nextcloud ignores system wide php.ini settings. Use their own config.
 			# Set max upload size
 			local php_max_upload_size="$(( $(php -r 'print(PHP_INT_MAX);') / 1024 / 1024))M"
@@ -9187,8 +9217,8 @@ _EOF_
 		if (( ${aSOFTWARE_INSTALL_STATE[$INSTALLING_INDEX]} == 1 )); then
 
 			# Install/Enable necessary PHP modules: https://docs.nextcloud.com/server/12/admin_manual/installation/source_installation.html#prerequisites-for-manual-installation
-			AGI "$PHP_APT_PACKAGE_NAME"-intl
-			${PHP_APT_PACKAGE_NAME}enmod curl gd intl json pdo_mysql opcache apcu
+			AGI "$PHP_APT_PACKAGE_NAME"-intl "$PHP_APT_PACKAGE_NAME"-redis
+			${PHP_APT_PACKAGE_NAME}enmod curl gd intl json pdo_mysql opcache apcu redis
 			# Solve: https://github.com/Fourdee/DietPi/issues/1067#issuecomment-335200352
 			if (( $DISTRO >= 4 )); then
 
@@ -9255,24 +9285,41 @@ _EOF_
 			sudo -u www-data php /var/www/nextcloud/occ maintenance:install --no-interaction --database "mysql" --database-name "nextcloud" --database-user "tmp_root" --database-pass "$GLOBAL_PW" --admin-user "$username" --admin-pass "$GLOBAL_PW" --data-dir "$FP_DIETPI_USERDATA_DIRECTORY/nextcloud_data"
 			mysql -uroot -p"$GLOBAL_PW" -e "drop user 'tmp_root'@'localhost'"
 
-			# Removing MySQL parent user 'oc_admin'@'%' could be done, but then privileges on database has to be granted to child user 'oc_admin'@'localhost' first.
-			# We leave it, as limitation to localhost database could limit extended Nextcloud features.
-			#mysql -uroot -p"$GLOBAL_PW" -e "drop user $(grep -m1 "'dbuser'" /var/www/nextcloud/config/config.php | awk '{print $3}' | sed "s/,//")"
+			# Adjusting config file:
+			local config_php="/var/www/nextcloud/config/config.php"
 
 			# Disable trusted_domains.
-			if (( ! $(cat /var/www/nextcloud/config/config.php | grep -ci -m1 "1 => '*'") )); then
+			if (( ! $(cat $config_php | grep -ci -m1 "1 => '*'") )); then
 
-				sed -i "/0 => 'localhost'/a     1 => '*'," /var/www/nextcloud/config/config.php
+				sed -i "/0 => 'localhost'/a     1 => '*'," $config_php
 
 			fi
 
 			# Set CLI URL to Nextcloud sub directory:
-			sed -i "s#'http://localhost'#'http://localhost/nextcloud'#g" /var/www/nextcloud/config/config.php
+			sed -i "s#'http://localhost'#'http://localhost/nextcloud'#g" $config_php
 
 			# APCu Memcache
-			if (( ! $(cat /var/www/nextcloud/config/config.php | grep -ci -m1 "'memcache.local'") )); then
+			if (( ! $(cat $config_php | grep -ci -m1 "'memcache.local'") )); then
 
-				sed -i "/'version'/a 'memcache.local' => '\\\OC\\\Memcache\\\APCu'," /var/www/nextcloud/config/config.php
+				sed -i "/'version'/a 'memcache.local' => '\\\OC\\\Memcache\\\APCu'," $config_php
+
+			fi
+
+			# Redis for transactional file locking:
+			# https://docs.nextcloud.com/server/12/admin_manual/configuration_files/files_locking_transactional.html
+			# - Enable Redis socket and grant www-data access to it:
+			sed -i "\#unixsocket /#c\unixsocket /var/run/redis/redis.sock" /etc/redis/redis*.conf
+			sed -i "\#unixsocketperm#c\unixsocketperm 770" /etc/redis/redis*.conf
+			usermod -a -G redis www-data
+			# - Enable Nextloud to use Redis socket:
+			if (( ! $(cat $config_php | grep -ci -m1 "'memcache.locking'") )); then
+
+				sed -i "\#'memcache.local'#a \ \ 'filelocking.enabled' => true,\n\
+  'memcache.locking' => '\\\OC\\\Memcache\\\Redis',\n\
+  'redis' => array(\n\
+    'host' => '/var/run/redis/redis.sock',\n\
+    'port' => 0,\n\
+    )," $config_php
 
 			fi
 
@@ -13058,7 +13105,7 @@ _EOF_
 
 		elif (( $1 == 91 )); then
 
-			AGP redis-server "$PHP_APT_PACKAGE_NAME"-redis
+			AGP "$PHP_APT_PACKAGE_NAME"-redis redis-server redis-tools
 
 		elif (( $1 == 89 )); then
 
