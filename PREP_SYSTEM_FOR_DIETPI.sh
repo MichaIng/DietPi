@@ -112,9 +112,7 @@ apt-get install -y bluetooth bluez-firmware
 #???
 
 #??? RPi - bluetooth/firmware for all RPi's
-apt-get install -y pi-bluetooth
-#??? RPi - common rpi specific binaries (eg: raspistill)
-apt-get install -y libraspberrypi-bin
+apt-get install -y pi-bluetooth libraspberrypi-bin
 #???
 
 #??? x86 images only: firmware
