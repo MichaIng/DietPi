@@ -19,8 +19,8 @@
 	# - /DietPi/dietpi/func/dietpi-set_hardware 		rpi-opengl		enable/disable
 	# - /DietPi/dietpi/func/dietpi-set_hardware 		i2c				enable/disable/khz
 	# - /DietPi/dietpi/func/dietpi-set_hardware 		wificountrycode	code
-	# - /DietPi/dietpi/func/dietpi-set_hardware 		wifi 			enable/disable/onboard_enable/onboard_disable
-	# - /DietPi/dietpi/func/dietpi-set_hardware 		wificreds		enable/disable | Applies wpa_supplicant.conf from dietpi.txt
+	# - /DietPi/dietpi/func/dietpi-set_hardware 		wifimodules		enable/disable/onboard_enable/onboard_disable
+	# - /DietPi/dietpi/func/dietpi-set_hardware 		wificreds		set | Generates wpa_supplicant.conf from dietpi.txt globals
 	# - /DietPi/dietpi/func/dietpi-set_hardware 		preferipversion	auto/ipv4/ipv6
 	# - /DietPi/dietpi/func/dietpi-set_hardware 		bluetooth 		enable/disable
 	# - /DietPi/dietpi/func/dietpi-set_hardware 		serialconsole	enable/disable
@@ -1445,26 +1445,47 @@ _EOF_
 
 		if [ -n "$INPUT_DEVICE_VALUE" ]; then
 
-			if [ "$INPUT_DEVICE_VALUE" = "enable" ]; then
+			if [ "$INPUT_DEVICE_VALUE" = "set" ]; then
+
+				local Wifi_KEYMGR=$(grep -m1 '^Wifi_KEYMGR' /DietPi/dietpi.txt | sed 's/.*=//')
+				local Wifi_KEY="$(grep -m1 '^Wifi_KEY' /DietPi/dietpi.txt | sed 's/.*=//')"
+				local Wifi_SSID="$(grep -m1 '^Wifi_SSID' /DietPi/dietpi.txt | sed 's/.*=//')"
 
 				cat << _EOF_ > /etc/wpa_supplicant/wpa_supplicant.conf
-country=$(cat /DietPi/dietpi.txt | grep -m1 '^wifi_country_code=' | sed 's/.*=//')
+country=$(grep -m1 '^wifi_country_code=' /DietPi/dietpi.txt | sed 's/.*=//')
 ctrl_interface=DIR=/var/run/wpa_supplicant GROUP=netdev
 update_config=1
 
 network={
-    ssid="$(grep -m1 '^Wifi_SSID' /DietPi/dietpi.txt | sed 's/.*=//')"
-    psk="$(grep -m1 '^Wifi_KEY' /DietPi/dietpi.txt | sed 's/.*=//')"
-    key_mgmt=WPA-PSK
-    #auth_alg=OPEN
-    #pairwise=CCMP
-    #proto=RSN
+    ssid="$Wifi_SSID"
+_EOF_
+
+				# - Add KEY and type
+				if [ "$Wifi_KEYMGR" = "NONE" ]; then
+
+					cat << _EOF_ >> /etc/wpa_supplicant/wpa_supplicant.conf
+    key_mgmt=$Wifi_KEYMGR
+}
+_EOF_
+				elif  [ "$Wifi_KEYMGR" = "WPA-PSK" ]; then
+
+					cat << _EOF_ >> /etc/wpa_supplicant/wpa_supplicant.conf
+    key_mgmt=$Wifi_KEYMGR
+    psk="$Wifi_KEY"
 }
 _EOF_
 
-			elif [ "$INPUT_DEVICE_VALUE" = "disable" ]; then
+				elif  [ "$Wifi_KEYMGR" = "WEP" ]; then
 
-				rm /etc/wpa_supplicant/wpa_supplicant.conf &> /dev/null
+					Wifi_KEYMGR='NONE'
+					cat << _EOF_ >> /etc/wpa_supplicant/wpa_supplicant.conf
+
+    key_mgmt=$Wifi_KEYMGR
+    wep_key0="$Wifi_KEY"
+    wep_tx_keyidx=0
+    }
+_EOF_
+				fi
 
 			else
 
@@ -1480,7 +1501,6 @@ _EOF_
 
 	}
 
-	#NB: Must run before Wifi_Creds_Main, to set dietpi.txt entry, used in /etc/wpa_supplicant/wpa_supplicant.conf
 	Wifi_Countrycode_Main(){
 
 		#Use country code from command input. Implies new setting.
@@ -1492,21 +1512,10 @@ _EOF_
 			# - Apply value to DietPi.txt
 			sed -i "/^wifi_country_code=/c\wifi_country_code=$INPUT_DEVICE_VALUE" /DietPi/dietpi.txt
 
-			#save country code to known system configs.
-			#	/etc/default/crda | Seems to have no effect, but we will do it for consistency.
-			#	/etc/modprobe.d/cfg80211.conf | Kernel/udev seems to apply this setting during boot. Although we call this script to override any set country code, no harm being consistent: https://github.com/Fourdee/DietPi/issues/313#issuecomment-217716104
-			echo -e "REGDOMAIN=$INPUT_DEVICE_VALUE" > /etc/default/crda
-			echo -e "options cfg80211 ieee80211_regdom=$INPUT_DEVICE_VALUE" > /etc/modprobe.d/cfg80211.conf
+			# - Update wpa_supplicant.conf
+			if [ -f /etc/wpa_supplicant/wpa_supplicant.conf ]; then
 
-			# - Activate country code, if WiFi modules are enabled: https://github.com/Fourdee/DietPi/issues/590
-			if (( $(lsmod | grep -ci -m1 '^cfg80211') )); then
-
-				iw reg set "$INPUT_DEVICE_VALUE"
-
-				#Apply to module params aswell: https://github.com/Fourdee/DietPi/issues/838
-				echo -e "options cfg80211 ieee80211_regdom=$INPUT_DEVICE_VALUE" > /etc/modprobe.d/cfg80211.conf
-
-				EXIT_CODE=$?
+				sed -i "/^country=/c\country=$INPUT_DEVICE_VALUE" /etc/wpa_supplicant/wpa_supplicant.conf
 
 			fi
 

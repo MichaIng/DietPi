@@ -357,6 +357,7 @@ cp /boot/dietpi/conf/network_interfaces /etc/network/interfaces
 # - enable allow-hotplug eth0 after copying.
 sed -i "/allow-hotplug eth/c\allow-hotplug eth$(sed -n 1p /DietPi/dietpi/.network)" /etc/network/interfaces
 
+
 #Reduce DHCP request retry count and timeouts: https://github.com/Fourdee/DietPi/issues/711
 sed -i '/^#timeout /d' /etc/dhcp/dhclient.conf
 sed -i '/^#retry /d' /etc/dhcp/dhclient.conf
