@@ -9,6 +9,7 @@
 #  - /boot/dietpi.txt (file)
 #  - /boot/config.txt (file)
 #  - /boot/dietpi (folder)
+# UPDATE: Steps are also provided within the script now.
 #------------------------------------------------------------------------------------------------
 # Legend:
 #  - Items that are commented out should not be used.
@@ -18,13 +19,12 @@
 #This is not currently a executable script. Please manually run through the commands:
 exit 0 #prevent continuation of this script.
 
-
 #------------------------------------------------------------------------------------------------
 #Packages
 #------------------------------------------------------------------------------------------------
 
 #NOTE:
-#Apt mirror will get overwritten by: /DietPi/dietpi/func/dietpi-set_software apt-mirror default : during finalize.
+#APT mirror will get overwritten by: /DietPi/dietpi/func/dietpi-set_software apt-mirror default : during finalize.
 
 #??? RPI
 DISTRO='stretch'
@@ -35,6 +35,7 @@ _EOF_
 cat << _EOF_ > /etc/apt/sources.list.d/raspi.list
 deb https://archive.raspberrypi.org/debian/ $DISTRO main ui
 _EOF_
+#???
 
 #??? Everything else (excluding RPi!)
 DISTRO='stretch'
@@ -44,84 +45,89 @@ deb http://ftp.debian.org/debian/ $DISTRO-updates main contrib non-free
 deb http://security.debian.org $DISTRO/updates main contrib non-free
 deb http://ftp.debian.org/debian/ $DISTRO-backports main contrib non-free
 _EOF_
-
+#???
 
 #+Meveric images
 rm /etc/apt/sources.list.d/deb-multimedia.list
 
-#Remove following All
+# Cleanup APT packages
+# Temporary disable automatic recommends/suggests installation and allow them to be autoremoved:
+cat << _EOF_ > /etc/apt/apt-conf.d/99norecommends
+APT::Install-Recommends "false";
+APT::Install-Suggests "false";
+APT::AutoRemove::RecommendsImportant "false";
+APT::AutoRemove::SuggestsImportant "false";
+_EOF_
+
 apt-get clean
 apt-get update
-apt-get purge -y libpython* fonts-* xmms2-client-* pulseaudio* jq xxd iperf3 gdisk gpsd ppp libboost-iostreams* sgml-base xml-core usb-modeswitch* libpng* cpp-* cpp ntpdate bluez bluetooth rsync dialog dhcpcd5 lua5.1 netcat-* make makedev ncdu plymouth openresolv shared-mime-in* tcpd strace tasksel* wireless-* xdg-user-dirs triggerhappy python* v4l-utils traceroute xz-utils ucf xauth zlib1g-dev xml-core aptitude* avahi-daemon rsyslog logrotate man-db manpages vim vim-common vim-runtime vim-tiny mc mc-data
-
-#+Desktop images (Mostly desktop packages, but apply to non-desktop images also):
-apt-get purge -y libpod-* libpeas-* isc-dhcp-server gnome-* fonts-dejavu* eject dnsmasq* dns-root-data colord-data libjasper* libjson* libwbclient* libwayland* golang-* libavahi* libtext* libweb* libpcsclite1 libxau6* libxc* dictionaries-* libgtk* miscfiles minicom lrzsz lxmenu-* x11-* zenity* yelp-*
-
-rm -R /usr/share/fonts/*
-rm -R /usr/share/icons/*
-
-#+Misc
-#??? BBB: https://github.com/Fourdee/DietPi/issues/931#issuecomment-345451529
-apt-get purge -y apache2 roboticscape ardupilot-* ti-* nodejs mjpg-streamer bonescript libapr1
-#???
-
-apt-get purge -y memtester expect tcl-expect toilet toilet-fonts w-scan vlan weather-util* sysbench stress cmake cmake-data device-tree-co* fping hddtemp haveged hostapd i2c-tools iperf ir-keytable libasound2* libmtp* libusb-dev lirc lsof ncurses-term pkg-config unicode-data rfkill pv mtp-tools m4 screen alsa-utils autotools-dev bind9-host btrfs-tools bridge-utils cpufrequtils dvb-apps dtv-scan-table* evtest f3 figlet gcc gcc-4.8-* git git-man ifenslave
-
-#+ dev packages
-#	On ARMbian DEV branch images, manually do this as triggers '*-dev' image/uboot etc
+# Mark all packages as auto installed first, to allow allow effective autoremove afterwards:
+apt-mark auto $(apt-mark showmanual)
+# Linux-headers are prevented from being autoremoved.
 apt-get purge -y '\-dev$' linux-headers*
 
-#+ Meveric's repo | Renders patch for removal in apt
-# apt-get purge setup-odroid # not compat with DietPi
-
-#??? RPI
-apt-get purge -y rpi-update libraspberrypi-doc
-#??? RPI (remove older version packages marked as manual): https://github.com/Fourdee/DietPi/issues/598#issuecomment-25919922
-apt-get purge gcc-4.6-base gcc-4.7-base gcc-4.8-base libsigc++-1.2-5c2
+#??? Optionally install Dropbear to allow remote system preperation:
+apt-get install dropbear -y
 #???
 
-apt-get autoremove --purge -y
-
-
-#??? ROCK64, reinstall kernel packages:
-apt-get install linux-rock64-package
-#???
-
-#???: Optional Reinstall OpenSSH (for updating dietpi scripts etc). Gets removed during finalise.
-apt-get install openssh-server -y
-echo -e "PermitRootLogin yes" >> /etc/ssh/sshd_config
-systemctl restart ssh
-#???
-
-
-#install packages
-apt-get dist-upgrade -y
+# Install necessary APT packages will mark them as manual installed as well:
+apt-get install -y apt-transport-https apt-utils bash-completion bc bzip2 ca-certificates console-setup crda cron curl dbus debconf-utils dosfstools dphys-swapfile ethtool fake-hwclock fbset gnupg hdparm hfsplus htop isc-dhcp-client iw locales nano net-tools ntfs-3g ntp p7zip-full parted psmisc resolvconf rfkill sudo tzdata unzip usbutils wget whiptail wireless-tools wpasupplicant wput xz-utils zip
 echo -e "CONF_SWAPSIZE=0" > /etc/dphys-swapfile
-apt-get install -y gnupg net-tools cron rfkill ca-certificates locales apt-transport-https ethtool p7zip-full hfsplus iw debconf-utils xz-utils fbset wpasupplicant resolvconf bc dbus bzip2 psmisc bash-completion cron whiptail sudo ntp ntfs-3g dosfstools parted hdparm usbutils zip htop wput wget fake-hwclock dphys-swapfile curl unzip console-setup console-data console-common keyboard-configuration wireless-tools wireless-regdb crda --no-install-recommends
 
-
-#??? Grub/intel+amd microcode firmware x86_64 native
-#	MBR
-apt-get install -y grub2
-#	UEFI
-apt-get install -y grub-common grub-efi-amd64 grub-efi-amd64-bin grub2-common
-#???
-
-#??? bluetooth if onboard device / RPI
+#??? Bluetooth onboard devices / RPI
 apt-get install -y bluetooth bluez-firmware
 #???
 
-#??? RPi - bluetooth/firmware for all RPi's
-apt-get install -y pi-bluetooth libraspberrypi-bin
+#??? RPi firmware and system modifications
+apt-get install -y libraspberrypi-bin pi-bluetooth raspberrypi-sys-mods raspbian-archive-keyring raspi-copies-and-fills
 #???
 
-#??? x86 images only: firmware
-apt-get install -y firmware-linux-nonfree firmware-realtek firmware-ralink firmware-brcm80211 firmware-atheros --no-install-recommends
+#??? ROCK64 kernel
+apt-get install linux-rock64-package
 #???
+
+#??? x86
+# Bootloader
+#   MBR
+apt-get install -y grub2
+#	UEFI
+apt-get install -y grub-efi-amd64
+# Kernel x64
+apt-get install linux-image-amd64
+# Firmware
+apt-get install -y firmware-linux-nonfree firmware-realtek firmware-ralink firmware-brcm80211 firmware-atheros
+#???
+
+# Do full upgrade and purge all unmarked packages afterwards:
+apt-get dist-upgrade -y
+apt-get autoremove --purge -y
+rm -R /usr/share/fonts/*
+rm -R /usr/share/icons/*
+# Enable auto install of recommendations again, in case it is necessary somewhere:
+rm /etc/apt/apt-conf.d/99norecommends
 
 #------------------------------------------------------------------------------------------------
 #DIETPI STUFF
 #------------------------------------------------------------------------------------------------
+
+# Preparing DietPi files:
+wget https://github.com/Fourdee/DietPi/archive/master.zip
+unzip master.zip
+rm master.zip
+cp DietPi-master/dietpi /boot
+cp DietPi-master/dietpi.txt /boot
+
+# Boot configuration files
+#??? RPi
+cp DietPi-master/config.txt /boot
+#??? Odroid: Choose proper <model> according to your hardware:
+cp DietPi-master/boot_<model>.ini /boot/boot.ini
+#??? Pine64
+cp DietPi-master/uEnv.txt /boot
+#???
+
+rm -R DietPi-master
+
 chmod +x -R /boot
 
 #Delete any non-root user (eg: pi)
@@ -344,7 +350,7 @@ _EOF_
 systemctl mask apt-daily.service
 systemctl mask apt-daily-upgrade.timer
 
-#/etc/sysctl.conf | Check for a previous entry before adding this
+#Create own sysctl config file:
 echo -e "vm.swappiness=1" > /etc/sysctl.d/97-dietpi.conf
 
 #login,
@@ -353,10 +359,15 @@ echo -e "\n/DietPi/dietpi/login" >> /root/.bashrc
 #Network
 rm -R /etc/network/interfaces # armbian symlink for bulky network-manager
 cp /boot/dietpi/conf/network_interfaces /etc/network/interfaces
+#??? Rename interface names to eth*/wifi* if necessary:
+ifconfig -a
+ifconfig enp0s3 down
+ip link set enp0s3 name eth0
+ifconfig eth0 up
+#???
 /DietPi/dietpi/func/obtain_network_details
 # - enable allow-hotplug eth0 after copying.
 sed -i "/allow-hotplug eth/c\allow-hotplug eth$(sed -n 1p /DietPi/dietpi/.network)" /etc/network/interfaces
-
 
 #Reduce DHCP request retry count and timeouts: https://github.com/Fourdee/DietPi/issues/711
 sed -i '/^#timeout /d' /etc/dhcp/dhclient.conf
@@ -451,9 +462,6 @@ sed -i "/FORCE=/c\FORCE=force" /etc/default/fake-hwclock
 # echo -e "options 8188eu rtw_power_mgnt=0" > /etc/modprobe.d/8188eu.conf
 # echo -e "options 8189es rtw_power_mgnt=0" > /etc/modprobe.d/8189es.conf
 
-
-#Set swapfile size
-echo -e "CONF_SWAPSIZE=0" > /etc/dphys-swapfile
 
 #nano /etc/systemd/logind.conf
 #NAutoVTs=1
@@ -559,8 +567,14 @@ update-initramfs -u
 #??? Does this device have a unique HW ID index and file? check /DietPi/dietpi/dietpi-obtain_hw_model
 echo ID > /etc/.dietpi_hw_model_identifier
 
+#??? Set eth0 interface to auto, to prevent connectivity loss during finalise: https://github.com/Fourdee/DietPi/issues/1219#issuecomment-348003572
+sed -i 's/allow-hotplug eth0/auto eth0/' /etc/network/interfaces
+# Will be reset during finalise again.
+
 #Finalise system
 /DietPi/dietpi/finalise
+
+#??? Adjust UUIDs in fstab and boot configuration files/s: /dev/disk/by-uuid/
 
 #Power off system
 
