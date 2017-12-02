@@ -112,9 +112,7 @@ apt-get install -y bluetooth bluez-firmware
 #???
 
 #??? RPi - bluetooth/firmware for all RPi's
-apt-get install -y pi-bluetooth
-#??? RPi - common rpi specific binaries (eg: raspistill)
-apt-get install -y libraspberrypi-bin
+apt-get install -y pi-bluetooth libraspberrypi-bin
 #???
 
 #??? x86 images only: firmware
@@ -358,6 +356,7 @@ cp /boot/dietpi/conf/network_interfaces /etc/network/interfaces
 /DietPi/dietpi/func/obtain_network_details
 # - enable allow-hotplug eth0 after copying.
 sed -i "/allow-hotplug eth/c\allow-hotplug eth$(sed -n 1p /DietPi/dietpi/.network)" /etc/network/interfaces
+
 
 #Reduce DHCP request retry count and timeouts: https://github.com/Fourdee/DietPi/issues/711
 sed -i '/^#timeout /d' /etc/dhcp/dhclient.conf
