@@ -2841,6 +2841,20 @@ _EOF_
 
 		fi
 
+		#Software that requires Redis
+		if (( ${aSOFTWARE_INSTALL_STATE[47]} == 1 ||
+			${aSOFTWARE_INSTALL_STATE[114]} == 1 )); then
+
+			if (( ${aSOFTWARE_INSTALL_STATE[91]} == 0 )); then
+
+				aSOFTWARE_INSTALL_STATE[91]=1
+
+				/DietPi/dietpi/func/dietpi-notify 2 "Redis will be installed"
+
+			fi
+
+		fi
+
 		#-------------------------------------------------------------------------
 		#Pre-req software, for items that do DO have their own array aSOFTWARE_REQUIRES_SOFTWARENAME
 		#	WEBSERVER - Manual stack install
@@ -4133,7 +4147,7 @@ _EOF_
 			#Install
 			if (( $? == 0 )); then
 
-				if [ ! -f /etc/apt/sources.list.d/owncloud.list ]; then
+				if [ ! -f /etc/apt/sources.list.d/owncloud.list ] && [ ! -d /var/www/owncloud ]; then
 
 					wget "$INSTALL_URL_ADDRESS" -O owncloud.key_or_zip
 					apt-key add - < owncloud.key_or_zip 2> /dev/null
@@ -4154,6 +4168,8 @@ _EOF_
 
 				fi
 
+				# Install necessary PHP modules: https://doc.owncloud.org/server/latest/admin_manual/installation/source_installation.html#php-extensions
+				AGI "$PHP_APT_PACKAGE_NAME"-intl "$PHP_APT_PACKAGE_NAME"-redis
 				AGI owncloud-files 2> /dev/null
 
 			else
@@ -4176,9 +4192,15 @@ _EOF_
 			#Install
 			if (( $? == 0 )); then
 
-				wget "$INSTALL_URL_ADDRESS" -O package.zip
-				unzip -o package.zip -d /var/www
-				rm package.zip
+				# Install necessary PHP modules: https://docs.nextcloud.com/server/12/admin_manual/installation/source_installation.html#prerequisites-for-manual-installation
+				AGI "$PHP_APT_PACKAGE_NAME"-intl "$PHP_APT_PACKAGE_NAME"-redis
+				if [ ! -d /var/www/nextcloud ]; then
+
+					wget "$INSTALL_URL_ADDRESS" -O package.zip
+					unzip -o package.zip -d /var/www
+					rm package.zip
+
+				fi
 
 			else
 
@@ -9031,8 +9053,8 @@ _EOF_
 		INSTALLING_INDEX=91
 		if (( ${aSOFTWARE_INSTALL_STATE[$INSTALLING_INDEX]} == 1 )); then
 
-			#Enable redis extension for all webstacks:
-			"$PHP_APT_PACKAGE_NAME"enmod redis
+			# Enable redis php module, if installed:
+			"$PHP_APT_PACKAGE_NAME"enmod redis 2> /dev/null
 
 		fi
 
@@ -9086,9 +9108,8 @@ _EOF_
 		INSTALLING_INDEX=47
 		if (( ${aSOFTWARE_INSTALL_STATE[$INSTALLING_INDEX]} == 1 )); then
 
-			# Install/Enable necessary PHP modules: https://doc.owncloud.org/server/latest/admin_manual/installation/source_installation.html#php-extensions
-			AGI "$PHP_APT_PACKAGE_NAME"-intl
-			${PHP_APT_PACKAGE_NAME}enmod curl gd intl json pdo_mysql opcache apcu
+			# Enable necessary PHP modules: https://doc.owncloud.org/server/latest/admin_manual/installation/source_installation.html#php-extensions
+			${PHP_APT_PACKAGE_NAME}enmod curl gd intl json pdo_mysql opcache apcu redis
 			# Following modules are not always enabled since Stretch:
 			if (( $DISTRO >= 4 )); then
 
@@ -9104,10 +9125,17 @@ _EOF_
 			if (( ${aSOFTWARE_INSTALL_STATE[83]} >= 1 )); then
 
 				a2enmod rewrite headers env dir mime
-				cp /DietPi/dietpi/conf/apache.ownnextcloud.conf /etc/apache2/sites-available/owncloud.conf
-				sed -i "s/nextcloud/owncloud/g" /etc/apache2/sites-available/owncloud.conf
+				local owncloud_conf='/etc/apache2/sites-available/owncloud.conf'
+				# Do not overwrite existing config.
+				if [ -f $owncloud_conf ]; then
+
+					owncloud_conf='/etc/apache2/sites-available/owncloud.conf.new'
+
+				fi
+				cp /DietPi/dietpi/conf/apache.ownnextcloud.conf $owncloud_conf
+				sed -i "s/nextcloud/owncloud/g" $owncloud_conf
 				# OPCache adjustment is just forced by Nextcloud
-				sed -i "s/php_admin_value/#php_admin_value/" /etc/apache2/sites-available/owncloud.conf
+				sed -i "s/php_admin_value/#php_admin_value/" $owncloud_conf
 				a2ensite owncloud
 
 			fi
@@ -9115,13 +9143,20 @@ _EOF_
 			# NGINX: https://doc.owncloud.org/server/latest/admin_manual/installation/nginx_configuration.html#owncloud-in-a-subdir-of-nginx
 			if (( ${aSOFTWARE_INSTALL_STATE[85]} >= 1 )); then
 
-				cp /DietPi/dietpi/conf/nginx.sites-dietpi.owncloud.config /etc/nginx/sites-dietpi/owncloud.config
+				local owncloud_config='/etc/nginx/sites-dietpi/owncloud.config'
+				# Do not overwrite existing config.
+				if [ -f $owncloud_config ]; then
+
+					owncloud_config='/etc/nginx/sites-dietpi/owncloud.config.new'
+
+				fi
+				cp /DietPi/dietpi/conf/nginx.sites-dietpi.owncloud.config $owncloud_config
 
 				# Stretch: Use PHP7.0 socket and set 'fastcgi_request_buffering off';
 				if (( $DISTRO >= 4 )); then
 
-					sed -i "s#/run/php5-fpm.sock#/run/php/php7.0-fpm.sock#g" /etc/nginx/sites-dietpi/owncloud.config
-					sed -i "s/#fastcgi_request_buffering off;/fastcgi_request_buffering off;/g" /etc/nginx/sites-dietpi/owncloud.config
+					sed -i "s#/run/php5-fpm.sock#/run/php/php7.0-fpm.sock#g" $owncloud_config
+					sed -i "s/#fastcgi_request_buffering off;/fastcgi_request_buffering off;/g" $owncloud_config
 
 				fi
 
@@ -9129,9 +9164,24 @@ _EOF_
 				DietPi/dietpi/func/check_connection https://localhost &> /dev/null
 				if (( $? == 0 || $? == 5)); then
 
-					sed -i "s/#fastcgi_param HTTPS on;/fastcgi_param HTTPS on;/g" /etc/nginx/sites-dietpi/owncloud.config
+					sed -i "s/#fastcgi_param HTTPS on;/fastcgi_param HTTPS on;/g" $owncloud_config
 
 				fi
+
+			fi
+
+			# Enable MySQL 4-byte support: https://doc.owncloud.org/server/latest/admin_manual/configuration/database/linux_database_configuration.html#configure-mysql-for-4-byte-unicode-support
+			cat << _EOF_ > /etc/mysql/conf.d/99-dietpi-4bit.cnf
+[mysqld]
+innodb_large_prefix=1
+innodb_file_format=barracuda
+innodb_file_per_table=1
+_EOF_
+			# Check if we really do fresh installation:
+			local oc_is_fresh=1
+			if [ -d '/mnt/dietpi_userdata/mysql/owncloud' ]; then
+
+				oc_is_fresh=0
 
 			fi
 
@@ -9150,11 +9200,15 @@ _EOF_
 			sudo -u www-data php /var/www/owncloud/occ maintenance:install --no-interaction --database "mysql" --database-name "owncloud" --database-user "tmp_root" --database-pass "$GLOBAL_PW" --admin-user "$username" --admin-pass "$GLOBAL_PW" --data-dir "$FP_DIETPI_USERDATA_DIRECTORY/owncloud_data"
 			mysql -uroot -p"$GLOBAL_PW" -e "drop user 'tmp_root'@'localhost'"
 
-			# Removing MySQL parent user 'oc_admin'@'%' could be done, but then privileges on database has to be granted to child user 'oc_admin'@'localhost' first.
-			# We leave it, as limitation to localhost database could limit extended Nextcloud features.
-			#mysql -uroot -p"$GLOBAL_PW" -e "drop user $(grep -m1 "'dbuser'" /var/www/nextcloud/config/config.php | awk '{print $3}' | sed "s/,//")"
-
+			# Adjusting config file:
 			local config_php="/var/www/owncloud/config/config.php"
+			
+			# Enable MySQL 4-byte support for new installations only, to prevent risky database conversion tasks:
+			if (( $oc_is_fresh == 1 )); then
+
+				grep -q "'mysql.utf8mb4' => " $config_php || sed -i "/'dbpassword'/a \ \ 'mysql.utf8mb4' => true," $config_php
+
+			fi
 
 			# Add local IP and hostname to trusted domains.
 			# If "1 => '" does not exist, the config.php is not copied e.g. from older instance, so we add entries.
@@ -9175,6 +9229,25 @@ _EOF_
 
 			fi
 
+			# Redis for transactional file locking:
+			# https://doc.owncloud.org/server/latest/admin_manual/configuration/server/caching_configura$
+			# - Enable Redis socket and grant www-data access to it:
+			sed -i "\#unixsocket /#c\unixsocket /var/run/redis/redis.sock" /etc/redis/redis*.conf
+			sed -i "\#unixsocketperm#c\unixsocketperm 770" /etc/redis/redis*.conf
+			usermod -a -G redis www-data
+			# - Enable ownCloud to use Redis socket:
+			if (( ! $(cat $config_php | grep -ci -m1 "'memcache.locking'") )); then
+
+				sed -i "\#'memcache.local'#a \ \ 'filelocking.enabled' => true,\n\
+  'memcache.locking' => '\\\OC\\\Memcache\\\Redis',\n\
+  'redis' => [\n\
+    'host' => '/var/run/redis/redis.sock',\n\
+    'port' => 0,\n\
+  ]," $config_php
+
+			fi
+
+
 			# ownCloud/Nextcloud ignores system wide php.ini settings. Use their own config.
 			# Set max upload size
 			local php_max_upload_size="$(( $(php -r 'print(PHP_INT_MAX);') / 1024 / 1024))M"
@@ -9184,6 +9257,13 @@ _EOF_
 			# Set memory limit: total / 4
 			local memory_limit_max="$(( $RAM_TOTAL / 4 ))M"
 			sed -i "/memory_limit=/c\memory_limit=$memory_limit_max" /var/www/owncloud/.user.ini
+			
+			# Enable ownCloud background cron job:
+			crontab -u www-data -l 2>/dev/null | grep -q '/var/www/owncloud/cron.php' || echo "*/15 * * * * php /var/www/owncloud/cron.php" | crontab -u www-data -
+			sudo -u www-data php /var/www/owncloud/occ background:cron
+			
+			# Add occ command shortcut:
+			grep -q '/var/www/owncloud/occ' /etc/bash.bashrc || sed -i "\|alias sudo='sudo '|a alias occ='sudo -u www-data php /var/www/owncloud/occ'" /etc/bash.bashrc
 
 		fi
 
@@ -9191,9 +9271,8 @@ _EOF_
 		INSTALLING_INDEX=114
 		if (( ${aSOFTWARE_INSTALL_STATE[$INSTALLING_INDEX]} == 1 )); then
 
-			# Install/Enable necessary PHP modules: https://docs.nextcloud.com/server/12/admin_manual/installation/source_installation.html#prerequisites-for-manual-installation
-			AGI "$PHP_APT_PACKAGE_NAME"-intl
-			${PHP_APT_PACKAGE_NAME}enmod curl gd intl json pdo_mysql opcache apcu
+			# Enable necessary PHP modules: https://docs.nextcloud.com/server/12/admin_manual/installation/source_installation.html#prerequisites-for-manual-installation
+			${PHP_APT_PACKAGE_NAME}enmod curl gd intl json pdo_mysql opcache apcu redis
 			# Solve: https://github.com/Fourdee/DietPi/issues/1067#issuecomment-335200352
 			if (( $DISTRO >= 4 )); then
 
@@ -9217,7 +9296,14 @@ _EOF_
 			if (( ${aSOFTWARE_INSTALL_STATE[83]} >= 1 )); then
 
 				a2enmod rewrite headers env dir mime
-				cp /DietPi/dietpi/conf/apache.ownnextcloud.conf /etc/apache2/sites-available/nextcloud.conf
+				local nextcloud_conf='/etc/apache2/sites-available/nextcloud.conf'
+				# Do not overwrite existing config.
+				if [ -f $nextcloud_conf ]; then
+
+					nextcloud_conf='/etc/apache2/sites-available/nextcloud.conf.new'
+
+				fi
+				cp /DietPi/dietpi/conf/apache.ownnextcloud.conf $nextcloud_conf
 				a2ensite nextcloud
 
 			fi
@@ -9225,13 +9311,20 @@ _EOF_
 			# Nginx: https://docs.nextcloud.com/server/12/admin_manual/installation/nginx.html#nextcloud-in-a-subdir-of-nginx
 			if (( ${aSOFTWARE_INSTALL_STATE[85]} >= 1 )); then
 
-				cp /DietPi/dietpi/conf/nginx.sites-dietpi.nextcloud.config /etc/nginx/sites-dietpi/nextcloud.config
+				local nextcloud_config='/etc/nginx/sites-dietpi/nextcloud.config'
+				# Do not overwrite existing config.
+				if [ -f $nextcloud_config ]; then
+
+					nextcloud_config='/etc/nginx/sites-dietpi/nextcloud.config.new'
+
+				fi
+				cp /DietPi/dietpi/conf/nginx.sites-dietpi.nextcloud.config $nextcloud_config
 
 				# Stretch: Use PHP7.0 socket and set 'fastcgi_request_buffering off';
 				if (( $DISTRO >= 4 )); then
 
-					sed -i "s#/run/php5-fpm.sock#/run/php/php7.0-fpm.sock#g" /etc/nginx/sites-dietpi/nextcloud.config
-					sed -i "s/#fastcgi_request_buffering off;/fastcgi_request_buffering off;/g" /etc/nginx/sites-dietpi/nextcloud.config
+					sed -i "s#/run/php5-fpm.sock#/run/php/php7.0-fpm.sock#g" $nextcloud_config
+					sed -i "s/#fastcgi_request_buffering off;/fastcgi_request_buffering off;/g" $nextcloud_config
 
 				fi
 
@@ -9239,9 +9332,24 @@ _EOF_
 				DietPi/dietpi/func/check_connection https://localhost &> /dev/null
 				if (( $? == 0 || $? == 5)); then
 
-					sed -i "s/#fastcgi_param HTTPS on;/fastcgi_param HTTPS on;/g" /etc/nginx/sites-dietpi/nextcloud.config
+					sed -i "s/#fastcgi_param HTTPS on;/fastcgi_param HTTPS on;/g" $nextcloud_config
 
 				fi
+
+			fi
+
+			# Enable MySQL 4-byte support: https://docs.nextcloud.com/server/12/admin_manual/configuration_database/mysql_4byte_support.html
+			cat << _EOF_ > /etc/mysql/conf.d/99-dietpi-4bit.cnf
+[mysqld]
+innodb_large_prefix=1
+innodb_file_format=barracuda
+innodb_file_per_table=1
+_EOF_
+			# Check if we really do fresh installation:
+			local nc_is_fresh=1
+			if [ -d '/mnt/dietpi_userdata/mysql/nextcloud' ]; then
+
+				nc_is_fresh=0
 
 			fi
 
@@ -9260,24 +9368,48 @@ _EOF_
 			sudo -u www-data php /var/www/nextcloud/occ maintenance:install --no-interaction --database "mysql" --database-name "nextcloud" --database-user "tmp_root" --database-pass "$GLOBAL_PW" --admin-user "$username" --admin-pass "$GLOBAL_PW" --data-dir "$FP_DIETPI_USERDATA_DIRECTORY/nextcloud_data"
 			mysql -uroot -p"$GLOBAL_PW" -e "drop user 'tmp_root'@'localhost'"
 
-			# Removing MySQL parent user 'oc_admin'@'%' could be done, but then privileges on database has to be granted to child user 'oc_admin'@'localhost' first.
-			# We leave it, as limitation to localhost database could limit extended Nextcloud features.
-			#mysql -uroot -p"$GLOBAL_PW" -e "drop user $(grep -m1 "'dbuser'" /var/www/nextcloud/config/config.php | awk '{print $3}' | sed "s/,//")"
+			# Adjusting config file:
+			local config_php="/var/www/nextcloud/config/config.php"
+
+			# Enable MySQL 4-byte support for new installations only, to prevent risky database conversion tasks:
+			if (( $nc_is_fresh == 1 )); then
+
+				grep -q "'mysql.utf8mb4' => " $config_php || sed -i "/'dbpassword'/a \ \ 'mysql.utf8mb4' => true," $config_php
+
+			fi
 
 			# Disable trusted_domains.
-			if (( ! $(cat /var/www/nextcloud/config/config.php | grep -ci -m1 "1 => '*'") )); then
+			if (( ! $(cat $config_php | grep -ci -m1 "1 => '*'") )); then
 
-				sed -i "/0 => 'localhost'/a     1 => '*'," /var/www/nextcloud/config/config.php
+				sed -i "/0 => 'localhost'/a     1 => '*'," $config_php
 
 			fi
 
 			# Set CLI URL to Nextcloud sub directory:
-			sed -i "s#'http://localhost'#'http://localhost/nextcloud'#g" /var/www/nextcloud/config/config.php
+			sed -i "s#'http://localhost'#'http://localhost/nextcloud'#g" $config_php
 
 			# APCu Memcache
-			if (( ! $(cat /var/www/nextcloud/config/config.php | grep -ci -m1 "'memcache.local'") )); then
+			if (( ! $(cat $config_php | grep -ci -m1 "'memcache.local'") )); then
 
-				sed -i "/'version'/a 'memcache.local' => '\\\OC\\\Memcache\\\APCu'," /var/www/nextcloud/config/config.php
+				sed -i "/'version'/a 'memcache.local' => '\\\OC\\\Memcache\\\APCu'," $config_php
+
+			fi
+
+			# Redis for transactional file locking:
+			# https://docs.nextcloud.com/server/12/admin_manual/configuration_files/files_locking_transactional.html
+			# - Enable Redis socket and grant www-data access to it:
+			sed -i "\#unixsocket /#c\unixsocket /var/run/redis/redis.sock" /etc/redis/redis*.conf
+			sed -i "\#unixsocketperm#c\unixsocketperm 770" /etc/redis/redis*.conf
+			usermod -a -G redis www-data
+			# - Enable Nextloud to use Redis socket:
+			if (( ! $(cat $config_php | grep -ci -m1 "'memcache.locking'") )); then
+
+				sed -i "\#'memcache.local'#a \ \ 'filelocking.enabled' => true,\n\
+  'memcache.locking' => '\\\OC\\\Memcache\\\Redis',\n\
+  'redis' => array(\n\
+    'host' => '/var/run/redis/redis.sock',\n\
+    'port' => 0,\n\
+    )," $config_php
 
 			fi
 
@@ -9290,6 +9422,13 @@ _EOF_
 			# Set memory limit: total / 4
 			local memory_limit_max="$(( $RAM_TOTAL / 4 ))M"
 			sed -i "/memory_limit=/c\memory_limit=$memory_limit_max" /var/www/nextcloud/.user.ini
+
+			# Enable Nextcloud background cron job:
+			crontab -u www-data -l 2>/dev/null | grep -q '/var/www/nextcloud/cron.php' || echo "*/15 * * * * php /var/www/nextcloud/cron.php" | crontab -u www-data -
+			sudo -u www-data php /var/www/nextcloud/occ background:cron
+			
+			# Add occ command shortcut, use 'ncc' as 'occ' is reserved for ownCloud:
+			grep -q '/var/www/nextcloud/occ' /etc/bash.bashrc || sed -i "\|alias sudo='sudo '|a alias ncc='sudo -u www-data php /var/www/nextcloud/occ'" >> /etc/bash.bashrc
 
 		fi
 
@@ -13054,7 +13193,7 @@ _EOF_
 
 		elif (( $1 == 91 )); then
 
-			AGP redis-server "$PHP_APT_PACKAGE_NAME"-redis
+			AGP "$PHP_APT_PACKAGE_NAME"-redis redis-server redis-tools
 
 		elif (( $1 == 89 )); then
 
@@ -13078,28 +13217,45 @@ _EOF_
 			rm -R /var/www/phpBB3
 
 		elif (( $1 == 47 )); then
-
+			#ownCloud
+			# Remove occ command alias
+			sed -i '\|/var/www/owncloud/occ|d' /etc/bash.bashrc
+			# Remove background cron job
+			crontab -u www-data -l | grep -v '/var/www/owncloud/cron.php'  | crontab -u www-data -
+			# Disable and remove webservier configs
 			a2dissite owncloud 2>/dev/null
 			rm /etc/apache2/sites-available/owncloud.conf 2>/dev/null
 			rm /etc/nginx/sites-dietpi/owncloud.config 2>/dev/null
+			# Purge APT package
 			AGP owncloud-files owncloud owncloud-deps
+			# Remove ownCloud installation folder
 			rm -R /var/www/owncloud
+			# Drop MySQL/MariaDB user and database
 			systemctl start mysql
 			mysql -uroot -p"$GLOBAL_PW" -e "drop user $(grep -m1 "'dbuser'" /var/www/owncloud/config/config.php | awk '{print $3}' | sed "s/,//")@$(grep -m1 "'dbhost'" /var/www/owncloud/config/config.php | awk '{print $3}' | sed "s/,//")"
 			mysql -uroot -p"$GLOBAL_PW" -e "drop user $(grep -m1 "'dbuser'" /var/www/owncloud/config/config.php | awk '{print $3}' | sed "s/,//")"
+			mysqldump --lock-tables -uroot -p"$GLOBAL_PW" owncloud > "$FP_DIETPI_USERDATA_DIRECTORY"/owncloud_data/mysql_backup.sql
 			mysqladmin -u root -p"$GLOBAL_PW" drop owncloud -f
+			# Remove ownCloud repo
 			rm /etc/apt/sources.list.d/owncloud.list 2> /dev/null
-			apt-get update
 
 		elif (( $1 == 114 )); then
-
+			#Nextcloud
+			# Remove occ command alias
+			sed -i '\|/var/www/nextcloud/occ|d' /etc/bash.bashrc
+			# Remove background cron job
+			crontab -u www-data -l | grep -v '/var/www/nextcloud/cron.php'  | crontab -u www-data -
+			# Disable and remove webservier configs
 			a2dissite nextcloud 2>/dev/null
 			rm /etc/apache2/sites-available/nextcloud.conf 2>/dev/null
 			rm /etc/nginx/sites-dietpi/nextcloud.config 2>/dev/null
+			# Remove Nextcloud installation folder
 			rm -R /var/www/nextcloud
+			# Drop MySQL/MariaDB user and database
 			systemctl start mysql
 			mysql -uroot -p"$GLOBAL_PW" -e "drop user $(grep -m1 "'dbuser'" /var/www/nextcloud/config/config.php | awk '{print $3}' | sed "s/,//")@$(grep -m1 "'dbhost'" /var/www/nextcloud/config/config.php | awk '{print $3}' | sed "s/,//")"
 			mysql -uroot -p"$GLOBAL_PW" -e "drop user $(grep -m1 "'dbuser'" /var/www/nextcloud/config/config.php | awk '{print $3}' | sed "s/,//")"
+			mysqldump --lock-tables -uroot -p"$GLOBAL_PW" nextcloud > "$FP_DIETPI_USERDATA_DIRECTORY"/nextcloud_data/mysql_backup.sql
 			mysqladmin -u root -p"$GLOBAL_PW" drop nextcloud -f
 
 		elif (( $1 == 115 )); then
