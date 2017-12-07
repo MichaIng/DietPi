@@ -532,8 +532,8 @@ _EOF_
 #???
 
 
-#??? XU4 FFMPEG (JESSIE only): https://github.com/Fourdee/DietPi/issues/1273
-cat << _EOF_ > /etc/apt/preferences.d/ffmpeg
+#??? XU4 FFMPEG fix. Prefer debian.org over Meveric for backports: https://github.com/Fourdee/DietPi/issues/1273
+cat << _EOF_ > /etc/apt/preferences.d/backports
 Package: *
 Pin: release a=$DISTRO-backports
 Pin-Priority: 600
