@@ -531,6 +531,15 @@ tput cnorm
 _EOF_
 #???
 
+
+#??? XU4 FFMPEG (JESSIE only): https://github.com/Fourdee/DietPi/issues/1273
+cat << _EOF_ > /etc/apt/preferences.d/ffmpeg
+Package: *
+Pin: release a=$DISTRO-backports
+Pin-Priority: 600
+_EOF_
+#???
+
 #??? x86_64
 #	Disable nouveau: https://github.com/Fourdee/DietPi/issues/1244 // http://dietpi.com/phpbb/viewtopic.php?f=11&t=2462&p=9688#p9688
 cat << _EOF_ > /etc/modprobe.d/blacklist-nouveau.conf
