@@ -399,7 +399,12 @@ cat << _EOF_ >> /etc/hdparm.conf
 _EOF_
 
 cat << _EOF_ >> /etc/bash.bashrc
+#LANG
 export \$(cat /etc/default/locale | grep LANG=)
+
+#Define a default LD_LIBRARY_PATH for all systems
+export LD_LIBRARY_PATH=/lib:/usr/lib:/usr/local/lib:/opt/vc/lib
+
 #DietPi Additions
 alias sudo='sudo ' # https://github.com/Fourdee/DietPi/issues/424
 alias dietpi-process_tool='/DietPi/dietpi/dietpi-process_tool'
