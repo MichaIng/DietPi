@@ -52,7 +52,7 @@ rm /etc/apt/sources.list.d/deb-multimedia.list
 #Remove following All
 apt-get clean
 apt-get update
-apt-get purge -y fonts-* xmms2-client-* pulseaudio* jq xxd iperf3 gdisk gpsd ppp libboost-iostreams* sgml-base xml-core usb-modeswitch* libpng* cpp-* cpp ntpdate bluez bluetooth rsync dialog dhcpcd5 lua5.1 netcat-* make makedev ncdu plymouth openresolv shared-mime-in* tcpd strace tasksel* wireless-* xdg-user-dirs triggerhappy python* v4l-utils traceroute xz-utils ucf xauth zlib1g-dev xml-core aptitude* avahi-daemon rsyslog logrotate man-db manpages vim vim-common vim-runtime vim-tiny mc mc-data
+apt-get purge -y libpython* fonts-* xmms2-client-* pulseaudio* jq xxd iperf3 gdisk gpsd ppp libboost-iostreams* sgml-base xml-core usb-modeswitch* libpng* cpp-* cpp ntpdate bluez bluetooth rsync dialog dhcpcd5 lua5.1 netcat-* make makedev ncdu plymouth openresolv shared-mime-in* tcpd strace tasksel* wireless-* xdg-user-dirs triggerhappy python* v4l-utils traceroute xz-utils ucf xauth zlib1g-dev xml-core aptitude* avahi-daemon rsyslog logrotate man-db manpages vim vim-common vim-runtime vim-tiny mc mc-data
 
 #+Desktop images (Mostly desktop packages, but apply to non-desktop images also):
 apt-get purge -y libpod-* libpeas-* isc-dhcp-server gnome-* fonts-dejavu* eject dnsmasq* dns-root-data colord-data libjasper* libjson* libwbclient* libwayland* golang-* libavahi* libtext* libweb* libpcsclite1 libxau6* libxc* dictionaries-* libgtk* miscfiles minicom lrzsz lxmenu-* x11-* zenity* yelp-*
@@ -60,9 +60,12 @@ apt-get purge -y libpod-* libpeas-* isc-dhcp-server gnome-* fonts-dejavu* eject 
 rm -R /usr/share/fonts/*
 rm -R /usr/share/icons/*
 
-#+armbian
-apt-get purge -y expect tcl-expect toilet toilet-fonts w-scan vlan weather-util* sysbench stress cmake cmake-data device-tree-co* fping hddtemp haveged hostapd i2c-tools iperf ir-keytable libasound2* libmtp* libusb-dev lirc lsof ncurses-term pkg-config unicode-data rfkill pv mtp-tools m4 screen alsa-utils autotools-dev bind9-host btrfs-tools bridge-utils cpufrequtils dvb-apps dtv-scan-table* evtest f3 figlet gcc gcc-4.8-* git git-man ifenslave
-#apt-get purge -y linux-jessie-root-*
+#+Misc
+#??? BBB: https://github.com/Fourdee/DietPi/issues/931#issuecomment-345451529
+apt-get purge -y apache2 roboticscape ardupilot-* ti-* nodejs mjpg-streamer bonescript libapr1
+#???
+
+apt-get purge -y memtester expect tcl-expect toilet toilet-fonts w-scan vlan weather-util* sysbench stress cmake cmake-data device-tree-co* fping hddtemp haveged hostapd i2c-tools iperf ir-keytable libasound2* libmtp* libusb-dev lirc lsof ncurses-term pkg-config unicode-data rfkill pv mtp-tools m4 screen alsa-utils autotools-dev bind9-host btrfs-tools bridge-utils cpufrequtils dvb-apps dtv-scan-table* evtest f3 figlet gcc gcc-4.8-* git git-man ifenslave
 
 #+ dev packages
 #	On ARMbian DEV branch images, manually do this as triggers '*-dev' image/uboot etc
@@ -75,38 +78,46 @@ apt-get purge -y '\-dev$' linux-headers*
 apt-get purge -y rpi-update libraspberrypi-doc
 #??? RPI (remove older version packages marked as manual): https://github.com/Fourdee/DietPi/issues/598#issuecomment-25919922
 apt-get purge gcc-4.6-base gcc-4.7-base gcc-4.8-base libsigc++-1.2-5c2
-
-
+#???
 
 apt-get autoremove --purge -y
 
+
 #??? ROCK64, reinstall kernel packages:
 apt-get install linux-rock64-package
+#???
 
-apt-get dist-upgrade -y
+#???: Optional Reinstall OpenSSH (for updating dietpi scripts etc). Gets removed during finalise.
+apt-get install openssh-server -y
+echo -e "PermitRootLogin yes" >> /etc/ssh/sshd_config
+systemctl restart ssh
+#???
+
 
 #install packages
+apt-get dist-upgrade -y
 echo -e "CONF_SWAPSIZE=0" > /etc/dphys-swapfile
 apt-get install -y gnupg net-tools cron rfkill ca-certificates locales apt-transport-https ethtool p7zip-full hfsplus iw debconf-utils xz-utils fbset wpasupplicant resolvconf bc dbus bzip2 psmisc bash-completion cron whiptail sudo ntp ntfs-3g dosfstools parted hdparm usbutils zip htop wput wget fake-hwclock dphys-swapfile curl unzip console-setup console-data console-common keyboard-configuration wireless-tools wireless-regdb crda --no-install-recommends
+
 
 #??? Grub/intel+amd microcode firmware x86_64 native
 #	MBR
 apt-get install -y grub2
 #	UEFI
 apt-get install -y grub-common grub-efi-amd64 grub-efi-amd64-bin grub2-common
-
-apt-get install firmware-linux-nonfree -y
+#???
 
 #??? bluetooth if onboard device / RPI
 apt-get install -y bluetooth bluez-firmware
+#???
 
 #??? RPi - bluetooth/firmware for all RPi's
-apt-get install -y pi-bluetooth
-#??? RPi - common rpi specific binaries (eg: raspistill)
-apt-get install -y libraspberrypi-bin
+apt-get install -y pi-bluetooth libraspberrypi-bin
+#???
 
 #??? x86 images only: firmware
-apt-get install -y firmware-realtek firmware-ralink firmware-brcm80211 firmware-atheros --no-install-recommends
+apt-get install -y firmware-linux-nonfree firmware-realtek firmware-ralink firmware-brcm80211 firmware-atheros --no-install-recommends
+#???
 
 #------------------------------------------------------------------------------------------------
 #DIETPI STUFF
@@ -120,6 +131,7 @@ userdel -f odroid
 userdel -f rock64
 userdel -f linaro #ASUS TB
 userdel -f dietpi
+userdel -f debian #BBB
 
 #Remove folders (now in finalise script)
 
@@ -333,7 +345,7 @@ systemctl mask apt-daily.service
 systemctl mask apt-daily-upgrade.timer
 
 #/etc/sysctl.conf | Check for a previous entry before adding this
-echo -e "vm.swappiness=1" >> /etc/sysctl.conf
+echo -e "vm.swappiness=1" > /etc/sysctl.d/97-dietpi.conf
 
 #login,
 echo -e "\n/DietPi/dietpi/login" >> /root/.bashrc
@@ -344,6 +356,7 @@ cp /boot/dietpi/conf/network_interfaces /etc/network/interfaces
 /DietPi/dietpi/func/obtain_network_details
 # - enable allow-hotplug eth0 after copying.
 sed -i "/allow-hotplug eth/c\allow-hotplug eth$(sed -n 1p /DietPi/dietpi/.network)" /etc/network/interfaces
+
 
 #Reduce DHCP request retry count and timeouts: https://github.com/Fourdee/DietPi/issues/711
 sed -i '/^#timeout /d' /etc/dhcp/dhclient.conf
@@ -386,7 +399,12 @@ cat << _EOF_ >> /etc/hdparm.conf
 _EOF_
 
 cat << _EOF_ >> /etc/bash.bashrc
+#LANG
 export \$(cat /etc/default/locale | grep LANG=)
+
+#Define a default LD_LIBRARY_PATH for all systems
+export LD_LIBRARY_PATH=/lib:/usr/lib:/usr/local/lib:/opt/vc/lib
+
 #DietPi Additions
 alias sudo='sudo ' # https://github.com/Fourdee/DietPi/issues/424
 alias dietpi-process_tool='/DietPi/dietpi/dietpi-process_tool'
@@ -451,7 +469,7 @@ echo -e "CONF_SWAPSIZE=0" > /etc/dphys-swapfile
 systemctl disable getty@tty[2-6].service
 #systemctl disable serial-getty@ttyS0.service
 
-#NTPd - remove systemd's version
+#NTPd default - Disable systemd's version
 systemctl disable systemd-timesyncd
 
 #+ARMbian increase console verbose
@@ -474,14 +492,16 @@ ln -sf /dev/null /etc/systemd/network/99-default.link
 #	kernel cmd line with GRUB
 #	/etc/default/grub [replace] GRUB_CMDLINE_LINUX="net.ifnames=0"
 #								GRUB_TIMEOUT=0
-
+#???
 
 #??? Native PC, add i386 support by default
 dpkg --add-architecture i386
 apt-get update
+#???
 
 #??? ARMbian OPi Zero 2: https://github.com/Fourdee/DietPi/issues/876#issuecomment-294350580
 echo -e "blacklist bmp085" > /etc/modprobe.d/bmp085.conf
+#???
 
 #??? Sparky SBC ONLY: Blacklist GPU and touch screen modules: https://github.com/Fourdee/DietPi/issues/699#issuecomment-271362441
 cat << _EOF_ > /etc/modprobe.d/disable_sparkysbc_touchscreen.conf
@@ -499,11 +519,13 @@ blacklist drm
 blacklist videobuf2_vmalloc
 blacklist bc_example
 _EOF_
+#???
 
 #??? RPI ONLY: Scroll lock fix for RPi by Midwan: https://github.com/Fourdee/DietPi/issues/474#issuecomment-243215674
 cat << _EOF_ > /etc/udev/rules.d/50-leds.rules
 ACTION=="add", SUBSYSTEM=="leds", ENV{DEVPATH}=="*/input*::scrolllock", ATTR{trigger}="kbd-scrollock"
 _EOF_
+#???
 
 #??? PINE (and possibily others): Cursor fix for FB
 cat << _EOF_ >> "$HOME"/.bashrc
@@ -512,6 +534,31 @@ sed -i -e 's/?0c/?112c/g' -e 's/?8c/?48;0;64c/g' terminfo.txt
 tic terminfo.txt
 tput cnorm
 _EOF_
+#???
+
+
+#??? XU4 FFMPEG fix. Prefer debian.org over Meveric for backports: https://github.com/Fourdee/DietPi/issues/1273
+cat << _EOF_ > /etc/apt/preferences.d/backports
+Package: *
+Pin: release a=jessie-backports
+Pin: origin "fuzon.co.uk"
+Pin-Priority: 99
+_EOF_
+#???
+
+#??? x86_64
+#	Disable nouveau: https://github.com/Fourdee/DietPi/issues/1244 // http://dietpi.com/phpbb/viewtopic.php?f=11&t=2462&p=9688#p9688
+cat << _EOF_ > /etc/modprobe.d/blacklist-nouveau.conf
+blacklist nouveau
+blacklist lbm-nouveau
+options nouveau modeset=0
+alias nouveau off
+alias lbm-nouveau off
+_EOF_
+echo -e "options nouveau modeset=0" > /etc/modprobe.d/nouveau-kms.conf
+update-initramfs -u
+#???
+
 
 #------------------------------------------------------------------------------------------------
 #A Unique HW_MODEL index will need to be assigned and coded into the DietPi sourcecode.

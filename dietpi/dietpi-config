@@ -1329,22 +1329,7 @@
 				CHOICE=$?
 				if (( $CHOICE == 0 )); then
 
-					sed -i "/ntpd_update_mode=/c\ntpd_update_mode=$OPTION" /DietPi/dietpi.txt
-
-					# - Drift mode, use SystemD
-					if (( $OPTION == 4 )); then
-
-						timedatectl set-ntp true
-
-					# - NTPD
-					else
-
-						systemctl disable systemd-timesyncd
-						/DietPi/dietpi/func/run_ntpd
-
-					fi
-
-					REBOOT_REQUIRED=1
+					/DietPi/dietpi/func/dietpi-set_software ntpd-mode $OPTION
 
 				fi
 
@@ -1563,8 +1548,10 @@
 		fi
 
 		local arm_temp=$(/DietPi/dietpi/dietpi-cpuinfo 1)
+		local arm_temp_f='Unknown'
 		if [[ $arm_temp =~ ^-?[0-9]+$ ]]; then
 
+			arm_temp_f="$(( ( $arm_temp * 9 / 5 ) + 32 ))'f"
 			arm_temp+="'c"
 
 		fi
@@ -1654,7 +1641,7 @@
 		fi
 
 		WHIP_TITLE='DietPi - Performance Options'
-		OPTION=$(whiptail --title "$WHIP_TITLE" --menu " Hardware : $HW_MODEL_DESCRIPTION \n ARM Temp: $arm_temp\n RAM: $memory_total MB | Used: $memory_usage MB | Free: $memory_free MB" --cancel-button "$TEXT_MENU_BACK" --backtitle "$WHIP_BACKTITLE" 18 60 8 "${whiptail_menu_array[@]}" 3>&1 1>&2 2>&3)
+		OPTION=$(whiptail --title "$WHIP_TITLE" --menu " Hardware : $HW_MODEL_DESCRIPTION \n ARM Temp: $arm_temp : $arm_temp_f\n RAM: $memory_total MB | Used: $memory_usage MB | Free: $memory_free MB" --cancel-button "$TEXT_MENU_BACK" --backtitle "$WHIP_BACKTITLE" 18 60 8 "${whiptail_menu_array[@]}" 3>&1 1>&2 2>&3)
 
 		CHOICE=$?
 
@@ -2467,12 +2454,12 @@ _EOF_
 		# - enable
 		if (( $WIFI_DISABLED == 0 )); then
 
-			/DietPi/dietpi/func/dietpi-set_hardware wifi enable
+			/DietPi/dietpi/func/dietpi-set_hardware wifimodules enable
 
 		# - disable
 		else
 
-			/DietPi/dietpi/func/dietpi-set_hardware wifi disable
+			/DietPi/dietpi/func/dietpi-set_hardware wifimodules disable
 
 		fi
 
@@ -2524,34 +2511,6 @@ _EOF_
 
 		fi
 
-		#if both adapaters, install netplug to enable support for multiple adapter control in dietpi-config.
-		if (( ( ! $ETH_DISABLED && ! $WIFI_DISABLED) && ! $WIFI_HOTSPOT )); then
-
-			if (( ! $(dpkg --get-selections | grep -ci -m1 '^netplug') )); then
-
-				apt-get install -y netplug
-
-				# - config
-				cat << _EOF_ > /etc/netplug/netplugd.conf
-eth*
-wlan*
-_EOF_
-
-				service netplug start
-
-			fi
-
-		#remove netplug
-		else
-
-			if (( $(dpkg --get-selections | grep -ci -m1 '^netplug') )); then
-
-				apt-get purge -y netplug
-
-			fi
-
-		fi
-
 		#Save STATIC/DHCP
 		# - eth
 		if (( $ETH_MODE_TARGET == 0 )); then
@@ -2594,7 +2553,7 @@ _EOF_
 
 		fi
 		# - Enable Wifi
-		if (( $WIFI_DISABLED == 0 )) && (( $WIFI_MODE == 0 )); then
+		if (( ! $WIFI_DISABLED )) && (( $WIFI_MODE == 0 )); then
 
 			sed -i "$(cat -n /etc/network/interfaces | grep 'dns-nameservers ' | sed -n 2p | awk '{print $1}')s/^#dns-nameservers/dns-nameservers/g" /etc/network/interfaces
 
@@ -2617,31 +2576,35 @@ _EOF_
 		fi
 
 		#Save WiFi creds
-		# - If not running in hotspot mode,  as these are disabled in the file.
 		if (( $WIFI_HOTSPOT == 0 )); then
 
-			sed -i "/wireless-essid/c\wireless-essid $WIFI_SSID" /etc/network/interfaces
-			sed -i "/wpa-ssid/c\wpa-ssid $WIFI_SSID" /etc/network/interfaces
+			# - Update globals
+			sed -i "/^Wifi_SSID=/c\Wifi_SSID=$WIFI_SSID" /DietPi/dietpi.txt
+			sed -i "/^Wifi_KEY=/c\Wifi_KEY=$WIFI_KEY" /DietPi/dietpi.txt
 
-			#Open host
+			#	Open host
 			if [ -z "$WIFI_KEY" ]; then
 
-				sed -i "/wireless-key/c\#wireless-key $WIFI_KEY" /etc/network/interfaces
-				sed -i "/wpa-psk/c\wpa-key_mgmt NONE" /etc/network/interfaces #swap
+				sed -i '/Wifi_KEYMGR=/c\Wifi_KEYMGR=NONE' /DietPi/dietpi.txt
 
-			#Key host
+
+			#	Key host
+			#??? Can we check for WEP/WPA-PSK on the SSID and set accordingly?
+			#	WEP tests failed, dropping support as its outdated and not secure. WPA-PSK is recommended for router.
 			else
 
-				sed -i "/wireless-key/c\wireless-key $WIFI_KEY" /etc/network/interfaces
-				sed -i "/wpa-psk/c\wpa-psk $WIFI_KEY" /etc/network/interfaces
-				sed -i "/wpa-key_mgmt/c\wpa-psk $WIFI_KEY" /etc/network/interfaces #invert
+				sed -i '/Wifi_KEYMGR=/c\Wifi_KEYMGR=WPA-PSK' /DietPi/dietpi.txt
 
 			fi
+
+			# - Function apply
+			/DietPi/dietpi/func/dietpi-set_hardware wificreds set
 
 		fi
 
 		#restart net
 		Network_Restart
+
 	}
 
 	Change_StaticIp(){
@@ -2779,7 +2742,6 @@ _EOF_
 
 		local wifi_country_code_target=$WIFI_COUNTRYCODE
 
-		#2.4GHZ
 		local whiptail_menu_array=()
 		whiptail_menu_array+=("GB" "Europe / Great Britain")
 		whiptail_menu_array+=("US" "United States")
@@ -2814,15 +2776,17 @@ _EOF_
 
 			#Apply
 			/DietPi/dietpi/func/dietpi-set_hardware wificountrycode "$wifi_country_code_target"
+			#iw reg set $wifi_country_code_target
 
-			# - Manually update var, else, not updated until Network_GetData() is run.
-			#   "iw reg get" will sometimes return the previous value, even after its been succesfully changed. So add little delay before running "iw reg get".
-			sleep 1
-			WIFI_COUNTRYCODE=$(iw reg get | grep -m1 'country' | awk '{print $2}' | tr -d ':')
+			# - Restart networking
+			Network_Restart
 
 			# - Check if country code was successfully applied
+			WIFI_COUNTRYCODE=$(iw reg get | grep -m1 'country' | awk '{print $2}' | tr -d ':')
 			if [ "$WIFI_COUNTRYCODE" != "$wifi_country_code_target" ]; then
+
 				whiptail --title "Error: Country Code" --msgbox "Country code ($wifi_country_code_target) could not been applied. Please check the country code and try again." --backtitle "$WHIP_BACKTITLE" 8 55
+
 			fi
 
 		fi
@@ -2830,6 +2794,9 @@ _EOF_
 	}
 
 	Scan_Wifi(){
+
+		#Ensure adapater is up
+		ifup wlan$WIFI_INDEX
 
 		#Get all ssids
 		clear
@@ -2924,10 +2891,10 @@ _EOF_
 		ETH_DISABLED=$(cat /tmp/net_interfaces | grep -ci -m1 "#allow-hotplug eth$ETH_INDEX")
 		ETH_HARDWARE=0
 		ETH_CONNECTED=0
-		ETH_IP="0.0.0.0"
-		ETH_GATEWAY="0.0.0.0"
-		ETH_MASK="0.0.0.0"
-		ETH_DNS="0.0.0.0"
+		ETH_IP='0.0.0.0'
+		ETH_GATEWAY='0.0.0.0'
+		ETH_MASK='0.0.0.0'
+		ETH_DNS='0.0.0.0'
 		ETH_MODE=1
 		ETH_MODE_TARGET=$ETH_MODE
 
@@ -2940,14 +2907,14 @@ _EOF_
 		WIFI_DISABLED=$(cat /tmp/net_interfaces | grep -ci -m1 "#allow-hotplug wlan$WIFI_INDEX")
 		WIFI_HARDWARE=0
 		WIFI_CONNECTED=0
-		WIFI_IP="0.0.0.0"
-		WIFI_GATEWAY="0.0.0.0"
-		WIFI_MASK="0.0.0.0"
-		WIFI_DNS="0.0.0.0"
+		WIFI_IP='0.0.0.0'
+		WIFI_GATEWAY='0.0.0.0'
+		WIFI_MASK='0.0.0.0'
+		WIFI_DNS='0.0.0.0'
 		WIFI_MODE=1
 		WIFI_MODE_TARGET=$WIFI_MODE
-		WIFI_SSID="Not_Set"
-		WIFI_KEY="Not_Set"
+		WIFI_SSID='MySuperDooperWiFi'
+		WIFI_KEY='0123456789'
 		#Get extra wifi stats
 		WIFI_BITRATE=0
 		WIFI_SIGNALSTRENGTH=0
@@ -2963,7 +2930,7 @@ _EOF_
 		# Redirect stderr and stdout does nowt 2> /dev/null and &> /dev/null no effect.
 
 		#if (( $(lsmod | grep -ci -m1 'cfg80211' ) )); then
-			WIFI_COUNTRYCODE=$(iw reg get | grep -m1 'country' | awk '{print $2}' | tr -d ':')
+		WIFI_COUNTRYCODE=$(iw reg get | grep -m1 'country' | awk '{print $2}' | tr -d ':')
 		#fi
 
 		#??????????????????????????????????????????????????????
@@ -3006,8 +2973,8 @@ _EOF_
 			WIFI_CONNECTED=$(ip r | grep -ci -m1 "wlan$WIFI_INDEX")
 
 			#Wifi Extras
-			WIFI_SSID=$(cat /tmp/net_interfaces | grep -m1 'wireless-essid' | sed 's/^[^\ ]\+\ //')
-			WIFI_KEY=$(cat /tmp/net_interfaces | grep -m1 'wireless-key' | sed 's/^[^\ ]\+\ //')
+			WIFI_SSID="$(grep -m1 '^Wifi_SSID' /DietPi/dietpi.txt | sed 's/.*=//')"
+			WIFI_KEY="$(grep -m1 '^Wifi_KEY' /DietPi/dietpi.txt | sed 's/.*=//')"
 
 			#Enabled and Connected
 			if (( $WIFI_DISABLED == 0 )) && (( $WIFI_CONNECTED == 1 )); then
@@ -3156,11 +3123,11 @@ _EOF_
 
 					if (( $onboard_wifi_enabled )); then
 
-						/DietPi/dietpi/func/dietpi-set_hardware wifi onboard_disable
+						/DietPi/dietpi/func/dietpi-set_hardware wifimodules onboard_disable
 
 					else
 
-						/DietPi/dietpi/func/dietpi-set_hardware wifi onboard_enable
+						/DietPi/dietpi/func/dietpi-set_hardware wifimodules onboard_enable
 
 					fi
 
@@ -3575,7 +3542,6 @@ _EOF_
 
 			whiptail_menu_array+=("Scan" "Scan and Connect"); ((whip_options_total++))
 			whiptail_menu_array+=("Manual" "Manually Set Wireless Details"); ((whip_options_total++))
-			whiptail_menu_array+=("Change Mode" ": $mode_target"); ((whip_options_total++))
 
 			if (( $WIFI_CONNECTED ||
 				$(systemctl is-active dietpi-wifi-monitor.service | grep -ci -m1 '^active') )); then
@@ -3592,6 +3558,8 @@ _EOF_
 				whiptail_menu_array+=("Auto Reconnect" ": $wifi_auto_reconnect_text"); ((whip_options_total++))
 
 			fi
+
+			whiptail_menu_array+=("Change Mode" ": $mode_target"); ((whip_options_total++))
 
 			# - show static options
 			if (( $WIFI_MODE_TARGET == 0 )); then
@@ -3837,6 +3805,8 @@ _EOF_
 	}
 
 	#Benchmark Scores
+	CPUBENCH_TIME='Not Tested'
+	CPUBENCH_INT_MAX=1000000
 	SD_WRITE='Not Tested'
 	SD_READ='Not Tested'
 	USB_WRITE='Not Tested'
@@ -4003,19 +3973,123 @@ _EOF_
 
 	}
 
+	Run_CPUBenchmark(){
+
+		# if (( ! $(dpkg --get-selections | grep -ci -m1 '^sysbench[[:space:]]') )); then
+
+			# /DietPi/dietpi/func/dietpi-notify 2 "Installing Sysbench, please wait..."
+			# apt-get install sysbench -y
+
+		# fi
+
+		/DietPi/dietpi/dietpi-services stop
+
+		# /DietPi/dietpi/func/dietpi-notify 0 "Running Sysbench with max prime of $CPUBENCH_INT_MAX, please wait..."
+
+		# local fp_log_sysbench='/tmp/.fp_log_sysbench'
+		# sysbench --test=cpu --num-threads=$(nproc --all) --cpu-max-prime=$CPUBENCH_INT_MAX --validate=on run | tee -a "$fp_log_sysbench"
+
+		# /DietPi/dietpi/func/dietpi-notify 0 "Sysbench completed"
+
+		# CPUBENCH_TIME=$(grep -m1 'total time' "$fp_log_sysbench" | awk '{print $NF}')
+
+		# rm "$fp_log_sysbench"
+
+		/DietPi/dietpi/func/dietpi-notify 0 "Running DietPi-CPU Benchmark with max value of 1000000 over $(nproc --all) cores, please wait..."
+
+			cat << _EOF_ > /tmp/dietpi-bench
+#!/bin/bash
+target_max_int=$CPUBENCH_INT_MAX
+cores=\$(nproc --all)
+int_split=\$((\$target_max_int / \$cores ))
+aStart_Int=()
+aEnd_Int=()
+
+#Split the max int target based on total cores
+for (( i=0; i<\$cores; i++ ))
+do
+
+    aEnd_Int[\$i]=\$(( (\$i + 1) * \$int_split ))
+    aStart_Int[\$i]=\$(( \${aEnd_Int[\$i]} - \$int_split ))
+
+    echo \${aStart_Int[\$i]} \${aEnd_Int[\$i]}
+
+done
+
+
+Run_Bench()
+{
+
+    while (( \${aStart_Int[\$1]} < \${aEnd_Int[\$1]} ))
+    do
+
+        ((aStart_Int[\$1]++))
+
+    done
+
+}
+
+#Launch benchmark threads
+for (( i=0; i<\$cores; i++ ))
+do
+
+    Run_Bench \$i &
+
+done
+
+#Wait for jobs to finish
+for job in \`jobs -p\`
+do
+    echo \$job
+    wait \$job
+done
+
+#delete[]
+unset aStart_Int
+unset aEnd_Int
+
+_EOF_
+		chmod +x /tmp/dietpi-bench
+
+		{ time -p /tmp/dietpi-bench; } 2> /tmp/dietpi-bench_result
+
+		CPUBENCH_TIME=$( grep -m1 'real' /tmp/dietpi-bench_result | awk '{print $2}' )
+
+		/DietPi/dietpi/dietpi-services start
+
+	}
+
 	#TARGETMENUID=12
 	Menu_FilesystemBenchmark(){
 
 		TARGETMENUID=11
 
-		WHIP_TITLE='DietPi - Filesystem benchmarks'
-		OPTION=$(whiptail --title "$WHIP_TITLE" --menu " RootFS        : Write = $SD_WRITE | Read = $SD_READ \n USB Drive     : Write = $USB_WRITE | Read = $USB_READ\n Custom        : Write = $CUSTOM_WRITE | Read = $CUSTOM_READ\n RAM           : Write = $RAM_WRITE | Read = $RAM_READ" --cancel-button "$TEXT_MENU_BACK" --backtitle "$WHIP_BACKTITLE" 15 65 4 \
+		WHIP_TITLE='DietPi - Benchmarks'
+		OPTION=$(whiptail --title "$WHIP_TITLE" --menu "\
+CPU        : Total time $CPUBENCH_INT_MAX int = $CPUBENCH_TIME seconds\n\
+RAM        : Write = $RAM_WRITE | Read = $RAM_READ\n\
+RootFS     : Write = $SD_WRITE | Read = $SD_READ \n\
+USB Drive  : Write = $USB_WRITE | Read = $USB_READ\n\
+Custom     : Write = $CUSTOM_WRITE | Read = $CUSTOM_READ\
+" --cancel-button "$TEXT_MENU_BACK" --backtitle "$WHIP_BACKTITLE" 19 70 7 \
+		"" "─── Performance ─────────────────────────────" \
+		"CPU" "Benchmark CPU performance." \
+		"RAM" "Benchmark RAM performance." \
+		"" "─── Filesystem ──────────────────────────────" \
 		"RootFS" "Benchmark SD/EMMC IO performance." \
 		"USB Drive" "Benchmark USB drive IO performance." \
-		"Custom" "Benchmark from a selection of mounted devices." \
-		"RAM" "Benchmark RAM IO performance." 3>&1 1>&2 2>&3)
+		"Custom" "Benchmark from a selection of mounted devices." 3>&1 1>&2 2>&3)
 
 		case "$OPTION" in
+
+			"CPU")
+
+				Run_CPUBenchmark
+
+				#Return to this menu
+				TARGETMENUID=12
+
+			;;
 
 			"RootFS")
 
@@ -4063,7 +4137,16 @@ _EOF_
 
 			"RAM")
 
-				Run_FilesystemBenchmark 2
+				#Check for /tmp as tmpfs, before running: https://github.com/Fourdee/DietPi/issues/1130#issuecomment-350348081
+				if (( $(df | grep '[[:space:]]/tmp' | grep -ci -m1 '^tmpfs[[:space:]]') )); then
+
+					Run_FilesystemBenchmark 2
+
+				else
+
+					whiptail --title "$WHIP_TITLE" --msgbox "Unable to run RAM benchmark, as /tmp is not mounted as tmpfs.\n\nThis mount is disabled automatically on <=512MB devices to prevent out of memory errors, please see here for more info:\n\n - https://github.com/Fourdee/DietPi/issues/1027" --backtitle "$WHIP_BACKTITLE" 12 70
+
+				fi
 
 				#Return to this menu
 				TARGETMENUID=12
