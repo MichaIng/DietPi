@@ -812,7 +812,7 @@ WantedBy=multi-user.target
 _EOF_
 			systemctl enable transmission-daemon.service
 			systemctl daemon-reload
-			/DietPi/dietpi/dietpi-services disable
+			/DietPi/dietpi/dietpi-services dietpi_controlled
 
 		fi
 		#-------------------------------------------------------------------------------
@@ -2666,7 +2666,7 @@ ExecStart=$(which python) openbazaard.py start -a 0.0.0.0
 WantedBy=multi-user.target
 _EOF_
 			systemctl daemon-reload
-			/DietPi/dietpi/dietpi-services disable
+			/DietPi/dietpi/dietpi-services dietpi_controlled
 
 		fi
 		#-------------------------------------------------------------------------------
@@ -2774,14 +2774,6 @@ _EOF_
 		systemctl daemon-reload
 		systemctl enable kill-ssh-user-sessions-before-network
 		#-------------------------------------------------------------------------------
-		#Sparky SBC USB/ETH stability patches
-		if (( $HW_MODEL == 70 )); then
-
-			wget https://raw.githubusercontent.com/sparky-sbc/sparky-test/master/urb_fix_71117/uImage -O /boot/uImage
-			wget https://raw.githubusercontent.com/sparky-sbc/sparky-test/master/urb_fix_71117/ethernet.ko -O /lib/modules/$(uname -r)/kernel/drivers/net/ethernet/acts/ethernet.ko
-
-		fi
-		#-------------------------------------------------------------------------------
 		#config.txt missing newline on older images, and uploaded/shared confs (<145)
 		echo -e "\n" >> /DietPi/config.txt
 		#-------------------------------------------------------------------------------
@@ -2792,7 +2784,15 @@ _EOF_
 		#	Allo GUI (full)
 		#	MPD
 		#	Squeezelite
-		/DietPi/dietpi/dietpi-software reinstall 159 128 36
+		#	YMPD
+		update-rc.d ympd remove &> /dev/null # switch to systemD
+		rm /etc/init.d/ympd &> /dev/null # switch to systemD
+
+		# Enable ownCloud/Nextcloud maintenance mode before reinstall:
+		sudo -u www-data php /var/www/owncloud/occ maintenance:mode --on &> /dev/null
+		sudo -u www-data php /var/www/nextcloud/occ maintenance:mode --on &> /dev/null
+
+		/DietPi/dietpi/dietpi-software reinstall 159 128 114 47 36 32
 		#-------------------------------------------------------------------------------
 		#RPi update DietPi kernel:
 		if (( $HW_MODEL < 10 )); then
@@ -2876,35 +2876,70 @@ _EOF_
 		fi
 		#-------------------------------------------------------------------------------
 		#PHP: Fix 'upload_tmp_dir': https://github.com/Fourdee/DietPi/issues/1259
+		if [ -f /lib/systemd/system/apache2.service ]; then
 
-		#DISABLED: Hangs automated image
+			PHP_SERVICE='/lib/systemd/system/apache2.service'
 
-		# if (( ${aSOFTWARE_INSTALL_STATE[83]} >= 1 )); then
+		else
 
-			# local php_service='/lib/systemd/system/apache2.service'
+			PHP_SERVICE='/lib/systemd/system/php*-fpm.service'
 
-  		# else
+		fi
+		if grep -q '^\s*PrivateTmp=true' $PHP_SERVICE &> /dev/null; then
 
-			# local php_service='/lib/systemd/system/php*-fpm.service'
+			if (( $DISTRO >= 4 )); then
 
-		# fi
-		# if grep -q '^\s*PrivateTmp=true' $php_service &> /dev/null; then
+				DIETPI_PHP_INI="/etc/php/7.0/mods-available/dietpi.ini"
+				PHP_BIN="php"
 
-			# if (( $DISTRO >= 4 )); then
+                        else
 
-				# local dietpi_php_ini="/etc/php/7.0/mods-available/dietpi.ini"
+				DIETPI_PHP_INI="/etc/php5/mods-available/dietpi.ini"
+				PHP_BIN="php5"
 
-			# else
+			fi
+			grep -q 'upload_tmp_dir' $DIETPI_PHP_INI &&
+			sed -i '/upload_tmp_dir/c\upload_tmp_dir = /var/tmp' $DIETPI_PHP_INI ||
+			echo 'upload_tmp_dir = /var/tmp' >> $DIETPI_PHP_INI
+			${PHP_BIN}enmod dietpi
 
-				# local dietpi_php_ini="/etc/php5/mods-available/dietpi.ini"
+        fi
+		#-------------------------------------------------------------------------------
+		#Sparky SBC kernel patches
+		if (( $HW_MODEL == 70 )); then
 
-			# fi
-			# touch $dietpi_php_ini
-			# grep -q 'upload_tmp_dir' $dietpi_php_ini &&
-			# sed -i "/upload_tmp_dir/c\upload_tmp_dir = $tmp_upload_dir" $dietpi_php_ini ||
-			# echo "upload_tmp_dir = $tmp_upload_dir" >> $dietpi_php_ini
+			wget https://raw.githubusercontent.com/sparky-sbc/sparky-test/master/dragon_fly_check/uImage -O /boot/uImage
+			wget https://raw.githubusercontent.com/sparky-sbc/sparky-test/master/dragon_fly_check/3.10.38.bz2 -O package.tar
+			tar xvf package.tar -C /lib/modules/
+			rm package.tar
 
-		# fi
+			cat << _EOF_ > /DietPi/uEnv.txt
+uenvcmd=setenv os_type linux;
+bootargs=earlyprintk clk_ignore_unused selinux=0 scandelay console=tty0 loglevel=1 real_rootflag=rw root=/dev/mmcblk0p2 rootwait init=/lib/systemd/systemd aotg.urb_fix=1 aotg.aotg1_speed=0
+_EOF_
+
+		fi
+		#-------------------------------------------------------------------------------
+		#XU4 FFMPEG fix. Prefer debian.org over Meveric for backports: https://github.com/Fourdee/DietPi/issues/1273
+		if (( $HW_MODEL == 11 && $DISTRO == 3 )); then
+
+			cat << _EOF_ > /etc/apt/preferences.d/backports
+Package: *
+Pin: release a=jessie-backports
+Pin: origin "fuzon.co.uk"
+Pin-Priority: 99
+_EOF_
+
+		fi
+		#-------------------------------------------------------------------------------
+		#Define a default LD_LIBRARY_PATH for all systems: https://github.com/Fourdee/DietPi/issues/475#issuecomment-350380744
+		if (( ! $(grep -ci -m1 '^export LD_LIBRARY_PATH=' /etc/bash.bashrc) )); then
+
+			cat << _EOF_ >> /etc/bash.bashrc
+export LD_LIBRARY_PATH=/lib:/usr/lib:/usr/local/lib:/opt/vc/lib
+_EOF_
+
+		fi
 		#-------------------------------------------------------------------------------
 
 	fi

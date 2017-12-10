@@ -69,10 +69,10 @@
 	#/////////////////////////////////////////////////////////////////////////////////////
 	#Filepath
 	#/////////////////////////////////////////////////////////////////////////////////////
-	FP_INSTALLED_FILE="/DietPi/dietpi/.installed"
+	FP_INSTALLED_FILE='/DietPi/dietpi/.installed'
 	FP_INSTALLED_FILE_TEMP='/tmp/dietpi-software.installed'
 
-	FP_DIETPIAUTOMATION_LOG="/root/DietPi-Automation.log"
+	FP_DIETPIAUTOMATION_LOG='/root/DietPi-Automation.log'
 
 	FP_APT_LOG='/etc/dietpi/logs/dietpi-software_apt.log'
 
@@ -164,11 +164,22 @@ _EOF_
 
 		fi
 
-		#FOURDEE: reset choice targets to current ( caused by menu uninstall, as we have to save the installed file after its run )
-		INDEX_SSHSERVER_TARGET=$INDEX_SSHSERVER_CURRENT
-		INDEX_FILESERVER_TARGET=$INDEX_FILESERVER_CURRENT
-		INDEX_LOGGING_TARGET=$INDEX_LOGGING_CURRENT
-		INDEX_WEBSERVER_TARGET=$INDEX_WEBSERVER_CURRENT
+		#Always reset choice system during first run to defaults: https://github.com/Fourdee/DietPi/issues/1122
+		if (( $DIETPI_INSTALL_STAGE == 0 )); then
+
+			INDEX_SSHSERVER_CURRENT=-1
+			INDEX_SSHSERVER_TARGET=-1
+
+			INDEX_FILESERVER_CURRENT=0
+			INDEX_FILESERVER_TARGET=0
+
+			INDEX_LOGGING_CURRENT=-1
+			INDEX_LOGGING_TARGET=-1
+
+			INDEX_WEBSERVER_CURRENT=-2
+			INDEX_WEBSERVER_TARGET=-2
+
+		fi
 
 	}
 
@@ -279,21 +290,25 @@ _EOF_
 	INSTALL_LINUX_CHOICESMADE=0
 
 	#DietPi Choice System: SSH Server
+	#NB: Update Read_InstallFileList with defaults
 	INSTALL_SSHSERVER_CHOICESMADE=0
 	INDEX_SSHSERVER_CURRENT=-1
 	INDEX_SSHSERVER_TARGET=-1
 
 	#DietPi Choice System: Fileserver
+	#NB: Update Read_InstallFileList with defaults
 	INSTALL_FILESERVER_CHOICESMADE=0
 	INDEX_FILESERVER_CURRENT=0
 	INDEX_FILESERVER_TARGET=0
 
 	#DietPi Choice System: Logging
+	#NB: Update Read_InstallFileList with defaults
 	INSTALL_LOGGING_CHOICESMADE=0
 	INDEX_LOGGING_CURRENT=-1
 	INDEX_LOGGING_TARGET=-1
 
 	#DietPi Preference System: Webserver base
+	#NB: Update Read_InstallFileList with defaults
 	INDEX_WEBSERVER_CURRENT=-2
 	INDEX_WEBSERVER_TARGET=-2
 
@@ -702,9 +717,6 @@ _EOF_
 					  aSOFTWARE_TYPE[$index_current]=0
 			 aSOFTWARE_REQUIRES_ALSA[$index_current]=1
 			 aSOFTWARE_ONLINEDOC_URL[$index_current]='f=8&t=5#p50'
-
-		# - x86_64
-		aSOFTWARE_AVAIL_HW_ARCH[$index_current,10]=0
 
 		#------------------
 		index_current=119
@@ -1350,9 +1362,6 @@ _EOF_
 			 aSOFTWARE_REQUIRES_GIT[$index_current]=1
 			 aSOFTWARE_REQUIRES_MYSQL[$index_current]=1
 			 aSOFTWARE_ONLINEDOC_URL[$index_current]=''
-
-		 # - ARMv8
-		 aSOFTWARE_AVAIL_HW_ARCH[$index_current,3]=0
 
 
 		#Emulation / Gaming
@@ -2844,6 +2853,20 @@ _EOF_
 
 		fi
 
+		#Software that requires Redis
+		if (( ${aSOFTWARE_INSTALL_STATE[47]} == 1 ||
+			${aSOFTWARE_INSTALL_STATE[114]} == 1 )); then
+
+			if (( ${aSOFTWARE_INSTALL_STATE[91]} == 0 )); then
+
+				aSOFTWARE_INSTALL_STATE[91]=1
+
+				/DietPi/dietpi/func/dietpi-notify 2 "Redis will be installed"
+
+			fi
+
+		fi
+
 		#-------------------------------------------------------------------------
 		#Pre-req software, for items that do DO have their own array aSOFTWARE_REQUIRES_SOFTWARENAME
 		#	WEBSERVER - Manual stack install
@@ -3378,6 +3401,12 @@ _EOF_
 	AGP(){
 
 		local string="$@"
+		if (( $DISTRO >= 4 )); then
+
+			string+=' --allow-change-held-packages'
+
+		fi
+
 		$APT_BINARY purge -y $string
 
 	}
@@ -3758,7 +3787,6 @@ _EOF_
 
 		fi
 
-
 		#WEBSERVER_MYSQL
 		INSTALLING_INDEX=86
 		if (( ${aSOFTWARE_INSTALL_STATE[$INSTALLING_INDEX]} == 1 )); then
@@ -4130,7 +4158,10 @@ _EOF_
 			#Install
 			if (( $? == 0 )); then
 
-				if [ ! -f /etc/apt/sources.list.d/owncloud.list ]; then
+				# Install necessary PHP modules: https://doc.owncloud.org/server/latest/admin_manual/installation/source_installation.html#php-extensions
+				AGI "$PHP_APT_PACKAGE_NAME"-intl "$PHP_APT_PACKAGE_NAME"-redis
+
+				if [ ! -f /etc/apt/sources.list.d/owncloud.list ] && [ ! -d /var/www/owncloud ]; then
 
 					wget "$INSTALL_URL_ADDRESS" -O owncloud.key_or_zip
 					apt-key add - < owncloud.key_or_zip 2> /dev/null
@@ -4173,9 +4204,16 @@ _EOF_
 			#Install
 			if (( $? == 0 )); then
 
-				wget "$INSTALL_URL_ADDRESS" -O package.zip
-				unzip -o package.zip -d /var/www
-				rm package.zip
+				# Install necessary PHP modules: https://docs.nextcloud.com/server/12/admin_manual/installation/source_installation.html#prerequisites-for-manual-installation
+				AGI "$PHP_APT_PACKAGE_NAME"-intl "$PHP_APT_PACKAGE_NAME"-redis
+
+				if [ ! -d /var/www/nextcloud ]; then
+
+					wget "$INSTALL_URL_ADDRESS" -O package.zip
+					unzip -o package.zip -d /var/www
+					rm package.zip
+
+				fi
 
 			else
 
@@ -4191,33 +4229,53 @@ _EOF_
 
 			Banner_Installing
 
-			#YMPD
-			# - armv6
-			if (( $HW_ARCH == 1 )); then
-
-				INSTALL_URL_ADDRESS='http://dietpi.com/downloads/binaries/all/ympd-1.3.0-armv6.tar.bz2'
-
-			# - armv7
-			elif (( $HW_ARCH == 2 )); then
-
-				INSTALL_URL_ADDRESS='http://dietpi.com/downloads/binaries/all/ympd-1.3.0-armv7.tar.bz2'
-
-			# - arm64
-			elif (( $HW_ARCH == 3 )); then
-
-				INSTALL_URL_ADDRESS='http://dietpi.com/downloads/binaries/all/ympd-1.2.3-arm64.tar.bz2'
-
-			fi
+			INSTALL_URL_ADDRESS='http://dietpi.com/downloads/binaries/all/ympd_1.2.3.7z'
 			/DietPi/dietpi/func/check_connection "$INSTALL_URL_ADDRESS"
 
 			#	Install
 			if (( $? == 0 )); then
 
-				#Install ympd
-				wget "$INSTALL_URL_ADDRESS"
-				tar -xvf ympd-*
-				rm ympd-*
-				mv ympd /usr/bin/ympd
+				wget "$INSTALL_URL_ADDRESS" -O package.7z
+				7z x -y package.7z
+
+				local binary_name='ympd_'
+				# - armv6
+				if (( $HW_ARCH == 1 )); then
+
+					binary_name+='armv6'
+
+				# - armv7
+				elif (( $HW_ARCH == 2 )); then
+
+					binary_name+='armv7'
+
+				# - arm64
+				elif (( $HW_ARCH == 3 )); then
+
+					binary_name+='armv8'
+
+				# - x86_64
+				elif (( $HW_ARCH == 10 )); then
+
+					binary_name+='amd64'
+
+				fi
+
+				if (( $DISTRO == 3 )); then
+
+					binary_name+='_jessie'
+
+				else
+
+					binary_name+='_stretch'
+
+				fi
+
+				mv "$binary_name" /usr/bin/ympd
+				chmod +x /usr/bin/ympd
+
+				rm ympd_*
+				rm package.7z
 
 			else
 
@@ -4383,8 +4441,14 @@ _EOF_
 			fi
 
 			# - libcurl3-gnutls required for C2. But lets apply to all: https://github.com/Fourdee/DietPi/issues/446
+			AGI libcurl3-gnutls
+
 			# - Add NFS support for kodi
-			AGI libcurl3-gnutls libnfs4
+			if (( $DISTRO == 3 )); then
+
+				AGI libnfs4
+
+			fi
 
 			# - CEC support | * due to C2 having libcec3v4, rpi has libcec3.
 			#	XU4 package conflict: https://github.com/Fourdee/DietPi/issues/554
@@ -4466,7 +4530,9 @@ _EOF_
 			#Install
 			if (( $? == 0 )); then
 
-				AGI alsa-oss joystick libsdl-image1.2 libsdl-ttf2.0-0 libsdl-gfx1.2-5 libguichan-0.8.1-1 libguichan-allegro-0.8.1-1 libguichan-sdl-0.8.1-1 libguichan-opengl-0.8.1-1 libjpgalleg4.4 libxml2 libmpg123-0
+				AGI alsa-oss joystick libsdl-image1.2 libsdl-ttf2.0-0 libsdl-gfx1.2-5 libguichan-0.8.1-1* libguichan-allegro-0.8.1-1* libguichan-sdl-0.8.1-1* libguichan-opengl-0.8.1-1* libjpgalleg4.4 libxml2 libmpg123-0
+
+				#libmpeg2-4 # Required for dev branch
 
 				# + SDL2
 				AGI libpng12-0 libflac8 libmpg123-0 libgoogle-perftools4 libfreetype6 libxxf86vm1
@@ -4802,6 +4868,8 @@ _EOF_
 
 				wget "$INSTALL_URL_ADDRESS" -O package.zip
 				unzip -o package.zip -d /var/www/
+
+				rm -R /var/www/ompd &> /dev/null #Replace/upgrade existing installs
 				mv /var/www/OMPD* /var/www/ompd
 				rm package.zip
 
@@ -4859,11 +4927,14 @@ _EOF_
 			/DietPi/dietpi/func/check_connection "$INSTALL_URL_ADDRESS"
 			if (( $? == 0 )); then
 
+				# - Pre-reqs: https://github.com/Fourdee/DietPi/issues/1282#issuecomment-350490524
+				AGI "$PHP_APT_PACKAGE_NAME"-cgi "$PHP_APT_PACKAGE_NAME"-sqlite*
+
 				# - Check free available memory. Increase swapfile size to prevent gravity running out of mem.
 				if (( $(free -m | grep -m1 'Mem:' | awk '{print $4}') < 512 )); then
 
 					if [ -f /etc/dphys-swapfile ] &&
-						(( $(cat /etc/dphys-swapfile | grep 'CONF_SWAPSIZE=' | sed 's/.*=//') < 512 )); then
+						(( $(grep 'CONF_SWAPSIZE=' /etc/dphys-swapfile | sed 's/.*=//') < 512 )); then
 
 						/DietPi/dietpi/func/dietpi-notify 2 "Increasing swapfile size to 512MB before running gravity.sh, please wait...\n"
 						/DietPi/dietpi/func/dietpi-set_dphys-swapfile 512
@@ -4879,6 +4950,13 @@ _EOF_
 				wget "$INSTALL_URL_ADDRESS" -O install.sh
 				chmod +x install.sh
 				./install.sh
+				local exit_code=$?
+				if (( $exit_code != 0 )); then
+
+					/DietPi/dietpi/func/dietpi-notify 1 "Pi-Hole exited with code ($exit_code) and is not installed."
+					aSOFTWARE_INSTALL_STATE[$INSTALLING_INDEX]=0
+
+				fi
 
 				mv /etc/lighttpd/lighttpd.conf.bak /etc/lighttpd/lighttpd.conf &> /dev/null
 
@@ -6690,7 +6768,15 @@ _EOF_
 			#Stretch via apt
 			if (( $DISTRO >= 4 )); then
 
-				AGI chromium
+				if (( $HW_MODEL < 10 )); then
+
+					AGI	chromium-browser
+
+				else
+
+					AGI chromium
+
+				fi
 
 			else
 
@@ -7421,22 +7507,28 @@ _EOF_
 
 				Banner_Installing
 
-				INSTALL_URL_ADDRESS='https://dl.gitea.io/gitea/1.2/gitea-1.2-'
+				INSTALL_URL_ADDRESS='https://dl.gitea.io/gitea/1.3.1/gitea-1.3.1-'
 
 				#armv6
 				if (( $HW_ARCH == 1 )); then
 
 					INSTALL_URL_ADDRESS+='linux-arm-6'
 
-				#armv7+
+				#armv7
 				elif (( $HW_ARCH == 2 )); then
 
 					INSTALL_URL_ADDRESS+='linux-arm-7'
+
+				#armv8
+				elif (( $HW_ARCH == 3 )); then
+
+					INSTALL_URL_ADDRESS+='linux-arm64'
 
 				#x86_64
 				elif (( $HW_ARCH == 10 )); then
 
 					INSTALL_URL_ADDRESS+='linux-amd64'
+
 				fi
 
 				/DietPi/dietpi/func/check_connection "$INSTALL_URL_ADDRESS"
@@ -7444,17 +7536,11 @@ _EOF_
 				#Install
 				if (( $? == 0 )); then
 
-					#create user
-					adduser --system --group git
-					sleep 2
-					mkdir /home/git/gitea
-					wget -O /home/git/gitea/gitea "$INSTALL_URL_ADDRESS"
-					chmod +x /home/git/gitea/gitea
-					chown -R git:git /home/git/gitea
+					# - Data storage / user data
+					mkdir -p "$FP_DIETPI_USERDATA_DIRECTORY"/gitea/gitea-repositories
 
-					# Download systemd file
-					wget -O /etc/systemd/system/gitea.service https://github.com/go-gitea/gitea/raw/master/contrib/systemd/gitea.service
-
+					wget "$INSTALL_URL_ADDRESS" -O "$FP_DIETPI_USERDATA_DIRECTORY"/gitea/gitea
+					chmod +x "$FP_DIETPI_USERDATA_DIRECTORY"/gitea/gitea
 
 				else
 
@@ -7464,7 +7550,6 @@ _EOF_
 
 		fi
 
-
 		#Allo Web Interface
 		INSTALLING_INDEX=159 #160 for quick reinstall
 		if (( ${aSOFTWARE_INSTALL_STATE[$INSTALLING_INDEX]} == 1 ||
@@ -7472,7 +7557,7 @@ _EOF_
 
 			Banner_Installing
 
-			INSTALL_URL_ADDRESS='http://dietpi.com/downloads/binaries/all/allo_web_interface_v3.7z'
+			INSTALL_URL_ADDRESS='http://dietpi.com/downloads/binaries/all/allo_web_interface_v4.7z'
 			/DietPi/dietpi/func/check_connection "$INSTALL_URL_ADDRESS"
 			if (( $? == 0 )); then
 
@@ -8512,6 +8597,9 @@ _EOF_
 		chown -R dietpi:dietpi /home/dietpi
 		chown -R dietpi:dietpi "$FP_DIETPI_USERDATA_DIRECTORY"
 		chmod -R 775 "$FP_DIETPI_USERDATA_DIRECTORY"
+		#	+ for symlinked locations
+		chown -R dietpi:dietpi "$FP_DIETPI_USERDATA_DIRECTORY"/*
+		chmod -R 775 "$FP_DIETPI_USERDATA_DIRECTORY"/*
 
 		# - MPD
 		chown -R mpd:audio "$FP_DIETPI_USERDATA_DIRECTORY"/.mpd_cache
@@ -8530,10 +8618,6 @@ _EOF_
 		chown -R www-data:www-data "$FP_DIETPI_USERDATA_DIRECTORY"/owncloud_data
 		chown -R www-data:www-data "$FP_DIETPI_USERDATA_DIRECTORY"/nextcloud_data
 
-		# - Syncthing
-		chown -R dietpi:dietpi "$FP_DIETPI_USERDATA_DIRECTORY"/syncthing
-		chown -R dietpi:dietpi "$FP_DIETPI_USERDATA_DIRECTORY"/syncthing_data
-
 		# - Home Assistant Permissions
 		#chown -R homeassistant:dietpi /home/homeassistant/.homeassistant
 		#chown -R dietpi:dietpi "$FP_DIETPI_USERDATA_DIRECTORY"/homeassistant
@@ -8543,9 +8627,6 @@ _EOF_
 
 		# - FuguHub
 		chown -R bd:bd "$FP_DIETPI_USERDATA_DIRECTORY"/fuguhub-data/
-
-		# - Gitea
-		chown -R git:git "$FP_DIETPI_USERDATA_DIRECTORY"/gitea-repositories/
 
 	}
 
@@ -8993,8 +9074,8 @@ _EOF_
 		INSTALLING_INDEX=91
 		if (( ${aSOFTWARE_INSTALL_STATE[$INSTALLING_INDEX]} == 1 )); then
 
-			#Enable redis extension for all webstacks:
-			"$PHP_APT_PACKAGE_NAME"enmod redis
+			# Enable redis php module, if installed:
+			"$PHP_APT_PACKAGE_NAME"enmod redis 2> /dev/null
 
 		fi
 
@@ -9048,11 +9129,10 @@ _EOF_
 		INSTALLING_INDEX=47
 		if (( ${aSOFTWARE_INSTALL_STATE[$INSTALLING_INDEX]} == 1 )); then
 
-			# Install/Enable necessary PHP modules: https://doc.owncloud.org/server/latest/admin_manual/installation/source_installation.html#php-extensions
-			AGI "$PHP_APT_PACKAGE_NAME"-intl
-			${PHP_APT_PACKAGE_NAME}enmod curl gd intl json pdo_mysql opcache apcu
-			# Following modules are not always enabled since Stretch:
-			if (( $DISTRO >= 4 )); then
+			# Enable necessary PHP modules: https://doc.owncloud.org/server/latest/admin_manual/installation/source_installation.html#php-extensions
+			${PHP_APT_PACKAGE_NAME}enmod curl gd intl json pdo_mysql opcache apcu redis
+			# Following modules are switchable since Stretch:
+			if (( $DISTRO > 3 )); then
 
 				phpenmod ctype dom fileinfo iconv mbstring posix simplexml xmlwriter xmlreader zip exif
 
@@ -9065,25 +9145,39 @@ _EOF_
 			# Apache: https://doc.owncloud.org/server/latest/admin_manual/installation/source_installation.html#configure-apache-web-server
 			if (( ${aSOFTWARE_INSTALL_STATE[83]} >= 1 )); then
 
-				a2enmod rewrite headers env dir mime
-				cp /DietPi/dietpi/conf/apache.ownnextcloud.conf /etc/apache2/sites-available/owncloud.conf
-				sed -i "s/nextcloud/owncloud/g" /etc/apache2/sites-available/owncloud.conf
+				a2enmod rewrite headers env dir mime &> /dev/null
+				local owncloud_conf='/etc/apache2/sites-available/owncloud.conf'
+				# Do not overwrite existing config.
+				if [ -f $owncloud_conf ]; then
+
+					owncloud_conf='/etc/apache2/sites-available/owncloud.conf.new'
+
+				fi
+				cp /DietPi/dietpi/conf/apache.ownnextcloud.conf $owncloud_conf
+				sed -i "s/nextcloud/owncloud/g" $owncloud_conf
 				# OPCache adjustment is just forced by Nextcloud
-				sed -i "s/php_admin_value/#php_admin_value/" /etc/apache2/sites-available/owncloud.conf
-				a2ensite owncloud
+				sed -i "s/php_admin_value/#php_admin_value/" $owncloud_conf
+				a2ensite owncloud &> /dev/null
 
 			fi
 
 			# NGINX: https://doc.owncloud.org/server/latest/admin_manual/installation/nginx_configuration.html#owncloud-in-a-subdir-of-nginx
 			if (( ${aSOFTWARE_INSTALL_STATE[85]} >= 1 )); then
 
-				cp /DietPi/dietpi/conf/nginx.sites-dietpi.owncloud.config /etc/nginx/sites-dietpi/owncloud.config
+				local owncloud_config='/etc/nginx/sites-dietpi/owncloud.config'
+				# Do not overwrite existing config.
+				if [ -f $owncloud_config ]; then
+
+					owncloud_config='/etc/nginx/sites-dietpi/owncloud.config.new'
+
+				fi
+				cp /DietPi/dietpi/conf/nginx.sites-dietpi.owncloud.config $owncloud_config
 
 				# Stretch: Use PHP7.0 socket and set 'fastcgi_request_buffering off';
-				if (( $DISTRO >= 4 )); then
+				if (( $DISTRO > 3 )); then
 
-					sed -i "s#/run/php5-fpm.sock#/run/php/php7.0-fpm.sock#g" /etc/nginx/sites-dietpi/owncloud.config
-					sed -i "s/#fastcgi_request_buffering off;/fastcgi_request_buffering off;/g" /etc/nginx/sites-dietpi/owncloud.config
+					sed -i "s#/run/php5-fpm.sock#/run/php/php7.0-fpm.sock#g" $owncloud_config
+					sed -i "s/#fastcgi_request_buffering off;/fastcgi_request_buffering off;/g" $owncloud_config
 
 				fi
 
@@ -9091,11 +9185,33 @@ _EOF_
 				DietPi/dietpi/func/check_connection https://localhost &> /dev/null
 				if (( $? == 0 || $? == 5)); then
 
-					sed -i "s/#fastcgi_param HTTPS on;/fastcgi_param HTTPS on;/g" /etc/nginx/sites-dietpi/owncloud.config
+					sed -i "s/#fastcgi_param HTTPS on;/fastcgi_param HTTPS on;/g" $owncloud_config
 
 				fi
 
 			fi
+
+			# Enable MySQL 4-byte support: https://doc.owncloud.org/server/latest/admin_manual/configuration/database/linux_database_configuration.html#configure-mysql-for-4-byte-unicode-support
+			cat << _EOF_ > /etc/mysql/conf.d/99-dietpi-4bit.cnf
+[mysqld]
+innodb_large_prefix=1
+innodb_file_format=barracuda
+innodb_file_per_table=1
+_EOF_
+			# Check if we really do fresh installation:
+			local oc_is_fresh=1
+			if [ -d '/mnt/dietpi_userdata/mysql/owncloud' ]; then
+
+				oc_is_fresh=0
+
+			fi
+
+			# Add occ command shortcut:
+			echo -e '#!/bin/bash\nsudo -u www-data php /var/www/owncloud/occ $*' > /usr/local/bin/occ
+			chmod +x /usr/local/bin/occ
+
+			# Adjusting config file:
+			local config_php='/var/www/owncloud/config/config.php'
 
 			# Terminal installation:
 			mkdir -p "$FP_DIETPI_USERDATA_DIRECTORY"/owncloud_data
@@ -9109,14 +9225,15 @@ _EOF_
 			systemctl start mysql
 			# For MariaDB, temporary database admin user needs to be created, as 'root' uses unix_socket login, which cannot be accessed by sudo -u www-data.
 			mysql -uroot -p"$GLOBAL_PW" -e "grant all privileges on *.* to 'tmp_root'@'localhost' identified by '$GLOBAL_PW' with grant option"
-			sudo -u www-data php /var/www/owncloud/occ maintenance:install --no-interaction --database "mysql" --database-name "owncloud" --database-user "tmp_root" --database-pass "$GLOBAL_PW" --admin-user "$username" --admin-pass "$GLOBAL_PW" --data-dir "$FP_DIETPI_USERDATA_DIRECTORY/owncloud_data"
+			grep -q "'installed' => true," $config_php 2>/dev/null || occ maintenance:install --no-interaction --database "mysql" --database-name "owncloud" --database-user "tmp_root" --database-pass "$GLOBAL_PW" --admin-user "$username" --admin-pass "$GLOBAL_PW" --data-dir "$FP_DIETPI_USERDATA_DIRECTORY/owncloud_data"
 			mysql -uroot -p"$GLOBAL_PW" -e "drop user 'tmp_root'@'localhost'"
 
-			# Removing MySQL parent user 'oc_admin'@'%' could be done, but then privileges on database has to be granted to child user 'oc_admin'@'localhost' first.
-			# We leave it, as limitation to localhost database could limit extended Nextcloud features.
-			#mysql -uroot -p"$GLOBAL_PW" -e "drop user $(grep -m1 "'dbuser'" /var/www/nextcloud/config/config.php | awk '{print $3}' | sed "s/,//")"
+			# Enable MySQL 4-byte support for new installations only, to prevent risky database conversion tasks:
+			if (( $oc_is_fresh == 1 )); then
 
-			local config_php="/var/www/owncloud/config/config.php"
+				grep -q "'mysql.utf8mb4' => " $config_php || sed -i "/'dbpassword'/a \ \ 'mysql.utf8mb4' => true," $config_php
+
+			fi
 
 			# Add local IP and hostname to trusted domains.
 			# If "1 => '" does not exist, the config.php is not copied e.g. from older instance, so we add entries.
@@ -9137,6 +9254,24 @@ _EOF_
 
 			fi
 
+			# Redis for transactional file locking:
+			# https://doc.owncloud.org/server/latest/admin_manual/configuration/server/caching_configura$
+			# - Enable Redis socket and grant www-data access to it:
+			sed -i "\#unixsocket /#c\unixsocket /var/run/redis/redis.sock" /etc/redis/redis*.conf
+			sed -i "\#unixsocketperm#c\unixsocketperm 770" /etc/redis/redis*.conf
+			usermod -a -G redis www-data
+			# - Enable ownCloud to use Redis socket:
+			if (( ! $(cat $config_php | grep -ci -m1 "'memcache.locking'") )); then
+
+				sed -i "\#'memcache.local'#a \ \ 'filelocking.enabled' => true,\n\
+  'memcache.locking' => '\\\OC\\\Memcache\\\Redis',\n\
+  'redis' => [\n\
+    'host' => '/var/run/redis/redis.sock',\n\
+    'port' => 0,\n\
+  ]," $config_php
+
+			fi
+
 			# ownCloud/Nextcloud ignores system wide php.ini settings. Use their own config.
 			# Set max upload size
 			local php_max_upload_size="$(( $(php -r 'print(PHP_INT_MAX);') / 1024 / 1024))M"
@@ -9147,17 +9282,23 @@ _EOF_
 			local memory_limit_max="$(( $RAM_TOTAL / 4 ))M"
 			sed -i "/memory_limit=/c\memory_limit=$memory_limit_max" /var/www/owncloud/.user.ini
 
+			# Enable ownCloud background cron job:
+			crontab -u www-data -l 2>/dev/null | grep -q '/var/www/owncloud/cron.php' || ( crontab -u www-data -l 2>/dev/null ; echo "*/15 * * * * php /var/www/owncloud/cron.php" ) | crontab -u www-data -
+			occ background:cron
+
+			# Enable maintenance mode to allow handling by dietpi-services:
+			grep -q "'maintenance' => true," $config_php &>/dev/null || occ maintenance:mode --on
+
 		fi
 
 		#Nextcloud
 		INSTALLING_INDEX=114
 		if (( ${aSOFTWARE_INSTALL_STATE[$INSTALLING_INDEX]} == 1 )); then
 
-			# Install/Enable necessary PHP modules: https://docs.nextcloud.com/server/12/admin_manual/installation/source_installation.html#prerequisites-for-manual-installation
-			AGI "$PHP_APT_PACKAGE_NAME"-intl
-			${PHP_APT_PACKAGE_NAME}enmod curl gd intl json pdo_mysql opcache apcu
-			# Solve: https://github.com/Fourdee/DietPi/issues/1067#issuecomment-335200352
-			if (( $DISTRO >= 4 )); then
+			# Enable necessary PHP modules: https://docs.nextcloud.com/server/12/admin_manual/installation/source_installation.html#prerequisites-for-manual-installation
+			${PHP_APT_PACKAGE_NAME}enmod curl gd intl json pdo_mysql opcache apcu redis
+			# Following modules are switchable since Stretch:
+			if (( $DISTRO > 3 )); then
 
 				phpenmod ctype dom fileinfo iconv mbstring posix simplexml xmlwriter xmlreader zip exif
 
@@ -9178,22 +9319,36 @@ _EOF_
 			# Apache: https://docs.nextcloud.com/server/12/admin_manual/installation/source_installation.html#apache-web-server-configuration
 			if (( ${aSOFTWARE_INSTALL_STATE[83]} >= 1 )); then
 
-				a2enmod rewrite headers env dir mime
-				cp /DietPi/dietpi/conf/apache.ownnextcloud.conf /etc/apache2/sites-available/nextcloud.conf
-				a2ensite nextcloud
+				a2enmod rewrite headers env dir mime &> /dev/null
+				local nextcloud_conf='/etc/apache2/sites-available/nextcloud.conf'
+				# Do not overwrite existing config.
+				if [ -f $nextcloud_conf ]; then
+
+					nextcloud_conf='/etc/apache2/sites-available/nextcloud.conf.new'
+
+				fi
+				cp /DietPi/dietpi/conf/apache.ownnextcloud.conf $nextcloud_conf
+				a2ensite nextcloud &> /dev/null
 
 			fi
 
 			# Nginx: https://docs.nextcloud.com/server/12/admin_manual/installation/nginx.html#nextcloud-in-a-subdir-of-nginx
 			if (( ${aSOFTWARE_INSTALL_STATE[85]} >= 1 )); then
 
-				cp /DietPi/dietpi/conf/nginx.sites-dietpi.nextcloud.config /etc/nginx/sites-dietpi/nextcloud.config
+				local nextcloud_config='/etc/nginx/sites-dietpi/nextcloud.config'
+				# Do not overwrite existing config.
+				if [ -f $nextcloud_config ]; then
+
+					nextcloud_config='/etc/nginx/sites-dietpi/nextcloud.config.new'
+
+				fi
+				cp /DietPi/dietpi/conf/nginx.sites-dietpi.nextcloud.config $nextcloud_config
 
 				# Stretch: Use PHP7.0 socket and set 'fastcgi_request_buffering off';
-				if (( $DISTRO >= 4 )); then
+				if (( $DISTRO > 3 )); then
 
-					sed -i "s#/run/php5-fpm.sock#/run/php/php7.0-fpm.sock#g" /etc/nginx/sites-dietpi/nextcloud.config
-					sed -i "s/#fastcgi_request_buffering off;/fastcgi_request_buffering off;/g" /etc/nginx/sites-dietpi/nextcloud.config
+					sed -i "s#/run/php5-fpm.sock#/run/php/php7.0-fpm.sock#g" $nextcloud_config
+					sed -i "s/#fastcgi_request_buffering off;/fastcgi_request_buffering off;/g" $nextcloud_config
 
 				fi
 
@@ -9201,11 +9356,33 @@ _EOF_
 				DietPi/dietpi/func/check_connection https://localhost &> /dev/null
 				if (( $? == 0 || $? == 5)); then
 
-					sed -i "s/#fastcgi_param HTTPS on;/fastcgi_param HTTPS on;/g" /etc/nginx/sites-dietpi/nextcloud.config
+					sed -i "s/#fastcgi_param HTTPS on;/fastcgi_param HTTPS on;/g" $nextcloud_config
 
 				fi
 
 			fi
+
+			# Enable MySQL 4-byte support: https://docs.nextcloud.com/server/12/admin_manual/configuration_database/mysql_4byte_support.html
+			cat << _EOF_ > /etc/mysql/conf.d/99-dietpi-4bit.cnf
+[mysqld]
+innodb_large_prefix=1
+innodb_file_format=barracuda
+innodb_file_per_table=1
+_EOF_
+			# Check if we really do fresh installation:
+			local nc_is_fresh=1
+			if [ -d '/mnt/dietpi_userdata/mysql/nextcloud' ]; then
+
+				nc_is_fresh=0
+
+			fi
+
+			# Add occ command shortcut, use 'ncc' as 'occ' is reserved for ownCloud:
+			echo -e '#!/bin/bash\nsudo -u www-data php /var/www/nextcloud/occ $*' > /usr/local/bin/ncc
+			chmod +x /usr/local/bin/ncc
+
+			# Adjusting config file:
+			local config_php='/var/www/nextcloud/config/config.php'
 
 			# Terminal installation:
 			mkdir -p "$FP_DIETPI_USERDATA_DIRECTORY"/nextcloud_data
@@ -9219,27 +9396,48 @@ _EOF_
 			systemctl start mysql
 			# For MariaDB, temporary database admin user needs to be created, as 'root' uses unix_socket login, which cannot be accessed by sudo -u www-data.
 			mysql -uroot -p"$GLOBAL_PW" -e "grant all privileges on *.* to 'tmp_root'@'localhost' identified by '$GLOBAL_PW' with grant option"
-			sudo -u www-data php /var/www/nextcloud/occ maintenance:install --no-interaction --database "mysql" --database-name "nextcloud" --database-user "tmp_root" --database-pass "$GLOBAL_PW" --admin-user "$username" --admin-pass "$GLOBAL_PW" --data-dir "$FP_DIETPI_USERDATA_DIRECTORY/nextcloud_data"
+			grep -q "'installed' => true," $config_php 2>/dev/null || ncc maintenance:install --no-interaction --database "mysql" --database-name "nextcloud" --database-user "tmp_root" --database-pass "$GLOBAL_PW" --admin-user "$username" --admin-pass "$GLOBAL_PW" --data-dir "$FP_DIETPI_USERDATA_DIRECTORY/nextcloud_data"
 			mysql -uroot -p"$GLOBAL_PW" -e "drop user 'tmp_root'@'localhost'"
 
-			# Removing MySQL parent user 'oc_admin'@'%' could be done, but then privileges on database has to be granted to child user 'oc_admin'@'localhost' first.
-			# We leave it, as limitation to localhost database could limit extended Nextcloud features.
-			#mysql -uroot -p"$GLOBAL_PW" -e "drop user $(grep -m1 "'dbuser'" /var/www/nextcloud/config/config.php | awk '{print $3}' | sed "s/,//")"
+			# Enable MySQL 4-byte support for new installations only, to prevent risky database conversion tasks:
+			if (( $nc_is_fresh == 1 )); then
+
+				grep -q "'mysql.utf8mb4' => " $config_php || sed -i "/'dbpassword'/a \ \ 'mysql.utf8mb4' => true," $config_php
+
+			fi
 
 			# Disable trusted_domains.
-			if (( ! $(cat /var/www/nextcloud/config/config.php | grep -ci -m1 "1 => '*'") )); then
+			if (( ! $(cat $config_php | grep -ci -m1 "1 => '*'") )); then
 
-				sed -i "/0 => 'localhost'/a     1 => '*'," /var/www/nextcloud/config/config.php
+				sed -i "/0 => 'localhost'/a     1 => '*'," $config_php
 
 			fi
 
 			# Set CLI URL to Nextcloud sub directory:
-			sed -i "s#'http://localhost'#'http://localhost/nextcloud'#g" /var/www/nextcloud/config/config.php
+			sed -i "s#'http://localhost'#'http://localhost/nextcloud'#g" $config_php
 
 			# APCu Memcache
-			if (( ! $(cat /var/www/nextcloud/config/config.php | grep -ci -m1 "'memcache.local'") )); then
+			if (( ! $(cat $config_php | grep -ci -m1 "'memcache.local'") )); then
 
-				sed -i "/'version'/a 'memcache.local' => '\\\OC\\\Memcache\\\APCu'," /var/www/nextcloud/config/config.php
+				sed -i "/'version'/a 'memcache.local' => '\\\OC\\\Memcache\\\APCu'," $config_php
+
+			fi
+
+			# Redis for transactional file locking:
+			# https://docs.nextcloud.com/server/12/admin_manual/configuration_files/files_locking_transactional.html
+			# - Enable Redis socket and grant www-data access to it:
+			sed -i "\#unixsocket /#c\unixsocket /var/run/redis/redis.sock" /etc/redis/redis*.conf
+			sed -i "\#unixsocketperm#c\unixsocketperm 770" /etc/redis/redis*.conf
+			usermod -a -G redis www-data
+			# - Enable Nextloud to use Redis socket:
+			if (( ! $(cat $config_php | grep -ci -m1 "'memcache.locking'") )); then
+
+				sed -i "\#'memcache.local'#a \ \ 'filelocking.enabled' => true,\n\
+  'memcache.locking' => '\\\OC\\\Memcache\\\Redis',\n\
+  'redis' => array(\n\
+    'host' => '/var/run/redis/redis.sock',\n\
+    'port' => 0,\n\
+    )," $config_php
 
 			fi
 
@@ -9252,6 +9450,13 @@ _EOF_
 			# Set memory limit: total / 4
 			local memory_limit_max="$(( $RAM_TOTAL / 4 ))M"
 			sed -i "/memory_limit=/c\memory_limit=$memory_limit_max" /var/www/nextcloud/.user.ini
+
+			# Enable Nextcloud background cron job:
+			crontab -u www-data -l 2>/dev/null | grep -q '/var/www/nextcloud/cron.php' || ( crontab -u www-data -l 2>/dev/null ; echo "*/15 * * * * php /var/www/nextcloud/cron.php" ) | crontab -u www-data -
+			ncc background:cron
+
+			# Enable maintenance mode to allow handling by dietpi-services:
+			grep -q "'maintenance' => true," $config_php &>/dev/null || ncc maintenance:mode --on
 
 		fi
 
@@ -9383,6 +9588,7 @@ _EOF_
 			touch /var/lib/mpd/state
 
 			#	Link /mnt to MPD defaults: https://github.com/Fourdee/DietPi/issues/1223#issuecomment-346955040
+			rm /var/lib/mpd/music/MNT &> /dev/null # Always recreate (reinstalls), else,  mnt -> /mnt
 			ln -sf /mnt /var/lib/mpd/music/MNT
 
 			chown -R mpd:audio /var/lib/mpd
@@ -9496,9 +9702,19 @@ _EOF_
 		if (( ${aSOFTWARE_INSTALL_STATE[$INSTALLING_INDEX]} == 1 )); then
 
 			#YMPD service
-			cp /DietPi/dietpi/conf/ympd_init /etc/init.d/ympd
-			chmod +x /etc/init.d/ympd
-			update-rc.d ympd defaults
+			cat << _EOF_ > /etc/systemd/system/ympd.service
+[Unit]
+Description=YMPD
+After=mpd.service
+
+[Service]
+Type=simple
+User=root
+ExecStart=/usr/bin/ympd --user root --webport 1337
+
+[Install]
+WantedBy=multi-user.target
+_EOF_
 
 		fi
 
@@ -9541,6 +9757,9 @@ ExecStart=/usr/local/bin/node-red -u $FP_DIETPI_USERDATA_DIRECTORY/node-red
 [Install]
 WantedBy=multi-user.target
 _EOF_
+
+			#Symlink to home dir: https://github.com/Fourdee/DietPi/issues/1256
+			ln -sf "$FP_DIETPI_USERDATA_DIRECTORY"/node-red "$HOME"/.node-red
 
 		fi
 
@@ -11761,7 +11980,6 @@ _EOF_
 
 			#Allow root, start maximized and disable sandbox under root (blank screen without)
 			local export_options="export CHROMIUM_FLAGS=\"\$CHROMIUM_FLAGS --no-sandbox --temp-profile --start-maximized --user-data-dir "
-			mkdir -p /etc/chromium.d
 
 			#RPi
 			if (( $HW_MODEL < 10 )); then
@@ -11789,12 +12007,17 @@ _EOF_
 
 			export_options+="\""
 
+			mkdir -p /etc/chromium.d
 			cat << _EOF_ > /etc/chromium.d/custom_flags
 $export_options
 _EOF_
 
+			#	Chromium 60+
+			cp /etc/chromium.d/custom_flags "$HOME"/.chromium-browser.init
+
 			#Symlink to desktop
-			ln -sf /usr/share/applications/chromium.desktop "$HOME"/Desktop/chromium.desktop
+			#	* for RPi Stretch due to chromium-browser.desktop
+			ln -sf /usr/share/applications/chromium*.desktop "$HOME"/Desktop/chromium.desktop
 
 		fi
 
@@ -11812,7 +12035,7 @@ _EOF_
 
 			sed -i "/'mysqli_user'/c \$cfg[\'mysqli_user\']                 = \'root\';" /var/www/ompd/include/config.inc.php
 			sed -i "/'mysqli_password'/c \$cfg[\'mysqli_password\']                 = \'$GLOBAL_PW\';" /var/www/ompd/include/config.inc.php
-			sed -i "/'media_dir'/c \$cfg[\'media_dir\']                 = \'/var/lib/mpd/music\';" /var/www/ompd/include/config.inc.php
+			sed -i "/'media_dir'/c \$cfg[\'media_dir\']                 = \'/var/lib/mpd/music/\';" /var/www/ompd/include/config.inc.php
 			sed -i "/'ignore_media_dir_access_error'/c \$cfg[\'ignore_media_dir_access_error\']                 = \'true';" /var/www/ompd/include/config.inc.php
 
 			/DietPi/dietpi/func/create_mysql_db ompd "$GLOBAL_PW" root "$GLOBAL_PW"
@@ -12418,8 +12641,27 @@ _EOF_
 		#GITEA Config
 		INSTALLING_INDEX=165
 		if (( ${aSOFTWARE_INSTALL_STATE[$INSTALLING_INDEX]} == 1 )); then
-			# - Data storage / user data
-			mkdir -p "$FP_DIETPI_USERDATA_DIRECTORY"/gitea-repositories
+
+			# - service
+			cat << _EOF_ > /etc/systemd/system/gitea.service
+
+[Unit]
+Description=Gitea (Git with a cup of tea)
+
+[Service]
+Type=simple
+User=dietpi
+WorkingDirectory=$FP_DIETPI_USERDATA_DIRECTORY/gitea/gitea-repositories
+ExecStart=$FP_DIETPI_USERDATA_DIRECTORY/gitea/gitea web
+Environment=USER=dietpi HOME=$FP_DIETPI_USERDATA_DIRECTORY/gitea
+
+[Install]
+WantedBy=multi-user.target
+_EOF_
+
+			# - Logs
+			mkdir -p /var/log/gitea
+			chown -R dietpi:dietpi /var/log/gitea
 
 			# - sqldb
 			/DietPi/dietpi/func/create_mysql_db gitea "$GLOBAL_PW" root "$GLOBAL_PW"
@@ -13002,7 +13244,7 @@ _EOF_
 
 		elif (( $1 == 91 )); then
 
-			AGP redis-server "$PHP_APT_PACKAGE_NAME"-redis
+			AGP "$PHP_APT_PACKAGE_NAME"-redis redis-server redis-tools
 
 		elif (( $1 == 89 )); then
 
@@ -13026,29 +13268,46 @@ _EOF_
 			rm -R /var/www/phpBB3
 
 		elif (( $1 == 47 )); then
-
+			#ownCloud
+			# Remove occ command binary
+			rm /usr/local/bin/occ
+			# Remove background cron job
+			crontab -u www-data -l | grep -v '/var/www/owncloud/cron.php'  | crontab -u www-data -
+			# Disable and remove webservier configs
 			a2dissite owncloud 2>/dev/null
 			rm /etc/apache2/sites-available/owncloud.conf 2>/dev/null
 			rm /etc/nginx/sites-dietpi/owncloud.config 2>/dev/null
-			AGP owncloud-files owncloud owncloud-deps
-			rm -R /var/www/owncloud
+			# Drop MySQL/MariaDB user and database
 			systemctl start mysql
 			mysql -uroot -p"$GLOBAL_PW" -e "drop user $(grep -m1 "'dbuser'" /var/www/owncloud/config/config.php | awk '{print $3}' | sed "s/,//")@$(grep -m1 "'dbhost'" /var/www/owncloud/config/config.php | awk '{print $3}' | sed "s/,//")"
 			mysql -uroot -p"$GLOBAL_PW" -e "drop user $(grep -m1 "'dbuser'" /var/www/owncloud/config/config.php | awk '{print $3}' | sed "s/,//")"
+			mysqldump --lock-tables -uroot -p"$GLOBAL_PW" owncloud > "$FP_DIETPI_USERDATA_DIRECTORY"/owncloud_data/mysql_backup.sql
 			mysqladmin -u root -p"$GLOBAL_PW" drop owncloud -f
+			# Purge APT package
+			AGP owncloud-files owncloud owncloud-deps
+			# Remove ownCloud installation folder
+			rm -R /var/www/owncloud
+			# Remove ownCloud repo
 			rm /etc/apt/sources.list.d/owncloud.list 2> /dev/null
-			apt-get update
 
 		elif (( $1 == 114 )); then
-
+			#Nextcloud
+			# Remove occ command binary
+			rm /usr/local/bin/ncc
+			# Remove background cron job
+			crontab -u www-data -l | grep -v '/var/www/nextcloud/cron.php'  | crontab -u www-data -
+			# Disable and remove webservier configs
 			a2dissite nextcloud 2>/dev/null
 			rm /etc/apache2/sites-available/nextcloud.conf 2>/dev/null
 			rm /etc/nginx/sites-dietpi/nextcloud.config 2>/dev/null
-			rm -R /var/www/nextcloud
+			# Drop MySQL/MariaDB user and database
 			systemctl start mysql
 			mysql -uroot -p"$GLOBAL_PW" -e "drop user $(grep -m1 "'dbuser'" /var/www/nextcloud/config/config.php | awk '{print $3}' | sed "s/,//")@$(grep -m1 "'dbhost'" /var/www/nextcloud/config/config.php | awk '{print $3}' | sed "s/,//")"
 			mysql -uroot -p"$GLOBAL_PW" -e "drop user $(grep -m1 "'dbuser'" /var/www/nextcloud/config/config.php | awk '{print $3}' | sed "s/,//")"
+			mysqldump --lock-tables -uroot -p"$GLOBAL_PW" nextcloud > "$FP_DIETPI_USERDATA_DIRECTORY"/nextcloud_data/mysql_backup.sql
 			mysqladmin -u root -p"$GLOBAL_PW" drop nextcloud -f
+			# Remove Nextcloud installation folder
+			rm -R /var/www/nextcloud
 
 		elif (( $1 == 115 )); then
 
@@ -13056,14 +13315,15 @@ _EOF_
 
 		elif (( $1 == 32 )); then
 
-			update-rc.d ympd remove
-			rm /etc/init.d/ympd
 			rm /usr/bin/ympd
+			rm /etc/systemd/system/ympd.service
 
 		elif (( $1 == 128 )); then
 
 			AGP mpd libmpdclient2
 			userdel -f mpd &> /dev/null
+			rm /lib/systemd/system/mpd.service
+			rm -R "$FP_DIETPI_USERDATA_DIRECTORY"/.mpd_cache
 
 		elif (( $1 == 121 )); then
 
@@ -13073,6 +13333,8 @@ _EOF_
 		elif (( $1 == 122 )); then
 
 			rm /etc/systemd/system/node-red.service
+			rm "$HOME"/.node-red
+			rm -R "$FP_DIETPI_USERDATA_DIRECTORY"/node-red
 
 		elif (( $1 == 123 )); then
 
@@ -13725,6 +13987,9 @@ _EOF_
 
 			apt-mark unhold chromium chromedriver
 
+			rm /etc/chromium.d/custom_flags
+			rm "$HOME"/.chromium-browser.init
+
 			AGP chromium
 
 		elif (( $1 == 157)); then
@@ -13741,16 +14006,17 @@ _EOF_
 
 		elif (( $1 == 165 )); then
 
-			# Delete the user / executible
-			userdel -r -f git
 			# Delete systemd files
 			rm /etc/systemd/system/gitea.service
+
 			# Delete data
-			rm -r "$FP_DIETPI_USERDATA_DIRECTORY"/gitea-repositories
+			rm -R "$FP_DIETPI_USERDATA_DIRECTORY"/gitea
+			rm -R /var/log/gitea
 
 			# drop/delete database
 			systemctl start mysql
 			mysqladmin -u root -p"$GLOBAL_PW" drop gitea -f
+			systemctl stop mysql
 
 		elif (( $1 == 166 )); then
 
@@ -13983,7 +14249,10 @@ _EOF_
 
 		elif (( $1 == 105 )); then
 
-			AGP openssh-server
+			AGP openssh-*
+
+			# This also clears Openssh-client
+			aSOFTWARE_INSTALL_STATE[0]=0
 
 		elif (( $1 == 103 )); then
 
@@ -14046,26 +14315,26 @@ _EOF_
 
 		#Check if we need to clear DietPi choices
 		local fp_temp='/tmp/.dietpi-uninstall_dpkg'
-		dpkg -l | awk '{print $2}' > "$fp_temp"
-		if (( $(cat "$fp_temp" | grep -ci -m1 '^openssh-server') == 0 &&
-			$(cat "$fp_temp" | grep -ci -m1 '^dropbear') == 0 )); then
+		dpkg --get-selections | awk '{print $1}' > "$fp_temp"
+		if (( ! $(grep -ci -m1 '^openssh-server' "$fp_temp") &&
+			! $(grep -ci -m1 '^dropbear' "$fp_temp") )); then
 
 			INDEX_SSHSERVER_CURRENT=0
 			INDEX_SSHSERVER_TARGET=0
 
 		fi
 
-		if (( $(cat "$fp_temp" | grep -ci -m1 '^samba$') == 0 &&
-			$(cat "$fp_temp" | grep -ci -m1 '^proftpd-basic') == 0 )); then
+		if (( ! $(grep -ci -m1 '^samba$' "$fp_temp") &&
+			! $(grep -ci -m1 '^proftpd-basic' "$fp_temp") )); then
 
 			INDEX_FILESERVER_CURRENT=0
 			INDEX_FILESERVER_TARGET=0
 
 		fi
 
-		if (( $(cat /etc/fstab | grep -ci -m1 '#/var/log') == 1 &&
-			$(cat "$fp_temp" | grep -ci -m1 '^rsyslog') == 0 &&
-			$(cat "$fp_temp" | grep -ci -m1 '^logrotate') == 0 )); then
+		if (( $(grep -ci -m1 '#/var/log' /etc/fstab) &&
+			! $(grep -ci -m1 '^rsyslog' "$fp_temp") &&
+			! $(grep -ci -m1 '^logrotate' "$fp_temp") )); then
 
 			INDEX_LOGGING_CURRENT=0
 			INDEX_LOGGING_TARGET=0
@@ -14164,7 +14433,7 @@ _EOF_
 		/DietPi/dietpi/dietpi-autostart $autostart_current
 
 		#Disable services so DietPi-services can take control (DietPi will start all services from rc.local)
-		/DietPi/dietpi/dietpi-services disable
+		/DietPi/dietpi/dietpi-services dietpi_controlled
 
 		#Install finished, set all installed software to state 2 (installed)
 		for ((i=0; i<$TOTAL_SOFTWARE_INDEXS; i++))

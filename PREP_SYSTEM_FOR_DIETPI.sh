@@ -410,7 +410,12 @@ cat << _EOF_ >> /etc/hdparm.conf
 _EOF_
 
 cat << _EOF_ >> /etc/bash.bashrc
+#LANG
 export \$(cat /etc/default/locale | grep LANG=)
+
+#Define a default LD_LIBRARY_PATH for all systems
+export LD_LIBRARY_PATH=/lib:/usr/lib:/usr/local/lib:/opt/vc/lib
+
 #DietPi Additions
 alias sudo='sudo ' # https://github.com/Fourdee/DietPi/issues/424
 alias dietpi-process_tool='/DietPi/dietpi/dietpi-process_tool'
@@ -536,6 +541,16 @@ infocmp > terminfo.txt
 sed -i -e 's/?0c/?112c/g' -e 's/?8c/?48;0;64c/g' terminfo.txt
 tic terminfo.txt
 tput cnorm
+_EOF_
+#???
+
+
+#??? XU4 FFMPEG fix. Prefer debian.org over Meveric for backports: https://github.com/Fourdee/DietPi/issues/1273
+cat << _EOF_ > /etc/apt/preferences.d/backports
+Package: *
+Pin: release a=jessie-backports
+Pin: origin "fuzon.co.uk"
+Pin-Priority: 99
 _EOF_
 #???
 
