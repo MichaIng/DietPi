@@ -14,6 +14,19 @@
 #  - Items that are commented out should not be used.
 #  - Sections with '#???', are WHIP_OPTIONal, depending on the device and its specs. (eg: does it need bluetooth?)
 #------------------------------------------------------------------------------------------------
+#Force en_GB Locale for whole script. Prevents incorrect parsing with non-english locales.
+LANG=en_GB.UTF-8
+
+#Ensure we are in users home dir: https://github.com/Fourdee/DietPi/issues/905#issuecomment-298223705
+cd "$HOME"
+
+#Exit path for non-root logins.
+if (( $UID != 0 )); then
+
+	echo -e 'Error: Root privileges required. Please run the command with "sudo"\n'
+	exit
+
+fi
 
 #------------------------------------------------------------------------------------------------
 #Globals
@@ -73,33 +86,35 @@ AGP(){
 
 	fi
 
+	#DEBUG: Dry run for testing
+	string+=' --dry-run'
+
 	$(which apt) purge -y $string
 
 }
 
-
 #DietPi-Notify:
 dietpi-notify(){
 
-	aINPUT_STRING=("$@")
+	local ainput_string=("$@")
 
-	STATUS_TEXT_OK="\e[32mOk\e[0m"
-	STATUS_TEXT_FAILED="\e[31mFailed:\e[0m"
+	local status_text_ok="\e[32mOk\e[0m"
+	local status_text_failed="\e[31mFailed:\e[0m"
 
-	BRACKET_STRING_L="\e[90m[\e[0m"
-	BRACKET_STRING_R="\e[90m]\e[0m"
+	local bracket_string_l="\e[90m[\e[0m"
+	local bracket_string_r="\e[90m]\e[0m"
 
 	#Funcs
 
 	Print_Ok(){
 
-		echo -ne " $BRACKET_STRING_L\e[32mOk\e[0m$BRACKET_STRING_R"
+		echo -ne " $bracket_string_l\e[32mOk\e[0m$bracket_string_r"
 
 	}
 
 	Print_Failed(){
 
-		echo -ne " $BRACKET_STRING_L\e[31mFailed\e[0m$BRACKET_STRING_R"
+		echo -ne " $bracket_string_l\e[31mFailed\e[0m$bracket_string_r"
 
 	}
 
@@ -107,9 +122,9 @@ dietpi-notify(){
 	# - $1 = start printing from word number $1
 	Print_Input_String(){
 
-		for (( i=$1;i<${#aINPUT_STRING[@]} ;i++))
+		for (( i=$1;i<${#ainput_string[@]} ;i++))
 		do
-			echo -ne " ${aINPUT_STRING[${i}]}"
+			echo -ne " ${ainput_string[${i}]}"
 		done
 
 		echo -e ""
@@ -124,14 +139,14 @@ dietpi-notify(){
 
 		if [ "$2" = "0" ]; then
 
-			aINPUT_STRING+=("Completed")
+			ainput_string+=("Completed")
 			Print_Ok
 			Print_Input_String 2
 			echo -e ""
 
 		else
 
-			aINPUT_STRING+=("An issue has occured")
+			ainput_string+=("An issue has occured")
 			Print_Failed
 			Print_Input_String 2
 			echo -e ""
@@ -157,7 +172,7 @@ dietpi-notify(){
 	#$@ = txt desc
 	elif (( $1 == 2 )); then
 
-		echo -ne " $BRACKET_STRING_L\e[0mInfo\e[0m$BRACKET_STRING_R"
+		echo -ne " $bracket_string_l\e[0mInfo\e[0m$bracket_string_r"
 		echo -ne "\e[90m"
 		Print_Input_String 1
 		echo -ne "\e[0m"
@@ -166,7 +181,7 @@ dietpi-notify(){
 
 	echo -e ""
 	#-----------------------------------------------------------------------------------
-	unset aINPUT_STRING
+	unset ainput_string
 	#-----------------------------------------------------------------------------------
 }
 
@@ -321,7 +336,16 @@ elif (( $DISTRO == 5 )); then
 
 fi
 
-dietpi-notify 2 "Setting APT sources.list: $DISTRO_NAME $DISTRO"
+###############
+dietpi-notify 0 'Removing conflicting apt sources.list.d'
+
+#rm /etc/apt/sources.list.d/* &> /dev/null #Probably a bad idea
+rm /etc/apt/sources.list.d/deb-multimedia.list &> /dev/null #meveric
+echo 0 #always pass
+Error_Check
+
+###############
+dietpi-notify 0 "Setting APT sources.list: $DISTRO_NAME $DISTRO"
 
 if (( $HW_MODEL < 10 )); then
 
@@ -356,13 +380,6 @@ Error_Check
 apt-get update
 Error_Check
 
-###############
-dietpi-notify 0 'Removing known conflicting apt sources.list.d'
-
-rm /etc/apt/sources.list.d/deb-multimedia.list &> /dev/null
-echo 0 #always pass
-Error_Check
-
 #------------------------------------------------------------------------------------------------
 #Step 4: APT removals
 #------------------------------------------------------------------------------------------------
@@ -370,23 +387,36 @@ Error_Check
 ###############
 dietpi-notify 0 "Removing Core APT packages not required by DietPi"
 
-AGP libpython* fonts-* xmms2-client-* pulseaudio* jq xxd iperf3 gdisk gpsd ppp libboost-iostreams* sgml-base xml-core usb-modeswitch* libpng* cpp-* cpp ntpdate bluez bluetooth rsync dialog dhcpcd5 lua5.1 netcat-* make makedev ncdu plymouth openresolv shared-mime-in* tcpd strace tasksel* wireless-* xdg-user-dirs triggerhappy python* v4l-utils traceroute xz-utils ucf xauth zlib1g-dev xml-core aptitude* avahi-daemon rsyslog logrotate man-db manpages vim vim-common vim-runtime vim-tiny mc mc-data
+AGP libpython* xmms2-client-* pulseaudio* jq xxd iperf3 gdisk gpsd ppp libboost-iostreams* sgml-base xml-core usb-modeswitch* libpng* cpp-* cpp ntpdate bluez bluetooth rsync dialog dhcpcd5 lua5.1 netcat-* make makedev ncdu plymouth openresolv shared-mime-in* tcpd strace tasksel* wireless-* xdg-user-dirs triggerhappy python* v4l-utils traceroute xz-utils ucf xauth zlib1g-dev xml-core aptitude* avahi-daemon rsyslog logrotate man-db manpages vim vim-common vim-runtime vim-tiny mc mc-data
+Error_Check
+
+###############
+dietpi-notify 0 "Removing webserver APT packages not required by DietPi"
+
+#TD: Add php here
+AGP apache2* lighttpd* nginx*
+Error_Check
+
+###############
+dietpi-notify 0 "Removing Desktop related APT packages not required by DietPi"
+
+AGP gnome-* mate-* lxde lxde-* lxmenu-* fonts-dejavu* libwayland* dictionaries-* libgtk* x11-* zenity* yelp-* fonts-*
 Error_Check
 
 ###############
 dietpi-notify 0 "Removing Misc (Stage 1) APT packages not required by DietPi"
 
-AGP libpod-* libpeas-* isc-dhcp-server gnome-* fonts-dejavu* eject dnsmasq* dns-root-data colord-data libjasper* libjson* libwbclient* libwayland* golang-* libavahi* libtext* libweb* libpcsclite1 libxau6* libxc* dictionaries-* libgtk* miscfiles minicom lrzsz lxmenu-* x11-* zenity* yelp-*
+AGP libpod-* libpeas-* isc-dhcp-server eject dnsmasq* dns-root-data colord-data libjasper* libjson* libwbclient* golang-* libavahi* libtext* libweb* libpcsclite1 libxau6* libxc* miscfiles minicom lrzsz
 Error_Check
 
 ###############
 dietpi-notify 0 "Removing Misc (Stage 2) APT packages not required by DietPi"
 
-AGP apache2* lighttpd* nginx* nodejs memtester expect tcl-expect toilet toilet-fonts w-scan vlan weather-util* sysbench stress cmake cmake-data device-tree-co* fping hddtemp haveged hostapd i2c-tools iperf ir-keytable libasound2* libmtp* libusb-dev lirc lsof ncurses-term pkg-config unicode-data rfkill pv mtp-tools m4 screen alsa-utils autotools-dev bind9-host btrfs-tools bridge-utils cpufrequtils dvb-apps dtv-scan-table* evtest f3 figlet gcc gcc-4.8-* git git-man ifenslave
+AGP nodejs memtester expect tcl-expect toilet toilet-fonts w-scan vlan weather-util* sysbench stress cmake cmake-data device-tree-co* fping hddtemp haveged hostapd i2c-tools iperf ir-keytable libasound2* libmtp* libusb-dev lirc lsof ncurses-term pkg-config unicode-data rfkill pv mtp-tools m4 screen alsa-utils autotools-dev bind9-host btrfs-tools bridge-utils cpufrequtils dvb-apps dtv-scan-table* evtest f3 figlet gcc gcc-4.8-* git git-man ifenslave
 Error_Check
 
 ###############
-dietpi-notify 0 "Removing Fonts"
+dietpi-notify 0 "Removing Fonts/Icons not Required by DietPi"
 
 rm -R /usr/share/fonts/*
 rm -R /usr/share/icons/*
@@ -696,7 +726,7 @@ rm /etc/init.d/ntp &> /dev/null
 #Apt
 # - Force use existing installed configs if available, else install new. Also disables end user prompt from dpkg
 cat << _EOF_ > /etc/apt/apt.conf.d/local
-Dpkg::WHIP_OPTIONs {
+Dpkg::options {
    "--force-confdef";
    "--force-confold";
 }
@@ -814,9 +844,9 @@ _EOF_
 sed -i "/FORCE=/c\FORCE=force" /etc/default/fake-hwclock
 
 #wifi dongles | move to dietpi-set_hardware wifi
-# echo -e "WHIP_OPTIONs 8192cu rtw_power_mgnt=0" > /etc/modprobe.d/8192cu.conf
-# echo -e "WHIP_OPTIONs 8188eu rtw_power_mgnt=0" > /etc/modprobe.d/8188eu.conf
-# echo -e "WHIP_OPTIONs 8189es rtw_power_mgnt=0" > /etc/modprobe.d/8189es.conf
+# echo -e "options 8192cu rtw_power_mgnt=0" > /etc/modprobe.d/8192cu.conf
+# echo -e "options 8188eu rtw_power_mgnt=0" > /etc/modprobe.d/8188eu.conf
+# echo -e "options 8189es rtw_power_mgnt=0" > /etc/modprobe.d/8189es.conf
 
 
 #Set swapfile size
@@ -913,11 +943,11 @@ _EOF_
 cat << _EOF_ > /etc/modprobe.d/blacklist-nouveau.conf
 blacklist nouveau
 blacklist lbm-nouveau
-WHIP_OPTIONs nouveau modeset=0
+options nouveau modeset=0
 alias nouveau off
 alias lbm-nouveau off
 _EOF_
-echo -e "WHIP_OPTIONs nouveau modeset=0" > /etc/modprobe.d/nouveau-kms.conf
+echo -e "options nouveau modeset=0" > /etc/modprobe.d/nouveau-kms.conf
 update-initramfs -u
 #???
 
