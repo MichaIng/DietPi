@@ -12,86 +12,448 @@
 #------------------------------------------------------------------------------------------------
 # Legend:
 #  - Items that are commented out should not be used.
-#  - Sections with '#???', are optional, depending on the device and its specs. (eg: does it need bluetooth?)
+#  - Sections with '#???', are WHIP_OPTIONal, depending on the device and its specs. (eg: does it need bluetooth?)
 #------------------------------------------------------------------------------------------------
 
-#This is not currently a executable script. Please manually run through the commands:
-exit 0 #prevent continuation of this script.
+#------------------------------------------------------------------------------------------------
+#Globals
+#------------------------------------------------------------------------------------------------
+#System
+DISTRO=4
+DISTRO_NAME='stretch'
+HW_MODEL=0
+
+#Funcs
+INTERNET_ADDRESS=''
+Check_Connection(){
+
+	wget -q --spider --timeout=10 --tries=2 "$INTERNET_ADDRESS"
+
+}
+
+Error_Check(){
+
+	#Grab exit code in case of failure
+	exit_code=$?
+	if (( $exit_code != 0 )); then
+
+		dietpi-notify 1 "($exit_code): Script aborted"
+		exit $exit_code
+
+	else
+
+		dietpi-notify 2 "($exit_code): Passed"
+	fi
+
+}
+
+#Apt-get
+AGI(){
+
+	local string="$@"
+
+	local force_WHIP_OPTIONs='--force-yes'
+
+	if (( $DISTRO >= 4 )); then
+
+		force_WHIP_OPTIONs='--allow-downgrades --allow-remove-essential --allow-change-held-packages --allow-unauthenticated'
+
+	fi
+
+	DEBIAN_FRONTEND=noninteractive $(which apt) install -y $force_WHIP_OPTIONs $string
+
+}
+
+AGP(){
+
+	local string="$@"
+	if (( $DISTRO >= 4 )); then
+
+		string+=' --allow-change-held-packages'
+
+	fi
+
+	$(which apt) purge -y $string
+
+}
+
+
+#DietPi-Notify:
+dietpi-notify(){
+
+	aINPUT_STRING=("$@")
+
+	STATUS_TEXT_OK="\e[32mOk\e[0m"
+	STATUS_TEXT_FAILED="\e[31mFailed:\e[0m"
+
+	BRACKET_STRING_L="\e[90m[\e[0m"
+	BRACKET_STRING_R="\e[90m]\e[0m"
+
+	#Funcs
+
+	Print_Ok(){
+
+		echo -ne " $BRACKET_STRING_L\e[32mOk\e[0m$BRACKET_STRING_R"
+
+	}
+
+	Print_Failed(){
+
+		echo -ne " $BRACKET_STRING_L\e[31mFailed\e[0m$BRACKET_STRING_R"
+
+	}
+
+	# - Print all input string on same line
+	# - $1 = start printing from word number $1
+	Print_Input_String(){
+
+		for (( i=$1;i<${#aINPUT_STRING[@]} ;i++))
+		do
+			echo -ne " ${aINPUT_STRING[${i}]}"
+		done
+
+		echo -e ""
+
+	}
+
+	# Main Loop
+	#--------------------------------------------------------------------------------------
+	echo -e ""
+
+	if (( $1 == -1 )); then
+
+		if [ "$2" = "0" ]; then
+
+			aINPUT_STRING+=("Completed")
+			Print_Ok
+			Print_Input_String 2
+			echo -e ""
+
+		else
+
+			aINPUT_STRING+=("An issue has occured")
+			Print_Failed
+			Print_Input_String 2
+			echo -e ""
+
+		fi
+
+	#--------------------------------------------------------------------------------------
+	#Status Ok
+	#$@ = txt desc
+	elif (( $1 == 0 )); then
+
+		Print_Ok
+		Print_Input_String 1
+
+	#Status failed
+	#$@ = txt desc
+	elif (( $1 == 1 )); then
+
+		Print_Failed
+		Print_Input_String 1
+
+	#Status Info
+	#$@ = txt desc
+	elif (( $1 == 2 )); then
+
+		echo -ne " $BRACKET_STRING_L\e[0mInfo\e[0m$BRACKET_STRING_R"
+		echo -ne "\e[90m"
+		Print_Input_String 1
+		echo -ne "\e[0m"
+
+	fi
+
+	echo -e ""
+	#-----------------------------------------------------------------------------------
+	unset aINPUT_STRING
+	#-----------------------------------------------------------------------------------
+}
+
+#Whiptail
+WHIP_BACKTITLE='DietPi-Prep'
+WHIP_TITLE=0
+WHIP_DESC=0
+WHIP_MENU_ARRAY=0
+WHIP_RETURN_VALUE=0
+WHIP_DEFAULT_ITEM=0
+WHIP_OPTION=0
+WHIP_CHOICE=0
+Run_Whiptail(){
+
+	WHIP_OPTION=$(whiptail --title "$WHIP_TITLE" --menu "$WHIP_DESC" --default-item "$WHIP_DEFAULT_ITEM" --backtitle "$WHIP_BACKTITLE" 30 80 20 "${WHIP_MENU_ARRAY[@]}" 3>&1 1>&2 2>&3)
+	WHIP_CHOICE=$?
+	if (( $WHIP_CHOICE == 0 )); then
+
+		WHIP_RETURN_VALUE=$WHIP_OPTION
+
+	else
+
+		dietpi-notify 1 'No choices detected, aborting'
+		exit 0
+
+	fi
+
+	#delete []
+	unset WHIP_MENU_ARRAY
+
+}
+
+
+#------------------------------------------------------------------------------------------------
+#------------------------------------------------------------------------------------------------
+#------------------------------------------------------------------------------------------------
+# MAIN LOOP
+#------------------------------------------------------------------------------------------------
+#------------------------------------------------------------------------------------------------
+#------------------------------------------------------------------------------------------------
+
+
+#------------------------------------------------------------------------------------------------
+#Step 1: Initial Critical Prep
+#------------------------------------------------------------------------------------------------
+
+###############
+dietpi-notify 0 'Updating Apt and installing initial core packages'
+
+apt-get clean
+Error_Check
+
+apt-get update
+Error_Check
+
+###############
+dietpi-notify 0 'Installing Core Packages'
+AGI wget unzip whiptail
+Error_Check
+
+#------------------------------------------------------------------------------------------------
+#Step 2: Hardware selection
+#------------------------------------------------------------------------------------------------
+###############
+dietpi-notify 0 'Hardware selection'
+
+WHIP_TITLE='Hardware selection'
+WHIP_DESC='Please select the current device this is being installed on:'
+WHIP_DEFAULT_ITEM=0
+WHIP_MENU_ARRAY=(
+	'110' 'RoseapplePi'
+	'100' 'Asus Tinker Board'
+	'90' 'A20-OLinuXino-MICRO'
+	'80' 'Cubieboard 3'
+	'71' 'Beagle Bone Black'
+	'70' 'Sparky SBC'
+	'66' 'NanoPi M1 Plus'
+	'65' 'NanoPi NEO 2'
+	'64' 'NanoPi NEO Air'
+	'63' 'NanoPi M1/T1'
+	'62' 'NanoPi M3/T3'
+	'61' 'NanoPi M2/T2'
+	'60' 'NanoPi Neo'
+	'51' 'BananaPi Pro (Lemaker)'
+	'50' 'BananaPi M2+ (sinovoip)'
+	'43' 'Rock64'
+	'42' 'Pine A64+ (2048mb)'
+	'41' 'Pine A64+ (1024mb)'
+	'40' 'Pine A64  (512mb)'
+	'38' 'OrangePi PC 2'
+	'37' 'OrangePi Prime'
+	'36' 'OrangePi Win'
+	'35' 'OrangePi Zero Plus 2 (H3/H5)'
+	'34' 'OrangePi Plus'
+	'33' 'OrangePi Lite'
+	'32' 'OrangePi Zero (H2+)'
+	'31' 'OrangePi One'
+	'30' 'OrangePi PC'
+	'21' 'x86_64 native (PC)'
+	'20' 'VM x64 (VMware VirtualBox)'
+	'13' 'oDroid U3'
+	'12' 'oDroid C2'
+	'11' 'oDroid XU3/4'
+	'10' 'oDroid C1'
+	'3' 'Raspberry Pi 3'
+	'2' 'Raspberry Pi 2'
+	'1' 'Raspberry Pi 1/Zero (512mb)'
+	'0' 'Raspberry Pi 1 (256mb)'
+)
+
+Run_Whiptail
+HW_MODEL=$WHIP_RETURN_VALUE
+
+dietpi-notify 2 "Setting HW_MODEL index of: $HW_MODEL"
+
+
+
+#------------------------------------------------------------------------------------------------
+#Step 3: Distro Selection + APT prep
+#------------------------------------------------------------------------------------------------
+###############
+dietpi-notify 0 'Distro selection'
+
+WHIP_TITLE='Distro Selection'
+WHIP_DESC='Please select a distro to install on this system. Selecting a distro that is older than the current installed on system, is not supported.'
+WHIP_DEFAULT_ITEM=4
+WHIP_MENU_ARRAY=(
+	'1' 'wheezy'
+	'3' 'jessie'
+	'4' 'stretch'
+	'5' 'buster'
+)
+
+Run_Whiptail
+DISTRO=$WHIP_RETURN_VALUE
+
+if (( $DISTRO == 1 )); then
+
+	DISTRO_NAME='wheezy'
+
+elif (( $DISTRO == 3 )); then
+
+	DISTRO_NAME='jessie'
+
+elif (( $DISTRO == 4 )); then
+
+	DISTRO_NAME='stretch'
+
+elif (( $DISTRO == 5 )); then
+
+	DISTRO_NAME='buster'
+
+fi
+
+dietpi-notify 2 "Setting APT sources.list: $DISTRO_NAME $DISTRO"
+
+if (( $HW_MODEL < 10 )); then
+
+	cat << _EOF_ > /etc/apt/sources.list
+deb https://www.mirrorservice.org/sites/archive.raspbian.org/raspbian $DISTRO main contrib non-free rpi
+_EOF_
+
+	cat << _EOF_ > /etc/apt/sources.list.d/raspi.list
+deb https://archive.raspberrypi.org/debian/ $DISTRO main ui
+_EOF_
+
+else
+
+	cat << _EOF_ > /etc/apt/sources.list
+deb http://ftp.debian.org/debian/ $DISTRO_NAME main contrib non-free
+deb http://ftp.debian.org/debian/ $DISTRO_NAME-updates main contrib non-free
+deb http://security.debian.org $DISTRO_NAME/updates main contrib non-free
+deb http://ftp.debian.org/debian/ $DISTRO_NAME-backports main contrib non-free
+_EOF_
+
+fi
+Error_Check
+
+#NB: Apt mirror will get overwritten by: /DietPi/dietpi/func/dietpi-set_software apt-mirror default : during finalize.
+
+###############
+dietpi-notify 0 "Updating APT for $DISTRO_NAME"
+
+apt-get clean
+Error_Check
+
+apt-get update
+Error_Check
+
+###############
+dietpi-notify 0 'Removing known conflicting apt sources.list.d'
+
+rm /etc/apt/sources.list.d/deb-multimedia.list &> /dev/null
+echo 0 #always pass
+Error_Check
+
+#------------------------------------------------------------------------------------------------
+#Step 4: APT removals
+#------------------------------------------------------------------------------------------------
+
+###############
+dietpi-notify 0 "Removing Core APT packages not required by DietPi"
+
+AGP libpython* fonts-* xmms2-client-* pulseaudio* jq xxd iperf3 gdisk gpsd ppp libboost-iostreams* sgml-base xml-core usb-modeswitch* libpng* cpp-* cpp ntpdate bluez bluetooth rsync dialog dhcpcd5 lua5.1 netcat-* make makedev ncdu plymouth openresolv shared-mime-in* tcpd strace tasksel* wireless-* xdg-user-dirs triggerhappy python* v4l-utils traceroute xz-utils ucf xauth zlib1g-dev xml-core aptitude* avahi-daemon rsyslog logrotate man-db manpages vim vim-common vim-runtime vim-tiny mc mc-data
+Error_Check
+
+###############
+dietpi-notify 0 "Removing Misc (Stage 1) APT packages not required by DietPi"
+
+AGP libpod-* libpeas-* isc-dhcp-server gnome-* fonts-dejavu* eject dnsmasq* dns-root-data colord-data libjasper* libjson* libwbclient* libwayland* golang-* libavahi* libtext* libweb* libpcsclite1 libxau6* libxc* dictionaries-* libgtk* miscfiles minicom lrzsz lxmenu-* x11-* zenity* yelp-*
+Error_Check
+
+###############
+dietpi-notify 0 "Removing Misc (Stage 2) APT packages not required by DietPi"
+
+AGP apache2* lighttpd* nginx* nodejs memtester expect tcl-expect toilet toilet-fonts w-scan vlan weather-util* sysbench stress cmake cmake-data device-tree-co* fping hddtemp haveged hostapd i2c-tools iperf ir-keytable libasound2* libmtp* libusb-dev lirc lsof ncurses-term pkg-config unicode-data rfkill pv mtp-tools m4 screen alsa-utils autotools-dev bind9-host btrfs-tools bridge-utils cpufrequtils dvb-apps dtv-scan-table* evtest f3 figlet gcc gcc-4.8-* git git-man ifenslave
+Error_Check
+
+###############
+dietpi-notify 0 "Removing Fonts"
+
+rm -R /usr/share/fonts/*
+rm -R /usr/share/icons/*
+
+###############
+dietpi-notify 0 "Removing Dev APT packages not required by DietPi"
+
+AGP '\-dev$' linux-headers*
+Error_Check
+
+# - Hardware specific
+if (( $HW_MODEL == 71 )); then
+
+	###############
+	dietpi-notify 0 "Removing BBB APT packages not required by DietPi"
+
+	AGP roboticscape ardupilot-* ti-* bonescript libapr1
+	Error_Check
+
+elif (( $HW_MODEL < 10 )); then
+
+	###############
+	dietpi-notify 0 "Removing RPi APT packages not required by DietPi"
+
+	AGP rpi-update libraspberrypi-doc gcc-4.6-base gcc-4.7-base gcc-4.8-base libsigc++-1.2-5c2
+	Error_Check
+
+fi
+
+
+###############
+dietpi-notify 0 "Purging APT with autoremoval"
+
+apt-get autoremove --purge -y
+Error_Check
+
+
+
+
+
+
+
+#??? ROCK64, reinstall kernel packages:
+# apt-get install linux-rock64-package
+#???
+
+#???: WHIP_OPTIONal Reinstall OpenSSH (for updating dietpi scripts etc). Gets removed during finalise.
+# apt-get install openssh-server -y
+# echo -e "PermitRootLogin yes" >> /etc/ssh/sshd_config
+# systemctl restart ssh
+#???
+
+
+exit
+
+
+
+
+
+
 
 
 #------------------------------------------------------------------------------------------------
 #Packages
 #------------------------------------------------------------------------------------------------
 
-#NOTE:
-#Apt mirror will get overwritten by: /DietPi/dietpi/func/dietpi-set_software apt-mirror default : during finalize.
 
-#??? RPI
-DISTRO='stretch'
-cat << _EOF_ > /etc/apt/sources.list
-deb https://www.mirrorservice.org/sites/archive.raspbian.org/raspbian $DISTRO main contrib non-free rpi
-_EOF_
-
-cat << _EOF_ > /etc/apt/sources.list.d/raspi.list
-deb https://archive.raspberrypi.org/debian/ $DISTRO main ui
-_EOF_
-
-#??? Everything else (excluding RPi!)
-DISTRO='stretch'
-cat << _EOF_ > /etc/apt/sources.list
-deb http://ftp.debian.org/debian/ $DISTRO main contrib non-free
-deb http://ftp.debian.org/debian/ $DISTRO-updates main contrib non-free
-deb http://security.debian.org $DISTRO/updates main contrib non-free
-deb http://ftp.debian.org/debian/ $DISTRO-backports main contrib non-free
-_EOF_
-
-
-#+Meveric images
-rm /etc/apt/sources.list.d/deb-multimedia.list
-
-#Remove following All
-apt-get clean
-apt-get update
-apt-get purge -y libpython* fonts-* xmms2-client-* pulseaudio* jq xxd iperf3 gdisk gpsd ppp libboost-iostreams* sgml-base xml-core usb-modeswitch* libpng* cpp-* cpp ntpdate bluez bluetooth rsync dialog dhcpcd5 lua5.1 netcat-* make makedev ncdu plymouth openresolv shared-mime-in* tcpd strace tasksel* wireless-* xdg-user-dirs triggerhappy python* v4l-utils traceroute xz-utils ucf xauth zlib1g-dev xml-core aptitude* avahi-daemon rsyslog logrotate man-db manpages vim vim-common vim-runtime vim-tiny mc mc-data
-
-#+Desktop images (Mostly desktop packages, but apply to non-desktop images also):
-apt-get purge -y libpod-* libpeas-* isc-dhcp-server gnome-* fonts-dejavu* eject dnsmasq* dns-root-data colord-data libjasper* libjson* libwbclient* libwayland* golang-* libavahi* libtext* libweb* libpcsclite1 libxau6* libxc* dictionaries-* libgtk* miscfiles minicom lrzsz lxmenu-* x11-* zenity* yelp-*
-
-rm -R /usr/share/fonts/*
-rm -R /usr/share/icons/*
-
-#+Misc
-#??? BBB: https://github.com/Fourdee/DietPi/issues/931#issuecomment-345451529
-apt-get purge -y apache2 roboticscape ardupilot-* ti-* nodejs mjpg-streamer bonescript libapr1
-#???
-
-apt-get purge -y memtester expect tcl-expect toilet toilet-fonts w-scan vlan weather-util* sysbench stress cmake cmake-data device-tree-co* fping hddtemp haveged hostapd i2c-tools iperf ir-keytable libasound2* libmtp* libusb-dev lirc lsof ncurses-term pkg-config unicode-data rfkill pv mtp-tools m4 screen alsa-utils autotools-dev bind9-host btrfs-tools bridge-utils cpufrequtils dvb-apps dtv-scan-table* evtest f3 figlet gcc gcc-4.8-* git git-man ifenslave
-
-#+ dev packages
-#	On ARMbian DEV branch images, manually do this as triggers '*-dev' image/uboot etc
-apt-get purge -y '\-dev$' linux-headers*
-
-#+ Meveric's repo | Renders patch for removal in apt
-# apt-get purge setup-odroid # not compat with DietPi
-
-#??? RPI
-apt-get purge -y rpi-update libraspberrypi-doc
-#??? RPI (remove older version packages marked as manual): https://github.com/Fourdee/DietPi/issues/598#issuecomment-25919922
-apt-get purge gcc-4.6-base gcc-4.7-base gcc-4.8-base libsigc++-1.2-5c2
-#???
-
-apt-get autoremove --purge -y
-
-
-#??? ROCK64, reinstall kernel packages:
-apt-get install linux-rock64-package
-#???
-
-#???: Optional Reinstall OpenSSH (for updating dietpi scripts etc). Gets removed during finalise.
-apt-get install openssh-server -y
-echo -e "PermitRootLogin yes" >> /etc/ssh/sshd_config
-systemctl restart ssh
-#???
 
 
 #install packages
@@ -172,9 +534,9 @@ mkdir -p /mnt/dietpi_userdata
 mkdir -p /mnt/samba
 mkdir -p /mnt/ftp_client
 mkdir -p /mnt/nfs_client
-echo -e "Samba client can be installed and setup by DietPi-Config.\nSimply run: dietpi-config and select the Networking Options: NAS/Misc menu" > /mnt/samba/readme.txt
-echo -e "FTP client mount can be installed and setup by DietPi-Config.\nSimply run: dietpi-config and select the Networking Options: NAS/Misc menu" > /mnt/ftp_client/readme.txt
-echo -e "NFS client can be installed and setup by DietPi-Config.\nSimply run: dietpi-config and select the Networking Options: NAS/Misc menu" > /mnt/nfs_client/readme.txt
+echo -e "Samba client can be installed and setup by DietPi-Config.\nSimply run: dietpi-config and select the Networking WHIP_OPTIONs: NAS/Misc menu" > /mnt/samba/readme.txt
+echo -e "FTP client mount can be installed and setup by DietPi-Config.\nSimply run: dietpi-config and select the Networking WHIP_OPTIONs: NAS/Misc menu" > /mnt/ftp_client/readme.txt
+echo -e "NFS client can be installed and setup by DietPi-Config.\nSimply run: dietpi-config and select the Networking WHIP_OPTIONs: NAS/Misc menu" > /mnt/nfs_client/readme.txt
 
 /boot/dietpi/dietpi-logclear 2
 
@@ -334,7 +696,7 @@ rm /etc/init.d/ntp &> /dev/null
 #Apt
 # - Force use existing installed configs if available, else install new. Also disables end user prompt from dpkg
 cat << _EOF_ > /etc/apt/apt.conf.d/local
-Dpkg::Options {
+Dpkg::WHIP_OPTIONs {
    "--force-confdef";
    "--force-confold";
 }
@@ -452,9 +814,9 @@ _EOF_
 sed -i "/FORCE=/c\FORCE=force" /etc/default/fake-hwclock
 
 #wifi dongles | move to dietpi-set_hardware wifi
-# echo -e "options 8192cu rtw_power_mgnt=0" > /etc/modprobe.d/8192cu.conf
-# echo -e "options 8188eu rtw_power_mgnt=0" > /etc/modprobe.d/8188eu.conf
-# echo -e "options 8189es rtw_power_mgnt=0" > /etc/modprobe.d/8189es.conf
+# echo -e "WHIP_OPTIONs 8192cu rtw_power_mgnt=0" > /etc/modprobe.d/8192cu.conf
+# echo -e "WHIP_OPTIONs 8188eu rtw_power_mgnt=0" > /etc/modprobe.d/8188eu.conf
+# echo -e "WHIP_OPTIONs 8189es rtw_power_mgnt=0" > /etc/modprobe.d/8189es.conf
 
 
 #Set swapfile size
@@ -551,11 +913,11 @@ _EOF_
 cat << _EOF_ > /etc/modprobe.d/blacklist-nouveau.conf
 blacklist nouveau
 blacklist lbm-nouveau
-options nouveau modeset=0
+WHIP_OPTIONs nouveau modeset=0
 alias nouveau off
 alias lbm-nouveau off
 _EOF_
-echo -e "options nouveau modeset=0" > /etc/modprobe.d/nouveau-kms.conf
+echo -e "WHIP_OPTIONs nouveau modeset=0" > /etc/modprobe.d/nouveau-kms.conf
 update-initramfs -u
 #???
 
