@@ -417,7 +417,6 @@ aPACKAGES_REQUIRED_INSTALL=(
 	'dbus'
 	'dc'
 	'debconf'
-	'debconf-utils'
 	'debian-archive-keyring'
 	'debianutils'
 	'diffutils'
@@ -472,11 +471,8 @@ aPACKAGES_REQUIRED_INSTALL=(
 	'ncurses-base'
 	'ncurses-bin'
 	'net-tools'
-	'netbase'
-	'nfacct'
 	'ntfs-3g'
 	'ntp'
-	'openssl'
 	'p7zip-full'
 	'parted'
 	'passwd'
@@ -485,7 +481,6 @@ aPACKAGES_REQUIRED_INSTALL=(
 	'psmisc'
 	'readline-common'
 	'resolvconf'
-	'rsync'
 	'sed'
 	'sensible-utils'
 	'startpar'
@@ -506,13 +501,11 @@ aPACKAGES_REQUIRED_INSTALL=(
 	'wireless-tools'
 	'wpasupplicant'
 	'wput'
-	'xkb-data'
-	'xz-utils'
 	'zip'
 
 )
 
-#List of packages we should never remove (eg: HW specific kernels, uboot etc):
+# - List of packages we should never remove (eg: HW specific kernels, uboot etc):
 aPACKAGES_AVOID_REMOVAL=(
 
 	#General
@@ -521,14 +514,15 @@ aPACKAGES_AVOID_REMOVAL=(
 	'linux-image-' 				#Odroid/x86_64 kernel
 	'linux-base'
 	'busybox'
+	'grub-'						#x86_64
 	'uboot' 					#Odroid
 	'u-boot' 					#Odroid
 	'u-boot-tools' 				#Odroid
 	'rfkill'					#Used by some onboard WiFi adapters
+	'rsync'						#DietPi-Backup
 
 	#Firmware
-	'firmware-linux-nonfree' 	#x86 AMD/INTEL bundle
-	'firmware-misc-nonfree'
+	'firmware-'
 
 	#Keys
 	'deb-multimedia-keyring'
@@ -550,6 +544,17 @@ INSTALL_PACKAGES=''
 REMOVE_PACKAGES=''
 
 ###############
+dietpi-notify 0 "Generating list of minimal packages required for DietPi installation"
+
+for ((i=0; i<${#aPACKAGES_REQUIRED_INSTALL[@]}; i++))
+do
+
+	#	One line INSTALL_PACKAGES so we can use it later.
+	INSTALL_PACKAGES+="${aPACKAGES_REQUIRED_INSTALL[$i]} "
+
+done
+
+###############
 dietpi-notify 0 "Obtaining list of currently installed packages"
 
 dpkg --get-selections | awk '{print $1}' > /tmp/current_installed_packages
@@ -561,9 +566,6 @@ dietpi-notify 0 "Generating a list of deps, required for the DietPi packages\nTh
 
 for ((i=0; i<${#aPACKAGES_REQUIRED_INSTALL[@]}; i++))
 do
-
-	#	One line INSTALL_PACKAGES so we can use it later.
-	INSTALL_PACKAGES+="${aPACKAGES_REQUIRED_INSTALL[$i]}"
 
 	#	Add deps (ignoring libs and <>)
 	echo -e "Checking deps: ${aPACKAGES_REQUIRED_INSTALL[$i]}"
@@ -578,11 +580,10 @@ do
 		do
 
 			PACKAGE_ENTRY_EXISTS=0
-			for ((j=0; j<${#aPACKAGES_REQUIRED_INSTALL[@]}; j++))
+			for ((j=0; j<${#aPACKAGES_REQUIRED_DEPS[@]}; j++))
 			do
 
-				if [[ $line == "${aPACKAGES_REQUIRED_INSTALL[$j]}"* ]]; then
-
+				if [[ $line == "${aPACKAGES_REQUIRED_DEPS[$j]}"* ]]; then
 
 					PACKAGE_ENTRY_EXISTS=1
 					break
@@ -669,7 +670,7 @@ do
 done < /tmp/current_installed_packages
 rm /tmp/current_installed_packages
 
-echo -e "$REMOVE_PACKAGES"
+dietpi-notify 2 "The following packages will be removed\n$REMOVE_PACKAGES"
 
 
 #Set aPACKAGES_REQUIRED_INSTALL to apt-mark manual?
@@ -722,61 +723,6 @@ exit
 
 
 
-
-###############
-dietpi-notify 0 "Removing Core APT packages not required by DietPi"
-
-AGP libpython* xmms2-client-* pulseaudio* jq xxd iperf3 gdisk gpsd ppp libboost-iostreams* sgml-base xml-core usb-modeswitch* libpng* cpp-* cpp ntpdate bluez bluetooth rsync dialog dhcpcd5 lua5.1 netcat-* make makedev ncdu plymouth openresolv shared-mime-in* tcpd strace tasksel* wireless-* xdg-user-dirs triggerhappy python* v4l-utils traceroute xz-utils ucf xauth zlib1g-dev xml-core aptitude* avahi-daemon rsyslog logrotate man-db manpages vim vim-common vim-runtime vim-tiny mc mc-data
-Error_Check
-
-###############
-dietpi-notify 0 "Removing webserver APT packages not required by DietPi"
-
-AGP apache2* lighttpd* nginx* php-* php7.0-* mysql-* mariadb-*
-Error_Check
-
-###############
-dietpi-notify 0 "Removing Desktop related APT packages not required by DietPi"
-
-AGP gnome-* mate-* lxde lxde-* lxmenu-* libwayland* dictionaries-* libgtk* x11-* zenity* yelp-* fonts-*
-Error_Check
-
-###############
-dietpi-notify 0 "Removing Misc (Stage 1) APT packages not required by DietPi"
-
-AGP libpod-* libpeas-* isc-dhcp-server eject dnsmasq* dns-root-data colord-data libjasper* libjson* libwbclient* golang-* libavahi* libtext* libweb* libpcsclite1 libxau6* libxc* miscfiles minicom lrzsz
-Error_Check
-
-###############
-dietpi-notify 0 "Removing Misc (Stage 2) APT packages not required by DietPi"
-
-AGP nodejs memtester expect tcl-expect toilet toilet-fonts w-scan vlan weather-util* sysbench stress cmake cmake-data device-tree-co* fping hddtemp haveged hostapd i2c-tools iperf ir-keytable libasound2* libmtp* libusb-dev lirc lsof ncurses-term pkg-config unicode-data rfkill pv mtp-tools m4 screen alsa-utils autotools-dev bind9-host btrfs-tools bridge-utils cpufrequtils dvb-apps dtv-scan-table* evtest f3 figlet gcc gcc-4.8-* git git-man ifenslave
-Error_Check
-
-###############
-dietpi-notify 0 "Removing Dev APT packages not required by DietPi"
-
-AGP '\-dev$' linux-headers*
-Error_Check
-
-# - Hardware specific
-if (( $HW_MODEL == 71 )); then
-
-	###############
-	dietpi-notify 0 "Removing BBB APT packages not required by DietPi"
-
-	AGP roboticscape ardupilot-* ti-* bonescript libapr1
-	Error_Check
-
-elif (( $HW_MODEL < 10 )); then
-
-	###############
-	dietpi-notify 0 "Removing RPi APT packages not required by DietPi"
-
-	AGP rpi-update libraspberrypi-doc gcc-4.6-base gcc-4.7-base gcc-4.8-base libsigc++-1.2-5c2
-	Error_Check
-
-fi
 
 
 ###############
