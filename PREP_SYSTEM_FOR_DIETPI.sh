@@ -44,55 +44,6 @@ Check_Connection(){
 
 }
 
-Error_Check(){
-
-	#Grab exit code in case of failure
-	exit_code=$?
-	if (( $exit_code != 0 )); then
-
-		dietpi-notify 1 "($exit_code): Script aborted"
-		exit $exit_code
-
-	else
-
-		dietpi-notify 2 "($exit_code): Passed"
-	fi
-
-}
-
-#Apt-get
-AGI(){
-
-	local string="$@"
-
-	local force_WHIP_OPTIONs='--force-yes'
-
-	if (( $DISTRO >= 4 )); then
-
-		force_WHIP_OPTIONs='--allow-downgrades --allow-remove-essential --allow-change-held-packages --allow-unauthenticated'
-
-	fi
-
-	DEBIAN_FRONTEND=noninteractive $(which apt) install -y $force_WHIP_OPTIONs $string
-
-}
-
-AGP(){
-
-	local string="$@"
-	if (( $DISTRO >= 4 )); then
-
-		string+=' --allow-change-held-packages'
-
-	fi
-
-	#DEBUG: Dry run for testing
-	string+=' --dry-run'
-
-	$(which apt) purge -y $string
-
-}
-
 #DietPi-Notify:
 dietpi-notify(){
 
@@ -185,6 +136,55 @@ dietpi-notify(){
 	#-----------------------------------------------------------------------------------
 }
 
+Error_Check(){
+
+	#Grab exit code in case of failure
+	exit_code=$?
+	if (( $exit_code != 0 )); then
+
+		dietpi-notify 1 "($exit_code): Script aborted"
+		exit $exit_code
+
+	else
+
+		dietpi-notify 2 "($exit_code): Passed"
+	fi
+
+}
+
+#Apt-get
+AGI(){
+
+	local string="$@"
+
+	local force_WHIP_OPTIONs='--force-yes'
+
+	if (( $DISTRO >= 4 )); then
+
+		force_WHIP_OPTIONs='--allow-downgrades --allow-remove-essential --allow-change-held-packages --allow-unauthenticated'
+
+	fi
+
+	DEBIAN_FRONTEND=noninteractive $(which apt) install -y $force_WHIP_OPTIONs $string
+
+}
+
+AGP(){
+
+	local string="$@"
+	if (( $DISTRO >= 4 )); then
+
+		string+=' --allow-change-held-packages'
+
+	fi
+
+	#DEBUG: Dry run for testing
+	string+=' --dry-run'
+
+	$(which apt) purge -y $string
+
+}
+
 #Whiptail
 WHIP_BACKTITLE='DietPi-Prep'
 WHIP_TITLE=0
@@ -196,7 +196,7 @@ WHIP_OPTION=0
 WHIP_CHOICE=0
 Run_Whiptail(){
 
-	WHIP_OPTION=$(whiptail --title "$WHIP_TITLE" --menu "$WHIP_DESC" --default-item "$WHIP_DEFAULT_ITEM" --backtitle "$WHIP_BACKTITLE" 30 80 20 "${WHIP_MENU_ARRAY[@]}" 3>&1 1>&2 2>&3)
+	WHIP_OPTION=$(whiptail --title "$WHIP_TITLE" --menu "$WHIP_DESC" --default-item "$WHIP_DEFAULT_ITEM" --backtitle "$WHIP_BACKTITLE" 22 80 16 "${WHIP_MENU_ARRAY[@]}" 3>&1 1>&2 2>&3)
 	WHIP_CHOICE=$?
 	if (( $WHIP_CHOICE == 0 )); then
 
@@ -223,13 +223,14 @@ Run_Whiptail(){
 #------------------------------------------------------------------------------------------------
 #------------------------------------------------------------------------------------------------
 
+AVOIDRUN(){
 
 #------------------------------------------------------------------------------------------------
 #Step 1: Initial Critical Prep
 #------------------------------------------------------------------------------------------------
 
 ###############
-dietpi-notify 0 'Updating Apt and installing initial core packages'
+dietpi-notify 0 'Updating APT'
 
 apt-get clean
 Error_Check
@@ -238,7 +239,7 @@ apt-get update
 Error_Check
 
 ###############
-dietpi-notify 0 'Installing Core Packages'
+dietpi-notify 0 'Installing core packages, required for this script to function'
 AGI wget unzip whiptail
 Error_Check
 
@@ -349,11 +350,11 @@ dietpi-notify 0 "Setting APT sources.list: $DISTRO_NAME $DISTRO"
 if (( $HW_MODEL < 10 )); then
 
 	cat << _EOF_ > /etc/apt/sources.list
-deb https://www.mirrorservice.org/sites/archive.raspbian.org/raspbian $DISTRO main contrib non-free rpi
+deb https://www.mirrorservice.org/sites/archive.raspbian.org/raspbian $DISTRO_NAME main contrib non-free rpi
 _EOF_
 
 	cat << _EOF_ > /etc/apt/sources.list.d/raspi.list
-deb https://archive.raspberrypi.org/debian/ $DISTRO main ui
+deb https://archive.raspberrypi.org/debian/ $DISTRO_NAME main ui
 _EOF_
 
 else
@@ -379,9 +380,348 @@ Error_Check
 apt-get update
 Error_Check
 
+}
+
 #------------------------------------------------------------------------------------------------
 #Step 4: APT removals
 #------------------------------------------------------------------------------------------------
+# - DietPi list of minimal required packages which must be installed:
+#	dpkg --get-selections | awk '{print $1}' | sed 's/:armhf//g' | sed "s/^/'/g" | sed "s/$/'/g"
+
+aPACKAGES_REQUIRED_INSTALL=(
+
+	'acl'
+	'adduser'
+	'apt'
+	'apt-transport-https'
+	'apt-utils'
+	'base-files'
+	'base-passwd'
+	'bash'
+	'bash-completion'
+	'bc'
+	'bsdmainutils'
+	'bsdutils'
+	'bzip2'
+	'ca-certificates'
+	'console-common'
+	'console-data'
+	'console-setup'
+	'console-setup-linux'
+	'coreutils'
+	'cpio'
+	'crda'
+	'cron'
+	'curl'
+	'dash'
+	'dbus'
+	'dc'
+	'debconf'
+	'debconf-utils'
+	'debian-archive-keyring'
+	'debianutils'
+	'diffutils'
+	'dmidecode'
+	'dmsetup'
+	'dosfstools'
+	'dphys-swapfile'
+	'dpkg'
+	'e2fslibs'
+	'e2fsprogs'
+	'ethtool'
+	'fake-hwclock'
+	'fbset'
+	'findutils'
+	'firmware-atheros'
+	'firmware-brcm80211'
+	'firmware-ralink'
+	'firmware-realtek'
+	'fuse'
+	'gnupg'
+	'gpgv'
+	'grep'
+	'groff-base'
+	'gzip'
+	'hdparm'
+	'hfsplus'
+	'hostname'
+	'htop'
+	'ifupdown'
+	'init'
+	'init-system-helpers'
+	'initramfs-tools'
+	'initscripts'
+	'insserv'
+	'iproute2'
+	'iputils-ping'
+	'isc-dhcp-client'
+	'isc-dhcp-common'
+	'iw'
+	'kbd'
+	'keyboard-configuration'
+	'klibc-utils'
+	'kmod'
+	'less'
+	'locales'
+	'login'
+	'lsb-base'
+	'mawk'
+	'mount'
+	'multiarch-support'
+	'nano'
+	'ncurses-base'
+	'ncurses-bin'
+	'net-tools'
+	'netbase'
+	'nfacct'
+	'ntfs-3g'
+	'ntp'
+	'openssl'
+	'p7zip-full'
+	'parted'
+	'passwd'
+	'perl-base'
+	'procps'
+	'psmisc'
+	'readline-common'
+	'resolvconf'
+	'rsync'
+	'sed'
+	'sensible-utils'
+	'startpar'
+	'sudo'
+	'systemd'
+	'systemd-sysv'
+	'sysv-rc'
+	'sysvinit-utils'
+	'tar'
+	'tzdata'
+	'udev'
+	'unzip'
+	'usbutils'
+	'util-linux'
+	'wget'
+	'whiptail'
+	'wireless-regdb'
+	'wireless-tools'
+	'wpasupplicant'
+	'wput'
+	'xkb-data'
+	'xz-utils'
+	'zip'
+
+)
+
+#List of packages we should never remove (eg: HW specific kernels, uboot etc):
+aPACKAGES_AVOID_REMOVAL=(
+
+	#General
+	'lib'						#Libs
+	'gcc-'
+	'linux-image-' 				#Odroid/x86_64 kernel
+	'linux-base'
+	'busybox'
+	'uboot' 					#Odroid
+	'u-boot' 					#Odroid
+	'u-boot-tools' 				#Odroid
+	'rfkill'					#Used by some onboard WiFi adapters
+
+	#Firmware
+	'firmware-linux-nonfree' 	#x86 AMD/INTEL bundle
+	'firmware-misc-nonfree'
+
+	#Keys
+	'deb-multimedia-keyring'
+
+	#RPi
+	'libraspberrypi-bin'
+	'libraspberrypi0'
+	'raspberrypi-bootloader'
+	'raspberrypi-kernel'
+	'raspberrypi-sys-mods'
+	'raspbian-archive-keyring'
+	'raspi-copies-and-fills'
+
+)
+
+aPACKAGES_REQUIRED_DEPS=()
+
+INSTALL_PACKAGES=''
+REMOVE_PACKAGES=''
+
+###############
+dietpi-notify 0 "Obtaining list of currently installed packages"
+
+dpkg --get-selections | awk '{print $1}' > /tmp/current_installed_packages
+Error_Check
+
+
+###############
+dietpi-notify 0 "Generating a list of deps, required for the DietPi packages\nThis may take some time, please wait..."
+
+for ((i=0; i<${#aPACKAGES_REQUIRED_INSTALL[@]}; i++))
+do
+
+	#	One line INSTALL_PACKAGES so we can use it later.
+	INSTALL_PACKAGES+="${aPACKAGES_REQUIRED_INSTALL[$i]}"
+
+	#	Add deps (ignoring libs and <>)
+	echo -e "Checking deps: ${aPACKAGES_REQUIRED_INSTALL[$i]}"
+	#dietpi-notify 2 "Checking deps for ${aPACKAGES_REQUIRED_INSTALL[$i]}" # RESULTS IN $i fixated on 3
+
+	VALUE=$(apt-cache depends ${aPACKAGES_REQUIRED_INSTALL[$i]} | grep 'Depends' | awk '{print $2}' | sed '/^lib/d' | sed '/</d')
+
+	if [ -n "$VALUE" ]; then
+
+		#	Read lines of $VALUE and only add to $aPACKAGES_REQUIRED_DEPS if does not already exist.
+		while read line
+		do
+
+			PACKAGE_ENTRY_EXISTS=0
+			for ((j=0; j<${#aPACKAGES_REQUIRED_INSTALL[@]}; j++))
+			do
+
+				if [[ $line == "${aPACKAGES_REQUIRED_INSTALL[$j]}"* ]]; then
+
+
+					PACKAGE_ENTRY_EXISTS=1
+					break
+
+				fi
+
+			done
+
+			if (( ! $PACKAGE_ENTRY_EXISTS )); then
+
+				echo -e "Adding deps: $line"
+				aPACKAGES_REQUIRED_DEPS+=("$line")
+
+			fi
+
+		done <<< "$VALUE"
+
+	fi
+
+done
+
+
+###############
+dietpi-notify 0 "Generating a list of packages, not required by DietPi, to be removed from system.\nThis may take some time, please wait..."
+
+# - Work out from the arrays, which packages to remove
+while read line
+do
+
+	PACKAGE_FLAGGED_FOR_REMOVE=1
+
+	#	Find matching packages and skip to the next
+	for ((i=0; i<${#aPACKAGES_REQUIRED_INSTALL[@]}; i++))
+	do
+
+		if [[ $line == "${aPACKAGES_REQUIRED_INSTALL[$i]}"* ]]; then
+
+			PACKAGE_FLAGGED_FOR_REMOVE=0
+			break
+
+		fi
+
+	done
+
+	if (( $PACKAGE_FLAGGED_FOR_REMOVE )); then 	#No need to check again. Double nested loop with GOTO in BASH? maybe not :)
+
+		for ((i=0; i<${#aPACKAGES_AVOID_REMOVAL[@]}; i++))
+		do
+
+			if [[ $line == "${aPACKAGES_AVOID_REMOVAL[$i]}"* ]]; then
+
+				PACKAGE_FLAGGED_FOR_REMOVE=0
+				break
+
+			fi
+
+		done
+
+	fi
+
+	if (( $PACKAGE_FLAGGED_FOR_REMOVE )); then 	#No need to check again. Double nested loop with GOTO in BASH? maybe not :)
+
+		for ((i=0; i<${#aPACKAGES_REQUIRED_DEPS[@]}; i++))
+		do
+
+			if [[ $line == "${aPACKAGES_REQUIRED_DEPS[$i]}"* ]]; then
+
+				PACKAGE_FLAGGED_FOR_REMOVE=0
+				break
+
+			fi
+
+		done
+
+	fi
+
+	#	Flag package for removal
+	if (( $PACKAGE_FLAGGED_FOR_REMOVE )); then
+
+		REMOVE_PACKAGES+="$line "
+
+	fi
+
+done < /tmp/current_installed_packages
+rm /tmp/current_installed_packages
+
+echo -e "$REMOVE_PACKAGES"
+
+
+#Set aPACKAGES_REQUIRED_INSTALL to apt-mark manual?
+
+unset aPACKAGES_REQUIRED_INSTALL
+unset aPACKAGES_AVOID_REMOVAL
+unset aPACKAGES_REQUIRED_DEPS
+
+
+exit
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 ###############
 dietpi-notify 0 "Removing Core APT packages not required by DietPi"
@@ -392,14 +732,13 @@ Error_Check
 ###############
 dietpi-notify 0 "Removing webserver APT packages not required by DietPi"
 
-#TD: Add php here
-AGP apache2* lighttpd* nginx*
+AGP apache2* lighttpd* nginx* php-* php7.0-* mysql-* mariadb-*
 Error_Check
 
 ###############
 dietpi-notify 0 "Removing Desktop related APT packages not required by DietPi"
 
-AGP gnome-* mate-* lxde lxde-* lxmenu-* fonts-dejavu* libwayland* dictionaries-* libgtk* x11-* zenity* yelp-* fonts-*
+AGP gnome-* mate-* lxde lxde-* lxmenu-* libwayland* dictionaries-* libgtk* x11-* zenity* yelp-* fonts-*
 Error_Check
 
 ###############
@@ -413,12 +752,6 @@ dietpi-notify 0 "Removing Misc (Stage 2) APT packages not required by DietPi"
 
 AGP nodejs memtester expect tcl-expect toilet toilet-fonts w-scan vlan weather-util* sysbench stress cmake cmake-data device-tree-co* fping hddtemp haveged hostapd i2c-tools iperf ir-keytable libasound2* libmtp* libusb-dev lirc lsof ncurses-term pkg-config unicode-data rfkill pv mtp-tools m4 screen alsa-utils autotools-dev bind9-host btrfs-tools bridge-utils cpufrequtils dvb-apps dtv-scan-table* evtest f3 figlet gcc gcc-4.8-* git git-man ifenslave
 Error_Check
-
-###############
-dietpi-notify 0 "Removing Fonts/Icons not Required by DietPi"
-
-rm -R /usr/share/fonts/*
-rm -R /usr/share/icons/*
 
 ###############
 dietpi-notify 0 "Removing Dev APT packages not required by DietPi"
@@ -453,14 +786,34 @@ apt-get autoremove --purge -y
 Error_Check
 
 
+#------------------------------------------------------------------------------------------------
+#Step 5: APT Installations
+#------------------------------------------------------------------------------------------------
+###############
+dietpi-notify 0 "Forcing use of existing apt configs if available"
 
+cat << _EOF_ > /etc/apt/apt.conf.d/local
+Dpkg::options {
+   "--force-confdef";
+   "--force-confold";
+}
+_EOF_
+Error_Check
 
+###############
+dietpi-notify 0 "Upgrading existing APT installed packages to latest"
 
+DEBIAN_FRONTEND='noninteractive' apt-get dist-upgrade -y
+Error_Check
 
+if (( $HW_MODEL == 43 )); then
 
-#??? ROCK64, reinstall kernel packages:
-# apt-get install linux-rock64-package
-#???
+	###############
+	dietpi-notify 0 "Reinstalling linux-rock64-package"
+	AGI linux-rock64-package
+	Error_Check
+
+fi
 
 #???: WHIP_OPTIONal Reinstall OpenSSH (for updating dietpi scripts etc). Gets removed during finalise.
 # apt-get install openssh-server -y
@@ -469,113 +822,264 @@ Error_Check
 #???
 
 
-exit
+###############
+dietpi-notify 0 "Disabling swapfile generation for dphys-swapfile during install"
 
-
-
-
-
-
-
-
-#------------------------------------------------------------------------------------------------
-#Packages
-#------------------------------------------------------------------------------------------------
-
-
-
-
-#install packages
-apt-get dist-upgrade -y
 echo -e "CONF_SWAPSIZE=0" > /etc/dphys-swapfile
-apt-get install -y gnupg net-tools cron rfkill ca-certificates locales apt-transport-https ethtool p7zip-full hfsplus iw debconf-utils xz-utils fbset wpasupplicant resolvconf bc dbus bzip2 psmisc bash-completion cron whiptail sudo ntp ntfs-3g dosfstools parted hdparm usbutils zip htop wput wget fake-hwclock dphys-swapfile curl unzip console-setup console-data console-common keyboard-configuration wireless-tools wireless-regdb crda --no-install-recommends
+Error_Check
 
 
-#??? Grub/intel+amd microcode firmware x86_64 native
-#	MBR
-apt-get install -y grub2
-#	UEFI
-apt-get install -y grub-common grub-efi-amd64 grub-efi-amd64-bin grub2-common
-#???
+###############
+dietpi-notify 0 "Installing core DietPi pre-req APT packages"
 
-#??? bluetooth if onboard device / RPI
-apt-get install -y bluetooth bluez-firmware
-#???
+AGI gnupg net-tools cron rfkill ca-certificates locales apt-transport-https ethtool p7zip-full hfsplus iw debconf-utils xz-utils fbset wpasupplicant resolvconf bc dbus bzip2 psmisc bash-completion cron whiptail sudo ntp ntfs-3g dosfstools parted hdparm usbutils zip htop wput wget fake-hwclock dphys-swapfile curl unzip console-setup console-data console-common keyboard-configuration wireless-tools wireless-regdb crda --no-install-recommends
+Error_Check
 
-#??? RPi - bluetooth/firmware for all RPi's
-apt-get install -y pi-bluetooth libraspberrypi-bin
-#???
+# - HW specific
+if (( $HW_MODEL == 21 )); then
 
-#??? x86 images only: firmware
-apt-get install -y firmware-linux-nonfree firmware-realtek firmware-ralink firmware-brcm80211 firmware-atheros --no-install-recommends
-#???
+	###############
+	dietpi-notify 0 "Installing Grub"
+
+	#	MBR
+	# AGI grub2
+
+	#	UEFI
+	AGI grub-common grub-efi-amd64 grub-efi-amd64-bin grub2-common
+	Error_Check
+
+fi
+
+WHIP_TITLE='Onboard Bluetooth'
+WHIP_DESC='Please select an option'
+WHIP_DEFAULT_ITEM=0
+WHIP_MENU_ARRAY=(
+	'0' 'Select if this device does NOT have onboard Bluetooth'
+	'1' 'Select if this device DOES have onboard Bluetooth'
+)
+
+Run_Whiptail
+if (( $WHIP_RETURN_VALUE == 1 )); then
+
+	###############
+	dietpi-notify 0 "Installing Bluetooth packages"
+
+	AGI bluetooth bluez-firmware
+	Error_Check
+
+fi
+
+if (( $HW_MODEL < 10 )); then
+
+	###############
+	dietpi-notify 0 "Installing Bluetooth packages specific to RPi"
+
+	AGI pi-bluetooth libraspberrypi-bin
+	Error_Check
+
+fi
+
+if (( $HW_MODEL < 10 )); then
+
+	###############
+	dietpi-notify 0 "Installing firmware packages"
+
+	AGI firmware-linux-nonfree firmware-realtek firmware-ralink firmware-brcm80211 firmware-atheros --no-install-recommends
+	Error_Check
+
+fi
 
 #------------------------------------------------------------------------------------------------
-#DIETPI STUFF
+#Step 6: Download DietPi sourcecode
 #------------------------------------------------------------------------------------------------
-chmod +x -R /boot
+###############
+INTERNET_ADDRESS='https://github.com/Fourdee/DietPi/archive/testing.zip' #NB: testing until this is stable in master
+dietpi-notify 0 "Checking connection to $INTERNET_ADDRESS"
+Check_Connection "$INTERNET_ADDRESS"
+Error_Check
 
-#Delete any non-root user (eg: pi)
-userdel -f pi
-userdel -f test #armbian
-userdel -f odroid
-userdel -f rock64
-userdel -f linaro #ASUS TB
-userdel -f dietpi
-userdel -f debian #BBB
 
-#Remove folders (now in finalise script)
+###############
+dietpi-notify 0 "Downloading DietPi sourcecode"
 
-#+Remove files
+wget "$INTERNET_ADDRESS" -O package.zip
+Error_Check
+
+
+###############
+dietpi-notify 0 "Extracting DietPi sourcecode"
+
+unzip package.zip
+Error_Check
+
+rm package.zip
+
+
+###############
+dietpi-notify 0 "Removing files not required"
+
+#	Remove files we do not require, or want to overwrite in /boot
+rm DietPi-*/CHANGELOG.txt
+rm DietPi-*/PREP_SYSTEM_FOR_DIETPI.sh
+rm DietPi-*/TESTING-BRANCH.md
+rm DietPi-*/uEnv.txt # Pine 64, use existing on system.
+
+
+###############
+dietpi-notify 0 "Creating /boot"
+
+mkdir -p /boot
+Error_Check
+
+
+###############
+dietpi-notify 0 "Moving to /boot"
+
+# - HW specific boot.ini uenv.txt
+if (( $HW_MODEL == 10 )); then
+
+	mv DietPi-*/boot_c1.ini /boot/boot.ini
+	Error_Check
+
+fi
+
+if (( $HW_MODEL == 11 )); then
+
+	mv DietPi-*/boot_xu4.ini /boot/boot.ini
+	Error_Check
+
+fi
+
+if (( $HW_MODEL == 12 )); then
+
+	mv DietPi-*/boot_c2.ini /boot/boot.ini
+	Error_Check
+
+fi
+
+rm DietPi-*/*.ini
+
+cp -R DietPi-*/* /boot/
+Error_Check
+
+
+###############
+dietpi-notify 0 "Cleaning up extracted files"
+
+rm -R DietPi-*
+Error_Check
+
+
+###############
+dietpi-notify 0 "Setting execute permissions for /boot/dietpi"
+
+chmod +x -R /boot/dietpi
+Error_Check
+
+#------------------------------------------------------------------------------------------------
+#Step 7: Prep DietPi ENV
+#------------------------------------------------------------------------------------------------
+###############
+dietpi-notify 0 "Prep system for DietPi ENV"
+
+
+###############
+dietpi-notify 0 "Deleting list of known users, not required by DietPi"
+
+userdel -f pi &> /dev/null
+userdel -f test &> /dev/null #armbian
+userdel -f odroid &> /dev/null
+userdel -f rock64 &> /dev/null
+userdel -f linaro &> /dev/null #ASUS TB
+userdel -f dietpi &> /dev/null
+userdel -f debian &> /dev/null #BBB
+
+###############
+dietpi-notify 0 "Removing misc files/folders, not required by DietPi"
+
+rm -R /home &> /dev/null
+rm -R /media &> /dev/null
+
+rm -R /usr/share/fonts/* &> /dev/null
+rm -R /usr/share/icons/* &> /dev/null
+
 #rm /etc/apt/sources.list.d/armbian.list
-rm /etc/init.d/resize2fs
-rm /etc/update-motd.d/* # ARMbian
+rm /etc/init.d/resize2fs &> /dev/null
+rm /etc/update-motd.d/* &> /dev/null # ARMbian
 
-systemctl disable firstrun
-rm /etc/init.d/firstrun # ARMbian
+systemctl disable firstrun  &> /dev/null
+rm /etc/init.d/firstrun  &> /dev/null # ARMbian
 
-#	Disable ARMbian's log2ram: https://github.com/Fourdee/DietPi/issues/781
-systemctl disable log2ram.service
-systemctl stop log2ram.service
-rm /usr/local/sbin/log2ram
-rm /etc/systemd/system/log2ram.service
-systemctl daemon-reload
-rm /etc/cron.hourly/log2ram
+# - Disable ARMbian's log2ram: https://github.com/Fourdee/DietPi/issues/781
+systemctl disable log2ram.service &> /dev/null
+systemctl stop log2ram.service &> /dev/null
+rm /usr/local/sbin/log2ram &> /dev/null
+rm /etc/systemd/system/log2ram.service &> /dev/null
+systemctl daemon-reload &> /dev/null
+rm /etc/cron.hourly/log2ram &> /dev/null
 
-rm /etc/init.d/cpu_governor # Meveric
-rm /etc/systemd/system/cpu_governor.service # Meveric
+rm /etc/init.d/cpu_governor &> /dev/null# Meveric
+rm /etc/systemd/system/cpu_governor.service &> /dev/null# Meveric
 
-#	Disable ARMbian's resize service (not automatically removed by ARMbian scripts...)
-systemctl disable resize2fs
-rm /etc/systemd/system/resize2fs.service
+# -Disable ARMbian's resize service (not automatically removed by ARMbian scripts...)
+systemctl disable resize2fs &> /dev/null
+rm /etc/systemd/system/resize2fs.service &> /dev/null
 
-#	ARMbian-config
-rm /etc/profile.d/check_first_login_reboot.sh
+# -ARMbian-config
+rm /etc/profile.d/check_first_login_reboot.sh &> /dev/null
 
-#Set UID bit for sudo: https://github.com/Fourdee/DietPi/issues/794
+
+###############
+dietpi-notify 0 "Setting UID bit for sudo"
+
+# - https://github.com/Fourdee/DietPi/issues/794
 chmod 4755 /usr/bin/sudo
+Error_Check
 
-#Create DietPi common folders
+
+###############
+dietpi-notify 0 "Creating DietPi system directories"
+
+# - Create DietPi common folders
 mkdir /DietPi
+Error_Check
+
+mkdir -p /etc/dietpi
+Error_Check
 
 mkdir -p /mnt/dietpi_userdata
+Error_Check
 
 mkdir -p /mnt/samba
+Error_Check
+
 mkdir -p /mnt/ftp_client
+Error_Check
+
 mkdir -p /mnt/nfs_client
+Error_Check
+
 echo -e "Samba client can be installed and setup by DietPi-Config.\nSimply run: dietpi-config and select the Networking WHIP_OPTIONs: NAS/Misc menu" > /mnt/samba/readme.txt
 echo -e "FTP client mount can be installed and setup by DietPi-Config.\nSimply run: dietpi-config and select the Networking WHIP_OPTIONs: NAS/Misc menu" > /mnt/ftp_client/readme.txt
 echo -e "NFS client can be installed and setup by DietPi-Config.\nSimply run: dietpi-config and select the Networking WHIP_OPTIONs: NAS/Misc menu" > /mnt/nfs_client/readme.txt
 
+
+###############
+dietpi-notify 0 "Deleting all log files /var/log. Please ignore any errors, its fine :)"
+
 /boot/dietpi/dietpi-logclear 2
 
-#FSTAB
-cp /boot/dietpi/conf/fstab /etc/fstab
-systemctl daemon-reload
-mount -a
 
-#Setup DietPi services
-#	DietPi-Ramdisk
+###############
+dietpi-notify 0 "Generating DietPi /etc/fstab"
+
+/boot/dietpi/dietpi-drive_manager 4
+Error_Check
+
+
+###############
+dietpi-notify 0 "Installing and starting DietPi-RAMdisk service"
+
 cat << _EOF_ > /etc/systemd/system/dietpi-ramdisk.service
 [Unit]
 Description=DietPi-RAMdisk
@@ -594,6 +1098,11 @@ _EOF_
 systemctl enable dietpi-ramdisk.service
 systemctl daemon-reload
 systemctl start dietpi-ramdisk.service
+Error_Check
+
+
+###############
+dietpi-notify 0 "Installing and starting DietPi-RAMlog service"
 
 #	DietPi-Ramlog
 cat << _EOF_ > /etc/systemd/system/dietpi-ramlog.service
@@ -614,6 +1123,11 @@ _EOF_
 systemctl enable dietpi-ramlog.service
 systemctl daemon-reload
 systemctl start dietpi-ramlog.service
+Error_Check
+
+
+###############
+dietpi-notify 0 "Installing DietPi boot service"
 
 #	Boot
 cat << _EOF_ > /etc/systemd/system/dietpi-boot.service
@@ -634,10 +1148,13 @@ _EOF_
 systemctl enable dietpi-boot.service
 systemctl daemon-reload
 
-#	Remove rc.local from /etc/init.d
-update-rc.d -f rc.local remove
-rm /etc/init.d/rc.local
-rm /lib/systemd/system/rc-local.service
+
+###############
+dietpi-notify 0 "Installing DietPi /etc/rc.local service"
+
+update-rc.d -f rc.local remove &> /dev/null
+rm /etc/init.d/rc.local &> /dev/null
+rm /lib/systemd/system/rc-local.service &> /dev/null
 
 cat << _EOF_ > /etc/systemd/system/rc-local.service
 [Unit]
@@ -681,7 +1198,10 @@ _EOF_
 chmod +x /etc/rc.local
 systemctl daemon-reload
 
-#	Shutdown SSH/Dropbear before reboot
+
+###############
+dietpi-notify 0 "Installing kill-ssh-user-sessions-before-network.service"
+
 cat << _EOF_ > /etc/systemd/system/kill-ssh-user-sessions-before-network.service
 [Unit]
 Description=Shutdown all ssh sessions before network
@@ -699,13 +1219,23 @@ systemctl enable kill-ssh-user-sessions-before-network
 systemctl daemon-reload
 
 
+###############
+dietpi-notify 0 "Installing DietPi Cron jobs"
+
 #Cron jobs
 cp /DietPi/dietpi/conf/cron.daily_dietpi /etc/cron.daily/dietpi
+Error_Check
 chmod +x /etc/cron.daily/dietpi
+Error_Check
 cp /DietPi/dietpi/conf/cron.hourly_dietpi /etc/cron.hourly/dietpi
+Error_Check
 chmod +x /etc/cron.hourly/dietpi
+Error_Check
 
-#Crontab
+
+###############
+dietpi-notify 0 "Generating default crontab"
+
 cat << _EOF_ > /etc/crontab
 #Please use dietpi-cron to change cron start times
 SHELL=/bin/sh
@@ -717,19 +1247,22 @@ PATH=/usr/local/sbin:/usr/local/bin:/sbin:/bin:/usr/sbin:/usr/bin
 47 1    * * 7   root    test -x /usr/sbin/anacron || ( cd / && run-parts --report /etc/cron.weekly )
 52 1    1 * *   root    test -x /usr/sbin/anacron || ( cd / && run-parts --report /etc/cron.monthly )
 _EOF_
+Error_Check
+
+
+
+
+
+
+exit
+
+
+
+
 
 #ntp
 rm /etc/cron.daily/ntp &> /dev/null
 rm /etc/init.d/ntp &> /dev/null
-
-#Apt
-# - Force use existing installed configs if available, else install new. Also disables end user prompt from dpkg
-cat << _EOF_ > /etc/apt/apt.conf.d/local
-Dpkg::options {
-   "--force-confdef";
-   "--force-confold";
-}
-_EOF_
 
 #Disable automatic updates and management of apt cache. Prevents unexpected lock on Apt cache and therefore failed apt installations.
 systemctl mask apt-daily.service
