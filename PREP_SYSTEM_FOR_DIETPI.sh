@@ -35,6 +35,30 @@ fi
 DISTRO=4
 DISTRO_NAME='stretch'
 HW_MODEL=0
+HW_ARCH_DESCRIPTION=$(uname -m)
+if [ "$HW_ARCH_DESCRIPTION" = "armv6l" ]; then
+
+	HW_ARCH=1
+
+elif [ "$HW_ARCH_DESCRIPTION" = "armv7l" ]; then
+
+	HW_ARCH=2
+
+elif [ "$HW_ARCH_DESCRIPTION" = "aarch64" ]; then
+
+	HW_ARCH=3
+
+elif [ "$HW_ARCH_DESCRIPTION" = "x86_64" ]; then
+
+	HW_ARCH=10
+
+# - Unknown arch for DietPi, inform user by adding 'unknown'.
+else
+
+	echo -e "Unknown HW_ARCH $HW_ARCH_DESCRIPTION, aborting"
+	exit
+
+fi
 
 #Funcs
 INTERNET_ADDRESS=''
@@ -214,7 +238,6 @@ Run_Whiptail(){
 
 }
 
-
 #------------------------------------------------------------------------------------------------
 #------------------------------------------------------------------------------------------------
 #------------------------------------------------------------------------------------------------
@@ -297,7 +320,7 @@ Run_Whiptail
 HW_MODEL=$WHIP_RETURN_VALUE
 
 dietpi-notify 2 "Setting HW_MODEL index of: $HW_MODEL"
-
+dietpi-notify 2 "CPU ARCH = $HW_ARCH : $HW_ARCH_DESCRIPTION"
 
 #------------------------------------------------------------------------------------------------
 #Step 3: Distro Selection + APT prep
@@ -415,7 +438,6 @@ aPACKAGES_REQUIRED_INSTALL=(
 	'curl'
 	'dash'
 	'dbus'
-	'dc'
 	'debconf'
 	'debian-archive-keyring'
 	'debianutils'
@@ -487,7 +509,6 @@ aPACKAGES_REQUIRED_INSTALL=(
 	'sudo'
 	'systemd'
 	'systemd-sysv'
-	'sysv-rc'
 	'sysvinit-utils'
 	'tar'
 	'tzdata'
@@ -504,6 +525,15 @@ aPACKAGES_REQUIRED_INSTALL=(
 	'zip'
 
 )
+
+# - HW specific required packages
+if (( $HW_ARCH == 10 )); then
+
+	aPACKAGES_REQUIRED_INSTALL+=('intel-microcode')
+	aPACKAGES_REQUIRED_INSTALL+=('amd64-microcode')
+	aPACKAGES_REQUIRED_INSTALL+=('firmware-linux-nonfree')
+
+fi
 
 # - List of packages we should never remove (eg: HW specific kernels, uboot etc):
 aPACKAGES_AVOID_REMOVAL=(
@@ -538,8 +568,6 @@ aPACKAGES_AVOID_REMOVAL=(
 
 )
 
-aPACKAGES_REQUIRED_DEPS=()
-
 INSTALL_PACKAGES=''
 REMOVE_PACKAGES=''
 
@@ -564,6 +592,7 @@ Error_Check
 ###############
 dietpi-notify 0 "Generating a list of deps, required for the DietPi packages\nThis may take some time, please wait..."
 
+aPACKAGES_REQUIRED_DEPS=()
 for ((i=0; i<${#aPACKAGES_REQUIRED_INSTALL[@]}; i++))
 do
 
@@ -594,7 +623,7 @@ do
 
 			if (( ! $PACKAGE_ENTRY_EXISTS )); then
 
-				echo -e "Adding deps: $line"
+				echo -e " - Adding deps: $line"
 				aPACKAGES_REQUIRED_DEPS+=("$line")
 
 			fi
@@ -670,59 +699,21 @@ do
 done < /tmp/current_installed_packages
 rm /tmp/current_installed_packages
 
-dietpi-notify 2 "The following packages will be removed\n$REMOVE_PACKAGES"
-
-
 #Set aPACKAGES_REQUIRED_INSTALL to apt-mark manual?
 
+# - delete[]
 unset aPACKAGES_REQUIRED_INSTALL
 unset aPACKAGES_AVOID_REMOVAL
 unset aPACKAGES_REQUIRED_DEPS
 
-
-exit
-
+dietpi-notify 2 "The following packages will be removed\n$REMOVE_PACKAGES"
 
 
+###############
+dietpi-notify 0 "Removing packages"
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
+AGP $REMOVE_PACKAGES
+Error_Check
 
 
 ###############
@@ -778,23 +769,9 @@ Error_Check
 ###############
 dietpi-notify 0 "Installing core DietPi pre-req APT packages"
 
-AGI gnupg net-tools cron rfkill ca-certificates locales apt-transport-https ethtool p7zip-full hfsplus iw debconf-utils xz-utils fbset wpasupplicant resolvconf bc dbus bzip2 psmisc bash-completion cron whiptail sudo ntp ntfs-3g dosfstools parted hdparm usbutils zip htop wput wget fake-hwclock dphys-swapfile curl unzip console-setup console-data console-common keyboard-configuration wireless-tools wireless-regdb crda --no-install-recommends
+AGI $INSTALL_PACKAGES
 Error_Check
 
-# - HW specific
-if (( $HW_MODEL == 21 )); then
-
-	###############
-	dietpi-notify 0 "Installing Grub"
-
-	#	MBR
-	# AGI grub2
-
-	#	UEFI
-	AGI grub-common grub-efi-amd64 grub-efi-amd64-bin grub2-common
-	Error_Check
-
-fi
 
 WHIP_TITLE='Onboard Bluetooth'
 WHIP_DESC='Please select an option'
@@ -821,16 +798,6 @@ if (( $HW_MODEL < 10 )); then
 	dietpi-notify 0 "Installing Bluetooth packages specific to RPi"
 
 	AGI pi-bluetooth libraspberrypi-bin
-	Error_Check
-
-fi
-
-if (( $HW_MODEL < 10 )); then
-
-	###############
-	dietpi-notify 0 "Installing firmware packages"
-
-	AGI firmware-linux-nonfree firmware-realtek firmware-ralink firmware-brcm80211 firmware-atheros --no-install-recommends
 	Error_Check
 
 fi
