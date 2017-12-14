@@ -220,7 +220,7 @@ WHIP_OPTION=0
 WHIP_CHOICE=0
 Run_Whiptail(){
 
-	WHIP_OPTION=$(whiptail --title "$WHIP_TITLE" --menu "$WHIP_DESC" --default-item "$WHIP_DEFAULT_ITEM" --backtitle "$WHIP_BACKTITLE" 22 80 16 "${WHIP_MENU_ARRAY[@]}" 3>&1 1>&2 2>&3)
+	WHIP_OPTION=$(whiptail --title "$WHIP_TITLE" --menu "$WHIP_DESC" --default-item "$WHIP_DEFAULT_ITEM" --backtitle "$WHIP_BACKTITLE" 22 80 14 "${WHIP_MENU_ARRAY[@]}" 3>&1 1>&2 2>&3)
 	WHIP_CHOICE=$?
 	if (( $WHIP_CHOICE == 0 )); then
 
@@ -245,8 +245,6 @@ Run_Whiptail(){
 #------------------------------------------------------------------------------------------------
 #------------------------------------------------------------------------------------------------
 #------------------------------------------------------------------------------------------------
-
-AVOIDRUN(){
 
 #------------------------------------------------------------------------------------------------
 #Step 1: Initial Critical Prep
@@ -276,6 +274,7 @@ WHIP_TITLE='Hardware selection'
 WHIP_DESC='Please select the current device this is being installed on:'
 WHIP_DEFAULT_ITEM=0
 WHIP_MENU_ARRAY=(
+
 	'110' 'RoseapplePi'
 	'100' 'Asus Tinker Board'
 	'90' 'A20-OLinuXino-MICRO'
@@ -304,8 +303,8 @@ WHIP_MENU_ARRAY=(
 	'32' 'OrangePi Zero (H2+)'
 	'31' 'OrangePi One'
 	'30' 'OrangePi PC'
-	'21' 'x86_64 native (PC)'
-	'20' 'VM x64 (VMware VirtualBox)'
+	'21' 'x86_64 Native PC'
+	'20' 'x86_64 VMware/VirtualBox'
 	'13' 'oDroid U3'
 	'12' 'oDroid C2'
 	'11' 'oDroid XU3/4'
@@ -314,6 +313,7 @@ WHIP_MENU_ARRAY=(
 	'2' 'Raspberry Pi 2'
 	'1' 'Raspberry Pi 1/Zero (512mb)'
 	'0' 'Raspberry Pi 1 (256mb)'
+
 )
 
 Run_Whiptail
@@ -332,20 +332,17 @@ WHIP_TITLE='Distro Selection'
 WHIP_DESC='Please select a distro to install on this system. Selecting a distro that is older than the current installed on system, is not supported.'
 WHIP_DEFAULT_ITEM=4
 WHIP_MENU_ARRAY=(
-	'1' 'wheezy'
+
 	'3' 'jessie'
 	'4' 'stretch'
 	'5' 'buster'
+
 )
 
 Run_Whiptail
 DISTRO=$WHIP_RETURN_VALUE
 
-if (( $DISTRO == 1 )); then
-
-	DISTRO_NAME='wheezy'
-
-elif (( $DISTRO == 3 )); then
+if (( $DISTRO == 3 )); then
 
 	DISTRO_NAME='jessie'
 
@@ -394,6 +391,40 @@ Error_Check
 
 #NB: Apt mirror will get overwritten by: /DietPi/dietpi/func/dietpi-set_software apt-mirror default : during finalize.
 
+
+###############
+# - @MichaIng https://github.com/Fourdee/DietPi/pull/1266/files
+dietpi-notify 0 "Marking all packages as auto installed first, to allow allow effective autoremove afterwards"
+
+apt-mark auto $(apt-mark showmanual)
+Error_Check
+
+
+###############
+# - @MichaIng https://github.com/Fourdee/DietPi/pull/1266/files
+dietpi-notify 0 "Temporary disable automatic recommends/suggests installation and allow them to be autoremoved:"
+
+cat << _EOF_ > /etc/apt/apt.conf.d/99norecommends
+APT::Install-Recommends "false";
+APT::Install-Suggests "false";
+APT::AutoRemove::RecommendsImportant "false";
+APT::AutoRemove::SuggestsImportant "false";
+_EOF_
+Error_Check
+
+
+###############
+dietpi-notify 0 "Forcing use of existing apt configs if available"
+
+cat << _EOF_ > /etc/apt/apt.conf.d/local
+Dpkg::options {
+   "--force-confdef";
+   "--force-confold";
+}
+_EOF_
+Error_Check
+
+
 ###############
 dietpi-notify 0 "Updating APT for $DISTRO_NAME"
 
@@ -403,14 +434,12 @@ Error_Check
 apt-get update
 Error_Check
 
-}
 
 #------------------------------------------------------------------------------------------------
 #Step 4: APT removals
 #------------------------------------------------------------------------------------------------
 # - DietPi list of minimal required packages which must be installed:
 #	dpkg --get-selections | awk '{print $1}' | sed 's/:armhf//g' | sed "s/^/'/g" | sed "s/$/'/g"
-
 aPACKAGES_REQUIRED_INSTALL=(
 
 	'acl'
@@ -457,6 +486,7 @@ aPACKAGES_REQUIRED_INSTALL=(
 	'firmware-brcm80211'
 	'firmware-ralink'
 	'firmware-realtek'
+	'firmware-misc-nonfree'
 	'fuse'
 	'gnupg'
 	'gpgv'
@@ -503,6 +533,7 @@ aPACKAGES_REQUIRED_INSTALL=(
 	'psmisc'
 	'readline-common'
 	'resolvconf'
+	'rfkill' #Used by some onboard WiFi chipsets
 	'sed'
 	'sensible-utils'
 	'startpar'
@@ -526,54 +557,63 @@ aPACKAGES_REQUIRED_INSTALL=(
 
 )
 
-# - HW specific required packages
+# - HW_ARCH specific required packages
+#	x86_64
 if (( $HW_ARCH == 10 )); then
 
+	aPACKAGES_REQUIRED_INSTALL+=('linux-image-amd64')
 	aPACKAGES_REQUIRED_INSTALL+=('intel-microcode')
 	aPACKAGES_REQUIRED_INSTALL+=('amd64-microcode')
 	aPACKAGES_REQUIRED_INSTALL+=('firmware-linux-nonfree')
+	aPACKAGES_REQUIRED_INSTALL+=('grub-efi-amd64')
 
 fi
 
-# - List of packages we should never remove (eg: HW specific kernels, uboot etc):
-aPACKAGES_AVOID_REMOVAL=(
+# - HW_MODEL specific required packages
+#	RPi
+if (( $HW_MODEL < 10 )); then
 
-	#General
-	'lib'						#Libs
-	'gcc-'
-	'linux-image-' 				#Odroid/x86_64 kernel
-	'linux-base'
-	'busybox'
-	'grub-'						#x86_64
-	'uboot' 					#Odroid
-	'u-boot' 					#Odroid
-	'u-boot-tools' 				#Odroid
-	'rfkill'					#Used by some onboard WiFi adapters
-	'rsync'						#DietPi-Backup
+	aPACKAGES_REQUIRED_INSTALL+=('libraspberrypi-bin')
+	aPACKAGES_REQUIRED_INSTALL+=('libraspberrypi0')
+	aPACKAGES_REQUIRED_INSTALL+=('raspberrypi-bootloader')
+	aPACKAGES_REQUIRED_INSTALL+=('raspberrypi-kernel')
+	aPACKAGES_REQUIRED_INSTALL+=('raspberrypi-sys-mods')
+	aPACKAGES_REQUIRED_INSTALL+=('raspbian-archive-keyring')
+	aPACKAGES_REQUIRED_INSTALL+=('raspi-copies-and-fills')
 
-	#Firmware
-	'firmware-'
+#	Odroid C2
+elif (( $HW_MODEL == 12 )); then
 
-	#Keys
-	'deb-multimedia-keyring'
+	aPACKAGES_REQUIRED_INSTALL+=('linux-image-arm64-odroid-c2')
 
-	#RPi
-	'libraspberrypi-bin'
-	'libraspberrypi0'
-	'raspberrypi-bootloader'
-	'raspberrypi-kernel'
-	'raspberrypi-sys-mods'
-	'raspbian-archive-keyring'
-	'raspi-copies-and-fills'
+#	Odroid XU3/4
+elif (( $HW_MODEL == 11 )); then
 
-)
+	#aPACKAGES_REQUIRED_INSTALL+=('linux-image-4.9-armhf-odroid-xu3')
+	aPACKAGES_REQUIRED_INSTALL+=('linux-image-armhf-odroid-xu3')
 
-INSTALL_PACKAGES=''
-REMOVE_PACKAGES=''
+#	Odroid C1
+elif (( $HW_MODEL == 10 )); then
+
+	aPACKAGES_REQUIRED_INSTALL+=('linux-image-armhf-odroid-c1')
+
+#	Rock64
+elif (( $HW_MODEL == 43 )); then
+
+	aPACKAGES_REQUIRED_INSTALL+=('linux-rock64-package')
+
+#	BBB
+elif (( $HW_MODEL == 71 )); then
+
+	aPACKAGES_REQUIRED_INSTALL+=('device-tree-compiler')
+
+fi
+
 
 ###############
 dietpi-notify 0 "Generating list of minimal packages required for DietPi installation"
 
+INSTALL_PACKAGES=''
 for ((i=0; i<${#aPACKAGES_REQUIRED_INSTALL[@]}; i++))
 do
 
@@ -582,175 +622,38 @@ do
 
 done
 
-###############
-dietpi-notify 0 "Obtaining list of currently installed packages"
-
-dpkg --get-selections | awk '{print $1}' > /tmp/current_installed_packages
-Error_Check
-
-
-###############
-dietpi-notify 0 "Generating a list of deps, required for the DietPi packages\nThis may take some time, please wait..."
-
-aPACKAGES_REQUIRED_DEPS=()
-for ((i=0; i<${#aPACKAGES_REQUIRED_INSTALL[@]}; i++))
-do
-
-	#	Add deps (ignoring libs and <>)
-	echo -e "Checking deps: ${aPACKAGES_REQUIRED_INSTALL[$i]}"
-	#dietpi-notify 2 "Checking deps for ${aPACKAGES_REQUIRED_INSTALL[$i]}" # RESULTS IN $i fixated on 3
-
-	VALUE=$(apt-cache depends ${aPACKAGES_REQUIRED_INSTALL[$i]} | grep 'Depends' | awk '{print $2}' | sed '/^lib/d' | sed '/</d')
-
-	if [ -n "$VALUE" ]; then
-
-		#	Read lines of $VALUE and only add to $aPACKAGES_REQUIRED_DEPS if does not already exist.
-		while read line
-		do
-
-			PACKAGE_ENTRY_EXISTS=0
-			for ((j=0; j<${#aPACKAGES_REQUIRED_DEPS[@]}; j++))
-			do
-
-				if [[ $line == "${aPACKAGES_REQUIRED_DEPS[$j]}"* ]]; then
-
-					PACKAGE_ENTRY_EXISTS=1
-					break
-
-				fi
-
-			done
-
-			if (( ! $PACKAGE_ENTRY_EXISTS )); then
-
-				echo -e " - Adding deps: $line"
-				aPACKAGES_REQUIRED_DEPS+=("$line")
-
-			fi
-
-		done <<< "$VALUE"
-
-	fi
-
-done
-
-
-###############
-dietpi-notify 0 "Generating a list of packages, not required by DietPi, to be removed from system.\nThis may take some time, please wait..."
-
-# - Work out from the arrays, which packages to remove
-while read line
-do
-
-	PACKAGE_FLAGGED_FOR_REMOVE=1
-
-	#	Find matching packages and skip to the next
-	for ((i=0; i<${#aPACKAGES_REQUIRED_INSTALL[@]}; i++))
-	do
-
-		if [[ $line == "${aPACKAGES_REQUIRED_INSTALL[$i]}"* ]]; then
-
-			PACKAGE_FLAGGED_FOR_REMOVE=0
-			break
-
-		fi
-
-	done
-
-	if (( $PACKAGE_FLAGGED_FOR_REMOVE )); then 	#No need to check again. Double nested loop with GOTO in BASH? maybe not :)
-
-		for ((i=0; i<${#aPACKAGES_AVOID_REMOVAL[@]}; i++))
-		do
-
-			if [[ $line == "${aPACKAGES_AVOID_REMOVAL[$i]}"* ]]; then
-
-				PACKAGE_FLAGGED_FOR_REMOVE=0
-				break
-
-			fi
-
-		done
-
-	fi
-
-	if (( $PACKAGE_FLAGGED_FOR_REMOVE )); then 	#No need to check again. Double nested loop with GOTO in BASH? maybe not :)
-
-		for ((i=0; i<${#aPACKAGES_REQUIRED_DEPS[@]}; i++))
-		do
-
-			if [[ $line == "${aPACKAGES_REQUIRED_DEPS[$i]}"* ]]; then
-
-				PACKAGE_FLAGGED_FOR_REMOVE=0
-				break
-
-			fi
-
-		done
-
-	fi
-
-	#	Flag package for removal
-	if (( $PACKAGE_FLAGGED_FOR_REMOVE )); then
-
-		REMOVE_PACKAGES+="$line "
-
-	fi
-
-done < /tmp/current_installed_packages
-rm /tmp/current_installed_packages
-
-#Set aPACKAGES_REQUIRED_INSTALL to apt-mark manual?
-
 # - delete[]
 unset aPACKAGES_REQUIRED_INSTALL
-unset aPACKAGES_AVOID_REMOVAL
-unset aPACKAGES_REQUIRED_DEPS
 
-dietpi-notify 2 "The following packages will be removed\n$REMOVE_PACKAGES"
+dietpi-notify 2 "The following packages will be installed\n$INSTALL_PACKAGES"
 
 
 ###############
-dietpi-notify 0 "Removing packages"
+dietpi-notify 0 "Marking required DietPi packages and manually installed"
 
-AGP $REMOVE_PACKAGES
+apt-mark manual $INSTALL_PACKAGES
 Error_Check
 
 
 ###############
 dietpi-notify 0 "Purging APT with autoremoval"
 
-apt-get autoremove --purge -y
+apt-get autoremove --purge #-y
 Error_Check
+
+
+exit
 
 
 #------------------------------------------------------------------------------------------------
 #Step 5: APT Installations
 #------------------------------------------------------------------------------------------------
-###############
-dietpi-notify 0 "Forcing use of existing apt configs if available"
-
-cat << _EOF_ > /etc/apt/apt.conf.d/local
-Dpkg::options {
-   "--force-confdef";
-   "--force-confold";
-}
-_EOF_
-Error_Check
 
 ###############
 dietpi-notify 0 "Upgrading existing APT installed packages to latest"
 
 DEBIAN_FRONTEND='noninteractive' apt-get dist-upgrade -y
 Error_Check
-
-if (( $HW_MODEL == 43 )); then
-
-	###############
-	dietpi-notify 0 "Reinstalling linux-rock64-package"
-	AGI linux-rock64-package
-	Error_Check
-
-fi
 
 #???: WHIP_OPTIONal Reinstall OpenSSH (for updating dietpi scripts etc). Gets removed during finalise.
 # apt-get install openssh-server -y
@@ -773,12 +676,17 @@ AGI $INSTALL_PACKAGES
 Error_Check
 
 
-WHIP_TITLE='Onboard Bluetooth'
+###############
+dietpi-notify 0 "Onboard Bluetooth selection"
+
+WHIP_TITLE='Bluetooth Required'
 WHIP_DESC='Please select an option'
 WHIP_DEFAULT_ITEM=0
 WHIP_MENU_ARRAY=(
-	'0' 'Select if this device does NOT have onboard Bluetooth'
-	'1' 'Select if this device DOES have onboard Bluetooth'
+
+	'0' 'BT not required, do not install.'
+	'1' 'Device has onboard BT, and/or, I require BT functionality.'
+
 )
 
 Run_Whiptail
@@ -801,6 +709,14 @@ if (( $HW_MODEL < 10 )); then
 	Error_Check
 
 fi
+
+
+###############
+# - @MichaIng https://github.com/Fourdee/DietPi/pull/1266/files
+dietpi-notify 0 "Enable auto install of recommendations again, in case it is necessary somewhere:"
+
+rm /etc/apt/apt-conf.d/99norecommends &> /dev/null
+
 
 #------------------------------------------------------------------------------------------------
 #Step 6: Download DietPi sourcecode
