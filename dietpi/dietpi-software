@@ -4170,19 +4170,22 @@ _EOF_
 
 					if (( $DISTRO == 3 )); then
 
-						echo -e "deb https://download.owncloud.org/download/repositories/stable/Debian_8.0/ /" > /etc/apt/sources.list.d/owncloud.list
-						apt-get update
+						echo -e 'deb https://download.owncloud.org/download/repositories/stable/Debian_8.0/ /' > /etc/apt/sources.list.d/owncloud.list
 
 					elif (( $DISTRO == 4 )); then
 
-						echo -e "deb https://download.owncloud.org/download/repositories/stable/Debian_9.0/ /" > /etc/apt/sources.list.d/owncloud.list
-						apt-get update
+						echo -e 'deb https://download.owncloud.org/download/repositories/stable/Debian_9.0/ /' > /etc/apt/sources.list.d/owncloud.list
 
 					fi
 
 				fi
 
-				AGI owncloud-files 2> /dev/null
+				# Install APT package just, if we have ownCloud's own up to date repository.
+				if [ -f /etc/apt/sources.list.d/owncloud.list ]; then
+
+					apt-get update && AGI owncloud-files
+
+				fi
 
 			else
 
@@ -9137,7 +9140,7 @@ _EOF_
 		if (( ${aSOFTWARE_INSTALL_STATE[$INSTALLING_INDEX]} == 1 )); then
 
 			# Enable necessary PHP modules: https://doc.owncloud.org/server/latest/admin_manual/installation/source_installation.html#php-extensions
-			${PHP_APT_PACKAGE_NAME}enmod curl gd intl json pdo_mysql opcache apcu redis
+			"$PHP_APT_PACKAGE_NAME"enmod curl gd intl json pdo_mysql opcache apcu redis
 			# Following modules are switchable since Stretch:
 			if (( $DISTRO > 3 )); then
 
@@ -9157,13 +9160,13 @@ _EOF_
 				# Do not overwrite existing config.
 				if [ -f $owncloud_conf ]; then
 
-					owncloud_conf='/etc/apache2/sites-available/owncloud.conf.new'
+					owncloud_conf='/etc/apache2/sites-available/owncloud.conf.dietpi-new'
 
 				fi
 				cp /DietPi/dietpi/conf/apache.ownnextcloud.conf $owncloud_conf
-				sed -i "s/nextcloud/owncloud/g" $owncloud_conf
-				# OPCache adjustment is just forced by Nextcloud
-				sed -i "s/php_admin_value/#php_admin_value/" $owncloud_conf
+				sed -i 's/nextcloud/owncloud/g' $owncloud_conf
+				# OPcache adjustment is just asked by Nextcloud
+				sed -i 's/php_admin_value/#php_admin_value/' $owncloud_conf
 				a2ensite owncloud &> /dev/null
 
 			fi
@@ -9175,7 +9178,7 @@ _EOF_
 				# Do not overwrite existing config.
 				if [ -f $owncloud_config ]; then
 
-					owncloud_config='/etc/nginx/sites-dietpi/owncloud.config.new'
+					owncloud_config='/etc/nginx/sites-dietpi/owncloud.config.dietpi-new'
 
 				fi
 				cp /DietPi/dietpi/conf/nginx.sites-dietpi.owncloud.config $owncloud_config
@@ -9183,8 +9186,8 @@ _EOF_
 				# Stretch: Use PHP7.0 socket and set 'fastcgi_request_buffering off';
 				if (( $DISTRO > 3 )); then
 
-					sed -i "s#/run/php5-fpm.sock#/run/php/php7.0-fpm.sock#g" $owncloud_config
-					sed -i "s/#fastcgi_request_buffering off;/fastcgi_request_buffering off;/g" $owncloud_config
+					sed -i 's|/run/php5-fpm.sock|/run/php/php7.0-fpm.sock|g' $owncloud_config
+					sed -i 's/#fastcgi_request_buffering off;/fastcgi_request_buffering off;/g' $owncloud_config
 
 				fi
 
@@ -9192,7 +9195,7 @@ _EOF_
 				DietPi/dietpi/func/check_connection https://localhost &> /dev/null
 				if (( $? == 0 || $? == 5)); then
 
-					sed -i "s/#fastcgi_param HTTPS on;/fastcgi_param HTTPS on;/g" $owncloud_config
+					sed -i 's/#fastcgi_param HTTPS on;/fastcgi_param HTTPS on;/g' $owncloud_config
 
 				fi
 
@@ -9207,7 +9210,7 @@ innodb_file_per_table=1
 _EOF_
 			# Check if we really do fresh installation:
 			local oc_is_fresh=1
-			if [ -d '/mnt/dietpi_userdata/mysql/owncloud' ]; then
+			if [ -d /mnt/dietpi_userdata/mysql/owncloud ]; then
 
 				oc_is_fresh=0
 
@@ -9252,7 +9255,7 @@ _EOF_
 			fi
 
 			# Set CLI URL to ownCloud sub directory:
-			sed -i "s#'http://localhost'#'http://localhost/owncloud'#g" $config_php
+			sed -i "s|'http://localhost'|'http://localhost/owncloud'|g" $config_php
 
 			# APCu Memcache
 			if (( ! $(cat $config_php | grep -ci -m1 "'memcache.local'") )); then
@@ -9264,8 +9267,10 @@ _EOF_
 			# Redis for transactional file locking:
 			# https://doc.owncloud.org/server/latest/admin_manual/configuration/server/caching_configura$
 			# - Enable Redis socket and grant www-data access to it:
-			sed -i "\#unixsocket /#c\unixsocket /var/run/redis/redis.sock" /etc/redis/redis*.conf
-			sed -i "\#unixsocketperm#c\unixsocketperm 770" /etc/redis/redis*.conf
+			local redis_conf="/etc/redis/redis*.conf"
+			grep -q "^\s*unixsocket /" $redis_conf || grep -q '#unixsocket /' $redis_conf && sed -i 's|#unixsocket /|unixsocket /|' $redis_conf || echo 'unixsocket /var/run/redis/redis.sock' >> $redis_conf
+			grep -q "^\s*#?unixsocketperm " $redis_conf && sed -i "/^\s*#?unixsocketperm /c\unixsocketperm 770" $redis_conf || echo 'unixsocketperm 770' >> $redis_conf
+			local redis_sock=$(grep "^\s*unixsocket " $redis_conf | sed "s/\s*unixsocket //")
 			usermod -a -G redis www-data
 			# - Enable ownCloud to use Redis socket:
 			if (( ! $(cat $config_php | grep -ci -m1 "'memcache.locking'") )); then
@@ -9273,7 +9278,7 @@ _EOF_
 				sed -i "\#'memcache.local'#a \ \ 'filelocking.enabled' => true,\n\
   'memcache.locking' => '\\\OC\\\Memcache\\\Redis',\n\
   'redis' => [\n\
-    'host' => '/var/run/redis/redis.sock',\n\
+    'host' => '$redis_sock',\n\
     'port' => 0,\n\
   ]," $config_php
 
@@ -9303,7 +9308,7 @@ _EOF_
 		if (( ${aSOFTWARE_INSTALL_STATE[$INSTALLING_INDEX]} == 1 )); then
 
 			# Enable necessary PHP modules: https://docs.nextcloud.com/server/12/admin_manual/installation/source_installation.html#prerequisites-for-manual-installation
-			${PHP_APT_PACKAGE_NAME}enmod curl gd intl json pdo_mysql opcache apcu redis
+			"$PHP_APT_PACKAGE_NAME"enmod curl gd intl json pdo_mysql opcache apcu redis
 			# Following modules are switchable since Stretch:
 			if (( $DISTRO > 3 )); then
 
@@ -9331,7 +9336,7 @@ _EOF_
 				# Do not overwrite existing config.
 				if [ -f $nextcloud_conf ]; then
 
-					nextcloud_conf='/etc/apache2/sites-available/nextcloud.conf.new'
+					nextcloud_conf='/etc/apache2/sites-available/nextcloud.conf.dietpi-new'
 
 				fi
 				cp /DietPi/dietpi/conf/apache.ownnextcloud.conf $nextcloud_conf
@@ -9346,7 +9351,7 @@ _EOF_
 				# Do not overwrite existing config.
 				if [ -f $nextcloud_config ]; then
 
-					nextcloud_config='/etc/nginx/sites-dietpi/nextcloud.config.new'
+					nextcloud_config='/etc/nginx/sites-dietpi/nextcloud.config.dietpi-new'
 
 				fi
 				cp /DietPi/dietpi/conf/nginx.sites-dietpi.nextcloud.config $nextcloud_config
@@ -9354,8 +9359,8 @@ _EOF_
 				# Stretch: Use PHP7.0 socket and set 'fastcgi_request_buffering off';
 				if (( $DISTRO > 3 )); then
 
-					sed -i "s#/run/php5-fpm.sock#/run/php/php7.0-fpm.sock#g" $nextcloud_config
-					sed -i "s/#fastcgi_request_buffering off;/fastcgi_request_buffering off;/g" $nextcloud_config
+					sed -i 's|/run/php5-fpm.sock|/run/php/php7.0-fpm.sock|g' $nextcloud_config
+					sed -i 's/#fastcgi_request_buffering off;/fastcgi_request_buffering off;/g' $nextcloud_config
 
 				fi
 
@@ -9363,7 +9368,7 @@ _EOF_
 				DietPi/dietpi/func/check_connection https://localhost &> /dev/null
 				if (( $? == 0 || $? == 5)); then
 
-					sed -i "s/#fastcgi_param HTTPS on;/fastcgi_param HTTPS on;/g" $nextcloud_config
+					sed -i 's/#fastcgi_param HTTPS on;/fastcgi_param HTTPS on;/g' $nextcloud_config
 
 				fi
 
@@ -9378,7 +9383,7 @@ innodb_file_per_table=1
 _EOF_
 			# Check if we really do fresh installation:
 			local nc_is_fresh=1
-			if [ -d '/mnt/dietpi_userdata/mysql/nextcloud' ]; then
+			if [ -d /mnt/dietpi_userdata/mysql/nextcloud ]; then
 
 				nc_is_fresh=0
 
@@ -9421,7 +9426,7 @@ _EOF_
 			fi
 
 			# Set CLI URL to Nextcloud sub directory:
-			sed -i "s#'http://localhost'#'http://localhost/nextcloud'#g" $config_php
+			sed -i "s|'http://localhost'|'http://localhost/nextcloud'|g" $config_php
 
 			# APCu Memcache
 			if (( ! $(cat $config_php | grep -ci -m1 "'memcache.local'") )); then
@@ -9433,8 +9438,10 @@ _EOF_
 			# Redis for transactional file locking:
 			# https://docs.nextcloud.com/server/12/admin_manual/configuration_files/files_locking_transactional.html
 			# - Enable Redis socket and grant www-data access to it:
-			sed -i "\#unixsocket /#c\unixsocket /var/run/redis/redis.sock" /etc/redis/redis*.conf
-			sed -i "\#unixsocketperm#c\unixsocketperm 770" /etc/redis/redis*.conf
+			local redis_conf="/etc/redis/redis*.conf"
+			grep -q "^\s*unixsocket /" $redis_conf || grep -q '#unixsocket /' $redis_conf && sed -i 's|#unixsocket /|unixsocket /|' $redis_conf || echo 'unixsocket /var/run/redis/redis.sock' >> $redis_conf
+			grep -q "^\s*#?unixsocketperm " $redis_conf && sed -i "/^\s*#?unixsocketperm /c\unixsocketperm 770" $redis_conf || echo 'unixsocketperm 770' >> $redis_conf
+			local redis_sock=$(grep "^\s*unixsocket " $redis_conf | sed "s/\s*unixsocket //")
 			usermod -a -G redis www-data
 			# - Enable Nextloud to use Redis socket:
 			if (( ! $(cat $config_php | grep -ci -m1 "'memcache.locking'") )); then
@@ -9442,7 +9449,7 @@ _EOF_
 				sed -i "\#'memcache.local'#a \ \ 'filelocking.enabled' => true,\n\
   'memcache.locking' => '\\\OC\\\Memcache\\\Redis',\n\
   'redis' => array(\n\
-    'host' => '/var/run/redis/redis.sock',\n\
+    'host' => '$redis_sock',\n\
     'port' => 0,\n\
     )," $config_php
 
