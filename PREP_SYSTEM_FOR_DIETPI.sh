@@ -465,7 +465,6 @@ _EOF_
 		'psmisc'
 		'resolvconf'
 		'rfkill' 			#Used by some onboard WiFi chipsets
-		'rsync' 			#dietpi-backup
 		'sed'
 		'sensible-utils'
 		'startpar'
