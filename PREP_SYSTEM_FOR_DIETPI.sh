@@ -303,13 +303,12 @@
 	WHIP_TITLE='Distro Selection:'
 	WHIP_DESC='Please select a distro to install on this system. Selecting a distro that is older than the current installed on system, is not supported.'
 	WHIP_DEFAULT_ITEM=4
-	WHIP_MENU_ARRAY=(
+	WHIP_MENU_ARRAY=('4' 'stretch (recommended)')
+	if (( $HW_MODEL >= 10 )); then
 
-		'3' 'jessie'
-		'4' 'stretch (Recommended)'
-		#'5' 'buster' #Disabled: https://github.com/Fourdee/DietPi/issues/1285#issuecomment-351600497
+		WHIP_MENU_ARRAY+=('5' 'buster (testing only, not officially suppoted)')
 
-	)
+	fi
 
 	Run_Whiptail
 	DISTRO=$WHIP_RETURN_VALUE
@@ -411,96 +410,59 @@ _EOF_
 	#	dpkg --get-selections | awk '{print $1}' | sed 's/:armhf//g' | sed "s/^/'/g" | sed "s/$/'/g"
 	aPACKAGES_REQUIRED_INSTALL=(
 
-		'acl'
 		'adduser'
 		'apt'
 		'apt-transport-https'
 		'apt-utils'
 		'base-files'
-		'base-passwd'
 		'bash'
 		'bash-completion'
 		'bc'
-		'bsdmainutils'
 		'bsdutils'
 		'bzip2'
 		'ca-certificates'
-		'console-common'
-		'console-data'
 		'console-setup'
-		'console-setup-linux'
-		'coreutils'
 		'cpio'
 		'crda'
 		'cron'
 		'curl'
-		'dash'
 		'dbus'
 		'debconf'
-		'debian-archive-keyring'
 		'debianutils'
-		'diffutils'
-		'dmidecode'
-		'dmsetup'
-		'dosfstools'
+		'dosfstools' 		# DietPi-Drive_Manager
 		'dphys-swapfile'
 		'dpkg'
-		'e2fslibs'
-		'e2fsprogs'
 		'ethtool'
 		'fake-hwclock'
 		'fbset'
-		'findutils'
 		'firmware-atheros'
 		'firmware-brcm80211'
 		'firmware-ralink'
 		'firmware-realtek'
-		'firmware-misc-nonfree'
 		'fuse'
-		'gnupg'
 		'gpgv'
 		'grep'
-		'groff-base'
 		'gzip'
 		'hdparm'
 		'hfsplus'
 		'hostname'
 		'htop'
 		'ifupdown'
-		'init'
-		'init-system-helpers'
 		'initramfs-tools'
-		'initscripts'
-		'insserv'
-		'iproute2'
 		'iputils-ping'
 		'isc-dhcp-client'
-		'isc-dhcp-common'
 		'iw'
-		'kbd'
-		'keyboard-configuration'
-		'klibc-utils'
-		'kmod'
-		'less'
 		'locales'
-		'login'
-		'lsb-base'
 		'mawk'
-		'mount'
-		'multiarch-support'
 		'nano'
-		'ncurses-base'
-		'ncurses-bin'
 		'net-tools'
 		'ntfs-3g'
 		'ntp'
 		'p7zip-full'
 		'parted'
 		'passwd'
-		'perl-base'
 		'procps'
 		'psmisc'
-		'readline-common'
 		'resolvconf'
 		'rfkill' 			#Used by some onboard WiFi chipsets
 		'rsync' 			#dietpi-backup
@@ -510,7 +472,6 @@ _EOF_
 		'sudo'
 		'systemd'
 		'systemd-sysv'
-		'sysvinit-utils'
 		'tar'
 		'tzdata'
 		'udev'
@@ -519,13 +480,25 @@ _EOF_
 		'util-linux'
 		'wget'
 		'whiptail'
-		'wireless-regdb'
 		'wireless-tools'
 		'wpasupplicant'
 		'wput'
 		'zip'
 
 	)
+
+	# - Keyring specific:
+	#	Raspbian
+	if (( $HW_MODEL < 10 )); then
+
+		aPACKAGES_REQUIRED_INSTALL+=('raspbian-archive-keyring')
+
+	#	Debian
+	else
+
+		aPACKAGES_REQUIRED_INSTALL+=('debian-archive-keyring')
+
+	fi
 
 	# - HW_ARCH specific required packages
 	#	x86_64
@@ -535,7 +508,9 @@ _EOF_
 		aPACKAGES_REQUIRED_INSTALL+=('intel-microcode')
 		aPACKAGES_REQUIRED_INSTALL+=('amd64-microcode')
 		aPACKAGES_REQUIRED_INSTALL+=('firmware-linux-nonfree')
+		aPACKAGES_REQUIRED_INSTALL+=('firmware-misc-nonfree')
 		aPACKAGES_REQUIRED_INSTALL+=('grub-efi-amd64')
+		#aPACKAGES_REQUIRED_INSTALL+=('dmidecode')
 
 	fi
 
@@ -548,7 +523,6 @@ _EOF_
 		aPACKAGES_REQUIRED_INSTALL+=('raspberrypi-bootloader')
 		aPACKAGES_REQUIRED_INSTALL+=('raspberrypi-kernel')
 		aPACKAGES_REQUIRED_INSTALL+=('raspberrypi-sys-mods')
-		aPACKAGES_REQUIRED_INSTALL+=('raspbian-archive-keyring')
 		aPACKAGES_REQUIRED_INSTALL+=('raspi-copies-and-fills')
 
 	#	Odroid C2
@@ -594,15 +568,17 @@ _EOF_
 	# - delete[]
 	unset aPACKAGES_REQUIRED_INSTALL
 
-	dietpi-notify 2 "Marking required DietPi packages and manually installed:"
+	dietpi-notify 2 "Marking required packages as manually installed:"
 
 	apt-mark manual $INSTALL_PACKAGES
 	Error_Check
 
 	dietpi-notify 2 "Purging APT with autoremoval:"
 
-	apt-get autoremove --purge -y
+	apt-get autoremove --purge #-y
 	Error_Check
+
+	exit
 
 
 	#------------------------------------------------------------------------------------------------
