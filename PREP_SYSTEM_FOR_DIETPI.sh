@@ -616,7 +616,7 @@ _EOF_
 	WHIP_DEFAULT_ITEM=0
 	WHIP_MENU_ARRAY=(
 
-		'0' 'I don't require Bluetooth, do not install.'
+		'0' "I don't require Bluetooth, do not install."
 		'1' 'Device has onboard Bluetooth and/or I require Bluetooth functionality.'
 
 	)
