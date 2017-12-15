@@ -225,6 +225,39 @@
 	#------------------------------------------------------------------------------------------------
 
 	#------------------------------------------------------------------------------------------------
+	dietpi-notify 0 'Step 0: Detecting existing DietPi system:'
+	#------------------------------------------------------------------------------------------------
+	if [ -f /DietPi/dietpi/.installed ]; then
+
+		dietpi-notify 2 'DietPi system found, running pre-prep'
+
+		# - Stop services
+		/DietPi/dietpi/dietpi-services stop
+		/DietPi/dietpi/dietpi-services dietpi_controlled
+
+		systemctl stop dietpi-ramlog
+		Error_Check
+		systemctl stop dietpi-ramdisk
+		Error_Check
+
+		# - Delete any previous exsiting data
+		rm -R /mnt/dietpi-backup &> /dev/null
+		rm -R /mnt/dietpi-sync &> /dev/null
+		rm -R /mnt/dietpi_userdata &> /dev/null
+
+		rm -R /etc/dietpi/logs &> /dev/null
+		rm /root/DietPi-Automation.log &> /dev/null
+
+		rm /boot/Automation_Format_My_Usb_Drive &> /dev/null
+
+	else
+
+		dietpi-notify 2 'Non-DietPi system'
+
+	fi
+
+
+	#------------------------------------------------------------------------------------------------
 	dietpi-notify 0 'Step 1: Initial prep to allow this script to function:'
 	#------------------------------------------------------------------------------------------------
 	dietpi-notify 2 'Updating APT:'
@@ -296,6 +329,8 @@
 	dietpi-notify 2 "Setting HW_MODEL index of: $HW_MODEL"
 	dietpi-notify 2 "CPU ARCH = $HW_ARCH : $HW_ARCH_DESCRIPTION"
 
+	echo -e "$HW_MODEL" > /etc/.dietpi_hw_model_identifier
+
 	#------------------------------------------------------------------------------------------------
 	dietpi-notify 0 'Step 3: Distro selection / APT prep:'
 	#------------------------------------------------------------------------------------------------
@@ -335,36 +370,7 @@
 
 	dietpi-notify 2 "Setting APT sources.list: $DISTRO_NAME $DISTRO"
 
-	if (( $HW_MODEL < 10 )); then
-
-		cat << _EOF_ > /etc/apt/sources.list
-deb https://www.mirrorservice.org/sites/archive.raspbian.org/raspbian $DISTRO_NAME main contrib non-free rpi
-_EOF_
-
-		cat << _EOF_ > /etc/apt/sources.list.d/raspi.list
-deb https://archive.raspberrypi.org/debian/ $DISTRO_NAME main ui
-_EOF_
-
-	else
-
-		cat << _EOF_ > /etc/apt/sources.list
-deb http://ftp.debian.org/debian/ $DISTRO_NAME main contrib non-free
-deb http://ftp.debian.org/debian/ $DISTRO_NAME-updates main contrib non-free
-deb http://security.debian.org $DISTRO_NAME/updates main contrib non-free
-deb http://ftp.debian.org/debian/ $DISTRO_NAME-backports main contrib non-free
-_EOF_
-
-	fi
-	Error_Check
-
-	#	Buster, remove backports: https://github.com/Fourdee/DietPi/issues/1285#issuecomment-351830101
-	if (( $DISTRO == 5 )); then
-
-		sed -i '/backports/d' /etc/apt/sources.list
-
-	fi
-
-	#NB: Apt mirror will get overwritten by: /DietPi/dietpi/func/dietpi-set_software apt-mirror default : during finalize.
+	/DietPi/dietpi/func/dietpi-set_software apt-mirror default
 
 	# - @MichaIng https://github.com/Fourdee/DietPi/pull/1266/files
 	dietpi-notify 2 "Marking all packages as auto installed first, to allow allow effective autoremove afterwards"
@@ -694,7 +700,6 @@ _EOF_
 		Error_Check
 
 	fi
-
 	rm DietPi-*/*.ini
 
 	cp -R DietPi-*/* /boot/
@@ -724,11 +729,31 @@ _EOF_
 	userdel -f dietpi &> /dev/null
 	userdel -f debian &> /dev/null #BBB
 
-	dietpi-notify 2 "Removing misc files/folders, not required by DietPi"
+	dietpi-notify 2 "Removing misc files/folders/services, not required by DietPi"
 
 	rm -R /home &> /dev/null
 	rm -R /media &> /dev/null
 
+	rm -R /selinux &> /dev/null
+
+	# - sourcecode (linux-headers etc)
+	rm -R /usr/src/* &> /dev/null
+
+	# - root
+	rm -R /root/.cache/* &> /dev/null
+	rm -R /root/.local/* &> /dev/null
+	rm -R /root/.config/* &> /dev/null
+
+	# - documentation folders
+	rm -R /usr/share/man &> /dev/null
+	rm -R /usr/share/doc &> /dev/null
+	rm -R /usr/share/doc-base &> /dev/null
+	rm -R /usr/share/calendar &> /dev/null
+
+	# - Previous debconfs
+	rm /var/cache/debconf/*-old &> /dev/null
+
+	# - Fonts
 	rm -R /usr/share/fonts/* &> /dev/null
 	rm -R /usr/share/icons/* &> /dev/null
 
@@ -750,11 +775,11 @@ _EOF_
 	rm /etc/init.d/cpu_governor &> /dev/null# Meveric
 	rm /etc/systemd/system/cpu_governor.service &> /dev/null# Meveric
 
-	# -Disable ARMbian's resize service (not automatically removed by ARMbian scripts...)
+	# - Disable ARMbian's resize service (not automatically removed by ARMbian scripts...)
 	systemctl disable resize2fs &> /dev/null
 	rm /etc/systemd/system/resize2fs.service &> /dev/null
 
-	# -ARMbian-config
+	# - ARMbian-config
 	rm /etc/profile.d/check_first_login_reboot.sh &> /dev/null
 
 	dietpi-notify 2 "Setting UID bit for sudo"
@@ -765,11 +790,10 @@ _EOF_
 
 	dietpi-notify 2 "Creating DietPi system directories"
 
-	# - Create DietPi common folders
 	mkdir -p /DietPi
 	Error_Check
 
-	mkdir -p /etc/dietpi
+	mkdir -p /etc/dietpi/logs
 	Error_Check
 
 	mkdir -p /mnt/dietpi_userdata
@@ -784,9 +808,9 @@ _EOF_
 	mkdir -p /mnt/nfs_client
 	Error_Check
 
-	echo -e "Samba client can be installed and setup by DietPi-Config.\nSimply run: dietpi-config and select the Networking WHIP_OPTIONs: NAS/Misc menu" > /mnt/samba/readme.txt
-	echo -e "FTP client mount can be installed and setup by DietPi-Config.\nSimply run: dietpi-config and select the Networking WHIP_OPTIONs: NAS/Misc menu" > /mnt/ftp_client/readme.txt
-	echo -e "NFS client can be installed and setup by DietPi-Config.\nSimply run: dietpi-config and select the Networking WHIP_OPTIONs: NAS/Misc menu" > /mnt/nfs_client/readme.txt
+	echo -e "Samba client can be installed and setup by DietPi-Config.\nSimply run: dietpi-config and select the Networking option: NAS/Misc menu" > /mnt/samba/readme.txt
+	echo -e "FTP client mount can be installed and setup by DietPi-Config.\nSimply run: dietpi-config and select the Networking option: NAS/Misc menu" > /mnt/ftp_client/readme.txt
+	echo -e "NFS client can be installed and setup by DietPi-Config.\nSimply run: dietpi-config and select the Networking option: NAS/Misc menu" > /mnt/nfs_client/readme.txt
 
 	dietpi-notify 2 "Deleting all log files /var/log"
 
@@ -796,6 +820,20 @@ _EOF_
 
 	/boot/dietpi/dietpi-drive_manager 4
 	Error_Check
+
+	# - HW Specific:
+	#	RPi requires PARTUUID for USB write: https://github.com/Fourdee/DietPi/issues/970
+	if (( $HW_MODEL < 10 )); then
+
+		PARTUUID_CURRENT=$(blkid /dev/mmcblk0p1 -s PARTUUID -o value)
+		sed -i "s#^/dev/mmcblk0p1#PARTUUID=$PARTUUID_CURRENT#g" /etc/fstab
+
+		PARTUUID_CURRENT=$(blkid /dev/mmcblk0p2 -s PARTUUID -o value)
+		sed -i "s#^/dev/mmcblk0p2#PARTUUID=$PARTUUID_CURRENT#g" /etc/fstab
+
+		systemctl daemon-reload
+
+	fi
 
 	dietpi-notify 2 "Installing and starting DietPi-RAMdisk service"
 
@@ -862,6 +900,10 @@ WantedBy=multi-user.target
 _EOF_
 	systemctl enable dietpi-boot.service
 	systemctl daemon-reload
+
+	dietpi-notify 2 'Updating DietPi globals'
+
+	/DietPi/dietpi/dietpi-obtain_hw_model
 
 	dietpi-notify 2 "Installing DietPi /etc/rc.local service"
 
@@ -974,8 +1016,19 @@ _EOF_
 	cp /boot/dietpi/conf/network_interfaces /etc/network/interfaces
 	/DietPi/dietpi/func/obtain_network_details
 	Error_Check
+
 	# - enable allow-hotplug eth0 after copying.
 	sed -i "/allow-hotplug eth/c\allow-hotplug eth$(sed -n 1p /DietPi/dietpi/.network)" /etc/network/interfaces
+	# - Remove all predefined eth*/wlan* adapter rules
+	rm /etc/udev/rules.d/70-persistent-net.rules &> /dev/null
+	rm /etc/udev/rules.d/70-persistant-net.rules &> /dev/null
+
+	# - Add pre-up lines for wifi on OrangePi Zero
+	if (( $HW_MODEL == 32 )); then
+
+		sed -i '/iface wlan0 inet dhcp/apre-up modprobe xradio_wlan\npre-up iwconfig wlan0 power on' /etc/network/interfaces
+
+	fi
 
 	dietpi-notify 2 "Tweaking DHCP timeout:"
 
@@ -1019,10 +1072,8 @@ _EOF_
 
 	dietpi-notify 2 "Configuring htop:"
 
-	#	NB: Also done in finalize
 	mkdir -p /root/.config/htop
 	cp /DietPi/dietpi/conf/htoprc /root/.config/htop/htoprc
-
 
 	dietpi-notify 2 "Configuring hdparm:"
 
@@ -1212,8 +1263,162 @@ _EOF_
 	dietpi-notify 0 "Step 8: Finalise system for first run of DietPi:"
 	#------------------------------------------------------------------------------------------------
 
-	#Finalise system
-	/DietPi/dietpi/finalise
+	dietpi-notify 2 'Configuring Services'
+
+	/DietPi/dietpi/dietpi-services stop
+	/DietPi/dietpi/dietpi-services dietpi_controlled
+
+	dietpi-notify 2 'Installing Dropbear by default'
+
+	AGI dropbear
+	#	set to start on next boot
+	sed -i '/NO_START=1/c\NO_START=0' /etc/default/dropbear
+
+	dietpi-notify 2 'Clearing APT cache'
+
+	apt-get clean
+	rm -R /var/lib/apt/lists/* -vf #lists cache: remove partial folder also, automatically gets regenerated on apt-get update
+	#rm /var/lib/dpkg/info/* #issue...
+	#dpkg: warning: files list file for package 'libdbus-1-3:armhf' missing; assuming      package has no files currently installed
+
+	dietpi-notify 2 'Running general cleanup of misc files'
+
+	# - general folders
+	rm -R /tmp/* &> /dev/null
+
+	# - Remove Bash History file
+	rm ~/.bash_history &> /dev/null
+
+	# - Nano histroy file
+	rm ~/.nano_history &> /dev/null
+
+	dietpi-notify 2 'Disabling swapfile'
+
+	/DietPi/dietpi/func/dietpi-set_dphys-swapfile 0 /var/swap
+	# - Reset config
+	echo -e "CONF_SWAPSIZE=0" > /etc/dphys-swapfile
+	echo -e "CONF_SWAPFILE=/var/swap" >> /etc/dphys-swapfile
+
+	#	BBB disable swapfile gen
+	if (( $HW_MODEL == 71 )); then
+
+		sed -i '/Swapfile_Size=/c\Swapfile_Size=0' /DietPi/dietpi.txt
+
+	fi
+
+	dietpi-notify 2 'Resetting boot.ini, config.txt, cmdline.txt etc'
+
+	# - PineA64 - delete ethaddr from uEnv.txt file
+	if (( $HW_MODEL >= 40 && $HW_MODEL <= 42 )); then
+
+		sed -i '/^ethaddr/ d' /boot/uEnv.txt
+
+	fi
+
+	# - Set Pi cmdline.txt back to normal
+	sed -i "s/ rootdelay=10//g" /boot/cmdline.txt
+
+	dietpi-notify 2 'Generating default wpa_supplicant.conf'
+
+	/DietPi/dietpi/func/dietpi-set_hardware wificreds set
+
+	dietpi-notify 2 'Disabling generic WiFi/BT by default'
+
+	/DietPi/dietpi/func/dietpi-set_hardware bluetooth disable
+	/DietPi/dietpi/func/dietpi-set_hardware wifimodules disable
+
+	dietpi-notify 2 'Enabling onboard WiFi modules by default'
+
+	/DietPi/dietpi/func/dietpi-set_hardware wifimodules onboard_enable
+
+	dietpi-notify 2 'Configuring IP version preferences'
+
+	/DietPi/dietpi/func/dietpi-set_hardware preferipversion auto
+
+	dietpi-notify 2 'Configuring kernels'
+
+	# - Disable installed flags
+	rm /etc/dietpi/.*
+
+	# - RPi install DietPi kernel by default
+	if (( $HW_MODEL < 10 )); then
+
+		/DietPi/dietpi/func/dietpi-set_hardware kernel dietpi_rpi
+
+	fi
+
+	dietpi-notify 2 'Disabling soundcards by default'
+
+	/DietPi/dietpi/func/dietpi-set_hardware soundcard none
+
+	dietpi-notify 2 'Setting default CPU gov'
+
+	/DietPi/dietpi/dietpi-cpu_set
+
+	dietpi-notify 2 'Clearing log files'
+
+	/DietPi/dietpi/dietpi-logclear 2
+
+	dietpi-notify 2 'Deleting DietPi-RAMlog storage'
+
+	rm -R /etc/dietpi/dietpi-ramlog/storage &> /dev/null
+
+	dietpi-notify 2 'Deleting NTP drift file'
+
+	rm /var/lib/ntp/ntp.drift &> /dev/null
+
+	dietpi-notify 2 'Creating DietPi default user'
+
+	/DietPi/dietpi/func/dietpi-set_software	useradd dietpi
+
+	dietpi-notify 2 'Resetting DietPi generated globals/files'
+
+	rm /DietPi/dietpi/.*
+
+	dietpi-notify 2 'Storing current image version /etc/.dietpi_image_version'
+
+	echo -e "$IMAGE_VERSION" > /etc/.dietpi_image_version
+
+	dietpi-notify 2 'Setting DietPi-Autostart to console'
+
+	echo 0 > /DietPi/dietpi/.dietpi-autostart_index
+
+	dietpi-notify 2 'Creating our update file (used on 1st run to check for DietPi updates)'
+
+	echo -1 > /DietPi/dietpi/.update_stage
+
+	dietpi-notify 2 'Set Init .install_stage to -3 (first boot)'
+
+	echo -3 > /DietPi/dietpi/.install_stage
+
+	#	 BBB skip FS_partition
+	if (( $HW_MODEL == 71 )); then
+
+		echo -2 > /DietPi/dietpi/.install_stage
+
+	fi
+
+	dietpi-notify 2 'Remove server_version / patch_file (downloads fresh from dietpi-update)'
+
+	rm /DietPi/dietpi/patch_file
+	rm /DietPi/dietpi/server_version
+
+	# - HW Specific
+	#	RPi remove saved HW_MODEL , allowing obtain-hw_model to auto detect RPi model
+	if (( $HW_MODEL < 10 )); then
+
+		rm /etc/.dietpi_hw_model_identifier
+
+	fi
+
+	#TRIM root FS
+	sync
+	fstrim -v /
+	sync
+
+	dietpi-notify 2 'Please check and delete all non-required folders in /root/.xxxxxx'
+	dietpi-notify 2 'Please delete outdated modules'
+	ls -lha /lib/modules
 
 	dietpi-notify 0 "Completed, disk can now be saved to .img for later use, or, reboot system to start first run of DietPi:"
 
