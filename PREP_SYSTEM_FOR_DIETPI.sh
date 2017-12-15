@@ -358,6 +358,13 @@ _EOF_
 	fi
 	Error_Check
 
+	#	Buster, remove backports: https://github.com/Fourdee/DietPi/issues/1285#issuecomment-351830101
+	if (( $DISTRO == 5 )); then
+
+		sed -i '/backports/d' /etc/apt/sources.list
+
+	fi
+
 	#NB: Apt mirror will get overwritten by: /DietPi/dietpi/func/dietpi-set_software apt-mirror default : during finalize.
 
 	# - @MichaIng https://github.com/Fourdee/DietPi/pull/1266/files
