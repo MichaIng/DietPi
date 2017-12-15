@@ -826,10 +826,12 @@ _EOF_
 	if (( $HW_MODEL < 10 )); then
 
 		PARTUUID_CURRENT=$(blkid /dev/mmcblk0p1 -s PARTUUID -o value)
-		sed -i "s#^/dev/mmcblk0p1#PARTUUID=$PARTUUID_CURRENT#g" /etc/fstab
+		UUID_CURRENT=$(blkid /dev/mmcblk0p1 -s UUID -o value)
+		sed -i "s#^UUID=$UUID_CURRENT#PARTUUID=$PARTUUID_CURRENT#g" /etc/fstab
 
 		PARTUUID_CURRENT=$(blkid /dev/mmcblk0p2 -s PARTUUID -o value)
-		sed -i "s#^/dev/mmcblk0p2#PARTUUID=$PARTUUID_CURRENT#g" /etc/fstab
+		UUID_CURRENT=$(blkid /dev/mmcblk0p2 -s UUID -o value)
+		sed -i "s#^UUID=$UUID_CURRENT#PARTUUID=$PARTUUID_CURRENT#g" /etc/fstab
 
 		systemctl daemon-reload
 
@@ -1273,7 +1275,6 @@ _EOF_
 
 	/DietPi/dietpi/dietpi-services stop
 	/DietPi/dietpi/dietpi-services dietpi_controlled
-
 
 	dietpi-notify 2 'Clearing APT cache'
 
