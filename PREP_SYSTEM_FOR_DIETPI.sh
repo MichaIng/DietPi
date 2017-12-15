@@ -575,10 +575,8 @@ _EOF_
 
 	dietpi-notify 2 "Purging APT with autoremoval:"
 
-	apt-get autoremove --purge #-y
+	apt-get autoremove --purge -y
 	Error_Check
-
-	exit
 
 
 	#------------------------------------------------------------------------------------------------
