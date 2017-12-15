@@ -1263,16 +1263,17 @@ _EOF_
 	dietpi-notify 0 "Step 8: Finalise system for first run of DietPi:"
 	#------------------------------------------------------------------------------------------------
 
-	dietpi-notify 2 'Configuring Services'
-
-	/DietPi/dietpi/dietpi-services stop
-	/DietPi/dietpi/dietpi-services dietpi_controlled
-
 	dietpi-notify 2 'Installing Dropbear by default'
 
 	AGI dropbear
 	#	set to start on next boot
 	sed -i '/NO_START=1/c\NO_START=0' /etc/default/dropbear
+
+	dietpi-notify 2 'Configuring Services'
+
+	/DietPi/dietpi/dietpi-services stop
+	/DietPi/dietpi/dietpi-services dietpi_controlled
+
 
 	dietpi-notify 2 'Clearing APT cache'
 
