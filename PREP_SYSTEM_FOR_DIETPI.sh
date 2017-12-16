@@ -262,7 +262,6 @@
 
 		# - Stop services
 		/DietPi/dietpi/dietpi-services stop
-		/DietPi/dietpi/dietpi-services dietpi_controlled
 
 		systemctl stop dietpi-ramlog
 		Error_Check
@@ -397,6 +396,7 @@
 	fi
 
 	dietpi-notify 2 'Removing conflicting apt sources.list.d'
+	#	NB: Apt sources will get overwritten during 1st run, via boot script andn dietpi.txt entry
 
 	#rm /etc/apt/sources.list.d/* &> /dev/null #Probably a bad idea
 	rm /etc/apt/sources.list.d/deb-multimedia.list &> /dev/null #meveric
