@@ -53,7 +53,7 @@
 
 	else
 
-		echo -e 'Error: Unknown or unsupported distribution version, abording...\n'
+		echo -e 'Error: Unknown or unsupported distribution version, aborting...\n'
 		exit
 
 	fi
@@ -78,7 +78,7 @@
 
 	else
 
-		echo -e "Error: Unknown or unsupported CPU architecture $HW_ARCH_DESCRIPTION, aborting...\n"
+		dietpi-notify 1 "Unknown or unsupported CPU architecture $HW_ARCH_DESCRIPTION, aborting..."
 		exit
 
 	fi
@@ -401,7 +401,36 @@
 
 	dietpi-notify 2 "Setting APT sources.list: $DISTRO_TARGET_NAME $DISTRO_TARGET"
 
-	/DietPi/dietpi/func/dietpi-set_software apt-mirror $DISTRO_TARGET
+	# - Set raspbian
+	if (( $HW_MODEL < 10 )); then
+
+		cat << _EOF_ > /etc/apt/sources.list
+deb https://www.mirrorservice.org/sites/archive.raspbian.org/raspbian $DISTRO_TARGET_NAME main contrib non-free rpi
+_EOF_
+
+		cat << _EOF_ > /etc/apt/sources.list.d/raspi.list
+deb https://archive.raspberrypi.org/debian/ $DISTRO_TARGET_NAME main ui
+_EOF_
+
+
+	# - Set debian
+	else
+
+		cat << _EOF_ > /etc/apt/sources.list
+deb http://ftp.debian.org/debian/ $DISTRO_TARGET_NAME main contrib non-free
+deb http://ftp.debian.org/debian/ $DISTRO_TARGET_NAME-updates main contrib non-free
+deb http://security.debian.org $DISTRO_TARGET_NAME/updates main contrib non-free
+deb http://ftp.debian.org/debian/ $DISTRO_TARGET_NAME-backports main contrib non-free
+_EOF_
+
+		#	Buster, remove backports: https://github.com/Fourdee/DietPi/issues/1285#issuecomment-351830101
+		if (( $DISTRO_TARGET == 5 )); then
+
+			sed -i '/backports/d' /etc/apt/sources.list
+
+		fi
+
+	fi
 
 	# - @MichaIng https://github.com/Fourdee/DietPi/pull/1266/files
 	dietpi-notify 2 "Marking all packages as auto installed first, to allow allow effective autoremove afterwards"
