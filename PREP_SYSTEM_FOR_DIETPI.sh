@@ -245,9 +245,9 @@
 		rm -R /mnt/dietpi-sync &> /dev/null
 		rm -R /mnt/dietpi_userdata &> /dev/null
 
-		rm -R /etc/dietpi/logs &> /dev/null
-		rm /root/DietPi-Automation.log &> /dev/null
+		rm -R /etc/dietpi &> /dev/null
 
+		rm /root/DietPi-Automation.log &> /dev/null
 		rm /boot/Automation_Format_My_Usb_Drive &> /dev/null
 
 	else
@@ -1008,7 +1008,7 @@ _EOF_
 
 	dietpi-notify 2 "Setting vm.swappiness=1:"
 
-	sed -i 's/vm.swappiness=/d' /etc/sysctl.conf
+	sed -i '/vm.swappiness=/d' /etc/sysctl.conf
 	echo -e "vm.swappiness=1" > /etc/sysctl.d/97-dietpi.conf
 	Error_Check
 
@@ -1345,6 +1345,7 @@ _EOF_
 	# - RPi install DietPi kernel by default
 	if (( $HW_MODEL < 10 )); then
 
+		rm -R /lib/modules/* # Remove all modules from all kernels, ensures our kernel is installed.
 		/DietPi/dietpi/func/dietpi-set_hardware kernel dietpi_rpi
 
 	fi
