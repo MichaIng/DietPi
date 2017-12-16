@@ -1463,8 +1463,9 @@ StandardOutput=tty
 [Install]
 WantedBy=local-fs.target
 _EOF_
-	systemctl enable dietpi-fs_partition_resize.service
 	systemctl daemon-reload
+	systemctl enable dietpi-fs_partition_resize.service
+	Error_Check
 
 	cat << _EOF_ > /etc/dietpi/fs_partition_resize.sh
 #!/bin/bash
@@ -1504,8 +1505,9 @@ _EOF_1
 reboot
 
 _EOF_
+	Error_Check
 	chmod +x /etc/dietpi/fs_partition_resize.sh
-
+	Error_Check
 
 	dietpi-notify 2 'Generating dietpi-fs_partition_expand for subsequent boot'
 
@@ -1523,18 +1525,18 @@ StandardOutput=tty
 [Install]
 WantedBy=local-fs.target
 _EOF_
-	systemctl enable dietpi-fs_expand.service
 	systemctl daemon-reload
+	systemctl enable dietpi-fs_expand.service
+	Error_Check
 
-
+	# #debug
 	# systemctl start dietpi-fs_partition_resize.service
 	# systemctl status dietpi-fs_partition_resize.service -l
 	# cat /etc/dietpi/logs/fs_partition_resize.log
 
-	#
-
 
 	dietpi-notify 2 'Sync changes to disk and TRIM rootFS'
+
 	sync
 	fstrim -v /
 	sync
