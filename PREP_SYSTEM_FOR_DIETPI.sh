@@ -271,6 +271,7 @@
 
 		# - Delete any previous exsiting data
 		rm -R /DietPi/*
+		rm -R /boot/dietpi
 
 		rm -R /mnt/dietpi-backup &> /dev/null
 		rm -R /mnt/dietpi-sync &> /dev/null
@@ -666,15 +667,14 @@ _EOF_
 		AGI bluetooth bluez-firmware
 		Error_Check
 
+		if (( $HW_MODEL < 10 )); then
 
-	fi
+			dietpi-notify 2 "Installing Bluetooth packages specific to RPi"
 
-	if (( $HW_MODEL < 10 )); then
+			AGI pi-bluetooth
+			Error_Check
 
-		dietpi-notify 2 "Installing Bluetooth packages specific to RPi"
-
-		AGI pi-bluetooth
-		Error_Check
+		fi
 
 	fi
 
@@ -1532,6 +1532,11 @@ _EOF_
 
 
 	dietpi-notify 2 'Sync changes to disk and TRIM rootFS'
+
+	systemctl stop dietpi-ramlog
+	Error_Check
+	systemctl stop dietpi-ramdisk
+	Error_Check
 
 	sync
 	fstrim -v /
