@@ -430,6 +430,18 @@ _EOF_
 
 	fi
 
+	dietpi-notify 2 "Updating APT for $DISTRO_TARGET_NAME:"
+
+	apt-get clean
+	Error_Check
+
+	apt-get update
+	Error_Check
+
+	# - Distro is now target
+	DISTRO=$DISTRO_TARGET
+	DISTRO_NAME=$DISTRO_TARGET_NAME
+
 	# - @MichaIng https://github.com/Fourdee/DietPi/pull/1266/files
 	dietpi-notify 2 "Marking all packages as auto installed first, to allow allow effective autoremove afterwards"
 
@@ -456,17 +468,6 @@ Dpkg::options {
 }
 _EOF_
 	Error_Check
-
-	dietpi-notify 2 "Updating APT for $DISTRO_TARGET_NAME:"
-
-	apt-get clean
-	Error_Check
-
-	apt-get update
-	Error_Check
-
-	# - Distro is now target
-	DISTRO=$DISTRO_TARGET
 
 
 	#------------------------------------------------------------------------------------------------
