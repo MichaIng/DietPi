@@ -1,11 +1,11 @@
 #!/bin/bash
 {
 	#------------------------------------------------------------------------------------------------
-	# Setup a Debian installation, for DietPi.
-	# - PRE-REQ
-	#	System currently running a Debian image (ideally minimal)
-	#	System with active eth0 connection
-	#	No USB drives attached
+	# Optimize current Debian installation and prep for DietPi installation.
+	#------------------------------------------------------------------------------------------------
+	# REQUIREMENTS
+	# - Currently running Debian (ideally minimal, eg: Raspbian Lite-ish =)) )
+	# - Active eth0 connection
 	#------------------------------------------------------------------------------------------------
 	# DO NOT USE. Currently under testing.
 	#------------------------------------------------------------------------------------------------
@@ -1423,9 +1423,9 @@ _EOF_
 
 	echo -1 > /DietPi/dietpi/.update_stage
 
-	dietpi-notify 2 'Set Init .install_stage to -3 (first boot)'
+	dietpi-notify 2 'Set Init .install_stage to -1 (first boot)'
 
-	echo -3 > /DietPi/dietpi/.install_stage
+	echo -1 > /DietPi/dietpi/.install_stage
 
 	#	 BBB skip FS_partition
 	if (( $HW_MODEL == 71 )); then
@@ -1436,8 +1436,8 @@ _EOF_
 
 	dietpi-notify 2 'Remove server_version / patch_file (downloads fresh from dietpi-update)'
 
-	rm /DietPi/dietpi/patch_file
-	rm /DietPi/dietpi/server_version
+	rm /DietPi/dietpi/patch_file &> /dev/null
+	rm /DietPi/dietpi/server_version &> /dev/null
 
 	# - HW Specific
 	#	RPi remove saved HW_MODEL , allowing obtain-hw_model to auto detect RPi model
@@ -1447,7 +1447,94 @@ _EOF_
 
 	fi
 
-	#TRIM root FS
+	dietpi-notify 2 'Generating dietpi-fs_partition_resize for first boot'
+
+	cat << _EOF_ > /etc/systemd/system/dietpi-fs_partition_resize.service
+[Unit]
+Description=dietpi-fs_partition_resize
+Before=dietpi-ramdisk.service
+
+[Service]
+Type=oneshot
+RemainAfterExit=no
+ExecStart=/bin/bash -c '/etc/dietpi/fs_partition_resize.sh | tee /etc/dietpi/logs/fs_partition_resize.log'
+StandardOutput=tty
+
+[Install]
+WantedBy=local-fs.target
+_EOF_
+	systemctl enable dietpi-fs_partition_resize.service
+	systemctl daemon-reload
+
+	cat << _EOF_ > /etc/dietpi/fs_partition_resize.sh
+#!/bin/bash
+
+systemctl disable dietpi-fs_partition_resize.service
+systemctl daemon-reload
+
+TARGET_PARTITION=\$(findmnt / -o source -n | sed 's/.*p//')
+TARGET_DEV=\$(findmnt / -o source -n)
+
+# - MMCBLK[0-9]p[0-9] scrape
+if [[ "\$TARGET_DEV" = *"mmcblk"* ]]; then
+
+    TARGET_DEV=\$(findmnt / -o source -n | sed 's/p[0-9]\$//')
+
+# - Everything else scrape (eg: /dev/sdX[0-9])
+else
+
+    TARGET_DEV=\$(findmnt / -o source -n | sed 's/[0-9]\$//')
+
+fi
+
+cat << _EOF_1 | fdisk \$TARGET_DEV
+p
+d
+\$TARGET_PARTITION
+n
+p
+\$TARGET_PARTITION
+\$(parted \$TARGET_DEV -ms unit s p | grep ':ext4::;' | sed 's/:/ /g' | sed 's/s//g' | awk '{ print \$2 }')
+
+p
+w
+
+_EOF_1
+
+reboot
+
+_EOF_
+	chmod +x /etc/dietpi/fs_partition_resize.sh
+
+
+	dietpi-notify 2 'Generating dietpi-fs_partition_expand for subsequent boot'
+
+	cat << _EOF_ > /etc/systemd/system/dietpi-fs_expand.service
+[Unit]
+Description=dietpi-fs_expand
+Before=dietpi-ramdisk.service
+
+[Service]
+Type=oneshot
+RemainAfterExit=no
+ExecStart=/bin/bash -c 'resize2fs \$(findmnt / -o source -n) | tee /etc/dietpi/logs/fs_expand.log; systemctl disable dietpi-fs_expand.service; systemctl daemon-reload'
+StandardOutput=tty
+
+[Install]
+WantedBy=local-fs.target
+_EOF_
+	systemctl enable dietpi-fs_expand.service
+	systemctl daemon-reload
+
+
+	# systemctl start dietpi-fs_partition_resize.service
+	# systemctl status dietpi-fs_partition_resize.service -l
+	# cat /etc/dietpi/logs/fs_partition_resize.log
+
+	#
+
+
+	dietpi-notify 2 'Sync changes to disk and TRIM rootFS'
 	sync
 	fstrim -v /
 	sync
