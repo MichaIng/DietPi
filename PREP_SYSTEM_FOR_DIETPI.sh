@@ -27,32 +27,37 @@
 	#Globals
 	#------------------------------------------------------------------------------------------------
 	#System
+	DISTRO=0
+	DISTRO_NAME=''
+	DISTRO_TARGET=0
+	DISTRO_TARGET_NAME=''
 	if grep -q 'wheezy' /etc/os-release; then
 
-                DISTRO=2
-                DISTRO_NAME='wheezy'
+		DISTRO=2
+		DISTRO_NAME='wheezy'
 
-        elif grep -q 'jessie' /etc/os-release; then
+	elif grep -q 'jessie' /etc/os-release; then
 
-                DISTRO=3
-                DISTRO_NAME='jessie'
+		DISTRO=3
+		DISTRO_NAME='jessie'
 
-        elif grep -q 'stretch' /etc/os-release; then
+	elif grep -q 'stretch' /etc/os-release; then
 
-                DISTRO=4
-                DISTRO_NAME='stretch'
+		DISTRO=4
+		DISTRO_NAME='stretch'
 
-        elif grep -q 'buster' /etc/os-release; then
+	elif grep -q 'buster' /etc/os-release; then
 
-                DISTRO=5
-                DISTRO_NAME='buster'
+		DISTRO=5
+		DISTRO_NAME='buster'
 
-        else
+	else
 
-                echo -e 'Error: Unknown or unsupported distribution version, abording...\n'
-                exit
+		echo -e 'Error: Unknown or unsupported distribution version, abording...\n'
+		exit
 
-        fi
+	fi
+
 	HW_MODEL=0
 	HW_ARCH_DESCRIPTION=$(uname -m)
 	if [ "$HW_ARCH_DESCRIPTION" = "armv6l" ]; then
@@ -361,7 +366,7 @@
 
 	WHIP_TITLE='Distro Selection:'
 	WHIP_DESC='Please select a distro to install on this system. Selecting a distro that is older than the current installed on system, is not supported.'
-	WHIP_DEFAULT_ITEM=4
+	WHIP_DEFAULT_ITEM=$DISTRO
 	WHIP_MENU_ARRAY=(
 		'3' 'Jessie (oldstable, just if you need to avoid upgrade to current release)'
 		'4' 'Stretch (current stable release, recommended)'
@@ -373,19 +378,18 @@
 	fi
 
 	Run_Whiptail
-	DISTRO=$WHIP_RETURN_VALUE
+	DISTRO_TARGET=$WHIP_RETURN_VALUE
+	if (( $DISTRO_TARGET == 3 )); then
 
-	if (( $DISTRO == 3 )); then
+		DISTRO_TARGET_NAME='jessie'
 
-		DISTRO_NAME='jessie'
+	elif (( $DISTRO_TARGET == 4 )); then
 
-	elif (( $DISTRO == 4 )); then
+		DISTRO_TARGET_NAME='stretch'
 
-		DISTRO_NAME='stretch'
+	elif (( $DISTRO_TARGET == 5 )); then
 
-	elif (( $DISTRO == 5 )); then
-
-		DISTRO_NAME='buster'
+		DISTRO_TARGET_NAME='buster'
 
 	fi
 
@@ -395,9 +399,9 @@
 	rm /etc/apt/sources.list.d/deb-multimedia.list &> /dev/null #meveric
 
 
-	dietpi-notify 2 "Setting APT sources.list: $DISTRO_NAME $DISTRO"
+	dietpi-notify 2 "Setting APT sources.list: $DISTRO_TARGET_NAME $DISTRO_TARGET"
 
-	/DietPi/dietpi/func/dietpi-set_software apt-mirror default
+	/DietPi/dietpi/func/dietpi-set_software apt-mirror $DISTRO_TARGET
 
 	# - @MichaIng https://github.com/Fourdee/DietPi/pull/1266/files
 	dietpi-notify 2 "Marking all packages as auto installed first, to allow allow effective autoremove afterwards"
@@ -426,7 +430,7 @@ Dpkg::options {
 _EOF_
 	Error_Check
 
-	dietpi-notify 2 "Updating APT for $DISTRO_NAME:"
+	dietpi-notify 2 "Updating APT for $DISTRO_TARGET_NAME:"
 
 	apt-get clean
 	Error_Check
@@ -476,7 +480,7 @@ _EOF_
 		'locales'		# Support locales, necessary for DietPi scripts, as we use enGB.UTF8 as default language
 		'nano'			# Simple text editor
 		'net-tools'		# DietPi-Boot: Network tools, ifconfig, route etc.
-		'ntfs-3g'		# DietPi-Drive_Manager NTPS (Windows) file system support 
+		'ntfs-3g'		# DietPi-Drive_Manager NTPS (Windows) file system support
 		'ntp'			# Network time syncronization
 		'p7zip-full'		# .7z wrapper
 		'parted'		# DietPi-Boot + DietPi-Drive_Manager
