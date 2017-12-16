@@ -27,8 +27,32 @@
 	#Globals
 	#------------------------------------------------------------------------------------------------
 	#System
-	DISTRO=4
-	DISTRO_NAME='stretch'
+	if grep -q 'wheezy' /etc/os-release; then
+
+                DISTRO=2
+                DISTRO_NAME='wheezy'
+
+        elif grep -q 'jessie' /etc/os-release; then
+
+                DISTRO=3
+                DISTRO_NAME='jessie'
+
+        elif grep -q 'stretch' /etc/os-release; then
+
+                DISTRO=4
+                DISTRO_NAME='stretch'
+
+        elif grep -q 'buster' /etc/os-release; then
+
+                DISTRO=5
+                DISTRO_NAME='buster'
+
+        else
+
+                echo -e 'Error: Unknown or unsupported distribution version, abording...\n'
+                exit
+
+        fi
 	HW_MODEL=0
 	HW_ARCH_DESCRIPTION=$(uname -m)
 	if [ "$HW_ARCH_DESCRIPTION" = "armv6l" ]; then
@@ -49,7 +73,7 @@
 
 	else
 
-		echo -e "Unknown HW_ARCH $HW_ARCH_DESCRIPTION, aborting"
+		echo -e "Error: Unknown or unsupported CPU architecture $HW_ARCH_DESCRIPTION, aborting...\n"
 		exit
 
 	fi
@@ -338,10 +362,13 @@
 	WHIP_TITLE='Distro Selection:'
 	WHIP_DESC='Please select a distro to install on this system. Selecting a distro that is older than the current installed on system, is not supported.'
 	WHIP_DEFAULT_ITEM=4
-	WHIP_MENU_ARRAY=('4' 'stretch (recommended)')
+	WHIP_MENU_ARRAY=(
+		'3' 'Jessie (oldstable, just if you need to avoid upgrade to current release)'
+		'4' 'Stretch (current stable release, recommended)'
+	)
 	if (( $HW_MODEL >= 10 )); then
 
-		WHIP_MENU_ARRAY+=('5' 'buster (testing only, not officially suppoted)')
+		WHIP_MENU_ARRAY+=('5' 'Buster (testing only, not officially suppoted)')
 
 	fi
 
@@ -381,7 +408,7 @@
 	# - @MichaIng https://github.com/Fourdee/DietPi/pull/1266/files
 	dietpi-notify 2 "Temporary disable automatic recommends/suggests installation and allow them to be autoremoved:"
 
-	cat << _EOF_ > /etc/apt/apt.conf.d/99norecommends
+	cat << _EOF_ > /etc/apt/apt.conf.d/99dietpi_norecommends
 APT::Install-Recommends "false";
 APT::Install-Suggests "false";
 APT::AutoRemove::RecommendsImportant "false";
@@ -391,7 +418,7 @@ _EOF_
 
 	dietpi-notify 2 "Forcing use of existing apt configs if available"
 
-	cat << _EOF_ > /etc/apt/apt.conf.d/local
+	cat << _EOF_ > /etc/apt/apt.conf.d/99dietpi_forceconf
 Dpkg::options {
    "--force-confdef";
    "--force-confold";
@@ -413,97 +440,61 @@ _EOF_
 	#------------------------------------------------------------------------------------------------
 
 	# - DietPi list of minimal required packages which must be installed:
-	#	dpkg --get-selections | awk '{print $1}' | sed 's/:armhf//g' | sed "s/^/'/g" | sed "s/$/'/g"
+	#	dpkg --get-selections | awk '{print $1}' | sed 's/:a....//g' | sed "s/^/'/g" | sed "s/$/'/g"
 	aPACKAGES_REQUIRED_INSTALL=(
 
-		'adduser'
-		'apt'
-		'apt-transport-https'
-		'apt-utils'
-		'base-files'
-		'bash'
-		'bash-completion'
-		'bc'
-		'bsdutils'
-		'bzip2'
-		'ca-certificates'
-		'console-setup'
-		'cpio'
-		'crda'
-		'cron'
-		'curl'
-		'dbus'
-		'debconf'
-		'debianutils'
-		'dosfstools' 		# DietPi-Drive_Manager
-		'dphys-swapfile'
-		'dpkg'
-		'ethtool'
-		'fake-hwclock'
-		'fbset'
-		'firmware-atheros'
-		'firmware-brcm80211'
-		'firmware-ralink'
-		'firmware-realtek'
-		'fuse'
-		'gpgv'
-		'grep'
-		'gzip'
-		'hdparm'
-		'hfsplus'
-		'hostname'
-		'htop'
-		'ifupdown'
-		'initramfs-tools'
-		'iputils-ping'
-		'isc-dhcp-client'
-		'iw'
-		'locales'
-		'mawk'
-		'nano'
-		'net-tools'
-		'ntfs-3g'
-		'ntp'
-		'p7zip-full'
-		'parted'
-		'passwd'
-		'procps'
-		'psmisc'
-		'resolvconf'
-		'rfkill' 			#Used by some onboard WiFi chipsets
-		'sed'
-		'sensible-utils'
-		'startpar'
-		'sudo'
-		'systemd'
-		'systemd-sysv'
-		'tar'
-		'tzdata'
-		'udev'
-		'unzip'
-		'usbutils'
-		'util-linux'
-		'wget'
-		'whiptail'
-		'wireless-tools'
-		'wpasupplicant'
-		'wput'
-		'zip'
+		'apt-transport-https'	# Allows https sources in ATP
+		'apt-utils'		# Allows debconf to preconfigure APT packages before installing
+		'bash-completion'	# Auto completes a wide list of bash commands
+		'bc'			# Floating point calculation within bash
+		'bzip2'			# .bz2 wrapper
+		'ca-certificates'	# Adds known ca-certificates, necessary to practically access https sources
+		'console-setup'		# DietPi-Config keyboard configuration
+		'crda'			# WiFi related
+		'cron'			# background job scheduler
+		'curl'			# Web address testing, downloading, uploading etc.
+		'dbus'			# System message bus
+		'debconf'		# APT package configuration, e.g. 'debconf-set-selections'
+		'dosfstools' 		# DietPi-Drive_Manager + fat (boot) drive file system check
+		'dphys-swapfile'	# Swap file management
+		'dropbear'		# DietPi sefault SSH-Client
+		'ethtool'		# Ethernet link checking
+		'fake-hwclock'		# Hardware clock emulation, to allow correct timestamps during boot before network time sync
+		'fbset'			# DietPi-Config display settings
+		'firmware-atheros'	# WiFi dongle firmware
+		'firmware-brcm80211'	# WiFi dongle firmware
+		'firmware-ralink'	# WiFi dongle firmware
+		'firmware-realtek'	# WiFi dongle firmware
+		'gnupg'			# apt-key add
+		'hdparm'		# Drive power management adjustment
+		'hfsplus'		# DietPi-Drive_Manager NTS (MacOS) file system support
+		'htop'			# System monitor
+		'initramfs-tools'	# RAM file system initialization
+		'iputils-ping'		# ping command
+		'isc-dhcp-client'	# DHCP client
+		'iw'			# WiFi related
+		'locales'		# Support locales, necessary for DietPi scripts, as we use enGB.UTF8 as default language
+		'nano'			# Simple text editor
+		'net-tools'		# DietPi-Boot: Network tools, ifconfig, route etc.
+		'ntfs-3g'		# DietPi-Drive_Manager NTPS (Windows) file system support 
+		'ntp'			# Network time syncronization
+		'p7zip-full'		# .7z wrapper
+		'parted'		# DietPi-Boot + DietPi-Drive_Manager
+		'psmisc'		# DietPi-Boot + DietPi-Software: e.g. killall
+		'resolvconf'		# System name server updater
+		'rfkill' 		# WiFi related: Used by some onboard WiFi chipsets
+		'sudo'			# DietPi-Software + general use
+		'tzdata'		# Time zone data for system clock, auto summer/winter time adjustment
+		'unzip'			# .zip unwrapper
+		'usbutils'		# DietPi-Software + DietPi-Bugreport: e.g. lsusb
+		'wget'			# download
+		'whiptail'		# DietPi dialogs
+		'wireless-tools'	# WiFi related
+		'wpasupplicant'		# WiFi related
+		'wput'			# upload
+		'zip'			# .zip wrapper
 
 	)
-
-	# - Keyring specific:
-	#	Raspbian
-	if (( $HW_MODEL < 10 )); then
-
-		aPACKAGES_REQUIRED_INSTALL+=('raspbian-archive-keyring')
-
-	#	Debian
-	else
-
-		aPACKAGES_REQUIRED_INSTALL+=('debian-archive-keyring')
-
-	fi
 
 	# - HW_ARCH specific required packages
 	#	x86_64
@@ -513,9 +504,17 @@ _EOF_
 		aPACKAGES_REQUIRED_INSTALL+=('intel-microcode')
 		aPACKAGES_REQUIRED_INSTALL+=('amd64-microcode')
 		aPACKAGES_REQUIRED_INSTALL+=('firmware-linux-nonfree')
-		aPACKAGES_REQUIRED_INSTALL+=('firmware-misc-nonfree')
-		aPACKAGES_REQUIRED_INSTALL+=('grub-efi-amd64')
+		#aPACKAGES_REQUIRED_INSTALL+=('firmware-misc-nonfree')
 		#aPACKAGES_REQUIRED_INSTALL+=('dmidecode')
+		if (( $(fdisk -l $1 | grep "Disklabel type:" | awk '{ print $3 }') == 'dos' )); then
+
+			aPACKAGES_REQUIRED_INSTALL+=('grub2')
+
+		else
+
+			aPACKAGES_REQUIRED_INSTALL+=('grub-efi-amd64')
+
+		fi
 
 	fi
 
@@ -524,9 +523,9 @@ _EOF_
 	if (( $HW_MODEL < 10 )); then
 
 		aPACKAGES_REQUIRED_INSTALL+=('libraspberrypi-bin')
-		aPACKAGES_REQUIRED_INSTALL+=('libraspberrypi0')
-		aPACKAGES_REQUIRED_INSTALL+=('raspberrypi-bootloader')
-		aPACKAGES_REQUIRED_INSTALL+=('raspberrypi-kernel')
+		#aPACKAGES_REQUIRED_INSTALL+=('libraspberrypi0')
+		#aPACKAGES_REQUIRED_INSTALL+=('raspberrypi-bootloader')
+		#aPACKAGES_REQUIRED_INSTALL+=('raspberrypi-kernel')
 		aPACKAGES_REQUIRED_INSTALL+=('raspberrypi-sys-mods')
 		aPACKAGES_REQUIRED_INSTALL+=('raspi-copies-and-fills')
 
@@ -555,7 +554,6 @@ _EOF_
 	elif (( $HW_MODEL == 71 )); then
 
 		aPACKAGES_REQUIRED_INSTALL+=('device-tree-compiler') #Kern
-		aPACKAGES_REQUIRED_INSTALL+=('dosfstools') #EMMC transfer
 
 	fi
 
@@ -618,8 +616,8 @@ _EOF_
 	WHIP_DEFAULT_ITEM=0
 	WHIP_MENU_ARRAY=(
 
-		'0' 'BT not required, do not install.'
-		'1' 'Device has onboard BT, and/or, I require BT functionality.'
+		'0' "I don't require Bluetooth, do not install."
+		'1' 'Device has onboard Bluetooth and/or I require Bluetooth functionality.'
 
 	)
 
@@ -647,7 +645,7 @@ _EOF_
 	# - @MichaIng https://github.com/Fourdee/DietPi/pull/1266/files
 	dietpi-notify 2 "Returning installation of recommends back to default"
 
-	rm /etc/apt/apt-conf.d/99norecommends &> /dev/null
+	rm /etc/apt/apt-conf.d/99dietpi_norecommends &> /dev/null
 
 	#------------------------------------------------------------------------------------------------
 	dietpi-notify 0 'Step 6: Downloading and installing DietPi sourcecode'
