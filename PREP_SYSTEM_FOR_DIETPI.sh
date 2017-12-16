@@ -270,6 +270,8 @@
 		Error_Check
 
 		# - Delete any previous exsiting data
+		rm -R /DietPi/*
+
 		rm -R /mnt/dietpi-backup &> /dev/null
 		rm -R /mnt/dietpi-sync &> /dev/null
 		rm -R /mnt/dietpi_userdata &> /dev/null
@@ -917,6 +919,7 @@ _EOF_
 	dietpi-notify 2 "Installing DietPi boot service"
 
 	#	Boot
+	#	- DEBUGGING enabled: tee /etc/dietpi/logs/dietpi-boot.log
 	cat << _EOF_ > /etc/systemd/system/dietpi-boot.service
 [Unit]
 Description=DietPi-Boot
@@ -926,7 +929,7 @@ Requires=dietpi-ramdisk.service
 [Service]
 Type=oneshot
 RemainAfterExit=yes
-ExecStart=/bin/bash -c '/DietPi/dietpi/boot'
+ExecStart=/bin/bash -c '/DietPi/dietpi/boot | tee /etc/dietpi/logs/dietpi-boot.log'
 StandardOutput=tty
 
 [Install]
@@ -1426,13 +1429,6 @@ _EOF_
 
 	echo -1 > /DietPi/dietpi/.install_stage
 
-	#	 BBB skip FS_partition
-	if (( $HW_MODEL == 71 )); then
-
-		echo -2 > /DietPi/dietpi/.install_stage
-
-	fi
-
 	dietpi-notify 2 'Remove server_version / patch_file (downloads fresh from dietpi-update)'
 
 	rm /DietPi/dietpi/patch_file &> /dev/null
@@ -1448,6 +1444,7 @@ _EOF_
 
 	dietpi-notify 2 'Generating dietpi-fs_partition_resize for first boot'
 
+	#??? BBB skip this???
 	cat << _EOF_ > /etc/systemd/system/dietpi-fs_partition_resize.service
 [Unit]
 Description=dietpi-fs_partition_resize
@@ -1518,7 +1515,7 @@ Before=dietpi-ramdisk.service
 [Service]
 Type=oneshot
 RemainAfterExit=no
-ExecStart=/bin/bash -c 'resize2fs \$(findmnt / -o source -n) | tee /etc/dietpi/logs/fs_expand.log; systemctl disable dietpi-fs_expand.service; systemctl daemon-reload'
+ExecStart=/bin/bash -c "resize2fs \$(findmnt / -o source -n) | tee /etc/dietpi/logs/fs_expand.log; systemctl disable dietpi-fs_expand.service; systemctl daemon-reload"
 StandardOutput=tty
 
 [Install]
