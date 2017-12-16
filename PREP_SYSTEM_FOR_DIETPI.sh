@@ -398,7 +398,6 @@
 	#rm /etc/apt/sources.list.d/* &> /dev/null #Probably a bad idea
 	rm /etc/apt/sources.list.d/deb-multimedia.list &> /dev/null #meveric
 
-
 	dietpi-notify 2 "Setting APT sources.list: $DISTRO_TARGET_NAME $DISTRO_TARGET"
 
 	# - Set raspbian
@@ -411,7 +410,6 @@ _EOF_
 		cat << _EOF_ > /etc/apt/sources.list.d/raspi.list
 deb https://archive.raspberrypi.org/debian/ $DISTRO_TARGET_NAME main ui
 _EOF_
-
 
 	# - Set debian
 	else
@@ -466,6 +464,9 @@ _EOF_
 
 	apt-get update
 	Error_Check
+
+	# - Distro is now target
+	DISTRO=$DISTRO_TARGET
 
 
 	#------------------------------------------------------------------------------------------------
