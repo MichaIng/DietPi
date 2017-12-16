@@ -558,9 +558,9 @@ _EOF_
 	if (( $HW_MODEL < 10 )); then
 
 		aPACKAGES_REQUIRED_INSTALL+=('libraspberrypi-bin')
-		#aPACKAGES_REQUIRED_INSTALL+=('libraspberrypi0')
-		#aPACKAGES_REQUIRED_INSTALL+=('raspberrypi-bootloader')
-		#aPACKAGES_REQUIRED_INSTALL+=('raspberrypi-kernel')
+		aPACKAGES_REQUIRED_INSTALL+=('libraspberrypi0')
+		aPACKAGES_REQUIRED_INSTALL+=('raspberrypi-bootloader')
+		aPACKAGES_REQUIRED_INSTALL+=('raspberrypi-kernel')
 		aPACKAGES_REQUIRED_INSTALL+=('raspberrypi-sys-mods')
 		aPACKAGES_REQUIRED_INSTALL+=('raspi-copies-and-fills')
 
@@ -666,7 +666,6 @@ _EOF_
 
 
 	fi
-
 
 	if (( $HW_MODEL < 10 )); then
 
