@@ -1450,6 +1450,11 @@ _EOF_
 	dietpi-notify 2 'Generating dietpi-fs_partition_resize for first boot'
 
 	#??? BBB skip this???
+	if [ ! -d /etc/dietpi ]; then
+
+		mkdir /etc/dietpi
+
+	fi
 	cat << _EOF_ > /etc/dietpi/fs_partition_resize.sh
 #!/bin/bash
 
