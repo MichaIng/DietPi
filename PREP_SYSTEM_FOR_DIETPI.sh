@@ -1381,7 +1381,7 @@ _EOF_
 	if (( $HW_MODEL < 10 )); then
 
 		rm -R /lib/modules/* # Remove all modules from all kernels, ensures our kernel is installed.
-		/DietPi/dietpi/func/dietpi-set_hardware kernel dietpi_rpi
+		/DietPi/dietpi/func/dietpi-set_hardware kernel dietpi_rpi_forced #forced, incase of kernel version match which would prevent install
 
 	fi
 
