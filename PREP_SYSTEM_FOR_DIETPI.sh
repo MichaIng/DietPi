@@ -1450,24 +1450,6 @@ _EOF_
 	dietpi-notify 2 'Generating dietpi-fs_partition_resize for first boot'
 
 	#??? BBB skip this???
-	cat << _EOF_ > /etc/systemd/system/dietpi-fs_partition_resize.service
-[Unit]
-Description=dietpi-fs_partition_resize
-Before=dietpi-ramdisk.service
-
-[Service]
-Type=oneshot
-RemainAfterExit=no
-ExecStart=/bin/bash -c '/etc/dietpi/fs_partition_resize.sh | tee /var/lib/dietpi/logs/fs_partition_resize.log'
-StandardOutput=tty
-
-[Install]
-WantedBy=local-fs.target
-_EOF_
-	systemctl daemon-reload
-	systemctl enable dietpi-fs_partition_resize.service
-	Error_Check
-
 	cat << _EOF_ > /etc/dietpi/fs_partition_resize.sh
 #!/bin/bash
 
@@ -1508,6 +1490,24 @@ reboot
 _EOF_
 	Error_Check
 	chmod +x /etc/dietpi/fs_partition_resize.sh
+	Error_Check
+	
+	cat << _EOF_ > /etc/systemd/system/dietpi-fs_partition_resize.service
+[Unit]
+Description=dietpi-fs_partition_resize
+Before=dietpi-ramdisk.service
+
+[Service]
+Type=oneshot
+RemainAfterExit=no
+ExecStart=/bin/bash -c '/etc/dietpi/fs_partition_resize.sh | tee /var/lib/dietpi/logs/fs_partition_resize.log'
+StandardOutput=tty
+
+[Install]
+WantedBy=local-fs.target
+_EOF_
+	systemctl daemon-reload
+	systemctl enable dietpi-fs_partition_resize.service
 	Error_Check
 
 	dietpi-notify 2 'Generating dietpi-fs_partition_expand for subsequent boot'
