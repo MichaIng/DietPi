@@ -1129,6 +1129,7 @@ _EOF_
 
 	dietpi-notify 2 "Configuring bash:"
 
+	#NB: we need to clear existing DietPi entries, then update with new
 	cat << _EOF_ >> /etc/bash.bashrc
 #LANG
 export \$(cat /etc/default/locale | grep LANG=)
@@ -1181,7 +1182,11 @@ _EOF_
 
 	# - login,
 	sed -i '/DietPi/d' /root/.bashrc #prevents dupes
-	echo -e "\n/DietPi/dietpi/login" >> /root/.bashrc
+	cat << _EOF_ >> /root/.bashrc
+/DietPi/dietpi/login
+. /DietPi/dietpi/func/dietpi-globals
+_EOF_
+
 	Error_Check
 
 	dietpi-notify 2 "Configuring fakehwclock:"
