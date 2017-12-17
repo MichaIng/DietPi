@@ -277,6 +277,7 @@
 		rm -R /mnt/dietpi_userdata &> /dev/null
 
 		rm -R /etc/dietpi &> /dev/null
+		rm -R /var/lib/dietpi &> /dev/null
 
 		rm /root/DietPi-Automation.log &> /dev/null
 		rm /boot/Automation_Format_My_Usb_Drive &> /dev/null
@@ -827,7 +828,7 @@ _EOF_
 	mkdir -p /DietPi
 	Error_Check
 
-	mkdir -p /etc/dietpi/logs
+	mkdir -p /var/lib/dietpi/logs
 	Error_Check
 
 	mkdir -p /mnt/dietpi_userdata
@@ -881,15 +882,15 @@ After=local-fs.target
 [Service]
 Type=forking
 RemainAfterExit=yes
-ExecStartPre=/bin/mkdir -p /etc/dietpi/logs
-ExecStart=/bin/bash -c '/boot/dietpi/dietpi-ramdisk 0'
-ExecStop=/bin/bash -c '/DietPi/dietpi/dietpi-ramdisk 1'
+ExecStartPre=/bin/mkdir -p /var/lib/dietpi/logs
+ExecStart=/bin/bash -c '/boot/dietpi/dietpi-ramdisk 0 | tee -a /var/lib/dietpi/logs/dietpi-ramdisk.log'
+ExecStop=/bin/bash -c '/DietPi/dietpi/dietpi-ramdisk 1 | tee -a /var/lib/dietpi/logs/dietpi-ramdisk.log'
 
 [Install]
 WantedBy=local-fs.target
 _EOF_
-	systemctl enable dietpi-ramdisk.service
 	systemctl daemon-reload
+	systemctl enable dietpi-ramdisk.service
 	systemctl start dietpi-ramdisk.service
 	Error_Check
 
@@ -911,15 +912,14 @@ ExecStop=/bin/bash -c '/DietPi/dietpi/dietpi-ramlog 1'
 [Install]
 WantedBy=local-fs.target
 _EOF_
-	systemctl enable dietpi-ramlog.service
 	systemctl daemon-reload
+	systemctl enable dietpi-ramlog.service
 	systemctl start dietpi-ramlog.service
 	Error_Check
 
 	dietpi-notify 2 "Installing DietPi boot service"
 
 	#	Boot
-	#	- DEBUGGING enabled: tee /etc/dietpi/logs/dietpi-boot.log
 	cat << _EOF_ > /etc/systemd/system/dietpi-boot.service
 [Unit]
 Description=DietPi-Boot
@@ -929,7 +929,7 @@ Requires=dietpi-ramdisk.service
 [Service]
 Type=oneshot
 RemainAfterExit=yes
-ExecStart=/bin/bash -c '/DietPi/dietpi/boot | tee /etc/dietpi/logs/dietpi-boot.log'
+ExecStart=/bin/bash -c '/DietPi/dietpi/boot'
 StandardOutput=tty
 
 [Install]
@@ -1458,7 +1458,7 @@ Before=dietpi-ramdisk.service
 [Service]
 Type=oneshot
 RemainAfterExit=no
-ExecStart=/bin/bash -c '/etc/dietpi/fs_partition_resize.sh | tee /etc/dietpi/logs/fs_partition_resize.log'
+ExecStart=/bin/bash -c '/etc/dietpi/fs_partition_resize.sh | tee /var/lib/dietpi/logs/fs_partition_resize.log'
 StandardOutput=tty
 
 [Install]
@@ -1520,7 +1520,7 @@ Before=dietpi-ramdisk.service
 [Service]
 Type=oneshot
 RemainAfterExit=no
-ExecStart=/bin/bash -c "resize2fs \$(findmnt / -o source -n) | tee /etc/dietpi/logs/fs_expand.log; systemctl disable dietpi-fs_expand.service; systemctl daemon-reload"
+ExecStart=/bin/bash -c "resize2fs \$(findmnt / -o source -n) | tee /var/lib/dietpi/logs/fs_expand.log; systemctl disable dietpi-fs_expand.service; systemctl daemon-reload"
 StandardOutput=tty
 
 [Install]
@@ -1533,7 +1533,7 @@ _EOF_
 	# #debug
 	# systemctl start dietpi-fs_partition_resize.service
 	# systemctl status dietpi-fs_partition_resize.service -l
-	# cat /etc/dietpi/logs/fs_partition_resize.log
+	# cat /var/lib/dietpi/logs/fs_partition_resize.log
 
 
 	dietpi-notify 2 'Sync changes to disk and TRIM rootFS'
