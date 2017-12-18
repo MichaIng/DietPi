@@ -254,7 +254,9 @@
 	#------------------------------------------------------------------------------------------------
 
 	#------------------------------------------------------------------------------------------------
+	dietpi-notify 2 '-----------------------------------------------------------------------------------'
 	dietpi-notify 0 'Step 0: Detecting existing DietPi system:'
+	dietpi-notify 2 '-----------------------------------------------------------------------------------'
 	#------------------------------------------------------------------------------------------------
 	if [ -f /DietPi/dietpi/.installed ]; then
 
@@ -278,6 +280,7 @@
 
 		rm -R /etc/dietpi &> /dev/null
 		rm -R /var/lib/dietpi &> /dev/null
+		rm -R /var/tmp/dietpi &> /dev/null
 
 		rm /root/DietPi-Automation.log &> /dev/null
 		rm /boot/Automation_Format_My_Usb_Drive &> /dev/null
@@ -290,7 +293,9 @@
 
 
 	#------------------------------------------------------------------------------------------------
+	dietpi-notify 2 '-----------------------------------------------------------------------------------'
 	dietpi-notify 0 'Step 1: Initial prep to allow this script to function:'
+	dietpi-notify 2 '-----------------------------------------------------------------------------------'
 	#------------------------------------------------------------------------------------------------
 	dietpi-notify 2 'Updating APT:'
 
@@ -306,7 +311,9 @@
 	Error_Check
 
 	#------------------------------------------------------------------------------------------------
+	dietpi-notify 2 '-----------------------------------------------------------------------------------'
 	dietpi-notify 0 'Step 2: Hardware selection:'
+	dietpi-notify 2 '-----------------------------------------------------------------------------------'
 	#------------------------------------------------------------------------------------------------
 
 	WHIP_TITLE='Hardware selection:'
@@ -364,7 +371,9 @@
 	echo -e "$HW_MODEL" > /etc/.dietpi_hw_model_identifier
 
 	#------------------------------------------------------------------------------------------------
+	dietpi-notify 2 '-----------------------------------------------------------------------------------'
 	dietpi-notify 0 'Step 3: Distro selection / APT prep:'
+	dietpi-notify 2 '-----------------------------------------------------------------------------------'
 	#------------------------------------------------------------------------------------------------
 
 	WHIP_TITLE='Distro Selection:'
@@ -475,7 +484,9 @@ _EOF_
 
 
 	#------------------------------------------------------------------------------------------------
+	dietpi-notify 2 '-----------------------------------------------------------------------------------'
 	dietpi-notify 0 'Step 4: APT removals:'
+	dietpi-notify 2 '-----------------------------------------------------------------------------------'
 	#------------------------------------------------------------------------------------------------
 
 	# - DietPi list of minimal required packages which must be installed:
@@ -622,7 +633,9 @@ _EOF_
 
 
 	#------------------------------------------------------------------------------------------------
+	dietpi-notify 2 '-----------------------------------------------------------------------------------'
 	dietpi-notify 0 'Step 5: APT Installations:'
+	dietpi-notify 2 '-----------------------------------------------------------------------------------'
 	#------------------------------------------------------------------------------------------------
 
 	dietpi-notify 2 "Upgrading existing APT installed packages:"
@@ -685,7 +698,9 @@ _EOF_
 	rm /etc/apt/apt-conf.d/99dietpi_norecommends &> /dev/null
 
 	#------------------------------------------------------------------------------------------------
+	dietpi-notify 2 '-----------------------------------------------------------------------------------'
 	dietpi-notify 0 'Step 6: Downloading and installing DietPi sourcecode'
+	dietpi-notify 2 '-----------------------------------------------------------------------------------'
 	#------------------------------------------------------------------------------------------------
 
 	INTERNET_ADDRESS='https://github.com/Fourdee/DietPi/archive/testing.zip' #NB: testing until this is stable in master
@@ -751,7 +766,9 @@ _EOF_
 	Error_Check
 
 	#------------------------------------------------------------------------------------------------
+	dietpi-notify 2 '-----------------------------------------------------------------------------------'
 	dietpi-notify 0 "Step 7: Prep system for DietPi ENV:"
+	dietpi-notify 2 '-----------------------------------------------------------------------------------'
 	#------------------------------------------------------------------------------------------------
 
 	dietpi-notify 2 "Deleting list of known users, not required by DietPi"
@@ -817,30 +834,9 @@ _EOF_
 	# - ARMbian-config
 	rm /etc/profile.d/check_first_login_reboot.sh &> /dev/null
 
-	dietpi-notify 2 "Setting UID bit for sudo"
+	dietpi-notify 2 "Creating DietPi core environment"
 
-	# - https://github.com/Fourdee/DietPi/issues/794
-	chmod 4755 /usr/bin/sudo
-	Error_Check
-
-	dietpi-notify 2 "Creating DietPi system directories"
-
-	mkdir -p /DietPi
-	Error_Check
-
-	mkdir -p /var/lib/dietpi/logs
-	Error_Check
-
-	mkdir -p /mnt/dietpi_userdata
-	Error_Check
-
-	mkdir -p /mnt/samba
-	Error_Check
-
-	mkdir -p /mnt/ftp_client
-	Error_Check
-
-	mkdir -p /mnt/nfs_client
+	/boot/dietpi/func/dietpi-set_core_environment
 	Error_Check
 
 	echo -e "Samba client can be installed and setup by DietPi-Config.\nSimply run: dietpi-config and select the Networking option: NAS/Misc menu" > /mnt/samba/readme.txt
@@ -872,180 +868,19 @@ _EOF_
 
 	fi
 
-	dietpi-notify 2 "Installing and starting DietPi-RAMdisk service"
+	dietpi-notify 2 "Starting DietPi-RAMdisk service"
 
-	cat << _EOF_ > /etc/systemd/system/dietpi-ramdisk.service
-[Unit]
-Description=DietPi-RAMdisk
-After=local-fs.target
-
-[Service]
-Type=forking
-RemainAfterExit=yes
-ExecStartPre=/bin/mkdir -p /var/lib/dietpi/logs
-ExecStart=/bin/bash -c '/boot/dietpi/dietpi-ramdisk 0 | tee -a /var/lib/dietpi/logs/dietpi-ramdisk.log'
-ExecStop=/bin/bash -c '/DietPi/dietpi/dietpi-ramdisk 1 | tee -a /var/lib/dietpi/logs/dietpi-ramdisk.log'
-
-[Install]
-WantedBy=local-fs.target
-_EOF_
-	systemctl daemon-reload
-	systemctl enable dietpi-ramdisk.service
 	systemctl start dietpi-ramdisk.service
 	Error_Check
 
-	dietpi-notify 2 "Installing and starting DietPi-RAMlog service"
+	dietpi-notify 2 "Starting DietPi-RAMlog service"
 
-	#	DietPi-Ramlog
-	cat << _EOF_ > /etc/systemd/system/dietpi-ramlog.service
-[Unit]
-Description=DietPi-RAMlog
-Before=rsyslog.service syslog.service
-After=local-fs.target
-
-[Service]
-Type=forking
-RemainAfterExit=yes
-ExecStart=/bin/bash -c '/boot/dietpi/dietpi-ramlog 0'
-ExecStop=/bin/bash -c '/DietPi/dietpi/dietpi-ramlog 1'
-
-[Install]
-WantedBy=local-fs.target
-_EOF_
-	systemctl daemon-reload
-	systemctl enable dietpi-ramlog.service
 	systemctl start dietpi-ramlog.service
 	Error_Check
-
-	dietpi-notify 2 "Installing DietPi boot service"
-
-	#	Boot
-	cat << _EOF_ > /etc/systemd/system/dietpi-boot.service
-[Unit]
-Description=DietPi-Boot
-After=network-online.target network.target networking.service dietpi-ramdisk.service dietpi-ramlog.service
-Requires=dietpi-ramdisk.service
-
-[Service]
-Type=oneshot
-RemainAfterExit=yes
-ExecStart=/bin/bash -c '/DietPi/dietpi/boot'
-StandardOutput=tty
-
-[Install]
-WantedBy=multi-user.target
-_EOF_
-	systemctl enable dietpi-boot.service
-	systemctl daemon-reload
 
 	dietpi-notify 2 'Updating DietPi globals'
 
 	/DietPi/dietpi/dietpi-obtain_hw_model
-
-	dietpi-notify 2 "Installing DietPi /etc/rc.local service"
-
-	update-rc.d -f rc.local remove &> /dev/null
-	rm /etc/init.d/rc.local &> /dev/null
-	rm /lib/systemd/system/rc-local.service &> /dev/null
-
-	cat << _EOF_ > /etc/systemd/system/rc-local.service
-[Unit]
-Description=/etc/rc.local Compatibility
-After=dietpi-boot.service dietpi-ramdisk.service dietpi-ramlog.service
-Requires=dietpi-boot.service dietpi-ramdisk.service
-
-[Service]
-Type=idle
-ExecStart=/etc/rc.local
-StandardOutput=tty
-RemainAfterExit=yes
-
-[Install]
-WantedBy=multi-user.target
-_EOF_
-	systemctl enable rc-local.service
-	systemctl daemon-reload
-
-	cat << _EOF_ > /etc/rc.local
-#!/bin/bash
-#Precaution: Wait for DietPi Ramdisk to finish
-while [ ! -f /DietPi/.ramdisk ]
-do
-
-    /DietPi/dietpi/func/dietpi-notify 2 "Waiting for DietPi-RAMDISK to finish mounting DietPi to RAM..."
-    sleep 1
-
-done
-
-echo -e "\$(cat /proc/uptime | awk '{print \$1}') Seconds" > /var/log/boottime
-if (( \$(cat /DietPi/dietpi/.install_stage) == 1 )); then
-
-    /DietPi/dietpi/dietpi-services start
-
-fi
-/DietPi/dietpi/dietpi-banner 0
-echo -e " Default Login:\n Username = root\n Password = dietpi\n"
-exit 0
-_EOF_
-	chmod +x /etc/rc.local
-	systemctl daemon-reload
-
-	dietpi-notify 2 "Installing kill-ssh-user-sessions-before-network.service"
-
-	cat << _EOF_ > /etc/systemd/system/kill-ssh-user-sessions-before-network.service
-[Unit]
-Description=Shutdown all ssh sessions before network
-DefaultDependencies=no
-Before=network.target shutdown.target
-
-[Service]
-Type=oneshot
-ExecStart=/bin/bash -c 'killall sshd &> /dev/null; killall dropbear &> /dev/null'
-
-[Install]
-WantedBy=poweroff.target halt.target reboot.target
-_EOF_
-	systemctl enable kill-ssh-user-sessions-before-network
-	systemctl daemon-reload
-
-	dietpi-notify 2 "Configuring Cron:"
-
-	#Cron jobs
-	cp /DietPi/dietpi/conf/cron.daily_dietpi /etc/cron.daily/dietpi
-	Error_Check
-	chmod +x /etc/cron.daily/dietpi
-	Error_Check
-	cp /DietPi/dietpi/conf/cron.hourly_dietpi /etc/cron.hourly/dietpi
-	Error_Check
-	chmod +x /etc/cron.hourly/dietpi
-	Error_Check
-
-	cat << _EOF_ > /etc/crontab
-#Please use dietpi-cron to change cron start times
-SHELL=/bin/sh
-PATH=/usr/local/sbin:/usr/local/bin:/sbin:/bin:/usr/sbin:/usr/bin
-
-# m h dom mon dow user  command
-17 *    * * *   root    cd / && run-parts --report /etc/cron.hourly
-25 1    * * *   root    test -x /usr/sbin/anacron || ( cd / && run-parts --report /etc/cron.daily )
-47 1    * * 7   root    test -x /usr/sbin/anacron || ( cd / && run-parts --report /etc/cron.weekly )
-52 1    1 * *   root    test -x /usr/sbin/anacron || ( cd / && run-parts --report /etc/cron.monthly )
-_EOF_
-	Error_Check
-
-	# - ntp
-	rm /etc/cron.daily/ntp &> /dev/null
-
-	dietpi-notify 2 "Disabling apt-daily services (prevents random APT cache lock):"
-
-	systemctl mask apt-daily.service
-	systemctl mask apt-daily-upgrade.timer
-
-	dietpi-notify 2 "Setting vm.swappiness=1:"
-
-	sed -i '/vm.swappiness=/d' /etc/sysctl.conf
-	echo -e "vm.swappiness=1" > /etc/sysctl.d/97-dietpi.conf
-	Error_Check
 
 	dietpi-notify 2 "Configuring Network:"
 
@@ -1078,17 +913,6 @@ _EOF_
 timeout 10;
 retry 4;
 _EOF_
-	Error_Check
-
-	dietpi-notify 2 "Tweaking network naming:"
-
-	# - Prefer to use wlan/eth naming for networked devices (eg: stretch)
-	ln -sf /dev/null /etc/systemd/network/99-default.link
-	#??? x86_64
-	#	kernel cmd line with GRUB
-	#	/etc/default/grub [replace] GRUB_CMDLINE_LINUX="net.ifnames=0"
-	#								GRUB_TIMEOUT=0
-	#???
 
 	dietpi-notify 2 "Configuring Hosts:"
 
@@ -1105,7 +929,6 @@ _EOF_
 DietPi
 _EOF_
 	Error_Check
-
 
 	dietpi-notify 2 "Configuring htop:"
 
@@ -1125,68 +948,6 @@ _EOF_
         apm = 254
 }
 _EOF_
-	Error_Check
-
-	dietpi-notify 2 "Configuring bash:"
-
-	#NB: we need to clear existing DietPi entries, then update with new
-	cat << _EOF_ >> /etc/bash.bashrc
-#LANG
-export \$(cat /etc/default/locale | grep LANG=)
-
-#Define a default LD_LIBRARY_PATH for all systems
-export LD_LIBRARY_PATH=/lib:/usr/lib:/usr/local/lib:/opt/vc/lib
-
-#DietPi Additions
-alias sudo='sudo ' # https://github.com/Fourdee/DietPi/issues/424
-alias dietpi-process_tool='/DietPi/dietpi/dietpi-process_tool'
-alias dietpi-letsencrypt='/DietPi/dietpi/dietpi-letsencrypt'
-alias dietpi-autostart='/DietPi/dietpi/dietpi-autostart'
-alias dietpi-cron='/DietPi/dietpi/dietpi-cron'
-alias dietpi-launcher='/DietPi/dietpi/dietpi-launcher'
-alias dietpi-cleaner='/DietPi/dietpi/dietpi-cleaner'
-alias dietpi-morsecode='/DietPi/dietpi/dietpi-morsecode'
-alias dietpi-sync='/DietPi/dietpi/dietpi-sync'
-alias dietpi-backup='/DietPi/dietpi/dietpi-backup'
-alias dietpi-bugreport='/DietPi/dietpi/dietpi-bugreport'
-alias dietpi-services='/DietPi/dietpi/dietpi-services'
-alias dietpi-config='/DietPi/dietpi/dietpi-config'
-alias dietpi-software='/DietPi/dietpi/dietpi-software'
-alias dietpi-update='/DietPi/dietpi/dietpi-update'
-alias dietpi-drive_manager='/DietPi/dietpi/dietpi-drive_manager'
-alias emulationstation='/opt/retropie/supplementary/emulationstation/emulationstation'
-alias opentyrian='/usr/local/games/opentyrian/run'
-
-alias cpu='/DietPi/dietpi/dietpi-cpuinfo'
-alias dietpi-logclear='/DietPi/dietpi/dietpi-logclear'
-treesize()
-{
-     du -k --max-depth=1 | sort -nr | awk '
-     BEGIN {
-        split("KB,MB,GB,TB", Units, ",");
-     }
-     {
-        u = 1;
-        while (\$1 >= 1024)
-        {
-           \$1 = \$1 / 1024;
-           u += 1;
-        }
-        \$1 = sprintf("%.1f %s", \$1, Units[u]);
-        print \$0;
-     }
-    '
-}
-_EOF_
-	Error_Check
-
-	# - login,
-	sed -i '/DietPi/d' /root/.bashrc #prevents dupes
-	cat << _EOF_ >> /root/.bashrc
-/DietPi/dietpi/login
-. /DietPi/dietpi/func/dietpi-globals
-_EOF_
-
 	Error_Check
 
 	dietpi-notify 2 "Configuring fakehwclock:"
@@ -1302,7 +1063,9 @@ _EOF_
 
 
 	#------------------------------------------------------------------------------------------------
+	dietpi-notify 2 '-----------------------------------------------------------------------------------'
 	dietpi-notify 0 "Step 8: Finalise system for first run of DietPi:"
+	dietpi-notify 2 '-----------------------------------------------------------------------------------'
 	#------------------------------------------------------------------------------------------------
 
 	dietpi-notify 2 'Installing Dropbear by default'
@@ -1410,10 +1173,6 @@ _EOF_
 
 	rm /var/lib/ntp/ntp.drift &> /dev/null
 
-	dietpi-notify 2 'Creating DietPi default user'
-
-	/DietPi/dietpi/func/dietpi-set_software	useradd dietpi
-
 	dietpi-notify 2 'Resetting DietPi generated globals/files'
 
 	rm /DietPi/dietpi/.*
@@ -1450,32 +1209,35 @@ _EOF_
 	dietpi-notify 2 'Generating dietpi-fs_partition_resize for first boot'
 
 	#??? BBB skip this???
-	if [ ! -d /etc/dietpi ]; then
+	cat << _EOF_ > /etc/systemd/system/dietpi-fs_partition_resize.service
+[Unit]
+Description=dietpi-fs_partition_resize
+Before=dietpi-ramdisk.service
+[Service]
+Type=oneshot
+RemainAfterExit=no
+ExecStart=/bin/bash -c '/etc/dietpi/fs_partition_resize.sh | tee /var/tmp/dietpi/logs/fs_partition_resize.log'
+StandardOutput=tty
+[Install]
+WantedBy=local-fs.target
+_EOF_
+	systemctl daemon-reload
+	systemctl enable dietpi-fs_partition_resize.service
+	Error_Check
 
-		mkdir /etc/dietpi
-
-	fi
 	cat << _EOF_ > /etc/dietpi/fs_partition_resize.sh
 #!/bin/bash
-
 systemctl disable dietpi-fs_partition_resize.service
 systemctl daemon-reload
-
 TARGET_PARTITION=\$(findmnt / -o source -n | sed 's/.*p//')
 TARGET_DEV=\$(findmnt / -o source -n)
-
 # - MMCBLK[0-9]p[0-9] scrape
 if [[ "\$TARGET_DEV" = *"mmcblk"* ]]; then
-
     TARGET_DEV=\$(findmnt / -o source -n | sed 's/p[0-9]\$//')
-
 # - Everything else scrape (eg: /dev/sdX[0-9])
 else
-
     TARGET_DEV=\$(findmnt / -o source -n | sed 's/[0-9]\$//')
-
 fi
-
 cat << _EOF_1 | fdisk \$TARGET_DEV
 p
 d
@@ -1484,35 +1246,13 @@ n
 p
 \$TARGET_PARTITION
 \$(parted \$TARGET_DEV -ms unit s p | grep ':ext4::;' | sed 's/:/ /g' | sed 's/s//g' | awk '{ print \$2 }')
-
 p
 w
-
 _EOF_1
-
 reboot
-
 _EOF_
 	Error_Check
 	chmod +x /etc/dietpi/fs_partition_resize.sh
-	Error_Check
-	
-	cat << _EOF_ > /etc/systemd/system/dietpi-fs_partition_resize.service
-[Unit]
-Description=dietpi-fs_partition_resize
-Before=dietpi-ramdisk.service
-
-[Service]
-Type=oneshot
-RemainAfterExit=no
-ExecStart=/bin/bash -c '/etc/dietpi/fs_partition_resize.sh | tee /var/lib/dietpi/logs/fs_partition_resize.log'
-StandardOutput=tty
-
-[Install]
-WantedBy=local-fs.target
-_EOF_
-	systemctl daemon-reload
-	systemctl enable dietpi-fs_partition_resize.service
 	Error_Check
 
 	dietpi-notify 2 'Generating dietpi-fs_partition_expand for subsequent boot'
@@ -1521,13 +1261,11 @@ _EOF_
 [Unit]
 Description=dietpi-fs_expand
 Before=dietpi-ramdisk.service
-
 [Service]
 Type=oneshot
 RemainAfterExit=no
-ExecStart=/bin/bash -c "resize2fs \$(findmnt / -o source -n) | tee /var/lib/dietpi/logs/fs_expand.log; systemctl disable dietpi-fs_expand.service; systemctl daemon-reload"
+ExecStart=/bin/bash -c "resize2fs \$(findmnt / -o source -n) | tee /var/tmp/dietpi/logs/fs_expand.log; systemctl disable dietpi-fs_expand.service; systemctl daemon-reload"
 StandardOutput=tty
-
 [Install]
 WantedBy=local-fs.target
 _EOF_
@@ -1538,7 +1276,7 @@ _EOF_
 	# #debug
 	# systemctl start dietpi-fs_partition_resize.service
 	# systemctl status dietpi-fs_partition_resize.service -l
-	# cat /var/lib/dietpi/logs/fs_partition_resize.log
+	# cat /var/tmp/dietpi/logs/fs_partition_resize.log
 
 
 	dietpi-notify 2 'Sync changes to disk and TRIM rootFS'
