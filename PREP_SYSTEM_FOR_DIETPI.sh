@@ -1213,11 +1213,13 @@ _EOF_
 [Unit]
 Description=dietpi-fs_partition_resize
 Before=dietpi-ramdisk.service
+
 [Service]
 Type=oneshot
 RemainAfterExit=no
 ExecStart=/bin/bash -c '/etc/dietpi/fs_partition_resize.sh | tee /var/tmp/dietpi/logs/fs_partition_resize.log'
 StandardOutput=tty
+
 [Install]
 WantedBy=local-fs.target
 _EOF_
@@ -1227,17 +1229,24 @@ _EOF_
 
 	cat << _EOF_ > /etc/dietpi/fs_partition_resize.sh
 #!/bin/bash
+
 systemctl disable dietpi-fs_partition_resize.service
 systemctl daemon-reload
+
 TARGET_PARTITION=\$(findmnt / -o source -n | sed 's/.*p//')
 TARGET_DEV=\$(findmnt / -o source -n)
 # - MMCBLK[0-9]p[0-9] scrape
 if [[ "\$TARGET_DEV" = *"mmcblk"* ]]; then
+
     TARGET_DEV=\$(findmnt / -o source -n | sed 's/p[0-9]\$//')
+
 # - Everything else scrape (eg: /dev/sdX[0-9])
 else
+
     TARGET_DEV=\$(findmnt / -o source -n | sed 's/[0-9]\$//')
+
 fi
+
 cat << _EOF_1 | fdisk \$TARGET_DEV
 p
 d
@@ -1246,10 +1255,14 @@ n
 p
 \$TARGET_PARTITION
 \$(parted \$TARGET_DEV -ms unit s p | grep ':ext4::;' | sed 's/:/ /g' | sed 's/s//g' | awk '{ print \$2 }')
+
 p
 w
+
 _EOF_1
+
 reboot
+
 _EOF_
 	Error_Check
 	chmod +x /etc/dietpi/fs_partition_resize.sh
@@ -1261,11 +1274,13 @@ _EOF_
 [Unit]
 Description=dietpi-fs_expand
 Before=dietpi-ramdisk.service
+
 [Service]
 Type=oneshot
 RemainAfterExit=no
 ExecStart=/bin/bash -c "resize2fs \$(findmnt / -o source -n) | tee /var/tmp/dietpi/logs/fs_expand.log; systemctl disable dietpi-fs_expand.service; systemctl daemon-reload"
 StandardOutput=tty
+
 [Install]
 WantedBy=local-fs.target
 _EOF_
