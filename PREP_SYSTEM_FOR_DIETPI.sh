@@ -78,7 +78,7 @@
 
 	else
 
-		dietpi-notify 1 "Unknown or unsupported CPU architecture $HW_ARCH_DESCRIPTION, aborting..."
+		dietpi-notify 1 "Error: Unknown or unsupported CPU architecture $HW_ARCH_DESCRIPTION, aborting..."
 		exit
 
 	fi
@@ -307,7 +307,7 @@
 
 	dietpi-notify 2 'Installing core packages, required for this script to function:'
 
-	AGI wget unzip whiptail
+	AGI apt-transport-https unzip wget whiptail
 	Error_Check
 
 	#------------------------------------------------------------------------------------------------
@@ -428,11 +428,18 @@ _EOF_
 	else
 
 		cat << _EOF_ > /etc/apt/sources.list
-deb http://ftp.debian.org/debian/ $DISTRO_TARGET_NAME main contrib non-free
-deb http://ftp.debian.org/debian/ $DISTRO_TARGET_NAME-updates main contrib non-free
-deb http://security.debian.org $DISTRO_TARGET_NAME/updates main contrib non-free
-deb http://ftp.debian.org/debian/ $DISTRO_TARGET_NAME-backports main contrib non-free
+deb https://deb.debian.org/debian/ $DISTRO_TARGET_NAME main contrib non-free
+deb https://deb.debian.org/debian/ $DISTRO_TARGET_NAME-updates main contrib non-free
+deb https://deb.debian.org/debian-security/ $DISTRO_TARGET_NAME/updates main contrib non-free
+deb https://deb.debian.org/debian/ $DISTRO_TARGET_NAME-backports main contrib non-free
 _EOF_
+
+		#	Jessie, switch to http: https://github.com/Fourdee/DietPi/issues/1285#issuecomment-351830101
+		if (( $DISTRO_TARGET == 3 )); then
+
+			sed -i 's/https/http/g' /etc/apt/sources.list
+
+		fi
 
 		#	Buster, remove backports: https://github.com/Fourdee/DietPi/issues/1285#issuecomment-351830101
 		if (( $DISTRO_TARGET == 5 )); then
@@ -556,13 +563,17 @@ _EOF_
 		aPACKAGES_REQUIRED_INSTALL+=('firmware-linux-nonfree')
 		#aPACKAGES_REQUIRED_INSTALL+=('firmware-misc-nonfree')
 		#aPACKAGES_REQUIRED_INSTALL+=('dmidecode')
-		if (( $(fdisk -l $1 | grep "Disklabel type:" | awk '{ print $3 }') == 'dos' )); then
+		if [ dpkg -l | grep 'grub2 ' ]; then
 
 			aPACKAGES_REQUIRED_INSTALL+=('grub2')
 
-		else
+		elif [ dpkg -l | grep 'grub-efi-amd64' ]; then
 
 			aPACKAGES_REQUIRED_INSTALL+=('grub-efi-amd64')
+
+		else
+
+			[ -d /boot/efi ] && aPACKAGES_REQUIRED_INSTALL+=('grub-efi-amd64') || aPACKAGES_REQUIRED_INSTALL+=('grub2')
 
 		fi
 
@@ -1121,7 +1132,7 @@ _EOF_
 	fi
 
 	# - Set Pi cmdline.txt back to normal
-	sed -i "s/ rootdelay=10//g" /boot/cmdline.txt
+	[ -f /boot/cmdline.txt ] && sed -i "s/ rootdelay=10//g" /boot/cmdline.txt
 
 	dietpi-notify 2 'Generating default wpa_supplicant.conf'
 
