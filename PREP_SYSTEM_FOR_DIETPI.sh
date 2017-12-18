@@ -1217,7 +1217,7 @@ Before=dietpi-ramdisk.service
 [Service]
 Type=oneshot
 RemainAfterExit=no
-ExecStart=/bin/bash -c '/etc/dietpi/fs_partition_resize.sh | tee /var/lib/dietpi/logs/fs_partition_resize.log'
+ExecStart=/bin/bash -c '/etc/dietpi/fs_partition_resize.sh | tee /var/tmp/dietpi/logs/fs_partition_resize.log'
 StandardOutput=tty
 
 [Install]
@@ -1279,7 +1279,7 @@ Before=dietpi-ramdisk.service
 [Service]
 Type=oneshot
 RemainAfterExit=no
-ExecStart=/bin/bash -c "resize2fs \$(findmnt / -o source -n) | tee /var/lib/dietpi/logs/fs_expand.log; systemctl disable dietpi-fs_expand.service; systemctl daemon-reload"
+ExecStart=/bin/bash -c "resize2fs \$(findmnt / -o source -n) | tee /var/tmp/dietpi/logs/fs_expand.log; systemctl disable dietpi-fs_expand.service; systemctl daemon-reload"
 StandardOutput=tty
 
 [Install]
@@ -1292,7 +1292,7 @@ _EOF_
 	# #debug
 	# systemctl start dietpi-fs_partition_resize.service
 	# systemctl status dietpi-fs_partition_resize.service -l
-	# cat /var/lib/dietpi/logs/fs_partition_resize.log
+	# cat /var/tmp/dietpi/logs/fs_partition_resize.log
 
 
 	dietpi-notify 2 'Sync changes to disk and TRIM rootFS'
