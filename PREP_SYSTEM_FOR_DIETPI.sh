@@ -886,7 +886,7 @@ _EOF_
 
 	fi
 
-	$FP_SCRIPTS/dietpi/func/dietpi-notify 2 "Tweaking DHCP timeout:"
+	dietpi-notify 2 "Tweaking DHCP timeout:"
 
 	# - Reduce DHCP request retry count and timeouts: https://github.com/Fourdee/DietPi/issues/711
 	sed -i '/^#timeout /d' /etc/dhcp/dhclient.conf
