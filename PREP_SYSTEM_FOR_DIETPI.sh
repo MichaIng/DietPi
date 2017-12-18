@@ -1235,6 +1235,7 @@ systemctl daemon-reload
 
 TARGET_PARTITION=\$(findmnt / -o source -n | sed 's/.*p//')
 TARGET_DEV=\$(findmnt / -o source -n)
+
 # - MMCBLK[0-9]p[0-9] scrape
 if [[ "\$TARGET_DEV" = *"mmcblk"* ]]; then
 
