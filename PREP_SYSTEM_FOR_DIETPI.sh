@@ -878,7 +878,7 @@ _EOF_
 	systemctl start dietpi-ramlog.service
 	Error_Check
 
-	dietpi-notify 2 'Updating DietPi globals'
+	dietpi-notify 2 'Updating DietPi HW_INFO'
 
 	/DietPi/dietpi/dietpi-obtain_hw_model
 

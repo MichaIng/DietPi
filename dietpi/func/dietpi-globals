@@ -10,6 +10,12 @@
 	#
 	# Info:
 	# - Allows export of shared DietPi global variables into current bash session, and, other scripts
+	#
+	# Excluded scripts, which do NOT load these globals
+	# - dietpi-ramlog
+	# - dietpi-ramdisk
+	# - PREP_SYSTEM_FOR_DIETPI.sh
+	#
 	# Notes:
 	# - . /DietPi/dietpi/func/dietpi-globals > $HOME/.bashrc
 	# - . /DietPi/dietpi/func/dietpi-globals > for each script that uses these globals
@@ -22,10 +28,8 @@
 
 	fi
 
-	#/DietPi/dietpi/func/dietpi-notify 2 'Updating DietPi-Globals, please wait...'
-
 	#-----------------------------------------------------------------------------------
-	# Core var's, functions, environment checks. Used at start of all scripts.
+	# Core var's, functions, environment. Used at start of all scripts.
 	#-----------------------------------------------------------------------------------
 	#Prevent incorrect parsing with non-english locales.
 	LANG=en_GB.UTF-8
@@ -33,11 +37,140 @@
 	#Ensure we are in users home dir: https://github.com/Fourdee/DietPi/issues/905#issuecomment-298223705
 	cd "$HOME"
 
+	#-----------------------------------------------------------------------------------
+	# DietPi-Notify
+	#-----------------------------------------------------------------------------------
+	# $1:
+	#	-1=autodetect_fail_ok
+	#	- $2 = EXIT_CODE
+	#	0=OK
+	#	- $2 = text
+	#	1=failed
+	#	- $2 = text
+	#	2=info
+	#	- $2 = text
+	#	3=DietPi banner style
+	#	- $2 = txt program name
+	#	- $3 = txt mode
+	dietpi-notify(){
+
+		local ainput_string=("$@")
+
+		#header_line="\e[38;5;154m─────────────────────────────────────────────────────\e[0m"
+		local header_line="\e[90m─────────────────────────────────────────────────────\e[0m"
+
+		local status_text_ok="\e[32mOk\e[0m"
+		local status_text_failed="\e[31mFailed:\e[0m"
+
+		local bracket_string_l="\e[90m[\e[0m"
+		local bracket_string_r="\e[90m]\e[0m"
+
+		#Funcs
+
+		Print_Ok(){
+
+			echo -ne " $bracket_string_l\e[32mOk\e[0m$bracket_string_r"
+
+		}
+
+		Print_Failed(){
+
+			echo -ne " $bracket_string_l\e[31mFailed\e[0m$bracket_string_r"
+
+		}
+
+		# - Print all input string on same line
+		# - $1 = start printing from word number $1
+		Print_Input_String(){
+
+			for (( i=$1;i<${#ainput_string[@]} ;i++))
+			do
+				echo -ne " ${ainput_string[${i}]}"
+			done
+
+			echo -e ""
+
+			# echo -e "SIZE = ${#ainput_string}"
+
+			# ainput_string="$@"
+			# for (( i=$1;i<${#ainput_string} ;i++))
+			# do
+				# echo -ne "${ainput_string:$i:1}"
+				# sleep 0.02
+			# done
+
+		}
+
+		#--------------------------------------------------------------------------------------
+		# Main Loop
+		#--------------------------------------------------------------------------------------
+		#Exit code, print OK or Failed
+		#$2 = exit code
+		# - Use this at end of DietPi scripts, EG: dietpi-notify -1 ${EXIT_CODE:=0}
+		if (( $1 == -1 )); then
+
+			if [ "$2" = "0" ]; then
+
+				ainput_string+=("Completed")
+				Print_Ok
+				Print_Input_String 2
+				echo -e ""
+
+			else
+
+				ainput_string+=("An issue has occured")
+				Print_Failed
+				Print_Input_String 2
+				echo -e ""
+
+			fi
+
+		#--------------------------------------------------------------------------------------
+		#Status Ok
+		#$@ = txt desc
+		elif (( $1 == 0 )); then
+
+			Print_Ok
+			Print_Input_String 1
+
+		#Status failed
+		#$@ = txt desc
+		elif (( $1 == 1 )); then
+
+			Print_Failed
+			Print_Input_String 1
+
+		#Status Info
+		#$@ = txt desc
+		elif (( $1 == 2 )); then
+
+			echo -ne " $bracket_string_l\e[0mInfo\e[0m$bracket_string_r"
+			echo -ne "\e[90m"
+			Print_Input_String 1
+			echo -ne "\e[0m"
+
+		#DietPi banner style
+		#$2 = txt program name
+		#$3 = txt mode
+		elif (( $1 == 3 )); then
+
+			echo -e "\n \e[38;5;154m$2\e[0m"
+			echo -e "$header_line"
+			echo -e " \e[90mMode:\e[0m$(Print_Input_String 2)"
+			echo -e " \e[90mPlease wait...\e[0m\n"
+
+		fi
+		#-----------------------------------------------------------------------------------
+		unset ainput_string
+		#-----------------------------------------------------------------------------------
+
+	}
+
 	CHECK_ROOT_USER(){
 
 		if (( $UID != 0 )); then
 
-			/DietPi/dietpi/func/dietpi-notify 1 'Error: Root privileges required. Please run the command with "sudo"\n'
+			dietpi-notify 1 'Error: Root privileges required. Please run the command with "sudo"\n'
 			exit 1
 
 		fi
@@ -50,7 +183,7 @@
 		/DietPi/dietpi/dietpi-drive_manager 3
 		if (( $? != 0 )); then
 
-			/DietPi/dietpi/func/dietpi-notify 1 'Error: RootFS is currently Read Only, unable to continue.\n'
+			dietpi-notify 1 'Error: RootFS is currently Read Only, unable to continue.\n'
 			exit 1
 
 		fi
@@ -66,30 +199,39 @@
 	#-----------------------------------------------------------------------------------
 	# Hardware Details
 	#-----------------------------------------------------------------------------------
-	#Update?
-	if [ ! -f /DietPi/dietpi/.hw_model ]; then
+	HW_MODEL=0
+	HW_MODEL_DESCRIPTION='NULL'
+	HW_ARCH=0
+	HW_CPU_CORES=1
+	HW_CPUID=0
 
-		/DietPi/dietpi/dietpi-obtain_hw_model
+	DISTRO=0
+	DISTRO_NAME='NULL'
+
+	# - Update
+	#	NB: dietpi-boot service launches dietpi-obtain_hw_model to create the following file
+	if [ -f /DietPi/dietpi/.hw_model ]; then
+
+		HW_MODEL=$(sed -n 1p /DietPi/dietpi/.hw_model)
+		HW_MODEL_DESCRIPTION=$(sed -n 2p /DietPi/dietpi/.hw_model)
+		HW_ARCH=$(sed -n 6p /DietPi/dietpi/.hw_model)
+		HW_CPU_CORES=$(nproc --all)
+		HW_CPUID=$(sed -n 9p /DietPi/dietpi/.hw_model)
+
+		DISTRO=$(sed -n 3p /DietPi/dietpi/.hw_model)
+		DISTRO_NAME='jessie'
+		if (( $DISTRO == 4 )); then
+
+			DISTRO_NAME='stretch'
+
+		elif (( $DISTRO == 5 )); then
+
+			DISTRO_NAME='buster'
+
+		fi
 
 	fi
 
-	HW_MODEL=$(sed -n 1p /DietPi/dietpi/.hw_model)
-	HW_MODEL_DESCRIPTION=$(sed -n 2p /DietPi/dietpi/.hw_model)
-	HW_ARCH=$(sed -n 6p /DietPi/dietpi/.hw_model)
-	HW_CPU_CORES=$(nproc --all)
-	HW_CPUID=$(sed -n 9p /DietPi/dietpi/.hw_model)
-
-	DISTRO=$(sed -n 3p /DietPi/dietpi/.hw_model)
-	DISTRO_NAME='jessie'
-	if (( $DISTRO == 4 )); then
-
-		DISTRO_NAME='stretch'
-
-	elif (( $DISTRO == 5 )); then
-
-		DISTRO_NAME='buster'
-
-	fi
 	#-----------------------------------------------------------------------------------
 	# DietPi specific directories
 	#-----------------------------------------------------------------------------------
@@ -127,8 +269,8 @@
 		fi
 
 		#-qq can add a slight period of appearing nothing is happening, lets inform user
-		/DietPi/dietpi/func/dietpi-notify 2 "APT installation for: $string"
-		/DietPi/dietpi/func/dietpi-notify 2 "APT is processing, please wait...\n"
+		dietpi-notify 2 "APT installation for: $string"
+		dietpi-notify 2 "APT is processing, please wait...\n"
 		DEBIAN_FRONTEND=noninteractive apt-get install -y -qq $force_options $string 2>&1 | tee "$FP_LOG_APT"
 		EXITCODE_APT=${PIPESTATUS[0]}
 
@@ -145,8 +287,8 @@
 
 		fi
 
-		/DietPi/dietpi/func/dietpi-notify 2 "APT removal for: $string"
-		apt-get purge -y $string $options
+		dietpi-notify 2 "APT removal for: $string"
+		DEBIAN_FRONTEND=noninteractive apt-get purge -y $string $options
 		EXITCODE_APT=${PIPESTATUS[0]}
 
 	}
@@ -154,8 +296,8 @@
 	#apt-get autoremove
 	AGA(){
 
-		/DietPi/dietpi/func/dietpi-notify 2 "APT autoremove + purge"
-		apt-get autoremove --purge -y
+		dietpi-notify 2 "APT autoremove + purge"
+		DEBIAN_FRONTEND=noninteractive apt-get autoremove --purge -y
 		EXITCODE_APT=${PIPESTATUS[0]}
 
 	}
@@ -163,13 +305,53 @@
 	#apt-get install -f
 	AGF(){
 
-		/DietPi/dietpi/func/dietpi-notify 2 "APT fix"
-		DEBIAN_FRONTEND=noninteractive apt-get install -f -y $force_options 2>&1 | tee "$FP_LOG_APT"
+		dietpi-notify 2 "APT fix"
+		DEBIAN_FRONTEND=noninteractive apt-get install -f -y 2>&1 | tee "$FP_LOG_APT"
+		EXITCODE_APT=${PIPESTATUS[0]}
+
+	}
+
+	#apt-get update
+	AGUP(){
+
+		dietpi-notify 2 "APT update"
+		DEBIAN_FRONTEND=noninteractive apt-get update 2>&1 | tee "$FP_LOG_APT"
+		EXITCODE_APT=${PIPESTATUS[0]}
+
+	}
+
+	#apt-get upgrade
+	AGUG(){
+
+		dietpi-notify 2 "APT upgrade"
+		DEBIAN_FRONTEND=noninteractive apt-get upgrade -y 2>&1 | tee "$FP_LOG_APT"
+		EXITCODE_APT=${PIPESTATUS[0]}
+
+	}
+
+	#apt-get dist-upgrade
+	AGDUG(){
+
+		local string="$@"
+		local force_options=''
+
+		if (( $DISTRO >= 4 )); then
+
+			force_options='--allow-downgrades --allow-remove-essential --allow-change-held-packages --allow-unauthenticated'
+
+		else
+
+			force_options='--force-yes'
+
+		fi
+
+		dietpi-notify 2 "APT dist-upgrade"
+		DEBIAN_FRONTEND=noninteractive apt-get dist-upgrade -y 2>&1 | tee "$FP_LOG_APT"
 		EXITCODE_APT=${PIPESTATUS[0]}
 
 	}
 
 	#-----------------------------------------------------------------------------------
-	#/DietPi/dietpi/func/dietpi-notify 0 'DietPi-Globals\n'
+	#dietpi-notify 0 'DietPi-Globals\n'
 	#-----------------------------------------------------------------------------------
 }
