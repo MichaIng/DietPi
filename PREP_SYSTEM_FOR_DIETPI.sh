@@ -204,15 +204,15 @@
 
 		local string="$@"
 
-		local force_WHIP_OPTIONs='--force-yes'
+		local apt_force_options='--force-yes'
 
 		if (( $DISTRO >= 4 )); then
 
-			force_WHIP_OPTIONs='--allow-downgrades --allow-remove-essential --allow-change-held-packages --allow-unauthenticated'
+			apt_force_options='--allow-downgrades --allow-remove-essential --allow-change-held-packages --allow-unauthenticated'
 
 		fi
 
-		DEBIAN_FRONTEND=noninteractive $(which apt) install -y $force_WHIP_OPTIONs $string
+		DEBIAN_FRONTEND=noninteractive $(which apt) install -y $apt_force_options $string
 
 	}
 
