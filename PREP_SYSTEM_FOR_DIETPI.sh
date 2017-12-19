@@ -1244,18 +1244,19 @@ _EOF_
 systemctl disable dietpi-fs_partition_resize.service
 systemctl daemon-reload
 
-TARGET_PARTITION=\$(findmnt / -o source -n | sed 's/.*p//')
 TARGET_DEV=\$(findmnt / -o source -n)
 
 # - MMCBLK[0-9]p[0-9] scrape
 if [[ "\$TARGET_DEV" = *"mmcblk"* ]]; then
 
     TARGET_DEV=\$(findmnt / -o source -n | sed 's/p[0-9]\$//')
+    TARGET_PARTITION=\$(findmnt / -o source -n | sed 's/.*p//')
 
 # - Everything else scrape (eg: /dev/sdX[0-9])
 else
 
     TARGET_DEV=\$(findmnt / -o source -n | sed 's/[0-9]\$//')
+    TARGET_PARTITION=\$(findmnt / -o source -n | sed 's|/dev/sd.||')
 
 fi
 
