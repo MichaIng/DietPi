@@ -561,11 +561,11 @@ _EOF_
 		aPACKAGES_REQUIRED_INSTALL+=('firmware-linux-nonfree')
 		#aPACKAGES_REQUIRED_INSTALL+=('firmware-misc-nonfree')
 		#aPACKAGES_REQUIRED_INSTALL+=('dmidecode')
-		if [ dpkg --get-selections | grep '^grub2[[:space:]]' ]; then
+		if (( $(dpkg --get-selections | grep -ci -m1 '^grub2[[:space:]]') )); then
 
 			aPACKAGES_REQUIRED_INSTALL+=('grub2')
 
-		elif [ dpkg --get-selections | grep '^grub-efi-amd64[[:space:]]' ]; then
+		elif (( $(dpkg --get-selections | grep -ci -m1 '^grub-efi-amd64[[:space:]]') )); then
 
 			aPACKAGES_REQUIRED_INSTALL+=('grub-efi-amd64')
 
