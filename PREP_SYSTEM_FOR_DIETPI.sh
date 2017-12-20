@@ -617,7 +617,6 @@ _EOF_
 
 
 	G_DIETPI-NOTIFY 2 "Installing core DietPi pre-req APT packages"
-	G_DIETPI-NOTIFY 2 "The following packages will be installed\n$INSTALL_PACKAGES"
 
 	G_AGI $INSTALL_PACKAGES
 	Error_Check
