@@ -74,7 +74,7 @@
 
 	# - load
 	chmod +x dietpi-globals
-	. /dietpi-globals
+	. ./dietpi-globals
 	if (( $? != 0 )); then
 
 		echo -e 'Error: Unable to load dietpi-globals. Aborting...\n'
