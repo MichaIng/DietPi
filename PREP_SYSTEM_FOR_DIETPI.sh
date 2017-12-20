@@ -10,7 +10,7 @@
 	# DO NOT USE. Currently under testing.
 	#------------------------------------------------------------------------------------------------
 
-	#apt-get update
+	#G_AGUP
 	#apt-get install wget || or make it a pre-req?
 	#wget
 	#load
@@ -239,6 +239,10 @@
 
 	fi
 
+	#Recreate dietpi logs dir, used by G_AGx
+	mkdir -p /var/tmp/dietpi/logs
+	Error_Check
+
 
 	#------------------------------------------------------------------------------------------------
 	G_DIETPI-NOTIFY 2 '-----------------------------------------------------------------------------------'
@@ -250,7 +254,7 @@
 	apt-get clean
 	Error_Check
 
-	apt-get update
+	G_AGUP
 	Error_Check
 
 	G_DIETPI-NOTIFY 2 'Installing core packages, required for next stage of this script:'
@@ -401,7 +405,7 @@ _EOF_
 	apt-get clean
 	Error_Check
 
-	apt-get update
+	G_AGUP
 	Error_Check
 
 	# - Distro is now target
@@ -585,7 +589,7 @@ _EOF_
 
 	G_DIETPI-NOTIFY 2 "Purging APT with autoremoval:"
 
-	apt-get autoremove --purge -y
+	G_AGA
 	Error_Check
 
 
@@ -597,7 +601,7 @@ _EOF_
 
 	G_DIETPI-NOTIFY 2 "Upgrading existing APT installed packages:"
 
-	DEBIAN_FRONTEND='noninteractive' apt-get dist-upgrade -y
+	G_AGDUG
 	Error_Check
 
 	#???: WHIP_OPTIONal Reinstall OpenSSH (for updating dietpi scripts etc). Gets removed during finalise.
@@ -944,7 +948,7 @@ _EOF_
 
 		# - i386 APT support
 		dpkg --add-architecture i386
-		apt-get update
+		G_AGUP
 
 		# - Disable nouveau: https://github.com/Fourdee/DietPi/issues/1244 // http://dietpi.com/phpbb/viewtopic.php?f=11&t=2462&p=9688#p9688
 		cat << _EOF_ > /etc/modprobe.d/blacklist-nouveau.conf
@@ -1039,7 +1043,7 @@ _EOF_
 	G_DIETPI-NOTIFY 2 'Clearing APT cache'
 
 	apt-get clean
-	rm -R /var/lib/apt/lists/* -vf #lists cache: remove partial folder also, automatically gets regenerated on apt-get update
+	rm -R /var/lib/apt/lists/* -vf #lists cache: remove partial folder also, automatically gets regenerated on G_AGUP
 	#rm /var/lib/dpkg/info/* #issue...
 	#dpkg: warning: files list file for package 'libdbus-1-3:armhf' missing; assuming      package has no files currently installed
 
