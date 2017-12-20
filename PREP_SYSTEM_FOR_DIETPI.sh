@@ -844,6 +844,23 @@ _EOF_
 
 	G_DIETPI-NOTIFY 2 "Configuring Network:"
 
+	# - x86_64 Check for non-standard ethX naming. Rename now (also done via net.iframes=0 in grub for future reboots.
+	if (( $G_HW_ARCH == 10 )); then
+
+		CURRENT_ADAPTER_NAME=$(ip r | grep -m1 'default' | awk '{print $NF}')
+		if [ ! -n "$CURRENT_ADAPTER_NAME" ]; then
+
+			G_DIETPI-NOTIFY 1 'Error: Unable to find active ethernet adapater. Aborting...'
+			exit 1
+
+		fi
+
+		ifconfig $CURRENT_ADAPTER_NAME down
+		ip link set $CURRENT_ADAPTER_NAME name eth0
+		ifconfig eth0 up
+
+	fi
+
 	rm -R /etc/network/interfaces &> /dev/null # armbian symlink for bulky network-manager
 	cp /boot/dietpi/conf/network_interfaces /etc/network/interfaces
 	/DietPi/dietpi/func/obtain_network_details
