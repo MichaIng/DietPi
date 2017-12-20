@@ -604,12 +604,6 @@ _EOF_
 	G_AGDUG
 	Error_Check
 
-	#???: WHIP_OPTIONal Reinstall OpenSSH (for updating dietpi scripts etc). Gets removed during finalise.
-	# apt-get install openssh-server -y
-	# echo -e "PermitRootLogin yes" >> /etc/ssh/sshd_config
-	# systemctl restart ssh
-	#???
-
 	G_DIETPI-NOTIFY 2 "Disabling swapfile generation for dphys-swapfile during install"
 
 	echo -e "CONF_SWAPSIZE=0" > /etc/dphys-swapfile
@@ -656,6 +650,12 @@ _EOF_
 	G_DIETPI-NOTIFY 2 "Returning installation of recommends back to default"
 
 	rm /etc/apt/apt-conf.d/99dietpi_norecommends &> /dev/null
+
+	G_DIETPI-NOTIFY 2 "Purging APT with autoremoval (in case of DISTRO upgrade/downgrade):"
+
+	G_AGA
+	Error_Check
+
 
 	#------------------------------------------------------------------------------------------------
 	G_DIETPI-NOTIFY 2 '-----------------------------------------------------------------------------------'
@@ -846,6 +846,9 @@ _EOF_
 
 	# - x86_64 Check for non-standard ethX naming. Rename now (also done via net.iframes=0 in grub for future reboots.
 	if (( $G_HW_ARCH == 10 )); then
+
+
+		G_DIETPI-NOTIFY 2 'Setting adapter name to standard ethX'
 
 		CURRENT_ADAPTER_NAME=$(ip r | grep -m1 'default' | awk '{print $NF}')
 		if [ ! -n "$CURRENT_ADAPTER_NAME" ]; then
