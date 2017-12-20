@@ -1257,7 +1257,7 @@ _EOF_
 	# cat /var/tmp/dietpi/logs/fs_partition_resize.log
 
 
-	G_DIETPI-NOTIFY 2 'Sync changes to disk and TRIM rootFS'
+	G_DIETPI-NOTIFY 2 'Sync changes to disk and TRIM rootFS. Please wait, this may take some time...'
 
 	systemctl stop dietpi-ramlog
 	Error_Check
