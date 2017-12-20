@@ -82,15 +82,12 @@
 
 	fi
 
-	#DEBUG
-	echo $G_HW_MODEL
-
-	exit
-
 	#------------------------------------------------------------------------------------------------
 	#Globals
 	#------------------------------------------------------------------------------------------------
 	#System
+	#G_DISTRO # init from dietpi-globals
+	#G_DISTRO_NAME # init from dietpi-globals
 	DISTRO_TARGET=0
 	DISTRO_TARGET_NAME=''
 	if grep -q 'wheezy' /etc/os-release; then
@@ -116,11 +113,12 @@
 	else
 
 		echo -e 'Error: Unknown or unsupported distribution version, aborting...\n'
-		exit
+		exit 1
 
 	fi
 
-	G_HW_MODEL=0
+	#G_HW_MODEL # init from dietpi-globals
+	#G_HW_ARCH_DESCRIPTION # init from dietpi-globals
 	G_HW_ARCH_DESCRIPTION=$(uname -m)
 	if [ "$G_HW_ARCH_DESCRIPTION" = "armv6l" ]; then
 
@@ -141,12 +139,14 @@
 	else
 
 		G_DIETPI-NOTIFY 1 "Error: Unknown or unsupported CPU architecture $G_HW_ARCH_DESCRIPTION, aborting..."
-		exit
+		exit 1
 
 	fi
 
-	#Funcs
+	#URL connection test var holder
 	INTERNET_ADDRESS=''
+
+	#Funcs
 
 	Error_Check(){
 
