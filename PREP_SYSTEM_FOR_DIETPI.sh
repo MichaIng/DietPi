@@ -60,32 +60,12 @@
 	# - Wget prefer IPv4
 	sed -i '/prefer-family =/c\prefer-family = IPv4' /etc/wgetrc &> /dev/null
 
-	#Download DietPi-Globals
-	# - NB: we'll have to manually handle errors, until script is sucessfully loaded
-	wget https://raw.githubusercontent.com/Fourdee/DietPi/$GIT_BRANCH/dietpi/func/dietpi-globals -O dietpi-globals
-	if (( $? != 0 )); then
-
-		echo -e 'Error: Unable to download dietpi-globals. Aborting...\n'
-		exit 1
-
-	fi
-
-	# - load
-	chmod +x dietpi-globals
-	. ./dietpi-globals
-	if (( $? != 0 )); then
-
-		echo -e 'Error: Unable to load dietpi-globals. Aborting...\n'
-		exit 1
-
-	fi
-
 	#------------------------------------------------------------------------------------------------
 	#Globals
 	#------------------------------------------------------------------------------------------------
 	#System
-	#G_DISTRO # init from dietpi-globals
-	#G_DISTRO_NAME # init from dietpi-globals
+	export G_DISTRO=0 # Export to dietpi-globals
+	export G_DISTRO_NAME='NULL' # Export to dietpi-globals
 	DISTRO_TARGET=0
 	DISTRO_TARGET_NAME=''
 	if grep -q 'wheezy' /etc/os-release; then
@@ -140,6 +120,32 @@
 		exit 1
 
 	fi
+
+	#Download DietPi-Globals
+	# - NB: we'll have to manually handle errors, until script is sucessfully loaded
+	wget https://raw.githubusercontent.com/Fourdee/DietPi/$GIT_BRANCH/dietpi/func/dietpi-globals -O dietpi-globals
+	if (( $? != 0 )); then
+
+		echo -e 'Error: Unable to download dietpi-globals. Aborting...\n'
+		exit 1
+
+	fi
+
+	# - load
+	chmod +x dietpi-globals
+	. ./dietpi-globals
+	if (( $? != 0 )); then
+
+		echo -e 'Error: Unable to load dietpi-globals. Aborting...\n'
+		exit 1
+
+	fi
+
+	#DEBUG:
+	G_AGI omgwtfbbq
+	G_DISTRO=-1
+	G_AGI omgwtfbbq
+	#DEBUG:
 
 	#URL connection test var holder
 	INTERNET_ADDRESS=''
