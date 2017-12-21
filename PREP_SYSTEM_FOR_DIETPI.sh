@@ -7,14 +7,6 @@
 	# - Currently running Debian (ideally minimal, eg: Raspbian Lite-ish =)) )
 	# - Active eth0 connection
 	#------------------------------------------------------------------------------------------------
-	# DO NOT USE. Currently under testing.
-	#------------------------------------------------------------------------------------------------
-
-	#G_AGUP
-	#apt-get install wget || or make it a pre-req?
-	#wget
-	#load
-	#Pull in dietpi-globals
 
 	#Force en_GB Locale for whole script. Prevents incorrect parsing with non-english locales.
 	LANG=en_GB.UTF-8
@@ -42,6 +34,9 @@
 
 	)
 
+	# - APT force IPv4
+	echo 'Acquire::ForceIPv4 "true";' > /etc/apt/apt.conf.d/99force-ipv
+
 	for (( i=0; i<${#a_MIN_APT_PREREQS[@]}; i++))
 	do
 
@@ -61,6 +56,9 @@
 	done
 
 	unset a_MIN_APT_PREREQS
+
+	# - Wget prefer IPv4
+	sed -i '/prefer-family =/c\prefer-family = IPv4' /etc/wgetrc &> /dev/null
 
 	#Download DietPi-Globals
 	# - NB: we'll have to manually handle errors, until script is sucessfully loaded
@@ -1116,11 +1114,11 @@ _EOF_
 
 	/DietPi/dietpi/func/dietpi-set_hardware wifimodules onboard_enable
 
-	G_DIETPI-NOTIFY 2 'Configuring IP version preferences'
+	#G_DIETPI-NOTIFY 2 'Configuring IP version preferences'
 
-	/DietPi/dietpi/func/dietpi-set_hardware preferipversion auto
+	#/DietPi/dietpi/func/dietpi-set_hardware preferipversion ipv4 #Already done at top of script, and now default in dietpi.txt
 
-	G_DIETPI-NOTIFY 2 'Configuring kernels'
+	G_DIETPI-NOTIFY 2 'Configuring kernel'
 
 	# - Disable installed flags
 	rm /etc/dietpi/.*
