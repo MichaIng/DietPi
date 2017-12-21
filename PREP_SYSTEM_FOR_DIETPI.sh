@@ -1057,13 +1057,6 @@ _EOF_
 	/DietPi/dietpi/dietpi-services stop
 	/DietPi/dietpi/dietpi-services dietpi_controlled
 
-	G_DIETPI-NOTIFY 2 'Clearing APT cache'
-
-	apt-get clean
-	rm -R /var/lib/apt/lists/* -vf #lists cache: remove partial folder also, automatically gets regenerated on G_AGUP
-	#rm /var/lib/dpkg/info/* #issue...
-	#dpkg: warning: files list file for package 'libdbus-1-3:armhf' missing; assuming      package has no files currently installed
-
 	G_DIETPI-NOTIFY 2 'Running general cleanup of misc files'
 
 	# - general folders
@@ -1134,6 +1127,8 @@ _EOF_
 	G_DIETPI-NOTIFY 2 'Disabling soundcards by default'
 
 	/DietPi/dietpi/func/dietpi-set_hardware soundcard none
+	#	Alsa-utils is auto installed to reset soundcard settings on some ARM devices. uninstall it afterwards
+	G_AGP alsa-utils
 
 	G_DIETPI-NOTIFY 2 'Setting default CPU gov'
 
@@ -1175,6 +1170,13 @@ _EOF_
 
 	rm /DietPi/dietpi/patch_file &> /dev/null
 	rm /DietPi/dietpi/server_version &> /dev/null
+
+	G_DIETPI-NOTIFY 2 'Clearing APT cache'
+
+	apt-get clean
+	rm -R /var/lib/apt/lists/* -vf #lists cache: remove partial folder also, automatically gets regenerated on G_AGUP
+	#rm /var/lib/dpkg/info/* #issue...
+	#dpkg: warning: files list file for package 'libdbus-1-3:armhf' missing; assuming      package has no files currently installed
 
 	# - HW Specific
 	#	RPi remove saved G_HW_MODEL , allowing obtain-hw_model to auto detect RPi model
