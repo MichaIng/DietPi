@@ -202,6 +202,7 @@
 	#------------------------------------------------------------------------------------------------
 
 	#------------------------------------------------------------------------------------------------
+	echo -e ''
 	G_DIETPI-NOTIFY 2 '-----------------------------------------------------------------------------------'
 	G_DIETPI-NOTIFY 0 'Step 0: Detecting existing DietPi system:'
 	G_DIETPI-NOTIFY 2 '-----------------------------------------------------------------------------------'
@@ -245,6 +246,7 @@
 
 
 	#------------------------------------------------------------------------------------------------
+	echo -e ''
 	G_DIETPI-NOTIFY 2 '-----------------------------------------------------------------------------------'
 	G_DIETPI-NOTIFY 0 'Step 1: Initial prep to allow this script to function:'
 	G_DIETPI-NOTIFY 2 '-----------------------------------------------------------------------------------'
@@ -263,6 +265,7 @@
 	Error_Check
 
 	#------------------------------------------------------------------------------------------------
+	echo -e ''
 	G_DIETPI-NOTIFY 2 '-----------------------------------------------------------------------------------'
 	G_DIETPI-NOTIFY 0 'Step 2: Hardware selection:'
 	G_DIETPI-NOTIFY 2 '-----------------------------------------------------------------------------------'
@@ -323,6 +326,7 @@
 	echo -e "$G_HW_MODEL" > /etc/.dietpi_hw_model_identifier
 
 	#------------------------------------------------------------------------------------------------
+	echo -e ''
 	G_DIETPI-NOTIFY 2 '-----------------------------------------------------------------------------------'
 	G_DIETPI-NOTIFY 0 'Step 3: Distro selection / APT prep:'
 	G_DIETPI-NOTIFY 2 '-----------------------------------------------------------------------------------'
@@ -441,6 +445,7 @@ _EOF_
 
 
 	#------------------------------------------------------------------------------------------------
+	echo -e ''
 	G_DIETPI-NOTIFY 2 '-----------------------------------------------------------------------------------'
 	G_DIETPI-NOTIFY 0 'Step 4: APT removals:'
 	G_DIETPI-NOTIFY 2 '-----------------------------------------------------------------------------------'
@@ -513,19 +518,19 @@ _EOF_
 		aPACKAGES_REQUIRED_INSTALL+=('firmware-linux-nonfree')
 		#aPACKAGES_REQUIRED_INSTALL+=('firmware-misc-nonfree')
 		#aPACKAGES_REQUIRED_INSTALL+=('dmidecode')
-		if (( $(dpkg --get-selections | grep -ci -m1 '^grub2[[:space:]]') )); then
 
-			aPACKAGES_REQUIRED_INSTALL+=('grub2')
-
-		elif (( $(dpkg --get-selections | grep -ci -m1 '^grub-efi-amd64[[:space:]]') )); then
+		#	Grub EFI
+		if (( $(dpkg --get-selections | grep -ci -m1 '^grub-efi-amd64[[:space:]]') )) ||
+			[ -d /boot/efi ]; then
 
 			aPACKAGES_REQUIRED_INSTALL+=('grub-efi-amd64')
 
+		#	Grub BIOS
 		else
 
-			[ -d /boot/efi ] && aPACKAGES_REQUIRED_INSTALL+=('grub-efi-amd64') || aPACKAGES_REQUIRED_INSTALL+=('grub2')
+			aPACKAGES_REQUIRED_INSTALL+=('grub2')
 
-  		fi
+		fi
 
 	fi
 
@@ -594,6 +599,7 @@ _EOF_
 
 
 	#------------------------------------------------------------------------------------------------
+	echo -e ''
 	G_DIETPI-NOTIFY 2 '-----------------------------------------------------------------------------------'
 	G_DIETPI-NOTIFY 0 'Step 5: APT Installations:'
 	G_DIETPI-NOTIFY 2 '-----------------------------------------------------------------------------------'
@@ -658,6 +664,7 @@ _EOF_
 
 
 	#------------------------------------------------------------------------------------------------
+	echo -e ''
 	G_DIETPI-NOTIFY 2 '-----------------------------------------------------------------------------------'
 	G_DIETPI-NOTIFY 0 'Step 6: Downloading and installing DietPi sourcecode'
 	G_DIETPI-NOTIFY 2 '-----------------------------------------------------------------------------------'
@@ -726,6 +733,7 @@ _EOF_
 	Error_Check
 
 	#------------------------------------------------------------------------------------------------
+	echo -e ''
 	G_DIETPI-NOTIFY 2 '-----------------------------------------------------------------------------------'
 	G_DIETPI-NOTIFY 0 "Step 7: Prep system for DietPi ENV:"
 	G_DIETPI-NOTIFY 2 '-----------------------------------------------------------------------------------'
@@ -934,7 +942,7 @@ _EOF_
 
 	G_DIETPI-NOTIFY 2 "Configuring regional settings (Keyboard):"
 
-	dpkg-reconfigure keyboard-configuration #Keyboard must be plugged in for this to work!
+	dpkg-reconfigure -f noninteractive keyboard-configuration #Keyboard must be plugged in for this to work!
 
 	G_DIETPI-NOTIFY 2 "Configuring regional settings (Locale):"
 
@@ -1035,6 +1043,7 @@ _EOF_
 
 
 	#------------------------------------------------------------------------------------------------
+	echo -e ''
 	G_DIETPI-NOTIFY 2 '-----------------------------------------------------------------------------------'
 	G_DIETPI-NOTIFY 0 "Step 8: Finalise system for first run of DietPi:"
 	G_DIETPI-NOTIFY 2 '-----------------------------------------------------------------------------------'
