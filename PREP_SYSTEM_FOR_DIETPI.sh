@@ -141,12 +141,6 @@
 
 	fi
 
-	#DEBUG:
-	G_AGI omgwtfbbq
-	G_DISTRO=-1
-	G_AGI omgwtfbbq
-	#DEBUG:
-
 	#URL connection test var holder
 	INTERNET_ADDRESS=''
 
