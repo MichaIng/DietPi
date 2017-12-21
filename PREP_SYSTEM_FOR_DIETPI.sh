@@ -528,7 +528,7 @@ _EOF_
 		#	Grub BIOS
 		else
 
-			aPACKAGES_REQUIRED_INSTALL+=('grub2')
+			aPACKAGES_REQUIRED_INSTALL+=('grub-pc')
 
 		fi
 
