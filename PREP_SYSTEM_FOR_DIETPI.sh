@@ -745,8 +745,10 @@ _EOF_
 
 	rm -R /home &> /dev/null
 	rm -R /media &> /dev/null
-
 	rm -R /selinux &> /dev/null
+
+	# - www
+	rm -R /var/www/* &> /dev/null
 
 	# - sourcecode (linux-headers etc)
 	rm -R /usr/src/* &> /dev/null
@@ -844,33 +846,12 @@ _EOF_
 
 	G_DIETPI-NOTIFY 2 "Configuring Network:"
 
-	# - x86_64 Check for non-standard ethX naming. Rename now (also done via net.iframes=0 in grub for future reboots.
-	if (( $G_HW_ARCH == 10 )); then
-
-
-		G_DIETPI-NOTIFY 2 'Setting adapter name to standard ethX'
-
-		CURRENT_ADAPTER_NAME=$(ip r | grep -m1 'default' | awk '{print $NF}')
-		if [ ! -n "$CURRENT_ADAPTER_NAME" ]; then
-
-			G_DIETPI-NOTIFY 1 'Error: Unable to find active ethernet adapater. Aborting...'
-			exit 1
-
-		fi
-
-		ifconfig $CURRENT_ADAPTER_NAME down
-		ip link set $CURRENT_ADAPTER_NAME name eth0
-		ifconfig eth0 up
-
-	fi
-
 	rm -R /etc/network/interfaces &> /dev/null # armbian symlink for bulky network-manager
 	cp /boot/dietpi/conf/network_interfaces /etc/network/interfaces
-	/DietPi/dietpi/func/obtain_network_details
 	Error_Check
 
 	# - enable allow-hotplug eth0 after copying.
-	sed -i "/allow-hotplug eth/c\allow-hotplug eth$(sed -n 1p /DietPi/dietpi/.network)" /etc/network/interfaces
+	sed -i "/allow-hotplug eth/c\allow-hotplug eth0" /etc/network/interfaces
 	# - Remove all predefined eth*/wlan* adapter rules
 	rm /etc/udev/rules.d/70-persistent-net.rules &> /dev/null
 	rm /etc/udev/rules.d/70-persistant-net.rules &> /dev/null
@@ -951,7 +932,6 @@ _EOF_
 	dpkg-reconfigure tzdata #Europe > London
 	dpkg-reconfigure keyboard-configuration #Keyboard must be plugged in for this to work!
 	dpkg-reconfigure locales # en_GB.UTF8 as default and only installed locale
-
 
 	# - Pump default locale into sys env: https://github.com/Fourdee/DietPi/issues/825
 	cat << _EOF_ > /etc/environment
@@ -1048,9 +1028,8 @@ _EOF_
 	G_DIETPI-NOTIFY 2 '-----------------------------------------------------------------------------------'
 	#------------------------------------------------------------------------------------------------
 
-	G_DIETPI-NOTIFY 2 'Installing Dropbear by default'
+	G_DIETPI-NOTIFY 2 'Configuring Dropbear:'
 
-	G_AGI dropbear
 	#	set to start on next boot
 	sed -i '/NO_START=1/c\NO_START=0' /etc/default/dropbear
 
