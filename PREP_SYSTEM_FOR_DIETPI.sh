@@ -926,12 +926,24 @@ _EOF_
 	systemctl disable systemd-timesyncd
 	rm /etc/init.d/ntp &> /dev/null
 
-	G_DIETPI-NOTIFY 2 "Configuring regional settings (TZ/Locale/Keyboard):"
+	G_DIETPI-NOTIFY 2 "Configuring regional settings (TZdata):"
 
-	#TODO: automate these...
-	dpkg-reconfigure tzdata #Europe > London
+	echo "Europe/London" > /etc/timezone
+	dpkg-reconfigure -f noninteractive tzdata #Europe > London
+	Error_Check
+
+	G_DIETPI-NOTIFY 2 "Configuring regional settings (Keyboard):"
+
 	dpkg-reconfigure keyboard-configuration #Keyboard must be plugged in for this to work!
-	dpkg-reconfigure locales # en_GB.UTF8 as default and only installed locale
+
+	G_DIETPI-NOTIFY 2 "Configuring regional settings (Locale):"
+
+	sed -i 's/^\([^#]\)/#\1/g' /etc/locale.gen
+	sed -i '/en_GB.UTF-8 UTF-8/c\en_GB.UTF-8 UTF-8' /etc/locale.gen
+	#locale-gen
+	update-locale
+	dpkg-reconfigure -f noninteractive locales # en_GB.UTF8 as only installed locale
+	Error_Check
 
 	# - Pump default locale into sys env: https://github.com/Fourdee/DietPi/issues/825
 	cat << _EOF_ > /etc/environment
