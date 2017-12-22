@@ -363,7 +363,8 @@
 		# - Enable option
 		if (( $temp_distro_available )); then
 
-			WHIP_MENU_ARRAY+=( "${DISTRO_LIST_ARRAY[$(( $i * 2 ))]}" "${DISTRO_LIST_ARRAY[$(( ($i * 2) + 1 ))]}")
+			WHIP_MENU_ARRAY+=( "${DISTRO_LIST_ARRAY[$(( $i * 2 ))]}" "${DISTRO_LIST_ARRAY[$(( ($i * 2) + 1 ))]}" )
+
 		fi
 
 	done
@@ -1183,6 +1184,7 @@ _EOF_
 	/DietPi/dietpi/func/dietpi-set_hardware soundcard none
 	#	Alsa-utils is auto installed to reset soundcard settings on some ARM devices. uninstall it afterwards
 	G_AGP alsa-utils
+	G_AGA
 
 	G_DIETPI-NOTIFY 2 'Setting default CPU gov'
 
