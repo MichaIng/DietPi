@@ -466,6 +466,7 @@ _EOF_
 		'ethtool'		# Ethernet link checking
 		'fake-hwclock'		# Hardware clock emulation, to allow correct timestamps during boot before network time sync
 		'fbset'			# DietPi-Config display settings
+		'firmware-realtek'	# Eth/WiFi/BT dongle firmware
 		'gnupg'			# apt-key add
 		'hdparm'		# Drive power management adjustment
 		'hfsplus'		# DietPi-Drive_Manager NTS (MacOS) file system support
@@ -557,7 +558,7 @@ _EOF_
 		aPACKAGES_REQUIRED_INSTALL+=('device-tree-compiler') #Kern
 
 	fi
-	
+
 	G_DIETPI-NOTIFY 2 "WiFi selection"
 
 	WHIP_TITLE='WiFi required?'
@@ -579,7 +580,6 @@ _EOF_
 		aPACKAGES_REQUIRED_INSTALL+=('firmware-atheros')	# WiFi dongle firmware
 		aPACKAGES_REQUIRED_INSTALL+=('firmware-brcm80211')	# WiFi dongle firmware
 		aPACKAGES_REQUIRED_INSTALL+=('firmware-ralink')		# WiFi dongle firmware
-		aPACKAGES_REQUIRED_INSTALL+=('firmware-realtek')	# WiFi dongle firmware
 		aPACKAGES_REQUIRED_INSTALL+=('iw')			# WiFi related
 		aPACKAGES_REQUIRED_INSTALL+=('rfkill')	 		# WiFi related: Used by some onboard WiFi chipsets
 		aPACKAGES_REQUIRED_INSTALL+=('wireless-tools')		# WiFi related
