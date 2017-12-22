@@ -9,17 +9,13 @@
 	#////////////////////////////////////
 	#
 	# Info:
-	# - Allows export of shared DietPi global variables into current bash session, and, other scripts
+	# - Allows export of shared DietPi global variables/funcs into current bash session, and, other scripts
 	#
 	# Excluded scripts, which do NOT load these globals
 	# - dietpi-ramlog
 	# - dietpi-ramdisk
-	# - PREP_SYSTEM_FOR_DIETPI.sh
 	# - dietpi.txt (and all other .txt .ini files)
 	#
-	# Notes:
-	# - . /DietPi/dietpi/func/dietpi-globals > $HOME/.bashrc
-	# - . /DietPi/dietpi/func/dietpi-globals > for each script that uses these globals
 	#////////////////////////////////////
 
 	#-----------------------------------------------------------------------------------
@@ -237,6 +233,89 @@
 
 	fi
 
+	#Returns current CPU temp 'C
+	G_OBTAIN_CPU_TEMP(){
+
+		# - Array to store possible locations for temp read.
+		afp_temperature=(
+
+			#'/sys/class/thermal/thermal_zone1/temp' #sparky/Asus, will break other SBC temp readouts as most have 2 zones, needs a special case
+			'/sys/class/thermal/thermal_zone0/temp'
+			'/sys/devices/platform/sunxi-i2c.0/i2c-0/0-0034/temp1_input'
+			'/sys/class/hwmon/hwmon0/device/temp_label'
+
+		)
+
+		for ((i=0; i<${#afp_temperature[@]}; i++))
+		do
+
+			if [ -f "${afp_temperature[$i]}" ]; then
+
+				#	Sparky/asus, special case:
+				if (( $G_HW_MODEL == 70 || $G_HW_MODEL == 100 || $G_HW_MODEL == 110 )); then
+
+					cpu_temp_current=$(cat /sys/class/thermal/thermal_zone1/temp)
+
+				else
+
+					cpu_temp_current=$(cat ${afp_temperature[$i]})
+
+				fi
+
+				# - Boards that provide 2 digit output
+				#	Pine
+				# 	NanoPi M2
+				#	NanoPi M3
+				#	H3 3.x
+				#	H2+ 3.x
+				if (( ( $G_HW_MODEL >= 40 && $G_HW_MODEL <= 42 ) ||
+					$G_HW_MODEL == 61 ||
+					$G_HW_MODEL == 62 ||
+					( $G_HW_CPUID == 1 && $(uname -r | grep -ci -m1 '^3.') ) ||
+					( $G_HW_MODEL == 32 && $(uname -r | grep -ci -m1 '^3.') ) )); then
+
+					echo -e "Do nothing" &> /dev/null
+
+				else
+
+					cpu_temp_current=$( echo -e "$cpu_temp_current" | awk '{print $1/1000}' | xargs printf "%0.0f" )
+
+				fi
+
+
+				break
+
+			fi
+
+		done
+
+		unset afp_temperature
+
+		echo $cpu_temp_current
+
+	}
+
+	#Returns current CPU usage %
+	G_OBTAIN_CPU_USAGE(){
+
+		# - PS (inaccurate, but fast??)
+		local cpu_usage=0
+		local fp_temp='/tmp/.cpu_usage_cpuinfo'
+		ps -axo %cpu | sed '1d' | sed 's/ //' > "$fp_temp"
+		while read line
+		do
+
+			cpu_usage=$( echo "scale=1;$cpu_usage + $line" | bc -l )
+
+		done < "$fp_temp"
+
+		# - ps returns usage of each core, so we devide the total by #n cores
+		cpu_usage=$(echo "scale=1;$cpu_usage / $(nproc --all)" | bc -l )
+
+		echo $cpu_usage
+
+	}
+
 	#-----------------------------------------------------------------------------------
 	# DietPi specific directories
 	#-----------------------------------------------------------------------------------
@@ -437,20 +516,20 @@
 		local string=( "$@" )
 		local packages_to_install=''
 
-		G_DIETPI-NOTIFY 2 "Checking for currently installed pre-req packages: ${string[@]}"
+		G_DIETPI-NOTIFY 2 "Checking for pre-req APT packages: ${string[@]}"
 
 		dpkg --get-selections > "$fp_temp"
 		for i in "${string[@]}"
 		do
 
-			if (( ! $(grep -ci -m1 "^$i[[:space:]]" "$fp_temp") )); then
+			if (( $(grep -ci -m1 "^$i[[:space:]]" "$fp_temp") )); then
 
-				G_DIETPI-NOTIFY 2 "($i) | Not found, flagging pre-req package for installation"
-				packages_to_install+=" $i"
+				G_DIETPI-NOTIFY 2 "($i) | Currently installed"
 
 			else
 
-				G_DIETPI-NOTIFY 2 "($i) | Currently installed"
+				G_DIETPI-NOTIFY 2 "($i) | Not found, flagging pre-req APT package for installation"
+				packages_to_install+=" $i"
 
 			fi
 
@@ -458,17 +537,17 @@
 
 		if [ -n "$packages_to_install" ]; then
 
-			G_DIETPI-NOTIFY 2 "Installing pre-req packages, please wait..."
+			G_DIETPI-NOTIFY 2 "Installing pre-req APT packages, please wait..."
 			G_AGI $packages_to_install
 			exit_code=$?
 
 		else
 
-			G_DIETPI-NOTIFY 2 "Pre-req packages already installed"
+			G_DIETPI-NOTIFY 2 "Pre-req APT packages are currently already installed"
 
 		fi
 
-		G_DIETPI-NOTIFY -1 $exit_code 'G_CHECK_INSTALL_PREREQ:'
+		G_DIETPI-NOTIFY -1 $exit_code 'G_AG_CHECK_INSTALL_PREREQ:'
 
 		rm "$fp_temp"
 
