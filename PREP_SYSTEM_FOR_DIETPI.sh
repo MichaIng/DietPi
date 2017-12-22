@@ -456,7 +456,6 @@ _EOF_
 		'bzip2'			# .bz2 wrapper
 		'ca-certificates'	# Adds known ca-certificates, necessary to practically access https sources
 		'console-setup'		# DietPi-Config keyboard configuration
-		'crda'			# WiFi related
 		'cron'			# background job scheduler
 		'curl'			# Web address testing, downloading, uploading etc.
 		'dbus'			# System message bus
@@ -467,10 +466,6 @@ _EOF_
 		'ethtool'		# Ethernet link checking
 		'fake-hwclock'		# Hardware clock emulation, to allow correct timestamps during boot before network time sync
 		'fbset'			# DietPi-Config display settings
-		'firmware-atheros'	# WiFi dongle firmware
-		'firmware-brcm80211'	# WiFi dongle firmware
-		'firmware-ralink'	# WiFi dongle firmware
-		'firmware-realtek'	# WiFi dongle firmware
 		'gnupg'			# apt-key add
 		'hdparm'		# Drive power management adjustment
 		'hfsplus'		# DietPi-Drive_Manager NTS (MacOS) file system support
@@ -478,7 +473,6 @@ _EOF_
 		'initramfs-tools'	# RAM file system initialization
 		'iputils-ping'		# ping command
 		'isc-dhcp-client'	# DHCP client
-		'iw'			# WiFi related
 		'locales'		# Support locales, necessary for DietPi scripts, as we use enGB.UTF8 as default language
 		'nano'			# Simple text editor
 		'net-tools'		# DietPi-Boot: Network tools, ifconfig, route etc.
@@ -488,15 +482,12 @@ _EOF_
 		'parted'		# DietPi-Boot + DietPi-Drive_Manager
 		'psmisc'		# DietPi-Boot + DietPi-Software: e.g. killall
 		'resolvconf'		# System name server updater
-		'rfkill' 		# WiFi related: Used by some onboard WiFi chipsets
 		'sudo'			# DietPi-Software + general use
 		'tzdata'		# Time zone data for system clock, auto summer/winter time adjustment
 		'unzip'			# .zip unwrapper
 		'usbutils'		# DietPi-Software + DietPi-Bugreport: e.g. lsusb
 		'wget'			# download
 		'whiptail'		# DietPi dialogs
-		'wireless-tools'	# WiFi related
-		'wpasupplicant'		# WiFi related
 		'wput'			# upload
 		'zip'			# .zip wrapper
 
@@ -507,8 +498,8 @@ _EOF_
 	if (( $G_HW_ARCH == 10 )); then
 
 		aPACKAGES_REQUIRED_INSTALL+=('linux-image-amd64')
-		aPACKAGES_REQUIRED_INSTALL+=('intel-microcode')
-		aPACKAGES_REQUIRED_INSTALL+=('amd64-microcode')
+		grep 'vendor_id' /proc/cpuinfo | grep -qi 'intel' && aPACKAGES_REQUIRED_INSTALL+=('intel-microcode')
+		grep 'vendor_id' /proc/cpuinfo | grep -qi 'amd' && aPACKAGES_REQUIRED_INSTALL+=('amd64-microcode')
 		aPACKAGES_REQUIRED_INSTALL+=('firmware-linux-nonfree')
 		#aPACKAGES_REQUIRED_INSTALL+=('firmware-misc-nonfree')
 		#aPACKAGES_REQUIRED_INSTALL+=('dmidecode')
@@ -566,6 +557,35 @@ _EOF_
 		aPACKAGES_REQUIRED_INSTALL+=('device-tree-compiler') #Kern
 
 	fi
+	
+	G_DIETPI-NOTIFY 2 "WiFi selection"
+
+	WHIP_TITLE='WiFi required?'
+	WHIP_DESC='Please select an option'
+	WHIP_DEFAULT_ITEM=1
+	WHIP_MENU_ARRAY=(
+
+		'0' "I don't require WiFi, do not install."
+		'1' 'I require WiFi functionality, keep/install related packages.'
+
+	)
+
+	Run_Whiptail
+	if (( $WHIP_RETURN_VALUE == 1 )); then
+
+		G_DIETPI-NOTIFY 2 "Marking WiFi as needed"
+
+		aPACKAGES_REQUIRED_INSTALL+=('crda')			# WiFi related
+		aPACKAGES_REQUIRED_INSTALL+=('firmware-atheros')	# WiFi dongle firmware
+		aPACKAGES_REQUIRED_INSTALL+=('firmware-brcm80211')	# WiFi dongle firmware
+		aPACKAGES_REQUIRED_INSTALL+=('firmware-ralink')		# WiFi dongle firmware
+		aPACKAGES_REQUIRED_INSTALL+=('firmware-realtek')	# WiFi dongle firmware
+		aPACKAGES_REQUIRED_INSTALL+=('iw')			# WiFi related
+		aPACKAGES_REQUIRED_INSTALL+=('rfkill')	 		# WiFi related: Used by some onboard WiFi chipsets
+		aPACKAGES_REQUIRED_INSTALL+=('wireless-tools')		# WiFi related
+		aPACKAGES_REQUIRED_INSTALL+=('wpasupplicant')		# WiFi related
+
+	fi
 
 	G_DIETPI-NOTIFY 2 "Generating list of minimal packages, required for DietPi installation:"
 
@@ -620,7 +640,7 @@ _EOF_
 
 	G_DIETPI-NOTIFY 2 "Onboard Bluetooth selection"
 
-	WHIP_TITLE='Bluetooth Required?'
+	WHIP_TITLE='Bluetooth required?'
 	WHIP_DESC='Please select an option'
 	WHIP_DEFAULT_ITEM=0
 	WHIP_MENU_ARRAY=(
