@@ -173,7 +173,7 @@
 	WHIP_CHOICE=0
 	Run_Whiptail(){
 
-		WHIP_OPTION=$(whiptail --title "$WHIP_TITLE" --menu "$WHIP_DESC" --default-item "$WHIP_DEFAULT_ITEM" --backtitle "$WHIP_BACKTITLE" 20 80 12 "${WHIP_MENU_ARRAY[@]}" 3>&1 1>&2 2>&3)
+		WHIP_OPTION=$(whiptail --title "$WHIP_TITLE" --menu "$WHIP_DESC" --default-item "$WHIP_DEFAULT_ITEM" --backtitle "$WHIP_BACKTITLE" 24 85 12 "${WHIP_MENU_ARRAY[@]}" 3>&1 1>&2 2>&3)
 		WHIP_CHOICE=$?
 		if (( $WHIP_CHOICE == 0 )); then
 
@@ -331,15 +331,50 @@
 	#------------------------------------------------------------------------------------------------
 
 	WHIP_TITLE='Distro Selection:'
-	WHIP_DESC='Please select a distro to install on this system. Selecting a distro that is older than the current installed on system, is not supported.'
+	WHIP_DESC="Please select a distro to install on this system. Selecting a distro that is older than the current installed on system, is not supported.\n\nCurrently installed:\n - $G_DISTRO $G_DISTRO_NAME"
 	WHIP_DEFAULT_ITEM=$G_DISTRO
-	WHIP_MENU_ARRAY=(
+	DISTRO_LIST_ARRAY=(
 		'3' 'Jessie (oldstable, just if you need to avoid upgrade to current release)'
 		'4' 'Stretch (current stable release, recommended)'
+		'5' 'Buster (testing only, not officially suppoted)'
 	)
-	if (( $G_HW_MODEL >= 10 )); then
 
-		WHIP_MENU_ARRAY+=('5' 'Buster (testing only, not officially suppoted)')
+	# - Enable/list available options based on criteria
+	#	NB: Whiptail use 2 array indexs per whip displayed entry.
+	for ((i=0; i<$(( ${#DISTRO_LIST_ARRAY[@]} / 2 )); i++))
+	do
+		temp_distro_available=1
+		temp_distro_index=$(( $i + 3 ))
+
+		# - Disable downgrades
+		if (( $temp_distro_index < $G_DISTRO )); then
+
+			G_DIETPI-NOTIFY 2 "Disabled Distro downgrade: index $temp_distro_index"
+			temp_distro_available=0
+
+		# - RPi disable buster
+		elif (( $temp_distro_index == 5 && $G_HW_MODEL < 10 )); then
+
+			G_DIETPI-NOTIFY 2 "Disabled Buster for RPi: index $temp_distro_index"
+			temp_distro_available=0
+
+		fi
+
+		# - Enable option
+		if (( $temp_distro_available )); then
+
+			WHIP_MENU_ARRAY+=( "${DISTRO_LIST_ARRAY[$(( $i * 2 ))]}" "${DISTRO_LIST_ARRAY[$(( ($i * 2) + 1 ))]}")
+		fi
+
+	done
+
+	#delete []
+	unset DISTRO_LIST_ARRAY
+
+	if [ -z ${WHIP_MENU_ARRAY+x} ]; then
+
+		G_DIETPI-NOTIFY 1 'Error: No available Distros for this system. Aborting...'
+		exit 1
 
 	fi
 
