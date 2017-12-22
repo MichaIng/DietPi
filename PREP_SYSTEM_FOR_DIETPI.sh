@@ -1043,9 +1043,10 @@ _EOF_
 
 		echo -e "blacklist bmp085" > /etc/modprobe.d/bmp085.conf
 
-	# - Sparky SBC ONLY: Blacklist GPU and touch screen modules: https://github.com/Fourdee/DietPi/issues/699#issuecomment-271362441
+	# - Sparky SBC ONLY:
 	elif (( $G_HW_MODEL == 70 )); then
 
+		#	Blacklist GPU and touch screen modules: https://github.com/Fourdee/DietPi/issues/699#issuecomment-271362441
 		cat << _EOF_ > /etc/modprobe.d/disable_sparkysbc_touchscreen.conf
 blacklist owl_camera
 blacklist gsensor_stk8313
@@ -1061,6 +1062,10 @@ blacklist drm
 blacklist videobuf2_vmalloc
 blacklist bc_example
 _EOF_
+
+		#	Use performance gov for stability.
+		sed -i "/^cpu_governor=/c\cpu_governor=performance" /DietPi/dietpi.txt
+		/DietPi/dietpi/dietpi-cpu_set
 
 	# - RPI: Scroll lock fix for RPi by Midwan: https://github.com/Fourdee/DietPi/issues/474#issuecomment-243215674
 	elif (( $G_HW_MODEL < 10 )); then
