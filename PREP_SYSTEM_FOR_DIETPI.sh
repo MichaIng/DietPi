@@ -429,22 +429,26 @@ _EOF_
 	# - @MichaIng https://github.com/Fourdee/DietPi/pull/1266/files
 	G_DIETPI-NOTIFY 2 "Temporary disable automatic recommends/suggests installation and allow them to be autoremoved:"
 
-	cat << _EOF_ > /etc/apt/apt.conf.d/99dietpi_norecommends
+	export G_ERROR_HANDLER_COMMAND='/etc/apt/apt.conf.d/99dietpi_norecommends'
+	cat << _EOF_ > $G_ERROR_HANDLER_COMMAND
 APT::Install-Recommends "false";
 APT::Install-Suggests "false";
 APT::AutoRemove::RecommendsImportant "false";
 APT::AutoRemove::SuggestsImportant "false";
 _EOF_
+	export G_ERROR_HANDLER_EXITCODE=$?
 	G_ERROR_HANDLER
 
 	G_DIETPI-NOTIFY 2 "Forcing use of existing apt configs if available"
 
-	cat << _EOF_ > /etc/apt/apt.conf.d/99dietpi_forceconf
+	export G_ERROR_HANDLER_COMMAND='/etc/apt/apt.conf.d/99dietpi_forceconf'
+	cat << _EOF_ > $G_ERROR_HANDLER_COMMAND
 Dpkg::options {
    "--force-confdef";
    "--force-confold";
 }
 _EOF_
+	export G_ERROR_HANDLER_EXITCODE=$?
 	G_ERROR_HANDLER
 
 
@@ -890,18 +894,22 @@ _EOF_
 
 	G_DIETPI-NOTIFY 2 "Configuring Hosts:"
 
-	cat << _EOF_ > /etc/hosts
+	export G_ERROR_HANDLER_COMMAND='/etc/hosts'
+	cat << _EOF_ > $G_ERROR_HANDLER_COMMAND
 127.0.0.1    localhost
 127.0.1.1    DietPi
 ::1          localhost ip6-localhost ip6-loopback
 ff02::1      ip6-allnodes
 ff02::2      ip6-allrouters
 _EOF_
+	export G_ERROR_HANDLER_EXITCODE=$?
 	G_ERROR_HANDLER
 
-	cat << _EOF_ > /etc/hostname
+	export G_ERROR_HANDLER_COMMAND='/etc/hostname'
+	cat << _EOF_ > $G_ERROR_HANDLER_COMMAND
 DietPi
 _EOF_
+	export G_ERROR_HANDLER_EXITCODE=$?
 	G_ERROR_HANDLER
 
 	G_DIETPI-NOTIFY 2 "Configuring htop:"
@@ -911,7 +919,8 @@ _EOF_
 
 	G_DIETPI-NOTIFY 2 "Configuring hdparm:"
 
-	cat << _EOF_ >> /etc/hdparm.conf
+	export G_ERROR_HANDLER_COMMAND='/etc/hdparm.conf'
+	cat << _EOF_ >> $G_ERROR_HANDLER_COMMAND
 
 #DietPi external USB drive. Power management settings.
 /dev/sda {
@@ -922,6 +931,7 @@ _EOF_
         apm = 254
 }
 _EOF_
+	export G_ERROR_HANDLER_EXITCODE=$?
 	G_ERROR_HANDLER
 
 	G_DIETPI-NOTIFY 2 "Configuring fakehwclock:"
@@ -942,8 +952,7 @@ _EOF_
 	G_DIETPI-NOTIFY 2 "Configuring regional settings (TZdata):"
 
 	echo "Europe/London" > /etc/timezone
-	dpkg-reconfigure -f noninteractive tzdata #Europe > London
-	G_ERROR_HANDLER
+	G_RUN_CMD dpkg-reconfigure -f noninteractive tzdata #Europe > London
 
 	G_DIETPI-NOTIFY 2 "Configuring regional settings (Keyboard):"
 
@@ -955,14 +964,15 @@ _EOF_
 	sed -i '/en_GB.UTF-8 UTF-8/c\en_GB.UTF-8 UTF-8' /etc/locale.gen
 	#locale-gen
 	update-locale
-	dpkg-reconfigure -f noninteractive locales # en_GB.UTF8 as only installed locale
-	G_ERROR_HANDLER
+	G_RUN_CMD dpkg-reconfigure -f noninteractive locales # en_GB.UTF8 as only installed locale
 
 	# - Pump default locale into sys env: https://github.com/Fourdee/DietPi/issues/825
-	cat << _EOF_ > /etc/environment
+	export G_ERROR_HANDLER_COMMAND='/etc/environment'
+	cat << _EOF_ > $G_ERROR_HANDLER_COMMAND
 LC_ALL=en_GB.UTF-8
 LANG=en_GB.UTF-8
 _EOF_
+	export G_ERROR_HANDLER_EXITCODE=$?
 	G_ERROR_HANDLER
 
 	#G_HW_ARCH specific
@@ -1217,8 +1227,7 @@ StandardOutput=tty
 WantedBy=local-fs.target
 _EOF_
 	systemctl daemon-reload
-	systemctl enable dietpi-fs_partition_resize.service
-	G_ERROR_HANDLER
+	G_RUN_CMD systemctl enable dietpi-fs_partition_resize.service
 
 	cat << _EOF_ > /etc/dietpi/fs_partition_resize.sh
 #!/bin/bash
@@ -1260,9 +1269,7 @@ _EOF_1
 reboot
 
 _EOF_
-	G_ERROR_HANDLER
-	chmod +x /etc/dietpi/fs_partition_resize.sh
-	G_ERROR_HANDLER
+	G_RUN_CMD chmod +x /etc/dietpi/fs_partition_resize.sh
 
 	G_DIETPI-NOTIFY 2 'Generating dietpi-fs_partition_expand for subsequent boot'
 
@@ -1281,14 +1288,12 @@ StandardOutput=tty
 WantedBy=local-fs.target
 _EOF_
 	systemctl daemon-reload
-	systemctl enable dietpi-fs_expand.service
-	G_ERROR_HANDLER
+	G_RUN_CMD systemctl enable dietpi-fs_expand.service
 
 	# #debug
 	# systemctl start dietpi-fs_partition_resize.service
 	# systemctl status dietpi-fs_partition_resize.service -l
 	# cat /var/tmp/dietpi/logs/fs_partition_resize.log
-
 
 	G_DIETPI-NOTIFY 2 'Sync changes to disk and TRIM rootFS. Please wait, this may take some time...'
 
