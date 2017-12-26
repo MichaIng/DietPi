@@ -140,27 +140,10 @@
 		exit 1
 
 	fi
+	export G_PROGRAM_NAME='DietPi-PREP_SYSTEM_FOR_DIETPI'
 
 	#URL connection test var holder
 	INTERNET_ADDRESS=''
-
-	#Funcs
-
-	Error_Check(){
-
-		#Grab exit code in case of failure
-		local exit_code=$?
-		if (( $exit_code != 0 )); then
-
-			G_DIETPI-NOTIFY 1 "($exit_code): Script aborted"
-			exit $exit_code
-
-		else
-
-			G_DIETPI-NOTIFY 2 "($exit_code): Passed"
-		fi
-
-	}
 
 	#Whiptail
 	WHIP_BACKTITLE='DietPi-Prep'
@@ -212,10 +195,8 @@
 		# - Stop services
 		/DietPi/dietpi/dietpi-services stop
 
-		systemctl stop dietpi-ramlog
-		Error_Check
-		systemctl stop dietpi-ramdisk
-		Error_Check
+		G_RUN_CMD systemctl stop dietpi-ramlog
+		G_RUN_CMD systemctl stop dietpi-ramdisk
 
 		# - Delete any previous exsiting data
 		rm -R /DietPi/*
@@ -239,8 +220,7 @@
 	fi
 
 	#Recreate dietpi logs dir, used by G_AGx
-	mkdir -p /var/tmp/dietpi/logs
-	Error_Check
+	G_RUN_CMD mkdir -p /var/tmp/dietpi/logs
 
 
 	#------------------------------------------------------------------------------------------------
@@ -251,16 +231,13 @@
 	#------------------------------------------------------------------------------------------------
 	G_DIETPI-NOTIFY 2 'Updating APT:'
 
-	apt-get clean
-	Error_Check
+	G_RUN_CMD apt-get clean
 
 	G_AGUP
-	Error_Check
 
 	G_DIETPI-NOTIFY 2 'Installing core packages, required for next stage of this script:'
 
 	G_AGI apt-transport-https wget unzip whiptail
-	Error_Check
 
 	#------------------------------------------------------------------------------------------------
 	echo -e ''
@@ -440,17 +417,14 @@ _EOF_
 
 	G_DIETPI-NOTIFY 2 "Updating APT for $DISTRO_TARGET_NAME:"
 
-	apt-get clean
-	Error_Check
+	G_RUN_CMD apt-get clean
 
 	G_AGUP
-	Error_Check
 
 	# - @MichaIng https://github.com/Fourdee/DietPi/pull/1266/files
 	G_DIETPI-NOTIFY 2 "Marking all packages as auto installed first, to allow allow effective autoremove afterwards"
 
-	apt-mark auto $(apt-mark showmanual)
-	Error_Check
+	G_RUN_CMD apt-mark auto $(apt-mark showmanual)
 
 	# - @MichaIng https://github.com/Fourdee/DietPi/pull/1266/files
 	G_DIETPI-NOTIFY 2 "Temporary disable automatic recommends/suggests installation and allow them to be autoremoved:"
@@ -461,7 +435,7 @@ APT::Install-Suggests "false";
 APT::AutoRemove::RecommendsImportant "false";
 APT::AutoRemove::SuggestsImportant "false";
 _EOF_
-	Error_Check
+	G_ERROR_HANDLER
 
 	G_DIETPI-NOTIFY 2 "Forcing use of existing apt configs if available"
 
@@ -471,7 +445,7 @@ Dpkg::options {
    "--force-confold";
 }
 _EOF_
-	Error_Check
+	G_ERROR_HANDLER
 
 
 	#------------------------------------------------------------------------------------------------
@@ -639,13 +613,11 @@ _EOF_
 
 	G_DIETPI-NOTIFY 2 "Marking required packages as manually installed:"
 
-	apt-mark manual $INSTALL_PACKAGES
-	Error_Check
+	G_RUN_CMD apt-mark manual $INSTALL_PACKAGES
 
 	G_DIETPI-NOTIFY 2 "Purging APT with autoremoval:"
 
 	G_AGA
-	Error_Check
 
 
 	#------------------------------------------------------------------------------------------------
@@ -658,7 +630,6 @@ _EOF_
 	G_DIETPI-NOTIFY 2 "Upgrading existing APT installed packages:"
 
 	G_AGDUG
-	Error_Check
 
 	# - Distro is now target (for APT purposes and G_AGX support due to installed binary, its here, instead of after G_AGUP)
 	G_DISTRO=$DISTRO_TARGET
@@ -666,13 +637,11 @@ _EOF_
 
 	G_DIETPI-NOTIFY 2 "Disabling swapfile generation for dphys-swapfile during install"
 
-	echo -e "CONF_SWAPSIZE=0" > /etc/dphys-swapfile
-	Error_Check
+	G_RUN_CMD echo -e "CONF_SWAPSIZE=0" > /etc/dphys-swapfile
 
 	G_DIETPI-NOTIFY 2 "Installing core DietPi pre-req APT packages"
 
 	G_AGI $INSTALL_PACKAGES
-	Error_Check
 
 	G_DIETPI-NOTIFY 2 "Onboard Bluetooth selection"
 
@@ -692,14 +661,12 @@ _EOF_
 		G_DIETPI-NOTIFY 2 "Installing Bluetooth packages"
 
 		G_AGI bluetooth bluez-firmware
-		Error_Check
 
 		if (( $G_HW_MODEL < 10 )); then
 
 			G_DIETPI-NOTIFY 2 "Installing Bluetooth packages specific to RPi"
 
 			G_AGI pi-bluetooth
-			Error_Check
 
 		fi
 
@@ -713,7 +680,6 @@ _EOF_
 	G_DIETPI-NOTIFY 2 "Purging APT with autoremoval (in case of DISTRO upgrade/downgrade):"
 
 	G_AGA
-	Error_Check
 
 
 	#------------------------------------------------------------------------------------------------
@@ -726,15 +692,12 @@ _EOF_
 	INTERNET_ADDRESS="https://github.com/Fourdee/DietPi/archive/$GIT_BRANCH.zip" #NB: testing until this is stable in master
 	G_DIETPI-NOTIFY 2 "Checking connection to $INTERNET_ADDRESS"
 	G_CHECK_URL "$INTERNET_ADDRESS"
-	Error_Check
 
-	wget "$INTERNET_ADDRESS" -O package.zip
-	Error_Check
+	G_RUN_CMD wget "$INTERNET_ADDRESS" -O package.zip
 
 	G_DIETPI-NOTIFY 2 "Extracting DietPi sourcecode"
 
-	unzip package.zip
-	Error_Check
+	G_RUN_CMD unzip package.zip
 
 	rm package.zip
 
@@ -748,42 +711,35 @@ _EOF_
 
 	G_DIETPI-NOTIFY 2 "Creating /boot"
 
-	mkdir -p /boot
-	Error_Check
+	G_RUN_CMD mkdir -p /boot
 
 	G_DIETPI-NOTIFY 2 "Moving to /boot"
 
 	# - HW specific boot.ini uenv.txt
 	if (( $G_HW_MODEL == 10 )); then
 
-		mv DietPi-*/boot_c1.ini /boot/boot.ini
-		Error_Check
+		G_RUN_CMD mv DietPi-*/boot_c1.ini /boot/boot.ini
 
 	elif (( $G_HW_MODEL == 11 )); then
 
-		mv DietPi-*/boot_xu4.ini /boot/boot.ini
-		Error_Check
+		G_RUN_CMD mv DietPi-*/boot_xu4.ini /boot/boot.ini
 
 	elif (( $G_HW_MODEL == 12 )); then
 
-		mv DietPi-*/boot_c2.ini /boot/boot.ini
-		Error_Check
+		G_RUN_CMD mv DietPi-*/boot_c2.ini /boot/boot.ini
 
 	fi
 	rm DietPi-*/*.ini
 
-	cp -R DietPi-*/* /boot/
-	Error_Check
+	G_RUN_CMD cp -R DietPi-*/* /boot/
 
 	G_DIETPI-NOTIFY 2 "Cleaning up extracted files"
 
-	rm -R DietPi-*
-	Error_Check
+	G_RUN_CMD rm -R DietPi-*
 
 	G_DIETPI-NOTIFY 2 "Setting execute permissions for /boot/dietpi"
 
-	chmod -R +x /boot/dietpi
-	Error_Check
+	G_RUN_CMD chmod -R +x /boot/dietpi
 
 	#------------------------------------------------------------------------------------------------
 	echo -e ''
@@ -859,8 +815,7 @@ _EOF_
 
 	G_DIETPI-NOTIFY 2 "Creating DietPi core environment"
 
-	/boot/dietpi/func/dietpi-set_core_environment
-	Error_Check
+	G_RUN_CMD /boot/dietpi/func/dietpi-set_core_environment
 
 	echo -e "Samba client can be installed and setup by DietPi-Config.\nSimply run: dietpi-config and select the Networking option: NAS/Misc menu" > /mnt/samba/readme.txt
 	echo -e "FTP client mount can be installed and setup by DietPi-Config.\nSimply run: dietpi-config and select the Networking option: NAS/Misc menu" > /mnt/ftp_client/readme.txt
@@ -872,8 +827,7 @@ _EOF_
 
 	G_DIETPI-NOTIFY 2 "Generating DietPi /etc/fstab"
 
-	/boot/dietpi/dietpi-drive_manager 4
-	Error_Check
+	G_RUN_CMD /boot/dietpi/dietpi-drive_manager 4
 
 	# - HW Specific:
 	#	RPi requires PARTUUID for USB write: https://github.com/Fourdee/DietPi/issues/970
@@ -893,13 +847,11 @@ _EOF_
 
 	G_DIETPI-NOTIFY 2 "Starting DietPi-RAMdisk service"
 
-	systemctl start dietpi-ramdisk.service
-	Error_Check
+	G_RUN_CMD systemctl start dietpi-ramdisk.service
 
 	G_DIETPI-NOTIFY 2 "Starting DietPi-RAMlog service"
 
-	systemctl start dietpi-ramlog.service
-	Error_Check
+	G_RUN_CMD systemctl start dietpi-ramlog.service
 
 	G_DIETPI-NOTIFY 2 'Updating DietPi HW_INFO'
 
@@ -908,8 +860,8 @@ _EOF_
 	G_DIETPI-NOTIFY 2 "Configuring Network:"
 
 	rm -R /etc/network/interfaces &> /dev/null # armbian symlink for bulky network-manager
-	cp /boot/dietpi/conf/network_interfaces /etc/network/interfaces
-	Error_Check
+
+	G_RUN_CMD cp /boot/dietpi/conf/network_interfaces /etc/network/interfaces
 
 	# - enable allow-hotplug eth0 after copying.
 	sed -i "/allow-hotplug eth/c\allow-hotplug eth0" /etc/network/interfaces
@@ -945,12 +897,12 @@ _EOF_
 ff02::1      ip6-allnodes
 ff02::2      ip6-allrouters
 _EOF_
-	Error_Check
+	G_ERROR_HANDLER
 
 	cat << _EOF_ > /etc/hostname
 DietPi
 _EOF_
-	Error_Check
+	G_ERROR_HANDLER
 
 	G_DIETPI-NOTIFY 2 "Configuring htop:"
 
@@ -970,7 +922,7 @@ _EOF_
         apm = 254
 }
 _EOF_
-	Error_Check
+	G_ERROR_HANDLER
 
 	G_DIETPI-NOTIFY 2 "Configuring fakehwclock:"
 
@@ -991,7 +943,7 @@ _EOF_
 
 	echo "Europe/London" > /etc/timezone
 	dpkg-reconfigure -f noninteractive tzdata #Europe > London
-	Error_Check
+	G_ERROR_HANDLER
 
 	G_DIETPI-NOTIFY 2 "Configuring regional settings (Keyboard):"
 
@@ -1004,14 +956,14 @@ _EOF_
 	#locale-gen
 	update-locale
 	dpkg-reconfigure -f noninteractive locales # en_GB.UTF8 as only installed locale
-	Error_Check
+	G_ERROR_HANDLER
 
 	# - Pump default locale into sys env: https://github.com/Fourdee/DietPi/issues/825
 	cat << _EOF_ > /etc/environment
 LC_ALL=en_GB.UTF-8
 LANG=en_GB.UTF-8
 _EOF_
-	Error_Check
+	G_ERROR_HANDLER
 
 	#G_HW_ARCH specific
 	G_DIETPI-NOTIFY 2 "Applying G_HW_ARCH specific tweaks:"
@@ -1266,7 +1218,7 @@ WantedBy=local-fs.target
 _EOF_
 	systemctl daemon-reload
 	systemctl enable dietpi-fs_partition_resize.service
-	Error_Check
+	G_ERROR_HANDLER
 
 	cat << _EOF_ > /etc/dietpi/fs_partition_resize.sh
 #!/bin/bash
@@ -1308,9 +1260,9 @@ _EOF_1
 reboot
 
 _EOF_
-	Error_Check
+	G_ERROR_HANDLER
 	chmod +x /etc/dietpi/fs_partition_resize.sh
-	Error_Check
+	G_ERROR_HANDLER
 
 	G_DIETPI-NOTIFY 2 'Generating dietpi-fs_partition_expand for subsequent boot'
 
@@ -1330,7 +1282,7 @@ WantedBy=local-fs.target
 _EOF_
 	systemctl daemon-reload
 	systemctl enable dietpi-fs_expand.service
-	Error_Check
+	G_ERROR_HANDLER
 
 	# #debug
 	# systemctl start dietpi-fs_partition_resize.service
@@ -1340,10 +1292,8 @@ _EOF_
 
 	G_DIETPI-NOTIFY 2 'Sync changes to disk and TRIM rootFS. Please wait, this may take some time...'
 
-	systemctl stop dietpi-ramlog
-	Error_Check
-	systemctl stop dietpi-ramdisk
-	Error_Check
+	G_RUN_CMD systemctl stop dietpi-ramlog
+	G_RUN_CMD systemctl stop dietpi-ramdisk
 
 	sync
 	fstrim -v /
