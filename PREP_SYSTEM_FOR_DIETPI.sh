@@ -1196,7 +1196,7 @@ _EOF_
 
 	G_DIETPI-NOTIFY 2 'Clearing APT cache'
 
-	apt-get clean
+	G_RUN_CMD apt-get clean
 	rm -R /var/lib/apt/lists/* -vf #lists cache: remove partial folder also, automatically gets regenerated on G_AGUP
 	#rm /var/lib/dpkg/info/* #issue...
 	#dpkg: warning: files list file for package 'libdbus-1-3:armhf' missing; assuming      package has no files currently installed
