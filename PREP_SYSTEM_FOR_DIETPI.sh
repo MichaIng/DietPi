@@ -206,7 +206,7 @@
 		rm -R /mnt/dietpi-sync &> /dev/null
 		rm -R /mnt/dietpi_userdata &> /dev/null
 
-		rm -R /etc/dietpi &> /dev/null
+		rm -R /etc/dietpi &> /dev/null # Pre v160
 		rm -R /var/lib/dietpi &> /dev/null
 		rm -R /var/tmp/dietpi &> /dev/null
 
@@ -219,10 +219,6 @@
 
 	fi
 
-	#Recreate dietpi logs dir, used by G_AGx
-	G_RUN_CMD mkdir -p /var/tmp/dietpi/logs
-
-
 	#------------------------------------------------------------------------------------------------
 	echo -e ''
 	G_DIETPI-NOTIFY 2 '-----------------------------------------------------------------------------------'
@@ -230,6 +226,9 @@
 	G_DIETPI-NOTIFY 2 '-----------------------------------------------------------------------------------'
 	#------------------------------------------------------------------------------------------------
 	G_DIETPI-NOTIFY 2 'Updating APT:'
+
+	#Recreate dietpi logs dir, used by G_AGx
+	G_RUN_CMD mkdir -p /var/tmp/dietpi/logs
 
 	G_RUN_CMD apt-get clean
 
@@ -1135,9 +1134,6 @@ _EOF_
 
 	G_DIETPI-NOTIFY 2 'Configuring kernel'
 
-	# - Disable installed flags
-	rm /etc/dietpi/.*
-
 	# - RPi install DietPi kernel by default
 	if (( $G_HW_MODEL < 10 )); then
 
@@ -1163,7 +1159,7 @@ _EOF_
 
 	G_DIETPI-NOTIFY 2 'Deleting DietPi-RAMlog storage'
 
-	rm -R /etc/dietpi/dietpi-ramlog/storage &> /dev/null
+	rm -R /var/lib/dietpi/dietpi-ramlog/storage/* &> /dev/null
 
 	G_DIETPI-NOTIFY 2 'Deleting NTP drift file'
 
@@ -1220,7 +1216,7 @@ Before=dietpi-ramdisk.service
 [Service]
 Type=oneshot
 RemainAfterExit=no
-ExecStart=/bin/bash -c '/etc/dietpi/fs_partition_resize.sh | tee /var/tmp/dietpi/logs/fs_partition_resize.log'
+ExecStart=/bin/bash -c '/var/lib/dietpi/fs_partition_resize.sh | tee /var/tmp/dietpi/logs/fs_partition_resize.log'
 StandardOutput=tty
 
 [Install]
@@ -1229,7 +1225,7 @@ _EOF_
 	systemctl daemon-reload
 	G_RUN_CMD systemctl enable dietpi-fs_partition_resize.service
 
-	cat << _EOF_ > /etc/dietpi/fs_partition_resize.sh
+	cat << _EOF_ > /var/lib/dietpi/fs_partition_resize.sh
 #!/bin/bash
 
 systemctl disable dietpi-fs_partition_resize.service
@@ -1269,7 +1265,7 @@ _EOF_1
 reboot
 
 _EOF_
-	G_RUN_CMD chmod +x /etc/dietpi/fs_partition_resize.sh
+	G_RUN_CMD chmod +x /var/lib/dietpi/fs_partition_resize.sh
 
 	G_DIETPI-NOTIFY 2 'Generating dietpi-fs_partition_expand for subsequent boot'
 
@@ -1309,6 +1305,10 @@ _EOF_
 	ls -lha /lib/modules
 
 	G_DIETPI-NOTIFY 0 "Completed, disk can now be saved to .img for later use, or, reboot system to start first run of DietPi:"
+
+	#Cleanup
+	rm dietpi-globals
+	rm PREP_SYSTEM_FOR_DIETPI.sh
 
 	#Power off system
 
