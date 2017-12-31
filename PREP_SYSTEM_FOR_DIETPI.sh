@@ -94,7 +94,7 @@
 
 	else
 
-		echo -e 'Error: Unknown or unsupported distribution version, aborting...\n'
+		echo -e 'Error: Unknown or unsupported distribution version. Aborting...\n'
 		exit 1
 
 	fi
@@ -120,7 +120,7 @@
 
 	else
 
-		G_DIETPI-NOTIFY 1 "Error: Unknown or unsupported CPU architecture $G_HW_ARCH_DESCRIPTION, aborting..."
+		echo -e "Error: Unknown or unsupported CPU architecture $G_HW_ARCH_DESCRIPTION. Aborting..."
 		exit 1
 
 	fi
@@ -168,7 +168,7 @@
 
 		else
 
-			G_DIETPI-NOTIFY 1 'No choices detected, aborting'
+			G_DIETPI-NOTIFY 1 'No choices detected, aborting...'
 			exit 0
 
 		fi
