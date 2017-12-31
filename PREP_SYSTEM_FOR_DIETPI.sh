@@ -35,7 +35,7 @@
 	)
 
 	# - APT force IPv4
-	echo 'Acquire::ForceIPv4 "true";' > /etc/apt/apt.conf.d/99force-ipv
+	echo 'Acquire::ForceIPv4 "true";' > /etc/apt/apt.conf.d/99-dietpi-force-ipv4
 
 	for (( i=0; i<${#a_MIN_APT_PREREQS[@]}; i++))
 	do
@@ -46,7 +46,7 @@
 			apt-get install -y ${a_MIN_APT_PREREQS[$i]}
 			if (( $? != 0 )); then
 
-				echo -e "Error: unable to install ${a_MIN_APT_PREREQS[$i]}, please install it manually with\n - apt-get install ${a_MIN_APT_PREREQS[$i]} -y"
+				echo -e "Error: Unable to install ${a_MIN_APT_PREREQS[$i]}, please install it manually with\n - apt-get install -y ${a_MIN_APT_PREREQS[$i]}"
 				exit 1
 
 			fi
@@ -58,7 +58,11 @@
 	unset a_MIN_APT_PREREQS
 
 	# - Wget prefer IPv4
-	sed -i '/prefer-family =/c\prefer-family = IPv4' /etc/wgetrc &> /dev/null
+	grep -q '^[[:blank:]]*prefer-family =' /etc/wgetrc &&
+	sed -i '/^[[:blank:]]*prefer-family =/c\prefer-family = IPv4' /etc/wgetrc ||
+	grep -q '^[[:blank:]#;]*prefer-family =' /etc/wgetrc &&
+	sed -i '/^[[:blank:]#;]*prefer-family =/c\prefer-family = IPv4' /etc/wgetrc ||
+	echo 'prefer-family = IPv4' >> /etc/wgetrc
 
 	#------------------------------------------------------------------------------------------------
 	#Globals
@@ -236,7 +240,7 @@
 
 	G_DIETPI-NOTIFY 2 'Installing core packages, required for next stage of this script:'
 
-	G_AGI apt-transport-https wget unzip whiptail
+	G_AGI apt-transport-https unzip whiptail
 
 	#------------------------------------------------------------------------------------------------
 	echo -e ''
@@ -282,7 +286,7 @@
 		'20' 'x86_64 VMware/VirtualBox'
 		'13' 'oDroid U3'
 		'12' 'oDroid C2'
-		'11' 'oDroid XU3/4'
+		'11' 'oDroid XU3/4/HC1'
 		'10' 'oDroid C1'
 		'3' 'Raspberry Pi 3'
 		'2' 'Raspberry Pi 2'
@@ -306,13 +310,13 @@
 	G_DIETPI-NOTIFY 2 '-----------------------------------------------------------------------------------'
 	#------------------------------------------------------------------------------------------------
 
-	WHIP_TITLE='Distro Selection:'
+	WHIP_TITLE='Distro selection:'
 	WHIP_DESC="Please select a distro to install on this system. Selecting a distro that is older than the current installed on system, is not supported.\n\nCurrently installed:\n - $G_DISTRO $G_DISTRO_NAME"
 	WHIP_DEFAULT_ITEM=$G_DISTRO
 	DISTRO_LIST_ARRAY=(
 		'3' 'Jessie (oldstable, just if you need to avoid upgrade to current release)'
 		'4' 'Stretch (current stable release, recommended)'
-		'5' 'Buster (testing only, not officially suppoted)'
+		'5' 'Buster (testing only, not officially supported)'
 	)
 
 	# - Enable/list available options based on criteria
@@ -329,12 +333,12 @@
 			temp_distro_available=0
 
 		# - RPi disable buster
-		elif (( $temp_distro_index == 5 && $G_HW_MODEL < 10 )); then
+		#elif (( $temp_distro_index == 5 && $G_HW_MODEL < 10 )); then
 
-			G_DIETPI-NOTIFY 2 "Disabled Buster for RPi: index $temp_distro_index"
-			temp_distro_available=0
+		#	G_DIETPI-NOTIFY 2 "Disabled Buster for RPi: index $temp_distro_index"
+		#	temp_distro_available=0
 
-		fi
+		#fi
 
 		# - Enable option
 		if (( $temp_distro_available )); then
@@ -376,6 +380,7 @@
 
 	#rm /etc/apt/sources.list.d/* &> /dev/null #Probably a bad idea
 	rm /etc/apt/sources.list.d/deb-multimedia.list &> /dev/null #meveric
+	#rm /etc/apt/sources.list.d/armbian.list
 
 	G_DIETPI-NOTIFY 2 "Setting APT sources.list: $DISTRO_TARGET_NAME $DISTRO_TARGET"
 
@@ -389,6 +394,9 @@ _EOF_
 		cat << _EOF_ > /etc/apt/sources.list.d/raspi.list
 deb https://archive.raspberrypi.org/debian/ $DISTRO_TARGET_NAME main ui
 _EOF_
+
+		# Reset raspo.list to max available distro Stretch, which at least worked on first tests with Buster."
+		(( $DISTRO_TARGET > 4 )) && sed -i "s/$DISTRO_TARGET_NAME/stretch/" /etc/apt/sources.list.d/raspi.list
 
 	# - Set debian
 	else
@@ -421,14 +429,14 @@ _EOF_
 	G_AGUP
 
 	# - @MichaIng https://github.com/Fourdee/DietPi/pull/1266/files
-	G_DIETPI-NOTIFY 2 "Marking all packages as auto installed first, to allow allow effective autoremove afterwards"
+	G_DIETPI-NOTIFY 2 "Marking all packages as auto installed first, to allow effective autoremove afterwards"
 
 	G_RUN_CMD apt-mark auto $(apt-mark showmanual)
 
 	# - @MichaIng https://github.com/Fourdee/DietPi/pull/1266/files
 	G_DIETPI-NOTIFY 2 "Temporary disable automatic recommends/suggests installation and allow them to be autoremoved:"
 
-	export G_ERROR_HANDLER_COMMAND='/etc/apt/apt.conf.d/99dietpi_norecommends'
+	export G_ERROR_HANDLER_COMMAND='/etc/apt/apt.conf.d/99-dietpi-norecommends'
 	cat << _EOF_ > $G_ERROR_HANDLER_COMMAND
 APT::Install-Recommends "false";
 APT::Install-Suggests "false";
@@ -438,9 +446,9 @@ _EOF_
 	export G_ERROR_HANDLER_EXITCODE=$?
 	G_ERROR_HANDLER
 
-	G_DIETPI-NOTIFY 2 "Forcing use of existing apt configs if available"
+	G_DIETPI-NOTIFY 2 "Forcing use of modified apt configs"
 
-	export G_ERROR_HANDLER_COMMAND='/etc/apt/apt.conf.d/99dietpi_forceconf'
+	export G_ERROR_HANDLER_COMMAND='/etc/apt/apt.conf.d/99-dietpi-forceconf'
 	cat << _EOF_ > $G_ERROR_HANDLER_COMMAND
 Dpkg::options {
    "--force-confdef";
@@ -508,13 +516,14 @@ _EOF_
 	)
 
 	# - G_HW_ARCH specific required packages
+	# As these are kernel, firmware or bootloader packages, we need to install them directly to allow autoremove of in case older kernel packages:
+	# https://github.com/Fourdee/DietPi/issues/1285#issuecomment-354602594
 	#	x86_64
 	if (( $G_HW_ARCH == 10 )); then
 
-		aPACKAGES_REQUIRED_INSTALL+=('linux-image-amd64')
-		grep 'vendor_id' /proc/cpuinfo | grep -qi 'intel' && aPACKAGES_REQUIRED_INSTALL+=('intel-microcode')
-		grep 'vendor_id' /proc/cpuinfo | grep -qi 'amd' && aPACKAGES_REQUIRED_INSTALL+=('amd64-microcode')
-		aPACKAGES_REQUIRED_INSTALL+=('firmware-linux-nonfree')
+		G_AGI linux-image-amd64 firmware-linux-nonfree
+		grep 'vendor_id' /proc/cpuinfo | grep -qi 'intel' && G_AGI intel-microcode
+		grep 'vendor_id' /proc/cpuinfo | grep -qi 'amd' && G_AGI amd64-microcode
 		#aPACKAGES_REQUIRED_INSTALL+=('firmware-misc-nonfree')
 		#aPACKAGES_REQUIRED_INSTALL+=('dmidecode')
 
@@ -522,12 +531,12 @@ _EOF_
 		if (( $(dpkg --get-selections | grep -ci -m1 '^grub-efi-amd64[[:space:]]') )) ||
 			[ -d /boot/efi ]; then
 
-			aPACKAGES_REQUIRED_INSTALL+=('grub-efi-amd64')
+			G_AGI grub-efi-amd64
 
 		#	Grub BIOS
 		else
 
-			aPACKAGES_REQUIRED_INSTALL+=('grub-pc')
+			G_AGI grub-pc
 
 		fi
 
@@ -537,38 +546,33 @@ _EOF_
 	#	RPi
 	if (( $G_HW_MODEL < 10 )); then
 
-		aPACKAGES_REQUIRED_INSTALL+=('libraspberrypi-bin')
-		aPACKAGES_REQUIRED_INSTALL+=('libraspberrypi0')
-		aPACKAGES_REQUIRED_INSTALL+=('raspberrypi-bootloader')
-		aPACKAGES_REQUIRED_INSTALL+=('raspberrypi-kernel')
-		aPACKAGES_REQUIRED_INSTALL+=('raspberrypi-sys-mods')
-		aPACKAGES_REQUIRED_INSTALL+=('raspi-copies-and-fills')
+		G_AGI libraspberrypi-bin libraspberrypi0 raspberrypi-bootloader raspberrypi-kernel raspberrypi-sys-mods raspi-copies-and-fills
 
 	#	Odroid C2
 	elif (( $G_HW_MODEL == 12 )); then
 
-		aPACKAGES_REQUIRED_INSTALL+=('linux-image-arm64-odroid-c2')
+		G_AGI linux-image-arm64-odroid-c2
 
-	#	Odroid XU3/4
+	#	Odroid XU3/4/HC1
 	elif (( $G_HW_MODEL == 11 )); then
 
-		#aPACKAGES_REQUIRED_INSTALL+=('linux-image-4.9-armhf-odroid-xu3')
-		aPACKAGES_REQUIRED_INSTALL+=('linux-image-armhf-odroid-xu3')
+		G_AGI linux-image-4.9-armhf-odroid-xu3
+		#aPACKAGES_REQUIRED_INSTALL+=('linux-image-armhf-odroid-xu3')
 
 	#	Odroid C1
 	elif (( $G_HW_MODEL == 10 )); then
 
-		aPACKAGES_REQUIRED_INSTALL+=('linux-image-armhf-odroid-c1')
+		G_AGI linux-image-armhf-odroid-c1
 
 	#	Rock64
 	elif (( $G_HW_MODEL == 43 )); then
 
-		aPACKAGES_REQUIRED_INSTALL+=('linux-rock64-package')
+		G_AGI linux-rock64-package
 
 	#	BBB
 	elif (( $G_HW_MODEL == 71 )); then
 
-		aPACKAGES_REQUIRED_INSTALL+=('device-tree-compiler') #Kern
+		G_AGI device-tree-compiler #Kern
 
 	fi
 
@@ -678,7 +682,7 @@ _EOF_
 	# - @MichaIng https://github.com/Fourdee/DietPi/pull/1266/files
 	G_DIETPI-NOTIFY 2 "Returning installation of recommends back to default"
 
-	rm /etc/apt/apt-conf.d/99dietpi_norecommends &> /dev/null
+	G_RUN_CMD rm /etc/apt/apt-conf.d/99-dietpi-norecommends
 
 	G_DIETPI-NOTIFY 2 "Purging APT with autoremoval (in case of DISTRO upgrade/downgrade):"
 
@@ -718,7 +722,7 @@ _EOF_
 
 	G_DIETPI-NOTIFY 2 "Moving to /boot"
 
-	# - HW specific boot.ini uenv.txt
+	# - HW specific boot.ini uEnv.txt
 	if (( $G_HW_MODEL == 10 )); then
 
 		G_RUN_CMD mv DietPi-*/boot_c1.ini /boot/boot.ini
@@ -791,7 +795,6 @@ _EOF_
 	rm -R /usr/share/fonts/* &> /dev/null
 	rm -R /usr/share/icons/* &> /dev/null
 
-	#rm /etc/apt/sources.list.d/armbian.list
 	rm /etc/init.d/resize2fs &> /dev/null
 	rm /etc/update-motd.d/* &> /dev/null # ARMbian
 
@@ -891,7 +894,7 @@ timeout 10;
 retry 4;
 _EOF_
 
-	G_DIETPI-NOTIFY 2 "Configuring Hosts:"
+	G_DIETPI-NOTIFY 2 "Configuring hosts:"
 
 	export G_ERROR_HANDLER_COMMAND='/etc/hosts'
 	cat << _EOF_ > $G_ERROR_HANDLER_COMMAND
