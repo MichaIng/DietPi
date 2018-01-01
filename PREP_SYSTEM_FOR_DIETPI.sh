@@ -1025,7 +1025,7 @@ blacklist bc_example
 _EOF_
 
 		#	Use performance gov for stability.
-		sed -i "/^cpu_governor=/c\cpu_governor=performance" /DietPi/dietpi.txt
+		sed -i "/^CONFIG_CPU_GOVERNOR=/c\CONFIG_CPU_GOVERNOR=performance" /DietPi/dietpi.txt
 		/DietPi/dietpi/dietpi-cpu_set
 
 	# - RPI: Scroll lock fix for RPi by Midwan: https://github.com/Fourdee/DietPi/issues/474#issuecomment-243215674
@@ -1099,7 +1099,7 @@ _EOF_
 	#	BBB disable swapfile gen
 	if (( $G_HW_MODEL == 71 )); then
 
-		sed -i '/Swapfile_Size=/c\Swapfile_Size=0' /DietPi/dietpi.txt
+		sed -i '/AUTO_SETUP_SWAPFILE_SIZE=/c\AUTO_SETUP_SWAPFILE_SIZE=0' /DietPi/dietpi.txt
 
 	fi
 
