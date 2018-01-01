@@ -682,7 +682,7 @@ _EOF_
 	# - @MichaIng https://github.com/Fourdee/DietPi/pull/1266/files
 	G_DIETPI-NOTIFY 2 "Returning installation of recommends back to default"
 
-	G_RUN_CMD rm /etc/apt/apt-conf.d/99-dietpi-norecommends
+	G_RUN_CMD rm /etc/apt/apt.conf.d/99-dietpi-norecommends
 
 	G_DIETPI-NOTIFY 2 "Purging APT with autoremoval (in case of DISTRO upgrade/downgrade):"
 
