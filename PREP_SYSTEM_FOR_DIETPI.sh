@@ -556,8 +556,9 @@ _EOF_
 	#	Odroid XU3/4/HC1
 	elif (( $G_HW_MODEL == 11 )); then
 
-		G_AGI linux-image-4.9-armhf-odroid-xu3
-		#aPACKAGES_REQUIRED_INSTALL+=('linux-image-armhf-odroid-xu3')
+		#G_AGI linux-image-4.9-armhf-odroid-xu3
+		G_AGI $(dpkg --get-selections | grep "linux-image*" | awk '{print $1}')
+		[ ! -n "$(dpkg --get-selections | grep "linux-image*" ] && G_AGI linux-image-armhf-odroid-xu3
 
 	#	Odroid C1
 	elif (( $G_HW_MODEL == 10 )); then
