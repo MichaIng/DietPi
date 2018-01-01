@@ -338,7 +338,7 @@
 		#	G_DIETPI-NOTIFY 2 "Disabled Buster for RPi: index $temp_distro_index"
 		#	temp_distro_available=0
 
-		#fi
+		fi
 
 		# - Enable option
 		if (( $temp_distro_available )); then
