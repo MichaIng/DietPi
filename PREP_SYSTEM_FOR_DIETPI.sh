@@ -963,11 +963,10 @@ _EOF_
 
 	G_DIETPI-NOTIFY 2 "Configuring regional settings (Locale):"
 
-	sed -i 's/^\([^#]\)/#\1/g' /etc/locale.gen
-	sed -i '/en_GB.UTF-8 UTF-8/c\en_GB.UTF-8 UTF-8' /etc/locale.gen
+	echo 'en_GB.UTF-8 UTF-8' > /etc/locale.gen
+	G_RUN_CMD dpkg-reconfigure -f noninteractive locales # en_GB.UTF-8 as only installed locale
 	#locale-gen
-	update-locale
-	G_RUN_CMD dpkg-reconfigure -f noninteractive locales # en_GB.UTF8 as only installed locale
+	#update-locale
 
 	# - Pump default locale into sys env: https://github.com/Fourdee/DietPi/issues/825
 	export G_ERROR_HANDLER_COMMAND='/etc/environment'
