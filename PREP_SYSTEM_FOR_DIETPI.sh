@@ -1167,7 +1167,7 @@ _EOF_
 
 	G_DIETPI-NOTIFY 2 'Resetting DietPi generated globals/files'
 
-	rm /DietPi/dietpi/.*
+	rm /DietPi/dietpi/.??*
 
 	G_DIETPI-NOTIFY 2 'Storing current image version /etc/.dietpi_image_version'
 
