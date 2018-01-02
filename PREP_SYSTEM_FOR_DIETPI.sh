@@ -1096,9 +1096,6 @@ _EOF_
 	G_DIETPI-NOTIFY 2 'Disabling swapfile'
 
 	/DietPi/dietpi/func/dietpi-set_dphys-swapfile 0 /var/swap
-	# - Reset config
-	echo -e "CONF_SWAPSIZE=0" > /etc/dphys-swapfile
-	echo -e "CONF_SWAPFILE=/var/swap" >> /etc/dphys-swapfile
 
 	#	BBB disable swapfile gen
 	if (( $G_HW_MODEL == 71 )); then
