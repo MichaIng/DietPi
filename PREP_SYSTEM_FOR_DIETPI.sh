@@ -1010,6 +1010,17 @@ _EOF_
 	# - Sparky SBC ONLY:
 	elif (( $G_HW_MODEL == 70 )); then
 
+		# 	Install latest kernel
+		wget https://raw.githubusercontent.com/sparky-sbc/sparky-test/master/dragon_fly_check/uImage -O /boot/uImage
+		wget https://raw.githubusercontent.com/sparky-sbc/sparky-test/master/dragon_fly_check/3.10.38.bz2 -O package.tar
+		tar xvf package.tar -C /lib/modules/
+		rm package.tar
+
+		cat << _EOF_ > /DietPi/uEnv.txt
+uenvcmd=setenv os_type linux;
+bootargs=earlyprintk clk_ignore_unused selinux=0 scandelay console=tty0 loglevel=1 real_rootflag=rw root=/dev/mmcblk0p2 rootwait init=/lib/systemd/systemd aotg.urb_fix=1 aotg.aotg1_speed=0
+_EOF_
+
 		#	Blacklist GPU and touch screen modules: https://github.com/Fourdee/DietPi/issues/699#issuecomment-271362441
 		cat << _EOF_ > /etc/modprobe.d/disable_sparkysbc_touchscreen.conf
 blacklist owl_camera
