@@ -1180,10 +1180,6 @@ _EOF_
 
 	rm /DietPi/dietpi/.??*
 
-	G_DIETPI-NOTIFY 2 'Storing current image version /etc/.dietpi_image_version'
-
-	echo -e "$IMAGE_VERSION" > /etc/.dietpi_image_version
-
 	G_DIETPI-NOTIFY 2 'Setting DietPi-Autostart to console'
 
 	echo 0 > /DietPi/dietpi/.dietpi-autostart_index
@@ -1301,6 +1297,21 @@ _EOF_
 	# systemctl start dietpi-fs_partition_resize.service
 	# systemctl status dietpi-fs_partition_resize.service -l
 	# cat /var/tmp/dietpi/logs/fs_partition_resize.log
+
+	G_DIETPI-NOTIFY 2 'Storing DietPi version ID'
+
+	G_RUN_CMD wget https://raw.githubusercontent.com/Fourdee/DietPi/$GIT_BRANCH/dietpi/.version -O /DietPi/dietpi/.version
+
+	#	reduce sub_version by 1, allows us to create image, prior to release and patch if needed.
+	CORE_VERSION=$(sed -n 1p /DietPi/dietpi/.version)
+	SUB_VERSION=$(sed -n 2p /DietPi/dietpi/.version)
+	((SUB_VERSION--))
+	cat << _EOF_ > /DietPi/dietpi/.version
+$CORE_VERSION
+$SUB_VERSION
+_EOF_
+
+	G_RUN_CMD cp /DietPi/dietpi/.version /var/lib/dietpi/.dietpi_image_version
 
 	G_DIETPI-NOTIFY 2 'Sync changes to disk and TRIM rootFS. Please wait, this may take some time...'
 
