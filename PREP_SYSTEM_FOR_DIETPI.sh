@@ -65,7 +65,7 @@
 
 	#Setup locale
 	echo 'en_GB.UTF-8 UTF-8' > /etc/locale.gen
-	dpkg-reconfigure -f noninteractive locales; echo $?
+	dpkg-reconfigure -f noninteractive locales
 	if (( $? != 0 )); then
 
 		echo -e 'Error: locale generation failed, aborting.'
