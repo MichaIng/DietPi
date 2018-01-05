@@ -32,7 +32,6 @@
 		'ca-certificates'
 		'sudo'
 		'locales'
-		'apt-transport-https'
 
 	)
 
@@ -271,7 +270,7 @@ _EOF_
 	#------------------------------------------------------------------------------------------------
 
 	WHIP_TITLE='Hardware selection:'
-	WHIP_DESC='Please select the current device DietPi is being installed on:'
+	WHIP_DESC='Please select the current device this is being installed on:'
 	WHIP_DEFAULT_ITEM=0
 	WHIP_MENU_ARRAY=(
 
