@@ -31,7 +31,7 @@
 		'wget'
 		'ca-certificates'
 		'sudo'
-		'locale'
+		'locales'
 
 	)
 
