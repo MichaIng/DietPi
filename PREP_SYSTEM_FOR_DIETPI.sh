@@ -428,7 +428,7 @@ deb https://deb.debian.org/debian/ $DISTRO_TARGET_NAME-backports main contrib no
 _EOF_
 
 		#	Jessie, switch to http: https://github.com/Fourdee/DietPi/issues/1285#issuecomment-351830101
-		if (( $DISTRO < 4 )); then
+		if (( $G_DISTRO < 4 )); then
 
 			sed -i 's/https/http/g' /etc/apt/sources.list
 
@@ -663,7 +663,7 @@ _EOF_
 	G_DISTRO_NAME=$DISTRO_TARGET_NAME
 	
 	# Enable HTTPS for Debian ATP repo, after system was dist-upgraded to Stretch+ 
-	if (( $DISTRO > 3 && $G_HW_MODEL > 9 )); then
+	if (( $G_DISTRO > 3 && $G_HW_MODEL > 9 )); then
 
 			sed -i 's/http:/https:/g' /etc/apt/sources.list
 	
