@@ -1308,6 +1308,8 @@ _EOF_
 
 	G_DIETPI-NOTIFY 2 'Storing DietPi version ID'
 
+	G_RUN_CMD wget https://raw.githubusercontent.com/Fourdee/DietPi/$GIT_BRANCH/dietpi/.version -O /DietPi/dietpi/.version
+
 	#	reduce sub_version by 1, allows us to create image, prior to release and patch if needed.
 	CORE_VERSION=$(sed -n 1p /DietPi/dietpi/.version)
 	SUB_VERSION=$(sed -n 2p /DietPi/dietpi/.version)
