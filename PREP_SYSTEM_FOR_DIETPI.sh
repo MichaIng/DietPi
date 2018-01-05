@@ -8,14 +8,11 @@
 	# - Active eth0 connection
 	#------------------------------------------------------------------------------------------------
 
-	#Force en_GB Locale for whole script. Prevents incorrect parsing with non-english locales.
-	LANG=en_GB.UTF-8
-
 	#Ensure we are in users home dir: https://github.com/Fourdee/DietPi/issues/905#issuecomment-298223705
 	cd "$HOME"
 
 	#------------------------------------------------------------------------------------------------
-	# Critical checks with exit, prior to initial run of script
+	# Critical checks and pre-reqs, with exit, prior to initial run of script
 	#------------------------------------------------------------------------------------------------
 	#Exit path for non-root logins.
 	if (( $UID != 0 )); then
@@ -25,24 +22,26 @@
 
 	fi
 
-	#Check for minimal APT Pre-Reqs
+	# - APT force IPv4
+	echo 'Acquire::ForceIPv4 "true";' > /etc/apt/apt.conf.d/99-dietpi-force-ipv4
+
+	#Check/install minimal APT Pre-Reqs
 	a_MIN_APT_PREREQS=(
 
 		'wget'
 		'ca-certificates'
 		'sudo'
+		'locale'
 
 	)
 
-	# - APT force IPv4
-	echo 'Acquire::ForceIPv4 "true";' > /etc/apt/apt.conf.d/99-dietpi-force-ipv4
-
+	apt-get clean
+	apt-get update
 	for (( i=0; i<${#a_MIN_APT_PREREQS[@]}; i++))
 	do
 
 		if (( ! $(dpkg --get-selections | grep -ci -m1 "^${a_MIN_APT_PREREQS[$i]}[[:space:]]") )); then
 
-			#attempt to install it:
 			apt-get install -y ${a_MIN_APT_PREREQS[$i]}
 			if (( $? != 0 )); then
 
@@ -63,6 +62,27 @@
 	grep -q '^[[:blank:]#;]*prefer-family =' /etc/wgetrc &&
 	sed -i '/^[[:blank:]#;]*prefer-family =/c\prefer-family = IPv4' /etc/wgetrc ||
 	echo 'prefer-family = IPv4' >> /etc/wgetrc
+
+	#Setup locale
+	echo 'en_GB.UTF-8 UTF-8' > /etc/locale.gen
+	dpkg-reconfigure -f noninteractive locales; echo $?
+	if (( $? != 0 )); then
+
+		echo -e 'Error: locale generation failed, aborting.'
+		exit 1
+
+	fi
+	#locale-gen
+	#update-locale
+
+	# - Pump default locale into sys env: https://github.com/Fourdee/DietPi/issues/825
+	cat << _EOF_ > /etc/environment
+LC_ALL=en_GB.UTF-8
+LANG=en_GB.UTF-8
+_EOF_
+
+	#Force en_GB Locale for rest of script. Prevents incorrect parsing with non-english locales.
+	LANG=en_GB.UTF-8
 
 	#------------------------------------------------------------------------------------------------
 	#Globals
@@ -961,21 +981,9 @@ _EOF_
 
 	dpkg-reconfigure -f noninteractive keyboard-configuration #Keyboard must be plugged in for this to work!
 
-	G_DIETPI-NOTIFY 2 "Configuring regional settings (Locale):"
+	#G_DIETPI-NOTIFY 2 "Configuring regional settings (Locale):"
 
-	echo 'en_GB.UTF-8 UTF-8' > /etc/locale.gen
-	G_RUN_CMD dpkg-reconfigure -f noninteractive locales # en_GB.UTF-8 as only installed locale
-	#locale-gen
-	#update-locale
-
-	# - Pump default locale into sys env: https://github.com/Fourdee/DietPi/issues/825
-	export G_ERROR_HANDLER_COMMAND='/etc/environment'
-	cat << _EOF_ > $G_ERROR_HANDLER_COMMAND
-LC_ALL=en_GB.UTF-8
-LANG=en_GB.UTF-8
-_EOF_
-	export G_ERROR_HANDLER_EXITCODE=$?
-	G_ERROR_HANDLER
+	#Runs at start of script
 
 	#G_HW_ARCH specific
 	G_DIETPI-NOTIFY 2 "Applying G_HW_ARCH specific tweaks:"
