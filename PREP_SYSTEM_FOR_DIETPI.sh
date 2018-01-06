@@ -17,7 +17,7 @@
 	#Exit path for non-root logins.
 	if (( $UID != 0 )); then
 
-		echo -e 'Error: Root privileges required. Please run the command with "sudo"\n'
+		echo -e 'Error: Root privileges required. Please run the command with "sudo"\nIn case install the "sudo" package with root privileges: #apt-get install sudo\n'
 		exit 1
 
 	fi
@@ -30,7 +30,6 @@
 
 		'wget'
 		'ca-certificates'
-		'sudo'
 		'locales'
 
 	)
@@ -45,7 +44,7 @@
 			apt-get install -y ${a_MIN_APT_PREREQS[$i]}
 			if (( $? != 0 )); then
 
-				echo -e "Error: Unable to install ${a_MIN_APT_PREREQS[$i]}, please install it manually with\n - apt-get install -y ${a_MIN_APT_PREREQS[$i]}"
+				echo -e "Error: Unable to install ${a_MIN_APT_PREREQS[$i]}, please try to install it manually with\n - apt-get install -y ${a_MIN_APT_PREREQS[$i]}"
 				exit 1
 
 			fi
@@ -68,7 +67,7 @@
 	dpkg-reconfigure -f noninteractive locales
 	if (( $? != 0 )); then
 
-		echo -e 'Error: locale generation failed, aborting.'
+		echo -e 'Error: Locale generation failed. Aborting...\n'
 		exit 1
 
 	fi
@@ -429,12 +428,12 @@ deb https://deb.debian.org/debian/ $DISTRO_TARGET_NAME-backports main contrib no
 _EOF_
 
 		#	Jessie, switch to http: https://github.com/Fourdee/DietPi/issues/1285#issuecomment-351830101
-		if (( $DISTRO_TARGET == 3 )); then
+		if (( $G_DISTRO < 4 )); then
 
 			sed -i 's/https/http/g' /etc/apt/sources.list
 
 		#	Buster, remove backports: https://github.com/Fourdee/DietPi/issues/1285#issuecomment-351830101
-		elif (( $DISTRO_TARGET == 5 )); then
+		elif (( $DISTRO_TARGET > 4 )); then
 
 			sed -i '/backports/d' /etc/apt/sources.list
 
@@ -662,6 +661,13 @@ _EOF_
 	# - Distro is now target (for APT purposes and G_AGX support due to installed binary, its here, instead of after G_AGUP)
 	G_DISTRO=$DISTRO_TARGET
 	G_DISTRO_NAME=$DISTRO_TARGET_NAME
+	
+	# Enable HTTPS for Debian ATP repo, after system was dist-upgraded to Stretch+ 
+	if (( $G_DISTRO > 3 && $G_HW_MODEL > 9 )); then
+
+			sed -i 's/http:/https:/g' /etc/apt/sources.list
+	
+	fi
 
 	G_DIETPI-NOTIFY 2 "Disabling swapfile generation for dphys-swapfile during install"
 
