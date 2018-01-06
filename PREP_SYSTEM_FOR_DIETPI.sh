@@ -662,13 +662,6 @@ _EOF_
 	G_DISTRO=$DISTRO_TARGET
 	G_DISTRO_NAME=$DISTRO_TARGET_NAME
 
-	# Enable HTTPS for Debian ATP repo, after system was dist-upgraded to Stretch+
-	if (( $G_DISTRO > 3 && $G_HW_MODEL > 9 )); then
-
-		sed -i 's/http:/https:/g' /etc/apt/sources.list
-
-	fi
-
 	G_DIETPI-NOTIFY 2 "Disabling swapfile generation for dphys-swapfile during install"
 
 	G_RUN_CMD echo -e "CONF_SWAPSIZE=0" > /etc/dphys-swapfile
@@ -715,6 +708,12 @@ _EOF_
 
 	G_AGA
 
+	# Enable HTTPS for Debian ATP repo, after system was dist-upgraded to Stretch+
+	if (( $G_DISTRO > 3 && $G_HW_MODEL > 9 )); then
+
+		sed -i 's/http:/https:/g' /etc/apt/sources.list
+
+	fi
 
 	#------------------------------------------------------------------------------------------------
 	echo -e ''
