@@ -665,7 +665,7 @@ _EOF_
 	# Enable HTTPS for Debian ATP repo, after system was dist-upgraded to Stretch+
 	if (( $G_DISTRO > 3 && $G_HW_MODEL > 9 )); then
 
-			sed -i 's/http:/https:/g' /etc/apt/sources.list
+		sed -i 's/http:/https:/g' /etc/apt/sources.list
 
 	fi
 
@@ -1326,6 +1326,15 @@ $SUB_VERSION
 _EOF_
 
 	G_RUN_CMD cp /DietPi/dietpi/.version /var/lib/dietpi/.dietpi_image_version
+
+	# - Native PC/EFI
+	if [ -d /boot/efi ]; then
+
+		G_DIETPI-NOTIFY 2 'Recreating GRUB-EFI'
+
+		G_RUN_CMD grub-install --target=x86_64-efi --efi-directory=/boot/efi --bootloader-id=arch_grub --recheck
+
+	fi
 
 	G_DIETPI-NOTIFY 2 'Sync changes to disk. Please wait, this may take some time...'
 
