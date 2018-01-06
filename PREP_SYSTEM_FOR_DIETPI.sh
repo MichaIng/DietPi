@@ -661,12 +661,12 @@ _EOF_
 	# - Distro is now target (for APT purposes and G_AGX support due to installed binary, its here, instead of after G_AGUP)
 	G_DISTRO=$DISTRO_TARGET
 	G_DISTRO_NAME=$DISTRO_TARGET_NAME
-	
-	# Enable HTTPS for Debian ATP repo, after system was dist-upgraded to Stretch+ 
+
+	# Enable HTTPS for Debian ATP repo, after system was dist-upgraded to Stretch+
 	if (( $G_DISTRO > 3 && $G_HW_MODEL > 9 )); then
 
 			sed -i 's/http:/https:/g' /etc/apt/sources.list
-	
+
 	fi
 
 	G_DIETPI-NOTIFY 2 "Disabling swapfile generation for dphys-swapfile during install"
@@ -1327,14 +1327,14 @@ _EOF_
 
 	G_RUN_CMD cp /DietPi/dietpi/.version /var/lib/dietpi/.dietpi_image_version
 
-	G_DIETPI-NOTIFY 2 'Sync changes to disk and TRIM rootFS. Please wait, this may take some time...'
+	G_DIETPI-NOTIFY 2 'Sync changes to disk. Please wait, this may take some time...'
 
 	G_RUN_CMD systemctl stop dietpi-ramlog
 	G_RUN_CMD systemctl stop dietpi-ramdisk
 
 	sync
-	fstrim -v /
-	sync
+	# fstrim -v /
+	# sync
 
 	G_DIETPI-NOTIFY 2 'Please check and delete all non-required folders in /root/.xxxxxx'
 	G_DIETPI-NOTIFY 2 'Please delete outdated modules'
