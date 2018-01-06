@@ -86,7 +86,27 @@ _EOF_
 	#------------------------------------------------------------------------------------------------
 	#Globals
 	#------------------------------------------------------------------------------------------------
-	#System
+	#Download DietPi-Globals
+	# - NB: we'll have to manually handle errors, until script is sucessfully loaded
+	wget https://raw.githubusercontent.com/Fourdee/DietPi/$GIT_BRANCH/dietpi/func/dietpi-globals -O dietpi-globals
+	if (( $? != 0 )); then
+
+		echo -e 'Error: Unable to download dietpi-globals. Aborting...\n'
+		exit 1
+
+	fi
+
+	# - load
+	chmod +x dietpi-globals
+	. ./dietpi-globals
+	if (( $? != 0 )); then
+
+		echo -e 'Error: Unable to load dietpi-globals. Aborting...\n'
+		exit 1
+
+	fi
+
+	export G_PROGRAM_NAME='DietPi-PREP_SYSTEM_FOR_DIETPI'
 	export G_DISTRO=0 # Export to dietpi-globals
 	export G_DISTRO_NAME='NULL' # Export to dietpi-globals
 	DISTRO_TARGET=0
@@ -143,27 +163,6 @@ _EOF_
 		exit 1
 
 	fi
-
-	#Download DietPi-Globals
-	# - NB: we'll have to manually handle errors, until script is sucessfully loaded
-	wget https://raw.githubusercontent.com/Fourdee/DietPi/$GIT_BRANCH/dietpi/func/dietpi-globals -O dietpi-globals
-	if (( $? != 0 )); then
-
-		echo -e 'Error: Unable to download dietpi-globals. Aborting...\n'
-		exit 1
-
-	fi
-
-	# - load
-	chmod +x dietpi-globals
-	. ./dietpi-globals
-	if (( $? != 0 )); then
-
-		echo -e 'Error: Unable to load dietpi-globals. Aborting...\n'
-		exit 1
-
-	fi
-	export G_PROGRAM_NAME='DietPi-PREP_SYSTEM_FOR_DIETPI'
 
 	#URL connection test var holder
 	INTERNET_ADDRESS=''
@@ -430,7 +429,8 @@ _EOF_
 		#	Jessie, switch to http: https://github.com/Fourdee/DietPi/issues/1285#issuecomment-351830101
 		if (( $G_DISTRO < 4 )); then
 
-			sed -i 's/https/http/g' /etc/apt/sources.list
+			sed -i 's/https:/http:/g' /etc/apt/sources.list
+			#sed -i 's/https:/http:/g' /etc/apt/sources.list.d/*
 
 		#	Buster, remove backports: https://github.com/Fourdee/DietPi/issues/1285#issuecomment-351830101
 		elif (( $DISTRO_TARGET > 4 )); then
