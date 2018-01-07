@@ -1239,7 +1239,10 @@ _EOF_
 #!/bin/bash
 
 systemctl disable dietpi-fs_partition_resize.service
+systemctl enable dietpi-fs_expand.service
 systemctl daemon-reload
+
+sync
 
 TARGET_PARTITION=0
 TARGET_DEV=\$(findmnt / -o source -n)
@@ -1294,7 +1297,6 @@ StandardOutput=tty
 WantedBy=local-fs.target
 _EOF_
 	systemctl daemon-reload
-	G_RUN_CMD systemctl enable dietpi-fs_expand.service
 
 	# #debug
 	# systemctl start dietpi-fs_partition_resize.service
