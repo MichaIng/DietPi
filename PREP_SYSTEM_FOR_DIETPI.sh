@@ -1156,16 +1156,6 @@ _EOF_
 
 	#/DietPi/dietpi/func/dietpi-set_hardware preferipversion ipv4 #Already done at top of script, and now default in dietpi.txt
 
-	G_DIETPI-NOTIFY 2 'Configuring kernel'
-
-	# - RPi install DietPi kernel by default
-	if (( $G_HW_MODEL < 10 )); then
-
-		rm -R /lib/modules/* # Remove all modules from all kernels, ensures our kernel is installed.
-		/DietPi/dietpi/func/dietpi-set_hardware kernel dietpi_rpi_forced #forced, incase of kernel version match which would prevent install
-
-	fi
-
 	G_DIETPI-NOTIFY 2 'Disabling soundcards by default'
 
 	/DietPi/dietpi/func/dietpi-set_hardware soundcard none
