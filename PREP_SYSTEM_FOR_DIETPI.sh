@@ -72,10 +72,15 @@
 
 	fi
 	#locale-gen
-	#update-locale
 
 	# - Pump default locale into sys env: https://github.com/Fourdee/DietPi/issues/825
 	cat << _EOF_ > /etc/environment
+LC_ALL=en_GB.UTF-8
+LANG=en_GB.UTF-8
+_EOF_
+
+	# - and default locale (jessie)
+	cat << _EOF_ > /etc/default/locale
 LC_ALL=en_GB.UTF-8
 LANG=en_GB.UTF-8
 _EOF_
