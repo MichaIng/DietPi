@@ -1290,7 +1290,7 @@ Before=dietpi-ramdisk.service
 [Service]
 Type=oneshot
 RemainAfterExit=no
-ExecStart=/bin/bash -c "resize2fs \$(findmnt / -o source -n) | tee /var/tmp/dietpi/logs/fs_expand.log; systemctl disable dietpi-fs_expand.service; systemctl daemon-reload"
+ExecStart=/bin/bash -c "resize2fs \$(findmnt / -o source -n) &> /var/tmp/dietpi/logs/fs_expand.log; systemctl disable dietpi-fs_expand.service; systemctl daemon-reload"
 StandardOutput=tty
 
 [Install]
