@@ -34,6 +34,9 @@
 
 	)
 
+	# - Meveric special: https://github.com/Fourdee/DietPi/issues/1285#issuecomment-355759321
+	rm /etc/apt/sources.list.d/deb-multimedia.list &> /dev/null
+
 	apt-get clean
 	apt-get update
 	for (( i=0; i<${#a_MIN_APT_PREREQS[@]}; i++))
@@ -79,7 +82,7 @@ LC_ALL=en_GB.UTF-8
 LANG=en_GB.UTF-8
 _EOF_
 
-	# - and default locale (jessie)
+	# - and default locale (jessie/meveric)
 	cat << _EOF_ > /etc/default/locale
 LC_ALL=en_GB.UTF-8
 LANG=en_GB.UTF-8
