@@ -88,6 +88,13 @@ LC_ALL=en_GB.UTF-8
 LANG=en_GB.UTF-8
 _EOF_
 
+	# - and force locale for remote access, especially dropbear, where receiving locale from client can't be suppressed:
+	cat << _EOF_ > /etc/default/locale
+export LANG="en_GB.UTF-8"
+export LC_ALL="en_GB.UTF-8"
+export LANGUAGE="en_GB:en"
+_EOF_
+
 	#Force en_GB Locale for rest of script. Prevents incorrect parsing with non-english locales.
 	LANG=en_GB.UTF-8
 
