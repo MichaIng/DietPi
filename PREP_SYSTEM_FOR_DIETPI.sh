@@ -210,7 +210,7 @@ _EOF_
 	G_DIETPI-NOTIFY 0 'Step 0: Detecting existing DietPi system:'
 	G_DIETPI-NOTIFY 2 '-----------------------------------------------------------------------------------'
 	#------------------------------------------------------------------------------------------------
-	if (( $(systemctl is-active dietpi-ramdisk | grep -ci -m1 'active') )); then
+	if (( $(systemctl is-active dietpi-ramdisk | grep -ci -m1 '^active') )); then
 
 		G_DIETPI-NOTIFY 2 'DietPi system found, running pre-prep'
 
