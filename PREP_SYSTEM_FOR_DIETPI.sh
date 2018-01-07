@@ -678,35 +678,6 @@ _EOF_
 
 	G_AGI $INSTALL_PACKAGES
 
-	G_DIETPI-NOTIFY 2 "Onboard Bluetooth selection"
-
-	WHIP_TITLE='Bluetooth required?'
-	WHIP_DESC='Please select an option'
-	WHIP_DEFAULT_ITEM=0
-	WHIP_MENU_ARRAY=(
-
-		'0' "I don't require Bluetooth, do not install."
-		'1' 'Device has onboard Bluetooth and/or I require Bluetooth functionality.'
-
-	)
-
-	Run_Whiptail
-	if (( $WHIP_RETURN_VALUE == 1 )); then
-
-		G_DIETPI-NOTIFY 2 "Installing Bluetooth packages"
-
-		G_AGI bluetooth bluez-firmware
-
-		if (( $G_HW_MODEL < 10 )); then
-
-			G_DIETPI-NOTIFY 2 "Installing Bluetooth packages specific to RPi"
-
-			G_AGI pi-bluetooth
-
-		fi
-
-	fi
-
 	# - @MichaIng https://github.com/Fourdee/DietPi/pull/1266/files
 	G_DIETPI-NOTIFY 2 "Returning installation of recommends back to default"
 
