@@ -89,12 +89,14 @@ LANG=en_GB.UTF-8
 _EOF_
 
 	# - and force locale for remote access, especially dropbear, where receiving locale from client can't be suppressed:
-	cat << _EOF_ > /etc/default/locale
+	cat << _EOF_ > /etc/profile.d/99-dietpi-force-locale.sh
 # To force server locales on SSH access, as dropbear does automatically overwrite them by client values:
 export LANG="en_GB.UTF-8"
 export LC_ALL="en_GB.UTF-8"
 export LANGUAGE="en_GB:en"
 _EOF_
+
+	
 
 	#Force en_GB Locale for rest of script. Prevents incorrect parsing with non-english locales.
 	LANG=en_GB.UTF-8
