@@ -90,6 +90,7 @@ _EOF_
 
 	# - and force locale for remote access, especially dropbear, where receiving locale from client can't be suppressed:
 	cat << _EOF_ > /etc/default/locale
+# To force server locales on SSH access, as dropbear does automatically overwrite them by client values:
 export LANG="en_GB.UTF-8"
 export LC_ALL="en_GB.UTF-8"
 export LANGUAGE="en_GB:en"
