@@ -18,7 +18,6 @@ $FP_SCRIPT			allo					eth_dhcp / eth_static
 $FP_SCRIPT			useradd					X=create user with name X and default permissions, using global DietPi password (dietpi)
 $FP_SCRIPT			userdel					X=delete user with name X
 $FP_SCRIPT			apt-mirror				url/default
-$FP_SCRIPT			ntpd-mirror				url/default
 $FP_SCRIPT			ntpd-mode				configures NTPD mode (eg: ntp/systemd)
 $FP_SCRIPT			verify_dietpi.txt		verifies dietpi.txt entries, adds missing entries if required
 "
@@ -129,40 +128,9 @@ _EOF_
 	}
 
 	#/////////////////////////////////////////////////////////////////////////////////////
-	# Set NTPD mirror
-	#/////////////////////////////////////////////////////////////////////////////////////
-	NtpdMirror_Main(){
-
-		if [ -n "$INPUT_MODE_VALUE" ]; then
-
-			# - Set defaults?
-			if [ "$INPUT_MODE_VALUE" = "default" ]; then
-
-				INPUT_MODE_VALUE='debian.pool.ntp.org'
-
-			fi
-
-			sed -i '/^server [0-9]/d' /etc/ntp.conf
-			for ((i=0; i<4; i++))
-			do
-
-				echo -e "server $i.$INPUT_MODE_VALUE iburst" >> /etc/ntp.conf
-
-			done
-
-			# - Update DietPi.txt
-			sed -i "/CONFIG_NTP_MIRROR=/c\CONFIG_NTP_MIRROR=$INPUT_MODE_VALUE" /DietPi/dietpi.txt
-
-		else
-
-			Unknown_Input_Mode
-
-		fi
-
-	}
-
-	#/////////////////////////////////////////////////////////////////////////////////////
 	# Set NTPD Mode
+	# NB: also sets mirror as defined in dietpi.txt CONFIG_NTP_MIRROR
+	# NB: Also restarts NTP updates
 	#/////////////////////////////////////////////////////////////////////////////////////
 	NtpdMode_Main(){
 
@@ -171,10 +139,27 @@ _EOF_
 			# - Reset global to disabled, prevents run_ntpd in dietpi-software
 			sed -i "/CONFIG_NTP_MODE=/c\CONFIG_NTP_MODE=0" /DietPi/dietpi.txt
 
+			local ntpd_mirror=$(grep -m1 '^CONFIG_NTP_MIRROR=' /DietPi/dietpi.txt | sed 's/.*=//')
+			# - Set defaults?
+			if [ "$ntpd_mirror" = "default" ]; then
+
+				ntpd_mirror='debian.pool.ntp.org'
+
+			fi
+
 			#Install ntp if required
 			if (( $INPUT_MODE_VALUE >= 1 && $INPUT_MODE_VALUE <= 3 )); then
 
 				/DietPi/dietpi/dietpi-software install 170
+
+				# - Set NTPD mirror
+				sed -i '/^server [0-9]/d' /etc/ntp.conf
+				for ((i=0; i<4; i++))
+				do
+
+					echo -e "server $i.$ntpd_mirror iburst" >> /etc/ntp.conf
+
+				done
 
 			#Uninstall ntp if not required
 			else
@@ -186,17 +171,15 @@ _EOF_
 			#Setup Drift mode, use SystemD
 			if (( $INPUT_MODE_VALUE == 4 )); then
 
-				# - Set default pool servers
-				local pool_servers=$(grep -m1 '^CONFIG_NTP_MIRROR=' /DietPi/dietpi.txt | sed 's/.*=//')
+				# - Set NTPD mirror
 				cat << _EOF_ > /etc/systemd/timesyncd.conf
 [Time]
-Servers=0.$pool_servers 1.$pool_servers 2.$pool_servers 3.$pool_servers
+Servers=0.$ntpd_mirror 1.$ntpd_mirror 2.$ntpd_mirror 3.$ntpd_mirror
 _EOF_
 
 				# - enable
 				systemctl daemon-reload
 				timedatectl set-ntp true
-
 
 			#Disable SystemD and allow "run_ntpd" script to take control
 			else
@@ -210,6 +193,10 @@ _EOF_
 			sed -i "/CONFIG_NTP_MODE=/c\CONFIG_NTP_MODE=$INPUT_MODE_VALUE" /DietPi/dietpi.txt
 
 			# - Update now
+			#	Kill all existing, refresh now
+			killall -w /DietPi/dietpi/func/run_ntpd &> /dev/null
+			killall -w ntpd &> /dev/null
+			rm /var/lib/dietpi/.ntpd_exit_status &> /dev/null
 			/DietPi/dietpi/func/run_ntpd status
 
 		else
