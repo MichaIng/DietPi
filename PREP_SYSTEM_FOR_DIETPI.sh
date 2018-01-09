@@ -968,8 +968,10 @@ _EOF_
 
 	G_DIETPI-NOTIFY 2 "Configuring regional settings (TZdata):"
 
-	echo "Europe/London" > /etc/timezone
-	G_RUN_CMD dpkg-reconfigure -f noninteractive tzdata #Europe > London
+	rm /etc/timezone &> /dev/null
+	rm /etc/localtime
+	ln -fs /usr/share/zoneinfo/Europe/London /etc/localtime
+	G_RUN_CMD dpkg-reconfigure -f noninteractive tzdata
 
 	G_DIETPI-NOTIFY 2 "Configuring regional settings (Keyboard):"
 
