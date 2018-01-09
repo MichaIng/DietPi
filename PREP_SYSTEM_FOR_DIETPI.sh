@@ -66,6 +66,7 @@
 	echo 'prefer-family = IPv4' >> /etc/wgetrc
 
 	#Setup locale
+	#	NB: DEV, any changes here must be also rolled into function '/DietPi/dietpi/func/dietpi-set_software locale', for future script use
 	echo 'en_GB.UTF-8 UTF-8' > /etc/locale.gen
 	dpkg-reconfigure -f noninteractive locales
 	if (( $? != 0 )); then
@@ -95,8 +96,7 @@ export LANG="en_GB.UTF-8"
 export LC_ALL="en_GB.UTF-8"
 export LANGUAGE="en_GB:en"
 _EOF_
-
-	
+	chmod +x /etc/profile.d/99-dietpi-force-locale.sh
 
 	#Force en_GB Locale for rest of script. Prevents incorrect parsing with non-english locales.
 	LANG=en_GB.UTF-8
