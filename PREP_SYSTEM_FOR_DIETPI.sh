@@ -306,9 +306,7 @@ _EOF_
 		'51' 'BananaPi Pro (Lemaker)'
 		'50' 'BananaPi M2+ (sinovoip)'
 		'43' 'Rock64'
-		'42' 'Pine A64+ (2048mb)'
-		'41' 'Pine A64+ (1024mb)'
-		'40' 'Pine A64  (512mb)'
+		'40' 'Pine A64'
 		'38' 'OrangePi PC 2'
 		'37' 'OrangePi Prime'
 		'36' 'OrangePi Win'
@@ -613,6 +611,11 @@ _EOF_
 	elif (( $G_HW_MODEL == 71 )); then
 
 		G_AGI device-tree-compiler #Kern
+
+	# 	Asus TB
+	# elif (( $G_HW_MODEL == 100 )); then
+
+		# G_AGI linaro-overlay-minimal
 
 	fi
 
@@ -1056,7 +1059,7 @@ ACTION=="add", SUBSYSTEM=="leds", ENV{DEVPATH}=="*/input*::scrolllock", ATTR{tri
 _EOF_
 
 	# - PINE64 (and possibily others): Cursor fix for FB
-	elif (( $G_HW_MODEL >= 40 && $G_HW_MODEL <= 42 )); then
+	elif (( $G_HW_MODEL == 40 )); then
 
 		cat << _EOF_ >> "$HOME"/.bashrc
 infocmp > terminfo.txt
@@ -1112,6 +1115,7 @@ _EOF_
 	G_DIETPI-NOTIFY 2 'Disabling swapfile'
 
 	/DietPi/dietpi/func/dietpi-set_dphys-swapfile 0 /var/swap
+	rm /var/swap &> /dev/null # still exists on some images...
 
 	#	BBB disable swapfile gen
 	if (( $G_HW_MODEL == 71 )); then
@@ -1123,7 +1127,7 @@ _EOF_
 	G_DIETPI-NOTIFY 2 'Resetting boot.ini, config.txt, cmdline.txt etc'
 
 	# - PineA64 - delete ethaddr from uEnv.txt file
-	if (( $G_HW_MODEL >= 40 && $G_HW_MODEL <= 42 )); then
+	if (( $G_HW_MODEL == 40 )); then
 
 		sed -i '/^ethaddr/ d' /boot/uEnv.txt
 
