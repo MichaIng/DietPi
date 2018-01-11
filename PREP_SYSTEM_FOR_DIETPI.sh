@@ -1309,8 +1309,9 @@ _EOF_
 
 	G_RUN_CMD cp /DietPi/dietpi/.version /var/lib/dietpi/.dietpi_image_version
 
-	# - Native PC/EFI
-	if [ -d /boot/efi ]; then
+	# - Native PC/EFI (assume x86_64 only possible)
+	if (( $(dpkg --get-selections | grep -ci -m1 '^grub-efi-amd64[[:space:]]') )) &&
+		[ -d /boot/efi ]; then
 
 		G_DIETPI-NOTIFY 2 'Recreating GRUB-EFI'
 
