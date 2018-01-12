@@ -583,7 +583,7 @@ _EOF_
 	#	RPi
 	if (( $G_HW_MODEL < 10 )); then
 
-		G_AGI libraspberrypi-bin libraspberrypi0 raspberrypi-bootloader raspberrypi-kernel raspberrypi-sys-mods raspi-copies-and-fills
+		G_AGI libraspberrypi-bin libraspberrypi0 raspberrypi-bootloader raspberrypi-kernel raspberrypi-sys-mods raspi-copies-and-fills --reinstall
 
 	#	Odroid C2
 	elif (( $G_HW_MODEL == 12 )); then
