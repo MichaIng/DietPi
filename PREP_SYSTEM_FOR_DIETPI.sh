@@ -540,7 +540,6 @@ _EOF_
 		'psmisc'		# DietPi-Boot + DietPi-Software: e.g. killall
 		'resolvconf'		# System name server updater
 		'sudo'			# DietPi-Software + general use
-		'systemd'		# Basic system control
 		'systemd-sysv'		# Includes systemd and additional commands: poweroff, shutdown etc.
 		'tzdata'		# Time zone data for system clock, auto summer/winter time adjustment
 		'unzip'			# .zip unwrapper
