@@ -551,6 +551,15 @@ _EOF_
 
 	)
 
+	# - G_HW_MODEL specific package removals:
+	#	VM
+	if (( $G_HW_MODEL == 20 )); then
+
+		# No network firmware necessary and hard drive power management stays at host system.
+		apt-mark auto firmware-realtek hdparm
+
+	fi
+
 	# - G_HW_ARCH specific required packages
 	# As these are kernel, firmware or bootloader packages, we need to install them directly to allow autoremove of in case older kernel packages:
 	# https://github.com/Fourdee/DietPi/issues/1285#issuecomment-354602594
@@ -573,14 +582,6 @@ _EOF_
 		else
 
 			G_AGI grub-pc
-
-		fi
-
-		#	VM
-		if (( $G_HW_MODEL == 20 )); then
-
-			# No network firmware necessary and hard drive power management stays at host system.
-			apt-mark auto firmware-realtek hdparm
 
 		fi
 
