@@ -643,6 +643,14 @@ _EOF_
 
 		fi
 
+		#ARMbian DTB
+		AUTO_DETECT_DTB_PKG=$(dpkg --get-selections | grep '^ linux-dtb-' | awk '{print $1}')
+		if [ -n "$AUTO_DETECT_DTB_PKG" ]; then
+
+			G_AGI $AUTO_DETECT_DTB_PKG
+
+		fi
+
 		#	Check for existing firmware
 		#	- ARMbian
 		# AUTO_DETECT_FIRMWARE_PKG=$(dpkg --get-selections | grep '^armbian-firmware' | awk '{print $1}')
@@ -652,10 +660,10 @@ _EOF_
 
 		# fi
 
-		# Unpacking armbian-firmware (5.35) ...
-		# dpkg: error processing archive /var/cache/apt/archives/armbian-firmware_5.35_all      .deb (--unpack):
-		# trying to overwrite '/lib/firmware/rt2870.bin', which is also in package firmwa      re-misc-nonfree 20161130-3
-		# dpkg-deb: error: subprocess paste was killed by signal (Broken pipe)
+			# Unpacking armbian-firmware (5.35) ...
+			# dpkg: error processing archive /var/cache/apt/archives/armbian-firmware_5.35_all      .deb (--unpack):
+			# trying to overwrite '/lib/firmware/rt2870.bin', which is also in package firmwa      re-misc-nonfree 20161130-3
+			# dpkg-deb: error: subprocess paste was killed by signal (Broken pipe)
 
 
 	fi
