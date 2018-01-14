@@ -518,7 +518,7 @@ _EOF_
 		'debconf'		# APT package configuration, e.g. 'debconf-set-selections'
 		'dosfstools' 		# DietPi-Drive_Manager + fat (boot) drive file system check
 		'dphys-swapfile'	# Swap file management
-		'dropbear'		# DietPi sefault SSH-Client
+		'dropbear-run'		# DietPi default SSH-Client (excluding initramfs integration)
 		'ethtool'		# Ethernet link checking
 		'fake-hwclock'		# Hardware clock emulation, to allow correct timestamps during boot before network time sync
 		'fbset'			# DietPi-Config display settings
@@ -540,8 +540,7 @@ _EOF_
 		'psmisc'		# DietPi-Boot + DietPi-Software: e.g. killall
 		'resolvconf'		# System name server updater
 		'sudo'			# DietPi-Software + general use
-		'systemd'		# Basic system control
-		'systemd-sysv'	# Additional: Poweroff/shutdown etc
+		'systemd-sysv'		# Includes systemd and additional commands: poweroff, shutdown etc.
 		'tzdata'		# Time zone data for system clock, auto summer/winter time adjustment
 		'unzip'			# .zip unwrapper
 		'usbutils'		# DietPi-Software + DietPi-Bugreport: e.g. lsusb
@@ -574,6 +573,14 @@ _EOF_
 		else
 
 			G_AGI grub-pc
+
+		fi
+
+		#	VM
+		if (( $G_HW_MODEL == 20 )); then
+
+			# No network firmware necessary and hard drive power management stays at host system.
+			apt-mark auto firmware-realtek hdparm
 
 		fi
 
@@ -612,6 +619,7 @@ _EOF_
 	elif (( $G_HW_MODEL == 71 )); then
 
 		G_AGI device-tree-compiler #Kern
+
 
 	# - Auto detect kernel package
 	else
