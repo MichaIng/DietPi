@@ -577,11 +577,9 @@ _EOF_
 
 		fi
 
-	fi
-
 	# - G_HW_MODEL specific required packages
 	#	RPi
-	if (( $G_HW_MODEL < 10 )); then
+	elif (( $G_HW_MODEL < 10 )); then
 
 		apt-mark unhold libraspberrypi-bin libraspberrypi0 raspberrypi-bootloader raspberrypi-kernel raspberrypi-sys-mods raspi-copies-and-fills
 		rm -R /lib/modules/*
@@ -615,10 +613,20 @@ _EOF_
 
 		G_AGI device-tree-compiler #Kern
 
-	# 	Asus TB
-	# elif (( $G_HW_MODEL == 100 )); then
+	# - Auto detect kernel package
+	else
 
-		# G_AGI linaro-overlay-minimal
+		AUTO_DETECT_KERN_PKG=$(dpkg --get-selections | grep '^linux-image' | awk '{print $1}')
+		if [ -n "$AUTO_DETECT_KERN_PKG" ]; then
+
+			G_AGI $AUTO_DETECT_KERN_PKG
+
+		else
+
+			G_DIETPI-NOTIFY 1 'Error: Unable to find kernel packages for installation. Aborting...'
+			exit 1
+
+		fi
 
 	fi
 
