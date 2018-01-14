@@ -644,7 +644,7 @@ _EOF_
 		fi
 
 		#ARMbian DTB
-		AUTO_DETECT_DTB_PKG=$(dpkg --get-selections | grep '^ linux-dtb-' | awk '{print $1}')
+		AUTO_DETECT_DTB_PKG=$(dpkg --get-selections | grep '^linux-dtb-' | awk '{print $1}')
 		if [ -n "$AUTO_DETECT_DTB_PKG" ]; then
 
 			G_AGI $AUTO_DETECT_DTB_PKG
