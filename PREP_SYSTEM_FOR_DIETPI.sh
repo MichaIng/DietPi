@@ -97,6 +97,12 @@ export LC_ALL="en_GB.UTF-8"
 export LANGUAGE="en_GB:en"
 _EOF_
 	chmod +x /etc/profile.d/99-dietpi-force-locale.sh
+	#. /etc/profile.d/99-dietpi-force-locale.sh
+		# root@nanopineo:~# . /etc/profile.d/99-dietpi-force-locale.sh
+		# -bash: warning: setlocale: LC_ALL: cannot change locale (en_GB.UTF-8)
+		# root@nanopineo:~# localectl set-locale LANG="en_GB.UTF-8"
+		# root@nanopineo:~# localectl set-locale LC_ALL="en_GB.UTF-8"
+		# Failed to issue method call: Invalid Locale data.
 
 	#Force en_GB Locale for rest of script. Prevents incorrect parsing with non-english locales.
 	LANG=en_GB.UTF-8
@@ -622,7 +628,7 @@ _EOF_
 		G_AGI device-tree-compiler #Kern
 
 
-	# - Auto detect kernel package
+	# - Auto detect kernel/firmware package
 	else
 
 		AUTO_DETECT_KERN_PKG=$(dpkg --get-selections | grep '^linux-image' | awk '{print $1}')
@@ -636,6 +642,21 @@ _EOF_
 			exit 1
 
 		fi
+
+		#	Check for existing firmware
+		#	- ARMbian
+		# AUTO_DETECT_FIRMWARE_PKG=$(dpkg --get-selections | grep '^armbian-firmware' | awk '{print $1}')
+		# if [ -n "$AUTO_DETECT_FIRMWARE_PKG" ]; then
+
+			# G_AGI $AUTO_DETECT_FIRMWARE_PKG
+
+		# fi
+
+		# Unpacking armbian-firmware (5.35) ...
+		# dpkg: error processing archive /var/cache/apt/archives/armbian-firmware_5.35_all      .deb (--unpack):
+		# trying to overwrite '/lib/firmware/rt2870.bin', which is also in package firmwa      re-misc-nonfree 20161130-3
+		# dpkg-deb: error: subprocess paste was killed by signal (Broken pipe)
+
 
 	fi
 
