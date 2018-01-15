@@ -524,7 +524,6 @@ _EOF_
 		'debconf'		# APT package configuration, e.g. 'debconf-set-selections'
 		'dosfstools' 		# DietPi-Drive_Manager + fat (boot) drive file system check
 		'dphys-swapfile'	# Swap file management
-		'dropbear-run'		# DietPi default SSH-Client (excluding initramfs integration)
 		'ethtool'		# Ethernet link checking
 		'fake-hwclock'		# Hardware clock emulation, to allow correct timestamps during boot before network time sync
 		'fbset'			# DietPi-Config display settings
@@ -556,6 +555,17 @@ _EOF_
 		'zip'			# .zip wrapper
 
 	)
+	
+	# - G_DISTRO specific packages:
+	if (( $G_DISTRO < 4 )); then
+
+		aPACKAGES_REQUIRED_INSTALL+=('dropbear')		# DietPi default SSH-Client
+
+	else
+
+		aPACKAGES_REQUIRED_INSTALL+=('dropbear-run')		# DietPi default SSH-Client (excluding initramfs integration, available since Stretch)
+
+	fi
 
 	# - G_HW_MODEL specific package removals:
 	#	VM
