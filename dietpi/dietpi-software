@@ -3567,7 +3567,7 @@ _EOF_
 
 			# In case remove old symlink, created by DietPi MariaDB installation, otherwise installation will fail.
 			# This will not remove the folder in case, without "-R".
-			rm /var/lib/mysql &> /dev/null
+			[ "$(readlink /var/lib/mysql)" ] && [ ! -d "$(readlink /var/lib/mysql)/mysql" ] && rm /var/lib/mysql
 			G_AGI mariadb-server
 
 		fi
@@ -3668,13 +3668,12 @@ _EOF_
 			Banner_Installing
 
 			#MySQL must be running during install to allow debconf setup.
-			systemctl start mysql
+			G_RUN_CMD systemctl start mysql
 
 			# Set password parameters before installing
 			debconf-set-selections <<< "phpmyadmin phpmyadmin/dbconfig-install boolean true"
-			debconf-set-selections <<< "phpmyadmin phpmyadmin/app-password-confirm password $GLOBAL_PW"
-			debconf-set-selections <<< "phpmyadmin phpmyadmin/mysql/admin-pass password $GLOBAL_PW"
 			debconf-set-selections <<< "phpmyadmin phpmyadmin/mysql/app-pass password $GLOBAL_PW"
+			debconf-set-selections <<< "phpmyadmin phpmyadmin/app-password-confirm password $GLOBAL_PW"
 
 			if (( ${aSOFTWARE_INSTALL_STATE[83]} == 1 )); then
 
@@ -8113,20 +8112,10 @@ _EOF_
 
 			Banner_Configuration
 
-			# On Jessie assure unix_socket authentication:
-			if (( $G_DISTRO < 4 )); then
-
-				mysql -uroot -e "install plugin unix_socket soname 'auth_socket';"
-				mysql -uroot -e "grant all privileges on *.* to 'root'@'localhost' identified via unix_socket with grant option;flush privileges"
-				# Drop unnecessary root user children.
-				mysql -uroot -e "drop user 'root'@'dietpi';drop user 'root'@'127.0.0.1';drop user 'root'@'::1'"
-
-			fi
-
 			# Move SQL store to userdata location: https://github.com/Fourdee/DietPi/issues/672
-			if [ "$(readlink /var/lib/mysql)" != "$G_FP_DIETPI_USERDATA/mysql" ]; then
+			if [ "$(readlink /var/lib/mysql)" != "$G_FP_DIETPI_USERDATA/mysql/" ]; then
 
-				systemctl stop mysql
+				G_RUN_CMD systemctl stop mysql
 
 				# - Create target dir
 				mkdir -p "$G_FP_DIETPI_USERDATA"/mysql
@@ -8140,7 +8129,7 @@ _EOF_
 
 				fi
 
-				rm -R /var/lib/mysql
+				rm -R /var/lib/mysql &> /dev/null || rm /var/lib/mysql &> /dev/null
 
 				# - Symlink
 				ln -sf "$G_FP_DIETPI_USERDATA"/mysql /var/lib/mysql
@@ -8152,9 +8141,20 @@ _EOF_
 
 			fi
 
+			# On Jessie assure unix_socket authentication:
+			if (( $G_DISTRO < 4 )); then
+
+				G_RUN_CMD systemctl start mysql
+				mysql -uroot -e "install plugin unix_socket soname 'auth_socket';" &> /dev/null
+				mysql -uroot -e "grant all privileges on *.* to 'root'@'localhost' identified via unix_socket with grant option;flush privileges"
+				# Drop unnecessary root user children.
+				mysql -uroot -e "drop user 'root'@'dietpi';drop user 'root'@'127.0.0.1';drop user 'root'@'::1'" &> /dev/null
+
+			fi
+
 			### Also for MariaDB?
-			#Optimize for reduced memory use: https://github.com/Fourdee/DietPi/issues/605#issue-188930987
-#			cat << _EOF_ > /etc/mysql/conf.d/reduce_resources.cnf
+			# Optimize for reduced memory use: https://github.com/Fourdee/DietPi/issues/605#issue-188930987
+			#cat << _EOF_ > /etc/mysql/conf.d/reduce_resources.cnf
 #[mysqld]
 #key_buffer_size=8M
 #max_connections=30
@@ -8178,6 +8178,11 @@ _EOF_
 				ln -sf /usr/share/phpmyadmin /var/www
 
 			fi
+
+			# Due to MariaDB unix_socket authentication, "root" cannot be used to login the web ui.
+			# Thus default "phpmyadmin" user need to be used, who on Jessie does not have all privileges:
+			# http://dietpi.com/phpbb/viewtopic.php?f=8&t=5&p=54#p54
+			mysql -uroot -e "grant all privileges on *.* to phpmyadmin@localhost with grant option"
 
 		fi
 
