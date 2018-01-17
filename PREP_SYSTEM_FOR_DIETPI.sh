@@ -69,40 +69,23 @@
 	#	NB: DEV, any changes here must be also rolled into function '/DietPi/dietpi/func/dietpi-set_software locale', for future script use
 	echo 'en_GB.UTF-8 UTF-8' > /etc/locale.gen
 	dpkg-reconfigure -f noninteractive locales
+	# dpkg-reconfigure includes:
+	#	- "locale-gen": Generate locale(s) based on "/etc/locale.gen" or interactive selection.
+	#	- "update-locale": Add $LANG to "/etc/default/locale" based on generated locale(s) or interactive default language selection.
 	if (( $? != 0 )); then
 
 		echo -e 'Error: Locale generation failed. Aborting...\n'
 		exit 1
 
 	fi
-	#locale-gen
 
-	# - Pump default locale into sys env: https://github.com/Fourdee/DietPi/issues/825
-	cat << _EOF_ > /etc/environment
-LC_ALL=en_GB.UTF-8
-LANG=en_GB.UTF-8
-_EOF_
-
-	# - and default locale (jessie/meveric)
-	cat << _EOF_ > /etc/default/locale
-LC_ALL=en_GB.UTF-8
-LANG=en_GB.UTF-8
-_EOF_
-
-	# - and force locale for remote access, especially dropbear, where receiving locale from client can't be suppressed:
 	cat << _EOF_ > /etc/profile.d/99-dietpi-force-locale.sh
-# To force server locales on SSH access, as dropbear does automatically overwrite them by client values:
-export LANG="en_GB.UTF-8"
-export LC_ALL="en_GB.UTF-8"
-export LANGUAGE="en_GB:en"
+# Force locale on remote access, especially via dropbear, where overwriting server locale by SSH client cannot be suppressed:
+export LANG=en_GB.UTF-8
+export LC_ALL=en_GB.UTF-8
+export LANGUAGE=en_GB:en
 _EOF_
 	chmod +x /etc/profile.d/99-dietpi-force-locale.sh
-	#. /etc/profile.d/99-dietpi-force-locale.sh
-		# root@nanopineo:~# . /etc/profile.d/99-dietpi-force-locale.sh
-		# -bash: warning: setlocale: LC_ALL: cannot change locale (en_GB.UTF-8)
-		# root@nanopineo:~# localectl set-locale LANG="en_GB.UTF-8"
-		# root@nanopineo:~# localectl set-locale LC_ALL="en_GB.UTF-8"
-		# Failed to issue method call: Invalid Locale data.
 
 	#Force en_GB Locale for rest of script. Prevents incorrect parsing with non-english locales.
 	LANG=en_GB.UTF-8
@@ -276,10 +259,6 @@ _EOF_
 	#Recreate dietpi logs dir, used by G_AGx
 	G_RUN_CMD mkdir -p /var/tmp/dietpi/logs
 
-	G_RUN_CMD apt-get clean
-
-	G_AGUP
-
 	G_DIETPI-NOTIFY 2 'Installing core packages, required for next stage of this script:'
 
 	G_AGI apt-transport-https unzip whiptail
@@ -372,12 +351,6 @@ _EOF_
 			G_DIETPI-NOTIFY 2 "Disabled Distro downgrade: index $temp_distro_index"
 			temp_distro_available=0
 
-		# - RPi disable buster
-		#elif (( $temp_distro_index == 5 && $G_HW_MODEL < 10 )); then
-
-		#	G_DIETPI-NOTIFY 2 "Disabled Buster for RPi: index $temp_distro_index"
-		#	temp_distro_available=0
-
 		fi
 
 		# - Enable option
@@ -416,7 +389,7 @@ _EOF_
 	fi
 
 	G_DIETPI-NOTIFY 2 'Removing conflicting apt sources.list.d'
-	#	NB: Apt sources will get overwritten during 1st run, via boot script andn dietpi.txt entry
+	#	NB: Apt sources will get overwritten during 1st run, via boot script and dietpi.txt entry
 
 	#rm /etc/apt/sources.list.d/* &> /dev/null #Probably a bad idea
 	rm /etc/apt/sources.list.d/deb-multimedia.list &> /dev/null #meveric
@@ -448,11 +421,10 @@ deb https://deb.debian.org/debian-security/ $DISTRO_TARGET_NAME/updates main con
 deb https://deb.debian.org/debian/ $DISTRO_TARGET_NAME-backports main contrib non-free
 _EOF_
 
-		#	Jessie, switch to http: https://github.com/Fourdee/DietPi/issues/1285#issuecomment-351830101
+		#	Jessie, switch deb.debian.org to http: https://github.com/Fourdee/DietPi/issues/1285#issuecomment-351830101
 		if (( $G_DISTRO < 4 )); then
 
 			sed -i 's/https:/http:/g' /etc/apt/sources.list
-			#sed -i 's/https:/http:/g' /etc/apt/sources.list.d/*
 
 		#	Buster, remove backports: https://github.com/Fourdee/DietPi/issues/1285#issuecomment-351830101
 		elif (( $DISTRO_TARGET > 4 )); then
@@ -761,7 +733,7 @@ _EOF_
 
 	G_AGA
 
-	# Enable HTTPS for Debian ATP repo, after system was dist-upgraded to Stretch+
+	# Reenable HTTPS for deb.debian.org, if system was dist-upgraded to Stretch+
 	if (( $G_DISTRO > 3 && $G_HW_MODEL > 9 )); then
 
 		sed -i 's/http:/https:/g' /etc/apt/sources.list
