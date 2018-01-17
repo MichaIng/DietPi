@@ -346,7 +346,7 @@ _EOF_
 	#------------------------------------------------------------------------------------------------
 	echo -e ''
 	G_DIETPI-NOTIFY 2 '-----------------------------------------------------------------------------------'
-	G_DIETPI-NOTIFY 0 'Step 3: Distro selection / APT prep:'
+	G_DIETPI-NOTIFY 0 'Step 3: Distro selection:'
 	G_DIETPI-NOTIFY 2 '-----------------------------------------------------------------------------------'
 	#------------------------------------------------------------------------------------------------
 
@@ -503,7 +503,7 @@ _EOF_
 	#------------------------------------------------------------------------------------------------
 	echo -e ''
 	G_DIETPI-NOTIFY 2 '-----------------------------------------------------------------------------------'
-	G_DIETPI-NOTIFY 0 'Step 4: APT removals:'
+	G_DIETPI-NOTIFY 0 'Step 4: APT configuration:'
 	G_DIETPI-NOTIFY 2 '-----------------------------------------------------------------------------------'
 	#------------------------------------------------------------------------------------------------
 
@@ -589,7 +589,7 @@ _EOF_
 	fi
 
 	# - Kernel required packages
-	# - G_HW_ARCH specific required packages
+	# - G_HW_ARCH specific required Kernel packages
 	#	As these are kernel, firmware or bootloader packages, we need to install them directly to allow autoremove of in case older kernel packages:
 	#	https://github.com/Fourdee/DietPi/issues/1285#issuecomment-354602594
 	#	x86_64
@@ -743,7 +743,7 @@ _EOF_
 	#------------------------------------------------------------------------------------------------
 	echo -e ''
 	G_DIETPI-NOTIFY 2 '-----------------------------------------------------------------------------------'
-	G_DIETPI-NOTIFY 0 'Step 5: APT Installations:'
+	G_DIETPI-NOTIFY 0 'Step 5: APT installations:'
 	G_DIETPI-NOTIFY 2 '-----------------------------------------------------------------------------------'
 	#------------------------------------------------------------------------------------------------
 
