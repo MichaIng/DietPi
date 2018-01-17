@@ -555,7 +555,7 @@ _EOF_
 		'zip'			# .zip wrapper
 
 	)
-	
+
 	# - G_DISTRO specific packages:
 	if (( $G_DISTRO < 4 )); then
 
@@ -648,8 +648,7 @@ _EOF_
 
 		else
 
-			G_DIETPI-NOTIFY 1 'Error: Unable to find kernel packages for installation. Aborting...'
-			exit 1
+			G_DIETPI-NOTIFY 2 'Unable to find kernel packages for installation. Assuming non-APT/.deb install.'
 
 		fi
 
