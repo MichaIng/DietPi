@@ -556,7 +556,7 @@ _EOF_
 
 	)
 
-	# - G_DISTRO specific packages:
+	# - G_DISTRO specific required packages:
 	if (( $G_DISTRO < 4 )); then
 
 		aPACKAGES_REQUIRED_INSTALL+=('dropbear')		# DietPi default SSH-Client
@@ -564,6 +564,18 @@ _EOF_
 	else
 
 		aPACKAGES_REQUIRED_INSTALL+=('dropbear-run')		# DietPi default SSH-Client (excluding initramfs integration, available since Stretch)
+
+	fi
+
+	# - G_HW_MODEL specific required repo key packages
+	#	Repo keys: https://github.com/Fourdee/DietPi/issues/1285#issuecomment-358301273
+	if (( $G_HW_MODEL > 10 )); then
+
+		G_AGI debian-keyring debian-archive-keyring
+
+	else
+
+		G_AGI raspbian-archive-keyring
 
 	fi
 
@@ -576,9 +588,10 @@ _EOF_
 
 	fi
 
+	# - Kernel required packages
 	# - G_HW_ARCH specific required packages
-	# As these are kernel, firmware or bootloader packages, we need to install them directly to allow autoremove of in case older kernel packages:
-	# https://github.com/Fourdee/DietPi/issues/1285#issuecomment-354602594
+	#	As these are kernel, firmware or bootloader packages, we need to install them directly to allow autoremove of in case older kernel packages:
+	#	https://github.com/Fourdee/DietPi/issues/1285#issuecomment-354602594
 	#	x86_64
 	if (( $G_HW_ARCH == 10 )); then
 
@@ -601,7 +614,7 @@ _EOF_
 
 		fi
 
-	# - G_HW_MODEL specific required packages
+	# - G_HW_MODEL specific required Kernel packages
 	#	RPi
 	elif (( $G_HW_MODEL < 10 )); then
 
@@ -648,11 +661,11 @@ _EOF_
 
 		else
 
-			G_DIETPI-NOTIFY 2 'Unable to find kernel packages for installation. Assuming non-APT/.deb install.'
+			G_DIETPI-NOTIFY 2 'Unable to find kernel packages for installation. Assuming non-APT/.deb kernel installation.'
 
 		fi
 
-		#ARMbian DTB
+		#ARMbian/others DTB
 		AUTO_DETECT_DTB_PKG=$(dpkg --get-selections | grep '^linux-dtb-' | awk '{print $1}')
 		if [ -n "$AUTO_DETECT_DTB_PKG" ]; then
 
@@ -668,7 +681,6 @@ _EOF_
 			# G_AGI $AUTO_DETECT_FIRMWARE_PKG
 
 		# fi
-
 			# Unpacking armbian-firmware (5.35) ...
 			# dpkg: error processing archive /var/cache/apt/archives/armbian-firmware_5.35_all      .deb (--unpack):
 			# trying to overwrite '/lib/firmware/rt2870.bin', which is also in package firmwa      re-misc-nonfree 20161130-3
