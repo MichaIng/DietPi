@@ -569,7 +569,7 @@ _EOF_
 
 	# - G_HW_MODEL specific required repo key packages
 	#	Repo keys: https://github.com/Fourdee/DietPi/issues/1285#issuecomment-358301273
-	if (( $G_HW_MODEL > 10 )); then
+	if (( $G_HW_MODEL >= 10 )); then
 
 		G_AGI debian-keyring debian-archive-keyring
 
