@@ -931,8 +931,6 @@ _EOF_
 
 	G_RUN_CMD cp /boot/dietpi/conf/network_interfaces /etc/network/interfaces
 
-	# - enable allow-hotplug eth0 after copying.
-	sed -i "/allow-hotplug eth/c\allow-hotplug eth0" /etc/network/interfaces
 	# - Remove all predefined eth*/wlan* adapter rules
 	rm /etc/udev/rules.d/70-persistent-net.rules &> /dev/null
 	rm /etc/udev/rules.d/70-persistant-net.rules &> /dev/null
