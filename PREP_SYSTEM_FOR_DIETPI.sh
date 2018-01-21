@@ -1234,7 +1234,7 @@ _EOF_
 	G_DIETPI-NOTIFY 2 'Remove server_version / patch_file (downloads fresh from dietpi-update)'
 
 	rm /DietPi/dietpi/patch_file &> /dev/null
-	rm /DietPi/dietpi/server_version &> /dev/null
+	rm /DietPi/dietpi/server_version* &> /dev/null
 
 	G_DIETPI-NOTIFY 2 'Clearing APT cache'
 
