@@ -388,6 +388,14 @@ _EOF_
 
 	fi
 
+
+	#------------------------------------------------------------------------------------------------
+	echo -e ''
+	G_DIETPI-NOTIFY 2 '-----------------------------------------------------------------------------------'
+	G_DIETPI-NOTIFY 0 'Step 4: APT configuration:'
+	G_DIETPI-NOTIFY 2 '-----------------------------------------------------------------------------------'
+	#------------------------------------------------------------------------------------------------
+
 	G_DIETPI-NOTIFY 2 'Removing conflicting apt sources.list.d'
 	#	NB: Apt sources will get overwritten during 1st run, via boot script and dietpi.txt entry
 
@@ -470,14 +478,6 @@ Dpkg::options {
 _EOF_
 	export G_ERROR_HANDLER_EXITCODE=$?
 	G_ERROR_HANDLER
-
-
-	#------------------------------------------------------------------------------------------------
-	echo -e ''
-	G_DIETPI-NOTIFY 2 '-----------------------------------------------------------------------------------'
-	G_DIETPI-NOTIFY 0 'Step 4: APT configuration:'
-	G_DIETPI-NOTIFY 2 '-----------------------------------------------------------------------------------'
-	#------------------------------------------------------------------------------------------------
 
 	# - DietPi list of minimal required packages which must be installed:
 	#	dpkg --get-selections | awk '{print $1}' | sed 's/:a....//g' | sed "s/^/'/g" | sed "s/$/'/g"
