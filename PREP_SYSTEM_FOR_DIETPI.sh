@@ -540,7 +540,7 @@ _EOF_
 	#	Repo keys: https://github.com/Fourdee/DietPi/issues/1285#issuecomment-358301273
 	if (( $G_HW_MODEL >= 10 )); then
 
-		G_AGI debian-keyring debian-archive-keyring
+		G_AGI debian-archive-keyring
 
 	else
 
