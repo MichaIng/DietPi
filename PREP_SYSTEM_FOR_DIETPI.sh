@@ -479,8 +479,7 @@ _EOF_
 	G_DIETPI-NOTIFY 2 '-----------------------------------------------------------------------------------'
 	#------------------------------------------------------------------------------------------------
 
-	# - DietPi list of minimal required packages which must be installed:
-	#	dpkg --get-selections | awk '{print $1}' | sed 's/:a....//g' | sed "s/^/'/g" | sed "s/$/'/g"
+	# - DietPi list of minimal required packages, which must be installed:
 	aPACKAGES_REQUIRED_INSTALL=(
 
 		'apt-transport-https'	# Allows https sources in ATP
@@ -499,9 +498,7 @@ _EOF_
 		'ethtool'		# Ethernet link checking
 		'fake-hwclock'		# Hardware clock emulation, to allow correct timestamps during boot before network time sync
 		'fbset'			# DietPi-Config display settings
-		'firmware-realtek'	# Eth/WiFi/BT dongle firmware
 		'gnupg'			# apt-key add
-		'hdparm'		# Drive power management adjustment
 		'hfsplus'		# DietPi-Drive_Manager NTS (MacOS) file system support
 		'htop'			# System monitor
 		'initramfs-tools'	# RAM file system initialization
@@ -543,7 +540,7 @@ _EOF_
 	#	Repo keys: https://github.com/Fourdee/DietPi/issues/1285#issuecomment-358301273
 	if (( $G_HW_MODEL >= 10 )); then
 
-		G_AGI debian-keyring debian-archive-keyring
+		G_AGI debian-archive-keyring
 
 	else
 
@@ -551,12 +548,12 @@ _EOF_
 
 	fi
 
-	# - G_HW_MODEL specific package removals:
-	#	VM
-	if (( $G_HW_MODEL == 20 )); then
+	# - G_HW_MODEL specific required packages:
+	#	VM: No network firmware necessary and hard drive power management stays at host system.
+	if (( $G_HW_MODEL != 20 )); then
 
-		# No network firmware necessary and hard drive power management stays at host system.
-		apt-mark auto firmware-realtek hdparm
+		G_AGI firmware-realtek					# Eth/WiFi/BT dongle firmware
+		aPACKAGES_REQUIRED_INSTALL+=('hdparm')			# Drive power management adjustment
 
 	fi
 
@@ -567,7 +564,9 @@ _EOF_
 	#	x86_64
 	if (( $G_HW_ARCH == 10 )); then
 
-		G_AGI linux-image-amd64 firmware-linux-nonfree
+		G_AGI linux-image-amd64
+		# Usually no firmware should be necessary for VMs. If user manually passes though some USB device, he might need to install the firmware then.
+		(( $G_HW_MODEL != 20 )) && G_AGI firmware-linux-nonfree
 		grep 'vendor_id' /proc/cpuinfo | grep -qi 'intel' && G_AGI intel-microcode
 		grep 'vendor_id' /proc/cpuinfo | grep -qi 'amd' && G_AGI amd64-microcode
 		#aPACKAGES_REQUIRED_INSTALL+=('firmware-misc-nonfree')
@@ -605,7 +604,7 @@ _EOF_
 
 		#G_AGI linux-image-4.9-armhf-odroid-xu3
 		G_AGI $(dpkg --get-selections | grep '^linux-image' | awk '{print $1}')
-		(( ! $(dpkg --get-selections | grep -ci -m1 '^linux-image') )) && G_AGI linux-image-armhf-odroid-xu3
+		(( $(dpkg --get-selections | grep -ci -m1 '^linux-image') )) || G_AGI linux-image-armhf-odroid-xu3
 
 	#	Odroid C1
 	elif (( $G_HW_MODEL == 10 )); then
