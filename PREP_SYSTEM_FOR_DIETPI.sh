@@ -1009,6 +1009,7 @@ _EOF_
 
 	systemctl disable systemd-timesyncd
 	rm /etc/init.d/ntp &> /dev/null
+	(( $G_DISTRO > 4 )) && systemctl mask ntp
 
 	G_DIETPI-NOTIFY 2 "Configuring regional settings (TZdata):"
 
