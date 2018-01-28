@@ -8,6 +8,10 @@
 	# - Active eth0 connection
 	#------------------------------------------------------------------------------------------------
 
+	#Use master branch, if unset
+	GIT_BRANCH=${GIT_BRANCH:=master}
+	echo -e "Git Branch: $GIT_BRANCH"
+
 	#Ensure we are in users home dir: https://github.com/Fourdee/DietPi/issues/905#issuecomment-298223705
 	cd "$HOME"
 
@@ -187,7 +191,8 @@ _EOF_
 
 		WHIP_OPTION=$(whiptail --title "$WHIP_TITLE" --menu "$WHIP_DESC" --default-item "$WHIP_DEFAULT_ITEM" --backtitle "$WHIP_BACKTITLE" 24 85 12 "${WHIP_MENU_ARRAY[@]}" 3>&1 1>&2 2>&3)
 		WHIP_CHOICE=$?
-		if (( $WHIP_CHOICE == 0 )); then
+		if (( $WHIP_CHOICE == 0 )) &&
+			[ -n "$WHIP_OPTION" ]; then
 
 			WHIP_RETURN_VALUE=$WHIP_OPTION
 
@@ -275,11 +280,13 @@ _EOF_
 	WHIP_DEFAULT_ITEM=22
 	WHIP_MENU_ARRAY=(
 
+		'' '────Other──────────────────────────────'
+		'22' 'Generic device (unknown to DietPi)'
+		'' '────SBC────────────────────────────────'
 		'52' 'Asus Tinker Board'
 		'51' 'BananaPi Pro (Lemaker)'
 		'50' 'BananaPi M2+ (sinovoip)'
 		'71' 'Beagle Bone Black'
-		'22' 'Generic device (unknown to DietPi)'
 		'66' 'NanoPi M1 Plus'
 		'65' 'NanoPi NEO 2'
 		'64' 'NanoPi NEO Air'
@@ -307,6 +314,7 @@ _EOF_
 		'0' 'Raspberry Pi 1 (256mb)'
 		'43' 'Rock64'
 		'70' 'Sparky SBC'
+		'' '────PC─────────────────────────────────'
 		'21' 'x86_64 Native PC'
 		'20' 'x86_64 VMware/VirtualBox'
 
