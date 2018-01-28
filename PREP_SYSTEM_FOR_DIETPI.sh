@@ -271,7 +271,7 @@ _EOF_
 	#------------------------------------------------------------------------------------------------
 
 	WHIP_TITLE='Hardware selection:'
-	WHIP_DESC='Please select the current device this is being installed on:'
+	WHIP_DESC='Please select the current device this is being installed on:\n - NB: Select "Generic device" if not listed.'
 	WHIP_DEFAULT_ITEM=22
 	WHIP_MENU_ARRAY=(
 
