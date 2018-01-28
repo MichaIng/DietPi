@@ -1,0 +1,374 @@
+#!/bin/bash
+{
+	#////////////////////////////////////
+	# DietPi Function:
+	# - Configures core/basic folders/permissions/services etc for DietPi a environment
+	#
+	#////////////////////////////////////
+	# Created by Daniel Knight / daniel.knight@dietpi.com / dietpi.com
+	#
+	#////////////////////////////////////
+	#
+	# Info:
+	# - Script does not require a DietPi ready system to exec, can be used in PREP_SYSTEM
+	# - DietPi sourcecode must exist in /boot or /DietPi
+	# - Not everything for the DietPi env is contained here, only the core/critial stuff, to prevent dupe code in patches/PREP_SYSTEM
+	#
+	# Usage:
+	# - /boot/dietpi/func/dietpi-set_core_environment
+	# - /DietPi/dietpi/func/dietpi-set_core_environment
+	#////////////////////////////////////
+
+	#Support Globals loaded on non-dietpi systems
+	FP_SCRIPTS='/boot'
+	if [ -f /DietPi/dietpi/dietpi-software ]; then
+
+		FP_SCRIPTS='/DietPi'
+
+	fi
+
+	#Import DietPi-Globals -------------------------------------------------------------
+	. $FP_SCRIPTS/dietpi/func/dietpi-globals # NB: HW_* info are init only, not detected.
+	G_CHECK_ROOT_USER
+	export G_PROGRAM_NAME='DietPi-Set_core_environment'
+	#Import DietPi-Globals -------------------------------------------------------------
+
+
+	DIETPI_USERNAME='dietpi'
+	DIETPI_PASSWORD='dietpi'
+
+	#Near copy of useradd in dietpi-set_software, however, to support use in non-dietpi ready system, we manually need it here.
+	Create_DietPi_User(){
+
+		mkdir -p /home/"$DIETPI_USERNAME"
+		useradd -m -s /bin/bash "$DIETPI_USERNAME"
+		chpasswd <<< "$DIETPI_USERNAME:$DIETPI_PASSWORD"
+
+		#	Copy existing profile/bashrc
+		cp /root/.profile /home/"$DIETPI_USERNAME"/
+		cp /root/.bashrc /home/"$DIETPI_USERNAME"/
+
+		#	Sudo up dietpi login script
+		sed -i '/^\/DietPi\/dietpi\/login/c\sudo \/DietPi\/dietpi\/login' /home/$DIETPI_USERNAME/.bashrc
+
+		chown -R "$DIETPI_USERNAME":"$DIETPI_USERNAME" /home/"$DIETPI_USERNAME"
+
+		#	Allow sudo without pw
+		if (( ! $(cat /etc/sudoers | grep -ci -m1 "^$DIETPI_USERNAME[[:space:]]") )); then
+
+			cat << _EOF_ >> /etc/sudoers
+$DIETPI_USERNAME ALL=NOPASSWD: ALL
+_EOF_
+
+		fi
+
+		#	Same groups as user pi
+		local group_array=()
+		group_array+=('input')
+		group_array+=('netdev')
+		group_array+=('spi')
+		group_array+=('i2c')
+		group_array+=('gpio')
+		group_array+=('tty')
+		group_array+=('users')
+		group_array+=('games')
+		group_array+=('plugdev')
+		group_array+=('video')
+		group_array+=('audio')
+		group_array+=('sudo')
+		group_array+=('cdrom')
+		group_array+=('dialout')
+		group_array+=('adm')
+
+		#	+ allow access to www-data
+		group_array+=('www-data')
+
+		for ((i=0; i<${#group_array[@]}; i++))
+		do
+
+			usermod -a -G ${group_array[$i]} $DIETPI_USERNAME &> /dev/null
+
+		done
+
+		unset group_array
+
+	}
+
+	#///////////////////////////////////////////////////////////////////////////////////
+	# Main Loop
+	#///////////////////////////////////////////////////////////////////////////////////
+	G_DIETPI-NOTIFY 2 "Creating core DietPi environment, please wait..."
+
+	#-----------------------------------------------------------------------------------
+	#Bash
+
+	G_DIETPI-NOTIFY 2 "Configuring .bashrc:"
+
+	sed -i '/DietPi/d' /root/.bashrc
+	cat << _EOF_ >> /root/.bashrc
+/DietPi/dietpi/login
+. /DietPi/dietpi/func/dietpi-globals
+_EOF_
+
+#	G_DIETPI-NOTIFY 2 "Configuring /etc/bash.bashrc:" # Moved into dietpi-globals
+
+	#-----------------------------------------------------------------------------------
+	#Create_DietPi_User
+
+	G_DIETPI-NOTIFY 2 'Creating DietPi User Account:'
+
+	Create_DietPi_User
+
+	#-----------------------------------------------------------------------------------
+	#UID bit for sudo
+	# - https://github.com/Fourdee/DietPi/issues/794
+
+	G_DIETPI-NOTIFY 2 'Configuring Sudo UID bit:'
+
+	chmod 4755 $(which sudo)
+
+	#-----------------------------------------------------------------------------------
+	#Dir's
+
+	G_DIETPI-NOTIFY 2 'Configuring DietPi Directories:'
+
+	# - /var/lib/dietpi : Core storage for installed non-standard APT software, outside of /mnt/dietpi_userdata
+	mkdir -p /var/lib/dietpi
+	chown dietpi:dietpi /var/lib/dietpi
+	chmod 660 /var/lib/dietpi
+
+	#	Storage locations for program specifc additional data
+	mkdir -p /var/lib/dietpi/dietpi-autostart
+	mkdir -p /var/lib/dietpi/dietpi-config
+
+	#mkdir -p /var/lib/dietpi/dietpi-ramlog
+	mkdir -p /var/lib/dietpi/dietpi-ramlog/storage
+
+	#mkdir -p /var/lib/dietpi/dietpi-software
+	mkdir -p /var/lib/dietpi/dietpi-software/services 		#non systemd custom services for installed software
+	mkdir -p /var/lib/dietpi/dietpi-software/installed		#Additional storage for installed apps, eg: custom scripts and data
+
+	# - /var/tmp/dietpi : Temp storage saved during reboots, eg: logs outside of /var/log
+	mkdir -p /var/tmp/dietpi/logs
+	chown dietpi:dietpi /var/tmp/dietpi
+	chmod 660 /var/tmp/dietpi
+
+	# - /DietPi RAMdisk
+	mkdir -p /DietPi
+	chown dietpi:dietpi /DietPi
+	chmod 660 /DietPi
+
+	# - /mnt/dietpi_userdata : DietPi userdata
+	mkdir -p "$G_FP_DIETPI_USERDATA"
+	chown dietpi:dietpi "$G_FP_DIETPI_USERDATA"
+	chmod -R 775 "$G_FP_DIETPI_USERDATA"
+
+	# - Networked drives
+	mkdir -p /mnt/samba
+	mkdir -p /mnt/ftp_client
+	mkdir -p /mnt/nfs_client
+
+	#-----------------------------------------------------------------------------------
+	#Services
+
+	G_DIETPI-NOTIFY 2 'Configuring DietPi Services:'
+
+	cat << _EOF_ > /etc/systemd/system/dietpi-ramdisk.service
+[Unit]
+Description=DietPi-RAMdisk
+Before=rsyslog.service syslog.service
+After=local-fs.target boot.mount
+
+[Service]
+Type=forking
+RemainAfterExit=yes
+ExecStart=/bin/bash -c '/boot/dietpi/dietpi-ramdisk 0 &>> /var/tmp/dietpi/logs/dietpi-ramdisk.log'
+ExecStop=/bin/bash -c '/DietPi/dietpi/dietpi-ramdisk 1 &>> /var/tmp/dietpi/logs/dietpi-ramdisk.log'
+
+[Install]
+WantedBy=local-fs.target
+_EOF_
+	systemctl daemon-reload
+	systemctl enable dietpi-ramdisk.service
+
+	cat << _EOF_ > /etc/systemd/system/dietpi-ramlog.service
+[Unit]
+Description=DietPi-RAMlog
+Before=rsyslog.service syslog.service
+After=local-fs.target boot.mount
+
+[Service]
+Type=forking
+RemainAfterExit=yes
+ExecStart=/bin/bash -c '/boot/dietpi/dietpi-ramlog 0 &>> /var/tmp/dietpi/logs/dietpi-ramlog.log'
+ExecStop=/bin/bash -c '/DietPi/dietpi/dietpi-ramlog 1 &>> /var/tmp/dietpi/logs/dietpi-ramlog.log'
+
+[Install]
+WantedBy=local-fs.target
+_EOF_
+	systemctl daemon-reload
+	systemctl enable dietpi-ramlog.service
+
+	cat << _EOF_ > /etc/systemd/system/dietpi-boot.service
+[Unit]
+Description=DietPi-Boot
+After=network-online.target network.target networking.service dietpi-ramdisk.service dietpi-ramlog.service
+Requires=dietpi-ramdisk.service
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/bin/bash -c '/DietPi/dietpi/boot'
+StandardOutput=tty
+
+[Install]
+WantedBy=multi-user.target
+_EOF_
+	systemctl enable dietpi-boot.service
+	systemctl daemon-reload
+
+	update-rc.d -f rc.local remove &> /dev/null
+	rm /etc/init.d/rc.local &> /dev/null
+	rm /lib/systemd/system/rc-local.service &> /dev/null
+	cat << _EOF_ > /etc/systemd/system/rc-local.service
+[Unit]
+Description=/etc/rc.local Compatibility
+After=dietpi-boot.service dietpi-ramdisk.service dietpi-ramlog.service
+Requires=dietpi-boot.service dietpi-ramdisk.service
+
+[Service]
+Type=idle
+ExecStart=/etc/rc.local
+StandardOutput=tty
+RemainAfterExit=yes
+
+[Install]
+WantedBy=multi-user.target
+_EOF_
+	systemctl enable rc-local.service
+	systemctl daemon-reload
+
+	cat << _EOF_ > /etc/rc.local
+#!/bin/bash
+#Precaution: Wait for DietPi Ramdisk to finish
+while [ ! -f /DietPi/.ramdisk ]
+do
+
+    G_DIETPI-NOTIFY 2 "Waiting for DietPi-RAMDISK to finish mounting DietPi to RAM..."
+    sleep 1
+
+done
+
+echo -e "\$(cat /proc/uptime | awk '{print \$1}') Seconds" > /var/log/boottime
+if (( \$(cat /DietPi/dietpi/.install_stage) == 1 )); then
+
+    /DietPi/dietpi/dietpi-services start
+
+fi
+/DietPi/dietpi/dietpi-banner 0
+echo -e " Default Login:\n Username = root\n Password = dietpi\n"
+echo -e " Please login to continue\n"
+exit 0
+_EOF_
+	chmod +x /etc/rc.local
+	systemctl daemon-reload
+
+	cat << _EOF_ > /etc/systemd/system/kill-ssh-user-sessions-before-network.service
+[Unit]
+Description=Shutdown all ssh sessions before network
+DefaultDependencies=no
+Before=network.target shutdown.target
+
+[Service]
+Type=oneshot
+ExecStart=/bin/bash -c '/var/lib/dietpi/dietpi-software/services/kill-ssh-user-sessions-before-network.sh'
+
+[Install]
+WantedBy=poweroff.target halt.target reboot.target
+_EOF_
+	systemctl daemon-reload
+	systemctl enable kill-ssh-user-sessions-before-network
+
+	cat << _EOF_ > /var/lib/dietpi/dietpi-software/services/kill-ssh-user-sessions-before-network.sh
+#!/bin/bash
+if (( \$(ps x | grep -ci -m1 '[s]shd' ) )); then
+
+    killall -w sshd
+
+elif (( \$(ps x | grep -ci -m1 '[d]ropbear' ) )); then
+
+    killall -w dropbear
+
+fi
+
+exit 0
+_EOF_
+	chmod +x /var/lib/dietpi/dietpi-software/services/kill-ssh-user-sessions-before-network.sh
+
+	#-----------------------------------------------------------------------------------
+	#Cron Jobs
+
+	G_DIETPI-NOTIFY 2 "Configuring Cron:"
+
+	cp $FP_SCRIPTS/dietpi/conf/cron.daily_dietpi /etc/cron.daily/dietpi
+	chmod +x /etc/cron.daily/dietpi
+	cp $FP_SCRIPTS/dietpi/conf/cron.hourly_dietpi /etc/cron.hourly/dietpi
+	chmod +x /etc/cron.hourly/dietpi
+
+	cat << _EOF_ > /etc/crontab
+#Please use dietpi-cron to change cron start times
+SHELL=/bin/sh
+PATH=/usr/local/sbin:/usr/local/bin:/sbin:/bin:/usr/sbin:/usr/bin
+
+# m h dom mon dow user  command
+17 *    * * *   root    cd / && run-parts --report /etc/cron.hourly
+25 1    * * *   root    test -x /usr/sbin/anacron || ( cd / && run-parts --report /etc/cron.daily )
+47 1    * * 7   root    test -x /usr/sbin/anacron || ( cd / && run-parts --report /etc/cron.weekly )
+52 1    1 * *   root    test -x /usr/sbin/anacron || ( cd / && run-parts --report /etc/cron.monthly )
+_EOF_
+
+	# - ntp
+	rm /etc/cron.daily/ntp &> /dev/null
+
+	#-----------------------------------------------------------------------------------
+	#Network
+
+	G_DIETPI-NOTIFY 2 "Configuring: prefer wlan/eth naming for networked devices:"
+
+	# - Prefer to use wlan/eth naming for networked devices (eg: stretch)
+	ln -sf /dev/null /etc/systemd/network/99-default.link
+	#	x86_64: kernel cmd line with GRUB
+	#	HW_ARCH not set at this stage within DietPi, using PREP_SYSTEM
+	if [ -f /etc/default/grub ]; then
+
+		sed -i '/^GRUB_CMDLINE_LINUX_DEFAULT=/c\GRUB_CMDLINE_LINUX_DEFAULT="consoleblank=0 quiet"' /etc/default/grub #ipv6.disable=1 # https://github.com/Fourdee/DietPi/pull/1419#issuecomment-360452027
+		sed -i '/^GRUB_CMDLINE_LINUX=/c\GRUB_CMDLINE_LINUX="net.ifnames=0"' /etc/default/grub
+		sed -i '/^GRUB_TIMEOUT=/c\GRUB_TIMEOUT=0' /etc/default/grub
+		update-grub
+
+	fi
+
+	#-----------------------------------------------------------------------------------
+	#MISC
+
+	G_DIETPI-NOTIFY 2 "Disabling apt-daily services on Stretch+ (prevents random APT cache lock):"
+
+	if (( $G_DISTRO > 3 )); then
+
+		systemctl mask apt-daily.service &> /dev/null
+		systemctl mask apt-daily.timer &> /dev/null
+		systemctl mask apt-daily-upgrade.service &> /dev/null
+		systemctl mask apt-daily-upgrade.timer &> /dev/null
+
+	fi
+
+	G_DIETPI-NOTIFY 2 "Setting vm.swappiness=1:"
+
+	sed -i '/^[[:blank:]]*vm.swappiness=/d' /etc/sysctl.conf
+	echo -e "vm.swappiness=1" > /etc/sysctl.d/99-dietpi.conf
+
+	#-----------------------------------------------------------------------------------
+	G_DIETPI-NOTIFY 0 "Completed DietPi core environment"
+	exit
+	#-----------------------------------------------------------------------------------
+}

@@ -13,38 +13,21 @@
 	# - activates on boot from /etc/init.d/dietpi-service
 	#////////////////////////////////////
 
-	#Force en_GB Locale for whole script. Prevents incorrect parsing with non-english locales.
-	LANG=en_GB.UTF-8
-
-	#Ensure we are in users home dir: https://github.com/Fourdee/DietPi/issues/905#issuecomment-298223705
-	cd "$HOME"
+	#Import DietPi-Globals ---------------------------------------------------------------
+	/DietPi/dietpi/dietpi-obtain_hw_model # Running for the 1st time
+	. /DietPi/dietpi/func/dietpi-globals
+	export G_PROGRAM_NAME='DietPi-Boot'
+	#Import DietPi-Globals ---------------------------------------------------------------
 
 	#/////////////////////////////////////////////////////////////////////////////////////
 	#Globals
 	#/////////////////////////////////////////////////////////////////////////////////////
 	FP_LOGFILE='/var/log/dietpi-boot.log'
 
-	HW_MODEL=0
-	DISTRO=0
-	HW_CPUID=0
-
-	FS_FORCED_EXPANSION=$(cat /DietPi/dietpi.txt | grep -m1 '^fs_force_resize=' | sed 's/.*=//')
-
-	# -3 = first boot / -2 = partition / -1 = filesystem / 0 = run dietpi-software at login / 1 = completed
-	DIETPI_INSTALL_STAGE=$(cat /DietPi/dietpi/.install_stage)
-
-	Read_Hw_Model(){
-
-		HW_MODEL=$(sed -n 1p /DietPi/dietpi/.hw_model)
-		DISTRO=$(sed -n 3p /DietPi/dietpi/.hw_model)
-		HW_CPUID=$(sed -n 9p /DietPi/dietpi/.hw_model)
-
-	}
-
 	RPi_Set_Clock_Speeds(){
 
 		#RPi's
-		if (( $HW_MODEL < 10 )); then
+		if (( $G_HW_MODEL < 10 )); then
 
 			#If no overclocking is set. set values to current (used in dietpi-config as reference for overclocking / current values)
 			if (( $(cat /DietPi/config.txt | grep -ci -m1 '^#over_voltage=') &&
@@ -53,7 +36,7 @@
 				$(cat /DietPi/config.txt | grep -ci -m1 '^#sdram_freq=') )); then
 
 				#RPi v1 - Set safe clock
-				if (( $HW_MODEL < 2 )); then
+				if (( $G_HW_MODEL < 2 )); then
 
 					sed -i '/over_voltage=/c\over_voltage=2' /DietPi/config.txt
 					sed -i '/arm_freq=/c\arm_freq=900' /DietPi/config.txt
@@ -71,7 +54,7 @@
 					fi
 
 				#RPi v2
-				elif (( $HW_MODEL == 2 )); then
+				elif (( $G_HW_MODEL == 2 )); then
 
 					sed -i '/over_voltage=/c\#over_voltage=0' /DietPi/config.txt
 					sed -i '/arm_freq=/c\#arm_freq=900' /DietPi/config.txt
@@ -79,7 +62,7 @@
 					sed -i '/sdram_freq=/c\#sdram_freq=450' /DietPi/config.txt
 
 				#RPi v3
-				elif (( $HW_MODEL == 3 )); then
+				elif (( $G_HW_MODEL == 3 )); then
 
 					sed -i '/over_voltage=/c\#over_voltage=0' /DietPi/config.txt
 					sed -i '/arm_freq=/c\#arm_freq=1200' /DietPi/config.txt
@@ -92,63 +75,6 @@
 			fi
 
 		fi
-	}
-
-	FS_Partition(){
-
-		#Force filesystem sync
-		sync
-
-		local rootfs_resize_limit=$(cat /DietPi/dietpi.txt | grep -m1 '^rootfs_resize_limit=' | sed 's/.*=//')
-
-		local target_partition=$(findmnt / -o source -n | sed 's/.*p//')
-		local target_dev=$(findmnt / -o source -n)
-
-		# - MMCBLK[0-9]p[0-9] scrape
-		if [[ "$target_dev" = *"mmcblk"* ]]; then
-
-			target_dev=$(findmnt / -o source -n | sed 's/p[0-9]$//')
-
-		# - Everything else scrape (eg: /dev/sdX[0-9])
-		else
-
-			target_dev=$(findmnt / -o source -n | sed 's/[0-9]$//')
-
-		fi
-
-		if (( $rootfs_resize_limit < 100 )); then
-
-			parted -s $target_dev unit % resizepart $target_partition $rootfs_resize_limit% || parted $target_dev unit % resizepart $target_partition Yes $rootfs_resize_limit%
-
-		else
-
-			cat << _EOF_ | fdisk $target_dev
-p
-d
-$target_partition
-n
-p
-$target_partition
-$(parted $target_dev -ms unit s p | grep ':ext4::;' | sed 's/:/ /g' | sed 's/s//g' | awk '{ print $2 }')
-
-p
-w
-
-_EOF_
-
-		fi
-
-	}
-
-	FS_Expand(){
-
-		#Force filesystem sync
-		sync
-
-		#Resize RootFS to new partition size
-		local target_dev=$(findmnt / -o source -n)
-		resize2fs $target_dev
-
 	}
 
 	Apply_DietPi_FirstRun_Settings(){
@@ -172,14 +98,14 @@ _EOF_
 		sed -i "s/wlan0/wlan$index_wlan/g" /etc/network/interfaces
 
 		#Grab user requested settings from /dietpi.txt
-		local Ethernet_Enabled=$(cat /DietPi/dietpi.txt | grep -ci -m1 'Ethernet_Enabled=1')
-		local Wifi_Enabled=$(cat /DietPi/dietpi.txt | grep -ci -m1 'Wifi_Enabled=1')
+		local Ethernet_Enabled=$(cat /DietPi/dietpi.txt | grep -ci -m1 'AUTO_SETUP_NET_ETHERNET_ENABLED=1')
+		local Wifi_Enabled=$(cat /DietPi/dietpi.txt | grep -ci -m1 'AUTO_SETUP_NET_WIFI_ENABLED=1')
 
-		local Use_Static=$(cat /DietPi/dietpi.txt | grep -ci -m1 '^Use_Static=1')
-		local Static_IP=$(cat /DietPi/dietpi.txt | grep -m1 '^Static_IP' | sed 's/.*=//')
-		local Static_Mask=$(cat /DietPi/dietpi.txt | grep -m1 '^Static_Mask' | sed 's/.*=//')
-		local Static_Gateway=$(cat /DietPi/dietpi.txt | grep -m1 '^Static_Gateway' | sed 's/.*=//')
-		local Static_Dns=$(cat /DietPi/dietpi.txt | grep -m1 '^Static_DNS' | sed 's/.*=//')
+		local Use_Static=$(cat /DietPi/dietpi.txt | grep -ci -m1 '^AUTO_SETUP_NET_USESTATIC=1')
+		local Static_IP=$(cat /DietPi/dietpi.txt | grep -m1 '^AUTO_SETUP_NET_STATIC_IP=' | sed 's/.*=//')
+		local Static_Mask=$(cat /DietPi/dietpi.txt | grep -m1 '^AUTO_SETUP_NET_STATIC_MASK=' | sed 's/.*=//')
+		local Static_Gateway=$(cat /DietPi/dietpi.txt | grep -m1 '^AUTO_SETUP_NET_STATIC_GATEWAY=' | sed 's/.*=//')
+		local Static_Dns=$(cat /DietPi/dietpi.txt | grep -m1 '^AUTO_SETUP_NET_STATIC_DNS=' | sed 's/.*=//')
 
 		# - Wifi
 		if (( $Wifi_Enabled == 1 )); then
@@ -245,7 +171,7 @@ _EOF_
 		fi
 
 		#Apply forced eth speed if set in dietpi.txt
-		/DietPi/dietpi/func/dietpi-set_hardware eth-forcespeed $(cat /DietPi/dietpi.txt | grep -m1 '^Ethernet_Force_Speed=' | sed 's/.*=//' )
+		/DietPi/dietpi/func/dietpi-set_hardware eth-forcespeed $(cat /DietPi/dietpi.txt | grep -m1 '^AUTO_SETUP_NET_ETH_FORCE_SPEED=' | sed 's/.*=//' )
 
 		#Wait for active connection, then update network details file
 		Wait_For_Valid_Network_Connection
@@ -258,7 +184,7 @@ _EOF_
 		local max_loops=1
 
 		#	Wait mode, max time
-		local boot_wait_for_network=$(cat /DietPi/dietpi.txt | grep -m1 '^boot_wait_for_network=' | sed 's/.*=//')
+		local boot_wait_for_network=$(cat /DietPi/dietpi.txt | grep -m1 '^CONFIG_BOOT_WAIT_FOR_NETWORK=' | sed 's/.*=//')
 		if (( $boot_wait_for_network == 1 )); then
 
 			max_loops=10
@@ -271,18 +197,18 @@ _EOF_
 
 			if (( $loop_count >= $max_loops )); then
 
-				/DietPi/dietpi/func/dietpi-notify 1 "$(date) | Valid connection wait timed out." | tee -a "$FP_LOGFILE"
+				G_DIETPI-NOTIFY 1 "$(date) | Valid connection wait timed out." | tee -a "$FP_LOGFILE"
 				break
 
 			elif (( ! $(route | awk '{print $4}' | grep -ci -m1 'UG') )); then
 
-				/DietPi/dietpi/func/dietpi-notify 2 "$(date) | Waiting for valid connection, before continuing boot | Mode=$boot_wait_for_network" | tee -a "$FP_LOGFILE"
+				G_DIETPI-NOTIFY 2 "$(date) | Waiting for valid connection, before continuing boot | Mode=$boot_wait_for_network" | tee -a "$FP_LOGFILE"
 				sleep 1
 
 			else
 
 				# - Update network details (for IP in dietpi-banner etc..)
-				/DietPi/dietpi/func/dietpi-notify 0 "$(date) | Valid connection found." | tee -a "$FP_LOGFILE"
+				G_DIETPI-NOTIFY 0 "$(date) | Valid connection found." | tee -a "$FP_LOGFILE"
 				/DietPi/dietpi/func/obtain_network_details
 
 				#	Mount all drives again (eg: network shares)
@@ -305,19 +231,17 @@ _EOF_
 	Run_Init(){
 
 		#----------------------------------------------------------------
+		#WiFi Country | Additional fallback for (older kernel?) devices that fail with wpa_supplicant.conf https://github.com/Fourdee/DietPi/issues/838
+		iw reg set $(grep -m1 '^CONFIG_WIFI_COUNTRY_CODE=' /DietPi/dietpi.txt | sed 's/.*=//') &> /dev/null &
+		#----------------------------------------------------------------
 		#Update NTP
 		/DietPi/dietpi/func/run_ntpd &
-		#----------------------------------------------------------------
-		#Write HW model and details to file
-		/DietPi/dietpi/dietpi-obtain_hw_model
-		#Read Hw model
-		Read_Hw_Model
 		#----------------------------------------------------------------
 		#Apply LED triggers if set
 		/DietPi/dietpi/func/dietpi-led_control 1 &
 		#----------------------------------------------------------------
 		#RPi set volume to -0.1db | We have to do it here because sound card modules (dietpi-set_hardware) are not enabled on the fly, requires a reboot.
-		if (( $HW_MODEL < 10 )); then
+		if (( $G_HW_MODEL < 10 )); then
 
 			amixer set PCM -- -010 &> /dev/null &
 
@@ -327,8 +251,8 @@ _EOF_
 		/DietPi/dietpi/dietpi-cpu_set &
 		#----------------------------------------------------------------
 		#Disable RPi hdmi output if set in dietpi.txt
-		if (( $HW_MODEL < 10 &&
-			$(cat /DietPi/dietpi.txt | grep -ci -m1 '^rpi_hdmi_output=0'))); then
+		if (( $G_HW_MODEL < 10 &&
+			$(cat /DietPi/dietpi.txt | grep -ci -m1 '^CONFIG_HDMI_OUTPUT=0'))); then
 
 			#FBset value below allows for reduced memory bandwidth usage from VideoCore (eg: Faster RAM bandwidth/performance)
 			fbset -xres 16 -yres 16 -vxres 16 -vyres 16 -depth 8 &> /dev/null
@@ -358,7 +282,7 @@ _EOF_
 
 		#Workaround: Wlan currently fails to connect during boot, so, manually drop and reconnect: https://github.com/Fourdee/DietPi/issues/602#issuecomment-262806470
 		#	OPi Zero 2 / Neo Air
-		if (( $HW_MODEL == 35 || $HW_MODEL == 64 )); then
+		if (( $G_HW_MODEL == 35 || $G_HW_MODEL == 64 )); then
 
 			ifdown wlan0
 			ifup wlan0
@@ -376,32 +300,12 @@ _EOF_
 	Run_Init
 
 	#----------------------------------------------------------------
-	#Filesystem expansion only (eg: for pre-installed images)
-	if (( $FS_FORCED_EXPANSION == 1 )); then
-
-		FS_Partition
-
-		sed -i '/fs_force_resize=/c\fs_force_resize=2' /DietPi/dietpi.txt
-
-		reboot
-
-	#----------------------------------------------------------------
 	#Normal Boot
-	elif (( $DIETPI_INSTALL_STAGE == 1 )); then
-
-		if (( $FS_FORCED_EXPANSION == 2 )); then
-
-			FS_Expand
-
-			sed -i '/fs_force_resize=/c\fs_force_resize=0' /DietPi/dietpi.txt
-
-			/DietPi/dietpi/func/dietpi-set_dphys-swapfile $(cat /DietPi/dietpi.txt | grep -m1 '^Swapfile_Size=' | sed 's/.*=//' )
-
-		fi
+	if (( $G_DIETPI_INSTALL_STAGE == 1 )); then
 
 		Wait_For_Valid_Network_Connection
 
-		if (( $( cat /DietPi/dietpi.txt | grep -ci -m1 '^dietpi_check_for_updates=1') )); then
+		if (( $( cat /DietPi/dietpi.txt | grep -ci -m1 '^CONFIG_CHECK_DIETPI_UPDATES=1') )); then
 
 			#Check for DietPi updates (+thread)
 			echo -e "$(date) | +Thread: checking for DietPi-Updates" >> "$FP_LOGFILE"
@@ -412,8 +316,8 @@ _EOF_
 		/DietPi/dietpi/dietpi-banner 1
 
 	#----------------------------------------------------------------
-	#Filesystem prep, stage 1/2
-	elif (( $DIETPI_INSTALL_STAGE == -3 )); then
+	#First run prep
+	elif (( $G_DIETPI_INSTALL_STAGE == -1 )); then
 
 		# Set RPi v1 safe overclocking profile (900mhz)
 		RPi_Set_Clock_Speeds
@@ -421,44 +325,41 @@ _EOF_
 		/DietPi/dietpi/dietpi-banner 0
 
 		#Set hostname
-		/DietPi/dietpi/func/change_hostname "$(cat /DietPi/dietpi.txt | grep -m1 '^Hostname=' | sed 's/.*=//')"
+		/DietPi/dietpi/func/change_hostname "$(cat /DietPi/dietpi.txt | grep -m1 '^AUTO_SETUP_NET_HOSTNAME=' | sed 's/.*=//')"
 
 		#Automation
 		# - Set auto login for next bootup
-		if (( $(cat /DietPi/dietpi.txt | grep -m1 '^AUTO_Install_Enable=' | sed 's/.*=//') >= 1 )); then
+		if (( $(cat /DietPi/dietpi.txt | grep -m1 '^AUTO_SETUP_AUTOMATED=' | sed 's/.*=//') >= 1 )); then
 
 			/DietPi/dietpi/dietpi-autostart 7
 
 		fi
 
 		# - Enable serial console?
-		if (( $(cat /DietPi/dietpi.txt | grep -ci -m1 '^serial_console_enabled=1') )); then
+		if (( $(cat /DietPi/dietpi.txt | grep -ci -m1 '^CONFIG_SERIAL_CONSOLE_ENABLE=1') )); then
 
 			/DietPi/dietpi/func/dietpi-set_hardware serialconsole enable
 
 		fi
 
 		# - Set root password?
-		root_password=$(cat /DietPi/dietpi.txt | grep -m1 '^AUTO_Global_Password=' | sed 's/.*=//')
-		if [ -n "$root_password" ]; then
+		ROOT_PASSWORD=$(cat /DietPi/dietpi.txt | grep -m1 '^AUTO_SETUP_GLOBAL_PASSWORD=' | sed 's/.*=//')
+		if [ -n "$ROOT_PASSWORD" ]; then
 
-			chpasswd <<< "root:$root_password"
-			chpasswd <<< "dietpi:$root_password"
+			chpasswd <<< "root:$ROOT_PASSWORD"
+			chpasswd <<< "dietpi:$ROOT_PASSWORD"
 
 		fi
 
 		# - Set apt mirror
-		local target_repo='Apt_Debian_Mirror'
-		if (( $HW_MODEL < 10 )); then
+		TARGET_REPO='CONFIG_APT_DEBIAN_MIRROR'
+		if (( $G_HW_MODEL < 10 )); then
 
-			target_repo='Apt_Raspbian_Mirror'
+			TARGET_REPO='CONFIG_APT_RASPBIAN_MIRROR'
 
 		fi
 
-		/DietPi/dietpi/func/dietpi-set_software apt-mirror $(cat /DietPi/dietpi.txt | grep -m1 "^$target_repo=" | sed 's/.*=//')
-
-		# - Set NTPD mirror
-		/DietPi/dietpi/func/dietpi-set_software ntpd-mirror $(cat /DietPi/dietpi.txt | grep -m1 '^NTPD_Mirror=' | sed 's/.*=//')
+		/DietPi/dietpi/func/dietpi-set_software apt-mirror $(grep -m1 "^$TARGET_REPO=" /DietPi/dietpi.txt | sed 's/.*=//')
 
 		#Disable /tmp tmpfs if RAM <= 512MB: https://github.com/Fourdee/DietPi/issues/1027
 		if (( $(free -m | grep -m1 'Mem:' | awk '{print $2}') <= 512 )); then
@@ -469,23 +370,6 @@ _EOF_
 
 		fi
 
-		FS_Partition
-
-		echo -2 > /DietPi/dietpi/.install_stage
-
-		reboot
-
-	#----------------------------------------------------------------
-	#Filesystem prep, stage 2/2
-	elif (( $DIETPI_INSTALL_STAGE == -2 )); then
-
-		#Expand rootFS
-		FS_Expand
-		echo -1 > /DietPi/dietpi/.install_stage
-
-		#Enable/Create swapfile.
-		/DietPi/dietpi/func/dietpi-set_dphys-swapfile $(cat /DietPi/dietpi.txt | grep -m1 '^Swapfile_Size=' | sed 's/.*=//' )
-
 		#Generate unique Dropbear host-key:
 		rm /etc/dropbear/*key &> /dev/null
 		dropbearkey -t rsa -f /etc/dropbear/dropbear_rsa_host_key &> /dev/null
@@ -494,6 +378,9 @@ _EOF_
 		Apply_DietPi_FirstRun_Settings
 
 		Workaround_WiFi
+
+		# - Set NTPD
+		/DietPi/dietpi/func/dietpi-set_software ntpd-mode $(grep -m1 '^CONFIG_NTP_MODE=' /DietPi/dietpi.txt | sed 's/.*=//')
 
 		#Finished
 		/DietPi/dietpi/dietpi-banner 0

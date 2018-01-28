@@ -1,0 +1,1098 @@
+#!/bin/bash
+{
+	#////////////////////////////////////
+	# DietPi-Globals
+	#
+	#////////////////////////////////////
+	# Created by Daniel Knight / daniel.knight@dietpi.com / dietpi.com
+	#
+	#////////////////////////////////////
+	#
+	# Info:
+	# - Allows export of shared DietPi global variables/funcs into current bash session, and other scripts
+	#
+	# Excluded scripts, which do NOT load these globals
+	# - dietpi-ramlog
+	# - dietpi-ramdisk
+	# - dietpi.txt (and all other .txt .ini or config files)
+	#
+	#////////////////////////////////////
+
+	#-----------------------------------------------------------------------------------
+	# Core var's, functions, environment. Used at start of all scripts.
+	#-----------------------------------------------------------------------------------
+	#Prevent incorrect parsing with non-english locales.
+	LANG=en_GB.UTF-8
+
+	#Ensure we are in users home dir: https://github.com/Fourdee/DietPi/issues/905#issuecomment-298223705
+	cd "$HOME"
+
+	#To be exported by the originating script (eg: dietpi-software)
+	# - Used in:
+	#	G_ERROR_ (info)
+	G_PROGRAM_NAME=''
+
+	#User input? (eg: interactive shell available via STDIN check)
+	#	Effects:
+	#	 - G_ERROR_HANDLER whiptail display
+	#	NB: You can export G_USER_INPUTS=0 to force non-interactive (eg: .bashrc) Must run 'unset G_USER_INPUTS' after to return to auto detection.
+	if [ -z $G_USER_INPUTS ]; then
+
+		G_USER_INPUTS=0
+
+		if [[ -t 0 ]]; then
+
+			#checked:
+			#	- OK | systemD = non-STDIN
+			#	- OK | Cron = non-STDIN
+
+			#shopt login_shell # == [[ $- == *i* ]] #.bashrc dietpi/login exec is not interactive...
+			#[ -t 0 ]# .bashrc dietpi/login exec is interactive...
+			#set -i in .bashrc is not available...
+
+			G_USER_INPUTS=1
+
+		fi
+
+	fi
+
+	#DEBUG:
+	# echo $G_USER_INPUTS
+	# shopt login_shell
+	# sleep 1
+	#DEBUG:
+
+	# - DietPi Scripts, moved from /etc/bash.bashrc
+	alias sudo='sudo ' # https://github.com/Fourdee/DietPi/issues/424
+	alias dietpi-process_tool='/DietPi/dietpi/dietpi-process_tool'
+	alias dietpi-letsencrypt='/DietPi/dietpi/dietpi-letsencrypt'
+	alias dietpi-autostart='/DietPi/dietpi/dietpi-autostart'
+	alias dietpi-cron='/DietPi/dietpi/dietpi-cron'
+	alias dietpi-launcher='/DietPi/dietpi/dietpi-launcher'
+	alias dietpi-cleaner='/DietPi/dietpi/dietpi-cleaner'
+	alias dietpi-morsecode='/DietPi/dietpi/dietpi-morsecode'
+	alias dietpi-sync='/DietPi/dietpi/dietpi-sync'
+	alias dietpi-backup='/DietPi/dietpi/dietpi-backup'
+	alias dietpi-bugreport='/DietPi/dietpi/dietpi-bugreport'
+	alias dietpi-services='/DietPi/dietpi/dietpi-services'
+	alias dietpi-config='/DietPi/dietpi/dietpi-config'
+	alias dietpi-software='/DietPi/dietpi/dietpi-software'
+	alias dietpi-update='/DietPi/dietpi/dietpi-update'
+	alias dietpi-drive_manager='/DietPi/dietpi/dietpi-drive_manager'
+	alias emulationstation='/opt/retropie/supplementary/emulationstation/emulationstation'
+
+	alias cpu='/DietPi/dietpi/dietpi-cpuinfo'
+	alias dietpi-logclear='/DietPi/dietpi/dietpi-logclear'
+
+	# - Optional DietPi software aliases/functions
+	[ -f /usr/local/games/opentyrian/run ] && alias opentyrian='/usr/local/games/opentyrian/run'
+	[ -f /DietPi/dietpi/misc/dietpi-justboom ] && alias dietpi-justboom='/DietPi/dietpi/misc/dietpi-justboom'
+	[ -f "$G_FP_DIETPI_USERDATA"/dxx-rebirth/run.sh ] && alias dxx-rebirth="$G_FP_DIETPI_USERDATA/dxx-rebirth/run.sh"
+	[ -f /usr/share/applications/kodi.desktop ] && alias startkodi='/DietPi/dietpi/misc/start_kodi'
+	[ -f /etc/systemd/system/dietpi-cloudshell.service ] && alias dietpi-cloudshell='/DietPi/dietpi/dietpi-cloudshell'
+	# occ/ncc need to be global function, as aliases are not accessible from non-interactive scripts:
+	[ -f /var/www/owncloud/occ ] && occ(){ sudo -u www-data php /var/www/owncloud/occ "$@"; }
+	[ -f /var/www/nextcloud/occ ] && ncc(){ sudo -u www-data php /var/www/nextcloud/occ "$@"; }
+
+	# - Treesize
+	#	$1 = Optional input directory (eg: G_TREESIZE /etc/apt)
+	G_TREESIZE()
+	{
+
+		du -k --max-depth=1 $1 | sort -nr | awk '
+		BEGIN {
+			split("KB,MB,GB,TB", Units, ",");
+		}
+		{
+			u = 1;
+			while ($1 >= 1024)
+			{
+				$1 = $1 / 1024;
+				u += 1;
+			}
+			$1 = sprintf("%.1f %s", $1, Units[u]);
+			print $0;
+		}
+		'
+	}
+
+	# DietPi-Notify
+	# $1:
+	#	-2=process animation
+	#	- $2 = text
+	#	-1=autodetect_fail_ok
+	#	- $2 = EXIT_CODE
+	#	0=OK
+	#	- $2 = text
+	#	1=failed
+	#	- $2 = text
+	#	2=info
+	#	- $2 = text
+	#	3=DietPi banner style
+	#	- $2 = txt program name
+	#	- $3 = txt mode
+	G_DIETPI-NOTIFY(){
+
+		local ainput_string=("$@")
+
+		#header_line="\e[38;5;154m─────────────────────────────────────────────────────\e[0m"
+		local header_line="\e[90m─────────────────────────────────────────────────────\e[0m"
+
+		local status_text_ok="\e[32m  OK  \e[0m"
+		local status_text_error="\e[31mFAILED\e[0m"
+		local status_text_info="\e[0m INFO \e[0m"
+
+		local bracket_string_l="\e[90m[\e[0m"
+		local bracket_string_r="\e[90m]\e[0m"
+
+		#Funcs
+
+		Print_Process_Animation(){
+
+			local bright_dot="\e[1;93m.\e[0m"
+			local dimmed_dot="\e[2;33m.\e[0m"
+			local aprocess_string=(
+				#\u23F9
+				"$bright_dot     "
+				"$dimmed_dot$bright_dot    "
+				" $dimmed_dot$bright_dot   "
+				"  $dimmed_dot$bright_dot  "
+				"   $dimmed_dot$bright_dot "
+				"    $dimmed_dot$bright_dot"
+				"    $bright_dot$dimmed_dot"
+				"   $bright_dot$dimmed_dot "
+				"  $bright_dot$dimmed_dot  "
+				" $bright_dot$dimmed_dot   "
+				"$bright_dot$dimmed_dot    "
+			)
+
+			for (( i=0; i<=${#aprocess_string[@]}; i++ )); do
+
+				(( i == 11 )) && i=1
+				[ -f /tmp/dietpi-process.pid ] && echo -ne "\r$bracket_string_l${aprocess_string[i]}$bracket_string_r " || break
+				sleep 0.15
+
+			done
+
+		}
+
+		Clean_Process_Animation(){
+
+			if [ -f /tmp/dietpi-process.pid ]; then
+
+				kill "$(</tmp/dietpi-process.pid)" &> /dev/null
+				rm /tmp/dietpi-process.pid &> /dev/null || sudo rm /tmp/dietpi-process.pid &> /dev/null
+				# In case, the output took more than one line, clean from cursor (animation position) until end of terminal.
+				tput ed
+
+			fi
+			echo -ne "\r\e[K"
+
+		}
+
+		Print_Process(){
+
+			echo -ne "\r\e[9C"
+
+		}
+
+		Print_Ok(){
+
+			Clean_Process_Animation
+			echo -ne "$bracket_string_l$status_text_ok$bracket_string_r "
+
+		}
+
+		Print_Failed(){
+
+			Clean_Process_Animation
+			echo -ne "$bracket_string_l$status_text_error$bracket_string_r "
+
+		}
+
+		Print_Info(){
+
+			Clean_Process_Animation
+			echo -ne "$bracket_string_l$status_text_info$bracket_string_r "
+
+		}
+
+		# - Print all input string on same line
+		# - $1 = start printing from word number $1
+		Print_Input_String(){
+
+			local i=0
+			for (( i=$1;i<${#ainput_string[@]} ;i++))
+			do
+				echo -ne "${ainput_string[$i]}"
+			done
+
+		}
+
+		#--------------------------------------------------------------------------------------
+		# Main Loop
+		#--------------------------------------------------------------------------------------
+		#Exit code, print OK or Failed
+		#$2 = exit code
+		# - Use this at end of DietPi scripts, EG: G_DIETPI-NOTIFY -1 ${EXIT_CODE:=0}
+		if (( $1 == -1 )); then
+
+			if [ "$2" = "0" ]; then
+
+				ainput_string+=(" Completed")
+				Print_Ok
+				Print_Input_String 2
+				echo ''
+
+			else
+
+				ainput_string+=(" An issue has occured")
+				Print_Failed
+				Print_Input_String 2
+				echo ''
+
+			fi
+
+		#--------------------------------------------------------------------------------------
+		#Status Processing
+		#$@ = txt desc
+		elif (( $1 == -2 )); then
+
+			Print_Process
+			Print_Input_String 1
+			# Calculate the amount of output lines and in case move cursor up for correct animation and to allow cleaning the whole output.
+			local string="$*"
+			local lines=0
+			(( lines=(${#string}+6)/$(tput cols) ))
+			while (( lines > 0 )); do
+
+				tput cuu1
+				(( lines-- ))
+
+			done
+			[ ! -f /tmp/dietpi-process.pid ] && touch /tmp/dietpi-process.pid && ( Print_Process_Animation & echo $! > /tmp/dietpi-process.pid )
+
+		#Status Ok
+		#$@ = txt desc
+		elif (( $1 == 0 )); then
+
+			Print_Ok
+			Print_Input_String 1
+			echo ''
+
+		#Status failed
+		#$@ = txt desc
+		elif (( $1 == 1 )); then
+
+			Print_Failed
+			Print_Input_String 1
+			echo ''
+
+		#Status Info
+		#$@ = txt desc
+		elif (( $1 == 2 )); then
+
+			Print_Info
+			echo -ne "\e[90m"
+			Print_Input_String 1
+			echo -e "\e[0m"
+
+		#DietPi banner style
+		#$2 = txt program name
+		#$3 = txt mode
+		elif (( $1 == 3 )); then
+
+			echo -e "\n \e[38;5;154m$2\e[0m"
+			echo -e "$header_line"
+			echo -e " \e[90mMode: \e[0m$(Print_Input_String 2)\n"
+
+		fi
+		#-----------------------------------------------------------------------------------
+		# Unset also internal functions, otherwise they are accessible from terminal.
+		unset Print_Process_Animation
+		unset Clean_Process_Animation
+		unset Print_Process
+		unset Print_Ok
+		unset Print_Failed
+		unset Print_Info
+		unset Print_Input_String
+		#-----------------------------------------------------------------------------------
+
+	}
+
+	G_CHECK_ROOT_USER_VERIFIED=${G_CHECK_ROOT_USER_VERIFIED:=0} #only check once for each session
+	G_CHECK_ROOT_USER(){
+
+		if (( ! $G_CHECK_ROOT_USER_VERIFIED )); then
+
+			G_DIETPI-NOTIFY -2 'Checking for (elevated) root access'
+
+			if (( $UID != 0 )); then
+
+				G_DIETPI-NOTIFY 1 'Root privileges required. Please run the command with "sudo"\n'
+				exit 1
+
+			else
+
+				G_DIETPI-NOTIFY 0 'Root access verified.'
+				export G_CHECK_ROOT_USER_VERIFIED=1
+
+			fi
+
+		fi
+
+	}
+
+	G_CHECK_ROOTFS_RW_VERIFIED=${G_CHECK_ROOTFS_RW_VERIFIED:=0} #only check once for each session
+	G_CHECK_ROOTFS_RW(){
+
+		if (( ! $G_CHECK_ROOTFS_RW_VERIFIED )); then
+
+			#RootFS RW check
+			/DietPi/dietpi/dietpi-drive_manager 3
+			if (( $? != 0 )); then
+
+				G_DIETPI-NOTIFY 1 'RootFS is currently Read Only, unable to continue.\n'
+				exit 1
+
+			else
+
+				export G_CHECK_ROOTFS_RW_VERIFIED=1
+
+			fi
+
+		fi
+
+	}
+
+	#-----------------------------------------------------------------------------------
+	# DietPi Error Handler
+	# https://github.com/Fourdee/DietPi/issues/1311#issuecomment-353716344
+	#-----------------------------------------------------------------------------------
+	G_ERROR_HANDLER_EXITCODE=''					#input value to use with G_ERROR_HANDLER
+	G_ERROR_HANDLER_COMMAND=''					#eg: G_AGI: moooooooo
+	#	For export: On error, following entries will be used
+	G_ERROR_HANDLER_ONERROR_EXIT=1				#Do we exit the program when the error occurs? 0=no 1=yes
+	G_ERROR_HANDLER_ONERROR_FPLOGFILE=''		#FP to logfile, if available
+
+	#Runs automatically after G_ERROR_HANDLER to reset vars to default
+	G_ERROR_HANDLER_RESET(){
+
+		#unset originating program
+		unset G_ERROR_HANDLER_EXITCODE
+		unset G_ERROR_HANDLER_COMMAND
+
+		unset G_ERROR_HANDLER_ONERROR_EXIT
+		unset G_ERROR_HANDLER_ONERROR_FPLOGFILE
+
+		G_ERROR_HANDLER_EXITCODE=''
+		G_ERROR_HANDLER_COMMAND=''
+
+		G_ERROR_HANDLER_ONERROR_EXIT=1
+		G_ERROR_HANDLER_ONERROR_FPLOGFILE=''
+
+	}
+
+	#Handles exit code errors, as defined by G_ERROR_HANDLER_xxxx settings
+	#	Usage:
+	#		export G_ERROR_HANDLER_COMMAND='Doing something usefull with Owncloud'
+	#		export G_ERROR_HANDLER_ONERROR_EXIT=0 # Don't exit program on error, continue
+	#		export G_ERROR_HANDLER_ONERROR_FPLOGFILE=/var/log/mylogfile # to print if error occurs
+	#		occ --doing-something-useful
+	#		export G_ERROR_HANDLER_EXITCODE=$?
+	#		G_ERROR_HANDLER
+	G_ERROR_HANDLER(){
+
+		#Ok
+		if (( $G_ERROR_HANDLER_EXITCODE == 0 )); then
+
+			G_DIETPI-NOTIFY 0 "$G_ERROR_HANDLER_COMMAND"
+
+		#Error
+		else
+
+			local print_hw_info="VERSION:v$(sed -n 1p /DietPi/dietpi/.version).$(sed -n 2p /DietPi/dietpi/.version) | HW_MODEL:$G_HW_MODEL | HW_ARCH:$G_HW_ARCH | DISTRO:$G_DISTRO"
+			local print_exitcode_info="exit_code = $G_ERROR_HANDLER_EXITCODE"
+			local print_logfile_info="Log file contents:\n$(tail -50 $G_ERROR_HANDLER_ONERROR_FPLOGFILE)"
+			local print_report_to_dietpi_info='If problems persist, please report this to DietPi for investigation, including a screenshot of this error! (https://github.com/Fourdee/DietPi/issues).'
+			local print_unable_to_continue='Unable to continue, the program will now terminate.'
+
+			echo ''
+			if [ -n "$G_PROGRAM_NAME" ]; then
+
+				G_DIETPI-NOTIFY 1 "$G_PROGRAM_NAME: $G_ERROR_HANDLER_COMMAND"
+
+			else
+
+				G_DIETPI-NOTIFY 1 "$G_ERROR_HANDLER_COMMAND"
+
+			fi
+
+			G_DIETPI-NOTIFY 2 "$print_exitcode_info"
+			G_DIETPI-NOTIFY 2 "$print_hw_info"
+
+			# - On Error: Display logfile FP, if set
+			if [ -n "$G_ERROR_HANDLER_ONERROR_FPLOGFILE" ]; then
+
+				G_DIETPI-NOTIFY 2 "$print_logfile_info"
+
+			fi
+
+			#	Display "please report to dietpi", if its one of our programs
+			if [ -n "$G_PROGRAM_NAME" ]; then
+
+				G_DIETPI-NOTIFY 2 "$print_report_to_dietpi_info"
+
+			fi
+
+			# - On Error: Display whip version?
+			if (( $G_USER_INPUTS )); then
+
+				local whip_msg=()
+				if [ -n "$G_PROGRAM_NAME" ]; then
+
+					whip_msg+="$G_PROGRAM_NAME: $G_ERROR_HANDLER_COMMAND"
+
+				else
+
+					whip_msg+="$G_ERROR_HANDLER_COMMAND"
+
+				fi
+
+				whip_msg+='\n'
+				whip_msg+=" - $print_exitcode_info"
+				whip_msg+='\n'
+				whip_msg+=" - $print_hw_info"
+				whip_msg+='\n\n'
+
+				#	Display optional logfile?
+				if [ -n "$G_ERROR_HANDLER_ONERROR_FPLOGFILE" ]; then
+
+					whip_msg+="$print_logfile_info"
+					whip_msg+='\n\n'
+
+				fi
+
+				#	Display "please report to dietpi", if its one of our programs
+				if [ -n "$G_PROGRAM_NAME" ]; then
+
+					whip_msg+="$print_report_to_dietpi_info"
+
+				fi
+
+				if (( $G_ERROR_HANDLER_ONERROR_EXIT )); then
+
+					whip_msg+='\n\n'
+					whip_msg+="$print_unable_to_continue"
+
+				fi
+
+				whiptail --title 'DietPi Error Handler:' --msgbox "$whip_msg" --scrolltext 22 85
+
+			fi
+
+			# - On Error: Kill current script, excluding the shell.
+			if (( $G_ERROR_HANDLER_ONERROR_EXIT )); then
+
+			# - Github printout:
+			echo -e "
+\e[41m
+--------------------------------------------------------------------
+- DietPi has encounted an error, and, is unable to continue        -
+- Please create a ticket: https://github.com/Fourdee/DietPi/issues -
+- Copy and paste the BLUE lines below, into the ticket             -
+--------------------------------------------------------------------
+\e[0m
+\e[44m
+#### Required Information:
+- DietPi Version | v$(sed -n 1p /DietPi/dietpi/.version).$(sed -n 2p /DietPi/dietpi/.version)
+- SBC Device     | $G_HW_MODEL_DESCRIPTION (index=$G_HW_MODEL)
+- Distro         | $G_DISTRO_NAME (index=$G_DISTRO)
+- Command        | $G_ERROR_HANDLER_COMMAND
+- Error Handler  | G_ERROR_HANDLER
+
+#### Additional Information (if applicable):
+- Software title | $G_PROGRAM_NAME
+
+#### Expected behaviour:
+<!-- What SHOULD be happening? -->
+
+#### Actual behaviour:
+<!-- What IS happening? -->
+
+#### Steps to reproduce:
+<!-- Explain how to reproduce the issue -->
+
+#### Additional logs:
+\`\`\`
+$print_logfile_info
+\`\`\`
+\e[0m
+
+\e[41m--------------------------------------------------------------------\e[0m
+"
+
+				G_DIETPI-NOTIFY 1 "$print_unable_to_continue"
+
+				# - Reset for next run
+				G_ERROR_HANDLER_RESET
+
+				kill -INT $$
+
+			fi
+
+		fi
+
+		return $G_ERROR_HANDLER_EXITCODE
+
+		# - Reset for next run
+		G_ERROR_HANDLER_RESET
+
+	}
+
+	#Run a command and send the output through the error handler. This has the same effect as running G_ERROR_HANDLER afterwards, however, allows for command used info, and log output/view when an error occurs
+	#NB: This command does not support inputs with redirects. For file creation, use G_FILE_EXISTS afterwards to check it exists: https://github.com/Fourdee/DietPi/issues/1311#issuecomment-354541417
+	#	$@ = input command
+	#	eg:
+	#		G_RUN_CMD mkdir /never/gonna/work
+	G_RUN_CMD(){
+
+		G_ERROR_HANDLER_COMMAND="$@"
+
+		G_DIETPI-NOTIFY -2 "Running command: $G_ERROR_HANDLER_COMMAND"
+
+		$G_ERROR_HANDLER_COMMAND &> /tmp/G_ERROR_HANDLER_COMMAND
+		G_ERROR_HANDLER_EXITCODE=$?
+		G_ERROR_HANDLER_ONERROR_FPLOGFILE='/tmp/G_ERROR_HANDLER_COMMAND'
+
+		G_ERROR_HANDLER
+
+		rm /tmp/G_ERROR_HANDLER_COMMAND &> /dev/null
+
+	}
+
+	#Checks if a file/folder exists
+	#	Automatically passed through G_ERROR_HANDLER
+	G_FILE_EXISTS(){
+
+		G_ERROR_HANDLER_COMMAND="$@"
+		G_ERROR_HANDLER_EXITCODE=0
+
+		G_DIETPI-NOTIFY -2 "Checking for existance: $G_ERROR_HANDLER_COMMAND"
+
+		local string=''
+
+		if [ -f "$G_ERROR_HANDLER_COMMAND" ]; then
+
+			string="File exists"
+
+		elif [ -d "$G_ERROR_HANDLER_COMMAND" ]; then
+
+			string="Folder exists"
+
+		else
+
+			string="File/folder does not exist"
+			G_ERROR_HANDLER_EXITCODE=1
+
+		fi
+
+		string+=" | $G_ERROR_HANDLER_COMMAND"
+
+		echo -e "$string" > /tmp/G_ERROR_HANDLER_COMMAND
+		G_ERROR_HANDLER_ONERROR_FPLOGFILE='/tmp/G_ERROR_HANDLER_COMMAND'
+		G_ERROR_HANDLER_COMMAND="$string"
+
+		G_ERROR_HANDLER
+
+		rm /tmp/G_ERROR_HANDLER_COMMAND &> /dev/null
+
+	}
+
+	#-----------------------------------------------------------------------------------
+	# DietPi First-Run Stage
+	#-----------------------------------------------------------------------------------
+	# -2 = PREP_SYSTEM/Unknown | -1 = first boot | 0 = run dietpi-software at login | 1 = completed
+	G_DIETPI_INSTALL_STAGE=-2
+	if [ -f /DietPi/dietpi/.install_stage ]; then
+
+		G_DIETPI_INSTALL_STAGE=$(cat /DietPi/dietpi/.install_stage)
+
+	fi
+
+	#-----------------------------------------------------------------------------------
+	# Hardware Details
+	#-----------------------------------------------------------------------------------
+	G_HW_MODEL=${G_HW_MODEL:-0}
+	G_HW_MODEL_DESCRIPTION=${G_HW_MODEL_DESCRIPTION:-NULL}
+	G_HW_ARCH=${G_HW_ARCH:-0}
+	G_HW_CPU_CORES=${G_HW_CPU_CORES:-1}
+	G_HW_CPUID=${G_HW_CPUID:-0}
+
+	G_DISTRO=${G_DISTRO:-0}
+	G_DISTRO_NAME=${G_DISTRO_NAME:-NULL}
+
+	# - Update
+	#	NB: dietpi-boot service launches dietpi-obtain_hw_model to create the following file
+	if [ -f /DietPi/dietpi/.hw_model ]; then
+
+		G_HW_MODEL=$(sed -n 1p /DietPi/dietpi/.hw_model)
+		G_HW_MODEL_DESCRIPTION=$(sed -n 2p /DietPi/dietpi/.hw_model)
+		G_HW_ARCH=$(sed -n 6p /DietPi/dietpi/.hw_model)
+		G_HW_CPU_CORES=$(nproc --all)
+		G_HW_CPUID=$(sed -n 9p /DietPi/dietpi/.hw_model)
+
+		G_DISTRO=$(sed -n 3p /DietPi/dietpi/.hw_model)
+		G_DISTRO_NAME='jessie'
+		if (( $G_DISTRO == 4 )); then
+
+			G_DISTRO_NAME='stretch'
+
+		elif (( $G_DISTRO == 5 )); then
+
+			G_DISTRO_NAME='buster'
+
+		fi
+
+	fi
+
+	#Returns current CPU temp 'C
+	G_OBTAIN_CPU_TEMP(){
+
+		# - Array to store possible locations for temp read.
+		afp_temperature=(
+
+			#'/sys/class/thermal/thermal_zone1/temp' #sparky/Asus, will break other SBC temp readouts as most have 2 zones, needs a special case
+			'/sys/class/thermal/thermal_zone0/temp'
+			'/sys/devices/platform/sunxi-i2c.0/i2c-0/0-0034/temp1_input'
+			'/sys/class/hwmon/hwmon0/device/temp_label'
+
+		)
+
+		for ((i=0; i<${#afp_temperature[@]}; i++))
+		do
+
+			if [ -f "${afp_temperature[$i]}" ]; then
+
+				#	Sparky/asus, special case:
+				if (( $G_HW_MODEL == 70 || $G_HW_MODEL == 52 )); then
+
+					cpu_temp_current=$(cat /sys/class/thermal/thermal_zone1/temp)
+
+				else
+
+					cpu_temp_current=$(cat ${afp_temperature[$i]})
+
+				fi
+
+				# - Boards that provide 2 digit output
+				#	Pine
+				# 	NanoPi M2
+				#	NanoPi M3
+				#	H3 3.x
+				#	H2+ 3.x
+				if (( $G_HW_MODEL == 40 ||
+					$G_HW_MODEL == 61 ||
+					$G_HW_MODEL == 62 ||
+					( $G_HW_CPUID == 1 && $(uname -r | grep -ci -m1 '^3.') ) ||
+					( $G_HW_MODEL == 32 && $(uname -r | grep -ci -m1 '^3.') ) )); then
+
+					echo -e "Do nothing" &> /dev/null
+
+				else
+
+					cpu_temp_current=$( echo -e "$cpu_temp_current" | awk '{print $1/1000}' | xargs printf "%0.0f" )
+
+				fi
+
+
+				break
+
+			fi
+
+		done
+
+		unset afp_temperature
+
+		echo $cpu_temp_current
+
+	}
+
+	#Returns current CPU usage %
+	G_OBTAIN_CPU_USAGE(){
+
+		# - PS (inaccurate, but fast??)
+		local cpu_usage=0
+		local fp_temp='/tmp/.cpu_usage_cpuinfo'
+		ps -axo %cpu | sed '1d' | sed 's/ //' > "$fp_temp"
+		while read line
+		do
+
+			cpu_usage=$( echo "scale=1;$cpu_usage + $line" | bc -l )
+
+		done < "$fp_temp"
+
+		# - ps returns usage of each core, so we devide the total by #n cores
+		cpu_usage=$(echo "scale=1;$cpu_usage / $(nproc --all)" | bc -l )
+
+		echo $cpu_usage
+
+	}
+
+	#-----------------------------------------------------------------------------------
+	# DietPi specific directories
+	#-----------------------------------------------------------------------------------
+	# - Default DietPi userdata location. This must NEVER change.
+	G_FP_DIETPI_USERDATA='/mnt/dietpi_userdata'
+	# - Current DietPi userdata location (actual, follows symlink of G_FP_DIETPI_USERDATA, if not on rootFS)
+	#G_FP_DIETPI_USERDATA_CURRENT=$(readlink -f $G_FP_DIETPI_USERDATA)
+	#FP_DIETPI_VAR_LIB='/var/lib/dietpi'
+	#FP_DIETPI_VAR_TMP='/var/tmp/dietpi'
+
+	#-----------------------------------------------------------------------------------
+	# URL Connection test
+	#-----------------------------------------------------------------------------------
+	# $@ = URL
+	#	NB: automatically error handled (G_ERROR_HANDLER)
+	#	Prompts user to configure network if $G_USER_INPUTS=1
+	G_CHECK_URL(){
+
+		local string="$@"
+		local timeout=10
+		local retry_max=5
+		local error_connection_failed=0
+
+		G_ERROR_HANDLER_EXITCODE=0
+		G_ERROR_HANDLER_COMMAND="Connection test: $string"
+		G_ERROR_HANDLER_ONERROR_FPLOGFILE='/tmp/G_CHECK_URL'
+
+		while true
+		do
+
+			#Allow user choice to configure network on failure
+			if (( $G_USER_INPUTS )); then
+
+				G_ERROR_HANDLER_ONERROR_EXIT=0
+
+				if (( $error_connection_failed )); then
+
+					#Ask to check settings,
+					whiptail --title "URL Connection Test Failed" --yesno "DietPi was unable to establish a connection:\n - $string\n\nIf problems persist, the URL may be offline/unreachable.\n\nWould you like to configure network settings and try again?" --yes-button "Ok" --no-button "Exit" --defaultno --backtitle "$G_PROGRAM_NAME" 15 80
+					CHOICE=$?
+
+					#run dietpi config
+					if (( $CHOICE == 0 )); then
+
+						whiptail --title "Launching DietPi-Config" --msgbox "DietPi-Config will now be started.\nUse the Network Options menu to change and test your network settings.\n\nWhen completed, exit DietPi-Config to resume." --backtitle "Launching DietPi-Config" 14 60
+						/DietPi/dietpi/dietpi-config 8 1
+
+					#User aborted, exit now with current error information
+					else
+
+						G_ERROR_HANDLER_ONERROR_EXIT=1
+						G_ERROR_HANDLER_EXITCODE=1
+						G_USER_INPUTS=0 #disable whiptail info
+						G_ERROR_HANDLER
+						#break #handled by G_ERROR_HANDLER script kill
+
+					fi
+
+				fi
+
+			#Force exit on failure to end loop (overrides any export G_ERROR_HANDLER_ONERROR_EXIT in this session)
+			else
+
+				G_ERROR_HANDLER_ONERROR_EXIT=1
+
+			fi
+
+			for ((i=1; i<=$retry_max; i++))
+			do
+
+				G_DIETPI-NOTIFY -2 "($i/$retry_max) Testing connection to $string, please wait..."
+
+				wget --spider --timeout=$timeout --tries=1 "$string" &> /tmp/G_CHECK_URL
+				G_ERROR_HANDLER_EXITCODE=$?
+				#	Valid
+				if (( $G_ERROR_HANDLER_EXITCODE == 0 )); then
+
+					break
+
+				#	Retry
+				else
+
+					sleep 2
+					error_connection_failed=1
+					G_DIETPI-NOTIFY -2 "Failed connection attempt ($i/$retry_max), retrying..."
+
+				fi
+
+			done
+
+			#--no-check-certificate
+			#https://github.com/Fourdee/DietPi/issues/352#issuecomment-221013166
+
+			G_ERROR_HANDLER
+			if (( $G_ERROR_HANDLER_EXITCODE == 0 )); then
+
+				break
+
+			fi
+
+		done
+
+		rm /tmp/G_CHECK_URL
+
+		return $G_ERROR_HANDLER_EXITCODE
+
+	}
+
+	#-----------------------------------------------------------------------------------
+	# APT
+	#-----------------------------------------------------------------------------------
+	G_FP_LOG_APT='/var/tmp/dietpi/logs/dietpi-software_apt.log'
+
+	#Support for apt-fast: https://github.com/Fourdee/DietPi/issues/698
+	# APT_BINARY='apt-get'
+	# if [ -f /usr/bin/apt-fast ]; then
+
+		# APT_BINARY='apt-fast'
+
+	# fi
+
+	#apt-get install
+	#	NB: automatically error handled (G_ERROR_HANDLER)
+	G_AGI(){
+
+		local string="$@"
+		local force_options=''
+
+		if (( $G_DISTRO >= 4 )); then
+
+			force_options='--allow-downgrades --allow-remove-essential --allow-change-held-packages --allow-unauthenticated'
+
+		else
+
+			force_options='--force-yes'
+
+		fi
+
+		G_ERROR_HANDLER_EXITCODE=0
+		G_ERROR_HANDLER_COMMAND="G_AGI: $string"
+		G_ERROR_HANDLER_ONERROR_FPLOGFILE="$G_FP_LOG_APT"
+
+
+		#-qq can add a slight period of appearing nothing is happening, lets inform user
+		G_DIETPI-NOTIFY 2 "APT installation for: $string, please wait..."
+
+		DEBIAN_FRONTEND=noninteractive apt-get install -y -qq $force_options $string 2>&1 | tee "$G_FP_LOG_APT"
+		G_ERROR_HANDLER_EXITCODE=${PIPESTATUS[0]}
+
+		G_ERROR_HANDLER
+
+		return $G_ERROR_HANDLER_EXITCODE
+
+	}
+
+	#apt-get purge
+	#	NB: automatically error handled (G_ERROR_HANDLER)
+	G_AGP(){
+
+		local string="$@"
+		local options=''
+		if (( $G_DISTRO >= 4 )); then
+
+			options+=' --allow-change-held-packages'
+
+		fi
+
+		G_ERROR_HANDLER_EXITCODE=0
+		G_ERROR_HANDLER_COMMAND="G_AGP: $string"
+		G_ERROR_HANDLER_ONERROR_FPLOGFILE="$G_FP_LOG_APT"
+
+		G_DIETPI-NOTIFY 2 "APT removal for: $string, please wait..."
+
+		DEBIAN_FRONTEND=noninteractive apt-get purge -y $string $options 2>&1 | tee "$G_FP_LOG_APT"
+		G_ERROR_HANDLER_EXITCODE=${PIPESTATUS[0]}
+
+		G_ERROR_HANDLER
+
+		return $G_ERROR_HANDLER_EXITCODE
+
+	}
+
+	#apt-get autoremove
+	#	NB: automatically error handled (G_ERROR_HANDLER)
+	G_AGA(){
+
+		G_ERROR_HANDLER_EXITCODE=0
+		G_ERROR_HANDLER_COMMAND="G_AGA"
+		G_ERROR_HANDLER_ONERROR_FPLOGFILE="$G_FP_LOG_APT"
+
+		G_DIETPI-NOTIFY 2 "APT autoremove + purge, please wait..."
+
+		DEBIAN_FRONTEND=noninteractive apt-get autoremove --purge -y  2>&1 | tee "$G_FP_LOG_APT"
+		G_ERROR_HANDLER_EXITCODE=${PIPESTATUS[0]}
+
+		G_ERROR_HANDLER
+
+		return $G_ERROR_HANDLER_EXITCODE
+
+	}
+
+	#apt-get install -f
+	#	NB: automatically error handled (G_ERROR_HANDLER)
+	G_AGF(){
+
+		G_ERROR_HANDLER_EXITCODE=0
+		G_ERROR_HANDLER_COMMAND="G_AGF"
+		G_ERROR_HANDLER_ONERROR_FPLOGFILE="$G_FP_LOG_APT"
+
+		G_DIETPI-NOTIFY 2 "APT fix, please wait..."
+
+		DEBIAN_FRONTEND=noninteractive apt-get install -f -y 2>&1 | tee "$G_FP_LOG_APT"
+		G_ERROR_HANDLER_EXITCODE=${PIPESTATUS[0]}
+
+		G_ERROR_HANDLER
+
+		return $G_ERROR_HANDLER_EXITCODE
+
+	}
+
+	#apt-get update
+	#	NB: automatically error handled (G_ERROR_HANDLER)
+	G_AGUP(){
+
+		G_ERROR_HANDLER_EXITCODE=0
+		G_ERROR_HANDLER_COMMAND="G_AGUP"
+		G_ERROR_HANDLER_ONERROR_FPLOGFILE="$G_FP_LOG_APT"
+
+		G_DIETPI-NOTIFY 2 "APT update, please wait..."
+
+		DEBIAN_FRONTEND=noninteractive apt-get clean 2>&1 | tee "$G_FP_LOG_APT"
+		DEBIAN_FRONTEND=noninteractive apt-get update 2>&1 | tee -a "$G_FP_LOG_APT"
+		G_ERROR_HANDLER_EXITCODE=${PIPESTATUS[0]}
+
+		G_ERROR_HANDLER
+
+		return $G_ERROR_HANDLER_EXITCODE
+
+	}
+
+	#apt-get upgrade
+	#	NB: automatically error handled (G_ERROR_HANDLER)
+	G_AGUG(){
+
+		G_ERROR_HANDLER_EXITCODE=0
+		G_ERROR_HANDLER_COMMAND="G_AGUG"
+		G_ERROR_HANDLER_ONERROR_FPLOGFILE="$G_FP_LOG_APT"
+
+		G_DIETPI-NOTIFY 2 "APT upgrade, please wait..."
+
+		DEBIAN_FRONTEND=noninteractive apt-get upgrade -y 2>&1 | tee "$G_FP_LOG_APT"
+		G_ERROR_HANDLER_EXITCODE=${PIPESTATUS[0]}
+
+		G_ERROR_HANDLER
+
+		return $G_ERROR_HANDLER_EXITCODE
+
+	}
+
+	#apt-get dist-upgrade
+	#	NB: automatically error handled (G_ERROR_HANDLER)
+	G_AGDUG(){
+
+		G_ERROR_HANDLER_EXITCODE=0
+		G_ERROR_HANDLER_COMMAND="G_AGDUG"
+		G_ERROR_HANDLER_ONERROR_FPLOGFILE="$G_FP_LOG_APT"
+
+		if (( $G_DISTRO >= 4 )); then
+
+			force_options='--allow-downgrades --allow-remove-essential --allow-change-held-packages --allow-unauthenticated'
+
+		else
+
+			force_options='--force-yes'
+
+		fi
+
+		G_DIETPI-NOTIFY 2 "APT dist-upgrade, please wait..."
+
+		DEBIAN_FRONTEND=noninteractive apt-get dist-upgrade -y 2>&1 | tee "$G_FP_LOG_APT"
+		G_ERROR_HANDLER_EXITCODE=${PIPESTATUS[0]}
+
+		G_ERROR_HANDLER
+
+		return $G_ERROR_HANDLER_EXITCODE
+
+	}
+
+	#Checks for required APT packages, installs if needed.
+	# $@ = list of required packages
+	#	NB: automatically error handled (G_ERROR_HANDLER)
+	G_AG_CHECK_INSTALL_PREREQ(){
+
+		local fp_temp='/tmp/.G_AG_CHECK_INSTALL_PREREQ'
+		local exit_code=0
+		local string=( "$@" )
+		local packages_to_install=''
+
+		G_DIETPI-NOTIFY 2 "Checking for pre-req APT packages: ${string[*]}"
+
+		dpkg --get-selections > "$fp_temp"
+		for i in "${string[@]}"
+		do
+
+			if (( ! $(grep -ci -m1 "^$i[[:space:]]" "$fp_temp") )); then
+
+				G_DIETPI-NOTIFY 2 "($i) | Not found, flagged for installation"
+				packages_to_install+=" $i"
+
+			fi
+
+		done
+
+		if [ -n "$packages_to_install" ]; then
+
+			G_DIETPI-NOTIFY -2 "Installing pre-req APT packages"
+			G_AGI $packages_to_install
+			exit_code=$?
+
+		else
+
+			G_DIETPI-NOTIFY 2 "Pre-req APT packages are installed"
+
+		fi
+
+		#G_AGI now handles the error
+
+		rm "$fp_temp"
+
+		return $exit_code
+
+	}
+
+	#-----------------------------------------------------------------------------------
+	# HW specific
+	#-----------------------------------------------------------------------------------
+	#rpi-update
+	#	- Holds APT packages
+	#	- Skips backup
+	G_RPI_UPDATE(){
+
+		if (( $G_HW_MODEL < 10 )); then
+
+			G_AG_CHECK_INSTALL_PREREQ rpi-update
+			export SKIP_BACKUP=1
+			G_RUN_CMD rpi-update
+			apt-mark hold raspberrypi-bootloader raspberrypi-kernel libraspberrypi-bin
+
+		fi
+
+	}
+
+	#-----------------------------------------------------------------------------------
+	#G_DIETPI-NOTIFY 2 'DietPi-Globals loaded\n'
+	#-----------------------------------------------------------------------------------
+
+}
