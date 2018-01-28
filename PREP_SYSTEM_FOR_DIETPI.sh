@@ -272,15 +272,14 @@ _EOF_
 
 	WHIP_TITLE='Hardware selection:'
 	WHIP_DESC='Please select the current device this is being installed on:'
-	WHIP_DEFAULT_ITEM=0
+	WHIP_DEFAULT_ITEM=22
 	WHIP_MENU_ARRAY=(
 
-		'110' 'RoseapplePi'
-		'100' 'Asus Tinker Board'
-		'90' 'A20-OLinuXino-MICRO'
-		'80' 'Cubieboard 3'
+		'52' 'Asus Tinker Board'
+		'51' 'BananaPi Pro (Lemaker)'
+		'50' 'BananaPi M2+ (sinovoip)'
 		'71' 'Beagle Bone Black'
-		'70' 'Sparky SBC'
+		'22' 'Generic device (unknown to DietPi)'
 		'66' 'NanoPi M1 Plus'
 		'65' 'NanoPi NEO 2'
 		'64' 'NanoPi NEO Air'
@@ -288,10 +287,10 @@ _EOF_
 		'62' 'NanoPi M3/T3'
 		'61' 'NanoPi M2/T2'
 		'60' 'NanoPi Neo'
-		'51' 'BananaPi Pro (Lemaker)'
-		'50' 'BananaPi M2+ (sinovoip)'
-		'43' 'Rock64'
-		'40' 'Pine A64'
+		'13' 'Odroid U3'
+		'12' 'Odroid C2'
+		'11' 'Odroid XU3/4/HC1'
+		'10' 'Odroid C1'
 		'38' 'OrangePi PC 2'
 		'37' 'OrangePi Prime'
 		'36' 'OrangePi Win'
@@ -301,16 +300,15 @@ _EOF_
 		'32' 'OrangePi Zero (H2+)'
 		'31' 'OrangePi One'
 		'30' 'OrangePi PC'
-		'21' 'x86_64 Native PC'
-		'20' 'x86_64 VMware/VirtualBox'
-		'13' 'oDroid U3'
-		'12' 'oDroid C2'
-		'11' 'oDroid XU3/4/HC1'
-		'10' 'oDroid C1'
+		'40' 'Pine A64'
 		'3' 'Raspberry Pi 3'
 		'2' 'Raspberry Pi 2'
 		'1' 'Raspberry Pi 1/Zero (512mb)'
 		'0' 'Raspberry Pi 1 (256mb)'
+		'43' 'Rock64'
+		'70' 'Sparky SBC'
+		'21' 'x86_64 Native PC'
+		'20' 'x86_64 VMware/VirtualBox'
 
 	)
 
