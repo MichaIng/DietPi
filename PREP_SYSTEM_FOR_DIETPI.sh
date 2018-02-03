@@ -407,6 +407,7 @@ _EOF_
 
 	#rm /etc/apt/sources.list.d/* &> /dev/null #Probably a bad idea
 	rm /etc/apt/sources.list.d/deb-multimedia.list &> /dev/null #meveric
+	rm /etc/apt/sources.list.d/openmediavault.list &> /dev/null #http://dietpi.com/phpbb/viewtopic.php?f=11&t=2772&p=10646#p10594
 	#rm /etc/apt/sources.list.d/armbian.list
 
 	G_DIETPI-NOTIFY 2 "Setting APT sources.list: $DISTRO_TARGET_NAME $DISTRO_TARGET"
@@ -1075,6 +1076,8 @@ _EOF_
 uenvcmd=setenv os_type linux;
 bootargs=earlyprintk clk_ignore_unused selinux=0 scandelay console=tty0 loglevel=1 real_rootflag=rw root=/dev/mmcblk0p2 rootwait init=/lib/systemd/systemd aotg.urb_fix=1 aotg.aotg1_speed=0
 _EOF_
+
+		cp /DietPi/uEnv.txt /boot/uenv.txt #temp solution
 
 		#	Blacklist GPU and touch screen modules: https://github.com/Fourdee/DietPi/issues/699#issuecomment-271362441
 		cat << _EOF_ > /etc/modprobe.d/disable_sparkysbc_touchscreen.conf
