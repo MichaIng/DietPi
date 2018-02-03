@@ -985,23 +985,6 @@ _EOF_
 	mkdir -p /root/.config/htop
 	cp /DietPi/dietpi/conf/htoprc /root/.config/htop/htoprc
 
-	G_DIETPI-NOTIFY 2 "Configuring hdparm:"
-
-	export G_ERROR_HANDLER_COMMAND='/etc/hdparm.conf'
-	cat << _EOF_ >> $G_ERROR_HANDLER_COMMAND
-
-#DietPi external USB drive. Power management settings.
-/dev/sda {
-        #10 mins
-        spindown_time = 120
-
-        #
-        apm = 254
-}
-_EOF_
-	export G_ERROR_HANDLER_EXITCODE=$?
-	G_ERROR_HANDLER
-
 	G_DIETPI-NOTIFY 2 "Configuring fakehwclock:"
 
 	# - allow times in the past
@@ -1057,6 +1040,27 @@ _EOF_
 
 	#G_HW_MODEL specific
 	G_DIETPI-NOTIFY 2 "Appling G_HW_MODEL specific tweaks:"
+
+	if (( $G_HW_MODEL != 20 )); then
+
+		G_DIETPI-NOTIFY 2 "Configuring hdparm:"
+
+		export G_ERROR_HANDLER_COMMAND='/etc/hdparm.conf'
+		cat << _EOF_ >> $G_ERROR_HANDLER_COMMAND
+
+#DietPi external USB drive. Power management settings.
+/dev/sda {
+        #10 mins
+        spindown_time = 120
+
+        #
+        apm = 254
+}
+_EOF_
+		export G_ERROR_HANDLER_EXITCODE=$?
+		G_ERROR_HANDLER
+
+	fi
 
 	# - ARMbian OPi Zero 2: https://github.com/Fourdee/DietPi/issues/876#issuecomment-294350580
 	if (( $G_HW_MODEL == 35 )); then
