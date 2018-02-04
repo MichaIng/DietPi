@@ -1045,6 +1045,7 @@ _EOF_
 
 		G_DIETPI-NOTIFY 2 "Configuring hdparm:"
 
+		sed -i '/#DietPi/,$d' /etc/hdparm.conf #Prevent dupes
 		export G_ERROR_HANDLER_COMMAND='/etc/hdparm.conf'
 		cat << _EOF_ >> $G_ERROR_HANDLER_COMMAND
 
