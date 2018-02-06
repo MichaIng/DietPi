@@ -598,8 +598,10 @@ _EOF_
 
 		apt-mark unhold libraspberrypi-bin libraspberrypi0 raspberrypi-bootloader raspberrypi-kernel raspberrypi-sys-mods raspi-copies-and-fills
 		rm -R /lib/modules/*
-
-		G_AGI libraspberrypi-bin libraspberrypi0 raspberrypi-bootloader raspberrypi-kernel raspberrypi-sys-mods raspi-copies-and-fills --reinstall
+		G_AGI libraspberrypi-bin libraspberrypi0 raspberrypi-bootloader raspberrypi-kernel raspberrypi-sys-mods
+		G_AGI --reinstall libraspberrypi-bin libraspberrypi0 raspberrypi-bootloader raspberrypi-kernel
+		# Buster systemd-udevd doesn't support the current raspi-copies-and-fills: https://github.com/Fourdee/DietPi/issues/1286
+		(( $DISTRO_TARGET < 5 )) && G_AGI raspi-copies-and-fills
 
 	#	Odroid C2
 	elif (( $G_HW_MODEL == 12 )); then
