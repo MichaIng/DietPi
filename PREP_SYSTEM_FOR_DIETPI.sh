@@ -71,9 +71,7 @@
 
 	#Setup locale
 	# - Remove exisiting settings that will break dpkg-reconfigure
-	cp /etc/environment /mnt/dietpi_userdata/ &> /dev/null
-	echo '' > /etc/environment
-	cp /etc/default/locale /mnt/dietpi_userdata/ &> /dev/null
+	rm /etc/environment &> /dev/null
 	rm /etc/default/locale &> /dev/null
 
 	#	NB: DEV, any changes here must be also rolled into function '/DietPi/dietpi/func/dietpi-set_software locale', for future script use
