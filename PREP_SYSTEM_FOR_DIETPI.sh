@@ -84,8 +84,8 @@
 	fi
 
 	#Force en_GB Locale for rest of script. Prevents incorrect parsing with non-english locales.
-	LC_ALL=en_GB.UTF-8
-	LANG=en_GB.UTF-8
+	export LC_ALL=en_GB.UTF-8
+	export LANG=en_GB.UTF-8
 
 	#------------------------------------------------------------------------------------------------
 	#Globals
