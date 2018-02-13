@@ -70,6 +70,10 @@
 	echo 'prefer-family = IPv4' >> /etc/wgetrc
 
 	#Setup locale
+	# - Remove exisiting settings that will break dpkg-reconfigure
+	rm /etc/environment &> /dev/null
+	rm /etc/default/locale &> /dev/null
+
 	#	NB: DEV, any changes here must be also rolled into function '/DietPi/dietpi/func/dietpi-set_software locale', for future script use
 	echo 'en_GB.UTF-8 UTF-8' > /etc/locale.gen
 	dpkg-reconfigure -f noninteractive locales
@@ -83,9 +87,16 @@
 
 	fi
 
+	# - Update /etc/default/locales with new values (not effective until next load of bash session, eg: logout/in)
+	update-locale LANG="$INPUT_MODE_VALUE"
+	update-locale LANGUAGE="$INPUT_MODE_VALUE"
+	update-locale LC_CTYPE="$INPUT_MODE_VALUE"
+	update-locale LC_TIME="$INPUT_MODE_VALUE"
+	update-locale LC_ALL="$INPUT_MODE_VALUE"
+
 	#Force en_GB Locale for rest of script. Prevents incorrect parsing with non-english locales.
-	LC_ALL=en_GB.UTF-8
-	LANG=en_GB.UTF-8
+	export LC_ALL=en_GB.UTF-8
+	export LANG=en_GB.UTF-8
 
 	#------------------------------------------------------------------------------------------------
 	#Globals
