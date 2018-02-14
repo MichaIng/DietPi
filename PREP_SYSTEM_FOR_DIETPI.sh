@@ -71,7 +71,7 @@
 
 	#Setup locale
 	# - Remove exisiting settings that will break dpkg-reconfigure
-	rm /etc/environment &> /dev/null
+	echo '' > /etc/environment
 	rm /etc/default/locale &> /dev/null
 
 	#	NB: DEV, any changes here must be also rolled into function '/DietPi/dietpi/func/dietpi-set_software locale', for future script use
@@ -88,11 +88,10 @@
 	fi
 
 	# - Update /etc/default/locales with new values (not effective until next load of bash session, eg: logout/in)
-	update-locale LANG="$INPUT_MODE_VALUE"
-	update-locale LANGUAGE="$INPUT_MODE_VALUE"
-	update-locale LC_CTYPE="$INPUT_MODE_VALUE"
-	update-locale LC_TIME="$INPUT_MODE_VALUE"
-	update-locale LC_ALL="$INPUT_MODE_VALUE"
+	update-locale LANG=en_GB.UTF-8
+	update-locale LC_CTYPE=en_GB.UTF-8
+	update-locale LC_TIME=en_GB.UTF-8
+	update-locale LC_ALL=en_GB.UTF-8
 
 	#Force en_GB Locale for rest of script. Prevents incorrect parsing with non-english locales.
 	export LC_ALL=en_GB.UTF-8
@@ -410,7 +409,7 @@
 	#	NB: Apt sources will get overwritten during 1st run, via boot script and dietpi.txt entry
 
 	#rm /etc/apt/sources.list.d/* &> /dev/null #Probably a bad idea
-	rm /etc/apt/sources.list.d/deb-multimedia.list &> /dev/null #meveric
+	#rm /etc/apt/sources.list.d/deb-multimedia.list &> /dev/null #meveric, already done above
 	rm /etc/apt/sources.list.d/openmediavault.list &> /dev/null #http://dietpi.com/phpbb/viewtopic.php?f=11&t=2772&p=10646#p10594
 	#rm /etc/apt/sources.list.d/armbian.list
 
@@ -580,8 +579,6 @@ _EOF_
 		(( $G_HW_MODEL != 20 )) && G_AGI firmware-linux-nonfree
 		grep 'vendor_id' /proc/cpuinfo | grep -qi 'intel' && G_AGI intel-microcode
 		grep 'vendor_id' /proc/cpuinfo | grep -qi 'amd' && G_AGI amd64-microcode
-		#aPACKAGES_REQUIRED_INSTALL+=('firmware-misc-nonfree')
-		#aPACKAGES_REQUIRED_INSTALL+=('dmidecode')
 
 		#	Grub EFI
 		if (( $(dpkg --get-selections | grep -ci -m1 '^grub-efi-amd64[[:space:]]') )) ||
