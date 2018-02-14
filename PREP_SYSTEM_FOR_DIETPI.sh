@@ -909,22 +909,6 @@ _EOF_
 
 	G_RUN_CMD /boot/dietpi/dietpi-drive_manager 4
 
-	# - HW Specific:
-	#	RPi requires PARTUUID for USB write: https://github.com/Fourdee/DietPi/issues/970
-	if (( $G_HW_MODEL < 10 )); then
-
-		PARTUUID_CURRENT=$(blkid /dev/mmcblk0p1 -s PARTUUID -o value)
-		UUID_CURRENT=$(blkid /dev/mmcblk0p1 -s UUID -o value)
-		sed -i "s#^UUID=$UUID_CURRENT#PARTUUID=$PARTUUID_CURRENT#g" /etc/fstab
-
-		PARTUUID_CURRENT=$(blkid /dev/mmcblk0p2 -s PARTUUID -o value)
-		UUID_CURRENT=$(blkid /dev/mmcblk0p2 -s UUID -o value)
-		sed -i "s#^UUID=$UUID_CURRENT#PARTUUID=$PARTUUID_CURRENT#g" /etc/fstab
-
-		systemctl daemon-reload
-
-	fi
-
 	G_DIETPI-NOTIFY 2 "Starting DietPi-RAMdisk service"
 
 	G_RUN_CMD systemctl start dietpi-ramdisk.service
