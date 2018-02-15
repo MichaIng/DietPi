@@ -297,6 +297,7 @@
 		'62' 'NanoPi M3/T3'
 		'61' 'NanoPi M2/T2'
 		'60' 'NanoPi Neo'
+		'14' 'Odroid N1'
 		'13' 'Odroid U3'
 		'12' 'Odroid C2'
 		'11' 'Odroid XU3/4/HC1'
