@@ -502,7 +502,6 @@ _EOF_
 		'console-setup'		# DietPi-Config keyboard configuration
 		'cron'			# background job scheduler
 		'curl'			# Web address testing, downloading, uploading etc.
-		'dbus'			# System message bus
 		'debconf'		# APT package configuration, e.g. 'debconf-set-selections'
 		'dosfstools' 		# DietPi-Drive_Manager + fat (boot) drive file system check
 		'dphys-swapfile'	# Swap file management
