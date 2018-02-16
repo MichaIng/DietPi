@@ -604,6 +604,11 @@ _EOF_
 		# Buster systemd-udevd doesn't support the current raspi-copies-and-fills: https://github.com/Fourdee/DietPi/issues/1286
 		(( $DISTRO_TARGET < 5 )) && G_AGI raspi-copies-and-fills
 
+	#	Odroid N1
+	elif (( $G_HW_MODEL == 14 )); then
+
+		G_AGI libdrm-rockchip1 #unsure if required yet...
+
 	#	Odroid C2
 	elif (( $G_HW_MODEL == 12 )); then
 
