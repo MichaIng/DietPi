@@ -70,6 +70,10 @@
 	echo 'prefer-family = IPv4' >> /etc/wgetrc
 
 	#Setup locale
+	# - Remove exisiting settings that will break dpkg-reconfigure
+	echo '' > /etc/environment
+	rm /etc/default/locale &> /dev/null
+
 	#	NB: DEV, any changes here must be also rolled into function '/DietPi/dietpi/func/dietpi-set_software locale', for future script use
 	echo 'en_GB.UTF-8 UTF-8' > /etc/locale.gen
 	dpkg-reconfigure -f noninteractive locales
@@ -83,16 +87,15 @@
 
 	fi
 
-	cat << _EOF_ > /etc/profile.d/99-dietpi-force-locale.sh
-# Force locale on remote access, especially via dropbear, where overwriting server locale by SSH client cannot be suppressed:
-export LANG=en_GB.UTF-8
-export LC_ALL=en_GB.UTF-8
-export LANGUAGE=en_GB:en
-_EOF_
-	chmod +x /etc/profile.d/99-dietpi-force-locale.sh
+	# - Update /etc/default/locales with new values (not effective until next load of bash session, eg: logout/in)
+	update-locale LANG=en_GB.UTF-8
+	update-locale LC_CTYPE=en_GB.UTF-8
+	update-locale LC_TIME=en_GB.UTF-8
+	update-locale LC_ALL=en_GB.UTF-8
 
 	#Force en_GB Locale for rest of script. Prevents incorrect parsing with non-english locales.
-	LANG=en_GB.UTF-8
+	export LC_ALL=en_GB.UTF-8
+	export LANG=en_GB.UTF-8
 
 	#------------------------------------------------------------------------------------------------
 	#Globals
@@ -294,6 +297,7 @@ _EOF_
 		'62' 'NanoPi M3/T3'
 		'61' 'NanoPi M2/T2'
 		'60' 'NanoPi Neo'
+		'14' 'Odroid N1'
 		'13' 'Odroid U3'
 		'12' 'Odroid C2'
 		'11' 'Odroid XU3/4/HC1'
@@ -406,7 +410,8 @@ _EOF_
 	#	NB: Apt sources will get overwritten during 1st run, via boot script and dietpi.txt entry
 
 	#rm /etc/apt/sources.list.d/* &> /dev/null #Probably a bad idea
-	rm /etc/apt/sources.list.d/deb-multimedia.list &> /dev/null #meveric
+	#rm /etc/apt/sources.list.d/deb-multimedia.list &> /dev/null #meveric, already done above
+	rm /etc/apt/sources.list.d/openmediavault.list &> /dev/null #http://dietpi.com/phpbb/viewtopic.php?f=11&t=2772&p=10646#p10594
 	#rm /etc/apt/sources.list.d/armbian.list
 
 	G_DIETPI-NOTIFY 2 "Setting APT sources.list: $DISTRO_TARGET_NAME $DISTRO_TARGET"
@@ -497,7 +502,6 @@ _EOF_
 		'console-setup'		# DietPi-Config keyboard configuration
 		'cron'			# background job scheduler
 		'curl'			# Web address testing, downloading, uploading etc.
-		'dbus'			# System message bus
 		'debconf'		# APT package configuration, e.g. 'debconf-set-selections'
 		'dosfstools' 		# DietPi-Drive_Manager + fat (boot) drive file system check
 		'dphys-swapfile'	# Swap file management
@@ -575,8 +579,6 @@ _EOF_
 		(( $G_HW_MODEL != 20 )) && G_AGI firmware-linux-nonfree
 		grep 'vendor_id' /proc/cpuinfo | grep -qi 'intel' && G_AGI intel-microcode
 		grep 'vendor_id' /proc/cpuinfo | grep -qi 'amd' && G_AGI amd64-microcode
-		#aPACKAGES_REQUIRED_INSTALL+=('firmware-misc-nonfree')
-		#aPACKAGES_REQUIRED_INSTALL+=('dmidecode')
 
 		#	Grub EFI
 		if (( $(dpkg --get-selections | grep -ci -m1 '^grub-efi-amd64[[:space:]]') )) ||
@@ -597,8 +599,15 @@ _EOF_
 
 		apt-mark unhold libraspberrypi-bin libraspberrypi0 raspberrypi-bootloader raspberrypi-kernel raspberrypi-sys-mods raspi-copies-and-fills
 		rm -R /lib/modules/*
+		G_AGI libraspberrypi-bin libraspberrypi0 raspberrypi-bootloader raspberrypi-kernel raspberrypi-sys-mods
+		G_AGI --reinstall libraspberrypi-bin libraspberrypi0 raspberrypi-bootloader raspberrypi-kernel
+		# Buster systemd-udevd doesn't support the current raspi-copies-and-fills: https://github.com/Fourdee/DietPi/issues/1286
+		(( $DISTRO_TARGET < 5 )) && G_AGI raspi-copies-and-fills
 
-		G_AGI libraspberrypi-bin libraspberrypi0 raspberrypi-bootloader raspberrypi-kernel raspberrypi-sys-mods raspi-copies-and-fills --reinstall
+	#	Odroid N1
+	elif (( $G_HW_MODEL == 14 )); then
+
+		G_AGI libdrm-rockchip1 #unsure if required yet...
 
 	#	Odroid C2
 	elif (( $G_HW_MODEL == 12 )); then
@@ -902,22 +911,6 @@ _EOF_
 
 	G_RUN_CMD /boot/dietpi/dietpi-drive_manager 4
 
-	# - HW Specific:
-	#	RPi requires PARTUUID for USB write: https://github.com/Fourdee/DietPi/issues/970
-	if (( $G_HW_MODEL < 10 )); then
-
-		PARTUUID_CURRENT=$(blkid /dev/mmcblk0p1 -s PARTUUID -o value)
-		UUID_CURRENT=$(blkid /dev/mmcblk0p1 -s UUID -o value)
-		sed -i "s#^UUID=$UUID_CURRENT#PARTUUID=$PARTUUID_CURRENT#g" /etc/fstab
-
-		PARTUUID_CURRENT=$(blkid /dev/mmcblk0p2 -s PARTUUID -o value)
-		UUID_CURRENT=$(blkid /dev/mmcblk0p2 -s UUID -o value)
-		sed -i "s#^UUID=$UUID_CURRENT#PARTUUID=$PARTUUID_CURRENT#g" /etc/fstab
-
-		systemctl daemon-reload
-
-	fi
-
 	G_DIETPI-NOTIFY 2 "Starting DietPi-RAMdisk service"
 
 	G_RUN_CMD systemctl start dietpi-ramdisk.service
@@ -984,23 +977,6 @@ _EOF_
 	mkdir -p /root/.config/htop
 	cp /DietPi/dietpi/conf/htoprc /root/.config/htop/htoprc
 
-	G_DIETPI-NOTIFY 2 "Configuring hdparm:"
-
-	export G_ERROR_HANDLER_COMMAND='/etc/hdparm.conf'
-	cat << _EOF_ >> $G_ERROR_HANDLER_COMMAND
-
-#DietPi external USB drive. Power management settings.
-/dev/sda {
-        #10 mins
-        spindown_time = 120
-
-        #
-        apm = 254
-}
-_EOF_
-	export G_ERROR_HANDLER_EXITCODE=$?
-	G_ERROR_HANDLER
-
 	G_DIETPI-NOTIFY 2 "Configuring fakehwclock:"
 
 	# - allow times in the past
@@ -1057,6 +1033,28 @@ _EOF_
 	#G_HW_MODEL specific
 	G_DIETPI-NOTIFY 2 "Appling G_HW_MODEL specific tweaks:"
 
+	if (( $G_HW_MODEL != 20 )); then
+
+		G_DIETPI-NOTIFY 2 "Configuring hdparm:"
+
+		sed -i '/#DietPi/,$d' /etc/hdparm.conf #Prevent dupes
+		export G_ERROR_HANDLER_COMMAND='/etc/hdparm.conf'
+		cat << _EOF_ >> $G_ERROR_HANDLER_COMMAND
+
+#DietPi external USB drive. Power management settings.
+/dev/sda {
+        #10 mins
+        spindown_time = 120
+
+        #
+        apm = 254
+}
+_EOF_
+		export G_ERROR_HANDLER_EXITCODE=$?
+		G_ERROR_HANDLER
+
+	fi
+
 	# - ARMbian OPi Zero 2: https://github.com/Fourdee/DietPi/issues/876#issuecomment-294350580
 	if (( $G_HW_MODEL == 35 )); then
 
@@ -1075,6 +1073,8 @@ _EOF_
 uenvcmd=setenv os_type linux;
 bootargs=earlyprintk clk_ignore_unused selinux=0 scandelay console=tty0 loglevel=1 real_rootflag=rw root=/dev/mmcblk0p2 rootwait init=/lib/systemd/systemd aotg.urb_fix=1 aotg.aotg1_speed=0
 _EOF_
+
+		cp /DietPi/uEnv.txt /boot/uenv.txt #temp solution
 
 		#	Blacklist GPU and touch screen modules: https://github.com/Fourdee/DietPi/issues/699#issuecomment-271362441
 		cat << _EOF_ > /etc/modprobe.d/disable_sparkysbc_touchscreen.conf

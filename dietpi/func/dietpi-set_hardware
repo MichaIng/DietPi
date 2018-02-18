@@ -17,9 +17,8 @@ $FP_SCRIPT 		rpi3_usb_boot		enable
 $FP_SCRIPT 		rpi-camera			enable/disable
 $FP_SCRIPT 		gpumemsplit			64/128/256 #RPi only
 $FP_SCRIPT 		remoteir			odroid_remote/justboom_ir_remote
-$FP_SCRIPT 		kernel				??see sourcode
 $FP_SCRIPT 		eth-forcespeed		10/100/1000/disable
-$FP_SCRIPT 		rpi-opengl			enable/disable
+$FP_SCRIPT 		rpi-opengl			vc4-kms-v3d/vc4-fkms-v3d/disable
 $FP_SCRIPT 		i2c					enable/disable/khz
 $FP_SCRIPT 		wificountrycode		code
 $FP_SCRIPT 		wifimodules			enable/disable/onboard_enable/onboard_disable
@@ -45,12 +44,12 @@ $FP_SCRIPT 		lcdpanel 			target_panel (none to remove all)
 		INPUT_DEVICE_VALUE='disable'
 
 	fi
-
 	#Import DietPi-Globals ---------------------------------------------------------------
 	. /DietPi/dietpi/func/dietpi-globals
 	G_CHECK_ROOT_USER
 	G_CHECK_ROOTFS_RW
 	export G_PROGRAM_NAME='DietPi-Set_Hardware'
+	G_INIT
 	#Import DietPi-Globals ---------------------------------------------------------------
 
 	#Semi support non-dietpi Raspbian
@@ -190,12 +189,6 @@ systemctl enable dietpi-rm_program_usb_boot_mode.service
 		if (( ! $(dpkg --get-selections | grep -ci -m1 '^lirc') )); then
 
 			G_AGI lirc
-			if (( $? != 0 )); then
-
-				G_DIETPI-NOTIFY 1 "apt-get install lirc"
-				EXIT_CODE=1
-
-			fi
 
 		fi
 
@@ -508,34 +501,33 @@ _EOF_
 	#/////////////////////////////////////////////////////////////////////////////////////
 	RPi_OpenGL_Main(){
 
-		if [ "$INPUT_DEVICE_VALUE" = "enable" ]; then
+		#Always remove previous vc4 overlay entry
+		sed -i '/dtoverlay=vc4-/d' "$FP_RPI_CONFIG"
+
+		if [[ "$INPUT_DEVICE_VALUE" = "vc4-"* ]]; then
 
 			#RPi 2/3+ only
 			if (( $G_HW_MODEL >= 2 && $G_HW_MODEL < 10 )); then
 
-				#install pre-reqs
-
-				# - Install Xserver
-				/DietPi/dietpi/dietpi-software install 6
-
 				# - GL packages
-				G_DIETPI-NOTIFY 2 "Installing additional OpenGL packages, please wait...\n"
-				sleep 1
-				G_AGI libgl1-mesa-dri mesa-utils
+				G_AGI libgl1-mesa-dri libgles2-mesa mesa-utils
 
-				sed -i '/dtoverlay=vc4-kms-v3d/d' "$FP_RPI_CONFIG"
-				echo -e "\ndtoverlay=vc4-kms-v3d" >> "$FP_RPI_CONFIG"
+				echo -e "\ndtoverlay=$INPUT_DEVICE_VALUE" >> "$FP_RPI_CONFIG"
+
+				# - set 1080p by default
+				sed -i '/framebuffer_width=/c\framebuffer_width=1920' /DietPi/config.txt
+				sed -i '/framebuffer_height=/c\framebuffer_height=1080' /DietPi/config.txt
 
 			else
 
-				G_DIETPI-NOTIFY 1 "OpenGL requires a RPi 2 or higher"
+				G_DIETPI-NOTIFY 1 "OpenGL requires an RPi 2 or higher"
 				sleep 2
 
 			fi
 
 		elif [ "$INPUT_DEVICE_VALUE" = "disable" ]; then
 
-			sed -i '/dtoverlay=vc4-kms-v3d/d' "$FP_RPI_CONFIG"
+			echo -e "already done" &> /dev/null
 
 		else
 
@@ -1307,6 +1299,7 @@ update_config=1
 
 network={
     ssid="$Wifi_SSID"
+    scan_ssid=1
 _EOF_
 
 				# - Add KEY and type
@@ -1680,6 +1673,7 @@ _EOF_
 		SOUNDCARD_TARGET_DEVICE=1
 		amixer -c 0 sset 'audio output mode switch' 'hdmi'
 
+		# Disable USB 1.1 compat
 		sed -i 's/aotg.aotg1_speed=1/aotg.aotg1_speed=0/' /DietPi/uEnv.txt
 
 	}
@@ -1749,13 +1743,20 @@ _EOF_
 
 			;;
 
-			usb-dac)
+			usb-dac*)
 
 				# - detect card
 				local usb_detection_card_index=$(aplay -l | grep -m1 'USB Audio' | awk '{print $2}' | sed 's/://g')
 				if [[ $usb_detection_card_index =~ ^-?[0-9]+$ ]]; then
 
 					SOUNDCARD_TARGET_CARD=$usb_detection_card_index
+
+					#USB 1.1 compat mode (Sparky currently)
+					if [ "$INPUT_DEVICE_VALUE" = 'usb-dac-1.1' ]; then
+
+						sed -i 's/aotg.aotg1_speed=0/aotg.aotg1_speed=1/' /DietPi/uEnv.txt
+
+					fi
 
 				# - Not found
 				else
@@ -1770,17 +1771,9 @@ _EOF_
 
 				SOUNDCARD_TARGET_DEVICE=0
 
-				# - SparkySBC, enable aotg.aotg1_speed compatibility setting for USB 1.1, when USB-DAC configured: https://github.com/Fourdee/DietPi/issues/1301
-				if (( $G_HW_MODEL == 70 )); then
-
-					sed -i 's/aotg.aotg1_speed=0/aotg.aotg1_speed=1/' /DietPi/uEnv.txt
-
-				fi
-
 			;;
 
 			#RPi -------------------------------------------------------------------------------
-
 			#rpi-bcm2835
 			#rpi-bcm2835-ultrahq
 			#rpi-bcm2835-3.5mm
@@ -1913,30 +1906,43 @@ _EOF_
 			#	i-sabre-k2m
 			i-sabre-k2m)
 
-				# - Install binaries
-				local install_url_address='http://dietpi.com/downloads/binaries/rpi/I-Sabre-K2M_binaries.zip'
+				# - Sourcebuild
+				if [ ! -f /var/lib/dietpi/.G_RPI_UPDATE ]; then
 
-				G_CHECK_URL "$install_url_address"
-				if (( $? == 0 )); then
-
-					wget "$install_url_address" -O package.zip
-					unzip -o package.zip -d /
-					rm package.zip
-
-					sync
-					depmod -a
-
-					# - enable dtoverlay
-					echo -e "\ndtoverlay=$INPUT_DEVICE_VALUE" >> "$FP_RPI_CONFIG"
-
-					# - i2c
-					sed -i '/dtparam=i2c_arm=/c\dtparam=i2c_arm=on' "$FP_RPI_CONFIG"
-
-				else
-
-					G_DIETPI-NOTIFY 1 "Failed to install $INPUT_DEVICE_NAME. $install_url_address may be offline or unreachable."
+					G_RPI_UPDATE
+					sed -i "/^CONFIG_SOUNDCARD=/c\CONFIG_SOUNDCARD=none" /DietPi/dietpi.txt
+					whiptail --title "Stage 1 completed" --msgbox "i-sabre-k2m_build:\n\nThe device will now reboot.\n\nOnce rebooted, please run dietpi-config > Audio Options again. Reselect the soundcard (i-sabre-k2m) to complete installation." --backtitle "DietPi" 13 70
+					reboot
 
 				fi
+
+				local install_url_address='https://raw.githubusercontent.com/notro/rpi-source/master/rpi-source'
+				G_CHECK_URL "$install_url_address"
+				G_AGI python build-essential git device-tree-compiler gcc-4.9 g++-4.9
+
+				mkdir -p "$HOME"/i-sabre-k2m_build
+				cd "$HOME"/i-sabre-k2m_build
+				wget "$install_url_address" -O /usr/bin/rpi-source
+				chmod +x /usr/bin/rpi-source
+				/usr/bin/rpi-source -q --tag-update
+				rpi-source -d . --skip-gcc
+
+				install_url_address='http://dietpi.com/downloads/sourcebuild/I-Sabre-K2M.7z'
+				G_CHECK_URL "$install_url_address"
+				wget "$install_url_address" -O package.7z
+				7z x -y package.7z
+				rm package.7z
+
+				G_RUN_CMD make
+				G_RUN_CMD make modules_install
+				G_RUN_CMD make dtbs
+				G_RUN_CMD make install_dtbo
+
+				cd "$HOME"
+				rm -R i-sabre-k2m_build
+
+				# - enable dtoverlay
+				echo -e "\ndtoverlay=$INPUT_DEVICE_VALUE" >> "$FP_RPI_CONFIG"
 
 			;;
 
@@ -2166,7 +2172,7 @@ _EOF_
 	#-----------------------------------------------------------------------------------
 	#info
 
-	G_DIETPI-NOTIFY 3 DietPi-Set_Hardware "$INPUT_DEVICE_NAME ($INPUT_DEVICE_VALUE)"
+	G_DIETPI-NOTIFY 3 "$G_PROGRAM_NAME" "$INPUT_DEVICE_NAME ($INPUT_DEVICE_VALUE)"
 
 	#-----------------------------------------------------------------------------------
 	if [ "$INPUT_DEVICE_NAME" = "soundcard" ]; then

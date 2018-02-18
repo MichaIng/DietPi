@@ -19,11 +19,11 @@
 	#Grab input
 	SUBVERSION_CURRENT=$1
 	SUBVERSION_SERVER=$2
-
 	#Import DietPi-Globals ---------------------------------------------------------------
 	/DietPi/dietpi/dietpi-obtain_hw_model # Always update
 	. /DietPi/dietpi/func/dietpi-globals
 	export G_PROGRAM_NAME='DietPi-Patchfile'
+	G_INIT
 	#Import DietPi-Globals ---------------------------------------------------------------
 
 	#/////////////////////////////////////////////////////////////////////////////////////
@@ -93,18 +93,6 @@
 		sed -i '/#Apply system locale/Q' /etc/bash.bashrc
 		sed -i '/#DietPi Additions/Q' /etc/bash.bashrc
 		#-------------------------------------------------------------------------------
-		#Fix locales according to: https://github.com/Fourdee/DietPi/pull/1402
-		if [ -f /etc/environment ]; then
-
-			rm /etc/environment
-			[ -f /etc/default/locales ] && rm /etc/default/locales
-			locale_value="$(grep '^[[:blank:]]*AUTO_SETUP_LOCALE=' /DietPi/dietpi.txt | sed 's/^.*=//')"
-			[ -n $locale_value ] || locale_value='en_GB.UTF-8'
-			/DietPi/dietpi/func/dietpi-set_software locale "$locale_value"
-			unset locale_value
-
-		fi
-		#-------------------------------------------------------------------------------
 		#Fix doubled and renamed config files:
 		#https://github.com/Fourdee/DietPi/commit/68148cec6b49afc787deca638456e1c4689e1cab#diff-8370b86e635383d521462994afe04a2d
 		[ -f /etc/apt/apt.conf.d/99force-ipv ] && rm /etc/apt/apt.conf.d/99force-ipv
@@ -129,6 +117,118 @@
 		if [ -f /DietPi/dietpi/.installed ]; then
 
 			/DietPi/dietpi/dietpi-software reinstall 31 73 134
+
+		fi
+		#-------------------------------------------------------------------------------
+
+	elif (( $SUBVERSION_CURRENT == 1 )); then
+
+		#-------------------------------------------------------------------------------
+		#Regen rootfs mount (removes nofail): https://github.com/Fourdee/DietPi/pull/1480
+		sed -i '/[[:space:]]\/[[:space:]]/d' /etc/fstab
+		sed -i '/[[:space:]]\/boot[[:space:]]/d' /etc/fstab
+		/DietPi/dietpi/dietpi-drive_manager 2
+		#-------------------------------------------------------------------------------
+		#locale rework/reset: https://github.com/Fourdee/DietPi/issues/1430#issuecomment-364763302
+		rm /etc/profile.d/99-dietpi-force-locale.sh &> /dev/null
+		mv /etc/environment /mnt/dietpi_userdata/environment.bak &> /dev/null
+		echo '' > /etc/environment
+
+		/DietPi/dietpi/func/dietpi-set_software locale en_GB.UTF-8
+
+		export G_WHIP_MSG_TEXT="Notice (locale):\n\nTo resolve broken Locales, they have been reset to en_GB.UTF-8.\n\nIf you had a different locale configured on this system, please use dietpi-config at a later date to re-configure.\n\nIn relation to that, DietPi does not use "/etc/environment" anymore, thus it is cleaned. In case you manually edited it, a backup was created: /mnt/dietpi_userdata/environment.bak"
+		G_WHIP_MSG
+		#------------------------------------------------------------------------------
+		#Removed control from DietPi-Services: https://github.com/Fourdee/DietPi/issues/1501
+		systemctl enable dnsmasq &> /dev/null
+		systemctl enable openvpn &> /dev/null
+		systemctl start dnsmasq &> /dev/null
+		systemctl start openvpn &> /dev/null
+		#-------------------------------------------------------------------------------
+		#CertBot fixes: https://github.com/Fourdee/DietPi/issues/734#issuecomment-361774084
+		if [ -f /etc/letsencrypt/live/*/cert.pem ]; then
+
+			if (( $G_DISTRO > 3 )); then
+
+				if (( $(cat /DietPi/dietpi/.installed | grep -ci -m1 '^aSOFTWARE_INSTALL_STATE\[83\]=2') )); then
+
+					certbot renew --force-renewal -a webroot -w /var/www/ -i apache
+
+				elif (( $(cat /DietPi/dietpi/.installed | grep -ci -m1 '^aSOFTWARE_INSTALL_STATE\[85\]=2') )); then
+
+					certbot renew --force-renewal -a webroot -w /var/www/ -i nginx
+
+				elif (( $(cat /DietPi/dietpi/.installed | grep -ci -m1 '^aSOFTWARE_INSTALL_STATE\[158\]=2') )); then
+
+					certbot renew --force-renewal --preferred-challenges http
+
+				fi
+
+			else
+
+				[ -f /etc/cron.monthly/dietpi-letsencrypt ] && rm /etc/cron.monthly/dietpi-letsencrypt
+				cat << _EOF_ > /etc/cron.weekly/dietpi-letsencrypt
+#!/bin/bash
+{
+	#////////////////////////////////////
+	# DietPi-LetsEncrypt Autorenew script
+	#
+	#////////////////////////////////////
+	#
+	# Info:
+	# - Location /etc/cron.weekly/dietpi-letsencrypt
+	#
+	#////////////////////////////////////
+	#----------------------------------------------------------------
+	# Main Loop
+	#----------------------------------------------------------------
+
+	/etc/certbot_scripts/certbot-auto -q renew &>> /var/log/dietpi-letsencrypt.log &&
+	[ -f /home/minio-user/.minio/dietpi-cert-renewl.sh ] && /home/minio-user/.minio/dietpi-cert-renewl.sh
+
+	#----------------------------------------------------------------
+	exit
+	#----------------------------------------------------------------
+}
+_EOF_
+				chmod +x /etc/cron.weekly/dietpi-letsencrypt
+
+			fi
+
+		fi
+		#-------------------------------------------------------------------------------
+		#http://dietpi.com/phpbb/viewtopic.php?f=11&t=2772&p=10646#p10646
+		rm /etc/apt/sources.list.d/openmediavault.list &> /dev/null
+		#-------------------------------------------------------------------------------
+		#DietPi-Software removals: https://github.com/Fourdee/DietPi/issues/1491
+		if [ -f /DietPi/dietpi/.installed ]; then
+
+			sed -i '/^aSOFTWARE_INSTALL_STATE\[100\]=/c\aSOFTWARE_INSTALL_STATE\[100\]=0' /DietPi/dietpi/.installed #grashopper (now pijuice)
+			sed -i '/^aSOFTWARE_INSTALL_STATE\[106\]=/c\aSOFTWARE_INSTALL_STATE\[106\]=0' /DietPi/dietpi/.installed #raspcontrol (now ntp)
+			if (( $(grep -ci -m1 '^aSOFTWARE_INSTALL_STATE\[170\]=2' /DietPi/dietpi/.installed) )); then
+
+				sed -i '/^aSOFTWARE_INSTALL_STATE\[106\]=/c\aSOFTWARE_INSTALL_STATE\[106\]=2' /DietPi/dietpi/.installed #ntp (replaces raspcontrol)
+				sed -i '/^aSOFTWARE_INSTALL_STATE\[170\]=/c\aSOFTWARE_INSTALL_STATE\[170\]=0' /DietPi/dietpi/.installed #ntp (now 106)
+
+			fi
+
+		fi
+		#-------------------------------------------------------------------------------
+		#Nodered lacks homedir, create it: https://github.com/Fourdee/DietPi/issues/1446#issuecomment-366370800
+		if (( $(grep -ci -m1 '^nodered:' /etc/passwd) )) &&
+			[ ! -d /home/nodered ]; then
+
+			mkdir -p /home/nodered
+			chown -R nodered:nodered /home/nodered
+
+		fi
+		#-------------------------------------------------------------------------------
+		#Reinstalls:
+		#	NetData 1.9
+		#	Allo GUI update
+		if [ -f /DietPi/dietpi/.installed ]; then
+
+			/DietPi/dietpi/dietpi-software reinstall 65 160
 
 		fi
 		#-------------------------------------------------------------------------------

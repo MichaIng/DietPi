@@ -25,14 +25,14 @@
 	# - Exit DietPi-Config when going back to previous menu?
 	if [[ $2 =~ ^-?[0-9]+$ ]]; then
 		EXITONBACK=$2
-		TEXT_MENU_BACK="Exit"
+		TEXT_MENU_BACK='Exit'
 	fi
-
 	#Import DietPi-Globals ---------------------------------------------------------------
 	. /DietPi/dietpi/func/dietpi-globals
 	G_CHECK_ROOT_USER
 	G_CHECK_ROOTFS_RW
 	export G_PROGRAM_NAME='DietPi-Config'
+	G_INIT
 	#Import DietPi-Globals ---------------------------------------------------------------
 
 	#/////////////////////////////////////////////////////////////////////////////////////
@@ -70,10 +70,10 @@
 	#/////////////////////////////////////////////////////////////////////////////////////
 	# MENUS
 	#/////////////////////////////////////////////////////////////////////////////////////
-	TARGETMENUID=0
-	EXITONBACK=0
+	TARGETMENUID=${TARGETMENUID:=0}
+	EXITONBACK=${EXITONBACK:=0}
 
-	TEXT_MENU_BACK="Back"
+	TEXT_MENU_BACK=${TEXT_MENU_BACK:=Back}
 
 	WHIP_BACKTITLE='DietPi-Config'
 	WHIP_TITLE='DietPi-Config'
@@ -845,28 +845,27 @@
 		#RPI
 		elif (( $G_HW_MODEL < 10 )); then
 
-			#Get Current Values
 			local framebuffer_x=$(cat /DietPi/config.txt | grep -m1 'framebuffer'_width= | sed 's/.*=//')
 			local framebuffer_y=$(cat /DietPi/config.txt | grep -m1 'framebuffer'_height= | sed 's/.*=//')
-			local display_output_text="$framebuffer_x X $framebuffer_y"
+			local current_value=$(grep -m1 '^dtoverlay=vc4-' /DietPi/config.txt | sed 's/.*=//') #OpenGL check 1st
+			if [ -z "$current_value" ]; then
 
-			# - openGL detection
-			if (( $(cat /DietPi/config.txt | grep -ci -m1 '^dtoverlay=vc4-kms-v3d') )); then
+				# - FB
+				current_value="$framebuffer_x X $framebuffer_y"
 
-				display_output_text='OpenGL 1080p'
+				# - check for headless
+				if (( $(grep -ci -m1 'CONFIG_HDMI_OUTPUT=0' /DietPi/dietpi.txt) )); then
 
-			fi
+					current_value='Headless'
 
-			#check for headless
-			if (($(cat /DietPi/dietpi.txt | grep -ci -m1 'CONFIG_HDMI_OUTPUT=0') == 1)); then
-
-				display_output_text="Headless"
+				fi
 
 			fi
 
 			WHIP_TITLE='DietPi - Resolution'
-			OPTION=$(whiptail --title "$WHIP_TITLE" --menu " Hardware : $G_HW_MODEL_DESCRIPTION \n Current: $display_output_text" --cancel-button "$TEXT_MENU_BACK" 19 60 9 \
-			'OpenGL' '1920 x 1080' \
+			OPTION=$(whiptail --title "$WHIP_TITLE" --menu " Hardware : $G_HW_MODEL_DESCRIPTION \n Current: $current_value" --default-item "$current_value" --cancel-button "$TEXT_MENU_BACK" 19 60 9 \
+			'vc4-kms-v3d' 'OpenGL | 1920 x 1080' \
+			'vc4-fkms-v3d' 'OpenGL | 1920 x 1080' \
 			'1080p' '1920 x 1080' \
 			'720p' '1280 x 720' \
 			'480p' '854 x 480' \
@@ -898,13 +897,9 @@
 				# - Always disable OpenGL by default:
 				/DietPi/dietpi/func/dietpi-set_hardware rpi-opengl disable
 
-				if [ "$OPTION" = "OpenGL" ]; then
+				if [[ "$OPTION" = "vc4-"* ]]; then
 
-					/DietPi/dietpi/func/dietpi-set_hardware rpi-opengl enable
-
-					# - although not used, dietpi-config reads current resolution from these, so apply also.
-					sed -i '/framebuffer_width=/c\framebuffer_width=1920' /DietPi/config.txt
-					sed -i '/framebuffer_height=/c\framebuffer_height=1080' /DietPi/config.txt
+					/DietPi/dietpi/func/dietpi-set_hardware rpi-opengl $OPTION
 
 				elif [[ "$OPTION" = "sdtv_mode"* ]]; then
 
@@ -2276,19 +2271,32 @@
 
 			REBOOT_REQUIRED=1
 
-			dpkg-reconfigure locales
+			G_FILE_EXISTS /usr/share/i18n/SUPPORTED
 
-			local locale_new=$(grep -m1 '^LANG=' /etc/default/locale | sed 's/.*=//')
+			cat /usr/share/i18n/SUPPORTED | sed 's/#//g' | awk '{print $1}' | grep 'UTF-8' > /tmp/available_locale
+			local whiptail_menu_array=()
+			local index=0
+			#	convert for whiptail 0-1=1st option 2-3=2nd
+			while read line
+			do
 
-			#	Sanity, No result, revert back to default
-			if [ -z "$locale_new" ]; then
+				whiptail_menu_array[$index]="$line"
+				((index++))
+				whiptail_menu_array[$index]=''
+				((index++))
 
-				locale_new='en_GB.UTF-8'
+			done < /tmp/available_locale
+			rm /tmp/available_locale
+
+			OPTION=$(whiptail --title "Locale" --menu "Please select a system locale. DietPi will automatically apply this as the default locale:" --default-item "$(grep -m1 '^AUTO_SETUP_LOCALE=' /DietPi/dietpi.txt | sed 's/.*=//')" --cancel-button "$TEXT_MENU_BACK" 19 70 10 "${whiptail_menu_array[@]}" 3>&1 1>&2 2>&3)
+			CHOICE=$?
+			if (( $CHOICE == 0 )); then
+
+				/DietPi/dietpi/func/dietpi-set_software locale "$OPTION"
 
 			fi
 
-			# - Re-apply locale + auto install en_GB.UTF-8 alongside
-			/DietPi/dietpi/func/dietpi-set_software locale "$locale_new"
+			unset whiptail_menu_array
 
 			#Return to this menu
 			TARGETMENUID=7
@@ -3107,7 +3115,7 @@
 
 						if (( $CHOICE == 0 )); then
 
-							if (( G_HW_ARCH == 10 )); then
+							if (( $G_HW_ARCH == 10 )); then
 							# On amd64 images, IPv6 is no kernel module, but can be disabled via grub: https://github.com/Fourdee/DietPi/issues/1343#issuecomment-359652751
 
 								if (( ! $(grep -ci -m1 'ipv6.disable=1' /etc/default/grub) )); then
@@ -4611,6 +4619,7 @@ Custom     : Write = $CUSTOM_WRITE | Read = $CUSTOM_READ\
 					whiptail_menu_array+=("snd-soc-allo-piano-dac-plus" "Allo Piano DAC 2.1")
 					whiptail_menu_array+=("allo-cheapo-analogue" "Allo Cheapo (3.5mm / RCA output)")
 					whiptail_menu_array+=("allo-cheapo-optical" "Allo Cheapo (Optical output)")
+					whiptail_menu_array+=("usb-dac-1.1" "USB 1.1 Audio DAC (any)")
 
 				# - Asus tb
 				elif (( $G_HW_MODEL == 52 )); then

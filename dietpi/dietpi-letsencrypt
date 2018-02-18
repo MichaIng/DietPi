@@ -22,33 +22,33 @@
 	if [[ $1 =~ ^-?[0-9]+$ ]]; then
 		INPUT=$1
 	fi
-
 	#Import DietPi-Globals ---------------------------------------------------------------
 	. /DietPi/dietpi/func/dietpi-globals
 	G_CHECK_ROOT_USER
 	G_CHECK_ROOTFS_RW
 	export G_PROGRAM_NAME='DietPi-Letsencrypt'
+	G_INIT
 	#Import DietPi-Globals ---------------------------------------------------------------
 
 	#/////////////////////////////////////////////////////////////////////////////////////
 	#Globals
 	#/////////////////////////////////////////////////////////////////////////////////////
 	DP_LOGFILE="/var/log/dietpi-letsencrypt.log"
-	DP_MONTHLY_CRON="/etc/cron.monthly/dietpi-letsencrypt"
-	DP_LETSENCRYPT_BINARY="/usr/bin/certbot"
-	if (( $G_DISTRO < 4 )); then
-		DP_LETSENCRYPT_BINARY="/etc/certbot_scripts/certbot-auto"
-	fi
 	DP_WEBSERVER_INDEX=0 #0=apache2 1=lighttpd 2=nginx 3=minio
 
+	DP_CRON='/etc/systemd/system/certbot.service'
+	(( $G_DISTRO < 4 )) && DP_CRON='/etc/cron.weekly/dietpi-letsencrypt'
+
+	DP_LETSENCRYPT_BINARY="/usr/bin/certbot"
+	(( $G_DISTRO < 4 )) && DP_LETSENCRYPT_BINARY="/etc/certbot_scripts/certbot-auto"
+
 	LETSENCRYPT_INSTALLED=0
-	if [ -f "$DP_LETSENCRYPT_BINARY" ]; then
-		LETSENCRYPT_INSTALLED=1
-	fi
+	[ -f "$DP_LETSENCRYPT_BINARY" ] && LETSENCRYPT_INSTALLED=1
+
 	LETSENCRYPT_DOMAIN="mydomain.com"
 	LETSENCRYPT_EMAIL="myemail@email.com"
 	LETSENCRYPT_REDIRECT=0
-	LETSENCRYPT_AUTORENEW=0
+	LETSENCRYPT_HSTS=0
 	LETSENCRYPT_KEYSIZE=4096
 
 	Run_Lets_Encrypt(){
@@ -65,9 +65,6 @@
 
 			DP_WEBSERVER_INDEX=0
 			G_DIETPI-NOTIFY 0 "Apache2 webserver detected"
-			if (( $G_DISTRO >= 4 )); then
-				DP_LETSENCRYPT_BINARY="$DP_LETSENCRYPT_BINARY --apache"
-			fi
 
 		elif (( $(ps aux | grep -ci -m1 '[l]ighttpd') )); then
 
@@ -78,9 +75,6 @@
 
 			DP_WEBSERVER_INDEX=2
 			G_DIETPI-NOTIFY 0 "Nginx webserver detected"
-			if (( $G_DISTRO >= 4 )); then
-				DP_LETSENCRYPT_BINARY="$DP_LETSENCRYPT_BINARY --nginx"
-			fi
 
 		elif (( $(ps aux | grep -ci -m1 '[m]inio') )); then
 
@@ -107,6 +101,39 @@
 		else
 
 			#------------------------------------------------------------------------------------------------------
+			#ALL | Create cron job for cert renewal on Jessie only, as on Stretch+ it will be done via systemd service:
+			if (( $G_DISTRO < 4 )); then
+
+				cat << _EOF_ > "$DP_CRON"
+#!/bin/bash
+{
+	#////////////////////////////////////
+	# DietPi-LetsEncrypt Autorenew script
+	#
+	#////////////////////////////////////
+	#
+	# Info:
+	# - Location $DP_CRON
+	#
+	#////////////////////////////////////
+
+	#----------------------------------------------------------------
+	# Main Loop
+	#----------------------------------------------------------------
+
+	/etc/certbot_scripts/certbot-auto -q renew &>> $DP_LOGFILE &&
+	[ -f /home/minio-user/.minio/dietpi-cert-renewl.sh ] && /home/minio-user/.minio/dietpi-cert-renewl.sh
+
+	#----------------------------------------------------------------
+	exit
+	#----------------------------------------------------------------
+}
+_EOF_
+				chmod +x "$DP_CRON"
+
+			fi
+
+			#------------------------------------------------------------------------------------------------------
 			#apache2
 			if (( $DP_WEBSERVER_INDEX == 0 )); then
 
@@ -128,15 +155,14 @@
 				#Restart apache2 to apply ServerName changes.
 				systemctl restart apache2
 
-				local cli_redirect="--no-redirect"
-				if (( $LETSENCRYPT_REDIRECT )); then
-
-					cli_redirect="--redirect"
-
-				fi
+				local options='--apache'
+				#Use webroot authentication on Stretch+ for now: https://github.com/Fourdee/DietPi/issues/734#issuecomment-361774084
+				(( $G_DISTRO > 3 )) && options='-a webroot -w /var/www/ -i apache'
+				(( $LETSENCRYPT_REDIRECT )) && options+=' --redirect' || options+=' --no-redirect'
+				(( $LETSENCRYPT_HSTS )) && options+=' --hsts'
 
 				#Cert me up Apache2
-				$DP_LETSENCRYPT_BINARY --duplicate --agree-tos $cli_redirect --rsa-key-size $LETSENCRYPT_KEYSIZE --email $LETSENCRYPT_EMAIL -d $LETSENCRYPT_DOMAIN
+				$DP_LETSENCRYPT_BINARY $options --agree-tos --rsa-key-size "$LETSENCRYPT_KEYSIZE" -m "$LETSENCRYPT_EMAIL" -d "$LETSENCRYPT_DOMAIN"
 
 			#------------------------------------------------------------------------------------------------------
 			#Lighttpd
@@ -145,7 +171,7 @@
 				# - Cert me up
 				/DietPi/dietpi/dietpi-services stop
 
-				$DP_LETSENCRYPT_BINARY certonly --standalone --duplicate --agree-tos $cli_redirect --rsa-key-size $LETSENCRYPT_KEYSIZE --email $LETSENCRYPT_EMAIL -d $LETSENCRYPT_DOMAIN
+				$DP_LETSENCRYPT_BINARY certonly --standalone --agree-tos --rsa-key-size "$LETSENCRYPT_KEYSIZE" -m "$LETSENCRYPT_EMAIL" -d "$LETSENCRYPT_DOMAIN"
 
 				# - Create combined key
 				cd /etc/letsencrypt/live/"$LETSENCRYPT_DOMAIN"
@@ -196,16 +222,14 @@ _EOF_
 				#Restart nginx to apply ServerName changes.
 				systemctl restart nginx
 
-				local cli_redirect="--no-redirect"
-
-				if (( $LETSENCRYPT_REDIRECT )); then
-
-					cli_redirect="--redirect"
-
-				fi
+				local options='--nginx'
+				#Use webroot authentication on Stretch+ for now: https://github.com/Fourdee/DietPi/issues/734#issuecomment-361774084
+				(( $G_DISTRO > 3 )) && options='-a webroot -w /var/www/ -i nginx'
+				(( $LETSENCRYPT_REDIRECT )) && options+=' --redirect' || options+=' --no-redirect'
+				(( $LETSENCRYPT_HSTS )) && options+=' --hsts'
 
 				#Cert me up Nginx
-				$DP_LETSENCRYPT_BINARY --duplicate --agree-tos $cli_redirect --rsa-key-size $LETSENCRYPT_KEYSIZE --email $LETSENCRYPT_EMAIL -d $LETSENCRYPT_DOMAIN
+				$DP_LETSENCRYPT_BINARY $options --agree-tos --rsa-key-size "$LETSENCRYPT_KEYSIZE" -m "$LETSENCRYPT_EMAIL" -d "$LETSENCRYPT_DOMAIN"
 
 
 			#------------------------------------------------------------------------------------------------------
@@ -214,7 +238,7 @@ _EOF_
 				# - Cert me up
 				/DietPi/dietpi/dietpi-services stop
 
-				$DP_LETSENCRYPT_BINARY certonly --standalone --preferred-challenges tls-sni --staple-ocsp --agree-tos $cli_redirect --rsa-key-size $LETSENCRYPT_KEYSIZE --email $LETSENCRYPT_EMAIL -d $LETSENCRYPT_DOMAIN
+				$DP_LETSENCRYPT_BINARY certonly --standalone --staple-ocsp --agree-tos --rsa-key-size "$LETSENCRYPT_KEYSIZE" -m "$LETSENCRYPT_EMAIL" -d "$LETSENCRYPT_DOMAIN"
 
 				# Locate them correctly (THIS didn't work as symlinks)
 				cp /etc/letsencrypt/live/$LETSENCRYPT_DOMAIN/fullchain.pem /home/minio-user/.minio/certs/public.crt
@@ -253,46 +277,30 @@ chown minio-user:minio-user /home/minio-user/.minio/certs/private.key
 systemctl start minio.service
 _EOF_
 
-			# Change permissions on renewal script
-			chmod +x /home/minio-user/.minio/dietpi-cert-renewl.sh
-			fi
+				# Change permissions on renewal script
+				chmod +x /home/minio-user/.minio/dietpi-cert-renewl.sh
 
+				# Add Minio renewal to certbot system service:
+				if (( $G_DISTRO > 3 )); then
+
+					cat << _EOF_ > "$DP_CRON"
+[Unit]
+Description=Certbot
+Documentation=file:///usr/share/doc/python-certbot-doc/html/index.html
+Documentation=https://letsencrypt.readthedocs.io/en/latest/
+[Service]
+Type=oneshot
+ExecStart=/usr/bin/certbot -q renew && /home/minio-user/.minio/dietpi-cert-renewl.sh
+PrivateTmp=true
+_EOF_
+
+					chmod +x "$DP_CRON"
+
+				fi
+
+			fi
 
 			#------------------------------------------------------------------------------------------------------
-			#ALL | Create cron job
-			if (( $LETSENCRYPT_AUTORENEW && $G_DISTRO < 4 )); then
-
-				cat << _EOF_ > "$DP_MONTHLY_CRON"
-#!/bin/bash
-{
-	#////////////////////////////////////
-	# DietPi-LetsEncrypt Autorenew script
-	#
-	#////////////////////////////////////
-	#
-	# Info:
-	# - Location $DP_MONTHLY_CRON
-	#
-	#////////////////////////////////////
-
-	#----------------------------------------------------------------
-	# Main Loop
-	#----------------------------------------------------------------
-	/DietPi/dietpi/dietpi-letsencrypt 1 &>> $DP_LOGFILE
-
-	# Minio specific applications
-	if (( $(ps aux | grep -ci -m1 '[m]inio') )); then
-		/home/minio-user/.minio/dietpi-cert-renewl.sh
-	fi
-
-	#----------------------------------------------------------------
-	exit
-	#----------------------------------------------------------------
-}
-_EOF_
-				chmod +x "$DP_MONTHLY_CRON"
-
-			fi
 
 			if (( $INPUT == 0 )); then
 
@@ -321,7 +329,7 @@ _EOF_
 		LETSENCRYPT_DOMAIN=$(sed -n "$sed_index"p $DP_SETTINGS);((sed_index++))
 		LETSENCRYPT_EMAIL=$(sed -n "$sed_index"p $DP_SETTINGS);((sed_index++))
 		LETSENCRYPT_REDIRECT=$(sed -n "$sed_index"p $DP_SETTINGS);((sed_index++))
-		LETSENCRYPT_AUTORENEW=$(sed -n "$sed_index"p $DP_SETTINGS);((sed_index++))
+		LETSENCRYPT_HSTS=$(sed -n "$sed_index"p $DP_SETTINGS);((sed_index++))
 		LETSENCRYPT_KEYSIZE=$(sed -n "$sed_index"p $DP_SETTINGS);((sed_index++))
 
 	}
@@ -332,7 +340,7 @@ _EOF_
 $LETSENCRYPT_DOMAIN
 $LETSENCRYPT_EMAIL
 $LETSENCRYPT_REDIRECT
-$LETSENCRYPT_AUTORENEW
+$LETSENCRYPT_HSTS
 $LETSENCRYPT_KEYSIZE
 _EOF_
 
@@ -364,9 +372,9 @@ _EOF_
 	#TARGETMENUID=0
 	Menu_Main(){
 
-		local auto_renew_text="Disabled | Manual renewal every 90 days"
-		if (( $LETSENCRYPT_AUTORENEW )); then
-			auto_renew_text="Enabled | Automatic cron.monthly renewals"
+		local hsts_text="Disabled | No HTTP Strict Transport Security"
+		if (( $LETSENCRYPT_HSTS )); then
+			hsts_text="Enabled | HTTP Strict Transport Security"
 		fi
 
 		local redirect_text="Disabled | Allows http and https usage"
@@ -378,7 +386,7 @@ _EOF_
 		"Domain" ": $LETSENCRYPT_DOMAIN" \
 		"Email" ": $LETSENCRYPT_EMAIL" \
 		"Redirect" ": $redirect_text" \
-		"Auto Renew" ": $auto_renew_text" \
+		"HSTS" ": $hsts_text" \
 		"Key Size" ": $LETSENCRYPT_KEYSIZE" \
 		"Apply" "Runs Lets Encrypt with your chosen options." 3>&1 1>&2 2>&3)
 
@@ -401,10 +409,10 @@ _EOF_
 						LETSENCRYPT_KEYSIZE=2048
 					fi
 				;;
-				"Auto Renew")
-					((LETSENCRYPT_AUTORENEW++))
-					if (( $LETSENCRYPT_AUTORENEW > 1 )); then
-						LETSENCRYPT_AUTORENEW=0
+				"HSTS")
+					((LETSENCRYPT_HSTS++))
+					if (( $LETSENCRYPT_HSTS > 1 )); then
+						LETSENCRYPT_HSTS=0
 					fi
 				;;
 				Redirect)
