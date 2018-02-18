@@ -71,7 +71,7 @@
 
 	#Setup locale
 	# - Remove exisiting settings that will break dpkg-reconfigure
-	rm /etc/environment &> /dev/null
+	echo '' > /etc/environment
 	rm /etc/default/locale &> /dev/null
 
 	#	NB: DEV, any changes here must be also rolled into function '/DietPi/dietpi/func/dietpi-set_software locale', for future script use
@@ -88,11 +88,10 @@
 	fi
 
 	# - Update /etc/default/locales with new values (not effective until next load of bash session, eg: logout/in)
-	update-locale LANG="$INPUT_MODE_VALUE"
-	update-locale LANGUAGE="$INPUT_MODE_VALUE"
-	update-locale LC_CTYPE="$INPUT_MODE_VALUE"
-	update-locale LC_TIME="$INPUT_MODE_VALUE"
-	update-locale LC_ALL="$INPUT_MODE_VALUE"
+	update-locale LANG=en_GB.UTF-8
+	update-locale LC_CTYPE=en_GB.UTF-8
+	update-locale LC_TIME=en_GB.UTF-8
+	update-locale LC_ALL=en_GB.UTF-8
 
 	#Force en_GB Locale for rest of script. Prevents incorrect parsing with non-english locales.
 	export LC_ALL=en_GB.UTF-8
@@ -298,6 +297,7 @@
 		'62' 'NanoPi M3/T3'
 		'61' 'NanoPi M2/T2'
 		'60' 'NanoPi Neo'
+		'14' 'Odroid N1'
 		'13' 'Odroid U3'
 		'12' 'Odroid C2'
 		'11' 'Odroid XU3/4/HC1'
@@ -410,7 +410,7 @@
 	#	NB: Apt sources will get overwritten during 1st run, via boot script and dietpi.txt entry
 
 	#rm /etc/apt/sources.list.d/* &> /dev/null #Probably a bad idea
-	rm /etc/apt/sources.list.d/deb-multimedia.list &> /dev/null #meveric
+	#rm /etc/apt/sources.list.d/deb-multimedia.list &> /dev/null #meveric, already done above
 	rm /etc/apt/sources.list.d/openmediavault.list &> /dev/null #http://dietpi.com/phpbb/viewtopic.php?f=11&t=2772&p=10646#p10594
 	#rm /etc/apt/sources.list.d/armbian.list
 
@@ -502,7 +502,6 @@ _EOF_
 		'console-setup'		# DietPi-Config keyboard configuration
 		'cron'			# background job scheduler
 		'curl'			# Web address testing, downloading, uploading etc.
-		'dbus'			# System message bus
 		'debconf'		# APT package configuration, e.g. 'debconf-set-selections'
 		'dosfstools' 		# DietPi-Drive_Manager + fat (boot) drive file system check
 		'dphys-swapfile'	# Swap file management
@@ -580,8 +579,6 @@ _EOF_
 		(( $G_HW_MODEL != 20 )) && G_AGI firmware-linux-nonfree
 		grep 'vendor_id' /proc/cpuinfo | grep -qi 'intel' && G_AGI intel-microcode
 		grep 'vendor_id' /proc/cpuinfo | grep -qi 'amd' && G_AGI amd64-microcode
-		#aPACKAGES_REQUIRED_INSTALL+=('firmware-misc-nonfree')
-		#aPACKAGES_REQUIRED_INSTALL+=('dmidecode')
 
 		#	Grub EFI
 		if (( $(dpkg --get-selections | grep -ci -m1 '^grub-efi-amd64[[:space:]]') )) ||
@@ -606,6 +603,11 @@ _EOF_
 		G_AGI --reinstall libraspberrypi-bin libraspberrypi0 raspberrypi-bootloader raspberrypi-kernel
 		# Buster systemd-udevd doesn't support the current raspi-copies-and-fills: https://github.com/Fourdee/DietPi/issues/1286
 		(( $DISTRO_TARGET < 5 )) && G_AGI raspi-copies-and-fills
+
+	#	Odroid N1
+	elif (( $G_HW_MODEL == 14 )); then
+
+		G_AGI libdrm-rockchip1 #unsure if required yet...
 
 	#	Odroid C2
 	elif (( $G_HW_MODEL == 12 )); then
@@ -908,22 +910,6 @@ _EOF_
 	G_DIETPI-NOTIFY 2 "Generating DietPi /etc/fstab"
 
 	G_RUN_CMD /boot/dietpi/dietpi-drive_manager 4
-
-	# - HW Specific:
-	#	RPi requires PARTUUID for USB write: https://github.com/Fourdee/DietPi/issues/970
-	if (( $G_HW_MODEL < 10 )); then
-
-		PARTUUID_CURRENT=$(blkid /dev/mmcblk0p1 -s PARTUUID -o value)
-		UUID_CURRENT=$(blkid /dev/mmcblk0p1 -s UUID -o value)
-		sed -i "s#^UUID=$UUID_CURRENT#PARTUUID=$PARTUUID_CURRENT#g" /etc/fstab
-
-		PARTUUID_CURRENT=$(blkid /dev/mmcblk0p2 -s PARTUUID -o value)
-		UUID_CURRENT=$(blkid /dev/mmcblk0p2 -s UUID -o value)
-		sed -i "s#^UUID=$UUID_CURRENT#PARTUUID=$PARTUUID_CURRENT#g" /etc/fstab
-
-		systemctl daemon-reload
-
-	fi
 
 	G_DIETPI-NOTIFY 2 "Starting DietPi-RAMdisk service"
 
