@@ -1260,7 +1260,6 @@ _EOF_
 
 	G_DIETPI-NOTIFY 2 'Generating dietpi-fs_partition_resize for first boot'
 
-	#??? BBB skip this???
 	cat << _EOF_ > /etc/systemd/system/dietpi-fs_partition_resize.service
 [Unit]
 Description=dietpi-fs_partition_resize
@@ -1345,6 +1344,17 @@ _EOF_
 	# systemctl start dietpi-fs_partition_resize.service
 	# systemctl status dietpi-fs_partition_resize.service -l
 	# cat /var/tmp/dietpi/logs/fs_partition_resize.log
+
+	# - BBB remove fsexpansion: https://github.com/Fourdee/DietPi/issues/931#issuecomment-345451529
+	if (( $G_HW_MODEL == 71 )); then
+
+		rm /etc/systemd/system/dietpi-fs_expand.service
+		rm /var/lib/dietpi/fs_partition_resize.sh
+		rm /etc/systemd/system/dietpi-fs_partition_resize.service
+		systemctl daemon-reload
+
+	fi
+
 
 	G_DIETPI-NOTIFY 2 'Storing DietPi version ID'
 
