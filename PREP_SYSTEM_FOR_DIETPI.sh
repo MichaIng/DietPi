@@ -995,6 +995,15 @@ _EOF_
 	# - Disable serial console
 	/DietPi/dietpi/func/dietpi-set_hardware serialconsole disable
 
+	G_DIETPI-NOTIFY 2 "Reducing getty count and resource usage:"
+
+	for ((i=2; i<=6; i++))
+	do
+
+		systemctl mask getty@tty$i
+
+	done
+
 	G_DIETPI-NOTIFY 2 "Configuring ntpd:"
 
 	systemctl disable systemd-timesyncd
