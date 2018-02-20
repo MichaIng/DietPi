@@ -63,11 +63,19 @@
 	unset a_MIN_APT_PREREQS
 
 	# - Wget prefer IPv4
-	grep -q '^[[:blank:]]*prefer-family =' /etc/wgetrc &&
-	sed -i '/^[[:blank:]]*prefer-family =/c\prefer-family = IPv4' /etc/wgetrc ||
-	grep -q '^[[:blank:]#;]*prefer-family =' /etc/wgetrc &&
-	sed -i '/^[[:blank:]#;]*prefer-family =/c\prefer-family = IPv4' /etc/wgetrc ||
-	echo 'prefer-family = IPv4' >> /etc/wgetrc
+	if grep -q '^[[:blank:]]*prefer-family =' /etc/wgetrc; then
+
+		sed -i '/^[[:blank:]]*prefer-family =/c\prefer-family = IPv4' /etc/wgetrc
+
+	elif grep -q '^[[:blank:]#;]*prefer-family =' /etc/wgetrc; then
+
+		sed -i '/^[[:blank:]#;]*prefer-family =/c\prefer-family = IPv4' /etc/wgetrc
+
+	else
+
+		echo 'prefer-family = IPv4' >> /etc/wgetrc
+
+	fi
 
 	#Setup locale
 	# - Remove exisiting settings that will break dpkg-reconfigure
