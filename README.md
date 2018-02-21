@@ -149,8 +149,8 @@ PHPBB
 Apache2
 - https://github.com/apache
 
-MySql
-- https://github.com/mysql
+MariaDB
+- https://github.com/MariaDB
 
 PHP
 - http://git.php.net/
