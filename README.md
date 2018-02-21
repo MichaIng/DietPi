@@ -29,7 +29,7 @@ Creator, programmer and project lead of DietPi.
 
 Current contributors:
 * MichaIng - Joined Q3 2017
-Source code contributor, bug fixes, software improvements.
+Source code contributor, bug fixes, software improvements, DietPi forum co-administrator.
 * JohnVick - Joined 08/06/2016 - 
 DietPi forum co-administrator, including managment, support, testing and valuable feedback
 * K-Plan - Joined 01/01/2016 -
@@ -116,8 +116,8 @@ Raspberry Pi
 Odroid
 - https://github.com/hardkernel?tab=repositories
 
-Orange Pi
-- https://github.com/orangepi-xunlong?tab=repositories
+FriendlyARM 
+- https://github.com/friendlyarm?tab=repositories
 
 LXDE
 - https://github.com/LXDE
@@ -152,7 +152,7 @@ Apache2
 MySql
 - https://github.com/mysql
 
-Php5
+PHP
 - http://git.php.net/
 
 PhpMyAdmin
@@ -170,8 +170,8 @@ NoIp2 Client Binary
 RetroPie Setup Script
 - https://github.com/petrockblog/RetroPie-Setup
 
-SoftEther VPN Server
-- https://github.com/SoftEtherVPN
+PiVPN  VPN Server
+- https://github.com/pivpn/pivpn
 
 OpenTyrian
 - https://bitbucket.org/opentyrian/opentyrian/wiki/Home
@@ -212,5 +212,5 @@ Lets Encrypt
 Shairport-Sync
 - https://github.com/mikebrady/shairport-sync
 
-ARMbian Build Tools:
-- https://github.com/igorpecovnik/lib
+OpenVPN
+- https://github.com/OpenVPN
