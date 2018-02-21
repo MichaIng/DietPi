@@ -30,7 +30,7 @@ Creator, programmer and project lead of DietPi.
 Current contributors:
 * MichaIng - Joined Q3 2017
 Source code contributor, bug fixes, software improvements.
-* JohnVick - Joined 08/06/2016 - 
+* JohnVick - Joined 08/06/2016 -
 DietPi forum co-administrator, including managment, support, testing and valuable feedback
 * K-Plan - Joined 01/01/2016 -
 Contributions to the DietPi in general, including In-depth testing, bug finding and valuable feedback. Forum moderator.
@@ -211,6 +211,3 @@ Lets Encrypt
 
 Shairport-Sync
 - https://github.com/mikebrady/shairport-sync
-
-ARMbian Build Tools:
-- https://github.com/igorpecovnik/lib
