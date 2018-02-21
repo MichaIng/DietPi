@@ -420,7 +420,9 @@
 	#rm /etc/apt/sources.list.d/* &> /dev/null #Probably a bad idea
 	#rm /etc/apt/sources.list.d/deb-multimedia.list &> /dev/null #meveric, already done above
 	rm /etc/apt/sources.list.d/openmediavault.list &> /dev/null #http://dietpi.com/phpbb/viewtopic.php?f=11&t=2772&p=10646#p10594
-	#rm /etc/apt/sources.list.d/armbian.list
+
+	#	Remove any existing apt recommends settings, defaults to "yes", allows us to manually --no-install-recommends as needed: https://github.com/Fourdee/DietPi/issues/1482#issuecomment-366971700
+	rm /etc/apt/apt.conf.d/*recommends*
 
 	G_DIETPI-NOTIFY 2 "Setting APT sources.list: $DISTRO_TARGET_NAME $DISTRO_TARGET"
 
