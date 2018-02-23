@@ -34,7 +34,6 @@
 	#Globals
 	#/////////////////////////////////////////////////////////////////////////////////////
 	DP_LOGFILE="/var/log/dietpi-letsencrypt.log"
-	DP_WEBSERVER_INDEX=0 #0=apache2 1=lighttpd 2=nginx 3=minio
 
 	DP_CRON='/etc/systemd/system/certbot.service'
 	(( $G_DISTRO < 4 )) && DP_CRON='/etc/cron.weekly/dietpi-letsencrypt'
@@ -53,58 +52,13 @@
 
 	Run_Lets_Encrypt(){
 
-		G_DIETPI-NOTIFY 3 "$PROGRAM_NAME" "Running cert"
+		G_DIETPI-NOTIFY 3 "$PROGRAM_NAME" "Running CertBot"
 
-		#Conditions that must be met before allowing run
-		local run_conditions_met=1
+		#------------------------------------------------------------------------------------------------------
+		#ALL | Create cron job for cert renewal on Jessie only, as on Stretch+ it will be done via systemd service:
+		if (( $G_DISTRO < 4 )); then
 
-		/DietPi/dietpi/dietpi-services start
-
-		# - Obtain installed and running webserver index
-		if (( $(ps aux | grep -ci -m1 '[a]pache') )); then
-
-			DP_WEBSERVER_INDEX=0
-			G_DIETPI-NOTIFY 0 "Apache2 webserver detected"
-
-		elif (( $(ps aux | grep -ci -m1 '[l]ighttpd') )); then
-
-			DP_WEBSERVER_INDEX=1
-			G_DIETPI-NOTIFY 0 "Lighttpd webserver detected"
-
-		elif (( $(ps aux | grep -ci -m1 '[n]ginx') )); then
-
-			DP_WEBSERVER_INDEX=2
-			G_DIETPI-NOTIFY 0 "Nginx webserver detected"
-
-		elif (( $(ps aux | grep -ci -m1 '[m]inio') )); then
-
-			DP_WEBSERVER_INDEX=3
-			G_DIETPI-NOTIFY 0 "Minio S3 server detected"
-
-		else
-
-			run_conditions_met=0
-
-		fi
-
-		#Failed. No compatible webserver is currently running
-		if (( ! $run_conditions_met )); then
-
-			echo -e "Error: No compatible and/or active webserver was found. Aborting." >> "$DP_LOGFILE"
-			if (( $INPUT == 0 )); then
-
-				whiptail --title "Error" --msgbox "Error: No compatible and/or active webserver was found. Aborting." --backtitle "$PROGRAM_NAME" 8 60
-
-			fi
-
-		#Cert up
-		else
-
-			#------------------------------------------------------------------------------------------------------
-			#ALL | Create cron job for cert renewal on Jessie only, as on Stretch+ it will be done via systemd service:
-			if (( $G_DISTRO < 4 )); then
-
-				cat << _EOF_ > "$DP_CRON"
+			cat << _EOF_ > "$DP_CRON"
 #!/bin/bash
 {
 	#////////////////////////////////////
@@ -121,63 +75,85 @@
 	# Main Loop
 	#----------------------------------------------------------------
 
-	/etc/certbot_scripts/certbot-auto -q renew &>> $DP_LOGFILE &&
-	[ -f /home/minio-user/.minio/dietpi-cert-renewl.sh ] && /home/minio-user/.minio/dietpi-cert-renewl.sh
+	/etc/certbot_scripts/certbot-auto -q renew &>> $DP_LOGFILE
+	[ -f /home/minio-user/.minio/dietpi-cert-renewl.sh ] && /home/minio-user/.minio/dietpi-cert-renewl.sh &>> $DP_LOGFILE
+	[ -f /etc/letsencrypt/live/$LETSENCRYPT_DOMAIN/combined.pem ] &&
+	cat /etc/letsencrypt/live/$LETSENCRYPT_DOMAIN/privkey.pem /etc/letsencrypt/live/$LETSENCRYPT_DOMAIN/combined.pem/cert.pem > /etc/letsencrypt/live/$LETSENCRYPT_DOMAIN/combined.pem &>> $DP_LOGFILE
 
 	#----------------------------------------------------------------
 	exit
 	#----------------------------------------------------------------
 }
 _EOF_
+			chmod +x "$DP_CRON"
+
+		fi
+
+		#------------------------------------------------------------------------------------------------------
+		#apache2
+		if (( $(ps aux | grep -ci -m1 '[a]pache') )); then
+
+			G_DIETPI-NOTIFY 0 "Apache2 webserver detected"
+			local dp_defaultsite="/etc/apache2/sites-available/000-default.conf"
+
+			#Add ServerName if it doesnt exist. This is required to prevent letsencrypt compaining about vhost with no domain.
+			if (( ! $(cat "$dp_defaultsite" | grep -ci -m1 'ServerName') )); then
+
+				sed -i "/ServerAdmin /a ServerName" "$dp_defaultsite"
+
+				#log
+				echo -e "ServerName entry not found in $dp_defaultsite. Adding it now." >> "$DP_LOGFILE"
+
+			fi
+
+			#Apply domain name
+			sed -i "/ServerName/c\        ServerName $LETSENCRYPT_DOMAIN" "$dp_defaultsite"
+
+			#Restart apache2 to apply ServerName changes.
+			systemctl restart apache2
+
+			local options='--apache'
+			#Use webroot authentication on Stretch+ for now: https://github.com/Fourdee/DietPi/issues/734#issuecomment-361774084
+			(( $G_DISTRO > 3 )) && options='-a webroot -w /var/www/ -i apache'
+			(( $LETSENCRYPT_REDIRECT )) && options+=' --redirect' || options+=' --no-redirect'
+			(( $LETSENCRYPT_HSTS )) && options+=' --hsts'
+
+			#Cert me up Apache2
+			$DP_LETSENCRYPT_BINARY $options --agree-tos --rsa-key-size "$LETSENCRYPT_KEYSIZE" -m "$LETSENCRYPT_EMAIL" -d "$LETSENCRYPT_DOMAIN"
+
+		#------------------------------------------------------------------------------------------------------
+		#Lighttpd
+		elif (( $(ps aux | grep -ci -m1 '[l]ighttpd') )); then
+
+			G_DIETPI-NOTIFY 0 "Lighttpd webserver detected"
+			# - Cert me up
+			/DietPi/dietpi/dietpi-services stop
+
+			$DP_LETSENCRYPT_BINARY certonly --standalone --agree-tos --rsa-key-size "$LETSENCRYPT_KEYSIZE" -m "$LETSENCRYPT_EMAIL" -d "$LETSENCRYPT_DOMAIN"
+
+			# - Create combined key
+			cd /etc/letsencrypt/live/"$LETSENCRYPT_DOMAIN"
+			cat privkey.pem cert.pem > combined.pem
+
+			# Add Lighttpd renewal to certbot system service:
+			if (( $G_DISTRO > 3 )); then
+
+				cat << _EOF_ > "$DP_CRON"
+[Unit]
+Description=Certbot
+Documentation=file:///usr/share/doc/python-certbot-doc/html/index.html
+Documentation=https://letsencrypt.readthedocs.io/en/latest/
+[Service]
+Type=oneshot
+ExecStart=/usr/bin/certbot -q renew && cat /etc/letsencrypt/live/$LETSENCRYPT_DOMAIN/privkey.pem /etc/letsencrypt/live/$LETSENCRYPT_DOMAIN/combined.pem/cert.pem > /etc/letsencrypt/live/$LETSENCRYPT_DOMAIN/combined.pem &>> $DP_LOGFILE
+PrivateTmp=true
+_EOF_
+
 				chmod +x "$DP_CRON"
 
 			fi
 
-			#------------------------------------------------------------------------------------------------------
-			#apache2
-			if (( $DP_WEBSERVER_INDEX == 0 )); then
-
-				local dp_defaultsite="/etc/apache2/sites-available/000-default.conf"
-
-				#Add ServerName if it doesnt exist. This is required to prevent letsencrypt compaining about vhost with no domain.
-				if (( ! $(cat "$dp_defaultsite" | grep -ci -m1 'ServerName') )); then
-
-					sed -i "/ServerAdmin /a ServerName" "$dp_defaultsite"
-
-					#log
-					echo -e "ServerName entry not found in $dp_defaultsite. Adding it now." >> "$DP_LOGFILE"
-
-				fi
-
-				#Apply domain name
-				sed -i "/ServerName/c\        ServerName $LETSENCRYPT_DOMAIN" "$dp_defaultsite"
-
-				#Restart apache2 to apply ServerName changes.
-				systemctl restart apache2
-
-				local options='--apache'
-				#Use webroot authentication on Stretch+ for now: https://github.com/Fourdee/DietPi/issues/734#issuecomment-361774084
-				(( $G_DISTRO > 3 )) && options='-a webroot -w /var/www/ -i apache'
-				(( $LETSENCRYPT_REDIRECT )) && options+=' --redirect' || options+=' --no-redirect'
-				(( $LETSENCRYPT_HSTS )) && options+=' --hsts'
-
-				#Cert me up Apache2
-				$DP_LETSENCRYPT_BINARY $options --agree-tos --rsa-key-size "$LETSENCRYPT_KEYSIZE" -m "$LETSENCRYPT_EMAIL" -d "$LETSENCRYPT_DOMAIN"
-
-			#------------------------------------------------------------------------------------------------------
-			#Lighttpd
-			elif (( $DP_WEBSERVER_INDEX == 1 )); then
-
-				# - Cert me up
-				/DietPi/dietpi/dietpi-services stop
-
-				$DP_LETSENCRYPT_BINARY certonly --standalone --agree-tos --rsa-key-size "$LETSENCRYPT_KEYSIZE" -m "$LETSENCRYPT_EMAIL" -d "$LETSENCRYPT_DOMAIN"
-
-				# - Create combined key
-				cd /etc/letsencrypt/live/"$LETSENCRYPT_DOMAIN"
-				cat privkey.pem cert.pem > combined.pem
-
-				cat << _EOF_ > /etc/lighttpd/conf-enabled/letsencrypt.conf
+			cat << _EOF_ > /etc/lighttpd/conf-enabled/letsencrypt.conf
 \$SERVER["socket"] == ":443" {
 		ssl.engine = "enable"
 		ssl.pemfile = "/etc/letsencrypt/live/$LETSENCRYPT_DOMAIN/combined.pem"
@@ -190,11 +166,11 @@ _EOF_
 }
 _EOF_
 
-				#Redirect
-				rm /etc/lighttpd/conf-enabled/redirect.conf
-				if (( $LETSENCRYPT_REDIRECT )); then
+			# Redirect
+			rm /etc/lighttpd/conf-enabled/redirect.conf
+			if (( $LETSENCRYPT_REDIRECT )); then
 
-					cat << _EOF_ > /etc/lighttpd/conf-enabled/redirect.conf
+				cat << _EOF_ > /etc/lighttpd/conf-enabled/redirect.conf
 \$HTTP["scheme"] == "http" {
 	# capture vhost name with regex conditiona -> %0 in redirect pattern
 	# must be the most inner block to the redirect rule
@@ -204,63 +180,78 @@ _EOF_
 }
 _EOF_
 
-				fi
+			fi
 
-				/etc/init.d/lighttpd force-reload
+			# HSTS
+			if (( $LETSENCRYPT_HSTS )); then
 
+				G_CONFIG_INJECT '"mod_setenv"' '\t"mod_setenv",' /etc/lighttpd/lighttpd.conf 'server.modules = ('
+				cat << _EOF_ > /etc/lighttpd/conf-available/99-dietpi-hsts.conf
+$HTTP["scheme"] == "https" {
+	setenv.add-response-header = ( "Strict-Transport-Security" => "max-age=31536000; includeSubdomains; preload;" )
+}
+_EOF_
 
-			#------------------------------------------------------------------------------------------------------
-			# Nginx
+			fi
+			lighttpd-enable-mod dietpi-hsts
 
-			elif (( $DP_WEBSERVER_INDEX == 2 )); then
-
-				local nginx_defaultsite="/etc/nginx/sites-available/default"
-
-				# Apply domain name
-				sed -i "/server_name/c\        server_name $LETSENCRYPT_DOMAIN;" "$nginx_defaultsite"
-
-				#Restart nginx to apply ServerName changes.
-				systemctl restart nginx
-
-				local options='--nginx'
-				#Use webroot authentication on Stretch+ for now: https://github.com/Fourdee/DietPi/issues/734#issuecomment-361774084
-				(( $G_DISTRO > 3 )) && options='-a webroot -w /var/www/ -i nginx'
-				(( $LETSENCRYPT_REDIRECT )) && options+=' --redirect' || options+=' --no-redirect'
-				(( $LETSENCRYPT_HSTS )) && options+=' --hsts'
-
-				#Cert me up Nginx
-				$DP_LETSENCRYPT_BINARY $options --agree-tos --rsa-key-size "$LETSENCRYPT_KEYSIZE" -m "$LETSENCRYPT_EMAIL" -d "$LETSENCRYPT_DOMAIN"
+			/etc/init.d/lighttpd force-reload
 
 
-			#------------------------------------------------------------------------------------------------------
-			#Minio
-			elif (( $DP_WEBSERVER_INDEX == 3 )); then
-				# - Cert me up
-				/DietPi/dietpi/dietpi-services stop
+		#------------------------------------------------------------------------------------------------------
+		# Nginx
+		elif (( $(ps aux | grep -ci -m1 '[n]ginx') )); then
 
-				$DP_LETSENCRYPT_BINARY certonly --standalone --staple-ocsp --agree-tos --rsa-key-size "$LETSENCRYPT_KEYSIZE" -m "$LETSENCRYPT_EMAIL" -d "$LETSENCRYPT_DOMAIN"
+			G_DIETPI-NOTIFY 0 "Nginx webserver detected"
+			local nginx_defaultsite="/etc/nginx/sites-available/default"
 
-				# Ensure strict permissions at all time:
-				umask 077
+			# Apply domain name
+			sed -i "/server_name/c\        server_name $LETSENCRYPT_DOMAIN;" "$nginx_defaultsite"
 
-				# Locate them correctly (THIS didn't work as symlinks)
-				cp /etc/letsencrypt/live/$LETSENCRYPT_DOMAIN/fullchain.pem /home/minio-user/.minio/certs/public.crt
-				cp /etc/letsencrypt/live/$LETSENCRYPT_DOMAIN/privkey.pem /home/minio-user/.minio/certs/private.key
+			#Restart nginx to apply ServerName changes.
+			systemctl restart nginx
 
-				# Own those certs!
-				chown minio-user:minio-user /home/minio-user/.minio/certs/public.crt \
-					/home/minio-user/.minio/certs/private.key
-				chmod 400 /home/minio-user/.minio/certs/public.crt \
-					/home/minio-user/.minio/certs/private.key
+			local options='--nginx'
+			#Use webroot authentication on Stretch+ for now: https://github.com/Fourdee/DietPi/issues/734#issuecomment-361774084
+			(( $G_DISTRO > 3 )) && options='-a webroot -w /var/www/ -i nginx'
+			(( $LETSENCRYPT_REDIRECT )) && options+=' --redirect' || options+=' --no-redirect'
+			(( $LETSENCRYPT_HSTS )) && options+=' --hsts'
 
-				# Add SSL to config file
-				G_CONFIG_INJECT 'MINIO_OPTS="' 'MINIO_OPTS="--address :443"' /etc/default/minio
+			#Cert me up Nginx
+			$DP_LETSENCRYPT_BINARY $options --agree-tos --rsa-key-size "$LETSENCRYPT_KEYSIZE" -m "$LETSENCRYPT_EMAIL" -d "$LETSENCRYPT_DOMAIN"
 
-				# Allow SSL binding for non root user
-				setcap CAP_NET_BIND_SERVICE=+eip /usr/local/bin/minio
 
-				# Create renewl script
-				cat << _EOF_ > /home/minio-user/.minio/dietpi-cert-renewl.sh
+		#------------------------------------------------------------------------------------------------------
+		#Minio
+		elif (( $(ps aux | grep -ci -m1 '[m]inio') )); then
+
+			G_DIETPI-NOTIFY 0 "Minio S3 server detected"
+			# - Cert me up
+			/DietPi/dietpi/dietpi-services stop
+
+			$DP_LETSENCRYPT_BINARY certonly --standalone --staple-ocsp --agree-tos --rsa-key-size "$LETSENCRYPT_KEYSIZE" -m "$LETSENCRYPT_EMAIL" -d "$LETSENCRYPT_DOMAIN"
+
+			# Ensure strict permissions at all time:
+			umask 077
+
+			# Locate them correctly (THIS didn't work as symlinks)
+			cp /etc/letsencrypt/live/$LETSENCRYPT_DOMAIN/fullchain.pem /home/minio-user/.minio/certs/public.crt
+			cp /etc/letsencrypt/live/$LETSENCRYPT_DOMAIN/privkey.pem /home/minio-user/.minio/certs/private.key
+
+			# Own those certs!
+			chown minio-user:minio-user /home/minio-user/.minio/certs/public.crt \
+				/home/minio-user/.minio/certs/private.key
+			chmod 400 /home/minio-user/.minio/certs/public.crt \
+				/home/minio-user/.minio/certs/private.key
+
+			# Add SSL to config file
+			G_CONFIG_INJECT 'MINIO_OPTS="' 'MINIO_OPTS="--address :443"' /etc/default/minio
+
+			# Allow SSL binding for non root user
+			setcap CAP_NET_BIND_SERVICE=+eip /usr/local/bin/minio
+
+			# Create renewl script
+			cat << _EOF_ > /home/minio-user/.minio/dietpi-cert-renewl.sh
 # Minio only works with copied and owned certs. Upon renewal the new certs needs to be copied and re-owned
 systemctl stop minio.service
 
@@ -280,43 +271,50 @@ chmod 400 /home/minio-user/.minio/certs/public.crt \
 systemctl start minio.service
 _EOF_
 
-				# Change permissions on renewal script
-				chmod +x /home/minio-user/.minio/dietpi-cert-renewl.sh
+			# Change permissions on renewal script
+			chmod +x /home/minio-user/.minio/dietpi-cert-renewl.sh
 
-				# Add Minio renewal to certbot system service:
-				if (( $G_DISTRO > 3 )); then
+			# Add Minio renewal to certbot system service:
+			if (( $G_DISTRO > 3 )); then
 
-					cat << _EOF_ > "$DP_CRON"
+				cat << _EOF_ > "$DP_CRON"
 [Unit]
 Description=Certbot
 Documentation=file:///usr/share/doc/python-certbot-doc/html/index.html
 Documentation=https://letsencrypt.readthedocs.io/en/latest/
 [Service]
 Type=oneshot
-ExecStart=/usr/bin/certbot -q renew && /home/minio-user/.minio/dietpi-cert-renewl.sh
+ExecStart=/usr/bin/certbot -q renew && /home/minio-user/.minio/dietpi-cert-renewl.sh &>> $DP_LOGFILE
 PrivateTmp=true
 _EOF_
 
-					chmod +x "$DP_CRON"
-
-				fi
+				chmod +x "$DP_CRON"
 
 			fi
 
-			#------------------------------------------------------------------------------------------------------
+		else
 
+			echo -e "Error: No compatible and/or active webserver was found. Aborting." >> "$DP_LOGFILE"
 			if (( $INPUT == 0 )); then
 
-				echo -e ""
-				read -p "Press any key to continue..."
-				echo -e ""
+				whiptail --title "Error" --msgbox "Error: No compatible and/or active webserver was found. Aborting." --backtitle "$PROGRAM_NAME" 8 60
 
 			fi
 
-			#Restart services
-			/DietPi/dietpi/dietpi-services restart
+		fi
+
+		#------------------------------------------------------------------------------------------------------
+
+		if (( $INPUT == 0 )); then
+
+			echo -e ""
+			read -p "Press any key to continue..."
+			echo -e ""
 
 		fi
+
+		#Restart services
+		/DietPi/dietpi/dietpi-services restart
 
 	}
 
