@@ -421,9 +421,6 @@
 	#rm /etc/apt/sources.list.d/deb-multimedia.list &> /dev/null #meveric, already done above
 	rm /etc/apt/sources.list.d/openmediavault.list &> /dev/null #http://dietpi.com/phpbb/viewtopic.php?f=11&t=2772&p=10646#p10594
 
-	#	Remove any existing apt recommends settings, defaults to "yes", allows us to manually --no-install-recommends as needed: https://github.com/Fourdee/DietPi/issues/1482#issuecomment-366971700
-	rm /etc/apt/apt.conf.d/*recommends*
-
 	G_DIETPI-NOTIFY 2 "Setting APT sources.list: $DISTRO_TARGET_NAME $DISTRO_TARGET"
 
 	# - Set raspbian
@@ -477,6 +474,9 @@ _EOF_
 
 	# - @MichaIng https://github.com/Fourdee/DietPi/pull/1266/files
 	G_DIETPI-NOTIFY 2 "Temporary disable automatic recommends/suggests installation and allow them to be autoremoved:"
+
+	#	Remove any existing apt recommends settings
+	rm /etc/apt/apt.conf.d/*recommends*
 
 	export G_ERROR_HANDLER_COMMAND='/etc/apt/apt.conf.d/99-dietpi-norecommends'
 	cat << _EOF_ > $G_ERROR_HANDLER_COMMAND
@@ -759,10 +759,17 @@ _EOF_
 
 	G_AGI $INSTALL_PACKAGES
 
-	# - @MichaIng https://github.com/Fourdee/DietPi/pull/1266/files
-	G_DIETPI-NOTIFY 2 "Returning installation of recommends back to default"
+	G_DIETPI-NOTIFY 2 "Applying default DietPi configuration for APT"
 
-	G_RUN_CMD rm /etc/apt/apt.conf.d/99-dietpi-norecommends
+	export G_ERROR_HANDLER_COMMAND='/etc/apt/apt.conf.d/99-dietpi-norecommends'
+	cat << _EOF_ > $G_ERROR_HANDLER_COMMAND
+APT::Install-Recommends "false";
+APT::Install-Suggests "false";
+#APT::AutoRemove::RecommendsImportant "false";
+#APT::AutoRemove::SuggestsImportant "false";
+_EOF_
+	export G_ERROR_HANDLER_EXITCODE=$?
+	G_ERROR_HANDLER
 
 	G_DIETPI-NOTIFY 2 "Purging APT with autoremoval (in case of DISTRO upgrade/downgrade):"
 
