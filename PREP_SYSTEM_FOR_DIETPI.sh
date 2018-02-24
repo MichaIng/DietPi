@@ -758,8 +758,8 @@ _EOF_
 	G_AGDUG
 
 	# - Distro is now target (for APT purposes and G_AGX support due to installed binary, its here, instead of after G_AGUP)
-	G_DISTRO=$DISTRO_TARGET
-	G_DISTRO_NAME=$DISTRO_TARGET_NAME
+	export G_DISTRO=$DISTRO_TARGET
+	export G_DISTRO_NAME=$DISTRO_TARGET_NAME
 
 	G_DIETPI-NOTIFY 2 "Disabling swapfile generation for dphys-swapfile during install"
 
