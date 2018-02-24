@@ -461,6 +461,9 @@ _EOF_
 
 	fi
 
+	# - Meveric, update repo to use our EU mirror: https://github.com/Fourdee/DietPi/issues/1519#issuecomment-368234302
+	sed -i 's@https://oph.mdrjr.net/meveric@http://fuzon.co.uk/meveric@' /etc/apt/sources.list.d/meveric* &> /dev/null
+
 	G_DIETPI-NOTIFY 2 "Updating APT for $DISTRO_TARGET_NAME:"
 
 	G_RUN_CMD apt-get clean
