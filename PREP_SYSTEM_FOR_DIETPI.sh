@@ -165,19 +165,19 @@
 	G_HW_ARCH_DESCRIPTION=$(uname -m)
 	if [ "$G_HW_ARCH_DESCRIPTION" = "armv6l" ]; then
 
-		G_HW_ARCH=1
+		export G_HW_ARCH=1
 
 	elif [ "$G_HW_ARCH_DESCRIPTION" = "armv7l" ]; then
 
-		G_HW_ARCH=2
+		export G_HW_ARCH=2
 
 	elif [ "$G_HW_ARCH_DESCRIPTION" = "aarch64" ]; then
 
-		G_HW_ARCH=3
+		export G_HW_ARCH=3
 
 	elif [ "$G_HW_ARCH_DESCRIPTION" = "x86_64" ]; then
 
-		G_HW_ARCH=10
+		export G_HW_ARCH=10
 
 	else
 
@@ -333,7 +333,8 @@
 	)
 
 	Run_Whiptail
-	G_HW_MODEL=$WHIP_RETURN_VALUE
+	# + Export to future scripts
+	export G_HW_MODEL=$WHIP_RETURN_VALUE
 
 	G_DIETPI-NOTIFY 2 "Setting G_HW_MODEL index of: $G_HW_MODEL"
 	G_DIETPI-NOTIFY 2 "CPU ARCH = $G_HW_ARCH : $G_HW_ARCH_DESCRIPTION"
