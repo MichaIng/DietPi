@@ -7,6 +7,12 @@
 	# - Currently running Debian (ideally minimal, eg: Raspbian Lite-ish =)) )
 	# - Active eth0 connection
 	#------------------------------------------------------------------------------------------------
+	# Dev notes:
+	# Following items must be exported at all times, throughout this script, else, additional scripts launched will trigger incorrect results.
+	# - G_HW_MODEL
+	# - G_HW_ARCH
+	# - G_DISTRO
+	#------------------------------------------------------------------------------------------------
 
 	#Use master branch, if unset
 	GIT_BRANCH=${GIT_BRANCH:=master}
