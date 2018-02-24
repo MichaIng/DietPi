@@ -623,6 +623,11 @@ _EOF_
 		#G_AGI libdrm-rockchip1 #Not currently on meveric's repo
 		echo 0
 
+	#	Odroid N1
+	elif (( $G_HW_MODEL == 14 )); then
+
+		G_AGI linux-image-arm64-odroid-n1
+
 	#	Odroid C2
 	elif (( $G_HW_MODEL == 12 )); then
 
