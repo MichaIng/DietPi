@@ -483,10 +483,7 @@ _EOF_
 	G_RUN_CMD apt-mark auto $(apt-mark showmanual)
 
 	# - @MichaIng https://github.com/Fourdee/DietPi/pull/1266/files
-	G_DIETPI-NOTIFY 2 "Disable automatic recommends/suggests installation and allow them to be autoremoved:"
-
-	# - - Remove other similar configurations first:
-	rm /etc/apt/apt.conf.d/*recommends*
+	G_DIETPI-NOTIFY 2 "Temporary disable automatic recommends/suggests installation and allow them to be autoremoved:"
 
 	#	Remove any existing apt recommends settings
 	rm /etc/apt/apt.conf.d/*recommends*
