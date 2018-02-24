@@ -902,8 +902,10 @@ _EOF_
 	systemctl daemon-reload &> /dev/null
 	rm /etc/cron.hourly/log2ram &> /dev/null
 
-	rm /etc/init.d/cpu_governor &> /dev/null# Meveric
-	rm /etc/systemd/system/cpu_governor.service &> /dev/null# Meveric
+	# - Meveric specific
+	rm /etc/init.d/cpu_governor &> /dev/null
+	rm /etc/systemd/system/cpu_governor.service &> /dev/null
+	rm /usr/local/sbin/setup-odroid &> /dev/null
 
 	# - Disable ARMbian's resize service (not automatically removed by ARMbian scripts...)
 	systemctl disable resize2fs &> /dev/null
