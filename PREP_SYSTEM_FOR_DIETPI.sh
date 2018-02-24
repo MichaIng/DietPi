@@ -7,6 +7,12 @@
 	# - Currently running Debian (ideally minimal, eg: Raspbian Lite-ish =)) )
 	# - Active eth0 connection
 	#------------------------------------------------------------------------------------------------
+	# Dev notes:
+	# Following items must be exported at all times, throughout this script, else, additional scripts launched will trigger incorrect results.
+	# - G_HW_MODEL
+	# - G_HW_ARCH
+	# - G_DISTRO
+	#------------------------------------------------------------------------------------------------
 
 	#Use master branch, if unset
 	GIT_BRANCH=${GIT_BRANCH:=master}
@@ -165,19 +171,19 @@
 	G_HW_ARCH_DESCRIPTION=$(uname -m)
 	if [ "$G_HW_ARCH_DESCRIPTION" = "armv6l" ]; then
 
-		G_HW_ARCH=1
+		export G_HW_ARCH=1
 
 	elif [ "$G_HW_ARCH_DESCRIPTION" = "armv7l" ]; then
 
-		G_HW_ARCH=2
+		export G_HW_ARCH=2
 
 	elif [ "$G_HW_ARCH_DESCRIPTION" = "aarch64" ]; then
 
-		G_HW_ARCH=3
+		export G_HW_ARCH=3
 
 	elif [ "$G_HW_ARCH_DESCRIPTION" = "x86_64" ]; then
 
-		G_HW_ARCH=10
+		export G_HW_ARCH=10
 
 	else
 
@@ -333,7 +339,8 @@
 	)
 
 	Run_Whiptail
-	G_HW_MODEL=$WHIP_RETURN_VALUE
+	# + Export to future scripts
+	export G_HW_MODEL=$WHIP_RETURN_VALUE
 
 	G_DIETPI-NOTIFY 2 "Setting G_HW_MODEL index of: $G_HW_MODEL"
 	G_DIETPI-NOTIFY 2 "CPU ARCH = $G_HW_ARCH : $G_HW_ARCH_DESCRIPTION"
@@ -461,6 +468,9 @@ _EOF_
 
 	fi
 
+	# - Meveric, update repo to use our EU mirror: https://github.com/Fourdee/DietPi/issues/1519#issuecomment-368234302
+	sed -i 's@https://oph.mdrjr.net/meveric@http://fuzon.co.uk/meveric@' /etc/apt/sources.list.d/meveric* &> /dev/null
+
 	G_DIETPI-NOTIFY 2 "Updating APT for $DISTRO_TARGET_NAME:"
 
 	G_RUN_CMD apt-get clean
@@ -476,6 +486,9 @@ _EOF_
 	G_DIETPI-NOTIFY 2 "Disable automatic recommends/suggests installation and allow them to be autoremoved:"
 
 	# - - Remove other similar configurations first:
+	rm /etc/apt/apt.conf.d/*recommends*
+
+	#	Remove any existing apt recommends settings
 	rm /etc/apt/apt.conf.d/*recommends*
 
 	export G_ERROR_HANDLER_COMMAND='/etc/apt/apt.conf.d/99-dietpi-norecommends'
@@ -617,7 +630,13 @@ _EOF_
 	#	Odroid N1
 	elif (( $G_HW_MODEL == 14 )); then
 
-		G_AGI libdrm-rockchip1 #unsure if required yet...
+		#G_AGI libdrm-rockchip1 #Not currently on meveric's repo
+		echo 0
+
+	#	Odroid N1
+	elif (( $G_HW_MODEL == 14 )); then
+
+		G_AGI linux-image-arm64-odroid-n1
 
 	#	Odroid C2
 	elif (( $G_HW_MODEL == 12 )); then
@@ -748,8 +767,8 @@ _EOF_
 	G_AGDUG
 
 	# - Distro is now target (for APT purposes and G_AGX support due to installed binary, its here, instead of after G_AGUP)
-	G_DISTRO=$DISTRO_TARGET
-	G_DISTRO_NAME=$DISTRO_TARGET_NAME
+	export G_DISTRO=$DISTRO_TARGET
+	export G_DISTRO_NAME=$DISTRO_TARGET_NAME
 
 	G_DIETPI-NOTIFY 2 "Disabling swapfile generation for dphys-swapfile during install"
 
@@ -758,6 +777,18 @@ _EOF_
 	G_DIETPI-NOTIFY 2 "Installing core DietPi pre-req APT packages"
 
 	G_AGI $INSTALL_PACKAGES
+
+	G_DIETPI-NOTIFY 2 "Applying default DietPi configuration for APT"
+
+	export G_ERROR_HANDLER_COMMAND='/etc/apt/apt.conf.d/99-dietpi-norecommends'
+	cat << _EOF_ > $G_ERROR_HANDLER_COMMAND
+APT::Install-Recommends "false";
+APT::Install-Suggests "false";
+#APT::AutoRemove::RecommendsImportant "false";
+#APT::AutoRemove::SuggestsImportant "false";
+_EOF_
+	export G_ERROR_HANDLER_EXITCODE=$?
+	G_ERROR_HANDLER
 
 	G_DIETPI-NOTIFY 2 "Purging APT with autoremoval (in case of DISTRO upgrade/downgrade):"
 
@@ -890,8 +921,10 @@ _EOF_
 	systemctl daemon-reload &> /dev/null
 	rm /etc/cron.hourly/log2ram &> /dev/null
 
-	rm /etc/init.d/cpu_governor &> /dev/null# Meveric
-	rm /etc/systemd/system/cpu_governor.service &> /dev/null# Meveric
+	# - Meveric specific
+	rm /etc/init.d/cpu_governor &> /dev/null
+	rm /etc/systemd/system/cpu_governor.service &> /dev/null
+	rm /usr/local/sbin/setup-odroid &> /dev/null
 
 	# - Disable ARMbian's resize service (not automatically removed by ARMbian scripts...)
 	systemctl disable resize2fs &> /dev/null
