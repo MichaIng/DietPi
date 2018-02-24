@@ -617,7 +617,8 @@ _EOF_
 	#	Odroid N1
 	elif (( $G_HW_MODEL == 14 )); then
 
-		G_AGI libdrm-rockchip1 #unsure if required yet...
+		#G_AGI libdrm-rockchip1 #Not currently on meveric's repo
+		echo 0
 
 	#	Odroid C2
 	elif (( $G_HW_MODEL == 12 )); then
