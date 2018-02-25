@@ -1024,12 +1024,7 @@ _EOF_
 
 	G_DIETPI-NOTIFY 2 "Reducing getty count and resource usage:"
 
-	for ((i=2; i<=6; i++))
-	do
-
-		systemctl mask getty@tty$i
-
-	done
+	systemctl mask getty-static
 
 	G_DIETPI-NOTIFY 2 "Configuring ntpd:"
 
