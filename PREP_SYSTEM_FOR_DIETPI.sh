@@ -523,6 +523,7 @@ _EOF_
 		'cron'			# background job scheduler
 		'curl'			# Web address testing, downloading, uploading etc.
 		'debconf'		# APT package configuration, e.g. 'debconf-set-selections'
+		'dirmngr'		# GNU key management required for some APT installs via additional repos
 		'dosfstools' 		# DietPi-Drive_Manager + fat (boot) drive file system check
 		'dphys-swapfile'	# Swap file management
 		'ethtool'		# Ethernet link checking
