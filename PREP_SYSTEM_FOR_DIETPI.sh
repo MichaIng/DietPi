@@ -1108,6 +1108,9 @@ _EOF_
 		tar xvf package.tar -C /lib/modules/
 		rm package.tar
 
+		G_RUN_CMD wget https://raw.githubusercontent.com/sparky-sbc/sparky-test/master/pro-ject-s2/snd-usb-audio.ko -O /lib/modules/$(uname -r)/kernel/sound/usb/snd-usb-audio.ko
+		G_RUN_CMD wget https://raw.githubusercontent.com/sparky-sbc/sparky-test/master/pro-ject-s2/snd-usbmidi-lib.ko -O /lib/modules/$(uname -r)/kernel/sound/usb/snd-usbmidi-lib.ko
+
 		cat << _EOF_ > /DietPi/uEnv.txt
 uenvcmd=setenv os_type linux;
 bootargs=earlyprintk clk_ignore_unused selinux=0 scandelay console=tty0 loglevel=1 real_rootflag=rw root=/dev/mmcblk0p2 rootwait init=/lib/systemd/systemd aotg.urb_fix=1 aotg.aotg1_speed=0
