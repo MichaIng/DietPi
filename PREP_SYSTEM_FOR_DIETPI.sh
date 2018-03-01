@@ -1157,8 +1157,8 @@ tic terminfo.txt
 tput cnorm
 _EOF_
 
-	# - XU4 FFMPEG fix. Prefer debian.org over Meveric for backports: https://github.com/Fourdee/DietPi/issues/1273
-	elif (( $G_HW_MODEL == 11 )); then
+	# - Odroids FFMPEG fix. Prefer debian.org over Meveric for backports: https://github.com/Fourdee/DietPi/issues/1273 + https://github.com/Fourdee/DietPi/issues/1556#issuecomment-369463910
+	elif (( $G_HW_MODEL > 9 && $G_HW_MODEL < 15 )); then
 
 		cat << _EOF_ > /etc/apt/preferences.d/backports
 Package: *
