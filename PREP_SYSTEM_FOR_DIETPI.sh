@@ -1160,11 +1160,17 @@ _EOF_
 	# - Odroids FFMPEG fix. Prefer debian.org over Meveric for backports: https://github.com/Fourdee/DietPi/issues/1273 + https://github.com/Fourdee/DietPi/issues/1556#issuecomment-369463910
 	elif (( $G_HW_MODEL > 9 && $G_HW_MODEL < 15 )); then
 
+		rm /etc/apt/preferences.d/meveric*
 		cat << _EOF_ > /etc/apt/preferences.d/backports
 Package: *
 Pin: release a=jessie-backports
 Pin: origin "fuzon.co.uk"
-Pin-Priority: 99
+Pin-Priority: 100
+
+Package: *
+Pin: release a=jessie-backports
+Pin: origin "oph.mdrjr.net"
+Pin-Priority: 100
 _EOF_
 
 	fi
