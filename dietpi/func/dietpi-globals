@@ -438,12 +438,23 @@
 
 	#G_WHIP_SIZE_UPDATE | update target whiptail size, based on current screen dimensions.
 	# - Used by G_WHIP_ automatically, doesn't need to be a global function, however, bash does not support local functions.
-	# - Capped to 100
+	# - $1 = calculate Z? 0=no 1=yes (G_WHIP_MENU_ARRAY) 2=yes (G_WHIP_CHECKLIST_ARRAY)
 	G_WHIP_SIZE_X=0
 	G_WHIP_SIZE_Y=0
 	G_WHIP_SIZE_Z=0
 	G_WHIP_SIZE_UPDATE(){
 
+		local calculate_z=$1
+
+		# - Whip margins
+		local whip_x_internal_margin=4
+		local whip_y_internal_margin=6
+
+		# - Text message lines required
+		local lines_required_whip_y=0
+		local lines_required_whip_z=0
+
+		# - Set current screen dimensions ( - outside margin)
 		G_WHIP_SIZE_X=$(( $(tput cols) - 6 ))
 		if (( $G_WHIP_SIZE_X > 120 )); then
 
@@ -458,7 +469,106 @@
 
 		fi
 
-		G_WHIP_SIZE_Z=$(( $G_WHIP_SIZE_Y / 3 )) #needs to be 2.5, or, calculate text lines used and size of G_WHIP_SIZE_Y to get remaining G_WHIP_SIZE_Z value
+		G_WHIP_SIZE_Z=0
+
+		#Calculate Z?
+		# - G_WHIP_MENU_ARRAY
+		if (( $calculate_z == 1 )); then
+
+			lines_required_whip_z=$(( ${#G_WHIP_MENU_ARRAY[@]} / 2 ))
+			# - Prevent single entries from being divided below 1, eg: 1 / 2 = 0 in bash
+			if (( $lines_required_whip_z < 0 )); then
+
+				lines_required_whip_z=1
+
+			fi
+
+			# - Requires additional line on Y
+			((lines_required_whip_y++))
+
+		# - G_WHIP_CHECKLIST_ARRAY
+		elif (( $calculate_z == 2 )); then
+
+			lines_required_whip_z=$(( ${#G_WHIP_CHECKLIST_ARRAY[@]} / 3 ))
+			# - Prevent single entries from being divided below 1, eg: 1 / 3 = 0 in bash
+			if (( $lines_required_whip_z < 0 )); then
+
+				lines_required_whip_z=1
+
+			fi
+
+		fi
+
+		#Calulate lines required for WHIP_MESSAGE, as displayed inside the whiptail box
+		# - This can then be used to increase/decrease size of G_WHIP_SIZE_Z automatically.
+		if [ -n "$WHIP_MESSAGE" ]; then
+
+			local line_count=$(echo -e "$WHIP_MESSAGE" | grep -c '^')
+
+			# - Lines required to fit text inside whiptail box. accomodate whip margins: 2 chars each side of G_WHIP_SIZE_X
+			lines_required_whip_y=$(( $lines_required_whip_y + $line_count + ( ${#WHIP_MESSAGE} / ( $G_WHIP_SIZE_X - $whip_x_internal_margin ) ) ))
+
+			#DEBUG:
+			echo "WHIP_MESSAGE line count $line_count"
+			echo "WHIP_MESSAGE char count ${#WHIP_MESSAGE}"
+			#DEBUG:
+
+		fi
+
+		#Process final whiptail size
+		# - Add internal whiptail margins to end line total
+		lines_required_whip_y=$(( $lines_required_whip_y + $whip_y_internal_margin ))
+
+		# - Message will not fit!
+		if (( $lines_required_whip_y > $G_WHIP_SIZE_Y )); then
+
+			G_DIETPI-NOTIFY 1 "Lines required for Whiptail box and its contents, exceeds screen dimensions."
+
+		# - Calculate a lower size of G_WHIP_SIZE_Y to fit everything and make it look nice!
+		else
+
+			# - Calc max size for lines_max_whip_z, based on lines_required_whip_y and current screen size
+			if (( $lines_required_whip_z > 0 )); then
+
+				local lines_max_whip_z=$lines_required_whip_z
+
+				while (( ( $lines_max_whip_z + $lines_required_whip_y ) > $G_WHIP_SIZE_Y ))
+				do
+
+					((lines_max_whip_z--))
+
+				done
+
+				#	lines_max_whip_z < 1 indicates G_WHIP_SIZE_Y is too small to fit all message text and any lines_required_whip_z.
+				#	So we must force lines_max_whip_z=1 resulting in some missing message text
+				if (( $lines_max_whip_z < 1 )); then
+
+					lines_max_whip_z=1
+					G_DIETPI-NOTIFY 1 "Lines required for Whiptail box and its contents (including lines_required_whip_z), exceeds screen dimensions."
+
+				fi
+
+				G_WHIP_SIZE_Y=$(( $lines_required_whip_y + $lines_max_whip_z ))
+				G_WHIP_SIZE_Z=$lines_max_whip_z
+
+			else
+
+				G_WHIP_SIZE_Y=$lines_required_whip_y
+
+			fi
+
+
+			#DEBUG:
+			echo -e "lines_required_whip_y $lines_required_whip_y"
+			echo -e "lines_required_whip_z $lines_required_whip_z"
+			echo -e "G_WHIP_SIZE_X $G_WHIP_SIZE_X"
+			echo -e "G_WHIP_SIZE_Y $G_WHIP_SIZE_Y"
+			echo -e "G_WHIP_SIZE_Z $G_WHIP_SIZE_Z"
+			echo -e "X_SCREEN = $(( $(tput cols) - 6 ))"
+			echo -e "Y_SCREEN = $(( $(tput lines) - 4 ))"
+			#DEBUG:
+
+		fi
 
 	}
 
@@ -466,18 +576,20 @@
 	# - Display a whip message
 	G_WHIP_MSG(){
 
-		local message=("$@")
+		WHIP_MESSAGE=("$@")
 
 		if (( $G_USER_INPUTS )); then
 
-			G_WHIP_SIZE_UPDATE
-			whiptail --title "$G_PROGRAM_NAME" --msgbox "$message" --backtitle "$G_PROGRAM_NAME" $G_WHIP_SIZE_Y $G_WHIP_SIZE_X
+			G_WHIP_SIZE_UPDATE 0
+			whiptail --title "$G_PROGRAM_NAME" --msgbox "$WHIP_MESSAGE" --backtitle "$G_PROGRAM_NAME" $G_WHIP_SIZE_Y $G_WHIP_SIZE_X
 
 		else
 
-			G_DIETPI-NOTIFY 2 "$message"
+			G_DIETPI-NOTIFY 2 "$WHIP_MESSAGE"
 
 		fi
+
+		unset WHIP_MESSAGE
 
 	}
 
@@ -487,15 +599,17 @@
 	G_WHIP_YESNO(){
 
 		local result=0
-		local message=("$@")
+		WHIP_MESSAGE=("$@")
 
 		if (( $G_USER_INPUTS )); then
 
-			G_WHIP_SIZE_UPDATE
-			whiptail --title "$G_PROGRAM_NAME" --yesno "$message" --backtitle "$G_PROGRAM_NAME" --yes-button "Ok" --no-button "Cancel" --defaultno $G_WHIP_SIZE_Y $G_WHIP_SIZE_X
+			G_WHIP_SIZE_UPDATE 0
+			whiptail --title "$G_PROGRAM_NAME" --yesno "$WHIP_MESSAGE" --backtitle "$G_PROGRAM_NAME" --yes-button "Ok" --no-button "Cancel" --defaultno $G_WHIP_SIZE_Y $G_WHIP_SIZE_X
 			result=$?
 
 		fi
+
+		unset WHIP_MESSAGE
 
 		return $result
 
@@ -507,17 +621,19 @@
 	G_WHIP_INPUTBOX(){
 
 		local result=0
-		local message=("$@")
+		WHIP_MESSAGE=("$@")
 
 		if (( $G_USER_INPUTS )); then
 
-			G_WHIP_SIZE_UPDATE
-			export G_WHIP_RETURNED_VALUE=$(whiptail --title "$G_PROGRAM_NAME" --inputbox "$message" --backtitle "$G_PROGRAM_NAME" $G_WHIP_SIZE_Y $G_WHIP_SIZE_X "$G_WHIP_DEFAULT_ITEM" 3>&1 1>&2 2>&3; echo $? > /tmp/.G_WHIP_INPUTBOX_RESULT)
+			G_WHIP_SIZE_UPDATE 0
+			export G_WHIP_RETURNED_VALUE=$(whiptail --title "$G_PROGRAM_NAME" --inputbox "$WHIP_MESSAGE" --backtitle "$G_PROGRAM_NAME" $G_WHIP_SIZE_Y $G_WHIP_SIZE_X "$G_WHIP_DEFAULT_ITEM" 3>&1 1>&2 2>&3; echo $? > /tmp/.G_WHIP_INPUTBOX_RESULT)
 
 			result=$(cat /tmp/.G_WHIP_INPUTBOX_RESULT)
 			rm /tmp/.G_WHIP_INPUTBOX_RESULT
 
 		fi
+
+		unset WHIP_MESSAGE
 
 		return $result
 
@@ -529,12 +645,12 @@
 	G_WHIP_MENU(){
 
 		local result=0
-		local message=("$@")
+		WHIP_MESSAGE=("$@")
 
 		if (( $G_USER_INPUTS )); then
 
-			G_WHIP_SIZE_UPDATE
-			export G_WHIP_RETURNED_VALUE=$(whiptail --title "$G_PROGRAM_NAME" --menu "$message" --default-item "$G_WHIP_DEFAULT_ITEM" --cancel-button "Cancel" --backtitle "$G_PROGRAM_NAME" $G_WHIP_SIZE_Y $G_WHIP_SIZE_X $G_WHIP_SIZE_Z "${G_WHIP_MENU_ARRAY[@]}" 3>&1 1>&2 2>&3; echo $? > /tmp/.G_WHIP_MENU_RESULT)
+			G_WHIP_SIZE_UPDATE 1
+			export G_WHIP_RETURNED_VALUE=$(whiptail --title "$G_PROGRAM_NAME" --menu "$WHIP_MESSAGE" --default-item "$G_WHIP_DEFAULT_ITEM" --cancel-button "Cancel" --backtitle "$G_PROGRAM_NAME" $G_WHIP_SIZE_Y $G_WHIP_SIZE_X $G_WHIP_SIZE_Z "${G_WHIP_MENU_ARRAY[@]}" 3>&1 1>&2 2>&3; echo $? > /tmp/.G_WHIP_MENU_RESULT)
 
 			result=$(cat /tmp/.G_WHIP_MENU_RESULT)
 			rm /tmp/.G_WHIP_MENU_RESULT
@@ -543,6 +659,8 @@
 			export G_WHIP_MENU_ARRAY=('NULL' 'NULL')
 
 		fi
+
+		unset WHIP_MESSAGE
 
 		return $result
 
@@ -554,12 +672,12 @@
 	G_WHIP_CHECKLIST(){
 
 		local result=0
-		local message=("$@")
+		WHIP_MESSAGE=("$@")
 
 		if (( $G_USER_INPUTS )); then
 
-			G_WHIP_SIZE_UPDATE
-			export G_WHIP_RETURNED_VALUE=$(whiptail --title "$G_PROGRAM_NAME" --checklist "$message" --separate-output --default-item "$G_WHIP_DEFAULT_ITEM" --cancel-button "Cancel" --backtitle "$G_PROGRAM_NAME" $G_WHIP_SIZE_Y $G_WHIP_SIZE_X $G_WHIP_SIZE_Z "${G_WHIP_CHECKLIST_ARRAY[@]}" 3>&1 1>&2 2>&3; echo $? > /tmp/.G_WHIP_CHECKLIST_RESULT)
+			G_WHIP_SIZE_UPDATE 2
+			export G_WHIP_RETURNED_VALUE=$(whiptail --title "$G_PROGRAM_NAME" --checklist "$WHIP_MESSAGE" --separate-output --default-item "$G_WHIP_DEFAULT_ITEM" --cancel-button "Cancel" --backtitle "$G_PROGRAM_NAME" $G_WHIP_SIZE_Y $G_WHIP_SIZE_X $G_WHIP_SIZE_Z "${G_WHIP_CHECKLIST_ARRAY[@]}" 3>&1 1>&2 2>&3; echo $? > /tmp/.G_WHIP_CHECKLIST_RESULT)
 
 			result=$(cat /tmp/.G_WHIP_CHECKLIST_RESULT)
 			rm /tmp/.G_WHIP_CHECKLIST_RESULT
@@ -568,6 +686,8 @@
 			export G_WHIP_CHECKLIST_ARRAY=('NULL' 'NULL' 'off')
 
 		fi
+
+		unset WHIP_MESSAGE
 
 		return $result
 
