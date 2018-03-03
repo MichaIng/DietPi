@@ -14,12 +14,22 @@
 	# Usage:
 	# - /DietPi/dietpi/dietpi-cron
 	#////////////////////////////////////
-	#Import DietPi-Globals ---------------------------------------------------------------
-	. /DietPi/dietpi/func/dietpi-globals
-	G_CHECK_ROOT_USER
-	export G_PROGRAM_NAME='DietPi-Cron'
-	G_INIT
-	#Import DietPi-Globals ---------------------------------------------------------------
+
+	#Force en_GB Locale for whole script. Prevents incorrect parsing with non-english locales.
+	LANG=en_GB.UTF-8
+
+	#Ensure we are in users home dir: https://github.com/Fourdee/DietPi/issues/905#issuecomment-298223705
+	cd "$HOME"
+
+	#Exit path for non-root logins.
+	if (( $UID != 0 )); then
+
+		/DietPi/dietpi/func/dietpi-notify 1 'Error: Root privileges required. Please run the command with "sudo"\n'
+		exit
+
+	fi
+
+	DISTRO=$(sed -n 3p /DietPi/dietpi/.hw_model)
 
 	#/////////////////////////////////////////////////////////////////////////////////////
 	#Globals
@@ -27,7 +37,8 @@
 	PROGRAM_NAME="DietPi-Cron"
 
 	TARGETMENUID=0
-	PREVIOUS_MENU_SELECTION="cron.hourly"
+#	PREVIOUS_MENU_SELECTION="cron.hourly"
+	PREVIOUS_MENU_SELECTION="cron.minutely"
 	OPTION=0
 	CHOICE=0
 	aCRON_TIME=()
@@ -60,6 +71,9 @@
 		aCRON_TIME[7]=$(cat /etc/crontab | grep -m1 'cron.monthly' | awk '{print $2}')
 		aCRON_TIME[8]=$(cat /etc/crontab | grep -m1 'cron.monthly' | awk '{print $3}')
 
+		#minutely_min
+		aCRON_TIME[9]=$(cat /etc/crontab | grep -m1 'cron.minutely' | awk -F'[/ ]' '{print $2}')
+
 		#Check for valid ints
 		for ((i=0; i<${#aCRON_TIME[@]}; i++))
 		do
@@ -81,11 +95,35 @@ SHELL=/bin/sh
 PATH=/usr/local/sbin:/usr/local/bin:/sbin:/bin:/usr/sbin:/usr/bin
 
 # m h dom mon dow user  command
+*/${aCRON_TIME[9]} * * * *   root    cd / && run-parts --report /etc/cron.minutely
 ${aCRON_TIME[0]} * * * *   root    cd / && run-parts --report /etc/cron.hourly
 ${aCRON_TIME[1]} ${aCRON_TIME[2]} * * *   root    test -x /usr/sbin/anacron || ( cd / && run-parts --report /etc/cron.daily )
 ${aCRON_TIME[3]} ${aCRON_TIME[4]} * * ${aCRON_TIME[5]}   root    test -x /usr/sbin/anacron || ( cd / && run-parts --report /etc/cron.weekly )
 ${aCRON_TIME[6]} ${aCRON_TIME[7]} ${aCRON_TIME[8]} * *   root    test -x /usr/sbin/anacron || ( cd / && run-parts --report /etc/cron.monthly )
 _EOF_
+
+	}
+
+	Input_Cron_Minutely_Minute(){
+
+		local input_value=$1
+		local min_value=1
+		local max_value=59
+
+		OPTION=$(whiptail --inputbox "Please enter a value for MINUTE:\n - Valid range ($min_value - $max_value)" 9 50 "$input_value" --title "Set Minute" 3>&1 1>&2 2>&3)
+		CHOICE=$?
+		if (( $CHOICE == 0 )); then
+
+			#Valid input?
+			if [[ $OPTION =~ ^-?[0-9]+$ ]] &&
+				(( $OPTION >= $min_value )) && (( $OPTION <= $max_value )); then
+				input_value=$OPTION
+			else
+				Info_Input_Not_Valid_Integer
+			fi
+		fi
+
+		return $input_value
 
 	}
 
@@ -201,7 +239,17 @@ _EOF_
 
 	Menu_Main(){
 
-		OPTION=$(whiptail --title "$PROGRAM_NAME" --menu "This program allows you to change the date and times for starting each cron job.\n\n- Example:\nIf you set cron.daily to 22 hours and 20 minutes, all scripts in /etc/cron.daily/* will be run at 10:20pm" --cancel-button "Exit" --default-item "$PREVIOUS_MENU_SELECTION" --backtitle "$PROGRAM_NAME" 18 70 5 \
+		case "${aCRON_TIME[9]}" in
+			"1")
+				minute_string="Minute"
+			;;
+			*)
+				minute_string="${aCRON_TIME[9]} Minutes"
+			;;
+		esac
+
+		OPTION=$(whiptail --title "$PROGRAM_NAME" --menu "This program allows you to change the date and times for starting each cron job.\n\n- Example:\nIf you set cron.daily to 22 hours and 20 minutes, all scripts in /etc/cron.daily/* will be run at 10:20pm" --cancel-button "Exit" --default-item "$PREVIOUS_MENU_SELECTION" --backtitle "$PROGRAM_NAME" 18 70 6 \
+		"cron.minutely" "Every $minute_string" \
 		"cron.hourly" "Every Hour at ${aCRON_TIME[0]} Minutes" \
 		"cron.daily" "Every Day at ${aCRON_TIME[2]} Hours and ${aCRON_TIME[1]} Minutes" \
 		"cron.weekly" "Every ${aDAY_OF_THE_WEEK_TEXT[$(( ${aCRON_TIME[5]} - 1))]} at ${aCRON_TIME[4]} Hours and ${aCRON_TIME[3]} Minutes" \
@@ -214,6 +262,10 @@ _EOF_
 			PREVIOUS_MENU_SELECTION=$OPTION
 
 			case "$OPTION" in
+				"cron.minutely")
+					Input_Cron_Minutely_Minute ${aCRON_TIME[9]}
+					aCRON_TIME[9]=$?
+				;;
 				"cron.hourly")
 					Input_Cron_Minute ${aCRON_TIME[0]}
 					aCRON_TIME[0]=$?
