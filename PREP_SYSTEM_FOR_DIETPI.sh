@@ -1207,10 +1207,13 @@ _EOF_
 	# - Nano histroy file
 	rm ~/.nano_history &> /dev/null
 
-	G_DIETPI-NOTIFY 2 'Disabling swapfile'
+	G_DIETPI-NOTIFY 2 'Removing swapfile from image'
 
 	/DietPi/dietpi/func/dietpi-set_dphys-swapfile 0 /var/swap
 	rm /var/swap &> /dev/null # still exists on some images...
+
+	# - re-enable for next run
+	sed -i '/AUTO_SETUP_SWAPFILE_SIZE=/c\AUTO_SETUP_SWAPFILE_SIZE=1' /DietPi/dietpi.txt
 
 	#	BBB disable swapfile gen
 	if (( $G_HW_MODEL == 71 )); then
@@ -1403,7 +1406,6 @@ _EOF_
 		systemctl daemon-reload
 
 	fi
-
 
 	G_DIETPI-NOTIFY 2 'Storing DietPi version ID'
 
