@@ -10,12 +10,11 @@
 	#////////////////////////////////////
 	#
 	# Info:
-	# - Launches NTPD time sync update
+	# - Launches Systemd-timesyncd time sync update
 	# - 'status' Allows for status check of sucessful completion with $FP_EXIT_CODE
 	#
 	# Usage:
-	# - /DietPi/dietpi/func/run_ntpd &
-	# - /DietPi/dietpi/func/run_ntpd status 			blocking mode (max Xs), wait for exit code of NTPD and return it. Launches ntpd if process and exit file does not exist
+	# - /DietPi/dietpi/func/run_ntpd
 	#////////////////////////////////////
 	#Import DietPi-Globals ---------------------------------------------------------------
 	. /DietPi/dietpi/func/dietpi-globals
@@ -33,103 +32,36 @@
 
 	Update_NTPD(){
 
-		#Dont run twice
-		if (( $(ps aux | grep -ci -m1 '[[:space:]][n]tpd[[:space:]]') )); then
+		#clear status file
+		if [ -f "$FP_EXIT_CODE" ]; then
 
-			G_DIETPI-NOTIFY 2 "NTPD: is already running"
-
-		else
-
-			#clear status file
-			if [ -f "$FP_EXIT_CODE" ]; then
-
-				rm "$FP_EXIT_CODE"
-
-			fi
-
-			#NTPD: run, exit when updated.
-			if (( $NTPD_UPDATE_MODE >= 1 && $NTPD_UPDATE_MODE <= 3 )); then
-
-				G_DIETPI-NOTIFY 2 "NTPD: Running time sync update ($NTPD_UPDATE_MODE)"
-				ntpd -gq -l /var/log/ntpd.log &> /dev/null
-				EXIT_CODE=$?
-
-			#systemd-timesyncd
-			elif (( $NTPD_UPDATE_MODE == 4 )); then
-
-				if (( $(systemctl is-active systemd-timesyncd | grep -ci -m1 '^active') )); then
-
-					G_DIETPI-NOTIFY 0 "NTPD: systemd-timesyncd detected"
-					EXIT_CODE=0
-
-				else
-
-					G_DIETPI-NOTIFY 1 "NTPD: systemd-timesyncd is not active"
-					EXIT_CODE=1
-
-				fi
-
-			#other method: assume status is ok
-			else
-
-				G_DIETPI-NOTIFY 0 "NTPD: manual mode detected"
-				EXIT_CODE=0
-
-			fi
-
-			# - log status of completion, prevent software installs: https://github.com/Fourdee/DietPi/issues/786
-			echo $EXIT_CODE > "$FP_EXIT_CODE"
+			rm "$FP_EXIT_CODE"
 
 		fi
 
-	}
+		#Manual mode
+		if (( $NTPD_UPDATE_MODE == 0 )); then
 
-	#/////////////////////////////////////////////////////////////////////////////////////
-	# Main Loop
-	#/////////////////////////////////////////////////////////////////////////////////////
-	#-----------------------------------------------------------------------------------
-	if [ "$INPUT_MODE" = "status" ]; then
-
-		MAX_LOOPS=30
-		CURRENT_LOOP=1
-
-		#NTPD:
-		if (( $NTPD_UPDATE_MODE >= 1 && $NTPD_UPDATE_MODE <= 3 )); then
-
-			while (( $CURRENT_LOOP <= $MAX_LOOPS ))
-			do
-
-				#	Update NTPD if its not running, and, no exit file exists
-				if [ ! -f "$FP_EXIT_CODE" ] && (( ! $(ps aux | grep -ci -m1 '[[:space:]][n]tpd[[:space:]]') )); then
-
-					G_DIETPI-NOTIFY 2 "NTPD: Has not yet been launched, running now, please wait..."
-					Update_NTPD &
-					sleep 1
-
-				elif [ -f "$FP_EXIT_CODE" ]; then
-
-					EXIT_CODE=$(cat "$FP_EXIT_CODE")
-					break
-
-				else
-
-					G_DIETPI-NOTIFY 2 "NTPD: Waiting for completion of time sync ($CURRENT_LOOP/$MAX_LOOPS)"
-					sleep 1
-					((CURRENT_LOOP++))
-
-				fi
-
-			done
+			G_DIETPI-NOTIFY 0 "NTPD: manual mode detected"
+			EXIT_CODE=0
 
 		#systemd-timesyncd
-		elif (( $NTPD_UPDATE_MODE == 4 )); then
+		elif (( $NTPD_UPDATE_MODE >= 1 && $NTPD_UPDATE_MODE <= 4 )); then
+
+			systemctl enable systemd-timesyncd
+			G_RUN_CMD systemctl start systemd-timesyncd
+
+			local max_loops=60 #*2 = seconds
+			local current_loop=1
+
+			# - Valid connection required for wait/status
+			# if (( $(route | awk '{print $4}' | grep -ci -m1 'UG') )); then
 
 			while true
 			do
 
-				#NB: Following will always report "Synced", once systemd has completed it once
 				TIME_SYNCED=$(timedatectl status --no-pager | grep -ci -m1 'NTP synchronized: yes')
-				if (( $CURRENT_LOOP >= $MAX_LOOPS )); then
+				if (( $current_loop >= $max_loops )); then
 
 					G_DIETPI-NOTIFY 2 "NTPD: time out waiting for systemd-timesyncd"
 					EXIT_CODE=1
@@ -137,15 +69,23 @@
 
 				elif (( $TIME_SYNCED )); then
 
-					G_DIETPI-NOTIFY 0 "NTPD: systemd-timesyncd"
+					G_DIETPI-NOTIFY 0 "NTPD: systemd-timesyncd synced"
+					if (( $NTPD_UPDATE_MODE >= 1 && $NTPD_UPDATE_MODE <= 3 )); then
+
+						systemctl stop systemd-timesyncd
+						#systemctl stop systemd-timedated
+						systemctl disable systemd-timesyncd
+
+					fi
+
 					EXIT_CODE=0
 					break
 
 				else
 
-					G_DIETPI-NOTIFY 2 "NTPD: Waiting for completion of systemd-timesyncd ($CURRENT_LOOP/$MAX_LOOPS)"
-					sleep 1
-					((CURRENT_LOOP++))
+					G_DIETPI-NOTIFY 2 "NTPD: Waiting for completion of systemd-timesyncd ($current_loop/$max_loops)"
+					sleep 2
+					((current_loop++))
 
 				fi
 
@@ -159,23 +99,23 @@
 
 		fi
 
-	#Run NTPD
-	else
+		# - log status of completion, prevent software installs: https://github.com/Fourdee/DietPi/issues/786
+		echo $EXIT_CODE > "$FP_EXIT_CODE"
 
-		Update_NTPD
+	}
 
-	fi
+	#/////////////////////////////////////////////////////////////////////////////////////
+	# Main Loop
+	#/////////////////////////////////////////////////////////////////////////////////////
+	#-----------------------------------------------------------------------------------
+	Update_NTPD
+
 	#-----------------------------------------------------------------------------------
 	#Always return status
 	G_DIETPI-NOTIFY -1 $EXIT_CODE 'NTPD: time sync |'
 	if (( $EXIT_CODE != 0 )); then
 
-		if (( $NTPD_UPDATE_MODE >= 1 && $NTPD_UPDATE_MODE <= 3 )); then
-
-			G_DIETPI-NOTIFY 2 "NTPD: Please check the log file for more information:"
-			G_DIETPI-NOTIFY 2 "NTPD: /var/log/ntpd.log"
-
-		elif (( $NTPD_UPDATE_MODE == 4 )); then
+		if (( $NTPD_UPDATE_MODE >= 1 && $NTPD_UPDATE_MODE <= 4 )); then
 
 			G_DIETPI-NOTIFY 2 "NTPD: Please check the service status for more information:"
 			G_DIETPI-NOTIFY 2 "NTPD: systemctl status systemd-timesyncd -l"
@@ -187,8 +127,10 @@
 		fi
 
 	fi
+
 	#-----------------------------------------------------------------------------------
 	#return exit code
 	exit $EXIT_CODE
 	#-----------------------------------------------------------------------------------
+
 }
