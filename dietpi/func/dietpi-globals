@@ -421,22 +421,343 @@
 	}
 
 	#-----------------------------------------------------------------------------------
-	# Whiptail
+	# Whiptail (Whippy-da-whip-whip-whip tail!)
+	# - Automatically detects/processes for G_USER_INPUTS
 	#-----------------------------------------------------------------------------------
-	G_WHIP_MSG_TEXT=${G_WHIP_MSG_TEXT:=0}
-	G_WHIP_MSG(){
+	#G_WHIP_DEFAULT_ITEM | to be set by scripts to set the default selected item.
+	G_WHIP_DEFAULT_ITEM=''
 
-		if (( $G_USER_INPUTS )); then
+	#G_WHIP_SIZE_X_MAX | Optional, limits X to value, if below available screen X limits
+	G_WHIP_SIZE_X_MAX=0
 
-			whiptail --title "$G_PROGRAM_NAME" --msgbox "$G_WHIP_MSG_TEXT" --backtitle "$G_PROGRAM_NAME" 20 80
+	#G_WHIP_BUTTON_X_TEXT | Change as needed, else, defaults to Ok/Cancel
+	G_WHIP_BUTTON_OK_TEXT=''
+	G_WHIP_BUTTON_CANCEL_TEXT=''
 
-		else
+	#G_WHIP_MENU_ARRAY | to be set by scripts to set available menu/checkbox options
+	G_WHIP_MENU_ARRAY=('NULL' 'NULL')
 
-			G_DIETPI-NOTIFY 2 "$G_WHIP_MSG_TEXT"
+	#G_WHIP_CHECKLIST_ARRAY | to be set by scripts to set available checklist options
+	G_WHIP_CHECKLIST_ARRAY=('NULL' 'NULL' 'off')
+
+	#G_WHIP_RETURNED_VALUE | Returned value from inputbox/menu/checklist based whiptail items
+	G_WHIP_RETURNED_VALUE=''
+
+	#G_WHIP_DESTROY | Clear vars after run of whiptail
+	G_WHIP_DESTROY(){
+
+		# - Delete
+		unset WHIP_MESSAGE
+		unset WHIP_SIZE_X
+		unset WHIP_SIZE_Y
+		unset WHIP_SIZE_Z
+		unset WHIP_BACKTITLE
+
+		# - Reset
+		G_WHIP_DEFAULT_ITEM=''
+		G_WHIP_SIZE_X_MAX=0
+		G_WHIP_BUTTON_OK_TEXT=''
+		G_WHIP_BUTTON_CANCEL_TEXT=''
+		G_WHIP_MENU_ARRAY=('NULL' 'NULL')
+		G_WHIP_CHECKLIST_ARRAY=('NULL' 'NULL' 'off')
+
+	}
+
+	#G_WHIP_INIT
+	# - update target whiptail size, based on current screen dimensions.
+	# - Used by G_WHIP_ automatically, doesn't need to be a global function, however, bash does not support local functions.
+	# - $1 = calculate Z? 0=no 1=yes (G_WHIP_MENU_ARRAY) 2=yes (G_WHIP_CHECKLIST_ARRAY)
+	G_WHIP_INIT(){
+
+		#Set default button text, if not defined
+		G_WHIP_BUTTON_OK_TEXT=${G_WHIP_BUTTON_OK_TEXT:=Ok}
+		G_WHIP_BUTTON_CANCEL_TEXT=${G_WHIP_BUTTON_CANCEL_TEXT:=Cancel}
+
+		#Update backtitle
+		WHIP_BACKTITLE="$G_PROGRAM_NAME | $G_HW_MODEL_DESCRIPTION"
+		if [ -f /DietPi/dietpi/.network ]; then
+
+			WHIP_BACKTITLE+=" | IP: $(sed -n 4p /DietPi/dietpi/.network)"
 
 		fi
 
-		unset G_WHIP_MSG_TEXT
+		#Automaticaly set size of whiptail box and contents
+		local calculate_z=$1
+
+		# - Whip margins
+		local whip_x_internal_margin=4
+		local whip_y_internal_margin=6
+
+		# - Text message lines required
+		local lines_required_whip_y=0
+		local lines_required_whip_z=0
+
+		# - Set current screen dimensions ( - outside margin)
+		WHIP_SIZE_X=$(( $(tput cols) - 6 ))
+		if (( $G_WHIP_SIZE_X_MAX > 0 && $G_WHIP_SIZE_X_MAX <= $WHIP_SIZE_X )); then
+
+			WHIP_SIZE_X=$G_WHIP_SIZE_X_MAX
+
+		elif (( $WHIP_SIZE_X > 120 )); then
+
+			WHIP_SIZE_X=120
+
+		fi
+
+		WHIP_SIZE_Y=$(( $(tput lines) - 4 ))
+		if (( $WHIP_SIZE_Y > 40 )); then
+
+			WHIP_SIZE_Y=40
+
+		fi
+
+		WHIP_SIZE_Z=2
+
+		# - G_WHIP_MENU_ARRAY
+		if (( $calculate_z == 1 )); then
+
+			lines_required_whip_z=$(( ${#G_WHIP_MENU_ARRAY[@]} / 2 ))
+			# - Prevent single entries from being divided below 1, eg: 1 / 2 = 0 in bash
+			if (( $lines_required_whip_z < 0 )); then
+
+				lines_required_whip_z=1
+
+			fi
+
+			# - Requires additional line on Y
+			((lines_required_whip_y++))
+
+		# - G_WHIP_CHECKLIST_ARRAY
+		elif (( $calculate_z == 2 )); then
+
+			lines_required_whip_z=$(( ${#G_WHIP_CHECKLIST_ARRAY[@]} / 3 ))
+			# - Prevent single entries from being divided below 1, eg: 1 / 3 = 0 in bash
+			if (( $lines_required_whip_z < 0 )); then
+
+				lines_required_whip_z=1
+
+			fi
+
+		fi
+
+		# - Calulate lines required for WHIP_MESSAGE, as displayed inside the whiptail box
+		#	This can then be used to increase/decrease size of WHIP_SIZE_Z automatically.
+		if [ -n "$WHIP_MESSAGE" ]; then
+
+			local line_count=$(echo -e "$WHIP_MESSAGE" | grep -c '^')
+
+			# - Lines required to fit text inside whiptail box. accomodate whip margins: 2 chars each side of WHIP_SIZE_X
+			lines_required_whip_y=$(( $lines_required_whip_y + $line_count + ( ${#WHIP_MESSAGE} / ( $WHIP_SIZE_X - $whip_x_internal_margin ) ) ))
+
+		fi
+
+		# - Process final whiptail size
+		#	Add internal whiptail margins to end line total
+		lines_required_whip_y=$(( $lines_required_whip_y + $whip_y_internal_margin ))
+
+		# - Message will not fit!
+		if (( $lines_required_whip_y > $WHIP_SIZE_Y )); then
+
+			G_DIETPI-NOTIFY 1 "Lines required for Whiptail box and its contents (y=$lines_required_whip_y, z=$lines_required_whip_z), exceeds screen dimensions (y=$WHIP_SIZE_Y)."
+
+		# - Calculate a lower size of WHIP_SIZE_Y to fit everything and make it look nice!
+		else
+
+			# - Calc max size for lines_max_whip_z, based on lines_required_whip_y and current screen size
+			if (( $lines_required_whip_z > 0 )); then
+
+				local lines_max_whip_z=$lines_required_whip_z
+
+				while (( ( $lines_max_whip_z + $lines_required_whip_y ) > $WHIP_SIZE_Y ))
+				do
+
+					((lines_max_whip_z--))
+
+				done
+
+				#	lines_max_whip_z < 1 indicates WHIP_SIZE_Y is too small to fit all message text and any lines_required_whip_z.
+				#	So we must force lines_max_whip_z=1 resulting in some missing message text
+				if (( $lines_max_whip_z < 1 )); then
+
+					lines_max_whip_z=2
+					G_DIETPI-NOTIFY 1 "Lines required for Whiptail box and its contents (y=$lines_required_whip_y, z=$lines_required_whip_z), exceeds screen dimensions (y=$WHIP_SIZE_Y)."
+
+				fi
+
+				WHIP_SIZE_Y=$(( $lines_required_whip_y + $lines_max_whip_z ))
+				WHIP_SIZE_Z=$lines_max_whip_z
+
+			else
+
+				WHIP_SIZE_Y=$lines_required_whip_y
+
+			fi
+
+		fi
+
+	}
+
+	#G_WHIP_MSG "message"
+	# - Display a whip message
+	G_WHIP_MSG(){
+
+		WHIP_MESSAGE=("$@")
+
+		if (( $G_USER_INPUTS )); then
+
+			G_WHIP_INIT 0
+			whiptail --title "$G_PROGRAM_NAME" --msgbox "$WHIP_MESSAGE" --ok-button "$G_WHIP_BUTTON_OK_TEXT" --backtitle "$WHIP_BACKTITLE" $WHIP_SIZE_Y $WHIP_SIZE_X
+
+		else
+
+			G_DIETPI-NOTIFY 2 "$WHIP_MESSAGE"
+
+		fi
+
+		G_WHIP_DESTROY
+
+	}
+
+	#G_WHIP_SCROLLBOX "message"
+	# - Display a whip message inside a scrollbox
+	G_WHIP_SCROLLBOX(){
+
+		WHIP_MESSAGE=("$@")
+
+		if (( $G_USER_INPUTS )); then
+
+			G_WHIP_INIT 0
+			whiptail --title "$G_PROGRAM_NAME" --scrolltext --msgbox "$WHIP_MESSAGE" --ok-button "$G_WHIP_BUTTON_OK_TEXT" --backtitle "$WHIP_BACKTITLE" $WHIP_SIZE_Y $WHIP_SIZE_X
+
+		else
+
+			G_DIETPI-NOTIFY 2 "$WHIP_MESSAGE"
+
+		fi
+
+		G_WHIP_DESTROY
+
+	}
+
+	#G_WHIP_YESNO "message"
+	# - Prompt user for a Yes/No, return result
+	# - returns result 0=Ok, everything else considered a user canceled result
+	G_WHIP_YESNO(){
+
+		local result=0
+		WHIP_MESSAGE=("$@")
+
+		if (( $G_USER_INPUTS )); then
+
+			G_WHIP_INIT 0
+			whiptail --title "$G_PROGRAM_NAME" --yesno "$WHIP_MESSAGE" --backtitle "$WHIP_BACKTITLE" --yes-button "$G_WHIP_BUTTON_OK_TEXT" --no-button "$G_WHIP_BUTTON_CANCEL_TEXT" --defaultno $WHIP_SIZE_Y $WHIP_SIZE_X
+			result=$?
+
+		fi
+
+		G_WHIP_DESTROY
+
+		return $result
+
+	}
+
+	#G_WHIP_INPUTBOX "message"
+	# - Prompt user to input text and export it to G_WHIP_RETURNED_VALUE
+	# - returns result 0=Ok, everything else considered a user canceled result
+	G_WHIP_INPUTBOX(){
+
+		local result=0
+		WHIP_MESSAGE=("$@")
+
+		if (( $G_USER_INPUTS )); then
+
+			G_WHIP_INIT 0
+			export G_WHIP_RETURNED_VALUE=$(whiptail --title "$G_PROGRAM_NAME" --inputbox "$WHIP_MESSAGE" --ok-button "$G_WHIP_BUTTON_OK_TEXT" --cancel-button "$G_WHIP_BUTTON_CANCEL_TEXT" --backtitle "$WHIP_BACKTITLE" $WHIP_SIZE_Y $WHIP_SIZE_X "$G_WHIP_DEFAULT_ITEM" 3>&1 1>&2 2>&3; echo $? > /tmp/.G_WHIP_INPUTBOX_RESULT)
+
+			result=$(cat /tmp/.G_WHIP_INPUTBOX_RESULT)
+			rm /tmp/.G_WHIP_INPUTBOX_RESULT
+
+		fi
+
+		G_WHIP_DESTROY
+
+		return $result
+
+	}
+
+	#G_WHIP_MENU "message"
+	# - Prompt user to select option from G_WHIP_MENU_ARRAY and sets G_WHIP_RETURNED_VALUE
+	# - returns result 0=Ok, everything else considered a user canceled result
+	G_WHIP_MENU(){
+
+		local result=0
+		WHIP_MESSAGE=("$@")
+
+		if (( $G_USER_INPUTS )); then
+
+			G_WHIP_INIT 1
+			export G_WHIP_RETURNED_VALUE=$(whiptail --title "$G_PROGRAM_NAME" --menu "$WHIP_MESSAGE" --default-item "$G_WHIP_DEFAULT_ITEM" --ok-button "$G_WHIP_BUTTON_OK_TEXT" --cancel-button "$G_WHIP_BUTTON_CANCEL_TEXT" --backtitle "$WHIP_BACKTITLE" $WHIP_SIZE_Y $WHIP_SIZE_X $WHIP_SIZE_Z "${G_WHIP_MENU_ARRAY[@]}" 3>&1 1>&2 2>&3; echo $? > /tmp/.WHIP_MENU_RESULT)
+
+			result=$(cat /tmp/.WHIP_MENU_RESULT)
+			rm /tmp/.WHIP_MENU_RESULT
+
+
+		fi
+
+		G_WHIP_DESTROY
+
+		return $result
+
+	}
+
+	#G_WHIP_CHECKLIST "message"
+	# - Prompt user to select multiple option from G_WHIP_CHECKLIST_ARRAY and sets G_WHIP_RETURNED_VALUE
+	# - returns result 0=Ok, everything else considered a user canceled result
+	G_WHIP_CHECKLIST(){
+
+		local result=0
+		WHIP_MESSAGE=("$@")
+
+		if (( $G_USER_INPUTS )); then
+
+			G_WHIP_INIT 2
+			G_WHIP_RETURNED_VALUE=$(whiptail --title "$G_PROGRAM_NAME" --checklist "$WHIP_MESSAGE" --separate-output --default-item "$G_WHIP_DEFAULT_ITEM" --ok-button "$G_WHIP_BUTTON_OK_TEXT" --cancel-button "$G_WHIP_BUTTON_CANCEL_TEXT" --backtitle "$WHIP_BACKTITLE" $WHIP_SIZE_Y $WHIP_SIZE_X $WHIP_SIZE_Z "${G_WHIP_CHECKLIST_ARRAY[@]}" 3>&1 1>&2 2>&3; echo $? > /tmp/.WHIP_CHECKLIST_RESULT)
+			export G_WHIP_RETURNED_VALUE=$(echo -e "$G_WHIP_RETURNED_VALUE" | tr '\n' ' ')
+
+			result=$(cat /tmp/.WHIP_CHECKLIST_RESULT)
+			rm /tmp/.WHIP_CHECKLIST_RESULT
+
+		fi
+
+		G_WHIP_DESTROY
+
+		return $result
+
+	}
+
+	#G_WHIP_VIEWLOG /var/log/file.log
+	# - Prompt user to view logfile, then display it as needed.
+	G_WHIP_VIEWLOG(){
+
+		local fp_log="$1"
+
+		if (( $G_USER_INPUTS )); then
+
+			G_WHIP_YESNO "Would you like to view the contents of the following logfile?\n - $fp_log\n\nThis will contain further additional information, that may be required by the user."
+			if (( $? == 0 )); then
+
+				#???
+				#G_FILE_EXISTS "$fp_log"
+				#???
+
+				G_WHIP_INIT 0
+				whiptail --title "$G_PROGRAM_NAME | Log viewer" --textbox "$fp_log" --ok-button "$G_WHIP_BUTTON_OK_TEXT" --backtitle "$WHIP_BACKTITLE" --scrolltext $WHIP_SIZE_Y $WHIP_SIZE_X
+
+			fi
+
+			G_WHIP_DESTROY
+
+		fi
 
 	}
 
@@ -478,10 +799,12 @@
 	#		G_ERROR_HANDLER
 	G_ERROR_HANDLER(){
 
+		[ -n "$l_message" ] || local l_message="$G_ERROR_HANDLER_COMMAND"
+
 		#Ok
 		if (( $G_ERROR_HANDLER_EXITCODE == 0 )); then
 
-			G_DIETPI-NOTIFY 0 "$G_ERROR_HANDLER_COMMAND"
+			G_DIETPI-NOTIFY 0 "$l_message"
 
 		#Error
 		else
@@ -492,17 +815,7 @@
 			local print_report_to_dietpi_info='If problems persist, please report this to DietPi for investigation, including a screenshot of this error! (https://github.com/Fourdee/DietPi/issues).'
 			local print_unable_to_continue='Unable to continue, the program will now terminate.'
 
-			echo ''
-			if [ -n "$G_PROGRAM_NAME" ]; then
-
-				G_DIETPI-NOTIFY 1 "$G_PROGRAM_NAME: $G_ERROR_HANDLER_COMMAND"
-
-			else
-
-				G_DIETPI-NOTIFY 1 "$G_ERROR_HANDLER_COMMAND"
-
-			fi
-
+			G_DIETPI-NOTIFY 1 "$G_ERROR_HANDLER_COMMAND"
 			G_DIETPI-NOTIFY 2 "$print_exitcode_info"
 			G_DIETPI-NOTIFY 2 "$print_hw_info"
 
@@ -634,7 +947,8 @@ $print_logfile_info
 
 		G_ERROR_HANDLER_COMMAND="$@"
 
-		G_DIETPI-NOTIFY -2 "Running command: $G_ERROR_HANDLER_COMMAND"
+		[ -n "$l_message" ] || local l_message="$G_ERROR_HANDLER_COMMAND"
+		G_DIETPI-NOTIFY -2 "$l_message"
 
 		$G_ERROR_HANDLER_COMMAND &> /tmp/G_ERROR_HANDLER_COMMAND
 		G_ERROR_HANDLER_EXITCODE=$?
@@ -853,7 +1167,7 @@ $print_logfile_info
 				if (( $error_connection_failed )); then
 
 					#Ask to check settings,
-					whiptail --title "URL Connection Test Failed" --yesno "DietPi was unable to establish a connection:\n - $string\n\nIf problems persist, the URL may be offline/unreachable.\n\nWould you like to configure network settings and try again?" --yes-button "Ok" --no-button "Exit" --defaultno --backtitle "$G_PROGRAM_NAME" 15 80
+					whiptail --title "URL Connection Test Failed" --yesno "DietPi was unable to establish a connection:\n - $string\n\nIf problems persist, the URL may be offline/unreachable.\n\nWould you like to configure network settings and try again?" --yes-button "Ok" --no-button "Exit" --defaultno --backtitle "$WHIP_BACKTITLE" 15 80
 					CHOICE=$?
 
 					#run dietpi config
@@ -1045,7 +1359,7 @@ $print_logfile_info
 
 		G_DIETPI-NOTIFY 2 "APT autoremove + purge, please wait..."
 
-		DEBIAN_FRONTEND=noninteractive apt-get autoremove --purge -y  2>&1 | tee "$G_FP_LOG_APT"
+		DEBIAN_FRONTEND=noninteractive apt-get autoremove --purge -y 2>&1 | tee "$G_FP_LOG_APT"
 		G_ERROR_HANDLER_EXITCODE=${PIPESTATUS[0]}
 
 		G_ERROR_HANDLER
@@ -1103,7 +1417,14 @@ $print_logfile_info
 
 		G_DIETPI-NOTIFY 2 "APT upgrade, please wait..."
 
-		DEBIAN_FRONTEND=noninteractive apt-get upgrade -y 2>&1 | tee "$G_FP_LOG_APT"
+		local options=''
+		if (( $G_DISTRO >= 4 )); then
+
+			options='--allow-unauthenticated'
+
+		fi
+
+		DEBIAN_FRONTEND=noninteractive apt-get upgrade -y $options 2>&1 | tee "$G_FP_LOG_APT"
 		G_ERROR_HANDLER_EXITCODE=${PIPESTATUS[0]}
 
 		G_ERROR_HANDLER
@@ -1239,6 +1560,51 @@ _EOF_
 			/DietPi/dietpi/dietpi-backup 1
 
 			unset G_USER_INPUTS
+
+		fi
+
+	}
+
+	# Inject setting into config file.
+	#	First tries to replace old setting, else commented setting and otherwise adds it to end of file.
+	#	Optionally adds argument to new line after speficied pattern $4.
+	#	PRESERVE=1 G_CONFIG_INJECT allows to keep current setting, if present.
+	#	Example: G_CONFIG_INJECT 'prefer-family =' 'prefer-family = IPv4' '/etc/wgetrc'
+	G_CONFIG_INJECT(){
+
+		local pattern="$1"
+		local setting="$2"
+		local file="$3"
+		local after="$4"
+
+		if grep -q "^[[:blank:]]*$pattern" "$file"; then
+
+			(( $PRESERVE )) && G_DIETPI-NOTIFY 2 "Preserve existing setting '$(grep $pattern $file)' in '$file'" && exit 0
+			sed -i "/^[[:blank:]]*$pattern/c\\$setting" "$file" && G_DIETPI-NOTIFY 2 "Overwrite existing setting '$setting' in '$file'"
+
+		elif grep -q "^[[:blank:]#;]*$pattern" "$file"; then
+
+			sed -i "/^[[:blank:]#;]*$pattern/c\\$setting" "$file" && G_DIETPI-NOTIFY 2 "Turn comment into setting '$setting' in '$file'"
+
+		else
+
+			if [ -n "$after" ]; then
+
+				if grep -q "^[[:blank:]]*$after" "$file"; then
+
+					sed -i "/^[[:blank:]]*$after/a\\$setting" "$file" && G_DIETPI-NOTIFY 2 "Add setting '$setting' after '$after' in '$file'"
+
+				else
+
+					G_WHIP_MSG "The pattern '$after' couldn't be found in '$file', thus the setting '$setting' couldn't be added to it's desired position.\n\nYou can ignore this, if the setting is not needed, or add it manually to an appropriate position." G_WHIP_MSG
+
+				fi
+
+			else
+
+				echo "$setting" >> "$file" && G_DIETPI-NOTIFY 2 "Add setting '$setting' to '$file'"
+
+			fi
 
 		fi
 

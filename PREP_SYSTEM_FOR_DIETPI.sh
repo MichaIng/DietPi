@@ -7,6 +7,12 @@
 	# - Currently running Debian (ideally minimal, eg: Raspbian Lite-ish =)) )
 	# - Active eth0 connection
 	#------------------------------------------------------------------------------------------------
+	# Dev notes:
+	# Following items must be exported at all times, throughout this script, else, additional scripts launched will trigger incorrect results.
+	# - G_HW_MODEL
+	# - G_HW_ARCH
+	# - G_DISTRO
+	#------------------------------------------------------------------------------------------------
 
 	#Use master branch, if unset
 	GIT_BRANCH=${GIT_BRANCH:=master}
@@ -63,11 +69,19 @@
 	unset a_MIN_APT_PREREQS
 
 	# - Wget prefer IPv4
-	grep -q '^[[:blank:]]*prefer-family =' /etc/wgetrc &&
-	sed -i '/^[[:blank:]]*prefer-family =/c\prefer-family = IPv4' /etc/wgetrc ||
-	grep -q '^[[:blank:]#;]*prefer-family =' /etc/wgetrc &&
-	sed -i '/^[[:blank:]#;]*prefer-family =/c\prefer-family = IPv4' /etc/wgetrc ||
-	echo 'prefer-family = IPv4' >> /etc/wgetrc
+	if grep -q '^[[:blank:]]*prefer-family =' /etc/wgetrc; then
+
+		sed -i '/^[[:blank:]]*prefer-family =/c\prefer-family = IPv4' /etc/wgetrc
+
+	elif grep -q '^[[:blank:]#;]*prefer-family =' /etc/wgetrc; then
+
+		sed -i '/^[[:blank:]#;]*prefer-family =/c\prefer-family = IPv4' /etc/wgetrc
+
+	else
+
+		echo 'prefer-family = IPv4' >> /etc/wgetrc
+
+	fi
 
 	#Setup locale
 	# - Remove exisiting settings that will break dpkg-reconfigure
@@ -157,19 +171,19 @@
 	G_HW_ARCH_DESCRIPTION=$(uname -m)
 	if [ "$G_HW_ARCH_DESCRIPTION" = "armv6l" ]; then
 
-		G_HW_ARCH=1
+		export G_HW_ARCH=1
 
 	elif [ "$G_HW_ARCH_DESCRIPTION" = "armv7l" ]; then
 
-		G_HW_ARCH=2
+		export G_HW_ARCH=2
 
 	elif [ "$G_HW_ARCH_DESCRIPTION" = "aarch64" ]; then
 
-		G_HW_ARCH=3
+		export G_HW_ARCH=3
 
 	elif [ "$G_HW_ARCH_DESCRIPTION" = "x86_64" ]; then
 
-		G_HW_ARCH=10
+		export G_HW_ARCH=10
 
 	else
 
@@ -325,7 +339,8 @@
 	)
 
 	Run_Whiptail
-	G_HW_MODEL=$WHIP_RETURN_VALUE
+	# + Export to future scripts
+	export G_HW_MODEL=$WHIP_RETURN_VALUE
 
 	G_DIETPI-NOTIFY 2 "Setting G_HW_MODEL index of: $G_HW_MODEL"
 	G_DIETPI-NOTIFY 2 "CPU ARCH = $G_HW_ARCH : $G_HW_ARCH_DESCRIPTION"
@@ -412,7 +427,6 @@
 	#rm /etc/apt/sources.list.d/* &> /dev/null #Probably a bad idea
 	#rm /etc/apt/sources.list.d/deb-multimedia.list &> /dev/null #meveric, already done above
 	rm /etc/apt/sources.list.d/openmediavault.list &> /dev/null #http://dietpi.com/phpbb/viewtopic.php?f=11&t=2772&p=10646#p10594
-	#rm /etc/apt/sources.list.d/armbian.list
 
 	G_DIETPI-NOTIFY 2 "Setting APT sources.list: $DISTRO_TARGET_NAME $DISTRO_TARGET"
 
@@ -454,6 +468,9 @@ _EOF_
 
 	fi
 
+	# - Meveric, update repo to use our EU mirror: https://github.com/Fourdee/DietPi/issues/1519#issuecomment-368234302
+	sed -i 's@https://oph.mdrjr.net/meveric@http://fuzon.co.uk/meveric@' /etc/apt/sources.list.d/meveric* &> /dev/null
+
 	G_DIETPI-NOTIFY 2 "Updating APT for $DISTRO_TARGET_NAME:"
 
 	G_RUN_CMD apt-get clean
@@ -467,6 +484,9 @@ _EOF_
 
 	# - @MichaIng https://github.com/Fourdee/DietPi/pull/1266/files
 	G_DIETPI-NOTIFY 2 "Temporary disable automatic recommends/suggests installation and allow them to be autoremoved:"
+
+	#	Remove any existing apt recommends settings
+	rm /etc/apt/apt.conf.d/*recommends*
 
 	export G_ERROR_HANDLER_COMMAND='/etc/apt/apt.conf.d/99-dietpi-norecommends'
 	cat << _EOF_ > $G_ERROR_HANDLER_COMMAND
@@ -503,6 +523,7 @@ _EOF_
 		'cron'			# background job scheduler
 		'curl'			# Web address testing, downloading, uploading etc.
 		'debconf'		# APT package configuration, e.g. 'debconf-set-selections'
+		'dirmngr'		# GNU key management required for some APT installs via additional repos
 		'dosfstools' 		# DietPi-Drive_Manager + fat (boot) drive file system check
 		'dphys-swapfile'	# Swap file management
 		'ethtool'		# Ethernet link checking
@@ -607,7 +628,13 @@ _EOF_
 	#	Odroid N1
 	elif (( $G_HW_MODEL == 14 )); then
 
-		G_AGI libdrm-rockchip1 #unsure if required yet...
+		#G_AGI libdrm-rockchip1 #Not currently on meveric's repo
+		echo 0
+
+	#	Odroid N1
+	elif (( $G_HW_MODEL == 14 )); then
+
+		G_AGI linux-image-arm64-odroid-n1
 
 	#	Odroid C2
 	elif (( $G_HW_MODEL == 12 )); then
@@ -738,8 +765,8 @@ _EOF_
 	G_AGDUG
 
 	# - Distro is now target (for APT purposes and G_AGX support due to installed binary, its here, instead of after G_AGUP)
-	G_DISTRO=$DISTRO_TARGET
-	G_DISTRO_NAME=$DISTRO_TARGET_NAME
+	export G_DISTRO=$DISTRO_TARGET
+	export G_DISTRO_NAME=$DISTRO_TARGET_NAME
 
 	G_DIETPI-NOTIFY 2 "Disabling swapfile generation for dphys-swapfile during install"
 
@@ -749,10 +776,17 @@ _EOF_
 
 	G_AGI $INSTALL_PACKAGES
 
-	# - @MichaIng https://github.com/Fourdee/DietPi/pull/1266/files
-	G_DIETPI-NOTIFY 2 "Returning installation of recommends back to default"
+	G_DIETPI-NOTIFY 2 "Applying default DietPi configuration for APT"
 
-	G_RUN_CMD rm /etc/apt/apt.conf.d/99-dietpi-norecommends
+	export G_ERROR_HANDLER_COMMAND='/etc/apt/apt.conf.d/99-dietpi-norecommends'
+	cat << _EOF_ > $G_ERROR_HANDLER_COMMAND
+APT::Install-Recommends "false";
+APT::Install-Suggests "false";
+#APT::AutoRemove::RecommendsImportant "false";
+#APT::AutoRemove::SuggestsImportant "false";
+_EOF_
+	export G_ERROR_HANDLER_EXITCODE=$?
+	G_ERROR_HANDLER
 
 	G_DIETPI-NOTIFY 2 "Purging APT with autoremoval (in case of DISTRO upgrade/downgrade):"
 
@@ -885,8 +919,10 @@ _EOF_
 	systemctl daemon-reload &> /dev/null
 	rm /etc/cron.hourly/log2ram &> /dev/null
 
-	rm /etc/init.d/cpu_governor &> /dev/null# Meveric
-	rm /etc/systemd/system/cpu_governor.service &> /dev/null# Meveric
+	# - Meveric specific
+	rm /etc/init.d/cpu_governor &> /dev/null
+	rm /etc/systemd/system/cpu_governor.service &> /dev/null
+	rm /usr/local/sbin/setup-odroid &> /dev/null
 
 	# - Disable ARMbian's resize service (not automatically removed by ARMbian scripts...)
 	systemctl disable resize2fs &> /dev/null
@@ -987,6 +1023,10 @@ _EOF_
 	# - Disable serial console
 	/DietPi/dietpi/func/dietpi-set_hardware serialconsole disable
 
+	G_DIETPI-NOTIFY 2 "Reducing getty count and resource usage:"
+
+	systemctl mask getty-static
+
 	G_DIETPI-NOTIFY 2 "Configuring ntpd:"
 
 	systemctl disable systemd-timesyncd
@@ -1069,6 +1109,9 @@ _EOF_
 		tar xvf package.tar -C /lib/modules/
 		rm package.tar
 
+		G_RUN_CMD wget https://raw.githubusercontent.com/sparky-sbc/sparky-test/master/pro-ject-s2/snd-usb-audio.ko -O /lib/modules/$(uname -r)/kernel/sound/usb/snd-usb-audio.ko
+		G_RUN_CMD wget https://raw.githubusercontent.com/sparky-sbc/sparky-test/master/pro-ject-s2/snd-usbmidi-lib.ko -O /lib/modules/$(uname -r)/kernel/sound/usb/snd-usbmidi-lib.ko
+
 		cat << _EOF_ > /DietPi/uEnv.txt
 uenvcmd=setenv os_type linux;
 bootargs=earlyprintk clk_ignore_unused selinux=0 scandelay console=tty0 loglevel=1 real_rootflag=rw root=/dev/mmcblk0p2 rootwait init=/lib/systemd/systemd aotg.urb_fix=1 aotg.aotg1_speed=0
@@ -1114,13 +1157,19 @@ tic terminfo.txt
 tput cnorm
 _EOF_
 
-	# - XU4 FFMPEG fix. Prefer debian.org over Meveric for backports: https://github.com/Fourdee/DietPi/issues/1273
-	elif (( $G_HW_MODEL == 11 )); then
+	# - Odroids FFMPEG fix. Prefer debian.org over Meveric for backports: https://github.com/Fourdee/DietPi/issues/1273 + https://github.com/Fourdee/DietPi/issues/1556#issuecomment-369463910
+	elif (( $G_HW_MODEL > 9 && $G_HW_MODEL < 15 )); then
 
+		rm /etc/apt/preferences.d/meveric*
 		cat << _EOF_ > /etc/apt/preferences.d/backports
 Package: *
 Pin: release a=jessie-backports
 Pin: origin "fuzon.co.uk"
+Pin-Priority: 99
+
+Package: *
+Pin: release a=jessie-backports
+Pin: origin "oph.mdrjr.net"
 Pin-Priority: 99
 _EOF_
 
@@ -1158,11 +1207,13 @@ _EOF_
 	# - Nano histroy file
 	rm ~/.nano_history &> /dev/null
 
-	G_DIETPI-NOTIFY 2 'Disabling swapfile'
+	G_DIETPI-NOTIFY 2 'Removing swapfile from image'
 
 	/DietPi/dietpi/func/dietpi-set_dphys-swapfile 0 /var/swap
 	rm /var/swap &> /dev/null # still exists on some images...
 
+	# - re-enable for next run
+	sed -i '/AUTO_SETUP_SWAPFILE_SIZE=/c\AUTO_SETUP_SWAPFILE_SIZE=1' /DietPi/dietpi.txt
 	#	BBB disable swapfile gen
 	if (( $G_HW_MODEL == 71 )); then
 
@@ -1260,7 +1311,6 @@ _EOF_
 
 	G_DIETPI-NOTIFY 2 'Generating dietpi-fs_partition_resize for first boot'
 
-	#??? BBB skip this???
 	cat << _EOF_ > /etc/systemd/system/dietpi-fs_partition_resize.service
 [Unit]
 Description=dietpi-fs_partition_resize
@@ -1345,6 +1395,16 @@ _EOF_
 	# systemctl start dietpi-fs_partition_resize.service
 	# systemctl status dietpi-fs_partition_resize.service -l
 	# cat /var/tmp/dietpi/logs/fs_partition_resize.log
+
+	# - BBB remove fsexpansion: https://github.com/Fourdee/DietPi/issues/931#issuecomment-345451529
+	if (( $G_HW_MODEL == 71 )); then
+
+		rm /etc/systemd/system/dietpi-fs_expand.service
+		rm /var/lib/dietpi/fs_partition_resize.sh
+		rm /etc/systemd/system/dietpi-fs_partition_resize.service
+		systemctl daemon-reload
+
+	fi
 
 	G_DIETPI-NOTIFY 2 'Storing DietPi version ID'
 
