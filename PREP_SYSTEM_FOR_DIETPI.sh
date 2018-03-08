@@ -751,6 +751,10 @@ _EOF_
 	G_DIETPI-NOTIFY 2 "Purging APT with autoremoval:"
 
 	G_AGA
+	
+	# Purging additional packages, that in some cases do not get autoremoved:
+	# - dhcpcd5: https://github.com/Fourdee/DietPi/issues/1560#issuecomment-370136642
+	G_AGP dhcpcd5
 
 
 	#------------------------------------------------------------------------------------------------
