@@ -598,11 +598,9 @@ _EOF_
 		G_AGI linux-image-amd64
 		# Usually no firmware should be necessary for VMs. If user manually passes though some USB device, he might need to install the firmware then.
 		(( $G_HW_MODEL != 20 )) && G_AGI firmware-linux-nonfree
-		grep 'vendor_id' /proc/cpuinfo | grep -qi 'intel' && G_AGI intel-microcode
-		grep 'vendor_id' /proc/cpuinfo | grep -qi 'amd' && G_AGI amd64-microcode
 
 		#	Grub EFI
-		if (( $(dpkg --get-selections | grep -ci -m1 '^grub-efi-amd64[[:space:]]') )) ||
+		if dpkg --get-selections | grep -q '^grub-efi-amd64' ||
 			[ -d /boot/efi ]; then
 
 			G_AGI grub-efi-amd64
