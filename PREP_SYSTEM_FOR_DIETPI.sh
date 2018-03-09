@@ -1214,12 +1214,6 @@ _EOF_
 
 	# - re-enable for next run
 	sed -i '/AUTO_SETUP_SWAPFILE_SIZE=/c\AUTO_SETUP_SWAPFILE_SIZE=1' /DietPi/dietpi.txt
-	#	BBB disable swapfile gen
-	if (( $G_HW_MODEL == 71 )); then
-
-		sed -i '/AUTO_SETUP_SWAPFILE_SIZE=/c\AUTO_SETUP_SWAPFILE_SIZE=0' /DietPi/dietpi.txt
-
-	fi
 
 	G_DIETPI-NOTIFY 2 'Resetting boot.ini, config.txt, cmdline.txt etc'
 
