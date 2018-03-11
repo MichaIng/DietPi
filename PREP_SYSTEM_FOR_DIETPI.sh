@@ -598,11 +598,9 @@ _EOF_
 		G_AGI linux-image-amd64
 		# Usually no firmware should be necessary for VMs. If user manually passes though some USB device, he might need to install the firmware then.
 		(( $G_HW_MODEL != 20 )) && G_AGI firmware-linux-nonfree
-		grep 'vendor_id' /proc/cpuinfo | grep -qi 'intel' && G_AGI intel-microcode
-		grep 'vendor_id' /proc/cpuinfo | grep -qi 'amd' && G_AGI amd64-microcode
 
 		#	Grub EFI
-		if (( $(dpkg --get-selections | grep -ci -m1 '^grub-efi-amd64[[:space:]]') )) ||
+		if dpkg --get-selections | grep -q '^grub-efi-amd64' ||
 			[ -d /boot/efi ]; then
 
 			G_AGI grub-efi-amd64
@@ -751,6 +749,10 @@ _EOF_
 	G_DIETPI-NOTIFY 2 "Purging APT with autoremoval:"
 
 	G_AGA
+	
+	# Purging additional packages, that in some cases do not get autoremoved:
+	# - dhcpcd5: https://github.com/Fourdee/DietPi/issues/1560#issuecomment-370136642
+	G_AGP dhcpcd5
 
 
 	#------------------------------------------------------------------------------------------------
@@ -1207,17 +1209,13 @@ _EOF_
 	# - Nano histroy file
 	rm ~/.nano_history &> /dev/null
 
-	G_DIETPI-NOTIFY 2 'Disabling swapfile'
+	G_DIETPI-NOTIFY 2 'Removing swapfile from image'
 
 	/DietPi/dietpi/func/dietpi-set_dphys-swapfile 0 /var/swap
 	rm /var/swap &> /dev/null # still exists on some images...
 
-	#	BBB disable swapfile gen
-	if (( $G_HW_MODEL == 71 )); then
-
-		sed -i '/AUTO_SETUP_SWAPFILE_SIZE=/c\AUTO_SETUP_SWAPFILE_SIZE=0' /DietPi/dietpi.txt
-
-	fi
+	# - re-enable for next run
+	sed -i '/AUTO_SETUP_SWAPFILE_SIZE=/c\AUTO_SETUP_SWAPFILE_SIZE=1' /DietPi/dietpi.txt
 
 	G_DIETPI-NOTIFY 2 'Resetting boot.ini, config.txt, cmdline.txt etc'
 
@@ -1403,7 +1401,6 @@ _EOF_
 		systemctl daemon-reload
 
 	fi
-
 
 	G_DIETPI-NOTIFY 2 'Storing DietPi version ID'
 

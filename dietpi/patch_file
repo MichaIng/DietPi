@@ -300,14 +300,6 @@ _EOF_
 
 			fi
 			#-------------------------------------------------------------------------------
-			#Microcode Native PC BIOS: https://github.com/Fourdee/DietPi/issues/1448
-			# - Install intel microcode if required on system. Due to PREP only installing detected (nice), me forgetting (not nice).
-			if (( $G_HW_MODEL == 21 )); then
-
-				grep 'vendor_id' /proc/cpuinfo | grep -qi 'intel' && G_AGI intel-microcode
-
-			fi
-			#-------------------------------------------------------------------------------
 			#Sparky SBC kernel patches: Pro-Ject-S2 dac DSD native support on sparky, also other few dac ids.
 			if (( $G_HW_MODEL == 70 )); then
 
@@ -318,14 +310,6 @@ _EOF_
 			#-------------------------------------------------------------------------------
 			#GNU key management required for some APT installs via additional repos: https://github.com/Fourdee/DietPi/issues/1388
 			G_AGI dirmngr
-			#-------------------------------------------------------------------------------
-			#Re-Apply swap to set /tmp tmpfs size: https://github.com/Fourdee/DietPi/issues/1027#issuecomment-369435049
-			#	Existing installations only needed for this patch as, dietpi-software will apply the below automatically during its 1st run of software installations.
-			if (( $G_DIETPI_INSTALL_STAGE >= 1 )); then
-
-				/DietPi/dietpi/func/dietpi-set_dphys-swapfile $(grep -m1 '^AUTO_SETUP_SWAPFILE_SIZE=' /DietPi/dietpi.txt | sed 's/.*=//')
-
-			fi
 			#-------------------------------------------------------------------------------
 			# Odroids FFmpeg decendency fix: https://github.com/Fourdee/DietPi/issues/1556#issuecomment-369463910
 			if (( $G_HW_MODEL > 9 && $G_HW_MODEL < 15 )); then
@@ -347,6 +331,99 @@ _EOF_
 			#-------------------------------------------------------------------------------
 			# Subsonic 5 replaced with Airsonic: https://github.com/Fourdee/DietPi/issues/1585
 			sed -i '/^aSOFTWARE_INSTALL_STATE\[33\]=/c\aSOFTWARE_INSTALL_STATE\[33\]=0' /DietPi/dietpi/.installed &> /dev/null
+			#-------------------------------------------------------------------------------
+
+		elif (( $SUBVERSION_CURRENT == 3 )); then
+
+			#-------------------------------------------------------------------------------
+			#Never run this in future patches!!! : https://github.com/Fourdee/DietPi/issues/1592
+			#/DietPi/dietpi/func/dietpi-set_core_environment
+			#-------------------------------------------------------------------------------
+			#Re-Apply swap to set /tmp tmpfs size: https://github.com/Fourdee/DietPi/issues/1027#issuecomment-369435049
+			# + Force auto swapfile size https://github.com/Fourdee/DietPi/issues/1593#issuecomment-371516418
+			/DietPi/dietpi/func/dietpi-set_dphys-swapfile 1
+			#-------------------------------------------------------------------------------
+			#Service updates: http://dietpi.com/phpbb/viewtopic.php?f=11&t=1148&p=11322#p11322
+			$(which mkdir) -p /var/tmp/dietpi/logs
+			cat << _EOF_ > /etc/systemd/system/dietpi-ramdisk.service
+[Unit]
+Description=DietPi-RAMdisk
+After=local-fs.target boot.mount
+Before=rsyslog.service syslog.service
+
+[Service]
+Type=forking
+RemainAfterExit=yes
+ExecStartPre=$(which mkdir) -p /var/tmp/dietpi/logs
+ExecStart=/bin/bash -c '/boot/dietpi/dietpi-ramdisk 0 &>> /var/tmp/dietpi/logs/dietpi-ramdisk.log'
+ExecStop=/bin/bash -c '/DietPi/dietpi/dietpi-ramdisk 1 &>> /var/tmp/dietpi/logs/dietpi-ramdisk.log'
+
+[Install]
+WantedBy=local-fs.target
+_EOF_
+			systemctl daemon-reload
+			systemctl enable dietpi-ramdisk.service
+
+			cat << _EOF_ > /etc/systemd/system/dietpi-ramlog.service
+[Unit]
+Description=DietPi-RAMlog
+After=local-fs.target boot.mount
+Before=rsyslog.service syslog.service
+
+[Service]
+Type=forking
+RemainAfterExit=yes
+ExecStartPre=$(which mkdir) -p /var/tmp/dietpi/logs
+ExecStart=/bin/bash -c '/boot/dietpi/dietpi-ramlog 0 &>> /var/tmp/dietpi/logs/dietpi-ramlog.log'
+ExecStop=/bin/bash -c '/DietPi/dietpi/dietpi-ramlog 1 &>> /var/tmp/dietpi/logs/dietpi-ramlog.log'
+
+[Install]
+WantedBy=local-fs.target
+_EOF_
+			systemctl daemon-reload
+			systemctl enable dietpi-ramlog.service
+			#-------------------------------------------------------------------------------
+			#Assure absence of dhcpcd5, if dhclient (isc-dhcp-client) is active: https://github.com/Fourdee/DietPi/issues/1560#issuecomment-370136642
+			ps aux | grep -q 'dhclient'  && G_AGP dhcpcd5
+			#-------------------------------------------------------------------------------
+			#Fix microcode installation based on image creation CPU instead of image target CPU: https://github.com/Fourdee/DietPi/pull/1596
+			if (( $G_HW_ARCH == 10 )); then
+
+				if grep 'vendor_id' /proc/cpuinfo | grep -qi 'intel'; then
+
+					dpkg --get-selections | grep -q '^amd64-microcode' && G_AGP amd64-microcode
+					G_AGI intel-microcode
+
+				elif grep 'vendor_id' /proc/cpuinfo | grep -qi 'amd'; then
+
+					dpkg --get-selections | grep -q '^intel-microcode' && G_AGP intel-microcode
+					G_AGI amd64-microcode
+
+				fi
+
+			fi
+			#-------------------------------------------------------------------------------
+			#Reinstalls
+			#	UrBackupServer
+			/DietPi/dietpi/dietpi-software reinstall 111
+			#-------------------------------------------------------------------------------
+			#Cron minutely support: https://github.com/Fourdee/DietPi/pull/1578
+			mkdir -p /etc/cron.minutely
+
+			if (( ! $(grep -ci -m1 'cron.minutely' /etc/crontab) )); then
+
+				cat << _EOF_ >> /etc/crontab
+*/30 * * * *   root    cd / && run-parts --report /etc/cron.minutely
+_EOF_
+
+			fi
+			#-------------------------------------------------------------------------------
+
+		elif (( $SUBVERSION_CURRENT == 4 )); then
+
+			#-------------------------------------------------------------------------------
+			#Rerun drive manager to remove x-systemd.automount if autofs4 module not found: https://github.com/Fourdee/DietPi/issues/1607
+			/DietPi/dietpi/dietpi-drive_manager 2
 			#-------------------------------------------------------------------------------
 
 		fi
