@@ -525,7 +525,6 @@ _EOF_
 		'debconf'		# APT package configuration, e.g. 'debconf-set-selections'
 		'dirmngr'		# GNU key management required for some APT installs via additional repos
 		'dosfstools' 		# DietPi-Drive_Manager + fat (boot) drive file system check
-		'dphys-swapfile'	# Swap file management
 		'ethtool'		# Ethernet link checking
 		'fake-hwclock'		# Hardware clock emulation, to allow correct timestamps during boot before network time sync
 		'fbset'			# DietPi-Config display settings
@@ -749,7 +748,7 @@ _EOF_
 	G_DIETPI-NOTIFY 2 "Purging APT with autoremoval:"
 
 	G_AGA
-	
+
 	# Purging additional packages, that in some cases do not get autoremoved:
 	# - dhcpcd5: https://github.com/Fourdee/DietPi/issues/1560#issuecomment-370136642
 	G_AGP dhcpcd5
@@ -769,10 +768,6 @@ _EOF_
 	# - Distro is now target (for APT purposes and G_AGX support due to installed binary, its here, instead of after G_AGUP)
 	export G_DISTRO=$DISTRO_TARGET
 	export G_DISTRO_NAME=$DISTRO_TARGET_NAME
-
-	G_DIETPI-NOTIFY 2 "Disabling swapfile generation for dphys-swapfile during install"
-
-	G_RUN_CMD echo -e "CONF_SWAPSIZE=0" > /etc/dphys-swapfile
 
 	G_DIETPI-NOTIFY 2 "Installing core DietPi pre-req APT packages"
 
