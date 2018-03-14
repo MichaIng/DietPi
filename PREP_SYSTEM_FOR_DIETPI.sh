@@ -314,7 +314,7 @@
 		'14' 'Odroid N1'
 		'13' 'Odroid U3'
 		'12' 'Odroid C2'
-		'11' 'Odroid XU3/4/HC1'
+		'11' 'Odroid XU3/4/HC1/HC2'
 		'10' 'Odroid C1'
 		'38' 'OrangePi PC 2'
 		'37' 'OrangePi Prime'
