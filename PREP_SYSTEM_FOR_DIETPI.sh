@@ -643,7 +643,7 @@ _EOF_
 
 		#G_AGI linux-image-4.9-armhf-odroid-xu3
 		G_AGI $(dpkg --get-selections | grep '^linux-image' | awk '{print $1}')
-		(( $(dpkg --get-selections | grep -ci -m1 '^linux-image') )) || G_AGI linux-image-armhf-odroid-xu3
+		(( $(dpkg --get-selections | grep -ci -m1 '^linux-image') )) || G_AGI linux-image-4.14-armhf-odroid-xu4
 
 	#	Odroid C1
 	elif (( $G_HW_MODEL == 10 )); then
