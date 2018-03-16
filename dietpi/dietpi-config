@@ -116,13 +116,6 @@
 
 				TARGETMENUID=1
 
-				if (( $G_HW_MODEL == 20 )); then
-
-					TARGETMENUID=0
-					Info_HW_OptionNotSupported
-
-				fi
-
 			 elif (( $OPTION == 2 )); then
 
 				TARGETMENUID=14
@@ -281,14 +274,19 @@
 		else
 
 			whiptail_menu_array+=("1" "Change Resolution")
-			whiptail_menu_array+=("2" "GPU/RAM Memory Split")
 
-			local lcdpanel_text=$(cat /DietPi/dietpi.txt | grep -m1 '^CONFIG_LCDPANEL=' | sed 's/.*=//')
-			whiptail_menu_array+=("3" "LCD Panel addon: $lcdpanel_text")
+			# Just offer resolution option for VMs
+			if (( $G_HW_MODEL != 20 )); then
+
+				whiptail_menu_array+=("2" "GPU/RAM Memory Split")
+				local lcdpanel_text=$(cat /DietPi/dietpi.txt | grep -m1 '^CONFIG_LCDPANEL=' | sed 's/.*=//')
+				whiptail_menu_array+=("3" "LCD Panel addon: $lcdpanel_text")
+
+			fi
 
 		fi
 
-		whiptail_menu_array+=("14" "LED Control")
+		(( $G_HW_MODEL != 20 )) && whiptail_menu_array+=("14" "LED Control")
 
 		#RPi only
 		if (( $G_HW_MODEL < 10 )); then
@@ -786,8 +784,45 @@
 		#Return to Display Options Menu
 		TARGETMENUID=1
 
+		#VM
+		if (( $G_HW_MODEL == 20 )); then
+
+			local current="$(grep '^[[:blank:]]*GRUB_GFXMODE=' /etc/default/grub | sed 's/^.*=//')"
+			[ -z $current ] && current='System default'
+
+			local array=(
+
+				'1' '1600x1200'
+				'2' '1280x1024'
+				'3' '1152x864'
+				'4' '1024x768'
+				'5' '800x600'
+				'6' 'System default'
+
+			)
+
+			G_WHIP_MENU_ARRAY=("${array[@]}")
+			G_WHIP_MENU "Please select a display resolution. Current: $current\n\nNote: This only affects the virtual screen resolution, not the SSH session.\n      You might need to increase the maximum guest screen resolution within your VM software."
+			if (( $? == 0 )); then
+
+				if (( $G_WHIP_RETURNED_VALUE == 6 )); then
+
+					sed -i 's/^[[:blank:]]*GRUB_GFXMODE=/#GRUB_GFXMODE=/' /etc/default/grub
+					sed -i 's/^[[:blank:]]*GRUB_GFXPAYLOAD_LINUX=/#GRUB_GFXPAYLOAD_LINUX=/' /etc/default/grub
+
+				else
+
+					G_CONFIG_INJECT 'GRUB_GFXMODE=' "GRUB_GFXMODE=${array[(( $G_WHIP_RETURNED_VALUE * 2 - 1 ))]}" /etc/default/grub
+					G_CONFIG_INJECT 'GRUB_GFXPAYLOAD_LINUX=' 'GRUB_GFXPAYLOAD_LINUX=keep' /etc/default/grub
+
+				fi
+
+				update-grub
+
+			fi
+
 		#Native PC
-		if (( $G_HW_MODEL == 21 )); then
+		elif (( $G_HW_MODEL == 21 )); then
 
 			local whiptail_menu_array=()
 
@@ -801,6 +836,7 @@
 			fi
 
 			whiptail_menu_array+=('Nvidia' " : $nvidia_text")
+			#whiptail_menu_array+=('Intel' " : ") #https://github.com/Fourdee/DietPi/issues/1007#issuecomment-321577913
 
 			local radeon_installed=0
 			local intel_installed=0
@@ -1159,33 +1195,49 @@
 		local whiptail_menu_array=()
 
 		#Get Current Settings
-		local swap_size=$(grep -m1 '^CONF_SWAPSIZE=' /etc/dphys-swapfile | sed 's/.*=//')
-		local swap_text="$swap_size MB"
+		local swap_size=$(free -m | grep -im1 'Swap:' | awk '{print $2}')
+		local swap_location="$(grep -m1 '^[[:blank:]]*AUTO_SETUP_SWAPFILE_LOCATION=' /DietPi/dietpi.txt | sed 's/.*=//')"
+		local swap_size_text="$swap_size MB"
 		if (( $swap_size == 0 )); then
-			swap_text="Disabled"
+
+			swap_size_text='Disabled'
+
 		fi
-		whiptail_menu_array+=("Swapfile size" ": $swap_text")
+
+		whiptail_menu_array+=('Swapfile' ": $swap_size_text | $swap_location")
 
 		#NTPD
 		local ntpd_mode_current=$(grep -m1 '^CONFIG_NTP_MODE=' /DietPi/dietpi.txt | sed 's/.*=//')
 		local ntpd_mode_text=""
 		if (( $ntpd_mode_current == 0 )); then
+
 			ntpd_mode_text="Disabled"
+
 		elif (( $ntpd_mode_current == 1 )); then
+
 			ntpd_mode_text="Boot Only"
+
 		elif (( $ntpd_mode_current == 2 )); then
+
 			ntpd_mode_text="Boot + Daily"
+
 		elif (( $ntpd_mode_current == 3 )); then
+
 			ntpd_mode_text="Boot + Hourly"
+
 		elif (( $ntpd_mode_current == 4 )); then
+
 			ntpd_mode_text="Daemon + Drift"
+
 		fi
 		whiptail_menu_array+=("Time sync mode" ": $ntpd_mode_text")
 
 		serialconsole_state=$(cat /DietPi/dietpi.txt | grep -m1 '^CONFIG_SERIAL_CONSOLE_ENABLE=' | sed 's/.*=//')
 		serialconsole_text='Disabled'
 		if (( $serialconsole_state == 1 )); then
+
 			serialconsole_text='Enabled'
+
 		fi
 
 		whiptail_menu_array+=("Update firmware" "")
@@ -1193,17 +1245,23 @@
 		local bluetooth_state_text='Enabled'
 		local bluetooth_state=1
 		if [ -f /etc/modprobe.d/disable_bt.conf ]; then
+
 			bluetooth_state=0
 			bluetooth_state_text='Disabled'
+
 		fi
 		# - No bluetooth for VM
 		if (( $G_HW_MODEL != 20 )); then
+
 			whiptail_menu_array+=("Bluetooth" ": $bluetooth_state_text")
+
 		fi
 
 		# - No serial console for VM
 		if (( $G_HW_MODEL != 20 )); then
+
 			whiptail_menu_array+=("Serial console" ": $serialconsole_text")
+
 		fi
 
 		#RPi Specific
@@ -1212,14 +1270,18 @@
 			local rpi_i2c_enabled=$(cat /DietPi/config.txt | grep -ci -m1 'dtparam=i2c_arm=on')
 			local rpi_i2c_text='Disabled'
 			if (( $rpi_i2c_enabled == 1 )); then
+
 				rpi_i2c_text='Enabled'
+
 			fi
 
 			local rpi_i2cbaudrate_hz="$(( $(cat /DietPi/config.txt | grep -m1 'i2c_arm_baudrate=' | sed 's/.*=//') / 1000 )) kHz"
 			local usb_max_current_enabled=$(cat /DietPi/config.txt | grep -ci -m1 'max_usb_current=1')
 			local rpi_usbmaxcurrent_text='Disabled'
 			if [ "$usb_max_current_enabled" = 1 ]; then
+
 				rpi_usbmaxcurrent_text='Enabled'
+
 			fi
 
 			if (( $G_HW_MODEL == 3 )); then
@@ -1252,23 +1314,34 @@
 
 		if (( $CHOICE == 0 )); then
 
-			if [ "$OPTION" = "Swapfile size" ]; then
+			if [ "$OPTION" = 'Swapfile' ]; then
 
-				MIN_VALUE=0
-				MAX_VALUE=2000
-				OPTION=$(whiptail --inputbox "This will set the size of your swap file in MB:\n\nSwapfile has a swapiness setting of 1. Swapfile is used only to prevent out of memory errors.\n\n - Recommended value = 1 (auto)\n - 0 = Disable swapfile\n - 1 = Auto size swapfile (2GB - RAM = size)\n - 2 - $MAX_VALUE = Manual size" 16 75 "$swap_size" --title "SwapFile Size (MB)" 3>&1 1>&2 2>&3)
-				CHOICE=$?
-				if (( $CHOICE == 0 )); then
+				local min_value=0
+				local max_value=2000
+				G_WHIP_DEFAULT_ITEM=$swap_size
+				G_WHIP_INPUTBOX "Please input a new value for swapfile size (MB):\n\nSwapfile has a swapiness setting of 1, and, is used only to prevent out of memory errors.\n\n - Recommended value = 1 (auto)\n - 0 = Disable swapfile\n - 1 = Auto size swapfile (2GB - RAM = size)\n - 2 - $max_value = Manual size"
+				if (( $? == 0 )); then
 
-					if [[ $OPTION =~ ^-?[0-9]+$ ]] &&
-						(( $OPTION >= $MIN_VALUE )) && (( $OPTION <= $MAX_VALUE )); then
+					local swapfile_size_target=$G_WHIP_RETURNED_VALUE
+					local swap_location_target="$swap_location"
 
-						#Generate swapfile with new size
-						if (( $OPTION != $swap_size )); then
+					if (( $(G_CHECK_VALIDINT $swapfile_size_target) == 0 &&
+						$swapfile_size_target >= $min_value && $swapfile_size_target <= $max_value )); then
 
-							/DietPi/dietpi/func/dietpi-set_dphys-swapfile $OPTION
+						# - Optional location
+						if (( $swapfile_size_target > 0 )); then
+
+							G_WHIP_DEFAULT_ITEM="$swap_location"
+							G_WHIP_INPUTBOX 'Optional: Please enter a location to generate the swapfile.\n\nNB: If unsure, enter the default "/var/swap".\n\nFor a swapfile on userdata location (eg: USB drive, if setup), use /mnt/dietpi_userdata/.swapfile'
+							if (( $? == 0 )); then
+
+								swap_location_target="$G_WHIP_RETURNED_VALUE"
+
+							fi
 
 						fi
+
+						/DietPi/dietpi/func/dietpi-set_dphys-swapfile $swapfile_size_target $swap_location_target
 
 					else
 
@@ -2423,7 +2496,7 @@
 		killall dhclient &> /dev/null
 
 		#Restart Networking
-		G_DIETPI-NOTIFY 2 'Restarting networking services, please wait...'
+		G_DIETPI-NOTIFY 2 'Restarting networking, please wait...'
 		systemctl daemon-reload
 		systemctl restart networking
 
@@ -4503,17 +4576,17 @@ Custom     : Write = $CUSTOM_WRITE | Read = $CUSTOM_READ\
 				#	RPI, none disables HDMI aswell.
 				if (( $G_HW_MODEL < 10 )); then
 
-					G_WHIP_MENU_ARRAY+=("none" "Disables HDMI + 3.5mm Analogue")
+					G_WHIP_MENU_ARRAY+=('none' 'Disables HDMI + 3.5mm Analogue')
 
 				#	NanoPi M2/M3, BPi Pro, OPi Zero
 				elif (( $G_HW_MODEL == 32 || $G_HW_MODEL == 51 || $G_HW_MODEL == 61 || $G_HW_MODEL == 62 )); then
 
-					G_WHIP_MENU_ARRAY+=("default" "3.5mm Analogue")
+					G_WHIP_MENU_ARRAY+=('default' '3.5mm Analogue')
 
 				#	Native PC | List available
 				elif (( $G_HW_MODEL == 21 )); then
 
-					G_WHIP_MENU_ARRAY+=("default" "HW:0,0")
+					G_WHIP_MENU_ARRAY+=('default' 'HW:0,0')
 
 					#	Install prereqs to allow for detection
 					if (( ! $(dpkg --get-selections | grep -ci -m1 '^alsa-utils') )); then
@@ -4549,88 +4622,89 @@ Custom     : Write = $CUSTOM_WRITE | Read = $CUSTOM_READ\
 
 				else
 
-					G_WHIP_MENU_ARRAY+=("default" "HDMI")
+					G_WHIP_MENU_ARRAY+=('default' 'HDMI')
 
 				fi
 
 				# - RPI
 				if (( $G_HW_MODEL < 10 )); then
 
-					G_WHIP_MENU_ARRAY+=("rpi-bcm2835" "Onboard: HDMI (if plugged in, else 3.5mm)")
-					G_WHIP_MENU_ARRAY+=("rpi-bcm2835-3.5mm" "Onboard: 3.5mm forced output")
-					G_WHIP_MENU_ARRAY+=("rpi-bcm2835-ultrahq" "Onboard HQ: HDMI (if plugged in, else 3.5mm)")
-					G_WHIP_MENU_ARRAY+=("rpi-bcm2835-ultrahq-3.5mm" "Onboard HQ: 3.5mm forced output")
-					G_WHIP_MENU_ARRAY+=("allo-boss-dac-pcm512x-audio" "Allo Boss DAC")
-					G_WHIP_MENU_ARRAY+=("allo-boss-dac-pcm512x-audio" "Allo Mini Boss DAC")
-					G_WHIP_MENU_ARRAY+=("allo-digione" "Allo DigiOne")
-					G_WHIP_MENU_ARRAY+=("allo-piano-dac-pcm512x-audio" "Allo Piano DAC")
-					G_WHIP_MENU_ARRAY+=("allo-piano-dac-pcm512x-audio" "Allo Piano DAC")
-					G_WHIP_MENU_ARRAY+=("dionaudio-loco" "Dion Audio LOCO")
-					G_WHIP_MENU_ARRAY+=("dionaudio-loco-v2" "Dion Audio LOCO V2")
-					G_WHIP_MENU_ARRAY+=("googlevoicehat-soundcard" "Google AIY voice kit")
-					G_WHIP_MENU_ARRAY+=("hifiberry-amp" "HifiBerry AMP / AMP+")
-					G_WHIP_MENU_ARRAY+=("hifiberry-dac" "HifiBerry DAC / MiniAMP")
-					G_WHIP_MENU_ARRAY+=("hifiberry-dacplus" "HifiBerry DAC+ / DAC+ Pro")
-					G_WHIP_MENU_ARRAY+=("hifiberry-digi" "HifiBerry DIGI / DIGI+")
-					G_WHIP_MENU_ARRAY+=("hifiberry-digi-pro" "HifiBerry DIGI Pro")
-					G_WHIP_MENU_ARRAY+=("i-sabre-k2m" "AudioPhonics I-Sabre ES9028 Q2M")
-					G_WHIP_MENU_ARRAY+=("iqaudio-dacplus" "Pi-DAC+, Pi-DACZero, Pi-DAC Pro, Pi-DigiAMP+")
-					G_WHIP_MENU_ARRAY+=("iqaudio-digi-wm8804-audio" "Pi-DIGI+")
-					G_WHIP_MENU_ARRAY+=("iqaudio-dacplus,auto_mute_amp" "Pi-DigiAMP+")
-					G_WHIP_MENU_ARRAY+=("iqaudio-dacplus,unmute_amp" "Pi-DigiAMP+")
-					G_WHIP_MENU_ARRAY+=("justboom-dac" "JustBoom: DAC HAT, Amp HAT, DAC Zero and Amp Zero")
-					G_WHIP_MENU_ARRAY+=("justboom-digi" "JustBoom: Digi HAT and Digi Zero")
-					G_WHIP_MENU_ARRAY+=("rpi-dac" "Soekris DAM1021 (pcm1794a)")
+					G_WHIP_MENU_ARRAY+=('rpi-bcm2835' 'Onboard: HDMI (if plugged in, else 3.5mm)')
+					G_WHIP_MENU_ARRAY+=('rpi-bcm2835-3.5mm' 'Onboard: 3.5mm forced output')
+					G_WHIP_MENU_ARRAY+=('rpi-bcm2835-ultrahq' 'Onboard HQ: HDMI (if plugged in, else 3.5mm)')
+					G_WHIP_MENU_ARRAY+=('rpi-bcm2835-ultrahq-3.5mm' 'Onboard HQ: 3.5mm forced output')
+					G_WHIP_MENU_ARRAY+=('allo-boss-dac-pcm512x-audio' 'Allo Boss DAC')
+					G_WHIP_MENU_ARRAY+=('allo-boss-dac-pcm512x-audio' 'Allo Mini Boss DAC')
+					G_WHIP_MENU_ARRAY+=('allo-digione' 'Allo DigiOne')
+					G_WHIP_MENU_ARRAY+=('allo-piano-dac-pcm512x-audio' 'Allo Piano DAC')
+					G_WHIP_MENU_ARRAY+=('allo-piano-dac-pcm512x-audio' 'Allo Piano DAC')
+					G_WHIP_MENU_ARRAY+=('applepi-dac' 'ApplePi DAC (Orchard Audio)')
+					G_WHIP_MENU_ARRAY+=('dionaudio-loco' 'Dion Audio LOCO')
+					G_WHIP_MENU_ARRAY+=('dionaudio-loco-v2' 'Dion Audio LOCO V2')
+					G_WHIP_MENU_ARRAY+=('googlevoicehat-soundcard' 'Google AIY voice kit')
+					G_WHIP_MENU_ARRAY+=('hifiberry-amp' 'HifiBerry AMP / AMP+')
+					G_WHIP_MENU_ARRAY+=('hifiberry-dac' 'HifiBerry DAC / MiniAMP')
+					G_WHIP_MENU_ARRAY+=('hifiberry-dacplus' 'HifiBerry DAC+ / DAC+ Pro')
+					G_WHIP_MENU_ARRAY+=('hifiberry-digi' 'HifiBerry DIGI / DIGI+')
+					G_WHIP_MENU_ARRAY+=('hifiberry-digi-pro' 'HifiBerry DIGI Pro')
+					G_WHIP_MENU_ARRAY+=('i-sabre-k2m' 'AudioPhonics I-Sabre ES9028 Q2M')
+					G_WHIP_MENU_ARRAY+=('iqaudio-dacplus' 'Pi-DAC+, Pi-DACZero, Pi-DAC Pro, Pi-DigiAMP+')
+					G_WHIP_MENU_ARRAY+=('iqaudio-digi-wm8804-audio' 'Pi-DIGI+')
+					G_WHIP_MENU_ARRAY+=('iqaudio-dacplus,auto_mute_amp' 'Pi-DigiAMP+')
+					G_WHIP_MENU_ARRAY+=('iqaudio-dacplus,unmute_amp' 'Pi-DigiAMP+')
+					G_WHIP_MENU_ARRAY+=('justboom-dac' 'JustBoom: DAC HAT, Amp HAT, DAC Zero and Amp Zero')
+					G_WHIP_MENU_ARRAY+=('justboom-digi' 'JustBoom: Digi HAT and Digi Zero')
+					G_WHIP_MENU_ARRAY+=('rpi-dac' 'Soekris DAM1021 (pcm1794a)')
 
 				# - C1/C2
 				elif (( $G_HW_MODEL == 10 || $G_HW_MODEL == 12 )); then
 
-					G_WHIP_MENU_ARRAY+=("odroid-hifishield-plus" "Odroid HiFi Shield 1/Plus")
-					G_WHIP_MENU_ARRAY+=("odroid-hifishield-2" "Odroid HiFi Shield 2")
+					G_WHIP_MENU_ARRAY+=('odroid-hifishield-plus' 'Odroid HiFi Shield 1/Plus')
+					G_WHIP_MENU_ARRAY+=('odroid-hifishield-2' 'Odroid HiFi Shield 2')
 
 				# - h2+ | OPi Zero
 				elif (( $G_HW_MODEL == 32 )); then
 
-					G_WHIP_MENU_ARRAY+=("h2-hdmi" "HDMI")
+					G_WHIP_MENU_ARRAY+=('h2-hdmi' 'HDMI')
 
 				# - Rock64
 				elif (( $G_HW_MODEL == 43 )); then
 
-					G_WHIP_MENU_ARRAY+=("rock64-analogue" "3.5MM")
+					G_WHIP_MENU_ARRAY+=('rock64-analogue' '3.5MM')
 
 				#	NanoPi M2/M3
 				elif (( $G_HW_MODEL == 61 || $G_HW_MODEL == 62 )); then
 
-					G_WHIP_MENU_ARRAY+=("s5pxx18-hdmi" "HDMI")
+					G_WHIP_MENU_ARRAY+=('s5pxx18-hdmi' 'HDMI')
 
 				# - H3
 				elif (( $G_HW_CPUID == 1 )); then
 
-					G_WHIP_MENU_ARRAY+=("H3-analogue" "3.5mm analogue")
+					G_WHIP_MENU_ARRAY+=('H3-analogue' '3.5mm analogue')
 
 				# - H5
 				# elif (( $G_HW_CPUID == 2 )); then
 
-					# G_WHIP_MENU_ARRAY+=("H5-analogue" "3.5mm analogue")
+					# G_WHIP_MENU_ARRAY+=('H5-analogue' '3.5mm analogue')
 
 				# - Sparky
 				elif (( $G_HW_MODEL == 70 )); then
 
-					G_WHIP_MENU_ARRAY+=("snd-soc-allo-piano-dac" "Allo Piano DAC")
-					G_WHIP_MENU_ARRAY+=("snd-soc-allo-piano-dac-plus" "Allo Piano DAC 2.1")
-					G_WHIP_MENU_ARRAY+=("allo-cheapo-analogue" "Allo Cheapo (3.5mm / RCA output)")
-					G_WHIP_MENU_ARRAY+=("allo-cheapo-optical" "Allo Cheapo (Optical output)")
-					G_WHIP_MENU_ARRAY+=("usb-dac-1.1" "USB 1.1 Audio DAC (any)")
+					G_WHIP_MENU_ARRAY+=('snd-soc-allo-piano-dac' 'Allo Piano DAC')
+					G_WHIP_MENU_ARRAY+=('snd-soc-allo-piano-dac-plus' 'Allo Piano DAC 2.1')
+					G_WHIP_MENU_ARRAY+=('allo-cheapo-analogue' 'Allo Cheapo (3.5mm / RCA output)')
+					G_WHIP_MENU_ARRAY+=('allo-cheapo-optical' 'Allo Cheapo (Optical output)')
+					G_WHIP_MENU_ARRAY+=('usb-dac-1.1' 'USB 1.1 Audio DAC (any)')
 
 				# - Asus tb
 				elif (( $G_HW_MODEL == 52 )); then
 
-					G_WHIP_MENU_ARRAY+=("asus-tb-analogue" "3.5mm analogue")
+					G_WHIP_MENU_ARRAY+=('asus-tb-analogue' '3.5mm analogue')
 
 				fi
 
 				# - Global usb-dac, prefer at bottom of list
-				G_WHIP_MENU_ARRAY+=("usb-dac" "USB Audio DAC (any)")
+				G_WHIP_MENU_ARRAY+=('usb-dac' 'USB Audio DAC (any)')
 
 				G_WHIP_DEFAULT_ITEM="$soundcard_current"
 				G_WHIP_MENU "Please select a soundcard\n - Current : $soundcard_current"

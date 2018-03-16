@@ -236,7 +236,6 @@ _EOF_
 	#Run Installation Flag (1 = run installs)
 	GOSTARTINSTALL=0
 	INSTALL_URL_ADDRESS=''
-	INSTALL_DESCRIPTION='DietPi'
 
 	#Special installation Vars
 	USER_EMONHUB_APIKEY_COMPLETED=0
@@ -3426,26 +3425,26 @@ _EOF_
 		if (( ${aSOFTWARE_INSTALL_STATE[$INSTALLING_INDEX]} == 1 )); then
 
 			Banner_Installing
-			INSTALL_DESCRIPTION="NoMachine (Secure RDP Server & Client)"
+
+			INSTALL_URL_ADDRESS='http://dietpi.com/downloads/binaries/all/nomachine_6.0.78_1_'
 
 			#x86_64
 			if (( $G_HW_ARCH == 10 )); then
 
-				INSTALL_URL_ADDRESS='http://dietpi.com/downloads/binaries/all/nomachine_5.1.44_1_amd64.deb'
+				INSTALL_URL_ADDRESS+='amd64.deb'
 
 			#arm6 (RPi1)
 			elif (( $G_HW_ARCH == 1 )); then
 
-				INSTALL_URL_ADDRESS='http://dietpi.com/downloads/binaries/all/nomachine_5.1.44_3_armv6hf.deb'
+				INSTALL_URL_ADDRESS+='armv6hf.deb'
 
 			#arm7+ (RPi 2/3)
 			elif (( $G_HW_ARCH == 2 )); then
 
-				INSTALL_URL_ADDRESS='http://dietpi.com/downloads/binaries/all/nomachine_5.1.44_armhf.deb'
+				INSTALL_URL_ADDRESS+='armhf.deb'
 
 			fi
 
-			# Now, check that the links are legitimate
 			G_CHECK_URL "$INSTALL_URL_ADDRESS"
 
 			wget "$INSTALL_URL_ADDRESS" -O package.deb
@@ -4425,15 +4424,11 @@ _EOF_
 			G_AGI "$PHP_APT_PACKAGE_NAME"-cgi "$PHP_APT_PACKAGE_NAME"-sqlite*
 
 			# - Check free available memory. Increase swapfile size to prevent gravity running out of mem.
-			if (( $(free -m | grep -m1 'Mem:' | awk '{print $4}') < 512 )); then
+			if (( $(free -m | grep -m1 'Mem:' | awk '{print $4}') < 512 &&
+				$(grep -m1 '^[[:blank:]]*AUTO_SETUP_SWAPFILE_SIZE=' /DietPi/dietpi.txt | sed 's/.*=//') < 512 )); then
 
-				if [ -f /etc/dphys-swapfile ] &&
-					(( $(grep 'CONF_SWAPSIZE=' /etc/dphys-swapfile | sed 's/.*=//') < 512 )); then
-
-					G_DIETPI-NOTIFY 2 "Increasing swapfile size to 512MB before running gravity.sh, please wait...\n"
-					/DietPi/dietpi/func/dietpi-set_dphys-swapfile 512
-
-				fi
+				G_DIETPI-NOTIFY 2 "Increasing swapfile size to 512MB before running gravity.sh, please wait...\n"
+				/DietPi/dietpi/func/dietpi-set_dphys-swapfile 512
 
 			fi
 
@@ -4867,7 +4862,16 @@ _EOF_
 
 				G_AGI libxml-parser-perl zlib1g-dev libjpeg-dev libpng-dev libjpeg62-turbo-dev # shared libs needed for Image::Scale@0.08
 
-				INSTALL_URL_ADDRESS='http://dietpi.com/downloads/binaries/all/DietPi-LMS7.9-CPAN_arm64.zip'
+				if (( $G_DISTRO == 3 )); then
+
+					INSTALL_URL_ADDRESS='http://dietpi.com/downloads/binaries/all/DietPi-LMS7.9-CPAN_arm64.zip'
+
+				else
+
+					INSTALL_URL_ADDRESS='http://dietpi.com/downloads/binaries/all/logitechmediaserver_7.9.1_CPAN-armv8-stretch.zip'
+
+				fi
+
 				G_CHECK_URL "$INSTALL_URL_ADDRESS"
 				wget "$INSTALL_URL_ADDRESS" -O package.zip
 				unzip -o package.zip -d /usr/share/squeezeboxserver
@@ -5251,6 +5255,35 @@ _EOF_
 			wget "$INSTALL_URL_ADDRESS" -O package.7z
 			7z x -y package.7z -o/
 			rm package.7z
+
+			#Jessie: https://github.com/Fourdee/DietPi/issues/1620#issuecomment-373086888
+			if (( $G_DISTRO == 3 )); then
+
+				INSTALL_URL_ADDRESS='http://dietpi.com/downloads/binaries/all/libssl1.1_1.1.0f-3+deb9u1_'
+
+				# - ARMv7
+				if (( $G_HW_ARCH == 2 )); then
+
+					INSTALL_URL_ADDRESS+='armhf.deb'
+
+				# - ARM64
+				elif (( $G_HW_ARCH == 3 )); then
+
+					INSTALL_URL_ADDRESS+='arm64.deb'
+
+				# - x86_64
+				elif (( $G_HW_ARCH == 10 )); then
+
+					INSTALL_URL_ADDRESS+='amd64.deb'
+
+				fi
+
+				G_CHECK_URL "$INSTALL_URL_ADDRESS"
+				wget "$INSTALL_URL_ADDRESS" -O package.deb
+				dpkg -i package.deb
+				rm package.deb
+
+			fi
 
 		fi
 
@@ -9459,12 +9492,25 @@ _EOF_
 
 			Banner_Configuration
 
-			#Remove service
-			update-rc.d logitechmediaserver remove
-			rm /etc/init.d/logitechmediaserver
+			#Remove bundled service
+			systemctl stop logitechmediaserver &> /dev/null
+			killall -w squeezeboxserver &> /dev/null #provided service may not wait for exit, kill: https://github.com/Fourdee/DietPi/issues/1613#issuecomment-372787574
 
-			#DietPi-Services init
-			cp /DietPi/dietpi/conf/squeezeboxserver.service /var/lib/dietpi/dietpi-software/services/squeezeboxserver.service
+			update-rc.d logitechmediaserver remove &> /dev/null
+			rm /etc/init.d/logitechmediaserver &> /dev/null
+
+			#Service
+			cat << _EOF_ > /etc/systemd/system/squeezeboxserver.service
+[Unit]
+Description=Squeezebox Server (LMS)
+
+[Service]
+Type=simple
+ExecStart=$(which squeezeboxserver) --prefsdir /var/lib/squeezeboxserver/prefs --logfile /var/log/squeezeboxserver/error.log --logdir /var/log/squeezeboxserver/ --cachedir /var/lib/squeezeboxserver/cache --user root
+
+[Install]
+WantedBy=multi-user.target
+_EOF_
 
 			#Grab our test media for user
 			Download_Test_Media
@@ -12731,8 +12777,7 @@ _EOF_
 		if (( aSOFTWARE_INSTALL_STATE[$UNINSTALLING_INDEX] == -1 )); then
 
 			Banner_Uninstalling
-			G_AGP openmediavault
-			rm /etc/apt/sources.list.d/openmediavault.list
+			apt-mark auto libssl1.0.0
 
 		fi
 
@@ -13236,7 +13281,7 @@ _EOF_
 			Banner_Uninstalling
 			#apt-mark auto libxml-parser-perl zlib1g-dev libjpeg-dev libpng-dev libjpeg62-turbo-dev &> /dev/null
 			G_RUN_CMD dpkg -P logitechmediaserver
-			rm /var/lib/dietpi/dietpi-software/services/squeezeboxserver.service
+			rm /etc/systemd/system/squeezeboxserver.service
 			rm -R /var/lib/squeezeboxserver
 			rm -R /usr/share/squeezeboxserver
 
@@ -14302,7 +14347,7 @@ _EOF_
 		#Generate Swapfile during 1st run (moved from boot: https://github.com/Fourdee/DietPi/issues/1270#issue-278797206)
 		if (( $G_DIETPI_INSTALL_STAGE == 0 )); then
 
-			/DietPi/dietpi/func/dietpi-set_dphys-swapfile "$(grep -m1 '^[[:blank:]]*AUTO_SETUP_SWAPFILE_SIZE=' /DietPi/dietpi.txt | sed 's/^.*=//')"
+			/DietPi/dietpi/func/dietpi-set_dphys-swapfile $(grep -m1 '^[[:blank:]]*AUTO_SETUP_SWAPFILE_SIZE=' /DietPi/dietpi.txt | sed 's/^.*=//') "$(grep -m1 '^[[:blank:]]*AUTO_SETUP_SWAPFILE_LOCATION=' /DietPi/dietpi.txt | sed 's/.*=//')"
 
 		fi
 		#------------------------------------------------------------
