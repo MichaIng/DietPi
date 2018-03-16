@@ -326,7 +326,7 @@
 		'31' 'OrangePi One'
 		'30' 'OrangePi PC'
 		'40' 'Pine A64'
-		'3' 'Raspberry Pi 3'
+		'3' 'Raspberry Pi 3/3+'
 		'2' 'Raspberry Pi 2'
 		'1' 'Raspberry Pi 1/Zero (512mb)'
 		'0' 'Raspberry Pi 1 (256mb)'
