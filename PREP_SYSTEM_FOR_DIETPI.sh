@@ -719,7 +719,7 @@ _EOF_
 		aPACKAGES_REQUIRED_INSTALL+=('crda')			# WiFi related
 		aPACKAGES_REQUIRED_INSTALL+=('firmware-atheros')	# WiFi dongle firmware
 		aPACKAGES_REQUIRED_INSTALL+=('firmware-brcm80211')	# WiFi dongle firmware
-		aPACKAGES_REQUIRED_INSTALL+=('firmware-ralink')		# WiFi dongle firmware
+		#aPACKAGES_REQUIRED_INSTALL+=('firmware-ralink')		# WiFi dongle firmware | virtual package for firmware-misc-nonfree
 		aPACKAGES_REQUIRED_INSTALL+=('iw')			# WiFi related
 		aPACKAGES_REQUIRED_INSTALL+=('rfkill')	 		# WiFi related: Used by some onboard WiFi chipsets
 		aPACKAGES_REQUIRED_INSTALL+=('wireless-tools')		# WiFi related
