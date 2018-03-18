@@ -93,7 +93,7 @@
 			#Core_ENV update: https://github.com/Fourdee/DietPi/pull/1419
 			#	IPv6 disable x86_64
 			#	consoleblank disable x86_64
-			/DietPi/dietpi/func/dietpi-set_core_environment
+			#/DietPi/dietpi/func/dietpi-set_core_environment # Done with v6.2 patch, avoid two executions!
 			#-------------------------------------------------------------------------------
 			#Remove -dev keyring
 			G_AGP debian-keyring
@@ -196,7 +196,7 @@ _EOF_
 
 				sed -i '/^aSOFTWARE_INSTALL_STATE\[100\]=/c\aSOFTWARE_INSTALL_STATE\[100\]=0' /DietPi/dietpi/.installed #grashopper (now pijuice)
 				sed -i '/^aSOFTWARE_INSTALL_STATE\[106\]=/c\aSOFTWARE_INSTALL_STATE\[106\]=0' /DietPi/dietpi/.installed #raspcontrol (now ntp)
-				if (( $(grep -ci -m1 '^aSOFTWARE_INSTALL_STATE\[170\]=2' /DietPi/dietpi/.installed) )); then
+				if grep -qi '^aSOFTWARE_INSTALL_STATE\[170\]=2' /DietPi/dietpi/.installed; then
 
 					sed -i '/^aSOFTWARE_INSTALL_STATE\[106\]=/c\aSOFTWARE_INSTALL_STATE\[106\]=2' /DietPi/dietpi/.installed #ntp (replaces raspcontrol)
 					sed -i '/^aSOFTWARE_INSTALL_STATE\[170\]=/c\aSOFTWARE_INSTALL_STATE\[170\]=0' /DietPi/dietpi/.installed #ntp (now 106)
@@ -206,7 +206,7 @@ _EOF_
 			fi
 			#-------------------------------------------------------------------------------
 			#Nodered lacks homedir, create it: https://github.com/Fourdee/DietPi/issues/1446#issuecomment-366370800
-			if (( $(grep -ci -m1 '^nodered:' /etc/passwd) )) &&
+			if grep -qi '^nodered:' /etc/passwd &&
 				[ ! -d /home/nodered ]; then
 
 				mkdir -p /home/nodered
@@ -228,7 +228,42 @@ _EOF_
 
 			#-------------------------------------------------------------------------------
 			#Switch from rc.local to own postboot script: https://github.com/Fourdee/DietPi/issues/1376
-			G_WHIP_MSG "DietPi will not use /etc/rc.local for its own scripts anymore.\n\nHowever, in case you've manually added something, we safe a backup to /etc/rc.local.bak, from where you can copy & paste back to the cleaned /etc/rc.local.\n\nIt will work as before."
+			G_WHIP_MSG "DietPi will not use /etc/rc.local for its own scripts anymore.\n\nHowever, in case you've manually added something, we safe a backup to /mnt/dietpi_userdata/rc.local.bak, from where you can copy & paste back to the cleaned /etc/rc.local.\n\nIt will work as before."
+			cat << _EOF_ > /etc/systemd/system/rc-local.service
+[Unit]
+Description=rc.local backwards compatibility
+Requires=dietpi-boot.service dietpi-ramdisk.service
+After=dietpi-boot.service dietpi-ramdisk.service dietpi-ramlog.service dietpi-postboot.service
+
+[Service]
+Type=idle
+RemainAfterExit=yes
+ExecStart=/bin/bash -c '/etc/rc.local'
+StandardOutput=tty
+
+[Install]
+WantedBy=multi-user.target
+_EOF_
+			systemctl daemon-reload
+			systemctl enable rc-local.service
+
+			cp -a /etc/rc.local /mnt/dietpi_userdata/rc.local.bak
+			cat << _EOF_ > /etc/rc.local
+#!/bin/sh -e
+#
+#
+# This script is executed at the end of each multiuser runlevel.
+# Make sure that the script will "exit 0" on success or any other
+# value on error.
+#
+# In order to disable this script please use systemd to control the service:
+# systemctl disable rc-local.service
+#
+# By default this script does nothing.
+
+exit 0
+_EOF_
+			chmod +x /etc/rc.local
 
 			/DietPi/dietpi/func/dietpi-set_core_environment
 
@@ -405,7 +440,7 @@ _EOF_
 			#Cron minutely support: https://github.com/Fourdee/DietPi/pull/1578
 			mkdir -p /etc/cron.minutely
 
-			if (( ! $(grep -ci -m1 'cron.minutely' /etc/crontab) )); then
+			if ! grep -qi 'cron.minutely' /etc/crontab; then
 
 				cat << _EOF_ >> /etc/crontab
 */30 * * * *   root    cd / && run-parts --report /etc/cron.minutely
@@ -427,7 +462,7 @@ _EOF_
 			if [ -f /etc/dphys-swapfile ]; then
 
 				swap_size=$(grep -m1 '^CONF_SWAPSIZE=' /etc/dphys-swapfile | sed 's/.*=//')
-				swap_location=$(grep -m1 '^CONF_SWAPFILE=' /etc/dphys-swapfile | sed 's/.*=//')
+				swap_location="$(grep -m1 '^CONF_SWAPFILE=' /etc/dphys-swapfile | sed 's/.*=//')"
 
 			fi
 
@@ -449,12 +484,20 @@ _EOF_
 			/DietPi/dietpi/dietpi-software reinstall 35 37
 			#-------------------------------------------------------------------------------
 			#RPi 3 B+: Set correct disabled clocks for B+ (scraped by dietpi-config > overclocking)
-			if (( $(grep -ci -m1 'RPi 3 Model B+' /DietPi/dietpi/.hw_model) )); then
+			if grep -qi 'RPi 3 Model B+' /DietPi/dietpi/.hw_model; then
 
 				sed -i '/arm_freq=/c\#arm_freq=1400' /DietPi/config.txt
 				sed -i '/sdram_freq=/c\#sdram_freq=500' /DietPi/config.txt
 
 			fi
+			#-------------------------------------------------------------------------------
+			#sudoers and sysctl adjustments moved to *.d/ files: https://github.com/Fourdee/DietPi/pull/1635
+			cat << _EOF_ > /etc/sudoers.d/dietpi
+dietpi ALL=NOPASSWD: ALL
+_EOF_
+			sed -i '/dietpi/d' /etc/sudoers
+			#Our config must not start with '99-' to assure priority higher than '99-sysctl.conf'
+			mv /etc/sysctl.d/99-dietpi.conf /etc/sysctl.d/dietpi.conf &> /dev/null
 			#-------------------------------------------------------------------------------
 
 		fi
