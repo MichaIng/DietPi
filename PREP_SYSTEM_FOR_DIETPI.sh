@@ -928,6 +928,9 @@ _EOF_
 	# - ARMbian-config
 	rm /etc/profile.d/check_first_login_reboot.sh &> /dev/null
 
+	# - RPi specific https://github.com/Fourdee/DietPi/issues/1631#issuecomment-373965406
+	rm /etc/profile.d/wifi-country.sh &> /dev/null
+
 	G_DIETPI-NOTIFY 2 "Creating DietPi core environment"
 
 	G_RUN_CMD /boot/dietpi/func/dietpi-set_core_environment
