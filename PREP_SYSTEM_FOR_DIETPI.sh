@@ -203,12 +203,10 @@
 	WHIP_RETURN_VALUE=0
 	WHIP_DEFAULT_ITEM=0
 	WHIP_OPTION=0
-	WHIP_CHOICE=0
 	Run_Whiptail(){
 
 		WHIP_OPTION=$(whiptail --title "$WHIP_TITLE" --menu "$WHIP_DESC" --default-item "$WHIP_DEFAULT_ITEM" --backtitle "$WHIP_BACKTITLE" 24 85 12 "${WHIP_MENU_ARRAY[@]}" 3>&1 1>&2 2>&3)
-		WHIP_CHOICE=$?
-		if (( $WHIP_CHOICE == 0 )) &&
+		if (( $? == 0 )) &&
 			[ -n "$WHIP_OPTION" ]; then
 
 			WHIP_RETURN_VALUE=$WHIP_OPTION
