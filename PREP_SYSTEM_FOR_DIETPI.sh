@@ -203,12 +203,10 @@
 	WHIP_RETURN_VALUE=0
 	WHIP_DEFAULT_ITEM=0
 	WHIP_OPTION=0
-	WHIP_CHOICE=0
 	Run_Whiptail(){
 
 		WHIP_OPTION=$(whiptail --title "$WHIP_TITLE" --menu "$WHIP_DESC" --default-item "$WHIP_DEFAULT_ITEM" --backtitle "$WHIP_BACKTITLE" 24 85 12 "${WHIP_MENU_ARRAY[@]}" 3>&1 1>&2 2>&3)
-		WHIP_CHOICE=$?
-		if (( $WHIP_CHOICE == 0 )) &&
+		if (( $? == 0 )) &&
 			[ -n "$WHIP_OPTION" ]; then
 
 			WHIP_RETURN_VALUE=$WHIP_OPTION
@@ -719,7 +717,7 @@ _EOF_
 		aPACKAGES_REQUIRED_INSTALL+=('crda')			# WiFi related
 		aPACKAGES_REQUIRED_INSTALL+=('firmware-atheros')	# WiFi dongle firmware
 		aPACKAGES_REQUIRED_INSTALL+=('firmware-brcm80211')	# WiFi dongle firmware
-		aPACKAGES_REQUIRED_INSTALL+=('firmware-ralink')		# WiFi dongle firmware
+		#aPACKAGES_REQUIRED_INSTALL+=('firmware-ralink')		# WiFi dongle firmware | virtual package for firmware-misc-nonfree
 		aPACKAGES_REQUIRED_INSTALL+=('iw')			# WiFi related
 		aPACKAGES_REQUIRED_INSTALL+=('rfkill')	 		# WiFi related: Used by some onboard WiFi chipsets
 		aPACKAGES_REQUIRED_INSTALL+=('wireless-tools')		# WiFi related
@@ -927,6 +925,9 @@ _EOF_
 
 	# - ARMbian-config
 	rm /etc/profile.d/check_first_login_reboot.sh &> /dev/null
+
+	# - RPi specific https://github.com/Fourdee/DietPi/issues/1631#issuecomment-373965406
+	rm /etc/profile.d/wifi-country.sh &> /dev/null
 
 	G_DIETPI-NOTIFY 2 "Creating DietPi core environment"
 
