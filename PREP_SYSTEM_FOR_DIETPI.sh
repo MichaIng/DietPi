@@ -1107,8 +1107,14 @@ _EOF_
 		tar xvf package.tar -C /lib/modules/
 		rm package.tar
 
-		G_RUN_CMD wget https://raw.githubusercontent.com/sparky-sbc/sparky-test/master/pro-ject-s2/snd-usb-audio.ko -O /lib/modules/$(uname -r)/kernel/sound/usb/snd-usb-audio.ko
-		G_RUN_CMD wget https://raw.githubusercontent.com/sparky-sbc/sparky-test/master/pro-ject-s2/snd-usbmidi-lib.ko -O /lib/modules/$(uname -r)/kernel/sound/usb/snd-usbmidi-lib.ko
+		#	patches
+		G_RUN_CMD wget https://raw.githubusercontent.com/sparky-sbc/sparky-test/master/dsd-marantz/snd-usb-audio.ko -O /lib/modules/3.10.38/kernel/sound/usb/snd-usb-audio.ko
+		G_RUN_CMD wget https://raw.githubusercontent.com/sparky-sbc/sparky-test/master/dsd-marantz/snd-usbmidi-lib.ko -O /lib/modules/3.10.38/kernel/sound/usb/snd-usbmidi-lib.ko
+
+		#	Firmware
+		G_RUN_CMD wget https://raw.githubusercontent.com/sparky-sbc/sparky-test/master/piano-firmware/piano-firmware.tar
+		tar -xvf piano-firmware.tar -C /lib/
+		rm piano-firmware.tar
 
 		cat << _EOF_ > /DietPi/uEnv.txt
 uenvcmd=setenv os_type linux;
