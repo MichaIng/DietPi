@@ -1144,9 +1144,17 @@ _EOF_
 		sed -i "/^CONFIG_CPU_GOVERNOR=/c\CONFIG_CPU_GOVERNOR=performance" /DietPi/dietpi.txt
 		/DietPi/dietpi/dietpi-cpu_set
 
-	# - RPI: Scroll lock fix for RPi by Midwan: https://github.com/Fourdee/DietPi/issues/474#issuecomment-243215674
+	# - RPI:
 	elif (( $G_HW_MODEL < 10 )); then
 
+		# - RPI Piano allo firmware:
+		G_RUN_CMD wget https://github.com/allocom/piano-firmware/archive/master.zip -O package.zip
+		unzip -o package.zip
+		rm package.zip
+		cp -R piano-firmware-master/lib/firmware/allo /lib/firmware/
+		rm -R piano-firmware-master
+
+		# - Scroll lock fix for RPi by Midwan: https://github.com/Fourdee/DietPi/issues/474#issuecomment-243215674
 		cat << _EOF_ > /etc/udev/rules.d/50-leds.rules
 ACTION=="add", SUBSYSTEM=="leds", ENV{DEVPATH}=="*/input*::scrolllock", ATTR{trigger}="kbd-scrollock"
 _EOF_
