@@ -1442,6 +1442,10 @@ _EOF_
 	G_RUN_CMD systemctl stop dietpi-ramlog
 	G_RUN_CMD systemctl stop dietpi-ramdisk
 
+	# - Minor cleanup, Remove tmp and our logs
+	rm -R /tmp/*
+	rm /var/tmp/dietpi/logs/*
+
 	sync
 	# fstrim -v /
 	# sync
