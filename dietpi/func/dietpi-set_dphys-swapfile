@@ -1,7 +1,7 @@
 #!/bin/bash
 {
 	#////////////////////////////////////
-	# DietPi Function: Dphys-Swapfile
+	# DietPi Function: Swapfile
 	#
 	#////////////////////////////////////
 	# Created by Daniel Knight / daniel.knight@dietpi.com / dietpi.com
@@ -9,72 +9,69 @@
 	#////////////////////////////////////
 	#
 	# Info:
-	# - DietPi Dphys-Swapfile control for setting enable/disable/size/location.
+	# - DietPi Swapfile control for setting enable/disable/size/location.
 	#
 	# Usage:
-	# - $1 = enable+size/disable
+	# - $1 = 0=disable, 1=enable+autosize, >=2=enable+size
 	# - $2 = optional location
 	# - /DietPi/dietpi/func/dietpi-set_dphys-swapfile     = Print current config size and location
-	# - /DietPi/dietpi/func/dietpi-set_dphys-swapfile <=0 = Disable + Delete swapfile.
-	# - /DietPi/dietpi/func/dietpi-set_dphys-swapfile 1   = Enable + Auto Size
-	# - /DietPi/dietpi/func/dietpi-set_dphys-swapfile >=2 = Enable + Manual Size
-	# - /DietPi/dietpi/func/dietpi-set_dphys-swapfile >=2 /var/swap = Enable + Set Size + Set new Location (also deletes previous swapfile)
 	#////////////////////////////////////
+
 	#Import DietPi-Globals ---------------------------------------------------------------
 	. /DietPi/dietpi/func/dietpi-globals
 	G_CHECK_ROOT_USER
-	export G_PROGRAM_NAME='DietPi-dphys-swapfile'
+	export G_PROGRAM_NAME='DietPi-Swapfile'
 	G_INIT
 	#Import DietPi-Globals ---------------------------------------------------------------
 
-	SWAP_SIZE_CURRENT=0
-	SWAP_LOCATION_CURRENT='/var/swap'
-	if [ -f /etc/dphys-swapfile ]; then
+	SWAP_SIZE=$(grep -m1 '^[[:blank:]]*AUTO_SETUP_SWAPFILE_SIZE=' /DietPi/dietpi.txt | sed 's/.*=//')
+	SWAP_LOCATION="$(grep -m1 '^[[:blank:]]*AUTO_SETUP_SWAPFILE_LOCATION=' /DietPi/dietpi.txt | sed 's/.*=//')"
 
-		SWAP_SIZE_CURRENT=$(cat /etc/dphys-swapfile | grep -m1 '^CONF_SWAPSIZE=' | sed 's/.*=//')
-		SWAP_LOCATION_CURRENT=$(cat /etc/dphys-swapfile | grep -m1 '^CONF_SWAPFILE=' | sed 's/.*=//')
-
-	fi
-
-	SWAP_SIZE_TARGET=$SWAP_SIZE_CURRENT
-	if [[ $1 =~ ^-?[0-9]+$ ]]; then
+	SWAP_SIZE_TARGET=$SWAP_SIZE
+	if (( $(G_CHECK_VALIDINT $1) )); then
 
 		SWAP_SIZE_TARGET=$1
 
 	fi
 
-	SWAP_LOCATION_TARGET=$SWAP_LOCATION_CURRENT
-	if [ "$2" != "" ]; then
+	SWAP_LOCATION_TARGET="$SWAP_LOCATION"
+	if [ -n "$2" ]; then
 
-		SWAP_LOCATION_TARGET=$2
+		SWAP_LOCATION_TARGET="$2"
 
 	fi
 
-	SERVICE_MODE=''
-
-	Generate_Default_Conf(){
-
-		cat << _EOF_ > /etc/dphys-swapfile
-CONF_SWAPSIZE=0
-CONF_SWAPFILE=/var/swap
-_EOF_
-
-	}
-
 	Delete_Swapfile(){
 
-		G_DIETPI-NOTIFY 2 "Deleting existing swapfile ($SWAP_LOCATION_CURRENT)\n"
-		rm "$SWAP_LOCATION_CURRENT" &> /dev/null
+		G_RUN_CMD swapoff -a
+		G_DIETPI-NOTIFY 2 "Deleting existing swapfile ($SWAP_LOCATION)"
+		rm "$SWAP_LOCATION" &> /dev/null
+		sed -i '/[[:blank:]]swap[[:blank:]]/d' /etc/fstab
+		systemctl daemon-reload
 
 	}
 
 	Update_Conf(){
 
-		sed -i "/CONF_SWAPSIZE/c\CONF_SWAPSIZE=$SWAP_SIZE_TARGET" /etc/dphys-swapfile
-		sed -i "/CONF_SWAPFILE/c\CONF_SWAPFILE=$SWAP_LOCATION_TARGET" /etc/dphys-swapfile
-
 		#	DietPi.txt
-		sed -i "/^AUTO_SETUP_SWAPFILE_SIZE=/c\AUTO_SETUP_SWAPFILE_SIZE=$SWAP_SIZE_TARGET" /DietPi/dietpi.txt
+		sed -i "/^[[:blank:]]*AUTO_SETUP_SWAPFILE_SIZE=/c\AUTO_SETUP_SWAPFILE_SIZE=$SWAP_SIZE" /DietPi/dietpi.txt
+		sed -i "/^[[:blank:]]*AUTO_SETUP_SWAPFILE_LOCATION=/c\AUTO_SETUP_SWAPFILE_LOCATION=$SWAP_LOCATION" /DietPi/dietpi.txt
+
+	}
+
+	Update_Tmp(){
+
+		#Set /tmp to 50% of RAM+SWAP: https://github.com/Fourdee/DietPi/issues/1027#issuecomment-369373082
+		local mem_total=$(free -m | grep -m1 'Mem:' | awk '{print $2}')
+		local swap_size=$(free -m | grep -im1 'Swap:' | awk '{print $2}')
+		local tmp_target_size="$(( ( $mem_total + $swap_size ) / 2 ))M"
+
+		G_DIETPI-NOTIFY 2 "Setting /tmp tmpfs size: $tmp_target_size"
+
+		sed -i -e "/[[:blank:]]\/tmp[[:blank:]]/ctmpfs \/tmp tmpfs defaults,size=$tmp_target_size,noatime,nodev,nosuid,mode=1777 0 0" /etc/fstab
+		systemctl daemon-reload
+		mount -a
+		G_RUN_CMD mount -o remount,size=$tmp_target_size tmpfs /tmp
 
 	}
 
@@ -82,25 +79,13 @@ _EOF_
 
 		G_DIETPI-NOTIFY 3 'DietPi-Swapfile' 'Disable swapfile'
 
-		SWAP_SIZE_TARGET=0
-		SERVICE_MODE='disable'
-
-		Generate_Default_Conf
-		G_RUN_CMD dphys-swapfile swapoff
 		Delete_Swapfile
 
+		SWAP_SIZE=0
+		SWAP_LOCATION='/var/swap'
 		Update_Conf
 
-		#Set /tmp to 50% of RAM: https://github.com/Fourdee/DietPi/issues/1027#issuecomment-369373082
-		local mem_total=$(free -m | grep -m1 'Mem:' | awk '{print $2}')
-		local tmp_target_size="$(( $mem_total / 2 ))M"
-
-		G_DIETPI-NOTIFY 2 "Setting /tmp tmpfs size: $tmp_target_size"
-
-		sed -i -e "/[[:space:]]\/tmp[[:space:]]/ctmpfs \/tmp tmpfs defaults,size=$tmp_target_size,noatime,nodev,nosuid,mode=1777 0 0" /etc/fstab
-		systemctl daemon-reload
-		mount -a
-		G_RUN_CMD mount -o remount,size=$tmp_target_size tmpfs /tmp
+		Update_Tmp
 
 	}
 
@@ -115,30 +100,28 @@ _EOF_
 
 		fi
 
-		G_DIETPI-NOTIFY 3 'DietPi-Swapfile' 'Generating new swapfile'
-		G_DIETPI-NOTIFY 2 "Size     = $SWAP_SIZE_TARGET MB"
-		G_DIETPI-NOTIFY 2 "Location = $SWAP_LOCATION_TARGET"
-
-		SERVICE_MODE='enable'
-		Generate_Default_Conf
-		G_RUN_CMD dphys-swapfile swapoff
 		Delete_Swapfile
 
+		SWAP_SIZE=$SWAP_SIZE_TARGET
+		SWAP_LOCATION="$SWAP_LOCATION_TARGET"
 		Update_Conf
-		G_RUN_CMD dphys-swapfile setup
-		chmod 600 "$SWAP_LOCATION_TARGET" #stretch complains when permissions are not 600, so lets set it.
-		G_RUN_CMD dphys-swapfile swapon
 
-		#Set /tmp to 50% of RAM+SWAP: https://github.com/Fourdee/DietPi/issues/1027#issuecomment-369373082
-		local mem_total=$(free -m | grep -m1 'Mem:' | awk '{print $2}')
-		local tmp_target_size="$(( ( $mem_total + $SWAP_SIZE_TARGET ) / 2 ))M"
+		G_DIETPI-NOTIFY 3 'DietPi-Swapfile' 'Generating new swapfile'
+		G_DIETPI-NOTIFY 2 "Size     = $SWAP_SIZE MB"
+		G_DIETPI-NOTIFY 2 "Location = $SWAP_LOCATION"
 
-		G_DIETPI-NOTIFY 2 "Setting /tmp tmpfs size: $tmp_target_size"
+		#G_RUN_CMD dd if=/dev/zero of=$SWAP_LOCATION bs=4K count=$(( $SWAP_SIZE * 1024 / 4 ))
+		G_RUN_CMD fallocate -l $SWAP_SIZE'M' $SWAP_LOCATION
+		G_RUN_CMD mkswap $SWAP_LOCATION
+		chmod 600 "$SWAP_LOCATION"
 
-		sed -i -e "/[[:space:]]\/tmp[[:space:]]/ctmpfs \/tmp tmpfs defaults,size=$tmp_target_size,noatime,nodev,nosuid,mode=1777 0 0" /etc/fstab
-		systemctl daemon-reload
-		mount -a
-		G_RUN_CMD mount -o remount,size=$tmp_target_size tmpfs /tmp
+		G_RUN_CMD swapon $SWAP_LOCATION
+
+		cat << _EOF_ >> /etc/fstab
+$SWAP_LOCATION    none    swap    sw    0   0
+_EOF_
+
+		Update_Tmp
 
 	}
 
@@ -148,7 +131,7 @@ _EOF_
 	#Info mode - Print Size / Location
 	if [ -z "$1" ]; then
 
-		echo -e "$SWAP_SIZE_CURRENT $SWAP_LOCATION_CURRENT"
+		echo -e "$SWAP_SIZE $SWAP_LOCATION"
 
 	#Disabled
 	elif (( $SWAP_SIZE_TARGET == 0 )); then
@@ -177,13 +160,7 @@ _EOF_
 	fi
 
 	#-----------------------------------------------------------------------------------
-	#Service Control.
-	if [ -n "$SERVICE_MODE" ]; then
-
-		systemctl "$SERVICE_MODE" dphys-swapfile &> /dev/null
-
-	fi
+	exit 0
 	#-----------------------------------------------------------------------------------
-	exit
-	#-----------------------------------------------------------------------------------
+
 }

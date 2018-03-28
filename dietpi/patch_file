@@ -13,12 +13,11 @@
 	# - Runs from dietpi-update
 	#
 	# Usage:
-	# - /DietPi/dietpi/patch_file $SUBVERSION_CURRENT $SUBVERSION_SERVER
+	# - /DietPi/dietpi/patch_file $SUBVERSION_CURRENT
 	#////////////////////////////////////
 
 	#Grab input
 	SUBVERSION_CURRENT=$1
-	SUBVERSION_SERVER=$2
 	#Import DietPi-Globals ---------------------------------------------------------------
 	/DietPi/dietpi/dietpi-obtain_hw_model # Always update
 	. /DietPi/dietpi/func/dietpi-globals
@@ -94,7 +93,7 @@
 			#Core_ENV update: https://github.com/Fourdee/DietPi/pull/1419
 			#	IPv6 disable x86_64
 			#	consoleblank disable x86_64
-			/DietPi/dietpi/func/dietpi-set_core_environment
+			#/DietPi/dietpi/func/dietpi-set_core_environment # Done with v6.2 patch, avoid two executions!
 			#-------------------------------------------------------------------------------
 			#Remove -dev keyring
 			G_AGP debian-keyring
@@ -197,7 +196,7 @@ _EOF_
 
 				sed -i '/^aSOFTWARE_INSTALL_STATE\[100\]=/c\aSOFTWARE_INSTALL_STATE\[100\]=0' /DietPi/dietpi/.installed #grashopper (now pijuice)
 				sed -i '/^aSOFTWARE_INSTALL_STATE\[106\]=/c\aSOFTWARE_INSTALL_STATE\[106\]=0' /DietPi/dietpi/.installed #raspcontrol (now ntp)
-				if (( $(grep -ci -m1 '^aSOFTWARE_INSTALL_STATE\[170\]=2' /DietPi/dietpi/.installed) )); then
+				if grep -qi '^aSOFTWARE_INSTALL_STATE\[170\]=2' /DietPi/dietpi/.installed; then
 
 					sed -i '/^aSOFTWARE_INSTALL_STATE\[106\]=/c\aSOFTWARE_INSTALL_STATE\[106\]=2' /DietPi/dietpi/.installed #ntp (replaces raspcontrol)
 					sed -i '/^aSOFTWARE_INSTALL_STATE\[170\]=/c\aSOFTWARE_INSTALL_STATE\[170\]=0' /DietPi/dietpi/.installed #ntp (now 106)
@@ -207,7 +206,7 @@ _EOF_
 			fi
 			#-------------------------------------------------------------------------------
 			#Nodered lacks homedir, create it: https://github.com/Fourdee/DietPi/issues/1446#issuecomment-366370800
-			if (( $(grep -ci -m1 '^nodered:' /etc/passwd) )) &&
+			if grep -qi '^nodered:' /etc/passwd &&
 				[ ! -d /home/nodered ]; then
 
 				mkdir -p /home/nodered
@@ -229,7 +228,42 @@ _EOF_
 
 			#-------------------------------------------------------------------------------
 			#Switch from rc.local to own postboot script: https://github.com/Fourdee/DietPi/issues/1376
-			G_WHIP_MSG "DietPi will not use /etc/rc.local for its own scripts anymore.\n\nHowever, in case you've manually added something, we safe a backup to /etc/rc.local.bak, from where you can copy & paste back to the cleaned /etc/rc.local.\n\nIt will work as before."
+			G_WHIP_MSG "DietPi will not use /etc/rc.local for its own scripts anymore.\n\nHowever, in case you've manually added something, we safe a backup to /mnt/dietpi_userdata/rc.local.bak, from where you can copy & paste back to the cleaned /etc/rc.local.\n\nIt will work as before."
+			cat << _EOF_ > /etc/systemd/system/rc-local.service
+[Unit]
+Description=rc.local backwards compatibility
+Requires=dietpi-boot.service dietpi-ramdisk.service
+After=dietpi-boot.service dietpi-ramdisk.service dietpi-ramlog.service dietpi-postboot.service
+
+[Service]
+Type=idle
+RemainAfterExit=yes
+ExecStart=/bin/bash -c '/etc/rc.local'
+StandardOutput=tty
+
+[Install]
+WantedBy=multi-user.target
+_EOF_
+			systemctl daemon-reload
+			systemctl enable rc-local.service
+
+			cp -a /etc/rc.local /mnt/dietpi_userdata/rc.local.bak
+			cat << _EOF_ > /etc/rc.local
+#!/bin/sh -e
+#
+#
+# This script is executed at the end of each multiuser runlevel.
+# Make sure that the script will "exit 0" on success or any other
+# value on error.
+#
+# In order to disable this script please use systemd to control the service:
+# systemctl disable rc-local.service
+#
+# By default this script does nothing.
+
+exit 0
+_EOF_
+			chmod +x /etc/rc.local
 
 			/DietPi/dietpi/func/dietpi-set_core_environment
 
@@ -339,10 +373,6 @@ _EOF_
 			#Never run this in future patches!!! : https://github.com/Fourdee/DietPi/issues/1592
 			#/DietPi/dietpi/func/dietpi-set_core_environment
 			#-------------------------------------------------------------------------------
-			#Re-Apply swap to set /tmp tmpfs size: https://github.com/Fourdee/DietPi/issues/1027#issuecomment-369435049
-			# + Force auto swapfile size https://github.com/Fourdee/DietPi/issues/1593#issuecomment-371516418
-			/DietPi/dietpi/func/dietpi-set_dphys-swapfile 1
-			#-------------------------------------------------------------------------------
 			#Service updates: http://dietpi.com/phpbb/viewtopic.php?f=11&t=1148&p=11322#p11322
 			$(which mkdir) -p /var/tmp/dietpi/logs
 			cat << _EOF_ > /etc/systemd/system/dietpi-ramdisk.service
@@ -410,11 +440,100 @@ _EOF_
 			#Cron minutely support: https://github.com/Fourdee/DietPi/pull/1578
 			mkdir -p /etc/cron.minutely
 
-			if (( ! $(grep -ci -m1 'cron.minutely' /etc/crontab) )); then
+			if ! grep -qi 'cron.minutely' /etc/crontab; then
 
 				cat << _EOF_ >> /etc/crontab
 */30 * * * *   root    cd / && run-parts --report /etc/cron.minutely
 _EOF_
+
+			fi
+			#-------------------------------------------------------------------------------
+
+		elif (( $SUBVERSION_CURRENT == 4 )); then
+
+			#-------------------------------------------------------------------------------
+			#Rerun drive manager to remove x-systemd.automount if autofs4 module not found: https://github.com/Fourdee/DietPi/issues/1607
+			/DietPi/dietpi/dietpi-drive_manager 2
+			#-------------------------------------------------------------------------------
+			#Removal of dphys-swapfile, switch to our own swapfile control system: https://github.com/Fourdee/DietPi/issues/1602
+			sed -i '/[[:space:]]dphys-swapfile[[:space:]]/d' /etc/fstab
+			local swap_size=0
+			local swap_location='/var/swap'
+			if [ -f /etc/dphys-swapfile ]; then
+
+				swap_size=$(grep -m1 '^CONF_SWAPSIZE=' /etc/dphys-swapfile | sed 's/.*=//')
+				swap_location="$(grep -m1 '^CONF_SWAPFILE=' /etc/dphys-swapfile | sed 's/.*=//')"
+
+			fi
+
+			sed -i "/^AUTO_SETUP_SWAPFILE_SIZE=/c\AUTO_SETUP_SWAPFILE_SIZE=$swap_size" /DietPi/dietpi.txt
+			sed -i "/^AUTO_SETUP_SWAPFILE_LOCATION=/c\AUTO_SETUP_SWAPFILE_LOCATION=$swap_location" /DietPi/dietpi.txt
+
+			#Re-Apply swap to set /tmp tmpfs size: https://github.com/Fourdee/DietPi/issues/1027#issuecomment-369435049
+			# + Force auto swapfile size https://github.com/Fourdee/DietPi/issues/1593#issuecomment-371516418
+			/DietPi/dietpi/func/dietpi-set_dphys-swapfile 1
+
+			G_AGP dphys-swapfile
+			#-------------------------------------------------------------------------------
+			#Reinstalls
+			#	Shairport-sync: https://github.com/Fourdee/DietPi/issues/1620#issuecomment-373086888
+			#	Squeezebox server:
+			#	AmiBerry 2.18: https://github.com/Fourdee/DietPi/issues/1410#issuecomment-374060452
+			#	Mopidy: https://github.com/Fourdee/DietPi/issues/1625
+			#	MPD: https://github.com/Fourdee/DietPi/issues/1614
+			$(which killall) -w squeezeboxserver &> /dev/null
+			rm /var/lib/dietpi/dietpi-software/services/squeezeboxserver.service &> /dev/null
+
+			/DietPi/dietpi/dietpi-software reinstall 35 37 108 118 128
+			#-------------------------------------------------------------------------------
+			#RPi 3 B+: Set correct disabled clocks for B+ (scraped by dietpi-config > overclocking)
+			if grep -qi 'RPi 3 Model B+' /DietPi/dietpi/.hw_model; then
+
+				sed -i '/arm_freq=/c\#arm_freq=1400' /DietPi/config.txt
+				sed -i '/sdram_freq=/c\#sdram_freq=500' /DietPi/config.txt
+
+			fi
+			#-------------------------------------------------------------------------------
+			#sudoers and sysctl adjustments moved to *.d/ files: https://github.com/Fourdee/DietPi/pull/1635
+			cat << _EOF_ > /etc/sudoers.d/dietpi
+dietpi ALL=NOPASSWD: ALL
+_EOF_
+			sed -i '/dietpi/d' /etc/sudoers
+			#Our config must not start with '99-' to assure priority higher than '99-sysctl.conf'
+			mv /etc/sysctl.d/99-dietpi.conf /etc/sysctl.d/dietpi.conf &> /dev/null
+			#-------------------------------------------------------------------------------
+			#Remove firmware-misc-nonfree if firmware-linux-nonfree is not installed, not required for SBC's: https://github.com/Fourdee/DietPi/issues/1631
+			if (( ! $(dpkg --get-selections | grep -ci -m1 '^firmware-linux-nonfree') )); then
+
+				G_AGP firmware-misc-nonfree
+
+			fi
+			#-------------------------------------------------------------------------------
+			# - RPi resolve gettext error: https://github.com/Fourdee/DietPi/issues/1631#issuecomment-373965406
+			rm /etc/profile.d/wifi-country.sh &> /dev/null
+			#-------------------------------------------------------------------------------
+			#Sparky kernel update: https://github.com/sparky-sbc/sparky-test/tree/master/dsd-marantz
+			if (( $G_HW_MODEL == 70 )); then
+
+				#	patches
+				G_RUN_CMD wget https://raw.githubusercontent.com/sparky-sbc/sparky-test/master/dsd-marantz/snd-usb-audio.ko -O /lib/modules/3.10.38/kernel/sound/usb/snd-usb-audio.ko
+				G_RUN_CMD wget https://raw.githubusercontent.com/sparky-sbc/sparky-test/master/dsd-marantz/snd-usbmidi-lib.ko -O /lib/modules/3.10.38/kernel/sound/usb/snd-usbmidi-lib.ko
+
+				#	Firmware
+				G_RUN_CMD wget https://raw.githubusercontent.com/sparky-sbc/sparky-test/master/piano-firmware/piano-firmware.tar
+				tar -xvf piano-firmware.tar -C /lib/
+				rm piano-firmware.tar
+
+			fi
+			#-------------------------------------------------------------------------------
+			#RPI Piano allo firmware:
+			if (( $G_HW_MODEL < 10 )); then
+
+				G_RUN_CMD wget https://github.com/allocom/piano-firmware/archive/master.zip -O package.zip
+				unzip -o package.zip
+				rm package.zip
+				cp -R piano-firmware-master/lib/firmware/allo /lib/firmware/
+				rm -R piano-firmware-master
 
 			fi
 			#-------------------------------------------------------------------------------
