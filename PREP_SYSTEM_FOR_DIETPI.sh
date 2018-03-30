@@ -432,7 +432,7 @@
 	if (( $G_HW_MODEL < 10 )); then
 
 		cat << _EOF_ > /etc/apt/sources.list
-deb https://www.mirrorservice.org/sites/archive.raspbian.org/raspbian $DISTRO_TARGET_NAME main contrib non-free rpi
+deb http://raspbian.raspberrypi.org/raspbian $DISTRO_TARGET_NAME main contrib non-free rpi
 _EOF_
 
 		cat << _EOF_ > /etc/apt/sources.list.d/raspi.list
