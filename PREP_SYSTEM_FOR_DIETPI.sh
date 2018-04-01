@@ -203,12 +203,10 @@
 	WHIP_RETURN_VALUE=0
 	WHIP_DEFAULT_ITEM=0
 	WHIP_OPTION=0
-	WHIP_CHOICE=0
 	Run_Whiptail(){
 
 		WHIP_OPTION=$(whiptail --title "$WHIP_TITLE" --menu "$WHIP_DESC" --default-item "$WHIP_DEFAULT_ITEM" --backtitle "$WHIP_BACKTITLE" 24 85 12 "${WHIP_MENU_ARRAY[@]}" 3>&1 1>&2 2>&3)
-		WHIP_CHOICE=$?
-		if (( $WHIP_CHOICE == 0 )) &&
+		if (( $? == 0 )) &&
 			[ -n "$WHIP_OPTION" ]; then
 
 			WHIP_RETURN_VALUE=$WHIP_OPTION
@@ -314,7 +312,7 @@
 		'14' 'Odroid N1'
 		'13' 'Odroid U3'
 		'12' 'Odroid C2'
-		'11' 'Odroid XU3/4/HC1'
+		'11' 'Odroid XU3/4/HC1/HC2'
 		'10' 'Odroid C1'
 		'38' 'OrangePi PC 2'
 		'37' 'OrangePi Prime'
@@ -326,7 +324,7 @@
 		'31' 'OrangePi One'
 		'30' 'OrangePi PC'
 		'40' 'Pine A64'
-		'3' 'Raspberry Pi 3'
+		'3' 'Raspberry Pi 3/3+'
 		'2' 'Raspberry Pi 2'
 		'1' 'Raspberry Pi 1/Zero (512mb)'
 		'0' 'Raspberry Pi 1 (256mb)'
@@ -434,7 +432,7 @@
 	if (( $G_HW_MODEL < 10 )); then
 
 		cat << _EOF_ > /etc/apt/sources.list
-deb https://www.mirrorservice.org/sites/archive.raspbian.org/raspbian $DISTRO_TARGET_NAME main contrib non-free rpi
+deb http://raspbian.raspberrypi.org/raspbian $DISTRO_TARGET_NAME main contrib non-free rpi
 _EOF_
 
 		cat << _EOF_ > /etc/apt/sources.list.d/raspi.list
@@ -526,7 +524,6 @@ _EOF_
 		'debconf'		# APT package configuration, e.g. 'debconf-set-selections'
 		'dirmngr'		# GNU key management required for some APT installs via additional repos
 		'dosfstools' 		# DietPi-Drive_Manager + fat (boot) drive file system check
-		'dphys-swapfile'	# Swap file management
 		'ethtool'		# Ethernet link checking
 		'fake-hwclock'		# Hardware clock emulation, to allow correct timestamps during boot before network time sync
 		'fbset'			# DietPi-Config display settings
@@ -599,11 +596,9 @@ _EOF_
 		G_AGI linux-image-amd64
 		# Usually no firmware should be necessary for VMs. If user manually passes though some USB device, he might need to install the firmware then.
 		(( $G_HW_MODEL != 20 )) && G_AGI firmware-linux-nonfree
-		grep 'vendor_id' /proc/cpuinfo | grep -qi 'intel' && G_AGI intel-microcode
-		grep 'vendor_id' /proc/cpuinfo | grep -qi 'amd' && G_AGI amd64-microcode
 
 		#	Grub EFI
-		if (( $(dpkg --get-selections | grep -ci -m1 '^grub-efi-amd64[[:space:]]') )) ||
+		if dpkg --get-selections | grep -q '^grub-efi-amd64' ||
 			[ -d /boot/efi ]; then
 
 			G_AGI grub-efi-amd64
@@ -647,7 +642,7 @@ _EOF_
 
 		#G_AGI linux-image-4.9-armhf-odroid-xu3
 		G_AGI $(dpkg --get-selections | grep '^linux-image' | awk '{print $1}')
-		(( $(dpkg --get-selections | grep -ci -m1 '^linux-image') )) || G_AGI linux-image-armhf-odroid-xu3
+		(( $(dpkg --get-selections | grep -ci -m1 '^linux-image') )) || G_AGI linux-image-4.14-armhf-odroid-xu4
 
 	#	Odroid C1
 	elif (( $G_HW_MODEL == 10 )); then
@@ -720,12 +715,12 @@ _EOF_
 
 		G_DIETPI-NOTIFY 2 "Marking WiFi as needed"
 
-		aPACKAGES_REQUIRED_INSTALL+=('crda')			# WiFi related
+		aPACKAGES_REQUIRED_INSTALL+=('crda')				# WiFi related
 		aPACKAGES_REQUIRED_INSTALL+=('firmware-atheros')	# WiFi dongle firmware
 		aPACKAGES_REQUIRED_INSTALL+=('firmware-brcm80211')	# WiFi dongle firmware
-		aPACKAGES_REQUIRED_INSTALL+=('firmware-ralink')		# WiFi dongle firmware
-		aPACKAGES_REQUIRED_INSTALL+=('iw')			# WiFi related
-		aPACKAGES_REQUIRED_INSTALL+=('rfkill')	 		# WiFi related: Used by some onboard WiFi chipsets
+		#aPACKAGES_REQUIRED_INSTALL+=('firmware-ralink')	# WiFi dongle firmware | virtual package for firmware-misc-nonfree
+		aPACKAGES_REQUIRED_INSTALL+=('iw')					# WiFi related
+		aPACKAGES_REQUIRED_INSTALL+=('rfkill')	 			# WiFi related: Used by some onboard WiFi chipsets
 		aPACKAGES_REQUIRED_INSTALL+=('wireless-tools')		# WiFi related
 		aPACKAGES_REQUIRED_INSTALL+=('wpasupplicant')		# WiFi related
 
@@ -753,6 +748,10 @@ _EOF_
 
 	G_AGA
 
+	# Purging additional packages, that in some cases do not get autoremoved:
+	# - dhcpcd5: https://github.com/Fourdee/DietPi/issues/1560#issuecomment-370136642
+	G_AGP dhcpcd5
+
 
 	#------------------------------------------------------------------------------------------------
 	echo -e ''
@@ -768,10 +767,6 @@ _EOF_
 	# - Distro is now target (for APT purposes and G_AGX support due to installed binary, its here, instead of after G_AGUP)
 	export G_DISTRO=$DISTRO_TARGET
 	export G_DISTRO_NAME=$DISTRO_TARGET_NAME
-
-	G_DIETPI-NOTIFY 2 "Disabling swapfile generation for dphys-swapfile during install"
-
-	G_RUN_CMD echo -e "CONF_SWAPSIZE=0" > /etc/dphys-swapfile
 
 	G_DIETPI-NOTIFY 2 "Installing core DietPi pre-req APT packages"
 
@@ -931,6 +926,12 @@ _EOF_
 
 	# - ARMbian-config
 	rm /etc/profile.d/check_first_login_reboot.sh &> /dev/null
+
+	# - RPi specific https://github.com/Fourdee/DietPi/issues/1631#issuecomment-373965406
+	rm /etc/profile.d/wifi-country.sh &> /dev/null
+
+	# - make_nas_processes_faster cron job on Rock64 + NanoPi + Pine64(?) images
+	rm /etc/cron.d/make_nas_processes_faster &> /dev/null
 
 	G_DIETPI-NOTIFY 2 "Creating DietPi core environment"
 
@@ -1110,8 +1111,14 @@ _EOF_
 		tar xvf package.tar -C /lib/modules/
 		rm package.tar
 
-		G_RUN_CMD wget https://raw.githubusercontent.com/sparky-sbc/sparky-test/master/pro-ject-s2/snd-usb-audio.ko -O /lib/modules/$(uname -r)/kernel/sound/usb/snd-usb-audio.ko
-		G_RUN_CMD wget https://raw.githubusercontent.com/sparky-sbc/sparky-test/master/pro-ject-s2/snd-usbmidi-lib.ko -O /lib/modules/$(uname -r)/kernel/sound/usb/snd-usbmidi-lib.ko
+		#	patches
+		G_RUN_CMD wget https://raw.githubusercontent.com/sparky-sbc/sparky-test/master/dsd-marantz/snd-usb-audio.ko -O /lib/modules/3.10.38/kernel/sound/usb/snd-usb-audio.ko
+		G_RUN_CMD wget https://raw.githubusercontent.com/sparky-sbc/sparky-test/master/dsd-marantz/snd-usbmidi-lib.ko -O /lib/modules/3.10.38/kernel/sound/usb/snd-usbmidi-lib.ko
+
+		#	Firmware
+		G_RUN_CMD wget https://raw.githubusercontent.com/sparky-sbc/sparky-test/master/piano-firmware/piano-firmware.tar
+		tar -xvf piano-firmware.tar -C /lib/
+		rm piano-firmware.tar
 
 		cat << _EOF_ > /DietPi/uEnv.txt
 uenvcmd=setenv os_type linux;
@@ -1141,9 +1148,17 @@ _EOF_
 		sed -i "/^CONFIG_CPU_GOVERNOR=/c\CONFIG_CPU_GOVERNOR=performance" /DietPi/dietpi.txt
 		/DietPi/dietpi/dietpi-cpu_set
 
-	# - RPI: Scroll lock fix for RPi by Midwan: https://github.com/Fourdee/DietPi/issues/474#issuecomment-243215674
+	# - RPI:
 	elif (( $G_HW_MODEL < 10 )); then
 
+		# - RPI Piano allo firmware:
+		G_RUN_CMD wget https://github.com/allocom/piano-firmware/archive/master.zip -O package.zip
+		unzip -o package.zip
+		rm package.zip
+		cp -R piano-firmware-master/lib/firmware/allo /lib/firmware/
+		rm -R piano-firmware-master
+
+		# - Scroll lock fix for RPi by Midwan: https://github.com/Fourdee/DietPi/issues/474#issuecomment-243215674
 		cat << _EOF_ > /etc/udev/rules.d/50-leds.rules
 ACTION=="add", SUBSYSTEM=="leds", ENV{DEVPATH}=="*/input*::scrolllock", ATTR{trigger}="kbd-scrollock"
 _EOF_
@@ -1215,12 +1230,6 @@ _EOF_
 
 	# - re-enable for next run
 	sed -i '/AUTO_SETUP_SWAPFILE_SIZE=/c\AUTO_SETUP_SWAPFILE_SIZE=1' /DietPi/dietpi.txt
-	#	BBB disable swapfile gen
-	if (( $G_HW_MODEL == 71 )); then
-
-		sed -i '/AUTO_SETUP_SWAPFILE_SIZE=/c\AUTO_SETUP_SWAPFILE_SIZE=0' /DietPi/dietpi.txt
-
-	fi
 
 	G_DIETPI-NOTIFY 2 'Resetting boot.ini, config.txt, cmdline.txt etc'
 
@@ -1436,6 +1445,10 @@ _EOF_
 
 	G_RUN_CMD systemctl stop dietpi-ramlog
 	G_RUN_CMD systemctl stop dietpi-ramdisk
+
+	# - Minor cleanup, Remove tmp and our logs
+	rm -R /tmp/*
+	rm /var/tmp/dietpi/logs/*
 
 	sync
 	# fstrim -v /

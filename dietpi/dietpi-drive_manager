@@ -10,23 +10,16 @@
 	#
 	# Info: Drive Manager for DietPi
 	#
-	# Notes: Script does not support VM image.
-	#
 	# Usage:
 	# 	  = Drive Manager
 	#	1 = Selectadrive! Provides a list of available drive mount locations, with value on selection saved to: /tmp/dietpi-drive_manager_selmnt
 	#	2 = Returns exit 1 if low on freespace
 	#	3 = Returns exit 1 if rootfs is currently RO (NB: simple check via mount cmd, does not init full drive manager vars, for quicker loading/processing)
-	#	4 = Generates a new /etc/fstab based on current mounted drives (for use in PREP_SYSTEM_FOR_DIETPI.sh)
+	#	4 = Generates a new /etc/fstab based on current mounted locally drives (for use in PREP_SYSTEM_FOR_DIETPI.sh). NB: does not include remoteFS mounts!
 	#
 	#	NB: This script does not support quoted/string UUID entries in /etc/fstab.
 	#////////////////////////////////////
 
-	#Grab Input (valid interger)
-	INPUT=0
-	if [[ $1 =~ ^-?[0-9]+$ ]]; then
-		INPUT=$1
-	fi
 	#Import DietPi-Globals ---------------------------------------------------------------
 	if [ -f /DietPi/dietpi/func/dietpi-globals ]; then
 
@@ -42,6 +35,14 @@
 	export G_PROGRAM_NAME='DietPi-Drive_Manager'
 	G_INIT
 	#Import DietPi-Globals ---------------------------------------------------------------
+
+	#Grab Input (valid interger)
+	INPUT=0
+	if (( $(G_CHECK_VALIDINT $1) )); then
+
+		INPUT=$1
+
+	fi
 
 	EXIT_CODE=0
 
@@ -265,6 +266,14 @@
 
 			done
 
+			#Remove x-systemd.automount if not supported by kernel: https://github.com/Fourdee/DietPi/issues/1607#issuecomment-372030565
+			if (( $(modprobe autofs4 --dry-run &> /dev/null; echo $?) != 0 )); then
+
+				sed -i 's/,x-systemd.automount//g' "$FP_TEMP_FSTAB"
+				G_DIETPI-NOTIFY 2 'autofs4 module not available in kernel, x-systemd.automount has been disabled'
+
+			fi
+
 			cp "$FP_TEMP_FSTAB" /etc/fstab
 			systemctl daemon-reload
 
@@ -367,7 +376,7 @@
 
 						G_DIETPI-NOTIFY 2 "RootFS is currently set to R/O. $PROGRAM_NAME requires R/W access."
 
-						whiptail --title "RootFS is R/O" --yesno "RootFS is currently set to 'Read Only'. DietPi-Drive_Manager requires 'Read Write' access to function.\n\nWould you like to renable 'Read Write' access on RootFS?" --backtitle "$PROGRAM_NAME" --defaultno 14 75
+						G_WHIP_YESNO "RootFS is currently set to 'Read Only'. DietPi-Drive_Manager requires 'Read Write' access to function.\n\nWould you like to renable 'Read Write' access on RootFS?"
 						if (( $? == 0 )); then
 
 							Toggle_WriteMode
@@ -420,6 +429,9 @@
 	Run_Format(){
 
 		local drivepath_no_partitions=$(Return_Drive_Without_Partitions ${aDRIVE_MOUNT_SOURCE[$INDEX_DRIVE_BEING_EDITED]})
+
+		# - disable swap
+		/DietPi/dietpi/func/dietpi-set_dphys-swapfile 0 /var/swap
 
 		# - Unmount drive
 		umount ${aDRIVE_MOUNT_SOURCE[$INDEX_DRIVE_BEING_EDITED]}
@@ -506,6 +518,9 @@
 		FORMAT_COMPLETED=1
 		FORMAT_PREVIOUS_MOUNT_SOURCE=${aDRIVE_MOUNT_SOURCE[$INDEX_DRIVE_BEING_EDITED]}
 
+		# - enable swap
+		/DietPi/dietpi/func/dietpi-set_dphys-swapfile 1 /var/swap
+
 		Init_Drives_and_Refresh
 
 	}
@@ -585,7 +600,7 @@
 
 		systemctl daemon-reload
 
-		whiptail --title "RootFS transfer completed" --msgbox "RootFS transfer completed. Press enter to reboot system." --backtitle "$PROGRAM_NAME" 8 60
+		G_WHIP_MSG 'RootFS transfer completed. Press enter to reboot system.'
 
 		reboot
 
@@ -611,12 +626,9 @@
 
 				if (( $free_space_current < $free_space_limit )); then
 
-					local message="Error:\n\nAvailable free space on RootFS is low ($free_space_current MB). To prevent potential issues due to running out of free space, this script will now be terminated.\n\nPlease free up at least $free_space_limit MB of free space, then try again."
-
-					whiptail --title "Insufficient free space" --msgbox "$message" --backtitle "$PROGRAM_NAME" 14 70
+					G_WHIP_MSG "Error:\n\nAvailable free space on RootFS is low ($free_space_current MB). To prevent potential issues due to running out of free space, this script will now be terminated.\n\nPlease free up at least $free_space_limit MB of free space, then try again."
 
 					G_DIETPI-NOTIFY 1 "Insufficient free space on RootFS. $free_space_current MB available, $free_space_limit MB required"
-					G_DIETPI-NOTIFY 1 'Aborting'
 
 					#	export
 					EXIT_CODE=1
@@ -692,7 +704,7 @@
 
 		if (( $exit_status != 0 )); then
 
-			whiptail --title "Failed to apply now" --msgbox "Due to:\n - $message_result\n\nIf you have set to read only, this will be active on next reboot." --backtitle "$PROGRAM_NAME" 14 70
+			G_WHIP_MSG "Failed to apply now:\n\nDue to:\n - $message_result\n\nIf you have set to read only, this will be active on next reboot."
 
 		fi
 
@@ -704,7 +716,7 @@
 	Menu_Main_Drive_Manager(){
 
 		#Generate menu
-		local whiptail_menu_array=()
+		G_WHIP_MENU_ARRAY=()
 
 		#List all available drives
 		local drive_available=0
@@ -719,7 +731,7 @@
 				if (( $(echo -e "${aDRIVE_MOUNT_SOURCE[$i]}" | grep -ci -m1 '1$') )); then
 
 					local drivepath_no_partitions=$(Return_Drive_Without_Partitions ${aDRIVE_MOUNT_SOURCE[$i]})
-					whiptail_menu_array+=('' "─($drivepath_no_partitions)────────────────────────────────────────")
+					G_WHIP_MENU_ARRAY+=('' "─($drivepath_no_partitions)────────────────────────────────────────")
 
 				fi
 
@@ -727,7 +739,7 @@
 				if (( ${aDRIVE_ISMOUNTED[$i]} )); then
 
 					#| ${aDRIVE_UUID[$i]}
-					whiptail_menu_array+=("${aDRIVE_MOUNT_TARGET[$i]}" ": ${aDRIVE_MOUNT_SOURCE[$i]} | ${aDRIVE_FSTYPE[$i]} | Size: ${aDRIVE_SIZE_TOTAL[$i]} | Used: ${aDRIVE_SIZE_USED[$i]} (${aDRIVE_SIZE_PERCENTUSED[$i]})")
+					G_WHIP_MENU_ARRAY+=("${aDRIVE_MOUNT_TARGET[$i]}" ": ${aDRIVE_MOUNT_SOURCE[$i]} | ${aDRIVE_FSTYPE[$i]} | Size: ${aDRIVE_SIZE_TOTAL[$i]} | Used: ${aDRIVE_SIZE_USED[$i]} (${aDRIVE_SIZE_PERCENTUSED[$i]})")
 
 				#Not mounted, why?
 				else
@@ -735,12 +747,12 @@
 					#Drive has no FS:
 					if (( ! ${aDRIVE_ISFILESYSTEM[$i]} )); then
 
-						whiptail_menu_array+=("${aDRIVE_MOUNT_TARGET[$i]}" ": ${aDRIVE_MOUNT_SOURCE[$i]} | No filesystem / format required")
+						G_WHIP_MENU_ARRAY+=("${aDRIVE_MOUNT_TARGET[$i]}" ": ${aDRIVE_MOUNT_SOURCE[$i]} | No filesystem / format required")
 
 					#Drive is not mounted:
 					else
 
-						whiptail_menu_array+=("${aDRIVE_MOUNT_TARGET[$i]}" ": ${aDRIVE_MOUNT_SOURCE[$i]} | ${aDRIVE_FSTYPE[$i]} | Not mounted")
+						G_WHIP_MENU_ARRAY+=("${aDRIVE_MOUNT_TARGET[$i]}" ": ${aDRIVE_MOUNT_SOURCE[$i]} | ${aDRIVE_FSTYPE[$i]} | Not mounted")
 
 					fi
 
@@ -750,15 +762,15 @@
 
 		done
 
-		whiptail_menu_array+=("" "───────────────────────────────────────────────────────")
+		G_WHIP_MENU_ARRAY+=("" "───────────────────────────────────────────────────────")
 
 		if (( ! $drive_available )); then
 
-			whiptail_menu_array+=("Refresh" ": No drives found. Insert a drive and select this option")
+			G_WHIP_MENU_ARRAY+=("Refresh" ": No drives found. Insert a drive and select this option")
 
 		else
 
-			whiptail_menu_array+=("Refresh" ": Scan for recently added/removed drives")
+			G_WHIP_MENU_ARRAY+=("Refresh" ": Scan for recently added/removed drives")
 
 		fi
 
@@ -771,19 +783,15 @@
 
 		fi
 
-		WHIP_TITLE="$PROGRAM_NAME"
-		OPTION=$(whiptail --title "$WHIP_TITLE" --menu "Please select a drive to see available options.\n - User data location: $userdata_location_text" --default-item "$MENU_LASTITEM" --cancel-button "Exit" --backtitle "$PROGRAM_NAME" 20 110 11 "${whiptail_menu_array[@]}" 3>&1 1>&2 2>&3)
+		G_WHIP_DEFAULT_ITEM="$MENU_LASTITEM"
+		G_WHIP_BUTTON_CANCEL_TEXT='Exit'
+		G_WHIP_MENU "Please select a drive to see available options.\n - User data location: $userdata_location_text"
+		if (( $? == 0 )); then
 
-		CHOICE=$?
-
-		unset whiptail_menu_array
-
-		if (( $CHOICE == 0 )); then
-
-			MENU_LASTITEM="$OPTION"
+			MENU_LASTITEM="$G_WHIP_RETURNED_VALUE"
 
 			#Refresh
-			if [ "$OPTION" = "Refresh" ]; then
+			if [ "$G_WHIP_RETURNED_VALUE" = "Refresh" ]; then
 
 				Init_Drives_and_Refresh
 
@@ -796,7 +804,7 @@
 				for ((i=0; i<$MAX_DRIVES; i++))
 				do
 
-					if [ "$OPTION" = "${aDRIVE_MOUNT_TARGET[$i]}" ]; then
+					if [ "$G_WHIP_RETURNED_VALUE" = "${aDRIVE_MOUNT_TARGET[$i]}" ]; then
 
 						# - Check if drive is still attached and available
 						if (( ${aDRIVE_ISAVAILABLE[$i]} )); then
@@ -805,9 +813,9 @@
 							TARGETMENUID=1
 							break
 
-						elif [ -n "$OPTION" ]; then
+						elif [ -n "$G_WHIP_RETURNED_VALUE" ]; then
 
-							whiptail --title "Info: No drive" --msgbox "This drive is no longer available" --backtitle "$PROGRAM_NAME" 8 60
+							G_WHIP_MSG 'Info:\n\nThis drive is no longer available'
 							break
 
 						fi
@@ -836,7 +844,7 @@
 
 		#Generate menu
 		local whiptail_desc=()
-		local whiptail_menu_array=()
+		G_WHIP_MENU_ARRAY=()
 
 		whiptail_desc+="Mount target: ${aDRIVE_MOUNT_TARGET[$INDEX_DRIVE_BEING_EDITED]}\n"
 		whiptail_desc+="Mount source: ${aDRIVE_MOUNT_SOURCE[$INDEX_DRIVE_BEING_EDITED]}\n"
@@ -870,41 +878,41 @@
 				# - Disable mount control for /boot /rootfs
 				if [ "${aDRIVE_MOUNT_TARGET[$INDEX_DRIVE_BEING_EDITED]}" != "/" ] && [ "${aDRIVE_MOUNT_TARGET[$INDEX_DRIVE_BEING_EDITED]}" != "/boot" ]; then
 
-					whiptail_menu_array+=("Unmount" ": Allows you to physically remove the drive")
+					G_WHIP_MENU_ARRAY+=("Unmount" ": Allows you to physically remove the drive")
 
 				fi
 
 				if ( [ "${aDRIVE_MOUNT_TARGET[$INDEX_DRIVE_BEING_EDITED]}" != "/" ] && [[ $FP_USERDATA_CURRENT == "${aDRIVE_MOUNT_TARGET[$INDEX_DRIVE_BEING_EDITED]}"* ]] ) || #off rootfs
 					( [ "${aDRIVE_MOUNT_TARGET[$INDEX_DRIVE_BEING_EDITED]}" = "/" ] && [ "$FP_USERDATA_CURRENT" = "$G_FP_DIETPI_USERDATA" ] ); then #on rootfs
 
-					whiptail_menu_array+=("User data" ": Your user data is currently located on this drive")
+					G_WHIP_MENU_ARRAY+=("User data" ": Your user data is currently located on this drive")
 					partition_contains_userdata=1
 
 				else
 
-					whiptail_menu_array+=("Move User data" ": Move your DietPi user data to this drive")
+					G_WHIP_MENU_ARRAY+=("Move User data" ": Move your DietPi user data to this drive")
 
 				fi
 
 				if (( ${aDRIVE_ISUUIDMOUNT[$INDEX_DRIVE_BEING_EDITED]} )); then
 
-					whiptail_menu_array+=("Mount Method" ": Change from UUID to /dev/sd")
+					G_WHIP_MENU_ARRAY+=("Mount Method" ": Change from UUID to /dev/sd")
 
 				else
 
-					whiptail_menu_array+=("Mount Method" ": Change from /dev/sd to UUID")
+					G_WHIP_MENU_ARRAY+=("Mount Method" ": Change from /dev/sd to UUID")
 
 				fi
 
 				#Read only?
 				if (( ${aDRIVE_ISREADONLY_FSTAB[$INDEX_DRIVE_BEING_EDITED]} || ${aDRIVE_ISREADONLY_CURRENTLY[$INDEX_DRIVE_BEING_EDITED]} )); then
 
-					whiptail_menu_array+=("Read Only" ": Enabled | Select to allow R/W")
+					G_WHIP_MENU_ARRAY+=("Read Only" ": Enabled | Select to allow R/W")
 					whiptail_desc+="\nRead only:    Enabled"
 
 				else
 
-					whiptail_menu_array+=("Read Only" ": Disabled | Select to set read only")
+					G_WHIP_MENU_ARRAY+=("Read Only" ": Disabled | Select to set read only")
 					whiptail_desc+="\nRead only:    Disabled"
 
 				fi
@@ -914,7 +922,7 @@
 
 				whiptail_desc+="Status:       Drive is not mounted and can be unplugged\n"
 
-				whiptail_menu_array+=("Mount" ": Mount the drive to ${aDRIVE_MOUNT_TARGET[$INDEX_DRIVE_BEING_EDITED]}")
+				G_WHIP_MENU_ARRAY+=("Mount" ": Mount the drive to ${aDRIVE_MOUNT_TARGET[$INDEX_DRIVE_BEING_EDITED]}")
 
 			fi
 
@@ -923,7 +931,7 @@
 		# - Disable format for /boot /rootfs
 		if [ "${aDRIVE_MOUNT_TARGET[$INDEX_DRIVE_BEING_EDITED]}" != "/" ] && [ "${aDRIVE_MOUNT_TARGET[$INDEX_DRIVE_BEING_EDITED]}" != "/boot" ]; then
 
-			whiptail_menu_array+=("Format" ": Wipe all data and format drive with ext4")
+			G_WHIP_MENU_ARRAY+=("Format" ": Wipe all data and format drive with ext4")
 
 		fi
 
@@ -931,23 +939,17 @@
 		if [[ ${aDRIVE_MOUNT_SOURCE[$INDEX_DRIVE_BEING_EDITED]} != $FP_ROOTFS_SOURCE ]] &&
 			(( $G_HW_MODEL < 10 || $G_HW_MODEL == 10 || $G_HW_MODEL == 11 || $G_HW_MODEL == 12 )); then
 
-			whiptail_menu_array+=("Transfer RootFS" ": Transfer RootFS to this drive")
+			G_WHIP_MENU_ARRAY+=("Transfer RootFS" ": Transfer RootFS to this drive")
 
 		fi
 
-		WHIP_TITLE="$PROGRAM_NAME"
-		OPTION=$(whiptail --title "$WHIP_TITLE" --menu "$whiptail_desc" --default-item "$MENU_LASTITEM" --cancel-button "Back" --backtitle "$PROGRAM_NAME" 22 90 6 "${whiptail_menu_array[@]}" 3>&1 1>&2 2>&3)
+		G_WHIP_DEFAULT_ITEM="$MENU_LASTITEM"
+		G_WHIP_MENU "$whiptail_desc"
+		if (( $? == 0 )); then
 
-		CHOICE=$?
+			MENU_LASTITEM="$G_WHIP_RETURNED_VALUE"
 
-		unset whiptail_desc
-		unset whiptail_menu_array
-
-		if (( $CHOICE == 0 )); then
-
-			MENU_LASTITEM="$OPTION"
-
-			if [ "$OPTION" = "Mount" ]; then
+			if [ "$G_WHIP_RETURNED_VALUE" = "Mount" ]; then
 
 					# - update fstab
 					sed -i -e "\@${aDRIVE_MOUNT_TARGET[$INDEX_DRIVE_BEING_EDITED]}[[:space:]]@s@^#@@" /etc/fstab
@@ -955,12 +957,12 @@
 
 					mount "${aDRIVE_MOUNT_TARGET[$INDEX_DRIVE_BEING_EDITED]}"
 
-			elif [ "$OPTION" = "Unmount" ]; then
+			elif [ "$G_WHIP_RETURNED_VALUE" = "Unmount" ]; then
 
 				# - Disallow if userdata is located on this drive!
 				if (( $partition_contains_userdata )); then
 
-					whiptail --title "Info: dismount prevented" --msgbox "Your DietPi user data is currently located on this drive:\n - $FP_USERDATA_CURRENT\n\nDismounting the drive at this time is not possible.\n\nPlease move your user data elsewhere, before trying again:\nhttp://dietpi.com/phpbb/viewtopic.php?f=8&t=478" --backtitle "$PROGRAM_NAME" 13 80
+					G_WHIP_MSG "Info: dismount prevented\n\nThe DietPi user data is currently located on this drive:\n - $FP_USERDATA_CURRENT\n\nDismounting the drive at this time is not possible.\n\nPlease move your user data elsewhere, before trying again:\nhttp://dietpi.com/phpbb/viewtopic.php?f=8&t=478"
 
 				else
 
@@ -972,12 +974,12 @@
 
 				fi
 
-			elif [ "$OPTION" = "Mount Method" ]; then
+			elif [ "$G_WHIP_RETURNED_VALUE" = "Mount Method" ]; then
 
 				#UUID exists?
 				if [ "${aDRIVE_UUID[$INDEX_DRIVE_BEING_EDITED]}" = "NULL" ]; then
 
-					whiptail --title "Error: No UUID" --msgbox "This drive does not have a UUID assigned. Unable to proceed." --backtitle "$PROGRAM_NAME" 8 60
+					G_WHIP_MSG 'Error:\n\nThis drive does not have a UUID assigned. Unable to proceed.'
 
 				else
 
@@ -996,11 +998,11 @@
 
 				fi
 
-			elif [ "$OPTION" = "Move User data" ]; then
+			elif [ "$G_WHIP_RETURNED_VALUE" = "Move User data" ]; then
 
 				if [ "${aDRIVE_FSTYPE[$INDEX_DRIVE_BEING_EDITED]}" = "vfat" ]; then
 
-					whiptail --title "Warning: FAT32" --msgbox "Warning:\n\nFAT32 does not support file and folder permissions. Some of the programs which use the DietPi user directory (eg: Owncloud data storage), rely on permissions to function correctly.\n\nIf you continue with the DietPi user data move to this FAT32 drive, programs may have issues reading and writing data." --backtitle "$PROGRAM_NAME" 14 70
+					G_WHIP_MSG 'Warning:\n\nFAT32 does not support file and folder permissions. Some of the programs which use the DietPi user directory (eg: Owncloud data storage), rely on permissions to function correctly.\n\nIf you continue with the DietPi user data move to this FAT32 drive, programs may have issues reading and writing data.'
 
 				fi
 
@@ -1014,16 +1016,15 @@
 
 				target_userdata_dir+='/dietpi_userdata'
 
-				whiptail --title "Move user data" --yesno "Your user data will be moved:\n - From: $FP_USERDATA_CURRENT\n - To: $target_userdata_dir\n\nDo you wish to continue?" --backtitle "$PROGRAM_NAME" --defaultno 12 70
-				CHOICE=$?
-				if (( $CHOICE == 0 )); then
+				G_WHIP_YESNO "Your user data will be moved:\n - From: $FP_USERDATA_CURRENT\n - To: $target_userdata_dir\n\nDo you wish to continue?"
+				if (( $? == 0 )); then
 
 					/DietPi/dietpi/func/dietpi-set_userdata "$FP_USERDATA_CURRENT" "$target_userdata_dir"
 					sleep 1
 
 				fi
 
-			elif [ "$OPTION" = "Format" ]; then
+			elif [ "$G_WHIP_RETURNED_VALUE" = "Format" ]; then
 
 				FORMAT_RECREATE_PARTITION_TABLE=1
 
@@ -1032,12 +1033,12 @@
 				# - Disallow if userdata is located on this drive!
 				if (( $partition_contains_userdata )); then
 
-					whiptail --title "Info: format prevented" --msgbox "Your DietPi user data is currently located on this drive:\n - $FP_USERDATA_CURRENT\n\nFormatting the drive at this time is not possible.\n\nPlease move your user data elsewhere, before trying again:\nhttp://dietpi.com/phpbb/viewtopic.php?f=8&t=478" --backtitle "$PROGRAM_NAME" 13 80
+					G_WHIP_MSG "Format failed:\n\nThe DietPi user data is currently located on this drive:\n - $FP_USERDATA_CURRENT\n\nFormatting the drive at this time is not possible.\n\nPlease move your user data elsewhere, before trying again:\nhttp://dietpi.com/phpbb/viewtopic.php?f=8&t=478"
 
 				#	user must unmount all partitions on this drive, before we can format
 				elif (( $(df -Ph | grep -ci -m1 "^$drivepath_no_partitions" ) )); then
 
-					whiptail --title "Notice:" --msgbox "As DietPi will format the entire drive with 1 partition, you must unmount ALL partitions on this disk, before formatting is available." --backtitle "$PROGRAM_NAME" 10 70
+					G_WHIP_MSG 'As DietPi will format the entire drive with 1 partition, you must unmount ALL partitions on this disk, before formatting is available.'
 
 				else
 
@@ -1046,22 +1047,21 @@
 				fi
 
 			#Transfer RootFS
-			elif [ "$OPTION" = "Transfer RootFS" ]; then
+			elif [ "$G_WHIP_RETURNED_VALUE" = "Transfer RootFS" ]; then
 
 				FORMAT_RECREATE_PARTITION_TABLE=0
 
 				#	user must unmount partition before format
 				if (( $(df -Ph | grep -ci -m1 "^${aDRIVE_MOUNT_SOURCE[$INDEX_DRIVE_BEING_EDITED]}") )); then
 
-					whiptail --title "Notice:" --msgbox "Partition must be unmounted, before format and RootFS transfer can begin.\n\nPlease unmount the partition, then try again." --backtitle "$PROGRAM_NAME" 10 70
+					G_WHIP_MSG 'Partition must be unmounted, before format and RootFS transfer can begin.\n\nPlease unmount the partition, then try again.'
 
 				else
 
-					whiptail --title "Move RootFS" --yesno --defaultno "This process will move RootFS data to another location. This may increase filesystem performance when using a USB drive over SD card, however, there are some limitations:\n\n - The SD/EMMC card is still required for the boot process\n - ALL data on the target PARTITION will be deleted\n\nNB: As this feature is still in testing, we recommend you use this feature on a fresh installation only.\n\nDo you wish to continue?" --backtitle "$PROGRAM_NAME" 18 77
-					CHOICE=$?
-					if (( $CHOICE == 0 )); then
+					G_WHIP_YESNO "This process will move RootFS data to another location. This may increase filesystem performance when using a USB drive over SD card, however, there are some limitations:\n\n - The SD/EMMC card is still required for the boot process\n - ALL data on the target PARTITION will be deleted\n\nNB: As this feature is still in testing, we recommend you use this feature on a fresh installation only.\n\nDo you wish to continue?"
+					if (( $? == 0 )); then
 
-						whiptail --title "Info:" --msgbox "On the next screen, you will be asked to format the target partition.\n\nPlease see the following recommendations for RootFS target filesystem type:\n\n - Odroid\nRootFS transfer supports ONLY EXT4 format\n\n - RPi\nRootFS transfer supports EXT4, BTRFS and F2FS" --backtitle "$PROGRAM_NAME" 16 75
+						G_WHIP_MSG 'On the next screen, you will be asked to format the target partition.\n\nPlease see the following recommendations for RootFS target filesystem type:\n\n - Odroid\nRootFS transfer supports ONLY EXT4 format\n\n - RPi\nRootFS transfer supports EXT4, BTRFS and F2FS'
 
 						#NB: We dont enter main loop in this func
 						TARGETMENUID=2
@@ -1082,7 +1082,7 @@
 
 				fi
 
-			elif [ "$OPTION" = "Read Only" ]; then
+			elif [ "$G_WHIP_RETURNED_VALUE" = "Read Only" ]; then
 
 				Toggle_WriteMode
 				ROOTFS_RW_CHECKED=0
@@ -1096,6 +1096,8 @@
 
 		fi
 
+		unset whiptail_desc
+
 		#Always init/refresh drives for next loop
 		Init_Drives_and_Refresh
 
@@ -1106,9 +1108,6 @@
 		TARGETMENUID=2
 
 		FORMAT_COMPLETED=0
-
-		# - disable swap
-		/DietPi/dietpi/func/dietpi-set_dphys-swapfile 0 /var/swap
 
 		local partition_table_text='MBR'
 		if (( $FORMAT_GPT )); then
@@ -1144,89 +1143,77 @@
 
 		fi
 
-		local whiptail_menu_array=()
+		G_WHIP_MENU_ARRAY=()
 
-		whiptail_menu_array+=("Partition Type" ": $partition_table_text")
-		whiptail_menu_array+=("Filesystem Type" ": $format_type_text")
-		whiptail_menu_array+=("Format" ": Wipe all data and format drive with current options")
+		G_WHIP_MENU_ARRAY+=("Partition Type" ": $partition_table_text")
+		G_WHIP_MENU_ARRAY+=("Filesystem Type" ": $format_type_text")
+		G_WHIP_MENU_ARRAY+=("Format" ": Wipe all data and format drive with current options")
 
-		WHIP_TITLE="Format Drive"
-		OPTION=$(whiptail --title "$WHIP_TITLE" --menu "Please select formatting options:" --cancel-button "Back" --default-item "$MENU_LASTITEM" --backtitle "$PROGRAM_NAME" 11 75 3 "${whiptail_menu_array[@]}" 3>&1 1>&2 2>&3)
-		CHOICE=$?
+		G_WHIP_DEFAULT_ITEM="$MENU_LASTITEM"
+		G_WHIP_MENU 'Please select formatting options:'
+		if (( $? == 0 )); then
 
-		unset whiptail_menu_array
+			MENU_LASTITEM="$G_WHIP_RETURNED_VALUE"
 
-		if (( $CHOICE == 0 )); then
+			if [ "$G_WHIP_RETURNED_VALUE" = "Partition Type" ]; then
 
-			MENU_LASTITEM="$OPTION"
-
-			if [ "$OPTION" = "Partition Type" ]; then
-
-				WHIP_TITLE='Partition table?'
-				whiptail --title "$WHIP_TITLE" --yesno "Would you like to use GPT or MBR parition table?\n - GPT is required for 2TB+ drives\n - MBR does NOT support 2TB+ drives\n\nIf unsure, select GPT (default)" --yes-button "MBR" --no-button "GPT" --backtitle "$PROGRAM_NAME" --defaultno 12 70
-				CHOICE=$?
 				FORMAT_GPT=1
-				if (( $CHOICE == 0 )); then
+
+				G_WHIP_YESNO "Would you like to use GPT or MBR parition table?\n - GPT is required for 2TB+ drives\n - MBR does NOT support 2TB+ drives\n\nIf unsure, select GPT (default)"
+				if (( $? == 0 )); then
 
 					FORMAT_GPT=0
 					partition_table_text='MBR'
 
 				fi
 
-			elif [ "$OPTION" = "Filesystem Type" ]; then
+			elif [ "$G_WHIP_RETURNED_VALUE" = "Filesystem Type" ]; then
 
-				whiptail_menu_array=()
-				whiptail_menu_array+=("0" ": EXT4   | Default (Recommended)")
-				whiptail_menu_array+=("1" ": NTFS   | Windows (High CPU usage)")
-				whiptail_menu_array+=("2" ": FAT32  | All OS (4GB filesize limit)")
-				whiptail_menu_array+=("3" ": HFS+   | Mac OS X (Intel Mac default file system)")
-				whiptail_menu_array+=("4" ": BTRFS  | Linux (Modern filesystem)")
-				whiptail_menu_array+=("5" ": F2FS   | Linux (Flash filesystem)")
-				whiptail_menu_array+=("6" ": exFAT  | Windows (Flash filesystem)")
+				G_WHIP_MENU_ARRAY=(
 
-				WHIP_TITLE='Filesystem Type?'
-				OPTION=$(whiptail --title "$WHIP_TITLE" --menu "Please select a filesystem type for this format:\n\nEXT4:\nHighly recommended if you plan to use this drive solely on this system (dedicated drive).\n\nNTFS:\nRecommended if you plan to use this drive on a Windows system. High CPU usage during transfers.\n\nFull list of different filesystem types:\nhttp://dietpi.com/phpbb/viewtopic.php?f=8&t=673&p=2898#p2898" --cancel-button "Back" --default-item "$FORMAT_FILESYSTEM_TYPE" --backtitle "$PROGRAM_NAME" 24 70 5 "${whiptail_menu_array[@]}" 3>&1 1>&2 2>&3)
-				CHOICE=$?
+					'0' ': EXT4   | Default (Recommended)'
+					'1' ': NTFS   | Windows (High CPU usage)'
+					'2' ': FAT32  | All OS (4GB filesize limit)'
+					'3' ': HFS+   | Mac OS X (Intel Mac default file system)'
+					'4' ': BTRFS  | Linux (Modern filesystem)'
+					'5' ': F2FS   | Linux (Flash filesystem)'
+					'6' ': exFAT  | Windows (Flash filesystem)'
 
-				unset whiptail_menu_array
+				)
 
-				if (( $CHOICE == 0 )); then
+				G_WHIP_DEFAULT_ITEM="$FORMAT_FILESYSTEM_TYPE"
+				G_WHIP_MENU "Please select a filesystem type for this format:\n\nEXT4:\nHighly recommended if you plan to use this drive solely on this system (dedicated drive).\n\nNTFS:\nRecommended if you plan to use this drive on a Windows system. High CPU usage during transfers.\n\nFull list of different filesystem types:\nhttp://dietpi.com/phpbb/viewtopic.php?f=8&t=673&p=2898#p2898"
+				if (( $? == 0 )); then
 
 					# - HFS install packages
-					if (( $OPTION == 3 &&
-						! $(dpkg --get-selections | grep -ci -m1 '^hfsutils') )); then
+					if (( $G_WHIP_RETURNED_VALUE == 3 )); then
 
-						G_DIETPI-NOTIFY 2 "Installing additional packages for HFS+ support, please wait..."
-						G_AGI hfsplus hfsprogs hfsutils
+						G_AG_CHECK_INSTALL_PREREQ hfsplus hfsprogs hfsutils
 
 					# - btrfs install packages
-					elif (( $OPTION == 4 &&
-						! $(dpkg --get-selections | grep -ci -m1 '^btrfs-tools') )); then
+					elif (( $G_WHIP_RETURNED_VALUE == 4 )); then
 
-						G_DIETPI-NOTIFY 2 "Installing additional packages for BTRFS support, please wait..."
-						G_AGI btrfs-tools
+						G_AG_CHECK_INSTALL_PREREQ btrfs-tools
 
 					# - f2fs install packages
-					elif (( $OPTION == 5 &&
-						! $(dpkg --get-selections | grep -ci -m1 '^f2fs-tools') )); then
+					elif (( $G_WHIP_RETURNED_VALUE == 5 )); then
 
-						G_DIETPI-NOTIFY 2 "Installing additional packages for F2FS support, please wait..."
-						G_AGI f2fs-tools
+						G_AG_CHECK_INSTALL_PREREQ f2fs-tools
 
 					# - exfat install packages
-					elif (( $OPTION == 6 &&
-						! $(dpkg --get-selections | grep -ci -m1 '^exfat-utils') )); then
+					elif (( $G_WHIP_RETURNED_VALUE == 6 )); then
 
-						G_DIETPI-NOTIFY 2 "Installing additional packages for exFAT support, please wait..."
-						G_AGI exfat-utils exfat-fuse
+						G_AG_CHECK_INSTALL_PREREQ exfat-utils exfat-fuse
 
 					fi
 
-					FORMAT_FILESYSTEM_TYPE=$OPTION
+					FORMAT_FILESYSTEM_TYPE="$G_WHIP_RETURNED_VALUE"
 
 				fi
 
-			elif [ "$OPTION" = "Format" ]; then
+
+
+			elif [ "$G_WHIP_RETURNED_VALUE" = "Format" ]; then
 
 				local drivepath_no_partitions=$(Return_Drive_Without_Partitions ${aDRIVE_MOUNT_SOURCE[$INDEX_DRIVE_BEING_EDITED]})
 				local text_desc="Format Drive:\n - $drivepath_no_partitions\n - UUID=${aDRIVE_UUID[$INDEX_DRIVE_BEING_EDITED]}\n - Partition table: $partition_table_text\n - Filesystem type: $format_type_text\n\nALL DATA and PARTITIONS on this drive will be DELETED.\nDo you wish to continue?"
@@ -1237,10 +1224,8 @@
 
 				fi
 
-				WHIP_TITLE='Start Format?'
-				whiptail --title "$WHIP_TITLE" --yesno "$text_desc" --backtitle "$PROGRAM_NAME" --defaultno 14 75
-				CHOICE=$?
-				if (( $CHOICE == 0 )); then
+				G_WHIP_YESNO "Start format?\n\n$text_desc"
+				if (( $? == 0 )); then
 
 					Run_Format
 
@@ -1256,34 +1241,30 @@
 
 		fi
 
+
+
 	}
 
 	Menu_Select_Mount_Location(){
 
 		#Generate menu
-		local whiptail_menu_array=()
+		G_WHIP_MENU_ARRAY=()
 
 		df -Ph | tail -n +2 | grep -v 'tmpfs[[:space:]]' | grep -v '^udev' > /tmp/dietpi-drive_manager_selmnt
 
 		while read line
 		do
 
-			whiptail_menu_array+=("$(echo -e $line | awk '{print $6}')" ": $(echo -e $line | awk '{print $1}') | size: $(echo -e $line | awk '{print $2}') | available: $(echo -e $line | awk '{print $4}')")
+			G_WHIP_MENU_ARRAY+=("$(echo -e $line | awk '{print $6}')" ": $(echo -e $line | awk '{print $1}') | size: $(echo -e $line | awk '{print $2}') | available: $(echo -e $line | awk '{print $4}')")
 
 		done < /tmp/dietpi-drive_manager_selmnt
 		rm /tmp/dietpi-drive_manager_selmnt
 
+		G_WHIP_DEFAULT_ITEM="$MENU_LASTITEM"
+		G_WHIP_MENU 'Please select a mount location to use:'
+		if (( $? == 0 )); then
 
-		WHIP_TITLE="$PROGRAM_NAME"
-		OPTION=$(whiptail --title "$WHIP_TITLE" --menu "Please select a mount location to use:" --default-item "$MENU_LASTITEM" --cancel-button "Exit" --backtitle "$PROGRAM_NAME" 16 110 7 "${whiptail_menu_array[@]}" 3>&1 1>&2 2>&3)
-
-		CHOICE=$?
-
-		unset whiptail_menu_array
-
-		if (( $CHOICE == 0 )); then
-
-			local drive_manager_selection="$OPTION"
+			local drive_manager_selection="$G_WHIP_RETURNED_VALUE"
 
 			G_DIETPI-NOTIFY 0 "Drive mount selected: $drive_manager_selection"
 			echo -e "$drive_manager_selection" > "$FP_DRIVE_MANAGER_SELECTION"
@@ -1294,11 +1275,8 @@
 
 	Menu_Exit(){
 
-		WHIP_TITLE="Exit $PROGRAM_NAME?"
-		WHIP_QUESTION="Exit $PROGRAM_NAME?"
-		whiptail --title "$WHIP_TITLE" --yesno "$WHIP_QUESTION" --backtitle "$PROGRAM_NAME" --yes-button "Ok" --no-button "Back" --defaultno 9 55
-		CHOICE=$?
-		if (( $CHOICE == 0 )); then
+		G_WHIP_YESNO "Exit $G_PROGRAM_NAME?"
+		if (( $? == 0 )); then
 
 			#exit
 			TARGETMENUID=-1

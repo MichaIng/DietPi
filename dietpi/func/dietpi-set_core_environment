@@ -27,7 +27,7 @@
 
 	fi
 	#Import DietPi-Globals -------------------------------------------------------------
-	. $FP_SCRIPTS/dietpi/func/dietpi-globals # NB: HW_* info are init only, not detected.
+	. "$FP_SCRIPTS"/dietpi/func/dietpi-globals # NB: HW_* info are init only, not detected.
 	G_CHECK_ROOT_USER
 	export G_PROGRAM_NAME='DietPi-Set_core_environment'
 	G_INIT
@@ -41,22 +41,22 @@
 	Create_DietPi_User(){
 
 		mkdir -p /home/"$DIETPI_USERNAME"
-		useradd -m -s /bin/bash "$DIETPI_USERNAME"
-		chpasswd <<< "$DIETPI_USERNAME:$DIETPI_PASSWORD"
+		useradd -m -s /bin/bash "$DIETPI_USERNAME" -p "$DIETPI_PASSWORD"
+		#chpasswd <<< "$DIETPI_USERNAME:$DIETPI_PASSWORD"
 
 		#	Copy existing profile/bashrc
 		cp /root/.profile /home/"$DIETPI_USERNAME"/
 		cp /root/.bashrc /home/"$DIETPI_USERNAME"/
 
 		#	Sudo up dietpi login script
-		sed -i '/^\/DietPi\/dietpi\/login/c\sudo \/DietPi\/dietpi\/login' /home/$DIETPI_USERNAME/.bashrc
+		sed -i '/^\/DietPi\/dietpi\/login/c\sudo \/DietPi\/dietpi\/login' /home/"$DIETPI_USERNAME"/.bashrc
 
 		chown -R "$DIETPI_USERNAME":"$DIETPI_USERNAME" /home/"$DIETPI_USERNAME"
 
 		#	Allow sudo without pw
-		if (( ! $(cat /etc/sudoers | grep -ci -m1 "^$DIETPI_USERNAME[[:space:]]") )); then
+		if ! grep -qi "^$DIETPI_USERNAME[[:blank:]]" /etc/sudoers.d/dietpi; then
 
-			cat << _EOF_ >> /etc/sudoers
+			cat << _EOF_ >> /etc/sudoers.d/dietpi
 $DIETPI_USERNAME ALL=NOPASSWD: ALL
 _EOF_
 
@@ -86,7 +86,7 @@ _EOF_
 		for ((i=0; i<${#group_array[@]}; i++))
 		do
 
-			usermod -a -G ${group_array[$i]} $DIETPI_USERNAME &> /dev/null
+			usermod -a -G "${group_array[$i]}" "$DIETPI_USERNAME" &> /dev/null
 
 		done
 
@@ -180,6 +180,7 @@ Before=rsyslog.service syslog.service
 [Service]
 Type=forking
 RemainAfterExit=yes
+ExecStartPre=$(which mkdir) -p /var/tmp/dietpi/logs
 ExecStart=/bin/bash -c '/boot/dietpi/dietpi-ramdisk 0 &>> /var/tmp/dietpi/logs/dietpi-ramdisk.log'
 ExecStop=/bin/bash -c '/DietPi/dietpi/dietpi-ramdisk 1 &>> /var/tmp/dietpi/logs/dietpi-ramdisk.log'
 
@@ -198,6 +199,7 @@ Before=rsyslog.service syslog.service
 [Service]
 Type=forking
 RemainAfterExit=yes
+ExecStartPre=$(which mkdir) -p /var/tmp/dietpi/logs
 ExecStart=/bin/bash -c '/boot/dietpi/dietpi-ramlog 0 &>> /var/tmp/dietpi/logs/dietpi-ramlog.log'
 ExecStop=/bin/bash -c '/DietPi/dietpi/dietpi-ramlog 1 &>> /var/tmp/dietpi/logs/dietpi-ramlog.log'
 
@@ -230,7 +232,7 @@ _EOF_
 Description=DietPi-PostBoot
 Requires=dietpi-boot.service dietpi-ramdisk.service
 After=dietpi-boot.service dietpi-ramdisk.service dietpi-ramlog.service
-Before=rc-local.service
+Before=rc-local.service rc.local.service
 
 [Service]
 Type=idle
@@ -263,11 +265,11 @@ _EOF_
 
 	cat << _EOF_ > /var/lib/dietpi/dietpi-software/services/kill-ssh-user-sessions-before-network.sh
 #!/bin/bash
-if (( \$(ps x | grep -ci -m1 '[s]shd' ) )); then
+if ps x | grep -qi '[s]shd'; then
 
     killall -w sshd
 
-elif (( \$(ps x | grep -ci -m1 '[d]ropbear' ) )); then
+elif ps x | grep -qi '[d]ropbear'; then
 
     killall -w dropbear
 
@@ -277,61 +279,17 @@ exit 0
 _EOF_
 	chmod +x /var/lib/dietpi/dietpi-software/services/kill-ssh-user-sessions-before-network.sh
 
-	G_DIETPI-NOTIFY 2 'Configuring rc-local service:'
-
-	#	Remove all previous known rc-local services, replace with our own to avoid conflict.
-	update-rc.d -f rc.local remove &> /dev/null
-	rm /etc/init.d/rc.local &> /dev/null
-	rm -R /lib/systemd/system/rc-local.service* &> /dev/null #* for .d/x.conf
-	rm -R /lib/systemd/system/rc.local.service* &> /dev/null
-	rm -R /etc/systemd/system/rc-local.service* &> /dev/null
-	rm -R /etc/systemd/system/rc.local.service* &> /dev/null
-
-	cat << _EOF_ > /etc/systemd/system/rc-local.service
-[Unit]
-Description=rc.local backwards compatibility
-Requires=dietpi-boot.service dietpi-ramdisk.service
-After=dietpi-boot.service dietpi-ramdisk.service dietpi-ramlog.service dietpi-postboot.service
-
-[Service]
-Type=idle
-RemainAfterExit=yes
-ExecStart=/bin/bash -c '/etc/rc.local'
-StandardOutput=tty
-
-[Install]
-WantedBy=multi-user.target
-_EOF_
-	systemctl daemon-reload
-	systemctl enable rc-local.service
-
-	cp -a /etc/rc.local /etc/rc.local.bak
-	cat << _EOF_ > /etc/rc.local
-#!/bin/sh -e
-#
-#
-# This script is executed at the end of each multiuser runlevel.
-# Make sure that the script will "exit 0" on success or any other
-# value on error.
-#
-# In order to disable this script please use systemd to control the service:
-# systemctl disable rc-local.service
-#
-# By default this script does nothing.
-
-exit 0
-_EOF_
-	chmod +x /etc/rc.local
-
 	#-----------------------------------------------------------------------------------
 	#Cron Jobs
 
 	G_DIETPI-NOTIFY 2 "Configuring Cron:"
 
-	cp $FP_SCRIPTS/dietpi/conf/cron.daily_dietpi /etc/cron.daily/dietpi
+	cp "$FP_SCRIPTS"/dietpi/conf/cron.daily_dietpi /etc/cron.daily/dietpi
 	chmod +x /etc/cron.daily/dietpi
-	cp $FP_SCRIPTS/dietpi/conf/cron.hourly_dietpi /etc/cron.hourly/dietpi
+	cp "$FP_SCRIPTS"/dietpi/conf/cron.hourly_dietpi /etc/cron.hourly/dietpi
 	chmod +x /etc/cron.hourly/dietpi
+
+	mkdir -p /etc/cron.minutely #: https://github.com/Fourdee/DietPi/pull/1578
 
 	cat << _EOF_ > /etc/crontab
 #Please use dietpi-cron to change cron start times
@@ -339,6 +297,7 @@ SHELL=/bin/sh
 PATH=/usr/local/sbin:/usr/local/bin:/sbin:/bin:/usr/sbin:/usr/bin
 
 # m h dom mon dow user  command
+*/30 * * * *   root    cd / && run-parts --report /etc/cron.minutely
 17 *    * * *   root    cd / && run-parts --report /etc/cron.hourly
 25 1    * * *   root    test -x /usr/sbin/anacron || ( cd / && run-parts --report /etc/cron.daily )
 47 1    * * 7   root    test -x /usr/sbin/anacron || ( cd / && run-parts --report /etc/cron.weekly )
@@ -373,6 +332,10 @@ _EOF_
 
 	if (( $G_DISTRO > 3 )); then
 
+		systemctl disable apt-daily.service &> /dev/null
+		systemctl disable apt-daily.timer &> /dev/null
+		systemctl disable apt-daily-upgrade.service &> /dev/null
+		systemctl disable apt-daily-upgrade.timer &> /dev/null
 		systemctl mask apt-daily.service &> /dev/null
 		systemctl mask apt-daily.timer &> /dev/null
 		systemctl mask apt-daily-upgrade.service &> /dev/null
@@ -382,19 +345,17 @@ _EOF_
 
 	G_DIETPI-NOTIFY 2 "Setting vm.swappiness=1:"
 
-	sed -i '/^[[:blank:]]*vm.swappiness=/d' /etc/sysctl.conf
-	echo -e "vm.swappiness=1" > /etc/sysctl.d/99-dietpi.conf
+	echo 'vm.swappiness=1' > /etc/sysctl.d/dietpi.conf
 
 	# - Workaround for setting user selected locale to session when POSIX is detected (eg: dropbear limitation/bug): https://github.com/Fourdee/DietPi/issues/1540#issuecomment-367066178
 	cat << _EOF_ > /etc/profile.d/99-dietpi-posix-set-locale.sh
 #!/bin/bash
 
 #Workaround for setting locale to session when POSIX is detected (eg: dropbear): https://github.com/Fourdee/DietPi/issues/1540#issuecomment-367066178
-if (( \$(locale | grep -ci -m1 'POSIX') )); then
-	CURRENT_LOCALE=\$(grep -m1 'AUTO_SETUP_LOCALE=' /DietPi/dietpi.txt | sed 's/.*=//')
+if locale | grep -qi 'POSIX'; then
+	CURRENT_LOCALE="\$(grep -m1 '^[[:blank:]]*AUTO_SETUP_LOCALE=' /DietPi/dietpi.txt | sed 's/^.*=//')"
 	export LANG="\$CURRENT_LOCALE"
 	export LC_ALL="\$CURRENT_LOCALE"
-	#export LANGUAGE="\$CURRENT_LOCALE"
 fi
 _EOF_
 	chmod +x /etc/profile.d/99-dietpi-posix-set-locale.sh
