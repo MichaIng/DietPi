@@ -432,7 +432,7 @@
 	if (( $G_HW_MODEL < 10 )); then
 
 		cat << _EOF_ > /etc/apt/sources.list
-deb https://www.mirrorservice.org/sites/archive.raspbian.org/raspbian $DISTRO_TARGET_NAME main contrib non-free rpi
+deb http://raspbian.raspberrypi.org/raspbian $DISTRO_TARGET_NAME main contrib non-free rpi
 _EOF_
 
 		cat << _EOF_ > /etc/apt/sources.list.d/raspi.list
@@ -594,7 +594,7 @@ _EOF_
 
 		G_AGI linux-image-amd64
 		# Usually no firmware should be necessary for VMs. If user manually passes though some USB device, he might need to install the firmware then.
-		(( $G_HW_MODEL != 20 )) && G_AGI firmware-linux-nonfree
+		(( $G_HW_MODEL != 20 )) && G_AGI firmware-linux-nonfree firmware-misc-nonfree
 
 		#	Grub EFI
 		if dpkg --get-selections | grep -q '^grub-efi-amd64' ||
@@ -665,7 +665,16 @@ _EOF_
 		AUTO_DETECT_KERN_PKG=$(dpkg --get-selections | grep '^linux-image' | awk '{print $1}')
 		if [ -n "$AUTO_DETECT_KERN_PKG" ]; then
 
-			G_AGI $AUTO_DETECT_KERN_PKG
+			# - Install kern package if it exists in cache, else, mark manual #: https://github.com/Fourdee/DietPi/issues/1651#issuecomment-376974917
+			if [ -n "$(apt-cache search ^$AUTO_DETECT_KERN_PKG)" ]; then
+
+				G_AGI $AUTO_DETECT_KERN_PKG
+
+			else
+
+				apt-mark manual $AUTO_DETECT_KERN_PKG
+
+			fi
 
 		else
 
@@ -690,8 +699,8 @@ _EOF_
 
 		# fi
 			# Unpacking armbian-firmware (5.35) ...
-			# dpkg: error processing archive /var/cache/apt/archives/armbian-firmware_5.35_all      .deb (--unpack):
-			# trying to overwrite '/lib/firmware/rt2870.bin', which is also in package firmwa      re-misc-nonfree 20161130-3
+			# dpkg: error processing archive /var/cache/apt/archives/armbian-firmware_5.35_all.deb (--unpack):
+			# trying to overwrite '/lib/firmware/rt2870.bin', which is also in package firmware-misc-nonfree 20161130-3
 			# dpkg-deb: error: subprocess paste was killed by signal (Broken pipe)
 
 
@@ -714,14 +723,14 @@ _EOF_
 
 		G_DIETPI-NOTIFY 2 "Marking WiFi as needed"
 
-		aPACKAGES_REQUIRED_INSTALL+=('crda')			# WiFi related
-		aPACKAGES_REQUIRED_INSTALL+=('firmware-atheros')	# WiFi dongle firmware
-		aPACKAGES_REQUIRED_INSTALL+=('firmware-brcm80211')	# WiFi dongle firmware
-		#aPACKAGES_REQUIRED_INSTALL+=('firmware-ralink')		# WiFi dongle firmware | virtual package for firmware-misc-nonfree
-		aPACKAGES_REQUIRED_INSTALL+=('iw')			# WiFi related
-		aPACKAGES_REQUIRED_INSTALL+=('rfkill')	 		# WiFi related: Used by some onboard WiFi chipsets
-		aPACKAGES_REQUIRED_INSTALL+=('wireless-tools')		# WiFi related
-		aPACKAGES_REQUIRED_INSTALL+=('wpasupplicant')		# WiFi related
+		aPACKAGES_REQUIRED_INSTALL+=('crda')					# WiFi related
+		aPACKAGES_REQUIRED_INSTALL+=('firmware-atheros')		# WiFi dongle firmware
+		aPACKAGES_REQUIRED_INSTALL+=('firmware-brcm80211')		# WiFi dongle firmware
+		aPACKAGES_REQUIRED_INSTALL+=('firmware-misc-nonfree')	# Intel/Nvidia/WiFi (ralink) dongle firmware: https://github.com/Fourdee/DietPi/issues/1675#issuecomment-377806609
+		aPACKAGES_REQUIRED_INSTALL+=('iw')						# WiFi related
+		aPACKAGES_REQUIRED_INSTALL+=('rfkill')	 				# WiFi related: Used by some onboard WiFi chipsets
+		aPACKAGES_REQUIRED_INSTALL+=('wireless-tools')			# WiFi related
+		aPACKAGES_REQUIRED_INSTALL+=('wpasupplicant')			# WiFi related
 
 	fi
 
@@ -928,6 +937,9 @@ _EOF_
 
 	# - RPi specific https://github.com/Fourdee/DietPi/issues/1631#issuecomment-373965406
 	rm /etc/profile.d/wifi-country.sh &> /dev/null
+
+	# - make_nas_processes_faster cron job on Rock64 + NanoPi + Pine64(?) images
+	rm /etc/cron.d/make_nas_processes_faster &> /dev/null
 
 	G_DIETPI-NOTIFY 2 "Creating DietPi core environment"
 
