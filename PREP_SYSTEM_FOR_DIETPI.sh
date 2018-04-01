@@ -594,7 +594,7 @@ _EOF_
 
 		G_AGI linux-image-amd64
 		# Usually no firmware should be necessary for VMs. If user manually passes though some USB device, he might need to install the firmware then.
-		(( $G_HW_MODEL != 20 )) && G_AGI firmware-linux-nonfree
+		(( $G_HW_MODEL != 20 )) && G_AGI firmware-linux-nonfree firmware-misc-nonfree
 
 		#	Grub EFI
 		if dpkg --get-selections | grep -q '^grub-efi-amd64' ||
@@ -714,14 +714,14 @@ _EOF_
 
 		G_DIETPI-NOTIFY 2 "Marking WiFi as needed"
 
-		aPACKAGES_REQUIRED_INSTALL+=('crda')				# WiFi related
-		aPACKAGES_REQUIRED_INSTALL+=('firmware-atheros')	# WiFi dongle firmware
-		aPACKAGES_REQUIRED_INSTALL+=('firmware-brcm80211')	# WiFi dongle firmware
-		#aPACKAGES_REQUIRED_INSTALL+=('firmware-ralink')	# WiFi dongle firmware | virtual package for firmware-misc-nonfree
-		aPACKAGES_REQUIRED_INSTALL+=('iw')					# WiFi related
-		aPACKAGES_REQUIRED_INSTALL+=('rfkill')	 			# WiFi related: Used by some onboard WiFi chipsets
-		aPACKAGES_REQUIRED_INSTALL+=('wireless-tools')		# WiFi related
-		aPACKAGES_REQUIRED_INSTALL+=('wpasupplicant')		# WiFi related
+		aPACKAGES_REQUIRED_INSTALL+=('crda')					# WiFi related
+		aPACKAGES_REQUIRED_INSTALL+=('firmware-atheros')		# WiFi dongle firmware
+		aPACKAGES_REQUIRED_INSTALL+=('firmware-brcm80211')		# WiFi dongle firmware
+		aPACKAGES_REQUIRED_INSTALL+=('firmware-misc-nonfree')	# Intel/Nvidia/WiFi (ralink) dongle firmware: https://github.com/Fourdee/DietPi/issues/1675#issuecomment-377806609
+		aPACKAGES_REQUIRED_INSTALL+=('iw')						# WiFi related
+		aPACKAGES_REQUIRED_INSTALL+=('rfkill')	 				# WiFi related: Used by some onboard WiFi chipsets
+		aPACKAGES_REQUIRED_INSTALL+=('wireless-tools')			# WiFi related
+		aPACKAGES_REQUIRED_INSTALL+=('wpasupplicant')			# WiFi related
 
 	fi
 
