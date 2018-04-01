@@ -665,7 +665,16 @@ _EOF_
 		AUTO_DETECT_KERN_PKG=$(dpkg --get-selections | grep '^linux-image' | awk '{print $1}')
 		if [ -n "$AUTO_DETECT_KERN_PKG" ]; then
 
-			G_AGI $AUTO_DETECT_KERN_PKG
+			# - Install package if it exists in cache, else, mark manual #: https://github.com/Fourdee/DietPi/issues/1651#issuecomment-376974917
+			if [ -n "$(apt-cache search ^$AUTO_DETECT_KERN_PKG)" ]; then
+
+				G_AGI $AUTO_DETECT_KERN_PKG
+
+			else
+
+				apt-mark manual $AUTO_DETECT_KERN_PKG
+
+			fi
 
 		else
 
