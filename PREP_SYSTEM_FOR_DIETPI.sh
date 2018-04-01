@@ -665,7 +665,7 @@ _EOF_
 		AUTO_DETECT_KERN_PKG=$(dpkg --get-selections | grep '^linux-image' | awk '{print $1}')
 		if [ -n "$AUTO_DETECT_KERN_PKG" ]; then
 
-			# - Install package if it exists in cache, else, mark manual #: https://github.com/Fourdee/DietPi/issues/1651#issuecomment-376974917
+			# - Install kern package if it exists in cache, else, mark manual #: https://github.com/Fourdee/DietPi/issues/1651#issuecomment-376974917
 			if [ -n "$(apt-cache search ^$AUTO_DETECT_KERN_PKG)" ]; then
 
 				G_AGI $AUTO_DETECT_KERN_PKG
@@ -699,8 +699,8 @@ _EOF_
 
 		# fi
 			# Unpacking armbian-firmware (5.35) ...
-			# dpkg: error processing archive /var/cache/apt/archives/armbian-firmware_5.35_all      .deb (--unpack):
-			# trying to overwrite '/lib/firmware/rt2870.bin', which is also in package firmwa      re-misc-nonfree 20161130-3
+			# dpkg: error processing archive /var/cache/apt/archives/armbian-firmware_5.35_all.deb (--unpack):
+			# trying to overwrite '/lib/firmware/rt2870.bin', which is also in package firmware-misc-nonfree 20161130-3
 			# dpkg-deb: error: subprocess paste was killed by signal (Broken pipe)
 
 
