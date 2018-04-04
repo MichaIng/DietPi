@@ -299,6 +299,8 @@
 		'22' 'Generic device (unknown to DietPi)'
 		'' '────SBC────────────────────────────────'
 		'52' 'Asus Tinker Board'
+		'73' 'BananaPi (sinovoip)'
+		'72' 'LeMaker Guitar'
 		'51' 'BananaPi Pro (Lemaker)'
 		'50' 'BananaPi M2+ (sinovoip)'
 		'71' 'Beagle Bone Black'
