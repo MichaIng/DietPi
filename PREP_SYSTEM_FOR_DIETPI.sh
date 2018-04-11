@@ -41,6 +41,7 @@
 		'wget'
 		'ca-certificates'
 		'locales'
+		'ncurses-bin' #tput G_WHIP
 
 	)
 
@@ -134,7 +135,7 @@
 
 	fi
 
-	export G_PROGRAM_NAME='DietPi-PREP_SYSTEM_FOR_DIETPI'
+	export G_PROGRAM_NAME='DietPi-PREP'
 	export G_DISTRO=0 # Export to dietpi-globals
 	export G_DISTRO_NAME='NULL' # Export to dietpi-globals
 	DISTRO_TARGET=0
@@ -192,36 +193,17 @@
 
 	fi
 
+	#WiFi install flag
+	WIFI_REQUIRED=0
+
+	#Image creator flag
+	IMAGE_CREATOR=''
+
+	#Setup step, current (used in info)
+	SETUP_STEP=0
+
 	#URL connection test var holder
 	INTERNET_ADDRESS=''
-
-	#Whiptail
-	WHIP_BACKTITLE='DietPi-Prep'
-	WHIP_TITLE=0
-	WHIP_DESC=0
-	WHIP_MENU_ARRAY=0
-	WHIP_RETURN_VALUE=0
-	WHIP_DEFAULT_ITEM=0
-	WHIP_OPTION=0
-	Run_Whiptail(){
-
-		WHIP_OPTION=$(whiptail --title "$WHIP_TITLE" --menu "$WHIP_DESC" --default-item "$WHIP_DEFAULT_ITEM" --backtitle "$WHIP_BACKTITLE" 24 85 12 "${WHIP_MENU_ARRAY[@]}" 3>&1 1>&2 2>&3)
-		if (( $? == 0 )) &&
-			[ -n "$WHIP_OPTION" ]; then
-
-			WHIP_RETURN_VALUE=$WHIP_OPTION
-
-		else
-
-			G_DIETPI-NOTIFY 1 'No choices detected, aborting...'
-			exit 0
-
-		fi
-
-		#delete []
-		unset WHIP_MENU_ARRAY
-
-	}
 
 	#------------------------------------------------------------------------------------------------
 	#------------------------------------------------------------------------------------------------
@@ -234,7 +216,8 @@
 	#------------------------------------------------------------------------------------------------
 	echo -e ''
 	G_DIETPI-NOTIFY 2 '-----------------------------------------------------------------------------------'
-	G_DIETPI-NOTIFY 0 'Step 0: Detecting existing DietPi system:'
+	G_DIETPI-NOTIFY 0 "Step $SETUP_STEP: Detecting existing DietPi system:"
+	((SETUP_STEP++))
 	G_DIETPI-NOTIFY 2 '-----------------------------------------------------------------------------------'
 	#------------------------------------------------------------------------------------------------
 	if (( $(systemctl is-active dietpi-ramdisk | grep -ci -m1 '^active') )); then
@@ -271,7 +254,8 @@
 	#------------------------------------------------------------------------------------------------
 	echo -e ''
 	G_DIETPI-NOTIFY 2 '-----------------------------------------------------------------------------------'
-	G_DIETPI-NOTIFY 0 'Step 1: Initial prep to allow this script to function:'
+	G_DIETPI-NOTIFY 0 "Step $SETUP_STEP: Initial prep to allow this script to function:"
+	((SETUP_STEP++))
 	G_DIETPI-NOTIFY 2 '-----------------------------------------------------------------------------------'
 	#------------------------------------------------------------------------------------------------
 	G_DIETPI-NOTIFY 2 'Updating APT:'
@@ -286,14 +270,29 @@
 	#------------------------------------------------------------------------------------------------
 	echo -e ''
 	G_DIETPI-NOTIFY 2 '-----------------------------------------------------------------------------------'
-	G_DIETPI-NOTIFY 0 'Step 2: Hardware selection:'
+	G_DIETPI-NOTIFY 0 "Step $SETUP_STEP(inputs): Image creator / Hardware / WiFi / Distro:"
+	((SETUP_STEP++))
 	G_DIETPI-NOTIFY 2 '-----------------------------------------------------------------------------------'
 	#------------------------------------------------------------------------------------------------
 
-	WHIP_TITLE='Hardware selection:'
-	WHIP_DESC='Please select the current device this is being installed on:\n - NB: Select "Generic device" if not listed.\n - "Core devices": Are fully supported by DietPi, offering full GPU + Kodi support.\n - "Limited support devices": No GPU support, supported limited to DietPi specific issues only (eg: excludes Kernel/GPU/VPU related items).'
-	WHIP_DEFAULT_ITEM=22
-	WHIP_MENU_ARRAY=(
+	#Image creator
+	while true
+	do
+
+		G_WHIP_INPUTBOX 'Please enter your name. This will be used to identify the image creator.'
+		if (( $? == 0 )) && [ -n "$G_WHIP_RETURNED_VALUE" ]; then
+
+			IMAGE_CREATOR="$G_WHIP_RETURNED_VALUE"
+			break
+
+		fi
+
+	done
+
+	#Hardware selection
+	G_WHIP_DEFAULT_ITEM=22
+	G_WHIP_BUTTON_CANCEL_TEXT='Exit'
+	G_WHIP_MENU_ARRAY=(
 
 		'' '────Other──────────────────────────────'
 		'22' 'Generic device (unknown to DietPi)'
@@ -339,33 +338,56 @@
 
 	)
 
-	Run_Whiptail
+	G_WHIP_MENU 'Please select the current device this is being installed on:\n - NB: Select "Generic device" if not listed.\n - "Core devices": Are fully supported by DietPi, offering full GPU + Kodi support.\n - "Limited support devices": No GPU support, supported limited to DietPi specific issues only (eg: excludes Kernel/GPU/VPU related items).'
+	if (( $? != 0 )) || [ -z "$G_WHIP_RETURNED_VALUE" ]; then
+
+		G_DIETPI-NOTIFY 1 'No choices detected, aborting...'
+		exit 0
+
+	fi
+
 	# + Export to future scripts
-	export G_HW_MODEL=$WHIP_RETURN_VALUE
+	export G_HW_MODEL=$G_WHIP_RETURNED_VALUE
 
 	G_DIETPI-NOTIFY 2 "Setting G_HW_MODEL index of: $G_HW_MODEL"
 	G_DIETPI-NOTIFY 2 "CPU ARCH = $G_HW_ARCH : $G_HW_ARCH_DESCRIPTION"
 
 	echo -e "$G_HW_MODEL" > /etc/.dietpi_hw_model_identifier
 
-	#------------------------------------------------------------------------------------------------
-	echo -e ''
-	G_DIETPI-NOTIFY 2 '-----------------------------------------------------------------------------------'
-	G_DIETPI-NOTIFY 0 'Step 3: Distro selection:'
-	G_DIETPI-NOTIFY 2 '-----------------------------------------------------------------------------------'
-	#------------------------------------------------------------------------------------------------
+	#WiFi selection
+	G_DIETPI-NOTIFY 2 "WiFi selection"
 
-	WHIP_TITLE='Distro selection:'
-	WHIP_DESC="Please select a distro to install on this system. Selecting a distro that is older than the current installed on system, is not supported.\n\nCurrently installed:\n - $G_DISTRO $G_DISTRO_NAME"
-	WHIP_DEFAULT_ITEM=$G_DISTRO
+	G_WHIP_DEFAULT_ITEM=1
+	G_WHIP_MENU_ARRAY=(
+
+		'0' "I don't require WiFi, do not install."
+		'1' 'I require WiFi functionality, keep/install related packages.'
+
+	)
+
+	G_WHIP_MENU 'Please select an option:'
+	if (( $? == 0 && $G_WHIP_RETURNED_VALUE == 1 )); then
+
+		G_DIETPI-NOTIFY 2 "Marking WiFi as needed"
+
+		WIFI_REQUIRED=1
+
+	fi
+
+	#Distro Selection
+	G_WHIP_DEFAULT_ITEM=$G_DISTRO
+	G_WHIP_BUTTON_CANCEL_TEXT='Exit'
 	DISTRO_LIST_ARRAY=(
+
 		'3' 'Jessie (oldstable, just if you need to avoid upgrade to current release)'
 		'4' 'Stretch (current stable release, recommended)'
 		'5' 'Buster (testing only, not officially supported)'
+
 	)
 
 	# - Enable/list available options based on criteria
 	#	NB: Whiptail use 2 array indexs per whip displayed entry.
+	G_WHIP_MENU_ARRAY=()
 	for ((i=0; i<$(( ${#DISTRO_LIST_ARRAY[@]} / 2 )); i++))
 	do
 		temp_distro_available=1
@@ -382,7 +404,7 @@
 		# - Enable option
 		if (( $temp_distro_available )); then
 
-			WHIP_MENU_ARRAY+=( "${DISTRO_LIST_ARRAY[$(( $i * 2 ))]}" "${DISTRO_LIST_ARRAY[$(( ($i * 2) + 1 ))]}" )
+			G_WHIP_MENU_ARRAY+=( "${DISTRO_LIST_ARRAY[$(( $i * 2 ))]}" "${DISTRO_LIST_ARRAY[$(( ($i * 2) + 1 ))]}" )
 
 		fi
 
@@ -391,15 +413,22 @@
 	#delete []
 	unset DISTRO_LIST_ARRAY
 
-	if [ -z ${WHIP_MENU_ARRAY+x} ]; then
+	if [ -z ${G_WHIP_MENU_ARRAY+x} ]; then
 
 		G_DIETPI-NOTIFY 1 'Error: No available Distros for this system. Aborting...'
 		exit 1
 
 	fi
 
-	Run_Whiptail
-	DISTRO_TARGET=$WHIP_RETURN_VALUE
+	G_WHIP_MENU "Please select a distro to install on this system. Selecting a distro that is older than the current installed on system, is not supported.\n\nCurrently installed:\n - $G_DISTRO $G_DISTRO_NAME"
+	if (( $? != 0 )) || [ -z "$G_WHIP_RETURNED_VALUE" ]; then
+
+		G_DIETPI-NOTIFY 1 'No choices detected, aborting...'
+		exit 0
+
+	fi
+
+	DISTRO_TARGET=$G_WHIP_RETURNED_VALUE
 	if (( $DISTRO_TARGET == 3 )); then
 
 		DISTRO_TARGET_NAME='jessie'
@@ -418,7 +447,8 @@
 	#------------------------------------------------------------------------------------------------
 	echo -e ''
 	G_DIETPI-NOTIFY 2 '-----------------------------------------------------------------------------------'
-	G_DIETPI-NOTIFY 0 'Step 4: APT configuration:'
+	G_DIETPI-NOTIFY 0 "Step $SETUP_STEP: APT configuration:"
+	((SETUP_STEP++))
 	G_DIETPI-NOTIFY 2 '-----------------------------------------------------------------------------------'
 	#------------------------------------------------------------------------------------------------
 
@@ -479,12 +509,12 @@ _EOF_
 	G_AGUP
 
 	# - @MichaIng https://github.com/Fourdee/DietPi/pull/1266/files
-	G_DIETPI-NOTIFY 2 "Marking all packages as auto installed first, to allow effective autoremove afterwards"
+	G_DIETPI-NOTIFY 2 'Marking all packages as auto installed first, to allow effective autoremove afterwards'
 
 	G_RUN_CMD apt-mark auto $(apt-mark showmanual)
 
 	# - @MichaIng https://github.com/Fourdee/DietPi/pull/1266/files
-	G_DIETPI-NOTIFY 2 "Temporary disable automatic recommends/suggests installation and allow them to be autoremoved:"
+	G_DIETPI-NOTIFY 2 'Temporary disable automatic recommends/suggests installation and allow them to be autoremoved:'
 
 	#	Remove any existing apt recommends settings
 	rm /etc/apt/apt.conf.d/*recommends*
@@ -555,6 +585,19 @@ _EOF_
 		'zip'			# .zip wrapper
 
 	)
+
+	if (( $WIFI_REQUIRED )); then
+
+		aPACKAGES_REQUIRED_INSTALL+=('crda')					# WiFi related
+		aPACKAGES_REQUIRED_INSTALL+=('firmware-atheros')		# WiFi dongle firmware
+		aPACKAGES_REQUIRED_INSTALL+=('firmware-brcm80211')		# WiFi dongle firmware
+		aPACKAGES_REQUIRED_INSTALL+=('firmware-misc-nonfree')	# Intel/Nvidia/WiFi (ralink) dongle firmware: https://github.com/Fourdee/DietPi/issues/1675#issuecomment-377806609
+		aPACKAGES_REQUIRED_INSTALL+=('iw')						# WiFi related
+		aPACKAGES_REQUIRED_INSTALL+=('rfkill')	 				# WiFi related: Used by some onboard WiFi chipsets
+		aPACKAGES_REQUIRED_INSTALL+=('wireless-tools')			# WiFi related
+		aPACKAGES_REQUIRED_INSTALL+=('wpasupplicant')			# WiFi related
+
+	fi
 
 	# - G_DISTRO specific required packages:
 	if (( $G_DISTRO < 4 )); then
@@ -709,34 +752,6 @@ _EOF_
 
 	fi
 
-	G_DIETPI-NOTIFY 2 "WiFi selection"
-
-	WHIP_TITLE='WiFi required?'
-	WHIP_DESC='Please select an option'
-	WHIP_DEFAULT_ITEM=1
-	WHIP_MENU_ARRAY=(
-
-		'0' "I don't require WiFi, do not install."
-		'1' 'I require WiFi functionality, keep/install related packages.'
-
-	)
-
-	Run_Whiptail
-	if (( $WHIP_RETURN_VALUE == 1 )); then
-
-		G_DIETPI-NOTIFY 2 "Marking WiFi as needed"
-
-		aPACKAGES_REQUIRED_INSTALL+=('crda')					# WiFi related
-		aPACKAGES_REQUIRED_INSTALL+=('firmware-atheros')		# WiFi dongle firmware
-		aPACKAGES_REQUIRED_INSTALL+=('firmware-brcm80211')		# WiFi dongle firmware
-		aPACKAGES_REQUIRED_INSTALL+=('firmware-misc-nonfree')	# Intel/Nvidia/WiFi (ralink) dongle firmware: https://github.com/Fourdee/DietPi/issues/1675#issuecomment-377806609
-		aPACKAGES_REQUIRED_INSTALL+=('iw')						# WiFi related
-		aPACKAGES_REQUIRED_INSTALL+=('rfkill')	 				# WiFi related: Used by some onboard WiFi chipsets
-		aPACKAGES_REQUIRED_INSTALL+=('wireless-tools')			# WiFi related
-		aPACKAGES_REQUIRED_INSTALL+=('wpasupplicant')			# WiFi related
-
-	fi
-
 	G_DIETPI-NOTIFY 2 "Generating list of minimal packages, required for DietPi installation:"
 
 	INSTALL_PACKAGES=''
@@ -767,7 +782,8 @@ _EOF_
 	#------------------------------------------------------------------------------------------------
 	echo -e ''
 	G_DIETPI-NOTIFY 2 '-----------------------------------------------------------------------------------'
-	G_DIETPI-NOTIFY 0 'Step 5: APT installations:'
+	G_DIETPI-NOTIFY 0 "Step $SETUP_STEP: APT installations:"
+	((SETUP_STEP++))
 	G_DIETPI-NOTIFY 2 '-----------------------------------------------------------------------------------'
 	#------------------------------------------------------------------------------------------------
 
@@ -809,7 +825,8 @@ _EOF_
 	#------------------------------------------------------------------------------------------------
 	echo -e ''
 	G_DIETPI-NOTIFY 2 '-----------------------------------------------------------------------------------'
-	G_DIETPI-NOTIFY 0 'Step 6: Downloading and installing DietPi sourcecode'
+	G_DIETPI-NOTIFY 0 "Step $SETUP_STEP: Downloading and installing DietPi sourcecode:"
+	((SETUP_STEP++))
 	G_DIETPI-NOTIFY 2 '-----------------------------------------------------------------------------------'
 	#------------------------------------------------------------------------------------------------
 
@@ -868,7 +885,8 @@ _EOF_
 	#------------------------------------------------------------------------------------------------
 	echo -e ''
 	G_DIETPI-NOTIFY 2 '-----------------------------------------------------------------------------------'
-	G_DIETPI-NOTIFY 0 "Step 7: Prep system for DietPi ENV:"
+	G_DIETPI-NOTIFY 0 "Step $SETUP_STEP: Prep system for DietPi ENV:"
+	((SETUP_STEP++))
 	G_DIETPI-NOTIFY 2 '-----------------------------------------------------------------------------------'
 	#------------------------------------------------------------------------------------------------
 
@@ -1209,7 +1227,8 @@ _EOF_
 	#------------------------------------------------------------------------------------------------
 	echo -e ''
 	G_DIETPI-NOTIFY 2 '-----------------------------------------------------------------------------------'
-	G_DIETPI-NOTIFY 0 "Step 8: Finalise system for first run of DietPi:"
+	G_DIETPI-NOTIFY 0 "Step $SETUP_STEP: Finalise system for first run of DietPi:"
+	((SETUP_STEP++))
 	G_DIETPI-NOTIFY 2 '-----------------------------------------------------------------------------------'
 	#------------------------------------------------------------------------------------------------
 
@@ -1309,6 +1328,10 @@ _EOF_
 	G_DIETPI-NOTIFY 2 'Set Init .install_stage to -1 (first boot)'
 
 	echo -1 > /DietPi/dietpi/.install_stage
+
+	G_DIETPI-NOTIFY 2 'Applying image creator'
+
+	echo -e "$IMAGE_CREATOR" > /DietPi/dietpi/.prep_info
 
 	G_DIETPI-NOTIFY 2 'Remove server_version / patch_file (downloads fresh from dietpi-update)'
 
