@@ -270,7 +270,7 @@
 	#------------------------------------------------------------------------------------------------
 	echo -e ''
 	G_DIETPI-NOTIFY 2 '-----------------------------------------------------------------------------------'
-	G_DIETPI-NOTIFY 0 "Step $SETUP_STEP(inputs): Image creator / Hardware / WiFi / Distro:"
+	G_DIETPI-NOTIFY 0 "Step $SETUP_STEP (inputs): Image creator / Hardware / WiFi / Distro:"
 	((SETUP_STEP++))
 	G_DIETPI-NOTIFY 2 '-----------------------------------------------------------------------------------'
 	#------------------------------------------------------------------------------------------------
@@ -1244,9 +1244,6 @@ _EOF_
 
 	G_DIETPI-NOTIFY 2 'Running general cleanup of misc files'
 
-	# - general folders
-	rm -R /tmp/* &> /dev/null
-
 	# - Remove Bash History file
 	rm ~/.bash_history &> /dev/null
 
@@ -1480,13 +1477,11 @@ _EOF_
 	G_RUN_CMD systemctl stop dietpi-ramlog
 	G_RUN_CMD systemctl stop dietpi-ramdisk
 
-	# - Minor cleanup, Remove tmp and our logs
-	rm -R /tmp/*
-	rm /var/tmp/dietpi/logs/*
+	# - Clear tmp files
+	rm -R /tmp/* &> /dev/null
+	rm /var/tmp/dietpi/logs/* &> /dev/null
 
 	sync
-	# fstrim -v /
-	# sync
 
 	G_DIETPI-NOTIFY 2 'Please check and delete all non-required folders in /root/.xxxxxx'
 	G_DIETPI-NOTIFY 2 'Please delete outdated modules'
@@ -1494,7 +1489,7 @@ _EOF_
 
 	G_DIETPI-NOTIFY 0 "Completed, disk can now be saved to .img for later use, or, reboot system to start first run of DietPi:"
 
-	#Cleanup
+	# - Remove PREP files
 	rm dietpi-globals
 	rm PREP_SYSTEM_FOR_DIETPI.sh
 
