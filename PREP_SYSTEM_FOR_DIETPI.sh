@@ -196,8 +196,9 @@
 	#WiFi install flag
 	WIFI_REQUIRED=0
 
-	#Image creator flag
+	#Image creator flags
 	IMAGE_CREATOR=''
+	PREIMAGE_NAME=''
 
 	#Setup step, current (used in info)
 	SETUP_STEP=0
@@ -279,7 +280,7 @@
 	while true
 	do
 
-		G_WHIP_INPUTBOX 'Please enter your name. This will be used to identify the image creator.'
+		G_WHIP_INPUTBOX 'Please enter your name. This will be used to identify the image creator.\n\nNB: An entry is required.'
 		if (( $? == 0 )) && [ -n "$G_WHIP_RETURNED_VALUE" ]; then
 
 			IMAGE_CREATOR="$G_WHIP_RETURNED_VALUE"
@@ -288,6 +289,21 @@
 		fi
 
 	done
+
+	#Pre-image used/name
+	while true
+	do
+
+		G_WHIP_INPUTBOX 'Please enter the name of the pre-image you installed on this system, prior to running this script. This will be used to identify the pre-image credits.\n\nEG: Debian, Raspbian Lite, Meveric, FriendlyARM, etc\n\nNB: An entry is required.'
+		if (( $? == 0 )) && [ -n "$G_WHIP_RETURNED_VALUE" ]; then
+
+			PREIMAGE_NAME="$G_WHIP_RETURNED_VALUE"
+			break
+
+		fi
+
+	done
+
 
 	#Hardware selection
 	G_WHIP_DEFAULT_ITEM=22
@@ -1326,9 +1342,12 @@ _EOF_
 
 	echo -1 > /DietPi/dietpi/.install_stage
 
-	G_DIETPI-NOTIFY 2 'Applying image creator'
+	G_DIETPI-NOTIFY 2 'Writing PREP information to file'
 
-	echo -e "$IMAGE_CREATOR" > /DietPi/dietpi/.prep_info
+	cat << _EOF_ > /DietPi/dietpi/.prep_info
+$IMAGE_CREATOR
+$PREIMAGE_NAME
+_EOF_
 
 	G_DIETPI-NOTIFY 2 'Remove server_version / patch_file (downloads fresh from dietpi-update)'
 
