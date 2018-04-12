@@ -283,8 +283,45 @@
 		G_WHIP_INPUTBOX 'Please enter your name. This will be used to identify the image creator.\n\nNB: An entry is required.'
 		if (( $? == 0 )) && [ -n "$G_WHIP_RETURNED_VALUE" ]; then
 
-			IMAGE_CREATOR="$G_WHIP_RETURNED_VALUE"
-			break
+			#Disallowed:
+			DISALLOWED_NAME=0
+			aDISALLOWED_NAMES=(
+
+				'official'
+				'fourdee'
+				'daniel knight'
+				'dan knight'
+				'michaing'
+				'k-plan'
+				'diet'
+
+			)
+
+			LOWERCASE_TEMP="$(echo -e $G_WHIP_RETURNED_VALUE | tr '[:upper:]' '[:lower:]')"
+			for (( i=0; i<${#aDISALLOWED_NAMES[@]}; i++))
+			do
+
+				if [[ "$LOWERCASE_TEMP" = *"${aDISALLOWED_NAMES[$i]}"* ]]; then
+
+					DISALLOWED_NAME=1
+					break
+
+				fi
+
+			done
+
+			unset aDISALLOWED_NAMES
+
+			if (( $DISALLOWED_NAME )); then
+
+				G_WHIP_MSG "$G_WHIP_RETURNED_VALUE is reserved and cannot be used. Please try again."
+
+			else
+
+				IMAGE_CREATOR="$G_WHIP_RETURNED_VALUE"
+				break
+
+			fi
 
 		fi
 
