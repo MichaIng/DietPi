@@ -384,6 +384,7 @@
 		'32' 'OrangePi Zero (H2+)'
 		'31' 'OrangePi One'
 		'30' 'OrangePi PC'
+		'29' 'OrangePi PC Plus'
 		'40' 'Pine A64'
 		'43' 'Rock64'
 		'70' 'Sparky SBC'
