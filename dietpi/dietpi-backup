@@ -337,17 +337,20 @@
 	TARGET_FILESYSTEM_TYPE=0
 	TARGET_DIRECTORY_SUPPORTED=0
 	aSUPPORTED_FILESYSTEMS=(
+
 		'ext4'
 		'ext3'
 		'ext2'
 		'nfs'
 		'nfs4'
 		'btrfs'
+
 	)
 
 	#rsync options
-	RSYNC_RUN_OPTIONS_SYSTEM_BACKUP="-alHpvP --delete --log-file=$LOGFILE --include-from=$FP_FILTER_INCLUDE_EXCLUDE_SYSTEM_BACKUP"
-	RSYNC_RUN_OPTIONS_USERDATA_BACKUP="-alHpvP --delete --log-file=$LOGFILE"
+	RSYNC_RUN_OPTIONS_SYSTEM_BACKUP="-aH --delete --include-from=$FP_FILTER_INCLUDE_EXCLUDE_SYSTEM_BACKUP"
+	RSYNC_RUN_OPTIONS_USERDATA_BACKUP="-aH --delete"
+	RSYNC_LOGGING_OPTIONS="-v --log-file=$LOGFILE"
 
 	#Date format for logs
 	Print_Date(){
@@ -462,7 +465,7 @@ _EOF_
 				G_WHIP_MSG "$RSYNC_MODE_TEXT Failed:\n\nUnable to create $FP_TARGET_BACKUP"
 
 			#Error: Rsync is already running
-			elif (( $(ps aux | grep -ci -m1 "[r]sync") == 1 )); then
+			elif (( $(ps aux | grep -ci -m1 "[r]sync") )); then
 
 				Error_Rsync_Already_Running
 
@@ -484,27 +487,99 @@ _EOF_
 
 					# - system
 					RSYNC_MODE_TEXT='Backup (system)'
+					mkdir -p "$FP_TARGET_BACKUP"/dietpi-backup_system
 
-					G_RUN_CMD rsync $RSYNC_RUN_OPTIONS_SYSTEM_BACKUP "$FP_SOURCE_SYSTEM" "$FP_TARGET_BACKUP"/dietpi-backup_system/
+					# - - Check for sufficient free space
+					#	NB: working in KiB until end MiB conversion, as, don't like using long long int, and, KiB should offer a good end result.
+					local old_backup_size=$(du -ks "$FP_TARGET_BACKUP"/dietpi-backup_system | awk '{print $1}')
+
+					rsync --dry-run --stats $RSYNC_RUN_OPTIONS_SYSTEM_BACKUP "$FP_SOURCE_SYSTEM" "$FP_TARGET_BACKUP"/dietpi-backup_system/ > /tmp/dietpi-backup_result
+					local new_backup_size=$(( $(grep -m1 'Total file size' /tmp/dietpi-backup_result | sed 's/[^0-9]*//g') / 1024 ))
+					local total_file_count=$(( $(grep -m1 'Number of files' /tmp/dietpi-backup_result | awk '{print $6}' | sed 's/[^0-9]*//g') ))
+					local total_folder_count=$(( $(grep -m1 'Number of files' /tmp/dietpi-backup_result | awk '{print $8}' | sed 's/[^0-9]*//g') ))
+					local target_fs_blocksize=$(stat -fc %s "$FP_TARGET_BACKUP"/dietpi-backup_system)
+					new_backup_size=$(( $new_backup_size + ( $total_file_count + $total_folder_count ) * $target_fs_blocksize / 1024 ))
+					local end_result=$(( ( $new_backup_size - $old_backup_size ) / 1024 + 1 ))
+					rm /tmp/dietpi-backup_result
+
+					#DEBUG:
+					# echo "old_backup_size $old_backup_size KiB"
+					# echo "total_file_count $total_file_count"
+					# echo "total_folder_count $total_folder_count"
+					# echo "new_backup_size $new_backup_size KiB"
+					# echo "end_result $end_result MiB"
+					#DEBUG:
+
+					if G_CHECK_FREESPACE "$FP_TARGET_BACKUP"/dietpi-backup_system $end_result; then
+
+						G_WHIP_BUTTON_OK_TEXT='Ignore'
+						G_WHIP_BUTTON_CANCEL_TEXT='Exit'
+						G_WHIP_YESNO 'The system backup target location appears to have insufficient free space to successfully finish the backup.\nHowever, this check is a rough estimation in reasonable time, thus it could be marginally incorrect.\n\nWould you like to override this warning and continue with the backup?'
+						if (( $? )); then
+
+							echo -e "$RSYNC_MODE_TEXT canceled due to insufficient free space    : $(Print_Date)" >> "$FP_TARGET_BACKUP/$BACKUP_STATS_FILENAME_SYSTEM"
+							break
+
+						fi
+
+					fi
+
+					G_RUN_CMD rsync $RSYNC_RUN_OPTIONS_SYSTEM_BACKUP $RSYNC_LOGGING_OPTIONS "$FP_SOURCE_SYSTEM" "$FP_TARGET_BACKUP"/dietpi-backup_system/
 					echo -e "$RSYNC_MODE_TEXT Completed    : $(Print_Date)" >> "$FP_TARGET_BACKUP/$BACKUP_STATS_FILENAME_SYSTEM"
 
 					# - userdata
-					RSYNC_MODE_TEXT='Backup (user data)'
-
 					if (( $BACKUP_MODE == 1 )); then
 
-						G_RUN_CMD rsync $RSYNC_RUN_OPTIONS_USERDATA_BACKUP "$G_FP_DIETPI_USERDATA_ACTUAL"/ "$FP_TARGET_BACKUP"/dietpi-backup_userdata/
+						RSYNC_MODE_TEXT='Backup (user data)'
+						mkdir -p "$FP_TARGET_BACKUP"/dietpi-backup_userdata
+
+						# - - Check for sufficient free space
+						#	NB: working in KiB until end MiB conversion, as, don't like using long long int, and, KiB should offer a good end result.
+						local old_backup_size=$(du -ks "$FP_TARGET_BACKUP"/dietpi-backup_userdata | awk '{print $1}')
+
+						rsync --dry-run --stats $RSYNC_RUN_OPTIONS_USERDATA_BACKUP "$G_FP_DIETPI_USERDATA_ACTUAL" "$FP_TARGET_BACKUP"/dietpi-backup_userdata/ > /tmp/dietpi-backup_result
+						local new_backup_size=$(( $(grep -m1 'Total file size' /tmp/dietpi-backup_result | sed 's/[^0-9]*//g') / 1024 ))
+						local total_file_count=$(( $(grep -m1 'Number of files' /tmp/dietpi-backup_result | awk '{print $6}' | sed 's/[^0-9]*//g') ))
+						local total_folder_count=$(( $(grep -m1 'Number of files' /tmp/dietpi-backup_result | awk '{print $8}' | sed 's/[^0-9]*//g') ))
+						local target_fs_blocksize=$(stat -fc %s "$FP_TARGET_BACKUP"/dietpi-backup_userdata)
+						new_backup_size=$(( $new_backup_size + ( $total_file_count + $total_folder_count ) * $target_fs_blocksize / 1024 ))
+						local end_result=$(( ( $new_backup_size - $old_backup_size ) / 1024 + 1 ))
+						rm /tmp/dietpi-backup_result
+
+						#DEBUG:
+						# echo "old_backup_size $old_backup_size KiB"
+						# echo "total_file_count $total_file_count"
+						# echo "total_folder_count $total_folder_count"
+						# echo "new_backup_size $new_backup_size KiB"
+						# echo "end_result $end_result MiB"
+						#DEBUG:
+
+						if G_CHECK_FREESPACE "$FP_TARGET_BACKUP"/dietpi-backup_userdata $end_result; then
+
+							G_WHIP_BUTTON_OK_TEXT='Ignore'
+							G_WHIP_BUTTON_CANCEL_TEXT='Exit'
+							G_WHIP_YESNO 'The userdata backup target location appears to have insufficient free space to successfully finish the backup.\nHowever, this check is a rough estimation in reasonable time, thus it could be marginally incorrect.\n\nWould you like to override this warning and continue with the backup?'
+							if (( $? )); then
+
+								echo -e "$RSYNC_MODE_TEXT canceled due to insufficient free space : $(Print_Date)" >> "$FP_TARGET_BACKUP/$BACKUP_STATS_FILENAME_USERDATA"
+								break
+
+							fi
+
+						fi
+
+						G_RUN_CMD rsync $RSYNC_RUN_OPTIONS_USERDATA_BACKUP $RSYNC_LOGGING_OPTIONS "$G_FP_DIETPI_USERDATA_ACTUAL"/ "$FP_TARGET_BACKUP"/dietpi-backup_userdata/
 						echo -e "$RSYNC_MODE_TEXT Completed : $(Print_Date)" >> "$FP_TARGET_BACKUP/$BACKUP_STATS_FILENAME_USERDATA"
 
 					fi
+
+					RSYNC_MODE_TEXT='Backup'
+					G_WHIP_MSG "$RSYNC_MODE_TEXT Completed:\n\n$RSYNC_MODE_TEXT was saved to:\n- $FP_TARGET_BACKUP\n- Log file: $LOGFILE"
 
 					# - done
 					break
 
 				done
-
-				RSYNC_MODE_TEXT='Backup'
-				G_WHIP_MSG "$RSYNC_MODE_TEXT Completed:\n\n$RSYNC_MODE_TEXT was saved to:\n- $FP_TARGET_BACKUP\n- Log file: $LOGFILE"
 
 				G_WHIP_VIEWLOG "$LOGFILE"
 
@@ -514,6 +589,7 @@ _EOF_
 				TARGETMENUID=0
 
 			fi
+
 		fi
 
 	}
@@ -539,7 +615,7 @@ _EOF_
 				G_WHIP_MSG "$RSYNC_MODE_TEXT Failed:\n\n$FP_TARGET_BACKUP/$BACKUP_STATS_FILENAME_SYSTEM does not exist\n\nHave you created a backup?"
 
 			#Error: Rsync is already running
-			elif (( $(ps aux | grep -ci -m1 "[r]sync") == 1 )); then
+			elif (( $(ps aux | grep -ci -m1 "[r]sync") )); then
 
 				Error_Rsync_Already_Running
 
@@ -553,38 +629,29 @@ _EOF_
 
 				G_DIETPI-NOTIFY 2 "Restoring from: $FP_TARGET_BACKUP"
 
-				while true
-				do
+				# - System
+				RSYNC_MODE_TEXT='Restore (system)'
+				G_RUN_CMD rsync $RSYNC_RUN_OPTIONS_SYSTEM_BACKUP $RSYNC_LOGGING_OPTIONS "$FP_TARGET_BACKUP"/dietpi-backup_system/ "$FP_SOURCE_SYSTEM"
+				echo -e "$RSYNC_MODE_TEXT Completed    : $(Print_Date)" >> "$FP_TARGET_BACKUP/$BACKUP_STATS_FILENAME_SYSTEM"
 
-					# - System
-					RSYNC_MODE_TEXT='Restore (system)'
+				# - User data
+				if (( $BACKUP_MODE == 1 )); then
 
-					G_RUN_CMD rsync $RSYNC_RUN_OPTIONS_SYSTEM_BACKUP "$FP_TARGET_BACKUP"/dietpi-backup_system/ "$FP_SOURCE_SYSTEM"
-					echo -e "$RSYNC_MODE_TEXT Completed    : $(Print_Date)" >> "$FP_TARGET_BACKUP/$BACKUP_STATS_FILENAME_SYSTEM"
-
-					# - User data
 					RSYNC_MODE_TEXT='Restore (user data)'
 
-					if (( $BACKUP_MODE == 1 )); then
+					# - Only restore userdata if a backup exists
+					if [ -f "$FP_TARGET_BACKUP/$BACKUP_STATS_FILENAME_USERDATA" ]; then
 
-						# - Only restore userdata if a backup exists
-						if [ -f "$FP_TARGET_BACKUP/$BACKUP_STATS_FILENAME_USERDATA" ]; then
+						G_RUN_CMD rsync $RSYNC_RUN_OPTIONS_USERDATA_BACKUP $RSYNC_LOGGING_OPTIONS "$FP_TARGET_BACKUP"/dietpi-backup_userdata/ "$G_FP_DIETPI_USERDATA_ACTUAL"/
+						echo -e "$RSYNC_MODE_TEXT Completed : $(Print_Date)" >> "$FP_TARGET_BACKUP/$BACKUP_STATS_FILENAME_USERDATA"
 
-							G_RUN_CMD rsync $RSYNC_RUN_OPTIONS_USERDATA_BACKUP "$FP_TARGET_BACKUP"/dietpi-backup_userdata/ "$G_FP_DIETPI_USERDATA_ACTUAL"/
-							echo -e "$RSYNC_MODE_TEXT Completed : $(Print_Date)" >> "$FP_TARGET_BACKUP/$BACKUP_STATS_FILENAME_USERDATA"
+					else
 
-						else
-
-							G_DIETPI-NOTIFY 2 "$RSYNC_MODE_TEXT: No backup exists, skipping...\n"
-
-						fi
+						G_DIETPI-NOTIFY 2 "$RSYNC_MODE_TEXT: No backup exists, skipping...\n"
 
 					fi
 
-					# - done
-					break
-
-				done
+				fi
 
 				RSYNC_MODE_TEXT='Restore'
 				G_WHIP_MSG "$RSYNC_MODE_TEXT Completed:\n\n- from:\n$FP_TARGET_BACKUP\n- Log file: $LOGFILE\n\nNB: A Reboot is highly recommended."
@@ -598,12 +665,6 @@ _EOF_
 			fi
 
 		fi
-
-	}
-
-	Check_Install_PreReqs(){
-
-		G_AG_CHECK_INSTALL_PREREQ rsync
 
 	}
 
@@ -692,9 +753,8 @@ _EOF_
 	#/////////////////////////////////////////////////////////////////////////////////////
 	# Main Loop
 	#/////////////////////////////////////////////////////////////////////////////////////
-
 	#pre-reqs, install if required.
-	Check_Install_PreReqs
+	G_AG_CHECK_INSTALL_PREREQ rsync
 
 	#Read settings file
 	Read_Settings_File

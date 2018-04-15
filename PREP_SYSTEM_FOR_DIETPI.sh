@@ -25,9 +25,9 @@
 	# Critical checks and pre-reqs, with exit, prior to initial run of script
 	#------------------------------------------------------------------------------------------------
 	#Exit path for non-root logins.
-	if (( $UID != 0 )); then
+	if (( $UID )); then
 
-		echo -e 'Error: Root privileges required. Please run the command with "sudo"\nIn case install the "sudo" package with root privileges: #apt-get install sudo\n'
+		echo -e 'Error: Root privileges required, please run the script with "sudo"\nIn case install the "sudo" package with root privileges:\n\t# apt-get install -y sudo\n'
 		exit 1
 
 	fi
@@ -41,6 +41,7 @@
 		'wget'
 		'ca-certificates'
 		'locales'
+		'ncurses-bin' #tput G_WHIP
 
 	)
 
@@ -52,12 +53,12 @@
 	for (( i=0; i<${#a_MIN_APT_PREREQS[@]}; i++))
 	do
 
-		if (( ! $(dpkg --get-selections | grep -ci -m1 "^${a_MIN_APT_PREREQS[$i]}[[:space:]]") )); then
+		if ! dpkg --get-selections | grep -qi "^${a_MIN_APT_PREREQS[$i]}[[:space:]]"; then
 
 			apt-get install -y ${a_MIN_APT_PREREQS[$i]}
-			if (( $? != 0 )); then
+			if (( $? )); then
 
-				echo -e "Error: Unable to install ${a_MIN_APT_PREREQS[$i]}, please try to install it manually with\n - apt-get install -y ${a_MIN_APT_PREREQS[$i]}"
+				echo -e "Error: Unable to install ${a_MIN_APT_PREREQS[$i]}, please try to install it manually:\n\t# apt-get install -y ${a_MIN_APT_PREREQS[$i]}"
 				exit 1
 
 			fi
@@ -85,7 +86,7 @@
 
 	#Setup locale
 	# - Remove exisiting settings that will break dpkg-reconfigure
-	echo '' > /etc/environment
+	> /etc/environment
 	rm /etc/default/locale &> /dev/null
 
 	#	NB: DEV, any changes here must be also rolled into function '/DietPi/dietpi/func/dietpi-set_software locale', for future script use
@@ -94,7 +95,7 @@
 	# dpkg-reconfigure includes:
 	#	- "locale-gen": Generate locale(s) based on "/etc/locale.gen" or interactive selection.
 	#	- "update-locale": Add $LANG to "/etc/default/locale" based on generated locale(s) or interactive default language selection.
-	if (( $? != 0 )); then
+	if (( $? )); then
 
 		echo -e 'Error: Locale generation failed. Aborting...\n'
 		exit 1
@@ -117,7 +118,7 @@
 	#Download DietPi-Globals
 	# - NB: we'll have to manually handle errors, until script is sucessfully loaded
 	wget https://raw.githubusercontent.com/Fourdee/DietPi/$GIT_BRANCH/dietpi/func/dietpi-globals -O dietpi-globals
-	if (( $? != 0 )); then
+	if (( $? )); then
 
 		echo -e 'Error: Unable to download dietpi-globals. Aborting...\n'
 		exit 1
@@ -127,14 +128,14 @@
 	# - load
 	chmod +x dietpi-globals
 	. ./dietpi-globals
-	if (( $? != 0 )); then
+	if (( $? )); then
 
 		echo -e 'Error: Unable to load dietpi-globals. Aborting...\n'
 		exit 1
 
 	fi
 
-	export G_PROGRAM_NAME='DietPi-PREP_SYSTEM_FOR_DIETPI'
+	export G_PROGRAM_NAME='DietPi-PREP'
 	export G_DISTRO=0 # Export to dietpi-globals
 	export G_DISTRO_NAME='NULL' # Export to dietpi-globals
 	DISTRO_TARGET=0
@@ -168,60 +169,42 @@
 
 	#G_HW_MODEL # init from dietpi-globals
 	#G_HW_ARCH_DESCRIPTION # init from dietpi-globals
-	G_HW_ARCH_DESCRIPTION=$(uname -m)
-	if [ "$G_HW_ARCH_DESCRIPTION" = "armv6l" ]; then
+	G_HW_ARCH_DESCRIPTION="$(uname -m)"
+	if [ "$G_HW_ARCH_DESCRIPTION" = 'armv6l' ]; then
 
 		export G_HW_ARCH=1
 
-	elif [ "$G_HW_ARCH_DESCRIPTION" = "armv7l" ]; then
+	elif [ "$G_HW_ARCH_DESCRIPTION" = 'armv7l' ]; then
 
 		export G_HW_ARCH=2
 
-	elif [ "$G_HW_ARCH_DESCRIPTION" = "aarch64" ]; then
+	elif [ "$G_HW_ARCH_DESCRIPTION" = 'aarch64' ]; then
 
 		export G_HW_ARCH=3
 
-	elif [ "$G_HW_ARCH_DESCRIPTION" = "x86_64" ]; then
+	elif [ "$G_HW_ARCH_DESCRIPTION" = 'x86_64' ]; then
 
 		export G_HW_ARCH=10
 
 	else
 
-		echo -e "Error: Unknown or unsupported CPU architecture $G_HW_ARCH_DESCRIPTION. Aborting..."
+		echo -e "Error: Unknown or unsupported CPU architecture \"$G_HW_ARCH_DESCRIPTION\". Aborting...\n"
 		exit 1
 
 	fi
 
+	#WiFi install flag
+	WIFI_REQUIRED=0
+
+	#Image creator flags
+	IMAGE_CREATOR=''
+	PREIMAGE_INFO=''
+
+	#Setup step, current (used in info)
+	SETUP_STEP=0
+
 	#URL connection test var holder
 	INTERNET_ADDRESS=''
-
-	#Whiptail
-	WHIP_BACKTITLE='DietPi-Prep'
-	WHIP_TITLE=0
-	WHIP_DESC=0
-	WHIP_MENU_ARRAY=0
-	WHIP_RETURN_VALUE=0
-	WHIP_DEFAULT_ITEM=0
-	WHIP_OPTION=0
-	Run_Whiptail(){
-
-		WHIP_OPTION=$(whiptail --title "$WHIP_TITLE" --menu "$WHIP_DESC" --default-item "$WHIP_DEFAULT_ITEM" --backtitle "$WHIP_BACKTITLE" 24 85 12 "${WHIP_MENU_ARRAY[@]}" 3>&1 1>&2 2>&3)
-		if (( $? == 0 )) &&
-			[ -n "$WHIP_OPTION" ]; then
-
-			WHIP_RETURN_VALUE=$WHIP_OPTION
-
-		else
-
-			G_DIETPI-NOTIFY 1 'No choices detected, aborting...'
-			exit 0
-
-		fi
-
-		#delete []
-		unset WHIP_MENU_ARRAY
-
-	}
 
 	#------------------------------------------------------------------------------------------------
 	#------------------------------------------------------------------------------------------------
@@ -232,12 +215,13 @@
 	#------------------------------------------------------------------------------------------------
 
 	#------------------------------------------------------------------------------------------------
-	echo -e ''
+	echo ''
 	G_DIETPI-NOTIFY 2 '-----------------------------------------------------------------------------------'
-	G_DIETPI-NOTIFY 0 'Step 0: Detecting existing DietPi system:'
+	G_DIETPI-NOTIFY 0 "Step $SETUP_STEP: Detecting existing DietPi system:"
+	((SETUP_STEP++))
 	G_DIETPI-NOTIFY 2 '-----------------------------------------------------------------------------------'
 	#------------------------------------------------------------------------------------------------
-	if (( $(systemctl is-active dietpi-ramdisk | grep -ci -m1 '^active') )); then
+	if systemctl is-active dietpi-ramdisk | grep -qi '^active'; then
 
 		G_DIETPI-NOTIFY 2 'DietPi system found, running pre-prep'
 
@@ -269,9 +253,10 @@
 	fi
 
 	#------------------------------------------------------------------------------------------------
-	echo -e ''
+	echo ''
 	G_DIETPI-NOTIFY 2 '-----------------------------------------------------------------------------------'
-	G_DIETPI-NOTIFY 0 'Step 1: Initial prep to allow this script to function:'
+	G_DIETPI-NOTIFY 0 "Step $SETUP_STEP: Initial prep to allow this script to function:"
+	((SETUP_STEP++))
 	G_DIETPI-NOTIFY 2 '-----------------------------------------------------------------------------------'
 	#------------------------------------------------------------------------------------------------
 	G_DIETPI-NOTIFY 2 'Updating APT:'
@@ -284,24 +269,105 @@
 	G_AGI apt-transport-https unzip whiptail
 
 	#------------------------------------------------------------------------------------------------
-	echo -e ''
+	echo ''
 	G_DIETPI-NOTIFY 2 '-----------------------------------------------------------------------------------'
-	G_DIETPI-NOTIFY 0 'Step 2: Hardware selection:'
+	G_DIETPI-NOTIFY 0 "Step $SETUP_STEP (inputs): Image info / Hardware / WiFi / Distro:"
+	((SETUP_STEP++))
 	G_DIETPI-NOTIFY 2 '-----------------------------------------------------------------------------------'
 	#------------------------------------------------------------------------------------------------
 
-	WHIP_TITLE='Hardware selection:'
-	WHIP_DESC='Please select the current device this is being installed on:\n - NB: Select "Generic device" if not listed.'
-	WHIP_DEFAULT_ITEM=22
-	WHIP_MENU_ARRAY=(
+	#Image creator
+	while true
+	do
+
+		G_WHIP_INPUTBOX 'Please enter your name. This will be used to identify the image creator within credits banner.\n\nYou can add your contanct information as well for end users.\n\nNB: An entry is required.'
+		if (( ! $? )) && [ -n "$G_WHIP_RETURNED_VALUE" ]; then
+
+			#Disallowed:
+			DISALLOWED_NAME=0
+			aDISALLOWED_NAMES=(
+
+				'official'
+				'fourdee'
+				'daniel knight'
+				'dan knight'
+				'michaing'
+				'k-plan'
+				'diet'
+
+			)
+
+			LOWERCASE_TEMP="$(echo -e $G_WHIP_RETURNED_VALUE | tr '[:upper:]' '[:lower:]')"
+			for (( i=0; i<${#aDISALLOWED_NAMES[@]}; i++))
+			do
+
+				if [[ "$LOWERCASE_TEMP" = *"${aDISALLOWED_NAMES[$i]}"* ]]; then
+
+					DISALLOWED_NAME=1
+					break
+
+				fi
+
+			done
+
+			unset aDISALLOWED_NAMES
+
+			if (( $DISALLOWED_NAME )); then
+
+				G_WHIP_MSG "\"$G_WHIP_RETURNED_VALUE\" is reserved and cannot be used. Please try again."
+
+			else
+
+				IMAGE_CREATOR="$G_WHIP_RETURNED_VALUE"
+				break
+
+			fi
+
+		fi
+
+	done
+
+	#Pre-image used/name
+	while true
+	do
+
+		G_WHIP_INPUTBOX 'Please enter the name or URL of the pre-image you installed on this system, prior to running this script. This will be used to identify the pre-image credits.\n\nEG: Debian, Raspbian Lite, Meveric, FriendlyARM, or "forum.odroid.com/viewtopic.php?f=ABC&t=XYZ" etc.\n\nNB: An entry is required.'
+		if (( ! $? )) && [ -n "$G_WHIP_RETURNED_VALUE" ]; then
+
+			PREIMAGE_INFO="$G_WHIP_RETURNED_VALUE"
+			break
+
+		fi
+
+	done
+
+	#Hardware selection
+	G_WHIP_DEFAULT_ITEM=22
+	G_WHIP_BUTTON_CANCEL_TEXT='Exit'
+	G_WHIP_MENU_ARRAY=(
 
 		'' '────Other──────────────────────────────'
 		'22' 'Generic device (unknown to DietPi)'
-		'' '────SBC────────────────────────────────'
+		'' '────SBC─(Core devices)─────────────────'
+		'10' 'Odroid C1'
+		'12' 'Odroid C2'
+		'14' 'Odroid N1'
+		'13' 'Odroid U3'
+		'11' 'Odroid XU3/4/HC1/HC2'
+		'0' 'Raspberry Pi 1 (256mb)'
+		'1' 'Raspberry Pi 1/Zero (512mb)'
+		'2' 'Raspberry Pi 2'
+		'3' 'Raspberry Pi 3/3+'
+		'' '────PC─────────────────────────────────'
+		'21' 'x86_64 Native PC'
+		'20' 'x86_64 VMware/VirtualBox'
+		'' '────SBC─(Limited support devices)──────'
 		'52' 'Asus Tinker Board'
+		'53' 'BananaPi (sinovoip)'
 		'51' 'BananaPi Pro (Lemaker)'
 		'50' 'BananaPi M2+ (sinovoip)'
 		'71' 'Beagle Bone Black'
+		'39' 'LeMaker Guitar'
 		'66' 'NanoPi M1 Plus'
 		'65' 'NanoPi NEO 2'
 		'64' 'NanoPi NEO Air'
@@ -309,11 +375,6 @@
 		'62' 'NanoPi M3/T3'
 		'61' 'NanoPi M2/T2'
 		'60' 'NanoPi Neo'
-		'14' 'Odroid N1'
-		'13' 'Odroid U3'
-		'12' 'Odroid C2'
-		'11' 'Odroid XU3/4/HC1/HC2'
-		'10' 'Odroid C1'
 		'38' 'OrangePi PC 2'
 		'37' 'OrangePi Prime'
 		'36' 'OrangePi Win'
@@ -324,45 +385,60 @@
 		'31' 'OrangePi One'
 		'30' 'OrangePi PC'
 		'40' 'Pine A64'
-		'3' 'Raspberry Pi 3/3+'
-		'2' 'Raspberry Pi 2'
-		'1' 'Raspberry Pi 1/Zero (512mb)'
-		'0' 'Raspberry Pi 1 (256mb)'
 		'43' 'Rock64'
 		'70' 'Sparky SBC'
-		'' '────PC─────────────────────────────────'
-		'21' 'x86_64 Native PC'
-		'20' 'x86_64 VMware/VirtualBox'
 
 	)
 
-	Run_Whiptail
+	G_WHIP_MENU 'Please select the current device this is being installed on:\n - NB: Select "Generic device" if not listed.\n - "Core devices": Are fully supported by DietPi, offering full GPU + Kodi support.\n - "Limited support devices": No GPU support, supported limited to DietPi specific issues only (eg: excludes Kernel/GPU/VPU related items).'
+	if (( $? )) || [ -z "$G_WHIP_RETURNED_VALUE" ]; then
+
+		G_DIETPI-NOTIFY 1 'No choices detected. Aborting...'
+		exit 0
+
+	fi
+
 	# + Export to future scripts
-	export G_HW_MODEL=$WHIP_RETURN_VALUE
+	export G_HW_MODEL=$G_WHIP_RETURNED_VALUE
 
 	G_DIETPI-NOTIFY 2 "Setting G_HW_MODEL index of: $G_HW_MODEL"
 	G_DIETPI-NOTIFY 2 "CPU ARCH = $G_HW_ARCH : $G_HW_ARCH_DESCRIPTION"
 
 	echo -e "$G_HW_MODEL" > /etc/.dietpi_hw_model_identifier
 
-	#------------------------------------------------------------------------------------------------
-	echo -e ''
-	G_DIETPI-NOTIFY 2 '-----------------------------------------------------------------------------------'
-	G_DIETPI-NOTIFY 0 'Step 3: Distro selection:'
-	G_DIETPI-NOTIFY 2 '-----------------------------------------------------------------------------------'
-	#------------------------------------------------------------------------------------------------
+	#WiFi selection
+	G_DIETPI-NOTIFY 2 'WiFi selection'
 
-	WHIP_TITLE='Distro selection:'
-	WHIP_DESC="Please select a distro to install on this system. Selecting a distro that is older than the current installed on system, is not supported.\n\nCurrently installed:\n - $G_DISTRO $G_DISTRO_NAME"
-	WHIP_DEFAULT_ITEM=$G_DISTRO
+	G_WHIP_DEFAULT_ITEM=1
+	G_WHIP_MENU_ARRAY=(
+
+		'0' "I don't require WiFi, do not install."
+		'1' 'I require WiFi functionality, keep/install related packages.'
+
+	)
+
+	G_WHIP_MENU 'Please select an option:'
+	if (( $? == 0 && $G_WHIP_RETURNED_VALUE == 1 )); then
+
+		G_DIETPI-NOTIFY 2 'Marking WiFi as needed'
+		WIFI_REQUIRED=1
+
+	fi
+
+	#Distro Selection
+	G_WHIP_DEFAULT_ITEM=$G_DISTRO
+	G_WHIP_BUTTON_CANCEL_TEXT='Exit'
 	DISTRO_LIST_ARRAY=(
+
 		'3' 'Jessie (oldstable, just if you need to avoid upgrade to current release)'
 		'4' 'Stretch (current stable release, recommended)'
 		'5' 'Buster (testing only, not officially supported)'
+
 	)
 
 	# - Enable/list available options based on criteria
 	#	NB: Whiptail use 2 array indexs per whip displayed entry.
+	G_WHIP_MENU_ARRAY=()
 	for ((i=0; i<$(( ${#DISTRO_LIST_ARRAY[@]} / 2 )); i++))
 	do
 		temp_distro_available=1
@@ -379,7 +455,7 @@
 		# - Enable option
 		if (( $temp_distro_available )); then
 
-			WHIP_MENU_ARRAY+=( "${DISTRO_LIST_ARRAY[$(( $i * 2 ))]}" "${DISTRO_LIST_ARRAY[$(( ($i * 2) + 1 ))]}" )
+			G_WHIP_MENU_ARRAY+=( "${DISTRO_LIST_ARRAY[$(( $i * 2 ))]}" "${DISTRO_LIST_ARRAY[$(( ($i * 2) + 1 ))]}" )
 
 		fi
 
@@ -388,15 +464,22 @@
 	#delete []
 	unset DISTRO_LIST_ARRAY
 
-	if [ -z ${WHIP_MENU_ARRAY+x} ]; then
+	if [ -z ${G_WHIP_MENU_ARRAY+x} ]; then
 
 		G_DIETPI-NOTIFY 1 'Error: No available Distros for this system. Aborting...'
 		exit 1
 
 	fi
 
-	Run_Whiptail
-	DISTRO_TARGET=$WHIP_RETURN_VALUE
+	G_WHIP_MENU "Please select a distro to install on this system. Selecting a distro that is older than the current installed on system, is not supported.\n\nCurrently installed:\n - $G_DISTRO $G_DISTRO_NAME"
+	if (( $? )) || [ -z "$G_WHIP_RETURNED_VALUE" ]; then
+
+		G_DIETPI-NOTIFY 1 'No choices detected. Aborting...'
+		exit 0
+
+	fi
+
+	DISTRO_TARGET=$G_WHIP_RETURNED_VALUE
 	if (( $DISTRO_TARGET == 3 )); then
 
 		DISTRO_TARGET_NAME='jessie'
@@ -413,13 +496,14 @@
 
 
 	#------------------------------------------------------------------------------------------------
-	echo -e ''
+	echo ''
 	G_DIETPI-NOTIFY 2 '-----------------------------------------------------------------------------------'
-	G_DIETPI-NOTIFY 0 'Step 4: APT configuration:'
+	G_DIETPI-NOTIFY 0 "Step $SETUP_STEP: APT configuration:"
+	((SETUP_STEP++))
 	G_DIETPI-NOTIFY 2 '-----------------------------------------------------------------------------------'
 	#------------------------------------------------------------------------------------------------
 
-	G_DIETPI-NOTIFY 2 'Removing conflicting apt sources.list.d'
+	G_DIETPI-NOTIFY 2 'Removing conflicting /etc/apt/sources.list.d entries'
 	#	NB: Apt sources will get overwritten during 1st run, via boot script and dietpi.txt entry
 
 	#rm /etc/apt/sources.list.d/* &> /dev/null #Probably a bad idea
@@ -476,12 +560,12 @@ _EOF_
 	G_AGUP
 
 	# - @MichaIng https://github.com/Fourdee/DietPi/pull/1266/files
-	G_DIETPI-NOTIFY 2 "Marking all packages as auto installed first, to allow effective autoremove afterwards"
+	G_DIETPI-NOTIFY 2 'Marking all packages as auto installed first, to allow effective autoremove afterwards'
 
 	G_RUN_CMD apt-mark auto $(apt-mark showmanual)
 
 	# - @MichaIng https://github.com/Fourdee/DietPi/pull/1266/files
-	G_DIETPI-NOTIFY 2 "Temporary disable automatic recommends/suggests installation and allow them to be autoremoved:"
+	G_DIETPI-NOTIFY 2 'Disable automatic recommends/suggests installation and allow them to be autoremoved:'
 
 	#	Remove any existing apt recommends settings
 	rm /etc/apt/apt.conf.d/*recommends*
@@ -496,7 +580,7 @@ _EOF_
 	export G_ERROR_HANDLER_EXITCODE=$?
 	G_ERROR_HANDLER
 
-	G_DIETPI-NOTIFY 2 "Forcing use of modified apt configs"
+	G_DIETPI-NOTIFY 2 'Forcing use of modified package configs'
 
 	export G_ERROR_HANDLER_COMMAND='/etc/apt/apt.conf.d/99-dietpi-forceconf'
 	cat << _EOF_ > $G_ERROR_HANDLER_COMMAND
@@ -553,6 +637,30 @@ _EOF_
 
 	)
 
+	if (( $WIFI_REQUIRED )); then
+
+		aPACKAGES_REQUIRED_INSTALL+=('crda')			# WiFi related
+		aPACKAGES_REQUIRED_INSTALL+=('firmware-atheros')	# WiFi dongle firmware
+		aPACKAGES_REQUIRED_INSTALL+=('firmware-brcm80211')	# WiFi dongle firmware
+		aPACKAGES_REQUIRED_INSTALL+=('iw')			# WiFi related
+		aPACKAGES_REQUIRED_INSTALL+=('rfkill')	 		# WiFi related: Used by some onboard WiFi chipsets
+		aPACKAGES_REQUIRED_INSTALL+=('wireless-tools')		# WiFi related
+		aPACKAGES_REQUIRED_INSTALL+=('wpasupplicant')		# WiFi related
+
+		# Intel/Nvidia/WiFi (ralink) dongle firmware: https://github.com/Fourdee/DietPi/issues/1675#issuecomment-377806609
+		# On Jessie, firmware-misc-nonfree is not available, firmware-ralink instead as dedicated package.
+		if (( $G_DISTRO < 4 )); then
+
+			aPACKAGES_REQUIRED_INSTALL+=('firmware-ralink')
+
+		else
+
+			aPACKAGES_REQUIRED_INSTALL+=('firmware-misc-nonfree')
+
+		fi
+
+	fi
+
 	# - G_DISTRO specific required packages:
 	if (( $G_DISTRO < 4 )); then
 
@@ -594,7 +702,7 @@ _EOF_
 
 		G_AGI linux-image-amd64
 		# Usually no firmware should be necessary for VMs. If user manually passes though some USB device, he might need to install the firmware then.
-		(( $G_HW_MODEL != 20 )) && G_AGI firmware-linux-nonfree firmware-misc-nonfree
+		(( $G_HW_MODEL != 20 )) && G_AGI firmware-linux-nonfree
 
 		#	Grub EFI
 		if dpkg --get-selections | grep -q '^grub-efi-amd64' ||
@@ -623,13 +731,8 @@ _EOF_
 	#	Odroid N1
 	elif (( $G_HW_MODEL == 14 )); then
 
-		#G_AGI libdrm-rockchip1 #Not currently on meveric's repo
-		echo 0
-
-	#	Odroid N1
-	elif (( $G_HW_MODEL == 14 )); then
-
 		G_AGI linux-image-arm64-odroid-n1
+		#G_AGI libdrm-rockchip1 #Not currently on meveric's repo
 
 	#	Odroid C2
 	elif (( $G_HW_MODEL == 12 )); then
@@ -641,7 +744,7 @@ _EOF_
 
 		#G_AGI linux-image-4.9-armhf-odroid-xu3
 		G_AGI $(dpkg --get-selections | grep '^linux-image' | awk '{print $1}')
-		(( $(dpkg --get-selections | grep -ci -m1 '^linux-image') )) || G_AGI linux-image-4.14-armhf-odroid-xu4
+		dpkg --get-selections | grep -qi '^linux-image' || G_AGI linux-image-4.14-armhf-odroid-xu4
 
 	#	Odroid C1
 	elif (( $G_HW_MODEL == 10 )); then
@@ -706,34 +809,6 @@ _EOF_
 
 	fi
 
-	G_DIETPI-NOTIFY 2 "WiFi selection"
-
-	WHIP_TITLE='WiFi required?'
-	WHIP_DESC='Please select an option'
-	WHIP_DEFAULT_ITEM=1
-	WHIP_MENU_ARRAY=(
-
-		'0' "I don't require WiFi, do not install."
-		'1' 'I require WiFi functionality, keep/install related packages.'
-
-	)
-
-	Run_Whiptail
-	if (( $WHIP_RETURN_VALUE == 1 )); then
-
-		G_DIETPI-NOTIFY 2 "Marking WiFi as needed"
-
-		aPACKAGES_REQUIRED_INSTALL+=('crda')					# WiFi related
-		aPACKAGES_REQUIRED_INSTALL+=('firmware-atheros')		# WiFi dongle firmware
-		aPACKAGES_REQUIRED_INSTALL+=('firmware-brcm80211')		# WiFi dongle firmware
-		aPACKAGES_REQUIRED_INSTALL+=('firmware-misc-nonfree')	# Intel/Nvidia/WiFi (ralink) dongle firmware: https://github.com/Fourdee/DietPi/issues/1675#issuecomment-377806609
-		aPACKAGES_REQUIRED_INSTALL+=('iw')						# WiFi related
-		aPACKAGES_REQUIRED_INSTALL+=('rfkill')	 				# WiFi related: Used by some onboard WiFi chipsets
-		aPACKAGES_REQUIRED_INSTALL+=('wireless-tools')			# WiFi related
-		aPACKAGES_REQUIRED_INSTALL+=('wpasupplicant')			# WiFi related
-
-	fi
-
 	G_DIETPI-NOTIFY 2 "Generating list of minimal packages, required for DietPi installation:"
 
 	INSTALL_PACKAGES=''
@@ -762,25 +837,26 @@ _EOF_
 
 
 	#------------------------------------------------------------------------------------------------
-	echo -e ''
+	echo ''
 	G_DIETPI-NOTIFY 2 '-----------------------------------------------------------------------------------'
-	G_DIETPI-NOTIFY 0 'Step 5: APT installations:'
+	G_DIETPI-NOTIFY 0 "Step $SETUP_STEP: APT installations:"
+	((SETUP_STEP++))
 	G_DIETPI-NOTIFY 2 '-----------------------------------------------------------------------------------'
 	#------------------------------------------------------------------------------------------------
 
-	G_DIETPI-NOTIFY 2 "Upgrading existing APT installed packages:"
+	G_DIETPI-NOTIFY 2 'Upgrading existing APT installed packages:'
 
 	G_AGDUG
 
 	# - Distro is now target (for APT purposes and G_AGX support due to installed binary, its here, instead of after G_AGUP)
 	export G_DISTRO=$DISTRO_TARGET
-	export G_DISTRO_NAME=$DISTRO_TARGET_NAME
+	export G_DISTRO_NAME="$DISTRO_TARGET_NAME"
 
-	G_DIETPI-NOTIFY 2 "Installing core DietPi pre-req APT packages"
+	G_DIETPI-NOTIFY 2 'Installing core DietPi pre-req APT packages'
 
 	G_AGI $INSTALL_PACKAGES
 
-	G_DIETPI-NOTIFY 2 "Applying default DietPi configuration for APT"
+	G_DIETPI-NOTIFY 2 'Applying default DietPi configuration for APT'
 
 	export G_ERROR_HANDLER_COMMAND='/etc/apt/apt.conf.d/99-dietpi-norecommends'
 	cat << _EOF_ > $G_ERROR_HANDLER_COMMAND
@@ -792,7 +868,7 @@ _EOF_
 	export G_ERROR_HANDLER_EXITCODE=$?
 	G_ERROR_HANDLER
 
-	G_DIETPI-NOTIFY 2 "Purging APT with autoremoval (in case of DISTRO upgrade/downgrade):"
+	G_DIETPI-NOTIFY 2 'Purging APT with autoremoval (in case of DISTRO upgrade/downgrade):'
 
 	G_AGA
 
@@ -804,9 +880,10 @@ _EOF_
 	fi
 
 	#------------------------------------------------------------------------------------------------
-	echo -e ''
+	echo ''
 	G_DIETPI-NOTIFY 2 '-----------------------------------------------------------------------------------'
-	G_DIETPI-NOTIFY 0 'Step 6: Downloading and installing DietPi sourcecode'
+	G_DIETPI-NOTIFY 0 "Step $SETUP_STEP: Downloading and installing DietPi sourcecode:"
+	((SETUP_STEP++))
 	G_DIETPI-NOTIFY 2 '-----------------------------------------------------------------------------------'
 	#------------------------------------------------------------------------------------------------
 
@@ -816,13 +893,13 @@ _EOF_
 
 	G_RUN_CMD wget "$INTERNET_ADDRESS" -O package.zip
 
-	G_DIETPI-NOTIFY 2 "Extracting DietPi sourcecode"
+	G_DIETPI-NOTIFY 2 'Extracting DietPi sourcecode'
 
 	G_RUN_CMD unzip -o package.zip
 
 	rm package.zip
 
-	G_DIETPI-NOTIFY 2 "Removing files not required"
+	G_DIETPI-NOTIFY 2 'Removing files not required'
 
 	#	Remove files we do not require, or want to overwrite in /boot
 	rm DietPi-*/CHANGELOG.txt
@@ -830,11 +907,11 @@ _EOF_
 	rm DietPi-*/TESTING-BRANCH.md
 	rm DietPi-*/uEnv.txt # Pine 64, use existing on system.
 
-	G_DIETPI-NOTIFY 2 "Creating /boot"
+	G_DIETPI-NOTIFY 2 'Creating /boot'
 
 	G_RUN_CMD mkdir -p /boot
 
-	G_DIETPI-NOTIFY 2 "Moving to /boot"
+	G_DIETPI-NOTIFY 2 'Moving to /boot'
 
 	# - HW specific boot.ini uEnv.txt
 	if (( $G_HW_MODEL == 10 )); then
@@ -854,22 +931,23 @@ _EOF_
 
 	G_RUN_CMD cp -R DietPi-*/* /boot/
 
-	G_DIETPI-NOTIFY 2 "Cleaning up extracted files"
+	G_DIETPI-NOTIFY 2 'Cleaning up extracted files'
 
 	G_RUN_CMD rm -R DietPi-*
 
-	G_DIETPI-NOTIFY 2 "Setting execute permissions for /boot/dietpi"
+	G_DIETPI-NOTIFY 2 'Setting execute permissions for /boot/dietpi'
 
 	G_RUN_CMD chmod -R +x /boot/dietpi
 
 	#------------------------------------------------------------------------------------------------
-	echo -e ''
+	echo ''
 	G_DIETPI-NOTIFY 2 '-----------------------------------------------------------------------------------'
-	G_DIETPI-NOTIFY 0 "Step 7: Prep system for DietPi ENV:"
+	G_DIETPI-NOTIFY 0 "Step $SETUP_STEP: Prep system for DietPi ENV:"
+	((SETUP_STEP++))
 	G_DIETPI-NOTIFY 2 '-----------------------------------------------------------------------------------'
 	#------------------------------------------------------------------------------------------------
 
-	G_DIETPI-NOTIFY 2 "Deleting list of known users, not required by DietPi"
+	G_DIETPI-NOTIFY 2 'Deleting list of known users, not required by DietPi'
 
 	userdel -f pi &> /dev/null
 	userdel -f test &> /dev/null #armbian
@@ -879,7 +957,7 @@ _EOF_
 	userdel -f dietpi &> /dev/null
 	userdel -f debian &> /dev/null #BBB
 
-	G_DIETPI-NOTIFY 2 "Removing misc files/folders/services, not required by DietPi"
+	G_DIETPI-NOTIFY 2 'Removing misc files/folders/services, not required by DietPi'
 
 	rm -R /home &> /dev/null
 	rm -R /media &> /dev/null
@@ -941,27 +1019,27 @@ _EOF_
 	# - make_nas_processes_faster cron job on Rock64 + NanoPi + Pine64(?) images
 	rm /etc/cron.d/make_nas_processes_faster &> /dev/null
 
-	G_DIETPI-NOTIFY 2 "Creating DietPi core environment"
+	G_DIETPI-NOTIFY 2 'Creating DietPi core environment'
 
 	G_RUN_CMD /boot/dietpi/func/dietpi-set_core_environment
 
-	echo -e "Samba client can be installed and setup by DietPi-Config.\nSimply run: dietpi-config and select the Networking option: NAS/Misc menu" > /mnt/samba/readme.txt
-	echo -e "FTP client mount can be installed and setup by DietPi-Config.\nSimply run: dietpi-config and select the Networking option: NAS/Misc menu" > /mnt/ftp_client/readme.txt
-	echo -e "NFS client can be installed and setup by DietPi-Config.\nSimply run: dietpi-config and select the Networking option: NAS/Misc menu" > /mnt/nfs_client/readme.txt
+	echo -e 'Samba client can be installed and setup by DietPi-Config.\nSimply run: dietpi-config and select the Networking option: NAS/Misc menu' > /mnt/samba/readme.txt
+	echo -e 'FTP client mount can be installed and setup by DietPi-Config.\nSimply run: dietpi-config and select the Networking option: NAS/Misc menu' > /mnt/ftp_client/readme.txt
+	echo -e 'NFS client can be installed and setup by DietPi-Config.\nSimply run: dietpi-config and select the Networking option: NAS/Misc menu' > /mnt/nfs_client/readme.txt
 
-	G_DIETPI-NOTIFY 2 "Deleting all log files /var/log"
+	G_DIETPI-NOTIFY 2 'Deleting all log files /var/log'
 
 	/boot/dietpi/dietpi-logclear 2 &> /dev/null # As this will report missing vars, however, its fine, does not break functionality.
 
-	G_DIETPI-NOTIFY 2 "Generating DietPi /etc/fstab"
+	G_DIETPI-NOTIFY 2 'Generating DietPi /etc/fstab'
 
 	G_RUN_CMD /boot/dietpi/dietpi-drive_manager 4
 
-	G_DIETPI-NOTIFY 2 "Starting DietPi-RAMdisk service"
+	G_DIETPI-NOTIFY 2 'Starting DietPi-RAMdisk service'
 
 	G_RUN_CMD systemctl start dietpi-ramdisk.service
 
-	G_DIETPI-NOTIFY 2 "Starting DietPi-RAMlog service"
+	G_DIETPI-NOTIFY 2 'Starting DietPi-RAMlog service'
 
 	G_RUN_CMD systemctl start dietpi-ramlog.service
 
@@ -969,7 +1047,7 @@ _EOF_
 
 	/DietPi/dietpi/dietpi-obtain_hw_model
 
-	G_DIETPI-NOTIFY 2 "Configuring Network:"
+	G_DIETPI-NOTIFY 2 'Configuring Network:'
 
 	rm -R /etc/network/interfaces &> /dev/null # armbian symlink for bulky network-manager
 
@@ -986,7 +1064,7 @@ _EOF_
 
 	fi
 
-	G_DIETPI-NOTIFY 2 "Tweaking DHCP timeout:"
+	G_DIETPI-NOTIFY 2 'Tweaking DHCP timeout:'
 
 	# - Reduce DHCP request retry count and timeouts: https://github.com/Fourdee/DietPi/issues/711
 	sed -i '/^#timeout /d' /etc/dhcp/dhclient.conf
@@ -998,7 +1076,7 @@ timeout 10;
 retry 4;
 _EOF_
 
-	G_DIETPI-NOTIFY 2 "Configuring hosts:"
+	G_DIETPI-NOTIFY 2 'Configuring hosts:'
 
 	export G_ERROR_HANDLER_COMMAND='/etc/hosts'
 	cat << _EOF_ > $G_ERROR_HANDLER_COMMAND
@@ -1018,39 +1096,39 @@ _EOF_
 	export G_ERROR_HANDLER_EXITCODE=$?
 	G_ERROR_HANDLER
 
-	G_DIETPI-NOTIFY 2 "Configuring htop:"
+	G_DIETPI-NOTIFY 2 'Configuring htop:'
 
 	mkdir -p /root/.config/htop
 	cp /DietPi/dietpi/conf/htoprc /root/.config/htop/htoprc
 
-	G_DIETPI-NOTIFY 2 "Configuring fakehwclock:"
+	G_DIETPI-NOTIFY 2 'Configuring fakehwclock:'
 
 	# - allow times in the past
-	sed -i "/FORCE=/c\FORCE=force" /etc/default/fake-hwclock
+	sed -i '/FORCE=/c\FORCE=force' /etc/default/fake-hwclock
 
-	G_DIETPI-NOTIFY 2 "Configuring serial consoles:"
+	G_DIETPI-NOTIFY 2 'Configuring serial consoles:'
 
 	# - Disable serial console
 	/DietPi/dietpi/func/dietpi-set_hardware serialconsole disable
 
-	G_DIETPI-NOTIFY 2 "Reducing getty count and resource usage:"
+	G_DIETPI-NOTIFY 2 'Reducing getty count and resource usage:'
 
 	systemctl mask getty-static
 
-	G_DIETPI-NOTIFY 2 "Configuring ntpd:"
+	G_DIETPI-NOTIFY 2 'Configuring ntpd:'
 
 	systemctl disable systemd-timesyncd
 	rm /etc/init.d/ntp &> /dev/null
 	(( $G_DISTRO > 4 )) && systemctl mask ntp
 
-	G_DIETPI-NOTIFY 2 "Configuring regional settings (TZdata):"
+	G_DIETPI-NOTIFY 2 'Configuring regional settings (TZdata):'
 
 	rm /etc/timezone &> /dev/null
 	rm /etc/localtime
 	ln -fs /usr/share/zoneinfo/Europe/London /etc/localtime
 	G_RUN_CMD dpkg-reconfigure -f noninteractive tzdata
 
-	G_DIETPI-NOTIFY 2 "Configuring regional settings (Keyboard):"
+	G_DIETPI-NOTIFY 2 'Configuring regional settings (Keyboard):'
 
 	dpkg-reconfigure -f noninteractive keyboard-configuration #Keyboard must be plugged in for this to work!
 
@@ -1059,7 +1137,7 @@ _EOF_
 	#Runs at start of script
 
 	#G_HW_ARCH specific
-	G_DIETPI-NOTIFY 2 "Applying G_HW_ARCH specific tweaks:"
+	G_DIETPI-NOTIFY 2 'Applying G_HW_ARCH specific tweaks:'
 
 	if (( $G_HW_ARCH == 10 )); then
 
@@ -1075,17 +1153,17 @@ options nouveau modeset=0
 alias nouveau off
 alias lbm-nouveau off
 _EOF_
-		echo -e "options nouveau modeset=0" > /etc/modprobe.d/nouveau-kms.conf
+		echo 'options nouveau modeset=0' > /etc/modprobe.d/nouveau-kms.conf
 		update-initramfs -u
 
 	fi
 
 	#G_HW_MODEL specific
-	G_DIETPI-NOTIFY 2 "Appling G_HW_MODEL specific tweaks:"
+	G_DIETPI-NOTIFY 2 'Appling G_HW_MODEL specific tweaks:'
 
 	if (( $G_HW_MODEL != 20 )); then
 
-		G_DIETPI-NOTIFY 2 "Configuring hdparm:"
+		G_DIETPI-NOTIFY 2 'Configuring hdparm:'
 
 		sed -i '/#DietPi/,$d' /etc/hdparm.conf #Prevent dupes
 		export G_ERROR_HANDLER_COMMAND='/etc/hdparm.conf'
@@ -1108,7 +1186,7 @@ _EOF_
 	# - ARMbian OPi Zero 2: https://github.com/Fourdee/DietPi/issues/876#issuecomment-294350580
 	if (( $G_HW_MODEL == 35 )); then
 
-		echo -e "blacklist bmp085" > /etc/modprobe.d/bmp085.conf
+		echo 'blacklist bmp085' > /etc/modprobe.d/bmp085.conf
 
 	# - Sparky SBC ONLY:
 	elif (( $G_HW_MODEL == 70 )); then
@@ -1153,7 +1231,7 @@ blacklist bc_example
 _EOF_
 
 		#	Use performance gov for stability.
-		sed -i "/^CONFIG_CPU_GOVERNOR=/c\CONFIG_CPU_GOVERNOR=performance" /DietPi/dietpi.txt
+		sed -i '/^[[:blank:]]*CONFIG_CPU_GOVERNOR=/c\CONFIG_CPU_GOVERNOR=performance' /DietPi/dietpi.txt
 		/DietPi/dietpi/dietpi-cpu_set
 
 	# - RPI:
@@ -1204,9 +1282,10 @@ _EOF_
 
 
 	#------------------------------------------------------------------------------------------------
-	echo -e ''
+	echo ''
 	G_DIETPI-NOTIFY 2 '-----------------------------------------------------------------------------------'
-	G_DIETPI-NOTIFY 0 "Step 8: Finalise system for first run of DietPi:"
+	G_DIETPI-NOTIFY 0 "Step $SETUP_STEP: Finalise system for first run of DietPi:"
+	((SETUP_STEP++))
 	G_DIETPI-NOTIFY 2 '-----------------------------------------------------------------------------------'
 	#------------------------------------------------------------------------------------------------
 
@@ -1221,9 +1300,6 @@ _EOF_
 	/DietPi/dietpi/dietpi-services dietpi_controlled
 
 	G_DIETPI-NOTIFY 2 'Running general cleanup of misc files'
-
-	# - general folders
-	rm -R /tmp/* &> /dev/null
 
 	# - Remove Bash History file
 	rm ~/.bash_history &> /dev/null
@@ -1249,7 +1325,7 @@ _EOF_
 	fi
 
 	# - Set Pi cmdline.txt back to normal
-	[ -f /boot/cmdline.txt ] && sed -i "s/ rootdelay=10//g" /boot/cmdline.txt
+	[ -f /boot/cmdline.txt ] && sed -i 's/ rootdelay=10//g' /boot/cmdline.txt
 
 	G_DIETPI-NOTIFY 2 'Generating default wpa_supplicant.conf'
 
@@ -1306,6 +1382,13 @@ _EOF_
 	G_DIETPI-NOTIFY 2 'Set Init .install_stage to -1 (first boot)'
 
 	echo -1 > /DietPi/dietpi/.install_stage
+
+	G_DIETPI-NOTIFY 2 'Writing PREP information to file'
+
+	cat << _EOF_ > /DietPi/dietpi/.prep_info
+$IMAGE_CREATOR
+$PREIMAGE_INFO
+_EOF_
 
 	G_DIETPI-NOTIFY 2 'Remove server_version / patch_file (downloads fresh from dietpi-update)'
 
@@ -1454,21 +1537,28 @@ _EOF_
 	G_RUN_CMD systemctl stop dietpi-ramlog
 	G_RUN_CMD systemctl stop dietpi-ramdisk
 
-	# - Minor cleanup, Remove tmp and our logs
-	rm -R /tmp/*
-	rm /var/tmp/dietpi/logs/*
+	# - Clear tmp files
+	rm -R /tmp/* &> /dev/null
+	rm /var/tmp/dietpi/logs/* &> /dev/null
 
 	sync
-	# fstrim -v /
-	# sync
 
+	G_DIETPI-NOTIFY 2 "The used kernel version is: $(uname -r)"
+	kernel_apt_packages="$(dpkg --get-selections | grep '^linux-image-[0-9]')"
+	if [ -n "$kernel_apt_packages" ]; then
+
+		G_DIETPI-NOTIFY 2 'The following kernel APT packages have been found, please purge the outdated ones:'
+		echo "$kernel_apt_packages"
+
+	fi
+	
 	G_DIETPI-NOTIFY 2 'Please check and delete all non-required folders in /root/.xxxxxx'
-	G_DIETPI-NOTIFY 2 'Please delete outdated modules'
+	G_DIETPI-NOTIFY 2 'Please delete outdated non-APT kernel modules:'
 	ls -lha /lib/modules
 
-	G_DIETPI-NOTIFY 0 "Completed, disk can now be saved to .img for later use, or, reboot system to start first run of DietPi:"
+	G_DIETPI-NOTIFY 0 'Completed, disk can now be saved to .img for later use, or, reboot system to start first run of DietPi:'
 
-	#Cleanup
+	# - Remove PREP files
 	rm dietpi-globals
 	rm PREP_SYSTEM_FOR_DIETPI.sh
 
