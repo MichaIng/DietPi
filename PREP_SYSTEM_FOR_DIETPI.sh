@@ -610,7 +610,6 @@ _EOF_
 		'dosfstools' 		# DietPi-Drive_Manager + fat (boot) drive file system check
 		'ethtool'		# Ethernet link checking
 		'fake-hwclock'		# Hardware clock emulation, to allow correct timestamps during boot before network time sync
-		'fbset'			# DietPi-Config display settings
 		'gnupg'			# apt-key add
 		'hfsplus'		# DietPi-Drive_Manager NTS (MacOS) file system support
 		'htop'			# System monitor
@@ -1552,7 +1551,7 @@ _EOF_
 		echo "$kernel_apt_packages"
 
 	fi
-	
+
 	G_DIETPI-NOTIFY 2 'Please check and delete all non-required folders in /root/.xxxxxx'
 	G_DIETPI-NOTIFY 2 'Please delete outdated non-APT kernel modules:'
 	ls -lha /lib/modules
