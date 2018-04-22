@@ -1201,11 +1201,6 @@ _EOF_
 		G_RUN_CMD wget https://raw.githubusercontent.com/sparky-sbc/sparky-test/master/dsd-marantz/snd-usb-audio.ko -O /lib/modules/3.10.38/kernel/sound/usb/snd-usb-audio.ko
 		G_RUN_CMD wget https://raw.githubusercontent.com/sparky-sbc/sparky-test/master/dsd-marantz/snd-usbmidi-lib.ko -O /lib/modules/3.10.38/kernel/sound/usb/snd-usbmidi-lib.ko
 
-		#	Firmware
-		G_RUN_CMD wget https://raw.githubusercontent.com/sparky-sbc/sparky-test/master/piano-firmware/piano-firmware.tar
-		tar -xvf piano-firmware.tar -C /lib/
-		rm piano-firmware.tar
-
 		cat << _EOF_ > /DietPi/uEnv.txt
 uenvcmd=setenv os_type linux;
 bootargs=earlyprintk clk_ignore_unused selinux=0 scandelay console=tty0 loglevel=1 real_rootflag=rw root=/dev/mmcblk0p2 rootwait init=/lib/systemd/systemd aotg.urb_fix=1 aotg.aotg1_speed=0
@@ -1236,13 +1231,6 @@ _EOF_
 
 	# - RPI:
 	elif (( $G_HW_MODEL < 10 )); then
-
-		# - RPI Piano allo firmware:
-		G_RUN_CMD wget https://github.com/allocom/piano-firmware/archive/master.zip -O package.zip
-		unzip -o package.zip
-		rm package.zip
-		cp -R piano-firmware-master/lib/firmware/allo /lib/firmware/
-		rm -R piano-firmware-master
 
 		# - Scroll lock fix for RPi by Midwan: https://github.com/Fourdee/DietPi/issues/474#issuecomment-243215674
 		cat << _EOF_ > /etc/udev/rules.d/50-leds.rules
