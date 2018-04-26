@@ -554,6 +554,31 @@
 
 	G_RUN_CMD chmod -R +x /boot/dietpi
 
+	G_DIETPI-NOTIFY 2 'Installing DietPi-RAMDISK'
+
+	cat << _EOF_ > /etc/systemd/system/dietpi-ramdisk.service
+[Unit]
+Description=DietPi-RAMdisk
+After=local-fs.target boot.mount
+Before=rsyslog.service syslog.service
+
+[Service]
+Type=forking
+RemainAfterExit=yes
+ExecStartPre=$(which mkdir) -p /var/tmp/dietpi/logs
+ExecStart=/bin/bash -c '/boot/dietpi/dietpi-ramdisk 0 &>> /var/tmp/dietpi/logs/dietpi-ramdisk.log'
+ExecStop=/bin/bash -c '/DietPi/dietpi/dietpi-ramdisk 1 &>> /var/tmp/dietpi/logs/dietpi-ramdisk.log'
+
+[Install]
+WantedBy=local-fs.target
+_EOF_
+	systemctl daemon-reload
+	systemctl enable dietpi-ramdisk.service
+
+	G_DIETPI-NOTIFY 2 'Starting DietPi-RAMDISK'
+
+	G_RUN_CMD systemctl start dietpi-ramdisk.service
+
 	#------------------------------------------------------------------------------------------------
 	echo ''
 	G_DIETPI-NOTIFY 2 '-----------------------------------------------------------------------------------'
@@ -577,7 +602,7 @@
 	export G_DISTRO=$DISTRO_TARGET
 	export G_DISTRO_NAME="$DISTRO_TARGET_NAME"
 
-	/boot/dietpi/func/dietpi-set_software apt-mirror 'default'
+	G_RUN_CMD /DietPi/dietpi/func/dietpi-set_software apt-mirror 'default'
 
 	export G_DISTRO=$G_DISTRO_TEMP
 	export G_DISTRO_NAME="$G_DISTRO_NAME_TEMP"
@@ -994,23 +1019,19 @@ _EOF_
 
 	G_DIETPI-NOTIFY 2 'Creating DietPi core environment'
 
-	G_RUN_CMD /boot/dietpi/func/dietpi-set_core_environment
+	G_RUN_CMD /DietPi/dietpi/func/dietpi-set_core_environment
 
 	echo -e 'Samba client can be installed and setup by DietPi-Config.\nSimply run: dietpi-config and select the Networking option: NAS/Misc menu' > /mnt/samba/readme.txt
 	echo -e 'FTP client mount can be installed and setup by DietPi-Config.\nSimply run: dietpi-config and select the Networking option: NAS/Misc menu' > /mnt/ftp_client/readme.txt
 	echo -e 'NFS client can be installed and setup by DietPi-Config.\nSimply run: dietpi-config and select the Networking option: NAS/Misc menu' > /mnt/nfs_client/readme.txt
 
-	G_DIETPI-NOTIFY 2 'Deleting all log files /var/log'
-
-	/boot/dietpi/dietpi-logclear 2 &> /dev/null # As this will report missing vars, however, its fine, does not break functionality.
-
 	G_DIETPI-NOTIFY 2 'Generating DietPi /etc/fstab'
 
-	G_RUN_CMD /boot/dietpi/dietpi-drive_manager 4
+	G_RUN_CMD /DietPi/dietpi/dietpi-drive_manager 4
 
-	G_DIETPI-NOTIFY 2 'Starting DietPi-RAMdisk service'
+	G_DIETPI-NOTIFY 2 'Deleting all log files /var/log'
 
-	G_RUN_CMD systemctl start dietpi-ramdisk.service
+	/DietPi/dietpi/dietpi-logclear 2 &> /dev/null # As this will report missing vars, however, its fine, does not break functionality.
 
 	G_DIETPI-NOTIFY 2 'Starting DietPi-RAMlog service'
 
@@ -1024,7 +1045,7 @@ _EOF_
 
 	rm -R /etc/network/interfaces &> /dev/null # armbian symlink for bulky network-manager
 
-	G_RUN_CMD cp /boot/dietpi/conf/network_interfaces /etc/network/interfaces
+	G_RUN_CMD cp /DietPi/dietpi/conf/network_interfaces /etc/network/interfaces
 
 	# - Remove all predefined eth*/wlan* adapter rules
 	rm /etc/udev/rules.d/70-persistent-net.rules &> /dev/null
