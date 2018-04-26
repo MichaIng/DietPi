@@ -42,6 +42,7 @@
 		'ca-certificates'
 		'locales'
 		'ncurses-bin' #tput G_WHIP
+		'unzip' #dietpi sourcecode extract, pre APT install
 
 	)
 
@@ -499,6 +500,63 @@
 	#------------------------------------------------------------------------------------------------
 	echo ''
 	G_DIETPI-NOTIFY 2 '-----------------------------------------------------------------------------------'
+	G_DIETPI-NOTIFY 0 "Step $SETUP_STEP: Downloading and installing DietPi sourcecode:"
+	((SETUP_STEP++))
+	G_DIETPI-NOTIFY 2 '-----------------------------------------------------------------------------------'
+	#------------------------------------------------------------------------------------------------
+
+	INTERNET_ADDRESS="https://github.com/Fourdee/DietPi/archive/$GIT_BRANCH.zip"
+	G_RUN_CMD wget "$INTERNET_ADDRESS" -O package.zip
+
+	G_DIETPI-NOTIFY 2 'Extracting DietPi sourcecode'
+
+	G_RUN_CMD unzip -o package.zip
+
+	rm package.zip
+
+	G_DIETPI-NOTIFY 2 'Removing files not required'
+
+	#	Remove files we do not require, or want to overwrite in /boot
+	rm DietPi-*/CHANGELOG.txt
+	rm DietPi-*/PREP_SYSTEM_FOR_DIETPI.sh
+	rm DietPi-*/TESTING-BRANCH.md
+	rm DietPi-*/uEnv.txt # Pine 64, use existing on system.
+
+	G_DIETPI-NOTIFY 2 'Creating /boot'
+
+	G_RUN_CMD mkdir -p /boot
+
+	G_DIETPI-NOTIFY 2 'Moving to /boot'
+
+	# - HW specific boot.ini uEnv.txt
+	if (( $G_HW_MODEL == 10 )); then
+
+		G_RUN_CMD mv DietPi-*/boot_c1.ini /boot/boot.ini
+
+	elif (( $G_HW_MODEL == 11 )); then
+
+		G_RUN_CMD mv DietPi-*/boot_xu4.ini /boot/boot.ini
+
+	elif (( $G_HW_MODEL == 12 )); then
+
+		G_RUN_CMD mv DietPi-*/boot_c2.ini /boot/boot.ini
+
+	fi
+	rm DietPi-*/*.ini
+
+	G_RUN_CMD cp -R DietPi-*/* /boot/
+
+	G_DIETPI-NOTIFY 2 'Cleaning up extracted files'
+
+	G_RUN_CMD rm -R DietPi-*
+
+	G_DIETPI-NOTIFY 2 'Setting execute permissions for /boot/dietpi'
+
+	G_RUN_CMD chmod -R +x /boot/dietpi
+
+	#------------------------------------------------------------------------------------------------
+	echo ''
+	G_DIETPI-NOTIFY 2 '-----------------------------------------------------------------------------------'
 	G_DIETPI-NOTIFY 0 "Step $SETUP_STEP: APT configuration:"
 	((SETUP_STEP++))
 	G_DIETPI-NOTIFY 2 '-----------------------------------------------------------------------------------'
@@ -853,66 +911,6 @@ _EOF_
 		sed -i 's/http:/https:/g' /etc/apt/sources.list
 
 	fi
-
-	#------------------------------------------------------------------------------------------------
-	echo ''
-	G_DIETPI-NOTIFY 2 '-----------------------------------------------------------------------------------'
-	G_DIETPI-NOTIFY 0 "Step $SETUP_STEP: Downloading and installing DietPi sourcecode:"
-	((SETUP_STEP++))
-	G_DIETPI-NOTIFY 2 '-----------------------------------------------------------------------------------'
-	#------------------------------------------------------------------------------------------------
-
-	INTERNET_ADDRESS="https://github.com/Fourdee/DietPi/archive/$GIT_BRANCH.zip" #NB: testing until this is stable in master
-	G_DIETPI-NOTIFY 2 "Checking connection to $INTERNET_ADDRESS"
-	G_CHECK_URL "$INTERNET_ADDRESS"
-
-	G_RUN_CMD wget "$INTERNET_ADDRESS" -O package.zip
-
-	G_DIETPI-NOTIFY 2 'Extracting DietPi sourcecode'
-
-	G_RUN_CMD unzip -o package.zip
-
-	rm package.zip
-
-	G_DIETPI-NOTIFY 2 'Removing files not required'
-
-	#	Remove files we do not require, or want to overwrite in /boot
-	rm DietPi-*/CHANGELOG.txt
-	rm DietPi-*/PREP_SYSTEM_FOR_DIETPI.sh
-	rm DietPi-*/TESTING-BRANCH.md
-	rm DietPi-*/uEnv.txt # Pine 64, use existing on system.
-
-	G_DIETPI-NOTIFY 2 'Creating /boot'
-
-	G_RUN_CMD mkdir -p /boot
-
-	G_DIETPI-NOTIFY 2 'Moving to /boot'
-
-	# - HW specific boot.ini uEnv.txt
-	if (( $G_HW_MODEL == 10 )); then
-
-		G_RUN_CMD mv DietPi-*/boot_c1.ini /boot/boot.ini
-
-	elif (( $G_HW_MODEL == 11 )); then
-
-		G_RUN_CMD mv DietPi-*/boot_xu4.ini /boot/boot.ini
-
-	elif (( $G_HW_MODEL == 12 )); then
-
-		G_RUN_CMD mv DietPi-*/boot_c2.ini /boot/boot.ini
-
-	fi
-	rm DietPi-*/*.ini
-
-	G_RUN_CMD cp -R DietPi-*/* /boot/
-
-	G_DIETPI-NOTIFY 2 'Cleaning up extracted files'
-
-	G_RUN_CMD rm -R DietPi-*
-
-	G_DIETPI-NOTIFY 2 'Setting execute permissions for /boot/dietpi'
-
-	G_RUN_CMD chmod -R +x /boot/dietpi
 
 	#------------------------------------------------------------------------------------------------
 	echo ''
