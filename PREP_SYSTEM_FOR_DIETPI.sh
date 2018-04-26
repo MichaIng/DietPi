@@ -513,43 +513,18 @@
 
 	G_DIETPI-NOTIFY 2 "Setting APT sources.list: $DISTRO_TARGET_NAME $DISTRO_TARGET"
 
-	# - Set raspbian
-	if (( $G_HW_MODEL < 10 )); then
+	# - We need to temp export target DISTRO vars, then revert them to current, after setting sources.list
+	G_DISTRO_TEMP=$G_DISTRO
+	G_DISTRO_NAME_TEMP="$G_DISTRO_NAME"
+	export G_DISTRO=$DISTRO_TARGET
+	export G_DISTRO_NAME="$DISTRO_TARGET_NAME"
 
-		cat << _EOF_ > /etc/apt/sources.list
-deb http://raspbian.raspberrypi.org/raspbian $DISTRO_TARGET_NAME main contrib non-free rpi
-_EOF_
+	/boot/dietpi/func/dietpi-set_software apt-mirror 'default'
 
-		cat << _EOF_ > /etc/apt/sources.list.d/raspi.list
-deb https://archive.raspberrypi.org/debian/ $DISTRO_TARGET_NAME main ui
-_EOF_
-
-		# Reset raspo.list to max available distro Stretch, which at least worked on first tests with Buster."
-		(( $DISTRO_TARGET > 4 )) && sed -i "s/$DISTRO_TARGET_NAME/stretch/" /etc/apt/sources.list.d/raspi.list
-
-	# - Set debian
-	else
-
-		cat << _EOF_ > /etc/apt/sources.list
-deb https://deb.debian.org/debian/ $DISTRO_TARGET_NAME main contrib non-free
-deb https://deb.debian.org/debian/ $DISTRO_TARGET_NAME-updates main contrib non-free
-deb https://deb.debian.org/debian-security/ $DISTRO_TARGET_NAME/updates main contrib non-free
-deb https://deb.debian.org/debian/ $DISTRO_TARGET_NAME-backports main contrib non-free
-_EOF_
-
-		#	Jessie, switch deb.debian.org to http: https://github.com/Fourdee/DietPi/issues/1285#issuecomment-351830101
-		if (( $G_DISTRO < 4 )); then
-
-			sed -i 's/https:/http:/g' /etc/apt/sources.list
-
-		#	Buster, remove backports: https://github.com/Fourdee/DietPi/issues/1285#issuecomment-351830101
-		elif (( $DISTRO_TARGET > 4 )); then
-
-			sed -i '/backports/d' /etc/apt/sources.list
-
-		fi
-
-	fi
+	export G_DISTRO=$G_DISTRO_TEMP
+	export G_DISTRO_NAME="$G_DISTRO_NAME_TEMP"
+	unset G_DISTRO_TEMP
+	unset G_DISTRO_NAME_TEMP
 
 	# - Meveric, update repo to use our EU mirror: https://github.com/Fourdee/DietPi/issues/1519#issuecomment-368234302
 	sed -i 's@https://oph.mdrjr.net/meveric@http://fuzon.co.uk/meveric@' /etc/apt/sources.list.d/meveric* &> /dev/null
@@ -1454,7 +1429,7 @@ p
 
 p
 w
-
+p
 _EOF_1
 
 reboot
