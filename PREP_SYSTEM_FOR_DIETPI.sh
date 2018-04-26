@@ -556,6 +556,7 @@
 
 	G_DIETPI-NOTIFY 2 'Installing DietPi-RAMDISK'
 
+	#	NB: Duplicate of set-core_env
 	cat << _EOF_ > /etc/systemd/system/dietpi-ramdisk.service
 [Unit]
 Description=DietPi-RAMdisk
