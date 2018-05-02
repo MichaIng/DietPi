@@ -369,6 +369,7 @@
 		'50' 'BananaPi M2+ (sinovoip)'
 		'71' 'Beagle Bone Black'
 		'39' 'LeMaker Guitar'
+		'67' 'NanoPi K1 Plus'
 		'66' 'NanoPi M1 Plus'
 		'65' 'NanoPi NEO 2'
 		'64' 'NanoPi NEO Air'
