@@ -578,9 +578,9 @@ _EOF_
 
 	G_DIETPI-NOTIFY 2 'Starting DietPi-RAMDISK'
 
-	#DEBUG
-	exit
-	#DEBUG
+	# - Mount tmpfs
+	mkdir -p /DietPi
+	mount -t tmpfs -o size=20m tmpfs /DietPi
 	G_RUN_CMD systemctl start dietpi-ramdisk.service
 
 	#------------------------------------------------------------------------------------------------
