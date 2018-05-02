@@ -578,6 +578,9 @@ _EOF_
 
 	G_DIETPI-NOTIFY 2 'Starting DietPi-RAMDISK'
 
+	#DEBUG
+	exit
+	#DEBUG
 	G_RUN_CMD systemctl start dietpi-ramdisk.service
 
 	#------------------------------------------------------------------------------------------------
