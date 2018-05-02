@@ -1043,7 +1043,7 @@ _EOF_
 
 	G_DIETPI-NOTIFY 2 'Updating DietPi HW_INFO'
 
-	/DietPi/dietpi/dietpi-obtain_hw_model
+	/DietPi/dietpi/func/dietpi-obtain_hw_model
 
 	G_DIETPI-NOTIFY 2 'Configuring Network:'
 
@@ -1225,7 +1225,6 @@ _EOF_
 
 		#	Use performance gov for stability.
 		sed -i '/^[[:blank:]]*CONFIG_CPU_GOVERNOR=/c\CONFIG_CPU_GOVERNOR=performance' /DietPi/dietpi.txt
-		/DietPi/dietpi/dietpi-cpu_set
 
 	# - RPI:
 	elif (( $G_HW_MODEL < 10 )); then
@@ -1339,7 +1338,7 @@ _EOF_
 
 	G_DIETPI-NOTIFY 2 'Setting default CPU gov'
 
-	/DietPi/dietpi/dietpi-cpu_set
+	/DietPi/dietpi/func/dietpi-set_cpu
 
 	G_DIETPI-NOTIFY 2 'Clearing log files'
 
