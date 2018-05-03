@@ -127,7 +127,6 @@
 	fi
 
 	# - load
-	chmod +x dietpi-globals
 	. ./dietpi-globals
 	if (( $? )); then
 
@@ -137,6 +136,7 @@
 	fi
 
 	export G_PROGRAM_NAME='DietPi-PREP'
+	export HIERARCHY=0
 	export G_DISTRO=0 # Export to dietpi-globals
 	export G_DISTRO_NAME='NULL' # Export to dietpi-globals
 	DISTRO_TARGET=0
@@ -171,19 +171,19 @@
 	#G_HW_MODEL # init from dietpi-globals
 	#G_HW_ARCH_DESCRIPTION # init from dietpi-globals
 	G_HW_ARCH_DESCRIPTION="$(uname -m)"
-	if [ "$G_HW_ARCH_DESCRIPTION" = 'armv6l' ]; then
+	if [[ $G_HW_ARCH_DESCRIPTION == armv6l ]]; then
 
 		export G_HW_ARCH=1
 
-	elif [ "$G_HW_ARCH_DESCRIPTION" = 'armv7l' ]; then
+	elif [[ $G_HW_ARCH_DESCRIPTION == armv7l ]]; then
 
 		export G_HW_ARCH=2
 
-	elif [ "$G_HW_ARCH_DESCRIPTION" = 'aarch64' ]; then
+	elif [[ $G_HW_ARCH_DESCRIPTION == aarch64 ]]; then
 
 		export G_HW_ARCH=3
 
-	elif [ "$G_HW_ARCH_DESCRIPTION" = 'x86_64' ]; then
+	elif [[ $G_HW_ARCH_DESCRIPTION == x86_64 ]]; then
 
 		export G_HW_ARCH=10
 
@@ -282,7 +282,7 @@
 	do
 
 		G_WHIP_INPUTBOX 'Please enter your name. This will be used to identify the image creator within credits banner.\n\nYou can add your contanct information as well for end users.\n\nNB: An entry is required.'
-		if (( ! $? )) && [ -n "$G_WHIP_RETURNED_VALUE" ]; then
+		if (( ! $? )) && [[ -n $G_WHIP_RETURNED_VALUE ]]; then
 
 			#Disallowed:
 			DISALLOWED_NAME=0
@@ -302,7 +302,7 @@
 			for (( i=0; i<${#aDISALLOWED_NAMES[@]}; i++))
 			do
 
-				if [[ "$LOWERCASE_TEMP" = *"${aDISALLOWED_NAMES[$i]}"* ]]; then
+				if [[ $LOWERCASE_TEMP == *"${aDISALLOWED_NAMES[$i]}"* ]]; then
 
 					DISALLOWED_NAME=1
 					break
@@ -333,7 +333,7 @@
 	do
 
 		G_WHIP_INPUTBOX 'Please enter the name or URL of the pre-image you installed on this system, prior to running this script. This will be used to identify the pre-image credits.\n\nEG: Debian, Raspbian Lite, Meveric, FriendlyARM, or "forum.odroid.com/viewtopic.php?f=ABC&t=XYZ" etc.\n\nNB: An entry is required.'
-		if (( ! $? )) && [ -n "$G_WHIP_RETURNED_VALUE" ]; then
+		if (( ! $? )) && [[ -n $G_WHIP_RETURNED_VALUE ]]; then
 
 			PREIMAGE_INFO="$G_WHIP_RETURNED_VALUE"
 			break
@@ -394,7 +394,7 @@
 	)
 
 	G_WHIP_MENU 'Please select the current device this is being installed on:\n - NB: Select "Generic device" if not listed.\n - "Core devices": Are fully supported by DietPi, offering full GPU + Kodi support.\n - "Limited support devices": No GPU support, supported limited to DietPi specific issues only (eg: excludes Kernel/GPU/VPU related items).'
-	if (( $? )) || [ -z "$G_WHIP_RETURNED_VALUE" ]; then
+	if (( $? )) || [[ -z $G_WHIP_RETURNED_VALUE ]]; then
 
 		G_DIETPI-NOTIFY 1 'No choices detected. Aborting...'
 		exit 0
@@ -467,7 +467,7 @@
 	#delete []
 	unset DISTRO_LIST_ARRAY
 
-	if [ -z ${G_WHIP_MENU_ARRAY+x} ]; then
+	if [[ -z ${G_WHIP_MENU_ARRAY+x} ]]; then
 
 		G_DIETPI-NOTIFY 1 'Error: No available Distros for this system. Aborting...'
 		exit 1
@@ -475,7 +475,7 @@
 	fi
 
 	G_WHIP_MENU "Please select a distro to install on this system. Selecting a distro that is older than the current installed on system, is not supported.\n\nCurrently installed:\n - $G_DISTRO $G_DISTRO_NAME"
-	if (( $? )) || [ -z "$G_WHIP_RETURNED_VALUE" ]; then
+	if (( $? )) || [[ -z $G_WHIP_RETURNED_VALUE ]]; then
 
 		G_DIETPI-NOTIFY 1 'No choices detected. Aborting...'
 		exit 0
@@ -829,10 +829,10 @@ _EOF_
 	else
 
 		AUTO_DETECT_KERN_PKG=$(dpkg --get-selections | grep '^linux-image' | awk '{print $1}')
-		if [ -n "$AUTO_DETECT_KERN_PKG" ]; then
+		if [[ -n $AUTO_DETECT_KERN_PKG ]]; then
 
 			# - Install kern package if it exists in cache, else, mark manual #: https://github.com/Fourdee/DietPi/issues/1651#issuecomment-376974917
-			if [ -n "$(apt-cache search ^$AUTO_DETECT_KERN_PKG)" ]; then
+			if [[ -n $(apt-cache search ^$AUTO_DETECT_KERN_PKG) ]]; then
 
 				G_AGI $AUTO_DETECT_KERN_PKG
 
@@ -850,7 +850,7 @@ _EOF_
 
 		#ARMbian/others DTB
 		AUTO_DETECT_DTB_PKG=$(dpkg --get-selections | grep '^linux-dtb-' | awk '{print $1}')
-		if [ -n "$AUTO_DETECT_DTB_PKG" ]; then
+		if [[ -n $AUTO_DETECT_DTB_PKG ]]; then
 
 			G_AGI $AUTO_DETECT_DTB_PKG
 
@@ -859,7 +859,7 @@ _EOF_
 		#	Check for existing firmware
 		#	- ARMbian
 		# AUTO_DETECT_FIRMWARE_PKG=$(dpkg --get-selections | grep '^armbian-firmware' | awk '{print $1}')
-		# if [ -n "$AUTO_DETECT_FIRMWARE_PKG" ]; then
+		# if [[ -n $AUTO_DETECT_FIRMWARE_PKG ]]; then
 
 			# G_AGI $AUTO_DETECT_FIRMWARE_PKG
 
@@ -1033,6 +1033,8 @@ _EOF_
 	G_DIETPI-NOTIFY 2 'Generating DietPi /etc/fstab'
 
 	G_RUN_CMD /DietPi/dietpi/dietpi-drive_manager 4
+	# Restart DietPi-RAMdisk, as 'dietpi-drive_manager 4' remounts /DietPi.
+	G_RUN_CMD systemctl restart dietpi-ramdisk
 
 	G_DIETPI-NOTIFY 2 'Deleting all log files /var/log'
 
@@ -1311,7 +1313,7 @@ _EOF_
 	fi
 
 	# - Set Pi cmdline.txt back to normal
-	[ -f /boot/cmdline.txt ] && sed -i 's/ rootdelay=10//g' /boot/cmdline.txt
+	[[ -f /boot/cmdline.txt ]] && sed -i 's/ rootdelay=10//g' /boot/cmdline.txt
 
 	G_DIETPI-NOTIFY 2 'Generating default wpa_supplicant.conf'
 
@@ -1334,7 +1336,8 @@ _EOF_
 
 	/DietPi/dietpi/func/dietpi-set_hardware soundcard none
 	#	Alsa-utils is auto installed to reset soundcard settings on some ARM devices. uninstall it afterwards
-	G_AGP alsa-utils
+	#	- The same for firmware-intel-sound (sound over HDMI?) on intel CPU devices
+	G_AGP alsa-utils firmware-intel-sound
 	G_AGA
 
 	G_DIETPI-NOTIFY 2 'Setting default CPU gov'
@@ -1510,8 +1513,8 @@ _EOF_
 	G_RUN_CMD cp /DietPi/dietpi/.version /var/lib/dietpi/.dietpi_image_version
 
 	# - Native PC/EFI (assume x86_64 only possible)
-	if (( $(dpkg --get-selections | grep -ci -m1 '^grub-efi-amd64[[:space:]]') )) &&
-		[ -d /boot/efi ]; then
+	if dpkg --get-selections | grep -qi '^grub-efi-amd64[[:space:]]' &&
+		[[ -d /boot/efi ]]; then
 
 		G_DIETPI-NOTIFY 2 'Recreating GRUB-EFI'
 
@@ -1532,7 +1535,7 @@ _EOF_
 
 	G_DIETPI-NOTIFY 2 "The used kernel version is: $(uname -r)"
 	kernel_apt_packages="$(dpkg --get-selections | grep '^linux-image-[0-9]')"
-	if [ -n "$kernel_apt_packages" ]; then
+	if [[ -n $kernel_apt_packages ]]; then
 
 		G_DIETPI-NOTIFY 2 'The following kernel APT packages have been found, please purge the outdated ones:'
 		echo "$kernel_apt_packages"
