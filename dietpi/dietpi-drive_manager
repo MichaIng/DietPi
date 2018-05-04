@@ -106,6 +106,23 @@
 		#---------------------------------------------------------------
 		local init=1
 
+		aDRIVE_UUID=()
+		aDRIVE_PART_UUID=()
+		aDRIVE_MOUNT_SOURCE=()
+		aDRIVE_MOUNT_TARGET=()
+		aDRIVE_FSTYPE=()
+		aDRIVE_SIZE_TOTAL=()
+		aDRIVE_SIZE_USED=()
+		aDRIVE_SIZE_PERCENTUSED=()
+		aDRIVE_SIZE_FREE=()
+
+		aDRIVE_ISAVAILABLE=()
+		aDRIVE_ISFILESYSTEM=()
+		aDRIVE_ISMOUNTED=()
+		aDRIVE_ISUUIDMOUNT=()
+		aDRIVE_ISREADONLY_FSTAB=()
+		aDRIVE_ISREADONLY_CURRENTLY=()
+
 		while (( $init ))
 		do
 
@@ -116,17 +133,49 @@
 			#Copy FSTAB to ram, faster exe
 			cp /etc/fstab "$FP_TEMP_FSTAB"
 
+			#Get list of available dev drives
+			local dev_detection_max_partitions=9
+			local dev_detection_max_drives=5
+			local string=''
+			for (( i=0; i<=$dev_detection_max_partitions; i++ ))
+			do
+
+				# - /dev/sdXX
+				for (( j=97; j<$(( 97 + $dev_detection_max_drives )); j++ ))
+				do
+
+					string="/dev/sd$(awk 'BEGIN{printf "%c", '$j'}')$i"
+					if [[ -b $string ]]; then
+
+						aDRIVE_MOUNT_SOURCE+=($string)
+
+					fi
+
+				done
+
+				# - /dev/mmcblkXpX
+				for (( j=0; j<$dev_detection_max_drives; j++ ))
+				do
+
+					string="/dev/mmcblk${j}p${i}"
+					if [[ -b $string ]]; then
+
+						aDRIVE_MOUNT_SOURCE+=($string)
+
+					fi
+
+				done
+
+			done
+
 			#Get list of all attached drives:
-			readarray -t aDRIVE_MOUNT_SOURCE <<< "$(blkid -o device)"
+			for (( i=0; i<${#aDRIVE_MOUNT_SOURCE[@]}; i++ ))
+			do
 
-			#	UUID
-			readarray -t aDRIVE_UUID <<< "$(blkid -s UUID -o value)"
+				aDRIVE_UUID+=($(blkid ${aDRIVE_MOUNT_SOURCE[$i]} -s UUID -o value))
+				aDRIVE_PART_UUID+=($(blkid ${aDRIVE_MOUNT_SOURCE[$i]} -s PARTUUID -o value))
 
-			#	PARTUUID
-			readarray -t aDRIVE_PART_UUID <<< "$(blkid -s PARTUUID -o value)"
-
-			#	TYPE
-			readarray -t aDRIVE_FSTYPE <<< "$(blkid -s TYPE -o value)"
+			done
 
 			# - Check fstab for existing entries and mount locations
 			MAX_DRIVES=${#aDRIVE_MOUNT_SOURCE[@]}
@@ -137,6 +186,7 @@
 				aDRIVE_ISUUIDMOUNT[$i]=0
 				aDRIVE_MOUNT_TARGET[$i]='NULL'
 
+				#Check FStab
 				local drive_mount_target_dev=$(grep -m1 "${aDRIVE_MOUNT_SOURCE[$i]}[[:space:]]" "$FP_TEMP_FSTAB" | awk '{print $2}')
 				local drive_mount_target_uuid=$(grep -m1 "UUID=${aDRIVE_UUID[$i]}[[:space:]]" "$FP_TEMP_FSTAB" | awk '{print $2}')
 				local drive_mount_target_partuuid=$(grep -m1 "PARTUUID=${aDRIVE_PART_UUID[$i]}[[:space:]]" "$FP_TEMP_FSTAB" | awk '{print $2}')
@@ -172,26 +222,20 @@
 				# - Active drive mount does not exist in fstab, create one
 				elif [[ -n ${aDRIVE_UUID[$i]} ]]; then #Ignore master partition tables / drives with no UUID
 
-					aDRIVE_MOUNT_TARGET[$i]="/mnt/${aDRIVE_UUID[$i]}"
+					#	Is drive already mounted? Use existing
+					local findmnt_target=$(findmnt ${aDRIVE_MOUNT_SOURCE[$i]} -o target -n)
+					if [[ -n $findmnt_target ]]; then
 
-					G_DIETPI-NOTIFY 2 "Creating UUID fstab entry: ${aDRIVE_MOUNT_SOURCE[$i]}"
+						aDRIVE_MOUNT_TARGET[$i]=$findmnt_target
 
-					#	Always check for rootFS device and set target manually
-					#	- EG: RPi, rootFS source is reported as /dev/root in df scrapes.
-					if [[ ${aDRIVE_MOUNT_SOURCE[$i]} == $(findmnt / -o source -n) ]]; then
+					# 	Generate new mount location
+					else
 
-						aDRIVE_MOUNT_TARGET[$i]='/'
-
-						G_DIETPI-NOTIFY 2 " - Drive is currently mounted, using existing mount location: ${aDRIVE_MOUNT_TARGET[$i]}"
-
-					#	Check if the drive is already mounted (but not set in fstab) and use existing mount target
-					elif df -P | grep -qi "${aDRIVE_MOUNT_SOURCE[$i]}[[:space:]]"; then
-
-						G_DIETPI-NOTIFY 2 " - Drive is currently mounted, using existing mount location: ${aDRIVE_MOUNT_TARGET[$i]}"
-
-						aDRIVE_MOUNT_TARGET[$i]=$(df -P | grep -m1 "${aDRIVE_MOUNT_SOURCE[$i]}[[:space:]]" | awk '{print $NF}')
+						aDRIVE_MOUNT_TARGET[$i]="/mnt/${aDRIVE_UUID[$i]}"
 
 					fi
+
+					G_DIETPI-NOTIFY 2 "Creating UUID fstab entry: ${aDRIVE_MOUNT_SOURCE[$i]}"
 
 					#	remove any previous/disabled entries for drive
 					sed -i "\@^${aDRIVE_MOUNT_SOURCE[$i]}[[:space:]]@d" "$FP_TEMP_FSTAB"
@@ -259,6 +303,7 @@
 
 			rm "$FP_TEMP_FSTAB"
 
+			sync
 			mount -a
 
 			#---------------------------------------------------------------
@@ -266,7 +311,7 @@
 			G_DIETPI-NOTIFY 2 'Processing drive information, please wait...'
 
 			#ROOTFS location
-			FP_ROOTFS_SOURCE=$(df -P | grep -m1 '[[:space:]]/$' | awk '{print $1}')
+			FP_ROOTFS_SOURCE=$(findmnt / -o source -n)
 
 			#Get data on mounted drives
 			for ((i=0; i<$MAX_DRIVES; i++))
@@ -493,7 +538,7 @@
 
 		#Remove previous fstab entry and mount location
 		rm -R "${aDRIVE_MOUNT_TARGET[$INDEX_DRIVE_BEING_EDITED]}"
-		sed -i "\@${aDRIVE_MOUNT_TARGET[$INDEX_DRIVE_BEING_EDITED]}[[:space:]]@d" /etc/fstab
+		sed -i "\@[[:space:]]${aDRIVE_MOUNT_TARGET[$INDEX_DRIVE_BEING_EDITED]}[[:space:]]@d" /etc/fstab
 
 		FORMAT_COMPLETED=1
 		FORMAT_PREVIOUS_MOUNT_SOURCE=${aDRIVE_MOUNT_SOURCE[$INDEX_DRIVE_BEING_EDITED]}
@@ -514,7 +559,7 @@
 		for ((i=0; i<$MAX_DRIVES; i++))
 		do
 
-			if [ "${aDRIVE_MOUNT_SOURCE[$i]}" = "$FORMAT_PREVIOUS_MOUNT_SOURCE" ]; then
+			if [[ ${aDRIVE_MOUNT_SOURCE[$i]} == $FORMAT_PREVIOUS_MOUNT_SOURCE ]]; then
 
 				INDEX_DRIVE_BEING_EDITED=$i
 				break
@@ -524,15 +569,15 @@
 		done
 
 		#	Remove automatic entry for new uuid
-		sed -i "\@${aDRIVE_MOUNT_TARGET[$INDEX_DRIVE_BEING_EDITED]}[[:space:]]@d" /etc/fstab
+		sed -i "\@[[:space:]]${aDRIVE_MOUNT_TARGET[$INDEX_DRIVE_BEING_EDITED]}[[:space:]]@d" /etc/fstab
 
 		#	Add new rootfs entry
-		sed -i "\@[[:space:]]/[[:space:]]@c UUID=${aDRIVE_UUID[$INDEX_DRIVE_BEING_EDITED]} / auto defaults,noatime 0 1" /etc/fstab
+		sed -i "\@[[:space:]]/[[:space:]]auto@c UUID=${aDRIVE_UUID[$INDEX_DRIVE_BEING_EDITED]} / auto defaults,noatime 0 1" /etc/fstab
 
 		# - install rsync
 		G_AG_CHECK_INSTALL_PREREQ rsync
 
-		rsync -paxv --exclude '/lost+found' / "${aDRIVE_MOUNT_TARGET[$INDEX_DRIVE_BEING_EDITED]}"/
+		rsync -aHv --delete --exclude '/lost+found/' --exclude ${aDRIVE_MOUNT_TARGET[$INDEX_DRIVE_BEING_EDITED]}/ --exclude '/sys/*' --exclude '/proc/*' / "${aDRIVE_MOUNT_TARGET[$INDEX_DRIVE_BEING_EDITED]}"/
 		if (( $? )); then
 
 			G_DIETPI-NOTIFY 1 'Rsync has failed, RootFS transfer has been aborted.'
@@ -1251,8 +1296,6 @@
 
 				fi
 
-
-
 			elif [ "$G_WHIP_RETURNED_VALUE" = 'Format' ]; then
 
 				local drivepath_no_partitions=$(Return_Drive_Without_Partitions ${aDRIVE_MOUNT_SOURCE[$INDEX_DRIVE_BEING_EDITED]})
@@ -1280,8 +1323,6 @@
 			TARGETMENUID=1
 
 		fi
-
-
 
 	}
 
