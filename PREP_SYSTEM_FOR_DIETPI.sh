@@ -817,7 +817,7 @@ _EOF_
 	#	Rock64
 	elif (( $G_HW_MODEL == 43 )); then
 
-		G_AGI linux-rock64-package
+		G_AGI linux-rock64-package gdisk
 
 	#	BBB
 	elif (( $G_HW_MODEL == 71 )); then
@@ -1459,10 +1459,31 @@ _EOF_1
 
 partprobe \$TARGET_DEV
 
-resize2fs \$TARGET_DEV\$TARGET_PARTITION
+resize2fs \${TARGET_DEV}p\$TARGET_PARTITION
 
 _EOF_
 	G_RUN_CMD chmod +x /var/lib/dietpi/fs_partition_resize.sh
+
+	#Rock64 GPT resize
+	# if (( $G_HW_MODEL == 43 )); then
+		# gdisk $TARGET_DEV << _EOF_1
+# x
+# e
+# m
+# d
+# $TARGET_PARTITION
+# n
+# $TARGET_PARTITION
+
+
+# 8300
+# c
+# $TARGET_PARTITION
+# root
+# w
+# Y
+# _EOF_1
+
 
 	# - BBB remove fsexpansion: https://github.com/Fourdee/DietPi/issues/931#issuecomment-345451529
 	if (( $G_HW_MODEL == 71 )); then
