@@ -1444,7 +1444,7 @@ else
 fi
 
 #Rock64 GPT resize | modified version of ayufan-rock64 resize script. I take no credit for this.
-if [[ -f /etc/.dietpi_hw_model_identifier ]] && (( $(/etc/.dietpi_hw_model_identifier) == 43 )); then
+if [[ -f /etc/.dietpi_hw_model_identifier ]] && (( $(cat /etc/.dietpi_hw_model_identifier) == 43 )); then
 
     gdisk \$TARGET_DEV << _EOF_1
 x
