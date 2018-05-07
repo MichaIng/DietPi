@@ -1422,7 +1422,6 @@ _EOF_
 #!/bin/bash
 
 systemctl disable dietpi-fs_partition_resize.service
-systemctl enable dietpi-fs_expand.service
 systemctl daemon-reload
 
 sync
@@ -1455,42 +1454,19 @@ p
 
 p
 w
-p
 
 _EOF_1
 
-reboot
+partprobe \$TARGET_DEV
+
+resize2fs \$TARGET_DEV\$TARGET_PARTITION
 
 _EOF_
 	G_RUN_CMD chmod +x /var/lib/dietpi/fs_partition_resize.sh
 
-	G_DIETPI-NOTIFY 2 'Generating dietpi-fs_partition_expand for subsequent boot'
-
-	cat << _EOF_ > /etc/systemd/system/dietpi-fs_expand.service
-[Unit]
-Description=dietpi-fs_expand
-Before=dietpi-ramdisk.service
-
-[Service]
-Type=oneshot
-RemainAfterExit=no
-ExecStart=/bin/bash -c "resize2fs \$(findmnt / -o source -n) &> /var/tmp/dietpi/logs/fs_expand.log; systemctl disable dietpi-fs_expand.service; systemctl daemon-reload"
-StandardOutput=tty
-
-[Install]
-WantedBy=local-fs.target
-_EOF_
-	systemctl daemon-reload
-
-	# #debug
-	# systemctl start dietpi-fs_partition_resize.service
-	# systemctl status dietpi-fs_partition_resize.service -l
-	# cat /var/tmp/dietpi/logs/fs_partition_resize.log
-
 	# - BBB remove fsexpansion: https://github.com/Fourdee/DietPi/issues/931#issuecomment-345451529
 	if (( $G_HW_MODEL == 71 )); then
 
-		rm /etc/systemd/system/dietpi-fs_expand.service
 		rm /var/lib/dietpi/fs_partition_resize.sh
 		rm /etc/systemd/system/dietpi-fs_partition_resize.service
 		systemctl daemon-reload
