@@ -1107,10 +1107,9 @@ _EOF_
 	# - allow times in the past
 	sed -i '/FORCE=/c\FORCE=force' /etc/default/fake-hwclock
 
-	G_DIETPI-NOTIFY 2 'Configuring serial consoles:'
+	G_DIETPI-NOTIFY 2 'Configuring serial console:'
 
-	# - Disable serial console
-	/DietPi/dietpi/func/dietpi-set_hardware serialconsole disable
+	/DietPi/dietpi/func/dietpi-set_hardware serialconsole enable
 
 	G_DIETPI-NOTIFY 2 'Reducing getty count and resource usage:'
 

@@ -44,7 +44,7 @@
 					sed -i '/sdram_freq=/c\#sdram_freq=400' /DietPi/config.txt
 
 					#Zero
-					if (( $(sed -n 2p /DietPi/dietpi/.hw_model | tr '[:upper:]' '[:lower:]' | grep -ci -m1 'rpi zero') )); then
+					if [[ $G_HW_MODEL_DESCRIPTION == *'Zero'* ]]; then
 
 						sed -i '/over_voltage=/c\#over_voltage=0' /DietPi/config.txt
 						sed -i '/arm_freq=/c\#arm_freq=1000' /DietPi/config.txt
@@ -70,7 +70,7 @@
 
 					local arm_freq=1200
 					local sdram_freq=450
-					if grep -qi 'RPi 3 Model B+' /DietPi/dietpi/.hw_model; then
+					if [[ $G_HW_MODEL_DESCRIPTION == *'RPi 3 Model B+'* ]]; then
 
 						arm_freq=1400
 						sdram_freq=500
@@ -91,24 +91,67 @@
 	Apply_DietPi_FirstRun_Settings(){
 
 		#----------------------------------------------------------------
-		# Network
+		#Automation
+		# - Set hostname
+		/DietPi/dietpi/func/change_hostname "$(grep -m1 '^[[:blank:]]*AUTO_SETUP_NET_HOSTNAME=' /DietPi/dietpi.txt | sed 's/^.*=//')"
+
+		# - Set auto login for next bootup
+		if grep -qi '^[[:blank:]]*AUTO_SETUP_AUTOMATED=1' /DietPi/dietpi.txt; then
+
+			/DietPi/dietpi/dietpi-autostart 7
+
+		fi
+
+		# - Disable serial console?
+		if grep -qi '^[[:blank:]]*CONFIG_SERIAL_CONSOLE_ENABLE=0' /DietPi/dietpi.txt; then
+
+			/DietPi/dietpi/func/dietpi-set_hardware serialconsole disable
+
+		fi
+
+		# - Set root password?
+		local root_password="$(grep -m1 '^[[:blank:]]*AUTO_SETUP_GLOBAL_PASSWORD=' /DietPi/dietpi.txt | sed 's/^.*=//')"
+		if [ -n "$root_password" ]; then
+
+			chpasswd <<< "root:$root_password"
+			chpasswd <<< "dietpi:$root_password"
+
+		fi
+
+		# - Set apt mirror
+		local target_repo='CONFIG_APT_DEBIAN_MIRROR'
+		if (( $G_HW_MODEL < 10 )); then
+
+			target_repo='CONFIG_APT_RASPBIAN_MIRROR'
+
+		fi
+
+		/DietPi/dietpi/func/dietpi-set_software apt-mirror "$(grep -m1 "^[[:blank:]]*$target_repo=" /DietPi/dietpi.txt | sed 's/^.*=//')"
+
+		# - Generate unique Dropbear host-key:
+		rm /etc/dropbear/*key &> /dev/null
+		dropbearkey -t rsa -f /etc/dropbear/dropbear_rsa_host_key &> /dev/null
+		dropbearkey -t ecdsa -f /etc/dropbear/dropbear_ecdsa_host_key &> /dev/null
+		dropbearkey -t dss -f /etc/dropbear/dropbear_dss_host_key &> /dev/null
+
+		# - Network
 		local index_eth=$(sed -n 1p /DietPi/dietpi/.network)
 		local index_wlan=$(sed -n 2p /DietPi/dietpi/.network)
 
 		systemctl stop networking.service
 
-		#Kill dhclient
+		#	Kill dhclient
 		killall -w dhclient &> /dev/null
 
-		#Drop Connections
+		#	Drop Connections
 		ifdown eth"$index_eth" &> /dev/null
 		ifdown wlan"$index_wlan" &> /dev/null
 
-		#Replace all eth0 and wlan0 values to the indexs DietPi has found.
+		#	Replace all eth0 and wlan0 values to the indexs DietPi has found.
 		sed -i "s/eth0/eth$index_eth/g" /etc/network/interfaces
 		sed -i "s/wlan0/wlan$index_wlan/g" /etc/network/interfaces
 
-		#Grab user requested settings from /dietpi.txt
+		#	Grab user requested settings from /dietpi.txt
 		local Ethernet_Enabled=$(grep -ci -m1 '^[[:blank:]]*AUTO_SETUP_NET_ETHERNET_ENABLED=1' /DietPi/dietpi.txt)
 		local Wifi_Enabled=$(grep -ci -m1 '^[[:blank:]]*AUTO_SETUP_NET_WIFI_ENABLED=1' /DietPi/dietpi.txt)
 
@@ -118,7 +161,7 @@
 		local Static_Gateway="$(grep -m1 '^[[:blank:]]*AUTO_SETUP_NET_STATIC_GATEWAY=' /DietPi/dietpi.txt | sed 's/^.*=//')"
 		local Static_Dns="$(grep -m1 '^[[:blank:]]*AUTO_SETUP_NET_STATIC_DNS=' /DietPi/dietpi.txt | sed 's/^.*=//')"
 
-		# - Wifi
+		#	Wifi
 		if (( $Wifi_Enabled )); then
 
 			#Enable Wlan, disable Eth
@@ -130,7 +173,7 @@
 			/DietPi/dietpi/func/dietpi-set_hardware wificreds set
 			/DietPi/dietpi/func/dietpi-set_hardware wifimodules enable
 
-		# - Ethernet
+		#	Ethernet
 		elif (( $Ethernet_Enabled )); then
 
 			#Enable Eth, disable Wlan
@@ -140,7 +183,7 @@
 
 		fi
 
-		# - Static IPs
+		#	Static IPs
 		if (( $Use_Static )); then
 
 			#enable dns-nameservers
@@ -163,14 +206,14 @@
 
 		fi
 
-		#Kill dhclient, again: https://github.com/Fourdee/DietPi/issues/660
+		#	Kill dhclient, again: https://github.com/Fourdee/DietPi/issues/660
 		killall -w dhclient
 
-		#Restart Networking
+		#	Restart Networking
 		systemctl daemon-reload
 		#systemctl restart networking #: Does exactly the same as ifdown/up that we already do.
 
-		#Manually bring up adapters
+		#	Manually bring up adapters
 		if (( $Wifi_Enabled )); then
 
 			ifup wlan"$index_wlan"
@@ -181,11 +224,14 @@
 
 		fi
 
-		#Apply forced eth speed if set in dietpi.txt
+		# - Apply forced eth speed if set in dietpi.txt
 		/DietPi/dietpi/func/dietpi-set_hardware eth-forcespeed $(grep -m1 '^[[:blank:]]*AUTO_SETUP_NET_ETH_FORCE_SPEED=' /DietPi/dietpi.txt | sed 's/^.*=//' )
 
-		#Wait for active connection, then update network details file
+		# - Wait for active connection, then update network details file
 		Wait_For_Valid_Network_Connection
+
+		# - Set NTPD
+		/DietPi/dietpi/func/dietpi-set_software ntpd-mode $(grep -m1 '^[[:blank:]]*CONFIG_NTP_MODE=' /DietPi/dietpi.txt | sed 's/^.*=//')
 
 	}
 
@@ -330,56 +376,10 @@
 
 		/DietPi/dietpi/dietpi-banner 0
 
-		#Set hostname
-		/DietPi/dietpi/func/change_hostname "$(grep -m1 '^[[:blank:]]*AUTO_SETUP_NET_HOSTNAME=' /DietPi/dietpi.txt | sed 's/^.*=//')"
-
-		#Automation
-		# - Set auto login for next bootup
-		if (( $(grep -m1 '^[[:blank:]]*AUTO_SETUP_AUTOMATED=' /DietPi/dietpi.txt | sed 's/^.*=//') >= 1 )); then
-
-			/DietPi/dietpi/dietpi-autostart 7
-
-		fi
-
-		# - Enable serial console?
-		if grep -qi '^[[:blank:]]*CONFIG_SERIAL_CONSOLE_ENABLE=1' /DietPi/dietpi.txt; then
-
-			/DietPi/dietpi/func/dietpi-set_hardware serialconsole enable
-
-		fi
-
-		# - Set root password?
-		ROOT_PASSWORD="$(grep -m1 '^[[:blank:]]*AUTO_SETUP_GLOBAL_PASSWORD=' /DietPi/dietpi.txt | sed 's/^.*=//')"
-		if [ -n "$ROOT_PASSWORD" ]; then
-
-			chpasswd <<< "root:$ROOT_PASSWORD"
-			chpasswd <<< "dietpi:$ROOT_PASSWORD"
-
-		fi
-
-		# - Set apt mirror
-		TARGET_REPO='CONFIG_APT_DEBIAN_MIRROR'
-		if (( $G_HW_MODEL < 10 )); then
-
-			TARGET_REPO='CONFIG_APT_RASPBIAN_MIRROR'
-
-		fi
-
-		/DietPi/dietpi/func/dietpi-set_software apt-mirror "$(grep -m1 "^[[:blank:]]*$TARGET_REPO=" /DietPi/dietpi.txt | sed 's/^.*=//')"
-
-		#Generate unique Dropbear host-key:
-		rm /etc/dropbear/*key &> /dev/null
-		dropbearkey -t rsa -f /etc/dropbear/dropbear_rsa_host_key &> /dev/null
-		dropbearkey -t ecdsa -f /etc/dropbear/dropbear_ecdsa_host_key &> /dev/null
-		dropbearkey -t dss -f /etc/dropbear/dropbear_dss_host_key &> /dev/null
-
 		#Activate DietPi Boot Loader User Settings and bring up network (dietpi.txt)
 		Apply_DietPi_FirstRun_Settings
 
 		Workaround_WiFi
-
-		# - Set NTPD
-		/DietPi/dietpi/func/dietpi-set_software ntpd-mode $(grep -m1 '^[[:blank:]]*CONFIG_NTP_MODE=' /DietPi/dietpi.txt | sed 's/^.*=//')
 
 		#Finished
 		/DietPi/dietpi/dietpi-banner 0
