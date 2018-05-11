@@ -1110,6 +1110,8 @@ _EOF_
 	G_DIETPI-NOTIFY 2 'Configuring serial console:'
 
 	/DietPi/dietpi/func/dietpi-set_hardware serialconsole enable
+	# - Disable for post-1st run setup:
+	sed -i '/^CONFIG_SERIAL_CONSOLE_ENABLE=/c\CONFIG_SERIAL_CONSOLE_ENABLE=0' /DietPi/dietpi.txt
 
 	G_DIETPI-NOTIFY 2 'Reducing getty count and resource usage:'
 
