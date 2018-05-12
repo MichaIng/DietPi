@@ -953,11 +953,11 @@ _EOF_
 	G_DIETPI-NOTIFY 2 'Deleting list of known users, not required by DietPi'
 
 	userdel -f pi &> /dev/null
-	userdel -f test &> /dev/null #armbian
+	userdel -f test &> /dev/null #@fourdee
 	userdel -f odroid &> /dev/null
 	userdel -f rock64 &> /dev/null
 	userdel -f linaro &> /dev/null #ASUS TB
-	userdel -f dietpi &> /dev/null
+	userdel -f dietpi &> /dev/null #recreated below
 	userdel -f debian &> /dev/null #BBB
 
 	G_DIETPI-NOTIFY 2 'Removing misc files/folders/services, not required by DietPi'
