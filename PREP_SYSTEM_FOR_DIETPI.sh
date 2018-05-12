@@ -544,6 +544,7 @@
 
 	fi
 	rm DietPi-*/*.ini
+	(( $G_HW_MODEL > 9 )) && rm DietPi-*/config.txt 
 
 	G_RUN_CMD cp -R DietPi-*/* /boot/
 
