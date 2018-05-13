@@ -21,31 +21,29 @@
 	. /DietPi/dietpi/func/dietpi-globals
 	G_CHECK_ROOT_USER
 	G_CHECK_ROOTFS_RW
-	export G_PROGRAM_NAME='DietPi-Letsencrypt'
+	export G_PROGRAM_NAME='DietPi-LetsEncrypt'
 	G_INIT
 	#Import DietPi-Globals ---------------------------------------------------------------
 
 	#Grab Input
 	INPUT=0
-	if (( $(G_CHECK_VALIDINT $1) )); then
+	G_CHECK_VALIDINT $1 && INPUT=$1
 
-		INPUT=$1
-
-	fi
-	
 	#/////////////////////////////////////////////////////////////////////////////////////
 	#Globals
 	#/////////////////////////////////////////////////////////////////////////////////////
-	DP_LOGFILE='/var/log/dietpi-letsencrypt.log'
+	FP_LOGFILE='/var/log/dietpi-letsencrypt.log'
 
-	DP_CRON='/etc/systemd/system/certbot.service.d'
-	(( $G_DISTRO < 4 )) && DP_CRON='/etc/cron.weekly/dietpi-letsencrypt'
+	# On Stretch+ the APT package installs a systemd unit for cert renewal,
+	# on Jessie-, we install the CertBot from github directly and add a cron job for renewal:
+	FP_RENEWAL='/etc/systemd/system/certbot.service.d'
+	(( $G_DISTRO < 4 )) && FP_RENEWAL='/etc/cron.weekly/dietpi-letsencrypt'
 
-	DP_LETSENCRYPT_BINARY='/usr/bin/certbot'
-	(( $G_DISTRO < 4 )) && DP_LETSENCRYPT_BINARY='/etc/certbot_scripts/certbot-auto'
+	FP_BINARY='/usr/bin/certbot'
+	(( $G_DISTRO < 4 )) && FP_BINARY='/etc/certbot_scripts/certbot-auto'
 
 	LETSENCRYPT_INSTALLED=0
-	[ -f "$DP_LETSENCRYPT_BINARY" ] && LETSENCRYPT_INSTALLED=1
+	[[ -f $FP_BINARY ]] && LETSENCRYPT_INSTALLED=1
 
 	LETSENCRYPT_DOMAIN='mydomain.com'
 	LETSENCRYPT_EMAIL='myemail@email.com'
@@ -55,65 +53,22 @@
 
 	Run_Lets_Encrypt(){
 
-		G_DIETPI-NOTIFY 3 "$G_PROGRAM_NAME" "Running CertBot"
+		G_DIETPI-NOTIFY 3 "$G_PROGRAM_NAME" 'Running CertBot'
+
+		local fp_cert_dir="/etc/letsencrypt/live/$LETSENCRYPT_DOMAIN"
 
 		#------------------------------------------------------------------------------------------------------
-		#ALL | Create cron job for cert renewal on Jessie only, as on Stretch+ it will be done via systemd service:
-		if (( $G_DISTRO < 4 )); then
-
-			cat << _EOF_ > "$DP_CRON"
-#!/bin/bash
-{
-	#////////////////////////////////////
-	# DietPi-LetsEncrypt Autorenew script
-	#
-	#////////////////////////////////////
-	#
-	# Info:
-	# - Location $DP_CRON
-	#
-	#////////////////////////////////////
-
-	#----------------------------------------------------------------
-	# Main Loop
-	#----------------------------------------------------------------
-
-	/etc/certbot_scripts/certbot-auto -q renew &>> $DP_LOGFILE
-	[ -f /home/minio-user/.minio/dietpi-cert-renewl.sh ] && /home/minio-user/.minio/dietpi-cert-renewl.sh &>> $DP_LOGFILE
-	[ -f /etc/letsencrypt/live/$LETSENCRYPT_DOMAIN/combined.pem ] &&
-	cat /etc/letsencrypt/live/$LETSENCRYPT_DOMAIN/privkey.pem /etc/letsencrypt/live/$LETSENCRYPT_DOMAIN/cert.pem > /etc/letsencrypt/live/$LETSENCRYPT_DOMAIN/combined.pem
-
-	#----------------------------------------------------------------
-	exit
-	#----------------------------------------------------------------
-}
-_EOF_
-			chmod +x "$DP_CRON"
-
-		fi
-
-		#------------------------------------------------------------------------------------------------------
-		#apache2
-		if (( $(ps aux | grep -ci -m1 '[a]pache') )); then
+		#Apache2
+		if pgrep '[a]pache' &> /dev/null; then
 
 			G_DIETPI-NOTIFY 0 'Apache2 webserver detected'
-			local dp_defaultsite='/etc/apache2/sites-available/000-default.conf'
+			local fp_defaultsite='/etc/apache2/sites-available/000-default.conf'
 
-			#Add ServerName if it doesnt exist. This is required to prevent letsencrypt compaining about vhost with no domain.
-			if (( ! $(cat "$dp_defaultsite" | grep -ci -m1 'ServerName') )); then
+			#Add ServerName if it doesnt exist. This is required to prevent CertBot compaining about vhost with no domain.
+			G_CONFIG_INJECT 'ServerName[[:blank:]]' "ServerName $LETSENCRYPT_DOMAIN" "$fp_defaultsite" '<VirtualHost'
 
-				sed -i "/ServerAdmin /a ServerName" "$dp_defaultsite"
-
-				#log
-				echo -e "ServerName entry not found in $dp_defaultsite. Adding it now." >> "$DP_LOGFILE"
-
-			fi
-
-			#Apply domain name
-			sed -i "/ServerName/c\        ServerName $LETSENCRYPT_DOMAIN" "$dp_defaultsite"
-
-			#Restart apache2 to apply ServerName changes.
-			systemctl restart apache2
+			#Restart Apache2 to apply ServerName changes.
+			G_RUN_CMD systemctl restart apache2
 
 			local options='--apache'
 			#Use webroot authentication on Stretch+ for now: https://github.com/Fourdee/DietPi/issues/734#issuecomment-361774084
@@ -122,48 +77,91 @@ _EOF_
 			(( $LETSENCRYPT_HSTS )) && options+=' --hsts'
 
 			#Cert me up Apache2
-			$DP_LETSENCRYPT_BINARY $options --agree-tos --rsa-key-size "$LETSENCRYPT_KEYSIZE" -m "$LETSENCRYPT_EMAIL" -d "$LETSENCRYPT_DOMAIN"
+			$FP_BINARY $options --agree-tos --rsa-key-size "$LETSENCRYPT_KEYSIZE" -m "$LETSENCRYPT_EMAIL" -d "$LETSENCRYPT_DOMAIN"
+			local exit_code=$?
+			if (( $exit_code )); then
+
+				echo -e "[FAILED] CertBot failed with error code ($exit_code), please check it's terminal output. Aborting..." | tee "$FP_LOGFILE"
+				(( ! $INPUT )) && G_WHIP_MSG "[FAILURE] CertBot failed with error code ($exit_code), please check it's terminal output. Aborting..."
+				return 1
+
+			fi
 
 		#------------------------------------------------------------------------------------------------------
 		#Lighttpd
-		elif (( $(ps aux | grep -ci -m1 '[l]ighttpd') )); then
+		elif pgrep '[l]ighttpd' &> /dev/null; then
 
 			G_DIETPI-NOTIFY 0 'Lighttpd webserver detected'
+
 			# - Cert me up
 			/DietPi/dietpi/dietpi-services stop
+			$FP_BINARY certonly --standalone --agree-tos --rsa-key-size "$LETSENCRYPT_KEYSIZE" -m "$LETSENCRYPT_EMAIL" -d "$LETSENCRYPT_DOMAIN"
+			local exit_code=$?
+			if (( $exit_code )); then
 
-			$DP_LETSENCRYPT_BINARY certonly --standalone --agree-tos --rsa-key-size "$LETSENCRYPT_KEYSIZE" -m "$LETSENCRYPT_EMAIL" -d "$LETSENCRYPT_DOMAIN"
+				echo -e "[FAILED] CertBot failed with error code ($exit_code), please check it's terminal output. Aborting..." | tee "$FP_LOGFILE"
+				(( ! $INPUT )) && G_WHIP_MSG "[FAILURE] CertBot failed with error code ($exit_code), please check it's terminal output. Aborting..."
+				return 1
+
+			fi
 
 			# - Create combined key
-			cd /etc/letsencrypt/live/"$LETSENCRYPT_DOMAIN"
-			cat privkey.pem cert.pem > combined.pem
+			cat "$fp_cert_dir/privkey.pem" "$fp_cert_dir/cert.pem" > "$fp_cert_dir/combined.pem"
+			if [[ ! -f $fp_cert_dir/combined.pem ]]; then
+
+				echo -e "[FAILED] $fp_cert_dir/combined.pem could not be created. Please check existence of privkey.pem and cert.pem within this folder, as result of CertBot execution. Aborting..." | tee "$FP_LOGFILE"
+				(( ! $INPUT )) && G_WHIP_MSG "[FAILED] $fp_cert_dir/combined.pem could not be created. Please check existence of privkey.pem and cert.pem within this folder, as result of CertBot execution. Aborting..."
+				return 1
+
+			fi
 
 			# Add Lighttpd renewal to certbot system service:
 			if (( $G_DISTRO > 3 )); then
 
-				[ -d "$DP_CRON" ] || mkdir "$DP_CRON"
-				cat << _EOF_ > "$DP_CRON"/dietpi-lighttpd.conf
+				[[ -d $FP_RENEWAL ]] || mkdir "$FP_RENEWAL"
+				cat << _EOF_ > "$FP_RENEWAL"/dietpi-lighttpd.conf
 [Service]
-ExecStartPost=/bin/bash -c '/bin/cat /etc/letsencrypt/live/$LETSENCRYPT_DOMAIN/privkey.pem /etc/letsencrypt/live/$LETSENCRYPT_DOMAIN/cert.pem > /etc/letsencrypt/live/$LETSENCRYPT_DOMAIN/combined.pem'
+ExecStartPost=/bin/bash -c '/bin/cat $fp_cert_dir/privkey.pem $fp_cert_dir/cert.pem > $fp_cert_dir/combined.pem'
 _EOF_
 
 			fi
 
+			# Allow adding environment variables via: setenv.add-environment
+			G_CONFIG_INJECT '"mod_setenv"' '	"mod_setenv",' /etc/lighttpd/lighttpd.conf '"mod_.+",'
+
 			cat << _EOF_ > /etc/lighttpd/conf-enabled/letsencrypt.conf
+# Based on: https://mozilla.github.io/server-side-tls/ssl-config-generator/?server=lighttpd-1.4.35&openssl=1.0.1t&hsts=yes&profile=intermediate
 \$SERVER["socket"] == ":443" {
-		ssl.engine = "enable"
-		ssl.pemfile = "/etc/letsencrypt/live/$LETSENCRYPT_DOMAIN/combined.pem"
-		ssl.ca-file =  "/etc/letsencrypt/live/$LETSENCRYPT_DOMAIN/fullchain.pem"
-		#ssl.cipher-list = "ECDHE-RSA-AES256-SHA384:AES256-SHA256:HIGH:!MD5:!aNULL:!EDH:!AESGCM"
-		ssl.cipher-list = "ECDH+AESGCM:DH+AESGCM:ECDH+AES256:DH+AES256:ECDH+AES128:DH+AES:RSA+AESGCM:RSA+AES:!aNULL:!MD5:!DSS"
-		ssl.honor-cipher-order = "enable"
-		ssl.use-sslv2 = "disable"
-		ssl.use-sslv3 = "disable"
+	protocol     = "https://"
+	ssl.engine   = "enable"
+	ssl.disable-client-renegotiation = "enable"
+
+	# pemfile is cert+privkey, ca-file is the intermediate chain in one file
+	ssl.pemfile               = "$fp_cert_dir/combined.pem"
+	ssl.ca-file               = "$fp_cert_dir/fullchain.pem"
+
+	# for DH/DHE ciphers, dhparam should be >= 2048-bit
+	#ssl.dh-file               = "/path/to/dhparam.pem"
+	# ECDH/ECDHE ciphers curve strength (see 'openssl ecparam -list_curves')
+	ssl.ec-curve              = "secp384r1"
+	# Compression is by default off at compile-time, but use if needed
+	# ssl.use-compression     = "disable"
+
+	# Environment flag for HTTPS enabled
+	setenv.add-environment = (
+		"HTTPS" => "on"
+	)
+
+	# intermediate configuration, tweak to your needs
+	ssl.use-sslv2 = "disable"
+	ssl.use-sslv3 = "disable"
+	ssl.honor-cipher-order    = "enable"
+	ssl.cipher-list           = "ECDHE-ECDSA-CHACHA20-POLY1305:ECDHE-RSA-CHACHA20-POLY1305:ECDHE-ECDSA-AES128-GCM-SHA256:ECDHE-RSA-AES128-GCM-SHA256:ECDHE-ECDSA-AES256-GCM-SHA384:ECDHE-RSA-AES256-GCM-SHA384:DHE-RSA-AES128-GCM-SHA256:DHE-RSA-AES256-GCM-SHA384:ECDHE-ECDSA-AES128-SHA256:ECDHE-RSA-AES128-SHA256:ECDHE-ECDSA-AES128-SHA:ECDHE-RSA-AES256-SHA384:ECDHE-RSA-AES128-SHA:ECDHE-ECDSA-AES256-SHA384:ECDHE-ECDSA-AES256-SHA:ECDHE-RSA-AES256-SHA:DHE-RSA-AES128-SHA256:DHE-RSA-AES128-SHA:DHE-RSA-AES256-SHA256:DHE-RSA-AES256-SHA:ECDHE-ECDSA-DES-CBC3-SHA:ECDHE-RSA-DES-CBC3-SHA:EDH-RSA-DES-CBC3-SHA:AES128-GCM-SHA256:AES256-GCM-SHA384:AES128-SHA256:AES256-SHA256:AES128-SHA:AES256-SHA:DES-CBC3-SHA:!DSS"
 }
 _EOF_
 
 			# Redirect
-			rm /etc/lighttpd/conf-enabled/redirect.conf
+			rm /etc/lighttpd/conf-enabled/redirect.conf &> /dev/null
 			if (( $LETSENCRYPT_REDIRECT )); then
 
 				cat << _EOF_ > /etc/lighttpd/conf-enabled/redirect.conf
@@ -181,7 +179,6 @@ _EOF_
 			# HSTS
 			if (( $LETSENCRYPT_HSTS )); then
 
-				G_CONFIG_INJECT '"mod_setenv"' '\t"mod_setenv",' /etc/lighttpd/lighttpd.conf 'server.modules = ('
 				cat << _EOF_ > /etc/lighttpd/conf-available/99-dietpi-hsts.conf
 \$HTTP["scheme"] == "https" {
 	setenv.add-response-header = ( "Strict-Transport-Security" => "max-age=31536000; includeSubdomains; preload;" )
@@ -189,22 +186,23 @@ _EOF_
 _EOF_
 				lighttpd-enable-mod dietpi-hsts
 
+			else
+
+				lighttpd-disable-mod dietpi-hsts
+
 			fi
-
-			/etc/init.d/lighttpd force-reload
-
 
 		#------------------------------------------------------------------------------------------------------
 		# Nginx
-		elif (( $(ps aux | grep -ci -m1 '[n]ginx') )); then
+		elif pgrep '[n]ginx' &> /dev/null; then
 
 			G_DIETPI-NOTIFY 0 'Nginx webserver detected'
-			local nginx_defaultsite='/etc/nginx/sites-available/default'
+			local fp_defaultsite='/etc/nginx/sites-available/default'
 
 			# Apply domain name
-			sed -i "/server_name/c\        server_name $LETSENCRYPT_DOMAIN;" "$nginx_defaultsite"
+			G_CONFIG_INJECT 'server_name[[:blank:]]' "	server_name $LETSENCRYPT_DOMAIN;" "$fp_defaultsite" 'listen[[:blank:]]'
 
-			#Restart nginx to apply ServerName changes.
+			#Restart Nginx to apply server_name change:
 			systemctl restart nginx
 
 			local options='--nginx'
@@ -214,29 +212,44 @@ _EOF_
 			(( $LETSENCRYPT_HSTS )) && options+=' --hsts'
 
 			#Cert me up Nginx
-			$DP_LETSENCRYPT_BINARY $options --agree-tos --rsa-key-size "$LETSENCRYPT_KEYSIZE" -m "$LETSENCRYPT_EMAIL" -d "$LETSENCRYPT_DOMAIN"
+			$FP_BINARY $options --agree-tos --rsa-key-size "$LETSENCRYPT_KEYSIZE" -m "$LETSENCRYPT_EMAIL" -d "$LETSENCRYPT_DOMAIN"
+			local exit_code=$?
+			if (( $exit_code )); then
 
+				echo -e "[FAILURE] CertBot failed with error code ($exit_code), please check it's terminal output. Aborting..." | tee "$FP_LOGFILE"
+				(( ! $INPUT )) && G_WHIP_MSG "[FAILURE] CertBot failed with error code ($exit_code), please check it's terminal output. Aborting..."
+				return 1
+
+			fi
 
 		#------------------------------------------------------------------------------------------------------
 		#Minio
-		elif (( $(ps aux | grep -ci -m1 '[m]inio') )); then
+		elif pgrep '[m]inio' &> /dev/null; then
 
 			G_DIETPI-NOTIFY 0 'Minio S3 server detected'
+
 			# - Cert me up
 			/DietPi/dietpi/dietpi-services stop
+			$FP_BINARY certonly --standalone --staple-ocsp --agree-tos --rsa-key-size "$LETSENCRYPT_KEYSIZE" -m "$LETSENCRYPT_EMAIL" -d "$LETSENCRYPT_DOMAIN"
+			local exit_code=$?
+			if (( $exit_code )); then
 
-			$DP_LETSENCRYPT_BINARY certonly --standalone --staple-ocsp --agree-tos --rsa-key-size "$LETSENCRYPT_KEYSIZE" -m "$LETSENCRYPT_EMAIL" -d "$LETSENCRYPT_DOMAIN"
+				echo -e "[FAILURE] CertBot failed with error code ($exit_code), please check it's terminal output. Aborting..." | tee "$FP_LOGFILE"
+				(( ! $INPUT )) && G_WHIP_MSG "[FAILURE] CertBot failed with error code ($exit_code), please check it's terminal output. Aborting..."
+				return 1
+
+			fi
 
 			# Ensure strict permissions while copying:
 			umask 077
 
 			# Locate them correctly (THIS didn't work as symlinks)
-			cp /etc/letsencrypt/live/$LETSENCRYPT_DOMAIN/fullchain.pem /home/minio-user/.minio/certs/public.crt
-			cp /etc/letsencrypt/live/$LETSENCRYPT_DOMAIN/privkey.pem /home/minio-user/.minio/certs/private.key
+			G_RUN_CMD cp "$fp_cert_dir"/fullchain.pem /home/minio-user/.minio/certs/public.crt
+			G_RUN_CMD cp "$fp_cert_dir"/privkey.pem /home/minio-user/.minio/certs/private.key
 
 			# Own those certs!
-			chown minio-user:minio-user /home/minio-user/.minio/certs/public.crt /home/minio-user/.minio/certs/private.key
-			chmod 400 /home/minio-user/.minio/certs/public.crt /home/minio-user/.minio/certs/private.key
+			G_RUN_CMD chown minio-user:minio-user /home/minio-user/.minio/certs/public.crt /home/minio-user/.minio/certs/private.key
+			G_RUN_CMD chmod 400 /home/minio-user/.minio/certs/public.crt /home/minio-user/.minio/certs/private.key
 
 			# Creation permissions back to default:
 			umask 022
@@ -247,88 +260,121 @@ _EOF_
 			# Allow SSL binding for non root user
 			# - Install libcap2-bin, which provides setcap command, not installed by default on DietPi:
 			G_AGI libcap2-bin
-			setcap CAP_NET_BIND_SERVICE=+eip /usr/local/bin/minio
+			G_RUN_CMD setcap CAP_NET_BIND_SERVICE=+eip /usr/local/bin/minio
 
 			# Create renewl script
 			cat << _EOF_ > /home/minio-user/.minio/dietpi-cert-renewl.sh
 #!/bin/bash
 # Minio only works with copied and owned certs. Upon renewal the new certs needs to be copied and re-owned
-systemctl stop minio.service
+systemctl stop minio
 
 # Ensure strict permissions while copying:
 umask 077
 
 # Copy to correct Location
-cp /etc/letsencrypt/live/$LETSENCRYPT_DOMAIN/fullchain.pem /home/minio-user/.minio/certs/public.crt
-cp /etc/letsencrypt/live/$LETSENCRYPT_DOMAIN/privkey.pem /home/minio-user/.minio/certs/private.key
+cp $fp_cert_dir/fullchain.pem /home/minio-user/.minio/certs/public.crt
+cp $fp_cert_dir/privkey.pem /home/minio-user/.minio/certs/private.key
 
 # Re-Own those certs!
 chown minio-user:minio-user /home/minio-user/.minio/certs/public.crt /home/minio-user/.minio/certs/private.key
 chmod 400 /home/minio-user/.minio/certs/public.crt /home/minio-user/.minio/certs/private.key
 
-systemctl start minio.service
+systemctl start minio
 _EOF_
 
 			# Change permissions on renewal script
-			chmod +x /home/minio-user/.minio/dietpi-cert-renewl.sh
+			G_RUN_CMD chmod +x /home/minio-user/.minio/dietpi-cert-renewl.sh
 
 			# Add Minio renewal to certbot system service:
 			if (( $G_DISTRO > 3 )); then
 
-				[ -d "$DP_CRON" ] || mkdir "$DP_CRON"
-				cat << _EOF_ > "$DP_CRON"/dietpi-minio.conf
+				[[ -d $FP_RENEWAL ]] || mkdir "$FP_RENEWAL"
+				cat << _EOF_ > "$FP_RENEWAL"/dietpi-minio.conf
 [Service]
-ExecStartPost=/home/minio-user/.minio/dietpi-cert-renewl.sh &>> $DP_LOGFILE
+ExecStartPost=/home/minio-user/.minio/dietpi-cert-renewl.sh &>> $FP_LOGFILE
 _EOF_
 
 			fi
 
+			echo -e '[ INFO ] HTTPS redirect and HSTS is not supported for Minio, thus will be ignored.' | tee "$FP_LOGFILE"		
+
 		else
 
-			echo -e "Error: No compatible and/or active webserver was found. Aborting." >> "$DP_LOGFILE"
-			if (( $INPUT == 0 )); then
+			echo -e '[FAILURE] No compatible and/or active webserver was found. Aborting...' | tee "$FP_LOGFILE"
+			(( ! $INPUT )) && G_WHIP_MSG '[FAILURE] No compatible and/or active webserver was found. Aborting...'
+			return 1
 
-				G_WHIP_MSG 'Error: No compatible and/or active webserver was found. Aborting.'
+		fi
 
-			fi
+		#ALL | Create cert renewal cron job on Jessie-:
+		if (( $G_DISTRO < 4 )); then
+
+			cat << _EOF_ > "$FP_RENEWAL"
+#!/bin/bash
+{
+	#////////////////////////////////////
+	# DietPi-LetsEncrypt Autorenew script
+	#
+	#////////////////////////////////////
+	#
+	# Info:
+	# - Location $FP_RENEWAL
+	#
+	#////////////////////////////////////
+
+	#----------------------------------------------------------------
+	# Main Loop
+	#----------------------------------------------------------------
+
+	$FP_BINARY -q renew &>> $FP_LOGFILE
+	[[ -f /home/minio-user/.minio/dietpi-cert-renewl.sh ]] && /home/minio-user/.minio/dietpi-cert-renewl.sh &>> $FP_LOGFILE
+	[[ -f $fp_cert_dir/combined.pem ]] && cat $fp_cert_dir/privkey.pem $fp_cert_dir/cert.pem > $fp_cert_dir/combined.pem 2>> $FP_LOGFILE
+
+	#----------------------------------------------------------------
+	exit
+	#----------------------------------------------------------------
+}
+_EOF_
+			G_RUN_CMD chmod +x "$FP_RENEWAL"
+
+		else
+
+			systemctl daemon-reload
 
 		fi
 
 		#------------------------------------------------------------------------------------------------------
 
-		if (( $INPUT == 0 )); then
+		if (( ! $INPUT )); then
 
-			echo -e ""
-			read -p "Press any key to continue..."
-			echo -e ""
+			echo ''
+			read -p 'Press any key to continue...'
+			echo ''
 
 		fi
-
-		#Restart services
-		/DietPi/dietpi/dietpi-services restart
 
 	}
 
 	#/////////////////////////////////////////////////////////////////////////////////////
 	# Settings File
 	#/////////////////////////////////////////////////////////////////////////////////////
-	DP_SETTINGS="/DietPi/dietpi/.dietpi-letsencrypt"
+	FP_SETTINGS='/DietPi/dietpi/.dietpi-letsencrypt'
 
 	Read_Settings_File(){
 
 		local sed_index=1
 
-		LETSENCRYPT_DOMAIN=$(sed -n "$sed_index"p $DP_SETTINGS);((sed_index++))
-		LETSENCRYPT_EMAIL=$(sed -n "$sed_index"p $DP_SETTINGS);((sed_index++))
-		LETSENCRYPT_REDIRECT=$(sed -n "$sed_index"p $DP_SETTINGS);((sed_index++))
-		LETSENCRYPT_HSTS=$(sed -n "$sed_index"p $DP_SETTINGS);((sed_index++))
-		LETSENCRYPT_KEYSIZE=$(sed -n "$sed_index"p $DP_SETTINGS);((sed_index++))
+		LETSENCRYPT_DOMAIN=$(sed -n "$sed_index"p "$FP_SETTINGS");((sed_index++))
+		LETSENCRYPT_EMAIL=$(sed -n "$sed_index"p "$FP_SETTINGS");((sed_index++))
+		LETSENCRYPT_REDIRECT=$(sed -n "$sed_index"p "$FP_SETTINGS");((sed_index++))
+		LETSENCRYPT_HSTS=$(sed -n "$sed_index"p "$FP_SETTINGS");((sed_index++))
+		LETSENCRYPT_KEYSIZE=$(sed -n "$sed_index"p "$FP_SETTINGS");((sed_index++))
 
 	}
 
 	Write_Settings_File(){
 
-		cat << _EOF_ > "$DP_SETTINGS"
+		cat << _EOF_ > "$FP_SETTINGS"
 $LETSENCRYPT_DOMAIN
 $LETSENCRYPT_EMAIL
 $LETSENCRYPT_REDIRECT
@@ -342,7 +388,7 @@ _EOF_
 	# MENUS
 	#/////////////////////////////////////////////////////////////////////////////////////
 	TARGETMENUID=0
-	PREVIOUS_MENU_SELECTION=""
+	PREVIOUS_MENU_SELECTION=''
 
 	Menu_Exit(){
 
@@ -381,19 +427,19 @@ _EOF_
 
 		G_WHIP_MENU_ARRAY=(
 
-			"Domain" ": $LETSENCRYPT_DOMAIN"
-			"Email" ": $LETSENCRYPT_EMAIL"
-			"Redirect" ": $redirect_text"
-			"HSTS" ": $hsts_text"
-			"Key Size" ": $LETSENCRYPT_KEYSIZE"
-			"Apply" "Runs Lets Encrypt with your chosen options."
+			'Domain' ": $LETSENCRYPT_DOMAIN"
+			'Email' ": $LETSENCRYPT_EMAIL"
+			'Redirect' ": $redirect_text"
+			'HSTS' ": $hsts_text"
+			'Key Size' ": $LETSENCRYPT_KEYSIZE"
+			'Apply' 'Runs Lets Encrypt with your chosen options.'
 
 		)
 
 		G_WHIP_DEFAULT_ITEM="$PREVIOUS_MENU_SELECTION"
 		G_WHIP_BUTTON_CANCEL_TEXT='Exit'
-		G_WHIP_MENU 'Please select a option.'
-		if (( $? == 0 )); then
+		G_WHIP_MENU 'Please select an option.'
+		if (( ! $? )); then
 
 			PREVIOUS_MENU_SELECTION=$G_WHIP_RETURNED_VALUE
 
@@ -401,7 +447,14 @@ _EOF_
 
 				'Domain')
 
-					LETSENCRYPT_DOMAIN="$(Input_Box $LETSENCRYPT_DOMAIN Website-Domain)"
+					while true; do
+
+						LETSENCRYPT_DOMAIN="$(Input_Box $LETSENCRYPT_DOMAIN Website-Domain)"
+						[[ $LETSENCRYPT_DOMAIN == *?.?* && ! $(sed 's/\.//g' <<< $LETSENCRYPT_DOMAIN) =~ ^[0-9]*$ ]] && break
+
+						G_WHIP_MSG "[FAILED] \"$LETSENCRYPT_DOMAIN\" is no valid domain name.\n\nNote that raw IP addresses are not allowed by LetsEncrypt, thus a domain is required.\nYou can install No-IP with DietPi-Software to aquire one.\n\nPlease try again..."
+
+					done
 
 				;;
 
@@ -450,10 +503,11 @@ _EOF_
 				'Apply')
 
 					G_WHIP_YESNO "LetsEncrypt will now be run. This will:\n- Create your free SSL cert.\n- Automatically apply and enable your SSL cert\n- NB: This process can take a long time, please be patient.\n\nWould you like to continue?"
-					if (( $? == 0 )); then
+					if (( ! $? )); then
 
 						Write_Settings_File
 						Run_Lets_Encrypt
+						/DietPi/dietpi/dietpi-services restart
 
 					fi
 
@@ -477,12 +531,12 @@ _EOF_
 
 		G_WHIP_DEFAULT_ITEM="$input_value"
 		G_WHIP_INPUTBOX "Please enter a value for $input_desc"
-		if (( $? == 0 )); then
+		if (( ! $? )); then
 
 			input_value="$G_WHIP_RETURNED_VALUE"
 
 			# - Prevent null values
-			if [ -z "$input_value" ]; then
+			if [[ -z $input_value ]]; then
 
 				input_value='NULL'
 
@@ -498,13 +552,13 @@ _EOF_
 	# Main Loop
 	#/////////////////////////////////////////////////////////////////////////////////////
 	#Load Settings file. Generate if required.
-	if [ ! -f "$DP_SETTINGS" ]; then
+	if [[ -f $FP_SETTINGS ]]; then
 
-		Write_Settings_File
+		Read_Settings_File
 
 	else
 
-		Read_Settings_File
+		Write_Settings_File
 
 	fi
 
@@ -513,21 +567,21 @@ _EOF_
 	if (( ! $LETSENCRYPT_INSTALLED )); then
 
 		#Menu
-		if (( $INPUT == 0 )); then
+		if (( ! $INPUT )); then
 
-			G_DIETPI-NOTIFY 1 "Certbot binary not found ( $DP_LETSENCRYPT_BINARY )"
-			G_DIETPI-NOTIFY 2 "Please install Certbot with DietPi-Software before running this program."
-			read -p "Press any key to continue....."
+			G_DIETPI-NOTIFY 1 "CertBot binary not found ( $FP_BINARY )"
+			G_DIETPI-NOTIFY 2 'Please install CertBot with DietPi-Software before running this program.'
+			read -p 'Press any key to continue.....'
 
 		else
 
-			echo -e "Error: Letsencrypt binary not installed ( $DP_LETSENCRYPT_BINARY )." >> "$DP_LOGFILE"
+			echo -e "[FAILURE] CertBot binary not found ( $FP_BINARY ), please install it with DietPi-Software. Aborting..." | tee "$FP_LOGFILE"
 
 		fi
 
 	#-----------------------------------------------------------------------------------
 	#Menu
-	elif (( $INPUT == 0 )); then
+	elif (( ! $INPUT )); then
 
 		while (( $TARGETMENUID > -1 )); do
 
@@ -546,6 +600,13 @@ _EOF_
 	elif (( $INPUT == 1 )); then
 
 		Run_Lets_Encrypt
+		/DietPi/dietpi/dietpi-services restart
+
+	else
+
+		G_DIETPI-NOTIFY 2 'DietPi-LetsEncrypt usage:'
+		G_DIETPI-NOTIFY 2 '	dietpi-letsencrypt	=>	Open whiptail menu'
+		G_DIETPI-NOTIFY 2 '	dietpi-letsencrypt 1	=>	Create/Renew/Apply certs without user input'
 
 	fi
 
