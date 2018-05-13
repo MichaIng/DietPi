@@ -544,7 +544,7 @@
 
 	fi
 	rm DietPi-*/*.ini
-	(( $G_HW_MODEL > 9 )) && rm DietPi-*/config.txt 
+	#(( $G_HW_MODEL > 9 )) && rm DietPi-*/config.txt #must check all scripts with config.txt scrapes, as they are not file checked??
 
 	G_RUN_CMD cp -R DietPi-*/* /boot/
 
