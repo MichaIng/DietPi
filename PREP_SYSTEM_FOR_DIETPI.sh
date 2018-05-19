@@ -262,8 +262,6 @@
 	((SETUP_STEP++))
 	G_DIETPI-NOTIFY 2 '-----------------------------------------------------------------------------------'
 	#------------------------------------------------------------------------------------------------
-	G_DIETPI-NOTIFY 2 'Updating APT:'
-
 	#Recreate dietpi logs dir, used by G_AGx
 	G_RUN_CMD mkdir -p /var/tmp/dietpi/logs
 
@@ -524,7 +522,7 @@
 	rm "DietPi-$GIT_BRANCH/uEnv.txt" # Pine 64, use existing on system.
 	#	Remove server_version / patch_file (downloads fresh from dietpi-update)
 	rm "DietPi-$GIT_BRANCH/dietpi/patch_file"
-	rm "DietPi-$GIT_BRANCH/dietpi/server_version*"
+	rm DietPi-"$GIT_BRANCH"/dietpi/server_version*
 
 	l_message='Creating /boot' G_RUN_CMD mkdir -p /boot
 
@@ -542,10 +540,10 @@
 		G_RUN_CMD mv "DietPi-$GIT_BRANCH/boot_c2.ini" /boot/boot.ini
 
 	fi
-	rm "DietPi-$GIT_BRANCH/*.ini"
+	rm DietPi-"$GIT_BRANCH"/*.ini
 	#(( $G_HW_MODEL > 9 )) && rm "DietPi-$GIT_BRANCH/config.txt" #must check all scripts with config.txt scrapes, as they are not file checked??
 
-	l_message='Moving to /boot' G_RUN_CMD mv "DietPi-$GIT_BRANCH/*" /boot/
+	l_message='Moving to /boot' G_RUN_CMD mv DietPi-"$GIT_BRANCH"/* /boot/
 
 	l_message='Cleaning up extracted files' G_RUN_CMD rm -R "DietPi-$GIT_BRANCH"
 
@@ -1506,6 +1504,10 @@ _EOF_
 
 	sync
 
+	# - Remove PREP files
+	rm dietpi-globals
+	rm PREP_SYSTEM_FOR_DIETPI.sh
+
 	G_DIETPI-NOTIFY 2 "The used kernel version is: $(uname -r)"
 	kernel_apt_packages="$(dpkg --get-selections | grep '^linux-image-[0-9]')"
 	if [[ $kernel_apt_packages ]]; then
@@ -1515,15 +1517,13 @@ _EOF_
 
 	fi
 
-	G_DIETPI-NOTIFY 2 'Please check and delete all non-required folders in /root/.xxxxxx'
 	G_DIETPI-NOTIFY 2 'Please delete outdated non-APT kernel modules:'
-	ls -lha /lib/modules
+	ls -lh /lib/modules
+
+	G_DIETPI-NOTIFY 2 'Please check and delete all non-required folders in /root/.*:'
+	ls -lha /root
 
 	G_DIETPI-NOTIFY 0 'Completed, disk can now be saved to .img for later use, or, reboot system to start first run of DietPi:'
-
-	# - Remove PREP files
-	rm dietpi-globals
-	rm PREP_SYSTEM_FOR_DIETPI.sh
 
 	#Power off system
 
