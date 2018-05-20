@@ -11,7 +11,7 @@
 	#
 	# Info:
 	# - Script does not require a DietPi ready system to exec, can be used in PREP_SYSTEM
-	# - DietPi sourcecode must exist in /boot or /DietPi
+	# - DietPi sourcecode must exist in /DietPi
 	# - Not everything for the DietPi env is contained here, only the core/critial stuff, to prevent dupe code in patches/PREP_SYSTEM
 	#
 	# Usage:
@@ -19,80 +19,12 @@
 	# - /DietPi/dietpi/func/dietpi-set_core_environment
 	#////////////////////////////////////
 
-	#Support Globals loaded on non-dietpi systems
-	FP_SCRIPTS='/boot'
-	if [ -f /DietPi/dietpi/dietpi-software ]; then
-
-		FP_SCRIPTS='/DietPi'
-
-	fi
 	#Import DietPi-Globals -------------------------------------------------------------
-	. "$FP_SCRIPTS"/dietpi/func/dietpi-globals # NB: HW_* info are init only, not detected.
+	. /DietPi/dietpi/func/dietpi-globals
 	G_CHECK_ROOT_USER
 	export G_PROGRAM_NAME='DietPi-Set_core_environment'
 	G_INIT
 	#Import DietPi-Globals -------------------------------------------------------------
-
-
-	DIETPI_USERNAME='dietpi'
-	DIETPI_PASSWORD='dietpi'
-
-	#Near copy of useradd in dietpi-set_software, however, to support use in non-dietpi ready system, we manually need it here.
-	Create_DietPi_User(){
-
-		mkdir -p /home/"$DIETPI_USERNAME"
-		useradd -m -s /bin/bash "$DIETPI_USERNAME" -p "$DIETPI_PASSWORD"
-		#chpasswd <<< "$DIETPI_USERNAME:$DIETPI_PASSWORD"
-
-		#	Copy existing profile/bashrc
-		cp /root/.profile /home/"$DIETPI_USERNAME"/
-		cp /root/.bashrc /home/"$DIETPI_USERNAME"/
-
-		#	Sudo up dietpi login script
-		sed -i '/^\/DietPi\/dietpi\/login/c\sudo \/DietPi\/dietpi\/login' /home/"$DIETPI_USERNAME"/.bashrc
-
-		chown -R "$DIETPI_USERNAME":"$DIETPI_USERNAME" /home/"$DIETPI_USERNAME"
-
-		#	Allow sudo without pw
-		if ! grep -qi "^$DIETPI_USERNAME[[:blank:]]" /etc/sudoers.d/dietpi; then
-
-			cat << _EOF_ >> /etc/sudoers.d/dietpi
-$DIETPI_USERNAME ALL=NOPASSWD: ALL
-_EOF_
-
-		fi
-
-		#	Same groups as user pi
-		local group_array=()
-		group_array+=('input')
-		group_array+=('netdev')
-		group_array+=('spi')
-		group_array+=('i2c')
-		group_array+=('gpio')
-		group_array+=('tty')
-		group_array+=('users')
-		group_array+=('games')
-		group_array+=('plugdev')
-		group_array+=('video')
-		group_array+=('audio')
-		group_array+=('sudo')
-		group_array+=('cdrom')
-		group_array+=('dialout')
-		group_array+=('adm')
-
-		#	+ allow access to www-data
-		group_array+=('www-data')
-
-		for ((i=0; i<${#group_array[@]}; i++))
-		do
-
-			usermod -a -G "${group_array[$i]}" "$DIETPI_USERNAME" &> /dev/null
-
-		done
-
-		unset group_array
-
-	}
 
 	#///////////////////////////////////////////////////////////////////////////////////
 	# Main Loop
@@ -100,22 +32,34 @@ _EOF_
 	G_DIETPI-NOTIFY 2 "Creating core DietPi environment, please wait..."
 
 	#-----------------------------------------------------------------------------------
-	#Bash
+	# Bash Profiles
 
-	G_DIETPI-NOTIFY 2 "Configuring .bashrc:"
-
-	sed -i '/DietPi/d' /root/.bashrc
+	# - Login | Global init and login script
+	sed -i '/\/DietPi/d' /root/.bashrc #failsafe start clean
 	cat << _EOF_ >> /root/.bashrc
 . /DietPi/dietpi/func/dietpi-globals
 /DietPi/dietpi/login
 _EOF_
+
+	# - Workaround for setting user selected locale to session when POSIX is detected (eg: dropbear limitation/bug): https://github.com/Fourdee/DietPi/issues/1540#issuecomment-367066178
+	cat << _EOF_ > /etc/profile.d/99-dietpi-posix-set-locale.sh
+#!/bin/bash
+
+#Workaround for setting locale to session when POSIX is detected (eg: dropbear): https://github.com/Fourdee/DietPi/issues/1540#issuecomment-367066178
+if locale | grep -qi 'POSIX'; then
+	CURRENT_LOCALE="\$(grep -m1 '^[[:blank:]]*AUTO_SETUP_LOCALE=' /DietPi/dietpi.txt | sed 's/^.*=//')"
+	export LANG="\$CURRENT_LOCALE"
+	export LC_ALL="\$CURRENT_LOCALE"
+fi
+_EOF_
+	chmod +x /etc/profile.d/99-dietpi-posix-set-locale.sh
 
 	#-----------------------------------------------------------------------------------
 	#Create_DietPi_User
 
 	G_DIETPI-NOTIFY 2 'Creating DietPi User Account:'
 
-	Create_DietPi_User
+	/DietPi/dietpi/func/dietpi-set_software useradd dietpi
 
 	#-----------------------------------------------------------------------------------
 	#UID bit for sudo
@@ -131,7 +75,8 @@ _EOF_
 	G_DIETPI-NOTIFY 2 'Configuring DietPi Directories:'
 
 	# - /var/lib/dietpi : Core storage for installed non-standard APT software, outside of /mnt/dietpi_userdata
-	mkdir -p /var/lib/dietpi
+	#mkdir -p /var/lib/dietpi
+	mkdir -p /var/lib/dietpi/postboot.d
 	chown dietpi:dietpi /var/lib/dietpi
 	chmod 660 /var/lib/dietpi
 
@@ -171,6 +116,7 @@ _EOF_
 
 	G_DIETPI-NOTIFY 2 'Configuring DietPi Services:'
 
+	#	NB: Duplicate exists in PREP
 	cat << _EOF_ > /etc/systemd/system/dietpi-ramdisk.service
 [Unit]
 Description=DietPi-RAMdisk
@@ -284,9 +230,9 @@ _EOF_
 
 	G_DIETPI-NOTIFY 2 "Configuring Cron:"
 
-	cp "$FP_SCRIPTS"/dietpi/conf/cron.daily_dietpi /etc/cron.daily/dietpi
+	cp /DietPi/dietpi/conf/cron.daily_dietpi /etc/cron.daily/dietpi
 	chmod +x /etc/cron.daily/dietpi
-	cp "$FP_SCRIPTS"/dietpi/conf/cron.hourly_dietpi /etc/cron.hourly/dietpi
+	cp /DietPi/dietpi/conf/cron.hourly_dietpi /etc/cron.hourly/dietpi
 	chmod +x /etc/cron.hourly/dietpi
 
 	mkdir -p /etc/cron.minutely #: https://github.com/Fourdee/DietPi/pull/1578
@@ -346,19 +292,6 @@ _EOF_
 	G_DIETPI-NOTIFY 2 "Setting vm.swappiness=1:"
 
 	echo 'vm.swappiness=1' > /etc/sysctl.d/dietpi.conf
-
-	# - Workaround for setting user selected locale to session when POSIX is detected (eg: dropbear limitation/bug): https://github.com/Fourdee/DietPi/issues/1540#issuecomment-367066178
-	cat << _EOF_ > /etc/profile.d/99-dietpi-posix-set-locale.sh
-#!/bin/bash
-
-#Workaround for setting locale to session when POSIX is detected (eg: dropbear): https://github.com/Fourdee/DietPi/issues/1540#issuecomment-367066178
-if locale | grep -qi 'POSIX'; then
-	CURRENT_LOCALE="\$(grep -m1 '^[[:blank:]]*AUTO_SETUP_LOCALE=' /DietPi/dietpi.txt | sed 's/^.*=//')"
-	export LANG="\$CURRENT_LOCALE"
-	export LC_ALL="\$CURRENT_LOCALE"
-fi
-_EOF_
-	chmod +x /etc/profile.d/99-dietpi-posix-set-locale.sh
 
 	#-----------------------------------------------------------------------------------
 	G_DIETPI-NOTIFY 0 "Completed DietPi core environment"

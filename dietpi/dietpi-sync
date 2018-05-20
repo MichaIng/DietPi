@@ -27,12 +27,12 @@
 
 	#Grab Input (valid interger)
 	INPUT=0
-	if (( $(G_CHECK_VALIDINT $1) )); then
+	if G_CHECK_VALIDINT $1; then
 
 		INPUT=$1
 
 	fi
-	
+
 	#/////////////////////////////////////////////////////////////////////////////////////
 	# MENUS
 	#/////////////////////////////////////////////////////////////////////////////////////
@@ -171,6 +171,7 @@
 
 	Menu_Exit(){
 
+		G_WHIP_SIZE_X_MAX=50
 		G_WHIP_YESNO "Exit $G_PROGRAM_NAME?"
 		if (( $? == 0 )); then
 
@@ -187,12 +188,12 @@
 		#2=Source | 1=Target
 
 		local current_directory="$FP_TARGET"
-		local current_mode_text="Target"
+		local current_mode_text='Target'
 		local whip_description_text="Please select the $current_mode_text location.\nA copy of all the files and folders in the Source location will be created here.\n\nCurrent Target location:\n$FP_TARGET"
 		if (( $TARGETMENUID == 2 )); then
 
 			current_directory="$FP_SOURCE"
-			current_mode_text="Source"
+			current_mode_text='Source'
 			whip_description_text="Please select the $current_mode_text location.\nA copy of all the files and folder in this Source location, will be created at the Target location.\n\nCurrent Source location:\n$FP_SOURCE"
 
 		fi
@@ -201,7 +202,7 @@
 
 		G_WHIP_MENU_ARRAY=(
 
-			'Manual' 'Manually type your $current_mode_text directory.'
+			'Manual' "Manually type your $current_mode_text directory."
 			'List' 'Select from a list of available mounts/drives'
 			"Samba Client" "$SAMBA_MOUNT_TEXT"
 			"FTP Client" "$FTP_MOUNT_TEXT"
@@ -540,18 +541,6 @@
 
 	}
 
-	Services_Stop(){
-
-		/DietPi/dietpi/dietpi-services stop
-
-	}
-
-	Services_Start(){
-
-		/DietPi/dietpi/dietpi-services start
-
-	}
-
 	Banner_Start(){
 
 		local mode='Sync'
@@ -577,23 +566,13 @@
 		#Error: Folder not found
 		if [ ! -d "$FP_TARGET" ]; then
 
-			if (( $G_USER_INPUTS )); then
-
-				G_WHIP_MSG "Error:\n\nSync failed, unable to create Target directory $FP_TARGET"
-
-			fi
+			G_WHIP_MSG "Error:\n\nSync failed, unable to create Target directory $FP_TARGET"
 
 		#Error: Rsync is already running
 		elif (( $(ps aux | grep -ci -m1 "[r]sync") == 1 )); then
 
+			G_WHIP_MSG 'Sync Failed:\n\nA sync job could not be started as rsync is already running.'
 			echo -e "Sync failed: $(date +"%d-%m-%Y_%H%M"). Rsync is already running." >> "$FP_TARGET/$SYNC_STATS_FILENAME"
-
-			#Menu
-			if (( $G_USER_INPUTS )); then
-
-				G_WHIP_MSG 'Sync Failed:\n\nA sync job could not be started as rsync is already running.'
-
-			fi
 
 		#Start sync
 		else
@@ -603,39 +582,64 @@
 			Create_Include_File
 
 			#Archive mode
-			local rync_options="-a"
+			local rync_options='-a'
 			#verbose
-			rync_options+="v"
+			rync_options+='v'
 			#Keep partial files + Progress. (eg: if file is interupted, it will resume where it left off, rather than resending the whole file.
-			rync_options+="P"
+			rync_options+='P'
 			#Prefer IPv4
-			rync_options+="4"
+			rync_options+='4'
 
 			#Compression?
-			if (( $SYNC_COMPRESSION == 1 )); then
+			if (( $SYNC_COMPRESSION )); then
 
-				rync_options+="z"
+				rync_options+='z'
 
 			fi
 
 			#Dry Run?
-			if (( $SYNC_DRY_RUN == 1 )); then
+			if (( $SYNC_DRY_RUN )); then
 
-				rync_options+="n"
+				rync_options+='n'
 
 			fi
 
 			#Delete mode?
-			if (( $SYNC_DELETE_MODE == 1 )); then
+			if (( $SYNC_DELETE_MODE )); then
 
-				rync_options+=" --delete"
+				rync_options+=' --delete'
 
 			fi
 
 			#Write new logfile
 			echo -e "DietPi-Sync Log File.\n$(date +%d-%m-%Y_%H%M)\nSYNC_DRY_RUN=$SYNC_DRY_RUN\n\n" > "$LOGFILE"
 
-			#Services_Stop
+			#Verify enough space
+			#	NB: working in KiB until end MiB conversion, as, don't like using long long int, and, KiB should offer a good end result.
+			local old_backup_size=$(du -ks "$FP_TARGET" | awk '{print $1}')
+
+			rsync --dry-run --stats $rync_options --exclude-from="$FP_EXCLUDE_GLOBAL" --include-from="$FP_INCLUDE_GLOBAL" "$FP_SOURCE"/ "$FP_TARGET"/ > /tmp/dietpi-sync_result
+			local new_backup_size=$(( $(grep -m1 'Total file size' /tmp/dietpi-sync_result | sed 's/[^0-9]*//g') / 1024 ))
+			local total_file_count=$(( $(grep -m1 'Number of files' /tmp/dietpi-sync_result | awk '{print $6}' | sed 's/[^0-9]*//g') ))
+			local total_folder_count=$(( $(grep -m1 'Number of files' /tmp/dietpi-sync_result | awk '{print $8}' | sed 's/[^0-9]*//g') ))
+			local target_fs_blocksize=$(stat -fc %s "$FP_TARGET")
+			new_backup_size=$(( $new_backup_size + ( $total_file_count + $total_folder_count ) * $target_fs_blocksize / 1024 ))
+			local end_result=$(( ( $new_backup_size - $old_backup_size ) / 1024 + 1 ))
+			rm /tmp/dietpi-sync_result
+
+			if G_CHECK_FREESPACE "$FP_TARGET" $end_result; then
+
+				G_WHIP_BUTTON_OK_TEXT='Ignore'
+				G_WHIP_BUTTON_CANCEL_TEXT='Exit'
+				G_WHIP_YESNO 'The system sync target location appears to have insufficient free space to successfully finish the backup.\nHowever, this check is a rough estimation in reasonable time, thus it could be marginally incorrect.\n\nWould you like to override this warning and continue with the backup?'
+				if (( $? )); then
+
+					echo -e "Sync canceled: due to insufficient free space: $(date +"%d-%m-%Y_%H%M")" >> "$FP_TARGET/$SYNC_STATS_FILENAME"
+					break
+
+				fi
+
+			fi
 
 			#Sync
 			G_RUN_CMD rsync $rync_options --log-file=$LOGFILE --exclude-from="$FP_EXCLUDE_GLOBAL" --include-from="$FP_INCLUDE_GLOBAL" "$FP_SOURCE"/ "$FP_TARGET"/
@@ -657,12 +661,6 @@
 			TARGETMENUID=0
 
 		fi
-
-	}
-
-	Check_Install_PreReqs(){
-
-		G_AG_CHECK_INSTALL_PREREQ rsync
 
 	}
 
@@ -732,7 +730,7 @@
 	# Main Loop
 	#/////////////////////////////////////////////////////////////////////////////////////
 	#pre-reqs, install if required.
-	Check_Install_PreReqs
+	G_AG_CHECK_INSTALL_PREREQ rsync
 
 	#Read settings file
 	Read_Settings_File
