@@ -660,7 +660,6 @@ _EOF_
 		'console-setup'		# DietPi-Config keyboard configuration
 		'cron'			# Background job scheduler
 		'curl'			# Web address testing, downloading, uploading etc.
-		'dbus'			# Required for systemd-timesyncd (timedatectl)
 		'debconf'		# APT package pre-configuration, e.g. "debconf-set-selections"
 		'dirmngr'		# GNU key management required for some APT installs via additional repos
 		'ethtool'		# Ethernet link checking
