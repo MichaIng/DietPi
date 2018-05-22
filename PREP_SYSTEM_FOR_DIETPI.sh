@@ -552,7 +552,7 @@
 	G_DIETPI-NOTIFY 2 'Installing DietPi-RAMDISK'
 
 	#	NB: Duplicate of set-core_env
-	cat << _EOF_ > /etc/systemd/system/dietpi-ramdisk.service
+cat << _EOF_ > /etc/systemd/system/dietpi-ramdisk.service
 [Unit]
 Description=DietPi-RAMdisk
 After=local-fs.target boot.mount
@@ -561,6 +561,7 @@ Before=rsyslog.service syslog.service
 [Service]
 Type=forking
 RemainAfterExit=yes
+StandardOutput=tty
 ExecStartPre=$(which mkdir) -p /var/tmp/dietpi/logs
 ExecStart=/bin/bash -c '/boot/dietpi/dietpi-ramdisk 0 &>> /var/tmp/dietpi/logs/dietpi-ramdisk.log'
 ExecStop=/bin/bash -c '/DietPi/dietpi/dietpi-ramdisk 1 &>> /var/tmp/dietpi/logs/dietpi-ramdisk.log'
