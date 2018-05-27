@@ -1219,7 +1219,11 @@ _EOF_
 	# - PINE64 (and possibily others): Cursor fix for FB
 	elif (( $G_HW_MODEL == 40 )); then
 
-		cat << _EOF_ >> "$HOME"/.bashrc
+		mkdir -p /etc/bashrc.d
+		cat << _EOF_ > /etc/bashrc.d/dietpi-pine64-cursorfix.sh
+#!/bin/bash
+
+# DietPi: Cursor fix for FB
 infocmp > terminfo.txt
 sed -i -e 's/?0c/?112c/g' -e 's/?8c/?48;0;64c/g' terminfo.txt
 tic terminfo.txt
