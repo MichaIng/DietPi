@@ -546,7 +546,7 @@
 
 	l_message='Moving system files in place' G_RUN_CMD mv DietPi-"$GIT_BRANCH"/rootfs/. /
 
-	l_message='Setting execute permissions for DietPi scripts' G_RUN_CMD chmod -R +x /boot/dietpi /etc/cron.*/dietpi /var/lib/dietpi/dietpi-software/services
+	l_message='Setting execute permissions for DietPi scripts' G_RUN_CMD chmod -R +x /boot/dietpi /etc/cron.*/dietpi /var/lib/dietpi/services
 
 	G_RUN_CMD systemctl daemon-reload
 	G_RUN_CMD systemctl enable dietpi-ramdisk
