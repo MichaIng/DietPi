@@ -1499,7 +1499,6 @@ _EOF_
 	else
 
 		l_message='Enabling dietpi-fs_partition_resize for first boot' G_RUN_CMD systemctl enable dietpi-fs_partition_resize
-		G_RUN_CMD chmod +x /var/lib/dietpi/services/fs_partition_resize.sh
 
 	fi
 
