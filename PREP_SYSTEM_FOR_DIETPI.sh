@@ -542,11 +542,11 @@
 	rm "DietPi-$GIT_BRANCH/dietpi/patch_file"
 	rm DietPi-"$GIT_BRANCH"/dietpi/server_version*
 
-	l_message='Moving DietPi core to /boot/dietpi' G_RUN_CMD mv DietPi-"$GIT_BRANCH"/dietpi /boot/
+	l_message='Move DietPi core to /boot/dietpi' G_RUN_CMD mv DietPi-"$GIT_BRANCH"/dietpi /boot/
 
-	l_message='Moving system files in place' G_RUN_CMD mv DietPi-"$GIT_BRANCH"/rootfs/. /
+	l_message='Copy rootfs files in place' G_RUN_CMD cp -Rf DietPi-"$GIT_BRANCH"/rootfs/. /
 
-	l_message='Setting execute permissions for DietPi scripts' G_RUN_CMD chmod -R +x /boot/dietpi /etc/cron.*/dietpi /var/lib/dietpi/services
+	l_message='Set execute permissions for DietPi scripts' G_RUN_CMD chmod -R +x /boot/dietpi /etc/cron.*/dietpi /var/lib/dietpi/services
 
 	G_RUN_CMD systemctl daemon-reload
 	G_RUN_CMD systemctl enable dietpi-ramdisk
