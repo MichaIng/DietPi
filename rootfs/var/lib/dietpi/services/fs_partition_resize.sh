@@ -24,7 +24,7 @@ fi
 #Rock64 GPT resize | modified version of ayufan-rock64 resize script. I take no credit for this.
 if [[ -f /etc/.dietpi_hw_model_identifier ]] && (( $(cat /etc/.dietpi_hw_model_identifier) == 43 )); then
 
-	gdisk $TARGET_DEV << _EOF_1
+	gdisk $TARGET_DEV << _EOF_
 x
 e
 m
@@ -40,12 +40,12 @@ $TARGET_PARTITION
 root
 w
 Y
-_EOF_1
+_EOF_
 
 #Everything else
 else
 
-	cat << _EOF_1 | fdisk $TARGET_DEV
+	cat << _EOF_ | fdisk $TARGET_DEV
 p
 d
 $TARGET_PARTITION
@@ -57,7 +57,7 @@ $(parted $TARGET_DEV -ms unit s p | grep ':ext4::;' | sed 's/:/ /g' | sed 's/s//
 p
 w
 
-_EOF_1
+_EOF_
 
 fi
 
