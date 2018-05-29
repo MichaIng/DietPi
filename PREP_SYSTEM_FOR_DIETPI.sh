@@ -497,7 +497,6 @@
 
 	fi
 
-
 	#------------------------------------------------------------------------------------------------
 	echo ''
 	G_DIETPI-NOTIFY 2 '-----------------------------------------------------------------------------------'
@@ -510,21 +509,16 @@
 	G_CHECK_URL "$INTERNET_ADDRESS"
 	G_RUN_CMD wget "$INTERNET_ADDRESS" -O package.zip
 
+	[[ -d DietPi-$GIT_BRANCH ]] && l_message='Cleaning previously extracted files' G_RUN_CMD rm -R "DietPi-$GIT_BRANCH"
 	l_message='Extracting DietPi sourcecode' G_RUN_CMD unzip -o package.zip
 	rm package.zip
 
-	G_DIETPI-NOTIFY 2 'Removing files not required'
-
-	#	Remove files we do not require, or want to overwrite in /boot
-	rm "DietPi-$GIT_BRANCH/CHANGELOG.txt"
-	rm "DietPi-$GIT_BRANCH/PREP_SYSTEM_FOR_DIETPI.sh"
-	rm "DietPi-$GIT_BRANCH/TESTING-BRANCH.md"
-	rm "DietPi-$GIT_BRANCH/uEnv.txt" # Pine 64, use existing on system.
-	#	Remove server_version / patch_file (downloads fresh from dietpi-update)
-	rm "DietPi-$GIT_BRANCH/dietpi/patch_file"
-	rm DietPi-"$GIT_BRANCH"/dietpi/server_version*
-
 	l_message='Creating /boot' G_RUN_CMD mkdir -p /boot
+
+	G_DIETPI-NOTIFY 2 'Moving kernel and boot configuration to /boot'
+
+	G_RUN_CMD mv "DietPi-$GIT_BRANCH/dietpi.txt" /boot/
+	G_RUN_CMD mv "DietPi-$GIT_BRANCH/config.txt" /boot/ #RPi only, but must check all scripts with config.txt scrapes, as they are not file checked??
 
 	# - HW specific boot.ini uEnv.txt
 	if (( $G_HW_MODEL == 10 )); then
@@ -540,35 +534,20 @@
 		G_RUN_CMD mv "DietPi-$GIT_BRANCH/boot_c2.ini" /boot/boot.ini
 
 	fi
-	rm DietPi-"$GIT_BRANCH"/*.ini
-	#(( $G_HW_MODEL > 9 )) && rm "DietPi-$GIT_BRANCH/config.txt" #must check all scripts with config.txt scrapes, as they are not file checked??
 
-	l_message='Moving to /boot' G_RUN_CMD mv DietPi-"$GIT_BRANCH"/* /boot/
+	G_RUN_CMD mv "DietPi-$GIT_BRANCH/README.md" /boot/
+	#G_RUN_CMD mv "DietPi-$GIT_BRANCH/CHANGELOG.txt" /boot/
 
-	l_message='Cleaning up extracted files' G_RUN_CMD rm -R "DietPi-$GIT_BRANCH"
+	# - Remove server_version / patch_file (downloads fresh from dietpi-update)
+	rm "DietPi-$GIT_BRANCH/dietpi/patch_file"
+	rm DietPi-"$GIT_BRANCH"/dietpi/server_version*
 
-	l_message='Setting execute permissions for /boot/dietpi' G_RUN_CMD chmod -R +x /boot/dietpi
+	l_message='Move DietPi core to /boot/dietpi' G_RUN_CMD mv DietPi-"$GIT_BRANCH"/dietpi /boot/
 
-	G_DIETPI-NOTIFY 2 'Installing DietPi-RAMDISK'
+	l_message='Copy rootfs files in place' G_RUN_CMD cp -Rf DietPi-"$GIT_BRANCH"/rootfs/. /
 
-	#	NB: Duplicate of set-core_env
-cat << _EOF_ > /etc/systemd/system/dietpi-ramdisk.service
-[Unit]
-Description=DietPi-RAMdisk
-After=local-fs.target boot.mount
-Before=rsyslog.service syslog.service
+	l_message='Set execute permissions for DietPi scripts' G_RUN_CMD chmod -R +x /boot/dietpi /etc/cron.*/dietpi /var/lib/dietpi/services
 
-[Service]
-Type=forking
-RemainAfterExit=yes
-StandardOutput=tty
-ExecStartPre=$(which mkdir) -p /var/tmp/dietpi/logs
-ExecStart=/bin/bash -c '/boot/dietpi/dietpi-ramdisk 0 &>> /var/tmp/dietpi/logs/dietpi-ramdisk.log'
-ExecStop=/bin/bash -c '/DietPi/dietpi/dietpi-ramdisk 1 &>> /var/tmp/dietpi/logs/dietpi-ramdisk.log'
-
-[Install]
-WantedBy=local-fs.target
-_EOF_
 	G_RUN_CMD systemctl daemon-reload
 	G_RUN_CMD systemctl enable dietpi-ramdisk
 
@@ -879,12 +858,12 @@ _EOF_
 
 	l_message='Marking required packages as manually installed' G_RUN_CMD apt-mark manual $INSTALL_PACKAGES
 
-	G_AGA
-
-	# Purging additional packages, that in some cases do not get autoremoved:
+	# Purging additional packages, that (in some cases) do not get autoremoved:
 	# - dhcpcd5: https://github.com/Fourdee/DietPi/issues/1560#issuecomment-370136642
-	G_AGP dhcpcd5
+	# - dbus: Not needed for headless images, but sometimes marked as "important", thus not autoremoved.
+	G_AGP dbus dhcpcd5
 
+	G_AGA
 
 	#------------------------------------------------------------------------------------------------
 	echo ''
@@ -1005,7 +984,143 @@ _EOF_
 	# - make_nas_processes_faster cron job on Rock64 + NanoPi + Pine64(?) images
 	rm /etc/cron.d/make_nas_processes_faster &> /dev/null
 
-	l_message='Creating DietPi core environment' G_RUN_CMD /DietPi/dietpi/func/dietpi-set_core_environment
+	#-----------------------------------------------------------------------------------
+	# Bash Profiles
+
+	# - Pre v6.9 cleaning:
+	sed -i '/\/DietPi/d' /root/.bashrc
+	sed -i '/\/DietPi/d' /home/dietpi/.bashrc &> /dev/null
+	rm /etc/profile.d/99-dietpi* &> /dev/null
+
+	# - Enable /etc/bashrc.d/ support for custom interactive non-login shell scripts:
+	G_CONFIG_INJECT '.*/etc/bashrc\.d/.*' 'for i in /etc/bashrc\.d/\*\.sh; do \[ -r "\$i" \] \&\& \. \$i; done' /etc/bash.bashrc
+
+	# - Enable bash-completion for non-login shells:
+	#	- NB: It is called twice on login shells then, but breaks directly if called already once.
+	ln -sf /etc/profile.d/bash_completion.sh /etc/bashrc.d/dietpi-bash_completion.sh
+
+	#-----------------------------------------------------------------------------------
+	#Create_DietPi_User
+
+	l_message='Creating DietPi User Account' G_RUN_CMD /DietPi/dietpi/func/dietpi-set_software useradd dietpi
+
+	#-----------------------------------------------------------------------------------
+	#UID bit for sudo
+	# - https://github.com/Fourdee/DietPi/issues/794
+
+	G_DIETPI-NOTIFY 2 'Configuring Sudo UID bit:'
+
+	chmod 4755 $(which sudo)
+
+	#-----------------------------------------------------------------------------------
+	#Dir's
+
+	G_DIETPI-NOTIFY 2 'Configuring DietPi Directories:'
+
+	# - /var/lib/dietpi : Core storage for installed non-standard APT software, outside of /mnt/dietpi_userdata
+	#mkdir -p /var/lib/dietpi
+	mkdir -p /var/lib/dietpi/postboot.d
+	chown dietpi:dietpi /var/lib/dietpi
+	chmod 660 /var/lib/dietpi
+
+	#	Storage locations for program specifc additional data
+	mkdir -p /var/lib/dietpi/dietpi-autostart
+	mkdir -p /var/lib/dietpi/dietpi-config
+
+	#mkdir -p /var/lib/dietpi/dietpi-ramlog
+	mkdir -p /var/lib/dietpi/dietpi-ramlog/storage
+
+	#mkdir -p /var/lib/dietpi/dietpi-software
+	mkdir -p /var/lib/dietpi/dietpi-software/installed		#Additional storage for installed apps, eg: custom scripts and data
+
+	# - /var/tmp/dietpi : Temp storage saved during reboots, eg: logs outside of /var/log
+	mkdir -p /var/tmp/dietpi/logs
+	chown dietpi:dietpi /var/tmp/dietpi
+	chmod 660 /var/tmp/dietpi
+
+	# - /DietPi RAMdisk
+	mkdir -p /DietPi
+	chown dietpi:dietpi /DietPi
+	chmod 660 /DietPi
+
+	# - /mnt/dietpi_userdata : DietPi userdata
+	mkdir -p "$G_FP_DIETPI_USERDATA"
+	chown dietpi:dietpi "$G_FP_DIETPI_USERDATA"
+	chmod -R 775 "$G_FP_DIETPI_USERDATA"
+
+	# - Networked drives
+	mkdir -p /mnt/samba
+	mkdir -p /mnt/ftp_client
+	mkdir -p /mnt/nfs_client
+
+	#-----------------------------------------------------------------------------------
+	#Services
+
+	G_DIETPI-NOTIFY 2 'Configuring DietPi Services:'
+
+	systemctl enable dietpi-ramlog
+	systemctl enable dietpi-boot
+	systemctl enable dietpi-postboot
+	systemctl enable kill-ssh-user-sessions-before-network
+
+	#-----------------------------------------------------------------------------------
+	#Cron Jobs
+
+	G_DIETPI-NOTIFY 2 "Configuring Cron:"
+
+	mkdir -p /etc/cron.minutely #: https://github.com/Fourdee/DietPi/pull/1578
+
+	cat << _EOF_ > /etc/crontab
+#Please use dietpi-cron to change cron start times
+SHELL=/bin/sh
+PATH=/usr/local/sbin:/usr/local/bin:/sbin:/bin:/usr/sbin:/usr/bin
+
+# m h dom mon dow user  command
+*/30 * * * *   root    cd / && run-parts --report /etc/cron.minutely
+17 *    * * *   root    cd / && run-parts --report /etc/cron.hourly
+25 1    * * *   root    test -x /usr/sbin/anacron || ( cd / && run-parts --report /etc/cron.daily )
+47 1    * * 7   root    test -x /usr/sbin/anacron || ( cd / && run-parts --report /etc/cron.weekly )
+52 1    1 * *   root    test -x /usr/sbin/anacron || ( cd / && run-parts --report /etc/cron.monthly )
+_EOF_
+
+	# - ntp
+	rm /etc/cron.daily/ntp &> /dev/null
+
+	#-----------------------------------------------------------------------------------
+	#Network
+
+	G_DIETPI-NOTIFY 2 "Configuring: prefer wlan/eth naming for networked devices:"
+
+	# - Prefer to use wlan/eth naming for networked devices (eg: stretch)
+	ln -sf /dev/null /etc/systemd/network/99-default.link
+	#	x86_64: kernel cmd line with GRUB
+	#	HW_ARCH not set at this stage within DietPi, using PREP_SYSTEM
+	if [ -f /etc/default/grub ]; then
+
+		sed -i '/^GRUB_CMDLINE_LINUX_DEFAULT=/c\GRUB_CMDLINE_LINUX_DEFAULT="consoleblank=0 quiet"' /etc/default/grub #ipv6.disable=1 # https://github.com/Fourdee/DietPi/pull/1419#issuecomment-360452027
+		sed -i '/^GRUB_CMDLINE_LINUX=/c\GRUB_CMDLINE_LINUX="net.ifnames=0"' /etc/default/grub
+		sed -i '/^GRUB_TIMEOUT=/c\GRUB_TIMEOUT=0' /etc/default/grub
+		update-grub
+
+	fi
+
+	#-----------------------------------------------------------------------------------
+	#MISC
+
+	if (( $G_DISTRO > 3 )); then
+
+		G_DIETPI-NOTIFY 2 'Disabling apt-daily services to prevent random APT cache lock:'
+
+		systemctl disable apt-daily.service &> /dev/null
+		systemctl disable apt-daily.timer &> /dev/null
+		systemctl disable apt-daily-upgrade.service &> /dev/null
+		systemctl disable apt-daily-upgrade.timer &> /dev/null
+		systemctl mask apt-daily.service &> /dev/null
+		systemctl mask apt-daily.timer &> /dev/null
+		systemctl mask apt-daily-upgrade.service &> /dev/null
+		systemctl mask apt-daily-upgrade.timer &> /dev/null
+
+	fi
 
 	echo -e 'Samba client can be installed and setup by DietPi-Config.\nSimply run: dietpi-config and select the Networking option: NAS/Misc menu' > /mnt/samba/readme.txt
 	echo -e 'FTP client mount can be installed and setup by DietPi-Config.\nSimply run: dietpi-config and select the Networking option: NAS/Misc menu' > /mnt/ftp_client/readme.txt
@@ -1373,104 +1488,16 @@ _EOF_
 
 	fi
 
-	G_DIETPI-NOTIFY 2 'Generating dietpi-fs_partition_resize for first boot'
-
-	cat << _EOF_ > /etc/systemd/system/dietpi-fs_partition_resize.service
-[Unit]
-Description=dietpi-fs_partition_resize
-Before=dietpi-ramdisk.service
-
-[Service]
-Type=oneshot
-RemainAfterExit=no
-ExecStart=/bin/bash -c '/var/lib/dietpi/fs_partition_resize.sh | tee /var/tmp/dietpi/logs/fs_partition_resize.log'
-StandardOutput=tty
-
-[Install]
-WantedBy=local-fs.target
-_EOF_
-	systemctl daemon-reload
-	G_RUN_CMD systemctl enable dietpi-fs_partition_resize
-
-	cat << _EOF_ > /var/lib/dietpi/fs_partition_resize.sh
-#!/bin/bash
-
-systemctl disable dietpi-fs_partition_resize
-systemctl daemon-reload
-
-sync
-
-TARGET_PARTITION=0
-TARGET_DEV=\$(findmnt / -o source -n)
-
-# - MMCBLK[0-9]p[0-9] scrape
-if [[ "\$TARGET_DEV" = *"mmcblk"* ]]; then
-
-    TARGET_DEV=\$(findmnt / -o source -n | sed 's/p[0-9]\$//')
-	TARGET_PARTITION=\$(findmnt / -o source -n | sed 's/.*p//')
-
-# - Everything else scrape (eg: /dev/sdX[0-9])
-else
-
-    TARGET_DEV=\$(findmnt / -o source -n | sed 's/[0-9]\$//')
-	TARGET_PARTITION=\$(findmnt / -o source -n | sed 's|/dev/sd.||')
-
-fi
-
-#Rock64 GPT resize | modified version of ayufan-rock64 resize script. I take no credit for this.
-if [[ -f /etc/.dietpi_hw_model_identifier ]] && (( \$(cat /etc/.dietpi_hw_model_identifier) == 43 )); then
-
-    gdisk \$TARGET_DEV << _EOF_1
-x
-e
-m
-d
-\$TARGET_PARTITION
-n
-\$TARGET_PARTITION
-
-
-8300
-c
-\$TARGET_PARTITION
-root
-w
-Y
-_EOF_1
-
-#Everything else
-else
-
-    cat << _EOF_1 | fdisk \$TARGET_DEV
-p
-d
-\$TARGET_PARTITION
-n
-p
-\$TARGET_PARTITION
-\$(parted \$TARGET_DEV -ms unit s p | grep ':ext4::;' | sed 's/:/ /g' | sed 's/s//g' | awk '{ print \$2 }')
-
-p
-w
-
-_EOF_1
-
-fi
-
-partprobe \$TARGET_DEV
-
-resize2fs \${TARGET_DEV}p\$TARGET_PARTITION
-
-_EOF_
-	G_RUN_CMD chmod +x /var/lib/dietpi/fs_partition_resize.sh
-
-
 	# - BBB remove fsexpansion: https://github.com/Fourdee/DietPi/issues/931#issuecomment-345451529
 	if (( $G_HW_MODEL == 71 )); then
 
-		rm /var/lib/dietpi/fs_partition_resize.sh
 		rm /etc/systemd/system/dietpi-fs_partition_resize.service
+		rm /var/lib/dietpi/services/fs_partition_resize.sh
 		systemctl daemon-reload
+
+	else
+
+		l_message='Enabling dietpi-fs_partition_resize for first boot' G_RUN_CMD systemctl enable dietpi-fs_partition_resize
 
 	fi
 
