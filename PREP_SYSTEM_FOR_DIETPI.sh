@@ -654,7 +654,6 @@ _EOF_
 		'nano'			# Simple text editor
 		'net-tools'		# Classic network commands: ifconfig, route, netstat
 		'ntfs-3g'		# DietPi-Drive_Manager NTPS (Windows) file system support
-		'ntp'			# Network time syncronization
 		'p7zip-full'		# .7z wrapper
 		'parted'		# DietPi-Boot + DietPi-Drive_Manager
 		'psmisc'		# DietPi-Boot + DietPi-Software: e.g. killall

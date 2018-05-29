@@ -26,11 +26,7 @@
 
 	#Grab Input
 	INPUT=0
-	if G_CHECK_VALIDINT $1; then
-
-		INPUT=$1
-
-	fi
+	G_CHECK_VALIDINT $1 && INPUT=$1
 
 	#/////////////////////////////////////////////////////////////////////////////////////
 	# Globals
@@ -54,154 +50,142 @@
 
 	Apply_Process_Tool(){
 
-		G_DIETPI-NOTIFY 3 "$G_PROGRAM_NAME" Apply
+		G_DIETPI-NOTIFY 3 "$G_PROGRAM_NAME" 'Apply'
 
 		local status_text=''
 		local status_text_ok="$(G_DIETPI-NOTIFY 0)"
 		local status_text_failed="$(G_DIETPI-NOTIFY 1)"
 
+		#Update process list again (incase of PID changes via forking processes, during init of this script)
+		ps cax > $FP_PS_LIST
+
+		# - Control verbosity of output
+		local print_info=0
+		if (( $HIERARCHY <= 1 )); then
+
+			print_info=1
+
+		fi
+
 		for ((i=0; i<$MAX_PROGRAMS; i++))
 		do
 
-			if (( ${aAVAILABLE[$i]} == 1 )); then
+			if (( ${aAVAILABLE[$i]} )); then
 
-				# - Find all processes with target name
-				grep "${aPROCESS_NAME[$i]}" "$FP_PS_LIST" | awk '{print $1}' > "$FP_TEMP"
+				# - Find all processes with target name, send PID to $FP_TEMP for later use
+				grep "${aPROCESS_NAME[$i]}" $FP_PS_LIST | awk '{print $1}' > $FP_TEMP
 				while read -r line
 				do
 
 					#Obtain PID
 					aPID[$i]=$line
 
-					# - Control verbosity of output
-					local print_info=0
-					if (( $HIERARCHY <= 1 )); then
+					# - nice
+					renice -n ${aNICE[$i]} ${aPID[$i]} &> /dev/null
+					if (( ! $? )); then
 
+						status_text=$status_text_ok
+
+					else
+
+						status_text=$status_text_failed
+						EXIT_CODE=1
 						print_info=1
 
 					fi
 
-					# - Check if PID exists (this can occur with programs like netdata that run as root initally, create a new process under a different user, then terminate the original root process.
-					if (( $print_info &&
-						! $( ps ax | awk '{print $1}' | grep -ci -m1 "${aPID[$i]}") )); then
+					if (( $print_info )); then
 
-						G_DIETPI-NOTIFY 2 "${aNAME[$i]} (${aPID[$i]}): PID no longer exists"
-
-					else
-
-						# - nice
-						renice -n ${aNICE[$i]} ${aPID[$i]} &> /dev/null
-						if (( $? == 0 )); then
-
-							status_text=$status_text_ok
-
-						else
-
-							status_text=$status_text_failed
-							EXIT_CODE=1
-							print_info=1
-
-						fi
-
-						if (( $print_info )); then
-
-							status_text+="${aNAME[$i]} (${aPID[$i]}) : \e[90mNice      ${aNICE[$i]}\e[0m"
-							echo -e "$status_text"
-
-						fi
-
-						# - Affinity
-						taskset -pc ${aAFFINITY[$i]} ${aPID[$i]} &> /dev/null
-						if (( $? == 0 )); then
-
-							status_text=$status_text_ok
-
-						else
-
-							status_text=$status_text_failed
-							EXIT_CODE=2
-							print_info=1
-
-						fi
-
-						if (( $print_info )); then
-
-							status_text+="${aNAME[$i]} (${aPID[$i]}) : \e[90mAffinity  ${aAFFINITY[$i]}\e[0m"
-							echo -e "$status_text"
-
-						fi
-
-						# - schedule
-						# -- Match scheduler policy to array list of available
-						for ((j=0; j<$MAX_SCHEDULE_POLICIES; j++))
-						do
-
-							if [[ "${aSCHEDULE_POLICY[$i]}" = "${aSCHEDULE_AVAILABLE_POLICY[$j]}" ]]; then
-
-								# -- cap to min/max against array of available
-								if (( ${aSCHEDULE_PRIORITY[$i]} < ${aSCHEDULE_AVAILABLE_PRIORITY_MIN[$j]} ||
-									${aSCHEDULE_PRIORITY[$i]} > ${aSCHEDULE_AVAILABLE_PRIORITY_MAX[$j]} )); then
-
-									aSCHEDULE_PRIORITY[$i]=${aSCHEDULE_AVAILABLE_PRIORITY_MIN[$j]}
-
-								fi
-
-								break
-
-							fi
-
-						done
-
-						local chrt_mode=''
-						if [[ "${aSCHEDULE_POLICY[$i]}" = 'SCHED_OTHER' ]]; then
-
-							chrt_mode='-o'
-
-						elif [[ "${aSCHEDULE_POLICY[$i]}" = 'SCHED_FIFO' ]]; then
-
-							chrt_mode='-f'
-
-						elif [[ "${aSCHEDULE_POLICY[$i]}" = 'SCHED_RR' ]]; then
-
-							chrt_mode='-r'
-
-						elif [[ "${aSCHEDULE_POLICY[$i]}" = 'SCHED_BATCH' ]]; then
-
-							chrt_mode='-b'
-
-						elif [[ "${aSCHEDULE_POLICY[$i]}" = 'SCHED_IDLE' ]]; then
-
-							chrt_mode='-i'
-
-						fi
-
-						# - Apply
-						chrt $chrt_mode -p ${aSCHEDULE_PRIORITY[$i]} ${aPID[$i]} &> /dev/null
-
-						if (( $? == 0 )); then
-
-							status_text=$status_text_ok
-
-						else
-
-							status_text=$status_text_failed
-							EXIT_CODE=3
-							print_info=1
-
-						fi
-
-						if (( $print_info )); then
-
-							status_text+="${aNAME[$i]} (${aPID[$i]}) : \e[90mScheduler ${aSCHEDULE_POLICY[$i]} ${aSCHEDULE_PRIORITY[$i]}\e[0m"
-							echo -e "$status_text"
-
-						fi
+						status_text+="${aNAME[$i]} (${aPID[$i]}) : \e[90mNice      ${aNICE[$i]}\e[0m"
+						echo -e "$status_text"
 
 					fi
 
-				done < "$FP_TEMP"
+					# - Affinity
+					taskset -pc ${aAFFINITY[$i]} ${aPID[$i]} &> /dev/null
+					if (( ! $? )); then
 
-				rm "$FP_TEMP"
+						status_text=$status_text_ok
+
+					else
+
+						status_text=$status_text_failed
+						EXIT_CODE=2
+						print_info=1
+
+					fi
+
+					if (( $print_info )); then
+
+						status_text+="${aNAME[$i]} (${aPID[$i]}) : \e[90mAffinity  ${aAFFINITY[$i]}\e[0m"
+						echo -e "$status_text"
+
+					fi
+
+					# - schedule
+					# -- Match scheduler policy to array list of available
+					for ((j=0; j<$MAX_SCHEDULE_POLICIES; j++))
+					do
+
+						if [[ ${aSCHEDULE_POLICY[$i]} == ${aSCHEDULE_AVAILABLE_POLICY[$j]} ]]; then
+
+							# -- cap to min/max against array of available
+							if (( ${aSCHEDULE_PRIORITY[$i]} < ${aSCHEDULE_AVAILABLE_PRIORITY_MIN[$j]} ||
+								${aSCHEDULE_PRIORITY[$i]} > ${aSCHEDULE_AVAILABLE_PRIORITY_MAX[$j]} )); then
+
+								aSCHEDULE_PRIORITY[$i]=${aSCHEDULE_AVAILABLE_PRIORITY_MIN[$j]}
+
+							fi
+
+							break
+
+						fi
+
+					done
+
+					local chrt_mode='-o' #SCHED_OTHER
+					if [[ ${aSCHEDULE_POLICY[$i]} == 'SCHED_FIFO' ]]; then
+
+						chrt_mode='-f'
+
+					elif [[ ${aSCHEDULE_POLICY[$i]} == 'SCHED_RR' ]]; then
+
+						chrt_mode='-r'
+
+					elif [[ ${aSCHEDULE_POLICY[$i]} == 'SCHED_BATCH' ]]; then
+
+						chrt_mode='-b'
+
+					elif [[ ${aSCHEDULE_POLICY[$i]} == 'SCHED_IDLE' ]]; then
+
+						chrt_mode='-i'
+
+					fi
+
+					# - Apply
+					chrt $chrt_mode -p ${aSCHEDULE_PRIORITY[$i]} ${aPID[$i]} &> /dev/null
+					if (( ! $? )); then
+
+						status_text=$status_text_ok
+
+					else
+
+						status_text=$status_text_failed
+						EXIT_CODE=3
+						print_info=1
+
+					fi
+
+					if (( $print_info )); then
+
+						status_text+="${aNAME[$i]} (${aPID[$i]}) : \e[90mScheduler ${aSCHEDULE_POLICY[$i]} ${aSCHEDULE_PRIORITY[$i]}\e[0m"
+						echo -e "$status_text"
+
+					fi
+
+				done < $FP_TEMP
+
+				rm $FP_TEMP
 
 			fi
 
@@ -324,10 +308,11 @@
 		aNAME[$index]='WiFi Monitor';aPROCESS_NAME[$index]='dietpi-wifi-monitor.sh';((index++))
 		aNAME[$index]='VirtualHere';aPROCESS_NAME[$index]='vhusbd';((index++))
 		aNAME[$index]='YaCy search engine';aPROCESS_NAME[$index]='yacy';((index++))
+
 		# Add processes from include file:
-		# - File lines must have the format: <aNAME>[[:blank:]]<aPROCESS_NAME>
+		# - File lines must have the format: <aNAME>:<aPROCESS_NAME>
 		local fp_include='/DietPi/dietpi/.dietpi-process_tool_include'
-		if [ -f "$fp_include" ]; then
+		if [[ -f $fp_include ]]; then
 
 			while read line
 			do
@@ -336,19 +321,19 @@
 				aPROCESS_NAME[$index]="$(sed 's/^.*://' <<< $line)"
 				((index++))
 
-			done < "$fp_include"
+			done < $fp_include
 
 		fi
 		MAX_PROGRAMS=${#aNAME[@]}
 
 		# - Find out which programs are running (impies installed) | exclude kernel threads ([])
-		ps ax | grep -v '\[' > "$FP_PS_LIST"
+		ps cax > $FP_PS_LIST
 
 		# - Enable affinity for all cores and all programs by default
 		local init_affinity_value=0
 		if (( $(nproc --all) > 1 )); then
 
-			init_affinity_value="0-$(( $(nproc --all) - 1))"
+			init_affinity_value="0-$(( $(nproc --all) - 1 ))"
 
 		fi
 
@@ -364,7 +349,7 @@
 			aAVAILABLE[$i]=0
 
 			# - Obtain list of available programs
-			if (( $(cat "$FP_PS_LIST" | awk '{string=""; for (i=5; i<=NF; i++) string=string $i " "; print string}' | grep -ci -m1 "${aPROCESS_NAME[$i]}") == 1 )); then
+			if cat "$FP_PS_LIST" | awk '{string=""; for (i=5; i<=NF; i++) string=string $i " "; print string}' | grep -qi "${aPROCESS_NAME[$i]}"; then
 
 				aAVAILABLE[$i]=1
 
@@ -380,29 +365,29 @@
 		done
 
 		#Obtain list of available system schedulers/priorites
-		chrt -m > "$FP_TEMP"
+		chrt -m > $FP_TEMP
 
 		index=0
 		while read line
 		do
 
 			# - available schedulers
-			aSCHEDULE_AVAILABLE_POLICY[$index]=$(echo -e "$line" | awk '{print $1}')
+			aSCHEDULE_AVAILABLE_POLICY[$index]=$(awk '{print $1}' <<< "$line")
 
 			# - available priorities
 			# -- min
-			aSCHEDULE_AVAILABLE_PRIORITY_MIN[$index]=$(echo -e "$line" | sed 's/.*: //' | sed 's/\// /' | awk '{print $1}')
+			aSCHEDULE_AVAILABLE_PRIORITY_MIN[$index]=$(sed 's/.*: //' <<< "$line" | sed 's/\// /' | awk '{print $1}')
 			# -- max
-			aSCHEDULE_AVAILABLE_PRIORITY_MAX[$index]=$(echo -e "$line" | sed 's/.*: //' | sed 's/\// /' | awk '{print $2}')
+			aSCHEDULE_AVAILABLE_PRIORITY_MAX[$index]=$(sed 's/.*: //' <<< "$line" | sed 's/\// /' | awk '{print $2}')
 
 			((index++))
 
-		done < "$FP_TEMP"
+		done < $FP_TEMP
 		MAX_SCHEDULE_POLICIES=${#aSCHEDULE_AVAILABLE_POLICY[@]}
 
 		#--------------------------------------------------------------------------------
 		#Load Settings file. Generate if required.
-		if [ ! -f "$FP_SETTINGS" ]; then
+		if [[ -z $FP_SETTINGS ]]; then
 
 			Write_Settings_File
 
@@ -432,7 +417,7 @@
 		local aschedule_priority_save=()
 
 		#Match saved items to current array, then update their settings.
-		. "$FP_SETTINGS"
+		. $FP_SETTINGS
 		for ((i=0; i<${#aname_save[@]}; i++))
 		do
 
@@ -463,7 +448,7 @@
 
 	Write_Settings_File(){
 
-		rm "$FP_SETTINGS" &> /dev/null
+		rm $FP_SETTINGS &> /dev/null
 
 		local save_index=0
 		for ((i=0; i<$MAX_PROGRAMS; i++))
@@ -497,7 +482,7 @@ _EOF_
 
 		G_WHIP_SIZE_X_MAX=50
 		G_WHIP_YESNO "Exit $G_PROGRAM_NAME?"
-		if (( $? == 0 )); then
+		if (( ! $? )); then
 
 			#exit
 			TARGETMENUID=-1
@@ -520,7 +505,7 @@ _EOF_
 		for ((i=0; i<$MAX_PROGRAMS; i++))
 		do
 
-			if (( ${aAVAILABLE[$i]} == 1 )); then
+			if (( ${aAVAILABLE[$i]} )); then
 
 				G_WHIP_MENU_ARRAY+=("${aNAME[$i]}" ": Nice ${aNICE[$i]} | Affinity ${aAFFINITY[$i]}")
 
@@ -531,7 +516,7 @@ _EOF_
 		G_WHIP_DEFAULT_ITEM="$LAST_SELECTED_NAME"
 		G_WHIP_BUTTON_CANCEL_TEXT='Exit'
 		G_WHIP_MENU 'Please select a program:'
-		if (( $? == 0 )); then
+		if (( ! $? )); then
 
 			LAST_SELECTED_NAME=$G_WHIP_RETURNED_VALUE
 
@@ -540,7 +525,7 @@ _EOF_
 			for ((i=0; i<$MAX_PROGRAMS; i++))
 			do
 
-				if [[ "${aNAME[$i]}" = "$G_WHIP_RETURNED_VALUE" ]]; then
+				if [[ ${aNAME[$i]} == $G_WHIP_RETURNED_VALUE ]]; then
 
 					index_current=$i
 					break
@@ -550,7 +535,7 @@ _EOF_
 			done
 
 			#Installed?
-			if (( ${aAVAILABLE[$index_current]} == 0 )); then
+			if (( ! ${aAVAILABLE[$index_current]} )); then
 
 				G_WHIP_MSG "${aNAME[$index_current]} is not running and/or installed."
 
@@ -558,33 +543,29 @@ _EOF_
 			else
 
 				#return back to this section.
-				local run_loop=1
-
-				while (( $run_loop == 1 ))
+				while true
 				do
 
 					#menu, choose nice/affinity etc
 					G_WHIP_MENU_ARRAY=(
 
-						"Nice" ": ${aNICE[$index_current]}"
-						"Affinity" ": ${aAFFINITY[$index_current]}"
-						"Schedule Policy" ": ${aSCHEDULE_POLICY[$index_current]}"
-						"Schedule Priority" ": ${aSCHEDULE_PRIORITY[$index_current]}"
+						'Nice' ": ${aNICE[$index_current]}"
+						'Affinity' ": ${aAFFINITY[$index_current]}"
+						'Schedule Policy' ": ${aSCHEDULE_POLICY[$index_current]}"
+						'Schedule Priority' ": ${aSCHEDULE_PRIORITY[$index_current]}"
 
 					)
 
 					G_WHIP_MENU "Please select an option for ${aNAME[$index_current]}:"
-					if (( $? == 0 )); then
+					if (( ! $? )); then
 
 						case "$G_WHIP_RETURNED_VALUE" in
 
 							'Nice')
 
 								#Get existing nice level
-								local nice_current=0
-
 								# - note: Whiptail will not work with negative numbers. The string cannot start with "-" as it throws subscript error.
-								nice_current="Nice : ${aNICE[$index_current]}"
+								local nice_current="Nice : ${aNICE[$index_current]}"
 
 								G_WHIP_MENU_ARRAY=()
 
@@ -627,7 +608,7 @@ _EOF_
 
 								G_WHIP_DEFAULT_ITEM="$nice_current"
 								G_WHIP_MENU "Please select your nice level for:\n${aNAME[$index_current]}\n\nInfo:\n - Negative values have a higher priority (eg: -10).\n - Positive values have a lower priority (eg: 15).\n - The default value is 0."
-								if (( $? == 0 )); then
+								if (( ! $? )); then
 
 									#Convert back to int
 									aNICE[$index_current]=$(echo "$G_WHIP_RETURNED_VALUE" | sed 's/[A-Za-z :]*//g')
@@ -648,12 +629,12 @@ _EOF_
 								for ((i=0; i<$(nproc --all); i++))
 								do
 
-									G_WHIP_CHECKLIST_ARRAY+=("$i" "CPU                           " "on")
+									G_WHIP_CHECKLIST_ARRAY+=($i 'CPU                           ' 'on')
 
 								done
 
 								G_WHIP_CHECKLIST "Please select a CPU affinity for:\n${aNAME[$index_current]}\n\n- Use the spacebar to enable/disable access to specific cores, for this program.\n- The default value is to enable all items."
-								if (( $? == 0 )); then
+								if (( ! $? )); then
 
 									local new_affinity=''
 									local loop_count=0
@@ -678,7 +659,7 @@ _EOF_
 									done
 
 									#Update affinity array with new value, if at least 1 item was selected.
-									if [ "$new_affinity" != "" ] ; then
+									if [[ -n $new_affinity ]] ; then
 
 										aAFFINITY[$index_current]="$new_affinity"
 
@@ -699,23 +680,23 @@ _EOF_
 								for ((i=0; i<$MAX_SCHEDULE_POLICIES; i++))
 								do
 									# - add descriptions
-									if [ "${aSCHEDULE_AVAILABLE_POLICY[$i]}" = "SCHED_OTHER" ]; then
+									if [[ ${aSCHEDULE_AVAILABLE_POLICY[$i]} == 'SCHED_OTHER' ]]; then
 
 										description='Normal (Default)'
 
-									elif [ "${aSCHEDULE_AVAILABLE_POLICY[$i]}" = "SCHED_FIFO" ]; then
+									elif [[ ${aSCHEDULE_AVAILABLE_POLICY[$i]} == 'SCHED_FIFO' ]]; then
 
 										description='First In, First Out (Real-time, time-critical)'
 
-									elif [ "${aSCHEDULE_AVAILABLE_POLICY[$i]}" = "SCHED_RR" ]; then
+									elif [[ ${aSCHEDULE_AVAILABLE_POLICY[$i]} == 'SCHED_RR' ]]; then
 
 										description='Round Robin (Real-time, time-critical)'
 
-									elif [ "${aSCHEDULE_AVAILABLE_POLICY[$i]}" = "SCHED_BATCH" ]; then
+									elif [[ ${aSCHEDULE_AVAILABLE_POLICY[$i]} == 'SCHED_BATCH' ]]; then
 
 										description='Batch style execution'
 
-									elif [ "${aSCHEDULE_AVAILABLE_POLICY[$i]}" = "SCHED_IDLE" ]; then
+									elif [[ ${aSCHEDULE_AVAILABLE_POLICY[$i]} == 'SCHED_IDLE' ]]; then
 
 										description='Background Jobs (Very low priority)'
 
@@ -727,7 +708,7 @@ _EOF_
 
 								G_WHIP_DEFAULT_ITEM="${aSCHEDULE_POLICY[$index_current]}"
 								G_WHIP_MENU "Please select a Schedule Policy for :\n${aNAME[$index_current]}"
-								if (( $? == 0 )); then
+								if (( ! $? )); then
 
 									aSCHEDULE_POLICY[$index_current]=$G_WHIP_RETURNED_VALUE
 
@@ -745,7 +726,7 @@ _EOF_
 								for ((i=0; i<$MAX_SCHEDULE_POLICIES; i++))
 								do
 
-									if [ "${aSCHEDULE_POLICY[$index_current]}" = "${aSCHEDULE_AVAILABLE_POLICY[$i]}" ]; then
+									if [[ ${aSCHEDULE_POLICY[$index_current]} == ${aSCHEDULE_AVAILABLE_POLICY[$i]} ]]; then
 
 										index_schedule=$i
 										break
@@ -812,7 +793,7 @@ _EOF_
 
 									G_WHIP_DEFAULT_ITEM="${aSCHEDULE_PRIORITY[$index_current]}"
 									G_WHIP_MENU "Please select a Schedule Priority level for :\n${aNAME[$index_current]}\n\n - Lower values are low priority\n - Higher values are high priority"
-									if (( $? == 0 )); then
+									if (( ! $? )); then
 
 										aSCHEDULE_PRIORITY[$index_current]=$G_WHIP_RETURNED_VALUE
 
@@ -830,7 +811,7 @@ _EOF_
 					#Return to main menu
 					else
 
-						run_loop=0
+						break
 
 					fi
 
@@ -876,13 +857,14 @@ _EOF_
 	elif (( $INPUT == 1 )); then
 
 		Apply_Process_Tool
+		#Write_Settings_File #Chance of deleteing user setting, if the process does not exist from scrape
 		G_DIETPI-NOTIFY -1 ${EXIT_CODE:=0} "$G_PROGRAM_NAME |"
 
 	fi
 	#-----------------------------------------------------------------------------------
 	#Del tmp files
-	rm "$FP_TEMP" &> /dev/null
-	rm "$FP_PS_LIST" &> /dev/null
+	rm $FP_TEMP &> /dev/null
+	rm $FP_PS_LIST &> /dev/null
 	#-----------------------------------------------------------------------------------
 	#Delete[] Global arrays
 	unset aNICE
