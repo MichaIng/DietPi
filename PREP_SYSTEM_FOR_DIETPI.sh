@@ -364,6 +364,7 @@
 		'20' 'x86_64 VMware/VirtualBox'
 		'' '────SBC─(Limited support devices)──────'
 		'52' 'Asus Tinker Board'
+		'54' 'BananaPi M2 Zero (sinovip)'
 		'53' 'BananaPi (sinovoip)'
 		'51' 'BananaPi Pro (Lemaker)'
 		'50' 'BananaPi M2+ (sinovoip)'
