@@ -234,7 +234,7 @@
 		G_RUN_CMD systemctl stop dietpi-ramlog
 		G_RUN_CMD systemctl stop dietpi-ramdisk
 
-		# - Delete any previous exsiting data
+		# - Delete any previous existing data
 		rm -R /DietPi/*
 		rm -R /boot/dietpi
 
@@ -542,9 +542,11 @@
 	rm "DietPi-$GIT_BRANCH/dietpi/patch_file"
 	rm DietPi-"$GIT_BRANCH"/dietpi/server_version*
 
-	l_message='Move DietPi core to /boot/dietpi' G_RUN_CMD mv DietPi-"$GIT_BRANCH"/dietpi /boot/
+	l_message='Move DietPi core to /boot/dietpi' G_RUN_CMD mv "DietPi-$GIT_BRANCH/dietpi" /boot/
 
 	l_message='Copy rootfs files in place' G_RUN_CMD cp -Rf DietPi-"$GIT_BRANCH"/rootfs/. /
+
+	l_message='Clean download location' G_RUN_CMD rm -R "DietPi-$GITBRANCH"
 
 	l_message='Set execute permissions for DietPi scripts' G_RUN_CMD chmod -R +x /boot/dietpi /etc/cron.*/dietpi /var/lib/dietpi/services
 
@@ -1058,10 +1060,10 @@ _EOF_
 
 	G_DIETPI-NOTIFY 2 'Configuring DietPi Services:'
 
-	systemctl enable dietpi-ramlog
-	systemctl enable dietpi-boot
-	systemctl enable dietpi-postboot
-	systemctl enable kill-ssh-user-sessions-before-network
+	G_RUN_CMD systemctl enable dietpi-ramlog
+	G_RUN_CMD systemctl enable dietpi-boot
+	G_RUN_CMD systemctl enable dietpi-postboot
+	G_RUN_CMD systemctl enable kill-ssh-user-sessions-before-network
 
 	#-----------------------------------------------------------------------------------
 	#Cron Jobs
@@ -1095,11 +1097,11 @@ _EOF_
 	ln -sf /dev/null /etc/systemd/network/99-default.link
 	#	x86_64: kernel cmd line with GRUB
 	#	HW_ARCH not set at this stage within DietPi, using PREP_SYSTEM
-	if [ -f /etc/default/grub ]; then
+	if [[ -f /etc/default/grub ]]; then
 
-		sed -i '/^GRUB_CMDLINE_LINUX_DEFAULT=/c\GRUB_CMDLINE_LINUX_DEFAULT="consoleblank=0 quiet"' /etc/default/grub #ipv6.disable=1 # https://github.com/Fourdee/DietPi/pull/1419#issuecomment-360452027
-		sed -i '/^GRUB_CMDLINE_LINUX=/c\GRUB_CMDLINE_LINUX="net.ifnames=0"' /etc/default/grub
-		sed -i '/^GRUB_TIMEOUT=/c\GRUB_TIMEOUT=0' /etc/default/grub
+		G_CONFIG_INJECT 'GRUB_CMDLINE_LINUX_DEFAULT=' 'GRUB_CMDLINE_LINUX_DEFAULT=\"consoleblank=0 quiet\"' /etc/default/grub
+		G_CONFIG_INJECT 'GRUB_CMDLINE_LINUX=' 'GRUB_CMDLINE_LINUX=\"net\.ifnames=0\"' /etc/default/grub
+		G_CONFIG_INJECT 'GRUB_TIMEOUT=' 'GRUB_TIMEOUT=0' /etc/default/grub
 		update-grub
 
 	fi
@@ -1160,14 +1162,8 @@ _EOF_
 	G_DIETPI-NOTIFY 2 'Tweaking DHCP timeout:'
 
 	# - Reduce DHCP request retry count and timeouts: https://github.com/Fourdee/DietPi/issues/711
-	sed -i '/^#timeout /d' /etc/dhcp/dhclient.conf
-	sed -i '/^#retry /d' /etc/dhcp/dhclient.conf
-	sed -i '/^timeout /d' /etc/dhcp/dhclient.conf
-	sed -i '/^retry /d' /etc/dhcp/dhclient.conf
-	cat << _EOF_ >> /etc/dhcp/dhclient.conf
-timeout 10;
-retry 4;
-_EOF_
+	G_CONFIG_INJECT 'timeout[[:blank:]]' 'timeout 10;' /etc/dhcp/dhclient.conf
+	G_CONFIG_INJECT 'retry[[:blank:]]' 'retry 4;' /etc/dhcp/dhclient.conf
 
 	G_DIETPI-NOTIFY 2 'Configuring hosts:'
 
@@ -1182,12 +1178,7 @@ _EOF_
 	export G_ERROR_HANDLER_EXITCODE=$?
 	G_ERROR_HANDLER
 
-	export G_ERROR_HANDLER_COMMAND='/etc/hostname'
-	cat << _EOF_ > $G_ERROR_HANDLER_COMMAND
-DietPi
-_EOF_
-	export G_ERROR_HANDLER_EXITCODE=$?
-	G_ERROR_HANDLER
+	G_RUN_CMD echo 'DietPi' > /etc/hostname
 
 	G_DIETPI-NOTIFY 2 'Configuring htop:'
 
@@ -1197,23 +1188,21 @@ _EOF_
 	G_DIETPI-NOTIFY 2 'Configuring fakehwclock:'
 
 	# - allow times in the past
-	sed -i '/FORCE=/c\FORCE=force' /etc/default/fake-hwclock
+	G_CONFIG_INJECT 'FORCE=' 'FORCE=force' /etc/default/fake-hwclock
 
 	G_DIETPI-NOTIFY 2 'Configuring serial console:'
 
 	/DietPi/dietpi/func/dietpi-set_hardware serialconsole enable
 	# - Disable for post-1st run setup:
-	sed -i '/^CONFIG_SERIAL_CONSOLE_ENABLE=/c\CONFIG_SERIAL_CONSOLE_ENABLE=0' /DietPi/dietpi.txt
+	sed -i '/^[[:blank:]]*CONFIG_SERIAL_CONSOLE_ENABLE=/c\CONFIG_SERIAL_CONSOLE_ENABLE=0' /DietPi/dietpi.txt
 
 	G_DIETPI-NOTIFY 2 'Reducing getty count and resource usage:'
 
 	systemctl mask getty-static
 
-	G_DIETPI-NOTIFY 2 'Configuring ntpd:'
+	G_DIETPI-NOTIFY 2 'Configuring time sync:'
 
 	systemctl disable systemd-timesyncd
-	rm /etc/init.d/ntp &> /dev/null
-	(( $G_DISTRO > 4 )) && systemctl mask ntp
 
 	G_DIETPI-NOTIFY 2 'Configuring regional settings (TZdata):'
 
@@ -1445,10 +1434,6 @@ _EOF_
 	G_DIETPI-NOTIFY 2 'Deleting DietPi-RAMlog storage'
 
 	rm -R /var/lib/dietpi/dietpi-ramlog/storage/* &> /dev/null
-
-	G_DIETPI-NOTIFY 2 'Deleting NTP drift file'
-
-	rm /var/lib/ntp/ntp.drift &> /dev/null
 
 	G_DIETPI-NOTIFY 2 'Resetting DietPi generated globals/files'
 
