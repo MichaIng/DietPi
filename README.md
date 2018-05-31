@@ -13,7 +13,7 @@
 
 ##### DietPi is available for:
 A wide range of SBC's and Virtual Machines, please see the below link for a full list:
-- http://dietpi.com/download
+- https://dietpi.com/download
 
 <hr>
 
