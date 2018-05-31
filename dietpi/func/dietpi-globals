@@ -848,11 +848,12 @@
 	# DietPi Error Handler
 	# https://github.com/Fourdee/DietPi/issues/1311#issuecomment-353716344
 	#-----------------------------------------------------------------------------------
-	G_ERROR_HANDLER_EXITCODE=''					#input value to use with G_ERROR_HANDLER
+	G_ERROR_HANDLER_EXITCODE=0					#input value to use with G_ERROR_HANDLER
 	G_ERROR_HANDLER_COMMAND=''					#eg: G_AGI: moooooooo
 	#	For export: On error, following entries will be used
 	G_ERROR_HANDLER_ONERROR_EXIT=1				#Do we exit the program when the error occurs? 0=no 1=yes
 	G_ERROR_HANDLER_ONERROR_FPLOGFILE=''		#FP to logfile, if available
+	G_ERROR_HANDLER_RETRY=0						#Used in func with while loop to re-run func as needed
 
 	#Runs automatically after G_ERROR_HANDLER to reset vars to default
 	G_ERROR_HANDLER_RESET(){
@@ -864,11 +865,15 @@
 		unset G_ERROR_HANDLER_ONERROR_EXIT
 		unset G_ERROR_HANDLER_ONERROR_FPLOGFILE
 
-		G_ERROR_HANDLER_EXITCODE=''
+		unset G_ERROR_HANDLER_RETRY
+
+		G_ERROR_HANDLER_EXITCODE=0
 		G_ERROR_HANDLER_COMMAND=''
 
 		G_ERROR_HANDLER_ONERROR_EXIT=1
 		G_ERROR_HANDLER_ONERROR_FPLOGFILE=''
+
+		G_ERROR_HANDLER_RETRY=0
 
 	}
 
@@ -882,6 +887,10 @@
 		if (( ! $G_ERROR_HANDLER_EXITCODE )); then
 
 			G_DIETPI-NOTIFY 0 "$l_message"
+
+			# - Reset for next run
+			G_ERROR_HANDLER_RETRY=0
+			G_ERROR_HANDLER_RESET
 
 		#Error
 		else
@@ -954,7 +963,34 @@
 
 				fi
 
-				whiptail --title 'DietPi Error Handler:' --msgbox "$whip_msg" --scrolltext 22 85
+				if (( $G_ERROR_HANDLER_RETRY )); then
+
+					G_ERROR_HANDLER_RETRY=0
+					local no_button_text='Ignore'
+					if (( $G_ERROR_HANDLER_ONERROR_EXIT )); then
+
+						no_button_text='Exit'
+
+					fi
+
+					whiptail --title 'DietPi Error Handler:' --yesno "$whip_msg" --yes-button 'Retry' --no-button "$no_button_text" --scrolltext 22 85
+					if (( ! $? )); then
+
+						G_ERROR_HANDLER_RETRY=1
+						G_ERROR_HANDLER_ONERROR_EXIT=0 #disable git ticket printout
+
+					fi
+
+				else
+
+					whiptail --title 'DietPi Error Handler:' --msgbox "$whip_msg" --scrolltext 22 85
+
+				fi
+
+			# - No user inputs, disable retry
+			else
+
+				G_ERROR_HANDLER_RETRY=0
 
 			fi
 
@@ -1016,9 +1052,6 @@ $print_logfile_info
 
 		return $G_ERROR_HANDLER_EXITCODE
 
-		# - Reset for next run
-		G_ERROR_HANDLER_RESET
-
 	}
 
 	#Run a command and send the output through the error handler. Allows for command used info, and log output/view when an error occurs
@@ -1032,16 +1065,22 @@ $print_logfile_info
 
 		G_ERROR_HANDLER_COMMAND="$@"
 
-		[[ $l_message ]] || local l_message="$G_ERROR_HANDLER_COMMAND"
-		G_DIETPI-NOTIFY -2 "$l_message"
+		G_ERROR_HANDLER_RETRY=1
+		while (( $G_ERROR_HANDLER_RETRY ))
+		do
 
-		$G_ERROR_HANDLER_COMMAND &> /tmp/G_ERROR_HANDLER_COMMAND
-		G_ERROR_HANDLER_EXITCODE=$?
-		G_ERROR_HANDLER_ONERROR_FPLOGFILE='/tmp/G_ERROR_HANDLER_COMMAND'
+			[[ $l_message ]] || local l_message="$G_ERROR_HANDLER_COMMAND"
+			G_DIETPI-NOTIFY -2 "$l_message"
 
-		G_ERROR_HANDLER
+			$G_ERROR_HANDLER_COMMAND &> /tmp/G_ERROR_HANDLER_COMMAND
+			G_ERROR_HANDLER_EXITCODE=$?
+			G_ERROR_HANDLER_ONERROR_FPLOGFILE='/tmp/G_ERROR_HANDLER_COMMAND'
 
-		rm /tmp/G_ERROR_HANDLER_COMMAND &> /dev/null
+			G_ERROR_HANDLER
+
+			rm /tmp/G_ERROR_HANDLER_COMMAND &> /dev/null
+
+		done
 
 	}
 
@@ -1057,7 +1096,6 @@ $print_logfile_info
 		local retry_max=5
 		local error_connection_failed=0
 
-		G_ERROR_HANDLER_EXITCODE=0
 		G_ERROR_HANDLER_COMMAND="Connection test: $string"
 		G_ERROR_HANDLER_ONERROR_FPLOGFILE='/tmp/G_CHECK_URL'
 
@@ -1143,7 +1181,6 @@ $print_logfile_info
 	G_FILE_EXISTS(){
 
 		G_ERROR_HANDLER_COMMAND="$@"
-		G_ERROR_HANDLER_EXITCODE=0
 
 		G_DIETPI-NOTIFY -2 "Checking for existance: $G_ERROR_HANDLER_COMMAND"
 
@@ -1200,20 +1237,24 @@ $print_logfile_info
 
 		fi
 
-		G_ERROR_HANDLER_EXITCODE=0
-		G_ERROR_HANDLER_COMMAND="G_AGI: $string"
-		G_ERROR_HANDLER_ONERROR_FPLOGFILE="$G_FP_LOG_APT"
+		G_ERROR_HANDLER_RETRY=1
+		while (( $G_ERROR_HANDLER_RETRY ))
+		do
 
+			G_ERROR_HANDLER_COMMAND="G_AGI: $string"
+			G_ERROR_HANDLER_ONERROR_FPLOGFILE="$G_FP_LOG_APT"
 
-		#-qq can add a slight period of appearing nothing is happening, lets inform user
-		G_DIETPI-NOTIFY 0 "APT installation for: \e[33m$string\e[0m, please wait..."
+			#-qq can add a slight period of appearing nothing is happening, lets inform user
+			G_DIETPI-NOTIFY 0 "APT installation for: \e[33m$string\e[0m, please wait..."
 
-		echo -ne "\e[90m"
-		DEBIAN_FRONTEND=noninteractive apt-get install -y -qq $force_options $string 2>&1 | tee "$G_FP_LOG_APT"
-		G_ERROR_HANDLER_EXITCODE=${PIPESTATUS[0]}
-		echo -e "\e[0m"
+			echo -ne "\e[90m"
+			DEBIAN_FRONTEND=noninteractive apt-get install -y -qq $force_options $string 2>&1 | tee "$G_FP_LOG_APT"
+			G_ERROR_HANDLER_EXITCODE=${PIPESTATUS[0]}
+			echo -e "\e[0m"
 
-		G_ERROR_HANDLER
+			G_ERROR_HANDLER
+
+		done
 
 		return $G_ERROR_HANDLER_EXITCODE
 
@@ -1226,7 +1267,6 @@ $print_logfile_info
 		G_CHECK_ROOT_USER 1
 
 		local string=( "$@" )
-		local exit_code=0
 		local options=''
 		if (( $G_DISTRO >= 4 )); then
 
@@ -1234,53 +1274,58 @@ $print_logfile_info
 
 		fi
 
-		G_ERROR_HANDLER_COMMAND="G_AGP: ${string[@]}"
-		G_ERROR_HANDLER_EXITCODE=0
-		G_ERROR_HANDLER_ONERROR_FPLOGFILE="$G_FP_LOG_APT"
+		G_ERROR_HANDLER_RETRY=1
+		while (( $G_ERROR_HANDLER_RETRY ))
+		do
 
-		# - Remove non-matching packages from string, which are not installed, to prevent failures.
-		# - Following checks are made:
-		#	match[[:space:]]
-		#	match: (eg: match:armhf)
-		#	match* (if wildcard is contained within input string)
-		local fp_temp='/tmp/.G_AGP_CHECK_PKG_INSTALLED'
-		local packages_to_remove=''
-		dpkg --get-selections > "$fp_temp"
-		local i=0
-		for i in "${string[@]}"; do
+			G_ERROR_HANDLER_COMMAND="G_AGP: ${string[@]}"
+			G_ERROR_HANDLER_ONERROR_FPLOGFILE="$G_FP_LOG_APT"
 
-			if (( $(grep -ci -m1 "^$i[[:space:]|:]" "$fp_temp") ||
-				( $(echo -e "$i" | grep -ci -m1 '*') && $(grep -ci -m1 "^$i" "$fp_temp") ) )); then #wildcard check
+			# - Remove non-matching packages from string, which are not installed, to prevent failures.
+			# - Following checks are made:
+			#	match[[:space:]]
+			#	match: (eg: match:armhf)
+			#	match* (if wildcard is contained within input string)
+			local fp_temp='/tmp/.G_AGP_CHECK_PKG_INSTALLED'
+			local packages_to_remove=''
+			dpkg --get-selections > "$fp_temp"
+			local i=0
+			for i in "${string[@]}"; do
 
-				packages_to_remove+="$i "
-				G_DIETPI-NOTIFY 2 "Install verified: $i"
+				if (( $(grep -ci -m1 "^$i[[:space:]|:]" "$fp_temp") ||
+					( $(echo -e "$i" | grep -ci -m1 '*') && $(grep -ci -m1 "^$i" "$fp_temp") ) )); then #wildcard check
+
+					packages_to_remove+="$i "
+					G_DIETPI-NOTIFY 2 "Install verified: $i"
+
+				else
+
+					G_DIETPI-NOTIFY 2 "Not installed, ignoring: $i"
+
+				fi
+
+			done
+
+			rm "$fp_temp"
+			unset string #habbit :)
+
+			if [[ $packages_to_remove ]]; then
+
+				G_DIETPI-NOTIFY 0 "APT removal for: \e[33m$packages_to_remove\e[0m, please wait..."
+				echo -ne "\e[90m"
+				DEBIAN_FRONTEND=noninteractive apt-get purge -y $packages_to_remove $options 2>&1 | tee "$G_FP_LOG_APT"
+				G_ERROR_HANDLER_EXITCODE=${PIPESTATUS[0]}
+				echo -e "\e[0m"
 
 			else
 
-				G_DIETPI-NOTIFY 2 "Not installed, ignoring: $i"
+				G_DIETPI-NOTIFY 2 "None of the requested packages are currently installed, aborting."
 
 			fi
 
+			G_ERROR_HANDLER
+
 		done
-
-		rm "$fp_temp"
-		unset string #habbit :)
-
-		if [[ $packages_to_remove ]]; then
-
-			G_DIETPI-NOTIFY 0 "APT removal for: \e[33m$packages_to_remove\e[0m, please wait..."
-			echo -ne "\e[90m"
-			DEBIAN_FRONTEND=noninteractive apt-get purge -y $packages_to_remove $options 2>&1 | tee "$G_FP_LOG_APT"
-			G_ERROR_HANDLER_EXITCODE=${PIPESTATUS[0]}
-			echo -e "\e[0m"
-
-		else
-
-			G_DIETPI-NOTIFY 2 "None of the requested packages are currently installed, aborting."
-
-		fi
-
-		G_ERROR_HANDLER
 
 		return $G_ERROR_HANDLER_EXITCODE
 
@@ -1292,18 +1337,23 @@ $print_logfile_info
 
 		G_CHECK_ROOT_USER 1
 
-		G_ERROR_HANDLER_EXITCODE=0
-		G_ERROR_HANDLER_COMMAND="G_AGA"
-		G_ERROR_HANDLER_ONERROR_FPLOGFILE="$G_FP_LOG_APT"
+		G_ERROR_HANDLER_RETRY=1
+		while (( $G_ERROR_HANDLER_RETRY ))
+		do
 
-		G_DIETPI-NOTIFY 0 'APT autoremove + purge, please wait...'
+			G_ERROR_HANDLER_COMMAND="G_AGA"
+			G_ERROR_HANDLER_ONERROR_FPLOGFILE="$G_FP_LOG_APT"
 
-		echo -ne "\e[90m"
-		DEBIAN_FRONTEND=noninteractive apt-get autoremove --purge -y 2>&1 | tee "$G_FP_LOG_APT"
-		G_ERROR_HANDLER_EXITCODE=${PIPESTATUS[0]}
-		echo -e "\e[0m"
+			G_DIETPI-NOTIFY 0 'APT autoremove + purge, please wait...'
 
-		G_ERROR_HANDLER
+			echo -ne "\e[90m"
+			DEBIAN_FRONTEND=noninteractive apt-get autoremove --purge -y 2>&1 | tee "$G_FP_LOG_APT"
+			G_ERROR_HANDLER_EXITCODE=${PIPESTATUS[0]}
+			echo -e "\e[0m"
+
+			G_ERROR_HANDLER
+
+		done
 
 		return $G_ERROR_HANDLER_EXITCODE
 
@@ -1315,18 +1365,23 @@ $print_logfile_info
 
 		G_CHECK_ROOT_USER 1
 
-		G_ERROR_HANDLER_EXITCODE=0
-		G_ERROR_HANDLER_COMMAND="G_AGF"
-		G_ERROR_HANDLER_ONERROR_FPLOGFILE="$G_FP_LOG_APT"
+		G_ERROR_HANDLER_RETRY=1
+		while (( $G_ERROR_HANDLER_RETRY ))
+		do
 
-		G_DIETPI-NOTIFY 0 'APT fix, please wait...'
+			G_ERROR_HANDLER_COMMAND="G_AGF"
+			G_ERROR_HANDLER_ONERROR_FPLOGFILE="$G_FP_LOG_APT"
 
-		echo -ne "\e[90m"
-		DEBIAN_FRONTEND=noninteractive apt-get install -f -y 2>&1 | tee "$G_FP_LOG_APT"
-		G_ERROR_HANDLER_EXITCODE=${PIPESTATUS[0]}
-		echo -e "\e[0m"
+			G_DIETPI-NOTIFY 0 'APT fix, please wait...'
 
-		G_ERROR_HANDLER
+			echo -ne "\e[90m"
+			DEBIAN_FRONTEND=noninteractive apt-get install -f -y 2>&1 | tee "$G_FP_LOG_APT"
+			G_ERROR_HANDLER_EXITCODE=${PIPESTATUS[0]}
+			echo -e "\e[0m"
+
+			G_ERROR_HANDLER
+
+		done
 
 		return $G_ERROR_HANDLER_EXITCODE
 
@@ -1338,19 +1393,24 @@ $print_logfile_info
 
 		G_CHECK_ROOT_USER 1
 
-		G_ERROR_HANDLER_EXITCODE=0
-		G_ERROR_HANDLER_COMMAND="G_AGUP"
-		G_ERROR_HANDLER_ONERROR_FPLOGFILE="$G_FP_LOG_APT"
+		G_ERROR_HANDLER_RETRY=1
+		while (( $G_ERROR_HANDLER_RETRY ))
+		do
 
- 		G_DIETPI-NOTIFY 0 'APT update, please wait...'
+			G_ERROR_HANDLER_COMMAND="G_AGUP"
+			G_ERROR_HANDLER_ONERROR_FPLOGFILE="$G_FP_LOG_APT"
 
-		echo -ne "\e[90m"
-		DEBIAN_FRONTEND=noninteractive apt-get clean 2>&1 | tee "$G_FP_LOG_APT"
-		DEBIAN_FRONTEND=noninteractive apt-get update 2>&1 | tee -a "$G_FP_LOG_APT"
-		G_ERROR_HANDLER_EXITCODE=${PIPESTATUS[0]}
-		echo -e "\e[0m"
+			G_DIETPI-NOTIFY 0 'APT update, please wait...'
 
-		G_ERROR_HANDLER
+			echo -ne "\e[90m"
+			DEBIAN_FRONTEND=noninteractive apt-get clean 2>&1 | tee "$G_FP_LOG_APT"
+			DEBIAN_FRONTEND=noninteractive apt-get update 2>&1 | tee -a "$G_FP_LOG_APT"
+			G_ERROR_HANDLER_EXITCODE=${PIPESTATUS[0]}
+			echo -e "\e[0m"
+
+			G_ERROR_HANDLER
+
+		done
 
 		return $G_ERROR_HANDLER_EXITCODE
 
@@ -1362,25 +1422,30 @@ $print_logfile_info
 
 		G_CHECK_ROOT_USER 1
 
-		G_ERROR_HANDLER_EXITCODE=0
-		G_ERROR_HANDLER_COMMAND="G_AGUG"
-		G_ERROR_HANDLER_ONERROR_FPLOGFILE="$G_FP_LOG_APT"
+		G_ERROR_HANDLER_RETRY=1
+		while (( $G_ERROR_HANDLER_RETRY ))
+		do
 
-		G_DIETPI-NOTIFY 0 'APT upgrade, please wait...'
+			G_ERROR_HANDLER_COMMAND="G_AGUG"
+			G_ERROR_HANDLER_ONERROR_FPLOGFILE="$G_FP_LOG_APT"
 
-		local options=''
-		if (( $G_DISTRO >= 4 )); then
+			G_DIETPI-NOTIFY 0 'APT upgrade, please wait...'
 
-			options='--allow-unauthenticated'
+			local options=''
+			if (( $G_DISTRO >= 4 )); then
 
-		fi
+				options='--allow-unauthenticated'
 
-		echo -ne "\e[90m"
-		DEBIAN_FRONTEND=noninteractive apt-get upgrade -y $options 2>&1 | tee "$G_FP_LOG_APT"
-		G_ERROR_HANDLER_EXITCODE=${PIPESTATUS[0]}
-		echo -e "\e[0m"
+			fi
 
-		G_ERROR_HANDLER
+			echo -ne "\e[90m"
+			DEBIAN_FRONTEND=noninteractive apt-get upgrade -y $options 2>&1 | tee "$G_FP_LOG_APT"
+			G_ERROR_HANDLER_EXITCODE=${PIPESTATUS[0]}
+			echo -e "\e[0m"
+
+			G_ERROR_HANDLER
+
+		done
 
 		return $G_ERROR_HANDLER_EXITCODE
 
@@ -1392,28 +1457,33 @@ $print_logfile_info
 
 		G_CHECK_ROOT_USER 1
 
-		G_ERROR_HANDLER_EXITCODE=0
-		G_ERROR_HANDLER_COMMAND="G_AGDUG"
-		G_ERROR_HANDLER_ONERROR_FPLOGFILE="$G_FP_LOG_APT"
+		G_ERROR_HANDLER_RETRY=1
+		while (( $G_ERROR_HANDLER_RETRY ))
+		do
 
-		if (( $G_DISTRO >= 4 )); then
+			G_ERROR_HANDLER_COMMAND="G_AGDUG"
+			G_ERROR_HANDLER_ONERROR_FPLOGFILE="$G_FP_LOG_APT"
 
-			force_options='--allow-downgrades --allow-remove-essential --allow-change-held-packages --allow-unauthenticated'
+			if (( $G_DISTRO >= 4 )); then
 
-		else
+				force_options='--allow-downgrades --allow-remove-essential --allow-change-held-packages --allow-unauthenticated'
 
-			force_options='--force-yes'
+			else
 
-		fi
+				force_options='--force-yes'
 
-		G_DIETPI-NOTIFY 0 'APT dist-upgrade, please wait...'
+			fi
 
-		echo -ne "\e[90m"
-		DEBIAN_FRONTEND=noninteractive apt-get dist-upgrade -y $force_options 2>&1 | tee "$G_FP_LOG_APT"
-		G_ERROR_HANDLER_EXITCODE=${PIPESTATUS[0]}
-		echo -e "\e[0m"
+			G_DIETPI-NOTIFY 0 'APT dist-upgrade, please wait...'
 
-		G_ERROR_HANDLER
+			echo -ne "\e[90m"
+			DEBIAN_FRONTEND=noninteractive apt-get dist-upgrade -y $force_options 2>&1 | tee "$G_FP_LOG_APT"
+			G_ERROR_HANDLER_EXITCODE=${PIPESTATUS[0]}
+			echo -e "\e[0m"
+
+			G_ERROR_HANDLER
+
+		done
 
 		return $G_ERROR_HANDLER_EXITCODE
 
