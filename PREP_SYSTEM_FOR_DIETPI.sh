@@ -546,7 +546,7 @@
 
 	l_message='Copy rootfs files in place' G_RUN_CMD cp -Rf DietPi-"$GIT_BRANCH"/rootfs/. /
 
-	l_message='Clean download location' G_RUN_CMD rm -R "DietPi-$GITBRANCH"
+	l_message='Clean download location' G_RUN_CMD rm -R "DietPi-$GIT_BRANCH"
 
 	l_message='Set execute permissions for DietPi scripts' G_RUN_CMD chmod -R +x /boot/dietpi /etc/cron.*/dietpi /var/lib/dietpi/services
 
