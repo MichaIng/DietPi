@@ -389,6 +389,7 @@
 		'41' 'OrangePi PC Plus'
 		'40' 'Pine A64'
 		'43' 'Rock64'
+		'44' 'Rock64Pro'
 		'70' 'Sparky SBC'
 
 	)
