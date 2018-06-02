@@ -27,7 +27,7 @@
 	cd "$HOME"
 	#-----------------------------------------------------------------------------------
 	#Exit script for unsupported terminal and set dumb: https://github.com/Fourdee/DietPi/issues/1703#issue-314330405
-	if [[ -z $TERM || $TERM == unknown ]]; then
+	if [[ -z $TERM || $TERM == 'unknown' ]]; then
 
 		export TERM='dumb'
 		exit
@@ -886,6 +886,8 @@
 
 		[[ $l_message ]] || local l_message="$G_ERROR_HANDLER_COMMAND"
 
+		local send_bugreport=0
+
 		#Ok
 		if (( ! $G_ERROR_HANDLER_EXITCODE )); then
 
@@ -914,7 +916,7 @@
 
 			fi
 			local print_logfile_info="Log file contents:\n$(tail -50 $G_ERROR_HANDLER_ONERROR_FPLOGFILE)"
-			local print_report_to_dietpi_info='If problems persist, please report this to DietPi for investigation, including a screenshot of this error! (https://github.com/Fourdee/DietPi/issues).'
+			local print_report_to_dietpi_info='If problems persist, please report this to DietPi for investigation'
 			local print_unable_to_continue="Unable to continue, $G_PROGRAM_NAME will now terminate."
 
 			G_DIETPI-NOTIFY 1 "$G_ERROR_HANDLER_COMMAND"
@@ -982,13 +984,33 @@
 
 					fi
 
-					whiptail --title 'DietPi Error Handler:' --yesno "$whip_msg" --yes-button 'Retry' --no-button "$no_button_text" --scrolltext 22 85
-					if (( ! $? )); then
+					local aretry_menu_options=()
+					local retry_menu_options_count=0
+					aretry_menu_options+=('Retry' 'Re-run the last command that failed')
+					((retry_menu_options_count++))
+					if [[ -n $G_PROGRAM_NAME ]]; then
 
-						G_ERROR_HANDLER_RETRY=1
-						G_ERROR_HANDLER_ONERROR_EXIT=0 #disable git ticket printout
+						aretry_menu_options+=('Send report' 'Uploads bugreport containing system info to DietPi')
+						((retry_menu_options_count++))
 
 					fi
+
+					local choice=$(whiptail --title 'DietPi Error Handler:' --menu "$whip_msg" --cancel-button "$no_button_text" --scrolltext 22 85 $retry_menu_options_count "${aretry_menu_options[@]}" 3>&1 1>&2 2>&3)
+					if (( $? == 0 )); then
+
+						if [[ $choice == 'Retry' ]]; then
+
+							G_ERROR_HANDLER_RETRY=1
+
+						elif [[ $choice == 'Send report' ]]; then
+
+							send_bugreport=1
+
+						fi
+
+					fi
+
+					unset aretry_menu_options
 
 				else
 
@@ -1003,10 +1025,8 @@
 
 			fi
 
-			# - On Error: Github printout
-			if (( $G_ERROR_HANDLER_ONERROR_EXIT )); then
-
-				echo -e "
+			#Github printout
+			echo -e "
 \e[41m
 --------------------------------------------------------------------
 - DietPi has encounted an error, and, is unable to continue        -
@@ -1017,6 +1037,7 @@
 \e[44m
 #### Details:
 - Date           | $(date)
+- BR_AUTO?       | $send_bugreport
 - DietPi version | $version_info
 - Img creator    | $image_creator
 - Pre-image      | $preimage_name
@@ -1045,14 +1066,27 @@ $print_logfile_info
 \e[0m
 
 \e[41m--------------------------------------------------------------------\e[0m
-"
+" > /tmp/.G_ERROR_HANDLER_GITREPORT
+
+			if (( $send_bugreport )); then
+
+				# - Send automated bug report
+				killall -w dietpi-bugreport &> /dev/null
+				/DietPi/dietpi/dietpi-bugreport 1
+
+			fi
+
+			# - Kill current script, excluding the shell.
+			if (( ! $G_ERROR_HANDLER_RETRY &&
+				$G_ERROR_HANDLER_ONERROR_EXIT )); then
+
+				cat /tmp/.G_ERROR_HANDLER_GITREPORT
+				rm /tmp/.G_ERROR_HANDLER_GITREPORT
 
 				G_DIETPI-NOTIFY 1 "$print_unable_to_continue"
 
 				# - Reset for next run
 				G_ERROR_HANDLER_RESET
-
-				# - Kill current script, excluding the shell.
 				kill -INT $$
 
 			fi
