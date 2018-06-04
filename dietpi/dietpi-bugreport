@@ -32,38 +32,72 @@
 	UPLOAD_FILESIZE_LIMIT=10000000
 	UPLOAD_FILESIZE=0
 
-	#DATE_CURRENT=$(date +"%d-%m-%Y")
-
 	UNIQUE_ID_HW=$(sed -n 5p /DietPi/dietpi/.hw_model)
-	UNIQUE_ID_BUGNUMBER=0
 
 	FTP_ADDR='dietpi.com'
 	FTP_USER='dietpi-survey'
 	FTP_PASS='inactive_tba'
 
 	FILEPATH_TEMP='/tmp/dietpi-bugreport'
-
-	FILE_GENERATED_ZIP='bugreport.zip'
-	FILE_BUG_NUMBER='/DietPi/dietpi/.bug_id'
+	FILE_GENERATED_ZIP='bugreport.7z'
 
 	Generate_Zip_File(){
 
 		#----------------------------------------------------------------
 		#Define zip settings (level 9 compression etc)
-		local zip_settings='-9'
-		FILE_GENERATED_ZIP="br_auto-$UNIQUE_ID_HW-$UNIQUE_ID_BUGNUMBER.zip"
-
+		FILE_GENERATED_ZIP="$UNIQUE_ID_HW.7z"
+		7z_settings='-spf -t7z'
 		#----------------------------------------------------------------
+		#List of commands we want to run and redirect to zip
+		acommand_list=(
+
+			'ls -lha /var/log'
+			'dpkg -l'
+			'ifconfig -a'
+			'ip a'
+			'lsusb'
+			'cat /proc/cpuinfo'
+			'ps aux'
+			'blkid'
+			'mount'
+			'df -h'
+			"ls /etc/rc*.d/"
+			'cut -d: -f1 /etc/passwd'
+			'locale'
+			'ls -lha /mnt' #dietpi userdata location
+			'dmesg'
+			'lsmod'
+			"systemctl status *.service -l"
+			"systemctl status *.mount -l"
+			'/DietPi/dietpi/dietpi-services status'
+
+		)
+
+		[[ -f br_cmd_out.txt ]] && rm br_cmd_out.txt
+
+		for ((i=0; i<${#acommand_list[@]}; i++))
+		do
+
+			echo -e "\n----------\n${acommand_list[$i]}:\n----------" >> br_cmd_out.txt
+			${acommand_list[$i]} >> br_cmd_out.txt
+
+		done
+
+		unset acommand_list
+
 		#list of files and/or folders we want to zip
 		local afile_list=(
+
+			# - command output file
+			'br_cmd_out.txt'
 
 			# - logs
 			"/var/log/*"
 
 			# - DietPi scripts / logs
 			"/DietPi/*"
-			"/boot/dietpi.txt"
-			"/boot/config.txt"
+			'/boot/dietpi.txt'
+			'/boot/config.txt'
 			"/boot/dietpi/*"
 			"/tmp/.G*"
 			"/var/tmp/dietpi/logs/*"
@@ -72,87 +106,42 @@
 			"/var/lib/dietpi/*"
 
 			# - confs
-			"/etc/X11/xorg.conf"
-			"/etc/bash.bashrc"
+			#	- bash shell
+			'/etc/bash.bashrc'
 			"/etc/bashrc.d/*"
-			"/root/.bashrc"
-			"/etc/profile"
+			'/root/.bashrc'
+			"/home/*/.bashrc"
+			#	- login shell
+			'/etc/profile'
 			"/etc/profile.d/*"
-			"/root/.profile"
-			"/etc/rc.local"
-			"/etc/asound.conf"
-			"/etc/network/interfaces"
-			"/etc/fstab"
-			"/etc/sysctl.conf"
+			'/root/.profile'
+			"/home/*/.profile"
+
+			'/etc/rc.local'
+			'/etc/X11/xorg.conf'
+			'/etc/asound.conf'
+			'/etc/network/interfaces'
+			'/etc/fstab'
+			'/etc/sysctl.conf'
 			"/etc/sysctl.d/*"
 
 			# - Services
 			"/etc/init.d/*"
-			"/etc/systemd/*"
-			"/lib/systemd/*"
+			"/etc/systemd/system/*"
+			"/lib/systemd/system/*"
 
 			# - APT
-			"/etc/apt/sources.list"
+			'/etc/apt/sources.list'
 			"/etc/apt/sources.list.d/*"
 
 		)
 
-		for ((i=0; i<${#afile_list[@]}; i++))
-		do
-
-			zip -r "$zip_settings" "$FILE_GENERATED_ZIP" ${afile_list[$i]}
-
-		done
-
-		unset afile_list
-
-		#List of commands we want to run and redirect to zip
-		local acommand_list=(
-
-			"ls -lha /var/log"
-			"dpkg -l"
-			"ifconfig -a"
-			"ip a"
-			"lsusb"
-			"cat /proc/cpuinfo"
-			"ps aux"
-			"blkid"
-			"mount"
-			"df -h"
-			"ls /etc/rc*.d/"
-			"cut -d: -f1 /etc/passwd"
-			"locale"
-			"ls -lha /mnt" #dietpi userdata location
-			"dmesg"
-			"lsmod"
-			"systemctl status *.service -l"
-			"systemctl status *.mount -l"
-			"/DietPi/dietpi/dietpi-services status"
-
-		)
-
-		for ((i=0; i<${#acommand_list[@]}; i++))
-		do
-
-			${acommand_list[$i]} > cmd_$i.txt
-			zip -r "$zip_settings" "$FILE_GENERATED_ZIP" cmd_$i.txt
-			rm cmd_$i.txt
-
-		done
-
-		unset acommand_list
+		[[ -f $FILE_GENERATED_ZIP ]] && rm "$FILE_GENERATED_ZIP"
+		7z a "$7z_settings" "$FILE_GENERATED_ZIP" ${afile_list[@]}
 
 	}
 
 	Create_Bug_Report(){
-
-		#----------------------------------------------------------------
-		#Load .bug_id
-		if [[ -f $FILE_BUG_NUMBER ]]; then
-
-			UNIQUE_ID_BUGNUMBER=$(cat "$FILE_BUG_NUMBER")
-
-		fi
 
 		#----------------------------------------------------------------
 		#Generate our zipped bugreport file
@@ -161,7 +150,7 @@
 		#----------------------------------------------------------------
 		#Check upload location is online
 		G_CHECK_URL "$FTP_ADDR"
-		if (( $? == 0 )); then
+		if (( ! $? )); then
 
 			#Limit filesize
 			UPLOAD_FILESIZE=$(stat -c%s "$FILE_GENERATED_ZIP")
@@ -171,22 +160,30 @@
 
 				G_DIETPI-NOTIFY 2 'Uploading bug report, please wait...'
 				wput --timeout=10th-4 --tries=1 --waitretry=2 -B -u "$FILE_GENERATED_ZIP" ftp://"$FTP_USER":"$FTP_PASS"@"$FTP_ADDR"
-				if (( $? == 0 )); then
-
-					((UNIQUE_ID_BUGNUMBER++))
-					echo $UNIQUE_ID_BUGNUMBER > $FILE_BUG_NUMBER
+				if (( ! $? )); then
 
 					G_DIETPI-NOTIFY 0 "Bug report sent, reference code: $FILE_GENERATED_ZIP"
 
+				else
+
+					G_DIETPI-NOTIFY 1 'An error appeared while trying to upload the bug report. Please try again later or report this to DietPi forum or GitHub repo in the first place.'
+
 				fi
+
+			else
+
+				G_DIETPI-NOTIFY 1 'The bug report upload archive appears to be unexpected large. The file list, that was to be uploaded, was saved to: /tmp/dietpi-bugreport-filelist\nPlease inspect and in case clean up those locations, as their size should never be that large.'
+				printf "%s\n" "${afile_list[@]}" > /tmp/dietpi-bugreport-filelist
 
 			fi
 
 		else
 
-			G_DIETPI-NOTIFY 1 'Failed to upload bugreport, URL offline or unreachable.'
+			G_DIETPI-NOTIFY 1 'Failed to upload bugreport, URL offline or unreachable. Please try again later or report this to DietPi forum or GitHub repo in the first place.'
 
 		fi
+
+		unset afile_list
 
 	}
 
