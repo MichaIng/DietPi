@@ -19,6 +19,12 @@ about: Create a report to help us improve
 - Software title	| (EG: Nextcloud)
 - Was the software title installed freshly or updated/migrated?
 - Can this issue be replicated on a fresh installation of DietPi?
+- `dietpi-bugreport` ID
+
+#### Steps to reproduce:
+<!-- Explain how to reproduce the issue -->
+1. ...
+2. ...
 
 #### Expected behaviour:
 <!-- What SHOULD be happening? -->
@@ -27,14 +33,6 @@ about: Create a report to help us improve
 #### Actual behaviour:
 <!-- What IS happening? -->
 - ...
-
-#### Steps to reproduce:
-<!-- Explain how to reproduce the issue -->
-1. ...
-2. ...
-
-#### Did you submit a `dietpi-bugreport`?
-<!-- Please post the bug report ID -->
 
 #### Extra details:
 <!-- Please post any extra details that might help solve the issue -->
