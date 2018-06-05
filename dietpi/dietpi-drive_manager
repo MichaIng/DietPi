@@ -78,6 +78,7 @@
 	INIT_FSTAB_SLOTS_ENABLED=0
 
 	FP_USERDATA_CURRENT=0
+	FP_SWAPFILE_CURRENT=0
 
 	Destroy(){
 
@@ -411,6 +412,9 @@
 			#Obtain actual user data location on disk (follows symlinks)
 			FP_USERDATA_CURRENT="$(readlink -f $G_FP_DIETPI_USERDATA)"
 
+			#Swapfile location
+			FP_SWAPFILE_CURRENT="$(grep -m1 '^[[:blank:]]*AUTO_SETUP_SWAPFILE_LOCATION=' /DietPi/dietpi.txt | sed 's/.*=//')"
+
 		done
 
 	}
@@ -434,9 +438,6 @@
 	Run_Format(){
 
 		local drivepath_no_partitions=$(Return_Drive_Without_Partitions ${aDRIVE_MOUNT_SOURCE[$INDEX_DRIVE_BEING_EDITED]})
-
-		# - disable swap
-		/DietPi/dietpi/func/dietpi-set_dphys-swapfile 0 /var/swap
 
 		# - Unmount drive
 		umount ${aDRIVE_MOUNT_SOURCE[$INDEX_DRIVE_BEING_EDITED]}
@@ -522,9 +523,6 @@
 
 		FORMAT_COMPLETED=1
 		FORMAT_PREVIOUS_MOUNT_SOURCE=${aDRIVE_MOUNT_SOURCE[$INDEX_DRIVE_BEING_EDITED]}
-
-		# - enable swap
-		/DietPi/dietpi/func/dietpi-set_dphys-swapfile 1 /var/swap
 
 		Init_Drives_and_Refresh
 
@@ -822,12 +820,29 @@
 
 	}
 
+	Notification(){
+
+		local input=$1
+
+		if (( $1 == 0 )); then
+
+			G_WHIP_MSG "Failed\n\nThe DietPi user data is currently located on this drive:\n - $FP_USERDATA_CURRENT\n\nThe requested option for this drive is not currently possible.\n\nPlease move your user data elsewhere, before trying again:\nhttp://dietpi.com/phpbb/viewtopic.php?f=8&t=478"
+
+		elif (( $1 == 1 )); then
+
+			G_WHIP_MSG "Failed\n\nThe DietPi swapfile is currently located on this drive:\n - $FP_SWAPFILE_CURRENT\n\nThe requested option for this drive is not currently possible.\n\nPlease move the swapfile elsewhere, before trying again."
+
+		fi
+
+	}
+
 	Menu_Drive_Manager_Edit_Drive(){
 
 		#Return to this menu
 		TARGETMENUID=1
 
 		local partition_contains_userdata=0
+		local partition_contains_swapfile=0
 
 		#Generate menu
 		local whiptail_desc=''
@@ -899,6 +914,20 @@
 
 				fi
 
+				#	NB: / rootfs will always be detected in this check, however, no rootFS options for umount and format...
+				local swapfile_location="$(grep -m1 '^[[:blank:]]*AUTO_SETUP_SWAPFILE_LOCATION=' /DietPi/dietpi.txt | sed 's/.*=//')"
+				if [[ $swapfile_location == ${aDRIVE_MOUNT_TARGET[$INDEX_DRIVE_BEING_EDITED]}* && ${aDRIVE_MOUNT_TARGET[$INDEX_DRIVE_BEING_EDITED]} != '/' ]] ||
+					[[ $swapfile_location == '/var/swap' && ${aDRIVE_MOUNT_TARGET[$INDEX_DRIVE_BEING_EDITED]} == '/' ]]; then
+
+					partition_contains_swapfile=1
+					G_WHIP_MENU_ARRAY+=('Swapfile' ': Currently located on this drive, select to change size')
+
+				else
+
+					G_WHIP_MENU_ARRAY+=('Swapfile' ': Select to move swapfile to this drive')
+
+				fi
+
 				if (( ${aDRIVE_ISUUIDMOUNT[$INDEX_DRIVE_BEING_EDITED]} )); then
 
 					G_WHIP_MENU_ARRAY+=('Mount Method' ': Change from UUID to /dev/sd')
@@ -951,7 +980,7 @@
 
 			MENU_LASTITEM="$G_WHIP_RETURNED_VALUE"
 
-			if [[ $G_WHIP_RETURNED_VALUE == Mount ]]; then
+			if [[ $G_WHIP_RETURNED_VALUE == 'Mount' ]]; then
 
 					# - update fstab
 					sed -i -e "\@${aDRIVE_MOUNT_TARGET[$INDEX_DRIVE_BEING_EDITED]}[[:space:]]@s@^#@@" /etc/fstab
@@ -959,12 +988,16 @@
 
 					mount "${aDRIVE_MOUNT_TARGET[$INDEX_DRIVE_BEING_EDITED]}"
 
-			elif [[ $G_WHIP_RETURNED_VALUE == Unmount ]]; then
+			elif [[ $G_WHIP_RETURNED_VALUE == 'Unmount' ]]; then
 
 				# - Disallow if userdata is located on this drive!
 				if (( $partition_contains_userdata )); then
 
-					G_WHIP_MSG "Info: dismount prevented\n\nThe DietPi user data is currently located on this drive:\n - $FP_USERDATA_CURRENT\n\nDismounting the drive at this time is not possible.\n\nPlease move your user data elsewhere, before trying again:\nhttp://dietpi.com/phpbb/viewtopic.php?f=8&t=478"
+					Notification 0
+
+				elif (( $partition_contains_swapfile )); then
+
+					Notification 1
 
 				else
 
@@ -973,6 +1006,33 @@
 					# - update fstab
 					sed -i -e "\@${aDRIVE_MOUNT_TARGET[$INDEX_DRIVE_BEING_EDITED]}[[:space:]]@s@^#*@#@" /etc/fstab
 					systemctl daemon-reload
+
+				fi
+
+			elif [[ $G_WHIP_RETURNED_VALUE == 'Swapfile' ]]; then
+
+				local min=0
+				local current_freespace=$(G_CHECK_FREESPACE ${aDRIVE_MOUNT_TARGET[$INDEX_DRIVE_BEING_EDITED]})
+				local max=$(( $current_freespace - 2000 ))
+				if (( $max < $min )); then
+
+					G_WHIP_MSG "Error: Insufficent free space on ${aDRIVE_MOUNT_TARGET[$INDEX_DRIVE_BEING_EDITED]}, a minimum of 2GB is required ($current_freespace MB available)."
+
+				else
+
+					G_WHIP_INPUTBOX "Please input a new value for swapfile size (MB):\n\nSwapfile has a swapiness setting of 1, and, is used only to prevent out of memory errors.\n\n - Recommended value = 1 (auto)\n - 0 = Disable swapfile\n - 1 = Auto size swapfile (2GB - RAM = size)\n - 2 - $max = Manual size"
+					if (( $? == 0 )); then
+
+						local fp_target_swapfile='/var/swap'
+						if [[ ${aDRIVE_MOUNT_TARGET[$INDEX_DRIVE_BEING_EDITED]} != '/' ]]; then
+
+							fp_target_swapfile="${aDRIVE_MOUNT_TARGET[$INDEX_DRIVE_BEING_EDITED]}/.swapfile"
+
+						fi
+
+						/DietPi/dietpi/func/dietpi-set_dphys-swapfile $G_WHIP_RETURNED_VALUE "$fp_target_swapfile"
+
+					fi
 
 				fi
 
@@ -1002,7 +1062,8 @@
 
 			elif [[ $G_WHIP_RETURNED_VALUE == 'Reserved blocks' ]]; then
 
-				while true; do
+				while true
+				do
 
 					G_WHIP_DEFAULT_ITEM="$reserved_blocks_percent_current"
 					G_WHIP_INPUTBOX 'Ext4 formatted drives allow the reservation of drive space for the root user to assure system functionality, if filled by other users or processes, and to avoid fragmentation of large files.\n\nHowever, on modern drives, the default of 5% reserved blocks is often by orders of magnitude larger than necessary. You may want to reduce the percentage to an absolute reserved space of about 500 MiB, which should be enough, to enable root user starting and maintaining the system. Additionally, on non rootfs drives reserved blocks are not necessary at all.\n\nPlease enter the desired percentage of reserved blocks, e.g. "0.05" for 0.05% or "10" for 10%.\nNote: Only values between "0" and "50" are allowed.'
@@ -1031,7 +1092,7 @@
 
 			elif [[ $G_WHIP_RETURNED_VALUE == 'Move User data' ]]; then
 
-				if [[ ${aDRIVE_FSTYPE[$INDEX_DRIVE_BEING_EDITED]} == vfat ]]; then
+				if [[ ${aDRIVE_FSTYPE[$INDEX_DRIVE_BEING_EDITED]} == 'vfat' ]]; then
 
 					G_WHIP_MSG 'Warning:\n\nFAT32 does not support file and folder permissions. Some of the programs which use the DietPi user directory (eg: Owncloud data storage), rely on permissions to function correctly.\n\nIf you continue with the DietPi user data move to this FAT32 drive, programs may have issues reading and writing data.'
 
@@ -1055,7 +1116,7 @@
 
 				fi
 
-			elif [[ $G_WHIP_RETURNED_VALUE == Format ]]; then
+			elif [[ $G_WHIP_RETURNED_VALUE == 'Format' ]]; then
 
 				FORMAT_RECREATE_PARTITION_TABLE=1
 
@@ -1064,7 +1125,11 @@
 				# - Disallow if userdata is located on this drive!
 				if (( $partition_contains_userdata )); then
 
-					G_WHIP_MSG "Format failed:\n\nThe DietPi user data is currently located on this drive:\n - $FP_USERDATA_CURRENT\n\nFormatting the drive at this time is not possible.\n\nPlease move your user data elsewhere, before trying again:\nhttp://dietpi.com/phpbb/viewtopic.php?f=8&t=478"
+					Notification 0
+
+				elif (( $partition_contains_swapfile )); then
+
+					Notification 1
 
 				#	user must unmount all partitions on this drive, before we can format
 				elif (( $(df -Ph | grep -ci -m1 "^$drivepath_no_partitions" ) )); then
@@ -1126,7 +1191,11 @@
 					(( $? )) && TARGETMENUID=1 && return
 
 					# - disable swap
-					G_RUN_CMD swapoff -a
+					if (( $partition_contains_swapfile )); then
+
+						G_RUN_CMD swapoff -a
+
+					fi
 
 					# - Unmount drive
 					G_RUN_CMD umount ${aDRIVE_MOUNT_SOURCE[$INDEX_DRIVE_BEING_EDITED]}
@@ -1208,7 +1277,11 @@ NB:
 				G_RUN_CMD mount -a
 
 				# - re-enable swap
-				G_RUN_CMD swapon -a
+				if (( $partition_contains_swapfile )); then
+
+					G_RUN_CMD swapon -a
+
+				fi
 
 			fi
 
