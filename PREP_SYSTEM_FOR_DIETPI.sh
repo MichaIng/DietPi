@@ -668,7 +668,6 @@ _EOF_
 		'usbutils'		# DietPi-Software + DietPi-Bugreport: e.g. lsusb
 		'wget'			# Download tool
 		'whiptail'		# DietPi dialogs
-		'wput'			# Upload tool
 		'zip'			# .zip wrapper
 
 	)
