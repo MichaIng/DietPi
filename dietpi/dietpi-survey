@@ -10,62 +10,100 @@
 	#
 	# Info:
 	# - http://dietpi.com/phpbb/viewtopic.php?f=8&t=20
-	# - Sends DietPi statistics to FTP server (eg: what programs are installed, hardware model)
+	# - Sends DietPi statistics to SFTP server (eg: what programs are installed, hardware model)
 	# - Allows the DietPi project to focus on areas based on popularity.
 	# - No private data is sent. Noone can indentify you.
-	# - Runs when user installs software using dietpi-software
+	# - Runs on dietpi-update and when user installs software using dietpi-software
 	#
-	# You can opt out of dietpi-survey by running:
-	# sed -i "1s/.*/0/" /DietPi/dietpi/.dietpi-survey
+	# Usage:
+	# - /DietPi/dietpi/dietpi-survey	Interactively let user opt-in, opt-out or remove already uploaded data
+	# - /DietPi/dietpi/dietpi-survey 1	Non-interactively send survey data, IF user opted in (!)
 	#
-	# File Sent format:
-	# $FILENAME_FORMAT.txt
+	# File sent format:
+	# $(sed -n 5p /DietPi/dietpi/.hw_model).txt
 	#////////////////////////////////////
+
 	#Import DietPi-Globals ---------------------------------------------------------------
 	. /DietPi/dietpi/func/dietpi-globals
-	export G_PROGRAM_NAME='DietPi-Survey'
 	G_CHECK_ROOT_USER
 	G_INIT
+	export G_PROGRAM_NAME='DietPi-Survey'
 	#Import DietPi-Globals ---------------------------------------------------------------
 
-	SURVEY_VERSION=4
+	#Grab Input (valid interger)
+	INPUT=0
+	G_CHECK_VALIDINT $1 && INPUT=$1
+
+	OPTED_IN=2 #2=yes | 1=no | 0=no and cleared data
 	SURVEY_SENTCOUNT=1
+	SURVEY_VERSION=5
 
-	OPTED_IN=1
-
-	DIETPI_VERSION="$(sed -n 1p /DietPi/dietpi/.version).$(sed -n 2p /DietPi/dietpi/.version)"
-	G_HW_MODEL=$(sed -n 1p /DietPi/dietpi/.hw_model)
+	DIETPI_VERSION="$(paste -sd '.' /DietPi/dietpi/.version)"
 	UNIQUE_ID=$(sed -n 5p /DietPi/dietpi/.hw_model)
+	FP_TMP='/tmp/dietpi-survey'
+	UPLOAD_FILENAME="$UNIQUE_ID.txt"
 
-	FTP_ADDR="dietpi.com"
-	FTP_USER="dietpi-survey"
-	FTP_PASS="raspberry13"
+	SFTP_ADDR='dietpi.com'
+	SFTP_USER='dietpi-survey'
+	SFTP_PASS='upload2dietpi'
 
-	Update_FileName_Format(){
-		FILENAME_FORMAT="$SURVEY_VERSION-$UNIQUE_ID-$DIETPI_VERSION-$G_HW_MODEL.txt"
-	}
-
-	FP_SETTINGS="/DietPi/dietpi/.dietpi-survey"
+	FP_SETTINGS='/DietPi/dietpi/.dietpi-survey'
 	Write_Settings(){
 
-		cat << _EOF_ > "$FP_SETTINGS"
+		cat << _EOF_ > $FP_SETTINGS
 $OPTED_IN
 $SURVEY_SENTCOUNT
 _EOF_
+
 	}
 
 	Read_Settings(){
 
-		OPTED_IN=$(sed -n 1p "$FP_SETTINGS")
-		SURVEY_SENTCOUNT=$(sed -n 2p "$FP_SETTINGS")
+		OPTED_IN=$(sed -n 1p $FP_SETTINGS)
+		SURVEY_SENTCOUNT=$(sed -n 2p $FP_SETTINGS)
+
+	}
+
+	Send_File(){
+
+		#Check if we have a working internet connection beforehand
+		G_CHECK_URL "$SFTP_ADDR"
+
+		#upload to server
+		curl --connect-timeout 4 --retry 1 --retry-delay 4 -sT "$UPLOAD_FILENAME" sftp://"$SFTP_USER":"$SFTP_PASS"@"$SFTP_ADDR"/survey/
+		if (( $? )); then
+
+			G_DIETPI-NOTIFY 1 'Failed to connect to SFTP server. Please try again later or report this to DietPi forum or GitHub repo in the first place.'
+			#return 1
+
+		else
+
+			if (( $OPTED_IN == 2 )); then
+
+				#Update .dietpi-survey file
+				((SURVEY_SENTCOUNT++))
+
+				G_DIETPI-NOTIFY 0 'Successfully sent survey data'
+
+			elif (( $OPTED_IN == 0 )); then
+
+				G_DIETPI-NOTIFY 0 'Successfully purged survey data'
+
+			fi
+
+		fi
 
 	}
 
 	#/////////////////////////////////////////////////////////////////////////////////////
 	# Main Loop
 	#/////////////////////////////////////////////////////////////////////////////////////
+	#Enter ramfs
+	mkdir -p "$FP_TMP"
+	cd "$FP_TMP"
+
 	#Read data from .dietpi-survey file
-	if [ -f "$FP_SETTINGS" ]; then
+	if [[ -f $FP_SETTINGS ]]; then
 
 		Read_Settings
 
@@ -76,58 +114,79 @@ _EOF_
 
 	fi
 
-	#-----------------------------------------------------------------------------------
-	#Opted in - Setup and send
-	if (( $OPTED_IN == 1 )); then
-
-		#Check if we have a working internet connection beforehand
-		G_CHECK_URL "$FTP_ADDR"
-
-		#Grab filename to use
-		Update_FileName_Format
-
-		#Generate text file for upload
-		# -  wput does not work with a filepath, so we must enter the directory and use a filename only.
-		cd /tmp
-
-		cat << _EOF_ > "$FILENAME_FORMAT"
+	#Generate text file for upload
+	cat << _EOF_ > "$UPLOAD_FILENAME"
 -------------------------
 DietPi-Survey v$SURVEY_VERSION
 -------------------------
-
 Upload Count   : $SURVEY_SENTCOUNT
 DietPi Version : $DIETPI_VERSION
 Hardware Index : $G_HW_MODEL
 Hardware Name  : $G_HW_MODEL_DESCRIPTION
+CPU Arch Index : $G_HW_ARCH
+CPU Count      : $G_HW_CPU_CORES
 Distro Index   : $G_DISTRO
-Autoboot Index : $(cat /DietPi/dietpi/.dietpi-autostart_index)
-Country        : $(curl --max-time 4 -s http://whatismycountry.com/ | sed -n 's|.*,\(.*\)</h3>|\1|p')
-Hostname       : $(cat /etc/hostname)
+Distro Name    : $G_DISTRO_NAME
+Autoboot Index : $(</DietPi/dietpi/.dietpi-autostart_index)
 
 -------------------------
 DietPi-Software Installed
 -------------------------
-$(cat /DietPi/dietpi/.installed | grep ' =2 ')
+$(grep '=2' /DietPi/dietpi/.installed)
 
--------------------------
-FileSystem
--------------------------
-$(df -h)
 _EOF_
 
-		#upload to server
-		wput --timeout=10th-4 --tries=1 --waitretry=4 -q -B -u "$FILENAME_FORMAT" ftp://"$FTP_USER":"$FTP_PASS"@"$FTP_ADDR"
+	#-----------------------------------------------------------------------------------
+	if (( $INPUT == 1 )); then
 
-		#clear generated temp file
-		rm "$FILENAME_FORMAT"
+		#Opted in - Setup and send
+		(( $OPTED_IN == 2 )) && Send_File
 
-		#Update .dietpi-survey file
-		((SURVEY_SENTCOUNT++))
-		Write_Settings
+	else
+
+		G_WHIP_DEFAULT_ITEM=$OPTED_IN
+		G_WHIP_MENU_ARRAY=(
+
+			'2' 'Yes, I want to opt in DietPi-Survey.'
+			'1' 'No, I want to opt out DietPi-Survey.'
+			'0' 'Opt me out and purge any existing survey data.'
+
+		)
+
+		G_WHIP_MENU "DietPi-Survey would like to collect anonymous statistics about your device, version and installed software. \
+This allows us to focus development based on popularity. NO private data will be collected and NO ONE can identify you based on the data. \
+The data is sent via secured connection to our SFTP server and is stored there unreadable to the public upload user. \
+If you agree, your uploaded data will be automatically updated on every DietPi-Update and whenever you install software via DietPi-Software. \
+We regularly publish results of the collected data at: https://dietpi.com/forum
+Your personal upload file would currently look like this:
+$(<$UPLOAD_FILENAME)
+
+Would you like to opt in for DietPi-Survey?"
+		if (( ! $? )); then
+
+			OPTED_IN=$G_WHIP_RETURNED_VALUE
+			if (( $OPTED_IN == 2 )); then
+
+				Send_File
+
+			elif (( $OPTED_IN == 0 )); then
+
+				# Send empty file to overwrite existing data, rm is not possible due to missing file list permissions
+				> "$UPLOAD_FILENAME"
+				Send_File
+
+			fi
+
+		fi
 
 	fi
+
+	Write_Settings
+	cd "$HOME"
+	rm -R "$FP_TMP"
 
 	#-----------------------------------------------------------------------------------
 	exit 0
 	#-----------------------------------------------------------------------------------
+
 }
