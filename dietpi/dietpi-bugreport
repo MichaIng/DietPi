@@ -11,206 +11,261 @@
 	# Info:
 	# - Called from G_ERROR_HANDLER
 	# - filename /DietPi/dietpi/dietpi-bugreport
-	# - Generates UUID_BUGNUMBER.zip and uploads to dietpi.com
+	# - Generates $UNIQUE_ID.7z and uploads to dietpi.com
 	# Usage:
-	# - /DietPi/dietpi/dietpi-bugreport 1				#Automated send of bug report
+	# - /DietPi/dietpi/dietpi-bugreport	Interactively let user send or remove already uploaded bug report
+	# - /DietPi/dietpi/dietpi-bugreport 1	Automated send of bug report
+	# - /DietPi/dietpi/dietpi-bugreport -1	Automated remove of already uploaded bug report
 	#////////////////////////////////////
 
 	#Import DietPi-Globals ---------------------------------------------------------------
 	. /DietPi/dietpi/func/dietpi-globals
 	G_CHECK_ROOT_USER
 	G_CHECK_ROOTFS_RW
-	export G_PROGRAM_NAME='DietPi-Bugreport'
 	G_INIT
-	G_USER_INPUTS=0
+	export G_PROGRAM_NAME='DietPi-Bugreport'
 	#Import DietPi-Globals ---------------------------------------------------------------
 
 	INPUT=0
 	G_CHECK_VALIDINT $1 && INPUT=$1
 
+	UNIQUE_ID=$(sed -n 5p /DietPi/dietpi/.hw_model)
+	FP_TMP='/tmp/dietpi-bugreport'
+	UPLOAD_FILENAME="$UNIQUE_ID.7z"
+
 	# - byte
 	UPLOAD_FILESIZE_LIMIT=10000000
 	UPLOAD_FILESIZE=0
 
-	#DATE_CURRENT=$(date +"%d-%m-%Y")
+	SFTP_ADDR='dietpi.com'
+	SFTP_USER='dietpi-survey'
+	SFTP_PASS='upload2dietpi'
 
-	UNIQUE_ID_HW=$(sed -n 5p /DietPi/dietpi/.hw_model)
-	UNIQUE_ID_BUGNUMBER=0
+	# List of commands we want to run and redirect to upload archive
+	aCOMMAND_LIST=(
 
-	FTP_ADDR='dietpi.com'
-	FTP_USER='dietpi-survey'
-	FTP_PASS='inactive_tba'
+		'ls -lha /var/log'
+		'dpkg -l'
+		'ifconfig -a'
+		'ip a'
+		'lsusb'
+		'cat /proc/cpuinfo'
+		'ps aux'
+		'blkid'
+		'mount'
+		'df -h'
+		"ls /etc/rc*.d/"
+		'cut -d: -f1 /etc/passwd'
+		'locale'
+		'ls -lha /mnt' #dietpi userdata location
+		'dmesg'
+		'lsmod'
+		"systemctl status *.service -l"
+		"systemctl status *.mount -l"
+		'/DietPi/dietpi/dietpi-services status'
 
-	FILEPATH_TEMP='/tmp/dietpi-bugreport'
+	)
 
-	FILE_GENERATED_ZIP='bugreport.zip'
-	FILE_BUG_NUMBER='/DietPi/dietpi/.bug_id'
+	# List of files and folders we want to add to upload archive
+	aFILE_LIST=(
 
-	Generate_Zip_File(){
+		# - command output file
+		'CMD_OUT.txt'
 
-		#----------------------------------------------------------------
-		#Define zip settings (level 9 compression etc)
-		local zip_settings='-9'
-		FILE_GENERATED_ZIP="br_auto-$UNIQUE_ID_HW-$UNIQUE_ID_BUGNUMBER.zip"
+		# - logs
+		"/var/log/*"
 
-		#----------------------------------------------------------------
-		#list of files and/or folders we want to zip
-		local afile_list=(
+		# - DietPi scripts / logs
+		"/DietPi/*"
+		'/boot/dietpi.txt'
+		'/boot/config.txt'
+		"/boot/dietpi/*"
+		"/tmp/.G*"
+		"/var/tmp/dietpi/logs/*"
 
-			# - logs
-			"/var/log/*"
+		# - /var/lib/dietpi
+		"/var/lib/dietpi/*"
 
-			# - DietPi scripts / logs
-			"/DietPi/*"
-			"/boot/dietpi.txt"
-			"/boot/config.txt"
-			"/boot/dietpi/*"
-			"/tmp/.G*"
-			"/var/tmp/dietpi/logs/*"
+		# - confs
+		#	- bash shell
+		'/etc/bash.bashrc'
+		"/etc/bashrc.d/*"
+		'/root/.bashrc'
+		"/home/*/.bashrc"
+		#	- login shell
+		'/etc/profile'
+		"/etc/profile.d/*"
+		'/root/.profile'
+		"/home/*/.profile"
 
-			# - /var/lib/dietpi
-			"/var/lib/dietpi/*"
+		'/etc/rc.local'
+		'/etc/X11/xorg.conf'
+		'/etc/asound.conf'
+		'/etc/network/interfaces'
+		'/etc/fstab'
+		'/etc/sysctl.conf'
+		"/etc/sysctl.d/*"
 
-			# - confs
-			"/etc/X11/xorg.conf"
-			"/etc/bash.bashrc"
-			"/etc/bashrc.d/*"
-			"/root/.bashrc"
-			"/etc/profile"
-			"/etc/profile.d/*"
-			"/root/.profile"
-			"/etc/rc.local"
-			"/etc/asound.conf"
-			"/etc/network/interfaces"
-			"/etc/fstab"
-			"/etc/sysctl.conf"
-			"/etc/sysctl.d/*"
+		# - Services
+		"/etc/init.d/*"
+		"/etc/systemd/system/*"
+		"/lib/systemd/system/*"
 
-			# - Services
-			"/etc/init.d/*"
-			"/etc/systemd/*"
-			"/lib/systemd/*"
+		# - APT
+		'/etc/apt/sources.list'
+		"/etc/apt/sources.list.d/*"
 
-			# - APT
-			"/etc/apt/sources.list"
-			"/etc/apt/sources.list.d/*"
+	)
 
-		)
+	Generate_Upload_File(){
 
-		for ((i=0; i<${#afile_list[@]}; i++))
+		# Generate command output file
+		for ((i=0; i<${#aCOMMAND_LIST[@]}; i++))
 		do
 
-			zip -r "$zip_settings" "$FILE_GENERATED_ZIP" ${afile_list[$i]}
+			echo -e "\n----------\n${aCOMMAND_LIST[$i]}:\n----------" >> CMD_OUT.txt
+			${aCOMMAND_LIST[$i]} >> CMD_OUT.txt
 
 		done
+		unset aCOMMAND_LIST
 
-		unset afile_list
-
-		#List of commands we want to run and redirect to zip
-		local acommand_list=(
-
-			"ls -lha /var/log"
-			"dpkg -l"
-			"ifconfig -a"
-			"ip a"
-			"lsusb"
-			"cat /proc/cpuinfo"
-			"ps aux"
-			"blkid"
-			"mount"
-			"df -h"
-			"ls /etc/rc*.d/"
-			"cut -d: -f1 /etc/passwd"
-			"locale"
-			"ls -lha /mnt" #dietpi userdata location
-			"dmesg"
-			"lsmod"
-			"systemctl status *.service -l"
-			"systemctl status *.mount -l"
-			"/DietPi/dietpi/dietpi-services status"
-
-		)
-
-		for ((i=0; i<${#acommand_list[@]}; i++))
-		do
-
-			${acommand_list[$i]} > cmd_$i.txt
-			zip -r "$zip_settings" "$FILE_GENERATED_ZIP" cmd_$i.txt
-			rm cmd_$i.txt
-
-		done
-
-		unset acommand_list
+		G_DIETPI-NOTIFY 2 'Packing upload archive, please wait...'
+		7z a -t7z -spf "$UPLOAD_FILENAME" ${aFILE_LIST[@]} &> /dev/null
 
 	}
 
-	Create_Bug_Report(){
+	Upload_Bug_Report(){
 
-		#----------------------------------------------------------------
-		#Load .bug_id
-		if [[ -f $FILE_BUG_NUMBER ]]; then
+		# Check upload location is online
+		G_CHECK_URL "$SFTP_ADDR"
+		if (( ! $? )); then
 
-			UNIQUE_ID_BUGNUMBER=$(cat "$FILE_BUG_NUMBER")
-
-		fi
-
-		#----------------------------------------------------------------
-		#Generate our zipped bugreport file
-		Generate_Zip_File
-
-		#----------------------------------------------------------------
-		#Check upload location is online
-		G_CHECK_URL "$FTP_ADDR"
-		if (( $? == 0 )); then
-
-			#Limit filesize
-			UPLOAD_FILESIZE=$(stat -c%s "$FILE_GENERATED_ZIP")
+			# Limit filesize
+			UPLOAD_FILESIZE=$(stat -c%s "$UPLOAD_FILENAME")
 
 			# - Upload
 			if (( $UPLOAD_FILESIZE <= $UPLOAD_FILESIZE_LIMIT )); then
 
-				G_DIETPI-NOTIFY 2 'Uploading bug report, please wait...'
-				wput --timeout=10th-4 --tries=1 --waitretry=2 -B -u "$FILE_GENERATED_ZIP" ftp://"$FTP_USER":"$FTP_PASS"@"$FTP_ADDR"
-				if (( $? == 0 )); then
+				G_DIETPI-NOTIFY -2 'Running cURL'
+				curl --connect-timeout 4 --retry 1 --retry-delay 4 -sT "$UPLOAD_FILENAME" sftp://"$SFTP_USER":"$SFTP_PASS"@"$SFTP_ADDR"/bugreport/
+				if (( ! $? )); then
 
-					((UNIQUE_ID_BUGNUMBER++))
-					echo $UNIQUE_ID_BUGNUMBER > $FILE_BUG_NUMBER
+					# Bug report removal via empty file upload
+					if (( $UPLOAD_FILESIZE == 0 )); then
 
-					G_DIETPI-NOTIFY 0 "Bug report sent, reference code: $FILE_GENERATED_ZIP"
+						G_DIETPI-NOTIFY 0 "Bug report successfully purged"
+
+					else
+
+						G_DIETPI-NOTIFY 0 "Bug report sent, reference code: $UNIQUE_ID"
+
+					fi
+
+				else
+
+					G_DIETPI-NOTIFY 1 'Failed to connect to SFTP server. Please try again later or report this to DietPi forum or GitHub repo in the first place.'
 
 				fi
+
+			else
+
+				G_DIETPI-NOTIFY 1 'The bug report upload archive appears to be unexpected large. Please inspect and in case clean up the locations to be uploaded, as their size should never be that large:'
+				printf "%s\n" "${aFILE_LIST[@]}"
 
 			fi
 
 		else
 
-			G_DIETPI-NOTIFY 1 'Failed to upload bugreport, URL offline or unreachable.'
+			G_DIETPI-NOTIFY 1 'Failed to connect to "dietpi.com". Please try again later or report this to DietPi forum or GitHub repo in the first place.'
 
 		fi
+
+		unset aFILE_LIST
 
 	}
 
 	#/////////////////////////////////////////////////////////////////////////////////////
 	# Main Loop
 	#/////////////////////////////////////////////////////////////////////////////////////
-	#----------------------------------------------------------------
-	if (( $INPUT == 1 )); then
+	# Interactive menu
+	if (( $INPUT != 1 && $INPUT != -1 )); then
 
-		#Make Directory
-		#	we need to work inside the directory as Wput cant accept /paths
-		mkdir -p $FILEPATH_TEMP
-		cd $FILEPATH_TEMP
+		while true
+		do
 
-		#Automated bug report send
-		Create_Bug_Report
+			G_WHIP_MENU_ARRAY=(
 
-		#remove temp folder and all generated temp files
+				'1' 'Send bug report archive to help the developers investigate your issue.'
+				'2' 'Remove my already uploaded bug report.'
+				'3' 'Show me what is included with the upload archive.'
+
+			)
+
+			G_WHIP_MENU "By sending a bug report file, you can help the developers to investigate your issue, in relation to your report on GitHub or the DietPi forum.
+The file is sent via secured connection to our SFTP server and is stored there unreadable to the public upload user.
+The file will be removed after your issue is solved and you can remove it by yourself as well by running \"dietpi-bugreport -1\" or via this menu.
+
+Would you like to send a bug report archive or remove an already uploaded one?"
+			if (( ! $? )); then
+
+				if (( G_WHIP_RETURNED_VALUE == 1 )); then
+
+					INPUT=1
+					break
+
+				elif (( G_WHIP_RETURNED_VALUE == 2 )); then
+
+					INPUT=-1
+					break
+
+				elif (( G_WHIP_RETURNED_VALUE == 3 )); then
+
+					G_WHIP_SCROLLBOX "The upload will contain the following command outputs:
+					
+$(printf "%s\n\t- " "${aCOMMAND_LIST[@]}")
+
+It will contain as well the following file locations:
+
+$(printf "%s\n\t- " "${aFILE_LIST[@]}")"
+
+				fi
+
+			else
+
+				break
+
+			fi
+
+		done
+
+	fi
+
+	if (( $INPUT == 1 || $INPUT == -1 )); then
+
+		# Clean, recreate and enter tmp ramfs
+		[[ -d $FP_TMP ]] && rm -R "$FP_TMP"
+		mkdir -p "$FP_TMP"
+		cd "$FP_TMP"
+
+
+		if (( $INPUT == 1 )); then
+
+			# Generate 7z bug report file
+			Generate_Upload_File
+
+		else
+
+			# Send empty file to clear already uploaded bug report
+			> "$UPLOAD_FILENAME"
+
+		fi
+
+		# Upload bug report file
+		Upload_Bug_Report
+
+		# Clean tmp ramfs
 		cd "$HOME"
-		rm -R $FILEPATH_TEMP &> /dev/null
-
-	else
-
-		G_DIETPI-NOTIFY 2 'This feature is no longer available. Now handled automatically by G_ERROR_HANDLER when an issue occurs'
+		rm -R "$FP_TMP"
 
 	fi
 
