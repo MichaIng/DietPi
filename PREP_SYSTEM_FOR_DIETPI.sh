@@ -369,6 +369,7 @@
 		'50' 'BananaPi M2+ (sinovoip)'
 		'71' 'Beagle Bone Black'
 		'39' 'LeMaker Guitar'
+		'68' 'NanoPC T4'
 		'67' 'NanoPi K1 Plus'
 		'66' 'NanoPi M1 Plus'
 		'65' 'NanoPi NEO 2'
@@ -389,7 +390,7 @@
 		'41' 'OrangePi PC Plus'
 		'40' 'Pine A64'
 		'43' 'Rock64'
-		'44' 'Rock64Pro'
+		'42' 'RockPro64'
 		'70' 'Sparky SBC'
 
 	)
