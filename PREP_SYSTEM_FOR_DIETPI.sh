@@ -231,7 +231,7 @@
 		# - Stop services
 		/DietPi/dietpi/dietpi-services stop
 
-		G_RUN_CMD systemctl stop dietpi-ramlog
+		[[ -f /etc/systemd/system/dietpi-ramlog ]] && G_RUN_CMD systemctl stop dietpi-ramlog
 		G_RUN_CMD systemctl stop dietpi-ramdisk
 
 		# - Delete any previous existing data
@@ -669,7 +669,6 @@ _EOF_
 		'usbutils'		# DietPi-Software + DietPi-Bugreport: e.g. lsusb
 		'wget'			# Download tool
 		'whiptail'		# DietPi dialogs
-		'zip'			# .zip wrapper
 
 	)
 
@@ -886,17 +885,17 @@ _EOF_
 
 	G_AGI $INSTALL_PACKAGES
 
-	G_DIETPI-NOTIFY 2 'Applying default DietPi configuration for APT'
+#	G_DIETPI-NOTIFY 2 'Applying default DietPi configuration for APT'
 
-	export G_ERROR_HANDLER_COMMAND='/etc/apt/apt.conf.d/99-dietpi-norecommends'
-	cat << _EOF_ > $G_ERROR_HANDLER_COMMAND
-APT::Install-Recommends "false";
-APT::Install-Suggests "false";
+#	export G_ERROR_HANDLER_COMMAND='/etc/apt/apt.conf.d/99-dietpi-norecommends'
+#	cat << _EOF_ > $G_ERROR_HANDLER_COMMAND
+#APT::Install-Recommends "false";
+#APT::Install-Suggests "false";
 #APT::AutoRemove::RecommendsImportant "false";
 #APT::AutoRemove::SuggestsImportant "false";
-_EOF_
-	export G_ERROR_HANDLER_EXITCODE=$?
-	G_ERROR_HANDLER
+#_EOF_
+#	export G_ERROR_HANDLER_EXITCODE=$?
+#	G_ERROR_HANDLER
 
 	G_AGA
 
@@ -1011,14 +1010,14 @@ _EOF_
 	#UID bit for sudo
 	# - https://github.com/Fourdee/DietPi/issues/794
 
-	G_DIETPI-NOTIFY 2 'Configuring Sudo UID bit:'
+	G_DIETPI-NOTIFY 2 'Configuring Sudo UID bit'
 
 	chmod 4755 $(which sudo)
 
 	#-----------------------------------------------------------------------------------
 	#Dir's
 
-	G_DIETPI-NOTIFY 2 'Configuring DietPi Directories:'
+	G_DIETPI-NOTIFY 2 'Configuring DietPi Directories'
 
 	# - /var/lib/dietpi : Core storage for installed non-standard APT software, outside of /mnt/dietpi_userdata
 	#mkdir -p /var/lib/dietpi
@@ -1069,7 +1068,7 @@ _EOF_
 	#-----------------------------------------------------------------------------------
 	#Cron Jobs
 
-	G_DIETPI-NOTIFY 2 "Configuring Cron:"
+	G_DIETPI-NOTIFY 2 "Configuring Cron"
 
 	mkdir -p /etc/cron.minutely #: https://github.com/Fourdee/DietPi/pull/1578
 
@@ -1085,9 +1084,6 @@ PATH=/usr/local/sbin:/usr/local/bin:/sbin:/bin:/usr/sbin:/usr/bin
 47 1    * * 7   root    test -x /usr/sbin/anacron || ( cd / && run-parts --report /etc/cron.weekly )
 52 1    1 * *   root    test -x /usr/sbin/anacron || ( cd / && run-parts --report /etc/cron.monthly )
 _EOF_
-
-	# - ntp
-	rm /etc/cron.daily/ntp &> /dev/null
 
 	#-----------------------------------------------------------------------------------
 	#Network
@@ -1181,7 +1177,7 @@ _EOF_
 
 	G_RUN_CMD echo 'DietPi' > /etc/hostname
 
-	G_DIETPI-NOTIFY 2 'Configuring htop:'
+	G_DIETPI-NOTIFY 2 'Configuring htop'
 
 	mkdir -p /root/.config/htop
 	cp /DietPi/dietpi/conf/htoprc /root/.config/htop/htoprc
@@ -1200,10 +1196,6 @@ _EOF_
 	G_DIETPI-NOTIFY 2 'Reducing getty count and resource usage:'
 
 	systemctl mask getty-static
-
-	G_DIETPI-NOTIFY 2 'Configuring time sync:'
-
-	systemctl disable systemd-timesyncd
 
 	G_DIETPI-NOTIFY 2 'Configuring regional settings (TZdata):'
 
