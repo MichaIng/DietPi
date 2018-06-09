@@ -1090,7 +1090,7 @@ _EOF_
 	#-----------------------------------------------------------------------------------
 	#Network
 
-	G_DIETPI-NOTIFY 2 "Configuring: prefer wlan/eth naming for networked devices:"
+	G_DIETPI-NOTIFY 2 'Configuring: prefer wlan/eth naming for networked devices:'
 
 	# - Prefer to use wlan/eth naming for networked devices (eg: stretch)
 	ln -sf /dev/null /etc/systemd/network/99-default.link
@@ -1104,6 +1104,11 @@ _EOF_
 		update-grub
 
 	fi
+
+	G_DIETPI-NOTIFY 2 'Add dietpi.com SSH pub host key for DietPi-Survey and -Bugreport upload:'
+	mkdir -p /root/.ssh
+	>> /root/.ssh/known_hosts
+	G_CONFIG_INJECT 'dietpi.com ' 'dietpi.com ssh-rsa AAAAB3NzaC1yc2EAAAADAQABAAABAQDE6aw3r6aOEqendNu376iiCHr9tGBIWPgfrLkzjXjEsHGyVSUFNnZt6pftrDeK7UX\+qX4FxOwQlugG4fymOHbimRCFiv6cf7VpYg1Ednquq9TLb7/cIIbX8a6AuRmX4fjdGuqwmBq3OG7ZksFcYEFKt5U4mAJIaL8hXiM2iXjgY02LqiQY/QWATsHI4ie9ZOnwrQE\+Rr6mASN1BVFuIgyHIbwX54jsFSnZ/7CdBMkuAd9B8JkxppWVYpYIFHE9oWNfjh/epdK8yv9Oo6r0w5Rb\+4qaAc5g\+RAaknHeV6Gp75d2lxBdCm5XknKKbGma2\+/DfoE8WZTSgzXrYcRlStYN' /root/.ssh/known_hosts
 
 	#-----------------------------------------------------------------------------------
 	#MISC
