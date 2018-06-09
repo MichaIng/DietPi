@@ -19,9 +19,6 @@
 	GIT_BRANCH=${GIT_BRANCH:=master}
 	echo "Git branch: $GIT_OWNER/$GIT_BRANCH"
 
-	#Ensure we are in users home dir: https://github.com/Fourdee/DietPi/issues/905#issuecomment-298223705
-	cd "$HOME"
-
 	#------------------------------------------------------------------------------------------------
 	# Critical checks and pre-reqs, with exit, prior to initial run of script
 	#------------------------------------------------------------------------------------------------
@@ -32,6 +29,10 @@
 		exit 1
 
 	fi
+
+	#Work inside /tmp as usually ramfs to reduce disk I/O and speed up download and unpacking
+	mkdir -p /tmp/dietpi-prep
+	cd /tmp/dietpi-prep
 
 	#Check/install minimal APT Pre-Reqs
 	a_MIN_APT_PREREQS=(
@@ -136,6 +137,7 @@
 		exit 1
 
 	fi
+	rm dietpi-globals
 
 	export G_PROGRAM_NAME='DietPi-PREP'
 	export HIERARCHY=0
@@ -1513,9 +1515,8 @@ _EOF_
 
 	sync
 
-	# - Remove PREP files
-	rm dietpi-globals
-	rm PREP_SYSTEM_FOR_DIETPI.sh
+	# - Remove PREP script
+	rm /root/PREP_SYSTEM_FOR_DIETPI.sh &> /dev/null
 
 	G_DIETPI-NOTIFY 2 "The used kernel version is: $(uname -r)"
 	kernel_apt_packages="$(dpkg --get-selections | grep '^linux-image-[0-9]')"
