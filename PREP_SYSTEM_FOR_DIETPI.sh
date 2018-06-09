@@ -19,9 +19,6 @@
 	GIT_BRANCH=${GIT_BRANCH:=master}
 	echo "Git branch: $GIT_OWNER/$GIT_BRANCH"
 
-	#Ensure we are in users home dir: https://github.com/Fourdee/DietPi/issues/905#issuecomment-298223705
-	cd "$HOME"
-
 	#------------------------------------------------------------------------------------------------
 	# Critical checks and pre-reqs, with exit, prior to initial run of script
 	#------------------------------------------------------------------------------------------------
@@ -32,6 +29,10 @@
 		exit 1
 
 	fi
+
+	#Work inside /tmp as usually ramfs to reduce disk I/O and speed up download and unpacking
+	mkdir -p /tmp/dietpi-prep
+	cd /tmp/dietpi-prep
 
 	#Check/install minimal APT Pre-Reqs
 	a_MIN_APT_PREREQS=(
@@ -136,6 +137,7 @@
 		exit 1
 
 	fi
+	rm dietpi-globals
 
 	export G_PROGRAM_NAME='DietPi-PREP'
 	export HIERARCHY=0
@@ -231,7 +233,7 @@
 		# - Stop services
 		/DietPi/dietpi/dietpi-services stop
 
-		G_RUN_CMD systemctl stop dietpi-ramlog
+		[[ -f /etc/systemd/system/dietpi-ramlog ]] && G_RUN_CMD systemctl stop dietpi-ramlog
 		G_RUN_CMD systemctl stop dietpi-ramdisk
 
 		# - Delete any previous existing data
@@ -669,7 +671,6 @@ _EOF_
 		'usbutils'		# DietPi-Software + DietPi-Bugreport: e.g. lsusb
 		'wget'			# Download tool
 		'whiptail'		# DietPi dialogs
-		'zip'			# .zip wrapper
 
 	)
 
@@ -886,17 +887,17 @@ _EOF_
 
 	G_AGI $INSTALL_PACKAGES
 
-	G_DIETPI-NOTIFY 2 'Applying default DietPi configuration for APT'
+#	G_DIETPI-NOTIFY 2 'Applying default DietPi configuration for APT'
 
-	export G_ERROR_HANDLER_COMMAND='/etc/apt/apt.conf.d/99-dietpi-norecommends'
-	cat << _EOF_ > $G_ERROR_HANDLER_COMMAND
-APT::Install-Recommends "false";
-APT::Install-Suggests "false";
+#	export G_ERROR_HANDLER_COMMAND='/etc/apt/apt.conf.d/99-dietpi-norecommends'
+#	cat << _EOF_ > $G_ERROR_HANDLER_COMMAND
+#APT::Install-Recommends "false";
+#APT::Install-Suggests "false";
 #APT::AutoRemove::RecommendsImportant "false";
 #APT::AutoRemove::SuggestsImportant "false";
-_EOF_
-	export G_ERROR_HANDLER_EXITCODE=$?
-	G_ERROR_HANDLER
+#_EOF_
+#	export G_ERROR_HANDLER_EXITCODE=$?
+#	G_ERROR_HANDLER
 
 	G_AGA
 
@@ -1011,14 +1012,14 @@ _EOF_
 	#UID bit for sudo
 	# - https://github.com/Fourdee/DietPi/issues/794
 
-	G_DIETPI-NOTIFY 2 'Configuring Sudo UID bit:'
+	G_DIETPI-NOTIFY 2 'Configuring Sudo UID bit'
 
 	chmod 4755 $(which sudo)
 
 	#-----------------------------------------------------------------------------------
 	#Dir's
 
-	G_DIETPI-NOTIFY 2 'Configuring DietPi Directories:'
+	G_DIETPI-NOTIFY 2 'Configuring DietPi Directories'
 
 	# - /var/lib/dietpi : Core storage for installed non-standard APT software, outside of /mnt/dietpi_userdata
 	#mkdir -p /var/lib/dietpi
@@ -1069,7 +1070,7 @@ _EOF_
 	#-----------------------------------------------------------------------------------
 	#Cron Jobs
 
-	G_DIETPI-NOTIFY 2 "Configuring Cron:"
+	G_DIETPI-NOTIFY 2 "Configuring Cron"
 
 	mkdir -p /etc/cron.minutely #: https://github.com/Fourdee/DietPi/pull/1578
 
@@ -1086,13 +1087,10 @@ PATH=/usr/local/sbin:/usr/local/bin:/sbin:/bin:/usr/sbin:/usr/bin
 52 1    1 * *   root    test -x /usr/sbin/anacron || ( cd / && run-parts --report /etc/cron.monthly )
 _EOF_
 
-	# - ntp
-	rm /etc/cron.daily/ntp &> /dev/null
-
 	#-----------------------------------------------------------------------------------
 	#Network
 
-	G_DIETPI-NOTIFY 2 "Configuring: prefer wlan/eth naming for networked devices:"
+	G_DIETPI-NOTIFY 2 'Configuring: prefer wlan/eth naming for networked devices:'
 
 	# - Prefer to use wlan/eth naming for networked devices (eg: stretch)
 	ln -sf /dev/null /etc/systemd/network/99-default.link
@@ -1106,6 +1104,11 @@ _EOF_
 		update-grub
 
 	fi
+
+	G_DIETPI-NOTIFY 2 'Add dietpi.com SSH pub host key for DietPi-Survey and -Bugreport upload:'
+	mkdir -p /root/.ssh
+	>> /root/.ssh/known_hosts
+	G_CONFIG_INJECT 'dietpi.com ' 'dietpi.com ssh-rsa AAAAB3NzaC1yc2EAAAADAQABAAABAQDE6aw3r6aOEqendNu376iiCHr9tGBIWPgfrLkzjXjEsHGyVSUFNnZt6pftrDeK7UX\+qX4FxOwQlugG4fymOHbimRCFiv6cf7VpYg1Ednquq9TLb7/cIIbX8a6AuRmX4fjdGuqwmBq3OG7ZksFcYEFKt5U4mAJIaL8hXiM2iXjgY02LqiQY/QWATsHI4ie9ZOnwrQE\+Rr6mASN1BVFuIgyHIbwX54jsFSnZ/7CdBMkuAd9B8JkxppWVYpYIFHE9oWNfjh/epdK8yv9Oo6r0w5Rb\+4qaAc5g\+RAaknHeV6Gp75d2lxBdCm5XknKKbGma2\+/DfoE8WZTSgzXrYcRlStYN' /root/.ssh/known_hosts
 
 	#-----------------------------------------------------------------------------------
 	#MISC
@@ -1181,7 +1184,7 @@ _EOF_
 
 	G_RUN_CMD echo 'DietPi' > /etc/hostname
 
-	G_DIETPI-NOTIFY 2 'Configuring htop:'
+	G_DIETPI-NOTIFY 2 'Configuring htop'
 
 	mkdir -p /root/.config/htop
 	cp /DietPi/dietpi/conf/htoprc /root/.config/htop/htoprc
@@ -1200,10 +1203,6 @@ _EOF_
 	G_DIETPI-NOTIFY 2 'Reducing getty count and resource usage:'
 
 	systemctl mask getty-static
-
-	G_DIETPI-NOTIFY 2 'Configuring time sync:'
-
-	systemctl disable systemd-timesyncd
 
 	G_DIETPI-NOTIFY 2 'Configuring regional settings (TZdata):'
 
@@ -1521,9 +1520,8 @@ _EOF_
 
 	sync
 
-	# - Remove PREP files
-	rm dietpi-globals
-	rm PREP_SYSTEM_FOR_DIETPI.sh
+	# - Remove PREP script
+	rm /root/PREP_SYSTEM_FOR_DIETPI.sh &> /dev/null
 
 	G_DIETPI-NOTIFY 2 "The used kernel version is: $(uname -r)"
 	kernel_apt_packages="$(dpkg --get-selections | grep '^linux-image-[0-9]')"
