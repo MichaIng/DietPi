@@ -658,7 +658,6 @@ _EOF_
 		'isc-dhcp-client'	# DHCP client
 		'locales'		# Support locales, necessary for DietPi scripts, as we use enGB.UTF8 as default language
 		'nano'			# Simple text editor
-		'net-tools'		# Classic network commands: ifconfig, route, netstat
 		'ntfs-3g'		# DietPi-Drive_Manager NTPS (Windows) file system support
 		'p7zip-full'		# .7z wrapper
 		'parted'		# DietPi-Boot + DietPi-Drive_Manager
