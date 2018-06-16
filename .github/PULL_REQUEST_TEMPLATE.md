@@ -1,3 +1,21 @@
-<!-- Before submitting a pull request  -->
-<!-- - Please ensure target branch is the testing (active dev) branch: https://github.com/Fourdee/DietPi/tree/testing  -->
-<!-- - Please ensure changes have been tested and verified functional.  -->
+<!--
+Before submitting a pull request
+- Please ensure target branch is the testing (active dev) branch: https://github.com/Fourdee/DietPi/tree/testing
+- Please ensure changes have been tested and verified functional.
+-->
+**Status**: <!-- WIP / Testing / Ready / ... -->
+<!--
+- [ ] Task 1
+- [ ] Task 2
+-->
+
+**Reference**: <!-- https://github.com/Fourdee/DietPi/issues/XXXX -->
+
+**Commit list/description**:
+<!--
+- DietPi-Config | Add "Fan control" option to "Performance Options"
+![Screenshot](https://xxx.github.com/images/xxx.png)
+- DietPi-Config | Add "Fan control" support for Odroid C2
+- DietPi-Config | Syntax fix
+-->
+- ...
