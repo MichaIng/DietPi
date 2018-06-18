@@ -1392,6 +1392,31 @@ _EOF_
 	G_AGP alsa-utils firmware-intel-sound
 	G_AGA
 
+	#	x86_64: kernel cmd line with GRUB
+	if (( $G_HW_ARCH == 10 )); then
+
+		l_message='Detecting additional OS installed on system' G_RUN_CMD os-prober
+
+		# - Native PC/EFI (assume x86_64 only possible)
+		if dpkg --get-selections | grep -qi '^grub-efi-amd64[[:space:]]' &&
+			[[ -d '/boot/efi' ]]; then
+
+			l_message='Recreating GRUB-EFI' G_RUN_CMD grub-install --target=x86_64-efi --efi-directory=/boot/efi --bootloader-id=arch_grub --recheck
+
+		fi
+
+		# - Finalize GRUB
+		if [[ -f '/etc/default/grub' ]]; then
+
+			G_CONFIG_INJECT 'GRUB_CMDLINE_LINUX_DEFAULT=' 'GRUB_CMDLINE_LINUX_DEFAULT=\"consoleblank=0 quiet\"' /etc/default/grub
+			G_CONFIG_INJECT 'GRUB_CMDLINE_LINUX=' 'GRUB_CMDLINE_LINUX=\"net\.ifnames=0\"' /etc/default/grub
+			G_CONFIG_INJECT 'GRUB_TIMEOUT=' 'GRUB_TIMEOUT=3' /etc/default/grub
+			l_message='Finalizing GRUB' G_RUN_CMD update-grub
+
+		fi
+
+	fi
+
 	G_DIETPI-NOTIFY 2 'Setting default CPU gov'
 
 	/DietPi/dietpi/func/dietpi-set_cpu
@@ -1469,31 +1494,6 @@ $SUB_VERSION
 _EOF_
 
 	G_RUN_CMD cp /DietPi/dietpi/.version /var/lib/dietpi/.dietpi_image_version
-
-	#	x86_64: kernel cmd line with GRUB
-	if (( $G_HW_ARCH == 10 )); then
-
-		l_message='Detecting additional OS installed on system' G_RUN_CMD os-prober
-
-		# - Native PC/EFI (assume x86_64 only possible)
-		if dpkg --get-selections | grep -qi '^grub-efi-amd64[[:space:]]' &&
-			[[ -d '/boot/efi' ]]; then
-
-			l_message='Recreating GRUB-EFI' G_RUN_CMD grub-install --target=x86_64-efi --efi-directory=/boot/efi --bootloader-id=arch_grub --recheck
-
-		fi
-
-		# - Finalize GRUB
-		if [[ -f '/etc/default/grub' ]]; then
-
-			G_CONFIG_INJECT 'GRUB_CMDLINE_LINUX_DEFAULT=' 'GRUB_CMDLINE_LINUX_DEFAULT=\"consoleblank=0 quiet\"' /etc/default/grub
-			G_CONFIG_INJECT 'GRUB_CMDLINE_LINUX=' 'GRUB_CMDLINE_LINUX=\"net\.ifnames=0\"' /etc/default/grub
-			G_CONFIG_INJECT 'GRUB_TIMEOUT=' 'GRUB_TIMEOUT=3' /etc/default/grub
-			l_message='Finalizing GRUB' G_RUN_CMD update-grub
-
-		fi
-
-	fi
 
 	G_DIETPI-NOTIFY 2 'Sync changes to disk. Please wait, this may take some time...'
 
