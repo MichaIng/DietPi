@@ -1477,7 +1477,7 @@ _EOF_
 
 		# - Native PC/EFI (assume x86_64 only possible)
 		if dpkg --get-selections | grep -qi '^grub-efi-amd64[[:space:]]' &&
-			[[ -d /boot/efi ]]; then
+			[[ -d '/boot/efi' ]]; then
 
 			l_message='Recreating GRUB-EFI' G_RUN_CMD grub-install --target=x86_64-efi --efi-directory=/boot/efi --bootloader-id=arch_grub --recheck
 
@@ -1489,7 +1489,7 @@ _EOF_
 			G_CONFIG_INJECT 'GRUB_CMDLINE_LINUX_DEFAULT=' 'GRUB_CMDLINE_LINUX_DEFAULT=\"consoleblank=0 quiet\"' /etc/default/grub
 			G_CONFIG_INJECT 'GRUB_CMDLINE_LINUX=' 'GRUB_CMDLINE_LINUX=\"net\.ifnames=0\"' /etc/default/grub
 			G_CONFIG_INJECT 'GRUB_TIMEOUT=' 'GRUB_TIMEOUT=3' /etc/default/grub
-			update-grub
+			l_message='Finalizing GRUB' G_RUN_CMD update-grub
 
 		fi
 
