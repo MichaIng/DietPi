@@ -678,6 +678,7 @@ _EOF_
 		aPACKAGES_REQUIRED_INSTALL+=('crda')			# WiFi related
 		aPACKAGES_REQUIRED_INSTALL+=('firmware-atheros')	# WiFi dongle firmware
 		aPACKAGES_REQUIRED_INSTALL+=('firmware-brcm80211')	# WiFi dongle firmware
+		aPACKAGES_REQUIRED_INSTALL+=('firmware-iwlwifi')	# Intel WiFi dongle/PCI-e firwmare
 		aPACKAGES_REQUIRED_INSTALL+=('iw')			# WiFi related
 		aPACKAGES_REQUIRED_INSTALL+=('rfkill')	 		# WiFi related: Used by some onboard WiFi chipsets
 		aPACKAGES_REQUIRED_INSTALL+=('wireless-tools')		# WiFi related
@@ -736,13 +737,14 @@ _EOF_
 	#	x86_64
 	if (( $G_HW_ARCH == 10 )); then
 
-		G_AGI linux-image-amd64
+		G_AGI linux-image-amd64 os-prober
+
 		# Usually no firmware should be necessary for VMs. If user manually passes though some USB device, he might need to install the firmware then.
 		(( $G_HW_MODEL != 20 )) && G_AGI firmware-linux-nonfree
 
 		#	Grub EFI
 		if dpkg --get-selections | grep -q '^grub-efi-amd64' ||
-			[ -d /boot/efi ]; then
+			[[ -d '/boot/efi' ]]; then
 
 			G_AGI grub-efi-amd64
 
@@ -802,7 +804,6 @@ _EOF_
 
 		G_AGI device-tree-compiler #Kern
 
-
 	# - Auto detect kernel/firmware package
 	else
 
@@ -833,20 +834,6 @@ _EOF_
 			G_AGI $AUTO_DETECT_DTB_PKG
 
 		fi
-
-		#	Check for existing firmware
-		#	- ARMbian
-		# AUTO_DETECT_FIRMWARE_PKG=$(dpkg --get-selections | grep '^armbian-firmware' | awk '{print $1}')
-		# if [[ -n $AUTO_DETECT_FIRMWARE_PKG ]]; then
-
-			# G_AGI $AUTO_DETECT_FIRMWARE_PKG
-
-		# fi
-			# Unpacking armbian-firmware (5.35) ...
-			# dpkg: error processing archive /var/cache/apt/archives/armbian-firmware_5.35_all.deb (--unpack):
-			# trying to overwrite '/lib/firmware/rt2870.bin', which is also in package firmware-misc-nonfree 20161130-3
-			# dpkg-deb: error: subprocess paste was killed by signal (Broken pipe)
-
 
 	fi
 
@@ -890,18 +877,6 @@ _EOF_
 	G_DIETPI-NOTIFY 2 'Installing core DietPi pre-req APT packages'
 
 	G_AGI $INSTALL_PACKAGES
-
-#	G_DIETPI-NOTIFY 2 'Applying default DietPi configuration for APT'
-
-#	export G_ERROR_HANDLER_COMMAND='/etc/apt/apt.conf.d/99-dietpi-norecommends'
-#	cat << _EOF_ > $G_ERROR_HANDLER_COMMAND
-#APT::Install-Recommends "false";
-#APT::Install-Suggests "false";
-#APT::AutoRemove::RecommendsImportant "false";
-#APT::AutoRemove::SuggestsImportant "false";
-#_EOF_
-#	export G_ERROR_HANDLER_EXITCODE=$?
-#	G_ERROR_HANDLER
 
 	G_AGA
 
@@ -1098,16 +1073,6 @@ _EOF_
 
 	# - Prefer to use wlan/eth naming for networked devices (eg: stretch)
 	ln -sf /dev/null /etc/systemd/network/99-default.link
-	#	x86_64: kernel cmd line with GRUB
-	#	HW_ARCH not set at this stage within DietPi, using PREP_SYSTEM
-	if [[ -f /etc/default/grub ]]; then
-
-		G_CONFIG_INJECT 'GRUB_CMDLINE_LINUX_DEFAULT=' 'GRUB_CMDLINE_LINUX_DEFAULT=\"consoleblank=0 quiet\"' /etc/default/grub
-		G_CONFIG_INJECT 'GRUB_CMDLINE_LINUX=' 'GRUB_CMDLINE_LINUX=\"net\.ifnames=0\"' /etc/default/grub
-		G_CONFIG_INJECT 'GRUB_TIMEOUT=' 'GRUB_TIMEOUT=0' /etc/default/grub
-		update-grub
-
-	fi
 
 	G_DIETPI-NOTIFY 2 'Add dietpi.com SSH pub host key for DietPi-Survey and -Bugreport upload:'
 	mkdir -p /root/.ssh
@@ -1505,11 +1470,28 @@ _EOF_
 
 	G_RUN_CMD cp /DietPi/dietpi/.version /var/lib/dietpi/.dietpi_image_version
 
-	# - Native PC/EFI (assume x86_64 only possible)
-	if dpkg --get-selections | grep -qi '^grub-efi-amd64[[:space:]]' &&
-		[[ -d /boot/efi ]]; then
+	#	x86_64: kernel cmd line with GRUB
+	if (( $G_HW_ARCH == 10 )); then
 
-		l_message='Recreating GRUB-EFI' G_RUN_CMD grub-install --target=x86_64-efi --efi-directory=/boot/efi --bootloader-id=arch_grub --recheck
+		l_message='Detecting additional OS installed on system' G_RUN_CMD os-prober
+
+		# - Native PC/EFI (assume x86_64 only possible)
+		if dpkg --get-selections | grep -qi '^grub-efi-amd64[[:space:]]' &&
+			[[ -d /boot/efi ]]; then
+
+			l_message='Recreating GRUB-EFI' G_RUN_CMD grub-install --target=x86_64-efi --efi-directory=/boot/efi --bootloader-id=arch_grub --recheck
+
+		fi
+
+		# - Finalize GRUB
+		if [[ -f '/etc/default/grub' ]]; then
+
+			G_CONFIG_INJECT 'GRUB_CMDLINE_LINUX_DEFAULT=' 'GRUB_CMDLINE_LINUX_DEFAULT=\"consoleblank=0 quiet\"' /etc/default/grub
+			G_CONFIG_INJECT 'GRUB_CMDLINE_LINUX=' 'GRUB_CMDLINE_LINUX=\"net\.ifnames=0\"' /etc/default/grub
+			G_CONFIG_INJECT 'GRUB_TIMEOUT=' 'GRUB_TIMEOUT=3' /etc/default/grub
+			update-grub
+
+		fi
 
 	fi
 
