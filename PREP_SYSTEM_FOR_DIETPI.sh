@@ -1167,13 +1167,7 @@ _EOF_
 
 	/DietPi/dietpi/func/dietpi-set_hardware serialconsole enable
 	# - Disable for post-1st run setup:
-	# - Exclude
-	#	NanoPCT4
-	if (( $G_HW_MODEL != 68 )); then
-
-		sed -i '/^[[:blank:]]*CONFIG_SERIAL_CONSOLE_ENABLE=/c\CONFIG_SERIAL_CONSOLE_ENABLE=0' /DietPi/dietpi.txt
-
-	fi
+	sed -i '/^[[:blank:]]*CONFIG_SERIAL_CONSOLE_ENABLE=/c\CONFIG_SERIAL_CONSOLE_ENABLE=0' /DietPi/dietpi.txt
 
 	G_DIETPI-NOTIFY 2 'Reducing getty count and resource usage:'
 
