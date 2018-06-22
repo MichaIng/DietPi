@@ -522,9 +522,12 @@
 	G_DIETPI-NOTIFY 2 'Moving kernel and boot configuration to /boot'
 
 	G_RUN_CMD mv "DietPi-$GIT_BRANCH/dietpi.txt" /boot/
-	G_RUN_CMD mv "DietPi-$GIT_BRANCH/config.txt" /boot/ #RPi only, but must check all scripts with config.txt scrapes, as they are not file checked??
 
-	# - HW specific boot.ini uEnv.txt
+	# - HW specific config.txt, boot.ini uEnv.txt
+	if (( $G_HW_MODEL < 10 )); then
+
+		G_RUN_CMD mv "DietPi-$GIT_BRANCH/config.txt" /boot/
+
 	if (( $G_HW_MODEL == 10 )); then
 
 		G_RUN_CMD mv "DietPi-$GIT_BRANCH/boot_c1.ini" /boot/boot.ini
