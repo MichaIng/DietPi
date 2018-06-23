@@ -528,7 +528,7 @@
 
 		G_RUN_CMD mv "DietPi-$GIT_BRANCH/config.txt" /boot/
 
-	if (( $G_HW_MODEL == 10 )); then
+	elif (( $G_HW_MODEL == 10 )); then
 
 		G_RUN_CMD mv "DietPi-$GIT_BRANCH/boot_c1.ini" /boot/boot.ini
 
