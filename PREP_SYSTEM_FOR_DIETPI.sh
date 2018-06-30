@@ -1100,9 +1100,9 @@ _EOF_
 
 	fi
 
-	echo -e 'Samba client can be installed and setup by DietPi-Config.\nSimply run: dietpi-config and select the Networking option: NAS/Misc menu' > /mnt/samba/readme.txt
-	echo -e 'FTP client mount can be installed and setup by DietPi-Config.\nSimply run: dietpi-config and select the Networking option: NAS/Misc menu' > /mnt/ftp_client/readme.txt
-	echo -e 'NFS client can be installed and setup by DietPi-Config.\nSimply run: dietpi-config and select the Networking option: NAS/Misc menu' > /mnt/nfs_client/readme.txt
+	local info_use_drive_manager='can be installed and setup by DietPi-Drive_Manager.\nSimply run: dietpi-drive_manager and select Add Network Drive'
+	echo -e "Samba client: $info_use_drive_manager" > /mnt/samba/readme.txt
+	echo -e "NFS client: $info_use_drive_manager" > /mnt/nfs_client/readme.txt
 
 	l_message='Generating DietPi /etc/fstab' G_RUN_CMD /DietPi/dietpi/dietpi-drive_manager 4
 	# Restart DietPi-RAMdisk, as 'dietpi-drive_manager 4' remounts /DietPi.
