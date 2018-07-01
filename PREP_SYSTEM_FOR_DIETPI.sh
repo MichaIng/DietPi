@@ -137,6 +137,8 @@
 		exit 1
 
 	fi
+	# Go back to tmp working dir, as loading global includes cd $HOME:
+	cd /tmp/dietpi-prep
 	rm dietpi-globals
 
 	export G_PROGRAM_NAME='DietPi-PREP'
