@@ -175,19 +175,19 @@
 	#G_HW_MODEL # init from dietpi-globals
 	#G_HW_ARCH_DESCRIPTION # init from dietpi-globals
 	G_HW_ARCH_DESCRIPTION="$(uname -m)"
-	if [[ $G_HW_ARCH_DESCRIPTION == armv6l ]]; then
+	if [[ $G_HW_ARCH_DESCRIPTION == 'armv6l' ]]; then
 
 		export G_HW_ARCH=1
 
-	elif [[ $G_HW_ARCH_DESCRIPTION == armv7l ]]; then
+	elif [[ $G_HW_ARCH_DESCRIPTION == 'armv7l' ]]; then
 
 		export G_HW_ARCH=2
 
-	elif [[ $G_HW_ARCH_DESCRIPTION == aarch64 ]]; then
+	elif [[ $G_HW_ARCH_DESCRIPTION == 'aarch64' ]]; then
 
 		export G_HW_ARCH=3
 
-	elif [[ $G_HW_ARCH_DESCRIPTION == x86_64 ]]; then
+	elif [[ $G_HW_ARCH_DESCRIPTION == 'x86_64' ]]; then
 
 		export G_HW_ARCH=10
 
