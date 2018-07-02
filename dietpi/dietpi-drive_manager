@@ -78,6 +78,7 @@
 		aDRIVE_ISMOUNTED[$INDEX_INIT_CURRENT_DEVICE]=0
 		aDRIVE_ISREADONLY_CURRENTLY[$INDEX_INIT_CURRENT_DEVICE]=0
 		aDRIVE_ISNETWORKED[$INDEX_INIT_CURRENT_DEVICE]=0
+		aDRIVE_ISROM[$INDEX_INIT_CURRENT_DEVICE]=0
 
 	}
 
@@ -101,6 +102,7 @@
 		unset aDRIVE_ISFILESYSTEM
 		unset aDRIVE_ISREADONLY_CURRENTLY
 		unset aDRIVE_ISNETWORKED
+		unset aDRIVE_ISROM
 
 	}
 
@@ -393,6 +395,19 @@ _EOF_
 
 		done < /tmp/.dietpi-drive_manager_lsblk_tmp
 		rm /tmp/.dietpi-drive_manager_lsblk_tmp
+
+		#Set required global flags, for all drives found
+		for ((i=0; i<${#aDRIVE_MOUNT_SOURCE[@]}; i++))
+		do
+
+			# - Detect and set ROM drives
+			if [[ ${aDRIVE_MOUNT_SOURCE[$i]} == '/dev/sr'* ]]; then
+
+				aDRIVE_ISROM[$i]=1
+
+			fi
+
+		done
 
 		#Remove x-systemd.automount if not supported by kernel: https://github.com/Fourdee/DietPi/issues/1607#issuecomment-372030565
 		if ! modprobe autofs4 --dry-run &> /dev/null; then
@@ -788,12 +803,21 @@ _EOF_
 					#Not mounted, why?
 					else
 
-						#Drive has no FS:
+						# - Drive has no FS:
 						if (( ! ${aDRIVE_ISFILESYSTEM[$j]} )); then
 
-							G_WHIP_MENU_ARRAY+=("${aDRIVE_MOUNT_TARGET[$j]}" ": ${aDRIVE_MOUNT_SOURCE[$j]} | No filesystem / format required")
+							# - ROM device with no ROM attached
+							if (( ${aDRIVE_ISROM[$j]} )); then
 
-						#Drive is not mounted:
+								G_WHIP_MENU_ARRAY+=("${aDRIVE_MOUNT_TARGET[$j]}" ": ${aDRIVE_MOUNT_SOURCE[$j]} | Please insert media into the ROM device")
+
+							else
+
+								G_WHIP_MENU_ARRAY+=("${aDRIVE_MOUNT_TARGET[$j]}" ": ${aDRIVE_MOUNT_SOURCE[$j]} | No filesystem / format required")
+
+							fi
+
+						# - Drive is not mounted:
 						else
 
 							G_WHIP_MENU_ARRAY+=("${aDRIVE_MOUNT_TARGET[$j]}" ": ${aDRIVE_MOUNT_SOURCE[$j]} | $string_fstype | Not mounted")
@@ -901,8 +925,18 @@ _EOF_
 		#No filesystem
 		if (( ! ${aDRIVE_ISFILESYSTEM[$INDEX_DRIVE_BEING_EDITED]} )); then
 
-			whiptail_desc+='\nStatus:       Drive has no known filesystem and must be formatted'
-			G_WHIP_MENU_ARRAY+=('Format' ': Wipe all data and format drive with ext4')
+
+			if (( ${aDRIVE_ISROM[$INDEX_DRIVE_BEING_EDITED]} )); then
+
+				whiptail_desc+='\nStatus:       No media found, please insert media into the ROM device'
+				G_WHIP_MENU_ARRAY+=('Refresh' ': No media found, please insert media into the ROM device')
+
+			else
+
+				whiptail_desc+='\nStatus:       Drive has no known filesystem and must be formatted'
+				G_WHIP_MENU_ARRAY+=('Format' ': Wipe all data and format drive with ext4')
+
+			fi
 
 		else
 
@@ -936,72 +970,76 @@ _EOF_
 
 				fi
 
-				G_WHIP_MENU_ARRAY+=('Benchmark' ': Test read and write speeds')
+				if (( ! ${aDRIVE_ISROM[$INDEX_DRIVE_BEING_EDITED]} )); then
 
-				local reserved_blocks_percent_info=''
-				local reserved_blocks_percent_current=0
-				# Show reserved blocks percentage for ext4 drives behind capacity:
-				if [[ ${aDRIVE_FSTYPE[$INDEX_DRIVE_BEING_EDITED]} == 'ext4' ]]; then
+					G_WHIP_MENU_ARRAY+=('Benchmark' ': Test read and write speeds')
 
-					local fp_temp='/tmp/.dietpi-drive_manager_dumpe2fs'
-					dumpe2fs -h "${aDRIVE_MOUNT_SOURCE[$INDEX_DRIVE_BEING_EDITED]}" > "$fp_temp"
-					local block_count="$(grep -m1 '^Block count:' $fp_temp | awk '{print $3}')"
-					local reserved_block_count="$(grep -m1 '^Reserved block count:' $fp_temp | awk '{print $4}')"
-					rm $fp_temp
-					reserved_blocks_percent_current="$(bc -l <<< "scale=3;(100*$reserved_block_count)/$block_count")"
-					# Correct rounding to final scale:
-					reserved_blocks_percent_current="$(bc -l <<< "scale=2;(($reserved_blocks_percent_current*100)+0.5)/100" | sed 's/^\./0\./' | sed '/.0$/s/0$//' | sed 's/\.0$//')"
-					reserved_blocks_percent_info=" (Reserved blocks: $reserved_blocks_percent_current%)"
-					G_WHIP_MENU_ARRAY+=('Reserved blocks' ': Adjust percentage of reserved blocks on this drive')
+					local reserved_blocks_percent_info=''
+					local reserved_blocks_percent_current=0
+					# Show reserved blocks percentage for ext4 drives behind capacity:
+					if [[ ${aDRIVE_FSTYPE[$INDEX_DRIVE_BEING_EDITED]} == 'ext4' ]]; then
 
-				fi
-
-				whiptail_desc+="\nAllocation:   Capacity: ${aDRIVE_SIZE_TOTAL[$INDEX_DRIVE_BEING_EDITED]}b | Used: ${aDRIVE_SIZE_USED[$INDEX_DRIVE_BEING_EDITED]}b (${aDRIVE_SIZE_PERCENTUSED[$INDEX_DRIVE_BEING_EDITED]})"
-				whiptail_desc+='\nStatus:       Drive is online and ready for use'
-
-				#Userdata location/swapfile/Readonly
-				if (( ! ${aDRIVE_ISNETWORKED[$INDEX_DRIVE_BEING_EDITED]} )); then
-
-					# - Userdata
-					if ( [[ ${aDRIVE_MOUNT_TARGET[$INDEX_DRIVE_BEING_EDITED]} != '/' && $FP_USERDATA_CURRENT == ${aDRIVE_MOUNT_TARGET[$INDEX_DRIVE_BEING_EDITED]}* ]] ) || #off rootfs
-						( [[ ${aDRIVE_MOUNT_TARGET[$INDEX_DRIVE_BEING_EDITED]} == '/' && $FP_USERDATA_CURRENT == $G_FP_DIETPI_USERDATA ]] ); then #on rootfs
-
-						G_WHIP_MENU_ARRAY+=('User data' ": [X] | DietPi user data is currently located on this drive")
-						partition_contains_userdata=1
-
-					else
-
-						G_WHIP_MENU_ARRAY+=('User data' ': [ ] | Select to transfer DietPi user data to this drive')
+						local fp_temp='/tmp/.dietpi-drive_manager_dumpe2fs'
+						dumpe2fs -h "${aDRIVE_MOUNT_SOURCE[$INDEX_DRIVE_BEING_EDITED]}" > "$fp_temp"
+						local block_count="$(grep -m1 '^Block count:' $fp_temp | awk '{print $3}')"
+						local reserved_block_count="$(grep -m1 '^Reserved block count:' $fp_temp | awk '{print $4}')"
+						rm $fp_temp
+						reserved_blocks_percent_current="$(bc -l <<< "scale=3;(100*$reserved_block_count)/$block_count")"
+						# Correct rounding to final scale:
+						reserved_blocks_percent_current="$(bc -l <<< "scale=2;(($reserved_blocks_percent_current*100)+0.5)/100" | sed 's/^\./0\./' | sed '/.0$/s/0$//' | sed 's/\.0$//')"
+						reserved_blocks_percent_info=" (Reserved blocks: $reserved_blocks_percent_current%)"
+						G_WHIP_MENU_ARRAY+=('Reserved blocks' ': Adjust percentage of reserved blocks on this drive')
 
 					fi
 
-					# - Swapfile
-					#	NB: / rootfs will always be detected in this check, however, no rootFS options for umount and format...
-					local swapfile_location="$(grep -m1 '^[[:blank:]]*AUTO_SETUP_SWAPFILE_LOCATION=' /DietPi/dietpi.txt | sed 's/.*=//')"
-					local swapfile_size=$(grep -m1 '^[[:blank:]]*AUTO_SETUP_SWAPFILE_SIZE=' /DietPi/dietpi.txt | sed 's/.*=//')
-					if [[ $swapfile_location == ${aDRIVE_MOUNT_TARGET[$INDEX_DRIVE_BEING_EDITED]}* && ${aDRIVE_MOUNT_TARGET[$INDEX_DRIVE_BEING_EDITED]} != '/' ]] ||
-						[[ $swapfile_location == '/var/swap' && ${aDRIVE_MOUNT_TARGET[$INDEX_DRIVE_BEING_EDITED]} == '/' ]]; then
+					whiptail_desc+="\nAllocation:   Capacity: ${aDRIVE_SIZE_TOTAL[$INDEX_DRIVE_BEING_EDITED]}b | Used: ${aDRIVE_SIZE_USED[$INDEX_DRIVE_BEING_EDITED]}b (${aDRIVE_SIZE_PERCENTUSED[$INDEX_DRIVE_BEING_EDITED]})"
+					whiptail_desc+='\nStatus:       Drive is online and ready for use'
 
-						partition_contains_swapfile=1
-						G_WHIP_MENU_ARRAY+=('Swapfile' ": [X] | ${swapfile_size}MB used on this drive, select to change size")
+					#Userdata location/swapfile/Readonly
+					if (( ! ${aDRIVE_ISNETWORKED[$INDEX_DRIVE_BEING_EDITED]} )); then
 
-					else
+						# - Userdata
+						if ( [[ ${aDRIVE_MOUNT_TARGET[$INDEX_DRIVE_BEING_EDITED]} != '/' && $FP_USERDATA_CURRENT == ${aDRIVE_MOUNT_TARGET[$INDEX_DRIVE_BEING_EDITED]}* ]] ) || #off rootfs
+							( [[ ${aDRIVE_MOUNT_TARGET[$INDEX_DRIVE_BEING_EDITED]} == '/' && $FP_USERDATA_CURRENT == $G_FP_DIETPI_USERDATA ]] ); then #on rootfs
 
-						G_WHIP_MENU_ARRAY+=('Swapfile' ': [ ] | Select to transfer swapfile to this drive')
+							G_WHIP_MENU_ARRAY+=('User data' ": [X] | DietPi user data is currently located on this drive")
+							partition_contains_userdata=1
+
+						else
+
+							G_WHIP_MENU_ARRAY+=('User data' ': [ ] | Select to transfer DietPi user data to this drive')
+
+						fi
+
+						# - Swapfile
+						#	NB: / rootfs will always be detected in this check, however, no rootFS options for umount and format...
+						local swapfile_location="$(grep -m1 '^[[:blank:]]*AUTO_SETUP_SWAPFILE_LOCATION=' /DietPi/dietpi.txt | sed 's/.*=//')"
+						local swapfile_size=$(grep -m1 '^[[:blank:]]*AUTO_SETUP_SWAPFILE_SIZE=' /DietPi/dietpi.txt | sed 's/.*=//')
+						if [[ $swapfile_location == ${aDRIVE_MOUNT_TARGET[$INDEX_DRIVE_BEING_EDITED]}* && ${aDRIVE_MOUNT_TARGET[$INDEX_DRIVE_BEING_EDITED]} != '/' ]] ||
+							[[ $swapfile_location == '/var/swap' && ${aDRIVE_MOUNT_TARGET[$INDEX_DRIVE_BEING_EDITED]} == '/' ]]; then
+
+							partition_contains_swapfile=1
+							G_WHIP_MENU_ARRAY+=('Swapfile' ": [X] | ${swapfile_size}MB used on this drive, select to change size")
+
+						else
+
+							G_WHIP_MENU_ARRAY+=('Swapfile' ': [ ] | Select to transfer swapfile to this drive')
+
+						fi
+
+						# - Read only?
+						local read_only_state='[ ]'
+						local read_only_state_text='Disabled'
+						if (( ${aDRIVE_ISREADONLY_CURRENTLY[$INDEX_DRIVE_BEING_EDITED]} )); then
+
+							read_only_state='[X]'
+							read_only_state_text='Enabled'
+
+						fi
+						G_WHIP_MENU_ARRAY+=('Read Only' ": $read_only_state | Select to toggle RW/RO modes")
+						whiptail_desc+="\nRead only:    $read_only_state_text"
 
 					fi
-
-					# - Read only?
-					local read_only_state='[ ]'
-					local read_only_state_text='Disabled'
-					if (( ${aDRIVE_ISREADONLY_CURRENTLY[$INDEX_DRIVE_BEING_EDITED]} )); then
-
-						read_only_state='[X]'
-						read_only_state_text='Enabled'
-
-					fi
-					G_WHIP_MENU_ARRAY+=('Read Only' ": $read_only_state | Select to toggle RW/RO modes")
-					whiptail_desc+="\nRead only:    $read_only_state_text"
 
 				fi
 
@@ -1012,7 +1050,7 @@ _EOF_
 
 			fi
 
-			if (( ! ${aDRIVE_ISNETWORKED[$INDEX_DRIVE_BEING_EDITED]} )); then
+			if (( ! ${aDRIVE_ISROM[$INDEX_DRIVE_BEING_EDITED]} && ! ${aDRIVE_ISNETWORKED[$INDEX_DRIVE_BEING_EDITED]} )); then
 
 				# - Disable check&repair for /boot /rootfs
 				if [[ ${aDRIVE_MOUNT_TARGET[$INDEX_DRIVE_BEING_EDITED]} != '/' && ${aDRIVE_MOUNT_TARGET[$INDEX_DRIVE_BEING_EDITED]} != '/boot' ]]; then
