@@ -55,8 +55,6 @@
 	FORMAT_FILESYSTEM_TYPE=0 #0=ext4 1=ntfs 2=fat32 3=hfs+ 4=btrfs 5=f2fs 6=exfat
 	FORMAT_RECREATE_PARTITION_TABLE=1
 	FORMAT_COMPLETED=0
-	FORMAT_PREVIOUS_MOUNT_SOURCE='' #Used to obtain previous mount source fp, before a format, for rootfs transfer
-	FORMAT_PREVIOUS_MOUNT_TARGET=''
 
 	INDEX_INIT_CURRENT_DEVICE=-1
 	Init_New_Device(){
@@ -521,11 +519,12 @@ _EOF_
 	Run_Format(){
 
 		local run_format=0
-
+		local info_format_fs_type=''
+		local info_format_type_output='Partition format' #used in complete message
 		local text_desc="Format Drive:\n - /dev/${aDRIVE_SOURCE_DEVICE[$INDEX_DRIVE_BEING_EDITED]}\n - UUID=${aDRIVE_UUID[$INDEX_DRIVE_BEING_EDITED]}\n - Partition table: $partition_table_text\n - Filesystem type: $format_type_text\n\nALL DATA and PARTITIONS on this drive will be DELETED.\nDo you wish to continue?"
 		if (( ${aDRIVE_ISPARTITIONTABLE[$INDEX_DRIVE_BEING_EDITED]} )); then
 
-			text_desc="Format partition:\n - ${aDRIVE_MOUNT_SOURCE[$INDEX_DRIVE_BEING_EDITED]}\n - UUID=${aDRIVE_UUID[$INDEX_DRIVE_BEING_EDITED]}\n - Partition table: $partition_table_text\n - Filesystem type: $format_type_text\n\nALL DATA on this partition will be DELETED.\nDo you wish to continue?"
+			text_desc="Format partition:\n - ${aDRIVE_MOUNT_SOURCE[$INDEX_DRIVE_BEING_EDITED]}\n - UUID=${aDRIVE_UUID[$INDEX_DRIVE_BEING_EDITED]}\n - Filesystem type: $format_type_text\n\nALL DATA on this partition will be DELETED.\nDo you wish to continue?"
 
 		fi
 
@@ -559,7 +558,7 @@ _EOF_
 					if [[ -b $fp_target_partition ]]; then
 
 						G_DIETPI-NOTIFY 2 "Writing zero's to partition $fp_target_partition"
-						dd if=/dev/zero of=$fp_target_partition  bs=4K count=1337 #Partition wipe (if it has one), must be done 1st, else blkid still reports UUID's etc
+						G_RUN_CMD dd if=/dev/zero of=$fp_target_partition bs=4K count=1337 #Partition wipe (if it has one), must be done 1st, else blkid still reports UUID's etc
 
 					fi
 
@@ -567,7 +566,7 @@ _EOF_
 
 				# - Clear Partition table from device
 				G_DIETPI-NOTIFY 2 "Writing zero's to partition table /dev/${aDRIVE_SOURCE_DEVICE[$INDEX_DRIVE_BEING_EDITED]}"
-				dd if=/dev/zero of=/dev/${aDRIVE_SOURCE_DEVICE[$INDEX_DRIVE_BEING_EDITED]} bs=4K count=1337 #Block device wipe
+				G_RUN_CMD dd if=/dev/zero of=/dev/${aDRIVE_SOURCE_DEVICE[$INDEX_DRIVE_BEING_EDITED]} bs=4K count=1337 #Block device wipe
 
 				# - Create partition table type
 				local parition_table_type='msdos'
@@ -577,10 +576,10 @@ _EOF_
 
 				fi
 
-				G_DIETPI-NOTIFY 2 "Partition table target: $parition_table_type"
+				G_DIETPI-NOTIFY 2 "Creating partition table, with target type: $parition_table_type"
 
-				parted -s /dev/${aDRIVE_SOURCE_DEVICE[$INDEX_DRIVE_BEING_EDITED]} mklabel $parition_table_type
-				parted -a optimal /dev/${aDRIVE_SOURCE_DEVICE[$INDEX_DRIVE_BEING_EDITED]} mkpart primary 0% 100%
+				G_RUN_CMD parted -s /dev/${aDRIVE_SOURCE_DEVICE[$INDEX_DRIVE_BEING_EDITED]} mklabel $parition_table_type
+				G_RUN_CMD parted -a optimal /dev/${aDRIVE_SOURCE_DEVICE[$INDEX_DRIVE_BEING_EDITED]} mkpart primary 0% 100%
 				partprobe /dev/${aDRIVE_SOURCE_DEVICE[$INDEX_DRIVE_BEING_EDITED]}
 
 				sleep 1 # due to systemD automount, wait for it.
@@ -593,11 +592,13 @@ _EOF_
 
 				fi
 
+				info_format_type_output='Partition table format'
 
 			else
 
 				# - Clear partition from device
-				dd if=/dev/zero of=${aDRIVE_MOUNT_SOURCE[$INDEX_DRIVE_BEING_EDITED]} bs=4K count=1337
+				G_DIETPI-NOTIFY 2 "Writing zero's to partition ${aDRIVE_MOUNT_SOURCE[$INDEX_DRIVE_BEING_EDITED]}"
+				G_RUN_CMD dd if=/dev/zero of=${aDRIVE_MOUNT_SOURCE[$INDEX_DRIVE_BEING_EDITED]} bs=4K count=1337
 
 			fi
 
@@ -605,71 +606,72 @@ _EOF_
 			if (( $FORMAT_FILESYSTEM_TYPE == 0 )); then
 
 				# force
-				mkfs.ext4 -F -m 0 ${aDRIVE_MOUNT_SOURCE[$INDEX_DRIVE_BEING_EDITED]}
+				info_format_fs_type='EXT4'
+				G_RUN_CMD mkfs.ext4 -F -m 0 ${aDRIVE_MOUNT_SOURCE[$INDEX_DRIVE_BEING_EDITED]}
 				resize2fs ${aDRIVE_MOUNT_SOURCE[$INDEX_DRIVE_BEING_EDITED]}
 
 			# - Format NTFS
 			elif (( $FORMAT_FILESYSTEM_TYPE == 1 )); then
 
 				# fast format / no indexing / force
-				mkfs.ntfs -f -I -F ${aDRIVE_MOUNT_SOURCE[$INDEX_DRIVE_BEING_EDITED]}
+				info_format_fs_type='NTFS'
+				G_RUN_CMD mkfs.ntfs -f -I -F ${aDRIVE_MOUNT_SOURCE[$INDEX_DRIVE_BEING_EDITED]}
 
 			# - Format FAT32
 			elif (( $FORMAT_FILESYSTEM_TYPE == 2 )); then
 
 				#  use 1 parition on whole device
-				mkfs.vfat -I ${aDRIVE_MOUNT_SOURCE[$INDEX_DRIVE_BEING_EDITED]}
+				info_format_fs_type='FAT'
+				G_RUN_CMD mkfs.vfat -I ${aDRIVE_MOUNT_SOURCE[$INDEX_DRIVE_BEING_EDITED]}
 
 			# - Format HFS+
 			elif (( $FORMAT_FILESYSTEM_TYPE == 3 )); then
 
-				mkfs.hfsplus ${aDRIVE_MOUNT_SOURCE[$INDEX_DRIVE_BEING_EDITED]}
+				info_format_fs_type='HFS+'
+				G_RUN_CMD mkfs.hfsplus ${aDRIVE_MOUNT_SOURCE[$INDEX_DRIVE_BEING_EDITED]}
 
 			# - Format btrfs
 			elif (( $FORMAT_FILESYSTEM_TYPE == 4 )); then
 
 				# force
-				mkfs.btrfs -f ${aDRIVE_MOUNT_SOURCE[$INDEX_DRIVE_BEING_EDITED]}
+				info_format_fs_type='BTRFS'
+				G_RUN_CMD mkfs.btrfs -f ${aDRIVE_MOUNT_SOURCE[$INDEX_DRIVE_BEING_EDITED]}
 
 			# - Format f2fs
 			elif (( $FORMAT_FILESYSTEM_TYPE == 5 )); then
 
-				mkfs.f2fs ${aDRIVE_MOUNT_SOURCE[$INDEX_DRIVE_BEING_EDITED]}
+				info_format_fs_type='F2FS'
+				G_RUN_CMD mkfs.f2fs ${aDRIVE_MOUNT_SOURCE[$INDEX_DRIVE_BEING_EDITED]}
 
 			# - Format exFAT
 			elif (( $FORMAT_FILESYSTEM_TYPE == 6 )); then
 
-				mkfs.exfat ${aDRIVE_MOUNT_SOURCE[$INDEX_DRIVE_BEING_EDITED]}
+				info_format_fs_type='exFAT'
+				G_RUN_CMD mkfs.exfat ${aDRIVE_MOUNT_SOURCE[$INDEX_DRIVE_BEING_EDITED]}
 
 			fi
 
+			G_DIETPI-NOTIFY 0 "Created $info_format_fs_type filesystem: ${aDRIVE_MOUNT_SOURCE[$INDEX_DRIVE_BEING_EDITED]}"
 			FORMAT_COMPLETED=1
-			FORMAT_PREVIOUS_MOUNT_SOURCE=${aDRIVE_MOUNT_SOURCE[$INDEX_DRIVE_BEING_EDITED]}
-			FORMAT_PREVIOUS_MOUNT_TARGET=${aDRIVE_MOUNT_TARGET[$INDEX_DRIVE_BEING_EDITED]}
+			local format_previous_mount_source=${aDRIVE_MOUNT_SOURCE[$INDEX_DRIVE_BEING_EDITED]}
+			local format_previous_mount_target=${aDRIVE_MOUNT_TARGET[$INDEX_DRIVE_BEING_EDITED]}
 
 			Init_Drives_and_Refresh
 
-			# - No FS previously, reboot most likley required to reinit the drive part tables
-			if (( ! ${aDRIVE_ISFILESYSTEM[$INDEX_DRIVE_BEING_EDITED]} )); then
-
-				G_WHIP_YESNO "Format completed:\n - ${aDRIVE_MOUNT_SOURCE[$INDEX_DRIVE_BEING_EDITED]}\n\nAs this drive originally lacked a partition table, a reboot may be required before the drive can be detected by the system.\n\nWould you like to reboot the system now?"
-				if (( $? == 0 )); then
-
-					reboot
-
-				fi
-
-			fi
-
-			local format_new_uuid=$(blkid $FORMAT_PREVIOUS_MOUNT_SOURCE -s UUID -o value)
-
-			rm -R $FORMAT_PREVIOUS_MOUNT_TARGET
+			local format_new_uuid=$(blkid $format_previous_mount_source -s UUID -o value)
+			rm -R $format_previous_mount_target
 
 			# - Automatically mount it
 			DRIVE_TARGET_BEING_EDITED="/mnt/$format_new_uuid"
-			Mount_Drive $FORMAT_PREVIOUS_MOUNT_SOURCE $DRIVE_TARGET_BEING_EDITED
+			Mount_Drive $format_previous_mount_source $DRIVE_TARGET_BEING_EDITED
 
 			Init_Drives_and_Refresh
+
+			G_WHIP_MSG "Format completed:\n
+ - Format Type           : $info_format_type_output
+ - Filesystem Type       : $info_format_fs_type
+ - Previous Mount Source : $format_previous_mount_target
+ - New Mount Source      : ${aDRIVE_MOUNT_TARGET[$INDEX_DRIVE_BEING_EDITED]}"
 
 		fi
 
