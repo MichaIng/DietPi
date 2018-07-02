@@ -516,136 +516,158 @@ _EOF_
 
 	Run_Format(){
 
-		# - Unmount drive
-		umount ${aDRIVE_MOUNT_SOURCE[$INDEX_DRIVE_BEING_EDITED]}
+		local run_format=0
 
-		if (( $FORMAT_RECREATE_PARTITION_TABLE )); then
+		local text_desc="Format Drive:\n - /dev/${aDRIVE_SOURCE_DEVICE[$INDEX_DRIVE_BEING_EDITED]}\n - UUID=${aDRIVE_UUID[$INDEX_DRIVE_BEING_EDITED]}\n - Partition table: $partition_table_text\n - Filesystem type: $format_type_text\n\nALL DATA and PARTITIONS on this drive will be DELETED.\nDo you wish to continue?"
+		if [[ ${aDRIVE_UUID[$INDEX_DRIVE_BEING_EDITED]} && ${aDRIVE_PART_UUID[$INDEX_DRIVE_BEING_EDITED]} ]]; then
 
-			# - Zero All Partitions on device
-			for ((i=1; i<=9; i++))
-			do
+			text_desc="Format partition:\n - ${aDRIVE_MOUNT_SOURCE[$INDEX_DRIVE_BEING_EDITED]}\n - UUID=${aDRIVE_UUID[$INDEX_DRIVE_BEING_EDITED]}\n - Partition table: $partition_table_text\n - Filesystem type: $format_type_text\n\nALL DATA on this partition will be DELETED.\nDo you wish to continue?"
 
-				local fp_target_partition="/dev/${aDRIVE_SOURCE_DEVICE[$INDEX_DRIVE_BEING_EDITED]}$i"
-				#	Does the device require an additional p for partitions (eg: mmcblkXp1 vs /dev/sdX1)?
-				if [[ ${aDRIVE_MOUNT_SOURCE[$INDEX_DRIVE_BEING_EDITED]} == *p[0-9] ]]; then
+		fi
 
-					fp_target_partition="/dev/${aDRIVE_SOURCE_DEVICE[$INDEX_DRIVE_BEING_EDITED]}p$i"
+		G_WHIP_YESNO "Start format?\n\n$text_desc"
+		if (( ! $? )); then
 
-				fi
+			run_format=1
 
-				if [[ -b $fp_target_partition ]]; then
+		fi
 
-					G_DIETPI-NOTIFY 2 "Writing zero's to partition $fp_target_partition"
-					dd if=/dev/zero of=$fp_target_partition  bs=4K count=1337 #Partition wipe (if it has one), must be done 1st, else blkid still reports UUID's etc
+		if (( $run_format )); then
 
-				fi
-
-			done
-
-			# - Clear Partition table from device
-			G_DIETPI-NOTIFY 2 "Writing zero's to partition table /dev/${aDRIVE_SOURCE_DEVICE[$INDEX_DRIVE_BEING_EDITED]}"
-			dd if=/dev/zero of=/dev/${aDRIVE_SOURCE_DEVICE[$INDEX_DRIVE_BEING_EDITED]} bs=4K count=1337 #Block device wipe
-
-			# - Create partition table type
-			local parition_table_type='msdos'
-			if (( $FORMAT_GPT )); then
-
-				parition_table_type='gpt'
-
-			fi
-
-			G_DIETPI-NOTIFY 2 "Partition table target: $parition_table_type"
-
-			parted -s /dev/${aDRIVE_SOURCE_DEVICE[$INDEX_DRIVE_BEING_EDITED]} mklabel $parition_table_type
-			parted -a optimal /dev/${aDRIVE_SOURCE_DEVICE[$INDEX_DRIVE_BEING_EDITED]} mkpart primary 0% 100%
-			partprobe /dev/${aDRIVE_SOURCE_DEVICE[$INDEX_DRIVE_BEING_EDITED]}
-
-			sleep 1 # due to systemD automount, wait for it.
+			# - Unmount drive
 			umount ${aDRIVE_MOUNT_SOURCE[$INDEX_DRIVE_BEING_EDITED]}
 
-		else
+			# - Create a new partition table
+			if [[ ! ${aDRIVE_UUID[$INDEX_DRIVE_BEING_EDITED]} && ! ${aDRIVE_PART_UUID[$INDEX_DRIVE_BEING_EDITED]} ]]; then
 
-			# - Clear partition from device
-			dd if=/dev/zero of=${aDRIVE_MOUNT_SOURCE[$INDEX_DRIVE_BEING_EDITED]} bs=4K count=1337
+				# - Zero All Partitions on device
+				for ((i=1; i<=9; i++))
+				do
 
-		fi
+					local fp_target_partition="/dev/${aDRIVE_SOURCE_DEVICE[$INDEX_DRIVE_BEING_EDITED]}$i"
+					#	Does the device require an additional p for partitions (eg: mmcblkXp1 vs /dev/sdX1)?
+					if [[ ${aDRIVE_MOUNT_SOURCE[$INDEX_DRIVE_BEING_EDITED]} == *p[0-9] ]]; then
 
-		# - Detect if this drive had no previous paritions, and ensure we create one (eg: /dev/sdX)
-		if [[ ${aDRIVE_MOUNT_SOURCE[$INDEX_DRIVE_BEING_EDITED]} != *[0-9] ]]; then
+						fp_target_partition="/dev/${aDRIVE_SOURCE_DEVICE[$INDEX_DRIVE_BEING_EDITED]}p$i"
 
-			aDRIVE_MOUNT_SOURCE[$INDEX_DRIVE_BEING_EDITED]+='1'
+					fi
 
-		fi
+					if [[ -b $fp_target_partition ]]; then
 
-		# - Format ext4
-		if (( $FORMAT_FILESYSTEM_TYPE == 0 )); then
+						G_DIETPI-NOTIFY 2 "Writing zero's to partition $fp_target_partition"
+						dd if=/dev/zero of=$fp_target_partition  bs=4K count=1337 #Partition wipe (if it has one), must be done 1st, else blkid still reports UUID's etc
 
-			# force
-			mkfs.ext4 -F -m 0 ${aDRIVE_MOUNT_SOURCE[$INDEX_DRIVE_BEING_EDITED]}
-			resize2fs ${aDRIVE_MOUNT_SOURCE[$INDEX_DRIVE_BEING_EDITED]}
+					fi
 
-		# - Format NTFS
-		elif (( $FORMAT_FILESYSTEM_TYPE == 1 )); then
+				done
 
-			# fast format / no indexing / force
-			mkfs.ntfs -f -I -F ${aDRIVE_MOUNT_SOURCE[$INDEX_DRIVE_BEING_EDITED]}
+				# - Clear Partition table from device
+				G_DIETPI-NOTIFY 2 "Writing zero's to partition table /dev/${aDRIVE_SOURCE_DEVICE[$INDEX_DRIVE_BEING_EDITED]}"
+				dd if=/dev/zero of=/dev/${aDRIVE_SOURCE_DEVICE[$INDEX_DRIVE_BEING_EDITED]} bs=4K count=1337 #Block device wipe
 
-		# - Format FAT32
-		elif (( $FORMAT_FILESYSTEM_TYPE == 2 )); then
+				# - Create partition table type
+				local parition_table_type='msdos'
+				if (( $FORMAT_GPT )); then
 
-			#  use 1 parition on whole device
-			mkfs.vfat -I ${aDRIVE_MOUNT_SOURCE[$INDEX_DRIVE_BEING_EDITED]}
+					parition_table_type='gpt'
 
-		# - Format HFS+
-		elif (( $FORMAT_FILESYSTEM_TYPE == 3 )); then
+				fi
 
-			mkfs.hfsplus ${aDRIVE_MOUNT_SOURCE[$INDEX_DRIVE_BEING_EDITED]}
+				G_DIETPI-NOTIFY 2 "Partition table target: $parition_table_type"
 
-		# - Format btrfs
-		elif (( $FORMAT_FILESYSTEM_TYPE == 4 )); then
+				parted -s /dev/${aDRIVE_SOURCE_DEVICE[$INDEX_DRIVE_BEING_EDITED]} mklabel $parition_table_type
+				parted -a optimal /dev/${aDRIVE_SOURCE_DEVICE[$INDEX_DRIVE_BEING_EDITED]} mkpart primary 0% 100%
+				partprobe /dev/${aDRIVE_SOURCE_DEVICE[$INDEX_DRIVE_BEING_EDITED]}
 
-			# force
-			mkfs.btrfs -f ${aDRIVE_MOUNT_SOURCE[$INDEX_DRIVE_BEING_EDITED]}
+				sleep 1 # due to systemD automount, wait for it.
+				umount ${aDRIVE_MOUNT_SOURCE[$INDEX_DRIVE_BEING_EDITED]}
 
-		# - Format f2fs
-		elif (( $FORMAT_FILESYSTEM_TYPE == 5 )); then
+				# - Target index to create partition to (eg: /dev/sdX1)
+				if [[ ${aDRIVE_MOUNT_SOURCE[$INDEX_DRIVE_BEING_EDITED]} != *[0-9] ]]; then
 
-			mkfs.f2fs ${aDRIVE_MOUNT_SOURCE[$INDEX_DRIVE_BEING_EDITED]}
+					aDRIVE_MOUNT_SOURCE[$INDEX_DRIVE_BEING_EDITED]+='1'
 
-		# - Format exFAT
-		elif (( $FORMAT_FILESYSTEM_TYPE == 6 )); then
+				fi
 
-			mkfs.exfat ${aDRIVE_MOUNT_SOURCE[$INDEX_DRIVE_BEING_EDITED]}
 
-		fi
+			else
 
-		FORMAT_COMPLETED=1
-		FORMAT_PREVIOUS_MOUNT_SOURCE=${aDRIVE_MOUNT_SOURCE[$INDEX_DRIVE_BEING_EDITED]}
-		FORMAT_PREVIOUS_MOUNT_TARGET=${aDRIVE_MOUNT_TARGET[$INDEX_DRIVE_BEING_EDITED]}
-
-		Init_Drives_and_Refresh
-
-		# - No FS previously, reboot most likley required to reinit the drive part tables
-		if (( ! ${aDRIVE_ISFILESYSTEM[$INDEX_DRIVE_BEING_EDITED]} )); then
-
-			G_WHIP_YESNO "Format completed:\n - ${aDRIVE_MOUNT_SOURCE[$INDEX_DRIVE_BEING_EDITED]}\n\nAs this drive originally lacked a partition table, a reboot may be required before the drive can be detected by the system.\n\nWould you like to reboot the system now?"
-			if (( $? == 0 )); then
-
-				reboot
+				# - Clear partition from device
+				dd if=/dev/zero of=${aDRIVE_MOUNT_SOURCE[$INDEX_DRIVE_BEING_EDITED]} bs=4K count=1337
 
 			fi
 
+			# - Format ext4
+			if (( $FORMAT_FILESYSTEM_TYPE == 0 )); then
+
+				# force
+				mkfs.ext4 -F -m 0 ${aDRIVE_MOUNT_SOURCE[$INDEX_DRIVE_BEING_EDITED]}
+				resize2fs ${aDRIVE_MOUNT_SOURCE[$INDEX_DRIVE_BEING_EDITED]}
+
+			# - Format NTFS
+			elif (( $FORMAT_FILESYSTEM_TYPE == 1 )); then
+
+				# fast format / no indexing / force
+				mkfs.ntfs -f -I -F ${aDRIVE_MOUNT_SOURCE[$INDEX_DRIVE_BEING_EDITED]}
+
+			# - Format FAT32
+			elif (( $FORMAT_FILESYSTEM_TYPE == 2 )); then
+
+				#  use 1 parition on whole device
+				mkfs.vfat -I ${aDRIVE_MOUNT_SOURCE[$INDEX_DRIVE_BEING_EDITED]}
+
+			# - Format HFS+
+			elif (( $FORMAT_FILESYSTEM_TYPE == 3 )); then
+
+				mkfs.hfsplus ${aDRIVE_MOUNT_SOURCE[$INDEX_DRIVE_BEING_EDITED]}
+
+			# - Format btrfs
+			elif (( $FORMAT_FILESYSTEM_TYPE == 4 )); then
+
+				# force
+				mkfs.btrfs -f ${aDRIVE_MOUNT_SOURCE[$INDEX_DRIVE_BEING_EDITED]}
+
+			# - Format f2fs
+			elif (( $FORMAT_FILESYSTEM_TYPE == 5 )); then
+
+				mkfs.f2fs ${aDRIVE_MOUNT_SOURCE[$INDEX_DRIVE_BEING_EDITED]}
+
+			# - Format exFAT
+			elif (( $FORMAT_FILESYSTEM_TYPE == 6 )); then
+
+				mkfs.exfat ${aDRIVE_MOUNT_SOURCE[$INDEX_DRIVE_BEING_EDITED]}
+
+			fi
+
+			FORMAT_COMPLETED=1
+			FORMAT_PREVIOUS_MOUNT_SOURCE=${aDRIVE_MOUNT_SOURCE[$INDEX_DRIVE_BEING_EDITED]}
+			FORMAT_PREVIOUS_MOUNT_TARGET=${aDRIVE_MOUNT_TARGET[$INDEX_DRIVE_BEING_EDITED]}
+
+			Init_Drives_and_Refresh
+
+			# - No FS previously, reboot most likley required to reinit the drive part tables
+			if (( ! ${aDRIVE_ISFILESYSTEM[$INDEX_DRIVE_BEING_EDITED]} )); then
+
+				G_WHIP_YESNO "Format completed:\n - ${aDRIVE_MOUNT_SOURCE[$INDEX_DRIVE_BEING_EDITED]}\n\nAs this drive originally lacked a partition table, a reboot may be required before the drive can be detected by the system.\n\nWould you like to reboot the system now?"
+				if (( $? == 0 )); then
+
+					reboot
+
+				fi
+
+			fi
+
+			local format_new_uuid=$(blkid $FORMAT_PREVIOUS_MOUNT_SOURCE -s UUID -o value)
+
+			rm -R $FORMAT_PREVIOUS_MOUNT_TARGET
+
+			# - Automatically mount it
+			DRIVE_TARGET_BEING_EDITED="/mnt/$format_new_uuid"
+			Mount_Drive $FORMAT_PREVIOUS_MOUNT_SOURCE $DRIVE_TARGET_BEING_EDITED
+
+			Init_Drives_and_Refresh
+
 		fi
-
-		local format_new_uuid=$(blkid $FORMAT_PREVIOUS_MOUNT_SOURCE -s UUID -o value)
-
-		rm -R $FORMAT_PREVIOUS_MOUNT_TARGET
-
-		# - Automatically mount it
-		DRIVE_TARGET_BEING_EDITED="/mnt/$format_new_uuid"
-		Mount_Drive $FORMAT_PREVIOUS_MOUNT_SOURCE $DRIVE_TARGET_BEING_EDITED
-
-		Init_Drives_and_Refresh
 
 	}
 
@@ -1247,8 +1269,6 @@ _EOF_
 
 			elif [[ $G_WHIP_RETURNED_VALUE == 'Format' ]]; then
 
-				FORMAT_RECREATE_PARTITION_TABLE=1
-
 				# - Disallow if userdata is located on this drive!
 				if (( $partition_contains_userdata )); then
 
@@ -1258,11 +1278,10 @@ _EOF_
 
 					Notification 1
 
-				#	user must unmount all partitions on this drive, before we can format
-				elif (( $(df -P | grep -ci -m1 "^/dev/${aDRIVE_SOURCE_DEVICE[$INDEX_DRIVE_BEING_EDITED]}") )); then
+				#	user must unmount partition on this drive, before we can format, this ensures a valid unmount check
+				elif (( ${aDRIVE_ISMOUNTED[$INDEX_DRIVE_BEING_EDITED]} )); then
 
-					df -P | grep -m1 "^/dev/${aDRIVE_SOURCE_DEVICE[$INDEX_DRIVE_BEING_EDITED]}"
-					G_WHIP_MSG 'As DietPi will format the entire drive with 1 partition, you must unmount ALL partitions on this disk, before formatting is available.'
+					G_WHIP_MSG "The partition (${aDRIVE_MOUNT_SOURCE[$INDEX_DRIVE_BEING_EDITED]}) must be unmounted, before formatting is allowed."
 
 				else
 
@@ -1278,8 +1297,6 @@ _EOF_
 			#Transfer RootFS
 			elif [[ $G_WHIP_RETURNED_VALUE == 'Transfer RootFS' ]]; then
 
-				FORMAT_RECREATE_PARTITION_TABLE=1
-
 				#	user must unmount partition before format
 				if (( ${aDRIVE_ISMOUNTED[$INDEX_DRIVE_BEING_EDITED]} )); then
 
@@ -1287,7 +1304,7 @@ _EOF_
 
 				else
 
-					G_WHIP_YESNO "This process will move RootFS data to another location. This may increase filesystem performance when using a USB drive over SD card, however, there are some limitations:\n\n - The SD/EMMC card is still required for the boot process\n - ALL data on the target PARTITION will be deleted\n\nNB: As this feature is still in testing, we recommend you use this feature on a fresh installation only.\n\nDo you wish to continue?"
+					G_WHIP_YESNO "This process will move RootFS data to another location. This may increase filesystem performance when using a USB drive over SD card, however, there are some limitations:\n\n - The SD/EMMC card is still required for the boot process\n\nNB: As this feature is still in testing, we recommend you use this feature on a fresh installation only.\n\nDo you wish to continue?"
 					if (( ! $? )); then
 
 						G_WHIP_MSG 'On the next screen, you will be asked to format the target partition.\n\nPlease see the following recommendations for RootFS target filesystem type:\n\n - Odroid\nRootFS transfer supports ONLY EXT4 format\n\n - RPi\nRootFS transfer supports EXT4, BTRFS and F2FS'
@@ -1556,22 +1573,9 @@ NB:
 
 			elif [[ $G_WHIP_RETURNED_VALUE == 'Format' ]]; then
 
-				local text_desc="Format Drive:\n - /dev/${aDRIVE_SOURCE_DEVICE[$INDEX_DRIVE_BEING_EDITED]}\n - UUID=${aDRIVE_UUID[$INDEX_DRIVE_BEING_EDITED]}\n - Partition table: $partition_table_text\n - Filesystem type: $format_type_text\n\nALL DATA and PARTITIONS on this drive will be DELETED.\nDo you wish to continue?"
+				Run_Format
 
-				if (( ! $FORMAT_RECREATE_PARTITION_TABLE )); then
-
-					text_desc="Format partition:\n - ${aDRIVE_MOUNT_SOURCE[$INDEX_DRIVE_BEING_EDITED]}\n - UUID=${aDRIVE_UUID[$INDEX_DRIVE_BEING_EDITED]}\n - Partition table: $partition_table_text\n - Filesystem type: $format_type_text\n\nALL DATA on this partition will be DELETED.\nDo you wish to continue?"
-
-				fi
-
-				G_WHIP_YESNO "Start format?\n\n$text_desc"
-				if (( ! $? )); then
-
-					Run_Format
-
-					TARGETMENUID=1
-
-				fi
+				TARGETMENUID=1
 
 			fi
 
