@@ -19,9 +19,6 @@
 	GIT_BRANCH=${GIT_BRANCH:=master}
 	echo "Git branch: $GIT_OWNER/$GIT_BRANCH"
 
-	#Ensure we are in users home dir: https://github.com/Fourdee/DietPi/issues/905#issuecomment-298223705
-	cd "$HOME"
-
 	#------------------------------------------------------------------------------------------------
 	# Critical checks and pre-reqs, with exit, prior to initial run of script
 	#------------------------------------------------------------------------------------------------
@@ -32,6 +29,10 @@
 		exit 1
 
 	fi
+
+	#Work inside /tmp as usually ramfs to reduce disk I/O and speed up download and unpacking
+	mkdir -p /tmp/dietpi-prep
+	cd /tmp/dietpi-prep
 
 	#Check/install minimal APT Pre-Reqs
 	a_MIN_APT_PREREQS=(
@@ -136,6 +137,9 @@
 		exit 1
 
 	fi
+	# Go back to tmp working dir, as loading global includes cd $HOME:
+	cd /tmp/dietpi-prep
+	rm dietpi-globals
 
 	export G_PROGRAM_NAME='DietPi-PREP'
 	export HIERARCHY=0
@@ -173,19 +177,19 @@
 	#G_HW_MODEL # init from dietpi-globals
 	#G_HW_ARCH_DESCRIPTION # init from dietpi-globals
 	G_HW_ARCH_DESCRIPTION="$(uname -m)"
-	if [[ $G_HW_ARCH_DESCRIPTION == armv6l ]]; then
+	if [[ $G_HW_ARCH_DESCRIPTION == 'armv6l' ]]; then
 
 		export G_HW_ARCH=1
 
-	elif [[ $G_HW_ARCH_DESCRIPTION == armv7l ]]; then
+	elif [[ $G_HW_ARCH_DESCRIPTION == 'armv7l' ]]; then
 
 		export G_HW_ARCH=2
 
-	elif [[ $G_HW_ARCH_DESCRIPTION == aarch64 ]]; then
+	elif [[ $G_HW_ARCH_DESCRIPTION == 'aarch64' ]]; then
 
 		export G_HW_ARCH=3
 
-	elif [[ $G_HW_ARCH_DESCRIPTION == x86_64 ]]; then
+	elif [[ $G_HW_ARCH_DESCRIPTION == 'x86_64' ]]; then
 
 		export G_HW_ARCH=10
 
@@ -231,7 +235,7 @@
 		# - Stop services
 		/DietPi/dietpi/dietpi-services stop
 
-		G_RUN_CMD systemctl stop dietpi-ramlog
+		[[ -f /etc/systemd/system/dietpi-ramlog ]] && G_RUN_CMD systemctl stop dietpi-ramlog
 		G_RUN_CMD systemctl stop dietpi-ramdisk
 
 		# - Delete any previous existing data
@@ -347,28 +351,29 @@
 	G_WHIP_BUTTON_CANCEL_TEXT='Exit'
 	G_WHIP_MENU_ARRAY=(
 
-		'' '────Other──────────────────────────────'
+		'' '●─ Other '
 		'22' 'Generic device (unknown to DietPi)'
-		'' '────SBC─(Core devices)─────────────────'
+		'' '●─ SBC─(Core devices) '
 		'10' 'Odroid C1'
 		'12' 'Odroid C2'
 		'14' 'Odroid N1'
 		'13' 'Odroid U3'
 		'11' 'Odroid XU3/4/HC1/HC2'
-		'0' 'Raspberry Pi 1 (256mb)'
-		'1' 'Raspberry Pi 1/Zero (512mb)'
-		'2' 'Raspberry Pi 2'
-		'3' 'Raspberry Pi 3/3+'
-		'' '────PC─────────────────────────────────'
+		'0' 'Raspberry Pi (All models)'
+		# '1' 'Raspberry Pi 1/Zero (512mb)'
+		# '2' 'Raspberry Pi 2'
+		# '3' 'Raspberry Pi 3/3+'
+		'' '●─ PC '
 		'21' 'x86_64 Native PC'
 		'20' 'x86_64 VMware/VirtualBox'
-		'' '────SBC─(Limited support devices)──────'
+		'' '●─ SBC─(Limited support devices) '
 		'52' 'Asus Tinker Board'
 		'53' 'BananaPi (sinovoip)'
 		'51' 'BananaPi Pro (Lemaker)'
 		'50' 'BananaPi M2+ (sinovoip)'
 		'71' 'Beagle Bone Black'
 		'39' 'LeMaker Guitar'
+		'68' 'NanoPC T4'
 		'67' 'NanoPi K1 Plus'
 		'66' 'NanoPi M1 Plus'
 		'65' 'NanoPi NEO 2'
@@ -389,7 +394,7 @@
 		'41' 'OrangePi PC Plus'
 		'40' 'Pine A64'
 		'43' 'Rock64'
-		'44' 'Rock64Pro'
+		'42' 'RockPro64'
 		'70' 'Sparky SBC'
 
 	)
@@ -519,10 +524,13 @@
 	G_DIETPI-NOTIFY 2 'Moving kernel and boot configuration to /boot'
 
 	G_RUN_CMD mv "DietPi-$GIT_BRANCH/dietpi.txt" /boot/
-	G_RUN_CMD mv "DietPi-$GIT_BRANCH/config.txt" /boot/ #RPi only, but must check all scripts with config.txt scrapes, as they are not file checked??
 
-	# - HW specific boot.ini uEnv.txt
-	if (( $G_HW_MODEL == 10 )); then
+	# - HW specific config.txt, boot.ini uEnv.txt
+	if (( $G_HW_MODEL < 10 )); then
+
+		G_RUN_CMD mv "DietPi-$GIT_BRANCH/config.txt" /boot/
+
+	elif (( $G_HW_MODEL == 10 )); then
 
 		G_RUN_CMD mv "DietPi-$GIT_BRANCH/boot_c1.ini" /boot/boot.ini
 
@@ -655,7 +663,6 @@ _EOF_
 		'isc-dhcp-client'	# DHCP client
 		'locales'		# Support locales, necessary for DietPi scripts, as we use enGB.UTF8 as default language
 		'nano'			# Simple text editor
-		'net-tools'		# Classic network commands: ifconfig, route, netstat
 		'ntfs-3g'		# DietPi-Drive_Manager NTPS (Windows) file system support
 		'p7zip-full'		# .7z wrapper
 		'parted'		# DietPi-Boot + DietPi-Drive_Manager
@@ -668,7 +675,6 @@ _EOF_
 		'usbutils'		# DietPi-Software + DietPi-Bugreport: e.g. lsusb
 		'wget'			# Download tool
 		'whiptail'		# DietPi dialogs
-		'zip'			# .zip wrapper
 
 	)
 
@@ -677,6 +683,7 @@ _EOF_
 		aPACKAGES_REQUIRED_INSTALL+=('crda')			# WiFi related
 		aPACKAGES_REQUIRED_INSTALL+=('firmware-atheros')	# WiFi dongle firmware
 		aPACKAGES_REQUIRED_INSTALL+=('firmware-brcm80211')	# WiFi dongle firmware
+		aPACKAGES_REQUIRED_INSTALL+=('firmware-iwlwifi')	# Intel WiFi dongle/PCI-e firwmare
 		aPACKAGES_REQUIRED_INSTALL+=('iw')			# WiFi related
 		aPACKAGES_REQUIRED_INSTALL+=('rfkill')	 		# WiFi related: Used by some onboard WiFi chipsets
 		aPACKAGES_REQUIRED_INSTALL+=('wireless-tools')		# WiFi related
@@ -735,13 +742,14 @@ _EOF_
 	#	x86_64
 	if (( $G_HW_ARCH == 10 )); then
 
-		G_AGI linux-image-amd64
+		G_AGI linux-image-amd64 os-prober
+
 		# Usually no firmware should be necessary for VMs. If user manually passes though some USB device, he might need to install the firmware then.
 		(( $G_HW_MODEL != 20 )) && G_AGI firmware-linux-nonfree
 
 		#	Grub EFI
 		if dpkg --get-selections | grep -q '^grub-efi-amd64' ||
-			[ -d /boot/efi ]; then
+			[[ -d '/boot/efi' ]]; then
 
 			G_AGI grub-efi-amd64
 
@@ -786,6 +794,11 @@ _EOF_
 
 		G_AGI linux-image-armhf-odroid-c1
 
+	#	RockPro64
+	elif (( $G_HW_MODEL == 42 )); then
+
+		G_AGI linux-rockpro64 linux-rockpro64-package
+
 	#	Rock64
 	elif (( $G_HW_MODEL == 43 )); then
 
@@ -795,7 +808,6 @@ _EOF_
 	elif (( $G_HW_MODEL == 71 )); then
 
 		G_AGI device-tree-compiler #Kern
-
 
 	# - Auto detect kernel/firmware package
 	else
@@ -827,20 +839,6 @@ _EOF_
 			G_AGI $AUTO_DETECT_DTB_PKG
 
 		fi
-
-		#	Check for existing firmware
-		#	- ARMbian
-		# AUTO_DETECT_FIRMWARE_PKG=$(dpkg --get-selections | grep '^armbian-firmware' | awk '{print $1}')
-		# if [[ -n $AUTO_DETECT_FIRMWARE_PKG ]]; then
-
-			# G_AGI $AUTO_DETECT_FIRMWARE_PKG
-
-		# fi
-			# Unpacking armbian-firmware (5.35) ...
-			# dpkg: error processing archive /var/cache/apt/archives/armbian-firmware_5.35_all.deb (--unpack):
-			# trying to overwrite '/lib/firmware/rt2870.bin', which is also in package firmware-misc-nonfree 20161130-3
-			# dpkg-deb: error: subprocess paste was killed by signal (Broken pipe)
-
 
 	fi
 
@@ -884,18 +882,6 @@ _EOF_
 	G_DIETPI-NOTIFY 2 'Installing core DietPi pre-req APT packages'
 
 	G_AGI $INSTALL_PACKAGES
-
-	G_DIETPI-NOTIFY 2 'Applying default DietPi configuration for APT'
-
-	export G_ERROR_HANDLER_COMMAND='/etc/apt/apt.conf.d/99-dietpi-norecommends'
-	cat << _EOF_ > $G_ERROR_HANDLER_COMMAND
-APT::Install-Recommends "false";
-APT::Install-Suggests "false";
-#APT::AutoRemove::RecommendsImportant "false";
-#APT::AutoRemove::SuggestsImportant "false";
-_EOF_
-	export G_ERROR_HANDLER_EXITCODE=$?
-	G_ERROR_HANDLER
 
 	G_AGA
 
@@ -1010,14 +996,14 @@ _EOF_
 	#UID bit for sudo
 	# - https://github.com/Fourdee/DietPi/issues/794
 
-	G_DIETPI-NOTIFY 2 'Configuring Sudo UID bit:'
+	G_DIETPI-NOTIFY 2 'Configuring Sudo UID bit'
 
 	chmod 4755 $(which sudo)
 
 	#-----------------------------------------------------------------------------------
 	#Dir's
 
-	G_DIETPI-NOTIFY 2 'Configuring DietPi Directories:'
+	G_DIETPI-NOTIFY 2 'Configuring DietPi Directories'
 
 	# - /var/lib/dietpi : Core storage for installed non-standard APT software, outside of /mnt/dietpi_userdata
 	#mkdir -p /var/lib/dietpi
@@ -1068,7 +1054,7 @@ _EOF_
 	#-----------------------------------------------------------------------------------
 	#Cron Jobs
 
-	G_DIETPI-NOTIFY 2 "Configuring Cron:"
+	G_DIETPI-NOTIFY 2 "Configuring Cron"
 
 	mkdir -p /etc/cron.minutely #: https://github.com/Fourdee/DietPi/pull/1578
 
@@ -1085,26 +1071,18 @@ PATH=/usr/local/sbin:/usr/local/bin:/sbin:/bin:/usr/sbin:/usr/bin
 52 1    1 * *   root    test -x /usr/sbin/anacron || ( cd / && run-parts --report /etc/cron.monthly )
 _EOF_
 
-	# - ntp
-	rm /etc/cron.daily/ntp &> /dev/null
-
 	#-----------------------------------------------------------------------------------
 	#Network
 
-	G_DIETPI-NOTIFY 2 "Configuring: prefer wlan/eth naming for networked devices:"
+	G_DIETPI-NOTIFY 2 'Configuring: prefer wlan/eth naming for networked devices:'
 
 	# - Prefer to use wlan/eth naming for networked devices (eg: stretch)
 	ln -sf /dev/null /etc/systemd/network/99-default.link
-	#	x86_64: kernel cmd line with GRUB
-	#	HW_ARCH not set at this stage within DietPi, using PREP_SYSTEM
-	if [[ -f /etc/default/grub ]]; then
 
-		G_CONFIG_INJECT 'GRUB_CMDLINE_LINUX_DEFAULT=' 'GRUB_CMDLINE_LINUX_DEFAULT=\"consoleblank=0 quiet\"' /etc/default/grub
-		G_CONFIG_INJECT 'GRUB_CMDLINE_LINUX=' 'GRUB_CMDLINE_LINUX=\"net\.ifnames=0\"' /etc/default/grub
-		G_CONFIG_INJECT 'GRUB_TIMEOUT=' 'GRUB_TIMEOUT=0' /etc/default/grub
-		update-grub
-
-	fi
+	G_DIETPI-NOTIFY 2 'Add dietpi.com SSH pub host key for DietPi-Survey and -Bugreport upload:'
+	mkdir -p /root/.ssh
+	>> /root/.ssh/known_hosts
+	G_CONFIG_INJECT 'dietpi.com ' 'dietpi.com ssh-rsa AAAAB3NzaC1yc2EAAAADAQABAAABAQDE6aw3r6aOEqendNu376iiCHr9tGBIWPgfrLkzjXjEsHGyVSUFNnZt6pftrDeK7UX\+qX4FxOwQlugG4fymOHbimRCFiv6cf7VpYg1Ednquq9TLb7/cIIbX8a6AuRmX4fjdGuqwmBq3OG7ZksFcYEFKt5U4mAJIaL8hXiM2iXjgY02LqiQY/QWATsHI4ie9ZOnwrQE\+Rr6mASN1BVFuIgyHIbwX54jsFSnZ/7CdBMkuAd9B8JkxppWVYpYIFHE9oWNfjh/epdK8yv9Oo6r0w5Rb\+4qaAc5g\+RAaknHeV6Gp75d2lxBdCm5XknKKbGma2\+/DfoE8WZTSgzXrYcRlStYN' /root/.ssh/known_hosts
 
 	#-----------------------------------------------------------------------------------
 	#MISC
@@ -1124,9 +1102,9 @@ _EOF_
 
 	fi
 
-	echo -e 'Samba client can be installed and setup by DietPi-Config.\nSimply run: dietpi-config and select the Networking option: NAS/Misc menu' > /mnt/samba/readme.txt
-	echo -e 'FTP client mount can be installed and setup by DietPi-Config.\nSimply run: dietpi-config and select the Networking option: NAS/Misc menu' > /mnt/ftp_client/readme.txt
-	echo -e 'NFS client can be installed and setup by DietPi-Config.\nSimply run: dietpi-config and select the Networking option: NAS/Misc menu' > /mnt/nfs_client/readme.txt
+	local info_use_drive_manager='can be installed and setup by DietPi-Drive_Manager.\nSimply run: dietpi-drive_manager and select Add Network Drive'
+	echo -e "Samba client: $info_use_drive_manager" > /mnt/samba/readme.txt
+	echo -e "NFS client: $info_use_drive_manager" > /mnt/nfs_client/readme.txt
 
 	l_message='Generating DietPi /etc/fstab' G_RUN_CMD /DietPi/dietpi/dietpi-drive_manager 4
 	# Restart DietPi-RAMdisk, as 'dietpi-drive_manager 4' remounts /DietPi.
@@ -1180,7 +1158,7 @@ _EOF_
 
 	G_RUN_CMD echo 'DietPi' > /etc/hostname
 
-	G_DIETPI-NOTIFY 2 'Configuring htop:'
+	G_DIETPI-NOTIFY 2 'Configuring htop'
 
 	mkdir -p /root/.config/htop
 	cp /DietPi/dietpi/conf/htoprc /root/.config/htop/htoprc
@@ -1199,10 +1177,6 @@ _EOF_
 	G_DIETPI-NOTIFY 2 'Reducing getty count and resource usage:'
 
 	systemctl mask getty-static
-
-	G_DIETPI-NOTIFY 2 'Configuring time sync:'
-
-	systemctl disable systemd-timesyncd
 
 	G_DIETPI-NOTIFY 2 'Configuring regional settings (TZdata):'
 
@@ -1423,6 +1397,31 @@ _EOF_
 	G_AGP alsa-utils firmware-intel-sound
 	G_AGA
 
+	#	x86_64: kernel cmd line with GRUB
+	if (( $G_HW_ARCH == 10 )); then
+
+		l_message='Detecting additional OS installed on system' G_RUN_CMD os-prober
+
+		# - Native PC/EFI (assume x86_64 only possible)
+		if dpkg --get-selections | grep -qi '^grub-efi-amd64[[:space:]]' &&
+			[[ -d '/boot/efi' ]]; then
+
+			l_message='Recreating GRUB-EFI' G_RUN_CMD grub-install --target=x86_64-efi --efi-directory=/boot/efi --bootloader-id=arch_grub --recheck
+
+		fi
+
+		# - Finalize GRUB
+		if [[ -f '/etc/default/grub' ]]; then
+
+			G_CONFIG_INJECT 'GRUB_CMDLINE_LINUX_DEFAULT=' 'GRUB_CMDLINE_LINUX_DEFAULT=\"consoleblank=0 quiet\"' /etc/default/grub
+			G_CONFIG_INJECT 'GRUB_CMDLINE_LINUX=' 'GRUB_CMDLINE_LINUX=\"net\.ifnames=0\"' /etc/default/grub
+			G_CONFIG_INJECT 'GRUB_TIMEOUT=' 'GRUB_TIMEOUT=3' /etc/default/grub
+			l_message='Finalizing GRUB' G_RUN_CMD update-grub
+
+		fi
+
+	fi
+
 	G_DIETPI-NOTIFY 2 'Setting default CPU gov'
 
 	/DietPi/dietpi/func/dietpi-set_cpu
@@ -1501,14 +1500,6 @@ _EOF_
 
 	G_RUN_CMD cp /DietPi/dietpi/.version /var/lib/dietpi/.dietpi_image_version
 
-	# - Native PC/EFI (assume x86_64 only possible)
-	if dpkg --get-selections | grep -qi '^grub-efi-amd64[[:space:]]' &&
-		[[ -d /boot/efi ]]; then
-
-		l_message='Recreating GRUB-EFI' G_RUN_CMD grub-install --target=x86_64-efi --efi-directory=/boot/efi --bootloader-id=arch_grub --recheck
-
-	fi
-
 	G_DIETPI-NOTIFY 2 'Sync changes to disk. Please wait, this may take some time...'
 
 	G_RUN_CMD systemctl stop dietpi-ramlog
@@ -1520,9 +1511,8 @@ _EOF_
 
 	sync
 
-	# - Remove PREP files
-	rm dietpi-globals
-	rm PREP_SYSTEM_FOR_DIETPI.sh
+	# - Remove PREP script
+	rm /root/PREP_SYSTEM_FOR_DIETPI.sh &> /dev/null
 
 	G_DIETPI-NOTIFY 2 "The used kernel version is: $(uname -r)"
 	kernel_apt_packages="$(dpkg --get-selections | grep '^linux-image-[0-9]')"

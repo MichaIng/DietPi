@@ -13,11 +13,9 @@
 	# Usage:
 	# 	  = Drive Manager
 	#	1 = Selectadrive! Provides a list of available drive mount locations, with value on selection saved to: /tmp/dietpi-drive_manager_selmnt
-	#	2 = Returns exit 1 if low on freespace
 	#	3 = Returns exit 1 if rootfs is currently RO (NB: simple check via mount cmd, does not init full drive manager vars, for quicker loading/processing)
-	#	4 = Generates a new /etc/fstab based on current mounted locally drives (for use in PREP_SYSTEM_FOR_DIETPI.sh). NB: does not include remoteFS mounts!
+	#	4 = Generates a new /etc/fstab based on current mounted locally drives (for use in PREP_SYSTEM_FOR_DIETPI.sh). NB: Resets /var/log to RAMLOG and /tmp enabled
 	#
-	#	NB: This script does not support quoted/string UUID entries in /etc/fstab.
 	#////////////////////////////////////
 
 	#Import DietPi-Globals ---------------------------------------------------------------
@@ -33,8 +31,6 @@
 
 	EXIT_CODE=0
 
-	PROGRAM_NAME='DietPi-Drive Manager'
-
 	#Service control for script
 	SERVICE_CONTROL=1
 
@@ -44,392 +40,478 @@
 	#FP
 	FP_TEMP_FSTAB='/tmp/.fstab'
 
+
+	#Drive data
 	FP_ROOTFS_SOURCE=0
-
-	#Drives
-	MAX_DRIVES=0
-	FORMAT_GPT=1 # default GPT: https://github.com/Fourdee/DietPi/issues/531. 0=MBR
-	FORMAT_FILESYSTEM_TYPE=0 #0=ext4 1=ntfs 2=fat32 3=hfs+ 4=btrfs 5=f2fs 6=exfat
-	FORMAT_RECREATE_PARTITION_TABLE=1 #0=for rootfs transfer
-	FORMAT_COMPLETED=0
-	FORMAT_PREVIOUS_MOUNT_SOURCE=0 #Used to obtain previous mount source fp, before a format, for rootfs transfer
-
-	INDEX_DRIVE_BEING_EDITED=0
-
-	ROOTFS_RW_CHECKED=0
-
-	aDRIVE_UUID=()
-	aDRIVE_PART_UUID=()
-	aDRIVE_MOUNT_SOURCE=()
-	aDRIVE_MOUNT_TARGET=()
-	aDRIVE_FSTYPE=()
-	aDRIVE_SIZE_TOTAL=()
-	aDRIVE_SIZE_USED=()
-	aDRIVE_SIZE_PERCENTUSED=()
-	aDRIVE_SIZE_FREE=()
-
-	aDRIVE_ISAVAILABLE=()
-	aDRIVE_ISFILESYSTEM=()
-	aDRIVE_ISMOUNTED=()
-	aDRIVE_ISUUIDMOUNT=()
-	aDRIVE_ISREADONLY_FSTAB=()
-	aDRIVE_ISREADONLY_CURRENTLY=()
-
-	INIT_FSTAB_SLOTS_ENABLED=0
-
 	FP_USERDATA_CURRENT=0
 	FP_SWAPFILE_CURRENT=0
 
+	INDEX_DRIVE_BEING_EDITED=0
+	DRIVE_TARGET_BEING_EDITED=''
+
+	FORMAT_GPT=1 # default GPT: https://github.com/Fourdee/DietPi/issues/531. 0=MBR
+	FORMAT_FILESYSTEM_TYPE=0 #0=ext4 1=ntfs 2=fat32 3=hfs+ 4=btrfs 5=f2fs 6=exfat
+	FORMAT_RECREATE_PARTITION_TABLE=1
+	FORMAT_COMPLETED=0
+
+	INDEX_INIT_CURRENT_DEVICE=-1
+	Init_New_Device(){
+
+		((INDEX_INIT_CURRENT_DEVICE++))
+
+		aDRIVE_UUID[$INDEX_INIT_CURRENT_DEVICE]=''
+		aDRIVE_PART_UUID[$INDEX_INIT_CURRENT_DEVICE]=''
+		aDRIVE_MOUNT_SOURCE[$INDEX_INIT_CURRENT_DEVICE]=''
+		aDRIVE_MOUNT_TARGET[$INDEX_INIT_CURRENT_DEVICE]=''
+		aDRIVE_SOURCE_DEVICE[$INDEX_INIT_CURRENT_DEVICE]=''
+		aDRIVE_FSTYPE[$INDEX_INIT_CURRENT_DEVICE]=''
+		aDRIVE_SIZE_TOTAL[$INDEX_INIT_CURRENT_DEVICE]=''
+		aDRIVE_SIZE_USED[$INDEX_INIT_CURRENT_DEVICE]=''
+		aDRIVE_SIZE_PERCENTUSED[$INDEX_INIT_CURRENT_DEVICE]=''
+		aDRIVE_SIZE_FREE[$INDEX_INIT_CURRENT_DEVICE]=''
+
+		aDRIVE_ISFILESYSTEM[$INDEX_INIT_CURRENT_DEVICE]=0
+		aDRIVE_ISMOUNTED[$INDEX_INIT_CURRENT_DEVICE]=0
+		aDRIVE_ISREADONLY_CURRENTLY[$INDEX_INIT_CURRENT_DEVICE]=0
+		aDRIVE_ISNETWORKED[$INDEX_INIT_CURRENT_DEVICE]=0
+		aDRIVE_ISROM[$INDEX_INIT_CURRENT_DEVICE]=0
+		aDRIVE_ISPARTITIONTABLE[$INDEX_INIT_CURRENT_DEVICE]=0
+
+	}
+
 	Destroy(){
 
+		INDEX_INIT_CURRENT_DEVICE=-1
+
 		#Delete []
+		unset aDRIVE_UUID
+		unset aDRIVE_PART_UUID
 		unset aDRIVE_MOUNT_SOURCE
 		unset aDRIVE_MOUNT_TARGET
+		unset aDRIVE_SOURCE_DEVICE
 		unset aDRIVE_FSTYPE
 		unset aDRIVE_SIZE_TOTAL
 		unset aDRIVE_SIZE_USED
 		unset aDRIVE_SIZE_PERCENTUSED
 		unset aDRIVE_SIZE_FREE
-		unset aDRIVE_PART_UUID
-		unset aDRIVE_UUID
 
-		unset aDRIVE_ISMOUNTED
 		unset aDRIVE_ISFILESYSTEM
-		unset aDRIVE_ISAVAILABLE
-		unset aDRIVE_ISUUIDMOUNT
-		unset aDRIVE_ISREADONLY_FSTAB
+		unset aDRIVE_ISMOUNTED
 		unset aDRIVE_ISREADONLY_CURRENTLY
+		unset aDRIVE_ISNETWORKED
+		unset aDRIVE_ISROM
+		unset aDRIVE_ISPARTITIONTABLE
 
 	}
 
 	Init_Drives_and_Refresh(){
 
 		#---------------------------------------------------------------
-		local init=1
-
-		# - Delete arrays before reinit
+		#Delete arrays before reinit
 		Destroy
 
-		while (( $init ))
+		# - Obtain actual user data location on disk (follows symlinks)
+		FP_USERDATA_CURRENT="$(readlink -f $G_FP_DIETPI_USERDATA)"
+
+		# - Swapfile location
+		FP_SWAPFILE_CURRENT="$(grep -m1 '^[[:blank:]]*AUTO_SETUP_SWAPFILE_LOCATION=' /DietPi/dietpi.txt | sed 's/^[^=]*=//')"
+
+		# - ROOTFS location
+		FP_ROOTFS_SOURCE=$(findmnt / -o source -n)
+
+		#Recreate FStab
+		cp /etc/fstab $FP_TEMP_FSTAB
+
+		# - Grab current /var/log
+		local var_log_mount=$(grep -m1 '[[:blank:]]/var/log[[:blank:]]' $FP_TEMP_FSTAB)
+		if (( $INPUT == 4 )); then
+
+			var_log_mount='tmpfs	/var/log	tmpfs 	defaults,size=20m,noatime,nodev,nosuid,mode=1777 		0 0'
+
+		fi
+
+		# - Grab current /tmp
+		local tmp_mount=$(grep -m1 '[[:blank:]]/tmp[[:blank:]]' $FP_TEMP_FSTAB)
+		if (( $INPUT == 4 )); then
+
+			tmp_mount='tmpfs	/tmp		tmpfs 	defaults,noatime,nodev,nosuid,mode=1777 	0 0'
+
+		fi
+
+		# - Grab current swap
+		local swap_mount=$(grep -m1 '[[:blank:]]swap[[:blank:]]' $FP_TEMP_FSTAB)
+
+		# - Grab current network mounts + creds
+		local net_mounts_samba=$(grep '[[:space:]]cifs[[:space:]]' $FP_TEMP_FSTAB)
+		local net_mounts_nfs4=$(grep '[[:space:]]nfs4[[:space:]]' $FP_TEMP_FSTAB)
+		local net_mounts_ftp=$(grep '^curlftpfs' $FP_TEMP_FSTAB)
+
+		cat << _EOF_ > $FP_TEMP_FSTAB
+#-----------------------------------------------------------
+#NETWORK
+#-----------------------------------------------------------
+#Please use DietPi-Drive_Manager to setup network mounts
+$net_mounts_samba
+$net_mounts_ftp
+$net_mounts_nfs4
+
+#-----------------------------------------------------------
+#TMPFS, MISC
+#-----------------------------------------------------------
+proc	/proc		proc    defaults															0 0
+$tmp_mount
+$var_log_mount
+tmpfs	/DietPi		tmpfs 	defaults,size=10m,noatime,nodev,nosuid,mode=1777					0 0
+
+#-----------------------------------------------------------
+#SWAPFILE
+#-----------------------------------------------------------
+$swap_mount
+
+#-----------------------------------------------------------
+#INTERNAL DRIVES
+#-----------------------------------------------------------
+_EOF_
+
+		#Detect mounted drives and add them to fstab
+		G_DIETPI-NOTIFY 2 'Detecting drives, please wait...'
+		local cmd_scrape_string=''
+		local index=0
+		G_DIETPI-NOTIFY 0 'Detecting currently mounted drives, please wait...'
+		df -Ph | tail -n +2 | sed '/tmpfs/d' | sed '/^udev/d' > /tmp/.dietpi-drive_manager_df_tmp
+		while read line
 		do
 
-			init=0
+			if [[ -z $line ]]; then
 
-			G_DIETPI-NOTIFY 2 'Detecting drives, please wait...'
+				break
 
-			#Copy FSTAB to ram, faster exec
-			cp /etc/fstab "$FP_TEMP_FSTAB"
+			fi
 
-			#Get list of available dev drives
-			# - /dev/sdXX
-			for i in /dev/sd[a-z][0-9]
-			do
+			Init_New_Device
 
-				aDRIVE_MOUNT_SOURCE+=($i)
+			aDRIVE_ISMOUNTED[$INDEX_INIT_CURRENT_DEVICE]=1
+			aDRIVE_ISPARTITIONTABLE[$INDEX_INIT_CURRENT_DEVICE]=1
+			aDRIVE_MOUNT_SOURCE[$INDEX_INIT_CURRENT_DEVICE]=$(awk '{print $1}' <<< $line)
+			aDRIVE_MOUNT_TARGET[$INDEX_INIT_CURRENT_DEVICE]=$(awk '{print $6}' <<< $line)
+			#	Workaround for /dev/root under RPi, force physical location
+			if [[ ${aDRIVE_MOUNT_TARGET[$INDEX_INIT_CURRENT_DEVICE]} == '/' ]]; then
 
-			done
+				aDRIVE_MOUNT_SOURCE[$INDEX_INIT_CURRENT_DEVICE]=$FP_ROOTFS_SOURCE
 
-			# - /dev/mmcblkXpX
-			for i in /dev/mmcblk[0-9]p[0-9]
-			do
+			fi
 
-				aDRIVE_MOUNT_SOURCE+=($i)
+			aDRIVE_SOURCE_DEVICE[$INDEX_INIT_CURRENT_DEVICE]=$(Return_Drive_Without_Partitions ${aDRIVE_MOUNT_SOURCE[$INDEX_INIT_CURRENT_DEVICE]})
+			# - Networked?
+			if [[ ! -d '/sys/block/'${aDRIVE_SOURCE_DEVICE[$INDEX_INIT_CURRENT_DEVICE]} ]]; then
 
-			done
+				aDRIVE_ISNETWORKED[$INDEX_INIT_CURRENT_DEVICE]=1
+				aDRIVE_ISFILESYSTEM[$INDEX_INIT_CURRENT_DEVICE]=1
+				aDRIVE_FSTYPE[$INDEX_INIT_CURRENT_DEVICE]='Net'
 
-			MAX_DRIVES=${#aDRIVE_MOUNT_SOURCE[@]}
-			for ((i=0; i<$MAX_DRIVES; i++))
-			do
+			# - Physical
+			else
 
-				#init
-				aDRIVE_ISAVAILABLE[$i]=0
-				aDRIVE_ISUUIDMOUNT[$i]=0
-				aDRIVE_MOUNT_TARGET[$i]='NULL'
-				aDRIVE_UUID[$i]=$(blkid ${aDRIVE_MOUNT_SOURCE[$i]} -s UUID -o value)
-				aDRIVE_PART_UUID[$i]=$(blkid ${aDRIVE_MOUNT_SOURCE[$i]} -s PARTUUID -o value)
+				cmd_scrape_string=$(blkid ${aDRIVE_MOUNT_SOURCE[$INDEX_INIT_CURRENT_DEVICE]} -s TYPE -o value)
+				if [[ $cmd_scrape_string ]]; then
 
-				#Check FStab for existing entry
-				local drive_mount_target_dev=$(grep -m1 "${aDRIVE_MOUNT_SOURCE[$i]}[[:space:]]" "$FP_TEMP_FSTAB" | awk '{print $2}')
-				local drive_mount_target_uuid=$(grep -m1 "UUID=${aDRIVE_UUID[$i]}[[:space:]]" "$FP_TEMP_FSTAB" | awk '{print $2}')
-				local drive_mount_target_partuuid=$(grep -m1 "PARTUUID=${aDRIVE_PART_UUID[$i]}[[:space:]]" "$FP_TEMP_FSTAB" | awk '{print $2}')
+					aDRIVE_ISFILESYSTEM[$INDEX_INIT_CURRENT_DEVICE]=1
+					aDRIVE_FSTYPE[$INDEX_INIT_CURRENT_DEVICE]=$cmd_scrape_string
 
-				# - check /dev/sdX
-				if [[ $drive_mount_target_dev ]]; then
+				fi
 
-					aDRIVE_MOUNT_TARGET[$i]="$drive_mount_target_dev"
-					aDRIVE_ISAVAILABLE[$i]=1
+			fi
 
-					G_DIETPI-NOTIFY 2 "Detected /dev mount: ${aDRIVE_MOUNT_SOURCE[$i]} > ${aDRIVE_MOUNT_TARGET[$i]}"
+			G_DIETPI-NOTIFY 2 " - Detected: ${aDRIVE_MOUNT_SOURCE[$INDEX_INIT_CURRENT_DEVICE]} > ${aDRIVE_MOUNT_TARGET[$INDEX_INIT_CURRENT_DEVICE]}"
 
-				# - check UUID
-				elif [[ $drive_mount_target_uuid ]]; then
+			aDRIVE_SIZE_TOTAL[$INDEX_INIT_CURRENT_DEVICE]=$(awk '{print $2}' <<< $line)
+			aDRIVE_SIZE_USED[$INDEX_INIT_CURRENT_DEVICE]=$(awk '{print $3}' <<< $line)
+			aDRIVE_SIZE_FREE[$INDEX_INIT_CURRENT_DEVICE]=$(awk '{print $4}' <<< $line)
+			aDRIVE_SIZE_PERCENTUSED[$INDEX_INIT_CURRENT_DEVICE]=$(awk '{print $5}' <<< $line)
 
-					aDRIVE_MOUNT_TARGET[$i]="$drive_mount_target_uuid"
+			aDRIVE_UUID[$INDEX_INIT_CURRENT_DEVICE]=$(blkid ${aDRIVE_MOUNT_SOURCE[$INDEX_INIT_CURRENT_DEVICE]} -s UUID -o value)
+			aDRIVE_PART_UUID[$INDEX_INIT_CURRENT_DEVICE]=$(blkid ${aDRIVE_MOUNT_SOURCE[$INDEX_INIT_CURRENT_DEVICE]} -s PARTUUID -o value)
 
-					aDRIVE_ISAVAILABLE[$i]=1
-					aDRIVE_ISUUIDMOUNT[$i]=1
+			#RO mounted?
+			#NB: We cant use -m1 for initial check as results can be:
+			# root@DietPi:~# cat /proc/mounts | grep ' / '
+			# rootfs / rootfs rw 0 0
+			# /dev/mmcblk0p2 / ext4 ro,noatime,discard,data=ordered 0 0
+			cmd_scrape_string=$(grep "[[:space:]]${aDRIVE_MOUNT_TARGET[$INDEX_INIT_CURRENT_DEVICE]}[[:space:]]" /proc/mounts | grep -m1 '[[:space:]]ro,')
+			if [[ $cmd_scrape_string ]]; then
 
-					G_DIETPI-NOTIFY 2 "Detected UUID mount: ${aDRIVE_MOUNT_SOURCE[$i]} > ${aDRIVE_MOUNT_TARGET[$i]}"
+				aDRIVE_ISREADONLY_CURRENTLY[$INDEX_INIT_CURRENT_DEVICE]=1
 
-				# - check PARTUUID
-				elif [[ $drive_mount_target_partuuid ]]; then
+				# - RootFS RW check
+				if [[ ${aDRIVE_MOUNT_TARGET[$INDEX_INIT_CURRENT_DEVICE]} == '/' ]]; then
 
-					aDRIVE_MOUNT_TARGET[$i]="$drive_mount_target_partuuid"
+					G_DIETPI-NOTIFY 2 "RootFS is currently set to R/O. $G_PROGRAM_NAME requires R/W access."
 
-					aDRIVE_ISAVAILABLE[$i]=1
-					aDRIVE_ISUUIDMOUNT[$i]=1
+					G_WHIP_YESNO "RootFS is currently set to 'Read Only'. $G_PROGRAM_NAME requires 'Read Write' access to function.\n\nWould you like to renable 'Read Write' access on RootFS?"
+					if (( $? == 0 )); then
 
-					G_DIETPI-NOTIFY 2 "Detected PARTUUID mount: ${aDRIVE_MOUNT_SOURCE[$i]} > ${aDRIVE_MOUNT_TARGET[$i]}"
+						G_RUN_CMD mount -v -o rw,remount ${aDRIVE_MOUNT_TARGET[$INDEX_INIT_CURRENT_DEVICE]}
+						G_DIETPI-NOTIFY 0 'RootFS R/W now enabled.'
 
-				# - Active drive mount does not exist in fstab, create one
-				elif [[ ${aDRIVE_UUID[$i]} ]]; then #Ignore master partition tables / drives with no UUID
-
-					#	Is drive already mounted? Use existing
-					local findmnt_target=$(findmnt ${aDRIVE_MOUNT_SOURCE[$i]} -o target -n | head -n 1) #multiple mounts can exist, we only want the 1st entry
-					if [[ $findmnt_target ]]; then
-
-						aDRIVE_MOUNT_TARGET[$i]=$findmnt_target
-
-					# 	Generate new mount location
 					else
 
-						aDRIVE_MOUNT_TARGET[$i]="/mnt/${aDRIVE_UUID[$i]}"
+						/DietPi/dietpi/dietpi-services start
+
+						G_DIETPI-NOTIFY 0 'RootFS currently set to R/O.'
+						G_DIETPI-NOTIFY 2 "Please run 'dietpi-drive_manager' again, if you want to re-enable RootFS R/W."
+
+						Destroy
+						exit
 
 					fi
-
-					G_DIETPI-NOTIFY 2 "Creating UUID fstab entry: ${aDRIVE_MOUNT_SOURCE[$i]}"
-
-					#	remove any previous/disabled entries for drive
-					sed -i "\@^${aDRIVE_MOUNT_SOURCE[$i]}[[:space:]]@d" "$FP_TEMP_FSTAB"
-					sed -i "\@^UUID=${aDRIVE_UUID[$i]}[[:space:]]@d" "$FP_TEMP_FSTAB"
-					sed -i "\@^PARTUUID=${aDRIVE_PART_UUID[$i]}[[:space:]]@d" "$FP_TEMP_FSTAB"
-
-					local mount_options='defaults,noatime,x-systemd.automount,nofail'
-					local mount_type_index=0
-					local repair_index=0 #No repair on boot
-					if [[ ${aDRIVE_MOUNT_TARGET[$i]} == '/' ]]; then
-
-						repair_index=1
-
-					fi
-
-					#	Override rootFS/Boot options
-					#	- Disable nofail for RootFS & boot, which will be ignored, causing warning:
-					#	- x-systemd.automount RootFS, breaks FS_partition
-					#	- x-systemd.automount Boot, breaks dietpi-ramdisk on ASUS TB
-					if [[ ${aDRIVE_MOUNT_TARGET[$i]} == '/' || ${aDRIVE_MOUNT_TARGET[$i]} == '/boot' ]]; then
-
-						mount_options='defaults,noatime'
-						#	RPi, PARTUUID to support USB rootFS/boot: https://github.com/Fourdee/DietPi/issues/970
-						if (( $G_HW_MODEL < 10 )); then
-
-							mount_type_index=1
-
-						fi
-
-					fi
-
-					local mount_type_string=0
-					if (( $mount_type_index == 0 )); then
-
-						mount_type_string="UUID=${aDRIVE_UUID[$i]}"
-
-					elif (( $mount_type_index == 1 )); then
-
-						mount_type_string="PARTUUID=${aDRIVE_PART_UUID[$i]}"
-
-					fi
-
-					echo -e "$mount_type_string    ${aDRIVE_MOUNT_TARGET[$i]}    auto    $mount_options    0 $repair_index" >> "$FP_TEMP_FSTAB"
-
-					aDRIVE_ISAVAILABLE[$i]=1
-					aDRIVE_ISUUIDMOUNT[$i]=1
 
 				fi
-
-				#create mount folders
-				if (( ${aDRIVE_ISAVAILABLE[$i]} )) &&
-					[[ ! -d ${aDRIVE_MOUNT_TARGET[$i]} ]]; then
-
-					G_DIETPI-NOTIFY 2 "Creating mount folder for ${aDRIVE_MOUNT_TARGET[$i]}"
-					mkdir -p "${aDRIVE_MOUNT_TARGET[$i]}"
-
-				fi
-
-			done
-
-			#Remove x-systemd.automount if not supported by kernel: https://github.com/Fourdee/DietPi/issues/1607#issuecomment-372030565
-			if ! modprobe autofs4 --dry-run &> /dev/null; then
-
-				sed -i 's/,x-systemd.automount//g' "$FP_TEMP_FSTAB"
-				G_DIETPI-NOTIFY 2 'autofs4 module not available in kernel, x-systemd.automount has been disabled'
 
 			fi
 
-			cp "$FP_TEMP_FSTAB" /etc/fstab
-			systemctl daemon-reload
+			# - Add entry to fstab
+			if [[ ${aDRIVE_UUID[$INDEX_INIT_CURRENT_DEVICE]} ]]; then
 
-			rm "$FP_TEMP_FSTAB"
+				local string_options=',rw'
+				if (( ${aDRIVE_ISREADONLY_CURRENTLY[$INDEX_INIT_CURRENT_DEVICE]} )); then
 
-			sync
-			mount -a
+					string_options=',ro'
 
-			#---------------------------------------------------------------
+				fi
 
-			G_DIETPI-NOTIFY 2 'Processing drive information, please wait...'
+				# fsck flag for root device, to allow check on reboot
+				local fsck_flag=1
+				if [[ ${aDRIVE_MOUNT_TARGET[$INDEX_INIT_CURRENT_DEVICE]} != '/' ]]; then
 
-			#ROOTFS location
-			FP_ROOTFS_SOURCE=$(findmnt / -o source -n)
+					string_options+=',nofail'
+					fsck_flag=0
 
-			local cmd_scrape_string=''
-			#Get data on mounted drives
-			for ((i=0; i<$MAX_DRIVES; i++))
+				fi
+
+				# - UUID or PARTUUID entry?
+				local dev_entry="UUID=${aDRIVE_UUID[$INDEX_INIT_CURRENT_DEVICE]}"
+				if (( $G_HW_MODEL < 10 )) &&
+					[[ ${aDRIVE_MOUNT_TARGET[$INDEX_INIT_CURRENT_DEVICE]} == '/' || ${aDRIVE_MOUNT_TARGET[$INDEX_INIT_CURRENT_DEVICE]} == '/boot' ]]; then
+
+					dev_entry="PARTUUID=${aDRIVE_PART_UUID[$INDEX_INIT_CURRENT_DEVICE]}"
+
+				fi
+
+				cat << _EOF_ >> $FP_TEMP_FSTAB
+$dev_entry ${aDRIVE_MOUNT_TARGET[$INDEX_INIT_CURRENT_DEVICE]} auto defaults,x-systemd.automount,noatime$string_options 0 $fsck_flag
+_EOF_
+
+			fi
+
+		done < /tmp/.dietpi-drive_manager_df_tmp
+		rm /tmp/.dietpi-drive_manager_df_tmp
+
+		#Check blkid for unmounted drives, if drive is not mounted, add entry as disabled mount
+		G_DIETPI-NOTIFY 0 'Detecting unmounted drives, please wait...'
+		blkid -o device > /tmp/.dietpi-drive_manager_blkid_tmp
+		while read line
+		do
+
+			if [[ -z $line ]]; then
+
+				break
+
+			fi
+
+			for ((i=0; i<${#aDRIVE_MOUNT_SOURCE[@]}; i++))
 			do
 
-				#Init
-				aDRIVE_FSTYPE[$i]='No filesystem'
-				aDRIVE_SIZE_TOTAL[$i]='NULL'
-				aDRIVE_SIZE_USED[$i]='NULL'
-				aDRIVE_SIZE_FREE[$i]='NULL'
-				aDRIVE_SIZE_PERCENTUSED[$i]='NULL'
+				if [[ ${aDRIVE_MOUNT_SOURCE[$i]} == $line ]]; then
 
-				aDRIVE_ISMOUNTED[$i]=0
-				aDRIVE_ISFILESYSTEM[$i]=0
-				aDRIVE_ISREADONLY_FSTAB[$i]=0
-				aDRIVE_ISREADONLY_CURRENTLY[$i]=0
-
-				cmd_scrape_string=$(blkid "${aDRIVE_MOUNT_SOURCE[$i]}" -s TYPE -o value)
-				if [[ $cmd_scrape_string ]]; then
-
-					aDRIVE_ISFILESYSTEM[$i]=1
-					aDRIVE_FSTYPE[$i]="$cmd_scrape_string"
+					break
 
 				fi
 
-				#mounted drive, pull size data
-				# - Store df result in RAM for faster processing
-				df -Ph > /tmp/.dietpi-drive_manager_df_tmp
-				cmd_scrape_string=$(grep -m1 "${aDRIVE_MOUNT_TARGET[$i]}$" /tmp/.dietpi-drive_manager_df_tmp | awk '{print $2}')
-				if [[ $cmd_scrape_string ]]; then
+				# - New unmounted drive found on system, add entry to fstab
+				#	Must have a valid UUID! (this excludes /dev/mmcblk0)
+				if (( $i == ( ${#aDRIVE_MOUNT_SOURCE[@]} - 1 ) )) &&
+					[[ $(blkid $line -s UUID -o value) ]]; then
 
-					aDRIVE_SIZE_TOTAL[$i]="$cmd_scrape_string"
-					aDRIVE_ISMOUNTED[$i]=1
+					G_DIETPI-NOTIFY 2 " - Detected unmounted drive: $line, updating fstab"
+
+					Init_New_Device
+
+					aDRIVE_ISPARTITIONTABLE[$INDEX_INIT_CURRENT_DEVICE]=1
+					aDRIVE_MOUNT_SOURCE[$INDEX_INIT_CURRENT_DEVICE]=$line
+					aDRIVE_SOURCE_DEVICE[$INDEX_INIT_CURRENT_DEVICE]=$(Return_Drive_Without_Partitions ${aDRIVE_MOUNT_SOURCE[$INDEX_INIT_CURRENT_DEVICE]})
+
+					aDRIVE_UUID[$INDEX_INIT_CURRENT_DEVICE]=$(blkid ${aDRIVE_MOUNT_SOURCE[$INDEX_INIT_CURRENT_DEVICE]} -s UUID -o value)
+					aDRIVE_PART_UUID[$INDEX_INIT_CURRENT_DEVICE]=$(blkid ${aDRIVE_MOUNT_SOURCE[$INDEX_INIT_CURRENT_DEVICE]} -s PARTUUID -o value)
+
+					aDRIVE_MOUNT_TARGET[$INDEX_INIT_CURRENT_DEVICE]="/mnt/${aDRIVE_UUID[$INDEX_INIT_CURRENT_DEVICE]}"
+
+					cmd_scrape_string=$(blkid ${aDRIVE_MOUNT_SOURCE[$INDEX_INIT_CURRENT_DEVICE]} -s TYPE -o value)
+					if [[ $cmd_scrape_string ]]; then
+
+						aDRIVE_ISFILESYSTEM[$INDEX_INIT_CURRENT_DEVICE]=1
+						aDRIVE_FSTYPE[$INDEX_INIT_CURRENT_DEVICE]=$cmd_scrape_string
+
+					fi
+
+					cat << _EOF_ >> $FP_TEMP_FSTAB
+#UUID=${aDRIVE_UUID[$INDEX_INIT_CURRENT_DEVICE]} ${aDRIVE_MOUNT_TARGET[$INDEX_INIT_CURRENT_DEVICE]} auto defaults,x-systemd.automount,noatime,rw,nofail 0 0
+_EOF_
 
 				fi
-
-				if (( ${aDRIVE_ISMOUNTED[$i]} )); then
-
-					cmd_scrape_string=$(grep -m1 "${aDRIVE_MOUNT_TARGET[$i]}$" /tmp/.dietpi-drive_manager_df_tmp | awk '{print $3}')
-					if [[ $cmd_scrape_string ]]; then
-
-						aDRIVE_SIZE_USED[$i]="$cmd_scrape_string"
-
-					fi
-
-					cmd_scrape_string=$(grep -m1 "${aDRIVE_MOUNT_TARGET[$i]}$" /tmp/.dietpi-drive_manager_df_tmp | awk '{print $4}')
-					if [[ $cmd_scrape_string ]]; then
-
-						aDRIVE_SIZE_FREE[$i]="$cmd_scrape_string"
-
-					fi
-
-					cmd_scrape_string=$(grep -m1 "${aDRIVE_MOUNT_TARGET[$i]}$" /tmp/.dietpi-drive_manager_df_tmp | awk '{print $5}')
-					if [[ $cmd_scrape_string ]]; then
-
-						aDRIVE_SIZE_PERCENTUSED[$i]="$cmd_scrape_string"
-
-					fi
-
-					#RO mounted?
-					#NB: We cant use -m1 for initial check as results can be:
-					# root@DietPi:~# cat /proc/mounts | grep ' / '
-					# rootfs / rootfs rw 0 0
-					# /dev/mmcblk0p2 / ext4 ro,noatime,discard,data=ordered 0 0
-					cmd_scrape_string=$(grep "[[:space:]]${aDRIVE_MOUNT_TARGET[$i]}[[:space:]]" /proc/mounts | grep -m1 '[[:space:]]ro,')
-					if [[ $cmd_scrape_string ]]; then
-
-						aDRIVE_ISREADONLY_CURRENTLY[$i]=1
-
-					fi
-
-				fi
-
-				rm /tmp/.dietpi-drive_manager_df_tmp
-
-				#RO set in fstab?
-				cmd_scrape_string=$(grep -m1 "[[:space:]]${aDRIVE_MOUNT_TARGET[$i]}[[:space:]]*.auto" /etc/fstab | grep -m1 ',ro,')
-				if [[ $cmd_scrape_string ]]; then
-
-					aDRIVE_ISREADONLY_FSTAB[$i]=1
-
-				fi
-
 
 			done
 
-			#Check for RO on rootfs and enable RW before this script can run
-			if (( ! $ROOTFS_RW_CHECKED )); then
+		done < /tmp/.dietpi-drive_manager_blkid_tmp
+		rm /tmp/.dietpi-drive_manager_blkid_tmp
 
-				ROOTFS_RW_CHECKED=1
+		#Find drives that have no partitions
+		lsblk -r -o NAME | tail +2 > /tmp/.dietpi-drive_manager_lsblk_tmp
+		while read line
+		do
 
-				for ((i=0; i<$MAX_DRIVES; i++))
-				do
+			local found=1
 
-					if [[ ${aDRIVE_MOUNT_TARGET[$i]} == '/' ]] &&
-						(( ${aDRIVE_ISREADONLY_CURRENTLY[$i]} )); then
+			# - Exclude drives already found
+			for ((i=0; i<${#aDRIVE_MOUNT_SOURCE[@]}; i++))
+			do
 
-						INDEX_DRIVE_BEING_EDITED=$i
+				if [[ $line == ${aDRIVE_SOURCE_DEVICE[$i]}* ]]; then
 
-						G_DIETPI-NOTIFY 2 "RootFS is currently set to R/O. $PROGRAM_NAME requires R/W access."
+					found=0
+					break
 
-						G_WHIP_YESNO "RootFS is currently set to 'Read Only'. DietPi-Drive_Manager requires 'Read Write' access to function.\n\nWould you like to renable 'Read Write' access on RootFS?"
-						if (( $? == 0 )); then
+				fi
 
-							Toggle_WriteMode
-							G_DIETPI-NOTIFY 0 "RootFS R/W now enabled."
+			done
 
-							#	reinit
-							init=1
+			if (( $found )); then
 
-						else
+				G_DIETPI-NOTIFY 2 " - Detected drive with no partitions: $line"
 
-							/DietPi/dietpi/dietpi-services start
+				Init_New_Device
 
-							G_DIETPI-NOTIFY 0 'RootFS currently set to R/O.'
-							G_DIETPI-NOTIFY 2 "Please run 'dietpi-drive_manager' again, if you want to re-enable RootFS R/W."
-
-							Destroy
-							exit
-
-						fi
-
-					fi
-
-				done
+				aDRIVE_MOUNT_SOURCE[$INDEX_INIT_CURRENT_DEVICE]="/dev/$line"
+				aDRIVE_MOUNT_TARGET[$INDEX_INIT_CURRENT_DEVICE]="/tmp/$line"
+				aDRIVE_SOURCE_DEVICE[$INDEX_INIT_CURRENT_DEVICE]=$line
 
 			fi
 
-			#Obtain actual user data location on disk (follows symlinks)
-			FP_USERDATA_CURRENT="$(readlink -f $G_FP_DIETPI_USERDATA)"
+		done < /tmp/.dietpi-drive_manager_lsblk_tmp
+		rm /tmp/.dietpi-drive_manager_lsblk_tmp
 
-			#Swapfile location
-			FP_SWAPFILE_CURRENT="$(grep -m1 '^[[:blank:]]*AUTO_SETUP_SWAPFILE_LOCATION=' /DietPi/dietpi.txt | sed 's/.*=//')"
+		#Set required global flags, for all drives found
+		for ((i=0; i<${#aDRIVE_MOUNT_SOURCE[@]}; i++))
+		do
+
+			# - Detect and set ROM drives
+			if [[ ${aDRIVE_MOUNT_SOURCE[$i]} == '/dev/sr'* ]]; then
+
+				aDRIVE_ISROM[$i]=1
+
+			fi
 
 		done
+
+		#Remove x-systemd.automount if not supported by kernel: https://github.com/Fourdee/DietPi/issues/1607#issuecomment-372030565
+		if ! modprobe autofs4 --dry-run &> /dev/null; then
+
+			sed -i 's/,x-systemd.automount//g' $FP_TEMP_FSTAB
+			G_DIETPI-NOTIFY 2 'autofs4 module not available in kernel, x-systemd.automount has been disabled'
+
+		fi
+
+		#Find the drive we are to edit, then set its index (this is due to array list total being not constant)
+		if [[ $DRIVE_TARGET_BEING_EDITED ]]; then
+
+			for ((i=0; i<${#aDRIVE_MOUNT_SOURCE[@]}; i++))
+			do
+
+				if [[ $DRIVE_TARGET_BEING_EDITED == ${aDRIVE_MOUNT_TARGET[$i]} ]]; then
+
+					INDEX_DRIVE_BEING_EDITED=$i
+					#echo -e "DEBUG EDIT | ${aDRIVE_MOUNT_TARGET[$INDEX_DRIVE_BEING_EDITED]} | ${aDRIVE_MOUNT_SOURCE[$INDEX_DRIVE_BEING_EDITED]} | ${aDRIVE_SOURCE_DEVICE[$INDEX_DRIVE_BEING_EDITED]}"
+					break
+
+				fi
+
+			done
+
+		fi
+
+		cp $FP_TEMP_FSTAB /etc/fstab
+		systemctl daemon-reload
+
+		rm $FP_TEMP_FSTAB
+
+		sync
+		mount -a
 
 	}
 
 	Return_Drive_Without_Partitions(){
 
 		#$1 = dev source
-		if [[ $1 == /dev/sd* ]]; then
+		if [[ $1 == '/dev/sd'* ]]; then
 
-			echo -e "$1" | sed 's/[0-9]$//g'
+			echo $1 | sed 's/[0-9]$//' | sed 's/\/dev\///'
 
 		#mmc
 		else
 
-			echo -e "$1" | sed 's/p[0-9]$//g'
+			echo $1 | sed 's/p[0-9]$//' | sed 's/\/dev\///'
+
+		fi
+
+	}
+
+	#$1=source $2=target
+	Mount_Drive(){
+
+		local source=$1
+		local target=$2
+		if [[ ! -d $target ]]; then
+
+			G_DIETPI-NOTIFY 2 "Creating mount folder for $target"
+			mkdir -p $target
+
+		fi
+
+		G_RUN_CMD_INFO_ONLY=1 G_RUN_CMD mount $source $target
+
+	}
+
+	#$=target
+	Unmount_Drive(){
+
+		local target=$1
+
+		G_RUN_CMD_INFO_ONLY=1 G_RUN_CMD umount $target
+		if (( $? == 0 )); then
+
+			sed -i "\#[[:space:]]$target[[:space:]]#d" /etc/fstab #Only needed for networked drives currently...
+			rm -R $target
+
+		fi
+
+	}
+
+	Resize_FS(){
+
+		if [[ ${aDRIVE_MOUNT_TARGET[$INDEX_DRIVE_BEING_EDITED]} == '/' ]]; then
+
+			systemctl unmask dietpi-fs_partition_resize
+			G_RUN_CMD systemctl enable dietpi-fs_partition_resize
+
+			G_WHIP_YESNO 'RootFS resize will occur on next reboot.\n\nWould you like to reboot the system now?'
+			if (( $? == 0 )); then
+
+				reboot
+
+			fi
+
+		else
+
+			G_RUN_CMD_INFO_ONLY=1 G_RUN_CMD resize2fs ${aDRIVE_MOUNT_SOURCE[$INDEX_DRIVE_BEING_EDITED]}
 
 		fi
 
@@ -437,125 +519,191 @@
 
 	Run_Format(){
 
-		local drivepath_no_partitions=$(Return_Drive_Without_Partitions ${aDRIVE_MOUNT_SOURCE[$INDEX_DRIVE_BEING_EDITED]})
+		local run_format=0
+		local info_format_fs_type=''
+		local info_format_type_output='Partition format' #used in complete message
+		local text_desc="Format Drive:\n - /dev/${aDRIVE_SOURCE_DEVICE[$INDEX_DRIVE_BEING_EDITED]}\n - UUID=${aDRIVE_UUID[$INDEX_DRIVE_BEING_EDITED]}\n - Partition table: $partition_table_text\n - Filesystem type: $format_type_text\n\nALL DATA and PARTITIONS on this drive will be DELETED.\nDo you wish to continue?"
+		if (( ${aDRIVE_ISPARTITIONTABLE[$INDEX_DRIVE_BEING_EDITED]} )); then
 
-		# - Unmount drive
-		umount ${aDRIVE_MOUNT_SOURCE[$INDEX_DRIVE_BEING_EDITED]}
+			text_desc="Format partition:\n - ${aDRIVE_MOUNT_SOURCE[$INDEX_DRIVE_BEING_EDITED]}\n - UUID=${aDRIVE_UUID[$INDEX_DRIVE_BEING_EDITED]}\n - Filesystem type: $format_type_text\n\nALL DATA on this partition will be DELETED.\nDo you wish to continue?"
 
-		if (( $FORMAT_RECREATE_PARTITION_TABLE )); then
+		fi
 
-			# - Clear MBR and partition table from device, and then some.
-			dd if=/dev/zero of=$drivepath_no_partitions bs=5M count=1
+		G_WHIP_YESNO "Start format?\n\n$text_desc"
+		if (( ! $? )); then
 
-			# - Create partition table type
-			local parition_table_type='msdos'
-			if (( $FORMAT_GPT )); then
+			run_format=1
 
-				parition_table_type='gpt'
+		fi
+
+		if (( $run_format )); then
+
+			# - Unmount drive
+			umount ${aDRIVE_MOUNT_SOURCE[$INDEX_DRIVE_BEING_EDITED]}
+
+			# - Create a new partition table
+			if (( ! ${aDRIVE_ISPARTITIONTABLE[$INDEX_DRIVE_BEING_EDITED]} )); then
+
+				# - Zero All Partitions on device
+				for ((i=1; i<=9; i++))
+				do
+
+					local fp_target_partition="/dev/${aDRIVE_SOURCE_DEVICE[$INDEX_DRIVE_BEING_EDITED]}$i"
+					#	Does the device require an additional p for partitions (eg: mmcblkXp1 vs /dev/sdX1)?
+					if [[ ${aDRIVE_MOUNT_SOURCE[$INDEX_DRIVE_BEING_EDITED]} == *p[0-9] ]]; then
+
+						fp_target_partition="/dev/${aDRIVE_SOURCE_DEVICE[$INDEX_DRIVE_BEING_EDITED]}p$i"
+
+					fi
+
+					if [[ -b $fp_target_partition ]]; then
+
+						G_DIETPI-NOTIFY 2 "Writing zero's to partition $fp_target_partition"
+						G_RUN_CMD dd if=/dev/zero of=$fp_target_partition bs=4K count=1337 #Partition wipe (if it has one), must be done 1st, else blkid still reports UUID's etc
+
+					fi
+
+				done
+
+				# - Clear Partition table from device
+				G_DIETPI-NOTIFY 2 "Writing zero's to partition table /dev/${aDRIVE_SOURCE_DEVICE[$INDEX_DRIVE_BEING_EDITED]}"
+				G_RUN_CMD dd if=/dev/zero of=/dev/${aDRIVE_SOURCE_DEVICE[$INDEX_DRIVE_BEING_EDITED]} bs=4K count=1337 #Block device wipe
+
+				# - Create partition table type
+				local parition_table_type='msdos'
+				if (( $FORMAT_GPT )); then
+
+					parition_table_type='gpt'
+
+				fi
+
+				G_DIETPI-NOTIFY 2 "Creating partition table, with target type: $parition_table_type"
+
+				G_RUN_CMD parted -s /dev/${aDRIVE_SOURCE_DEVICE[$INDEX_DRIVE_BEING_EDITED]} mklabel $parition_table_type
+				G_RUN_CMD parted -a optimal /dev/${aDRIVE_SOURCE_DEVICE[$INDEX_DRIVE_BEING_EDITED]} mkpart primary 0% 100%
+				partprobe /dev/${aDRIVE_SOURCE_DEVICE[$INDEX_DRIVE_BEING_EDITED]}
+
+				sleep 1 # due to systemD automount, wait for it.
+				umount ${aDRIVE_MOUNT_SOURCE[$INDEX_DRIVE_BEING_EDITED]}
+
+				# - Target index to create partition to (eg: /dev/sdX1)
+				if [[ ${aDRIVE_MOUNT_SOURCE[$INDEX_DRIVE_BEING_EDITED]} != *[0-9] ]]; then
+
+					aDRIVE_MOUNT_SOURCE[$INDEX_DRIVE_BEING_EDITED]+='1'
+
+				fi
+
+				info_format_type_output='Partition table format'
+
+			else
+
+				# - Clear partition from device
+				G_DIETPI-NOTIFY 2 "Writing zero's to partition ${aDRIVE_MOUNT_SOURCE[$INDEX_DRIVE_BEING_EDITED]}"
+				G_RUN_CMD dd if=/dev/zero of=${aDRIVE_MOUNT_SOURCE[$INDEX_DRIVE_BEING_EDITED]} bs=4K count=1337
 
 			fi
 
-			G_DIETPI-NOTIFY 2 "Partition table target: $parition_table_type"
+			# - Format ext4
+			if (( $FORMAT_FILESYSTEM_TYPE == 0 )); then
 
-			parted -s "$drivepath_no_partitions" mklabel "$parition_table_type"
-			parted -a optimal "$drivepath_no_partitions" mkpart primary 0% 100%
+				# force
+				info_format_fs_type='EXT4'
+				G_RUN_CMD mkfs.ext4 -F -m 0 ${aDRIVE_MOUNT_SOURCE[$INDEX_DRIVE_BEING_EDITED]}
+				resize2fs ${aDRIVE_MOUNT_SOURCE[$INDEX_DRIVE_BEING_EDITED]}
 
-			# parted -s "${aDRIVE_MOUNT_SOURCE[$INDEX_DRIVE_BEING_EDITED]}" mklabel "$parition_table_type"
-			# parted -a optimal "${aDRIVE_MOUNT_SOURCE[$INDEX_DRIVE_BEING_EDITED]}" mkpart primary 0% 100%
+			# - Format NTFS
+			elif (( $FORMAT_FILESYSTEM_TYPE == 1 )); then
 
-			#partprobe #this mounts all drives
+				# fast format / no indexing / force
+				info_format_fs_type='NTFS'
+				G_RUN_CMD mkfs.ntfs -f -I -F ${aDRIVE_MOUNT_SOURCE[$INDEX_DRIVE_BEING_EDITED]}
 
-			sleep 1 # due to systemD automount, wait for it.
-			umount ${aDRIVE_MOUNT_SOURCE[$INDEX_DRIVE_BEING_EDITED]}
+			# - Format FAT32
+			elif (( $FORMAT_FILESYSTEM_TYPE == 2 )); then
 
-		else
+				#  use 1 parition on whole device
+				info_format_fs_type='FAT'
+				G_RUN_CMD mkfs.vfat -I ${aDRIVE_MOUNT_SOURCE[$INDEX_DRIVE_BEING_EDITED]}
 
-			# - Clear partition from device
-			dd if=/dev/zero of=${aDRIVE_MOUNT_SOURCE[$INDEX_DRIVE_BEING_EDITED]} bs=5M count=1
+			# - Format HFS+
+			elif (( $FORMAT_FILESYSTEM_TYPE == 3 )); then
+
+				info_format_fs_type='HFS+'
+				G_RUN_CMD mkfs.hfsplus ${aDRIVE_MOUNT_SOURCE[$INDEX_DRIVE_BEING_EDITED]}
+
+			# - Format btrfs
+			elif (( $FORMAT_FILESYSTEM_TYPE == 4 )); then
+
+				# force
+				info_format_fs_type='BTRFS'
+				G_RUN_CMD mkfs.btrfs -f ${aDRIVE_MOUNT_SOURCE[$INDEX_DRIVE_BEING_EDITED]}
+
+			# - Format f2fs
+			elif (( $FORMAT_FILESYSTEM_TYPE == 5 )); then
+
+				info_format_fs_type='F2FS'
+				G_RUN_CMD mkfs.f2fs ${aDRIVE_MOUNT_SOURCE[$INDEX_DRIVE_BEING_EDITED]}
+
+			# - Format exFAT
+			elif (( $FORMAT_FILESYSTEM_TYPE == 6 )); then
+
+				info_format_fs_type='exFAT'
+				G_RUN_CMD mkfs.exfat ${aDRIVE_MOUNT_SOURCE[$INDEX_DRIVE_BEING_EDITED]}
+
+			fi
+
+			G_DIETPI-NOTIFY 0 "Created $info_format_fs_type filesystem: ${aDRIVE_MOUNT_SOURCE[$INDEX_DRIVE_BEING_EDITED]}"
+			FORMAT_COMPLETED=1
+			local format_previous_mount_source=${aDRIVE_MOUNT_SOURCE[$INDEX_DRIVE_BEING_EDITED]}
+			local format_previous_mount_target=${aDRIVE_MOUNT_TARGET[$INDEX_DRIVE_BEING_EDITED]}
+
+			Init_Drives_and_Refresh
+
+			local format_new_uuid=$(blkid $format_previous_mount_source -s UUID -o value)
+			[[ -e $format_previous_mount_target ]] && rm -R $format_previous_mount_target
+
+			# - Automatically mount it
+			DRIVE_TARGET_BEING_EDITED="/mnt/$format_new_uuid"
+			Mount_Drive $format_previous_mount_source $DRIVE_TARGET_BEING_EDITED
+
+			Init_Drives_and_Refresh
+
+			G_WHIP_MSG "Format completed:\n
+ - Format Type           : $info_format_type_output
+ - Filesystem Type       : $info_format_fs_type
+ - Previous Mount Source : $format_previous_mount_target
+ - New Mount Source      : ${aDRIVE_MOUNT_TARGET[$INDEX_DRIVE_BEING_EDITED]}"
 
 		fi
-
-		# - Format ext4
-		if (( $FORMAT_FILESYSTEM_TYPE == 0 )); then
-
-			# force
-			mkfs.ext4 -F -m 0 ${aDRIVE_MOUNT_SOURCE[$INDEX_DRIVE_BEING_EDITED]}
-			resize2fs ${aDRIVE_MOUNT_SOURCE[$INDEX_DRIVE_BEING_EDITED]}
-
-		# - Format NTFS
-		elif (( $FORMAT_FILESYSTEM_TYPE == 1 )); then
-
-			# fast format / no indexing / force
-			mkfs.ntfs -f -I -F ${aDRIVE_MOUNT_SOURCE[$INDEX_DRIVE_BEING_EDITED]}
-
-		# - Format FAT32
-		elif (( $FORMAT_FILESYSTEM_TYPE == 2 )); then
-
-			#  use 1 parition on whole device
-			mkfs.vfat -I ${aDRIVE_MOUNT_SOURCE[$INDEX_DRIVE_BEING_EDITED]}
-
-		# - Format HFS+
-		elif (( $FORMAT_FILESYSTEM_TYPE == 3 )); then
-
-			mkfs.hfsplus ${aDRIVE_MOUNT_SOURCE[$INDEX_DRIVE_BEING_EDITED]}
-
-		# - Format btrfs
-		elif (( $FORMAT_FILESYSTEM_TYPE == 4 )); then
-
-			# force
-			mkfs.btrfs -f ${aDRIVE_MOUNT_SOURCE[$INDEX_DRIVE_BEING_EDITED]}
-
-		# - Format f2fs
-		elif (( $FORMAT_FILESYSTEM_TYPE == 5 )); then
-
-			mkfs.f2fs ${aDRIVE_MOUNT_SOURCE[$INDEX_DRIVE_BEING_EDITED]}
-
-		# - Format exFAT
-		elif (( $FORMAT_FILESYSTEM_TYPE == 6 )); then
-
-			mkfs.exfat ${aDRIVE_MOUNT_SOURCE[$INDEX_DRIVE_BEING_EDITED]}
-
-		fi
-
-		#Remove previous fstab entry and mount location
-		rm -R "${aDRIVE_MOUNT_TARGET[$INDEX_DRIVE_BEING_EDITED]}"
-		sed -i "\@[[:space:]]${aDRIVE_MOUNT_TARGET[$INDEX_DRIVE_BEING_EDITED]}[[:space:]]@d" /etc/fstab
-
-		FORMAT_COMPLETED=1
-		FORMAT_PREVIOUS_MOUNT_SOURCE=${aDRIVE_MOUNT_SOURCE[$INDEX_DRIVE_BEING_EDITED]}
-
-		Init_Drives_and_Refresh
 
 	}
 
 	RootFS_Move(){
 
+		/DietPi/dietpi/dietpi-services stop
+
+		# - install rsync
+		G_AG_CHECK_INSTALL_PREREQ rsync
+
 		#Remove previous fstab entry and mount location
 		cp /etc/fstab /etc/fstab.bak #incase of Rsync fail
-
-		#	redetect index, after format
-		for ((i=0; i<$MAX_DRIVES; i++))
-		do
-
-			if [[ ${aDRIVE_MOUNT_SOURCE[$i]} == $FORMAT_PREVIOUS_MOUNT_SOURCE ]]; then
-
-				INDEX_DRIVE_BEING_EDITED=$i
-				break
-
-			fi
-
-		done
 
 		#	Remove automatic entry for new uuid
 		sed -i "\@[[:space:]]${aDRIVE_MOUNT_TARGET[$INDEX_DRIVE_BEING_EDITED]}[[:space:]]@d" /etc/fstab
 
 		#	Add new rootfs entry
-		sed -i "\@[[:space:]]/[[:space:]]auto@c UUID=${aDRIVE_UUID[$INDEX_DRIVE_BEING_EDITED]} / auto defaults,noatime 0 1" /etc/fstab
+		local dev_entry="UUID=${aDRIVE_UUID[$INDEX_DRIVE_BEING_EDITED]}"
+		if (( $G_HW_MODEL < 10 )); then
 
-		# - install rsync
-		G_AG_CHECK_INSTALL_PREREQ rsync
+			dev_entry="PARTUUID=${aDRIVE_PART_UUID[$INDEX_DRIVE_BEING_EDITED]}"
 
-		rsync -aHv --delete --exclude '/lost+found/' --exclude ${aDRIVE_MOUNT_TARGET[$INDEX_DRIVE_BEING_EDITED]}/ --exclude '/sys/*' --exclude '/proc/*' / "${aDRIVE_MOUNT_TARGET[$INDEX_DRIVE_BEING_EDITED]}"/
+		fi
+		sed -i "\@[[:space:]]/[[:space:]]auto@c $dev_entry / auto defaults,noatime 0 1" /etc/fstab
+
+		# - Disable Swap
+		/DietPi/dietpi/func/dietpi-set_dphys-swapfile 0
+
+		rsync -aHv --delete --exclude '/boot/*' --exclude '/lost+found/' --exclude '/mnt/*' --exclude ${aDRIVE_MOUNT_TARGET[$INDEX_DRIVE_BEING_EDITED]}/ --exclude '/sys/*' --exclude '/proc/*' / "${aDRIVE_MOUNT_TARGET[$INDEX_DRIVE_BEING_EDITED]}"/
 		if (( $? )); then
 
 			G_DIETPI-NOTIFY 1 'Rsync has failed, RootFS transfer has been aborted.'
@@ -566,6 +714,11 @@
 			exit
 
 		fi
+
+		# - Recreate swap
+		# /DietPi/dietpi/func/dietpi-set_dphys-swapfile 1 ${aDRIVE_MOUNT_TARGET[$INDEX_DRIVE_BEING_EDITED]}/var/swap/.swap
+		#	Manually update location
+		# sed -i "/^[[:blank:]]*AUTO_SETUP_SWAPFILE_LOCATION=/c\AUTO_SETUP_SWAPFILE_LOCATION=/var/swap" /DietPi/dietpi.txt
 
 		#RPi | cmdline.txt
 		if (( $G_HW_MODEL < 10 )); then
@@ -602,55 +755,12 @@
 
 	}
 
-	RootFS_Low_Free_Space_Check(){
-
-		#	global min limit (MB)
-		local free_space_limit=500
-
-		G_DIETPI-NOTIFY 2 'Checking available free space on RootFS, please wait...'
-
-		#Find rootfs
-		for ((i=0; i<$MAX_DRIVES; i++))
-		do
-
-			if [ '/' = "${aDRIVE_MOUNT_TARGET[$i]}" ]; then
-
-				INDEX_DRIVE_BEING_EDITED=$i
-
-				#	Obtain free space (MB)
-				local free_space_current=$(df -B M | grep -m1 "${aDRIVE_MOUNT_TARGET[$i]}$" | awk '{print $4}' | sed 's/[^0-9]//g')
-
-				if (( $free_space_current < $free_space_limit )); then
-
-					G_WHIP_MSG "Error:\n\nAvailable free space on RootFS is low ($free_space_current MB). To prevent potential issues due to running out of free space, this script will now be terminated.\n\nPlease free up at least $free_space_limit MB of free space, then try again."
-
-					G_DIETPI-NOTIFY 1 "Insufficient free space on RootFS. $free_space_current MB available, $free_space_limit MB required"
-
-					#	export
-					EXIT_CODE=1
-
-				else
-
-					G_DIETPI-NOTIFY 0 "$free_space_current MB available, $free_space_limit MB required"
-
-				fi
-
-				break
-
-			fi
-
-		done
-
-		#Still waiting for Freespace 3 :(
-
-	}
-
 	RootFS_RW_Check(){
 
 		if mount | grep -m1 '[[:blank:]]/[[:blank:]]' | grep -q '(ro,'; then
 
 			G_DIETPI-NOTIFY 1 'RootFS is currently set to R/O.'
-			G_DIETPI-NOTIFY 2 "DietPi requires RootFS R/W access. Please run 'dietpi-drive_manager' to re-enable.\n"
+			G_DIETPI-NOTIFY 2 'DietPi requires RootFS R/W access. Please run "dietpi-drive_manager" to re-enable.\n'
 			EXIT_CODE=1
 
 		else
@@ -663,33 +773,24 @@
 
 	Toggle_WriteMode(){
 
-		local line_number=$(grep -m1 -n "[[:space:]]${aDRIVE_MOUNT_TARGET[$INDEX_DRIVE_BEING_EDITED]}[[:space:]]*.auto" /etc/fstab | cut -f1 -d:)
 		local exit_status=0
 		local message_result=0
 
-		if (( ${aDRIVE_ISREADONLY_FSTAB[$INDEX_DRIVE_BEING_EDITED]} || ${aDRIVE_ISREADONLY_CURRENTLY[$INDEX_DRIVE_BEING_EDITED]} )); then
+		if (( ${aDRIVE_ISREADONLY_CURRENTLY[$INDEX_DRIVE_BEING_EDITED]} )); then
 
-			message_result=$(mount -v -o rw,remount "${aDRIVE_MOUNT_SOURCE[$INDEX_DRIVE_BEING_EDITED]}" 2>&1)
+			message_result=$(mount -v -o rw,remount ${aDRIVE_MOUNT_SOURCE[$INDEX_DRIVE_BEING_EDITED]} 2>&1)
 			exit_status=$?
-
-			#	Apply this only if no ,ro, exists?
-			sed -i "${line_number}s/[[:space:]]defaults,ro,/ defaults,/" /etc/fstab
 
 		else
 
-			sed -i "${line_number}s/[[:space:]]defaults,/ defaults,ro,/" /etc/fstab
-
-			message_result=$(mount -v -o ro,remount "${aDRIVE_MOUNT_SOURCE[$INDEX_DRIVE_BEING_EDITED]}" 2>&1)
+			message_result=$(mount -v -o ro,remount ${aDRIVE_MOUNT_SOURCE[$INDEX_DRIVE_BEING_EDITED]} 2>&1)
 			exit_status=$?
 
 		fi
 
-		systemctl daemon-reload
-		mount -a
-
 		if (( $exit_status )); then
 
-			G_WHIP_MSG "Failed to apply now:\n\nDue to:\n - $message_result\n\nIf you have set to read only, this will be active on next reboot."
+			G_WHIP_MSG "Failed to apply:\n\nDue to:\n - $message_result"
 
 		fi
 
@@ -703,51 +804,94 @@
 		#Generate menu
 		G_WHIP_MENU_ARRAY=()
 
-		#List all available drives
-		local drive_available=0
-		for ((i=0; i<$MAX_DRIVES; i++))
+		# - Create a nice category list, to match items to their block device (eg: mmcblk0)
+		local acategory_list=()
+		for ((i=0; i<${#aDRIVE_MOUNT_SOURCE[@]}; i++))
 		do
 
-			drive_available=1
+			local new_cat=1
 
-			if (( ${aDRIVE_ISAVAILABLE[$i]} )); then
+			for ((j=0; j<${#acategory_list[@]}; j++))
+			do
 
-				#Seperate list if 1st partition on drive
-				if grep -qi '1$' <<< "${aDRIVE_MOUNT_SOURCE[$i]}"; then
+				if [[ ${aDRIVE_SOURCE_DEVICE[$i]} == ${acategory_list[$j]} ]]; then
 
-					local drivepath_no_partitions=$(Return_Drive_Without_Partitions ${aDRIVE_MOUNT_SOURCE[$i]})
-					G_WHIP_MENU_ARRAY+=('' "─($drivepath_no_partitions)────────────────────────────────────────")
-
-				fi
-
-				#Drive is fully mounted:
-				if (( ${aDRIVE_ISMOUNTED[$i]} )); then
-
-					#| ${aDRIVE_UUID[$i]}
-					G_WHIP_MENU_ARRAY+=("${aDRIVE_MOUNT_TARGET[$i]}" ": ${aDRIVE_MOUNT_SOURCE[$i]} | ${aDRIVE_FSTYPE[$i]} | Size: ${aDRIVE_SIZE_TOTAL[$i]} | Used: ${aDRIVE_SIZE_USED[$i]} (${aDRIVE_SIZE_PERCENTUSED[$i]})")
-
-				#Not mounted, why?
-				else
-
-					#Drive has no FS:
-					if (( ! ${aDRIVE_ISFILESYSTEM[$i]} )); then
-
-						G_WHIP_MENU_ARRAY+=("${aDRIVE_MOUNT_TARGET[$i]}" ": ${aDRIVE_MOUNT_SOURCE[$i]} | No filesystem / format required")
-
-					#Drive is not mounted:
-					else
-
-						G_WHIP_MENU_ARRAY+=("${aDRIVE_MOUNT_TARGET[$i]}" ": ${aDRIVE_MOUNT_SOURCE[$i]} | ${aDRIVE_FSTYPE[$i]} | Not mounted")
-
-					fi
+					new_cat=0
+					break
 
 				fi
+
+			done
+
+			# - add
+			if (( $new_cat )); then
+
+				acategory_list+=( ${aDRIVE_SOURCE_DEVICE[$i]} )
 
 			fi
 
 		done
 
-		G_WHIP_MENU_ARRAY+=("" "───────────────────────────────────────────────────────")
+		#List all available drives, if no drive found, list info for user.
+		local drive_available=0
+		for ((i=0; i<${#acategory_list[@]}; i++))
+		do
+
+			drive_available=1
+			G_WHIP_MENU_ARRAY+=('' "●─ ${acategory_list[$i]} ")
+
+			for ((j=0; j<${#aDRIVE_MOUNT_SOURCE[@]}; j++))
+			do
+
+				if [[ ${aDRIVE_SOURCE_DEVICE[$j]} == ${acategory_list[$i]} ]]; then
+
+					local string_fstype=${aDRIVE_FSTYPE[$j]}
+					if (( ${aDRIVE_ISNETWORKED[$j]} )); then
+
+						string_fstype='Net'
+
+					fi
+
+					#Drive is fully mounted:
+					if (( ${aDRIVE_ISMOUNTED[$j]} )); then
+
+						G_WHIP_MENU_ARRAY+=("${aDRIVE_MOUNT_TARGET[$j]}" ": ${aDRIVE_MOUNT_SOURCE[$j]} | $string_fstype | Capacity: ${aDRIVE_SIZE_TOTAL[$j]} | Used: ${aDRIVE_SIZE_USED[$j]} (${aDRIVE_SIZE_PERCENTUSED[$j]})")
+
+					#Not mounted, why?
+					else
+
+						# - Drive has no FS:
+						if (( ! ${aDRIVE_ISFILESYSTEM[$j]} )); then
+
+							# - ROM device with no ROM attached
+							if (( ${aDRIVE_ISROM[$j]} )); then
+
+								G_WHIP_MENU_ARRAY+=("${aDRIVE_MOUNT_TARGET[$j]}" ": ${aDRIVE_MOUNT_SOURCE[$j]} | Please insert media into the ROM device")
+
+							else
+
+								G_WHIP_MENU_ARRAY+=("${aDRIVE_MOUNT_TARGET[$j]}" ": ${aDRIVE_MOUNT_SOURCE[$j]} | No filesystem / format required")
+
+							fi
+
+						# - Drive is not mounted:
+						else
+
+							G_WHIP_MENU_ARRAY+=("${aDRIVE_MOUNT_TARGET[$j]}" ": ${aDRIVE_MOUNT_SOURCE[$j]} | $string_fstype | Not mounted")
+
+						fi
+
+					fi
+
+				fi
+
+			done
+
+		done
+
+		unset acategory_list
+
+		G_WHIP_MENU_ARRAY+=('' '●─')
 
 		if (( ! $drive_available )); then
 
@@ -759,12 +903,13 @@
 
 		fi
 
+		G_WHIP_MENU_ARRAY+=('Add network drive' ': Select to mount networked drives')
+
 		# - User data
 		local userdata_location_text="RootFS ($FP_USERDATA_CURRENT)"
-
 		if [[ $FP_USERDATA_CURRENT != $G_FP_DIETPI_USERDATA ]]; then
 
-			userdata_location_text="USB ($FP_USERDATA_CURRENT)"
+			userdata_location_text="$FP_USERDATA_CURRENT"
 
 		fi
 
@@ -775,39 +920,22 @@
 
 			MENU_LASTITEM="$G_WHIP_RETURNED_VALUE"
 
-			#Refresh
+			# - Refresh
 			if [[ $G_WHIP_RETURNED_VALUE == 'Refresh' ]]; then
 
 				Init_Drives_and_Refresh
 
-			#Edit drive
-			else
 
+			elif [[ $G_WHIP_RETURNED_VALUE == 'Add network drive' ]]; then
+
+				TARGETMENUID=3
+
+			# - Edit drive
+			elif [[ -n $G_WHIP_RETURNED_VALUE ]]; then
+
+				TARGETMENUID=1
+				DRIVE_TARGET_BEING_EDITED="$G_WHIP_RETURNED_VALUE"
 				Init_Drives_and_Refresh
-
-				#Match selected mount target against index
-				for ((i=0; i<$MAX_DRIVES; i++))
-				do
-
-					if [[ $G_WHIP_RETURNED_VALUE == ${aDRIVE_MOUNT_TARGET[$i]} ]]; then
-
-						# - Check if drive is still attached and available
-						if (( ${aDRIVE_ISAVAILABLE[$i]} )); then
-
-							INDEX_DRIVE_BEING_EDITED=$i
-							TARGETMENUID=1
-							break
-
-						elif [[ $G_WHIP_RETURNED_VALUE ]]; then
-
-							G_WHIP_MSG 'Info:\n\nThis drive is no longer available'
-							break
-
-						fi
-
-					fi
-
-				done
 
 			fi
 
@@ -854,126 +982,180 @@
 		#No filesystem
 		if (( ! ${aDRIVE_ISFILESYSTEM[$INDEX_DRIVE_BEING_EDITED]} )); then
 
-			whiptail_desc+='\nStatus:       Drive has no filesystem and must be formatted'
+			if (( ${aDRIVE_ISROM[$INDEX_DRIVE_BEING_EDITED]} )); then
 
-		else
-
-			if (( ${aDRIVE_ISUUIDMOUNT[$INDEX_DRIVE_BEING_EDITED]} )); then
-
-				whiptail_desc+='\nMount method: UUID (Permanent: always mount to "Mount Target")'
+				whiptail_desc+='\nStatus:       No media found, please insert media into the ROM device'
+				G_WHIP_MENU_ARRAY+=('Refresh' ': No media found, please insert media into the ROM device')
 
 			else
 
-				whiptail_desc+='\nMount method: /dev/sd (Warning: mount location not permanent, use UUID)'
+				whiptail_desc+='\nStatus:       Drive has no known filesystem and must be formatted'
+				G_WHIP_MENU_ARRAY+=('Format' ': Wipe all data and format drive with ext4')
 
 			fi
 
-			whiptail_desc+="\nFilesystem:   ${aDRIVE_FSTYPE[$INDEX_DRIVE_BEING_EDITED]}"
-			whiptail_desc+="\nUUID:         ${aDRIVE_UUID[$INDEX_DRIVE_BEING_EDITED]}"
+		#Filesystem
+		else
+
+			if [[ -n ${aDRIVE_FSTYPE[$INDEX_DRIVE_BEING_EDITED]} ]]; then
+
+				whiptail_desc+="\nFilesystem:   ${aDRIVE_FSTYPE[$INDEX_DRIVE_BEING_EDITED]}"
+
+			fi
+
+			if [[ -n ${aDRIVE_UUID[$INDEX_DRIVE_BEING_EDITED]} ]]; then
+
+				whiptail_desc+="\nUUID:         ${aDRIVE_UUID[$INDEX_DRIVE_BEING_EDITED]}"
+
+			fi
 
 			if (( ${aDRIVE_ISMOUNTED[$INDEX_DRIVE_BEING_EDITED]} )); then
 
-				local reserved_blocks_percent_info=''
-				local reserved_blocks_percent_current=0
-				# Show reserved blocks percentage for ext4 drives behind capacity:
-				if [[ ${aDRIVE_FSTYPE[$INDEX_DRIVE_BEING_EDITED]} == 'ext4' ]]; then
-
-					local fp_temp='/tmp/.dietpi-drive_manager_dumpe2fs'
-					dumpe2fs -h "${aDRIVE_MOUNT_SOURCE[$INDEX_DRIVE_BEING_EDITED]}" > "$fp_temp"
-					local block_count="$(grep -m1 '^Block count:' $fp_temp | awk '{print $3}')"
-					local reserved_block_count="$(grep -m1 '^Reserved block count:' $fp_temp | awk '{print $4}')"
-					rm "$fp_temp"
-					reserved_blocks_percent_current="$(bc -l <<< "scale=3;(100*$reserved_block_count)/$block_count")"
-					# Correct rounding to final scale:
-					reserved_blocks_percent_current="$(bc -l <<< "scale=2;(($reserved_blocks_percent_current*100)+0.5)/100" | sed 's/^\./0\./' | sed '/.0$/s/0$//' | sed 's/\.0$//')"
-					reserved_blocks_percent_info=" (Reserved blocks: $reserved_blocks_percent_current%)"
-					G_WHIP_MENU_ARRAY+=('Reserved blocks' ': Adjust percentage of reserved blocks on this drive')
-
-				fi
-
-				whiptail_desc+="\nCapacity:     ${aDRIVE_SIZE_TOTAL[$INDEX_DRIVE_BEING_EDITED]}b$reserved_blocks_percent_info"
-				whiptail_desc+="\nUsed:         ${aDRIVE_SIZE_USED[$INDEX_DRIVE_BEING_EDITED]}b (${aDRIVE_SIZE_PERCENTUSED[$INDEX_DRIVE_BEING_EDITED]})"
+				whiptail_desc+="\nAllocation:   Capacity: ${aDRIVE_SIZE_TOTAL[$INDEX_DRIVE_BEING_EDITED]}b | Used: ${aDRIVE_SIZE_USED[$INDEX_DRIVE_BEING_EDITED]}b (${aDRIVE_SIZE_PERCENTUSED[$INDEX_DRIVE_BEING_EDITED]})"
 				whiptail_desc+='\nStatus:       Drive is online and ready for use'
 
+				#Unmount
 				# - Disable mount control for /boot /rootfs
 				if [[ ${aDRIVE_MOUNT_TARGET[$INDEX_DRIVE_BEING_EDITED]} != '/' && ${aDRIVE_MOUNT_TARGET[$INDEX_DRIVE_BEING_EDITED]} != '/boot' ]]; then
 
-					G_WHIP_MENU_ARRAY+=('Unmount' ': Allows you to physically remove the drive')
+					G_WHIP_MENU_ARRAY+=('' '●─ Mount Control ')
+					if (( ${aDRIVE_ISNETWORKED[$INDEX_DRIVE_BEING_EDITED]} )); then
+
+						G_WHIP_MENU_ARRAY+=('Remove' ': Unmount networked drive and remove it from database')
+
+					else
+
+						G_WHIP_MENU_ARRAY+=('Unmount' ': Allows you to physically remove the drive')
+
+					fi
 
 				fi
 
-				if ( [[ ${aDRIVE_MOUNT_TARGET[$INDEX_DRIVE_BEING_EDITED]} != '/' && $FP_USERDATA_CURRENT == ${aDRIVE_MOUNT_TARGET[$INDEX_DRIVE_BEING_EDITED]}* ]] ) || #off rootfs
-					( [[ ${aDRIVE_MOUNT_TARGET[$INDEX_DRIVE_BEING_EDITED]} == '/' && $FP_USERDATA_CURRENT == $G_FP_DIETPI_USERDATA ]] ); then #on rootfs
+				if (( ! ${aDRIVE_ISROM[$INDEX_DRIVE_BEING_EDITED]} )); then
 
-					G_WHIP_MENU_ARRAY+=('User data' ": [X] | DietPi user data is currently located on this drive")
-					partition_contains_userdata=1
+					if (( ! ${aDRIVE_ISREADONLY_CURRENTLY[$INDEX_DRIVE_BEING_EDITED]} )); then
 
-				else
+						G_WHIP_MENU_ARRAY+=('' '●─ Benchmark Options ')
+						G_WHIP_MENU_ARRAY+=('Benchmark' ': Test read and write speeds')
 
-					G_WHIP_MENU_ARRAY+=('User data' ': [ ] | Select to transfer DietPi user data to this drive')
+						#Userdata location/swapfile
+						if (( ! ${aDRIVE_ISNETWORKED[$INDEX_DRIVE_BEING_EDITED]} )); then
 
-				fi
+							G_WHIP_MENU_ARRAY+=('' '●─ Userdata & Swap options ')
 
-				#	NB: / rootfs will always be detected in this check, however, no rootFS options for umount and format...
-				local swapfile_location="$(grep -m1 '^[[:blank:]]*AUTO_SETUP_SWAPFILE_LOCATION=' /DietPi/dietpi.txt | sed 's/.*=//')"
-				local swapfile_size=$(grep -m1 '^[[:blank:]]*AUTO_SETUP_SWAPFILE_SIZE=' /DietPi/dietpi.txt | sed 's/.*=//')
-				if [[ $swapfile_location == ${aDRIVE_MOUNT_TARGET[$INDEX_DRIVE_BEING_EDITED]}* && ${aDRIVE_MOUNT_TARGET[$INDEX_DRIVE_BEING_EDITED]} != '/' ]] ||
-					[[ $swapfile_location == '/var/swap' && ${aDRIVE_MOUNT_TARGET[$INDEX_DRIVE_BEING_EDITED]} == '/' ]]; then
+							if ( [[ ${aDRIVE_MOUNT_TARGET[$INDEX_DRIVE_BEING_EDITED]} != '/' && $FP_USERDATA_CURRENT == ${aDRIVE_MOUNT_TARGET[$INDEX_DRIVE_BEING_EDITED]}* ]] ) || #off rootfs
+								( [[ ${aDRIVE_MOUNT_TARGET[$INDEX_DRIVE_BEING_EDITED]} == '/' && $FP_USERDATA_CURRENT == $G_FP_DIETPI_USERDATA ]] ); then #on rootfs
 
-					partition_contains_swapfile=1
-					G_WHIP_MENU_ARRAY+=('Swapfile' ": [X] | ${swapfile_size}MB used on this drive, select to change size")
+								G_WHIP_MENU_ARRAY+=('User data' ": [X] | DietPi user data is currently located on this drive")
+								partition_contains_userdata=1
 
-				else
+							else
 
-					G_WHIP_MENU_ARRAY+=('Swapfile' ': [ ] | Select to transfer swapfile to this drive')
+								G_WHIP_MENU_ARRAY+=('User data' ': [ ] | Select to transfer DietPi user data to this drive')
 
-				fi
+							fi
 
-				#Read only?
-				local read_only_state='[ ]'
-				local read_only_state_text='Disabled'
-				if (( ${aDRIVE_ISREADONLY_FSTAB[$INDEX_DRIVE_BEING_EDITED]} || ${aDRIVE_ISREADONLY_CURRENTLY[$INDEX_DRIVE_BEING_EDITED]} )); then
+							# - Swapfile
+							#	NB: / rootfs will always be detected in this check, however, no rootFS options for umount and format...
+							local swapfile_location="$(grep -m1 '^[[:blank:]]*AUTO_SETUP_SWAPFILE_LOCATION=' /DietPi/dietpi.txt | sed 's/.*=//')"
+							local swapfile_size=$(grep -m1 '^[[:blank:]]*AUTO_SETUP_SWAPFILE_SIZE=' /DietPi/dietpi.txt | sed 's/.*=//')
+							if [[ $swapfile_location == ${aDRIVE_MOUNT_TARGET[$INDEX_DRIVE_BEING_EDITED]}* && ${aDRIVE_MOUNT_TARGET[$INDEX_DRIVE_BEING_EDITED]} != '/' ]] ||
+								[[ $swapfile_location == '/var/swap' && ${aDRIVE_MOUNT_TARGET[$INDEX_DRIVE_BEING_EDITED]} == '/' ]]; then
 
-					read_only_state='[X]'
-					read_only_state_text='Enabled'
+								partition_contains_swapfile=1
+								G_WHIP_MENU_ARRAY+=('Swapfile' ": [X] | ${swapfile_size}MB used on this drive, select to change size")
 
-				fi
-				G_WHIP_MENU_ARRAY+=('Read Only' ": $read_only_state | Select to toggle RW/RO modes")
-				whiptail_desc+="\nRead only:    $read_only_state_text"
+							else
 
-				if (( ${aDRIVE_ISUUIDMOUNT[$INDEX_DRIVE_BEING_EDITED]} )); then
+								G_WHIP_MENU_ARRAY+=('Swapfile' ': [ ] | Select to transfer swapfile to this drive')
 
-					G_WHIP_MENU_ARRAY+=('Mount Method' ': Change from UUID to /dev/sd')
+							fi
 
-				else
+						fi
 
-					G_WHIP_MENU_ARRAY+=('Mount Method' ': Change from /dev/sd to UUID')
+					fi
+
+					if (( ! ${aDRIVE_ISNETWORKED[$INDEX_DRIVE_BEING_EDITED]} )); then
+
+						G_WHIP_MENU_ARRAY+=('' '●─ Advanced options ')
+
+						# - Read only?
+						local read_only_state='[X]'
+						local read_only_state_text='Enabled'
+						if (( ! ${aDRIVE_ISREADONLY_CURRENTLY[$INDEX_DRIVE_BEING_EDITED]} )); then
+
+							read_only_state='[ ]'
+							read_only_state_text='Disabled'
+
+						fi
+						G_WHIP_MENU_ARRAY+=('Read Only' ": $read_only_state | Select to toggle RW/RO modes")
+						whiptail_desc+="\nRead only:    $read_only_state_text"
+
+						# Show reserved blocks percentage for ext4 drives behind capacity:
+						if [[ ${aDRIVE_FSTYPE[$INDEX_DRIVE_BEING_EDITED]} == 'ext4' ]]; then
+
+							local reserved_blocks_percent_current=0
+							local fp_temp='/tmp/.dietpi-drive_manager_dumpe2fs'
+							dumpe2fs -h "${aDRIVE_MOUNT_SOURCE[$INDEX_DRIVE_BEING_EDITED]}" > "$fp_temp"
+							local block_count="$(grep -m1 '^Block count:' $fp_temp | awk '{print $3}')"
+							local reserved_block_count="$(grep -m1 '^Reserved block count:' $fp_temp | awk '{print $4}')"
+							rm $fp_temp
+							reserved_blocks_percent_current="$(bc -l <<< "scale=3;(100*$reserved_block_count)/$block_count")"
+							# Correct rounding to final scale:
+							reserved_blocks_percent_current="$(bc -l <<< "scale=2;(($reserved_blocks_percent_current*100)+0.5)/100" | sed 's/^\./0\./' | sed '/.0$/s/0$//' | sed 's/\.0$//')"
+							G_WHIP_MENU_ARRAY+=('Reserved blocks' ": [$reserved_blocks_percent_current%] | Adjust percentage of reserved blocks on this drive")
+
+						fi
+
+					fi
 
 				fi
 
 			else
 
 				whiptail_desc+='\nStatus:       Drive is not mounted and can be unplugged'
-
+				G_WHIP_MENU_ARRAY+=('' '●─ Mount Control ')
 				G_WHIP_MENU_ARRAY+=('Mount' ": Mount the drive to ${aDRIVE_MOUNT_TARGET[$INDEX_DRIVE_BEING_EDITED]}")
+				G_WHIP_MENU_ARRAY+=('' '●─ Advanced Options ')
 
 			fi
 
-		fi
+			if (( ! ${aDRIVE_ISROM[$INDEX_DRIVE_BEING_EDITED]} && ! ${aDRIVE_ISNETWORKED[$INDEX_DRIVE_BEING_EDITED]} )); then
 
-		# - Disable format/check&repair for /boot /rootfs
-		if [[ ${aDRIVE_MOUNT_TARGET[$INDEX_DRIVE_BEING_EDITED]} != '/' && ${aDRIVE_MOUNT_TARGET[$INDEX_DRIVE_BEING_EDITED]} != '/boot' ]]; then
+				if (( ! ${aDRIVE_ISREADONLY_CURRENTLY[$INDEX_DRIVE_BEING_EDITED]} )); then
 
-			G_WHIP_MENU_ARRAY+=('Check & Repair' ': Check and optionally repair filesystem')
-			G_WHIP_MENU_ARRAY+=('Format' ': Wipe all data and format drive with ext4')
+					# - Disable check&repair for /boot /rootfs
+					if [[ ${aDRIVE_MOUNT_TARGET[$INDEX_DRIVE_BEING_EDITED]} != '/' && ${aDRIVE_MOUNT_TARGET[$INDEX_DRIVE_BEING_EDITED]} != '/boot' ]]; then
 
-		fi
+						G_WHIP_MENU_ARRAY+=('Check & Repair' ': Check and optionally repair filesystem')
 
-		#Transfer RootFS
-		if [[ ${aDRIVE_MOUNT_SOURCE[$INDEX_DRIVE_BEING_EDITED]} != $FP_ROOTFS_SOURCE ]] &&
-			(( $G_HW_MODEL < 10 || $G_HW_MODEL == 10 || $G_HW_MODEL == 11 || $G_HW_MODEL == 12 )); then
+					fi
 
-			G_WHIP_MENU_ARRAY+=('Transfer RootFS' ': Transfer RootFS to this drive')
+					# - Resize
+					if [[ ${aDRIVE_FSTYPE[$INDEX_DRIVE_BEING_EDITED]} == 'ext4' ]]; then
+
+						G_WHIP_MENU_ARRAY+=('Resize' ': Maximize the available filesystem size')
+
+					fi
+
+				fi
+
+				#- Transfer RootFS
+				if [[ ${aDRIVE_MOUNT_SOURCE[$INDEX_DRIVE_BEING_EDITED]} != $FP_ROOTFS_SOURCE ]] &&
+					(( $G_HW_MODEL < 10 || $G_HW_MODEL == 10 || $G_HW_MODEL == 11 || $G_HW_MODEL == 12 )); then
+
+					G_WHIP_MENU_ARRAY+=('Transfer RootFS' ': Transfer RootFS to this drive')
+
+				fi
+
+				# - Disable format for /boot /rootfs
+				if [[ ${aDRIVE_MOUNT_TARGET[$INDEX_DRIVE_BEING_EDITED]} != '/' && ${aDRIVE_MOUNT_TARGET[$INDEX_DRIVE_BEING_EDITED]} != '/boot' ]]; then
+
+					G_WHIP_MENU_ARRAY+=('Format' ': Wipe all data and format drive with ext4')
+
+				fi
+
+			fi
 
 		fi
 
@@ -985,13 +1167,9 @@
 
 			if [[ $G_WHIP_RETURNED_VALUE == 'Mount' ]]; then
 
-					# - update fstab
-					sed -i -e "\@${aDRIVE_MOUNT_TARGET[$INDEX_DRIVE_BEING_EDITED]}[[:space:]]@s@^#@@" /etc/fstab
-					systemctl daemon-reload
+				Mount_Drive ${aDRIVE_MOUNT_SOURCE[$INDEX_DRIVE_BEING_EDITED]} ${aDRIVE_MOUNT_TARGET[$INDEX_DRIVE_BEING_EDITED]}
 
-					mount "${aDRIVE_MOUNT_TARGET[$INDEX_DRIVE_BEING_EDITED]}"
-
-			elif [[ $G_WHIP_RETURNED_VALUE == 'Unmount' ]]; then
+			elif [[ $G_WHIP_RETURNED_VALUE == 'Unmount' || $G_WHIP_RETURNED_VALUE == 'Remove' ]]; then
 
 				# - Disallow if userdata is located on this drive!
 				if (( $partition_contains_userdata )); then
@@ -1004,11 +1182,21 @@
 
 				else
 
-					umount "${aDRIVE_MOUNT_TARGET[$INDEX_DRIVE_BEING_EDITED]}"
+					if [[ $G_WHIP_RETURNED_VALUE == 'Remove' ]]; then
 
-					# - update fstab
-					sed -i -e "\@${aDRIVE_MOUNT_TARGET[$INDEX_DRIVE_BEING_EDITED]}[[:space:]]@s@^#*@#@" /etc/fstab
-					systemctl daemon-reload
+						G_WHIP_YESNO "Do you wish to unmount and remove the following networked drive from this system?\n - ${aDRIVE_MOUNT_SOURCE[$INDEX_DRIVE_BEING_EDITED]} > ${aDRIVE_MOUNT_TARGET[$INDEX_DRIVE_BEING_EDITED]}\n\nNB: You can add additional network shares at a later date through the 'dietpi-drive_manager' main menu."
+						if (( $? == 0 )); then
+
+							Unmount_Drive ${aDRIVE_MOUNT_TARGET[$INDEX_DRIVE_BEING_EDITED]}
+							TARGETMENUID=0
+
+						fi
+
+					else
+
+						Unmount_Drive ${aDRIVE_MOUNT_TARGET[$INDEX_DRIVE_BEING_EDITED]}
+
+					fi
 
 				fi
 
@@ -1046,30 +1234,6 @@
 						fi
 
 					fi
-
-				fi
-
-			elif [[ $G_WHIP_RETURNED_VALUE == 'Mount Method' ]]; then
-
-				#UUID exists?
-				if [[ ${aDRIVE_UUID[$INDEX_DRIVE_BEING_EDITED]} == 'NULL' ]]; then
-
-					G_WHIP_MSG 'Error:\n\nThis drive does not have a UUID assigned. Unable to proceed.'
-
-				else
-
-					if (( ${aDRIVE_ISUUIDMOUNT[$INDEX_DRIVE_BEING_EDITED]} )); then
-
-						sed -i "s@^UUID=${aDRIVE_UUID[$INDEX_DRIVE_BEING_EDITED]}@${aDRIVE_MOUNT_SOURCE[$INDEX_DRIVE_BEING_EDITED]}@g" /etc/fstab
-
-					else
-
-						sed -i "s@^${aDRIVE_MOUNT_SOURCE[$INDEX_DRIVE_BEING_EDITED]}@UUID=${aDRIVE_UUID[$INDEX_DRIVE_BEING_EDITED]}@g" /etc/fstab
-
-					fi
-
-					# - update systemd to use fstab UUID changes
-					systemctl daemon-reload
 
 				fi
 
@@ -1117,12 +1281,6 @@
 
 				if [[ $fp_target_userdata_dir != $FP_USERDATA_CURRENT ]]; then
 
-					if [[ ${aDRIVE_FSTYPE[$INDEX_DRIVE_BEING_EDITED]} == 'vfat' ]]; then
-
-						G_WHIP_MSG 'Warning:\n\nFAT32 does not support file and folder permissions. Some of the programs which use the DietPi user directory (eg: Owncloud data storage), rely on permissions to function correctly.\n\nIf you continue with the DietPi user data move to this FAT32 drive, programs may have issues reading and writing data.'
-
-					fi
-
 					G_WHIP_YESNO "Your user data will be moved:\n - From: $FP_USERDATA_CURRENT\n - To: $fp_target_userdata_dir\n\nDo you wish to continue?"
 					if (( ! $? )); then
 
@@ -1135,10 +1293,6 @@
 
 			elif [[ $G_WHIP_RETURNED_VALUE == 'Format' ]]; then
 
-				FORMAT_RECREATE_PARTITION_TABLE=1
-
-				local drivepath_no_partitions=$(Return_Drive_Without_Partitions ${aDRIVE_MOUNT_SOURCE[$INDEX_DRIVE_BEING_EDITED]})
-
 				# - Disallow if userdata is located on this drive!
 				if (( $partition_contains_userdata )); then
 
@@ -1148,10 +1302,10 @@
 
 					Notification 1
 
-				#	user must unmount all partitions on this drive, before we can format
-				elif (( $(df -Ph | grep -ci -m1 "^$drivepath_no_partitions" ) )); then
+				#	user must unmount partition on this drive, before we can format, this ensures a valid unmount check
+				elif (( ${aDRIVE_ISMOUNTED[$INDEX_DRIVE_BEING_EDITED]} )); then
 
-					G_WHIP_MSG 'As DietPi will format the entire drive with 1 partition, you must unmount ALL partitions on this disk, before formatting is available.'
+					G_WHIP_MSG "The partition (${aDRIVE_MOUNT_SOURCE[$INDEX_DRIVE_BEING_EDITED]}) must be unmounted, before formatting is allowed.\n\nPlease use the option 'Unmount' on the next screen, then retry the 'Format' option."
 
 				else
 
@@ -1159,10 +1313,13 @@
 
 				fi
 
+			#Resize
+			elif [[ $G_WHIP_RETURNED_VALUE == 'Resize' ]]; then
+
+				Resize_FS
+
 			#Transfer RootFS
 			elif [[ $G_WHIP_RETURNED_VALUE == 'Transfer RootFS' ]]; then
-
-				FORMAT_RECREATE_PARTITION_TABLE=0
 
 				#	user must unmount partition before format
 				if (( ${aDRIVE_ISMOUNTED[$INDEX_DRIVE_BEING_EDITED]} )); then
@@ -1171,7 +1328,7 @@
 
 				else
 
-					G_WHIP_YESNO "This process will move RootFS data to another location. This may increase filesystem performance when using a USB drive over SD card, however, there are some limitations:\n\n - The SD/EMMC card is still required for the boot process\n - ALL data on the target PARTITION will be deleted\n\nNB: As this feature is still in testing, we recommend you use this feature on a fresh installation only.\n\nDo you wish to continue?"
+					G_WHIP_YESNO "This process will move RootFS data to another location. This may increase filesystem performance when using a USB drive over SD card, however, there are some limitations:\n\n - The SD/EMMC card is still required for the boot process\n\nNB: As this feature is still in testing, we recommend you use this feature on a fresh installation only.\n\nDo you wish to continue?"
 					if (( ! $? )); then
 
 						G_WHIP_MSG 'On the next screen, you will be asked to format the target partition.\n\nPlease see the following recommendations for RootFS target filesystem type:\n\n - Odroid\nRootFS transfer supports ONLY EXT4 format\n\n - RPi\nRootFS transfer supports EXT4, BTRFS and F2FS'
@@ -1197,8 +1354,20 @@
 
 			elif [[ $G_WHIP_RETURNED_VALUE == 'Read Only' ]]; then
 
-				Toggle_WriteMode
-				ROOTFS_RW_CHECKED=0
+				# - Disallow if userdata is located on this drive!
+				if (( $partition_contains_swapfile )); then
+
+					Notification 1
+
+				else
+
+					Toggle_WriteMode
+
+				fi
+
+			elif [[ $G_WHIP_RETURNED_VALUE == 'Benchmark' ]]; then
+
+				/DietPi/dietpi/func/dietpi-benchmark 0 "${aDRIVE_MOUNT_TARGET[$INDEX_DRIVE_BEING_EDITED]}"
 
 			elif [[ $G_WHIP_RETURNED_VALUE == 'Check & Repair' ]]; then
 
@@ -1219,41 +1388,41 @@
 
 				fi
 
-				if [[ ${aDRIVE_FSTYPE[$INDEX_DRIVE_BEING_EDITED]} =~ ext ]]; then
+				if [[ ${aDRIVE_FSTYPE[$INDEX_DRIVE_BEING_EDITED]} =~ 'ext' ]]; then
 
 					local fsck_dry='e2fsck -n -f'
 					local fsck_fix='e2fsck -y -f'
 
-				elif [[ ${aDRIVE_FSTYPE[$INDEX_DRIVE_BEING_EDITED]} == exfat ]]; then
+				elif [[ ${aDRIVE_FSTYPE[$INDEX_DRIVE_BEING_EDITED]} == 'exfat' ]]; then
 
 					G_AG_CHECK_INSTALL_PREREQ exfat-utils exfat-fuse
 					local fsck_fix='exfatfsck'
 
-				elif [[ ${aDRIVE_FSTYPE[$INDEX_DRIVE_BEING_EDITED]} =~ fat ]]; then
+				elif [[ ${aDRIVE_FSTYPE[$INDEX_DRIVE_BEING_EDITED]} =~ 'fat' ]]; then
 
 					G_AG_CHECK_INSTALL_PREREQ dosfstools
 					local fsck_dry='fsck.fat -n'
 					local fsck_fix='fsck.fat -y'
 
-				elif [[ ${aDRIVE_FSTYPE[$INDEX_DRIVE_BEING_EDITED]} == ntfs ]]; then
+				elif [[ ${aDRIVE_FSTYPE[$INDEX_DRIVE_BEING_EDITED]} == 'ntfs' ]]; then
 
 					G_AG_CHECK_INSTALL_PREREQ ntfs-3g
 					local fsck_dry='ntfsfix -n'
 					local fsck_fix='ntfsfix'
 
-				elif [[ ${aDRIVE_FSTYPE[$INDEX_DRIVE_BEING_EDITED]} =~ hfs ]]; then
+				elif [[ ${aDRIVE_FSTYPE[$INDEX_DRIVE_BEING_EDITED]} =~ 'hfs' ]]; then
 
 					G_AG_CHECK_INSTALL_PREREQ hfsplus hfsprogs hfsutils
 					local fsck_dry='fsck.hfsplus -n -f'
 					local fsck_fix='fsck.hfsplus -y -f'
 
-				elif [[ ${aDRIVE_FSTYPE[$INDEX_DRIVE_BEING_EDITED]} == f2fs ]]; then
+				elif [[ ${aDRIVE_FSTYPE[$INDEX_DRIVE_BEING_EDITED]} == 'f2fs' ]]; then
 
 					G_AG_CHECK_INSTALL_PREREQ f2fs-tools
 					local fsck_dry='fsck.f2fs'
 					local fsck_fix='fsck.f2fs -f'
 
-				elif [[ ${aDRIVE_FSTYPE[$INDEX_DRIVE_BEING_EDITED]} == btrfs ]]; then
+				elif [[ ${aDRIVE_FSTYPE[$INDEX_DRIVE_BEING_EDITED]} == 'btrfs' ]]; then
 
 					G_AG_CHECK_INSTALL_PREREQ btrfs-tools
 					local fsck_dry='btrfs check --readonly'
@@ -1358,7 +1527,12 @@ NB:
 
 		G_WHIP_MENU_ARRAY=()
 
-		G_WHIP_MENU_ARRAY+=('Partition Type' ": $partition_table_text")
+		if (( ! ${aDRIVE_ISPARTITIONTABLE[$INDEX_DRIVE_BEING_EDITED]} )); then
+
+			G_WHIP_MENU_ARRAY+=('Partition Type' ": $partition_table_text")
+
+		fi
+
 		G_WHIP_MENU_ARRAY+=('Filesystem Type' ": $format_type_text")
 		G_WHIP_MENU_ARRAY+=('Format' ': Wipe all data and format drive with current options')
 
@@ -1372,7 +1546,9 @@ NB:
 
 				FORMAT_GPT=1
 
-				G_WHIP_YESNO "Would you like to use GPT or MBR parition table?\n - GPT is required for 2TB+ drives\n - MBR does NOT support 2TB+ drives\n\nIf unsure, select GPT (default)"
+				G_WHIP_BUTTON_OK_TEXT='MBR'
+				G_WHIP_BUTTON_CANCEL_TEXT='GPT'
+				G_WHIP_YESNO 'Would you like to use GPT or MBR parition table?\n - GPT is required for 2TB+ drives\n - MBR does NOT support 2TB+ drives\n\nIf unsure, select GPT (default)'
 				if (( ! $? )); then
 
 					FORMAT_GPT=0
@@ -1395,7 +1571,7 @@ NB:
 				)
 
 				G_WHIP_DEFAULT_ITEM="$FORMAT_FILESYSTEM_TYPE"
-				G_WHIP_MENU "Please select a filesystem type for this format:\n\nEXT4:\nHighly recommended if you plan to use this drive solely on this system (dedicated drive).\n\nNTFS:\nRecommended if you plan to use this drive on a Windows system. High CPU usage during transfers.\n\nFull list of different filesystem types:\nhttp://dietpi.com/phpbb/viewtopic.php?f=8&t=673&p=2898#p2898"
+				G_WHIP_MENU 'Please select a filesystem type for this format:\n\nEXT4:\nHighly recommended if you plan to use this drive solely on this system (dedicated drive).\n\nNTFS:\nRecommended if you plan to use this drive on a Windows system. High CPU usage during transfers.\n\nFull list of different filesystem types:\nhttp://dietpi.com/phpbb/viewtopic.php?f=8&t=673&p=2898#p2898'
 				if (( ! $? )); then
 
 					# Install FS pre-reqs
@@ -1437,23 +1613,9 @@ NB:
 
 			elif [[ $G_WHIP_RETURNED_VALUE == 'Format' ]]; then
 
-				local drivepath_no_partitions=$(Return_Drive_Without_Partitions ${aDRIVE_MOUNT_SOURCE[$INDEX_DRIVE_BEING_EDITED]})
-				local text_desc="Format Drive:\n - $drivepath_no_partitions\n - UUID=${aDRIVE_UUID[$INDEX_DRIVE_BEING_EDITED]}\n - Partition table: $partition_table_text\n - Filesystem type: $format_type_text\n\nALL DATA and PARTITIONS on this drive will be DELETED.\nDo you wish to continue?"
+				Run_Format
 
-				if (( ! $FORMAT_RECREATE_PARTITION_TABLE )); then
-
-					text_desc="Format partition:\n - ${aDRIVE_MOUNT_SOURCE[$INDEX_DRIVE_BEING_EDITED]}\n - UUID=${aDRIVE_UUID[$INDEX_DRIVE_BEING_EDITED]}\n - Partition table: $partition_table_text\n - Filesystem type: $format_type_text\n\nALL DATA on this partition will be DELETED.\nDo you wish to continue?"
-
-				fi
-
-				G_WHIP_YESNO "Start format?\n\n$text_desc"
-				if (( ! $? )); then
-
-					Run_Format
-
-					TARGETMENUID=0
-
-				fi
+				TARGETMENUID=1
 
 			fi
 
@@ -1465,12 +1627,193 @@ NB:
 
 	}
 
+	Mount_Samba(){
+
+		rm /mnt/samba/readme.txt &> /dev/null
+
+		local samba_clientname=''
+		local samba_clientshare=''
+		local samba_clientuser=''
+		local samba_clientpassword=''
+		local samba_fp_mount_target='samba'
+
+		while true
+		do
+
+			G_WHIP_DEFAULT_ITEM="$samba_clientname"
+			G_WHIP_INPUTBOX 'Please enter the fileservers IP address\n - eg: 192.168.0.2'
+			if (( $? )); then
+
+				break
+
+			fi
+			samba_clientname=$G_WHIP_RETURNED_VALUE
+
+			G_WHIP_DEFAULT_ITEM="$samba_clientshare"
+			G_WHIP_INPUTBOX 'Please enter the fileservers shared folder name\n - eg: MySharedFolder'
+			if (( $? )); then
+
+				break
+
+			fi
+			samba_clientshare=$G_WHIP_RETURNED_VALUE
+
+			G_WHIP_DEFAULT_ITEM="$samba_clientuser"
+			G_WHIP_INPUTBOX 'Please enter the fileservers username\n - eg: JoeBloggs'
+			if (( $? )); then
+
+				break
+
+			fi
+			samba_clientuser=$G_WHIP_RETURNED_VALUE
+
+			G_WHIP_DEFAULT_ITEM="$samba_clientpassword"
+			G_WHIP_PASSWORD 'Please enter the fileservers password\n - eg: LetMeIn'
+			samba_clientpassword=$result
+			unset result
+
+			G_WHIP_DEFAULT_ITEM="$samba_fp_mount_target"
+			G_WHIP_INPUTBOX 'Please enter a unique folder name for the mount location (eg: samba). This will be placed in /mnt/'
+			if (( $? )); then
+
+				break
+
+			fi
+			samba_fp_mount_target="/mnt/$(echo -e $G_WHIP_RETURNED_VALUE | sed 's/\///g' | sed 's/[[:space:]]/_/g')"
+
+			# - Unmount if connected
+			umount /mnt/$samba_fp_mount_target &> /dev/null
+
+			G_AG_CHECK_INSTALL_PREREQ smbclient cifs-utils
+
+			#NB: Convert spaces into '\040': https://github.com/Fourdee/DietPi/issues/1201#issuecomment-339720271
+			local space_to_040=$(echo -e "$samba_clientshare" | sed 's/ /\\\\040/g')
+
+			#Mount now
+			mkdir -p $samba_fp_mount_target
+
+			G_RUN_CMD_INFO_ONLY=1 G_RUN_CMD mount -t cifs -o username=$samba_clientuser,password=$samba_clientpassword //$samba_clientname/$space_to_040 $samba_fp_mount_target
+			if (( ! $G_ERROR_HANDLER_EXITCODE_RETURN )); then
+
+				#Apply to fstab
+				sed -i "\#[[:space:]]$samba_fp_mount_target[[:space:]]#d" /etc/fstab
+				cat << _EOF_ >> /etc/fstab
+//$samba_clientname/$space_to_040 $samba_fp_mount_target cifs username=$samba_clientuser,password=$samba_clientpassword,iocharset=utf8,vers=1.0,nofail 0 0
+_EOF_
+
+				G_WHIP_MSG "Mount completed. The new mount can be accessed via:\n - $samba_fp_mount_target"
+
+			else
+
+				rm -R $samba_fp_mount_target
+
+			fi
+
+			break
+
+		done
+
+	}
+
+	Mount_NFS(){
+
+		rm /mnt/nfs_client/readme.txt &> /dev/null
+
+		local nfs_clientname=''
+		local nfs_fp_mount_target='nfs'
+
+		while true
+		do
+
+			G_WHIP_DEFAULT_ITEM="$nfs_clientname"
+			G_WHIP_INPUTBOX 'Please enter the fileservers IP address\n - eg: 192.168.0.2'
+			if (( $? )); then
+
+				break
+
+			fi
+			nfs_clientname=$G_WHIP_RETURNED_VALUE
+
+			G_WHIP_DEFAULT_ITEM="$nfs_fp_mount_target"
+			G_WHIP_INPUTBOX 'Please enter a unique folder name for the mount location (eg: samba). This will be placed in /mnt/'
+			if (( $? )); then
+
+				break
+
+			fi
+			nfs_fp_mount_target="/mnt/$(echo -e $G_WHIP_RETURNED_VALUE | sed 's/\///g' | sed 's/[[:space:]]/_/g')"
+
+			# - Unmount if connected
+			umount /mnt/$nfs_fp_mount_target &> /dev/null
+
+			G_AG_CHECK_INSTALL_PREREQ nfs-common
+
+			#Mount now
+			mkdir -p $nfs_fp_mount_target
+
+			G_RUN_CMD_INFO_ONLY=1 G_RUN_CMD mount -t nfs4 -o port=2049 $nfs_clientname:/ $nfs_fp_mount_target
+			if (( ! $G_ERROR_HANDLER_EXITCODE_RETURN )); then
+
+				#Apply to fstab
+				sed -i "\#[[:space:]]$nfs_fp_mount_target[[:space:]]#d" /etc/fstab
+				cat << _EOF_ >> /etc/fstab
+$nfs_clientname:/ $nfs_fp_mount_target nfs4 auto,_netdev 0  0
+_EOF_
+
+				G_WHIP_MSG "Mount completed. The new mount can be accessed via:\n - $nfs_fp_mount_target"
+
+			else
+
+				rm -R $nfs_fp_mount_target
+
+			fi
+
+			break
+
+		done
+
+	}
+
+	Menu_Add_Network_Drive(){
+
+		TARGETMENUID=3
+
+		G_WHIP_MENU_ARRAY=(
+
+			'Samba' 'Setup a connection for a Samba/CIFS/Windows compatible file share'
+			'NFS' 'Setup a connection for a NFS compatible file share'
+
+		)
+
+		G_WHIP_MENU 'Please select a mount location to use:'
+		if (( $? == 0 )); then
+
+			if [[ $G_WHIP_RETURNED_VALUE == 'Samba' ]]; then
+
+				Mount_Samba
+
+			elif [[ $G_WHIP_RETURNED_VALUE == 'NFS' ]]; then
+
+				Mount_NFS
+
+			fi
+
+			Init_Drives_and_Refresh
+
+		else
+
+			TARGETMENUID=0
+
+		fi
+
+	}
+
 	Menu_Select_Mount_Location(){
 
 		#Generate menu
 		G_WHIP_MENU_ARRAY=()
 
-		df -Ph | tail -n +2 | grep -v 'tmpfs[[:space:]]' | grep -v '^udev' > /tmp/dietpi-drive_manager_selmnt
+		df -Ph | tail -n +2 | sed '/tmpfs/d' | sed '/^udev/d' > /tmp/dietpi-drive_manager_selmnt
 
 		while read line
 		do
@@ -1530,44 +1873,12 @@ NB:
 	#Generate /etc/fstab based on current drive mounts
 	if (( $INPUT == 4 )); then
 
-		VAR_LOG_SIZE=$(grep -m1 '^AUTO_SETUP_RAMLOG_MAXSIZE=' /DietPi/dietpi.txt | sed 's/^.*=//')
-		if [[ -z $VAR_LOG_SIZE ]]; then
-
-			VAR_LOG_SIZE=20
-
-		fi
-
-		cat << _EOF_ > /etc/fstab
-#Samba Client------------------------------------------------------
-#/mnt/samba . Please use dietpi-config and the Networking Options: NAS menu to setup this mount
-
-#FTP Client Mount--------------------------------------------------
-#/mnt/ftp_client . Please use dietpi-config and the Networking Options: NAS menu to setup this mount
-
-#NFS Client Mount--------------------------------------------------
-#/mnt/nfs_client . Please use dietpi-config and the Networking Options: NAS menu to setup this mount
-
-#TMPFS / MISC ------------------------------------------------------
-proc            /proc           proc    defaults											0 0
-tmpfs 			/tmp  			tmpfs 	defaults,noatime,nodev,nosuid,mode=1777				0 0
-tmpfs 			/var/log 		tmpfs 	defaults,size=${VAR_LOG_SIZE}m,noatime,nodev,nosuid,mode=1777	0 0
-tmpfs 			/DietPi 		tmpfs 	defaults,size=10m,noatime,nodev,nosuid,mode=1777	0 0
-
-#Internal Drives---------------------------------------------------
-_EOF_
-
 		Init_Drives_and_Refresh
 
 	#Return 1 if RootFS is RO
 	elif (( $INPUT == 3 )); then
 
 		RootFS_RW_Check
-
-	#Return for low free space check
-	elif (( $INPUT == 2 )); then
-
-		Init_Drives_and_Refresh
-		RootFS_Low_Free_Space_Check
 
 	#Menu system for user to select an active mount and return value
 	elif (( $INPUT == 1 )); then
@@ -1595,6 +1906,10 @@ _EOF_
 			elif (( $TARGETMENUID == 2 )); then
 
 				Menu_Format
+
+			elif (( $TARGETMENUID == 3 )); then
+
+				Menu_Add_Network_Drive
 
 			fi
 
