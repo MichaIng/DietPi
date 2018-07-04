@@ -8,21 +8,21 @@ TARGET_PARTITION=0
 TARGET_DEV=$(findmnt / -o source -n)
 
 # - MMCBLK[0-9]p[0-9] scrape
-if [[ "$TARGET_DEV" = *"mmcblk"* ]]; then
+if [[ $TARGET_DEV =~ mmcblk ]]; then
 
-	TARGET_DEV=$(findmnt / -o source -n | sed 's/p[0-9]$//')
-	TARGET_PARTITION=$(findmnt / -o source -n | sed 's/^.*p//')
+	TARGET_PARTITION=${TARGET_DEV##*p}
+	TARGET_DEV=${TARGET_DEV%p[0-9]}
 
 # - Everything else scrape (eg: /dev/sdX[0-9])
 else
 
-	TARGET_DEV=$(findmnt / -o source -n | sed 's/[0-9]$//')
-	TARGET_PARTITION=$(findmnt / -o source -n | sed 's|/dev/sd.||')
+	TARGET_PARTITION=${TARGET_DEV##*/sd}
+	TARGET_DEV=${TARGET_DEV%[0-9]}
 
 fi
 
 #Rock64 GPT resize | modified version of ayufan-rock64 resize script. I take no credit for this.
-if [[ -f /etc/.dietpi_hw_model_identifier ]] && (( $(cat /etc/.dietpi_hw_model_identifier) == 43 )); then
+if [[ -f /etc/.dietpi_hw_model_identifier ]] && (( $(</etc/.dietpi_hw_model_identifier) == 43 )); then
 
 	gdisk $TARGET_DEV << _EOF_
 x
