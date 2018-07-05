@@ -143,7 +143,7 @@
 
 		# - Grab current network mounts + creds
 		local net_mounts_samba=$(grep '[[:space:]]cifs[[:space:]]' $FP_TEMP_FSTAB)
-		local net_mounts_nfs4=$(grep '[[:space:]]nfs4[[:space:]]' $FP_TEMP_FSTAB)
+		local net_mounts_nfs=$(grep '[[:space:]]nfs.*[[:space:]]' $FP_TEMP_FSTAB)
 		local net_mounts_ftp=$(grep '^curlftpfs' $FP_TEMP_FSTAB)
 
 		cat << _EOF_ > $FP_TEMP_FSTAB
@@ -153,7 +153,7 @@
 #Please use DietPi-Drive_Manager to setup network mounts
 $net_mounts_samba
 $net_mounts_ftp
-$net_mounts_nfs4
+$net_mounts_nfs
 
 #-----------------------------------------------------------
 #TMPFS, MISC
@@ -279,15 +279,6 @@ _EOF_
 
 				fi
 
-				# fsck flag for root device, to allow check on reboot
-				local fsck_flag=1
-				if [[ ${aDRIVE_MOUNT_TARGET[$INDEX_INIT_CURRENT_DEVICE]} != '/' ]]; then
-
-					string_options+=',nofail'
-					fsck_flag=0
-
-				fi
-
 				# - UUID or PARTUUID entry?
 				local dev_entry="UUID=${aDRIVE_UUID[$INDEX_INIT_CURRENT_DEVICE]}"
 				if (( $G_HW_MODEL < 10 )) &&
@@ -297,8 +288,19 @@ _EOF_
 
 				fi
 
+				# - Non-RootFS flags
+				#	fsck flag for root device, to allow check on reboot
+				#	x-systemd.automount: [ 1166.110202] systemd-fstab-generator[3512]: Ignoring automount option for root device
+				local fsck_flag=1
+				if [[ ${aDRIVE_MOUNT_TARGET[$INDEX_INIT_CURRENT_DEVICE]} != '/' ]]; then
+
+					string_options+=',nofail,x-systemd.automount'
+					fsck_flag=0
+
+				fi
+
 				cat << _EOF_ >> $FP_TEMP_FSTAB
-$dev_entry ${aDRIVE_MOUNT_TARGET[$INDEX_INIT_CURRENT_DEVICE]} auto defaults,x-systemd.automount,noatime$string_options 0 $fsck_flag
+$dev_entry ${aDRIVE_MOUNT_TARGET[$INDEX_INIT_CURRENT_DEVICE]} auto defaults,noatime$string_options 0 $fsck_flag
 _EOF_
 
 			fi
@@ -469,14 +471,36 @@ _EOF_
 
 		local source=$1
 		local target=$2
-		if [[ ! -d $target ]]; then
 
-			G_DIETPI-NOTIFY 2 "Creating mount folder for $target"
-			mkdir -p $target
+		G_WHIP_DEFAULT_ITEM=$target
+		G_WHIP_INPUTBOX "Please enter the target path, this device will mount to.\n - Default and recommended = $target\n\nNB: The path must start with /mnt/ and be unique. Spaces will be converted automatically to underscores (_)."
+		if (( $? == 0 )); then
+
+			if [[ $G_WHIP_RETURNED_VALUE == '/mnt/'* ]]; then
+
+				# - replace spaces with underscores
+				target="$(echo -e $G_WHIP_RETURNED_VALUE | sed 's/[[:space:]]/_/g')"
+
+			else
+
+				G_WHIP_MSG "Invalid mount target location:\n - $G_WHIP_RETURNED_VALUE\n\nThe drive will now be mounted to:\n - $target"
+
+			fi
 
 		fi
 
-		G_RUN_CMD_INFO_ONLY=1 G_RUN_CMD mount $source $target
+		if [[ -d $target ]]; then
+
+			G_WHIP_MSG "Error:\n\nThe mount target directory, already exists and may be in use:\n - $target\n\nPlease retry, using a unique mount target location."
+
+		else
+
+			G_DIETPI-NOTIFY 2 "Creating mount folder for $target"
+			mkdir -p $target
+			G_RUN_CMD_INFO_ONLY=1 G_RUN_CMD mount $source $target
+
+		fi
+
 
 	}
 
@@ -1647,7 +1671,7 @@ NB:
 				break
 
 			fi
-			samba_clientname=$G_WHIP_RETURNED_VALUE
+			samba_clientname="$G_WHIP_RETURNED_VALUE"
 
 			G_WHIP_DEFAULT_ITEM="$samba_clientshare"
 			G_WHIP_INPUTBOX 'Please enter the fileservers shared folder name\n - eg: MySharedFolder'
@@ -1656,7 +1680,7 @@ NB:
 				break
 
 			fi
-			samba_clientshare=$G_WHIP_RETURNED_VALUE
+			samba_clientshare="$G_WHIP_RETURNED_VALUE"
 
 			G_WHIP_DEFAULT_ITEM="$samba_clientuser"
 			G_WHIP_INPUTBOX 'Please enter the fileservers username\n - eg: JoeBloggs'
@@ -1665,11 +1689,11 @@ NB:
 				break
 
 			fi
-			samba_clientuser=$G_WHIP_RETURNED_VALUE
+			samba_clientuser="$G_WHIP_RETURNED_VALUE"
 
 			G_WHIP_DEFAULT_ITEM="$samba_clientpassword"
 			G_WHIP_PASSWORD 'Please enter the fileservers password\n - eg: LetMeIn'
-			samba_clientpassword=$result
+			samba_clientpassword="$result"
 			unset result
 
 			G_WHIP_DEFAULT_ITEM="$samba_fp_mount_target"
@@ -1692,7 +1716,7 @@ NB:
 			#Mount now
 			mkdir -p $samba_fp_mount_target
 
-			G_RUN_CMD_INFO_ONLY=1 G_RUN_CMD mount -t cifs -o username=$samba_clientuser,password=$samba_clientpassword //$samba_clientname/$space_to_040 $samba_fp_mount_target
+			G_RUN_CMD_INFO_ONLY=1 G_RUN_CMD mount -t cifs -o username="$samba_clientuser",password="$samba_clientpassword" //"$samba_clientname"/"$space_to_040" "$samba_fp_mount_target"
 			if (( ! $G_ERROR_HANDLER_EXITCODE_RETURN )); then
 
 				#Apply to fstab
@@ -1705,7 +1729,7 @@ _EOF_
 
 			else
 
-				rm -R $samba_fp_mount_target
+				rm -R "$samba_fp_mount_target"
 
 			fi
 
@@ -1732,7 +1756,7 @@ _EOF_
 				break
 
 			fi
-			nfs_clientname=$G_WHIP_RETURNED_VALUE
+			nfs_clientname="$G_WHIP_RETURNED_VALUE"
 
 			G_WHIP_DEFAULT_ITEM="$nfs_fp_mount_target"
 			G_WHIP_INPUTBOX 'Please enter a unique folder name for the mount location (eg: samba). This will be placed in /mnt/'
@@ -1751,13 +1775,13 @@ _EOF_
 			#Mount now
 			mkdir -p $nfs_fp_mount_target
 
-			G_RUN_CMD_INFO_ONLY=1 G_RUN_CMD mount -t nfs4 -o port=2049 $nfs_clientname:/ $nfs_fp_mount_target
+			G_RUN_CMD_INFO_ONLY=1 G_RUN_CMD mount -t nfs -o port=2049 "$nfs_clientname":/ "$nfs_fp_mount_target"
 			if (( ! $G_ERROR_HANDLER_EXITCODE_RETURN )); then
 
 				#Apply to fstab
 				sed -i "\#[[:space:]]$nfs_fp_mount_target[[:space:]]#d" /etc/fstab
 				cat << _EOF_ >> /etc/fstab
-$nfs_clientname:/ $nfs_fp_mount_target nfs4 auto,_netdev 0  0
+$nfs_clientname:/ $nfs_fp_mount_target nfs auto,_netdev 0  0
 _EOF_
 
 				G_WHIP_MSG "Mount completed. The new mount can be accessed via:\n - $nfs_fp_mount_target"
