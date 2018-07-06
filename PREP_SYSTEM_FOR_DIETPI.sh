@@ -1137,6 +1137,13 @@ _EOF_
 
 	fi
 
+	#ASUS TB WiFi: https://github.com/Fourdee/DietPi/issues/1760
+	if (( $G_HW_MODEL == 52 )); then
+
+		G_CONFIG_INJECT '^8723bs' '8723bs' /etc/modules
+
+	fi
+
 	G_DIETPI-NOTIFY 2 'Tweaking DHCP timeout:'
 
 	# - Reduce DHCP request retry count and timeouts: https://github.com/Fourdee/DietPi/issues/711
