@@ -1130,15 +1130,13 @@ _EOF_
 	rm /etc/udev/rules.d/70-persistent-net.rules &> /dev/null
 	rm /etc/udev/rules.d/70-persistant-net.rules &> /dev/null
 
-	# - Add pre-up lines for wifi on OrangePi Zero
+	#	Add pre-up lines for wifi on OrangePi Zero
 	if (( $G_HW_MODEL == 32 )); then
 
 		sed -i '/iface wlan0 inet dhcp/apre-up modprobe xradio_wlan\npre-up iwconfig wlan0 power on' /etc/network/interfaces
 
-	fi
-
-	#ASUS TB WiFi: https://github.com/Fourdee/DietPi/issues/1760
-	if (( $G_HW_MODEL == 52 )); then
+	#	ASUS TB WiFi: https://github.com/Fourdee/DietPi/issues/1760
+	elif (( $G_HW_MODEL == 52 )); then
 
 		G_CONFIG_INJECT '^8723bs' '8723bs' /etc/modules
 
