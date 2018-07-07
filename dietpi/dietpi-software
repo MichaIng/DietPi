@@ -222,7 +222,7 @@ _EOF_
 	DISABLE_REBOOT=0
 
 	#Global Password for software installs
-	GLOBAL_PW="$(grep -m1 '^[[:blank:]]*AUTO_SETUP_GLOBAL_PASSWORD=' /DietPi/dietpi.txt | sed 's/^.*=//')"
+	GLOBAL_PW="$(grep -m1 '^[[:blank:]]*AUTO_SETUP_GLOBAL_PASSWORD=' /DietPi/dietpi.txt | sed 's/^[^=]*=//')"
 	if [[ -z $GLOBAL_PW ]]; then
 
 		GLOBAL_PW='dietpi'
@@ -234,8 +234,12 @@ _EOF_
 
 	#Run Installation Flag (1 = run installs)
 	GOSTARTINSTALL=0
+
+	# Install variables
 	INSTALL_URL_ADDRESS=''
 	UNINSTALL_URL_ADDRESS=''
+	FP_DL_TMP='/tmp/dietpi-downloads'
+	DEPS_LIST=''
 
 	#Special installation Vars
 	USER_EMONHUB_APIKEY_COMPLETED=0
@@ -3290,6 +3294,59 @@ _EOF_
 
 	}
 
+	Download_Install(){
+
+		local type="$1" # deb/zip/tar/7z
+		local url="$2"
+		local target="$3" # Extract target
+		local file="$INSTALLING_INDEX.$type"
+
+		G_CHECK_URL "$url"
+		cd $FP_DL_TMP
+
+		local type="$2" 
+		if [[ $type == deb ]]; then
+
+			# If deb package dependencies need to be installed, start wget as G_THREAD_START
+			if [[ $DEPS_LIST ]]; then
+
+				G_THREAD_START wget "$url" -O $file
+				G_AGI $DEPS_LIST
+				G_THREAD_WAIT
+				DEPS_LIST=''
+
+			else
+
+				l_message='Downloading deb package' G_RUN_CMD wget "$url" -O $file
+
+			fi
+			l_message='Installing deb package' G_RUN_CMD dpkg -i $file
+
+		elif [[ $type == zip ]]; then
+
+			l_message='Downloading zip archive' G_RUN_CMD wget "$url" -O $file
+			[[ $target ]] && target="-d $target"
+			l_message='Unzipping archive' G_RUN_CMD unzip -o $file $target
+
+		elif [[ $type == tar ]]; then
+
+			l_message='Downloading tarball' G_RUN_CMD wget "$url" -O $file
+			[[ $target ]] && target="-C $target"
+			l_message='Unzipping tarball' G_RUN_CMD tar xf $file $target
+
+		elif [[ $type == 7z ]]; then
+
+			l_message='Downloading 7z archive' G_RUN_CMD wget "$url" -O $file
+			[[ $target ]] && target="-o$target"
+			l_message='Unzipping archive' G_RUN_CMD 7zr x -y $file $target
+
+		fi
+
+		l_message='Cleaning up' G_RUN_CMD rm $file
+		cd $HOME
+
+	}
+
 	#/////////////////////////////////////////////////////////////////////////////////////
 	# This function handles the installation of the selected software.
 	#
@@ -3352,11 +3409,7 @@ _EOF_
 			#RPi, revert to Debian pcmanfm install package: https://github.com/Fourdee/DietPi/issues/1558#issuecomment-390328173
 			if (( $G_HW_MODEL < 10 )); then
 
-				INSTALL_URL_ADDRESS='https://dietpi.com/downloads/binaries/all/pcmanfm_1.2.5-3_armhf.deb'
-				G_CHECK_URL "$INSTALL_URL_ADDRESS"
-				wget "$INSTALL_URL_ADDRESS" -O $INSTALLING_INDEX.deb
-				G_RUN_CMD dpkg -i $INSTALLING_INDEX.deb
-				rm $INSTALLING_INDEX.deb
+				Download_Install deb 'https://dietpi.com/downloads/binaries/all/pcmanfm_1.2.5-3_armhf.deb'
 
 			fi
 
@@ -3412,7 +3465,6 @@ _EOF_
 		if (( ${aSOFTWARE_INSTALL_STATE[$INSTALLING_INDEX]} == 1 )); then
 
 			Banner_Installing
-
 			G_AGI xrdp
 
 		fi
@@ -3424,7 +3476,6 @@ _EOF_
 			Banner_Installing
 
 			INSTALL_URL_ADDRESS='https://dietpi.com/downloads/binaries/all/nomachine_6.1.6_'
-
 			#x86_64
 			if (( $G_HW_ARCH == 10 )); then
 
@@ -3442,11 +3493,7 @@ _EOF_
 
 			fi
 
-			G_CHECK_URL "$INSTALL_URL_ADDRESS"
-
-			wget "$INSTALL_URL_ADDRESS" -O package.deb
-			dpkg -i package.deb
-			rm package.deb
+			Download_Install deb "$INSTALL_URL_ADDRESS"
 
 		fi
 
@@ -3465,7 +3512,7 @@ _EOF_
 
 			Banner_Installing
 
-			echo -e "proftpd-basic shared/proftpd/inetd_or_standalone select standalone" | debconf-set-selections
+			debconf-set-selections <<< 'proftpd-basic shared/proftpd/inetd_or_standalone select standalone'
 			G_AGI proftpd-basic
 
 		fi
@@ -3511,13 +3558,12 @@ _EOF_
 		if (( ${aSOFTWARE_INSTALL_STATE[$INSTALLING_INDEX]} == 1 )); then
 
 			Banner_Installing
-			# If IPv6 is disabled, nginx service fails to start up due to IPv6 part in default site.
+			# If IPv6 is disabled, nginx service fails to start up due to IPv6 statement in default site.
 			# This leads to APT failure, thus we copy our non-IPv6 config in place first:
-			if [ ! -d /proc/sys/net/ipv6 ]; then
+			if [[ ! -d /proc/sys/net/ipv6 ]]; then
 
-				[ -d /etc/nginx ] || mkdir /etc/nginx
+				[[ -d /etc/nginx/sites-available ]] || mkdir -p /etc/nginx/sites-available
 				cp /DietPi/dietpi/conf/nginx.conf /etc/nginx/nginx.conf
-				[ -d /etc/nginx/sites-available ] || mkdir /etc/nginx/sites-available
 				cp /DietPi/dietpi/conf/nginx.site-available-default /etc/nginx/sites-available/default
 
 			fi
@@ -3550,9 +3596,9 @@ _EOF_
 			else
 				# Otherwise use possibly existent /var/lib/mysql
 				# - Remove possible dead symlinks/files:
-				rm "$G_FP_DIETPI_USERDATA/mysql" &> /dev/null
-				G_RUN_CMD mkdir -p "$G_FP_DIETPI_USERDATA/mysql"
-				if [ -d /var/lib/mysql ]; then
+				rm $G_FP_DIETPI_USERDATA/mysql &> /dev/null
+				G_RUN_CMD mkdir -p $G_FP_DIETPI_USERDATA/mysql
+				if [[ -d /var/lib/mysql ]]; then
 
 					G_DIETPI-NOTIFY 2 '/var/lib/mysql exists, will migrate containing databases'
 					G_RUN_CMD cp -a /var/lib/mysql/. $G_FP_DIETPI_USERDATA/mysql
@@ -3563,12 +3609,13 @@ _EOF_
 
 			G_DIETPI-NOTIFY 2 'Removing /var/lib/mysql, if existent'
 			[[ -L /var/lib/mysql && ! $(readlink /var/lib/mysql) =~ $G_FP_DIETPI_USERDATA/mysql ]] &&
-					rm -R "$(readlink /var/lib/mysql)" &> /dev/null
+				rm -R "$(readlink /var/lib/mysql)" &> /dev/null
 			rm -R /var/lib/mysql &> /dev/null
 
 			G_DIETPI-NOTIFY 2 "Creating symlink: /var/lib/mysql -> $G_FP_DIETPI_USERDATA/mysql"
-			G_RUN_CMD ln -sf "$G_FP_DIETPI_USERDATA/mysql" /var/lib/mysql
-			chown -R mysql:mysql "$G_FP_DIETPI_USERDATA/mysql" 2>/dev/null
+			G_RUN_CMD ln -sf $G_FP_DIETPI_USERDATA/mysql /var/lib/mysql
+			chown mysql:mysql -h /var/lib/mysql
+			chown mysql:mysql -RL /var/lib/mysql
 
 			G_AGI mariadb-server
 
@@ -3588,13 +3635,15 @@ _EOF_
 		if (( ${aSOFTWARE_INSTALL_STATE[$INSTALLING_INDEX]} == 1 )); then
 
 			Banner_Installing
-			G_AGI redis-server
+			local package_list='redis-server'
 			#Redis php module | == 2 to check for existing installs, if == 1, then module will be installed together with PHP, to prevent dependency installations
 			if (( ${aSOFTWARE_INSTALL_STATE[89]} == 2 )); then
 
-				G_AGI "$PHP_APT_PACKAGE_NAME"-redis
+				package_list+=" $PHP_APT_PACKAGE_NAME-redis"
 
 			fi
+
+			AGI $package_list
 
 		fi
 
@@ -3607,28 +3656,28 @@ _EOF_
 			#Install base PHP packages/modules.
 			if (( ${aSOFTWARE_INSTALL_STATE[83]} >= 1 )); then
 
-				G_AGI libapache2-mod-"$PHP_APT_PACKAGE_NAME"
+				local package_list="libapache2-mod-$PHP_APT_PACKAGE_NAME"
 
 			else
 
-				G_AGI "$PHP_APT_PACKAGE_NAME"-fpm
+				local package_list="$PHP_APT_PACKAGE_NAME-fpm"
 
 			fi
 
 			#php-common modules, used by most web software
-			G_AGI "$PHP_APT_PACKAGE_NAME"-curl "$PHP_APT_PACKAGE_NAME"-gd "$PHP_APT_PACKAGE_NAME"-apcu
+			package_list+=" $PHP_APT_PACKAGE_NAME-curl $PHP_APT_PACKAGE_NAME-gd $PHP_APT_PACKAGE_NAME-apcu"
 
 			# + stretch extras
 			if (( $G_DISTRO >= 4 )); then
 
-				G_AGI "$PHP_APT_PACKAGE_NAME"-mbstring "$PHP_APT_PACKAGE_NAME"-zip "$PHP_APT_PACKAGE_NAME"-xml
+				package_list+=" $PHP_APT_PACKAGE_NAME-mbstring $PHP_APT_PACKAGE_NAME-zip $PHP_APT_PACKAGE_NAME-xml"
 
 			fi
 
 			# PHP7.2/Buster dropped support for mcrypt: https://liorkaplan.wordpress.com/2017/09/10/php-7-2-is-coming-mcrypt-extension-isnt/
 			if (( $G_DISTRO < 5 )); then
 
-				G_AGI "$PHP_APT_PACKAGE_NAME"-mcrypt
+				package_list+=" $PHP_APT_PACKAGE_NAME-mcrypt"
 
 			fi
 
@@ -3636,11 +3685,11 @@ _EOF_
 
 				if (( $G_DISTRO < 4 )); then
 					#For <= Jessie, php5-mysqlnd provides the newer mysql client libraries compared to php5-mysql.
-					G_AGI php5-mysqlnd
+					package_list+=' php5-mysqlnd'
 
 				else
 					#For >= Stretch, php(7.X)-mysqlnd does not exist, thus php-mysql need to be installed: https://packages.debian.org/de/stretch/php-mysql
-					G_AGI "$PHP_APT_PACKAGE_NAME"-mysql
+					package_list+=" $PHP_APT_PACKAGE_NAME-mysql"
 
 				fi
 
@@ -3648,16 +3697,18 @@ _EOF_
 
 			if (( ${aSOFTWARE_INSTALL_STATE[87]} >= 1 )); then
 
-				G_AGI "$PHP_APT_PACKAGE_NAME"-sqlite* #wildcard for version (eg:3)
+				package_list+=" $PHP_APT_PACKAGE_NAME-sqlite*" #wildcard for version (eg:3)
 
 			fi
 
 			#Redis php module
 			if (( ${aSOFTWARE_INSTALL_STATE[91]} >= 1 )); then
 
-				G_AGI "$PHP_APT_PACKAGE_NAME"-redis
+				package_list+=" $PHP_APT_PACKAGE_NAME-redis"
 
 			fi
+
+			G_AGI $package_list
 
 		fi
 
@@ -3671,21 +3722,21 @@ _EOF_
 			G_RUN_CMD systemctl start mysql
 
 			# Set password parameters before installing
-			debconf-set-selections <<< "phpmyadmin phpmyadmin/dbconfig-install boolean true"
+			debconf-set-selections <<< 'phpmyadmin phpmyadmin/dbconfig-install boolean true'
 			debconf-set-selections <<< "phpmyadmin phpmyadmin/mysql/app-pass password $GLOBAL_PW"
 			debconf-set-selections <<< "phpmyadmin phpmyadmin/app-password-confirm password $GLOBAL_PW"
 
 			if (( ${aSOFTWARE_INSTALL_STATE[83]} == 1 )); then
 
-				debconf-set-selections <<< "phpmyadmin phpmyadmin/reconfigure-webserver multiselect apache2"
+				debconf-set-selections <<< 'phpmyadmin phpmyadmin/reconfigure-webserver multiselect apache2'
 
 			elif (( ${aSOFTWARE_INSTALL_STATE[84]} == 1 )); then
 
-				debconf-set-selections <<< "phpmyadmin phpmyadmin/reconfigure-webserver multiselect lighttpd"
+				debconf-set-selections <<< 'phpmyadmin phpmyadmin/reconfigure-webserver multiselect lighttpd'
 
 			else
 
-				debconf-set-selections <<< "phpmyadmin phpmyadmin/reconfigure-webserver multiselect none"
+				debconf-set-selections <<< 'phpmyadmin phpmyadmin/reconfigure-webserver multiselect none'
 
 			fi
 
@@ -3705,16 +3756,9 @@ _EOF_
 				#MPD not available in Jessie Repo for ARMv8
 				if (( $G_HW_ARCH == 3 )); then
 
-					INSTALL_URL_ADDRESS='https://dietpi.com/downloads/binaries/all/mpd_0.19.21_arm64.deb'
-					G_CHECK_URL "$INSTALL_URL_ADDRESS"
-
 					#libupnp6 for net discov with upnp/avahi
-					G_AGI libupnp6
-					G_AGI libwrap0 libmpdclient2 libao-common libao4 libasound2 libasound2-data libasyncns0 libaudiofile1 libavahi-client3 libavahi-common-data libavahi-common3 libavcodec56 libavformat56 libavresample2 libavutil54 libbinio1ldbl libcaca0 libcdio-cdda1 libcdio-paranoia1 libcdio13 libcups2 libcurl3-gnutls libdirectfb-1.2-9 libdnet libfaad2 libflac8 libfluidsynth1 libgme0 libgomp1 libgsm1 libice6 libid3tag0 libiso9660-8 libjack-jackd2-0 libjson-c2 libldb1 libmad0 libmikmod3 libmms0 libmodplug1 libmp3lame0 libmpcdec6 libmpg123-0 libnfs4 libntdb1 libogg0 libopenal-data libopenal1 libopenjpeg5 libopus0 liborc-0.4-0 libpulse0 libresid-builder0c2a libroar2 libsamplerate0 libschroedinger-1.0-0 libsdl1.2debian libshout3 libsidplay2 libsidutils0 libslp1 libsm6 libsmbclient libsndfile1 libsoxr0 libspeex1 libspeexdsp1 libsqlite3-0 libtalloc2 libtdb1 libtevent0 libtheora0 libupnp6 libva1 libvorbis0a libvorbisenc2 libvorbisfile3 libvpx1 libwavpack1 libwbclient0 libwildmidi-config libwildmidi1 libx11-6 libx11-data libx11-xcb1 libx264-142 libxau6 libxcb1 libxdmcp6 libxext6 libxi6 libxtst6 libxvidcore4 libyajl2 libzzip-0-13 mime-support python python-talloc python2.7 samba-libs x11-common file
-
-					wget "$INSTALL_URL_ADDRESS" -O package.deb
-					dpkg -i package.deb
-					rm package.deb
+					DEPS_LIST='libupnp6 libwrap0 libmpdclient2 libao-common libao4 libasound2 libasound2-data libasyncns0 libaudiofile1 libavahi-client3 libavahi-common-data libavahi-common3 libavcodec56 libavformat56 libavresample2 libavutil54 libbinio1ldbl libcaca0 libcdio-cdda1 libcdio-paranoia1 libcdio13 libcups2 libcurl3-gnutls libdirectfb-1.2-9 libdnet libfaad2 libflac8 libfluidsynth1 libgme0 libgomp1 libgsm1 libice6 libid3tag0 libiso9660-8 libjack-jackd2-0 libjson-c2 libldb1 libmad0 libmikmod3 libmms0 libmodplug1 libmp3lame0 libmpcdec6 libmpg123-0 libnfs4 libntdb1 libogg0 libopenal-data libopenal1 libopenjpeg5 libopus0 liborc-0.4-0 libpulse0 libresid-builder0c2a libroar2 libsamplerate0 libschroedinger-1.0-0 libsdl1.2debian libshout3 libsidplay2 libsidutils0 libslp1 libsm6 libsmbclient libsndfile1 libsoxr0 libspeex1 libspeexdsp1 libsqlite3-0 libtalloc2 libtdb1 libtevent0 libtheora0 libupnp6 libva1 libvorbis0a libvorbisenc2 libvorbisfile3 libvpx1 libwavpack1 libwbclient0 libwildmidi-config libwildmidi1 libx11-6 libx11-data libx11-xcb1 libx264-142 libxau6 libxcb1 libxdmcp6 libxext6 libxi6 libxtst6 libxvidcore4 libyajl2 libzzip-0-13 mime-support python python-talloc python2.7 samba-libs x11-common file'
+					Download_Install deb 'https://dietpi.com/downloads/binaries/all/mpd_0.19.21_arm64.deb'
 
 				else
 
@@ -3726,7 +3770,6 @@ _EOF_
 			else
 
 				INSTALL_URL_ADDRESS='https://dietpi.com/downloads/binaries/all/mpd_0.20.18-1_'
-
 				#armv6
 				if (( $G_HW_ARCH == 1 )); then
 
@@ -3749,16 +3792,10 @@ _EOF_
 
 				fi
 
-				G_CHECK_URL "$INSTALL_URL_ADDRESS"
-				G_THREAD_START wget "$INSTALL_URL_ADDRESS" -O $INSTALLING_INDEX.deb
-
-				G_AGI libupnp6 libwrap0 libmpdclient2 libflac8 libyajl2 libavahi-client3 libvorbisfile3 libwavpack1 libmad0 libmpg123-0 libopus0 libavformat57 libfaad2 libcdio-paranoia1 libiso9660-8 libshout3 libid3tag0
-
-				G_THREAD_WAIT
 				apt-mark unhold mpd &> /dev/null #??? Not required for dpkg -i installs
 
-				dpkg -i $INSTALLING_INDEX.deb
-				rm $INSTALLING_INDEX.deb
+				DEPS_LIST='libupnp6 libwrap0 libmpdclient2 libflac8 libyajl2 libavahi-client3 libvorbisfile3 libwavpack1 libmad0 libmpg123-0 libopus0 libavformat57 libfaad2 libcdio-paranoia1 libiso9660-8 libshout3 libid3tag0'
+				Download_Install deb "$INSTALL_URL_ADDRESS"
 
 				apt-mark hold mpd # prevent repo updates from overwriting
 
@@ -3771,13 +3808,7 @@ _EOF_
 		if (( ${aSOFTWARE_INSTALL_STATE[$INSTALLING_INDEX]} == 1 )); then
 
 			Banner_Installing
-
-			INSTALL_URL_ADDRESS='https://www.phpbb.com/files/release/phpBB-3.2.2.zip'
-			G_CHECK_URL "$INSTALL_URL_ADDRESS"
-
-			wget "$INSTALL_URL_ADDRESS" -O package.zip
-			G_RUN_CMD unzip -o package.zip -d /var/www
-			rm package.zip
+			Download_Install zip 'https://www.phpbb.com/files/release/phpBB-3.2.2.zip' /var/www
 
 		fi
 
@@ -3799,35 +3830,37 @@ _EOF_
 
 			pip install cryptography
 
-			cd "$HOME"
+			cd $FP_DL_TMP
 			git clone --depth=1 https://github.com/zeromq/libzmq
 			git clone --depth=1 https://github.com/pyca/pynacl/
 			git clone --depth=1 "$INSTALL_URL_ADDRESS"
 
 			# - compile
-			cd "$HOME"/libzmq
+			cd libzmq
 			./autogen.sh && ./configure && make -j $G_HW_CPU_CORES
 			make check && make install && ldconfig
 
-			cd "$HOME"/pynacl
+			cd ../pynacl
 			python setup.py build && python setup.py install
 
-			cd "$HOME"
+			cd ..
 
 			# - Move OpenBazaar to a 'better' location
 			mkdir -p /etc/openbazaar-server
-			mv "$HOME"/OpenBazaar-Server/* /etc/openbazaar-server/
-			rm -R "$HOME"/OpenBazaar-Server
+			mv OpenBazaar-Server/* /etc/openbazaar-server/
+			rm -R OpenBazaar-Server
 
 			# - install OpenBazaar
 			cd /etc/openbazaar-server
 			pip install -r requirements.txt
 
-			cd "$HOME"
+			cd $FP_DL_TMP
 
 			# - Clean up, remove source libraries
-			rm -R "$HOME"/libzmq
-			rm -R "$HOME"/pynacl
+			rm -R libzmq
+			rm -R pynacl
+
+			cd $HOME
 
 		fi
 
@@ -3836,13 +3869,7 @@ _EOF_
 		if (( ${aSOFTWARE_INSTALL_STATE[$INSTALLING_INDEX]} == 1 )); then
 
 			Banner_Installing
-
-			INSTALL_URL_ADDRESS='http://yacy.net/release/yacy_v1.92_20161226_9000.tar.gz'
-			G_CHECK_URL "$INSTALL_URL_ADDRESS"
-
-			wget "$INSTALL_URL_ADDRESS" -O package.tar.gz
-			G_RUN_CMD tar xvf package.tar.gz -C /etc/
-			rm package.tar.gz
+			Download_Install tar 'http://yacy.net/release/yacy_v1.92_20161226_9000.tar.gz' /etc/
 
 		fi
 
@@ -3852,7 +3879,7 @@ _EOF_
 
 			Banner_Installing
 
-			G_DIETPI-NOTIFY 2 'Installing needed PHP modules.' # https://doc.owncloud.org/server/latest/admin_manual/installation/source_installation.html#php-extensions
+			G_DIETPI-NOTIFY 2 'Installing needed PHP modules' # https://doc.owncloud.org/server/latest/admin_manual/installation/source_installation.html#php-extensions
 			G_AGI "$PHP_APT_PACKAGE_NAME"-intl "$PHP_APT_PACKAGE_NAME"-redis
 
 			if [[ -f /var/www/owncloud/occ ]]; then
@@ -3861,7 +3888,7 @@ _EOF_
 
 			else
 
-				local datadir="$(grep -m1 '^[[:blank:]]*SOFTWARE_OWNCLOUD_DATADIR=' /DietPi/dietpi.txt | sed 's/^.*=//' | sed 's|/$||')"
+				local datadir="$(grep -m1 '^[[:blank:]]*SOFTWARE_OWNCLOUD_DATADIR=' /DietPi/dietpi.txt | sed 's/^[^=]*=//' | sed 's|/$||')"
 				[[ $datadir ]] || datadir="$G_FP_DIETPI_USERDATA/owncloud_data"
 				if [[ -f $datadir/dietpi-owncloud-installation-backup/occ ]]; then
 
@@ -3872,11 +3899,7 @@ _EOF_
 
 				else
 
-					INSTALL_URL_ADDRESS='https://download.owncloud.org/community/owncloud-latest.zip'
-					G_CHECK_URL "$INSTALL_URL_ADDRESS"
-					G_RUN_CMD wget "$INSTALL_URL_ADDRESS" -O package.zip
-					G_RUN_CMD unzip -o package.zip -d /var/www
-					rm package.zip
+					Download_Install zip 'https://download.owncloud.org/community/owncloud-latest.zip' /var/www
 
 				fi
 
@@ -3892,7 +3915,7 @@ _EOF_
 
 			Banner_Installing
 
-			G_DIETPI-NOTIFY 2 'Installing needed PHP modules.' # https://docs.nextcloud.com/server/13/admin_manual/installation/source_installation.html#prerequisites-label
+			G_DIETPI-NOTIFY 2 'Installing needed PHP modules' # https://docs.nextcloud.com/server/13/admin_manual/installation/source_installation.html#prerequisites-label
 			G_AGI "$PHP_APT_PACKAGE_NAME"-intl "$PHP_APT_PACKAGE_NAME"-redis
 
 			if [[ -f /var/www/nextcloud/occ ]]; then
@@ -3901,7 +3924,7 @@ _EOF_
 
 			else
 
-				local datadir="$(grep -m1 '^[[:blank:]]*SOFTWARE_NEXTCLOUD_DATADIR=' /DietPi/dietpi.txt | sed 's/^.*=//' | sed 's|/$||')"
+				local datadir="$(grep -m1 '^[[:blank:]]*SOFTWARE_NEXTCLOUD_DATADIR=' /DietPi/dietpi.txt | sed 's/^[^=]*=//' | sed 's|/$||')"
 				[[ $datadir ]] || datadir="$G_FP_DIETPI_USERDATA/nextcloud_data"
 				if [[ -f $datadir/dietpi-nextcloud-installation-backup/occ ]]; then
 
@@ -3912,11 +3935,7 @@ _EOF_
 
 				else
 
-					INSTALL_URL_ADDRESS='https://download.nextcloud.com/server/releases/latest.zip'
-					G_CHECK_URL "$INSTALL_URL_ADDRESS"
-					G_RUN_CMD wget "$INSTALL_URL_ADDRESS" -O package.zip
-					G_RUN_CMD unzip -o package.zip -d /var/www
-					rm package.zip
+					Download_Install zip 'https://download.nextcloud.com/server/releases/latest.zip' /var/www
 
 				fi
 
@@ -3932,11 +3951,7 @@ _EOF_
 
 			Banner_Installing
 
-			INSTALL_URL_ADDRESS='https://dietpi.com/downloads/binaries/all/ympd_1.2.3.7z'
-			G_CHECK_URL "$INSTALL_URL_ADDRESS"
-
-			wget "$INSTALL_URL_ADDRESS" -O package.7z
-			G_RUN_CMD 7z x -y package.7z
+			Download_Install 7z 'https://dietpi.com/downloads/binaries/all/ympd_1.2.3.7z'
 
 			local binary_name='ympd_'
 			# - armv6
@@ -3960,14 +3975,12 @@ _EOF_
 				binary_name+='amd64'
 
 			fi
-
 			binary_name+="_$G_DISTRO_NAME"
 
 			mv "$binary_name" /usr/bin/ympd
 			chmod +x /usr/bin/ympd
 
 			rm ympd_*
-			rm package.7z
 
 		fi
 
@@ -3994,11 +4007,7 @@ _EOF_
 
 			fi
 
-			G_CHECK_URL "$INSTALL_URL_ADDRESS"
-
-			wget "$INSTALL_URL_ADDRESS" -O package.tar.bz2
-			G_RUN_CMD tar xvf package.tar.bz2
-			rm package.tar.bz2
+			Download_Install tar "$INSTALL_URL_ADDRESS"
 
 			# - reinstall, clear dir, prevent mv fail on non-empty dir
 			rm -R /etc/roonbridge &> /dev/null
@@ -14422,7 +14431,7 @@ _EOF_
 		Create_UserContent_Folders
 		#------------------------------------------------------------
 		# Set current path to home folder
-		cd "$HOME"
+		cd $HOME
 
 		# Update APT
 		Banner_Apt_Update
@@ -14459,6 +14468,9 @@ _EOF_
 
 		# Update required software that needs to be installed
 		Install_Flag_Prereq_Software
+
+		# Create tmp download directory
+		G_RUN_CMD mkdir -p $FP_DL_TMP
 
 		# Install Linux Software
 		/DietPi/dietpi/dietpi-services stop
