@@ -19,7 +19,7 @@ $FP_SCRIPT			allo					eth_dhcp / eth_static
 $FP_SCRIPT			useradd					X=create user with name X and default permissions, using global DietPi password (dietpi)
 $FP_SCRIPT			userdel					X=delete user with name X
 $FP_SCRIPT			apt-mirror				url / default
-$FP_SCRIPT			ntpd-mode				[0-4] configures NTPD mode (eg: ntp/systemd)
+$FP_SCRIPT			ntpd-mode				[0-4] configures time sync mode (eg: daily/hourly/daemon)
 $FP_SCRIPT			verify_dietpi.txt			verifies dietpi.txt entries, adds missing entries if required
 $FP_SCRIPT			passwords				NULL=Prompt user to change DietPi related passwords | X=optional set X as global password for future dietpi-software installations and \"root\" + \"dietpi\" login passwords.
 "
@@ -112,7 +112,7 @@ _EOF_
 		if [[ $INPUT_MODE_VALUE ]]; then
 
 			# - Set defaults?
-			if [[ $INPUT_MODE_VALUE = 'default' ]]; then
+			if [[ $INPUT_MODE_VALUE == 'default' ]]; then
 
 				if (( $G_HW_MODEL < 10 )); then
 
@@ -192,7 +192,7 @@ _EOF_
 			#Kill current
 			killall -w /DietPi/dietpi/func/run_ntpd &> /dev/null
 
-			local ntpd_mirror=$(grep -m1 '^[[:blank:]]*CONFIG_NTP_MIRROR=' /DietPi/dietpi.txt | sed 's/^.*=//')
+			local ntpd_mirror=$(grep -m1 '^[[:blank:]]*CONFIG_NTP_MIRROR=' /DietPi/dietpi.txt | sed 's/^[^=]*=//')
 			# - Set defaults?
 			if [[ $ntpd_mirror == 'default' ]]; then
 
@@ -241,15 +241,15 @@ _EOF_
 		if [[ $INPUT_MODE_VALUE == 'eth_dhcp' ]]; then
 
 			G_CONFIG_INJECT 'iface eth' 'iface eth0 inet dhcp' /etc/network/interfaces
-			sed -i "$(cat -n /etc/network/interfaces | grep 'dns-nameservers ' | sed -n 1p | awk '{print $1}')s/.*/#dns-nameservers 8.8.8.8/" /etc/network/interfaces
+			sed -i '0,/^.*dns-nameservers .*$/s//#dns-nameservers 8.8.8.8/' /etc/network/interfaces
 
 		elif [[ $INPUT_MODE_VALUE == 'eth_static' ]]; then
 
 			G_CONFIG_INJECT 'iface eth' 'iface eth0 inet static' /etc/network/interfaces
-			sed -i "$(cat -n /etc/network/interfaces | grep 'address ' | sed -n 1p | awk '{print $1}')s/.*/address $INPUT_ADDITIONAL_1/" /etc/network/interfaces
-			sed -i "$(cat -n /etc/network/interfaces | grep 'gateway ' | sed -n 1p | awk '{print $1}')s/.*/gateway $INPUT_ADDITIONAL_2/" /etc/network/interfaces
-			sed -i "$(cat -n /etc/network/interfaces | grep 'netmask ' | sed -n 1p | awk '{print $1}')s/.*/netmask $INPUT_ADDITIONAL_3/" /etc/network/interfaces
-			sed -i "$(cat -n /etc/network/interfaces | grep 'dns-nameservers ' | sed -n 1p | awk '{print $1}')s/.*/dns-nameservers $INPUT_ADDITIONAL_4/" /etc/network/interfaces
+			G_CONFIG_INJECT 'address ' "address $INPUT_ADDITIONAL_1" /etc/network/interfaces
+			G_CONFIG_INJECT 'gateway ' "gateway $INPUT_ADDITIONAL_2" /etc/network/interfaces
+			G_CONFIG_INJECT 'netmask ' "netmask $INPUT_ADDITIONAL_3" /etc/network/interfaces
+			G_CONFIG_INJECT 'dns-nameservers ' "dns-nameservers $INPUT_ADDITIONAL_4" /etc/network/interfaces
 
 		else
 
@@ -267,7 +267,7 @@ _EOF_
 		if [[ $INPUT_MODE_VALUE ]]; then
 
 			mkdir -p /home
-			useradd -m -s /bin/bash "$INPUT_MODE_VALUE" -p "$(grep -m1 '^[[:blank:]]*AUTO_SETUP_GLOBAL_PASSWORD=' /DietPi/dietpi.txt | sed 's/^.*=//')"
+			useradd -m -s /bin/bash "$INPUT_MODE_VALUE" -p "$(grep -m1 '^[[:blank:]]*AUTO_SETUP_GLOBAL_PASSWORD=' /DietPi/dietpi.txt | sed 's/^[^=]*=//')"
 
 			#	Copy existing profile/bashrc
 			cp /root/.profile /home/"$INPUT_MODE_VALUE"/
@@ -344,7 +344,7 @@ _EOF_
 	Verify_DietPi_Txt(){
 
 		#Verify entries with git dietpi.txt
-		local gitbranch=$(grep -m1 '^[[:blank:]]*DEV_GITBRANCH=' /DietPi/dietpi.txt | sed 's/^.*=//')
+		local gitbranch=$(grep -m1 '^[[:blank:]]*DEV_GITBRANCH=' /DietPi/dietpi.txt | sed 's/^[^=]*=//')
 		if [[ -z $gitbranch ]]; then
 
 			gitbranch='master'
@@ -355,28 +355,26 @@ _EOF_
 		G_CHECK_URL "$INSTALL_URL"
 		if (( ! $? )); then
 
-			G_DIETPI-NOTIFY 0 "Patching dietpi.txt"
-			wget "$INSTALL_URL" -O /tmp/dietpi.txt_patch
+			G_DIETPI-NOTIFY 0 'Patching dietpi.txt'
+			l_message='Downloading current dietpi.txt' G_RUN_CMD wget "$INSTALL_URL" -O /tmp/dietpi.txt_patch
 
 			local entry=0
 			local value=0
 			while read line
 			do
 
-				entry=$(echo -e "$line" | grep "^[^#;/]" )
+				entry=$(grep '^[^#;/]' <<< "$line")
 
 				if [[ $entry ]]; then
 
-					value=$(echo -e "${entry##*=}") #*=X
-					entry=$(echo -e "${entry%%=*}") #X*
+					value="${entry#*=}"  #*=X
+					entry="${entry%%=*}" #X=*
 
 					# - Patch new entry if required
-					if ! grep -qi "^$entry=" /DietPi/dietpi.txt; then
+					if ! grep -qi "^[[:blank:]]*$entry=" /DietPi/dietpi.txt; then
 
 						G_DIETPI-NOTIFY 2 "Updating dietpi.txt with new entry: $entry=$value"
-						cat << _EOF_ >> /DietPi/dietpi.txt
-$entry=$value
-_EOF_
+						echo "$entry=$value" >> /DietPi/dietpi.txt
 
 					#else
 
@@ -405,7 +403,7 @@ _EOF_
 		local pw_root_dietpi_users=''
 
 		#Automation/input mode, set and then apply input password to both dietpi-software and root/dietpi user passwords.
-		if [[ -n $INPUT_MODE_VALUE ]]; then
+		if [[ $INPUT_MODE_VALUE ]]; then
 
 			pw_dietpi_software="$INPUT_MODE_VALUE"
 			pw_root_dietpi_users="$INPUT_MODE_VALUE"
@@ -442,7 +440,7 @@ It is highly recommended to change this password, ideally, it should be differen
 		fi
 
 		#Apply | dietpi-software PW
-		if [[ -n $pw_dietpi_software ]]; then
+		if [[ $pw_dietpi_software ]]; then
 
 			G_CONFIG_INJECT 'AUTO_SETUP_GLOBAL_PASSWORD=' "AUTO_SETUP_GLOBAL_PASSWORD=$pw_dietpi_software" /DietPi/dietpi.txt &> /dev/null
 			G_DIETPI-NOTIFY 2 'Global password successfully changed'
@@ -450,7 +448,7 @@ It is highly recommended to change this password, ideally, it should be differen
 		fi
 
 		#Apply | Root/DietPi users PW
-		if [[ -n $pw_root_dietpi_users ]]; then
+		if [[ $pw_root_dietpi_users ]]; then
 
 			chpasswd <<< "root:$pw_root_dietpi_users"
 			chpasswd <<< "dietpi:$pw_root_dietpi_users"
