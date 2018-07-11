@@ -25,17 +25,20 @@
 
 	#Import DietPi-Globals ---------------------------------------------------------------
 	. /DietPi/dietpi/func/dietpi-globals
+	export G_PROGRAM_NAME='DietPi-Software'
+	FP_WORK_DIR='/tmp/dietpi-software'
+	G_INIT
 	G_CHECK_ROOT_USER
 	G_CHECK_ROOTFS_RW
-	export G_PROGRAM_NAME='DietPi-Software'
-	G_INIT
+	rm -R $FP_WORK_DIR
+	mkdir -p $FP_WORK_DIR
 	#Import DietPi-Globals ---------------------------------------------------------------
 
 	#/////////////////////////////////////////////////////////////////////////////////////
 	#Filepath
 	#/////////////////////////////////////////////////////////////////////////////////////
 	FP_INSTALLED_FILE='/DietPi/dietpi/.installed'
-	FP_INSTALLED_FILE_TEMP='/tmp/dietpi-software.installed'
+	FP_INSTALLED_FILE_TEMP="$FP_WORK_DIR/.installed"
 
 	#Used to set user/personal data directories (eg: usbdrive)
 	FP_DIETPI_DEDICATED_USBDRIVE=''
@@ -238,7 +241,7 @@ _EOF_
 	# Install variables
 	INSTALL_URL_ADDRESS=''
 	UNINSTALL_URL_ADDRESS=''
-	FP_DL_TMP='/tmp/dietpi-downloads'
+	URL_LIST=''
 	DEPS_LIST=''
 
 	#Special installation Vars
@@ -3126,7 +3129,7 @@ _EOF_
 	Create_Desktop_Shared_Items(){
 
 		#Copy DietPi favourite links
-		wget https://dietpi.com/downloads/conf/desktop/.gtk-bookmarks -O "$HOME"/.gtk-bookmarks
+		wget https://dietpi.com/downloads/conf/desktop/.gtk-bookmarks -O "$#"/.gtk-bookmarks
 
 		#Create Desktop SymLinks
 		mkdir -p "$HOME"/Desktop
@@ -3301,53 +3304,70 @@ _EOF_
 		local target="$3" # Extract target
 		local file="$INSTALLING_INDEX.$type"
 
-		(( no_check_url )) || G_CHECK_URL "$url"
-		unset no_check_url
-		cd $FP_DL_TMP
+		# Check all required URLs for each software title first, before starting any download: 
+		if [[ $URL_LIST ]]; then
 
-		# If deb package dependencies need to be installed, start wget as G_THREAD_START
+			local i=0
+			for i in $URL_LIST
+			do
+
+				G_CHECK_URL "$i"
+
+			done
+			URL_LIST=''
+			local no_check_url=1
+
+		fi
+
+		(( $no_check_url )) || G_CHECK_URL "$url"
+		unset no_check_url
+
+		cd $FP_WORK_DIR
+
+		# If deb package dependencies need to be installed, start wget as G_THREAD_START:
 		if [[ $DEPS_LIST ]]; then
 
 			G_THREAD_START wget "$url" -O $file
 			G_AGI $DEPS_LIST
+			DEPS_LIST=''
 			G_THREAD_WAIT
+			local no_download=1
 
 		fi
 
 		if [[ $type == deb ]]; then
 
-			[[ $DEPS_LIST ]] && DEPS_LIST='' || l_message='Downloading deb package' G_RUN_CMD wget "$url" -O $file
+			(( $no_download )) || l_message='Downloading deb package' G_RUN_CMD wget "$url" -O $file
 			# Allow error on first attempt, giving APT fix a change to resolve e.g. dependencies
 			l_message='Installing deb package' G_USER_INPUTS=0 G_RUN_CMD_INFO_ONLY=1 G_RUN_CMD dpkg -i $file
 			(( $? )) && G_DIETPI-NOTIFY 2 'Trying automated APT fix' && G_AGF
 
 		elif [[ $type == zip ]]; then
 
-			[[ $DEPS_LIST ]] && DEPS_LIST='' || l_message='Downloading zip archive' G_RUN_CMD wget "$url" -O $file
+			(( $no_download )) || l_message='Downloading zip archive' G_RUN_CMD wget "$url" -O $file
 			[[ $target ]] && mkdir -p $target && target="-d $target"
 			l_message='Unzipping archive' G_RUN_CMD unzip -o $file $target
 
 		elif [[ $type == tar ]]; then
 
-			[[ $DEPS_LIST ]] && DEPS_LIST='' || l_message='Downloading tarball' G_RUN_CMD wget "$url" -O $file
+			(( $no_download )) || l_message='Downloading tarball' G_RUN_CMD wget "$url" -O $file
 			[[ $target ]] && mkdir -p $target && target="-C $target"
 			l_message='Unpacking tarball' G_RUN_CMD tar xf $file $target
 
 		elif [[ $type == 7z ]]; then
 
-			[[ $DEPS_LIST ]] && DEPS_LIST='' || l_message='Downloading 7zip archive' G_RUN_CMD wget "$url" -O $file
+			(( $no_download )) || l_message='Downloading 7zip archive' G_RUN_CMD wget "$url" -O $file
 			[[ $target ]] && mkdir -p $target && target="-o$target"
 			l_message='Extracting 7zip archive' G_RUN_CMD 7za x -y $file $target
 
 		else
 
 			G_DIETPI-NOTIFY 1 'Download_Install: Invalid argument, needs to be one of: deb|zip|tar|7z'
-			DEPS_LIST=''
 
 		fi
 
 		[[ -f $file ]] && l_message='Cleaning up' G_RUN_CMD rm $file
-		cd $HOME
+		unset no_download
 
 	}
 
@@ -3427,7 +3447,6 @@ _EOF_
 
 			# - For desktop entries/icons hosted on dietpi.com
 			INSTALL_URL_ADDRESS='https://dietpi.com/downloads/conf/desktop'
-
 			G_CHECK_URL "$INSTALL_URL_ADDRESS"
 
 			G_AGI mate-desktop-environment-extras upower policykit-1 iceweasel
@@ -3442,7 +3461,6 @@ _EOF_
 
 			# - For desktop entries/icons hosted on dietpi.com
 			INSTALL_URL_ADDRESS='https://dietpi.com/downloads/conf/desktop'
-
 			G_CHECK_URL "$INSTALL_URL_ADDRESS"
 
 			G_AGI x-window-system-core wmaker gnustep gnustep-devel gnustep-games libc-dbg upower policykit-1 iceweasel
@@ -3457,7 +3475,6 @@ _EOF_
 
 			# - For desktop entries/icons hosted on dietpi.com
 			INSTALL_URL_ADDRESS='https://dietpi.com/downloads/conf/desktop'
-
 			G_CHECK_URL "$INSTALL_URL_ADDRESS"
 
 			G_AGI xfce4 xfce4-terminal gnome-icon-theme tango-icon-theme iceweasel
@@ -3580,9 +3597,9 @@ _EOF_
 		if (( ${aSOFTWARE_INSTALL_STATE[$INSTALLING_INDEX]} == 1 )); then
 
 			Banner_Installing
-			G_AGI lighttpd perl
 
 			#NB: RPi | Perl required, else 'lighttpd-enable-mod fastcgi' = Can't locate Term/ReadLine.pm
+			G_AGI lighttpd perl
 
 		fi
 
@@ -3601,7 +3618,7 @@ _EOF_
 				# Otherwise use possibly existent /var/lib/mysql
 				# - Remove possible dead symlinks/files:
 				rm $G_FP_DIETPI_USERDATA/mysql &> /dev/null
-				G_RUN_CMD mkdir -p $G_FP_DIETPI_USERDATA/mysql
+				mkdir -p $G_FP_DIETPI_USERDATA/mysql
 				if [[ -d /var/lib/mysql ]]; then
 
 					G_DIETPI-NOTIFY 2 '/var/lib/mysql exists, will migrate containing databases'
@@ -3616,10 +3633,9 @@ _EOF_
 				rm -R "$(readlink /var/lib/mysql)" &> /dev/null
 			rm -R /var/lib/mysql &> /dev/null
 
-			G_DIETPI-NOTIFY 2 "Creating symlink: /var/lib/mysql -> $G_FP_DIETPI_USERDATA/mysql"
-			G_RUN_CMD ln -sf $G_FP_DIETPI_USERDATA/mysql /var/lib/mysql
-			chown mysql:mysql -h /var/lib/mysql
-			chown mysql:mysql -RL /var/lib/mysql
+			l_message="Creating symlink: /var/lib/mysql -> $G_FP_DIETPI_USERDATA/mysql" G_RUN_CMD ln -sf $G_FP_DIETPI_USERDATA/mysql /var/lib/mysql
+			chown mysql:mysql -h /var/lib/mysql &> /dev/null
+			chown mysql:mysql -RL /var/lib/mysql &> /dev/null
 
 			G_AGI mariadb-server
 
@@ -3829,49 +3845,41 @@ _EOF_
 
 			Banner_Installing
 
-			INSTALL_URL_ADDRESS='https://github.com/OpenBazaar/OpenBazaar-Server.git'
-			G_CHECK_URL "$INSTALL_URL_ADDRESS"
+			INSTALL_URL_ADDRESS1='https://github.com/zeromq/libzmq'
+			INSTALL_URL_ADDRESS2='https://github.com/pyca/pynacl/'
+			INSTALL_URL_ADDRESS3='https://github.com/OpenBazaar/OpenBazaar-Server.git'
+			G_CHECK_URL "$INSTALL_URL_ADDRESS1"
+			G_CHECK_URL "$INSTALL_URL_ADDRESS2"
+			G_CHECK_URL "$INSTALL_URL_ADDRESS3"
 
 			G_AGI libsodium-dev automake autoconf pkg-config libtool libssl-dev libffi-dev python-dev openssl libzmq3-dev
-
-			#Not required.
-			#G_AGI software-properties-common
-			#add-apt-repository -y ppa:chris-lea/libsodium
-			#G_AGUP
-
 			pip install cryptography
 
-			cd $FP_DL_TMP
-			git clone --depth=1 https://github.com/zeromq/libzmq
-			git clone --depth=1 https://github.com/pyca/pynacl/
-			git clone --depth=1 "$INSTALL_URL_ADDRESS"
-
-			# - compile
+			# libzmq
+			git clone --depth=1 "$INSTALL_URL_ADDRESS1"
 			cd libzmq
 			./autogen.sh && ./configure && make -j $G_HW_CPU_CORES
 			make check && make install && ldconfig
+			cd $FP_WORK_DIR
+			rm -R libzmq
 
-			cd ../pynacl
+			# pynacl
+			git clone --depth=1 "$INSTALL_URL_ADDRESS2"
+			cd pynacl
 			python setup.py build && python setup.py install
+			cd $FP_WORK_DIR
+			rm -R pynacl
 
-			cd ..
-
+			# OpenBazaar
+			git clone --depth=1 "$INSTALL_URL_ADDRESS3"
 			# - Move OpenBazaar to a 'better' location
 			mkdir -p /etc/openbazaar-server
-			mv OpenBazaar-Server/* /etc/openbazaar-server/
+			cp -R OpenBazaar-Server/* /etc/openbazaar-server/
 			rm -R OpenBazaar-Server
-
 			# - install OpenBazaar
 			cd /etc/openbazaar-server
 			pip install -r requirements.txt
-
-			cd $FP_DL_TMP
-
-			# - Clean up, remove source libraries
-			rm -R libzmq
-			rm -R pynacl
-
-			cd $HOME
+			cd $FP_WORK_DIR
 
 		fi
 
@@ -3880,7 +3888,7 @@ _EOF_
 		if (( ${aSOFTWARE_INSTALL_STATE[$INSTALLING_INDEX]} == 1 )); then
 
 			Banner_Installing
-			Download_Install tar 'http://yacy.net/release/yacy_v1.92_20161226_9000.tar.gz' /etc/
+			Download_Install tar 'http://yacy.net/release/yacy_v1.92_20161226_9000.tar.gz' /etc
 
 		fi
 
@@ -3988,10 +3996,9 @@ _EOF_
 			fi
 			binary_name+="_$G_DISTRO_NAME"
 
-			mv $FP_DL_TMP/"$binary_name" /usr/bin/ympd
+			mv "$binary_name" /usr/bin/ympd
 			chmod +x /usr/bin/ympd
-
-			rm $FP_DL_TMP/ympd_*
+			rm ympd_*
 
 		fi
 
@@ -4024,8 +4031,8 @@ _EOF_
 			rm -R /etc/roonbridge &> /dev/null
 
 			mkdir -p /etc/roonbridge
-			mv $FP_DL_TMP/RoonBridge/* /etc/roonbridge
-			rm -R $FP_DL_TMP/RoonBridge
+			mv RoonBridge/* /etc/roonbridge
+			rm -R RoonBridge
 
 		fi
 
@@ -4189,7 +4196,7 @@ _EOF_
 			#NoIp Binary install
 			Download_Install zip "$INSTALL_URL_ADDRESS"
 
-			mv $FP_DL_TMP/noip_binary /usr/local/bin/noip2
+			mv noip_binary /usr/local/bin/noip2
 			chmod +x /usr/local/bin/noip2
 
 		fi
@@ -4247,9 +4254,9 @@ _EOF_
 				DEPS_LIST='build-essential zlib1g-dev libcurl4-openssl-dev libcrypto++-dev sqlite3'
 				Download_Install tar "$INSTALL_URL_ADDRESS"
 
-				cd $FP_DL_TMP/urbackup-server-*
-
+				cd urbackup-server-*
 				./configure
+
 				G_RUN_CMD make -j $G_HW_CPU_CORES
 				G_RUN_CMD make install
 
@@ -4258,9 +4265,8 @@ _EOF_
 				cp defaults_server /etc/default/urbackupsrv
 				cp logrotate_urbackupsrv /etc/logrotate.d/urbackupsrv
 
-				cd $HOME
-
-				rm -R $FP_DL_TMP/urbackup-server-*
+				cd $FP_WORK_DIR
+				rm -R urbackup-server-*
 
 			#Deb
 			else
@@ -4293,13 +4299,14 @@ _EOF_
 			DEPS_LIST='gpac motion'
 			Download_Install zip 'https://github.com/silvanmelchior/RPi_Cam_Web_Interface/archive/master.zip'
 
-			cd $FP_DL_TMP/RPi_Cam*
+			cd RPi_Cam*
 
 			#Config /etc/motion
 			mkdir -p /etc/motion
 			cp etc/motion/motion.conf.1 /etc/motion/motion.conf
 
 			#Config /etc/raspimjpeg
+			mkdir -p /etc/raspimjpeg
 			cp etc/raspimjpeg/raspimjpeg.1 /etc/raspimjpeg
 
 			#Setup /var/www/rpicam
@@ -4319,8 +4326,8 @@ _EOF_
 			ln -s /opt/vc/bin/raspimjpeg /usr/bin/raspimjpeg
 
 			#Cleanup / remove extracted source
-			cd "$HOME"
-			rm -R $FP_DL_TMP/RPi_Cam*
+			cd $FP_WORK_DIR
+			rm -R RPi_Cam*
 
 		fi
 
@@ -4350,7 +4357,7 @@ _EOF_
 
 			Banner_Installing
 
-			Download_Install zip 'https://github.com/ArturSierzant/OMPD/archive/master.zip' /var/www/
+			Download_Install zip 'https://github.com/ArturSierzant/OMPD/archive/master.zip' /var/www
 
 			rm -R /var/www/ompd &> /dev/null #Replace/upgrade existing installs
 			mv /var/www/OMPD* /var/www/ompd
@@ -4485,35 +4492,20 @@ _EOF_
 			if (( $G_HW_MODEL < 10 )); then
 
 				#	http://git.drogon.net/?p=wiringPi;a=shortlog;h=refs/heads/master snapshot
-				INSTALL_URL_ADDRESS='http://git.drogon.net/?p=wiringPi;a=snapshot;h=HEAD;sf=tgz'
+				Download_Install tar 'http://git.drogon.net/?p=wiringPi;a=snapshot;h=HEAD;sf=tgz'
 
 			# - Odroid's
 			elif (( $G_HW_MODEL < 20 )); then
 
-				INSTALL_URL_ADDRESS='https://github.com/hardkernel/wiringPi/archive/master.zip'
+				Download_Install zip 'https://github.com/hardkernel/wiringPi/archive/master.zip'
 
 			# - BPiPro
 			elif (( $G_HW_MODEL == 51 )); then
 
-				INSTALL_URL_ADDRESS='https://github.com/LeMaker/WiringBP/archive/bananapro.zip'
+				Download_Install zip 'https://github.com/LeMaker/WiringBP/archive/bananapro.zip'
 
 			fi
 
-			G_CHECK_URL "$INSTALL_URL_ADDRESS"
-
-			# - RPi
-			if (( $G_HW_MODEL < 10 )); then
-
-				Download_Install tar "$INSTALL_URL_ADDRESS"
-
-			# - Odroid's / BPI
-			else
-
-				Download_Install zip "$INSTALL_URL_ADDRESS"
-
-			fi
-
-			cd $FP_DL_TMP
 			mv WiringBP* wiringPi &> /dev/null #BPi
 			mv wiringPi* wiringPi &> /dev/null #eg: RPi, wiringPi-HEAD-8d188fa
 
@@ -4521,8 +4513,8 @@ _EOF_
 			chmod +x build
 			./build
 
-			cd $HOME
-			mv $FP_DL_TMP/wiringPi $HOME/
+			cd $FP_WORK_DIR
+			mv wiringPi $HOME/
 
 		fi
 
@@ -4662,7 +4654,7 @@ _EOF_
 			DEPS_LIST='python-dev python-setuptools'
 			Download_Install tar 'https://sourceforge.net/projects/webiopi/files/WebIOPi-0.7.1.tar.gz/download'
 
-			cd $FP_DL_TMP/WebIOPi*
+			cd WebIOPi*
 
 			#Automate Weaved prompt
 			sed -i '/read response/c\response="n"' setup.sh
@@ -4671,10 +4663,10 @@ _EOF_
 			./setup.sh
 			printf '\ec' # clear current terminal screen
 
-			cd $HOME
+			cd $FP_WORK_DIR
 
 			#Cleanup
-			rm -R $FP_DL_TMP/WebIOPi*
+			rm -R WebIOPi*
 
 		fi
 
@@ -4703,7 +4695,7 @@ _EOF_
 			DEPS_LIST='libpcre3-dev libssl-dev zlib1g-dev'
 			Download_Install tar 'https://www.haproxy.org/download/1.8/src/haproxy-1.8.8.tar.gz'
 
-			cd $FP_DL_TMP/haproxy-*
+			cd haproxy-*
 
 			#Compile and install
 			make -j $G_HW_CPU_CORES TARGET=linux2628 CPU=generic USE_PCRE=1 USE_OPENSSL=1 USE_ZLIB=1 USE_LINUX_SPLICE=1
@@ -4712,10 +4704,10 @@ _EOF_
 			mkdir /etc/haproxy
 
 			#Exit directory
-			cd $HOME
+			cd $FP_WORK_DIR
 
 			#Clean up
-			rm -R $FP_DL_TMP/haproxy-*
+			rm -R haproxy-*
 
 			#Install init script as service
 			cp /DietPi/dietpi/conf/haproxy_init /etc/init.d/haproxy
@@ -4936,8 +4928,10 @@ _EOF_
 
 			Banner_Installing
 
-			Download_Install zip 'https://github.com/ampache/ampache/archive/master.zip' /var/www
-			mv /var/www/ampache-* /var/www/ampache
+			Download_Install zip 'https://github.com/ampache/ampache/archive/master.zip'
+			mkdir -p /var/www/ampache
+			cp -R ampache-*/* /var/www/ampache
+			rm -R ampache-*
 
 			#composer install required for 3.8.2
 			php -r "readfile('https://getcomposer.org/installer');" > composer-setup.php
@@ -4948,7 +4942,7 @@ _EOF_
 
 			cd /var/www/ampache
 			composer install --prefer-source --no-interaction
-			cd "$HOME"
+			cd $FP_WORK_DIR
 
 		fi
 
@@ -5037,7 +5031,7 @@ _EOF_
 				# - Install packages
 				cd /etc/certbot_scripts
 				./certbot-auto -n --os-packages-only
-				cd $HOME
+				cd $FP_WORK_DIR
 
 			fi
 
@@ -5109,13 +5103,13 @@ _EOF_
 
 			fi
 
-			mv "$FP_DL_TMP/$filename_hostapd" /usr/sbin/hostapd
-			mv "$FP_DL_TMP/$filename_hostapd_cli" /usr/sbin/hostapd_cli
+			mv "$filename_hostapd" /usr/sbin/hostapd
+			mv "$filename_hostapd_cli" /usr/sbin/hostapd_cli
 
 			chmod +x /usr/sbin/hostapd
 			chmod +x /usr/sbin/hostapd_cli
 
-			rm $FP_DL_TMP/hostapd-*
+			rm hostapd-*
 
 			#Enable wifi modules
 			/DietPi/dietpi/func/dietpi-set_hardware wifimodules enable
@@ -5279,7 +5273,7 @@ _EOF_
 
 			# - move everything to /etc/emonhub
 			rm -R /etc/emonhub
-			mv $FP_DL_TMP/emonhub-* /etc/emonhub
+			mv emonhub-* /etc/emonhub
 
 		fi
 
@@ -5511,7 +5505,7 @@ _EOF_
 
 			npm install --unsafe-perm
 
-			cd "$HOME"
+			cd $FP_WORK_DIR
 
 		fi
 
@@ -5566,8 +5560,8 @@ _EOF_
 			Download_Install zip 'http://bintray.com/novik65/generic/download_file?file_path=ruTorrent-3.7.zip'
 
 			mkdir -p /var/www/rutorrent
-			mv $FP_DL_TMP/ruTorrent-*/* /var/www/rutorrent/
-			rm -R $FP_DL_TMP/ruTorrent-*
+			mv ruTorrent-*/* /var/www/rutorrent/
+			rm -R ruTorrent-*
 
 			#Raspbian unrar free only available in repos
 			if (( $G_HW_MODEL < 10 )); then
@@ -5624,7 +5618,7 @@ _EOF_
 				DEPS_LIST='libc-ares2'
 				Download_Install 7z "$INSTALL_URL_ADDRESS"
 
-				mv $FP_DL_TMP/aria2_* /usr/local/bin/aria2c
+				mv aria2_* /usr/local/bin/aria2c
 				chmod +x /usr/local/bin/aria2c
 
 			fi
@@ -5632,8 +5626,8 @@ _EOF_
 			#Web interface
 			Download_Install zip 'https://github.com/ziahamza/webui-aria2/archive/master.zip'
 
-			cp -R $FP_DL_TMP/webui-aria2* /var/www/aria2
-			rm -R $FP_DL_TMP/webui-aria2*
+			cp -R webui-aria2* /var/www/aria2
+			rm -R webui-aria2*
 
 		fi
 
@@ -5647,8 +5641,8 @@ _EOF_
 			Download_Install zip 'https://github.com/SickRage/SickRage/archive/master.zip'
 
 			mkdir -p $G_FP_DIETPI_USERDATA/sickrage
-			cp -R $FP_DL_TMP/SickRage-*/* $G_FP_DIETPI_USERDATA/sickrage/
-			rm -R $FP_DL_TMP/SickRage-*
+			cp -R SickRage-*/* $G_FP_DIETPI_USERDATA/sickrage/
+			rm -R SickRage-*
 
 			#Raspbian unrar free
 			if (( $G_HW_MODEL < 10 )); then
@@ -5693,8 +5687,8 @@ _EOF_
 			no_url_check=1 Download_Install tar "$INSTALL_URL_ADDRESS"
 
 			mkdir -p /etc/syncthing
-			cp -R $FP_DL_TMP/syncthing-*/syncthing /etc/syncthing/
-			rm -R $FP_DL_TMP/syncthing-*
+			cp -R syncthing-*/syncthing /etc/syncthing/
+			rm -R syncthing-*
 
 		fi
 
@@ -6031,7 +6025,7 @@ _EOF_
 
 			cd /var/www/koel
 			composer install
-			cd "$HOME"
+			cd $FP_WORK_DIR
 
 		fi
 
@@ -6181,13 +6175,12 @@ _EOF_
 			#Install Python and PIP
 			G_AGI python python-pip python-imaging python-dev
 
-			cd "$HOME"
 			git clone --depth=1 "$INSTALL_URL_ADDRESS"
 
 			# - Move HTPC Manager to a 'better' location
 			mkdir -p $G_FP_DIETPI_USERDATA/htpc-manager
-			mv "$HOME"/HTPC-Manager/* $G_FP_DIETPI_USERDATA/htpc-manager/
-			rm -R "$HOME"/HTPC-Manager
+			cp -R HTPC-Manager/* $G_FP_DIETPI_USERDATA/htpc-manager/
+			rm -R HTPC-Manager
 
 			# - psutil for system stats
 			pip install psutil
@@ -6214,7 +6207,7 @@ _EOF_
 			G_DIETPI-NOTIFY 2 'OctoPrint is now installing, please be patient and do not terminate this process, it may take some time...'
 			G_RUN_CMD python setup.py install
 
-			cd "$HOME"
+			cd $FP_WORK_DIR
 
 		fi
 
@@ -6504,7 +6497,7 @@ _EOF_
 			# - Enable default app for service start
 			cp src/assistant_library_with_button_demo.py src/main.py
 
-			cd "$HOME"
+			cd $FP_WORK_DIR
 
 		fi
 
@@ -6739,7 +6732,7 @@ _EOF_
 				dpkg -i *.deb
 				G_AGF
 
-				cd "$HOME"
+				cd $FP_WORK_DIR
 				rm -R gpu_driver
 				rm package.7z
 
@@ -8667,7 +8660,6 @@ _EOF_
 		if (( ${aSOFTWARE_INSTALL_STATE[$INSTALLING_INDEX]} == 1 )); then
 
 			Banner_Configuration
-
 			sed -i "/JAVA_HOME=/c\JAVA_HOME=$(find \/usr\/lib\/jvm\/ -name java-8-openjdk*)" /etc/default/tomcat8
 
 		fi
@@ -10458,7 +10450,7 @@ _EOF_
 			# - Supervisor service
 			cp $G_FP_DIETPI_USERDATA/mineos/minecraft/init/supervisor_conf /etc/supervisor/conf.d/mineos.conf
 
-			cd "$HOME"
+			cd $FP_WORK_DIR
 
 			# - Add underprivilged user for web access
 			useradd mineos
@@ -11510,7 +11502,7 @@ _EOF_
 			php artisan koel:init
 			#php artisan db:seed --force
 
-			cd "$HOME"
+			cd $FP_WORK_DIR
 
 			cat << _EOF_ > /etc/systemd/system/koel.service
 [Unit]
@@ -14279,7 +14271,7 @@ _EOF_
 		Create_UserContent_Folders
 		#------------------------------------------------------------
 		# Set current path to home folder
-		cd $HOME
+		cd $FP_WORK_DIR
 
 		# Update APT
 		Banner_Apt_Update
@@ -14316,9 +14308,6 @@ _EOF_
 
 		# Update required software that needs to be installed
 		Install_Flag_Prereq_Software
-
-		# Create tmp download directory
-		G_RUN_CMD mkdir -p $FP_DL_TMP
 
 		# Install Linux Software
 		/DietPi/dietpi/dietpi-services stop
