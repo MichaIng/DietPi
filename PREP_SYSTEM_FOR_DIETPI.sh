@@ -379,7 +379,7 @@
 		'65' 'NanoPi NEO 2'
 		'64' 'NanoPi NEO Air'
 		'63' 'NanoPi M1/T1'
-		'62' 'NanoPi M3/T3'
+		'62' 'NanoPi M3/T3/F3'
 		'61' 'NanoPi M2/T2'
 		'60' 'NanoPi Neo'
 		'38' 'OrangePi PC 2'
