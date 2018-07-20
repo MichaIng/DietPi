@@ -1102,7 +1102,7 @@ _EOF_
 		# Restart DietPi-RAMdisk, as 'dietpi-drive_manager 4' remounts /DietPi.
 		G_RUN_CMD systemctl restart dietpi-ramdisk
 		# Recreate and navigate to "/tmp/dietpi-prep" working directory
-		mkdir /tmp/dietpi-prep
+		mkdir -p /tmp/dietpi-prep
 		cd /tmp/dietpi-prep
 
 		G_DIETPI-NOTIFY 2 'Deleting all log files /var/log'
