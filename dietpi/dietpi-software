@@ -25,17 +25,20 @@
 
 	#Import DietPi-Globals ---------------------------------------------------------------
 	. /DietPi/dietpi/func/dietpi-globals
+	export G_PROGRAM_NAME='DietPi-Software'
+	FP_WORK_DIR='/tmp/dietpi-software'
+	G_INIT
 	G_CHECK_ROOT_USER
 	G_CHECK_ROOTFS_RW
-	export G_PROGRAM_NAME='DietPi-Software'
-	G_INIT
+	[[ -f $FP_WORK_DIR ]] && rm -R $FP_WORK_DIR
+	mkdir -p $FP_WORK_DIR
 	#Import DietPi-Globals ---------------------------------------------------------------
 
 	#/////////////////////////////////////////////////////////////////////////////////////
 	#Filepath
 	#/////////////////////////////////////////////////////////////////////////////////////
 	FP_INSTALLED_FILE='/DietPi/dietpi/.installed'
-	FP_INSTALLED_FILE_TEMP='/tmp/dietpi-software.installed'
+	FP_INSTALLED_FILE_TEMP="$FP_WORK_DIR/.installed"
 
 	#Used to set user/personal data directories (eg: usbdrive)
 	FP_DIETPI_DEDICATED_USBDRIVE=''
@@ -222,7 +225,7 @@ _EOF_
 	DISABLE_REBOOT=0
 
 	#Global Password for software installs
-	GLOBAL_PW="$(grep -m1 '^[[:blank:]]*AUTO_SETUP_GLOBAL_PASSWORD=' /DietPi/dietpi.txt | sed 's/^.*=//')"
+	GLOBAL_PW="$(grep -m1 '^[[:blank:]]*AUTO_SETUP_GLOBAL_PASSWORD=' /DietPi/dietpi.txt | sed 's/^[^=]*=//')"
 	if [[ -z $GLOBAL_PW ]]; then
 
 		GLOBAL_PW='dietpi'
@@ -234,8 +237,12 @@ _EOF_
 
 	#Run Installation Flag (1 = run installs)
 	GOSTARTINSTALL=0
+
+	# Install variables
 	INSTALL_URL_ADDRESS=''
 	UNINSTALL_URL_ADDRESS=''
+	URL_LIST=''
+	DEPS_LIST=''
 
 	#Special installation Vars
 	USER_EMONHUB_APIKEY_COMPLETED=0
@@ -3270,6 +3277,80 @@ _EOF_
 
 	}
 
+	Download_Install(){
+
+		local type="$1" # deb|zip|tar|7z
+		local url="$2"
+		local target="$3" # Extract target
+		local file="$INSTALLING_INDEX.$type"
+
+		# Allow to check all required URLs for each software title first, before starting any download: 
+		if [[ $URL_LIST ]]; then
+
+			local i=0
+			for i in $URL_LIST
+			do
+
+				G_CHECK_URL "$i"
+
+			done
+			URL_LIST=''
+			local no_check_url=1
+
+		fi
+
+		(( $no_check_url )) || G_CHECK_URL "$url"
+		unset no_check_url
+
+		cd $FP_WORK_DIR
+
+		# If deb package dependencies need to be installed, start wget as G_THREAD_START:
+		if [[ $DEPS_LIST ]]; then
+
+			G_THREAD_START wget "$url" -O $file
+			G_AGI $DEPS_LIST
+			DEPS_LIST=''
+			G_THREAD_WAIT
+			local no_download=1
+
+		fi
+
+		if [[ $type == deb ]]; then
+
+			(( $no_download )) || l_message='Downloading deb package' G_RUN_CMD wget "$url" -O $file
+			# Allow error on first attempt, giving APT fix a change to resolve e.g. dependencies
+			l_message='Installing deb package' G_USER_INPUTS=0 G_RUN_CMD_INFO_ONLY=1 G_RUN_CMD dpkg -i $file
+			(( $G_ERROR_HANDLER_EXITCODE_RETURN )) && G_DIETPI-NOTIFY 2 'Trying automated APT fix' && G_AGF
+
+		elif [[ $type == zip ]]; then
+
+			(( $no_download )) || l_message='Downloading zip archive' G_RUN_CMD wget "$url" -O $file
+			[[ $target ]] && target="-d $target"
+			l_message='Unzipping archive' G_RUN_CMD unzip -o $file $target
+
+		elif [[ $type == tar ]]; then
+
+			(( $no_download )) || l_message='Downloading tarball' G_RUN_CMD wget "$url" -O $file
+			[[ $target ]] && mkdir -p $target && target="-C $target"
+			l_message='Unpacking tarball' G_RUN_CMD tar xf $file $target
+
+		elif [[ $type == 7z ]]; then
+
+			(( $no_download )) || l_message='Downloading 7zip archive' G_RUN_CMD wget "$url" -O $file
+			[[ $target ]] && target="-o$target"
+			l_message='Extracting 7zip archive' G_RUN_CMD 7za x -y $file $target
+
+		else
+
+			G_DIETPI-NOTIFY 1 'Download_Install: Invalid argument $1, needs to be one of: deb|zip|tar|7z'
+
+		fi
+
+		[[ -f $file ]] && l_message='Cleaning download directory' G_RUN_CMD rm $file
+		unset no_download
+
+	}
+
 	#/////////////////////////////////////////////////////////////////////////////////////
 	# This function handles the installation of the selected software.
 	#
@@ -3332,11 +3413,7 @@ _EOF_
 			#RPi, revert to Debian pcmanfm install package: https://github.com/Fourdee/DietPi/issues/1558#issuecomment-390328173
 			if (( $G_HW_MODEL < 10 )); then
 
-				INSTALL_URL_ADDRESS='https://dietpi.com/downloads/binaries/all/pcmanfm_1.2.5-3_armhf.deb'
-				G_CHECK_URL "$INSTALL_URL_ADDRESS"
-				wget "$INSTALL_URL_ADDRESS" -O $INSTALLING_INDEX.deb
-				G_RUN_CMD dpkg -i $INSTALLING_INDEX.deb
-				rm $INSTALLING_INDEX.deb
+				Download_Install deb 'https://dietpi.com/downloads/binaries/all/pcmanfm_1.2.5-3_armhf.deb'
 
 			fi
 
@@ -3400,7 +3477,6 @@ _EOF_
 			Banner_Installing
 
 			INSTALL_URL_ADDRESS='https://dietpi.com/downloads/binaries/all/nomachine_6.1.6_'
-
 			#x86_64
 			if (( $G_HW_ARCH == 10 )); then
 
@@ -3418,11 +3494,7 @@ _EOF_
 
 			fi
 
-			G_CHECK_URL "$INSTALL_URL_ADDRESS"
-
-			wget "$INSTALL_URL_ADDRESS" -O package.deb
-			dpkg -i package.deb
-			rm package.deb
+			Download_Install deb "$INSTALL_URL_ADDRESS"
 
 		fi
 
@@ -3441,7 +3513,7 @@ _EOF_
 
 			Banner_Installing
 
-			echo -e "proftpd-basic shared/proftpd/inetd_or_standalone select standalone" | debconf-set-selections
+			debconf-set-selections <<< 'proftpd-basic shared/proftpd/inetd_or_standalone select standalone'
 			G_AGI proftpd-basic
 
 		fi
@@ -3493,13 +3565,12 @@ _EOF_
 		if (( ${aSOFTWARE_INSTALL_STATE[$INSTALLING_INDEX]} == 1 )); then
 
 			Banner_Installing
-			# If IPv6 is disabled, nginx service fails to start up due to IPv6 part in default site.
+			# If IPv6 is disabled, nginx service fails to start up due to IPv6 statement in default site.
 			# This leads to APT failure, thus we copy our non-IPv6 config in place first:
-			if [ ! -d /proc/sys/net/ipv6 ]; then
+			if [[ ! -d /proc/sys/net/ipv6 ]]; then
 
-				[ -d /etc/nginx ] || mkdir /etc/nginx
+				[[ -d /etc/nginx/sites-available ]] || mkdir -p /etc/nginx/sites-available
 				cp /DietPi/dietpi/conf/nginx.conf /etc/nginx/nginx.conf
-				[ -d /etc/nginx/sites-available ] || mkdir /etc/nginx/sites-available
 				cp /DietPi/dietpi/conf/nginx.site-available-default /etc/nginx/sites-available/default
 
 			fi
@@ -3512,9 +3583,9 @@ _EOF_
 		if (( ${aSOFTWARE_INSTALL_STATE[$INSTALLING_INDEX]} == 1 )); then
 
 			Banner_Installing
-			G_AGI lighttpd perl
 
 			#NB: RPi | Perl required, else 'lighttpd-enable-mod fastcgi' = Can't locate Term/ReadLine.pm
+			G_AGI lighttpd perl
 
 		fi
 
@@ -3532,9 +3603,9 @@ _EOF_
 			else
 				# Otherwise use possibly existent /var/lib/mysql
 				# - Remove possible dead symlinks/files:
-				rm "$G_FP_DIETPI_USERDATA/mysql" &> /dev/null
-				G_RUN_CMD mkdir -p "$G_FP_DIETPI_USERDATA/mysql"
-				if [ -d /var/lib/mysql ]; then
+				rm $G_FP_DIETPI_USERDATA/mysql &> /dev/null
+				mkdir -p $G_FP_DIETPI_USERDATA/mysql
+				if [[ -d /var/lib/mysql ]]; then
 
 					G_DIETPI-NOTIFY 2 '/var/lib/mysql exists, will migrate containing databases'
 					G_RUN_CMD cp -a /var/lib/mysql/. $G_FP_DIETPI_USERDATA/mysql
@@ -3545,12 +3616,12 @@ _EOF_
 
 			G_DIETPI-NOTIFY 2 'Removing /var/lib/mysql, if existent'
 			[[ -L /var/lib/mysql && ! $(readlink /var/lib/mysql) =~ $G_FP_DIETPI_USERDATA/mysql ]] &&
-					rm -R "$(readlink /var/lib/mysql)" &> /dev/null
+				rm -R "$(readlink /var/lib/mysql)" &> /dev/null
 			rm -R /var/lib/mysql &> /dev/null
 
-			G_DIETPI-NOTIFY 2 "Creating symlink: /var/lib/mysql -> $G_FP_DIETPI_USERDATA/mysql"
-			G_RUN_CMD ln -sf "$G_FP_DIETPI_USERDATA/mysql" /var/lib/mysql
-			chown -R mysql:mysql "$G_FP_DIETPI_USERDATA/mysql" 2>/dev/null
+			l_message="Creating symlink: /var/lib/mysql -> $G_FP_DIETPI_USERDATA/mysql" G_RUN_CMD ln -sf $G_FP_DIETPI_USERDATA/mysql /var/lib/mysql
+			chown mysql:mysql -h /var/lib/mysql &> /dev/null
+			chown mysql:mysql -RL /var/lib/mysql &> /dev/null
 
 			G_AGI mariadb-server
 
@@ -3570,13 +3641,15 @@ _EOF_
 		if (( ${aSOFTWARE_INSTALL_STATE[$INSTALLING_INDEX]} == 1 )); then
 
 			Banner_Installing
-			G_AGI redis-server
+			local package_list='redis-server'
 			#Redis php module | == 2 to check for existing installs, if == 1, then module will be installed together with PHP, to prevent dependency installations
 			if (( ${aSOFTWARE_INSTALL_STATE[89]} == 2 )); then
 
-				G_AGI "$PHP_APT_PACKAGE_NAME"-redis
+				package_list+=" $PHP_APT_PACKAGE_NAME-redis"
 
 			fi
+
+			G_AGI $package_list
 
 		fi
 
@@ -3589,28 +3662,28 @@ _EOF_
 			#Install base PHP packages/modules.
 			if (( ${aSOFTWARE_INSTALL_STATE[83]} >= 1 )); then
 
-				G_AGI libapache2-mod-"$PHP_APT_PACKAGE_NAME"
+				local package_list="libapache2-mod-$PHP_APT_PACKAGE_NAME"
 
 			else
 
-				G_AGI "$PHP_APT_PACKAGE_NAME"-fpm
+				local package_list="$PHP_APT_PACKAGE_NAME-fpm"
 
 			fi
 
 			#php-common modules, used by most web software
-			G_AGI "$PHP_APT_PACKAGE_NAME"-curl "$PHP_APT_PACKAGE_NAME"-gd "$PHP_APT_PACKAGE_NAME"-apcu
+			package_list+=" $PHP_APT_PACKAGE_NAME-curl $PHP_APT_PACKAGE_NAME-gd $PHP_APT_PACKAGE_NAME-apcu"
 
 			# + stretch extras
 			if (( $G_DISTRO >= 4 )); then
 
-				G_AGI "$PHP_APT_PACKAGE_NAME"-mbstring "$PHP_APT_PACKAGE_NAME"-zip "$PHP_APT_PACKAGE_NAME"-xml
+				package_list+=" $PHP_APT_PACKAGE_NAME-mbstring $PHP_APT_PACKAGE_NAME-zip $PHP_APT_PACKAGE_NAME-xml"
 
 			fi
 
 			# PHP7.2/Buster dropped support for mcrypt: https://liorkaplan.wordpress.com/2017/09/10/php-7-2-is-coming-mcrypt-extension-isnt/
 			if (( $G_DISTRO < 5 )); then
 
-				G_AGI "$PHP_APT_PACKAGE_NAME"-mcrypt
+				package_list+=" $PHP_APT_PACKAGE_NAME-mcrypt"
 
 			fi
 
@@ -3618,11 +3691,11 @@ _EOF_
 
 				if (( $G_DISTRO < 4 )); then
 					#For <= Jessie, php5-mysqlnd provides the newer mysql client libraries compared to php5-mysql.
-					G_AGI php5-mysqlnd
+					package_list+=' php5-mysqlnd'
 
 				else
 					#For >= Stretch, php(7.X)-mysqlnd does not exist, thus php-mysql need to be installed: https://packages.debian.org/de/stretch/php-mysql
-					G_AGI "$PHP_APT_PACKAGE_NAME"-mysql
+					package_list+=" $PHP_APT_PACKAGE_NAME-mysql"
 
 				fi
 
@@ -3630,16 +3703,18 @@ _EOF_
 
 			if (( ${aSOFTWARE_INSTALL_STATE[87]} >= 1 )); then
 
-				G_AGI "$PHP_APT_PACKAGE_NAME"-sqlite* #wildcard for version (eg:3)
+				package_list+=" $PHP_APT_PACKAGE_NAME-sqlite*" #wildcard for version (eg:3)
 
 			fi
 
 			#Redis php module
 			if (( ${aSOFTWARE_INSTALL_STATE[91]} >= 1 )); then
 
-				G_AGI "$PHP_APT_PACKAGE_NAME"-redis
+				package_list+=" $PHP_APT_PACKAGE_NAME-redis"
 
 			fi
+
+			G_AGI $package_list
 
 		fi
 
@@ -3653,21 +3728,21 @@ _EOF_
 			G_RUN_CMD systemctl start mysql
 
 			# Set password parameters before installing
-			debconf-set-selections <<< "phpmyadmin phpmyadmin/dbconfig-install boolean true"
+			debconf-set-selections <<< 'phpmyadmin phpmyadmin/dbconfig-install boolean true'
 			debconf-set-selections <<< "phpmyadmin phpmyadmin/mysql/app-pass password $GLOBAL_PW"
 			debconf-set-selections <<< "phpmyadmin phpmyadmin/app-password-confirm password $GLOBAL_PW"
 
 			if (( ${aSOFTWARE_INSTALL_STATE[83]} == 1 )); then
 
-				debconf-set-selections <<< "phpmyadmin phpmyadmin/reconfigure-webserver multiselect apache2"
+				debconf-set-selections <<< 'phpmyadmin phpmyadmin/reconfigure-webserver multiselect apache2'
 
 			elif (( ${aSOFTWARE_INSTALL_STATE[84]} == 1 )); then
 
-				debconf-set-selections <<< "phpmyadmin phpmyadmin/reconfigure-webserver multiselect lighttpd"
+				debconf-set-selections <<< 'phpmyadmin phpmyadmin/reconfigure-webserver multiselect lighttpd'
 
 			else
 
-				debconf-set-selections <<< "phpmyadmin phpmyadmin/reconfigure-webserver multiselect none"
+				debconf-set-selections <<< 'phpmyadmin phpmyadmin/reconfigure-webserver multiselect none'
 
 			fi
 
@@ -3681,22 +3756,15 @@ _EOF_
 
 			Banner_Installing
 
-			#Jessie
-			if (( $G_DISTRO == 3 )); then
+			#Jessie-
+			if (( $G_DISTRO < 4 )); then
 
 				#MPD not available in Jessie Repo for ARMv8
 				if (( $G_HW_ARCH == 3 )); then
 
-					INSTALL_URL_ADDRESS='https://dietpi.com/downloads/binaries/all/mpd_0.19.21_arm64.deb'
-					G_CHECK_URL "$INSTALL_URL_ADDRESS"
-
 					#libupnp6 for net discov with upnp/avahi
-					G_AGI libupnp6
-					G_AGI libwrap0 libmpdclient2 libao-common libao4 libasound2 libasound2-data libasyncns0 libaudiofile1 libavahi-client3 libavahi-common-data libavahi-common3 libavcodec56 libavformat56 libavresample2 libavutil54 libbinio1ldbl libcaca0 libcdio-cdda1 libcdio-paranoia1 libcdio13 libcups2 libcurl3-gnutls libdirectfb-1.2-9 libdnet libfaad2 libflac8 libfluidsynth1 libgme0 libgomp1 libgsm1 libice6 libid3tag0 libiso9660-8 libjack-jackd2-0 libjson-c2 libldb1 libmad0 libmikmod3 libmms0 libmodplug1 libmp3lame0 libmpcdec6 libmpg123-0 libnfs4 libntdb1 libogg0 libopenal-data libopenal1 libopenjpeg5 libopus0 liborc-0.4-0 libpulse0 libresid-builder0c2a libroar2 libsamplerate0 libschroedinger-1.0-0 libsdl1.2debian libshout3 libsidplay2 libsidutils0 libslp1 libsm6 libsmbclient libsndfile1 libsoxr0 libspeex1 libspeexdsp1 libsqlite3-0 libtalloc2 libtdb1 libtevent0 libtheora0 libupnp6 libva1 libvorbis0a libvorbisenc2 libvorbisfile3 libvpx1 libwavpack1 libwbclient0 libwildmidi-config libwildmidi1 libx11-6 libx11-data libx11-xcb1 libx264-142 libxau6 libxcb1 libxdmcp6 libxext6 libxi6 libxtst6 libxvidcore4 libyajl2 libzzip-0-13 mime-support python python-talloc python2.7 samba-libs x11-common file
-
-					wget "$INSTALL_URL_ADDRESS" -O package.deb
-					dpkg -i package.deb
-					rm package.deb
+					DEPS_LIST='libupnp6 libwrap0 libmpdclient2 libao-common libao4 libasound2 libasound2-data libasyncns0 libaudiofile1 libavahi-client3 libavahi-common-data libavahi-common3 libavcodec56 libavformat56 libavresample2 libavutil54 libbinio1ldbl libcaca0 libcdio-cdda1 libcdio-paranoia1 libcdio13 libcups2 libcurl3-gnutls libdirectfb-1.2-9 libdnet libfaad2 libflac8 libfluidsynth1 libgme0 libgomp1 libgsm1 libice6 libid3tag0 libiso9660-8 libjack-jackd2-0 libjson-c2 libldb1 libmad0 libmikmod3 libmms0 libmodplug1 libmp3lame0 libmpcdec6 libmpg123-0 libnfs4 libntdb1 libogg0 libopenal-data libopenal1 libopenjpeg5 libopus0 liborc-0.4-0 libpulse0 libresid-builder0c2a libroar2 libsamplerate0 libschroedinger-1.0-0 libsdl1.2debian libshout3 libsidplay2 libsidutils0 libslp1 libsm6 libsmbclient libsndfile1 libsoxr0 libspeex1 libspeexdsp1 libsqlite3-0 libtalloc2 libtdb1 libtevent0 libtheora0 libupnp6 libva1 libvorbis0a libvorbisenc2 libvorbisfile3 libvpx1 libwavpack1 libwbclient0 libwildmidi-config libwildmidi1 libx11-6 libx11-data libx11-xcb1 libx264-142 libxau6 libxcb1 libxdmcp6 libxext6 libxi6 libxtst6 libxvidcore4 libyajl2 libzzip-0-13 mime-support python python-talloc python2.7 samba-libs x11-common file'
+					Download_Install deb 'https://dietpi.com/downloads/binaries/all/mpd_0.19.21_arm64.deb'
 
 				else
 
@@ -3704,11 +3772,10 @@ _EOF_
 
 				fi
 
-			#Stretch+
-			else
+			#Stretch
+			elif (( $G_DISTRO == 4 )); then
 
 				INSTALL_URL_ADDRESS='https://dietpi.com/downloads/binaries/all/mpd_0.20.18-1_'
-
 				#armv6
 				if (( $G_HW_ARCH == 1 )); then
 
@@ -3731,18 +3798,19 @@ _EOF_
 
 				fi
 
-				G_CHECK_URL "$INSTALL_URL_ADDRESS"
-				G_THREAD_START wget "$INSTALL_URL_ADDRESS" -O $INSTALLING_INDEX.deb
-
-				G_AGI libupnp6 libwrap0 libmpdclient2 libflac8 libyajl2 libavahi-client3 libvorbisfile3 libwavpack1 libmad0 libmpg123-0 libopus0 libavformat57 libfaad2 libcdio-paranoia1 libiso9660-8 libshout3 libid3tag0
-
-				G_THREAD_WAIT
 				apt-mark unhold mpd &> /dev/null #??? Not required for dpkg -i installs
 
-				dpkg -i $INSTALLING_INDEX.deb
-				rm $INSTALLING_INDEX.deb
+				DEPS_LIST='libupnp6 libwrap0 libmpdclient2 libflac8 libyajl2 libavahi-client3 libvorbisfile3 libwavpack1 libmad0 libmpg123-0 libopus0 libavformat57 libfaad2 libcdio-paranoia1 libiso9660-8 libshout3 libid3tag0'
+				Download_Install deb "$INSTALL_URL_ADDRESS"
 
 				apt-mark hold mpd # prevent repo updates from overwriting
+
+			#Buster+
+			else
+
+				# libcdio-paranoia1 and libiso9660-8 not available, but ibcdio-paranoia2 and libiso9660-11 instead
+				# Buster repo version > 0.20.18, thus stay with APT for now:
+				G_AGI mpd
 
 			fi
 
@@ -3753,13 +3821,7 @@ _EOF_
 		if (( ${aSOFTWARE_INSTALL_STATE[$INSTALLING_INDEX]} == 1 )); then
 
 			Banner_Installing
-
-			INSTALL_URL_ADDRESS='https://www.phpbb.com/files/release/phpBB-3.2.2.zip'
-			G_CHECK_URL "$INSTALL_URL_ADDRESS"
-
-			wget "$INSTALL_URL_ADDRESS" -O package.zip
-			G_RUN_CMD unzip -o package.zip -d /var/www
-			rm package.zip
+			Download_Install zip 'https://www.phpbb.com/files/release/phpBB-3.2.2.zip' /var/www
 
 		fi
 
@@ -3769,47 +3831,43 @@ _EOF_
 
 			Banner_Installing
 
-			INSTALL_URL_ADDRESS='https://github.com/OpenBazaar/OpenBazaar-Server.git'
-			G_CHECK_URL "$INSTALL_URL_ADDRESS"
+			INSTALL_URL_ADDRESS1='https://github.com/zeromq/libzmq'
+			INSTALL_URL_ADDRESS2='https://github.com/pyca/pynacl/'
+			INSTALL_URL_ADDRESS3='https://github.com/OpenBazaar/OpenBazaar-Server.git'
+			G_CHECK_URL "$INSTALL_URL_ADDRESS1"
+			G_CHECK_URL "$INSTALL_URL_ADDRESS2"
+			G_CHECK_URL "$INSTALL_URL_ADDRESS3"
 
 			G_AGI libsodium-dev automake autoconf pkg-config libtool libssl-dev libffi-dev python-dev openssl libzmq3-dev
-
-			#Not required.
-			#G_AGI software-properties-common
-			#add-apt-repository -y ppa:chris-lea/libsodium
-			#G_AGUP
-
 			pip install cryptography
 
-			cd $HOME
-			git clone --depth=1 https://github.com/zeromq/libzmq
-			git clone --depth=1 https://github.com/pyca/pynacl/
-			git clone --depth=1 "$INSTALL_URL_ADDRESS"
-
-			# - compile
-			cd $HOME/libzmq
+			# libzmq
+			git clone --depth=1 "$INSTALL_URL_ADDRESS1"
+			cd libzmq
 			./autogen.sh && ./configure && make -j $G_HW_CPU_CORES
 			make check && make install && ldconfig
+			cd $FP_WORK_DIR
+			rm -R libzmq
 
-			cd $HOME/pynacl
+			# pynacl
+			git clone --depth=1 "$INSTALL_URL_ADDRESS2"
+			cd pynacl
 			python setup.py build && python setup.py install
+			cd $FP_WORK_DIR
+			rm -R pynacl
 
-			cd $HOME
-
+			# OpenBazaar
+			git clone --depth=1 "$INSTALL_URL_ADDRESS3"
 			# - Move OpenBazaar to a 'better' location
 			mkdir -p /etc/openbazaar-server
-			mv $HOME/OpenBazaar-Server/* /etc/openbazaar-server/
-			rm -R $HOME/OpenBazaar-Server
-
+			cp -R OpenBazaar-Server/* /etc/openbazaar-server/
+			rm -R OpenBazaar-Server
 			# - install OpenBazaar
 			cd /etc/openbazaar-server
 			pip install -r requirements.txt
+			cd $FP_WORK_DIR
 
-			cd $HOME
-
-			# - Clean up, remove source libraries
-			rm -R $HOME/libzmq
-			rm -R $HOME/pynacl
+			unset INSTALL_URL_ADDRESS1 INSTALL_URL_ADDRESS2 INSTALL_URL_ADDRESS3
 
 		fi
 
@@ -3818,13 +3876,7 @@ _EOF_
 		if (( ${aSOFTWARE_INSTALL_STATE[$INSTALLING_INDEX]} == 1 )); then
 
 			Banner_Installing
-
-			INSTALL_URL_ADDRESS='http://yacy.net/release/yacy_v1.92_20161226_9000.tar.gz'
-			G_CHECK_URL "$INSTALL_URL_ADDRESS"
-
-			wget "$INSTALL_URL_ADDRESS" -O package.tar.gz
-			G_RUN_CMD tar xvf package.tar.gz -C /etc/
-			rm package.tar.gz
+			Download_Install tar 'http://yacy.net/release/yacy_v1.92_20161226_9000.tar.gz' /etc
 
 		fi
 
@@ -3834,7 +3886,7 @@ _EOF_
 
 			Banner_Installing
 
-			G_DIETPI-NOTIFY 2 'Installing needed PHP modules.' # https://doc.owncloud.org/server/latest/admin_manual/installation/source_installation.html#php-extensions
+			G_DIETPI-NOTIFY 2 'Installing needed PHP modules' # https://doc.owncloud.org/server/latest/admin_manual/installation/source_installation.html#php-extensions
 			G_AGI "$PHP_APT_PACKAGE_NAME"-intl "$PHP_APT_PACKAGE_NAME"-redis
 
 			if [[ -f /var/www/owncloud/occ ]]; then
@@ -3843,7 +3895,7 @@ _EOF_
 
 			else
 
-				local datadir="$(grep -m1 '^[[:blank:]]*SOFTWARE_OWNCLOUD_DATADIR=' /DietPi/dietpi.txt | sed 's/^.*=//' | sed 's|/$||')"
+				local datadir="$(grep -m1 '^[[:blank:]]*SOFTWARE_OWNCLOUD_DATADIR=' /DietPi/dietpi.txt | sed 's/^[^=]*=//' | sed 's|/$||')"
 				[[ $datadir ]] || datadir="$G_FP_DIETPI_USERDATA/owncloud_data"
 				if [[ -f $datadir/dietpi-owncloud-installation-backup/occ ]]; then
 
@@ -3854,11 +3906,7 @@ _EOF_
 
 				else
 
-					INSTALL_URL_ADDRESS='https://download.owncloud.org/community/owncloud-latest.zip'
-					G_CHECK_URL "$INSTALL_URL_ADDRESS"
-					G_RUN_CMD wget "$INSTALL_URL_ADDRESS" -O package.zip
-					G_RUN_CMD unzip -o package.zip -d /var/www
-					rm package.zip
+					Download_Install zip 'https://download.owncloud.org/community/owncloud-latest.zip' /var/www
 
 				fi
 
@@ -3874,7 +3922,7 @@ _EOF_
 
 			Banner_Installing
 
-			G_DIETPI-NOTIFY 2 'Installing needed PHP modules.' # https://docs.nextcloud.com/server/13/admin_manual/installation/source_installation.html#prerequisites-label
+			G_DIETPI-NOTIFY 2 'Installing needed PHP modules' # https://docs.nextcloud.com/server/13/admin_manual/installation/source_installation.html#prerequisites-label
 			G_AGI "$PHP_APT_PACKAGE_NAME"-intl "$PHP_APT_PACKAGE_NAME"-redis
 
 			if [[ -f /var/www/nextcloud/occ ]]; then
@@ -3883,7 +3931,7 @@ _EOF_
 
 			else
 
-				local datadir="$(grep -m1 '^[[:blank:]]*SOFTWARE_NEXTCLOUD_DATADIR=' /DietPi/dietpi.txt | sed 's/^.*=//' | sed 's|/$||')"
+				local datadir="$(grep -m1 '^[[:blank:]]*SOFTWARE_NEXTCLOUD_DATADIR=' /DietPi/dietpi.txt | sed 's/^[^=]*=//' | sed 's|/$||')"
 				[[ $datadir ]] || datadir="$G_FP_DIETPI_USERDATA/nextcloud_data"
 				if [[ -f $datadir/dietpi-nextcloud-installation-backup/occ ]]; then
 
@@ -3894,11 +3942,7 @@ _EOF_
 
 				else
 
-					INSTALL_URL_ADDRESS='https://download.nextcloud.com/server/releases/latest.zip'
-					G_CHECK_URL "$INSTALL_URL_ADDRESS"
-					G_RUN_CMD wget "$INSTALL_URL_ADDRESS" -O package.zip
-					G_RUN_CMD unzip -o package.zip -d /var/www
-					rm package.zip
+					Download_Install zip 'https://download.nextcloud.com/server/releases/latest.zip' /var/www
 
 				fi
 
@@ -3914,11 +3958,7 @@ _EOF_
 
 			Banner_Installing
 
-			INSTALL_URL_ADDRESS='https://dietpi.com/downloads/binaries/all/ympd_1.2.3.7z'
-			G_CHECK_URL "$INSTALL_URL_ADDRESS"
-
-			wget "$INSTALL_URL_ADDRESS" -O package.7z
-			G_RUN_CMD 7z x -y package.7z
+			Download_Install 7z 'https://dietpi.com/downloads/binaries/all/ympd_1.2.3.7z'
 
 			local binary_name='ympd_'
 			# - armv6
@@ -3942,14 +3982,11 @@ _EOF_
 				binary_name+='amd64'
 
 			fi
-
 			binary_name+="_$G_DISTRO_NAME"
 
 			mv "$binary_name" /usr/bin/ympd
 			chmod +x /usr/bin/ympd
-
 			rm ympd_*
-			rm package.7z
 
 		fi
 
@@ -3976,11 +4013,7 @@ _EOF_
 
 			fi
 
-			G_CHECK_URL "$INSTALL_URL_ADDRESS"
-
-			wget "$INSTALL_URL_ADDRESS" -O package.tar.bz2
-			G_RUN_CMD tar xvf package.tar.bz2
-			rm package.tar.bz2
+			Download_Install tar "$INSTALL_URL_ADDRESS"
 
 			# - reinstall, clear dir, prevent mv fail on non-empty dir
 			rm -R /etc/roonbridge &> /dev/null
@@ -4011,6 +4044,7 @@ _EOF_
 			elif (( $G_HW_ARCH == 3 )); then
 
 				INSTALL_URL_ADDRESS='https://dietpi.com/downloads/binaries/all/cava_0.6.1-1_arm64.deb'
+				# Using older binary for Odroid C2 due to: https://github.com/Fourdee/DietPi/issues/1340#issuecomment-393225267
 				if (( $G_HW_MODEL == 12 )); then
 
 					INSTALL_URL_ADDRESS='https://dietpi.com/downloads/binaries/all/cava_0.4.2_arm64.deb'
@@ -4024,16 +4058,10 @@ _EOF_
 
 			fi
 
-			G_CHECK_URL "$INSTALL_URL_ADDRESS"
-			G_THREAD_START wget "$INSTALL_URL_ADDRESS" -O $INSTALLING_INDEX.deb
 			G_THREAD_START wget https://dietpi.com/downloads/binaries/all/cava.psf -O $HOME/cava.psf # + Font for cava, nice bars
 
-			G_AGI libpulse0 libfftw3-3
-
-			G_THREAD_WAIT
-
-			G_RUN_CMD dpkg -i $INSTALLING_INDEX.deb
-			rm $INSTALLING_INDEX.deb
+			DEPS_LIST='libpulse0 libfftw3-3'
+			Download_Install deb "$INSTALL_URL_ADDRESS"
 
 		fi
 
@@ -4083,35 +4111,41 @@ _EOF_
 			#Odroids
 			if (( $G_HW_MODEL >= 10 )) && (( $G_HW_MODEL < 20 )); then
 
-				G_AGI kodi-odroid
+				local package_list='kodi-odroid'
 
 				#XU4 - requires pulse audio (fixes corrupt sound)
 				if (( $G_HW_MODEL == 11 )); then
 
-					G_AGI pulseaudio
+					package_list+=' pulseaudio'
 
 				fi
 
 			#Everything else
 			else
 
-				G_AGI kodi
+				local package_list='kodi'
 
 			fi
 
 			# - libcurl3-gnutls required for C2. But lets apply to all: https://github.com/Fourdee/DietPi/issues/446
-			G_AGI libcurl3-gnutls
+			package_list+=' libcurl3-gnutls'
 
 			# - NFS/CEC support
-			if (( $G_DISTRO >= 4 )); then
+			if (( $G_DISTRO < 4 )); then
 
-				G_AGI libnfs8 libcec4
+				package_list+=' libnfs4 libcec3v4'
+
+			elif (( $G_DISTRO == 4 )); then
+
+				package_list+=' libnfs8 libcec4'
 
 			else
 
-				G_AGI libnfs4 libcec3v4
+				package_list+=' libnfs11 libcec4'
 
 			fi
+
+			G_AGI $package_list
 
 		fi
 
@@ -4146,12 +4180,10 @@ _EOF_
 				INSTALL_URL_ADDRESS="https://dietpi.com/downloads/binaries/all/noip_armhf.zip"
 
 			fi
-			G_CHECK_URL "$INSTALL_URL_ADDRESS"
 
 			#NoIp Binary install
-			wget "$INSTALL_URL_ADDRESS" -O dietpi-noip.zip
-			G_RUN_CMD unzip -o dietpi-noip.zip
-			rm dietpi-noip.zip
+			Download_Install zip "$INSTALL_URL_ADDRESS"
+
 			mv noip_binary /usr/local/bin/noip2
 			chmod +x /usr/local/bin/noip2
 
@@ -4163,21 +4195,11 @@ _EOF_
 
 			Banner_Installing
 
-			INSTALL_URL_ADDRESS='https://dietpi.com/downloads/binaries/all/amiberry_v2.19.7z'
-			G_CHECK_URL "$INSTALL_URL_ADDRESS"
-
 			# - Backup existing autostart.uae for user
-			mv $G_FP_DIETPI_USERDATA/amiberry/conf/autostart.uae $G_FP_DIETPI_USERDATA/amiberry/conf/autostart_pre-dietpi-update.uae &> /dev/null
+			cp $G_FP_DIETPI_USERDATA/amiberry/conf/autostart.uae $G_FP_DIETPI_USERDATA/amiberry/conf/autostart_pre-dietpi-update.uae &> /dev/null
 
-			G_THREAD_START wget "$INSTALL_URL_ADDRESS" -O $INSTALLING_INDEX.7z
-
-			# - Pre-Req's
-			G_AGI libmpg123-0 libxml2 mpeg2dec libmpeg2-4 libsndio6.1
-
-			G_THREAD_WAIT
-
-			G_RUN_CMD 7z x -y $INSTALLING_INDEX.7z -o$G_FP_DIETPI_USERDATA
-			rm $INSTALLING_INDEX.7z
+			DEPS_LIST='libmpg123-0 libxml2 mpeg2dec libmpeg2-4 libsndio6.1'
+			Download_Install 7z 'https://dietpi.com/downloads/binaries/all/amiberry_v2.19.7z' $G_FP_DIETPI_USERDATA
 
 		fi
 
@@ -4187,16 +4209,8 @@ _EOF_
 
 			Banner_Installing
 
-			INSTALL_URL_ADDRESS='https://dietpi.com/downloads/binaries/rpi/dxx-rebirth.7z'
-			G_CHECK_URL "$INSTALL_URL_ADDRESS"
-
-			G_THREAD_START wget "$INSTALL_URL_ADDRESS" -O $INSTALLING_INDEX.7z
-
-			G_AGI libsdl-mixer1.2 libsdl1.2debian libphysfs1
-
-			G_THREAD_WAIT
-			G_RUN_CMD 7z x -y $INSTALLING_INDEX.7z -o$G_FP_DIETPI_USERDATA
-			rm $INSTALLING_INDEX.7z
+			DEPS_LIST='libsdl-mixer1.2 libsdl1.2debian libphysfs1'
+			Download_Install 7z 'https://dietpi.com/downloads/binaries/rpi/dxx-rebirth.7z' $G_FP_DIETPI_USERDATA
 
 		fi
 
@@ -4221,24 +4235,16 @@ _EOF_
 
 			fi
 
-			G_CHECK_URL "$INSTALL_URL_ADDRESS"
-
 			#ARMv8 source build
 			if (( $G_HW_ARCH == 3 )); then
 
 
-				G_THREAD_START wget "$INSTALL_URL_ADDRESS" -O $INSTALLING_INDEX.tar
-
-				G_AGI build-essential zlib1g-dev libcurl4-openssl-dev libcrypto++-dev sqlite3
-
-				G_THREAD_WAIT
-
-				G_RUN_CMD tar xzvf $INSTALLING_INDEX.tar
-				rm $INSTALLING_INDEX.tar
+				DEPS_LIST='build-essential zlib1g-dev libcurl4-openssl-dev libcrypto++-dev sqlite3'
+				Download_Install tar "$INSTALL_URL_ADDRESS"
 
 				cd urbackup-server-*
-
 				./configure
+
 				G_RUN_CMD make -j $G_HW_CPU_CORES
 				G_RUN_CMD make install
 
@@ -4247,21 +4253,14 @@ _EOF_
 				cp defaults_server /etc/default/urbackupsrv
 				cp logrotate_urbackupsrv /etc/logrotate.d/urbackupsrv
 
-				cd ..
-
+				cd $FP_WORK_DIR
 				rm -R urbackup-server-*
 
 			#Deb
 			else
 
-				wget "$INSTALL_URL_ADDRESS" -O package.deb
-
-				echo -e "urbackup-server urbackup/backuppath string $G_FP_DIETPI_USERDATA/urbackup" | debconf-set-selections
-				dpkg -i package.deb
-
-				apt-get -f install -y
-
-				rm package.deb
+				debconf-set-selections <<< "urbackup-server urbackup/backuppath string $G_FP_DIETPI_USERDATA/urbackup"
+				Download_Install deb "$INSTALL_URL_ADDRESS"
 
 			fi
 
@@ -4273,17 +4272,8 @@ _EOF_
 
 			Banner_Installing
 
-			INSTALL_URL_ADDRESS="https://dietpi.com/downloads/binaries/rpi/opentyrian_armhf.zip"
-			G_CHECK_URL "$INSTALL_URL_ADDRESS"
-
-			G_THREAD_START wget "$INSTALL_URL_ADDRESS" -O $INSTALLING_INDEX.zip
-
-			G_AGI ibsdl1.2debian libsdl-net1.2
-
-			G_THREAD_WAIT
-
-			G_RUN_CMD unzip -o $INSTALLING_INDEX.zip -d /
-			rm $INSTALLING_INDEX.zip
+			DEPS_LIST='ibsdl1.2debian libsdl-net1.2'
+			Download_Install zip 'https://dietpi.com/downloads/binaries/rpi/opentyrian_armhf.zip' /
 			chmod +x /usr/local/games/opentyrian/opentyrian
 
 		fi
@@ -4294,16 +4284,8 @@ _EOF_
 
 			Banner_Installing
 
-			INSTALL_URL_ADDRESS='https://github.com/silvanmelchior/RPi_Cam_Web_Interface/archive/master.zip'
-			G_CHECK_URL "$INSTALL_URL_ADDRESS"
-
-			G_THREAD_START wget "$INSTALL_URL_ADDRESS" -O $INSTALLING_INDEX.zip
-
-			G_AGI gpac motion
-
-			G_THREAD_WAIT
-			G_RUN_CMD unzip -o $INSTALLING_INDEX.zip
-			rm $INSTALLING_INDEX.zip
+			DEPS_LIST='gpac motion'
+			Download_Install zip 'https://github.com/silvanmelchior/RPi_Cam_Web_Interface/archive/master.zip'
 
 			cd RPi_Cam*
 
@@ -4331,8 +4313,8 @@ _EOF_
 			ln -s /opt/vc/bin/raspimjpeg /usr/bin/raspimjpeg
 
 			#Cleanup / remove extracted source
-			cd $HOME
-			rm -R $HOME/RPi_Cam*
+			cd $FP_WORK_DIR
+			rm -R RPi_Cam*
 
 		fi
 
@@ -4351,19 +4333,8 @@ _EOF_
 
 			Banner_Installing
 
-			INSTALL_URL_ADDRESS='http://www.webmin.com/download/deb/webmin-current.deb'
-			G_CHECK_URL "$INSTALL_URL_ADDRESS"
-
-			G_THREAD_START wget "$INSTALL_URL_ADDRESS" -O $INSTALLING_INDEX.deb
-
-			G_AGI perl python
-
-			G_THREAD_WAIT
-
-			dpkg -i $INSTALLING_INDEX.deb
-			G_AGF
-
-			rm $INSTALLING_INDEX.deb
+			DEPS_LIST='perl python'
+			Download_Install deb 'http://www.webmin.com/download/deb/webmin-current.deb'
 
 		fi
 
@@ -4373,15 +4344,10 @@ _EOF_
 
 			Banner_Installing
 
-			INSTALL_URL_ADDRESS='https://github.com/ArturSierzant/OMPD/archive/master.zip'
-			G_CHECK_URL "$INSTALL_URL_ADDRESS"
-
-			wget "$INSTALL_URL_ADDRESS" -O package.zip
-			G_RUN_CMD unzip -o package.zip -d /var/www/
+			Download_Install zip 'https://github.com/ArturSierzant/OMPD/archive/master.zip' /var/www
 
 			rm -R /var/www/ompd &> /dev/null #Replace/upgrade existing installs
 			mv /var/www/OMPD* /var/www/ompd
-			rm package.zip
 
 		fi
 
@@ -4390,7 +4356,6 @@ _EOF_
 		if (( ${aSOFTWARE_INSTALL_STATE[$INSTALLING_INDEX]} == 1 )); then
 
 			Banner_Installing
-
 			G_AGI darkice icecast2
 
 		fi
@@ -4401,15 +4366,9 @@ _EOF_
 
 			Banner_Installing
 
-			INSTALL_URL_ADDRESS='https://github.com/afaqurk/linux-dash/archive/master.zip'
-			G_CHECK_URL "$INSTALL_URL_ADDRESS"
-
-			wget "$INSTALL_URL_ADDRESS" -O package.zip
-
-			G_RUN_CMD unzip -o package.zip
-			rm package.zip
+			Download_Install zip 'https://github.com/afaqurk/linux-dash/archive/master.zip'
 			mkdir -p /var/www/linuxdash
-			mv linux-dash-master/* /var/www/linuxdash
+			cp -R linux-dash-master/* /var/www/linuxdash
 			rm -R linux-dash-master
 
 		fi
@@ -4425,9 +4384,9 @@ _EOF_
 
 			# - Check free available memory. Increase swapfile size to prevent gravity running out of mem.
 			if (( $(free -m | grep -m1 'Mem:' | awk '{print $4}') < 512 &&
-				$(grep -m1 '^[[:blank:]]*AUTO_SETUP_SWAPFILE_SIZE=' /DietPi/dietpi.txt | sed 's/.*=//') < 512 )); then
+				$(grep -m1 '^[[:blank:]]*AUTO_SETUP_SWAPFILE_SIZE=' /DietPi/dietpi.txt | sed 's/^.*=//') < 512 )); then
 
-				G_DIETPI-NOTIFY 2 "Increasing swapfile size to 512MB before running gravity.sh, please wait...\n"
+				G_DIETPI-NOTIFY 2 'Increasing swapfile size to 512MB before running gravity.sh, please wait...\n'
 				/DietPi/dietpi/func/dietpi-set_dphys-swapfile 512
 
 			fi
@@ -4472,14 +4431,7 @@ _EOF_
 		if (( ${aSOFTWARE_INSTALL_STATE[$INSTALLING_INDEX]} == 1 )); then
 
 			Banner_Installing
-
-			INSTALL_URL_ADDRESS='https://dietpi.com/downloads/binaries/all/airsonic.7z'
-			G_CHECK_URL "$INSTALL_URL_ADDRESS"
-
-			mkdir -p $G_FP_DIETPI_USERDATA/airsonic
-			wget "$INSTALL_URL_ADDRESS" -O package.7z
-			G_RUN_CMD 7z x -y package.7z -o$G_FP_DIETPI_USERDATA/airsonic
-			rm package.7z
+			Download_Install 7z 'https://dietpi.com/downloads/binaries/all/airsonic.7z' $G_FP_DIETPI_USERDATA/airsonic
 
 		fi
 
@@ -4489,15 +4441,8 @@ _EOF_
 
 			Banner_Installing
 
-			INSTALL_URL_ADDRESS='https://dietpi.com/downloads/binaries/all/subsonic-6.1.3.deb'
-			G_CHECK_URL "$INSTALL_URL_ADDRESS"
-
 			#G_AGI lame #conflicts with our ffmpeg package: https://github.com/Fourdee/DietPi/issues/946#issuecomment-300738228
-
-			#Install SubSonic 6.0
-			wget "$INSTALL_URL_ADDRESS" -O package.deb
-			dpkg -i package.deb
-			rm package.deb
+			Download_Install deb 'https://dietpi.com/downloads/binaries/all/subsonic-6.1.3.deb'
 
 		fi
 
@@ -4506,14 +4451,7 @@ _EOF_
 		if (( ${aSOFTWARE_INSTALL_STATE[$INSTALLING_INDEX]} == 1 )); then
 
 			Banner_Installing
-
-			INSTALL_URL_ADDRESS='https://github.com/weaved/installer/raw/master/Raspbian%20deb/1.3-07/weavedconnectd_1.3-07z1_armhf.deb'
-			G_CHECK_URL "$INSTALL_URL_ADDRESS"
-
-			#Install WEAVED
-			wget "$INSTALL_URL_ADDRESS" -O package.deb
-			dpkg -i package.deb
-			rm package.deb
+			Download_Install deb 'https://github.com/weaved/installer/raw/master/Raspbian%20deb/1.3-07/weavedconnectd_1.3-07z1_armhf.deb'
 
 		fi
 
@@ -4529,7 +4467,6 @@ _EOF_
 		if (( ${aSOFTWARE_INSTALL_STATE[$INSTALLING_INDEX]} == 1 )); then
 
 			Banner_Installing
-
 			G_AGI python-rpi.gpio python3-rpi.gpio
 
 		fi
@@ -4544,35 +4481,17 @@ _EOF_
 			if (( $G_HW_MODEL < 10 )); then
 
 				#	http://git.drogon.net/?p=wiringPi;a=shortlog;h=refs/heads/master snapshot
-				INSTALL_URL_ADDRESS='http://git.drogon.net/?p=wiringPi;a=snapshot;h=HEAD;sf=tgz'
+				Download_Install tar 'http://git.drogon.net/?p=wiringPi;a=snapshot;h=HEAD;sf=tgz'
 
 			# - Odroid's
-			elif (( $G_HW_MODEL >= 10 && $G_HW_MODEL < 20 )); then
+			elif (( $G_HW_MODEL < 20 )); then
 
-				INSTALL_URL_ADDRESS='https://github.com/hardkernel/wiringPi/archive/master.zip'
+				Download_Install zip 'https://github.com/hardkernel/wiringPi/archive/master.zip'
 
 			# - BPiPro
 			elif (( $G_HW_MODEL == 51 )); then
 
-				INSTALL_URL_ADDRESS='https://github.com/LeMaker/WiringBP/archive/bananapro.zip'
-
-			fi
-
-			G_CHECK_URL "$INSTALL_URL_ADDRESS"
-
-			# - RPi
-			if (( $G_HW_MODEL < 10 )); then
-
-				wget "$INSTALL_URL_ADDRESS" -O package.tar
-				G_RUN_CMD tar xfz package.tar
-				rm package.tar
-
-			# - Odroid's / BPI
-			else
-
-				wget "$INSTALL_URL_ADDRESS" -O package.zip
-				unzip package.zip
-				rm package.zip
+				Download_Install zip 'https://github.com/LeMaker/WiringBP/archive/bananapro.zip'
 
 			fi
 
@@ -4582,7 +4501,9 @@ _EOF_
 			cd wiringPi
 			chmod +x build
 			./build
-			cd $HOME
+
+			cd $FP_WORK_DIR
+			mv wiringPi $HOME/
 
 		fi
 
@@ -4591,7 +4512,6 @@ _EOF_
 		if (( ${aSOFTWARE_INSTALL_STATE[$INSTALLING_INDEX]} == 1 )); then
 
 			Banner_Installing
-
 			/DietPi/dietpi/func/dietpi-set_hardware i2c enable
 
 		fi
@@ -4602,14 +4522,14 @@ _EOF_
 
 			Banner_Installing
 
-			G_AGI python python3
-
+			local package_list='python python3'
 			# - RPi, pre-reqs GPIO control for Node-Red
 			if (( $G_HW_MODEL < 10 )); then
 
-				G_AGI python-rpi.gpio
+				package_list+=' python-rpi.gpio'
 
 			fi
+			G_AGI $package_list
 
 			# - Serialport fails to build unless below flags are provided
 			npm install -g node-red --unsafe-perm
@@ -4621,7 +4541,6 @@ _EOF_
 		if (( ${aSOFTWARE_INSTALL_STATE[$INSTALLING_INDEX]} == 1 )); then
 
 			Banner_Installing
-
 			G_AGI mosquitto
 
 		fi
@@ -4657,7 +4576,7 @@ _EOF_
 			# - Skip license for NAA daemon if needed:
 			if (( ! $G_USER_INPUTS )); then
 
-				debconf-set-selections <<< "networkaudiod networkaudiod/license note false"
+				debconf-set-selections <<< 'networkaudiod networkaudiod/license note false'
 
 			fi
 
@@ -4678,27 +4597,24 @@ _EOF_
 			for ((i=0; i<${#apackages[@]}; i++))
 			do
 
-				INSTALL_URL_ADDRESS="${apackages[$i]}"
-				G_CHECK_URL "$INSTALL_URL_ADDRESS"
+				G_CHECK_URL "${apackages[$i]}"
 
 			done
 
 			# - Prereqs
-			G_AGI libasound2
+			DEPS_LIST='libasound2'
 
 			# - Stretch, install additional packages
 			if (( $G_DISTRO >= 4 )); then
 
-				G_AGI gcc-6-base libstdc++6
+				DEPS_LIST+=' gcc-6-base libstdc++6'
 
 			fi
 
 			for ((i=0; i<${#apackages[@]}; i++))
 			do
 
-				wget "${apackages[$i]}" -O package.deb
-				dpkg -i package.deb
-				rm package.deb
+				no_check_url=1 Download_Install deb "${apackages[$i]}"
 
 			done
 
@@ -4714,7 +4630,6 @@ _EOF_
 		if (( ${aSOFTWARE_INSTALL_STATE[$INSTALLING_INDEX]} == 1 )); then
 
 			Banner_Installing
-
 			G_AGI tomcat8
 
 		fi
@@ -4725,16 +4640,8 @@ _EOF_
 
 			Banner_Installing
 
-			INSTALL_URL_ADDRESS='https://sourceforge.net/projects/webiopi/files/WebIOPi-0.7.1.tar.gz/download'
-			G_CHECK_URL "$INSTALL_URL_ADDRESS"
-
-			G_THREAD_START wget "$INSTALL_URL_ADDRESS" -O $INSTALLING_INDEX.tar
-
-			G_AGI python-dev python-setuptools
-
-			G_THREAD_WAIT
-			G_RUN_CMD tar xvzf $INSTALLING_INDEX.tar
-			rm $INSTALLING_INDEX.tar
+			DEPS_LIST='python-dev python-setuptools'
+			Download_Install tar 'https://sourceforge.net/projects/webiopi/files/WebIOPi-0.7.1.tar.gz/download'
 
 			cd WebIOPi*
 
@@ -4745,7 +4652,7 @@ _EOF_
 			./setup.sh
 			printf '\ec' # clear current terminal screen
 
-			cd ..
+			cd $FP_WORK_DIR
 
 			#Cleanup
 			rm -R WebIOPi*
@@ -4774,17 +4681,8 @@ _EOF_
 
 			Banner_Installing
 
-			INSTALL_URL_ADDRESS='https://www.haproxy.org/download/1.8/src/haproxy-1.8.8.tar.gz'
-			G_CHECK_URL "$INSTALL_URL_ADDRESS"
-
-			G_THREAD_START wget "$INSTALL_URL_ADDRESS" -O $INSTALLING_INDEX.tar
-
-			G_AGI libpcre3-dev libssl-dev zlib1g-dev
-
-			G_THREAD_WAIT
-
-			G_RUN_CMD tar -xvf $INSTALLING_INDEX.tar
-			rm $INSTALLING_INDEX.tar
+			DEPS_LIST='libpcre3-dev libssl-dev zlib1g-dev'
+			Download_Install tar 'https://www.haproxy.org/download/1.8/src/haproxy-1.8.8.tar.gz'
 
 			cd haproxy-*
 
@@ -4795,7 +4693,7 @@ _EOF_
 			mkdir /etc/haproxy
 
 			#Exit directory
-			cd ..
+			cd $FP_WORK_DIR
 
 			#Clean up
 			rm -R haproxy-*
@@ -4821,17 +4719,10 @@ _EOF_
 
 			fi
 
-			INSTALL_URL_ADDRESS='https://dietpi.com/downloads/binaries/all/logitechmediaserver_7.9.1_all.deb'
-			G_CHECK_URL "$INSTALL_URL_ADDRESS"
-			wget "$INSTALL_URL_ADDRESS" -O package.deb
-			dpkg -i package.deb
-			rm package.deb
-			G_AGF
+			Download_Install deb 'https://dietpi.com/downloads/binaries/all/logitechmediaserver_7.9.1_all.deb'
 
 			# - ARMv8, CPAN
 			if (( $G_HW_ARCH == 3 )); then
-
-				G_AGI libxml-parser-perl zlib1g-dev libjpeg-dev libpng-dev libjpeg62-turbo-dev # shared libs needed for Image::Scale@0.08
 
 				if (( $G_DISTRO == 3 )); then
 
@@ -4843,10 +4734,8 @@ _EOF_
 
 				fi
 
-				G_CHECK_URL "$INSTALL_URL_ADDRESS"
-				wget "$INSTALL_URL_ADDRESS" -O package.zip
-				G_RUN_CMD unzip -o package.zip -d /usr/share/squeezeboxserver
-				rm package.zip
+				DEPS_LIST='libxml-parser-perl zlib1g-dev libjpeg-dev libpng-dev libjpeg62-turbo-dev' # shared libs needed for Image::Scale@0.08
+				Download_Install zip "$INSTALL_URL_ADDRESS" /usr/share/squeezeboxserver
 
 			fi
 
@@ -4857,13 +4746,7 @@ _EOF_
 		if (( ${aSOFTWARE_INSTALL_STATE[$INSTALLING_INDEX]} == 1 )); then
 
 			Banner_Installing
-
-			INSTALL_URL_ADDRESS='https://wordpress.org/latest.zip'
-			G_CHECK_URL "$INSTALL_URL_ADDRESS"
-
-			wget "$INSTALL_URL_ADDRESS" -O package.zip
-			G_RUN_CMD unzip -o package.zip -d /var/www/
-			rm package.zip
+			Download_Install zip 'https://wordpress.org/latest.zip' /var/www
 
 		fi
 
@@ -4872,7 +4755,6 @@ _EOF_
 		if (( ${aSOFTWARE_INSTALL_STATE[$INSTALLING_INDEX]} == 1 )); then
 
 			Banner_Installing
-
 			G_AGI tightvncserver x11vnc
 
 		fi
@@ -4883,14 +4765,16 @@ _EOF_
 
 			Banner_Installing
 
-			G_AGI vnc4server x11vnc
+			local package_list='vnc4server x11vnc'
 
 			# - Stretch+
 			if (( $G_DISTRO >= 4 )); then
 
-				G_AGI tigervnc-common
+				package_list+=' tigervnc-common'
 
 			fi
+
+			G_AGI $package_list
 
 		fi
 
@@ -4922,7 +4806,7 @@ _EOF_
 
 			Banner_Installing
 
-			touch /var/log/auth.log #: https://github.com/Fourdee/DietPi/issues/475#issuecomment-310873879
+			>> /var/log/auth.log #: https://github.com/Fourdee/DietPi/issues/475#issuecomment-310873879
 
 			G_AGI python3-systemd fail2ban
 
@@ -4985,7 +4869,6 @@ _EOF_
 				fi
 
 				echo -e "deb $deb_address $G_DISTRO_NAME main" > /etc/apt/sources.list.d/grafana.list
-
 				G_AGUP
 
 			fi
@@ -5000,12 +4883,7 @@ _EOF_
 
 			Banner_Installing
 
-			INSTALL_URL_ADDRESS='https://github.com/phpsysinfo/phpsysinfo/archive/master.zip'
-			G_CHECK_URL "$INSTALL_URL_ADDRESS"
-
-			wget "$INSTALL_URL_ADDRESS" -O package.zip
-			G_RUN_CMD unzip -o package.zip -d /var/www/
-			rm package.zip
+			Download_Install zip 'https://github.com/phpsysinfo/phpsysinfo/archive/master.zip' /var/www
 			mv /var/www/phpsysinfo-* /var/www/phpsysinfo
 
 		fi
@@ -5029,13 +4907,7 @@ _EOF_
 		if (( ${aSOFTWARE_INSTALL_STATE[$INSTALLING_INDEX]} == 1 )); then
 
 			Banner_Installing
-
-			INSTALL_URL_ADDRESS='https://dietpi.com/downloads/binaries/all/Single_File_PHP_Gallery_4.7.0.zip'
-			G_CHECK_URL "$INSTALL_URL_ADDRESS"
-
-			wget "$INSTALL_URL_ADDRESS" -O package.zip
-			G_RUN_CMD unzip -o package.zip -d /var/www/gallery
-			rm package.zip
+			Download_Install zip 'https://dietpi.com/downloads/binaries/all/Single_File_PHP_Gallery_4.7.0.zip' /var/www/gallery
 
 		fi
 
@@ -5045,14 +4917,10 @@ _EOF_
 
 			Banner_Installing
 
-			INSTALL_URL_ADDRESS='https://github.com/ampache/ampache/archive/master.zip'
-
-			G_CHECK_URL "$INSTALL_URL_ADDRESS"
-
-			wget "$INSTALL_URL_ADDRESS" -O package.zip
-			G_RUN_CMD unzip -o package.zip
-			rm package.zip
-			mv ampache-* /var/www/ampache
+			Download_Install zip 'https://github.com/ampache/ampache/archive/master.zip'
+			mkdir -p /var/www/ampache
+			cp -R ampache-*/* /var/www/ampache
+			rm -R ampache-*
 
 			#composer install required for 3.8.2
 			php -r "readfile('https://getcomposer.org/installer');" > composer-setup.php
@@ -5063,7 +4931,7 @@ _EOF_
 
 			cd /var/www/ampache
 			composer install --prefer-source --no-interaction
-			cd $HOME
+			cd $FP_WORK_DIR
 
 		fi
 
@@ -5072,7 +4940,6 @@ _EOF_
 		if (( ${aSOFTWARE_INSTALL_STATE[$INSTALLING_INDEX]} == 1 )); then
 
 			Banner_Installing
-
 			G_AGI openvpn easy-rsa iptables
 
 		fi
@@ -5133,11 +5000,11 @@ _EOF_
 
 				if (( ${aSOFTWARE_INSTALL_STATE[83]} >= 1 )); then
 
-  					G_AGI python-certbot-apache
+  					G_AGI certbot python-certbot-apache
 
 				elif (( ${aSOFTWARE_INSTALL_STATE[85]} >= 1 )); then
 
-  					G_AGI python-certbot-nginx
+  					G_AGI certbot python-certbot-nginx
 
 				else
 
@@ -5147,18 +5014,13 @@ _EOF_
 
 			else
 
-				INSTALL_URL_ADDRESS='https://github.com/certbot/certbot/archive/master.zip'
-				G_CHECK_URL "$INSTALL_URL_ADDRESS"
-
-				wget "$INSTALL_URL_ADDRESS" -O package.zip
-				G_RUN_CMD unzip -o package.zip -d /root
-				rm package.zip
-				mv certbot* /etc/certbot_scripts
+				Download_Install zip 'https://github.com/certbot/certbot/archive/master.zip' /etc
+				mv /etc/certbot* /etc/certbot_scripts
 
 				# - Install packages
 				cd /etc/certbot_scripts
 				./certbot-auto -n --os-packages-only
-				cd ~/
+				cd $FP_WORK_DIR
 
 			fi
 
@@ -5177,17 +5039,8 @@ _EOF_
 
 			Banner_Installing
 
-			INSTALL_URL_ADDRESS='https://dietpi.com/downloads/binaries/all/hostapd_2.5_all.zip'
-			G_CHECK_URL "$INSTALL_URL_ADDRESS"
-
-			G_THREAD_START wget "$INSTALL_URL_ADDRESS" -O $INSTALLING_INDEX.zip
-
-			G_AGI hostapd isc-dhcp-server iptables libnl-3-200
-
-			G_THREAD_WAIT
-
-			G_RUN_CMD unzip -o $INSTALLING_INDEX.zip
-			rm $INSTALLING_INDEX.zip
+			DEPS_LIST='hostapd isc-dhcp-server iptables libnl-3-200'
+			Download_Install zip 'https://dietpi.com/downloads/binaries/all/hostapd_2.5_all.zip'
 
 			# - Check for RTL8188C* device, use the patched binary I compiled: https://github.com/pritambaral/hostapd-rtl871xdrv#why
 			if (( $(lsusb | grep -ci -m1 'RTL8188C') ||
@@ -5294,18 +5147,10 @@ _EOF_
 
 			fi
 
-			G_CHECK_URL "$INSTALL_URL_ADDRESS"
-
-			G_THREAD_START wget "$INSTALL_URL_ADDRESS" -O $INSTALLING_INDEX.7z
-
-			G_AGI openssl libsoxr0 libavahi-client3 libtool libconfig9 libpopt0 libdaemon0
 			# This occured on C2: shairport-sync : Depends: libpopt-dev but it is not installed
 			#G_AGI libpopt-dev
-
-			G_THREAD_WAIT
-
-			G_RUN_CMD 7z x -y $INSTALLING_INDEX.7z -o/
-			rm $INSTALLING_INDEX.7z
+			DEPS_LIST='openssl libsoxr0 libavahi-client3 libtool libconfig9 libpopt0 libdaemon0'
+			Download_Install 7z "$INSTALL_URL_ADDRESS" /
 
 			#Jessie: https://github.com/Fourdee/DietPi/issues/1620#issuecomment-373086888
 			if (( $G_DISTRO == 3 )); then
@@ -5329,10 +5174,7 @@ _EOF_
 
 				fi
 
-				G_CHECK_URL "$INSTALL_URL_ADDRESS"
-				wget "$INSTALL_URL_ADDRESS" -O package.deb
-				dpkg -i package.deb
-				rm package.deb
+				Download_Install deb "$INSTALL_URL_ADDRESS"
 
 			fi
 
@@ -5362,20 +5204,9 @@ _EOF_
 
 			Banner_Installing
 
-			#check folder is online
-			INSTALL_URL_ADDRESS='https://download.pydio.com/pub/core/archives/pydio-core-8.0.2.zip'
-			G_CHECK_URL "$INSTALL_URL_ADDRESS"
-
-			G_THREAD_START wget "$INSTALL_URL_ADDRESS" -O $INSTALLING_INDEX.zip
-
-			#Pre-reqs: Web ui warning: "PHP INTL extension missing. English month names will be used for all languages."
-			G_AGI $PHP_APT_PACKAGE_NAME-intl
-
-			G_THREAD_WAIT
-
-			G_RUN_CMD unzip -o $INSTALLING_INDEX.zip -d /var/www
+			DEPS_LIST="$PHP_APT_PACKAGE_NAME-intl"
+			Download_Install zip 'https://download.pydio.com/pub/core/archives/pydio-core-8.0.2.zip' /var/www
 			mv /var/www/pydio-core-* /var/www/pydio
-			rm $INSTALLING_INDEX.zip
 
 		fi
 
@@ -5385,16 +5216,8 @@ _EOF_
 
 			Banner_Installing
 
-			INSTALL_URL_ADDRESS='https://dietpi.com/downloads/binaries/all/squeezelite-1.8_all.7z'
-			G_CHECK_URL "$INSTALL_URL_ADDRESS"
-
-			# - Prereqs
-			G_AGI squeezelite
-
-			# - Overwrite binary with our DSD patched version:
-			wget "$INSTALL_URL_ADDRESS" -O package.7z
-			G_RUN_CMD 7z x -y package.7z -o/usr/bin
-			rm package.7z
+			DEPS_LIST='squeezelite'
+			Download_Install 7z 'https://dietpi.com/downloads/binaries/all/squeezelite-1.8_all.7z' /usr/bin
 
 			rm /usr/bin/squeezelite
 
@@ -5432,23 +5255,14 @@ _EOF_
 
 			Banner_Installing
 
-			#check, is online
-			INSTALL_URL_ADDRESS='https://github.com/Fourdee/emonhub/archive/emon-pi.zip'
-			G_CHECK_URL "$INSTALL_URL_ADDRESS"
+			DEPS_LIST='minicom python-serial python-configobj'
+			Download_Install zip 'https://github.com/Fourdee/emonhub/archive/emon-pi.zip'
 
-			# - Prereqs
-			G_AGI minicom python-serial python-configobj
 			pip install paho-mqtt pydispatcher
-
-			wget "$INSTALL_URL_ADDRESS" -O package.zip
-			G_RUN_CMD unzip -o package.zip
-			rm package.zip
 
 			# - move everything to /etc/emonhub
 			rm -R /etc/emonhub
-			mkdir -p /etc/emonhub
-			mv emonhub-*/* /etc/emonhub/
-			rm -R emonhub-*
+			mv emonhub-* /etc/emonhub
 
 		fi
 
@@ -5457,17 +5271,7 @@ _EOF_
 		if (( ${aSOFTWARE_INSTALL_STATE[$INSTALLING_INDEX]} == 1 )); then
 
 			Banner_Installing
-
-			#check, is online
-			INSTALL_URL_ADDRESS='https://github.com/XavierBerger/RPi-Monitor-deb/raw/master/packages/rpimonitor_2.12-r0_all.deb'
-			G_CHECK_URL "$INSTALL_URL_ADDRESS"
-
-			wget "$INSTALL_URL_ADDRESS" -O package.deb
-			dpkg -i package.deb
-			rm package.deb
-
-			# - Prereqs
-			apt-get -f -y install
+			Download_Install deb 'https://github.com/XavierBerger/RPi-Monitor-deb/raw/master/packages/rpimonitor_2.12-r0_all.deb'
 
 		fi
 
@@ -5501,15 +5305,8 @@ _EOF_
 
 			fi
 
-			#check, is online
-			G_CHECK_URL "$INSTALL_URL_ADDRESS"
-
-			# - For compression
-			G_AGI zlib1g-dev
-
-			wget "$INSTALL_URL_ADDRESS" -O package.deb
-			dpkg -i package.deb
-			rm package.deb
+			DEPS_LIST='zlib1g-dev'
+			Download_Install deb "$INSTALL_URL_ADDRESS"
 
 		fi
 
@@ -5519,13 +5316,7 @@ _EOF_
 
 			Banner_Installing
 
-			#check folder is online
-			INSTALL_URL_ADDRESS='https://github.com/fruux/Baikal/archive/master.zip'
-			G_CHECK_URL "$INSTALL_URL_ADDRESS"
-
-			wget "$INSTALL_URL_ADDRESS" -O package.zip
-			G_RUN_CMD unzip -o package.zip -d /var/www
-			rm package.zip
+			Download_Install zip 'https://github.com/fruux/Baikal/archive/master.zip' /var/www
 			mv /var/www/Baikal* /var/www/baikal
 
 		fi
@@ -5535,7 +5326,6 @@ _EOF_
 		if (( ${aSOFTWARE_INSTALL_STATE[$INSTALLING_INDEX]} == 1 )); then
 
 			Banner_Installing
-
 			G_AGI mumble-server
 
 		fi
@@ -5575,45 +5365,26 @@ _EOF_
 
 			G_CHECK_URL "$INSTALL_URL_ADDRESS"
 
-			echo -e "deb $INSTALL_URL_ADDRESS /" > /etc/apt/sources.list.d/emby-server.list
-			wget "$INSTALL_URL_ADDRESS"Release.key
-			apt-key add - < Release.key
-			rm Release.key
+			echo "deb $INSTALL_URL_ADDRESS /" > /etc/apt/sources.list.d/emby-server.list
+			curl -sL "$INSTALL_URL_ADDRESS"Release.key | apt-key add -
 			G_AGUP
 
 			#ARMv7, Grab required pre-reqs from various sources: https://github.com/Fourdee/DietPi/issues/1128#issuecomment-326743471 / https://github.com/Fourdee/DietPi/issues/1150#issuecomment-330291298
 			if (( $G_HW_ARCH == 2 )); then
 
-				wget http://ftp.us.debian.org/debian/pool/main/libj/libjpeg8/libjpeg8_8d-1+deb7u1_armhf.deb -O package.deb
-				dpkg -i package.deb
-				rm package.deb
-
-				wget http://ftp.us.debian.org/debian/pool/main/libp/libpng/libpng12-0_1.2.50-2+deb8u3_armhf.deb -O package.deb
-				dpkg -i package.deb
-				rm package.deb
-
-				wget http://ftp.us.debian.org/debian/pool/main/libw/libwebp/libwebp5_0.4.1-1.2+b2_armhf.deb -O package.deb
-				dpkg -i package.deb
-				rm package.deb
+				G_DIETPI-NOTIFY 2 'Installing some needed libraries'
+				Download_Install deb 'http://ftp.us.debian.org/debian/pool/main/libj/libjpeg8/libjpeg8_8d-1+deb7u1_armhf.deb'
+				Download_Install deb 'http://ftp.us.debian.org/debian/pool/main/libp/libpng/libpng12-0_1.2.50-2+deb8u3_armhf.deb'
+				Download_Install deb 'http://ftp.us.debian.org/debian/pool/main/libw/libwebp/libwebp5_0.4.1-1.2+b2_armhf.deb'
 
 			#ARMv8
 			elif (( $G_HW_ARCH == 3 )); then
 
-				wget http://ftp.us.debian.org/debian/pool/main/libp/libpng/libpng12-0_1.2.50-2+deb8u3_arm64.deb -O package.deb
-				dpkg -i package.deb
-				rm package.deb
-
-				wget http://ftp.us.debian.org/debian/pool/main/libw/libwebp/libwebp5_0.4.1-1.2+b2_arm64.deb -O package.deb
-				dpkg -i package.deb
-				rm package.deb
-
-				wget https://mirror.i-novus.ru/ubuntu-ports/pool/main/libj/libjpeg-turbo/libjpeg-turbo8_1.3.0-0ubuntu2_arm64.deb -O package.deb
-				dpkg -i package.deb
-				rm package.deb
-
-				wget http://turul.canonical.com/pool/main/libj/libjpeg8-empty/libjpeg8_8c-2ubuntu8_arm64.deb -O package.deb
-				dpkg -i package.deb
-				rm package.deb
+				G_DIETPI-NOTIFY 2 'Installing some needed libraries'
+				Download_Install deb 'http://ftp.us.debian.org/debian/pool/main/libp/libpng/libpng12-0_1.2.50-2+deb8u3_arm64.deb'
+				Download_Install deb 'http://ftp.us.debian.org/debian/pool/main/libw/libwebp/libwebp5_0.4.1-1.2+b2_arm64.deb'
+				Download_Install deb 'https://mirror.i-novus.ru/ubuntu-ports/pool/main/libj/libjpeg-turbo/libjpeg-turbo8_1.3.0-0ubuntu2_arm64.deb'
+				Download_Install deb 'http://turul.canonical.com/pool/main/libj/libjpeg8-empty/libjpeg8_8c-2ubuntu8_arm64.deb'
 
 			fi
 
@@ -5627,35 +5398,19 @@ _EOF_
 
 			Banner_Installing
 
-			#check folder is online
-
 			#x86_64
 			if (( $G_HW_ARCH == 10 )); then
 
-				INSTALL_URL_ADDRESS='https://downloads.plex.tv/plex-media-server/1.13.0.5023-31d3c0c65/plexmediaserver_1.13.0.5023-31d3c0c65_amd64.deb'
+				Download_Install deb 'https://downloads.plex.tv/plex-media-server/1.13.0.5023-31d3c0c65/plexmediaserver_1.13.0.5023-31d3c0c65_amd64.deb'
 
 			#ARM
 			else
 
 				INSTALL_URL_ADDRESS='http://dev2day.de/pms/'
-
-			fi
-
-			G_CHECK_URL "$INSTALL_URL_ADDRESS"
-
-			#x86_64
-			if (( $G_HW_ARCH == 10 )); then
-
-				wget "$INSTALL_URL_ADDRESS" -O package.deb
-				dpkg -i package.deb
-				rm package.deb
-
-			#ARM
-			else
+				G_CHECK_URL "$INSTALL_URL_ADDRESS"
 
 				echo -e "deb [arch=armhf] $INSTALL_URL_ADDRESS $G_DISTRO_NAME main" > /etc/apt/sources.list.d/plex.list
 				wget -O - "$INSTALL_URL_ADDRESS"dev2day-pms.gpg.key | apt-key add -
-				G_AGUP
 
 				#ARMv8: Install 32bit binaries
 				if (( $G_HW_ARCH == 3 )); then
@@ -5667,6 +5422,7 @@ _EOF_
 				#ARM32
 				else
 
+					G_AGUP
 					G_AGI plexmediaserver-installer
 
 				fi
@@ -5692,12 +5448,8 @@ _EOF_
 				INSTALL_URL_ADDRESS='http://builds.cuberite.org/job/Cuberite%20Linux%20raspi-armhf%20Master/lastSuccessfulBuild/artifact/Cuberite.tar.gz'
 
 			fi
-			G_CHECK_URL "$INSTALL_URL_ADDRESS"
 
-			wget "$INSTALL_URL_ADDRESS" -O package.tar
-			mkdir -p $G_FP_DIETPI_USERDATA/cubrite
-			G_RUN_CMD tar xzvf package.tar -C $G_FP_DIETPI_USERDATA/cubrite
-			rm package.tar
+			Download_Install tar "$INSTALL_URL_ADDRESS" $G_FP_DIETPI_USERDATA/cubrite
 
 			# - Move everything into base directory (cuberite)
 			mv $G_FP_DIETPI_USERDATA/cubrite/Server/* $G_FP_DIETPI_USERDATA/cubrite/
@@ -5712,7 +5464,6 @@ _EOF_
 			Banner_Installing
 
 			#check folder is online
-
 			INSTALL_URL_ADDRESS='https://github.com/hexparrot/mineos-node.git'
 			G_CHECK_URL "$INSTALL_URL_ADDRESS"
 
@@ -5733,7 +5484,7 @@ _EOF_
 
 			npm install --unsafe-perm
 
-			cd $HOME
+			cd $FP_WORK_DIR
 
 		fi
 
@@ -5761,13 +5512,8 @@ _EOF_
 				INSTALL_URL_ADDRESS+='amd64.zip'
 			fi
 
-			G_CHECK_URL "$INSTALL_URL_ADDRESS"
-
-			wget "$INSTALL_URL_ADDRESS" -O package.zip
-			G_RUN_CMD unzip -o package.zip
-			rm package.zip
-
-			mv gogs* /etc/gogs
+			Download_Install zip "$INSTALL_URL_ADDRESS" /etc
+			mv /etc/gogs* /etc/gogs
 
 		fi
 
@@ -5776,7 +5522,6 @@ _EOF_
 		if (( ${aSOFTWARE_INSTALL_STATE[$INSTALLING_INDEX]} == 1 )); then
 
 			Banner_Installing
-
 			G_AGI qbittorrent-nox
 
 		fi
@@ -5787,17 +5532,11 @@ _EOF_
 
 			Banner_Installing
 
-			INSTALL_URL_ADDRESS='http://bintray.com/novik65/generic/download_file?file_path=ruTorrent-3.7.zip'
-			G_CHECK_URL "$INSTALL_URL_ADDRESS"
-
+			DEPS_LIST='rtorrent screen' #mediainfo
 			# On Jessie, nginx-full is needed for SCGI module: https://github.com/Fourdee/DietPi/issues/1240
-			(( $G_DISTRO < 4 && ${aSOFTWARE_INSTALL_STATE[85]} >= 1 )) && G_AGI nginx-full
+			(( $G_DISTRO < 4 && ${aSOFTWARE_INSTALL_STATE[85]} >= 1 )) && DEPS_LIST+=' nginx-full'
 
-			G_AGI rtorrent screen #mediainfo
-
-			wget "$INSTALL_URL_ADDRESS" -O package.zip
-			G_RUN_CMD unzip -o package.zip
-			rm package.zip
+			Download_Install zip 'http://bintray.com/novik65/generic/download_file?file_path=ruTorrent-3.7.zip'
 
 			mkdir -p /var/www/rutorrent
 			mv ruTorrent-*/* /var/www/rutorrent/
@@ -5807,12 +5546,7 @@ _EOF_
 			if (( $G_HW_MODEL < 10 )); then
 
 				#G_AGI unrar-free #https://github.com/Fourdee/DietPi/issues/176#issuecomment-240101365
-
-				INSTALL_URL_ADDRESS='https://dietpi.com/downloads/binaries/all/unrar_5.3.2-1+deb9u1_armhf.deb'
-				G_CHECK_URL "$INSTALL_URL_ADDRESS"
-				wget "$INSTALL_URL_ADDRESS" -O package.deb
-				dpkg -i package.deb
-				rm package.deb
+				Download_Install deb 'https://dietpi.com/downloads/binaries/all/unrar_5.3.2-1+deb9u1_armhf.deb'
 
 			else
 
@@ -5859,14 +5593,9 @@ _EOF_
 
 				fi
 
-				G_CHECK_URL "$INSTALL_URL_ADDRESS"
-
 				# - prereqs
-				G_AGI libc-ares2
-
-				wget "$INSTALL_URL_ADDRESS" -O package.7z
-				G_RUN_CMD 7z x -y package.7z
-				rm package.7z
+				DEPS_LIST='libc-ares2'
+				Download_Install 7z "$INSTALL_URL_ADDRESS"
 
 				mv aria2_* /usr/local/bin/aria2c
 				chmod +x /usr/local/bin/aria2c
@@ -5874,13 +5603,7 @@ _EOF_
 			fi
 
 			#Web interface
-			INSTALL_URL_ADDRESS='https://github.com/ziahamza/webui-aria2/archive/master.zip'
-
-			G_CHECK_URL "$INSTALL_URL_ADDRESS"
-
-			wget "$INSTALL_URL_ADDRESS" -O package.zip
-			G_RUN_CMD unzip -o package.zip
-			rm package.zip
+			Download_Install zip 'https://github.com/ziahamza/webui-aria2/archive/master.zip'
 
 			cp -R webui-aria2* /var/www/aria2
 			rm -R webui-aria2*
@@ -5893,17 +5616,10 @@ _EOF_
 
 			Banner_Installing
 
-			INSTALL_URL_ADDRESS='https://github.com/SickRage/SickRage/archive/master.zip'
-			G_CHECK_URL "$INSTALL_URL_ADDRESS"
-
-			G_AGI python libxslt1.1 libxml2 python-openssl python-xmltodict
-
-			wget "$INSTALL_URL_ADDRESS" -O package.zip
-			G_RUN_CMD unzip -o package.zip
-			rm package.zip
+			DEPS_LIST='python libxslt1.1 libxml2 python-openssl python-xmltodict'
+			Download_Install zip 'https://github.com/SickRage/SickRage/archive/master.zip'
 
 			mkdir -p $G_FP_DIETPI_USERDATA/sickrage
-
 			cp -R SickRage-*/* $G_FP_DIETPI_USERDATA/sickrage/
 			rm -R SickRage-*
 
@@ -5911,12 +5627,7 @@ _EOF_
 			if (( $G_HW_MODEL < 10 )); then
 
 				#G_AGI unrar-free #https://github.com/Fourdee/DietPi/issues/176#issuecomment-240101365
-
-				INSTALL_URL_ADDRESS='https://dietpi.com/downloads/binaries/all/unrar_5.3.2-1+deb9u1_armhf.deb'
-				G_CHECK_URL "$INSTALL_URL_ADDRESS"
-				wget "$INSTALL_URL_ADDRESS" -O package.deb
-				dpkg -i package.deb
-				rm package.deb
+				Download_Install deb 'https://dietpi.com/downloads/binaries/all/unrar_5.3.2-1+deb9u1_armhf.deb'
 
 			else
 
@@ -5949,15 +5660,10 @@ _EOF_
 
 			fi
 
-			#??
 			#For some reason checking connection (spider) against the files above fails.
-
-			#G_CHECK_URL "$INSTALL_URL_ADDRESS"
 			G_CHECK_URL https://github.com/syncthing/syncthing
 
-			wget "$INSTALL_URL_ADDRESS" -O package.tar
-			G_RUN_CMD tar xzvf package.tar
-			rm package.tar
+			no_check_url=1 Download_Install tar "$INSTALL_URL_ADDRESS"
 
 			mkdir -p /etc/syncthing
 			cp -R syncthing-*/syncthing /etc/syncthing/
@@ -5972,53 +5678,32 @@ _EOF_
 			Banner_Installing
 
 			### Pre-reqs
+			DEPS_LIST='libfontconfig1'
 			## libjpeg8, libpng12
 			# https://github.com/Fourdee/DietPi/issues/1428#issuecomment-361099496
 			# - armv6/7
 			if (( $G_HW_ARCH == 1 || $G_HW_ARCH == 2 )); then
 
-				G_RUN_CMD wget "https://dietpi.com/downloads/binaries/all/libjpeg8_8d1-2_armhf.deb"
-				G_RUN_CMD wget "https://dietpi.com/downloads/binaries/all/libpng12-0_1.2.50-2+deb8u3_armhf.deb"
-				G_RUN_CMD dpkg -i *.deb
-				rm *.deb
+				INSTALL_URL_ADDRESS1='https://dietpi.com/downloads/binaries/all/libjpeg8_8d1-2_armhf.deb'
+				INSTALL_URL_ADDRESS2='https://dietpi.com/downloads/binaries/all/libpng12-0_1.2.50-2+deb8u3_armhf.deb'
+				INSTALL_URL_ADDRESS3='http://patch.codelathe.com/tonido/live/installer/armv6l-rpi/tonido.tar.gz'
 
 			# - x86_64
 			elif (( $G_HW_ARCH == 10 )); then
 
-				G_RUN_CMD wget "https://dietpi.com/downloads/binaries/all/libjpeg8_8d1-2_amd64.deb"
-				if (( $G_DISTRO > 3 )); then
-
-					G_RUN_CMD wget "https://dietpi.com/downloads/binaries/all/libpng12-0_1.2.50-2+deb8u3_amd64.deb"
-
-				fi
-
-				G_RUN_CMD dpkg -i *.deb
-				rm *.deb
+				INSTALL_URL_ADDRESS1='https://dietpi.com/downloads/binaries/all/libjpeg8_8d1-2_amd64.deb'
+				(( $G_DISTRO > 3 )) && INSTALL_URL_ADDRESS2='https://dietpi.com/downloads/binaries/all/libpng12-0_1.2.50-2+deb8u3_amd64.deb' || DEPS_LIST+=' libpng12-0'
+				INSTALL_URL_ADDRESS3='http://www.tonido.com/download.php?tonido64.tar.gz'
 
 			fi
 
-			## libfontconfig1
-			G_AGI libfontconfig1
+			URL_LIST="$INSTALL_URL_ADDRESS1 $INSTALL_URL_ADDRESS2 $INSTALL_URL_ADDRESS3"
 
-			### Tonido
-			# - armv6+
-			if (( $G_HW_ARCH == 1 || $G_HW_ARCH == 2 )); then
+			Download_Install deb "$INSTALL_URL_ADDRESS1"
+			[[ $INSTALL_URL_ADDRESS2 ]] && no_check_url=1 Download_Install deb "$INSTALL_URL_ADDRESS2"
+			no_check_url=1 Download_Install tar "$INSTALL_URL_ADDRESS3" $G_FP_DIETPI_USERDATA/tonido
 
-				INSTALL_URL_ADDRESS='http://patch.codelathe.com/tonido/live/installer/armv6l-rpi/tonido.tar.gz'
-
-			# - x86_64
-			elif (( $G_HW_ARCH == 10 )); then
-
-				INSTALL_URL_ADDRESS='http://www.tonido.com/download.php?tonido64.tar.gz'
-
-			fi
-
-			G_CHECK_URL "$INSTALL_URL_ADDRESS"
-
-			wget "$INSTALL_URL_ADDRESS" -O package.tar
-			mkdir $G_FP_DIETPI_USERDATA/tonido
-			G_RUN_CMD tar xvf package.tar -C $G_FP_DIETPI_USERDATA/tonido
-			rm package.tar
+			unset INSTALL_URL_ADDRESS1 INSTALL_URL_ADDRESS2 INSTALL_URL_ADDRESS3
 
 		fi
 
@@ -6058,41 +5743,28 @@ _EOF_
 
 				fi
 
-				G_CHECK_URL "$INSTALL_URL_ADDRESS"
-
-				wget "$INSTALL_URL_ADDRESS" -O package.deb
-				dpkg -i package.deb
-				rm package.deb
-
 				# - Odroid's, 'apt-get install -f' removes chromium package, rather than install required deps...
 				if (( $G_HW_MODEL >= 10 && $G_HW_MODEL < 20 )); then
 
-					G_AGI libgnome-keyring0 libnspr4 libnss3 libnss3-1d libspeechd2 libxslt1.1 libxss1 xdg-utils libgnome-keyring-common libltdl7
-
-				else
-
-					G_AGF
+					DEPS_LIST='libgnome-keyring0 libnspr4 libnss3 libnss3-1d libspeechd2 libxslt1.1 libxss1 xdg-utils libgnome-keyring-common libltdl7'
 
 				fi
 
-				wget https://dietpi.com/downloads/binaries/all/chromium-l10n_52.0.2743.116-1-deb8u1.1_all.deb -O package.deb
-				dpkg -i package.deb
+				Download_Install deb "$INSTALL_URL_ADDRESS"
+
+				Download_Install deb 'https://dietpi.com/downloads/binaries/all/chromium-l10n_52.0.2743.116-1-deb8u1.1_all.deb'
 
 				#	armv6+
 				if (( $G_HW_ARCH == 1 || $G_HW_ARCH == 2 )); then
 
-					wget https://dietpi.com/downloads/binaries/all/chromedriver_52.0.2743.116-1-deb8u1.1_armhf.deb -O package.deb
-					dpkg -i package.deb
+					Download_Install deb 'https://dietpi.com/downloads/binaries/all/chromedriver_52.0.2743.116-1-deb8u1.1_armhf.deb -O package.deb'
 
 				#	arm64
 				elif (( $G_HW_ARCH == 3 )); then
 
-					wget https://dietpi.com/downloads/binaries/all/chromedriver_52.0.2743.116-1-deb8u1.1_arm64.deb -O package.deb
-					dpkg -i package.deb
+					Download_Install deb 'https://dietpi.com/downloads/binaries/all/chromedriver_52.0.2743.116-1-deb8u1.1_arm64.deb -O package.deb'
 
 				fi
-
-				rm package.deb
 
 				# - Prevent Debian repo from replacing our chromium packages: https://github.com/Fourdee/DietPi/issues/658
 				apt-mark hold chromium chromedriver
@@ -6110,18 +5782,14 @@ _EOF_
 			#Jessie, prefer latest motion release.
 			if (( $G_DISTRO == 3 )); then
 
-				INSTALL_URL_ADDRESS='https://github.com/Motion-Project/motion/releases/download/release-4.1.1/pi_jessie_motion_4.1.1-1_armhf.deb'
-
 				#url/redireect always fails wget spider test...
 				G_CHECK_URL "http://github.com/Motion-Project/motion"
 
 				# - Prereqs
-				G_AGI v4l-utils python python-dev curl libssl-dev libcurl4-openssl-dev libjpeg-dev zlib1g-dev libx264-142 libavcodec56 libavformat56 libmysqlclient18 libswscale3 libpq5
+				DEPS_LIST='v4l-utils python python-dev curl libssl-dev libcurl4-openssl-dev libjpeg-dev zlib1g-dev libx264-142 libavcodec56 libavformat56 libmysqlclient18 libswscale3 libpq5'
 
 				# - Motion
-				wget "$INSTALL_URL_ADDRESS" -O package.deb
-				dpkg -i package.deb
-				rm package.deb
+				no_check_url=1 Download_Install deb 'https://github.com/Motion-Project/motion/releases/download/release-4.1.1/pi_jessie_motion_4.1.1-1_armhf.deb'
 
 				# - Motioneye
 				pip install motioneye
@@ -6129,10 +5797,8 @@ _EOF_
 			#Stretch
 			else
 
-				# - Prereqs
-				G_AGI v4l-utils python python-dev curl libssl-dev libcurl4-openssl-dev libjpeg-dev zlib1g-dev
-
-				G_AGI motion
+				# - Prereqs + Motion
+				G_AGI v4l-utils python python-dev curl libssl-dev libcurl4-openssl-dev libjpeg-dev zlib1g-dev motion
 
 				# - Motioneye
 				pip install motioneye
@@ -6198,7 +5864,6 @@ _EOF_
 			G_CHECK_URL "$INSTALL_URL_ADDRESS"
 
 			mkdir -p /etc/vhusbd
-
 			wget "$INSTALL_URL_ADDRESS" -O /etc/vhusbd/vhusbd
 			chmod +x /etc/vhusbd/vhusbd
 
@@ -6212,17 +5877,10 @@ _EOF_
 
 			local version='2.3.4'
 
-			INSTALL_URL_ADDRESS="https://github.com/sabnzbd/sabnzbd/archive/$version.zip"
-
-			G_CHECK_URL "$INSTALL_URL_ADDRESS"
-
 			#prereqs
-			G_AGI par2 python-dev libffi-dev libssl-dev
+			DEPS_LIST='par2 python-dev libffi-dev libssl-dev'
 
-			wget "$INSTALL_URL_ADDRESS" -O package.zip
-			mkdir -p /etc/sabnzbd
-			G_RUN_CMD unzip -o package.zip -d /etc/sabnzbd
-			rm package.zip
+			Download_Install zip "https://github.com/sabnzbd/sabnzbd/archive/$version.zip" /etc/sabnzbd
 
 			mv /etc/sabnzbd/sabnzbd-"$version"/* /etc/sabnzbd/
 			rm -R /etc/sabnzbd/sabnzbd-"$version"
@@ -6231,12 +5889,7 @@ _EOF_
 			if (( $G_HW_MODEL < 10 )); then
 
 				#G_AGI unrar-free #https://github.com/Fourdee/DietPi/issues/176#issuecomment-240101365
-
-				INSTALL_URL_ADDRESS='https://dietpi.com/downloads/binaries/all/unrar_5.3.2-1+deb9u1_armhf.deb'
-				G_CHECK_URL "$INSTALL_URL_ADDRESS"
-				wget "$INSTALL_URL_ADDRESS" -O package.deb
-				dpkg -i package.deb
-				rm package.deb
+				Download_Install deb 'https://dietpi.com/downloads/binaries/all/unrar_5.3.2-1+deb9u1_armhf.deb'
 
 			else
 
@@ -6257,11 +5910,7 @@ _EOF_
 			INSTALL_URL_ADDRESS='https://github.com/Fornoth/spotify-connect-web/releases' #full path fails wget spider test...
 			G_CHECK_URL "$INSTALL_URL_ADDRESS"
 
-			INSTALL_URL_ADDRESS+='/download/0.0.4-alpha/spotify-connect-web_0.0.4-alpha.tar.gz'
-
-			wget "$INSTALL_URL_ADDRESS" -O package.tar
-			G_RUN_CMD tar zxvf package.tar -C $G_FP_DIETPI_USERDATA/
-			rm package.tar
+			no_check_url=1 Download_Install tar "$INSTALL_URL_ADDRESS/download/0.0.4-alpha/spotify-connect-web_0.0.4-alpha.tar.gz" $G_FP_DIETPI_USERDATA
 
 		fi
 
@@ -6317,7 +5966,7 @@ _EOF_
 
 			cd /var/www/koel
 			composer install
-			cd $HOME
+			cd $FP_WORK_DIR
 
 		fi
 
@@ -6448,13 +6097,12 @@ _EOF_
 			#Install Python and PIP
 			G_AGI python python-pip python-imaging python-dev
 
-			cd $HOME
 			git clone --depth=1 "$INSTALL_URL_ADDRESS"
 
 			# - Move HTPC Manager to a 'better' location
 			mkdir -p $G_FP_DIETPI_USERDATA/htpc-manager
-			mv $HOME/HTPC-Manager/* $G_FP_DIETPI_USERDATA/htpc-manager/
-			rm -R $HOME/HTPC-Manager
+			cp -R HTPC-Manager/* $G_FP_DIETPI_USERDATA/htpc-manager/
+			rm -R HTPC-Manager
 
 			# - psutil for system stats
 			pip install psutil
@@ -6481,7 +6129,7 @@ _EOF_
 			G_DIETPI-NOTIFY 2 'OctoPrint is now installing, please be patient and do not terminate this process, it may take some time...'
 			G_RUN_CMD python setup.py install
 
-			cd $HOME
+			cd $FP_WORK_DIR
 
 		fi
 
@@ -6771,7 +6419,7 @@ _EOF_
 			# - Enable default app for service start
 			cp src/assistant_library_with_button_demo.py src/main.py
 
-			cd $HOME
+			cd $FP_WORK_DIR
 
 		fi
 
@@ -7006,7 +6654,7 @@ _EOF_
 				dpkg -i *.deb
 				G_AGF
 
-				cd $HOME
+				cd $FP_WORK_DIR
 				rm -R gpu_driver
 				rm package.7z
 
@@ -8947,7 +8595,6 @@ _EOF_
 		if (( ${aSOFTWARE_INSTALL_STATE[$INSTALLING_INDEX]} == 1 )); then
 
 			Banner_Configuration
-
 			sed -i "/JAVA_HOME=/c\JAVA_HOME=$(find \/usr\/lib\/jvm\/ -name java-8-openjdk*)" /etc/default/tomcat8
 
 		fi
@@ -10759,7 +10406,7 @@ _EOF_
 			# - setup SSL cert
 			cd $G_FP_DIETPI_USERDATA/mineos/minecraft
 			./generate-sslcert.sh
-			cd $HOME
+			cd $FP_WORK_DIR
 
 			# - Supervisor service
 			cat << _EOF_ > /etc/supervisor/conf.d/mineos.conf
@@ -10788,9 +10435,7 @@ _EOF_
 			# - Data storage / user data
 			mkdir -p $G_FP_DIETPI_USERDATA/gogs-repo
 			mkdir -p /var/log/gogs
-
 			> /var/log/gogs/gogs_daemon.log
-
 			chown -R gogs:gogs /var/log/gogs
 
 			# - sqldb
@@ -11814,7 +11459,7 @@ _EOF_
 			php artisan koel:init
 			#php artisan db:seed --force
 
-			cd $HOME
+			cd $FP_WORK_DIR
 
 			cat << _EOF_ > /etc/systemd/system/koel.service
 [Unit]
@@ -13831,7 +13476,6 @@ _EOF_
 
 			rm -R /etc/gogs
 			rm /etc/systemd/system/gogs.service
-
 			rm -R /var/log/gogs
 
 			systemctl start mysql
@@ -14607,12 +14251,12 @@ _EOF_
 		Create_UserContent_Folders
 		#------------------------------------------------------------
 		# Set current path to home folder
-		cd $HOME
+		cd $FP_WORK_DIR
 
-		# Update & Upgrade APT
+		# Update & upgrade APT
 		Banner_Apt_Update
 
-		# - Always update APT, before running installs.
+		# - Update APT list
 		G_AGUP
 
 		# - Simulated APT installation to check for failures related to apt-cache.
@@ -14620,7 +14264,7 @@ _EOF_
 		local package_to_test='bash-doc'
 		G_AGI $package_to_test -s
 
-		# - Upgrade APT
+		# - Upgrade APT packages
 		G_AGUG
 
 		# Generate dir for dietpi-software installed "non-service" based control scripts
@@ -15170,7 +14814,7 @@ _EOF_
 	Exit_Destroy(){
 
 		Software_Arrays_Destroy
-
+		rm -R $FP_WORK_DIR
 		exit
 
 	}
