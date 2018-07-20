@@ -1101,6 +1101,9 @@ _EOF_
 		l_message='Generating DietPi /etc/fstab' G_RUN_CMD /DietPi/dietpi/dietpi-drive_manager 4
 		# Restart DietPi-RAMdisk, as 'dietpi-drive_manager 4' remounts /DietPi.
 		G_RUN_CMD systemctl restart dietpi-ramdisk
+		# Recreate and navigate to "/tmp/dietpi-prep" working directory
+		mkdir -p /tmp/dietpi-prep
+		cd /tmp/dietpi-prep
 
 		G_DIETPI-NOTIFY 2 'Deleting all log files /var/log'
 
