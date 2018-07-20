@@ -1008,9 +1008,7 @@ _EOF_
 		#	Storage locations for program specifc additional data
 		mkdir -p /var/lib/dietpi/dietpi-autostart
 		mkdir -p /var/lib/dietpi/dietpi-config
-
-		#mkdir -p /var/lib/dietpi/dietpi-ramlog
-		mkdir -p /var/lib/dietpi/dietpi-ramlog/storage
+		mkdir -p /var/tmp/dietpi/logs/dietpi-ramlog_store
 
 		#mkdir -p /var/lib/dietpi/dietpi-software
 		mkdir -p /var/lib/dietpi/dietpi-software/installed		#Additional storage for installed apps, eg: custom scripts and data
@@ -1431,7 +1429,7 @@ _EOF_
 
 		G_DIETPI-NOTIFY 2 'Deleting DietPi-RAMlog storage'
 
-		rm -R /var/lib/dietpi/dietpi-ramlog/storage/* &> /dev/null
+		rm -R /var/tmp/dietpi/logs/dietpi-ramlog_store/* &> /dev/null
 
 		G_DIETPI-NOTIFY 2 'Resetting DietPi generated globals/files'
 

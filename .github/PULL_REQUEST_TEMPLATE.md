@@ -3,13 +3,10 @@ Before submitting a pull request
 - Please ensure target branch is the testing (active dev) branch: https://github.com/Fourdee/DietPi/tree/testing
 - Please ensure changes have been tested and verified functional.
 -->
-**Status**: <!-- WIP / Testing / Ready / ... -->
-<!--
-- [ ] Task 1
-- [ ] Task 2
--->
+**Status**: WIP | Testing | Ready | ?
+- [ ] Example task 1
 
-**Reference**: <!-- https://github.com/Fourdee/DietPi/issues/XXXX -->
+**Reference**: https://github.com/Fourdee/DietPi/issues/XXXX
 
 **Commit list/description**:
 <!--
