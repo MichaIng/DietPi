@@ -3301,7 +3301,7 @@ _EOF_
 			[[ $target ]] && target="-d $target"
 			l_message='Unzipping archive' G_RUN_CMD unzip -o $file $target
 
-		elif [[ $type == tar ]]; then # .bz2 .gz may require different extraction vars if I remember correctly?
+		elif [[ $type == tar ]]; then
 
 			[[ $target ]] && mkdir -p $target && target="-C $target"
 			l_message='Unpacking tarball' G_RUN_CMD tar xf $file $target
@@ -5913,7 +5913,7 @@ _EOF_
 			(( $G_DISTRO > 3 )) && DEPS_LIST+=" $PHP_APT_PACKAGE_NAME-mbstring $PHP_APT_PACKAGE_NAME-xml"
 
 			Download_Install 'https://github.com/phanan/koel/archive/v3.7.2.zip'
-			mv koel-* /var/www/koel
+			mv koel-* $G_FP_DIETPI_USERDATA/koel
 
 			# Install pre-req yarn and "n" to downgrade to Node 8, as Node 10 is not (yet) compatible with Koel build.
 			npm i yarn n -g --unsafe-perm
@@ -5924,8 +5924,9 @@ _EOF_
 			php composer-setup.php
 			php -r "unlink('composer-setup.php');"
 			mv composer.phar /usr/local/bin/composer
+			rm composer-setup.php &> /dev/null
 
-			cd /var/www/koel
+			cd $G_FP_DIETPI_USERDATA/koel
 			composer install
 			cd $FP_WORK_DIR
 
@@ -7391,6 +7392,9 @@ _EOF_
 		chown -R deluge:dietpi $G_FP_DIETPI_USERDATA/deluge
 		chown deluge:dietpi /var/log/deluged.log /var/log/deluge-web.log
 
+		# - Koel
+		chown -R koel:dietpi $G_FP_DIETPI_USERDATA/koel
+
 	}
 
 	#/////////////////////////////////////////////////////////////////////////////////////
@@ -7756,15 +7760,22 @@ _EOF_
 			local modules_to_enable=$(ls "$FP_PHP_BASE_DIR"/mods-available | grep '.ini' | sed 's/.ini//')
 			${PHP_APT_PACKAGE_NAME}enmod "$modules_to_enable"
 
-			# PHP info page
-			echo "<?php phpinfo(); ?>" > /var/www/phpinfo.php
+			# Create PHP info pages within webroot, if webserver is installed.
+			if (( ${aSOFTWARE_INSTALL_STATE[83]} >= 1 ||
+				${aSOFTWARE_INSTALL_STATE[84]} >= 1 ||
+				${aSOFTWARE_INSTALL_STATE[85]} >= 1 )); then
 
-			#	OPcache info page
-			G_THREAD_START wget https://raw.githubusercontent.com/rlerdorf/opcache-status/master/opcache.php -O /var/www/opcache.php
-			#	APC info page
-			G_THREAD_START wget https://github.com/krakjoe/apcu/raw/master/apc.php -O /var/www/apc.php
+				# PHP info page
+				echo '<?php phpinfo(); ?>' > /var/www/phpinfo.php
 
-			G_THREAD_WAIT
+				#	OPcache info page
+				G_THREAD_START wget https://raw.githubusercontent.com/rlerdorf/opcache-status/master/opcache.php -O /var/www/opcache.php
+				#	APC info page
+				G_THREAD_START wget https://github.com/krakjoe/apcu/raw/master/apc.php -O /var/www/apc.php
+
+				G_THREAD_WAIT
+
+			fi
 
 		fi
 
@@ -11366,13 +11377,13 @@ _EOF_
 
 			Banner_Configuration
 
-			useradd -r -M koel -G dietpi -G www-data -s /usr/bin/nologin
+			useradd -r -M koel -G dietpi -s /usr/bin/nologin
 
 			Download_Test_Media
 
 			/DietPi/dietpi/func/create_mysql_db koel koel "$GLOBAL_PW"
 
-			cd /var/www/koel
+			cd $G_FP_DIETPI_USERDATA/koel
 
 			G_CONFIG_INJECT 'DB_CONNECTION=' 'DB_CONNECTION=mysql' .env
 			G_CONFIG_INJECT 'DB_HOST=' 'DB_HOST=127.0.0.1' .env
@@ -11383,7 +11394,6 @@ _EOF_
 			#G_CONFIG_INJECT 'ADMIN_EMAIL=' 'ADMIN_EMAIL=dietpi@dietpi.com' .env
 			#G_CONFIG_INJECT 'ADMIN_NAME=' 'ADMIN_NAME=admin' .env
 			#G_CONFIG_INJECT 'ADMIN_PASSWORD=' "ADMIN_PASSWORD=$GLOBAL_PW" .env
-			G_CONFIG_INJECT 'DB_CONNECTION=' 'DB_CONNECTION=mysql' .env
 			G_CONFIG_INJECT 'FFMPEG_PATH=' "FFMPEG_PATH=$(which ffmpeg)" .env
 
 			php artisan koel:init
@@ -11399,8 +11409,8 @@ Description=Koel
 Type=simple
 User=koel
 Group=dietpi
-WorkingDirectory=/var/www/koel
-ExecStart=$(which php) /var/www/koel/artisan serve --host 0.0.0.0
+WorkingDirectory=$G_FP_DIETPI_USERDATA/koel
+ExecStart=$(which php) $G_FP_DIETPI_USERDATA/koel/artisan serve --host 0.0.0.0
 
 [Install]
 WantedBy=multi-user.target
@@ -12635,7 +12645,9 @@ _EOF_
 			mysqladmin drop koel -f
 			mysql -e "drop user 'koel'@'localhost'"
 
-			rm -R /var/www/koel
+			rm -R $G_FP_DIETPI_USERDATA/koel
+
+			systemctl disable koel
 			rm /etc/systemd/system/koel.service
 
 		fi
@@ -13700,10 +13712,14 @@ _EOF_
 			G_WHIP_MSG "Creating MariaDB database backup before uninstallation:\n\nIn case of accident, we create a database backup for you. You can remove it manually, if you are sure, that you don't need it any more.\n\n$G_FP_DIETPI_USERDATA/mariadb-database-backup.sql"
 			G_RUN_CMD systemctl start mysql
 			mysqldump --all-databases > $G_FP_DIETPI_USERDATA/mariadb-database-backup.sql
+			# On Jessie, purging MariaDB server with unix_socket authentication fails, thus revert to password:
+			(( $G_DISTRO < 4 )) && mysql -e "grant all privileges on *.* to 'root'@'localhost' identified by '$GLOBAL_PW' with grant option;flush privileges"
+			systemctl stop mysql
 			G_AGP mariadb-server
 
 			# - config folder
 			rm -R /etc/mysql 2> /dev/null
+			rm -R ~/.mysql_history 2> /dev/null
 
 			# - SQL store
 			rm -R /var/lib/mysql 2> /dev/null
