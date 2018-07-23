@@ -53,7 +53,7 @@
 		G_DIETPI-NOTIFY 3 "$G_PROGRAM_NAME" 'Apply'
 
 		# G_DIETPI-NOTIFY 0/OK or 1/FAILURE
-		local status=0
+		local notify_type=0
 
 		#Update process list again (incase of PID changes via forking processes, during init of this script)
 		ps ax > $FP_PS_LIST
@@ -80,42 +80,46 @@
 					aPID[$i]=$line
 
 					# - nice
-					renice -n ${aNICE[$i]} ${aPID[$i]} &> /dev/null
-					if (( ! $? )); then
+					notify_type=0
+					renice -n ${aNICE[$i]} -g ${aPID[$i]} &> /dev/null
+					if (( $? )); then
 
-						status=0
+						#	Retry without group apply (eg: PID only)
+						renice -n ${aNICE[$i]} -p ${aPID[$i]} &> /dev/null
+						if (( $? )); then
 
-					else
+							notify_type=1
+							EXIT_CODE=1
 
-						status=1
-						EXIT_CODE=1
-						print_info=1
+						fi
 
 					fi
 
-					if (( $print_info )); then
+					if (( $print_info || $notify_type == 1 )); then
 
-						G_DIETPI-NOTIFY $status "${aNAME[$i]} (${aPID[$i]}) : \e[90mNice      ${aNICE[$i]}\e[0m"
+						G_DIETPI-NOTIFY $notify_type "${aNAME[$i]} (${aPID[$i]}) : \e[90mNice      ${aNICE[$i]}\e[0m"
 
 					fi
 
 					# - Affinity
-					taskset -pc ${aAFFINITY[$i]} ${aPID[$i]} &> /dev/null
-					if (( ! $? )); then
+					notify_type=0
+					taskset -apc ${aAFFINITY[$i]} ${aPID[$i]} &> /dev/null
+					if (( $? )); then
 
-						status=0
+						#	Retry without group apply (eg: PID only)
+						taskset -pc ${aAFFINITY[$i]} ${aPID[$i]} &> /dev/null
+						if (( $? )); then
 
-					else
+							notify_type=1
+							EXIT_CODE=2
 
-						status=1
-						EXIT_CODE=2
-						print_info=1
+						fi
 
 					fi
 
-					if (( $print_info )); then
+					if (( $print_info || $notify_type == 1 )); then
 
-						G_DIETPI-NOTIFY $status "${aNAME[$i]} (${aPID[$i]}) : \e[90mAffinity  ${aAFFINITY[$i]}\e[0m"
+						G_DIETPI-NOTIFY $notify_type "${aNAME[$i]} (${aPID[$i]}) : \e[90mAffinity  ${aAFFINITY[$i]}\e[0m"
 
 					fi
 
@@ -160,22 +164,24 @@
 					fi
 
 					# - Apply
-					chrt $chrt_mode -p ${aSCHEDULE_PRIORITY[$i]} ${aPID[$i]} &> /dev/null
-					if (( ! $? )); then
+					notify_type=0
+					chrt $chrt_mode -ap ${aSCHEDULE_PRIORITY[$i]} ${aPID[$i]} &> /dev/null
+					if (( $? )); then
 
-						status=0
+						#	Retry without group apply (eg: PID only)
+						chrt $chrt_mode -p ${aSCHEDULE_PRIORITY[$i]} ${aPID[$i]} &> /dev/null
+						if (( $? )); then
 
-					else
+							notify_type=1
+							EXIT_CODE=3
 
-						status=1
-						EXIT_CODE=3
-						print_info=1
+						fi
 
 					fi
 
-					if (( $print_info )); then
+					if (( $print_info || $notify_type == 1 )); then
 
-						G_DIETPI-NOTIFY $status "${aNAME[$i]} (${aPID[$i]}) : \e[90mScheduler ${aSCHEDULE_POLICY[$i]} ${aSCHEDULE_PRIORITY[$i]}\e[0m"
+						G_DIETPI-NOTIFY $notify_type "${aNAME[$i]} (${aPID[$i]}) : \e[90mScheduler ${aSCHEDULE_POLICY[$i]} ${aSCHEDULE_PRIORITY[$i]}\e[0m"
 
 					fi
 
@@ -325,7 +331,8 @@
 		MAX_PROGRAMS=${#aNAME[@]}
 
 		# - Find out which programs are running (impies installed) | exclude kernel threads ([])
-		ps ax | sed '/\]$/d' > $FP_PS_LIST
+		#	NB: -L to list all threads in ps output
+		ps ax --no-headers -o pid -o cmd | sed '/\]$/d' > $FP_PS_LIST
 
 		# - Enable affinity for all cores and all programs by default
 		local init_affinity_value=0
@@ -351,12 +358,13 @@
 
 				aAVAILABLE[$i]=1
 
-			fi
+				# - Apply default nice to specific programs
+				#	NB: we need a better way of achiveing this, slows down the loop.
+				# if [[ ${aPROCESS_NAME[$i]} == 'netdata' || ${aPROCESS_NAME[$i]} == 'cron' ]]; then
 
-			# - Apply default nice to specific programs
-			if [[ ${aPROCESS_NAME[$i]} == 'netdata' ]]; then
+					# aNICE[$i]=19
 
-				aNICE[$i]=19
+				# fi
 
 			fi
 
@@ -643,7 +651,7 @@ _EOF_
 										#taskset requires , (comma) seperated cpu index indexs after 1st entry.
 										if (( $loop_count == 0 )); then
 
-											new_affinity+="$i"
+											new_affinity+=$i
 
 										#Add comma for future entries
 										else
@@ -785,7 +793,7 @@ _EOF_
 
 										fi
 
-										G_WHIP_MENU_ARRAY+=("$i" ": $description")
+										G_WHIP_MENU_ARRAY+=($i ": $description")
 
 									done
 
