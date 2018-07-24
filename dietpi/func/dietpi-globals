@@ -23,9 +23,6 @@
 	#////////////////////////////////////
 
 	#-----------------------------------------------------------------------------------
-	#Ensure we are in users home dir: https://github.com/Fourdee/DietPi/issues/905#issuecomment-298223705
-	cd $HOME
-	#-----------------------------------------------------------------------------------
 	#Exit script for unsupported terminal and set dumb: https://github.com/Fourdee/DietPi/issues/1703#issue-314330405
 	if [[ -z $TERM || $TERM == 'unknown' ]]; then
 
@@ -80,9 +77,20 @@
 	G_FP_DIETPI_USERDATA='/mnt/dietpi_userdata'
 
 	#Device details
+	# - Declare
+	G_HW_MODEL=0
+	G_HW_MODEL_DESCRIPTION='NULL'
+	G_HW_ARCH=0
+	G_HW_ARCH_DESCRIPTION='NULL'
+	G_HW_CPUID=0
+	G_HW_CPU_CORES=$(nproc --all)
+
+	G_DISTRO=0
+	G_DISTRO_NAME='NULL'
+
 	# - Update
 	#	NB: dietpi-boot service launches dietpi-obtain_hw_model to create the following file
-	if [[ -f /DietPi/dietpi/.hw_model ]]; then
+	if [[ -r /DietPi/dietpi/.hw_model ]]; then
 
 		G_HW_MODEL=$(sed -n 1p /DietPi/dietpi/.hw_model)
 		G_HW_MODEL_DESCRIPTION=$(sed -n 2p /DietPi/dietpi/.hw_model)
@@ -104,29 +112,42 @@
 
 	fi
 
-	# - Create variables, if empty
-	G_HW_MODEL=${G_HW_MODEL:-0}
-	G_HW_MODEL_DESCRIPTION=${G_HW_MODEL_DESCRIPTION:-NULL}
-	G_HW_ARCH=${G_HW_ARCH:-0}
-	G_HW_ARCH_DESCRIPTION=${G_HW_ARCH_DESCRIPTION:-NULL}
-	G_HW_CPUID=${G_HW_CPUID:-0}
-	G_HW_CPU_CORES=$(nproc --all)
-
-	G_DISTRO=${G_DISTRO:-0}
-	G_DISTRO_NAME=${G_DISTRO_NAME:-NULL}
-
 	#INIT functions for originating script
 	#	eg: stuff we cant init in main globals/funcs due to .bashrc load into current session.
 	G_INIT(){
 
-		# - Set locale for scripts, prevents incorrect scraping
+		# Set locale for scripts, prevents incorrect scraping
 		export LANG=en_GB.UTF-8
 		export LC_ALL=en_GB.UTF-8
 
-		# - HIERARCHY system for G_DIETPI-NOTIFY 3
+		# HIERARCHY system for G_DIETPI-NOTIFY 3
 		[[ $HIERARCHY ]] && export HIERARCHY=$((HIERARCHY+1)) || export HIERARCHY=0
 
-		# - Auto print init header for all scripts
+		# Ensure we are in script working dir or users home dir, if available: https://github.com/Fourdee/DietPi/issues/905#issuecomment-298223705
+		# - If any $FP_WORK_DIR step fails, go to $HOME if it is assigned
+		if [[ $FP_WORK_DIR ]] && mkdir -p $FP_WORK_DIR && cd $FP_WORK_DIR; then
+
+			: # G_DIETPI-NOTIFY 2 "Entered working directory: $FP_WORK_DIR"
+
+		elif [[ $HOME ]]; then
+
+			cd $HOME
+
+		fi
+
+		# Declare and trap G_EXIT() as exit function, that runs on EXIT signal, which includes INT (error) and TERM (kill).
+		G_EXIT(){
+
+			# - Purging working directory
+			[[ $FP_WORK_DIR && -d $FP_WORK_DIR ]] && rm -R $FP_WORK_DIR
+
+			# - Execute custom exit function, if existent
+			declare -F G_EXIT_CUSTOM &> /dev/null && G_EXIT_CUSTOM
+
+		}
+		trap 'G_EXIT' EXIT
+
+		# Auto print init header for all scripts
 		# G_DIETPI-NOTIFY 3 "$G_PROGRAM_NAME" 'Init'
 
 	}
@@ -151,12 +172,12 @@
 		local ainput_string=("$@")
 		local output_string=''
 		local bracket_l='\e[90m[\e[0m'
-		local bracket_r='\e[90m]\e[0m'
+		local bracket_r='\e[0m\e[90m]\e[0m'
 
 		#Funcs
 		Clean_Process_Animation(){
 
-			if (( $G_USER_INPUTS )) && [[ -w /tmp/dietpi-process.pid ]]; then
+			if [[ -t 0 ]] && [[ -w /tmp/dietpi-process.pid ]]; then
 
 				kill $(</tmp/dietpi-process.pid) &> /dev/null
 				rm /tmp/dietpi-process.pid &> /dev/null
@@ -228,10 +249,10 @@
 		#$@ = txt desc
 		elif (( $1 == -2 )); then
 
-			output_string+="\r$bracket_l\e[33m......$bracket_r "
+			output_string+="\r$bracket_l\e[33m .... $bracket_r "
 			Print_Output_String 1
 
-			if (( $G_USER_INPUTS )); then
+			if [[ -t 0 ]]; then
 
 				Print_Process_Animation(){
 
@@ -268,8 +289,19 @@
 				local output_lines=0
 				(( output_lines=(${#input_string}+6)/$(tput cols) ))
 				(( $output_lines )) && tput cuu $output_lines
-				[[ ! -e /tmp/dietpi-process.pid ]] && > /tmp/dietpi-process.pid && ( Print_Process_Animation & echo $! > /tmp/dietpi-process.pid )
+				# If redirect to PID file fails (due to noclobber, on existent file), start processing animation.
+				# - This method prevents a tiny condition race from checking file existance to creating it, when doing: [[ ! -e file ]] && > file
+				set -o noclobber
+				if { > /tmp/dietpi-process.pid; } &> /dev/null; then
 
+					set +o noclobber
+					{ Print_Process_Animation & echo $! > /tmp/dietpi-process.pid; disown; } 2> /dev/null
+
+				else
+
+					set +o noclobber
+
+				fi
 				unset Print_Process_Animation
 
 			fi
@@ -296,7 +328,7 @@
 
 			Clean_Process_Animation
 			output_string+="$bracket_l INFO $bracket_r "
-			# Keep info messages in gray, even if "G_PROGRAM_NAME | \e[0m" is added:
+			# Keep info messages in gray, even if "$G_PROGRAM_NAME | \e[0m" is added:
 			ainput_string[1]="\e[90m${ainput_string[1]}"
 			ainput_string+=('\n')
 			Print_Output_String 1
@@ -325,7 +357,7 @@
 
 			else
 
-				output_string+="\n \e[38;5;154m$2"
+				output_string+="\n \e[38;5;154m$2\e[0m"
 				output_string+='\n\e[90m─────────────────────────────────────────────────────'
 				output_string+='\n Mode: \e[0m'
 				ainput_string+=('\n\n')
@@ -389,9 +421,6 @@
 			#RootFS RW check
 			/DietPi/dietpi/dietpi-drive_manager 3
 			local exit_code=$?
-
-			#Prevent HIERARCHY increase (as this pre-check runs before we define it in originating script)
-			export HIERARCHY=$((HIERARCHY-1))
 
 			if (( $exit_code != 0 )); then
 
@@ -505,7 +534,7 @@
 
 		#Update backtitle
 		WHIP_BACKTITLE="$G_PROGRAM_NAME | $G_HW_MODEL_DESCRIPTION"
-		if [[ -f '/DietPi/dietpi/.network' ]]; then
+		if [[ -r '/DietPi/dietpi/.network' ]]; then
 
 			WHIP_BACKTITLE+=" | IP: $(sed -n 4p /DietPi/dietpi/.network)"
 
