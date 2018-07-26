@@ -796,7 +796,7 @@ _EOF_
 		#	Rock64
 		elif (( $G_HW_MODEL == 43 )); then
 
-			G_AGI linux-rock64-package gdisk
+			G_AGI linux-rock64 gdisk
 
 		#	BBB
 		elif (( $G_HW_MODEL == 71 )); then
