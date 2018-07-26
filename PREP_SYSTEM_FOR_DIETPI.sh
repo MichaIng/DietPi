@@ -791,7 +791,7 @@ _EOF_
 		#	RockPro64
 		elif (( $G_HW_MODEL == 42 )); then
 
-			G_AGI linux-rockpro64 linux-rockpro64-package
+			G_AGI linux-rockpro64 linux-rockpro64-package board-package-rockpro64-0.7-30
 
 		#	Rock64
 		elif (( $G_HW_MODEL == 43 )); then
