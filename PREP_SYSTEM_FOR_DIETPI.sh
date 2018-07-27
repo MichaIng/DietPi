@@ -1156,7 +1156,7 @@ _EOF_
 		export G_ERROR_HANDLER_EXITCODE=$?
 		G_ERROR_HANDLER
 
-		G_RUN_CMD echo 'DietPi' > /etc/hostname
+		echo 'DietPi' > /etc/hostname
 
 		G_DIETPI-NOTIFY 2 'Configuring htop'
 
