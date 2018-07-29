@@ -1177,6 +1177,7 @@ _EOF_
 		G_DIETPI-NOTIFY 2 'Reducing getty count and resource usage:'
 
 		systemctl mask getty-static
+		systemctl mask systemd-logind
 
 		G_DIETPI-NOTIFY 2 'Configuring regional settings (TZdata):'
 
