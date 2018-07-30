@@ -10,122 +10,221 @@
 	#
 	# Info:
 	# - Location: /DietPi/dietpi/func/dietpi-set_cpu_fan + /boot/dietpi/func/dietpi-set_cpu_fan
-	# - Runs at boot up /DietPi/dietpi/boot
+	# - Runs at boot up /DietPi/dietpi/boot, if settings were applied.
 	# - Toggles CPU fan temp control and:
-	#	- Sets temp strip points, e.g. 35°C, 50°C, 65°C
-	#	- Attaches PWM fan speeds to temp strip points, e.g. 0%, 45%, 70%, 95%
+	#	- Sets trip point temps, e.g. 35°C, 50°C, 65°C
+	#	- Attaches PWM fan speeds to temp trip points, e.g. 0%, 45%, 70%, 95%
+	#	- Result: Fan off below 35°C, 45% fan speed at 35°C - 50°C, 70% fan speed at 50°C - 65°C, 95% fan speed above 65°C
 	#	or
-	#	- Sets constant fan speed
+	#	- Sets static fan speed
+	#
+	# Usage:
+	AVAIABLE_COMMANDS="
+Available commands:
+dietpi-set_cpu_fan	=>	Interactive whiptail menu to choose settings and create $FP_SETTINGS.
+dietpi-set_cpu_fan 1	=>	Non-interactively apply settings from $FP_SETTINGS.
+"
 	#////////////////////////////////////
 
-	#Import DietPi-Globals ---------------------------------------------------------------
+	# Import DietPi-Globals ---------------------------------------------------------------
 	. /DietPi/dietpi/func/dietpi-globals
 	export G_PROGRAM_NAME='DietPi-Set_CPU_fan'
 	G_INIT
 	G_CHECK_ROOT_USER
-	#Import DietPi-Globals ---------------------------------------------------------------
+	# Import DietPi-Globals ---------------------------------------------------------------
 
-	#Exit path for VM
+	# Exit path for VM
 	if (( $G_HW_MODEL == 20 )); then
 
-		G_DIETPI-NOTIFY 2 'CPU fan control is not available on VMs.'
-		exit
+		G_DIETPI-NOTIFY 1 'CPU fan control is not available on VMs. Aborting...'
+		exit 1
 
 	fi
 
-	#Control file paths
+	# Control file paths
 	FP_SETTINGS='/DietPi/dietpi/.dietpi-set_cpu_fan'
 	FP_FAN_CONTROL_TOGGLE='/sys/devices/platform/pwm-fan/hwmon/hwmon0/automatic'
 	FP_FAN_TRIP_TEMPS='/sys/devices/virtual/thermal/thermal_zone0/trip_point_0_temp'
 	FP_FAN_TRIP_SPEEDS='/sys/devices/platform/pwm-fan/hwmon/hwmon0/fan_speed'
-	FP_FAN_SPEED_FIXED='/sys/devices/platform/pwm-fan/hwmon/hwmon0/pwm1'
+	FP_FAN_SPEED_STATIC='/sys/devices/platform/pwm-fan/hwmon/hwmon0/pwm1'
 
-	#Exit without settings or control toggle file
-	if [[ ! -f $FP_SETTINGS ]]; then
+	# Exit without control toggle file
+	if [[ ! -e $FP_FAN_CONTROL_TOGGLE ]]; then
 
-		G_DIETPI-NOTIFY 2 'No settings file found, keep system defaults'
-		exit
-
-	elif [[ ! -e $FP_FAN_CONTROL_TOGGLE ]]; then
-
-		G_DIETPI-NOTIFY 2 'CPU fan PWM control is not available on your system.'
-		exit
+		G_DIETPI-NOTIFY 1 'CPU fan control is not available on your system. Aborting...'
+		exit 1
 
 	fi
+
+	# Grab valid input
+	INPUT=0
+	G_CHECK_VALIDINT $1 && INPUT=$1
+
+	# Read settings file
+	# - $FAN_CONTROL_TOGGLE=0|1; On|Off
+	# - $FAN_TRIP_TEMPS='XX YY ZZ'; XX°C YY°C ZZ°C
+	# - $FAN_TRIP_SPEEDS='AAA BBB CCC DDD'; AAA*100/255 %...
+	# - $FAN_SPEED_STATIC=EEE; EEE*100/255 %
+	read_Settings(){
+
+		. $FP_SETTINGS
+
+	}
+
+	# Write settings file
+	write_Settings(){
+
+		# - Write fan control toggle to settings file
+		echo "FAN_CONTROL_TOGGLE=$FAN_CONTROL_TOGGLE" > $FP_SETTINGS
+
+		if (( $FAN_CONTROL_TOGGLE )); then
+
+			# - Write trip points and attached temperatures to settings file
+			cat << _EOF_ >> $FP_SETTINGS
+FAN_TRIP_TEMPS=$FAN_TRIP_TEMPS
+FAN_TRIP_SPEEDS=$FAN_TRIP_SPEEDS
+_EOF_
+
+		else
+
+			# - Write static fan speed to settings file
+			echo "FAN_SPEED_STATIC=$FAN_SPEED_STATIC" >> $FP_SETTINGS
+
+		fi
+
+	}
+
+	# Read currently applied fan control values
+	read_Current(){
+
+		# - Read current fan control toggle
+		FAN_CONTROL_TOGGLE=$(<$FP_FAN_CONTROL_TOGGLE)
+
+		if (( $FAN_CONTROL_TOGGLE )); then
+
+			# - Read current static fan speed
+			FAN_SPEED_STATIC=$(<$FP_FAN_SPEED_STATIC)
+
+		else
+
+			# - Read current trip point temperatures, assuming values for CPU0 for all CPUs
+			local fp_target=''
+			local i=0
+			for fp_target in /sys/devices/virtual/thermal/thermal_zone0/trip_point_*_temp
+			do
+
+				# Check for file existance. If no file matches string, $ft_target will return the pattern literally.
+				[[ ! -e $fp_target ]] && G_DIETPI-NOTIFY 1 'Trip point temperature files missing. Skipping...' && break
+
+				FAN_TRIP_TEMPS+=" $(</sys/devices/virtual/thermal/thermal_zone0/trip_point_$i_temp)"
+				((i++))
+
+			done
+			# - Remove leading white space
+			FAN_TRIP_TEMPS=${FAN_TRIP_TEMPS% }
+
+			# - Read current trip point fan speeds
+			FAN_TRIP_SPEEDS=$(<$FP_FAN_TRIP_SPEEDS)
+
+		fi
+
+	}
 
 	#/////////////////////////////////////////////////////////////////////////////////////
 	# Main Loop
 	#/////////////////////////////////////////////////////////////////////////////////////
-	#-----------------------------------------------------------------------------------
-	G_DIETPI-NOTIFY 3 $G_PROGRAM_NAME 'Applying CPU fan PWN settings'
-	#-----------------------------------------------------------------------------------
-	#Read settings file
-	# - $FAN_CONTROL_TOGGLE=0|1; On|Off
-	# - $FAN_TRIP_TEMPS='XX YY ZZ'; XX°C YY°C ZZ°C
-	# - $FAN_TRIP_SPEEDS='AAA BBB CCC DDD'; AAA*100/255 %...
-	# - $FAN_SPEED_FIXED=EEE; EEE*100/255 %
-	. $FP_SETTINGS
 
-	#Exit without control files, needed for chosen settings
-	if (( $FAN_CONTROL_TOGGLE )) && [[ ! -e $FP_FAN_TRIP_TEMPS || ! -e $FP_FAN_TRIP_SPEEDS ]]; then
+	if (( $INPUT == 1 )); then
 
-		G_DIETPI-NOTIFY 2 'Temperature based CPU fan PWM control is not available on your system.'
-		exit
+		#-----------------------------------------------------------------------------------
+		G_DIETPI-NOTIFY 3 $G_PROGRAM_NAME 'Applying CPU fan settings'
+		#-----------------------------------------------------------------------------------
 
-	elif (( ! $FAN_CONTROL_TOGGLE )) && [[ ! -e $FP_FAN_SPEED_FIXED ]]; then
+		# Read settings file, if successfully created
+		if [[ -f $FP_SETTINGS ]]; then
 
-		G_DIETPI-NOTIFY 2 'Changing constant CPU fan speed is not available on your system.'
-		exit
+			read_Settings
 
-	fi
+		else
 
-	#Apply chosen settings
-	if (( $FAN_CONTROL_TOGGLE )); then
-
-		# Exit without control files files or empty settings strings
-		if [[ ! -e $FP_FAN_TRIP_TEMPS || ! -e $FP_FAN_TRIP_SPEEDS ||
-			-z $FAN_TRIP_TEMPS || -z $FAN_TRIP_SPEEDS ]]; then
-
-			G_DIETPI-NOTIFY 2 'Temperature based CPU fan PWM control not chosen or not available on your system.'
-			exit
+			G_DIETPI-NOTIFY 1 'No CPU fan control settings file found. Please start "dietpi-set_cpu_fan" first. Aborting...'
+			exit 1
 
 		fi
 
-		local i=0
-		for (( i=0; i<$G_HW_CPU_CORES; i++ ))
-		do
+		# Exit without control files, needed for chosen settings
+		if (( $FAN_CONTROL_TOGGLE )) && [[ ! -e $FP_FAN_TRIP_TEMPS || ! -e $FP_FAN_TRIP_SPEEDS ]]; then
 
-			local fp_target=''
-			local j=0
-			for fp_target in /sys/devices/virtual/thermal/thermal_zone$i/trip_point_*_temp
+			G_DIETPI-NOTIFY 2 'Temperature based CPU fan control is not available on your system. Aborting...'
+			exit 1
+
+		elif (( ! $FAN_CONTROL_TOGGLE )) && [[ ! -e $FP_FAN_SPEED_STATIC ]]; then
+
+			G_DIETPI-NOTIFY 2 'Changing constant CPU fan speed is not available on your system. Aborting...'
+			exit 1
+
+		fi
+
+		# Apply chosen settings
+		if (( $FAN_CONTROL_TOGGLE )); then
+
+			# - Exit with empty settings strings
+			if [[ -z $FAN_TRIP_TEMPS || -z $FAN_TRIP_SPEEDS ]]; then
+
+				G_DIETPI-NOTIFY 1 'Invalid settings found. Please run "dietpi-set_cpu_fan" to re-apply valid settings. Aborting...'
+				exit 1
+
+			fi
+
+			# - Apply trip point temps
+			local i=0
+			for (( i=0; i<$G_HW_CPU_CORES; i++ ))
 			do
 
-				awk '{print $((j+1))}' <<< $FAN_TRIP_TEMPS > /sys/devices/virtual/thermal/thermal_zone$i/trip_point_$j_temp
-				((j++))
+				local fp_target=''
+				local j=0
+				for fp_target in /sys/devices/virtual/thermal/thermal_zone$i/trip_point_*_temp
+				do
+
+					# Check for file existance. If no file matches string, $ft_target will return the pattern literally.
+					[[ ! -e $fp_target ]] && G_DIETPI-NOTIFY 1 "Trip point temperature files missing. Skipping CPU$i" && break
+
+					awk '{print $((j+1))}' <<< $FAN_TRIP_TEMPS > /sys/devices/virtual/thermal/thermal_zone$i/trip_point_$j_temp
+					((j++))
+
+				done
 
 			done
 
-		done
+			# - Apply trip point fan speeds
+			echo $FAN_TRIP_SPEEDS > $FP_FAN_TRIP_SPEEDS
 
-		echo $FAN_TRIP_SPEEDS > $FP_FAN_TRIP_SPEEDS
+		else
 
-	else
+			# - Exit with empty settings string
+			if [[ -z $FAN_SPEED_STATIC ]]; then
 
-		# Exit without needed control file or empty settings string
-		if [[ ! -e $FP_FAN_SPEED_FIXED || -z $FAN_SPEED_FIXED ]]; then
+				G_DIETPI-NOTIFY 1 'Invalid settings found. Please run "dietpi-set_cpu_fan" to re-apply valid settings. Aborting...'
+				exit 1
 
-			G_DIETPI-NOTIFY 2 'Changing constant CPU fan speed not chosen or not available on your system.'
-			exit
+			fi
+
+			# - Apply static fan speed
+			echo $FAN_SPEED_STATIC > $FP_FAN_SPEED_STATIC
 
 		fi
 
-		echo $FAN_SPEED_FIXED > $FP_FAN_SPEED_FIXED
+		# - Apply fan control toggle
+		echo $FAN_CONTROL_TOGGLE > $FP_FAN_CONTROL_TOGGLE
+
+	else
+
+		G_DIETPI-NOTIFY 1 "Invalid input argument found. Aborting...\n$AVAIABLE_COMMANDS"
+		exit 1
 
 	fi
 
-	echo $FAN_CONTROL_TOGGLE > $FP_FAN_CONTROL_TOGGLE
-
 	#-----------------------------------------------------------------------------------
-	exit
+	exit 0
 	#-----------------------------------------------------------------------------------
 }
