@@ -13,8 +13,8 @@
 	# - Runs at boot up /DietPi/dietpi/boot, if settings were applied.
 	# - Toggles CPU fan temp control and:
 	#	- Sets trip point temps, e.g. 35°C, 50°C, 65°C
-	#	- Attaches PWM fan speeds to temp trip points, e.g. 0%, 45%, 70%, 95%
-	#	- Result: Fan off below 35°C, 45% fan speed at 35°C - 50°C, 70% fan speed at 50°C - 65°C, 95% fan speed above 65°C
+	#	- Attaches fan speeds to temp trip points, e.g. 0%, 45%, 70%, 95%
+	#	- Result: Fan off below 35°C, 45% fan speed at 35°C - 50°C, 70% fan speed at 50°C - 65°C and 95% fan speed above 65°C
 	#	or
 	#	- Sets static fan speed
 	#
@@ -33,189 +33,31 @@ dietpi-set_cpu_fan 1	=>	Non-interactively apply settings from $FP_SETTINGS.
 	G_CHECK_ROOT_USER
 	# Import DietPi-Globals ---------------------------------------------------------------
 
-	# Exit path for VM
-	if (( $G_HW_MODEL == 20 )); then
-
-		G_DIETPI-NOTIFY 1 'CPU fan control is not available on VMs. Aborting...'
-		exit 1
-
-	fi
-
-	# Control file paths
+	# File paths
 	FP_SETTINGS='/DietPi/dietpi/.dietpi-set_cpu_fan'
-	FP_FAN_CONTROL_TOGGLE='/sys/devices/platform/pwm-fan/hwmon/hwmon0/automatic'
-	FP_FAN_TRIP_TEMPS='/sys/devices/virtual/thermal/thermal_zone0/trip_point_0_temp'
-	FP_FAN_TRIP_SPEEDS='/sys/devices/platform/pwm-fan/hwmon/hwmon0/fan_speed'
-	FP_FAN_SPEED_STATIC='/sys/devices/platform/pwm-fan/hwmon/hwmon0/pwm1'
+	FP_TEMP_CONTROLLED='/sys/devices/platform/pwm-fan/hwmon/hwmon0/automatic'
+	FP_TRIP_TEMPS='/sys/devices/virtual/thermal/thermal_zone0/trip_point_0_temp'
+	FP_TRIP_SPEEDS='/sys/devices/platform/pwm-fan/hwmon/hwmon0/fan_speed'
+	FP_STATIC_SPEED='/sys/devices/platform/pwm-fan/hwmon/hwmon0/pwm1'
 
-	# Exit without control toggle file
-	if [[ ! -e $FP_FAN_CONTROL_TOGGLE ]]; then
+	# Exit path for unsupported devices
+	if ! [[ -e $FP_TEMP_CONTROLLED && -e $FP_TRIP_TEMPS && -e $FP_TRIP_SPEEDS && -e $FP_STATIC_SPEED ]]; then
 
-		G_DIETPI-NOTIFY 1 'CPU fan control is not available on your system. Aborting...'
+		# - DEBUG
+		echo "$FP_TEMP_CONTROLLED: $(<$FP_TEMP_CONTROLLED)"
+		echo "$FP_TRIP_TEMPS: $(<$FP_TRIP_TEMPS)"
+		echo "$FP_TRIP_SPEEDS: $(<$FP_TRIP_SPEEDS)"
+		echo "$FP_STATIC_SPEED: $(<$FP_STATIC_SPEED)"
+		G_DIETPI-NOTIFY 1 'CPU fan control is not available on your device. Aborting...'
 		exit 1
 
 	fi
 
 	# Grab valid input
 	INPUT=0
-	G_CHECK_VALIDINT $1 && INPUT=$1
+	if G_CHECK_VALIDINT $1; then
 
-	# Read settings file
-	# - $FAN_CONTROL_TOGGLE=0|1; On|Off
-	# - $FAN_TRIP_TEMPS='XX YY ZZ'; XX°C YY°C ZZ°C
-	# - $FAN_TRIP_SPEEDS='AAA BBB CCC DDD'; AAA*100/255 %...
-	# - $FAN_SPEED_STATIC=EEE; EEE*100/255 %
-	read_Settings(){
-
-		. $FP_SETTINGS
-
-	}
-
-	# Write settings file
-	write_Settings(){
-
-		# - Write fan control toggle to settings file
-		echo "FAN_CONTROL_TOGGLE=$FAN_CONTROL_TOGGLE" > $FP_SETTINGS
-
-		if (( $FAN_CONTROL_TOGGLE )); then
-
-			# - Write trip points and attached temperatures to settings file
-			cat << _EOF_ >> $FP_SETTINGS
-FAN_TRIP_TEMPS=$FAN_TRIP_TEMPS
-FAN_TRIP_SPEEDS=$FAN_TRIP_SPEEDS
-_EOF_
-
-		else
-
-			# - Write static fan speed to settings file
-			echo "FAN_SPEED_STATIC=$FAN_SPEED_STATIC" >> $FP_SETTINGS
-
-		fi
-
-	}
-
-	# Read currently applied fan control values
-	read_Current(){
-
-		# - Read current fan control toggle
-		FAN_CONTROL_TOGGLE=$(<$FP_FAN_CONTROL_TOGGLE)
-
-		if (( $FAN_CONTROL_TOGGLE )); then
-
-			# - Read current static fan speed
-			FAN_SPEED_STATIC=$(<$FP_FAN_SPEED_STATIC)
-
-		else
-
-			# - Read current trip point temperatures, assuming values for CPU0 for all CPUs
-			local fp_target=''
-			local i=0
-			for fp_target in /sys/devices/virtual/thermal/thermal_zone0/trip_point_*_temp
-			do
-
-				# Check for file existance. If no file matches string, $ft_target will return the pattern literally.
-				[[ ! -e $fp_target ]] && G_DIETPI-NOTIFY 1 'Trip point temperature files missing. Skipping...' && break
-
-				FAN_TRIP_TEMPS+=" $(</sys/devices/virtual/thermal/thermal_zone0/trip_point_$i_temp)"
-				((i++))
-
-			done
-			# - Remove leading white space
-			FAN_TRIP_TEMPS=${FAN_TRIP_TEMPS% }
-
-			# - Read current trip point fan speeds
-			FAN_TRIP_SPEEDS=$(<$FP_FAN_TRIP_SPEEDS)
-
-		fi
-
-	}
-
-	#/////////////////////////////////////////////////////////////////////////////////////
-	# Main Loop
-	#/////////////////////////////////////////////////////////////////////////////////////
-
-	if (( $INPUT == 1 )); then
-
-		#-----------------------------------------------------------------------------------
-		G_DIETPI-NOTIFY 3 $G_PROGRAM_NAME 'Applying CPU fan settings'
-		#-----------------------------------------------------------------------------------
-
-		# Read settings file, if successfully created
-		if [[ -f $FP_SETTINGS ]]; then
-
-			read_Settings
-
-		else
-
-			G_DIETPI-NOTIFY 1 'No CPU fan control settings file found. Please start "dietpi-set_cpu_fan" first. Aborting...'
-			exit 1
-
-		fi
-
-		# Exit without control files, needed for chosen settings
-		if (( $FAN_CONTROL_TOGGLE )) && [[ ! -e $FP_FAN_TRIP_TEMPS || ! -e $FP_FAN_TRIP_SPEEDS ]]; then
-
-			G_DIETPI-NOTIFY 2 'Temperature based CPU fan control is not available on your system. Aborting...'
-			exit 1
-
-		elif (( ! $FAN_CONTROL_TOGGLE )) && [[ ! -e $FP_FAN_SPEED_STATIC ]]; then
-
-			G_DIETPI-NOTIFY 2 'Changing constant CPU fan speed is not available on your system. Aborting...'
-			exit 1
-
-		fi
-
-		# Apply chosen settings
-		if (( $FAN_CONTROL_TOGGLE )); then
-
-			# - Exit with empty settings strings
-			if [[ -z $FAN_TRIP_TEMPS || -z $FAN_TRIP_SPEEDS ]]; then
-
-				G_DIETPI-NOTIFY 1 'Invalid settings found. Please run "dietpi-set_cpu_fan" to re-apply valid settings. Aborting...'
-				exit 1
-
-			fi
-
-			# - Apply trip point temps
-			local i=0
-			for (( i=0; i<$G_HW_CPU_CORES; i++ ))
-			do
-
-				local fp_target=''
-				local j=0
-				for fp_target in /sys/devices/virtual/thermal/thermal_zone$i/trip_point_*_temp
-				do
-
-					# Check for file existance. If no file matches string, $ft_target will return the pattern literally.
-					[[ ! -e $fp_target ]] && G_DIETPI-NOTIFY 1 "Trip point temperature files missing. Skipping CPU$i" && break
-
-					awk '{print $((j+1))}' <<< $FAN_TRIP_TEMPS > /sys/devices/virtual/thermal/thermal_zone$i/trip_point_$j_temp
-					((j++))
-
-				done
-
-			done
-
-			# - Apply trip point fan speeds
-			echo $FAN_TRIP_SPEEDS > $FP_FAN_TRIP_SPEEDS
-
-		else
-
-			# - Exit with empty settings string
-			if [[ -z $FAN_SPEED_STATIC ]]; then
-
-				G_DIETPI-NOTIFY 1 'Invalid settings found. Please run "dietpi-set_cpu_fan" to re-apply valid settings. Aborting...'
-				exit 1
-
-			fi
-
-			# - Apply static fan speed
-			echo $FAN_SPEED_STATIC > $FP_FAN_SPEED_STATIC
-
-		fi
-
-		# - Apply fan control toggle
-		echo $FAN_CONTROL_TOGGLE > $FP_FAN_CONTROL_TOGGLE
+		INPUT=$1
 
 	else
 
@@ -225,6 +67,324 @@ _EOF_
 	fi
 
 	#-----------------------------------------------------------------------------------
-	exit 0
+	# Functions
+	#-----------------------------------------------------------------------------------
+	# Read currently applied fan control values
+	Read_Control_Files(){
+
+		# - Read current fan control toggle
+		TEMP_CONTROLLED_CURRENT=$(<$FP_TEMP_CONTROLLED)
+
+		if (( $TEMP_CONTROLLED_CURRENT )); then
+
+			# - Read current trip point temperatures, assuming values for CPU0 for all CPUs
+			local fp_target=''
+			local i=0
+			for fp_target in /sys/devices/virtual/thermal/thermal_zone0/trip_point_*_temp
+			do
+
+				#	- Convert "XY000" to XY°C
+				TRIP_TEMPS_CURRENT+=" $(( $(</sys/devices/virtual/thermal/thermal_zone0/trip_point_${i}_temp) / 1000 ))"
+				((i++))
+
+			done
+			#	- Remove leading white space
+			TRIP_TEMPS_CURRENT=${TRIP_TEMPS_CURRENT# }
+
+			# - Read current trip point fan speeds
+			for i in $(<$FP_TRIP_SPEEDS)
+			do
+
+				#	- Convert 0-255 to 0-100%
+				TRIP_SPEEDS_CURRENT+=" $(( $i * 100 / 255 ))"
+
+			done
+			#	- Remove leading white space
+			TRIP_SPEEDS_CURRENT=${TRIP_SPEEDS_CURRENT# }
+
+		else
+
+			# - Read current static fan speed
+			#	- Convert 0-255 to 0-100%
+			STATIC_SPEED_CURRENT=$(( $(<$FP_STATIC_SPEED) * 100 / 255 ))
+
+		fi
+
+	}
+
+	# Read settings from file
+	# - $TEMP_CONTROLLED=0|1; On|Off
+	# - $TRIP_TEMPS='XX YY ZZ'; XX°C YY°C ZZ°C
+	# - $TRIP_SPEEDS='AAA BBB CCC DDD'; AAA*100/255 %...
+	# - $STATIC_SPEED=EEE; EEE*100/255 %
+	Read_Settings(){
+
+		. $FP_SETTINGS
+
+	}
+
+	# Verify valid settings, before applying
+	Verify_Settings(){
+
+		# - $TEMP_CONTROLLED is expected to be either 0 or 1.
+		if ! [[ $TEMP_CONTROLLED == 0 || $TEMP_CONTROLLED == 1 ]]; then
+
+			G_DIETPI-NOTIFY 1 "Invalid setting: \$TEMP_CONTROLLED=$TEMP_CONTROLLED"
+			return 1
+
+		elif (( $TEMP_CONTROLLED )); then
+
+			# - $TRIP_SPEEDS and $TRIP_TEMPS are expected to follow scheme: [0-9]+[[:blank:]][0-9]+...
+			# - $TRIP_TEMPS need to match than $TRIP_POINT_COUNT: Amount of actual CPU0 thermal zone control files
+			# - $TRIP_SPEEDS values need to be exactly one more: Min speed + one each temp trip
+			if ! [[ $TRIP_TEMPS =~ ^[0-9[:blank:]]+$ && $TRIP_SPEEDS =~ ^[0-9[:blank:]]+$ ]] ||
+				! (( $(wc -w <<< "$TRIP_TEMPS") == $TRIP_POINT_COUNT && $(wc -w <<< "$TRIP_SPEEDS") == $TRIP_POINT_COUNT + 1 )); then
+
+				G_DIETPI-NOTIFY 1 "Invalid settings: \$TRIP_TEMPS=$TRIP_TEMPS; \$TRIP_SPEEDS=$TRIP_SPEEDS"
+				return 1
+
+			fi
+
+		elif (( ! $TEMP_CONTROLLED )); then
+
+			# - $STATIC_SPEED is expected to be an integer.
+			if ! G_CHECK_VALIDINT $STATIC_SPEED; then
+
+				G_DIETPI-NOTIFY 1 "Invalid setting: \$STATIC_SPEED=$STATIC_SPEED"
+				return 1
+
+			fi
+
+		fi
+
+		G_DIETPI-NOTIFY 0 'Valid settings verified' # DEBUG
+		return 0
+
+	}
+
+	# Write settings to file
+	Write_Settings(){
+
+		# - Write fan control toggle to settings file
+		echo "TEMP_CONTROLLED=$TEMP_CONTROLLED" > $FP_SETTINGS
+
+		if (( $TEMP_CONTROLLED )); then
+
+			# - Write trip points and attached temperatures to settings file
+			cat << _EOF_ >> $FP_SETTINGS
+TRIP_TEMPS=$TRIP_TEMPS
+TRIP_SPEEDS=$TRIP_SPEEDS
+_EOF_
+
+		else
+
+			# - Write static fan speed to settings file
+			echo "STATIC_SPEED=$STATIC_SPEED" >> $FP_SETTINGS
+
+		fi
+
+	}
+
+	# Apply chosen settings to control files
+	Apply_Settings(){
+
+		#-----------------------------------------------------------------------------------
+		G_DIETPI-NOTIFY 3 $G_PROGRAM_NAME 'Applying CPU fan settings'
+		#-----------------------------------------------------------------------------------
+		# - Apply fan control toggle
+		echo $TEMP_CONTROLLED > $FP_TEMP_CONTROLLED
+
+		if (( $TEMP_CONTROLLED )); then
+
+			local i=0
+
+			# - Apply trip point temps
+			local j=0
+			local temp=0
+			local fp_target=''
+			for (( i=0; i<$G_HW_CPU_CORES; i++ ))
+			do
+
+				j=0
+				for temp in $TRIP_TEMPS
+				do
+
+					fp_target="/sys/devices/virtual/thermal/thermal_zone${i}/trip_point_${j}_temp"
+					#	- DEBUG: Check for file existence, otherwise break for current CPU
+					[[ ! -e $fp_target ]] && G_DIETPI-NOTIFY 1 "Trip point temperature file missing: $fp_target. Skipping..." && break
+
+					#	- Convert XY°C to XY000
+					echo "${temp}000" > $fp_target
+					((j++))
+
+				done
+
+			done
+
+			# - Apply trip point fan speeds
+			local trip_speeds_target=''
+			for i in $TRIP_SPEEDS
+			do
+
+				#	- Convert 0-100% to 0-255
+				trip_speeds_target+=" $(( $i * 255 / 100 ))"
+
+			done
+			#	- Remove leading white space
+			trip_speeds_target=${trip_speeds_target# }
+			echo $trip_speeds_target > $FP_TRIP_SPEEDS
+
+		else
+
+			# - Apply static fan speed
+			#	- Convert 0-100% to 0-255
+			echo $(( $STATIC_SPEED * 255 / 100 )) > $FP_STATIC_SPEED
+
+		fi
+
+	}
+
+	#-----------------------------------------------------------------------------------
+	# Menus
+	#-----------------------------------------------------------------------------------
+	# Main menu
+	Main_Menu(){
+
+		# Currently applied fan controls
+		Read_Control_Files
+
+		if (( $TEMP_CONTROLLED_CURRENT )); then
+
+			# - Current control mode
+			local mode_current_text='Temperature controlled'
+
+			local i=''
+
+			# - Current trip point temps
+			local trip_speeds_current_text=''
+			for i in $TRIP_TEMPS_CURRENT
+			do
+
+				trip_temps_current_text+="	${i}°C"
+
+			done
+			#	- Remove leading white space
+			trip_temps_current_text=${trip_temps_current_text#	}
+
+			# - Current trip point speeds
+			local trip_speeds_current_text=''
+			for i in $TRIP_SPEEDS_CURRENT
+			do
+
+				trip_speeds_current_text+="	${i}%"
+
+			done
+			#	- Remove leading white space
+			trip_speeds_current_text=${trip_speeds_current_text#	}
+
+		else
+
+			# - Current control mode
+			local mode_current_text='Static fan speed'
+
+			# - Static fan speed
+			local static_speed_current_text="${STATIC_SPEED_CURRENT}%"
+
+		fi
+
+		# Chosen fan control settings
+		[[ -f $FP_SETTINGS ]] && Read_Settings
+
+		# - Control mode setting
+		TEMP_CONTROLLED=${TEMP_CONTROLLED:-$TEMP_CONTROLLED_CURRENT}
+		local mode_text='Temperature controlled'
+		(( $TEMP_CONTROLLED )) && mode_current_text='Static fan speed'
+
+		G_WHIP_MENU_ARRAY=(
+
+			'Reset' 'Remove current settings file to reset fan control on reboot'
+			'Mode' "$mode_text"
+
+		)
+
+		if (( $TEMP_CONTROLLED )); then
+
+			local i=''
+
+			# - Trip point temperature settings
+			TRIP_TEMPS=${TRIP_TEMPS:-$TRIP_TEMPS_CURRENT}
+			local trip_speeds_text=''
+			for i in $TRIP_TEMPS
+			do
+
+				trip_temps_text+="	${i}°C"
+
+			done
+			#	- Remove leading white space
+			trip_temps_text=${trip_temps_text#	}
+
+			# - Trip point speed settings
+			TRIP_SPEEDS=${TRIP_SPEEDS:-$TRIP_SPEEDS_CURRENT}
+			local trip_speeds_text=''
+			for i in $TRIP_SPEEDS
+			do
+
+				trip_speeds_text+="	${i}%"
+
+			done
+			#	- Remove leading white space
+			trip_speeds_text=${trip_speeds_text#	}
+
+			G_WHIP_MENU_ARRAY+=(
+
+				'Temperatures' "$trip_temps_text"
+				'Fan speeds' "$trip_speeds_text"
+
+			)
+
+		else
+
+			# - Static fan speed setting
+			STATIC_SPEED=${STATIC_SPEED:-$STATIC_SPEED_CURRENT}
+			local static_speed_current_text="${STATIC_SPEED}%"
+
+		fi
+
+		G_WHIP_MENU_ARRAY+=( 'Apply' 'Apply fan control settings now and on every boot up' )
+
+	}
+
+	#/////////////////////////////////////////////////////////////////////////////////////
+	# Main Loop
+	#/////////////////////////////////////////////////////////////////////////////////////
+
+	TRIP_POINT_COUNT=$(find /sys/devices/virtual/thermal/thermal_zone0 -name 'trip_point_*_temp' | wc -l)
+
+	if (( $INPUT == 1 )); then
+
+		# Exit, if no settings file exists
+		if [[ ! -f $FP_SETTINGS ]]; then
+
+			G_DIETPI-NOTIFY 1 'No CPU settings file found. Please start "dietpi-set_cpu_fan" first. Aborting...'
+			exit 1
+
+		fi
+
+		Read_Settings
+		Verify_Settings && Apply_Settings
+
+	elif (( $INPUT == 0 )); then
+
+		Main_Menu
+
+	else
+
+		G_DIETPI-NOTIFY 1 "Invalid input argument found. Aborting...\n$AVAIABLE_COMMANDS"
+		exit 1
+
+	fi
+
+	#-----------------------------------------------------------------------------------
+	G_DIETPI-NOTIFY -1 0 "$G_PROGRAM NAME |" && exit 0
 	#-----------------------------------------------------------------------------------
 }
