@@ -55,14 +55,18 @@ dietpi-set_cpu_fan 1	=>	Non-interactively apply settings from $FP_SETTINGS.
 
 	# Grab valid input
 	INPUT=0
-	if G_CHECK_VALIDINT $1; then
+	if [[ $@ ]]; then
 
-		INPUT=$1
+		if G_CHECK_VALIDINT "$@"; then
 
-	else
+			INPUT=$@
 
-		G_DIETPI-NOTIFY 1 "Invalid input argument found. Aborting...\n$AVAIABLE_COMMANDS"
-		exit 1
+		else
+
+			G_DIETPI-NOTIFY 1 "Invalid input argument ($@) found. Aborting...\n$AVAIABLE_COMMANDS"
+			exit 1
+
+		fi
 
 	fi
 
@@ -75,40 +79,36 @@ dietpi-set_cpu_fan 1	=>	Non-interactively apply settings from $FP_SETTINGS.
 		# - Read current fan control toggle
 		TEMP_CONTROLLED_CURRENT=$(<$FP_TEMP_CONTROLLED)
 
-		if (( $TEMP_CONTROLLED_CURRENT )); then
+		# - Read current trip point temperatures, assuming values of CPU0 for all CPUs
+		local fp_target=''
+		local i=0
+		TRIP_TEMPS_CURRENT=''
+		for fp_target in /sys/devices/virtual/thermal/thermal_zone0/trip_point_*_temp
+		do
 
-			# - Read current trip point temperatures, assuming values for CPU0 for all CPUs
-			local fp_target=''
-			local i=0
-			for fp_target in /sys/devices/virtual/thermal/thermal_zone0/trip_point_*_temp
-			do
+			#	- Convert "XY000" to XY°C
+			TRIP_TEMPS_CURRENT+=" $(( $(</sys/devices/virtual/thermal/thermal_zone0/trip_point_${i}_temp) / 1000 ))"
+			((i++))
 
-				#	- Convert "XY000" to XY°C
-				TRIP_TEMPS_CURRENT+=" $(( $(</sys/devices/virtual/thermal/thermal_zone0/trip_point_${i}_temp) / 1000 ))"
-				((i++))
+		done
+		#	- Remove leading white space
+		TRIP_TEMPS_CURRENT="${TRIP_TEMPS_CURRENT# }"
 
-			done
-			#	- Remove leading white space
-			TRIP_TEMPS_CURRENT=${TRIP_TEMPS_CURRENT# }
+		# - Read current trip point fan speeds
+		TRIP_SPEEDS_CURRENT=''
+		for i in $(<$FP_TRIP_SPEEDS)
+		do
 
-			# - Read current trip point fan speeds
-			for i in $(<$FP_TRIP_SPEEDS)
-			do
-
-				#	- Convert 0-255 to 0-100%
-				TRIP_SPEEDS_CURRENT+=" $(( $i * 100 / 255 ))"
-
-			done
-			#	- Remove leading white space
-			TRIP_SPEEDS_CURRENT=${TRIP_SPEEDS_CURRENT# }
-
-		else
-
-			# - Read current static fan speed
 			#	- Convert 0-255 to 0-100%
-			STATIC_SPEED_CURRENT=$(( $(<$FP_STATIC_SPEED) * 100 / 255 ))
+			TRIP_SPEEDS_CURRENT+=" $(( $i * 100 / 255 ))"
 
-		fi
+		done
+		#	- Remove leading white space
+		TRIP_SPEEDS_CURRENT="${TRIP_SPEEDS_CURRENT# }"
+
+		# - Read current static fan speed
+		#	- Convert 0-255 to 0-100%
+		STATIC_SPEED_CURRENT=$(( $(<$FP_STATIC_SPEED) * 100 / 255 ))
 
 	}
 
@@ -172,8 +172,8 @@ dietpi-set_cpu_fan 1	=>	Non-interactively apply settings from $FP_SETTINGS.
 
 			# - Write trip points and attached temperatures to settings file
 			cat << _EOF_ >> $FP_SETTINGS
-TRIP_TEMPS=$TRIP_TEMPS
-TRIP_SPEEDS=$TRIP_SPEEDS
+TRIP_TEMPS='$TRIP_TEMPS'
+TRIP_SPEEDS='$TRIP_SPEEDS'
 _EOF_
 
 		else
@@ -231,8 +231,8 @@ _EOF_
 
 			done
 			#	- Remove leading white space
-			trip_speeds_target=${trip_speeds_target# }
-			echo $trip_speeds_target > $FP_TRIP_SPEEDS
+			trip_speeds_target="${trip_speeds_target# }"
+			echo "$trip_speeds_target" > $FP_TRIP_SPEEDS
 
 		else
 
@@ -252,7 +252,7 @@ _EOF_
 		G_WHIP_YESNO 'Reset fan control settings\n\nYour fan control settings file will be removed and current selections purged. This will take effect after next reboot.\n\nDo you want to continue?'
 		if (( ! $? )); then
 
-			l_message="Removing $FP_SETTINGS" G_RUN_CMD rm $FP_SETTINGS
+			[[ -f $FP_SETTINGS ]] && l_message="Removing $FP_SETTINGS" G_RUN_CMD rm $FP_SETTINGS
 			l_message='Resetting current selections' G_RUN_CMD unset TEMP_CONTROLLED TRIP_TEMPS TRIP_SPEEDS STATIC_SPEED
 
 		fi
@@ -263,7 +263,7 @@ _EOF_
 
 		G_WHIP_DEFAULT_ITEM="$TRIP_TEMPS"
 		G_WHIP_INPUTBOX "Please enter $TRIP_POINT_COUNT space-separated temperature points in °C.
-EG: To have trip points at 35°C, 50°C and 65°C, enter\n\t\"35 50 65\""
+EG: To have trip points at 35°C, 50°C and 65°C, enter\n     \"35 50 65\""
 		if (( ! $? )); then
 
 			TRIP_TEMPS="$G_WHIP_RETURNED_VALUE"
@@ -277,7 +277,7 @@ EG: To have trip points at 35°C, 50°C and 65°C, enter\n\t\"35 50 65\""
 		G_WHIP_DEFAULT_ITEM="$TRIP_SPEEDS"
 		G_WHIP_INPUTBOX "Please enter $(( $TRIP_POINT_COUNT + 1 )) space-separated fan speeds in % (percent) of the maximum possible speed.
 EG: To disable the fan below $(( ${FP_TRIP_TEMPS} / 1000 ))°C, run it at 45% above, 70% after reaching $(( ${FP_TRIP_TEMPS/0_temp/1_temp} / 1000 ))°C and 95% above $(( ${FP_TRIP_TEMPS/0_temp/2_temp} / 1000 ))°C, enter
-\t\"0 45 70 95\""
+     \"0 45 70 95\""
 		if (( ! $? )); then
 
 			TRIP_SPEEDS="$G_WHIP_RETURNED_VALUE"
@@ -286,11 +286,11 @@ EG: To disable the fan below $(( ${FP_TRIP_TEMPS} / 1000 ))°C, run it at 45% ab
 
 	}
 
-	Speed_Menu(){
+	Static_Speed_Menu(){
 
-		G_WHIP_DEFAULT_ITEM="$TRIP_SPEEDS"
+		G_WHIP_DEFAULT_ITEM="$STATIC_SPEED"
 		G_WHIP_INPUTBOX "Please enter the desired static fan speeds in % (percent) of the maximum possible speed.
-EG: To run the fan at 50%, enter\n\t\"60\""
+EG: To run the fan at 50%, enter\n     \"60\""
 		if (( ! $? )); then
 
 			STATIC_SPEED="$G_WHIP_RETURNED_VALUE"
@@ -323,14 +323,14 @@ EG: To run the fan at 50%, enter\n\t\"60\""
 		if (( $TEMP_CONTROLLED_CURRENT )); then
 
 			# - Current control mode
-			whip_message+='Mode:	Temperature controlled'
+			whip_message+='Mode:        Temperature controlled'
 
 			# - Current trip point temps
-			whip_message+='\nTemperatures:	'
+			whip_message+='\nTemp points:    '
 			for i in $TRIP_TEMPS_CURRENT
 			do
 
-				whip_message+="	${i}°C"
+				whip_message+=" ${i}°C"
 
 			done
 
@@ -339,19 +339,17 @@ EG: To run the fan at 50%, enter\n\t\"60\""
 			for i in $TRIP_SPEEDS_CURRENT
 			do
 
-				whip_message+="	${i}%"
+				whip_message+="  ${i}%"
 
 			done
-			#	- Remove leading tab
-			#trip_speeds_current_text=${trip_speeds_current_text#	}
 
 		else
 
 			# - Current control mode
-			whip_message+='Mode:	Static fan speed'
+			whip_message+='Mode:      Static fan speed'
 
 			# - Static fan speed
-			whip_message+="\nFan speed:	${STATIC_SPEED_CURRENT}%"
+			whip_message+="\nFan speed: ${STATIC_SPEED_CURRENT}%"
 
 		fi
 
@@ -372,28 +370,26 @@ EG: To run the fan at 50%, enter\n\t\"60\""
 		if (( $TEMP_CONTROLLED )); then
 
 			# - Trip point temperature settings
-			TRIP_TEMPS=${TRIP_TEMPS:-$TRIP_TEMPS_CURRENT}
+			TRIP_TEMPS="${TRIP_TEMPS:-$TRIP_TEMPS_CURRENT}"
 			local trip_temps_text=''
 			for i in $TRIP_TEMPS
 			do
 
-				trip_temps_text+="	${i}°C"
+				trip_temps_text+=" ${i}°C"
 
 			done
-			G_WHIP_MENU_ARRAY+=( 'Temperatures' "Selected: $trip_temps_text" )
+			G_WHIP_MENU_ARRAY+=( 'Temperatures' "Selected:     $trip_temps_text" )
 
 			# - Trip point speed settings
-			TRIP_SPEEDS=${TRIP_SPEEDS:-$TRIP_SPEEDS_CURRENT}
+			TRIP_SPEEDS="${TRIP_SPEEDS:-$TRIP_SPEEDS_CURRENT}"
 			local trip_speeds_text=''
 			for i in $TRIP_SPEEDS
 			do
 
-				trip_speeds_text+="	${i}%"
+				trip_speeds_text+="  ${i}%"
 
 			done
-			#	- Remove leading tab
-			trip_speeds_text=${trip_speeds_text#	}
-			G_WHIP_MENU_ARRAY+=( 'Fan speeds' "Selected: $trip_speeds_text" )
+			G_WHIP_MENU_ARRAY+=( 'Fan speeds' "Selected:$trip_speeds_text" )
 
 		else
 
@@ -452,6 +448,10 @@ EG: To run the fan at 50%, enter\n\t\"60\""
 
 			fi
 
+		else
+
+			exit 0
+
 		fi
 
 	}
@@ -481,7 +481,7 @@ EG: To run the fan at 50%, enter\n\t\"60\""
 		while true
 		do
 
-			Main_Menu || break
+			Main_Menu
 
 		done
 
