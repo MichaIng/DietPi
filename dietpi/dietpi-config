@@ -2981,26 +2981,8 @@
 	}
 
 
-	INTERNET_ONLINE=0 # 0=not tested, 1=failed, 2=online
-	INTERNET_URL='https://dietpi.com'
-
-	Network_CheckInternetConnection(){
-
-		INTERNET_ONLINE=0 #Not tested
-
-		#Check for connection
-		wget --spider --timeout=10 --tries=2 "$INTERNET_URL"
-		if (( $? == 0 )); then
-
-			INTERNET_ONLINE=2 #Online
-
-		else
-
-			INTERNET_ONLINE=1 #Failed
-
-		fi
-
-	}
+	INTERNET_TEST_STATE=0 # 0=not tested, 1=failed, 2=online
+	INTERNET_TEST_URL='https://google.com'
 
 	Network_GetData(){
 
@@ -3234,18 +3216,18 @@
 
 		#Internet Connection Status
 		local Internet_connected_text='Please run Internet Test'
-		if (( $INTERNET_ONLINE == 2 )); then
+		if (( $INTERNET_TEST_STATE == 2 )); then
 
-			Internet_connected_text='Online'
+			Internet_connected_text='[On]'
 
-		elif (( $INTERNET_ONLINE == 1 )); then
+		elif (( $INTERNET_TEST_STATE == 1 )); then
 
-			Internet_connected_text='Offline / Failed'
+			Internet_connected_text='[Fail] | Offline'
 
 		fi
 
 		#Set to Not Tested for next loop
-		INTERNET_ONLINE=0
+		INTERNET_TEST_STATE=0
 
 		#IPv6 status
 		local ipv6_enabled=1
@@ -3462,12 +3444,23 @@
 
 				'Test')
 
-					G_WHIP_DEFAULT_ITEM="$INTERNET_URL"
+					G_WHIP_DEFAULT_ITEM="$INTERNET_TEST_URL"
 					G_WHIP_INPUTBOX 'Press enter a URL address to test (eg: http://google.com)'
 					if (( $? == 0 )); then
 
-						INTERNET_URL=$G_WHIP_RETURNED_VALUE
-						Network_CheckInternetConnection
+						INTERNET_TEST_URL=$G_WHIP_RETURNED_VALUE
+
+						INTERNET_TEST_STATE=0 #Not tested
+						G_RUN_CMD_INFO_ONLY=1 retry_max=2 G_CHECK_URL "$INTERNET_TEST_URL"
+						if (( $G_ERROR_HANDLER_EXITCODE_RETURN == 0 )); then
+
+							INTERNET_TEST_STATE=2 #Online
+
+						else
+
+							INTERNET_TEST_STATE=1 #Failed
+
+						fi
 
 					fi
 
@@ -5241,12 +5234,6 @@ Custom         : Write = $FSBENCH_CUSTOM_WRITE | Read = $FSBENCH_CUSTOM_READ"
 
 							;;
 
-							*)
-
-								return_value=$G_WHIP_RETURNED_VALUE
-
-							;;
-
 						esac
 
 						/DietPi/dietpi/func/dietpi-set_software apt-mirror $G_WHIP_RETURNED_VALUE
@@ -5296,9 +5283,10 @@ Custom         : Write = $FSBENCH_CUSTOM_WRITE | Read = $FSBENCH_CUSTOM_READ"
 "Custom": Manually enter local or external NTP server address(es).\n
 "Default": Leave mirror choice to system. Usually falls back to local gateway (Stretch+ only) or "debian.pool.ntp.org".\n
 Use "*.pool.ntp.org" mirrors, if your device is mobile or should act as local NTP server. Further information: "http://www.pool.ntp.org/zone/@"'
-					if (( $? == 0 )); then
+					if (( $? == 0 )) && [[ $G_WHIP_RETURNED_VALUE ]]; then
 
-						return_value="$G_WHIP_RETURNED_VALUE"
+						local apply=1
+						local previous_setting=$(grep -m1 '^[[:blank:]]*CONFIG_NTP_MODE=' /DietPi/dietpi.txt | sed 's/^[^=]*=//')
 
 						case $G_WHIP_RETURNED_VALUE in
 
@@ -5308,9 +5296,9 @@ Use "*.pool.ntp.org" mirrors, if your device is mobile or should act as local NT
 								G_WHIP_INPUTBOX 'Please enter one or more (space-separated) NTP mirrors.\n
 NB: If you need to use *.pool.ntp.org servers, enter the base domain only. The subdomains 0-3 will be added automatically.
 - Enter "uk.pool.ntp.org" to use [0-3].uk.pool.ntp.org'
-								if (( $? == 0 )); then
+								if (( $? != 0 )); then
 
-									return_value=$G_WHIP_RETURNED_VALUE
+									apply=0
 
 								fi
 
@@ -5318,9 +5306,20 @@ NB: If you need to use *.pool.ntp.org servers, enter the base domain only. The s
 
 						esac
 
-						G_CONFIG_INJECT 'CONFIG_NTP_MIRROR=' "CONFIG_NTP_MIRROR=$G_WHIP_RETURNED_VALUE" /DietPi/dietpi.txt
-						/DietPi/dietpi/func/dietpi-set_software ntpd-mode $(grep -m1 '^[[:blank:]]*CONFIG_NTP_MODE=' /DietPi/dietpi.txt | sed 's/^[^=]*=//')
-						/DietPi/dietpi/func/run_ntpd
+						if (( $apply )); then
+
+							G_CONFIG_INJECT 'CONFIG_NTP_MIRROR=' "CONFIG_NTP_MIRROR=$G_WHIP_RETURNED_VALUE" /DietPi/dietpi.txt
+							/DietPi/dietpi/func/dietpi-set_software ntpd-mode $(grep -m1 '^[[:blank:]]*CONFIG_NTP_MODE=' /DietPi/dietpi.txt | sed 's/^[^=]*=//')
+							MAX_LOOPS_CHECK=10 /DietPi/dietpi/func/run_ntpd 1
+							if (( $? )); then
+
+								G_WHIP_MSG "NTP sync failed:\n - $G_WHIP_RETURNED_VALUE\n\nSetting reverted to previous."
+
+								/DietPi/dietpi/func/dietpi-set_software ntpd-mode $previous_setting
+
+							fi
+
+						fi
 
 						#Return to this Menu
 						TARGETMENUID=16
