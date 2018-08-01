@@ -35,10 +35,10 @@ $FP_SCRIPT			passwords				NULL=Prompt user to change DietPi related passwords | 
 	INPUT_ADDITIONAL_4="$6"
 	#Import DietPi-Globals ---------------------------------------------------------------
 	. /DietPi/dietpi/func/dietpi-globals
-	G_CHECK_ROOT_USER
-	G_CHECK_ROOTFS_RW
 	export G_PROGRAM_NAME='DietPi-Set_software'
 	G_INIT
+	G_CHECK_ROOT_USER
+	G_CHECK_ROOTFS_RW
 	#Import DietPi-Globals ---------------------------------------------------------------
 
 	EXIT_CODE=0
@@ -196,24 +196,63 @@ _EOF_
 			# - Reset global to disabled, prevents run_ntpd in dietpi-software
 			sed -i '/CONFIG_NTP_MODE=/c\CONFIG_NTP_MODE=0' /DietPi/dietpi.txt
 
-			#Kill current
+			# - Kill current
 			killall -w /DietPi/dietpi/func/run_ntpd &> /dev/null
 
-			local ntpd_mirror=$(grep -m1 '^[[:blank:]]*CONFIG_NTP_MIRROR=' /DietPi/dietpi.txt | sed 's/^[^=]*=//')
-			# - Set defaults?
-			if [[ $ntpd_mirror == 'default' ]]; then
+			local ntp_mirror=$(grep -m1 '^[[:blank:]]*CONFIG_NTP_MIRROR=' /DietPi/dietpi.txt | sed 's/^[^=]*=//')
+			local ntp_mirror_entry='Servers='$ntp_mirror
 
-				ntpd_mirror='debian.pool.ntp.org'
+			# - Default, lets timesyncd use DHCP server (Stretch+ only) or fallback to debian.pool.ntp.org.
+			if [[ ${ntp_mirror,,} == default ]]; then
+
+				ntp_mirror_entry='#Servers=0.debian.pool.ntp.org 1.debian.pool.ntp.org 2.debian.pool.ntp.org 3.debian.pool.ntp.org'
+
+			# - Gateway, auto detect local gateway(s) (router) to use as NTP server.
+			elif [[ ${ntp_mirror,,} == gateway ]]; then
+
+				local gateway="$(ip r | grep '^default' | awk '{print $3}')"
+				if [[ $gateway ]]; then
+
+					G_DIETPI-NOTIFY 0 "Gateway(s) detected:$(printf ' %s' $gateway), adding as NTP server(s)."
+					ntp_mirror_entry='Servers='$(ip r | grep '^default' | awk '{print $3}')
+
+				else
+
+					G_DIETPI-NOTIFY 1 'No local gateway detected. No NTP mirror change will be applied.'
+					EXIT_CODE=1
+					return 1
+
+				fi
+
+			# - Add pool.ntp.org entries with subdomains "[0-3].", other entries without.
+			elif [[ $ntp_mirror =~ 'pool.ntp.org' ]]; then
+
+				ntp_mirror_entry='Servers='
+				local i
+				for i in $ntp_mirror
+				do
+
+					if [[ $i == *'pool.ntp.org' ]]; then
+
+						ntp_mirror_entry+="0.$i 1.$i 2.$i 3.$i "
+
+					else
+
+						ntp_mirror_entry+="$i "
+
+					fi
+
+				done
 
 			fi
 
 			# - Set mirror
 			cat << _EOF_ > /etc/systemd/timesyncd.conf
 [Time]
-Servers=0.$ntpd_mirror 1.$ntpd_mirror 2.$ntpd_mirror 3.$ntpd_mirror
+$ntp_mirror_entry
 _EOF_
 
-			# - Daemon mode, dbus required for timedatectl, that users may require
+			# - Daemon mode, dbus required for timedatectl, that users may expect
 			if (( $INPUT_MODE_VALUE == 4 )); then
 
 				G_AG_CHECK_INSTALL_PREREQ dbus
