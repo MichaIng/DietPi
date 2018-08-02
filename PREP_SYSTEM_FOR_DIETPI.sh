@@ -56,7 +56,7 @@
 	for (( i=0; i<${#a_MIN_APT_PREREQS[@]}; i++))
 	do
 
-		if ! dpkg --get-selections | grep -qi "^${a_MIN_APT_PREREQS[$i]}[[:space:]]"; then
+		if ! dpkg-query -s ${a_MIN_APT_PREREQS[$i]} &> /dev/null; then
 
 			apt-get install -y ${a_MIN_APT_PREREQS[$i]}
 			if (( $? )); then
@@ -742,7 +742,7 @@ _EOF_
 			(( $G_HW_MODEL != 20 )) && G_AGI firmware-linux-nonfree
 
 			#	Grub EFI
-			if dpkg --get-selections | grep -q '^grub-efi-amd64' ||
+			if dpkg-query -s 'grub-efi-amd64' &> /dev/null ||
 				[[ -d '/boot/efi' ]]; then
 
 				G_AGI grub-efi-amd64
@@ -1401,7 +1401,7 @@ _EOF_
 			l_message='Detecting additional OS installed on system' G_RUN_CMD os-prober
 
 			# - Native PC/EFI (assume x86_64 only possible)
-			if dpkg --get-selections | grep -qi '^grub-efi-amd64[[:space:]]' &&
+			if dpkg-query -s 'grub-efi-amd64' &> /dev/null &&
 				[[ -d '/boot/efi' ]]; then
 
 				l_message='Recreating GRUB-EFI' G_RUN_CMD grub-install --target=x86_64-efi --efi-directory=/boot/efi --bootloader-id=arch_grub --recheck
