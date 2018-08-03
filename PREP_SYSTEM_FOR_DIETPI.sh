@@ -56,7 +56,7 @@
 	for (( i=0; i<${#a_MIN_APT_PREREQS[@]}; i++))
 	do
 
-		if ! dpkg --get-selections | grep -qi "^${a_MIN_APT_PREREQS[$i]}[[:space:]]"; then
+		if ! dpkg-query -s ${a_MIN_APT_PREREQS[$i]} &> /dev/null; then
 
 			apt-get install -y ${a_MIN_APT_PREREQS[$i]}
 			if (( $? )); then
@@ -366,6 +366,7 @@
 			'51' 'BananaPi Pro (Lemaker)'
 			'50' 'BananaPi M2+ (sinovoip)'
 			'71' 'Beagle Bone Black'
+			'69' 'Firefly RK3399'
 			'39' 'LeMaker Guitar'
 			'68' 'NanoPC T4'
 			'67' 'NanoPi K1 Plus'
@@ -742,7 +743,7 @@ _EOF_
 			(( $G_HW_MODEL != 20 )) && G_AGI firmware-linux-nonfree
 
 			#	Grub EFI
-			if dpkg --get-selections | grep -q '^grub-efi-amd64' ||
+			if dpkg-query -s 'grub-efi-amd64' &> /dev/null ||
 				[[ -d '/boot/efi' ]]; then
 
 				G_AGI grub-efi-amd64
@@ -1048,15 +1049,13 @@ _EOF_
 
 		G_DIETPI-NOTIFY 2 "Configuring Cron"
 
-		mkdir -p /etc/cron.minutely #: https://github.com/Fourdee/DietPi/pull/1578
-
 		cat << _EOF_ > /etc/crontab
 #Please use dietpi-cron to change cron start times
 SHELL=/bin/sh
 PATH=/usr/local/sbin:/usr/local/bin:/sbin:/bin:/usr/sbin:/usr/bin
 
 # m h dom mon dow user  command
-*/30 * * * *   root    cd / && run-parts --report /etc/cron.minutely
+#*/0 * * * *   root    cd / && run-parts --report /etc/cron.minutely
 17 *    * * *   root    cd / && run-parts --report /etc/cron.hourly
 25 1    * * *   root    test -x /usr/sbin/anacron || ( cd / && run-parts --report /etc/cron.daily )
 47 1    * * 7   root    test -x /usr/sbin/anacron || ( cd / && run-parts --report /etc/cron.weekly )
@@ -1408,7 +1407,7 @@ _EOF_
 			l_message='Detecting additional OS installed on system' G_RUN_CMD os-prober
 
 			# - Native PC/EFI (assume x86_64 only possible)
-			if dpkg --get-selections | grep -qi '^grub-efi-amd64[[:space:]]' &&
+			if dpkg-query -s 'grub-efi-amd64' &> /dev/null &&
 				[[ -d '/boot/efi' ]]; then
 
 				l_message='Recreating GRUB-EFI' G_RUN_CMD grub-install --target=x86_64-efi --efi-directory=/boot/efi --bootloader-id=arch_grub --recheck
