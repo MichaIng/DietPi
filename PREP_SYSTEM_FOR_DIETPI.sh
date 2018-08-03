@@ -366,6 +366,7 @@
 			'51' 'BananaPi Pro (Lemaker)'
 			'50' 'BananaPi M2+ (sinovoip)'
 			'71' 'Beagle Bone Black'
+			'69' 'Firefly RK3399'
 			'39' 'LeMaker Guitar'
 			'68' 'NanoPC T4'
 			'67' 'NanoPi K1 Plus'
