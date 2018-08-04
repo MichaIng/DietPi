@@ -1281,6 +1281,15 @@ blacklist videobuf2_vmalloc
 blacklist bc_example
 _EOF_
 
+			#Sparky SBC, WiFi rtl8812au driver: https://github.com/sparky-sbc/sparky-test/tree/master/rtl8812au
+			G_RUN_CMD wget https://raw.githubusercontent.com/sparky-sbc/sparky-test/master/rtl8812au/rtl8812au_sparky.tar
+			mkdir -p rtl8812au_sparky
+			tar -xvf rtl8812au_sparky.tar -C rtl8812au_sparky
+			chmod +x rtl8812au_sparky/install.sh
+			G_RUN_CMD rtl8812au_sparky/install.sh
+			rm rtl8812au_sparky.tar
+			rm -R rtl8812au_sparky
+
 			#	Use performance gov for stability.
 			sed -i '/^[[:blank:]]*CONFIG_CPU_GOVERNOR=/c\CONFIG_CPU_GOVERNOR=performance' /DietPi/dietpi.txt
 
