@@ -654,6 +654,7 @@ _EOF_
 			'htop'			# System monitor
 			'iputils-ping'		# ping command
 			'isc-dhcp-client'	# DHCP client
+			'kmod'			# "modprobe", "lsmod", required by several DietPi scripts
 			'locales'		# Support locales, necessary for DietPi scripts, as we use enGB.UTF8 as default language
 			'nano'			# Simple text editor
 			'p7zip-full'		# .7z wrapper
@@ -663,6 +664,7 @@ _EOF_
 			'sudo'			# Root permission wrapper for users within /etc/sudoers(.d/)
 			'systemd-sysv'		# Includes systemd and additional commands: poweroff, shutdown etc.
 			'tzdata'		# Time zone data for system clock, auto summer/winter time adjustment
+			'udev'			# /dev/ and hotplug management daemon
 			'unzip'			# .zip unpacker
 			'usbutils'		# "lsusb", needed by DietPi-Software + DietPi-Bugreport
 			'wget'			# Download tool
@@ -1400,14 +1402,6 @@ _EOF_
 
 		#/DietPi/dietpi/func/dietpi-set_hardware preferipversion ipv4 #Already done at top of script, and now default in dietpi.txt
 
-		G_DIETPI-NOTIFY 2 'Disabling soundcards by default'
-
-		/DietPi/dietpi/func/dietpi-set_hardware soundcard none
-		#	Alsa-utils is auto installed to reset soundcard settings on some ARM devices. uninstall it afterwards
-		#	- The same for firmware-intel-sound (sound over HDMI?) on intel CPU devices
-		G_AGP alsa-utils firmware-intel-sound
-		G_AGA
-
 		#	x86_64: kernel cmd line with GRUB
 		if (( $G_HW_ARCH == 10 )); then
 
@@ -1432,6 +1426,15 @@ _EOF_
 			fi
 
 		fi
+
+		G_DIETPI-NOTIFY 2 'Disabling soundcards by default'
+
+		/DietPi/dietpi/func/dietpi-set_hardware soundcard none
+		#	Alsa-utils is auto installed to reset soundcard settings on some ARM devices. uninstall it afterwards
+		#	- The same for firmware-intel-sound (sound over HDMI?) on intel CPU devices
+		#	- Purge "os-prober" from previous step as well
+		G_AGP alsa-utils firmware-intel-sound os-prober
+		G_AGA
 
 		G_DIETPI-NOTIFY 2 'Setting default CPU gov'
 
