@@ -1176,6 +1176,11 @@ _EOF_
 		G_DIETPI-NOTIFY 2 'Reducing getty count and resource usage:'
 
 		systemctl mask getty-static
+		# - logind features disabled by default. Usually not needed and all features besides auto getty creation are not available without libpam-systemd package.
+		#	- It will be unmasked/enabled, automatically if libpam-systemd got installed during dietpi-software install, usually with desktops.
+		systemctl stop systemd-logind &> /dev/null
+		systemctl disable systemd-logind &> /dev/null
+		systemctl mask systemd-logind
 
 		G_DIETPI-NOTIFY 2 'Configuring regional settings (TZdata):'
 
