@@ -637,37 +637,36 @@ _EOF_
 		# - DietPi list of minimal required packages, which must be installed:
 		aPACKAGES_REQUIRED_INSTALL=(
 
-			'apt-transport-https'	# Allows https sources in ATP
-			'apt-utils'		# Allows debconf to preconfigure APT packages before installing
-			'bash-completion'	# Auto completes a wide list of bash commands
-			'bc'			# Floating point calculation within bash
-			'bzip2'			# .bz2 wrapper
+			'apt-transport-https'	# Allows HTTPS sources for ATP
+			'apt-utils'		# Allows "debconf" to pre-configure APT packages for non-interactive install
+			'bash-completion'	# Auto completes a wide list of bash commands and options via <tab>
+			'bc'			# Bash calculator, e.g. for floating point calculation
+			'bzip2'			# (.tar).bz2 wrapper
 			'ca-certificates'	# Adds known ca-certificates, necessary to practically access HTTPS sources
-			'console-setup'		# DietPi-Config keyboard configuration
+			'console-setup'		# DietPi-Config keyboard configuration + console fonts
 			'cron'			# Background job scheduler
 			'curl'			# Web address testing, downloading, uploading etc.
-			'debconf'		# APT package pre-configuration, e.g. "debconf-set-selections"
+			'debconf'		# APT package pre-configuration, e.g. "debconf-set-selections" for non-interactive install
 			'dirmngr'		# GNU key management required for some APT installs via additional repos
 			'ethtool'		# Ethernet link checking
 			'fake-hwclock'		# Hardware clock emulation, to allow correct timestamps during boot before network time sync
 			'gnupg'			# apt-key add
-			'hfsplus'		# DietPi-Drive_Manager NTS (MacOS) file system support
 			'htop'			# System monitor
-			'initramfs-tools'	# RAM file system initialization
-			'iputils-ping'		# ping command + dependant of iproute2 ("ip" commands)
+			'iputils-ping'		# ping command
 			'isc-dhcp-client'	# DHCP client
+			'kmod'			# "modprobe", "lsmod", required by several DietPi scripts
 			'locales'		# Support locales, necessary for DietPi scripts, as we use enGB.UTF8 as default language
 			'nano'			# Simple text editor
-			'ntfs-3g'		# DietPi-Drive_Manager NTPS (Windows) file system support
 			'p7zip-full'		# .7z wrapper
-			'parted'		# DietPi-Boot + DietPi-Drive_Manager
-			'psmisc'		# DietPi-Boot + DietPi-Software: e.g. killall
-			'resolvconf'		# System nameserver updater
-			'sudo'			# DietPi-Software + general use
+			'parted'		# Needed by DietPi-Boot + DietPi-Drive_Manager
+			'psmisc'		# "killall", needed by many DietPi scripts
+			'resolvconf'		# Network nameserver handler + depandant for "ifupdown" (network interface handler) => "iproute2" ("ip" command)
+			'sudo'			# Root permission wrapper for users within /etc/sudoers(.d/)
 			'systemd-sysv'		# Includes systemd and additional commands: poweroff, shutdown etc.
 			'tzdata'		# Time zone data for system clock, auto summer/winter time adjustment
+			'udev'			# /dev/ and hotplug management daemon
 			'unzip'			# .zip unpacker
-			'usbutils'		# DietPi-Software + DietPi-Bugreport: e.g. lsusb
+			'usbutils'		# "lsusb", needed by DietPi-Software + DietPi-Bugreport
 			'wget'			# Download tool
 			'whiptail'		# DietPi dialogs
 
@@ -682,7 +681,7 @@ _EOF_
 			aPACKAGES_REQUIRED_INSTALL+=('iw')			# WiFi related
 			aPACKAGES_REQUIRED_INSTALL+=('rfkill')	 		# WiFi related: Used by some onboard WiFi chipsets
 			aPACKAGES_REQUIRED_INSTALL+=('wireless-tools')		# WiFi related
-			aPACKAGES_REQUIRED_INSTALL+=('wpasupplicant')		# WiFi related
+			aPACKAGES_REQUIRED_INSTALL+=('wpasupplicant')		# WiFi WPA(2) support
 
 			# Intel/Nvidia/WiFi (ralink) dongle firmware: https://github.com/Fourdee/DietPi/issues/1675#issuecomment-377806609
 			# On Jessie, firmware-misc-nonfree is not available, firmware-ralink instead as dedicated package.
@@ -713,6 +712,7 @@ _EOF_
 		if (( $G_HW_MODEL >= 10 )); then
 
 			G_AGI debian-archive-keyring
+			aPACKAGES_REQUIRED_INSTALL+=('initramfs-tools')		# RAM file system initialization, required for generic boot loader, but not required/used by RPi bootloader
 
 		else
 
@@ -1405,14 +1405,6 @@ _EOF_
 
 		#/DietPi/dietpi/func/dietpi-set_hardware preferipversion ipv4 #Already done at top of script, and now default in dietpi.txt
 
-		G_DIETPI-NOTIFY 2 'Disabling soundcards by default'
-
-		/DietPi/dietpi/func/dietpi-set_hardware soundcard none
-		#	Alsa-utils is auto installed to reset soundcard settings on some ARM devices. uninstall it afterwards
-		#	- The same for firmware-intel-sound (sound over HDMI?) on intel CPU devices
-		G_AGP alsa-utils firmware-intel-sound
-		G_AGA
-
 		#	x86_64: kernel cmd line with GRUB
 		if (( $G_HW_ARCH == 10 )); then
 
@@ -1437,6 +1429,15 @@ _EOF_
 			fi
 
 		fi
+
+		G_DIETPI-NOTIFY 2 'Disabling soundcards by default'
+
+		/DietPi/dietpi/func/dietpi-set_hardware soundcard none
+		#	Alsa-utils is auto installed to reset soundcard settings on some ARM devices. uninstall it afterwards
+		#	- The same for firmware-intel-sound (sound over HDMI?) on intel CPU devices
+		#	- Purge "os-prober" from previous step as well
+		G_AGP alsa-utils firmware-intel-sound os-prober
+		G_AGA
 
 		G_DIETPI-NOTIFY 2 'Setting default CPU gov'
 
