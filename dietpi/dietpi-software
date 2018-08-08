@@ -3891,54 +3891,16 @@ _EOF_
 
 			Banner_Installing
 
-			G_DIETPI-NOTIFY 2 'Preparing data folder'
-			if [[ -d $G_FP_DIETPI_USERDATA/fahclient ]]; then
-
-				G_DIETPI-NOTIFY 2 "$G_FP_DIETPI_USERDATA/fahclient exists, will migrate contained data"
-
-			else
-				# Otherwise use possibly existent /var/lib/fahclient
-				# - Remove possible dead symlinks/files:
-				rm $G_FP_DIETPI_USERDATA/fahclient &> /dev/null
-				mkdir -p $G_FP_DIETPI_USERDATA/fahclient
-				if [[ -d /var/lib/fahclient ]]; then
-
-					G_DIETPI-NOTIFY 2 '/var/lib/fahclient exists, will migrate contained data'
-					G_RUN_CMD cp -a /var/lib/fahclient/. $G_FP_DIETPI_USERDATA/fahclient
-
-				fi
-
-			fi
-
-			G_DIETPI-NOTIFY 2 'Removing /var/lib/fahclient, if existent'
-			[[ -L /var/lib/fahclient && ! $(readlink /var/lib/fahclient) =~ $G_FP_DIETPI_USERDATA/fahclient ]] &&
-				rm -R "$(readlink /var/lib/fahclient)" &> /dev/null
-			rm -R /var/lib/fahclient &> /dev/null
-
-			l_message="Creating symlink: /var/lib/fahclient -> $G_FP_DIETPI_USERDATA/fahclient" G_RUN_CMD ln -sf $G_FP_DIETPI_USERDATA/fahclient /var/lib/fahclient
-			chown fahclient:root -h /var/lib/fahclient &> /dev/null
-			chown fahclient:dietpi -RL /var/lib/fahclient &> /dev/null
-
 			G_DIETPI-NOTIFY 2 'Pre-configuring FAHClient deb package'
-			debconf-set-selections <<< 'fahclient fahclient/autostart boolean true'
+			debconf-set-selections <<< 'fahclient fahclient/autostart boolean true' # external bug with setting false https://github.com/FoldingAtHome/fah-issues/issues/1193
 			debconf-set-selections <<< 'fahclient fahclient/power select light'
 			debconf-set-selections <<< 'fahclient fahclient/team string 234437' # Team "DietPi"
 			debconf-set-selections <<< 'fahclient fahclient/user string DietPi-Anonymous' # Default, until user chooses an own username
 			debconf-set-selections <<< 'fahclient fahclient/passkey string'
 
 			Download_Install 'https://download.foldingathome.org/releases/public/release/fahclient/debian-stable-64bit/v7.5/latest.deb'
-			# - FAHCore needs to fully start up, to check system and prepare configuration.
-			G_DIETPI-NOTIFY -2 'Wait for Folding@Home to do initial checks and fully start up'
-			local i=0
-			while ! pgrep -cif ^$(readlink -f /var/lib/fahclient)/cores* &> /dev/null
-			do
 
-				(( $i >= 10 )) && G_DIETPI-NOTIFY 1 'Folding@Home failed to fully start up within 10 seconds. Install will continue, but manual configuration might be required.' && break
-				sleep 1
-				((i++))
-
-			done
-			(( $i < 10 )) && G_DIETPI-NOTIFY 0 'Folding@Home start up finished'
+			killall -w FAHClient #due to https://github.com/FoldingAtHome/fah-issues/issues/1193
 
 		fi
 
@@ -7446,6 +7408,8 @@ _EOF_
 
 		# - FAHClient (Folding@Home)
 		chown -R fahclient:dietpi $G_FP_DIETPI_USERDATA/fahclient
+		chown -R fahclient:dietpi /etc/fahclient
+		chown fahclient:dietpi /var/log/fahclient.log
 
 	}
 
@@ -7948,35 +7912,30 @@ _EOF_
 
 			Banner_Configuration
 
-			# FAHClient parent process needs to fully stop, which writes back "/etc/fahclient/config.xml", before we can edit.
-			G_DIETPI-NOTIFY -2 'Wait for FAHClient to fully stop and write back config file'
-			local i=0
-			while pgrep -ci FAHClient &> /dev/null
-			do
+			mkdir -p $G_FP_DIETPI_USERDATA/fahclient
 
-				(( $i >= 10 )) && G_DIETPI-NOTIFY 1 'FAHClient failed to fully stop within 10 seconds. Install will continue, but manual configuration might be required.' && break
-				sleep 1
-				((i++))
+			> /var/log/fahclient.log
 
-			done
-			(( $i < 10 )) && G_DIETPI-NOTIFY 0 'FAHClient config file ready'
+			rm /etc/init.d/FAHClient
+			systemctl daemon-reload
 
-			# Allow web access for localhost and local network: IP 192.168.0.100 => allow 192.168.0.0/24
-			local ip_address="$(sed -n 4p /DietPi/dietpi/.network)"
-			if [[ $ip_address ]]; then
+			> /etc/fahclient/config.xml # Regen clean config after services start, ensures our CLI options get used, unless set in config.xml by user afterwards
 
-				ip_address=${ip_address%.[0-9]*}
-				ip_address+='.0/24'
-				PRESERVE=1 G_CONFIG_INJECT '<allow' "<allow v='127.0.0.1 $ip_address'/>" /etc/fahclient/config.xml '<config>'
-				PRESERVE=1 G_CONFIG_INJECT '<web-allow' "<web-allow v='127.0.0.1 $ip_address'/>" /etc/fahclient/config.xml '<config>'
+			cat << _EOF_ > /lib/systemd/system/fahclient.service
+[Unit]
+Description=Folding@Home (DietPi service)
 
-			# If local IP coundn't be detected, allow access to all IPs: 0/0
-			else
+[Service]
+Type=simple
+User=fahclient
+Group=dietpi
+WorkingDirectory=$G_FP_DIETPI_USERDATA/fahclient
+ExecStart=$(which FAHClient) --allow='0/0' --web-allow='0/0' --daemon=false --user=DietPi --team=234437 --gpu=true --log-rotate=false --log=/var/log/fahclient.log --power=light --data-directory=$G_FP_DIETPI_USERDATA/fahclient
 
-				PRESERVE=1 G_CONFIG_INJECT '<allow' "<allow v='0/0'/>" /etc/fahclient/config.xml '<config>'
-				PRESERVE=1 G_CONFIG_INJECT '<web-allow' "<web-allow v='0/0'/>" /etc/fahclient/config.xml '<config>'
+[Install]
+WantedBy=multi-user.target
 
-			fi
+_EOF_
 
 		fi
 
@@ -12660,6 +12619,8 @@ _EOF_
 
 			Banner_Uninstalling
 			dpkg -P fahclient
+
+			rm -R $G_FP_DIETPI_USERDATA/fahclient
 
 		fi
 
