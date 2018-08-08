@@ -1320,6 +1320,9 @@ tic terminfo.txt
 tput cnorm
 _EOF_
 
+			# - Ensure WiFi module pre-exists
+			G_CONFIG_INJECT '8723bs' '8723bs' /etc/modules
+
 		# - Odroids FFMPEG fix. Prefer debian.org over Meveric for backports: https://github.com/Fourdee/DietPi/issues/1273 + https://github.com/Fourdee/DietPi/issues/1556#issuecomment-369463910
 		elif (( $G_HW_MODEL > 9 && $G_HW_MODEL < 15 )); then
 
