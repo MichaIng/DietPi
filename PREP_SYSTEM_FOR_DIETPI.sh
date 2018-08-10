@@ -31,8 +31,8 @@
 	fi
 
 	#Work inside /tmp as usually ramfs to reduce disk I/O and speed up download and unpacking
-	mkdir -p /tmp/dietpi-prep
-	cd /tmp/dietpi-prep
+	mkdir -p /tmp/DietPi-PREP
+	cd /tmp/DietPi-PREP
 
 	#Check/install minimal APT Pre-Reqs
 	a_MIN_APT_PREREQS=(
@@ -138,7 +138,7 @@
 
 	fi
 	# Go back to tmp working dir, as loading global includes cd $HOME:
-	cd /tmp/dietpi-prep
+	cd /tmp/DietPi-PREP
 	rm dietpi-globals
 
 	export G_PROGRAM_NAME='DietPi-PREP'
@@ -1100,9 +1100,9 @@ _EOF_
 		l_message='Generating DietPi /etc/fstab' G_RUN_CMD /DietPi/dietpi/dietpi-drive_manager 4
 		# Restart DietPi-RAMdisk, as 'dietpi-drive_manager 4' remounts /DietPi.
 		G_RUN_CMD systemctl restart dietpi-ramdisk
-		# Recreate and navigate to "/tmp/dietpi-prep" working directory
-		mkdir -p /tmp/dietpi-prep
-		cd /tmp/dietpi-prep
+		# Recreate and navigate to "/tmp/DietPi-PREP" working directory
+		mkdir -p /tmp/DietPi-PREP
+		cd /tmp/DietPi-PREP
 
 		G_DIETPI-NOTIFY 2 'Deleting all log files /var/log'
 
