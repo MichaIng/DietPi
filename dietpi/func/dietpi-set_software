@@ -19,9 +19,10 @@ $FP_SCRIPT			allo					eth_dhcp / eth_static
 $FP_SCRIPT			useradd					X=create user with name X and default permissions, using global DietPi password (dietpi)
 $FP_SCRIPT			userdel					X=delete user with name X
 $FP_SCRIPT			apt-mirror				url / default
-$FP_SCRIPT			ntpd-mode				[0-4] configures NTPD mode (eg: ntp/systemd)
+$FP_SCRIPT			ntpd-mode				[0-4] configures time sync mode (eg: daily/hourly/daemon)
 $FP_SCRIPT			verify_dietpi.txt			verifies dietpi.txt entries, adds missing entries if required
 $FP_SCRIPT			passwords				NULL=Prompt user to change DietPi related passwords | X=optional set X as global password for future dietpi-software installations and \"root\" + \"dietpi\" login passwords.
+$FP_SCRIPT			setpermissions			Applies required filesystem permissions to DietPi specific content, and, DietPi userdata directory for software installs
 "
 	#////////////////////////////////////
 
@@ -33,12 +34,13 @@ $FP_SCRIPT			passwords				NULL=Prompt user to change DietPi related passwords | 
 	INPUT_ADDITIONAL_2="$4"
 	INPUT_ADDITIONAL_3="$5"
 	INPUT_ADDITIONAL_4="$6"
+
 	#Import DietPi-Globals ---------------------------------------------------------------
 	. /DietPi/dietpi/func/dietpi-globals
-	G_CHECK_ROOT_USER
-	G_CHECK_ROOTFS_RW
 	export G_PROGRAM_NAME='DietPi-Set_software'
 	G_INIT
+	G_CHECK_ROOT_USER
+	G_CHECK_ROOTFS_RW
 	#Import DietPi-Globals ---------------------------------------------------------------
 
 	EXIT_CODE=0
@@ -112,7 +114,7 @@ _EOF_
 		if [[ $INPUT_MODE_VALUE ]]; then
 
 			# - Set defaults?
-			if [[ $INPUT_MODE_VALUE = 'default' ]]; then
+			if [[ $INPUT_MODE_VALUE == 'default' ]]; then
 
 				if (( $G_HW_MODEL < 10 )); then
 
@@ -157,6 +159,13 @@ _EOF_
 
 					sed -i 's/https:/http:/g' /etc/apt/sources.list
 
+					# - ARM64 packages no longer available: https://github.com/Fourdee/DietPi/issues/1915
+					if (( $G_HW_ARCH == 3 )); then
+
+						sed -i '/debian-security/d' /etc/apt/sources.list
+
+					fi
+
 				#	Buster, remove backports: https://github.com/Fourdee/DietPi/issues/1285#issuecomment-351830101
 				elif (( $G_DISTRO > 4 )); then
 
@@ -189,24 +198,63 @@ _EOF_
 			# - Reset global to disabled, prevents run_ntpd in dietpi-software
 			sed -i '/CONFIG_NTP_MODE=/c\CONFIG_NTP_MODE=0' /DietPi/dietpi.txt
 
-			#Kill current
+			# - Kill current
 			killall -w /DietPi/dietpi/func/run_ntpd &> /dev/null
 
-			local ntpd_mirror=$(grep -m1 '^[[:blank:]]*CONFIG_NTP_MIRROR=' /DietPi/dietpi.txt | sed 's/^.*=//')
-			# - Set defaults?
-			if [[ $ntpd_mirror == 'default' ]]; then
+			local ntp_mirror=$(grep -m1 '^[[:blank:]]*CONFIG_NTP_MIRROR=' /DietPi/dietpi.txt | sed 's/^[^=]*=//')
+			local ntp_mirror_entry='Servers='$ntp_mirror
 
-				ntpd_mirror='debian.pool.ntp.org'
+			# - Default, lets timesyncd use DHCP server (Stretch+ only) or fallback to debian.pool.ntp.org.
+			if [[ ${ntp_mirror,,} == default ]]; then
+
+				ntp_mirror_entry='#Servers=0.debian.pool.ntp.org 1.debian.pool.ntp.org 2.debian.pool.ntp.org 3.debian.pool.ntp.org'
+
+			# - Gateway, auto detect local gateway(s) (router) to use as NTP server.
+			elif [[ ${ntp_mirror,,} == gateway ]]; then
+
+				local gateway="$(ip r | grep '^default' | awk '{print $3}')"
+				if [[ $gateway ]]; then
+
+					G_DIETPI-NOTIFY 0 "Gateway(s) detected:$(printf ' %s' $gateway), adding as NTP server(s)."
+					ntp_mirror_entry='Servers='$(ip r | grep '^default' | awk '{print $3}')
+
+				else
+
+					G_DIETPI-NOTIFY 1 'No local gateway detected. No NTP mirror change will be applied.'
+					EXIT_CODE=1
+					return 1
+
+				fi
+
+			# - Add pool.ntp.org entries with subdomains "[0-3].", other entries without.
+			elif [[ $ntp_mirror =~ 'pool.ntp.org' ]]; then
+
+				ntp_mirror_entry='Servers='
+				local i
+				for i in $ntp_mirror
+				do
+
+					if [[ $i == *'pool.ntp.org' ]]; then
+
+						ntp_mirror_entry+="0.$i 1.$i 2.$i 3.$i "
+
+					else
+
+						ntp_mirror_entry+="$i "
+
+					fi
+
+				done
 
 			fi
 
 			# - Set mirror
 			cat << _EOF_ > /etc/systemd/timesyncd.conf
 [Time]
-Servers=0.$ntpd_mirror 1.$ntpd_mirror 2.$ntpd_mirror 3.$ntpd_mirror
+$ntp_mirror_entry
 _EOF_
 
-			# - Daemon mode, dbus required for timedatectl, that users may require
+			# - Daemon mode, dbus required for timedatectl, that users may expect
 			if (( $INPUT_MODE_VALUE == 4 )); then
 
 				G_AG_CHECK_INSTALL_PREREQ dbus
@@ -241,21 +289,171 @@ _EOF_
 		if [[ $INPUT_MODE_VALUE == 'eth_dhcp' ]]; then
 
 			G_CONFIG_INJECT 'iface eth' 'iface eth0 inet dhcp' /etc/network/interfaces
-			sed -i "$(cat -n /etc/network/interfaces | grep 'dns-nameservers ' | sed -n 1p | awk '{print $1}')s/.*/#dns-nameservers 8.8.8.8/" /etc/network/interfaces
+			sed -i '0,/^.*dns-nameservers .*$/s//#dns-nameservers 8.8.8.8/' /etc/network/interfaces
 
 		elif [[ $INPUT_MODE_VALUE == 'eth_static' ]]; then
 
 			G_CONFIG_INJECT 'iface eth' 'iface eth0 inet static' /etc/network/interfaces
-			sed -i "$(cat -n /etc/network/interfaces | grep 'address ' | sed -n 1p | awk '{print $1}')s/.*/address $INPUT_ADDITIONAL_1/" /etc/network/interfaces
-			sed -i "$(cat -n /etc/network/interfaces | grep 'gateway ' | sed -n 1p | awk '{print $1}')s/.*/gateway $INPUT_ADDITIONAL_2/" /etc/network/interfaces
-			sed -i "$(cat -n /etc/network/interfaces | grep 'netmask ' | sed -n 1p | awk '{print $1}')s/.*/netmask $INPUT_ADDITIONAL_3/" /etc/network/interfaces
-			sed -i "$(cat -n /etc/network/interfaces | grep 'dns-nameservers ' | sed -n 1p | awk '{print $1}')s/.*/dns-nameservers $INPUT_ADDITIONAL_4/" /etc/network/interfaces
+			G_CONFIG_INJECT 'address ' "address $INPUT_ADDITIONAL_1" /etc/network/interfaces
+			G_CONFIG_INJECT 'gateway ' "gateway $INPUT_ADDITIONAL_2" /etc/network/interfaces
+			G_CONFIG_INJECT 'netmask ' "netmask $INPUT_ADDITIONAL_3" /etc/network/interfaces
+			G_CONFIG_INJECT 'dns-nameservers ' "dns-nameservers $INPUT_ADDITIONAL_4" /etc/network/interfaces
 
 		else
 
 			Unknown_Input_Mode
 
 		fi
+
+	}
+
+	#/////////////////////////////////////////////////////////////////////////////////////
+	# Setpermissions_Main
+	#/////////////////////////////////////////////////////////////////////////////////////
+	Setpermissions_Main(){
+
+		# - /var/www / www-data
+		chown -R www-data:www-data /var/www
+		chmod -R 775 /var/www
+		#	Allow www-data under sudo without password
+		if ! grep -qi '^www-data$' /etc/passwd && ! grep -qi '^www-data[[:space:]]' /etc/sudoers; then
+
+			cat << _EOF_ >> /etc/sudoers
+www-data ALL=NOPASSWD: ALL
+_EOF_
+
+		fi
+
+		#Apply non-root permissions for files and folders in G_FP_DIETPI_USERDATA
+
+		# - dietpi user
+		chown -R dietpi:dietpi /home/dietpi
+		chown -R dietpi:dietpi $G_FP_DIETPI_USERDATA
+		chmod -R 775 $G_FP_DIETPI_USERDATA
+		#	+ for symlinked locations
+		chown -R dietpi:dietpi $G_FP_DIETPI_USERDATA/*
+		chmod -R 775 $G_FP_DIETPI_USERDATA/*
+
+		# - Apply program specific permissions
+		#	NB: Following should be ordered ascending by index to prevent dupes.
+
+		# - O!MPD, requires write permissions
+		chmod -R 777 /var/www/ompd/tmp #(required for database update)
+		chmod -R 777 /var/www/ompd/stream #(required for streaming files)
+		chmod -R 777 /var/www/ompd/cache #(required for downloading files)
+
+		# - MPD
+		chmod 644 /var/log/mpd/mpd.log
+		chmod 0666 /etc/mpd.conf
+		chown -R mpd:dietpi /var/lib/mpd /var/log/mpd /etc/mpd.conf $G_FP_DIETPI_USERDATA/.mpd_cache
+
+		# - Mopidy
+		chown -R mopidy:dietpi $G_FP_DIETPI_USERDATA/mopidy
+
+		# - Minidlna
+		chown -R minidlna:dietpi $G_FP_DIETPI_USERDATA/.MiniDLNA_Cache
+
+		# - AirSonic
+		chown -R airsonic:dietpi $G_FP_DIETPI_USERDATA/airsonic
+
+		# - MySQL data store
+		chown -R mysql:mysql $G_FP_DIETPI_USERDATA/mysql
+		chmod -R 770 $G_FP_DIETPI_USERDATA/mysql
+
+		# - UrBackup
+		chown -R urbackup:urbackup $G_FP_DIETPI_USERDATA/urbackup
+
+		# - www-data
+		chown -R www-data:www-data $G_FP_DIETPI_USERDATA/rpicam
+		chown -R www-data:www-data $G_FP_DIETPI_USERDATA/pydio_data
+
+		local datadir="$(grep -m1 '^[[:blank:]]*SOFTWARE_OWNCLOUD_DATADIR=' /DietPi/dietpi.txt | sed 's/^[^=]*=//')"
+		[[ -z $datadir ]] && datadir="$G_FP_DIETPI_USERDATA/owncloud_data"
+		chown -R www-data:www-data "$datadir"
+
+		datadir="$(grep -m1 '^[[:blank:]]*SOFTWARE_NEXTCLOUD_DATADIR=' /DietPi/dietpi.txt | sed 's/^[^=]*=//')"
+		[[ -z $datadir ]] && datadir="$G_FP_DIETPI_USERDATA/nextcloud_data"
+		chown -R www-data:www-data "$datadir"
+
+		# - Home Assistant Permissions
+		#chown -R homeassistant:dietpi /home/homeassistant/.homeassistant
+		#chown -R dietpi:dietpi $G_FP_DIETPI_USERDATA/homeassistant
+
+		# - Minio
+		chown -R minio-user:minio-user $G_FP_DIETPI_USERDATA/minio-data
+
+		# - FuguHub
+		chown -R bd:bd $G_FP_DIETPI_USERDATA/fuguhub-data/
+
+		# - Nodered
+		chown -R nodered:nodered $G_FP_DIETPI_USERDATA/node-red
+
+		# - grafana
+		chown -R grafana:grafana $G_FP_DIETPI_USERDATA/grafana
+
+		# - influxDB
+		chown -R influxdb:influxdb $G_FP_DIETPI_USERDATA/influxdb
+
+		# - gogs
+		chown -R gogs:gogs /etc/gogs
+		chown -R gogs:gogs $G_FP_DIETPI_USERDATA/gogs-repo
+		chown -R gogs:gogs /var/log/gogs
+
+		# - ubooquity
+		chown -R ubooquity:dietpi $G_FP_DIETPI_USERDATA/ubooquity
+
+		# - Mineos
+		chown -R mineos:dietpi $G_FP_DIETPI_USERDATA/mineos
+		chown -R mineos:dietpi /var/games/minecraft
+		chown mineos:dietpi /etc/ssl/certs/mineos*
+
+		# - cubrite
+		chown -R cuberite:dietpi $G_FP_DIETPI_USERDATA/cubrite
+
+		# - sickrage
+		chown -R sickrage:dietpi $G_FP_DIETPI_USERDATA/sickrage
+		chown sickrage:dietpi /var/log/sickrage.log
+
+		# - Sonarr
+		chown -R sonarr:dietpi $G_FP_DIETPI_USERDATA/sonarr
+		chown -R sonarr:dietpi /opt/NzbDrone
+
+		# - Radarr
+		chown -R radarr:dietpi $G_FP_DIETPI_USERDATA/radarr
+		chown -R radarr:dietpi /opt/Radarr
+
+		# - Tonido
+		chown -R tonido:dietpi $G_FP_DIETPI_USERDATA/tonido
+		chown -R tonido:dietpi /home/tonido
+
+		# - NZBget
+		chown -R nzbget:dietpi $G_FP_DIETPI_USERDATA/nzbget
+
+		# - Roon Bridge
+		chown -R roon:dietpi $G_FP_DIETPI_USERDATA/roon $G_FP_DIETPI_USERDATA/roonserver /var/log/roon
+
+		# - GMrender
+		chown gmrender:dietpi /var/log/gmrender.log
+
+		# - PlexPy
+		chown plexpy:dietpi $G_FP_DIETPI_USERDATA/plexpy
+
+		# - Deluge
+		chown -R deluge:dietpi $G_FP_DIETPI_USERDATA/deluge
+		chown deluge:dietpi /var/log/deluged.log /var/log/deluge-web.log
+
+		# - Jackett
+		chown -R jackett:jackett /opt/jackett
+
+		# - Koel
+		chown -R koel:dietpi $G_FP_DIETPI_USERDATA/koel
+
+		# - qBitTorrent
+		chown -R qbittorrent:dietpi /home/qbittorrent
+
+		# - FAHClient (Folding@Home)
+		chown -R fahclient:dietpi $G_FP_DIETPI_USERDATA/fahclient
+		chown fahclient:dietpi /var/log/fahclient.log
 
 	}
 
@@ -267,7 +465,7 @@ _EOF_
 		if [[ $INPUT_MODE_VALUE ]]; then
 
 			mkdir -p /home
-			useradd -m -s /bin/bash "$INPUT_MODE_VALUE" -p "$(grep -m1 '^[[:blank:]]*AUTO_SETUP_GLOBAL_PASSWORD=' /DietPi/dietpi.txt | sed 's/^.*=//')"
+			useradd -m -s /bin/bash "$INPUT_MODE_VALUE" -p "$(grep -m1 '^[[:blank:]]*AUTO_SETUP_GLOBAL_PASSWORD=' /DietPi/dietpi.txt | sed 's/^[^=]*=//')"
 
 			#	Copy existing profile/bashrc
 			cp /root/.profile /home/"$INPUT_MODE_VALUE"/
@@ -344,7 +542,7 @@ _EOF_
 	Verify_DietPi_Txt(){
 
 		#Verify entries with git dietpi.txt
-		local gitbranch=$(grep -m1 '^[[:blank:]]*DEV_GITBRANCH=' /DietPi/dietpi.txt | sed 's/^.*=//')
+		local gitbranch=$(grep -m1 '^[[:blank:]]*DEV_GITBRANCH=' /DietPi/dietpi.txt | sed 's/^[^=]*=//')
 		if [[ -z $gitbranch ]]; then
 
 			gitbranch='master'
@@ -355,28 +553,26 @@ _EOF_
 		G_CHECK_URL "$INSTALL_URL"
 		if (( ! $? )); then
 
-			G_DIETPI-NOTIFY 0 "Patching dietpi.txt"
-			wget "$INSTALL_URL" -O /tmp/dietpi.txt_patch
+			G_DIETPI-NOTIFY 0 'Patching dietpi.txt'
+			l_message='Downloading current dietpi.txt' G_RUN_CMD wget "$INSTALL_URL" -O /tmp/dietpi.txt_patch
 
 			local entry=0
 			local value=0
 			while read line
 			do
 
-				entry=$(echo -e "$line" | grep "^[^#;/]" )
+				entry=$(grep '^[^#;/]' <<< "$line")
 
 				if [[ $entry ]]; then
 
-					value=$(echo -e "${entry##*=}") #*=X
-					entry=$(echo -e "${entry%%=*}") #X*
+					value="${entry#*=}"  #*=X
+					entry="${entry%%=*}" #X=*
 
 					# - Patch new entry if required
-					if ! grep -qi "^$entry=" /DietPi/dietpi.txt; then
+					if ! grep -qi "^[[:blank:]]*$entry=" /DietPi/dietpi.txt; then
 
 						G_DIETPI-NOTIFY 2 "Updating dietpi.txt with new entry: $entry=$value"
-						cat << _EOF_ >> /DietPi/dietpi.txt
-$entry=$value
-_EOF_
+						echo "$entry=$value" >> /DietPi/dietpi.txt
 
 					#else
 
@@ -405,7 +601,7 @@ _EOF_
 		local pw_root_dietpi_users=''
 
 		#Automation/input mode, set and then apply input password to both dietpi-software and root/dietpi user passwords.
-		if [[ -n $INPUT_MODE_VALUE ]]; then
+		if [[ $INPUT_MODE_VALUE ]]; then
 
 			pw_dietpi_software="$INPUT_MODE_VALUE"
 			pw_root_dietpi_users="$INPUT_MODE_VALUE"
@@ -442,7 +638,7 @@ It is highly recommended to change this password, ideally, it should be differen
 		fi
 
 		#Apply | dietpi-software PW
-		if [[ -n $pw_dietpi_software ]]; then
+		if [[ $pw_dietpi_software ]]; then
 
 			G_CONFIG_INJECT 'AUTO_SETUP_GLOBAL_PASSWORD=' "AUTO_SETUP_GLOBAL_PASSWORD=$pw_dietpi_software" /DietPi/dietpi.txt &> /dev/null
 			G_DIETPI-NOTIFY 2 'Global password successfully changed'
@@ -450,7 +646,7 @@ It is highly recommended to change this password, ideally, it should be differen
 		fi
 
 		#Apply | Root/DietPi users PW
-		if [[ -n $pw_root_dietpi_users ]]; then
+		if [[ $pw_root_dietpi_users ]]; then
 
 			chpasswd <<< "root:$pw_root_dietpi_users"
 			chpasswd <<< "dietpi:$pw_root_dietpi_users"
@@ -507,6 +703,10 @@ It is highly recommended to change this password, ideally, it should be differen
 	elif [[ $INPUT_MODE_NAME == 'passwords' ]]; then
 
 		Passwords_Main
+
+	elif [[ $INPUT_MODE_NAME == 'setpermissions' ]]; then
+
+		Setpermissions_Main &> /dev/null #as no file exist checks are done in bash (quicker to let the program report it missing), hide output
 
 	else
 

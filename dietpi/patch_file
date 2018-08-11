@@ -18,6 +18,7 @@
 
 	#Grab input
 	SUBVERSION_CURRENT=$1
+
 	#Import DietPi-Globals ---------------------------------------------------------------
 	/DietPi/dietpi/func/dietpi-obtain_hw_model # Always update
 	. /DietPi/dietpi/func/dietpi-globals
@@ -35,6 +36,7 @@
 
 	Update_EMR_Index(){
 
+		G_DIETPI-NOTIFY 0 "EMR patch applied $EMR_INDEX"
 		((EMR_INDEX++))
 		echo $EMR_INDEX > $FP_EMR
 
@@ -47,7 +49,7 @@
 
 	else
 
-		EMR_INDEX=$(cat $FP_EMR)
+		EMR_INDEX=$(<$FP_EMR)
 
 	fi
 
@@ -56,7 +58,7 @@
 
 		#Pre-6.9 preparations: Manually copy rootfs files in place: https://github.com/Fourdee/DietPi/pull/1802
 		#	NB: dietpi-update takes over, post v6.9 update completion.
-		GITBRANCH="$(grep -m1 '^[[:blank:]]*DEV_GITBRANCH=' /DietPi/dietpi.txt | sed 's/^.*=//')"
+		GITBRANCH="$(grep -m1 '^[[:blank:]]*DEV_GITBRANCH=' /DietPi/dietpi.txt | sed 's/^[^=]*=//')"
 		if (( $SUBVERSION_CURRENT < 9 )) && [[ -d /tmp/dietpi-update/DietPi-$GITBRANCH/rootfs ]]; then
 
 			l_message='Copy rootfs files in place' G_RUN_CMD cp -Rf /tmp/dietpi-update/DietPi-"$GITBRANCH"/rootfs/. /
@@ -68,7 +70,19 @@
 
 		Update_EMR_Index
 
-	# elif (( $EMR_INDEX == 1 )); then
+	elif (( $EMR_INDEX == 1 )); then
+
+		#RAMlog 0 free space check due to issues with failing DietPi cron jobs in v6.11
+		if (( $(G_CHECK_FREESPACE /var/log) < 2 )); then
+
+			G_DIETPI-NOTIFY 2 'EMR: Clearing log files to free up space before patching (<2MB)'
+			/DietPi/dietpi/dietpi-logclear 1
+
+		fi
+
+		Update_EMR_Index
+
+	# elif (( $EMR_INDEX == 2 )); then
 
 		#echo -e 'nothing here yet'
 		# Update_EMR_Index
@@ -83,7 +97,7 @@
 
 			#-------------------------------------------------------------------------------
 			#Asus TB G_HW_MODEL change
-			if [[ -f /etc/.dietpi_hw_model_identifier ]] &&
+			if [[ -r /etc/.dietpi_hw_model_identifier ]] &&
 				(( $(sed -n 1p /etc/.dietpi_hw_model_identifier) == 100 )); then
 
 				export G_HW_MODEL=52
@@ -114,7 +128,7 @@
 			fi
 			#-------------------------------------------------------------------------------
 			#Remove -dev keyring
-			G_AGP debian-keyring
+			apt-mark auto debian-keyring
 			#-------------------------------------------------------------------------------
 
 		elif (( $SUBVERSION_CURRENT == 0 )); then
@@ -124,7 +138,7 @@
 			#	Kodi: https://github.com/Fourdee/DietPi/issues/1428
 			#	Fail2Ban: https://github.com/Fourdee/DietPi/issues/1431
 			#	Tonido: https://github.com/Fourdee/DietPi/issues/1432
-			if [[ -f /DietPi/dietpi/.installed ]]; then
+			if (( $G_DIETPI_INSTALL_STAGE == 1 )); then
 
 				/DietPi/dietpi/dietpi-software reinstall 31 73 134
 
@@ -197,7 +211,7 @@
 			#Reinstalls:
 			#	NetData 1.9
 			#	Allo GUI update
-			if [[ -f /DietPi/dietpi/.installed ]]; then
+			if (( $G_DIETPI_INSTALL_STAGE == 1 )); then
 
 				/DietPi/dietpi/dietpi-software reinstall 65 160
 
@@ -247,7 +261,7 @@ _EOF_
 			systemctl enable rc-local.service
 			systemctl enable dietpi-postboot
 
-			if grep -q '^aSOFTWARE_INSTALL_STATE\[168\]=2' /DietPi/dietpi/.installed; then
+			if (( $G_DIETPI_INSTALL_STAGE == 1 )) && grep -q '^aSOFTWARE_INSTALL_STATE\[168\]=2' /DietPi/dietpi/.installed; then
 
 				[[ -d /var/lib/dietpi/postboot.d ]] || mkdir /var/lib/dietpi/postboot.d
 				cat << _EOF_ > /var/lib/dietpi/postboot.d/moode
@@ -289,11 +303,11 @@ _EOF_
 			# 	RPi Cam
 			#	Aria2 for .conf addition: https://github.com/Fourdee/DietPi/issues/1575#issuecomment-370248708
 			#	Sonarr/Radarr: https://github.com/Fourdee/DietPi/issues/1566#issuecomment-369334473
-			if [[ -f /DietPi/dietpi/.installed ]]; then
+			if (( $G_DIETPI_INSTALL_STAGE == 1 )); then
 
 				# - RPi cam pre-patch
 				mv /var/www/dietpicam /var/www/rpicam &> /dev/null
-				mv "$G_FP_DIETPI_USERDATA"/dietpicam "$G_FP_DIETPI_USERDATA"/rpicam &> /dev/null
+				mv $G_FP_DIETPI_USERDATA/dietpicam $G_FP_DIETPI_USERDATA/rpicam &> /dev/null
 				rm /var/www/rpicam/media &> /dev/null
 
 				/DietPi/dietpi/dietpi-software reinstall 37 59 132 144 145
@@ -361,14 +375,14 @@ _EOF_
 			#Fix microcode installation based on image creation CPU instead of image target CPU: https://github.com/Fourdee/DietPi/pull/1596
 			if (( $G_HW_ARCH == 10 )); then
 
-				if grep 'vendor_id' /proc/cpuinfo | grep -qi 'intel'; then
+				if grep -qi 'vendor_id.*intel' /proc/cpuinfo; then
 
-					dpkg --get-selections | grep -q '^amd64-microcode' && G_AGP amd64-microcode
+					dpkg-query -s amd64-microcode &> /dev/null && apt-mark auto amd64-microcode
 					G_AGI intel-microcode
 
-				elif grep 'vendor_id' /proc/cpuinfo | grep -qi 'amd'; then
+				elif grep -qi 'vendor_id.*amd' /proc/cpuinfo; then
 
-					dpkg --get-selections | grep -q '^intel-microcode' && G_AGP intel-microcode
+					dpkg-query -s intel-microcode &> /dev/null && apt-mark auto intel-microcode
 					G_AGI amd64-microcode
 
 				fi
@@ -377,7 +391,11 @@ _EOF_
 			#-------------------------------------------------------------------------------
 			#Reinstalls
 			#	UrBackupServer
-			[[ -f /DietPi/dietpi/.installed ]] && /DietPi/dietpi/dietpi-software reinstall 111
+			if (( $G_DIETPI_INSTALL_STAGE == 1 )); then
+
+				/DietPi/dietpi/dietpi-software reinstall 111
+
+			fi
 			#-------------------------------------------------------------------------------
 			#Cron minutely support: https://github.com/Fourdee/DietPi/pull/1578
 			mkdir -p /etc/cron.minutely
@@ -385,7 +403,7 @@ _EOF_
 			if ! grep -qi 'cron.minutely' /etc/crontab; then
 
 				cat << _EOF_ >> /etc/crontab
-*/30 * * * *   root    cd / && run-parts --report /etc/cron.minutely
+#*/0 * * * *   root    cd / && run-parts --report /etc/cron.minutely
 _EOF_
 
 			fi
@@ -400,8 +418,8 @@ _EOF_
 			local swap_location='/var/swap'
 			if [[ -f /etc/dphys-swapfile ]]; then
 
-				swap_size=$(grep -m1 '^[[:blank:]]*CONF_SWAPSIZE=' /etc/dphys-swapfile | sed 's/^.*=//')
-				swap_location="$(grep -m1 '^[[:blank:]]*CONF_SWAPFILE=' /etc/dphys-swapfile | sed 's/^.*=//')"
+				swap_size=$(grep -m1 '^[[:blank:]]*CONF_SWAPSIZE=' /etc/dphys-swapfile | sed 's/^[^=]*=//')
+				swap_location="$(grep -m1 '^[[:blank:]]*CONF_SWAPFILE=' /etc/dphys-swapfile | sed 's/^[^=]*=//')"
 
 			fi
 
@@ -420,7 +438,7 @@ _EOF_
 			#	AmiBerry 2.18: https://github.com/Fourdee/DietPi/issues/1410#issuecomment-374060452
 			#	Mopidy: https://github.com/Fourdee/DietPi/issues/1625
 			#	MPD: https://github.com/Fourdee/DietPi/issues/1614
-			if [[ -f /DietPi/dietpi/.installed ]]; then
+			if (( $G_DIETPI_INSTALL_STAGE == 1 )); then
 
 				$(which killall) -w squeezeboxserver &> /dev/null
 				rm /var/lib/dietpi/dietpi-software/services/squeezeboxserver.service &> /dev/null
@@ -466,7 +484,7 @@ _EOF_
 			rm /etc/cron.d/make_nas_processes_faster &> /dev/null
 			#-------------------------------------------------------------------------------
 			#Add Dropbear ecdsa and dss host keys, if missing: https://github.com/Fourdee/DietPi/issues/1670
-			if grep -q '^aSOFTWARE_INSTALL_STATE\[104\]=2' /DietPi/dietpi/.installed; then
+			if (( $G_DIETPI_INSTALL_STAGE == 1 )) && grep -q '^aSOFTWARE_INSTALL_STATE\[104\]=2' /DietPi/dietpi/.installed; then
 
 				[[ -f /etc/dropbear/dropbear_ecdsa_host_key ]] || dropbearkey -t ecdsa -f /etc/dropbear/dropbear_ecdsa_host_key &> /dev/null
 				[[ -f /etc/dropbear/dropbear_dss_host_key ]] || dropbearkey -t dss -f /etc/dropbear/dropbear_dss_host_key &> /dev/null
@@ -474,7 +492,7 @@ _EOF_
 			fi
 			#-------------------------------------------------------------------------------
 			#Reinstall firmware-misc-nonfree by default (ralink): https://github.com/Fourdee/DietPi/issues/1675
-			if dpkg --get-selections | grep -qi '^wpasupplicant'; then
+			if dpkg-query -s wpasupplicant &> /dev/null; then
 
 				if (( $G_DISTRO == 3 )); then
 
@@ -549,7 +567,7 @@ _EOF_
 			#	Removal of fbset on new installs: https://github.com/Fourdee/DietPi/issues/1716
 			if (( $G_DIETPI_INSTALL_STAGE <= 0 )); then
 
-				G_AGP fbset
+				apt-mark auto fbset
 
 			fi
 			#-------------------------------------------------------------------------------
@@ -558,7 +576,11 @@ _EOF_
 			#	AmiBerry 2.19: https://github.com/Fourdee/DietPi/issues/1707
 			#	Allo GUI v7
 			#	Pi-SPC
-			[[ -f /DietPi/dietpi/.installed ]] && /DietPi/dietpi/dietpi-software reinstall 29 108 160 166
+			if (( $G_DIETPI_INSTALL_STAGE == 1 )); then
+
+				/DietPi/dietpi/dietpi-software reinstall 29 108 160 166
+
+			fi
 			#-------------------------------------------------------------------------------
 			#Pi-hole: Enable FTLDNS support by removing pihole-FTL from DietPi control: https://github.com/Fourdee/DietPi/pull/1714
 			systemctl enable pihole-FTL 2> /dev/null
@@ -627,7 +649,7 @@ _EOF_
 			mkdir -p /etc/bashrc.d
 			G_CONFIG_INJECT '.*/etc/bashrc\.d/.*' 'for i in /etc/bashrc\.d/\*\.sh; do \[ -r "\$i" \] \&\& \. \$i; done' /etc/bash.bashrc
 			sed -i '/\/DietPi/d' /root/.bashrc #should already be removed, failsafe start clean
-			for i in /home/*/.bashrc; do sed -i '/\/DietPi/d' "$i"; done #should already be removed, failsafe start clean
+			for i in /home/*/.bashrc; do sed -i '/\/DietPi/d' $i; done #should already be removed, failsafe start clean
 			rm /etc/profile.d/99-dietpi* &> /dev/null
 			# - Enable bash-completion for non-login shells:
 			#	- NB: It is called twice on login shells then, but breaks directly if called already once.
@@ -657,7 +679,11 @@ _EOF_
 			#	CloudPrint
 			#	TightVNC/VNC4/RealVNC: https://github.com/Fourdee/DietPi/pull/1798#issuecomment-392594878
 			#	Xserver: https://github.com/Fourdee/DietPi/issues/1823
-			[[ -f /DietPi/dietpi/.installed ]] && /DietPi/dietpi/dietpi-software reinstall 23 33 34 119 137 27 28 120 6
+			if (( $G_DIETPI_INSTALL_STAGE == 1 )); then
+
+				/DietPi/dietpi/dietpi-software reinstall 23 33 34 119 137 27 28 120 6
+
+			fi
 			#-------------------------------------------------------------------------------
 			#Sickrage service update: https://github.com/Fourdee/DietPi/issues/1762
 			if [[ -f /etc/systemd/system/sickrage.service ]]; then
@@ -702,7 +728,12 @@ _EOF_
 			rm /var/lib/dietpi/dietpi-software/services/kill-ssh-user-sessions-before-network.sh &> /dev/null
 			#-------------------------------------------------------------------------------
 			#Offer to change global and unix user passwords to make users aware of the existance or "dietpi" and how the dietpi.txt password is used.
-			/DietPi/dietpi/func/dietpi-set_software passwords
+			#	If already installed only, else, dietpi-software will handle this on first run, after the update
+			if (( $G_DIETPI_INSTALL_STAGE == 1 )); then
+
+				/DietPi/dietpi/func/dietpi-set_software passwords
+
+			fi
 			#-------------------------------------------------------------------------------
 			#Add dietpi.com SSH pub host key for survey and bug report uploads:
 			mkdir -p /root/.ssh
@@ -717,14 +748,27 @@ _EOF_
 
 			#-------------------------------------------------------------------------------
 			#Switch to IP commands, removal of net-tools: https://github.com/Fourdee/DietPi/pull/1839
-			apt-mark auto net-tools
-			G_AGA
-			G_WHIP_MSG '"net-tools" package is no longer required for DietPi systems and has been flagged as such in APT. "ifconfig" can be replaced with "ip a", or, you can reinstall "net-tools" package as needed.'
+			# - Only apply, if HomeAssistant is not installed, as it depends on net-tools: https://github.com/Fourdee/DietPi/issues/1911
+			if [[ -f '/DietPi/dietpi/.installed' ]] &&
+				grep -q '^aSOFTWARE_INSTALL_STATE\[157\]=2' /DietPi/dietpi/.installed; then
+
+				echo 'HA installed, avoid net-tools removal' &> /dev/null
+
+			else
+
+				G_AGP net-tools
+				G_WHIP_MSG '"net-tools" package is no longer required for DietPi systems and has been flagged as such in APT. "ifconfig" can be replaced with "ip a", or, you can reinstall "net-tools" package as needed.'
+
+			fi
 			#-------------------------------------------------------------------------------
 			#Reinstalls
 			#	GMrender: https://dietpi.com/phpbb/viewtopic.php?f=11&t=3900&p=12985#p12985
 			# 	Xserver (ASUSTB GPU)
-			/DietPi/dietpi/dietpi-software reinstall 163 6
+			if (( $G_DIETPI_INSTALL_STAGE == 1 )); then
+
+				/DietPi/dietpi/dietpi-software reinstall 163 6
+
+			fi
 			#-------------------------------------------------------------------------------
 			#DietPi-Backup rewrite, no longer supports older backups: https://github.com/Fourdee/DietPi/issues/1851
 			if [[ -f '/DietPi/dietpi/.dietpi-backup_settings' ]]; then
@@ -779,10 +823,9 @@ _EOF_
 
 				if (( $G_DIETPI_INSTALL_STAGE <= 0 )); then
 
-					G_AGP fonts-dejavu-core libfontconfig1 libfreetype6 fontconfig-config fontconfig xserver-*
-					G_AGA
+					apt-mark auto fonts-dejavu-core libfontconfig1 libfreetype6 fontconfig-config fontconfig xserver-*
 
-				elif dpkg --get-selections | grep -q '^libfreetype6'; then
+				elif dpkg-query -s libfreetype6 &> /dev/null; then
 
 					G_AGI --reinstall fonts-dejavu-core libfontconfig1 libfreetype6 fontconfig-config fontconfig
 
@@ -838,7 +881,249 @@ _EOF_
 			#-------------------------------------------------------------------------------
 			#Reinstalls
 			#	Allo GUI
-			/DietPi/dietpi/dietpi-software reinstall 160
+			if (( $G_DIETPI_INSTALL_STAGE == 1 )); then
+
+				/DietPi/dietpi/dietpi-software reinstall 160
+
+			fi
+			#-------------------------------------------------------------------------------
+
+		elif (( $SUBVERSION_CURRENT == 11 )); then
+
+			#-------------------------------------------------------------------------------
+			#Software removals:
+			#	JRiver: https://github.com/Fourdee/DietPi/issues/1080#issuecomment-403489246
+			sed -i '/^aSOFTWARE_INSTALL_STATE\[148\]=/c\aSOFTWARE_INSTALL_STATE\[148\]=0' /DietPi/dietpi/.installed &> /dev/null
+			#-------------------------------------------------------------------------------
+			#ASUS TB WiFi: https://github.com/Fourdee/DietPi/issues/1760
+			if (( $G_HW_MODEL == 52 )); then
+
+				G_CONFIG_INJECT '^8723bs' '8723bs' /etc/modules
+
+			fi
+			#-------------------------------------------------------------------------------
+			#Software reinstalls:
+			#	https://github.com/Fourdee/DietPi/issues/1877#issuecomment-403421942
+			#	Items which run as own user:
+			#	YMPD
+			#	MPD
+			#	minidlna
+			#	AirSonic
+			#	Sickrage
+			#	Sonarr
+			#	Radarr
+			#	NZBget
+			#	RoonBridge
+			#	RoonServer
+			#	GMrender
+			#	PlexPy
+			#	Koel
+			#	Deluge
+			#	O!MPD: https://github.com/Fourdee/DietPi/issues/1934#issuecomment-406059462
+			#	 - NO REINSTALL: due to many changes, or, too much risk for existing user settings, fresh installs only
+			#		CubeRite
+			#		qBitTorrent
+			#		tonido
+			if (( $G_DIETPI_INSTALL_STAGE == 1 )); then
+
+				#Moved to userdata folder, pre-reinstall to keep existing settings
+				if [[ -d '/etc/sickrage' ]]; then
+
+					G_RUN_CMD mv /etc/sickrage/* $G_FP_DIETPI_USERDATA/sickrage/
+					rm -R /etc/sickrage
+
+					G_WHIP_MSG "INFO:\n\nSickrage has been moved to the DietPi userdata directory:\n\n - /etc/sickrage > $G_FP_DIETPI_USERDATA/sickrage"
+
+				fi
+
+				if [[ -d '/root/.config/NzbDrone' ]]; then
+
+					G_RUN_CMD mv /root/.config/NzbDrone $G_FP_DIETPI_USERDATA/sonarr
+					G_WHIP_MSG "INFO:\n\nSonarr userdata has been moved to the DietPi userdata directory:\n\n - /root/.config/NzbDrone > $G_FP_DIETPI_USERDATA/sonarr"
+
+				fi
+
+				if [[ -d '/root/.config/Radarr' ]]; then
+
+					G_RUN_CMD mv /root/.config/Radarr $G_FP_DIETPI_USERDATA/radarr
+					G_WHIP_MSG "INFO:\n\nRadarr userdata has been moved to the DietPi userdata directory:\n\n - /root/.config/Radarr > $G_FP_DIETPI_USERDATA/radarr"
+
+				fi
+
+				if [[ -d $HOME/.config/deluge ]]; then
+
+					mkdir -p $G_FP_DIETPI_USERDATA/deluge/.config/deluge
+					G_RUN_CMD mv $HOME/.config/deluge/* $G_FP_DIETPI_USERDATA/deluge/.config/deluge/
+					rm -R $HOME/.config/deluge
+					G_WHIP_MSG "INFO:\n\nDeluge userdata has been moved to the DietPi userdata directory:\n\n - /root/.config/deluge > $G_FP_DIETPI_USERDATA/deluge"
+
+				fi
+
+				/DietPi/dietpi/dietpi-software reinstall 32 128 39 33 116 144 145 149 121 154 163 146 143 45 129
+
+				#	O!MPD requires libary refresh by end user
+				if grep -q '^aSOFTWARE_INSTALL_STATE\[129\]=2' /DietPi/dietpi/.installed; then
+
+					G_WHIP_MSG 'O!MPD configuration has been updated.\n\nOnce the DietPi update is completed, and system is rebooted, please manually update the O!MPD database via the web interface.\n\n - O!MPD web interface > Settings > Update'
+
+				fi
+
+			fi
+			#-------------------------------------------------------------------------------
+			#Increase /var/log max size to 50MB, if lower than 50MB: https://github.com/pi-hole/pi-hole/issues/2270#issuecomment-405109135
+			if df | grep '^tmpfs.*/var/log' &> /dev/null; then
+
+				local var_log_size_new=50
+
+				if (( $(grep -m1 '^[[:blank:]]*AUTO_SETUP_RAMLOG_MAXSIZE=' /DietPi/dietpi.txt | sed 's/^[^=]*=//') < $var_log_size_new )); then
+
+					sed -i "/^[[:blank:]]*AUTO_SETUP_RAMLOG_MAXSIZE=/c\AUTO_SETUP_RAMLOG_MAXSIZE=$var_log_size_new" /DietPi/dietpi.txt
+
+				fi
+
+				sed -i '/[[:space:]]\/var\/log[[:space:]]/d' /etc/fstab
+				cat << _EOF_ >> /etc/fstab
+tmpfs /var/log tmpfs defaults,size=${var_log_size_new}m,noatime,nodev,nosuid,mode=1777 0 0
+_EOF_
+
+				systemctl daemon-reload
+
+			fi
+			#-------------------------------------------------------------------------------
+			# - ARM64 packages no longer available: https://github.com/Fourdee/DietPi/issues/1915
+			if (( $G_DISTRO < 4 && $G_HW_ARCH == 3 )); then
+
+				sed -i '/debian-security/d' /etc/apt/sources.list
+
+			fi
+			#-------------------------------------------------------------------------------
+			#Fix Xserver uninstall issus by not purging dependencies, but leaving them for autoremove: https://github.com/Fourdee/DietPi/pull/1930/files
+			local dpkg_list="$(dpkg --get-selections)"
+			grep -q '^xinit[[:space:]]' <<< "$dpkg_list" && apt-mark auto xauth x11-common
+			grep -q '^mesa-utils-extra[[:space:]]' <<< "$dpkg_list" && apt-mark auto libgles2-mesa
+			#-------------------------------------------------------------------------------
+			#Reinstall net-tools as dependency, if HomeAssistant is installed. Thanks to @lupa18 for reporting this: https://github.com/Fourdee/DietPi/issues/1911
+			if (( $G_DIETPI_INSTALL_STAGE == 1 )) && grep -q '^aSOFTWARE_INSTALL_STATE\[157\]=2' /DietPi/dietpi/.installed; then
+
+				G_AGI net-tools
+
+			fi
+			#-------------------------------------------------------------------------------
+			#Removal of CurlFTPFS from dietpi-software
+			sed -i '/^aSOFTWARE_INSTALL_STATE\[2\]=/c\aSOFTWARE_INSTALL_STATE\[2\]=0' /DietPi/dietpi/.installed &> /dev/null
+			#-------------------------------------------------------------------------------
+			#/var/lib/dietpi/dietpi-ramlog/storage moved to /var/tmp/dietpi/logs/dietpi-ramlog_store https://github.com/Fourdee/DietPi/pull/1919
+			#automatically generated during ramlog, remove old location only
+			rm -R /var/lib/dietpi/dietpi-ramlog/storage &> /dev/null
+			#-------------------------------------------------------------------------------
+			#Reinstall "netbase", in case of installed NFS client and/or server, to reenable NFSv3 support: https://github.com/Fourdee/DietPi/issues/1898
+			if (( $G_DIETPI_INSTALL_STAGE == 1 )); then
+
+				if grep -q '^aSOFTWARE_INSTALL_STATE\[109\]=2' /DietPi/dietpi/.installed ||
+					grep -q '^aSOFTWARE_INSTALL_STATE\[110\]=2' /DietPi/dietpi/.installed; then
+
+					G_AGI netbase
+
+				fi
+
+			fi
+			#-------------------------------------------------------------------------------
+
+		elif (( $SUBVERSION_CURRENT == 12 )); then
+
+			#-------------------------------------------------------------------------------
+			#Move Koel from /var/www to /mnt/dietpi_userdata: https://github.com/Fourdee/DietPi/pull/1954
+			if [[ -d '/var/www/koel' ]]; then
+
+				G_RUN_CMD mv /var/www/koel $G_FP_DIETPI_USERDATA/koel
+				chown -R koel:dietpi $G_FP_DIETPI_USERDATA/koel
+				[[ -f /etc/systemd/system/koel.service ]] && sed -i 's|/var/www|/mnt/dietpi_userdata|g' /etc/systemd/system/koel.service
+				systemctl daemon-reload
+				G_WHIP_MSG "INFO:\n\nKoel has been moved to the DietPi userdata directory:\n\n - /var/www/koel > $G_FP_DIETPI_USERDATA/koel"
+
+			fi
+			#-------------------------------------------------------------------------------
+			#Mask systemd-logind as new default, if libpam-systemd is not installed: https://github.com/Fourdee/DietPi/issues/1767
+			if ! dpkg-query -s 'libpam-systemd' &> /dev/null; then
+
+				systemctl stop systemd-logind &> /dev/null
+				systemctl disable systemd-logind &> /dev/null
+				systemctl mask systemd-logind
+
+			fi
+			#-------------------------------------------------------------------------------
+			# - Disable cron.minutely, if unused to reduce cron executions and logs
+			(( $(find /etc/cron.minutely/ | wc -l) > 2 )) || sed -i '\|cron\.minutely|s|^\*/[0-9]*[[:blank:]]|#*/0 |' /etc/crontab
+			#-------------------------------------------------------------------------------
+			# - Remove fake-hwclock, if real hwclock is available
+			hwclock &> /dev/null && apt-mark auto fake-hwclock
+			#-------------------------------------------------------------------------------
+			#Sparky SBC, WiFi rtl8812au driver: https://github.com/sparky-sbc/sparky-test/tree/master/rtl8812au
+			if (( $G_HW_MODEL == 70 )); then
+
+				G_RUN_CMD wget https://raw.githubusercontent.com/sparky-sbc/sparky-test/master/rtl8812au/rtl8812au_sparky.tar
+				mkdir -p rtl8812au_sparky
+				tar -xvf rtl8812au_sparky.tar -C rtl8812au_sparky
+				chmod +x rtl8812au_sparky/install.sh
+				G_RUN_CMD rtl8812au_sparky/install.sh
+				rm rtl8812au_sparky.tar
+				rm -R rtl8812au_sparky
+
+			fi
+			#-------------------------------------------------------------------------------
+			#Remove "ntfs-3g" respectively "hfsplus", if no attached drive requires it.
+			local fs_list=$(lsblk -nro FSTYPE)
+			grep -q 'ntfs' <<< $fs_list || apt-mark auto ntfs-3g
+			grep -q 'hfs' <<< $fs_list || apt-mark auto hfsplus
+			#-------------------------------------------------------------------------------
+			#Pine 64, WiFi module: https://github.com/Fourdee/DietPi/issues/1995#issuecomment-410931618
+			if (( $G_HW_MODEL == 40 )); then
+
+				G_CONFIG_INJECT '8723bs' '8723bs' /etc/modules
+
+			fi
+			#-------------------------------------------------------------------------------
+			#Autoremove all marked packages during all patches with a single final call
+			G_AGA
+			#-------------------------------------------------------------------------------
+			#DietPi-Services custom includes has changed
+			local fp_old='/DietPi/dietpi/.dietpi-services_include'
+			local fp_new='/DietPi/dietpi/.dietpi-services_include_exclude'
+			if [[ -f $fp_old ]]; then
+
+				# - generate the new file, if not done already
+				if [[ ! -f $fp_new ]]; then
+
+					/DietPi/dietpi/dietpi-services stop cron
+
+				fi
+
+				# - Transfer existing entries over
+				while read line
+				do
+
+					if [[ $line != '#'* ]]; then
+
+						echo -e "+ $line" >> $fp_new
+
+					fi
+
+				done < $fp_old
+
+				G_WHIP_MSG "DietPi-Services custom includes has changed.\n\nYour previous items from\n - $fp_old\nhave been transfered to the new system\n - $fp_new.\n\nPlease see the new file $fp_new for more information."
+
+				rm $fp_old
+
+			fi
+			#-------------------------------------------------------------------------------
+			# - NZBget Umask: https://github.com/Fourdee/DietPi/issues/1999
+			# - qBitTorrent: https://github.com/Fourdee/DietPi/issues/1957
+			if [[ -f $G_FP_DIETPI_USERDATA/nzbget/nzbget.conf ]]; then
+
+				G_CONFIG_INJECT 'UMask=' 'UMask=0002' $G_FP_DIETPI_USERDATA/nzbget/nzbget.conf
+
+			fi
+			/DietPi/dietpi/func/dietpi-set_software setpermissions
 			#-------------------------------------------------------------------------------
 
 		fi

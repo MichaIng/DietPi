@@ -25,22 +25,22 @@
 
 	#Import DietPi-Globals ---------------------------------------------------------------
 	. /DietPi/dietpi/func/dietpi-globals
-	G_CHECK_ROOT_USER
-	G_INIT
 	export G_PROGRAM_NAME='DietPi-Survey'
+	G_INIT
+	G_CHECK_ROOT_USER
 	#Import DietPi-Globals ---------------------------------------------------------------
 
 	#Grab Input (valid interger)
 	INPUT=0
 	G_CHECK_VALIDINT $1 && INPUT=$1
 
+	#Force opted in, for automated installations by default
 	OPTED_IN=1 #1=yes | 0=no and purge data
 	SURVEY_SENTCOUNT=0
 	SURVEY_VERSION=6
 
 	DIETPI_VERSION="$(paste -sd '.' /DietPi/dietpi/.version)"
 	UNIQUE_ID=$(sed -n 5p /DietPi/dietpi/.hw_model)
-	FP_TMP='/tmp/dietpi-survey'
 	UPLOAD_FILENAME="$UNIQUE_ID.txt"
 
 	SFTP_ADDR='dietpi.com'
@@ -66,65 +66,9 @@ _EOF_
 
 	}
 
-	Send_File(){
+	Generate_File(){
 
-		#Check if we have a working internet connection beforehand
-		G_CHECK_URL "$SFTP_ADDR"
-
-		if (( ! $OPTED_IN )); then
-
-			# Send empty file to overwrite existing data, rm is not possible due to missing file list permissions
-			> "$UPLOAD_FILENAME"
-
-		fi
-
-		#Upload to server
-		curl --connect-timeout 4 --retry 1 --retry-delay 4 -sT "$UPLOAD_FILENAME" sftp://"$SFTP_USER":"$SFTP_PASS"@"$SFTP_ADDR"/survey/
-		if (( $? )); then
-
-			# Silently fail, in case of non-interactive mode
-			(( ! $INPUT )) && G_DIETPI-NOTIFY 1 'Failed to connect to SFTP server. Please try again later or report this to DietPi forum or GitHub repo in the first place.'
-
-		# Successful upload + opted in
-		elif (( $OPTED_IN )); then
-
-			G_DIETPI-NOTIFY 0 'Successfully sent survey data'
-			# Increase sent count
-			((SURVEY_SENTCOUNT++))
-
-		# Successful upload + opted out + interactive
-		elif (( ! $INPUT )); then
-
-			G_DIETPI-NOTIFY 0 'Successfully purged survey data'
-
-		fi
-
-		Write_Settings
-
-	}
-
-	#/////////////////////////////////////////////////////////////////////////////////////
-	# Main Loop
-	#/////////////////////////////////////////////////////////////////////////////////////
-	#Enter ramfs
-	mkdir -p $FP_TMP
-	cd $FP_TMP
-
-	#Read data from .dietpi-survey file
-	if [[ -f $FP_SETTINGS ]]; then
-
-		Read_Settings
-
-	#Force interactive user choice, if no settings file found = no choice made yet
-	#Force opted in, for automated installations by default
-	elif (( $G_USER_INPUTS )); then
-
-		INPUT=0
-
-	fi
-
-	#Generate file for upload
-	cat << _EOF_ > $UPLOAD_FILENAME
+		cat << _EOF_ > $UPLOAD_FILENAME
 #!/bin/bash
 # -------------------------
 ((aSURVEY_VERSION[$SURVEY_VERSION]++))
@@ -143,23 +87,102 @@ _EOF_
 # -------------------------
 _EOF_
 
-	# - Add installed software in source-able array format, use DietPi version specific index => name translation:
-	while read software
-	do
+		# Add installed software in source-able array format, use DietPi version specific index => name translation:
+		if [[ -f '/DietPi/dietpi/.installed' ]]; then
 
-		software=${software##*[}
-		software=${software%%]*}
-		echo "((aSOFTWARE[\${aSOFTWARE_NAME$(paste -sd '_' /DietPi/dietpi/.version)[$software]}]++))" >> $UPLOAD_FILENAME
+			while read software
+			do
 
-	done <<< "$(grep '=2' /DietPi/dietpi/.installed)"
+				software=${software##*[}
+				software=${software%%]*}
+				echo "((aSOFTWARE[\${aSOFTWARE_NAME$(paste -sd '_' /DietPi/dietpi/.version)[$software]}]++))" >> $UPLOAD_FILENAME
 
-	#-----------------------------------------------------------------------------------
+			done <<< "$(grep '=2' /DietPi/dietpi/.installed)"
+
+		# - 1st run update/setup
+		else
+
+			echo '# 1st run update and setup. /DietPi/dietpi/.installed does not exist at this stage.' >> $UPLOAD_FILENAME
+
+		fi
+
+	}
+
+	Send_File(){
+
+		local info_failure_msg='Failed to connect to SFTP server. Please try again later. If problems persist, please report this issue to the DietPi dev team (forum or GitHub repo).'
+
+		#Check if we have a working internet connection beforehand
+		G_USER_INPUTS=0 G_RUN_CMD_INFO_ONLY=1 G_CHECK_URL "$SFTP_ADDR"
+		if (( $G_ERROR_HANDLER_EXITCODE_RETURN == 0 )); then
+
+			if (( $OPTED_IN )); then
+
+				Generate_File
+
+			else
+
+				# Send empty file to overwrite existing data, rm is not possible due to missing file list permissions
+				> "$UPLOAD_FILENAME"
+
+			fi
+
+			#Upload to server
+			curl --connect-timeout 4 --retry 1 --retry-delay 4 -sT "$UPLOAD_FILENAME" sftp://"$SFTP_USER":"$SFTP_PASS"@"$SFTP_ADDR"/survey/
+			if (( $? )); then
+
+				# Silently fail, in case of non-interactive mode
+				(( ! $INPUT )) && G_DIETPI-NOTIFY 1 "$info_failure_msg"
+
+			# Successful upload + opted in
+			elif (( $OPTED_IN )); then
+
+				G_DIETPI-NOTIFY 0 'Successfully sent survey data'
+				# Increase sent count
+				((SURVEY_SENTCOUNT++))
+
+			# Successful upload + opted out + interactive
+			elif (( ! $INPUT )); then
+
+				G_DIETPI-NOTIFY 0 'Successfully purged survey data'
+
+			fi
+
+		else
+
+			G_DIETPI-NOTIFY 1 "$info_failure_msg"
+
+		fi
+
+		Write_Settings
+
+	}
+
+	#/////////////////////////////////////////////////////////////////////////////////////
+	# Main Loop
+	#/////////////////////////////////////////////////////////////////////////////////////
+
+	#Read data from .dietpi-survey file
+	if [[ -f $FP_SETTINGS ]]; then
+
+		Read_Settings
+
+	#Force interactive user choice, if no settings file found = no choice made yet
+	elif (( $G_USER_INPUTS )); then
+
+		INPUT=0
+
+	fi
+
 	#Input mode: Send survey if opted in or empty file if opted out
 	if (( $INPUT == 1 )); then
 
 		Send_File
 
 	else
+
+		# Generate file to show content on user prompt
+		Generate_File
 
 		G_WHIP_DEFAULT_ITEM=$OPTED_IN
 		G_WHIP_MENU_ARRAY=(
@@ -187,9 +210,6 @@ Would you like to join DietPi-Survey?"
 		fi
 
 	fi
-
-	cd $HOME
-	rm -R $FP_TMP
 
 	#-----------------------------------------------------------------------------------
 	exit 0
