@@ -1106,7 +1106,7 @@ _EOF_
 
 		G_DIETPI-NOTIFY 2 'Deleting all log files /var/log'
 
-		/DietPi/dietpi/dietpi-logclear 2 &> /dev/null # As this will report missing vars, however, its fine, does not break functionality.
+		/DietPi/dietpi/func/dietpi-logclear 2 &> /dev/null # As this will report missing vars, however, its fine, does not break functionality.
 
 		l_message='Starting DietPi-RAMlog service' G_RUN_CMD systemctl start dietpi-ramlog.service
 
@@ -1445,7 +1445,7 @@ _EOF_
 
 		G_DIETPI-NOTIFY 2 'Clearing log files'
 
-		/DietPi/dietpi/dietpi-logclear 2
+		/DietPi/dietpi/func/dietpi-logclear 2
 
 		G_DIETPI-NOTIFY 2 'Deleting DietPi-RAMlog storage'
 
