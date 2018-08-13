@@ -575,7 +575,7 @@
 
 		#rm /etc/apt/sources.list.d/* &> /dev/null #Probably a bad idea
 		#rm /etc/apt/sources.list.d/deb-multimedia.list &> /dev/null #meveric, already done above
-		rm /etc/apt/sources.list.d/openmediavault.list &> /dev/null #http://dietpi.com/phpbb/viewtopic.php?f=11&t=2772&p=10646#p10594
+		rm /etc/apt/sources.list.d/openmediavault.list &> /dev/null #https://dietpi.com/phpbb/viewtopic.php?f=11&t=2772&p=10646#p10594
 
 		G_DIETPI-NOTIFY 2 "Setting APT sources.list: $DISTRO_TARGET_NAME $DISTRO_TARGET"
 
@@ -1206,7 +1206,7 @@ _EOF_
 			dpkg --add-architecture i386
 			G_AGUP
 
-			# - Disable nouveau: https://github.com/Fourdee/DietPi/issues/1244 // http://dietpi.com/phpbb/viewtopic.php?f=11&t=2462&p=9688#p9688
+			# - Disable nouveau: https://github.com/Fourdee/DietPi/issues/1244 // https://dietpi.com/phpbb/viewtopic.php?f=11&t=2462&p=9688#p9688
 			cat << _EOF_ > /etc/modprobe.d/blacklist-nouveau.conf
 blacklist nouveau
 blacklist lbm-nouveau
