@@ -1100,6 +1100,7 @@ _EOF_
 		l_message='Generating DietPi /etc/fstab' G_RUN_CMD /DietPi/dietpi/dietpi-drive_manager 4
 		# Restart DietPi-RAMdisk, as 'dietpi-drive_manager 4' remounts /DietPi.
 		G_RUN_CMD systemctl restart dietpi-ramdisk
+
 		# Recreate and navigate to "/tmp/DietPi-PREP" working directory
 		mkdir -p /tmp/DietPi-PREP
 		cd /tmp/DietPi-PREP
