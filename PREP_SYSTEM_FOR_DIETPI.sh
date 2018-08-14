@@ -31,8 +31,8 @@
 	fi
 
 	#Work inside /tmp as usually ramfs to reduce disk I/O and speed up download and unpacking
-	mkdir -p /tmp/dietpi-prep
-	cd /tmp/dietpi-prep
+	mkdir -p /tmp/DietPi-PREP
+	cd /tmp/DietPi-PREP
 
 	#Check/install minimal APT Pre-Reqs
 	a_MIN_APT_PREREQS=(
@@ -56,7 +56,7 @@
 	for (( i=0; i<${#a_MIN_APT_PREREQS[@]}; i++))
 	do
 
-		if ! dpkg --get-selections | grep -qi "^${a_MIN_APT_PREREQS[$i]}[[:space:]]"; then
+		if ! dpkg-query -s ${a_MIN_APT_PREREQS[$i]} &> /dev/null; then
 
 			apt-get install -y ${a_MIN_APT_PREREQS[$i]}
 			if (( $? )); then
@@ -138,7 +138,7 @@
 
 	fi
 	# Go back to tmp working dir, as loading global includes cd $HOME:
-	cd /tmp/dietpi-prep
+	cd /tmp/DietPi-PREP
 	rm dietpi-globals
 
 	export G_PROGRAM_NAME='DietPi-PREP'
@@ -366,6 +366,7 @@
 			'51' 'BananaPi Pro (Lemaker)'
 			'50' 'BananaPi M2+ (sinovoip)'
 			'71' 'Beagle Bone Black'
+			'69' 'Firefly RK3399'
 			'39' 'LeMaker Guitar'
 			'68' 'NanoPC T4'
 			'67' 'NanoPi K1 Plus'
@@ -574,7 +575,7 @@
 
 		#rm /etc/apt/sources.list.d/* &> /dev/null #Probably a bad idea
 		#rm /etc/apt/sources.list.d/deb-multimedia.list &> /dev/null #meveric, already done above
-		rm /etc/apt/sources.list.d/openmediavault.list &> /dev/null #http://dietpi.com/phpbb/viewtopic.php?f=11&t=2772&p=10646#p10594
+		rm /etc/apt/sources.list.d/openmediavault.list &> /dev/null #https://dietpi.com/phpbb/viewtopic.php?f=11&t=2772&p=10646#p10594
 
 		G_DIETPI-NOTIFY 2 "Setting APT sources.list: $DISTRO_TARGET_NAME $DISTRO_TARGET"
 
@@ -636,37 +637,36 @@ _EOF_
 		# - DietPi list of minimal required packages, which must be installed:
 		aPACKAGES_REQUIRED_INSTALL=(
 
-			'apt-transport-https'	# Allows https sources in ATP
-			'apt-utils'		# Allows debconf to preconfigure APT packages before installing
-			'bash-completion'	# Auto completes a wide list of bash commands
-			'bc'			# Floating point calculation within bash
-			'bzip2'			# .bz2 wrapper
+			'apt-transport-https'	# Allows HTTPS sources for ATP
+			'apt-utils'		# Allows "debconf" to pre-configure APT packages for non-interactive install
+			'bash-completion'	# Auto completes a wide list of bash commands and options via <tab>
+			'bc'			# Bash calculator, e.g. for floating point calculation
+			'bzip2'			# (.tar).bz2 wrapper
 			'ca-certificates'	# Adds known ca-certificates, necessary to practically access HTTPS sources
-			'console-setup'		# DietPi-Config keyboard configuration
+			'console-setup'		# DietPi-Config keyboard configuration + console fonts
 			'cron'			# Background job scheduler
 			'curl'			# Web address testing, downloading, uploading etc.
-			'debconf'		# APT package pre-configuration, e.g. "debconf-set-selections"
+			'debconf'		# APT package pre-configuration, e.g. "debconf-set-selections" for non-interactive install
 			'dirmngr'		# GNU key management required for some APT installs via additional repos
 			'ethtool'		# Ethernet link checking
 			'fake-hwclock'		# Hardware clock emulation, to allow correct timestamps during boot before network time sync
 			'gnupg'			# apt-key add
-			'hfsplus'		# DietPi-Drive_Manager NTS (MacOS) file system support
 			'htop'			# System monitor
-			'initramfs-tools'	# RAM file system initialization
-			'iputils-ping'		# ping command + dependant of iproute2 ("ip" commands)
+			'iputils-ping'		# ping command
 			'isc-dhcp-client'	# DHCP client
+			'kmod'			# "modprobe", "lsmod", required by several DietPi scripts
 			'locales'		# Support locales, necessary for DietPi scripts, as we use enGB.UTF8 as default language
 			'nano'			# Simple text editor
-			'ntfs-3g'		# DietPi-Drive_Manager NTPS (Windows) file system support
 			'p7zip-full'		# .7z wrapper
-			'parted'		# DietPi-Boot + DietPi-Drive_Manager
-			'psmisc'		# DietPi-Boot + DietPi-Software: e.g. killall
-			'resolvconf'		# System nameserver updater
-			'sudo'			# DietPi-Software + general use
+			'parted'		# Needed by DietPi-Boot + DietPi-Drive_Manager
+			'psmisc'		# "killall", needed by many DietPi scripts
+			'resolvconf'		# Network nameserver handler + depandant for "ifupdown" (network interface handler) => "iproute2" ("ip" command)
+			'sudo'			# Root permission wrapper for users within /etc/sudoers(.d/)
 			'systemd-sysv'		# Includes systemd and additional commands: poweroff, shutdown etc.
 			'tzdata'		# Time zone data for system clock, auto summer/winter time adjustment
+			'udev'			# /dev/ and hotplug management daemon
 			'unzip'			# .zip unpacker
-			'usbutils'		# DietPi-Software + DietPi-Bugreport: e.g. lsusb
+			'usbutils'		# "lsusb", needed by DietPi-Software + DietPi-Bugreport
 			'wget'			# Download tool
 			'whiptail'		# DietPi dialogs
 
@@ -681,7 +681,7 @@ _EOF_
 			aPACKAGES_REQUIRED_INSTALL+=('iw')			# WiFi related
 			aPACKAGES_REQUIRED_INSTALL+=('rfkill')	 		# WiFi related: Used by some onboard WiFi chipsets
 			aPACKAGES_REQUIRED_INSTALL+=('wireless-tools')		# WiFi related
-			aPACKAGES_REQUIRED_INSTALL+=('wpasupplicant')		# WiFi related
+			aPACKAGES_REQUIRED_INSTALL+=('wpasupplicant')		# WiFi WPA(2) support
 
 			# Intel/Nvidia/WiFi (ralink) dongle firmware: https://github.com/Fourdee/DietPi/issues/1675#issuecomment-377806609
 			# On Jessie, firmware-misc-nonfree is not available, firmware-ralink instead as dedicated package.
@@ -712,6 +712,7 @@ _EOF_
 		if (( $G_HW_MODEL >= 10 )); then
 
 			G_AGI debian-archive-keyring
+			aPACKAGES_REQUIRED_INSTALL+=('initramfs-tools')		# RAM file system initialization, required for generic boot loader, but not required/used by RPi bootloader
 
 		else
 
@@ -742,7 +743,7 @@ _EOF_
 			(( $G_HW_MODEL != 20 )) && G_AGI firmware-linux-nonfree
 
 			#	Grub EFI
-			if dpkg --get-selections | grep -q '^grub-efi-amd64' ||
+			if dpkg-query -s 'grub-efi-amd64' &> /dev/null ||
 				[[ -d '/boot/efi' ]]; then
 
 				G_AGI grub-efi-amd64
@@ -791,12 +792,12 @@ _EOF_
 		#	RockPro64
 		elif (( $G_HW_MODEL == 42 )); then
 
-			G_AGI linux-rockpro64 linux-rockpro64-package
+			G_AGI linux-rockpro64 gdisk
 
 		#	Rock64
 		elif (( $G_HW_MODEL == 43 )); then
 
-			G_AGI linux-rock64-package gdisk
+			G_AGI linux-rock64 gdisk
 
 		#	BBB
 		elif (( $G_HW_MODEL == 71 )); then
@@ -1048,15 +1049,13 @@ _EOF_
 
 		G_DIETPI-NOTIFY 2 "Configuring Cron"
 
-		mkdir -p /etc/cron.minutely #: https://github.com/Fourdee/DietPi/pull/1578
-
 		cat << _EOF_ > /etc/crontab
 #Please use dietpi-cron to change cron start times
 SHELL=/bin/sh
 PATH=/usr/local/sbin:/usr/local/bin:/sbin:/bin:/usr/sbin:/usr/bin
 
 # m h dom mon dow user  command
-*/30 * * * *   root    cd / && run-parts --report /etc/cron.minutely
+#*/0 * * * *   root    cd / && run-parts --report /etc/cron.minutely
 17 *    * * *   root    cd / && run-parts --report /etc/cron.hourly
 25 1    * * *   root    test -x /usr/sbin/anacron || ( cd / && run-parts --report /etc/cron.daily )
 47 1    * * 7   root    test -x /usr/sbin/anacron || ( cd / && run-parts --report /etc/cron.weekly )
@@ -1101,13 +1100,14 @@ _EOF_
 		l_message='Generating DietPi /etc/fstab' G_RUN_CMD /DietPi/dietpi/dietpi-drive_manager 4
 		# Restart DietPi-RAMdisk, as 'dietpi-drive_manager 4' remounts /DietPi.
 		G_RUN_CMD systemctl restart dietpi-ramdisk
-		# Recreate and navigate to "/tmp/dietpi-prep" working directory
-		mkdir -p /tmp/dietpi-prep
-		cd /tmp/dietpi-prep
+
+		# Recreate and navigate to "/tmp/DietPi-PREP" working directory
+		mkdir -p /tmp/DietPi-PREP
+		cd /tmp/DietPi-PREP
 
 		G_DIETPI-NOTIFY 2 'Deleting all log files /var/log'
 
-		/DietPi/dietpi/dietpi-logclear 2 &> /dev/null # As this will report missing vars, however, its fine, does not break functionality.
+		/DietPi/dietpi/func/dietpi-logclear 2 &> /dev/null # As this will report missing vars, however, its fine, does not break functionality.
 
 		l_message='Starting DietPi-RAMlog service' G_RUN_CMD systemctl start dietpi-ramlog.service
 
@@ -1156,7 +1156,7 @@ _EOF_
 		export G_ERROR_HANDLER_EXITCODE=$?
 		G_ERROR_HANDLER
 
-		G_RUN_CMD echo 'DietPi' > /etc/hostname
+		echo 'DietPi' > /etc/hostname
 
 		G_DIETPI-NOTIFY 2 'Configuring htop'
 
@@ -1177,6 +1177,11 @@ _EOF_
 		G_DIETPI-NOTIFY 2 'Reducing getty count and resource usage:'
 
 		systemctl mask getty-static
+		# - logind features disabled by default. Usually not needed and all features besides auto getty creation are not available without libpam-systemd package.
+		#	- It will be unmasked/enabled, automatically if libpam-systemd got installed during dietpi-software install, usually with desktops.
+		systemctl stop systemd-logind &> /dev/null
+		systemctl disable systemd-logind &> /dev/null
+		systemctl mask systemd-logind
 
 		G_DIETPI-NOTIFY 2 'Configuring regional settings (TZdata):'
 
@@ -1202,7 +1207,7 @@ _EOF_
 			dpkg --add-architecture i386
 			G_AGUP
 
-			# - Disable nouveau: https://github.com/Fourdee/DietPi/issues/1244 // http://dietpi.com/phpbb/viewtopic.php?f=11&t=2462&p=9688#p9688
+			# - Disable nouveau: https://github.com/Fourdee/DietPi/issues/1244 // https://dietpi.com/phpbb/viewtopic.php?f=11&t=2462&p=9688#p9688
 			cat << _EOF_ > /etc/modprobe.d/blacklist-nouveau.conf
 blacklist nouveau
 blacklist lbm-nouveau
@@ -1282,6 +1287,15 @@ blacklist videobuf2_vmalloc
 blacklist bc_example
 _EOF_
 
+			#Sparky SBC, WiFi rtl8812au driver: https://github.com/sparky-sbc/sparky-test/tree/master/rtl8812au
+			G_RUN_CMD wget https://raw.githubusercontent.com/sparky-sbc/sparky-test/master/rtl8812au/rtl8812au_sparky.tar
+			mkdir -p rtl8812au_sparky
+			tar -xvf rtl8812au_sparky.tar -C rtl8812au_sparky
+			chmod +x rtl8812au_sparky/install.sh
+			G_RUN_CMD rtl8812au_sparky/install.sh
+			rm rtl8812au_sparky.tar
+			rm -R rtl8812au_sparky
+
 			#	Use performance gov for stability.
 			sed -i '/^[[:blank:]]*CONFIG_CPU_GOVERNOR=/c\CONFIG_CPU_GOVERNOR=performance' /DietPi/dietpi.txt
 
@@ -1306,6 +1320,9 @@ sed -i -e 's/?0c/?112c/g' -e 's/?8c/?48;0;64c/g' terminfo.txt
 tic terminfo.txt
 tput cnorm
 _EOF_
+
+			# - Ensure WiFi module pre-exists
+			G_CONFIG_INJECT '8723bs' '8723bs' /etc/modules
 
 		# - Odroids FFMPEG fix. Prefer debian.org over Meveric for backports: https://github.com/Fourdee/DietPi/issues/1273 + https://github.com/Fourdee/DietPi/issues/1556#issuecomment-369463910
 		elif (( $G_HW_MODEL > 9 && $G_HW_MODEL < 15 )); then
@@ -1389,21 +1406,13 @@ _EOF_
 
 		#/DietPi/dietpi/func/dietpi-set_hardware preferipversion ipv4 #Already done at top of script, and now default in dietpi.txt
 
-		G_DIETPI-NOTIFY 2 'Disabling soundcards by default'
-
-		/DietPi/dietpi/func/dietpi-set_hardware soundcard none
-		#	Alsa-utils is auto installed to reset soundcard settings on some ARM devices. uninstall it afterwards
-		#	- The same for firmware-intel-sound (sound over HDMI?) on intel CPU devices
-		G_AGP alsa-utils firmware-intel-sound
-		G_AGA
-
 		#	x86_64: kernel cmd line with GRUB
 		if (( $G_HW_ARCH == 10 )); then
 
 			l_message='Detecting additional OS installed on system' G_RUN_CMD os-prober
 
 			# - Native PC/EFI (assume x86_64 only possible)
-			if dpkg --get-selections | grep -qi '^grub-efi-amd64[[:space:]]' &&
+			if dpkg-query -s 'grub-efi-amd64' &> /dev/null &&
 				[[ -d '/boot/efi' ]]; then
 
 				l_message='Recreating GRUB-EFI' G_RUN_CMD grub-install --target=x86_64-efi --efi-directory=/boot/efi --bootloader-id=arch_grub --recheck
@@ -1422,13 +1431,22 @@ _EOF_
 
 		fi
 
+		G_DIETPI-NOTIFY 2 'Disabling soundcards by default'
+
+		/DietPi/dietpi/func/dietpi-set_hardware soundcard none
+		#	Alsa-utils is auto installed to reset soundcard settings on some ARM devices. uninstall it afterwards
+		#	- The same for firmware-intel-sound (sound over HDMI?) on intel CPU devices
+		#	- Purge "os-prober" from previous step as well
+		G_AGP alsa-utils firmware-intel-sound os-prober
+		G_AGA
+
 		G_DIETPI-NOTIFY 2 'Setting default CPU gov'
 
 		/DietPi/dietpi/func/dietpi-set_cpu
 
 		G_DIETPI-NOTIFY 2 'Clearing log files'
 
-		/DietPi/dietpi/dietpi-logclear 2
+		/DietPi/dietpi/func/dietpi-logclear 2
 
 		G_DIETPI-NOTIFY 2 'Deleting DietPi-RAMlog storage'
 

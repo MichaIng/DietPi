@@ -22,6 +22,7 @@ $FP_SCRIPT			apt-mirror				url / default
 $FP_SCRIPT			ntpd-mode				[0-4] configures time sync mode (eg: daily/hourly/daemon)
 $FP_SCRIPT			verify_dietpi.txt			verifies dietpi.txt entries, adds missing entries if required
 $FP_SCRIPT			passwords				NULL=Prompt user to change DietPi related passwords | X=optional set X as global password for future dietpi-software installations and \"root\" + \"dietpi\" login passwords.
+$FP_SCRIPT			setpermissions			Applies required filesystem permissions to DietPi specific content, and, DietPi userdata directory for software installs
 "
 	#////////////////////////////////////
 
@@ -33,12 +34,13 @@ $FP_SCRIPT			passwords				NULL=Prompt user to change DietPi related passwords | 
 	INPUT_ADDITIONAL_2="$4"
 	INPUT_ADDITIONAL_3="$5"
 	INPUT_ADDITIONAL_4="$6"
+
 	#Import DietPi-Globals ---------------------------------------------------------------
 	. /DietPi/dietpi/func/dietpi-globals
-	G_CHECK_ROOT_USER
-	G_CHECK_ROOTFS_RW
 	export G_PROGRAM_NAME='DietPi-Set_software'
 	G_INIT
+	G_CHECK_ROOT_USER
+	G_CHECK_ROOTFS_RW
 	#Import DietPi-Globals ---------------------------------------------------------------
 
 	EXIT_CODE=0
@@ -196,24 +198,63 @@ _EOF_
 			# - Reset global to disabled, prevents run_ntpd in dietpi-software
 			sed -i '/CONFIG_NTP_MODE=/c\CONFIG_NTP_MODE=0' /DietPi/dietpi.txt
 
-			#Kill current
+			# - Kill current
 			killall -w /DietPi/dietpi/func/run_ntpd &> /dev/null
 
-			local ntpd_mirror=$(grep -m1 '^[[:blank:]]*CONFIG_NTP_MIRROR=' /DietPi/dietpi.txt | sed 's/^[^=]*=//')
-			# - Set defaults?
-			if [[ $ntpd_mirror == 'default' ]]; then
+			local ntp_mirror=$(grep -m1 '^[[:blank:]]*CONFIG_NTP_MIRROR=' /DietPi/dietpi.txt | sed 's/^[^=]*=//')
+			local ntp_mirror_entry='Servers='$ntp_mirror
 
-				ntpd_mirror='debian.pool.ntp.org'
+			# - Default, lets timesyncd use DHCP server (Stretch+ only) or fallback to debian.pool.ntp.org.
+			if [[ ${ntp_mirror,,} == default ]]; then
+
+				ntp_mirror_entry='#Servers=0.debian.pool.ntp.org 1.debian.pool.ntp.org 2.debian.pool.ntp.org 3.debian.pool.ntp.org'
+
+			# - Gateway, auto detect local gateway(s) (router) to use as NTP server.
+			elif [[ ${ntp_mirror,,} == gateway ]]; then
+
+				local gateway="$(ip r | grep '^default' | awk '{print $3}')"
+				if [[ $gateway ]]; then
+
+					G_DIETPI-NOTIFY 0 "Gateway(s) detected:$(printf ' %s' $gateway), adding as NTP server(s)."
+					ntp_mirror_entry='Servers='$(ip r | grep '^default' | awk '{print $3}')
+
+				else
+
+					G_DIETPI-NOTIFY 1 'No local gateway detected. No NTP mirror change will be applied.'
+					EXIT_CODE=1
+					return 1
+
+				fi
+
+			# - Add pool.ntp.org entries with subdomains "[0-3].", other entries without.
+			elif [[ $ntp_mirror =~ 'pool.ntp.org' ]]; then
+
+				ntp_mirror_entry='Servers='
+				local i
+				for i in $ntp_mirror
+				do
+
+					if [[ $i == *'pool.ntp.org' ]]; then
+
+						ntp_mirror_entry+="0.$i 1.$i 2.$i 3.$i "
+
+					else
+
+						ntp_mirror_entry+="$i "
+
+					fi
+
+				done
 
 			fi
 
 			# - Set mirror
 			cat << _EOF_ > /etc/systemd/timesyncd.conf
 [Time]
-Servers=0.$ntpd_mirror 1.$ntpd_mirror 2.$ntpd_mirror 3.$ntpd_mirror
+$ntp_mirror_entry
 _EOF_
 
-			# - Daemon mode, dbus required for timedatectl, that users may require
+			# - Daemon mode, dbus required for timedatectl, that users may expect
 			if (( $INPUT_MODE_VALUE == 4 )); then
 
 				G_AG_CHECK_INSTALL_PREREQ dbus
@@ -263,6 +304,156 @@ _EOF_
 			Unknown_Input_Mode
 
 		fi
+
+	}
+
+	#/////////////////////////////////////////////////////////////////////////////////////
+	# Setpermissions_Main
+	#/////////////////////////////////////////////////////////////////////////////////////
+	Setpermissions_Main(){
+
+		# - /var/www / www-data
+		chown -R www-data:www-data /var/www
+		chmod -R 775 /var/www
+		#	Allow www-data under sudo without password
+		if ! grep -qi '^www-data$' /etc/passwd && ! grep -qi '^www-data[[:space:]]' /etc/sudoers; then
+
+			cat << _EOF_ >> /etc/sudoers
+www-data ALL=NOPASSWD: ALL
+_EOF_
+
+		fi
+
+		#Apply non-root permissions for files and folders in G_FP_DIETPI_USERDATA
+
+		# - dietpi user
+		chown -R dietpi:dietpi /home/dietpi
+		chown -R dietpi:dietpi $G_FP_DIETPI_USERDATA
+		chmod -R 775 $G_FP_DIETPI_USERDATA
+		#	+ for symlinked locations
+		chown -R dietpi:dietpi $G_FP_DIETPI_USERDATA/*
+		chmod -R 775 $G_FP_DIETPI_USERDATA/*
+
+		# - Apply program specific permissions
+		#	NB: Following should be ordered ascending by index to prevent dupes.
+
+		# - O!MPD, requires write permissions
+		chmod -R 777 /var/www/ompd/tmp #(required for database update)
+		chmod -R 777 /var/www/ompd/stream #(required for streaming files)
+		chmod -R 777 /var/www/ompd/cache #(required for downloading files)
+
+		# - MPD
+		chmod 644 /var/log/mpd/mpd.log
+		chmod 0666 /etc/mpd.conf
+		chown -R mpd:dietpi /var/lib/mpd /var/log/mpd /etc/mpd.conf $G_FP_DIETPI_USERDATA/.mpd_cache
+
+		# - Mopidy
+		chown -R mopidy:dietpi $G_FP_DIETPI_USERDATA/mopidy
+
+		# - Minidlna
+		chown -R minidlna:dietpi $G_FP_DIETPI_USERDATA/.MiniDLNA_Cache
+
+		# - AirSonic
+		chown -R airsonic:dietpi $G_FP_DIETPI_USERDATA/airsonic
+
+		# - MySQL data store
+		chown -R mysql:mysql $G_FP_DIETPI_USERDATA/mysql
+		chmod -R 770 $G_FP_DIETPI_USERDATA/mysql
+
+		# - UrBackup
+		chown -R urbackup:urbackup $G_FP_DIETPI_USERDATA/urbackup
+
+		# - www-data
+		chown -R www-data:www-data $G_FP_DIETPI_USERDATA/rpicam
+		chown -R www-data:www-data $G_FP_DIETPI_USERDATA/pydio_data
+
+		local datadir="$(grep -m1 '^[[:blank:]]*SOFTWARE_OWNCLOUD_DATADIR=' /DietPi/dietpi.txt | sed 's/^[^=]*=//')"
+		[[ -z $datadir ]] && datadir="$G_FP_DIETPI_USERDATA/owncloud_data"
+		chown -R www-data:www-data "$datadir"
+
+		datadir="$(grep -m1 '^[[:blank:]]*SOFTWARE_NEXTCLOUD_DATADIR=' /DietPi/dietpi.txt | sed 's/^[^=]*=//')"
+		[[ -z $datadir ]] && datadir="$G_FP_DIETPI_USERDATA/nextcloud_data"
+		chown -R www-data:www-data "$datadir"
+
+		# - Home Assistant Permissions
+		#chown -R homeassistant:dietpi /home/homeassistant/.homeassistant
+		#chown -R dietpi:dietpi $G_FP_DIETPI_USERDATA/homeassistant
+
+		# - Minio
+		chown -R minio-user:minio-user $G_FP_DIETPI_USERDATA/minio-data
+
+		# - FuguHub
+		chown -R bd:bd $G_FP_DIETPI_USERDATA/fuguhub-data/
+
+		# - Nodered
+		chown -R nodered:nodered $G_FP_DIETPI_USERDATA/node-red
+
+		# - grafana
+		chown -R grafana:grafana $G_FP_DIETPI_USERDATA/grafana
+
+		# - influxDB
+		chown -R influxdb:influxdb $G_FP_DIETPI_USERDATA/influxdb
+
+		# - gogs
+		chown -R gogs:gogs /etc/gogs
+		chown -R gogs:gogs $G_FP_DIETPI_USERDATA/gogs-repo
+		chown -R gogs:gogs /var/log/gogs
+
+		# - ubooquity
+		chown -R ubooquity:dietpi $G_FP_DIETPI_USERDATA/ubooquity
+
+		# - Mineos
+		chown -R mineos:dietpi $G_FP_DIETPI_USERDATA/mineos
+		chown -R mineos:dietpi /var/games/minecraft
+		chown mineos:dietpi /etc/ssl/certs/mineos*
+
+		# - cubrite
+		chown -R cuberite:dietpi $G_FP_DIETPI_USERDATA/cubrite
+
+		# - sickrage
+		chown -R sickrage:dietpi $G_FP_DIETPI_USERDATA/sickrage
+		chown sickrage:dietpi /var/log/sickrage.log
+
+		# - Sonarr
+		chown -R sonarr:dietpi $G_FP_DIETPI_USERDATA/sonarr
+		chown -R sonarr:dietpi /opt/NzbDrone
+
+		# - Radarr
+		chown -R radarr:dietpi $G_FP_DIETPI_USERDATA/radarr
+		chown -R radarr:dietpi /opt/Radarr
+
+		# - Tonido
+		chown -R tonido:dietpi $G_FP_DIETPI_USERDATA/tonido
+		chown -R tonido:dietpi /home/tonido
+
+		# - NZBget
+		chown -R nzbget:dietpi $G_FP_DIETPI_USERDATA/nzbget
+
+		# - Roon Bridge
+		chown -R roon:dietpi $G_FP_DIETPI_USERDATA/roon $G_FP_DIETPI_USERDATA/roonserver /var/log/roon
+
+		# - GMrender
+		chown gmrender:dietpi /var/log/gmrender.log
+
+		# - PlexPy
+		chown plexpy:dietpi $G_FP_DIETPI_USERDATA/plexpy
+
+		# - Deluge
+		chown -R deluge:dietpi $G_FP_DIETPI_USERDATA/deluge
+		chown deluge:dietpi /var/log/deluged.log /var/log/deluge-web.log
+
+		# - Jackett
+		chown -R jackett:jackett /opt/jackett
+
+		# - Koel
+		chown -R koel:dietpi $G_FP_DIETPI_USERDATA/koel
+
+		# - qBitTorrent
+		chown -R qbittorrent:dietpi /home/qbittorrent
+
+		# - FAHClient (Folding@Home)
+		chown -R fahclient:dietpi $G_FP_DIETPI_USERDATA/fahclient
+		chown fahclient:dietpi /var/log/fahclient.log
 
 	}
 
@@ -512,6 +703,10 @@ It is highly recommended to change this password, ideally, it should be differen
 	elif [[ $INPUT_MODE_NAME == 'passwords' ]]; then
 
 		Passwords_Main
+
+	elif [[ $INPUT_MODE_NAME == 'setpermissions' ]]; then
+
+		Setpermissions_Main &> /dev/null #as no file exist checks are done in bash (quicker to let the program report it missing), hide output
 
 	else
 
