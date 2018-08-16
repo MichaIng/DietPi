@@ -1508,12 +1508,12 @@ _EOF_
 		G_RUN_CMD wget "https://raw.githubusercontent.com/$GIT_OWNER/DietPi/$GIT_BRANCH/dietpi/.version" -O /DietPi/dietpi/.version
 
 		#	reduce sub_version by 1, allows us to create image, prior to release and patch if needed.
-		CORE_VERSION=$(sed -n 1p /DietPi/dietpi/.version)
-		SUB_VERSION=$(sed -n 2p /DietPi/dietpi/.version)
-		((SUB_VERSION--))
+		export G_DIETPI_VERSION_CORE=$(sed -n 1p /DietPi/dietpi/.version)
+		export G_DIETPI_VERSION_SUB=$(sed -n 2p /DietPi/dietpi/.version)
+		((G_DIETPI_VERSION_SUB--))
 		cat << _EOF_ > /DietPi/dietpi/.version
-$CORE_VERSION
-$SUB_VERSION
+$G_DIETPI_VERSION_CORE
+$G_DIETPI_VERSION_SUB
 _EOF_
 
 		G_RUN_CMD cp /DietPi/dietpi/.version /var/lib/dietpi/.dietpi_image_version
