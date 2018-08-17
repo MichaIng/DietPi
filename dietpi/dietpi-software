@@ -25,9 +25,9 @@
 	#Import DietPi-Globals ---------------------------------------------------------------
 	. /DietPi/dietpi/func/dietpi-globals
 	export G_PROGRAM_NAME='DietPi-Software'
-	G_INIT
 	G_CHECK_ROOT_USER
 	G_CHECK_ROOTFS_RW
+	G_INIT
 	#Import DietPi-Globals ---------------------------------------------------------------
 
 	# Custom exit trap
@@ -1452,6 +1452,17 @@ _EOF_
 		aSOFTWARE_REQUIRES_WEBSERVER[$index_current]=1
 			aSOFTWARE_REQUIRES_MYSQL[$index_current]=1
 			 aSOFTWARE_ONLINEDOC_URL[$index_current]='f=8&t=5&start=30#p395'
+
+		#------------------
+		index_current=38
+
+				 aSOFTWARE_WHIP_NAME[$index_current]='FreshRSS'
+				 aSOFTWARE_WHIP_DESC[$index_current]='self-hosted RSS feed aggregator'
+			aSOFTWARE_CATEGORY_INDEX[$index_current]=6
+					  aSOFTWARE_TYPE[$index_current]=0
+		aSOFTWARE_REQUIRES_WEBSERVER[$index_current]=1
+			aSOFTWARE_REQUIRES_MYSQL[$index_current]=1
+			 aSOFTWARE_ONLINEDOC_URL[$index_current]=''
 
 		#------------------
 		index_current=56
@@ -4739,6 +4750,21 @@ _EOF_
 
 			Banner_Installing
 			Download_Install 'https://wordpress.org/latest.zip' /var/www
+
+		fi
+
+		#FRESHRSS
+		INSTALLING_INDEX=38
+		if (( ${aSOFTWARE_INSTALL_STATE[$INSTALLING_INDEX]} == 1 )); then
+
+			Banner_Installing
+
+			# Install required PHP modules: https://github.com/FreshRSS/FreshRSS#example-of-full-installation-on-linux-debianubuntu
+			DEPS_LIST="$PHP_APT_PACKAGE_NAME-curl $PHP_APT_PACKAGE_NAME-gmp $PHP_APT_PACKAGE_NAME-intl $PHP_APT_PACKAGE_NAME-json"
+			(( $G_DISTRO > 3 )) && DEPS_LIST+=" $PHP_APT_PACKAGE_NAME-mbstring $PHP_APT_PACKAGE_NAME-xml $PHP_APT_PACKAGE_NAME-zip"
+
+			Download_Install 'https://github.com/FreshRSS/FreshRSS/archive/master.zip' /opt
+			mv /opt/FreshRSS-master /opt/FreshRSS
 
 		fi
 
@@ -9150,6 +9176,65 @@ _EOF_
 
 		fi
 
+		#FRESHRSS
+		INSTALLING_INDEX=38
+		if (( ${aSOFTWARE_INSTALL_STATE[$INSTALLING_INDEX]} == 1 )); then
+
+			Banner_Configuration
+
+			# Enable required PHP modules: https://github.com/FreshRSS/FreshRSS#requirements
+			${PHP_APT_PACKAGE_NAME}enmod ctype curl dom gmp intl json xml pdo_mysql
+			(( $G_DISTRO > 3 )) && phpenmod mbstring xml zip
+
+			# Apache configuration
+			if (( ${aSOFTWARE_INSTALL_STATE[83]} > 0 )); then
+
+				# - Required modules
+				a2enmod headers expires rewrite
+
+				# - Better compatibility with mobile clients
+				cat << _EOF_ > /etc/apache2/sites-available/freshrss.conf
+<Directory /var/www/freshrss/>
+
+	AllowEncodedSlashes On
+
+</Directory>
+_EOF_
+
+				a2ensite freshrss
+
+			fi
+
+			# Create MariaDB database and user
+			if [[ -d $G_FP_DIETPI_USERDATA/mysql/freshrss ]]; then
+
+				G_DIETPI-NOTIFY 2 'FreshRSS MariaDB database found, will NOT overwrite.'
+
+			else
+
+				/DietPi/dietpi/func/create_mysql_db freshrss freshrss "$GLOBAL_PW"
+
+			fi
+
+			# Set permissions for webserver access
+			chown -R :www-data /opt/FreshRSS
+			chmod -R g+r+w /opt/FreshRSS
+
+			# CLI install: https://github.com/FreshRSS/FreshRSS/blob/master/cli/README.md#commands
+			cd /opt/FreshRSS
+			sudo -u www-data php ./cli/prepare.php
+			sudo -u www-data php ./cli/do-install.php --default_user dietpi --auth_type form --environment production --title FreshRSS --db-type mysql --db-host localhost --db-user freshrss --db-password "$GLOBAL_PW" --db-base freshrss --db-prefix freshrss
+			sudo -u www-data php ./cli/create-user.php --user dietpi --password "$GLOBAL_PW" --api_password "$GLOBAL_PW"
+			cd /tmp/$G_PROGRAM_NAME
+
+			# Link web interface to webroot
+			ln -sf /opt/FreshRSS/p /var/www/freshrss
+
+			# Create cron job for feed update every 30 minutes, if it does not yet exist
+			crontab -u www-data -l 2>/dev/null | grep -q '/opt/FreshRSS/app/actualize_script.php' || ( crontab -u www-data -l 2>/dev/null ; echo '*/30 * * * * php /opt/FreshRSS/app/actualize_script.php' ) | crontab -u www-data -
+
+		fi
+
 		#TIGHTVNCSERVER / VNC4SERVER / RealVNC - Shared setup
 		#INSTALLING_INDEX=27/28/120
 		if (( ${aSOFTWARE_INSTALL_STATE[27]} == 1 ||
@@ -12926,6 +13011,23 @@ _EOF_
 			mysql -e "drop user 'wordpress'@'localhost'"
 
 			rm -R /var/www/wordpress
+
+		fi
+
+		UNINSTALLING_INDEX=38
+		if (( aSOFTWARE_INSTALL_STATE[$UNINSTALLING_INDEX] == -1 )); then
+
+			Banner_Uninstalling
+
+			crontab -u www-data -l | grep -v '/opt/FreshRSS/app/actualize_script.php'  | crontab -u www-data -
+
+			systemctl start mysql
+			mysqladmin drop freshrss -f
+			mysql -e "drop user 'freshrss'@'localhost'"
+
+			rm -R /var/www/freshrss
+			rm -R /opt/FreshRSS
+			rm /var/log/freshrss.log
 
 		fi
 
