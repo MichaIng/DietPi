@@ -1291,10 +1291,11 @@ _EOF_
 			G_RUN_CMD wget https://raw.githubusercontent.com/sparky-sbc/sparky-test/master/rtl8812au/rtl8812au_sparky.tar
 			mkdir -p rtl8812au_sparky
 			tar -xvf rtl8812au_sparky.tar -C rtl8812au_sparky
-			chmod +x rtl8812au_sparky/install.sh
-			G_RUN_CMD rtl8812au_sparky/install.sh
-			rm rtl8812au_sparky.tar
-			rm -R rtl8812au_sparky
+			chmod +x -R rtl8812au_sparky
+			cd rtl8812au_sparky
+			G_RUN_CMD ./install.sh
+			cd ..
+			rm -R rtl8812au_sparky*
 
 			#	Use performance gov for stability.
 			sed -i '/^[[:blank:]]*CONFIG_CPU_GOVERNOR=/c\CONFIG_CPU_GOVERNOR=performance' /DietPi/dietpi.txt
