@@ -213,3 +213,9 @@ Shairport-Sync
 
 OpenVPN
 - https://github.com/OpenVPN
+
+FreshRSS
+- https://github.com/FreshRSS/FreshRSS
+
+Folding@Home
+- https://github.com/FoldingAtHome

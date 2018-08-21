@@ -20,23 +20,11 @@ if [[ $TARGET_PARTITION ]]; then
 	#Rock64 GPT resize | modified version of ayufan-rock64 resize script. I take no credit for this.
 	if [[ -f /etc/.dietpi_hw_model_identifier ]] && (( $(</etc/.dietpi_hw_model_identifier) == 43 )); then
 
-		gdisk $TARGET_DRIVE << _EOF_
-x
-e
-m
-d
-$TARGET_PARTITION
-n
-$TARGET_PARTITION
+		# move GPT alternate header to end of disk
+		sgdisk -e $TARGET_DRIVE
 
-
-8300
-c
-$TARGET_PARTITION
-root
-w
-Y
-_EOF_
+		# resize partition 7 to as much as possible
+		echo ",+,,," | sfdisk $TARGET_DRIVE -N7 --force
 
 	#Everything else
 	else

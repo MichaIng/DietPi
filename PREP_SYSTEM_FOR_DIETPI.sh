@@ -1074,6 +1074,7 @@ _EOF_
 		mkdir -p /root/.ssh
 		>> /root/.ssh/known_hosts
 		G_CONFIG_INJECT 'dietpi.com ' 'dietpi.com ssh-rsa AAAAB3NzaC1yc2EAAAADAQABAAABAQDE6aw3r6aOEqendNu376iiCHr9tGBIWPgfrLkzjXjEsHGyVSUFNnZt6pftrDeK7UX\+qX4FxOwQlugG4fymOHbimRCFiv6cf7VpYg1Ednquq9TLb7/cIIbX8a6AuRmX4fjdGuqwmBq3OG7ZksFcYEFKt5U4mAJIaL8hXiM2iXjgY02LqiQY/QWATsHI4ie9ZOnwrQE\+Rr6mASN1BVFuIgyHIbwX54jsFSnZ/7CdBMkuAd9B8JkxppWVYpYIFHE9oWNfjh/epdK8yv9Oo6r0w5Rb\+4qaAc5g\+RAaknHeV6Gp75d2lxBdCm5XknKKbGma2\+/DfoE8WZTSgzXrYcRlStYN' /root/.ssh/known_hosts
+		G_CONFIG_INJECT '185.101.93.93 ' '185.101.93.93 ssh-rsa AAAAB3NzaC1yc2EAAAADAQABAAABAQDE6aw3r6aOEqendNu376iiCHr9tGBIWPgfrLkzjXjEsHGyVSUFNnZt6pftrDeK7UX\+qX4FxOwQlugG4fymOHbimRCFiv6cf7VpYg1Ednquq9TLb7/cIIbX8a6AuRmX4fjdGuqwmBq3OG7ZksFcYEFKt5U4mAJIaL8hXiM2iXjgY02LqiQY/QWATsHI4ie9ZOnwrQE\+Rr6mASN1BVFuIgyHIbwX54jsFSnZ/7CdBMkuAd9B8JkxppWVYpYIFHE9oWNfjh/epdK8yv9Oo6r0w5Rb\+4qaAc5g\+RAaknHeV6Gp75d2lxBdCm5XknKKbGma2\+/DfoE8WZTSgzXrYcRlStYN' /root/.ssh/known_hosts
 
 		#-----------------------------------------------------------------------------------
 		#MISC
@@ -1291,10 +1292,11 @@ _EOF_
 			G_RUN_CMD wget https://raw.githubusercontent.com/sparky-sbc/sparky-test/master/rtl8812au/rtl8812au_sparky.tar
 			mkdir -p rtl8812au_sparky
 			tar -xvf rtl8812au_sparky.tar -C rtl8812au_sparky
-			chmod +x rtl8812au_sparky/install.sh
-			G_RUN_CMD rtl8812au_sparky/install.sh
-			rm rtl8812au_sparky.tar
-			rm -R rtl8812au_sparky
+			chmod +x -R rtl8812au_sparky
+			cd rtl8812au_sparky
+			G_RUN_CMD ./install.sh
+			cd ..
+			rm -R rtl8812au_sparky*
 
 			#	Use performance gov for stability.
 			sed -i '/^[[:blank:]]*CONFIG_CPU_GOVERNOR=/c\CONFIG_CPU_GOVERNOR=performance' /DietPi/dietpi.txt
@@ -1508,12 +1510,12 @@ _EOF_
 		G_RUN_CMD wget "https://raw.githubusercontent.com/$GIT_OWNER/DietPi/$GIT_BRANCH/dietpi/.version" -O /DietPi/dietpi/.version
 
 		#	reduce sub_version by 1, allows us to create image, prior to release and patch if needed.
-		CORE_VERSION=$(sed -n 1p /DietPi/dietpi/.version)
-		SUB_VERSION=$(sed -n 2p /DietPi/dietpi/.version)
-		((SUB_VERSION--))
+		export G_DIETPI_VERSION_CORE=$(sed -n 1p /DietPi/dietpi/.version)
+		export G_DIETPI_VERSION_SUB=$(sed -n 2p /DietPi/dietpi/.version)
+		((G_DIETPI_VERSION_SUB--))
 		cat << _EOF_ > /DietPi/dietpi/.version
-$CORE_VERSION
-$SUB_VERSION
+$G_DIETPI_VERSION_CORE
+$G_DIETPI_VERSION_SUB
 _EOF_
 
 		G_RUN_CMD cp /DietPi/dietpi/.version /var/lib/dietpi/.dietpi_image_version
