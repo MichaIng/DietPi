@@ -1173,7 +1173,12 @@ _EOF_
 
 		/DietPi/dietpi/func/dietpi-set_hardware serialconsole enable
 		# - Disable for post-1st run setup:
-		sed -i '/^[[:blank:]]*CONFIG_SERIAL_CONSOLE_ENABLE=/c\CONFIG_SERIAL_CONSOLE_ENABLE=0' /DietPi/dietpi.txt
+		#	Exclude XU4: https://github.com/Fourdee/DietPi/issues/2038#issuecomment-416089875
+		if (( $G_HW_MODEL != 11 )); then
+
+			sed -i '/^[[:blank:]]*CONFIG_SERIAL_CONSOLE_ENABLE=/c\CONFIG_SERIAL_CONSOLE_ENABLE=0' /DietPi/dietpi.txt
+
+		fi
 
 		G_DIETPI-NOTIFY 2 'Reducing getty count and resource usage:'
 
