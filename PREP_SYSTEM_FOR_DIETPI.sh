@@ -1243,7 +1243,7 @@ _EOF_
 		spindown_time = 120
 
 		#
-		apm = 254
+		apm = 127
 }
 _EOF_
 			export G_ERROR_HANDLER_EXITCODE=$?
