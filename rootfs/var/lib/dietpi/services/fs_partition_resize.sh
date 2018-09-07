@@ -17,8 +17,9 @@ TARGET_DRIVE=${TARGET_DEV%[0-9]} # EG: /dev/mmcblk[0-9]p
 # Only redo partitions, if drive actually contains a partition table.
 if [[ $TARGET_PARTITION ]]; then
 
-	#Rock64 GPT resize | modified version of ayufan-rock64 resize script. I take no credit for this.
-	if [[ -f /etc/.dietpi_hw_model_identifier ]] && (( $(</etc/.dietpi_hw_model_identifier) == 43 )); then
+	#Rock/pro64 GPT resize | modified version of ayufan-rock64 resize script. I take no credit for this.
+	if [[ -f /etc/.dietpi_hw_model_identifier ]] &&
+		(( $(</etc/.dietpi_hw_model_identifier) == 42 || $(</etc/.dietpi_hw_model_identifier) == 43 )); then
 
 		# move GPT alternate header to end of disk
 		sgdisk -e $TARGET_DRIVE
@@ -52,4 +53,3 @@ partprobe $TARGET_DRIVE
 resize2fs $TARGET_DEV
 
 exit 0
-
