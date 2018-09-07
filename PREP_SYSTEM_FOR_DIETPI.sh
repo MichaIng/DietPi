@@ -1401,10 +1401,13 @@ _EOF_
 
 		/DietPi/dietpi/func/dietpi-set_hardware wificreds set
 
-		G_DIETPI-NOTIFY 2 'Disabling generic WiFi/BT by default'
+		G_DIETPI-NOTIFY 2 'Disabling generic BT by default'
 
 		/DietPi/dietpi/func/dietpi-set_hardware bluetooth disable
-		/DietPi/dietpi/func/dietpi-set_hardware wifimodules disable
+
+		G_DIETPI-NOTIFY 2 'Enabling generic WiFi by default, it will be disabled automatically during 1st run if ethernet is used'
+
+		/DietPi/dietpi/func/dietpi-set_hardware wifimodules enable
 
 		G_DIETPI-NOTIFY 2 'Enabling onboard WiFi modules by default'
 
