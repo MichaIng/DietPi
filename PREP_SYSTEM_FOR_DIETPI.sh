@@ -1405,17 +1405,21 @@ _EOF_
 
 		/DietPi/dietpi/func/dietpi-set_hardware bluetooth disable
 
-		G_DIETPI-NOTIFY 2 'Enabling generic WiFi by default, it will be disabled automatically during 1st run if ethernet is used'
+		# - Set WiFi
+		local tmp_info='Disabling'
+		local tmp_mode='disable'
+		if (( $WIFI_REQUIRED )); then
 
-		/DietPi/dietpi/func/dietpi-set_hardware wifimodules enable
+			tmp_info='Enabling'
+			tmp_mode='enable'
 
-		G_DIETPI-NOTIFY 2 'Enabling onboard WiFi modules by default'
+		fi
 
-		/DietPi/dietpi/func/dietpi-set_hardware wifimodules onboard_enable
+		G_DIETPI-NOTIFY 2 "$tmp_info onboard WiFi modules by default"
+		/DietPi/dietpi/func/dietpi-set_hardware wifimodules onboard_$tmp_mode
 
-		#G_DIETPI-NOTIFY 2 'Configuring IP version preferences'
-
-		#/DietPi/dietpi/func/dietpi-set_hardware preferipversion ipv4 #Already done at top of script, and now default in dietpi.txt
+		G_DIETPI-NOTIFY 2 "$tmp_info generic WiFi by default"
+		/DietPi/dietpi/func/dietpi-set_hardware wifimodules $tmp_mode
 
 		#	x86_64: kernel cmd line with GRUB
 		if (( $G_HW_ARCH == 10 )); then
