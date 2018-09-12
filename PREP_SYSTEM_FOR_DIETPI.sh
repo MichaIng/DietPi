@@ -1041,6 +1041,7 @@ _EOF_
 
 		G_RUN_CMD systemctl enable dietpi-ramlog
 		G_RUN_CMD systemctl enable dietpi-boot
+		G_RUN_CMD systemctl enable dietpi-preboot
 		G_RUN_CMD systemctl enable dietpi-postboot
 		G_RUN_CMD systemctl enable kill-ssh-user-sessions-before-network
 
@@ -1174,6 +1175,14 @@ _EOF_
 		/DietPi/dietpi/func/dietpi-set_hardware serialconsole enable
 		# - Disable for post-1st run setup:
 		sed -i '/^[[:blank:]]*CONFIG_SERIAL_CONSOLE_ENABLE=/c\CONFIG_SERIAL_CONSOLE_ENABLE=0' /DietPi/dietpi.txt
+		# - must be enabled for the following:
+		#	XU4: https://github.com/Fourdee/DietPi/issues/2038#issuecomment-416089875
+		#	RockPro64: Fails to boot into kernel without serial enabled
+		if (( $G_HW_MODEL == 11 || $G_HW_MODEL == 42 )); then
+
+			sed -i '/^[[:blank:]]*CONFIG_SERIAL_CONSOLE_ENABLE=/c\CONFIG_SERIAL_CONSOLE_ENABLE=1' /DietPi/dietpi.txt
+
+		fi
 
 		G_DIETPI-NOTIFY 2 'Reducing getty count and resource usage:'
 
@@ -1238,7 +1247,7 @@ _EOF_
 		spindown_time = 120
 
 		#
-		apm = 254
+		apm = 127
 }
 _EOF_
 			export G_ERROR_HANDLER_EXITCODE=$?
@@ -1395,18 +1404,25 @@ _EOF_
 
 		/DietPi/dietpi/func/dietpi-set_hardware wificreds set
 
-		G_DIETPI-NOTIFY 2 'Disabling generic WiFi/BT by default'
+		G_DIETPI-NOTIFY 2 'Disabling generic BT by default'
 
 		/DietPi/dietpi/func/dietpi-set_hardware bluetooth disable
-		/DietPi/dietpi/func/dietpi-set_hardware wifimodules disable
 
-		G_DIETPI-NOTIFY 2 'Enabling onboard WiFi modules by default'
+		# - Set WiFi
+		local tmp_info='Disabling'
+		local tmp_mode='disable'
+		if (( $WIFI_REQUIRED )); then
 
-		/DietPi/dietpi/func/dietpi-set_hardware wifimodules onboard_enable
+			tmp_info='Enabling'
+			tmp_mode='enable'
 
-		#G_DIETPI-NOTIFY 2 'Configuring IP version preferences'
+		fi
 
-		#/DietPi/dietpi/func/dietpi-set_hardware preferipversion ipv4 #Already done at top of script, and now default in dietpi.txt
+		G_DIETPI-NOTIFY 2 "$tmp_info onboard WiFi modules by default"
+		/DietPi/dietpi/func/dietpi-set_hardware wifimodules onboard_$tmp_mode
+
+		G_DIETPI-NOTIFY 2 "$tmp_info generic WiFi by default"
+		/DietPi/dietpi/func/dietpi-set_hardware wifimodules $tmp_mode
 
 		#	x86_64: kernel cmd line with GRUB
 		if (( $G_HW_ARCH == 10 )); then

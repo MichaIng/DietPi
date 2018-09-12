@@ -35,6 +35,364 @@
 	disable_error=1 G_CHECK_VALIDINT $1 && INPUT=$1
 
 	#/////////////////////////////////////////////////////////////////////////////////////
+	# Backup System
+	#/////////////////////////////////////////////////////////////////////////////////////
+	RSYNC_MODE_TEXT=0
+
+	FP_LOG='/var/log/dietpi-backup.log'
+
+	#Backup Filepaths
+	FP_SOURCE='/'
+	FP_TARGET_BACKUP='/mnt/dietpi-backup'
+	G_FP_DIETPI_USERDATA_ACTUAL="$(readlink -f /mnt/dietpi_userdata)"
+
+	#file applied to successful backups (stored in "$FP_TARGET_BACKUP/$BACKUP_STATS_FILENAME"
+	BACKUP_STATS_FILENAME='.dietpi-backup_stats'
+
+	#Exclude/include file
+	FP_FILTER_INCLUDE_EXCLUDE='/tmp/.dietpi-backup_filter_inc_exc'
+	FP_USER_FILTER_INCLUDE_EXCLUDE_BACKUP='/DietPi/dietpi/.dietpi-backup_inc_exc'
+
+	#Supported filesystems
+	TARGET_FILESYSTEM_TYPE=0
+	TARGET_DIRECTORY_SUPPORTED=0
+	aSUPPORTED_FILESYSTEMS=(
+
+		'ext4'
+		'ext3'
+		'ext2'
+		'nfs'
+		'nfs4'
+		'btrfs'
+
+	)
+
+	#rsync options
+	RSYNC_RUN_OPTIONS_BACKUP="-aH --info=name0 --info=progress2 --delete --delete-excluded --exclude-from=$FP_FILTER_INCLUDE_EXCLUDE"
+	RSYNC_RUN_OPTIONS_RESTORE="-aH --info=name0 --info=progress2 --delete-after --exclude-from=$FP_FILTER_INCLUDE_EXCLUDE"
+	RSYNC_LOGGING_OPTIONS="-v --log-file=$FP_LOG"
+
+	#Date format for logs
+	Print_Date(){
+
+		echo -e "$(date +"%d-%m-%Y %H:%M")"
+
+	}
+
+	Create_Filter_Include_Exclude(){
+
+		#Default - Include/Exclude
+		cat << _EOF_ > $FP_FILTER_INCLUDE_EXCLUDE
+#Global - Folders
+- $FP_TARGET_BACKUP/
++ $G_FP_DIETPI_USERDATA_ACTUAL/
++ $G_FP_DIETPI_USERDATA/
+- /mnt/*
+- /media/
+- /dev/
+- /lost+found/
+- /proc/
+- /sys/
+- /tmp/
+- /run/
+
+#Apt package cache (.deb)
+- /var/cache/apt/archives/
+
+#Manpages / Docs
+- /usr/share/man/
+- /usr/share/doc/
+
+#Global - Files
+- /var/swap
+- .swap*
+- $FP_LOG
+- $FP_DIETPIBACKUP_SETTINGS
+- $BACKUP_STATS_FILENAME
+- fake-hwclock.data
+- *.tmp
+
+#MS Windows specific
+- Thumbs.db
+- desktop.ini
+_EOF_
+
+		# - Add users filter list
+		if [[ -f $FP_USER_FILTER_INCLUDE_EXCLUDE_BACKUP ]]; then
+
+			cat $FP_USER_FILTER_INCLUDE_EXCLUDE_BACKUP >> $FP_FILTER_INCLUDE_EXCLUDE
+
+		fi
+
+	}
+
+	Services_Stop(){
+
+		/DietPi/dietpi/dietpi-services stop
+		killall -w rsync &> /dev/null # :https://github.com/Fourdee/DietPi/issues/1869#issuecomment-400036370
+
+	}
+
+	Services_Start(){
+
+		/DietPi/dietpi/dietpi-services start
+
+	}
+
+	Run_Backup(){
+
+		RSYNC_MODE_TEXT='Backup'
+
+		G_DIETPI-NOTIFY 3 "$G_PROGRAM_NAME" "$RSYNC_MODE_TEXT"
+
+		#Check valid FS
+		Check_Supported_Directory_Location
+
+		#Filesystem supported
+		if (( $TARGET_DIRECTORY_SUPPORTED )); then
+
+			Services_Stop
+
+			#Generate target dir.
+			mkdir -p "$FP_TARGET_BACKUP"
+
+			#Error: Unable to create target folder.
+			if [[ ! -d $FP_TARGET_BACKUP ]]; then
+
+				G_WHIP_MSG "$RSYNC_MODE_TEXT Failed:\n\nUnable to create $FP_TARGET_BACKUP"
+
+			#Error: Rsync is already running
+			elif (( $(ps aux | grep -ci -m1 "[r]sync") )); then
+
+				Error_Rsync_Already_Running
+
+			else
+
+				#Start Backup
+
+				echo -e "DietPi-Backup Log File. $(date +"%d-%m-%Y_%H%M")\n\n" > $FP_LOG
+
+				#Generate Exclude/Include lists
+				Create_Filter_Include_Exclude
+
+				Services_Stop
+
+				while true
+				do
+
+					# - system
+					RSYNC_MODE_TEXT='Backup'
+					mkdir -p "$FP_TARGET_BACKUP"/data
+
+					# - - Check for sufficient free space
+					#	NB: working in KiB until end MiB conversion, as, don't like using long long int, and, KiB should offer a good end result.
+					local old_backup_size=$(du -ks "$FP_TARGET_BACKUP"/data | awk '{print $1}')
+
+					rsync --dry-run --stats $RSYNC_RUN_OPTIONS_BACKUP "$FP_SOURCE" "$FP_TARGET_BACKUP"/data/ > /tmp/dietpi-backup_result
+					local new_backup_size=$(( $(grep -m1 'Total file size' /tmp/dietpi-backup_result | sed 's/[^0-9]*//g') / 1024 ))
+					local total_file_count=$(( $(grep -m1 'Number of files' /tmp/dietpi-backup_result | awk '{print $6}' | sed 's/[^0-9]*//g') ))
+					local total_folder_count=$(( $(grep -m1 'Number of files' /tmp/dietpi-backup_result | awk '{print $8}' | sed 's/[^0-9]*//g') ))
+					local target_fs_blocksize=$(stat -fc %s "$FP_TARGET_BACKUP"/data)
+					new_backup_size=$(( $new_backup_size + ( $total_file_count + $total_folder_count ) * $target_fs_blocksize / 1024 ))
+					local end_result=$(( ( $new_backup_size - $old_backup_size ) / 1024 + 1 ))
+					rm /tmp/dietpi-backup_result
+
+					if ! G_CHECK_FREESPACE "$FP_TARGET_BACKUP"/data $end_result; then
+
+						G_WHIP_BUTTON_OK_TEXT='Ignore'
+						G_WHIP_BUTTON_CANCEL_TEXT='Exit'
+						G_WHIP_YESNO 'The backup target location appears to have insufficient free space to successfully finish the backup.\nHowever, this check is a rough estimation in reasonable time, thus it could be marginally incorrect.\n\nWould you like to override this warning and continue with the backup?'
+						if (( $? )); then
+
+							echo -e "$RSYNC_MODE_TEXT canceled due to insufficient free space    : $(Print_Date)" >> "$FP_TARGET_BACKUP/$BACKUP_STATS_FILENAME"
+							break
+
+						fi
+
+					fi
+
+					G_DIETPI-NOTIFY 2 "$RSYNC_MODE_TEXT $FP_TARGET_BACKUP: in progress, please wait..."
+
+					rsync $RSYNC_RUN_OPTIONS_BACKUP $RSYNC_LOGGING_OPTIONS "$FP_SOURCE" "$FP_TARGET_BACKUP"/data/
+					EXIT_CODE=$?
+					G_DIETPI-NOTIFY -1 $EXIT_CODE "$G_PROGRAM_NAME: $RSYNC_MODE_TEXT"
+					if (( $EXIT_CODE == 0 )); then
+
+						echo -e "$RSYNC_MODE_TEXT Completed    : $(Print_Date)" >> "$FP_TARGET_BACKUP/$BACKUP_STATS_FILENAME"
+						G_WHIP_MSG "$RSYNC_MODE_TEXT Completed:\n - $FP_TARGET_BACKUP"
+
+					else
+
+						G_WHIP_MSG "$RSYNC_MODE_TEXT Failed:\n - $FP_TARGET_BACKUP\n\nYou will given an option to view the logfile on the next screen. Please check it for information and/or errors."
+
+					fi
+
+					# - done
+					break
+
+				done
+
+				G_WHIP_VIEWLOG $FP_LOG
+
+				#return to main menu
+				TARGETMENUID=0
+
+			fi
+
+			Services_Start
+
+		fi
+
+	}
+
+	Run_Restore(){
+
+		RSYNC_MODE_TEXT='Restore'
+
+		G_DIETPI-NOTIFY 3 "$G_PROGRAM_NAME" "$RSYNC_MODE_TEXT"
+
+		#Check valid FS
+		Check_Supported_Directory_Location
+
+		#Filesystem supported
+		if (( $TARGET_DIRECTORY_SUPPORTED )); then
+
+			Services_Stop
+
+			#Error: Backup not found
+			if [[ ! -f $FP_TARGET_BACKUP/$BACKUP_STATS_FILENAME ]]; then
+
+				G_DIETPI-NOTIFY 2 "No Backup was found in $FP_TARGET_BACKUP"
+				G_DIETPI-NOTIFY 1 "$RSYNC_MODE_TEXT Failed.\n"
+
+				G_WHIP_MSG "$RSYNC_MODE_TEXT Failed:\n\n$FP_TARGET_BACKUP/$BACKUP_STATS_FILENAME does not exist\n\nHave you created a backup?"
+
+			#Error: Rsync is already running
+			elif (( $(ps aux | grep -ci -m1 "[r]sync") )); then
+
+				Error_Rsync_Already_Running
+
+			#Restore
+			else
+
+				#Generate Exclude/Include lists
+				Create_Filter_Include_Exclude
+
+				G_DIETPI-NOTIFY 2 "$RSYNC_MODE_TEXT $FP_TARGET_BACKUP: in progress, please wait..."
+
+				RSYNC_MODE_TEXT='Restore'
+				rsync $RSYNC_RUN_OPTIONS_RESTORE $RSYNC_LOGGING_OPTIONS "$FP_TARGET_BACKUP"/data/ "$FP_SOURCE"
+				EXIT_CODE=$?
+				G_DIETPI-NOTIFY -1 $EXIT_CODE "$G_PROGRAM_NAME: $RSYNC_MODE_TEXT"
+				if (( $EXIT_CODE == 0 )); then
+
+					echo -e "$RSYNC_MODE_TEXT Completed    : $(Print_Date)" >> "$FP_TARGET_BACKUP/$BACKUP_STATS_FILENAME"
+					G_WHIP_MSG "$RSYNC_MODE_TEXT Completed:\n - $FP_TARGET_BACKUP\n\nNB: A Reboot is highly recommended."
+
+				else
+
+					G_WHIP_MSG "$RSYNC_MODE_TEXT Failed:\n - $FP_TARGET_BACKUP\n\nYou will given an option to view the logfile on the next screen. Please check it for information and/or errors."
+
+				fi
+
+				G_WHIP_VIEWLOG $FP_LOG
+
+				# - done
+				TARGETMENUID=0
+
+			fi
+
+			Services_Start
+
+		fi
+
+	}
+
+	Check_Supported_Directory_Location(){
+
+		TARGET_DIRECTORY_SUPPORTED=0
+
+		# Userdata location verify
+		G_CHECK_USERDATA
+
+		#Disallow dietpi_userdata location, due to includes in that location
+		if [[ $FP_TARGET_BACKUP == $G_FP_DIETPI_USERDATA* || $FP_TARGET_BACKUP == $G_FP_DIETPI_USERDATA_ACTUAL* ]] ; then
+
+			Error_DietpiUserdata_Directory
+
+		#Check location contains /mnt/
+		elif [[ $FP_TARGET_BACKUP == '/mnt/'* ]]; then
+
+			#Generate the target directory if it doesnt exist. So we can check what filesystem it will be.
+			local directory_generated=0
+			if [[ ! -d $FP_TARGET_BACKUP ]]; then
+
+				mkdir -p "$FP_TARGET_BACKUP"
+				directory_generated=1
+
+			fi
+
+			TARGET_FILESYSTEM_TYPE="$( df -T $FP_TARGET_BACKUP | sed -n '2p' | awk '{print $2}')"
+			for ((i=0; i<${#aSUPPORTED_FILESYSTEMS[@]}; i++))
+			do
+
+				if [[ $TARGET_FILESYSTEM_TYPE == ${aSUPPORTED_FILESYSTEMS[$i]} ]]; then
+
+					TARGET_DIRECTORY_SUPPORTED=1
+					break
+
+				fi
+
+			done
+
+			#Delete directory if tested
+			if (( $directory_generated )); then
+
+				rm -R "$FP_TARGET_BACKUP"
+
+			fi
+
+			#Not ext2/3/4
+			if (( ! $TARGET_DIRECTORY_SUPPORTED )); then
+
+				Error_Filesystem_Not_Supported
+
+			fi
+
+		#Not inside /mnt
+		else
+
+			Error_Not_Mnt_Directory
+
+		fi
+
+	}
+
+	#/////////////////////////////////////////////////////////////////////////////////////
+	# Settings File
+	#/////////////////////////////////////////////////////////////////////////////////////
+	#Settings File
+	FP_DIETPIBACKUP_SETTINGS='/DietPi/dietpi/.dietpi-backup_settings'
+
+	Write_Settings_File(){
+
+		cat << _EOF_ > $FP_DIETPIBACKUP_SETTINGS
+FP_TARGET_BACKUP=$FP_TARGET_BACKUP
+_EOF_
+
+	}
+
+	Read_Settings_File(){
+
+		if [[ -f $FP_DIETPIBACKUP_SETTINGS ]]; then
+
+			. $FP_DIETPIBACKUP_SETTINGS
+
+		fi
+
+	}
+
+	#/////////////////////////////////////////////////////////////////////////////////////
 	# MENUS
 	#/////////////////////////////////////////////////////////////////////////////////////
 	MENU_LASTITEM=''
@@ -46,17 +404,19 @@
 	Menu_Main(){
 
 		local backup_last_completed='Backup not found. Please create one.'
-		if [[ -f $FP_TARGET_BACKUP'/'$BACKUP_STATS_FILENAME ]]; then
-
-			backup_last_completed=$(grep 'Completed' "$FP_TARGET_BACKUP/$BACKUP_STATS_FILENAME" | tail -1)
-
-		fi
 
 		G_WHIP_MENU_ARRAY=()
-		G_WHIP_MENU_ARRAY+=('Help' 'What does DietPi-Backup do?')
+		G_WHIP_MENU_ARRAY+=('' '●─ Info ')
+		G_WHIP_MENU_ARRAY+=('Help' "What does $G_PROGRAM_NAME do?")
 		G_WHIP_MENU_ARRAY+=('' '●─ Options ')
 		G_WHIP_MENU_ARRAY+=('Location' ': Change where your backup will be saved and restored from.')
 		G_WHIP_MENU_ARRAY+=('Custom Filters' ': Modify custom include/exclude filters for backups.')
+		if [[ -f $FP_TARGET_BACKUP'/'$BACKUP_STATS_FILENAME ]]; then
+
+			G_WHIP_MENU_ARRAY+=('Delete' ": Remove backup ($FP_TARGET_BACKUP)")
+			backup_last_completed=$(grep 'Completed' "$FP_TARGET_BACKUP/$BACKUP_STATS_FILENAME" | tail -1)
+
+		fi
 		G_WHIP_MENU_ARRAY+=('' '●─ Run ')
 		G_WHIP_MENU_ARRAY+=('Backup' 'Create (or update) a backup of this device.')
 		G_WHIP_MENU_ARRAY+=('Restore' 'Restore this device from a previous backup.')
@@ -85,6 +445,17 @@
 				'Help')
 
 					G_WHIP_MSG "DietPi-Backup is a program that allows you to Backup and Restore your DietPi system.\n\nIf you have broken your system, or want to reset your system to an earlier date, this can all be done with DietPi-Backup.\n\nSimply choose a location where you want to save and restore your backups from, then, select Backup or Restore.\n\nMore information:\n - https://dietpi.com/phpbb/viewtopic.php?f=8&t=5&p=256#p255"
+
+				;;
+
+				'Delete')
+
+					G_WHIP_YESNO "Do you wish to DELETE the following backup?\n - $FP_TARGET_BACKUP"
+					if (( $? == 0 )); then
+
+						rm -R "$FP_TARGET_BACKUP"
+
+					fi
 
 				;;
 
@@ -280,346 +651,6 @@
 	}
 
 	#/////////////////////////////////////////////////////////////////////////////////////
-	# Backup System
-	#/////////////////////////////////////////////////////////////////////////////////////
-	RSYNC_MODE_TEXT=0
-
-	#LOGFILE
-	LOGFILE='/var/log/dietpi-backup.log'
-
-	#Backup Filepaths
-	FP_SOURCE='/'
-	FP_TARGET_BACKUP='/mnt/dietpi-backup'
-	G_FP_DIETPI_USERDATA_ACTUAL="$(readlink -f /mnt/dietpi_userdata)"
-
-	#file applied to successful backups (stored in "$FP_TARGET_BACKUP/$BACKUP_STATS_FILENAME"
-	BACKUP_STATS_FILENAME='.dietpi-backup_stats'
-
-	#Exclude/include file
-	FP_FILTER_INCLUDE_EXCLUDE='/tmp/.dietpi-backup_filter_inc_exc'
-	FP_USER_FILTER_INCLUDE_EXCLUDE_BACKUP='/DietPi/dietpi/.dietpi-backup_inc_exc'
-
-	#Supported filesystems
-	TARGET_FILESYSTEM_TYPE=0
-	TARGET_DIRECTORY_SUPPORTED=0
-	aSUPPORTED_FILESYSTEMS=(
-
-		'ext4'
-		'ext3'
-		'ext2'
-		'nfs'
-		'nfs4'
-		'btrfs'
-
-	)
-
-	#rsync options
-	RSYNC_RUN_OPTIONS_BACKUP="-aH --delete --delete-excluded --exclude-from=$FP_FILTER_INCLUDE_EXCLUDE"
-	RSYNC_RUN_OPTIONS_RESTORE="-aH --delete-after --exclude-from=$FP_FILTER_INCLUDE_EXCLUDE"
-	RSYNC_LOGGING_OPTIONS="-v --log-file=$LOGFILE"
-
-	#Date format for logs
-	Print_Date(){
-
-		echo -e "$(date +"%d-%m-%Y %H:%M")"
-
-	}
-
-	Create_Filter_Include_Exclude(){
-
-		#Default - Include/Exclude
-		cat << _EOF_ > $FP_FILTER_INCLUDE_EXCLUDE
-#Global - Folders
-- $FP_TARGET_BACKUP/
-+ $G_FP_DIETPI_USERDATA_ACTUAL/
-+ $G_FP_DIETPI_USERDATA/
-- /mnt/*
-- /media/
-- /dev/
-- /lost+found/
-- /proc/
-- /sys/
-- /tmp/
-- /run/
-
-#Apt package cache (.deb)
-- /var/cache/apt/archives/
-
-#Manpages / Docs
-- /usr/share/man/
-- /usr/share/doc/
-
-#Global - Files
-- /var/swap
-- .swap*
-- $LOGFILE
-- $FP_DIETPIBACKUP_SETTINGS
-- $BACKUP_STATS_FILENAME
-- fake-hwclock.data
-- *.tmp
-
-#MS Windows specific
-- Thumbs.db
-- desktop.ini
-_EOF_
-
-		# - Add users filter list
-		if [[ -f $FP_USER_FILTER_INCLUDE_EXCLUDE_BACKUP ]]; then
-
-			cat $FP_USER_FILTER_INCLUDE_EXCLUDE_BACKUP >> $FP_FILTER_INCLUDE_EXCLUDE
-
-		fi
-
-	}
-
-	Services_Stop(){
-
-		/DietPi/dietpi/dietpi-services stop
-		killall -w rsync &> /dev/null # :https://github.com/Fourdee/DietPi/issues/1869#issuecomment-400036370
-
-	}
-
-	Services_Start(){
-
-		/DietPi/dietpi/dietpi-services start
-
-	}
-
-	Run_Backup(){
-
-		RSYNC_MODE_TEXT='Backup'
-
-		G_DIETPI-NOTIFY 3 "$G_PROGRAM_NAME" "$RSYNC_MODE_TEXT"
-
-		#Check valid FS
-		Check_Supported_Directory_Location
-
-		#Filesystem supported
-		if (( $TARGET_DIRECTORY_SUPPORTED )); then
-
-			Services_Stop
-
-			#Generate target dir.
-			mkdir -p "$FP_TARGET_BACKUP"
-
-			#Error: Unable to create target folder.
-			if [[ ! -d $FP_TARGET_BACKUP ]]; then
-
-				G_WHIP_MSG "$RSYNC_MODE_TEXT Failed:\n\nUnable to create $FP_TARGET_BACKUP"
-
-			#Error: Rsync is already running
-			elif (( $(ps aux | grep -ci -m1 "[r]sync") )); then
-
-				Error_Rsync_Already_Running
-
-			else
-
-				#Start Backup
-
-				echo -e "DietPi-Backup Log File. $(date +"%d-%m-%Y_%H%M")\n\n" > "$LOGFILE"
-
-				#Generate Exclude/Include lists
-				Create_Filter_Include_Exclude
-
-				Services_Stop
-
-				G_DIETPI-NOTIFY 2 "Backing up to: $FP_TARGET_BACKUP"
-
-				while true
-				do
-
-					# - system
-					RSYNC_MODE_TEXT='Backup'
-					mkdir -p "$FP_TARGET_BACKUP"/data
-
-					# - - Check for sufficient free space
-					#	NB: working in KiB until end MiB conversion, as, don't like using long long int, and, KiB should offer a good end result.
-					local old_backup_size=$(du -ks "$FP_TARGET_BACKUP"/data | awk '{print $1}')
-
-					rsync --dry-run --stats $RSYNC_RUN_OPTIONS_BACKUP "$FP_SOURCE" "$FP_TARGET_BACKUP"/data/ > /tmp/dietpi-backup_result
-					local new_backup_size=$(( $(grep -m1 'Total file size' /tmp/dietpi-backup_result | sed 's/[^0-9]*//g') / 1024 ))
-					local total_file_count=$(( $(grep -m1 'Number of files' /tmp/dietpi-backup_result | awk '{print $6}' | sed 's/[^0-9]*//g') ))
-					local total_folder_count=$(( $(grep -m1 'Number of files' /tmp/dietpi-backup_result | awk '{print $8}' | sed 's/[^0-9]*//g') ))
-					local target_fs_blocksize=$(stat -fc %s "$FP_TARGET_BACKUP"/data)
-					new_backup_size=$(( $new_backup_size + ( $total_file_count + $total_folder_count ) * $target_fs_blocksize / 1024 ))
-					local end_result=$(( ( $new_backup_size - $old_backup_size ) / 1024 + 1 ))
-					rm /tmp/dietpi-backup_result
-
-					if G_CHECK_FREESPACE "$FP_TARGET_BACKUP"/data $end_result; then
-
-						G_WHIP_BUTTON_OK_TEXT='Ignore'
-						G_WHIP_BUTTON_CANCEL_TEXT='Exit'
-						G_WHIP_YESNO 'The backup target location appears to have insufficient free space to successfully finish the backup.\nHowever, this check is a rough estimation in reasonable time, thus it could be marginally incorrect.\n\nWould you like to override this warning and continue with the backup?'
-						if (( $? )); then
-
-							echo -e "$RSYNC_MODE_TEXT canceled due to insufficient free space    : $(Print_Date)" >> "$FP_TARGET_BACKUP/$BACKUP_STATS_FILENAME"
-							break
-
-						fi
-
-					fi
-
-					G_RUN_CMD rsync $RSYNC_RUN_OPTIONS_BACKUP $RSYNC_LOGGING_OPTIONS "$FP_SOURCE" "$FP_TARGET_BACKUP"/data/
-					echo -e "$RSYNC_MODE_TEXT Completed    : $(Print_Date)" >> "$FP_TARGET_BACKUP/$BACKUP_STATS_FILENAME"
-					G_WHIP_MSG "$RSYNC_MODE_TEXT Completed:\n\n$RSYNC_MODE_TEXT was saved to:\n- $FP_TARGET_BACKUP\n- Log file: $LOGFILE"
-
-					# - done
-					EXIT_CODE=0
-					break
-
-				done
-
-				G_WHIP_VIEWLOG "$LOGFILE"
-
-				#return to main menu
-				TARGETMENUID=0
-
-			fi
-
-			Services_Start
-
-		fi
-
-	}
-
-	Run_Restore(){
-
-		RSYNC_MODE_TEXT='Restore'
-
-		G_DIETPI-NOTIFY 3 "$G_PROGRAM_NAME" "$RSYNC_MODE_TEXT"
-
-		#Check valid FS
-		Check_Supported_Directory_Location
-
-		#Filesystem supported
-		if (( $TARGET_DIRECTORY_SUPPORTED )); then
-
-			Services_Stop
-
-			#Error: Backup not found
-			if [[ ! -f $FP_TARGET_BACKUP/$BACKUP_STATS_FILENAME ]]; then
-
-				G_DIETPI-NOTIFY 2 "No Backup was found in $FP_TARGET_BACKUP"
-				G_DIETPI-NOTIFY 1 "$RSYNC_MODE_TEXT Failed.\n"
-
-				G_WHIP_MSG "$RSYNC_MODE_TEXT Failed:\n\n$FP_TARGET_BACKUP/$BACKUP_STATS_FILENAME does not exist\n\nHave you created a backup?"
-
-			#Error: Rsync is already running
-			elif (( $(ps aux | grep -ci -m1 "[r]sync") )); then
-
-				Error_Rsync_Already_Running
-
-			#Restore
-			else
-
-				#Generate Exclude/Include lists
-				Create_Filter_Include_Exclude
-
-				G_DIETPI-NOTIFY 2 "Restoring from: $FP_TARGET_BACKUP"
-
-				RSYNC_MODE_TEXT='Restore'
-				G_RUN_CMD rsync $RSYNC_RUN_OPTIONS_RESTORE $RSYNC_LOGGING_OPTIONS "$FP_TARGET_BACKUP"/data/ "$FP_SOURCE"
-				echo -e "$RSYNC_MODE_TEXT Completed    : $(Print_Date)" >> "$FP_TARGET_BACKUP/$BACKUP_STATS_FILENAME"
-				G_WHIP_MSG "$RSYNC_MODE_TEXT Completed:\n\n- from:\n$FP_TARGET_BACKUP\n- Log file: $LOGFILE\n\nNB: A Reboot is highly recommended."
-				G_WHIP_VIEWLOG "$LOGFILE"
-
-				# - done
-				EXIT_CODE=0
-				TARGETMENUID=0
-
-			fi
-
-			Services_Start
-
-		fi
-
-	}
-
-	Check_Supported_Directory_Location(){
-
-		TARGET_DIRECTORY_SUPPORTED=0
-
-		# Userdata location verify
-		G_CHECK_USERDATA
-
-		#Disallow dietpi_userdata location, due to includes in that location
-		if [[ $FP_TARGET_BACKUP == $G_FP_DIETPI_USERDATA* || $FP_TARGET_BACKUP == $G_FP_DIETPI_USERDATA_ACTUAL* ]] ; then
-
-			Error_DietpiUserdata_Directory
-
-		#Check location contains /mnt/
-		elif [[ $FP_TARGET_BACKUP == '/mnt/'* ]]; then
-
-			#Generate the target directory if it doesnt exist. So we can check what filesystem it will be.
-			local directory_generated=0
-			if [[ ! -d $FP_TARGET_BACKUP ]]; then
-
-				mkdir -p "$FP_TARGET_BACKUP"
-				directory_generated=1
-
-			fi
-
-			TARGET_FILESYSTEM_TYPE="$( df -T $FP_TARGET_BACKUP | sed -n '2p' | awk '{print $2}')"
-			for ((i=0; i<${#aSUPPORTED_FILESYSTEMS[@]}; i++))
-			do
-
-				if [[ $TARGET_FILESYSTEM_TYPE == ${aSUPPORTED_FILESYSTEMS[$i]} ]]; then
-
-					TARGET_DIRECTORY_SUPPORTED=1
-					break
-
-				fi
-
-			done
-
-			#Delete directory if tested
-			if (( $directory_generated )); then
-
-				rm -R "$FP_TARGET_BACKUP"
-
-			fi
-
-			#Not ext2/3/4
-			if (( ! $TARGET_DIRECTORY_SUPPORTED )); then
-
-				Error_Filesystem_Not_Supported
-
-			fi
-
-		#Not inside /mnt
-		else
-
-			Error_Not_Mnt_Directory
-
-		fi
-
-	}
-
-	#/////////////////////////////////////////////////////////////////////////////////////
-	# Settings File
-	#/////////////////////////////////////////////////////////////////////////////////////
-	#Settings File
-	FP_DIETPIBACKUP_SETTINGS='/DietPi/dietpi/.dietpi-backup_settings'
-
-	Write_Settings_File(){
-
-		cat << _EOF_ > $FP_DIETPIBACKUP_SETTINGS
-FP_TARGET_BACKUP=$FP_TARGET_BACKUP
-_EOF_
-
-	}
-
-	Read_Settings_File(){
-
-		if [[ -f $FP_DIETPIBACKUP_SETTINGS ]]; then
-
-			. $FP_DIETPIBACKUP_SETTINGS
-
-		fi
-
-	}
-
-	#/////////////////////////////////////////////////////////////////////////////////////
 	# Main Loop
 	#/////////////////////////////////////////////////////////////////////////////////////
 	#pre-reqs, install if required.
@@ -640,7 +671,7 @@ _EOF_
 	if [[ ! -f $FP_USER_FILTER_INCLUDE_EXCLUDE_BACKUP ]]; then
 
 		cat << _EOF_ > $FP_USER_FILTER_INCLUDE_EXCLUDE_BACKUP
-#DietPi-Backup | Custom include/exclude filters
+#$_PROGRAM_NAME | Custom include/exclude filters
 #
 #To INCLUDE (+) a file/folder:
 #	NB: dietpi_userdata is included by default, as well, if moved to a custom location.
@@ -694,7 +725,7 @@ _EOF_
 
 	#-----------------------------------------------------------------------------------
 	#Cleaup left over tmp files
-	rm "$FP_FILTER_INCLUDE_EXCLUDE" &> /dev/null
+	rm $FP_FILTER_INCLUDE_EXCLUDE &> /dev/null
 	#-----------------------------------------------------------------------------------
 	#delete[] array
 	unset aSUPPORTED_FILESYSTEMS

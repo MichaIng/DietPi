@@ -34,12 +34,251 @@
 	fi
 
 	#/////////////////////////////////////////////////////////////////////////////////////
+	# Sync System
+	#/////////////////////////////////////////////////////////////////////////////////////
+	EXIT_CODE=0
+	FP_LOG='/var/log/dietpi-sync.log'
+
+	#Sync Filepaths
+	FP_SOURCE='/mnt/Source'
+	FP_TARGET='/mnt/Target'
+
+	#DietPi Mounts
+	FP_SAMBA_MOUNT='/mnt/samba'
+
+	#file applied to successful Sync (stored in $FP_TARGET/$SYNC_STATS_FILENAME)
+	SYNC_STATS_FILENAME='.dietpi-sync_stats'
+
+	#Exclude/include file
+	FP_FILTER_INCLUDE_EXCLUDE='.dietpi-sync_include_exclude'
+	FP_USER_FILTER_INCLUDE_EXCLUDE='/DietPi/dietpi/.dietpi-sync_inc_exc'
+
+	#Extra options
+	SYNC_DELETE_MODE=0
+	SYNC_COMPRESSION=0
+	SYNC_CRONDAILY=0
+
+	Create_Filter_Include_Exclude(){
+
+		cat << _EOF_ > $FP_FILTER_INCLUDE_EXCLUDE
+#Global - Folders
+- $FP_TARGET
+- /boot/dietpi/
+- /DietPi/
+- /dev/
+- /proc/
+- /sys/
+- /tmp/
+- /run/
+
+#Global - Files
+- $FP_LOG
+- $FP_DIETPISYNC_SETTINGS
+- $SYNC_STATS_FILENAME
+- /var/swap
+- .swap*
+- *.tmp
+# - MS Windows specific
+- Thumbs.db
+- desktop.ini
+- SyncToy* # MS SyncToy
+- System Volume Information #  - causes error code 23 (permission denied)
+
+_EOF_
+
+		#Add users additional list
+		if [[ -f $FP_USER_FILTER_INCLUDE_EXCLUDE ]]; then
+
+			cat $FP_USER_FILTER_INCLUDE_EXCLUDE >> $FP_FILTER_INCLUDE_EXCLUDE
+
+		fi
+
+	}
+
+	Banner_Start(){
+
+		local mode='Sync'
+		#Dry Run?
+		if (( $SYNC_DRY_RUN )); then
+
+			mode='Dry Run'
+
+		fi
+
+		G_DIETPI-NOTIFY 3 "$G_PROGRAM_NAME" "$mode"
+
+	}
+
+	Run_Sync(){
+
+		Banner_Start
+
+		# Userdata location verify
+		G_CHECK_USERDATA
+
+		#Generate Target dir.
+		mkdir -p "$FP_TARGET"
+
+		systemctl stop rsync &> /dev/null # : https://github.com/Fourdee/DietPi/issues/1869
+		killall -w rsync &> /dev/null
+
+		#Error: Folder not found
+		if [[ ! -d $FP_TARGET ]]; then
+
+			G_WHIP_MSG "Error:\n\nSync failed, unable to create Target directory $FP_TARGET"
+
+		#Error: Rsync is already running
+		elif (( $(ps aux | grep -ci -m1 "[r]sync") )); then
+
+			G_WHIP_MSG 'Sync Failed:\n\nA sync job could not be started as rsync is already running.'
+			echo -e "Sync failed: $(date +"%d-%m-%Y_%H%M"). Rsync is already running." >> "$FP_TARGET/$SYNC_STATS_FILENAME"
+
+		#Start sync
+		else
+
+			#Generate Exclude/Include lists
+			Create_Filter_Include_Exclude
+
+			#Rsync options
+			local rync_options+="-aHP4 --info=name0 --info=progress2 --human-readable --delete-excluded --exclude-from=$FP_FILTER_INCLUDE_EXCLUDE --log-file=$FP_LOG "
+
+			# - Compression?
+			if (( $SYNC_COMPRESSION )); then
+
+				rync_options+='z'
+
+			fi
+
+			# - Dry Run?
+			if (( $SYNC_DRY_RUN )); then
+
+				rync_options+='n'
+
+			fi
+
+			# - Delete mode?
+			if (( $SYNC_DELETE_MODE )); then
+
+				rync_options+=' --delete'
+
+			fi
+
+			#Verify enough space
+			#	NB: working in KiB until end MiB conversion, as, don't like using long long int, and, KiB should offer a good end result.
+			local old_backup_size=$(du -ks "$FP_TARGET" | awk '{print $1}')
+
+			rsync --dry-run --stats $rync_options "$FP_SOURCE"/ "$FP_TARGET"/ > /tmp/dietpi-sync_result
+			local new_backup_size=$(( $(grep -m1 'Total file size' /tmp/dietpi-sync_result | sed 's/[^0-9]*//g') / 1024 ))
+			local total_file_count=$(( $(grep -m1 'Number of files' /tmp/dietpi-sync_result | awk '{print $6}' | sed 's/[^0-9]*//g') ))
+			local total_folder_count=$(( $(grep -m1 'Number of files' /tmp/dietpi-sync_result | awk '{print $8}' | sed 's/[^0-9]*//g') ))
+			local target_fs_blocksize=$(stat -fc %s "$FP_TARGET")
+			new_backup_size=$(( $new_backup_size + ( $total_file_count + $total_folder_count ) * $target_fs_blocksize / 1024 ))
+			local end_result=$(( ( $new_backup_size - $old_backup_size ) / 1024 + 1 ))
+			rm /tmp/dietpi-sync_result
+
+			if ! G_CHECK_FREESPACE "$FP_TARGET" $end_result; then
+
+				G_WHIP_BUTTON_OK_TEXT='Ignore'
+				G_WHIP_BUTTON_CANCEL_TEXT='Exit'
+				G_WHIP_YESNO 'The system sync target location appears to have insufficient free space to successfully finish the backup.\nHowever, this check is a rough estimation in reasonable time, thus it could be marginally incorrect.\n\nWould you like to override this warning and continue with the backup?'
+				if (( $? )); then
+
+					echo -e "Sync canceled: due to insufficient free space: $(date +"%d-%m-%Y_%H%M")" >> "$FP_TARGET/$SYNC_STATS_FILENAME"
+					break
+
+				fi
+
+			fi
+
+			G_DIETPI-NOTIFY 2 "Sync | $FP_SOURCE > $FP_TARGET: in progress, please wait..."
+
+			#Sync
+			rsync $rync_options "$FP_SOURCE"/ "$FP_TARGET"/
+			EXIT_CODE=$?
+			G_DIETPI-NOTIFY -1 $EXIT_CODE "$G_PROGRAM_NAME"
+			if (( $EXIT_CODE == 0 )); then
+
+				echo -e "Sync completed: $(date +"%d-%m-%Y_%H%M")" >> "$FP_TARGET/$SYNC_STATS_FILENAME"
+				if (( ! $SYNC_DRY_RUN )); then
+
+					G_WHIP_MSG "Sync completed:\n - $FP_SOURCE > $FP_TARGET"
+
+				else
+
+					G_WHIP_MSG "Dry Run Sync completed (NO modifications):\n - $FP_SOURCE > $FP_TARGET"
+
+				fi
+
+			else
+
+				echo -e "Sync failed: please see the log file for more information ($FP_LOG): $(date +"%d-%m-%Y_%H%M")" >> "$FP_TARGET/$SYNC_STATS_FILENAME"
+				G_WHIP_MSG "Sync failed:\n - $FP_SOURCE > $FP_TARGET\n\nYou will given an option to view the logfile on the next screen. Please check it for information and/or errors."
+
+			fi
+
+			G_WHIP_VIEWLOG $FP_LOG
+
+			#return to main menu
+			TARGETMENUID=0
+
+		fi
+
+		systemctl start rsync &> /dev/null # : https://github.com/Fourdee/DietPi/issues/1869
+
+	}
+
+	Check_Available_DietPi_Mounts(){
+
+		local temp_file_mounts='.dietpi-sync_dietpi_mounts'
+		df -h > "$temp_file_mounts"
+
+		#Samba Client
+		SAMBA_MOUNT_AVAILABLE=0
+		SAMBA_MOUNT_TEXT="Not mounted ($FP_SAMBA_MOUNT). Select to setup."
+		if (( $(grep -ci -m1 "/mnt/samba" $temp_file_mounts) )); then
+
+			SAMBA_MOUNT_AVAILABLE=1
+			SAMBA_MOUNT_TEXT="Size: $(df -h | grep /mnt/samba | awk '{print $2}')B | Available: $(df -h | grep /mnt/samba | awk '{print $4}')B"
+
+		fi
+
+		rm $temp_file_mounts
+
+	}
+
+	#/////////////////////////////////////////////////////////////////////////////////////
+	# Settings File
+	#/////////////////////////////////////////////////////////////////////////////////////
+	#Settings File
+	FP_DIETPISYNC_SETTINGS='/DietPi/dietpi/.dietpi-sync_settings'
+
+	Write_Settings_File(){
+
+		cat << _EOF_ > $FP_DIETPISYNC_SETTINGS
+FP_SOURCE=$FP_SOURCE
+FP_TARGET=$FP_TARGET
+SYNC_DELETE_MODE=$SYNC_DELETE_MODE
+SYNC_COMPRESSION=$SYNC_COMPRESSION
+SYNC_CRONDAILY=$SYNC_CRONDAILY
+_EOF_
+
+	}
+
+	Read_Settings_File(){
+
+		if [[ -f $FP_DIETPISYNC_SETTINGS ]]; then
+
+			. $FP_DIETPISYNC_SETTINGS
+
+		fi
+
+	}
+
+	#/////////////////////////////////////////////////////////////////////////////////////
 	# MENUS
 	#/////////////////////////////////////////////////////////////////////////////////////
 	TARGETMENUID=0
 
-	FTP_MOUNT_AVAILABLE=0
-	FTP_MOUNT_TEXT='Not available'
 	SAMBA_MOUNT_AVAILABLE=0
 	SAMBA_MOUNT_TEXT='Not available'
 
@@ -82,7 +321,8 @@
 
 		G_WHIP_MENU_ARRAY=(
 
-			'Help' 'What does DietPi-Sync do?'
+			'' '●─ Info '
+			'Help' "What does $G_PROGRAM_NAME do?"
 			'' '●─ Options '
 			'Source Location' ': Change the Source directory.'
 			'Target Location' ': Change the Target directory.'
@@ -207,10 +447,10 @@
 			'Manual' "Manually type your $current_mode_text directory."
 			'List' 'Select from a list of available mounts/drives'
 			"Samba Client" "$SAMBA_MOUNT_TEXT"
-			"FTP Client" "$FTP_MOUNT_TEXT"
 
 		)
 
+		G_WHIP_BUTTON_CANCEL_TEXT='Back'
 		G_WHIP_MENU "$whip_description_text"
 		if (( $? == 0 )); then
 
@@ -220,8 +460,8 @@
 
 					/DietPi/dietpi/dietpi-drive_manager 1
 
-					local return_value=$(cat /tmp/dietpi-drive_manager_selmnt)
-					if [[ $return_value == "/" ]]; then
+					local return_value=$(</tmp/dietpi-drive_manager_selmnt)
+					if [[ $return_value == '/' ]]; then
 
 						return_value='/mnt'
 
@@ -262,37 +502,6 @@
 					else
 
 						Prompt_Setup_Samba_Mount
-						if (( $TARGETMENUID == 2 )); then
-
-							FP_SOURCE="$current_directory"
-
-						else
-
-							FP_TARGET="$current_directory"
-
-						fi
-
-					fi
-
-				;;
-
-				'FTP Client')
-
-					if (( $FTP_MOUNT_AVAILABLE == 1 )); then
-
-						if (( $TARGETMENUID == 2 )); then
-
-							FP_SOURCE="$FP_FTP_MOUNT"
-
-						else
-
-							FP_TARGET="$FP_FTP_MOUNT/dietpi-sync"
-
-						fi
-
-					else
-
-						Prompt_Setup_FTP_Mount
 						if (( $TARGETMENUID == 2 )); then
 
 							FP_SOURCE="$current_directory"
@@ -435,302 +644,10 @@
 
 	Prompt_Setup_Samba_Mount(){
 
-		G_WHIP_YESNO "$SAMBA_MOUNT_TEXT\n\nWould you like to run DietPi-Config and setup your Samba Client Mount now?"
+		G_WHIP_YESNO "$SAMBA_MOUNT_TEXT\n\nWould you like to run DietPi-Drive_Manager and setup your Samba Client Mount now?"
 		if (( $? == 0 )); then
 
-			#Run configure
-			/DietPi/dietpi/dietpi-config 16 1
-
-		fi
-
-	}
-
-	Prompt_Setup_FTP_Mount(){
-
-		G_WHIP_YESNO "$FTP_MOUNT_TEXT\n\nWould you like to run DietPi-Config and setup your FTP Client Mount now?"
-		if (( $? == 0 )); then
-
-			#Run configure
-			/DietPi/dietpi/dietpi-config 16 1
-
-		fi
-
-	}
-
-	#/////////////////////////////////////////////////////////////////////////////////////
-	# Sync System
-	#/////////////////////////////////////////////////////////////////////////////////////
-	#LOGFILE
-	LOGFILE='/var/log/dietpi-sync.log'
-
-	#Sync Filepaths
-	FP_SOURCE='/mnt/Source'
-	FP_TARGET='/mnt/Target'
-
-	#DietPi Mounts
-	FP_FTP_MOUNT='/mnt/ftp_client'
-	FP_SAMBA_MOUNT='/mnt/samba'
-
-	#file applied to successful Sync (stored in $FP_TARGET/$SYNC_STATS_FILENAME)
-	SYNC_STATS_FILENAME='.dietpi-sync_stats'
-
-	#Exclude/include file
-	FP_EXCLUDE_GLOBAL='/tmp/.dietpi-sync_exclude'
-	FP_INCLUDE_GLOBAL='/tmp/.dietpi-sync_include'
-	FP_EXCLUDE_USER='/DietPi/dietpi/.dietpi-sync_exclude'
-	FP_INCLUDE_USER='/DietPi/dietpi/.dietpi-sync_include'
-
-	#Extra options
-	SYNC_DELETE_MODE=0
-	SYNC_COMPRESSION=0
-	SYNC_CRONDAILY=0
-
-	Create_Exclude_File(){
-
-		#Generate new
-		rm $FP_EXCLUDE_GLOBAL &> /dev/null
-
-		#Global - Folders
-		echo -e "$FP_TARGET" >> $FP_EXCLUDE_GLOBAL
-		echo -e "/boot/dietpi/*" >> $FP_EXCLUDE_GLOBAL
-		echo -e "/DietPi/*" >> $FP_EXCLUDE_GLOBAL
-		echo -e "/dev/*" >> $FP_EXCLUDE_GLOBAL
-		echo -e "/proc/*" >> $FP_EXCLUDE_GLOBAL
-		echo -e "/sys/*" >> $FP_EXCLUDE_GLOBAL
-		echo -e "/tmp/*" >> $FP_EXCLUDE_GLOBAL
-		echo -e "/run/*" >> $FP_EXCLUDE_GLOBAL
-
-		#Global - Files
-		echo -e "$LOGFILE" >> $FP_EXCLUDE_GLOBAL
-		echo -e $FP_DIETPISYNC_SETTINGS >> $FP_EXCLUDE_GLOBAL
-		echo -e "$FP_EXCLUDE_USER" >> $FP_EXCLUDE_GLOBAL
-		echo -e "$FP_INCLUDE_USER" >> $FP_EXCLUDE_GLOBAL
-		echo -e "$SYNC_STATS_FILENAME" >> $FP_EXCLUDE_GLOBAL
-		echo -e "/var/swap" >> $FP_EXCLUDE_GLOBAL
-		echo -e ".swap*" >> $FP_EXCLUDE_GLOBAL
-		echo -e "*.tmp" >> $FP_EXCLUDE_GLOBAL
-		# - MS Windows specific
-		echo -e "Thumbs.db" >> $FP_EXCLUDE_GLOBAL
-		echo -e "desktop.ini" >> $FP_EXCLUDE_GLOBAL
-		echo -e "SyncToy*" >> $FP_EXCLUDE_GLOBAL # MS SyncToy
-		echo -e "System Volume Information" >> $FP_EXCLUDE_GLOBAL #  - causes error code 23 (permission denied)
-
-		#Add users additional list
-		if [[ -f $FP_EXCLUDE_USER ]]; then
-
-			cat $FP_EXCLUDE_USER >> $FP_EXCLUDE_GLOBAL
-
-		fi
-
-	}
-
-	Create_Include_File(){
-
-		#Generate new
-		rm $FP_INCLUDE_GLOBAL &> /dev/null
-
-		#Global - Folders
-		> $FP_INCLUDE_GLOBAL
-
-		#Global - Files
-
-		#Add users additional list
-		if [[ -f $FP_INCLUDE_USER ]]; then
-
-			cat $FP_INCLUDE_USER >> $FP_INCLUDE_GLOBAL
-
-		fi
-
-	}
-
-	Banner_Start(){
-
-		local mode='Sync'
-		#Dry Run?
-		if (( $SYNC_DRY_RUN )); then
-
-			mode='Dry Run'
-
-		fi
-
-		G_DIETPI-NOTIFY 3 "$G_PROGRAM_NAME" "$mode"
-
-	}
-
-
-	Run_Sync(){
-
-		Banner_Start
-
-		# Userdata location verify
-		G_CHECK_USERDATA
-
-		#Generate Target dir.
-		mkdir -p "$FP_TARGET"
-
-		systemctl stop rsync &> /dev/null # : https://github.com/Fourdee/DietPi/issues/1869
-		killall -w rsync &> /dev/null
-
-		#Error: Folder not found
-		if [[ ! -d $FP_TARGET ]]; then
-
-			G_WHIP_MSG "Error:\n\nSync failed, unable to create Target directory $FP_TARGET"
-
-		#Error: Rsync is already running
-		elif (( $(ps aux | grep -ci -m1 "[r]sync") )); then
-
-			G_WHIP_MSG 'Sync Failed:\n\nA sync job could not be started as rsync is already running.'
-			echo -e "Sync failed: $(date +"%d-%m-%Y_%H%M"). Rsync is already running." >> "$FP_TARGET/$SYNC_STATS_FILENAME"
-
-		#Start sync
-		else
-
-			#Generate Exclude/Include lists
-			Create_Exclude_File
-			Create_Include_File
-
-			#Archive mode
-			local rync_options='-a'
-			#verbose
-			rync_options+='v'
-			#Keep partial files + Progress. (eg: if file is interupted, it will resume where it left off, rather than resending the whole file.
-			rync_options+='P'
-			#Prefer IPv4
-			rync_options+='4'
-
-			#Compression?
-			if (( $SYNC_COMPRESSION )); then
-
-				rync_options+='z'
-
-			fi
-
-			#Dry Run?
-			if (( $SYNC_DRY_RUN )); then
-
-				rync_options+='n'
-
-			fi
-
-			#Delete mode?
-			if (( $SYNC_DELETE_MODE )); then
-
-				rync_options+=' --delete'
-
-			fi
-
-			#Write new logfile
-			echo -e "DietPi-Sync Log File.\n$(date +%d-%m-%Y_%H%M)\nSYNC_DRY_RUN=$SYNC_DRY_RUN\n\n" > "$LOGFILE"
-
-			#Verify enough space
-			#	NB: working in KiB until end MiB conversion, as, don't like using long long int, and, KiB should offer a good end result.
-			local old_backup_size=$(du -ks "$FP_TARGET" | awk '{print $1}')
-
-			rsync --dry-run --stats $rync_options --exclude-from=$FP_EXCLUDE_GLOBAL --include-from=$FP_INCLUDE_GLOBAL "$FP_SOURCE"/ "$FP_TARGET"/ > /tmp/dietpi-sync_result
-			local new_backup_size=$(( $(grep -m1 'Total file size' /tmp/dietpi-sync_result | sed 's/[^0-9]*//g') / 1024 ))
-			local total_file_count=$(( $(grep -m1 'Number of files' /tmp/dietpi-sync_result | awk '{print $6}' | sed 's/[^0-9]*//g') ))
-			local total_folder_count=$(( $(grep -m1 'Number of files' /tmp/dietpi-sync_result | awk '{print $8}' | sed 's/[^0-9]*//g') ))
-			local target_fs_blocksize=$(stat -fc %s "$FP_TARGET")
-			new_backup_size=$(( $new_backup_size + ( $total_file_count + $total_folder_count ) * $target_fs_blocksize / 1024 ))
-			local end_result=$(( ( $new_backup_size - $old_backup_size ) / 1024 + 1 ))
-			rm /tmp/dietpi-sync_result
-
-			if G_CHECK_FREESPACE "$FP_TARGET" $end_result; then
-
-				G_WHIP_BUTTON_OK_TEXT='Ignore'
-				G_WHIP_BUTTON_CANCEL_TEXT='Exit'
-				G_WHIP_YESNO 'The system sync target location appears to have insufficient free space to successfully finish the backup.\nHowever, this check is a rough estimation in reasonable time, thus it could be marginally incorrect.\n\nWould you like to override this warning and continue with the backup?'
-				if (( $? )); then
-
-					echo -e "Sync canceled: due to insufficient free space: $(date +"%d-%m-%Y_%H%M")" >> "$FP_TARGET/$SYNC_STATS_FILENAME"
-					break
-
-				fi
-
-			fi
-
-			#Sync
-			G_RUN_CMD rsync $rync_options --log-file=$LOGFILE --exclude-from=$FP_EXCLUDE_GLOBAL --include-from=$FP_INCLUDE_GLOBAL "$FP_SOURCE"/ "$FP_TARGET"/
-			echo -e "Sync completed: $(date +"%d-%m-%Y_%H%M")" >> "$FP_TARGET/$SYNC_STATS_FILENAME"
-
-			if (( ! $SYNC_DRY_RUN )); then
-
-				G_WHIP_MSG "Sync completed:\n\n$FP_SOURCE\n\nHas been synced to:\n$FP_TARGET\n\nLog file: $LOGFILE"
-
-			else
-
-				G_WHIP_MSG "Dry Run Sync completed:\n\n$FP_SOURCE\n\nHas been synced with a Dry Run (NO modifications) to:\n$FP_TARGET\n\nLog file: $LOGFILE"
-
-			fi
-
-			G_WHIP_VIEWLOG "$LOGFILE"
-
-			#return to main menu
-			TARGETMENUID=0
-
-		fi
-
-		systemctl start rsync &> /dev/null # : https://github.com/Fourdee/DietPi/issues/1869
-
-	}
-
-	Check_Available_DietPi_Mounts(){
-
-		local temp_file_mounts="/tmp/.dietpi-sync_dietpi_mounts"
-		df -h > "$temp_file_mounts"
-
-		#Samba Client
-		SAMBA_MOUNT_AVAILABLE=0
-		SAMBA_MOUNT_TEXT="Not mounted ($FP_SAMBA_MOUNT). Select to setup."
-		if (( $(grep -ci -m1 "/mnt/samba" "$temp_file_mounts") )); then
-
-			SAMBA_MOUNT_AVAILABLE=1
-			SAMBA_MOUNT_TEXT="Size: $(df -h | grep /mnt/samba | awk '{print $2}')B | Available: $(df -h | grep /mnt/samba | awk '{print $4}')B"
-
-		fi
-
-		#FTP Client
-		FTP_MOUNT_AVAILABLE=0
-		FTP_MOUNT_TEXT="Not mounted ($FP_FTP_MOUNT). Select to setup."
-		if (( $(grep -ci -m1 "/mnt/ftp_client" "$temp_file_mounts") )); then
-
-			FTP_MOUNT_AVAILABLE=1
-			FTP_MOUNT_TEXT="Mounted and online."
-
-		fi
-
-		rm "$temp_file_mounts"
-
-	}
-
-	#/////////////////////////////////////////////////////////////////////////////////////
-	# Settings File
-	#/////////////////////////////////////////////////////////////////////////////////////
-	#Settings File
-	FP_DIETPISYNC_SETTINGS='/DietPi/dietpi/.dietpi-sync_settings'
-
-	Write_Settings_File(){
-
-		rm $FP_DIETPISYNC_SETTINGS &> /dev/null
-
-		echo -e "$FP_SOURCE" >> $FP_DIETPISYNC_SETTINGS
-		echo -e "$FP_TARGET" >> $FP_DIETPISYNC_SETTINGS
-		echo -e "$SYNC_DELETE_MODE" >> $FP_DIETPISYNC_SETTINGS
-		echo -e "$SYNC_COMPRESSION" >> $FP_DIETPISYNC_SETTINGS
-		echo -e "$SYNC_CRONDAILY" >> $FP_DIETPISYNC_SETTINGS
-
-	}
-
-	Read_Settings_File(){
-
-		if [[ -f $FP_DIETPISYNC_SETTINGS ]]; then
-
-			local sed_index=1
-			FP_SOURCE=$(sed -n "$sed_index"p $FP_DIETPISYNC_SETTINGS);((sed_index++))
-			FP_TARGET=$(sed -n "$sed_index"p $FP_DIETPISYNC_SETTINGS);((sed_index++))
-			SYNC_DELETE_MODE=$(sed -n "$sed_index"p $FP_DIETPISYNC_SETTINGS);((sed_index++))
-			SYNC_COMPRESSION=$(sed -n "$sed_index"p $FP_DIETPISYNC_SETTINGS);((sed_index++))
-			SYNC_CRONDAILY=$(sed -n "$sed_index"p $FP_DIETPISYNC_SETTINGS);((sed_index++))
+			/DietPi/dietpi/dietpi-drive_manager
 
 		fi
 
@@ -741,6 +658,24 @@
 	#/////////////////////////////////////////////////////////////////////////////////////
 	#pre-reqs, install if required.
 	G_AG_CHECK_INSTALL_PREREQ rsync
+
+	#Generate optional user include/exclude file
+	if [[ ! -f $FP_USER_FILTER_INCLUDE_EXCLUDE ]]; then
+
+		cat << _EOF_ > $FP_USER_FILTER_INCLUDE_EXCLUDE
+#$G_PROGRAM_NAME | Custom include/exclude filters
+#
+#To INCLUDE (+) a file/folder:
+#+ /location/to/my/file
+#+ /location/to/my/directory/
+#
+#To EXCLUDE (-) a file/folder:
+#- /location/to/my/file
+#- /location/to/my/directory/
+
+_EOF_
+
+	fi
 
 	#Read settings file
 	Read_Settings_File
@@ -790,10 +725,9 @@
 
 	#-----------------------------------------------------------------------------------
 	#Cleaup left over tmp files
-	rm $FP_INCLUDE_GLOBAL &> /dev/null
-	rm $FP_EXCLUDE_GLOBAL &> /dev/null
+	rm $FP_FILTER_INCLUDE_EXCLUDE &> /dev/null
 	#-----------------------------------------------------------------------------------
-	exit 0
+	exit $EXIT_CODE
 	#-----------------------------------------------------------------------------------
 
 }

@@ -219,3 +219,6 @@ FreshRSS
 
 Folding@Home
 - https://github.com/FoldingAtHome
+
+OpenBazaar
+- https://github.com/OpenBazaar/openbazaar-go
