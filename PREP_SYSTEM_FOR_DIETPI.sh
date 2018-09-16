@@ -296,11 +296,10 @@
 
 				)
 
-				LOWERCASE_TEMP="$(echo $G_WHIP_RETURNED_VALUE | tr '[:upper:]' '[:lower:]')"
 				for (( i=0; i<${#aDISALLOWED_NAMES[@]}; i++))
 				do
 
-					if [[ $LOWERCASE_TEMP == *"${aDISALLOWED_NAMES[$i]}"* ]]; then
+					if [[ ${G_WHIP_RETURNED_VALUE,,} == *"${aDISALLOWED_NAMES[$i]}"* ]]; then
 
 						DISALLOWED_NAME=1
 						break
@@ -1403,6 +1402,8 @@ _EOF_
 		G_DIETPI-NOTIFY 2 'Generating default wpa_supplicant.conf'
 
 		/DietPi/dietpi/func/dietpi-set_hardware wificreds set
+		#	Copy to /boot/ so users can modify as needed for automated
+		G_RUN_CMD cp /var/lib/dietpi/dietpi-wifi.db /boot/dietpi-wifi.txt
 
 		G_DIETPI-NOTIFY 2 'Disabling generic BT by default'
 
