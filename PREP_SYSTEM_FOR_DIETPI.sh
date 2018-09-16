@@ -1138,6 +1138,9 @@ _EOF_
 
 		fi
 
+		#	Fix rare WiFi interface start issue: https://github.com/Fourdee/DietPi/issues/2074
+		sed -i '\|^[[:blank:]]ifconfig "$IFACE" up$|c\\t/sbin/ip link set dev "$IFACE" up' /etc/network/if-pre-up.d/wireless-tools &> /dev/null
+
 		G_DIETPI-NOTIFY 2 'Tweaking DHCP timeout:'
 
 		# - Reduce DHCP request retry count and timeouts: https://github.com/Fourdee/DietPi/issues/711
@@ -1164,7 +1167,7 @@ _EOF_
 		mkdir -p /root/.config/htop
 		cp /DietPi/dietpi/conf/htoprc /root/.config/htop/htoprc
 
-		G_DIETPI-NOTIFY 2 'Configuring fakehwclock:'
+		G_DIETPI-NOTIFY 2 'Configuring fake-hwclock:'
 
 		# - allow times in the past
 		G_CONFIG_INJECT 'FORCE=' 'FORCE=force' /etc/default/fake-hwclock
