@@ -1402,8 +1402,8 @@ _EOF_
 		G_DIETPI-NOTIFY 2 'Generating default wpa_supplicant.conf'
 
 		/DietPi/dietpi/func/dietpi-set_hardware wificreds set
-		#	Copy to /boot/ so users can modify as needed for automated
-		G_RUN_CMD cp /var/lib/dietpi/dietpi-wifi.db /boot/dietpi-wifi.txt
+		#	move to /boot/ so users can modify as needed for automated
+		G_RUN_CMD mv /var/lib/dietpi/dietpi-wifi.db /boot/dietpi-wifi.txt
 
 		G_DIETPI-NOTIFY 2 'Disabling generic BT by default'
 
