@@ -63,38 +63,25 @@ Creator, programmer and project lead of DietPi.
 
 _Joined Q3 2017_
 
-Source code contributor.
-
-- bug fixes
-- software improvements
-- DietPi forum co-administrator
+Source code contributor, bug fixes, software improvements, DietPi forum co-administrator.
 
 #### JohnVick
 
 _Joined 2016-06-08_
 
-DietPi forum co-administrator.
-
-- management
-- support
-- testing and valuable feedback
+DietPi forum co-administrator, management, support, testing and valuable feedback.
 
 #### K-Plan
 
 _Joined 2016-01-01_
 
-Contributions to the DietPi in general.
-
-- in-depth testing
-- bug finding and valuable feedback
-- forum moderator
+Contributions to the DietPi in general, in-depth testing, bug finding and valuable feedback, forum moderator.
 
 #### ZombieVirus
 
 _Joined 2016-03-20_
 
-- DietPi forum moderator
-- Version history maintainer on forums
+DietPi forum moderator and version history maintainer on forums.
 
 ---
 
@@ -115,31 +102,19 @@ https://github.com/Fourdee/DietPi/issues/474
 
 _Joined 2018-03-01_
 
-Contributions to the DietPi in general, including:
-
-- source code
-- testing
-- new devices
-- forum moderator
+Contributions to the DietPi in general, including source code, testing, new devices, forum moderator.
 
 #### Pilovali
 
 _Joined 2015-10-10_
 
-Provided DietPi.com web hosting for 1 year until April 17th 2016.
-
-- forum moderator
-- testing
-- bug reporting
+Provided DietPi.com web hosting for 1 year until April 17th 2016. Additionally: forum moderator, testing, bug reporting.
 
 #### xenfomation
 
 _Joined 2016-04-01_
 
-Contributions to the DietPi in general, including:
-
-- source code
-- VirtualBox image creation/conversion
+Contributions to the DietPi in general, including source code and VirtualBox image creation/conversion.
 
 #### AWL29
 
