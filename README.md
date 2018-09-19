@@ -96,6 +96,8 @@ _Joined 2016-03-20_
 - DietPi forum moderator
 - Version history maintainer on forums
 
+---
+
 ### Collaborations
 
 #### DietPi + AmiBerry
@@ -129,8 +131,6 @@ _Joined 2015-10-10_
 - testing
 - bug reporting
 
----
-
 #### xenfomation
 
 _Joined 2016-04-01_
@@ -139,8 +139,6 @@ Contributions to the DietPi in general, including
 
 - source code
 - VirtualBox image creation/conversion
-
----
 
 #### AWL29
 
