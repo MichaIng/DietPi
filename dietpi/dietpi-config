@@ -759,7 +759,6 @@
 
 	}
 
-
 	Xorg_Configure(){
 
 		G_WHIP_YESNO "Xorg Configuration:\nNB: This feature will only work if X server is NOT currently running.\n\nPlease ensure:\n - No current X server (desktop) is running\n\nIf a desktop is running, please set 'dietpi-autostart' to 'Console', reboot system, then rerun this option.\n\nWould you like to continue?"
@@ -2369,7 +2368,7 @@
 	ETH_MASK_STATIC='0.0.0.0'
 	ETH_DNS_STATIC='0.0.0.0'
 
-	ETH_INDEX=0
+	ETH_DEV_INDEX=0
 	ETH_DISABLED=0
 	ETH_HARDWARE=0
 	ETH_CONNECTED=0
@@ -2385,7 +2384,7 @@
 	WIFI_MASK_STATIC='0.0.0.0'
 	WIFI_DNS_STATIC='0.0.0.0'
 
-	WIFI_INDEX=0
+	WIFI_DEV_INDEX=0
 	WIFI_DISABLED=0
 	WIFI_HARDWARE=0
 	WIFI_CONNECTED=0
@@ -2395,8 +2394,12 @@
 	WIFI_DNS='0.0.0.0'
 	WIFI_MODE=1 #0=static 1=dhcp
 	WIFI_MODE_TARGET=0
-	WIFI_SSID='WifiSSID'
-	WIFI_KEY='WifiKey'
+	WIFI_SSID_CURRENT=''
+	WIFI_CRED_INDEX=0
+	aWIFI_SSID=()
+	aWIFI_KEY=()
+	aWIFI_KEYMGR=()
+
 	WIFI_BITRATE=0
 	WIFI_SIGNALSTRENGTH=0
 	WIFI_HOTSPOT=0
@@ -2436,16 +2439,17 @@
 		#Stop all services (required for hotspot)
 		/DietPi/dietpi/dietpi-services stop
 
+		# - Apply WiFi creds to wpa_supplicant.conf
+		/DietPi/dietpi/func/dietpi-set_hardware wificreds set
+
 		# Enable/Disable wifi modules
-		# - enable
-		if (( $WIFI_DISABLED == 0 )); then
-
-			/DietPi/dietpi/func/dietpi-set_hardware wifimodules enable
-
-		# - disable
-		else
+		if (( $WIFI_DISABLED )); then
 
 			/DietPi/dietpi/func/dietpi-set_hardware wifimodules disable
+
+		else
+
+			/DietPi/dietpi/func/dietpi-set_hardware wifimodules enable
 
 		fi
 
@@ -2454,8 +2458,8 @@
 
 		#Drop Connections
 		G_DIETPI-NOTIFY 2 'Dropping connections, please wait...'
-		ifdown eth$ETH_INDEX &> /dev/null
-		ifdown wlan$WIFI_INDEX &> /dev/null
+		ifdown eth$ETH_DEV_INDEX &> /dev/null
+		ifdown wlan$WIFI_DEV_INDEX &> /dev/null
 
 		#Kill dhclient
 		killall dhclient &> /dev/null
@@ -2468,13 +2472,13 @@
 		#Manually bring up adapters
 		if (( $ETH_DISABLED == 0 )); then
 
-			ifup eth$ETH_INDEX
+			ifup eth$ETH_DEV_INDEX
 
 		fi
 
 		if (( $WIFI_DISABLED == 0 )); then
 
-			ifup wlan$WIFI_INDEX
+			ifup wlan$WIFI_DEV_INDEX
 
 			#	disable power saving
 			systemctl restart wifi_disable_powersave
@@ -2484,6 +2488,10 @@
 		#Restart all services (required for hotspot)
 		/DietPi/dietpi/dietpi-services start
 
+		# - Add a little delay to ensure all network device data are updated (eg: SSID current takes a little longer)
+		G_DIETPI-NOTIFY 2 'Reloading networking data, please wait...'
+		sleep 2
+
 		#Update network data
 		Network_GetData
 
@@ -2491,113 +2499,129 @@
 
 	Network_ApplyChanges(){
 
-		#Disable all adapters
-		sed -i "/allow-hotplug eth/c\#allow-hotplug eth$ETH_INDEX" /etc/network/interfaces
-		sed -i "/allow-hotplug wlan/c\#allow-hotplug wlan$WIFI_INDEX" /etc/network/interfaces
+		#Eth
+		local eth_enabled_text=''
+		if (( $ETH_DISABLED )); then
 
-		#Enable adapters
-		if (( $ETH_DISABLED == 0 )); then
-
-			sed -i "/allow-hotplug eth/c\allow-hotplug eth$ETH_INDEX" /etc/network/interfaces
+			eth_enabled_text='#'
 
 		fi
 
-		if (( $WIFI_DISABLED == 0 )); then
-
-			sed -i "/allow-hotplug wlan/c\allow-hotplug wlan$WIFI_INDEX" /etc/network/interfaces
-
-		fi
-
-		#Save STATIC/DHCP
-		# - eth
+		local eth_dhcp_static_text='dhcp'
+		local eth_dns_text='#'
 		if (( $ETH_MODE_TARGET == 0 )); then
 
-			#Change to STATIC
-			sed -i "/iface eth/c\iface eth$ETH_INDEX inet static" /etc/network/interfaces
-
-		elif (( $ETH_MODE_TARGET == 1 )); then
-
-			#Change to DHCP
-			sed -i "/iface eth/c\iface eth$ETH_INDEX inet dhcp" /etc/network/interfaces
+			eth_dhcp_static_text='static'
+			eth_dns_text=''
+			ETH_IP="$ETH_IP_STATIC"
+			ETH_GATEWAY="$ETH_GATEWAY_STATIC"
+			ETH_MASK="$ETH_MASK_STATIC"
+			ETH_DNS="$ETH_DNS_STATIC"
 
 		fi
-		#Update Current Mode for network restart
-		ETH_MODE=$ETH_MODE_TARGET
 
-		# - Wifi
+		#Wlan
+		local wifi_enabled_text=''
+		if (( $WIFI_DISABLED )); then
+
+			wifi_enabled_text='#'
+
+		fi
+
+		local wifi_dhcp_static_text='dhcp'
+		local wifi_dns_text='#'
 		if (( $WIFI_MODE_TARGET == 0 )); then
 
-			#Change to STATIC
-			sed -i "/iface wlan/c\iface wlan$WIFI_INDEX inet static" /etc/network/interfaces
-
-		elif (( $WIFI_MODE_TARGET == 1 )); then
-
-			#Change to DHCP
-			sed -i "/iface wlan/c\iface wlan$WIFI_INDEX inet dhcp" /etc/network/interfaces
+			wifi_dhcp_static_text='static'
+			wifi_dns_text=''
+			WIFI_IP="$WIFI_IP_STATIC"
+			WIFI_GATEWAY="$WIFI_GATEWAY_STATIC"
+			WIFI_MASK="$WIFI_MASK_STATIC"
+			WIFI_DNS="$WIFI_DNS_STATIC"
 
 		fi
+
+		cat << _EOF_ > /etc/network/interfaces
+#/etc/network/interfaces
+#Please use DietPi-Config to modify network settings.
+
+# Local
+auto lo
+iface lo inet loopback
+
+# Ethernet
+${eth_enabled_text}allow-hotplug eth$ETH_DEV_INDEX
+iface eth$ETH_DEV_INDEX inet $eth_dhcp_static_text
+address $ETH_IP
+netmask $ETH_MASK
+gateway $ETH_GATEWAY
+${eth_dns_text}dns-nameservers $ETH_DNS
+
+# Wifi
+${wifi_enabled_text}allow-hotplug wlan$WIFI_DEV_INDEX
+iface wlan$WIFI_DEV_INDEX inet $wifi_dhcp_static_text
+address $WIFI_IP
+netmask $WIFI_MASK
+gateway $WIFI_GATEWAY
+${wifi_dns_text}dns-nameservers $WIFI_DNS
+wireless-power off
+wpa-conf /etc/wpa_supplicant/wpa_supplicant.conf
+_EOF_
+
+		# - Additional settings/changes, required for hotspot mode
+		if (( $WIFI_HOTSPOT )); then
+
+			# - Remove all entries below wlan, so we can recreate them.
+			sed -i '/allow-hotplug wlan/q0' /etc/network/interfaces
+
+			cat << _EOF_ >> /etc/network/interfaces
+iface wlan$WIFI_DEV_INDEX inet static
+address 192.168.42.1
+netmask 255.255.255.0
+#gateway 192.168.0.1
+wireless-power off
+#dns-nameservers 8.8.8.8 8.8.4.4
+
+# IP tables
+up iptables-restore < /etc/iptables.ipv4.nat
+_EOF_
+
+		fi
+
+		# - Update WiFi db
+		#NB: THIS IS AN EXACT COPY OF wificreds set, ensure both match
+		rm /var/lib/dietpi/dietpi-wifi.db
+		#	Wish we could export an array... Could create a global for these to allow that, but, "security"................
+		for (( i=0; i<5; i++ ))
+		do
+
+			cat << _EOF_ >> /var/lib/dietpi/dietpi-wifi.db
+#---------------------------------------------------------------
+# - Entry $i
+#	WiFi SSID (Case Sensitive)
+aWIFI_SSID[$i]="${aWIFI_SSID[$i]}"
+#	Key options: If no key (open), leave this blank
+aWIFI_KEY[$i]="${aWIFI_KEY[$i]}"
+#	Available options: NONE (no key/open) | WPA-PSK | WEP | WPA-EAP (then use settings below)
+aWIFI_KEYMGR[$i]="${aWIFI_KEYMGR[$i]}"
+# - WPA-EAP Options
+aWIFI_PROTO[$i]="${aWIFI_PROTO[$i]}"
+aWIFI_PAIRWISE[$i]="${aWIFI_PAIRWISE[$i]}"
+aWIFI_AUTH_ALG[$i]="${aWIFI_AUTH_ALG[$i]}"
+aWIFI_EAP[$i]="${aWIFI_EAP[$i]}"
+aWIFI_IDENTITY[$i]="${aWIFI_IDENTITY[$i]}"
+aWIFI_PASSWORD[$i]="${aWIFI_PASSWORD[$i]}"
+aWIFI_PHASE1[$i]="${aWIFI_PHASE1[$i]}"
+aWIFI_PHASE2[$i]="${aWIFI_PHASE2[$i]}"
+#	Location of the certificate file (eg: /boot/mycert.cer)
+aWIFI_CERT[$i]="${aWIFI_CERT[$i]}"
+_EOF_
+
+		done
 
 		#Update Current Mode for network restart
+		ETH_MODE=$ETH_MODE_TARGET
 		WIFI_MODE=$WIFI_MODE_TARGET
-
-		#dns-nameservers (If static IP. dns-nameservers MUST be enabled)
-		# - Disable all
-		sed -i 's/^dns-nameservers/#dns-nameservers/g' /etc/network/interfaces
-		# - Enable eth
-		if (( $ETH_DISABLED == 0 )) && (( $ETH_MODE == 0 )); then
-
-			sed -i "$(cat -n /etc/network/interfaces | grep 'dns-nameservers ' | sed -n 1p | awk '{print $1}')s/^#dns-nameservers/dns-nameservers/g" /etc/network/interfaces
-
-		fi
-		# - Enable Wifi
-		if (( ! $WIFI_DISABLED )) && (( $WIFI_MODE == 0 )); then
-
-			sed -i "$(cat -n /etc/network/interfaces | grep 'dns-nameservers ' | sed -n 2p | awk '{print $1}')s/^#dns-nameservers/dns-nameservers/g" /etc/network/interfaces
-
-		fi
-
-		#Save Static IPs (not applied to # disabled lines)
-		# - eth
-		sed -i "$(cat -n /etc/network/interfaces | grep 'address ' | sed -n 1p | awk '{print $1}')s/address.*/address $ETH_IP_STATIC/" /etc/network/interfaces
-		sed -i "$(cat -n /etc/network/interfaces | grep 'gateway ' | sed -n 1p | awk '{print $1}')s/gateway.*/gateway $ETH_GATEWAY_STATIC/" /etc/network/interfaces
-		sed -i "$(cat -n /etc/network/interfaces | grep 'netmask ' | sed -n 1p | awk '{print $1}')s/netmask.*/netmask $ETH_MASK_STATIC/" /etc/network/interfaces
-		sed -i "$(cat -n /etc/network/interfaces | grep 'dns-nameservers ' | sed -n 1p | awk '{print $1}')s/dns-nameservers.*/dns-nameservers $ETH_DNS_STATIC/" /etc/network/interfaces
-		# - wifi | If not running in hotspot mode, as these are disabled in the file.
-		if (( $WIFI_HOTSPOT == 0 )); then
-
-			sed -i "$(cat -n /etc/network/interfaces | grep 'address ' | sed -n 2p | awk '{print $1}')s/address.*/address $WIFI_IP_STATIC/" /etc/network/interfaces
-			sed -i "$(cat -n /etc/network/interfaces | grep 'gateway ' | sed -n 2p | awk '{print $1}')s/gateway.*/gateway $WIFI_GATEWAY_STATIC/" /etc/network/interfaces
-			sed -i "$(cat -n /etc/network/interfaces | grep 'netmask ' | sed -n 2p | awk '{print $1}')s/netmask.*/netmask $WIFI_MASK_STATIC/" /etc/network/interfaces
-			sed -i "$(cat -n /etc/network/interfaces | grep 'dns-nameservers ' | sed -n 2p | awk '{print $1}')s/dns-nameservers.*/dns-nameservers $WIFI_DNS_STATIC/" /etc/network/interfaces
-
-		fi
-
-		#Save WiFi creds
-		if (( $WIFI_HOTSPOT == 0 )); then
-
-			# - Update globals
-			G_CONFIG_INJECT 'AUTO_SETUP_NET_WIFI_SSID=' "AUTO_SETUP_NET_WIFI_SSID=$WIFI_SSID" /DietPi/dietpi.txt
-			G_CONFIG_INJECT 'AUTO_SETUP_NET_WIFI_KEY=' "AUTO_SETUP_NET_WIFI_KEY=$WIFI_KEY" /DietPi/dietpi.txt
-
-			#	Open host
-			if [[ -z $WIFI_KEY ]]; then
-
-				G_CONFIG_INJECT 'AUTO_SETUP_NET_WIFI_KEYMGR=' 'AUTO_SETUP_NET_WIFI_KEYMGR=NONE' /DietPi/dietpi.txt
-
-
-			#	Key host
-			#??? Can we check for WEP/WPA-PSK on the SSID and set accordingly?
-			#	WEP tests failed, dropping support as its outdated and not secure. WPA-PSK is recommended for router.
-			else
-
-				G_CONFIG_INJECT 'AUTO_SETUP_NET_WIFI_KEYMGR=' 'AUTO_SETUP_NET_WIFI_KEYMGR=WPA-PSK' /DietPi/dietpi.txt
-
-			fi
-
-			# - Function apply
-			/DietPi/dietpi/func/dietpi-set_hardware wificreds set
-
-		fi
 
 		#restart net
 		Network_Restart
@@ -2768,11 +2792,11 @@
 
 	Change_WifiSsid(){
 
-		G_WHIP_DEFAULT_ITEM="$WIFI_SSID"
+		G_WHIP_DEFAULT_ITEM="${aWIFI_SSID[$WIFI_CRED_INDEX]}"
 		G_WHIP_INPUTBOX 'Please enter the SSID name to connect to.'
 		if (( $? == 0 )); then
 
-			WIFI_SSID=$G_WHIP_RETURNED_VALUE
+			aWIFI_SSID[$WIFI_CRED_INDEX]="$G_WHIP_RETURNED_VALUE"
 
 		fi
 
@@ -2780,11 +2804,32 @@
 
 	Change_WifiKey(){
 
-		G_WHIP_DEFAULT_ITEM="$WIFI_KEY"
-		G_WHIP_INPUTBOX 'Please enter the Access Key (WPA).'
+		G_WHIP_MENU_ARRAY=(
+
+			'WPA-PSK' ': Default (recommended)'
+			'WEP' ': Legacy (insecure)'
+			'NONE' ': Open host that does not require a key (eg: free WiFi!)'
+
+		)
+
+		G_WHIP_DEFAULT_ITEM="${aWIFI_KEYMGR[$WIFI_CRED_INDEX]}"
+		G_WHIP_MENU 'Please select a WiFi encryption mode.\n\nNB: If unsure, its most likely WPA-PSK.'
 		if (( $? == 0 )); then
 
-			WIFI_KEY=$G_WHIP_RETURNED_VALUE
+			aWIFI_KEYMGR[$WIFI_CRED_INDEX]="$G_WHIP_RETURNED_VALUE"
+
+			if [[ ${aWIFI_KEYMGR[$WIFI_CRED_INDEX]} != 'NONE' ]]; then
+
+				G_WHIP_DEFAULT_ITEM="${aWIFI_KEY[$WIFI_CRED_INDEX]}"
+				G_WHIP_INPUTBOX 'Please enter the Access Key (WPA).'
+				if (( $? == 0 )); then
+
+					aWIFI_KEY[$WIFI_CRED_INDEX]="$G_WHIP_RETURNED_VALUE"
+
+
+				fi
+
+			fi
 
 		fi
 
@@ -2855,51 +2900,65 @@
 	Scan_Wifi(){
 
 		#Ensure adapater is up
-		ifup wlan$WIFI_INDEX
+		ifup wlan$WIFI_DEV_INDEX
 
 		#Get all ssids
 		printf '\ec' # clear current terminal screen
 		echo 'Scanning SSIDS, please wait....'
 		echo '-------------------------------'
-		iwlist wlan$WIFI_INDEX scan | grep ESSID: | sed 's/[ \t]*ESSID:"\(.*\)"/\1/' > /tmp/dietpi-config_temp
-
-		#read file to array
-		readarray wifi_ssid_array < /tmp/dietpi-config_temp
 
 		G_WHIP_MENU_ARRAY=()
-		for ((i=0; i<${#wifi_ssid_array[@]}; i++))
+		while read line
 		do
 
-			G_WHIP_MENU_ARRAY+=($i "${wifi_ssid_array[$i]}")
+			if [[ $line ]]; then
 
-		done
+				G_WHIP_MENU_ARRAY+=("$line" '')
+
+			fi
+
+		done <<< "$(iwlist wlan$WIFI_DEV_INDEX scan | grep 'ESSID:' | sed 's/[ \t]*ESSID:"\(.*\)"/\1/')"
 
 		G_WHIP_MENU 'Please select a Wifi SSID'
 		if (( $? == 0 )); then
 
-			WIFI_SSID=${wifi_ssid_array[$G_WHIP_RETURNED_VALUE]}
+			aWIFI_SSID[$WIFI_CRED_INDEX]="$G_WHIP_RETURNED_VALUE"
 			Change_WifiKey
-			Wifi_Reconnect
 
 		fi
-
-		#Clean up tmp files
-		rm /tmp/dietpi-config_temp &> /dev/null
-
-		#delete[] arrays
-		unset wifi_ssid_array
 
 	}
 
 	Wifi_Reconnect(){
 
-		G_WHIP_YESNO "SSID: $WIFI_SSID \nKEY: $WIFI_KEY \n\nConnect now? \n\n(NOTICE) All WiFi connections will be dropped!"
-		if (( $? == 0 )); then
+		local ssid_text='Stored WiFi SSIDs:\n'
+		local ssid_configured=0
 
-			#Apply Changes
-			printf '\ec' # clear current terminal screen
-			echo "Connecting to $WIFI_SSID , please wait"
-			Network_ApplyChanges
+		for (( i=0; i<5; i++ ))
+		do
+
+			if [[ ${aWIFI_SSID[$i]} ]]; then
+
+				ssid_text+=" - ${aWIFI_SSID[$i]}\n"
+				ssid_configured=1
+
+			fi
+
+		done
+
+		if (( $ssid_configured )); then
+
+			G_WHIP_YESNO "$ssid_text\nWiFi will connect to the strongest configured SSID that is secure, with an open SSID being the last priority.\n\nSave all changes and restart networking?\n\nNB: All WiFi connections will be dropped!"
+			if (( $? == 0 )); then
+
+				#Apply Changes
+				Network_ApplyChanges
+
+			fi
+
+		else
+
+			G_WHIP_MSG 'No WiFi SSIDs are configured, please use the "Scan" option to set this up.'
 
 		fi
 
@@ -2919,7 +2978,6 @@
 
 	}
 
-
 	INTERNET_TEST_STATE=0 # 0=not tested, 1=failed, 2=online
 	INTERNET_TEST_URL='https://google.com'
 
@@ -2937,8 +2995,8 @@
 		ETH_MASK_STATIC=$(cat -n /tmp/net_interfaces | grep 'netmask ' | sed -n 1p | awk '{print $3}')
 		ETH_DNS_STATIC=$(cat -n /tmp/net_interfaces | grep 'dns-nameservers ' | sed -n 1p | awk '{print $3,$4}')
 
-		ETH_INDEX=$(sed -n 1p /DietPi/dietpi/.network)
-		ETH_DISABLED=$(grep -ci -m1 "#allow-hotplug eth$ETH_INDEX" /tmp/net_interfaces)
+		ETH_DEV_INDEX=$(sed -n 1p /DietPi/dietpi/.network)
+		ETH_DISABLED=$(grep -ci -m1 "#allow-hotplug eth$ETH_DEV_INDEX" /tmp/net_interfaces)
 		ETH_HARDWARE=0
 		ETH_CONNECTED=0
 		ETH_IP='0.0.0.0'
@@ -2953,8 +3011,8 @@
 		WIFI_MASK_STATIC=$(cat -n /tmp/net_interfaces | grep 'netmask ' | sed -n 2p | awk '{print $3}')
 		WIFI_DNS_STATIC=$(cat -n /tmp/net_interfaces | grep 'dns-nameservers ' | sed -n 2p | awk '{print $3,$4}')
 
-		WIFI_INDEX=$(sed -n 2p /DietPi/dietpi/.network)
-		WIFI_DISABLED=$(grep -ci -m1 "#allow-hotplug wlan$WIFI_INDEX" /tmp/net_interfaces)
+		WIFI_DEV_INDEX=$(sed -n 2p /DietPi/dietpi/.network)
+		WIFI_DISABLED=$(grep -ci -m1 "#allow-hotplug wlan$WIFI_DEV_INDEX" /tmp/net_interfaces)
 		WIFI_HARDWARE=0
 		WIFI_CONNECTED=0
 		WIFI_IP='0.0.0.0'
@@ -2963,8 +3021,26 @@
 		WIFI_DNS='0.0.0.0'
 		WIFI_MODE=1
 		WIFI_MODE_TARGET=$WIFI_MODE
-		WIFI_SSID='MySuperDooperWiFi'
-		WIFI_KEY='0123456789'
+		WIFI_SSID_CURRENT="$(iwgetid -r)"
+		if [[ ! $WIFI_SSID_CURRENT ]]; then
+
+			WIFI_SSID_CURRENT='Disconnected / No SSID'
+
+		fi
+		WIFI_CRED_INDEX=0 # Which index of SSID/KEY etc we are editing
+
+		# - Load dietpi-wifi.db
+		aWIFI_SSID=()
+		aWIFI_KEY=()
+		aWIFI_KEYMGR=()
+		if [[ ! -f /var/lib/dietpi/dietpi-wifi.db ]]; then
+
+			G_DIETPI-NOTIFY 1 "DEBUG: /var/lib/dietpi/dietpi-wifi.db does not exist, unable to continue. If you did not manually remove this file, please report this issue to DietPi."
+			exit 1
+
+		fi
+		. /var/lib/dietpi/dietpi-wifi.db
+
 		#Get extra wifi stats
 		WIFI_BITRATE=0
 		WIFI_SIGNALSTRENGTH=0
@@ -3020,57 +3096,53 @@
 		}
 
 		#eth
-		if [[ -d /sys/class/net/eth$ETH_INDEX ]]; then
+		if [[ -d /sys/class/net/eth$ETH_DEV_INDEX ]]; then
 
 			#Hardware
 			ETH_HARDWARE=1
 
 			#Static or Dhcp?
-			ETH_MODE=$(grep -ci -m1 "iface eth$ETH_INDEX inet dhcp" /tmp/net_interfaces)
+			ETH_MODE=$(grep -ci -m1 "iface eth$ETH_DEV_INDEX inet dhcp" /tmp/net_interfaces)
 			ETH_MODE_TARGET=$ETH_MODE
 
 			#Connected and Valid IP?
-			ETH_CONNECTED=$(ip r | grep -ci -m1 "eth$ETH_INDEX")
+			ETH_CONNECTED=$(ip r | grep -ci -m1 "eth$ETH_DEV_INDEX")
 
 			#Enabled and Connected
 			if (( $ETH_DISABLED == 0 && $ETH_CONNECTED == 1 )); then
 
-				ETH_IP=$(ip a s eth$ETH_INDEX | grep -m1 '^[[:blank:]]*inet ' | awk '{ print $2 }' | sed 's|/.*$||')
+				ETH_IP=$(ip a s eth$ETH_DEV_INDEX | grep -m1 '^[[:blank:]]*inet ' | awk '{ print $2 }' | sed 's|/.*$||')
 				ETH_GATEWAY=$(ip r | grep -m1 'default' | awk '{ print $3 }')
-				ETH_MASK=$(cidr2mask $(ip a s eth$ETH_INDEX | grep -m1 '^[[:blank:]]*inet ' | awk '{ print $2 }' | sed 's|^.*/||'))
+				ETH_MASK=$(cidr2mask $(ip a s eth$ETH_DEV_INDEX | grep -m1 '^[[:blank:]]*inet ' | awk '{ print $2 }' | sed 's|^.*/||'))
 				ETH_DNS=$(grep -m1 'nameserver' /etc/resolv.conf | awk '{print $2}')
 
 			fi
 
 		fi
 
-		if [[ -d /sys/class/net/wlan$WIFI_INDEX ]]; then
+		if [[ -d /sys/class/net/wlan$WIFI_DEV_INDEX ]]; then
 
 			#Hardware
 			WIFI_HARDWARE=1
 
 			#Static or Dhcp?
-			WIFI_MODE=$(grep -ci -m1 "iface wlan$WIFI_INDEX inet dhcp" /tmp/net_interfaces)
+			WIFI_MODE=$(grep -ci -m1 "iface wlan$WIFI_DEV_INDEX inet dhcp" /tmp/net_interfaces)
 			WIFI_MODE_TARGET=$WIFI_MODE
 
 			#Connected and Valid IP?
-			WIFI_CONNECTED=$(ip r | grep -ci -m1 "wlan$WIFI_INDEX")
-
-			#Wifi Extras
-			WIFI_SSID="$(grep -m1 '^[[:blank:]]*AUTO_SETUP_NET_WIFI_SSID=' /DietPi/dietpi.txt | sed 's/^[^=]*=//')"
-			WIFI_KEY="$(grep -m1 '^[[:blank:]]*AUTO_SETUP_NET_WIFI_KEY=' /DietPi/dietpi.txt | sed 's/^[^=]*=//')"
+			WIFI_CONNECTED=$(ip r | grep -ci -m1 "wlan$WIFI_DEV_INDEX")
 
 			#Enabled and Connected
 			if (( $WIFI_DISABLED == 0 && $WIFI_CONNECTED == 1 )); then
 
-				WIFI_IP=$(ip a s wlan$WIFI_INDEX | grep -m1 '^[[:blank:]]*inet ' | awk '{ print $2 }' | sed 's|/.*$||')
+				WIFI_IP=$(ip a s wlan$WIFI_DEV_INDEX | grep -m1 '^[[:blank:]]*inet ' | awk '{ print $2 }' | sed 's|/.*$||')
 				WIFI_GATEWAY=$(ip r | grep -m1 'default' | awk '{ print $3 }')
-				WIFI_MASK=$(cidr2mask $(ip a s wlan$WIFI_INDEX | grep -m1 '^[[:blank:]]*inet ' | awk '{ print $2 }' | sed 's|^.*/||'))
+				WIFI_MASK=$(cidr2mask $(ip a s wlan$WIFI_DEV_INDEX | grep -m1 '^[[:blank:]]*inet ' | awk '{ print $2 }' | sed 's|^.*/||'))
 				WIFI_DNS=$(grep -m1 'nameserver' /etc/resolv.conf | awk '{print $2}')
 
 				#Get extra wifi stats
-				WIFI_BITRATE=$(iwconfig wlan$WIFI_INDEX | grep -m1 'Bit Rate' | awk '{ print $2 }' | sed 's/Rate[:=]//g')
-				WIFI_SIGNALSTRENGTH=$(iwconfig wlan$WIFI_INDEX | grep -m1 'Signal level=' | awk '{ print $4 }' | sed 's/level=//g' | cut -f1 -d "/")
+				WIFI_BITRATE=$(iwconfig wlan$WIFI_DEV_INDEX | grep -m1 'Bit Rate' | awk '{ print $2 }' | sed 's/Rate[:=]//g')
+				WIFI_SIGNALSTRENGTH=$(iwconfig wlan$WIFI_DEV_INDEX | grep -m1 'Signal level=' | awk '{ print $4 }' | sed 's/level=//g' | cut -f1 -d "/")
 
 				# - try and detect if this is dBm (contains -) or %
 				if disable_error=1 G_CHECK_VALIDINT $WIFI_SIGNALSTRENGTH -500 -1; then
@@ -3431,23 +3503,27 @@
 
 		fi
 
-		G_WHIP_MENU_ARRAY=()
+		G_WHIP_MENU_ARRAY=('' '●─ DHCP/STATIC IP ')
 
-		G_WHIP_MENU_ARRAY+=('Change Mode' "$mode_target")
+		G_WHIP_MENU_ARRAY+=('Change Mode' ": $mode_target")
 		# - show static options
 		if (( $ETH_MODE_TARGET == 0 )); then
 
 			G_WHIP_MENU_ARRAY+=('Copy' 'Copy Current address to Static')
-			G_WHIP_MENU_ARRAY+=('Static Ip' "$ETH_IP_STATIC")
-			G_WHIP_MENU_ARRAY+=('Static Mask' "$ETH_MASK_STATIC")
-			G_WHIP_MENU_ARRAY+=('Static Gateway' "$ETH_GATEWAY_STATIC")
-			G_WHIP_MENU_ARRAY+=('Static DNS' "$ETH_DNS_STATIC")
+			G_WHIP_MENU_ARRAY+=('Static Ip' ": $ETH_IP_STATIC")
+			G_WHIP_MENU_ARRAY+=('Static Mask' ": $ETH_MASK_STATIC")
+			G_WHIP_MENU_ARRAY+=('Static Gateway' ": $ETH_GATEWAY_STATIC")
+			G_WHIP_MENU_ARRAY+=('Static DNS' ": $ETH_DNS_STATIC")
 
 		fi
-		G_WHIP_MENU_ARRAY+=('Disable' 'Disable Ethernet adapter')
-		G_WHIP_MENU_ARRAY+=('Apply' 'Save Changes (Restart Networking)')
 
-		Net_Update_UsageStats eth$ETH_INDEX
+		G_WHIP_MENU_ARRAY+=('' '●─ Additional Options ')
+		G_WHIP_MENU_ARRAY+=('Disable' 'Disable Ethernet adapter')
+
+		G_WHIP_MENU_ARRAY+=('' '●─ Apply ')
+		G_WHIP_MENU_ARRAY+=('Apply' 'Save all changes and restart networking')
+
+		Net_Update_UsageStats eth$ETH_DEV_INDEX
 
 		G_WHIP_DEFAULT_ITEM="$WHIP_SELECTION_PREVIOUS"
 		G_WHIP_MENU "Current Details:\nUsage   : Sent = $NET_TX_MB | Recieved = $NET_RX_MB\nMode    : $mode_current\nIp      : $ETH_IP\nMask    : $ETH_MASK\nGateway : $ETH_GATEWAY\nDNS     : $ETH_DNS"
@@ -3549,7 +3625,7 @@
 #!/bin/bash
 {
 URL_PING="$WIFI_GATEWAY"
-ADAPTER="wlan$WIFI_INDEX"
+ADAPTER="wlan$WIFI_DEV_INDEX"
 TICKRATE=10
 while true
 do
@@ -3591,7 +3667,85 @@ WantedBy=multi-user.target
 _EOF_
 		systemctl daemon-reload
 		systemctl enable dietpi-wifi-monitor.service
-		systemctl start dietpi-wifi-monitor.service
+		G_RUN_CMD systemctl start dietpi-wifi-monitor.service
+
+	}
+
+	Menu_WiFi_SSID_DB(){
+
+		while true
+		do
+
+			G_WHIP_MENU_ARRAY=('' '●─ WiFi Slots')
+			for (( i=0; i<5; i++ ))
+			do
+
+				if [[ ${aWIFI_SSID[$i]} ]]; then
+
+					G_WHIP_MENU_ARRAY+=($i "SSID = ${aWIFI_SSID[$i]} | Key = ${aWIFI_KEY[$i]}")
+
+				else
+
+					G_WHIP_MENU_ARRAY+=($i 'Unused: Select to configure')
+
+				fi
+
+			done
+
+			G_WHIP_DEFAULT_ITEM=$WIFI_CRED_INDEX
+			G_WHIP_BUTTON_CANCEL_TEXT='Back'
+			G_WHIP_MENU 'Please select a WiFi slot to configure:'
+			if (( $? == 0 )) && [[ $G_WHIP_RETURNED_VALUE ]]; then
+
+					WIFI_CRED_INDEX=$G_WHIP_RETURNED_VALUE
+
+					G_WHIP_MENU_ARRAY=()
+					if [[ ${aWIFI_SSID[$WIFI_CRED_INDEX]} ]]; then
+
+						G_WHIP_MENU_ARRAY+=('Remove' ": Delete '${aWIFI_SSID[$WIFI_CRED_INDEX]}' from the database")
+
+					else
+
+						G_WHIP_MENU_ARRAY+=('Scan' ': Scan and configure an SSID')
+						G_WHIP_MENU_ARRAY+=('Manual' ': Manually enter all WiFi creds')
+
+					fi
+
+					local message_text="Please select an option for slot $WIFI_CRED_INDEX."
+					if [[ ${aWIFI_SSID[$WIFI_CRED_INDEX]} ]]; then
+
+						message_text+="\n\nCurrent details:\n - SSID = ${aWIFI_SSID[$WIFI_CRED_INDEX]}\n - Key = ${aWIFI_KEY[$WIFI_CRED_INDEX]}"
+
+					fi
+
+					G_WHIP_MENU "$message_text"
+					if (( $? == 0 )); then
+
+						if [[ $G_WHIP_RETURNED_VALUE == 'Remove' ]]; then
+
+							aWIFI_SSID[$WIFI_CRED_INDEX]=''
+							aWIFI_KEY[$WIFI_CRED_INDEX]=''
+
+						elif [[ $G_WHIP_RETURNED_VALUE == 'Scan' ]]; then
+
+							Scan_Wifi
+
+						elif [[ $G_WHIP_RETURNED_VALUE == 'Manual' ]]; then
+
+							Change_WifiSsid
+							Change_WifiKey
+
+						fi
+
+					fi
+
+			else
+
+				break
+
+			fi
+
+		done
 
 	}
 
@@ -3600,17 +3754,18 @@ _EOF_
 
 		TARGETMENUID=8
 
-		Net_Update_UsageStats wlan$ETH_INDEX
+		Net_Update_UsageStats wlan$ETH_DEV_INDEX
 
 		local whip_options_total=0
 		local description_text="Current Details:\nUsage   : Sent = $NET_TX_MB | Recieved = $NET_RX_MB\n"
-		G_WHIP_MENU_ARRAY=()
+
+		G_WHIP_MENU_ARRAY=('' '●─ Basic Options ')
 
 		#WiFi Hotspot Menu
 		if (( $WIFI_HOTSPOT )); then
 
 			# - Load current details into global vars, once.
-			if [[ -z $HOTSPOT_SSID ]]; then
+			if [[ ! $HOTSPOT_SSID ]]; then
 
 				HOTSPOT_SSID=$(grep -m1 '^[[:blank:]]*ssid=' /etc/hostapd/hostapd.conf | sed 's/^[^=]*=//')
 				HOTSPOT_CHANNEL=$(grep -m1 '^[[:blank:]]*channel=' /etc/hostapd/hostapd.conf | sed 's/^[^=]*=//')
@@ -3632,7 +3787,6 @@ _EOF_
 			G_WHIP_MENU_ARRAY+=('SSID' 'Change the wireless hotspot name')
 			G_WHIP_MENU_ARRAY+=('Channel' 'Change the wireless channel')
 			G_WHIP_MENU_ARRAY+=('Key' 'Change the access key required to connect')
-			G_WHIP_MENU_ARRAY+=('State' ": $hotspot_active_state_text")
 
 			description_text+="SSID    : $HOTSPOT_SSID\nChannel : $HOTSPOT_CHANNEL\nKey     : $HOTSPOT_KEY\nStatus  : $hotspot_status_text"
 
@@ -3655,8 +3809,7 @@ _EOF_
 
 			fi
 
-			G_WHIP_MENU_ARRAY+=('Scan' 'Scan and Connect')
-			G_WHIP_MENU_ARRAY+=('Manual' 'Manually Set Wireless Details')
+			G_WHIP_MENU_ARRAY+=('Scan' 'Scan and configure SSID')
 
 			if (( $WIFI_CONNECTED || $(systemctl is-active dietpi-wifi-monitor.service | grep -ci -m1 '^active') )); then
 
@@ -3673,6 +3826,7 @@ _EOF_
 
 			fi
 
+			G_WHIP_MENU_ARRAY+=('' '●─ DHCP/STATIC IP ')
 			G_WHIP_MENU_ARRAY+=('Change Mode' ": $mode_target")
 
 			# - show static options
@@ -3686,12 +3840,12 @@ _EOF_
 
 			fi
 
-			G_WHIP_MENU_ARRAY+=('Disable' 'Disable WiFi adapter')
-
-			description_text+="SSID    : $WIFI_SSID | $WIFI_BITRATE Mbit | Strength: $WIFI_SIGNALSTRENGTH\nKEY     : $WIFI_KEY \nMode    : $mode_current \nIp      : $WIFI_IP\nMask    : $WIFI_MASK\nDNS     : $WIFI_DNS"
+			description_text+="SSID    : $WIFI_SSID_CURRENT | $WIFI_BITRATE Mbit | Strength: $WIFI_SIGNALSTRENGTH\nMode    : $mode_current \nIp      : $WIFI_IP\nMask    : $WIFI_MASK\nDNS     : $WIFI_DNS"
 
 		fi
 
+
+		G_WHIP_MENU_ARRAY+=('' '●─ Additional Options ')
 		# - Unset country code?
 		if [[ $WIFI_COUNTRYCODE == '00' ]]; then
 
@@ -3702,7 +3856,19 @@ _EOF_
 
 		fi
 
-		G_WHIP_MENU_ARRAY+=('Apply' 'Save Changes (Restart Networking)')
+		G_WHIP_MENU_ARRAY+=('' '●─ Toggle State ')
+		if (( $WIFI_HOTSPOT )); then
+
+			G_WHIP_MENU_ARRAY+=('State' ": $hotspot_active_state_text")
+
+		else
+
+			G_WHIP_MENU_ARRAY+=('Disable' 'Disable WiFi adapter')
+
+		fi
+
+		G_WHIP_MENU_ARRAY+=('' '●─ Apply ')
+		G_WHIP_MENU_ARRAY+=('Apply' 'Save all changes and restart networking')
 
 		G_WHIP_DEFAULT_ITEM="$WHIP_SELECTION_PREVIOUS"
 		G_WHIP_MENU "$description_text"
@@ -3801,15 +3967,7 @@ _EOF_
 
 				'Scan')
 
-					Scan_Wifi
-
-				;;
-
-				'Manual')
-
-					Change_WifiSsid
-					Change_WifiKey
-					Wifi_Reconnect
+					Menu_WiFi_SSID_DB
 
 				;;
 
@@ -3819,6 +3977,7 @@ _EOF_
 					if (( $WIFI_MODE_TARGET >= 2 )); then
 
 						WIFI_MODE_TARGET=0
+						G_WHIP_MSG 'Information for STATIC IP:\n\nWhen using STATIC IP, please ensure only 1 SSID entry exists in the "Scan" menu. Else, WiFi will most likely fail, and, the IP conflict committee will be displeased ;)'
 
 					fi
 
@@ -4132,7 +4291,7 @@ Custom         : Write = $FSBENCH_CUSTOM_WRITE | Read = $FSBENCH_CUSTOM_READ"
 			sed -i '/sdram_freq=/c\#sdram_freq=400' /DietPi/config.txt
 
 			#Zero , via name id
-			if (( $(cat /DietPi/dietpi/.hw_model | tr '[:upper:]' '[:lower:]' | grep -ci -m1 'rpi zero') )); then
+			if grep -qi 'rpi zero' /DietPi/dietpi/.hw_model; then
 
 				sed -i '/arm_freq=/c\#arm_freq=1000' /DietPi/config.txt
 				sed -i '/core_freq=/c\#core_freq=400' /DietPi/config.txt

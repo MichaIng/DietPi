@@ -296,11 +296,10 @@
 
 				)
 
-				LOWERCASE_TEMP="$(echo $G_WHIP_RETURNED_VALUE | tr '[:upper:]' '[:lower:]')"
 				for (( i=0; i<${#aDISALLOWED_NAMES[@]}; i++))
 				do
 
-					if [[ $LOWERCASE_TEMP == *"${aDISALLOWED_NAMES[$i]}"* ]]; then
+					if [[ ${G_WHIP_RETURNED_VALUE,,} == *"${aDISALLOWED_NAMES[$i]}"* ]]; then
 
 						DISALLOWED_NAME=1
 						break
@@ -1139,6 +1138,9 @@ _EOF_
 
 		fi
 
+		#	Fix rare WiFi interface start issue: https://github.com/Fourdee/DietPi/issues/2074
+		sed -i '\|^[[:blank:]]ifconfig "$IFACE" up$|c\\t/sbin/ip link set dev "$IFACE" up' /etc/network/if-pre-up.d/wireless-tools &> /dev/null
+
 		G_DIETPI-NOTIFY 2 'Tweaking DHCP timeout:'
 
 		# - Reduce DHCP request retry count and timeouts: https://github.com/Fourdee/DietPi/issues/711
@@ -1165,7 +1167,7 @@ _EOF_
 		mkdir -p /root/.config/htop
 		cp /DietPi/dietpi/conf/htoprc /root/.config/htop/htoprc
 
-		G_DIETPI-NOTIFY 2 'Configuring fakehwclock:'
+		G_DIETPI-NOTIFY 2 'Configuring fake-hwclock:'
 
 		# - allow times in the past
 		G_CONFIG_INJECT 'FORCE=' 'FORCE=force' /etc/default/fake-hwclock
@@ -1403,6 +1405,8 @@ _EOF_
 		G_DIETPI-NOTIFY 2 'Generating default wpa_supplicant.conf'
 
 		/DietPi/dietpi/func/dietpi-set_hardware wificreds set
+		#	move to /boot/ so users can modify as needed for automated
+		G_RUN_CMD mv /var/lib/dietpi/dietpi-wifi.db /boot/dietpi-wifi.txt
 
 		G_DIETPI-NOTIFY 2 'Disabling generic BT by default'
 
