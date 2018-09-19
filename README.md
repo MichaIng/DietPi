@@ -9,7 +9,7 @@
         <br>
         optimised • simplified • for everyone
         <br>
-        <br>****
+        <br>
         <a href="https://dietpi.com">find out more</a>
         •
         <a href="https://dietpi.com">download image</a>
