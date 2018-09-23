@@ -32,7 +32,7 @@
 	DIETPI_CLOUDSHELL_VERSION=9
 
 	#/tmp/.* files used throughout this script.
-	FP_TEMP='/tmp/dietpi-cloudshell'
+	FP_TEMP="/tmp/$G_PROGRAM_NAME/.tmp"
 
 	BLANK_SCREEN_ACTIVE=0
 	BLANK_SCREEN_AT_SPECIFIC_TIME_ENABLED=0
@@ -59,12 +59,18 @@
 		#Turn screen on
 		elif (( $BLANK_SCREEN_TIME_HOUR_END == $current_hour )); then
 
-			setterm --blank poke &> /dev/tty1
-			setterm --reset &> /dev/tty1
-			setterm --blank 0 --powersave off &> /dev/tty1
-			BLANK_SCREEN_ACTIVE=0
+			Disable_Screen_Blanking
 
 		fi
+
+	}
+
+	Disable_Screen_Blanking(){
+
+		setterm --blank poke &> /dev/tty1
+		setterm --reset &> /dev/tty1
+		setterm --blank 0 --powersave off &> /dev/tty1
+		BLANK_SCREEN_ACTIVE=0
 
 	}
 
@@ -158,8 +164,7 @@
 
     }
 
-	#Apply fonts
-	Enable_Term_Options(){
+	Init_Term_Options(){
 
 		# - Set large font 1st (480x320+)
 		setfont /usr/share/consolefonts/Uni3-TerminusBold32x16
@@ -170,6 +175,9 @@
 			setfont /usr/share/consolefonts/Uni3-TerminusBold24x12.psf
 
 		fi
+
+		#Disable screen blanking on tty1 initially
+		Disable_Screen_Blanking
 
 	}
 
@@ -419,16 +427,14 @@
 		fi
 
 		CPU_USAGE=0
-		FP_TEMP='/tmp/.cpu_usage'
 
 		# PS (inaccurate)
-		ps -axo %cpu | sed '1d' | sed 's/ //' > $FP_TEMP
 		while read -r line
 		do
 
 			CPU_USAGE=$( echo "scale=1;$CPU_USAGE + $line" | bc -l )
 
-		done < $FP_TEMP
+		done <<< "$(ps -axo %cpu | sed '1d' | sed 's/ //')"
 
 		#ps returns usage of each core, so we devide the total by #n cores
 		CPU_USAGE=$(echo "scale=0;$CPU_USAGE / $G_HW_CPU_CORES" | bc -l )
@@ -498,29 +504,26 @@
 		local index_start=$1
 		local index_end=$2
 
-		FP_TEMP='/tmp/.df'
-		rm $FP_TEMP
 
 		#df will endless hang when NFS server is down: https://github.com/Fourdee/DietPi/issues/395
 		# - So lets run it as another thread so we can kill it if it hangs.
 		local df_failed=0
+		rm $FP_TEMP
 		df -Ph > $FP_TEMP &
-		local pid=$(echo $!)
 
 		# - Wait X seconds before terminating the df thread
 		local max_seconds=4
 		local current_seconds=0
-		while ps aux | awk '{print $2}' | grep -q "$pid\$" # ! -f may exist, but no data at time of scrape, causing 'mount not found'. so lets wait for process to exit.
+		while [[ ! -f $FP_TEMP ]]
 		do
 
+			#kill
 			if (( $current_seconds >= $max_seconds )); then
-
-				#kill
 
 				G_DIETPI-NOTIFY 1 'DF failed, unable to obtain drive data'
 				sleep 2
 
-				kill $pid
+				killall -w df
 
 				df_failed=1
 
@@ -562,23 +565,10 @@
 					Percent_To_Graph ${STORAGE_PERCENT[$i]}
 					STORAGE_PERCENT[$i]=$C_PERCENT_GRAPH
 
-					#DEBUG John:
-					echo -e 'Results success:\n' >> /var/log/dietpi-cloudshell.log
-					echo -e " - Index = $i" >> /var/log/dietpi-cloudshell.log
-					echo -e " - Path  = ${STORAGE_PATH[$i]}" >> /var/log/dietpi-cloudshell.log
-					echo -e " - Total = ${STORAGE_TOTAL[$i]}" >> /var/log/dietpi-cloudshell.log
-
 				else
 
 					STORAGE_PERCENT[$i]="${STORAGE_PATH[$i]}"
 					STORAGE_FREE[$i]='Mount not active'
-
-					#DEBUG John:
-					echo -e "$(date) | Mount not found:\n" >> /var/log/dietpi-cloudshell.log
-					echo -e " - Index = $i" >> /var/log/dietpi-cloudshell.log
-					echo -e " - Path  = ${STORAGE_PATH[$i]}\n" >> /var/log/dietpi-cloudshell.log
-					cat $FP_TEMP >> /var/log/dietpi-cloudshell.log
-					echo -e '\n' >> /var/log/dietpi-cloudshell.log
 
 				fi
 
@@ -633,8 +623,6 @@
 	NETWORK_DETAILS_HOSTNAME=0
 	NETWORK_DETAILS_MODE=0 #1=dhcp, 0=static
 	Obtain_NETWORK_DETAILS(){
-
-		FP_TEMP='/tmp/.ip_address'
 
 		#Hostname
 		NETWORK_DETAILS_HOSTNAME=$(hostname)
@@ -763,15 +751,13 @@
 	Obtain_MEMORY(){
 
 		#Write to temp
-		FP_TEMP='/tmp/.mem'
 		free -m > $FP_TEMP
 
 		#RAM MB
 		MEMORY_TOTAL=$(grep -m1 'Mem: ' $FP_TEMP | awk '{print $2}')
-		#Grab values and seperate cache from "used and free" results.
-		MEMORY_CACHED=$(grep -m1 'Mem: ' $FP_TEMP | awk '{print $7}')
-		MEMORY_USED=$(( $(grep -m1 'Mem: ' $FP_TEMP | awk '{print $3}') - $MEMORY_CACHED ))
-		MEMORY_FREE=$(( $(grep -m1 'Mem: ' $FP_TEMP | awk '{print $4}') + $MEMORY_CACHED ))
+		#MEMORY_CACHED=$(grep -m1 'Mem: ' $FP_TEMP | awk '{print $6}')
+		MEMORY_USED=$(( $(grep -m1 'Mem: ' $FP_TEMP | awk '{print $3}') ))
+		MEMORY_FREE=$(( $(grep -m1 'Mem: ' $FP_TEMP | awk '{print $7}') ))
 		MEMORY_PERCENT=$(echo | awk "{print $MEMORY_USED / $MEMORY_TOTAL * 100}")
 
 		#convert to interger and graph it
@@ -796,7 +782,6 @@
 			MEMORY_SWAPERCENT=' Disabled'
 
 		fi
-
 
 	}
 
@@ -1304,7 +1289,7 @@ _EOF_
 	#0=tty1 1=current
 	OUTPUT_DISPLAY_INDEX=0
 
-	Stop(){
+	Menu_Stop(){
 
 		#Service if started.
 		systemctl stop dietpi-cloudshell
@@ -1320,7 +1305,7 @@ _EOF_
 
 	}
 
-	Start(){
+	Menu_Start(){
 
 		#Are we starting on the current screen? (eg: from tty1)
 		local output_current_screen=0
@@ -1346,7 +1331,7 @@ _EOF_
 		#Launch in blocking mode
 		if (( $output_current_screen == 1 )); then
 
-			/DietPi/dietpi/dietpi-cloudshell 1
+			Run_Cloudshell
 
 		#Launch as service on main screen
 		else
@@ -1356,6 +1341,86 @@ _EOF_
 		fi
 
 		sleep 0.1
+
+	}
+
+	Run_Cloudshell(){
+
+		Init_Term_Options
+
+		#Start Intro
+		if (( $RUN_INTRO )); then
+
+			Run_Intro
+
+		fi
+
+		#Set Nice to +10 (not critical)
+		renice -n 10 $$ &> /dev/null
+
+		#Start display updates
+		while true
+		do
+
+			if (( $BLANK_SCREEN_AT_SPECIFIC_TIME_ENABLED )); then
+
+				RUN_BLANK_SCREEN_AT_SPECIFIC_TIME
+
+			fi
+
+			#Disable updates when screen is blanked
+			if (( $BLANK_SCREEN_ACTIVE )); then
+
+				sleep 60
+
+			#Update enabled scenes
+			else
+
+				if (( ${aEnabledScenes[$SCENE_CURRENT]} )); then
+
+					Update_Banner
+
+					# - Input mode scene update (storage array)
+					if (( $SCENE_CURRENT == 1 )); then
+
+						Update_Scene_1 0 1
+
+					# - Input mode scene update (storage array)
+					elif (( $SCENE_CURRENT == 2 )); then
+
+						Update_Scene_1 2 3
+
+					# - Input mode scene update (storage array)
+					elif (( $SCENE_CURRENT == 3 )); then
+
+						Update_Scene_1 4 5
+
+					# - Normal scene update
+					else
+
+						Update_Scene_$SCENE_CURRENT
+
+					fi
+
+					#Apply refresh rate delay
+					sleep $REFRESH_RATE
+
+				fi
+
+				#Scene Switcher
+				((SCENE_CURRENT++))
+
+				#Cap
+				if (( $SCENE_CURRENT >= $MAX_SCENES )); then
+
+					SCENE_CURRENT=0
+
+				fi
+
+
+			fi
+
+		done
 
 	}
 
@@ -1491,14 +1556,14 @@ _EOF_
 				'Start / Restart')
 
 					Write_Settings_File
-					Stop
-					Start
+					Menu_Stop
+					Menu_Start
 
 				;;
 
 				'Stop')
 
-					Stop
+					Menu_Stop
 
 				;;
 
@@ -1535,15 +1600,6 @@ _EOF_
 
 		#Return to main menu
 		TARGETMENUID=0
-
-		#Colour array
-		#0 WHITE
-		#1 RED
-		#2 GREEN
-		#3 YELLOW
-		#4 BLUE
-		#5 PURPLE
-		#6 CYAN
 
 		G_WHIP_MENU_ARRAY=(
 
@@ -1676,6 +1732,7 @@ _EOF_
 
 		)
 
+		G_WHIP_BUTTON_CANCEL_TEXT='Back'
 		G_WHIP_MENU 'Automatically power down the screen and disable DietPi-Cloudshell processing during a specific time.\n\nNB: This feature will only work if DietPi-Cloudshell was launched with the DietPi-Autostart option, or, launched from the main screen (tty1).'
 		if (( $? == 0 )); then
 
@@ -1747,6 +1804,7 @@ _EOF_
 
 		done
 
+		G_WHIP_BUTTON_CANCEL_TEXT='Back'
 		G_WHIP_MENU 'Storage Device Mount Location:\n\nDietPi-Cloudshell pulls the storage stats from the drive mount location. If you have custom drives/mounts, please set them here to be displayed during storage scene updates.\n\n - Drive 1 = Displayed during main storage scene\n - Drive 2/3 = Displayed during additional storage scene\n - Drive 4/5 = Displayed during additional storage scene'
 		if (( $? == 0 )); then
 
@@ -1814,81 +1872,7 @@ _EOF_
 	#Run DietPi-Cloudshell
 	elif (( $INPUT >= 1 )); then
 
-		Enable_Term_Options
-
-		#Start Intro
-		if (( $RUN_INTRO )); then
-
-			Run_Intro
-
-		fi
-
-		#Set Nice to +10 (not critical)
-		renice -n 10 $$ &> /dev/null
-
-		#Start display updates
-		while true
-		do
-
-			if (( $BLANK_SCREEN_AT_SPECIFIC_TIME_ENABLED )); then
-
-				RUN_BLANK_SCREEN_AT_SPECIFIC_TIME
-
-			fi
-
-			#Disable updates when screen is blanked
-			if (( $BLANK_SCREEN_ACTIVE )); then
-
-				sleep 60
-
-			#Update enabled scenes
-			else
-
-				if (( ${aEnabledScenes[$SCENE_CURRENT]} )); then
-
-					Update_Banner
-
-					# - Input mode scene update (storage array)
-					if (( $SCENE_CURRENT == 1 )); then
-
-						Update_Scene_1 0 1
-
-					# - Input mode scene update (storage array)
-					elif (( $SCENE_CURRENT == 2 )); then
-
-						Update_Scene_1 2 3
-
-					# - Input mode scene update (storage array)
-					elif (( $SCENE_CURRENT == 3 )); then
-
-						Update_Scene_1 4 5
-
-					# - Normal scene update
-					else
-
-						Update_Scene_$SCENE_CURRENT
-
-					fi
-
-					#Apply refresh rate delay
-					sleep $REFRESH_RATE
-
-				fi
-
-				#Scene Switcher
-				((SCENE_CURRENT++))
-
-				#Cap
-				if (( $SCENE_CURRENT >= $MAX_SCENES )); then
-
-					SCENE_CURRENT=0
-
-				fi
-
-
-			fi
-
-		done
+		Run_Cloudshell
 
 	fi
 
