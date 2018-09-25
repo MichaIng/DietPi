@@ -58,8 +58,7 @@
 
 		if ! dpkg-query -s ${a_MIN_APT_PREREQS[$i]} &> /dev/null; then
 
-			apt-get install -y ${a_MIN_APT_PREREQS[$i]}
-			if (( $? )); then
+			if ! apt-get install -y ${a_MIN_APT_PREREQS[$i]}; then
 
 				echo -e "Error: Unable to install ${a_MIN_APT_PREREQS[$i]}, please try to install it manually:\n\t# apt-get install -y ${a_MIN_APT_PREREQS[$i]}"
 				exit 1
@@ -79,11 +78,10 @@
 
 	# - NB: DEV, any changes here must be also rolled into function '/DietPi/dietpi/func/dietpi-set_software locale', for future script use
 	echo 'en_GB.UTF-8 UTF-8' > /etc/locale.gen
-	dpkg-reconfigure -f noninteractive locales
 	# - dpkg-reconfigure includes:
 	#	- "locale-gen": Generate locale(s) based on "/etc/locale.gen" or interactive selection.
 	#	- "update-locale": Add $LANG to "/etc/default/locale" based on generated locale(s) or interactive default language selection.
-	if (( $? )); then
+	if ! dpkg-reconfigure -f noninteractive locales; then
 
 		echo -e 'Error: Locale generation failed. Aborting...\n'
 		exit 1
@@ -121,8 +119,7 @@
 
 	fi
 
-	wget "https://raw.githubusercontent.com/$GIT_OWNER/DietPi/$GIT_BRANCH/dietpi/func/dietpi-globals"
-	if (( $? )); then
+	if ! wget "https://raw.githubusercontent.com/$GIT_OWNER/DietPi/$GIT_BRANCH/dietpi/func/dietpi-globals"; then
 
 		echo -e 'Error: Unable to download dietpi-globals. Aborting...\n'
 		exit 1
@@ -130,8 +127,7 @@
 	fi
 
 	# - Load
-	. ./dietpi-globals
-	if (( $? )); then
+	if ! . ./dietpi-globals; then
 
 		echo -e 'Error: Unable to load dietpi-globals. Aborting...\n'
 		exit 1
@@ -279,8 +275,7 @@
 		while true
 		do
 
-			G_WHIP_INPUTBOX 'Please enter your name. This will be used to identify the image creator within credits banner.\n\nYou can add your contanct information as well for end users.\n\nNB: An entry is required.'
-			if (( ! $? )) && [[ $G_WHIP_RETURNED_VALUE ]]; then
+			if ! G_WHIP_INPUTBOX 'Please enter your name. This will be used to identify the image creator within credits banner.\n\nYou can add your contanct information as well for end users.\n\nNB: An entry is required.'  && [[ $G_WHIP_RETURNED_VALUE ]]; then
 
 				#Disallowed:
 				DISALLOWED_NAME=0
@@ -329,8 +324,7 @@
 		while true
 		do
 
-			G_WHIP_INPUTBOX 'Please enter the name or URL of the pre-image you installed on this system, prior to running this script. This will be used to identify the pre-image credits.\n\nEG: Debian, Raspbian Lite, Meveric, FriendlyARM, or "forum.odroid.com/viewtopic.php?f=ABC&t=XYZ" etc.\n\nNB: An entry is required.'
-			if (( ! $? )) && [[ $G_WHIP_RETURNED_VALUE ]]; then
+			if ! G_WHIP_INPUTBOX 'Please enter the name or URL of the pre-image you installed on this system, prior to running this script. This will be used to identify the pre-image credits.\n\nEG: Debian, Raspbian Lite, Meveric, FriendlyARM, or "forum.odroid.com/viewtopic.php?f=ABC&t=XYZ" etc.\n\nNB: An entry is required.' && [[ $G_WHIP_RETURNED_VALUE ]]; then
 
 				PREIMAGE_INFO="$G_WHIP_RETURNED_VALUE"
 				break
@@ -393,8 +387,7 @@
 
 		)
 
-		G_WHIP_MENU 'Please select the current device this is being installed on:\n - NB: Select "Generic device" if not listed.\n - "Core devices": Are fully supported by DietPi, offering full GPU + Kodi support.\n - "Limited support devices": No GPU support, supported limited to DietPi specific issues only (eg: excludes Kernel/GPU/VPU related items).'
-		if (( $? )) || [[ -z $G_WHIP_RETURNED_VALUE ]]; then
+		if ! G_WHIP_MENU 'Please select the current device this is being installed on:\n - NB: Select "Generic device" if not listed.\n - "Core devices": Are fully supported by DietPi, offering full GPU + Kodi support.\n - "Limited support devices": No GPU support, supported limited to DietPi specific issues only (eg: excludes Kernel/GPU/VPU related items).' || [[ -z $G_WHIP_RETURNED_VALUE ]]; then
 
 			G_DIETPI-NOTIFY 1 'No choices detected. Aborting...'
 			exit 0
@@ -420,8 +413,7 @@
 
 		)
 
-		G_WHIP_MENU 'Please select an option:'
-		if (( ! $? && $G_WHIP_RETURNED_VALUE == 1 )); then
+		if G_WHIP_MENU 'Please select an option:' && $G_WHIP_RETURNED_VALUE == 1 ; then
 
 			G_DIETPI-NOTIFY 2 'Marking WiFi as needed'
 			WIFI_REQUIRED=1
@@ -474,8 +466,7 @@
 
 		fi
 
-		G_WHIP_MENU "Please select a distro to install on this system. Selecting a distro that is older than the current installed on system, is not supported.\n\nCurrently installed:\n - $G_DISTRO $G_DISTRO_NAME"
-		if (( $? )) || [[ -z $G_WHIP_RETURNED_VALUE ]]; then
+		if ! G_WHIP_MENU "Please select a distro to install on this system. Selecting a distro that is older than the current installed on system, is not supported.\n\nCurrently installed:\n - $G_DISTRO $G_DISTRO_NAME" || [[ -z $G_WHIP_RETURNED_VALUE ]]; then
 
 			G_DIETPI-NOTIFY 1 'No choices detected. Aborting...'
 			exit 0
@@ -1304,7 +1295,7 @@ _EOF_
 			mkdir -p rtl8812au_sparky
 			tar -xvf rtl8812au_sparky.tar -C rtl8812au_sparky
 			chmod +x -R rtl8812au_sparky
-			cd rtl8812au_sparky
+			cd rtl8812au_sparky || exit
 			G_RUN_CMD ./install.sh
 			cd ..
 			rm -R rtl8812au_sparky*
