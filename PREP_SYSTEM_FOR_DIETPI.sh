@@ -1295,7 +1295,7 @@ _EOF_
 			mkdir -p rtl8812au_sparky
 			tar -xvf rtl8812au_sparky.tar -C rtl8812au_sparky
 			chmod +x -R rtl8812au_sparky
-			cd rtl8812au_sparky || exit
+			cd rtl8812au_sparky
 			G_RUN_CMD ./install.sh
 			cd ..
 			rm -R rtl8812au_sparky*
