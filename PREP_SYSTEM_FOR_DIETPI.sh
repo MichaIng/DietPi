@@ -275,7 +275,7 @@
 		while true
 		do
 
-			if ! G_WHIP_INPUTBOX 'Please enter your name. This will be used to identify the image creator within credits banner.\n\nYou can add your contanct information as well for end users.\n\nNB: An entry is required.'  && [[ $G_WHIP_RETURNED_VALUE ]]; then
+			if G_WHIP_INPUTBOX 'Please enter your name. This will be used to identify the image creator within credits banner.\n\nYou can add your contanct information as well for end users.\n\nNB: An entry is required.'  && [[ $G_WHIP_RETURNED_VALUE ]]; then
 
 				#Disallowed:
 				DISALLOWED_NAME=0
@@ -324,7 +324,7 @@
 		while true
 		do
 
-			if ! G_WHIP_INPUTBOX 'Please enter the name or URL of the pre-image you installed on this system, prior to running this script. This will be used to identify the pre-image credits.\n\nEG: Debian, Raspbian Lite, Meveric, FriendlyARM, or "forum.odroid.com/viewtopic.php?f=ABC&t=XYZ" etc.\n\nNB: An entry is required.' && [[ $G_WHIP_RETURNED_VALUE ]]; then
+			if G_WHIP_INPUTBOX 'Please enter the name or URL of the pre-image you installed on this system, prior to running this script. This will be used to identify the pre-image credits.\n\nEG: Debian, Raspbian Lite, Meveric, FriendlyARM, or "forum.odroid.com/viewtopic.php?f=ABC&t=XYZ" etc.\n\nNB: An entry is required.' && [[ $G_WHIP_RETURNED_VALUE ]]; then
 
 				PREIMAGE_INFO="$G_WHIP_RETURNED_VALUE"
 				break
@@ -413,7 +413,7 @@
 
 		)
 
-		if G_WHIP_MENU 'Please select an option:' && G_WHIP_RETURNED_VALUE==1 ; then
+		if G_WHIP_MENU 'Please select an option:' && (( $G_WHIP_RETURNED_VALUE==1 )) ; then
 
 			G_DIETPI-NOTIFY 2 'Marking WiFi as needed'
 			WIFI_REQUIRED=1
