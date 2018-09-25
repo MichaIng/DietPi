@@ -27,7 +27,7 @@ if [[ $SSH_TTY ]] && ! toe -a | grep -q "$TERM"; then
 
 	G_WHIP_DEFAULT_ITEM=1
 	
-	(( ! G_PROGRAM_NAME='Unsupported SSH client terminal' G_WHIP_MENU "[WARNING] The terminal passed by your SSH client (TERM=$TERM_old) is not supported by this DietPi server.\n
+       G_PROGRAM_NAME='Unsupported SSH client terminal' G_WHIP_MENU "[WARNING] The terminal passed by your SSH client (TERM=$TERM_old) is not supported by this DietPi server.\n
 Please change your SSH clients terminal (passed $TERM string)$ncurses_term." && (( $G_WHIP_RETURNED_VALUE )) && G_AGI ncurses-term ))
 
 	unset TERM_old
