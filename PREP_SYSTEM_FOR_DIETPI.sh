@@ -413,7 +413,7 @@
 
 		)
 
-		if G_WHIP_MENU 'Please select an option:' && $G_WHIP_RETURNED_VALUE == 1 ; then
+		if G_WHIP_MENU 'Please select an option:' && G_WHIP_RETURNED_VALUE==1 ; then
 
 			G_DIETPI-NOTIFY 2 'Marking WiFi as needed'
 			WIFI_REQUIRED=1
