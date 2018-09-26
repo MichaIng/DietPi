@@ -345,51 +345,51 @@
 		G_WHIP_MENU_ARRAY=(
 
 			'' '●─ Other '
-			'22' 'Generic device (unknown to DietPi)'
+			'22' ': Generic device (unknown to DietPi)'
 			'' '●─ SBC─(Core devices) '
-			'10' 'Odroid C1'
-			'12' 'Odroid C2'
-			'14' 'Odroid N1'
-			'13' 'Odroid U3'
-			'11' 'Odroid XU3/4/HC1/HC2'
-			'0' 'Raspberry Pi (All models)'
-			# '1' 'Raspberry Pi 1/Zero (512mb)'
-			# '2' 'Raspberry Pi 2'
-			# '3' 'Raspberry Pi 3/3+'
+			'10' ': Odroid C1'
+			'12' ': Odroid C2'
+			'14' ': Odroid N1'
+			'13' ': Odroid U3'
+			'11' ': Odroid XU3/4/HC1/HC2'
+			'0' ': Raspberry Pi (All models)'
+			# '1' ': Raspberry Pi 1/Zero (512mb)'
+			# '2' ': Raspberry Pi 2'
+			# '3' ': Raspberry Pi 3/3+'
 			'' '●─ PC '
-			'21' 'x86_64 Native PC'
-			'20' 'x86_64 VMware/VirtualBox'
+			'21' ': x86_64 Native PC'
+			'20' ': x86_64 VMware/VirtualBox'
 			'' '●─ SBC─(Limited support devices) '
-			'52' 'Asus Tinker Board'
-			'53' 'BananaPi (sinovoip)'
-			'51' 'BananaPi Pro (Lemaker)'
-			'50' 'BananaPi M2+ (sinovoip)'
-			'71' 'Beagle Bone Black'
-			'69' 'Firefly RK3399'
-			'39' 'LeMaker Guitar'
-			'68' 'NanoPC T4'
-			'67' 'NanoPi K1 Plus'
-			'66' 'NanoPi M1 Plus'
-			'65' 'NanoPi NEO 2'
-			'64' 'NanoPi NEO Air'
-			'63' 'NanoPi M1/T1'
-			'62' 'NanoPi M3/T3/F3'
-			'61' 'NanoPi M2/T2'
-			'60' 'NanoPi Neo'
-			'38' 'OrangePi PC 2'
-			'37' 'OrangePi Prime'
-			'36' 'OrangePi Win'
-			'35' 'OrangePi Zero Plus 2 (H3/H5)'
-			'34' 'OrangePi Plus'
-			'33' 'OrangePi Lite'
-			'32' 'OrangePi Zero (H2+)'
-			'31' 'OrangePi One'
-			'30' 'OrangePi PC'
-			'41' 'OrangePi PC Plus'
-			'40' 'Pine A64'
-			'43' 'Rock64'
-			'42' 'RockPro64'
-			'70' 'Sparky SBC'
+			'52' ': Asus Tinker Board'
+			'53' ': BananaPi (sinovoip)'
+			'51' ': BananaPi Pro (Lemaker)'
+			'50' ': BananaPi M2+ (sinovoip)'
+			'71' ': Beagle Bone Black'
+			'69' ': Firefly RK3399'
+			'39' ': LeMaker Guitar'
+			'60' ': NanoPi NEO'
+			'65' ': NanoPi NEO 2'
+			'64' ': NanoPi NEO Air'
+			'63' ': NanoPi M1/T1'
+			'66' ': NanoPi M1 Plus'
+			'61' ': NanoPi M2/T2'
+			'62' ': NanoPi M3/T3/F3'
+			'68' ': NanoPC T4'
+			'67' ': NanoPi K1 Plus'
+			'38' ': OrangePi PC 2'
+			'37' ': OrangePi Prime'
+			'36' ': OrangePi Win'
+			'35' ': OrangePi Zero Plus 2 (H3/H5)'
+			'34' ': OrangePi Plus'
+			'33' ': OrangePi Lite'
+			'32' ': OrangePi Zero (H2+)'
+			'31' ': OrangePi One'
+			'30' ': OrangePi PC'
+			'41' ': OrangePi PC Plus'
+			'40' ': Pine A64'
+			'43' ': Rock64'
+			'42' ': RockPro64'
+			'70' ': Sparky SBC'
 
 		)
 
@@ -413,10 +413,15 @@
 		G_DIETPI-NOTIFY 2 'WiFi selection'
 
 		G_WHIP_DEFAULT_ITEM=1
+		if (( $G_HW_MODEL == 20 )); then
+
+			G_WHIP_DEFAULT_ITEM=0
+
+		fi
 		G_WHIP_MENU_ARRAY=(
 
-			'0' "I don't require WiFi, do not install."
-			'1' 'I require WiFi functionality, keep/install related packages.'
+			'0' ": I don't require WiFi, do not install."
+			'1' ': I require WiFi functionality, keep/install related packages.'
 
 		)
 
@@ -433,9 +438,9 @@
 		G_WHIP_BUTTON_CANCEL_TEXT='Exit'
 		DISTRO_LIST_ARRAY=(
 
-			'3' 'Jessie (oldstable, just if you need to avoid upgrade to current release)'
-			'4' 'Stretch (current stable release, recommended)'
-			'5' 'Buster (testing only, not officially supported)'
+			'3' ': Jessie (oldstable, if you need to avoid upgrade to current release)'
+			'4' ': Stretch (current stable release, recommended)'
+			'5' ': Buster (testing only, not officially supported)'
 
 		)
 
