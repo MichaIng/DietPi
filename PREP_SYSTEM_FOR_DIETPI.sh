@@ -1414,7 +1414,7 @@ _EOF_
 
 		G_DIETPI-NOTIFY 2 'Generating default wpa_supplicant.conf'
 
-		/DietPi/dietpi/func/dietpi-set_hardware wificreds set
+		/DietPi/dietpi/func/dietpi-wifidb 1
 		#	move to /boot/ so users can modify as needed for automated
 		G_RUN_CMD mv /var/lib/dietpi/dietpi-wifi.db /boot/dietpi-wifi.txt
 

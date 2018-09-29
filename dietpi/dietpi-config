@@ -2396,9 +2396,6 @@
 	WIFI_MODE_TARGET=0
 	WIFI_SSID_CURRENT=''
 	WIFI_CRED_INDEX=0
-	aWIFI_SSID=()
-	aWIFI_KEY=()
-	aWIFI_KEYMGR=()
 
 	WIFI_BITRATE=0
 	WIFI_SIGNALSTRENGTH=0
@@ -2438,9 +2435,6 @@
 
 		#Stop all services (required for hotspot)
 		/DietPi/dietpi/dietpi-services stop
-
-		# - Apply WiFi creds to wpa_supplicant.conf
-		/DietPi/dietpi/func/dietpi-set_hardware wificreds set
 
 		# Enable/Disable wifi modules
 		if (( $WIFI_DISABLED )); then
@@ -2588,36 +2582,8 @@ _EOF_
 
 		fi
 
-		# - Update WiFi db
-		#NB: THIS IS AN EXACT COPY OF wificreds set, ensure both match
-		rm /var/lib/dietpi/dietpi-wifi.db
-		#	Wish we could export an array... Could create a global for these to allow that, but, "security"................
-		for (( i=0; i<5; i++ ))
-		do
-
-			cat << _EOF_ >> /var/lib/dietpi/dietpi-wifi.db
-#---------------------------------------------------------------
-# - Entry $i
-#	WiFi SSID (Case Sensitive)
-aWIFI_SSID[$i]="${aWIFI_SSID[$i]}"
-#	Key options: If no key (open), leave this blank
-aWIFI_KEY[$i]="$( echo ${aWIFI_KEY[$i]} | sed 's/\\/\\\\\\/g' )"
-#	Available options: NONE (no key/open) | WPA-PSK | WEP | WPA-EAP (then use settings below)
-aWIFI_KEYMGR[$i]="${aWIFI_KEYMGR[$i]}"
-# - WPA-EAP Options
-aWIFI_PROTO[$i]="${aWIFI_PROTO[$i]}"
-aWIFI_PAIRWISE[$i]="${aWIFI_PAIRWISE[$i]}"
-aWIFI_AUTH_ALG[$i]="${aWIFI_AUTH_ALG[$i]}"
-aWIFI_EAP[$i]="${aWIFI_EAP[$i]}"
-aWIFI_IDENTITY[$i]="${aWIFI_IDENTITY[$i]}"
-aWIFI_PASSWORD[$i]="${aWIFI_PASSWORD[$i]}"
-aWIFI_PHASE1[$i]="${aWIFI_PHASE1[$i]}"
-aWIFI_PHASE2[$i]="${aWIFI_PHASE2[$i]}"
-#	Location of the certificate file (eg: /boot/mycert.cer)
-aWIFI_CERT[$i]="${aWIFI_CERT[$i]}"
-_EOF_
-
-		done
+		# - Update WiFi db/wpa_supplicant
+		/DietPi/dietpi/func/dietpi-wifidb 1
 
 		#Update Current Mode for network restart
 		ETH_MODE=$ETH_MODE_TARGET
@@ -2790,50 +2756,6 @@ _EOF_
 
 	}
 
-	Change_WifiSsid(){
-
-		G_WHIP_DEFAULT_ITEM="${aWIFI_SSID[$WIFI_CRED_INDEX]}"
-		G_WHIP_INPUTBOX 'Please enter the SSID name to connect to.'
-		if (( $? == 0 )); then
-
-			aWIFI_SSID[$WIFI_CRED_INDEX]="$G_WHIP_RETURNED_VALUE"
-
-		fi
-
-	}
-
-	Change_WifiKey(){
-
-		G_WHIP_MENU_ARRAY=(
-
-			'WPA-PSK' ': Default (recommended)'
-			'WEP' ': Legacy (insecure)'
-			'NONE' ': Open host that does not require a key (eg: free WiFi!)'
-
-		)
-
-		G_WHIP_DEFAULT_ITEM="${aWIFI_KEYMGR[$WIFI_CRED_INDEX]}"
-		G_WHIP_MENU 'Please select a WiFi encryption mode.\n\nNB: If unsure, its most likely WPA-PSK.'
-		if (( $? == 0 )); then
-
-			aWIFI_KEYMGR[$WIFI_CRED_INDEX]="$G_WHIP_RETURNED_VALUE"
-
-			if [[ ${aWIFI_KEYMGR[$WIFI_CRED_INDEX]} != 'NONE' ]]; then
-
-				G_WHIP_DEFAULT_ITEM="${aWIFI_KEY[$WIFI_CRED_INDEX]}"
-				G_WHIP_INPUTBOX 'Please enter the Access Key.\n\nNB: the following characters require a backslash \ before their entry\n\`$"\n\nEG: This\\is\`my\$key\"itrocks'
-				if (( $? == 0 )); then
-
-					aWIFI_KEY[$WIFI_CRED_INDEX]="$G_WHIP_RETURNED_VALUE"
-
-				fi
-
-			fi
-
-		fi
-
-	}
-
 	Change_WifiCountryCode(){
 
 		local wifi_country_code_target=$WIFI_COUNTRYCODE
@@ -2896,68 +2818,13 @@ _EOF_
 
 	}
 
-	Scan_Wifi(){
-
-		#Ensure adapater is up
-		ifup wlan$WIFI_DEV_INDEX
-
-		#Get all ssids
-		printf '\ec' # clear current terminal screen
-		echo 'Scanning SSIDS, please wait....'
-		echo '-------------------------------'
-
-		G_WHIP_MENU_ARRAY=()
-		while read line
-		do
-
-			if [[ $line ]]; then
-
-				G_WHIP_MENU_ARRAY+=("$line" '')
-
-			fi
-
-		done <<< "$(iwlist wlan$WIFI_DEV_INDEX scan | grep 'ESSID:' | sed 's/[ \t]*ESSID:"\(.*\)"/\1/')"
-
-		G_WHIP_MENU 'Please select a Wifi SSID'
-		if (( $? == 0 )); then
-
-			aWIFI_SSID[$WIFI_CRED_INDEX]="$G_WHIP_RETURNED_VALUE"
-			Change_WifiKey
-
-		fi
-
-	}
-
 	Wifi_Reconnect(){
 
-		local ssid_text='Stored WiFi SSIDs:\n'
-		local ssid_configured=0
+		G_WHIP_YESNO "WiFi will connect to the strongest configured SSID that is secure, with an open SSID being the last priority.\n\nSave all changes and restart networking?\n\nNB: All WiFi connections will be dropped!"
+		if (( $? == 0 )); then
 
-		for (( i=0; i<5; i++ ))
-		do
-
-			if [[ ${aWIFI_SSID[$i]} ]]; then
-
-				ssid_text+=" - ${aWIFI_SSID[$i]}\n"
-				ssid_configured=1
-
-			fi
-
-		done
-
-		if (( $ssid_configured )); then
-
-			G_WHIP_YESNO "$ssid_text\nWiFi will connect to the strongest configured SSID that is secure, with an open SSID being the last priority.\n\nSave all changes and restart networking?\n\nNB: All WiFi connections will be dropped!"
-			if (( $? == 0 )); then
-
-				#Apply Changes
-				Network_ApplyChanges
-
-			fi
-
-		else
-
-			G_WHIP_MSG 'No WiFi SSIDs are configured, please use the "Scan" option to set this up.'
+			#Apply Changes
+			Network_ApplyChanges
 
 		fi
 
@@ -3027,18 +2894,6 @@ _EOF_
 
 		fi
 		WIFI_CRED_INDEX=0 # Which index of SSID/KEY etc we are editing
-
-		# - Load dietpi-wifi.db
-		aWIFI_SSID=()
-		aWIFI_KEY=()
-		aWIFI_KEYMGR=()
-		if [[ ! -f /var/lib/dietpi/dietpi-wifi.db ]]; then
-
-			G_DIETPI-NOTIFY 2 '/var/lib/dietpi/dietpi-wifi.db does not exist, creating it now.'
-			/DietPi/dietpi/func/dietpi-set_hardware wificreds set
-
-		fi
-		. /var/lib/dietpi/dietpi-wifi.db
 
 		#Get extra wifi stats
 		WIFI_BITRATE=0
@@ -3664,84 +3519,6 @@ _EOF_
 
 	}
 
-	Menu_WiFi_SSID_DB(){
-
-		while true
-		do
-
-			G_WHIP_MENU_ARRAY=('' '●─ WiFi Slots')
-			for (( i=0; i<5; i++ ))
-			do
-
-				if [[ ${aWIFI_SSID[$i]} ]]; then
-
-					G_WHIP_MENU_ARRAY+=($i "SSID = ${aWIFI_SSID[$i]} | Key = ${aWIFI_KEY[$i]}")
-
-				else
-
-					G_WHIP_MENU_ARRAY+=($i 'Unused: Select to configure')
-
-				fi
-
-			done
-
-			G_WHIP_DEFAULT_ITEM=$WIFI_CRED_INDEX
-			G_WHIP_BUTTON_CANCEL_TEXT='Back'
-			G_WHIP_MENU 'Please select a WiFi slot to configure:'
-			if (( $? == 0 )) && [[ $G_WHIP_RETURNED_VALUE ]]; then
-
-					WIFI_CRED_INDEX=$G_WHIP_RETURNED_VALUE
-
-					G_WHIP_MENU_ARRAY=()
-					if [[ ${aWIFI_SSID[$WIFI_CRED_INDEX]} ]]; then
-
-						G_WHIP_MENU_ARRAY+=('Remove' ": Delete '${aWIFI_SSID[$WIFI_CRED_INDEX]}' from the database")
-
-					else
-
-						G_WHIP_MENU_ARRAY+=('Scan' ': Scan and configure an SSID')
-						G_WHIP_MENU_ARRAY+=('Manual' ': Manually enter all WiFi creds')
-
-					fi
-
-					local message_text="Please select an option for slot $WIFI_CRED_INDEX."
-					if [[ ${aWIFI_SSID[$WIFI_CRED_INDEX]} ]]; then
-
-						message_text+="\n\nCurrent details:\n - SSID = ${aWIFI_SSID[$WIFI_CRED_INDEX]}\n - Key = ${aWIFI_KEY[$WIFI_CRED_INDEX]}"
-
-					fi
-
-					G_WHIP_MENU "$message_text"
-					if (( $? == 0 )); then
-
-						if [[ $G_WHIP_RETURNED_VALUE == 'Remove' ]]; then
-
-							aWIFI_SSID[$WIFI_CRED_INDEX]=''
-							aWIFI_KEY[$WIFI_CRED_INDEX]=''
-
-						elif [[ $G_WHIP_RETURNED_VALUE == 'Scan' ]]; then
-
-							Scan_Wifi
-
-						elif [[ $G_WHIP_RETURNED_VALUE == 'Manual' ]]; then
-
-							Change_WifiSsid
-							Change_WifiKey
-
-						fi
-
-					fi
-
-			else
-
-				break
-
-			fi
-
-		done
-
-	}
-
 	#TARGETMENUID=10
 	Menu_NetworkAdapters_Wifi(){
 
@@ -3960,7 +3737,7 @@ _EOF_
 
 				'Scan')
 
-					Menu_WiFi_SSID_DB
+					/DietPi/dietpi/func/dietpi-wifidb
 
 				;;
 
