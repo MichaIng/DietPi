@@ -48,9 +48,6 @@
 	# - Meveric special: https://github.com/Fourdee/DietPi/issues/1285#issuecomment-355759321
 	rm /etc/apt/sources.list.d/deb-multimedia.list &> /dev/null
 
-	# - APT force IPv4
-	echo 'Acquire::ForceIPv4 "true";' > /etc/apt/apt.conf.d/99-dietpi-force-ipv4
-
 	apt-get clean
 	apt-get update
 	for (( i=0; i<${#a_MIN_APT_PREREQS[@]}; i++))
@@ -105,21 +102,6 @@
 	#------------------------------------------------------------------------------------------------
 	#Download DietPi-Globals
 	# - NB: We'll have to manually handle errors, until DietPi-Globals are sucessfully loaded.
-
-	# - Wget prefer IPv4
-	if grep -q '^[[:blank:]]*prefer-family[[:blank:]]*=' /etc/wgetrc; then
-
-		sed -i '/^[[:blank:]]*prefer-family[[:blank:]]*=/c\prefer-family = IPv4' /etc/wgetrc
-
-	elif grep -q '^[[:blank:]#;]*prefer-family[[:blank:]]*=' /etc/wgetrc; then
-
-		sed -i '/^[[:blank:]#;]*prefer-family[[:blank:]]*=/c\prefer-family = IPv4' /etc/wgetrc
-
-	else
-
-		echo 'prefer-family = IPv4' >> /etc/wgetrc
-
-	fi
 
 	wget "https://raw.githubusercontent.com/$GIT_OWNER/DietPi/$GIT_BRANCH/dietpi/func/dietpi-globals"
 	if (( $? )); then
