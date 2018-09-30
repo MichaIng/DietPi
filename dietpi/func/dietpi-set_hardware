@@ -22,6 +22,8 @@ $FP_SCRIPT 		rpi-opengl		vc4-kms-v3d/vc4-fkms-v3d/disable
 $FP_SCRIPT 		i2c			enable/disable/khz
 $FP_SCRIPT 		wificountrycode		GB/US/DE
 $FP_SCRIPT 		wifimodules		enable/disable/onboard_enable/onboard_disable
+$FP_SCRIPT		enableipv6		enable/disable
+$FP_SCRIPT 		preferipv4		enable/disable
 $FP_SCRIPT 		bluetooth 		enable/disable
 $FP_SCRIPT 		serialconsole		enable/disable
 $FP_SCRIPT 		soundcard 		target_card (non-matching name for reset to default) add '-eq' to target_card string, enable alsa eq on card. HW:x,x (specify target card and device index eg: HW:9,1)
@@ -45,9 +47,9 @@ $FP_SCRIPT 		lcdpanel 		target_panel (none to remove all)
 
 	#Import DietPi-Globals ---------------------------------------------------------------
 	. /DietPi/dietpi/func/dietpi-globals
+	export G_PROGRAM_NAME='DietPi-Set_Hardware'
 	G_CHECK_ROOT_USER
 	G_CHECK_ROOTFS_RW
-	export G_PROGRAM_NAME='DietPi-Set_Hardware'
 	G_INIT
 	#Import DietPi-Globals ---------------------------------------------------------------
 
@@ -1055,6 +1057,93 @@ _EOF_
 	#/////////////////////////////////////////////////////////////////////////////////////
 	# Network
 	#/////////////////////////////////////////////////////////////////////////////////////
+
+	Enable_IPv6(){
+
+		if [[ ! -d /proc/sys/net/ipv6 ]]; then
+
+			G_DIETPI-NOTIFY 1 'IPv6 is not supported or disabled on kernel level. Aborting...'
+			EXIT_CODE=1
+			return
+
+		elif [[ $INPUT_DEVICE_VALUE == 'enable' ]]; then
+
+			[[ -f /etc/sysctl.d/dietpi-disable_ipv6.conf ]] && rm /etc/sysctl.d/dietpi-disable_ipv6.conf
+			# - Apply to current session:
+			#	- "all" => all existing interfaces
+			#	- "default" => all future interfaces
+			echo 0 > /proc/sys/net/ipv6/conf/all/disable_ipv6
+			echo 0 > /proc/sys/net/ipv6/conf/default/disable_ipv6
+			# - dietpi.txt entry
+			G_CONFIG_INJECT 'CONFIG_ENABLE_IPV6=' 'CONFIG_ENABLE_IPV6=1' $FP_RPI_CONFIG
+
+
+		elif [[ $INPUT_DEVICE_VALUE == 'disable' ]]; then
+
+			echo -e 'net.ipv6.conf.all.disable_ipv6=1\nnet.ipv6.conf.default.disable_ipv6=1' > /etc/sysctl.d/dietpi-disable_ipv6.conf
+			sysctl -qp /etc/sysctl.d/dietpi-disable_ipv6.conf
+			# - dietpi.txt entry
+			G_CONFIG_INJECT 'CONFIG_ENABLE_IPV6=' 'CONFIG_ENABLE_IPV6=0' $FP_RPI_CONFIG
+			# - Stop preferring IPv4, if IPv6 is disabled, to reduce obsolete/confusing entries
+			INPUT_DEVICE_VALUE='disable' Prefer_IPv4
+
+		else
+
+			Unknown_Input_Mode
+			return
+
+		fi
+
+		# Failsafe: Comment "disable_ipv6" entries in all other sysctl config files
+		local i=''
+		for i in /etc/sysctl.conf /etc/sysctl.d/*
+		do
+
+			[[ ! -f $i || $i == *'dietpi-disable_ipv6.conf' ]] && continue
+			sed -i 's/^[[:blank:]]*net.ipv6.conf.[^[:blank:]].disable_ipv6[[:blank:]]*=/#&/' $i
+
+		done
+
+	}
+
+	Prefer_IPv4(){
+
+		if [[ $INPUT_DEVICE_VALUE == 'enable' ]]; then
+
+			# - APT force IPv4
+			echo 'Acquire::ForceIPv4 "true";' > /etc/apt/apt.conf.d/99-dietpi-force-ipv4
+			# - Wget prefer IPv4
+			G_CONFIG_INJECT 'prefer-family[[:blank:]]*=' 'prefer-family = IPv4' /etc/wgetrc
+			# - dietpi.txt entry
+			G_CONFIG_INJECT 'CONFIG_PREFER_IPV4=' 'CONFIG_PREFER_IPV4=1' $FP_RPI_CONFIG
+
+		elif [[ $INPUT_DEVICE_VALUE == 'disable' ]]; then
+
+			# - APT allow IPv6
+			[[ -f /etc/apt/apt.conf.d/99-dietpi-force-ipv4 ]] && rm /etc/apt/apt.conf.d/99-dietpi-force-ipv4
+			# - Wget back to default
+			sed -i 's/^[[:blank:]]*prefer-family[[:blank:]]*=/#&/' /etc/wgetrc
+			# - dietpi.txt entry
+			G_CONFIG_INJECT 'CONFIG_PREFER_IPV4=' 'CONFIG_PREFER_IPV4=0' $FP_RPI_CONFIG
+
+		else
+
+			Unknown_Input_Mode
+			return
+
+		fi
+
+		# Failsafe: Comment "ForceIPv[46]" entries in all other APT config files
+		local i=''
+		for i in /etc/apt/apt.conf.d/*
+		do
+
+			[[ ! -f $i || $i == *'99-dietpi-force-ipv4' ]] && continue
+			sed -i 's/^[[:blank:]]*Acquire::ForceIPv[46][[:blank:]]*=/#&/' $i
+
+		done
+
+	}
 
 	Wifi_Modules_Main(){
 
@@ -2099,6 +2188,14 @@ _EOF_
 	elif [[ $INPUT_DEVICE_NAME == 'wifimodules' ]]; then
 
 		Wifi_Modules_Main
+
+	elif [[ $INPUT_DEVICE_NAME == 'enableipv6' ]]; then
+
+		Enable_IPv6
+
+	elif [[ $INPUT_DEVICE_NAME == 'preferipv4' ]]; then
+
+		Prefer_IPv4
 
 	elif [[ $INPUT_DEVICE_NAME == 'wificountrycode' ]]; then
 
