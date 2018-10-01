@@ -48,9 +48,6 @@
 	# - Meveric special: https://github.com/Fourdee/DietPi/issues/1285#issuecomment-355759321
 	rm /etc/apt/sources.list.d/deb-multimedia.list &> /dev/null
 
-	# - APT force IPv4
-	echo 'Acquire::ForceIPv4 "true";' > /etc/apt/apt.conf.d/99-dietpi-force-ipv4
-
 	apt-get clean
 	apt-get update
 	for (( i=0; i<${#a_MIN_APT_PREREQS[@]}; i++))
@@ -99,26 +96,10 @@
 	export LANG=en_GB.UTF-8
 
 	#------------------------------------------------------------------------------------------------
-	#Globals
+	# DietPi-Globals
 	#------------------------------------------------------------------------------------------------
-	#Download DietPi-Globals
+	# - Download 
 	# - NB: We'll have to manually handle errors, until DietPi-Globals are sucessfully loaded.
-
-	# - Wget prefer IPv4
-	if grep -q '^[[:blank:]]*prefer-family[[:blank:]]*=' /etc/wgetrc; then
-
-		sed -i '/^[[:blank:]]*prefer-family[[:blank:]]*=/c\prefer-family = IPv4' /etc/wgetrc
-
-	elif grep -q '^[[:blank:]#;]*prefer-family[[:blank:]]*=' /etc/wgetrc; then
-
-		sed -i '/^[[:blank:]#;]*prefer-family[[:blank:]]*=/c\prefer-family = IPv4' /etc/wgetrc
-
-	else
-
-		echo 'prefer-family = IPv4' >> /etc/wgetrc
-
-	fi
-
 	if ! wget "https://raw.githubusercontent.com/$GIT_OWNER/DietPi/$GIT_BRANCH/dietpi/func/dietpi-globals"; then
 
 		echo -e 'Error: Unable to download dietpi-globals. Aborting...\n'
@@ -339,51 +320,51 @@
 		G_WHIP_MENU_ARRAY=(
 
 			'' '●─ Other '
-			'22' 'Generic device (unknown to DietPi)'
+			'22' ': Generic device (unknown to DietPi)'
 			'' '●─ SBC─(Core devices) '
-			'10' 'Odroid C1'
-			'12' 'Odroid C2'
-			'14' 'Odroid N1'
-			'13' 'Odroid U3'
-			'11' 'Odroid XU3/4/HC1/HC2'
-			'0' 'Raspberry Pi (All models)'
-			# '1' 'Raspberry Pi 1/Zero (512mb)'
-			# '2' 'Raspberry Pi 2'
-			# '3' 'Raspberry Pi 3/3+'
+			'10' ': Odroid C1'
+			'12' ': Odroid C2'
+			'14' ': Odroid N1'
+			'13' ': Odroid U3'
+			'11' ': Odroid XU3/4/HC1/HC2'
+			'0' ': Raspberry Pi (All models)'
+			# '1' ': Raspberry Pi 1/Zero (512mb)'
+			# '2' ': Raspberry Pi 2'
+			# '3' ': Raspberry Pi 3/3+'
 			'' '●─ PC '
-			'21' 'x86_64 Native PC'
-			'20' 'x86_64 VMware/VirtualBox'
+			'21' ': x86_64 Native PC'
+			'20' ': x86_64 VMware/VirtualBox'
 			'' '●─ SBC─(Limited support devices) '
-			'52' 'Asus Tinker Board'
-			'53' 'BananaPi (sinovoip)'
-			'51' 'BananaPi Pro (Lemaker)'
-			'50' 'BananaPi M2+ (sinovoip)'
-			'71' 'Beagle Bone Black'
-			'69' 'Firefly RK3399'
-			'39' 'LeMaker Guitar'
-			'68' 'NanoPC T4'
-			'67' 'NanoPi K1 Plus'
-			'66' 'NanoPi M1 Plus'
-			'65' 'NanoPi NEO 2'
-			'64' 'NanoPi NEO Air'
-			'63' 'NanoPi M1/T1'
-			'62' 'NanoPi M3/T3/F3'
-			'61' 'NanoPi M2/T2'
-			'60' 'NanoPi Neo'
-			'38' 'OrangePi PC 2'
-			'37' 'OrangePi Prime'
-			'36' 'OrangePi Win'
-			'35' 'OrangePi Zero Plus 2 (H3/H5)'
-			'34' 'OrangePi Plus'
-			'33' 'OrangePi Lite'
-			'32' 'OrangePi Zero (H2+)'
-			'31' 'OrangePi One'
-			'30' 'OrangePi PC'
-			'41' 'OrangePi PC Plus'
-			'40' 'Pine A64'
-			'43' 'Rock64'
-			'42' 'RockPro64'
-			'70' 'Sparky SBC'
+			'52' ': Asus Tinker Board'
+			'53' ': BananaPi (sinovoip)'
+			'51' ': BananaPi Pro (Lemaker)'
+			'50' ': BananaPi M2+ (sinovoip)'
+			'71' ': Beagle Bone Black'
+			'69' ': Firefly RK3399'
+			'39' ': LeMaker Guitar'
+			'60' ': NanoPi NEO'
+			'65' ': NanoPi NEO 2'
+			'64' ': NanoPi NEO Air'
+			'63' ': NanoPi M1/T1'
+			'66' ': NanoPi M1 Plus'
+			'61' ': NanoPi M2/T2'
+			'62' ': NanoPi M3/T3/F3'
+			'68' ': NanoPC T4'
+			'67' ': NanoPi K1 Plus'
+			'38' ': OrangePi PC 2'
+			'37' ': OrangePi Prime'
+			'36' ': OrangePi Win'
+			'35' ': OrangePi Zero Plus 2 (H3/H5)'
+			'34' ': OrangePi Plus'
+			'33' ': OrangePi Lite'
+			'32' ': OrangePi Zero (H2+)'
+			'31' ': OrangePi One'
+			'30' ': OrangePi PC'
+			'41' ': OrangePi PC Plus'
+			'40' ': Pine A64'
+			'43' ': Rock64'
+			'42' ': RockPro64'
+			'70' ': Sparky SBC'
 
 		)
 
@@ -406,10 +387,15 @@
 		G_DIETPI-NOTIFY 2 'WiFi selection'
 
 		G_WHIP_DEFAULT_ITEM=1
+		if (( $G_HW_MODEL == 20 )); then
+
+			G_WHIP_DEFAULT_ITEM=0
+
+		fi
 		G_WHIP_MENU_ARRAY=(
 
-			'0' "I don't require WiFi, do not install."
-			'1' 'I require WiFi functionality, keep/install related packages.'
+			'0' ": I don't require WiFi, do not install."
+			'1' ': I require WiFi functionality, keep/install related packages.'
 
 		)
 
@@ -425,9 +411,9 @@
 		G_WHIP_BUTTON_CANCEL_TEXT='Exit'
 		DISTRO_LIST_ARRAY=(
 
-			'3' 'Jessie (oldstable, just if you need to avoid upgrade to current release)'
-			'4' 'Stretch (current stable release, recommended)'
-			'5' 'Buster (testing only, not officially supported)'
+			'3' ': Jessie (oldstable, if you need to avoid upgrade to current release)'
+			'4' ': Stretch (current stable release, recommended)'
+			'5' ': Buster (testing only, not officially supported)'
 
 		)
 
@@ -1326,6 +1312,11 @@ _EOF_
 			# - Ensure WiFi module pre-exists
 			G_CONFIG_INJECT '8723bs' '8723bs' /etc/modules
 
+		#Rock64, remove HW accell config, as its not currently functional: https://github.com/Fourdee/DietPi/issues/2086
+		elif (( $G_HW_MODEL == 43 )); then
+
+			rm /etc/X11/xorg.conf.d/20-armsoc.conf &> /dev/null
+
 		# - Odroids FFMPEG fix. Prefer debian.org over Meveric for backports: https://github.com/Fourdee/DietPi/issues/1273 + https://github.com/Fourdee/DietPi/issues/1556#issuecomment-369463910
 		elif (( $G_HW_MODEL > 9 && $G_HW_MODEL < 15 )); then
 
@@ -1393,7 +1384,7 @@ _EOF_
 
 		G_DIETPI-NOTIFY 2 'Generating default wpa_supplicant.conf'
 
-		/DietPi/dietpi/func/dietpi-set_hardware wificreds set
+		/DietPi/dietpi/func/dietpi-wifidb 1
 		#	move to /boot/ so users can modify as needed for automated
 		G_RUN_CMD mv /var/lib/dietpi/dietpi-wifi.db /boot/dietpi-wifi.txt
 

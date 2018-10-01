@@ -2396,9 +2396,6 @@
 	WIFI_MODE_TARGET=0
 	WIFI_SSID_CURRENT=''
 	WIFI_CRED_INDEX=0
-	aWIFI_SSID=()
-	aWIFI_KEY=()
-	aWIFI_KEYMGR=()
 
 	WIFI_BITRATE=0
 	WIFI_SIGNALSTRENGTH=0
@@ -2438,9 +2435,6 @@
 
 		#Stop all services (required for hotspot)
 		/DietPi/dietpi/dietpi-services stop
-
-		# - Apply WiFi creds to wpa_supplicant.conf
-		/DietPi/dietpi/func/dietpi-set_hardware wificreds set
 
 		# Enable/Disable wifi modules
 		if (( $WIFI_DISABLED )); then
@@ -2588,36 +2582,8 @@ _EOF_
 
 		fi
 
-		# - Update WiFi db
-		#NB: THIS IS AN EXACT COPY OF wificreds set, ensure both match
-		rm /var/lib/dietpi/dietpi-wifi.db
-		#	Wish we could export an array... Could create a global for these to allow that, but, "security"................
-		for (( i=0; i<5; i++ ))
-		do
-
-			cat << _EOF_ >> /var/lib/dietpi/dietpi-wifi.db
-#---------------------------------------------------------------
-# - Entry $i
-#	WiFi SSID (Case Sensitive)
-aWIFI_SSID[$i]="${aWIFI_SSID[$i]}"
-#	Key options: If no key (open), leave this blank
-aWIFI_KEY[$i]="${aWIFI_KEY[$i]}"
-#	Available options: NONE (no key/open) | WPA-PSK | WEP | WPA-EAP (then use settings below)
-aWIFI_KEYMGR[$i]="${aWIFI_KEYMGR[$i]}"
-# - WPA-EAP Options
-aWIFI_PROTO[$i]="${aWIFI_PROTO[$i]}"
-aWIFI_PAIRWISE[$i]="${aWIFI_PAIRWISE[$i]}"
-aWIFI_AUTH_ALG[$i]="${aWIFI_AUTH_ALG[$i]}"
-aWIFI_EAP[$i]="${aWIFI_EAP[$i]}"
-aWIFI_IDENTITY[$i]="${aWIFI_IDENTITY[$i]}"
-aWIFI_PASSWORD[$i]="${aWIFI_PASSWORD[$i]}"
-aWIFI_PHASE1[$i]="${aWIFI_PHASE1[$i]}"
-aWIFI_PHASE2[$i]="${aWIFI_PHASE2[$i]}"
-#	Location of the certificate file (eg: /boot/mycert.cer)
-aWIFI_CERT[$i]="${aWIFI_CERT[$i]}"
-_EOF_
-
-		done
+		# - Update WiFi db/wpa_supplicant
+		/DietPi/dietpi/func/dietpi-wifidb 1
 
 		#Update Current Mode for network restart
 		ETH_MODE=$ETH_MODE_TARGET
@@ -2790,51 +2756,6 @@ _EOF_
 
 	}
 
-	Change_WifiSsid(){
-
-		G_WHIP_DEFAULT_ITEM="${aWIFI_SSID[$WIFI_CRED_INDEX]}"
-		G_WHIP_INPUTBOX 'Please enter the SSID name to connect to.'
-		if (( $? == 0 )); then
-
-			aWIFI_SSID[$WIFI_CRED_INDEX]="$G_WHIP_RETURNED_VALUE"
-
-		fi
-
-	}
-
-	Change_WifiKey(){
-
-		G_WHIP_MENU_ARRAY=(
-
-			'WPA-PSK' ': Default (recommended)'
-			'WEP' ': Legacy (insecure)'
-			'NONE' ': Open host that does not require a key (eg: free WiFi!)'
-
-		)
-
-		G_WHIP_DEFAULT_ITEM="${aWIFI_KEYMGR[$WIFI_CRED_INDEX]}"
-		G_WHIP_MENU 'Please select a WiFi encryption mode.\n\nNB: If unsure, its most likely WPA-PSK.'
-		if (( $? == 0 )); then
-
-			aWIFI_KEYMGR[$WIFI_CRED_INDEX]="$G_WHIP_RETURNED_VALUE"
-
-			if [[ ${aWIFI_KEYMGR[$WIFI_CRED_INDEX]} != 'NONE' ]]; then
-
-				G_WHIP_DEFAULT_ITEM="${aWIFI_KEY[$WIFI_CRED_INDEX]}"
-				G_WHIP_INPUTBOX 'Please enter the Access Key (WPA).'
-				if (( $? == 0 )); then
-
-					aWIFI_KEY[$WIFI_CRED_INDEX]="$G_WHIP_RETURNED_VALUE"
-
-
-				fi
-
-			fi
-
-		fi
-
-	}
-
 	Change_WifiCountryCode(){
 
 		local wifi_country_code_target=$WIFI_COUNTRYCODE
@@ -2897,68 +2818,13 @@ _EOF_
 
 	}
 
-	Scan_Wifi(){
-
-		#Ensure adapater is up
-		ifup wlan$WIFI_DEV_INDEX
-
-		#Get all ssids
-		printf '\ec' # clear current terminal screen
-		echo 'Scanning SSIDS, please wait....'
-		echo '-------------------------------'
-
-		G_WHIP_MENU_ARRAY=()
-		while read line
-		do
-
-			if [[ $line ]]; then
-
-				G_WHIP_MENU_ARRAY+=("$line" '')
-
-			fi
-
-		done <<< "$(iwlist wlan$WIFI_DEV_INDEX scan | grep 'ESSID:' | sed 's/[ \t]*ESSID:"\(.*\)"/\1/')"
-
-		G_WHIP_MENU 'Please select a Wifi SSID'
-		if (( $? == 0 )); then
-
-			aWIFI_SSID[$WIFI_CRED_INDEX]="$G_WHIP_RETURNED_VALUE"
-			Change_WifiKey
-
-		fi
-
-	}
-
 	Wifi_Reconnect(){
 
-		local ssid_text='Stored WiFi SSIDs:\n'
-		local ssid_configured=0
+		G_WHIP_YESNO "WiFi will connect to the strongest configured SSID that is secure, with an open SSID being the last priority.\n\nSave all changes and restart networking?\n\nNB: All WiFi connections will be dropped!"
+		if (( $? == 0 )); then
 
-		for (( i=0; i<5; i++ ))
-		do
-
-			if [[ ${aWIFI_SSID[$i]} ]]; then
-
-				ssid_text+=" - ${aWIFI_SSID[$i]}\n"
-				ssid_configured=1
-
-			fi
-
-		done
-
-		if (( $ssid_configured )); then
-
-			G_WHIP_YESNO "$ssid_text\nWiFi will connect to the strongest configured SSID that is secure, with an open SSID being the last priority.\n\nSave all changes and restart networking?\n\nNB: All WiFi connections will be dropped!"
-			if (( $? == 0 )); then
-
-				#Apply Changes
-				Network_ApplyChanges
-
-			fi
-
-		else
-
-			G_WHIP_MSG 'No WiFi SSIDs are configured, please use the "Scan" option to set this up.'
+			#Apply Changes
+			Network_ApplyChanges
 
 		fi
 
@@ -3029,18 +2895,6 @@ _EOF_
 		fi
 		WIFI_CRED_INDEX=0 # Which index of SSID/KEY etc we are editing
 
-		# - Load dietpi-wifi.db
-		aWIFI_SSID=()
-		aWIFI_KEY=()
-		aWIFI_KEYMGR=()
-		if [[ ! -f /var/lib/dietpi/dietpi-wifi.db ]]; then
-
-			G_DIETPI-NOTIFY 1 "DEBUG: /var/lib/dietpi/dietpi-wifi.db does not exist, unable to continue. If you did not manually remove this file, please report this issue to DietPi."
-			exit 1
-
-		fi
-		. /var/lib/dietpi/dietpi-wifi.db
-
 		#Get extra wifi stats
 		WIFI_BITRATE=0
 		WIFI_SIGNALSTRENGTH=0
@@ -3052,19 +2906,13 @@ _EOF_
 
 		fi
 
-		# - Prevent "nl80211 not found" message, when running this command with cfg80211 module disabled.
-		#??????????????????????????????????????????????????????
-		# We cant rely on lsmod for this. Some of our images have cfg80211 built into kernel, so lsmod wont show a result.
-		# Redirect stderr and stdout does nowt 2> /dev/null and &> /dev/null no effect.
-		#if (( $(lsmod | grep -ci -m1 'cfg80211' ) )); then
 		WIFI_COUNTRYCODE='GB'
+		# - Prevent "nl80211 not found" message, when running this command with cfg80211 module disabled.
 		if [[ $(which iw) ]]; then
 
 			WIFI_COUNTRYCODE=$(iw reg get | grep -m1 'country' | awk '{print $2}' | tr -d ':')
 
 		fi
-
-		#??????????????????????????????????????????????????????
 
 		# Convert CIDR integer to net mask, e.g. "192.168.0.100/24" (take "24") to "255.255.255.0"
 		cidr2mask() {
@@ -3237,16 +3085,6 @@ _EOF_
 
 		fi
 
-		#IPv6 status
-		local ipv6_enabled=1
-		local ipv6_status_text='[On]'
-		if [[ ! -d /proc/sys/net/ipv6 ]]; then
-
-			ipv6_enabled=0
-			ipv6_status_text='[Off]'
-
-		fi
-
 		#Proxy settings (global vars, force an int to obtain current values stored in dietpi.txt)
 		Load_Proxy_Vars
 
@@ -3280,11 +3118,10 @@ _EOF_
 
 		fi
 
-		G_WHIP_MENU_ARRAY+=('IPv6' "$ipv6_status_text | Toggle IPv6 Support")
 		G_WHIP_MENU_ARRAY+=('Test' 'Run the Internet Connection Test')
 		G_WHIP_MENU_ARRAY+=('Proxy' 'Configure proxy settings')
 
-		G_WHIP_MENU "Ethernet     : $eth_hardware_text | $eth_disabled_text | $eth_connected_text \nWifi         : $wlan_hardware_text | $wlan_disabled_text | $wlan_connected_text\nIPv6         : $ipv6_status_text\nInternet     : $Internet_connected_text\nProxy        : $proxy_state_text"
+		G_WHIP_MENU "Ethernet     : $eth_hardware_text | $eth_disabled_text | $eth_connected_text \nWifi         : $wlan_hardware_text | $wlan_disabled_text | $wlan_connected_text\nInternet     : $Internet_connected_text\nProxy        : $proxy_state_text"
 		if (( $? == 0 )); then
 
 			#Return to this Menu
@@ -3307,71 +3144,6 @@ _EOF_
 					REBOOT_REQUIRED=1
 
 					G_WHIP_MSG 'Onboard WiFi modules setting applied\n\nNB: A reboot is required for the changes to take effect.'
-
-				;;
-
-				'IPv6')
-
-					#Disable
-					if (( $ipv6_enabled )); then
-
-						G_WHIP_YESNO 'IPv6 is currently enabled. Would you like to disable it?\n\n - A system restart is required for settings to take effect.\n - Disabling IPv6 may break certain programs that rely on it.'
-						if (( $? == 0 )); then
-
-							# - On amd64 images, IPv6 is no kernel module, but can be disabled via grub: https://github.com/Fourdee/DietPi/issues/1343#issuecomment-359652751
-							if (( $G_HW_ARCH == 10 )); then
-
-								if ! grep -qi '^[[:blank:]]*GRUB_CMDLINE_LINUX_DEFAULT=".*ipv6.disable=1' /etc/default/grub; then
-
-									sed -i '/^[[:blank:]]*GRUB_CMDLINE_LINUX_DEFAULT="/s/="/="ipv6.disable=1 /' /etc/default/grub
-									update-grub
-
-								fi
-
-							# - On all other images, IPv6 is a kernel module, which can be blacklisted.
-							else
-
-								# Since RPi kernel 4.14.y, IPv6 is no kernel module as well, but keep blacklist as fail-safe:
-								(( $G_HW_MODEL < 10 )) && sed -Ei '/root=/s/( ipv6.disable=.|$)/ ipv6.disable=1/' /boot/cmdline.txt
-								echo 'blacklist ipv6' > /etc/modprobe.d/99-dietpi-blacklist-ipv6.conf
-
-							fi
-
-							# - APT force IPv4
-							echo 'Acquire::ForceIPv4 "true";' > /etc/apt/apt.conf.d/99-dietpi-force-ipv4
-							# - Wget prefer IPv4
-							G_CONFIG_INJECT 'prefer-family =' 'prefer-family = IPv4' /etc/wgetrc
-							REBOOT_REQUIRED=1
-
-						fi
-
-					#Enable
-					else
-
-						G_WHIP_YESNO "IPv6 is currently disabled. Would you like to enable it?\n\n - NB: A system restart is required for settings to take effect."
-						if (( $? == 0 )); then
-
-							if (( $G_HW_ARCH == 10 )); then
-
-								sed -i '/^[[:blank:]]*GRUB_CMDLINE_LINUX_DEFAULT="/s/ipv6.disable=. //' /etc/default/grub
-								update-grub
-
-							else
-
-								(( $G_HW_MODEL < 10 )) && sed -i '/root=/s/ ipv6.disable=.//' /boot/cmdline.txt
-								rm /etc/modprobe.d/99-dietpi-blacklist-ipv6.conf &> /dev/null
-
-							fi
-
-							# - APT allow IPv6 but do not force it: https://github.com/Fourdee/DietPi/issues/472#issuecomment-356444922
-							rm /etc/apt/apt.conf.d/99-dietpi-force-ipv4 &> /dev/null
-							# - Wget prefer IPv6
-							G_CONFIG_INJECT 'prefer-family =' 'prefer-family = IPv6' /etc/wgetrc
-							REBOOT_REQUIRED=1
-
-						fi
-
-					fi
 
 				;;
 
@@ -3671,84 +3443,6 @@ _EOF_
 
 	}
 
-	Menu_WiFi_SSID_DB(){
-
-		while true
-		do
-
-			G_WHIP_MENU_ARRAY=('' '●─ WiFi Slots')
-			for (( i=0; i<5; i++ ))
-			do
-
-				if [[ ${aWIFI_SSID[$i]} ]]; then
-
-					G_WHIP_MENU_ARRAY+=($i "SSID = ${aWIFI_SSID[$i]} | Key = ${aWIFI_KEY[$i]}")
-
-				else
-
-					G_WHIP_MENU_ARRAY+=($i 'Unused: Select to configure')
-
-				fi
-
-			done
-
-			G_WHIP_DEFAULT_ITEM=$WIFI_CRED_INDEX
-			G_WHIP_BUTTON_CANCEL_TEXT='Back'
-			G_WHIP_MENU 'Please select a WiFi slot to configure:'
-			if (( $? == 0 )) && [[ $G_WHIP_RETURNED_VALUE ]]; then
-
-					WIFI_CRED_INDEX=$G_WHIP_RETURNED_VALUE
-
-					G_WHIP_MENU_ARRAY=()
-					if [[ ${aWIFI_SSID[$WIFI_CRED_INDEX]} ]]; then
-
-						G_WHIP_MENU_ARRAY+=('Remove' ": Delete '${aWIFI_SSID[$WIFI_CRED_INDEX]}' from the database")
-
-					else
-
-						G_WHIP_MENU_ARRAY+=('Scan' ': Scan and configure an SSID')
-						G_WHIP_MENU_ARRAY+=('Manual' ': Manually enter all WiFi creds')
-
-					fi
-
-					local message_text="Please select an option for slot $WIFI_CRED_INDEX."
-					if [[ ${aWIFI_SSID[$WIFI_CRED_INDEX]} ]]; then
-
-						message_text+="\n\nCurrent details:\n - SSID = ${aWIFI_SSID[$WIFI_CRED_INDEX]}\n - Key = ${aWIFI_KEY[$WIFI_CRED_INDEX]}"
-
-					fi
-
-					G_WHIP_MENU "$message_text"
-					if (( $? == 0 )); then
-
-						if [[ $G_WHIP_RETURNED_VALUE == 'Remove' ]]; then
-
-							aWIFI_SSID[$WIFI_CRED_INDEX]=''
-							aWIFI_KEY[$WIFI_CRED_INDEX]=''
-
-						elif [[ $G_WHIP_RETURNED_VALUE == 'Scan' ]]; then
-
-							Scan_Wifi
-
-						elif [[ $G_WHIP_RETURNED_VALUE == 'Manual' ]]; then
-
-							Change_WifiSsid
-							Change_WifiKey
-
-						fi
-
-					fi
-
-			else
-
-				break
-
-			fi
-
-		done
-
-	}
-
 	#TARGETMENUID=10
 	Menu_NetworkAdapters_Wifi(){
 
@@ -3967,7 +3661,7 @@ _EOF_
 
 				'Scan')
 
-					Menu_WiFi_SSID_DB
+					/DietPi/dietpi/func/dietpi-wifidb
 
 				;;
 
