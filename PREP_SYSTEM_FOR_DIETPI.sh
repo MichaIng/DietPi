@@ -114,8 +114,6 @@
 		exit 1
 
 	fi
-	# Go back to tmp working dir, as loading global includes cd $HOME:
-	cd /tmp/DietPi-PREP
 	rm dietpi-globals
 
 	export G_PROGRAM_NAME='DietPi-PREP'
@@ -253,10 +251,11 @@
 		#------------------------------------------------------------------------------------------------
 
 		#Image creator
-		while true
+		while :
 		do
 
-			if G_WHIP_INPUTBOX 'Please enter your name. This will be used to identify the image creator within credits banner.\n\nYou can add your contanct information as well for end users.\n\nNB: An entry is required.'  && [[ $G_WHIP_RETURNED_VALUE ]]; then
+			G_WHIP_INPUTBOX 'Please enter your name. This will be used to identify the image creator within credits banner.\n\nYou can add your contanct information as well for end users.\n\nNB: An entry is required.'
+			if (( ! $? )) && [[ $G_WHIP_RETURNED_VALUE ]]; then
 
 				#Disallowed:
 				DISALLOWED_NAME=0
@@ -275,7 +274,7 @@
 				for (( i=0; i<${#aDISALLOWED_NAMES[@]}; i++))
 				do
 
-					if [[ ${G_WHIP_RETURNED_VALUE,,} == *"${aDISALLOWED_NAMES[$i]}"* ]]; then
+					if [[ ${G_WHIP_RETURNED_VALUE,,} =~ ${aDISALLOWED_NAMES[$i]} ]]; then
 
 						DISALLOWED_NAME=1
 						break
@@ -302,10 +301,11 @@
 		done
 
 		#Pre-image used/name
-		while true
+		while :
 		do
 
-			if G_WHIP_INPUTBOX 'Please enter the name or URL of the pre-image you installed on this system, prior to running this script. This will be used to identify the pre-image credits.\n\nEG: Debian, Raspbian Lite, Meveric, FriendlyARM, or "forum.odroid.com/viewtopic.php?f=ABC&t=XYZ" etc.\n\nNB: An entry is required.' && [[ $G_WHIP_RETURNED_VALUE ]]; then
+			G_WHIP_INPUTBOX 'Please enter the name or URL of the pre-image you installed on this system, prior to running this script. This will be used to identify the pre-image credits.\n\nEG: Debian, Raspbian Lite, Meveric, FriendlyARM, or "forum.odroid.com/viewtopic.php?f=ABC&t=XYZ" etc.\n\nNB: An entry is required.'
+			if (( ! $? )) && [[ $G_WHIP_RETURNED_VALUE ]]; then
 
 				PREIMAGE_INFO="$G_WHIP_RETURNED_VALUE"
 				break
@@ -368,7 +368,8 @@
 
 		)
 
-		if ! G_WHIP_MENU 'Please select the current device this is being installed on:\n - NB: Select "Generic device" if not listed.\n - "Core devices": Are fully supported by DietPi, offering full GPU + Kodi support.\n - "Limited support devices": No GPU support, supported limited to DietPi specific issues only (eg: excludes Kernel/GPU/VPU related items).' || [[ -z $G_WHIP_RETURNED_VALUE ]]; then
+		G_WHIP_MENU 'Please select the current device this is being installed on:\n - NB: Select "Generic device" if not listed.\n - "Core devices": Are fully supported by DietPi, offering full GPU + Kodi support.\n - "Limited support devices": No GPU support, supported limited to DietPi specific issues only (eg: excludes Kernel/GPU/VPU related items).'
+		if (( $? )) || [[ -z $G_WHIP_RETURNED_VALUE ]]; then
 
 			G_DIETPI-NOTIFY 1 'No choices detected. Aborting...'
 			exit 0
@@ -381,17 +382,14 @@
 		G_DIETPI-NOTIFY 2 "Setting G_HW_MODEL index of: $G_HW_MODEL"
 		G_DIETPI-NOTIFY 2 "CPU ARCH = $G_HW_ARCH : $G_HW_ARCH_DESCRIPTION"
 
-		echo "$G_HW_MODEL" > /etc/.dietpi_hw_model_identifier
+		echo $G_HW_MODEL > /etc/.dietpi_hw_model_identifier
 
 		#WiFi selection
 		G_DIETPI-NOTIFY 2 'WiFi selection'
 
 		G_WHIP_DEFAULT_ITEM=1
-		if (( $G_HW_MODEL == 20 )); then
+		(( $G_HW_MODEL == 20 )) && G_WHIP_DEFAULT_ITEM=0
 
-			G_WHIP_DEFAULT_ITEM=0
-
-		fi
 		G_WHIP_MENU_ARRAY=(
 
 			'0' ": I don't require WiFi, do not install."
@@ -399,7 +397,7 @@
 
 		)
 
-		if G_WHIP_MENU 'Please select an option:' && (( $G_WHIP_RETURNED_VALUE==1 )) ; then
+		if G_WHIP_MENU 'Please select an option:' && (( $G_WHIP_RETURNED_VALUE )) ; then
 
 			G_DIETPI-NOTIFY 2 'Marking WiFi as needed'
 			WIFI_REQUIRED=1
@@ -452,7 +450,8 @@
 
 		fi
 
-		if ! G_WHIP_MENU "Please select a distro to install on this system. Selecting a distro that is older than the current installed on system, is not supported.\n\nCurrently installed:\n - $G_DISTRO $G_DISTRO_NAME" || [[ -z $G_WHIP_RETURNED_VALUE ]]; then
+		G_WHIP_MENU "Please select a distro to install on this system. Selecting a distro that is older than the current installed on system, is not supported.\n\nCurrently installed:\n - $G_DISTRO $G_DISTRO_NAME"
+		if (( $? )) || [[ -z $G_WHIP_RETURNED_VALUE ]]; then
 
 			G_DIETPI-NOTIFY 1 'No choices detected. Aborting...'
 			exit 0
@@ -1281,7 +1280,9 @@ _EOF_
 			mkdir -p rtl8812au_sparky
 			tar -xvf rtl8812au_sparky.tar -C rtl8812au_sparky
 			chmod +x -R rtl8812au_sparky
-			( cd rtl8812au_sparky && G_RUN_CMD ./install.sh )
+			cd rtl8812au_sparky
+			G_RUN_CMD ./install.sh
+			cd /tmp/DietPi-PREP
 			rm -R rtl8812au_sparky*
 
 			#	Use performance gov for stability.
