@@ -55,8 +55,7 @@
 
 		if ! dpkg-query -s ${a_MIN_APT_PREREQS[$i]} &> /dev/null; then
 
-			apt-get install -y ${a_MIN_APT_PREREQS[$i]}
-			if (( $? )); then
+			if ! apt-get install -y ${a_MIN_APT_PREREQS[$i]}; then
 
 				echo -e "Error: Unable to install ${a_MIN_APT_PREREQS[$i]}, please try to install it manually:\n\t# apt-get install -y ${a_MIN_APT_PREREQS[$i]}"
 				exit 1
@@ -76,11 +75,10 @@
 
 	# - NB: DEV, any changes here must be also rolled into function '/DietPi/dietpi/func/dietpi-set_software locale', for future script use
 	echo 'en_GB.UTF-8 UTF-8' > /etc/locale.gen
-	dpkg-reconfigure -f noninteractive locales
 	# - dpkg-reconfigure includes:
 	#	- "locale-gen": Generate locale(s) based on "/etc/locale.gen" or interactive selection.
 	#	- "update-locale": Add $LANG to "/etc/default/locale" based on generated locale(s) or interactive default language selection.
-	if (( $? )); then
+	if ! dpkg-reconfigure -f noninteractive locales; then
 
 		echo -e 'Error: Locale generation failed. Aborting...\n'
 		exit 1
@@ -98,13 +96,11 @@
 	export LANG=en_GB.UTF-8
 
 	#------------------------------------------------------------------------------------------------
-	#Globals
+	# DietPi-Globals
 	#------------------------------------------------------------------------------------------------
-	#Download DietPi-Globals
+	# - Download 
 	# - NB: We'll have to manually handle errors, until DietPi-Globals are sucessfully loaded.
-
-	wget "https://raw.githubusercontent.com/$GIT_OWNER/DietPi/$GIT_BRANCH/dietpi/func/dietpi-globals"
-	if (( $? )); then
+	if ! wget "https://raw.githubusercontent.com/$GIT_OWNER/DietPi/$GIT_BRANCH/dietpi/func/dietpi-globals"; then
 
 		echo -e 'Error: Unable to download dietpi-globals. Aborting...\n'
 		exit 1
@@ -112,15 +108,12 @@
 	fi
 
 	# - Load
-	. ./dietpi-globals
-	if (( $? )); then
+	if ! . ./dietpi-globals; then
 
 		echo -e 'Error: Unable to load dietpi-globals. Aborting...\n'
 		exit 1
 
 	fi
-	# Go back to tmp working dir, as loading global includes cd $HOME:
-	cd /tmp/DietPi-PREP
 	rm dietpi-globals
 
 	export G_PROGRAM_NAME='DietPi-PREP'
@@ -258,7 +251,7 @@
 		#------------------------------------------------------------------------------------------------
 
 		#Image creator
-		while true
+		while :
 		do
 
 			G_WHIP_INPUTBOX 'Please enter your name. This will be used to identify the image creator within credits banner.\n\nYou can add your contanct information as well for end users.\n\nNB: An entry is required.'
@@ -281,7 +274,7 @@
 				for (( i=0; i<${#aDISALLOWED_NAMES[@]}; i++))
 				do
 
-					if [[ ${G_WHIP_RETURNED_VALUE,,} == *"${aDISALLOWED_NAMES[$i]}"* ]]; then
+					if [[ ${G_WHIP_RETURNED_VALUE,,} =~ ${aDISALLOWED_NAMES[$i]} ]]; then
 
 						DISALLOWED_NAME=1
 						break
@@ -308,7 +301,7 @@
 		done
 
 		#Pre-image used/name
-		while true
+		while :
 		do
 
 			G_WHIP_INPUTBOX 'Please enter the name or URL of the pre-image you installed on this system, prior to running this script. This will be used to identify the pre-image credits.\n\nEG: Debian, Raspbian Lite, Meveric, FriendlyARM, or "forum.odroid.com/viewtopic.php?f=ABC&t=XYZ" etc.\n\nNB: An entry is required.'
@@ -391,17 +384,14 @@
 		G_DIETPI-NOTIFY 2 "Setting G_HW_MODEL index of: $G_HW_MODEL"
 		G_DIETPI-NOTIFY 2 "CPU ARCH = $G_HW_ARCH : $G_HW_ARCH_DESCRIPTION"
 
-		echo "$G_HW_MODEL" > /etc/.dietpi_hw_model_identifier
+		echo $G_HW_MODEL > /etc/.dietpi_hw_model_identifier
 
 		#WiFi selection
 		G_DIETPI-NOTIFY 2 'WiFi selection'
 
 		G_WHIP_DEFAULT_ITEM=1
-		if (( $G_HW_MODEL == 20 )); then
+		(( $G_HW_MODEL == 20 )) && G_WHIP_DEFAULT_ITEM=0
 
-			G_WHIP_DEFAULT_ITEM=0
-
-		fi
 		G_WHIP_MENU_ARRAY=(
 
 			'0' ": I don't require WiFi, do not install."
@@ -409,8 +399,7 @@
 
 		)
 
-		G_WHIP_MENU 'Please select an option:'
-		if (( ! $? && $G_WHIP_RETURNED_VALUE == 1 )); then
+		if G_WHIP_MENU 'Please select an option:' && (( $G_WHIP_RETURNED_VALUE )) ; then
 
 			G_DIETPI-NOTIFY 2 'Marking WiFi as needed'
 			WIFI_REQUIRED=1
@@ -1295,7 +1284,7 @@ _EOF_
 			chmod +x -R rtl8812au_sparky
 			cd rtl8812au_sparky
 			G_RUN_CMD ./install.sh
-			cd ..
+			cd /tmp/DietPi-PREP
 			rm -R rtl8812au_sparky*
 
 			#	Use performance gov for stability.
