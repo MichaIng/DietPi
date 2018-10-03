@@ -322,6 +322,8 @@
 		done
 
 		#Hardware selection
+		#	NB: PLEASE ENSURE HW_MODEL INDEX ENTRIES MATCH : PREP, dietpi-obtain_hw_model, dietpi-survey_results,
+		#	NBB: DO NOT REORDER INDEX's. These are now fixed and will never change (due to survey results etc)
 		G_WHIP_DEFAULT_ITEM=22
 		G_WHIP_BUTTON_CANCEL_TEXT='Exit'
 		G_WHIP_MENU_ARRAY=(
