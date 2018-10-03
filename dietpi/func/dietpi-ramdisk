@@ -9,38 +9,32 @@
 	#////////////////////////////////////
 	#
 	# Info:
-	# - Copies dietpi files from /boot to /DietPi (ram)
-	# - /DietPi is mounted as tmpfs (ram)
+	# - Copies dietpi files from /boot to /DietPi (RAM)
+	# - /DietPi is mounted as tmpfs (RAMdisk)
 	# - This allows us to vastly reduce filesystem IO across DietPi.
 	# - Creates a file when active (/DietPi/.ramdisk)
 	#
 	# Usage:
-	# - /DietPi/dietpi/func/dietpi-ramdisk 0				= Copy from /boot (disk) to /DietPi (ram)
-	# - /DietPi/dietpi/func/dietpi-ramdisk 1				= Copy from /DietPi (ram) to /boot (disk)
+	# - /DietPi/dietpi/func/dietpi-ramdisk 0		= Copy from /boot (disk) to /DietPi (RAM)
+	# - /DietPi/dietpi/func/dietpi-ramdisk 1		= Copy from /DietPi (RAM) to /boot (disk)
 	#////////////////////////////////////
 
 	#-----------------------------------------------------------------------------------
-	#Set locale for all scripts, prevents incorrect scraping
-	export LANG=en_GB.UTF-8
-	export LC_ALL=en_GB.UTF-8
-	#Ensure we are in users home dir: https://github.com/Fourdee/DietPi/issues/905#issuecomment-298223705
-	cd $HOME
+	#. /DietPi/dietpi/func/dietpi-globals	# Not compatible until dietpi-preboot.service and overkill for the purpose of this script.
+	#export LC_ALL=en_GB.UTF-8		# Not needed, as we do not parse any external command and "date" is allowed to be in user locale format.
+	#cd $HOME				# "cd: HOME not set" error and not needed, since we do not create any tmp files.
 	#-----------------------------------------------------------------------------------
 
 	INPUT=0
-	if [[ $1 =~ ^-?[0-9]+$ ]]; then
+	[[ $1 =~ ^-?[0-9]+$ ]] && INPUT=$1
 
-		INPUT=$1
+	EXIT_CODE=0
 
-	fi
-	#Import DietPi-Globals ---------------------------------------------------------------
-	#. /DietPi/dietpi/func/dietpi-globals # Not compatible until dietpi-boot.service
-	#Import DietPi-Globals ---------------------------------------------------------------
+	PROGRAM_NAME='DietPi-RAMdisk'
+	FP_RAM='/DietPi'
+	FP_DISK='/boot'
 
-	FILEPATH_RAM='/DietPi'
-	FILEPATH_DISK='/boot'
-
-	#List of ini/config files located in /boot
+	# List of ini/config files located in /boot
 	aFILE_BOOT_INI=(
 
 		'dietpi.txt'
@@ -51,99 +45,102 @@
 	)
 
 	#/////////////////////////////////////////////////////////////////////////////////////
-	#Main Loop
+	# Main Loop
 	#/////////////////////////////////////////////////////////////////////////////////////
 
-	#Start: Copy to Ram
+	# Start: Copy to RAM
 	if (( $INPUT == 0 )); then
 
-		if [[ ! -f '/DietPi/.ramdisk' ]]; then
+		echo "$(date) | $PROGRAM_NAME: Starting..."
 
-			echo -e "$(date) | DietPi-Ramdisk: Starting"
+		if [[ ! -f $FP_RAM'/.ramdisk' ]]; then
 
-			#Generate required directories
-			#mkdir -p $FILEPATH_RAM/dietpi
-			mkdir -p $FILEPATH_RAM/dietpi/conf
-			mkdir -p $FILEPATH_RAM/dietpi/func
-			mkdir -p $FILEPATH_RAM/dietpi/misc
+			# - Failsafe: Pre-create /DietPi
+			mkdir -p $FP_RAM
 
-			#Copy array of /boot/* files to RAM (config/ini etc)
+			# - Copy array of /boot/* files to RAM (config/ini etc)
 			for ((i=0; i<${#aFILE_BOOT_INI[@]}; i++))
 			do
 
-				if [[ -f $FILEPATH_DISK/${aFILE_BOOT_INI[$i]} ]]; then
+				if [[ -f $FP_DISK/${aFILE_BOOT_INI[$i]} ]]; then
 
-					cp $FILEPATH_DISK/${aFILE_BOOT_INI[$i]} $FILEPATH_RAM/
+					cp $FP_DISK/${aFILE_BOOT_INI[$i]} $FP_RAM/
 
-					# - Convert line endings to Unix from Dos. Prevents various issues where users modify file on another system, then save with dos line endings: https://github.com/Fourdee/DietPi/issues/390
-					sed -i $'s/\r$//' $FILEPATH_RAM/${aFILE_BOOT_INI[$i]}
+					# - Convert line endings to Unix from DOS. Prevents various issues where users modify file on another system, then save with DOS line endings: https://github.com/Fourdee/DietPi/issues/390
+					sed -i $'s/\r$//' $FP_RAM/${aFILE_BOOT_INI[$i]}
 
 				fi
 
 			done
 
 			# - Copy to RAM
-			cp -Rf $FILEPATH_DISK/dietpi $FILEPATH_RAM/
-
-			# - Generate active flag
-			echo 0 > /DietPi/.ramdisk
+			cp -Rf $FP_DISK/dietpi $FP_RAM/
 
 			# - Set DietPi user + exec
-			# chown -R dietpi:dietpi "$FILEPATH_RAM" #Unless we can find a way to prevent file permissions being changed after root modifies them, no point in having this.
-			chmod -R +x $FILEPATH_RAM
+			#chown -R dietpi:dietpi $FP_RAM # Unless we can find a way to prevent file permissions being changed after root modifies them, no point in having this.
+			chmod -R +x $FP_RAM
 
-			echo -e "$(date) | DietPi-Ramdisk: Completed"
+			# - Generate active flag
+			> $FP_RAM/.ramdisk
+
+			echo "$(date) | $PROGRAM_NAME: Completed"
 
 		else
 
-			echo -e "$(date) | DietPi-Ramdisk: Already running"
+			echo "$(date) | $PROGRAM_NAME: Already running. Aborting..."
 
 		fi
 
 	#Stop: Copy everything back to DISK
 	elif (( $INPUT == 1 )); then
 
-		echo -e "$(date) | DietPi-Ramdisk: Stopping"
+		echo "$(date) | $PROGRAM_NAME: Stopping..."
 
-		if [[ -f '/DietPi/.ramdisk' ]]; then
+		if [[ -f $FP_RAM'/.ramdisk' ]]; then
 
-			if [[ ! -f '/DietPi/dietpi/boot' ]]; then #Only copy back if file exists (in-case "DietPi-Ramdisk: Already running" occured during start): https://github.com/Fourdee/DietPi/issues/719#issuecomment-276101472
+			if [[ ! -f $FP_RAM'/dietpi/boot' ]]; then # Only copy back if file exists (in-case "DietPi-RAMdisk: Already running" occured during start): https://github.com/Fourdee/DietPi/issues/719#issuecomment-276101472
 
-				echo -e "$(date) | DietPi-Ramdisk: Error - /DietPi/dietpi/boot is missing, aborting..."
-				exit 1
+				echo "$(date) | $PROGRAM_NAME: [ERROR] $FP_RAM/dietpi/boot is missing. Aborting..."
+				EXIT_CODE=1
 
 			else
 
-				#Remove all of DietPi files and folders from DISK
-				# rm -R "$FILEPATH_DISK"/dietpi #: https://github.com/Fourdee/DietPi/issues/905#issuecomment-298241622
+				# - Remove all of DietPi files and folders from disk
+				#rm -R $FP_DISK/dietpi # https://github.com/Fourdee/DietPi/issues/905#issuecomment-298241622
 
-				#Copy DietPi to Disk with files from RAM
-				cp -Rf $FILEPATH_RAM/* /boot/
+				# - Copy DietPi to disk with files from RAM
+				cp -Rf $FP_RAM/* /boot/
 
-				# - remove active flag.
-				rm /DietPi/.ramdisk
+				# - Remove active flag
+				rm $FP_RAM/.ramdisk
 
 				# - Remove update available status (refreshed during reboot)
-				rm /boot/dietpi/.update_available &> /dev/null
+				rm $FP_DISK/dietpi/.update_available &> /dev/null
+
+				# - Sync changes to disk NOW
+				sync
+
+				echo "$(date) | $PROGRAM_NAME: Completed"
 
 			fi
 
-			echo -e "$(date) | DietPi-Ramdisk: Completed"
-
 		else
 
-			echo -e "$(date) | DietPi-Ramdisk: Is not currently running"
+			echo "$(date) | $PROGRAM_NAME: Is not currently running. Aborting..."
 
 		fi
-	fi
 
-	#Sync changes to disk NOW
-	sync
+	else
+
+		echo "$(date) | $PROGRAM_NAME: Unknown argument: $INPUT. Aborting..."
+		EXIT_CODE=1
+
+	fi
 
 	#-----------------------------------------------------------------------------------
 	#delete[]
 	unset aFILE_BOOT_INI
 	#-----------------------------------------------------------------------------------
-	exit
+	exit $EXIT_CODE
 	#-----------------------------------------------------------------------------------
 }
