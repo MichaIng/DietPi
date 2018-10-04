@@ -16,8 +16,8 @@
 
 	#Use Fourdee master branch, if unset
 	GIT_OWNER=${GIT_OWNER:=Fourdee}
-	GIT_BRANCH=${GIT_BRANCH:=master}
-	echo "Git branch: $GIT_OWNER/$GIT_BRANCH"
+	export G_GITBRANCH=${GIT_BRANCH:=master}
+	echo "Git branch: $GIT_OWNER/$G_GITBRANCH"
 
 	#------------------------------------------------------------------------------------------------
 	# Critical checks and pre-reqs, with exit, prior to initial run of script
@@ -48,9 +48,6 @@
 	# - Meveric special: https://github.com/Fourdee/DietPi/issues/1285#issuecomment-355759321
 	rm /etc/apt/sources.list.d/deb-multimedia.list &> /dev/null
 
-	# - APT force IPv4
-	echo 'Acquire::ForceIPv4 "true";' > /etc/apt/apt.conf.d/99-dietpi-force-ipv4
-
 	apt-get clean
 	apt-get update
 	for (( i=0; i<${#a_MIN_APT_PREREQS[@]}; i++))
@@ -58,8 +55,7 @@
 
 		if ! dpkg-query -s ${a_MIN_APT_PREREQS[$i]} &> /dev/null; then
 
-			apt-get install -y ${a_MIN_APT_PREREQS[$i]}
-			if (( $? )); then
+			if ! apt-get install -y ${a_MIN_APT_PREREQS[$i]}; then
 
 				echo -e "Error: Unable to install ${a_MIN_APT_PREREQS[$i]}, please try to install it manually:\n\t# apt-get install -y ${a_MIN_APT_PREREQS[$i]}"
 				exit 1
@@ -79,11 +75,10 @@
 
 	# - NB: DEV, any changes here must be also rolled into function '/DietPi/dietpi/func/dietpi-set_software locale', for future script use
 	echo 'en_GB.UTF-8 UTF-8' > /etc/locale.gen
-	dpkg-reconfigure -f noninteractive locales
 	# - dpkg-reconfigure includes:
 	#	- "locale-gen": Generate locale(s) based on "/etc/locale.gen" or interactive selection.
 	#	- "update-locale": Add $LANG to "/etc/default/locale" based on generated locale(s) or interactive default language selection.
-	if (( $? )); then
+	if ! dpkg-reconfigure -f noninteractive locales; then
 
 		echo -e 'Error: Locale generation failed. Aborting...\n'
 		exit 1
@@ -101,28 +96,11 @@
 	export LANG=en_GB.UTF-8
 
 	#------------------------------------------------------------------------------------------------
-	#Globals
+	# DietPi-Globals
 	#------------------------------------------------------------------------------------------------
-	#Download DietPi-Globals
+	# - Download
 	# - NB: We'll have to manually handle errors, until DietPi-Globals are sucessfully loaded.
-
-	# - Wget prefer IPv4
-	if grep -q '^[[:blank:]]*prefer-family[[:blank:]]*=' /etc/wgetrc; then
-
-		sed -i '/^[[:blank:]]*prefer-family[[:blank:]]*=/c\prefer-family = IPv4' /etc/wgetrc
-
-	elif grep -q '^[[:blank:]#;]*prefer-family[[:blank:]]*=' /etc/wgetrc; then
-
-		sed -i '/^[[:blank:]#;]*prefer-family[[:blank:]]*=/c\prefer-family = IPv4' /etc/wgetrc
-
-	else
-
-		echo 'prefer-family = IPv4' >> /etc/wgetrc
-
-	fi
-
-	wget "https://raw.githubusercontent.com/$GIT_OWNER/DietPi/$GIT_BRANCH/dietpi/func/dietpi-globals"
-	if (( $? )); then
+	if ! wget "https://raw.githubusercontent.com/$GIT_OWNER/DietPi/$G_GITBRANCH/dietpi/func/dietpi-globals"; then
 
 		echo -e 'Error: Unable to download dietpi-globals. Aborting...\n'
 		exit 1
@@ -130,17 +108,15 @@
 	fi
 
 	# - Load
-	. ./dietpi-globals
-	if (( $? )); then
+	if ! . ./dietpi-globals; then
 
 		echo -e 'Error: Unable to load dietpi-globals. Aborting...\n'
 		exit 1
 
 	fi
-	# Go back to tmp working dir, as loading global includes cd $HOME:
-	cd /tmp/DietPi-PREP
 	rm dietpi-globals
 
+	export G_GITBRANCH=${GIT_BRANCH:=master}
 	export G_PROGRAM_NAME='DietPi-PREP'
 	export HIERARCHY=0
 	export G_DISTRO=0 # Export to dietpi-globals
@@ -276,7 +252,7 @@
 		#------------------------------------------------------------------------------------------------
 
 		#Image creator
-		while true
+		while :
 		do
 
 			G_WHIP_INPUTBOX 'Please enter your name. This will be used to identify the image creator within credits banner.\n\nYou can add your contanct information as well for end users.\n\nNB: An entry is required.'
@@ -299,7 +275,7 @@
 				for (( i=0; i<${#aDISALLOWED_NAMES[@]}; i++))
 				do
 
-					if [[ ${G_WHIP_RETURNED_VALUE,,} == *"${aDISALLOWED_NAMES[$i]}"* ]]; then
+					if [[ ${G_WHIP_RETURNED_VALUE,,} =~ ${aDISALLOWED_NAMES[$i]} ]]; then
 
 						DISALLOWED_NAME=1
 						break
@@ -326,7 +302,7 @@
 		done
 
 		#Pre-image used/name
-		while true
+		while :
 		do
 
 			G_WHIP_INPUTBOX 'Please enter the name or URL of the pre-image you installed on this system, prior to running this script. This will be used to identify the pre-image credits.\n\nEG: Debian, Raspbian Lite, Meveric, FriendlyARM, or "forum.odroid.com/viewtopic.php?f=ABC&t=XYZ" etc.\n\nNB: An entry is required.'
@@ -340,56 +316,58 @@
 		done
 
 		#Hardware selection
+		#	NB: PLEASE ENSURE HW_MODEL INDEX ENTRIES MATCH : PREP, dietpi-obtain_hw_model, dietpi-survey_results,
+		#	NBB: DO NOT REORDER INDEX's. These are now fixed and will never change (due to survey results etc)
 		G_WHIP_DEFAULT_ITEM=22
 		G_WHIP_BUTTON_CANCEL_TEXT='Exit'
 		G_WHIP_MENU_ARRAY=(
 
 			'' '●─ Other '
-			'22' 'Generic device (unknown to DietPi)'
+			'22' ': Generic device (unknown to DietPi)'
 			'' '●─ SBC─(Core devices) '
-			'10' 'Odroid C1'
-			'12' 'Odroid C2'
-			'14' 'Odroid N1'
-			'13' 'Odroid U3'
-			'11' 'Odroid XU3/4/HC1/HC2'
-			'0' 'Raspberry Pi (All models)'
-			# '1' 'Raspberry Pi 1/Zero (512mb)'
-			# '2' 'Raspberry Pi 2'
-			# '3' 'Raspberry Pi 3/3+'
+			'10' ': Odroid C1'
+			'12' ': Odroid C2'
+			'14' ': Odroid N1'
+			'13' ': Odroid U3'
+			'11' ': Odroid XU3/4/HC1/HC2'
+			'0' ': Raspberry Pi (All models)'
+			# '1' ': Raspberry Pi 1/Zero (512mb)'
+			# '2' ': Raspberry Pi 2'
+			# '3' ': Raspberry Pi 3/3+'
 			'' '●─ PC '
-			'21' 'x86_64 Native PC'
-			'20' 'x86_64 VMware/VirtualBox'
+			'21' ': x86_64 Native PC'
+			'20' ': x86_64 VMware/VirtualBox'
 			'' '●─ SBC─(Limited support devices) '
-			'52' 'Asus Tinker Board'
-			'53' 'BananaPi (sinovoip)'
-			'51' 'BananaPi Pro (Lemaker)'
-			'50' 'BananaPi M2+ (sinovoip)'
-			'71' 'Beagle Bone Black'
-			'69' 'Firefly RK3399'
-			'39' 'LeMaker Guitar'
-			'68' 'NanoPC T4'
-			'67' 'NanoPi K1 Plus'
-			'66' 'NanoPi M1 Plus'
-			'65' 'NanoPi NEO 2'
-			'64' 'NanoPi NEO Air'
-			'63' 'NanoPi M1/T1'
-			'62' 'NanoPi M3/T3/F3'
-			'61' 'NanoPi M2/T2'
-			'60' 'NanoPi Neo'
-			'38' 'OrangePi PC 2'
-			'37' 'OrangePi Prime'
-			'36' 'OrangePi Win'
-			'35' 'OrangePi Zero Plus 2 (H3/H5)'
-			'34' 'OrangePi Plus'
-			'33' 'OrangePi Lite'
-			'32' 'OrangePi Zero (H2+)'
-			'31' 'OrangePi One'
-			'30' 'OrangePi PC'
-			'41' 'OrangePi PC Plus'
-			'40' 'Pine A64'
-			'43' 'Rock64'
-			'42' 'RockPro64'
-			'70' 'Sparky SBC'
+			'52' ': Asus Tinker Board'
+			'53' ': BananaPi (sinovoip)'
+			'51' ': BananaPi Pro (Lemaker)'
+			'50' ': BananaPi M2+ (sinovoip)'
+			'71' ': Beagle Bone Black'
+			'69' ': Firefly RK3399'
+			'39' ': LeMaker Guitar'
+			'60' ': NanoPi NEO'
+			'65' ': NanoPi NEO 2'
+			'64' ': NanoPi NEO Air'
+			'63' ': NanoPi M1/T1'
+			'66' ': NanoPi M1 Plus'
+			'61' ': NanoPi M2/T2'
+			'62' ': NanoPi M3/T3/F3'
+			'68' ': NanoPC T4'
+			'67' ': NanoPi K1 Plus'
+			'38' ': OrangePi PC 2'
+			'37' ': OrangePi Prime'
+			'36' ': OrangePi Win'
+			'35' ': OrangePi Zero Plus 2 (H3/H5)'
+			'34' ': OrangePi Plus'
+			'33' ': OrangePi Lite'
+			'32' ': OrangePi Zero (H2+)'
+			'31' ': OrangePi One'
+			'30' ': OrangePi PC'
+			'41' ': OrangePi PC Plus'
+			'40' ': Pine A64'
+			'43' ': Rock64'
+			'42' ': RockPro64'
+			'70' ': Sparky SBC'
 
 		)
 
@@ -407,21 +385,22 @@
 		G_DIETPI-NOTIFY 2 "Setting G_HW_MODEL index of: $G_HW_MODEL"
 		G_DIETPI-NOTIFY 2 "CPU ARCH = $G_HW_ARCH : $G_HW_ARCH_DESCRIPTION"
 
-		echo "$G_HW_MODEL" > /etc/.dietpi_hw_model_identifier
+		echo $G_HW_MODEL > /etc/.dietpi_hw_model_identifier
 
 		#WiFi selection
 		G_DIETPI-NOTIFY 2 'WiFi selection'
 
 		G_WHIP_DEFAULT_ITEM=1
+		(( $G_HW_MODEL == 20 )) && G_WHIP_DEFAULT_ITEM=0
+
 		G_WHIP_MENU_ARRAY=(
 
-			'0' "I don't require WiFi, do not install."
-			'1' 'I require WiFi functionality, keep/install related packages.'
+			'0' ": I don't require WiFi, do not install."
+			'1' ': I require WiFi functionality, keep/install related packages.'
 
 		)
 
-		G_WHIP_MENU 'Please select an option:'
-		if (( ! $? && $G_WHIP_RETURNED_VALUE == 1 )); then
+		if G_WHIP_MENU 'Please select an option:' && (( $G_WHIP_RETURNED_VALUE )) ; then
 
 			G_DIETPI-NOTIFY 2 'Marking WiFi as needed'
 			WIFI_REQUIRED=1
@@ -433,9 +412,9 @@
 		G_WHIP_BUTTON_CANCEL_TEXT='Exit'
 		DISTRO_LIST_ARRAY=(
 
-			'3' 'Jessie (oldstable, just if you need to avoid upgrade to current release)'
-			'4' 'Stretch (current stable release, recommended)'
-			'5' 'Buster (testing only, not officially supported)'
+			'3' ': Jessie (oldstable, if you need to avoid upgrade to current release)'
+			'4' ': Stretch (current stable release, recommended)'
+			'5' ': Buster (testing only, not officially supported)'
 
 		)
 
@@ -505,11 +484,11 @@
 		G_DIETPI-NOTIFY 2 '-----------------------------------------------------------------------------------'
 		#------------------------------------------------------------------------------------------------
 
-		INTERNET_ADDRESS="https://github.com/$GIT_OWNER/DietPi/archive/$GIT_BRANCH.zip"
+		INTERNET_ADDRESS="https://github.com/$GIT_OWNER/DietPi/archive/$G_GITBRANCH.zip"
 		G_CHECK_URL "$INTERNET_ADDRESS"
 		G_RUN_CMD wget "$INTERNET_ADDRESS" -O package.zip
 
-		[[ -d DietPi-$GIT_BRANCH ]] && l_message='Cleaning previously extracted files' G_RUN_CMD rm -R "DietPi-$GIT_BRANCH"
+		[[ -d DietPi-$G_GITBRANCH ]] && l_message='Cleaning previously extracted files' G_RUN_CMD rm -R "DietPi-$G_GITBRANCH"
 		l_message='Extracting DietPi sourcecode' G_RUN_CMD unzip -o package.zip
 		rm package.zip
 
@@ -517,39 +496,39 @@
 
 		G_DIETPI-NOTIFY 2 'Moving kernel and boot configuration to /boot'
 
-		G_RUN_CMD mv "DietPi-$GIT_BRANCH/dietpi.txt" /boot/
+		G_RUN_CMD mv "DietPi-$G_GITBRANCH/dietpi.txt" /boot/
 
 		# - HW specific config.txt, boot.ini uEnv.txt
 		if (( $G_HW_MODEL < 10 )); then
 
-			G_RUN_CMD mv "DietPi-$GIT_BRANCH/config.txt" /boot/
+			G_RUN_CMD mv "DietPi-$G_GITBRANCH/config.txt" /boot/
 
 		elif (( $G_HW_MODEL == 10 )); then
 
-			G_RUN_CMD mv "DietPi-$GIT_BRANCH/boot_c1.ini" /boot/boot.ini
+			G_RUN_CMD mv "DietPi-$G_GITBRANCH/boot_c1.ini" /boot/boot.ini
 
 		elif (( $G_HW_MODEL == 11 )); then
 
-			G_RUN_CMD mv "DietPi-$GIT_BRANCH/boot_xu4.ini" /boot/boot.ini
+			G_RUN_CMD mv "DietPi-$G_GITBRANCH/boot_xu4.ini" /boot/boot.ini
 
 		elif (( $G_HW_MODEL == 12 )); then
 
-			G_RUN_CMD mv "DietPi-$GIT_BRANCH/boot_c2.ini" /boot/boot.ini
+			G_RUN_CMD mv "DietPi-$G_GITBRANCH/boot_c2.ini" /boot/boot.ini
 
 		fi
 
-		G_RUN_CMD mv "DietPi-$GIT_BRANCH/README.md" /boot/
-		#G_RUN_CMD mv "DietPi-$GIT_BRANCH/CHANGELOG.txt" /boot/
+		G_RUN_CMD mv "DietPi-$G_GITBRANCH/README.md" /boot/
+		#G_RUN_CMD mv "DietPi-$G_GITBRANCH/CHANGELOG.txt" /boot/
 
 		# - Remove server_version / patch_file (downloads fresh from dietpi-update)
-		rm "DietPi-$GIT_BRANCH/dietpi/patch_file"
-		rm DietPi-"$GIT_BRANCH"/dietpi/server_version*
+		rm "DietPi-$G_GITBRANCH/dietpi/patch_file"
+		rm DietPi-"$G_GITBRANCH"/dietpi/server_version*
 
-		l_message='Move DietPi core to /boot/dietpi' G_RUN_CMD mv "DietPi-$GIT_BRANCH/dietpi" /boot/
+		l_message='Move DietPi core to /boot/dietpi' G_RUN_CMD mv "DietPi-$G_GITBRANCH/dietpi" /boot/
 
-		l_message='Copy rootfs files in place' G_RUN_CMD cp -Rf DietPi-"$GIT_BRANCH"/rootfs/. /
+		l_message='Copy rootfs files in place' G_RUN_CMD cp -Rf DietPi-"$G_GITBRANCH"/rootfs/. /
 
-		l_message='Clean download location' G_RUN_CMD rm -R "DietPi-$GIT_BRANCH"
+		l_message='Clean download location' G_RUN_CMD rm -R "DietPi-$G_GITBRANCH"
 
 		l_message='Set execute permissions for DietPi scripts' G_RUN_CMD chmod -R +x /boot/dietpi /etc/cron.*/dietpi /var/lib/dietpi/services
 
@@ -1306,7 +1285,7 @@ _EOF_
 			chmod +x -R rtl8812au_sparky
 			cd rtl8812au_sparky
 			G_RUN_CMD ./install.sh
-			cd ..
+			cd /tmp/DietPi-PREP
 			rm -R rtl8812au_sparky*
 
 			#	Use performance gov for stability.
@@ -1336,6 +1315,11 @@ _EOF_
 
 			# - Ensure WiFi module pre-exists
 			G_CONFIG_INJECT '8723bs' '8723bs' /etc/modules
+
+		#Rock64, remove HW accell config, as its not currently functional: https://github.com/Fourdee/DietPi/issues/2086
+		elif (( $G_HW_MODEL == 43 )); then
+
+			rm /etc/X11/xorg.conf.d/20-armsoc.conf &> /dev/null
 
 		# - Odroids FFMPEG fix. Prefer debian.org over Meveric for backports: https://github.com/Fourdee/DietPi/issues/1273 + https://github.com/Fourdee/DietPi/issues/1556#issuecomment-369463910
 		elif (( $G_HW_MODEL > 9 && $G_HW_MODEL < 15 )); then
@@ -1404,7 +1388,7 @@ _EOF_
 
 		G_DIETPI-NOTIFY 2 'Generating default wpa_supplicant.conf'
 
-		/DietPi/dietpi/func/dietpi-set_hardware wificreds set
+		/DietPi/dietpi/func/dietpi-wifidb 1
 		#	move to /boot/ so users can modify as needed for automated
 		G_RUN_CMD mv /var/lib/dietpi/dietpi-wifi.db /boot/dietpi-wifi.txt
 
@@ -1527,15 +1511,17 @@ _EOF_
 
 		G_DIETPI-NOTIFY 2 'Storing DietPi version ID'
 
-		G_RUN_CMD wget "https://raw.githubusercontent.com/$GIT_OWNER/DietPi/$GIT_BRANCH/dietpi/.version" -O /DietPi/dietpi/.version
+		G_RUN_CMD wget "https://raw.githubusercontent.com/$GIT_OWNER/DietPi/$G_GITBRANCH/dietpi/.version" -O /DietPi/dietpi/.version
 
 		#	reduce sub_version by 1, allows us to create image, prior to release and patch if needed.
 		export G_DIETPI_VERSION_CORE=$(sed -n 1p /DietPi/dietpi/.version)
 		export G_DIETPI_VERSION_SUB=$(sed -n 2p /DietPi/dietpi/.version)
+		export G_DIETPI_VERSION_RC=$(sed -n 3p /DietPi/dietpi/.version)
 		((G_DIETPI_VERSION_SUB--))
 		cat << _EOF_ > /DietPi/dietpi/.version
 $G_DIETPI_VERSION_CORE
 $G_DIETPI_VERSION_SUB
+$G_DIETPI_VERSION_RC
 _EOF_
 
 		G_RUN_CMD cp /DietPi/dietpi/.version /var/lib/dietpi/.dietpi_image_version

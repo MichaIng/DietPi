@@ -30,6 +30,8 @@
 	G_INIT
 	#Import DietPi-Globals ---------------------------------------------------------------
 
+	EXIT_CODE=1 # 1=failed to send survey, 0=survey sent, 2=opted out and sent
+
 	#Grab Input (valid interger)
 	INPUT=0
 	disable_error=1 G_CHECK_VALIDINT $1 && INPUT=$1
@@ -95,7 +97,11 @@ _EOF_
 
 				software=${software##*[}
 				software=${software%%]*}
-				echo "((aSOFTWARE[\${aSOFTWARE_NAME$(paste -sd '_' /DietPi/dietpi/.version)[$software]}]++))" >> $UPLOAD_FILENAME
+				if disable_error=1 G_CHECK_VALIDINT $software; then
+
+					echo "((aSOFTWARE[\${aSOFTWARE_NAME${G_DIETPI_VERSION_CORE}_${G_DIETPI_VERSION_SUB}[$software]}]++))" >> $UPLOAD_FILENAME
+
+				fi
 
 			done <<< "$(grep ']=2' /DietPi/dietpi/.installed)"
 
@@ -106,9 +112,33 @@ _EOF_
 
 		fi
 
+		# Add benchmark if completed by user
+		if [[ -f /var/lib/dietpi/dietpi-benchmark/upload_results ]]; then
+
+			cat << _EOF_ >> $UPLOAD_FILENAME
+# -------------------------
+# DietPi-Benchmark
+# -------------------------
+BENCH_HW_MODEL=$G_HW_MODEL
+BENCH_CPU=$(sed -n 1p /var/lib/dietpi/dietpi-benchmark/upload_results)
+BENCH_ROOTFS_WRITE=$(sed -n 2p /var/lib/dietpi/dietpi-benchmark/upload_results)
+BENCH_ROOTFS_READ=$(sed -n 3p /var/lib/dietpi/dietpi-benchmark/upload_results)
+BENCH_RAM_WRITE=$(sed -n 4p /var/lib/dietpi/dietpi-benchmark/upload_results)
+BENCH_RAM_READ=$(sed -n 5p /var/lib/dietpi/dietpi-benchmark/upload_results)
+BENCH_CPU_TEMP_START=$(sed -n 6p /var/lib/dietpi/dietpi-benchmark/upload_results)
+BENCH_CPU_TEMP_END=$(sed -n 7p /var/lib/dietpi/dietpi-benchmark/upload_results)
+_EOF_
+
+		fi
+
 	}
 
 	Send_File(){
+
+		#DEBUG:
+		# cp "$UPLOAD_FILENAME" /home/dietpi-survey/survey/"$UPLOAD_FILENAME"
+		# exit 0
+		#DEBUG:
 
 		local info_failure_msg='Failed to connect to SFTP server. Please try again later. If problems persist, please report this issue to the DietPi dev team (forum or GitHub repo).'
 
@@ -128,7 +158,7 @@ _EOF_
 			fi
 
 			#Upload to server
-			curl --connect-timeout 4 --retry 1 --retry-delay 4 -sT "$UPLOAD_FILENAME" sftp://"$SFTP_USER":"$SFTP_PASS"@"$SFTP_ADDR"/survey/
+			curl --connect-timeout 8 --retry 1 --retry-delay 4 -sT "$UPLOAD_FILENAME" sftp://"$SFTP_USER":"$SFTP_PASS"@"$SFTP_ADDR"/survey/
 			if (( $? )); then
 
 				# Silently fail, in case of non-interactive mode
@@ -137,6 +167,7 @@ _EOF_
 			# Successful upload + opted in
 			elif (( $OPTED_IN )); then
 
+				EXIT_CODE=0
 				G_DIETPI-NOTIFY 0 'Successfully sent survey data'
 				# Increase sent count
 				((SURVEY_SENTCOUNT++))
@@ -144,6 +175,7 @@ _EOF_
 			# Successful upload + opted out + interactive
 			elif (( ! $INPUT )); then
 
+				EXIT_CODE=2
 				G_DIETPI-NOTIFY 0 'Successfully purged survey data'
 
 			fi
@@ -178,6 +210,7 @@ _EOF_
 	#Input mode: Send survey if opted in or empty file if opted out
 	if (( $INPUT == 1 )); then
 
+		Generate_File
 		Send_File
 
 	else
@@ -213,7 +246,7 @@ Would you like to join DietPi-Survey?"
 	fi
 
 	#-----------------------------------------------------------------------------------
-	exit 0
+	exit $EXIT_CODE
 	#-----------------------------------------------------------------------------------
 
 }
