@@ -132,7 +132,7 @@ A personal thanks to **Pilovali** for helping DietPi during our early days with 
 
 ## Contributing
 
-Please use the active development branch [`testing`](https://github.com/Fourdee/DietPi/tree/testing)
+Please use the active development branch [`dev`](https://github.com/Fourdee/DietPi/tree/dev)
 
 * [Adding new software installation options to DietPi-Software](https://github.com/Fourdee/DietPi/issues/490#issuecomment-244416570)
 
