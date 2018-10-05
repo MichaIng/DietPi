@@ -59,6 +59,12 @@ Creator, programmer and project lead of DietPi.
 
 ### Current Contributors
 
+#### Mrmajik45
+
+_Joined 2018-09-25
+
+Spell checker, Code maintainer.
+
 #### MichaIng
 
 _Joined Q3 2017_
