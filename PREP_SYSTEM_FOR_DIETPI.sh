@@ -954,7 +954,7 @@ _EOF_
 		rm /etc/profile.d/99-dietpi* &> /dev/null
 
 		# - Enable /etc/bashrc.d/ support for custom interactive non-login shell scripts:
-		G_CONFIG_INJECT '.*/etc/bashrc\.d/.*' 'for i in /etc/bashrc\.d/\*\.sh; do \[ -r "\$i" \] \&\& \. \$i; done' /etc/bash.bashrc
+		G_CONFIG_INJECT ".*/etc/bashrc\.d/.*" "for i in /etc/bashrc\.d/\*\.sh; do \[ -r "\$i" \] \&\& \. \$i; done" /etc/bash.bashrc
 
 		# - Enable bash-completion for non-login shells:
 		#	- NB: It is called twice on login shells then, but breaks directly if called already once.
@@ -1118,7 +1118,7 @@ _EOF_
 		fi
 
 		#	Fix rare WiFi interface start issue: https://github.com/Fourdee/DietPi/issues/2074
-		sed -i '\|^[[:blank:]]ifconfig "$IFACE" up$|c\\t/sbin/ip link set dev "$IFACE" up' /etc/network/if-pre-up.d/wireless-tools &> /dev/null
+		sed -i "\|^[[:blank:]]ifconfig "$IFACE" up$|c\\t/sbin/ip link set dev "$IFACE" up" /etc/network/if-pre-up.d/wireless-tools &> /dev/null
 
 		G_DIETPI-NOTIFY 2 'Tweaking DHCP timeout:'
 
