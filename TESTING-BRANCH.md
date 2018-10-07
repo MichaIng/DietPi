@@ -12,7 +12,7 @@ Existing installation:
 2. Run the following command to switch to 'beta' branch: ```G_CONFIG_INJECT 'DEV_GITBRANCH=' 'DEV_GITBRANCH=beta' /DietPi/dietpi.txt```
 3. Run ```dietpi-update``` and reboot system
 4. Test away.
-5. If you want to return the system to the previous restore state, run ```dietpi-backup``` to restore (or restore quickly with ```dietpi-backup 1```)
+5. If you want to return the system to the previous restore state, run ```dietpi-backup``` to restore (or restore quickly with ```dietpi-backup -1```)
 
 ## Steps to use the DietPi "dev" branch.
 #### This is the active development branch. Its potentially unstable, unsupported and should not be used by end users.
