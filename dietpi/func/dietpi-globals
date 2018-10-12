@@ -9,16 +9,16 @@
 	#////////////////////////////////////
 	#
 	# Info:
-	# - Allows export of shared DietPi global variables/funcs into current bash session, and other scripts
-	# - CRITICAL, when using for-loops, always ensure you localize the var before hand (eg: local i=0\nfor (( i=.....)) ), else havoc: https://github.com/Fourdee/DietPi/issues/1454
-	# - activates on interactive bash: /etc/bashrc.d/dietpi-login.sh
-	# - activates on all other DietPi script during their init
+	# - Provides/Exports shared/global DietPi variables/functions for current bash session and other scripts
+	# - CRITICAL, use local index variables in for/while loops, or unset them afterwards, else havoc: https://github.com/Fourdee/DietPi/issues/1454
+	# - Sourced/Loaded in interactive bash sessions: /etc/bashrc.d/dietpi-login.sh
+	# - Sourced/Loaded as start of all DietPi script, except those listed below
 	#
-	# Excluded scripts, which do NOT load these globals
+	# Excluded scripts, which do NOT load these globals:
 	# - dietpi-ramlog
 	# - dietpi-ramdisk
 	# - dietpi-obtain_hw_model
-	# - dietpi.txt (and all other .txt .ini or config files)
+	# - dietpi.txt and all other .txt, .ini or config files
 	#
 	#////////////////////////////////////
 
@@ -33,35 +33,22 @@
 	#-----------------------------------------------------------------------------------
 
 	#-----------------------------------------------------------------------------------
-	# Core var's, functions, environment. Used at start of all scripts.
+	# Core varianles, functions and environment, used at start of all scripts
 	#-----------------------------------------------------------------------------------
-	#To be exported by the originating script, after loading globals
-	# - Used in:
-	#	G_ERROR_
-	#	G_WHIP_
+	#To be exported by the originating script, after loading globals and before calling G_INIT()
+	# - Used in G_ERROR_ and G_WHIP_
 	G_PROGRAM_NAME=''
 
-	#User input? (eg: interactive shell available via STDIN check)
-	# - Affects:
-	#	G_ERROR_HANDLER / G_WHIP whiptail display
-	#	NB: You can export G_USER_INPUTS=0 to force non-interactive (eg: .bashrc) Must run 'unset G_USER_INPUTS' after to return to auto detection.
+	#Flag, if we are in interactive shell, by checking STDIN availability
+	#	OK | systemd	= non-STDIN
+	#	OK | Cron	= non-STDIN
+	#	NB | ~/.bashrc	= STDIN
+	# - Affects whether G_ERROR_ and G_WHIP_ prompts are displayed or not
+	#	NB: You can export G_USER_INPUTS=0 to force non-interactive/automated scipt calls. Run 'unset G_USER_INPUTS' afterwards to return to auto detection.
 	if [[ -z $G_USER_INPUTS ]]; then
 
 		G_USER_INPUTS=0
-
-		if [[ -t 0 ]]; then
-
-			#checked:
-			#	- OK | systemD = non-STDIN
-			#	- OK | Cron = non-STDIN
-
-			#shopt login_shell # == [[ $- == *i* ]] #.bashrc dietpi/login exec is not interactive...
-			#[ -t 0 ]# .bashrc dietpi/login exec is interactive...
-			#set -i in .bashrc is not available...
-
-			G_USER_INPUTS=1
-
-		fi
+		[[ -t 0 ]] && G_USER_INPUTS=1
 
 	fi
 
@@ -77,7 +64,7 @@
 	G_GITBRANCH=${G_GITBRANCH:-master}
 	if [[ -r '/DietPi/dietpi.txt' ]]; then
 
-		G_GITBRANCH=$(grep -m1 '^DEV_GITBRANCH=' /DietPi/dietpi.txt | sed 's/^[^=]*=//')
+		G_GITBRANCH=$(grep -m1 '^[[:blank:]]*DEV_GITBRANCH=' /DietPi/dietpi.txt | sed 's/^[^=]*=//')
 
 	fi
 
@@ -93,11 +80,11 @@
 
 	fi
 
-	#Default DietPi userdata location. This must NEVER change.
-	# - In case of moved userdata location, a symlink stays here to keep this path valid.
+	#Default DietPi userdata location, which must NEVER change!
+	# - NB: In case of moved userdata location, a symlink stays here to keep this path valid.
 	G_FP_DIETPI_USERDATA='/mnt/dietpi_userdata'
 
-	#DietPi scripts disable
+	#Allows to disable dietpi-services handling, e.g. if already handled within parent script.
 	G_DIETPI_SERVICES_DISABLE=${G_DIETPI_SERVICES_DISABLE:-0}
 
 	#Device details
@@ -137,7 +124,7 @@
 	fi
 
 	#INIT functions for originating script
-	#	eg: stuff we cant init in main globals/funcs due to .bashrc load into current session.
+	# - Stuff we can't init in main globals/funcs due to /etc/bashrc.d/ load into current session.
 	G_INIT(){
 
 		# Check for concurrent execution
@@ -145,29 +132,70 @@
 		do
 
 			G_WHIP_BUTTON_OK_TEXT='Retry'
-			G_WHIP_YESNO "WARNING: Concurrent execution of $G_PROGRAM_NAME detected.\n
+			if ! G_WHIP_YESNO "WARNING: Concurrent execution of $G_PROGRAM_NAME detected.\n
 Please check if one of the following applies:
- - The script already runs on another terminal/SSH session.
+ - This script already runs on another terminal/SSH session.
  - Currently a cron or systemd background job executes the script.
  - You started this script from within another DietPi program, causing a loop.\n
-Please assure that the concurrent execution has finished, before trying again, otherwise cancel this instance.\n
+Please assure that the concurrent execution has finished, before retrying, otherwise cancel this instance.\n
 The following info might help:
-$(ps f -eo pid,user,tty,cmd | grep -i [d]ietpi)"
-			if (( $? )); then
+$(ps f -eo pid,user,tty,cmd | grep -i [d]ietpi)"; then
 
-				G_DIETPI-NOTIFY 1 "Canceled $G_PROGRAM_NAME due to concurrent execution."
+				G_DIETPI-NOTIFY 1 "Canceled $G_PROGRAM_NAME due to concurrent execution"
 				exit 1
 
 			fi
 
 		done
 
+		# HIERARCHY system for G_DIETPI-NOTIFY 3
+		disable_error=1 G_CHECK_VALIDINT $HIERARCHY && export HIERARCHY=$((HIERARCHY+1)) || export HIERARCHY=0
+
+		# DEBUG: Print init header
+		[[ $G_DEBUG == 1 ]] && G_DIETPI-NOTIFY 3 "$G_PROGRAM_NAME" 'Running G_INIT()'
+
 		# Set locale for scripts to prevent incorrect scraping due to translated command outputs
 		export LANG=en_GB.UTF-8
 		export LC_ALL=en_GB.UTF-8
 
-		# HIERARCHY system for G_DIETPI-NOTIFY 3
-		[[ $HIERARCHY ]] && export HIERARCHY=$((HIERARCHY+1)) || export HIERARCHY=0
+		# Declare and trap G_EXIT() as exit function, that runs on EXIT signal, which includes INT (error) and TERM (kill)
+		G_EXIT(){
+
+			# - Purge working directory, if existent
+			if [[ -d /tmp/$G_PROGRAM_NAME ]]; then
+
+				# - Navigate to /tmp, if we are inside working dir, which is about to be removed
+				if [[ $PWD == /tmp/$G_PROGRAM_NAME* ]]; then
+
+					if cd /tmp; then
+
+						[[ $G_DEBUG == 1 ]] && G_DIETPI-NOTIFY 2 'Navigated to /tmp'
+
+					else
+
+						[[ $G_DEBUG == 1 ]] && G_DIETPI-NOTIFY 2 "Failed to navigate out of /tmp/$G_PROGRAM_NAME"
+
+					fi
+
+				fi
+
+				if rm -R /tmp/$G_PROGRAM_NAME; then
+
+					[[ $G_DEBUG == 1 ]] && G_DIETPI-NOTIFY 2 "Removed scripts working directory: /tmp/$G_PROGRAM_NAME"
+
+				else
+
+					[[ $G_DEBUG == 1 ]] && G_DIETPI-NOTIFY 2 "Failed to removed scripts working directory: /tmp/$G_PROGRAM_NAME"
+
+				fi
+
+			fi
+
+			# - Execute custom exit function, if existent
+			declare -F G_EXIT_CUSTOM &> /dev/null && G_EXIT_CUSTOM
+
+		}
+		trap 'G_EXIT' EXIT
 
 		# Ensure we are in script working dir or users home dir, if available: https://github.com/Fourdee/DietPi/issues/905#issuecomment-298223705
 		if [[ $G_PROGRAM_NAME ]] && mkdir -p /tmp/$G_PROGRAM_NAME && cd /tmp/$G_PROGRAM_NAME; then
@@ -183,21 +211,6 @@ $(ps f -eo pid,user,tty,cmd | grep -i [d]ietpi)"
 			[[ $G_DEBUG == 1 ]] && G_DIETPI-NOTIFY 2 "Failed to enter scripts working dir or users home dir. Will use current: $PWD"
 
 		fi
-
-		# Declare and trap G_EXIT() as exit function, that runs on EXIT signal, which includes INT (error) and TERM (kill)
-		G_EXIT(){
-
-			# - Purge working directory, if existent
-			[[ -d /tmp/$G_PROGRAM_NAME ]] && [[ $PWD == /tmp/$G_PROGRAM_NAME* ]] && cd /tmp && rm -R /tmp/$G_PROGRAM_NAME && [[ $G_DEBUG == 1 ]] && G_DIETPI-NOTIFY 2 "Removed scripts working directory: /tmp/$G_PROGRAM_NAME"
-
-			# - Execute custom exit function, if existent
-			declare -F G_EXIT_CUSTOM &> /dev/null && G_EXIT_CUSTOM
-
-		}
-		trap 'G_EXIT' EXIT
-
-		# Auto print init header for all scripts
-		#G_DIETPI-NOTIFY 3 "$G_PROGRAM_NAME" 'Init'
 
 	}
 
@@ -220,7 +233,7 @@ $(ps f -eo pid,user,tty,cmd | grep -i [d]ietpi)"
 
 		local ainput_string=("$@")
 		local output_string=''
-		local bracket_l='\e[90m[\e[0m'
+		local bracket_l='\e[0m\e[90m[\e[0m'
 		local bracket_r='\e[0m\e[90m]\e[0m'
 
 		#Funcs
@@ -391,7 +404,7 @@ $(ps f -eo pid,user,tty,cmd | grep -i [d]ietpi)"
 		elif (( $1 == 3 )); then
 
 			Clean_Process_Animation
-			if [[ $HIERARCHY ]] && (( $HIERARCHY > 0 )); then
+			if disable_error=1 G_CHECK_VALIDINT $HIERARCHY && (( $HIERARCHY > 0 )); then
 
 				# >=10 should never occur, however, if it is, lets make it line up regardless
 				if (( $HIERARCHY < 10 )); then
@@ -419,7 +432,7 @@ $(ps f -eo pid,user,tty,cmd | grep -i [d]ietpi)"
 
 		fi
 		#-----------------------------------------------------------------------------------
-		# Unset also internal functions, otherwise they are accessible from terminal:
+		# Unset internal functions, otherwise they are accessible from terminal:
 		unset Clean_Process_Animation
 		unset Status_Ok
 		unset Status_Failed
@@ -496,6 +509,7 @@ $(ps f -eo pid,user,tty,cmd | grep -i [d]ietpi)"
 		sudo -i $@
 
 	}
+
 	alias sudo='sudo ' # https://github.com/Fourdee/DietPi/issues/424
 	alias dietpi-process_tool='/DietPi/dietpi/dietpi-process_tool'
 	alias dietpi-letsencrypt='/DietPi/dietpi/dietpi-letsencrypt'
@@ -517,6 +531,7 @@ $(ps f -eo pid,user,tty,cmd | grep -i [d]ietpi)"
 	alias dietpi-explorer='/DietPi/dietpi/dietpi-explorer'
 
 	alias cpu='/DietPi/dietpi/dietpi-cpuinfo'
+	alias 1337='echo Indeed, you are =\)'
 
 	# - Optional DietPi software aliases/functions
 	[[ -f /opt/retropie/supplementary/emulationstation/emulationstation ]] && alias emulationstation='/opt/retropie/supplementary/emulationstation/emulationstation'
@@ -1952,7 +1967,7 @@ $print_logfile_info
 	#Returns current CPU temp 'C
 	G_OBTAIN_CPU_TEMP(){
 
-		local cpu_temp_current=1 #We must always return a value, due to VM lacking this feature + benchmark online
+		local cpu_temp_current='N/A' #We must always return a value, due to VM lacking this feature + benchmark online
 
 		# - Array to store possible locations for temp read.
 		afp_temperature=(
@@ -2085,26 +2100,28 @@ $print_logfile_info
 
 		if [[ $input =~ ^-?[0-9]+$ ]]; then
 
-			return_value=0
-
 			if [[ $min && $max ]]; then
-
-				return_value=1
 
 				if [[ $min =~ ^-?[0-9]+$ && $max =~ ^-?[0-9]+$ ]] &&
 					(( $input >= $min && $input <= $max )); then
 
 					return_value=0
 
+				elif (( ! $disable_error )); then
+
+					G_WHIP_MSG "Input value \"$input\" is not in range of \"$min\" and \"$max\". No changes applied."
+
 				fi
+
+			else
+
+				return_value=0
 
 			fi
 
-		fi
+		elif (( ! $disable_error )); then
 
-		if (( ! $disable_error && $return_value )); then
-
-			G_WHIP_MSG "Invalid value $input. No changes applied."
+			G_WHIP_MSG "Invalid input value \"$input\". No changes applied."
 
 		fi
 
