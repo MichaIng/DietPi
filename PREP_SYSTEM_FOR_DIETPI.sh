@@ -14,10 +14,10 @@
 	# - G_DISTRO
 	#------------------------------------------------------------------------------------------------
 
-	#Use Fourdee master branch, if unset
-	GIT_OWNER=${GIT_OWNER:=Fourdee}
-	export G_GITBRANCH=${GIT_BRANCH:=master}
-	echo "Git branch: $GIT_OWNER/$G_GITBRANCH"
+	#Core globals
+	export G_PROGRAM_NAME='DietPi-PREP'
+	export G_GITOWNER=${G_GITOWNER:-Fourdee}
+	export G_GITBRANCH=${G_GITBRANCH:-master}
 
 	#------------------------------------------------------------------------------------------------
 	# Critical checks and pre-reqs, with exit, prior to initial run of script
@@ -95,12 +95,37 @@
 	export LC_ALL=en_GB.UTF-8
 	export LANG=en_GB.UTF-8
 
+	# - Select gitbranch
+	aWHIP_BRANCH=(
+
+		'master' ': Stable release (recommended)'
+		'beta' ': Public beta testing branch'
+		'dev' ': Unstable dev branch'
+
+	)
+
+	WHIP_RETURN=$(whiptail --title "$G_PROGRAM_NAME" --menu "Please select a GitBranch:" --default-item "master" --ok-button "Ok" --cancel-button "Exit" --backtitle "$G_PROGRAM_NAME" 12 80 3 "${aWHIP_BRANCH[@]}" 3>&1 1>&2 2>&3)
+	if (( $? == 0 )); then
+
+		export G_GITBRANCH=$WHIP_RETURN
+
+	else
+
+		exit 0
+
+	fi
+
+	unset aWHIP_BRANCH
+	unset WHIP_RETURN
+
+	echo "Git branch: $G_GITOWNER/$G_GITBRANCH"
+
 	#------------------------------------------------------------------------------------------------
 	# DietPi-Globals
 	#------------------------------------------------------------------------------------------------
 	# - Download
 	# - NB: We'll have to manually handle errors, until DietPi-Globals are sucessfully loaded.
-	if ! wget "https://raw.githubusercontent.com/$GIT_OWNER/DietPi/$G_GITBRANCH/dietpi/func/dietpi-globals"; then
+	if ! wget "https://raw.githubusercontent.com/$G_GITOWNER/DietPi/$G_GITBRANCH/dietpi/func/dietpi-globals"; then
 
 		echo -e 'Error: Unable to download dietpi-globals. Aborting...\n'
 		exit 1
@@ -116,7 +141,6 @@
 	fi
 	rm dietpi-globals
 
-	export G_GITBRANCH=${GIT_BRANCH:=master}
 	export G_PROGRAM_NAME='DietPi-PREP'
 	export HIERARCHY=0
 	export G_DISTRO=0 # Export to dietpi-globals
@@ -484,7 +508,7 @@
 		G_DIETPI-NOTIFY 2 '-----------------------------------------------------------------------------------'
 		#------------------------------------------------------------------------------------------------
 
-		INTERNET_ADDRESS="https://github.com/$GIT_OWNER/DietPi/archive/$G_GITBRANCH.zip"
+		INTERNET_ADDRESS="https://github.com/$G_GITOWNER/DietPi/archive/$G_GITBRANCH.zip"
 		G_CHECK_URL "$INTERNET_ADDRESS"
 		G_RUN_CMD wget "$INTERNET_ADDRESS" -O package.zip
 
@@ -1510,18 +1534,21 @@ _EOF_
 
 		G_DIETPI-NOTIFY 2 'Storing DietPi version ID'
 
-		G_RUN_CMD wget "https://raw.githubusercontent.com/$GIT_OWNER/DietPi/$G_GITBRANCH/dietpi/.version" -O /DietPi/dietpi/.version
+		G_RUN_CMD wget "https://raw.githubusercontent.com/$G_GITOWNER/DietPi/$G_GITBRANCH/dietpi/.version" -O /DietPi/dietpi/.version
+
+		local gitowner_temp=$G_GITOWNER
+		local gitbranch_temp=$G_GITBRANCH
+
+		chmod +x /DietPi/dietpi/.version
+		. /DietPi/dietpi/.version
+
+		export G_GITOWNER=$gitowner_temp
+		export G_GITBRANCH=$gitbranch_temp
 
 		#	reduce sub_version by 1, allows us to create image, prior to release and patch if needed.
-		export G_DIETPI_VERSION_CORE=$(sed -n 1p /DietPi/dietpi/.version)
-		export G_DIETPI_VERSION_SUB=$(sed -n 2p /DietPi/dietpi/.version)
-		export G_DIETPI_VERSION_RC=$(sed -n 3p /DietPi/dietpi/.version)
-		((G_DIETPI_VERSION_SUB--))
-		cat << _EOF_ > /DietPi/dietpi/.version
-$G_DIETPI_VERSION_CORE
-$G_DIETPI_VERSION_SUB
-$G_DIETPI_VERSION_RC
-_EOF_
+		export G_DIETPI_VERSION_SUB=$(( $G_DIETPI_VERSION_SUB - 1 ))
+
+		G_VERSIONDB_SAVE
 
 		G_RUN_CMD cp /DietPi/dietpi/.version /var/lib/dietpi/.dietpi_image_version
 
