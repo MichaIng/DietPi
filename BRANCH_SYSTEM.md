@@ -18,8 +18,8 @@ Beta on an existing installation:
 G_CONFIG_INJECT 'DEV_GITBRANCH=' 'DEV_GITBRANCH=beta' /DietPi/dietpi.txt
 ```
 3. Run ```dietpi-update``` to update the system, then reboot.
-4. Test away, please report any issues on our GitHub page. Please ensure you metion "Beta branch" in your post: https://github.com/Fourdee/DietPi/issues
-5. If you want to return the system to the previous restore state, run ```dietpi-backup``` to restore (or restore quickly with ```dietpi-backup 1```)
+4. Test away, please report any issues on our GitHub page. Also ensure you metion "Beta branch" in your post: https://github.com/Fourdee/DietPi/issues
+5. If you want to return the system to the previous restore state, run ```dietpi-backup``` to restore (or restore quickly with ```dietpi-backup -1```)
 
 ## Steps to use the DietPi "dev" branch.
 #### This is the active development branch. Its potentially unstable, unsupported and should not be used by end users.
