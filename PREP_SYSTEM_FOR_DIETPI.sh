@@ -1548,6 +1548,7 @@ _EOF_
 		#	reduce sub_version by 1, allows us to create image, prior to release and patch if needed.
 		export G_DIETPI_VERSION_SUB=$(( $G_DIETPI_VERSION_SUB - 1 ))
 
+		G_CONFIG_INJECT 'DEV_GITBRANCH=' "DEV_GITBRANCH=$G_GITBRANCH" /DietPi/dietpi.txt
 		G_VERSIONDB_SAVE
 
 		G_RUN_CMD cp /DietPi/dietpi/.version /var/lib/dietpi/.dietpi_image_version
