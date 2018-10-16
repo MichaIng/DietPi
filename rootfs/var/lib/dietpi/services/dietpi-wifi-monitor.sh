@@ -5,7 +5,7 @@
 	. /DietPi/dietpi/func/dietpi-globals
 	G_CHECK_ROOT_USER
 	G_CHECK_ROOTFS_RW
-	export G_PROGRAM_NAME='DietPi-WiFi-Monitor'
+	G_PROGRAM_NAME='DietPi-WiFi-Monitor'
 	G_INIT
 	#Import DietPi-Globals ---------------------------------------------------------------
 

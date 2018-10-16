@@ -15,9 +15,9 @@
 	#------------------------------------------------------------------------------------------------
 
 	#Core globals
-	export G_PROGRAM_NAME='DietPi-PREP'
-	export G_GITOWNER=${G_GITOWNER:-Fourdee}
-	export G_GITBRANCH=${G_GITBRANCH:-master}
+	G_PROGRAM_NAME='DietPi-PREP'
+	G_GITOWNER=${G_GITOWNER:-Fourdee}
+	G_GITBRANCH=${G_GITBRANCH:-master}
 
 	#------------------------------------------------------------------------------------------------
 	# Critical checks and pre-reqs, with exit, prior to initial run of script
@@ -107,7 +107,7 @@
 	WHIP_RETURN=$(whiptail --title "$G_PROGRAM_NAME" --menu "Please select a GitBranch:" --default-item "master" --ok-button "Ok" --cancel-button "Exit" --backtitle "$G_PROGRAM_NAME" 12 80 3 "${aWHIP_BRANCH[@]}" 3>&1 1>&2 2>&3)
 	if (( $? == 0 )); then
 
-		export G_GITBRANCH=$WHIP_RETURN
+		G_GITBRANCH=$WHIP_RETURN
 
 	else
 
@@ -141,10 +141,10 @@
 	fi
 	rm dietpi-globals
 
-	export G_PROGRAM_NAME='DietPi-PREP'
-	export HIERARCHY=0
-	export G_DISTRO=0 # Export to dietpi-globals
-	export G_DISTRO_NAME='NULL' # Export to dietpi-globals
+	G_PROGRAM_NAME='DietPi-PREP'
+	HIERARCHY=0
+	G_DISTRO=0 # Export to dietpi-globals
+	G_DISTRO_NAME='NULL' # Export to dietpi-globals
 	DISTRO_TARGET=0
 	DISTRO_TARGET_NAME=''
 	if grep -q 'wheezy' /etc/os-release; then
@@ -179,19 +179,19 @@
 	G_HW_ARCH_DESCRIPTION="$(uname -m)"
 	if [[ $G_HW_ARCH_DESCRIPTION == 'armv6l' ]]; then
 
-		export G_HW_ARCH=1
+		G_HW_ARCH=1
 
 	elif [[ $G_HW_ARCH_DESCRIPTION == 'armv7l' ]]; then
 
-		export G_HW_ARCH=2
+		G_HW_ARCH=2
 
 	elif [[ $G_HW_ARCH_DESCRIPTION == 'aarch64' ]]; then
 
-		export G_HW_ARCH=3
+		G_HW_ARCH=3
 
 	elif [[ $G_HW_ARCH_DESCRIPTION == 'x86_64' ]]; then
 
-		export G_HW_ARCH=10
+		G_HW_ARCH=10
 
 	else
 
@@ -403,8 +403,8 @@
 
 		fi
 
-		# + Export to future scripts
-		export G_HW_MODEL=$G_WHIP_RETURNED_VALUE
+		# + Set for future scripts
+		G_HW_MODEL=$G_WHIP_RETURNED_VALUE
 
 		G_DIETPI-NOTIFY 2 "Setting G_HW_MODEL index of: $G_HW_MODEL"
 		G_DIETPI-NOTIFY 2 "CPU ARCH = $G_HW_ARCH : $G_HW_ARCH_DESCRIPTION"
@@ -581,16 +581,16 @@
 
 		G_DIETPI-NOTIFY 2 "Setting APT sources.list: $DISTRO_TARGET_NAME $DISTRO_TARGET"
 
-		# - We need to temp export target DISTRO vars, then revert them to current, after setting sources.list
+		# - We need to temp save target DISTRO vars, then revert them to current, after setting sources.list
 		G_DISTRO_TEMP=$G_DISTRO
 		G_DISTRO_NAME_TEMP="$G_DISTRO_NAME"
-		export G_DISTRO=$DISTRO_TARGET
-		export G_DISTRO_NAME="$DISTRO_TARGET_NAME"
+		G_DISTRO=$DISTRO_TARGET
+		G_DISTRO_NAME="$DISTRO_TARGET_NAME"
 
 		G_RUN_CMD /DietPi/dietpi/func/dietpi-set_software apt-mirror 'default'
 
-		export G_DISTRO=$G_DISTRO_TEMP
-		export G_DISTRO_NAME="$G_DISTRO_NAME_TEMP"
+		G_DISTRO=$G_DISTRO_TEMP
+		G_DISTRO_NAME="$G_DISTRO_NAME_TEMP"
 		unset G_DISTRO_TEMP
 		unset G_DISTRO_NAME_TEMP
 
@@ -614,26 +614,26 @@
 		#	Remove any existing apt recommends settings
 		rm /etc/apt/apt.conf.d/*recommends* &> /dev/null
 
-		export G_ERROR_HANDLER_COMMAND='/etc/apt/apt.conf.d/99-dietpi-norecommends'
+		G_ERROR_HANDLER_COMMAND='/etc/apt/apt.conf.d/99-dietpi-norecommends'
 		cat << _EOF_ > $G_ERROR_HANDLER_COMMAND
 APT::Install-Recommends "false";
 APT::Install-Suggests "false";
 APT::AutoRemove::RecommendsImportant "false";
 APT::AutoRemove::SuggestsImportant "false";
 _EOF_
-		export G_ERROR_HANDLER_EXITCODE=$?
+		G_ERROR_HANDLER_EXITCODE=$?
 		G_ERROR_HANDLER
 
 		G_DIETPI-NOTIFY 2 'Forcing use of modified package configs'
 
-		export G_ERROR_HANDLER_COMMAND='/etc/apt/apt.conf.d/99-dietpi-forceconf'
+		G_ERROR_HANDLER_COMMAND='/etc/apt/apt.conf.d/99-dietpi-forceconf'
 		cat << _EOF_ > $G_ERROR_HANDLER_COMMAND
 Dpkg::options {
    "--force-confdef";
    "--force-confold";
 }
 _EOF_
-		export G_ERROR_HANDLER_EXITCODE=$?
+		G_ERROR_HANDLER_EXITCODE=$?
 		G_ERROR_HANDLER
 
 		# - DietPi list of minimal required packages, which must be installed:
@@ -873,8 +873,8 @@ _EOF_
 		G_AGDUG
 
 		# - Distro is now target (for APT purposes and G_AGX support due to installed binary, its here, instead of after G_AGUP)
-		export G_DISTRO=$DISTRO_TARGET
-		export G_DISTRO_NAME="$DISTRO_TARGET_NAME"
+		G_DISTRO=$DISTRO_TARGET
+		G_DISTRO_NAME="$DISTRO_TARGET_NAME"
 
 		G_DIETPI-NOTIFY 2 'Installing core DietPi pre-req APT packages'
 
@@ -1151,7 +1151,7 @@ _EOF_
 
 		G_DIETPI-NOTIFY 2 'Configuring hosts:'
 
-		export G_ERROR_HANDLER_COMMAND='/etc/hosts'
+		G_ERROR_HANDLER_COMMAND='/etc/hosts'
 		cat << _EOF_ > $G_ERROR_HANDLER_COMMAND
 127.0.0.1    localhost
 127.0.1.1    DietPi
@@ -1159,7 +1159,7 @@ _EOF_
 ff02::1      ip6-allnodes
 ff02::2      ip6-allrouters
 _EOF_
-		export G_ERROR_HANDLER_EXITCODE=$?
+		G_ERROR_HANDLER_EXITCODE=$?
 		G_ERROR_HANDLER
 
 		echo 'DietPi' > /etc/hostname
@@ -1242,7 +1242,7 @@ _EOF_
 			G_DIETPI-NOTIFY 2 'Configuring hdparm:'
 
 			sed -i '/#DietPi/,$d' /etc/hdparm.conf #Prevent dupes
-			export G_ERROR_HANDLER_COMMAND='/etc/hdparm.conf'
+			G_ERROR_HANDLER_COMMAND='/etc/hdparm.conf'
 			cat << _EOF_ >> $G_ERROR_HANDLER_COMMAND
 
 #DietPi external USB drive. Power management settings.
@@ -1254,7 +1254,7 @@ _EOF_
 		apm = 127
 }
 _EOF_
-			export G_ERROR_HANDLER_EXITCODE=$?
+			G_ERROR_HANDLER_EXITCODE=$?
 			G_ERROR_HANDLER
 
 		fi
@@ -1542,11 +1542,11 @@ _EOF_
 		chmod +x /DietPi/dietpi/.version
 		. /DietPi/dietpi/.version
 
-		export G_GITOWNER=$gitowner_temp
-		export G_GITBRANCH=$gitbranch_temp
+		G_GITOWNER=$gitowner_temp
+		G_GITBRANCH=$gitbranch_temp
 
 		#	reduce sub_version by 1, allows us to create image, prior to release and patch if needed.
-		export G_DIETPI_VERSION_SUB=$(( $G_DIETPI_VERSION_SUB - 1 ))
+		G_DIETPI_VERSION_SUB=$(( $G_DIETPI_VERSION_SUB - 1 ))
 
 		G_CONFIG_INJECT 'DEV_GITBRANCH=' "DEV_GITBRANCH=$G_GITBRANCH" /DietPi/dietpi.txt
 		G_VERSIONDB_SAVE
