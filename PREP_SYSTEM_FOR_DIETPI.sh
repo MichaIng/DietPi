@@ -31,8 +31,7 @@
 	fi
 
 	#Work inside /tmp as usually ramfs to reduce disk I/O and speed up download and unpacking
-	mkdir -p /tmp/DietPi-PREP
-	cd /tmp/DietPi-PREP
+	cd /tmp
 
 	#Check/install minimal APT Pre-Reqs
 	a_MIN_APT_PREREQS=(
@@ -91,11 +90,7 @@
 	update-locale LC_TIME=en_GB.UTF-8
 	update-locale LC_ALL=en_GB.UTF-8
 
-	# - Force en_GB Locale for rest of script. Prevents incorrect parsing with non-english locales.
-	export LC_ALL=en_GB.UTF-8
-	export LANG=en_GB.UTF-8
-
-	# - Select gitbranch
+	#Select gitbranch
 	aWHIP_BRANCH=(
 
 		'master' ': Stable release (recommended)'
@@ -141,10 +136,10 @@
 	fi
 	rm dietpi-globals
 
+	# - Reset G_PROGRAM_NAME, which was set to empty string by sourcing dietpi-globals
 	G_PROGRAM_NAME='DietPi-PREP'
-	HIERARCHY=0
-	G_DISTRO=0 # Export to dietpi-globals
-	G_DISTRO_NAME='NULL' # Export to dietpi-globals
+	G_INIT
+
 	DISTRO_TARGET=0
 	DISTRO_TARGET_NAME=''
 	if grep -q 'wheezy' /etc/os-release; then
@@ -174,8 +169,6 @@
 
 	fi
 
-	#G_HW_MODEL # init from dietpi-globals
-	#G_HW_ARCH_DESCRIPTION # init from dietpi-globals
 	G_HW_ARCH_DESCRIPTION="$(uname -m)"
 	if [[ $G_HW_ARCH_DESCRIPTION == 'armv6l' ]]; then
 
@@ -424,7 +417,7 @@
 
 		)
 
-		if G_WHIP_MENU 'Please select an option:' && (( $G_WHIP_RETURNED_VALUE )) ; then
+		if G_WHIP_MENU 'Please select an option:' && (( $G_WHIP_RETURNED_VALUE )); then
 
 			G_DIETPI-NOTIFY 2 'Marking WiFi as needed'
 			WIFI_REQUIRED=1
@@ -581,25 +574,11 @@
 
 		G_DIETPI-NOTIFY 2 "Setting APT sources.list: $DISTRO_TARGET_NAME $DISTRO_TARGET"
 
-		# - We need to temp save target DISTRO vars, then revert them to current, after setting sources.list
-		G_DISTRO_TEMP=$G_DISTRO
-		G_DISTRO_NAME_TEMP="$G_DISTRO_NAME"
-		G_DISTRO=$DISTRO_TARGET
-		G_DISTRO_NAME="$DISTRO_TARGET_NAME"
-
-		G_RUN_CMD /DietPi/dietpi/func/dietpi-set_software apt-mirror 'default'
-
-		G_DISTRO=$G_DISTRO_TEMP
-		G_DISTRO_NAME="$G_DISTRO_NAME_TEMP"
-		unset G_DISTRO_TEMP
-		unset G_DISTRO_NAME_TEMP
+		# - We need to forward $DISTRO_TARGET* to dietpi-set_software, as well as $G_HW_MODEL for Debian vs Raspbian decision.
+		G_DISTRO=$DISTRO_TARGET G_DISTRO_NAME="$DISTRO_TARGET_NAME" G_HW_MODEL=$G_HW_MODEL G_RUN_CMD /DietPi/dietpi/func/dietpi-set_software apt-mirror 'default'
 
 		# - Meveric, update repo to use our EU mirror: https://github.com/Fourdee/DietPi/issues/1519#issuecomment-368234302
 		sed -i 's@https://oph.mdrjr.net/meveric@http://fuzon.co.uk/meveric@' /etc/apt/sources.list.d/meveric* &> /dev/null
-
-		G_DIETPI-NOTIFY 2 "Updating APT for $DISTRO_TARGET_NAME:"
-
-		G_RUN_CMD apt-get clean
 
 		G_AGUP
 
@@ -859,7 +838,6 @@ _EOF_
 		# - dhcpcd5: https://github.com/Fourdee/DietPi/issues/1560#issuecomment-370136642
 		# - dbus: Not needed for headless images, but sometimes marked as "important", thus not autoremoved.
 		G_AGP dbus dhcpcd5
-
 		G_AGA
 
 		#------------------------------------------------------------------------------------------------
@@ -1050,7 +1028,7 @@ _EOF_
 		#-----------------------------------------------------------------------------------
 		#Cron Jobs
 
-		G_DIETPI-NOTIFY 2 "Configuring Cron"
+		G_DIETPI-NOTIFY 2 'Configuring Cron'
 
 		cat << _EOF_ > /etc/crontab
 #Please use dietpi-cron to change cron start times
@@ -1104,9 +1082,9 @@ _EOF_
 		# Restart DietPi-RAMdisk, as 'dietpi-drive_manager 4' remounts /DietPi.
 		G_RUN_CMD systemctl restart dietpi-ramdisk
 
-		# Recreate and navigate to "/tmp/DietPi-PREP" working directory
-		mkdir -p /tmp/DietPi-PREP
-		cd /tmp/DietPi-PREP
+		# Recreate and navigate to "/tmp/$G_PROGRAM_NAME" working directory
+		mkdir -p /tmp/$G_PROGRAM_NAME
+		cd /tmp/$G_PROGRAM_NAME
 
 		G_DIETPI-NOTIFY 2 'Deleting all log files /var/log'
 
@@ -1308,7 +1286,7 @@ _EOF_
 			chmod +x -R rtl8812au_sparky
 			cd rtl8812au_sparky
 			G_RUN_CMD ./install.sh
-			cd /tmp/DietPi-PREP
+			cd /tmp/$G_PROGRAM_NAME
 			rm -R rtl8812au_sparky*
 
 			#	Use performance gov for stability.
@@ -1376,7 +1354,7 @@ _EOF_
 
 		l_message='Enable Dropbear autostart' G_RUN_CMD sed -i '/NO_START=1/c\NO_START=0' /etc/default/dropbear
 
-		G_DIETPI-NOTIFY 2 'Configuring Services'
+		G_DIETPI-NOTIFY 2 'Configuring services'
 
 		/DietPi/dietpi/dietpi-services stop
 		/DietPi/dietpi/dietpi-services dietpi_controlled
@@ -1541,14 +1519,14 @@ _EOF_
 
 		chmod +x /DietPi/dietpi/.version
 		. /DietPi/dietpi/.version
+		#	reduce sub_version by 1, allows us to create image, prior to release and patch if needed.
+		G_DIETPI_VERSION_SUB=$(( $G_DIETPI_VERSION_SUB - 1 ))
 
 		G_GITOWNER=$gitowner_temp
 		G_GITBRANCH=$gitbranch_temp
 
-		#	reduce sub_version by 1, allows us to create image, prior to release and patch if needed.
-		G_DIETPI_VERSION_SUB=$(( $G_DIETPI_VERSION_SUB - 1 ))
-
 		G_CONFIG_INJECT 'DEV_GITBRANCH=' "DEV_GITBRANCH=$G_GITBRANCH" /DietPi/dietpi.txt
+		G_CONFIG_INJECT 'DEV_GITOWNER=' "DEV_GITOWNER=$G_GITOWNER" /DietPi/dietpi.txt
 		G_VERSIONDB_SAVE
 
 		G_RUN_CMD cp /DietPi/dietpi/.version /var/lib/dietpi/.dietpi_image_version
