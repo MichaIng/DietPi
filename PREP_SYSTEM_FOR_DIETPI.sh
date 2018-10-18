@@ -1516,6 +1516,8 @@ _EOF_
 
 		chmod +x /DietPi/dietpi/.version
 		. /DietPi/dietpi/.version
+		#	reduce sub_version by 1, allows us to create image, prior to release and patch if needed.
+		G_DIETPI_VERSION_SUB=$(( $G_DIETPI_VERSION_SUB - 1 ))
 
 		G_GITOWNER=$gitowner_temp
 		G_GITBRANCH=$gitbranch_temp
@@ -1523,9 +1525,6 @@ _EOF_
 		G_CONFIG_INJECT 'DEV_GITBRANCH=' "DEV_GITBRANCH=$G_GITBRANCH" /DietPi/dietpi.txt
 		G_CONFIG_INJECT 'DEV_GITOWNER=' "DEV_GITOWNER=$G_GITOWNER" /DietPi/dietpi.txt
 		G_VERSIONDB_SAVE
-
-		#	reduce sub_version by 1, allows us to create image, prior to release and patch if needed.
-		G_DIETPI_VERSION_SUB=$(( $G_DIETPI_VERSION_SUB - 1 ))
 
 		G_RUN_CMD cp /DietPi/dietpi/.version /var/lib/dietpi/.dietpi_image_version
 
