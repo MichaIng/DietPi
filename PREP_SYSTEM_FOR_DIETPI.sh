@@ -135,6 +135,9 @@
 
 	fi
 	rm dietpi-globals
+
+	# - Reset G_PROGRAM_NAME, which was set to empty string by sourcing dietpi-globals
+	G_PROGRAM_NAME='DietPi-PREP'
 	G_INIT
 
 	DISTRO_TARGET=0
