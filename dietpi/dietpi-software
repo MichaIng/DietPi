@@ -6281,7 +6281,7 @@ _EOF_
 			${aSOFTWARE_INSTALL_STATE[160]} == 1 )); then
 
 			Banner_Installing
-			Download_Install 'https://dietpi.com/downloads/binaries/all/allo_web_interface_v10.7z' /var/www
+			Download_Install 'https://dietpi.com/downloads/binaries/all/allo_web_interface_v11.7z' /var/www
 
 		fi
 
@@ -8301,22 +8301,29 @@ _EOF_
 			Banner_Configuration
 
 			# Create MPD user
-			useradd -rM mpd -G dietpi,audio -s /usr/sbin/nologin
+			#useradd -rM mpd -G dietpi,audio -s /usr/sbin/nologin
 
-			# - Add files/folders
-			mkdir -p /var/run/mpd
-			mkdir -p /var/lib/mpd/music
-			mkdir -p /var/lib/mpd/playlists
-			> /var/lib/mpd/state
-
-			#	- log
+			# - Runtime folders/files
+			#	log
 			mkdir -p /var/log/mpd
 			> /var/log/mpd/mpd.log
 
-			#	- cache
+			#	cache
 			mkdir -p $G_FP_DIETPI_USERDATA/.mpd_cache
+			> $G_FP_DIETPI_USERDATA/.mpd_cache/db_file
+			> $G_FP_DIETPI_USERDATA/.mpd_cache/state
+			> $G_FP_DIETPI_USERDATA/.mpd_cache/sticker.sql
 
-			#	- default config
+			#	Symlink from MPD defaults that applications may still expect/use.
+			rm -R /var/lib/mpd &> /dev/null
+			mkdir -p /var/lib/mpd
+			ln -sf $G_FP_DIETPI_USERDATA/Music /var/lib/mpd/music
+			ln -sf $G_FP_DIETPI_USERDATA/Music /var/lib/mpd/playlists
+			ln -sf $G_FP_DIETPI_USERDATA/.mpd_cache/db_file /var/lib/mpd/mpd.db
+			ln -sf $G_FP_DIETPI_USERDATA/.mpd_cache/state /var/lib/mpd/state
+			ln -sf $G_FP_DIETPI_USERDATA/.mpd_cache/sticker.sql /var/lib/mpd/sticker.sql
+
+			# - default config
 			cp /DietPi/dietpi/conf/mpd.conf /etc/mpd.conf
 
 			# - MPD service/confs
@@ -8332,12 +8339,14 @@ Description=Music Player Daemon
 After=network.target sound.target
 
 [Service]
-#User=mpd #Forks its own process under user set in /etc/mpd.conf (mpd)
+User=root #Also forks its own process under user set in /etc/mpd.conf (mpd)
+Group=dietpi
+Type=simple
 LimitRTPRIO=infinity
-RuntimeDirectory=/var/run/mpd
+#RuntimeDirectory=/var/run/mpd
 EnvironmentFile=/etc/default/mpd
-ExecStartPre=/bin/mkdir -p /var/run/mpd
-ExecStartPre=/bin/chown -R mpd:dietpi /var/run/mpd
+ExecStartPre=$(which mkdir) -p /var/run/mpd
+ExecStartPre=$(which chown) -R root:dietpi /var/run/mpd
 ExecStart=$(which mpd) --no-daemon /etc/mpd.conf
 
 [Install]
@@ -8436,7 +8445,8 @@ After=mpd.service
 
 [Service]
 Type=simple
-#User=ympd # Forks its own process using ympd user
+User=root # Changes to ympd during run
+Group=dietpi
 ExecStart=/usr/bin/ympd --user ympd --webport 1337
 
 [Install]
@@ -8451,6 +8461,8 @@ _EOF_
 
 			Banner_Configuration
 
+			useradd -rM mympd -G dietpi,audio -s /usr/sbin/nologin
+
 			cat << _EOF_ > /lib/systemd/system/mympd.service
 [Unit]
 Description=myMPD
@@ -8458,7 +8470,8 @@ After=mpd.service
 
 [Service]
 Type=simple
-#User=mympd # Forks its own process using mympd user
+User=root # Changes at runlevel
+Group=dietpi
 ExecStart=$(which mympd) /etc/mympd/mympd.conf
 
 [Install]
@@ -8470,14 +8483,9 @@ _EOF_
 			G_CONFIG_INJECT 'user =' 'user = mympd' /etc/mympd/mympd.conf
 			G_CONFIG_INJECT 'group =' 'group = dietpi' /etc/mympd/mympd.conf
 
+			mkdir -p /var/lib/mympd/smartpls /var/lib/mympd/tmp
+
 			#symlink music/libary folders used by mympd
-			if [[ $(readlink /var/lib/mpd/music) != $G_FP_DIETPI_USERDATA/Music ]]; then
-
-				[[ -d /var/lib/mpd/music ]] && rm -R /var/lib/mpd/music
-				ln -sf $G_FP_DIETPI_USERDATA/Music /var/lib/mpd/music
-
-			fi
-
 			if [[ $(readlink /usr/share/mympd/htdocs/library) != $G_FP_DIETPI_USERDATA/Music ]]; then
 
 				[[ -d /usr/share/mympd/htdocs/library ]] && rm -R /usr/share/mympd/htdocs/library
@@ -11091,6 +11099,7 @@ _EOF_
 			ln -sf /usr/share/applications/chromium*.desktop $HOME/Desktop/chromium.desktop &> /dev/null
 
 			# - Autostart run script for Kiosk mode, based on @AYapejian https://github.com/Fourdee/DietPi/issues/1737#issue-318697621
+
 			cat << _EOF_ > /var/lib/dietpi/dietpi-software/installed/chromium-autostart.sh
 #!/bin/bash
 #Autostart run script for Kiosk mode, based on @AYapejian https://github.com/Fourdee/DietPi/issues/1737#issue-318697621
@@ -11101,7 +11110,11 @@ _EOF_
 #   --pull-to-refresh=1
 #   --ash-host-window-bounds="400,300"
 
-CHROMIUM_OPTS='--kiosk --test-type --window-size=1280,720'
+# - Resolution to use for kiosk mode, should ideally match current system resolution
+RES_X=\$(grep -m1 '^[[:blank:]]*SOFTWARE_CHROMIUM_RES_X=' /DietPi/dietpi.txt | sed 's/^[^=]*=//')
+RES_Y=\$(grep -m1 '^[[:blank:]]*SOFTWARE_CHROMIUM_RES_Y=' /DietPi/dietpi.txt | sed 's/^[^=]*=//')
+
+CHROMIUM_OPTS='--kiosk --test-type --window-size=\$RES_X,\$RES_Y'
 # - If you want tablet mode, uncomment the next line.
 #CHROMIUM_OPTS+=' --force-tablet-mode'
 

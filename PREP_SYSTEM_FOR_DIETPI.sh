@@ -5,13 +5,15 @@
 	#------------------------------------------------------------------------------------------------
 	# REQUIREMENTS
 	# - Currently running Debian (ideally minimal, eg: Raspbian Lite-ish =)) )
-	# - Active eth0 connection
+	# - systemd as system/init/service manager
+	# - Either eth0 connection or local (non-SSH) terminal access
 	#------------------------------------------------------------------------------------------------
 	# Dev notes:
-	# Following items must be exported at all times, throughout this script, else, additional scripts launched will trigger incorrect results.
+	# Following items must be exported or assigned to DietPi scripts, if used, until dietpi-obtain_hw_model is executed.
 	# - G_HW_MODEL
 	# - G_HW_ARCH
 	# - G_DISTRO
+	# - G_DISTRO_NAME
 	#------------------------------------------------------------------------------------------------
 
 	#Core globals
@@ -68,7 +70,7 @@
 	unset a_MIN_APT_PREREQS
 
 	#Setup locale
-	# - Remove exisiting settings that will break dpkg-reconfigure
+	# - Remove exisiting settings that could break dpkg-reconfigure locales
 	> /etc/environment
 	rm /etc/default/locale &> /dev/null
 
@@ -99,13 +101,14 @@
 
 	)
 
-	WHIP_RETURN=$(whiptail --title "$G_PROGRAM_NAME" --menu "Please select a GitBranch:" --default-item "master" --ok-button "Ok" --cancel-button "Exit" --backtitle "$G_PROGRAM_NAME" 12 80 3 "${aWHIP_BRANCH[@]}" 3>&1 1>&2 2>&3)
+	WHIP_RETURN=$(whiptail --title "$G_PROGRAM_NAME" --menu "Please select a Git branch:" --default-item "master" --ok-button "Ok" --cancel-button "Exit" --backtitle "$G_PROGRAM_NAME" 12 80 3 "${aWHIP_BRANCH[@]}" 3>&1 1>&2 2>&3)
 	if (( $? == 0 )); then
 
 		G_GITBRANCH=$WHIP_RETURN
 
 	else
 
+		echo -e 'No choice detected. Aborting...\n'
 		exit 0
 
 	fi
@@ -391,7 +394,7 @@
 		G_WHIP_MENU 'Please select the current device this is being installed on:\n - NB: Select "Generic device" if not listed.\n - "Core devices": Are fully supported by DietPi, offering full GPU + Kodi support.\n - "Limited support devices": No GPU support, supported limited to DietPi specific issues only (eg: excludes Kernel/GPU/VPU related items).'
 		if (( $? )) || [[ -z $G_WHIP_RETURNED_VALUE ]]; then
 
-			G_DIETPI-NOTIFY 1 'No choices detected. Aborting...'
+			G_DIETPI-NOTIFY 1 'No choice detected. Aborting...'
 			exit 0
 
 		fi
@@ -465,7 +468,7 @@
 
 		if [[ -z ${G_WHIP_MENU_ARRAY+x} ]]; then
 
-			G_DIETPI-NOTIFY 1 'Error: No available Distros for this system. Aborting...'
+			G_DIETPI-NOTIFY 1 'Error: No available Distros for this system. Aborting...\n'
 			exit 1
 
 		fi
@@ -473,7 +476,7 @@
 		G_WHIP_MENU "Please select a distro to install on this system. Selecting a distro that is older than the current installed on system, is not supported.\n\nCurrently installed:\n - $G_DISTRO $G_DISTRO_NAME"
 		if (( $? )) || [[ -z $G_WHIP_RETURNED_VALUE ]]; then
 
-			G_DIETPI-NOTIFY 1 'No choices detected. Aborting...'
+			G_DIETPI-NOTIFY 1 'No choice detected. Aborting...\n'
 			exit 0
 
 		fi
@@ -509,7 +512,7 @@
 		l_message='Extracting DietPi sourcecode' G_RUN_CMD unzip -o package.zip
 		rm package.zip
 
-		l_message='Creating /boot' G_RUN_CMD mkdir -p /boot
+		[[ ! -d /boot ]] && l_message='Creating /boot' G_RUN_CMD mkdir -p /boot
 
 		G_DIETPI-NOTIFY 2 'Moving kernel and boot configuration to /boot'
 
@@ -541,13 +544,12 @@
 		rm "DietPi-$G_GITBRANCH/dietpi/patch_file"
 		rm DietPi-"$G_GITBRANCH"/dietpi/server_version*
 
-		l_message='Move DietPi core to /boot/dietpi' G_RUN_CMD mv "DietPi-$G_GITBRANCH/dietpi" /boot/
-
+		l_message='Copy DietPi core files to /boot/dietpi' G_RUN_CMD cp -Rf DietPi-"$G_GITBRANCH"/dietpi /boot/
 		l_message='Copy rootfs files in place' G_RUN_CMD cp -Rf DietPi-"$G_GITBRANCH"/rootfs/. /
 
 		l_message='Clean download location' G_RUN_CMD rm -R "DietPi-$G_GITBRANCH"
 
-		l_message='Set execute permissions for DietPi scripts' G_RUN_CMD chmod -R +x /boot/dietpi /etc/cron.*/dietpi /var/lib/dietpi/services
+		l_message='Set execute permissions for DietPi scripts' G_RUN_CMD chmod -R +x /boot/dietpi /var/lib/dietpi/services /etc/cron.*/dietpi /etc/profile.d/dietpi-*.sh /etc/bashrc.d/dietpi-*.sh
 
 		G_RUN_CMD systemctl daemon-reload
 		G_RUN_CMD systemctl enable dietpi-ramdisk
@@ -555,7 +557,7 @@
 		# - Mount tmpfs
 		G_RUN_CMD mkdir -p /DietPi
 		G_RUN_CMD mount -t tmpfs -o size=20m tmpfs /DietPi
-		l_message='Starting DietPi-RAMDISK' G_RUN_CMD systemctl start dietpi-ramdisk
+		l_message='Starting DietPi-RAMdisk' G_RUN_CMD systemctl start dietpi-ramdisk
 
 		#------------------------------------------------------------------------------------------------
 		echo ''
