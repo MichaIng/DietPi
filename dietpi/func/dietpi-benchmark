@@ -10,34 +10,121 @@
 	#////////////////////////////////////
 	#
 	# Info:
-	# FSBENCH_FP=/location FSBENCH_FILESIZE=optional_size_MB /DietPi/dietpi/func/dietpi-benchmark 0		= Benchmark $FSBENCH_FP filesystem read/write.
-	# /DietPi/dietpi/func/dietpi-benchmark 1															= Benchmark CPU.
+	# /DietPi/dietpi/func/dietpi-benchmark 0															= init vars for sourcing /var/lib/dietpi/dietpi-benchmark/results
+	# FP_BENCHFILE=/location BENCH_FILESIZE=optional_size_MB /DietPi/dietpi/func/dietpi-benchmark 1		= Benchmark $FP_BENCHFILE filesystem read/write.
 	# /DietPi/dietpi/func/dietpi-benchmark 2															= Run all benchmarks and upload to dietpi.com
+	# G_USER_INPUTS=0 /DietPi/dietpi/func/dietpi-benchmark 2											= Same as above, automated
+	# /DietPi/dietpi/func/dietpi-benchmark 3															= iPerf server
+	# /DietPi/dietpi/func/dietpi-benchmark 4															= iPerf client with prompt
 	#
-	# Notes:
-	# - All results are saved to /tmp/dietpi-benchmark_results
-	# 	Please see end of script for fixed layout of above file
 	#////////////////////////////////////
 
 	#Import DietPi-Globals ---------------------------------------------------------------
 	. /DietPi/dietpi/func/dietpi-globals
-	export G_PROGRAM_NAME='DietPi-Benchmark'
+	G_PROGRAM_NAME='DietPi-Benchmark'
 	G_INIT
 	#Import DietPi-Globals ---------------------------------------------------------------
 
 	INPUT=$1
+	if [[ ! $INPUT ]]; then
+
+		G_DIETPI-NOTIFY 1 'Invalid command, please see sourcecode'
+		exit 1
+
+	fi
 
 	#/////////////////////////////////////////////////////////////////////////////////////
 	# Global
 	#/////////////////////////////////////////////////////////////////////////////////////
+	SURVEY_OPTED_IN=0
 
+	IPERF_SERVER_IP=''
 	SHOW_RESULTS=${SHOW_RESULTS:-1} #optional input | show results for individual tests?
 
-	CPUBENCH_TIME='Not tested'
 	CPUBENCH_INT_MAX=${CPUBENCH_INT_MAX:-1000000} #optional input
+	BENCH_CPU='Not tested'
+
+	BENCH_FILESIZE=${BENCH_FILESIZE:-0} #optional input for automated
+	FP_BENCHFILE=${FP_BENCHFILE:-/} #optional input for automated
+	BENCH_ROOTFS_WRITE='Not tested'
+	BENCH_ROOTFS_READ='Not tested'
+	BENCH_RAM_WRITE='Not tested'
+	BENCH_RAM_READ='Not tested'
+	BENCH_CUSTOMFS_WRITE='Not tested'
+	BENCH_CUSTOMFS_READ='Not tested'
+
+	BENCH_CPU_TEMP_START='Not tested'
+	BENCH_CPU_TEMP_END='Not tested'
+
+	BENCH_NET_LAN_SPEED='Not tested'
+
+	Load_Results(){
+
+		if [[ -f /var/lib/dietpi/dietpi-benchmark/results ]]; then
+
+			. /var/lib/dietpi/dietpi-benchmark/results
+
+		fi
+
+	}
+
+	Save_Results(){
+
+		mkdir -p /var/lib/dietpi/dietpi-benchmark
+		cat << _EOF_ > /var/lib/dietpi/dietpi-benchmark/results
+# -------------------------
+# DietPi-Benchmark
+# -------------------------
+BENCH_VERSION=1
+BENCH_HW_MODEL=$G_HW_MODEL
+BENCH_CPU='$BENCH_CPU'
+BENCH_ROOTFS_WRITE='$BENCH_ROOTFS_WRITE'
+BENCH_ROOTFS_READ='$BENCH_ROOTFS_READ'
+BENCH_RAM_WRITE='$BENCH_RAM_WRITE'
+BENCH_RAM_READ='$BENCH_RAM_READ'
+BENCH_CUSTOMFS_WRITE='$BENCH_CUSTOMFS_WRITE'
+BENCH_CUSTOMFS_READ='$BENCH_CUSTOMFS_READ'
+BENCH_CPU_TEMP_START='$BENCH_CPU_TEMP_START'
+BENCH_CPU_TEMP_END='$BENCH_CPU_TEMP_END'
+BENCH_NET_LAN_SPEED='$BENCH_NET_LAN_SPEED'
+_EOF_
+
+	}
+
+	Update_Survey_Opted_Status(){
+
+		if [[ -f /DietPi/dietpi/.dietpi-survey ]]; then
+
+			SURVEY_OPTED_IN=$(sed -n 1p /DietPi/dietpi/.dietpi-survey)
+
+		fi
+
+	}
+
+	Upload_Survey(){
+
+		Update_Survey_Opted_Status
+
+		if (( $SURVEY_OPTED_IN )); then
+
+			/DietPi/dietpi/dietpi-survey 1
+
+		else
+
+			G_WHIP_YESNO 'To upload and compare your results against other users, you must be opted in to the DietPi-Survey.\n\nWould you like to run DietPi-Survey now, allowing you to opt in?'
+			if (( $? == 0 )); then
+
+				/DietPi/dietpi/dietpi-survey
+
+			fi
+
+		fi
+
+	}
+
 	CPU_Benchmark(){
 
-		G_DIETPI-NOTIFY 0 "Running DietPi-CPU Benchmark with max value of 1000000 over $(nproc --all) cores, please wait..."
+		G_DIETPI-NOTIFY 0 "Running DietPi-CPU Benchmark with max value of 1000000 over $G_HW_CPU_CORES cores, please wait..."
 
 		cat << _EOF_ > $FP_TEMP/bench
 #!/bin/bash
@@ -96,89 +183,134 @@ _EOF_
 		sync
 		sleep 1
 
+		BENCH_CPU_TEMP_START=$(G_OBTAIN_CPU_TEMP)
+
 		{ time -p $FP_TEMP/bench; } 2> $FP_TEMP/bench_result
 
-		CPUBENCH_TIME=$( grep -m1 'real' $FP_TEMP/bench_result | awk '{print $2}' )
+		BENCH_CPU_TEMP_END=$(G_OBTAIN_CPU_TEMP)
+		BENCH_CPU=$( grep -m1 'real' $FP_TEMP/bench_result | awk '{print $2}' )
 
 		if (( $SHOW_RESULTS )); then
 
 			G_WHIP_MSG "CPU Benchmark Results:\n
- - Total time     = $CPUBENCH_TIME Seconds
- - Value to reach = $CPUBENCH_INT_MAX\n\n
- NB: A lower 'Total time' is faster"
+ - Total time     = $BENCH_CPU Seconds
+ - Value to reach = $CPUBENCH_INT_MAX
+ - CPU temps      = Start: ${BENCH_CPU_TEMP_START}'c | End: ${BENCH_CPU_TEMP_END}'c\n\n
+NB: A lower 'Total time' is faster"
 
 		fi
 
 	}
 
-	FSBENCH_READ_SPEED='Not tested'
-	FSBENCH_WRITE_SPEED='Not tested'
-	FSBENCH_FILESIZE=${FSBENCH_FILESIZE:-0} #optional input for automated
-	FSBENCH_FP=${FSBENCH_FP:-/} #optional input for automated
 	Filesystem_Benchmark(){
 
 		local benchmark_file_name='benchmark.file'
 		local min_benchmark_size=10
-		local max_benchmark_size=$(( $(G_CHECK_FREESPACE $FSBENCH_FP) - 100 ))
+		local max_benchmark_size=$(( $(G_CHECK_FREESPACE $FP_BENCHFILE) - 100 ))
 		if (( $max_benchmark_size > 1000 )); then
 
 			max_benchmark_size=1000
 
 		fi
 
-		if [[ $FSBENCH_FP != *'/' ]]; then
+		if [[ $FP_BENCHFILE != *'/' ]]; then
 
-			FSBENCH_FP+='/'
+			FP_BENCHFILE+='/'
 
 		fi
-		FSBENCH_FP+=$benchmark_file_name
+		FP_BENCHFILE+=$benchmark_file_name
 
 		printf '\ec' # clear current terminal screen
 
 		#Obtain user benchmark size.
-		if (( $FSBENCH_FILESIZE == 0 )); then
+		if (( $BENCH_FILESIZE == 0 )); then
 
 			G_WHIP_DEFAULT_ITEM=$min_benchmark_size
 			G_WHIP_INPUTBOX "Please enter a filesize test value (MB). A value of 100 is recommended.\n- Minimum value: $min_benchmark_size\n- Maximum possible value: $max_benchmark_size"
 			if (( $? == 0 )); then
 
-				FSBENCH_FILESIZE=$G_WHIP_RETURNED_VALUE
+				BENCH_FILESIZE=$G_WHIP_RETURNED_VALUE
 
 			fi
 
 		fi
 
 		#Run benchmark
-		if G_CHECK_VALIDINT $FSBENCH_FILESIZE $min_benchmark_size $max_benchmark_size; then
+		if G_CHECK_VALIDINT $BENCH_FILESIZE $min_benchmark_size $max_benchmark_size; then
 
-			G_DIETPI-NOTIFY 2 "Performing Read/Write benchmark on $FSBENCH_FP, please wait..."
+			G_DIETPI-NOTIFY 2 "Performing Read/Write benchmark on $FP_BENCHFILE, please wait..."
 
-			G_DIETPI-NOTIFY 2 "Testing Seq Write Speed ($FSBENCH_FILESIZE MB)"
+			G_DIETPI-NOTIFY 2 "Testing Seq Write Speed ($BENCH_FILESIZE MB)"
 
 			sleep 1
 
-			FSBENCH_WRITE_SPEED=$(dd bs=4K count=$(( $FSBENCH_FILESIZE * 1024 / 4 )) if=/dev/zero of=$FSBENCH_FP conv=fdatasync 2>&1 | grep 'MB' | awk '{print $(NF - 1), $NF}' | sed 's/[^0-9.]*//g')
+			local bench_write_result=$(dd bs=4K count=$(( $BENCH_FILESIZE * 1024 / 4 )) if=/dev/zero of=$FP_BENCHFILE conv=fdatasync 2>&1 | grep 'copied')
+			#	Convert results manually from bytes and time to MB/s
+			local temp_bytes_result=$(echo "$bench_write_result" | awk '{print $1}')
+			local temp_time_result=''
+			if (( $G_DISTRO == 3 )); then
+
+				temp_time_result=$(echo "$bench_write_result" | awk '{print $6}')
+
+			else
+
+				temp_time_result=$(echo "$bench_write_result" | awk '{print $8}')
+
+			fi
+			bench_write_result=$(bc -l <<< "scale=0; ( $temp_bytes_result / $temp_time_result ) / 1000 / 1000")
 
 			# - Clear cache
 			sync
 			echo 3 > /proc/sys/vm/drop_caches
-			G_DIETPI-NOTIFY 2 "Testing Seq Read Speed ($FSBENCH_FILESIZE MB)"
+			G_DIETPI-NOTIFY 2 "Testing Seq Read Speed ($BENCH_FILESIZE MB)"
 
 			sleep 1
 
-			FSBENCH_READ_SPEED=$(dd bs=4K count=$(( $FSBENCH_FILESIZE * 1024 / 4 )) if=$FSBENCH_FP of=/dev/zero conv=fdatasync 2>&1 | grep 'MB' | awk '{print $(NF - 1), $NF}' | sed 's/[^0-9.]*//g')
+			local bench_read_result=$(dd bs=4K count=$(( $BENCH_FILESIZE * 1024 / 4 )) if=$FP_BENCHFILE of=/dev/null conv=fdatasync 2>&1 | grep 'copied')
+			#	Convert results manually from bytes and time to MB/s
+			temp_bytes_result=$(echo "$bench_read_result" | awk '{print $1}')
+			if (( $G_DISTRO == 3 )); then
+
+				temp_time_result=$(echo "$bench_read_result" | awk '{print $6}')
+
+			else
+
+				temp_time_result=$(echo "$bench_read_result" | awk '{print $8}')
+
+			fi
+			bench_read_result=$(bc -l <<< "scale=0; ( $temp_bytes_result / $temp_time_result ) / 1000 / 1000")
+
+			# - RootFS
+			if [[ $FP_BENCHFILE == '/'$benchmark_file_name ]]; then
+
+				BENCH_ROOTFS_WRITE=$bench_write_result
+				BENCH_ROOTFS_READ=$bench_read_result
+
+			# - RAM
+			elif [[ $FP_BENCHFILE == '/tmp/'$benchmark_file_name ]]; then
+
+				BENCH_RAM_WRITE=$bench_write_result
+				BENCH_RAM_READ=$bench_read_result
+
+			# - Custom
+			else
+
+				BENCH_CUSTOMFS_WRITE=$bench_write_result
+				BENCH_CUSTOMFS_READ=$bench_read_result
+
+			fi
 
 			if (( $SHOW_RESULTS )); then
 
 				G_WHIP_MSG "Filesystem Benchmark Results:\n
- - Filepath  = $FSBENCH_FP
- - Test size = ${FSBENCH_FILESIZE} MB
- - READ      = ${FSBENCH_READ_SPEED} MB/s
- - WRITE     = ${FSBENCH_WRITE_SPEED} MB/s"
+ - Filepath  = $FP_BENCHFILE
+ - Test size = ${BENCH_FILESIZE} MB
+ - WRITE     = ${bench_write_result} MB/s
+ - READ      = ${bench_read_result} MB/s"
 
 			fi
 
-			rm $FSBENCH_FP &> /dev/null
+			rm $FP_BENCHFILE &> /dev/null
 
 		fi
 
@@ -189,84 +321,145 @@ _EOF_
 		SHOW_RESULTS=0
 		mkdir -p /var/lib/dietpi/dietpi-benchmark
 
-		G_DIETPI-NOTIFY 0 'Running benchmark suite tests for upload to DietPi-Survey'
+		if (( $G_USER_INPUTS )); then
 
-		#CPU
-		if (( $G_HW_CPU_CORES <= 2 )); then
-
-			G_WHIP_YESNO "We have detected a low CPU core count ($G_HW_CPU_CORES). The tests may take upto 5 minutes to complete on a RaspberryPi Zero.\n\nDo you wish to continue?"
+			G_WHIP_YESNO "$G_PROGRAM_NAME will now run the following benchmarks:\n - CPU performance\n - RootFS read/write performance\n - RAM read/write performance.\nThe test duration will depend on hardware specs, however, most devices will not exceed 40 seconds.\n\nIf you are opted in to the DietPi-Survey, your scores will uploaded automatically.\nYou can compare results against other users and hardware using the following link:\n - https://dietpi.com/survey#benchmark\n\nPlease select 'Ok' to begin the benchmark tests."
 			if (( $? == 1 )); then
 
+				G_DIETPI-NOTIFY 0 'Benchmark aborted'
 				exit 0
+
+			#	Additional checks
+			else
+
+				if (( $G_HW_CPU_CORES <= 2 )); then
+
+					G_WHIP_YESNO "We have detected a low CPU core count ($G_HW_CPU_CORES). The tests may take upto 5 minutes to complete (eg: RaspberryPi Zero).\n\nDo you wish to continue?"
+					if (( $? == 1 )); then
+
+						exit 0
+
+					fi
+
+				fi
 
 			fi
 
 		fi
 
+		G_DIETPI-NOTIFY 0 'Running benchmark suite tests, please wait...'
+
 		CPU_Benchmark
 
 		#FS/RAM
-		FSBENCH_FILESIZE=10
+		BENCH_FILESIZE=10
 
 		# - RAM
-		FSBENCH_FP='/tmp'
+		FP_BENCHFILE='/tmp'
 		Filesystem_Benchmark
-		local ram_write=$FSBENCH_WRITE_SPEED
-		local ram_read=$FSBENCH_READ_SPEED
 
 		# - Rootfs
-		FSBENCH_FP='/'
+		FP_BENCHFILE='/'
 		Filesystem_Benchmark
-		local rootfs_write=$FSBENCH_WRITE_SPEED
-		local rootfs_read=$FSBENCH_READ_SPEED
-
-		cat << _EOF_ > /var/lib/dietpi/dietpi-benchmark/upload_results
-$CPUBENCH_TIME
-$rootfs_write
-$rootfs_read
-$ram_write
-$ram_read
-_EOF_
 
 		SHOW_RESULTS=1
 
 		G_WHIP_MSG "Benchmarks completed:
-CPU     : Total time $CPUBENCH_INT_MAX int = $CPUBENCH_TIME seconds
-RAM     : Write = $ram_write MB/s | Read = $ram_read MB/s
-RootFS  : Write = $rootfs_write MB/s | Read = $rootfs_read MB/s"
+ - CPU Performance : Duration = $BENCH_CPU seconds (lower is faster)
+ - CPU Temp        : Idle = ${BENCH_CPU_TEMP_START}'c | Full load = ${BENCH_CPU_TEMP_END}'c
+ - RootFS          : Write = $BENCH_ROOTFS_WRITE MB/s | Read = $BENCH_ROOTFS_READ MB/s
+ - RAM             : Write = $BENCH_RAM_WRITE MB/s | Read = $BENCH_RAM_READ MB/s
+
+Compare these results online with other users, using the link below:
+ - https://dietpi.com/survey#benchmark"
+
+	}
+
+	Benchmark_Lan_Server(){
+
+		G_AG_CHECK_INSTALL_PREREQ iperf
+		G_THREAD_START iperf -s
+		G_WHIP_MSG "Network benchmark is now running in 'server mode'. Please use another DietPi system to connect as a client and begin the test.\n - Server IP = $(sed -n 4p /DietPi/dietpi/.network)\n\nWhen the client has finished, select 'Ok' to stop the server."
+		killall -w iperf
+		G_THREAD_WAIT
+
+	}
+
+	Benchmark_Lan_Client(){
+
+		G_AG_CHECK_INSTALL_PREREQ iperf
+		G_WHIP_INPUTBOX 'Please enter the IP address of the system running the network benchmark server:\n - eg: 192.168.0.100'
+		if (( $? == 0 )); then
+
+			IPERF_SERVER_IP="$G_WHIP_RETURNED_VALUE"
+
+			G_DIETPI-NOTIFY 2 "Benchmarking network performance to $IPERF_SERVER_IP. Please wait..."
+			BENCH_NET_LAN_SPEED="$(iperf -c $IPERF_SERVER_IP -p 5001 -t 5 -y C | sed 's/.*,//g')"
+			if disable_error=1 G_CHECK_VALIDINT $BENCH_NET_LAN_SPEED; then
+
+				BENCH_NET_LAN_SPEED=$(( $BENCH_NET_LAN_SPEED / 8 / 1000 / 1000 ))
+
+				G_WHIP_MSG "Network LAN benchmark completed:\n - Transfer rate = $BENCH_NET_LAN_SPEED MB/s"
+
+			else
+
+				G_WHIP_MSG "Network LAN benchmark failed, please verify:\n - Server is running on the other system\n - Server IP address is correct"
+				BENCH_NET_LAN_SPEED='Not tested'
+
+			fi
+
+		fi
 
 	}
 
 	#/////////////////////////////////////////////////////////////////////////////////////
 	# Main Loop
 	#/////////////////////////////////////////////////////////////////////////////////////
-	#-----------------------------------------------------------------------------------
-	/DietPi/dietpi/dietpi-services stop
-	#-----------------------------------------------------------------------------------
+	#Init vars for sourcing
 	if (( $INPUT == 0 )); then
 
-		Filesystem_Benchmark
+		Save_Results
 
-	elif (( $INPUT == 1 )); then
+	#Lan bench server
+	elif (( $INPUT == 3 )); then
 
-		CPU_Benchmark
+		Benchmark_Lan_Server
 
-	elif (( $INPUT == 2 )); then
+	#Run benchmarks
+	else
 
-		Benchmark_Survey
+		#-----------------------------------------------------------------------------------
+		/DietPi/dietpi/dietpi-services stop
+		#-----------------------------------------------------------------------------------
+		#Reuse existing results if done
+		Load_Results
+		#-----------------------------------------------------------------------------------
+		if (( $INPUT == 1 )); then
+
+			Filesystem_Benchmark
+
+		elif (( $INPUT == 2 )); then
+
+			Benchmark_Survey
+
+		elif (( $INPUT == 4 )); then
+
+			Benchmark_Lan_Client
+
+		fi
+		#-----------------------------------------------------------------------------------
+		#Export results data for other scripts:
+		Save_Results
+		#-----------------------------------------------------------------------------------
+		#Upload if in survey, else, prompt
+		Upload_Survey
+		#-----------------------------------------------------------------------------------
+		/DietPi/dietpi/dietpi-services start
+		#-----------------------------------------------------------------------------------
 
 	fi
 	#-----------------------------------------------------------------------------------
-	#Export results data for other scripts:
-	cat << _EOF_ > /tmp/dietpi-benchmark_results
-$CPUBENCH_TIME
-$FSBENCH_WRITE_SPEED
-$FSBENCH_READ_SPEED
-_EOF_
-	#-----------------------------------------------------------------------------------
-	/DietPi/dietpi/dietpi-services start
-	#-----------------------------------------------------------------------------------
-	exit
+	exit 0
 	#-----------------------------------------------------------------------------------
 
 }

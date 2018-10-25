@@ -14,9 +14,9 @@
 	#////////////////////////////////////
 
 	#Import DietPi-Globals ---------------------------------------------------------------
-	/DietPi/dietpi/func/dietpi-obtain_hw_model # Running for the 1st time
+	/DietPi/dietpi/func/dietpi-obtain_hw_model # Runs every boot to allow e.g. switching SDcards between devices and to be failsafe
 	. /DietPi/dietpi/func/dietpi-globals
-	export G_PROGRAM_NAME='DietPi-PreBoot'
+	G_PROGRAM_NAME='DietPi-PreBoot'
 	G_INIT
 	#Import DietPi-Globals ---------------------------------------------------------------
 
@@ -93,14 +93,8 @@
 		#----------------------------------------------------------------
 		#Automation
 		#----------------------------------------------------------------
-		# - Grab available network devices
-		/DietPi/dietpi/func/obtain_network_details
-
 		# - Generate Swapfile
-		/DietPi/dietpi/func/dietpi-set_dphys-swapfile $(grep -m1 '^[[:blank:]]*AUTO_SETUP_SWAPFILE_SIZE=' /DietPi/dietpi.txt | sed 's/^.*=//') "$(grep -m1 '^[[:blank:]]*AUTO_SETUP_SWAPFILE_LOCATION=' /DietPi/dietpi.txt | sed 's/.*=//')"
-
-		# - IPversion preference: https://github.com/Fourdee/DietPi/issues/472
-		/DietPi/dietpi/func/dietpi-set_hardware preferipversion "$(grep -m1 '^[[:blank:]]*CONFIG_PREFER_IPVERSION=' /DietPi/dietpi.txt | sed 's/^.*=//')"
+		/DietPi/dietpi/func/dietpi-set_dphys-swapfile $(grep -m1 '^[[:blank:]]*AUTO_SETUP_SWAPFILE_SIZE=' /DietPi/dietpi.txt | sed 's/^[^=]*=//') "$(grep -m1 '^[[:blank:]]*AUTO_SETUP_SWAPFILE_LOCATION=' /DietPi/dietpi.txt | sed 's/^[^=]*=//')"
 
 		# - Apply Timezone
 		local autoinstall_timezone="$(grep -m1 '^[[:blank:]]*AUTO_SETUP_TIMEZONE=' /DietPi/dietpi.txt | sed 's/^[^=]*=//' )"
@@ -122,11 +116,7 @@
 			G_DIETPI-NOTIFY 2 "Setting Locale $autoinstall_language. Please wait..."
 
 			#	Sanity, wrong result, revert back to default
-			if [[ ! $autoinstall_language =~ 'UTF-8' ]]; then
-
-				autoinstall_language='en_GB.UTF-8'
-
-			fi
+			[[ ! $autoinstall_language =~ 'UTF-8' ]] && autoinstall_language='en_GB.UTF-8'
 
 			# - Re-apply locale + auto install en_GB.UTF-8 alongside
 			/DietPi/dietpi/func/dietpi-set_software locale "$autoinstall_language"
@@ -172,18 +162,14 @@
 
 		fi
 
-		# - Set apt mirror
+		# - Set APT mirror
 		local target_repo='CONFIG_APT_DEBIAN_MIRROR'
-		if (( $G_HW_MODEL < 10 )); then
-
-			target_repo='CONFIG_APT_RASPBIAN_MIRROR'
-
-		fi
+		(( $G_HW_MODEL < 10 )) && target_repo='CONFIG_APT_RASPBIAN_MIRROR'
 
 		/DietPi/dietpi/func/dietpi-set_software apt-mirror "$(grep -m1 "^[[:blank:]]*$target_repo=" /DietPi/dietpi.txt | sed 's/^[^=]*=//')"
 
-		# - Generate unique Dropbear host-key:
-		rm /etc/dropbear/*key &> /dev/null
+		# - Generate unique Dropbear host keys:
+		rm /etc/dropbear/*_host_key &> /dev/null
 		dropbearkey -t rsa -f /etc/dropbear/dropbear_rsa_host_key &> /dev/null
 		dropbearkey -t ecdsa -f /etc/dropbear/dropbear_ecdsa_host_key &> /dev/null
 		dropbearkey -t dss -f /etc/dropbear/dropbear_dss_host_key &> /dev/null
@@ -193,15 +179,16 @@
 		rm /var/lib/dbus/machine-id &> /dev/null
 		systemd-machine-id-setup
 
-		#	Failsafe
-		killall -w dhclient &> /dev/null
+		# - Network setup
+		#	Grab available network devices
+		/DietPi/dietpi/func/obtain_network_details
 
 		local index_eth=$(sed -n 1p /DietPi/dietpi/.network)
 		local index_wlan=$(sed -n 2p /DietPi/dietpi/.network)
 
-		#	Replace all eth0 and wlan0 values to the indexs DietPi has found.
-		sed -i "s/eth0/eth$index_eth/g" /etc/network/interfaces
-		sed -i "s/wlan0/wlan$index_wlan/g" /etc/network/interfaces
+		#	Replace all eth0 and wlan0 values to the indices DietPi has found.
+		sed -i "s/eth[0-9]/eth$index_eth/g" /etc/network/interfaces
+		sed -i "s/wlan[0-9]/wlan$index_wlan/g" /etc/network/interfaces
 
 		#	Grab user requested settings from /dietpi.txt
 		local ethernet_enabled=$(grep -ci -m1 '^[[:blank:]]*AUTO_SETUP_NET_ETHERNET_ENABLED=1' /DietPi/dietpi.txt)
@@ -222,25 +209,22 @@
 			sed -i "/allow-hotplug eth/c\#allow-hotplug eth$index_eth" /etc/network/interfaces
 
 			# - Apply global SSID/Keys from dietpi.txt to wpa_supp
-			/DietPi/dietpi/func/dietpi-set_hardware wificreds set
+			/DietPi/dietpi/func/dietpi-wifidb 1
 
 		#	Ethernet
 		elif (( $ethernet_enabled )); then
 
 			#Enable Eth, disable Wlan
+			wifi_enabled=0
 			sed -i "/allow-hotplug eth/c\allow-hotplug eth$index_eth" /etc/network/interfaces
 			sed -i "/allow-hotplug wlan/c\#allow-hotplug wlan$index_wlan" /etc/network/interfaces
 
-			wifi_enabled=0
 			/DietPi/dietpi/func/dietpi-set_hardware wifimodules disable
 
 		fi
 
 		#	Static IPs
 		if (( $use_static )); then
-
-			#enable dns-nameservers
-			sed -i 's/^#dns-nameservers/dns-nameservers/g' /etc/network/interfaces
 
 			if (( $wifi_enabled )); then
 
@@ -259,96 +243,10 @@
 
 		fi
 
-		# - reload networking
-		systemctl daemon-reload
-
-		#	Failsafe
-		systemctl stop networking.service
-		killall -w dhclient &> /dev/null
-
-		# - Bring up networking (this is required, not sure what systemD isnt doing here, as this service runs before networking?!!?)
-		if (( $wifi_enabled )); then
-
-			ifup wlan$index_wlan
-
-		elif (( $ethernet_enabled )); then
-
-			ifup eth$index_eth
-
-		fi
-
-	}
-
-	Run_Init(){
-
-		#----------------------------------------------------------------
-		#Apply DietPi CPU Governor and settings
-		/DietPi/dietpi/func/dietpi-set_cpu &
-		#----------------------------------------------------------------
-		#Apply LED triggers if set
-		/DietPi/dietpi/func/dietpi-led_control 1 &
-		#----------------------------------------------------------------
-		#RPi Specials
-		#	set volume to -0.1db | We have to do it here because sound card modules (dietpi-set_hardware) are not enabled on the fly, requires a reboot.
-		#	Disable RPi hdmi output if set in dietpi.txt
-		if (( $G_HW_MODEL < 10 )); then
-
-			which amixer &> /dev/null && amixer set PCM -- -010 &
-			if grep -qi '^[[:blank:]]*CONFIG_HDMI_OUTPUT=0' /DietPi/dietpi.txt; then
-
-				/opt/vc/bin/tvservice -o &> /dev/null &
-
-			fi
-
-		fi
-		#----------------------------------------------------------------
-
-	}
-
-	Main(){
-
-		#Pre-Installed image, 1st run
-		if (( $G_DIETPI_INSTALL_STAGE == 2 )); then
-
-			echo 0
-
-		fi
-
-		#Normal Boot
-		if (( $G_DIETPI_INSTALL_STAGE == 1 )); then
-
-			echo 0
-
-		#First run prep
-		elif (( $G_DIETPI_INSTALL_STAGE == -1 )); then
-
-			# - Set RPi v1 safe overclocking profile (900mhz)
-			RPi_Set_Clock_Speeds
-
-			# - End user automated script
-			if [[ -f /boot/Automation_Custom_PreScript.sh ]]; then
-
-				G_DIETPI-NOTIFY 2 'Running custom script, please wait...'
-
-				local fp_dietpiautomation_custom_prescript_log='/var/tmp/dietpi/logs/dietpi-automation_custom_prescript.log'
-				chmod +x /boot/Automation_Custom_PreScript.sh
-				/boot/Automation_Custom_PreScript.sh | tee $fp_dietpiautomation_custom_prescript_log
-				if (( $? == 0 )); then
-
-					G_DIETPI-NOTIFY 0 'Custom script'
-
-				else
-
-					G_DIETPI-NOTIFY 1 "Custom script: Please see the log file for more information $fp_dietpiautomation_custom_prescript_log"
-
-				fi
-
-			fi
-
-			# - Activate DietPi Boot Loader User Settings and bring up network (dietpi.txt)
-			Apply_DietPi_FirstRun_Settings
-
-		fi
+		# - IPv6
+		local enable_ipv6=$(grep -ci -m1 '^[[:blank:]]*CONFIG_ENABLE_IPV6=1' /DietPi/dietpi.txt)
+		/DietPi/dietpi/func/dietpi-set_hardware enableipv6 $enable_ipv6
+		(( $enable_ipv6 )) && /DietPi/dietpi/func/dietpi-set_hardware preferipv4 $(grep -ci -m1 '^[[:blank:]]*CONFIG_PREFER_IPV4=1' /DietPi/dietpi.txt)
 
 	}
 
@@ -356,10 +254,56 @@
 	# Main Loop
 	#/////////////////////////////////////////////////////////////////////////////////////
 	#-----------------------------------------------------------------------------------
-	# Init
-	Run_Init
+	#Apply DietPi CPU Governor and settings
+	/DietPi/dietpi/func/dietpi-set_cpu &
+
+	#Apply LED triggers if set
+	/DietPi/dietpi/func/dietpi-led_control 1 &
+
+	#RPi Specials
+	#	set volume to -0.1db | We have to do it here because sound card modules (dietpi-set_hardware) are not enabled on the fly, requires a reboot.
+	#	Disable RPi hdmi output if set in dietpi.txt
+	if (( $G_HW_MODEL < 10 )); then
+
+		which amixer &> /dev/null && amixer set PCM -- -010 &
+		if grep -qi '^[[:blank:]]*CONFIG_HDMI_OUTPUT=0' /DietPi/dietpi.txt; then
+
+			/opt/vc/bin/tvservice -o &> /dev/null &
+
+		fi
+
+	fi
 	#-----------------------------------------------------------------------------------
-	Main
+	#First run prep
+	if (( $G_DIETPI_INSTALL_STAGE == -1 )); then
+
+		# - Set RPi v1 safe overclocking profile (900mhz)
+		RPi_Set_Clock_Speeds
+
+		# - End user automated script
+		if [[ -f /boot/Automation_Custom_PreScript.sh ]]; then
+
+			G_DIETPI-NOTIFY 2 'Running custom script, please wait...'
+
+			local fp_dietpiautomation_custom_prescript_log='/var/tmp/dietpi/logs/dietpi-automation_custom_prescript.log'
+			chmod +x /boot/Automation_Custom_PreScript.sh
+			/boot/Automation_Custom_PreScript.sh | tee $fp_dietpiautomation_custom_prescript_log
+			if (( $? == 0 )); then
+
+				G_DIETPI-NOTIFY 0 'Custom script'
+
+			else
+
+				G_DIETPI-NOTIFY 1 "Custom script: Please see the log file for more information $fp_dietpiautomation_custom_prescript_log"
+
+			fi
+
+		fi
+
+		# - Activate DietPi Boot Loader User Settings and bring up network (dietpi.txt)
+		Apply_DietPi_FirstRun_Settings
+
+	fi
 	#-----------------------------------------------------------------------------------
 	exit
 	#-----------------------------------------------------------------------------------

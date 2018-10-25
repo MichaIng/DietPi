@@ -25,10 +25,12 @@
 
 	#Import DietPi-Globals ---------------------------------------------------------------
 	. /DietPi/dietpi/func/dietpi-globals
-	export G_PROGRAM_NAME='DietPi-Survey'
+	G_PROGRAM_NAME='DietPi-Survey'
 	G_CHECK_ROOT_USER
 	G_INIT
 	#Import DietPi-Globals ---------------------------------------------------------------
+
+	EXIT_CODE=1 # 1=failed to send survey, 0=survey sent, 2=opted out and sent
 
 	#Grab Input (valid interger)
 	INPUT=0
@@ -68,6 +70,11 @@ _EOF_
 
 	Generate_File(){
 
+		# Current Git user/branch
+		# - For privacy reasons, replace all non-official (Fourdee) branches with "custom"
+		local gitbranch="$G_GITOWNER/$G_GITBRANCH"
+		[[ $G_GITOWNER != 'Fourdee' ]] && gitbranch='custom'
+
 		cat << _EOF_ > $UPLOAD_FILENAME
 #!/bin/bash
 # -------------------------
@@ -75,11 +82,12 @@ _EOF_
 # -------------------------
 ((aSURVEY_SENTCOUNT[$((SURVEY_SENTCOUNT+1))]++))
 ((aDIETPI_VERSION[$DIETPI_VERSION]++))
+((aGIT_BRANCH[$gitbranch]++))
 ((aDEVICE_NAME[$G_HW_MODEL_DESCRIPTION]++))
 ((aCPU_ARCH[$G_HW_ARCH_DESCRIPTION]++))
 ((aCPU_COUNT[$G_HW_CPU_CORES]++))
 ((aDISTRO_VERSION[$G_DISTRO_NAME]++))
-((aAUTOSTART_OPTION[\${aAUTOSTART_NAME[$(</DietPi/dietpi/.dietpi-autostart_index)]}]++))
+((aAUTOSTART_OPTION[\${aAUTOSTART_NAME[$(</DietPi/dietpi/.dietpi-autostart_index)]:=$(</DietPi/dietpi/.dietpi-autostart_index)}]++))
 ((aAUTO_SETUP_AUTOMATED[$(grep -m1 -ci '^[[:blank:]]*AUTO_SETUP_AUTOMATED=1' /DietPi/dietpi.txt)]++))
 ((aNETWORK_INTERFACE[$(sed -n 3p /DietPi/dietpi/.network)]++))
 # -------------------------
@@ -95,7 +103,11 @@ _EOF_
 
 				software=${software##*[}
 				software=${software%%]*}
-				echo "((aSOFTWARE[\${aSOFTWARE_NAME$(paste -sd '_' /DietPi/dietpi/.version)[$software]}]++))" >> $UPLOAD_FILENAME
+				if disable_error=1 G_CHECK_VALIDINT $software; then
+
+					echo "((aSOFTWARE[\${aSOFTWARE_NAME${G_DIETPI_VERSION_CORE}_${G_DIETPI_VERSION_SUB}[$software]:=$software}]++))" >> $UPLOAD_FILENAME
+
+				fi
 
 			done <<< "$(grep ']=2' /DietPi/dietpi/.installed)"
 
@@ -106,9 +118,21 @@ _EOF_
 
 		fi
 
+		# Add benchmark if completed by user
+		if [[ -f /var/lib/dietpi/dietpi-benchmark/results ]]; then
+
+			cat /var/lib/dietpi/dietpi-benchmark/results >> $UPLOAD_FILENAME
+
+		fi
+
 	}
 
 	Send_File(){
+
+		#DEBUG:
+		# cp "$UPLOAD_FILENAME" /home/dietpi-survey/survey/"$UPLOAD_FILENAME"
+		# exit 0
+		#DEBUG:
 
 		local info_failure_msg='Failed to connect to SFTP server. Please try again later. If problems persist, please report this issue to the DietPi dev team (forum or GitHub repo).'
 
@@ -128,7 +152,7 @@ _EOF_
 			fi
 
 			#Upload to server
-			curl --connect-timeout 4 --retry 1 --retry-delay 4 -sT "$UPLOAD_FILENAME" sftp://"$SFTP_USER":"$SFTP_PASS"@"$SFTP_ADDR"/survey/
+			curl --connect-timeout 8 --retry 1 --retry-delay 4 -sT "$UPLOAD_FILENAME" sftp://"$SFTP_USER":"$SFTP_PASS"@"$SFTP_ADDR"/survey/
 			if (( $? )); then
 
 				# Silently fail, in case of non-interactive mode
@@ -137,6 +161,7 @@ _EOF_
 			# Successful upload + opted in
 			elif (( $OPTED_IN )); then
 
+				EXIT_CODE=0
 				G_DIETPI-NOTIFY 0 'Successfully sent survey data'
 				# Increase sent count
 				((SURVEY_SENTCOUNT++))
@@ -144,6 +169,7 @@ _EOF_
 			# Successful upload + opted out + interactive
 			elif (( ! $INPUT )); then
 
+				EXIT_CODE=2
 				G_DIETPI-NOTIFY 0 'Successfully purged survey data'
 
 			fi
@@ -178,6 +204,7 @@ _EOF_
 	#Input mode: Send survey if opted in or empty file if opted out
 	if (( $INPUT == 1 )); then
 
+		Generate_File
 		Send_File
 
 	else
@@ -188,8 +215,8 @@ _EOF_
 		G_WHIP_DEFAULT_ITEM=$OPTED_IN
 		G_WHIP_MENU_ARRAY=(
 
-			'1' 'Opt IN to DietPi-Survey.'
-			'0' 'Opt OUT and purge my existing survey data.'
+			'1' ': Opt IN to DietPi-Survey.'
+			'0' ': Opt OUT and purge my existing survey data.'
 
 		)
 
@@ -213,7 +240,7 @@ Would you like to join DietPi-Survey?"
 	fi
 
 	#-----------------------------------------------------------------------------------
-	exit 0
+	exit $EXIT_CODE
 	#-----------------------------------------------------------------------------------
 
 }

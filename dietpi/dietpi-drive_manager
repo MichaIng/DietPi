@@ -19,7 +19,7 @@
 
 	#Import DietPi-Globals ---------------------------------------------------------------
 	. /DietPi/dietpi/func/dietpi-globals
-	export G_PROGRAM_NAME='DietPi-Drive_Manager'
+	G_PROGRAM_NAME='DietPi-Drive_Manager'
 	G_CHECK_ROOT_USER
 	G_INIT
 	#Import DietPi-Globals ---------------------------------------------------------------
@@ -60,6 +60,7 @@
 	FORMAT_FILESYSTEM_TYPE=0 #0=ext4 1=ntfs 2=fat32 3=hfs+ 4=btrfs 5=f2fs 6=exfat
 	FORMAT_RECREATE_PARTITION_TABLE=1
 	FORMAT_COMPLETED=0
+	FORMAT_MODE=1 #0=drive 1=partition
 
 	INDEX_INIT_CURRENT_DEVICE=-1
 	Init_New_Device(){
@@ -170,10 +171,13 @@ $net_mounts_ftp
 $net_mounts_nfs
 
 #-----------------------------------------------------------
-#TMPFS, MISC
+#TMPFS
 #-----------------------------------------------------------
-proc /proc proc defaults 0 0
 $tmpfs_mounts
+
+#-----------------------------------------------------------
+#MISC (bind)
+#-----------------------------------------------------------
 $bind_mounts
 
 #-----------------------------------------------------------
@@ -288,6 +292,7 @@ $swap_mount
 						if (( $? == 0 )); then
 
 							G_RUN_CMD mount -v -o rw,remount ${aDRIVE_MOUNT_TARGET[$INDEX_INIT_CURRENT_DEVICE]}
+							aDRIVE_ISREADONLY_CURRENTLY[$INDEX_INIT_CURRENT_DEVICE]=0
 							G_DIETPI-NOTIFY 0 'RootFS R/W now enabled.'
 
 						else
@@ -332,6 +337,13 @@ $swap_mount
 
 						string_options+=',nofail,x-systemd.automount'
 						fsck_flag=0
+
+					fi
+
+					# - Additional options for fstype specific items
+					if [[ ${aDRIVE_FSTYPE[$INDEX_INIT_CURRENT_DEVICE]} == 'ntfs' ]]; then
+
+						string_options+=',permissions'
 
 					fi
 
@@ -564,10 +576,10 @@ aDRIVE_ISPARTITIONTABLE ${aDRIVE_ISPARTITIONTABLE[$i]}
 
 			echo ${drive%[0-9]}
 
-		#mmc/NVMe
+		#MMC/NVMe
 		else
 
-			echo ${drive%[pn][0-9]}
+			echo ${drive%[p][0-9]}
 
 		fi
 
@@ -619,9 +631,18 @@ aDRIVE_ISPARTITIONTABLE ${aDRIVE_ISPARTITIONTABLE[$i]}
 
 		if (( $apply_mount )); then
 
+			# - Additional mount options
+			local additional_options=''
+			#	fstype specific items
+			if [[ ${aDRIVE_FSTYPE[$INDEX_DRIVE_BEING_EDITED]} == 'ntfs' ]]; then
+
+				additional_options='-o permissions'
+
+			fi
+
 			G_DIETPI-NOTIFY 2 "Creating mount folder for $target"
 			mkdir -p $target
-			G_ERROR_HANDLER_INFO_ONLY=1 G_RUN_CMD mount $source $target
+			G_ERROR_HANDLER_INFO_ONLY=1 G_RUN_CMD mount $source $target $additional_options
 			DRIVE_TARGET_BEING_EDITED="$target"
 
 		fi
@@ -669,15 +690,26 @@ aDRIVE_ISPARTITIONTABLE ${aDRIVE_ISPARTITIONTABLE[$i]}
 
 		local run_format=0
 		local info_format_fs_type=''
-		local info_format_type_output='Partition format' #used in complete message
-		local text_desc="Format Drive:\n - /dev/${aDRIVE_SOURCE_DEVICE[$INDEX_DRIVE_BEING_EDITED]}\n - UUID=${aDRIVE_UUID[$INDEX_DRIVE_BEING_EDITED]}\n - Partition table: $partition_table_text\n - Filesystem type: $format_type_text\n\nALL DATA and PARTITIONS on this drive will be DELETED.\nDo you wish to continue?"
-		if (( ${aDRIVE_ISPARTITIONTABLE[$INDEX_DRIVE_BEING_EDITED]} )); then
+		local info_format_type_output='Drive format' #used in complete message
+		local text_desc=''
 
-			text_desc="Format partition:\n - ${aDRIVE_MOUNT_SOURCE[$INDEX_DRIVE_BEING_EDITED]}\n - UUID=${aDRIVE_UUID[$INDEX_DRIVE_BEING_EDITED]}\n - Filesystem type: $format_type_text\n\nALL DATA on this partition will be DELETED.\nDo you wish to continue?"
+		# - No partition table, force drive wipe
+		if (( ! ${aDRIVE_ISPARTITIONTABLE[$INDEX_DRIVE_BEING_EDITED]} )); then
+
+			FORMAT_MODE=0
 
 		fi
 
-		G_WHIP_YESNO "Start format?\n\n$text_desc"
+		if (( $FORMAT_MODE == 0 )); then
+
+			text_desc=" - /dev/${aDRIVE_SOURCE_DEVICE[$INDEX_DRIVE_BEING_EDITED]}\n - UUID=${aDRIVE_UUID[$INDEX_DRIVE_BEING_EDITED]}\n - Partition table: $partition_table_text\n - Filesystem type: $format_type_text\n\nALL DATA and PARTITIONS on this drive will be DELETED.\nDo you wish to continue?"
+
+		elif (( $FORMAT_MODE == 1 )); then
+
+			text_desc=" - ${aDRIVE_MOUNT_SOURCE[$INDEX_DRIVE_BEING_EDITED]}\n - UUID=${aDRIVE_UUID[$INDEX_DRIVE_BEING_EDITED]}\n - Filesystem type: $format_type_text\n\nALL DATA on this PARTITION will be DELETED.\nDo you wish to continue?"
+		fi
+
+		G_WHIP_YESNO "Ready to format:\n$text_desc"
 		if (( ! $? )); then
 
 			run_format=1
@@ -686,28 +718,29 @@ aDRIVE_ISPARTITIONTABLE ${aDRIVE_ISPARTITIONTABLE[$i]}
 
 		if (( $run_format )); then
 
-			# - Unmount drive
-			umount ${aDRIVE_MOUNT_SOURCE[$INDEX_DRIVE_BEING_EDITED]}
+			# - Drive format
+			#	Create a new partition table
+			if (( $FORMAT_MODE == 0 )); then
 
-			# - Create a new partition table
-			if (( ! ${aDRIVE_ISPARTITIONTABLE[$INDEX_DRIVE_BEING_EDITED]} )); then
-
-				# - Zero All Partitions on device
+				# - Umount and Zero All Partitions on device
 				for ((i=1; i<=9; i++))
 				do
 
-					local fp_target_partition="/dev/${aDRIVE_SOURCE_DEVICE[$INDEX_DRIVE_BEING_EDITED]}$i"
-					#	Does the device require an additional p for partitions (eg: mmcblkXp1 vs /dev/sdX1)?
-					if [[ ${aDRIVE_MOUNT_SOURCE[$INDEX_DRIVE_BEING_EDITED]} == *p[0-9] ]]; then
+					# - Obtain partition location to wipe
+					#	mmcblkXp1/nvmeXn1p1
+					local fp_target_partition="/dev/${aDRIVE_SOURCE_DEVICE[$INDEX_DRIVE_BEING_EDITED]}p$i"
+					#	h/sdX1
+					if [[ ${aDRIVE_SOURCE_DEVICE[$INDEX_DRIVE_BEING_EDITED]} == [sh]d[a-z]* ]]; then
 
-						fp_target_partition="/dev/${aDRIVE_SOURCE_DEVICE[$INDEX_DRIVE_BEING_EDITED]}p$i"
+						fp_target_partition="/dev/${aDRIVE_SOURCE_DEVICE[$INDEX_DRIVE_BEING_EDITED]}$i"
 
 					fi
 
 					if [[ -b $fp_target_partition ]]; then
 
+						umount $fp_target_partition
 						G_DIETPI-NOTIFY 2 "Writing zero's to partition $fp_target_partition"
-						G_RUN_CMD dd if=/dev/zero of=$fp_target_partition bs=4K count=1337 #Partition wipe (if it has one), must be done 1st, else blkid still reports UUID's etc
+						G_RUN_CMD dd if=/dev/zero of=$fp_target_partition bs=4K count=10 #Partition wipe (if it has one), must be done 1st, else blkid still reports UUID's etc
 
 					fi
 
@@ -734,16 +767,27 @@ aDRIVE_ISPARTITIONTABLE ${aDRIVE_ISPARTITIONTABLE[$i]}
 				sleep 1 # due to systemD automount, wait for it.
 				umount ${aDRIVE_MOUNT_SOURCE[$INDEX_DRIVE_BEING_EDITED]}
 
-				# - Target index to create partition to (eg: /dev/sdX1)
-				if [[ ${aDRIVE_MOUNT_SOURCE[$INDEX_DRIVE_BEING_EDITED]} != *[0-9] ]]; then
+				# - Generate new aDRIVE_MOUNT_SOURCE location to use
+				#	mmcblkXp1/nvmeXn1p1
+				aDRIVE_MOUNT_SOURCE[$INDEX_DRIVE_BEING_EDITED]="/dev/${aDRIVE_SOURCE_DEVICE[$INDEX_DRIVE_BEING_EDITED]}p1"
+				#	h/sdX1
+				if [[ ${aDRIVE_SOURCE_DEVICE[$INDEX_DRIVE_BEING_EDITED]} == [sh]d[a-z]* ]]; then
 
-					aDRIVE_MOUNT_SOURCE[$INDEX_DRIVE_BEING_EDITED]+='1'
+					aDRIVE_MOUNT_SOURCE[$INDEX_DRIVE_BEING_EDITED]="/dev/${aDRIVE_SOURCE_DEVICE[$INDEX_DRIVE_BEING_EDITED]}1"
+
+				#	NanoPC-T4 + NVMe special: https://github.com/Fourdee/DietPi/issues/2102#issue-366001513
+				elif (( $G_HW_MODEL == 68 )) && [[ ${aDRIVE_SOURCE_DEVICE[$INDEX_DRIVE_BEING_EDITED]} == nvme* ]]; then
+
+					aDRIVE_MOUNT_SOURCE[$INDEX_DRIVE_BEING_EDITED]="/dev/${aDRIVE_SOURCE_DEVICE[$INDEX_DRIVE_BEING_EDITED]}p6"
 
 				fi
 
-				info_format_type_output='Partition table format'
+			elif (( $FORMAT_MODE == 1 )); then
 
-			else
+				info_format_type_output='Single partition format'
+
+				# - Unmount partition
+				umount ${aDRIVE_MOUNT_SOURCE[$INDEX_DRIVE_BEING_EDITED]}
 
 				# - Clear partition from device
 				G_DIETPI-NOTIFY 2 "Writing zero's to partition ${aDRIVE_MOUNT_SOURCE[$INDEX_DRIVE_BEING_EDITED]}"
@@ -1091,7 +1135,7 @@ aDRIVE_ISPARTITIONTABLE ${aDRIVE_ISPARTITIONTABLE[$i]}
 				done
 
 				G_WHIP_DEFAULT_ITEM=241
-				G_WHIP_MENU "Please select a idle duration of time, before each drive is powered down:\n - This will be applied to all drives on the system\n - Not all drives support the feature of 'hdparm' and visa versa. End results may vary\n - You can check status with 'hdparm -C /dev/sd*'"
+				G_WHIP_MENU "Please select a idle duration of time, before each drive is powered down:\n - This will be applied to all drives on the system\n - Not all drives support the feature of 'hdparm' and visa versa. End results may vary.\n - You can check status with 'hdparm -C /dev/sd*'"
 				if (( $? == 0 )); then
 
 					> /etc/hdparm.conf
@@ -1175,7 +1219,7 @@ aDRIVE_ISPARTITIONTABLE ${aDRIVE_ISPARTITIONTABLE[$i]}
 			else
 
 				whiptail_desc+='\nStatus:       Drive has no known filesystem and must be formatted'
-				G_WHIP_MENU_ARRAY+=('Format' ': Wipe all data and format drive with ext4')
+				G_WHIP_MENU_ARRAY+=('Format' ': Create a filesystem for this drive/partition')
 
 			fi
 
@@ -1242,10 +1286,9 @@ aDRIVE_ISPARTITIONTABLE ${aDRIVE_ISPARTITIONTABLE[$i]}
 
 							# - Swapfile
 							#	NB: / rootfs will always be detected in this check, however, no rootFS options for umount and format...
-							local swapfile_location="$(grep -m1 '^[[:blank:]]*AUTO_SETUP_SWAPFILE_LOCATION=' /DietPi/dietpi.txt | sed 's/^[^=]*=//')"
 							local swapfile_size=$(grep -m1 '^[[:blank:]]*AUTO_SETUP_SWAPFILE_SIZE=' /DietPi/dietpi.txt | sed 's/^[^=]*=//')
-							if [[ $swapfile_location == ${aDRIVE_MOUNT_TARGET[$INDEX_DRIVE_BEING_EDITED]}* && ${aDRIVE_MOUNT_TARGET[$INDEX_DRIVE_BEING_EDITED]} != '/' ]] ||
-								[[ $swapfile_location == '/var/swap' && ${aDRIVE_MOUNT_TARGET[$INDEX_DRIVE_BEING_EDITED]} == '/' ]]; then
+							if (( $swapfile_size > 0 )) &&
+								( [[ $FP_SWAPFILE_CURRENT == ${aDRIVE_MOUNT_TARGET[$INDEX_DRIVE_BEING_EDITED]}* && ${aDRIVE_MOUNT_TARGET[$INDEX_DRIVE_BEING_EDITED]} != '/' ]] || [[ $FP_SWAPFILE_CURRENT == '/var/swap' && ${aDRIVE_MOUNT_TARGET[$INDEX_DRIVE_BEING_EDITED]} == '/' ]] ); then
 
 								partition_contains_swapfile=1
 								G_WHIP_MENU_ARRAY+=('Swapfile' ": [X] | ${swapfile_size}MB used on this drive, select to change size")
@@ -1336,7 +1379,7 @@ aDRIVE_ISPARTITIONTABLE ${aDRIVE_ISPARTITIONTABLE[$i]}
 				# - Disable format for /boot /rootfs
 				if [[ ${aDRIVE_MOUNT_TARGET[$INDEX_DRIVE_BEING_EDITED]} != '/' && ${aDRIVE_MOUNT_TARGET[$INDEX_DRIVE_BEING_EDITED]} != '/boot' ]]; then
 
-					G_WHIP_MENU_ARRAY+=('Format' ': Wipe all data and format drive with ext4')
+					G_WHIP_MENU_ARRAY+=('Format' ': Select to see formatting options')
 
 				fi
 
@@ -1344,6 +1387,7 @@ aDRIVE_ISPARTITIONTABLE ${aDRIVE_ISPARTITIONTABLE[$i]}
 
 		fi
 
+		G_WHIP_BUTTON_CANCEL_TEXT='Back'
 		G_WHIP_DEFAULT_ITEM="$MENU_LASTITEM"
 		G_WHIP_MENU "$whiptail_desc"
 		if (( ! $? )); then
@@ -1549,7 +1593,7 @@ aDRIVE_ISPARTITIONTABLE ${aDRIVE_ISPARTITIONTABLE[$i]}
 
 			elif [[ $G_WHIP_RETURNED_VALUE == 'Benchmark' ]]; then
 
-				FSBENCH_FP="${aDRIVE_MOUNT_TARGET[$INDEX_DRIVE_BEING_EDITED]}" /DietPi/dietpi/func/dietpi-benchmark 0
+				FP_BENCHFILE="${aDRIVE_MOUNT_TARGET[$INDEX_DRIVE_BEING_EDITED]}" /DietPi/dietpi/func/dietpi-benchmark 1
 
 			elif [[ $G_WHIP_RETURNED_VALUE == 'Check & Repair' ]]; then
 
@@ -1623,7 +1667,7 @@ aDRIVE_ISPARTITIONTABLE ${aDRIVE_ISPARTITIONTABLE[$i]}
 
 					G_WHIP_MSG "The following drive will now be checked for errors:\n${aDRIVE_MOUNT_SOURCE[$INDEX_DRIVE_BEING_EDITED]}\n\nNo repair will be completed during this process. An option to repair the drive, will be provided after the check."
 					$fsck_dry ${aDRIVE_MOUNT_SOURCE[$INDEX_DRIVE_BEING_EDITED]} &> .dietpi-drive_manager_check.log
-					G_WHIP_VIEWLOG .dietpi-drive_manager_check.log
+					log=1 G_WHIP_VIEWFILE .dietpi-drive_manager_check.log
 					rm .dietpi-drive_manager_check.log &> /dev/null
 
 				fi
@@ -1636,7 +1680,7 @@ NB:
 				if (( ! $? )); then
 
 					$fsck_fix ${aDRIVE_MOUNT_SOURCE[$INDEX_DRIVE_BEING_EDITED]} &> .dietpi-drive_manager_repair.log
-					G_WHIP_VIEWLOG .dietpi-drive_manager_repair.log
+					log=1 G_WHIP_VIEWFILE .dietpi-drive_manager_repair.log
 					rm .dietpi-drive_manager_repair.log &> /dev/null
 
 				fi
@@ -1680,6 +1724,13 @@ NB:
 
 		fi
 
+		local format_mode_text='Drive'
+		if (( $FORMAT_MODE == 1 )); then
+
+			format_mode_text='Partition'
+
+		fi
+
 		local format_type_text='EXT4'
 		if (( $FORMAT_FILESYSTEM_TYPE == 1 )); then
 
@@ -1709,16 +1760,29 @@ NB:
 
 		G_WHIP_MENU_ARRAY=()
 
+		# - No partition table, force drive wipe
 		if (( ! ${aDRIVE_ISPARTITIONTABLE[$INDEX_DRIVE_BEING_EDITED]} )); then
+
+			FORMAT_MODE=0
+
+		# - Has partition table, offer modes
+		else
+
+			G_WHIP_MENU_ARRAY+=('Format Mode' ": $format_mode_text")
+
+		fi
+
+		if (( $FORMAT_MODE == 0 )); then
 
 			G_WHIP_MENU_ARRAY+=('Partition Type' ": $partition_table_text")
 
 		fi
 
 		G_WHIP_MENU_ARRAY+=('Filesystem Type' ": $format_type_text")
-		G_WHIP_MENU_ARRAY+=('Format' ': Wipe all data and format drive with current options')
+		G_WHIP_MENU_ARRAY+=('Format' ': Start the format process with selected options')
 
 		G_WHIP_DEFAULT_ITEM="$MENU_LASTITEM"
+		G_WHIP_BUTTON_CANCEL_TEXT='Back'
 		G_WHIP_MENU 'Please select formatting options:'
 		if (( ! $? )); then
 
@@ -1735,6 +1799,27 @@ NB:
 
 					FORMAT_GPT=0
 					partition_table_text='MBR'
+
+				fi
+
+			elif [[ $G_WHIP_RETURNED_VALUE == 'Format Mode' ]]; then
+
+				G_WHIP_MENU_ARRAY=(
+
+					'Partition' ": ${aDRIVE_MOUNT_SOURCE[$INDEX_DRIVE_BEING_EDITED]} | UUID=${aDRIVE_UUID[$INDEX_DRIVE_BEING_EDITED]}"
+					'Drive' ": /dev/${aDRIVE_SOURCE_DEVICE[$INDEX_DRIVE_BEING_EDITED]}"
+
+				)
+
+				G_WHIP_MENU "Please select a formatting mode:\n\n - Formatting the drive will DELETE all data on the DRIVE.\n - Formatting the partition, will DELETE all data on the current PARTITION only.\n\nNB: If you are planning to dedicate the drive to this system, it is recommended to format the whole drive where possible, this will ensure full drive capacity is available for use."
+				if (( ! $? )); then
+
+					FORMAT_MODE=0
+					if [[ ${G_WHIP_RETURNED_VALUE,,} == 'partition' ]]; then
+
+						FORMAT_MODE=1
+
+					fi
 
 				fi
 
@@ -2040,8 +2125,8 @@ $(<$fp_tmp)"
 
 		G_WHIP_MENU_ARRAY=(
 
-			'Samba' 'Setup a connection for a Samba/CIFS/Windows compatible file share'
-			'NFS' 'Setup a connection for a NFS compatible file share'
+			'Samba' ': Setup a connection for a Samba/CIFS/Windows compatible file share'
+			'NFS' ': Setup a connection for a NFS compatible file share'
 
 		)
 

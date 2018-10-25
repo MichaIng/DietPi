@@ -8,7 +8,7 @@ about: Create a report to help us improve
 
 
 #### Required Information:
-- DietPi version	| `paste -sd '.' /DietPi/dietpi/.version`
+- DietPi version	| `cat /DietPi/dietpi/.version`
 - Distro version	| `echo $G_DISTRO_NAME` or `cat /etc/debian_version`
 - Kernel version	| `uname -a`
 - SBC device		| `echo $G_HW_MODEL_DESCRIPTION` or (EG: RPi3)

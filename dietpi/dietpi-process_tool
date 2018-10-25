@@ -14,15 +14,32 @@
 	#
 	# Usage:
 	# dietpi-process_tool 0/no input	= Menu
-	# dietpi-process_tool 1				= Apply
+	# dietpi-process_tool 1			= Apply
 	#////////////////////////////////////
 
 	#Import DietPi-Globals ---------------------------------------------------------------
 	. /DietPi/dietpi/func/dietpi-globals
 	G_CHECK_ROOT_USER
-	export G_PROGRAM_NAME='DietPi-Process_tool'
+	G_PROGRAM_NAME='DietPi-Process_tool'
 	G_INIT
 	#Import DietPi-Globals ---------------------------------------------------------------
+
+	G_EXIT_CUSTOM(){
+
+		#Delete[] Global arrays
+		unset aNICE
+		unset aAFFINITY
+		unset aSCHEDULE_POLICY
+		unset aSCHEDULE_PRIORITY
+		unset aPID
+		unset aNAME
+		unset aPROCESS_NAME
+		unset aAVAILABLE
+		unset aSCHEDULE_AVAILABLE_POLICY
+		unset aSCHEDULE_AVAILABLE_PRIORITY_MIN
+		unset aSCHEDULE_AVAILABLE_PRIORITY_MAX
+
+	}
 
 	#Grab Input
 	INPUT=0
@@ -56,12 +73,8 @@
 		local notify_type=0
 
 		# - Control verbosity of output
-		local print_info=0
-		if (( $HIERARCHY <= 1 )); then
-
-			print_info=1
-
-		fi
+		local print_info=1
+		(( $HIERARCHY > 1 )) && print_info=0
 
 		for ((i=0; i<$MAX_PROGRAMS; i++))
 		do
@@ -77,12 +90,10 @@
 
 					# - nice
 					notify_type=0
-					renice -n ${aNICE[$i]} -g ${aPID[$i]} &> /dev/null
-					if (( $? )); then
+					if ! renice -n ${aNICE[$i]} -g ${aPID[$i]} &> /dev/null; then
 
 						#	Retry without group apply (eg: PID only)
-						renice -n ${aNICE[$i]} -p ${aPID[$i]} &> /dev/null
-						if (( $? )); then
+						if ! renice -n ${aNICE[$i]} -p ${aPID[$i]} &> /dev/null; then
 
 							notify_type=1
 							EXIT_CODE=1
@@ -99,12 +110,10 @@
 
 					# - Affinity
 					notify_type=0
-					taskset -apc ${aAFFINITY[$i]} ${aPID[$i]} &> /dev/null
-					if (( $? )); then
+					if ! taskset -apc ${aAFFINITY[$i]} ${aPID[$i]} &> /dev/null; then
 
 						#	Retry without group apply (eg: PID only)
-						taskset -pc ${aAFFINITY[$i]} ${aPID[$i]} &> /dev/null
-						if (( $? )); then
+						if ! taskset -pc ${aAFFINITY[$i]} ${aPID[$i]} &> /dev/null; then
 
 							notify_type=1
 							EXIT_CODE=2
@@ -161,12 +170,10 @@
 
 					# - Apply
 					notify_type=0
-					chrt $chrt_mode -ap ${aSCHEDULE_PRIORITY[$i]} ${aPID[$i]} &> /dev/null
-					if (( $? )); then
+					if ! chrt $chrt_mode -ap ${aSCHEDULE_PRIORITY[$i]} ${aPID[$i]} &> /dev/null; then
 
 						#	Retry without group apply (eg: PID only)
-						chrt $chrt_mode -p ${aSCHEDULE_PRIORITY[$i]} ${aPID[$i]} &> /dev/null
-						if (( $? )); then
+						if ! chrt $chrt_mode -p ${aSCHEDULE_PRIORITY[$i]} ${aPID[$i]} &> /dev/null; then
 
 							notify_type=1
 							EXIT_CODE=3
@@ -181,7 +188,7 @@
 
 					fi
 
-				done <<< "$(pgrep -f ${aPROCESS_NAME[$i]})"
+				done <<< "$(pgrep -f "${aPROCESS_NAME[$i]}")"
 
 			fi
 
@@ -282,7 +289,7 @@
 		aNAME[$index]='Samba Server (Daemon)';aPROCESS_NAME[$index]='smbd';((index++))
 		aNAME[$index]='Samba Server (NetBios)';aPROCESS_NAME[$index]='nmbd';((index++))
 		aNAME[$index]='Shairport Sync';aPROCESS_NAME[$index]='shairport-sync';((index++))
-		aNAME[$index]='SickRage';aPROCESS_NAME[$index]='SickBeard.py';((index++))
+		aNAME[$index]='SickRage';aPROCESS_NAME[$index]='SiCKRAGE.py';((index++))
 		aNAME[$index]='Sonarr';aPROCESS_NAME[$index]='NzbDrone.exe';((index++))
 		aNAME[$index]='Spotify Connect Web';aPROCESS_NAME[$index]='spotify-connect-web';((index++))
 		aNAME[$index]='Supervisor';aPROCESS_NAME[$index]='supervisor';((index++))
@@ -325,17 +332,17 @@
 		fi
 		MAX_PROGRAMS=${#aNAME[@]}
 
+		# - Enable affinity for all cores and all programs by default
+		local init_affinity_value=0
+		if (( $G_HW_CPU_CORES > 1 )); then
+
+			init_affinity_value="0-$(( $G_HW_CPU_CORES - 1 ))"
+
+		fi
+
 		# - Find out which programs are running (impies installed) | exclude kernel threads ([])
 		#	NB: -L to list all threads in ps output
 		ps ax --no-headers -o pid -o cmd | sed '/\]$/d' > $FP_PS_LIST
-
-		# - Enable affinity for all cores and all programs by default
-		local init_affinity_value=0
-		if (( $(nproc --all) > 1 )); then
-
-			init_affinity_value="0-$(( $(nproc --all) - 1 ))"
-
-		fi
 
 		# - Init other arrays
 		for ((i=0; i<$MAX_PROGRAMS; i++))
@@ -373,13 +380,14 @@
 		do
 
 			# - available schedulers
-			aSCHEDULE_AVAILABLE_POLICY[$index]=$(awk '{print $1}' <<< "$line")
+			aSCHEDULE_AVAILABLE_POLICY[$index]="${line%%[[:blank:]]*}"
 
 			# - available priorities
+			line="${line##*: }"
 			# -- min
-			aSCHEDULE_AVAILABLE_PRIORITY_MIN[$index]=$(sed 's/.*: //' <<< "$line" | sed 's/\// /' | awk '{print $1}')
+			aSCHEDULE_AVAILABLE_PRIORITY_MIN[$index]=${line%/*}
 			# -- max
-			aSCHEDULE_AVAILABLE_PRIORITY_MAX[$index]=$(sed 's/.*: //' <<< "$line" | sed 's/\// /' | awk '{print $2}')
+			aSCHEDULE_AVAILABLE_PRIORITY_MAX[$index]=${line#*/}
 
 			((index++))
 
@@ -405,9 +413,9 @@
 	#/////////////////////////////////////////////////////////////////////////////////////
 	#Define Location
 	FP_SETTINGS='/DietPi/dietpi/.dietpi-process_tool'
-	FP_TEMP='/tmp/.dietpi-process_tool_temp'
+	FP_TEMP='.dietpi-process_tool_temp'
 	# - ps-aux > ram
-	FP_PS_LIST='/tmp/.dietpi-process_tool_ps_list'
+	FP_PS_LIST='.dietpi-process_tool_ps_list'
 
 	Read_Settings_File(){
 
@@ -482,8 +490,7 @@ _EOF_
 	Menu_Exit(){
 
 		G_WHIP_SIZE_X_MAX=50
-		G_WHIP_YESNO "Exit $G_PROGRAM_NAME?"
-		if (( ! $? )); then
+		if G_WHIP_YESNO "Exit $G_PROGRAM_NAME?"; then
 
 			#exit
 			TARGETMENUID=-1
@@ -494,6 +501,7 @@ _EOF_
 			TARGETMENUID=0
 
 		fi
+
 	}
 
 	#TARGETMENUID=0
@@ -516,8 +524,7 @@ _EOF_
 
 		G_WHIP_DEFAULT_ITEM="$LAST_SELECTED_NAME"
 		G_WHIP_BUTTON_CANCEL_TEXT='Exit'
-		G_WHIP_MENU 'Please select a program:'
-		if (( ! $? )); then
+		if G_WHIP_MENU 'Please select a program:'; then
 
 			LAST_SELECTED_NAME=$G_WHIP_RETURNED_VALUE
 
@@ -550,15 +557,14 @@ _EOF_
 					#menu, choose nice/affinity etc
 					G_WHIP_MENU_ARRAY=(
 
-						'Nice' ": ${aNICE[$index_current]}"
-						'Affinity' ": ${aAFFINITY[$index_current]}"
-						'Schedule Policy' ": ${aSCHEDULE_POLICY[$index_current]}"
-						'Schedule Priority' ": ${aSCHEDULE_PRIORITY[$index_current]}"
+						'Nice' ": [${aNICE[$index_current]}]"
+						'Affinity' ": [${aAFFINITY[$index_current]}]"
+						'Schedule Policy' ": [${aSCHEDULE_POLICY[$index_current]}]"
+						'Schedule Priority' ": [${aSCHEDULE_PRIORITY[$index_current]}]"
 
 					)
 
-					G_WHIP_MENU "Please select an option for ${aNAME[$index_current]}:"
-					if (( ! $? )); then
+					if G_WHIP_MENU "Please select an option for ${aNAME[$index_current]}:"; then
 
 						case "$G_WHIP_RETURNED_VALUE" in
 
@@ -612,7 +618,7 @@ _EOF_
 								if (( ! $? )); then
 
 									#Convert back to int
-									aNICE[$index_current]=$(echo "$G_WHIP_RETURNED_VALUE" | sed 's/[A-Za-z :]*//g')
+									aNICE[$index_current]=${G_WHIP_RETURNED_VALUE##*: }
 
 									#Apply
 									Apply_Process_Tool
@@ -627,7 +633,7 @@ _EOF_
 								#NB: currently enables all
 								G_WHIP_CHECKLIST_ARRAY=()
 
-								for ((i=0; i<$(nproc --all); i++))
+								for ((i=0; i<$G_HW_CPU_CORES; i++))
 								do
 
 									G_WHIP_CHECKLIST_ARRAY+=($i 'CPU                           ' 'on')
@@ -660,7 +666,7 @@ _EOF_
 									done
 
 									#Update affinity array with new value, if at least 1 item was selected.
-									if [[ -n $new_affinity ]] ; then
+									if [[ $new_affinity ]] ; then
 
 										aAFFINITY[$index_current]="$new_affinity"
 
@@ -708,8 +714,7 @@ _EOF_
 								done
 
 								G_WHIP_DEFAULT_ITEM="${aSCHEDULE_POLICY[$index_current]}"
-								G_WHIP_MENU "Please select a Schedule Policy for :\n${aNAME[$index_current]}"
-								if (( ! $? )); then
+								if G_WHIP_MENU "Please select a Schedule Policy for :\n${aNAME[$index_current]}"; then
 
 									aSCHEDULE_POLICY[$index_current]=$G_WHIP_RETURNED_VALUE
 
@@ -862,24 +867,8 @@ _EOF_
 		G_DIETPI-NOTIFY -1 ${EXIT_CODE:=0} "$G_PROGRAM_NAME |"
 
 	fi
+
 	#-----------------------------------------------------------------------------------
-	#Del tmp files
-	rm $FP_TEMP &> /dev/null
-	rm $FP_PS_LIST &> /dev/null
-	#-----------------------------------------------------------------------------------
-	#Delete[] Global arrays
-	unset aNICE
-	unset aAFFINITY
-	unset aSCHEDULE_POLICY
-	unset aSCHEDULE_PRIORITY
-	unset aPID
-	unset aNAME
-	unset aPROCESS_NAME
-	unset aAVAILABLE
-	unset aSCHEDULE_AVAILABLE_POLICY
-	unset aSCHEDULE_AVAILABLE_PRIORITY_MIN
-	unset aSCHEDULE_AVAILABLE_PRIORITY_MAX
-	#-----------------------------------------------------------------------------------
-	exit
+	exit ${EXIT_CODE:=0}
 	#-----------------------------------------------------------------------------------
 }

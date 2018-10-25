@@ -1,0 +1,385 @@
+#!/bin/bash
+{
+	#////////////////////////////////////
+	# DietPi Function:
+	# - WiFi DB
+	#
+	#////////////////////////////////////
+	# Created by Daniel Knight / daniel.knight@dietpi.com / dietpi.com
+	#
+	#////////////////////////////////////
+	#
+	# Usage:
+	FP_SCRIPT='/DietPi/dietpi/func/dietpi-wifidb'
+	AVAIABLE_COMMANDS="
+Available commands
+$FP_SCRIPT 						Menu
+$FP_SCRIPT 		1				Applys WiFi creds from DB store to system
+"
+	#////////////////////////////////////
+
+	#Grab Input
+	INPUT="${@,,}"
+	ERROR_CODE=1
+
+	#Import DietPi-Globals ---------------------------------------------------------------
+	. /DietPi/dietpi/func/dietpi-globals
+	G_CHECK_ROOT_USER
+	G_CHECK_ROOTFS_RW
+	G_PROGRAM_NAME='DietPi-wifidb'
+	G_INIT
+	#Import DietPi-Globals ---------------------------------------------------------------
+
+	#/////////////////////////////////////////////////////////////////////////////////////
+	# Globals
+	#/////////////////////////////////////////////////////////////////////////////////////
+	MAX_SSID_SLOTS=5
+	WIFI_SSID_INDEX=0
+
+	Init_Wifi_Db_Slot(){
+
+		local index=$1
+
+		aWIFI_SSID[$index]=''
+		aWIFI_KEY[$index]=''
+		aWIFI_KEYMGR[$index]='WPA-PSK'
+		aWIFI_PROTO[$index]=''
+		aWIFI_PAIRWISE[$index]=''
+		aWIFI_AUTH_ALG[$index]=''
+		aWIFI_EAP[$index]=''
+		aWIFI_IDENTITY[$index]=''
+		aWIFI_PASSWORD[$index]=''
+		aWIFI_PHASE1[$index]=''
+		aWIFI_PHASE2[$index]=''
+		aWIFI_CERT[$index]=''
+
+	}
+
+	Init_Wifi_Db_Array(){
+
+		#Init
+		for (( i=0; i<$MAX_SSID_SLOTS; i++ ))
+		do
+
+			Init_Wifi_Db_Slot $i
+
+		done
+
+		#Load existing array
+		#	1st run, move file
+		if [[ -f /boot/dietpi-wifi.txt ]]; then
+
+			mv /boot/dietpi-wifi.txt /var/lib/dietpi/dietpi-wifi.db
+
+		fi
+
+		#	load
+		if [[ -f /var/lib/dietpi/dietpi-wifi.db ]]; then
+
+			. /var/lib/dietpi/dietpi-wifi.db
+			rm /var/lib/dietpi/dietpi-wifi.db
+
+		fi
+
+	}
+
+	Wifi_Db_Apply(){
+
+		mkdir -p /etc/wpa_supplicant
+		cat << _EOF_ > /etc/wpa_supplicant/wpa_supplicant.conf
+country=$(grep -m1 '^CONFIG_WIFI_COUNTRY_CODE=' /DietPi/dietpi.txt | sed 's/^[^=]*=//')
+ctrl_interface=DIR=/var/run/wpa_supplicant GROUP=netdev
+update_config=1
+_EOF_
+
+		for (( i=0; i<$MAX_SSID_SLOTS; i++ ))
+		do
+
+			# - No entry, init + reset
+			if [[ ! ${aWIFI_SSID[$i]} ]]; then
+
+				Init_Wifi_Db_Slot $i
+
+			# - Apply to wpa_supplicant.conf
+			else
+
+				cat << _EOF_ >> /etc/wpa_supplicant/wpa_supplicant.conf
+network={
+ssid="${aWIFI_SSID[$i]}"
+scan_ssid=1
+_EOF_
+
+				# - Add KEY and type
+				if [[ ${aWIFI_KEYMGR[$i]^^} == 'NONE' ]]; then
+
+					cat << _EOF_ >> /etc/wpa_supplicant/wpa_supplicant.conf
+key_mgmt=${aWIFI_KEYMGR[$i]}
+_EOF_
+				elif [[ ${aWIFI_KEYMGR[$i]^^} == 'WPA-PSK' ]]; then
+
+					cat << _EOF_ >> /etc/wpa_supplicant/wpa_supplicant.conf
+key_mgmt=${aWIFI_KEYMGR[$i]}
+psk="${aWIFI_KEY[$i]}"
+_EOF_
+
+				elif [[ ${aWIFI_KEYMGR[$i]^^} == 'WEP' ]]; then
+
+					aWIFI_KEYMGR[$i]='NONE'
+					cat << _EOF_ >> /etc/wpa_supplicant/wpa_supplicant.conf
+key_mgmt=${aWIFI_KEYMGR[$i]}
+wep_key0=${aWIFI_KEY[$i]}
+wep_tx_keyidx=0
+_EOF_
+				elif [[ ${aWIFI_KEYMGR[$i]^^} == 'WPA-EAP' ]]; then
+
+					cat << _EOF_ >> /etc/wpa_supplicant/wpa_supplicant.conf
+proto=${aWIFI_PROTO[$i]}
+key_mgmt=${aWIFI_KEYMGR[$i]}
+pairwise=${aWIFI_PAIRWISE[$i]}
+auth_alg=${aWIFI_AUTH_ALG[$i]}
+eap=${aWIFI_EAP[$i]}
+identity="${aWIFI_IDENTITY[$i]}"
+password="${aWIFI_PASSWORD[$i]}"
+_EOF_
+					if [[ ${aWIFI_CERT[$i]} ]]; then
+
+						mkdir -p /etc/cert
+						cp ${aWIFI_CERT[$i]} /etc/cert/$i.cert
+						cat << _EOF_ >> /etc/wpa_supplicant/wpa_supplicant.conf
+ca_cert="/etc/cert/$i.cert"
+_EOF_
+					fi
+
+					if [[ ${aWIFI_PHASE1[$i]} ]]; then
+
+						cat << _EOF_ >> /etc/wpa_supplicant/wpa_supplicant.conf
+phase1="${aWIFI_PHASE1[$i]}"
+_EOF_
+					fi
+
+					if [[ ${aWIFI_PHASE2[$i]} ]]; then
+
+						cat << _EOF_ >> /etc/wpa_supplicant/wpa_supplicant.conf
+phase2="${aWIFI_PHASE2[$i]}"
+_EOF_
+					fi
+
+				fi
+
+				# - End of current item
+				cat << _EOF_ >> /etc/wpa_supplicant/wpa_supplicant.conf
+}
+
+_EOF_
+
+			fi
+
+			# - Update db
+			cat << _EOF_ >> /var/lib/dietpi/dietpi-wifi.db
+#---------------------------------------------------------------
+# - Entry $i
+#	WiFi SSID (Case Sensitive)
+aWIFI_SSID[$i]="${aWIFI_SSID[$i]//\\/\\\\\\}"
+#	Key options: If no key (open), leave this blank
+aWIFI_KEY[$i]="${aWIFI_KEY[$i]//\\/\\\\\\}"
+#	Available options: NONE (no key/open) | WPA-PSK | WEP | WPA-EAP (then use settings below)
+aWIFI_KEYMGR[$i]="${aWIFI_KEYMGR[$i]}"
+# - WPA-EAP Options
+aWIFI_PROTO[$i]="${aWIFI_PROTO[$i]}"
+aWIFI_PAIRWISE[$i]="${aWIFI_PAIRWISE[$i]}"
+aWIFI_AUTH_ALG[$i]="${aWIFI_AUTH_ALG[$i]}"
+aWIFI_EAP[$i]="${aWIFI_EAP[$i]}"
+aWIFI_IDENTITY[$i]="${aWIFI_IDENTITY[$i]}"
+aWIFI_PASSWORD[$i]="${aWIFI_PASSWORD[$i]}"
+aWIFI_PHASE1[$i]="${aWIFI_PHASE1[$i]}"
+aWIFI_PHASE2[$i]="${aWIFI_PHASE2[$i]}"
+#	Location of the certificate file (eg: /boot/mycert.cer)
+aWIFI_CERT[$i]="${aWIFI_CERT[$i]}"
+_EOF_
+
+			G_DIETPI-NOTIFY 2 "WiFi SSID DB slot applied ($i): ${aWIFI_SSID[$i]}"
+
+		done
+
+		chown root:root /var/lib/dietpi/dietpi-wifi.db
+		chmod 700 /var/lib/dietpi/dietpi-wifi.db
+
+	}
+
+	#/////////////////////////////////////////////////////////////////////////////////////
+	# Menus
+	#/////////////////////////////////////////////////////////////////////////////////////
+
+	Scan_Wifi(){
+
+		local wifi_dev_index=$(sed -n 2p /DietPi/dietpi/.network)
+
+		#Ensure adapater is up
+		ifup wlan$wifi_dev_index
+
+		#Get all ssids
+		G_DIETPI-NOTIFY 0 'Scanning SSIDs, please wait....'
+
+		G_WHIP_MENU_ARRAY=()
+		while read line
+		do
+
+			[[ $line ]] && G_WHIP_MENU_ARRAY+=("$line" '')
+
+		done <<< "$(iwlist wlan$wifi_dev_index scan | grep 'ESSID:' | sed 's/[ \t]*ESSID:"\(.*\)"/\1/')"
+
+		if G_WHIP_MENU 'Please select a WiFi SSID'; then
+
+			aWIFI_SSID[$WIFI_SSID_INDEX]="$G_WHIP_RETURNED_VALUE"
+			Change_WifiKey
+
+		fi
+
+	}
+
+	Change_WifiSsid(){
+
+		G_WHIP_DEFAULT_ITEM="${aWIFI_SSID[$WIFI_SSID_INDEX]}"
+		if G_WHIP_INPUTBOX 'Please enter the SSID name to connect to.'; then
+
+			aWIFI_SSID[$WIFI_SSID_INDEX]="$G_WHIP_RETURNED_VALUE"
+
+		fi
+
+	}
+
+	Change_WifiKey(){
+
+		G_WHIP_MENU_ARRAY=(
+
+			'WPA-PSK' ': Default (recommended)'
+			'WEP' ': Legacy (insecure)'
+			'NONE' ': Open host that does not require a key (eg: free WiFi!)'
+
+		)
+
+		G_WHIP_DEFAULT_ITEM="${aWIFI_KEYMGR[$WIFI_SSID_INDEX]}"
+		G_WHIP_MENU 'Please select a WiFi encryption mode.\n\nNB: If unsure, its most likely WPA-PSK.'
+		if (( $? == 0 )); then
+
+			aWIFI_KEYMGR[$WIFI_SSID_INDEX]="$G_WHIP_RETURNED_VALUE"
+
+			if [[ ${aWIFI_KEYMGR[$WIFI_SSID_INDEX]} != 'NONE' ]]; then
+
+				G_WHIP_DEFAULT_ITEM="${aWIFI_KEY[$WIFI_SSID_INDEX]}"
+				G_WHIP_INPUTBOX 'Please enter the Access Key.\n\nNB: the following characters require a backslash \ before their entry\n\`$"\n\nEG: This\\is\`my\$key\"itrocks'
+				if (( $? == 0 )); then
+
+					aWIFI_KEY[$WIFI_SSID_INDEX]="$G_WHIP_RETURNED_VALUE"
+
+				fi
+
+			fi
+
+		fi
+
+	}
+
+	Menu_Main(){
+
+		while :
+		do
+
+			G_WHIP_MENU_ARRAY=('' '●─ WiFi Slots')
+			for (( i=0; i<$MAX_SSID_SLOTS; i++ ))
+			do
+
+				if [[ ${aWIFI_SSID[$i]} ]]; then
+
+					G_WHIP_MENU_ARRAY+=($i "SSID = ${aWIFI_SSID[$i]} | Key = ${aWIFI_KEY[$i]}")
+
+				else
+
+					G_WHIP_MENU_ARRAY+=($i 'Unused: Select to configure')
+
+				fi
+
+			done
+
+			G_WHIP_DEFAULT_ITEM=$WIFI_SSID_INDEX
+			G_WHIP_BUTTON_CANCEL_TEXT='Back'
+			G_WHIP_MENU 'Please select a WiFi slot to configure:'
+			if (( $? == 0 )) && [[ $G_WHIP_RETURNED_VALUE ]]; then
+
+				WIFI_SSID_INDEX=$G_WHIP_RETURNED_VALUE
+
+				G_WHIP_MENU_ARRAY=()
+				if [[ ${aWIFI_SSID[$WIFI_SSID_INDEX]} ]]; then
+
+					G_WHIP_MENU_ARRAY+=('Remove' ": Delete '${aWIFI_SSID[$WIFI_SSID_INDEX]}' from the database")
+
+				else
+
+					G_WHIP_MENU_ARRAY+=('Scan' ': Scan and configure an SSID')
+					G_WHIP_MENU_ARRAY+=('Manual' ': Manually enter all WiFi creds')
+
+				fi
+
+				local message_text="Please select an option for slot $WIFI_SSID_INDEX."
+				if [[ ${aWIFI_SSID[$WIFI_SSID_INDEX]} ]]; then
+
+					message_text+="\n\nCurrent details:\n - SSID = ${aWIFI_SSID[$WIFI_SSID_INDEX]}\n - Key = ${aWIFI_KEY[$WIFI_SSID_INDEX]}"
+
+				fi
+
+				if G_WHIP_MENU "$message_text"; then
+
+					if [[ $G_WHIP_RETURNED_VALUE == 'Remove' ]]; then
+
+						aWIFI_SSID[$WIFI_SSID_INDEX]=''
+						aWIFI_KEY[$WIFI_SSID_INDEX]=''
+
+					elif [[ $G_WHIP_RETURNED_VALUE == 'Scan' ]]; then
+
+						Scan_Wifi
+
+					elif [[ $G_WHIP_RETURNED_VALUE == 'Manual' ]]; then
+
+						Change_WifiSsid
+						Change_WifiKey
+
+					fi
+
+				fi
+
+			else
+
+				Wifi_Db_Apply
+				break
+
+			fi
+
+		done
+
+	}
+
+	#/////////////////////////////////////////////////////////////////////////////////////
+	# Main Loop
+	#/////////////////////////////////////////////////////////////////////////////////////
+	#-----------------------------------------------------------------------------------
+	Init_Wifi_Db_Array
+	#-----------------------------------------------------------------------------------
+	if [[ ! $INPUT ]]; then
+
+		Menu_Main
+
+	elif [[ $INPUT == 1 ]]; then
+
+		Wifi_Db_Apply
+
+	else
+
+		G_DIETPI-NOFITY 1 "Unknown input argument: $INPUT\n$AVAIABLE_COMMANDS"
+		ERROR_CODE=0
+
+	fi
+
+	#-----------------------------------------------------------------------------------
+	exit $ERROR_CODE
+	#-----------------------------------------------------------------------------------
+}

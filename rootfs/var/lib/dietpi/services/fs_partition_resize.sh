@@ -8,18 +8,43 @@ sync
 # - SCSI/SATA:	/dev/sd[a-z][0-9]
 # - IDE:	/dev/hd[a-z][0-9]
 # - eMMC:	/dev/mmcblk[0-9]p[0-9]
-# - NVMe:	/dev/nvme[0-9]n[0-9]
+# - NVMe:	/dev/nvme[0-9]n[0-9]p[0-9]
 TARGET_DEV=$(findmnt / -o source -n)
-TARGET_PARTITION=${TARGET_DEV##*[a-z]} # Last [0-9]
-TARGET_DRIVE=${TARGET_DEV%[0-9]} # EG: /dev/mmcblk[0-9]p
-[[ $TARGET_DEV =~ mmcblk ]] || [[ $TARGET_DEV =~ nvme ]] && TARGET_DRIVE=${TARGET_DRIVE%[a-z]} # EG: /dev/mmcblk[0-9]
+if [[ $TARGET_DEV =~ /mmcblk || $TARGET_DEV =~ /nvme ]]; then
+
+	TARGET_PARTITION=${TARGET_DEV##*p} # Last [0-9] after "p"
+	TARGET_DRIVE=${TARGET_DRIVE%p[0-9]} # EG: /dev/mmcblk[0-9]
+
+elif [[ $TARGET_DEV =~ /[sh]d[a-z] ]]; then
+
+	TARGET_PARTITION=${TARGET_DEV##*[a-z]} # Last [0-9]
+	TARGET_DRIVE=${TARGET_DEV%[0-9]} # EG: /dev/sda
+
+else
+
+	echo "[FAILED] Unsupported drive naming scheme: $TARGET_DEV"
+	exit 1
+
+fi
 
 # Only redo partitions, if drive actually contains a partition table.
-if [[ $TARGET_PARTITION ]]; then
+if [[ $TARGET_PARTITION == [0-9] ]]; then
 
-	#Rock/pro64 GPT resize | modified version of ayufan-rock64 resize script. I take no credit for this.
-	if [[ -f /etc/.dietpi_hw_model_identifier ]] &&
-		(( $(</etc/.dietpi_hw_model_identifier) == 42 || $(</etc/.dietpi_hw_model_identifier) == 43 )); then
+	# - Check for valid device ID
+	if ! HW_MODEL=$(</etc/.dietpi_hw_model_identifier); then
+
+		echo '[FAILED] Could not determine device ID from: /etc/.dietpi_hw_model_identifier'
+		exit 1
+
+	elif [[ $HW_MODEL =~ [^0-9] ]]; then
+
+		echo "[FAILED] Invalid hardware ID: $HW_MODEL"
+		exit 1
+
+	fi
+
+	# - Rock/pro64 GPT resize | modified version of ayufan-rock64 resize script. I take no credit for this.
+	if (( $HW_MODEL == 42 || $HW_MODEL == 43 )); then
 
 		# move GPT alternate header to end of disk
 		sgdisk -e $TARGET_DRIVE
@@ -27,7 +52,7 @@ if [[ $TARGET_PARTITION ]]; then
 		# resize partition 7 to as much as possible
 		echo ",+,,," | sfdisk $TARGET_DRIVE -N7 --force
 
-	#Everything else
+	# - Everything else
 	else
 
 		cat << _EOF_ | fdisk $TARGET_DRIVE
@@ -37,7 +62,7 @@ $TARGET_PARTITION
 n
 p
 $TARGET_PARTITION
-$(parted $TARGET_DRIVE -ms unit s p | grep ':ext4::;' | sed 's/:/ /g' | sed 's/s//g' | awk '{ print $2 }')
+$(parted $TARGET_DRIVE -ms unit s p | grep ':ext4::;' | awk -F: '{print $2}' | sed 's/s//g')
 
 p
 w
@@ -46,9 +71,13 @@ _EOF_
 
 	fi
 
-fi
+	partprobe $TARGET_DRIVE
 
-partprobe $TARGET_DRIVE
+else
+
+	echo "[ INFO ] No valid root partition found: $TARGET_PARTITION. Skipping partition resize..."
+
+fi
 
 resize2fs $TARGET_DEV
 

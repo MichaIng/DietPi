@@ -9,16 +9,16 @@
 	#////////////////////////////////////
 	#
 	# Info:
-	# - Allows export of shared DietPi global variables/funcs into current bash session, and other scripts
-	# - CRITICAL, when using for-loops, always ensure you localize the var before hand (eg: local i=0\nfor (( i=.....)) ), else havoc: https://github.com/Fourdee/DietPi/issues/1454
-	# - activates on interactive bash: /etc/bashrc.d/dietpi-login.sh
-	# - activates on all other DietPi script during their init
+	# - Provides/Exports shared/global DietPi variables/functions for current bash session and other scripts
+	# - CRITICAL, use local index variables in for/while loops, or unset them afterwards, else havoc: https://github.com/Fourdee/DietPi/issues/1454
+	# - Sourced/Loaded in interactive bash sessions: /etc/bashrc.d/dietpi-login.sh
+	# - Sourced/Loaded as start of all DietPi script, except those listed below
 	#
-	# Excluded scripts, which do NOT load these globals
+	# Excluded scripts, which do NOT load these globals:
 	# - dietpi-ramlog
 	# - dietpi-ramdisk
 	# - dietpi-obtain_hw_model
-	# - dietpi.txt (and all other .txt .ini or config files)
+	# - dietpi.txt and all other .txt, .ini or config files
 	#
 	#////////////////////////////////////
 
@@ -33,35 +33,22 @@
 	#-----------------------------------------------------------------------------------
 
 	#-----------------------------------------------------------------------------------
-	# Core var's, functions, environment. Used at start of all scripts.
+	# Core varianles, functions and environment, used at start of all scripts
 	#-----------------------------------------------------------------------------------
-	#To be exported by the originating script, after loading globals
-	# - Used in:
-	#	G_ERROR_
-	#	G_WHIP_
+	#To be exported by the originating script, after loading globals and before calling G_INIT()
+	# - Used in G_ERROR_ and G_WHIP_
 	G_PROGRAM_NAME=''
 
-	#User input? (eg: interactive shell available via STDIN check)
-	# - Affects:
-	#	G_ERROR_HANDLER / G_WHIP whiptail display
-	#	NB: You can export G_USER_INPUTS=0 to force non-interactive (eg: .bashrc) Must run 'unset G_USER_INPUTS' after to return to auto detection.
+	#Flag, if we are in interactive shell, by checking STDIN availability
+	#	OK | systemd	= non-STDIN
+	#	OK | Cron	= non-STDIN
+	#	NB | ~/.bashrc	= STDIN
+	# - Affects whether G_ERROR_ and G_WHIP_ prompts are displayed or not
+	#	NB: You can export G_USER_INPUTS=0 to force non-interactive/automated scipt calls. Run 'unset G_USER_INPUTS' afterwards to return to auto detection.
 	if [[ -z $G_USER_INPUTS ]]; then
 
 		G_USER_INPUTS=0
-
-		if [[ -t 0 ]]; then
-
-			#checked:
-			#	- OK | systemD = non-STDIN
-			#	- OK | Cron = non-STDIN
-
-			#shopt login_shell # == [[ $- == *i* ]] #.bashrc dietpi/login exec is not interactive...
-			#[ -t 0 ]# .bashrc dietpi/login exec is interactive...
-			#set -i in .bashrc is not available...
-
-			G_USER_INPUTS=1
-
-		fi
+		[[ -t 0 ]] && G_USER_INPUTS=1
 
 	fi
 
@@ -73,21 +60,38 @@
 
 	fi
 
-	#DietPi versions
-	G_DIETPI_VERSION_CORE=0
-	G_DIETPI_VERSION_SUB=0
-	if [[ -r '/DietPi/dietpi/.version' ]]; then
+	#DietPi Versions/Branch
+	G_GITBRANCH=${G_GITBRANCH:-master}
+	G_GITOWNER=${G_GITOWNER:-Fourdee}
+	G_DIETPI_VERSION_CORE=${G_DIETPI_VERSION_CORE:-6}
+	G_DIETPI_VERSION_SUB=${G_DIETPI_VERSION_SUB:-16}
+	G_DIETPI_VERSION_RC=${G_DIETPI_VERSION_RC:-0}
+	if [[ -f '/DietPi/dietpi/.version' && $(sed -n 1p /DietPi/dietpi/.version) == '#!/bin/bash' ]]; then
 
-		G_DIETPI_VERSION_CORE=$(sed -n 1p /DietPi/dietpi/.version)
-		G_DIETPI_VERSION_SUB=$(sed -n 2p /DietPi/dietpi/.version)
+		. /DietPi/dietpi/.version
 
 	fi
 
-	#Default DietPi userdata location. This must NEVER change.
-	# - In case of moved userdata location, a symlink stays here to keep this path valid.
+	G_VERSIONDB_SAVE(){
+
+		cat << _EOF_ > /DietPi/dietpi/.version
+#!/bin/bash
+G_DIETPI_VERSION_CORE=$G_DIETPI_VERSION_CORE
+G_DIETPI_VERSION_SUB=$G_DIETPI_VERSION_SUB
+G_DIETPI_VERSION_RC=$G_DIETPI_VERSION_RC
+G_GITBRANCH=$G_GITBRANCH
+G_GITOWNER=$G_GITOWNER
+_EOF_
+
+		chmod +x /DietPi/dietpi/.version
+
+	}
+
+	#Default DietPi userdata location, which must NEVER change!
+	# - NB: In case of moved userdata location, a symlink stays here to keep this path valid.
 	G_FP_DIETPI_USERDATA='/mnt/dietpi_userdata'
 
-	#DietPi scripts disable
+	#Allows to disable dietpi-services handling, e.g. if already handled within parent script.
 	G_DIETPI_SERVICES_DISABLE=${G_DIETPI_SERVICES_DISABLE:-0}
 
 	#Device details
@@ -127,37 +131,87 @@
 	fi
 
 	#INIT functions for originating script
-	#	eg: stuff we cant init in main globals/funcs due to .bashrc load into current session.
+	# - Stuff we can't init in main globals/funcs due to /etc/bashrc.d/ load into current session.
+	G_INIT_ALLOW_CONCURRENT=${G_INIT_ALLOW_CONCURRENT:-0}
 	G_INIT(){
 
 		# Check for concurrent execution
-		while [[ -d /tmp/$G_PROGRAM_NAME ]]
-		do
+		if (( ! $G_INIT_ALLOW_CONCURRENT )); then
 
-			G_WHIP_BUTTON_OK_TEXT='Retry'
-			G_WHIP_YESNO "WARNING: Concurrent execution of $G_PROGRAM_NAME detected.\n
+			while [[ -d /tmp/$G_PROGRAM_NAME ]]
+			do
+
+				G_WHIP_BUTTON_OK_TEXT='Retry'
+				if ! G_WHIP_YESNO "WARNING: Concurrent execution of $G_PROGRAM_NAME detected.\n
 Please check if one of the following applies:
- - The script already runs on another terminal/SSH session.
+ - This script already runs on another terminal/SSH session.
  - Currently a cron or systemd background job executes the script.
  - You started this script from within another DietPi program, causing a loop.\n
-Please assure that the concurrent execution has finished, before trying again, otherwise cancel this instance.\n
+Please assure that the concurrent execution has finished, before retrying, otherwise cancel this instance.\n
 The following info might help:
-$(ps f -eo pid,user,tty,cmd | grep -i [d]ietpi)"
-			if (( $? )); then
+$(ps f -eo pid,user,tty,cmd | grep -i [d]ietpi)"; then
 
-				G_DIETPI-NOTIFY 1 "Canceled $G_PROGRAM_NAME due to concurrent execution."
-				exit 1
+					G_DIETPI-NOTIFY 1 "Canceled $G_PROGRAM_NAME due to concurrent execution"
+					exit 1
 
-			fi
+				fi
 
-		done
+			done
+
+		fi
+
+		# HIERARCHY system for G_DIETPI-NOTIFY 3
+		disable_error=1 G_CHECK_VALIDINT $HIERARCHY && export HIERARCHY=$((HIERARCHY+1)) || export HIERARCHY=0
+
+		# DEBUG: Print init header
+		[[ $G_DEBUG == 1 ]] && G_DIETPI-NOTIFY 3 "$G_PROGRAM_NAME" 'Running G_INIT()'
 
 		# Set locale for scripts to prevent incorrect scraping due to translated command outputs
 		export LANG=en_GB.UTF-8
 		export LC_ALL=en_GB.UTF-8
 
-		# HIERARCHY system for G_DIETPI-NOTIFY 3
-		[[ $HIERARCHY ]] && export HIERARCHY=$((HIERARCHY+1)) || export HIERARCHY=0
+		# Declare and trap G_EXIT() as exit function, that runs on EXIT signal, which includes INT (error) and TERM (kill)
+		G_EXIT(){
+
+			# - Purge working directory, if existent
+			if [[ -d /tmp/$G_PROGRAM_NAME ]]; then
+
+				# - Navigate to /tmp, if we are inside working dir, which is about to be removed
+				if [[ $PWD == /tmp/$G_PROGRAM_NAME* ]]; then
+
+					if cd /tmp; then
+
+						[[ $G_DEBUG == 1 ]] && G_DIETPI-NOTIFY 2 'Navigated to /tmp'
+
+					else
+
+						[[ $G_DEBUG == 1 ]] && G_DIETPI-NOTIFY 2 "Failed to navigate out of /tmp/$G_PROGRAM_NAME"
+
+					fi
+
+				fi
+
+				if (( ! $G_INIT_ALLOW_CONCURRENT )); then
+
+					if rm -R /tmp/$G_PROGRAM_NAME; then
+
+						[[ $G_DEBUG == 1 ]] && G_DIETPI-NOTIFY 2 "Removed scripts working directory: /tmp/$G_PROGRAM_NAME"
+
+					else
+
+						[[ $G_DEBUG == 1 ]] && G_DIETPI-NOTIFY 2 "Failed to removed scripts working directory: /tmp/$G_PROGRAM_NAME"
+
+					fi
+
+				fi
+
+			fi
+
+			# - Execute custom exit function, if existent
+			declare -F G_EXIT_CUSTOM &> /dev/null && G_EXIT_CUSTOM
+
+		}
+		trap 'G_EXIT' EXIT
 
 		# Ensure we are in script working dir or users home dir, if available: https://github.com/Fourdee/DietPi/issues/905#issuecomment-298223705
 		if [[ $G_PROGRAM_NAME ]] && mkdir -p /tmp/$G_PROGRAM_NAME && cd /tmp/$G_PROGRAM_NAME; then
@@ -173,21 +227,6 @@ $(ps f -eo pid,user,tty,cmd | grep -i [d]ietpi)"
 			[[ $G_DEBUG == 1 ]] && G_DIETPI-NOTIFY 2 "Failed to enter scripts working dir or users home dir. Will use current: $PWD"
 
 		fi
-
-		# Declare and trap G_EXIT() as exit function, that runs on EXIT signal, which includes INT (error) and TERM (kill)
-		G_EXIT(){
-
-			# - Purge working directory, if existent
-			[[ -d /tmp/$G_PROGRAM_NAME ]] && [[ $PWD == /tmp/$G_PROGRAM_NAME* ]] && cd /tmp && rm -R /tmp/$G_PROGRAM_NAME && [[ $G_DEBUG == 1 ]] && G_DIETPI-NOTIFY 2 "Removed scripts working directory: /tmp/$G_PROGRAM_NAME"
-
-			# - Execute custom exit function, if existent
-			declare -F G_EXIT_CUSTOM &> /dev/null && G_EXIT_CUSTOM
-
-		}
-		trap 'G_EXIT' EXIT
-
-		# Auto print init header for all scripts
-		#G_DIETPI-NOTIFY 3 "$G_PROGRAM_NAME" 'Init'
 
 	}
 
@@ -210,7 +249,7 @@ $(ps f -eo pid,user,tty,cmd | grep -i [d]ietpi)"
 
 		local ainput_string=("$@")
 		local output_string=''
-		local bracket_l='\e[90m[\e[0m'
+		local bracket_l='\e[0m\e[90m[\e[0m'
 		local bracket_r='\e[0m\e[90m]\e[0m'
 
 		#Funcs
@@ -342,7 +381,6 @@ $(ps f -eo pid,user,tty,cmd | grep -i [d]ietpi)"
 					set +o noclobber
 
 				fi
-				#[[ ! -e /tmp/dietpi-process.pid ]] && > /tmp/dietpi-process.pid && ( Print_Process_Animation & echo $! > /tmp/dietpi-process.pid )
 
 				unset Print_Process_Animation
 
@@ -381,19 +419,19 @@ $(ps f -eo pid,user,tty,cmd | grep -i [d]ietpi)"
 		elif (( $1 == 3 )); then
 
 			Clean_Process_Animation
-			if [[ $HIERARCHY ]] && (( $HIERARCHY > 0 )); then
+			if disable_error=1 G_CHECK_VALIDINT $HIERARCHY && (( $HIERARCHY > 0 )); then
 
 				# >=10 should never occur, however, if it is, lets make it line up regardless
 				if (( $HIERARCHY < 10 )); then
 
-					local status_subfunction="\e[33m SUB$HIERARCHY "
+					local status_subfunction="$HIERARCHY "
 
 				else
 
-					local status_subfunction="\e[33m SUB$HIERARCHY"
+					local status_subfunction="$HIERARCHY"
 
 				fi
-				output_string+="$bracket_l$status_subfunction$bracket_r $2 > "
+				output_string+="$bracket_l\e[33m SUB$status_subfunction$bracket_r $2 > "
 				ainput_string+=('\n')
 				Print_Output_String 2
 
@@ -409,7 +447,7 @@ $(ps f -eo pid,user,tty,cmd | grep -i [d]ietpi)"
 
 		fi
 		#-----------------------------------------------------------------------------------
-		# Unset also internal functions, otherwise they are accessible from terminal:
+		# Unset internal functions, otherwise they are accessible from terminal:
 		unset Clean_Process_Animation
 		unset Status_Ok
 		unset Status_Failed
@@ -418,18 +456,18 @@ $(ps f -eo pid,user,tty,cmd | grep -i [d]ietpi)"
 
 	}
 
-	G_CHECK_ROOT_USER_VERIFIED=${G_CHECK_ROOT_USER_VERIFIED:=0} #only check once for each session
+	G_CHECK_ROOT_USER_VERIFIED=${G_CHECK_ROOT_USER_VERIFIED:-0} #only check once for each session
 	#	$1 = mode
 	#	- 0 = Exit all linked scripts (kill all)
 	#	- 1 = Kill current script only, excluding the shell.
 	G_CHECK_ROOT_USER(){
 
-		local input=0
-		disable_error=1 G_CHECK_VALIDINT $1 && input=$1
-
 		if [[ $G_CHECK_ROOT_USER_VERIFIED != 1 ]]; then
 
 			if (( $UID )); then
+
+				local input=0
+				disable_error=1 G_CHECK_VALIDINT $1 && input=$1
 
 				G_DIETPI-NOTIFY 1 'Root privileges required. Please run the command with "G_SUDO", or, "sudo -i".'
 
@@ -454,7 +492,7 @@ $(ps f -eo pid,user,tty,cmd | grep -i [d]ietpi)"
 
 	}
 
-	G_CHECK_ROOTFS_RW_VERIFIED=${G_CHECK_ROOTFS_RW_VERIFIED:=0} #only check once for each session
+	G_CHECK_ROOTFS_RW_VERIFIED=${G_CHECK_ROOTFS_RW_VERIFIED:-0} #only check once for each session
 	G_CHECK_ROOTFS_RW(){
 
 		if [[ $G_CHECK_ROOTFS_RW_VERIFIED != 1 ]]; then
@@ -479,13 +517,15 @@ $(ps f -eo pid,user,tty,cmd | grep -i [d]ietpi)"
 	#-----------------------------------------------------------------------------------
 	# Alias defines
 	#-----------------------------------------------------------------------------------
-	#DietPi Scripts, moved from /etc/bash.bashrc
+	#DietPi scripts, moved from /etc/bash.bashrc
 	# - Sudo command, that ensures profile.d is reloaded (ensures ENV with our globals)
 	G_SUDO(){
 
 		sudo -i $@
 
 	}
+
+	# - DietPi programs
 	alias sudo='sudo ' # https://github.com/Fourdee/DietPi/issues/424
 	alias dietpi-process_tool='/DietPi/dietpi/dietpi-process_tool'
 	alias dietpi-letsencrypt='/DietPi/dietpi/dietpi-letsencrypt'
@@ -507,6 +547,7 @@ $(ps f -eo pid,user,tty,cmd | grep -i [d]ietpi)"
 	alias dietpi-explorer='/DietPi/dietpi/dietpi-explorer'
 
 	alias cpu='/DietPi/dietpi/dietpi-cpuinfo'
+	alias 1337='echo Indeed, you are =\)'
 
 	# - Optional DietPi software aliases/functions
 	[[ -f /opt/retropie/supplementary/emulationstation/emulationstation ]] && alias emulationstation='/opt/retropie/supplementary/emulationstation/emulationstation'
@@ -526,8 +567,12 @@ $(ps f -eo pid,user,tty,cmd | grep -i [d]ietpi)"
 	#G_WHIP_DEFAULT_ITEM | to be set by scripts to set the default selected item.
 	G_WHIP_DEFAULT_ITEM=''
 
-	#G_WHIP_SIZE_X_MAX | Optional, limits X to value, if below available screen X limits
+	#Scaling options:
+	#	Optional, limits X to value, if below available screen X limits
 	G_WHIP_SIZE_X_MAX=0
+	#	Whip size overrides | optional, will override auto detection, must be exported and unset after use.
+	#G_WHIP_SIZE_X_OVERRIDE
+	#G_WHIP_SIZE_Y_OVERRIDE
 
 	#G_WHIP_BUTTON_X_TEXT | Change as needed, else, defaults to Ok/Cancel
 	G_WHIP_BUTTON_OK_TEXT=''
@@ -569,8 +614,8 @@ $(ps f -eo pid,user,tty,cmd | grep -i [d]ietpi)"
 	G_WHIP_INIT(){
 
 		#Set default button text, if not defined
-		G_WHIP_BUTTON_OK_TEXT=${G_WHIP_BUTTON_OK_TEXT:=Ok}
-		G_WHIP_BUTTON_CANCEL_TEXT=${G_WHIP_BUTTON_CANCEL_TEXT:=Cancel}
+		G_WHIP_BUTTON_OK_TEXT=${G_WHIP_BUTTON_OK_TEXT:-Ok}
+		G_WHIP_BUTTON_CANCEL_TEXT=${G_WHIP_BUTTON_CANCEL_TEXT:-Cancel}
 
 		#Update backtitle
 		WHIP_BACKTITLE="$G_PROGRAM_NAME | $G_HW_MODEL_DESCRIPTION"
@@ -592,7 +637,11 @@ $(ps f -eo pid,user,tty,cmd | grep -i [d]ietpi)"
 		local lines_required_whip_z=0
 
 		#Set current screen dimensions ( - outside margin)
-		WHIP_SIZE_X=$(( $(tput cols) - 6 ))
+		# - G_WHIP_SIZE_X_OVERRIDE allows to estimate and export terminal sizes outside of script/function
+		#	This is required in case both, STOUT and STERR are redirected ( e.g. 2>&1 | tee file.log )
+		#	Until ncurses-bin v6.0 (current on Stretch repo), tput can not estimate terminal dimensions then.
+		#	With ncurses-bin v6.1 (current on Buster repo) this issue is resolved.
+		WHIP_SIZE_X=$(( ${G_WHIP_SIZE_X_OVERRIDE:-$(tput cols)} - 6 ))
 		if (( $G_WHIP_SIZE_X_MAX > 0 && $G_WHIP_SIZE_X_MAX <= $WHIP_SIZE_X )); then
 
 			WHIP_SIZE_X=$G_WHIP_SIZE_X_MAX
@@ -603,12 +652,8 @@ $(ps f -eo pid,user,tty,cmd | grep -i [d]ietpi)"
 
 		fi
 
-		WHIP_SIZE_Y=$(( $(tput lines) - 4 ))
-		if (( $WHIP_SIZE_Y > 40 )); then
-
-			WHIP_SIZE_Y=40
-
-		fi
+		WHIP_SIZE_Y=$(( ${G_WHIP_SIZE_Y_OVERRIDE:-$(tput lines)} - 4 ))
+		(( $WHIP_SIZE_Y > 40 )) && WHIP_SIZE_Y=40
 
 		WHIP_SIZE_Z=2
 
@@ -621,31 +666,17 @@ $(ps f -eo pid,user,tty,cmd | grep -i [d]ietpi)"
 		# - This can then be used to increase/decrease size of WHIP_SIZE_Z automatically.
 		else
 
-			if [[ $WHIP_MESSAGE ]]; then
+			# - Calculate lines required, including addition lines, if the text is longer than X
+			[[ $WHIP_MESSAGE ]] && while read -r line
+			do
 
-				local character_count_per_line=$(echo -e "$WHIP_MESSAGE" | awk '{ print length }')
+				(( lines_required_whip_y += 1 + ${#line} / ( $WHIP_SIZE_X - $whip_x_internal_margin) ))
 
-				# - Calculate lines required
-				while read -r line
-				do
-
-					((lines_required_whip_y++))
-
-					# - Calculate for addition required lines, if the text is longer than X
-					while (( $line > ( $WHIP_SIZE_X - $whip_x_internal_margin ) ));	do
-
-						line=$(( $line - ( $WHIP_SIZE_X - $whip_x_internal_margin ) ))
-						((lines_required_whip_y++))
-
-					done
-
-				done <<< "$character_count_per_line"
-
-			fi
+			done <<< "$(echo -e "$WHIP_MESSAGE")"
 
 			#	Process final whiptail size
 			#	Add internal whiptail margins to end line total
-			lines_required_whip_y=$(( $lines_required_whip_y + $whip_y_internal_margin ))
+			(( lines_required_whip_y += $whip_y_internal_margin ))
 
 		fi
 
@@ -653,13 +684,8 @@ $(ps f -eo pid,user,tty,cmd | grep -i [d]ietpi)"
 		# - G_WHIP_MENU_ARRAY
 		if (( $input_mode == 1 )); then
 
-			lines_required_whip_z=$(( ${#G_WHIP_MENU_ARRAY[@]} / 2 ))
-			# - Prevent single entries from being divided below 1, eg: 1 / 2 = 0 in bash
-			if (( $lines_required_whip_z < 0 )); then
-
-				lines_required_whip_z=1
-
-			fi
+			# - ( ${#array} + 1 ) to round up on uneven array entries
+			lines_required_whip_z=$(( ( ${#G_WHIP_MENU_ARRAY[@]} + 1 ) / 2 ))
 
 			# - Requires additional line on Y
 			((lines_required_whip_y++))
@@ -667,33 +693,21 @@ $(ps f -eo pid,user,tty,cmd | grep -i [d]ietpi)"
 			#Auto length for ─
 			#	Get max length of all the lines in odd number array 1st | '' 'this one'
 			local i=0
-			local index=0
 			local character_count_max=0
-			for (( i=0; i<${#G_WHIP_MENU_ARRAY[@]}; i++ ))
+			for (( i=1; i<${#G_WHIP_MENU_ARRAY[@]}; i+=2 ))
 			do
 
-				if (( $index == 1 )); then
+				if (( ${#G_WHIP_MENU_ARRAY[$i]} > $character_count_max )); then
 
-					if (( ${#G_WHIP_MENU_ARRAY[$i]} > $character_count_max )); then
+					character_count_max=${#G_WHIP_MENU_ARRAY[$i]}
 
-						character_count_max=${#G_WHIP_MENU_ARRAY[$i]}
+					# - cap to X | need to calculate all length of array 1st...
+					# if (( $character_count_max >= $WHIP_SIZE_X )); then
 
-						# - cap to X | need to calculate all length of array 1st...
-						# if (( $character_count_max >= $WHIP_SIZE_X )); then
+						# character_count_max=$WHIP_SIZE_X
+						# break
 
-							# character_count_max=$WHIP_SIZE_X
-							# break
-
-						# fi
-
-					fi
-
-				fi
-				((index++))
-
-				if (( $index >= 2 )); then
-
-					index=0
+					# fi
 
 				fi
 
@@ -722,44 +736,27 @@ $(ps f -eo pid,user,tty,cmd | grep -i [d]ietpi)"
 		# - G_WHIP_CHECKLIST_ARRAY
 		elif (( $input_mode == 2 )); then
 
-			lines_required_whip_z=$(( ${#G_WHIP_CHECKLIST_ARRAY[@]} / 3 ))
-			# - Prevent single entries from being divided below 1, eg: 1 / 3 = 0 in bash
-			if (( $lines_required_whip_z < 0 )); then
-
-				lines_required_whip_z=1
-
-			fi
+			# - ( ${#array} + 2 ) to round up single+double array entries
+			lines_required_whip_z=$(( ( ${#G_WHIP_CHECKLIST_ARRAY[@]} + 2 ) / 3 ))
 
 			#Auto length for ─
 			#	Get max length of all the lines in array index 1 1st | '' 'this one' ''
 			local i=0
-			local index=0
 			local character_count_max=0
-			for (( i=0; i<${#G_WHIP_CHECKLIST_ARRAY[@]}; i++ ))
+			for (( i=1; i<${#G_WHIP_CHECKLIST_ARRAY[@]}; i+=3 ))
 			do
 
-				if (( $index == 1 )); then
+				if (( ${#G_WHIP_CHECKLIST_ARRAY[$i]} > $character_count_max )); then
 
-					if (( ${#G_WHIP_CHECKLIST_ARRAY[$i]} > $character_count_max )); then
+					character_count_max=${#G_WHIP_CHECKLIST_ARRAY[$i]}
 
-						character_count_max=${#G_WHIP_CHECKLIST_ARRAY[$i]}
+					# - cap to X | need to calculate all length of array 1st...
+					# if (( $character_count_max >= $WHIP_SIZE_X )); then
 
-						# - cap to X | need to calculate all length of array 1st...
-						# if (( $character_count_max >= $WHIP_SIZE_X )); then
+						# character_count_max=$WHIP_SIZE_X
+						# break
 
-							# character_count_max=$WHIP_SIZE_X
-							# break
-
-						# fi
-
-					fi
-
-				fi
-				((index++))
-
-				if (( $index >= 3 )); then
-
-					index=0
+					# fi
 
 				fi
 
@@ -802,9 +799,9 @@ $(ps f -eo pid,user,tty,cmd | grep -i [d]ietpi)"
 
 				local lines_max_whip_z=$lines_required_whip_z
 
-				while (( ( $lines_max_whip_z + $lines_required_whip_y ) > $WHIP_SIZE_Y )); do
+				if (( ( $lines_max_whip_z + $lines_required_whip_y ) > $WHIP_SIZE_Y )); then
 
-					((lines_max_whip_z--))
+					lines_max_whip_z=$(( $WHIP_SIZE_Y - $lines_required_whip_y ))
 
 					#	lines_max_whip_z < 1 indicates WHIP_SIZE_Y is too small to fit all message text and any lines_required_whip_z.
 					#	So we must force lines_max_whip_z=1 resulting in some missing message text
@@ -812,11 +809,10 @@ $(ps f -eo pid,user,tty,cmd | grep -i [d]ietpi)"
 
 						lines_max_whip_z=2
 						G_DIETPI-NOTIFY 2 "Lines required for Whiptail box and its contents (y=$lines_required_whip_y, z=$lines_required_whip_z), exceeds screen dimensions (y=$WHIP_SIZE_Y)."
-						break
 
 					fi
 
-				done
+				fi
 
 				WHIP_SIZE_Y=$(( $lines_required_whip_y + $lines_max_whip_z ))
 				WHIP_SIZE_Z=$lines_max_whip_z
@@ -879,34 +875,34 @@ $(ps f -eo pid,user,tty,cmd | grep -i [d]ietpi)"
 	G_WHIP_YESNO(){
 
 		local result=1
-		WHIP_MESSAGE=("$@")
 
 		if (( $G_USER_INPUTS )); then
 
+			WHIP_MESSAGE=("$@")
 			G_WHIP_INIT 0
 			whiptail --title "$G_PROGRAM_NAME" --yesno "$WHIP_MESSAGE" --backtitle "$WHIP_BACKTITLE" --yes-button "$G_WHIP_BUTTON_OK_TEXT" --no-button "$G_WHIP_BUTTON_CANCEL_TEXT" --defaultno $WHIP_SIZE_Y $WHIP_SIZE_X
 			result=$?
 
-		fi
+			G_WHIP_DESTROY
 
-		G_WHIP_DESTROY
+		fi
 
 		return $result
 
 	}
 
 	#G_WHIP_INPUTBOX "message"
-	# - Prompt user to input text and export it to G_WHIP_RETURNED_VALUE
+	# - Prompt user to input text and save it to G_WHIP_RETURNED_VALUE
 	# - returns result 0=Ok, everything else considered a user canceled result
 	G_WHIP_INPUTBOX(){
 
 		local result=1
-		WHIP_MESSAGE=("$@")
 
 		if (( $G_USER_INPUTS )); then
 
+			WHIP_MESSAGE=("$@")
 			G_WHIP_INIT 0
-			export G_WHIP_RETURNED_VALUE=$(whiptail --title "$G_PROGRAM_NAME" --inputbox "$WHIP_MESSAGE" --ok-button "$G_WHIP_BUTTON_OK_TEXT" --cancel-button "$G_WHIP_BUTTON_CANCEL_TEXT" --default-item "$G_WHIP_DEFAULT_ITEM" --backtitle "$WHIP_BACKTITLE" $WHIP_SIZE_Y $WHIP_SIZE_X "$G_WHIP_DEFAULT_ITEM" 3>&1 1>&2 2>&3; echo $? > /tmp/.G_WHIP_INPUTBOX_RESULT)
+			G_WHIP_RETURNED_VALUE=$(whiptail --title "$G_PROGRAM_NAME" --inputbox "$WHIP_MESSAGE" --ok-button "$G_WHIP_BUTTON_OK_TEXT" --cancel-button "$G_WHIP_BUTTON_CANCEL_TEXT" --default-item "$G_WHIP_DEFAULT_ITEM" --backtitle "$WHIP_BACKTITLE" $WHIP_SIZE_Y $WHIP_SIZE_X "$G_WHIP_DEFAULT_ITEM" 3>&1 1>&2 2>&3; echo $? > /tmp/.G_WHIP_INPUTBOX_RESULT)
 			result=$(</tmp/.G_WHIP_INPUTBOX_RESULT)
 			if (( $result == 0 )) && [[ -z $G_WHIP_RETURNED_VALUE ]]; then
 
@@ -916,10 +912,9 @@ $(ps f -eo pid,user,tty,cmd | grep -i [d]ietpi)"
 			fi
 
 			rm /tmp/.G_WHIP_INPUTBOX_RESULT
+			G_WHIP_DESTROY
 
 		fi
-
-		G_WHIP_DESTROY
 
 		return $result
 
@@ -931,13 +926,13 @@ $(ps f -eo pid,user,tty,cmd | grep -i [d]ietpi)"
 
 		local return_value=1
 		result=''
-		WHIP_MESSAGE=("$@")
 
 		if (( $G_USER_INPUTS )); then
 
+			WHIP_MESSAGE=("$@")
 			G_WHIP_INIT 0
 
-			while true
+			while :
 			do
 
 				local password_0=$(whiptail --title "$G_PROGRAM_NAME" --passwordbox "$WHIP_MESSAGE" --ok-button "$G_WHIP_BUTTON_OK_TEXT" --nocancel --backtitle "$WHIP_BACKTITLE" $WHIP_SIZE_Y $WHIP_SIZE_X 3>&1 1>&2 2>&3)
@@ -956,9 +951,9 @@ $(ps f -eo pid,user,tty,cmd | grep -i [d]ietpi)"
 
 			done
 
-		fi
+			G_WHIP_DESTROY
 
-		G_WHIP_DESTROY
+		fi
 
 		return $return_value
 
@@ -970,19 +965,18 @@ $(ps f -eo pid,user,tty,cmd | grep -i [d]ietpi)"
 	G_WHIP_MENU(){
 
 		local result=1
-		WHIP_MESSAGE=("$@")
 
 		if (( $G_USER_INPUTS )); then
 
+			WHIP_MESSAGE=("$@")
 			G_WHIP_INIT 1
-			export G_WHIP_RETURNED_VALUE=$(whiptail --title "$G_PROGRAM_NAME" --menu "$WHIP_MESSAGE" --default-item "$G_WHIP_DEFAULT_ITEM" --ok-button "$G_WHIP_BUTTON_OK_TEXT" --cancel-button "$G_WHIP_BUTTON_CANCEL_TEXT" --backtitle "$WHIP_BACKTITLE" $WHIP_SIZE_Y $WHIP_SIZE_X $WHIP_SIZE_Z "${G_WHIP_MENU_ARRAY[@]}" 3>&1 1>&2 2>&3; echo $? > /tmp/.WHIP_MENU_RESULT)
-
+			G_WHIP_RETURNED_VALUE=$(whiptail --title "$G_PROGRAM_NAME" --menu "$WHIP_MESSAGE" --default-item "$G_WHIP_DEFAULT_ITEM" --ok-button "$G_WHIP_BUTTON_OK_TEXT" --cancel-button "$G_WHIP_BUTTON_CANCEL_TEXT" --backtitle "$WHIP_BACKTITLE" $WHIP_SIZE_Y $WHIP_SIZE_X $WHIP_SIZE_Z "${G_WHIP_MENU_ARRAY[@]}" 3>&1 1>&2 2>&3; echo $? > /tmp/.WHIP_MENU_RESULT)
 			result=$(</tmp/.WHIP_MENU_RESULT)
+
 			rm /tmp/.WHIP_MENU_RESULT
+			G_WHIP_DESTROY
 
 		fi
-
-		G_WHIP_DESTROY
 
 		return $result
 
@@ -994,50 +988,61 @@ $(ps f -eo pid,user,tty,cmd | grep -i [d]ietpi)"
 	G_WHIP_CHECKLIST(){
 
 		local result=1
-		WHIP_MESSAGE=("$@")
 
 		if (( $G_USER_INPUTS )); then
 
+			WHIP_MESSAGE=("$@")
 			G_WHIP_INIT 2
 			G_WHIP_RETURNED_VALUE=$(whiptail --title "$G_PROGRAM_NAME" --checklist "$WHIP_MESSAGE" --separate-output --default-item "$G_WHIP_DEFAULT_ITEM" --ok-button "$G_WHIP_BUTTON_OK_TEXT" --cancel-button "$G_WHIP_BUTTON_CANCEL_TEXT" --backtitle "$WHIP_BACKTITLE" $WHIP_SIZE_Y $WHIP_SIZE_X $WHIP_SIZE_Z "${G_WHIP_CHECKLIST_ARRAY[@]}" 3>&1 1>&2 2>&3; echo $? > /tmp/.WHIP_CHECKLIST_RESULT)
-			export G_WHIP_RETURNED_VALUE=$(echo -e "$G_WHIP_RETURNED_VALUE" | tr '\n' ' ')
-
+			G_WHIP_RETURNED_VALUE=$(echo -e "$G_WHIP_RETURNED_VALUE" | tr '\n' ' ')
 			result=$(</tmp/.WHIP_CHECKLIST_RESULT)
+
 			rm /tmp/.WHIP_CHECKLIST_RESULT
+			G_WHIP_DESTROY
 
 		fi
-
-		G_WHIP_DESTROY
 
 		return $result
 
 	}
 
-	#G_WHIP_VIEWLOG /var/log/file.log
+	#G_WHIP_VIEWFILE /var/log/file.log
 	# - Prompt user to view logfile, then display it as needed.
-	G_WHIP_VIEWLOG(){
+	G_WHIP_VIEWFILE(){
 
 		local result=1
-		local fp_log=$1
 
 		if (( $G_USER_INPUTS )); then
 
-			G_WHIP_YESNO "Would you like to view the contents of the following logfile?\n - $fp_log\n\nThis will contain further additional information, that may be required by the user."
-			result=$?
+			local log=${log:-0} #Optional yes/no prompt for viewing logs
+			local fp_file=$1
+
+			# - Log file view with prompt
+			if (( $log )); then
+
+				G_WHIP_YESNO "Would you like to view the contents of the following logfile?\n - $fp_file\n\nThis will contain further additional information, that may be required by the user."
+				result=$?
+
+			# - Simple file view
+			else
+
+				result=0
+
+			fi
+
 			if (( ! $result )); then
 
 				#???
-				#G_FILE_EXISTS $fp_log
+				#G_FILE_EXISTS $fp_file
 				#???
 
 				G_WHIP_INIT 3
-				whiptail --title "$G_PROGRAM_NAME | Log viewer" --textbox $fp_log --ok-button "$G_WHIP_BUTTON_OK_TEXT" --backtitle "$WHIP_BACKTITLE" --scrolltext $WHIP_SIZE_Y $WHIP_SIZE_X
+				whiptail --title "$G_PROGRAM_NAME | File viewer" --textbox $fp_file --ok-button "$G_WHIP_BUTTON_OK_TEXT" --backtitle "$WHIP_BACKTITLE" --scrolltext $WHIP_SIZE_Y $WHIP_SIZE_X
+				G_WHIP_DESTROY
 
 			fi
 
 		fi
-
-		G_WHIP_DESTROY
 
 		return $result
 
@@ -1107,7 +1112,7 @@ $(ps f -eo pid,user,tty,cmd | grep -i [d]ietpi)"
 
 			fi
 
-			local version_info="v$G_DIETPI_VERSION_CORE.$G_DIETPI_VERSION_SUB"
+			local version_info="v$G_DIETPI_VERSION_CORE.$G_DIETPI_VERSION_SUB.$G_DIETPI_VERSION_RC ($G_GITOWNER/$G_GITBRANCH)"
 
 			local print_hw_info="DietPi version: $version_info | HW_MODEL:$G_HW_MODEL | HW_ARCH:$G_HW_ARCH | DISTRO:$G_DISTRO"
 			local image_creator='n/a'
@@ -1181,18 +1186,18 @@ $(ps f -eo pid,user,tty,cmd | grep -i [d]ietpi)"
 
 					local aretry_menu_options=()
 					local retry_menu_options_count=0
-					aretry_menu_options+=('Retry' 'Re-run the last command that failed'); ((retry_menu_options_count++))
+					aretry_menu_options+=('Retry' ': Re-run the last command that failed'); ((retry_menu_options_count++))
 
 					if ! ps aux | grep -qi '[d]ietpi-config' && (( ! $G_ERROR_HANDLER_INFO_ONLY )); then
 
 
-						aretry_menu_options+=('DietPi-Config' 'Edit network, APT/NTP mirror settings etc'); ((retry_menu_options_count++))
+						aretry_menu_options+=('DietPi-Config' ': Edit network, APT/NTP mirror settings etc'); ((retry_menu_options_count++))
 
 					fi
 
 					if [[ $G_PROGRAM_NAME && ! $G_ERROR_HANDLER_INFO_ONLY ]]; then
 
-						aretry_menu_options+=('Send report' 'Uploads bugreport containing system info to DietPi'); ((retry_menu_options_count++))
+						aretry_menu_options+=('Send report' ': Uploads bugreport containing system info to DietPi'); ((retry_menu_options_count++))
 
 					fi
 
@@ -1408,7 +1413,7 @@ $print_logfile_info
 
 				fi
 
-			#Force exit on failure to end loop (overrides any export G_ERROR_HANDLER_ONERROR_EXIT in this session)
+			#Force exit on failure to end loop (overrides any G_ERROR_HANDLER_ONERROR_EXIT in this session)
 			else
 
 				G_ERROR_HANDLER_ONERROR_EXIT=1
@@ -1483,8 +1488,26 @@ $print_logfile_info
 
 			fi
 
-			chown 775 $fp_target
-			if (( $? != 0 )); then
+			# - Apply and check permissions support, twice (just incase the current value is already set)
+			local permissions_failed=0
+
+			chmod 600 $fp_target
+			if [[ $(stat -c "%a" $fp_target) != '600' ]]; then
+
+				permissions_failed=1
+
+			else
+
+				chmod 644 $fp_target
+				if [[ $(stat -c "%a" $fp_target) != '644' ]]; then
+
+					permissions_failed=1
+
+				fi
+
+			fi
+
+			if (( $permissions_failed )); then
 
 				G_WHIP_MSG "ERROR: Filesystem does not support permissions (eg: FAT16/32):\n\n$fp_target\n\nPlease select a different drive and/or format it with ext4, ensuring support for filesystem permissions.\n\nUnable to continue, aborting..."
 				break
@@ -1912,6 +1935,8 @@ $print_logfile_info
 	#Returns current CPU temp 'C
 	G_OBTAIN_CPU_TEMP(){
 
+		local cpu_temp_current='N/A' #We must always return a value, due to VM lacking this feature + benchmark online
+
 		# - Array to store possible locations for temp read.
 		afp_temperature=(
 
@@ -1956,6 +1981,14 @@ $print_logfile_info
 
 				fi
 
+				# - Native PC + possibily others, due to vast sensors /sys/class/thermal/thermal_zone[0-9], all of which we are unsure is CPU, check for possible invalid entries and set N/A
+				#	EG: Z83 = 0, also seen some results as a minus value
+				if ! G_CHECK_VALIDINT $cpu_temp_current || (( $cpu_temp_current <= 0 )); then
+
+					cpu_temp_current='N/A'
+
+				fi
+
 				break
 
 			fi
@@ -1982,7 +2015,7 @@ $print_logfile_info
 		done < "$fp_temp"
 
 		# - ps returns usage of each core, so we devide the total by #n cores
-		cpu_usage=$(echo "scale=1;$cpu_usage / $(nproc --all)" | bc -l )
+		cpu_usage=$(echo "scale=1;$cpu_usage / $G_HW_CPU_CORES" | bc -l )
 
 		echo $cpu_usage
 
@@ -2043,26 +2076,28 @@ $print_logfile_info
 
 		if [[ $input =~ ^-?[0-9]+$ ]]; then
 
-			return_value=0
-
 			if [[ $min && $max ]]; then
-
-				return_value=1
 
 				if [[ $min =~ ^-?[0-9]+$ && $max =~ ^-?[0-9]+$ ]] &&
 					(( $input >= $min && $input <= $max )); then
 
 					return_value=0
 
+				elif (( ! $disable_error )); then
+
+					G_WHIP_MSG "Input value \"$input\" is not in range of \"$min\" and \"$max\". No changes applied."
+
 				fi
+
+			else
+
+				return_value=0
 
 			fi
 
-		fi
+		elif (( ! $disable_error )); then
 
-		if (( ! $disable_error && $return_value )); then
-
-			G_WHIP_MSG "Invalid value $input. No changes applied."
+			G_WHIP_MSG "Invalid input value \"$input\". No changes applied."
 
 		fi
 
@@ -2145,12 +2180,6 @@ $print_logfile_info
 
 	fi
 
-	if [[ -z $G_THREAD_PID ]]; then
-
-		G_THREAD_PID=()
-
-	fi
-
 	G_THREAD_START(){
 
 		# - Launch as BG process
@@ -2159,13 +2188,10 @@ $print_logfile_info
 			((G_THREAD_COUNT++))
 			G_THREAD_COMMAND[$G_THREAD_COUNT]=$@
 
-			( G_USER_INPUTS=0 ${G_THREAD_COMMAND[$G_THREAD_COUNT]} &> /tmp/.G_THREAD_COMMAND_$G_THREAD_COUNT; echo $? > /tmp/.G_THREAD_EXITCODE_$G_THREAD_COUNT & echo $! > /tmp/.G_THREAD_PID_$G_THREAD_COUNT ) > /dev/null
-			G_THREAD_PID[$G_THREAD_COUNT]=$(cat /tmp/.G_THREAD_PID_$G_THREAD_COUNT)
-			rm /tmp/.G_THREAD_PID_$G_THREAD_COUNT
+			echo -1337 > /tmp/.G_THREAD_EXITCODE_$G_THREAD_COUNT
+			( ( G_USER_INPUTS=0 ${G_THREAD_COMMAND[$G_THREAD_COUNT]} &> /tmp/.G_THREAD_COMMAND_$G_THREAD_COUNT; echo $? > /tmp/.G_THREAD_EXITCODE_$G_THREAD_COUNT ) & ) > /dev/null
 
-			G_DIETPI-NOTIFY 2 "G_THREAD_START_$G_THREAD_COUNT (PID:${G_THREAD_PID[$G_THREAD_COUNT]}) | ${G_THREAD_COMMAND[$G_THREAD_COUNT]}"
-
-			#return ${G_THREAD_PID[$G_THREAD_COUNT]} #returns a lower value, 255 char limit?
+			G_DIETPI-NOTIFY 2 "G_THREAD_START_$G_THREAD_COUNT | ${G_THREAD_COMMAND[$G_THREAD_COUNT]}"
 
 		# - Run in blocking mode
 		else
@@ -2195,13 +2221,9 @@ $print_logfile_info
 			for (( i=0; i<${#G_THREAD_COMMAND[@]}; i++ ))
 			do
 
-				if [[ -z ${G_THREAD_PID[$i]} ]]; then
+				if [[ -f /tmp/.G_THREAD_EXITCODE_$i ]] && (( $(</tmp/.G_THREAD_EXITCODE_$i) == -1337 )); then
 
-					G_DIETPI-NOTIFY 2 "G_THREAD_WAIT_$i (PID:${G_THREAD_PID[$i]}) | No PID for thread. Command may of finished, before PID could be pulled."
-
-				elif [[ -d /proc/${G_THREAD_PID[$i]} ]]; then
-
-					G_DIETPI-NOTIFY 2 "G_THREAD_WAIT_$i (PID:${G_THREAD_PID[$i]}) | ${G_THREAD_COMMAND[$i]}"
+					G_DIETPI-NOTIFY 2 "G_THREAD_WAIT_$i | ${G_THREAD_COMMAND[$i]}"
 					thread_active=1
 
 				fi
@@ -2239,14 +2261,13 @@ $print_logfile_info
 
 		done
 
-		rm /tmp/.G_THREAD*
+		rm /tmp/.G_THREAD* &> /dev/null
 
 		sync #Failsafe: Sync changes to disk
 
 		G_DIETPI-NOTIFY 0 'G_THREAD: All threads finished'
 
 		unset G_THREAD_COMMAND
-		unset G_THREAD_PID
 		G_THREAD_COUNT=-1
 
 	}
@@ -2254,10 +2275,10 @@ $print_logfile_info
 	#-----------------------------------------------------------------------------------
 	# DEV tools (Not for public use! All mine! :D)
 	#-----------------------------------------------------------------------------------
-	# Restore backup and update DietPi to latest testing branch code
+	# Restore backup and update DietPi to latest development branch code
 	# - Restore backup
-	# - Set testing branch, set version code -1
-	# - Update DietPi
+	# - Set dev branch
+	# - Update DietPi, setting subversion code -1
 	# - Update backup
 	G_DEV_1(){
 
@@ -2265,11 +2286,19 @@ $print_logfile_info
 
 		export G_USER_INPUTS=0
 		/DietPi/dietpi/dietpi-backup -1
-		G_CONFIG_INJECT 'DEV_GITBRANCH=' 'DEV_GITBRANCH=testing' /DietPi/dietpi.txt
+		G_CONFIG_INJECT 'DEV_GITBRANCH=' 'DEV_GITBRANCH=dev' /DietPi/dietpi.txt
 		/DietPi/dietpi/dietpi-update -1
 		/DietPi/dietpi/dietpi-backup 1
 
 		unset G_USER_INPUTS
+
+	}
+
+	# Automatically opt in to DietPi-Survey and run + send benchmark + data
+	G_DEV_BENCH(){
+
+		sed -i "1s/.*/1/" /DietPi/dietpi/.dietpi-survey
+		G_USER_INPUTS=0 /DietPi/dietpi/func/dietpi-benchmark 2
 
 	}
 

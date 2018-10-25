@@ -12,7 +12,7 @@
         <br>
         <a href="https://dietpi.com">find out more</a>
         •
-        <a href="https://dietpi.com">download image</a>
+        <a href="https://dietpi.com/#download">download image</a>
         <hr>
     </p>
     <p align="center">
@@ -26,10 +26,10 @@
         <br>
         <br>
         DietPi's web hosting is powered by
-        <a href="https://www.myvirtualserver.com/en">myVirtualserver.</a>
+        <a href="https://www.myvirtualserver.com">myVirtualServer</a>.
         <br>
         <br>
-        A wide range of SBCs and VMs are supported. <a href="https://dietpi.com/download">Click here</a> for the full list.
+        A wide range of SBCs and VMs are supported. <a href="https://dietpi.com/#download">Click here</a> for the full list.
         <br>
         <br>
     </p>
@@ -37,15 +37,12 @@
 
 ## Introduction
 
-DietPi is an extremely lightweight Debian OS. With images starting at 400MB, that's 3x lighter than 'Raspbian Lite'.
-It is highly optimised for minimal CPU and RAM resource usage, ensuring your SBC always runs at its maximum potential.
-The programs use lightweight Whiptail menus. You'll spend less time staring at the command line, and more time enjoying DietPi.
+DietPi is an extremely lightweight Debian-based OS. With images starting at 400MB, that's 3x lighter than 'Raspbian Lite'. It is highly optimized for minimal CPU and RAM resource usage, ensuring your SBC always runs at its maximum potential. The programs use lightweight Whiptail menus. You'll spend less time staring at the command line, and more time enjoying DietPi.
 
-Use `dietpi-software` to quickly and easily install popular software that's "Ready to run" and optimised for your system. Only the software you need is installed.
-Use `dietpi-process` to control which installed software has higher or lower priority levels (nice, affinity, policy scheduler).
+Use `dietpi-software` to quickly and easily install popular software that's "Ready to run" and optimized for your system. Only the software you need is installed. Use `dietpi-process_tool` to control which installed software has higher or lower priority levels (nice, affinity, policy scheduler).
 
-`dietpi-update` automatically checks for updates and informs you when they are available. Update instantly, without having to write a new image.
-`dietpi-automation` Allows you to completely automate a DietPi installation with no user input. Simply by configuring dietpi.txt before powering on.
+`dietpi-update` automatically checks for updates and informs you when they are available. Update instantly, without having to write a new image. `dietpi-automation` Allows you to completely automate a DietPi installation with no user input, simply by configuring dietpi.txt before powering on.
+
 
 ## The DietPi Project Team
 
@@ -132,9 +129,9 @@ A personal thanks to **Pilovali** for helping DietPi during our early days with 
 
 ## Contributing
 
-Please use the active development branch [`testing`](https://github.com/Fourdee/DietPi/tree/testing)
+Git coders, please use the active development branch: [`dev`](https://github.com/Fourdee/DietPi/tree/dev)
 
-* [Adding new software installation options to DietPi-Software](https://github.com/Fourdee/DietPi/issues/490#issuecomment-244416570)
+* [How to add new software installation options to DietPi-Software](https://github.com/Fourdee/DietPi/issues/490#issuecomment-244416570)
 
 Are you able to:
 
@@ -150,7 +147,7 @@ We are always looking for talented people who believe in the DietPi project, and
 
 * Send me an Email: daniel.knight@dietpi.com
 * Join our forums: https://dietpi.com/phpbb
-* Git Hub: https://github.com/Fourdee/DietPi
+* GitHub: https://github.com/Fourdee/DietPi
 
 ## License
 
