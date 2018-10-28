@@ -13,7 +13,7 @@ TARGET_DEV=$(findmnt / -o source -n)
 if [[ $TARGET_DEV =~ /mmcblk || $TARGET_DEV =~ /nvme ]]; then
 
 	TARGET_PARTITION=${TARGET_DEV##*p} # Last [0-9] after "p"
-	TARGET_DRIVE=${TARGET_DRIVE%p[0-9]} # EG: /dev/mmcblk[0-9]
+	TARGET_DRIVE=${TARGET_DEV%p[0-9]} # EG: /dev/mmcblk[0-9]
 
 elif [[ $TARGET_DEV =~ /[sh]d[a-z] ]]; then
 
