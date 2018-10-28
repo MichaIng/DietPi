@@ -31,15 +31,12 @@ fi
 if [[ $TARGET_PARTITION == [0-9] ]]; then
 
 	# - Check for valid device ID
+	#	Do not fail due to RPi has autodetection of hw_model
 	if ! HW_MODEL=$(</etc/.dietpi_hw_model_identifier); then
 
 		echo '[FAILED] Could not determine device ID from: /etc/.dietpi_hw_model_identifier'
-		exit 1
-
-	elif [[ $HW_MODEL =~ [^0-9] ]]; then
-
-		echo "[FAILED] Invalid hardware ID: $HW_MODEL"
-		exit 1
+		echo 'Assuming RPi'
+		HW_MODEL=0
 
 	fi
 
