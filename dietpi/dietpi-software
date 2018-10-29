@@ -1249,6 +1249,18 @@ _EOF_
 			 aSOFTWARE_ONLINEDOC_URL[$index_current]='f=8&t=5&p=3026#p3026'
 
 		#------------------
+		index_current=168
+
+				 aSOFTWARE_WHIP_NAME[$index_current]='Nextcloud Talk'
+				 aSOFTWARE_WHIP_DESC[$index_current]='Video calls with configured TURN server'
+			aSOFTWARE_CATEGORY_INDEX[$index_current]=4
+					  aSOFTWARE_TYPE[$index_current]=0
+		#Currently requires manual domain and TURN server port input.
+		# - To resolve: Default port 5349 could be used, but reliable method to get external domain/static IP is required.
+		aSOFTWARE_REQUIRES_USERINPUT[$index_current]=1
+			 aSOFTWARE_ONLINEDOC_URL[$index_current]='f=8&t=5&p=15227#p15227'
+
+		#------------------
 		index_current=48
 
 				 aSOFTWARE_WHIP_NAME[$index_current]='Pydio'
@@ -2595,6 +2607,16 @@ _EOF_
 		#Pre-req software, for items that do not have their own array aSOFTWARE_REQUIRES_SOFTWARENAME
 		local index=0
 
+		#Mark Nextcloud, if Nextcloud Talk was chosen
+		index=114
+		if (( ${aSOFTWARE_INSTALL_STATE[168]} == 1 &&
+			${aSOFTWARE_INSTALL_STATE[$index]} < 1 )); then
+
+			aSOFTWARE_INSTALL_STATE[$index]=1
+			G_DIETPI-NOTIFY 2 "${aSOFTWARE_WHIP_NAME[$index]} will be installed"
+
+		fi
+
 		#Additional software that requires VNC4server
 		#	XRDP: https://github.com/Fourdee/DietPi/issues/1727
 		if (( $G_DISTRO >= 4 && ${aSOFTWARE_INSTALL_STATE[29]} == 1 )); then
@@ -2652,8 +2674,7 @@ _EOF_
 			${aSOFTWARE_INSTALL_STATE[37]} == 1 ||
 			${aSOFTWARE_INSTALL_STATE[128]} == 1 ||
 			${aSOFTWARE_INSTALL_STATE[138]} == 1 ||
-			${aSOFTWARE_INSTALL_STATE[163]} == 1 ||
-			${aSOFTWARE_INSTALL_STATE[168]} == 1 )); then
+			${aSOFTWARE_INSTALL_STATE[163]} == 1 )); then
 
 			aSOFTWARE_INSTALL_STATE[$index]=1
 
@@ -3973,6 +3994,17 @@ _EOF_
 			fi
 
 			chown -R www-data:www-data /var/www/nextcloud
+
+		fi
+
+		#Nextcloud Talk
+		INSTALLING_INDEX=168
+		if (( ${aSOFTWARE_INSTALL_STATE[$INSTALLING_INDEX]} == 1 )); then
+
+			Banner_Installing
+
+			# Install "coturn" TURN server only, install Nextcloud Talk app after Nextcloud has been fully configured
+			G_AGI coturn
 
 		fi
 
@@ -8267,6 +8299,107 @@ The install script will now exit. After applying one of the the above, rerun die
 
 		fi
 
+		#Nextcloud Talk
+		INSTALLING_INDEX=168
+		if (( ${aSOFTWARE_INSTALL_STATE[$INSTALLING_INDEX]} == 1 )); then
+
+			Banner_Configuration
+
+			G_DIETPI-NOTIFY 2 'Configuring TURN server:'
+			# - Enable init.d service
+			G_CONFIG_INJECT 'TURNSERVER_ENABLED=' 'TURNSERVER_ENABLED=1' /etc/default/coturn
+
+			# - Ask user for server domain and desired TURN server port
+			local invalid_text=''
+			local domain='my.domain.org'
+			while :
+			do
+
+				G_WHIP_DEFAULT_ITEM="$domain"
+				G_WHIP_INPUTBOX "${invalid_text}Please enter your servers external domain to allow Nextcloud Talk access your TURN server:"
+				if (( $? == 0 )) && [[ $G_WHIP_RETURNED_VALUE ]]; then
+
+					domain="${G_WHIP_RETURNED_VALUE#http*://}"
+					break
+
+				else
+
+					invalid_text='[ERROR] No valid entry found. Please retry...\n\n'
+
+				fi
+
+			done
+			local invalid_text=''
+			local port=5349
+			while :
+			do
+
+				G_WHIP_DEFAULT_ITEM=$port
+				G_WHIP_INPUTBOX "${invalid_text}Please enter the network port, that should be used for your TURN server:\n
+NB: This port needs to be forwarded by your router and/or opened in your firewall settings. Default value is: 5349"
+				if (( $? == 0 )) && disable_error=1 G_CHECK_VALIDINT "$G_WHIP_RETURNED_VALUE"; then
+
+					port=$G_WHIP_RETURNED_VALUE
+					break
+
+				else
+
+					invalid_text='[ERROR] No valid entry found, value needs to be a sequence of integers. Please retry...\n\n'
+
+				fi
+
+			done
+
+			# - Adjust coturn settings
+			G_CONFIG_INJECT 'fingerprint' 'fingerprint' /etc/turnserver.conf
+			G_CONFIG_INJECT 'lt-cred-mech' 'lt-cred-mech' /etc/turnserver.conf
+			G_CONFIG_INJECT 'use-auth-secret' 'use-auth-secret' /etc/turnserver.conf
+			G_CONFIG_INJECT 'realm=' "realm=$domain" /etc/turnserver.conf
+			PRESERVE=1 G_CONFIG_INJECT 'total-quota=' 'total-quota=100' /etc/turnserver.conf
+			PRESERVE=1 G_CONFIG_INJECT 'bps-capacity=' 'bps-capacity=0' /etc/turnserver.conf
+			G_CONFIG_INJECT 'stale-nonce' 'stale-nonce' /etc/turnserver.conf
+			G_CONFIG_INJECT 'no-loopback-peers' 'no-loopback-peers' /etc/turnserver.conf
+			G_CONFIG_INJECT 'no-multicast-peers' 'no-multicast-peers' /etc/turnserver.conf
+
+			# - Add TLS settings, if LetsEncrypt certificates are available:
+			if [[ -f /DietPi/dietpi/.dietpi-letsencrypt &&
+				-f /etc/letsencrypt/live/$(sed -n 1p /DietPi/dietpi/.dietpi-letsencrypt)/cert.pem ]]; then
+
+				G_DIETPI-NOTIFY 2 'LetsEncrypt certificate found, will configure coturn TURN server to accept TLS connections'
+				# - Comment matching non-TLS port, to avoid doubled port use:
+				G_CONFIG_INJECT "listening-port=$port" "#listening-port=$port" /etc/turnserver.conf
+				G_CONFIG_INJECT 'tls-listening-port=' "tls-listening-port=$port" /etc/turnserver.conf
+				local fp_cert_dir="/etc/letsencrypt/live/$(sed -n 1p /DietPi/dietpi/.dietpi-letsencrypt)/cert.pem"
+				G_CONFIG_INJECT 'cert=' "cert=$fp_cert_dir/cert.pem" /etc/turnserver.conf
+				G_CONFIG_INJECT 'pkey=' "pkey=$fp_cert_dir/privkey.pem" /etc/turnserver.conf
+				# - Proven working default cipher, but thus should be properly reworked, e.g. to match webserver settings?
+				G_CONFIG_INJECT 'cipher-list=' 'cipher-list="ECDH+AESGCM:DH+AESGCM:ECDH+AES256:DH+AES256:ECDH+AES128:DH+AES:ECDH+3DES:DH+3DES:RSA+AES:RSA+3DES:!ADH:!AECDH:!MD5"' /etc/turnserver.conf
+
+			else
+
+				G_CONFIG_INJECT 'listening-port=' "listening-port=$port" /etc/turnserver.conf
+
+			fi
+
+			# - Install Nextcloud Talk app
+			G_RUN_CMD systemctl start $MARIADB_SERVICE
+			G_RUN_CMD ncc maintenance:mode --off
+			G_RUN_CMD ncc app:install spreed
+			ncc app:enable spreed
+
+			# - Adjust Nextcloud Talk settings to use coturn
+			ncc config:app:set spreed stun_servers --value="[\"$domain:$port\"]"
+			#	Generate random secret to secure TURN server access
+			local secret=$(openssl rand -hex 32)
+			PRESERVE=1 G_CONFIG_INJECT 'static-auth-secret=' "static-auth-secret=$secret" /etc/turnserver.conf
+			#	Scrape existing secret, in case user manually chose/edited it
+			secret="$(grep -m1 '^[[:blank:]]*static-auth-secret=' /etc/turnserver.conf)"
+			secret="${secret#*static-auth-secret=}"
+			ncc config:app:set spreed turn_servers --value="[{\"server\":\"$domain:$port\",\"secret\":\"$secret\",\"protocols\":\"udp,tcp\"}]"
+			unset secret
+
+		fi
+
 		# Transmission
 		INSTALLING_INDEX=44
 		if (( ${aSOFTWARE_INSTALL_STATE[$INSTALLING_INDEX]} == 1 )); then
@@ -12379,11 +12512,11 @@ _EOF_
 
 		fi
 
+		#ownCloud
 		UNINSTALLING_INDEX=47
 		if (( aSOFTWARE_INSTALL_STATE[$UNINSTALLING_INDEX] == -1 )); then
 
 			Banner_Uninstalling
-			#ownCloud
 			# Remove background cron job
 			crontab -u www-data -l | grep -v '/var/www/owncloud/cron.php'  | crontab -u www-data -
 			# Disable and remove webserver configs
@@ -12424,11 +12557,24 @@ _EOF_
 
 		fi
 
+		#Nextcloud Talk + TURN server "coturn"
+		UNINSTALLING_INDEX=168
+		if (( aSOFTWARE_INSTALL_STATE[$UNINSTALLING_INDEX] == -1 )); then
+
+			Banner_Uninstalling
+			G_AGP coturn
+			systemctl start $MARIADB_SERVICE
+			ncc maintenance:mode --off
+			ncc app:disable spreed
+			G_DIETPI-NOTIFY 2 'Disabled Nextcloud Talk app, but you need to remove it manually from Nextcloud web UI, if desired.'
+
+		fi
+
+		#Nextcloud
 		UNINSTALLING_INDEX=114
 		if (( aSOFTWARE_INSTALL_STATE[$UNINSTALLING_INDEX] == -1 )); then
 
 			Banner_Uninstalling
-			#Nextcloud
 			crontab -u www-data -l | grep -v '/var/www/nextcloud/cron.php'  | crontab -u www-data -
 			# Disable and remove webserver configs
 			a2dissite nextcloud 2> /dev/null
