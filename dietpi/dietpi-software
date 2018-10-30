@@ -4457,18 +4457,9 @@ _EOF_
 			# - Install
 			wget "$INSTALL_URL_ADDRESS" -O install.sh
 			chmod +x install.sh
-
-			local commandline_options='--disable-install-webserver'
-
-			./install.sh $commandline_options
-			local exit_code=0 #always returns 5!
-			if (( $exit_code )); then
-
-				G_WHIP_MSG "Pi-hole installer exited with code ($exit_code) and is not installed."
-				aSOFTWARE_INSTALL_STATE[$INSTALLING_INDEX]=0
-
-			fi
-
+			#	Skip Lighttpd install, since user properly has chosen a different one, which was installed as pre-req.
+			./install.sh --disable-install-webserver
+			#	We can't do reasonable exit code check, since installer always returns 5!
 			rm install.sh
 
 		fi
@@ -9202,34 +9193,41 @@ _EOF_
 
 			Banner_Configuration
 
-			# - Add Pi-hole user to www group
-			# usermod -a -G www-data pihole
+			# - Create symlinks to align Pi-hole admin and blocking page relative to webroot
+			cd /var/www
+			#	Move existing files/dirs out of the way
+			[[ -L admin ]] || [[ -e admin ]] && mv -v admin admin.bak
+			ln -vsf html/admin admin
+			[[ -L pihole ]] || [[ -e pihole ]] && mv -v pihole pihole.bak
+			ln -vsf html/pihole pihole
 
-			# - Create a symlink so users can use http://ip/pihole
-			ln -sf /var/www/html/admin /var/www/pihole
+			# - Ask user whether to show blocking page
+			if G_WHIP_YESNO 'Pi-hole can show a blocking page, when clients access a blocked website. This allows you to whitelist domains directly from the blocking page and prevents the need to access the admin page or use the Pi-hole CLI for this.\n
+The downside is additional traffic and less performance compared to a silent request block. Additional info can be found at: https://docs.pi-hole.net/ftldns/blockingmode/\n
+Do you want to enable the Pi-hole blocking page?'; then
 
-			# - Create a symlink so users can use http://ip/admin
-			ln -sf /var/www/html/admin /var/www/admin
+				G_CONFIG_INJECT 'BLOCKINGMODE=' 'BLOCKINGMODE=IP-NODATA-AAAA' /etc/pihole/pihole-FTL.conf
+				#	Link blocking page to webroot, where it is required
+				[[ -L index.php ]] || [[ -e index.php ]] && mv -v index.php index.php.bak
+				ln -vsf pihole/index.php index.php
 
-			# - Generate index page that replaces adverts and prevents popups
-			# G_RUN_CMD wget https://dietpi.com/images/pi-hole.png -O /var/www/pi-hole.png
+			else
 
-			systemctl enable pihole-FTL
+				G_CONFIG_INJECT 'BLOCKINGMODE=' 'BLOCKINGMODE=NULL' /etc/pihole/pihole-FTL.conf
 
-			# rm /var/www/index.php &> /dev/null
-			# ln -sf /var/www/html/pihole/index.php /var/www/index.php
-
-			# - Generate web interface PW: https://github.com/Fourdee/DietPi/issues/662
-			pihole -a -p "$GLOBAL_PW"
-
-			# - Run Gravity
-			pihole -g
+			fi
+			cd /tmp/$G_PROGRAM_NAME
 
 			# - Fix service to disable syslog pre-req preventing start
 			G_CONFIG_INJECT '# Required-Stop:' '# Required-Stop: $network $remote_fs' /etc/init.d/pihole-FTL
 			G_CONFIG_INJECT '# Required-Start:' '# Required-Start: $network $remote_fs' /etc/init.d/pihole-FTL
+			systemctl enable pihole-FTL
 
-			# - PiHole now generates a password, inform user of the correct one:
+			# - Run Gravity
+			pihole -g
+
+			# - Generate web interface PW: https://github.com/Fourdee/DietPi/issues/662
+			pihole -a -p "$GLOBAL_PW"
 			G_WHIP_MSG "DietPi has changed the Pi-hole web interface password to:\n- $GLOBAL_PW\n\nPlease use this password when logging into the web interface:\n - http://ip/pihole\n\nThis password can be changed, please see pihole binary for info:\n - pihole --help"
 
 		fi
@@ -13279,12 +13277,11 @@ _EOF_
 			# - symlinks
 			rm /var/www/pihole &> /dev/null
 			rm /var/www/admin &> /dev/null
+			[[ $(readlink /var/www/index.php) == 'pihole/index.php' ]] && rm /var/www/index.php
 
-			G_AGP dnsmasq #pre v4
+			# - pre Pi-hole v4
+			G_AGP dnsmasq
 			rm -R /etc/dnsmasq* &> /dev/null
-
-			#https://github.com/Fourdee/DietPi/issues/753
-			chmod 774 /etc/lighttpd/lighttpd.conf &> /dev/null
 
 		fi
 
