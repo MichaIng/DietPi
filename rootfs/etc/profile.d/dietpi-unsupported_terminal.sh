@@ -1,7 +1,7 @@
 #!/bin/bash
 
 # Workaround for SSH client passing an unsupported $TERM string
-if [[ $SSH_TTY ]] && ! toe -a | grep -q "$TERM"; then
+if [[ $SSH_TTY ]] && ! toe -a | grep -q "^$TERM[[:blank:]]"; then
 
 	TERM_old="$TERM"
 	ncurses_term=''
