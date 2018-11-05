@@ -1625,15 +1625,9 @@ NB: We highly recommend choosing 'Retry' first. Failing that, 'mirror' then 'mod
 					  aSOFTWARE_TYPE[$software_id]=0
 			 aSOFTWARE_ONLINEDOC_URL[$software_id]='f=8&t=5&start=20#p188'
 
-		# - Currently ARMv6/7 only, so disable all archs
-		for ((i=1; i<=$MAX_G_HW_ARCH; i++))
-		do
-
-			aSOFTWARE_AVAIL_G_HW_ARCH[$software_id,$i]=0
-
-		done
-		aSOFTWARE_AVAIL_G_HW_ARCH[$software_id,1]=1
-		aSOFTWARE_AVAIL_G_HW_ARCH[$software_id,2]=1
+		# - Currently ARMv6/7 only
+		aSOFTWARE_AVAIL_G_HW_ARCH[$software_id,3]=0
+		aSOFTWARE_AVAIL_G_HW_ARCH[$software_id,10]=0
 
 		#------------------
 		software_id=138
@@ -2382,11 +2376,13 @@ NB: We highly recommend choosing 'Retry' first. Failing that, 'mirror' then 'mod
 					  aSOFTWARE_TYPE[$software_id]=1
 
 		# - Stretch only
-		if (( $G_DISTRO < 4 )); then
+		for ((i=3; i<=$MAX_G_DISTRO; i++))
+		do
 
-			aSOFTWARE_AVAIL_G_HW_MODEL[$software_id,$G_HW_MODEL]=0
+			aSOFTWARE_AVAIL_G_DISTRO[$software_id,$G_DISTRO]=0
 
-		fi
+		done
+		aSOFTWARE_AVAIL_G_DISTRO[$software_id,4]=1
 
 		#------------------
 
@@ -2751,6 +2747,9 @@ NB: We highly recommend choosing 'Retry' first. Failing that, 'mirror' then 'mod
 
 				fi
 
+				# Pretent software requiring PHP, to mark it below, in case webserver ID already passed:
+				aSOFTWARE_REQUIRES_PHP[$i]=1
+
 			fi
 
 			#WEBSERVER_PHP
@@ -2790,6 +2789,9 @@ NB: We highly recommend choosing 'Retry' first. Failing that, 'mirror' then 'mod
 				# - If no desktop is selected or installed (0), default to LXDE
 				aSOFTWARE_INSTALL_STATE[23]=1
 				G_DIETPI-NOTIFY 2 "${aSOFTWARE_WHIP_NAME[$software_id]} will be installed"
+
+				# Pretent software requiring Xserver, to mark it below, in case desktop ID already passed:
+				aSOFTWARE_REQUIRES_XSERVERXORG[$i]=1
 
 			fi
 
@@ -3435,7 +3437,22 @@ NB: We highly recommend choosing 'Retry' first. Failing that, 'mirror' then 'mod
 			chown mysql:mysql -h /var/lib/mysql &> /dev/null
 			chown mysql:mysql -RL /var/lib/mysql &> /dev/null
 
-			G_AGI mariadb-server
+			local package_list='mariadb-server'
+			# Install php-mysql module, if PHP was already installed
+			if (( ${aSOFTWARE_INSTALL_STATE[89]} == 2 )); then
+
+				if (( $G_DISTRO < 4 )); then
+					# For <= Jessie, php5-mysqlnd provides the newer mysql client libraries compared to php5-mysql.
+					package_list+=' php5-mysqlnd'
+
+				else
+					# For >= Stretch, php(7.X)-mysqlnd does not exist, thus php-mysql need to be installed: https://packages.debian.org/de/stretch/php-mysql
+					package_list+=" $PHP_APT_PACKAGE_NAME-mysql"
+
+				fi
+
+			fi
+			G_AGI "$package_list"
 
 		fi
 
@@ -3444,7 +3461,10 @@ NB: We highly recommend choosing 'Retry' first. Failing that, 'mirror' then 'mod
 		if (( ${aSOFTWARE_INSTALL_STATE[$software_id]} == 1 )); then
 
 			Banner_Installing
-			G_AGI sqlite3
+			local package_list='sqlite3'
+			# Install php-sqlite module, if PHP was already installed
+			(( ${aSOFTWARE_INSTALL_STATE[89]} == 2 )) && package_list+=" $PHP_APT_PACKAGE_NAME-sqlite*"
+			G_AGI "$package_list"
 
 		fi
 
@@ -3454,13 +3474,8 @@ NB: We highly recommend choosing 'Retry' first. Failing that, 'mirror' then 'mod
 
 			Banner_Installing
 			local package_list='redis-server'
-			#Redis php module | == 2 to check for existing installs, if == 1, then module will be installed together with PHP, to prevent dependency installations
-			if (( ${aSOFTWARE_INSTALL_STATE[89]} == 2 )); then
-
-				package_list+=" $PHP_APT_PACKAGE_NAME-redis"
-
-			fi
-
+			# Install php-redis module, if PHP was already installed
+			(( ${aSOFTWARE_INSTALL_STATE[89]} == 2 )) && package_list+=" $PHP_APT_PACKAGE_NAME-redis"
 			G_AGI $package_list
 
 		fi
@@ -3633,7 +3648,19 @@ We work around this error by running APT a second time. Please do not worry and 
 		if (( ${aSOFTWARE_INSTALL_STATE[$software_id]} == 1 )); then
 
 			Banner_Installing
-			Download_Install 'https://www.phpbb.com/files/release/phpBB-3.2.2.zip' /var/www
+
+			# Skip install, if already present
+			if [[ -d /var/www/phpBB3 ]]; then
+
+				G_DIETPI-NOTIFY 2 "${aSOFTWARE_WHIP_NAME[$software_id]} install dir \"/var/www/phpBB3\" already exists. Download and install steps will be skipped.
+ - Please manually backup your config files+data, remove the install dir and rerun \"dietpi-software (re)install $software_id\" if you need to reinstall.
+ - If you want to update the ${aSOFTWARE_WHIP_NAME[$software_id]} instance, please follow the instructions from WebUI ACP."
+
+			else
+
+				Download_Install 'https://www.phpbb.com/files/release/phpBB-3.2.3.tar.bz2' /var/www
+
+			fi
 
 		fi
 
@@ -5822,9 +5849,9 @@ _EOF_
 
 			Banner_Installing
 
-			INSTALL_URL_ADDRESS='https://api.github.com/repos/Radarr/Radarr/releases'
+			INSTALL_URL_ADDRESS='https://api.github.com/repos/Radarr/Radarr/releases/latest'
 			G_CHECK_URL "$INSTALL_URL_ADDRESS" #full filepath below, returns --spider error :(
-			INSTALL_URL_ADDRESS="$( curl -s $INSTALL_URL_ADDRESS | grep 'linux.tar.gz' | grep 'browser_download_url' | head -1 | cut -d \" -f 4 )"
+			INSTALL_URL_ADDRESS="$(curl -s $INSTALL_URL_ADDRESS | grep -m1 'browser_download_url.*linux.tar.gz' | cut -d \" -f 4)"
 
 			DEPS_LIST='mediainfo'
 			no_check_url=1 Download_Install "$INSTALL_URL_ADDRESS" /opt
@@ -5837,9 +5864,9 @@ _EOF_
 
 			Banner_Installing
 
-			INSTALL_URL_ADDRESS='https://api.github.com/repos/Lidarr/Lidarr/releases'
+			INSTALL_URL_ADDRESS='https://api.github.com/repos/Lidarr/Lidarr/releases/latest'
 			G_CHECK_URL "$INSTALL_URL_ADDRESS"
-			INSTALL_URL_ADDRESS="$( curl -s $INSTALL_URL_ADDRESS | grep 'linux.tar.gz' | grep 'browser_download_url' | head -1 | cut -d \" -f 4 )"
+			INSTALL_URL_ADDRESS="$(curl -s $INSTALL_URL_ADDRESS | grep -m1 'browser_download_url.*linux.tar.gz' | cut -d \" -f 4)"
 
 			DEPS_LIST='mediainfo'
 			no_check_url=1 Download_Install "$INSTALL_URL_ADDRESS" /opt
@@ -5870,14 +5897,21 @@ _EOF_
 
 			Banner_Installing
 
-			INSTALL_URL_ADDRESS='https://api.github.com/repos/Jackett/Jackett/releases'
+			INSTALL_URL_ADDRESS='https://api.github.com/repos/Jackett/Jackett/releases/latest'
 			G_CHECK_URL "$INSTALL_URL_ADDRESS" #full filepath below, returns --spider error :(
-			INSTALL_URL_ADDRESS="$( curl -s $INSTALL_URL_ADDRESS | grep Jackett.Binaries.Mono.tar.gz | grep browser_download_url | head -1 | cut -d \" -f 4 )"
+			INSTALL_URL_ADDRESS="$(curl -s $INSTALL_URL_ADDRESS | grep -m1 'browser_download_url.*Jackett.Binaries.Mono.tar.gz' | cut -d \" -f 4)"
 
 			no_check_url=1 Download_Install "$INSTALL_URL_ADDRESS" /opt
 
-			cp -R /opt/Jackett /opt/jackett #CP for reinstall support
-			rm -R /opt/Jackett
+			# Move existing configs to unpacked install dir
+			[[ -d /opt/jackett/.mono ]] && mv /opt/jackett/.mono /opt/Jackett/
+			[[ -d /opt/jackett/.config ]] && mv /opt/jackett/.config /opt/Jackett/
+
+			# Remove existing install dir
+			[[ -d /opt/jackett ]] && rm -R /opt/jackett
+
+			# Move unpacked install dir in place
+			mv /opt/Jackett /opt/jackett
 
 		fi
 
@@ -5956,8 +5990,21 @@ _EOF_
 			Banner_Installing
 
 			DEPS_LIST='libav-tools cifs-utils'
-			Download_Install 'http://download.roonlabs.com/builds/RoonServer_linuxx64.tar.bz2'
-			mv RoonServer $G_FP_DIETPI_USERDATA/roonserver
+
+			# Skip download and install, if already existent, manual removal or internal updater can be used:
+			if [[ ! -d $G_FP_DIETPI_USERDATA/roonserver ]]; then
+
+				Download_Install 'http://download.roonlabs.com/builds/RoonServer_linuxx64.tar.bz2' $G_FP_DIETPI_USERDATA
+				mv $G_FP_DIETPI_USERDATA/RoonServer $G_FP_DIETPI_USERDATA/roonserver
+
+			else
+
+				G_WHIP_MSG "[WARNING] Existing install found\n
+The ${aSOFTWARE_WHIP_NAME[$software_id]} target install directory $G_FP_DIETPI_USERDATA/roonserver already exists. This will not be overwritten.\n
+If the existing instance is broken or obsolete, please manually backup config files and data, then remove this directory and rerun "dietpi-software".\n
+If you want to update ${aSOFTWARE_WHIP_NAME[$software_id]}, please use it's internal updater."
+
+			fi
 
 		fi
 
@@ -8232,7 +8279,7 @@ NB: This port needs to be forwarded by your router and/or opened in your firewal
 
 			# Run service as "dietpi" group: https://github.com/Fourdee/DietPi/issues/350#issuecomment-423763518
 			mkdir -p /etc/systemd/system/transmission-daemon.service.d
-			echo -e '[Service]\nGroup=dietpi' >> /etc/systemd/system/transmission-daemon.service.d/dietpi-group.conf
+			echo -e '[Service]\nGroup=dietpi' > /etc/systemd/system/transmission-daemon.service.d/dietpi-group.conf
 
 			# Apply optimized settings
 			sed -i '/^}/d' /etc/transmission-daemon/settings.json
@@ -11570,7 +11617,7 @@ _EOF_
 
 			Banner_Configuration
 
-			adduser jackett --system --no-create-home --group --shell=/bin/nologin
+			adduser jackett --system --no-create-home --group --shell=/usr/sbin/nologin
 
 			cat << _EOF_ > /etc/systemd/system/jackett.service
 [Unit]
@@ -12937,8 +12984,8 @@ _EOF_
 		if (( aSOFTWARE_INSTALL_STATE[$software_id] == -1 )); then
 
 			Banner_Uninstalling
-			rm -R $G_FP_DIETPI_USERDATA/roonserver
-			rm /etc/systemd/system/roonserver.service
+			[[ -d $G_FP_DIETPI_USERDATA/roonserver ]] && rm -R $G_FP_DIETPI_USERDATA/roonserver
+			[[ -f /etc/systemd/system/roonserver.service ]] && rm /etc/systemd/system/roonserver.service
 
 		fi
 
