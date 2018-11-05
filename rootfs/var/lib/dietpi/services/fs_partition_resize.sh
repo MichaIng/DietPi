@@ -56,8 +56,8 @@ if [[ $TARGET_PARTITION == [0-9] ]]; then
 p
 d
 $TARGET_PARTITION
-n
 p
+n
 $TARGET_PARTITION
 $(parted $TARGET_DRIVE -ms unit s p | grep ':ext4::;' | awk -F: '{print $2}' | sed 's/s//g')
 
