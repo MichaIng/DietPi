@@ -958,7 +958,7 @@ _EOF_
 		rm /etc/profile.d/99-dietpi* &> /dev/null
 
 		# - Enable /etc/bashrc.d/ support for custom interactive non-login shell scripts:
-		G_CONFIG_INJECT '.*/etc/bashrc\.d/.*' 'for i in /etc/bashrc\.d/\*\.sh; do \[ -r "\$i" \] \&\& \. \$i; done' /etc/bash.bashrc
+		G_CONFIG_INJECT '.*/etc/bashrc\.d/.*' 'for i in /etc/bashrc.d/*.sh; do [ -r "$i" ] && . $i; done' /etc/bash.bashrc
 
 		# - Enable bash-completion for non-login shells:
 		#	- NB: It is called twice on login shells then, but breaks directly if called already once.
@@ -1056,7 +1056,7 @@ _EOF_
 		G_DIETPI-NOTIFY 2 'Add dietpi.com SSH pub host key for DietPi-Survey and -Bugreport upload:'
 		mkdir -p /root/.ssh
 		>> /root/.ssh/known_hosts
-		G_CONFIG_INJECT 'ssh.dietpi.com ' 'ssh.dietpi.com ssh-rsa AAAAB3NzaC1yc2EAAAADAQABAAABAQDE6aw3r6aOEqendNu376iiCHr9tGBIWPgfrLkzjXjEsHGyVSUFNnZt6pftrDeK7UX\+qX4FxOwQlugG4fymOHbimRCFiv6cf7VpYg1Ednquq9TLb7/cIIbX8a6AuRmX4fjdGuqwmBq3OG7ZksFcYEFKt5U4mAJIaL8hXiM2iXjgY02LqiQY/QWATsHI4ie9ZOnwrQE\+Rr6mASN1BVFuIgyHIbwX54jsFSnZ/7CdBMkuAd9B8JkxppWVYpYIFHE9oWNfjh/epdK8yv9Oo6r0w5Rb\+4qaAc5g\+RAaknHeV6Gp75d2lxBdCm5XknKKbGma2\+/DfoE8WZTSgzXrYcRlStYN' /root/.ssh/known_hosts
+		G_CONFIG_INJECT 'ssh.dietpi.com ' 'ssh.dietpi.com ssh-rsa AAAAB3NzaC1yc2EAAAADAQABAAABAQDE6aw3r6aOEqendNu376iiCHr9tGBIWPgfrLkzjXjEsHGyVSUFNnZt6pftrDeK7UX+qX4FxOwQlugG4fymOHbimRCFiv6cf7VpYg1Ednquq9TLb7/cIIbX8a6AuRmX4fjdGuqwmBq3OG7ZksFcYEFKt5U4mAJIaL8hXiM2iXjgY02LqiQY/QWATsHI4ie9ZOnwrQE+Rr6mASN1BVFuIgyHIbwX54jsFSnZ/7CdBMkuAd9B8JkxppWVYpYIFHE9oWNfjh/epdK8yv9Oo6r0w5Rb+4qaAc5g+RAaknHeV6Gp75d2lxBdCm5XknKKbGma2+/DfoE8WZTSgzXrYcRlStYN' /root/.ssh/known_hosts
 
 		#-----------------------------------------------------------------------------------
 		#MISC
@@ -1116,7 +1116,7 @@ _EOF_
 		#	ASUS TB WiFi: https://github.com/Fourdee/DietPi/issues/1760
 		elif (( $G_HW_MODEL == 52 )); then
 
-			G_CONFIG_INJECT '^8723bs' '8723bs' /etc/modules
+			G_CONFIG_INJECT '8723bs' '8723bs' /etc/modules
 
 		fi
 
@@ -1431,8 +1431,8 @@ _EOF_
 			# - Finalize GRUB
 			if [[ -f '/etc/default/grub' ]]; then
 
-				G_CONFIG_INJECT 'GRUB_CMDLINE_LINUX_DEFAULT=' 'GRUB_CMDLINE_LINUX_DEFAULT=\"consoleblank=0 quiet\"' /etc/default/grub
-				G_CONFIG_INJECT 'GRUB_CMDLINE_LINUX=' 'GRUB_CMDLINE_LINUX=\"net\.ifnames=0\"' /etc/default/grub
+				G_CONFIG_INJECT 'GRUB_CMDLINE_LINUX_DEFAULT=' 'GRUB_CMDLINE_LINUX_DEFAULT="consoleblank=0 quiet"' /etc/default/grub
+				G_CONFIG_INJECT 'GRUB_CMDLINE_LINUX=' 'GRUB_CMDLINE_LINUX="net.ifnames=0"' /etc/default/grub
 				G_CONFIG_INJECT 'GRUB_TIMEOUT=' 'GRUB_TIMEOUT=3' /etc/default/grub
 				l_message='Finalizing GRUB' G_RUN_CMD update-grub
 
