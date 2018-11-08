@@ -1162,7 +1162,8 @@ _EOF_
 		# - must be enabled for the following:
 		#	XU4: https://github.com/Fourdee/DietPi/issues/2038#issuecomment-416089875
 		#	RockPro64: Fails to boot into kernel without serial enabled
-		if (( $G_HW_MODEL == 11 || $G_HW_MODEL == 42 )); then
+		#	NanoPi Neo Air: Required for end users/debugging/setting up WiFi without automation
+		if (( $G_HW_MODEL == 11 || $G_HW_MODEL == 42  || $G_HW_MODEL == 64 )); then
 
 			sed -i '/^[[:blank:]]*CONFIG_SERIAL_CONSOLE_ENABLE=/c\CONFIG_SERIAL_CONSOLE_ENABLE=1' /DietPi/dietpi.txt
 
