@@ -1428,6 +1428,7 @@ NB: We highly recommend choosing 'Retry' first. Failing that, 'mirror' then 'mod
 					  aSOFTWARE_TYPE[$software_id]=0
    aSOFTWARE_REQUIRES_BUILDESSENTIAL[$software_id]=1
 			  aSOFTWARE_REQUIRES_GIT[$software_id]=1
+		  aSOFTWARE_REQUIRES_USERINPUT[$software_id]=1
 			 aSOFTWARE_ONLINEDOC_URL[$software_id]='f=8&t=5&p=1796#p1796'
 
 		#------------------
@@ -1625,15 +1626,9 @@ NB: We highly recommend choosing 'Retry' first. Failing that, 'mirror' then 'mod
 					  aSOFTWARE_TYPE[$software_id]=0
 			 aSOFTWARE_ONLINEDOC_URL[$software_id]='f=8&t=5&start=20#p188'
 
-		# - Currently ARMv6/7 only, so disable all archs
-		for ((i=1; i<=$MAX_G_HW_ARCH; i++))
-		do
-
-			aSOFTWARE_AVAIL_G_HW_ARCH[$software_id,$i]=0
-
-		done
-		aSOFTWARE_AVAIL_G_HW_ARCH[$software_id,1]=1
-		aSOFTWARE_AVAIL_G_HW_ARCH[$software_id,2]=1
+		# - Currently ARMv6/7 only
+		aSOFTWARE_AVAIL_G_HW_ARCH[$software_id,3]=0
+		aSOFTWARE_AVAIL_G_HW_ARCH[$software_id,10]=0
 
 		#------------------
 		software_id=138
@@ -2382,11 +2377,13 @@ NB: We highly recommend choosing 'Retry' first. Failing that, 'mirror' then 'mod
 					  aSOFTWARE_TYPE[$software_id]=1
 
 		# - Stretch only
-		if (( $G_DISTRO < 4 )); then
+		for ((i=3; i<=$MAX_G_DISTRO; i++))
+		do
 
-			aSOFTWARE_AVAIL_G_HW_MODEL[$software_id,$G_HW_MODEL]=0
+			aSOFTWARE_AVAIL_G_DISTRO[$software_id,$G_DISTRO]=0
 
-		fi
+		done
+		aSOFTWARE_AVAIL_G_DISTRO[$software_id,4]=1
 
 		#------------------
 
@@ -2751,6 +2748,9 @@ NB: We highly recommend choosing 'Retry' first. Failing that, 'mirror' then 'mod
 
 				fi
 
+				# Pretent software requiring PHP, to mark it below, in case webserver ID already passed:
+				aSOFTWARE_REQUIRES_PHP[$i]=1
+
 			fi
 
 			#WEBSERVER_PHP
@@ -2790,6 +2790,9 @@ NB: We highly recommend choosing 'Retry' first. Failing that, 'mirror' then 'mod
 				# - If no desktop is selected or installed (0), default to LXDE
 				aSOFTWARE_INSTALL_STATE[23]=1
 				G_DIETPI-NOTIFY 2 "${aSOFTWARE_WHIP_NAME[$software_id]} will be installed"
+
+				# Pretent software requiring Xserver, to mark it below, in case desktop ID already passed:
+				aSOFTWARE_REQUIRES_XSERVERXORG[$i]=1
 
 			fi
 
@@ -3435,7 +3438,22 @@ NB: We highly recommend choosing 'Retry' first. Failing that, 'mirror' then 'mod
 			chown mysql:mysql -h /var/lib/mysql &> /dev/null
 			chown mysql:mysql -RL /var/lib/mysql &> /dev/null
 
-			G_AGI mariadb-server
+			local package_list='mariadb-server'
+			# Install php-mysql module, if PHP was already installed
+			if (( ${aSOFTWARE_INSTALL_STATE[89]} == 2 )); then
+
+				if (( $G_DISTRO < 4 )); then
+					# For <= Jessie, php5-mysqlnd provides the newer mysql client libraries compared to php5-mysql.
+					package_list+=' php5-mysqlnd'
+
+				else
+					# For >= Stretch, php(7.X)-mysqlnd does not exist, thus php-mysql need to be installed: https://packages.debian.org/de/stretch/php-mysql
+					package_list+=" $PHP_APT_PACKAGE_NAME-mysql"
+
+				fi
+
+			fi
+			G_AGI "$package_list"
 
 		fi
 
@@ -3444,7 +3462,10 @@ NB: We highly recommend choosing 'Retry' first. Failing that, 'mirror' then 'mod
 		if (( ${aSOFTWARE_INSTALL_STATE[$software_id]} == 1 )); then
 
 			Banner_Installing
-			G_AGI sqlite3
+			local package_list='sqlite3'
+			# Install php-sqlite module, if PHP was already installed
+			(( ${aSOFTWARE_INSTALL_STATE[89]} == 2 )) && package_list+=" $PHP_APT_PACKAGE_NAME-sqlite*"
+			G_AGI "$package_list"
 
 		fi
 
@@ -3454,13 +3475,8 @@ NB: We highly recommend choosing 'Retry' first. Failing that, 'mirror' then 'mod
 
 			Banner_Installing
 			local package_list='redis-server'
-			#Redis php module | == 2 to check for existing installs, if == 1, then module will be installed together with PHP, to prevent dependency installations
-			if (( ${aSOFTWARE_INSTALL_STATE[89]} == 2 )); then
-
-				package_list+=" $PHP_APT_PACKAGE_NAME-redis"
-
-			fi
-
+			# Install php-redis module, if PHP was already installed
+			(( ${aSOFTWARE_INSTALL_STATE[89]} == 2 )) && package_list+=" $PHP_APT_PACKAGE_NAME-redis"
 			G_AGI $package_list
 
 		fi
@@ -3633,7 +3649,19 @@ We work around this error by running APT a second time. Please do not worry and 
 		if (( ${aSOFTWARE_INSTALL_STATE[$software_id]} == 1 )); then
 
 			Banner_Installing
-			Download_Install 'https://www.phpbb.com/files/release/phpBB-3.2.2.zip' /var/www
+
+			# Skip install, if already present
+			if [[ -d /var/www/phpBB3 ]]; then
+
+				G_DIETPI-NOTIFY 2 "${aSOFTWARE_WHIP_NAME[$software_id]} install dir \"/var/www/phpBB3\" already exists. Download and install steps will be skipped.
+ - Please manually backup your config files+data, remove the install dir and rerun \"dietpi-software (re)install $software_id\" if you need to reinstall.
+ - If you want to update the ${aSOFTWARE_WHIP_NAME[$software_id]} instance, please follow the instructions from WebUI ACP."
+
+			else
+
+				Download_Install 'https://www.phpbb.com/files/release/phpBB-3.2.3.tar.bz2' /var/www
+
+			fi
 
 		fi
 
@@ -3647,17 +3675,17 @@ We work around this error by running APT a second time. Please do not worry and 
 			#	x86_64
 			if (( $G_HW_ARCH == 10 )); then
 
-				INSTALL_URL_ADDRESS='https://dl.google.com/go/go1.11.linux-amd64.tar.gz'
+				INSTALL_URL_ADDRESS='https://dl.google.com/go/go1.11.2.linux-amd64.tar.gz'
 
 			#	ARMv8
 			elif (( $G_HW_ARCH == 3 )); then
 
-				INSTALL_URL_ADDRESS='https://dl.google.com/go/go1.11.linux-arm64.tar.gz'
+				INSTALL_URL_ADDRESS='https://dl.google.com/go/go1.11.2.linux-arm64.tar.gz'
 
 			#	ARMv6/7
 			else
 
-				INSTALL_URL_ADDRESS='https://dl.google.com/go/go1.11.linux-armv6l.tar.gz'
+				INSTALL_URL_ADDRESS='https://dl.google.com/go/go1.11.2.linux-armv6l.tar.gz'
 
 			fi
 
@@ -3667,7 +3695,7 @@ We work around this error by running APT a second time. Please do not worry and 
 			cat << _EOF_ > /etc/bashrc.d/go.sh
 #!/bin/bash
 export GOPATH=$G_FP_DIETPI_USERDATA/go
-export PATH=\$PATH:/usr/local/go/bin
+export PATH=\$PATH:/usr/local/go/bin:$G_FP_DIETPI_USERDATA/go/bin
 _EOF_
 
 			. /etc/bashrc.d/go.sh
@@ -4828,7 +4856,7 @@ _EOF_
 			useradd pivpn
 			mkdir -p /home/pivpn
 
-			while true
+			while :
 			do
 
 				wget "$INSTALL_URL_ADDRESS" -O pivpn_install.sh
@@ -5822,9 +5850,9 @@ _EOF_
 
 			Banner_Installing
 
-			INSTALL_URL_ADDRESS='https://api.github.com/repos/Radarr/Radarr/releases'
+			INSTALL_URL_ADDRESS='https://api.github.com/repos/Radarr/Radarr/releases/latest'
 			G_CHECK_URL "$INSTALL_URL_ADDRESS" #full filepath below, returns --spider error :(
-			INSTALL_URL_ADDRESS="$( curl -s $INSTALL_URL_ADDRESS | grep 'linux.tar.gz' | grep 'browser_download_url' | head -1 | cut -d \" -f 4 )"
+			INSTALL_URL_ADDRESS="$(curl -s $INSTALL_URL_ADDRESS | grep -m1 'browser_download_url.*linux.tar.gz' | cut -d \" -f 4)"
 
 			DEPS_LIST='mediainfo'
 			no_check_url=1 Download_Install "$INSTALL_URL_ADDRESS" /opt
@@ -5837,9 +5865,9 @@ _EOF_
 
 			Banner_Installing
 
-			INSTALL_URL_ADDRESS='https://api.github.com/repos/Lidarr/Lidarr/releases'
+			INSTALL_URL_ADDRESS='https://api.github.com/repos/Lidarr/Lidarr/releases/latest'
 			G_CHECK_URL "$INSTALL_URL_ADDRESS"
-			INSTALL_URL_ADDRESS="$( curl -s $INSTALL_URL_ADDRESS | grep 'linux.tar.gz' | grep 'browser_download_url' | head -1 | cut -d \" -f 4 )"
+			INSTALL_URL_ADDRESS="$(curl -s $INSTALL_URL_ADDRESS | grep -m1 'browser_download_url.*linux.tar.gz' | cut -d \" -f 4)"
 
 			DEPS_LIST='mediainfo'
 			no_check_url=1 Download_Install "$INSTALL_URL_ADDRESS" /opt
@@ -5870,14 +5898,21 @@ _EOF_
 
 			Banner_Installing
 
-			INSTALL_URL_ADDRESS='https://api.github.com/repos/Jackett/Jackett/releases'
+			INSTALL_URL_ADDRESS='https://api.github.com/repos/Jackett/Jackett/releases/latest'
 			G_CHECK_URL "$INSTALL_URL_ADDRESS" #full filepath below, returns --spider error :(
-			INSTALL_URL_ADDRESS="$( curl -s $INSTALL_URL_ADDRESS | grep Jackett.Binaries.Mono.tar.gz | grep browser_download_url | head -1 | cut -d \" -f 4 )"
+			INSTALL_URL_ADDRESS="$(curl -s $INSTALL_URL_ADDRESS | grep -m1 'browser_download_url.*Jackett.Binaries.Mono.tar.gz' | cut -d \" -f 4)"
 
 			no_check_url=1 Download_Install "$INSTALL_URL_ADDRESS" /opt
 
-			cp -R /opt/Jackett /opt/jackett #CP for reinstall support
-			rm -R /opt/Jackett
+			# Move existing configs to unpacked install dir
+			[[ -d /opt/jackett/.mono ]] && mv /opt/jackett/.mono /opt/Jackett/
+			[[ -d /opt/jackett/.config ]] && mv /opt/jackett/.config /opt/Jackett/
+
+			# Remove existing install dir
+			[[ -d /opt/jackett ]] && rm -R /opt/jackett
+
+			# Move unpacked install dir in place
+			mv /opt/Jackett /opt/jackett
 
 		fi
 
@@ -5956,8 +5991,21 @@ _EOF_
 			Banner_Installing
 
 			DEPS_LIST='libav-tools cifs-utils'
-			Download_Install 'http://download.roonlabs.com/builds/RoonServer_linuxx64.tar.bz2'
-			mv RoonServer $G_FP_DIETPI_USERDATA/roonserver
+
+			# Skip download and install, if already existent, manual removal or internal updater can be used:
+			if [[ ! -d $G_FP_DIETPI_USERDATA/roonserver ]]; then
+
+				Download_Install 'http://download.roonlabs.com/builds/RoonServer_linuxx64.tar.bz2' $G_FP_DIETPI_USERDATA
+				mv $G_FP_DIETPI_USERDATA/RoonServer $G_FP_DIETPI_USERDATA/roonserver
+
+			else
+
+				G_WHIP_MSG "[WARNING] Existing install found\n
+The ${aSOFTWARE_WHIP_NAME[$software_id]} target install directory $G_FP_DIETPI_USERDATA/roonserver already exists. This will not be overwritten.\n
+If the existing instance is broken or obsolete, please manually backup config files and data, then remove this directory and rerun "dietpi-software".\n
+If you want to update ${aSOFTWARE_WHIP_NAME[$software_id]}, please use it's internal updater."
+
+			fi
 
 		fi
 
@@ -7434,7 +7482,7 @@ _EOF_
 			fi
 
 			# - Set UTF-8
-			G_CONFIG_INJECT 'default_charset[[:blank:]]*=' 'default_charset=\"UTF-8\"' $target_php_ini
+			G_CONFIG_INJECT 'default_charset[[:blank:]]*=' 'default_charset="UTF-8"' $target_php_ini
 
 			# Enable all installed and available PHP modules.
 			local modules_to_enable=$(ls "$FP_PHP_BASE_DIR"/mods-available | grep '.ini' | sed 's/.ini//')
@@ -7531,6 +7579,46 @@ _EOF_
 			# - Data dir
 			mkdir -p $G_FP_DIETPI_USERDATA/openbazaar
 
+			# - Init OB to have config file available, if not yet the case, and edit to allow remote client access
+			if [[ ! -f $G_FP_DIETPI_USERDATA/openbazaar/config ]]; then
+
+				openbazaar-go init -d $G_FP_DIETPI_USERDATA/openbazaar
+
+				# - Add current IP as gateway to allow external client connection
+				G_CONFIG_INJECT '"Gateway": "' "    \"Gateway\": \"/ip4/$(sed -n 4p /DietPi/dietpi/.network)/tcp/4002\"," $G_FP_DIETPI_USERDATA/openbazaar/config
+
+				# - Client connection user/password
+				G_DIETPI-NOTIFY 2 "Please enter username and password for your ${aSOFTWARE_WHIP_NAME[$software_id]} client connection:"
+				openbazaar-go setapicreds -d $G_FP_DIETPI_USERDATA/openbazaar
+
+				# - Client IP needs to be added to allowed IP list
+				local ob_client_ip=''
+				local invalid_entry=''
+				while :
+				do
+
+					G_WHIP_INPUTBOX "${invalid_entry}Please enter the IP address of your ${aSOFTWARE_WHIP_NAME[$software_id]} client machine
+This is required, since the ${aSOFTWARE_WHIP_NAME[$software_id]} server node by default does not allow any remote connection."
+					if (( ! $? )) && [[ $G_WHIP_RETURNED_VALUE =~ ^[0-9.]+$ ]]; then
+
+						ob_client_ip=$G_WHIP_RETURNED_VALUE
+						break
+
+					else
+
+						invalid_entry='[FAILED] Please enter a valid IP address\n\n'
+
+					fi
+
+				done
+				GCI_NEWLINE=1 G_CONFIG_INJECT '"AllowedIPs":' "    \"AllowedIPs\": [\n      \"$ob_client_ip\"\n    ]," $G_FP_DIETPI_USERDATA/openbazaar/config
+
+			else
+
+				G_DIETPI-NOTIFY 2 "Existing ${aSOFTWARE_WHIP_NAME[$software_id]} config found. Skipping pre-configuration..."
+
+			fi
+
 			# - service
 			cat << _EOF_ > /etc/systemd/system/openbazaar.service
 [Unit]
@@ -7540,7 +7628,7 @@ Description=OpenBazaar
 Type=simple
 Environment=GOPATH=$G_FP_DIETPI_USERDATA/go
 WorkingDirectory=$G_FP_DIETPI_USERDATA/go
-ExecStart=$(which go) run $G_FP_DIETPI_USERDATA/go/src/github.com/OpenBazaar/openbazaar-go/openbazaard.go start -a 0.0.0.0 -d $G_FP_DIETPI_USERDATA/openbazaar
+ExecStart=$(which openbazaar-go) start -d $G_FP_DIETPI_USERDATA/openbazaar
 
 [Install]
 WantedBy=multi-user.target
@@ -7733,9 +7821,6 @@ collation-server=utf8mb4_general_ci
 _EOF_
 			G_RUN_CMD systemctl restart $MARIADB_SERVICE
 
-			# Enable support for symlink userdata dir: https://github.com/Fourdee/DietPi/issues/2221
-			G_CONFIG_INJECT 'protected \$allowSymlinks =' 'protected \$allowSymlinks = true;' /var/www/owncloud/lib/private/Files/Storage/Local.php
-
 			# Initially add occ command shortcut, will be done by Dietpi-Globals automatically, if occ file exist:
 			occ(){ sudo -u www-data php /var/www/owncloud/occ "$@"; }
 
@@ -7774,16 +7859,18 @@ _EOF_
 					if ! grep -q "'installed' => true," $config_php 2>/dev/null; then
 
 						G_ERROR_HANDLER_COMMAND='occ maintenance:install'
-						G_ERROR_HANDLER_ONERROR_FPLOGFILE='/tmp/G_ERROR_HANDLER_OCC'
-						occ maintenance:install --no-interaction --database 'mysql' --database-name 'owncloud' --database-user 'tmp_root' --database-pass "$GLOBAL_PW" --admin-user "$username" --admin-pass "$GLOBAL_PW" --data-dir "$datadir" &> /tmp/G_ERROR_HANDLER_OCC
+						G_ERROR_HANDLER_ONERROR_FPLOGFILE='G_ERROR_HANDLER_OCC'
+						occ maintenance:install --no-interaction --database 'mysql' --database-name 'owncloud' --database-user 'tmp_root' --database-pass "$GLOBAL_PW" --admin-user "$username" --admin-pass "$GLOBAL_PW" --data-dir "$datadir" &> G_ERROR_HANDLER_OCC
 						G_ERROR_HANDLER_EXITCODE=$?
-						if (( ! $G_ERROR_HANDLER_EXITCODE )) && grep -qi 'Stack trace' /tmp/G_ERROR_HANDLER_OCC; then
+						if (( ! $G_ERROR_HANDLER_EXITCODE )) && grep -qi 'Stack trace' G_ERROR_HANDLER_OCC; then
 
 							G_ERROR_HANDLER_EXITCODE=999 # Our individual error code for unhandled exceptions
 
 						fi
 						G_ERROR_HANDLER
-						rm /tmp/G_ERROR_HANDLER_OCC
+						rm G_ERROR_HANDLER_OCC
+						# Remove obsolete default data dir
+						[[ $(readlink -f $datadir) != $(readlink -f /var/www/owncloud/data) ]] && rm -R /var/www/owncloud/data
 
 					fi
 					mysql -e "drop user 'tmp_root'@'localhost'"
@@ -7810,27 +7897,27 @@ _EOF_
 			# Set pretty URLs (without /index.php/) on Apache:
 			if (( ${aSOFTWARE_INSTALL_STATE[83]} >= 1 )); then
 
-				PRESERVE=1 G_CONFIG_INJECT "'htaccess.RewriteBase'" "'htaccess.RewriteBase' => '/owncloud'," $config_php "'overwrite.cli.url'"
+				GCI_PRESERVE=1 G_CONFIG_INJECT "'htaccess.RewriteBase'" "'htaccess.RewriteBase' => '/owncloud'," $config_php "'overwrite.cli.url'"
 				occ maintenance:update:htaccess
 
 			fi
 
 			# APCu Memcache
-			PRESERVE=1 G_CONFIG_INJECT "'memcache.local'" "'memcache.local' => '\\\\OC\\\\Memcache\\\\APCu'," $config_php "'version'"
+			GCI_PRESERVE=1 G_CONFIG_INJECT "'memcache.local'" "'memcache.local' => '\\\\OC\\\\Memcache\\\\APCu'," $config_php "'version'"
 
 			# Redis for transactional file locking:
 			G_DIETPI-NOTIFY 2 'Enabling Redis for transactional file locking.' # https://doc.owncloud.org/server/latest/admin_manual/configuration/server/caching_configuration.html#configuring-transactional-file-locking
 			local redis_conf="/etc/redis/redis*.conf"
 			# - Enable Redis socket and grant www-data access to it:
 			#	- NB: To allow wildcard expansion, do not use quotes around $redis_conf!
-			PRESERVE=1 G_CONFIG_INJECT 'unixsocket[[:blank:]]' 'unixsocket /var/run/redis/redis-server.sock' $redis_conf
+			GCI_PRESERVE=1 G_CONFIG_INJECT 'unixsocket[[:blank:]]' 'unixsocket /var/run/redis/redis-server.sock' $redis_conf
 			G_CONFIG_INJECT 'unixsocketperm[[:blank:]]' 'unixsocketperm 770' $redis_conf
 			local redis_sock=$(grep -m1 '^[[:blank:]]*unixsocket[[:blank:]]' $redis_conf | awk '{print $2}')
 			usermod -a -G redis www-data
 			G_RUN_CMD systemctl restart redis-server
 			# - Enable ownCloud to use Redis socket for transactional file locking:
 			G_CONFIG_INJECT "'filelocking.enabled'" "'filelocking.enabled' => true," $config_php "'memcache.local'"
-			PRESERVE=1 G_CONFIG_INJECT "'memcache.locking'" "'memcache.locking' => '\\\\OC\\\\Memcache\\\\Redis',\n'redis' => array ('host' => '$redis_sock', 'port' => 0,)," $config_php "'filelocking.enabled'"
+			GCI_PRESERVE=1 GCI_NEWLINE=1 G_CONFIG_INJECT "'memcache.locking'" "'memcache.locking' => '\\\\OC\\\\Memcache\\\\Redis',\n'redis' => array ('host' => '$redis_sock', 'port' => 0,)," $config_php "'filelocking.enabled'"
 
 			# Enable ownCloud background cron job:
 			crontab -u www-data -l 2>/dev/null | grep -q '/var/www/owncloud/cron.php' || ( crontab -u www-data -l 2>/dev/null ; echo "*/15 * * * * php /var/www/owncloud/cron.php" ) | crontab -u www-data -
@@ -7985,9 +8072,6 @@ collation-server=utf8mb4_general_ci
 _EOF_
 			G_RUN_CMD systemctl restart $MARIADB_SERVICE
 
-			# Enable support for symlink userdata dir: https://github.com/Fourdee/DietPi/issues/2221
-			G_CONFIG_INJECT 'protected \$allowSymlinks =' 'protected \$allowSymlinks = true;' /var/www/nextcloud/lib/private/Files/Storage/Local.php
-
 			# Initially add occ command shortcut, will be done by Dietpi-Globals automatically, if occ file exist:
 			ncc(){ sudo -u www-data php /var/www/nextcloud/occ "$@"; }
 
@@ -8046,16 +8130,29 @@ The install script will now exit. After applying one of the the above, rerun die
 					if ! grep -q "'installed' => true," $config_php 2>/dev/null; then
 
 						G_ERROR_HANDLER_COMMAND='ncc maintenance:install'
-						G_ERROR_HANDLER_ONERROR_FPLOGFILE='/tmp/G_ERROR_HANDLER_NCC'
-						ncc maintenance:install --no-interaction --database 'mysql' --database-name 'nextcloud' --database-user 'tmp_root' --database-pass "$GLOBAL_PW" --admin-user "$username" --admin-pass "$GLOBAL_PW" --data-dir "$datadir" &> /tmp/G_ERROR_HANDLER_NCC
+						G_ERROR_HANDLER_ONERROR_FPLOGFILE='G_ERROR_HANDLER_NCC'
+						ncc maintenance:install --no-interaction --database 'mysql' --database-name 'nextcloud' --database-user 'tmp_root' --database-pass "$GLOBAL_PW" --admin-user "$username" --admin-pass "$GLOBAL_PW" --data-dir "$datadir" &> G_ERROR_HANDLER_NCC
 						G_ERROR_HANDLER_EXITCODE=$?
-						if (( ! G_ERROR_HANDLER_EXITCODE )) && grep -qi 'Stack trace' /tmp/G_ERROR_HANDLER_NCC; then
+						if (( ! G_ERROR_HANDLER_EXITCODE )) && grep -qi 'Stack trace' G_ERROR_HANDLER_NCC; then
 
 							G_ERROR_HANDLER_EXITCODE=999 # Our individual error code for unhandled exceptions
 
 						fi
-						G_ERROR_HANDLER
-						rm /tmp/G_ERROR_HANDLER_NCC
+						# Workaround Nextcloud 14.0.3 throwing an error, when data dir path contains a symlink: https://github.com/nextcloud/server/issues/12247
+						if (( $G_DISTRO > 3 )) && [[ $(readlink -f $datadir) != $datadir ]]; then
+
+							G_ERROR_HANDLER_RESET
+							# Install with this error does not copy over skeleton
+							cp -a /var/www/nextcloud/core/skeleton/. "$datadir/$username/files"
+
+						else
+
+							G_ERROR_HANDLER
+
+						fi
+						rm G_ERROR_HANDLER_NCC
+						# Remove obsolete default data dir
+						[[ $(readlink -f $datadir) != $(readlink -f /var/www/nextcloud/data) ]] && rm -R /var/www/nextcloud/data
 
 					fi
 					mysql -e "drop user 'tmp_root'@'localhost'"
@@ -8080,27 +8177,27 @@ The install script will now exit. After applying one of the the above, rerun die
 			# Set pretty URLs (without /index.php/) on Apache:
 			if (( ${aSOFTWARE_INSTALL_STATE[83]} >= 1 )); then
 
-				PRESERVE=1 G_CONFIG_INJECT "'htaccess.RewriteBase'" "'htaccess.RewriteBase' => '/nextcloud'," $config_php "'overwrite.cli.url'"
+				GCI_PRESERVE=1 G_CONFIG_INJECT "'htaccess.RewriteBase'" "'htaccess.RewriteBase' => '/nextcloud'," $config_php "'overwrite.cli.url'"
 				ncc maintenance:update:htaccess
 
 			fi
 
 			# APCu Memcache
-			PRESERVE=1 G_CONFIG_INJECT "'memcache.local'" "'memcache.local' => '\\\\OC\\\\Memcache\\\\APCu'," $config_php "'version'"
+			GCI_PRESERVE=1 G_CONFIG_INJECT "'memcache.local'" "'memcache.local' => '\\\\OC\\\\Memcache\\\\APCu'," $config_php "'version'"
 
 			# Redis for transactional file locking:
 			G_DIETPI-NOTIFY 2 'Enabling Redis for transactional file locking.' # https://docs.nextcloud.com/server/14/admin_manual/configuration_files/files_locking_transactional.html
 			local redis_conf="/etc/redis/redis*.conf"
 			# - Enable Redis socket and grant www-data access to it:
 			#	- NB: To allow wildcard expansion, do not use quotes around $redis_conf!
-			PRESERVE=1 G_CONFIG_INJECT 'unixsocket[[:blank:]]' 'unixsocket /var/run/redis/redis-server.sock' $redis_conf
+			GCI_PRESERVE=1 G_CONFIG_INJECT 'unixsocket[[:blank:]]' 'unixsocket /var/run/redis/redis-server.sock' $redis_conf
 			G_CONFIG_INJECT 'unixsocketperm[[:blank:]]' 'unixsocketperm 770' $redis_conf
 			local redis_sock=$(grep -m1 '^[[:blank:]]*unixsocket[[:blank:]]' $redis_conf | awk '{print $2}')
 			usermod -a -G redis www-data
 			G_RUN_CMD systemctl restart redis-server
 			# - Enable Nextloud to use Redis socket:
 			G_CONFIG_INJECT "'filelocking.enabled'" "'filelocking.enabled' => true," $config_php "'memcache.local'"
-			PRESERVE=1 G_CONFIG_INJECT "'memcache.locking'" "'memcache.locking' => '\\\\OC\\\\Memcache\\\\Redis',\n'redis' => array ('host' => '$redis_sock', 'port' => 0,)," $config_php "'filelocking.enabled'"
+			GCI_PRESERVE=1 GCI_NEWLINE=1 G_CONFIG_INJECT "'memcache.locking'" "'memcache.locking' => '\\\\OC\\\\Memcache\\\\Redis',\n'redis' => array ('host' => '$redis_sock', 'port' => 0,)," $config_php "'filelocking.enabled'"
 
 			# Enable Nextcloud background cron job:
 			crontab -u www-data -l 2>/dev/null | grep -q '/var/www/nextcloud/cron.php' || ( crontab -u www-data -l 2>/dev/null ; echo "*/15 * * * * php /var/www/nextcloud/cron.php" ) | crontab -u www-data -
@@ -8167,8 +8264,8 @@ NB: This port needs to be forwarded by your router and/or opened in your firewal
 			G_CONFIG_INJECT 'lt-cred-mech' 'lt-cred-mech' /etc/turnserver.conf
 			G_CONFIG_INJECT 'use-auth-secret' 'use-auth-secret' /etc/turnserver.conf
 			G_CONFIG_INJECT 'realm=' "realm=$domain" /etc/turnserver.conf
-			PRESERVE=1 G_CONFIG_INJECT 'total-quota=' 'total-quota=100' /etc/turnserver.conf
-			PRESERVE=1 G_CONFIG_INJECT 'bps-capacity=' 'bps-capacity=0' /etc/turnserver.conf
+			GCI_PRESERVE=1 G_CONFIG_INJECT 'total-quota=' 'total-quota=100' /etc/turnserver.conf
+			GCI_PRESERVE=1 G_CONFIG_INJECT 'bps-capacity=' 'bps-capacity=0' /etc/turnserver.conf
 			G_CONFIG_INJECT 'stale-nonce' 'stale-nonce' /etc/turnserver.conf
 			G_CONFIG_INJECT 'no-loopback-peers' 'no-loopback-peers' /etc/turnserver.conf
 			G_CONFIG_INJECT 'no-multicast-peers' 'no-multicast-peers' /etc/turnserver.conf
@@ -8203,7 +8300,7 @@ NB: This port needs to be forwarded by your router and/or opened in your firewal
 			ncc config:app:set spreed stun_servers --value="[\"$domain:$port\"]"
 			#	Generate random secret to secure TURN server access
 			local secret=$(openssl rand -hex 32)
-			PRESERVE=1 G_CONFIG_INJECT 'static-auth-secret=' "static-auth-secret=$secret" /etc/turnserver.conf
+			GCI_PRESERVE=1 G_CONFIG_INJECT 'static-auth-secret=' "static-auth-secret=$secret" /etc/turnserver.conf
 			#	Scrape existing secret, in case user manually chose/edited it
 			secret="$(grep -m1 '^[[:blank:]]*static-auth-secret=' /etc/turnserver.conf)"
 			secret="${secret#*static-auth-secret=}"
@@ -8223,7 +8320,7 @@ NB: This port needs to be forwarded by your router and/or opened in your firewal
 
 			# Run service as "dietpi" group: https://github.com/Fourdee/DietPi/issues/350#issuecomment-423763518
 			mkdir -p /etc/systemd/system/transmission-daemon.service.d
-			echo -e '[Service]\nGroup=dietpi' >> /etc/systemd/system/transmission-daemon.service.d/dietpi-group.conf
+			echo -e '[Service]\nGroup=dietpi' > /etc/systemd/system/transmission-daemon.service.d/dietpi-group.conf
 
 			# Apply optimized settings
 			sed -i '/^}/d' /etc/transmission-daemon/settings.json
@@ -8250,7 +8347,7 @@ NB: This port needs to be forwarded by your router and/or opened in your firewal
 			G_CONFIG_INJECT '"message-level"' '"message-level": 0,' /etc/transmission-daemon/settings.json
 
 			# To allow access for download managers and media software, files need to be created with 77X permissions.
-			G_CONFIG_INJECT '\"umask\":' '    \"umask\": 7,' /etc/transmission-daemon/settings.json
+			G_CONFIG_INJECT '\"umask\":' '    "umask": 7,' /etc/transmission-daemon/settings.json
 
 			echo '}' >> /etc/transmission-daemon/settings.json
 
@@ -11561,7 +11658,7 @@ _EOF_
 
 			Banner_Configuration
 
-			adduser jackett --system --no-create-home --group --shell=/bin/nologin
+			adduser jackett --system --no-create-home --group --shell=/usr/sbin/nologin
 
 			cat << _EOF_ > /etc/systemd/system/jackett.service
 [Unit]
@@ -12008,7 +12105,7 @@ gpio -g write 17 0
 gpio -g mode 22 out
 gpio -g write 22 1
 
-while true
+while :
 do
 
 	if (( \$(gpio -g read 17) == 1 )); then
@@ -12044,8 +12141,8 @@ ExecStart=/bin/bash -c '/var/lib/dietpi/dietpi-software/installed/pi-spc/sds.sh'
 WantedBy=multi-user.target
 _EOF_
 
-			# G_CONFIG_INJECT	'^dtoverlay=gpio-shutdown' 'dtoverlay=gpio-shutdown,gpio_pin=22,active_low=0' /DietPi/config.txt
-			# G_CONFIG_INJECT	'^dtoverlay=gpio-poweroff' 'dtoverlay=gpio-poweroff,gpio_pin=17' /DietPi/config.txt
+			# G_CONFIG_INJECT	'dtoverlay=gpio-shutdown' 'dtoverlay=gpio-shutdown,gpio_pin=22,active_low=0' /DietPi/config.txt
+			# G_CONFIG_INJECT	'dtoverlay=gpio-poweroff' 'dtoverlay=gpio-poweroff,gpio_pin=17' /DietPi/config.txt
 
 		fi
 
@@ -12928,8 +13025,8 @@ _EOF_
 		if (( aSOFTWARE_INSTALL_STATE[$software_id] == -1 )); then
 
 			Banner_Uninstalling
-			rm -R $G_FP_DIETPI_USERDATA/roonserver
-			rm /etc/systemd/system/roonserver.service
+			[[ -d $G_FP_DIETPI_USERDATA/roonserver ]] && rm -R $G_FP_DIETPI_USERDATA/roonserver
+			[[ -f /etc/systemd/system/roonserver.service ]] && rm /etc/systemd/system/roonserver.service
 
 		fi
 
@@ -13537,7 +13634,6 @@ _EOF_
 			Banner_Uninstalling
 
 			rm /etc/systemd/system/openbazaar.service
-
 			rm -R $G_FP_DIETPI_USERDATA/go/src/github.com/OpenBazaar
 			rm -R /etc/openbazaar-server &> /dev/null # Pre v6.15 OB1.0
 

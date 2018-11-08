@@ -2330,41 +2330,51 @@ $print_logfile_info
 
 	}
 
-	# Inject setting into config file
-	# - First tries to replace old setting, else commented setting and otherwise adds it to end of file.
-	#	- Optionally adds argument to new line after speficied pattern $4.
-	#	- PRESERVE=1 G_CONFIG_INJECT allows to keep current setting, if present.
-	#	- BACKUP=1 G_CONFIG_INJECT allows to backup to file before editing, if backup does not yet exist.
-	# - Example: G_CONFIG_INJECT 'prefer-family[[:blank:]=]' 'prefer-family = IPv4' /etc/wgetrc
-	# - Extended regular expressions can be used for the identifying patterns $1 and $4.
-	#	- Escape any of: ".+*?&\|^$()[]{}
-	#	- Escape baskashes doubled within double quotes.
+	# Inject setting into config file: First tries to replace old setting, else commented setting and otherwise adds to end of file.
+	# Usage:
+	# - $1 Setting pattern to find existing setting with grep extended regular expression support
+	# - $2 Target setting + value, to inject into config file: After bash string expansion (e.g. variables), everything else will be taken literally, thus no further escaping is required.
+	# - $3 Path to config file
+	# - Optional: $4 Line pattern after which the setting will be added instead of end of file with grep extended regular expression support
+	# - GCI_PRESERVE=1 G_CONFIG_INJECT preserves current setting, if present.
+	# - GCI_BACKUP=1 G_CONFIG_INJECT creates a backup before editing the file, if backup does not yet exist, to: $3.bak
+	# - GCI_NEWLINE=1 G_CONFIG_INJECT explicitly expands newlines \n within $2, which by default are taken literally
+	#	- Be careful with this, since pattern matching is only done per line which can lead to doubled lines when applying G_CONFIG_INJECT a second time.
+	# NB:
+	# - Within double quotes "", as usual, escape literally meant double quotes and dollar signs $ with leading backslash \.
+	# - Within single quotes '', as usual, escape literally meant single quotes via: '\'' # End leading string; Add escaped single quote; Start trailing string
+	# - Additionally in case of extended regular expression support ($1 and $4), the following characters need to be escaped via backslash \, if wanted literally:
+	#	\ . + * ? [ ( { ^ & $ |
+	# Example:
+	# - G_CONFIG_INJECT 'prefer-family[[:blank:]=]' 'prefer-family = IPv4' /etc/wgetrc
 	G_CONFIG_INJECT(){
 
 		[[ $G_PROGRAM_NAME ]] || local G_PROGRAM_NAME='G_CONFIG_INJECT'
 		local pattern="$1"
-		local setting="$2"
+		local setting="${2//\\/\\\\}"; setting="${setting//./\\.}"; setting="${setting//+/\\+}"; setting="${setting//\*/\\\*}"; setting="${setting//\?/\\\?}"; setting="${setting//[/\\[}"
+		setting="${setting//\(/\\\(}"; setting="${setting//{/\\{}"; setting="${setting//^/\\^}"; setting="${setting//&/\\&}"; setting="${setting//$/\\$}"; setting="${setting//|/\\|}"
+		[[ $GCI_NEWLINE == 1 ]] && setting="${setting//\\\\n/\\n}"
 		local file="$3"
 		local after="$4"
 		local error=''
 
 		syntax_error(){
 
-			[[ $after ]] && after='after line\n	'.$after.' ($4)\n'
-			[[ $error ]] && error="\n\"grep\" reported the following error:\n	$error\n"
+			[[ $after ]] && after="after line \$4\n	$after (raw escaped input)\n"
+			[[ $error ]] && error="\n\"grep\" or \"sed\" reported the following error:\n	$error\n"
 
 			G_WHIP_MSG "[FAILED] Syntax error
 $error
-Couldn't add setting (\$2)
-	$setting
-into file (\$3)
+Couldn't add setting \$2
+	$setting (raw escaped input)
+into file \$3
 	$file
 $after
 NB:
-- Please escape any of the following characters with leading backslash (\):
-	\".+*?\\|^\$()[]{}
-- Within double quotes (\"\"), please escape backslashes (\) doubled:
-	\"\\\\\\\\\" results in \"\\\""
+ - Within double quotes \"\", as usual, escape literally meant double quotes and dollar signs $ with leading backslash \.
+ - Within single quotes '', as usual, escape literally meant single quotes via: '\'' # End leading string; Add escaped single quote; Start trailing string
+ - Additionally in case of extended regular expression support (\$1 and \$4), the following characters need to be escaped via backslash \, if wanted literally:
+	\ . + * ? [ ( { ^ & $ |"
 
 			unset syntax_error
 
@@ -2372,71 +2382,84 @@ NB:
 
 		if [[ ! -w $file ]]; then
 
-			G_WHIP_MSG "[FAILED] '$file' does not exist or cannot be written to by current user.\n
-Please verify the existance of the file, retry with proper permissions or apply the setting manually:
+			G_WHIP_MSG "[FAILED] File does not exist or cannot be written to by current user\n
+Please verify the existence of the file \$3
+	$file\n
+Retry with proper permissions or apply the setting manually:
 	$(sed -E "c\\$setting" <<< '')"
 
-		elif error=$(grep -qE "^[[:blank:]]*$pattern" $file 2>&1); then
-			# As an error within the condition leads to "false", it can be catched only after next condition match
+		elif error=$(grep -Eq "^[[:blank:]]*$pattern" $file 2>&1); then
+			# As an error within the condition leads to result "false", it can be caught only in next "elif"/"else" statement.
 
-			if [[ $PRESERVE == 1 ]]; then
+			if [[ $GCI_PRESERVE == 1 ]]; then
 
 				G_DIETPI-NOTIFY 0 "Current setting in \e[33m$file\e[0m will be preserved: \e[33m$(grep -Em1 "^[[:blank:]]*$pattern" $file | sed 's|\\|\\\\|g')\e[0m"
 
-			elif error=$(grep -qE "^[[:blank:]]*$setting([[:space:]]|$)" $file 2>&1); then
+			elif error=$(grep -Eq "^[[:blank:]]*$setting([[:space:]]|$)" $file 2>&1); then
 
 				G_DIETPI-NOTIFY 0 "Desired setting in \e[33m$file\e[0m was already set: \e[33m$(grep -Em1 "^[[:blank:]]*$pattern" $file | sed 's|\\|\\\\|g')\e[0m"
 
-			else
-				[[ $error ]] && syntax_error && return 1
+			elif error=$( (( $(grep -Ec "^[[:blank:]]*$pattern" $file 2>&1) > 1 )) 2>&1); then
+				[[ $error ]] && { syntax_error; return 1; }
 
-				[[ $BACKUP == 1 && ! -f $file.bak ]] && cp -a $file $file.bak && G_DIETPI-NOTIFY 2 "Config file backup created: \e[33m$file\e[0m"
-				sed -Ei "0,\|^[[:blank:]]*$pattern.*$|s||$setting|" $file
-				(( $? )) && syntax_error && return 1
+				G_WHIP_MSG "[FAILED] Setting was found multiple times\n
+The pattern \$1
+	$(sed -E "c\\$pattern" <<< '')
+was found multiple times in file \$3
+	$file\n
+____________
+$(grep -En "^[[:blank:]]*$pattern" $file)
+____________\n
+Either the pattern \$1 needs to be more specific or the desired setting can appear multiple times by design and it cannot be predicted which instance to edit.
+Please retry with more specific parameter \$1 or apply the setting manually:
+	$(sed -E "c\\$setting" <<< '')"
+
+			else
+				[[ $error ]] && { syntax_error; return 1; }
+
+				[[ $GCI_BACKUP == 1 && ! -f $file.bak ]] && cp -a $file $file.bak && G_DIETPI-NOTIFY 2 "Config file backup created: \e[33m$file.bak\e[0m"
+				error=$(sed -Ei "0,\|^[[:blank:]]*$pattern.*|s||$setting|" $file 2>&1) || { syntax_error; return 1; }
 				G_DIETPI-NOTIFY 0 "Setting in \e[33m$file\e[0m adjusted: \e[33m$(sed -E "c\\$setting" <<< '' | sed 's|\\|\\\\|g')\e[0m"
 
 			fi
 
-		elif error=$(grep -qE "^[[:blank:]#;]*$pattern" $file 2>&1); then
-			[[ $error ]] && syntax_error && return 1
+		elif error=$(grep -Eq "^[[:blank:]#;]*$pattern" $file 2>&1); then
+			[[ $error ]] && { syntax_error; return 1; }
 
-			[[ $BACKUP == 1 && ! -f $file.bak ]] && cp -a $file $file.bak && G_DIETPI-NOTIFY 2 "Config file backup created: \e[33m$file\e[0m"
-			sed -Ei "0,\|^[[:blank:]#;]*$pattern.*$|s||$setting|" $file
-			(( $? )) && syntax_error && return 1
+			[[ $GCI_BACKUP == 1 && ! -f $file.bak ]] && cp -a $file $file.bak && G_DIETPI-NOTIFY 2 "Config file backup created: \e[33m$file.bak\e[0m"
+			error=$(sed -Ei "0,\|^[[:blank:]#;]*$pattern.*|s||$setting|" $file 2>&1) || { syntax_error; return 1; }
 			G_DIETPI-NOTIFY 0 "Comment in \e[33m$file\e[0m converted to setting: \e[33m$(sed -E "c\\$setting" <<< '' | sed 's|\\|\\\\|g')\e[0m"
 
 		else
-			[[ $error ]] && syntax_error && return 1
+			[[ $error ]] && { syntax_error; return 1; }
 
 			if [[ $after ]]; then
 
-				if error=$(grep -qE "^[[:blank:]]*$after" $file 2>&1); then
+				if error=$(grep -Eq "^[[:blank:]]*$after" $file 2>&1); then
 
-					[[ $BACKUP == 1 && ! -f $file.bak ]] && cp -a $file $file.bak && G_DIETPI-NOTIFY 2 "Config file backup created: \e[33m$file\e[0m"
-					sed -Ei "0,\|^[[:blank:]]*$after.*$|s||&\n$setting|" $file
-					(( $? )) && syntax_error && return 1
+					[[ $GCI_BACKUP == 1 && ! -f $file.bak ]] && cp -a $file $file.bak && G_DIETPI-NOTIFY 2 "Config file backup created: \e[33m$file.bak\e[0m"
+					error=$(sed -Ei "0,\|^[[:blank:]]*$after.*|s||&\n$setting|" $file 2>&1) || { syntax_error; return 1; }
 					G_DIETPI-NOTIFY 0 "Added setting \e[33m$(sed -E "c\\$setting" <<< '' | sed 's|\\|\\\\|g')\e[0m to \e[33m$file\e[0m after line \e[33m$(grep -Em1 "^[[:blank:]]*$after" $file | sed 's|\\|\\\\|g')\e[0m"
 
 				else
-					[[ $error ]] && syntax_error && return 1
+					[[ $error ]] && { syntax_error; return 1; }
 
-					G_WHIP_MSG "[FAILED] Setting could not be added after desired line.\n
-The pattern
+					G_WHIP_MSG "[FAILED] Setting could not be added after desired line\n
+The pattern \$4
 	$(sed -E "c\\$after" <<< '')
-could not be found in file
+could not be found in file \$3
 	$file\n
-Please retry with valid parameter (\$4) or apply the setting manually:
+Please retry with valid parameter \$4 or apply the setting manually:
 	$(sed -E "c\\$setting" <<< '')"
 
 				fi
 
 			else
 
-				[[ $BACKUP == 1 && ! -f $file.bak ]] && cp -a $file $file.bak && G_DIETPI-NOTIFY 2 "Config file backup created: \e[33m$file\e[0m"
+				[[ $GCI_BACKUP == 1 && ! -f $file.bak ]] && cp -a $file $file.bak && G_DIETPI-NOTIFY 2 "Config file backup created: \e[33m$file.bak\e[0m"
 				# The following sed does not work on empty files:
 				[[ ! -s $file ]] && echo '# Added by DietPi:' >> $file
-				sed -Ei "\$s|\$|\n$setting|" $file
-				(( $? )) && syntax_error && return 1
+				error=$(sed -Ei "\$s|\$|\n$setting|" $file 2>&1) || { syntax_error; return 1; }
 				G_DIETPI-NOTIFY 0 "Added setting \e[33m$(sed -E "c\\$setting" <<< '' | sed 's|\\|\\\\|g')\e[0m to end of file \e[33m$file\e[0m"
 
 			fi
