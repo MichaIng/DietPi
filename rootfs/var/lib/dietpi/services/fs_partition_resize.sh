@@ -40,33 +40,16 @@ if [[ $TARGET_PARTITION == [0-9] ]]; then
 
 	fi
 
-	# - Rock/pro64 GPT resize | modified version of ayufan-rock64 resize script. I take no credit for this.
-	if (( $HW_MODEL == 42 || $HW_MODEL == 43 )); then
+	# - GPT detection | modified version of ayufan-rock64 resize script.
+	if sfdisk $TARGET_DRIVE -l | grep -qi 'disklabel type: gpt'; then
 
-		# move GPT alternate header to end of disk
+		#	move GPT alternate header to end of disk
 		sgdisk -e $TARGET_DRIVE
 
-		# resize partition 7 to as much as possible
-		echo ",+,,," | sfdisk $TARGET_DRIVE -N7 --force
-
-	# - Everything else
-	else
-
-		cat << _EOF_ | fdisk $TARGET_DRIVE
-p
-d
-$TARGET_PARTITION
-p
-n
-$TARGET_PARTITION
-$(parted $TARGET_DRIVE -ms unit s p | grep ':ext4::;' | awk -F: '{print $2}' | sed 's/s//g')
-
-p
-w
-
-_EOF_
-
 	fi
+
+	# - Maximize partition size
+	echo ",+,,," | sfdisk $TARGET_DRIVE -N$TARGET_PARTITION --force
 
 	partprobe $TARGET_DRIVE
 
