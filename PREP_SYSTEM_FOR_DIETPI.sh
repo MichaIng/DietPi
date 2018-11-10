@@ -104,7 +104,7 @@
 	WHIP_RETURN=$(whiptail --title "$G_PROGRAM_NAME" --menu "Please select a Git branch:" --default-item "master" --ok-button "Ok" --cancel-button "Exit" --backtitle "$G_PROGRAM_NAME" 12 80 3 "${aWHIP_BRANCH[@]}" 3>&1 1>&2 2>&3)
 	if (( $? == 0 )); then
 
-		G_GITBRANCH=$WHIP_RETURN
+		export G_GITBRANCH=$WHIP_RETURN
 
 	else
 
@@ -275,7 +275,7 @@
 		while :
 		do
 
-			G_WHIP_INPUTBOX 'Please enter your name. This will be used to identify the image creator within credits banner.\n\nYou can add your contanct information as well for end users.\n\nNB: An entry is required.'
+			G_WHIP_INPUTBOX 'Please enter your name. This will be used to identify the image creator within credits banner.\n\nYou can add your contact information as well for end users.\n\nNB: An entry is required.'
 			if (( ! $? )) && [[ $G_WHIP_RETURNED_VALUE ]]; then
 
 				#Disallowed:
