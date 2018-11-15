@@ -105,6 +105,7 @@
 	if (( $? == 0 )); then
 
 		export G_GITBRANCH=$WHIP_RETURN
+		echo -e "$G_GITBRANCH $WHIP_RETURN"
 
 	else
 
@@ -131,12 +132,14 @@
 	fi
 
 	# - Load
+		echo -e "$G_GITBRANCH $WHIP_RETURN"
 	if ! . ./dietpi-globals; then
 
 		echo -e 'Error: Unable to load dietpi-globals. Aborting...\n'
 		exit 1
 
 	fi
+		echo -e "$G_GITBRANCH $WHIP_RETURN"
 	rm dietpi-globals
 
 	# - Reset G_PROGRAM_NAME, which was set to empty string by sourcing dietpi-globals
