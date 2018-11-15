@@ -218,7 +218,7 @@
 		((SETUP_STEP++))
 		G_DIETPI-NOTIFY 2 '-----------------------------------------------------------------------------------'
 		#------------------------------------------------------------------------------------------------
-		if [[ -d /DietPi/dietpi ]]; then
+		if [[ -d /DietPi/dietpi || /boot/dietpi ]]; then
 
 			G_DIETPI-NOTIFY 2 'DietPi system found, running pre-prep'
 
@@ -1540,8 +1540,11 @@ _EOF_
 		G_RUN_CMD systemctl stop dietpi-ramdisk
 
 		# - Clear tmp files on disk
-		umount /tmp; rm -R /tmp/* &> /dev/null
 		rm /var/tmp/dietpi/logs/* &> /dev/null
+
+		# - Clear items that may have been left on disk, from previous PREP's
+		rm -R /DietPi/* &> /dev/null
+		umount /tmp; rm -R /tmp/* &> /dev/null
 
 		sync
 
