@@ -218,15 +218,15 @@
 		((SETUP_STEP++))
 		G_DIETPI-NOTIFY 2 '-----------------------------------------------------------------------------------'
 		#------------------------------------------------------------------------------------------------
-		if systemctl is-active dietpi-ramdisk | grep -qi '^active'; then
+		if [[ -d /DietPi/dietpi || /boot/dietpi ]]; then
 
 			G_DIETPI-NOTIFY 2 'DietPi system found, running pre-prep'
 
 			# - Stop services
 			/DietPi/dietpi/dietpi-services stop
 
-			[[ -f /etc/systemd/system/dietpi-ramlog ]] && G_RUN_CMD systemctl stop dietpi-ramlog
-			G_RUN_CMD systemctl stop dietpi-ramdisk
+			[[ -f /etc/systemd/system/dietpi-ramlog ]] && systemctl stop dietpi-ramlog
+			systemctl stop dietpi-ramdisk
 
 			# - Delete any previous existing data
 			rm -R /DietPi/*
@@ -1539,9 +1539,12 @@ _EOF_
 		G_RUN_CMD systemctl stop dietpi-ramlog
 		G_RUN_CMD systemctl stop dietpi-ramdisk
 
-		# - Clear tmp files
-		rm -R /tmp/* &> /dev/null
+		# - Clear tmp files on disk
 		rm /var/tmp/dietpi/logs/* &> /dev/null
+
+		# - Clear items that may have been left on disk, from previous PREP's
+		rm -R /DietPi/* &> /dev/null
+		umount /tmp; rm -R /tmp/* &> /dev/null
 
 		sync
 
