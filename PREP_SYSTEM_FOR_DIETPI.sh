@@ -38,6 +38,7 @@
 	#Check/install minimal APT Pre-Reqs
 	a_MIN_APT_PREREQS=(
 
+		'apt-transport-https'	# Allows HTTPS sources for ATP
 		'wget' # Download DietPi-Globals...
 		'ca-certificates' # ...via HTTPS
 		'locales' # Allow ensuring en_GB.UTF-8
