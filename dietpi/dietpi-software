@@ -5084,9 +5084,24 @@ _EOF_
 
 			Banner_Installing
 
-			DEPS_LIST="$PHP_APT_PACKAGE_NAME-intl"
-			Download_Install 'https://download.pydio.com/pub/core/archives/pydio-core-8.0.2.zip' /var/www
-			mv /var/www/pydio-core-* /var/www/pydio
+			DEPS_LIST="$PHP_APT_PACKAGE_NAME-apcu $PHP_APT_PACKAGE_NAME-gd $PHP_APT_PACKAGE_NAME-intl"
+			(( $G_DISTRO >= 4 )) && DEPS_LIST+=" $PHP_APT_PACKAGE_NAME-mbstring $PHP_APT_PACKAGE_NAME-opcache $PHP_APT_PACKAGE_NAME-xml"
+
+			# Skip install, if already present
+			if [[ -d /var/www/pydio ]]; then
+
+				G_DIETPI-NOTIFY 2 "${aSOFTWARE_WHIP_NAME[$software_id]} install dir \"/var/www/pydio\" already exists. Download and install steps will be skipped.
+ - Please manually backup your config files+data, remove the install dir and rerun \"dietpi-software (re)install $software_id\" if you need to reinstall.
+ - If you want to update the ${aSOFTWARE_WHIP_NAME[$software_id]} instance, please use the internal updater from WebUI."
+				G_AGI $DEPS_LIST
+				unset DEPS_LIST
+
+			else
+
+				Download_Install 'https://download.pydio.com/pub/core/ci/pydio-latest.tar.gz' /var/www
+				mv /var/www/pydio-latest /var/www/pydio
+
+			fi
 
 		fi
 
@@ -10135,30 +10150,87 @@ _EOF_
 
 			Banner_Configuration
 
-			#Configure apache2
-			# - Disable php output_buffering =
-			sed -i '/output_buffering = /c\output_buffering = Off/' "$FP_PHP_BASE_DIR"/apache2/php.ini
-			# - Allow overrides and redirects
-			sed -i "/AllowOverride /c\    AllowOverride All" /etc/apache2/sites-enabled/000-default*
-			# - +Jessie
-			sed -i "/AllowOverride /c\    AllowOverride All" /etc/apache2/apache2.conf
+			# PHP configuration
+			${PHP_APT_PACKAGE_NAME}enmod apcu dom gd intl mbstring pdo_mysql xml
 
-			# - Enable apache2 rewrite engine
-			a2enmod rewrite
+			# Webserver config
+			# - Apache2
+			if (( $aSOFTWARE_INSTALL_STATE[83] > 0 )); then
 
-			#Create Mysql DB
+				# - Enable apache2 rewrite engine
+				a2enmod rewrite
+
+				# - Create Pydio Apache2 config:
+				#	- /data access denial is done via .htaccess
+				cat << _EOF_ > /etc/apache2/sites-available/dietpi-pydio.conf
+<Directory /var/www/pydio/>
+	Options +FollowSymlinks
+	AllowOverride All
+
+	php_admin_value output_buffering Off
+
+</Directory>
+_EOF_
+
+				a2ensite dietpi-pydio
+
+			# - Lighttpd
+			elif (( $aSOFTWARE_INSTALL_STATE[84] > 0 )); then
+
+				# - Enable Lighttpd setenv and access modules
+				G_CONFIG_INJECT '"mod_access",' '	"mod_access",' /etc/lighttpd/lighttpd.conf '"mod_.+",'
+				G_CONFIG_INJECT '"mod_setenv",' '	"mod_setenv",' /etc/lighttpd/lighttpd.conf '"mod_.+",'
+
+				# - Create Pydio Lighttpd config:
+				cat << _EOF_ > /etc/lighttpd/conf-available/99-dietpi-pydio.conf
+$HTTP["url"] =~ "^/pydio($|/)" {
+	$HTTP["url"] =~ "^/pydio/data" {
+		url.access-deny = ("")
+	}
+	setenv.add-environment += (
+		"PHP_ADMIN_VALUE" => "output_buffering=Off",
+	)
+}
+_EOF_
+
+				lighttpd-enable-mod dietpi-pydio
+
+			# - Nginx
+			elif (( $aSOFTWARE_INSTALL_STATE[85] > 0 )); then
+
+				# - Create Pydio Nginx config:
+				cat << _EOF_ > /etc/nginx/sites-dietpi/dietpi-pydio.config
+location ^~ /pydio {
+	location ~ ^/pydio/data/ {
+		deny all;
+	}
+	fastcgi_param PHP_ADMIN_VALUE "output_buffering=Off";
+}
+_EOF_
+
+			fi
+
+			# Create MySQL DB
 			/DietPi/dietpi/func/create_mysql_db pydio pydio "$GLOBAL_PW"
 
-			#Setup Data directory
-			local target_data_dir="$G_FP_DIETPI_USERDATA/pydio_data"
+			# Setup Data directory
+			# - Skip if already existent
+			local target_data_dir=$G_FP_DIETPI_USERDATA/pydio_data
+			if [[ -d $target_data_dir ]]; then
 
-			# - Generate user data dir
-			mkdir -p "$target_data_dir"
+				G_DIETPI-NOTIFY 2 "Existing $target_data_dir found, will migrate..."
+				[[ -e /var/www/pydio/data ]] && rm -R /var/www/pydio/data
 
-			# - move data structure
-			mv /var/www/pydio/data/* "$target_data_dir"/
-			rm -R /var/www/pydio/data
-			ln -sf "$target_data_dir" /var/www/pydio/data
+			else
+
+				# - Move data structure
+				[[ -e $target_data_dir ]] && rm -R $target_data_dir
+				mv /var/www/pydio/data $target_data_dir
+
+			fi
+
+			# Create symlink
+			ln -sf $target_data_dir /var/www/pydio/data
 
 		fi
 
@@ -11659,7 +11731,7 @@ WantedBy=multi-user.target
 _EOF_
 
 			# - logs to RAM
-			rm -R $G_FP_DIETPI_USERDATA/lidarr/logs &> /dev/null
+			rm -R $G_FP_DIETPI_USERDATA/lidarr/logs* &> /dev/null
 			mkdir -p /var/log/lidarr
 			ln -sf /var/log/lidarr $G_FP_DIETPI_USERDATA/lidarr/logs
 			ln -sf /var/log/lidarr/logs.db $G_FP_DIETPI_USERDATA/lidarr/logs.db
@@ -13577,7 +13649,14 @@ _EOF_
 			Banner_Uninstalling
 			rm -R /var/www/pydio
 
-			#drop database
+			# Remove webserver configs
+			[[ $(which a2dissite) ]] && a2dissite dietpi-pydio
+			[[ -f /etc/apache2/conf-available/dietpi-pydio.conf ]] && rm /etc/apache2/conf-available/dietpi-pydio.conf
+			[[ -f /etc/nginx/sites-dietpi/dietpi-pydio.config ]] && rm /etc/nginx/sites-dietpi/dietpi-pydio.config
+			[[ $(which lighttpd-disable-mod) ]] && lighttpd-disable-mod dietpi-pydio
+			[[ -f /etc/lighttpd/conf-available/99-dietpi-pydio.conf ]] && rm /etc/lighttpd/conf-available/99-dietpi-pydio.conf
+
+			# Drop database
 			systemctl start $MARIADB_SERVICE
 			mysqladmin drop pydio -f
 			mysql -e "drop user pydio@localhost"
