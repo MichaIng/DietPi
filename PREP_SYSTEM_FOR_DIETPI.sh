@@ -351,6 +351,7 @@
 			'14' ': Odroid N1'
 			'13' ': Odroid U3'
 			'11' ': Odroid XU3/4/HC1/HC2'
+			'44' ': Pinebook 1080p'
 			'0' ': Raspberry Pi (All models)'
 			# '1' ': Raspberry Pi 1/Zero (512mb)'
 			# '2' ': Raspberry Pi 2'
@@ -782,6 +783,11 @@ _EOF_
 		elif (( $G_HW_MODEL == 43 )); then
 
 			G_AGI linux-rock64 gdisk
+
+		#	Pinebook
+		elif (( $G_HW_MODEL == 44 )); then
+
+			G_AGI linux-pine64-package
 
 		#	BBB
 		elif (( $G_HW_MODEL == 71 )); then
