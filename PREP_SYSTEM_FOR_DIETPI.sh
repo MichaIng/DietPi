@@ -1551,6 +1551,7 @@ _EOF_
 
 		# - Clear items that may have been left on disk, from previous PREP's
 		rm -R /DietPi/* &> /dev/null
+		cd /root
 		umount /tmp; rm -R /tmp/* &> /dev/null
 
 		sync
