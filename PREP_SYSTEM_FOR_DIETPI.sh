@@ -124,7 +124,7 @@
 	#------------------------------------------------------------------------------------------------
 	# - Download
 	# - NB: We'll have to manually handle errors, until DietPi-Globals are sucessfully loaded.
-	if ! wget "https://raw.githubusercontent.com/$G_GITOWNER/DietPi/$G_GITBRANCH/dietpi/func/dietpi-globals"; then
+	if ! wget "https://raw.githubusercontent.com/$G_GITOWNER/DietPi/$G_GITBRANCH/dietpi/func/dietpi-globals" -O dietpi-globals; then
 
 		echo -e 'Error: Unable to download dietpi-globals. Aborting...\n'
 		exit 1
