@@ -1,6 +1,6 @@
 <!--
-Before submitting a pull request
-- Please ensure the target branch is the testing (active dev) branch: https://github.com/Fourdee/DietPi/tree/testing
+Before submitting a pull request:
+- Please ensure the target branch is "dev" (active development): https://github.com/Fourdee/DietPi/tree/dev
 - Please ensure changes have been tested and verified functional.
 -->
 **Status**: WIP | Testing | Ready | ?

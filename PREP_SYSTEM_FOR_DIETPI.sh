@@ -38,6 +38,7 @@
 	#Check/install minimal APT Pre-Reqs
 	a_MIN_APT_PREREQS=(
 
+		'apt-transport-https'	# Allows HTTPS sources for ATP
 		'wget' # Download DietPi-Globals...
 		'ca-certificates' # ...via HTTPS
 		'locales' # Allow ensuring en_GB.UTF-8
@@ -123,7 +124,7 @@
 	#------------------------------------------------------------------------------------------------
 	# - Download
 	# - NB: We'll have to manually handle errors, until DietPi-Globals are sucessfully loaded.
-	if ! wget "https://raw.githubusercontent.com/$G_GITOWNER/DietPi/$G_GITBRANCH/dietpi/func/dietpi-globals"; then
+	if ! wget "https://raw.githubusercontent.com/$G_GITOWNER/DietPi/$G_GITBRANCH/dietpi/func/dietpi-globals" -O dietpi-globals; then
 
 		echo -e 'Error: Unable to download dietpi-globals. Aborting...\n'
 		exit 1
@@ -350,6 +351,7 @@
 			'14' ': Odroid N1'
 			'13' ': Odroid U3'
 			'11' ': Odroid XU3/4/HC1/HC2'
+			'44' ': Pinebook 1080p'
 			'0' ': Raspberry Pi (All models)'
 			# '1' ': Raspberry Pi 1/Zero (512mb)'
 			# '2' ': Raspberry Pi 2'
@@ -781,6 +783,11 @@ _EOF_
 		elif (( $G_HW_MODEL == 43 )); then
 
 			G_AGI linux-rock64 gdisk
+
+		#	Pinebook
+		elif (( $G_HW_MODEL == 44 )); then
+
+			G_AGI linux-pine64-package
 
 		#	BBB
 		elif (( $G_HW_MODEL == 71 )); then
@@ -1544,6 +1551,7 @@ _EOF_
 
 		# - Clear items that may have been left on disk, from previous PREP's
 		rm -R /DietPi/* &> /dev/null
+		cd /root
 		umount /tmp; rm -R /tmp/* &> /dev/null
 
 		sync
