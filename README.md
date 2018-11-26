@@ -1,8 +1,7 @@
 <html>
-    <p align="center">
-        <img src="https://dietpi.com/images/dietpi-logo_150.png">
-    </p>
-    <h1 align="center">DietPi</h1>
+    <h1 align="center">
+        <img src="https://dietpi.com/images/dietpi-logo_150.png" alt="DietPi">
+    </h1>
     <p align="center">
         <b>Lightweight justice for your single-board computer!</b>
         <br>

@@ -267,12 +267,11 @@
 
 		fi
 
+		local xorg_dpi_current=$(grep -m1 '^SOFTWARE_XORG_DPI=' /DietPi/dietpi.txt | sed 's/^[^=]*=//')
+		G_WHIP_MENU_ARRAY+=('17' ": Xorg DPI: [$xorg_dpi_current]")
+
 		#Display brightness
-		if [[ -f /sys/class/backlight/intel_backlight/max_brightness && -f /sys/class/backlight/intel_backlight/brightness ]]; then
-
-			G_WHIP_MENU_ARRAY+=('16' ': Display Brightness')
-
-		fi
+		G_WHIP_MENU_ARRAY+=('16' ': Display Brightness')
 
 		(( $G_HW_MODEL != 20 )) && G_WHIP_MENU_ARRAY+=('14' ': LED Control')
 
@@ -729,19 +728,83 @@
 
 			elif (( $G_WHIP_RETURNED_VALUE == 16 )); then
 
-				MAX_VALUE=$(cat /sys/class/backlight/intel_backlight/max_brightness)
+				# - Known FP's for setting brightness
+				local afp_current_set_brightness=(
+
+					'/sys/class/backlight/intel_backlight'
+					'/sys/class/backlight/rpi_backlight'
+					'/sys/class/backlight/lcd0'
+					'/sys/class/backlight/backlight'
+
+				)
+
 				MIN_VALUE=0
-				local current_brightness=$(cat /sys/class/backlight/intel_backlight/brightness)
+				MAX_VALUE=255
+				local index_apply=0
+				local current_brightness=''
 
-				G_WHIP_DEFAULT_ITEM=$current_brightness
-				G_WHIP_INPUTBOX "Please enter a brightness value:\n - Min = $MIN_VALUE | Max = $MAX_VALUE"
-				if (( $? == 0 )) && [[ $G_WHIP_RETURNED_VALUE ]]; then
+				for ((i=0; i<${#afp_current_set_brightness[@]}; i++))
+				do
 
-					if G_CHECK_VALIDINT $G_WHIP_RETURNED_VALUE $MIN_VALUE $MAX_VALUE; then
+					if [[ -f ${afp_current_set_brightness[$i]}/brightness ]]; then
 
-						echo $G_WHIP_RETURNED_VALUE > /sys/class/backlight/intel_backlight/brightness
+						current_brightness=$(<${afp_current_set_brightness[$i]}/brightness)
+						if [[ -f ${afp_current_set_brightness[$i]}/max_brightness ]]; then
+
+							MAX_VALUE=$(<${afp_current_set_brightness[$i]}/max_brightness)
+
+						fi
+
+						index_apply=$i
+						break
 
 					fi
+
+				done
+
+				if disable_error=1 G_CHECK_VALIDINT $current_brightness; then
+
+					G_WHIP_DEFAULT_ITEM=$current_brightness
+					G_WHIP_INPUTBOX "Please enter a brightness value:\n - Min = $MIN_VALUE | Max = $MAX_VALUE"
+					if (( $? == 0 )) && [[ $G_WHIP_RETURNED_VALUE ]]; then
+
+						if G_CHECK_VALIDINT $G_WHIP_RETURNED_VALUE $MIN_VALUE $MAX_VALUE; then
+
+							# - apply
+							echo $G_WHIP_RETURNED_VALUE > ${afp_current_set_brightness[$index_apply]}/brightness
+
+						fi
+
+					fi
+
+				else
+
+					Info_HW_OptionNotSupported
+
+				fi
+
+				unset afp_current_set_brightness
+
+			elif (( $G_WHIP_RETURNED_VALUE == 17 )); then
+
+				G_WHIP_MENU_ARRAY=(
+
+					'96' ': Default'
+					'120' ": +25% larger"
+					'144' ": +50% larger"
+					'168' ": +75% larger"
+					'192' ": +100% larger"
+
+				)
+
+				G_WHIP_DEFAULT_ITEM=$xorg_dpi_current
+				G_WHIP_MENU "Please select a DPI value for Xorg:\n - A higher value will make text and windows larger\n - Has no effect on local terminal (eg: no desktop installed)\n\nNB: Setting will only take effect, once system is restarted."
+				if (( $? == 0 )); then
+
+					G_CONFIG_INJECT 'SOFTWARE_XORG_DPI=' "SOFTWARE_XORG_DPI=$G_WHIP_RETURNED_VALUE" /DietPi/dietpi.txt
+					mkdir -p /etc/X11/Xsession.d
+					echo -e "xrandr --dpi $G_WHIP_RETURNED_VALUE" > /etc/X11/Xsession.d/99-dietpi-dpi
+					REBOOT_REQUIRED=1
 
 				fi
 
@@ -1336,7 +1399,9 @@
 
 			fi
 
-			local rpi_i2cbaudrate_hz="$(( $(grep -m1 '^[[:blank:]]*i2c_arm_baudrate=' /DietPi/config.txt | sed 's/^[^=]*=//') / 1000 )) kHz"
+			local rpi_i2cbaudrate_hz="$(grep -m1 '^[[:blank:]]*i2c_arm_baudrate=' /DietPi/config.txt | sed 's/^[^=]*=//')"
+			# Allow commented/non-existent entry, using default value: https://github.com/raspberrypi/firmware/blob/d69aadedb7c146ba5d3b0b45a661e5669a9141c4/boot/overlays/README#L115-L116
+			rpi_i2cbaudrate_hz="$(( ${rpi_i2cbaudrate_hz:-100000} / 1000 )) kHz"
 			local usb_max_current_enabled=$(grep -ci -m1 'max_usb_current=1' /DietPi/config.txt)
 			local rpi_usbmaxcurrent_text='[Off]'
 			if (( $usb_max_current_enabled )); then
@@ -2249,9 +2314,11 @@
 
 		TARGETMENUID=0
 
+		local locale_current="$(grep -m1 '^[[:blank:]]*AUTO_SETUP_LOCALE=' /DietPi/dietpi.txt | sed 's/^[^=]*=//')"
+
 		G_WHIP_MENU_ARRAY=(
 
-			'Locale' ": [$LC_ALL]"
+			'Locale' ": [$locale_current]"
 			'Timezone' ": [$(</etc/timezone)]"
 			'Keyboard' ": [$(grep 'XKBLAYOUT=' /etc/default/keyboard | sed 's/^[^=]*=//' | sed 's/"//g')]"
 
@@ -2286,7 +2353,7 @@
 					done < /tmp/available_locale
 					rm /tmp/available_locale
 
-					G_WHIP_DEFAULT_ITEM="$(grep -m1 '^[[:blank:]]*AUTO_SETUP_LOCALE=' /DietPi/dietpi.txt | sed 's/^[^=]*=//')"
+					G_WHIP_DEFAULT_ITEM="$locale_current"
 					G_WHIP_MENU 'Please select a system locale. DietPi will automatically apply this as the default locale:'
 					if (( $? == 0 )); then
 
@@ -2703,12 +2770,12 @@ _EOF_
 			'37.235.1.174 37.235.1.177' ': FreeDNS'
 			'64.6.64.6 64.6.65.6' ': Verisign'
 			'84.200.69.80 84.200.70.40' ': DNS Watch'
+			'1.1.1.1 1.0.0.1' ': Cloudflare'
 
 		)
 
 		G_WHIP_DEFAULT_ITEM="$current_value"
-		G_WHIP_MENU 'Please select a DNS server, or choose custom for manual entry.'
-		if (( $? == 0 )); then
+		if G_WHIP_MENU 'Please select a DNS server, or choose custom for manual entry.'; then
 
 			case $G_WHIP_RETURNED_VALUE in
 
@@ -2849,10 +2916,12 @@ _EOF_
 		cp /etc/network/interfaces /tmp/net_interfaces
 
 		#Reset
-		ETH_IP_STATIC=$(cat -n /tmp/net_interfaces | grep 'address ' | sed -n 1p | awk '{print $3}')
-		ETH_GATEWAY_STATIC=$(cat -n /tmp/net_interfaces | grep 'gateway ' | sed -n 1p | awk '{print $3}')
-		ETH_MASK_STATIC=$(cat -n /tmp/net_interfaces | grep 'netmask ' | sed -n 1p | awk '{print $3}')
-		ETH_DNS_STATIC=$(cat -n /tmp/net_interfaces | grep 'dns-nameservers ' | sed -n 1p | awk '{print $3,$4}')
+		ETH_IP_STATIC=$(cat /tmp/net_interfaces | grep -m1 'address ' | awk '{print $2}')
+		ETH_GATEWAY_STATIC=$(cat /tmp/net_interfaces | grep -m1 'gateway ' | awk '{print $2}')
+		ETH_MASK_STATIC=$(cat /tmp/net_interfaces | grep -m1 'netmask ' | awk '{print $2}')
+		ETH_DNS_STATIC=$(cat /tmp/net_interfaces | grep -m1 'dns-nameservers ' | awk '{print $2,$3}')
+		# Remove trailing space in case of single nameserver, due to awk '{print $2,$3}'
+		ETH_DNS_STATIC=${ETH_DNS_STATIC%[[:blank:]]}
 
 		ETH_DEV_INDEX=$(sed -n 1p /DietPi/dietpi/.network)
 		ETH_DISABLED=$(grep -ci -m1 "#allow-hotplug eth$ETH_DEV_INDEX" /tmp/net_interfaces)
@@ -2865,10 +2934,12 @@ _EOF_
 		ETH_MODE=1
 		ETH_MODE_TARGET=$ETH_MODE
 
-		WIFI_IP_STATIC=$(cat -n /tmp/net_interfaces | grep 'address ' | sed -n 2p | awk '{print $3}')
-		WIFI_GATEWAY_STATIC=$(cat -n /tmp/net_interfaces | grep 'gateway ' | sed -n 2p | awk '{print $3}')
-		WIFI_MASK_STATIC=$(cat -n /tmp/net_interfaces | grep 'netmask ' | sed -n 2p | awk '{print $3}')
-		WIFI_DNS_STATIC=$(cat -n /tmp/net_interfaces | grep 'dns-nameservers ' | sed -n 2p | awk '{print $3,$4}')
+		WIFI_IP_STATIC=$(cat /tmp/net_interfaces | grep 'address ' | sed -n 2p | awk '{print $2}')
+		WIFI_GATEWAY_STATIC=$(cat /tmp/net_interfaces | grep 'gateway ' | sed -n 2p | awk '{print $2}')
+		WIFI_MASK_STATIC=$(cat /tmp/net_interfaces | grep 'netmask ' | sed -n 2p | awk '{print $2}')
+		WIFI_DNS_STATIC=$(cat /tmp/net_interfaces | grep 'dns-nameservers ' | sed -n 2p | awk '{print $2,$3}')
+		# Remove trailing space in case of single nameserver, due to awk '{print $2,$3}'
+		WIFI_DNS_STATIC=${WIFI_DNS_STATIC%[[:blank:]]}
 
 		WIFI_DEV_INDEX=$(sed -n 2p /DietPi/dietpi/.network)
 		WIFI_DISABLED=$(grep -ci -m1 "#allow-hotplug wlan$WIFI_DEV_INDEX" /tmp/net_interfaces)
@@ -2940,9 +3011,9 @@ _EOF_
 			#Enabled and Connected
 			if (( $ETH_DISABLED == 0 && $ETH_CONNECTED == 1 )); then
 
-				ETH_IP=$(ip a s eth$ETH_DEV_INDEX | grep -m1 '^[[:blank:]]*inet ' | awk '{ print $2 }' | sed 's|/.*$||')
-				ETH_GATEWAY=$(ip r | grep -m1 'default' | awk '{ print $3 }')
-				ETH_MASK=$(cidr2mask $(ip a s eth$ETH_DEV_INDEX | grep -m1 '^[[:blank:]]*inet ' | awk '{ print $2 }' | sed 's|^.*/||'))
+				ETH_IP=$(ip a s eth$ETH_DEV_INDEX | grep -m1 '^[[:blank:]]*inet ' | awk '{print $2}' | sed 's|/.*$||')
+				ETH_GATEWAY=$(ip r | grep -m1 'default' | awk '{print $3}')
+				ETH_MASK=$(cidr2mask $(ip a s eth$ETH_DEV_INDEX | grep -m1 '^[[:blank:]]*inet ' | awk '{print $2}' | sed 's|^.*/||'))
 				ETH_DNS=$(grep -m1 'nameserver' /etc/resolv.conf | awk '{print $2}')
 
 			fi
@@ -2964,14 +3035,14 @@ _EOF_
 			#Enabled and Connected
 			if (( $WIFI_DISABLED == 0 && $WIFI_CONNECTED == 1 )); then
 
-				WIFI_IP=$(ip a s wlan$WIFI_DEV_INDEX | grep -m1 '^[[:blank:]]*inet ' | awk '{ print $2 }' | sed 's|/.*$||')
-				WIFI_GATEWAY=$(ip r | grep -m1 'default' | awk '{ print $3 }')
-				WIFI_MASK=$(cidr2mask $(ip a s wlan$WIFI_DEV_INDEX | grep -m1 '^[[:blank:]]*inet ' | awk '{ print $2 }' | sed 's|^.*/||'))
+				WIFI_IP=$(ip a s wlan$WIFI_DEV_INDEX | grep -m1 '^[[:blank:]]*inet ' | awk '{print $2}' | sed 's|/.*$||')
+				WIFI_GATEWAY=$(ip r | grep -m1 'default' | awk '{print $3}')
+				WIFI_MASK=$(cidr2mask $(ip a s wlan$WIFI_DEV_INDEX | grep -m1 '^[[:blank:]]*inet ' | awk '{print $2}' | sed 's|^.*/||'))
 				WIFI_DNS=$(grep -m1 'nameserver' /etc/resolv.conf | awk '{print $2}')
 
 				#Get extra wifi stats
-				WIFI_BITRATE=$(iwconfig wlan$WIFI_DEV_INDEX | grep -m1 'Bit Rate' | awk '{ print $2 }' | sed 's/Rate[:=]//g')
-				WIFI_SIGNALSTRENGTH=$(iwconfig wlan$WIFI_DEV_INDEX | grep -m1 'Signal level=' | awk '{ print $4 }' | sed 's/level=//g' | cut -f1 -d "/")
+				WIFI_BITRATE=$(iwconfig wlan$WIFI_DEV_INDEX | grep -m1 'Bit Rate' | awk '{print $2}' | sed 's/Rate[:=]//g')
+				WIFI_SIGNALSTRENGTH=$(iwconfig wlan$WIFI_DEV_INDEX | grep -m1 'Signal level=' | awk '{print $4}' | sed 's/level=//g' | cut -f1 -d "/")
 
 				# - try and detect if this is dBm (contains -) or %
 				if disable_error=1 G_CHECK_VALIDINT $WIFI_SIGNALSTRENGTH -500 -1; then
@@ -4245,7 +4316,7 @@ Additional benchmarks:
 					G_WHIP_MENU_ARRAY+=('default' ': 3.5mm Analogue')
 
 				#	Native PC/MISC devices | Detect and list available
-				elif (( $G_HW_MODEL == 21 || $G_HW_MODEL == 42 || $G_HW_MODEL == 67 )); then
+				elif (( $G_HW_MODEL == 21 || $G_HW_MODEL == 42 || $G_HW_MODEL == 44 || $G_HW_MODEL == 67 )); then
 
 					G_WHIP_MENU_ARRAY+=('default' ': HW:0,0')
 

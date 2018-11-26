@@ -38,6 +38,7 @@
 	#Check/install minimal APT Pre-Reqs
 	a_MIN_APT_PREREQS=(
 
+		'apt-transport-https'	# Allows HTTPS sources for ATP
 		'wget' # Download DietPi-Globals...
 		'ca-certificates' # ...via HTTPS
 		'locales' # Allow ensuring en_GB.UTF-8
@@ -104,7 +105,7 @@
 	WHIP_RETURN=$(whiptail --title "$G_PROGRAM_NAME" --menu "Please select a Git branch:" --default-item "master" --ok-button "Ok" --cancel-button "Exit" --backtitle "$G_PROGRAM_NAME" 12 80 3 "${aWHIP_BRANCH[@]}" 3>&1 1>&2 2>&3)
 	if (( $? == 0 )); then
 
-		G_GITBRANCH=$WHIP_RETURN
+		export G_GITBRANCH=$WHIP_RETURN
 
 	else
 
@@ -123,7 +124,7 @@
 	#------------------------------------------------------------------------------------------------
 	# - Download
 	# - NB: We'll have to manually handle errors, until DietPi-Globals are sucessfully loaded.
-	if ! wget "https://raw.githubusercontent.com/$G_GITOWNER/DietPi/$G_GITBRANCH/dietpi/func/dietpi-globals"; then
+	if ! wget "https://raw.githubusercontent.com/$G_GITOWNER/DietPi/$G_GITBRANCH/dietpi/func/dietpi-globals" -O dietpi-globals; then
 
 		echo -e 'Error: Unable to download dietpi-globals. Aborting...\n'
 		exit 1
@@ -218,15 +219,15 @@
 		((SETUP_STEP++))
 		G_DIETPI-NOTIFY 2 '-----------------------------------------------------------------------------------'
 		#------------------------------------------------------------------------------------------------
-		if systemctl is-active dietpi-ramdisk | grep -qi '^active'; then
+		if [[ -d /DietPi/dietpi || /boot/dietpi ]]; then
 
 			G_DIETPI-NOTIFY 2 'DietPi system found, running pre-prep'
 
 			# - Stop services
 			/DietPi/dietpi/dietpi-services stop
 
-			[[ -f /etc/systemd/system/dietpi-ramlog ]] && G_RUN_CMD systemctl stop dietpi-ramlog
-			G_RUN_CMD systemctl stop dietpi-ramdisk
+			[[ -f /etc/systemd/system/dietpi-ramlog ]] && systemctl stop dietpi-ramlog
+			systemctl stop dietpi-ramdisk
 
 			# - Delete any previous existing data
 			rm -R /DietPi/*
@@ -275,7 +276,7 @@
 		while :
 		do
 
-			G_WHIP_INPUTBOX 'Please enter your name. This will be used to identify the image creator within credits banner.\n\nYou can add your contanct information as well for end users.\n\nNB: An entry is required.'
+			G_WHIP_INPUTBOX 'Please enter your name. This will be used to identify the image creator within credits banner.\n\nYou can add your contact information as well for end users.\n\nNB: An entry is required.'
 			if (( ! $? )) && [[ $G_WHIP_RETURNED_VALUE ]]; then
 
 				#Disallowed:
@@ -350,6 +351,7 @@
 			'14' ': Odroid N1'
 			'13' ': Odroid U3'
 			'11' ': Odroid XU3/4/HC1/HC2'
+			'44' ': Pinebook 1080p'
 			'0' ': Raspberry Pi (All models)'
 			# '1' ': Raspberry Pi 1/Zero (512mb)'
 			# '2' ': Raspberry Pi 2'
@@ -782,6 +784,11 @@ _EOF_
 
 			G_AGI linux-rock64 gdisk
 
+		#	Pinebook
+		elif (( $G_HW_MODEL == 44 )); then
+
+			G_AGI linux-pine64-package
+
 		#	BBB
 		elif (( $G_HW_MODEL == 71 )); then
 
@@ -958,7 +965,7 @@ _EOF_
 		rm /etc/profile.d/99-dietpi* &> /dev/null
 
 		# - Enable /etc/bashrc.d/ support for custom interactive non-login shell scripts:
-		G_CONFIG_INJECT '.*/etc/bashrc\.d/.*' 'for i in /etc/bashrc\.d/\*\.sh; do \[ -r "\$i" \] \&\& \. \$i; done' /etc/bash.bashrc
+		G_CONFIG_INJECT '.*/etc/bashrc\.d/.*' 'for i in /etc/bashrc.d/*.sh; do [ -r "$i" ] && . $i; done' /etc/bash.bashrc
 
 		# - Enable bash-completion for non-login shells:
 		#	- NB: It is called twice on login shells then, but breaks directly if called already once.
@@ -1056,7 +1063,7 @@ _EOF_
 		G_DIETPI-NOTIFY 2 'Add dietpi.com SSH pub host key for DietPi-Survey and -Bugreport upload:'
 		mkdir -p /root/.ssh
 		>> /root/.ssh/known_hosts
-		G_CONFIG_INJECT 'ssh.dietpi.com ' 'ssh.dietpi.com ssh-rsa AAAAB3NzaC1yc2EAAAADAQABAAABAQDE6aw3r6aOEqendNu376iiCHr9tGBIWPgfrLkzjXjEsHGyVSUFNnZt6pftrDeK7UX\+qX4FxOwQlugG4fymOHbimRCFiv6cf7VpYg1Ednquq9TLb7/cIIbX8a6AuRmX4fjdGuqwmBq3OG7ZksFcYEFKt5U4mAJIaL8hXiM2iXjgY02LqiQY/QWATsHI4ie9ZOnwrQE\+Rr6mASN1BVFuIgyHIbwX54jsFSnZ/7CdBMkuAd9B8JkxppWVYpYIFHE9oWNfjh/epdK8yv9Oo6r0w5Rb\+4qaAc5g\+RAaknHeV6Gp75d2lxBdCm5XknKKbGma2\+/DfoE8WZTSgzXrYcRlStYN' /root/.ssh/known_hosts
+		G_CONFIG_INJECT 'ssh.dietpi.com ' 'ssh.dietpi.com ssh-rsa AAAAB3NzaC1yc2EAAAADAQABAAABAQDE6aw3r6aOEqendNu376iiCHr9tGBIWPgfrLkzjXjEsHGyVSUFNnZt6pftrDeK7UX+qX4FxOwQlugG4fymOHbimRCFiv6cf7VpYg1Ednquq9TLb7/cIIbX8a6AuRmX4fjdGuqwmBq3OG7ZksFcYEFKt5U4mAJIaL8hXiM2iXjgY02LqiQY/QWATsHI4ie9ZOnwrQE+Rr6mASN1BVFuIgyHIbwX54jsFSnZ/7CdBMkuAd9B8JkxppWVYpYIFHE9oWNfjh/epdK8yv9Oo6r0w5Rb+4qaAc5g+RAaknHeV6Gp75d2lxBdCm5XknKKbGma2+/DfoE8WZTSgzXrYcRlStYN' /root/.ssh/known_hosts
 
 		#-----------------------------------------------------------------------------------
 		#MISC
@@ -1116,7 +1123,7 @@ _EOF_
 		#	ASUS TB WiFi: https://github.com/Fourdee/DietPi/issues/1760
 		elif (( $G_HW_MODEL == 52 )); then
 
-			G_CONFIG_INJECT '^8723bs' '8723bs' /etc/modules
+			G_CONFIG_INJECT '8723bs' '8723bs' /etc/modules
 
 		fi
 
@@ -1162,7 +1169,8 @@ _EOF_
 		# - must be enabled for the following:
 		#	XU4: https://github.com/Fourdee/DietPi/issues/2038#issuecomment-416089875
 		#	RockPro64: Fails to boot into kernel without serial enabled
-		if (( $G_HW_MODEL == 11 || $G_HW_MODEL == 42 )); then
+		#	NanoPi Neo Air: Required for end users/debugging/setting up WiFi without automation
+		if (( $G_HW_MODEL == 11 || $G_HW_MODEL == 42  || $G_HW_MODEL == 64 )); then
 
 			sed -i '/^[[:blank:]]*CONFIG_SERIAL_CONSOLE_ENABLE=/c\CONFIG_SERIAL_CONSOLE_ENABLE=1' /DietPi/dietpi.txt
 
@@ -1431,8 +1439,8 @@ _EOF_
 			# - Finalize GRUB
 			if [[ -f '/etc/default/grub' ]]; then
 
-				G_CONFIG_INJECT 'GRUB_CMDLINE_LINUX_DEFAULT=' 'GRUB_CMDLINE_LINUX_DEFAULT=\"consoleblank=0 quiet\"' /etc/default/grub
-				G_CONFIG_INJECT 'GRUB_CMDLINE_LINUX=' 'GRUB_CMDLINE_LINUX=\"net\.ifnames=0\"' /etc/default/grub
+				G_CONFIG_INJECT 'GRUB_CMDLINE_LINUX_DEFAULT=' 'GRUB_CMDLINE_LINUX_DEFAULT="consoleblank=0 quiet"' /etc/default/grub
+				G_CONFIG_INJECT 'GRUB_CMDLINE_LINUX=' 'GRUB_CMDLINE_LINUX="net.ifnames=0"' /etc/default/grub
 				G_CONFIG_INJECT 'GRUB_TIMEOUT=' 'GRUB_TIMEOUT=3' /etc/default/grub
 				l_message='Finalizing GRUB' G_RUN_CMD update-grub
 
@@ -1538,9 +1546,13 @@ _EOF_
 		G_RUN_CMD systemctl stop dietpi-ramlog
 		G_RUN_CMD systemctl stop dietpi-ramdisk
 
-		# - Clear tmp files
-		rm -R /tmp/* &> /dev/null
+		# - Clear tmp files on disk
 		rm /var/tmp/dietpi/logs/* &> /dev/null
+
+		# - Clear items that may have been left on disk, from previous PREP's
+		rm -R /DietPi/* &> /dev/null
+		cd /root
+		umount /tmp; rm -R /tmp/* &> /dev/null
 
 		sync
 
