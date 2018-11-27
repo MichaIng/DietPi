@@ -5,19 +5,21 @@
 	#------------------------------------------------------------------------------------------------
 	# REQUIREMENTS
 	# - Currently running Debian (ideally minimal, eg: Raspbian Lite-ish =)) )
-	# - Active eth0 connection
+	# - systemd as system/init/service manager
+	# - Either eth0 connection or local (non-SSH) terminal access
 	#------------------------------------------------------------------------------------------------
 	# Dev notes:
-	# Following items must be exported at all times, throughout this script, else, additional scripts launched will trigger incorrect results.
+	# Following items must be exported or assigned to DietPi scripts, if used, until dietpi-obtain_hw_model is executed.
 	# - G_HW_MODEL
 	# - G_HW_ARCH
 	# - G_DISTRO
+	# - G_DISTRO_NAME
 	#------------------------------------------------------------------------------------------------
 
-	#Use Fourdee master branch, if unset
-	GIT_OWNER=${GIT_OWNER:=Fourdee}
-	export G_GITBRANCH=${GIT_BRANCH:=master}
-	echo "Git branch: $GIT_OWNER/$G_GITBRANCH"
+	#Core globals
+	G_PROGRAM_NAME='DietPi-PREP'
+	G_GITOWNER=${G_GITOWNER:-Fourdee}
+	G_GITBRANCH=${G_GITBRANCH:-master}
 
 	#------------------------------------------------------------------------------------------------
 	# Critical checks and pre-reqs, with exit, prior to initial run of script
@@ -31,12 +33,12 @@
 	fi
 
 	#Work inside /tmp as usually ramfs to reduce disk I/O and speed up download and unpacking
-	mkdir -p /tmp/DietPi-PREP
-	cd /tmp/DietPi-PREP
+	cd /tmp
 
 	#Check/install minimal APT Pre-Reqs
 	a_MIN_APT_PREREQS=(
 
+		'apt-transport-https'	# Allows HTTPS sources for ATP
 		'wget' # Download DietPi-Globals...
 		'ca-certificates' # ...via HTTPS
 		'locales' # Allow ensuring en_GB.UTF-8
@@ -69,7 +71,7 @@
 	unset a_MIN_APT_PREREQS
 
 	#Setup locale
-	# - Remove exisiting settings that will break dpkg-reconfigure
+	# - Remove exisiting settings that could break dpkg-reconfigure locales
 	> /etc/environment
 	rm /etc/default/locale &> /dev/null
 
@@ -91,16 +93,38 @@
 	update-locale LC_TIME=en_GB.UTF-8
 	update-locale LC_ALL=en_GB.UTF-8
 
-	# - Force en_GB Locale for rest of script. Prevents incorrect parsing with non-english locales.
-	export LC_ALL=en_GB.UTF-8
-	export LANG=en_GB.UTF-8
+	#Select gitbranch
+	aWHIP_BRANCH=(
+
+		'master' ': Stable release (recommended)'
+		'beta' ': Public beta testing branch'
+		'dev' ': Unstable dev branch'
+
+	)
+
+	WHIP_RETURN=$(whiptail --title "$G_PROGRAM_NAME" --menu "Please select a Git branch:" --default-item "master" --ok-button "Ok" --cancel-button "Exit" --backtitle "$G_PROGRAM_NAME" 12 80 3 "${aWHIP_BRANCH[@]}" 3>&1 1>&2 2>&3)
+	if (( $? == 0 )); then
+
+		export G_GITBRANCH=$WHIP_RETURN
+
+	else
+
+		echo -e 'No choice detected. Aborting...\n'
+		exit 0
+
+	fi
+
+	unset aWHIP_BRANCH
+	unset WHIP_RETURN
+
+	echo "Git branch: $G_GITOWNER/$G_GITBRANCH"
 
 	#------------------------------------------------------------------------------------------------
 	# DietPi-Globals
 	#------------------------------------------------------------------------------------------------
 	# - Download
 	# - NB: We'll have to manually handle errors, until DietPi-Globals are sucessfully loaded.
-	if ! wget "https://raw.githubusercontent.com/$GIT_OWNER/DietPi/$G_GITBRANCH/dietpi/func/dietpi-globals"; then
+	if ! wget "https://raw.githubusercontent.com/$G_GITOWNER/DietPi/$G_GITBRANCH/dietpi/func/dietpi-globals" -O dietpi-globals; then
 
 		echo -e 'Error: Unable to download dietpi-globals. Aborting...\n'
 		exit 1
@@ -116,11 +140,10 @@
 	fi
 	rm dietpi-globals
 
-	export G_GITBRANCH=${GIT_BRANCH:=master}
-	export G_PROGRAM_NAME='DietPi-PREP'
-	export HIERARCHY=0
-	export G_DISTRO=0 # Export to dietpi-globals
-	export G_DISTRO_NAME='NULL' # Export to dietpi-globals
+	# - Reset G_PROGRAM_NAME, which was set to empty string by sourcing dietpi-globals
+	G_PROGRAM_NAME='DietPi-PREP'
+	G_INIT
+
 	DISTRO_TARGET=0
 	DISTRO_TARGET_NAME=''
 	if grep -q 'wheezy' /etc/os-release; then
@@ -150,24 +173,22 @@
 
 	fi
 
-	#G_HW_MODEL # init from dietpi-globals
-	#G_HW_ARCH_DESCRIPTION # init from dietpi-globals
 	G_HW_ARCH_DESCRIPTION="$(uname -m)"
 	if [[ $G_HW_ARCH_DESCRIPTION == 'armv6l' ]]; then
 
-		export G_HW_ARCH=1
+		G_HW_ARCH=1
 
 	elif [[ $G_HW_ARCH_DESCRIPTION == 'armv7l' ]]; then
 
-		export G_HW_ARCH=2
+		G_HW_ARCH=2
 
 	elif [[ $G_HW_ARCH_DESCRIPTION == 'aarch64' ]]; then
 
-		export G_HW_ARCH=3
+		G_HW_ARCH=3
 
 	elif [[ $G_HW_ARCH_DESCRIPTION == 'x86_64' ]]; then
 
-		export G_HW_ARCH=10
+		G_HW_ARCH=10
 
 	else
 
@@ -198,15 +219,15 @@
 		((SETUP_STEP++))
 		G_DIETPI-NOTIFY 2 '-----------------------------------------------------------------------------------'
 		#------------------------------------------------------------------------------------------------
-		if systemctl is-active dietpi-ramdisk | grep -qi '^active'; then
+		if [[ -d /DietPi/dietpi || /boot/dietpi ]]; then
 
 			G_DIETPI-NOTIFY 2 'DietPi system found, running pre-prep'
 
 			# - Stop services
 			/DietPi/dietpi/dietpi-services stop
 
-			[[ -f /etc/systemd/system/dietpi-ramlog ]] && G_RUN_CMD systemctl stop dietpi-ramlog
-			G_RUN_CMD systemctl stop dietpi-ramdisk
+			[[ -f /etc/systemd/system/dietpi-ramlog ]] && systemctl stop dietpi-ramlog
+			systemctl stop dietpi-ramdisk
 
 			# - Delete any previous existing data
 			rm -R /DietPi/*
@@ -255,7 +276,7 @@
 		while :
 		do
 
-			G_WHIP_INPUTBOX 'Please enter your name. This will be used to identify the image creator within credits banner.\n\nYou can add your contanct information as well for end users.\n\nNB: An entry is required.'
+			G_WHIP_INPUTBOX 'Please enter your name. This will be used to identify the image creator within credits banner.\n\nYou can add your contact information as well for end users.\n\nNB: An entry is required.'
 			if (( ! $? )) && [[ $G_WHIP_RETURNED_VALUE ]]; then
 
 				#Disallowed:
@@ -330,6 +351,7 @@
 			'14' ': Odroid N1'
 			'13' ': Odroid U3'
 			'11' ': Odroid XU3/4/HC1/HC2'
+			'44' ': Pinebook 1080p'
 			'0' ': Raspberry Pi (All models)'
 			# '1' ': Raspberry Pi 1/Zero (512mb)'
 			# '2' ': Raspberry Pi 2'
@@ -374,13 +396,13 @@
 		G_WHIP_MENU 'Please select the current device this is being installed on:\n - NB: Select "Generic device" if not listed.\n - "Core devices": Are fully supported by DietPi, offering full GPU + Kodi support.\n - "Limited support devices": No GPU support, supported limited to DietPi specific issues only (eg: excludes Kernel/GPU/VPU related items).'
 		if (( $? )) || [[ -z $G_WHIP_RETURNED_VALUE ]]; then
 
-			G_DIETPI-NOTIFY 1 'No choices detected. Aborting...'
+			G_DIETPI-NOTIFY 1 'No choice detected. Aborting...'
 			exit 0
 
 		fi
 
-		# + Export to future scripts
-		export G_HW_MODEL=$G_WHIP_RETURNED_VALUE
+		# + Set for future scripts
+		G_HW_MODEL=$G_WHIP_RETURNED_VALUE
 
 		G_DIETPI-NOTIFY 2 "Setting G_HW_MODEL index of: $G_HW_MODEL"
 		G_DIETPI-NOTIFY 2 "CPU ARCH = $G_HW_ARCH : $G_HW_ARCH_DESCRIPTION"
@@ -400,7 +422,7 @@
 
 		)
 
-		if G_WHIP_MENU 'Please select an option:' && (( $G_WHIP_RETURNED_VALUE )) ; then
+		if G_WHIP_MENU 'Please select an option:' && (( $G_WHIP_RETURNED_VALUE )); then
 
 			G_DIETPI-NOTIFY 2 'Marking WiFi as needed'
 			WIFI_REQUIRED=1
@@ -448,7 +470,7 @@
 
 		if [[ -z ${G_WHIP_MENU_ARRAY+x} ]]; then
 
-			G_DIETPI-NOTIFY 1 'Error: No available Distros for this system. Aborting...'
+			G_DIETPI-NOTIFY 1 'Error: No available Distros for this system. Aborting...\n'
 			exit 1
 
 		fi
@@ -456,7 +478,7 @@
 		G_WHIP_MENU "Please select a distro to install on this system. Selecting a distro that is older than the current installed on system, is not supported.\n\nCurrently installed:\n - $G_DISTRO $G_DISTRO_NAME"
 		if (( $? )) || [[ -z $G_WHIP_RETURNED_VALUE ]]; then
 
-			G_DIETPI-NOTIFY 1 'No choices detected. Aborting...'
+			G_DIETPI-NOTIFY 1 'No choice detected. Aborting...\n'
 			exit 0
 
 		fi
@@ -484,7 +506,7 @@
 		G_DIETPI-NOTIFY 2 '-----------------------------------------------------------------------------------'
 		#------------------------------------------------------------------------------------------------
 
-		INTERNET_ADDRESS="https://github.com/$GIT_OWNER/DietPi/archive/$G_GITBRANCH.zip"
+		INTERNET_ADDRESS="https://github.com/$G_GITOWNER/DietPi/archive/$G_GITBRANCH.zip"
 		G_CHECK_URL "$INTERNET_ADDRESS"
 		G_RUN_CMD wget "$INTERNET_ADDRESS" -O package.zip
 
@@ -492,7 +514,7 @@
 		l_message='Extracting DietPi sourcecode' G_RUN_CMD unzip -o package.zip
 		rm package.zip
 
-		l_message='Creating /boot' G_RUN_CMD mkdir -p /boot
+		[[ ! -d /boot ]] && l_message='Creating /boot' G_RUN_CMD mkdir -p /boot
 
 		G_DIETPI-NOTIFY 2 'Moving kernel and boot configuration to /boot'
 
@@ -524,13 +546,12 @@
 		rm "DietPi-$G_GITBRANCH/dietpi/patch_file"
 		rm DietPi-"$G_GITBRANCH"/dietpi/server_version*
 
-		l_message='Move DietPi core to /boot/dietpi' G_RUN_CMD mv "DietPi-$G_GITBRANCH/dietpi" /boot/
-
+		l_message='Copy DietPi core files to /boot/dietpi' G_RUN_CMD cp -Rf DietPi-"$G_GITBRANCH"/dietpi /boot/
 		l_message='Copy rootfs files in place' G_RUN_CMD cp -Rf DietPi-"$G_GITBRANCH"/rootfs/. /
 
 		l_message='Clean download location' G_RUN_CMD rm -R "DietPi-$G_GITBRANCH"
 
-		l_message='Set execute permissions for DietPi scripts' G_RUN_CMD chmod -R +x /boot/dietpi /etc/cron.*/dietpi /var/lib/dietpi/services
+		l_message='Set execute permissions for DietPi scripts' G_RUN_CMD chmod -R +x /boot/dietpi /var/lib/dietpi/services /etc/cron.*/dietpi /etc/profile.d/dietpi-*.sh /etc/bashrc.d/dietpi-*.sh
 
 		G_RUN_CMD systemctl daemon-reload
 		G_RUN_CMD systemctl enable dietpi-ramdisk
@@ -538,7 +559,7 @@
 		# - Mount tmpfs
 		G_RUN_CMD mkdir -p /DietPi
 		G_RUN_CMD mount -t tmpfs -o size=20m tmpfs /DietPi
-		l_message='Starting DietPi-RAMDISK' G_RUN_CMD systemctl start dietpi-ramdisk
+		l_message='Starting DietPi-RAMdisk' G_RUN_CMD systemctl start dietpi-ramdisk
 
 		#------------------------------------------------------------------------------------------------
 		echo ''
@@ -557,25 +578,11 @@
 
 		G_DIETPI-NOTIFY 2 "Setting APT sources.list: $DISTRO_TARGET_NAME $DISTRO_TARGET"
 
-		# - We need to temp export target DISTRO vars, then revert them to current, after setting sources.list
-		G_DISTRO_TEMP=$G_DISTRO
-		G_DISTRO_NAME_TEMP="$G_DISTRO_NAME"
-		export G_DISTRO=$DISTRO_TARGET
-		export G_DISTRO_NAME="$DISTRO_TARGET_NAME"
-
-		G_RUN_CMD /DietPi/dietpi/func/dietpi-set_software apt-mirror 'default'
-
-		export G_DISTRO=$G_DISTRO_TEMP
-		export G_DISTRO_NAME="$G_DISTRO_NAME_TEMP"
-		unset G_DISTRO_TEMP
-		unset G_DISTRO_NAME_TEMP
+		# - We need to forward $DISTRO_TARGET* to dietpi-set_software, as well as $G_HW_MODEL for Debian vs Raspbian decision.
+		G_DISTRO=$DISTRO_TARGET G_DISTRO_NAME="$DISTRO_TARGET_NAME" G_HW_MODEL=$G_HW_MODEL G_RUN_CMD /DietPi/dietpi/func/dietpi-set_software apt-mirror 'default'
 
 		# - Meveric, update repo to use our EU mirror: https://github.com/Fourdee/DietPi/issues/1519#issuecomment-368234302
 		sed -i 's@https://oph.mdrjr.net/meveric@http://fuzon.co.uk/meveric@' /etc/apt/sources.list.d/meveric* &> /dev/null
-
-		G_DIETPI-NOTIFY 2 "Updating APT for $DISTRO_TARGET_NAME:"
-
-		G_RUN_CMD apt-get clean
 
 		G_AGUP
 
@@ -590,26 +597,26 @@
 		#	Remove any existing apt recommends settings
 		rm /etc/apt/apt.conf.d/*recommends* &> /dev/null
 
-		export G_ERROR_HANDLER_COMMAND='/etc/apt/apt.conf.d/99-dietpi-norecommends'
+		G_ERROR_HANDLER_COMMAND='/etc/apt/apt.conf.d/99-dietpi-norecommends'
 		cat << _EOF_ > $G_ERROR_HANDLER_COMMAND
 APT::Install-Recommends "false";
 APT::Install-Suggests "false";
 APT::AutoRemove::RecommendsImportant "false";
 APT::AutoRemove::SuggestsImportant "false";
 _EOF_
-		export G_ERROR_HANDLER_EXITCODE=$?
+		G_ERROR_HANDLER_EXITCODE=$?
 		G_ERROR_HANDLER
 
 		G_DIETPI-NOTIFY 2 'Forcing use of modified package configs'
 
-		export G_ERROR_HANDLER_COMMAND='/etc/apt/apt.conf.d/99-dietpi-forceconf'
+		G_ERROR_HANDLER_COMMAND='/etc/apt/apt.conf.d/99-dietpi-forceconf'
 		cat << _EOF_ > $G_ERROR_HANDLER_COMMAND
 Dpkg::options {
    "--force-confdef";
    "--force-confold";
 }
 _EOF_
-		export G_ERROR_HANDLER_EXITCODE=$?
+		G_ERROR_HANDLER_EXITCODE=$?
 		G_ERROR_HANDLER
 
 		# - DietPi list of minimal required packages, which must be installed:
@@ -777,6 +784,11 @@ _EOF_
 
 			G_AGI linux-rock64 gdisk
 
+		#	Pinebook
+		elif (( $G_HW_MODEL == 44 )); then
+
+			G_AGI linux-pine64-package
+
 		#	BBB
 		elif (( $G_HW_MODEL == 71 )); then
 
@@ -835,7 +847,6 @@ _EOF_
 		# - dhcpcd5: https://github.com/Fourdee/DietPi/issues/1560#issuecomment-370136642
 		# - dbus: Not needed for headless images, but sometimes marked as "important", thus not autoremoved.
 		G_AGP dbus dhcpcd5
-
 		G_AGA
 
 		#------------------------------------------------------------------------------------------------
@@ -849,8 +860,8 @@ _EOF_
 		G_AGDUG
 
 		# - Distro is now target (for APT purposes and G_AGX support due to installed binary, its here, instead of after G_AGUP)
-		export G_DISTRO=$DISTRO_TARGET
-		export G_DISTRO_NAME="$DISTRO_TARGET_NAME"
+		G_DISTRO=$DISTRO_TARGET
+		G_DISTRO_NAME="$DISTRO_TARGET_NAME"
 
 		G_DIETPI-NOTIFY 2 'Installing core DietPi pre-req APT packages'
 
@@ -954,7 +965,7 @@ _EOF_
 		rm /etc/profile.d/99-dietpi* &> /dev/null
 
 		# - Enable /etc/bashrc.d/ support for custom interactive non-login shell scripts:
-		G_CONFIG_INJECT '.*/etc/bashrc\.d/.*' 'for i in /etc/bashrc\.d/\*\.sh; do \[ -r "\$i" \] \&\& \. \$i; done' /etc/bash.bashrc
+		G_CONFIG_INJECT '.*/etc/bashrc\.d/.*' 'for i in /etc/bashrc.d/*.sh; do [ -r "$i" ] && . $i; done' /etc/bash.bashrc
 
 		# - Enable bash-completion for non-login shells:
 		#	- NB: It is called twice on login shells then, but breaks directly if called already once.
@@ -1026,7 +1037,7 @@ _EOF_
 		#-----------------------------------------------------------------------------------
 		#Cron Jobs
 
-		G_DIETPI-NOTIFY 2 "Configuring Cron"
+		G_DIETPI-NOTIFY 2 'Configuring Cron'
 
 		cat << _EOF_ > /etc/crontab
 #Please use dietpi-cron to change cron start times
@@ -1052,15 +1063,14 @@ _EOF_
 		G_DIETPI-NOTIFY 2 'Add dietpi.com SSH pub host key for DietPi-Survey and -Bugreport upload:'
 		mkdir -p /root/.ssh
 		>> /root/.ssh/known_hosts
-		G_CONFIG_INJECT 'dietpi.com ' 'dietpi.com ssh-rsa AAAAB3NzaC1yc2EAAAADAQABAAABAQDE6aw3r6aOEqendNu376iiCHr9tGBIWPgfrLkzjXjEsHGyVSUFNnZt6pftrDeK7UX\+qX4FxOwQlugG4fymOHbimRCFiv6cf7VpYg1Ednquq9TLb7/cIIbX8a6AuRmX4fjdGuqwmBq3OG7ZksFcYEFKt5U4mAJIaL8hXiM2iXjgY02LqiQY/QWATsHI4ie9ZOnwrQE\+Rr6mASN1BVFuIgyHIbwX54jsFSnZ/7CdBMkuAd9B8JkxppWVYpYIFHE9oWNfjh/epdK8yv9Oo6r0w5Rb\+4qaAc5g\+RAaknHeV6Gp75d2lxBdCm5XknKKbGma2\+/DfoE8WZTSgzXrYcRlStYN' /root/.ssh/known_hosts
-		G_CONFIG_INJECT '185.101.93.93 ' '185.101.93.93 ssh-rsa AAAAB3NzaC1yc2EAAAADAQABAAABAQDE6aw3r6aOEqendNu376iiCHr9tGBIWPgfrLkzjXjEsHGyVSUFNnZt6pftrDeK7UX\+qX4FxOwQlugG4fymOHbimRCFiv6cf7VpYg1Ednquq9TLb7/cIIbX8a6AuRmX4fjdGuqwmBq3OG7ZksFcYEFKt5U4mAJIaL8hXiM2iXjgY02LqiQY/QWATsHI4ie9ZOnwrQE\+Rr6mASN1BVFuIgyHIbwX54jsFSnZ/7CdBMkuAd9B8JkxppWVYpYIFHE9oWNfjh/epdK8yv9Oo6r0w5Rb\+4qaAc5g\+RAaknHeV6Gp75d2lxBdCm5XknKKbGma2\+/DfoE8WZTSgzXrYcRlStYN' /root/.ssh/known_hosts
+		G_CONFIG_INJECT 'ssh.dietpi.com ' 'ssh.dietpi.com ssh-rsa AAAAB3NzaC1yc2EAAAADAQABAAABAQDE6aw3r6aOEqendNu376iiCHr9tGBIWPgfrLkzjXjEsHGyVSUFNnZt6pftrDeK7UX+qX4FxOwQlugG4fymOHbimRCFiv6cf7VpYg1Ednquq9TLb7/cIIbX8a6AuRmX4fjdGuqwmBq3OG7ZksFcYEFKt5U4mAJIaL8hXiM2iXjgY02LqiQY/QWATsHI4ie9ZOnwrQE+Rr6mASN1BVFuIgyHIbwX54jsFSnZ/7CdBMkuAd9B8JkxppWVYpYIFHE9oWNfjh/epdK8yv9Oo6r0w5Rb+4qaAc5g+RAaknHeV6Gp75d2lxBdCm5XknKKbGma2+/DfoE8WZTSgzXrYcRlStYN' /root/.ssh/known_hosts
 
 		#-----------------------------------------------------------------------------------
 		#MISC
 
 		if (( $G_DISTRO > 3 )); then
 
-			G_DIETPI-NOTIFY 2 'Disabling apt-daily services to prevent random APT cache lock:'
+			G_DIETPI-NOTIFY 2 'Disabling apt-daily services to prevent random APT cache lock'
 
 			systemctl disable apt-daily.service &> /dev/null
 			systemctl disable apt-daily.timer &> /dev/null
@@ -1081,9 +1091,9 @@ _EOF_
 		# Restart DietPi-RAMdisk, as 'dietpi-drive_manager 4' remounts /DietPi.
 		G_RUN_CMD systemctl restart dietpi-ramdisk
 
-		# Recreate and navigate to "/tmp/DietPi-PREP" working directory
-		mkdir -p /tmp/DietPi-PREP
-		cd /tmp/DietPi-PREP
+		# Recreate and navigate to "/tmp/$G_PROGRAM_NAME" working directory
+		mkdir -p /tmp/$G_PROGRAM_NAME
+		cd /tmp/$G_PROGRAM_NAME
 
 		G_DIETPI-NOTIFY 2 'Deleting all log files /var/log'
 
@@ -1095,7 +1105,7 @@ _EOF_
 
 		/DietPi/dietpi/func/dietpi-obtain_hw_model
 
-		G_DIETPI-NOTIFY 2 'Configuring Network:'
+		G_DIETPI-NOTIFY 2 'Configuring Network'
 
 		rm -R /etc/network/interfaces &> /dev/null # armbian symlink for bulky network-manager
 
@@ -1113,7 +1123,7 @@ _EOF_
 		#	ASUS TB WiFi: https://github.com/Fourdee/DietPi/issues/1760
 		elif (( $G_HW_MODEL == 52 )); then
 
-			G_CONFIG_INJECT '^8723bs' '8723bs' /etc/modules
+			G_CONFIG_INJECT '8723bs' '8723bs' /etc/modules
 
 		fi
 
@@ -1128,7 +1138,7 @@ _EOF_
 
 		G_DIETPI-NOTIFY 2 'Configuring hosts:'
 
-		export G_ERROR_HANDLER_COMMAND='/etc/hosts'
+		G_ERROR_HANDLER_COMMAND='/etc/hosts'
 		cat << _EOF_ > $G_ERROR_HANDLER_COMMAND
 127.0.0.1    localhost
 127.0.1.1    DietPi
@@ -1136,7 +1146,7 @@ _EOF_
 ff02::1      ip6-allnodes
 ff02::2      ip6-allrouters
 _EOF_
-		export G_ERROR_HANDLER_EXITCODE=$?
+		G_ERROR_HANDLER_EXITCODE=$?
 		G_ERROR_HANDLER
 
 		echo 'DietPi' > /etc/hostname
@@ -1159,7 +1169,8 @@ _EOF_
 		# - must be enabled for the following:
 		#	XU4: https://github.com/Fourdee/DietPi/issues/2038#issuecomment-416089875
 		#	RockPro64: Fails to boot into kernel without serial enabled
-		if (( $G_HW_MODEL == 11 || $G_HW_MODEL == 42 )); then
+		#	NanoPi Neo Air: Required for end users/debugging/setting up WiFi without automation
+		if (( $G_HW_MODEL == 11 || $G_HW_MODEL == 42  || $G_HW_MODEL == 64 )); then
 
 			sed -i '/^[[:blank:]]*CONFIG_SERIAL_CONSOLE_ENABLE=/c\CONFIG_SERIAL_CONSOLE_ENABLE=1' /DietPi/dietpi.txt
 
@@ -1219,7 +1230,7 @@ _EOF_
 			G_DIETPI-NOTIFY 2 'Configuring hdparm:'
 
 			sed -i '/#DietPi/,$d' /etc/hdparm.conf #Prevent dupes
-			export G_ERROR_HANDLER_COMMAND='/etc/hdparm.conf'
+			G_ERROR_HANDLER_COMMAND='/etc/hdparm.conf'
 			cat << _EOF_ >> $G_ERROR_HANDLER_COMMAND
 
 #DietPi external USB drive. Power management settings.
@@ -1231,7 +1242,7 @@ _EOF_
 		apm = 127
 }
 _EOF_
-			export G_ERROR_HANDLER_EXITCODE=$?
+			G_ERROR_HANDLER_EXITCODE=$?
 			G_ERROR_HANDLER
 
 		fi
@@ -1285,7 +1296,7 @@ _EOF_
 			chmod +x -R rtl8812au_sparky
 			cd rtl8812au_sparky
 			G_RUN_CMD ./install.sh
-			cd /tmp/DietPi-PREP
+			cd /tmp/$G_PROGRAM_NAME
 			rm -R rtl8812au_sparky*
 
 			#	Use performance gov for stability.
@@ -1353,7 +1364,7 @@ _EOF_
 
 		l_message='Enable Dropbear autostart' G_RUN_CMD sed -i '/NO_START=1/c\NO_START=0' /etc/default/dropbear
 
-		G_DIETPI-NOTIFY 2 'Configuring Services'
+		G_DIETPI-NOTIFY 2 'Configuring services'
 
 		/DietPi/dietpi/dietpi-services stop
 		/DietPi/dietpi/dietpi-services dietpi_controlled
@@ -1428,8 +1439,8 @@ _EOF_
 			# - Finalize GRUB
 			if [[ -f '/etc/default/grub' ]]; then
 
-				G_CONFIG_INJECT 'GRUB_CMDLINE_LINUX_DEFAULT=' 'GRUB_CMDLINE_LINUX_DEFAULT=\"consoleblank=0 quiet\"' /etc/default/grub
-				G_CONFIG_INJECT 'GRUB_CMDLINE_LINUX=' 'GRUB_CMDLINE_LINUX=\"net\.ifnames=0\"' /etc/default/grub
+				G_CONFIG_INJECT 'GRUB_CMDLINE_LINUX_DEFAULT=' 'GRUB_CMDLINE_LINUX_DEFAULT="consoleblank=0 quiet"' /etc/default/grub
+				G_CONFIG_INJECT 'GRUB_CMDLINE_LINUX=' 'GRUB_CMDLINE_LINUX="net.ifnames=0"' /etc/default/grub
 				G_CONFIG_INJECT 'GRUB_TIMEOUT=' 'GRUB_TIMEOUT=3' /etc/default/grub
 				l_message='Finalizing GRUB' G_RUN_CMD update-grub
 
@@ -1511,18 +1522,22 @@ _EOF_
 
 		G_DIETPI-NOTIFY 2 'Storing DietPi version ID'
 
-		G_RUN_CMD wget "https://raw.githubusercontent.com/$GIT_OWNER/DietPi/$G_GITBRANCH/dietpi/.version" -O /DietPi/dietpi/.version
+		G_RUN_CMD wget "https://raw.githubusercontent.com/$G_GITOWNER/DietPi/$G_GITBRANCH/dietpi/.version" -O /DietPi/dietpi/.version
 
+		local gitowner_temp=$G_GITOWNER
+		local gitbranch_temp=$G_GITBRANCH
+
+		chmod +x /DietPi/dietpi/.version
+		. /DietPi/dietpi/.version
 		#	reduce sub_version by 1, allows us to create image, prior to release and patch if needed.
-		export G_DIETPI_VERSION_CORE=$(sed -n 1p /DietPi/dietpi/.version)
-		export G_DIETPI_VERSION_SUB=$(sed -n 2p /DietPi/dietpi/.version)
-		export G_DIETPI_VERSION_RC=$(sed -n 3p /DietPi/dietpi/.version)
-		((G_DIETPI_VERSION_SUB--))
-		cat << _EOF_ > /DietPi/dietpi/.version
-$G_DIETPI_VERSION_CORE
-$G_DIETPI_VERSION_SUB
-$G_DIETPI_VERSION_RC
-_EOF_
+		G_DIETPI_VERSION_SUB=$(( $G_DIETPI_VERSION_SUB - 1 ))
+
+		G_GITOWNER=$gitowner_temp
+		G_GITBRANCH=$gitbranch_temp
+
+		G_CONFIG_INJECT 'DEV_GITBRANCH=' "DEV_GITBRANCH=$G_GITBRANCH" /DietPi/dietpi.txt
+		G_CONFIG_INJECT 'DEV_GITOWNER=' "DEV_GITOWNER=$G_GITOWNER" /DietPi/dietpi.txt
+		G_VERSIONDB_SAVE
 
 		G_RUN_CMD cp /DietPi/dietpi/.version /var/lib/dietpi/.dietpi_image_version
 
@@ -1531,9 +1546,13 @@ _EOF_
 		G_RUN_CMD systemctl stop dietpi-ramlog
 		G_RUN_CMD systemctl stop dietpi-ramdisk
 
-		# - Clear tmp files
-		rm -R /tmp/* &> /dev/null
+		# - Clear tmp files on disk
 		rm /var/tmp/dietpi/logs/* &> /dev/null
+
+		# - Clear items that may have been left on disk, from previous PREP's
+		rm -R /DietPi/* &> /dev/null
+		cd /root
+		umount /tmp; rm -R /tmp/* &> /dev/null
 
 		sync
 

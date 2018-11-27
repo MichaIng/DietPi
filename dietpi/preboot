@@ -14,9 +14,9 @@
 	#////////////////////////////////////
 
 	#Import DietPi-Globals ---------------------------------------------------------------
-	/DietPi/dietpi/func/dietpi-obtain_hw_model # Running for the 1st time
+	/DietPi/dietpi/func/dietpi-obtain_hw_model # Runs every boot to allow e.g. switching SDcards between devices and to be failsafe
 	. /DietPi/dietpi/func/dietpi-globals
-	export G_PROGRAM_NAME='DietPi-PreBoot'
+	G_PROGRAM_NAME='DietPi-PreBoot'
 	G_INIT
 	#Import DietPi-Globals ---------------------------------------------------------------
 
@@ -93,9 +93,6 @@
 		#----------------------------------------------------------------
 		#Automation
 		#----------------------------------------------------------------
-		# - Grab available network devices
-		/DietPi/dietpi/func/obtain_network_details
-
 		# - Generate Swapfile
 		/DietPi/dietpi/func/dietpi-set_dphys-swapfile $(grep -m1 '^[[:blank:]]*AUTO_SETUP_SWAPFILE_SIZE=' /DietPi/dietpi.txt | sed 's/^[^=]*=//') "$(grep -m1 '^[[:blank:]]*AUTO_SETUP_SWAPFILE_LOCATION=' /DietPi/dietpi.txt | sed 's/^[^=]*=//')"
 
@@ -119,11 +116,7 @@
 			G_DIETPI-NOTIFY 2 "Setting Locale $autoinstall_language. Please wait..."
 
 			#	Sanity, wrong result, revert back to default
-			if [[ ! $autoinstall_language =~ 'UTF-8' ]]; then
-
-				autoinstall_language='en_GB.UTF-8'
-
-			fi
+			[[ ! $autoinstall_language =~ 'UTF-8' ]] && autoinstall_language='en_GB.UTF-8'
 
 			# - Re-apply locale + auto install en_GB.UTF-8 alongside
 			/DietPi/dietpi/func/dietpi-set_software locale "$autoinstall_language"
@@ -186,15 +179,16 @@
 		rm /var/lib/dbus/machine-id &> /dev/null
 		systemd-machine-id-setup
 
-		#	Failsafe
-		killall -w dhclient &> /dev/null
+		# - Network setup
+		#	Grab available network devices
+		/DietPi/dietpi/func/obtain_network_details
 
 		local index_eth=$(sed -n 1p /DietPi/dietpi/.network)
 		local index_wlan=$(sed -n 2p /DietPi/dietpi/.network)
 
 		#	Replace all eth0 and wlan0 values to the indices DietPi has found.
-		sed -i "s/eth0/eth$index_eth/g" /etc/network/interfaces
-		sed -i "s/wlan0/wlan$index_wlan/g" /etc/network/interfaces
+		sed -i "s/eth[0-9]/eth$index_eth/g" /etc/network/interfaces
+		sed -i "s/wlan[0-9]/wlan$index_wlan/g" /etc/network/interfaces
 
 		#	Grab user requested settings from /dietpi.txt
 		local ethernet_enabled=$(grep -ci -m1 '^[[:blank:]]*AUTO_SETUP_NET_ETHERNET_ENABLED=1' /DietPi/dietpi.txt)
@@ -232,9 +226,6 @@
 		#	Static IPs
 		if (( $use_static )); then
 
-			#enable dns-nameservers
-			sed -i 's/^#dns-nameservers/dns-nameservers/g' /etc/network/interfaces
-
 			if (( $wifi_enabled )); then
 
 				sed -i "/iface wlan/c\iface wlan$index_wlan inet static" /etc/network/interfaces
@@ -252,31 +243,10 @@
 
 		fi
 
-		#	Failsafe
-		systemctl stop networking
-		killall -w dhclient &> /dev/null
-
 		# - IPv6
 		local enable_ipv6=$(grep -ci -m1 '^[[:blank:]]*CONFIG_ENABLE_IPV6=1' /DietPi/dietpi.txt)
 		/DietPi/dietpi/func/dietpi-set_hardware enableipv6 $enable_ipv6
 		(( $enable_ipv6 )) && /DietPi/dietpi/func/dietpi-set_hardware preferipv4 $(grep -ci -m1 '^[[:blank:]]*CONFIG_PREFER_IPV4=1' /DietPi/dietpi.txt)
-
-		# - reload networking
-		systemctl daemon-reload
-
-		# - Jessie service fails to start: https://github.com/Fourdee/DietPi/issues/2075#issuecomment-424747579
-		(( $G_DISTRO == 3 )) && systemctl start networking
-
-		# - Bring up networking (this is required, not sure what systemd isn't doing here, as this service runs before networking?!!?)
-		if (( $wifi_enabled )); then
-
-			ifup wlan$index_wlan
-
-		elif (( $ethernet_enabled )); then
-
-			ifup eth$index_eth
-
-		fi
 
 	}
 
@@ -285,20 +255,20 @@
 	#/////////////////////////////////////////////////////////////////////////////////////
 	#-----------------------------------------------------------------------------------
 	#Apply DietPi CPU Governor and settings
-	/DietPi/dietpi/func/dietpi-set_cpu &
+	G_THREAD_START /DietPi/dietpi/func/dietpi-set_cpu
 
 	#Apply LED triggers if set
-	/DietPi/dietpi/func/dietpi-led_control 1 &
+	G_THREAD_START /DietPi/dietpi/func/dietpi-led_control 1
 
 	#RPi Specials
 	#	set volume to -0.1db | We have to do it here because sound card modules (dietpi-set_hardware) are not enabled on the fly, requires a reboot.
 	#	Disable RPi hdmi output if set in dietpi.txt
 	if (( $G_HW_MODEL < 10 )); then
 
-		which amixer &> /dev/null && amixer set PCM -- -010 &
+		which amixer &> /dev/null && amixer set PCM -- -010
 		if grep -qi '^[[:blank:]]*CONFIG_HDMI_OUTPUT=0' /DietPi/dietpi.txt; then
 
-			/opt/vc/bin/tvservice -o &> /dev/null &
+			/opt/vc/bin/tvservice -o &> /dev/null
 
 		fi
 
@@ -335,6 +305,7 @@
 
 	fi
 	#-----------------------------------------------------------------------------------
+	G_THREAD_WAIT
 	exit
 	#-----------------------------------------------------------------------------------
 }

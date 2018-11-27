@@ -3,9 +3,9 @@
 
 	#Import DietPi-Globals ---------------------------------------------------------------
 	. /DietPi/dietpi/func/dietpi-globals
+	G_PROGRAM_NAME='DietPi-WiFi-Monitor'
 	G_CHECK_ROOT_USER
 	G_CHECK_ROOTFS_RW
-	export G_PROGRAM_NAME='DietPi-WiFi-Monitor'
 	G_INIT
 	#Import DietPi-Globals ---------------------------------------------------------------
 
@@ -16,25 +16,24 @@
 	#-------------------------------------------------------------------------------------
 	#Main
 	#-------------------------------------------------------------------------------------
-	while true
+	while :
 	do
 
 		# - Get current gateway for ping
-		URL_PING="$(ip route show 0.0.0.0/0 dev $ADAPTER | awk '{print $3}')"
+		URL_PING="$(ip r s 0.0.0.0/0 dev $ADAPTER | awk '{print $3}')"
 
-		echo -e "Checking connnection for: $ADAPTER via ping to $URL_PING"
-		ping -I $ADAPTER -c 1 $URL_PING
-		if (( $? != 0 )); then
+		echo "Checking connnection for: $ADAPTER via ping to $URL_PING"
+		if ping -I $ADAPTER -c 1 $URL_PING; then
 
-			echo -e  "Detected connection loss: $ADAPTER. Reconnecting"
+			echo "Connection valid for: $ADAPTER"
+
+		else
+
+			echo "Detected connection loss: $ADAPTER. Reconnecting"
 			ifdown "$ADAPTER"
 			sleep 1
 			ifup "$ADAPTER"
 			echo 'Completed'
-
-		else
-
-			echo -e "Connection valid for: $ADAPTER"
 
 		fi
 
