@@ -787,7 +787,7 @@ _EOF_
 		#	Pinebook
 		elif (( $G_HW_MODEL == 44 )); then
 
-			G_AGI linux-pine64-package
+			G_AGI armbian-firmware armbian-tools-stretch sunxi-tools linux-dtb-dev-sunxi64 linux-image-dev-sunxi64 linux-u-boot-pinebook-a64-dev linux-stretch-root-dev-pinebook-a64
 
 		#	BBB
 		elif (( $G_HW_MODEL == 71 )); then
@@ -924,31 +924,34 @@ _EOF_
 		rm -R /usr/share/fonts/* &> /dev/null
 		rm -R /usr/share/icons/* &> /dev/null
 
-		rm /etc/init.d/resize2fs &> /dev/null
-		rm /etc/update-motd.d/* &> /dev/null # ARMbian
-
+		# - ARMbian
 		systemctl disable firstrun  &> /dev/null
-		rm /etc/init.d/firstrun  &> /dev/null # ARMbian
-
-		# - Disable ARMbian's log2ram: https://github.com/Fourdee/DietPi/issues/781
+		rm /etc/init.d/resize2fs &> /dev/null
+		rm /etc/init.d/firstrun  &> /dev/null
 		systemctl disable log2ram &> /dev/null
 		systemctl stop log2ram &> /dev/null
+		rm $(find / -name armbian*.service) &> /dev/null
+		rm $(find / -name log2ram.service) &> /dev/null
 		rm /usr/local/sbin/log2ram &> /dev/null
-		rm /etc/systemd/system/log2ram.service &> /dev/null
-		systemctl daemon-reload &> /dev/null
-		rm /etc/cron.hourly/log2ram &> /dev/null
+		rm /usr/bin/armbianmonitor &> /dev/null
+		rm -R /usr/lib/armbian &> /dev/null
+		rm -R /usr/share/armbian &> /dev/null
+		rm /etc/profile.d/armbian* &> /dev/null
+		rm -R /etc/armbian* &> /dev/null
+		rm -R /etc/default/armbian* &> /dev/null
+		rm -R /etc/logrotate.d &> /dev/null
+		rm /etc/cron.d/armbian* &> /dev/null
+		rm /etc/cron.daily/armbian* &> /dev/null
+		rm /boot/armbian_first_run.txt.template &> /dev/null
+		umount /var/log.hdd &> /dev/null
+		rm -R /var/log.hdd &> /dev/null
+
+		systemctl daemon-reload
 
 		# - Meveric specific
 		rm /etc/init.d/cpu_governor &> /dev/null
 		rm /etc/systemd/system/cpu_governor.service &> /dev/null
 		rm /usr/local/sbin/setup-odroid &> /dev/null
-
-		# - Disable ARMbian's resize service (not automatically removed by ARMbian scripts...)
-		systemctl disable resize2fs &> /dev/null
-		rm /etc/systemd/system/resize2fs.service &> /dev/null
-
-		# - ARMbian-config
-		rm /etc/profile.d/check_first_login_reboot.sh &> /dev/null
 
 		# - RPi specific https://github.com/Fourdee/DietPi/issues/1631#issuecomment-373965406
 		rm /etc/profile.d/wifi-country.sh &> /dev/null
