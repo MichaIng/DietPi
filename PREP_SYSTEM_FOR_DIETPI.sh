@@ -348,8 +348,6 @@
 			'' '●─ SBC─(Core devices) '
 			'10' ': Odroid C1'
 			'12' ': Odroid C2'
-			'14' ': Odroid N1'
-			'13' ': Odroid U3'
 			'11' ': Odroid XU3/4/HC1/HC2'
 			'44' ': Pinebook 1080p'
 			'0' ': Raspberry Pi (All models)'
@@ -376,6 +374,8 @@
 			'62' ': NanoPi M3/T3/F3'
 			'68' ': NanoPC T4'
 			'67' ': NanoPi K1 Plus'
+			'14' ': Odroid N1'
+			'13' ': Odroid U3'
 			'38' ': OrangePi PC 2'
 			'37' ': OrangePi Prime'
 			'36' ': OrangePi Win'
@@ -657,28 +657,26 @@ _EOF_
 
 		)
 
+		# - G_HW_MODEL specific required repo key packages: https://github.com/Fourdee/DietPi/issues/1285#issuecomment-358301273
+		if (( $G_HW_MODEL >= 10 )); then
+
+			G_AGI debian-archive-keyring
+			aPACKAGES_REQUIRED_INSTALL+=('initramfs-tools')		# RAM file system initialization, required for generic boot loader, but not required/used by RPi bootloader
+
+		else
+
+			G_AGI raspbian-archive-keyring
+
+		fi
+
+		# - WiFi related packages
 		if (( $WIFI_REQUIRED )); then
 
 			aPACKAGES_REQUIRED_INSTALL+=('crda')			# WiFi related
-			aPACKAGES_REQUIRED_INSTALL+=('firmware-atheros')	# WiFi dongle firmware
-			aPACKAGES_REQUIRED_INSTALL+=('firmware-brcm80211')	# WiFi dongle firmware
-			aPACKAGES_REQUIRED_INSTALL+=('firmware-iwlwifi')	# Intel WiFi dongle/PCI-e firwmare
 			aPACKAGES_REQUIRED_INSTALL+=('iw')			# WiFi related
 			aPACKAGES_REQUIRED_INSTALL+=('rfkill')	 		# WiFi related: Used by some onboard WiFi chipsets
 			aPACKAGES_REQUIRED_INSTALL+=('wireless-tools')		# WiFi related
 			aPACKAGES_REQUIRED_INSTALL+=('wpasupplicant')		# WiFi WPA(2) support
-
-			# Intel/Nvidia/WiFi (ralink) dongle firmware: https://github.com/Fourdee/DietPi/issues/1675#issuecomment-377806609
-			# On Jessie, firmware-misc-nonfree is not available, firmware-ralink instead as dedicated package.
-			if (( $G_DISTRO < 4 )); then
-
-				aPACKAGES_REQUIRED_INSTALL+=('firmware-ralink')
-
-			else
-
-				aPACKAGES_REQUIRED_INSTALL+=('firmware-misc-nonfree')
-
-			fi
 
 		fi
 
@@ -693,23 +691,9 @@ _EOF_
 
 		fi
 
-		# - G_HW_MODEL specific required repo key packages: https://github.com/Fourdee/DietPi/issues/1285#issuecomment-358301273
-		if (( $G_HW_MODEL >= 10 )); then
-
-			G_AGI debian-archive-keyring
-			aPACKAGES_REQUIRED_INSTALL+=('initramfs-tools')		# RAM file system initialization, required for generic boot loader, but not required/used by RPi bootloader
-
-		else
-
-			G_AGI raspbian-archive-keyring
-
-		fi
-
 		# - G_HW_MODEL specific required packages:
-		#	VM: No network firmware necessary and hard drive power management stays at host system.
 		if (( $G_HW_MODEL != 20 )); then
 
-			G_AGI firmware-realtek					# Eth/WiFi/BT dongle firmware
 			aPACKAGES_REQUIRED_INSTALL+=('dosfstools')		# DietPi-Drive_Manager + fat (boot) drive file system check and creation tools
 			aPACKAGES_REQUIRED_INSTALL+=('hdparm')			# Drive power management adjustments
 
@@ -717,15 +701,12 @@ _EOF_
 
 		# - Kernel required packages
 		# - G_HW_ARCH specific required Kernel packages
-		#	As these are kernel, firmware or bootloader packages, we need to install them directly to allow autoremove of in case older kernel packages:
+		#	As these are kernel, or bootloader packages, we need to install them directly to allow autoremove of in case older kernel packages:
 		#	https://github.com/Fourdee/DietPi/issues/1285#issuecomment-354602594
 		#	x86_64
 		if (( $G_HW_ARCH == 10 )); then
 
 			G_AGI linux-image-amd64 os-prober
-
-			# Usually no firmware should be necessary for VMs. If user manually passes though some USB device, he might need to install the firmware then.
-			(( $G_HW_MODEL != 20 )) && G_AGI firmware-linux-nonfree
 
 			#	Grub EFI
 			if dpkg-query -s 'grub-efi-amd64' &> /dev/null ||
@@ -787,14 +768,14 @@ _EOF_
 		#	Pinebook
 		elif (( $G_HW_MODEL == 44 )); then
 
-			G_AGI armbian-firmware armbian-tools-stretch sunxi-tools linux-dtb-dev-sunxi64 linux-image-dev-sunxi64 linux-u-boot-pinebook-a64-dev linux-stretch-root-dev-pinebook-a64
+			G_AGI armbian-tools-stretch sunxi-tools linux-dtb-dev-sunxi64 linux-image-dev-sunxi64 linux-u-boot-pinebook-a64-dev linux-stretch-root-dev-pinebook-a64
 
 		#	BBB
 		elif (( $G_HW_MODEL == 71 )); then
 
 			G_AGI device-tree-compiler #Kern
 
-		# - Auto detect kernel/firmware package
+		# - Auto detect kernel package
 		else
 
 			AUTO_DETECT_KERN_PKG=$(dpkg --get-selections | grep '^linux-image' | awk '{print $1}')
@@ -822,6 +803,43 @@ _EOF_
 			if [[ $AUTO_DETECT_DTB_PKG ]]; then
 
 				G_AGI $AUTO_DETECT_DTB_PKG
+
+			fi
+
+		fi
+
+		# - Firmware
+		if dpkg --get-selections | grep -q '^armbian-firmware'; then
+
+			aPACKAGES_REQUIRED_INSTALL+=('armbian-firmware')
+
+		else
+
+			#	Usually no firmware should be necessary for VMs. If user manually passes though some USB device, user might need to install the firmware then.
+			if (( $G_HW_MODEL != 20 )); then
+
+				aPACKAGES_REQUIRED_INSTALL+=('firmware-realtek')		# Eth/WiFi/BT dongle firmware
+				aPACKAGES_REQUIRED_INSTALL+=('firmware-linux-nonfree')
+
+			fi
+
+			if (( $WIFI_REQUIRED )); then
+
+				aPACKAGES_REQUIRED_INSTALL+=('firmware-atheros')	# WiFi dongle firmware
+				aPACKAGES_REQUIRED_INSTALL+=('firmware-brcm80211')	# WiFi dongle firmware
+				aPACKAGES_REQUIRED_INSTALL+=('firmware-iwlwifi')	# Intel WiFi dongle/PCI-e firwmare
+
+				# Intel/Nvidia/WiFi (ralink) dongle firmware: https://github.com/Fourdee/DietPi/issues/1675#issuecomment-377806609
+				# On Jessie, firmware-misc-nonfree is not available, firmware-ralink instead as dedicated package.
+				if (( $G_DISTRO < 4 )); then
+
+					aPACKAGES_REQUIRED_INSTALL+=('firmware-ralink')
+
+				else
+
+					aPACKAGES_REQUIRED_INSTALL+=('firmware-misc-nonfree')
+
+				fi
 
 			fi
 
