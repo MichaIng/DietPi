@@ -722,6 +722,41 @@ _EOF_
 			fi
 
 		# - G_HW_MODEL specific required Kernel packages
+		#	ARMbian grab currently installed packages
+		elif dpkg --get-selections | grep -qi armbian; then
+
+			local apackages=(
+
+				"armbian-tools-$DISTRO_TARGET_NAME"
+				"linux-dtb-"
+				"linux-u-"
+				"linux-image-"
+				"linux-$DISTRO_TARGET_NAME"
+				'sunxi'
+				'armbian-firmware'
+
+			)
+
+			for i in "${!apackages[@]}"
+			do
+
+				while read -r line
+				do
+
+					if [[ $line ]]; then
+
+						aPACKAGES_REQUIRED_INSTALL+=("$line")
+						G_DIETPI-NOTIFY 2 "PKG detected: $line"
+
+					fi
+
+
+				done <<< "$(dpkg --get-selections | grep "^${apackages[$i]}" | awk '{print $1}')"
+
+			done
+
+			unset apackages
+
 		#	RPi
 		elif (( $G_HW_MODEL < 10 )); then
 
@@ -764,11 +799,6 @@ _EOF_
 		elif (( $G_HW_MODEL == 43 )); then
 
 			G_AGI linux-rock64 gdisk
-
-		#	Pinebook
-		elif (( $G_HW_MODEL == 44 )); then
-
-			G_AGI armbian-tools-stretch sunxi-tools linux-dtb-dev-sunxi64 linux-image-dev-sunxi64 linux-u-boot-pinebook-a64-dev linux-stretch-root-dev-pinebook-a64
 
 		#	BBB
 		elif (( $G_HW_MODEL == 71 )); then
