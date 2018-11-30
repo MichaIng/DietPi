@@ -18,8 +18,8 @@
 
 	#Core globals
 	G_PROGRAM_NAME='DietPi-PREP'
-	G_GITOWNER=${G_GITOWNER:-Fourdee}
-	G_GITBRANCH=${G_GITBRANCH:-master}
+	GITOWNER=${GITOWNER:-Fourdee}
+	GITBRANCH=${GITBRANCH:-master}
 
 	#------------------------------------------------------------------------------------------------
 	# Critical checks and pre-reqs, with exit, prior to initial run of script
@@ -105,7 +105,7 @@
 	WHIP_RETURN=$(whiptail --title "$G_PROGRAM_NAME" --menu "Please select a Git branch:" --default-item "master" --ok-button "Ok" --cancel-button "Exit" --backtitle "$G_PROGRAM_NAME" 12 80 3 "${aWHIP_BRANCH[@]}" 3>&1 1>&2 2>&3)
 	if (( $? == 0 )); then
 
-		export G_GITBRANCH=$WHIP_RETURN
+		export GITBRANCH=$WHIP_RETURN
 
 	else
 
@@ -117,14 +117,14 @@
 	unset aWHIP_BRANCH
 	unset WHIP_RETURN
 
-	echo "Git branch: $G_GITOWNER/$G_GITBRANCH"
+	echo "Git branch: $GITOWNER/$GITBRANCH"
 
 	#------------------------------------------------------------------------------------------------
 	# DietPi-Globals
 	#------------------------------------------------------------------------------------------------
 	# - Download
 	# - NB: We'll have to manually handle errors, until DietPi-Globals are sucessfully loaded.
-	if ! wget "https://raw.githubusercontent.com/$G_GITOWNER/DietPi/$G_GITBRANCH/dietpi/func/dietpi-globals" -O dietpi-globals; then
+	if ! wget "https://raw.githubusercontent.com/$GITOWNER/DietPi/$GITBRANCH/dietpi/func/dietpi-globals" -O dietpi-globals; then
 
 		echo -e 'Error: Unable to download dietpi-globals. Aborting...\n'
 		exit 1
@@ -348,8 +348,6 @@
 			'' '●─ SBC─(Core devices) '
 			'10' ': Odroid C1'
 			'12' ': Odroid C2'
-			'14' ': Odroid N1'
-			'13' ': Odroid U3'
 			'11' ': Odroid XU3/4/HC1/HC2'
 			'44' ': Pinebook 1080p'
 			'0' ': Raspberry Pi (All models)'
@@ -376,6 +374,8 @@
 			'62' ': NanoPi M3/T3/F3'
 			'68' ': NanoPC T4'
 			'67' ': NanoPi K1 Plus'
+			'14' ': Odroid N1'
+			'13' ': Odroid U3'
 			'38' ': OrangePi PC 2'
 			'37' ': OrangePi Prime'
 			'36' ': OrangePi Win'
@@ -506,11 +506,11 @@
 		G_DIETPI-NOTIFY 2 '-----------------------------------------------------------------------------------'
 		#------------------------------------------------------------------------------------------------
 
-		INTERNET_ADDRESS="https://github.com/$G_GITOWNER/DietPi/archive/$G_GITBRANCH.zip"
+		INTERNET_ADDRESS="https://github.com/$GITOWNER/DietPi/archive/$GITBRANCH.zip"
 		G_CHECK_URL "$INTERNET_ADDRESS"
 		G_RUN_CMD wget "$INTERNET_ADDRESS" -O package.zip
 
-		[[ -d DietPi-$G_GITBRANCH ]] && l_message='Cleaning previously extracted files' G_RUN_CMD rm -R "DietPi-$G_GITBRANCH"
+		[[ -d DietPi-$GITBRANCH ]] && l_message='Cleaning previously extracted files' G_RUN_CMD rm -R "DietPi-$GITBRANCH"
 		l_message='Extracting DietPi sourcecode' G_RUN_CMD unzip -o package.zip
 		rm package.zip
 
@@ -518,38 +518,38 @@
 
 		G_DIETPI-NOTIFY 2 'Moving kernel and boot configuration to /boot'
 
-		G_RUN_CMD mv "DietPi-$G_GITBRANCH/dietpi.txt" /boot/
+		G_RUN_CMD mv "DietPi-$GITBRANCH/dietpi.txt" /boot/
 
 		# - HW specific config.txt, boot.ini uEnv.txt
 		if (( $G_HW_MODEL < 10 )); then
 
-			G_RUN_CMD mv "DietPi-$G_GITBRANCH/config.txt" /boot/
+			G_RUN_CMD mv "DietPi-$GITBRANCH/config.txt" /boot/
 
 		elif (( $G_HW_MODEL == 10 )); then
 
-			G_RUN_CMD mv "DietPi-$G_GITBRANCH/boot_c1.ini" /boot/boot.ini
+			G_RUN_CMD mv "DietPi-$GITBRANCH/boot_c1.ini" /boot/boot.ini
 
 		elif (( $G_HW_MODEL == 11 )); then
 
-			G_RUN_CMD mv "DietPi-$G_GITBRANCH/boot_xu4.ini" /boot/boot.ini
+			G_RUN_CMD mv "DietPi-$GITBRANCH/boot_xu4.ini" /boot/boot.ini
 
 		elif (( $G_HW_MODEL == 12 )); then
 
-			G_RUN_CMD mv "DietPi-$G_GITBRANCH/boot_c2.ini" /boot/boot.ini
+			G_RUN_CMD mv "DietPi-$GITBRANCH/boot_c2.ini" /boot/boot.ini
 
 		fi
 
-		G_RUN_CMD mv "DietPi-$G_GITBRANCH/README.md" /boot/
-		#G_RUN_CMD mv "DietPi-$G_GITBRANCH/CHANGELOG.txt" /boot/
+		G_RUN_CMD mv "DietPi-$GITBRANCH/README.md" /boot/
+		#G_RUN_CMD mv "DietPi-$GITBRANCH/CHANGELOG.txt" /boot/
 
 		# - Remove server_version / patch_file (downloads fresh from dietpi-update)
-		rm "DietPi-$G_GITBRANCH/dietpi/patch_file"
-		rm DietPi-"$G_GITBRANCH"/dietpi/server_version*
+		rm "DietPi-$GITBRANCH/dietpi/patch_file"
+		rm DietPi-"$GITBRANCH"/dietpi/server_version*
 
-		l_message='Copy DietPi core files to /boot/dietpi' G_RUN_CMD cp -Rf DietPi-"$G_GITBRANCH"/dietpi /boot/
-		l_message='Copy rootfs files in place' G_RUN_CMD cp -Rf DietPi-"$G_GITBRANCH"/rootfs/. /
+		l_message='Copy DietPi core files to /boot/dietpi' G_RUN_CMD cp -Rf DietPi-"$GITBRANCH"/dietpi /boot/
+		l_message='Copy rootfs files in place' G_RUN_CMD cp -Rf DietPi-"$GITBRANCH"/rootfs/. /
 
-		l_message='Clean download location' G_RUN_CMD rm -R "DietPi-$G_GITBRANCH"
+		l_message='Clean download location' G_RUN_CMD rm -R "DietPi-$GITBRANCH"
 
 		l_message='Set execute permissions for DietPi scripts' G_RUN_CMD chmod -R +x /boot/dietpi /var/lib/dietpi/services /etc/cron.*/dietpi /etc/profile.d/dietpi-*.sh /etc/bashrc.d/dietpi-*.sh
 
@@ -657,28 +657,26 @@ _EOF_
 
 		)
 
+		# - G_HW_MODEL specific required repo key packages: https://github.com/Fourdee/DietPi/issues/1285#issuecomment-358301273
+		if (( $G_HW_MODEL >= 10 )); then
+
+			G_AGI debian-archive-keyring
+			aPACKAGES_REQUIRED_INSTALL+=('initramfs-tools')		# RAM file system initialization, required for generic boot loader, but not required/used by RPi bootloader
+
+		else
+
+			G_AGI raspbian-archive-keyring
+
+		fi
+
+		# - WiFi related packages
 		if (( $WIFI_REQUIRED )); then
 
 			aPACKAGES_REQUIRED_INSTALL+=('crda')			# WiFi related
-			aPACKAGES_REQUIRED_INSTALL+=('firmware-atheros')	# WiFi dongle firmware
-			aPACKAGES_REQUIRED_INSTALL+=('firmware-brcm80211')	# WiFi dongle firmware
-			aPACKAGES_REQUIRED_INSTALL+=('firmware-iwlwifi')	# Intel WiFi dongle/PCI-e firwmare
 			aPACKAGES_REQUIRED_INSTALL+=('iw')			# WiFi related
 			aPACKAGES_REQUIRED_INSTALL+=('rfkill')	 		# WiFi related: Used by some onboard WiFi chipsets
 			aPACKAGES_REQUIRED_INSTALL+=('wireless-tools')		# WiFi related
 			aPACKAGES_REQUIRED_INSTALL+=('wpasupplicant')		# WiFi WPA(2) support
-
-			# Intel/Nvidia/WiFi (ralink) dongle firmware: https://github.com/Fourdee/DietPi/issues/1675#issuecomment-377806609
-			# On Jessie, firmware-misc-nonfree is not available, firmware-ralink instead as dedicated package.
-			if (( $G_DISTRO < 4 )); then
-
-				aPACKAGES_REQUIRED_INSTALL+=('firmware-ralink')
-
-			else
-
-				aPACKAGES_REQUIRED_INSTALL+=('firmware-misc-nonfree')
-
-			fi
 
 		fi
 
@@ -693,23 +691,9 @@ _EOF_
 
 		fi
 
-		# - G_HW_MODEL specific required repo key packages: https://github.com/Fourdee/DietPi/issues/1285#issuecomment-358301273
-		if (( $G_HW_MODEL >= 10 )); then
-
-			G_AGI debian-archive-keyring
-			aPACKAGES_REQUIRED_INSTALL+=('initramfs-tools')		# RAM file system initialization, required for generic boot loader, but not required/used by RPi bootloader
-
-		else
-
-			G_AGI raspbian-archive-keyring
-
-		fi
-
 		# - G_HW_MODEL specific required packages:
-		#	VM: No network firmware necessary and hard drive power management stays at host system.
 		if (( $G_HW_MODEL != 20 )); then
 
-			G_AGI firmware-realtek					# Eth/WiFi/BT dongle firmware
 			aPACKAGES_REQUIRED_INSTALL+=('dosfstools')		# DietPi-Drive_Manager + fat (boot) drive file system check and creation tools
 			aPACKAGES_REQUIRED_INSTALL+=('hdparm')			# Drive power management adjustments
 
@@ -717,15 +701,12 @@ _EOF_
 
 		# - Kernel required packages
 		# - G_HW_ARCH specific required Kernel packages
-		#	As these are kernel, firmware or bootloader packages, we need to install them directly to allow autoremove of in case older kernel packages:
+		#	As these are kernel, or bootloader packages, we need to install them directly to allow autoremove of in case older kernel packages:
 		#	https://github.com/Fourdee/DietPi/issues/1285#issuecomment-354602594
 		#	x86_64
 		if (( $G_HW_ARCH == 10 )); then
 
 			G_AGI linux-image-amd64 os-prober
-
-			# Usually no firmware should be necessary for VMs. If user manually passes though some USB device, he might need to install the firmware then.
-			(( $G_HW_MODEL != 20 )) && G_AGI firmware-linux-nonfree
 
 			#	Grub EFI
 			if dpkg-query -s 'grub-efi-amd64' &> /dev/null ||
@@ -741,6 +722,40 @@ _EOF_
 			fi
 
 		# - G_HW_MODEL specific required Kernel packages
+		#	ARMbian grab currently installed packages
+		elif dpkg --get-selections | grep -qi armbian; then
+
+			local apackages=(
+
+				"armbian-tools-$DISTRO_TARGET_NAME"
+				"linux-dtb-"
+				"linux-u-"
+				"linux-image-"
+				"linux-$DISTRO_TARGET_NAME"
+				'sunxi'
+
+			)
+
+			for i in "${!apackages[@]}"
+			do
+
+				while read -r line
+				do
+
+					if [[ $line ]]; then
+
+						aPACKAGES_REQUIRED_INSTALL+=("$line")
+						apt-mark hold $line
+						G_DIETPI-NOTIFY 2 "PKG detected and set on hold: $line"
+
+					fi
+
+				done <<< "$(dpkg --get-selections | grep "^${apackages[$i]}" | awk '{print $1}')"
+
+			done
+
+			unset apackages
+
 		#	RPi
 		elif (( $G_HW_MODEL < 10 )); then
 
@@ -784,17 +799,12 @@ _EOF_
 
 			G_AGI linux-rock64 gdisk
 
-		#	Pinebook
-		elif (( $G_HW_MODEL == 44 )); then
-
-			G_AGI linux-pine64-package
-
 		#	BBB
 		elif (( $G_HW_MODEL == 71 )); then
 
 			G_AGI device-tree-compiler #Kern
 
-		# - Auto detect kernel/firmware package
+		# - Auto detect kernel package
 		else
 
 			AUTO_DETECT_KERN_PKG=$(dpkg --get-selections | grep '^linux-image' | awk '{print $1}')
@@ -822,6 +832,43 @@ _EOF_
 			if [[ $AUTO_DETECT_DTB_PKG ]]; then
 
 				G_AGI $AUTO_DETECT_DTB_PKG
+
+			fi
+
+		fi
+
+		# - Firmware
+		if dpkg --get-selections | grep -q '^armbian-firmware'; then
+
+			aPACKAGES_REQUIRED_INSTALL+=('armbian-firmware')
+
+		else
+
+			#	Usually no firmware should be necessary for VMs. If user manually passes though some USB device, user might need to install the firmware then.
+			if (( $G_HW_MODEL != 20 )); then
+
+				aPACKAGES_REQUIRED_INSTALL+=('firmware-realtek')		# Eth/WiFi/BT dongle firmware
+				aPACKAGES_REQUIRED_INSTALL+=('firmware-linux-nonfree')
+
+			fi
+
+			if (( $WIFI_REQUIRED )); then
+
+				aPACKAGES_REQUIRED_INSTALL+=('firmware-atheros')	# WiFi dongle firmware
+				aPACKAGES_REQUIRED_INSTALL+=('firmware-brcm80211')	# WiFi dongle firmware
+				aPACKAGES_REQUIRED_INSTALL+=('firmware-iwlwifi')	# Intel WiFi dongle/PCI-e firwmare
+
+				# Intel/Nvidia/WiFi (ralink) dongle firmware: https://github.com/Fourdee/DietPi/issues/1675#issuecomment-377806609
+				# On Jessie, firmware-misc-nonfree is not available, firmware-ralink instead as dedicated package.
+				if (( $G_DISTRO < 4 )); then
+
+					aPACKAGES_REQUIRED_INSTALL+=('firmware-ralink')
+
+				else
+
+					aPACKAGES_REQUIRED_INSTALL+=('firmware-misc-nonfree')
+
+				fi
 
 			fi
 
@@ -924,37 +971,50 @@ _EOF_
 		rm -R /usr/share/fonts/* &> /dev/null
 		rm -R /usr/share/icons/* &> /dev/null
 
-		rm /etc/init.d/resize2fs &> /dev/null
-		rm /etc/update-motd.d/* &> /dev/null # ARMbian
-
+		# - ARMbian
 		systemctl disable firstrun  &> /dev/null
-		rm /etc/init.d/firstrun  &> /dev/null # ARMbian
-
-		# - Disable ARMbian's log2ram: https://github.com/Fourdee/DietPi/issues/781
+		rm /etc/init.d/resize2fs &> /dev/null
+		rm /etc/init.d/firstrun  &> /dev/null
 		systemctl disable log2ram &> /dev/null
 		systemctl stop log2ram &> /dev/null
+		rm $(find / -name armbian*.service) &> /dev/null
+		rm $(find / -name log2ram.service) &> /dev/null
 		rm /usr/local/sbin/log2ram &> /dev/null
-		rm /etc/systemd/system/log2ram.service &> /dev/null
-		systemctl daemon-reload &> /dev/null
-		rm /etc/cron.hourly/log2ram &> /dev/null
+		rm /usr/bin/armbianmonitor &> /dev/null
+		rm -R /usr/lib/armbian &> /dev/null
+		rm -R /usr/share/armbian &> /dev/null
+		rm /etc/profile.d/armbian* &> /dev/null
+		rm -R /etc/armbian* &> /dev/null
+		rm -R /etc/default/armbian* &> /dev/null
+		rm -R /etc/update-motd.d/*armbian* &> /dev/null
+		rm -R /etc/logrotate.d &> /dev/null
+		rm -R /etc/X11/xorg.conf.d/*armbian* &> /dev/null
+		rm /etc/cron.d/armbian* &> /dev/null
+		rm /etc/cron.daily/armbian* &> /dev/null
+		rm /boot/armbian_first_run.txt.template &> /dev/null
+		umount /var/log.hdd &> /dev/null
+		rm -R /var/log.hdd &> /dev/null
+
+		systemctl daemon-reload
 
 		# - Meveric specific
 		rm /etc/init.d/cpu_governor &> /dev/null
 		rm /etc/systemd/system/cpu_governor.service &> /dev/null
 		rm /usr/local/sbin/setup-odroid &> /dev/null
 
-		# - Disable ARMbian's resize service (not automatically removed by ARMbian scripts...)
-		systemctl disable resize2fs &> /dev/null
-		rm /etc/systemd/system/resize2fs.service &> /dev/null
-
-		# - ARMbian-config
-		rm /etc/profile.d/check_first_login_reboot.sh &> /dev/null
-
 		# - RPi specific https://github.com/Fourdee/DietPi/issues/1631#issuecomment-373965406
 		rm /etc/profile.d/wifi-country.sh &> /dev/null
 
 		# - make_nas_processes_faster cron job on Rock64 + NanoPi + Pine64(?) images
 		rm /etc/cron.d/make_nas_processes_faster &> /dev/null
+
+		#-----------------------------------------------------------------------------------
+		#Boot Logo
+		if [[ -f /boot/boot.bmp ]]; then
+
+			G_RUN_CMD wget https://github.com/Fourdee/DietPi/raw/$GITBRANCH/.meta/images/dietpi-logo_boot.bmp -O /boot/boot.bmp
+
+		fi
 
 		#-----------------------------------------------------------------------------------
 		# Bash Profiles
@@ -1522,21 +1582,15 @@ _EOF_
 
 		G_DIETPI-NOTIFY 2 'Storing DietPi version ID'
 
-		G_RUN_CMD wget "https://raw.githubusercontent.com/$G_GITOWNER/DietPi/$G_GITBRANCH/dietpi/.version" -O /DietPi/dietpi/.version
-
-		local gitowner_temp=$G_GITOWNER
-		local gitbranch_temp=$G_GITBRANCH
+		G_RUN_CMD wget "https://raw.githubusercontent.com/$GITOWNER/DietPi/$GITBRANCH/dietpi/.version" -O /DietPi/dietpi/.version
 
 		chmod +x /DietPi/dietpi/.version
 		. /DietPi/dietpi/.version
 		#	reduce sub_version by 1, allows us to create image, prior to release and patch if needed.
 		G_DIETPI_VERSION_SUB=$(( $G_DIETPI_VERSION_SUB - 1 ))
 
-		G_GITOWNER=$gitowner_temp
-		G_GITBRANCH=$gitbranch_temp
-
-		G_CONFIG_INJECT 'DEV_GITBRANCH=' "DEV_GITBRANCH=$G_GITBRANCH" /DietPi/dietpi.txt
-		G_CONFIG_INJECT 'DEV_GITOWNER=' "DEV_GITOWNER=$G_GITOWNER" /DietPi/dietpi.txt
+		G_CONFIG_INJECT 'DEV_GITBRANCH=' "DEV_GITBRANCH=$GITBRANCH" /DietPi/dietpi.txt
+		G_CONFIG_INJECT 'DEV_GITOWNER=' "DEV_GITOWNER=$GITOWNER" /DietPi/dietpi.txt
 		G_VERSIONDB_SAVE
 
 		G_RUN_CMD cp /DietPi/dietpi/.version /var/lib/dietpi/.dietpi_image_version
