@@ -733,7 +733,6 @@ _EOF_
 				"linux-image-"
 				"linux-$DISTRO_TARGET_NAME"
 				'sunxi'
-				'armbian-firmware'
 
 			)
 
