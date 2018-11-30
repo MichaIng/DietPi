@@ -1007,6 +1007,14 @@ _EOF_
 		rm /etc/cron.d/make_nas_processes_faster &> /dev/null
 
 		#-----------------------------------------------------------------------------------
+		#Boot Logo
+		if [[ -f /boot/boot.bmp ]]; then
+
+			G_RUN_CMD wget https://github.com/Fourdee/DietPi/raw/$G_GITBRANCH/.meta/images/dietpi-logo_boot.bmp -O /boot/boot.bmp
+
+		fi
+
+		#-----------------------------------------------------------------------------------
 		# Bash Profiles
 
 		# - Pre v6.9 cleaning:
