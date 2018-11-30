@@ -986,7 +986,9 @@ _EOF_
 		rm /etc/profile.d/armbian* &> /dev/null
 		rm -R /etc/armbian* &> /dev/null
 		rm -R /etc/default/armbian* &> /dev/null
+		rm -R /etc/update-motd.d/*armbian* &> /dev/null
 		rm -R /etc/logrotate.d &> /dev/null
+		rm -R /etc/X11/xorg.conf.d/*armbian* &> /dev/null
 		rm /etc/cron.d/armbian* &> /dev/null
 		rm /etc/cron.daily/armbian* &> /dev/null
 		rm /boot/armbian_first_run.txt.template &> /dev/null
