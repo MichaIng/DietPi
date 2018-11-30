@@ -745,10 +745,10 @@ _EOF_
 					if [[ $line ]]; then
 
 						aPACKAGES_REQUIRED_INSTALL+=("$line")
-						G_DIETPI-NOTIFY 2 "PKG detected: $line"
+						apt-mark hold $line
+						G_DIETPI-NOTIFY 2 "PKG detected and set on hold: $line"
 
 					fi
-
 
 				done <<< "$(dpkg --get-selections | grep "^${apackages[$i]}" | awk '{print $1}')"
 
