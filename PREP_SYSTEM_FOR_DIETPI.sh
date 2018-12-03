@@ -1221,20 +1221,9 @@ _EOF_
 		# - allow times in the past
 		G_CONFIG_INJECT 'FORCE=' 'FORCE=force' /etc/default/fake-hwclock
 
-		G_DIETPI-NOTIFY 2 'Configuring serial console:'
+		G_DIETPI-NOTIFY 2 'Configuring enable serial console:'
 
 		/DietPi/dietpi/func/dietpi-set_hardware serialconsole enable
-		# - Disable for post-1st run setup:
-		sed -i '/^[[:blank:]]*CONFIG_SERIAL_CONSOLE_ENABLE=/c\CONFIG_SERIAL_CONSOLE_ENABLE=0' /DietPi/dietpi.txt
-		# - must be enabled for the following:
-		#	XU4: https://github.com/Fourdee/DietPi/issues/2038#issuecomment-416089875
-		#	RockPro64: Fails to boot into kernel without serial enabled
-		#	NanoPi Neo Air: Required for end users/debugging/setting up WiFi without automation
-		if (( $G_HW_MODEL == 11 || $G_HW_MODEL == 42  || $G_HW_MODEL == 64 )); then
-
-			sed -i '/^[[:blank:]]*CONFIG_SERIAL_CONSOLE_ENABLE=/c\CONFIG_SERIAL_CONSOLE_ENABLE=1' /DietPi/dietpi.txt
-
-		fi
 
 		G_DIETPI-NOTIFY 2 'Reducing getty count and resource usage:'
 
