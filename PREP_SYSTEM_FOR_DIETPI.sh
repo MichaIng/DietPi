@@ -349,7 +349,7 @@
 			'52' ': ASUS Tinker Board'
 			'10' ': Odroid C1'
 			'12' ': Odroid C2'
-			'11' ': Odroid XU3/4/HC1/HC2'
+			'11' ': Odroid XU3/XU4/HC1/HC2'
 			'44' ': Pinebook 1080p'
 			'0' ': Raspberry Pi (All models)'
 			# '1' ': Raspberry Pi 1/Zero (512mb)'
