@@ -345,7 +345,8 @@
 
 			'' '●─ Other '
 			'22' ': Generic device (unknown to DietPi)'
-			'' '●─ SBC─(Core devices) '
+			'' '●─ SBC─(Core devices, with GPU support) '
+			'52' ': ASUS Tinker Board'
 			'10' ': Odroid C1'
 			'12' ': Odroid C2'
 			'11' ': Odroid XU3/4/HC1/HC2'
@@ -357,8 +358,7 @@
 			'' '●─ PC '
 			'21' ': x86_64 Native PC'
 			'20' ': x86_64 VMware/VirtualBox'
-			'' '●─ SBC─(Limited support devices) '
-			'52' ': Asus Tinker Board'
+			'' '●─ SBC─(Limited support devices, no GPU support) '
 			'53' ': BananaPi (sinovoip)'
 			'51' ': BananaPi Pro (Lemaker)'
 			'50' ': BananaPi M2+ (sinovoip)'
@@ -1125,6 +1125,10 @@ _EOF_
 		>> /root/.ssh/known_hosts
 		G_CONFIG_INJECT 'ssh.dietpi.com ' 'ssh.dietpi.com ssh-rsa AAAAB3NzaC1yc2EAAAADAQABAAABAQDE6aw3r6aOEqendNu376iiCHr9tGBIWPgfrLkzjXjEsHGyVSUFNnZt6pftrDeK7UX+qX4FxOwQlugG4fymOHbimRCFiv6cf7VpYg1Ednquq9TLb7/cIIbX8a6AuRmX4fjdGuqwmBq3OG7ZksFcYEFKt5U4mAJIaL8hXiM2iXjgY02LqiQY/QWATsHI4ie9ZOnwrQE+Rr6mASN1BVFuIgyHIbwX54jsFSnZ/7CdBMkuAd9B8JkxppWVYpYIFHE9oWNfjh/epdK8yv9Oo6r0w5Rb+4qaAc5g+RAaknHeV6Gp75d2lxBdCm5XknKKbGma2+/DfoE8WZTSgzXrYcRlStYN' /root/.ssh/known_hosts
 
+		G_DIETPI-NOTIFY 2 'Recreate symlink for resolv.conf (DNS)'
+		rm /etc/resolv.conf
+		ln -sf /etc/resolvconf/run/resolv.conf /etc/resolv.conf
+
 		#-----------------------------------------------------------------------------------
 		#MISC
 
@@ -1221,20 +1225,9 @@ _EOF_
 		# - allow times in the past
 		G_CONFIG_INJECT 'FORCE=' 'FORCE=force' /etc/default/fake-hwclock
 
-		G_DIETPI-NOTIFY 2 'Configuring serial console:'
+		G_DIETPI-NOTIFY 2 'Configuring enable serial console:'
 
 		/DietPi/dietpi/func/dietpi-set_hardware serialconsole enable
-		# - Disable for post-1st run setup:
-		sed -i '/^[[:blank:]]*CONFIG_SERIAL_CONSOLE_ENABLE=/c\CONFIG_SERIAL_CONSOLE_ENABLE=0' /DietPi/dietpi.txt
-		# - must be enabled for the following:
-		#	XU4: https://github.com/Fourdee/DietPi/issues/2038#issuecomment-416089875
-		#	RockPro64: Fails to boot into kernel without serial enabled
-		#	NanoPi Neo Air: Required for end users/debugging/setting up WiFi without automation
-		if (( $G_HW_MODEL == 11 || $G_HW_MODEL == 42  || $G_HW_MODEL == 64 )); then
-
-			sed -i '/^[[:blank:]]*CONFIG_SERIAL_CONSOLE_ENABLE=/c\CONFIG_SERIAL_CONSOLE_ENABLE=1' /DietPi/dietpi.txt
-
-		fi
 
 		G_DIETPI-NOTIFY 2 'Reducing getty count and resource usage:'
 
