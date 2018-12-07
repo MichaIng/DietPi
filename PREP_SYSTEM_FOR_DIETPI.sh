@@ -1127,6 +1127,7 @@ _EOF_
 
 		G_DIETPI-NOTIFY 2 'Recreate symlink for resolv.conf (DNS)'
 		rm /etc/resolv.conf
+		echo 'nameserver 8.8.8.8' > /etc/resolvconf/run/resolv.conf # Temp apply, in case was not previously symlink, resets on next ifup.
 		ln -sf /etc/resolvconf/run/resolv.conf /etc/resolv.conf
 
 		#-----------------------------------------------------------------------------------
