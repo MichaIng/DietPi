@@ -142,12 +142,7 @@
 
 	DISTRO_TARGET=0
 	DISTRO_TARGET_NAME=''
-	if grep -q 'wheezy' /etc/os-release; then
-
-		G_DISTRO=2
-		G_DISTRO_NAME='wheezy'
-
-	elif grep -q 'jessie' /etc/os-release; then
+	if grep -q 'jessie' /etc/os-release; then
 
 		G_DISTRO=3
 		G_DISTRO_NAME='jessie'
@@ -809,11 +804,7 @@ _EOF_
 
 			#ARMbian/others DTB
 			AUTO_DETECT_DTB_PKG=$(dpkg --get-selections | grep '^linux-dtb-' | awk '{print $1}')
-			if [[ $AUTO_DETECT_DTB_PKG ]]; then
-
-				G_AGI $AUTO_DETECT_DTB_PKG
-
-			fi
+			[[ $AUTO_DETECT_DTB_PKG ]] && G_AGI $AUTO_DETECT_DTB_PKG
 
 		fi
 
@@ -897,11 +888,7 @@ _EOF_
 		G_AGA
 
 		# Reenable HTTPS for deb.debian.org, since system was dist-upgraded to Stretch+
-		if (( $G_HW_MODEL > 9 )); then
-
-			sed -i 's/http:/https:/g' /etc/apt/sources.list
-
-		fi
+		(( $G_HW_MODEL > 9 )) && sed -i 's/http:/https:/g' /etc/apt/sources.list
 
 		#------------------------------------------------------------------------------------------------
 		echo ''
@@ -913,88 +900,112 @@ _EOF_
 
 		G_DIETPI-NOTIFY 2 'Deleting list of known users, not required by DietPi'
 
-		userdel -f pi &> /dev/null
-		userdel -f test &> /dev/null #@fourdee
-		userdel -f odroid &> /dev/null
-		userdel -f rock64 &> /dev/null
-		userdel -f linaro &> /dev/null #ASUS TB
-		userdel -f dietpi &> /dev/null #recreated below
-		userdel -f debian &> /dev/null #BBB
+		getent passwd pi &> /dev/null && userdel -f pi
+		getent passwd test &> /dev/null && userdel -f test #@fourdee
+		getent passwd odroid &> /dev/null && userdel -f odroid
+		getent passwd rock64 &> /dev/null && userdel -f rock64
+		getent passwd linaro &> /dev/null && userdel -f linaro #ASUS TB
+		getent passwd dietpi &> /dev/null && userdel -f dietpi #recreated below
+		getent passwd debian &> /dev/null && userdel -f debian #BBB
 
 		G_DIETPI-NOTIFY 2 'Removing misc files/folders/services, not required by DietPi'
 
-		rm -R /home &> /dev/null
-		rm -R /media &> /dev/null
-		rm -R /selinux &> /dev/null
+		[[ -d /home ]] && rm -R /home
+		[[ -d /media ]] && rm -R /media
+		[[ -d /selinux ]] && rm -R /selinux
 
 		# - www
-		rm -R /var/www/* &> /dev/null
+		[[ -d /var/www ]] && rm -R /var/www
+		mkdir /var/www
 
 		# - sourcecode (linux-headers etc)
-		rm -R /usr/src/* &> /dev/null
+		[[ -d /usr/src ]] && rm -R /usr/src
+		mkdir /usr/src
 
 		# - root
-		rm -R /root/.cache/* &> /dev/null
-		rm -R /root/.local/* &> /dev/null
-		rm -R /root/.config/* &> /dev/null
+		[[ -e /root/.cache ]] && rm -R /root/.cache
+		[[ -e /root/.local ]] && rm -R /root/.local
+		[[ -e /root/.config ]] && rm -R /root/.config
 
 		# - documentation folders
-		rm -R /usr/share/man &> /dev/null
-		rm -R /usr/share/doc &> /dev/null
-		rm -R /usr/share/doc-base &> /dev/null
-		rm -R /usr/share/calendar &> /dev/null
+		[[ -d /usr/share/man ]] && rm -R /usr/share/man
+		[[ -d /usr/share/doc ]] && rm -R /usr/share/doc
+		[[ -d /usr/share/doc-base ]] && rm -R /usr/share/doc-base
+		[[ -d /usr/share/calendar ]] && rm -R /usr/share/calendar
 
 		# - Previous debconfs
-		rm /var/cache/debconf/*-old &> /dev/null
+		ls -Al /var/cache/debconf/*-old &> /dev/null && rm /var/cache/debconf/*-old
 
 		# - Fonts
-		rm -R /usr/share/fonts/* &> /dev/null
-		rm -R /usr/share/icons/* &> /dev/null
+		[[ -d /usr/share/fonts ]] && rm -R /usr/share/fonts
+		[[ -d /usr/share/icons ]] && rm -R /usr/share/icons
 
-		# - ARMbian
-		systemctl disable firstrun  &> /dev/null
-		rm /etc/init.d/resize2fs &> /dev/null
-		rm /etc/init.d/firstrun  &> /dev/null
-		systemctl disable log2ram &> /dev/null
-		systemctl stop log2ram &> /dev/null
-		rm $(find / -name armbian*.service) &> /dev/null
-		rm $(find / -name log2ram.service) &> /dev/null
-		rm /usr/local/sbin/log2ram &> /dev/null
-		rm /usr/bin/armbianmonitor &> /dev/null
-		rm -R /usr/lib/armbian &> /dev/null
-		rm -R /usr/share/armbian &> /dev/null
-		rm /etc/profile.d/armbian* &> /dev/null
-		rm -R /etc/armbian* &> /dev/null
-		rm -R /etc/default/armbian* &> /dev/null
-		rm -R /etc/update-motd.d/*armbian* &> /dev/null
-		rm -R /etc/logrotate.d &> /dev/null
-		rm -R /etc/X11/xorg.conf.d/*armbian* &> /dev/null
-		rm /etc/cron.d/armbian* &> /dev/null
-		rm /etc/cron.daily/armbian* &> /dev/null
-		rm /boot/armbian_first_run.txt.template &> /dev/null
-		umount /var/log.hdd &> /dev/null
-		rm -R /var/log.hdd &> /dev/null
+		# - Stop, disable and remove not required services
+		local aservices=(
+
+			# - ARMbian
+			firstrun
+			resize2fs
+			log2ram
+			armbian*
+			# - Meveric
+			cpu_governor
+
+		)
+
+		for i in ${aservices[@]}
+		do
+
+			# Loop through known service locations
+			for j in /etc/init.d/$i /etc/systemd/system/$i.service /etc/systemd/system/$i.service.d /lib/systemd/system/$i.service /lib/systemd/system/$i.service.d
+			do
+
+				if [[ -e $j ]]; then
+
+					if [[ -f $j ]]; then
+
+						systemctl stop ${j##*/}
+						systemctl disable ${j##*/}
+
+					fi
+
+					rm -R $j
+
+				fi
+
+			done
+
+		done
 
 		systemctl daemon-reload
 
+		# - ARMbian
+		[[ -f /usr/local/sbin/log2ram ]] && rm /usr/local/sbin/log2ram
+		[[ -f /usr/bin/armbianmonitor ]] && rm /usr/bin/armbianmonitor
+		[[ -d /usr/lib/armbian ]] && rm -R /usr/lib/armbian
+		[[ -d /usr/share/armbian ]] && rm -R /usr/share/armbian
+		ls -Al /etc/profile.d/armbian* &> /dev/null && rm /etc/profile.d/armbian*
+		ls -Al /etc/armbian* &> /dev/null && rm -R /etc/armbian*
+		ls -Al /etc/default/armbian* &> /dev/null && rm -R /etc/default/armbian*
+		ls -Al /etc/update-motd.d/*armbian* &> /dev/null && rm -R /etc/update-motd.d/*armbian*
+		ls -Al /etc/X11/xorg.conf.d/*armbian* &> /dev/null && rm -R /etc/X11/xorg.conf.d/*armbian*
+		ls -Al /etc/cron.*/armbian* &> /dev/null && rm /etc/cron.*/armbian*
+		[[ -f /boot/armbian_first_run.txt.template ]] && rm /boot/armbian_first_run.txt.template
+		umount /var/log.hdd 2> /dev/null
+		[[ -d /var/log.hdd ]] && rm -R /var/log.hdd
+
 		# - Meveric specific
-		rm /etc/init.d/cpu_governor &> /dev/null
-		rm /etc/systemd/system/cpu_governor.service &> /dev/null
-		rm /usr/local/sbin/setup-odroid &> /dev/null
+		[[ -f /usr/local/sbin/setup-odroid ]] && rm /usr/local/sbin/setup-odroid
 
 		# - RPi specific https://github.com/Fourdee/DietPi/issues/1631#issuecomment-373965406
-		rm /etc/profile.d/wifi-country.sh &> /dev/null
+		[[ -f /etc/profile.d/wifi-country.sh ]] && rm /etc/profile.d/wifi-country.sh
 
 		# - make_nas_processes_faster cron job on Rock64 + NanoPi + Pine64(?) images
-		rm /etc/cron.d/make_nas_processes_faster &> /dev/null
+		[[ -f /etc/cron.d/make_nas_processes_faster ]] && rm /etc/cron.d/make_nas_processes_faster
 
 		#-----------------------------------------------------------------------------------
 		#Boot Logo
-		if [[ -f /boot/boot.bmp ]]; then
-
-			G_RUN_CMD wget https://github.com/Fourdee/DietPi/raw/$GITBRANCH/.meta/images/dietpi-logo_boot.bmp -O /boot/boot.bmp
-
-		fi
+		[[ -f /boot/boot.bmp ]] && G_RUN_CMD wget https://github.com/$GITOWNER/DietPi/raw/$GITBRANCH/.meta/images/dietpi-logo_boot.bmp -O /boot/boot.bmp
 
 		#-----------------------------------------------------------------------------------
 		# Bash Profiles
@@ -1002,7 +1013,7 @@ _EOF_
 		# - Pre v6.9 cleaning:
 		sed -i '/\/DietPi/d' /root/.bashrc
 		sed -i '/\/DietPi/d' /home/dietpi/.bashrc &> /dev/null
-		rm /etc/profile.d/99-dietpi* &> /dev/null
+		ls -Al /etc/profile.d/99-dietpi* &> /dev/null && rm /etc/profile.d/99-dietpi*
 
 		# - Enable /etc/bashrc.d/ support for custom interactive non-login shell scripts:
 		G_CONFIG_INJECT '.*/etc/bashrc\.d/.*' 'for i in /etc/bashrc.d/*.sh; do [ -r "$i" ] && . $i; done' /etc/bash.bashrc
@@ -1041,7 +1052,7 @@ _EOF_
 		mkdir -p /var/tmp/dietpi/logs/dietpi-ramlog_store
 
 		#mkdir -p /var/lib/dietpi/dietpi-software
-		mkdir -p /var/lib/dietpi/dietpi-software/installed		#Additional storage for installed apps, eg: custom scripts and data
+		mkdir -p /var/lib/dietpi/dietpi-software/installed #Additional storage for installed apps, eg: custom scripts and data
 
 		# - /var/tmp/dietpi : Temp storage saved during reboots, eg: logs outside of /var/log
 		mkdir -p /var/tmp/dietpi/logs
@@ -1054,9 +1065,9 @@ _EOF_
 		chmod 660 /DietPi
 
 		# - /mnt/dietpi_userdata : DietPi userdata
-		mkdir -p "$G_FP_DIETPI_USERDATA"
-		chown dietpi:dietpi "$G_FP_DIETPI_USERDATA"
-		chmod -R 775 "$G_FP_DIETPI_USERDATA"
+		mkdir -p $G_FP_DIETPI_USERDATA
+		chown dietpi:dietpi $G_FP_DIETPI_USERDATA
+		chmod -R 775 $G_FP_DIETPI_USERDATA
 
 		# - Networked drives
 		mkdir -p /mnt/samba
@@ -1113,18 +1124,14 @@ _EOF_
 		#-----------------------------------------------------------------------------------
 		#MISC
 
-		if (( $G_DISTRO > 3 )); then
+		G_DIETPI-NOTIFY 2 'Disabling apt-daily services to prevent random APT cache lock'
 
-			G_DIETPI-NOTIFY 2 'Disabling apt-daily services to prevent random APT cache lock'
+		for i in apt-daily.service apt-daily.timer apt-daily-upgrade.service apt-daily-upgrade.timer
+		do
 
-			systemctl disable apt-daily.service &> /dev/null
-			systemctl disable apt-daily.timer &> /dev/null
-			systemctl disable apt-daily-upgrade.service &> /dev/null
-			systemctl disable apt-daily-upgrade.timer &> /dev/null
-			systemctl mask apt-daily.service &> /dev/null
-			systemctl mask apt-daily.timer &> /dev/null
-			systemctl mask apt-daily-upgrade.service &> /dev/null
-			systemctl mask apt-daily-upgrade.timer &> /dev/null
+			systemctl stop $i &> /dev/null
+			systemctl disable $i &> /dev/null
+			systemctl mask $i &> /dev/null
 
 		fi
 
@@ -1144,7 +1151,7 @@ _EOF_
 
 		/DietPi/dietpi/func/dietpi-logclear 2 &> /dev/null # As this will report missing vars, however, its fine, does not break functionality.
 
-		l_message='Starting DietPi-RAMlog service' G_RUN_CMD systemctl start dietpi-ramlog.service
+		l_message='Starting DietPi-RAMlog service' G_RUN_CMD systemctl start dietpi-ramlog
 
 		G_DIETPI-NOTIFY 2 'Updating DietPi HW_INFO'
 
@@ -1152,13 +1159,12 @@ _EOF_
 
 		G_DIETPI-NOTIFY 2 'Configuring Network'
 
-		rm -R /etc/network/interfaces &> /dev/null # armbian symlink for bulky network-manager
+		[[ -f /etc/network/interfaces ]] && rm -R /etc/network/interfaces # armbian symlink for bulky network-manager
 
 		G_RUN_CMD cp /DietPi/dietpi/conf/network_interfaces /etc/network/interfaces
 
 		# - Remove all predefined eth*/wlan* adapter rules
-		rm /etc/udev/rules.d/70-persistent-net.rules &> /dev/null
-		rm /etc/udev/rules.d/70-persistant-net.rules &> /dev/null
+		ls -Al /etc/udev/rules.d/70-persist*nt-net.rules &> /dev/null && rm /etc/udev/rules.d/70-persist*nt-net.rules
 
 		#	Add pre-up lines for wifi on OrangePi Zero
 		if (( $G_HW_MODEL == 32 )); then
@@ -1173,7 +1179,7 @@ _EOF_
 		fi
 
 		#	Fix rare WiFi interface start issue: https://github.com/Fourdee/DietPi/issues/2074
-		sed -i '\|^[[:blank:]]ifconfig "$IFACE" up$|c\\t/sbin/ip link set dev "$IFACE" up' /etc/network/if-pre-up.d/wireless-tools &> /dev/null
+		[[ -f /etc/network/if-pre-up.d/wireless-tools ]] && sed -i '\|^[[:blank:]]ifconfig "$IFACE" up$|c\\t/sbin/ip link set dev "$IFACE" up' /etc/network/if-pre-up.d/wireless-tools
 
 		G_DIETPI-NOTIFY 2 'Tweaking DHCP timeout:'
 
@@ -1215,15 +1221,15 @@ _EOF_
 		systemctl mask getty-static
 		# - logind features disabled by default. Usually not needed and all features besides auto getty creation are not available without libpam-systemd package.
 		#	- It will be unmasked/enabled, automatically if libpam-systemd got installed during dietpi-software install, usually with desktops.
-		systemctl stop systemd-logind &> /dev/null
+		systemctl stop systemd-logind
 		systemctl disable systemd-logind &> /dev/null
 		systemctl mask systemd-logind
 
 		G_DIETPI-NOTIFY 2 'Configuring regional settings (TZdata):'
 
-		rm /etc/timezone &> /dev/null
-		rm /etc/localtime
-		ln -fs /usr/share/zoneinfo/Europe/London /etc/localtime
+		[[ -f /etc/timezone ]] && rm /etc/timezone
+		[[ -f /etc/localtime ]] && rm /etc/localtime
+		ln -sf /usr/share/zoneinfo/Europe/London /etc/localtime
 		G_RUN_CMD dpkg-reconfigure -f noninteractive tzdata
 
 		G_DIETPI-NOTIFY 2 'Configuring regional settings (Keyboard):'
@@ -1241,7 +1247,7 @@ _EOF_
 
 			# - i386 APT support
 			dpkg --add-architecture i386
-			G_AGUP
+			#G_AGUP # Not required here, since this will be done on every update+install
 
 			# - Disable nouveau: https://github.com/Fourdee/DietPi/issues/1244 // https://dietpi.com/phpbb/viewtopic.php?f=11&t=2462&p=9688#p9688
 			cat << _EOF_ > /etc/modprobe.d/blacklist-nouveau.conf
@@ -1334,7 +1340,7 @@ _EOF_
 			rm -R rtl8812au_sparky*
 
 			#	Use performance gov for stability.
-			sed -i '/^[[:blank:]]*CONFIG_CPU_GOVERNOR=/c\CONFIG_CPU_GOVERNOR=performance' /DietPi/dietpi.txt
+			G_CONFIG_INJECT 'CONFIG_CPU_GOVERNOR=' 'CONFIG_CPU_GOVERNOR=performance' /DietPi/dietpi.txt
 
 		# - RPI:
 		elif (( $G_HW_MODEL < 10 )); then
@@ -1364,12 +1370,12 @@ _EOF_
 		#Rock64, remove HW accell config, as its not currently functional: https://github.com/Fourdee/DietPi/issues/2086
 		elif (( $G_HW_MODEL == 43 )); then
 
-			rm /etc/X11/xorg.conf.d/20-armsoc.conf &> /dev/null
+			[[ -f /etc/X11/xorg.conf.d/20-armsoc.conf ]] && rm /etc/X11/xorg.conf.d/20-armsoc.conf
 
 		# - Odroids FFMPEG fix. Prefer debian.org over Meveric for backports: https://github.com/Fourdee/DietPi/issues/1273 + https://github.com/Fourdee/DietPi/issues/1556#issuecomment-369463910
 		elif (( $G_HW_MODEL > 9 && $G_HW_MODEL < 15 )); then
 
-			rm /etc/apt/preferences.d/meveric*
+			ls -Al /etc/apt/preferences.d/meveric* &> /dev/null && rm /etc/apt/preferences.d/meveric*
 			cat << _EOF_ > /etc/apt/preferences.d/backports
 Package: *
 Pin: release a=jessie-backports
@@ -1385,7 +1391,7 @@ _EOF_
 		fi
 
 		# - ARMbian increase console verbose
-		sed -i '/verbosity=/c\verbosity=7' /boot/armbianEnv.txt &> /dev/null
+		[[ -f /boot/armbianEnv.txt ]] && sed -i '/verbosity=/c\verbosity=7' /boot/armbianEnv.txt
 
 
 		#------------------------------------------------------------------------------------------------
@@ -1406,25 +1412,27 @@ _EOF_
 		G_DIETPI-NOTIFY 2 'Running general cleanup of misc files'
 
 		# - Remove Bash History file
-		rm ~/.bash_history &> /dev/null
+		[[ -f ~/.bash_history ]] && rm ~/.bash_history
+		ls -Al /home/*/.bash_history &> /dev/null && rm /home/*/.bash_history
 
 		# - Nano histroy file
-		rm ~/.nano_history &> /dev/null
+		[[ -f ~/.nano_history ]] && rm ~/.nano_history
+		ls -Al /home/*/.nano_history &> /dev/null && rm /home/*/.nano_history
 
 		G_DIETPI-NOTIFY 2 'Removing swapfile from image'
 
 		/DietPi/dietpi/func/dietpi-set_dphys-swapfile 0 /var/swap
-		rm /var/swap &> /dev/null # still exists on some images...
+		[[ -e /var/swap ]] && rm /var/swap # still exists on some images...
 
 		# - re-enable for next run
-		sed -i '/AUTO_SETUP_SWAPFILE_SIZE=/c\AUTO_SETUP_SWAPFILE_SIZE=1' /DietPi/dietpi.txt
+		G_CONFIG_INJECT 'AUTO_SETUP_SWAPFILE_SIZE=' 'AUTO_SETUP_SWAPFILE_SIZE=1' /DietPi/dietpi.txt
 
 		G_DIETPI-NOTIFY 2 'Resetting boot.ini, config.txt, cmdline.txt etc'
 
 		# - PineA64 - delete ethaddr from uEnv.txt file
 		if (( $G_HW_MODEL == 40 )); then
 
-			sed -i '/^ethaddr/ d' /boot/uEnv.txt
+			[[ -f /boot/cmdline.txt ]] && sed -i '/^ethaddr/ d' /boot/uEnv.txt
 
 		fi
 
@@ -1501,7 +1509,7 @@ _EOF_
 
 		G_DIETPI-NOTIFY 2 'Deleting DietPi-RAMlog storage'
 
-		rm -R /var/tmp/dietpi/logs/dietpi-ramlog_store/* &> /dev/null
+		ls -Al /var/tmp/dietpi/logs/dietpi-ramlog_store/* &> /dev/mull && rm -R /var/tmp/dietpi/logs/dietpi-ramlog_store/*
 
 		G_DIETPI-NOTIFY 2 'Resetting DietPi generated globals/files'
 
@@ -1529,17 +1537,13 @@ _EOF_
 		G_DIETPI-NOTIFY 2 'Clearing APT cache'
 
 		G_RUN_CMD apt-get clean
-		rm -R /var/lib/apt/lists/* -vf 2> /dev/null #lists cache: remove partial folder also, automatically gets regenerated on G_AGUP
+		ls -Al /var/lib/apt/lists/* &> /dev/null && rm -R /var/lib/apt/lists/* -vf 2> /dev/null #lists cache: remove partial folder also, automatically gets regenerated on G_AGUP
 		#rm /var/lib/dpkg/info/* #issue...
 		#dpkg: warning: files list file for package 'libdbus-1-3:armhf' missing; assuming      package has no files currently installed
 
 		# - HW Specific
 		#	RPi remove saved G_HW_MODEL , allowing obtain-hw_model to auto detect RPi model
-		if (( $G_HW_MODEL < 10 )); then
-
-			rm /etc/.dietpi_hw_model_identifier
-
-		fi
+		(( $G_HW_MODEL < 10 )) && [[ -f /etc/.dietpi_hw_model_identifier ]] && rm /etc/.dietpi_hw_model_identifier
 
 		# - BBB remove fsexpansion: https://github.com/Fourdee/DietPi/issues/931#issuecomment-345451529
 		if (( $G_HW_MODEL == 71 )); then
@@ -1575,17 +1579,21 @@ _EOF_
 		G_RUN_CMD systemctl stop dietpi-ramdisk
 
 		# - Clear tmp files on disk
-		rm /var/tmp/dietpi/logs/* &> /dev/null
+		rm /var/tmp/dietpi/logs/*
 
 		# - Clear items that may have been left on disk, from previous PREP's
-		rm -R /DietPi/* &> /dev/null
+		rm -R /DietPi
+		mkdir /DietPi
 		cd /root
-		umount /tmp; rm -R /tmp/* &> /dev/null
+		umount /tmp
+		rm -R /tmp
+		mkdir /tmp
 
 		sync
 
 		# - Remove PREP script
-		rm /root/PREP_SYSTEM_FOR_DIETPI.sh &> /dev/null
+		[[ -f /root/PREP_SYSTEM_FOR_DIETPI.sh ]] && rm /root/PREP_SYSTEM_FOR_DIETPI.sh
+		ls -Al /home/*/PREP_SYSTEM_FOR_DIETPI.sh &> /dev/null && rm /home/*/PREP_SYSTEM_FOR_DIETPI.sh
 
 		G_DIETPI-NOTIFY 2 "The used kernel version is: $(uname -r)"
 		kernel_apt_packages="$(dpkg --get-selections | grep '^linux-image-[0-9]')"
