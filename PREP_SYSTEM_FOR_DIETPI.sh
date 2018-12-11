@@ -27,7 +27,7 @@
 	#Exit path for non-root logins
 	if (( $UID )); then
 
-		echo -e 'Error: Root privileges required, please run the script with "sudo"\nIn case install the "sudo" package with root privileges:\n\t# apt-get install -y sudo\n'
+		echo -e 'ERROR: Root privileges required, please run the script with "sudo"\nIn case install the "sudo" package with root privileges:\n\t# apt-get install -y sudo\n'
 		exit 1
 
 	fi
@@ -38,9 +38,10 @@
 	#Check/install minimal APT Pre-Reqs
 	a_MIN_APT_PREREQS=(
 
-		'apt-transport-https'	# Allows HTTPS sources for ATP
+		'apt-transport-https' # Allows HTTPS sources for APT
 		'wget' # Download DietPi-Globals...
 		'ca-certificates' # ...via HTTPS
+		'unzip' # Unzip DietPi code
 		'locales' # Allow ensuring en_GB.UTF-8
 		'whiptail' # G_WHIP...
 		'ncurses-bin' # ...using tput
@@ -48,21 +49,17 @@
 	)
 
 	# - Meveric special: https://github.com/Fourdee/DietPi/issues/1285#issuecomment-355759321
-	rm /etc/apt/sources.list.d/deb-multimedia.list &> /dev/null
+	[[ -f /etc/apt/sources.list.d/deb-multimedia.list ]] && rm /etc/apt/sources.list.d/deb-multimedia.list
 
 	apt-get clean
 	apt-get update
-	for (( i=0; i<${#a_MIN_APT_PREREQS[@]}; i++))
+	for i in "${a_MIN_APT_PREREQS[@]}"
 	do
 
-		if ! dpkg-query -s ${a_MIN_APT_PREREQS[$i]} &> /dev/null; then
+		if ! dpkg-query -s $i &> /dev/null && ! apt-get install -y $i; then
 
-			if ! apt-get install -y ${a_MIN_APT_PREREQS[$i]}; then
-
-				echo -e "Error: Unable to install ${a_MIN_APT_PREREQS[$i]}, please try to install it manually:\n\t# apt-get install -y ${a_MIN_APT_PREREQS[$i]}"
-				exit 1
-
-			fi
+			echo -e "ERROR: Unable to install $i, please try to install it manually:\n\t# apt-get install -y $i\n"
+			exit 1
 
 		fi
 
@@ -73,7 +70,7 @@
 	#Setup locale
 	# - Remove exisiting settings that could break dpkg-reconfigure locales
 	> /etc/environment
-	rm /etc/default/locale &> /dev/null
+	[[ -f /etc/default/locale ]] && rm /etc/default/locale
 
 	# - NB: DEV, any changes here must be also rolled into function '/DietPi/dietpi/func/dietpi-set_software locale', for future script use
 	echo 'en_GB.UTF-8 UTF-8' > /etc/locale.gen
@@ -82,7 +79,7 @@
 	#	- "update-locale": Add $LANG to "/etc/default/locale" based on generated locale(s) or interactive default language selection.
 	if ! dpkg-reconfigure -f noninteractive locales; then
 
-		echo -e 'Error: Locale generation failed. Aborting...\n'
+		echo -e 'ERROR: Locale generation failed. Aborting...\n'
 		exit 1
 
 	fi
@@ -114,8 +111,7 @@
 
 	fi
 
-	unset aWHIP_BRANCH
-	unset WHIP_RETURN
+	unset aWHIP_BRANCH WHIP_RETURN
 
 	echo "Git branch: $GITOWNER/$GITBRANCH"
 
@@ -126,7 +122,7 @@
 	# - NB: We'll have to manually handle errors, until DietPi-Globals are sucessfully loaded.
 	if ! wget "https://raw.githubusercontent.com/$GITOWNER/DietPi/$GITBRANCH/dietpi/func/dietpi-globals" -O dietpi-globals; then
 
-		echo -e 'Error: Unable to download dietpi-globals. Aborting...\n'
+		echo -e 'ERROR: Unable to download dietpi-globals. Aborting...\n'
 		exit 1
 
 	fi
@@ -134,7 +130,7 @@
 	# - Load
 	if ! . ./dietpi-globals; then
 
-		echo -e 'Error: Unable to load dietpi-globals. Aborting...\n'
+		echo -e 'ERROR: Unable to load dietpi-globals. Aborting...\n'
 		exit 1
 
 	fi
@@ -192,7 +188,7 @@
 
 	else
 
-		G_DIETPI-NOTIFY 1 "Error: Unknown or unsupported CPU architecture \"$G_HW_ARCH_DESCRIPTION\". Aborting...\n"
+		G_DIETPI-NOTIFY 1 "Unknown or unsupported CPU architecture \"$G_HW_ARCH_DESCRIPTION\". Aborting...\n"
 		exit 1
 
 	fi
@@ -219,50 +215,37 @@
 		((SETUP_STEP++))
 		G_DIETPI-NOTIFY 2 '-----------------------------------------------------------------------------------'
 		#------------------------------------------------------------------------------------------------
-		if [[ -d /DietPi/dietpi || /boot/dietpi ]]; then
+		if [[ -d /DietPi/dietpi || -d /boot/dietpi ]]; then
 
 			G_DIETPI-NOTIFY 2 'DietPi system found, running pre-prep'
 
 			# - Stop services
-			/DietPi/dietpi/dietpi-services stop
-
-			[[ -f /etc/systemd/system/dietpi-ramlog ]] && systemctl stop dietpi-ramlog
-			systemctl stop dietpi-ramdisk
+			[[ -f /DietPi/dietpi/dietpi-services ]] && /DietPi/dietpi/dietpi-services stop
+			[[ -f /etc/systemd/system/dietpi-ramdisk.service ]] && systemctl stop dietpi-ramdisk
+			[[ -f /etc/systemd/system/dietpi-ramlog.service ]] && systemctl stop dietpi-ramlog
 
 			# - Delete any previous existing data
-			rm -R /DietPi/*
-			rm -R /boot/dietpi
+			#	Failsafe
+			umount /DietPi
+			[[ -d /DietPi ]] && rm -R /DietPi
+			[[ -d /boot/dietpi ]] && rm -R /boot/dietpi
 
-			rm -R /mnt/dietpi-backup &> /dev/null
-			rm -R /mnt/dietpi-sync &> /dev/null
-			rm -R /mnt/dietpi_userdata &> /dev/null
+			[[ -d /mnt/dietpi-backup ]] && rm -R /mnt/dietpi-backup
+			[[ -d /mnt/dietpi-sync ]] && rm -R /mnt/dietpi-sync
+			[[ -d /mnt/dietpi_userdata ]] && rm -R /mnt/dietpi_userdata
 
-			rm -R /etc/dietpi &> /dev/null # Pre v160
-			rm -R /var/lib/dietpi &> /dev/null
-			rm -R /var/tmp/dietpi &> /dev/null
+			[[ -d /etc/dietpi ]] && rm -R /etc/dietpi # Pre v160
+			[[ -d /var/lib/dietpi ]] && rm -R /var/lib/dietpi
+			[[ -d /var/tmp/dietpi ]] && rm -R /var/tmp/dietpi
 
-			rm /root/DietPi-Automation.log &> /dev/null
-			rm /boot/Automation_Format_My_Usb_Drive &> /dev/null
+			[[ -f /root/DietPi-Automation.log ]] && rm /root/DietPi-Automation.log
+			[[ -f /boot/Automation_Format_My_Usb_Drive ]] && rm /boot/Automation_Format_My_Usb_Drive
 
 		else
 
 			G_DIETPI-NOTIFY 2 'Non-DietPi system'
 
 		fi
-
-		#------------------------------------------------------------------------------------------------
-		echo ''
-		G_DIETPI-NOTIFY 2 '-----------------------------------------------------------------------------------'
-		G_DIETPI-NOTIFY 0 "Step $SETUP_STEP: Initial prep to allow this script to function:"
-		((SETUP_STEP++))
-		G_DIETPI-NOTIFY 2 '-----------------------------------------------------------------------------------'
-		#------------------------------------------------------------------------------------------------
-		#Recreate dietpi logs dir, used by G_AGx
-		G_RUN_CMD mkdir -p /var/tmp/dietpi/logs
-
-		G_DIETPI-NOTIFY 2 'Installing core packages, required for next stage of this script:'
-
-		G_AGI apt-transport-https unzip
 
 		#------------------------------------------------------------------------------------------------
 		echo ''
@@ -293,10 +276,10 @@
 
 				)
 
-				for (( i=0; i<${#aDISALLOWED_NAMES[@]}; i++))
+				for i in "${aDISALLOWED_NAMES[@]}"
 				do
 
-					if [[ ${G_WHIP_RETURNED_VALUE,,} =~ ${aDISALLOWED_NAMES[$i]} ]]; then
+					if [[ ${G_WHIP_RETURNED_VALUE,,} =~ $i ]]; then
 
 						DISALLOWED_NAME=1
 						break
@@ -396,7 +379,7 @@
 		G_WHIP_MENU 'Please select the current device this is being installed on:\n - NB: Select "Generic device" if not listed.\n - "Core devices": Are fully supported by DietPi, offering full GPU + Kodi support.\n - "Limited support devices": No GPU support, supported limited to DietPi specific issues only (eg: excludes Kernel/GPU/VPU related items).'
 		if (( $? )) || [[ -z $G_WHIP_RETURNED_VALUE ]]; then
 
-			G_DIETPI-NOTIFY 1 'No choice detected. Aborting...'
+			G_DIETPI-NOTIFY 1 'No choice detected. Aborting...\n'
 			exit 0
 
 		fi
@@ -412,9 +395,6 @@
 		#WiFi selection
 		G_DIETPI-NOTIFY 2 'WiFi selection'
 
-		G_WHIP_DEFAULT_ITEM=1
-		(( $G_HW_MODEL == 20 )) && G_WHIP_DEFAULT_ITEM=0
-
 		G_WHIP_MENU_ARRAY=(
 
 			'0' ": I don't require WiFi, do not install."
@@ -422,19 +402,19 @@
 
 		)
 
+		G_WHIP_DEFAULT_ITEM=1
+		(( $G_HW_MODEL == 20 )) && G_WHIP_DEFAULT_ITEM=0
+
 		if G_WHIP_MENU 'Please select an option:' && (( $G_WHIP_RETURNED_VALUE )); then
 
-			G_DIETPI-NOTIFY 2 'Marking WiFi as needed'
+			G_DIETPI-NOTIFY 2 'Marking WiFi as required'
 			WIFI_REQUIRED=1
 
 		fi
 
 		#Distro Selection
-		G_WHIP_DEFAULT_ITEM=$G_DISTRO
-		G_WHIP_BUTTON_CANCEL_TEXT='Exit'
 		DISTRO_LIST_ARRAY=(
 
-			'3' ': Jessie (oldstable, if you need to avoid upgrade to current release)'
 			'4' ': Stretch (current stable release, recommended)'
 			'5' ': Buster (testing only, not officially supported)'
 
@@ -443,23 +423,18 @@
 		# - Enable/list available options based on criteria
 		#	NB: Whiptail use 2 array indexs per whip displayed entry.
 		G_WHIP_MENU_ARRAY=()
-		for ((i=0; i<$(( ${#DISTRO_LIST_ARRAY[@]} / 2 )); i++))
+		for ((i=0; i<${#DISTRO_LIST_ARRAY[@]}; i+=2))
 		do
-			temp_distro_available=1
-			temp_distro_index=$(( $i + 3 ))
 
 			# - Disable downgrades
-			if (( $temp_distro_index < $G_DISTRO )); then
+			if (( ${DISTRO_LIST_ARRAY[$i]} < $G_DISTRO )); then
 
-				G_DIETPI-NOTIFY 2 "Disabled Distro downgrade: index $temp_distro_index"
-				temp_distro_available=0
-
-			fi
+				G_DIETPI-NOTIFY 2 "Disabled distro downgrade to: ${DISTRO_LIST_ARRAY[$i+1]}"
 
 			# - Enable option
-			if (( $temp_distro_available )); then
+			else
 
-				G_WHIP_MENU_ARRAY+=( "${DISTRO_LIST_ARRAY[$(( $i * 2 ))]}" "${DISTRO_LIST_ARRAY[$(( ($i * 2) + 1 ))]}" )
+				G_WHIP_MENU_ARRAY+=( "${DISTRO_LIST_ARRAY[$i]}" "${DISTRO_LIST_ARRAY[$i+1]}" )
 
 			fi
 
@@ -470,12 +445,14 @@
 
 		if [[ -z ${G_WHIP_MENU_ARRAY+x} ]]; then
 
-			G_DIETPI-NOTIFY 1 'Error: No available Distros for this system. Aborting...\n'
+			G_DIETPI-NOTIFY 1 'No available distro versions for this system. Aborting...\n'
 			exit 1
 
 		fi
 
-		G_WHIP_MENU "Please select a distro to install on this system. Selecting a distro that is older than the current installed on system, is not supported.\n\nCurrently installed:\n - $G_DISTRO $G_DISTRO_NAME"
+		G_WHIP_DEFAULT_ITEM=${G_WHIP_MENU_ARRAY[0]} # Downgrades disabled, so first item matches current/lowest supported distro version
+		G_WHIP_BUTTON_CANCEL_TEXT='Exit'
+		G_WHIP_MENU "Please select a distro version to install on this system. Selecting a distro that is older than the current installed on system, is not supported.\n\nCurrently installed:\n - $G_DISTRO $G_DISTRO_NAME"
 		if (( $? )) || [[ -z $G_WHIP_RETURNED_VALUE ]]; then
 
 			G_DIETPI-NOTIFY 1 'No choice detected. Aborting...\n'
@@ -484,17 +461,18 @@
 		fi
 
 		DISTRO_TARGET=$G_WHIP_RETURNED_VALUE
-		if (( $DISTRO_TARGET == 3 )); then
-
-			DISTRO_TARGET_NAME='jessie'
-
-		elif (( $DISTRO_TARGET == 4 )); then
+		if (( $DISTRO_TARGET == 4 )); then
 
 			DISTRO_TARGET_NAME='stretch'
 
 		elif (( $DISTRO_TARGET == 5 )); then
 
 			DISTRO_TARGET_NAME='buster'
+
+		else
+
+			G_DIETPI-NOTIFY 1 'Invalid choice detected. Aborting...\n'
+			exit 1
 
 		fi
 
@@ -511,14 +489,12 @@
 		G_RUN_CMD wget "$INTERNET_ADDRESS" -O package.zip
 
 		[[ -d DietPi-$GITBRANCH ]] && l_message='Cleaning previously extracted files' G_RUN_CMD rm -R "DietPi-$GITBRANCH"
-		l_message='Extracting DietPi sourcecode' G_RUN_CMD unzip -o package.zip
+		l_message='Extracting DietPi sourcecode' G_RUN_CMD unzip package.zip
 		rm package.zip
 
-		[[ ! -d /boot ]] && l_message='Creating /boot' G_RUN_CMD mkdir -p /boot
+		[[ -d /boot ]] || l_message='Creating /boot' G_RUN_CMD mkdir -p /boot
 
 		G_DIETPI-NOTIFY 2 'Moving kernel and boot configuration to /boot'
-
-		G_RUN_CMD mv "DietPi-$GITBRANCH/dietpi.txt" /boot/
 
 		# - HW specific config.txt, boot.ini uEnv.txt
 		if (( $G_HW_MODEL < 10 )); then
@@ -539,16 +515,17 @@
 
 		fi
 
-		G_RUN_CMD mv "DietPi-$GITBRANCH/README.md" /boot/
-		#G_RUN_CMD mv "DietPi-$GITBRANCH/CHANGELOG.txt" /boot/
+		G_RUN_CMD mv "DietPi-$GITBRANCH/dietpi.txt" /boot/
+		G_RUN_CMD mv "DietPi-$GITBRANCH/README.md" /boot/dietpi-README.md
+		G_RUN_CMD mv "DietPi-$GITBRANCH/CHANGELOG.txt" /boot/dietpi-CHANGELOG.txt
 
 		# - Remove server_version / patch_file (downloads fresh from dietpi-update)
-		rm "DietPi-$GITBRANCH/dietpi/patch_file"
 		rm DietPi-"$GITBRANCH"/dietpi/server_version*
+		rm "DietPi-$GITBRANCH/dietpi/pre-patch_file"
+		rm "DietPi-$GITBRANCH/dietpi/patch_file"
 
-		l_message='Copy DietPi core files to /boot/dietpi' G_RUN_CMD cp -Rf DietPi-"$GITBRANCH"/dietpi /boot/
+		l_message='Copy DietPi core files to /boot/dietpi' G_RUN_CMD cp -Rf "DietPi-$GITBRANCH/dietpi" /boot/
 		l_message='Copy rootfs files in place' G_RUN_CMD cp -Rf DietPi-"$GITBRANCH"/rootfs/. /
-
 		l_message='Clean download location' G_RUN_CMD rm -R "DietPi-$GITBRANCH"
 
 		l_message='Set execute permissions for DietPi scripts' G_RUN_CMD chmod -R +x /boot/dietpi /var/lib/dietpi/services /etc/cron.*/dietpi /etc/profile.d/dietpi-*.sh /etc/bashrc.d/dietpi-*.sh
@@ -558,7 +535,7 @@
 
 		# - Mount tmpfs
 		G_RUN_CMD mkdir -p /DietPi
-		G_RUN_CMD mount -t tmpfs -o size=20m tmpfs /DietPi
+		G_RUN_CMD mount -t tmpfs -o size=10m tmpfs /DietPi
 		l_message='Starting DietPi-RAMdisk' G_RUN_CMD systemctl start dietpi-ramdisk
 
 		#------------------------------------------------------------------------------------------------
@@ -574,7 +551,7 @@
 
 		#rm /etc/apt/sources.list.d/* &> /dev/null #Probably a bad idea
 		#rm /etc/apt/sources.list.d/deb-multimedia.list &> /dev/null #meveric, already done above
-		rm /etc/apt/sources.list.d/openmediavault.list &> /dev/null #https://dietpi.com/phpbb/viewtopic.php?f=11&t=2772&p=10646#p10594
+		[[ -f /etc/apt/sources.list.d/openmediavault.list ]] && rm /etc/apt/sources.list.d/openmediavault.list #https://dietpi.com/phpbb/viewtopic.php?f=11&t=2772&p=10646#p10594
 
 		G_DIETPI-NOTIFY 2 "Setting APT sources.list: $DISTRO_TARGET_NAME $DISTRO_TARGET"
 
@@ -584,17 +561,20 @@
 		# - Meveric, update repo to use our EU mirror: https://github.com/Fourdee/DietPi/issues/1519#issuecomment-368234302
 		sed -i 's@https://oph.mdrjr.net/meveric@http://fuzon.co.uk/meveric@' /etc/apt/sources.list.d/meveric* &> /dev/null
 
+		# - (Re)create DietPi logs dir, used by G_AGx
+		G_RUN_CMD mkdir -p /var/tmp/dietpi/logs
+
 		G_AGUP
 
 		# - @MichaIng https://github.com/Fourdee/DietPi/pull/1266/files
-		G_DIETPI-NOTIFY 2 'Marking all packages as auto installed first, to allow effective autoremove afterwards'
+		G_DIETPI-NOTIFY 2 'Marking all packages as auto-installed first, to allow effective autoremove afterwards'
 
 		G_RUN_CMD apt-mark auto $(apt-mark showmanual)
 
 		# - @MichaIng https://github.com/Fourdee/DietPi/pull/1266/files
 		G_DIETPI-NOTIFY 2 'Disable automatic recommends/suggests installation and allow them to be autoremoved:'
 
-		#	Remove any existing apt recommends settings
+		#	Remove any existing APT recommends settings
 		rm /etc/apt/apt.conf.d/*recommends* &> /dev/null
 
 		G_ERROR_HANDLER_COMMAND='/etc/apt/apt.conf.d/99-dietpi-norecommends'
@@ -736,7 +716,7 @@ _EOF_
 
 			)
 
-			for i in "${!apackages[@]}"
+			for i in "${apackages[@]}"
 			do
 
 				while read -r line
@@ -750,7 +730,7 @@ _EOF_
 
 					fi
 
-				done <<< "$(dpkg --get-selections | grep "^${apackages[$i]}" | awk '{print $1}')"
+				done <<< "$(dpkg --get-selections | grep "^$i" | awk '{print $1}')"
 
 			done
 
@@ -877,11 +857,11 @@ _EOF_
 		G_DIETPI-NOTIFY 2 'Generating list of minimal packages, required for DietPi installation'
 
 		INSTALL_PACKAGES=''
-		for ((i=0; i<${#aPACKAGES_REQUIRED_INSTALL[@]}; i++))
+		for i in ${aPACKAGES_REQUIRED_INSTALL[@]}
 		do
 
 			#	One line INSTALL_PACKAGES so we can use it later.
-			INSTALL_PACKAGES+="${aPACKAGES_REQUIRED_INSTALL[$i]} "
+			INSTALL_PACKAGES+="$i "
 
 		done
 
@@ -916,8 +896,8 @@ _EOF_
 
 		G_AGA
 
-		# Reenable HTTPS for deb.debian.org, if system was dist-upgraded to Stretch+
-		if (( $G_DISTRO > 3 && $G_HW_MODEL > 9 )); then
+		# Reenable HTTPS for deb.debian.org, since system was dist-upgraded to Stretch+
+		if (( $G_HW_MODEL > 9 )); then
 
 			sed -i 's/http:/https:/g' /etc/apt/sources.list
 
