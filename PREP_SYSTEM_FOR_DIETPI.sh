@@ -1043,19 +1043,17 @@ _EOF_
 		# - /var/lib/dietpi : Core storage for installed non-standard APT software, outside of /mnt/dietpi_userdata
 		#mkdir -p /var/lib/dietpi
 		mkdir -p /var/lib/dietpi/postboot.d
-		chown dietpi:dietpi /var/lib/dietpi
-		chmod 660 /var/lib/dietpi
-
 		#	Storage locations for program specifc additional data
 		mkdir -p /var/lib/dietpi/dietpi-autostart
 		mkdir -p /var/lib/dietpi/dietpi-config
-		mkdir -p /var/tmp/dietpi/logs/dietpi-ramlog_store
-
 		#mkdir -p /var/lib/dietpi/dietpi-software
 		mkdir -p /var/lib/dietpi/dietpi-software/installed #Additional storage for installed apps, eg: custom scripts and data
+		chown dietpi:dietpi /var/lib/dietpi
+		chmod 660 /var/lib/dietpi
 
 		# - /var/tmp/dietpi : Temp storage saved during reboots, eg: logs outside of /var/log
-		mkdir -p /var/tmp/dietpi/logs
+		#mkdir -p /var/tmp/dietpi/logs
+		mkdir -p /var/tmp/dietpi/logs/dietpi-ramlog_store
 		chown dietpi:dietpi /var/tmp/dietpi
 		chmod 660 /var/tmp/dietpi
 
@@ -1133,7 +1131,7 @@ _EOF_
 			systemctl disable $i &> /dev/null
 			systemctl mask $i &> /dev/null
 
-		fi
+		done
 
 		local info_use_drive_manager='can be installed and setup by DietPi-Drive_Manager.\nSimply run: dietpi-drive_manager and select Add Network Drive'
 		echo -e "Samba client: $info_use_drive_manager" > /mnt/samba/readme.txt
@@ -1507,10 +1505,6 @@ _EOF_
 
 		/DietPi/dietpi/func/dietpi-logclear 2
 
-		G_DIETPI-NOTIFY 2 'Deleting DietPi-RAMlog storage'
-
-		ls -A /var/tmp/dietpi/logs/dietpi-ramlog_store/* &> /dev/mull && rm -R /var/tmp/dietpi/logs/dietpi-ramlog_store/*
-
 		G_DIETPI-NOTIFY 2 'Resetting DietPi generated globals/files'
 
 		rm /DietPi/dietpi/.??*
@@ -1579,11 +1573,13 @@ _EOF_
 		G_RUN_CMD systemctl stop dietpi-ramdisk
 
 		# - Clear tmp files on disk
-		rm /var/tmp/dietpi/logs/*
+		rm -R /var/tmp/dietpi/logs/*
 
 		# - Clear items that may have been left on disk, from previous PREP's
+		umount /DietPi
 		rm -R /DietPi
 		mkdir /DietPi
+
 		cd /root
 		umount /tmp
 		rm -R /tmp
