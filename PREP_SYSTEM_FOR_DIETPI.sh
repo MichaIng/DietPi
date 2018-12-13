@@ -934,7 +934,7 @@ _EOF_
 		[[ -d /usr/share/calendar ]] && rm -R /usr/share/calendar
 
 		# - Previous debconfs
-		ls -Al /var/cache/debconf/*-old &> /dev/null && rm /var/cache/debconf/*-old
+		ls -A /var/cache/debconf/*-old &> /dev/null && rm /var/cache/debconf/*-old
 
 		# - Fonts
 		[[ -d /usr/share/fonts ]] && rm -R /usr/share/fonts
@@ -984,12 +984,12 @@ _EOF_
 		[[ -f /usr/bin/armbianmonitor ]] && rm /usr/bin/armbianmonitor
 		[[ -d /usr/lib/armbian ]] && rm -R /usr/lib/armbian
 		[[ -d /usr/share/armbian ]] && rm -R /usr/share/armbian
-		ls -Al /etc/profile.d/armbian* &> /dev/null && rm /etc/profile.d/armbian*
-		ls -Al /etc/armbian* &> /dev/null && rm -R /etc/armbian*
-		ls -Al /etc/default/armbian* &> /dev/null && rm -R /etc/default/armbian*
-		ls -Al /etc/update-motd.d/*armbian* &> /dev/null && rm -R /etc/update-motd.d/*armbian*
-		ls -Al /etc/X11/xorg.conf.d/*armbian* &> /dev/null && rm -R /etc/X11/xorg.conf.d/*armbian*
-		ls -Al /etc/cron.*/armbian* &> /dev/null && rm /etc/cron.*/armbian*
+		ls -A /etc/profile.d/armbian* &> /dev/null && rm /etc/profile.d/armbian*
+		ls -A /etc/armbian* &> /dev/null && rm -R /etc/armbian*
+		ls -A /etc/default/armbian* &> /dev/null && rm -R /etc/default/armbian*
+		ls -A /etc/update-motd.d/*armbian* &> /dev/null && rm -R /etc/update-motd.d/*armbian*
+		ls -A /etc/X11/xorg.conf.d/*armbian* &> /dev/null && rm -R /etc/X11/xorg.conf.d/*armbian*
+		ls -A /etc/cron.*/armbian* &> /dev/null && rm /etc/cron.*/armbian*
 		[[ -f /boot/armbian_first_run.txt.template ]] && rm /boot/armbian_first_run.txt.template
 		umount /var/log.hdd 2> /dev/null
 		[[ -d /var/log.hdd ]] && rm -R /var/log.hdd
@@ -1013,7 +1013,7 @@ _EOF_
 		# - Pre v6.9 cleaning:
 		sed -i '/\/DietPi/d' /root/.bashrc
 		sed -i '/\/DietPi/d' /home/dietpi/.bashrc &> /dev/null
-		ls -Al /etc/profile.d/99-dietpi* &> /dev/null && rm /etc/profile.d/99-dietpi*
+		ls -A /etc/profile.d/99-dietpi* &> /dev/null && rm /etc/profile.d/99-dietpi*
 
 		# - Enable /etc/bashrc.d/ support for custom interactive non-login shell scripts:
 		G_CONFIG_INJECT '.*/etc/bashrc\.d/.*' 'for i in /etc/bashrc.d/*.sh; do [ -r "$i" ] && . $i; done' /etc/bash.bashrc
@@ -1164,7 +1164,7 @@ _EOF_
 		G_RUN_CMD cp /DietPi/dietpi/conf/network_interfaces /etc/network/interfaces
 
 		# - Remove all predefined eth*/wlan* adapter rules
-		ls -Al /etc/udev/rules.d/70-persist*nt-net.rules &> /dev/null && rm /etc/udev/rules.d/70-persist*nt-net.rules
+		ls -A /etc/udev/rules.d/70-persist*nt-net.rules &> /dev/null && rm /etc/udev/rules.d/70-persist*nt-net.rules
 
 		#	Add pre-up lines for wifi on OrangePi Zero
 		if (( $G_HW_MODEL == 32 )); then
@@ -1375,7 +1375,7 @@ _EOF_
 		# - Odroids FFMPEG fix. Prefer debian.org over Meveric for backports: https://github.com/Fourdee/DietPi/issues/1273 + https://github.com/Fourdee/DietPi/issues/1556#issuecomment-369463910
 		elif (( $G_HW_MODEL > 9 && $G_HW_MODEL < 15 )); then
 
-			ls -Al /etc/apt/preferences.d/meveric* &> /dev/null && rm /etc/apt/preferences.d/meveric*
+			ls -A /etc/apt/preferences.d/meveric* &> /dev/null && rm /etc/apt/preferences.d/meveric*
 			cat << _EOF_ > /etc/apt/preferences.d/backports
 Package: *
 Pin: release a=jessie-backports
@@ -1413,11 +1413,11 @@ _EOF_
 
 		# - Remove Bash History file
 		[[ -f ~/.bash_history ]] && rm ~/.bash_history
-		ls -Al /home/*/.bash_history &> /dev/null && rm /home/*/.bash_history
+		ls -A /home/*/.bash_history &> /dev/null && rm /home/*/.bash_history
 
 		# - Nano histroy file
 		[[ -f ~/.nano_history ]] && rm ~/.nano_history
-		ls -Al /home/*/.nano_history &> /dev/null && rm /home/*/.nano_history
+		ls -A /home/*/.nano_history &> /dev/null && rm /home/*/.nano_history
 
 		G_DIETPI-NOTIFY 2 'Removing swapfile from image'
 
@@ -1509,7 +1509,7 @@ _EOF_
 
 		G_DIETPI-NOTIFY 2 'Deleting DietPi-RAMlog storage'
 
-		ls -Al /var/tmp/dietpi/logs/dietpi-ramlog_store/* &> /dev/mull && rm -R /var/tmp/dietpi/logs/dietpi-ramlog_store/*
+		ls -A /var/tmp/dietpi/logs/dietpi-ramlog_store/* &> /dev/mull && rm -R /var/tmp/dietpi/logs/dietpi-ramlog_store/*
 
 		G_DIETPI-NOTIFY 2 'Resetting DietPi generated globals/files'
 
@@ -1537,7 +1537,7 @@ _EOF_
 		G_DIETPI-NOTIFY 2 'Clearing APT cache'
 
 		G_RUN_CMD apt-get clean
-		ls -Al /var/lib/apt/lists/* &> /dev/null && rm -R /var/lib/apt/lists/* -vf 2> /dev/null #lists cache: remove partial folder also, automatically gets regenerated on G_AGUP
+		ls -A /var/lib/apt/lists/* &> /dev/null && rm -R /var/lib/apt/lists/* -vf 2> /dev/null #lists cache: remove partial folder also, automatically gets regenerated on G_AGUP
 		#rm /var/lib/dpkg/info/* #issue...
 		#dpkg: warning: files list file for package 'libdbus-1-3:armhf' missing; assuming      package has no files currently installed
 
@@ -1593,7 +1593,7 @@ _EOF_
 
 		# - Remove PREP script
 		[[ -f /root/PREP_SYSTEM_FOR_DIETPI.sh ]] && rm /root/PREP_SYSTEM_FOR_DIETPI.sh
-		ls -Al /home/*/PREP_SYSTEM_FOR_DIETPI.sh &> /dev/null && rm /home/*/PREP_SYSTEM_FOR_DIETPI.sh
+		ls -A /home/*/PREP_SYSTEM_FOR_DIETPI.sh &> /dev/null && rm /home/*/PREP_SYSTEM_FOR_DIETPI.sh
 
 		G_DIETPI-NOTIFY 2 "The used kernel version is: $(uname -r)"
 		kernel_apt_packages="$(dpkg --get-selections | grep '^linux-image-[0-9]')"
