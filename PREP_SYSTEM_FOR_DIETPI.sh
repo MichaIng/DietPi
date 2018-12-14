@@ -1528,10 +1528,6 @@ _EOF_
 
 		rm /DietPi/dietpi/.??*
 
-		G_DIETPI-NOTIFY 2 'Setting DietPi-Autostart to console'
-
-		echo 0 > /DietPi/dietpi/.dietpi-autostart_index
-
 		G_DIETPI-NOTIFY 2 'Creating our update file (used on 1st run to check for DietPi updates)'
 
 		echo -1 > /DietPi/dietpi/.update_stage
