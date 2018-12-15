@@ -19,7 +19,6 @@
 	#Core globals
 	G_PROGRAM_NAME='DietPi-PREP'
 	GITOWNER=${GITOWNER:-Fourdee}
-	GITBRANCH=${GITBRANCH:-master}
 
 	#------------------------------------------------------------------------------------------------
 	# Critical checks and pre-reqs, with exit, prior to initial run of script
@@ -33,6 +32,8 @@
 	fi
 
 	#Work inside /tmp as usually ramfs to reduce disk I/O and speed up download and unpacking
+	# - Save current full script path, before nagivating to /tmp: https://github.com/Fourdee/DietPi/pull/2341#discussion_r241784962
+	FP_PREP_SCRIPT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/$(basename "${BASH_SOURCE[0]}")"
 	cd /tmp
 
 	#Prefer IPv4 by default, to avoid hanging access attempts in some cases
@@ -67,8 +68,11 @@
 
 	)
 
-	# - Meveric special: https://github.com/Fourdee/DietPi/issues/1285#issuecomment-355759321
+	#Removing conflicting /etc/apt/sources.list.d entries
+	# - Meveric: https://github.com/Fourdee/DietPi/issues/1285#issuecomment-355759321
 	[[ -f /etc/apt/sources.list.d/deb-multimedia.list ]] && rm /etc/apt/sources.list.d/deb-multimedia.list
+	# - OMV: https://dietpi.com/phpbb/viewtopic.php?f=11&t=2772&p=10646#p10594
+	[[ -f /etc/apt/sources.list.d/openmediavault.list ]] && rm /etc/apt/sources.list.d/openmediavault.list
 
 	apt-get clean
 	apt-get update
@@ -77,7 +81,7 @@
 
 		if ! dpkg-query -s $i &> /dev/null && ! apt-get install -y $i; then
 
-			echo -e "ERROR: Unable to install $i, please try to install it manually:\n\t# apt-get install -y $i\n"
+			echo -e "[FAILED] Unable to install $i, please try to install it manually:\n\t# apt-get install -y $i\n"
 			exit 1
 
 		fi
@@ -87,7 +91,7 @@
 	unset a_MIN_APT_PREREQS
 
 	#Setup locale
-	# - Remove exisiting settings that could break dpkg-reconfigure locales
+	# - Remove existing settings that could break dpkg-reconfigure locales
 	> /etc/environment
 	[[ -f /etc/default/locale ]] && rm /etc/default/locale
 
@@ -98,7 +102,7 @@
 	#	- "update-locale": Add $LANG to "/etc/default/locale" based on generated locale(s) or interactive default language selection.
 	if ! dpkg-reconfigure -f noninteractive locales; then
 
-		echo -e 'ERROR: Locale generation failed. Aborting...\n'
+		echo -e '[FAILED] Locale generation failed. Aborting...\n'
 		exit 1
 
 	fi
@@ -118,21 +122,20 @@
 
 	)
 
-	WHIP_RETURN=$(whiptail --title "$G_PROGRAM_NAME" --menu "Please select a Git branch:" --default-item "master" --ok-button "Ok" --cancel-button "Exit" --backtitle "$G_PROGRAM_NAME" 12 80 3 "${aWHIP_BRANCH[@]}" 3>&1 1>&2 2>&3)
-	if (( $? == 0 )); then
+	if WHIP_RETURN=$(whiptail --title "$G_PROGRAM_NAME" --menu 'Please select a Git branch:' --default-item 'master' --ok-button 'Ok' --cancel-button 'Exit' --backtitle "$G_PROGRAM_NAME" 12 80 3 "${aWHIP_BRANCH[@]}" 3>&1 1>&2 2>&3); then
 
 		export GITBRANCH=$WHIP_RETURN
 
 	else
 
-		echo -e 'No choice detected. Aborting...\n'
+		echo -e '[ INFO ] No choice detected. Aborting...\n'
 		exit 0
 
 	fi
 
 	unset aWHIP_BRANCH WHIP_RETURN
 
-	echo "Git branch: $GITOWNER/$GITBRANCH"
+	echo "[ INFO ] Git branch: $GITOWNER/$GITBRANCH"
 
 	#------------------------------------------------------------------------------------------------
 	# DietPi-Globals
@@ -141,7 +144,7 @@
 	# - NB: We'll have to manually handle errors, until DietPi-Globals are sucessfully loaded.
 	if ! wget "https://raw.githubusercontent.com/$GITOWNER/DietPi/$GITBRANCH/dietpi/func/dietpi-globals" -O dietpi-globals; then
 
-		echo -e 'ERROR: Unable to download dietpi-globals. Aborting...\n'
+		echo -e '[FAILED] Unable to download dietpi-globals. Aborting...\n'
 		exit 1
 
 	fi
@@ -149,7 +152,7 @@
 	# - Load
 	if ! . ./dietpi-globals; then
 
-		echo -e 'ERROR: Unable to load dietpi-globals. Aborting...\n'
+		echo -e '[FAILED] Unable to load dietpi-globals. Aborting...\n'
 		exit 1
 
 	fi
@@ -202,7 +205,7 @@
 
 	else
 
-		G_DIETPI-NOTIFY 1 "Unknown or unsupported CPU architecture \"$G_HW_ARCH_DESCRIPTION\". Aborting...\n"
+		G_DIETPI-NOTIFY 1 "Unknown or unsupported CPU architecture: \"$G_HW_ARCH_DESCRIPTION\". Aborting...\n"
 		exit 1
 
 	fi
@@ -257,7 +260,7 @@
 
 		else
 
-			G_DIETPI-NOTIFY 2 'Non-DietPi system'
+			G_DIETPI-NOTIFY 2 'Non-DietPi system found, skipping pre-prep'
 
 		fi
 
@@ -411,8 +414,8 @@
 
 		G_WHIP_MENU_ARRAY=(
 
-			'0' ": I don't require WiFi, do not install."
-			'1' ': I require WiFi functionality, keep/install related packages.'
+			'0' ': I do not require WiFi functionality, skip related package install.'
+			'1' ': I require WiFi functionality, install related packages.'
 
 		)
 
@@ -454,7 +457,6 @@
 
 		done
 
-		#delete []
 		unset DISTRO_LIST_ARRAY
 
 		if [[ -z ${G_WHIP_MENU_ARRAY+x} ]]; then
@@ -533,13 +535,13 @@
 		G_RUN_CMD mv "DietPi-$GITBRANCH/README.md" /boot/dietpi-README.md
 		G_RUN_CMD mv "DietPi-$GITBRANCH/CHANGELOG.txt" /boot/dietpi-CHANGELOG.txt
 
-		# - Remove server_version / patch_file (downloads fresh from dietpi-update)
-		rm DietPi-"$GITBRANCH"/dietpi/server_version*
+		# - Remove server_version* / (pre-)patch_file (downloads fresh from dietpi-update)
+		rm "DietPi-$GITBRANCH/dietpi/server_version"*
 		rm "DietPi-$GITBRANCH/dietpi/pre-patch_file"
 		rm "DietPi-$GITBRANCH/dietpi/patch_file"
 
 		l_message='Copy DietPi core files to /boot/dietpi' G_RUN_CMD cp -Rf "DietPi-$GITBRANCH/dietpi" /boot/
-		l_message='Copy rootfs files in place' G_RUN_CMD cp -Rf DietPi-"$GITBRANCH"/rootfs/. /
+		l_message='Copy DietPi rootfs files in place' G_RUN_CMD cp -Rf "DietPi-$GITBRANCH/rootfs"/. /
 		l_message='Clean download location' G_RUN_CMD rm -R "DietPi-$GITBRANCH"
 
 		l_message='Set execute permissions for DietPi scripts' G_RUN_CMD chmod -R +x /boot/dietpi /var/lib/dietpi/services /etc/cron.*/dietpi /etc/profile.d/dietpi-*.sh /etc/bashrc.d/dietpi-*.sh
@@ -560,13 +562,6 @@
 		G_DIETPI-NOTIFY 2 '-----------------------------------------------------------------------------------'
 		#------------------------------------------------------------------------------------------------
 
-		G_DIETPI-NOTIFY 2 'Removing conflicting /etc/apt/sources.list.d entries'
-		#	NB: Apt sources will get overwritten during 1st run, via boot script and dietpi.txt entry
-
-		#rm /etc/apt/sources.list.d/* &> /dev/null #Probably a bad idea
-		#rm /etc/apt/sources.list.d/deb-multimedia.list &> /dev/null #meveric, already done above
-		[[ -f /etc/apt/sources.list.d/openmediavault.list ]] && rm /etc/apt/sources.list.d/openmediavault.list #https://dietpi.com/phpbb/viewtopic.php?f=11&t=2772&p=10646#p10594
-
 		G_DIETPI-NOTIFY 2 "Setting APT sources.list: $DISTRO_TARGET_NAME $DISTRO_TARGET"
 
 		# - We need to forward $DISTRO_TARGET* to dietpi-set_software, as well as $G_HW_MODEL for Debian vs Raspbian decision.
@@ -586,10 +581,10 @@
 		G_RUN_CMD apt-mark auto $(apt-mark showmanual)
 
 		# - @MichaIng https://github.com/Fourdee/DietPi/pull/1266/files
-		G_DIETPI-NOTIFY 2 'Disable automatic recommends/suggests installation and allow them to be autoremoved:'
+		G_DIETPI-NOTIFY 2 'Disable automatic recommends/suggests install and allow them to be autoremoved:'
 
 		#	Remove any existing APT recommends settings
-		rm /etc/apt/apt.conf.d/*recommends* &> /dev/null
+		rm -f /etc/apt/apt.conf.d/*recommends*
 
 		G_ERROR_HANDLER_COMMAND='/etc/apt/apt.conf.d/99-dietpi-norecommends'
 		cat << _EOF_ > $G_ERROR_HANDLER_COMMAND
@@ -601,7 +596,7 @@ _EOF_
 		G_ERROR_HANDLER_EXITCODE=$?
 		G_ERROR_HANDLER
 
-		G_DIETPI-NOTIFY 2 'Forcing use of modified package configs'
+		G_DIETPI-NOTIFY 2 'Preserve modified config files on APT update:'
 
 		G_ERROR_HANDLER_COMMAND='/etc/apt/apt.conf.d/99-dietpi-forceconf'
 		cat << _EOF_ > $G_ERROR_HANDLER_COMMAND
@@ -798,32 +793,19 @@ _EOF_
 
 			G_AGI device-tree-compiler #Kern
 
-		# - Auto detect kernel package
+		# - Auto detect kernel package incl. ARMbian/others DTB
 		else
 
-			AUTO_DETECT_KERN_PKG=$(dpkg --get-selections | grep '^linux-image' | awk '{print $1}')
+			AUTO_DETECT_KERN_PKG=$(dpkg --get-selections | grep -E '^linux-(image|dtb)' | awk '{print $1}')
 			if [[ $AUTO_DETECT_KERN_PKG ]]; then
 
-				# - Install kern package if it exists in cache, else, mark manual #: https://github.com/Fourdee/DietPi/issues/1651#issuecomment-376974917
-				if [[ $(apt-cache search ^$AUTO_DETECT_KERN_PKG) ]]; then
-
-					G_AGI $AUTO_DETECT_KERN_PKG
-
-				else
-
-					apt-mark manual $AUTO_DETECT_KERN_PKG
-
-				fi
+				G_AGI $AUTO_DETECT_KERN_PKG
 
 			else
 
 				G_DIETPI-NOTIFY 2 'Unable to find kernel packages for installation. Assuming non-APT/.deb kernel installation.'
 
 			fi
-
-			#ARMbian/others DTB
-			AUTO_DETECT_DTB_PKG=$(dpkg --get-selections | grep '^linux-dtb-' | awk '{print $1}')
-			[[ $AUTO_DETECT_DTB_PKG ]] && G_AGI $AUTO_DETECT_DTB_PKG
 
 		fi
 
@@ -837,7 +819,7 @@ _EOF_
 			#	Usually no firmware should be necessary for VMs. If user manually passes though some USB device, user might need to install the firmware then.
 			if (( $G_HW_MODEL != 20 )); then
 
-				aPACKAGES_REQUIRED_INSTALL+=('firmware-realtek')		# Eth/WiFi/BT dongle firmware
+				aPACKAGES_REQUIRED_INSTALL+=('firmware-realtek')	# Eth/WiFi/BT dongle firmware
 				aPACKAGES_REQUIRED_INSTALL+=('firmware-linux-nonfree')
 
 			fi
@@ -934,12 +916,10 @@ _EOF_
 		[[ -d /selinux ]] && rm -R /selinux
 
 		# - www
-		[[ -d /var/www ]] && rm -R /var/www
-		mkdir /var/www
+		[[ -d /var/www ]] && rm -Rf /var/www/{,.??,.[^.]}*
 
 		# - sourcecode (linux-headers etc)
-		[[ -d /usr/src ]] && rm -R /usr/src
-		mkdir /usr/src
+		[[ -d /usr/src ]] && rm -Rf /usr/src/{,.??,.[^.]}*
 
 		# - root
 		[[ -e /root/.cache ]] && rm -R /root/.cache
@@ -953,7 +933,7 @@ _EOF_
 		[[ -d /usr/share/calendar ]] && rm -R /usr/share/calendar
 
 		# - Previous debconfs
-		ls -A /var/cache/debconf/*-old &> /dev/null && rm /var/cache/debconf/*-old
+		rm -f /var/cache/debconf/*-old
 
 		# - Fonts
 		[[ -d /usr/share/fonts ]] && rm -R /usr/share/fonts
@@ -1003,12 +983,12 @@ _EOF_
 		[[ -f /usr/bin/armbianmonitor ]] && rm /usr/bin/armbianmonitor
 		[[ -d /usr/lib/armbian ]] && rm -R /usr/lib/armbian
 		[[ -d /usr/share/armbian ]] && rm -R /usr/share/armbian
-		ls -A /etc/profile.d/armbian* &> /dev/null && rm /etc/profile.d/armbian*
-		ls -A /etc/armbian* &> /dev/null && rm -R /etc/armbian*
-		ls -A /etc/default/armbian* &> /dev/null && rm -R /etc/default/armbian*
-		ls -A /etc/update-motd.d/*armbian* &> /dev/null && rm -R /etc/update-motd.d/*armbian*
-		ls -A /etc/X11/xorg.conf.d/*armbian* &> /dev/null && rm -R /etc/X11/xorg.conf.d/*armbian*
-		ls -A /etc/cron.*/armbian* &> /dev/null && rm /etc/cron.*/armbian*
+		rm -f /etc/profile.d/armbian*
+		rm -Rf /etc/armbian*
+		rm -Rf /etc/default/armbian*
+		rm -Rf /etc/update-motd.d/*armbian*
+		rm -Rf /etc/X11/xorg.conf.d/*armbian*
+		rm -f /etc/cron.*/armbian*
 		[[ -f /boot/armbian_first_run.txt.template ]] && rm /boot/armbian_first_run.txt.template
 		umount /var/log.hdd 2> /dev/null
 		[[ -d /var/log.hdd ]] && rm -R /var/log.hdd
@@ -1032,7 +1012,7 @@ _EOF_
 		# - Pre v6.9 cleaning:
 		sed -i '/\/DietPi/d' /root/.bashrc
 		sed -i '/\/DietPi/d' /home/dietpi/.bashrc &> /dev/null
-		ls -A /etc/profile.d/99-dietpi* &> /dev/null && rm /etc/profile.d/99-dietpi*
+		rm -f /etc/profile.d/99-dietpi*
 
 		# - Enable /etc/bashrc.d/ support for custom interactive non-login shell scripts:
 		G_CONFIG_INJECT '.*/etc/bashrc\.d/.*' 'for i in /etc/bashrc.d/*.sh; do [ -r "$i" ] && . $i; done' /etc/bash.bashrc
@@ -1134,7 +1114,7 @@ _EOF_
 		G_CONFIG_INJECT 'ssh.dietpi.com ' 'ssh.dietpi.com ssh-rsa AAAAB3NzaC1yc2EAAAADAQABAAABAQDE6aw3r6aOEqendNu376iiCHr9tGBIWPgfrLkzjXjEsHGyVSUFNnZt6pftrDeK7UX+qX4FxOwQlugG4fymOHbimRCFiv6cf7VpYg1Ednquq9TLb7/cIIbX8a6AuRmX4fjdGuqwmBq3OG7ZksFcYEFKt5U4mAJIaL8hXiM2iXjgY02LqiQY/QWATsHI4ie9ZOnwrQE+Rr6mASN1BVFuIgyHIbwX54jsFSnZ/7CdBMkuAd9B8JkxppWVYpYIFHE9oWNfjh/epdK8yv9Oo6r0w5Rb+4qaAc5g+RAaknHeV6Gp75d2lxBdCm5XknKKbGma2+/DfoE8WZTSgzXrYcRlStYN' /root/.ssh/known_hosts
 
 		G_DIETPI-NOTIFY 2 'Recreate symlink for resolv.conf (DNS)'
-		rm /etc/resolv.conf
+		[[ -f /etc/resolv.conf ]] && rm /etc/resolv.conf
 		echo 'nameserver 8.8.8.8' > /etc/resolvconf/run/resolv.conf # Temp apply, in case was not previously symlink, resets on next ifup.
 		ln -sf /etc/resolvconf/run/resolv.conf /etc/resolv.conf
 
@@ -1181,7 +1161,7 @@ _EOF_
 		G_RUN_CMD cp /DietPi/dietpi/conf/network_interfaces /etc/network/interfaces
 
 		# - Remove all predefined eth*/wlan* adapter rules
-		ls -A /etc/udev/rules.d/70-persist*nt-net.rules &> /dev/null && rm /etc/udev/rules.d/70-persist*nt-net.rules
+		rm -f /etc/udev/rules.d/70-persist*nt-net.rules
 
 		#	Add pre-up lines for wifi on OrangePi Zero
 		if (( $G_HW_MODEL == 32 )); then
@@ -1346,11 +1326,11 @@ blacklist videobuf2_vmalloc
 blacklist bc_example
 _EOF_
 
-			#Sparky SBC, WiFi rtl8812au driver: https://github.com/sparky-sbc/sparky-test/tree/master/rtl8812au
+			#	Sparky SBC, WiFi rtl8812au driver: https://github.com/sparky-sbc/sparky-test/tree/master/rtl8812au
 			G_RUN_CMD wget https://raw.githubusercontent.com/sparky-sbc/sparky-test/master/rtl8812au/rtl8812au_sparky.tar
 			mkdir -p rtl8812au_sparky
 			tar -xvf rtl8812au_sparky.tar -C rtl8812au_sparky
-			chmod +x -R rtl8812au_sparky
+			chmod -R +x rtl8812au_sparky
 			cd rtl8812au_sparky
 			G_RUN_CMD ./install.sh
 			cd /tmp/$G_PROGRAM_NAME
@@ -1392,8 +1372,8 @@ _EOF_
 		# - Odroids FFMPEG fix. Prefer debian.org over Meveric for backports: https://github.com/Fourdee/DietPi/issues/1273 + https://github.com/Fourdee/DietPi/issues/1556#issuecomment-369463910
 		elif (( $G_HW_MODEL > 9 && $G_HW_MODEL < 15 )); then
 
-			ls -A /etc/apt/preferences.d/meveric* &> /dev/null && rm /etc/apt/preferences.d/meveric*
-			cat << _EOF_ > /etc/apt/preferences.d/backports
+			rm -f /etc/apt/preferences.d/meveric*
+			cat << _EOF_ > /etc/apt/preferences.d/dietpi-meveric-backports
 Package: *
 Pin: release a=jessie-backports
 Pin: origin "fuzon.co.uk"
@@ -1428,13 +1408,13 @@ _EOF_
 
 		G_DIETPI-NOTIFY 2 'Running general cleanup of misc files'
 
-		# - Remove Bash History file
+		# - Remove Bash history file
 		[[ -f ~/.bash_history ]] && rm ~/.bash_history
-		ls -A /home/*/.bash_history &> /dev/null && rm /home/*/.bash_history
+		rm -f /home/*/.bash_history
 
-		# - Nano histroy file
+		# - Remove Nano histroy file
 		[[ -f ~/.nano_history ]] && rm ~/.nano_history
-		ls -A /home/*/.nano_history &> /dev/null && rm /home/*/.nano_history
+		rm -f /home/*/.nano_history
 
 		G_DIETPI-NOTIFY 2 'Removing swapfile from image'
 
@@ -1447,11 +1427,7 @@ _EOF_
 		G_DIETPI-NOTIFY 2 'Resetting boot.ini, config.txt, cmdline.txt etc'
 
 		# - PineA64 - delete ethaddr from uEnv.txt file
-		if (( $G_HW_MODEL == 40 )); then
-
-			[[ -f /boot/cmdline.txt ]] && sed -i '/^ethaddr/ d' /boot/uEnv.txt
-
-		fi
+		(( $G_HW_MODEL == 40 )) && [[ -f /boot/uEnv.txt ]] && sed -i '/^ethaddr/ d' /boot/uEnv.txt
 
 		# - Set Pi cmdline.txt back to normal
 		[[ -f /boot/cmdline.txt ]] && sed -i 's/ rootdelay=10//g' /boot/cmdline.txt
@@ -1532,7 +1508,7 @@ _EOF_
 
 		echo -1 > /DietPi/dietpi/.update_stage
 
-		G_DIETPI-NOTIFY 2 'Set Init .install_stage to -1 (first boot)'
+		G_DIETPI-NOTIFY 2 'Set init .install_stage to -1 (first boot)'
 
 		echo -1 > /DietPi/dietpi/.install_stage
 
@@ -1546,7 +1522,7 @@ _EOF_
 		G_DIETPI-NOTIFY 2 'Clearing APT cache'
 
 		G_RUN_CMD apt-get clean
-		ls -A /var/lib/apt/lists/* &> /dev/null && rm -R /var/lib/apt/lists/* -vf 2> /dev/null #lists cache: remove partial folder also, automatically gets regenerated on G_AGUP
+		rm -Rfv /var/lib/apt/lists/* # Clear APT cache, gets regenerated on G_AGUP
 		#rm /var/lib/dpkg/info/* #issue...
 		#dpkg: warning: files list file for package 'libdbus-1-3:armhf' missing; assuming      package has no files currently installed
 
@@ -1573,8 +1549,8 @@ _EOF_
 
 		chmod +x /DietPi/dietpi/.version
 		. /DietPi/dietpi/.version
-		#	reduce sub_version by 1, allows us to create image, prior to release and patch if needed.
-		G_DIETPI_VERSION_SUB=$(( $G_DIETPI_VERSION_SUB - 1 ))
+		#	Reduce sub_version by 1, allows us to create image, prior to release and patch if needed.
+		((G_DIETPI_VERSION_SUB--))
 
 		G_CONFIG_INJECT 'DEV_GITBRANCH=' "DEV_GITBRANCH=$GITBRANCH" /DietPi/dietpi.txt
 		G_CONFIG_INJECT 'DEV_GITOWNER=' "DEV_GITOWNER=$GITOWNER" /DietPi/dietpi.txt
@@ -1587,41 +1563,43 @@ _EOF_
 		G_RUN_CMD systemctl stop dietpi-ramlog
 		G_RUN_CMD systemctl stop dietpi-ramdisk
 
-		# - Clear tmp files on disk
-		rm -R /var/tmp/dietpi/logs/*
+		# - Clear DietPi logs, written during PREP
+		rm -Rf /var/tmp/dietpi/logs/{,.??,.[^.]}*
 
-		# - Clear items that may have been left on disk, from previous PREP's
+		# - Clear items below mount points, e.g. from previous PREP's
 		umount /DietPi
-		rm -R /DietPi
-		mkdir /DietPi
+		rm -Rf /DietPi/{,.??,.[^.]}*
 
-		cd /root
+		umount /var/log
+		rm -Rf /var/log/{,.??,.[^.]}*
+		mount /var/log # Prevent new log files from being written to disk by background processes
+
+		cd ~
 		umount /tmp
-		rm -R /tmp
-		mkdir /tmp
+		rm -Rf /tmp/{,.??,.[^.]}*
+		mount /tmp # Prevent new tmp files from being written to disk by background processes
+
+		# - Remove PREP script
+		[[ -f $FP_PREP_SCRIPT ]] && rm $FP_PREP_SCRIPT
 
 		sync
 
-		# - Remove PREP script
-		[[ -f /root/PREP_SYSTEM_FOR_DIETPI.sh ]] && rm /root/PREP_SYSTEM_FOR_DIETPI.sh
-		ls -A /home/*/PREP_SYSTEM_FOR_DIETPI.sh &> /dev/null && rm /home/*/PREP_SYSTEM_FOR_DIETPI.sh
-
-		G_DIETPI-NOTIFY 2 "The used kernel version is: $(uname -r)"
-		kernel_apt_packages="$(dpkg --get-selections | grep '^linux-image-[0-9]')"
+		G_DIETPI-NOTIFY 2 "The used kernel version is:\n\t - $(uname -a)"
+		kernel_apt_packages=$(dpkg -l | grep -E '^linux-(image|dtb)-[0-9]')
 		if [[ $kernel_apt_packages ]]; then
 
-			G_DIETPI-NOTIFY 2 'The following kernel APT packages have been found, please purge the outdated ones:'
+			G_DIETPI-NOTIFY 2 'The following kernel APT packages have been found, please purge outdated ones:'
 			echo "$kernel_apt_packages"
 
 		fi
 
 		G_DIETPI-NOTIFY 2 'Please delete outdated non-APT kernel modules:'
-		ls -lh /lib/modules
+		ls -lAh /lib/modules
 
-		G_DIETPI-NOTIFY 2 'Please check and delete all non-required folders in /root/.*:'
-		ls -lha /root
+		G_DIETPI-NOTIFY 2 'Please check and delete all non-required home diretory content:'
+		ls -lAh /root /home/*/
 
-		G_DIETPI-NOTIFY 0 'Completed, disk can now be saved to .img for later use, or, reboot system to start first run of DietPi:'
+		G_DIETPI-NOTIFY 0 'Completed, disk can now be saved to .img for later use, or, reboot system to start first run of DietPi.'
 
 		#Power off system
 
