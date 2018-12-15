@@ -32,7 +32,7 @@
 	fi
 
 	#Work inside /tmp as usually ramfs to reduce disk I/O and speed up download and unpacking
-	# - Save current full script path, before nagivating to /tmp: https://github.com/Fourdee/DietPi/pull/2341#discussion_r241784962
+	# - Save full script path, beforehand: https://github.com/Fourdee/DietPi/pull/2341#discussion_r241784962
 	FP_PREP_SCRIPT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/$(basename "${BASH_SOURCE[0]}")"
 	cd /tmp
 
@@ -81,7 +81,7 @@
 
 		if ! dpkg-query -s $i &> /dev/null && ! apt-get install -y $i; then
 
-			echo -e "[FAILED] Unable to install $i, please try to install it manually:\n\t# apt-get install -y $i\n"
+			echo -e "[FAILED] Unable to install $i, please try to install it manually:\n\t # apt-get install -y $i\n"
 			exit 1
 
 		fi
@@ -113,6 +113,10 @@
 	update-locale LC_TIME=en_GB.UTF-8
 	update-locale LC_ALL=en_GB.UTF-8
 
+	# - Export locale vars to assure the following whiptail being beautiful
+	export LANG=en_GB.UTF8
+	export LC_ALL=en_GB.UTF8
+
 	#Select gitbranch
 	aWHIP_BRANCH=(
 
@@ -124,7 +128,7 @@
 
 	if WHIP_RETURN=$(whiptail --title "$G_PROGRAM_NAME" --menu 'Please select a Git branch:' --default-item 'master' --ok-button 'Ok' --cancel-button 'Exit' --backtitle "$G_PROGRAM_NAME" 12 80 3 "${aWHIP_BRANCH[@]}" 3>&1 1>&2 2>&3); then
 
-		export GITBRANCH=$WHIP_RETURN
+		GITBRANCH=$WHIP_RETURN
 
 	else
 
@@ -135,7 +139,7 @@
 
 	unset aWHIP_BRANCH WHIP_RETURN
 
-	echo "[ INFO ] Git branch: $GITOWNER/$GITBRANCH"
+	echo "[ INFO ] Selected Git branch: $GITOWNER/$GITBRANCH"
 
 	#------------------------------------------------------------------------------------------------
 	# DietPi-Globals
@@ -314,6 +318,7 @@
 				else
 
 					IMAGE_CREATOR="$G_WHIP_RETURNED_VALUE"
+					G_DIETPI-NOTIFY 2 "Entered image creator: $IMAGE_CREATOR"
 					break
 
 				fi
@@ -330,6 +335,7 @@
 			if (( ! $? )) && [[ $G_WHIP_RETURNED_VALUE ]]; then
 
 				PREIMAGE_INFO="$G_WHIP_RETURNED_VALUE"
+				G_DIETPI-NOTIFY 2 "Entered pre-image info: $PREIMAGE_INFO"
 				break
 
 			fi
@@ -403,14 +409,10 @@
 
 		# + Set for future scripts
 		G_HW_MODEL=$G_WHIP_RETURNED_VALUE
-
-		G_DIETPI-NOTIFY 2 "Setting G_HW_MODEL index of: $G_HW_MODEL"
-		G_DIETPI-NOTIFY 2 "CPU ARCH = $G_HW_ARCH : $G_HW_ARCH_DESCRIPTION"
-
 		echo $G_HW_MODEL > /etc/.dietpi_hw_model_identifier
 
-		#WiFi selection
-		G_DIETPI-NOTIFY 2 'WiFi selection'
+		G_DIETPI-NOTIFY 2 "Selected hardware model ID: $G_HW_MODEL"
+		G_DIETPI-NOTIFY 2 "Detected CPU architecture: $G_HW_ARCH_DESCRIPTION (ID: $G_HW_ARCH)"
 
 		G_WHIP_MENU_ARRAY=(
 
@@ -426,6 +428,10 @@
 
 			G_DIETPI-NOTIFY 2 'Marking WiFi as required'
 			WIFI_REQUIRED=1
+
+		else
+
+			G_DIETPI-NOTIFY 2 'Marking WiFi as NOT required'
 
 		fi
 
@@ -491,6 +497,8 @@
 			exit 1
 
 		fi
+
+		G_DIETPI-NOTIFY 2 "Selected Debian version: $DISTRO_TARGET_NAME (ID: $DISTRO_TARGET)"
 
 		#------------------------------------------------------------------------------------------------
 		echo ''
@@ -749,7 +757,7 @@ _EOF_
 		elif (( $G_HW_MODEL < 10 )); then
 
 			apt-mark unhold libraspberrypi-bin libraspberrypi0 raspberrypi-bootloader raspberrypi-kernel raspberrypi-sys-mods raspi-copies-and-fills
-			rm -R /lib/modules/*
+			rm -Rf /lib/modules/*
 			G_AGI libraspberrypi-bin libraspberrypi0 raspberrypi-bootloader raspberrypi-kernel raspberrypi-sys-mods
 			G_AGI --reinstall libraspberrypi-bin libraspberrypi0 raspberrypi-bootloader raspberrypi-kernel
 			# Buster systemd-udevd doesn't support the current raspi-copies-and-fills: https://github.com/Fourdee/DietPi/issues/1286
@@ -848,23 +856,11 @@ _EOF_
 
 		G_DIETPI-NOTIFY 2 'Generating list of minimal packages, required for DietPi installation'
 
-		INSTALL_PACKAGES=''
-		for i in ${aPACKAGES_REQUIRED_INSTALL[@]}
-		do
-
-			#	One line INSTALL_PACKAGES so we can use it later.
-			INSTALL_PACKAGES+="$i "
-
-		done
-
-		# - delete[]
-		unset aPACKAGES_REQUIRED_INSTALL
-
-		l_message='Marking required packages as manually installed' G_RUN_CMD apt-mark manual $INSTALL_PACKAGES
+		l_message='Marking required packages as manually installed' G_RUN_CMD apt-mark manual ${aPACKAGES_REQUIRED_INSTALL[@]}
 
 		# Purging additional packages, that (in some cases) do not get autoremoved:
 		# - dhcpcd5: https://github.com/Fourdee/DietPi/issues/1560#issuecomment-370136642
-		# - dbus: Not needed for headless images, but sometimes marked as "important", thus not autoremoved.
+		# - dbus: Not required for headless images, but sometimes marked as "important", thus not autoremoved.
 		G_AGP dbus dhcpcd5
 		G_AGA
 
@@ -884,7 +880,9 @@ _EOF_
 
 		G_DIETPI-NOTIFY 2 'Installing core DietPi pre-req APT packages'
 
-		G_AGI $INSTALL_PACKAGES
+		G_AGI ${aPACKAGES_REQUIRED_INSTALL[@]}
+
+		unset aPACKAGES_REQUIRED_INSTALL
 
 		G_AGA
 
@@ -1007,7 +1005,7 @@ _EOF_
 		[[ -f /boot/boot.bmp ]] && G_RUN_CMD wget https://github.com/$GITOWNER/DietPi/raw/$GITBRANCH/.meta/images/dietpi-logo_boot.bmp -O /boot/boot.bmp
 
 		#-----------------------------------------------------------------------------------
-		# Bash Profiles
+		#Bash Profiles
 
 		# - Pre v6.9 cleaning:
 		sed -i '/\/DietPi/d' /root/.bashrc
@@ -1027,8 +1025,7 @@ _EOF_
 		l_message='Creating DietPi User Account' G_RUN_CMD /DietPi/dietpi/func/dietpi-set_software useradd dietpi
 
 		#-----------------------------------------------------------------------------------
-		#UID bit for sudo
-		# - https://github.com/Fourdee/DietPi/issues/794
+		#UID bit for sudo: https://github.com/Fourdee/DietPi/issues/794
 
 		G_DIETPI-NOTIFY 2 'Configuring Sudo UID bit'
 
@@ -1103,20 +1100,17 @@ _EOF_
 		#-----------------------------------------------------------------------------------
 		#Network
 
-		G_DIETPI-NOTIFY 2 'Configuring: prefer wlan/eth naming for networked devices:'
+		G_DIETPI-NOTIFY 2 'Configuring wlan/eth naming to be preferred for networked devices:'
+		ln -sfv /dev/null /etc/systemd/network/99-default.link
 
-		# - Prefer to use wlan/eth naming for networked devices (eg: stretch)
-		ln -sf /dev/null /etc/systemd/network/99-default.link
-
-		G_DIETPI-NOTIFY 2 'Add dietpi.com SSH pub host key for DietPi-Survey and -Bugreport upload:'
+		G_DIETPI-NOTIFY 2 'Adding dietpi.com SSH pub host key for DietPi-Survey/Bugreport uploads:'
 		mkdir -p /root/.ssh
 		>> /root/.ssh/known_hosts
 		G_CONFIG_INJECT 'ssh.dietpi.com ' 'ssh.dietpi.com ssh-rsa AAAAB3NzaC1yc2EAAAADAQABAAABAQDE6aw3r6aOEqendNu376iiCHr9tGBIWPgfrLkzjXjEsHGyVSUFNnZt6pftrDeK7UX+qX4FxOwQlugG4fymOHbimRCFiv6cf7VpYg1Ednquq9TLb7/cIIbX8a6AuRmX4fjdGuqwmBq3OG7ZksFcYEFKt5U4mAJIaL8hXiM2iXjgY02LqiQY/QWATsHI4ie9ZOnwrQE+Rr6mASN1BVFuIgyHIbwX54jsFSnZ/7CdBMkuAd9B8JkxppWVYpYIFHE9oWNfjh/epdK8yv9Oo6r0w5Rb+4qaAc5g+RAaknHeV6Gp75d2lxBdCm5XknKKbGma2+/DfoE8WZTSgzXrYcRlStYN' /root/.ssh/known_hosts
 
-		G_DIETPI-NOTIFY 2 'Recreate symlink for resolv.conf (DNS)'
-		[[ -f /etc/resolv.conf ]] && rm /etc/resolv.conf
+		G_DIETPI-NOTIFY 2 'Recreating symlink for resolv.conf (DNS):'
 		echo 'nameserver 8.8.8.8' > /etc/resolvconf/run/resolv.conf # Temp apply, in case was not previously symlink, resets on next ifup.
-		ln -sf /etc/resolvconf/run/resolv.conf /etc/resolv.conf
+		ln -sfv /etc/resolvconf/run/resolv.conf /etc/resolv.conf
 
 		#-----------------------------------------------------------------------------------
 		#MISC
@@ -1154,7 +1148,7 @@ _EOF_
 
 		/DietPi/dietpi/func/dietpi-obtain_hw_model
 
-		G_DIETPI-NOTIFY 2 'Configuring Network'
+		G_DIETPI-NOTIFY 2 'Configuring Network:'
 
 		[[ -f /etc/network/interfaces ]] && rm -R /etc/network/interfaces # armbian symlink for bulky network-manager
 
