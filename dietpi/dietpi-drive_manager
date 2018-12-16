@@ -29,12 +29,15 @@
 
 	#Grab Input (valid interger)
 	INPUT=0
-	disable_error=1 G_CHECK_VALIDINT $1 && INPUT=$1
+	disable_error=1 G_CHECK_VALIDINT "$1" && INPUT=$1
 
 	EXIT_CODE=0
 
 	#Service control for script
 	SERVICE_CONTROL=1
+
+	#APT pre-req check flag, allows to check for required APT packages only once per session
+	APT_CHECK=0
 
 	#Return values
 	FP_DRIVE_MANAGER_SELECTION='/tmp/dietpi-drive_manager_selmnt'
@@ -109,36 +112,36 @@
 	Init_Drives_and_Refresh(){
 
 		#---------------------------------------------------------------
-		#Delete arrays before reinit
+		# Reset current index and delete arrays
 		Destroy
 
-		# - Obtain actual user data location on disk (follows symlinks)
+		# Obtain actual user data location on disk (follows symlinks)
 		FP_USERDATA_CURRENT="$(readlink -f $G_FP_DIETPI_USERDATA)"
 
-		# - Swapfile location
+		# Swapfile location
 		FP_SWAPFILE_CURRENT="$(grep -m1 '^[[:blank:]]*AUTO_SETUP_SWAPFILE_LOCATION=' /DietPi/dietpi.txt | sed 's/^[^=]*=//')"
 
-		# - ROOTFS location
+		# RootFS location
 		FP_ROOTFS_SOURCE=$(findmnt / -o source -n)
 
-		#Recreate FStab
+		# Recreate FStab
 		cp -a /etc/fstab $FP_TEMP_FSTAB
 
-		# - Grab current tmpfs entries
+		# Grab current tmpfs entries
 		local tmpfs_mounts=$(grep '^tmpfs[[:blank:]]' $FP_TEMP_FSTAB)
 
-		# - Grab current bind
+		# Grab current bind mounts
 		local bind_mounts=$(grep '[[:blank:],]bind[[:blank:],]' $FP_TEMP_FSTAB)
 
-		# - Grab current swap
+		# Grab current swap
 		local swap_mount=$(grep -m1 '[[:blank:]]swap[[:blank:]]' $FP_TEMP_FSTAB)
 
-		# - Grab current network mounts + creds
+		# Grab current network mounts + creds
 		local net_mounts_samba=$(grep '[[:blank:]]cifs[[:blank:]]' $FP_TEMP_FSTAB)
 		local net_mounts_nfs=$(grep '[[:blank:]]nfs.*[[:blank:]]' $FP_TEMP_FSTAB)
 		local net_mounts_ftp=$(grep '^curlftpfs' $FP_TEMP_FSTAB)
 
-		#	Force regen (PREP)
+		# Force reset/clean fstab (PREP)
 		if (( $INPUT == 4 )); then
 
 			bind_mounts=''
@@ -148,8 +151,7 @@
 			net_mounts_ftp=''
 
 			local var_log_size=$(grep -m1 '^[[:blank:]]*AUTO_SETUP_RAMLOG_MAXSIZE=' /DietPi/dietpi.txt | sed 's/^[^=]*=//')
-			tmpfs_mounts="
-tmpfs /tmp tmpfs defaults,noatime,nodev,nosuid,mode=1777 0 0
+			tmpfs_mounts="tmpfs /tmp tmpfs defaults,noatime,nodev,nosuid,mode=1777 0 0
 tmpfs /var/log tmpfs defaults,size=${var_log_size}m,noatime,nodev,nosuid,mode=1777 0 0
 tmpfs /DietPi tmpfs defaults,size=10m,noatime,nodev,nosuid,mode=1777 0 0
 "
@@ -183,12 +185,12 @@ $swap_mount
 #PHYSICAL DRIVES
 #-----------------------------------------------------------" > $FP_TEMP_FSTAB
 
-		#Detect mounted drives and add them to fstab
+		# Detect mounted drives and add them to fstab
 		G_DIETPI-NOTIFY 2 'Detecting drives, please wait...'
 		df -Pha | tail -n +2 > .dietpi-drive_manager_df_tmp
 
 		# - Remove items from list
-		#	Bind : https://github.com/Fourdee/DietPi/issues/2013#issuecomment-416394374
+		#	Bind: https://github.com/Fourdee/DietPi/issues/2013#issuecomment-416394374
 		while read line
 		do
 
@@ -199,7 +201,7 @@ $swap_mount
 			local input_bind_mount_target="$(awk '{print $2}' <<< $line)"
 			sed -i "\#[[:blank:]]$input_bind_mount_target#d" .dietpi-drive_manager_df_tmp
 			sed -i "\#[[:blank:]]$input_bind_mount_source#d" .dietpi-drive_manager_df_tmp
-			[[ $G_DEBUG == 1 ]] && G_DIETPI-NOTIFY 0 "BIND: match removed from df scrape: $input_bind_mount_source > $input_bind_mount_target"
+			[[ $G_DEBUG == 1 ]] && G_DIETPI-NOTIFY 0 " - Detected bind mount and removed from df scrape: $input_bind_mount_source > $input_bind_mount_target"
 
 		done <<< "$bind_mounts"
 
@@ -221,7 +223,7 @@ $swap_mount
 				aDRIVE_SIZE_FREE[$INDEX_INIT_CURRENT_DEVICE]=$(awk '{print $4}' <<< $line)
 				aDRIVE_SIZE_PERCENTUSED[$INDEX_INIT_CURRENT_DEVICE]=$(awk '{print $5}' <<< $line)
 				aDRIVE_MOUNT_TARGET[$INDEX_INIT_CURRENT_DEVICE]=$(awk '{print $6}' <<< $line)
-				#	Workaround for /dev/root under RPi, force physical location
+				# - Workaround for /dev/root under RPi, force physical location
 				[[ ${aDRIVE_MOUNT_TARGET[$INDEX_INIT_CURRENT_DEVICE]} == '/' ]] && aDRIVE_MOUNT_SOURCE[$INDEX_INIT_CURRENT_DEVICE]=$FP_ROOTFS_SOURCE
 
 				aDRIVE_SOURCE_DEVICE[$INDEX_INIT_CURRENT_DEVICE]=$(Return_Drive_Without_Partitions ${aDRIVE_MOUNT_SOURCE[$INDEX_INIT_CURRENT_DEVICE]})
@@ -245,11 +247,11 @@ $swap_mount
 
 				G_DIETPI-NOTIFY 2 " - Detected mounted drive: ${aDRIVE_MOUNT_SOURCE[$INDEX_INIT_CURRENT_DEVICE]} > ${aDRIVE_MOUNT_TARGET[$INDEX_INIT_CURRENT_DEVICE]}"
 
-				#RO mounted?
-				#NB: We cant use -m1 for initial check as results can be:
-				# root@DietPi:~# cat /proc/mounts | grep ' / '
-				# rootfs / rootfs rw 0 0
-				# /dev/mmcblk0p2 / ext4 ro,noatime,discard,data=ordered 0 0
+				# - RO mounted?
+				# - NB: We cant use -m1 for initial check as results can be:
+				#	root@DietPi:~# cat /proc/mounts | grep ' / '
+				#	rootfs / rootfs rw 0 0
+				#	/dev/mmcblk0p2 / ext4 ro,noatime,discard,data=ordered 0 0
 				if grep -q "[[:blank:]]${aDRIVE_MOUNT_TARGET[$INDEX_INIT_CURRENT_DEVICE]}[[:blank:]].*[[:blank:]]ro," /proc/mounts; then
 
 					aDRIVE_ISREADONLY_CURRENTLY[$INDEX_INIT_CURRENT_DEVICE]=1
@@ -268,7 +270,7 @@ $swap_mount
 							/DietPi/dietpi/dietpi-services start
 
 							G_DIETPI-NOTIFY 1 "RootFS is currently set to R/O. $G_PROGRAM_NAME requires R/W access to function. Aborting..."
-							G_DIETPI-NOTIFY 2 "Rerun \"dietpi-drive_manager\" to enable RootFS R/W access."
+							G_DIETPI-NOTIFY 2 'Rerun "dietpi-drive_manager" to enable RootFS R/W access.'
 
 							exit
 
@@ -321,7 +323,7 @@ $swap_mount
 		done < .dietpi-drive_manager_df_tmp
 		rm .dietpi-drive_manager_df_tmp
 
-		#Check blkid for unmounted drives, if drive is not mounted, add entry as disabled mount
+		# - Check blkid for unmounted drives, if drive is not mounted, add entry as disabled mount
 		blkid -o device > .dietpi-drive_manager_blkid_tmp
 		while read line
 		do
@@ -337,13 +339,14 @@ $swap_mount
 				#	Must have a valid UUID! (this excludes /dev/mmcblk0)
 				if (( $i == ${#aDRIVE_MOUNT_SOURCE[@]} - 1 )); then
 
-					aDRIVE_UUID[$INDEX_INIT_CURRENT_DEVICE]=$(blkid $line -s UUID -o value)
-					[[ ${aDRIVE_UUID[$INDEX_INIT_CURRENT_DEVICE]} ]] || break
+					local uuid=$(blkid $line -s UUID -o value)
+					[[ $uuid ]] || break
 
 					G_DIETPI-NOTIFY 2 " - Detected unmounted drive: $line"
 
 					Init_New_Device
 
+					aDRIVE_UUID[$INDEX_INIT_CURRENT_DEVICE]=$uuid
 					aDRIVE_ISPARTITIONTABLE[$INDEX_INIT_CURRENT_DEVICE]=1
 					aDRIVE_MOUNT_SOURCE[$INDEX_INIT_CURRENT_DEVICE]=$line
 					aDRIVE_MOUNT_TARGET[$INDEX_INIT_CURRENT_DEVICE]="/mnt/${aDRIVE_UUID[$INDEX_INIT_CURRENT_DEVICE]}"
@@ -362,8 +365,8 @@ $swap_mount
 		done < .dietpi-drive_manager_blkid_tmp
 		rm .dietpi-drive_manager_blkid_tmp
 
-		#Find drives that have no partitions
-		# - Exclude mtdblock devices: https://github.com/Fourdee/DietPi/issues/2067#issuecomment-422400520
+		# - Find drives that have no partitions
+		#	Exclude mtdblock devices: https://github.com/Fourdee/DietPi/issues/2067#issuecomment-422400520
 		lsblk -nro NAME | sed '/^mtdblock[0-9]/d' > .dietpi-drive_manager_lsblk_tmp
 		while read line
 		do
@@ -374,7 +377,7 @@ $swap_mount
 			for i in ${!aDRIVE_MOUNT_SOURCE[@]}
 			do
 
-				[[ $line == ${aDRIVE_SOURCE_DEVICE[$i]}* ]] && break 2
+				[[ $line == ${aDRIVE_SOURCE_DEVICE[$i]}* ]] && continue 2
 
 			done
 
@@ -389,7 +392,7 @@ $swap_mount
 		done < .dietpi-drive_manager_lsblk_tmp
 		rm .dietpi-drive_manager_lsblk_tmp
 
-		#Set required global flags, for all drives found
+		# - Set required global flags and deps for all drives found
 		for i in ${!aDRIVE_MOUNT_SOURCE[@]}
 		do
 
@@ -409,6 +412,7 @@ $swap_mount
 
 		done
 
+		# - Debug drive detection, exit after first init
 		if [[ $G_DEBUG == 1 ]]; then
 
 			G_DIETPI-NOTIFY 0 'DEBUG INFO:'
@@ -440,7 +444,7 @@ aDRIVE_ISPARTITIONTABLE ${aDRIVE_ISPARTITIONTABLE[$i]}
 
 		fi
 
-		#Remove x-systemd.automount if not supported by kernel: https://github.com/Fourdee/DietPi/issues/1607#issuecomment-372030565
+		# - Remove x-systemd.automount if not supported by kernel: https://github.com/Fourdee/DietPi/issues/1607#issuecomment-372030565
 		if ! modprobe autofs4 --dry-run &> /dev/null; then
 
 			sed -i 's/,x-systemd.automount//g' $FP_TEMP_FSTAB
@@ -448,7 +452,7 @@ aDRIVE_ISPARTITIONTABLE ${aDRIVE_ISPARTITIONTABLE[$i]}
 
 		fi
 
-		#Find the drive we are to edit, then set its index (this is due to array list total being not constant)
+		# - Find the drive we are to edit, then set its index (this is due to array list total being not constant)
 		if [[ $DRIVE_TARGET_BEING_EDITED ]]; then
 
 			for i in ${!aDRIVE_MOUNT_SOURCE[@]}
@@ -471,12 +475,8 @@ aDRIVE_ISPARTITIONTABLE ${aDRIVE_ISPARTITIONTABLE[$i]}
 
 		rm $FP_TEMP_FSTAB
 
-		# Install required APT packages for FS R/W access
-		if [[ $need_ntfs || $need_hfs ]]; then
-
-			G_AG_CHECK_INSTALL_PREREQ $need_ntfs $need_hfs
-
-		fi
+		# - Install required APT packages for FS R/W access
+		(( ! $APT_CHECK )) && [[ $need_ntfs || $need_hfs ]] && G_AG_CHECK_INSTALL_PREREQ $need_ntfs $need_hfs && APT_CHECK=1
 
 		sync
 		mount -a
@@ -510,7 +510,7 @@ aDRIVE_ISPARTITIONTABLE ${aDRIVE_ISPARTITIONTABLE[$i]}
 		#MMC/NVMe
 		else
 
-			echo ${drive%[p][0-9]}
+			echo ${drive%p[0-9]}
 
 		fi
 
@@ -550,11 +550,7 @@ aDRIVE_ISPARTITIONTABLE ${aDRIVE_ISPARTITIONTABLE[$i]}
 			else
 
 				G_WHIP_YESNO "Warning:\n\nThe mount target directory already exists, however, it does not contain any files or data at this time:\n - $target\n\nDo you wish to ignore this warning, and, mount the drive regardless?"
-				if (( $? )); then
-
-					apply_mount=0
-
-				fi
+				(( $? )) && apply_mount=0
 
 			fi
 
