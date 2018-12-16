@@ -1579,7 +1579,7 @@ _EOF_
 		sync
 
 		G_DIETPI-NOTIFY 2 "The used kernel version is:\n\t - $(uname -a)"
-		kernel_apt_packages=$(dpkg -l | grep -E '^linux-(image|dtb)-[0-9]')
+		kernel_apt_packages=$(dpkg -l | grep -E '[[:blank:]]linux-(image|dtb)-[0-9]')
 		if [[ $kernel_apt_packages ]]; then
 
 			G_DIETPI-NOTIFY 2 'The following kernel APT packages have been found, please purge outdated ones:'
