@@ -12,17 +12,17 @@ sync
 TARGET_DEV=$(findmnt / -o source -n)
 if [[ $TARGET_DEV =~ /mmcblk || $TARGET_DEV =~ /nvme ]]; then
 
-	TARGET_PARTITION=${TARGET_DEV##*p} # Last [0-9] after "p"
-	TARGET_DRIVE=${TARGET_DEV%p[0-9]} # EG: /dev/mmcblk0
+	TARGET_PARTITION=${TARGET_DEV##*p}	# mmcblk0p1 => 1
+	TARGET_DRIVE=${TARGET_DEV%p[0-9]}	# mmcblk0p1 => mmcblk0
 
 elif [[ $TARGET_DEV =~ /[sh]d[a-z] ]]; then
 
-	TARGET_PARTITION=${TARGET_DEV##*[a-z]} # Last [0-9]
-	TARGET_DRIVE=${TARGET_DEV%[0-9]} # EG: /dev/sda
+	TARGET_PARTITION=${TARGET_DEV##*[a-z]}	# /dev/sda1 => 1
+	TARGET_DRIVE=${TARGET_DEV%[0-9]}	# /dev/sda1 => /dev/sda
 
 else
 
-	echo "[FAILED] Unsupported drive naming scheme: $TARGET_DEV"
+	echo "[FAILED] Unsupported drive naming scheme: $TARGET_DEV. Aborting..."
 	exit 1
 
 fi
@@ -39,7 +39,7 @@ if [[ $TARGET_PARTITION == [0-9] ]]; then
 	fi
 
 	# - Maximize partition size
-	sfdisk $TARGET_DRIVE -N$TARGET_PARTITION --force <<< ',+,,,'
+	sfdisk $TARGET_DRIVE -fN$TARGET_PARTITION --no-reread <<< ',+,,,'
 
 	partprobe $TARGET_DRIVE
 
