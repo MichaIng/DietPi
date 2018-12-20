@@ -1465,7 +1465,7 @@ _EOF_
 
 			fi
 
-			# - Finalize GRUB
+			# - Finalise GRUB
 			if [[ -f '/etc/default/grub' ]]; then
 
 				G_CONFIG_INJECT 'GRUB_CMDLINE_LINUX_DEFAULT=' 'GRUB_CMDLINE_LINUX_DEFAULT="consoleblank=0 quiet"' /etc/default/grub
