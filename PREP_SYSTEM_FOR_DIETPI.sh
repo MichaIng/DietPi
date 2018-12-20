@@ -1400,6 +1400,10 @@ _EOF_
 		/DietPi/dietpi/dietpi-services stop
 		/DietPi/dietpi/dietpi-services dietpi_controlled
 
+		G_DIETPI-NOTIFY 2 'Mask cron until 1st run setup is completed'
+
+		G_RUN_CMD systemctl mask cron
+
 		G_DIETPI-NOTIFY 2 'Running general cleanup of misc files'
 
 		# - Remove Bash history file
@@ -1497,10 +1501,6 @@ _EOF_
 		G_DIETPI-NOTIFY 2 'Resetting DietPi generated globals/files'
 
 		rm /DietPi/dietpi/.??*
-
-		G_DIETPI-NOTIFY 2 'Creating our update file (used on 1st run to check for DietPi updates)'
-
-		echo -1 > /DietPi/dietpi/.update_stage
 
 		G_DIETPI-NOTIFY 2 'Set init .install_stage to -1 (first boot)'
 
