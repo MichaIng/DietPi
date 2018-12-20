@@ -13,7 +13,7 @@ TARGET_DEV=$(findmnt / -o source -n)
 if [[ $TARGET_DEV =~ /mmcblk || $TARGET_DEV =~ /nvme ]]; then
 
 	TARGET_PARTITION=${TARGET_DEV##*p} # Last [0-9] after "p"
-	TARGET_DRIVE=${TARGET_DEV%p[0-9]} # EG: /dev/mmcblk[0-9]
+	TARGET_DRIVE=${TARGET_DEV%p[0-9]} # EG: /dev/mmcblk0
 
 elif [[ $TARGET_DEV =~ /[sh]d[a-z] ]]; then
 
@@ -30,16 +30,6 @@ fi
 # Only redo partitions, if drive actually contains a partition table.
 if [[ $TARGET_PARTITION == [0-9] ]]; then
 
-	# - Check for valid device ID
-	#	Do not fail due to RPi has autodetection of hw_model
-	if ! HW_MODEL=$(</etc/.dietpi_hw_model_identifier); then
-
-		echo '[FAILED] Could not determine device ID from: /etc/.dietpi_hw_model_identifier'
-		echo 'Assuming RPi'
-		HW_MODEL=0
-
-	fi
-
 	# - GPT detection | modified version of ayufan-rock64 resize script.
 	if sfdisk $TARGET_DRIVE -l | grep -qi 'disklabel type: gpt'; then
 
@@ -49,7 +39,7 @@ if [[ $TARGET_PARTITION == [0-9] ]]; then
 	fi
 
 	# - Maximize partition size
-	echo ",+,,," | sfdisk $TARGET_DRIVE -N$TARGET_PARTITION --force
+	sfdisk $TARGET_DRIVE -N$TARGET_PARTITION --force <<< ',+,,,'
 
 	partprobe $TARGET_DRIVE
 
