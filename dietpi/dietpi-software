@@ -145,7 +145,7 @@ _EOF_
 		[[ -f $fp_target ]] && . $fp_target
 
 		#Always reset choice system during first run to defaults: https://github.com/Fourdee/DietPi/issues/1122
-		if (( $G_DIETPI_INSTALL_STAGE == 0 )); then
+		if (( $G_DIETPI_INSTALL_STAGE == 1 )); then
 
 			INDEX_SSHSERVER_CURRENT=-1
 			INDEX_SSHSERVER_TARGET=-1
@@ -165,67 +165,13 @@ _EOF_
 
 	}
 
-	Reset_Timesync(){ killall -w /DietPi/dietpi/func/run_ntpd &> /dev/null; }
-
 	Check_Internet_and_NTPD(){
 
 		# Internet
 		# - Use /etc/apt/sources.list for connection test
-		local internet_url_test="$(grep -m1 '^[[:blank:]]*deb ' /etc/apt/sources.list | awk '{print $2}')"
-		optional_cmd_inputs='--no-check-certificate' G_CHECK_URL "$internet_url_test" # Will exit on failure here then prompt user to configure network
+		optional_cmd_inputs='--no-check-certificate' G_CHECK_URL "$(grep -m1 '^[[:blank:]]*deb ' /etc/apt/sources.list | awk '{print $2}')" # Will exit on failure here then prompt user to configure network
 
-		# Timesync
-		until /DietPi/dietpi/func/run_ntpd
-		do
-
-			# - Ask
-			if (( $G_USER_INPUTS )); then
-
-				G_WHIP_MENU_ARRAY=(
-
-					'Retry' ': (Recommended) Rerun network time sync'
-					'NTP mirror' ': Change the NTP mirror used'
-					'NTP mode' ': Change the NTP mode (eg: daemon + drift)'
-					'Override' ': (NOT RECOMMENDED) Ignore failure and override time sync status'
-
-				)
-
-				G_WHIP_MENU 'Network time sync has not yet completed, or, failed to update.\nTo prevent issues with outdated system time during installations, please select an option below.\n
-NB: We highly recommend choosing "Retry" first. Failing that, "NTP mirror" then "NTP mode".\n"Override" is a last resort and may cause follow-up issues due to incorrect system clock time.'
-				if (( ! $? )); then
-
-					if [[ $G_WHIP_RETURNED_VALUE == 'Retry' ]]; then
-
-						Reset_Timesync
-
-					elif [[ $G_WHIP_RETURNED_VALUE == 'NTP mirror' ]]; then
-
-						G_WHIP_MSG 'DietPi-Config will now be launched, on the next screen:\n - Select "NTP Mirror"\n - Select a different NTP mirror\n\nOnce completed, exit dietpi-config to resume setup'
-						/DietPi/dietpi/dietpi-config 16 1
-
-					elif [[ $G_WHIP_RETURNED_VALUE == 'NTP mode' ]]; then
-
-						G_WHIP_MSG 'DietPi-Config will now be launched, on the next screen:\n - Select "Time sync mode"\n - Select a different time sync mode (eg: Daemon + Drift)\n\nOnce completed, exit dietpi-config to resume setup'
-						/DietPi/dietpi/dietpi-config 3 1
-
-					elif [[ $G_WHIP_RETURNED_VALUE == 'Override' ]]; then
-
-						Reset_Timesync
-						echo 0 > /DietPi/dietpi/.timesync_exit_status
-						echo 1 > /var/lib/dietpi/.ntpd_override
-
-					fi
-
-				fi
-
-			# - Endless retry
-			else
-
-				Reset_Timesync
-
-			fi
-
-		done
+		G_CHECK_NTP
 
 	}
 
@@ -14613,7 +14559,7 @@ _EOF_
 
 		# - Automation Set NTPD mode
 		#	Due to possible packages required, must be done here after APT cache updated
-		if (( $G_DIETPI_INSTALL_STAGE == 0 )); then
+		if (( $G_DIETPI_INSTALL_STAGE == 1 )); then
 
 			/DietPi/dietpi/func/dietpi-set_software ntpd-mode $(grep -m1 '^[[:blank:]]*CONFIG_NTP_MODE=' /DietPi/dietpi.txt | sed 's/^[^=]*=//')
 
@@ -14678,7 +14624,7 @@ _EOF_
 		Write_InstallFileList
 
 		# DietPi-Automation
-		if (( $G_DIETPI_INSTALL_STAGE == 0 )); then
+		if (( $G_DIETPI_INSTALL_STAGE == 1 )); then
 
 			# - Remove fake-hwclock, if real hwclock is available
 			#REMOVED: Needs further work as SBC's without RTC's (XU4/Sparky SBC) are being flagged for this removal
@@ -14732,12 +14678,13 @@ _EOF_
 			fi
 
 			# Apply AutoStart
-			/DietPi/dietpi/dietpi-autostart "$AUTOINSTALL_AUTOSTARTTARGET"
+			/DietPi/dietpi/dietpi-autostart $AUTOINSTALL_AUTOSTARTTARGET
+
+			# Set Install Stage to Finished
+			export G_DIETPI_INSTALL_STAGE=2
+			echo $G_DIETPI_INSTALL_STAGE > /DietPi/dietpi/.install_stage
 
 		fi
-
-		# Set Install Stage to Finished
-		echo 1 > /DietPi/dietpi/.install_stage
 
 	}
 
@@ -14818,34 +14765,8 @@ _EOF_
 
 	FirstRun_DietPi_Update(){
 
-		#Disable powersaving on main screen
-		setterm -blank 0 -powersave off 2> /dev/null
-
-		#-1 = 1st run | 0 = Reboot, updates applied | 1 = Idle, No updates
-		#Update .update_stage file to completed
-		echo 1 > /DietPi/dietpi/.update_stage
-
 		#Check for updates and apply if needed (1=force apply updates).
 		/DietPi/dietpi/dietpi-update 1
-
-		#Check update stage file again (dietpi-update will set to 0 if an update was applied and requires a reboot)
-		if (( $(</DietPi/dietpi/.update_stage) == 0 )); then
-
-			#Update .update_stage file to completed
-			echo 1 > /DietPi/dietpi/.update_stage
-
-			#Prompt user for reboot
-			if (( $G_USER_INPUTS )); then
-
-				G_WHIP_MSG 'DietPi has been updated to the latest version.\n\nThe system will now reboot. Once completed, simply login to resume DietPi Setup. \n\nPress Enter to Continue.'
-
-			fi
-
-			#Reboot required NOW
-			reboot
-			exit
-
-		fi
 
 	}
 
@@ -16043,36 +15964,22 @@ When you select any software for install that requires a webserver, DietPi will 
 
 	Menu_Exit(){
 
+		#Return to Main Menu
+		TARGETMENUID=0
+
 		#1st run install
-		if (( $G_DIETPI_INSTALL_STAGE == 0 )); then
+		if (( $G_DIETPI_INSTALL_STAGE == 1 )); then
 
-			G_WHIP_YESNO 'DietPi has not fully been installed.\nThis must be completed prior to using DietPi by selecting:\n - Go Start Install.\n\nWould you like to exit and abort the installation?'
-			if (( $? == 0 )); then
-
-				Banner_Aborted
-				#Exit script NOW
-				exit
-
-			else
-
-				#Return to Main Menu
-				TARGETMENUID=0
-
-			fi
+			G_WHIP_MSG 'DietPi has not fully been installed.\nThis must be completed prior to using DietPi by selecting:\n - Go Start Install.'
 
 		#Standard exit
-		elif (( $G_DIETPI_INSTALL_STAGE == 1 )); then
+		elif (( $G_DIETPI_INSTALL_STAGE == 2 )); then
 
 			if G_WHIP_YESNO 'Do you wish to exit DietPi-Software?\n\nAll changes to software selections will be cleared.'; then
 
 				Banner_Aborted
 				#Exit script NOW
 				exit
-
-			else
-
-				#Return to Main Menu
-				TARGETMENUID=0
 
 			fi
 
@@ -16131,7 +16038,7 @@ Would you like to begin?"
 		else
 
 			#1st run install
-			if (( $G_DIETPI_INSTALL_STAGE == 0 )); then
+			if (( $G_DIETPI_INSTALL_STAGE == 1 )); then
 
 				G_WHIP_YESNO 'DietPi was unable to detect any additional software selections for install.\n
 NB: You can use dietpi-software at a later date, to install optimized software from our catalogue as required.\n\nDo you wish to continue with DietPi as a pure minimal image?'
@@ -16151,7 +16058,7 @@ NB: You can use dietpi-software at a later date, to install optimized software f
 				fi
 
 			#Not 1st run
-			elif (( $G_DIETPI_INSTALL_STAGE == 1 )); then
+			elif (( $G_DIETPI_INSTALL_STAGE == 2 )); then
 
 				G_WHIP_MSG 'No changes have been detected. Unable to start installation.'
 
@@ -16314,7 +16221,7 @@ NB: You can use dietpi-software at a later date, to install optimized software f
 	Banner_Aborted(){
 
 		#1st run abort
-		if (( $G_DIETPI_INSTALL_STAGE == 0 )); then
+		if (( $G_DIETPI_INSTALL_STAGE == 1 )); then
 
 			/DietPi/dietpi/func/dietpi-banner 0
 			G_DIETPI-NOTIFY 1 '\n Installation aborted by user.\n Installation must be completed prior to using DietPi.\n Please run dietpi-software to restart the installation.\n'
@@ -16351,48 +16258,37 @@ NB: You can use dietpi-software at a later date, to install optimized software f
 	#Standard launch
 	else
 
-		#Pre-first run (no network)
-		if (( $G_DIETPI_INSTALL_STAGE == 0 )); then
+		#1st run dietpi-software
+		if (( $G_DIETPI_INSTALL_STAGE == 1 )); then
 
 			# - Load all automation vars
 			FirstRun_Automation_Init
 
-			# - GPL compliance prompt
-			G_WHIP_MSG 'DietPi - GPLv2 License:\n
-This program is free software: you can redistribute it and/or modify it under the terms of the GNU General Public License as published by the Free Software Foundation, either version 2 of the License, or any later version.\n
-This program is distributed in the hope that it will be useful, but WITHOUT ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the GNU General Public License for more details.\n
-You should have received a copy of the GNU General Public License along with this program.  If not, see http://www.gnu.org/licenses/'
+			# - Global PW
+			#	Automation, apply as per dietpi.txt
+			if (( $AUTOINSTALL_ENABLED )); then
 
-			#	NB: This should be after 1st run update, however, to prevent dupe run of this without requiring an image update, we can do it here.
-			if (( $(</DietPi/dietpi/.update_stage) == -1 )); then
+				/DietPi/dietpi/func/dietpi-set_software passwords "$GLOBAL_PW"
 
-				# - Global PW
-				#	Automation, apply as per dietpi.txt
-				if (( $AUTOINSTALL_ENABLED )); then
+			#	Prompt change global password and login passwords for root and dietpi users
+			else
 
-					/DietPi/dietpi/func/dietpi-set_software passwords "$GLOBAL_PW"
+				/DietPi/dietpi/func/dietpi-set_software passwords
+				Update_Global_Pw
 
-				#	Prompt change global password and login passwords for root and dietpi users
-				else
+			fi
 
-					/DietPi/dietpi/func/dietpi-set_software passwords
-					Update_Global_Pw
+			# - Disable serial?
+			#	must be enabled for the following:
+			#	XU4: https://github.com/Fourdee/DietPi/issues/2038#issuecomment-416089875
+			#	RockPro64: Fails to boot into kernel without serial enabled
+			#	NanoPi Neo Air: Required for end users/debugging/setting up WiFi without automation
+			if (( $(grep -m1 '^[[:blank:]]*CONFIG_SERIAL_CONSOLE_ENABLE=' /DietPi/dietpi.txt | sed 's/^.*=//') == 1 &&
+				$G_HW_MODEL != 11 && $G_HW_MODEL != 42 && $G_HW_MODEL != 64 )); then
 
-				fi
+				if G_WHIP_YESNO 'Serial console is currently enabled, would you like to disable it?\n - Disabling serial console will reduce memory consumption slightly\n - If you are unsure on what serial console is, it is safe to disable it'; then
 
-				# - Disable serial?
-				#	must be enabled for the following:
-				#	XU4: https://github.com/Fourdee/DietPi/issues/2038#issuecomment-416089875
-				#	RockPro64: Fails to boot into kernel without serial enabled
-				#	NanoPi Neo Air: Required for end users/debugging/setting up WiFi without automation
-				if (( $(grep -m1 '^[[:blank:]]*CONFIG_SERIAL_CONSOLE_ENABLE=' /DietPi/dietpi.txt | sed 's/^.*=//') == 1 &&
-					$G_HW_MODEL != 11 && $G_HW_MODEL != 42 && $G_HW_MODEL != 64 )); then
-
-					if G_WHIP_YESNO 'Serial console is currently enabled, would you like to disable it?\n - Disabling serial console will reduce memory consumption slightly\n - If you are unsure on what serial console is, it is safe to disable it'; then
-
-						/DietPi/dietpi/func/dietpi-set_hardware serialconsole disable
-
-					fi
+					/DietPi/dietpi/func/dietpi-set_hardware serialconsole disable
 
 				fi
 
@@ -16403,17 +16299,9 @@ You should have received a copy of the GNU General Public License along with thi
 		# Prevent continue if no Network or NTPD is not completed: https://github.com/Fourdee/DietPi/issues/786
 		Check_Internet_and_NTPD
 
-		# - 1st run DietPi updates
-		if (( $(</DietPi/dietpi/.update_stage) == -1 )); then
-
-			FirstRun_DietPi_Update
-
-		fi
-
 		# - Apply 1st run automation
-		if (( $G_DIETPI_INSTALL_STAGE == 0 )); then
+		if (( $G_DIETPI_INSTALL_STAGE == 1 )); then
 
-			# - Activate automation settings from dietpi.txt, if set.
 			FirstRun_Automation_Set
 
 		fi

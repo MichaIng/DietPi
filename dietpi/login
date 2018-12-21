@@ -11,7 +11,6 @@
 	# Info:
 	# - filename /DietPi/dietpi/login
 	# - activates on login /etc/bashrc.d/dietpi-login.sh
-	# - requires /DietPi/dietpi/.install_stage to have a value of 0 for it to run /DietPi/dietpi/dietpi-software (active after /dietpi/boot has completed first run setup)
 	#////////////////////////////////////
 
 	#Precaution: Wait for DietPi Ramdisk to finish
@@ -145,6 +144,91 @@
 
 	}
 
+	Run_First_Update_Setup(){
+
+		/DietPi/dietpi/func/dietpi-banner 0
+		local automated_setup=0
+		local shown_license=0
+
+		until (( $G_DIETPI_INSTALL_STAGE == 2 ))
+		do
+
+			# - Automated?
+			if grep -qi '^[[:blank:]]*AUTO_SETUP_AUTOMATED=1' /DietPi/dietpi.txt; then
+
+				automated_setup=1
+				#	Set non-interactive shell, if automated installation (as .bashrc run via STDIN check is interactive)
+				export G_USER_INPUTS=0
+
+			fi
+
+			# - 1st run dietpi-update
+			if (( $G_DIETPI_INSTALL_STAGE == 0 )); then
+
+				#	Check internet
+				optional_cmd_inputs='--no-check-certificate' G_CHECK_URL "$(grep -m1 '^[[:blank:]]*deb ' /etc/apt/sources.list | awk '{print $2}')" # Will exit on failure here then prompt user to configure network
+
+				#	Check NTP synced
+				G_CHECK_NTP
+
+				if (( ! $shown_license )); then
+
+					G_WHIP_MSG 'DietPi - GPLv2 License:\n
+This program is free software: you can redistribute it and/or modify it under the terms of the GNU General Public License as published by the Free Software Foundation, either version 2 of the License, or any later version.\n
+This program is distributed in the hope that it will be useful, but WITHOUT ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the GNU General Public License for more details.\n
+You should have received a copy of the GNU General Public License along with this program.  If not, see http://www.gnu.org/licenses/'
+
+					shown_license=1
+
+				fi
+
+				/DietPi/dietpi/dietpi-update 1
+
+				export G_DIETPI_INSTALL_STAGE=1
+				echo $G_DIETPI_INSTALL_STAGE > /DietPi/dietpi/.install_stage
+
+			# - 1st run dietpi-software installs
+			elif (( $G_DIETPI_INSTALL_STAGE == 1 )); then
+
+				#	Wait for DietPi-Software if already running, else run it
+				local run_dietpi_software=1
+				while pgrep 'dietpi-software' &> /dev/null
+				do
+
+					run_dietpi_software=0
+
+					# - Automated
+					if (( $automated_setup )); then
+
+						G_DIETPI-NOTIFY 2 'DietPi is currently installing and configuring your system. Please wait for this to complete, check back later.'
+
+					else
+
+						G_DIETPI-NOTIFY 2 'DietPi-Software is already running on another terminal/screen. Please complete or exit, before continuing.'
+
+					fi
+
+					sleep 2
+
+				done
+
+				#	Start DietPi-Software
+				if (( $run_dietpi_software )); then
+
+					/DietPi/dietpi/dietpi-software | tee $FP_TMP_DIETPI_FIRSTRUNSETUP_LOG
+					mv $FP_TMP_DIETPI_FIRSTRUNSETUP_LOG $FP_DIETPI_FIRSTRUNSETUP_LOG
+
+				fi
+
+			fi
+
+			# - reset to auto detection
+			unset G_USER_INPUTS
+
+		done
+
+	}
+
 	#/////////////////////////////////////////////////////////////////////////////////////
 	# Main Loop
 	#/////////////////////////////////////////////////////////////////////////////////////
@@ -154,65 +238,31 @@
 
 	#----------------------------------------------------------------
 	#Normal Login
-	if (( $G_DIETPI_INSTALL_STAGE == 1 )); then
+	if (( $G_DIETPI_INSTALL_STAGE == 2 )); then
 
 		/DietPi/dietpi/func/dietpi-banner 1
 
 		(( $AUTO_START_INDEX > 0 )) && Run_AutoStart
 
 	#----------------------------------------------------------------
-	#Run DietPi-Software (1st run setup)
-	elif (( $G_DIETPI_INSTALL_STAGE == 0 )); then
+	#Run DietPi-Update/DietPi-Software (1st run setup) (G_DIETPI_INSTALL_STAGE=0/1)
+	elif (( $G_DIETPI_INSTALL_STAGE >= 0 )); then
 
-		/DietPi/dietpi/func/dietpi-banner 0
-
-		#Wait for DietPi-Software if already running, else run it
-		while pgrep 'dietpi-software' &> /dev/null
-		do
-
-			# - Automated
-			if grep -qi '^[[:blank:]]*AUTO_SETUP_AUTOMATED=1' /DietPi/dietpi.txt; then
-
-				G_DIETPI-NOTIFY 2 'DietPi is currently installing and configuring your system. Please wait for this to complete, check back later.'
-
-			else
-
-				G_DIETPI-NOTIFY 2 'DietPi-Software is already running on another terminal/screen. Please complete or exit, before continuing.'
-
-			fi
-
-			sleep 2
-
-		done
-
-		# - Start DietPi-Software
-
-		#Set non-interactive shell, if automated installation (as .bashrc run via STDIN check is interactive)
-		if grep -qi '^[[:blank:]]*AUTO_SETUP_AUTOMATED=1' /DietPi/dietpi.txt; then
-
-			export G_USER_INPUTS=0
-
-		fi
-
-		/DietPi/dietpi/dietpi-software | tee $FP_TMP_DIETPI_FIRSTRUNSETUP_LOG
-		mv $FP_TMP_DIETPI_FIRSTRUNSETUP_LOG $FP_DIETPI_FIRSTRUNSETUP_LOG
-
-		#	reset to auto detection
-		unset G_USER_INPUTS
+		Run_First_Update_Setup
 
 	#----------------------------------------------------------------
 	#DietPi finishing up bootloader.
 	elif (( $G_DIETPI_INSTALL_STAGE == -1 )); then
 
 		/DietPi/dietpi/func/dietpi-banner 0
-		echo -e ' >> DietPi System prep is nearly completed: \n Please run /DietPi/dietpi/login after a few seconds'
+		echo -e ' >> DietPi System prep is nearly completed: \n Please run /DietPi/dietpi/login after a few seconds.'
 
 	#----------------------------------------------------------------
 	#DietPi running filesystem prep
 	else
 
 		/DietPi/dietpi/func/dietpi-banner 0
-		echo -e ' >> Filesystem prep has not yet completed: \n Please wait for the system to reboot'
+		echo -e ' >> Filesystem prep has not yet completed: \n Please wait for the system to reboot.'
 
 	fi
 

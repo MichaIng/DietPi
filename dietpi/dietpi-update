@@ -225,12 +225,22 @@
 		while :
 		do
 
+			local auto_updates_enabled=0
+			local auto_updates_text='[Disabled]'
+			if grep -qi '^[[:blank:]]*CONFIG_AUTO_DIETPI_UPDATES=1' /DietPi/dietpi.txt; then
+
+				auto_updates_enabled=1
+				auto_updates_text='[Enabled]'
+
+			fi
+
 			G_WHIP_BUTTON_CANCEL_TEXT='Exit'
 			G_WHIP_MENU_ARRAY=(
 
 				'' '●─ Update DietPi '
 				'Update' ": Apply $COREVERSION_SERVER.$SUBVERSION_SERVER.$RCVERSION_SERVER update."
 				'' '●─ Additional Options '
+				'Automatic Updates' ": $auto_updates_text"
 				'Changelog' ': View the changelog and patch notes.'
 				'Backup' ': Create a system backup, before updating.'
 
@@ -261,6 +271,21 @@ Do you wish to continue and update DietPi to v$COREVERSION_SERVER.$SUBVERSION_SE
 						break
 
 					fi
+
+				elif [[ ${G_WHIP_RETURNED_VALUE,,} == 'automatic updates' ]]; then
+
+					((auto_updates_enabled++))
+					if (( $auto_updates_enabled >= 2 )); then
+
+						auto_updates_enabled=0
+
+					else
+
+						G_WHIP_MSG 'Automatic DietPi updates have been enabled.\n\nUpdates will be checked and applied (if update is available) daily via cron job.\n\nWe highly recommend you create a system backup with "DietPi-Backup" if using this feature, as automated updates will not prompt user if a failure occurs.\n\nWhen DietPi applies updates, all system services will be temporarily stopped. Do NOT power off the unit during updates as this could render the system in a unrecoverable state.'
+
+					fi
+
+					G_CONFIG_INJECT 'CONFIG_AUTO_DIETPI_UPDATES=' "CONFIG_AUTO_DIETPI_UPDATES=$auto_updates_enabled" /DietPi/dietpi.txt
 
 				elif [[ ${G_WHIP_RETURNED_VALUE,,} == 'changelog' ]]; then
 
@@ -321,7 +346,7 @@ Do you wish to continue and update DietPi to v$COREVERSION_SERVER.$SUBVERSION_SE
 			l_message='Copy DietPi core files to RAMdisk' G_RUN_CMD cp -Rf DietPi-"$GITBRANCH_TARGET"/dietpi /DietPi/
 			l_message='Copy rootfs files in place' G_RUN_CMD cp -Rf DietPi-"$GITBRANCH_TARGET"/rootfs/. /
 
-			l_message='Set execute permissions for DietPi scripts' G_RUN_CMD chmod -R +x /DietPi /var/lib/dietpi/services /etc/cron.*/dietpi /etc/profile.d/dietpi-*.sh /etc/bashrc.d/dietpi-*.sh
+			l_message='Set execute permissions for DietPi scripts' G_RUN_CMD chmod -R +x /DietPi /var/lib/dietpi/services /etc/cron.*/dietpi /etc/bashrc.d/dietpi-*.sh
 			systemctl daemon-reload
 
 			#Verify/update dietpi.txt entries:
@@ -462,6 +487,9 @@ Please download the latest DietPi image:\n - https://dietpi.com/#download \n\n -
 			#Stop Services
 			/DietPi/dietpi/dietpi-services stop
 
+			#Disable powersaving on main screen
+			setterm -blank 0 -powersave off 2> /dev/null
+
 			#Run update and patcher
 			[[ -f $FP_LOG ]] && rm $FP_LOG
 
@@ -473,28 +501,38 @@ Please download the latest DietPi image:\n - https://dietpi.com/#download \n\n -
 			unset G_WHIP_SIZE_X_OVERRIDE G_WHIP_SIZE_Y_OVERRIDE
 			mv $FP_TMP_LOG $FP_LOG
 
-			#.update file stage (only used on 1st run of dietpi-software to check/apply updates, 0 tells dietpi-software to reboot)
-			echo 0 > /DietPi/dietpi/.update_stage
-
 			#Remove update_available file
+			# - Remove update_available file
 			[[ -f /DietPi/dietpi/.update_available ]] && rm /DietPi/dietpi/.update_available
-
-			#Update DietPi-Survey
+			# - Update DietPi-Survey
 			/DietPi/dietpi/dietpi-survey 1
 
-			#Sync to disk now: https://dietpi.com/phpbb/viewtopic.php?f=9&t=2591
+			# - Sync to disk now: https://dietpi.com/phpbb/viewtopic.php?f=9&t=2591
 			sync
 
-			#Done
 			G_DIETPI-NOTIFY 3 "$G_PROGRAM_NAME" 'Completed'
 			G_DIETPI-NOTIFY 2 "$INFO_CURRENT_VERSION"
 			G_DIETPI-NOTIFY 2 "$INFO_SERVER_VERSION"
 
-			# - Reboot prompt, if system is already installed (else, dietpi-software handles this for 1st run)
-			if (( $G_DIETPI_INSTALL_STAGE == 1 )); then
+			# - 1st run setup
+			if (( $G_DIETPI_INSTALL_STAGE == 0 )); then
+
+				G_WHIP_MSG 'DietPi has been updated to the latest version.\n\nThe system will now reboot. Once completed, simply login to resume DietPi Setup. \n\nPress Enter to Continue.'
+				reboot
+
+			# - Reboot prompt, if system is already installed
+			elif (( $G_DIETPI_INSTALL_STAGE == 2 )); then
 
 				G_WHIP_YESNO "Update applied:\n\n - $INFO_CURRENT_VERSION\n\nA system reboot is required to finalize the update. Would you like to reboot the system now?"
-				(( $? == 0 )) && reboot
+				if (( $? == 0 )); then
+
+					reboot
+
+				else
+
+					/DietPi/dietpi/dietpi-services restart
+
+				fi
 
 			fi
 
