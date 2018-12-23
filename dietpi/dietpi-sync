@@ -19,19 +19,15 @@
 
 	#Import DietPi-Globals ---------------------------------------------------------------
 	. /DietPi/dietpi/func/dietpi-globals
+	G_PROGRAM_NAME='DietPi-Sync'
 	G_CHECK_ROOT_USER
 	G_CHECK_ROOTFS_RW
-	G_PROGRAM_NAME='DietPi-Sync'
 	G_INIT
 	#Import DietPi-Globals ---------------------------------------------------------------
 
 	#Grab Input (valid interger)
 	INPUT=0
-	if disable_error=1 G_CHECK_VALIDINT $1; then
-
-		INPUT=$1
-
-	fi
+	disable_error=1 G_CHECK_VALIDINT "$1" && INPUT=$1
 
 	#/////////////////////////////////////////////////////////////////////////////////////
 	# Sync System
@@ -87,11 +83,7 @@
 _EOF_
 
 		#Add users additional list
-		if [[ -f $FP_USER_FILTER_INCLUDE_EXCLUDE ]]; then
-
-			cat $FP_USER_FILTER_INCLUDE_EXCLUDE >> $FP_FILTER_INCLUDE_EXCLUDE
-
-		fi
+		[[ -f $FP_USER_FILTER_INCLUDE_EXCLUDE ]] && cat $FP_USER_FILTER_INCLUDE_EXCLUDE >> $FP_FILTER_INCLUDE_EXCLUDE
 
 	}
 
@@ -99,11 +91,7 @@ _EOF_
 
 		local mode='Sync'
 		#Dry Run?
-		if (( $SYNC_DRY_RUN )); then
-
-			mode='Dry Run'
-
-		fi
+		(( $SYNC_DRY_RUN )) && mode='Dry Run'
 
 		G_DIETPI-NOTIFY 3 "$G_PROGRAM_NAME" "$mode"
 
@@ -119,19 +107,27 @@ _EOF_
 		#Generate Target dir.
 		mkdir -p "$FP_TARGET"
 
-		systemctl stop rsync &> /dev/null # : https://github.com/Fourdee/DietPi/issues/1869
-		killall -w rsync &> /dev/null
+		# https://github.com/Fourdee/DietPi/issues/1869
+		local control_rsync_service=0
+		if systemctl is-active rsync &> /dev/null; then
+
+			control_rsync_service=1
+			systemctl stop rsync
+
+		fi
+		killall -qw rsync
 
 		#Error: Folder not found
 		if [[ ! -d $FP_TARGET ]]; then
 
-			G_WHIP_MSG "Error:\n\nSync failed, unable to create Target directory $FP_TARGET"
+			G_WHIP_MSG "[FAILED] Unable to create target directory: $FP_TARGET"
+			echo -e "$(date +"%d-%m-%Y_%H%M") [FAILED] Unable to create target directory: $FP_TARGET" >> $FP_LOG
 
 		#Error: Rsync is already running
-		elif (( $(ps aux | grep -ci -m1 "[r]sync") )); then
+		elif pgrep '[r]sync' &> /dev/null; then
 
-			G_WHIP_MSG 'Sync Failed:\n\nA sync job could not be started as rsync is already running.'
-			echo -e "Sync failed: $(date +"%d-%m-%Y_%H%M"). Rsync is already running." >> "$FP_TARGET/$SYNC_STATS_FILENAME"
+			G_WHIP_MSG '[FAILED] Rsync is already running'
+			echo -e "$(date +"%d-%m-%Y_%H%M") [FAILED] Rsync is already running" >> "$FP_TARGET/$SYNC_STATS_FILENAME"
 
 		#Start sync
 		else
@@ -140,28 +136,18 @@ _EOF_
 			Create_Filter_Include_Exclude
 
 			#Rsync options
-			local rync_options+="-aHP4 --info=name0 --info=progress2 --human-readable --delete-excluded --exclude-from=$FP_FILTER_INCLUDE_EXCLUDE --log-file=$FP_LOG "
+			local rync_options='-aHP4h'
 
 			# - Compression?
-			if (( $SYNC_COMPRESSION )); then
-
-				rync_options+='z'
-
-			fi
+			(( $SYNC_COMPRESSION )) && rync_options+='z'
 
 			# - Dry Run?
-			if (( $SYNC_DRY_RUN )); then
-
-				rync_options+='n'
-
-			fi
+			(( $SYNC_DRY_RUN )) && rync_options+='n'
 
 			# - Delete mode?
-			if (( $SYNC_DELETE_MODE )); then
+			(( $SYNC_DELETE_MODE )) && rync_options+=' --delete'
 
-				rync_options+=' --delete'
-
-			fi
+			rsync_options+=" --info=name0 --info=progress2 --delete-excluded --exclude-from=$FP_FILTER_INCLUDE_EXCLUDE --log-file=$FP_LOG"
 
 			#Verify enough space
 			#	NB: working in KiB until end MiB conversion, as, don't like using long long int, and, KiB should offer a good end result.
@@ -183,7 +169,7 @@ _EOF_
 				G_WHIP_YESNO 'The system sync target location appears to have insufficient free space to successfully finish the backup.\nHowever, this check is a rough estimation in reasonable time, thus it could be marginally incorrect.\n\nWould you like to override this warning and continue with the backup?'
 				if (( $? )); then
 
-					echo -e "Sync canceled: due to insufficient free space: $(date +"%d-%m-%Y_%H%M")" >> "$FP_TARGET/$SYNC_STATS_FILENAME"
+					echo -e "$(date +"%d-%m-%Y_%H%M") [FAILED] Insufficient free space" >> "$FP_TARGET/$SYNC_STATS_FILENAME"
 					break
 
 				fi
@@ -198,21 +184,21 @@ _EOF_
 			G_DIETPI-NOTIFY -1 $EXIT_CODE "$G_PROGRAM_NAME"
 			if (( $EXIT_CODE == 0 )); then
 
-				echo -e "Sync completed: $(date +"%d-%m-%Y_%H%M")" >> "$FP_TARGET/$SYNC_STATS_FILENAME"
+				echo -e "$(date +"%d-%m-%Y_%H%M") [  OK  ] Sync completed" >> "$FP_TARGET/$SYNC_STATS_FILENAME"
 				if (( ! $SYNC_DRY_RUN )); then
 
-					G_WHIP_MSG "Sync completed:\n - $FP_SOURCE > $FP_TARGET"
+					G_WHIP_MSG "[  OK  ] Sync completed:\n - $FP_SOURCE > $FP_TARGET"
 
 				else
 
-					G_WHIP_MSG "Dry Run Sync completed (NO modifications):\n - $FP_SOURCE > $FP_TARGET"
+					G_WHIP_MSG "[  OK  ] Dry Run Sync completed (NO modifications):\n - $FP_SOURCE > $FP_TARGET"
 
 				fi
 
 			else
 
-				echo -e "Sync failed: please see the log file for more information ($FP_LOG): $(date +"%d-%m-%Y_%H%M")" >> "$FP_TARGET/$SYNC_STATS_FILENAME"
-				G_WHIP_MSG "Sync failed:\n - $FP_SOURCE > $FP_TARGET\n\nYou will given an option to view the logfile on the next screen. Please check it for information and/or errors."
+				echo -e "$(date +"%d-%m-%Y_%H%M") [FAILED] Please see the log file for more information: $FP_LOG" >> "$FP_TARGET/$SYNC_STATS_FILENAME"
+				G_WHIP_MSG "[FAILED] $FP_SOURCE > $FP_TARGET\n\nYou will given an option to view the logfile on the next screen. Please check it for information and/or errors."
 
 			fi
 
@@ -223,19 +209,19 @@ _EOF_
 
 		fi
 
-		systemctl start rsync &> /dev/null # : https://github.com/Fourdee/DietPi/issues/1869
+		(( $control_rsync_service )) && systemctl start rsync # https://github.com/Fourdee/DietPi/issues/1869
 
 	}
 
 	Check_Available_DietPi_Mounts(){
 
 		local temp_file_mounts='.dietpi-sync_dietpi_mounts'
-		df -h > "$temp_file_mounts"
+		df -h > $temp_file_mounts
 
 		#Samba Client
 		SAMBA_MOUNT_AVAILABLE=0
 		SAMBA_MOUNT_TEXT="Not mounted ($FP_SAMBA_MOUNT). Select to setup."
-		if (( $(grep -ci -m1 "/mnt/samba" $temp_file_mounts) )); then
+		if grep -qi '/mnt/samba' $temp_file_mounts; then
 
 			SAMBA_MOUNT_AVAILABLE=1
 			SAMBA_MOUNT_TEXT="Size: $(df -h | grep /mnt/samba | awk '{print $2}')B | Available: $(df -h | grep /mnt/samba | awk '{print $4}')B"
@@ -266,11 +252,7 @@ _EOF_
 
 	Read_Settings_File(){
 
-		if [[ -f $FP_DIETPISYNC_SETTINGS ]]; then
-
-			. $FP_DIETPISYNC_SETTINGS
-
-		fi
+		[[ -f $FP_DIETPISYNC_SETTINGS ]] && . $FP_DIETPISYNC_SETTINGS
 
 	}
 
@@ -292,25 +274,13 @@ _EOF_
 	Menu_Main(){
 
 		SYNC_MODE_TEXT='[Off]'
-		if (( $SYNC_DELETE_MODE )); then
-
-			SYNC_MODE_TEXT='[On]'
-
-		fi
+		(( $SYNC_DELETE_MODE )) && SYNC_MODE_TEXT='[On]'
 
 		SYNC_COMPRESSION_TEXT='[Off]'
-		if (( $SYNC_COMPRESSION )); then
-
-			SYNC_COMPRESSION_TEXT='[On]'
-
-		fi
+		(( $SYNC_COMPRESSION )) && SYNC_COMPRESSION_TEXT='[On]'
 
 		SYNC_CRONDAILY_TEXT='[Off]'
-		if (( $SYNC_CRONDAILY )); then
-
-			SYNC_CRONDAILY_TEXT='[On]'
-
-		fi
+		(( $SYNC_CRONDAILY )) && YNC_CRONDAILY_TEXT='[On]'
 
 		local sync_last_completed='No previous sync found in target directory.'
 		if [[ -f $FP_TARGET/$SYNC_STATS_FILENAME ]]; then
@@ -414,12 +384,7 @@ _EOF_
 	Menu_Exit(){
 
 		G_WHIP_SIZE_X_MAX=50
-		G_WHIP_YESNO "Exit $G_PROGRAM_NAME?"
-		if (( $? == 0 )); then
-
-			TARGETMENUID=-1
-
-		fi
+		G_WHIP_YESNO "Exit $G_PROGRAM_NAME?" && TARGETMENUID=-1
 
 	}
 
@@ -451,8 +416,7 @@ _EOF_
 		)
 
 		G_WHIP_BUTTON_CANCEL_TEXT='Back'
-		G_WHIP_MENU "$whip_description_text"
-		if (( $? == 0 )); then
+		if G_WHIP_MENU "$whip_description_text"; then
 
 			case "$G_WHIP_RETURNED_VALUE" in
 
@@ -461,11 +425,7 @@ _EOF_
 					/DietPi/dietpi/dietpi-drive_manager 1
 
 					local return_value=$(</tmp/dietpi-drive_manager_selmnt)
-					if [[ $return_value == '/' ]]; then
-
-						return_value='/mnt'
-
-					fi
+					[[ $return_value == '/' ]] && return_value='/mnt'
 
 					if (( $TARGETMENUID == 2 )); then
 
@@ -542,11 +502,7 @@ _EOF_
 		if (( $? == 0 )); then
 
 			SYNC_DELETE_MODE=0
-			if [[ $G_WHIP_RETURNED_VALUE == 'Enabled' ]]; then
-
-				SYNC_DELETE_MODE=1
-
-			fi
+			[[ $G_WHIP_RETURNED_VALUE == 'Enabled' ]] && SYNC_DELETE_MODE=1
 
 		fi
 
@@ -570,11 +526,7 @@ _EOF_
 		if (( $? == 0 )); then
 
 			SYNC_COMPRESSION=0
-			if [[ $G_WHIP_RETURNED_VALUE == 'Enabled' ]]; then
-
-				SYNC_COMPRESSION=1
-
-			fi
+			[[ $G_WHIP_RETURNED_VALUE == 'Enabled' ]] && SYNC_COMPRESSION=1
 
 		fi
 
@@ -598,11 +550,7 @@ _EOF_
 		if (( $? == 0 )); then
 
 			SYNC_CRONDAILY=0
-			if [[ $G_WHIP_RETURNED_VALUE == 'Enabled' ]]; then
-
-				SYNC_CRONDAILY=1
-
-			fi
+			[[ $G_WHIP_RETURNED_VALUE == 'Enabled' ]] && SYNC_CRONDAILY=1
 
 		fi
 
@@ -620,23 +568,13 @@ _EOF_
 		if (( $TARGETMENUID == 1 )); then
 
 			G_WHIP_DEFAULT_ITEM="$FP_TARGET"
-			G_WHIP_INPUTBOX 'Please enter a new filepath for the Target directory. \neg: /mnt/target'
-			if (( $? == 0 )); then
-
-				FP_TARGET="$G_WHIP_RETURNED_VALUE"
-
-			fi
+			G_WHIP_INPUTBOX 'Please enter a new filepath for the Target directory.\neg: /mnt/target' && FP_TARGET="$G_WHIP_RETURNED_VALUE"
 
 		#Source
 		elif (( $TARGETMENUID == 2 )); then
 
 			G_WHIP_DEFAULT_ITEM="$FP_SOURCE"
-			G_WHIP_INPUTBOX 'Please enter a new filepath for the Source directory. \neg: /mnt/source'
-			if (( $? == 0 )); then
-
-				FP_SOURCE="$G_WHIP_RETURNED_VALUE"
-
-			fi
+			G_WHIP_INPUTBOX 'Please enter a new filepath for the Source directory.\neg: /mnt/source' && FP_SOURCE="$G_WHIP_RETURNED_VALUE"
 
 		fi
 
@@ -645,11 +583,7 @@ _EOF_
 	Prompt_Setup_Samba_Mount(){
 
 		G_WHIP_YESNO "$SAMBA_MOUNT_TEXT\n\nWould you like to run DietPi-Drive_Manager and setup your Samba Client Mount now?"
-		if (( $? == 0 )); then
-
-			/DietPi/dietpi/dietpi-drive_manager
-
-		fi
+		(( $? == 0 )) && /DietPi/dietpi/dietpi-drive_manager
 
 	}
 
@@ -723,9 +657,6 @@ _EOF_
 
 	fi
 
-	#-----------------------------------------------------------------------------------
-	#Cleaup left over tmp files
-	rm $FP_FILTER_INCLUDE_EXCLUDE &> /dev/null
 	#-----------------------------------------------------------------------------------
 	exit $EXIT_CODE
 	#-----------------------------------------------------------------------------------
