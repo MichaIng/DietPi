@@ -51,7 +51,6 @@
 
 	#Extra options
 	SYNC_DELETE_MODE=0
-	SYNC_COMPRESSION=0
 	SYNC_CRONDAILY=0
 
 	Create_Filter_Include_Exclude(){
@@ -136,15 +135,10 @@ _EOF_
 			Create_Filter_Include_Exclude
 
 			#Rsync options
-			local rync_options='-aHP4h'
-
-			# - Compression?
-			(( $SYNC_COMPRESSION )) && rync_options+='z'
+			local rync_options="-aHP4h --info=name0 --info=progress2 --delete-excluded --exclude-from=$FP_FILTER_INCLUDE_EXCLUDE --log-file=$FP_LOG"
 
 			# - Delete mode?
 			(( $SYNC_DELETE_MODE )) && rync_options+=' --delete'
-
-			rsync_options+=" --info=name0 --info=progress2 --delete-excluded --exclude-from=$FP_FILTER_INCLUDE_EXCLUDE --log-file=$FP_LOG"
 
 			#Verify enough space
 			#	NB: working in KiB until end MiB conversion, as, don't like using long long int, and, KiB should offer a good end result.
@@ -152,29 +146,33 @@ _EOF_
 
 			rsync --dry-run --stats $rync_options "$FP_SOURCE"/ "$FP_TARGET"/ > /tmp/dietpi-sync_result
 			EXIT_CODE=$?
-			local new_backup_size=$(( $(grep -m1 'Total file size' /tmp/dietpi-sync_result | sed 's/[^0-9]*//g') / 1024 ))
-			local total_file_count=$(( $(grep -m1 'Number of files' /tmp/dietpi-sync_result | awk '{print $6}' | sed 's/[^0-9]*//g') ))
-			local total_folder_count=$(( $(grep -m1 'Number of files' /tmp/dietpi-sync_result | awk '{print $8}' | sed 's/[^0-9]*//g') ))
-			local target_fs_blocksize=$(stat -fc %s "$FP_TARGET")
-			new_backup_size=$(( $new_backup_size + ( $total_file_count + $total_folder_count ) * $target_fs_blocksize / 1024 ))
-			local end_result=$(( ( $new_backup_size - $old_backup_size ) / 1024 + 1 ))
-			rm /tmp/dietpi-sync_result
+			if (( ! $EXIT_CODE )); then
 
-			if ! G_CHECK_FREESPACE "$FP_TARGET" $end_result; then
+				local new_backup_size=$(( $(grep -m1 'Total file size' /tmp/dietpi-sync_result | sed 's/[^0-9]*//g') / 1024 ))
+				local total_file_count=$(( $(grep -m1 'Number of files' /tmp/dietpi-sync_result | awk '{print $6}' | sed 's/[^0-9]*//g') ))
+				local total_folder_count=$(( $(grep -m1 'Number of files' /tmp/dietpi-sync_result | awk '{print $8}' | sed 's/[^0-9]*//g') ))
+				local target_fs_blocksize=$(stat -fc %s "$FP_TARGET")
+				new_backup_size=$(( $new_backup_size + ( $total_file_count + $total_folder_count ) * $target_fs_blocksize / 1024 ))
+				local end_result=$(( ( $new_backup_size - $old_backup_size ) / 1024 + 1 ))
+				rm /tmp/dietpi-sync_result
 
-				G_WHIP_BUTTON_OK_TEXT='Ignore'
-				G_WHIP_BUTTON_CANCEL_TEXT='Exit'
-				G_WHIP_YESNO 'The system sync target location appears to have insufficient free space to successfully finish the backup.\nHowever, this check is a rough estimation in reasonable time, thus it could be marginally incorrect.\n\nWould you like to override this warning and continue with the backup?'
-				if (( $? )); then
+				if ! G_CHECK_FREESPACE "$FP_TARGET" $end_result; then
 
-					echo "$(date +"%d-%m-%Y_%H%M") [FAILED] Insufficient free space" >> "$FP_TARGET/$SYNC_STATS_FILENAME"
-					break
+					G_WHIP_BUTTON_OK_TEXT='Ignore'
+					G_WHIP_BUTTON_CANCEL_TEXT='Exit'
+					G_WHIP_YESNO 'The system sync target location appears to have insufficient free space to successfully finish the backup.\nHowever, this check is a rough estimation in reasonable time, thus it could be marginally incorrect.\n\nWould you like to override this warning and continue with the backup?'
+					if (( $? )); then
+
+						echo "$(date +"%d-%m-%Y_%H%M") [FAILED] Insufficient free space" >> "$FP_TARGET/$SYNC_STATS_FILENAME"
+						break
+
+					fi
 
 				fi
 
 			fi
 
-			if (( ! $SYNC_DRY_RUN )); then
+			if ! (( $SYNC_DRY_RUN || $EXIT_CODE )); then
 
 				G_DIETPI-NOTIFY 2 "Sync | $FP_SOURCE > $FP_TARGET: in progress, please wait..."
 
@@ -247,7 +245,6 @@ _EOF_
 FP_SOURCE=$FP_SOURCE
 FP_TARGET=$FP_TARGET
 SYNC_DELETE_MODE=$SYNC_DELETE_MODE
-SYNC_COMPRESSION=$SYNC_COMPRESSION
 SYNC_CRONDAILY=$SYNC_CRONDAILY
 _EOF_
 
@@ -270,7 +267,6 @@ _EOF_
 	SYNC_DRY_RUN=0
 
 	SYNC_MODE_TEXT=''
-	SYNC_COMPRESSION_TEXT=''
 	SYNC_CRONDAILY_TEXT=''
 
 	#TARGETMENUID=0
@@ -278,9 +274,6 @@ _EOF_
 
 		SYNC_MODE_TEXT='[Off]'
 		(( $SYNC_DELETE_MODE )) && SYNC_MODE_TEXT='[On]'
-
-		SYNC_COMPRESSION_TEXT='[Off]'
-		(( $SYNC_COMPRESSION )) && SYNC_COMPRESSION_TEXT='[On]'
 
 		SYNC_CRONDAILY_TEXT='[Off]'
 		(( $SYNC_CRONDAILY )) && YNC_CRONDAILY_TEXT='[On]'
@@ -300,7 +293,6 @@ _EOF_
 			'Source Location' ': Change the Source directory.'
 			'Target Location' ': Change the Target directory.'
 			"Delete Mode" ": $SYNC_MODE_TEXT"
-			"Compression" ": $SYNC_COMPRESSION_TEXT"
 			"Sync: Daily" ": $SYNC_CRONDAILY_TEXT"
 			'' '●─ Run '
 			'Sync: Dry Run' ': Run a test Sync without modifying any data.'
@@ -338,15 +330,9 @@ _EOF_
 
 				;;
 
-				'Compression')
-
-					TARGETMENUID=4
-
-				;;
-
 				"Sync: Daily")
 
-					TARGETMENUID=5
+					TARGETMENUID=4
 
 				;;
 
@@ -515,30 +501,6 @@ _EOF_
 	}
 
 	#TARGETMENUID=4
-	Menu_Set_Compression(){
-
-		G_WHIP_MENU_ARRAY=(
-
-			'Disabled' ': Transfer data in its original state.'
-			'Enabled' ': Compress the data during transfer.'
-
-		)
-
-		G_WHIP_DEFAULT_ITEM="$SYNC_COMPRESSION_TEXT"
-		G_WHIP_MENU "Please select the compression mode.\n\nDisabled:\nNo compression will be used during data transfer.\n\nEnabled:\nData will be compressed when its being transfered. Useful for slow connections, however, its CPU intensive."
-		if (( $? == 0 )); then
-
-			SYNC_COMPRESSION=0
-			[[ $G_WHIP_RETURNED_VALUE == 'Enabled' ]] && SYNC_COMPRESSION=1
-
-		fi
-
-		#Return to main menu
-		TARGETMENUID=0
-
-	}
-
-	#TARGETMENUID=5
 	Menu_Set_CronDaily(){
 
 		G_WHIP_MENU_ARRAY=(
@@ -645,11 +607,7 @@ _EOF_
 
 			elif (( $TARGETMENUID == 4 )); then
 
-				Menu_Set_Compression
-
-			elif (( $TARGETMENUID == 5 )); then
-
-				Menu_Set_CronDaily
+				Menu_Set_CronDaily	
 
 			fi
 
