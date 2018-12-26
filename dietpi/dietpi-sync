@@ -25,6 +25,10 @@
 	G_INIT
 	#Import DietPi-Globals ---------------------------------------------------------------
 
+	#Restart rsync service, if stopped during DietPi-Sync run: https://github.com/Fourdee/DietPi/issues/1869
+	SERVICE_CONTROL=0
+	G_EXIT_CUSTOM(){ (( $SERVICE_CONTROL )) && systemctl start rsync; }
+
 	#Grab Input (valid interger)
 	INPUT=0
 	disable_error=1 G_CHECK_VALIDINT "$1" && INPUT=$1
@@ -33,23 +37,17 @@
 	# Sync System
 	#/////////////////////////////////////////////////////////////////////////////////////
 	EXIT_CODE=0
-	FP_LOG='/var/log/dietpi-sync.log'
 
-	#Sync Filepaths
+	#File paths
+	FP_SETTINGS='/DietPi/dietpi/.dietpi-sync_settings'
+	FP_FILTER_INCLUDE_EXCLUDE='.dietpi-sync_include_exclude'
+	FP_USER_FILTER_INCLUDE_EXCLUDE='/DietPi/dietpi/.dietpi-sync_inc_exc'
+	FP_LOG='.dietpi-sync.log'
+	FP_SAMBA_MOUNT='/mnt/samba'
 	FP_SOURCE='/mnt/Source'
 	FP_TARGET='/mnt/Target'
 
-	#DietPi Mounts
-	FP_SAMBA_MOUNT='/mnt/samba'
-
-	#file applied to successful Sync (stored in $FP_TARGET/$SYNC_STATS_FILENAME)
-	SYNC_STATS_FILENAME='.dietpi-sync_stats'
-
-	#Exclude/include file
-	FP_FILTER_INCLUDE_EXCLUDE='.dietpi-sync_include_exclude'
-	FP_USER_FILTER_INCLUDE_EXCLUDE='/DietPi/dietpi/.dietpi-sync_inc_exc'
-
-	#Extra options
+	#Extra settings
 	SYNC_DELETE_MODE=0
 	SYNC_CRONDAILY=0
 
@@ -57,23 +55,23 @@
 
 		#Exclude files by name
 		cat << _EOF_ > $FP_FILTER_INCLUDE_EXCLUDE
-- $SYNC_STATS_FILENAME
+- $FP_LOG
+- $FP_FILTER_INCLUDE_EXCLUDE
 - .swap*
 - *.tmp
 # - MS Windows specific
 - Thumbs.db
 - desktop.ini
 - SyncToy* # MS SyncToy
-- System Volume Information #  - causes error code 23 (permission denied)
-
+- System Volume Information # causes error code 23 (permission denied)
 _EOF_
 
 		#Exclude specific files/dirs by path
 		local aexclude=(
 
 			"$FP_TARGET"
-			"$FP_LOG"
-			"$FP_DIETPISYNC_SETTINGS"
+			$FP_SETTINGS
+			$FP_USER_FILTER_INCLUDE_EXCLUDE
 			/boot/dietpi/
 			/var/swap
 
@@ -97,7 +95,6 @@ _EOF_
 	Banner_Start(){
 
 		local mode='Sync'
-		#Dry Run?
 		(( $SYNC_DRY_RUN )) && mode='Dry Run'
 
 		G_DIETPI-NOTIFY 3 "$G_PROGRAM_NAME" "$mode"
@@ -109,10 +106,9 @@ _EOF_
 		Banner_Start
 
 		#Stop rsync service: https://github.com/Fourdee/DietPi/issues/1869
-		local control_rsync_service=0
 		if systemctl is-active rsync &> /dev/null; then
 
-			control_rsync_service=1
+			SERVICE_CONTROL=1
 			systemctl stop rsync
 
 		fi
@@ -121,17 +117,17 @@ _EOF_
 		#Pre-create target dir
 		mkdir -p "$FP_TARGET"
 
-		#Error: Folder not found
+		#Error: Dir not found
 		if [[ ! -d $FP_TARGET ]]; then
 
 			G_WHIP_MSG "[FAILED] Unable to pre-create target directory: $FP_TARGET"
-			echo "$(date +"%d-%m-%Y_%T") [FAILED] Unable to pre-create target directory: $FP_TARGET" >> $FP_LOG
 
 		#Error: Rsync is already running
 		elif pgrep '[r]sync' &> /dev/null; then
 
 			G_WHIP_MSG '[FAILED] Rsync is already running'
-			echo "$(date +"%d-%m-%Y_%T") [FAILED] Rsync is already running" >> "$FP_TARGET/$SYNC_STATS_FILENAME"
+			# Add info to target log location directly, preserve previous rsync log
+			echo "$(date +"%d-%m-%Y_%T") [FAILED] Rsync is already running" >> "$FP_TARGET/$FP_LOG"
 
 		#Start sync
 		else
@@ -140,15 +136,14 @@ _EOF_
 			Create_Filter_Include_Exclude
 
 			#Rsync options
-			local rync_options="-aHP4h --info=name0 --info=progress2 --delete-excluded --exclude-from=$FP_FILTER_INCLUDE_EXCLUDE --log-file=$FP_LOG"
-
+			local rsync_options="-aHP4h --info=name0 --info=progress2 --delete-excluded --exclude-from=$FP_FILTER_INCLUDE_EXCLUDE --log-file=$FP_LOG"
 			# - Delete mode?
-			(( $SYNC_DELETE_MODE )) && rync_options+=' --delete'
+			(( $SYNC_DELETE_MODE )) && rsync_options+=' --delete'
 
-			#Verify enough space
-			rsync --dry-run --stats $rync_options "$FP_SOURCE"/ "$FP_TARGET"/ > .dietpi-sync_result
+			#Dry Run and verify enough space, in case if real sync
+			rsync --dry-run --stats $rsync_options "$FP_SOURCE"/ "$FP_TARGET"/ > .dietpi-sync_result
 			EXIT_CODE=$?
-			if (( ! $EXIT_CODE )); then
+			if ! (( $SYNC_DRY_RUN || $EXIT_CODE )); then
 
 				# - NB: working in KiB until end MiB conversion, as, don't like using long long int, and, KiB should offer a good end result.
 				local old_backup_size=$(du -ks "$FP_TARGET" | awk '{print $1}')
@@ -167,55 +162,50 @@ _EOF_
 However, this check is a rough estimation in reasonable time, thus it could be marginally incorrect.\n
 Would you like to override this warning and continue with the backup?'; then
 
-						echo "$(date +"%d-%m-%Y_%T") [FAILED] Insufficient free space" >> "$FP_TARGET/$SYNC_STATS_FILENAME"
+						echo "$(date +"%d-%m-%Y_%T") [FAILED] Insufficient free space" >> $FP_LOG
+						mv $FP_LOG "$FP_TARGET"/
 						return 1
 
 					fi
 
 				fi
 
-			fi
-			rm .dietpi-sync_result
-
-			if ! (( $SYNC_DRY_RUN || $EXIT_CODE )); then
-
+				#Real sync
 				G_DIETPI-NOTIFY 2 "Sync | $FP_SOURCE > $FP_TARGET: in progress, please wait..."
-
-				rsync $rync_options "$FP_SOURCE"/ "$FP_TARGET"/
+				# - Clear log file from space check
+				> $FP_LOG
+				rsync $rsync_options "$FP_SOURCE"/ "$FP_TARGET"/
 				EXIT_CODE=$?
 
 			fi
 
 			G_DIETPI-NOTIFY -1 $EXIT_CODE "$G_PROGRAM_NAME"
-			if (( $EXIT_CODE == 0 )); then
+
+			if (( ! $EXIT_CODE )); then
 
 				if (( ! $SYNC_DRY_RUN )); then
 
-					echo "$(date +"%d-%m-%Y_%T") [  OK  ] Sync completed" >> "$FP_TARGET/$SYNC_STATS_FILENAME"
+					echo "$(date +"%d-%m-%Y_%T") [  OK  ] Sync completed" >> $FP_LOG
 					G_WHIP_MSG "[  OK  ] Sync completed:\n - $FP_SOURCE > $FP_TARGET"
 
 				else
 
-					echo "$(date +"%d-%m-%Y_%T") [  OK  ] Dry run completed" >> "$FP_TARGET/$SYNC_STATS_FILENAME"
+					echo "$(date +"%d-%m-%Y_%T") [  OK  ] Dry run completed" >> $FP_LOG
 					G_WHIP_MSG "[  OK  ] Dry Run Sync completed (NO modifications):\n - $FP_SOURCE > $FP_TARGET"
 
 				fi
 
 			else
 
-				echo "$(date +"%d-%m-%Y_%T") [FAILED] Please see the log file for more information: $FP_LOG" >> "$FP_TARGET/$SYNC_STATS_FILENAME"
+				echo "$(date +"%d-%m-%Y_%T") [FAILED] Please see the log file for more information: $FP_TARGET/$FP_LOG" >> $FP_LOG
 				G_WHIP_MSG "[FAILED] $FP_SOURCE > $FP_TARGET\n\nYou will given an option to view the logfile on the next screen. Please check it for information and/or errors."
 
 			fi
 
 			log=1 G_WHIP_VIEWFILE $FP_LOG
-
-			#return to main menu
-			TARGETMENUID=0
+			mv $FP_LOG "$FP_TARGET"/
 
 		fi
-
-		(( $control_rsync_service )) && systemctl start rsync # https://github.com/Fourdee/DietPi/issues/1869
 
 	}
 
@@ -241,12 +231,9 @@ Would you like to override this warning and continue with the backup?'; then
 	#/////////////////////////////////////////////////////////////////////////////////////
 	# Settings File
 	#/////////////////////////////////////////////////////////////////////////////////////
-	#Settings File
-	FP_DIETPISYNC_SETTINGS='/DietPi/dietpi/.dietpi-sync_settings'
-
 	Write_Settings_File(){
 
-		cat << _EOF_ > $FP_DIETPISYNC_SETTINGS
+		cat << _EOF_ > $FP_SETTINGS
 FP_SOURCE=$FP_SOURCE
 FP_TARGET=$FP_TARGET
 SYNC_DELETE_MODE=$SYNC_DELETE_MODE
@@ -257,7 +244,7 @@ _EOF_
 
 	Read_Settings_File(){
 
-		[[ -f $FP_DIETPISYNC_SETTINGS ]] && . $FP_DIETPISYNC_SETTINGS
+		[[ -f $FP_SETTINGS ]] && . $FP_SETTINGS
 
 	}
 
@@ -284,7 +271,7 @@ _EOF_
 		(( $SYNC_CRONDAILY )) && SYNC_CRONDAILY_TEXT='[On]'
 
 		local sync_last_status='No previous sync found in target directory.'
-		[[ -f $FP_TARGET/$SYNC_STATS_FILENAME ]] && sync_last_status=$(tail -1 "$FP_TARGET/$SYNC_STATS_FILENAME")
+		[[ -f $FP_TARGET/$FP_LOG ]] && sync_last_status=$(tail -1 "$FP_TARGET/$FP_LOG")
 
 		G_WHIP_MENU_ARRAY=(
 
@@ -302,8 +289,7 @@ _EOF_
 		)
 
 		G_WHIP_BUTTON_CANCEL_TEXT='Exit'
-		G_WHIP_MENU "Source location:\n  $FP_SOURCE\n\nTarget location:\n  $FP_TARGET\n\nLast sync status:\n  $sync_last_status"
-		if (( $? == 0 )); then
+		if G_WHIP_MENU "Source location:\n  $FP_SOURCE\n\nTarget location:\n  $FP_TARGET\n\nLast sync status:\n  $sync_last_status"; then
 
 			case "$G_WHIP_RETURNED_VALUE" in
 
@@ -321,22 +307,22 @@ _EOF_
 
 				'Help')
 
-					G_WHIP_MSG "DietPi-Sync is a program that allows you to duplicate a directory from one location (Source) to another (Target).\n
+					G_WHIP_MSG 'DietPi-Sync is a program that allows you to duplicate a directory from one location (Source) to another (Target).\n
 For example: If we want to duplicate (sync) the data on our external USB HDD to another location, we simply select the USB HDD as the source, then, select a target location.
 The target location can be anything from a networked samba fileserver, or even a FTP server.\n
-If you would like to test a sync without modifiying any data, simply select Dry Run.\n\nMore information:\n - https://dietpi.com/phpbb/viewtopic.php?p=256#p256"
+If you would like to test a sync without modifiying any data, simply select Dry Run.\n\nMore information:\n - https://dietpi.com/phpbb/viewtopic.php?p=256#p256'
 
 				;;
 
 				'Delete Mode')
 
-					TARGETMENUID=3
+					Menu_Set_Sync_Delete_Mode
 
 				;;
 
 				'Sync: Daily')
 
-					TARGETMENUID=4
+					Menu_Set_CronDaily
 
 				;;
 
@@ -381,20 +367,17 @@ A copy of all the files and folders inside your Source location, will be created
 
 	}
 
-	#TARGETMENUID=1 && TARGETMENUID=2
+	#TARGETMENUID=1 (Target) && TARGETMENUID=2 (Source)
 	Menu_Set_Directories(){
-
-		#TARGETMENUID
-		#2=Source | 1=Target
 
 		local current_directory="$FP_TARGET"
 		local current_mode_text='Target'
-		local whip_description_text="Please select the $current_mode_text location.\nA copy of all the files and folders in the Source location will be created here.\n\nCurrent Target location:\n$FP_TARGET"
+		local whip_description_text="Please select the $current_mode_text location.\nA copy of all the files and folders in the Source location will be created here.\n\nCurrent $current_mode_text location:\n$current_directory"
 		if (( $TARGETMENUID == 2 )); then
 
 			current_directory="$FP_SOURCE"
 			current_mode_text='Source'
-			whip_description_text="Please select the $current_mode_text location.\nA copy of all the files and folder in this Source location, will be created at the Target location.\n\nCurrent Source location:\n$FP_SOURCE"
+			whip_description_text="Please select the $current_mode_text location.\nA copy of all the files and folder in this Source location, will be created at the Target location.\n\nCurrent $current_mode_text location:\n$current_directory"
 
 		fi
 
@@ -446,11 +429,11 @@ A copy of all the files and folders inside your Source location, will be created
 
 						if (( $TARGETMENUID == 2 )); then
 
-							FP_SOURCE="$FP_SAMBA_MOUNT"
+							FP_SOURCE=$FP_SAMBA_MOUNT
 
 						else
 
-							FP_TARGET="$FP_SAMBA_MOUNT/dietpi-sync"
+							FP_TARGET=$FP_SAMBA_MOUNT/dietpi-sync
 
 						fi
 
@@ -459,15 +442,6 @@ A copy of all the files and folders inside your Source location, will be created
 					else
 
 						Prompt_Setup_Samba_Mount
-						if (( $TARGETMENUID == 2 )); then
-
-							FP_SOURCE="$current_directory"
-
-						else
-
-							FP_TARGET="$current_directory"
-
-						fi
 
 					fi
 
@@ -484,7 +458,6 @@ A copy of all the files and folders inside your Source location, will be created
 
 	}
 
-	#TARGETMENUID=3
 	Menu_Set_Sync_Delete_Mode(){
 
 		G_WHIP_MENU_ARRAY=(
@@ -495,28 +468,24 @@ A copy of all the files and folders inside your Source location, will be created
 		)
 
 		G_WHIP_DEFAULT_ITEM="$SYNC_MODE_TEXT"
-		if G_WHIP_MENU "Please select the Sync delete mode.\n
+		if G_WHIP_MENU 'Please select the Sync delete mode.\n
 [Off]: (safe)\nIf files and folders exist in the Target location, that are not in the Source, they will be left alone.\n
 [On]: (WARNING, if in doubt, DO NOT enable)\nAn exact copy of the Source location will be created at the Target location.
-If files are in the Target location that don't exist in the Source, they will be DELETED."; then
+If files are in the Target location that do not exist in the Source, they will be DELETED.'; then
 
 			SYNC_DELETE_MODE=0
 			[[ $G_WHIP_RETURNED_VALUE == '[On]' ]] && SYNC_DELETE_MODE=1
 
 		fi
 
-		#Return to main menu
-		TARGETMENUID=0
-
 	}
 
-	#TARGETMENUID=4
 	Menu_Set_CronDaily(){
 
 		G_WHIP_MENU_ARRAY=(
 
-			'[Off]' 'Manual sync.'
-			'[On]' 'Automatically sync once a day.'
+			'[Off]' ': Manual sync'
+			'[On]' ': Automatically sync once a day'
 
 		)
 
@@ -530,9 +499,6 @@ If files are in the Target location that don't exist in the Source, they will be
 
 		fi
 
-		#Return to main menu
-		TARGETMENUID=0
-
 	}
 
 	Input_User_Directory(){
@@ -544,7 +510,7 @@ If files are in the Target location that don't exist in the Source, they will be
 		(( $TARGETMENUID == 2 )) && mode='source'
 		local fp_mode="FP_${mode^^}"
 		G_WHIP_DEFAULT_ITEM=${!fp_mode}
-		local text="Please enter a new filepath for the $mode directory.\neg: /mnt/$mode"
+		local text="Please enter a new file path for the $mode directory.\neg: /mnt/$mode"
 
 		while :
 		do
@@ -638,14 +604,6 @@ _EOF_
 			elif (( $TARGETMENUID == 1 || $TARGETMENUID == 2 )); then
 
 				Menu_Set_Directories
-
-			elif (( $TARGETMENUID == 3 )); then
-
-				Menu_Set_Sync_Delete_Mode
-
-			elif (( $TARGETMENUID == 4 )); then
-
-				Menu_Set_CronDaily	
 
 			fi
 
