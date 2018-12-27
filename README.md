@@ -148,6 +148,12 @@ We are always looking for talented people who believe in the DietPi project, and
 * Join our forums: https://dietpi.com/phpbb
 * GitHub: https://github.com/Fourdee/DietPi
 
+### FeatHub
+
+Vote for new suggestions, feature-, software- or image request, or add your own to our new FeatHub page:
+
+[![Feature Requests](http://feathub.com/Fourdee/DietPi?format=svg)](http://feathub.com/Fourdee/DietPi)
+
 ## License
 
 DietPi Copyright (C) 2016 Daniel Knight
