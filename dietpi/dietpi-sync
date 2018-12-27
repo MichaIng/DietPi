@@ -27,7 +27,7 @@
 
 	#Restart rsync service, if stopped during DietPi-Sync run: https://github.com/Fourdee/DietPi/issues/1869
 	SERVICE_CONTROL=0
-	G_EXIT_CUSTOM(){ (( $SERVICE_CONTROL )) && systemctl start rsync; }
+	G_EXIT_CUSTOM(){ (( $SERVICE_CONTROL )) && G_RUN_CMD systemctl start rsync; }
 
 	#Grab Input (valid interger)
 	INPUT=0
@@ -43,7 +43,6 @@
 	FP_FILTER_INCLUDE_EXCLUDE='.dietpi-sync_include_exclude'
 	FP_USER_FILTER_INCLUDE_EXCLUDE='/DietPi/dietpi/.dietpi-sync_inc_exc'
 	FP_LOG='.dietpi-sync.log'
-	FP_SAMBA_MOUNT='/mnt/samba'
 	FP_SOURCE='/mnt/Source'
 	FP_TARGET='/mnt/Target'
 
@@ -95,7 +94,7 @@ _EOF_
 	Banner_Start(){
 
 		local mode='Sync'
-		(( $SYNC_DRY_RUN )) && mode='Dry Run'
+		(( ${SYNC_DRY_RUN:=0} )) && mode='Dry Run'
 
 		G_DIETPI-NOTIFY 3 "$G_PROGRAM_NAME" "$mode"
 
@@ -109,25 +108,29 @@ _EOF_
 		if systemctl is-active rsync &> /dev/null; then
 
 			SERVICE_CONTROL=1
-			systemctl stop rsync
+			G_RUN_CMD systemctl stop rsync
 
 		fi
 		killall -qw rsync
 
-		#Pre-create target dir
-		mkdir -p "$FP_TARGET"
+		#Pre-create target dir to check R/W access
+                # - Remove previous mkdir log
+		[[ -f /var/log/dietpi-sync.log ]] && rm /var/log/dietpi-sync.log
+		mkdir -p "$FP_TARGET" &> $FP_TMP
 
 		#Error: Dir not found
 		if [[ ! -d $FP_TARGET ]]; then
 
-			G_WHIP_MSG "[FAILED] Unable to pre-create target directory: $FP_TARGET"
+			G_WHIP_MSG "[FAILED] Unable to pre-create target directory: $FP_TARGET\n\n\"mkdir\" reported the following error:\n$(<$FP_TMP)"
+			echo "$(date +"%d-%m-%Y_%T") [FAILED] Unable to pre-create target directory: $FP_TARGET" >> $FP_LOG
+			mv $FP_LOG /var/log/dietpi-sync.log
 
 		#Error: Rsync is already running
 		elif pgrep '[r]sync' &> /dev/null; then
 
-			G_WHIP_MSG '[FAILED] Rsync is already running'
+			G_WHIP_MSG '[FAILED] Rsync is already running and failed to stop gracefully'
 			# Add info to target log location directly, preserve previous rsync log
-			echo "$(date +"%d-%m-%Y_%T") [FAILED] Rsync is already running" >> "$FP_TARGET/$FP_LOG"
+			echo "$(date +"%d-%m-%Y_%T") [FAILED] Rsync is already running and failed to stop gracefully" >> "$FP_TARGET/$FP_LOG"
 
 		#Start sync
 		else
@@ -211,20 +214,13 @@ Would you like to override this warning and continue with the backup?'; then
 
 	Check_Available_DietPi_Mounts(){
 
-		local temp_file_mounts='.dietpi-sync_dietpi_mounts'
-		df -h > $temp_file_mounts
+		local samba_mount_out=$(df -h | grep "$fp_samba_mount")
+		if [[ $samba_mount_out ]]; then
 
-		#Samba Client
-		SAMBA_MOUNT_AVAILABLE=0
-		SAMBA_MOUNT_TEXT="Not mounted ($FP_SAMBA_MOUNT). Select to setup."
-		if grep -qi '/mnt/samba' $temp_file_mounts; then
-
-			SAMBA_MOUNT_AVAILABLE=1
-			SAMBA_MOUNT_TEXT="Size: $(df -h | grep /mnt/samba | awk '{print $2}')B | Available: $(df -h | grep /mnt/samba | awk '{print $4}')B"
+			samba_mount_available=1
+			samba_mount_text=$(awk '{print "Size: "$2"B | Available: "$4"B"}' <<< $samba_mount_out)
 
 		fi
-
-		rm $temp_file_mounts
 
 	}
 
@@ -242,21 +238,12 @@ _EOF_
 
 	}
 
-	Read_Settings_File(){
-
-		[[ -f $FP_SETTINGS ]] && . $FP_SETTINGS
-
-	}
+	Read_Settings_File(){ [[ -f $FP_SETTINGS ]] && . $FP_SETTINGS; }
 
 	#/////////////////////////////////////////////////////////////////////////////////////
 	# MENUS
 	#/////////////////////////////////////////////////////////////////////////////////////
 	TARGETMENUID=0
-
-	SAMBA_MOUNT_AVAILABLE=0
-	SAMBA_MOUNT_TEXT='Not available'
-
-	SYNC_DRY_RUN=0
 
 	SYNC_MODE_TEXT=''
 	SYNC_CRONDAILY_TEXT=''
@@ -270,8 +257,19 @@ _EOF_
 		SYNC_CRONDAILY_TEXT='[Off]'
 		(( $SYNC_CRONDAILY )) && SYNC_CRONDAILY_TEXT='[On]'
 
-		local sync_last_status='No previous sync found in target directory.'
-		[[ -f $FP_TARGET/$FP_LOG ]] && sync_last_status=$(tail -1 "$FP_TARGET/$FP_LOG")
+		if [[ -f $FP_TARGET/$FP_LOG ]]; then
+
+			local sync_last_status=$(tail -1 "$FP_TARGET/$FP_LOG")
+
+		elif [[ -f /var/log/dietpi-sync.log ]]; then
+
+			local sync_last_status=$(tail -1 /var/log/dietpi-sync.log)
+
+		else
+
+			local sync_last_status='No previous sync found in target directory.'
+
+		fi
 
 		G_WHIP_MENU_ARRAY=(
 
@@ -331,8 +329,7 @@ If you would like to test a sync without modifiying any data, simply select Dry 
 					if G_WHIP_YESNO "Start dry run sync?\n\nSource location:\n$FP_SOURCE/*\n\nTarget location:\n$FP_TARGET/*\n
 This is a Dry Run for testing. No data will be modified.\n\nDo you wish to continue?"; then
 
-						SYNC_DRY_RUN=1
-						Run_Sync
+						SYNC_DRY_RUN=1 Run_Sync
 
 					fi
 
@@ -343,8 +340,7 @@ This is a Dry Run for testing. No data will be modified.\n\nDo you wish to conti
 					if G_WHIP_YESNO "Start sync?\n\nSource location:\n$FP_SOURCE/*\n\nTarget location:\n$FP_TARGET/*\n
 A copy of all the files and folders inside your Source location, will be created at the Target location.\n\nDo you wish to continue?"; then
 
-						SYNC_DRY_RUN=0
-						Run_Sync
+						SYNC_DRY_RUN=0 Run_Sync
 
 					fi
 
@@ -381,13 +377,17 @@ A copy of all the files and folders inside your Source location, will be created
 
 		fi
 
+		# Check for samba mount
+		local fp_samba_mount='/mnt/samba'
+		local samba_mount_available=0
+		local samba_mount_text="Not mounted ($fp_samba_mount). Select to setup."
 		Check_Available_DietPi_Mounts
 
 		G_WHIP_MENU_ARRAY=(
 
 			'Manual' ": Manually type your $current_mode_text directory."
 			'List' ': Select from a list of available mounts/drives'
-			'Samba Client' ": [$SAMBA_MOUNT_TEXT]"
+			'Samba Client' ": [$samba_mount_text]"
 
 		)
 
@@ -425,15 +425,15 @@ A copy of all the files and folders inside your Source location, will be created
 
 				'Samba Client')
 
-					if (( $SAMBA_MOUNT_AVAILABLE )); then
+					if (( $samba_mount_available )); then
 
 						if (( $TARGETMENUID == 2 )); then
 
-							FP_SOURCE=$FP_SAMBA_MOUNT
+							FP_SOURCE=$fp_samba_mount
 
 						else
 
-							FP_TARGET=$FP_SAMBA_MOUNT/dietpi-sync
+							FP_TARGET=$fp_samba_mount/dietpi-sync
 
 						fi
 
@@ -550,7 +550,7 @@ If files are in the Target location that do not exist in the Source, they will b
 
 	Prompt_Setup_Samba_Mount(){
 
-		G_WHIP_YESNO "$SAMBA_MOUNT_TEXT\n\nWould you like to run DietPi-Drive_Manager and setup your Samba Client Mount now?"
+		G_WHIP_YESNO "$samba_mount_text\n\nWould you like to run DietPi-Drive_Manager and setup your Samba Client Mount now?"
 		(( $? == 0 )) && /DietPi/dietpi/dietpi-drive_manager
 
 	}
