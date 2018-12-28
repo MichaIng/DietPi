@@ -37,7 +37,6 @@ Use `dietpi-software` to quickly and easily install popular software that's "Rea
 
 `dietpi-update` automatically checks for updates and informs you when they are available. Update instantly, without having to write a new image. `dietpi-automation` Allows you to completely automate a DietPi installation with no user input, simply by configuring "dietpi.txt" before powering on.
 
-
 ## The DietPi Project Team
 
 ### Lead
@@ -125,23 +124,23 @@ A personal thanks to **Pilovali** for helping DietPi during our early days with 
 
 Git coders, please use the active development branch: [dev](https://github.com/Fourdee/DietPi/tree/dev)
 
-* [How to add new software installation options to DietPi-Software](https://github.com/Fourdee/DietPi/issues/490#issuecomment-244416570)
+- [How to add new software installation options to DietPi-Software](https://github.com/Fourdee/DietPi/issues/490#issuecomment-244416570)
 
 Are you able to:
 
-* Provide feedback and/or test areas of DietPi, to improve the user experience?
-* Report bugs?
-* Improve/add more features to the [DietPi website](https://dietpi.com)?
-* Compile software for our supported SBCs?
-* Contribute to DietPi with programming on GitHub?
-* Suggest new software that we can add to the `dietpi-software` install system?
+- Provide feedback and/or test areas of DietPi, to improve the user experience?
+- Report bugs?
+- Improve/add more features to the [DietPi website](https://dietpi.com)?
+- Compile software for our supported SBCs?
+- Contribute to DietPi with programming on GitHub?
+- Suggest new software that we can add to the `dietpi-software` install system?
 
 If so, let us know!
 We are always looking for talented people who believe in the DietPi project, and, wish to contribute in any way you can.
 
-* Send me an Email: daniel.knight@dietpi.com
-* Join our forums: https://dietpi.com/phpbb
-* GitHub: https://github.com/Fourdee/DietPi
+- Send me an Email: daniel.knight@dietpi.com
+- Join our forums: https://dietpi.com/phpbb
+- GitHub: https://github.com/Fourdee/DietPi
 
 ### FeatHub
 
@@ -152,8 +151,8 @@ Vote for new suggestions, feature-, software- or image requests, or add your own
 ## License
 
 DietPi Copyright (C) 2016 Daniel Knight
-* Email daniel.knight@dietpi.com
-* Web https://dietpi.com
+- Email daniel.knight@dietpi.com
+- Web https://dietpi.com
 
 This program is free software: you can redistribute it and/or modify
 it under the terms of the GNU General Public License as published by
