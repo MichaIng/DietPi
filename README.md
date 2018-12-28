@@ -1,46 +1,41 @@
 <html>
-    <h1 align="center">
-        <img src="https://dietpi.com/images/dietpi-logo_150.png" alt="DietPi">
-    </h1>
-    <p align="center">
-        <b>Lightweight justice for your single-board computer!</b>
-        <br>
-        <br>
-        optimised • simplified • for everyone
-        <br>
-        <br>
-        <a href="https://dietpi.com">find out more</a>
-        •
-        <a href="https://dietpi.com/#download">download image</a>
-        <hr>
-    </p>
-    <p align="center">
-        Optional "ready to run" optimised software choices with <b>dietpi-software</b>.
-        <br>
-        Feature rich configuration tool for your device with <b>dietpi-config</b>.
-        <hr>
-    </p>
-    <p align="center">
-        <img src="https://dietpi.com/images/mvs_logo_150.jpg">
-        <br>
-        <br>
-        DietPi's web hosting is powered by
-        <a href="https://www.myvirtualserver.com">myVirtualServer</a>.
-        <br>
-        <br>
-        A wide range of SBCs and VMs are supported. <a href="https://dietpi.com/#download">Click here</a> for the full list.
-        <br>
-        <br>
-    </p>
+	<h1 align="center">
+		<img src="https://dietpi.com/images/dietpi-logo_150.png" alt="DietPi">
+	</h1>
+	<p align="center">
+		<b>Lightweight justice for your single-board computer!</b>
+		<br><br>
+		optimised • simplified • for everyone
+		<br><br>
+		<a href="https://dietpi.com">find out more</a>
+		•
+		<a href="https://dietpi.com/#download">download image</a>
+	</p>
+	<hr>
+	<p align="center">
+		Optional "ready to run" optimised software choices with <b>dietpi-software</b>.
+		<br>
+		Feature rich configuration tool for your device with <b>dietpi-config</b>.
+	</p>
+	<hr>
+	<p align="center">
+		<img src="https://dietpi.com/images/mvs_logo_150.jpg" alt="myVirtualServer">
+		<br><br>
+		DietPi's web hosting is powered by
+		<a href="https://www.myvirtualserver.com">myVirtualServer</a>.
+		<br><br>
+		A wide range of SBCs and VMs are supported. <a href="https://dietpi.com/#download">Click here</a> for the full list.
+		<br><br>
+	</p>
 </html>
 
 ## Introduction
 
-DietPi is an extremely lightweight Debian-based OS. With images starting at 400MB, that's 3x lighter than 'Raspbian Lite'. It is highly optimized for minimal CPU and RAM resource usage, ensuring your SBC always runs at its maximum potential. The programs use lightweight Whiptail menus. You'll spend less time staring at the command line, and more time enjoying DietPi.
+DietPi is an extremely lightweight Debian-based OS. With images starting at 400MB, that's 3x lighter than "Raspbian Lite". It is highly optimized for minimal CPU and RAM resource usage, ensuring your SBC always runs at its maximum potential. The programs use lightweight Whiptail menus. You'll spend less time staring at the command line, and more time enjoying DietPi.
 
-Use `dietpi-software` to quickly and easily install popular software that's "Ready to run" and optimized for your system. Only the software you need is installed. Use `dietpi-process_tool` to control which installed software has higher or lower priority levels (nice, affinity, policy scheduler).
+Use `dietpi-software` to quickly and easily install popular software that's "Ready to run" and optimised for your system. Only the software you need is installed. Use `dietpi-process_tool` to control which installed software has higher or lower priority levels (nice, affinity, policy scheduler).
 
-`dietpi-update` automatically checks for updates and informs you when they are available. Update instantly, without having to write a new image. `dietpi-automation` Allows you to completely automate a DietPi installation with no user input, simply by configuring dietpi.txt before powering on.
+`dietpi-update` automatically checks for updates and informs you when they are available. Update instantly, without having to write a new image. `dietpi-automation` Allows you to completely automate a DietPi installation with no user input, simply by configuring "dietpi.txt" before powering on.
 
 
 ## The DietPi Project Team
@@ -128,7 +123,7 @@ A personal thanks to **Pilovali** for helping DietPi during our early days with 
 
 ## Contributing
 
-Git coders, please use the active development branch: [`dev`](https://github.com/Fourdee/DietPi/tree/dev)
+Git coders, please use the active development branch: [dev](https://github.com/Fourdee/DietPi/tree/dev)
 
 * [How to add new software installation options to DietPi-Software](https://github.com/Fourdee/DietPi/issues/490#issuecomment-244416570)
 
@@ -137,7 +132,7 @@ Are you able to:
 * Provide feedback and/or test areas of DietPi, to improve the user experience?
 * Report bugs?
 * Improve/add more features to the [DietPi website](https://dietpi.com)?
-* Compile software for Odroid C1 and RPi systems?
+* Compile software for our supported SBCs?
 * Contribute to DietPi with programming on GitHub?
 * Suggest new software that we can add to the `dietpi-software` install system?
 
@@ -150,7 +145,7 @@ We are always looking for talented people who believe in the DietPi project, and
 
 ### FeatHub
 
-Vote for new suggestions, feature-, software- or image request, or add your own to our new FeatHub page:
+Vote for new suggestions, feature-, software- or image requests, or add your own to our new FeatHub page:
 
 [![Feature Requests](http://feathub.com/Fourdee/DietPi?format=svg)](http://feathub.com/Fourdee/DietPi)
 
@@ -181,11 +176,15 @@ along with this program.  If not, see https://www.gnu.org/licenses/
 
 ### DietPi file list
 
-
-- All files located in `/DietPi/dietpi` (recursive)
+- All files located in (recursively):
+  - `/boot/dietpi/`
+  - `/DietPi/dietpi/`
+  - `/var/lib/dietpi/`
+  - `/var/tmp/dietpi/`
 - `/DietPi/dietpi.txt`
-- `/DietPi/config.txt`
-- `/DietPi/boot.ini`
+- `/DietPi/config.txt` (RPi)
+- `/DietPi/boot.ini` (Odroid)
+- All files prefixed with: `dietpi-`
 
 > The above GPLv2 documentation also applies to all mentioned files!
 
@@ -208,10 +207,10 @@ Links to additional software used in DietPi and their source and build instructi
 - [Apache2](https://github.com/apache)
 - [MariaDB](https://github.com/MariaDB)
 - [PHP](https://git.php.net/)
-- [PhpMyAdmin](https://github.com/phpmyadmin)
+- [phpMyAdmin](https://github.com/phpmyadmin)
 - [Proftpd](https://github.com/proftpd)
 - [Samba](https://wiki.samba.org/index.php/Using_Git_for_Samba_Development)
-- [NoIp2 Client Binary](https://www.noip.com/support/knowledgebase/installing-the-linux-dynamic-update-client/)
+- [No-IP Client Binary](https://www.noip.com/support/knowledgebase/installing-the-linux-dynamic-update-client/)
 - [RetroPie Setup Script](https://github.com/petrockblog/RetroPie-Setup)
 - [PiVPN VPN Server](https://github.com/pivpn/pivpn)
 - [OpenTyrian](https://bitbucket.org/opentyrian/opentyrian/wiki/Home)
@@ -219,7 +218,6 @@ Links to additional software used in DietPi and their source and build instructi
 - [PHP OPcache GUI](https://github.com/amnuts/opcache-gui)
 - [Nginx](https://hg.nginx.org/nginx/)
 - [Deluge](https://dev.deluge-torrent.org/wiki/Development#SourceCode)
-- [Grasshopper](https://sourceforge.net/projects/grasshopperwebapp/Grasshopper)
 - [Pi-hole](https://github.com/pi-hole/pi-hole)
 - [SubSonic](https://sourceforge.net/projects/subsonic/)
 - [SqueezeBox](https://github.com/Logitech/slimserver)
