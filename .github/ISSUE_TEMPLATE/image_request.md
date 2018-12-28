@@ -4,10 +4,9 @@ about: Suggest a new SBC to be added to the offial support and image list of Die
 
 ---
 
-## Creating an image request:
+### Creating an image request
 
-
-#### Give us some formal device information:
+#### Formal device information
 - Device name | <!-- EG: Raspberry Pi 3 Model B+ -->
 - Official product URL | <!-- EG: https://www.raspberrypi.org/products/raspberry-pi-3-model-b-plus/ -->
 - GitHub resource URL (if available) | <!-- EG: https://github.com/raspberrypi -->
