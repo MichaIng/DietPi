@@ -225,3 +225,4 @@ Links to additional software used in DietPi and their source and build instructi
 - [FreshRSS](https://github.com/FreshRSS/FreshRSS)
 - [Folding@Home](https://github.com/FoldingAtHome)
 - [OpenBazaar](https://github.com/OpenBazaar/openbazaar-go)
+- [Medusa](https://github.com/pymedusa/Medusa)
