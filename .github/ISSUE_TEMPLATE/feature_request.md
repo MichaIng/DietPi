@@ -4,8 +4,7 @@ about: Suggest an idea for this project
 
 ---
 
-## Creating a feature request:
-
+### Creating a feature request
 
 #### Is your feature request related to a problem? Please describe:
 <!-- A clear and concise description of what the problem is. Ex. I'm always frustrated when [...] -->
@@ -19,6 +18,6 @@ about: Suggest an idea for this project
 <!-- A clear and concise description of any alternative solutions or features you've considered.-->
 - ...
 
-#### Additional context:
+#### Additional context
 <!-- Add any other context or screenshots about the feature request here.-->
 - ...
