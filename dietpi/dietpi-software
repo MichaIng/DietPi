@@ -6601,8 +6601,8 @@ Pin-Priority: -1' > /etc/apt/preferences.d/dietpi-docker_fix
 
 			Banner_Installing
 
-			#Remove information file
-			rm /mnt/nfs_client/readme.txt &> /dev/null
+			# Remove information file
+			[[ -f /mnt/nfs_client/readme.txt ]] && rm /mnt/nfs_client/readme.txt
 
 			# "netbase" is needed for mounting NFSv3: https://github.com/Fourdee/DietPi/issues/1898#issuecomment-406247814
 			G_AGI nfs-common netbase
@@ -6613,10 +6613,25 @@ Pin-Priority: -1' > /etc/apt/preferences.d/dietpi-docker_fix
 		if (( ${aSOFTWARE_INSTALL_STATE[$software_id]} == 1 )); then
 
 			Banner_Installing
-			G_AGI dropbear
 
-			#set to start on next boot
+			# On Stretch+ Dropbear packages have been split, install "dropbear-run" only, to have active service, but "skip dropbear-initramfs"
+			if (( $G_DISTRO < 4 )); then
+
+				G_AGI dropbear
+				# ECDSA key is not generated (or converted from OpenSSH) automatically on Jessie
+				dropbearkey -t ecdsa -f /etc/dropbear/dropbear_ecdsa_host_key
+
+			else
+
+				G_AGI dropbear-run
+
+			fi
+
+			# Enable Dropbear daemon
 			G_CONFIG_INJECT 'NO_START=' 'NO_START=0' /etc/default/dropbear
+
+			# Failsafe: Enable Dropbear service
+			systemctl enable dropbear
 
 		fi
 
@@ -6626,21 +6641,17 @@ Pin-Priority: -1' > /etc/apt/preferences.d/dietpi-docker_fix
 			Banner_Installing
 			G_AGI openssh-server
 
+			# SSH server package also installs client.
+			aSOFTWARE_INSTALL_STATE[0]=2
+
 			# Allow root login
 			G_CONFIG_INJECT 'PermitRootLogin[[:blank:]]' 'PermitRootLogin yes' /etc/ssh/sshd_config
 
-			#Re-generate host keys
-			# - Remove all previous
-			rm -f /etc/ssh/ssh_host_*_key*
+			# Reload SSH server now so root users can login during setup.
+			systemctl reload ssh
 
-			# - Generate
-			dpkg-reconfigure openssh-server
-
-			#Restart ssh server now so root users can login during setup.
-			systemctl restart ssh
-
-			#SSH server package also installs client.
-			aSOFTWARE_INSTALL_STATE[0]=2
+			# Failsafe: Enable OpenSSH service
+			systemctl enable ssh
 
 		fi
 
@@ -6904,7 +6915,7 @@ _EOF_
 
 	Apply_SSHServer_Choices(){
 
-		#Work out which SSH Server needs installing from IDs (if any)
+		#Work out which SSH server needs installing from IDs (if any)
 		#Work out which SSH server needs removing (if any)
 		if (( $INDEX_SSHSERVER_TARGET != $INDEX_SSHSERVER_CURRENT )); then
 
@@ -6923,7 +6934,7 @@ _EOF_
 				aSOFTWARE_INSTALL_STATE[104]=1
 				(( ${aSOFTWARE_INSTALL_STATE[105]} == 2 )) && aSOFTWARE_INSTALL_STATE[105]=-1
 
-			# - Openssh
+			# - OpenSSH
 			elif (( $INDEX_SSHSERVER_TARGET == -2 )); then
 
 				aSOFTWARE_INSTALL_STATE[105]=1
@@ -6931,14 +6942,14 @@ _EOF_
 
 			fi
 
-			#Inform user (From testing, stopping SSH server services does not disconnect user, however, just incase it does in the future)
+			# Inform user (From testing, stopping SSH server services does not disconnect user, however, just incase it does in the future)
 			G_DIETPI-NOTIFY 3 "$G_PROGRAM_NAME" 'Stopping SSH servers'
 
-			#stop all SSH server services
+			# Stop all SSH server services
 			systemctl stop ssh &> /dev/null
 			systemctl stop dropbear &> /dev/null
 
-			#Update Current SSHSERVER index
+			# Update current SSH server index
 			INDEX_SSHSERVER_CURRENT=$INDEX_SSHSERVER_TARGET
 
 		fi
@@ -14371,6 +14382,9 @@ _EOF_
 			Banner_Uninstalling
 			G_AGP $(dpkg --get-selections dropbear* | awk '{print $1}') # Stretch: dropbear-initramfs dropbear-run
 
+			# Required on Jessie only, since ECDSA key is not created on install automatically, thus not removed on uninstall
+			[[ -d /etc/dropbear ]] && rm -R /etc/dropbear
+
 		fi
 
 		software_id=105
@@ -15231,9 +15245,8 @@ Once $G_PROGRAM_NAME has finished installation, simply run 'dietpi-drive_manager
 			#Gogs: Requires OpenSSH for ssh-keygen binary: https://github.com/Fourdee/DietPi/issues/442
 			if (( ${aSOFTWARE_INSTALL_STATE[49]} == 1 && $INDEX_SSHSERVER_TARGET != -2 )); then
 
-				G_WHIP_YESNO "Gogs requires OpenSSH server to function.\n\nIf you continue, OpenSSH will be selected for install on your system. OpenSSH will also replace Dropbear (if currently installed).\n
-Would you like to continue with the Gogs installation?"
-				if (( $? == 0 )); then
+				if G_WHIP_YESNO "Gogs requires OpenSSH server to function.\n\nIf you continue, OpenSSH will be selected for install on your system. OpenSSH will also replace Dropbear (if currently installed).\n
+Would you like to continue with the Gogs installation?"; then
 
 					# - Use SSH target index to ensure Dropbear gets removed if installed.
 					INDEX_SSHSERVER_TARGET=-2
@@ -15580,11 +15593,10 @@ This will allow you to choose which program loads automatically, after the syste
 
 					G_WHIP_DEFAULT_ITEM="$index_sshserver_text"
 					G_WHIP_BUTTON_CANCEL_TEXT='Back'
-					G_WHIP_MENU 'Please select desired SSH server:\n
+					if G_WHIP_MENU 'Please select desired SSH server:\n
 - None: Selecting this option will uninstall all SSH servers. This reduces system resources and improves performance. Useful for users who do NOT require networked/remote terminal access.\n
 - Dropbear (Recommended): Lightweight SSH server, installed by default on DietPi systems.\n
-- OpenSSH: A feature rich SSH server with SFTP/SCP support, at the cost of increased resource usage.'
-					if (( $? == 0 )); then
+- OpenSSH: A feature rich SSH server with SFTP/SCP support, at the cost of increased resource usage.'; then
 
 						# - Assign target index
 						if [[ $G_WHIP_RETURNED_VALUE == 'None' ]]; then
@@ -16013,11 +16025,10 @@ When you select any software for install that requires a webserver, DietPi will 
 		done
 
 		#Confirm Software install
-		G_WHIP_YESNO "DietPi is now ready to install your software choices: $string_output\n
+		if G_WHIP_YESNO "DietPi is now ready to install your software choices: $string_output\n
 Software details, usernames, passwords etc:\n - https://dietpi.com/software\n
 NB: Software services will be temporarily controlled (stopped) by DietPi during this process. Please inform connected users, before continuing. SSH is not affected.\n
-Would you like to begin?"
-		if (( $? == 0 )); then
+Would you like to begin?"; then
 
 			#exit menu system
 			TARGETMENUID=-1
