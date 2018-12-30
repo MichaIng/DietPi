@@ -3615,8 +3615,6 @@ We work around this error by running APT a second time. Please do not worry and 
 
 				fi
 
-				apt-mark unhold mpd &> /dev/null #??? Not required for dpkg -i installs
-
 				DEPS_LIST='libsqlite3-0 libupnp6 libwrap0 libmpdclient2 libflac8 libyajl2 libavahi-client3 libvorbisfile3 libwavpack1 libmad0 libmpg123-0 libopus0 libavformat57 libfaad2 libcdio-paranoia1 libiso9660-8 libshout3 libid3tag0'
 				Download_Install "$INSTALL_URL_ADDRESS"
 
@@ -6268,10 +6266,10 @@ Pin-Priority: -1' > /etc/apt/preferences.d/dietpi-docker_fix
 
 			#Apply soundcard
 			local soundcard="$(grep -m1 '^[[:blank:]]*CONFIG_SOUNDCARD=' /DietPi/dietpi.txt | sed 's/^[^=]*=//')"
+			soundcard=${soundcard:-none}
 
 			# - RPi enable internal HDMI+Analogue if currently set to 'none'
-			if (( $G_HW_MODEL < 10 )) &&
-				[[ $soundcard == 'none' || $soundcard == 'default' ]]; then
+			if (( $G_HW_MODEL < 10 )) && [[ $soundcard == 'none' || $soundcard == 'default' ]]; then
 
 				soundcard='rpi-bcm2835-ultrahq'
 
@@ -8321,21 +8319,26 @@ NB: This port needs to be forwarded by your router and/or opened in your firewal
 			Banner_Configuration
 
 			# Create MPD user
-			#useradd -rM mpd -G dietpi,audio -s /usr/sbin/nologin
+			local usercmd='useradd -rM'
+			getent passwd mpd &> /dev/null && usercmd='usermod'
+			$usercmd mpd -G dietpi,audio -d /var/lib/mpd -s /usr/sbin/nologin
 
 			# - Runtime folders/files
 			#	log
 			mkdir -p /var/log/mpd
-			> /var/log/mpd/mpd.log
-
+			>> /var/log/mpd/mpd.log
 			#	cache
 			mkdir -p $G_FP_DIETPI_USERDATA/.mpd_cache
-			> $G_FP_DIETPI_USERDATA/.mpd_cache/db_file
-			> $G_FP_DIETPI_USERDATA/.mpd_cache/state
-			> $G_FP_DIETPI_USERDATA/.mpd_cache/sticker.sql
-
+			>> $G_FP_DIETPI_USERDATA/.mpd_cache/db_file
+			>> $G_FP_DIETPI_USERDATA/.mpd_cache/state
+			>> $G_FP_DIETPI_USERDATA/.mpd_cache/sticker.sql
 			#	Symlink from MPD defaults that applications may still expect/use.
-			rm -R /var/lib/mpd &> /dev/null
+			[[ -L /var/lib/mpd/music ]] || mv /var/lib/mpd/music/* $G_FP_DIETPI_USERDATA/Music/
+			[[ -L /var/lib/mpd/playlists ]] || mv /var/lib/mpd/playlists/* $G_FP_DIETPI_USERDATA/Music/
+			[[ -L /var/lib/mpd/mpd.db ]] || mv /var/lib/mpd/mpd.db $G_FP_DIETPI_USERDATA/.mpd_cache/db_file
+			[[ -L /var/lib/mpd/state ]] || mv /var/lib/mpd/state $G_FP_DIETPI_USERDATA/.mpd_cache/state
+			[[ -L /var/lib/mpd/sticker.sql ]] || mv /var/lib/mpd/sticker.sql $G_FP_DIETPI_USERDATA/.mpd_cache/sticker.sql
+			[[ -d /var/lib/mpd ]] && rm -R /var/lib/mpd
 			mkdir -p /var/lib/mpd
 			ln -sf $G_FP_DIETPI_USERDATA/Music /var/lib/mpd/music
 			ln -sf $G_FP_DIETPI_USERDATA/Music /var/lib/mpd/playlists
@@ -8348,31 +8351,54 @@ NB: This port needs to be forwarded by your router and/or opened in your firewal
 			cp /DietPi/dietpi/conf/mpd.conf /etc/mpd.conf
 
 			# - MPD service/confs
-			cat << _EOF_ > /etc/default/mpd
-#Even though we declare the conf location in our service, MPD will fail to start if this file does not exist.
-## The configuration file location for mpd:
-MPDCONF=/etc/mpd.conf
-_EOF_
+			[[ -f /etc/default/mpd ]] && rm /etc/default/mpd
 
+			#	Upsteam systemd unit: https://github.com/MusicPlayerDaemon/MPD/blob/master/systemd/system/mpd.service.in
+			#	Debian package systemd unit: https://deb.debian.org/debian/pool/main/m/mpd/
 			cat << _EOF_ > /lib/systemd/system/mpd.service
 [Unit]
 Description=Music Player Daemon (DietPi)
+Documentation=man:mpd(1) man:mpd.conf(5)
+Documentation=file:///usr/share/doc/mpd/user-manual.html
 After=network.target sound.target
 
 [Service]
-#User=root #forks its own process under user set in /etc/mpd.conf (mpd)
-Type=simple
-LimitRTPRIO=infinity
+#User=mpd # Forks its own process under user set in /etc/mpd.conf (mpd)
 RuntimeDirectory=/var/run/mpd
-EnvironmentFile=/etc/default/mpd
 ExecStartPre=$(which mkdir) -p /var/run/mpd
-ExecStartPre=$(which chown) -R root:dietpi /var/run/mpd
+ExecStartPre=$(which chown) -R mpd:dietpi /var/run/mpd
 ExecStart=$(which mpd) --no-daemon /etc/mpd.conf
+
+# allow MPD to use real-time priority 50
+LimitRTPRIO=50
+LimitRTTIME=infinity
+
+# disallow writing to /usr, /bin, /sbin, ...
+ProtectSystem=yes
+
+# more paranoid security settings
+NoNewPrivileges=yes
+ProtectKernelTunables=yes
+ProtectControlGroups=yes
+ProtectKernelModules=yes
+# AF_NETLINK is required by libsmbclient, or it will exit() .. *sigh*
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX AF_NETLINK
+RestrictNamespaces=yes
 
 [Install]
 WantedBy=multi-user.target
-
+Also=mpd.socket
 _EOF_
+
+			#	Jessie: Remove unsupported systemd unit settings
+			if (( $G_DISTRO < 4 )); then
+
+				sed -i '/ProtectKernelTunables/d' /lib/systemd/system/mpd.service
+				sed -i '/ProtectControlGroups/d' /lib/systemd/system/mpd.service
+				sed -i '/ProtectKernelModules/d' /lib/systemd/system/mpd.service
+				sed -i '/RestrictNamespaces/d' /lib/systemd/system/mpd.service
+
+			fi
 
 			#JustBoom specials
 			if grep -qi '^[[:blank:]]*CONFIG_SOUNDCARD=justboom' /DietPi/dietpi.txt; then
@@ -12750,9 +12776,10 @@ _EOF_
 			#apt-mark auto libavformat57 libupnp6 libao-common libao4 libasound2 libasound2-data libasyncns0 libaudiofile1 libavahi-client3 libavahi-common-data libavahi-common3 libavcodec56 libavformat56 libavresample2 libavutil54 libbinio1ldbl libcaca0 libcdio-cdda1 libcdio-paranoia1 libcdio13 libcups2 libcurl3-gnutls libdirectfb-1.2-9 libdnet libfaad2 libflac8 libfluidsynth1 libgme0 libgomp1 libgsm1 libice6 libid3tag0 libiso9660-8 libjack-jackd2-0 libjson-c2 libldb1 libmad0 libmikmod3 libmms0 libmodplug1 libmp3lame0 libmpcdec6 libmpg123-0 libnfs4 libntdb1 libogg0 libopenal-data libopenal1 libopenjpeg5 libopus0 liborc-0.4-0 libpulse0 libresid-builder0c2a libroar2 libsamplerate0 libschroedinger-1.0-0 libsdl1.2debian libshout3 libsidplay2 libsidutils0 libslp1 libsm6 libsmbclient libsndfile1 libsoxr0 libspeex1 libspeexdsp1 libsqlite3-0 libtalloc2 libtdb1 libtevent0 libtheora0 libupnp6 libva1 libvorbis0a libvorbisenc2 libvorbisfile3 libvpx1 libwavpack1 libwbclient0 libwildmidi-config libwildmidi1 libx11-6 libx11-data libx11-xcb1 libx264-142 libxau6 libxcb1 libxdmcp6 libxext6 libxi6 libxtst6 libxvidcore4 libyajl2 libzzip-0-13 mime-support python python-talloc python2.7 samba-libs x11-common file &> /dev/null
 			apt-mark unhold mpd 1> /dev/null
 			G_AGP mpd libmpdclient2
-			userdel -rf mpd
-			rm /lib/systemd/system/mpd.service
-			rm -R $G_FP_DIETPI_USERDATA/.mpd_cache
+			getent passwd mpd &> /dev/null && userdel -rf mpd
+			[[ -f /lib/systemd/system/mpd.service ]] && rm /lib/systemd/system/mpd.service
+			[[ -d $G_FP_DIETPI_USERDATA/.mpd_cache ]] && rm -R $G_FP_DIETPI_USERDATA/.mpd_cache
+			[[ -f /etc/default/mpd ]] && rm /etc/default/mpd # pre-v6.20
 
 		fi
 
