@@ -1085,16 +1085,16 @@ _EOF_
 		G_DIETPI-NOTIFY 2 'Configuring Cron'
 
 		cat << _EOF_ > /etc/crontab
-#Please use dietpi-cron to change cron start times
+# Please use dietpi-cron to change cron start times
 SHELL=/bin/sh
 PATH=/usr/local/sbin:/usr/local/bin:/sbin:/bin:/usr/sbin:/usr/bin
 
-# m h dom mon dow user  command
-#*/0 * * * *   root    cd / && run-parts --report /etc/cron.minutely
-17 *    * * *   root    cd / && run-parts --report /etc/cron.hourly
-25 1    * * *   root    test -x /usr/sbin/anacron || ( cd / && run-parts --report /etc/cron.daily )
-47 1    * * 7   root    test -x /usr/sbin/anacron || ( cd / && run-parts --report /etc/cron.weekly )
-52 1    1 * *   root    test -x /usr/sbin/anacron || ( cd / && run-parts --report /etc/cron.monthly )
+# m h dom mon dow user command
+#*/0 * * * * root cd / && run-parts --report /etc/cron.minutely
+17 * * * * root cd / && run-parts --report /etc/cron.hourly
+25 1 * * * root test -x /usr/sbin/anacron || { cd / && run-parts --report /etc/cron.daily; }
+47 1 * * 7 root test -x /usr/sbin/anacron || { cd / && run-parts --report /etc/cron.weekly; }
+52 1 1 * * root test -x /usr/sbin/anacron || { cd / && run-parts --report /etc/cron.monthly; }
 _EOF_
 
 		#-----------------------------------------------------------------------------------
