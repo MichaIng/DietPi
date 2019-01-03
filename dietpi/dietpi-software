@@ -3979,9 +3979,13 @@ _EOF_
 			INSTALL_URL_ADDRESS='https://apt.mopidy.com/mopidy.gpg'
 			G_CHECK_URL "$INSTALL_URL_ADDRESS"
 
+			# Install our config file only, if not yet existent, to preserve manual user config.
+			# - This needs to be done prior to APT install, since this would otherwise install a default config file as well.
+			[[ -f /etc/mopidy/mopidy.conf ]] || dps_index=$software_id Download_Install 'mopidy.conf' /etc/mopidy/mopidy.conf
+
 			wget -q -O - "$INSTALL_URL_ADDRESS" | apt-key add -
 			# No Buster list available yet, use stretch.list for testing:
-			if (( $G_DISTRO > 4 )); then
+			if (( $G_DISTRO > 3 )); then
 
 				wget https://apt.mopidy.com/stretch.list -O /etc/apt/sources.list.d/mopidy.list
 
@@ -8647,61 +8651,44 @@ _EOF_
 
 			Banner_Configuration
 
-			useradd -rM mopidy -G dietpi,audio -s /usr/sbin/nologin
-			sed -i "/User=/c\User=mopidy" /lib/systemd/system/mopidy.service
+			# Assure user home, data and cache dir as well on custom configs
+			G_CONFIG_INJECT 'data_dir[[:blank:]]*=' 'data_dir = /mnt/dietpi_userdata/mopidy/data' /etc/mopidy/mopidy.conf '\[core\]'
+			G_CONFIG_INJECT 'cache_dir[[:blank:]]*=' 'cache_dir = /mnt/dietpi_userdata/mopidy/cache' /etc/mopidy/mopidy.conf '\[core\]'
 
-			# - conf
-			mkdir -p $G_FP_DIETPI_USERDATA/mopidy/cache
-			mkdir -p $G_FP_DIETPI_USERDATA/mopidy/data
+			# - Move existing home+data to dietpi_userdata, if not yet existent
+			if [[ -d /var/lib/mopidy && ! -d $G_FP_DIETPI_USERDATA/mopidy ]]; then
 
-			mkdir -p ~/.config/mopidy
+				mv /var/lib/mopidy $G_FP_DIETPI_USERDATA/mopidy
+				mkdir -p $G_FP_DIETPI_USERDATA/mopidy/data
+				# - Non-hidden files/folders are data
+				mv $G_FP_DIETPI_USERDATA/mopidy/* $G_FP_DIETPI_USERDATA/mopidy/data
+				
 
-			G_BACKUP_FP ~/.config/mopidy/mopidy.conf
-			cat << _EOF_ > ~/.config/mopidy/mopidy.conf
-[core]
-cache_dir = $G_FP_DIETPI_USERDATA/mopidy/cache
-config_dir = /etc/mopidy
-data_dir = $G_FP_DIETPI_USERDATA/mopidy/data
+			else
 
-[logging]
-config_file = /etc/mopidy/logging.conf
-debug_file = /var/log/mopidy.log
+				mkdir -p $G_FP_DIETPI_USERDATA/mopidy/data
+				[[ -d /var/lib/mopidy ]] && rm -R /var/lib/mopidy
 
-[local]
-library = images
-media_dir = /mnt
-enabled = true
-scan_timeout = 1000
-scan_flush_threshold = 100
-scan_follow_symlinks = false
-excluded_file_extensions =
-  .directory
-  .html
-  .jpeg
-  .jpg
-  .log
-  .nfo
-  .png
-  .txt
+			fi
 
-[file]
-enabled = true
-media_dirs = /mnt
+			# - Move existing cache to dietpi_userdata, if not yet existent
+			if [[ -d /var/cache/mopidy && ! -d $G_FP_DIETPI_USERDATA/mopidy/cache ]]; then
 
-[m3u]
-playlists_dir = /mnt
+				mv /var/cache/mopidy $G_FP_DIETPI_USERDATA/mopidy/cache
 
-[http]
-enabled = true
-hostname = ::
-port = 6680
-static_dir =
-zeroconf = Mopidy HTTP server on $hostname
+			else
 
-_EOF_
+				mkdir -p $G_FP_DIETPI_USERDATA/mopidy/cache
+				[[ -d /var/cache/mopidy ]] && rm -R /var/cache/mopidy
 
-			#	NB: mopidy uses both config locations, so lets make sure we match them
-			cp ~/.config/mopidy/mopidy.conf /etc/mopidy/mopidy.conf
+			fi
+
+			# - Adjust user group and home dir
+			usermod -a -G dietpi -d $G_FP_DIETPI_USERDATA/mopidy mopidy
+
+			# - Adjust systemd unit to match new group and do not pre-create obsolete cache dir
+			mkdir -p /etc/systemd/system/mopidy.service.d
+			echo -e '[Service]\nGroup=dietpi\nExecStartPre=' > /etc/systemd/system/mopidy.service.d/dietpi.conf
 
 			Download_Test_Media
 
@@ -13154,12 +13141,12 @@ _EOF_
 
 			Banner_Uninstalling
 			G_AGP mopidy
-			rm /etc/apt/sources.list.d/mopidy.list
-			rm -R $G_FP_DIETPI_USERDATA/mopidy
+			[[ -f /etc/apt/sources.list.d/mopidy.list ]] && rm /etc/apt/sources.list.d/mopidy.list
 
-			userdel -rf mopidy
+			which pip &> /dev/null && pip uninstall -y Mopidy-MusicBox-Webclient Mopidy-Local-Images
 
-			pip uninstall -y Mopidy-MusicBox-Webclient Mopidy-Local-Images
+			getent passwd mopidy &> /dev/null && userdel -rf mopidy
+			[[ -d $G_FP_DIETPI_USERDATA/mopidy ]] && rm -R $G_FP_DIETPI_USERDATA/mopidy
 
 		fi
 
@@ -13170,7 +13157,7 @@ _EOF_
 			G_AGP kodi kodi-odroid
 			[[ -f /usr/share/applications/kodi.desktop ]] && rm /usr/share/applications/kodi.desktop
 			[[ -f /root/Desktop/kodi.desktop ]] && rm /root/Desktop/kodi.desktop
-			rm /home/*/Desktop/kodi.desktop &> /dev/null
+			rm -f /home/*/Desktop/kodi.desktop
 			[[ -f /etc/udev/rules.d/99-dietpi-kodi.rules ]] && rm /etc/udev/rules.d/99-dietpi-kodi.rules
 
 		fi
