@@ -1195,8 +1195,37 @@ _EOF_
 
 		G_DIETPI-NOTIFY 2 'Configuring htop'
 
-		mkdir -p /root/.config/htop
-		cp /DietPi/dietpi/conf/htoprc /root/.config/htop/htoprc
+		G_ERROR_HANDLER_COMMAND='/etc/htoprc'
+		cat << _EOF_ > $G_ERROR_HANDLER_COMMAND
+# DietPi default config for htop
+# Location: /etc/htoprc
+#
+# NB: htop will create "~/.config/htop/htoprc" based on this defaults, when opened the first time by per-user.
+#     Use setup (F2) within htop GUI or edit "~/.config/htop/htoprc" to change settings for your user.
+fields=48 18 46 47 49 1
+sort_key=46
+sort_direction=1
+hide_threads=0
+hide_kernel_threads=1
+hide_userland_threads=1
+shadow_other_users=0
+show_thread_names=0
+highlight_base_name=1
+highlight_megabytes=1
+highlight_threads=0
+tree_view=0
+header_margin=1
+detailed_cpu_time=0
+cpu_count_from_zero=0
+color_scheme=0
+delay=15
+left_meters=AllCPUs Memory Swap
+left_meter_modes=1 1 1
+right_meters=Tasks LoadAverage Uptime
+right_meter_modes=2 2 2
+_EOF_
+		G_ERROR_HANDLER_EXITCODE=$?
+		G_ERROR_HANDLER
 
 		G_DIETPI-NOTIFY 2 'Configuring fake-hwclock:'
 
