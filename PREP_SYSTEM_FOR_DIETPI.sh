@@ -1267,6 +1267,7 @@ _EOF_
 		# - Move fake-hwclock data store to RAM: https://github.com/Fourdee/DietPi/issues/2396
 		systemctl stop fake-hwclock
 		G_CONFIG_INJECT 'FILE=' 'FILE=/tmp/fake-hwclock.dat' /etc/default/fake-hwclock
+		mkdir -p /lib/systemd/system/fake-hwclock.service.d
 		cat << _EOF_ > /lib/systemd/system/fake-hwclock.service.d/dietpi-ram.conf
 [Service]
 ExecStartPre=$(which cp) /etc/fake-hwclock.dat /tmp/fake-hwclock.dat
