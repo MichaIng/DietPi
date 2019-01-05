@@ -1082,9 +1082,10 @@ _EOF_
 		#-----------------------------------------------------------------------------------
 		#Cron Jobs
 
-		G_DIETPI-NOTIFY 2 'Configuring Cron'
+		G_DIETPI-NOTIFY 2 'Configuring Cron:'
 
-		cat << _EOF_ > /etc/crontab
+		G_ERROR_HANDLER_COMMAND='/etc/crontab'
+		cat << _EOF_ > $G_ERROR_HANDLER_COMMAND
 # Please use dietpi-cron to change cron start times
 SHELL=/bin/sh
 PATH=/usr/local/sbin:/usr/local/bin:/sbin:/bin:/usr/sbin:/usr/bin
@@ -1096,6 +1097,8 @@ PATH=/usr/local/sbin:/usr/local/bin:/sbin:/bin:/usr/sbin:/usr/bin
 47 1 * * 7 root test -x /usr/sbin/anacron || { cd / && run-parts --report /etc/cron.weekly; }
 52 1 1 * * root test -x /usr/sbin/anacron || { cd / && run-parts --report /etc/cron.monthly; }
 _EOF_
+		G_ERROR_HANDLER_EXITCODE=$?
+		G_ERROR_HANDLER
 
 		#-----------------------------------------------------------------------------------
 		#Network
@@ -1148,11 +1151,39 @@ _EOF_
 
 		/DietPi/dietpi/func/dietpi-obtain_hw_model
 
-		G_DIETPI-NOTIFY 2 'Configuring Network:'
+		G_DIETPI-NOTIFY 2 'Configuring network interfaces:'
 
-		[[ -f /etc/network/interfaces ]] && rm -R /etc/network/interfaces # armbian symlink for bulky network-manager
+		[[ -f /etc/network/interfaces ]] && rm -R /etc/network/interfaces # ARMbian symlink for bulky network-manager
 
-		G_RUN_CMD cp /DietPi/dietpi/conf/network_interfaces /etc/network/interfaces
+		G_ERROR_HANDLER_COMMAND='/etc/network/interfaces'
+		cat << _EOF_ > $G_ERROR_HANDLER_COMMAND
+#/etc/network/interfaces
+#Please use DietPi-Config to modify network settings.
+
+# Local
+auto lo
+iface lo inet loopback
+
+# Ethernet
+#allow-hotplug eth0
+iface eth0 inet dhcp
+address 192.168.0.100
+netmask 255.255.255.0
+gateway 192.168.0.1
+#dns-nameservers 8.8.8.8 8.8.4.4
+
+# Wifi
+#allow-hotplug wlan0
+iface wlan0 inet dhcp
+address 192.168.0.100
+netmask 255.255.255.0
+gateway 192.168.0.1
+wireless-power off
+wpa-conf /etc/wpa_supplicant/wpa_supplicant.conf
+#dns-nameservers 8.8.8.8 8.8.4.4
+_EOF_
+		G_ERROR_HANDLER_EXITCODE=$?
+		G_ERROR_HANDLER
 
 		# - Remove all predefined eth*/wlan* adapter rules
 		rm -f /etc/udev/rules.d/70-persist*nt-net.rules
@@ -1193,7 +1224,7 @@ _EOF_
 
 		echo 'DietPi' > /etc/hostname
 
-		G_DIETPI-NOTIFY 2 'Configuring htop'
+		G_DIETPI-NOTIFY 2 'Configuring htop:'
 
 		G_ERROR_HANDLER_COMMAND='/etc/htoprc'
 		cat << _EOF_ > $G_ERROR_HANDLER_COMMAND
