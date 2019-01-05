@@ -1260,23 +1260,12 @@ _EOF_
 
 		G_DIETPI-NOTIFY 2 'Configuring fake-hwclock:'
 
-		# - allow times in the past
 		systemctl stop fake-hwclock
 
+		# - allow times in the past
 		G_CONFIG_INJECT 'FORCE=' 'FORCE=force' /etc/default/fake-hwclock
-		# - Move fake-hwclock data store to RAM: https://github.com/Fourdee/DietPi/issues/2396
-		systemctl stop fake-hwclock
-		G_CONFIG_INJECT 'FILE=' 'FILE=/tmp/fake-hwclock.data' /etc/default/fake-hwclock
-		mkdir -p /lib/systemd/system/fake-hwclock.service.d
-		cat << _EOF_ > /lib/systemd/system/fake-hwclock.service.d/dietpi-ram.conf
-[Service]
-ExecStartPre=$(which cp) /etc/fake-hwclock.data /tmp/fake-hwclock.data
-#ExecStart=$(which fake-hwclock) load $FORCE
-ExecStopPre=$(which fake-hwclock) save
-ExecStop=$(which cp) /tmp/fake-hwclock.data /etc/fake-hwclock.data
-_EOF_
-		systemctl daemon-reload
-		systemctl restart fake-hwclock
+
+		systemctl restart fake-hwclock #failsafe, apply now if date is way far back...
 
 		G_DIETPI-NOTIFY 2 'Configuring enable serial console:'
 
