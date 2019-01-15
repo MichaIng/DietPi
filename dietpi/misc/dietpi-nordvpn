@@ -1,0 +1,299 @@
+#!/bin/bash
+{
+	#////////////////////////////////////
+	# DietPi NordVPN
+	#
+	#////////////////////////////////////
+	# Created by Daniel Knight / daniel.knight@dietpi.com / dietpi.com
+	#
+	#////////////////////////////////////
+	#
+	# Info:
+	# - GUI to setup a NordVPN connection
+	# - Automatically starts service during boot
+	# Usage:
+	# - /DietPi/dietpi/misc/dietpi-nordvpn
+	#////////////////////////////////////
+
+	#Import DietPi-Globals ---------------------------------------------------------------
+	. /DietPi/dietpi/func/dietpi-globals
+	G_PROGRAM_NAME='DietPi-NordVPN'
+	G_CHECK_ROOT_USER
+	G_CHECK_ROOTFS_RW
+	G_INIT
+	#Import DietPi-Globals ---------------------------------------------------------------
+
+	FP_SETTINGS='/var/lib/dietpi/dietpi-software/installed/dietpi-nordvpn/settings.conf'
+	NORDVPN_USERNAME=''
+	NORDVPN_PASSWORD=''
+	NORDVPN_SERVER=''
+	PROTOCOL='udp'
+
+	NORDVPN_CONNECTED=0
+	MAX_WAIT_FOR_CONNECTION=5
+
+	Init(){
+
+		#Check installed
+		while ! grep -q 'aSOFTWARE_INSTALL_STATE\[171\]=2' /DietPi/dietpi/.installed
+		do
+
+			if G_WHIP_YES_NO "$G_PROGRAM_NAME is not installed, would you like to install it now?"; then
+
+				/DietPi/dietpi/dietpi-software install 171
+
+			else
+
+				TARGETMENUID=-1
+				break
+
+			fi
+
+		done
+
+		Read_Settings
+
+	}
+
+	Check_Connected(){
+
+		NORDVPN_CONNECTED=0
+		local status=1
+		#if systemctl status dietpi-nordvpn | grep -qi 'initialization sequence completed'; then
+		if ip route | grep -q 'tun0'; then
+
+			status=0
+			NORDVPN_CONNECTED=1
+
+		fi
+
+		return $status
+
+	}
+
+	Read_Settings(){
+
+		if [[ -f $FP_SETTINGS ]]; then
+
+			NORDVPN_USERNAME="$(sed -n 1p $FP_SETTINGS)"
+			NORDVPN_PASSWORD="$(sed -n 2p $FP_SETTINGS)"
+			NORDVPN_SERVER="$(sed -n 3p $FP_SETTINGS)"
+			PROTOCOL=$(sed -n 4p $FP_SETTINGS)
+
+		fi
+
+	}
+
+	Save_Settings(){
+
+		systemctl stop dietpi-nordvpn
+
+		cat << _EOF_ > $FP_SETTINGS
+$NORDVPN_USERNAME
+$NORDVPN_PASSWORD
+$NORDVPN_SERVER
+$PROTOCOL
+_EOF_
+
+		chmod 770 $FP_SETTINGS
+		chown root:root $FP_SETTINGS
+
+		G_CONFIG_INJECT 'auth-user-pass' "auth-user-pass $FP_SETTINGS" /etc/openvpn/ovpn_$PROTOCOL/$NORDVPN_SERVER
+
+		cat << _EOF_ > /lib/systemd/system/dietpi-nordvpn.service
+[Unit]
+Description=NordVPN (DietPi)
+After=network.target dietpi-boot.service
+
+[Service]
+User=root
+Type=simple
+ExecStart=$(which openvpn) /etc/openvpn/ovpn_$PROTOCOL/$NORDVPN_SERVER
+
+[Install]
+WantedBy=multi-user.target
+_EOF_
+
+		systemctl daemon-reload
+		G_RUN_CMD systemctl enable dietpi-nordvpn
+		G_RUN_CMD systemctl restart dietpi-nordvpn
+
+		for (( i=1; i<=$MAX_WAIT_FOR_CONNECTION; i++ ))
+		do
+
+			if Check_Connected; then
+
+				break
+
+			else
+
+				G_DIETPI-NOTIFY 2 "Waiting for connection ($i/$MAX_WAIT_FOR_CONNECTION)"
+				sleep 1
+
+			fi
+
+		done
+
+		if (( ! $NORDVPN_CONNECTED )); then
+
+			G_WHIP_MSG "Connection failed/time out: $NORDVPN_SERVER\n\nPlease verify account details are correct.\n\nIf problems persist, please check the status of 'systemctl status dietpi-nordvpn -l'"
+
+		fi
+
+	}
+
+	#/////////////////////////////////////////////////////////////////////////////////////
+	# Whip
+	#/////////////////////////////////////////////////////////////////////////////////////
+	TARGETMENUID=0
+	LAST_SELECTED_NAME=0
+
+	Menu_Exit(){
+
+		G_WHIP_SIZE_X_MAX=50
+		G_WHIP_YESNO "Exit $G_PROGRAM_NAME?"
+		if (( $? == 0 )); then
+
+			#exit
+			TARGETMENUID=-1
+
+		else
+
+			#Return to Main Menu
+			TARGETMENUID=0
+
+		fi
+
+	}
+
+	#TARGETMENUID=0
+	Menu_Main(){
+
+		local text_status='Status:\n'
+		#if ps aux | grep -q "[o]penvpn /etc/openvpn/ovpn_$PROTOCOL/$NORDVPN_SERVER"; then
+		#if ip r | grep tun[0-9] | grep -ci -m1 'link'; then
+		if Check_Connected; then
+
+			text_status+=" - Connected to $NORDVPN_SERVER"
+
+		else
+
+			text_status+=' - Disconnected\n'
+			text_status+=' - NordVPN subscription: https://go.nordvpn.net/aff_c?offer_id=15&aff_id=5305&url_id=902'
+
+		fi
+
+		G_WHIP_MENU_ARRAY=('' '●─ Global Options ')
+		G_WHIP_MENU_ARRAY+=('Username' ": [$NORDVPN_USERNAME]")
+		G_WHIP_MENU_ARRAY+=('Password' ": [$NORDVPN_PASSWORD]")
+		G_WHIP_MENU_ARRAY+=('Server' ": [$NORDVPN_SERVER]")
+		G_WHIP_MENU_ARRAY+=('Refresh' ': Update VPN connection status')
+		if (( $NORDVPN_CONNECTED )); then
+
+			G_WHIP_MENU_ARRAY+=('Disconnect' '')
+
+		fi
+
+		G_WHIP_MENU_ARRAY+=('' '●─ Save settings ')
+		G_WHIP_MENU_ARRAY+=('Apply' ': Save settings and restart VPN connection')
+
+		G_WHIP_DEFAULT_ITEM="$LAST_SELECTED_NAME"
+		G_WHIP_BUTTON_CANCEL_TEXT='Exit'
+		G_WHIP_MENU "$text_status"
+		if (( $? == 0 )); then
+
+			LAST_SELECTED_NAME="$G_WHIP_RETURNED_VALUE"
+
+			if [[ $G_WHIP_RETURNED_VALUE == 'Apply' ]]; then
+
+				Save_Settings
+
+			elif [[ $G_WHIP_RETURNED_VALUE == 'Username' ]]; then
+
+				G_WHIP_DEFAULT_ITEM="$NORDVPN_USERNAME"
+				if G_WHIP_INPUTBOX 'Please enter your NordVPN username:'; then
+
+					NORDVPN_USERNAME="$G_WHIP_RETURNED_VALUE"
+
+				fi
+
+			elif [[ $G_WHIP_RETURNED_VALUE == 'Password' ]]; then
+
+				if G_WHIP_PASSWORD 'Please enter your NordVPN password:'; then
+
+					NORDVPN_PASSWORD="$result"
+					unset result
+
+				fi
+
+			elif [[ $G_WHIP_RETURNED_VALUE == 'Disconnect' ]]; then
+
+				G_RUN_CMD systemctl stop dietpi-nordvpn
+
+			elif [[ $G_WHIP_RETURNED_VALUE == 'Server' ]]; then
+
+				#	select protocol
+				G_WHIP_MENU_ARRAY=(
+
+					'udp' ': Recommended'
+					'tcp' ''
+
+				)
+
+				G_WHIP_DEFAULT_ITEM=$PROTOCOL
+				if G_WHIP_MENU 'Please select the connection protocol type:'; then
+
+					PROTOCOL=$G_WHIP_RETURNED_VALUE
+
+				fi
+
+				#	Select server
+				G_WHIP_MENU_ARRAY=()
+				G_DIETPI-NOTIFY 2 'Populating NordVPN server list, please wait'
+				cd /etc/openvpn/ovpn_$PROTOCOL
+				for i in *
+				do
+
+					G_WHIP_MENU_ARRAY+=($i '')
+
+				done
+
+				cd /tmp/$G_PROGRAM_NAME
+
+				G_WHIP_DEFAULT_ITEM="$NORDVPN_SERVER"
+				if G_WHIP_MENU 'Please select a NordVPN server to use'; then
+
+					NORDVPN_SERVER="$G_WHIP_RETURNED_VALUE"
+
+				fi
+
+			fi
+
+		else
+
+			Menu_Exit
+
+		fi
+
+	}
+
+	#/////////////////////////////////////////////////////////////////////////////////////
+	# Main Loop
+	#/////////////////////////////////////////////////////////////////////////////////////
+	#-----------------------------------------------------------------------------------
+	Init
+	#-----------------------------------------------------------------------------------
+	while (( $TARGETMENUID >= 0 ))
+	do
+
+		if (( $TARGETMENUID == 0 )); then
+
+			Menu_Main
+
+		fi
+
+	done
+	#-----------------------------------------------------------------------------------
+	exit
+	#-----------------------------------------------------------------------------------
+}

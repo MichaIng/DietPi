@@ -4,14 +4,13 @@ about: Suggest a software title to be added to DietPi-Software
 
 ---
 
-## Creating a software request:
+### Creating a software request
 
-
-#### Give us some formal software information:
+#### Formal software information
 - Software title | <!-- EG: Nextcloud -->
 - Short description | <!-- Personal cloud and data sharing solution -->
+- Official URL (if available) | <!-- https://nextcloud.com -->
 - GitHub URL (if available) | <!-- https://github.com/nextcloud/server -->
-- External URL (if available) | <!-- https://nextcloud.com -->
 - (Official) install documentation | <!-- https://docs.nextcloud.com/server/13/admin_manual/installation/index.html -->
 
 #### Are there similar/alternative software titles available with DietPi-Software?

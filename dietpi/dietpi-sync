@@ -13,97 +13,88 @@
 	# - Allows user to sync a Source and Target directory.
 	#
 	# Usage:
-	# - /DietPi/dietpi/dietpi-sync  0 = Menu
-	# - /DietPi/dietpi/dietpi-sync  1 = Sync
+	# - /DietPi/dietpi/dietpi-sync		= Menu
+	# - /DietPi/dietpi/dietpi-sync 1	= Sync
 	#////////////////////////////////////
 
 	#Import DietPi-Globals ---------------------------------------------------------------
 	. /DietPi/dietpi/func/dietpi-globals
+	G_PROGRAM_NAME='DietPi-Sync'
 	G_CHECK_ROOT_USER
 	G_CHECK_ROOTFS_RW
-	G_PROGRAM_NAME='DietPi-Sync'
 	G_INIT
 	#Import DietPi-Globals ---------------------------------------------------------------
 
+	#Restart rsync service, if stopped during DietPi-Sync run: https://github.com/Fourdee/DietPi/issues/1869
+	SERVICE_CONTROL=0
+	G_EXIT_CUSTOM(){ (( $SERVICE_CONTROL )) && G_RUN_CMD systemctl start rsync; }
+
 	#Grab Input (valid interger)
 	INPUT=0
-	if disable_error=1 G_CHECK_VALIDINT $1; then
-
-		INPUT=$1
-
-	fi
+	disable_error=1 G_CHECK_VALIDINT "$1" && INPUT=$1
 
 	#/////////////////////////////////////////////////////////////////////////////////////
 	# Sync System
 	#/////////////////////////////////////////////////////////////////////////////////////
 	EXIT_CODE=0
-	FP_LOG='/var/log/dietpi-sync.log'
 
-	#Sync Filepaths
+	#File paths
+	FP_SETTINGS='/DietPi/dietpi/.dietpi-sync_settings'
+	FP_FILTER_INCLUDE_EXCLUDE='.dietpi-sync_include_exclude'
+	FP_USER_FILTER_INCLUDE_EXCLUDE='/DietPi/dietpi/.dietpi-sync_inc_exc'
+	FP_LOG='.dietpi-sync.log'
 	FP_SOURCE='/mnt/Source'
 	FP_TARGET='/mnt/Target'
 
-	#DietPi Mounts
-	FP_SAMBA_MOUNT='/mnt/samba'
-
-	#file applied to successful Sync (stored in $FP_TARGET/$SYNC_STATS_FILENAME)
-	SYNC_STATS_FILENAME='.dietpi-sync_stats'
-
-	#Exclude/include file
-	FP_FILTER_INCLUDE_EXCLUDE='.dietpi-sync_include_exclude'
-	FP_USER_FILTER_INCLUDE_EXCLUDE='/DietPi/dietpi/.dietpi-sync_inc_exc'
-
-	#Extra options
+	#Extra settings
 	SYNC_DELETE_MODE=0
-	SYNC_COMPRESSION=0
 	SYNC_CRONDAILY=0
 
 	Create_Filter_Include_Exclude(){
 
+		#Exclude files by name
 		cat << _EOF_ > $FP_FILTER_INCLUDE_EXCLUDE
-#Global - Folders
-- $FP_TARGET
-- /boot/dietpi/
-- /DietPi/
-- /dev/
-- /proc/
-- /sys/
-- /tmp/
-- /run/
-
-#Global - Files
 - $FP_LOG
-- $FP_DIETPISYNC_SETTINGS
-- $SYNC_STATS_FILENAME
-- /var/swap
+- $FP_FILTER_INCLUDE_EXCLUDE
 - .swap*
 - *.tmp
 # - MS Windows specific
 - Thumbs.db
 - desktop.ini
 - SyncToy* # MS SyncToy
-- System Volume Information #  - causes error code 23 (permission denied)
-
+- System Volume Information # causes error code 23 (permission denied)
 _EOF_
 
+		#Exclude specific files/dirs by path
+		local aexclude=(
+
+			"$FP_TARGET"
+			$FP_SETTINGS
+			$FP_USER_FILTER_INCLUDE_EXCLUDE
+			/boot/dietpi/
+			/var/swap
+
+		)
+
+		for i in "${aexclude[@]}"
+		do
+
+			# - Exclude only, if inside source location, via path, relative to source location
+			[[ $i == ${FP_SOURCE}/* ]] && echo "- $(realpath --relative-to="$FP_SOURCE" "$i")" >> $FP_FILTER_INCLUDE_EXCLUDE
+
+		done
+
+		unset aexclude
+
 		#Add users additional list
-		if [[ -f $FP_USER_FILTER_INCLUDE_EXCLUDE ]]; then
-
-			cat $FP_USER_FILTER_INCLUDE_EXCLUDE >> $FP_FILTER_INCLUDE_EXCLUDE
-
-		fi
+		[[ -f $FP_USER_FILTER_INCLUDE_EXCLUDE ]] && cat $FP_USER_FILTER_INCLUDE_EXCLUDE >> $FP_FILTER_INCLUDE_EXCLUDE
 
 	}
 
 	Banner_Start(){
 
 		local mode='Sync'
-		#Dry Run?
-		if (( $SYNC_DRY_RUN )); then
-
-			mode='Dry Run'
-
-		fi
+		(( ${SYNC_DRY_RUN:=0} )) && mode='Dry Run'
 
 		G_DIETPI-NOTIFY 3 "$G_PROGRAM_NAME" "$mode"
 
@@ -113,25 +104,33 @@ _EOF_
 
 		Banner_Start
 
-		# Userdata location verify
-		G_CHECK_USERDATA
+		#Stop rsync service: https://github.com/Fourdee/DietPi/issues/1869
+		if systemctl is-active rsync &> /dev/null; then
 
-		#Generate Target dir.
-		mkdir -p "$FP_TARGET"
+			SERVICE_CONTROL=1
+			G_RUN_CMD systemctl stop rsync
 
-		systemctl stop rsync &> /dev/null # : https://github.com/Fourdee/DietPi/issues/1869
-		killall -w rsync &> /dev/null
+		fi
+		killall -qw rsync
 
-		#Error: Folder not found
+		#Pre-create target dir to check R/W access
+                # - Remove previous mkdir log
+		[[ -f /var/log/dietpi-sync.log ]] && rm /var/log/dietpi-sync.log
+		mkdir -p "$FP_TARGET" &> $FP_TMP
+
+		#Error: Dir not found
 		if [[ ! -d $FP_TARGET ]]; then
 
-			G_WHIP_MSG "Error:\n\nSync failed, unable to create Target directory $FP_TARGET"
+			G_WHIP_MSG "[FAILED] Unable to pre-create target directory: $FP_TARGET\n\n\"mkdir\" reported the following error:\n$(<$FP_TMP)"
+			echo "$(date +"%d-%m-%Y_%T") [FAILED] Unable to pre-create target directory: $FP_TARGET" >> $FP_LOG
+			mv $FP_LOG /var/log/dietpi-sync.log
 
 		#Error: Rsync is already running
-		elif (( $(ps aux | grep -ci -m1 "[r]sync") )); then
+		elif pgrep '[r]sync' &> /dev/null; then
 
-			G_WHIP_MSG 'Sync Failed:\n\nA sync job could not be started as rsync is already running.'
-			echo -e "Sync failed: $(date +"%d-%m-%Y_%H%M"). Rsync is already running." >> "$FP_TARGET/$SYNC_STATS_FILENAME"
+			G_WHIP_MSG '[FAILED] Rsync is already running and failed to stop gracefully'
+			# Add info to target log location directly, preserve previous rsync log
+			echo "$(date +"%d-%m-%Y_%T") [FAILED] Rsync is already running and failed to stop gracefully" >> "$FP_TARGET/$FP_LOG"
 
 		#Start sync
 		else
@@ -140,204 +139,155 @@ _EOF_
 			Create_Filter_Include_Exclude
 
 			#Rsync options
-			local rync_options+="-aHP4 --info=name0 --info=progress2 --human-readable --delete-excluded --exclude-from=$FP_FILTER_INCLUDE_EXCLUDE --log-file=$FP_LOG "
-
-			# - Compression?
-			if (( $SYNC_COMPRESSION )); then
-
-				rync_options+='z'
-
-			fi
-
-			# - Dry Run?
-			if (( $SYNC_DRY_RUN )); then
-
-				rync_options+='n'
-
-			fi
-
+			local rsync_options="-aHP4h --info=name0 --info=progress2 --delete-excluded --exclude-from=$FP_FILTER_INCLUDE_EXCLUDE --log-file=$FP_LOG"
 			# - Delete mode?
-			if (( $SYNC_DELETE_MODE )); then
+			(( $SYNC_DELETE_MODE )) && rsync_options+=' --delete'
 
-				rync_options+=' --delete'
+			#Dry Run and verify enough space, in case if real sync
+			rsync --dry-run --stats $rsync_options "$FP_SOURCE"/ "$FP_TARGET"/ > .dietpi-sync_result
+			EXIT_CODE=$?
+			if ! (( $SYNC_DRY_RUN || $EXIT_CODE )); then
 
-			fi
+				# - NB: working in KiB until end MiB conversion, as, don't like using long long int, and, KiB should offer a good end result.
+				local old_backup_size=$(du -ks "$FP_TARGET" | awk '{print $1}')
+				local new_backup_size=$(( $(grep -m1 'Total file size' .dietpi-sync_result | sed 's/[^0-9]*//g') / 1024 ))
+				local total_file_count=$(( $(grep -m1 'Number of files' .dietpi-sync_result | awk '{print $6}' | sed 's/[^0-9]*//g') ))
+				local total_folder_count=$(( $(grep -m1 'Number of files' .dietpi-sync_result | awk '{print $8}' | sed 's/[^0-9]*//g') ))
+				local target_fs_blocksize=$(stat -fc %s "$FP_TARGET")
+				new_backup_size=$(( $new_backup_size + ( $total_file_count + $total_folder_count ) * $target_fs_blocksize / 1024 ))
+				local end_result=$(( ( $new_backup_size - $old_backup_size ) / 1024 + 1 ))
 
-			#Verify enough space
-			#	NB: working in KiB until end MiB conversion, as, don't like using long long int, and, KiB should offer a good end result.
-			local old_backup_size=$(du -ks "$FP_TARGET" | awk '{print $1}')
+				if ! G_CHECK_FREESPACE "$FP_TARGET" $end_result; then
 
-			rsync --dry-run --stats $rync_options "$FP_SOURCE"/ "$FP_TARGET"/ > /tmp/dietpi-sync_result
-			local new_backup_size=$(( $(grep -m1 'Total file size' /tmp/dietpi-sync_result | sed 's/[^0-9]*//g') / 1024 ))
-			local total_file_count=$(( $(grep -m1 'Number of files' /tmp/dietpi-sync_result | awk '{print $6}' | sed 's/[^0-9]*//g') ))
-			local total_folder_count=$(( $(grep -m1 'Number of files' /tmp/dietpi-sync_result | awk '{print $8}' | sed 's/[^0-9]*//g') ))
-			local target_fs_blocksize=$(stat -fc %s "$FP_TARGET")
-			new_backup_size=$(( $new_backup_size + ( $total_file_count + $total_folder_count ) * $target_fs_blocksize / 1024 ))
-			local end_result=$(( ( $new_backup_size - $old_backup_size ) / 1024 + 1 ))
-			rm /tmp/dietpi-sync_result
+					G_WHIP_BUTTON_OK_TEXT='Ignore'
+					G_WHIP_BUTTON_CANCEL_TEXT='Exit'
+					if ! G_WHIP_YESNO 'The system sync target location appears to have insufficient free space to successfully finish the backup.
+However, this check is a rough estimation in reasonable time, thus it could be marginally incorrect.\n
+Would you like to override this warning and continue with the backup?'; then
 
-			if ! G_CHECK_FREESPACE "$FP_TARGET" $end_result; then
+						echo "$(date +"%d-%m-%Y_%T") [FAILED] Insufficient free space" >> $FP_LOG
+						mv $FP_LOG "$FP_TARGET"/
+						return 1
 
-				G_WHIP_BUTTON_OK_TEXT='Ignore'
-				G_WHIP_BUTTON_CANCEL_TEXT='Exit'
-				G_WHIP_YESNO 'The system sync target location appears to have insufficient free space to successfully finish the backup.\nHowever, this check is a rough estimation in reasonable time, thus it could be marginally incorrect.\n\nWould you like to override this warning and continue with the backup?'
-				if (( $? )); then
-
-					echo -e "Sync canceled: due to insufficient free space: $(date +"%d-%m-%Y_%H%M")" >> "$FP_TARGET/$SYNC_STATS_FILENAME"
-					break
+					fi
 
 				fi
 
+				#Real sync
+				G_DIETPI-NOTIFY 2 "Sync | $FP_SOURCE > $FP_TARGET: in progress, please wait..."
+				# - Clear log file from space check
+				> $FP_LOG
+				rsync $rsync_options "$FP_SOURCE"/ "$FP_TARGET"/
+				EXIT_CODE=$?
+
 			fi
 
-			G_DIETPI-NOTIFY 2 "Sync | $FP_SOURCE > $FP_TARGET: in progress, please wait..."
-
-			#Sync
-			rsync $rync_options "$FP_SOURCE"/ "$FP_TARGET"/
-			EXIT_CODE=$?
 			G_DIETPI-NOTIFY -1 $EXIT_CODE "$G_PROGRAM_NAME"
-			if (( $EXIT_CODE == 0 )); then
 
-				echo -e "Sync completed: $(date +"%d-%m-%Y_%H%M")" >> "$FP_TARGET/$SYNC_STATS_FILENAME"
+			if (( ! $EXIT_CODE )); then
+
 				if (( ! $SYNC_DRY_RUN )); then
 
-					G_WHIP_MSG "Sync completed:\n - $FP_SOURCE > $FP_TARGET"
+					echo "$(date +"%d-%m-%Y_%T") [  OK  ] Sync completed" >> $FP_LOG
+					G_WHIP_MSG "[  OK  ] Sync completed:\n - $FP_SOURCE > $FP_TARGET"
 
 				else
 
-					G_WHIP_MSG "Dry Run Sync completed (NO modifications):\n - $FP_SOURCE > $FP_TARGET"
+					echo "$(date +"%d-%m-%Y_%T") [  OK  ] Dry run completed" >> $FP_LOG
+					G_WHIP_MSG "[  OK  ] Dry Run Sync completed (NO modifications):\n - $FP_SOURCE > $FP_TARGET"
 
 				fi
 
 			else
 
-				echo -e "Sync failed: please see the log file for more information ($FP_LOG): $(date +"%d-%m-%Y_%H%M")" >> "$FP_TARGET/$SYNC_STATS_FILENAME"
-				G_WHIP_MSG "Sync failed:\n - $FP_SOURCE > $FP_TARGET\n\nYou will given an option to view the logfile on the next screen. Please check it for information and/or errors."
+				echo "$(date +"%d-%m-%Y_%T") [FAILED] Please see the log file for more information: $FP_TARGET/$FP_LOG" >> $FP_LOG
+				G_WHIP_MSG "[FAILED] $FP_SOURCE > $FP_TARGET\n\nYou will given an option to view the logfile on the next screen. Please check it for information and/or errors."
 
 			fi
 
 			log=1 G_WHIP_VIEWFILE $FP_LOG
-
-			#return to main menu
-			TARGETMENUID=0
+			mv $FP_LOG "$FP_TARGET"/
 
 		fi
-
-		systemctl start rsync &> /dev/null # : https://github.com/Fourdee/DietPi/issues/1869
 
 	}
 
 	Check_Available_DietPi_Mounts(){
 
-		local temp_file_mounts='.dietpi-sync_dietpi_mounts'
-		df -h > "$temp_file_mounts"
+		local samba_mount_out=$(df -h | grep "$fp_samba_mount")
+		if [[ $samba_mount_out ]]; then
 
-		#Samba Client
-		SAMBA_MOUNT_AVAILABLE=0
-		SAMBA_MOUNT_TEXT="Not mounted ($FP_SAMBA_MOUNT). Select to setup."
-		if (( $(grep -ci -m1 "/mnt/samba" $temp_file_mounts) )); then
-
-			SAMBA_MOUNT_AVAILABLE=1
-			SAMBA_MOUNT_TEXT="Size: $(df -h | grep /mnt/samba | awk '{print $2}')B | Available: $(df -h | grep /mnt/samba | awk '{print $4}')B"
+			samba_mount_available=1
+			samba_mount_text=$(awk '{print "Size: "$2"B | Available: "$4"B"}' <<< $samba_mount_out)
 
 		fi
-
-		rm $temp_file_mounts
 
 	}
 
 	#/////////////////////////////////////////////////////////////////////////////////////
 	# Settings File
 	#/////////////////////////////////////////////////////////////////////////////////////
-	#Settings File
-	FP_DIETPISYNC_SETTINGS='/DietPi/dietpi/.dietpi-sync_settings'
-
 	Write_Settings_File(){
 
-		cat << _EOF_ > $FP_DIETPISYNC_SETTINGS
+		cat << _EOF_ > $FP_SETTINGS
 FP_SOURCE=$FP_SOURCE
 FP_TARGET=$FP_TARGET
 SYNC_DELETE_MODE=$SYNC_DELETE_MODE
-SYNC_COMPRESSION=$SYNC_COMPRESSION
 SYNC_CRONDAILY=$SYNC_CRONDAILY
 _EOF_
 
 	}
 
-	Read_Settings_File(){
-
-		if [[ -f $FP_DIETPISYNC_SETTINGS ]]; then
-
-			. $FP_DIETPISYNC_SETTINGS
-
-		fi
-
-	}
+	Read_Settings_File(){ [[ -f $FP_SETTINGS ]] && . $FP_SETTINGS; }
 
 	#/////////////////////////////////////////////////////////////////////////////////////
 	# MENUS
 	#/////////////////////////////////////////////////////////////////////////////////////
 	TARGETMENUID=0
 
-	SAMBA_MOUNT_AVAILABLE=0
-	SAMBA_MOUNT_TEXT='Not available'
-
-	SYNC_DRY_RUN=0
-
-	SYNC_MODE_TEXT='Disabled'
-	SYNC_COMPRESSION_TEXT='Disabled'
-	SYNC_CRONDAILY_TEXT='Disabled'
+	SYNC_MODE_TEXT=''
+	SYNC_CRONDAILY_TEXT=''
 
 	#TARGETMENUID=0
 	Menu_Main(){
 
 		SYNC_MODE_TEXT='[Off]'
-		if (( $SYNC_DELETE_MODE )); then
-
-			SYNC_MODE_TEXT='[On]'
-
-		fi
-
-		SYNC_COMPRESSION_TEXT='[Off]'
-		if (( $SYNC_COMPRESSION )); then
-
-			SYNC_COMPRESSION_TEXT='[On]'
-
-		fi
+		(( $SYNC_DELETE_MODE )) && SYNC_MODE_TEXT='[On]'
 
 		SYNC_CRONDAILY_TEXT='[Off]'
-		if (( $SYNC_CRONDAILY )); then
+		(( $SYNC_CRONDAILY )) && SYNC_CRONDAILY_TEXT='[On]'
 
-			SYNC_CRONDAILY_TEXT='[On]'
+		if [[ -f $FP_TARGET/$FP_LOG ]]; then
 
-		fi
+			local sync_last_status=$(tail -1 "$FP_TARGET/$FP_LOG")
 
-		local sync_last_completed='No previous sync found in target directory.'
-		if [[ -f $FP_TARGET/$SYNC_STATS_FILENAME ]]; then
+		elif [[ -f /var/log/dietpi-sync.log ]]; then
 
-			sync_last_completed=$(grep '^Sync completed' "$FP_TARGET/$SYNC_STATS_FILENAME" | tail -1 | awk '{print $3}')
+			local sync_last_status=$(tail -1 /var/log/dietpi-sync.log)
+
+		else
+
+			local sync_last_status='No previous sync found in target directory.'
 
 		fi
 
 		G_WHIP_MENU_ARRAY=(
 
 			'' '●─ Info '
-			'Help' "What does $G_PROGRAM_NAME do?"
+			'Help' ": What does $G_PROGRAM_NAME do?"
 			'' '●─ Options '
 			'Source Location' ': Change the Source directory.'
 			'Target Location' ': Change the Target directory.'
 			"Delete Mode" ": $SYNC_MODE_TEXT"
-			"Compression" ": $SYNC_COMPRESSION_TEXT"
 			"Sync: Daily" ": $SYNC_CRONDAILY_TEXT"
 			'' '●─ Run '
-			'Sync: Dry Run' 'Run a test Sync without modifying any data.'
-			'Sync: Now' 'Sync the Source location to the Target location.'
+			'Sync: Dry Run' ': Run a test Sync without modifying any data.'
+			'Sync: Now' ': Sync the Source location to the Target location.'
 
 		)
 
 		G_WHIP_BUTTON_CANCEL_TEXT='Exit'
-		G_WHIP_MENU "Source location:\n  $FP_SOURCE\n\nTarget location:\n  $FP_TARGET\n\nMost recent successful sync date:\n  $sync_last_completed"
-		if (( $? == 0 )); then
+		if G_WHIP_MENU "Source location:\n  $FP_SOURCE\n\nTarget location:\n  $FP_TARGET\n\nLast sync status:\n  $sync_last_status"; then
 
 			case "$G_WHIP_RETURNED_VALUE" in
 
@@ -355,47 +305,42 @@ _EOF_
 
 				'Help')
 
-					G_WHIP_MSG "DietPi-Sync is a program that allows you to duplicate a directory from one location (Source) to another (Target).\n\nFor example: If we want to duplicate (sync) the data on our external USB HDD to another location, we simply select the USB HDD as the source, then, select a target location. The target location can be anything from a networked samba fileserver, or even a FTP server.\n\nIf you would like to test a sync without modifiying any data, simply select Dry Run.\n\nMore information:\n - https://dietpi.com/phpbb/viewtopic.php?f=8&t=5&p=256#p256"
+					G_WHIP_MSG 'DietPi-Sync is a program that allows you to duplicate a directory from one location (Source) to another (Target).\n
+For example: If we want to duplicate (sync) the data on our external USB HDD to another location, we simply select the USB HDD as the source, then, select a target location.
+The target location can be anything from a networked samba fileserver, or even a FTP server.\n
+If you would like to test a sync without modifiying any data, simply select Dry Run.\n\nMore information:\n - https://dietpi.com/phpbb/viewtopic.php?p=256#p256'
 
 				;;
 
-				"Delete Mode")
+				'Delete Mode')
 
-					TARGETMENUID=3
-
-				;;
-
-				'Compression')
-
-					TARGETMENUID=4
+					Menu_Set_Sync_Delete_Mode
 
 				;;
 
-				"Sync: Daily")
+				'Sync: Daily')
 
-					TARGETMENUID=5
+					Menu_Set_CronDaily
 
 				;;
 
-				"Sync: Dry Run")
+				'Sync: Dry Run')
 
-					G_WHIP_YESNO "Start dry run sync?\n\nSource location:\n$FP_SOURCE/*\n\nTarget location:\n$FP_TARGET/*\n\nThis is a Dry Run for testing. No data will be modified.\n\nDo you wish to continue?"
-					if (( $? == 0 )); then
+					if G_WHIP_YESNO "Start dry run sync?\n\nSource location:\n$FP_SOURCE/*\n\nTarget location:\n$FP_TARGET/*\n
+This is a Dry Run for testing. No data will be modified.\n\nDo you wish to continue?"; then
 
-						SYNC_DRY_RUN=1
-						Run_Sync
+						SYNC_DRY_RUN=1 Run_Sync
 
 					fi
 
 				;;
 
-				"Sync: Now")
+				'Sync: Now')
 
-					G_WHIP_YESNO "Start sync?\n\nSource location:\n$FP_SOURCE/*\n\nTarget location:\n$FP_TARGET/*\n\nA copy of all the files and folders inside your Source location, will be created at the Target location.\n\nDo you wish to continue?"
-					if (( $? == 0 )); then
+					if G_WHIP_YESNO "Start sync?\n\nSource location:\n$FP_SOURCE/*\n\nTarget location:\n$FP_TARGET/*\n
+A copy of all the files and folders inside your Source location, will be created at the Target location.\n\nDo you wish to continue?"; then
 
-						SYNC_DRY_RUN=0
-						Run_Sync
+						SYNC_DRY_RUN=0 Run_Sync
 
 					fi
 
@@ -414,45 +359,40 @@ _EOF_
 	Menu_Exit(){
 
 		G_WHIP_SIZE_X_MAX=50
-		G_WHIP_YESNO "Exit $G_PROGRAM_NAME?"
-		if (( $? == 0 )); then
-
-			TARGETMENUID=-1
-
-		fi
+		G_WHIP_YESNO "Exit $G_PROGRAM_NAME?" && TARGETMENUID=-1
 
 	}
 
-	#TARGETMENUID=1 && TARGETMENUID=2
+	#TARGETMENUID=1 (Target) && TARGETMENUID=2 (Source)
 	Menu_Set_Directories(){
-
-		#TARGETMENUID
-		#2=Source | 1=Target
 
 		local current_directory="$FP_TARGET"
 		local current_mode_text='Target'
-		local whip_description_text="Please select the $current_mode_text location.\nA copy of all the files and folders in the Source location will be created here.\n\nCurrent Target location:\n$FP_TARGET"
+		local whip_description_text="Please select the $current_mode_text location.\nA copy of all the files and folders in the Source location will be created here.\n\nCurrent $current_mode_text location:\n$current_directory"
 		if (( $TARGETMENUID == 2 )); then
 
 			current_directory="$FP_SOURCE"
 			current_mode_text='Source'
-			whip_description_text="Please select the $current_mode_text location.\nA copy of all the files and folder in this Source location, will be created at the Target location.\n\nCurrent Source location:\n$FP_SOURCE"
+			whip_description_text="Please select the $current_mode_text location.\nA copy of all the files and folder in this Source location, will be created at the Target location.\n\nCurrent $current_mode_text location:\n$current_directory"
 
 		fi
 
+		# Check for samba mount
+		local fp_samba_mount='/mnt/samba'
+		local samba_mount_available=0
+		local samba_mount_text="Not mounted ($fp_samba_mount). Select to setup."
 		Check_Available_DietPi_Mounts
 
 		G_WHIP_MENU_ARRAY=(
 
-			'Manual' "Manually type your $current_mode_text directory."
-			'List' 'Select from a list of available mounts/drives'
-			"Samba Client" "$SAMBA_MOUNT_TEXT"
+			'Manual' ": Manually type your $current_mode_text directory."
+			'List' ': Select from a list of available mounts/drives'
+			'Samba Client' ": [$samba_mount_text]"
 
 		)
 
 		G_WHIP_BUTTON_CANCEL_TEXT='Back'
-		G_WHIP_MENU "$whip_description_text"
-		if (( $? == 0 )); then
+		if G_WHIP_MENU "$whip_description_text"; then
 
 			case "$G_WHIP_RETURNED_VALUE" in
 
@@ -461,11 +401,7 @@ _EOF_
 					/DietPi/dietpi/dietpi-drive_manager 1
 
 					local return_value=$(</tmp/dietpi-drive_manager_selmnt)
-					if [[ $return_value == '/' ]]; then
-
-						return_value='/mnt'
-
-					fi
+					[[ $return_value == '/' ]] && return_value='/mnt'
 
 					if (( $TARGETMENUID == 2 )); then
 
@@ -477,6 +413,8 @@ _EOF_
 
 					fi
 
+					TARGETMENUID=0
+
 				;;
 
 				'Manual')
@@ -487,30 +425,23 @@ _EOF_
 
 				'Samba Client')
 
-					if (( $SAMBA_MOUNT_AVAILABLE == 1 )); then
+					if (( $samba_mount_available )); then
 
 						if (( $TARGETMENUID == 2 )); then
 
-							FP_SOURCE="$FP_SAMBA_MOUNT"
+							FP_SOURCE=$fp_samba_mount
 
 						else
 
-							FP_TARGET="$FP_SAMBA_MOUNT/dietpi-sync"
+							FP_TARGET=$fp_samba_mount/dietpi-sync
 
 						fi
+
+						TARGETMENUID=0
 
 					else
 
 						Prompt_Setup_Samba_Mount
-						if (( $TARGETMENUID == 2 )); then
-
-							FP_SOURCE="$current_directory"
-
-						else
-
-							FP_TARGET="$current_directory"
-
-						fi
 
 					fi
 
@@ -527,87 +458,46 @@ _EOF_
 
 	}
 
-	#TARGETMENUID=3
 	Menu_Set_Sync_Delete_Mode(){
 
 		G_WHIP_MENU_ARRAY=(
 
-			'Disabled' 'Ignores data that exists at Target Location and not Source.'
-			'Enabled' 'Deletes data at Target location if not in Source Location.'
+			'[Off]' ': Only add/update, but never remove data in target location'
+			'[On]' ': Sync removals from source to target as well => Exact copy'
 
 		)
 
 		G_WHIP_DEFAULT_ITEM="$SYNC_MODE_TEXT"
-		G_WHIP_MENU "Please select the Sync delete mode.\n\nDisabled: (safe)\nIf files and folders exist in the Target location, that are not in the Source, they will be left alone.\n\nEnabled: (WARNING, if in doubt, DO NOT enable)\nAn exact copy of the Source location will be created at the Target location. If files are in the Target location that dont exist in the Source, they will be DELETED."
-		if (( $? == 0 )); then
+		if G_WHIP_MENU 'Please select the Sync delete mode.\n
+[Off]: (safe)\nIf files and folders exist in the Target location, that are not in the Source, they will be left alone.\n
+[On]: (WARNING, if in doubt, DO NOT enable)\nAn exact copy of the Source location will be created at the Target location.
+If files are in the Target location that do not exist in the Source, they will be DELETED.'; then
 
 			SYNC_DELETE_MODE=0
-			if [[ $G_WHIP_RETURNED_VALUE == 'Enabled' ]]; then
-
-				SYNC_DELETE_MODE=1
-
-			fi
+			[[ $G_WHIP_RETURNED_VALUE == '[On]' ]] && SYNC_DELETE_MODE=1
 
 		fi
 
-		#Return to main menu
-		TARGETMENUID=0
-
 	}
 
-	#TARGETMENUID=4
-	Menu_Set_Compression(){
-
-		G_WHIP_MENU_ARRAY=(
-
-			'Disabled' 'Transfer data in its original state.'
-			'Enabled' 'Compress the data during transfer.'
-
-		)
-
-		G_WHIP_DEFAULT_ITEM="$SYNC_COMPRESSION_TEXT"
-		G_WHIP_MENU "Please select the compression mode.\n\nDisabled:\nNo compression will be used during data transfer.\n\nEnabled:\nData will be compressed when its being transfered. Useful for slow connections, however, its CPU intensive."
-		if (( $? == 0 )); then
-
-			SYNC_COMPRESSION=0
-			if [[ $G_WHIP_RETURNED_VALUE == 'Enabled' ]]; then
-
-				SYNC_COMPRESSION=1
-
-			fi
-
-		fi
-
-		#Return to main menu
-		TARGETMENUID=0
-
-	}
-
-	#TARGETMENUID=5
 	Menu_Set_CronDaily(){
 
 		G_WHIP_MENU_ARRAY=(
 
-			'Disabled' 'Manual sync.'
-			'Enabled' 'Automatically sync once a day.'
+			'[Off]' ': Manual sync'
+			'[On]' ': Automatically sync once a day'
 
 		)
 
 		G_WHIP_DEFAULT_ITEM="$SYNC_CRONDAILY_TEXT"
-		G_WHIP_MENU "Disabled:\nThe user must manually sync using dietpi-sync.\n\nEnabled:\nA cron job will be created that automatically runs dietpi-sync, once a day.\n\n(NOTICE):\nBefore enabling this feature, please run a test sync (Dry Run) to verify what will happen."
-		if (( $? == 0 )); then
+		if G_WHIP_MENU '[Off]:\nThe user must manually sync using dietpi-sync.\n
+[On]:\nA cron job will be created that automatically runs dietpi-sync, once a day.\n
+(NOTICE):\nBefore enabling this feature, please run a test sync (Dry Run) to verify what will happen.'; then
 
 			SYNC_CRONDAILY=0
-			if [[ $G_WHIP_RETURNED_VALUE == 'Enabled' ]]; then
-
-				SYNC_CRONDAILY=1
-
-			fi
+			[[ $G_WHIP_RETURNED_VALUE == '[On]' ]] && SYNC_CRONDAILY=1
 
 		fi
-
-		#Return to main menu
-		TARGETMENUID=0
 
 	}
 
@@ -616,40 +506,52 @@ _EOF_
 		#TARGETMENUID
 		#2=Source | 1=Target
 
-		#Target
-		if (( $TARGETMENUID == 1 )); then
+		local mode='target'
+		(( $TARGETMENUID == 2 )) && mode='source'
+		local fp_mode="FP_${mode^^}"
+		G_WHIP_DEFAULT_ITEM=${!fp_mode}
+		local text="Please enter a new file path for the $mode directory.\neg: /mnt/$mode"
 
-			G_WHIP_DEFAULT_ITEM="$FP_TARGET"
-			G_WHIP_INPUTBOX 'Please enter a new filepath for the Target directory. \neg: /mnt/target'
-			if (( $? == 0 )); then
+		while :
+		do
 
-				FP_TARGET="$G_WHIP_RETURNED_VALUE"
+			if G_WHIP_INPUTBOX "$text"; then
+
+				# Sanity checks
+				# - Full path required
+				if [[ $G_WHIP_RETURNED_VALUE != /* ]]; then
+
+					text="ERROR: Please enter the $mode location as full path with leading slash: /\n\n - eg: /mnt/$mode"
+
+				# - Do not allow to sync from or to root
+				elif [[ $G_WHIP_RETURNED_VALUE == / ]]; then
+
+					text="ERROR: You entered the root directory as $mode location: /\n\n - Please use \"dietpi-backup\" instead for system backups and recoveries."
+
+				else
+
+					declare -g $fp_mode="${G_WHIP_RETURNED_VALUE%/}"
+					TARGETMENUID=0
+					return
+
+				fi
+
+			else
+
+				return
 
 			fi
 
-		#Source
-		elif (( $TARGETMENUID == 2 )); then
+			G_WHIP_DEFAULT_ITEM="$G_WHIP_RETURNED_VALUE"
 
-			G_WHIP_DEFAULT_ITEM="$FP_SOURCE"
-			G_WHIP_INPUTBOX 'Please enter a new filepath for the Source directory. \neg: /mnt/source'
-			if (( $? == 0 )); then
-
-				FP_SOURCE="$G_WHIP_RETURNED_VALUE"
-
-			fi
-
-		fi
+		done
 
 	}
 
 	Prompt_Setup_Samba_Mount(){
 
-		G_WHIP_YESNO "$SAMBA_MOUNT_TEXT\n\nWould you like to run DietPi-Drive_Manager and setup your Samba Client Mount now?"
-		if (( $? == 0 )); then
-
-			/DietPi/dietpi/dietpi-drive_manager
-
-		fi
+		G_WHIP_YESNO "$samba_mount_text\n\nWould you like to run DietPi-Drive_Manager and setup your Samba Client Mount now?"
+		(( $? )) || /DietPi/dietpi/dietpi-drive_manager
 
 	}
 
@@ -665,19 +567,20 @@ _EOF_
 		cat << _EOF_ > $FP_USER_FILTER_INCLUDE_EXCLUDE
 #$G_PROGRAM_NAME | Custom include/exclude filters
 #
-#To INCLUDE (+) a file/folder:
-#+ /location/to/my/file
-#+ /location/to/my/directory/
+#To EXCLUDE (-) all files by name:
+#- file
+#To EXCLUDE (-) a single file by path, relative to source directory:
+#- /relative/path/to/file
+#To EXCLUDE (-) a specific directory by path, relative to source directory:
+#- /relative/path/to/directory/
 #
-#To EXCLUDE (-) a file/folder:
-#- /location/to/my/file
-#- /location/to/my/directory/
+#To INCLUDE (+) something from within an otherwise excluded directory:
+#+ /relative/path/to/directory/include_this
 
 _EOF_
 
 	fi
 
-	#Read settings file
 	Read_Settings_File
 
 	#-----------------------------------------------------------------------------
@@ -702,30 +605,14 @@ _EOF_
 
 				Menu_Set_Directories
 
-			elif (( $TARGETMENUID == 3 )); then
-
-				Menu_Set_Sync_Delete_Mode
-
-			elif (( $TARGETMENUID == 4 )); then
-
-				Menu_Set_Compression
-
-			elif (( $TARGETMENUID == 5 )); then
-
-				Menu_Set_CronDaily
-
 			fi
 
 		done
 
-		#Save settings
 		Write_Settings_File
 
 	fi
 
-	#-----------------------------------------------------------------------------------
-	#Cleaup left over tmp files
-	rm $FP_FILTER_INCLUDE_EXCLUDE &> /dev/null
 	#-----------------------------------------------------------------------------------
 	exit $EXIT_CODE
 	#-----------------------------------------------------------------------------------
