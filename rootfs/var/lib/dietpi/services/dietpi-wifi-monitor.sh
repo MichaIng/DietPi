@@ -22,7 +22,7 @@
 	do
 
 		# - Get current gateway for ping
-		URL_PING="$(ip r s 0.0.0.0/0 dev $ADAPTER | awk '{print $3}')"
+		URL_PING=$(ip r s 0.0.0.0/0 dev $ADAPTER | mawk '{print $3}')
 
 		[[ $G_DEBUG == 1 ]] && echo "Checking connnection for: $ADAPTER via ping to $URL_PING"
 		if ping -I $ADAPTER -c 1 $URL_PING; then
@@ -32,9 +32,9 @@
 		else
 
 			echo "Detected connection loss: $ADAPTER. Reconnecting..."
-			ifdown "$ADAPTER"
+			ifdown $ADAPTER
 			sleep 1
-			ifup "$ADAPTER"
+			ifup $ADAPTER
 			echo 'Completed'
 
 		fi
