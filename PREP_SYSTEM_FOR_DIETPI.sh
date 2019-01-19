@@ -748,7 +748,7 @@ _EOF_
 
 					fi
 
-				done <<< "$(dpkg --get-selections | grep "^$i" | awk '{print $1}')"
+				done <<< "$(dpkg --get-selections | mawk -v pat="^$i" '$0~pat {print $1}')"
 
 			done
 
@@ -779,7 +779,7 @@ _EOF_
 		elif (( $G_HW_MODEL == 11 )); then
 
 			#G_AGI linux-image-4.9-armhf-odroid-xu3
-			G_AGI $(dpkg --get-selections | grep '^linux-image' | awk '{print $1}')
+			G_AGI $(dpkg --get-selections | mawk '/^linux-image/ {print $1}')
 			dpkg --get-selections | grep -q '^linux-image' || G_AGI linux-image-4.14-armhf-odroid-xu4
 
 		#	Odroid C1
