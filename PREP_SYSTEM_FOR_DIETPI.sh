@@ -983,7 +983,7 @@ _EOF_
 		[[ -d /usr/lib/armbian ]] && rm -R /usr/lib/armbian
 		[[ -d /usr/share/armbian ]] && rm -R /usr/share/armbian
 		rm -f /etc/profile.d/armbian*
-		rm -Rf /etc/armbian*
+		#rm -Rf /etc/armbian* armbian-release required for kernel package update success.
 		rm -Rf /etc/default/armbian*
 		rm -Rf /etc/update-motd.d/*armbian*
 		rm -Rf /etc/X11/xorg.conf.d/*armbian*
