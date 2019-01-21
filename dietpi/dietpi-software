@@ -3619,7 +3619,7 @@ We work around this error by running APT a second time. Please do not worry and 
 			#Jessie-
 			if (( $G_DISTRO < 4 )); then
 
-				# MPD not available in Jessie Repo for ARMv8
+				# MPD not available in Jessie repo for ARMv8
 				if (( $G_HW_ARCH == 3 )); then
 
 					# libupnp6 for net discov with upnp/avahi
@@ -4106,26 +4106,27 @@ _EOF_
 
 			Banner_Installing
 
-			#x32 x64
-			if (( $G_HW_MODEL == 20 || $G_HW_MODEL == 21 )); then
+			#x86_x64
+			if (( $G_HW_ARCH == 10 )); then
 
 				INSTALL_URL_ADDRESS='https://dietpi.com/downloads/binaries/all/noip_x32_x64.zip'
 
 			#ARMv8
-			elif (( ( $G_HW_MODEL == 12 ) || ( $G_HW_MODEL >= 40 && $G_HW_MODEL < 50 ) )); then
+			elif (( $G_HW_ARCH == 3 )); then
 
 				INSTALL_URL_ADDRESS='https://dietpi.com/downloads/binaries/all/noip_arm64.zip'
 
-			#armv6+
+			#ARMv6/7
 			else
 
 				INSTALL_URL_ADDRESS='https://dietpi.com/downloads/binaries/all/noip_armhf.zip'
 
 			fi
 
-			#NoIp Binary install
+			#NoIp binary install
 			Download_Install "$INSTALL_URL_ADDRESS"
 
+			mkdir -p /usr/local/bin
 			mv noip_binary /usr/local/bin/noip2
 			chmod +x /usr/local/bin/noip2
 
@@ -4910,10 +4911,7 @@ _EOF_
 
 			Banner_Installing
 
-			local kernel_version_active=$(ls /lib/modules/)
-
 			# Kernel headers and matching kernel image required for wireguard-dkms to build the wireguard kernel module
-			# - Since G_AGUG does not upgrade packages with changed dependencies, in case of kernel image meta packages, those need to be installed via G_AGI.
 			local kernel_packages=''
 			# - x86_64
 			if (( $G_HW_ARCH == 10 )); then
@@ -4940,14 +4938,18 @@ _EOF_
 
 				kernel_packages='linux-image-arm64-odroid-c2 linux-headers-arm64-odroid-c2'
 
-			#	Odroid N1
+			# - Odroid N1
 			elif (( $G_HW_MODEL == 14 )); then
 
 				kernel_packages='linux-image-arm64-odroid-n1 linux-headers-arm64-odroid-n1'
 
 			fi
 
-			G_RUN_CMD apt-mark unhold $kernel_packages
+			# Odroids need to purge before we install, else, does not update to latest version...
+			(( $G_HW_MODEL >= 10 && $G_HW_MODEL < 20 )) && G_AGP $kernel_packages
+
+			# Since G_AGUG does not upgrade packages with changed dependencies, in case of kernel image meta packages, those need to be installed via G_AGI.
+			G_AGI $kernel_packages # apt-get install overrides hold state
 
 			# Add Debian "sid" repo, which contains the wireguard packages
 			echo 'deb https://deb.debian.org/debian/ sid main' > /etc/apt/sources.list.d/dietpi-wireguard.list
@@ -4955,29 +4957,18 @@ _EOF_
 			echo -e 'Package: *\nPin: release n=sid\nPin-Priority: 99' > /etc/apt/preferences.d/dietpi-wireguard
 			G_AGUP
 
-			# - Odroids need to purge before we install, else, does not update to latest version...
-			(( $G_HW_MODEL >= 10 && $G_HW_MODEL < 20 )) && G_AGP $kernel_packages
+			# Check for existing WireGuard install
+			local existing_install=0
+			dpkg-query -s wireguard-dkms &> /dev/null && existing_install=1
 
-			G_AGI $kernel_packages
+			# iptables required to forward incoming VPN traffic to internet interface
+			# qrencode required to print client config QR code to console
+			G_AGI wireguard iptables qrencode
 
-			if [[ $kernel_version_active != $(ls /lib/modules/) ]]; then
+			# If no fresh install, reconfigure to rebuild WireGuard kernel module against current kernel headers
+			(( $existing_install )) && G_RUN_CMD dpkg-reconfigure wireguard-dkms
 
-				G_WHIP_MSG '[INFO] Wireguard:\n\nKernel update detected, a reboot is required before Wireguard module can be built with latest kernel.\n\nOnce the system has rebooted, please reselect "Wireguard" for installation in "DietPi-Software" to continue.'
-				aSOFTWARE_INSTALL_STATE[$software_id]=0
-
-			else
-
-				# iptables required to forward incoming VPN traffic to internet interface
-				# qrencode required to create client config QR code on console
-				# reinstall to rebuild kernel modules via wireguard-dkms, failsafe.
-				G_AGI --reinstall wireguard wireguard-dkms iptables qrencode
-
-				# Enable the kernel module | exit on failure
-				G_RUN_CMD modprobe wireguard
-
-			fi
-
-			unset kernel_packages
+			unset kernel_packages existing_install
 
 		fi
 
@@ -8431,8 +8422,7 @@ NB: This port needs to be forwarded by your router and/or opened in your firewal
 
 		fi
 
-		#MPD
-		software_id=128
+		software_id=128 # MPD
 		if (( ${aSOFTWARE_INSTALL_STATE[$software_id]} == 1 )); then
 
 			Banner_Configuration
@@ -8442,16 +8432,16 @@ NB: This port needs to be forwarded by your router and/or opened in your firewal
 			getent passwd mpd &> /dev/null && usercmd='usermod'
 			$usercmd mpd -G dietpi,audio -d $G_FP_DIETPI_USERDATA/.mpd_cache -s /usr/sbin/nologin
 
-			# - Runtime folders/files
-			#	log
+			# Runtime dirs/files
+			# - Log
 			mkdir -p /var/log/mpd
 			>> /var/log/mpd/mpd.log
-			#	cache
+			# - Cache
 			mkdir -p $G_FP_DIETPI_USERDATA/.mpd_cache
 			>> $G_FP_DIETPI_USERDATA/.mpd_cache/db_file
 			>> $G_FP_DIETPI_USERDATA/.mpd_cache/state
 			>> $G_FP_DIETPI_USERDATA/.mpd_cache/sticker.sql
-			#	Symlink from MPD defaults that applications may still expect/use.
+			# - Symlink from MPD defaults that applications may still expect/use.
 			[[ ! -e /var/lib/mpd/music || -L /var/lib/mpd/music ]] || mv -n /var/lib/mpd/music/* $G_FP_DIETPI_USERDATA/Music/ &> /dev/null
 			[[ ! -e /var/lib/mpd/playlists || -L /var/lib/mpd/playlists ]] || mv -n /var/lib/mpd/playlists/* $G_FP_DIETPI_USERDATA/Music/ &> /dev/null
 			[[ ! -e /var/lib/mpd/mpd.db || -L /var/lib/mpd/mpd.db ]] || mv -n /var/lib/mpd/mpd.db $G_FP_DIETPI_USERDATA/.mpd_cache/db_file
@@ -8465,22 +8455,22 @@ NB: This port needs to be forwarded by your router and/or opened in your firewal
 			ln -sf $G_FP_DIETPI_USERDATA/.mpd_cache/state /var/lib/mpd/state
 			ln -sf $G_FP_DIETPI_USERDATA/.mpd_cache/sticker.sql /var/lib/mpd/sticker.sql
 
-			# - default config
+			# Default config
 			G_BACKUP_FP /etc/mpd.conf
 			dps_index=$software_id Download_Install 'mpd.conf' /etc/mpd.conf
-			#	On Stretch (custom build), symlink /etc/mpd.conf to /usr/local/etc/mpd.conf, where /usr/local/bin/mpd by default searches
-			if (( $G_DISTRO == 4 )); then
+			# - On Stretch (custom build), symlink /etc/mpd.conf to /usr/local/etc/mpd.conf, where /usr/local/bin/mpd by default searches
+			if [[ $(command -v mpd) == '/usr/local/bin/mpd' ]]; then
 
 				mkdir -p /usr/local/etc
 				ln -sf /etc/mpd.conf /usr/local/etc/mpd.conf
 
 			fi
 
-			# - MPD service/confs
+			# MPD service/confs
 			[[ -f /etc/default/mpd ]] && rm /etc/default/mpd
 
-			#	Upsteam systemd unit: https://github.com/MusicPlayerDaemon/MPD/blob/master/systemd/system/mpd.service.in
-			#	Debian package systemd unit: https://deb.debian.org/debian/pool/main/m/mpd/
+			# - Upsteam systemd unit: https://github.com/MusicPlayerDaemon/MPD/blob/master/systemd/system/mpd.service.in
+			# - Debian package systemd unit: https://deb.debian.org/debian/pool/main/m/mpd/
 			cat << _EOF_ > /lib/systemd/system/mpd.service
 [Unit]
 Description=Music Player Daemon (DietPi)
@@ -8516,7 +8506,7 @@ WantedBy=multi-user.target
 Also=mpd.socket
 _EOF_
 
-			#	Jessie: Remove unsupported systemd unit settings
+			# - Jessie: Remove unsupported systemd unit settings
 			if (( $G_DISTRO < 4 )); then
 
 				sed -i '/ProtectKernelTunables/d' /lib/systemd/system/mpd.service
@@ -8526,7 +8516,7 @@ _EOF_
 
 			fi
 
-			#JustBoom specials
+			# JustBoom specials
 			if grep -qi '^[[:blank:]]*CONFIG_SOUNDCARD=justboom' /DietPi/dietpi.txt; then
 
 				# - Name displayed in YMPD sound button
@@ -8546,7 +8536,7 @@ _EOF_
 
 			fi
 
-			#Grab our test music for the user.
+			# Grab our test music for the user.
 			Download_Test_Media
 
 		fi
@@ -8900,11 +8890,15 @@ _EOF_
 
 			Banner_Configuration
 
+			#Failsafe: Directory required for "noip2 -C" to create the config file
+			mkdir -p /usr/local/etc
+
 			#noip2 service file
 			cat << _EOF_ > /etc/systemd/system/noip2.service
 [Unit]
 Description=noip2 (DietPi)
 After=network.target network-online.target rsyslog.service
+ConditionPathExists=/usr/local/etc/no-ip2.conf
 
 [Service]
 Type=forking
@@ -10057,61 +10051,85 @@ _EOF_
 		software_id=172
 		if (( ${aSOFTWARE_INSTALL_STATE[$software_id]} == 1 )); then
 
-			# User inputs: Ask user for servers public IP/domain and desired WireGuard server port
-			local invalid_text=''
-			local domain=$(hostname)
+			# Try to enable module, if it fails, a reboot is required
+			local module_active=0
+			modprobe wireguard 2> /dev/null && module_active=1
+
+			# Server/Client choice
+			G_WHIP_MENU_ARRAY=(
+
+				'Server' ': Use this machine as VPN server and allow clients to connect to it.'
+				'Client' ': Use this machine as VPN client, e.g. to connect to a VPN service provider.'
+
+			)
+
+			local choice_required=''
 			while :
 			do
 
-				G_WHIP_DEFAULT_ITEM="$domain"
-				G_WHIP_INPUTBOX "${invalid_text}Please enter your servers public IP/domain for WireGuard client access:"
-				if (( $? == 0 )) && [[ $G_WHIP_RETURNED_VALUE ]]; then
-
-					domain="${G_WHIP_RETURNED_VALUE#http*://}"
-					break
-
-				else
-
-					invalid_text='[ERROR] No valid entry found. Please retry...\n\n'
-
-				fi
+				G_WHIP_MENU "${choice_required}Please choose, if this machine should be set up as VPN server or client:" && break
+				choice_required='[ERROR] A choice is required to finish the WireGuard install.\n\n'
 
 			done
-			invalid_text=''
-			local port=51820
-			while :
-			do
 
-				G_WHIP_DEFAULT_ITEM=$port
-				G_WHIP_INPUTBOX "${invalid_text}Please enter the network port, that should be used to access your WireGuard server:\n
+			# Server choice
+			if [[ $G_WHIP_RETURNED_VALUE == 'Server' ]]; then
+
+				# - Public IP/domain and desired WireGuard server port
+				local invalid_text=''
+				local domain=$(hostname)
+				while :
+				do
+
+					G_WHIP_DEFAULT_ITEM="$domain"
+					G_WHIP_INPUTBOX "${invalid_text}Please enter your servers public IP/domain for WireGuard client access:"
+					if (( $? == 0 )) && [[ $G_WHIP_RETURNED_VALUE ]]; then
+
+						domain="${G_WHIP_RETURNED_VALUE#http*://}"
+						break
+
+					else
+
+						invalid_text='[ERROR] No valid entry found. Please retry...\n\n'
+
+					fi
+
+				done
+				invalid_text=''
+				local port=51820
+				while :
+				do
+
+					G_WHIP_DEFAULT_ITEM=$port
+					G_WHIP_INPUTBOX "${invalid_text}Please enter the network port, that should be used to access your WireGuard server:\n
 NB: This port needs to be forwarded by your router and/or opened in your firewall settings. Default value is: 51820"
-				if (( $? == 0 )) && disable_error=1 G_CHECK_VALIDINT "$G_WHIP_RETURNED_VALUE"; then
+					if (( $? == 0 )) && disable_error=1 G_CHECK_VALIDINT "$G_WHIP_RETURNED_VALUE" 0; then
 
-					port=$G_WHIP_RETURNED_VALUE
-					break
+						port=$G_WHIP_RETURNED_VALUE
+						break
 
-				else
+					else
 
-					invalid_text='[ERROR] No valid entry found, value needs to be a sequence of integers. Please retry...\n\n'
+						invalid_text='[ERROR] No valid entry found, value needs to be a sequence of integers. Please retry...\n\n'
 
-				fi
+					fi
 
-			done
+				done
 
-			# Create everything inside WireGuard config dir
-			cd /etc/wireguard
+				# - Create everything inside WireGuard config dir
+				cd /etc/wireguard
 
-			# For securiy reasons set umask to 077
-			umask 077
+				# - For securiy reasons set umask to 077
+				umask 077
 
-			# Create server and client keys
-			wg genkey > server_private.key
-			wg pubkey < server_private.key > server_public.key
-			wg genkey > client_private.key
-			wg pubkey < client_private.key > client_public.key
+				# - Create server and client keys
+				[[ -f server_private.key ]] || wg genkey > server_private.key
+				[[ -f server_public.key ]] || wg pubkey < server_private.key > server_public.key
+				[[ -f client_private.key ]] || wg genkey > client_private.key
+				[[ -f client_public.key ]] || wg pubkey < client_private.key > client_public.key
 
-			# Server config
-			cat << _EOF_ > wg0.conf
+				# - Server config
+				[[ -f wg0.conf ]] || cat << _EOF_ > wg0.conf
 [Interface]
 Address = 10.8.0.1/24
 PrivateKey = $(<server_private.key)
@@ -10125,39 +10143,70 @@ PublicKey = $(<client_public.key)
 AllowedIPs = 10.8.0.0/24
 _EOF_
 
-			# Client config
-			cat << _EOF_ > wg0-client.conf
+				# - Server local network IP
+				local server_ip=$(sed -n 4p /DietPi/dietpi/.network)
+
+				# - Client config
+				[[ -f wg0-client.conf ]] || cat << _EOF_ > wg0-client.conf
 [Interface]
+# The address must be unique for each client, use "10.8.0.3/24" for the second client and so on.
 Address = 10.8.0.2/24
 PrivateKey = $(<client_private.key)
+# Comment the following to preserve the clients default DNS server, or force a desired one.
 DNS = $(awk '/nameserver/ {print $2;exit}' /etc/resolv.conf)
 
 [Peer]
 PublicKey = $(<server_public.key)
-AllowedIPs = 0.0.0.0/0
+# Tunnel all network traffic through the VPN:
+#	AllowedIPs = 0.0.0.0/0, ::/0
+# Tunnel access to server-side local network only:
+#	AllowedIPs = ${server_ip%.*}.0/24
+# Tunnel access to VPN server only:
+#	AllowedIPs = $server_ip/32
+AllowedIPs = 0.0.0.0/0, ::/0
 Endpoint = $domain:51820
 
 # Uncomment the following, if you're behind a NAT and want the connection to be kept alive.
 #PersistentKeepalive = 25
 _EOF_
 
-			unset domain port invalid_text
+				# - Enable IPv4 + IPv6 forwarding
+				(( $module_active )) && sysctl net.ipv4.ip_forward=1 net.ipv6.conf.all.forwarding=1 net.ipv6.conf.default.forwarding=1
+				#	persistent
+				echo -e 'net.ipv4.ip_forward=1\nnet.ipv6.conf.all.forwarding=1\nnet.ipv6.conf.default.forwarding=1' > /etc/sysctl.d/dietpi-wireguard.conf
 
-			# Enable IPv4 forwarding
-			sysctl net.ipv4.ip_forward=1
-			# - persistent
-			echo 'net.ipv4.ip_forward=1' > /etc/sysctl.d/dietpi-wireguard.conf
+				# - Start WireGuard interface via systemd unit
+				(( $module_active )) && systemctl start wg-quick@wg0
+				#	persistent
+				systemctl enable wg-quick@wg0
 
-			# Start WireGuard interface via systemd unit
-			systemctl start wg-quick@wg0
-			# - persistent
-			systemctl enable wg-quick@wg0
+				# - Set umask back to default 022
+				umask 022
 
-			# Set umask back to default 022
-			umask 022
+				# - Navigate back to DietPi-Software working dir
+				cd /tmp/$G_PROGRAM_NAME
 
-			# Navigate back to DietPi-Software working dir
-			cd /tmp/$G_PROGRAM_NAME
+			# Client choice
+			elif [[ $G_WHIP_RETURNED_VALUE == 'Client' ]]; then
+
+				G_WHIP_MSG '[ INFO ] WireGuard client setup has been chosen\n
+Please follow the instructions of your VPN provider to configure WireGuard.\n
+If no WireGuard (auto)start is included, but you require it, please do the following:
+1. Check for the created config file/interface name:
+	ls -Al /etc/wireguard/
+   It has a ".conf" file ending, lets assume "wg0-client.conf".
+2. To start the VPN interface, run:
+	systemctl start wg0-client
+3. To autostart the VPN interface on boot, run:
+	systemctl enable wg0-client
+4. To disable autostart again, run:
+	systemctl disable wg0-client'
+
+			fi
+
+			(( $module_active )) || { [[ $DISABLE_REBOOT == 1 ]] && G_WHIP_MSG '[[ INFO ]] WireGuard install finished\n\nNB: WireGuard has been successfully installed, but a reboot is required, before it can be started.'; }
+
+			unset module_active choice_required domain port invalid_text server_ip
 
 		fi
 
@@ -12587,7 +12636,7 @@ _EOF_
 			gpu_memory=320
 			(( $hw_memory_size <= 512 )) && gpu_memory=256
 
-		#Mode 4 (Descent)
+		# - Mode 4 (Descent)
 		elif (( ${aSOFTWARE_INSTALL_STATE[112]} == 2 )); then
 
 			gpu_enabled=1
@@ -12973,8 +13022,8 @@ _EOF_
 			getent passwd mpd &> /dev/null && userdel -rf mpd
 			[[ -f /lib/systemd/system/mpd.service ]] && rm /lib/systemd/system/mpd.service
 			[[ -d $G_FP_DIETPI_USERDATA/.mpd_cache ]] && rm -R $G_FP_DIETPI_USERDATA/.mpd_cache
-			[[ -f /etc/mpd.conf ]] && rm /etc/mpd.conf
 			[[ -f /usr/local/etc/mpd.conf ]] && rm /usr/local/etc/mpd.conf && rmdir --ignore-fail-on-non-empty /usr/local/etc
+			[[ -f /etc/mpd.conf ]] && rm /etc/mpd.conf
 			[[ -f /etc/default/mpd ]] && rm /etc/default/mpd # pre-v6.20
 
 		fi
@@ -13491,8 +13540,9 @@ _EOF_
 		if (( ${aSOFTWARE_INSTALL_STATE[$software_id]} == -1 )); then
 
 			Banner_Uninstalling
-			rm /usr/local/bin/noip2
-			rm /etc/systemd/system/noip2.service
+			[[ -f /usr/local/bin/noip2 ]] && rm /usr/local/bin/noip2
+			[[ -f /usr/local/etc/no-ip2.conf ]] && rm /usr/local/etc/no-ip2.conf
+			[[ -f /etc/systemd/system/noip2.service ]] && rm /etc/systemd/system/noip2.service
 
 		fi
 
@@ -13500,7 +13550,7 @@ _EOF_
 		if (( ${aSOFTWARE_INSTALL_STATE[$software_id]} == -1 )); then
 
 			Banner_Uninstalling
-			rm -R /var/www/linuxdash
+			[[ -d /var/www/linuxdash ]] && rm -R /var/www/linuxdash
 
 		fi
 
