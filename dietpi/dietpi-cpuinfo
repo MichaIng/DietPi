@@ -18,36 +18,21 @@
 
 	#Import DietPi-Globals ---------------------------------------------------------------
 	. /DietPi/dietpi/func/dietpi-globals
-	G_CHECK_ROOT_USER
 	G_PROGRAM_NAME='DietPi-CPU_info'
+	G_CHECK_ROOT_USER
 	G_INIT
 	#Import DietPi-Globals ---------------------------------------------------------------
 
+	#DietPi-Globals exit trap addition
+	G_EXIT_CUSTOM(){ unset aCPU_CURRENT_FREQ aCPU_MIN_FREQ aCPU_MAX_FREQ aCPU_SCALINGAVAILABLE_FREQ; }
+
 	#Grab Input
 	INPUT=0
-	if disable_error=1 G_CHECK_VALIDINT $1; then
+	disable_error=1 G_CHECK_VALIDINT "$1" && INPUT=$1
 
-		INPUT=$1
-
-	fi
-
-	#Exit path for VM
-	if (( $G_HW_MODEL == 20 )); then
-
-		echo -e '\nNotice: CPU information is not available for VM.\n'
-		exit
-
-	fi
-
-	#Funcs
-	CPU_GOV_CURRENT='Unknown'
-
-	aCPU_CURRENT_FREQ=0
-	aCPU_MIN_FREQ=0
-	aCPU_MAX_FREQ=0
-	aCPU_SCALINGAVAILABLE_FREQ=0
-	CPU_SCALINGSUPPORTED=1
-	FP_CPU_SCALINGAVAILABLE_FREQ='/tmp/dietpi-available_cpu_freqs'
+	aCPU_CURRENT_FREQ=()
+	aCPU_MIN_FREQ=()
+	aCPU_MAX_FREQ=()
 	Obtain_Cpu_Freq(){
 
 		for ((i=0; i<$(nproc --all); i++))
@@ -73,7 +58,13 @@
 
 		done
 
-		#Obtain available scaling freqs:
+	}
+
+	aCPU_SCALINGAVAILABLE_FREQ=()
+	CPU_SCALINGSUPPORTED=1
+	FP_CPU_SCALINGAVAILABLE_FREQ='/tmp/dietpi-available_cpu_freqs'
+	Obtain_Cpu_Scaling_Freq(){
+
 		# - Intel
 		if [[ -f /sys/devices/system/cpu/intel_pstate/max_perf_pct ]]; then
 
@@ -94,14 +85,14 @@
 			for ((i=0; i<$(nproc --all); i++))
 			do
 
-				aCPU_SCALINGAVAILABLE_FREQ[$i]=$(cat /sys/devices/system/cpu/cpu$i/cpufreq/scaling_available_frequencies | tr ' ' '\n' | sed -e 's/[^0-9]//g' | sed '/^$/d')
+				aCPU_SCALINGAVAILABLE_FREQ[$i]=$(tr ' ' '\n' < /sys/devices/system/cpu/cpu$i/cpufreq/scaling_available_frequencies | sed 's/[^0-9]//g' | sed '/^$/d')
 
 			done
 
 		# - XU4 3.x
 		elif [[ -f /sys/devices/system/cpu/cpufreq/mp-cpufreq/cpu_freq_table ]]; then
 
-			aCPU_SCALINGAVAILABLE_FREQ[0]=$(cat /sys/devices/system/cpu/cpufreq/mp-cpufreq/cpu_freq_table | tr ' ' '\n' | sed -e 's/[^0-9]//g' | sed '/^$/d')
+			aCPU_SCALINGAVAILABLE_FREQ[0]=$(tr ' ' '\n' < /sys/devices/system/cpu/cpufreq/mp-cpufreq/cpu_freq_table | sed 's/[^0-9]//g' | sed '/^$/d')
 
 		else
 
@@ -111,18 +102,15 @@
 
 	}
 
-	CPU_TEMP_CURRENT='Unknown'
-	CPU_TEMP_PRINT='Unknown'
-
-
+	CPU_TEMP_CURRENT='N/A'
+	CPU_TEMP_PRINT='N/A'
 	Obtain_Cpu_Temp(){
 
 		CPU_TEMP_CURRENT=$(G_OBTAIN_CPU_TEMP)
 
-		local cpu_temp_current_f='Unknown'
-		if disable_error=1 G_CHECK_VALIDINT $CPU_TEMP_CURRENT; then
+		if disable_error=1 G_CHECK_VALIDINT "$CPU_TEMP_CURRENT"; then
 
-			cpu_temp_current_f=$(( ( $CPU_TEMP_CURRENT * 9 / 5 ) + 32 ))
+			local cpu_temp_current_f=$(( $CPU_TEMP_CURRENT * 9/5 + 32 ))
 			if (( $CPU_TEMP_CURRENT >= 70 )); then
 
 				CPU_TEMP_PRINT="\e[1;31mWarning: $CPU_TEMP_CURRENT'c : $cpu_temp_current_f'f | Reducing the life of your device.\e[0m"
@@ -151,12 +139,13 @@
 
 		else
 
-				CPU_TEMP_PRINT="\e[1;31mKERNELERR: $CPU_TEMP_CURRENT'c\e[0m"
+			CPU_TEMP_PRINT="\e[1;31mKERNELERR: $CPU_TEMP_CURRENT'c\e[0m"
 
 		fi
 
 	}
 
+	CPU_GOV_CURRENT='N/A'
 	Obtain_Cpu_Gov(){
 
 		if [[ -f /sys/devices/system/cpu/cpu0/cpufreq/scaling_governor ]]; then
@@ -171,18 +160,21 @@
 
 		echo -e "\n \e[38;5;154m─────────────────────────────────────────────────────\e[0m\n \e[1mDietPi CPU Info\n\e[90m Use dietpi-config to change CPU / performance options\e[0m\n \e[38;5;154m─────────────────────────────────────────────────────\e[0m"
 
-		#Processor Type
+		#VM does not support most info
+		(( $G_HW_MODEL == 20 )) && G_DIETPI-NOTIFY 2 '\nMost CPU information is not available on VM.\n'
+
+		#Processor Arch
 		echo -e " Architecture \e[90m|\e[0m     $(uname -m)"
 
 		#Current Temp
-		echo -e " Temp         \e[90m|\e[0m     $CPU_TEMP_PRINT"
+		echo -e " Temperature  \e[90m|\e[0m     $CPU_TEMP_PRINT"
 
 		#Current Gov
 		echo -e " Governor     \e[90m|\e[0m     $CPU_GOV_CURRENT"
 
 		if [[ $CPU_GOV_CURRENT == 'ondemand' || $CPU_GOV_CURRENT == 'conservative' ]]; then
 
-			echo -e " Throttle up  \e[90m|\e[0m     $(grep -m1 '^CONFIG_CPU_USAGE_THROTTLE_UP=' /DietPi/dietpi.txt | sed 's/.*=//')% CPU usage"
+			echo -e " Throttle up  \e[90m|\e[0m     $(grep -m1 '^[[:blank:]]*CONFIG_CPU_USAGE_THROTTLE_UP=' /DietPi/dietpi.txt | sed 's/^[^=]*=//')% CPU usage"
 
 		fi
 
@@ -191,7 +183,7 @@
 		for ((i=0; i<${#aCPU_CURRENT_FREQ[@]}; i++))
 		do
 
-			echo -e " \e[90mCPU$i         |\e[0m      $(( ${aCPU_CURRENT_FREQ[$i]} / 1000 )) MHz      \e[90m$(( ${aCPU_MIN_FREQ[$i]} / 1000 )) MHz    $(( ${aCPU_MAX_FREQ[$i]} / 1000 )) MHz\e[0m"
+			echo -e " \e[90mCPU$i         |\e[0m      $(( ${aCPU_CURRENT_FREQ[$i]:-0} / 1000 )) MHz      \e[90m$(( ${aCPU_MIN_FREQ[$i]:-0} / 1000 )) MHz    $(( ${aCPU_MAX_FREQ[$i]:-0} / 1000 )) MHz\e[0m"
 
 		done
 
@@ -210,17 +202,17 @@
 	#Return mode
 	if (( $INPUT == 2 )); then
 
-		Obtain_Cpu_Freq
+		Obtain_Cpu_Scaling_Freq
 
 		#	Export to file
-		rm $FP_CPU_SCALINGAVAILABLE_FREQ &> /dev/null
+		> $FP_CPU_SCALINGAVAILABLE_FREQ
 
 		if (( $CPU_SCALINGSUPPORTED )); then
 
-			for ((i=0; i<${#aCPU_SCALINGAVAILABLE_FREQ[@]}; i++))
+			for i in ${aCPU_SCALINGAVAILABLE_FREQ[@]}
 			do
 
-				echo -e "${aCPU_SCALINGAVAILABLE_FREQ[$i]}" >> $FP_CPU_SCALINGAVAILABLE_FREQ
+				echo -e "$i" >> $FP_CPU_SCALINGAVAILABLE_FREQ
 
 			done
 
@@ -240,13 +232,6 @@
 
 	fi
 
-	#-----------------------------------------------------------------------------------
-	#Delete[] array
-	unset aCPU_CURRENT_FREQ
-	unset aCPU_MIN_FREQ
-	unset aCPU_MAX_FREQ
-	unset aCPU_SCALINGAVAILABLE_FREQ
-	unset afp_temperature
 	#-----------------------------------------------------------------------------------
 	exit
 	#-----------------------------------------------------------------------------------
