@@ -634,21 +634,22 @@ _EOF_
 			'fake-hwclock'		# Hardware clock emulation, to allow correct timestamps during boot before network time sync
 			'gnupg'			# apt-key add
 			'htop'			# System monitor
-			'iputils-ping'		# ping command
+			'iputils-ping'		# "ping" command
 			'isc-dhcp-client'	# DHCP client
-			'kmod'			# "modprobe", "lsmod", required by several DietPi scripts
-			'locales'		# Support locales, necessary for DietPi scripts, as we use enGB.UTF8 as default language
+			'kmod'			# "modprobe", "lsmod", used by several DietPi scripts
+			'locales'		# Support locales, necessary for DietPi scripts, as we use en_GB.UTF8 as default language
 			'nano'			# Simple text editor
 			'p7zip-full'		# .7z wrapper
-			'parted'		# Needed by DietPi-Boot + DietPi-Drive_Manager
-			'psmisc'		# "killall", needed by many DietPi scripts
+			'parted'		# Drive partitioning, required by DietPi-Boot + DietPi-Drive_Manager
+			'procps'		# "kill", "ps", "pgrep", "sysctl", used by several DietPi scripts
+			'psmisc'		# "killall", used by several DietPi scripts
 			'resolvconf'		# Network nameserver handler + depandant for "ifupdown" (network interface handler) => "iproute2" ("ip" command)
 			'sudo'			# Root permission wrapper for users within /etc/sudoers(.d/)
-			'systemd-sysv'		# Includes systemd and additional commands: poweroff, shutdown etc.
+			'systemd-sysv'		# Includes systemd and additional commands: "poweroff", "shutdown" etc.
 			'tzdata'		# Time zone data for system clock, auto summer/winter time adjustment
 			'udev'			# /dev/ and hotplug management daemon
 			'unzip'			# .zip unpacker
-			'usbutils'		# "lsusb", needed by DietPi-Software + DietPi-Bugreport
+			'usbutils'		# "lsusb", used by DietPi-Software + DietPi-Bugreport
 			'wget'			# Download tool
 			'whiptail'		# DietPi dialogs
 
@@ -747,7 +748,7 @@ _EOF_
 
 					fi
 
-				done <<< "$(dpkg --get-selections | grep "^$i" | awk '{print $1}')"
+				done <<< "$(dpkg --get-selections | mawk -v pat="^$i" '$0~pat {print $1}')"
 
 			done
 
@@ -778,7 +779,7 @@ _EOF_
 		elif (( $G_HW_MODEL == 11 )); then
 
 			#G_AGI linux-image-4.9-armhf-odroid-xu3
-			G_AGI $(dpkg --get-selections | grep '^linux-image' | awk '{print $1}')
+			G_AGI $(dpkg --get-selections | mawk '/^linux-image/ {print $1}')
 			dpkg --get-selections | grep -q '^linux-image' || G_AGI linux-image-4.14-armhf-odroid-xu4
 
 		#	Odroid C1
@@ -982,7 +983,7 @@ _EOF_
 		[[ -d /usr/lib/armbian ]] && rm -R /usr/lib/armbian
 		[[ -d /usr/share/armbian ]] && rm -R /usr/share/armbian
 		rm -f /etc/profile.d/armbian*
-		rm -Rf /etc/armbian*
+		#rm -Rf /etc/armbian* armbian-release required for kernel package update success.
 		rm -Rf /etc/default/armbian*
 		rm -Rf /etc/update-motd.d/*armbian*
 		rm -Rf /etc/X11/xorg.conf.d/*armbian*
