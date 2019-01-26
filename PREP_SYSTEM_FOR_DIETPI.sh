@@ -1067,7 +1067,6 @@ _EOF_
 		G_RUN_CMD systemctl enable dietpi-boot
 		G_RUN_CMD systemctl enable dietpi-preboot
 		G_RUN_CMD systemctl enable dietpi-postboot
-		G_RUN_CMD systemctl enable kill-ssh-user-sessions-before-network
 
 		#-----------------------------------------------------------------------------------
 		#Cron Jobs
