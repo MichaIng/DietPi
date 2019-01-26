@@ -787,16 +787,6 @@ _EOF_
 
 			G_AGI linux-image-armhf-odroid-c1
 
-		#	RockPro64
-		elif (( $G_HW_MODEL == 42 )); then
-
-			G_AGI linux-rockpro64 gdisk
-
-		#	Rock64
-		elif (( $G_HW_MODEL == 43 )); then
-
-			G_AGI linux-rock64 gdisk
-
 		#	BBB
 		elif (( $G_HW_MODEL == 71 )); then
 
