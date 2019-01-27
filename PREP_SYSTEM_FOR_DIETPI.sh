@@ -190,7 +190,7 @@
 
 	fi
 
-	G_HW_ARCH_DESCRIPTION="$(uname -m)"
+	G_HW_ARCH_DESCRIPTION=$(uname -m)
 	if [[ $G_HW_ARCH_DESCRIPTION == 'armv6l' ]]; then
 
 		G_HW_ARCH=1
@@ -317,7 +317,7 @@
 
 				else
 
-					IMAGE_CREATOR="$G_WHIP_RETURNED_VALUE"
+					IMAGE_CREATOR=$G_WHIP_RETURNED_VALUE
 					G_DIETPI-NOTIFY 2 "Entered image creator: $IMAGE_CREATOR"
 					break
 
@@ -334,7 +334,7 @@
 			G_WHIP_INPUTBOX 'Please enter the name or URL of the pre-image you installed on this system, prior to running this script. This will be used to identify the pre-image credits.\n\nEG: Debian, Raspbian Lite, Meveric, FriendlyARM, or "forum.odroid.com/viewtopic.php?f=ABC&t=XYZ" etc.\n\nNB: An entry is required.'
 			if (( ! $? )) && [[ $G_WHIP_RETURNED_VALUE ]]; then
 
-				PREIMAGE_INFO="$G_WHIP_RETURNED_VALUE"
+				PREIMAGE_INFO=$G_WHIP_RETURNED_VALUE
 				G_DIETPI-NOTIFY 2 "Entered pre-image info: $PREIMAGE_INFO"
 				break
 
@@ -551,8 +551,7 @@
 		l_message='Copy DietPi core files to /boot/dietpi' G_RUN_CMD cp -Rf "DietPi-$GITBRANCH/dietpi" /boot/
 		l_message='Copy DietPi rootfs files in place' G_RUN_CMD cp -Rf "DietPi-$GITBRANCH/rootfs"/. /
 		l_message='Clean download location' G_RUN_CMD rm -R "DietPi-$GITBRANCH"
-
-		l_message='Set execute permissions for DietPi scripts' G_RUN_CMD chmod -R +x /boot/dietpi /var/lib/dietpi/services /etc/cron.*/dietpi /etc/profile.d/dietpi-*.sh /etc/bashrc.d/dietpi-*.sh
+		l_message='Set execute permissions for DietPi scripts' G_RUN_CMD chmod -R +x /DietPi/dietpi /var/lib/dietpi/services /etc/cron.*/dietpi
 
 		G_RUN_CMD systemctl daemon-reload
 		G_RUN_CMD systemctl enable dietpi-ramdisk
@@ -573,7 +572,7 @@
 		G_DIETPI-NOTIFY 2 "Setting APT sources.list: $DISTRO_TARGET_NAME $DISTRO_TARGET"
 
 		# - We need to forward $DISTRO_TARGET* to dietpi-set_software, as well as $G_HW_MODEL for Debian vs Raspbian decision.
-		G_DISTRO=$DISTRO_TARGET G_DISTRO_NAME="$DISTRO_TARGET_NAME" G_HW_MODEL=$G_HW_MODEL G_RUN_CMD /DietPi/dietpi/func/dietpi-set_software apt-mirror 'default'
+		G_DISTRO=$DISTRO_TARGET G_DISTRO_NAME=$DISTRO_TARGET_NAME G_HW_MODEL=$G_HW_MODEL G_RUN_CMD /DietPi/dietpi/func/dietpi-set_software apt-mirror 'default'
 
 		# - Meveric, update repo to use our EU mirror: https://github.com/Fourdee/DietPi/issues/1519#issuecomment-368234302
 		sed -i 's@https://oph.mdrjr.net/meveric@http://fuzon.co.uk/meveric@' /etc/apt/sources.list.d/meveric* &> /dev/null
@@ -787,16 +786,6 @@ _EOF_
 
 			G_AGI linux-image-armhf-odroid-c1
 
-		#	RockPro64
-		elif (( $G_HW_MODEL == 42 )); then
-
-			G_AGI linux-rockpro64 gdisk
-
-		#	Rock64
-		elif (( $G_HW_MODEL == 43 )); then
-
-			G_AGI linux-rock64 gdisk
-
 		#	BBB
 		elif (( $G_HW_MODEL == 71 )); then
 
@@ -877,7 +866,7 @@ _EOF_
 
 		# - Distro is now target (for APT purposes and G_AGX support due to installed binary, its here, instead of after G_AGUP)
 		G_DISTRO=$DISTRO_TARGET
-		G_DISTRO_NAME="$DISTRO_TARGET_NAME"
+		G_DISTRO_NAME=$DISTRO_TARGET_NAME
 
 		G_DIETPI-NOTIFY 2 'Installing core DietPi pre-req APT packages'
 
@@ -1078,7 +1067,7 @@ _EOF_
 		G_RUN_CMD systemctl enable dietpi-boot
 		G_RUN_CMD systemctl enable dietpi-preboot
 		G_RUN_CMD systemctl enable dietpi-postboot
-		G_RUN_CMD systemctl enable kill-ssh-user-sessions-before-network
+		G_RUN_CMD systemctl enable dietpi-kill_ssh
 
 		#-----------------------------------------------------------------------------------
 		#Cron Jobs
