@@ -25,7 +25,7 @@
 
 	#Grab Input (valid interger)
 	INPUT=-1
-	disable_error=1 G_CHECK_VALIDINT $1 && INPUT=$1
+	disable_error=1 G_CHECK_VALIDINT "$1" && INPUT=$1
 
 	#/////////////////////////////////////////////////////////////////////////////////////
 	# MENUS
@@ -36,26 +36,32 @@
 
 	Apply_Boot_Index(){
 
-		#Always disable LightDM
-		systemctl disable lightdm.service &> /dev/null
+		# - Always disable LightDM
+		systemctl disable lightdm &> /dev/null
 
 		# - Amiberry | always disable services, service launched by DietPi/login if non fastboot mode
-		systemctl disable amiberry.service &> /dev/null
+		systemctl disable amiberry &> /dev/null
 
 		if (( $G_HW_MODEL < 10 )); then
 
-			sed -i '/^boot_delay=0/d' /DietPi/config.txt
-			sed -i 's/logo.nologo//' /boot/cmdline.txt
-			sed -i 's/loglevel=3//' /boot/cmdline.txt
+			sed -i '/^[[:blank:]]*boot_delay=0/d' /DietPi/config.txt
+			sed -i 's/[[:blank:]]*logo.nologo//' /boot/cmdline.txt
+			sed -i 's/[[:blank:]]*loglevel=3//' /boot/cmdline.txt
 			sed -i 's/console=tty3/console=tty1/' /boot/cmdline.txt
 
 		fi
 
 		# - Disable custom launch service
-		rm /etc/systemd/system/dietpi-autostart_custom.service &> /dev/null
+		[[ -f /etc/systemd/system/dietpi-autostart_custom.service ]] && rm /etc/systemd/system/dietpi-autostart_custom.service
 
 		# - Disable auto login
-		rm /etc/systemd/system/getty@tty1.service.d/autologin.conf &> /dev/null
+		local fp_svc='/etc/systemd/system/getty@tty1.service.d'
+		if [[ -d $fp_svc ]]; then
+
+			[[ -f $fp_svc/dietpi-autologin.conf ]] && rm $fp_svc/dietpi-autologin.conf
+			[[ $(ls -A $fp_svc) ]] || rmdir $fp_svc
+
+		fi
 
 		#----------------------------------------------------------------------
 		#Enable autoboot options
@@ -64,67 +70,58 @@
 
 			cat << _EOF_ > /etc/systemd/system/dietpi-autostart_custom.service
 [Unit]
-Description=DietPi autostart (Custom /var/lib/dietpi/dietpi-autostart/custom.sh)
+Description=DietPi-Autostart (Custom /var/lib/dietpi/dietpi-autostart/custom.sh)
 After=dietpi-boot.service dietpi-ramdisk.service dietpi-ramlog.service dietpi-postboot.service rc-local.service
 Requires=dietpi-boot.service dietpi-ramdisk.service
 
 [Service]
 Type=idle
-ExecStartPre=/bin/bash -c 'echo -e "Starting DietPi-Autostart (Custom) script"'
-ExecStartPre=$(which chmod) +x /var/lib/dietpi/dietpi-autostart/custom.sh
-ExecStart=/bin/bash -c /var/lib/dietpi/dietpi-autostart/custom.sh
+ExecStartPre=$(command -v echo) 'Starting DietPi-Autostart (Custom) script'
+ExecStartPre=$(command -v chmod) +x /var/lib/dietpi/dietpi-autostart/custom.sh
+ExecStart=/var/lib/dietpi/dietpi-autostart/custom.sh
 StandardOutput=tty
 RemainAfterExit=yes
 
 [Install]
 WantedBy=multi-user.target
 _EOF_
-		systemctl enable dietpi-autostart_custom.service
+
+			systemctl enable dietpi-autostart_custom
 
 		#	Uae4arm special | fast boot via enabled service
 		elif (( $AUTO_START_INDEX == 6 )); then
 
-			systemctl enable amiberry.service
+			systemctl enable amiberry
 
 			# - apply tweaks
 			if (( $G_HW_MODEL < 10 )); then
 
 				G_CONFIG_INJECT 'boot_delay=' 'boot_delay=0' /DietPi/config.txt
-
-				if ! grep -qi ' logo.nologo' /boot/cmdline.txt; then
-
-					sed -i 's/rootwait/rootwait logo.nologo/' /boot/cmdline.txt
-
-				fi
-
-				if ! grep -qi ' loglevel=3' /boot/cmdline.txt; then
-
-					sed -i 's/rootwait/rootwait loglevel=3/' /boot/cmdline.txt
-
-				fi
-
-				if ! grep -qi ' console=tty3' /boot/cmdline.txt; then
-
-					sed -i 's/console=tty1/console=tty3/' /boot/cmdline.txt
-
-				fi
+				grep -qi ' logo.nologo' /boot/cmdline.txt || sed -i 's/rootwait/rootwait logo.nologo/' /boot/cmdline.txt
+				grep -qi ' loglevel=3' /boot/cmdline.txt || sed -i 's/rootwait/rootwait loglevel=3/' /boot/cmdline.txt
+				grep -qi ' console=tty3' /boot/cmdline.txt || sed -i 's/console=tty1/console=tty3/' /boot/cmdline.txt
 
 			fi
 
 		#	Enable auto login
 		elif (( $AUTO_START_INDEX > 0 )); then
 
-			mkdir -p /etc/systemd/system/getty@tty1.service.d &> /dev/null
-			cat << _EOF_ > /etc/systemd/system/getty@tty1.service.d/autologin.conf
+			mkdir -p /etc/systemd/system/getty@tty1.service.d
+			cat << _EOF_ > /etc/systemd/system/getty@tty1.service.d/dietpi-autologin.conf
 [Service]
 ExecStart=
 ExecStart=-/sbin/agetty --autologin root %I $TERM
 _EOF_
 
+		else
+
+			[[ -f /DietPi/dietpi/.dietpi-autostart_index ]] && rm /DietPi/dietpi/.dietpi-autostart_index
+			[[ -f /boot/dietpi/.dietpi-autostart_index ]] && rm /boot/dietpi/.dietpi-autostart_index
+
 		fi
 
-		#Save boot index.
-		echo $AUTO_START_INDEX > /DietPi/dietpi/.dietpi-autostart_index
+		#Save boot index, if not default 0
+		(( $AUTO_START_INDEX )) && echo $AUTO_START_INDEX > /DietPi/dietpi/.dietpi-autostart_index
 
 		systemctl daemon-reload
 
@@ -134,7 +131,7 @@ _EOF_
 	Menu_Main(){
 
 		#existing boot flag
-		AUTO_START_INDEX=$(</DietPi/dietpi/.dietpi-autostart_index)
+		[[ -f /DietPi/dietpi/.dietpi-autostart_index ]] && AUTO_START_INDEX=$(</DietPi/dietpi/.dietpi-autostart_index)
 
 		G_WHIP_MENU_ARRAY=(
 
@@ -178,11 +175,7 @@ _EOF_
 
 				G_WHIP_DEFAULT_ITEM="$(grep -m1 '^[[:blank:]]*SOFTWARE_CHROMIUM_AUTOSTART_URL=' /DietPi/dietpi.txt | sed 's/^[^=]*=//')"
 				G_WHIP_INPUTBOX "Please enter a homepage URL to start with Chromium:\n - eg: https://google.com"
-				if (( $? == 0 )); then
-
-					G_CONFIG_INJECT 'SOFTWARE_CHROMIUM_AUTOSTART_URL=' "SOFTWARE_CHROMIUM_AUTOSTART_URL=$G_WHIP_RETURNED_VALUE" /DietPi/dietpi.txt
-
-				fi
+				(( $? == 0 )) && G_CONFIG_INJECT 'SOFTWARE_CHROMIUM_AUTOSTART_URL=' "SOFTWARE_CHROMIUM_AUTOSTART_URL=$G_WHIP_RETURNED_VALUE" /DietPi/dietpi.txt
 
 			#Custom info
 			elif (( $choice == 14 )); then
@@ -202,7 +195,7 @@ _EOF_
 #startx
 
 # - Print hello
-#echo -e "Hello"
+#echo "Hello"
 
 #---Put your code below this line---
 
@@ -243,11 +236,7 @@ _EOF_
 
 			printf '\ec' # clear current terminal screen
 
-			if (( $TARGETMENUID == 0 )); then
-
-				Menu_Main
-
-			fi
+			(( $TARGETMENUID )) || Menu_Main
 
 		done
 
