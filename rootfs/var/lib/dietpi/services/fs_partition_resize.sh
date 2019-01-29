@@ -12,8 +12,8 @@ sync
 TARGET_DEV=$(findmnt / -o source -n)
 if [[ $TARGET_DEV =~ /mmcblk || $TARGET_DEV =~ /nvme ]]; then
 
-	TARGET_PARTITION=${TARGET_DEV##*p}	# mmcblk0p1 => 1
-	TARGET_DRIVE=${TARGET_DEV%p[0-9]}	# mmcblk0p1 => mmcblk0
+	TARGET_PARTITION=${TARGET_DEV##*p}	# /dev/mmcblk0p1 => 1
+	TARGET_DRIVE=${TARGET_DEV%p[0-9]}	# /dev/mmcblk0p1 => /dev/mmcblk0
 
 elif [[ $TARGET_DEV =~ /[sh]d[a-z] ]]; then
 
