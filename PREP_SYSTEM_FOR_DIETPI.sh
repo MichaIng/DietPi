@@ -551,13 +551,13 @@
 		l_message='Copy DietPi core files to /boot/dietpi' G_RUN_CMD cp -Rf "DietPi-$GITBRANCH/dietpi" /boot/
 		l_message='Copy DietPi rootfs files in place' G_RUN_CMD cp -Rf "DietPi-$GITBRANCH/rootfs"/. /
 		l_message='Clean download location' G_RUN_CMD rm -R "DietPi-$GITBRANCH"
+		l_message='Pre-create directories' G_RUN_CMD mkdir -p /DietPi/dietpi /var/lib/dietpi/services
 		l_message='Set execute permissions for DietPi scripts' G_RUN_CMD chmod -R +x /DietPi/dietpi /var/lib/dietpi/services /etc/cron.*/dietpi
 
 		G_RUN_CMD systemctl daemon-reload
 		G_RUN_CMD systemctl enable dietpi-ramdisk
 
 		# - Mount tmpfs
-		G_RUN_CMD mkdir -p /DietPi
 		G_RUN_CMD mount -t tmpfs -o size=10m tmpfs /DietPi
 		l_message='Starting DietPi-RAMdisk' G_RUN_CMD systemctl start dietpi-ramdisk
 
