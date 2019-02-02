@@ -722,6 +722,8 @@ _EOF_
 		#	ARMbian grab currently installed packages
 		elif dpkg --get-selections | grep -qi armbian; then
 
+			systemctl stop armbian-*
+
 			local apackages=(
 
 				"armbian-tools-$DISTRO_TARGET_NAME"
