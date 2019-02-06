@@ -551,7 +551,7 @@
 		l_message='Copy DietPi core files to /boot/dietpi' G_RUN_CMD cp -Rf "DietPi-$GITBRANCH/dietpi" /boot/
 		l_message='Copy DietPi rootfs files in place' G_RUN_CMD cp -Rf "DietPi-$GITBRANCH/rootfs"/. /
 		l_message='Clean download location' G_RUN_CMD rm -R "DietPi-$GITBRANCH"
-		l_message='Set execute permissions for DietPi scripts' G_RUN_CMD chmod -R +x /DietPi/dietpi /var/lib/dietpi/services /etc/cron.*/dietpi
+		l_message='Set execute permissions for DietPi scripts' G_RUN_CMD chmod -R +x /boot/dietpi /var/lib/dietpi/services /etc/cron.*/dietpi
 
 		G_RUN_CMD systemctl daemon-reload
 		G_RUN_CMD systemctl enable dietpi-ramdisk
