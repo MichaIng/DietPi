@@ -557,7 +557,6 @@
 		G_RUN_CMD systemctl enable dietpi-ramdisk
 
 		# - Mount tmpfs
-		G_RUN_CMD mkdir -p /DietPi
 		G_RUN_CMD mount -t tmpfs -o size=10m tmpfs /DietPi
 		l_message='Starting DietPi-RAMdisk' G_RUN_CMD systemctl start dietpi-ramdisk
 
@@ -721,6 +720,8 @@ _EOF_
 		# - G_HW_MODEL specific required Kernel packages
 		#	ARMbian grab currently installed packages
 		elif dpkg --get-selections | grep -qi armbian; then
+
+			systemctl stop armbian-*
 
 			local apackages=(
 
