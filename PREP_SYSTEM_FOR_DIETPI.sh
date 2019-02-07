@@ -557,6 +557,7 @@
 		G_RUN_CMD systemctl enable dietpi-ramdisk
 
 		# - Mount tmpfs
+		mkdir -p /DietPi
 		G_RUN_CMD mount -t tmpfs -o size=10m tmpfs /DietPi
 		l_message='Starting DietPi-RAMdisk' G_RUN_CMD systemctl start dietpi-ramdisk
 
