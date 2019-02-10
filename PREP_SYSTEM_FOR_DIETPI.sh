@@ -933,12 +933,12 @@ _EOF_
 		local aservices=(
 
 			# - ARMbian
-			firstrun
-			resize2fs
-			log2ram
-			armbian*
+			'firstrun'
+			'resize2fs'
+			'log2ram'
+			'armbian*'
 			# - Meveric
-			cpu_governor
+			'cpu_governor'
 
 		)
 
