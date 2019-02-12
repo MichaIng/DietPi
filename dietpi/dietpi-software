@@ -4915,11 +4915,11 @@ _EOF_
 			local existing_install=0
 			dpkg-query -s wireguard-dkms &> /dev/null && existing_install=1
 
-			# iptables required to forward incoming VPN traffic to internet interface
+			# iptables required to forward incoming VPN traffic to local LAN/internet interface
 			# qrencode required to print client config QR code to console
 			G_AGI wireguard iptables qrencode
 
-			# If no fresh install, reconfigure to rebuild WireGuard kernel module against current kernel headers
+			# If existing install, reconfigure to rebuild WireGuard kernel module against current kernel + headers
 			(( $existing_install )) && G_RUN_CMD dpkg-reconfigure wireguard-dkms
 
 			unset kernel_packages existing_install
@@ -9923,8 +9923,9 @@ _EOF_
 			# - and /boot partition
 			cp /etc/openvpn/easy-rsa/keys/DietPi_OpenVPN_Client.ovpn /boot/
 
-			#enable ipv4 forwarding
-			sed -i '/net.ipv4.ip_forward=/c\net.ipv4.ip_forward=1' /etc/sysctl.conf
+			#Enable IP forwarding
+			echo -e 'net.ipv4.ip_forward=1\nnet.ipv6.conf.all.forwarding=1\nnet.ipv6.conf.default.forwarding=1' > /etc/sysctl.d/dietpi-openvpn.conf
+			sysctl net.ipv4.ip_forward=1 net.ipv6.conf.all.forwarding=1 net.ipv6.conf.default.forwarding=1
 
 			#Web Fowarding (Setup IPtables, must also be run during boot)
 			#iptables -t nat -A POSTROUTING -s 10.8.0.0/24 -o "$(sed -n 3p /DietPi/dietpi/.network)" -j MASQUERADE
@@ -10015,30 +10016,41 @@ NB: This port needs to be forwarded by your router and/or opened in your firewal
 				# - Server config
 				[[ -f wg0.conf ]] || cat << _EOF_ > wg0.conf
 [Interface]
-Address = 10.8.0.1/24
+Address = 10.9.0.1/24
 PrivateKey = $(<server_private.key)
 ListenPort = $port
 
 PostUp = iptables -A FORWARD -i %i -j ACCEPT; iptables -t nat -A POSTROUTING -o \$(sed -n 3p /DietPi/dietpi/.network) -j MASQUERADE
 PostDown = iptables -D FORWARD -i %i -j ACCEPT; iptables -t nat -D POSTROUTING -o \$(sed -n 3p /DietPi/dietpi/.network) -j MASQUERADE
 
+# Client 1
 [Peer]
 PublicKey = $(<client_public.key)
-AllowedIPs = 10.8.0.0/24
+AllowedIPs = 10.9.0.2/32
+
+# Client 2
+#[Peer]
+#PublicKey = XXXX
+#AllowedIPs = 10.9.0.3/32
 _EOF_
 
 				# - Server local network IP
 				local server_ip=$(sed -n 4p /DietPi/dietpi/.network)
 
+				# - Server DNS nameserver
+				local server_dns=$(awk '/nameserver/ {print $2;exit}' /etc/resolv.conf)
+				#	Replace "127.0.0.1"/"localhost" loopback entries by server wg0 IP: https://github.com/Fourdee/DietPi/issues/2482
+				server_dns=${server_dns//127.0.0.1/10.9.0.1}
+				server_dns=${server_dns//localhost/10.9.0.1}
+
 				# - Client config
 				[[ -f wg0-client.conf ]] || cat << _EOF_ > wg0-client.conf
 [Interface]
-# The address must be unique for each client, use "10.8.0.3/24" for the second client and so on.
-Address = 10.8.0.2/24
+Address = 10.9.0.2/24
 PrivateKey = $(<client_private.key)
 
 # Comment the following to preserve the clients default DNS server, or force a desired one.
-DNS = $(awk '/nameserver/ {print $2;exit}' /etc/resolv.conf)
+DNS = $server_dns
 
 # Kill switch: Uncomment the following, if the client should stop any network traffic, when disconnected from the VPN server
 # NB: This requires "iptables" to be installed, thus will most likely not work on mobile phones.
@@ -10060,7 +10072,7 @@ Endpoint = $domain:$port
 #PersistentKeepalive = 25
 _EOF_
 
-				# - Enable IPv4 + IPv6 forwarding
+				# - Enable IP forwarding
 				(( $module_active )) && sysctl net.ipv4.ip_forward=1 net.ipv6.conf.all.forwarding=1 net.ipv6.conf.default.forwarding=1
 				#	persistent
 				echo -e 'net.ipv4.ip_forward=1\nnet.ipv6.conf.all.forwarding=1\nnet.ipv6.conf.default.forwarding=1' > /etc/sysctl.d/dietpi-wireguard.conf
@@ -10185,9 +10197,9 @@ _EOF_
 DAEMON_CONF="/etc/hostapd/hostapd.conf"
 _EOF_
 
-			# - Enable IPv4 forwarding
-			sed -i "/net.ipv4.ip_forward=/c\net.ipv4.ip_forward=1" /etc/sysctl.conf
-			echo 1 > /proc/sys/net/ipv4/ip_forward
+			# - Enable IP forwarding
+			echo -e 'net.ipv4.ip_forward=1\nnet.ipv6.conf.all.forwarding=1\nnet.ipv6.conf.default.forwarding=1' > /etc/sysctl.d/dietpi-wifihotspot.conf
+			sysctl net.ipv4.ip_forward=1 net.ipv6.conf.all.forwarding=1 net.ipv6.conf.default.forwarding=1
 
 			# - Apply iptables
 			iptables -t nat -A POSTROUTING -o eth$eth_index -j MASQUERADE
@@ -13628,12 +13640,13 @@ _EOF_
 
 		fi
 
-		software_id=97
+		software_id=97 # OpenVPN server
 		if (( ${aSOFTWARE_INSTALL_STATE[$software_id]} == -1 )); then
 
 			Banner_Uninstalling
 			G_AGP openvpn
 			[[ -d /etc/openvpn ]] && rm -R /etc/openvpn
+			[[ -f /etc/sysctl.d/dietpi-openvpn.conf ]] && rm /etc/sysctl.d/dietpi-openvpn.conf
 
 		fi
 
@@ -13732,6 +13745,9 @@ _EOF_
 			# - remove binary (used a -f trigger to detect wifi hotspot mode in dietpi-config).
 			rm /usr/sbin/hostapd &> /dev/null
 			rm /usr/sbin/hostapd_cli &> /dev/null
+
+			# IP forwarding
+			[[ -f /etc/sysctl.d/dietpi-wifihotspot.conf ]] && rm /etc/sysctl.d/dietpi-wifihotspot.conf
 
 			#Set Wlan back to inactive and ready for use with dietpi-config.
 			local wifi_index=$(sed -n 2p /DietPi/dietpi/.network)
