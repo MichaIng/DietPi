@@ -13,64 +13,31 @@
 	# - activates on login /etc/bashrc.d/dietpi-login.sh
 	#////////////////////////////////////
 
-	#Precaution: Wait for DietPi Ramdisk to finish
-	until [[ -f /DietPi/.ramdisk ]]
-	do
-
-		G_DIETPI-NOTIFY 2 'Waiting for DietPi-RAMDISK to finish mounting DietPi to RAM...'
-		sleep 1
-
-	done
-
-	#Import DietPi-Globals ---------------------------------------------------------------
-	. /DietPi/dietpi/func/dietpi-globals
-	G_PROGRAM_NAME='DietPi-Login'
-	#G_INIT
-	##Import DietPi-Globals ---------------------------------------------------------------
+	# Import DietPi-Globals --------------------------------------------------------------
+	# In main loop
+	# Import DietPi-Globals --------------------------------------------------------------
 
 	#/////////////////////////////////////////////////////////////////////////////////////
-	#Globals
+	# Globals
 	#/////////////////////////////////////////////////////////////////////////////////////
 	FP_DIETPI_FIRSTRUNSETUP_LOG='/var/tmp/dietpi/logs/dietpi-firstrun-setup.log'
-	FP_TMP_DIETPI_FIRSTRUNSETUP_LOG='/tmp/dietpi-firstrun-setup.log'
 
-	#/////////////////////////////////////////////////////////////////////////////////////
-	#DietPi-Autostart
-	#/////////////////////////////////////////////////////////////////////////////////////
-	AUTO_START_INDEX=0
-	[[ -f /DietPi/dietpi/.dietpi-autostart_index ]] && AUTO_START_INDEX=$(</DietPi/dietpi/.dietpi-autostart_index)
-
-	#Autoboot
+	# Autoboot
 	Run_AutoStart(){
 
-		#Do we have a valid screen for autoboot?
+		# - Do we have a valid screen for autoboot?
 		local screen_valid=0
 		[[ ! $DISPLAY && $(tty) == '/dev/tty1' ]] && screen_valid=1
 
-		#Boot to specific Program
+		# - Boot to specific program
 		if (( $screen_valid )); then
 
-			#Wait for postboot
-			local max_seconds=15
-			local current_seconds=1
-			until systemctl status dietpi-postboot | grep -qi 'exited'
-			do
-
-				G_DIETPI-NOTIFY 2 "Waiting for DietPi-Postboot to finish ($current_seconds/$max_seconds)"
-				sleep 1
-				((current_seconds++))
-
-				#max loop limit
-				(( $current_seconds >= $max_seconds )) && break
-
-			done
-
-			#Kodi
+			# - Kodi
 			if (( $AUTO_START_INDEX == 1 )); then
 
 				/DietPi/dietpi/misc/start_kodi
 
-			#Desktop (LXDE/MATE etc)
+			# - Desktop (LXDE/MATE etc)
 			elif (( $AUTO_START_INDEX == 2 )); then
 
 				clear
@@ -84,49 +51,46 @@
 
 				fi
 
-			#RetroPie/Emulation station
+			# - RetroPie/Emulation station
 			elif (( $AUTO_START_INDEX == 3 )); then
 
-				#emulationstation - can no longer be run as root
+				#	emulationstation - can no longer be run as root
 				/opt/retropie/supplementary/emulationstation/emulationstation.sh
 
-			#OpenTyrian
+			# - OpenTyrian
 			elif (( $AUTO_START_INDEX == 4 )); then
 
 				/usr/local/games/opentyrian/run
 
-			#DietPi-Cloudshell
+			# - DietPi-Cloudshell
 			elif (( $AUTO_START_INDEX == 5 )); then
 
-				#Launch DietPi-Cloudshell
 				setterm --blank 0 --powersave off --cursor off
 				systemctl start dietpi-cloudshell
 
-			#Amiberry standard boot
+			# - Amiberry standard boot
 			elif (( $AUTO_START_INDEX == 8 )); then
 
 				systemctl start amiberry
 
-			#DXX-Rebirth
+			# - DXX-Rebirth
 			elif (( $AUTO_START_INDEX == 9 )); then
 
 				$G_FP_DIETPI_USERDATA/dxx-rebirth/run.sh
 
-			#CAVA
+			# - CAVA
 			elif (( $AUTO_START_INDEX == 10 )); then
 
-				# wait for MPD fifo to start
-				sleep 4
-
+				sleep 4 # Wait for MPD fifo to start
 				setterm --blank 0 --powersave off
 				cava
 
-			#Chromium
+			# - Chromium
 			elif (( $AUTO_START_INDEX == 11 )); then
 
 				/var/lib/dietpi/dietpi-software/installed/chromium-autostart.sh
 
-			#LightDM
+			# - LightDM
 			elif (( $AUTO_START_INDEX == 16 )); then
 
 				/usr/sbin/lightdm
@@ -137,90 +101,154 @@
 
 	}
 
+	# First Run Setup
 	Run_First_Update_Setup(){
 
-		/DietPi/dietpi/func/dietpi-banner 0
-		local automated_setup=0
+		# First run setup running in other session
+		Other_Session_User_Prompt(){
 
-		until (( $G_DIETPI_INSTALL_STAGE == 2 ))
+			local additional_text='Please resume setup on the active screen.'
+			(( ! $G_USER_INPUTS )) && additional_text='Automated setup is in progress, the system will reboot automatically when completed.'
+
+			#	Force interactive whiptail
+			G_USER_INPUTS=1 G_WHIP_MSG "[WARNING] DietPi is currently running on another screen.\n\n$additional_text"
+
+			exit
+
+		}
+
+		# 1st run dietpi-update
+		if (( $G_DIETPI_INSTALL_STAGE == 0 )); then
+
+			# - Prompt and exit if DietPi-Update runs in other session already
+			pgrep 'dietpi-update' &> /dev/null && Other_Session_User_Prompt
+
+			# - Check internet
+			optional_cmd_inputs='--no-check-certificate' G_CHECK_URL "$(grep -m1 '^[[:blank:]]*deb ' /etc/apt/sources.list | mawk '{print $2}')" # Will exit on failure here then prompt user to configure network
+
+			# - Check NTP synced
+			/DietPi/dietpi/func/run_ntpd
+
+			# - Start DietPi-Update
+			/DietPi/dietpi/dietpi-update 1 # Sets G_DIETPI_INSTALL_STAGE=1
+
+			# - Update install state, to allow DietPi-Software in same loop
+			export G_DIETPI_INSTALL_STAGE=$(</DietPi/dietpi/.install_stage)
+
+		# 1st run dietpi-software installs
+		elif (( $G_DIETPI_INSTALL_STAGE == 1 )); then
+
+			# - Prompt and exit if DietPi-Software runs in other session already
+			pgrep 'dietpi-software' &> /dev/null && Other_Session_User_Prompt
+
+			# - Start DietPi-Software
+			/DietPi/dietpi/dietpi-software | tee $FP_DIETPI_FIRSTRUNSETUP_LOG # Sets G_DIETPI_INSTALL_STAGE=2
+
+			# - Update install state, to exit loop, if user skipped immediate reboot
+			export G_DIETPI_INSTALL_STAGE=$(</DietPi/dietpi/.install_stage)
+
+		fi
+
+	}
+
+	Show_License(){
+
+		if [[ -f /var/lib/dietpi/license.txt ]] && (( $G_USER_INPUTS )); then
+
+			G_WHIP_VIEWFILE /var/lib/dietpi/license.txt
+			rm /var/lib/dietpi/license.txt
+
+		fi
+
+	}
+
+	Main(){
+
+		while :
 		do
 
-			# - Automated?
-			if grep -qi '^[[:blank:]]*AUTO_SETUP_AUTOMATED=1' /DietPi/dietpi.txt; then
+			# Import DietPi-Globals --------------------------------------------------------------
+			. /DietPi/dietpi/func/dietpi-globals
+			G_PROGRAM_NAME='DietPi-Login'
+			#G_INIT
+			# Import DietPi-Globals --------------------------------------------------------------
 
-				automated_setup=1
+			# - Wait for full system boot
+			until systemctl status dietpi-postboot | grep -qi 'exited'
+			do
+
+				G_DIETPI-NOTIFY 2 'Waiting for DietPi-Postboot to finish, before executing login script.'
+				sleep 1
+
+			done
+
+			# - Automated install?
+			if (( $G_DIETPI_INSTALL_STAGE < 2 )) && grep -qi '^[[:blank:]]*AUTO_SETUP_AUTOMATED=1' /DietPi/dietpi.txt; then
+
 				#	Set non-interactive shell, if automated installation (as .bashrc run via STDIN check is interactive)
 				export G_USER_INPUTS=0
 
 			fi
 
-			# - 1st run dietpi-update
-			if (( $G_DIETPI_INSTALL_STAGE == 0 )); then
+			/DietPi/dietpi/func/obtain_network_details
 
-				if pgrep 'dietpi-update' &> /dev/null; then
+			Show_License
 
-					local additional_text='Please resume setup on the active screen.'
-					grep -q '^[[:blank:]]*AUTO_SETUP_AUTOMATED=1' /DietPi/dietpi.txt && additional_text='Automated installation update is in progress, the system will reboot automatically when completed.'
+			#----------------------------------------------------------------
+			# Normal Login
+			if (( $G_DIETPI_INSTALL_STAGE == 2 )); then
 
-					G_WHIP_MSG "DietPi is currently running on another screen.\n\n$additional_text"
+				/DietPi/dietpi/func/dietpi-banner 1
+
+				local auto_start_index=0
+				[[ -f /DietPi/dietpi/.dietpi-autostart_index ]] && auto_start_index=$(</DietPi/dietpi/.dietpi-autostart_index)
+				(( $auto_start_index > 0 )) && Run_AutoStart
+
+				break
+
+			#----------------------------------------------------------------
+			# Run DietPi-Update/DietPi-Software (1st run setup) (G_DIETPI_INSTALL_STAGE=0/1)
+			elif (( $G_DIETPI_INSTALL_STAGE == 0 || $G_DIETPI_INSTALL_STAGE == 1 )); then
+
+				/DietPi/dietpi/func/dietpi-banner 0
+				if (( $G_CHECK_ROOT_USER_VERIFIED )); then
+
+					Run_First_Update_Setup
 
 				else
 
-					#	Check internet
-					optional_cmd_inputs='--no-check-certificate' G_CHECK_URL "$(grep -m1 '^[[:blank:]]*deb ' /etc/apt/sources.list | awk '{print $2}')" # Will exit on failure here then prompt user to configure network
+					G_WHIP_MSG '[WARNING] Root login required\n
+To finish DietPi first run setup, root permissions are required.\n
+Please login again as user "root" with password "dietpi", respectively the one you chose in "dietpi.txt".'
 
-					#	Check NTP synced
-					/DietPi/dietpi/func/run_ntpd
-
-					#	Show GPL license
-					if [[ -f /var/lib/dietpi/license.txt ]]; then
-
-						G_WHIP_VIEWFILE /var/lib/dietpi/license.txt
-						rm /var/lib/dietpi/license.txt
-
-					fi
-
-					/DietPi/dietpi/dietpi-update 1 #Sets G_DIETPI_INSTALL_STAGE=1
+					break
 
 				fi
 
-			# - 1st run dietpi-software installs
-			elif (( $G_DIETPI_INSTALL_STAGE == 1 )); then
+			#----------------------------------------------------------------
+			# Unknown install state
+			else
 
-				#	Wait for DietPi-Software if already running, else run it
-				local run_dietpi_software=1
-				while pgrep 'dietpi-software' &> /dev/null
-				do
+				/DietPi/dietpi/func/dietpi-banner 0
 
-					run_dietpi_software=0
+				# - Force interactive mode to show G_WHIP error prompts
+				export G_USER_INPUTS=1
 
-					# - Automated
-					if (( $automated_setup )); then
+				if G_WHIP_YESNO "[FAILED] Unknown install state/First run setup failed\n
+An error has occured either during first run update or installs.\n
+First run setup will now attempt to re-apply the last step.
+If this repeatedly fails, please collect all terminal output and the content of $FP_DIETPI_FIRSTRUNSETUP_LOG if available and report this issue to: https://github.com/Fourdee/DietPi/issues\n\nWould you like to restart the first run setup and installation?"; then
 
-						G_DIETPI-NOTIFY 2 'DietPi is currently installing and configuring your system. Please wait for this to complete, check back later.'
+					# - reset to 0 to force update and fix code
+					echo 0 > /DietPi/dietpi/.install_stage
 
-					else
+				else
 
-						G_DIETPI-NOTIFY 2 'DietPi-Software is already running on another terminal/screen. Please complete or exit, before continuing.'
-
-					fi
-
-					sleep 2
-
-				done
-
-				#	Start DietPi-Software
-				if (( $run_dietpi_software )); then
-
-					/DietPi/dietpi/dietpi-software | tee $FP_TMP_DIETPI_FIRSTRUNSETUP_LOG #Sets G_DIETPI_INSTALL_STAGE=2
-					mv $FP_TMP_DIETPI_FIRSTRUNSETUP_LOG $FP_DIETPI_FIRSTRUNSETUP_LOG
+					break
 
 				fi
 
 			fi
-
-			# - reset to auto detection
-			unset G_USER_INPUTS
 
 		done
 
@@ -229,39 +257,7 @@
 	#/////////////////////////////////////////////////////////////////////////////////////
 	# Main Loop
 	#/////////////////////////////////////////////////////////////////////////////////////
-
-	#Update network details for banner IP address.
-	/DietPi/dietpi/func/obtain_network_details
-
-	#----------------------------------------------------------------
-	#Normal Login
-	if (( $G_DIETPI_INSTALL_STAGE == 2 )); then
-
-		/DietPi/dietpi/func/dietpi-banner 1
-
-		(( $AUTO_START_INDEX > 0 )) && Run_AutoStart
-
-	#----------------------------------------------------------------
-	#Run DietPi-Update/DietPi-Software (1st run setup) (G_DIETPI_INSTALL_STAGE=0/1)
-	elif (( $G_DIETPI_INSTALL_STAGE >= 0 )); then
-
-		Run_First_Update_Setup
-
-	#----------------------------------------------------------------
-	#DietPi finishing up bootloader.
-	elif (( $G_DIETPI_INSTALL_STAGE == -1 )); then
-
-		/DietPi/dietpi/func/dietpi-banner 0
-		echo -e ' >> DietPi System prep is nearly completed: \n Please run /DietPi/dietpi/login after a few seconds.'
-
-	#----------------------------------------------------------------
-	#DietPi running filesystem prep
-	else
-
-		/DietPi/dietpi/func/dietpi-banner 0
-		echo -e ' >> Filesystem prep has not yet completed: \n Please wait for the system to reboot.'
-
-	fi
+	Main
 
 	#-----------------------------------------------------------------------------------
 	exit
