@@ -1527,11 +1527,7 @@ _EOF_
 				 aSOFTWARE_WHIP_DESC[$software_id]='(Weaved) access your device over the internet'
 			aSOFTWARE_CATEGORY_INDEX[$software_id]=10
 					  aSOFTWARE_TYPE[$software_id]=0
-			 aSOFTWARE_ONLINEDOC_URL[$software_id]='f=8&t=5&start=20#p188'
-
-		# - Currently ARMv6/7 only
-		aSOFTWARE_AVAIL_G_HW_ARCH[$software_id,3]=0
-		aSOFTWARE_AVAIL_G_HW_ARCH[$software_id,10]=0
+			 aSOFTWARE_ONLINEDOC_URL[$software_id]='p=188#p188'
 
 		#------------------
 		software_id=138
@@ -4336,12 +4332,30 @@ _EOF_
 
 		fi
 
-		#WEAVED
-		software_id=68
+		software_id=68 # Remot3.it (previously Weaved)
 		if (( ${aSOFTWARE_INSTALL_STATE[$software_id]} == 1 )); then
 
 			Banner_Installing
-			Download_Install 'https://github.com/weaved/installer/raw/master/Raspbian%20deb/1.3-07/weavedconnectd_1.3-07z1_armhf.deb'
+			INSTALL_URL_ADDRESS='https://api.github.com/repos/remoteit/installer/releases/latest'
+			G_CHECK_URL "$INSTALL_URL_ADDRESS"
+
+			# ARMv6/7
+			local arch='armhf'
+
+			# ARMv8
+			if (( $G_HW_ARCH == 3 )); then
+
+				arch='arm64'
+
+			# x86_64
+			elif (( $G_HW_ARCH == 10 )); then
+
+				arch='amd64'
+
+			fi
+
+			INSTALL_URL_ADDRESS=$(curl -s "$INSTALL_URL_ADDRESS" | grep -m1 "browser_download_url.*connectd_.*_$arch\.deb" | cut -d \" -f 4)
+			no_check_url=1 Download_Install "$INSTALL_URL_ADDRESS"
 
 		fi
 
@@ -4915,11 +4929,11 @@ _EOF_
 			local existing_install=0
 			dpkg-query -s wireguard-dkms &> /dev/null && existing_install=1
 
-			# iptables required to forward incoming VPN traffic to internet interface
+			# iptables required to forward incoming VPN traffic to local LAN/internet interface
 			# qrencode required to print client config QR code to console
 			G_AGI wireguard iptables qrencode
 
-			# If no fresh install, reconfigure to rebuild WireGuard kernel module against current kernel headers
+			# If existing install, reconfigure to rebuild WireGuard kernel module against current kernel + headers
 			(( $existing_install )) && G_RUN_CMD dpkg-reconfigure wireguard-dkms
 
 			unset kernel_packages existing_install
@@ -6725,6 +6739,8 @@ Pin-Priority: -1' > /etc/apt/preferences.d/dietpi-docker_fix
 
 			Banner_Installing
 
+			local packages='ca-certificates-java openjdk-8-jre-headless openjdk-8-jdk-headless'
+
 			# On Jessie use backports repo:
 			if (( $G_DISTRO == 3 )); then
 
@@ -6734,13 +6750,13 @@ Pin: release a=jessie-backports
 Pin-Priority: 990
 _EOF_
 
-				G_AGI openjdk-8-jre-headless openjdk-8-jdk-headless -t jessie-backports
-
-			else
-
-				G_AGI openjdk-8-jre-headless openjdk-8-jdk-headless
+				packages+=' -t jessie-backports'
 
 			fi
+
+			# Workaround for ARM install issue: https://github.com/Fourdee/DietPi/issues/2524
+			apt-get install -y -qq $packages
+			G_AGI $packages
 
 		fi
 
@@ -8722,7 +8738,7 @@ _EOF_
 			fi
 
 			# - Adjust user group and home dir
-			usermod -a -G dietpi -d $G_FP_DIETPI_USERDATA/mopidy mopidy
+			usermod -a -G dietpi,audio -d $G_FP_DIETPI_USERDATA/mopidy mopidy
 
 			# - Adjust systemd unit to match new group and do not pre-create obsolete cache dir
 			mkdir -p /etc/systemd/system/mopidy.service.d
@@ -9920,8 +9936,9 @@ _EOF_
 			# - and /boot partition
 			cp /etc/openvpn/easy-rsa/keys/DietPi_OpenVPN_Client.ovpn /boot/
 
-			#enable ipv4 forwarding
-			sed -i '/net.ipv4.ip_forward=/c\net.ipv4.ip_forward=1' /etc/sysctl.conf
+			#Enable IP forwarding
+			echo -e 'net.ipv4.ip_forward=1\nnet.ipv6.conf.all.forwarding=1\nnet.ipv6.conf.default.forwarding=1' > /etc/sysctl.d/dietpi-openvpn.conf
+			sysctl net.ipv4.ip_forward=1 net.ipv6.conf.all.forwarding=1 net.ipv6.conf.default.forwarding=1
 
 			#Web Fowarding (Setup IPtables, must also be run during boot)
 			#iptables -t nat -A POSTROUTING -s 10.8.0.0/24 -o "$(sed -n 3p /DietPi/dietpi/.network)" -j MASQUERADE
@@ -10012,30 +10029,41 @@ NB: This port needs to be forwarded by your router and/or opened in your firewal
 				# - Server config
 				[[ -f wg0.conf ]] || cat << _EOF_ > wg0.conf
 [Interface]
-Address = 10.8.0.1/24
+Address = 10.9.0.1/24
 PrivateKey = $(<server_private.key)
 ListenPort = $port
 
 PostUp = iptables -A FORWARD -i %i -j ACCEPT; iptables -t nat -A POSTROUTING -o \$(sed -n 3p /DietPi/dietpi/.network) -j MASQUERADE
 PostDown = iptables -D FORWARD -i %i -j ACCEPT; iptables -t nat -D POSTROUTING -o \$(sed -n 3p /DietPi/dietpi/.network) -j MASQUERADE
 
+# Client 1
 [Peer]
 PublicKey = $(<client_public.key)
-AllowedIPs = 10.8.0.0/24
+AllowedIPs = 10.9.0.2/32
+
+# Client 2
+#[Peer]
+#PublicKey = XXXX
+#AllowedIPs = 10.9.0.3/32
 _EOF_
 
 				# - Server local network IP
 				local server_ip=$(sed -n 4p /DietPi/dietpi/.network)
 
+				# - Server DNS nameserver
+				local server_dns=$(awk '/nameserver/ {print $2;exit}' /etc/resolv.conf)
+				#	Replace "127.0.0.1"/"localhost" loopback entries by server wg0 IP: https://github.com/Fourdee/DietPi/issues/2482
+				server_dns=${server_dns//127.0.0.1/10.9.0.1}
+				server_dns=${server_dns//localhost/10.9.0.1}
+
 				# - Client config
 				[[ -f wg0-client.conf ]] || cat << _EOF_ > wg0-client.conf
 [Interface]
-# The address must be unique for each client, use "10.8.0.3/24" for the second client and so on.
-Address = 10.8.0.2/24
+Address = 10.9.0.2/24
 PrivateKey = $(<client_private.key)
 
 # Comment the following to preserve the clients default DNS server, or force a desired one.
-DNS = $(awk '/nameserver/ {print $2;exit}' /etc/resolv.conf)
+DNS = $server_dns
 
 # Kill switch: Uncomment the following, if the client should stop any network traffic, when disconnected from the VPN server
 # NB: This requires "iptables" to be installed, thus will most likely not work on mobile phones.
@@ -10057,7 +10085,7 @@ Endpoint = $domain:$port
 #PersistentKeepalive = 25
 _EOF_
 
-				# - Enable IPv4 + IPv6 forwarding
+				# - Enable IP forwarding
 				(( $module_active )) && sysctl net.ipv4.ip_forward=1 net.ipv6.conf.all.forwarding=1 net.ipv6.conf.default.forwarding=1
 				#	persistent
 				echo -e 'net.ipv4.ip_forward=1\nnet.ipv6.conf.all.forwarding=1\nnet.ipv6.conf.default.forwarding=1' > /etc/sysctl.d/dietpi-wireguard.conf
@@ -10182,9 +10210,9 @@ _EOF_
 DAEMON_CONF="/etc/hostapd/hostapd.conf"
 _EOF_
 
-			# - Enable IPv4 forwarding
-			sed -i "/net.ipv4.ip_forward=/c\net.ipv4.ip_forward=1" /etc/sysctl.conf
-			echo 1 > /proc/sys/net/ipv4/ip_forward
+			# - Enable IP forwarding
+			echo -e 'net.ipv4.ip_forward=1\nnet.ipv6.conf.all.forwarding=1\nnet.ipv6.conf.default.forwarding=1' > /etc/sysctl.d/dietpi-wifihotspot.conf
+			sysctl net.ipv4.ip_forward=1 net.ipv6.conf.all.forwarding=1 net.ipv6.conf.default.forwarding=1
 
 			# - Apply iptables
 			iptables -t nat -A POSTROUTING -o eth$eth_index -j MASQUERADE
@@ -11105,22 +11133,18 @@ _EOF_
 
 			G_BACKUP_FP /var/lib/dietpi/dietpi-software/installed/aria2.conf
 			cat << _EOF_ > /var/lib/dietpi/dietpi-software/installed/aria2.conf
-# host is where aria2c is running on
-host=localhost
-dir=$G_FP_DIETPI_USERDATA/$FOLDER_DOWNLOADS
-
-# cleanup_policy
-cleanup-policy=clean_got
-cleanup-percent=90%
-
 # The fallowing options are aria2c options as usual aria2.conf file
 # https://aria2.github.io/manual/en/html/aria2c.html
+
+# Download directory
+dir=$G_FP_DIETPI_USERDATA/$FOLDER_DOWNLOADS
 
 # RPC Options
 enable-rpc=true
 rpc-listen-all=true
 rpc-listen-port=6800
 rpc-secret=$GLOBAL_PW
+rpc-allow-origin-all=true
 pause=false
 
 # General Options
@@ -11132,6 +11156,9 @@ continue=true
 check-integrity=true
 max-concurrent-downloads=$(Optimize_BitTorrent 1)
 max-connection-per-server=$(Optimize_BitTorrent 1)
+# Bandwidth limits: https://aria2.github.io/manual/en/html/aria2c.html#cmdoption-max-overall-upload-limit
+max-overall-download-limit=0
+max-overall-upload-limit=0
 max-file-not-found=3
 max-tries=5
 retry-wait=60
@@ -11147,21 +11174,10 @@ max-download-limit=0
 seed-ratio=0.1
 seed-time=0
 
-metalink-servers=$(Optimize_BitTorrent 2)
 allow-overwrite=false
 always-resume=true
 auto-file-renaming=false
 file-allocation=none
-
-[limit-options]
-max-concurrent-downloads=$(Optimize_BitTorrent 1)
-max-overall-download-limit=1000K
-max-overall-upload-limit=100K
-
-[unlimit-options]
-max-concurrent-downloads=$(Optimize_BitTorrent 1)
-max-overall-download-limit=0
-max-overall-upload-limit=0
 _EOF_
 
 			cat << _EOF_ > /etc/systemd/system/aria2.service
@@ -13486,13 +13502,7 @@ _EOF_
 		if (( ${aSOFTWARE_INSTALL_STATE[$software_id]} == -1 )); then
 
 			Banner_Uninstalling
-			# <= v150 (weaved)
-			rm -R /etc/weaved
-			rm -R $HOME/weaved_software
-			rm $HOME/weaved_setup.bin
-
-			# Remot3.it
-			G_AGP weavedconnectd
+			G_AGP connectd weavedconnectd # pre-v6.22
 
 		fi
 
@@ -13637,12 +13647,13 @@ _EOF_
 
 		fi
 
-		software_id=97
+		software_id=97 # OpenVPN server
 		if (( ${aSOFTWARE_INSTALL_STATE[$software_id]} == -1 )); then
 
 			Banner_Uninstalling
 			G_AGP openvpn
 			[[ -d /etc/openvpn ]] && rm -R /etc/openvpn
+			[[ -f /etc/sysctl.d/dietpi-openvpn.conf ]] && rm /etc/sysctl.d/dietpi-openvpn.conf
 
 		fi
 
@@ -13652,7 +13663,7 @@ _EOF_
 			Banner_Uninstalling
 			G_AGP wireguard*
 			[[ -d /etc/wireguard ]] && rm -R /etc/wireguard
-			[[ -f /etc/apt/sources.d/dietpi-wireguard.list ]] && rm /etc/apt/sources.d/dietpi-wireguard.list
+			[[ -f /etc/apt/sources.list.d/dietpi-wireguard.list ]] && rm /etc/apt/sources.list.d/dietpi-wireguard.list
 			[[ -f /etc/apt/preferences.d/dietpi-wireguard ]] && rm /etc/apt/preferences.d/dietpi-wireguard
 			[[ -f /etc/sysctl.d/dietpi-wireguard.conf ]] && rm /etc/sysctl.d/dietpi-wireguard.conf
 
@@ -13741,6 +13752,9 @@ _EOF_
 			# - remove binary (used a -f trigger to detect wifi hotspot mode in dietpi-config).
 			rm /usr/sbin/hostapd &> /dev/null
 			rm /usr/sbin/hostapd_cli &> /dev/null
+
+			# IP forwarding
+			[[ -f /etc/sysctl.d/dietpi-wifihotspot.conf ]] && rm /etc/sysctl.d/dietpi-wifihotspot.conf
 
 			#Set Wlan back to inactive and ready for use with dietpi-config.
 			local wifi_index=$(sed -n 2p /DietPi/dietpi/.network)
@@ -16164,6 +16178,8 @@ NB: You can use dietpi-software at a later date, to install optimized software f
 
 					#exit menu system
 					TARGETMENUID=-1
+
+					DISABLE_REBOOT=1
 
 					#Enable installation start flag
 					GOSTARTINSTALL=1

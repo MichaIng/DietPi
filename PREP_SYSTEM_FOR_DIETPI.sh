@@ -145,7 +145,7 @@
 	# DietPi-Globals
 	#------------------------------------------------------------------------------------------------
 	# - Download
-	# - NB: We'll have to manually handle errors, until DietPi-Globals are sucessfully loaded.
+	# - NB: We'll have to manually handle errors, until DietPi-Globals are successfully loaded.
 	if ! wget "https://raw.githubusercontent.com/$GITOWNER/DietPi/$GITBRANCH/dietpi/func/dietpi-globals" -O dietpi-globals; then
 
 		echo -e '[FAILED] Unable to download dietpi-globals. Aborting...\n'
@@ -933,12 +933,12 @@ _EOF_
 		local aservices=(
 
 			# - ARMbian
-			firstrun
-			resize2fs
-			log2ram
-			armbian*
+			'firstrun'
+			'resize2fs'
+			'log2ram'
+			'armbian*'
 			# - Meveric
-			cpu_governor
+			'cpu_governor'
 
 		)
 
@@ -1466,7 +1466,7 @@ _EOF_
 		[[ -f ~/.bash_history ]] && rm ~/.bash_history
 		rm -f /home/*/.bash_history
 
-		# - Remove Nano histroy file
+		# - Remove Nano history file
 		[[ -f ~/.nano_history ]] && rm ~/.nano_history
 		rm -f /home/*/.nano_history
 
@@ -1671,7 +1671,7 @@ _EOF_
 
 		#Read image
 
-		#Resize rootfs parition to mininum size +50MB
+		#Resize rootfs partition to minimum size +50MB
 
 	}
 
