@@ -4,4 +4,4 @@
 . /DietPi/dietpi/func/dietpi-globals
 
 # login scripts and banner
-/DietPi/dietpi/login
+/DietPi/dietpi/dietpi-login
