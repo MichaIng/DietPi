@@ -18,7 +18,8 @@
 
 	#Core globals
 	G_PROGRAM_NAME='DietPi-PREP'
-	GITOWNER=${GITOWNER:-Fourdee}
+	G_GITOWNER=${GITOWNER:-Fourdee}
+	unset GITOWNER
 
 	#------------------------------------------------------------------------------------------------
 	# Critical checks and pre-reqs, with exit, prior to initial run of script
@@ -128,7 +129,7 @@
 
 	if WHIP_RETURN=$(whiptail --title "$G_PROGRAM_NAME" --menu 'Please select a Git branch:' --default-item 'master' --ok-button 'Ok' --cancel-button 'Exit' --backtitle "$G_PROGRAM_NAME" 12 80 3 "${aWHIP_BRANCH[@]}" 3>&1 1>&2 2>&3); then
 
-		GITBRANCH=$WHIP_RETURN
+		G_GITBRANCH=$WHIP_RETURN
 
 	else
 
@@ -139,14 +140,14 @@
 
 	unset aWHIP_BRANCH WHIP_RETURN
 
-	echo "[ INFO ] Selected Git branch: $GITOWNER/$GITBRANCH"
+	echo "[ INFO ] Selected Git branch: $G_GITOWNER/$G_GITBRANCH"
 
 	#------------------------------------------------------------------------------------------------
 	# DietPi-Globals
 	#------------------------------------------------------------------------------------------------
 	# - Download
 	# - NB: We'll have to manually handle errors, until DietPi-Globals are successfully loaded.
-	if ! wget "https://raw.githubusercontent.com/$GITOWNER/DietPi/$GITBRANCH/dietpi/func/dietpi-globals" -O dietpi-globals; then
+	if ! wget "https://raw.githubusercontent.com/$G_GITOWNER/DietPi/$G_GITBRANCH/dietpi/func/dietpi-globals" -O dietpi-globals; then
 
 		echo -e '[FAILED] Unable to download dietpi-globals. Aborting...\n'
 		exit 1
@@ -508,11 +509,11 @@
 		G_DIETPI-NOTIFY 2 '-----------------------------------------------------------------------------------'
 		#------------------------------------------------------------------------------------------------
 
-		INTERNET_ADDRESS="https://github.com/$GITOWNER/DietPi/archive/$GITBRANCH.zip"
+		INTERNET_ADDRESS="https://github.com/$G_GITOWNER/DietPi/archive/$G_GITBRANCH.zip"
 		G_CHECK_URL "$INTERNET_ADDRESS"
 		G_RUN_CMD wget "$INTERNET_ADDRESS" -O package.zip
 
-		[[ -d DietPi-$GITBRANCH ]] && l_message='Cleaning previously extracted files' G_RUN_CMD rm -R "DietPi-$GITBRANCH"
+		[[ -d DietPi-$G_GITBRANCH ]] && l_message='Cleaning previously extracted files' G_RUN_CMD rm -R "DietPi-$G_GITBRANCH"
 		l_message='Extracting DietPi sourcecode' G_RUN_CMD unzip package.zip
 		rm package.zip
 
@@ -523,41 +524,46 @@
 		# - HW specific config.txt, boot.ini uEnv.txt
 		if (( $G_HW_MODEL < 10 )); then
 
-			G_RUN_CMD mv "DietPi-$GITBRANCH/config.txt" /boot/
+			G_RUN_CMD mv "DietPi-$G_GITBRANCH/config.txt" /boot/
 
 		elif (( $G_HW_MODEL == 10 )); then
 
-			G_RUN_CMD mv "DietPi-$GITBRANCH/boot_c1.ini" /boot/boot.ini
+			G_RUN_CMD mv "DietPi-$G_GITBRANCH/boot_c1.ini" /boot/boot.ini
 
 		elif (( $G_HW_MODEL == 11 )); then
 
-			G_RUN_CMD mv "DietPi-$GITBRANCH/boot_xu4.ini" /boot/boot.ini
+			G_RUN_CMD mv "DietPi-$G_GITBRANCH/boot_xu4.ini" /boot/boot.ini
 
 		elif (( $G_HW_MODEL == 12 )); then
 
-			G_RUN_CMD mv "DietPi-$GITBRANCH/boot_c2.ini" /boot/boot.ini
+			G_RUN_CMD mv "DietPi-$G_GITBRANCH/boot_c2.ini" /boot/boot.ini
 
 		fi
 
-		G_RUN_CMD mv "DietPi-$GITBRANCH/dietpi.txt" /boot/
-		G_RUN_CMD mv "DietPi-$GITBRANCH/README.md" /boot/dietpi-README.md
-		G_RUN_CMD mv "DietPi-$GITBRANCH/CHANGELOG.txt" /boot/dietpi-CHANGELOG.txt
+		G_RUN_CMD mv "DietPi-$G_GITBRANCH/dietpi.txt" /boot/
+		G_RUN_CMD mv "DietPi-$G_GITBRANCH/README.md" /boot/dietpi-README.md
+		G_RUN_CMD mv "DietPi-$G_GITBRANCH/CHANGELOG.txt" /boot/dietpi-CHANGELOG.txt
+
+		# - Reading version string for later use
+		G_DIETPI_VERSION_CORE=$(sed -n 1p "DietPi-$G_GITBRANCH/dietpi/server_version-6")
+		G_DIETPI_VERSION_SUB=$(sed -n 2p "DietPi-$G_GITBRANCH/dietpi/server_version-6")
+		G_DIETPI_VERSION_RC=$(sed -n 3p "DietPi-$G_GITBRANCH/dietpi/server_version-6")
 
 		# - Remove server_version* / (pre-)patch_file (downloads fresh from dietpi-update)
-		rm "DietPi-$GITBRANCH/dietpi/server_version"*
-		rm "DietPi-$GITBRANCH/dietpi/pre-patch_file"
-		rm "DietPi-$GITBRANCH/dietpi/patch_file"
+		rm "DietPi-$G_GITBRANCH/dietpi/server_version"*
+		rm "DietPi-$G_GITBRANCH/dietpi/pre-patch_file"
+		rm "DietPi-$G_GITBRANCH/dietpi/patch_file"
 
-		l_message='Copy DietPi core files to /boot/dietpi' G_RUN_CMD cp -Rf "DietPi-$GITBRANCH/dietpi" /boot/
-		l_message='Copy DietPi rootfs files in place' G_RUN_CMD cp -Rf "DietPi-$GITBRANCH/rootfs"/. /
-		l_message='Clean download location' G_RUN_CMD rm -R "DietPi-$GITBRANCH"
+		l_message='Copy DietPi core files to /boot/dietpi' G_RUN_CMD cp -Rf "DietPi-$G_GITBRANCH/dietpi" /boot/
+		l_message='Copy DietPi rootfs files in place' G_RUN_CMD cp -Rf "DietPi-$G_GITBRANCH/rootfs"/. /
+		l_message='Clean download location' G_RUN_CMD rm -R "DietPi-$G_GITBRANCH"
 		l_message='Set execute permissions for DietPi scripts' G_RUN_CMD chmod -R +x /boot/dietpi /var/lib/dietpi/services /etc/cron.*/dietpi
 
 		G_RUN_CMD systemctl daemon-reload
 		G_RUN_CMD systemctl enable dietpi-ramdisk
 
 		# - Mount tmpfs
-		mkdir -p /DietPi
+		G_RUN_CMD mkdir -p /DietPi
 		G_RUN_CMD mount -t tmpfs -o size=10m tmpfs /DietPi
 		l_message='Starting DietPi-RAMdisk' G_RUN_CMD systemctl start dietpi-ramdisk
 
@@ -994,7 +1000,7 @@ _EOF_
 
 		#-----------------------------------------------------------------------------------
 		#Boot Logo
-		[[ -f /boot/boot.bmp ]] && G_RUN_CMD wget https://github.com/$GITOWNER/DietPi/raw/$GITBRANCH/.meta/images/dietpi-logo_boot.bmp -O /boot/boot.bmp
+		[[ -f /boot/boot.bmp ]] && G_RUN_CMD wget https://github.com/$G_GITOWNER/DietPi/raw/$G_GITBRANCH/.meta/images/dietpi-logo_boot.bmp -O /boot/boot.bmp
 
 		#-----------------------------------------------------------------------------------
 		#Bash Profiles
@@ -1582,7 +1588,7 @@ This program is free software: you can redistribute it and/or modify it under th
 
 This program is distributed in the hope that it will be useful, but WITHOUT ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the GNU General Public License for more details.
 
-You should have received a copy of the GNU General Public License along with this program. If not, please see http://www.gnu.org/licenses/'
+You should have received a copy of the GNU General Public License along with this program. If not, please see http://www.gnu.org/licenses/
 _EOF_
 
 		G_DIETPI-NOTIFY 2 'Clearing APT cache'
@@ -1609,17 +1615,13 @@ _EOF_
 
 		fi
 
-		G_DIETPI-NOTIFY 2 'Storing DietPi version ID'
+		G_DIETPI-NOTIFY 2 'Storing DietPi version info'
 
-		G_RUN_CMD wget "https://raw.githubusercontent.com/$GITOWNER/DietPi/$GITBRANCH/dietpi/.version" -O /DietPi/dietpi/.version
+		G_CONFIG_INJECT 'DEV_GITBRANCH=' "DEV_GITBRANCH=$G_GITBRANCH" /DietPi/dietpi.txt
+		G_CONFIG_INJECT 'DEV_GITOWNER=' "DEV_GITOWNER=$G_GITOWNER" /DietPi/dietpi.txt
 
-		chmod +x /DietPi/dietpi/.version
-		. /DietPi/dietpi/.version
 		#	Reduce sub_version by 1, allows us to create image, prior to release and patch if needed.
 		((G_DIETPI_VERSION_SUB--))
-
-		G_CONFIG_INJECT 'DEV_GITBRANCH=' "DEV_GITBRANCH=$GITBRANCH" /DietPi/dietpi.txt
-		G_CONFIG_INJECT 'DEV_GITOWNER=' "DEV_GITOWNER=$GITOWNER" /DietPi/dietpi.txt
 		G_VERSIONDB_SAVE
 
 		G_RUN_CMD cp /DietPi/dietpi/.version /var/lib/dietpi/.dietpi_image_version
