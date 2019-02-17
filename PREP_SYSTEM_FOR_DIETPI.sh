@@ -638,7 +638,7 @@ _EOF_
 			'kmod'			# "modprobe", "lsmod", used by several DietPi scripts
 			'locales'		# Support locales, necessary for DietPi scripts, as we use en_GB.UTF8 as default language
 			'nano'			# Simple text editor
-			'p7zip-full'		# .7z wrapper
+			'p7zip'			# .7z wrapper
 			'parted'		# Drive partitioning, required by DietPi-Boot + DietPi-Drive_Manager
 			'procps'		# "kill", "ps", "pgrep", "sysctl", used by several DietPi scripts
 			'psmisc'		# "killall", used by several DietPi scripts
