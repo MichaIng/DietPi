@@ -1651,28 +1651,60 @@ Also have a look at "Sonarr", another alternative TV show manager, available for
 			G_CONFIG_INJECT '.*/etc/bashrc\.d/.*' 'for i in /etc/bashrc.d/*.sh; do [ -r "$i" ] && . $i; done' /etc/bash.bashrc
 			#-------------------------------------------------------------------------------
 			#Mopidy fix: https://github.com/Fourdee/DietPi/issues/2536
-			if grep -q '^mopidy' /etc/passwd; then
-
-				usermod -a -G dietpi,audio -d $G_FP_DIETPI_USERDATA/mopidy mopidy
-
-			fi
+			getent passwd mopidy &> /dev/null && usermod -a -G dietpi,audio -d $G_FP_DIETPI_USERDATA/mopidy mopidy
 			#-------------------------------------------------------------------------------
 			#Remove obsolete workaround for archive.raspberrypi.org repo on Buster: https://github.com/Fourdee/DietPi/issues/1286#issuecomment-463856159
 			(( $G_DISTRO == 5 && $G_HW_MODEL < 10 )) && sed -i 's/stretch/buster/g' /etc/apt/sources.list.d/raspi.list
 			#-------------------------------------------------------------------------------
 			#Removed dependency on "p7zip-full", use "7zr" (p7zip) instead: https://github.com/Fourdee/DietPi/pull/2559
-			dpkg-query -s p7zip-full &> /dev/null && apt-mark auto p7zip-full
 			G_AGI p7zip
-			#-------------------------------------------------------------------------------
-			# - Reinstalls
-			#	MPD: https://github.com/Fourdee/DietPi/issues/2462
-			(( $G_DIETPI_INSTALL_STAGE == 2 )) && /DietPi/dietpi/dietpi-software reinstall 128
+			if dpkg-query -s p7zip-full &> /dev/null &&
+				! G_WHIP_BUTTON_OK_TEXT='Yes' G_WHIP_BUTTON_CANCEL_TEXT='No' G_WHIP_YESNO '[QUESTION] Do you want to keep "p7zip-full"?\n
+DietPi does not require the "p7zip-full" package anymore but just "p7zip" instead.
+- "p7zip" provides the lightweight standalone "7zr" command to handle 7zip archives only.
+- "p7zip-full" additionally provides the "7z" and "7za" commands which can handle other archive types as well.
+  However, DietPi internally uses "unzip", "tar" and "unrar" to handle those.\n
+Do you still want to keep "p7zip-full"?'; then
+
+				apt-mark auto p7zip-full
+				G_AGA
+
+			fi
 			#-------------------------------------------------------------------------------
 			#Fix Pi-hole permissions to allow "pihole -up"
 			if [[ -d /var/www/html/pihole ]]; then
 
 				cd /var/www/html/admin && git reset --hard HEAD
 				cd /tmp/$G_PROGRAM_NAME
+
+			fi
+			#-------------------------------------------------------------------------------
+			#WireGuard: Harden "sid" repo handling and on RPi, catch up on installing the Debian keyring: https://github.com/Fourdee/DietPi/pull/2571
+			if [[ -f /etc/apt/preferences.d/dietpi-wireguard ]]; then
+
+				if (( $G_HW_MODEL < 10 )); then
+
+					wget https://dietpi.com/downloads/binaries/rpi/debian-archive-keyring.deb
+					dpkg -i debian-archive-keyring.deb
+					rm debian-archive-keyring.deb
+
+				fi
+
+				echo -e 'Package: *\nPin: release n=sid\nPin-Priority: -1\n
+Package: wireguard wireguard-dkms wireguard-tools\nPin: release n=sid\nPin-Priority: 99' > /etc/apt/preferences.d/dietpi-wireguard
+
+			fi
+			#-------------------------------------------------------------------------------
+			#MPD: Fix permissions issue: https://github.com/Fourdee/DietPi/issues/2462
+			if [[ -f /etc/mpd/mpd.conf ]]; then
+
+				sed -Ei '/^(user|group)[[:blank:]]/d' /etc/mpd/mpd.conf
+				sed -i '/^Group=/d' /lib/systemd/system/mpd.service
+				G_CONFIG_INJECT 'User=' 'User=mpd' /lib/systemd/system/mpd.service '\[Service\]'
+				G_CONFIG_INJECT 'PermissionsStartOnly=' 'PermissionsStartOnly=true' /lib/systemd/system/mpd.service '^User=mpd'
+				usermod -a -G audio,dietpi mpd
+				systemctl daemon-reload
+				systemctl restart mpd
 
 			fi
 			#-------------------------------------------------------------------------------
