@@ -18,7 +18,7 @@
 
 	#Core globals
 	G_PROGRAM_NAME='DietPi-PREP'
-	G_GITOWNER=${GITOWNER:-Fourdee}
+	G_GITOWNER=${GITOWNER:-MichaIng}
 	unset GITOWNER
 
 	#------------------------------------------------------------------------------------------------
@@ -33,7 +33,7 @@
 	fi
 
 	#Work inside /tmp as usually ramfs to reduce disk I/O and speed up download and unpacking
-	# - Save full script path, beforehand: https://github.com/Fourdee/DietPi/pull/2341#discussion_r241784962
+	# - Save full script path, beforehand: https://github.com/MichaIng/DietPi/pull/2341#discussion_r241784962
 	FP_PREP_SCRIPT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/$(basename "${BASH_SOURCE[0]}")"
 	cd /tmp
 
@@ -70,7 +70,7 @@
 	)
 
 	#Removing conflicting /etc/apt/sources.list.d entries
-	# - Meveric: https://github.com/Fourdee/DietPi/issues/1285#issuecomment-355759321
+	# - Meveric: https://github.com/MichaIng/DietPi/issues/1285#issuecomment-355759321
 	[[ -f /etc/apt/sources.list.d/deb-multimedia.list ]] && rm /etc/apt/sources.list.d/deb-multimedia.list
 	# - OMV: https://dietpi.com/phpbb/viewtopic.php?f=11&t=2772&p=10646#p10594
 	[[ -f /etc/apt/sources.list.d/openmediavault.list ]] && rm /etc/apt/sources.list.d/openmediavault.list
@@ -580,7 +580,7 @@
 		# - We need to forward $DISTRO_TARGET* to dietpi-set_software, as well as $G_HW_MODEL for Debian vs Raspbian decision.
 		G_DISTRO=$DISTRO_TARGET G_DISTRO_NAME=$DISTRO_TARGET_NAME G_HW_MODEL=$G_HW_MODEL G_RUN_CMD /DietPi/dietpi/func/dietpi-set_software apt-mirror 'default'
 
-		# - Meveric, update repo to use our EU mirror: https://github.com/Fourdee/DietPi/issues/1519#issuecomment-368234302
+		# - Meveric, update repo to use our EU mirror: https://github.com/MichaIng/DietPi/issues/1519#issuecomment-368234302
 		sed -i 's@https://oph.mdrjr.net/meveric@http://fuzon.co.uk/meveric@' /etc/apt/sources.list.d/meveric* &> /dev/null
 
 		# - (Re)create DietPi logs dir, used by G_AGx
@@ -588,12 +588,12 @@
 
 		G_AGUP
 
-		# - @MichaIng https://github.com/Fourdee/DietPi/pull/1266/files
+		# - @MichaIng https://github.com/MichaIng/DietPi/pull/1266/files
 		G_DIETPI-NOTIFY 2 'Marking all packages as auto-installed first, to allow effective autoremove afterwards'
 
 		G_RUN_CMD apt-mark auto $(apt-mark showmanual)
 
-		# - @MichaIng https://github.com/Fourdee/DietPi/pull/1266/files
+		# - @MichaIng https://github.com/MichaIng/DietPi/pull/1266/files
 		G_DIETPI-NOTIFY 2 'Disable automatic recommends/suggests install and allow them to be autoremoved:'
 
 		#	Remove any existing APT recommends settings
@@ -660,7 +660,7 @@ _EOF_
 
 		)
 
-		# - G_HW_MODEL specific required repo key packages: https://github.com/Fourdee/DietPi/issues/1285#issuecomment-358301273
+		# - G_HW_MODEL specific required repo key packages: https://github.com/MichaIng/DietPi/issues/1285#issuecomment-358301273
 		if (( $G_HW_MODEL >= 10 )); then
 
 			G_AGI debian-archive-keyring
@@ -705,7 +705,7 @@ _EOF_
 		# - Kernel required packages
 		# - G_HW_ARCH specific required Kernel packages
 		#	As these are kernel, or bootloader packages, we need to install them directly to allow autoremove of in case older kernel packages:
-		#	https://github.com/Fourdee/DietPi/issues/1285#issuecomment-354602594
+		#	https://github.com/MichaIng/DietPi/issues/1285#issuecomment-354602594
 		#	x86_64
 		if (( $G_HW_ARCH == 10 )); then
 
@@ -768,7 +768,7 @@ _EOF_
 			rm -Rf /lib/modules/*
 			G_AGI libraspberrypi-bin libraspberrypi0 raspberrypi-bootloader raspberrypi-kernel raspberrypi-sys-mods
 			G_AGI --reinstall libraspberrypi-bin libraspberrypi0 raspberrypi-bootloader raspberrypi-kernel
-			# Buster systemd-udevd doesn't support the current raspi-copies-and-fills: https://github.com/Fourdee/DietPi/issues/1286
+			# Buster systemd-udevd doesn't support the current raspi-copies-and-fills: https://github.com/MichaIng/DietPi/issues/1286
 			(( $DISTRO_TARGET < 5 )) && G_AGI raspi-copies-and-fills
 
 		#	Odroid N1
@@ -836,7 +836,7 @@ _EOF_
 				aPACKAGES_REQUIRED_INSTALL+=('firmware-brcm80211')	# WiFi dongle firmware
 				aPACKAGES_REQUIRED_INSTALL+=('firmware-iwlwifi')	# Intel WiFi dongle/PCI-e firwmare
 
-				# Intel/Nvidia/WiFi (ralink) dongle firmware: https://github.com/Fourdee/DietPi/issues/1675#issuecomment-377806609
+				# Intel/Nvidia/WiFi (ralink) dongle firmware: https://github.com/MichaIng/DietPi/issues/1675#issuecomment-377806609
 				# On Jessie, firmware-misc-nonfree is not available, firmware-ralink instead as dedicated package.
 				if (( $G_DISTRO < 4 )); then
 
@@ -857,7 +857,7 @@ _EOF_
 		l_message='Marking required packages as manually installed' G_RUN_CMD apt-mark manual ${aPACKAGES_REQUIRED_INSTALL[@]}
 
 		# Purging additional packages, that (in some cases) do not get autoremoved:
-		# - dhcpcd5: https://github.com/Fourdee/DietPi/issues/1560#issuecomment-370136642
+		# - dhcpcd5: https://github.com/MichaIng/DietPi/issues/1560#issuecomment-370136642
 		# - dbus: Not required for headless images, but sometimes marked as "important", thus not autoremoved.
 		G_AGP dbus dhcpcd5
 		G_AGA
@@ -992,7 +992,7 @@ _EOF_
 		# - Meveric specific
 		[[ -f /usr/local/sbin/setup-odroid ]] && rm /usr/local/sbin/setup-odroid
 
-		# - RPi specific https://github.com/Fourdee/DietPi/issues/1631#issuecomment-373965406
+		# - RPi specific https://github.com/MichaIng/DietPi/issues/1631#issuecomment-373965406
 		[[ -f /etc/profile.d/wifi-country.sh ]] && rm /etc/profile.d/wifi-country.sh
 
 		# - make_nas_processes_faster cron job on Rock64 + NanoPi + Pine64(?) images
@@ -1023,7 +1023,7 @@ _EOF_
 		l_message='Creating DietPi User Account' G_RUN_CMD /DietPi/dietpi/func/dietpi-set_software useradd dietpi
 
 		#-----------------------------------------------------------------------------------
-		#UID bit for sudo: https://github.com/Fourdee/DietPi/issues/794
+		#UID bit for sudo: https://github.com/MichaIng/DietPi/issues/794
 
 		G_DIETPI-NOTIFY 2 'Configuring Sudo UID bit'
 
@@ -1191,19 +1191,19 @@ _EOF_
 
 			sed -i '/iface wlan0 inet dhcp/apre-up modprobe xradio_wlan\npre-up iwconfig wlan0 power on' /etc/network/interfaces
 
-		#	ASUS TB WiFi: https://github.com/Fourdee/DietPi/issues/1760
+		#	ASUS TB WiFi: https://github.com/MichaIng/DietPi/issues/1760
 		elif (( $G_HW_MODEL == 52 )); then
 
 			G_CONFIG_INJECT '8723bs' '8723bs' /etc/modules
 
 		fi
 
-		#	Fix rare WiFi interface start issue: https://github.com/Fourdee/DietPi/issues/2074
+		#	Fix rare WiFi interface start issue: https://github.com/MichaIng/DietPi/issues/2074
 		[[ -f /etc/network/if-pre-up.d/wireless-tools ]] && sed -i '\|^[[:blank:]]ifconfig "$IFACE" up$|c\\t/sbin/ip link set dev "$IFACE" up' /etc/network/if-pre-up.d/wireless-tools
 
 		G_DIETPI-NOTIFY 2 'Tweaking DHCP timeout:'
 
-		# - Reduce DHCP request retry count and timeouts: https://github.com/Fourdee/DietPi/issues/711
+		# - Reduce DHCP request retry count and timeouts: https://github.com/MichaIng/DietPi/issues/711
 		G_CONFIG_INJECT 'timeout[[:blank:]]' 'timeout 10;' /etc/dhcp/dhclient.conf
 		G_CONFIG_INJECT 'retry[[:blank:]]' 'retry 4;' /etc/dhcp/dhclient.conf
 
@@ -1302,7 +1302,7 @@ _EOF_
 			dpkg --add-architecture i386
 			#G_AGUP # Not required here, since this will be done on every update+install
 
-			# - Disable nouveau: https://github.com/Fourdee/DietPi/issues/1244 // https://dietpi.com/phpbb/viewtopic.php?f=11&t=2462&p=9688#p9688
+			# - Disable nouveau: https://github.com/MichaIng/DietPi/issues/1244 // https://dietpi.com/phpbb/viewtopic.php?f=11&t=2462&p=9688#p9688
 			cat << _EOF_ > /etc/modprobe.d/blacklist-nouveau.conf
 blacklist nouveau
 blacklist lbm-nouveau
@@ -1340,7 +1340,7 @@ _EOF_
 
 		fi
 
-		# - ARMbian OPi Zero 2: https://github.com/Fourdee/DietPi/issues/876#issuecomment-294350580
+		# - ARMbian OPi Zero 2: https://github.com/MichaIng/DietPi/issues/876#issuecomment-294350580
 		if (( $G_HW_MODEL == 35 )); then
 
 			echo 'blacklist bmp085' > /etc/modprobe.d/bmp085.conf
@@ -1365,7 +1365,7 @@ _EOF_
 
 			cp /DietPi/uEnv.txt /boot/uenv.txt #temp solution
 
-			#	Blacklist GPU and touch screen modules: https://github.com/Fourdee/DietPi/issues/699#issuecomment-271362441
+			#	Blacklist GPU and touch screen modules: https://github.com/MichaIng/DietPi/issues/699#issuecomment-271362441
 			cat << _EOF_ > /etc/modprobe.d/disable_sparkysbc_touchscreen.conf
 blacklist owl_camera
 blacklist gsensor_stk8313
@@ -1398,7 +1398,7 @@ _EOF_
 		# - RPI:
 		elif (( $G_HW_MODEL < 10 )); then
 
-			# - Scroll lock fix for RPi by Midwan: https://github.com/Fourdee/DietPi/issues/474#issuecomment-243215674
+			# - Scroll lock fix for RPi by Midwan: https://github.com/MichaIng/DietPi/issues/474#issuecomment-243215674
 			cat << _EOF_ > /etc/udev/rules.d/50-leds.rules
 ACTION=="add", SUBSYSTEM=="leds", ENV{DEVPATH}=="*/input*::scrolllock", ATTR{trigger}="kbd-scrollock"
 _EOF_
@@ -1420,12 +1420,12 @@ _EOF_
 			# - Ensure WiFi module pre-exists
 			G_CONFIG_INJECT '8723bs' '8723bs' /etc/modules
 
-		#Rock64, remove HW accell config, as its not currently functional: https://github.com/Fourdee/DietPi/issues/2086
+		#Rock64, remove HW accell config, as its not currently functional: https://github.com/MichaIng/DietPi/issues/2086
 		elif (( $G_HW_MODEL == 43 )); then
 
 			[[ -f /etc/X11/xorg.conf.d/20-armsoc.conf ]] && rm /etc/X11/xorg.conf.d/20-armsoc.conf
 
-		# - Odroids FFMPEG fix. Prefer debian.org over Meveric for backports: https://github.com/Fourdee/DietPi/issues/1273 + https://github.com/Fourdee/DietPi/issues/1556#issuecomment-369463910
+		# - Odroids FFMPEG fix. Prefer debian.org over Meveric for backports: https://github.com/MichaIng/DietPi/issues/1273 + https://github.com/MichaIng/DietPi/issues/1556#issuecomment-369463910
 		elif (( $G_HW_MODEL > 9 && $G_HW_MODEL < 15 )); then
 
 			rm -f /etc/apt/preferences.d/meveric*
@@ -1602,7 +1602,7 @@ _EOF_
 		#	RPi remove saved G_HW_MODEL , allowing obtain-hw_model to auto detect RPi model
 		(( $G_HW_MODEL < 10 )) && [[ -f /etc/.dietpi_hw_model_identifier ]] && rm /etc/.dietpi_hw_model_identifier
 
-		# - BBB remove fsexpansion: https://github.com/Fourdee/DietPi/issues/931#issuecomment-345451529
+		# - BBB remove fsexpansion: https://github.com/MichaIng/DietPi/issues/931#issuecomment-345451529
 		if (( $G_HW_MODEL == 71 )); then
 
 			rm /etc/systemd/system/dietpi-fs_partition_resize.service
