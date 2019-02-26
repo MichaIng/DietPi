@@ -4047,7 +4047,7 @@ _EOF_
 
 			else
 
-				package_list+=' libnfs11 libcec4'
+				package_list+=' libnfs12 libcec4'
 
 			fi
 
@@ -9058,12 +9058,13 @@ _EOF_
 			Banner_Configuration
 
 			usercmd='useradd -r'
-			getent passwd deluge &> /dev/null && usercmd='usermod'
-			$usercmd deluge -G dietpi -d $G_FP_DIETPI_USERDATA/deluge -s /usr/sbin/nologin
+			getent passwd debian-deluged &> /dev/null && usercmd='usermod'
+			$usercmd debian-deluged -G dietpi -d $G_FP_DIETPI_USERDATA/deluge -s /usr/sbin/nologin
 
 			mkdir -p $G_FP_DIETPI_USERDATA/deluge/.config/deluge
-			> /var/log/deluged.log
-			> /var/log/deluge-web.log
+			chown -R debian-deluged:debian-deluged $G_FP_DIETPI_USERDATA/deluge
+			mkdir -p /var/log/deluged
+			chown -R debian-deluged /var/log/deluged
 
 			# https://git.deluge-torrent.org/deluge/tree/packaging/systemd/deluged.service
 			cat << _EOF_ > /etc/systemd/system/deluged.service
@@ -9072,10 +9073,10 @@ Description=Deluge Daemon (DietPi)
 Documentation=man:deluged
 
 [Service]
-User=deluge
+User=debian-deluged
 Group=dietpi
 UMask=007
-ExecStart=$(command -v deluged) -d -l /var/log/deluged.log -L warning
+ExecStart=$(command -v deluged) -d -l /var/log/deluged/daemon.log -L warning
 Restart=on-failure
 TimeoutStopSec=300
 
@@ -9090,31 +9091,47 @@ Description=Deluge Web UI (DietPi)
 Documentation=man:deluge-web
 
 [Service]
-User=deluge
-Group=dietpi
+User=debian-deluged
 UMask=027
-ExecStart=$(command -v deluge-web) -l /var/log/deluge-web.log -L warning
+ExecStart=$(command -v deluge-web) -l /var/log/deluged/web.log -L warning
 Restart=on-failure
 
 [Install]
 WantedBy=multi-user.target
 _EOF_
 
-			# Copy DietPi configs
-			G_BACKUP_FP $G_FP_DIETPI_USERDATA/deluge/.config/deluge/{auth,core,web}.conf
-			dps_index=$software_id Download_Install 'deluge.conf' $G_FP_DIETPI_USERDATA/deluge/.config/deluge/core.conf
-			dps_index=$software_id Download_Install 'deluge_web.conf' $G_FP_DIETPI_USERDATA/deluge/.config/deluge/web.conf
+			# Add web.log to logrotate config
+			if [[ -f /etc/logrotate.d/deluged ]] && ! grep -q 'web.log' /etc/logrotate.d/deluged; then
 
-			# Set remote access login details
-			echo "root:$GLOBAL_PW:10" > $G_FP_DIETPI_USERDATA/deluge/.config/deluge/auth
+				echo -e "\n$(</etc/logrotate.d/deluged)" >> /etc/logrotate.d/deluged
+				sed -i '1,1s/daemon.log/web.log/' /etc/logrotate.d/deluged
 
-			# Apply Optimized settings
-			# - Cache size is in steps of 16 KiB. (Cachesize * 16 = total KiB)
-			sed -i '/"cache_size": /c\ "cache_size": '$(( $(Optimize_BitTorrent 0) * 1024 / 16 ))',' $G_FP_DIETPI_USERDATA/deluge/.config/deluge/core.conf
-			sed -i '/"max_active_limit": /c\ "max_active_limit": '$(Optimize_BitTorrent 1)',' $G_FP_DIETPI_USERDATA/deluge/.config/deluge/core.conf
-			sed -i '/"max_active_downloading": /c\ "max_active_downloading": '$(Optimize_BitTorrent 1)',' $G_FP_DIETPI_USERDATA/deluge/.config/deluge/core.conf
-			sed -i '/"max_connections_global": /c\ "max_connections_global": '$(Optimize_BitTorrent 2)',' $G_FP_DIETPI_USERDATA/deluge/.config/deluge/core.conf
-			sed -i '/"max_upload_slots_global": /c\ "max_upload_slots_global": '$(Optimize_BitTorrent 3)',' $G_FP_DIETPI_USERDATA/deluge/.config/deluge/core.conf
+			fi
+
+			# Adjust config files only, if not yet existent
+			if [[ ! -f $G_FP_DIETPI_USERDATA/deluge/.config/deluge/core.conf ]]; then
+
+				# Copy DietPi configs
+				dps_index=$software_id Download_Install 'deluge.conf' $G_FP_DIETPI_USERDATA/deluge/.config/deluge/core.conf
+				dps_index=$software_id Download_Install 'deluge_web.conf' $G_FP_DIETPI_USERDATA/deluge/.config/deluge/web.conf
+
+				# Set remote access login details
+				echo "root:$GLOBAL_PW:10" > $G_FP_DIETPI_USERDATA/deluge/.config/deluge/auth
+
+				# Apply optimised settings
+				# - Cache size is in steps of 16 KiB. (Cachesize * 16 = total KiB)
+				sed -i '/"cache_size": /c\ "cache_size": '$(( $(Optimize_BitTorrent 0) * 1024 / 16 ))',' $G_FP_DIETPI_USERDATA/deluge/.config/deluge/core.conf
+				sed -i '/"max_active_limit": /c\ "max_active_limit": '$(Optimize_BitTorrent 1)',' $G_FP_DIETPI_USERDATA/deluge/.config/deluge/core.conf
+				sed -i '/"max_active_downloading": /c\ "max_active_downloading": '$(Optimize_BitTorrent 1)',' $G_FP_DIETPI_USERDATA/deluge/.config/deluge/core.conf
+				sed -i '/"max_connections_global": /c\ "max_connections_global": '$(Optimize_BitTorrent 2)',' $G_FP_DIETPI_USERDATA/deluge/.config/deluge/core.conf
+				sed -i '/"max_upload_slots_global": /c\ "max_upload_slots_global": '$(Optimize_BitTorrent 3)',' $G_FP_DIETPI_USERDATA/deluge/.config/deluge/core.conf
+
+			fi
+
+			# Remove init.d service leftovers, installed by Debian APT package
+			[[ -f /etc/init.d/deluged ]] rm /etc/init.d/deluged
+			[[ -f /etc/default/deluged ]] rm /etc/default/deluged
+			[[ -d /var/lib/deluged ]] rm -R /var/lib/deluged
 
 		fi
 
