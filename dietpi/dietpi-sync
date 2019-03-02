@@ -43,8 +43,9 @@
 	FP_FILTER_INCLUDE_EXCLUDE='.dietpi-sync_include_exclude'
 	FP_USER_FILTER_INCLUDE_EXCLUDE='/DietPi/dietpi/.dietpi-sync_inc_exc'
 	FP_LOG='.dietpi-sync.log'
-	FP_SOURCE='/mnt/Source'
-	FP_TARGET='/mnt/Target'
+	FP_LOG_ALT='/var/tmp/dietpi/logs/dietpi-sync.log'
+	FP_SOURCE='/mnt/source'
+	FP_TARGET='/mnt/target'
 
 	#Extra settings
 	SYNC_DELETE_MODE=0
@@ -91,18 +92,7 @@ _EOF_
 
 	}
 
-	Banner_Start(){
-
-		local mode='Sync'
-		(( ${SYNC_DRY_RUN:=0} )) && mode='Dry Run'
-
-		G_DIETPI-NOTIFY 3 "$G_PROGRAM_NAME" "$mode"
-
-	}
-
 	Run_Sync(){
-
-		Banner_Start
 
 		#Stop rsync service: https://github.com/MichaIng/DietPi/issues/1869
 		if systemctl is-active rsync &> /dev/null; then
@@ -111,97 +101,133 @@ _EOF_
 			G_RUN_CMD systemctl stop rsync
 
 		fi
-		killall -qw rsync
 
-		#Pre-create target dir to check R/W access
+		#Pre-create target dir, which also checks R/W access
                 # - Remove previous mkdir log
-		[[ -f /var/log/dietpi-sync.log ]] && rm /var/log/dietpi-sync.log
+		[[ -f $FP_LOG_ALT ]] && rm $FP_LOG_ALT
 		mkdir -p "$FP_TARGET" &> $FP_LOG
 
 		#Error: Dir not found
 		if [[ ! -d $FP_TARGET ]]; then
 
 			G_WHIP_MSG "[FAILED] Unable to pre-create target directory: $FP_TARGET\n\n\"mkdir\" reported the following error:\n$(<$FP_LOG)"
+			# We cannot log to target dir, use $FP_LOG_ALT instead
 			echo "$(date +"%d-%m-%Y_%T") [FAILED] Unable to pre-create target directory: $FP_TARGET" >> $FP_LOG
-			mv $FP_LOG /var/log/dietpi-sync.log
+			mv $FP_LOG $FP_LOG_ALT
 
-		#Error: Rsync is already running
+		#Error: Empty source dir
+		elif [[ ! $(ls -A "$FP_SOURCE") ]]; then
+			
+			G_WHIP_MSG "[FAILED] The chosen source directory is empty: $FP_SOURCE\n\nPlease check it's path and in case verify that it's mount is active."
+			# Log to target dir directly, preserve previous rsync log
+			echo "$(date +"%d-%m-%Y_%T") [FAILED] The chosen source directory is empty: $FP_SOURCE" >> "$FP_TARGET/$FP_LOG"
+
+		#Error: Rsync still running
 		elif pgrep '[r]sync' &> /dev/null; then
 
-			G_WHIP_MSG '[FAILED] Rsync is already running and failed to stop gracefully'
-			# Add info to target log location directly, preserve previous rsync log
+			G_WHIP_MSG '[FAILED] Rsync is already running and failed to stop gracefully\n\nPlease check active rsync processes e.g. via "htop" and finish or kill them.'
+			# Log to target dir directly, preserve previous rsync log
 			echo "$(date +"%d-%m-%Y_%T") [FAILED] Rsync is already running and failed to stop gracefully" >> "$FP_TARGET/$FP_LOG"
 
-		#Start sync
+		#Start sync, beginning with dry run
 		else
 
 			#Generate Exclude/Include lists
 			Create_Filter_Include_Exclude
 
 			#Rsync options
-			local rsync_options="-aHP4h --info=name0 --info=progress2 --delete-excluded --exclude-from=$FP_FILTER_INCLUDE_EXCLUDE --log-file=$FP_LOG"
+			local rsync_options="-aHP4 --info=name0 --info=progress2 --exclude-from=$FP_FILTER_INCLUDE_EXCLUDE --log-file=$FP_LOG"
 			# - Delete mode?
-			(( $SYNC_DELETE_MODE )) && rsync_options+=' --delete'
+			(( $SYNC_DELETE_MODE )) && rsync_options+=' --delete --delete-excluded'
 
-			#Dry Run and verify enough space, in case if real sync
+			#Dry run
+			G_DIETPI-NOTIFY 3 $G_PROGRAM_NAME "Dry run $FP_SOURCE > $FP_TARGET"
 			rsync --dry-run --stats $rsync_options "$FP_SOURCE"/ "$FP_TARGET"/ > .dietpi-sync_result
 			EXIT_CODE=$?
-			if ! (( $SYNC_DRY_RUN || $EXIT_CODE )); then
+			if (( ! $EXIT_CODE )); then
 
-				# - NB: working in KiB until end MiB conversion, as, don't like using long long int, and, KiB should offer a good end result.
-				local old_backup_size=$(du -ks "$FP_TARGET" | mawk '{print $1}')
-				local new_backup_size=$(( $(grep -m1 'Total file size' .dietpi-sync_result | sed 's/[^0-9]*//g') / 1024 ))
-				local total_file_count=$(( $(mawk '/Number of files/ {print $6;exit}' .dietpi-sync_result | sed 's/[^0-9]*//g') ))
-				local total_folder_count=$(( $(mawk '/Number of files/ {print $8;exit}' .dietpi-sync_result | sed 's/[^0-9]*//g') ))
+				# Free space check
+				# - NB: Working in KiB until end MiB conversion, as, don't like using long long int, and, KiB should offer a good end result.
+				local old_backup_size=$(du -ks "$FP_TARGET" | mawk '{print $1}') # Actual disk space usage
+				local new_backup_size=$(( $(grep -m1 '^Total file size:' .dietpi-sync_result | sed 's/[^0-9]*//g') / 1024 + 1 )) # Theoretical, data size only
+				# - NB: Number of files $4 includes files + dirs + links.
+				#	Actually, we don't want to count links, as they don't use block sizes.
+				#	But scraping files + dirs is too much effort, as the output format depends on their existence.
+				local total_file_count=$(mawk '/^Number of files:/ {print $4;exit}' .dietpi-sync_result | sed 's/[^0-9]*//g')
 				local target_fs_blocksize=$(stat -fc %s "$FP_TARGET")
-				new_backup_size=$(( $new_backup_size + ( $total_file_count + $total_folder_count ) * $target_fs_blocksize / 1024 ))
+				new_backup_size=$(( $new_backup_size + $total_file_count * $target_fs_blocksize / 1024 + 1 )) # Add one block size to each file as worst case result
 				local end_result=$(( ( $new_backup_size - $old_backup_size ) / 1024 + 1 ))
 
+				local menu_test="[  OK  ] Dry run completed (NO changes made):\n - $FP_SOURCE > $FP_TARGET"
+				G_WHIP_DEFAULT_ITEM='Sync'
 				if ! G_CHECK_FREESPACE "$FP_TARGET" $end_result; then
 
-					G_WHIP_BUTTON_OK_TEXT='Ignore'
-					G_WHIP_BUTTON_CANCEL_TEXT='Exit'
-					if ! G_WHIP_YESNO 'The system sync target location appears to have insufficient free space to successfully finish the backup.
-However, this check is a rough estimation in reasonable time, thus it could be marginally incorrect.\n
-Would you like to override this warning and continue with the backup?'; then
+					if (( $INPUT == 1 )); then
 
-						echo "$(date +"%d-%m-%Y_%T") [FAILED] Insufficient free space" >> $FP_LOG
-						mv $FP_LOG "$FP_TARGET"/
+						echo "$(date +"%d-%m-%Y_%T") [FAILED] Insufficient free space" >> "$FP_TARGET/$FP_LOG"
 						return 1
+
+					else
+
+						menu_test="[WARNING] Insufficient free space\n - $FP_SOURCE > $FP_TARGET\n
+The target location appears to have insufficient free space to successfully finish the sync. However, this check is a rough estimate in reasonable time and may be slightly incorrect.\n
+Continue only if you know what you are doing and after checking the log!"
+						G_WHIP_DEFAULT_ITEM='Cancel'
 
 					fi
 
 				fi
 
-				#Real sync
-				G_DIETPI-NOTIFY 2 "Sync | $FP_SOURCE > $FP_TARGET: in progress, please wait..."
-				# - Clear log file from space check
+				while :
+				do
+
+					G_WHIP_MENU_ARRAY=(
+
+						'Sync' ': Continue with real sync'
+						'Log' ': View log file for details'
+						'Cancel' ': Abort sync, no changes will be made'
+
+					)
+
+					G_WHIP_MENU "$menu_test\n\n$(sed -n 3,8p .dietpi-sync_result)"
+
+					if [[ $G_WHIP_RETURNED_VALUE == 'Log' ]]; then
+
+						G_WHIP_VIEWFILE $FP_LOG
+						G_WHIP_DEFAULT_ITEM='Log'
+
+					elif [[ $G_WHIP_RETURNED_VALUE == 'Sync' || $INPUT == 1 ]]; then
+
+						break
+
+					else
+
+						return
+
+					fi
+
+				done
+
+				#Sync
+				G_DIETPI-NOTIFY 3 $G_PROGRAM_NAME "Sync $FP_SOURCE > $FP_TARGET"
+				# - Clear log file from dry run
 				> $FP_LOG
 				rsync $rsync_options "$FP_SOURCE"/ "$FP_TARGET"/
 				EXIT_CODE=$?
 
 			fi
 
-			G_DIETPI-NOTIFY -1 $EXIT_CODE "$G_PROGRAM_NAME"
+			G_DIETPI-NOTIFY -1 $EXIT_CODE $G_PROGRAM_NAME
 
-			if (( ! $EXIT_CODE )); then
-
-				if (( ! $SYNC_DRY_RUN )); then
-
-					echo "$(date +"%d-%m-%Y_%T") [  OK  ] Sync completed" >> $FP_LOG
-					G_WHIP_MSG "[  OK  ] Sync completed:\n - $FP_SOURCE > $FP_TARGET"
-
-				else
-
-					echo "$(date +"%d-%m-%Y_%T") [  OK  ] Dry run completed" >> $FP_LOG
-					G_WHIP_MSG "[  OK  ] Dry Run Sync completed (NO modifications):\n - $FP_SOURCE > $FP_TARGET"
-
-				fi
-
-			else
+			if (( $EXIT_CODE )); then
 
 				echo "$(date +"%d-%m-%Y_%T") [FAILED] Please see the log file for more information: $FP_TARGET/$FP_LOG" >> $FP_LOG
 				G_WHIP_MSG "[FAILED] $FP_SOURCE > $FP_TARGET\n\nYou will given an option to view the logfile on the next screen. Please check it for information and/or errors."
+
+			else
+
+				echo "$(date +"%d-%m-%Y_%T") [  OK  ] Sync completed" >> $FP_LOG
+				G_WHIP_MSG "[  OK  ] Sync completed:\n - $FP_SOURCE > $FP_TARGET"
 
 			fi
 
@@ -230,8 +256,8 @@ Would you like to override this warning and continue with the backup?'; then
 	Write_Settings_File(){
 
 		cat << _EOF_ > $FP_SETTINGS
-FP_SOURCE=$FP_SOURCE
-FP_TARGET=$FP_TARGET
+FP_SOURCE='$FP_SOURCE'
+FP_TARGET='$FP_TARGET'
 SYNC_DELETE_MODE=$SYNC_DELETE_MODE
 SYNC_CRONDAILY=$SYNC_CRONDAILY
 _EOF_
@@ -261,9 +287,9 @@ _EOF_
 
 			local sync_last_status=$(tail -1 "$FP_TARGET/$FP_LOG")
 
-		elif [[ -f /var/log/dietpi-sync.log ]]; then
+		elif [[ -f $FP_LOG_ALT ]]; then
 
-			local sync_last_status=$(tail -1 /var/log/dietpi-sync.log)
+			local sync_last_status=$(tail -1 $FP_LOG_ALT)
 
 		else
 
@@ -278,11 +304,10 @@ _EOF_
 			'' '●─ Options '
 			'Source Location' ': Change the Source directory.'
 			'Target Location' ': Change the Target directory.'
-			"Delete Mode" ": $SYNC_MODE_TEXT"
-			"Sync: Daily" ": $SYNC_CRONDAILY_TEXT"
+			'Delete Mode' ": $SYNC_MODE_TEXT"
+			'Daily Sync' ": $SYNC_CRONDAILY_TEXT"
 			'' '●─ Run '
-			'Sync: Dry Run' ': Run a test Sync without modifying any data.'
-			'Sync: Now' ': Sync the Source location to the Target location.'
+			'Sync' ': Sync from Source to Target (Dry run included!)'
 
 		)
 
@@ -307,8 +332,9 @@ _EOF_
 
 					G_WHIP_MSG 'DietPi-Sync is a program that allows you to duplicate a directory from one location (Source) to another (Target).\n
 For example: If we want to duplicate (sync) the data on our external USB HDD to another location, we simply select the USB HDD as the source, then, select a target location.
-The target location can be anything from a networked samba fileserver, or even a FTP server.\n
-If you would like to test a sync without modifiying any data, simply select Dry Run.\n\nMore information:\n - https://dietpi.com/phpbb/viewtopic.php?p=256#p256'
+The target location can be anything from a networked samba fileserver, or even an FTP server.\n
+Each sync includes a leading dry run, after which you can check the expected result before deciding if you want to continue with the actual sync.\n
+More information:\n - https://dietpi.com/phpbb/viewtopic.php?p=256#p256'
 
 				;;
 
@@ -318,31 +344,15 @@ If you would like to test a sync without modifiying any data, simply select Dry 
 
 				;;
 
-				'Sync: Daily')
+				'Daily Sync')
 
 					Menu_Set_CronDaily
 
 				;;
 
-				'Sync: Dry Run')
+				'Sync')
 
-					if G_WHIP_YESNO "Start dry run sync?\n\nSource location:\n$FP_SOURCE/*\n\nTarget location:\n$FP_TARGET/*\n
-This is a Dry Run for testing. No data will be modified.\n\nDo you wish to continue?"; then
-
-						SYNC_DRY_RUN=1 Run_Sync
-
-					fi
-
-				;;
-
-				'Sync: Now')
-
-					if G_WHIP_YESNO "Start sync?\n\nSource location:\n$FP_SOURCE/*\n\nTarget location:\n$FP_TARGET/*\n
-A copy of all the files and folders inside your Source location, will be created at the Target location.\n\nDo you wish to continue?"; then
-
-						SYNC_DRY_RUN=0 Run_Sync
-
-					fi
+					Run_Sync
 
 				;;
 
@@ -366,12 +376,12 @@ A copy of all the files and folders inside your Source location, will be created
 	#TARGETMENUID=1 (Target) && TARGETMENUID=2 (Source)
 	Menu_Set_Directories(){
 
-		local current_directory="$FP_TARGET"
+		local current_directory=$FP_TARGET
 		local current_mode_text='Target'
 		local whip_description_text="Please select the $current_mode_text location.\nA copy of all the files and folders in the Source location will be created here.\n\nCurrent $current_mode_text location:\n$current_directory"
 		if (( $TARGETMENUID == 2 )); then
 
-			current_directory="$FP_SOURCE"
+			current_directory=$FP_SOURCE
 			current_mode_text='Source'
 			whip_description_text="Please select the $current_mode_text location.\nA copy of all the files and folder in this Source location, will be created at the Target location.\n\nCurrent $current_mode_text location:\n$current_directory"
 
@@ -405,7 +415,7 @@ A copy of all the files and folders inside your Source location, will be created
 
 					if (( $TARGETMENUID == 2 )); then
 
-						FP_SOURCE="$return_value"
+						FP_SOURCE=$return_value
 
 					else
 
@@ -433,7 +443,7 @@ A copy of all the files and folders inside your Source location, will be created
 
 						else
 
-							FP_TARGET=$fp_samba_mount/dietpi-sync
+							FP_TARGET="$fp_samba_mount/dietpi-sync"
 
 						fi
 
@@ -467,7 +477,7 @@ A copy of all the files and folders inside your Source location, will be created
 
 		)
 
-		G_WHIP_DEFAULT_ITEM="$SYNC_MODE_TEXT"
+		G_WHIP_DEFAULT_ITEM=$SYNC_MODE_TEXT
 		if G_WHIP_MENU 'Please select the Sync delete mode.\n
 [Off]: (safe)\nIf files and folders exist in the Target location, that are not in the Source, they will be left alone.\n
 [On]: (WARNING, if in doubt, DO NOT enable)\nAn exact copy of the Source location will be created at the Target location.
@@ -484,15 +494,15 @@ If files are in the Target location that do not exist in the Source, they will b
 
 		G_WHIP_MENU_ARRAY=(
 
-			'[Off]' ': Manual sync'
+			'[Off]' ': Manual sync only'
 			'[On]' ': Automatically sync once a day'
 
 		)
 
-		G_WHIP_DEFAULT_ITEM="$SYNC_CRONDAILY_TEXT"
+		G_WHIP_DEFAULT_ITEM=$SYNC_CRONDAILY_TEXT
 		if G_WHIP_MENU '[Off]:\nThe user must manually sync using dietpi-sync.\n
-[On]:\nA cron job will be created that automatically runs dietpi-sync, once a day.\n
-(NOTICE):\nBefore enabling this feature, please run a test sync (Dry Run) to verify what will happen.'; then
+[On]:\nA cron job will automatically run dietpi-sync, once a day.\n
+(NOTICE):\nWhen using this feature, please run a manual sync and check the dry run log to verify what will happen.'; then
 
 			SYNC_CRONDAILY=0
 			[[ $G_WHIP_RETURNED_VALUE == '[On]' ]] && SYNC_CRONDAILY=1
@@ -542,7 +552,7 @@ If files are in the Target location that do not exist in the Source, they will b
 
 			fi
 
-			G_WHIP_DEFAULT_ITEM="$G_WHIP_RETURNED_VALUE"
+			G_WHIP_DEFAULT_ITEM=$G_WHIP_RETURNED_VALUE
 
 		done
 
