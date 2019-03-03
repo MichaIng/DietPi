@@ -857,9 +857,10 @@ _EOF_
 		l_message='Marking required packages as manually installed' G_RUN_CMD apt-mark manual ${aPACKAGES_REQUIRED_INSTALL[@]}
 
 		# Purging additional packages, that (in some cases) do not get autoremoved:
-		# - dhcpcd5: https://github.com/MichaIng/DietPi/issues/1560#issuecomment-370136642
 		# - dbus: Not required for headless images, but sometimes marked as "important", thus not autoremoved.
-		G_AGP dbus dhcpcd5
+		# - dhcpcd5: https://github.com/MichaIng/DietPi/issues/1560#issuecomment-370136642
+		# - mountall: https://github.com/MichaIng/DietPi/issues/2613
+		G_AGP dbus dhcpcd5 mountall
 		G_AGA
 
 		#------------------------------------------------------------------------------------------------
