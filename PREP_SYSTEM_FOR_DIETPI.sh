@@ -764,10 +764,9 @@ _EOF_
 		#	RPi
 		elif (( $G_HW_MODEL < 10 )); then
 
-			apt-mark unhold libraspberrypi-bin libraspberrypi0 raspberrypi-bootloader raspberrypi-kernel raspberrypi-sys-mods raspi-copies-and-fills
+			# Remove old kernel modules first
 			rm -Rf /lib/modules/*
-			G_AGI libraspberrypi-bin libraspberrypi0 raspberrypi-bootloader raspberrypi-kernel raspberrypi-sys-mods
-			G_AGI --reinstall libraspberrypi-bin libraspberrypi0 raspberrypi-bootloader raspberrypi-kernel
+			G_AGI --reinstall libraspberrypi-bin libraspberrypi0 raspberrypi-bootloader raspberrypi-kernel raspberrypi-sys-mods
 			# Buster systemd-udevd doesn't support the current raspi-copies-and-fills: https://github.com/MichaIng/DietPi/issues/1286
 			(( $DISTRO_TARGET < 5 )) && G_AGI raspi-copies-and-fills
 
@@ -857,9 +856,10 @@ _EOF_
 		l_message='Marking required packages as manually installed' G_RUN_CMD apt-mark manual ${aPACKAGES_REQUIRED_INSTALL[@]}
 
 		# Purging additional packages, that (in some cases) do not get autoremoved:
-		# - dhcpcd5: https://github.com/MichaIng/DietPi/issues/1560#issuecomment-370136642
 		# - dbus: Not required for headless images, but sometimes marked as "important", thus not autoremoved.
-		G_AGP dbus dhcpcd5
+		# - dhcpcd5: https://github.com/MichaIng/DietPi/issues/1560#issuecomment-370136642
+		# - mountall: https://github.com/MichaIng/DietPi/issues/2613
+		G_AGP dbus dhcpcd5 mountall
 		G_AGA
 
 		#------------------------------------------------------------------------------------------------
