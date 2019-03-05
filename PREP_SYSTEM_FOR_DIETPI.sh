@@ -935,7 +935,7 @@ _EOF_
 		[[ -d /usr/share/fonts ]] && rm -R /usr/share/fonts
 		[[ -d /usr/share/icons ]] && rm -R /usr/share/icons
 
-		# - Stop, disable and remove not required services
+		# - Stop, disable and remove not required 3rd party services
 		local aservices=(
 
 			# - ARMbian
@@ -1112,6 +1112,9 @@ _EOF_
 		G_DIETPI-NOTIFY 2 'Recreating symlink for resolv.conf (DNS):'
 		echo 'nameserver 8.8.8.8' > /etc/resolvconf/run/resolv.conf # Temp apply, in case was not previously symlink, resets on next ifup.
 		ln -sfv /etc/resolvconf/run/resolv.conf /etc/resolv.conf
+
+		# ifupdown starts the daemon outside of systemd, the enabled systemd unit just thows an error on boot due to missing dbus and with dbus might interfere with ifupdown
+		systemctl disable wpa_supplicant 2> /dev/null && G_DIETPI-NOTIFY 2 'Disabled non-required wpa_supplicant systemd unit'
 
 		#-----------------------------------------------------------------------------------
 		#MISC
