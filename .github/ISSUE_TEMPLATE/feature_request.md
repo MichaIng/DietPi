@@ -21,3 +21,6 @@ about: Suggest an idea for this project
 #### Additional context
 <!-- Add any other context or screenshots about the feature request here.-->
 - ...
+
+#### Vor for this feature on FeatHub: https://feathub.com/MichaIng/DietPi/
+<!-- Optional: Add your request to our FeatHub page as well and replace the above link accordinly.-->
