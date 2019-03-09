@@ -36,5 +36,5 @@ about: Suggest a software title to be added to DietPi-Software
 <!-- EG: Yes, I could help out with this, e.g. if I experience issues. / Sorry, I am totally unexperienced in bash coding. -->
 - ...
 
-#### Vor for this software on FeatHub: https://feathub.com/MichaIng/DietPi/
+#### Vote for this software on FeatHub: https://feathub.com/MichaIng/DietPi/
 <!-- Optional: Add your request to our FeatHub page as well and replace the above link accordinly.-->
