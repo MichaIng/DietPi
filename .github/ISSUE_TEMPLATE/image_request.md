@@ -22,5 +22,5 @@ about: Suggest a new SBC to be added to the offial support and image list of Die
 <!-- EG: https://github.com/drtyhlpr/rpi23-gen-image/https://github.com/Debian/raspi3-image-spec -->
 - ...
 
-#### Vor for this iamge on FeatHub: https://feathub.com/MichaIng/DietPi/
+#### Vote for this iamge on FeatHub: https://feathub.com/MichaIng/DietPi/
 <!-- Optional: Add your request to our FeatHub page as well and replace the above link accordinly.-->
