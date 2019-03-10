@@ -1,6 +1,6 @@
 #!/bin/bash
 
-# Workaround, if SSH client overrides locale with "POSIX" fallback: https://github.com/Fourdee/DietPi/issues/1540#issuecomment-367066178
+# Workaround, if SSH client overrides locale with "POSIX" fallback: https://github.com/MichaIng/DietPi/issues/1540#issuecomment-367066178
 if [[ $(locale) =~ 'POSIX' ]]; then
 
 	CURRENT_LOCALE="$(grep -m1 '^[[:blank:]]*AUTO_SETUP_LOCALE=' /DietPi/dietpi.txt | sed 's/^[^=]*=//')"
