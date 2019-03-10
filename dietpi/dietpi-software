@@ -6711,12 +6711,20 @@ Pin-Priority: -1' > /etc/apt/preferences.d/dietpi-docker_fix
 
 			Banner_Installing
 
-			l_message='Copy /var/log skeletons to temporary storage' G_RUN_CMD /DietPi/dietpi/func/dietpi-ramlog 1
-			# Install (add tmpfs mount to fstab)
+			# Install persistent tmpfs
 			local tmpfs_max_size=$(grep -m1 '^[[:blank:]]*AUTO_SETUP_RAMLOG_MAXSIZE=' /DietPi/dietpi.txt | sed 's/^[^=]*=//')
-			sed -i '/[[:space:]]\/var\/log[[:space:]]/d' /etc/fstab
+			tmpfs_max_size=${tmpfs_max_size:=50}
+			sed -i '/[[:blank:]]\/var\/log[[:blank:]]/d' /etc/fstab
 			echo "tmpfs /var/log tmpfs defaults,size=${tmpfs_max_size}m,noatime,nodev,nosuid,mode=1777 0 0" >> /etc/fstab
+
+			# Enable DietPi-RAMdisk
 			systemctl enable dietpi-ramlog
+
+			# To assure a cleaned mountpoint we need to start RAMlog now
+			l_message='Storing /var/log metadata to disk' G_RUN_CMD /DietPi/dietpi/func/dietpi-ramlog 1
+			l_message='Cleaning /var/log mountpoint' G_RUN_CMD rm -Rf /var/log/{,.??,.[^.]}*
+			l_message='Mounting tmpfs to /var/log' G_RUN_CMD mount /var/log
+			l_message='Restoring metadata to /var/log tmpfs' G_RUN_CMD systemctl start dietpi-ramlog
 
 		fi
 
@@ -14601,31 +14609,28 @@ _EOF_
 
 		fi
 
-		software_id=103
+		software_id=103 # DietPi-RAMlog
 		if (( ${aSOFTWARE_INSTALL_STATE[$software_id]} == -1 )); then
 
 			Banner_Uninstalling
 
-			sed -i '/\/var\/log/c\#\/var\/log DietPi-RAMlog disabled' /etc/fstab
+			sed -i '/[[:blank:]]\/var\/log[[:blank:]]/d' /etc/fstab
 
-			# - Boot service to allow dietpi-ramlog to start and copy skeletons back to /var/log, then finally disable ramlog
 			cat << _EOF_ > /etc/systemd/system/dietpi-ramlog_disable.service
 [Unit]
-Description=DietPi - Boot service to allow dietpi-ramlog to start and copy skeletons back to /var/log, then finally disable ramlog
+Description=DietPi-RAMlog_disable | Disables DietPi-RAMlog after it has restored log metadata back to /var/log
 After=dietpi-ramlog.service dietpi-ramdisk.service
 Requires=dietpi-ramdisk.service
-Before=dietpi-boot.service rsyslog.service syslog.service
+Before=dietpi-preboot.service rsyslog.service syslog.service
 
 [Service]
 Type=oneshot
-RemainAfterExit=yes
 StandardOutput=tty
 ExecStart=/bin/bash -c '/var/lib/dietpi/dietpi-ramlog/disable.sh &> /var/tmp/dietpi/logs/dietpi-ramlog_disable_debug.log'
 
 [Install]
 WantedBy=local-fs.target
 _EOF_
-
 			systemctl daemon-reload
 			systemctl enable dietpi-ramlog_disable
 
@@ -14634,14 +14639,12 @@ _EOF_
 {
 	systemctl stop dietpi-ramlog
 	systemctl disable dietpi-ramlog
-	rm -R /var/tmp/dietpi/logs/dietpi-ramlog_store/*
+	rm -R /var/tmp/dietpi/logs/dietpi-ramlog_store
 	systemctl disable dietpi-ramlog_disable
 	rm /etc/systemd/system/dietpi-ramlog_disable.service
-	systemctl daemon-reload
 	rm /var/lib/dietpi/dietpi-ramlog/disable.sh
 }
 _EOF_
-
 			chmod +x /var/lib/dietpi/dietpi-ramlog/disable.sh
 
 		fi
@@ -14742,7 +14745,7 @@ _EOF_
 
 		fi
 
-		if grep -q '#/var/log' /etc/fstab &&
+		if ! grep -q '[[:blank:]]/var/log[[:blank:]]' /etc/fstab &&
 			! grep -q '^rsyslog' $fp_temp &&
 			! grep -q '^logrotate' $fp_temp; then
 
