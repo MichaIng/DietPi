@@ -5394,7 +5394,9 @@ Package: wireguard wireguard-dkms wireguard-tools\nPin: release n=sid\nPin-Prior
 
 			Banner_Installing
 
-			DEPS_LIST='rtorrent screen' #mediainfo
+			DEPS_LIST='rtorrent' #mediainfo
+			# On Buster no "screen" is required to run rTorrent as daemon
+			(( $G_DISTRO < 5 )) && DEPS_LIST+=' screen'
 			# On Jessie, nginx-full is needed for SCGI module: https://github.com/MichaIng/DietPi/issues/1240
 			(( $G_DISTRO < 4 && ${aSOFTWARE_INSTALL_STATE[85]} > 0 )) && DEPS_LIST+=' nginx-full'
 
@@ -11058,53 +11060,64 @@ ExecStop=$(command -v screen) -S rtorrent -X quit
 [Install]
 WantedBy=multi-user.target
 _EOF_
+			# - On Buster we use new daemon mode
+			if (( $G_DISTRO > 4 )); then
+
+				sed -Ei '/^(KillMode|ExecStop)=/d' /etc/systemd/system/rtorrent.service
+				G_CONFIG_INJECT 'ExecStart=' "ExecStart=$(command -v rtorrent)" /etc/systemd/system/rtorrent.service
+
+			fi
 			systemctl daemon-reload
 
 			# - Default conf, do not overwrite if existent
+			#	Example: https://github.com/rakshasa/rtorrent/blob/master/doc/rtorrent.rc
+			#	Deprecated commands:
+			#		- https://github.com/rakshasa/rtorrent/wiki/rTorrent-0.9-Comprehensive-Command-list-(WIP)
+			#		- https://github.com/rakshasa/rtorrent/blob/master/doc/scripts/update_commands_0.9.sed
 			mkdir -p $G_FP_DIETPI_USERDATA/rtorrent
 			[[ -f $G_FP_DIETPI_USERDATA/rtorrent/.rtorrent.rc ]] || cat << _EOF_ > $G_FP_DIETPI_USERDATA/rtorrent/.rtorrent.rc
-#Attempt to reduce disk throttling/abuse | 0.9.2 command does not exist
-#max_open_files = 50
+# Attempt to reduce disk throttling/abuse
+network.max_open_files.set = 50
 
-#Max queue
+# Max queue
 scheduler.max_active.set = 3
 
-#byte value
-max_memory_usage = $(( $(Optimize_BitTorrent 0) * 1024 * 1024 ))
+# byte value
+pieces.memory.max.set = $(( $(Optimize_BitTorrent 0) * 1024 * 1024 ))
 
 # Maximum and minimum number of peers to connect to per torrent.
-min_peers = 1
-max_peers = $(( $(Optimize_BitTorrent 2) / 2 + 1 ))
+throttle.min_peers.normal.set = 1
+throttle.max_peers.normal.set = $(( $(Optimize_BitTorrent 2) / 2 + 1 ))
 
 # Same as above but for seeding completed torrents (-1 = same as downloading)
-min_peers_seed = -1
-max_peers_seed = -1
+throttle.min_peers.seed.set = -1
+throttle.max_peers.seed.set = -1
 
 # Maximum number of simultaneous downloads
-max_downloads_global = $(Optimize_BitTorrent 2)
+throttle.max_downloads.set = $(Optimize_BitTorrent 2)
 # Maximum number of simultaneous uploads
-max_uploads_global = $(Optimize_BitTorrent 3)
+throttle.max_uploads.set = $(Optimize_BitTorrent 3)
 
 # Global upload and download rate in KiB. "0" for unlimited.
-download_rate = 0
-upload_rate = 0
+throttle.global_down.max_rate.set_kb = 0
+throttle.global_up.max_rate.set_kb = 0
 
 # Default directory to save the downloaded torrents.
-directory = $G_FP_DIETPI_USERDATA/downloads
+directory.default.set = $G_FP_DIETPI_USERDATA/downloads
 
 # Default session directory. Make sure you don't run multiple instance
 # of rtorrent using the same session directory. Perhaps using a
 # relative path?
-session = $G_FP_DIETPI_USERDATA/downloads/.session
+session.path.set = $G_FP_DIETPI_USERDATA/downloads/.session
 
 # UMask
 system.umask.set = 002
 
 # Close torrents when diskspace is low.
-schedule = low_diskspace,5,60,close_low_diskspace=1000M
+schedule2 = low_diskspace,5,60,close_low_diskspace=1000M
 
 # Periodically save session data
-schedule = session_save,240,300,session_save=
+schedule2 = session_save,240,300,session_save=
 
 # Enable the default ratio group.
 ratio.enable=yes
@@ -11123,10 +11136,10 @@ system.method.set = group.seeding.ratio.command, d.close=
 system.method.set_key = event.download.finished,move_complete,"execute=mv,-n,$d.get_base_path=,./unsorted/;d.set_directory=./unsorted/"
 
 # Port range to use for listening.
-port_range = 33101-33199
+network.port_range.set = 33101-33199
 
 # Start opening ports at a random position within the port range.
-port_random = yes
+network.port_random.set = yes
 
 # Encryption options, set to none (default) or any combination of the following:
 # allow_incoming, try_outgoing, require, require_RC4, enable_retry, prefer_plaintext
@@ -11135,7 +11148,7 @@ port_random = yes
 # outgoing connections but retries with encryption if they fail, preferring
 # plaintext to RC4 encryption after the encrypted handshake
 #
-encryption = require
+protocol.encryption.set = require
 
 # Sort the main view by ratio
 view.sort_current = main,greater=d.get_ratio=
@@ -11159,30 +11172,37 @@ view.sort_new = leeching,less=d.get_name=
 view.filter = active,d.get_peers_connected=
 view.sort = active
 
-schedule = sort_main,11,5,view.sort=main
-schedule = sort_seeding,12,5,view.sort=seeding
-schedule = sort_leeching,13,5,view.sort=leeching
-schedule = sort_active,14,5,view.sort=active
+schedule2 = sort_main,11,5,view.sort=main
+schedule2 = sort_seeding,12,5,view.sort=seeding
+schedule2 = sort_leeching,13,5,view.sort=leeching
+schedule2 = sort_active,14,5,view.sort=active
 
 # Enable DHT support for trackerless torrents or when all trackers are down.
 # May be set to "disable" (completely disable DHT), "off" (do not start DHT),
 # "auto" (start and stop DHT as needed), or "on" (start DHT immediately).
 # The default is "off". For DHT to work, a session directory must be defined.
 #
-dht = auto
+dht.mode.set = auto
 
 # UDP port to use for DHT.
 #
-#dht_port = 6881
+#dht.port.set = 6881
 
 # Enable peer exchange (for torrents not marked private)
 #
-peer_exchange = yes
+protocol.pex.set = yes
 
-#Enable remote access (eg: webui)
-scgi_port = localhost:5000
-
+# SCGI Connectivity (for alternative rtorrent interfaces, XMLRPC)
+#
+# Use a IP socket with scgi_port, or a Unix socket with scgi_local.
+# schedule can be used to set permissions on the unix socket.
+#
+scgi_port = 127.0.0.1:5000
+#scgi_local = /home/user/rtorrent/rpc.socket
+#schedule2 = scgi_permission,0,0,"execute.nothrow=chmod,\"g+w,o=\",/home/user/rtorrent/rpc.socket"
 _EOF_
+			# On Buster use new daemon mode
+			(( $G_DISTRO > 4 )) && G_CONFIG_INJECT 'system.daemon.set[[:blank:]=]' 'system.daemon.set = true' $G_FP_DIETPI_USERDATA/rtorrent/.rtorrent.rc
 			chown -R rtorrent:rtorrent $G_FP_DIETPI_USERDATA/rtorrent
 
 		fi
