@@ -778,7 +778,7 @@ _EOF_
 				 aSOFTWARE_WHIP_DESC[$software_id]='web interface audio streamer'
 			aSOFTWARE_CATEGORY_INDEX[$software_id]=2
 					  aSOFTWARE_TYPE[$software_id]=0
-			 aSOFTWARE_ONLINEDOC_URL[$software_id]='f=8&t=5&p=7305#p7305'
+			 aSOFTWARE_ONLINEDOC_URL[$software_id]='p=7305#p7305'
 		aSOFTWARE_REQUIRES_PHP[$software_id]=1
  			aSOFTWARE_REQUIRES_MYSQL[$software_id]=1
 		   aSOFTWARE_REQUIRES_NODEJS[$software_id]=1
@@ -921,7 +921,7 @@ _EOF_
 					  aSOFTWARE_TYPE[$software_id]=0
 		aSOFTWARE_REQUIRES_WEBSERVER[$software_id]=1
 			  aSOFTWARE_REQUIRES_PHP[$software_id]=1
-			 aSOFTWARE_ONLINEDOC_URL[$software_id]='f=8&t=5&p=2603#p2603'
+			 aSOFTWARE_ONLINEDOC_URL[$software_id]='p=2603#p2603'
 
 		#------------------
 		software_id=116
@@ -951,7 +951,7 @@ _EOF_
 				 aSOFTWARE_WHIP_DESC[$software_id]='nzb download manager'
 			aSOFTWARE_CATEGORY_INDEX[$software_id]=3
 					  aSOFTWARE_TYPE[$software_id]=0
-			 aSOFTWARE_ONLINEDOC_URL[$software_id]='f=8&t=5&p=6747#p6747'
+			 aSOFTWARE_ONLINEDOC_URL[$software_id]='p=6747#p6747'
    aSOFTWARE_REQUIRES_BUILDESSENTIAL[$software_id]=1
 
 		#------------------
@@ -5389,31 +5389,47 @@ Package: wireguard wireguard-dkms wireguard-tools\nPin: release n=sid\nPin-Prior
 
 		fi
 
-		#RTORRENT
-		software_id=107
+		software_id=107 # rTorrent
 		if (( ${aSOFTWARE_INSTALL_STATE[$software_id]} == 1 )); then
 
 			Banner_Installing
 
-			DEPS_LIST='rtorrent screen' #mediainfo
-			# On Jessie, nginx-full is needed for SCGI module: https://github.com/MichaIng/DietPi/issues/1240
+			DEPS_LIST='rtorrent' #mediainfo
+			# On Buster, no "screen" is required to run rTorrent as daemon: https://github.com/rakshasa/rtorrent/wiki/Daemon_Mode
+			(( $G_DISTRO < 5 )) && DEPS_LIST+=' screen'
+			# On Jessie, nginx-full is required for SCGI module: https://github.com/MichaIng/DietPi/issues/1240
 			(( $G_DISTRO < 4 && ${aSOFTWARE_INSTALL_STATE[85]} > 0 )) && DEPS_LIST+=' nginx-full'
 
-			# Get current version string
+			# Install ruTorrent: Web UI for rTorrent
+			# - Get current version string
 			INSTALL_URL_ADDRESS='https://api.github.com/repos/Novik/ruTorrent/releases/latest'
 			G_CHECK_URL "$INSTALL_URL_ADDRESS"
 			local version_string=$(curl -s "$INSTALL_URL_ADDRESS" | grep -m1 '^[[:blank:]]*"tag_name":' | cut -d \" -f 4)
 
 			Download_Install "https://github.com/Novik/ruTorrent/archive/$version_string.tar.gz"
 
-			mkdir -p /var/www/rutorrent
-			mv ruTorrent-*/* /var/www/rutorrent/
-			rm -R ruTorrent-*
+			# - Reinstall
+			if [[ -d /var/www/rutorrent ]]; then
+
+				# - Backup known config files
+				G_BACKUP_FP /var/www/rutorrent/conf/config.php
+				G_BACKUP_FP /var/www/rutorrent/conf/access.ini
+				G_BACKUP_FP /var/www/rutorrent/conf/plugins.ini
+
+				# - Merge new install into old to preserve e.g. 3rd party plugins
+				cp -a ruTorrent-*/. /var/www/rutorrent/
+				rm -R ruTorrent-*
+
+			# - Fresh install
+			else
+
+				mv ruTorrent-* /var/www/rutorrent
+
+			fi
 
 		fi
 
-		#Aria2
-		software_id=132
+		software_id=132 # Aria2
 		if (( ${aSOFTWARE_INSTALL_STATE[$software_id]} == 1 )); then
 
 			Banner_Installing
@@ -10917,25 +10933,20 @@ _EOF_
 
 		fi
 
-		#RTORRENT
-		software_id=107
+		software_id=107 # rTorrent
 		if (( ${aSOFTWARE_INSTALL_STATE[$software_id]} == 1 )); then
 
 			Banner_Configuration
 
-			#Create username/password for rutorrent based on webserver type.
+			# Create username/password for rutorrent based on webserver type.
 			# - Apache2
-			if (( ${aSOFTWARE_INSTALL_STATE[83]} >= 1 )); then
+			if (( ${aSOFTWARE_INSTALL_STATE[83]} > 0 )); then
 
-				# - Allow overrides redirects and .htaccess
-				sed -i "/AllowOverride /c\    AllowOverride All" /etc/apache2/sites-enabled/000-default*
-				sed -i "/AllowOverride /c\    AllowOverride All" /etc/apache2/apache2.conf
-
-				a2enmod rewrite
-
-				#install scgi module
+				# - Install SCGI module
 				G_AGI libapache2-mod-scgi
+				a2enmod rewrite scgi
 
+				# - Enable password protection
 				htpasswd -cb /etc/.rutorrent-htaccess root "$GLOBAL_PW"
 				cat << _EOF_ > /var/www/rutorrent/.htaccess
 AuthUserFile /etc/.rutorrent-htaccess
@@ -10944,24 +10955,29 @@ AuthType Basic
 require user root
 _EOF_
 
+				# - Allow overrides/.htaccess and enable SCGI + authentication
 				cat << _EOF_ > /etc/apache2/sites-available/dietpi-rutorrent.conf
+<Directory /var/www/rutorrent/>
+	AllowOverride All
+</Directory>
+
 SCGIMount /RPC2 127.0.0.1:5000
 <location /RPC2>
-AuthName "rTorrent secure access"
-AuthType Basic
-AuthBasicProvider file
-AuthUserFile /etc/.rutorrent-htaccess
-Require user root
+	AuthName "rTorrent secure access"
+	AuthType Basic
+	AuthBasicProvider file
+	AuthUserFile /etc/.rutorrent-htaccess
+	Require user root
 </location>
 _EOF_
 				a2ensite dietpi-rutorrent
-
+				
 			# - Lighttpd
-			elif (( ${aSOFTWARE_INSTALL_STATE[84]} >= 1 )); then
+			elif (( ${aSOFTWARE_INSTALL_STATE[84]} > 0 )); then
 
 				echo "root:rtorrent:$(echo -n 'root:rtorrent:dietpi' | md5sum | cut -b -32)" > /etc/.rutorrent-htaccess
 
-				# - add to /etc/lighttpd/lighttpd.conf
+				# - Add to /etc/lighttpd/lighttpd.conf
 				if ! grep -qi '^#RUTORRENT_DIETPI' /etc/lighttpd/lighttpd.conf; then
 
 					cat << _EOF_ >> /etc/lighttpd/lighttpd.conf
@@ -10994,7 +11010,7 @@ _EOF_
 				fi
 
 			# - Nginx
-			elif (( ${aSOFTWARE_INSTALL_STATE[85]} >= 1 )); then
+			elif (( ${aSOFTWARE_INSTALL_STATE[85]} > 0 )); then
 
 				echo "root:$(openssl passwd -crypt dietpi)" > /etc/.rutorrent-htaccess
 
@@ -11012,8 +11028,8 @@ _EOF_
 
 			fi
 
-			# - Define curl location in config.php (for lighttpd and nginx)
-			sed -i '/"curl"[[:space:]]/c\        "curl" => "/usr/bin/curl",' /var/www/rutorrent/conf/config.php
+			# - Define curl location in config.php (for Lighttpd and Nginx)
+			G_CONFIG_INJECT '"curl"[[:blank:]]' '		"curl"	=> "/usr/bin/curl",' /var/www/rutorrent/conf/config.php
 
 			chown www-data:www-data /etc/.rutorrent-htaccess
 			chmod 400 /etc/.rutorrent-htaccess
@@ -11021,65 +11037,87 @@ _EOF_
 			# - Session folder
 			mkdir -p $G_FP_DIETPI_USERDATA/downloads/.session
 
+			# Create rTorrent run user
+			local usercmd='useradd -rM'
+			getent passwd rtorrent &> /dev/null && usercmd='usermod'
+			$usercmd rtorrent -G dietpi -d $G_FP_DIETPI_USERDATA/rtorrent -s $(command -v nologin)
+
 			# - Service using screen | '/usr/bin/rtorrent &> /var/log/rtorrent.log &' doesnt work, hangs program after 5 seconds
 			cat << _EOF_ > /etc/systemd/system/rtorrent.service
 [Unit]
 Description=rTorrent (DietPi)
-After=network.target
+Wants=network-online.target
+After=network-online.target
 
 [Service]
 Type=forking
+User=rtorrent
+Group=dietpi
 KillMode=none
-ExecStart=/usr/bin/screen -d -m -fa -S rtorrent /usr/bin/rtorrent
-ExecStop=/usr/bin/killall -w -s 2 /usr/bin/rtorrent
-WorkingDirectory=%h
+ExecStart=$(command -v screen) -fa -dmS rtorrent $(command -v rtorrent)
+ExecStop=$(command -v screen) -S rtorrent -X quit
 
 [Install]
 WantedBy=multi-user.target
 _EOF_
+			# - On Buster we use new daemon mode
+			if (( $G_DISTRO > 4 )); then
+
+				sed -Ei '/^(Type|KillMode|ExecStop)=/d' /etc/systemd/system/rtorrent.service
+				G_CONFIG_INJECT 'ExecStart=' "ExecStart=$(command -v rtorrent)" /etc/systemd/system/rtorrent.service
+
+			fi
 			systemctl daemon-reload
 
-			#Default conf
-			cat << _EOF_ > $HOME/.rtorrent.rc
-#Attempt to reduce disk throttling/abuse | 0.9.2 command does not exist
-#max_open_files = 50
+			# - Default conf, do not overwrite if existent
+			#	Example: https://github.com/rakshasa/rtorrent/blob/master/doc/rtorrent.rc
+			#	Deprecated commands:
+			#		- https://github.com/rakshasa/rtorrent/wiki/rTorrent-0.9-Comprehensive-Command-list-(WIP)
+			#		- https://github.com/rakshasa/rtorrent/blob/master/doc/scripts/update_commands_0.9.sed
+			mkdir -p $G_FP_DIETPI_USERDATA/rtorrent
+			[[ -f $G_FP_DIETPI_USERDATA/rtorrent/.rtorrent.rc ]] || cat << _EOF_ > $G_FP_DIETPI_USERDATA/rtorrent/.rtorrent.rc
+# Attempt to reduce disk throttling/abuse
+network.max_open_files.set = 50
 
-#Max queue
+# Max queue
 scheduler.max_active.set = 3
 
-#byte value
-max_memory_usage = $(( $(Optimize_BitTorrent 0) * 1024 * 1024 ))
+# byte value
+pieces.memory.max.set = $(( $(Optimize_BitTorrent 0) * 1024 * 1024 ))
 
 # Maximum and minimum number of peers to connect to per torrent.
-min_peers = 1
-max_peers = $(( $(Optimize_BitTorrent 2) / 2 + 1 ))
+throttle.min_peers.normal.set = 1
+throttle.max_peers.normal.set = $(( $(Optimize_BitTorrent 2) / 2 + 1 ))
 
 # Same as above but for seeding completed torrents (-1 = same as downloading)
-min_peers_seed = -1
-max_peers_seed = -1
+throttle.min_peers.seed.set = -1
+throttle.max_peers.seed.set = -1
 
 # Maximum number of simultaneous downloads
-max_downloads_global = $(Optimize_BitTorrent 2)
+throttle.max_downloads.set = $(Optimize_BitTorrent 2)
 # Maximum number of simultaneous uploads
-max_uploads_global = $(Optimize_BitTorrent 3)
+throttle.max_uploads.set = $(Optimize_BitTorrent 3)
 
 # Global upload and download rate in KiB. "0" for unlimited.
-download_rate = 0
-upload_rate = 0
+throttle.global_down.max_rate.set_kb = 0
+throttle.global_up.max_rate.set_kb = 0
 
 # Default directory to save the downloaded torrents.
-directory = $G_FP_DIETPI_USERDATA/downloads
+directory.default.set = $G_FP_DIETPI_USERDATA/downloads
 
 # Default session directory. Make sure you don't run multiple instance
 # of rtorrent using the same session directory. Perhaps using a
 # relative path?
-session = $G_FP_DIETPI_USERDATA/downloads/.session
+session.path.set = $G_FP_DIETPI_USERDATA/downloads/.session
+
+# UMask
+system.umask.set = 002
 
 # Close torrents when diskspace is low.
-schedule = low_diskspace,5,60,close_low_diskspace=1000M
+schedule2 = low_diskspace,5,60,close_low_diskspace=1000M
 
 # Periodically save session data
-schedule = session_save,240,300,session_save=
+schedule2 = session_save,240,300,session_save=
 
 # Enable the default ratio group.
 ratio.enable=yes
@@ -11092,16 +11130,16 @@ ratio.max.set=125
 ratio.upload.set=1M
 
 # When seeding ratio is reached close the torrent
-system.method.set = group.seeding.ratio.command, d.close=
+method.set = group.seeding.ratio.command,d.close=
 
 # Move files to ./unsorted when download completes
-system.method.set_key = event.download.finished,move_complete,"execute=mv,-n,$d.get_base_path=,./unsorted/;d.set_directory=./unsorted/"
+method.set_key = event.download.finished,move_complete,"execute=mv,-n,$d.get_base_path=,./unsorted/;d.set_directory=./unsorted/"
 
 # Port range to use for listening.
-port_range = 33101-33199
+network.port_range.set = 33101-33199
 
 # Start opening ports at a random position within the port range.
-port_random = yes
+network.port_random.set = yes
 
 # Encryption options, set to none (default) or any combination of the following:
 # allow_incoming, try_outgoing, require, require_RC4, enable_retry, prefer_plaintext
@@ -11110,7 +11148,7 @@ port_random = yes
 # outgoing connections but retries with encryption if they fail, preferring
 # plaintext to RC4 encryption after the encrypted handshake
 #
-encryption = require
+protocol.encryption.set = require
 
 # Sort the main view by ratio
 view.sort_current = main,greater=d.get_ratio=
@@ -11134,36 +11172,42 @@ view.sort_new = leeching,less=d.get_name=
 view.filter = active,d.get_peers_connected=
 view.sort = active
 
-schedule = sort_main,11,5,view.sort=main
-schedule = sort_seeding,12,5,view.sort=seeding
-schedule = sort_leeching,13,5,view.sort=leeching
-schedule = sort_active,14,5,view.sort=active
+schedule2 = sort_main,11,5,view.sort=main
+schedule2 = sort_seeding,12,5,view.sort=seeding
+schedule2 = sort_leeching,13,5,view.sort=leeching
+schedule2 = sort_active,14,5,view.sort=active
 
 # Enable DHT support for trackerless torrents or when all trackers are down.
 # May be set to "disable" (completely disable DHT), "off" (do not start DHT),
 # "auto" (start and stop DHT as needed), or "on" (start DHT immediately).
 # The default is "off". For DHT to work, a session directory must be defined.
 #
-dht = auto
+dht.mode.set = auto
 
 # UDP port to use for DHT.
 #
-#dht_port = 6881
+#dht.port.set = 6881
 
 # Enable peer exchange (for torrents not marked private)
 #
-peer_exchange = yes
+protocol.pex.set = yes
 
-#Enable remote access (eg: webui)
-scgi_port = localhost:5000
-
+# SCGI Connectivity (for alternative rtorrent interfaces, XMLRPC)
+#
+# Use a IP socket with scgi_port, or a Unix socket with scgi_local.
+# schedule can be used to set permissions on the unix socket.
+#
+scgi_port = 127.0.0.1:5000
+#scgi_local = /home/user/rtorrent/rpc.socket
+#schedule2 = scgi_permission,0,0,"execute.nothrow=chmod,\"g+w,o=\",/home/user/rtorrent/rpc.socket"
 _EOF_
-
+			# On Buster use new daemon mode
+			(( $G_DISTRO > 4 )) && G_CONFIG_INJECT 'system.daemon.set[[:blank:]=]' 'system.daemon.set = true' $G_FP_DIETPI_USERDATA/rtorrent/.rtorrent.rc
+			chown -R rtorrent:rtorrent $G_FP_DIETPI_USERDATA/rtorrent
 
 		fi
 
-		#Aria2
-		software_id=132
+		software_id=132 # Aria2
 		if (( ${aSOFTWARE_INSTALL_STATE[$software_id]} == 1 )); then
 
 			Banner_Configuration
@@ -14062,28 +14106,28 @@ _EOF_
 
 		fi
 
-		software_id=107
+		software_id=107 # rTorrent
 		if (( ${aSOFTWARE_INSTALL_STATE[$software_id]} == -1 )); then
 
 			Banner_Uninstalling
 			G_AGP rtorrent
-			rm -R /var/www/rutorrent
-			rm $HOME/.rtorrent.rc
-			rm /etc/systemd/system/rtorrent.service
+			[[ -d /var/www/rutorrent ]] && rm -R /var/www/rutorrent
+			[[ -d $G_FP_DIETPI_USERDATA/rtorrent ]] && rm -R $G_FP_DIETPI_USERDATA/rtorrent
+			[[ -f /etc/systemd/system/rtorrent.service ]] && rm /etc/systemd/system/rtorrent.service
 
-			# - webserver rutorrent user/pw settings
-			rm /etc/.rutorrent-htaccess
+			# - Webserver rutorrent user/pw settings
+			[[ -f /etc/.rutorrent-htaccess ]] && rm /etc/.rutorrent-htaccess
 
-			#	lighttpd
+			#	Lighttpd
 			#Remove from
 			#RUTORRENT_DIETPI to #RUTORRENT_DIETPI in /etc/lighttpd/lighttpd.conf
 
-			#	nginx
-			rm /etc/nginx/sites-dietpi/dietpi-rutorrent.conf
+			#	Nginx
+			[[ -f /etc/nginx/sites-dietpi/dietpi-rutorrent.conf ]] && rm /etc/nginx/sites-dietpi/dietpi-rutorrent.conf
 
-			#	apache2
+			#	Apache2
 			command -v a2dissite &> /dev/null && a2dissite dietpi-rutorrent
-			rm /etc/apache2/sites-available/dietpi-rutorrent.conf
+			[[ -f /etc/apache2/sites-available/dietpi-rutorrent.conf ]] && rm /etc/apache2/sites-available/dietpi-rutorrent.conf
 
 		fi
 
