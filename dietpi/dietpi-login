@@ -9,8 +9,8 @@
 	#////////////////////////////////////
 	#
 	# Info:
-	# - filename /DietPi/dietpi/dietpi-login
-	# - activates on login /etc/bashrc.d/dietpi-login.sh
+	# - Filename: /DietPi/dietpi/dietpi-login
+	# - Called in interactive bash shells from: /etc/bashrc.d/dietpi.bash
 	#////////////////////////////////////
 
 	# Import DietPi-Globals --------------------------------------------------------------
@@ -21,17 +21,24 @@
 	# Globals
 	#/////////////////////////////////////////////////////////////////////////////////////
 	FP_DIETPI_FIRSTRUNSETUP_LOG='/var/tmp/dietpi/logs/dietpi-firstrun-setup.log'
-	FP_DIETPI_FIRSTRUNSETUP_PID='/tmp/.dietpi-login_1st_run_setup' # Must be on RAM, in case of reboot from dietpi-software etc, to reset file before this script can remove it.
+	FP_DIETPI_FIRSTRUNSETUP_PID='/tmp/.dietpi-login_firstrun_setup.pid' # Must be on RAM, in case of reboot from dietpi-software etc, to reset file before this script can remove it.
+
+	Show_License(){
+
+		if [[ -f /var/lib/dietpi/license.txt ]] && (( $G_USER_INPUTS )); then
+
+			G_WHIP_VIEWFILE /var/lib/dietpi/license.txt
+			rm /var/lib/dietpi/license.txt
+
+		fi
+
+	}
 
 	# Autoboot
 	Run_AutoStart(){
 
-		# - Do we have a valid screen for autoboot?
-		local screen_valid=0
-		[[ ! $DISPLAY && $(tty) == '/dev/tty1' ]] && screen_valid=1
-
-		# - Boot to specific program
-		if (( $screen_valid )); then
+		# - Boot into specific program if we have a valid screen
+		if [[ ! $DISPLAY && $(tty) == '/dev/tty1' ]]; then
 
 			# - Kodi
 			if (( $auto_start_index == 1 )); then
@@ -105,24 +112,17 @@
 	# First Run Setup
 	Run_DietPi_First_Run_Setup(){
 
-		G_CHECK_ROOT_USER
-
-		# - Automated first run setup?
-		if grep -qi '^[[:blank:]]*AUTO_SETUP_AUTOMATED=1' /DietPi/dietpi.txt; then
-
-			# - Set non-interactive shell, if automated installation (as .bashrc run via STDIN check is interactive)
-			export G_USER_INPUTS=0
-
-		fi
+		# - Set non-interactive shell if automated install chosen, as .bashrc run via STDIN check is interactive
+		grep -qi '^[[:blank:]]*AUTO_SETUP_AUTOMATED=1' /DietPi/dietpi.txt && export G_USER_INPUTS=0
 
 		# - Prompt and wait if this script runs in other session already
 		local pid_firstrunsetup=''
-		[[ -f $FP_DIETPI_FIRSTRUNSETUP_PID ]] && pid_firstrunsetup=$(cat $FP_DIETPI_FIRSTRUNSETUP_PID)
+		[[ -f $FP_DIETPI_FIRSTRUNSETUP_PID ]] && pid_firstrunsetup=$(<$FP_DIETPI_FIRSTRUNSETUP_PID)
 		if [[ $pid_firstrunsetup ]] && (( $pid_firstrunsetup != $$ )); then
 
 			# - First run setup running in other session
 			local additional_text='Please resume setup on the active screen.'
-			(( ! $G_USER_INPUTS )) && additional_text='Automated setup is in progress. When completed, the system will be rebooted.'
+			(( $G_USER_INPUTS )) || additional_text='Automated setup is in progress. When completed, the system will be rebooted.'
 
 			G_WHIP_MSG "[INFO] DietPi first run setup: Currently running on another screen (PID=$pid_firstrunsetup).\n\n$additional_text"
 
@@ -130,7 +130,7 @@
 			G_DIETPI-NOTIFY 2 "Waiting $restart_loop_delay seconds before checking again. Please wait... (Press CTRL+C to abort)"
 			sleep $restart_loop_delay
 
-		elif (( ! $G_CHECK_ROOT_USER_VERIFIED )); then
+		elif (( $UID )); then
 
 			G_WHIP_MSG '[ERROR] Root login required\n
 To finish DietPi first run setup, root permissions are required.\n
@@ -173,24 +173,14 @@ Please login again as user "root" with password "dietpi", respectively the one y
 
 	}
 
-	Show_License(){
-
-		if [[ -f /var/lib/dietpi/license.txt ]] && (( $G_USER_INPUTS )); then
-
-			G_WHIP_VIEWFILE /var/lib/dietpi/license.txt
-			rm /var/lib/dietpi/license.txt
-
-		fi
-
-	}
-
 	Main(){
 
 		# Wait for full system boot
-		until sudo systemctl status dietpi-postboot | grep -qi 'exited' #Sudo required for non-root
+		local i=0
+		until sudo systemctl -ln 0 --no-pager status dietpi-postboot | grep -qi 'exited' # "sudo" required for non-root logins
 		do
 
-			echo -e '\e[90m[\e[0m INFO \e[90m]\e[0m Waiting for DietPi-Postboot to finish, before executing login script...'
+			echo -ne "\e[90m[\e[0m INFO \e[90m]\e[0m Waiting for DietPi-Postboot to finish... (Press CTRL+C to abort) ($((i++)))\r"
 			sleep 1
 
 		done
@@ -201,7 +191,7 @@ Please login again as user "root" with password "dietpi", respectively the one y
 			# Import DietPi-Globals --------------------------------------------------------------
 			. /DietPi/dietpi/func/dietpi-globals
 			G_PROGRAM_NAME='DietPi-Login'
-			#G_INIT
+			#G_INIT # To allow concurrent logins
 			# Import DietPi-Globals --------------------------------------------------------------
 
 			/DietPi/dietpi/func/obtain_network_details
@@ -235,15 +225,18 @@ Please login again as user "root" with password "dietpi", respectively the one y
 				/DietPi/dietpi/func/dietpi-banner 0
 
 				# - Force interactive mode to show G_WHIP error prompts
+				#   NB: We need to write this to dietpi.txt as well to not have this overwritten on next loop.
 				export G_USER_INPUTS=1
+				G_CONFIG_INJECT 'AUTO_SETUP_AUTOMATED=' 'AUTO_SETUP_AUTOMATED=0' /DietPi/dietpi.txt
 
-				if G_WHIP_YESNO "[FAILED] Unknown install state/First run setup failed\n
+				if G_WHIP_DEFAULT_ITEM='yes' G_WHIP_YESNO "[FAILED] Unknown install state/First run setup failed\n
 An error has occured either during first run update or installs.\n
-First run setup will now attempt to re-apply the last step.
-If this repeatedly fails, please collect all terminal output and the content of $FP_DIETPI_FIRSTRUNSETUP_LOG if available and report this issue to: https://github.com/Fourdee/DietPi/issues\n\nWould you like to restart the first run setup and installation?"; then
+First run setup will now attempt to re-apply the last step, forced as interactive run.
+If this repeatedly fails, please collect all terminal output and the content of $FP_DIETPI_FIRSTRUNSETUP_LOG if available and report this issue to: https://github.com/MichaIng/DietPi/issues\n
+Would you like to restart the first run setup and installation?"; then
 
 					# - Reset and force re-run of first run
-					killall -w dietpi-software dietpi-update &> /dev/null
+					killall -qw dietpi-software dietpi-update
 					echo 0 > /DietPi/dietpi/.install_stage
 					[[ -f $FP_DIETPI_FIRSTRUNSETUP_PID ]] && rm $FP_DIETPI_FIRSTRUNSETUP_PID
 

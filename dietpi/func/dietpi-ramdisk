@@ -9,24 +9,23 @@
 	#////////////////////////////////////
 	#
 	# Info:
-	# - Copies dietpi files from /boot to /DietPi (RAM)
-	# - /DietPi is mounted as tmpfs (RAMdisk)
-	# - This allows us to vastly reduce filesystem IO across DietPi.
-	# - Creates a file when active (/DietPi/.ramdisk)
+	# - $FP_RAM is mounted as tmpfs (RAMdisk) before this script runs.
+	# - When booting this script copies DietPi from $FP_DISK to $FP_RAM and creates an active flag file: $FP_RAM/.ramdisk
+	# - This allows us to vastly reduce filesystem I/O and increase performance across DietPi.
+	# - When shutting down this script stores DietPi from $FP_RAM back to $FP_DISK and removes the flag file.
 	#
 	# Usage:
-	# - /DietPi/dietpi/func/dietpi-ramdisk 0		= Copy from /boot (disk) to /DietPi (RAM)
-	# - /DietPi/dietpi/func/dietpi-ramdisk 1		= Copy from /DietPi (RAM) to /boot (disk)
+	# - /DietPi/dietpi/func/dietpi-ramdisk 0	= Copy from $FP_DISK to $FP_RAM
+	# - /DietPi/dietpi/func/dietpi-ramdisk 1	= Store from $FP_RAM to $FP_DISK
 	#////////////////////////////////////
 
 	#-----------------------------------------------------------------------------------
-	#. /DietPi/dietpi/func/dietpi-globals	# Not compatible until dietpi-preboot.service and overkill for the purpose of this script.
-	#export LC_ALL=en_GB.UTF-8		# Not needed, as we do not parse any external command and "date" is allowed to be in user locale format.
-	#cd $HOME				# "cd: HOME not set" error and not needed, since we do not create any tmp files.
+	#. /DietPi/dietpi/func/dietpi-globals	# Not compatible until DietPi-PreBoot has finished and overkill for the purpose of this script.
+	#export LC_ALL=en_GB.UTF-8		# Not required, as we do not parse any external command and "date" is allowed to be in user locale format.
+	#cd $HOME				# Not required, as we do not create any tmp files and produces and: "cd: HOME not set"
 	#-----------------------------------------------------------------------------------
 
-	INPUT=0
-	[[ $1 =~ ^-?[0-9]+$ ]] && INPUT=$1
+	[[ $1 =~ ^-?[0-9]+$ ]] && INPUT=$1 || INPUT=-1
 
 	EXIT_CODE=0
 
@@ -48,99 +47,98 @@
 	# Main Loop
 	#/////////////////////////////////////////////////////////////////////////////////////
 
-	# Start: Copy to RAM
+	# Startup phase: Copy to RAM
 	if (( $INPUT == 0 )); then
 
-		echo "$(date) | $PROGRAM_NAME: Starting..."
+		echo "$(date) | $PROGRAM_NAME: Copying DietPi to RAM..."
 
 		if [[ ! -f $FP_RAM'/.ramdisk' ]]; then
 
-			# - Failsafe: Recreate /DietPi
-			[[ -d $FP_RAM ]] && rm -R $FP_RAM
-			mkdir -p $FP_RAM
+			# - Failsafe: Assure empty $FP_RAM
+			[[ -d $FP_RAM ]] && rm -Rf $FP_RAM/{,.??,.[^.]}* || mkdir -p $FP_RAM || EXIT_CODE=1
 
 			# - Copy array of /boot/* files to RAM (config/ini etc)
-			for ((i=0; i<${#aFILE_BOOT_INI[@]}; i++))
+			for i in ${aFILE_BOOT_INI[@]}
 			do
 
-				if [[ -f $FP_DISK/${aFILE_BOOT_INI[$i]} ]]; then
+				if [[ -f $FP_DISK/$i ]]; then
 
-					cp $FP_DISK/${aFILE_BOOT_INI[$i]} $FP_RAM/
+					cp $FP_DISK/$i $FP_RAM/ || EXIT_CODE=1
 
-					# - Convert line endings to Unix from DOS. Prevents various issues where users modify file on another system, then save with DOS line endings: https://github.com/Fourdee/DietPi/issues/390
-					sed -i $'s/\r$//' $FP_RAM/${aFILE_BOOT_INI[$i]}
+					# - Convert line endings to Unix from DOS. Prevents various issues where users modify file on another system, then save with DOS line endings: https://github.com/MichaIng/DietPi/issues/390
+					sed -i $'s/\r$//' $FP_RAM/$i || EXIT_CODE=1
 
 				fi
 
 			done
 
-			# - Copy to RAM
-			cp -Rf $FP_DISK/dietpi $FP_RAM/
+			# - Copy DietPi to RAM
+			cp -Rf $FP_DISK/dietpi $FP_RAM/ || EXIT_CODE=1
 
-			# - Set DietPi user + exec
-			#chown -R dietpi:dietpi $FP_RAM # Unless we can find a way to prevent file permissions being changed after root modifies them, no point in having this.
-			chmod -R +x $FP_RAM
+			# - Set exec permissions
+			chmod -R +x $FP_RAM || EXIT_CODE=1
 
 			# - Generate active flag
-			> $FP_RAM/.ramdisk
+			> $FP_RAM/.ramdisk || EXIT_CODE=1
 
-			echo "$(date) | $PROGRAM_NAME: Completed"
+			if (( $EXIT_CODE )); then
 
-		else
-
-			echo "$(date) | $PROGRAM_NAME: Already running. Aborting..."
-
-		fi
-
-	#Stop: Copy everything back to DISK
-	elif (( $INPUT == 1 )); then
-
-		echo "$(date) | $PROGRAM_NAME: Stopping..."
-
-		if [[ -f $FP_RAM'/.ramdisk' ]]; then
-
-			if [[ ! -f $FP_RAM'/dietpi/boot' ]]; then # Only copy back if file exists (in-case "DietPi-RAMdisk: Already running" occured during start): https://github.com/Fourdee/DietPi/issues/719#issuecomment-276101472
-
-				echo "$(date) | $PROGRAM_NAME: [ERROR] $FP_RAM/dietpi/boot is missing. Aborting..."
-				EXIT_CODE=1
+				echo "$(date) | $PROGRAM_NAME: [ERROR] An issue occurred while copying DietPi to RAM."
 
 			else
 
-				# - Remove all of DietPi files and folders from disk
-				#rm -R $FP_DISK/dietpi # https://github.com/Fourdee/DietPi/issues/905#issuecomment-298241622
-
-				# - Copy DietPi to disk with files from RAM
-				cp -Rf $FP_RAM/* /boot/
-
-				# - Remove active flag
-				rm $FP_RAM/.ramdisk
-
-				# - Remove update available status (refreshed during reboot)
-				rm $FP_DISK/dietpi/.update_available &> /dev/null
-
-				# - Sync changes to disk NOW
-				sync
-
-				echo "$(date) | $PROGRAM_NAME: Completed"
+				echo "$(date) | $PROGRAM_NAME: Copied DietPi to RAM."
 
 			fi
 
 		else
 
-			echo "$(date) | $PROGRAM_NAME: Is not currently running. Aborting..."
+			echo "$(date) | $PROGRAM_NAME: DietPi is already in RAM. Aborting..."
+
+		fi
+
+	# Shutdown phase: Store to disk
+	elif (( $INPUT == 1 )); then
+
+		echo "$(date) | $PROGRAM_NAME: Storing DietPi to disk..."
+
+		if [[ -f $FP_RAM'/.ramdisk' ]]; then
+
+			# - Remove old DietPi form disk before storing new DietPi from RAM
+			#rm -R $FP_DISK/dietpi # Skip this to prevent unrecoverable removal of DietPi in case of error while copying to RAM
+
+			# - Store DietPi to disk
+			cp -Rf $FP_RAM/* $FP_DISK/ || EXIT_CODE=1
+
+			# - Remove active flag
+			rm $FP_RAM/.ramdisk || EXIT_CODE=1
+
+			# - Failsafe due to "async": Force sync NOW!
+			sync
+
+			if (( $EXIT_CODE )); then
+
+				echo "$(date) | $PROGRAM_NAME: [ERROR] An issue occurred while storing DietPi to RAM."
+
+			else
+
+				echo "$(date) | $PROGRAM_NAME: Stored DietPi to disk."
+
+			fi
+
+		else
+
+			echo "$(date) | $PROGRAM_NAME: DietPi is not in RAM. Aborting..."
 
 		fi
 
 	else
 
-		echo "$(date) | $PROGRAM_NAME: Unknown argument: $INPUT. Aborting..."
+		echo "$(date) | $PROGRAM_NAME: [ERROR] Unknown input argument: $INPUT. Aborting..."
 		EXIT_CODE=1
 
 	fi
 
-	#-----------------------------------------------------------------------------------
-	#delete[]
-	unset aFILE_BOOT_INI
 	#-----------------------------------------------------------------------------------
 	exit $EXIT_CODE
 	#-----------------------------------------------------------------------------------

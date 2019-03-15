@@ -21,3 +21,6 @@ about: Suggest a new SBC to be added to the offial support and image list of Die
 #### If not, are there install instructions for Debian available?
 <!-- EG: https://github.com/drtyhlpr/rpi23-gen-image/https://github.com/Debian/raspi3-image-spec -->
 - ...
+
+#### Vote for this iamge on FeatHub: https://feathub.com/MichaIng/DietPi/
+<!-- Optional: Add your request to our FeatHub page as well and replace the above link accordinly.-->
