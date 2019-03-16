@@ -499,13 +499,6 @@ _EOF_
 
 			fi
 			#-------------------------------------------------------------------------------
-			#RPi add FB depth 16: https://github.com/MichaIng/DietPi/issues/1716
-			if (( $G_HW_MODEL < 10 )) && ! grep -q 'framebuffer_depth=' /DietPi/config.txt; then
-
-				echo -e "\n#framebuffer_depth=16" >> /DietPi/config.txt
-
-			fi
-			#-------------------------------------------------------------------------------
 			#RPi UART: https://github.com/MichaIng/DietPi/issues/1759
 			if [[ -f /DietPi/config.txt ]]; then
 
@@ -881,7 +874,7 @@ _EOF_
 				# - Use new "pbkdf2" function on Buster to resolve warning about deprecated key derivation used: https://github.com/MichaIng/DietPi/issues/2213
 				local pbkdf2=''
 				(( $G_DISTRO > 4 )) && pbkdf2='-iter 10000'
-				openssl enc -e -a -aes-256-cbc $pbkdf2 -salt -pass pass:'DietPiRocks!' -out /var/lib/dietpi/dietpi-software/.GLOBAL_PW.bin <<< $pw_dietpi_software
+				openssl enc -e -a -md sha256 -aes-256-cbc $pbkdf2 -salt -pass pass:'DietPiRocks!' -out /var/lib/dietpi/dietpi-software/.GLOBAL_PW.bin <<< $pw_dietpi_software
 
 				unset pw_dietpi_software
 
@@ -1560,8 +1553,10 @@ Also have a look at "Sonarr", another alternative TV show manager, available for
 
 			#-------------------------------------------------------------------------------
 			#Redo our /etc/bash.bashrc entry, user confirmed 4 entries: https://github.com/MichaIng/DietPi/issues/2529
+			#As well allow ".bash" file ending and remove obsolete dietpi-*.sh scripts: https://github.com/MichaIng/DietPi/pull/2636
 			sed -i '\#for i in /etc/bashrc#d' /etc/bash.bashrc
-			G_CONFIG_INJECT '.*/etc/bashrc\.d/.*' 'for i in /etc/bashrc.d/*.sh; do [ -r "$i" ] && . $i; done' /etc/bash.bashrc
+			G_CONFIG_INJECT '.*/etc/bashrc\.d/.*' 'for i in /etc/bashrc.d/*.sh /etc/bashrc.d/*.bash; do [ -r "$i" ] && . $i; done' /etc/bash.bashrc
+			rm -f /etc/bashrc.d/dietpi-*.sh
 			#-------------------------------------------------------------------------------
 			#Mopidy fix: https://github.com/MichaIng/DietPi/issues/2536
 			getent passwd mopidy &> /dev/null && usermod -a -G dietpi,audio -d $G_FP_DIETPI_USERDATA/mopidy mopidy
@@ -1676,12 +1671,61 @@ _EOF_
 
 			fi
 			#-------------------------------------------------------------------------------
+			#RPi | Remove "framebuffer_depth" handling: https://github.com/MichaIng/DietPi/pull/2635
+			(( $G_HW_MODEL < 10 )) && sed -i '/framebuffer_depth/d' /DietPi/config.txt
+			#-------------------------------------------------------------------------------
+			#Tiny fix for Beta users on Jessie system to switch global PW to sha256 digest, since related pre-patch is not re-run on RC-only updates: https://github.com/MichaIng/DietPi/commit/70e0a664d5b12954d673cde3f20224547ed8d549
+			local global_pw=''
+			if (( $G_DISTRO < 4 )) &&
+				global_pw=$(openssl enc -d -a -md md5 -aes-256-cbc -salt -pass pass:'DietPiRocks!' -in /var/lib/dietpi/dietpi-software/.GLOBAL_PW.bin 2> /dev/null); then
+
+				openssl enc -e -a -md sha256 -aes-256-cbc -salt -pass pass:'DietPiRocks!' -out /var/lib/dietpi/dietpi-software/.GLOBAL_PW.bin <<< $global_pw
+
+			fi
+			#-------------------------------------------------------------------------------
+			#Nextcloud: Add OCM/OCS provider redirects as this is checked and printed as warning on admin panel: https://github.com/MichaIng/DietPi/issues/2638
+			if [[ -f /etc/apache2/sites-available/dietpi-nextcloud.conf ]] &&
+				! grep -q 'oc[ms]-provider' /etc/apache2/sites-available/dietpi-nextcloud.conf; then
+
+				echo 'Redirect permanent /ocm-provider /nextcloud/ocm-provider
+Redirect permanent /ocs-provider /nextcloud/ocs-provider' >> /etc/apache2/sites-available/dietpi-nextcloud.conf
+
+			fi
+			if [[ -f /etc/lighttpd/conf-available/99-dietpi-nextcloud.conf ]] &&
+				! grep -q 'oc[ms]-provider' /etc/lighttpd/conf-available/99-dietpi-nextcloud.conf; then
+
+				echo 'url.redirect += (
+	"^/ocm-provider" => "/nextcloud/ocm-provider",
+	"^/ocs-provider" => "/nextcloud/ocs-provider"
+)' >> /etc/lighttpd/conf-available/99-dietpi-nextcloud.conf
+
+			fi
+			if [[ -f /etc/nginx/sites-dietpi/dietpi-nextcloud.conf ]] &&
+				! grep -q 'oc[ms]-provider' /etc/nginx/sites-dietpi/dietpi-nextcloud.conf; then
+
+				echo 'location ~ ^\/(?:ocm-provider|ocs-provider).* {
+	rewrite ^ /nextcloud$request_uri;
+}' >> /etc/nginx/sites-dietpi/dietpi-nextcloud.conf
+
+			fi
+			#-------------------------------------------------------------------------------
 			#Reinstalls
 			#	Amiberry 2.25: https://github.com/MichaIng/DietPi/issues/2599
 			#	Deluge: Patch according to installer rework: https://github.com/MichaIng/DietPi/pull/2594
+			#	rTorrent: https://github.com/MichaIng/DietPi/issues/2629
 			if (( $G_DIETPI_INSTALL_STAGE == 2 )); then
 
 				local reinstall_indices='108'
+
+				if grep -q '^aSOFTWARE_INSTALL_STATE\[107\]=2' /DietPi/dietpi/.installed &&
+					[[ -f /root/.rtorrent.rc ]]; then
+
+					reinstall_indices+=' 107'
+					G_CONFIG_INJECT 'system.umask.set[[:blank:]=]' 'system.umask.set = 002' /root/.rtorrent.rc
+					mkdir -p $G_FP_DIETPI_USERDATA/rtorrent
+					mv /root/.rtorrent.rc $G_FP_DIETPI_USERDATA/rtorrent/
+
+				fi
 
 				if grep -q '^aSOFTWARE_INSTALL_STATE\[45\]=2' /DietPi/dietpi/.installed &&
 					getent passwd deluge &> /dev/null; then # Only do this once, regardless of re-patches
@@ -1713,7 +1757,6 @@ NB: When accessing "deluge-console" you need to do that as user "debian-deluged"
 
 			fi
 			#-------------------------------------------------------------------------------
-
 
 		fi
 
