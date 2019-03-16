@@ -7747,7 +7747,7 @@ Redirect permanent /.well-known/caldav /owncloud/remote.php/dav' > /etc/apache2/
 				if [[ ! -f /etc/lighttpd/conf-enabled/99-dietpi-dav_redirect.conf ]]; then
 
 					echo '# Redirect Cal/CardDAV requests to ownCloud endpoint:
-url.redirect = (
+url.redirect += (
 	"^/.well-known/caldav"  => "/owncloud/remote.php/dav",
 	"^/.well-known/carddav" => "/owncloud/remote.php/dav"
 )' > /etc/lighttpd/conf-available/99-dietpi-dav_redirect.conf
@@ -7915,7 +7915,18 @@ _EOF_
 			# - Enable Redis socket and grant www-data access to it:
 			#	- NB: To allow wildcard expansion, do not use quotes around $redis_conf!
 			GCI_PRESERVE=1 G_CONFIG_INJECT 'unixsocket[[:blank:]]' 'unixsocket /var/run/redis/redis-server.sock' $redis_conf
-			G_CONFIG_INJECT 'unixsocketperm[[:blank:]]' 'unixsocketperm 770' $redis_conf
+			#	- Current Buster PHP7.3 Redis module cannot access Redis socket even with group + 770 permissions.
+			#	- Obviously group of spawned processes is overridden by only www-data while redis membership is lost.
+			#	- Requires secure solution, however for now we workaround with 777 socket permissions.
+			if (( $G_DISTRO > 4 )); then
+
+				G_CONFIG_INJECT 'unixsocketperm[[:blank:]]' 'unixsocketperm 777' $redis_conf
+
+			else
+
+				G_CONFIG_INJECT 'unixsocketperm[[:blank:]]' 'unixsocketperm 770' $redis_conf
+
+			fi
 			local redis_sock=$(grep -m1 '^[[:blank:]]*unixsocket[[:blank:]]' $redis_conf | mawk '{print $2}')
 			usermod -a -G redis www-data
 			G_RUN_CMD systemctl restart redis-server
@@ -8009,7 +8020,7 @@ Redirect permanent /.well-known/caldav /nextcloud/remote.php/dav' > /etc/apache2
 				if [[ ! -f /etc/lighttpd/conf-enabled/99-dietpi-dav_redirect.conf ]]; then
 
 					echo '# Redirect Cal/CardDAV requests to Nextcloud endpoint:
-url.redirect = (
+url.redirect += (
 	"^/.well-known/caldav"  => "/nextcloud/remote.php/dav",
 	"^/.well-known/carddav" => "/nextcloud/remote.php/dav"
 )' > /etc/lighttpd/conf-available/99-dietpi-dav_redirect.conf
@@ -8205,7 +8216,18 @@ The install script will now exit. After applying one of the the above, rerun die
 			# - Enable Redis socket and grant www-data access to it:
 			#	- NB: To allow wildcard expansion, do not use quotes around $redis_conf!
 			GCI_PRESERVE=1 G_CONFIG_INJECT 'unixsocket[[:blank:]]' 'unixsocket /var/run/redis/redis-server.sock' $redis_conf
-			G_CONFIG_INJECT 'unixsocketperm[[:blank:]]' 'unixsocketperm 770' $redis_conf
+			#	- Current Buster PHP7.3 Redis module cannot access Redis socket even with group + 770 permissions.
+			#	- Obviously group of spawned processes is overridden by only www-data while redis membership is lost.
+			#	- Requires secure solution, however for now we workaround with 777 socket permissions.
+			if (( $G_DISTRO > 4 )); then
+
+				G_CONFIG_INJECT 'unixsocketperm[[:blank:]]' 'unixsocketperm 777' $redis_conf
+
+			else
+
+				G_CONFIG_INJECT 'unixsocketperm[[:blank:]]' 'unixsocketperm 770' $redis_conf
+
+			fi
 			local redis_sock=$(grep -m1 '^[[:blank:]]*unixsocket[[:blank:]]' $redis_conf | mawk '{print $2}')
 			usermod -a -G redis www-data
 			G_RUN_CMD systemctl restart redis-server
@@ -8231,12 +8253,28 @@ The install script will now exit. After applying one of the the above, rerun die
 			Banner_Configuration
 
 			G_DIETPI-NOTIFY 2 'Configuring TURN server:'
-			# - Enable init.d service
-			G_CONFIG_INJECT 'TURNSERVER_ENABLED=' 'TURNSERVER_ENABLED=1' /etc/default/coturn
-			# - Disable coturn logging by default, this can be overridden via /etc/turnserver.conf
-			G_CONFIG_INJECT 'DAEMON_ARGS=' "DAEMON_ARGS='-c /etc/turnserver.conf -o -l stdout --no-stdout-log --simple-log'" /etc/default/coturn
+			# Buster (systemd unit)
+			if (( $G_DISTRO > 4 )); then
 
-			# - Ask user for server domain and desired TURN server port
+				# - Remove init.d service traces
+				[[ -f /etc/init.d/coturn ]] && rm /etc/init.d/coturn
+				[[ -f /etc/default/coturn ]] && rm /etc/default/coturn
+
+				# - Disable coturn logging by default, this can be overridden via /etc/turnserver.conf
+				mkdir -p /etc/systemd/system/coturn.service.d
+				echo -e "[Service]\nExecStart=\n$(grep -m1 "^[[:blank:]]*ExecStart=" /lib/systemd/system/coturn.service) -l stdout --no-stdout-log --simple-log" > /etc/systemd/system/coturn.service.d/dietpi-logging.conf
+
+			# Stretch/Jessie (init.d service)
+			else
+
+				# - Enable init.d service
+				G_CONFIG_INJECT 'TURNSERVER_ENABLED=' 'TURNSERVER_ENABLED=1' /etc/default/coturn
+				# - Disable coturn logging by default, this can be overridden via /etc/turnserver.conf
+				G_CONFIG_INJECT 'DAEMON_ARGS=' "DAEMON_ARGS='-c /etc/turnserver.conf -o -l stdout --no-stdout-log --simple-log'" /etc/default/coturn
+
+			fi
+
+			# Ask user for server domain and desired TURN server port
 			local invalid_text=''
 			local domain=$(hostname)
 			while :
@@ -8277,7 +8315,14 @@ NB: This port needs to be forwarded by your router and/or opened in your firewal
 
 			done
 
-			# - Adjust coturn settings
+			# Adjust coturn settings
+			# - On Buster by default /etc/turnserver.conf is not created. Use example or create empty file:
+			if [[ ! -f /etc/turnserver.conf ]]; then
+
+				> /etc/turnserver.conf
+				[[ -f /usr/share/doc/coturn/examples/etc/turnserver.conf.gz ]] && gzip -cd /usr/share/doc/coturn/examples/etc/turnserver.conf.gz > /etc/turnserver.conf
+
+			fi
 			G_CONFIG_INJECT 'fingerprint' 'fingerprint' /etc/turnserver.conf
 			G_CONFIG_INJECT 'use-auth-secret' 'use-auth-secret' /etc/turnserver.conf
 			G_CONFIG_INJECT 'realm=' "realm=$domain" /etc/turnserver.conf
@@ -8287,7 +8332,7 @@ NB: This port needs to be forwarded by your router and/or opened in your firewal
 			G_CONFIG_INJECT 'no-loopback-peers' 'no-loopback-peers' /etc/turnserver.conf
 			G_CONFIG_INJECT 'no-multicast-peers' 'no-multicast-peers' /etc/turnserver.conf
 
-			# - Add TLS settings, if LetsEncrypt certificates are available:
+			# Add TLS settings, if LetsEncrypt certificates are available:
 			if [[ -f /DietPi/dietpi/.dietpi-letsencrypt &&
 				-f /etc/letsencrypt/live/$(sed -n 1p /DietPi/dietpi/.dietpi-letsencrypt)/cert.pem ]]; then
 
@@ -8307,19 +8352,19 @@ NB: This port needs to be forwarded by your router and/or opened in your firewal
 
 			fi
 
-			# - Install Nextcloud Talk app
+			# Install Nextcloud Talk app
 			G_RUN_CMD systemctl start $MARIADB_SERVICE
 			G_RUN_CMD systemctl start redis-server
 			G_RUN_CMD ncc maintenance:mode --off
-			G_RUN_CMD ncc app:install spreed
+			[[ -d /var/www/nextcloud/apps/spreed ]] || G_RUN_CMD ncc app:install spreed
 			ncc app:enable spreed
 
-			# - Adjust Nextcloud Talk settings to use coturn
+			# Adjust Nextcloud Talk settings to use coturn
 			ncc config:app:set spreed stun_servers --value="[\"$domain:$port\"]"
-			#	Generate random secret to secure TURN server access
+			# - Generate random secret to secure TURN server access
 			local secret=$(openssl rand -hex 32)
 			GCI_PRESERVE=1 G_CONFIG_INJECT 'static-auth-secret=' "static-auth-secret=$secret" /etc/turnserver.conf
-			#	Scrape existing secret, in case user manually chose/edited it
+			# - Scrape existing secret, in case user manually chose/edited it
 			secret=$(grep -m1 '^[[:blank:]]*static-auth-secret=' /etc/turnserver.conf)
 			secret=${secret#*static-auth-secret=}
 			ncc config:app:set spreed turn_servers --value="[{\"server\":\"$domain:$port\",\"secret\":\"$secret\",\"protocols\":\"udp,tcp\"}]"
@@ -10611,7 +10656,7 @@ Redirect permanent /.well-known/caldav /baikal/html/dav.php' > /etc/apache2/conf
 			elif (( ${aSOFTWARE_INSTALL_STATE[84]} > 0 )); then
 
 				echo '# Redirect Cal/CardDAV requests to Baikal endpoint:
-url.redirect = (
+url.redirect += (
 	"^/.well-known/caldav"  => "/baikal/html/dav.php",
 	"^/.well-known/carddav" => "/baikal/html/dav.php"
 )' > /etc/lighttpd/conf-available/99-dietpi-dav_redirect.conf
@@ -12739,8 +12784,7 @@ _EOF_
 
 		fi
 
-		#ownCloud
-		software_id=47
+		software_id=47 # ownCloud
 		if (( ${aSOFTWARE_INSTALL_STATE[$software_id]} == -1 )); then
 
 			Banner_Uninstalling
@@ -12784,21 +12828,22 @@ _EOF_
 
 		fi
 
-		#Nextcloud Talk + TURN server "coturn"
-		software_id=168
+		software_id=168 # Nextcloud Talk + TURN server "coturn"
 		if (( ${aSOFTWARE_INSTALL_STATE[$software_id]} == -1 )); then
 
 			Banner_Uninstalling
 			G_AGP coturn
+			[[ -f /etc/turnserver.conf ]] && rm /etc/turnserver.conf
+			[[ -d /etc/systemd/system/coturn.service.d ]] && rm -R /etc/systemd/system/coturn.service.d
 			systemctl start $MARIADB_SERVICE
+			systemctl start redis-server
 			ncc maintenance:mode --off
 			ncc app:disable spreed
 			G_DIETPI-NOTIFY 2 'Disabled Nextcloud Talk app, but you need to remove it manually from Nextcloud web UI, if desired.'
 
 		fi
 
-		#Nextcloud
-		software_id=114
+		software_id=114 # Nextcloud
 		if (( ${aSOFTWARE_INSTALL_STATE[$software_id]} == -1 )); then
 
 			Banner_Uninstalling
