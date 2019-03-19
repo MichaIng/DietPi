@@ -5,13 +5,13 @@ $ip = isset($_SERVER['HTTP_CLIENT_IP']) ? $_SERVER['HTTP_CLIENT_IP'] : isset($_S
 if ($ip)
 {
 
-    echo $ip;
+	echo $ip;
 
 }
 else
 {
 
-	echo 'Obtain IP failed';
+	echo 'Failed to obtain IP';
 
 }
 
