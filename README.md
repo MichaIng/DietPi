@@ -41,7 +41,7 @@ Use `dietpi-software` to quickly and easily install popular software that's "Rea
 
 ### Lead
 
-**Micha (MichaIng)**
+#### Micha (MichaIng)
 
 Project lead of DietPi (20/02/2019 and onwards), source code contributor, bug fixes, software improvements, DietPi forum administrator.
 
@@ -169,30 +169,38 @@ along with this program.  If not, see https://www.gnu.org/licenses/
 ### DietPi Source
 
 - Source: https://github.com/MichaIng/DietPi
-- Build: Not applicable (as DietPi currently uses Bash scripts, no building or compiling is required).
+- Build: Not applicable, as DietPi uses Bash scripts only, no building or compiling is required.
 
 ### DietPi file list
 
 - All files located in (recursively):
-  - `/boot/dietpi/`
-  - `/DietPi/dietpi/`
+  - `/DietPi/`
   - `/var/lib/dietpi/`
   - `/var/tmp/dietpi/`
-- `/DietPi/dietpi.txt`
-- `/DietPi/config.txt` (RPi)
-- `/DietPi/boot.ini` (Odroid)
+  - `/boot/dietpi/`
+- `/boot/dietpi.txt`
+- `/boot/config.txt` (RPi)
+- `/boot/boot.ini` (Odroid)
 - All files prefixed with: `dietpi-`
 
 > The above GPLv2 documentation also applies to all mentioned files!
 
 ### Additional Software
 
-Links to additional software used in DietPi and their source and build instructions (where applicable):
+Links to additional software used in DietPi and their source and build instructions where applicable:
 
-- [Raspberry Pi](https://github.com/raspberrypi)
+- [Linux kernel](https://github.com/torvalds/linux)
+- [GNU operating sytem](https://www.gnu.org/)
+- [Debian distribution](https://salsa.debian.org/)
+- [Raspberry](https://github.com/raspberrypi) [Pi](https://github.com/RPi-Distro)
 - [Odroid](https://github.com/hardkernel?tab=repositories)
 - [FriendlyARM](https://github.com/friendlyarm?tab=repositories)
-- [LXDE](https://github.com/LXDE)
+- [X.Org-X-Server](https://www.x.org/archive//individual/)
+- [LXDE desktop](https://github.com/LXDE)
+- [Xfce desktop](https://git.xfce.org/)
+- [MATE desktop](https://github.com/mate-desktop)
+- [GNUstep](https://github.com/gnustep)
+- [Chromium](https://chromium.googlesource.com/chromium/src/)
 - [Kodi/XBMC](https://github.com/xbmc/xbmc)
 - [Transmission](https://transmissionbt.com/download/)
 - [Nextcloud](https://github.com/nextcloud/server)
