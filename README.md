@@ -41,19 +41,17 @@ Use `dietpi-software` to quickly and easily install popular software that's "Rea
 
 ### Lead
 
-**Daniel Knight (Fourdee)**
+#### Micha (MichaIng)
 
-Creator, programmer and project lead of DietPi.
+Project lead of DietPi (20/02/2019 and onwards), source code contributor, bug fixes, software improvements, DietPi forum administrator.
 
 ---
 
-### Current Contributors
+### Currently active contributors
 
-#### MichaIng
+#### Daniel Knight (Fourdee)
 
-_Joined Q3 2017_
-
-Source code contributor, bug fixes, software improvements, DietPi forum co-administrator.
+Project founder and previous project lead (19/02/2019 and previous), source code contributor and tester.
 
 #### JohnVick
 
@@ -82,7 +80,7 @@ DietPi forum moderator and version history maintainer on forums.
 _02/09/2016_
 
 Joint venture to bring you the ultimate Amiga experience on your SBC, running lightweight and optimised DietPi at its core:
-https://github.com/Fourdee/DietPi/issues/474
+https://github.com/MichaIng/DietPi/issues/474
 
 ---
 
@@ -122,9 +120,9 @@ A personal thanks to **Pilovali** for helping DietPi during our early days with 
 
 ## Contributing
 
-Git coders, please use the active development branch: [dev](https://github.com/Fourdee/DietPi/tree/dev)
+Git coders, please use the active development branch: [dev](https://github.com/MichaIng/DietPi/tree/dev)
 
-- [How to add new software installation options to DietPi-Software](https://github.com/Fourdee/DietPi/issues/490#issuecomment-244416570)
+- [How to add new software installation options to DietPi-Software](https://github.com/MichaIng/DietPi/issues/490#issuecomment-244416570)
 
 Are you able to:
 
@@ -140,13 +138,13 @@ We are always looking for talented people who believe in the DietPi project, and
 
 - Send me an Email: daniel.knight@dietpi.com
 - Join our forums: https://dietpi.com/phpbb
-- GitHub: https://github.com/Fourdee/DietPi
+- GitHub: https://github.com/MichaIng/DietPi
 
 ### FeatHub
 
 Vote for new suggestions, feature-, software- or image requests, or add your own to our new FeatHub page:
 
-[![Feature Requests](http://feathub.com/Fourdee/DietPi?format=svg)](http://feathub.com/Fourdee/DietPi)
+[![Feature Requests](http://feathub.com/MichaIng/DietPi?format=svg)](http://feathub.com/MichaIng/DietPi)
 
 ## License
 
@@ -170,31 +168,39 @@ along with this program.  If not, see https://www.gnu.org/licenses/
 
 ### DietPi Source
 
-- Source: https://github.com/Fourdee/DietPi
-- Build: Not applicable (as DietPi currently uses Bash scripts, no building or compiling is required).
+- Source: https://github.com/MichaIng/DietPi
+- Build: Not applicable, as DietPi uses Bash scripts only, no building or compiling is required.
 
 ### DietPi file list
 
 - All files located in (recursively):
-  - `/boot/dietpi/`
-  - `/DietPi/dietpi/`
+  - `/DietPi/`
   - `/var/lib/dietpi/`
   - `/var/tmp/dietpi/`
-- `/DietPi/dietpi.txt`
-- `/DietPi/config.txt` (RPi)
-- `/DietPi/boot.ini` (Odroid)
+  - `/boot/dietpi/`
+- `/boot/dietpi.txt`
+- `/boot/config.txt` (RPi)
+- `/boot/boot.ini` (Odroid)
 - All files prefixed with: `dietpi-`
 
 > The above GPLv2 documentation also applies to all mentioned files!
 
 ### Additional Software
 
-Links to additional software used in DietPi and their source and build instructions (where applicable):
+Links to additional software used in DietPi and their source and build instructions where applicable:
 
-- [Raspberry Pi](https://github.com/raspberrypi)
+- [Linux kernel](https://github.com/torvalds/linux)
+- [GNU operating sytem](https://www.gnu.org/)
+- [Debian distribution](https://salsa.debian.org/)
+- [Raspberry](https://github.com/raspberrypi) [Pi](https://github.com/RPi-Distro)
 - [Odroid](https://github.com/hardkernel?tab=repositories)
 - [FriendlyARM](https://github.com/friendlyarm?tab=repositories)
-- [LXDE](https://github.com/LXDE)
+- [X.Org-X-Server](https://www.x.org/archive//individual/)
+- [LXDE desktop](https://github.com/LXDE)
+- [Xfce desktop](https://git.xfce.org/)
+- [MATE desktop](https://github.com/mate-desktop)
+- [GNUstep](https://github.com/gnustep)
+- [Chromium](https://chromium.googlesource.com/chromium/src/)
 - [Kodi/XBMC](https://github.com/xbmc/xbmc)
 - [Transmission](https://transmissionbt.com/download/)
 - [Nextcloud](https://github.com/nextcloud/server)
@@ -213,7 +219,7 @@ Links to additional software used in DietPi and their source and build instructi
 - [RetroPie Setup Script](https://github.com/petrockblog/RetroPie-Setup)
 - [PiVPN VPN Server](https://github.com/pivpn/pivpn)
 - [OpenTyrian](https://bitbucket.org/opentyrian/opentyrian/wiki/Home)
-- [DietPiCam](https://github.com/Fourdee/RPi_Cam_Web_Interface)
+- [DietPiCam](https://github.com/MichaIng/RPi_Cam_Web_Interface)
 - [PHP OPcache GUI](https://github.com/amnuts/opcache-gui)
 - [Nginx](https://hg.nginx.org/nginx/)
 - [Lighttpd](https://redmine.lighttpd.net/projects/lighttpd/repository)
