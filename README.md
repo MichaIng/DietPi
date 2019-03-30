@@ -144,7 +144,7 @@ We are always looking for talented people who believe in the DietPi project, and
 
 Vote for new suggestions, feature-, software- or image requests, or add your own to our new FeatHub page:
 
-[![Feature Requests](http://feathub.com/MichaIng/DietPi?format=svg)](http://feathub.com/MichaIng/DietPi)
+[![Feature Requests](https://feathub.com/MichaIng/DietPi?format=svg)](https://feathub.com/MichaIng/DietPi)
 
 ## License
 
