@@ -37,24 +37,9 @@
 	FP_PREP_SCRIPT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/$(basename "${BASH_SOURCE[0]}")"
 	cd /tmp
 
-	# Prefer IPv4 by default, to avoid hanging access attempts in some cases
+	# APT: Prefer IPv4 by default to avoid hanging access attempts in some cases
 	# - NB: This needs to match the method in: /DietPi/dietpi/func/dietpi-set_hardware preferipv4 enable
-	# - APT
 	echo 'Acquire::ForceIPv4 "true";' > /etc/apt/apt.conf.d/99-dietpi-force-ipv4
-	# - Wget
-	if grep -q '^[[:blank:]]*prefer-family[[:blank:]]*=' /etc/wgetrc; then
-
- 		sed -i '/^[[:blank:]]*prefer-family[[:blank:]]*=/c\prefer-family = IPv4' /etc/wgetrc
-
- 	elif grep -q '^[[:blank:]#;]*prefer-family[[:blank:]]*=' /etc/wgetrc; then
-
- 		sed -i '/^[[:blank:]#;]*prefer-family[[:blank:]]*=/c\prefer-family = IPv4' /etc/wgetrc
-
- 	else
-
- 		echo 'prefer-family = IPv4' >> /etc/wgetrc
-
- 	fi
 
 	# Check/install minimal APT Pre-Reqs
 	a_MIN_APT_PREREQS=(
@@ -88,8 +73,23 @@
 		fi
 
 	done
-
 	unset a_MIN_APT_PREREQS
+
+	# Wget: Prefer IPv4 by default to avoid hanging access attempts in some cases
+	# - NB: This needs to match the method in: /DietPi/dietpi/func/dietpi-set_hardware preferipv4 enable
+	if grep -q '^[[:blank:]]*prefer-family[[:blank:]]*=' /etc/wgetrc; then
+
+ 		sed -i '/^[[:blank:]]*prefer-family[[:blank:]]*=/c\prefer-family = IPv4' /etc/wgetrc
+
+ 	elif grep -q '^[[:blank:]#;]*prefer-family[[:blank:]]*=' /etc/wgetrc; then
+
+ 		sed -i '/^[[:blank:]#;]*prefer-family[[:blank:]]*=/c\prefer-family = IPv4' /etc/wgetrc
+
+ 	else
+
+ 		echo 'prefer-family = IPv4' >> /etc/wgetrc
+
+ 	fi
 
 	# Setup locale
 	# - Remove existing settings that could break dpkg-reconfigure locales
