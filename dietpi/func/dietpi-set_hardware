@@ -899,7 +899,7 @@ _EOF_
 		sed -i '/^[[:blank:]]*spi_s3c64xx/d' /etc/modules
 		sed -i '/^[[:blank:]]*fbtft_device/d' /etc/modules
 
-		##Cant run it on the fly, locks up device.
+		# Cant run it on the fly, locks up device.
 		#root@DietPi-XU4:~# modprobe -rf spi_s3c64xx
 		#root@DietPi-XU4:~# modprobe -rf fbtft_device
 		#Segmentation fault
@@ -1473,8 +1473,8 @@ Do you want to continue and disable the serial login console?'; then
 			# Enable for specific Serial/UART device
 			if [[ $INPUT_ADDITIONAL ]]; then
 
-				# - RPi: Warn if ttyAMA0 is about to be enabled while Bluetooth is up
-				if (( $G_HW_MODEL < 10 )) && systemctl -q is-active hciuart; then
+				# - RPi: Warn if on RPi ttyAMA0 is about to be enabled while Bluetooth is up
+				if [[ $G_HW_MODEL == [0-9] && $INPUT_ADDITIONAL == 'ttyAMA0' ]] && systemctl -q is-active hciuart; then
 
 					if G_WHIP_YESNO '[WARNING] ttyAMA0 is currently used by Bluetooth\n
 Do you want to continue and DISABLE Bluetooth now?'; then
@@ -1507,18 +1507,44 @@ Do you want to continue and DISABLE Bluetooth now?'; then
 				# - Odroid C1/C2
 				elif (( $G_HW_MODEL == 10 || $G_HW_MODEL == 12 )); then
 
-					G_CONFIG_INJECT 'setenv condev[[:blank:]]' "setenv condev \"console=tty0 console=$INPUT_ADDITIONAL,115200n8\"" /DietPi/boot.ini
+					local old=''
+					[[ -f /DietPi/boot.ini ]] && old=$(grep -m1 '^setenv condev "' /DietPi/boot.ini) || return
+					[[ $old =~ console=$INPUT_ADDITIONAL ]] && return
+					old=$(cut -d \" -f 2 <<< "$old")
+					G_CONFIG_INJECT 'setenv condev "' "setenv condev \"$old console=$INPUT_ADDITIONAL,115200n8\"" /DietPi/boot.ini
 
 				# - Odroid XU4
 				elif (( $G_HW_MODEL == 11 )); then
 
-					grep -q "console=$INPUT_ADDITIONAL" /DietPi/boot.ini || sed -i "s/console=tty1/console=tty1 console=$INPUT_ADDITIONAL,115200n8/" /DietPi/boot.ini
+					local old=''
+					[[ -f /DietPi/boot.ini ]] && old=$(grep -m1 '^setenv bootrootfs "' /DietPi/boot.ini) || return
+					[[ $old =~ console=$INPUT_ADDITIONAL ]] && return
+					old=$(cut -d \" -f 2 <<< "$old")
+					G_CONFIG_INJECT 'setenv bootrootfs "' "setenv bootrootfs \"$old console=$INPUT_ADDITIONAL,115200n8\"" /DietPi/boot.ini
 
-				
+				# - ARMbian: armbianEnv.txt only allows to toggle a fixed serial console depending on device
+				elif (( $ARMBIAN )); then
+
+					grep -q "console=$INPUT_ADDITIONAL" /boot/boot.cmd || return
+					if grep -qE 'console=(display|both)' $FP_UENV; then
+
+						G_CONFIG_INJECT 'console=' 'console=both' $FP_UENV
+
+					else
+
+						G_CONFIG_INJECT 'console=' 'console=serial' $FP_UENV
+
+					fi
+
 				# - Pine A64: On ARMbian ttyS0 boot output is forced and custom console is not possible via armbianEnv.txt
-				elif (( $G_HW_MODEL == 40 && ! $ARMBIAN )); then
+				elif (( $G_HW_MODEL == 40 )); then
 
-					grep -q "console=$INPUT_ADDITIONAL" $FP_UENV || sed -i "s/console=tty0/console=tty0 console=$INPUT_ADDITIONAL,115200n8/" $FP_UENV
+					[[ ! -f $FP_UENV ]] || grep -q "console=$INPUT_ADDITIONAL" $FP_UENV && return
+					echo "console=$INPUT_ADDITIONAL,115200n8" >> $FP_UENV
+
+				#elif (( $G_HW_MODEL == 70 )); then
+
+				#	grep -q "console=$INPUT_ADDITIONAL" $FP_UENV || sed -i "/bootargs=/s/$/ console=$INPUT_ADDITIONAL,115200n8/" $FP_UENV
 
 				fi
 
@@ -1528,7 +1554,7 @@ Do you want to continue and DISABLE Bluetooth now?'; then
 				# ttyFIQ[0-9]: https://github.com/MichaIng/DietPi/issues/1829#issuecomment-398302497
 				for i in /dev/tty{S,AMA,SAC}[0-9]
 				do
-		
+
 					[[ -e $i ]] || continue
 					INPUT_ADDITIONAL=${i/\/dev\/} Serial_Main
 
@@ -1552,29 +1578,42 @@ Do you want to continue and DISABLE Bluetooth now?'; then
 				G_DIETPI-NOTIFY 2 "Disabling serial-getty on: /dev/$INPUT_ADDITIONAL"
 				systemctl stop serial-getty@$INPUT_ADDITIONAL
 				systemctl disable serial-getty@$INPUT_ADDITIONAL
-				systemctl mask serial-getty@$INPUT_ADDITIONAL
+				# - Place a mask only if device exists
+				[[ -e /dev/$INPUT_ADDITIONAL ]] && systemctl mask serial-getty@$INPUT_ADDITIONAL
 
 				# Disable boot messages depending on device
 				# - RPi
 				if (( $G_HW_MODEL < 10 )); then
 
-					sed -i "s/[[:blank:]]console=$INPUT_ADDITIONAL,115200//" /boot/cmdline.txt
+					sed -i "s/[[:blank:]]*console=$INPUT_ADDITIONAL[^\"[:blank:]]*//" /boot/cmdline.txt
 
-				# - Odroid C1/C2
-				elif (( $G_HW_MODEL == 10 || $G_HW_MODEL == 12 )); then
+				# - Odroid C1/C2/XU4
+				elif (( $G_HW_MODEL < 12 )); then
 
-					G_CONFIG_INJECT 'setenv condev[[:blank:]]' 'setenv condev "console=tty0"' /DietPi/boot.ini
+					sed -i "s/[[:blank:]]*console=$INPUT_ADDITIONAL[^\"[:blank:]]*//" /DietPi/boot.ini
 
-				# - Odroid XU4
-				elif (( $G_HW_MODEL == 11 )); then
+				elif (( $ARMBIAN )); then
 
-					sed -i "s/[[:blank:]]console=$INPUT_ADDITIONAL,115200n8//" /DietPi/boot.ini
+					grep -q "console=$INPUT_ADDITIONAL" /boot/boot.cmd || return
+					if grep -qE 'console=(display|both)' $FP_UENV; then
 
-				
+						G_CONFIG_INJECT 'console=' 'console=display' $FP_UENV
+
+					else
+
+						G_CONFIG_INJECT 'console=' 'console=none' $FP_UENV
+
+					fi
+
 				# - Pine A64: On ARMbian ttyS0 boot output is forced and custom console is not possible via armbianEnv.txt
-				elif (( $G_HW_MODEL == 40 && ! $ARMBIAN )); then
+				elif (( $G_HW_MODEL == 40 )); then
 
-					sed -i "s/[[:blank:]]console=$INPUT_ADDITIONAL,115200n8//" $FP_UENV
+					sed -i "/^[[:blank:]]*console=$INPUT_ADDITIONAL[^\"[:blank:]]*$/d" $FP_UENV # New style: One variable each line
+					sed -i "s/[[:blank:]]*console=$INPUT_ADDITIONAL[^\"[:blank:]]*//" $FP_UENV # Old style: Multiple variables possible each line
+
+				#elif (( $G_HW_MODEL == 70 )); then
+
+				#	sed -i "s/[[:blank:]]*console=$INPUT_ADDITIONAL[^\"[:blank:]]*//" $FP_UENV
 
 				fi
 
@@ -1584,7 +1623,7 @@ Do you want to continue and DISABLE Bluetooth now?'; then
 				# ttyFIQ[0-9]: https://github.com/MichaIng/DietPi/issues/1829#issuecomment-398302497
 				for i in /dev/tty{S,AMA,SAC}[0-9]
 				do
-		
+
 					[[ -e $i ]] || continue
 					INPUT_ADDITIONAL=${i/\/dev\/} Serial_Main
 
