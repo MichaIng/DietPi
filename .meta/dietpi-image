@@ -1,0 +1,137 @@
+#!/bin/bash
+{
+	#////////////////////////////////////
+	# DietPi Image creation/finalise Script
+	#
+	#////////////////////////////////////
+	# Created by Daniel Knight / daniel.knight@dietpi.com / dietpi.com
+	# Updated by MichaIng / micha@dietpi.com / dietpi.com
+	#
+	#////////////////////////////////////
+	#
+	# Usage:
+	# - ./dietpi-image <source> <name> <root_partition> [GPT]
+	#	source: /dev/* | *.img
+	#	name: DietPi_<device>-<arch>-<distro>
+	#		device: RPi | OdroidXU4 | NativePC-BIOS | ...
+	#		arch: ARMv6 | ARMv7 | ARMv8 | x86_64
+	#		distro: Stretch | Buster
+	#	root_partition: 0 | 1 | 2 | ... ("0" means no partition table)
+	#	"GPT": Required to correctly handle GPT partition tables
+	#////////////////////////////////////
+
+	# Grab input
+	SOURCE=$1
+	NAME=$2
+	ROOT=$3
+	[[ $4 == GPT ]] && GPT=1 || GPT=0
+
+	# Check source
+	SOURCE_IS_FILE=1
+	if [[ $SOURCE == /dev/* ]]; then
+
+		SOURCE_IS_FILE=0
+		[[ -b $SOURCE ]] || { echo "ERROR: Source block device ($SOURCE) does not exist"; exit 1; }
+
+	else
+
+		[[ -f $SOURCE ]] || { echo "ERROR: Source image file ($SOURCE) does not exist"; exit 1; }
+
+	fi
+
+	apt-get -y install gparted gdisk gpart dosfstools zerofree p7zip
+
+	# GPT images (RockPro64) after reading the image AND again after shrinking
+	# To fix:
+	# - GPT PMBR size mismatch (4458495 != 15523839) will be corrected by w(rite).
+	# - 15523806
+	# RUN
+	# - gdisk "$IMAGE_FP/$IMAGE_NAME"
+	#	w | y
+	(( $GPT )) && gdisk $SOURCE
+
+	# Attach .img file to loop device
+	if (( $SOURCE_IS_FILE )); then
+
+		modprobe loop
+		SOURCE_FILE=$SOURCE
+		SOURCE=$(losetup -f)
+		losetup $SOURCE "$SOURCE_FILE"
+		partprobe $SOURCE
+
+	fi
+
+	# Estimate root partition dev
+	ROOT_DEV=$SOURCE
+	if [[ $ROOT != 0 ]]; then
+
+		[[ $SOURCE =~ /mmcblk || $SOURCE =~ /nvme || $SOURCE =~ /loop ]] && ROOT_DEV="${SOURCE}p${ROOT}"
+		[[ $SOURCE =~ /[sh]d[a-z] ]] && ROOT_DEV="${SOURCE}${ROOT}"
+
+	fi
+
+	# Fsck
+	e2fsck -f $ROOT_DEV
+
+	# Run the shrinking multiple times as the size can be reduced every time a bid more
+	for i in {0..2}
+	do
+
+		# Shrink root file system to minimum size
+		resize2fs -M $ROOT_DEV
+		read -p 'The minimum file system size above is as well the minimum for gparted, besides gparted shows a larger minimum already.
+Press CTRL+C to exit, else gparted will now start to allow partition resizing'
+
+		# gparted to resize boot partition to minimum
+		gparted $SOURCE
+		read -p 'If failed press CTRL+C to exit and prevent further action, else, press any key to continue...'
+
+		sync
+
+		# Override free space with zeros to purge removed data and allow further image/archive size reduction
+		zerofree -v $ROOT_DEV
+
+	done
+
+	# GPT images (RockPro64) after reading the image AND again after shrinking
+	# To fix:
+	# - GPT PMBR size mismatch (4458495 != 15523839) will be corrected by w(rite).
+	# - 15523806
+	# RUN
+	# - gdisk "$IMAGE_FP/$IMAGE_NAME"
+	#	w | y
+	(( $GPT )) && gdisk $SOURCE
+
+	# Estimate used size
+	# - Without partition table, the whole raw disk space needs to be cloned
+	if [[ $ROOT == 0 ]]; then
+
+		SIZE=$(lsblk -o SIZE --bytes $SOURCE)
+
+	else
+
+		# 64 bytes for secondary GPT + safety net
+		SIZE=$(( ( $(fdisk -l -o End $SOURCE | tail -1) + 1 ) * 512 ))
+
+	fi
+	SIZE=$(( $SIZE + 512*256 )) 
+
+	# If source is an image file, truncate to used size
+	if (( $SOURCE_IS_FILE )); then
+
+		umount $SOURCE
+		truncate --size=$SIZE "$SOURCE_FILE"
+
+	# else create .img file from block device source via dd, stopping at block count that matches used size
+	else
+
+		dd if=$SOURCE of=/root/$NAME.img bs=1M status=progress count=$(( $SIZE / 1024 / 1024 + 1 ))
+		read -p "Image file created: /root/$NAME.img"
+		umount $SOURCE
+
+	fi
+
+	#-----------------------------------------------------------------------------------
+	exit
+	#-----------------------------------------------------------------------------------
+}
