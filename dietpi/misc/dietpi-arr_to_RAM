@@ -13,121 +13,138 @@
 	# - Moves arr program database files to RAM (/tmp) with symlink, and, back to disk
 	#
 	# Usage:
-	# - dietpi-arr_to_RAM 1			= Move to RAM
-	# - dietpi-arr_to_RAM 0			= Move to Disk
+	# - dietpi-arr_to_RAM 1		= Link to RAM
+	# - dietpi-arr_to_RAM 0		= Store to disk
 	#////////////////////////////////////
 
-	#Import DietPi-Globals ---------------------------------------------------------------
+	# Import DietPi-Globals --------------------------------------------------------------
 	. /DietPi/dietpi/func/dietpi-globals
 	G_PROGRAM_NAME='DietPi-Arr_to_RAM'
-	G_INIT
 	G_CHECK_ROOT_USER
-	#Import DietPi-Globals ---------------------------------------------------------------
+	G_INIT
+	# Import DietPi-Globals --------------------------------------------------------------
 
-	INPUT=$1
-	if [[ ! $INPUT ]]; then
+	[[ $INPUT ]] && INPUT=$1 || exit 1
 
-		exit 1
+	declare -A aFP_FILES=()
+	# - Sonarr/Radarr: Both use the same file names
+	aFP_FILES[sonarr]='nzbdrone.db nzbdrone.db-shm nzbdrone.db-wal'
+	aFP_FILES[radarr]='nzbdrone.db nzbdrone.db-shm nzbdrone.db-wal'
+	# - Lidarr
+	aFP_FILES[lidarr]='lidarr.db lidarr.db-shm lidarr.db-wal'
 
-	fi
+	FP_DISK=''
+	FP_RAM=''
 
-	aFP_FILES=(
+	Link_To_Ram(){
 
-		'nzbdrone.db'
-		'nzbdrone.db-shm'
-		'nzbdrone.db-wal'
-
-		# - Lidarr
-		'lidarr.db'
-		'lidarr.db-shm'
-		'lidarr.db-wal'
-
-	)
-
-	aFP_PROGRAM=(
-
-		'sonarr'
-		'radarr'
-		'lidarr'
-
-	)
-
-	FP_SOURCE=''
-	FP_TARGET=''
-
-	Copy_To_Ram(){
-
-		G_ERROR_HANDLER_INFO_ONLY=1 G_RUN_CMD cp $FP_SOURCE ${FP_SOURCE}.bak
-		G_ERROR_HANDLER_INFO_ONLY=1 G_RUN_CMD cp $FP_SOURCE $FP_TARGET
-		G_ERROR_HANDLER_INFO_ONLY=1 G_RUN_CMD rm $FP_SOURCE
-		G_ERROR_HANDLER_INFO_ONLY=1 G_RUN_CMD ln -sf $FP_TARGET $FP_SOURCE
+		[[ $G_DEBUG == 1 ]] && G_DIETPI-NOTIFY 2 "Linking $FP_DISK to RAM ($FP_RAM)..."
+		G_ERROR_HANDLER_INFO_ONLY=1 G_RUN_CMD cp -a $FP_DISK $FP_RAM
+		G_ERROR_HANDLER_INFO_ONLY=1 G_RUN_CMD mv $FP_DISK ${FP_DISK}.bak
+		G_ERROR_HANDLER_INFO_ONLY=1 G_RUN_CMD ln -s $FP_RAM $FP_DISK
+		# - Failsafe: chown fully to program run user since nothing else ever needs or should access these databases directly
+		chown -R ${i}:${i} $FP_RAM
 
 	}
 
-	for i in ${!aFP_PROGRAM[@]}
+	for i in ${!aFP_FILES[@]}
 	do
 
-		systemctl stop ${aFP_PROGRAM[$i]}
+		FP_DISK="$G_FP_DIETPI_USERDATA/$i"
+		FP_RAM="/tmp/${i}_db_link"
 
-		for j in ${!aFP_FILES[@]}
-		do
+		# Skip non-installed program
+		[[ -d $FP_DISK ]] || continue
 
-			FP_SOURCE="$G_FP_DIETPI_USERDATA/${aFP_PROGRAM[$i]}/${aFP_FILES[$j]}"
-			FP_TARGET="/tmp/${aFP_PROGRAM[$i]}/${aFP_FILES[$j]}"
+		G_DIETPI-NOTIFY 2 "${i^} detected"
 
-			# - Copy to RAM + backup
-			if (( $INPUT == 1 )); then
+		# If active, stop program before handling database and restart afterwards
+		handle_service=0
+		if pgrep $i &> /dev/null; then
 
-				if [[ ! -d /tmp/${aFP_PROGRAM[$i]} ]]; then
+			handle_service=1
+			G_RUN_CMD systemctl stop $i
 
-					G_RUN_CMD mkdir -p /tmp/${aFP_PROGRAM[$i]}
+		fi			
 
-				fi
+		# Link to RAM + backup
+		if (( $INPUT == 1 )); then
 
-				if [[ -f $FP_TARGET ]]; then
+			# - Pre-create target dir
+			[[ -d $FP_RAM ]] || G_RUN_CMD mkdir -p $FP_RAM
 
-					G_DIETPI-NOTIFY 2 "$FP_SOURCE already at location ($FP_TARGET)"
+			for j in ${aFP_FILES[$i]}
+			do
 
-				elif [[ ! -L $FP_SOURCE && -f $FP_SOURCE ]]; then
+				FP_DISK="$FP_DISK/$j"
+				FP_RAM="$FP_RAM/$j"
 
-					Copy_To_Ram
+				# - Source exists and is no symlink, expected situation
+				if [[ -f $FP_DISK && ! -L $FP_DISK ]]; then
 
-				# - recover + copy to RAM
-				elif [[ -f ${FP_SOURCE}.bak ]]; then
+					Link_To_Ram
 
-					rm $FP_SOURCE &> /dev/null
+				# - Link + target exists, should only happen when running the script two times in same session
+				elif [[ -L $FP_DISK ]] && fp_target=$(readlink -e $FP_DISK); then
 
-					G_ERROR_HANDLER_INFO_ONLY=1 G_RUN_CMD cp ${FP_SOURCE}.bak $FP_SOURCE
-					Copy_To_Ram
+					if [[ $fp_target == $FP_RAM ]]; then
 
-				fi
+						G_DIETPI-NOTIFY 2 "$FP_DISK already linked to RAM ($FP_RAM), skipping this file..."
 
-				systemctl start ${aFP_PROGRAM[$i]}
+					# - Failsafe: Restore file from wrong symlink, should never occur but required for this script to function
+					else
 
-			# - Save to disk
-			elif (( $INPUT == 0 )); then
+						G_DIETPI-NOTIFY 2 "$FP_DISK is already linked to $fp_target, restoring original file location before linking to RAM"
+						G_RUN_CMD rm $FP_DISK
+						G_RUN_CMD mv $fp_target $FP_DISK
+						Link_To_Ram
 
-				if [[ ! -f $FP_TARGET ]]; then
+					fi
 
-					G_DIETPI-NOTIFY 2 "$FP_TARGET does not exist."
+				# - Source does not exist or is orphaned link, should only happen after crash
+				elif [[ -f ${FP_DISK}.bak ]]; then
+
+					G_DIETPI-NOTIFY 2 "$FP_DISK not found, recovering from backup first (${FP_DISK}.bak)..."
+					# - Remove possible obsolete symlink
+					[[ -L $FP_DISK ]] && rm $FP_DISK
+					# - Recover from backup
+					G_ERROR_HANDLER_INFO_ONLY=1 G_RUN_CMD mv ${FP_DISK}.bak $FP_DISK
+					Link_To_Ram
 
 				else
 
-					G_ERROR_HANDLER_INFO_ONLY=1 G_RUN_CMD rm $FP_SOURCE
-					G_ERROR_HANDLER_INFO_ONLY=1 G_RUN_CMD cp $FP_TARGET $FP_SOURCE
-					G_ERROR_HANDLER_INFO_ONLY=1 G_RUN_CMD rm $FP_TARGET
+					G_DIETPI-NOTIFY 2 "$FP_DISK not found, skipping this file..."
 
 				fi
 
+			done
+
+			# - Restart program if we stopped it before
+			(( $handle_service )) && systemctl start $i
+
+		# Store to disk
+		elif (( $INPUT == 0 )); then
+
+			if [[ -f $FP_RAM ]]; then
+
+				# - "-u" will only copy newer files, thus actually used by program.
+				# - "--remove-destination" will remove expected existing symlinks.
+				G_ERROR_HANDLER_INFO_ONLY=1 G_RUN_CMD cp -au --remove-destination $FP_RAM/. $FP_DISK
+				G_ERROR_HANDLER_INFO_ONLY=1 G_RUN_CMD rm -R $FP_RAM
+
+			else
+
+				G_DIETPI-NOTIFY 2 "$FP_RAM not found, skipping this program..."
+
 			fi
 
-			chown -R ${aFP_PROGRAM[$i]}:dietpi $FP_TARGET $FP_SOURCE &> /dev/null
+			# - Failsafe: chown fully to program run user since nothing else ever needs or should access these databases directly
+			chown -R ${i}:${i} $FP_DISK
+			# - Failsafe: Sync to disk now
+			sync
 
-		done
+		fi
 
 	done
-
-	unset aFP_FILES
-	unset aFP_PROGRAM
 
 }
