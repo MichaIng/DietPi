@@ -13,140 +13,238 @@
 	# - Moves arr program database files to RAM (/tmp) with symlink, and, back to disk
 	#
 	# Usage:
-	# - dietpi-arr_to_RAM 1		= Link to RAM
-	# - dietpi-arr_to_RAM 0		= Store to disk
+	# - /DietPi/dietpi/misc/dietpi-arr_to_RAM 1		= Link to RAM
+	# - /DietPi/dietpi/misc/dietpi-arr_to_RAM 0		= Store to disk
+	# - /DietPi/dietpi/misc/dietpi-arr_to_RAM enable	= Enable Link to RAM on boot
+	# - /DietPi/dietpi/misc/dietpi-arr_to_RAM disable	= Disable Link to RAM on boot
 	#////////////////////////////////////
 
 	# Import DietPi-Globals --------------------------------------------------------------
-	. /DietPi/dietpi/func/dietpi-globals
-	G_PROGRAM_NAME='DietPi-Arr_to_RAM'
-	G_CHECK_ROOT_USER
-	G_INIT
+	#. /DietPi/dietpi/func/dietpi-globals	# Skip globals for faster execution on early boot stage
+	PROGRAM_NAME='DietPi-Arr_to_RAM'
 	# Import DietPi-Globals --------------------------------------------------------------
 
-	[[ $1 ]] && INPUT=$1 || exit 1
+	# Print output
+	# - In case of error, sets EXIT_CODE as well
+	unset error
+	Print(){
 
-	declare -A aFP_FILES=()
+		local message=$@
+		[[ $error ]] && { message="[ERROR] $message"; EXIT_CODE=$error; }
+		unset error
+		echo "$(date) | $PROGRAM_NAME: $message"
+
+	}
+
+	# Check for required root permissions
+	(( $UID )) && { error=1 Print "This script must run with root privileges. Please use: \"sudo\""; exit 1 }
+
+	# Grab input
+	[[ $1 ]] && INPUT=$1
+
+	EXIT_CODE=0
+
+	# Boot service log file
+	FP_LOG='/var/tmp/dietpi/logs/dietpi-arr_to_RAM.log'
+
+	# Program files array
+	declare -A aFILES=()
 	# - Sonarr/Radarr: Both use the same file names
-	aFP_FILES[sonarr]='nzbdrone.db nzbdrone.db-shm nzbdrone.db-wal'
-	aFP_FILES[radarr]='nzbdrone.db nzbdrone.db-shm nzbdrone.db-wal'
+	aFILES[sonarr]='nzbdrone.db nzbdrone.db-shm nzbdrone.db-wal'
+	aFILES[radarr]='nzbdrone.db nzbdrone.db-shm nzbdrone.db-wal'
 	# - Lidarr
-	aFP_FILES[lidarr]='lidarr.db lidarr.db-shm lidarr.db-wal'
+	aFILES[lidarr]='lidarr.db lidarr.db-shm lidarr.db-wal'
 
 	FP_DISK=''
 	FP_RAM=''
 
 	Link_To_Ram(){
 
-		[[ $G_DEBUG == 1 ]] && G_DIETPI-NOTIFY 2 "Linking $FP_DISK to RAM ($FP_RAM)..."
-		G_ERROR_HANDLER_INFO_ONLY=1 G_RUN_CMD mv $FP_DISK ${FP_DISK}.bak
-		G_ERROR_HANDLER_INFO_ONLY=1 G_RUN_CMD ln -s $FP_RAM $FP_DISK
-		G_ERROR_HANDLER_INFO_ONLY=1 G_RUN_CMD cp -a --no-preserve=timestamps ${FP_DISK}.bak $FP_RAM
+		Print "Linking $FP_DISK to RAM ($FP_RAM)..."
+		mv $FP_DISK ${FP_DISK}.bak || { error=$? Print "Creating backup failed for $FP_DISK. Skipping this file..."; return; }
+		ln -s $FP_RAM $FP_DISK || EXIT_CODE=$?
+		cp -a --no-preserve=timestamps ${FP_DISK}.bak $FP_RAM || EXIT_CODE=$?
 		# - Failsafe: chown fully to program run user since nothing else ever needs or should access these databases directly
 		chown -R ${i}:${i} $FP_RAM
 
 	}
 
-	for i in ${!aFP_FILES[@]}
-	do
+	Toggle_Link_To_Ram(){
 
-		FP_DISK="$G_FP_DIETPI_USERDATA/$i"
-		FP_RAM="/tmp/${i}_db_link"
+		for i in ${!aFILES[@]}
+		do
 
-		# Skip non-installed program
-		[[ -d $FP_DISK ]] || continue
+			FP_DISK="$G_FP_DIETPI_USERDATA/$i"
+			FP_RAM="/tmp/${i}_db_link"
 
-		G_DIETPI-NOTIFY 2 "${i^} detected"
+			# Skip non-installed program
+			[[ -d $FP_DISK ]] || continue
 
-		# If active, stop program before handling database and restart afterwards
-		handle_service=0
-		if pgrep -f $i &> /dev/null; then
+			Print "${i^} detected"
 
-			handle_service=1
-			G_RUN_CMD systemctl stop $i
+			# If active, stop program before handling database and restart afterwards
+			local handle_service=0
+			if pgrep -f $i &> /dev/null; then
 
-		fi
-
-		# Link to RAM + backup
-		if (( $INPUT == 1 )); then
-
-			# - Pre-create target dir
-			[[ -d $FP_RAM ]] || G_RUN_CMD mkdir -p $FP_RAM
-
-			for j in ${aFP_FILES[$i]}
-			do
-
-				FP_DISK="$G_FP_DIETPI_USERDATA/$i/$j"
-				FP_RAM="/tmp/${i}_db_link/$j"
-
-				# - Source exists and is no symlink, expected situation
-				if [[ -f $FP_DISK && ! -L $FP_DISK ]]; then
-
-					Link_To_Ram
-
-				# - Link + target exists, should only happen when running the script two times in same session
-				elif [[ -L $FP_DISK ]] && fp_target=$(readlink -e $FP_DISK); then
-
-					if [[ $fp_target == $FP_RAM ]]; then
-
-						G_DIETPI-NOTIFY 2 "$FP_DISK already linked to RAM ($FP_RAM), skipping this file..."
-
-					# - Failsafe: Restore file from wrong symlink, should never occur but required for this script to function
-					else
-
-						G_DIETPI-NOTIFY 2 "$FP_DISK is already linked to $fp_target, restoring original file location before linking to RAM"
-						G_RUN_CMD rm $FP_DISK
-						G_RUN_CMD mv $fp_target $FP_DISK
-						Link_To_Ram
-
-					fi
-
-				# - Source does not exist or is orphaned link, should only happen after crash
-				elif [[ -f ${FP_DISK}.bak ]]; then
-
-					G_DIETPI-NOTIFY 2 "$FP_DISK not found, recovering from backup first (${FP_DISK}.bak)..."
-					# - Remove possible obsolete symlink
-					[[ -L $FP_DISK ]] && rm $FP_DISK
-					# - Recover from backup
-					G_ERROR_HANDLER_INFO_ONLY=1 G_RUN_CMD mv ${FP_DISK}.bak $FP_DISK
-					Link_To_Ram
-
-				else
-
-					G_DIETPI-NOTIFY 2 "$FP_DISK not found, skipping this file..."
-
-				fi
-
-			done
-
-			# - Restart program if we stopped it before
-			(( $handle_service )) && systemctl start $i
-
-		# Store to disk
-		elif (( $INPUT == 0 )); then
-
-			if [[ -d $FP_RAM ]]; then
-
-				# - "-u" will only copy newer files, thus actually used by program.
-				# - "--remove-destination" will remove expected existing symlinks.
-				G_ERROR_HANDLER_INFO_ONLY=1 G_RUN_CMD cp -au --remove-destination $FP_RAM/. $FP_DISK
-				G_ERROR_HANDLER_INFO_ONLY=1 G_RUN_CMD rm -R $FP_RAM
-
-			else
-
-				G_DIETPI-NOTIFY 2 "$FP_RAM not found, skipping this program..."
+				Print "Stopping ${i^} service..."
+				handle_service=1
+				systemctl stop $i || { error=$? Print "Stopping ${i^} service failed. Skipping this program..."; continue; }
 
 			fi
 
-			# - Failsafe: chown fully to program run user since nothing else ever needs or should access these databases directly
-			chown -R ${i}:${i} $FP_DISK
-			# - Failsafe: Sync to disk now
-			sync
+			# Link to RAM + backup
+			if (( $INPUT == 1 )); then
+
+				Print 'Linking files to RAM...'
+
+				# - Pre-create RAM dir
+				[[ -d $FP_RAM ]] || mkdir -p $FP_RAM || { error=$? Print "Pre-creating RAM directory for ${^i} failed ($FP_RAM). Skipping this program..."; continue; }
+
+				for j in ${aFILES[$i]}
+				do
+
+					FP_DISK="$G_FP_DIETPI_USERDATA/$i/$j"
+					FP_RAM="/tmp/${i}_db_link/$j"
+					local fp_target=''
+
+					# - Source exists and is no symlink, expected situation
+					if [[ -f $FP_DISK && ! -L $FP_DISK ]]; then
+
+						Link_To_Ram
+
+					# - Link + target exists, should only happen when running the script two times in same session
+					elif [[ -L $FP_DISK ]] && fp_target=$(readlink -e $FP_DISK); then
+
+						if [[ $fp_target == $FP_RAM ]]; then
+
+							Print "$FP_DISK already linked to RAM ($FP_RAM). Skipping this file..."
+
+						# - Failsafe: Restore file from wrong symlink, should never occur but required for this script to function
+						else
+
+							Print "$FP_DISK already linked to $fp_target. Restoring original file location before linking to RAM..."
+							rm $FP_DISK || { error=$? Print "Removing symlink failed ($FP_DISK). Skipping this file..."; continue; }
+							mv $fp_target $FP_DISK || { error=$? Print "Restoring original file failed ($fp_target). Skipping this file..."; continue; }
+							Link_To_Ram
+
+						fi
+
+					# - Source does not exist or is orphaned link, should only happen after crash
+					elif [[ -f ${FP_DISK}.bak ]]; then
+
+						Print "$FP_DISK not found. Recovering from backup first (${FP_DISK}.bak)..."
+						# - Remove possible obsolete symlink
+						[[ ! -L $FP_DISK ]] || rm $FP_DISK || { error=$? Print "Removing orphaned symlink failed ($FP_DISK). Skipping this file..."; continue; }
+						# - Recover from backup
+						mv ${FP_DISK}.bak $FP_DISK || { error=$? Print "Recovering file from backup failed (${FP_DISK}.bak). Skipping this file..."; continue; }
+						Link_To_Ram
+
+					else
+
+						Print "$FP_DISK not found. Skipping this file..."
+
+					fi
+
+				done
+
+				# - Restart program if we stopped it before
+				(( $handle_service )) && systemctl start $i
+
+			# Store to disk
+			elif (( $INPUT == 0 )); then
+
+				Print "Restoring files from RAM ($FP_RAM) to disk ($FP_DISK)..."
+
+				if [[ -d $FP_RAM ]]; then
+
+					# - "-u" will only copy newer files, thus actually used by program.
+					# - "--remove-destination" will remove expected existing symlinks.
+					cp -au --remove-destination $FP_RAM/. $FP_DISK || { error=$? Print "Restoring ${^i} files from RAM to disk failed. Skipping this program..."; continue; }
+					rm -R $FP_RAM
+
+				else
+
+					Print "$FP_RAM not found. Skipping this program..."
+					continue
+
+				fi
+
+				# - Failsafe: chown fully to program run user since nothing else ever needs or should access these databases directly
+				chown -R ${i}:${i} $FP_DISK
+				# - Failsafe: Sync to disk now
+				sync
+
+			fi
+
+		done
+
+	}
+
+	Enable_On_Boot(){
+
+		cat << _EOF_ > /etc/systemd/system/dietpi-arr_to_RAM.service
+[Unit]
+Description=DietPi-Arr_to_RAM
+Requires=dietpi-ramdisk.service tmp.mount
+After=dietpi-ramdisk.service tmp.mount
+Before=dietpi-preboot.service sonarr.service radarr.service lidarr.service
+
+[Service]
+Type=forking
+RemainAfterExit=yes
+ExecStart=/bin/dash -c '/DietPi/dietpi/misc/dietpi-arr_to_RAM 1 2>&1 >> $FP_LOG'
+ExecStop=/bin/dash -c '/DietPi/dietpi/misc/dietpi-arr_to_RAM 0 2>&1 > $FP_LOG'
+
+[Install]
+WantedBy=multi-user.target
+_EOF_
+		systemctl daemon-reload
+		systemctl enable dietpi-arr_to_RAM || EXIT_CODE=$?
+		systemctl start dietpi-arr_to_RAM || EXIT_CODE=$?
+
+	}
+
+	Disable_On_Boot(){
+
+		if [[ -f /etc/systemd/system/dietpi-arr_to_RAM.service ]]; then
+
+			systemctl stop dietpi-arr_to_RAM || EXIT_CODE=$?
+			systemctl disable dietpi-arr_to_RAM || EXIT_CODE=$?
+			rm /etc/systemd/system/dietpi-arr_to_RAM.service || EXIT_CODE=$?
+			systemctl daemon-reload
 
 		fi
 
-	done
+	}
 
-	exit 0
+	#/////////////////////////////////////////////////////////////////////////////////////
+	# Main Loop
+	#/////////////////////////////////////////////////////////////////////////////////////
+	# - Toggle Link to RAM
+	if [[ $INPUT == [01] ]]; then
 
+		Toggle_Link_To_Ram
+
+	# - Enable Link to RAM on boot
+	elif [[ ${INPUT,,} == 'enable' ]]; then
+
+		Enable_On_Boot
+
+	# - Disable Link to RAM on boot
+	elif [[ ${INPUT,,} == 'disable' ]]; then
+
+		Disable_On_Boot
+
+	else
+
+		error=1 Print "Unknown input argument: $INPUT. Aborting..."
+		exit 1
+
+	fi
+
+	(( $EXIT_CODE )) && error=$EXIT_CODE Print "An issue has occurred. Please check the log for details: $FP_LOG"
+
+	#-----------------------------------------------------------------------------------
+	exit $EXIT_CODE
+	#-----------------------------------------------------------------------------------
 }
