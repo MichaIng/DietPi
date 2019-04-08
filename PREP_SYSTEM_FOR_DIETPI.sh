@@ -581,7 +581,7 @@
 		G_DISTRO=$DISTRO_TARGET G_DISTRO_NAME=$DISTRO_TARGET_NAME G_HW_MODEL=$G_HW_MODEL G_RUN_CMD /DietPi/dietpi/func/dietpi-set_software apt-mirror 'default'
 
 		# - Meveric, update repo to use our EU mirror: https://github.com/MichaIng/DietPi/issues/1519#issuecomment-368234302
-		sed -i 's@https://oph.mdrjr.net/meveric@http://fuzon.co.uk/meveric@' /etc/apt/sources.list.d/meveric* &> /dev/null
+		sed -Ei 's@https?://oph\.mdrjr\.net@http://fuzon.co.uk@' /etc/apt/sources.list.d/meveric* &> /dev/null
 
 		# - (Re)create DietPi logs dir, used by G_AGx
 		G_RUN_CMD mkdir -p /var/tmp/dietpi/logs
