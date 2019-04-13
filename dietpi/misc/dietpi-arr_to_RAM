@@ -53,8 +53,8 @@ Supported programs:
 
 	# Check for required root or program specific permissions permissions
 	# - enable/disable systemd service always requires root permissions
-	# - Database file handling can be done as program run user when specific program is defined via $2
-	(( $UID )) && [[ $INPUT != [012] || $USER != $INPUT_PROG ]] && { error=1 Print 'This script must run as root or *arr program run user. Please use: "sudo"'; exit 1; }
+	# - Database file handling can be done as program user when defined via $2
+	(( $UID )) && [[ $INPUT != [012] || $USER != $INPUT_PROG ]] && { error=1 Print 'This script must run as root or *arr program user. Please use: "sudo"'; exit 1; }
 
 	# Boot service log file
 	FP_LOG='/var/tmp/dietpi/logs/dietpi-arr_to_RAM.log'
@@ -79,13 +79,15 @@ $USAGE"; exit 1; }
 		Print "Linking $FP_DISK to RAM ($FP_RAM)..."
 		mv $FP_DISK ${FP_DISK}.bak || { error=$? Print "Creating backup failed for $FP_DISK. Skipping this file..."; return; }
 		ln -s $FP_RAM $FP_DISK || EXIT_CODE=$?
-		# Failsafe: chown link in case created by root but program user wants to remove
+		# Failsafe: chown link in case created by root but program user wants to restore
 		chown -h $i $FP_DISK || EXIT_CODE=$?
 		cp -a --no-preserve=timestamps ${FP_DISK}.bak $FP_RAM || EXIT_CODE=$?
 
 	}
 
 	Toggle_Link_To_Ram(){
+
+		local start_services=''
 
 		for i in ${!aFILES[@]}
 		do
@@ -101,26 +103,33 @@ $USAGE"; exit 1; }
 			# Update backup
 			if (( $INPUT == 2 )); then
 
-				Print "Updating ${i^} database backups..."
-				for j in ${aFILES[$i]}
-				do
+				if [[ -d $FP_RAM ]]; then
 
-					FP_RAM="/tmp/${i}_db_link/$j"
-					[[ -f $FP_RAM ]] || { Print "$FP_RAM not found. Skipping this file..."; continue; }
-					cp -a $FP_RAM $FP_DISK/$j.bak || EXIT_CODE=$?
+					Print "Updating ${i^} database backups..."
+					for j in ${aFILES[$i]}
+					do
 
-				done
-				Print "Updated ${i^} database backups."
+						FP_RAM="/tmp/${i}_db_link/$j"
+						[[ -f $FP_RAM ]] || { Print "$FP_RAM not found. Skipping this file..."; continue; }
+						cp -a $FP_RAM $FP_DISK/$j.bak || EXIT_CODE=$?
+
+					done
+					Print "Updated ${i^} database backups."
+
+				else
+
+					Print "${i^} database is not in RAM. Skipping this program..."
+
+				fi
 				continue
 
 			fi
 
 			# If active, stop program before handling database and restart afterwards
-			local handle_service=0
 			if pgrep -f $i &> /dev/null; then
 
 				Print "Stopping ${i^} service..."
-				handle_service=1
+				start_services+=" $i"
 				systemctl stop $i || { error=$? Print "Stopping ${i^} service failed. Skipping this program..."; continue; }
 
 			fi
@@ -129,7 +138,6 @@ $USAGE"; exit 1; }
 			if (( $INPUT == 1 )); then
 
 				Print "Linking ${i^} database to RAM..."
-
 				# - Pre-create RAM dir
 				[[ -d $FP_RAM ]] || mkdir -p $FP_RAM || { error=$? Print "Pre-creating RAM directory for ${i^} failed ($FP_RAM). Skipping this program..."; continue; }
 
@@ -180,50 +188,46 @@ $USAGE"; exit 1; }
 
 				done
 
-				# - Failsafe: chown fully to program run user since nothing else ever needs or should access these databases directly
+				# - Failsafe: chown fully to program user since nothing else ever needs or should access this database directly
 				chown -R ${i}:${i} /tmp/${i}_db_link
-
 				Print "Linked ${i^} database to RAM."
 
 			# Store to disk
 			elif (( $INPUT == 0 )); then
 
-				Print "Restoring database from RAM ($FP_RAM) to disk ($FP_DISK)..."
-
 				if [[ -d $FP_RAM ]]; then
 
+					Print "Restoring database from RAM ($FP_RAM) to disk ($FP_DISK)..."
 					# - "-u" will only copy newer files, thus actually used by program.
 					# - "--remove-destination" will remove expected existing symlinks.
-					cp -au --remove-destination $FP_RAM/. $FP_DISK || { error=$? Print "Restoring ${i^} files from RAM to disk failed. Skipping this program..."; continue; }
+					cp -au --remove-destination $FP_RAM/. $FP_DISK || { error=$? Print "Restoring ${i^} database from RAM to disk failed."; continue; }
 					rm -R $FP_RAM
+					# - Failsafe: chown fully to program user since nothing else ever needs or should access this database directly
+					chown -R ${i}:${i} $FP_DISK
+					Print "Restored ${i^} database from RAM to disk."
 
 				else
 
-					Print "$FP_RAM not found. Skipping this program..."
-					continue
+					Print "${i^} database is not in RAM. Skipping this program..."
 
 				fi
-
-				# - Failsafe: chown fully to program run user since nothing else ever needs or should access these databases directly
-				chown -R ${i}:${i} $FP_DISK
-				# - Failsafe: Sync to disk now
-				sync
-
-				Print "Restored ${i^} database from RAM to disk."
-
-			fi
-
-			# Start program if we stopped it before
-			# - NB: Due to Before=, *arr.service waits for dietpi-arr_to_RAM.service to finish, timing it out.
-			# - "--no-block" allows dietpi-arr_to_RAM.service to only enqueue *arr.service starts and finish, to allow them starting afterwards.
-			if (( $handle_service )); then
-
-				Print "Enqueuing ${i^} service start..."
-				systemctl --no-block start $i
 
 			fi
 
 		done
+
+		# Failsafe: When restoring to disk, "sync" now to prevent async issues!
+		(( $INPUT == 0 )) && sync
+
+		# Start programs we stopped before
+		# - NB: Due to Before=, *arr.service waits for dietpi-arr_to_RAM.service to finish, timing it out.
+		# - "--no-block" allows dietpi-arr_to_RAM.service to only enqueue *arr.service starts and finish, to allow them starting afterwards.
+		if [[ $start_services ]]; then
+
+			Print "Enqueuing$start_services service start(s)..."
+			systemctl --no-block start $start_services
+
+		fi
 
 	}
 
