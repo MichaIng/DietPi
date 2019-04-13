@@ -14,19 +14,30 @@
 	# - Creates a backup first and automatically restores from backup on next start in case of system crash
 	#
 	USAGE='
-Usage: /DietPi/dietpi/misc/dietpi-arr_to_RAM <command>
+Usage: /DietPi/dietpi/misc/dietpi-arr_to_RAM <command> [<program>]
 Available commands:
-  1		Link to RAM
-  2		Update backup
-  0		Store back to disk
-  enable	Enable Link to RAM on boot
-  disable	Disable Link to RAM on boot
+  1 [<program>]		Link (program) database(s) to RAM
+  2 [<program>]		Update (program) database backup(s)
+  0 [<program>]		Store (program) database(s) back to disk
+  enable		Enable Link to RAM on boot
+  disable		Disable Link to RAM on boot
+Supported programs:
+  <empty>		Apply to all supported and installed programs
+  sonarr		Apply to Sonarr database only
+  radarr		Apply to Radarr database only
+  lidarr		Apply to Lidarr database only
 '	#////////////////////////////////////
 
 	# Import DietPi-Globals --------------------------------------------------------------
 	#. /DietPi/dietpi/func/dietpi-globals	# Skip globals for faster execution on early boot stage
 	PROGRAM_NAME='DietPi-Arr_to_RAM'
 	# Import DietPi-Globals --------------------------------------------------------------
+
+	# Grab input
+	INPUT=$1
+	INPUT_PROG=$2
+
+	EXIT_CODE=0
 
 	# Print output
 	# - In case of error, sets EXIT_CODE as well
@@ -40,13 +51,10 @@ Available commands:
 
 	}
 
-	# Check for required root permissions
-	(( $UID )) && { error=1 Print 'This script must run with root privileges. Please use: "sudo"'; exit 1; }
-
-	# Grab input
-	INPUT=$@
-
-	EXIT_CODE=0
+	# Check for required root or program specific permissions permissions
+	# - enable/disable systemd service always requires root permissions
+	# - Database file handling can be done as program run user when specific program is defined via $2
+	(( $UID )) && [[ $INPUT != [012] || $USER != $INPUT_PROG ]] && { error=1 Print 'This script must run as root or *arr program run user. Please use: "sudo"'; exit 1; }
 
 	# Boot service log file
 	FP_LOG='/var/tmp/dietpi/logs/dietpi-arr_to_RAM.log'
@@ -54,10 +62,14 @@ Available commands:
 	# Program files array
 	declare -A aFILES=()
 	# - Sonarr/Radarr: Both use the same file names
-	aFILES[sonarr]='nzbdrone.db nzbdrone.db-shm nzbdrone.db-wal'
-	aFILES[radarr]='nzbdrone.db nzbdrone.db-shm nzbdrone.db-wal'
+	[[ ${INPUT_PROG:-sonarr} == 'sonarr' ]] && aFILES[sonarr]='nzbdrone.db nzbdrone.db-shm nzbdrone.db-wal'
+	[[ ${INPUT_PROG:-radarr} == 'radarr' ]] && aFILES[radarr]='nzbdrone.db nzbdrone.db-shm nzbdrone.db-wal'
 	# - Lidarr
-	aFILES[lidarr]='lidarr.db lidarr.db-shm lidarr.db-wal'
+	[[ ${INPUT_PROG:-lidarr} == 'lidarr' ]] && aFILES[lidarr]='lidarr.db lidarr.db-shm lidarr.db-wal'
+
+	# Check for valid input program
+	(( ${#aFILES[@]} )) || { error=1 Print "Invalid input program ($INPUT_PROG). Aborting...
+$USAGE"; exit 1; }
 
 	FP_DISK=''
 	FP_RAM=''
@@ -67,6 +79,8 @@ Available commands:
 		Print "Linking $FP_DISK to RAM ($FP_RAM)..."
 		mv $FP_DISK ${FP_DISK}.bak || { error=$? Print "Creating backup failed for $FP_DISK. Skipping this file..."; return; }
 		ln -s $FP_RAM $FP_DISK || EXIT_CODE=$?
+		# Failsafe: chown link in case created by root but program user wants to remove
+		chown -h $i $FP_DISK || EXIT_CODE=$?
 		cp -a --no-preserve=timestamps ${FP_DISK}.bak $FP_RAM || EXIT_CODE=$?
 
 	}
@@ -91,9 +105,9 @@ Available commands:
 				for j in ${aFILES[$i]}
 				do
 
-					FP_DISK="/mnt/dietpi_userdata/$i/$j"
-					[[ -f $FP_DISK ]] || { Print "$FP_DISK not found. Skipping this file..."; continue; }
-					cp -aL $FP_DISK ${FP_DISK}.bak || EXIT_CODE=$?
+					FP_RAM="/tmp/${i}_db_link/$j"
+					[[ -f $FP_RAM ]] || { Print "$FP_RAM not found. Skipping this file..."; continue; }
+					cp -a $FP_RAM $FP_DISK/$j.bak || EXIT_CODE=$?
 
 				done
 				Print "Updated ${i^} database backups."
@@ -114,7 +128,7 @@ Available commands:
 			# Link to RAM + backup
 			if (( $INPUT == 1 )); then
 
-				Print "Linking ${i^} files to RAM..."
+				Print "Linking ${i^} database to RAM..."
 
 				# - Pre-create RAM dir
 				[[ -d $FP_RAM ]] || mkdir -p $FP_RAM || { error=$? Print "Pre-creating RAM directory for ${i^} failed ($FP_RAM). Skipping this program..."; continue; }
@@ -152,7 +166,7 @@ Available commands:
 					elif [[ -f ${FP_DISK}.bak ]]; then
 
 						Print "$FP_DISK not found. Recovering from backup first (${FP_DISK}.bak)..."
-						# - Remove possible obsolete symlink
+						# - Remove possible orphaned symlink
 						[[ ! -L $FP_DISK ]] || rm $FP_DISK || { error=$? Print "Removing orphaned symlink failed ($FP_DISK). Skipping this file..."; continue; }
 						# - Recover from backup
 						mv ${FP_DISK}.bak $FP_DISK || { error=$? Print "Recovering file from backup failed (${FP_DISK}.bak). Skipping this file..."; continue; }
@@ -169,12 +183,12 @@ Available commands:
 				# - Failsafe: chown fully to program run user since nothing else ever needs or should access these databases directly
 				chown -R ${i}:${i} /tmp/${i}_db_link
 
-				Print "Linked ${i^} files to RAM."
+				Print "Linked ${i^} database to RAM."
 
 			# Store to disk
 			elif (( $INPUT == 0 )); then
 
-				Print "Restoring files from RAM ($FP_RAM) to disk ($FP_DISK)..."
+				Print "Restoring database from RAM ($FP_RAM) to disk ($FP_DISK)..."
 
 				if [[ -d $FP_RAM ]]; then
 
@@ -195,7 +209,7 @@ Available commands:
 				# - Failsafe: Sync to disk now
 				sync
 
-				Print "Restored ${i^} files from RAM to disk."
+				Print "Restored ${i^} database from RAM to disk."
 
 			fi
 
@@ -272,7 +286,7 @@ _EOF_
 
 	else
 
-		error=1 Print "Invalid input argument: ${INPUT:-<none>}. Aborting...
+		error=1 Print "Invalid input command (${INPUT:-<empty>}). Aborting...
 $USAGE"
 
 	fi
