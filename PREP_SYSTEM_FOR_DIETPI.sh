@@ -382,6 +382,7 @@
 			'68' ': NanoPC T4'
 			'67' ': NanoPi K1 Plus'
 			'14' ': Odroid N1'
+			'15' ': Odroid N2'
 			'13' ': Odroid U3'
 			'38' ': OrangePi PC 2'
 			'37' ': OrangePi Prime'
@@ -769,6 +770,11 @@ _EOF_
 			G_AGI --reinstall libraspberrypi-bin libraspberrypi0 raspberrypi-bootloader raspberrypi-kernel raspberrypi-sys-mods
 			# Buster systemd-udevd doesn't support the current raspi-copies-and-fills: https://github.com/MichaIng/DietPi/issues/1286
 			(( $DISTRO_TARGET < 5 )) && G_AGI raspi-copies-and-fills
+
+		#	Odroid N2
+		elif (( $G_HW_MODEL == 15 )); then
+
+			G_AGI linux-image-arm64-odroid-n2
 
 		#	Odroid N1
 		elif (( $G_HW_MODEL == 14 )); then
