@@ -1,0 +1,156 @@
+#!/bin/bash
+{
+	#////////////////////////////////////
+	# DietPi Function: Swapfile
+	#
+	#////////////////////////////////////
+	# Created by Daniel Knight / daniel.knight@dietpi.com / dietpi.com
+	#
+	#////////////////////////////////////
+	#
+	# Info:
+	# - DietPi Swapfile control for setting enable/disable/size/location.
+	#
+	# Usage:
+	# - $1 = 0=disable, 1=enable+autosize, >=2=enable+size
+	# - $2 = optional location
+	# - /DietPi/dietpi/func/dietpi-set_swapfile     = Print current swap size and location
+	#////////////////////////////////////
+
+	# Import DietPi-Globals --------------------------------------------------------------
+	. /DietPi/dietpi/func/dietpi-globals
+	G_PROGRAM_NAME='DietPi-Set_swapfile'
+	G_CHECK_ROOT_USER
+	G_INIT
+	# Import DietPi-Globals --------------------------------------------------------------
+
+	SWAP_SIZE=$(grep -m1 '^[[:blank:]]*AUTO_SETUP_SWAPFILE_SIZE=' /DietPi/dietpi.txt | sed 's/^[^=]*=//')
+	SWAP_LOCATION=$(grep -m1 '^[[:blank:]]*AUTO_SETUP_SWAPFILE_LOCATION=' /DietPi/dietpi.txt | sed 's/^[^=]*=//')
+
+	disable_error=1 G_CHECK_VALIDINT "$1" && SWAP_SIZE_TARGET=$1 || SWAP_SIZE_TARGET=$SWAP_SIZE
+	[[ $2 ]] && SWAP_LOCATION_TARGET=$2 || SWAP_LOCATION_TARGET=$SWAP_LOCATION
+
+	Update_DietPi_Conf(){
+
+		G_CONFIG_INJECT 'AUTO_SETUP_SWAPFILE_SIZE=' "AUTO_SETUP_SWAPFILE_SIZE=$SWAP_SIZE" /DietPi/dietpi.txt
+		G_CONFIG_INJECT 'AUTO_SETUP_SWAPFILE_LOCATION=' "AUTO_SETUP_SWAPFILE_LOCATION=$SWAP_LOCATION" /DietPi/dietpi.txt
+
+	}
+
+	Update_Tmp(){
+
+		# Set /tmp to 50% of RAM+SWAP: https://github.com/MichaIng/DietPi/issues/1027#issuecomment-369373082
+		local mem_total=$(free -m | mawk '/Mem:/ {print $2;exit}')
+		local swap_size=$(free -m | mawk '/Swap:/ {print $2;exit}')
+		local tmp_target_size="$(( ( $mem_total + $swap_size ) / 2 ))M"
+
+		G_DIETPI-NOTIFY 2 "Setting /tmp tmpfs size: $tmp_target_size"
+
+		sed -i "/[[:blank:]]\/tmp[[:blank:]]/ctmpfs \/tmp tmpfs defaults,size=$tmp_target_size,noatime,nodev,nosuid,mode=1777 0 0" /etc/fstab
+		systemctl daemon-reload
+		mount -a # Required if /tmp was somehow not mounted before. Will be skipped if already mounted
+		G_RUN_CMD mount -o remount /tmp # Required to apply new settings/size. "remount" required to preserve current content, or, doubled mount
+
+	}
+
+	Swap_Disable(){
+
+		G_DIETPI-NOTIFY 0 'Disable swapfile'
+
+		G_RUN_CMD swapoff -a
+		if [[ -f $SWAP_LOCATION ]]; then
+
+			G_DIETPI-NOTIFY 2 "Deleting existing swapfile: $SWAP_LOCATION"
+			rm "$SWAP_LOCATION"
+
+		fi
+		sed -i '/[[:blank:]]swap[[:blank:]]/d' /etc/fstab
+
+		SWAP_SIZE=0
+		SWAP_LOCATION='/var/swap'
+
+	}
+
+	Swap_Enable(){
+
+		local swap_dir="${SWAP_LOCATION_TARGET%/*}/"
+		local fs_type=$(findmnt -n -o FSTYPE -T "$swap_dir")
+
+		# Exclude devices
+		# - BBB
+		if (( $G_HW_MODEL == 71 )); then
+
+			G_DIETPI-NOTIFY 1 "Disabled swapfile generation for: $G_HW_MODEL_DESCRIPTION"
+
+		# Exclude file systems
+		elif (( $fs_type == 'btrfs' )); then
+
+			G_DIETPI-NOTIFY 1 "Swapfile not supported on file system: $fs_type"
+
+		# Free spacey, checkey weckey
+		elif ! G_CHECK_FREESPACE "$swap_dir" $SWAP_SIZE_TARGET; then
+
+			G_DIETPI-NOTIFY 1 'Unable to generate swapfile due to insufficient disk space. Swap has been disabled.'
+
+		# Create new swappey whappey
+		else
+
+			SWAP_SIZE=$SWAP_SIZE_TARGET
+			SWAP_LOCATION=$SWAP_LOCATION_TARGET
+
+			G_DIETPI-NOTIFY 0 'Generating new swapfile'
+			G_DIETPI-NOTIFY 2 "Size     = $SWAP_SIZE MB"
+			G_DIETPI-NOTIFY 2 "Location = $SWAP_LOCATION"
+
+			# - Pre-allocate for filesystems which do no support quick-allocate with fallocate
+			if [[ $fs_type == 'f2fs' || $fs_type == 'xfs' || $fs_type == 'vfat' ]]; then
+
+				G_RUN_CMD dd if=/dev/zero of="$SWAP_LOCATION" bs=4K count=$(( $SWAP_SIZE * 1024 / 4 ))
+
+			else
+
+				G_RUN_CMD fallocate -l $SWAP_SIZE'M' "$SWAP_LOCATION"
+
+			fi
+
+			G_RUN_CMD mkswap "$SWAP_LOCATION"
+			chmod 600 "$SWAP_LOCATION"
+			G_RUN_CMD swapon "$SWAP_LOCATION"
+
+			echo "$SWAP_LOCATION none swap sw 0 0" >> /etc/fstab
+
+		fi
+
+	}
+
+	#/////////////////////////////////////////////////////////////////////////////////////
+	# Main Loop
+	#/////////////////////////////////////////////////////////////////////////////////////
+	# Info mode - Print Size / Location
+	if [[ ! $1 ]]; then
+
+		echo "$SWAP_SIZE $SWAP_LOCATION"
+
+	# Remove/Create swap
+	else
+
+		G_DIETPI-NOTIFY 3 "$G_PROGRAM_NAME" 'Apply'
+
+		# - Always reset/remove existing swap
+		Swap_Disable
+
+		# - Auto size?
+		(( $SWAP_SIZE_TARGET == 1 )) && SWAP_SIZE_TARGET=$(( 2048 - $(free -m | mawk '/Mem:/ {print $2;exit}') ))
+
+		# - Configure new swapfile?
+		(( $SWAP_SIZE_TARGET > 0 )) && Swap_Enable
+
+		Update_DietPi_Conf
+		Update_Tmp
+
+	fi
+	#-----------------------------------------------------------------------------------
+	exit 0
+	#-----------------------------------------------------------------------------------
+
+}
