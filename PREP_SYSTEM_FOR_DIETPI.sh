@@ -1488,7 +1488,7 @@ _EOF_
 
 		G_DIETPI-NOTIFY 2 'Removing swapfile from image'
 
-		/DietPi/dietpi/func/dietpi-set_dphys-swapfile 0 /var/swap
+		/DietPi/dietpi/func/dietpi-set_swapfile 0 /var/swap
 		[[ -e /var/swap ]] && rm /var/swap # still exists on some images...
 
 		# - re-enable for next run
