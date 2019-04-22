@@ -60,6 +60,21 @@
 	# - OMV: https://dietpi.com/phpbb/viewtopic.php?f=11&t=2772&p=10646#p10594
 	[[ -f /etc/apt/sources.list.d/openmediavault.list ]] && rm /etc/apt/sources.list.d/openmediavault.list
 
+	# Fixing sources.list due to Debian dropped Jessie support: https://github.com/MichaIng/DietPi/issues/2665
+	if grep -qi 'jessie' /etc/os-release && ! grep -qi 'raspbian' /etc/os-release; then
+
+		if [[ $(uname -m) == 'aarch64' ]]; then
+
+			echo 'deb http://archive.debian.org/debian/ main contrib non-free' > /etc/apt/sources.list
+
+		else
+
+			sed -Ei '/jessie(\/updates|-backports|-updates)/d' /etc/apt/sources.list
+
+		fi
+
+	fi
+
 	apt-get clean
 	apt-get update
 	for i in "${a_MIN_APT_PREREQS[@]}"
