@@ -1549,8 +1549,7 @@ _EOF_
 			l_message='Detecting additional OS installed on system' G_RUN_CMD os-prober
 
 			# - Native PC/EFI (assume x86_64 only possible)
-			if dpkg-query -s 'grub-efi-amd64' &> /dev/null &&
-				[[ -d '/boot/efi' ]]; then
+			if dpkg-query -s 'grub-efi-amd64' &> /dev/null && [[ -d '/boot/efi' ]]; then
 
 				l_message='Recreating GRUB-EFI' G_RUN_CMD grub-install --target=x86_64-efi --efi-directory=/boot/efi --bootloader-id=arch_grub --recheck
 
@@ -1561,8 +1560,8 @@ _EOF_
 
 				G_CONFIG_INJECT 'GRUB_CMDLINE_LINUX_DEFAULT=' 'GRUB_CMDLINE_LINUX_DEFAULT="consoleblank=0 quiet"' /etc/default/grub
 				G_CONFIG_INJECT 'GRUB_CMDLINE_LINUX=' 'GRUB_CMDLINE_LINUX="net.ifnames=0"' /etc/default/grub
-				G_CONFIG_INJECT 'GRUB_TIMEOUT=' 'GRUB_TIMEOUT=3' /etc/default/grub
-				l_message='Finalizing GRUB' G_RUN_CMD update-grub
+				G_CONFIG_INJECT 'GRUB_TIMEOUT=' 'GRUB_TIMEOUT=0' /etc/default/grub
+				l_message='Finalising GRUB' G_RUN_CMD update-grub
 
 			fi
 
@@ -1636,7 +1635,7 @@ _EOF_
 
 		else
 
-			l_message='Enabling dietpi-fs_partition_resize for first boot' G_RUN_CMD systemctl enable dietpi-fs_partition_resize
+			l_message='Enabling automated partition and file system resize for first boot' G_RUN_CMD systemctl enable dietpi-fs_partition_resize
 
 		fi
 
