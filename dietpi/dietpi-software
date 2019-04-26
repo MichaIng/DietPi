@@ -1195,7 +1195,7 @@ DietPi-Software will decrypt and use it for software installs. You can change it
 			aSOFTWARE_AVAIL_G_HW_MODEL[$software_id,$i]=0
 
 		done
-		aSOFTWARE_AVAIL_G_HW_MODEL[$software_id,52]=1 # ASUS TB
+		aSOFTWARE_AVAIL_G_HW_MODEL[$software_id,52]=1 # + ASUS TB
 
 		# - XU4 test
 		#aSOFTWARE_AVAIL_G_HW_MODEL[$software_id,11]=1 #Requires Stretch due to libc requirements
@@ -8229,7 +8229,7 @@ The install script will now exit. After applying one of the the above, rerun die
 
 			G_DIETPI-NOTIFY 2 'Configuring TURN server:'
 			# Buster (systemd unit)
-			if (( $G_DISTRO > 4 )); then
+			if [[ -f '/lib/systemd/system/coturn.service' ]]; then
 
 				# - Remove init.d service traces
 				[[ -f /etc/init.d/coturn ]] && rm /etc/init.d/coturn
@@ -8270,13 +8270,13 @@ The install script will now exit. After applying one of the the above, rerun die
 
 			done
 			invalid_text=''
-			local port=5349
+			local port=3478
 			while :
 			do
 
 				G_WHIP_DEFAULT_ITEM=$port
 				G_WHIP_INPUTBOX "${invalid_text}Please enter the network port, that should be used for your TURN server:\n
-NB: This port needs to be forwarded by your router and/or opened in your firewall settings. Default value is: 5349"
+NB: This port needs to be forwarded by your router and/or opened in your firewall settings. Default value is: 3478"
 				if (( $? == 0 )) && disable_error=1 G_CHECK_VALIDINT "$G_WHIP_RETURNED_VALUE" 0; then
 
 					port=$G_WHIP_RETURNED_VALUE
@@ -8290,40 +8290,41 @@ NB: This port needs to be forwarded by your router and/or opened in your firewal
 
 			done
 
-			# Adjust coturn settings
+			# Adjust coTURN settings
 			# - On Buster by default /etc/turnserver.conf is not created. Use example or create empty file:
-			if [[ ! -f /etc/turnserver.conf ]]; then
+			if [[ ! -f '/etc/turnserver.conf' ]]; then
 
 				> /etc/turnserver.conf
-				[[ -f /usr/share/doc/coturn/examples/etc/turnserver.conf.gz ]] && gzip -cd /usr/share/doc/coturn/examples/etc/turnserver.conf.gz > /etc/turnserver.conf
+				[[ -f '/usr/share/doc/coturn/examples/etc/turnserver.conf.gz' ]] && gzip -cd /usr/share/doc/coturn/examples/etc/turnserver.conf.gz > /etc/turnserver.conf
 
 			fi
+			# - Estimate coTURN version to handle outdated settings correctly
+			local version=$(dpkg-query -Wf '${Version}' coturn); version=${version:0:7}; version=${version//./}
+			# https://help.nextcloud.com/t/howto-setup-nextcloud-talk-with-turn-server/30794
+			G_CONFIG_INJECT 'listening-port=' "listening-port=$port" /etc/turnserver.conf
 			G_CONFIG_INJECT 'fingerprint' 'fingerprint' /etc/turnserver.conf
 			G_CONFIG_INJECT 'use-auth-secret' 'use-auth-secret' /etc/turnserver.conf
+			if (( $version < 4508 )); then
+
+				G_CONFIG_INJECT 'lt-cred-mech' 'lt-cred-mech' /etc/turnserver.conf
+
+			else
+
+				sed -i '/^[[:blank:]]*lt-cred-mech/#lt-cred-mech/' /etc/turnserver.conf
+
+			fi
 			G_CONFIG_INJECT 'realm=' "realm=$domain" /etc/turnserver.conf
 			GCI_PRESERVE=1 G_CONFIG_INJECT 'total-quota=' 'total-quota=100' /etc/turnserver.conf
 			GCI_PRESERVE=1 G_CONFIG_INJECT 'bps-capacity=' 'bps-capacity=0' /etc/turnserver.conf
 			G_CONFIG_INJECT 'stale-nonce' 'stale-nonce' /etc/turnserver.conf
 			G_CONFIG_INJECT 'no-loopback-peers' 'no-loopback-peers' /etc/turnserver.conf
-			G_CONFIG_INJECT 'no-multicast-peers' 'no-multicast-peers' /etc/turnserver.conf
+			if (( $version < 4510 )); then
 
-			# Add TLS settings, if LetsEncrypt certificates are available:
-			if [[ -f /DietPi/dietpi/.dietpi-letsencrypt &&
-				-f /etc/letsencrypt/live/$(sed -n 1p /DietPi/dietpi/.dietpi-letsencrypt)/cert.pem ]]; then
-
-				G_DIETPI-NOTIFY 2 'LetsEncrypt certificate found, will configure coturn TURN server to accept TLS connections'
-				# - Disable non-TLS listening port, enable TLS listening port:
-				G_CONFIG_INJECT 'listening-port=' "#listening-port=$port" /etc/turnserver.conf
-				G_CONFIG_INJECT 'tls-listening-port=' "tls-listening-port=$port" /etc/turnserver.conf
-				local fp_cert_dir="/etc/letsencrypt/live/$(sed -n 1p /DietPi/dietpi/.dietpi-letsencrypt)"
-				G_CONFIG_INJECT 'cert=' "cert=$fp_cert_dir/cert.pem" /etc/turnserver.conf
-				G_CONFIG_INJECT 'pkey=' "pkey=$fp_cert_dir/privkey.pem" /etc/turnserver.conf
-				# - Proven working default cipher, but thus should be properly reworked, e.g. to match webserver settings?
-				G_CONFIG_INJECT 'cipher-list=' 'cipher-list="ECDH+AESGCM:DH+AESGCM:ECDH+AES256:DH+AES256:ECDH+AES128:DH+AES:ECDH+3DES:DH+3DES:RSA+AES:RSA+3DES:!ADH:!AECDH:!MD5"' /etc/turnserver.conf
+				G_CONFIG_INJECT 'no-multicast-peers' 'no-multicast-peers' /etc/turnserver.conf
 
 			else
 
-				G_CONFIG_INJECT 'listening-port=' "listening-port=$port" /etc/turnserver.conf
+				sed -i '/^[[:blank:]]*no-multicast-peers/d' /etc/turnserver.conf
 
 			fi
 
@@ -8343,7 +8344,7 @@ NB: This port needs to be forwarded by your router and/or opened in your firewal
 			secret=$(grep -m1 '^[[:blank:]]*static-auth-secret=' /etc/turnserver.conf)
 			secret=${secret#*static-auth-secret=}
 			ncc config:app:set spreed turn_servers --value="[{\"server\":\"$domain:$port\",\"secret\":\"$secret\",\"protocols\":\"udp,tcp\"}]"
-			unset secret domain port invalid_text
+			unset secret domain port invalid_text version
 
 		fi
 
