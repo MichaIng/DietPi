@@ -69,7 +69,7 @@
 
 		else
 
-			sed -Ei '/jessie(\/updates|-backports|-updates)/d' /etc/apt/sources.list
+			sed -Ei '/jessie-(backports|updates)/d' /etc/apt/sources.list
 
 		fi
 
@@ -651,6 +651,7 @@ _EOF_
 			'curl'			# Web address testing, downloading, uploading etc.
 			'debconf'		# APT package pre-configuration, e.g. "debconf-set-selections" for non-interactive install
 			'dirmngr'		# GNU key management required for some APT installs via additional repos
+			'dropbear-run'		# DietPi default SSH-Client, excluding initramfs integration
 			'ethtool'		# Ethernet link checking
 			'fake-hwclock'		# Hardware clock emulation, to allow correct timestamps during boot before network time sync
 			'gnupg'			# apt-key add
@@ -677,7 +678,7 @@ _EOF_
 		)
 
 		# - G_HW_MODEL specific required repo key packages: https://github.com/MichaIng/DietPi/issues/1285#issuecomment-358301273
-		if (( $G_HW_MODEL >= 10 )); then
+		if (( $G_HW_MODEL > 9 )); then
 
 			G_AGI debian-archive-keyring
 			aPACKAGES_REQUIRED_INSTALL+=('initramfs-tools')		# RAM file system initialization, required for generic boot loader, but not required/used by RPi bootloader
@@ -696,17 +697,6 @@ _EOF_
 			aPACKAGES_REQUIRED_INSTALL+=('rfkill')	 		# WiFi related: Used by some onboard WiFi chipsets
 			aPACKAGES_REQUIRED_INSTALL+=('wireless-tools')		# WiFi related
 			aPACKAGES_REQUIRED_INSTALL+=('wpasupplicant')		# WiFi WPA(2) support
-
-		fi
-
-		# - G_DISTRO specific required packages:
-		if (( $G_DISTRO < 4 )); then
-
-			aPACKAGES_REQUIRED_INSTALL+=('dropbear')		# DietPi default SSH-Client
-
-		else
-
-			aPACKAGES_REQUIRED_INSTALL+=('dropbear-run')		# DietPi default SSH-Client (excluding initramfs integration, available since Stretch)
 
 		fi
 
@@ -795,7 +785,7 @@ _EOF_
 		elif (( $G_HW_MODEL == 14 )); then
 
 			G_AGI linux-image-arm64-odroid-n1
-			#G_AGI libdrm-rockchip1 #Not currently on meveric's repo
+			#G_AGI libdrm-rockchip1 # Not currently on meveric's repo
 
 		#	Odroid C2
 		elif (( $G_HW_MODEL == 12 )); then
@@ -805,9 +795,7 @@ _EOF_
 		#	Odroid XU3/4/HC1/HC2
 		elif (( $G_HW_MODEL == 11 )); then
 
-			#G_AGI linux-image-4.9-armhf-odroid-xu3
-			G_AGI $(dpkg --get-selections | mawk '/^linux-image/ {print $1}')
-			dpkg --get-selections | grep -q '^linux-image' || G_AGI linux-image-4.14-armhf-odroid-xu4
+			G_AGI linux-image-4.14-armhf-odroid-xu4
 
 		#	Odroid C1
 		elif (( $G_HW_MODEL == 10 )); then
@@ -817,12 +805,12 @@ _EOF_
 		#	BBB
 		elif (( $G_HW_MODEL == 71 )); then
 
-			G_AGI device-tree-compiler #Kern
+			G_AGI device-tree-compiler # dtoverlay compiler
 
 		# - Auto detect kernel package incl. ARMbian/others DTB
 		else
 
-			AUTO_DETECT_KERN_PKG=$(dpkg --get-selections | grep -E '^linux-(image|dtb)' | awk '{print $1}')
+			AUTO_DETECT_KERN_PKG=$(dpkg --get-selections | grep -E '^linux-(image|dtb)' | mawk '{print $1}')
 			if [[ $AUTO_DETECT_KERN_PKG ]]; then
 
 				G_AGI $AUTO_DETECT_KERN_PKG
@@ -846,7 +834,7 @@ _EOF_
 			if (( $G_HW_MODEL != 20 )); then
 
 				aPACKAGES_REQUIRED_INSTALL+=('firmware-realtek')	# Eth/WiFi/BT dongle firmware
-				aPACKAGES_REQUIRED_INSTALL+=('firmware-linux-nonfree')
+				aPACKAGES_REQUIRED_INSTALL+=('firmware-linux-nonfree')  # Various drivers for generic devices
 
 			fi
 
@@ -855,18 +843,7 @@ _EOF_
 				aPACKAGES_REQUIRED_INSTALL+=('firmware-atheros')	# WiFi dongle firmware
 				aPACKAGES_REQUIRED_INSTALL+=('firmware-brcm80211')	# WiFi dongle firmware
 				aPACKAGES_REQUIRED_INSTALL+=('firmware-iwlwifi')	# Intel WiFi dongle/PCI-e firwmare
-
-				# Intel/Nvidia/WiFi (ralink) dongle firmware: https://github.com/MichaIng/DietPi/issues/1675#issuecomment-377806609
-				# On Jessie, firmware-misc-nonfree is not available, firmware-ralink instead as dedicated package.
-				if (( $G_DISTRO < 4 )); then
-
-					aPACKAGES_REQUIRED_INSTALL+=('firmware-ralink')
-
-				else
-
-					aPACKAGES_REQUIRED_INSTALL+=('firmware-misc-nonfree')
-
-				fi
+				aPACKAGES_REQUIRED_INSTALL+=('firmware-misc-nonfree')	# Intel/Nvidia/WiFi (Ralink) dongle firmware
 
 			fi
 
