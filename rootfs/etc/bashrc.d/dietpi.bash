@@ -15,7 +15,7 @@
 	#////////////////////////////////////
 
 	# - DietPi-Globals: dietpi-* aliases, G_* functions and variables
-	. /DietPi/dietpi/func/dietpi-globals
+	. /DietPi/dietpi/func/dietpi-globals || { echo -e '[\e[31mFAILED\e[0m] DietPi-Login | DietPi boot scripts failed. Skipping DietPi login scripts...'; exit 1; }
 
 	# - "G_DIETPI-NOFITY -2 message" starts a process animation.
 	#   If scripts fail to kill the animation, e.g. cancelled by user, terminal bash prompt has to do it as last resort:
@@ -53,8 +53,7 @@
 As a workaround we fooled the server by setting: TERM=$TERM. This is not the cleanest solution, since commands might expect colours or formats, that are not supported by the actual terminal.\n
 Please change your SSH clients terminal, respectively the passed \$TERM string$ncurses_term." && (( $G_WHIP_RETURNED_VALUE )) && G_AGI ncurses-term
 
-		unset TERM_old
-		unset ncurses_term
+		unset TERM_old ncurses_term
 
 	fi
 
