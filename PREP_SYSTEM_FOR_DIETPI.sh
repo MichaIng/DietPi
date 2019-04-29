@@ -41,6 +41,9 @@
 	# - NB: This needs to match the method in: /DietPi/dietpi/func/dietpi-set_hardware preferipv4 enable
 	echo 'Acquire::ForceIPv4 "true";' > /etc/apt/apt.conf.d/99-dietpi-force-ipv4
 
+	# Allow PDiffs on RPi since the "slow implementation" argument is outdated and PDiffs allow lower download size and less disk I/O
+	[[ -f '/etc/apt/apt.conf.d/50raspi' ]] rm /etc/apt/apt.conf.d/50raspi
+
 	# Check/install minimal APT Pre-Reqs
 	a_MIN_APT_PREREQS=(
 
@@ -56,9 +59,9 @@
 
 	# Removing conflicting /etc/apt/sources.list.d entries
 	# - Meveric: https://github.com/MichaIng/DietPi/issues/1285#issuecomment-355759321
-	[[ -f /etc/apt/sources.list.d/deb-multimedia.list ]] && rm /etc/apt/sources.list.d/deb-multimedia.list
+	[[ -f '/etc/apt/sources.list.d/deb-multimedia.list' ]] && rm /etc/apt/sources.list.d/deb-multimedia.list
 	# - OMV: https://dietpi.com/phpbb/viewtopic.php?f=11&t=2772&p=10646#p10594
-	[[ -f /etc/apt/sources.list.d/openmediavault.list ]] && rm /etc/apt/sources.list.d/openmediavault.list
+	[[ -f '/etc/apt/sources.list.d/openmediavault.list' ]] && rm /etc/apt/sources.list.d/openmediavault.list
 
 	# Fixing sources.list due to Debian dropped Jessie support: https://github.com/MichaIng/DietPi/issues/2665
 	if grep -qi 'jessie' /etc/os-release && ! grep -qi 'raspbian' /etc/os-release; then
@@ -256,24 +259,27 @@
 
 			G_DIETPI-NOTIFY 2 'DietPi system found, running pre-prep'
 
-			# - Stop services
+			# - Stop services: RAMdisk includes (Pre|Post)Boot due to dependencies
 			[[ -f /DietPi/dietpi/dietpi-services ]] && /DietPi/dietpi/dietpi-services stop
-			[[ -f /etc/systemd/system/dietpi-ramdisk.service ]] && systemctl stop dietpi-ramdisk
 			[[ -f /etc/systemd/system/dietpi-ramlog.service ]] && systemctl stop dietpi-ramlog
+			[[ -f /etc/systemd/system/dietpi-ramdisk.service ]] && systemctl stop dietpi-ramdisk
+
+			# - Disable services
+			for i in /etc/systemd/system/dietpi-*
+			do
+
+				[[ -f $i ]] || continue
+				systemctl disable ${i##*/}
+				rm $i
+
+			fi
 
 			# - Delete any previous existing data
 			#	Failsafe
 			umount /DietPi
 			[[ -d /DietPi ]] && rm -R /DietPi
-			[[ -d /boot/dietpi ]] && rm -R /boot/dietpi
-
-			[[ -d /mnt/dietpi-backup ]] && rm -R /mnt/dietpi-backup
-			[[ -d /mnt/dietpi-sync ]] && rm -R /mnt/dietpi-sync
-			[[ -d /mnt/dietpi_userdata ]] && rm -R /mnt/dietpi_userdata
-
-			[[ -d /etc/dietpi ]] && rm -R /etc/dietpi # Pre v160
-			[[ -d /var/lib/dietpi ]] && rm -R /var/lib/dietpi
-			[[ -d /var/tmp/dietpi ]] && rm -R /var/tmp/dietpi
+			rm -Rf /{boot,mnt,etc,var/lib,var/tmp}/dietpi*
+			rm -f /etc/{bashrc,profile,sysctl}.d/dietpi*
 
 			[[ -f /root/DietPi-Automation.log ]] && rm /root/DietPi-Automation.log
 			[[ -f /boot/Automation_Format_My_Usb_Drive ]] && rm /boot/Automation_Format_My_Usb_Drive
