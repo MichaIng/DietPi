@@ -562,7 +562,7 @@ $(ps f -eo pid,user,tty,cmd | grep -i '[d]ietpi')"; then
 	[[ -f $G_FP_DIETPI_USERDATA/dxx-rebirth/run.sh ]] && alias dxx-rebirth="$G_FP_DIETPI_USERDATA/dxx-rebirth/run.sh"
 	[[ -f /usr/share/applications/kodi.desktop ]] && alias startkodi='/DietPi/dietpi/misc/start_kodi'
 	[[ -f /etc/systemd/system/dietpi-cloudshell.service ]] && alias dietpi-cloudshell='/DietPi/dietpi/dietpi-cloudshell'
-	[[ -d $G_FP_DIETPI_USERDATA/sonarr || -d $G_FP_DIETPI_USERDATA/radarr || -d $G_FP_DIETPI_USERDATA/lidarr ]] && alias dietpi-arr_to_RAM='/DietPi/dietpi/misc/dietpi-arr_to_RAM'
+	(( $G_DISTRO > 3 )) && [[ -d $G_FP_DIETPI_USERDATA/sonarr || -d $G_FP_DIETPI_USERDATA/radarr || -d $G_FP_DIETPI_USERDATA/lidarr ]] && alias dietpi-arr_to_RAM='/DietPi/dietpi/misc/dietpi-arr_to_RAM'
 	# - occ/ncc need to be global function, as aliases are not accessible from non-interactive scripts:
 	[[ -f /var/www/owncloud/occ ]] && occ(){ sudo -u www-data php /var/www/owncloud/occ "$@"; }
 	[[ -f /var/www/nextcloud/occ ]] && ncc(){ sudo -u www-data php /var/www/nextcloud/occ "$@"; }
@@ -2292,6 +2292,7 @@ $print_logfile_info
 	# - $2 Target setting + value, to inject into config file: After bash string expansion (e.g. variables), everything else will be taken literally, thus no further escaping is required.
 	# - $3 Path to config file
 	# - Optional: $4 Line pattern after which the setting will be added instead of end of file with grep extended regular expression support
+	# - GCI_PASSWORD=1 G_CONFIG_INJECT, password entry, do not print raw output to screen.
 	# - GCI_PRESERVE=1 G_CONFIG_INJECT preserves current setting, if present.
 	# - GCI_BACKUP=1 G_CONFIG_INJECT creates a backup before editing the file, if backup does not yet exist, to: $3.bak
 	# - GCI_NEWLINE=1 G_CONFIG_INJECT explicitly expands newlines \n within $2, which by default are taken literally
@@ -2307,12 +2308,21 @@ $print_logfile_info
 
 		[[ $G_PROGRAM_NAME ]] || local G_PROGRAM_NAME='G_CONFIG_INJECT'
 		local pattern=${1//\//\\\/}
+		local setting_raw=$2
 		local setting=${2//\\/\\\\}; setting=${setting//./\\.}; setting=${setting//+/\\+}; setting=${setting//\*/\\\*}; setting=${setting//\?/\\\?}; setting=${setting//[/\\[}
 		setting=${setting//\(/\\\(}; setting=${setting//\{/\\\{}; setting=${setting//^/\\^}; setting=${setting//&/\\&}; setting=${setting//$/\\$}; setting=${setting//|/\\|}; setting=${setting//\//\\\/}
 		[[ $GCI_NEWLINE == 1 ]] && setting=${setting//\\\\n/\\n}
 		local file=$3
 		local after=${4//\//\\\/}
 		local error=''
+
+		# Replace password string by asterisks in output string
+		if [[ $GCI_PASSWORD == 1 ]]; then
+
+			setting_raw=$(sed -E "s/^.*$pattern[[:blank:]]*//" <<< "$setting_raw")
+			setting_raw="$(sed -E "s/(^.*$pattern[[:blank:]]*).*$/\1/" <<< "$setting_raw")${setting_raw//?/*}"
+
+		fi
 
 		syntax_error(){
 
@@ -2322,7 +2332,7 @@ $print_logfile_info
 			G_WHIP_MSG "[FAILED] Syntax error
 $error
 Couldn't add setting \$2
-	$setting (raw escaped input)
+	$setting (escaped input)
 into file \$3
 	$file
 $after
@@ -2345,18 +2355,18 @@ NB:
 Please verify the existence of the file \$3
 	$file\n
 Retry with proper permissions or apply the setting manually:
-	$(sed -E "c\\$setting" <<< '')"
+	$setting_raw"
 
 		elif error=$(grep -Eq "^[[:blank:]]*$pattern" $file 2>&1); then
 			# As an error within the condition leads to result "false", it can be caught only in next "elif"/"else" statement.
 
 			if [[ $GCI_PRESERVE == 1 ]]; then
 
-				G_DIETPI-NOTIFY 0 "Current setting in \e[33m$file\e[0m will be preserved: \e[33m$(grep -Em1 "^[[:blank:]]*$pattern" $file | sed 's|\\|\\\\|g')\e[0m"
+				G_DIETPI-NOTIFY 0 "Current setting in \e[33m$file\e[0m will be preserved: \e[33m$([[ $GCI_PASSWORD == 1 ]] && echo "${setting_raw//\\/\\\\}" || grep -Em1 "^[[:blank:]]*$pattern" $file | sed 's|\\|\\\\|g')\e[0m"
 
 			elif error=$(grep -Eq "^[[:blank:]]*$setting([[:space:]]|$)" $file 2>&1); then
 
-				G_DIETPI-NOTIFY 0 "Desired setting in \e[33m$file\e[0m was already set: \e[33m$(grep -Em1 "^[[:blank:]]*$pattern" $file | sed 's|\\|\\\\|g')\e[0m"
+				G_DIETPI-NOTIFY 0 "Desired setting in \e[33m$file\e[0m was already set: \e[33m$([[ $GCI_PASSWORD == 1 ]] && echo "${setting_raw//\\/\\\\}" || grep -Em1 "^[[:blank:]]*$pattern" $file | sed 's|\\|\\\\|g')\e[0m"
 
 			elif error=$( (( $(grep -Ec "^[[:blank:]]*$pattern" $file 2>&1) > 1 )) 2>&1); then
 				[[ $error ]] && { syntax_error; return 1; }
@@ -2371,14 +2381,14 @@ $(grep -En "^[[:blank:]]*$pattern" $file)
 ____________\n
 Either the pattern \$1 needs to be more specific or the desired setting can appear multiple times by design and it cannot be predicted which instance to edit.
 Please retry with more specific parameter \$1 or apply the setting manually:
-	$(sed -E "c\\$setting" <<< '')"
+	$setting_raw"
 
 			else
 				[[ $error ]] && { syntax_error; return 1; }
 
 				[[ $GCI_BACKUP == 1 && ! -f $file.bak ]] && cp -a $file $file.bak && G_DIETPI-NOTIFY 2 "Config file backup created: \e[33m$file.bak\e[0m"
 				error=$(sed -Ei "0,/^[[:blank:]]*$pattern.*$/s//$setting/" $file 2>&1) || { syntax_error; return 1; }
-				G_DIETPI-NOTIFY 0 "Setting in \e[33m$file\e[0m adjusted: \e[33m$(sed -E "c\\$setting" <<< '' | sed 's|\\|\\\\|g')\e[0m"
+				G_DIETPI-NOTIFY 0 "Setting in \e[33m$file\e[0m adjusted: \e[33m${setting_raw//\\/\\\\}\e[0m"
 
 			fi
 
@@ -2387,7 +2397,7 @@ Please retry with more specific parameter \$1 or apply the setting manually:
 
 			[[ $GCI_BACKUP == 1 && ! -f $file.bak ]] && cp -a $file $file.bak && G_DIETPI-NOTIFY 2 "Config file backup created: \e[33m$file.bak\e[0m"
 			error=$(sed -Ei "0,/^[[:blank:]#;]*$pattern.*$/s//$setting/" $file 2>&1) || { syntax_error; return 1; }
-			G_DIETPI-NOTIFY 0 "Comment in \e[33m$file\e[0m converted to setting: \e[33m$(sed -E "c\\$setting" <<< '' | sed 's|\\|\\\\|g')\e[0m"
+			G_DIETPI-NOTIFY 0 "Comment in \e[33m$file\e[0m converted to setting: \e[33m${setting_raw//\\/\\\\}\e[0m"
 
 		else
 			[[ $error ]] && { syntax_error; return 1; }
@@ -2398,7 +2408,7 @@ Please retry with more specific parameter \$1 or apply the setting manually:
 
 					[[ $GCI_BACKUP == 1 && ! -f $file.bak ]] && cp -a $file $file.bak && G_DIETPI-NOTIFY 2 "Config file backup created: \e[33m$file.bak\e[0m"
 					error=$(sed -Ei "0,/^[[:blank:]]*$after.*$/s//&\n$setting/" $file 2>&1) || { syntax_error; return 1; }
-					G_DIETPI-NOTIFY 0 "Added setting \e[33m$(sed -E "c\\$setting" <<< '' | sed 's|\\|\\\\|g')\e[0m to \e[33m$file\e[0m after line \e[33m$(grep -Em1 "^[[:blank:]]*$after" $file | sed 's|\\|\\\\|g')\e[0m"
+					G_DIETPI-NOTIFY 0 "Added setting \e[33m${setting_raw//\\/\\\\}\e[0m to \e[33m$file\e[0m after line \e[33m$(grep -Em1 "^[[:blank:]]*$after" $file | sed 's|\\|\\\\|g')\e[0m"
 
 				else
 					[[ $error ]] && { syntax_error; return 1; }
@@ -2409,7 +2419,7 @@ The pattern \$4
 could not be found in file \$3
 	$file\n
 Please retry with valid parameter \$4 or apply the setting manually:
-	$(sed -E "c\\$setting" <<< '')"
+	$setting_raw"
 
 				fi
 
@@ -2419,7 +2429,7 @@ Please retry with valid parameter \$4 or apply the setting manually:
 				# The following sed does not work on empty files:
 				[[ ! -s $file ]] && echo '# Added by DietPi:' >> $file
 				error=$(sed -Ei "\$a\\$setting" $file 2>&1) || { syntax_error; return 1; }
-				G_DIETPI-NOTIFY 0 "Added setting \e[33m$(sed -E "c\\$setting" <<< '' | sed 's|\\|\\\\|g')\e[0m to end of file \e[33m$file\e[0m"
+				G_DIETPI-NOTIFY 0 "Added setting \e[33m${setting_raw//\\/\\\\}\e[0m to end of file \e[33m$file\e[0m"
 
 			fi
 
@@ -2428,9 +2438,9 @@ Please retry with valid parameter \$4 or apply the setting manually:
 	}
 
 	#-----------------------------------------------------------------------------------
-	(( $G_DEBUG == 1 )) && G_DIETPI-NOTIFY 2 'DietPi-Globals loaded\n'
+	[[ $G_DEBUG == 1 ]] && G_DIETPI-NOTIFY 2 'DietPi-Globals loaded'
 	#-----------------------------------------------------------------------------------
-	#return exit code 0, by triggering null as last command to output
+	# Return exit code 0, by triggering null as last command to output
 	:
 	#-----------------------------------------------------------------------------------
 
