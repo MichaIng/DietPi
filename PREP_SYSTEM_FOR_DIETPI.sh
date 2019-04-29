@@ -14,6 +14,13 @@
 	# - G_HW_ARCH
 	# - G_DISTRO
 	# - G_DISTRO_NAME
+	#
+  # To avoid interactive build, environnement variable can be preset to automate the questioning process:
+	# - export G_GITBRANCH=master
+	# - export gIMAGE_CREATOR="Mr. Tux"
+	# - export gPREIMAGE_INFO="Some GNU/Linux"
+	# - export g_HW_MODEL="0"
+  # - export gWIFI_REQUIRED=0
 	#------------------------------------------------------------------------------------------------
 
 	# Core globals
@@ -142,14 +149,20 @@
 
 	)
 
-	if WHIP_RETURN=$(whiptail --title "$G_PROGRAM_NAME" --menu 'Please select a Git branch:' --default-item 'master' --ok-button 'Ok' --cancel-button 'Exit' --backtitle "$G_PROGRAM_NAME" 12 80 3 "${aWHIP_BRANCH[@]}" 3>&1 1>&2 2>&3); then
+	if [ -z ${G_GITBRANCH+x} ]; then
+		if WHIP_RETURN=$(whiptail --title "$G_PROGRAM_NAME" --menu 'Please select a Git branch:' --default-item 'master' --ok-button 'Ok' --cancel-button 'Exit' --backtitle "$G_PROGRAM_NAME" 12 80 3 "${aWHIP_BRANCH[@]}" 3>&1 1>&2 2>&3); then
 
-		G_GITBRANCH=$WHIP_RETURN
+				G_GITBRANCH=$WHIP_RETURN
 
+		else
+
+			echo -e '[ INFO ] No choice detected. Aborting...\n'
+      exit 0
+
+		fi
 	else
 
-		echo -e '[ INFO ] No choice detected. Aborting...\n'
-		exit 0
+		echo -e '[ INFO ] Using environment the variable for gitbranch (G_PROGRAM_NAME) \n'
 
 	fi
 
@@ -295,8 +308,16 @@
 		# Image creator
 		while :
 		do
+			if [ -z ${gIMAGE_CREATOR+x} ]; then
 
-			G_WHIP_INPUTBOX 'Please enter your name. This will be used to identify the image creator within credits banner.\n\nYou can add your contact information as well for end users.\n\nNB: An entry is required.'
+				G_WHIP_INPUTBOX 'Please enter your name. This will be used to identify the image creator within credits banner.\n\nYou can add your contact information as well for end users.\n\nNB: An entry is required.'
+
+			else
+
+        G_WHIP_RETURNED_VALUE=$gIMAGE_CREATOR
+				echo -e '[ INFO ] Using environment the variable for the image creator name (gIMAGE_CREATOR) \n'
+
+			fi
 			if (( ! $? )) && [[ $G_WHIP_RETURNED_VALUE ]]; then
 
 				#Disallowed:
@@ -347,7 +368,16 @@
 		while :
 		do
 
-			G_WHIP_INPUTBOX 'Please enter the name or URL of the pre-image you installed on this system, prior to running this script. This will be used to identify the pre-image credits.\n\nEG: Debian, Raspbian Lite, Meveric, FriendlyARM, or "forum.odroid.com/viewtopic.php?f=ABC&t=XYZ" etc.\n\nNB: An entry is required.'
+			if [ -z ${gPREIMAGE_INFO+x} ]; then
+
+				G_WHIP_INPUTBOX 'Please enter the name or URL of the pre-image you installed on this system, prior to running this script. This will be used to identify the pre-image credits.\n\nEG: Debian, Raspbian Lite, Meveric, FriendlyARM, or "forum.odroid.com/viewtopic.php?f=ABC&t=XYZ" etc.\n\nNB: An entry is required.'
+
+			else
+
+				G_WHIP_RETURNED_VALUE=$gPREIMAGE_INFO
+				echo -e '[ INFO ] Using environment the variable for the name or URL of the pre-image (gPREIMAGE_INFO) \n'
+
+			fi
 			if (( ! $? )) && [[ $G_WHIP_RETURNED_VALUE ]]; then
 
 				PREIMAGE_INFO=$G_WHIP_RETURNED_VALUE
@@ -416,7 +446,16 @@
 
 		)
 
-		G_WHIP_MENU 'Please select the current device this is being installed on:\n - NB: Select "Generic device" if not listed.\n - "Core devices": Are fully supported by DietPi, offering full GPU + Kodi support.\n - "Limited support devices": No GPU support, supported limited to DietPi specific issues only (eg: excludes Kernel/GPU/VPU related items).'
+		if [ -z ${G_HW_MODEL+x} ]; then
+
+			G_WHIP_MENU 'Please select the current device this is being installed on:\n - NB: Select "Generic device" if not listed.\n - "Core devices": Are fully supported by DietPi, offering full GPU + Kodi support.\n - "Limited support devices": No GPU support, supported limited to DietPi specific issues only (eg: excludes Kernel/GPU/VPU related items).'
+
+		else
+
+			G_WHIP_RETURNED_VALUE=$G_HW_MODEL
+			echo -e '[ INFO ] Using environment the variable for the current device name (G_HW_MODEL) \n'
+
+		fi
 		if (( $? )) || [[ -z $G_WHIP_RETURNED_VALUE ]]; then
 
 			G_DIETPI-NOTIFY 1 'No choice detected. Aborting...\n'
@@ -440,15 +479,21 @@
 
 		G_WHIP_DEFAULT_ITEM=1
 		(( $G_HW_MODEL == 20 )) && G_WHIP_DEFAULT_ITEM=0
+		if [ -z ${gWIFI_REQUIRED+x} ]; then
+				if G_WHIP_MENU 'Please select an option:' && (( $G_WHIP_RETURNED_VALUE )); then
 
-		if G_WHIP_MENU 'Please select an option:' && (( $G_WHIP_RETURNED_VALUE )); then
+					G_DIETPI-NOTIFY 2 'Marking WiFi as required'
+					WIFI_REQUIRED=1
 
-			G_DIETPI-NOTIFY 2 'Marking WiFi as required'
-			WIFI_REQUIRED=1
+				else
 
+					G_DIETPI-NOTIFY 2 'Marking WiFi as NOT required'
+
+				fi
 		else
 
-			G_DIETPI-NOTIFY 2 'Marking WiFi as NOT required'
+				WIFI_REQUIRED=$gWIFI_REQUIRED
+				echo -e '[ INFO ] Using environment the variable to tell if wifi is required (gWIFI_REQUIRED) \n'
 
 		fi
 
