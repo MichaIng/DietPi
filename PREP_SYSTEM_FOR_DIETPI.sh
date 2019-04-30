@@ -149,7 +149,7 @@
 	else
 
 		echo -e '[ INFO ] No choice detected. Aborting...\n'
-		exit 0
+		exit 1
 
 	fi
 
@@ -420,7 +420,7 @@
 		if (( $? )) || [[ -z $G_WHIP_RETURNED_VALUE ]]; then
 
 			G_DIETPI-NOTIFY 1 'No choice detected. Aborting...\n'
-			exit 0
+			exit 1
 
 		fi
 
@@ -495,7 +495,7 @@
 		if (( $? )) || [[ -z $G_WHIP_RETURNED_VALUE ]]; then
 
 			G_DIETPI-NOTIFY 1 'No choice detected. Aborting...\n'
-			exit 0
+			exit 1
 
 		fi
 
