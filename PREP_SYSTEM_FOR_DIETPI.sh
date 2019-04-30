@@ -454,7 +454,8 @@
 
 		# Distro Selection
 		DISTRO_LIST_ARRAY=(
-
+		
+			'3' ': Jessie-support'
 			'4' ': Stretch (current stable release, recommended)'
 			'5' ': Buster (testing only, not officially supported)'
 
@@ -500,7 +501,11 @@
 		fi
 
 		DISTRO_TARGET=$G_WHIP_RETURNED_VALUE
-		if (( $DISTRO_TARGET == 4 )); then
+		if (( $DISTRO_TARGET == 3 )); then
+
+			DISTRO_TARGET_NAME='jessie'
+			
+		elif (( $DISTRO_TARGET == 4 )); then
 
 			DISTRO_TARGET_NAME='stretch'
 
@@ -651,7 +656,6 @@ _EOF_
 			'curl'			# Web address testing, downloading, uploading etc.
 			'debconf'		# APT package pre-configuration, e.g. "debconf-set-selections" for non-interactive install
 			'dirmngr'		# GNU key management required for some APT installs via additional repos
-			'dropbear-run'		# DietPi default SSH-Client, excluding initramfs integration
 			'ethtool'		# Ethernet link checking
 			'fake-hwclock'		# Hardware clock emulation, to allow correct timestamps during boot before network time sync
 			'gnupg'			# apt-key add
@@ -676,6 +680,16 @@ _EOF_
 			'whiptail'		# DietPi dialogs
 
 		)
+		
+		if (( $DISTRO_TARGET == 3 )); then
+		
+			aPACKAGES_REQUIRED_INSTALL+=('dropbear') # DietPi default SSH-Client
+		
+		else
+		
+			aPACKAGES_REQUIRED_INSTALL+=('dropbear-run') # DietPi default SSH-Client, excluding initramfs integration
+			
+		fi
 
 		# - G_HW_MODEL specific required repo key packages: https://github.com/MichaIng/DietPi/issues/1285#issuecomment-358301273
 		if (( $G_HW_MODEL > 9 )); then
