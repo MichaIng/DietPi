@@ -144,7 +144,7 @@ We are always looking for talented people who believe in the DietPi project, and
 
 Vote for new suggestions, feature-, software- or image requests, or add your own to our new FeatHub page:
 
-[![Feature Requests](http://feathub.com/MichaIng/DietPi?format=svg)](http://feathub.com/MichaIng/DietPi)
+[![Feature Requests](https://feathub.com/MichaIng/DietPi?format=svg)](https://feathub.com/MichaIng/DietPi)
 
 ## License
 
@@ -190,10 +190,11 @@ along with this program.  If not, see https://www.gnu.org/licenses/
 Links to additional software used in DietPi and their source and build instructions where applicable:
 
 - [Linux kernel](https://github.com/torvalds/linux)
-- [GNU operating sytem](https://www.gnu.org/)
+- [GNU operating system](https://www.gnu.org/)
 - [Debian distribution](https://salsa.debian.org/)
 - [Raspberry](https://github.com/raspberrypi) [Pi](https://github.com/RPi-Distro)
 - [Odroid](https://github.com/hardkernel?tab=repositories)
+- [Sparky](https://github.com/sparkysbc?tab=repositories) [SBC](https://github.com/sparky-sbc/sparky-test)
 - [FriendlyARM](https://github.com/friendlyarm?tab=repositories)
 - [X.Org-X-Server](https://www.x.org/archive//individual/)
 - [LXDE desktop](https://github.com/LXDE)
