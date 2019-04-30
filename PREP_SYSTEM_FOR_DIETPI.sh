@@ -42,7 +42,7 @@
 	echo 'Acquire::ForceIPv4 "true";' > /etc/apt/apt.conf.d/99-dietpi-force-ipv4
 
 	# Allow PDiffs on RPi since the "slow implementation" argument is outdated and PDiffs allow lower download size and less disk I/O
-	[[ -f '/etc/apt/apt.conf.d/50raspi' ]] rm /etc/apt/apt.conf.d/50raspi
+	[[ -f '/etc/apt/apt.conf.d/50raspi' ]] && rm /etc/apt/apt.conf.d/50raspi
 
 	# Check/install minimal APT Pre-Reqs
 	a_MIN_APT_PREREQS=(
@@ -272,7 +272,7 @@
 				systemctl disable ${i##*/}
 				rm $i
 
-			fi
+			done
 
 			# - Delete any previous existing data
 			#	Failsafe
