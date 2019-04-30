@@ -136,13 +136,11 @@
 	# Select gitbranch
 	aWHIP_BRANCH=(
 
-		'master' ': Stable release (recommended)'
-		'beta' ': Public beta testing branch'
-		'dev' ': Unstable dev branch'
+		'jessie-support' ': Stable EOL release (recommended)'
 
 	)
 
-	if WHIP_RETURN=$(whiptail --title "$G_PROGRAM_NAME" --menu 'Please select a Git branch:' --default-item 'master' --ok-button 'Ok' --cancel-button 'Exit' --backtitle "$G_PROGRAM_NAME" 12 80 3 "${aWHIP_BRANCH[@]}" 3>&1 1>&2 2>&3); then
+	if WHIP_RETURN=$(whiptail --title "$G_PROGRAM_NAME" --menu 'Please select a Git branch:' --default-item 'jessie-support' --ok-button 'Ok' --cancel-button 'Exit' --backtitle "$G_PROGRAM_NAME" 12 80 3 "${aWHIP_BRANCH[@]}" 3>&1 1>&2 2>&3); then
 
 		G_GITBRANCH=$WHIP_RETURN
 
