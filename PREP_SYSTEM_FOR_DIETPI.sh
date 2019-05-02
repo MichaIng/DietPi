@@ -21,6 +21,7 @@
 	# - export gPREIMAGE_INFO="Some GNU/Linux"
 	# - export g_HW_MODEL="0"
   # - export gWIFI_REQUIRED=0
+	# - export G_DISTRO_TARGET="stretch"
 	#------------------------------------------------------------------------------------------------
 
 	# Core globals
@@ -534,31 +535,40 @@
 
 		fi
 
-		G_WHIP_DEFAULT_ITEM=${G_WHIP_MENU_ARRAY[0]} # Downgrades disabled, so first item matches current/lowest supported distro version
-		G_WHIP_BUTTON_CANCEL_TEXT='Exit'
-		G_WHIP_MENU "Please select a distro version to install on this system. Selecting a distro that is older than the current installed on system, is not supported.\n\nCurrently installed:\n - $G_DISTRO $G_DISTRO_NAME"
-		if (( $? )) || [[ -z $G_WHIP_RETURNED_VALUE ]]; then
+		if [ -z ${G_DISTRO_TARGET+x} ]; then
 
-			G_DIETPI-NOTIFY 1 'No choice detected. Aborting...\n'
-			exit 0
+				G_WHIP_DEFAULT_ITEM=${G_WHIP_MENU_ARRAY[0]} # Downgrades disabled, so first item matches current/lowest supported distro version
+				G_WHIP_BUTTON_CANCEL_TEXT='Exit'
+				G_WHIP_MENU "Please select a distro version to install on this system. Selecting a distro that is older than the current installed on system, is not supported.\n\nCurrently installed:\n - $G_DISTRO $G_DISTRO_NAME"
+				if (( $? )) || [[ -z $G_WHIP_RETURNED_VALUE ]]; then
 
-		fi
+					G_DIETPI-NOTIFY 1 'No choice detected. Aborting...\n'
+					exit 0
 
-		DISTRO_TARGET=$G_WHIP_RETURNED_VALUE
-		if (( $DISTRO_TARGET == 4 )); then
-
-			DISTRO_TARGET_NAME='stretch'
-
-		elif (( $DISTRO_TARGET == 5 )); then
-
-			DISTRO_TARGET_NAME='buster'
+				fi
+				DISTRO_TARGET=$G_WHIP_RETURNED_VALUE
 
 		else
-
-			G_DIETPI-NOTIFY 1 'Invalid choice detected. Aborting...\n'
-			exit 1
+			DISTRO_TARGET=$G_DISTRO_TARGET
+			echo -e '[ INFO ] Using environment the variable to tell if wifi is required (gWIFI_REQUIRED) \n'
 
 		fi
+
+				DISTRO_TARGET=$G_WHIP_RETURNED_VALUE
+				if (( $DISTRO_TARGET == 4 )); then
+
+					DISTRO_TARGET_NAME='stretch'
+
+				elif (( $DISTRO_TARGET == 5 )); then
+
+					DISTRO_TARGET_NAME='buster'
+
+				else
+
+					G_DIETPI-NOTIFY 1 'Invalid choice detected. Aborting...\n'
+					exit 1
+
+				fi
 
 		G_DIETPI-NOTIFY 2 "Selected Debian version: $DISTRO_TARGET_NAME (ID: $DISTRO_TARGET)"
 
