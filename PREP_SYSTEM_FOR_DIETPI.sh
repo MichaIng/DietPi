@@ -548,10 +548,6 @@
 
 			G_RUN_CMD mv "DietPi-$G_GITBRANCH/config.txt" /boot/
 
-		elif (( $G_HW_MODEL == 10 )); then
-
-			G_RUN_CMD mv "DietPi-$G_GITBRANCH/boot_c1.ini" /boot/boot.ini
-
 		elif (( $G_HW_MODEL == 11 )); then
 
 			G_RUN_CMD mv "DietPi-$G_GITBRANCH/boot_xu4.ini" /boot/boot.ini
@@ -802,11 +798,6 @@ _EOF_
 		elif (( $G_HW_MODEL == 11 )); then
 
 			G_AGI linux-image-4.14-armhf-odroid-xu4
-
-		#	Odroid C1
-		elif (( $G_HW_MODEL == 10 )); then
-
-			G_AGI linux-image-armhf-odroid-c1
 
 		#	BBB
 		elif (( $G_HW_MODEL == 71 )); then
