@@ -19,9 +19,9 @@
 	# - export G_GITBRANCH=master
 	# - export gIMAGE_CREATOR="Mr. Tux"
 	# - export gPREIMAGE_INFO="Some GNU/Linux"
-	# - export g_HW_MODEL="0"
-  # - export gWIFI_REQUIRED=0
-	# - export G_DISTRO_TARGET="stretch"
+	# - export g_HW_MODEL=0
+	# - export gWIFI_REQUIRED=2
+	# - export G_DISTRO_TARGET=4
 	#------------------------------------------------------------------------------------------------
 
 	# Core globals
