@@ -573,7 +573,7 @@
 
 			DISTRO_TARGET_NAME='stretch'
 
-		elif (( $G_DISTRO_TARGET == 5 )); then
+		elif (( $DISTRO_TARGET == 5 )); then
 
 			DISTRO_TARGET_NAME='buster'
 
