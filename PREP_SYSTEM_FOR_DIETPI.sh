@@ -563,7 +563,7 @@
 
 			fi
 
-		fi
+		done
 
 		if (( $G_DISTRO_TARGET == 4 )); then
 
