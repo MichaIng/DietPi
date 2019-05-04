@@ -477,14 +477,14 @@
 				'0' ': I do not require WiFi functionality, skip related package install.'
 				'1' ': I require WiFi functionality, install related packages.'
 
-			)			
+			)
 
 			G_WHIP_DEFAULT_ITEM=1
 			(( $G_HW_MODEL == 20 )) && G_WHIP_DEFAULT_ITEM=0
 			if G_WHIP_MENU 'Please select an option:'; then
 
 
-				G_WIFI_REQUIRED=$G_WHIP_RETURNED_VALUE 
+				G_WIFI_REQUIRED=$G_WHIP_RETURNED_VALUE
 
 			else
 
@@ -538,7 +538,7 @@
 		do
 
 			if disable_error=1 G_CHECK_VALIDINT "$G_DISTRO_TARGET" 0; then
-				
+
 				for i in "${G_WHIP_MENU_ARRAY[@]}"
 				do
 
