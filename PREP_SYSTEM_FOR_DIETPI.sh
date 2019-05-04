@@ -16,13 +16,13 @@
 	# - G_DISTRO_NAME
 	#
 	# The following environment variables can be set to automate the this script (adjust example values to your needs):
-	# - G_GITOWNER='MichaIng'		(optional, defaults to 'MichaIng')
-	# - G_GITBRANCH='master'		(must be one of 'master', 'beta' or 'dev')
-	# - G_IMAGE_CREATOR='Mr. Tux'
-	# - G_PREIMAGE_INFO='Some GNU/Linux'
-	# - G_HW_MODEL=0			(must match one of the supported IDs below)
-	# - G_WIFI_REQUIRED=0			[01]
-	# - G_DISTRO_TARGET=4			[45] (Stretch: 4, Buster: 5)
+	# - GITOWNER='MichaIng'			(optional, defaults to 'MichaIng')
+	# - GITBRANCH='master'			(must be one of 'master', 'beta' or 'dev')
+	# - IMAGE_CREATOR='Mr. Tux'
+	# - PREIMAGE_INFO='Some GNU/Linux'
+	# - HW_MODEL=0				(must match one of the supported IDs below)
+	# - WIFI_REQUIRED=0			[01]
+	# - DISTRO_TARGET=4			[45] (Stretch: 4, Buster: 5)
 	#------------------------------------------------------------------------------------------------
 
 	# Core globals
@@ -141,10 +141,11 @@
 	export LC_ALL=en_GB.UTF8
 
 	# Set Git owner
-	[[ $G_GITOWNER ]] || G_GITOWNER='MichaIng'
+	G_GITOWNER=${GITOWNER:-MichaIng}
+	unset GITOWNER
 
 	# Select Git branch
-	if ! [[ $G_GITBRANCH =~ ^(master|beta|dev)$ ]]; then
+	if ! [[ $GITBRANCH =~ ^(master|beta|dev)$ ]]; then
 
 		aWHIP_BRANCH=(
 
@@ -154,10 +155,9 @@
 
 		)
 
-		if WHIP_RETURN=$(whiptail --title "$G_PROGRAM_NAME" --menu 'Please select a Git branch:' --default-item 'master' --ok-button 'Ok' --cancel-button 'Exit' --backtitle "$G_PROGRAM_NAME" 12 80 3 "${aWHIP_BRANCH[@]}" 3>&1 1>&2 2>&3); then
+		if GITBRANCH=$(whiptail --title "$G_PROGRAM_NAME" --menu 'Please select a Git branch:' --default-item 'master' --ok-button 'Ok' --cancel-button 'Exit' --backtitle "$G_PROGRAM_NAME" 12 80 3 "${aWHIP_BRANCH[@]}" 3>&1 1>&2 2>&3); then
 
-				G_GITBRANCH=$WHIP_RETURN
-				unset aWHIP_BRANCH WHIP_RETURN
+			unset aWHIP_BRANCH
 
 		else
 
@@ -167,6 +167,8 @@
 		fi
 
 	fi
+	G_GITBRANCH=$GITBRANCH
+	unset GITBRANCH
 
 	echo "[ INFO ] Selected Git branch: $G_GITOWNER/$G_GITBRANCH"
 
@@ -296,11 +298,11 @@
 		# Image creator
 		while :
 		do
-			if [[ $G_IMAGE_CREATOR ]]; then
+			if [[ $IMAGE_CREATOR ]]; then
 
-				G_WHIP_RETURNED_VALUE=$G_IMAGE_CREATOR
+				G_WHIP_RETURNED_VALUE=$IMAGE_CREATOR
 				# unset to force interactive input if disallowed name is detected
-				unset G_IMAGE_CREATOR
+				unset IMAGE_CREATOR
 
 			else
 
@@ -344,7 +346,7 @@
 
 				else
 
-					G_IMAGE_CREATOR=$G_WHIP_RETURNED_VALUE
+					IMAGE_CREATOR=$G_WHIP_RETURNED_VALUE
 					break
 
 				fi
@@ -353,10 +355,10 @@
 
 		done
 
-		G_DIETPI-NOTIFY 2 "Entered image creator: $G_IMAGE_CREATOR"
+		G_DIETPI-NOTIFY 2 "Entered image creator: $IMAGE_CREATOR"
 
 		# Pre-image used/name
-		if [[ ! $G_PREIMAGE_INFO ]]; then
+		if [[ ! $PREIMAGE_INFO ]]; then
 
 			while :
 			do
@@ -364,7 +366,7 @@
 				G_WHIP_INPUTBOX 'Please enter the name or URL of the pre-image you installed on this system, prior to running this script. This will be used to identify the pre-image credits.\n\nEG: Debian, Raspbian Lite, Meveric, FriendlyARM, or "forum.odroid.com/viewtopic.php?f=ABC&t=XYZ" etc.\n\nNB: An entry is required.'
 				if [[ $G_WHIP_RETURNED_VALUE ]]; then
 
-					G_PREIMAGE_INFO=$G_WHIP_RETURNED_VALUE
+					PREIMAGE_INFO=$G_WHIP_RETURNED_VALUE
 					break
 
 				fi
@@ -373,7 +375,7 @@
 
 		fi
 
-		G_DIETPI-NOTIFY 2 "Entered pre-image info: $G_PREIMAGE_INFO"
+		G_DIETPI-NOTIFY 2 "Entered pre-image info: $PREIMAGE_INFO"
 
 		# Hardware selection
 		#	NB: PLEASE ENSURE HW_MODEL INDEX ENTRIES MATCH : PREP, dietpi-obtain_hw_model, dietpi-survey_results,
@@ -437,12 +439,12 @@
 		do
 
 			# Check for valid entry, e.g. when set via environment variabe
-			if disable_error=1 G_CHECK_VALIDINT "$G_HW_MODEL" 0; then
+			if disable_error=1 G_CHECK_VALIDINT "$HW_MODEL" 0; then
 
 				for i in "${G_WHIP_MENU_ARRAY[@]}"
 				do
 
-					[[ $G_HW_MODEL == $i ]] && break 2
+					[[ $HW_MODEL == $i ]] && break 2
 
 				done
 
@@ -456,12 +458,14 @@
 
 			elif [[ $G_WHIP_RETURNED_VALUE ]]; then
 
-				G_HW_MODEL=$G_WHIP_RETURNED_VALUE
+				HW_MODEL=$G_WHIP_RETURNED_VALUE
 				break
 
 			fi
 
 		done
+		G_HW_MODEL=$HW_MODEL
+		unset HW_MODEL
 
 		# + Set for future scripts
 		echo $G_HW_MODEL > /etc/.dietpi_hw_model_identifier
@@ -470,7 +474,7 @@
 		G_DIETPI-NOTIFY 2 "Detected CPU architecture: $G_HW_ARCH_DESCRIPTION (ID: $G_HW_ARCH)"
 
 		# WiFi selection
-		if [[ $G_WIFI_REQUIRED != [01] ]]; then
+		if [[ $WIFI_REQUIRED != [01] ]]; then
 
 			G_WHIP_MENU_ARRAY=(
 
@@ -484,7 +488,7 @@
 			if G_WHIP_MENU 'Please select an option:'; then
 
 
-				G_WIFI_REQUIRED=$G_WHIP_RETURNED_VALUE
+				WIFI_REQUIRED=$G_WHIP_RETURNED_VALUE
 
 			else
 
@@ -495,7 +499,7 @@
 
 		fi
 
-		(( $G_WIFI_REQUIRED )) && G_DIETPI-NOTIFY 2 'Marking WiFi as required' || G_DIETPI-NOTIFY 2 'Marking WiFi as NOT required'
+		(( $WIFI_REQUIRED )) && G_DIETPI-NOTIFY 2 'Marking WiFi as required' || G_DIETPI-NOTIFY 2 'Marking WiFi as NOT required'
 
 		# Distro Selection
 		DISTRO_LIST_ARRAY=(
@@ -537,12 +541,12 @@
 		while :
 		do
 
-			if disable_error=1 G_CHECK_VALIDINT "$G_DISTRO_TARGET" 0; then
+			if disable_error=1 G_CHECK_VALIDINT "$DISTRO_TARGET" 0; then
 
 				for i in "${G_WHIP_MENU_ARRAY[@]}"
 				do
 
-					[[ $G_DISTRO_TARGET == $i ]] && break 2
+					[[ $DISTRO_TARGET == $i ]] && break 2
 
 				done
 
@@ -558,14 +562,14 @@
 
 			else
 
-				G_DISTRO_TARGET=$G_WHIP_RETURNED_VALUE
+				DISTRO_TARGET=$G_WHIP_RETURNED_VALUE
 				break
 
 			fi
 
 		done
 
-		if (( $G_DISTRO_TARGET == 4 )); then
+		if (( $DISTRO_TARGET == 4 )); then
 
 			DISTRO_TARGET_NAME='stretch'
 
@@ -580,7 +584,7 @@
 
 		fi
 
-		G_DIETPI-NOTIFY 2 "Selected Debian version: $DISTRO_TARGET_NAME (ID: $G_DISTRO_TARGET)"
+		G_DIETPI-NOTIFY 2 "Selected Debian version: $DISTRO_TARGET_NAME (ID: $DISTRO_TARGET)"
 
 		#------------------------------------------------------------------------------------------------
 		echo ''
@@ -656,10 +660,10 @@
 		G_DIETPI-NOTIFY 2 '-----------------------------------------------------------------------------------'
 		#------------------------------------------------------------------------------------------------
 
-		G_DIETPI-NOTIFY 2 "Setting APT sources.list: $DISTRO_TARGET_NAME $G_DISTRO_TARGET"
+		G_DIETPI-NOTIFY 2 "Setting APT sources.list: $DISTRO_TARGET_NAME $DISTRO_TARGET"
 
-		# - We need to forward $G_DISTRO_TARGET* to dietpi-set_software, as well as $G_HW_MODEL for Debian vs Raspbian decision.
-		G_DISTRO=$G_DISTRO_TARGET G_DISTRO_NAME=$DISTRO_TARGET_NAME G_HW_MODEL=$G_HW_MODEL G_RUN_CMD /DietPi/dietpi/func/dietpi-set_software apt-mirror 'default'
+		# - We need to forward $DISTRO_TARGET* to dietpi-set_software, as well as $G_HW_MODEL for Debian vs Raspbian decision.
+		G_DISTRO=$DISTRO_TARGET G_DISTRO_NAME=$DISTRO_TARGET_NAME G_HW_MODEL=$G_HW_MODEL G_RUN_CMD /DietPi/dietpi/func/dietpi-set_software apt-mirror 'default'
 
 		# - Meveric, update repo to use our EU mirror: https://github.com/MichaIng/DietPi/issues/1519#issuecomment-368234302
 		sed -Ei 's@https?://oph\.mdrjr\.net@http://fuzon.co.uk@' /etc/apt/sources.list.d/meveric* &> /dev/null
@@ -839,7 +843,7 @@ _EOF_
 			rm -Rf /lib/modules/*
 			G_AGI --reinstall libraspberrypi-bin libraspberrypi0 raspberrypi-bootloader raspberrypi-kernel raspberrypi-sys-mods
 			# Buster systemd-udevd doesn't support the current raspi-copies-and-fills: https://github.com/MichaIng/DietPi/issues/1286
-			(( $G_DISTRO_TARGET < 5 )) && G_AGI raspi-copies-and-fills
+			(( $DISTRO_TARGET < 5 )) && G_AGI raspi-copies-and-fills
 
 		#	Odroid N2
 		elif (( $G_HW_MODEL == 15 )); then
@@ -936,7 +940,7 @@ _EOF_
 		G_AGDUG
 
 		# - Distro is now target (for APT purposes and G_AGX support due to installed binary, its here, instead of after G_AGUP)
-		G_DISTRO=$G_DISTRO_TARGET
+		G_DISTRO=$DISTRO_TARGET
 		G_DISTRO_NAME=$DISTRO_TARGET_NAME
 
 		G_DIETPI-NOTIFY 2 'Installing core DietPi pre-req APT packages'
@@ -1637,8 +1641,8 @@ _EOF_
 		G_DIETPI-NOTIFY 2 'Writing PREP information to file'
 
 		cat << _EOF_ > /DietPi/dietpi/.prep_info
-$G_IMAGE_CREATOR
-$G_PREIMAGE_INFO
+$IMAGE_CREATOR
+$PREIMAGE_INFO
 _EOF_
 
 		G_DIETPI-NOTIFY 2 'Generating GPL license readme'
