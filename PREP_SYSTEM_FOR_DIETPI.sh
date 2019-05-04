@@ -1150,12 +1150,16 @@ _EOF_
 
 		G_DIETPI-NOTIFY 2 'Configuring network interfaces:'
 
-		[[ -f /etc/network/interfaces ]] && rm -R /etc/network/interfaces # ARMbian symlink for bulky network-manager
+		[[ -f '/etc/network/interfaces' ]] && rm -R /etc/network/interfaces # ARMbian symlink for bulky network-manager
 
 		G_ERROR_HANDLER_COMMAND='/etc/network/interfaces'
 		cat << _EOF_ > $G_ERROR_HANDLER_COMMAND
-#/etc/network/interfaces
-#Please use DietPi-Config to modify network settings.
+# Location: /etc/network/interfaces
+# Please modify network settings via: dietpi-config
+# Or create your own drop-ins in: /etc/network/interfaces.d/
+
+# Drop-in configs
+source interfaces.d/*
 
 # Local
 auto lo
@@ -1169,7 +1173,7 @@ netmask 255.255.255.0
 gateway 192.168.0.1
 #dns-nameservers 8.8.8.8 8.8.4.4
 
-# Wifi
+# WiFi
 #allow-hotplug wlan0
 iface wlan0 inet dhcp
 address 192.168.0.100
@@ -1198,7 +1202,7 @@ _EOF_
 		fi
 
 		#	Fix rare WiFi interface start issue: https://github.com/MichaIng/DietPi/issues/2074
-		[[ -f /etc/network/if-pre-up.d/wireless-tools ]] && sed -i '\|^[[:blank:]]ifconfig "$IFACE" up$|c\\t/sbin/ip link set dev "$IFACE" up' /etc/network/if-pre-up.d/wireless-tools
+		[[ -f '/etc/network/if-pre-up.d/wireless-tools' ]] && sed -i '\|^[[:blank:]]ifconfig "$IFACE" up$|c\\t/sbin/ip link set dev "$IFACE" up' /etc/network/if-pre-up.d/wireless-tools
 
 		G_DIETPI-NOTIFY 2 'Tweaking DHCP timeout:'
 
@@ -1279,8 +1283,8 @@ _EOF_
 
 		G_DIETPI-NOTIFY 2 'Configuring regional settings (TZdata):'
 
-		[[ -f /etc/timezone ]] && rm /etc/timezone
-		[[ -f /etc/localtime ]] && rm /etc/localtime
+		[[ -f '/etc/timezone' ]] && rm /etc/timezone
+		[[ -f '/etc/localtime' ]] && rm /etc/localtime
 		ln -sf /usr/share/zoneinfo/Europe/London /etc/localtime
 		G_RUN_CMD dpkg-reconfigure -f noninteractive tzdata
 
@@ -1468,17 +1472,17 @@ _EOF_
 		G_DIETPI-NOTIFY 2 'Running general cleanup of misc files'
 
 		# - Remove Bash history file
-		[[ -f /root/.bash_history ]] && rm /root/.bash_history
+		[[ -f '/root/.bash_history' ]] && rm /root/.bash_history
 		rm -f /home/*/.bash_history
 
 		# - Remove Nano history file
-		[[ -f /root/.nano_history ]] && rm /root/.nano_history
+		[[ -f '/root/.nano_history' ]] && rm /root/.nano_history
 		rm -f /home/*/.nano_history
 
 		G_DIETPI-NOTIFY 2 'Removing swapfile from image'
 
 		/DietPi/dietpi/func/dietpi-set_swapfile 0 /var/swap
-		[[ -e /var/swap ]] && rm /var/swap # still exists on some images...
+		[[ -e '/var/swap' ]] && rm /var/swap # still exists on some images...
 
 		# - re-enable for next run
 		G_CONFIG_INJECT 'AUTO_SETUP_SWAPFILE_SIZE=' 'AUTO_SETUP_SWAPFILE_SIZE=1' /DietPi/dietpi.txt
@@ -1489,7 +1493,7 @@ _EOF_
 		(( $G_HW_MODEL == 40 )) && [[ -f /boot/uEnv.txt ]] && sed -i '/^ethaddr/ d' /boot/uEnv.txt
 
 		# - Set Pi cmdline.txt back to normal
-		[[ -f /boot/cmdline.txt ]] && sed -i 's/ rootdelay=10//g' /boot/cmdline.txt
+		[[ -f '/boot/cmdline.txt' ]] && sed -i 's/ rootdelay=10//g' /boot/cmdline.txt
 
 		G_DIETPI-NOTIFY 2 'Generating default wpa_supplicant.conf'
 
