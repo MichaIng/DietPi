@@ -18,7 +18,8 @@ about: Create a report to help us improve
 - Software title | (EG: Nextcloud)
 - Was the software title installed freshly or updated/migrated?
 - Can this issue be replicated on a fresh installation of DietPi?
-- `dietpi-bugreport` ID | `sed -n 5p /DietPi/dietpi/.hw_model`
+<!-- If you sent a "dietpi-bugreport", please paste the ID here -->
+- Bug report ID | `sed -n 5p /DietPi/dietpi/.hw_model`
 
 #### Steps to reproduce
 <!-- Explain how to reproduce the issue -->
