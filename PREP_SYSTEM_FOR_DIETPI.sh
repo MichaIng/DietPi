@@ -15,19 +15,18 @@
 	# - G_DISTRO
 	# - G_DISTRO_NAME
 	#
-  # To avoid interactive build, environnement variable can be preset to automate the questioning process:
-	# - export G_GITBRANCH=master
-	# - export gIMAGE_CREATOR="Mr. Tux"
-	# - export gPREIMAGE_INFO="Some GNU/Linux"
-	# - export g_HW_MODEL=0
-	# - export gWIFI_REQUIRED=2
-	# - export G_DISTRO_TARGET=4
+	# The following environment variables can be set to automate the this script (adjust example values to your needs):
+	# - G_GITOWNER='MichaIng'		(optional, defaults to 'MichaIng')
+	# - G_GITBRANCH='master'		(must be one of 'master', 'beta' or 'dev')
+	# - G_IMAGE_CREATOR='Mr. Tux'
+	# - G_PREIMAGE_INFO='Some GNU/Linux'
+	# - G_HW_MODEL=0			(must match one of the supported IDs below)
+	# - G_WIFI_REQUIRED=0			[01]
+	# - G_DISTRO_TARGET=4			[45] (Stretch: 4, Buster: 5)
 	#------------------------------------------------------------------------------------------------
 
 	# Core globals
 	G_PROGRAM_NAME='DietPi-PREP'
-	G_GITOWNER=${GITOWNER:-MichaIng}
-	unset GITOWNER
 
 	#------------------------------------------------------------------------------------------------
 	# Critical checks and pre-reqs, with exit, prior to initial run of script
@@ -141,33 +140,33 @@
 	export LANG=en_GB.UTF8
 	export LC_ALL=en_GB.UTF8
 
-	# Select gitbranch
-	aWHIP_BRANCH=(
+	# Set Git owner
+	[[ $G_GITOWNER ]] || G_GITOWNER='MichaIng'
 
-		'master' ': Stable release (recommended)'
-		'beta' ': Public beta testing branch'
-		'dev' ': Unstable dev branch'
+	# Select Git branch
+	if ! [[ $G_GITBRANCH =~ ^(master|beta|dev)$ ]]; then
 
-	)
+		aWHIP_BRANCH=(
 
-	if [ -z ${G_GITBRANCH+x} ]; then
+			'master' ': Stable release (recommended)'
+			'beta' ': Public beta testing branch'
+			'dev' ': Unstable dev branch'
+
+		)
+
 		if WHIP_RETURN=$(whiptail --title "$G_PROGRAM_NAME" --menu 'Please select a Git branch:' --default-item 'master' --ok-button 'Ok' --cancel-button 'Exit' --backtitle "$G_PROGRAM_NAME" 12 80 3 "${aWHIP_BRANCH[@]}" 3>&1 1>&2 2>&3); then
 
 				G_GITBRANCH=$WHIP_RETURN
+				unset aWHIP_BRANCH WHIP_RETURN
 
 		else
 
 			echo -e '[ INFO ] No choice detected. Aborting...\n'
-      exit 0
+			exit 0
 
 		fi
-	else
-
-		echo -e '[ INFO ] Using environment the variable for gitbranch (G_PROGRAM_NAME) \n'
 
 	fi
-
-	unset aWHIP_BRANCH WHIP_RETURN
 
 	echo "[ INFO ] Selected Git branch: $G_GITOWNER/$G_GITBRANCH"
 
@@ -196,8 +195,6 @@
 	G_PROGRAM_NAME='DietPi-PREP'
 	G_INIT
 
-	DISTRO_TARGET=0
-	DISTRO_TARGET_NAME=''
 	if grep -q 'jessie' /etc/os-release; then
 
 		G_DISTRO=3
@@ -244,20 +241,10 @@
 
 	fi
 
-	# WiFi install flag
-	WIFI_REQUIRED=0
-
-	# Image creator flags
-	IMAGE_CREATOR=''
-	PREIMAGE_INFO=''
-
-	# Setup step, current (used in info)
-	SETUP_STEP=0
-
-	# URL connection test var holder
-	INTERNET_ADDRESS=''
-
 	Main(){
+
+		# Setup step, current (used in info)
+		SETUP_STEP=0
 
 		#------------------------------------------------------------------------------------------------
 		echo ''
@@ -309,19 +296,21 @@
 		# Image creator
 		while :
 		do
-			if [ -z ${gIMAGE_CREATOR+x} ]; then
+			if [[ $G_IMAGE_CREATOR ]]; then
 
-				G_WHIP_INPUTBOX 'Please enter your name. This will be used to identify the image creator within credits banner.\n\nYou can add your contact information as well for end users.\n\nNB: An entry is required.'
+				G_WHIP_RETURNED_VALUE=$G_IMAGE_CREATOR
+				# unset to force interactive input if disallowed name is detected
+				unset G_IMAGE_CREATOR
 
 			else
 
-        G_WHIP_RETURNED_VALUE=$gIMAGE_CREATOR
-				echo -e '[ INFO ] Using environment the variable for the image creator name (gIMAGE_CREATOR) \n'
+				G_WHIP_INPUTBOX 'Please enter your name. This will be used to identify the image creator within credits banner.\n\nYou can add your contact information as well for end users.\n\nNB: An entry is required.'
 
 			fi
-			if (( ! $? )) && [[ $G_WHIP_RETURNED_VALUE ]]; then
 
-				#Disallowed:
+			if [[ $G_WHIP_RETURNED_VALUE ]]; then
+
+				# Disallowed:
 				DISALLOWED_NAME=0
 				aDISALLOWED_NAMES=(
 
@@ -355,8 +344,7 @@
 
 				else
 
-					IMAGE_CREATOR=$G_WHIP_RETURNED_VALUE
-					G_DIETPI-NOTIFY 2 "Entered image creator: $IMAGE_CREATOR"
+					G_IMAGE_CREATOR=$G_WHIP_RETURNED_VALUE
 					break
 
 				fi
@@ -365,29 +353,27 @@
 
 		done
 
-		# Pre-image used/name
-		while :
-		do
+		G_DIETPI-NOTIFY 2 "Entered image creator: $G_IMAGE_CREATOR"
 
-			if [ -z ${gPREIMAGE_INFO+x} ]; then
+		# Pre-image used/name
+		if [[ ! $G_PREIMAGE_INFO ]]; then
+
+			while :
+			do
 
 				G_WHIP_INPUTBOX 'Please enter the name or URL of the pre-image you installed on this system, prior to running this script. This will be used to identify the pre-image credits.\n\nEG: Debian, Raspbian Lite, Meveric, FriendlyARM, or "forum.odroid.com/viewtopic.php?f=ABC&t=XYZ" etc.\n\nNB: An entry is required.'
+				if [[ $G_WHIP_RETURNED_VALUE ]]; then
 
-			else
+					G_PREIMAGE_INFO=$G_WHIP_RETURNED_VALUE
+					break
 
-				G_WHIP_RETURNED_VALUE=$gPREIMAGE_INFO
-				echo -e '[ INFO ] Using environment the variable for the name or URL of the pre-image (gPREIMAGE_INFO) \n'
+				fi
 
-			fi
-			if (( ! $? )) && [[ $G_WHIP_RETURNED_VALUE ]]; then
+			done
 
-				PREIMAGE_INFO=$G_WHIP_RETURNED_VALUE
-				G_DIETPI-NOTIFY 2 "Entered pre-image info: $PREIMAGE_INFO"
-				break
+		fi
 
-			fi
-
-		done
+		G_DIETPI-NOTIFY 2 "Entered pre-image info: $G_PREIMAGE_INFO"
 
 		# Hardware selection
 		#	NB: PLEASE ENSURE HW_MODEL INDEX ENTRIES MATCH : PREP, dietpi-obtain_hw_model, dietpi-survey_results,
@@ -447,56 +433,69 @@
 
 		)
 
-		if [ -z ${G_HW_MODEL+x} ]; then
+		while :
+		do
+
+			# Check for valid entry, e.g. when set via environment variabe
+			if disable_error=1 G_CHECK_VALIDINT "$G_HW_MODEL" 0; then
+
+				for i in "${G_WHIP_MENU_ARRAY[@]}"
+				do
+
+					[[ $G_HW_MODEL == $i ]] && break 2
+
+				done
+
+			fi
 
 			G_WHIP_MENU 'Please select the current device this is being installed on:\n - NB: Select "Generic device" if not listed.\n - "Core devices": Are fully supported by DietPi, offering full GPU + Kodi support.\n - "Limited support devices": No GPU support, supported limited to DietPi specific issues only (eg: excludes Kernel/GPU/VPU related items).'
+			if (( $? )); then
 
-		else
+				G_DIETPI-NOTIFY 1 'No choice detected. Aborting...\n'
+				exit 0
 
-			G_WHIP_RETURNED_VALUE=$G_HW_MODEL
-			echo -e '[ INFO ] Using environment the variable for the current device name (G_HW_MODEL) \n'
+			elif [[ $G_WHIP_RETURNED_VALUE ]]; then
 
-		fi
-		if (( $? )) || [[ -z $G_WHIP_RETURNED_VALUE ]]; then
+				G_HW_MODEL=$G_WHIP_RETURNED_VALUE
+				break
 
-			G_DIETPI-NOTIFY 1 'No choice detected. Aborting...\n'
-			exit 0
+			fi
 
-		fi
+		done
 
 		# + Set for future scripts
-		G_HW_MODEL=$G_WHIP_RETURNED_VALUE
 		echo $G_HW_MODEL > /etc/.dietpi_hw_model_identifier
 
 		G_DIETPI-NOTIFY 2 "Selected hardware model ID: $G_HW_MODEL"
 		G_DIETPI-NOTIFY 2 "Detected CPU architecture: $G_HW_ARCH_DESCRIPTION (ID: $G_HW_ARCH)"
 
-		G_WHIP_MENU_ARRAY=(
+		# WiFi selection
+		if [[ $G_WIFI_REQUIRED != [01] ]]; then
 
-			'0' ': I do not require WiFi functionality, skip related package install.'
-			'1' ': I require WiFi functionality, install related packages.'
+			G_WHIP_MENU_ARRAY=(
 
-		)
+				'0' ': I do not require WiFi functionality, skip related package install.'
+				'1' ': I require WiFi functionality, install related packages.'
 
-		G_WHIP_DEFAULT_ITEM=1
-		(( $G_HW_MODEL == 20 )) && G_WHIP_DEFAULT_ITEM=0
-		if [ -z ${gWIFI_REQUIRED+x} ]; then
-				if G_WHIP_MENU 'Please select an option:' && (( $G_WHIP_RETURNED_VALUE )); then
+			)			
 
-					G_DIETPI-NOTIFY 2 'Marking WiFi as required'
-					WIFI_REQUIRED=1
+			G_WHIP_DEFAULT_ITEM=1
+			(( $G_HW_MODEL == 20 )) && G_WHIP_DEFAULT_ITEM=0
+			if G_WHIP_MENU 'Please select an option:'; then
 
-				else
 
-					G_DIETPI-NOTIFY 2 'Marking WiFi as NOT required'
+				G_WIFI_REQUIRED=$G_WHIP_RETURNED_VALUE 
 
-				fi
-		else
+			else
 
-				WIFI_REQUIRED=$gWIFI_REQUIRED
-				echo -e '[ INFO ] Using environment the variable to tell if wifi is required (gWIFI_REQUIRED) \n'
+				G_DIETPI-NOTIFY 1 'No choice detected. Aborting...\n'
+				exit 0
+
+			fi
 
 		fi
+
+		(( $G_WIFI_REQUIRED )) && G_DIETPI-NOTIFY 2 'Marking WiFi as required' || G_DIETPI-NOTIFY 2 'Marking WiFi as NOT required'
 
 		# Distro Selection
 		DISTRO_LIST_ARRAY=(
@@ -528,48 +527,60 @@
 
 		unset DISTRO_LIST_ARRAY
 
-		if [[ -z ${G_WHIP_MENU_ARRAY+x} ]]; then
+		if (( ! ${#G_WHIP_MENU_ARRAY[@]} )); then
 
 			G_DIETPI-NOTIFY 1 'No available distro versions for this system. Aborting...\n'
 			exit 1
 
 		fi
 
-		if [ -z ${G_DISTRO_TARGET+x} ]; then
+		while :
+		do
 
-				G_WHIP_DEFAULT_ITEM=${G_WHIP_MENU_ARRAY[0]} # Downgrades disabled, so first item matches current/lowest supported distro version
-				G_WHIP_BUTTON_CANCEL_TEXT='Exit'
-				G_WHIP_MENU "Please select a distro version to install on this system. Selecting a distro that is older than the current installed on system, is not supported.\n\nCurrently installed:\n - $G_DISTRO $G_DISTRO_NAME"
-				if (( $? )) || [[ -z $G_WHIP_RETURNED_VALUE ]]; then
+			if disable_error=1 G_CHECK_VALIDINT "$G_DISTRO_TARGET" 0; then
+				
+				for i in "${G_WHIP_MENU_ARRAY[@]}"
+				do
 
-					G_DIETPI-NOTIFY 1 'No choice detected. Aborting...\n'
-					exit 0
+					[[ $G_DISTRO_TARGET == $i ]] && break 2
 
-				fi
-				DISTRO_TARGET=$G_WHIP_RETURNED_VALUE
+				done
 
-		else
-			DISTRO_TARGET=$G_DISTRO_TARGET
-			echo -e '[ INFO ] Using environment the variable to tell version of distro to use (G_DISTRO_TARGET) \n'
+			fi
+
+			G_WHIP_DEFAULT_ITEM=${G_WHIP_MENU_ARRAY[0]} # Downgrades disabled, so first item matches current/lowest supported distro version
+			G_WHIP_BUTTON_CANCEL_TEXT='Exit'
+			G_WHIP_MENU "Please select a distro version to install on this system. Selecting a distro that is older than the current installed on system, is not supported.\n\nCurrently installed:\n - $G_DISTRO $G_DISTRO_NAME"
+			if (( $? )); then
+
+				G_DIETPI-NOTIFY 1 'No choice detected. Aborting...\n'
+				exit 0
+
+			else
+
+				G_DISTRO_TARGET=$G_WHIP_RETURNED_VALUE
+				break
+
+			fi
 
 		fi
 
-				if (( $DISTRO_TARGET == 4 )); then
+		if (( $G_DISTRO_TARGET == 4 )); then
 
-					DISTRO_TARGET_NAME='stretch'
+			DISTRO_TARGET_NAME='stretch'
 
-				elif (( $DISTRO_TARGET == 5 )); then
+		elif (( $G_DISTRO_TARGET == 5 )); then
 
-					DISTRO_TARGET_NAME='buster'
+			DISTRO_TARGET_NAME='buster'
 
-				else
+		else
 
-					G_DIETPI-NOTIFY 1 'Invalid choice detected. Aborting...\n'
-					exit 1
+			G_DIETPI-NOTIFY 1 'Invalid choice detected. Aborting...\n'
+			exit 1
 
-				fi
+		fi
 
-		G_DIETPI-NOTIFY 2 "Selected Debian version: $DISTRO_TARGET_NAME (ID: $DISTRO_TARGET)"
+		G_DIETPI-NOTIFY 2 "Selected Debian version: $DISTRO_TARGET_NAME (ID: $G_DISTRO_TARGET)"
 
 		#------------------------------------------------------------------------------------------------
 		echo ''
@@ -579,9 +590,9 @@
 		G_DIETPI-NOTIFY 2 '-----------------------------------------------------------------------------------'
 		#------------------------------------------------------------------------------------------------
 
-		INTERNET_ADDRESS="https://github.com/$G_GITOWNER/DietPi/archive/$G_GITBRANCH.zip"
-		G_CHECK_URL "$INTERNET_ADDRESS"
-		G_RUN_CMD wget "$INTERNET_ADDRESS" -O package.zip
+		local url="https://github.com/$G_GITOWNER/DietPi/archive/$G_GITBRANCH.zip"
+		G_CHECK_URL "$url"
+		G_RUN_CMD wget "$url" -O package.zip
 
 		[[ -d DietPi-$G_GITBRANCH ]] && l_message='Cleaning previously extracted files' G_RUN_CMD rm -R "DietPi-$G_GITBRANCH"
 		l_message='Extracting DietPi sourcecode' G_RUN_CMD unzip package.zip
@@ -645,10 +656,10 @@
 		G_DIETPI-NOTIFY 2 '-----------------------------------------------------------------------------------'
 		#------------------------------------------------------------------------------------------------
 
-		G_DIETPI-NOTIFY 2 "Setting APT sources.list: $DISTRO_TARGET_NAME $DISTRO_TARGET"
+		G_DIETPI-NOTIFY 2 "Setting APT sources.list: $DISTRO_TARGET_NAME $G_DISTRO_TARGET"
 
-		# - We need to forward $DISTRO_TARGET* to dietpi-set_software, as well as $G_HW_MODEL for Debian vs Raspbian decision.
-		G_DISTRO=$DISTRO_TARGET G_DISTRO_NAME=$DISTRO_TARGET_NAME G_HW_MODEL=$G_HW_MODEL G_RUN_CMD /DietPi/dietpi/func/dietpi-set_software apt-mirror 'default'
+		# - We need to forward $G_DISTRO_TARGET* to dietpi-set_software, as well as $G_HW_MODEL for Debian vs Raspbian decision.
+		G_DISTRO=$G_DISTRO_TARGET G_DISTRO_NAME=$DISTRO_TARGET_NAME G_HW_MODEL=$G_HW_MODEL G_RUN_CMD /DietPi/dietpi/func/dietpi-set_software apt-mirror 'default'
 
 		# - Meveric, update repo to use our EU mirror: https://github.com/MichaIng/DietPi/issues/1519#issuecomment-368234302
 		sed -Ei 's@https?://oph\.mdrjr\.net@http://fuzon.co.uk@' /etc/apt/sources.list.d/meveric* &> /dev/null
@@ -828,7 +839,7 @@ _EOF_
 			rm -Rf /lib/modules/*
 			G_AGI --reinstall libraspberrypi-bin libraspberrypi0 raspberrypi-bootloader raspberrypi-kernel raspberrypi-sys-mods
 			# Buster systemd-udevd doesn't support the current raspi-copies-and-fills: https://github.com/MichaIng/DietPi/issues/1286
-			(( $DISTRO_TARGET < 5 )) && G_AGI raspi-copies-and-fills
+			(( $G_DISTRO_TARGET < 5 )) && G_AGI raspi-copies-and-fills
 
 		#	Odroid N2
 		elif (( $G_HW_MODEL == 15 )); then
@@ -925,7 +936,7 @@ _EOF_
 		G_AGDUG
 
 		# - Distro is now target (for APT purposes and G_AGX support due to installed binary, its here, instead of after G_AGUP)
-		G_DISTRO=$DISTRO_TARGET
+		G_DISTRO=$G_DISTRO_TARGET
 		G_DISTRO_NAME=$DISTRO_TARGET_NAME
 
 		G_DIETPI-NOTIFY 2 'Installing core DietPi pre-req APT packages'
@@ -1626,8 +1637,8 @@ _EOF_
 		G_DIETPI-NOTIFY 2 'Writing PREP information to file'
 
 		cat << _EOF_ > /DietPi/dietpi/.prep_info
-$IMAGE_CREATOR
-$PREIMAGE_INFO
+$G_IMAGE_CREATOR
+$G_PREIMAGE_INFO
 _EOF_
 
 		G_DIETPI-NOTIFY 2 'Generating GPL license readme'
