@@ -550,11 +550,10 @@
 
 		else
 			DISTRO_TARGET=$G_DISTRO_TARGET
-			echo -e '[ INFO ] Using environment the variable to tell if wifi is required (gWIFI_REQUIRED) \n'
+			echo -e '[ INFO ] Using environment the variable to tell version of distro to use (G_DISTRO_TARGET) \n'
 
 		fi
 
-				DISTRO_TARGET=$G_WHIP_RETURNED_VALUE
 				if (( $DISTRO_TARGET == 4 )); then
 
 					DISTRO_TARGET_NAME='stretch'
