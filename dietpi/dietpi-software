@@ -5596,22 +5596,29 @@ Package: wireguard wireguard-dkms wireguard-tools\nPin: release n=sid\nPin-Prior
 
 		fi
 
-		#sabnzbd
-		software_id=139
+		software_id=139 # SABnzbd
 		if (( ${aSOFTWARE_INSTALL_STATE[$software_id]} == 1 )); then
 
-			Banner_Installing
+			Banner_Installing # https://sabnzbd.org/wiki/installation/install-off-modules
 
-			local version='2.3.5'
+			# Pre-reqs
+			DEPS_LIST='par2 p7zip-full'
 
-			#prereqs
-			DEPS_LIST='par2 python-dev libffi-dev libssl-dev'
+			Download_Install 'https://github.com/sabnzbd/sabnzbd/archive/master.zip'
 
-			Download_Install "https://github.com/sabnzbd/sabnzbd/archive/$version.zip" /etc/sabnzbd
+			# Clear old install dir (in case of reinstall)
+			if [[ -d '/etc/sabnzbd' ]]; then
 
-			mv /etc/sabnzbd/sabnzbd-"$version"/* /etc/sabnzbd/
-			rm -R /etc/sabnzbd/sabnzbd-"$version"
+				# - Preserve old config file
+				[[ -f '/etc/sabnzbd/sabnzbd.ini' ]] && mv /etc/sabnzbd/sabnzbd.ini sabnzbd-master/
+				rm -R /etc/sabnzbd
 
+			fi
+
+			# Install new files
+			mv sabnzbd-master /etc/sabnzbd
+
+			# Required Python modules
 			pip install cheetah cryptography sabyenc
 
 		fi
@@ -11446,60 +11453,76 @@ _EOF_
 
 			Banner_Configuration
 
-			useradd -rM sabnzbd -G dietpi -s /usr/sbin/nologin
+			# User
+			local usercmd='useradd -rM'
+			getent passwd sabnzbd &> /dev/null && usercmd='usermod'
+			$usercmd sabnzbd -G dietpi -d /etc/sabnzbd -s $(command -v nologin)
+
+			# Service: https://github.com/sabnzbd/sabnzbd/blob/master/linux/sabnzbd%40.service
+			# - Options: https://sabnzbd.org/wiki/advanced/command-line-parameters
+			#	"-OO":	Optimise code and remove doc lines (default shebang of SABnzbd.py, but we run python2.7 explicitly to avoid version conflicts)
+			#	"-d": Run in daemon mode without terminal and browser start (requires "-f </path/to/config.ini>")
+			#	      NB: In systemd unit leads to unreliable long taking webserver start. A new process is forked which allows web access, but sometimes after very long time, sometimes never: https://github.com/sabnzbd/sabnzbd/issues/1283
+			#	"-b 0":	Do no start browser with daemon
 			cat << _EOF_ > /etc/systemd/system/sabnzbd.service
 [Unit]
-Description=sabnzbd (DietPi)
+Description=SABnzbd (DietPi)
+Documentation=https://sabnzbd.org/wiki/
+Wants=network-online.target
+After=network-online.target
 
 [Service]
 User=sabnzbd
 Group=dietpi
-ExecStart=$(command -v python) /etc/sabnzbd/SABnzbd.py -f /etc/sabnzbd/sabnzbd.ini
+ExecStart=$(command -v python2.7) -OO /etc/sabnzbd/SABnzbd.py -b 0 -f /etc/sabnzbd/sabnzbd.ini
+Restart=on-failure
 
 [Install]
 WantedBy=multi-user.target
 _EOF_
-			systemctl daemon-reload
 
+			# Log dir and permissions
 			mkdir -p /var/log/sabnzbd
-			chown -R sabnzbd:dietpi /etc/sabnzbd
-			chown -R sabnzbd:dietpi /var/log/sabnzbd
+			chown -R sabnzbd:sabnzbd /etc/sabnzbd /var/log/sabnzbd
 
-			# Create config:
-			#	API keys and intial config are only generated during 1st run of sabnzbd
-			#	We need to launch program, then apply our config tweaks, else, wizard setup in web interface simply loops without API keys.
-			rm /etc/sabnzbd/sabnzbd.ini &> /dev/null
+			# Create config
+			# - Touch only if it does not yet exist, assume reinstall otherwise and preserve custom changes
+			# - API keys and initial config are only generated during 1st run
+			# - We need to launch program, then apply our config tweaks, else, wizard setup in web interface simply loops without API keys.
+			if [[ ! -f '/etc/sabnzbd/sabnzbd.ini' ]]; then
 
-			systemctl start sabnzbd
-			G_DIETPI-NOTIFY 2 "Generating initial config, please wait..."
-			while [[ ! -f '/etc/sabnzbd/sabnzbd.ini' ]]
-			do
+				systemctl daemon-reload
+				systemctl start sabnzbd
 
-				sleep 1
+				G_DIETPI-NOTIFY 2 'Generating initial config, please wait...'
+				while [[ ! -f '/etc/sabnzbd/sabnzbd.ini' ]]
+				do
 
-			done
+					sleep 0.5
 
-			sleep 2
+				done
+				sleep 2
 
-			systemctl stop sabnzbd
+				systemctl stop sabnzbd
+				sleep 2 # Additional wait, config being overwritten after below changes: https://dietpi.com/phpbb/viewtopic.php?p=7082#p7082
 
-			sleep 2 #additional wait, config being overwritten after below changes: https://dietpi.com/phpbb/viewtopic.php?f=11&t=1848&p=7085#p7082
+				G_CONFIG_INJECT 'download_dir =' "download_dir = $G_FP_DIETPI_USERDATA/downloads/incomplete" /etc/sabnzbd/sabnzbd.ini
+				G_CONFIG_INJECT 'complete_dir =' "complete_dir = $G_FP_DIETPI_USERDATA/downloads/complete" /etc/sabnzbd/sabnzbd.ini
+				G_CONFIG_INJECT 'nzb_backup_dir =' "nzb_backup_dir = $G_FP_DIETPI_USERDATA/downloads/sabnzbd_nzb_backup" /etc/sabnzbd/sabnzbd.ini
+				G_CONFIG_INJECT 'admin_dir =' "admin_dir = $G_FP_DIETPI_USERDATA/downloads/sabnzbd_admin" /etc/sabnzbd/sabnzbd.ini
+				G_CONFIG_INJECT 'log_dir =' 'log_dir = /var/log/sabnzbd' /etc/sabnzbd/sabnzbd.ini
+				G_CONFIG_INJECT 'log_level =' 'log_level = 0' /etc/sabnzbd/sabnzbd.ini # Warning  errors only
+				G_CONFIG_INJECT 'refresh_rate =' 'refresh_rate = 2' /etc/sabnzbd/sabnzbd.ini
+				G_CONFIG_INJECT 'host =' 'host = 0.0.0.0' /etc/sabnzbd/sabnzbd.ini
+				G_CONFIG_INJECT 'permissions =' 'permissions = 0775' /etc/sabnzbd/sabnzbd.ini
+				G_CONFIG_INJECT 'auto_browser =' 'auto_browser = 0' /etc/sabnzbd/sabnzbd.ini
 
-			sed -i "/^download_dir =/c\download_dir = $G_FP_DIETPI_USERDATA/downloads/incomplete" /etc/sabnzbd/sabnzbd.ini
-			sed -i "/^complete_dir =/c\complete_dir = $G_FP_DIETPI_USERDATA/downloads/complete" /etc/sabnzbd/sabnzbd.ini
-			sed -i "/^nzb_backup_dir =/c\nzb_backup_dir = $G_FP_DIETPI_USERDATA/downloads/sabnzbd_nzb_backup" /etc/sabnzbd/sabnzbd.ini
-			sed -i "/^admin_dir =/c\admin_dir = $G_FP_DIETPI_USERDATA/downloads/sabnzbd_admin" /etc/sabnzbd/sabnzbd.ini
-			sed -i "/^log_dir =/c\log_dir = /var/log/sabnzbd" /etc/sabnzbd/sabnzbd.ini
-			sed -i "/^log_level =/c\log_level = 0" /etc/sabnzbd/sabnzbd.ini #err only
-			sed -i "/^refresh_rate =/c\refresh_rate = 2" /etc/sabnzbd/sabnzbd.ini
-			sed -i "/^host =/c\host = 0.0.0.0" /etc/sabnzbd/sabnzbd.ini
+			fi
 
-			G_CONFIG_INJECT 'permissions =' 'permissions = "0775"' /etc/sabnzbd/sabnzbd.ini
-
-			# - Install language packs: https://github.com/MichaIng/DietPi/issues/1917#issue-340631943
+			# Install language packs: https://github.com/MichaIng/DietPi/issues/1917#issue-340631943
 			cd /etc/sabnzbd
-			G_RUN_CMD python tools/make_mo.py
-			cd /root
+			G_RUN_CMD python2.7 tools/make_mo.py
+			cd /tmp/$G_PROGRAM_NAME
 
 		fi
 
@@ -12908,13 +12931,18 @@ _EOF_
 
 		fi
 
-		software_id=139
+		software_id=139 # SABnzbd
 		if (( ${aSOFTWARE_INSTALL_STATE[$software_id]} == -1 )); then
 
 			Banner_Uninstalling
-			userdel -rf sabnzbd
-			rm -R /etc/sabnzbd
-			rm /etc/systemd/system/sabnzbd.service
+			getent passwd sabnzbd &> /dev/null && userdel -rf sabnzbd
+			[[ -d '/etc/sabnzbd' ]] && rm -R /etc/sabnzbd
+			if [[ -f '/etc/systemd/system/sabnzbd.service' ]]; then
+
+				systemctl disable sabnzbd
+				rm /etc/systemd/system/sabnzbd.service
+
+			fi
 
 		fi
 
