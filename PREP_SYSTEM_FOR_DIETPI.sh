@@ -142,7 +142,7 @@
 
 	)
 
-	if WHIP_RETURN=$(whiptail --title "$G_PROGRAM_NAME" --menu 'Please select a Git branch:' --default-item 'master' --ok-button 'Ok' --cancel-button 'Exit' --backtitle "$G_PROGRAM_NAME" 12 80 3 "${aWHIP_BRANCH[@]}" 3>&1 1>&2 2>&3); then
+	if WHIP_RETURN=$(whiptail --title "$G_PROGRAM_NAME" --menu 'Please select a Git branch the installer should use :' --default-item 'master' --ok-button 'Ok' --cancel-button 'Exit' --backtitle "$G_PROGRAM_NAME" 12 80 3 "${aWHIP_BRANCH[@]}" 3>&1 1>&2 2>&3); then
 
 		G_GITBRANCH=$WHIP_RETURN
 
@@ -182,6 +182,7 @@
 	G_PROGRAM_NAME='DietPi-PREP'
 	G_INIT
 
+	# - Find the the debian version of this Operating System.
 	DISTRO_TARGET=0
 	DISTRO_TARGET_NAME=''
 	if grep -q 'jessie' /etc/os-release; then
@@ -206,6 +207,7 @@
 
 	fi
 
+	# - Find the the hardware architecture of this Operating System.
 	G_HW_ARCH_DESCRIPTION=$(uname -m)
 	if [[ $G_HW_ARCH_DESCRIPTION == 'armv6l' ]]; then
 
@@ -254,7 +256,7 @@
 		#------------------------------------------------------------------------------------------------
 		if [[ -d /DietPi/dietpi || -d /boot/dietpi ]]; then
 
-			G_DIETPI-NOTIFY 2 'DietPi system found, running pre-prep'
+			G_DIETPI-NOTIFY 2 'DietPi system found, Removing old files'
 
 			# - Stop services
 			[[ -f /DietPi/dietpi/dietpi-services ]] && /DietPi/dietpi/dietpi-services stop
@@ -287,7 +289,7 @@
 		#------------------------------------------------------------------------------------------------
 		echo ''
 		G_DIETPI-NOTIFY 2 '-----------------------------------------------------------------------------------'
-		G_DIETPI-NOTIFY 0 "Step $SETUP_STEP (inputs): Image info / Hardware / WiFi / Distro:"
+		G_DIETPI-NOTIFY 0 "Step $SETUP_STEP Ask user about: Image info / Hardware / WiFi / Distro:"
 		((SETUP_STEP++))
 		G_DIETPI-NOTIFY 2 '-----------------------------------------------------------------------------------'
 		#------------------------------------------------------------------------------------------------
@@ -491,7 +493,7 @@
 
 		G_WHIP_DEFAULT_ITEM=${G_WHIP_MENU_ARRAY[0]} # Downgrades disabled, so first item matches current/lowest supported distro version
 		G_WHIP_BUTTON_CANCEL_TEXT='Exit'
-		G_WHIP_MENU "Please select a distro version to install on this system. Selecting a distro that is older than the current installed on system, is not supported.\n\nCurrently installed:\n - $G_DISTRO $G_DISTRO_NAME"
+		G_WHIP_MENU "Please select a Debian version to install on this system. Selecting a distro that is older than the current installed on system, is not supported.\n\nCurrently installed:\n - $G_DISTRO $G_DISTRO_NAME"
 		if (( $? )) || [[ -z $G_WHIP_RETURNED_VALUE ]]; then
 
 			G_DIETPI-NOTIFY 1 'No choice detected. Aborting...\n'
@@ -712,6 +714,7 @@ _EOF_
 		# - G_HW_ARCH specific required Kernel packages
 		#	As these are kernel, or bootloader packages, we need to install them directly to allow autoremove of in case older kernel packages:
 		#	https://github.com/MichaIng/DietPi/issues/1285#issuecomment-354602594
+
 		#	x86_64
 		if (( $G_HW_ARCH == 10 )); then
 
@@ -849,7 +852,7 @@ _EOF_
 
 		fi
 
-		G_DIETPI-NOTIFY 2 'Generating list of minimal packages, required for DietPi installation'
+		G_DIETPI-NOTIFY 2 'Generating list of minimal packages, required for DietPi + architecture specific packages.'
 
 		l_message='Marking required packages as manually installed' G_RUN_CMD apt-mark manual ${aPACKAGES_REQUIRED_INSTALL[@]}
 
