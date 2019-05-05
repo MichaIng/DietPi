@@ -89,7 +89,7 @@ _EOF_
 
 	#Device details
 	# - Declare
-	G_HW_MODEL=${G_HW_MODEL:-0}
+	G_HW_MODEL=${G_HW_MODEL:--1}
 	G_HW_MODEL_DESCRIPTION=${G_HW_MODEL_DESCRIPTION:-NULL}
 	G_HW_ARCH=${G_HW_ARCH:-0}
 	G_HW_ARCH_DESCRIPTION=$(uname -m)
@@ -101,7 +101,7 @@ _EOF_
 
 	# - Update
 	#	NB: dietpi-boot service launches dietpi-obtain_hw_model to create the following file
-	if [[ -f /DietPi/dietpi/.hw_model ]]; then
+	if [[ -f '/DietPi/dietpi/.hw_model' ]]; then
 
 		G_HW_MODEL=$(sed -n 1p /DietPi/dietpi/.hw_model)
 		G_HW_MODEL_DESCRIPTION=$(sed -n 2p /DietPi/dietpi/.hw_model)
@@ -562,7 +562,7 @@ $(ps f -eo pid,user,tty,cmd | grep -i '[d]ietpi')"; then
 	[[ -f $G_FP_DIETPI_USERDATA/dxx-rebirth/run.sh ]] && alias dxx-rebirth="$G_FP_DIETPI_USERDATA/dxx-rebirth/run.sh"
 	[[ -f /usr/share/applications/kodi.desktop ]] && alias startkodi='/DietPi/dietpi/misc/start_kodi'
 	[[ -f /etc/systemd/system/dietpi-cloudshell.service ]] && alias dietpi-cloudshell='/DietPi/dietpi/dietpi-cloudshell'
-	[[ -d $G_FP_DIETPI_USERDATA/sonarr || -d $G_FP_DIETPI_USERDATA/radarr || -d $G_FP_DIETPI_USERDATA/lidarr ]] && alias dietpi-arr_to_RAM='/DietPi/dietpi/misc/dietpi-arr_to_RAM'
+	(( $G_DISTRO > 3 )) && [[ -d $G_FP_DIETPI_USERDATA/sonarr || -d $G_FP_DIETPI_USERDATA/radarr || -d $G_FP_DIETPI_USERDATA/lidarr ]] && alias dietpi-arr_to_RAM='/DietPi/dietpi/misc/dietpi-arr_to_RAM'
 	# - occ/ncc need to be global function, as aliases are not accessible from non-interactive scripts:
 	[[ -f /var/www/owncloud/occ ]] && occ(){ sudo -u www-data php /var/www/owncloud/occ "$@"; }
 	[[ -f /var/www/nextcloud/occ ]] && ncc(){ sudo -u www-data php /var/www/nextcloud/occ "$@"; }
@@ -1376,37 +1376,61 @@ $print_logfile_info
 
 	#URL Connection test
 	# - $@ = URL
-	#	Optional variables: $optional_cmd_inputs (eg: --no-check-certificate)
+	#	Optional variables:
+	#	- $optional_cmd_inputs (eg: --no-check-certificate)
+	#	- G_CHECK_URL_TIMEOUT to override default and dietpi.txt set timeout
+	#	- G_CHECK_URL_ATTEMPTS to override default and dietpi.txt set attempts
 	#	In case of failure and $G_USER_INPUTS=1: Prompts user to configure network
 	G_CHECK_URL(){
 
-		local string=$@
-		local timeout=$(grep -m1 '^[[:blank:]]*CONFIG_G_CHECK_URL_TIMEOUT=' /DietPi/dietpi.txt | sed 's/^[^=]*=//')
-		local attempts=$(grep -m1 '^[[:blank:]]*CONFIG_G_CHECK_URL_ATTEMPTS=' /DietPi/dietpi.txt | sed 's/^[^=]*=//')
-		#local optional_cmd_inputs
+		local url=$@
+		local timeout=5
+		if disable_error=1 G_CHECK_VALIDINT "$G_CHECK_URL_TIMEOUT" 0; then
+
+			timeout=$G_CHECK_URL_TIMEOUT
+			unset G_CHECK_URL_TIMEOUT
+
+		elif [[ -f '/DietPi/dietpi.txt' ]]; then
+
+			timeout=$(grep -m1 '^[[:blank:]]*CONFIG_G_CHECK_URL_TIMEOUT=' /DietPi/dietpi.txt | sed 's/^[^=]*=//')
+			disable_error=1 G_CHECK_VALIDINT "$timeout" 0 || timeout=5
+
+		fi
+		local attempts=3
+		if disable_error=1 G_CHECK_VALIDINT "$G_CHECK_URL_ATTEMPTS" 0; then
+
+			attempts=$G_CHECK_URL_ATTEMPTS
+			unset G_CHECK_URL_ATTEMPTS
+
+		elif [[ -f '/DietPi/dietpi.txt' ]]; then
+
+			attempts=$(grep -m1 '^[[:blank:]]*CONFIG_G_CHECK_URL_ATTEMPTS=' /DietPi/dietpi.txt | sed 's/^[^=]*=//')
+			disable_error=1 G_CHECK_VALIDINT "$attempts" 0 || attempts=3
+
+		fi
 
 		while :
 		do
 
-			G_ERROR_HANDLER_COMMAND="Connection test: $string"
+			G_ERROR_HANDLER_COMMAND="Connection test: $url"
 			G_ERROR_HANDLER_ONERROR_FPLOGFILE='/tmp/G_CHECK_URL'
 			G_ERROR_HANDLER_RETRY=1
 
-			G_DIETPI-NOTIFY -2 "Testing connection to $string, please wait..."
+			G_DIETPI-NOTIFY -2 "Testing connection to $url, please wait..."
 
 			local i=0
 			for ((i=1; i<=$attempts; i++))
 			do
 
 				# Since --tries/-t is not applied on "fatal" errors (resolving failed, connection refused, 404), we need to loop ourself to exclude any temporary issue
-				wget --spider -t 1 -T $timeout $optional_cmd_inputs "$string" &> $G_ERROR_HANDLER_ONERROR_FPLOGFILE
+				wget --spider -t 1 -T $timeout $optional_cmd_inputs "$url" &> $G_ERROR_HANDLER_ONERROR_FPLOGFILE
 				G_ERROR_HANDLER_EXITCODE=$?
 
 				# Valid
 				(( $G_ERROR_HANDLER_EXITCODE )) || break
 
 				# Retry
-				G_DIETPI-NOTIFY -2 "Failed connection attempt to $string ($i/$attempts), retrying..."
+				G_DIETPI-NOTIFY -2 "Failed connection attempt to $url ($i/$attempts), retrying..."
 				sleep 1
 
 			done
@@ -2308,12 +2332,23 @@ $print_logfile_info
 
 		[[ $G_PROGRAM_NAME ]] || local G_PROGRAM_NAME='G_CONFIG_INJECT'
 		local pattern=${1//\//\\\/}
+		local setting_raw=$2
 		local setting=${2//\\/\\\\}; setting=${setting//./\\.}; setting=${setting//+/\\+}; setting=${setting//\*/\\\*}; setting=${setting//\?/\\\?}; setting=${setting//[/\\[}
 		setting=${setting//\(/\\\(}; setting=${setting//\{/\\\{}; setting=${setting//^/\\^}; setting=${setting//&/\\&}; setting=${setting//$/\\$}; setting=${setting//|/\\|}; setting=${setting//\//\\\/}
 		[[ $GCI_NEWLINE == 1 ]] && setting=${setting//\\\\n/\\n}
 		local file=$3
 		local after=${4//\//\\\/}
 		local error=''
+
+		# Replace password string by asterisks in output string
+		if [[ $GCI_PASSWORD == 1 ]]; then
+
+			local password=''
+			password=$(sed -E "s/^.*$pattern[[:blank:]]*//" <<< "$setting_raw")
+			setting_raw="$(sed -E "s/(^.*$pattern[[:blank:]]*).*$/\1/" <<< "$setting_raw")${password//?/*}"
+			unset password
+
+		fi
 
 		syntax_error(){
 
@@ -2323,7 +2358,7 @@ $print_logfile_info
 			G_WHIP_MSG "[FAILED] Syntax error
 $error
 Couldn't add setting \$2
-	$setting (raw escaped input)
+	$setting (escaped input)
 into file \$3
 	$file
 $after
@@ -2346,18 +2381,18 @@ NB:
 Please verify the existence of the file \$3
 	$file\n
 Retry with proper permissions or apply the setting manually:
-	$(sed -E "c\\$setting" <<< '')"
+	$setting_raw"
 
 		elif error=$(grep -Eq "^[[:blank:]]*$pattern" $file 2>&1); then
 			# As an error within the condition leads to result "false", it can be caught only in next "elif"/"else" statement.
 
 			if [[ $GCI_PRESERVE == 1 ]]; then
 
-				G_DIETPI-NOTIFY 0 "Current setting in \e[33m$file\e[0m will be preserved: \e[33m$(grep -Em1 "^[[:blank:]]*$pattern" $file | sed 's|\\|\\\\|g')\e[0m"
+				G_DIETPI-NOTIFY 0 "Current setting in \e[33m$file\e[0m will be preserved: \e[33m$([[ $GCI_PASSWORD == 1 ]] && echo "${setting_raw//\\/\\\\}" || grep -Em1 "^[[:blank:]]*$pattern" $file | sed 's|\\|\\\\|g')\e[0m"
 
 			elif error=$(grep -Eq "^[[:blank:]]*$setting([[:space:]]|$)" $file 2>&1); then
 
-				G_DIETPI-NOTIFY 0 "Desired setting in \e[33m$file\e[0m was already set: \e[33m$(grep -Em1 "^[[:blank:]]*$pattern" $file | sed 's|\\|\\\\|g')\e[0m"
+				G_DIETPI-NOTIFY 0 "Desired setting in \e[33m$file\e[0m was already set: \e[33m$([[ $GCI_PASSWORD == 1 ]] && echo "${setting_raw//\\/\\\\}" || grep -Em1 "^[[:blank:]]*$pattern" $file | sed 's|\\|\\\\|g')\e[0m"
 
 			elif error=$( (( $(grep -Ec "^[[:blank:]]*$pattern" $file 2>&1) > 1 )) 2>&1); then
 				[[ $error ]] && { syntax_error; return 1; }
@@ -2372,14 +2407,14 @@ $(grep -En "^[[:blank:]]*$pattern" $file)
 ____________\n
 Either the pattern \$1 needs to be more specific or the desired setting can appear multiple times by design and it cannot be predicted which instance to edit.
 Please retry with more specific parameter \$1 or apply the setting manually:
-	$(sed -E "c\\$setting" <<< '')"
+	$setting_raw"
 
 			else
 				[[ $error ]] && { syntax_error; return 1; }
 
 				[[ $GCI_BACKUP == 1 && ! -f $file.bak ]] && cp -a $file $file.bak && G_DIETPI-NOTIFY 2 "Config file backup created: \e[33m$file.bak\e[0m"
 				error=$(sed -Ei "0,/^[[:blank:]]*$pattern.*$/s//$setting/" $file 2>&1) || { syntax_error; return 1; }
-				G_DIETPI-NOTIFY 0 "Setting in \e[33m$file\e[0m adjusted: \e[33m$(sed -E "c\\$setting" <<< '' | sed 's|\\|\\\\|g')\e[0m"
+				G_DIETPI-NOTIFY 0 "Setting in \e[33m$file\e[0m adjusted: \e[33m${setting_raw//\\/\\\\}\e[0m"
 
 			fi
 
@@ -2388,7 +2423,7 @@ Please retry with more specific parameter \$1 or apply the setting manually:
 
 			[[ $GCI_BACKUP == 1 && ! -f $file.bak ]] && cp -a $file $file.bak && G_DIETPI-NOTIFY 2 "Config file backup created: \e[33m$file.bak\e[0m"
 			error=$(sed -Ei "0,/^[[:blank:]#;]*$pattern.*$/s//$setting/" $file 2>&1) || { syntax_error; return 1; }
-			G_DIETPI-NOTIFY 0 "Comment in \e[33m$file\e[0m converted to setting: \e[33m$(sed -E "c\\$setting" <<< '' | sed 's|\\|\\\\|g')\e[0m"
+			G_DIETPI-NOTIFY 0 "Comment in \e[33m$file\e[0m converted to setting: \e[33m${setting_raw//\\/\\\\}\e[0m"
 
 		else
 			[[ $error ]] && { syntax_error; return 1; }
@@ -2399,7 +2434,7 @@ Please retry with more specific parameter \$1 or apply the setting manually:
 
 					[[ $GCI_BACKUP == 1 && ! -f $file.bak ]] && cp -a $file $file.bak && G_DIETPI-NOTIFY 2 "Config file backup created: \e[33m$file.bak\e[0m"
 					error=$(sed -Ei "0,/^[[:blank:]]*$after.*$/s//&\n$setting/" $file 2>&1) || { syntax_error; return 1; }
-					G_DIETPI-NOTIFY 0 "Added setting \e[33m$(sed -E "c\\$setting" <<< '' | sed 's|\\|\\\\|g')\e[0m to \e[33m$file\e[0m after line \e[33m$(grep -Em1 "^[[:blank:]]*$after" $file | sed 's|\\|\\\\|g')\e[0m"
+					G_DIETPI-NOTIFY 0 "Added setting \e[33m${setting_raw//\\/\\\\}\e[0m to \e[33m$file\e[0m after line \e[33m$(grep -Em1 "^[[:blank:]]*$after" $file | sed 's|\\|\\\\|g')\e[0m"
 
 				else
 					[[ $error ]] && { syntax_error; return 1; }
@@ -2410,7 +2445,7 @@ The pattern \$4
 could not be found in file \$3
 	$file\n
 Please retry with valid parameter \$4 or apply the setting manually:
-	$(sed -E "c\\$setting" <<< '')"
+	$setting_raw"
 
 				fi
 
@@ -2420,7 +2455,7 @@ Please retry with valid parameter \$4 or apply the setting manually:
 				# The following sed does not work on empty files:
 				[[ ! -s $file ]] && echo '# Added by DietPi:' >> $file
 				error=$(sed -Ei "\$a\\$setting" $file 2>&1) || { syntax_error; return 1; }
-				G_DIETPI-NOTIFY 0 "Added setting \e[33m$(sed -E "c\\$setting" <<< '' | sed 's|\\|\\\\|g')\e[0m to end of file \e[33m$file\e[0m"
+				G_DIETPI-NOTIFY 0 "Added setting \e[33m${setting_raw//\\/\\\\}\e[0m to end of file \e[33m$file\e[0m"
 
 			fi
 
@@ -2429,9 +2464,9 @@ Please retry with valid parameter \$4 or apply the setting manually:
 	}
 
 	#-----------------------------------------------------------------------------------
-	(( $G_DEBUG == 1 )) && G_DIETPI-NOTIFY 2 'DietPi-Globals loaded\n'
+	[[ $G_DEBUG == 1 ]] && G_DIETPI-NOTIFY 2 'DietPi-Globals loaded'
 	#-----------------------------------------------------------------------------------
-	#return exit code 0, by triggering null as last command to output
+	# Return exit code 0, by triggering null as last command to output
 	:
 	#-----------------------------------------------------------------------------------
 

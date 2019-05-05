@@ -14,12 +14,19 @@
 	# - G_HW_ARCH
 	# - G_DISTRO
 	# - G_DISTRO_NAME
+	#
+	# The following environment variables can be set to automate the this script (adjust example values to your needs):
+	# - GITOWNER='MichaIng'			(optional, defaults to 'MichaIng')
+	# - GITBRANCH='master'			(must be one of 'master', 'beta' or 'dev')
+	# - IMAGE_CREATOR='Mr. Tux'
+	# - PREIMAGE_INFO='Some GNU/Linux'
+	# - HW_MODEL=0				(must match one of the supported IDs below)
+	# - WIFI_REQUIRED=0			[01]
+	# - DISTRO_TARGET=4			[45] (Stretch: 4, Buster: 5)
 	#------------------------------------------------------------------------------------------------
 
 	# Core globals
 	G_PROGRAM_NAME='DietPi-PREP'
-	G_GITOWNER=${GITOWNER:-MichaIng}
-	unset GITOWNER
 
 	#------------------------------------------------------------------------------------------------
 	# Critical checks and pre-reqs, with exit, prior to initial run of script
@@ -41,6 +48,9 @@
 	# - NB: This needs to match the method in: /DietPi/dietpi/func/dietpi-set_hardware preferipv4 enable
 	echo 'Acquire::ForceIPv4 "true";' > /etc/apt/apt.conf.d/99-dietpi-force-ipv4
 
+	# Allow PDiffs on RPi since the "slow implementation" argument is outdated and PDiffs allow lower download size and less disk I/O
+	[[ -f '/etc/apt/apt.conf.d/50raspi' ]] && rm /etc/apt/apt.conf.d/50raspi
+
 	# Check/install minimal APT Pre-Reqs
 	a_MIN_APT_PREREQS=(
 
@@ -56,9 +66,9 @@
 
 	# Removing conflicting /etc/apt/sources.list.d entries
 	# - Meveric: https://github.com/MichaIng/DietPi/issues/1285#issuecomment-355759321
-	[[ -f /etc/apt/sources.list.d/deb-multimedia.list ]] && rm /etc/apt/sources.list.d/deb-multimedia.list
+	[[ -f '/etc/apt/sources.list.d/deb-multimedia.list' ]] && rm /etc/apt/sources.list.d/deb-multimedia.list
 	# - OMV: https://dietpi.com/phpbb/viewtopic.php?f=11&t=2772&p=10646#p10594
-	[[ -f /etc/apt/sources.list.d/openmediavault.list ]] && rm /etc/apt/sources.list.d/openmediavault.list
+	[[ -f '/etc/apt/sources.list.d/openmediavault.list' ]] && rm /etc/apt/sources.list.d/openmediavault.list
 
 	# Fixing sources.list due to Debian dropped Jessie support: https://github.com/MichaIng/DietPi/issues/2665
 	if grep -qi 'jessie' /etc/os-release && ! grep -qi 'raspbian' /etc/os-release; then
@@ -133,27 +143,35 @@
 	export LANG=en_GB.UTF8
 	export LC_ALL=en_GB.UTF8
 
-	# Select gitbranch
-	aWHIP_BRANCH=(
+	# Set Git owner
+	G_GITOWNER=${GITOWNER:-MichaIng}
+	unset GITOWNER
 
-		'master' ': Stable release (recommended)'
-		'beta' ': Public beta testing branch'
-		'dev' ': Unstable dev branch'
+	# Select Git branch
+	if ! [[ $GITBRANCH =~ ^(master|beta|dev)$ ]]; then
 
-	)
+		aWHIP_BRANCH=(
+    
+			'master' ': Stable release (recommended)'
+			'beta' ': Public beta testing branch'
+			'dev' ': Unstable dev branch'
+      
+		)
 
-	if WHIP_RETURN=$(whiptail --title "$G_PROGRAM_NAME" --menu 'Please select a Git branch the installer should use :' --default-item 'master' --ok-button 'Ok' --cancel-button 'Exit' --backtitle "$G_PROGRAM_NAME" 12 80 3 "${aWHIP_BRANCH[@]}" 3>&1 1>&2 2>&3); then
+    if WHIP_RETURN=$(whiptail --title "$G_PROGRAM_NAME" --menu 'Please select a Git branch the installer should use :' --default-item 'master' --ok-button 'Ok' --cancel-button 'Exit' --backtitle "$G_PROGRAM_NAME" 12 80 3 "${aWHIP_BRANCH[@]}" 3>&1 1>&2 2>&3); then
 
-		G_GITBRANCH=$WHIP_RETURN
+			unset aWHIP_BRANCH
 
-	else
+		else
 
-		echo -e '[ INFO ] No choice detected. Aborting...\n'
-		exit 0
+			echo -e '[ INFO ] No choice detected. Aborting...\n'
+			exit 0
+
+		fi
 
 	fi
-
-	unset aWHIP_BRANCH WHIP_RETURN
+	G_GITBRANCH=$GITBRANCH
+	unset GITBRANCH
 
 	echo "[ INFO ] Selected Git branch: $G_GITOWNER/$G_GITBRANCH"
 
@@ -185,6 +203,7 @@
 	# - Find the the debian version of this Operating System.
 	DISTRO_TARGET=0
 	DISTRO_TARGET_NAME=''
+
 	if grep -q 'jessie' /etc/os-release; then
 
 		G_DISTRO=3
@@ -232,20 +251,10 @@
 
 	fi
 
-	# WiFi install flag
-	WIFI_REQUIRED=0
-
-	# Image creator flags
-	IMAGE_CREATOR=''
-	PREIMAGE_INFO=''
-
-	# Setup step, current (used in info)
-	SETUP_STEP=0
-
-	# URL connection test var holder
-	INTERNET_ADDRESS=''
-
 	Main(){
+
+		# Setup step, current (used in info)
+		SETUP_STEP=0
 
 		#------------------------------------------------------------------------------------------------
 		echo ''
@@ -258,24 +267,27 @@
 
 			G_DIETPI-NOTIFY 2 'DietPi system found, Removing old files'
 
-			# - Stop services
+			# - Stop services: RAMdisk includes (Pre|Post)Boot due to dependencies
 			[[ -f /DietPi/dietpi/dietpi-services ]] && /DietPi/dietpi/dietpi-services stop
-			[[ -f /etc/systemd/system/dietpi-ramdisk.service ]] && systemctl stop dietpi-ramdisk
 			[[ -f /etc/systemd/system/dietpi-ramlog.service ]] && systemctl stop dietpi-ramlog
+			[[ -f /etc/systemd/system/dietpi-ramdisk.service ]] && systemctl stop dietpi-ramdisk
+
+			# - Disable services
+			for i in /etc/systemd/system/dietpi-*
+			do
+
+				[[ -f $i ]] || continue
+				systemctl disable ${i##*/}
+				rm $i
+
+			done
 
 			# - Delete any previous existing data
 			#	Failsafe
 			umount /DietPi
 			[[ -d /DietPi ]] && rm -R /DietPi
-			[[ -d /boot/dietpi ]] && rm -R /boot/dietpi
-
-			[[ -d /mnt/dietpi-backup ]] && rm -R /mnt/dietpi-backup
-			[[ -d /mnt/dietpi-sync ]] && rm -R /mnt/dietpi-sync
-			[[ -d /mnt/dietpi_userdata ]] && rm -R /mnt/dietpi_userdata
-
-			[[ -d /etc/dietpi ]] && rm -R /etc/dietpi # Pre v160
-			[[ -d /var/lib/dietpi ]] && rm -R /var/lib/dietpi
-			[[ -d /var/tmp/dietpi ]] && rm -R /var/tmp/dietpi
+			rm -Rf /{boot,mnt,etc,var/lib,var/tmp}/dietpi*
+			rm -f /etc/{bashrc,profile,sysctl}.d/dietpi*
 
 			[[ -f /root/DietPi-Automation.log ]] && rm /root/DietPi-Automation.log
 			[[ -f /boot/Automation_Format_My_Usb_Drive ]] && rm /boot/Automation_Format_My_Usb_Drive
@@ -297,11 +309,21 @@
 		# Image creator
 		while :
 		do
+			if [[ $IMAGE_CREATOR ]]; then
 
-			G_WHIP_INPUTBOX 'Please enter your name. This will be used to identify the image creator within credits banner.\n\nYou can add your contact information as well for end users.\n\nNB: An entry is required.'
-			if (( ! $? )) && [[ $G_WHIP_RETURNED_VALUE ]]; then
+				G_WHIP_RETURNED_VALUE=$IMAGE_CREATOR
+				# unset to force interactive input if disallowed name is detected
+				unset IMAGE_CREATOR
 
-				#Disallowed:
+			else
+
+				G_WHIP_INPUTBOX 'Please enter your name. This will be used to identify the image creator within credits banner.\n\nYou can add your contact information as well for end users.\n\nNB: An entry is required.'
+
+			fi
+
+			if [[ $G_WHIP_RETURNED_VALUE ]]; then
+
+				# Disallowed:
 				DISALLOWED_NAME=0
 				aDISALLOWED_NAMES=(
 
@@ -336,7 +358,6 @@
 				else
 
 					IMAGE_CREATOR=$G_WHIP_RETURNED_VALUE
-					G_DIETPI-NOTIFY 2 "Entered image creator: $IMAGE_CREATOR"
 					break
 
 				fi
@@ -345,20 +366,27 @@
 
 		done
 
+		G_DIETPI-NOTIFY 2 "Entered image creator: $IMAGE_CREATOR"
+
 		# Pre-image used/name
-		while :
-		do
+		if [[ ! $PREIMAGE_INFO ]]; then
 
-			G_WHIP_INPUTBOX 'Please enter the name or URL of the pre-image you installed on this system, prior to running this script. This will be used to identify the pre-image credits.\n\nEG: Debian, Raspbian Lite, Meveric, FriendlyARM, or "forum.odroid.com/viewtopic.php?f=ABC&t=XYZ" etc.\n\nNB: An entry is required.'
-			if (( ! $? )) && [[ $G_WHIP_RETURNED_VALUE ]]; then
+			while :
+			do
 
-				PREIMAGE_INFO=$G_WHIP_RETURNED_VALUE
-				G_DIETPI-NOTIFY 2 "Entered pre-image info: $PREIMAGE_INFO"
-				break
+				G_WHIP_INPUTBOX 'Please enter the name or URL of the pre-image you installed on this system, prior to running this script. This will be used to identify the pre-image credits.\n\nEG: Debian, Raspbian Lite, Meveric, FriendlyARM, or "forum.odroid.com/viewtopic.php?f=ABC&t=XYZ" etc.\n\nNB: An entry is required.'
+				if [[ $G_WHIP_RETURNED_VALUE ]]; then
 
-			fi
+					PREIMAGE_INFO=$G_WHIP_RETURNED_VALUE
+					break
 
-		done
+				fi
+
+			done
+
+		fi
+
+		G_DIETPI-NOTIFY 2 "Entered pre-image info: $PREIMAGE_INFO"
 
 		# Hardware selection
 		#	NB: PLEASE ENSURE HW_MODEL INDEX ENTRIES MATCH : PREP, dietpi-obtain_hw_model, dietpi-survey_results,
@@ -418,41 +446,71 @@
 
 		)
 
-		G_WHIP_MENU 'Please select the current device this is being installed on:\n - NB: Select "Generic device" if not listed.\n - "Core devices": Are fully supported by DietPi, offering full GPU + Kodi support.\n - "Limited support devices": No GPU support, supported limited to DietPi specific issues only (eg: excludes Kernel/GPU/VPU related items).'
-		if (( $? )) || [[ -z $G_WHIP_RETURNED_VALUE ]]; then
+		while :
+		do
 
-			G_DIETPI-NOTIFY 1 'No choice detected. Aborting...\n'
-			exit 0
+			# Check for valid entry, e.g. when set via environment variabe
+			if disable_error=1 G_CHECK_VALIDINT "$HW_MODEL" 0; then
 
-		fi
+				for i in "${G_WHIP_MENU_ARRAY[@]}"
+				do
+
+					[[ $HW_MODEL == $i ]] && break 2
+
+				done
+
+			fi
+
+			G_WHIP_MENU 'Please select the current device this is being installed on:\n - NB: Select "Generic device" if not listed.\n - "Core devices": Are fully supported by DietPi, offering full GPU + Kodi support.\n - "Limited support devices": No GPU support, supported limited to DietPi specific issues only (eg: excludes Kernel/GPU/VPU related items).'
+			if (( $? )); then
+
+				G_DIETPI-NOTIFY 1 'No choice detected. Aborting...\n'
+				exit 0
+
+			elif [[ $G_WHIP_RETURNED_VALUE ]]; then
+
+				HW_MODEL=$G_WHIP_RETURNED_VALUE
+				break
+
+			fi
+
+		done
+		G_HW_MODEL=$HW_MODEL
+		unset HW_MODEL
 
 		# + Set for future scripts
-		G_HW_MODEL=$G_WHIP_RETURNED_VALUE
 		echo $G_HW_MODEL > /etc/.dietpi_hw_model_identifier
 
 		G_DIETPI-NOTIFY 2 "Selected hardware model ID: $G_HW_MODEL"
 		G_DIETPI-NOTIFY 2 "Detected CPU architecture: $G_HW_ARCH_DESCRIPTION (ID: $G_HW_ARCH)"
 
-		G_WHIP_MENU_ARRAY=(
+		# WiFi selection
+		if [[ $WIFI_REQUIRED != [01] ]]; then
 
-			'0' ': I do not require WiFi functionality, skip related package install.'
-			'1' ': I require WiFi functionality, install related packages.'
+			G_WHIP_MENU_ARRAY=(
 
-		)
+				'0' ': I do not require WiFi functionality, skip related package install.'
+				'1' ': I require WiFi functionality, install related packages.'
 
-		G_WHIP_DEFAULT_ITEM=1
-		(( $G_HW_MODEL == 20 )) && G_WHIP_DEFAULT_ITEM=0
+			)
 
-		if G_WHIP_MENU 'Please select an option:' && (( $G_WHIP_RETURNED_VALUE )); then
+			G_WHIP_DEFAULT_ITEM=1
+			(( $G_HW_MODEL == 20 )) && G_WHIP_DEFAULT_ITEM=0
+			if G_WHIP_MENU 'Please select an option:'; then
 
-			G_DIETPI-NOTIFY 2 'Marking WiFi as required'
-			WIFI_REQUIRED=1
 
-		else
+				WIFI_REQUIRED=$G_WHIP_RETURNED_VALUE
 
-			G_DIETPI-NOTIFY 2 'Marking WiFi as NOT required'
+			else
+
+				G_DIETPI-NOTIFY 1 'No choice detected. Aborting...\n'
+				exit 0
+
+			fi
 
 		fi
+
+		(( $WIFI_REQUIRED )) && G_DIETPI-NOTIFY 2 'Marking WiFi as required' || G_DIETPI-NOTIFY 2 'Marking WiFi as NOT required'
 
 		# Distro Selection
 		DISTRO_LIST_ARRAY=(
@@ -484,24 +542,44 @@
 
 		unset DISTRO_LIST_ARRAY
 
-		if [[ -z ${G_WHIP_MENU_ARRAY+x} ]]; then
+		if (( ! ${#G_WHIP_MENU_ARRAY[@]} )); then
 
 			G_DIETPI-NOTIFY 1 'No available distro versions for this system. Aborting...\n'
 			exit 1
 
 		fi
 
-		G_WHIP_DEFAULT_ITEM=${G_WHIP_MENU_ARRAY[0]} # Downgrades disabled, so first item matches current/lowest supported distro version
-		G_WHIP_BUTTON_CANCEL_TEXT='Exit'
-		G_WHIP_MENU "Please select a Debian version to install on this system. Selecting a distro that is older than the current installed on system, is not supported.\n\nCurrently installed:\n - $G_DISTRO $G_DISTRO_NAME"
-		if (( $? )) || [[ -z $G_WHIP_RETURNED_VALUE ]]; then
+		while :
+		do
 
-			G_DIETPI-NOTIFY 1 'No choice detected. Aborting...\n'
-			exit 0
+			if disable_error=1 G_CHECK_VALIDINT "$DISTRO_TARGET" 0; then
 
-		fi
+				for i in "${G_WHIP_MENU_ARRAY[@]}"
+				do
 
-		DISTRO_TARGET=$G_WHIP_RETURNED_VALUE
+					[[ $DISTRO_TARGET == $i ]] && break 2
+
+				done
+
+			fi
+
+			G_WHIP_DEFAULT_ITEM=${G_WHIP_MENU_ARRAY[0]} # Downgrades disabled, so first item matches current/lowest supported distro version
+			G_WHIP_BUTTON_CANCEL_TEXT='Exit'
+      G_WHIP_MENU "Please select a Debian version to install on this system. Selecting a distro that is older than the current installed on system, is not supported.\n\nCurrently installed:\n - $G_DISTRO $G_DISTRO_NAME"
+			if (( $? )); then
+
+				G_DIETPI-NOTIFY 1 'No choice detected. Aborting...\n'
+				exit 0
+
+			else
+
+				DISTRO_TARGET=$G_WHIP_RETURNED_VALUE
+				break
+
+			fi
+
+		done
+
 		if (( $DISTRO_TARGET == 4 )); then
 
 			DISTRO_TARGET_NAME='stretch'
@@ -527,9 +605,9 @@
 		G_DIETPI-NOTIFY 2 '-----------------------------------------------------------------------------------'
 		#------------------------------------------------------------------------------------------------
 
-		INTERNET_ADDRESS="https://github.com/$G_GITOWNER/DietPi/archive/$G_GITBRANCH.zip"
-		G_CHECK_URL "$INTERNET_ADDRESS"
-		G_RUN_CMD wget "$INTERNET_ADDRESS" -O package.zip
+		local url="https://github.com/$G_GITOWNER/DietPi/archive/$G_GITBRANCH.zip"
+		G_CHECK_URL "$url"
+		G_RUN_CMD wget "$url" -O package.zip
 
 		[[ -d DietPi-$G_GITBRANCH ]] && l_message='Cleaning previously extracted files' G_RUN_CMD rm -R "DietPi-$G_GITBRANCH"
 		l_message='Extracting DietPi sourcecode' G_RUN_CMD unzip package.zip
@@ -543,10 +621,6 @@
 		if (( $G_HW_MODEL < 10 )); then
 
 			G_RUN_CMD mv "DietPi-$G_GITBRANCH/config.txt" /boot/
-
-		elif (( $G_HW_MODEL == 10 )); then
-
-			G_RUN_CMD mv "DietPi-$G_GITBRANCH/boot_c1.ini" /boot/boot.ini
 
 		elif (( $G_HW_MODEL == 11 )); then
 
@@ -799,11 +873,6 @@ _EOF_
 		elif (( $G_HW_MODEL == 11 )); then
 
 			G_AGI linux-image-4.14-armhf-odroid-xu4
-
-		#	Odroid C1
-		elif (( $G_HW_MODEL == 10 )); then
-
-			G_AGI linux-image-armhf-odroid-c1
 
 		#	BBB
 		elif (( $G_HW_MODEL == 71 )); then
@@ -1156,12 +1225,16 @@ _EOF_
 
 		G_DIETPI-NOTIFY 2 'Configuring network interfaces:'
 
-		[[ -f /etc/network/interfaces ]] && rm -R /etc/network/interfaces # ARMbian symlink for bulky network-manager
+		[[ -f '/etc/network/interfaces' ]] && rm -R /etc/network/interfaces # ARMbian symlink for bulky network-manager
 
 		G_ERROR_HANDLER_COMMAND='/etc/network/interfaces'
 		cat << _EOF_ > $G_ERROR_HANDLER_COMMAND
-#/etc/network/interfaces
-#Please use DietPi-Config to modify network settings.
+# Location: /etc/network/interfaces
+# Please modify network settings via: dietpi-config
+# Or create your own drop-ins in: /etc/network/interfaces.d/
+
+# Drop-in configs
+source interfaces.d/*
 
 # Local
 auto lo
@@ -1175,7 +1248,7 @@ netmask 255.255.255.0
 gateway 192.168.0.1
 #dns-nameservers 8.8.8.8 8.8.4.4
 
-# Wifi
+# WiFi
 #allow-hotplug wlan0
 iface wlan0 inet dhcp
 address 192.168.0.100
@@ -1204,7 +1277,7 @@ _EOF_
 		fi
 
 		#	Fix rare WiFi interface start issue: https://github.com/MichaIng/DietPi/issues/2074
-		[[ -f /etc/network/if-pre-up.d/wireless-tools ]] && sed -i '\|^[[:blank:]]ifconfig "$IFACE" up$|c\\t/sbin/ip link set dev "$IFACE" up' /etc/network/if-pre-up.d/wireless-tools
+		[[ -f '/etc/network/if-pre-up.d/wireless-tools' ]] && sed -i '\|^[[:blank:]]ifconfig "$IFACE" up$|c\\t/sbin/ip link set dev "$IFACE" up' /etc/network/if-pre-up.d/wireless-tools
 
 		G_DIETPI-NOTIFY 2 'Tweaking DHCP timeout:'
 
@@ -1285,8 +1358,8 @@ _EOF_
 
 		G_DIETPI-NOTIFY 2 'Configuring regional settings (TZdata):'
 
-		[[ -f /etc/timezone ]] && rm /etc/timezone
-		[[ -f /etc/localtime ]] && rm /etc/localtime
+		[[ -f '/etc/timezone' ]] && rm /etc/timezone
+		[[ -f '/etc/localtime' ]] && rm /etc/localtime
 		ln -sf /usr/share/zoneinfo/Europe/London /etc/localtime
 		G_RUN_CMD dpkg-reconfigure -f noninteractive tzdata
 
@@ -1474,17 +1547,17 @@ _EOF_
 		G_DIETPI-NOTIFY 2 'Running general cleanup of misc files'
 
 		# - Remove Bash history file
-		[[ -f /root/.bash_history ]] && rm /root/.bash_history
+		[[ -f '/root/.bash_history' ]] && rm /root/.bash_history
 		rm -f /home/*/.bash_history
 
 		# - Remove Nano history file
-		[[ -f /root/.nano_history ]] && rm /root/.nano_history
+		[[ -f '/root/.nano_history' ]] && rm /root/.nano_history
 		rm -f /home/*/.nano_history
 
 		G_DIETPI-NOTIFY 2 'Removing swapfile from image'
 
 		/DietPi/dietpi/func/dietpi-set_swapfile 0 /var/swap
-		[[ -e /var/swap ]] && rm /var/swap # still exists on some images...
+		[[ -e '/var/swap' ]] && rm /var/swap # still exists on some images...
 
 		# - re-enable for next run
 		G_CONFIG_INJECT 'AUTO_SETUP_SWAPFILE_SIZE=' 'AUTO_SETUP_SWAPFILE_SIZE=1' /DietPi/dietpi.txt
@@ -1495,7 +1568,7 @@ _EOF_
 		(( $G_HW_MODEL == 40 )) && [[ -f /boot/uEnv.txt ]] && sed -i '/^ethaddr/ d' /boot/uEnv.txt
 
 		# - Set Pi cmdline.txt back to normal
-		[[ -f /boot/cmdline.txt ]] && sed -i 's/ rootdelay=10//g' /boot/cmdline.txt
+		[[ -f '/boot/cmdline.txt' ]] && sed -i 's/ rootdelay=10//g' /boot/cmdline.txt
 
 		G_DIETPI-NOTIFY 2 'Generating default wpa_supplicant.conf'
 
