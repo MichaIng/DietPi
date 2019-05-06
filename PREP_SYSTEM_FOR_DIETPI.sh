@@ -158,6 +158,8 @@
 
 		)
 
+		grep -qi 'jessie' /etc/os-release && aWHIP_BRANCH+=( 'jessie-support' 'EOS') #REMOVE v6.24
+
 		if GITBRANCH=$(whiptail --title "$G_PROGRAM_NAME" --menu 'Please select the Git branch the installer should use:' --default-item 'master' --ok-button 'Ok' --cancel-button 'Exit' --backtitle "$G_PROGRAM_NAME" 12 80 3 "${aWHIP_BRANCH[@]}" 3>&1 1>&2 2>&3); then
 
 			unset aWHIP_BRANCH
@@ -512,6 +514,7 @@
 		# Distro Selection
 		DISTRO_LIST_ARRAY=(
 
+			'3' ': jessie-support' #REMOVE v6.24
 			'4' ': Stretch (current stable release, recommended)'
 			'5' ': Buster (testing only, not officially supported)'
 
@@ -577,7 +580,11 @@
 
 		done
 
-		if (( $DISTRO_TARGET == 4 )); then
+		if (( $DISTRO_TARGET == 3 )); then #REMOVE v6.24
+
+			DISTRO_TARGET_NAME='jessie'
+
+		elif (( $DISTRO_TARGET == 4 )); then
 
 			DISTRO_TARGET_NAME='stretch'
 
