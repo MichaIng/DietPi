@@ -158,7 +158,7 @@
 
 		)
 
-		if GITBRANCH=$(whiptail --title "$G_PROGRAM_NAME" --menu 'Please select a Git branch:' --default-item 'master' --ok-button 'Ok' --cancel-button 'Exit' --backtitle "$G_PROGRAM_NAME" 12 80 3 "${aWHIP_BRANCH[@]}" 3>&1 1>&2 2>&3); then
+		if GITBRANCH=$(whiptail --title "$G_PROGRAM_NAME" --menu 'Please select the Git branch the installer should use:' --default-item 'master' --ok-button 'Ok' --cancel-button 'Exit' --backtitle "$G_PROGRAM_NAME" 12 80 3 "${aWHIP_BRANCH[@]}" 3>&1 1>&2 2>&3); then
 
 			unset aWHIP_BRANCH
 
@@ -200,6 +200,7 @@
 	G_PROGRAM_NAME='DietPi-PREP'
 	G_INIT
 
+	# - Detect the the Debian version of this operating system.
 	if grep -q 'jessie' /etc/os-release; then
 
 		G_DISTRO=3
@@ -222,6 +223,7 @@
 
 	fi
 
+	# - Detect the the hardware architecture of this operating system.
 	G_HW_ARCH_DESCRIPTION=$(uname -m)
 	if [[ $G_HW_ARCH_DESCRIPTION == 'armv6l' ]]; then
 
@@ -260,7 +262,7 @@
 		#------------------------------------------------------------------------------------------------
 		if [[ -d /DietPi/dietpi || -d /boot/dietpi ]]; then
 
-			G_DIETPI-NOTIFY 2 'DietPi system found, running pre-prep'
+			G_DIETPI-NOTIFY 2 'DietPi system found, removing the old files and stopping services. (pre-prep)'
 
 			# - Stop services: RAMdisk includes (Pre|Post)Boot due to dependencies
 			[[ -f /DietPi/dietpi/dietpi-services ]] && /DietPi/dietpi/dietpi-services stop
@@ -296,7 +298,7 @@
 		#------------------------------------------------------------------------------------------------
 		echo ''
 		G_DIETPI-NOTIFY 2 '-----------------------------------------------------------------------------------'
-		G_DIETPI-NOTIFY 0 "Step $SETUP_STEP (inputs): Image info / Hardware / WiFi / Distro:"
+		G_DIETPI-NOTIFY 0 "Step $SETUP_STEP Ask user about: Image info / Hardware / WiFi / Distro:"
 		((SETUP_STEP++))
 		G_DIETPI-NOTIFY 2 '-----------------------------------------------------------------------------------'
 		#------------------------------------------------------------------------------------------------
@@ -783,6 +785,7 @@ _EOF_
 		# - G_HW_ARCH specific required Kernel packages
 		#	As these are kernel, or bootloader packages, we need to install them directly to allow autoremove of in case older kernel packages:
 		#	https://github.com/MichaIng/DietPi/issues/1285#issuecomment-354602594
+
 		#	x86_64
 		if (( $G_HW_ARCH == 10 )); then
 
