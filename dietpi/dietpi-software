@@ -2168,7 +2168,7 @@ DietPi-Software will decrypt and use it for software installs. You can change it
 		software_id=126
 
 		aSOFTWARE_WHIP_NAME[$software_id]='LibSSL1.0.0'
-		aSOFTWARE_WHIP_DESC[$software_id]='backwards compatibility (stretch)'
+		aSOFTWARE_WHIP_DESC[$software_id]='backwards compatibility (stretch+)'
 		aSOFTWARE_CATEGORY_INDEX[$software_id]=4
 		aSOFTWARE_TYPE[$software_id]=1
 
@@ -2477,24 +2477,31 @@ DietPi-Software will decrypt and use it for software installs. You can change it
 
 		fi
 
-		#Software that requires LibSSL1.0.0
-		software_id=126
-		if (( ${aSOFTWARE_INSTALL_STATE[37]} == 1 ||
-			${aSOFTWARE_INSTALL_STATE[60]} == 1 ||
-			${aSOFTWARE_INSTALL_STATE[97]} == 1 ||
-			${aSOFTWARE_INSTALL_STATE[134]} == 1 )); then
+		#Software that requires LibSSL1.0.0, Stretch+ only
+		if (( $G_DISTRO > 3 )); then
 
-			aSOFTWARE_INSTALL_STATE[$software_id]=1
-			G_DIETPI-NOTIFY 2 "${aSOFTWARE_WHIP_NAME[$software_id]} will be installed"
+			#	Jackett (147)
+			software_id=126
+			if (( ${aSOFTWARE_INSTALL_STATE[37]} == 1 ||
+				${aSOFTWARE_INSTALL_STATE[60]} == 1 ||
+				${aSOFTWARE_INSTALL_STATE[97]} == 1 ||
+				${aSOFTWARE_INSTALL_STATE[134]} == 1 ||
+				${aSOFTWARE_INSTALL_STATE[147]} == 1 )); then
+
+				aSOFTWARE_INSTALL_STATE[$software_id]=1
+				G_DIETPI-NOTIFY 2 "${aSOFTWARE_WHIP_NAME[$software_id]} will be installed"
+
+			fi
 
 		fi
 
 		#Software that requires Mono
+		#	Jackett (147) on ARMv6: https://github.com/Jackett/Jackett#installation-on-linux-armv6-or-below
 		software_id=150
 		if (( ${aSOFTWARE_INSTALL_STATE[106]} == 1 ||
 			${aSOFTWARE_INSTALL_STATE[144]} == 1 ||
 			${aSOFTWARE_INSTALL_STATE[145]} == 1 ||
-			${aSOFTWARE_INSTALL_STATE[147]} == 1 )); then
+			( ${aSOFTWARE_INSTALL_STATE[147]} == 1 && $G_HW_ARCH == 1 ) )); then
 
 			aSOFTWARE_INSTALL_STATE[$software_id]=1
 			G_DIETPI-NOTIFY 2 "${aSOFTWARE_WHIP_NAME[$software_id]} will be installed"
@@ -5775,15 +5782,57 @@ Package: wireguard wireguard-dkms wireguard-tools\nPin: release n=sid\nPin-Prior
 			# Grab latest version download link
 			INSTALL_URL_ADDRESS='https://api.github.com/repos/Jackett/Jackett/releases/latest'
 			G_CHECK_URL "$INSTALL_URL_ADDRESS"
+
+			# - ARMv6: Requires mono: https://github.com/Jackett/Jackett#installation-on-linux-armv6-or-below
 			INSTALL_URL_ADDRESS=$(curl -s "$INSTALL_URL_ADDRESS" | grep -m1 'browser_download_url.*Jackett\.Binaries\.Mono\.tar\.gz' | cut -d \" -f 4)
+			fallback_url='https://github.com/Jackett/Jackett/releases/download/v0.11.295/Jackett.Binaries.Mono.tar.gz'
+
+			# - ARMv7
+			if (( $G_HW_ARCH == 2 )); then
+
+				INSTALL_URL_ADDRESS=${INSTALL_URL_ADDRESS/Mono/LinuxARM32}
+				fallback_url=${fallback_url/Mono/LinuxARM32}
+
+			# - ARMv8
+			elif (( $G_HW_ARCH == 3 )); then
+
+				INSTALL_URL_ADDRESS=${INSTALL_URL_ADDRESS/Mono/LinuxARM64}
+				fallback_url=${fallback_url/Mono/LinuxARM64}
+
+			# - x86_64
+			elif (( $G_HW_ARCH == 10 )); then
+
+				INSTALL_URL_ADDRESS=${INSTALL_URL_ADDRESS/Mono/LinuxAMDx64}
+				fallback_url=${fallback_url/Mono/LinuxAMDx64}
+
+			fi
+
+			# Standalone version dependencies: https://docs.microsoft.com/en-us/dotnet/core/linux-prerequisites?tabs=netcore30#linux-distribution-dependencies
+			if (( $G_HW_ARCH != 1 )); then
+
+				DEPS_LIST='liblttng-ust0'
+				if (( $G_DISTRO < 4 )); then
+
+					DEPS_LIST+=' libicu52'
+
+				elif (( $G_DISTRO == 4 )); then
+
+					DEPS_LIST+=' libicu57'
+
+				elif (( $G_DISTRO > 4 )); then
+
+					DEPS_LIST+=' libicu63'
+
+				fi
+
+			fi
 
 			# Download: wget --spider/curl -LI return 403
-			fallback_url='https://github.com/Jackett/Jackett/releases/download/v0.11.295/Jackett.Binaries.Mono.tar.gz'
 			no_check_url=1 Download_Install "$INSTALL_URL_ADDRESS" /opt
 
 			# Move existing configs to unpacked install dir
+			[[ -d '/opt/jackett/Jackett' ]] && mv /opt/jackett/Jackett /opt/Jackett/
 			[[ -d '/opt/jackett/.mono' ]] && mv /opt/jackett/.mono /opt/Jackett/
-			[[ -d '/opt/jackett/.config' ]] && mv /opt/jackett/.config /opt/Jackett/
 
 			# Remove existing install dir
 			[[ -d '/opt/jackett' ]] && rm -R /opt/jackett
@@ -6218,6 +6267,7 @@ Pin-Priority: -1' > /etc/apt/preferences.d/dietpi-docker_fix
 
 				fi
 
+				DEPS_LIST='multiarch-support'
 				Download_Install "$INSTALL_URL_ADDRESS"
 
 			fi
@@ -11746,6 +11796,9 @@ _EOF_
 			getent passwd jackett &> /dev/null && usercmd='usermod'
 			$usercmd jackett -d /opt/jackett -s $(command -v nologin)
 
+			# Permissions
+			chown -R jackett:jackett /opt/jackett
+
 			# Service: https://github.com/Jackett/Jackett/wiki/systemd-service
 			cat << _EOF_ > /etc/systemd/system/jackett.service
 [Unit]
@@ -11754,20 +11807,33 @@ After=network.target
 
 [Service]
 User=jackett
+Environment=XDG_CONFIG_HOME=/opt/jackett
 ExecStart=$(command -v mono) -O=-aot /opt/jackett/JackettConsole.exe --NoRestart
 Restart=always
 RestartSec=5
 TimeoutStopSec=20
 
 # These lines optionally isolate (sandbox) Jackett from the rest of the system.
-ReadWritePaths=/opt/jackett
 ProtectSystem=strict
-PrivateDevices=true
 ProtectHome=true
+PrivateDevices=true
+PrivateTmp=true
+ReadWritePaths=/opt/jackett
 
 [Install]
 WantedBy=multi-user.target
 _EOF_
+
+			# - Non-ARMv6 devices run the standalone version: https://github.com/Jackett/Jackett#install-on-linux-amdx64
+			(( $G_HW_ARCH != 1 )) && G_CONFIG_INJECT 'ExecStart=' 'ExecStart=/opt/jackett/jackett --NoRestart' /etc/systemd/system/jackett.service
+
+			# - Jessie: ProtectSystem=strict and ReadWritePaths not supported, use ProtectSystem=full instead: https://manpages.debian.org/jessie/systemd/systemd.exec.5.en.html
+			if (( $G_DISTRO < 4 )); then
+
+				G_CONFIG_INJECT 'ProtectSystem=' 'ProtectSystem=full' /etc/systemd/system/jackett.service
+				sed -i '/^ReadWritePaths=/d' /etc/systemd/system/jackett.service
+
+			fi
 
 		fi
 
@@ -13041,13 +13107,18 @@ _EOF_
 
 		fi
 
-		software_id=147
+		software_id=147 # Jackett
 		if (( ${aSOFTWARE_INSTALL_STATE[$software_id]} == -1 )); then
 
 			Banner_Uninstalling
-			userdel -rf jackett
-			rm -R /opt/jackett
-			rm /etc/systemd/system/jackett.service
+			getent passwd jackett &> /dev/null && userdel -rf jackett
+			[[ -d '/opt/jackett' ]] && rm -R /opt/jackett
+			if [[ -f '/etc/systemd/system/jackett.service' ]]; then
+
+				systemctl disable jackett
+				rm /etc/systemd/system/jackett.service
+
+			fi
 
 		fi
 
