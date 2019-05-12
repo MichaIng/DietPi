@@ -17,16 +17,15 @@
 	#
 	#////////////////////////////////////
 
-	#Import DietPi-Globals ---------------------------------------------------------------
+	# Import DietPi-Globals --------------------------------------------------------------
 	. /DietPi/dietpi/func/dietpi-globals
 	G_PROGRAM_NAME='DietPi-Drive_Manager'
 	G_CHECK_ROOT_USER
 	G_INIT
-	#Import DietPi-Globals ---------------------------------------------------------------
+	# Import DietPi-Globals --------------------------------------------------------------
 
 	#Grab Input (valid interger)
-	INPUT=0
-	disable_error=1 G_CHECK_VALIDINT "$1" && INPUT=$1
+	disable_error=1 G_CHECK_VALIDINT "$1" && INPUT=$1 || INPUT=0
 
 	EXIT_CODE=0
 
@@ -127,7 +126,7 @@
 		# Mounts
 		local swap_mount=''
 		local tmpfs_mounts=''
-		local bind_mounts=''
+		local misc_mounts=''
 		local net_mounts=''
 
 		# Mode 4: Force reset/clean fstab (PREP)
@@ -141,58 +140,59 @@ tmpfs /DietPi tmpfs defaults,size=10m,noatime,nodev,nosuid,mode=1777 0 0"
 		# Else: Grab current mounts
 		else
 
-			swap_mount=$(grep -m1 '[[:blank:]]swap[[:blank:]]' $FP_TEMP_FSTAB)
+			swap_mount=$(grep -m1 '^[[:blank:]]*[^#].*[[:blank:]]swap[[:blank:]]' $FP_TEMP_FSTAB)
 			tmpfs_mounts=$(grep '^tmpfs[[:blank:]]' $FP_TEMP_FSTAB)
-			bind_mounts=$(grep '[[:blank:],]bind[[:blank:],]' $FP_TEMP_FSTAB)
+			# encryptfs, vboxsf, bind mounts
+			misc_mounts=$(grep -E '^[[:blank:]]*[^#].*([[:blank:],]bind[[:blank:],]|[[:blank:]](encryptfs|vboxsf)[[:blank:]])' $FP_TEMP_FSTAB)
 			# CurlFtpFS, CIFS/SMB/Samba, NFS
-			net_mounts=$(grep -E '(^curlftpfs|[[:blank:]]cifs[[:blank:]]|[[:blank:]]nfs[4]?[[:blank:]])' $FP_TEMP_FSTAB)
+			net_mounts=$(grep -E '(^curlftpfs|[[:blank:]](cifs|nfs4?)[[:blank:]])' $FP_TEMP_FSTAB)
 
 		fi
 
-		echo "#-----------------------------------------------------------
-#NETWORK
-#-----------------------------------------------------------
-#Please use DietPi-Drive_Manager to setup network mounts
+		echo "# Please use \"dietpi-drive_manager\" to setup mounts
+#----------------------------------------------------------------
+# NETWORK
+#----------------------------------------------------------------
 $net_mounts
 
-#-----------------------------------------------------------
-#TMPFS
-#-----------------------------------------------------------
+#----------------------------------------------------------------
+# TMPFS
+#----------------------------------------------------------------
 $tmpfs_mounts
 
-#-----------------------------------------------------------
-#MISC (bind)
-#-----------------------------------------------------------
-$bind_mounts
+#----------------------------------------------------------------
+# MISC: encryptfs, vboxsf (VirtualBox shared folder), bind mounts
+#----------------------------------------------------------------
+$misc_mounts
 
-#-----------------------------------------------------------
-#SWAPFILE
-#-----------------------------------------------------------
+#----------------------------------------------------------------
+# SWAPFILE
+#----------------------------------------------------------------
 $swap_mount
 
-#-----------------------------------------------------------
-#PHYSICAL DRIVES
-#-----------------------------------------------------------" > $FP_TEMP_FSTAB
+#----------------------------------------------------------------
+# PHYSICAL DRIVES
+#----------------------------------------------------------------" > $FP_TEMP_FSTAB
 
 		# Detect mounted drives and add them to fstab
 		G_DIETPI-NOTIFY 2 'Detecting drives, please wait...'
 		df -Pha | tail -n +2 > .dietpi-drive_manager_df_tmp
 
-		# - Remove items from list
-		#	Bind: https://github.com/MichaIng/DietPi/issues/2013#issuecomment-416394374
+		# - Remove misc items from list
+		#	bind: https://github.com/MichaIng/DietPi/issues/2013#issuecomment-416394374
 		while read line
 		do
 
 			[[ $line ]] || continue
 
-			# - Bind
-			local input_bind_mount_source=$(mawk '{print $1}' <<< $line)
-			local input_bind_mount_target=$(mawk '{print $2}' <<< $line)
-			sed -i "\#[[:blank:]]$input_bind_mount_target#d" .dietpi-drive_manager_df_tmp
-			sed -i "\#[[:blank:]]$input_bind_mount_source#d" .dietpi-drive_manager_df_tmp
-			[[ $G_DEBUG == 1 ]] && G_DIETPI-NOTIFY 0 " - Detected bind mount and removed from df scrape: $input_bind_mount_source > $input_bind_mount_target"
+			local input_mount_target=$(mawk '{print $2}' <<< $line)
+			sed -i "\#[[:blank:]]$input_mount_target$#d" .dietpi-drive_manager_df_tmp
+			# - target + source removal via $6 required for bind mounts: https://github.com/MichaIng/DietPi/issues/2013#issuecomment-417413867
+			local input_mount_source=$(mawk '{print $1}' <<< $line)
+			sed -i "\#[[:blank:]]$input_mount_source$#d" .dietpi-drive_manager_df_tmp
+			[[ $G_DEBUG == 1 ]] && G_DIETPI-NOTIFY 0 " - Detected misc mount and removed from df scrape: $input_mount_source > $input_mount_target"
 
-		done <<< "$bind_mounts"
+		done <<< "$misc_mounts"
 
 		# - Process final DF result
 		while read line
@@ -782,7 +782,7 @@ aDRIVE_ISPARTITIONTABLE ${aDRIVE_ISPARTITIONTABLE[$i]}
 		sed -i "\@[[:space:]]/[[:space:]][[:space:]]*auto@c $dev_entry / auto defaults,noatime,rw 0 1" /etc/fstab
 
 		# - Disable Swap
-		/DietPi/dietpi/func/dietpi-set_dphys-swapfile 0
+		/DietPi/dietpi/func/dietpi-set_swapfile 0
 
 		rsync -aHv --delete --exclude '/boot/*' --exclude '/lost+found/' --exclude '/mnt/*' --exclude ${aDRIVE_MOUNT_TARGET[$INDEX_DRIVE_BEING_EDITED]}/ --exclude '/sys/*' --exclude '/proc/*' / "${aDRIVE_MOUNT_TARGET[$INDEX_DRIVE_BEING_EDITED]}"/
 		if (( $? )); then
@@ -796,7 +796,7 @@ aDRIVE_ISPARTITIONTABLE ${aDRIVE_ISPARTITIONTABLE[$i]}
 		fi
 
 		# - Recreate swap
-		# /DietPi/dietpi/func/dietpi-set_dphys-swapfile 1 ${aDRIVE_MOUNT_TARGET[$INDEX_DRIVE_BEING_EDITED]}/var/swap/.swap
+		# /DietPi/dietpi/func/dietpi-set_swapfile 1 ${aDRIVE_MOUNT_TARGET[$INDEX_DRIVE_BEING_EDITED]}/var/swap/.swap
 		#	Manually update location
 		# sed -i "/^[[:blank:]]*AUTO_SETUP_SWAPFILE_LOCATION=/c\AUTO_SETUP_SWAPFILE_LOCATION=/var/swap" /DietPi/dietpi.txt
 
@@ -814,8 +814,9 @@ aDRIVE_ISPARTITIONTABLE ${aDRIVE_ISPARTITIONTABLE[$i]}
 			local rootfstype_current=$(mawk '{for(i=1;i<=NF;i++) {print $i} }' /boot/cmdline.txt | grep -m1 'rootfstype=')
 			sed -i "s#$rootfstype_current#rootfstype=${aDRIVE_FSTYPE[$INDEX_DRIVE_BEING_EDITED]}#g" /boot/cmdline.txt
 
-		#C1/C2/XU4 | /DietPi/boot.ini
-		elif (( $G_HW_MODEL == 10 || $G_HW_MODEL == 11 || $G_HW_MODEL == 12 )); then
+		#C2/XU4 | /DietPi/boot.ini
+		elif (( $G_HW_MODEL == 11 || $G_HW_MODEL == 12 ||
+			( $G_HW_MODEL == 10 && $G_DISTRO == 3 ) )); then #REMOVE v6.24
 
 			#	find current root= to replace
 			local rootfs_current=$(mawk '{for(i=1;i<=NF;i++) {print $i} }' /DietPi/boot.ini | grep -m1 'root=' | sed 's/\"//')
@@ -1318,7 +1319,7 @@ aDRIVE_ISPARTITIONTABLE ${aDRIVE_ISPARTITIONTABLE[$i]}
 							local fp_target_swapfile="${aDRIVE_MOUNT_TARGET[$INDEX_DRIVE_BEING_EDITED]}/.swapfile"
 							[[ ${aDRIVE_MOUNT_TARGET[$INDEX_DRIVE_BEING_EDITED]} == '/' ]] && fp_target_swapfile='/var/swap'
 
-							/DietPi/dietpi/func/dietpi-set_dphys-swapfile $G_WHIP_RETURNED_VALUE "$fp_target_swapfile"
+							/DietPi/dietpi/func/dietpi-set_swapfile $G_WHIP_RETURNED_VALUE "$fp_target_swapfile"
 
 						fi
 
