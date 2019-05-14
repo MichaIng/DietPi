@@ -49,7 +49,7 @@
 	fi
 
 	# Install required packages
-	apt-get -y install gparted gdisk gpart dosfstools zerofree p7zip
+	apt-get -y install gdist dosfstools parted zerofree p7zip
 
 	# GPT images (RockPro64) after reading the image AND again after shrinking
 	# To fix:
@@ -83,7 +83,7 @@
 	# Fsck
 	e2fsck -f $ROOT_DEV
 
-	# Shrink file system
+	# Shrink file system to minimum
 	# - Run multiple times until no change is done any more
 	out=''
 	FS_SIZE=0
@@ -93,21 +93,22 @@
 		resize2fs -M $ROOT_DEV | tee resize2fs_out
 		if out=$(grep -m1 'Nothing to do!' resize2fs_out); then
 
-			FS_SIZE=$(mawk '{print $5 * 4096}' <<< $out)
-			echo "[  OK  ] Shrunken file system to $FS_SIZE bytes"
+			FS_SIZE=$(mawk '{print $5 * 8}' <<< $out) # 4k blocks => 512 byte sectors
+			echo "[  OK  ] Shrunken root file system to $(( $FS_SIZE / 2048 + 1 )) MiB"
 			break
 
 		fi
 
 	done
 
-	read -p 'The minimum file system size above is as well the minimum for gparted, besides gparted shows a larger minimum already.
-Press CTRL+C to exit, else gparted will now start to allow partition resizing'
+	# Estimate minimum end sector
+	PART_START=$(fdisk -l -o Start $SOURCE | tail -1) # 512 byte sectors
+	PART_END=$(( $PART_START + $FS_SIZE ))
 
-	# gparted to resize boot partition to minimum
-	gparted $SOURCE
-	read -p 'If failed press CTRL+C to exit and prevent further action, else, press any key to continue...'
+	# Resize partition to minimum
+	parted $SOURCE unit s resizepart 2 $PART_END
 
+	# Sync changes to disk now
 	sync
 
 	# Override free space with zeros to purge removed data and allow further image/archive size reduction
@@ -126,30 +127,44 @@ Press CTRL+C to exit, else gparted will now start to allow partition resizing'
 	# - Without partition table, the whole raw disk space needs to be cloned
 	if [[ $ROOT == 0 ]]; then
 
-		SIZE=$(lsblk -o SIZE --bytes $SOURCE)
+		PART_SIZE=$(lsblk -o SIZE --bytes $SOURCE)
 
 	else
 
-		# 64 bytes for secondary GPT + safety net
-		SIZE=$(( ( $(fdisk -l -o End $SOURCE | tail -1) + 1 ) * 512 ))
+		PART_SIZE=$(( ( $(fdisk -l -o End $SOURCE | tail -1) + 1 ) * 512 ))
 
 	fi
-	SIZE=$(( $SIZE + 512*256 )) 
+	IMAGE_SIZE=$(( $PART_SIZE + 512*256 )) # 64 bytes for secondary GPT + safety net
+
+	# Create final image in /root
+	cd /root
 
 	# If source is an image file, truncate to used size
 	if (( $SOURCE_IS_FILE )); then
 
-		umount $SOURCE
-		truncate --size=$SIZE "$SOURCE_FILE"
+		truncate --size=$IMAGE_SIZE "$SOURCE_FILE"
 
 	# else create .img file from block device source via dd, stopping at block count that matches used size
 	else
 
-		dd if=$SOURCE of=/root/$NAME.img bs=1M status=progress count=$(( $SIZE / 1024 / 1024 + 1 ))
+		dd if=$SOURCE of=$NAME.img bs=1M status=progress count=$(( $IMAGE_SIZE / 1024 / 1024 + 1 ))
 		read -p "Image file created: /root/$NAME.img"
-		umount $SOURCE
 
 	fi
+
+	# Generate hashes: MD5, SHA1, SHA256
+	cat << _EOF_ > hash.txt
+MD5:	$(md5sum $NAME.img | mawk '{print $1}')
+SHA1:	$(sha1sum $NAME.img | mawk '{print $1}')
+SHA256:	$(sha256sum $NAME.img | mawk '{print $1}')
+_EOF_
+
+	# Download current README
+	wget https://raw.githubusercontent.com/MichaIng/DietPi/master/README.md
+
+	# Generate 7z archive
+	# NB: LZMA2 ultra compression method requires 2G RAM
+	7zr a -m0=lzma2 -mx=9 $NAME.7z $NAME.img hash.txt README.md
 
 	#-----------------------------------------------------------------------------------
 	exit
