@@ -5,7 +5,7 @@
 	(( $UID )) && { echo 'ERROR: Root permissions required. Please run this script with "sudo". Exiting...'; exit 1; }
 
 	# Check for concurrent execution
-	pgrep -f 'dietpi-wifi-monitor.sh' &> /dev/null && { echo 'ERROR: Concurrent execution detected. Please exit the running instance of DietPi-WiFi-Monitor first. Exiting...'; exit 1; }
+	(( $(pgrep -cf 'dietpi-wifi-monitor.sh') > 1 )) && { echo 'ERROR: Concurrent execution detected. Please exit the running instance of DietPi-WiFi-Monitor first. Exiting...'; exit 1; }
 
 	# Update network info
 	/DietPi/dietpi/func/obtain_network_details

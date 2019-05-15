@@ -996,6 +996,8 @@ DietPi-Software will decrypt and use it for software installs. You can change it
 		aSOFTWARE_ONLINEDOC_URL[$software_id]='p=47#p47'
 		# ownCloud up to 10.2 does not support PHP7.3 (Buster): https://doc.owncloud.org/server/administration_manual/installation/system_requirements.html
 		aSOFTWARE_AVAIL_G_DISTRO[$software_id,5]=0
+		# ARMv6 devices have no chance to get some required PHP7.2 packages (APCu, Redis)
+		aSOFTWARE_AVAIL_G_HW_ARCH[$software_id,1]=0
 		# Disable if PHP7.3 is already installed
 		command -v php7.3 &> /dev/null && aSOFTWARE_AVAIL_G_DISTRO[$software_id,$G_DISTRO]=0
 
@@ -1248,6 +1250,13 @@ DietPi-Software will decrypt and use it for software installs. You can change it
 		aSOFTWARE_REQUIRES_PHP[$software_id]=1
 		aSOFTWARE_REQUIRES_MYSQL[$software_id]=1
 		aSOFTWARE_ONLINEDOC_URL[$software_id]='p=51#p51'
+
+		# phpBB up to 3.2 does not support PHP7.3 (Buster)
+		aSOFTWARE_AVAIL_G_DISTRO[$software_id,5]=0
+		# ARMv6 devices have no chance to get some required PHP7.2 packages (APCu, Redis)
+		aSOFTWARE_AVAIL_G_HW_ARCH[$software_id,1]=0
+		# Disable if PHP7.3 is already installed
+		command -v php7.3 &> /dev/null && aSOFTWARE_AVAIL_G_DISTRO[$software_id,$G_DISTRO]=0
 
 		#------------------
 		software_id=55
@@ -2681,8 +2690,7 @@ DietPi-Software will decrypt and use it for software installs. You can change it
 
 			fi
 
-			# WEBSERVER_PHP
-			software_id=89
+			software_id=89 # PHP
 			if (( ${aSOFTWARE_REQUIRES_PHP[$i]:=0} && aSOFTWARE_INSTALL_STATE[$software_id] != 1 )); then
 
 				aSOFTWARE_INSTALL_STATE[$software_id]=1
@@ -3414,45 +3422,69 @@ ExecStartPre=$(command -v chown) -R redis:redis /var/run/redis /var/lib/redis" >
 
 			Banner_Installing
 
+			# Buster force flag
+			local force_buster=''
+
 			# Jessie + Stretch: Add Ondrejs PHP repository for latest PHP version (currently PHP7.3)
 			if (( $G_DISTRO < 5 )); then
 
-				# Jessie: https://github.com/MichaIng/DietPi/issues/1620#issuecomment-373086888
-				if (( $G_DISTRO < 4 )); then
+				# - Debian (+sury.org) armhf is not ARMv6 compatible: https://github.com/MichaIng/DietPi/issues/2794
+				if (( $G_HW_ARCH < 2 )); then
 
-					INSTALL_URL_ADDRESS='https://dietpi.com/downloads/binaries/all/libssl1.1_1.1.0f-3+deb9u1_'
+					INSTALL_URL_ADDRESS='http://raspbian.raspberrypi.org/raspbian'
+					# - Actually we do not support any non-RPi ARMv6 devices currently, but lets be failsafe here
+					(( $G_HW_MODEL > 9 )) && INSTALL_URL_ADDRESS='https://deb.debian.org/debian/'
+					# - Jessie does not like https://deb.debian.org
+					(( $G_DISTRO < 4 )) && INSTALL_URL_ADDRESS=${INSTALL_URL_ADDRESS/https/http}
 
-					# - ARMv7
-					if (( $G_HW_ARCH < 3 )); then
+					# - APT source
+					echo "deb $INSTALL_URL_ADDRESS buster main" > /etc/apt/sources.list.d/dietpi-php.list
+					# - Set priority for Buster: No auto install but auto upgrade
+					echo -e 'Package: *\nPin: release n=buster\nPin-Priority: 100' > /etc/apt/preferences.d/dietpi-php
+					# - Force Buster to allow APT install with above low priority
+					force_buster='-t buster'
 
-						INSTALL_URL_ADDRESS+='armhf.deb'
+				else
 
-					# - ARM64
-					elif (( $G_HW_ARCH == 3 )); then
+					# Jessie: https://github.com/MichaIng/DietPi/issues/1620#issuecomment-373086888
+					if (( $G_DISTRO < 4 )); then
 
-						INSTALL_URL_ADDRESS+='arm64.deb'
+						INSTALL_URL_ADDRESS='https://dietpi.com/downloads/binaries/all/libssl1.1_1.1.0f-3+deb9u1_'
 
-					# - x86_64
-					elif (( $G_HW_ARCH == 10 )); then
+						# - ARMv7
+						if (( $G_HW_ARCH < 3 )); then
 
-						INSTALL_URL_ADDRESS+='amd64.deb'
+							INSTALL_URL_ADDRESS+='armhf.deb'
+
+						# - ARM64
+						elif (( $G_HW_ARCH == 3 )); then
+
+							INSTALL_URL_ADDRESS+='arm64.deb'
+
+						# - x86_64
+						elif (( $G_HW_ARCH == 10 )); then
+
+							INSTALL_URL_ADDRESS+='amd64.deb'
+
+						fi
+
+						Download_Install "$INSTALL_URL_ADDRESS"
 
 					fi
 
-					Download_Install "$INSTALL_URL_ADDRESS"
+					# - Check URL
+					INSTALL_URL_ADDRESS='https://packages.sury.org/php/apt.gpg'
+					G_CHECK_URL "$INSTALL_URL_ADDRESS"
+					# - APT key
+					curl -sSL "$INSTALL_URL_ADDRESS" | apt-key add -
+					# - APT source
+					echo "deb https://packages.sury.org/php/ $G_DISTRO_NAME main" > /etc/apt/sources.list.d/dietpi-php.list
+					# - Pin down libssl1.1 version from this repo on Jessie and Stretch: https://github.com/MichaIng/DietPi/issues/2734
+					echo -e '# libssl1.1 from sury.org breaks Lighttpd install
+Package: openssl libssl*\nPin: origin packages.sury.org\nPin-Priority: -1' > /etc/apt/preferences.d/dietpi-openssl
 
 				fi
 
-				# - Check URL
-				INSTALL_URL_ADDRESS='https://packages.sury.org/php/apt.gpg'
-				G_CHECK_URL "$INSTALL_URL_ADDRESS"
-				# - APT key
-				curl -sSL "$INSTALL_URL_ADDRESS" | apt-key add -
-				# - APT source
-				echo "deb https://packages.sury.org/php/ $G_DISTRO_NAME main" > /etc/apt/sources.list.d/dietpi-php.list
-				# - Pin down libssl1.1 version from this repo on Jessie and Stretch: https://github.com/MichaIng/DietPi/issues/2734
-				echo -e '# libssl1.1 from sury.org breaks Lighttpd install
-Package: openssl libssl1.1\nPin: origin packages.sury.org\nPin-Priority: -1' > /etc/apt/preferences.d/dietpi-openssl
 				# - APT list update
 				G_AGUP
 
@@ -3488,7 +3520,7 @@ Package: openssl libssl1.1\nPin: origin packages.sury.org\nPin-Priority: -1' > /
 			# Redis PHP module
 			(( ${aSOFTWARE_INSTALL_STATE[91]} > 0 )) && package_list+=" $PHP_NAME-redis"
 
-			G_AGI $package_list
+			G_AGI $force_buster $package_list
 
 		fi
 
@@ -10424,6 +10456,9 @@ location = /.well-known/caldav {
 			Banner_Configuration
 			Download_Test_Media
 
+			# Permissions
+			usermod -a -G dietpi emby
+
 		fi
 
 		software_id=42 # Plex Media Server
@@ -10431,6 +10466,9 @@ location = /.well-known/caldav {
 
 			Banner_Configuration
 			Download_Test_Media
+
+			# Permissions
+			usermod -a -G dietpi plex
 
 			# Run service as "dietpi" group: https://github.com/MichaIng/DietPi/issues/350#issuecomment-423763518
 			mkdir -p /etc/systemd/system/plexmediaserver.service.d
@@ -12682,6 +12720,13 @@ _EOF_
 			# temp php uploads, if it was created
 			[[ -d '/var/tmp/php_upload_tmp' ]] && rm -R /var/tmp/php_upload_tmp
 
+			## Leave PHP repo in place to avoid issues with remaining dependency packages that were pulled from this repo
+			# APT repo
+			#[[ -f '/etc/apt/sources.list.d/dietpi-php.list' ]] && rm /etc/apt/sources.list.d/dietpi-php.list
+			# APT preferences
+			#[[ -f '/etc/apt/preferences.d/dietpi-openssl' ]] && rm /etc/apt/preferences.d/dietpi-openssl
+			#[[ -f '/etc/apt/preferences.d/dietpi-php' ]] && rm /etc/apt/preferences.d/dietpi-php
+
 		fi
 
 		software_id=90
@@ -14867,14 +14912,25 @@ _EOF_
 
 						elif [[ $1 == 'reinstall' ]]; then
 
-							if (( ${aSOFTWARE_INSTALL_STATE[$i]} == 2 )); then
+							if (( ! ${aSOFTWARE_AVAIL_G_HW_ARCH[$i,$G_HW_ARCH]:=1} )); then
 
-								# - Flag to be installed
+								G_DIETPI-NOTIFY 1 "Software title (${aSOFTWARE_WHIP_NAME[$i]}) is not supported for $G_HW_ARCH_DESCRIPTION."
+
+							elif (( ! ${aSOFTWARE_AVAIL_G_HW_MODEL[$i,$G_HW_MODEL]:=1} )); then
+
+								G_DIETPI-NOTIFY 1 "Software title (${aSOFTWARE_WHIP_NAME[$i]}) is not supported for $G_HW_MODEL_DESCRIPTION."
+
+							elif (( ! ${aSOFTWARE_AVAIL_G_DISTRO[$i,$G_DISTRO]:=1} )); then
+
+								G_DIETPI-NOTIFY 1 "Software title (${aSOFTWARE_WHIP_NAME[$i]}) is not supported for Debian $G_DISTRO_NAME."
+
+							elif (( ${aSOFTWARE_INSTALL_STATE[$i]} == 2 )); then
+
 								aSOFTWARE_INSTALL_STATE[$i]=1
 								GOSTARTINSTALL=1
 
 								G_DIETPI-NOTIFY 0 "Reinstalling ${aSOFTWARE_WHIP_NAME[$i]}: ${aSOFTWARE_WHIP_DESC[$i]}"
-								sleep 1
+								sleep 0.5
 
 							else
 
