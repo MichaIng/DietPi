@@ -12,7 +12,7 @@
 
 	URL_PING=''
 	ADAPTER="wlan$(sed -n 2p /DietPi/dietpi/.network)"
-	TICKRATE={TICKRATE:-10}
+	TICKRATE=${TICKRATE:-10}
 
 	#-------------------------------------------------------------------------------------
 	# Main
