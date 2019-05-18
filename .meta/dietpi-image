@@ -93,9 +93,12 @@
 		resize2fs -M $ROOT_DEV 2>&1 | tee resize2fs_out
 		if out=$(grep -m1 'Nothing to do!' resize2fs_out); then
 
-			FS_SIZE=$(mawk '{print $5 * 8}' <<< $out) # 4k blocks => 512 byte sectors
-			echo "[  OK  ] Shrunken root file system to $(( $FS_SIZE / 2048 + 1 )) MiB"
+			# Re-add 4M to be failsafe, was required on Raspbian Buster for successful boot
+			FS_SIZE=$(mawk '{print $5 + 1024}' <<< $out) # 4k blocks
 			rm resize2fs_out
+			resize2fs $ROOT_DEV $FS_SIZE
+			echo "[  OK  ] Shrunken root file system to $(( $FS_SIZE / 256 + 1 )) MiB"
+			FS_SIZE=$(( $FS_SIZE * 8 )) # 4k blocks => 512 byte sectors
 			break
 
 		fi
@@ -132,14 +135,14 @@
 	# - Without partition table, the whole raw disk space needs to be cloned
 	if [[ $ROOT == 0 ]]; then
 
-		PART_SIZE=$(lsblk -o SIZE --bytes $SOURCE)
+		PART_SIZE=$(lsblk -o SIZE --bytes $SOURCE) # Byte
 
 	else
 
-		PART_SIZE=$(( ( $(fdisk -l -o End $SOURCE | tail -1) + 1 ) * 512 ))
+		PART_SIZE=$(( ( $(fdisk -l -o End $SOURCE | tail -1) + 1 ) * 512 )) # 512 byte sectors => Byte 
 
 	fi
-	IMAGE_SIZE=$(( $PART_SIZE + 512*256 )) # 64 bytes for secondary GPT + safety net
+	IMAGE_SIZE=$(( $PART_SIZE + 512*256 )) # 64 byte for secondary GPT + safety net
 
 	# Create final image in /root
 	cd /root
@@ -152,6 +155,7 @@
 	# else create .img file from block device source via dd, stopping at block count that matches used size
 	else
 
+		[[ -f $NAME.img ]] && rm $NAME.img
 		dd if=$SOURCE of=$NAME.img bs=1M status=progress count=$(( $IMAGE_SIZE / 1024 / 1024 + 1 ))
 		echo "Image file created: /root/$NAME.img"
 
@@ -169,6 +173,7 @@ _EOF_
 
 	# Generate 7z archive
 	# NB: LZMA2 ultra compression method requires 2G RAM
+	[[ -f $NAME.7z ]] && rm $NAME.7z
 	7zr a -m0=lzma2 -mx=9 $NAME.7z $NAME.img hash.txt README.md
 
 	#-----------------------------------------------------------------------------------
