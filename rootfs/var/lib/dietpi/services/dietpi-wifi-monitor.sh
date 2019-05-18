@@ -12,7 +12,7 @@
 
 	URL_PING=''
 	ADAPTER="wlan$(sed -n 2p /DietPi/dietpi/.network)"
-	TICKRATE={TICKRATE:-10}
+	[[ $TICKRATE =~ ^[0-9]+$ ]] && (( $TICKRATE > 0 )) || TICKRATE=10
 
 	#-------------------------------------------------------------------------------------
 	# Main
