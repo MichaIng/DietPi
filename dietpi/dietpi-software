@@ -540,6 +540,9 @@ DietPi-Software will decrypt and use it for software installs. You can change it
 		aSOFTWARE_REQUIRES_FFMPEG[$software_id]=1
 		aSOFTWARE_ONLINEDOC_URL[$software_id]='p=11280#p11280'
 
+		# - Buster: https://github.com/MichaIng/DietPi/issues/2787
+		aSOFTWARE_AVAIL_G_DISTRO[$software_id,5]=0
+
 		#------------------
 		software_id=34
 
@@ -551,6 +554,9 @@ DietPi-Software will decrypt and use it for software installs. You can change it
 		aSOFTWARE_REQUIRES_FFMPEG[$software_id]=1
 		aSOFTWARE_REQUIRES_JAVA_JRE_JDK[$software_id]=1
 		aSOFTWARE_ONLINEDOC_URL[$software_id]='p=213#p213'
+
+		# - Buster: https://github.com/MichaIng/DietPi/issues/2787
+		aSOFTWARE_AVAIL_G_DISTRO[$software_id,5]=0
 
 		#------------------
 		software_id=35
@@ -996,6 +1002,8 @@ DietPi-Software will decrypt and use it for software installs. You can change it
 		aSOFTWARE_ONLINEDOC_URL[$software_id]='p=47#p47'
 		# ownCloud up to 10.2 does not support PHP7.3 (Buster): https://doc.owncloud.org/server/administration_manual/installation/system_requirements.html
 		aSOFTWARE_AVAIL_G_DISTRO[$software_id,5]=0
+		# ARMv6 devices have no chance to get some required PHP7.2 packages (APCu, Redis)
+		aSOFTWARE_AVAIL_G_HW_ARCH[$software_id,1]=0
 		# Disable if PHP7.3 is already installed
 		command -v php7.3 &> /dev/null && aSOFTWARE_AVAIL_G_DISTRO[$software_id,$G_DISTRO]=0
 
@@ -1248,6 +1256,13 @@ DietPi-Software will decrypt and use it for software installs. You can change it
 		aSOFTWARE_REQUIRES_PHP[$software_id]=1
 		aSOFTWARE_REQUIRES_MYSQL[$software_id]=1
 		aSOFTWARE_ONLINEDOC_URL[$software_id]='p=51#p51'
+
+		# phpBB up to 3.2 does not support PHP7.3 (Buster)
+		aSOFTWARE_AVAIL_G_DISTRO[$software_id,5]=0
+		# ARMv6 devices have no chance to get some required PHP7.2 packages (APCu, Redis)
+		aSOFTWARE_AVAIL_G_HW_ARCH[$software_id,1]=0
+		# Disable if PHP7.3 is already installed
+		command -v php7.3 &> /dev/null && aSOFTWARE_AVAIL_G_DISTRO[$software_id,$G_DISTRO]=0
 
 		#------------------
 		software_id=55
@@ -1824,6 +1839,10 @@ DietPi-Software will decrypt and use it for software installs. You can change it
 
 		# - non-RPi Buster: https://packages.debian.org/phpmyadmin
 		(( $G_HW_MODEL > 9 )) && aSOFTWARE_AVAIL_G_DISTRO[$software_id,5]=0
+
+		# Since the APT package depends on PHP meta packages, PHP7.2 cannot be installed
+		# Since ownCloud + phpBB require PHP7.2 currently, phpMyAdmin is not compatible with those
+		[[ -f '/var/www/owncloud/occ' || -f '/var/www/phpBB3/config.php' ]] && aSOFTWARE_AVAIL_G_DISTRO[$software_id,$G_DISTRO]=0
 
 		#------------------
 		software_id=91
@@ -3260,11 +3279,11 @@ Package: *php7.3*\nPin: release *\nPin-Priority: -1' > /etc/apt/preferences.d/di
 			# - Remove previous disk cache dir or symlink
 			[[ -d '/var/cache/samba' || -L '/var/cache/samba' ]] && rm -R /var/cache/samba
 			# - Pre-create RAM cache dir
-			mkdir -p /var/run/samba-cache
+			mkdir -p /run/samba-cache
 			# - Link disk cache to RAM
-			ln -s /var/run/samba-cache /var/cache/samba
+			ln -s /run/samba-cache /var/cache/samba
 			# - Create RAM cache dir automatically on boot
-			echo 'd /var/run/samba-cache - - - - -' > /etc/tmpfiles.d/dietpi-samba_cache.conf
+			echo 'd /run/samba-cache - - - - -' > /etc/tmpfiles.d/dietpi-samba_cache.conf
 
 			G_AGI samba
 
@@ -3394,14 +3413,14 @@ Package: *php7.3*\nPin: release *\nPin-Priority: -1' > /etc/apt/preferences.d/di
 			G_AGI $package_list
 
 			# Fix wrong permissions from Jessie package: https://github.com/MichaIng/DietPi/issues/2736
-			# - /var/run/redis is created but on boot as well with wrong root:root permissions, so we need to fix that via ExecStartPre
+			# - /run/redis is created but on boot as well with wrong root:root permissions, so we need to fix that via ExecStartPre
 			if (( $G_DISTRO < 4 )); then
 
 				mkdir -p /etc/systemd/system/redis-server.service.d
 				echo "[Service]
 PermissionsStartOnly=true
-ExecStartPre=$(command -v mkdir) -p /var/run/redis /var/lib/redis
-ExecStartPre=$(command -v chown) -R redis:redis /var/run/redis /var/lib/redis" > /etc/systemd/system/redis-server.service.d/dietpi-fix_permissions.conf
+ExecStartPre=$(command -v mkdir) -p /run/redis /var/lib/redis
+ExecStartPre=$(command -v chown) -R redis:redis /run/redis /var/lib/redis" > /etc/systemd/system/redis-server.service.d/dietpi-fix_permissions.conf
 				systemctl daemon-reload
 
 			fi
@@ -3428,7 +3447,12 @@ ExecStartPre=$(command -v chown) -R redis:redis /var/run/redis /var/lib/redis" >
 					# - APT source
 					echo "deb $INSTALL_URL_ADDRESS buster main" > /etc/apt/sources.list.d/dietpi-php.list
 					# - Set priority for Buster: No auto install but auto upgrade
-					echo -e 'Package: *\nPin: release n=buster\nPin-Priority: 100' > /etc/apt/preferences.d/dietpi-php
+					echo -e '# Allow to install PHP7.3 dependencies and meta packages from Buster
+# - Lighttpd must be pulled as well from Buster since the Stretch version does not support Buster libssl1.1 (1.1.1)
+Package: php libapache2-mod-php php-* libssl* libc6* libc-* libgssapi-krb5-2 libpcre2-8-0 libk5crypto3 libkrb5-3 libkrb5support0 locales libzip4 curl lighttpd
+Pin: release n=buster\nPin-Priority: 501\n
+# Pin down all other Buster packages to only allow upgrades of already installed ones via: "apt upgrade"
+Package: *\nPin: release n=buster\nPin-Priority: 100' > /etc/apt/preferences.d/dietpi-php
 
 				else
 
@@ -3467,7 +3491,7 @@ ExecStartPre=$(command -v chown) -R redis:redis /var/run/redis /var/lib/redis" >
 					echo "deb https://packages.sury.org/php/ $G_DISTRO_NAME main" > /etc/apt/sources.list.d/dietpi-php.list
 					# - Pin down libssl1.1 version from this repo on Jessie and Stretch: https://github.com/MichaIng/DietPi/issues/2734
 					echo -e '# libssl1.1 from sury.org breaks Lighttpd install
-Package: openssl libssl1.1\nPin: origin packages.sury.org\nPin-Priority: -1' > /etc/apt/preferences.d/dietpi-openssl
+Package: openssl libssl*\nPin: origin packages.sury.org\nPin-Priority: -1' > /etc/apt/preferences.d/dietpi-openssl
 
 				fi
 
@@ -7225,6 +7249,10 @@ _EOF_
 			G_BACKUP_FP /etc/lighttpd/lighttpd.conf
 			sed -i '/^server.document-root/c\server.document-root        = "/var/www"' /etc/lighttpd/lighttpd.conf
 
+			# Fix in case Lighttpd got updated to Buster version (on ARMv6 due to PHP7.3 libssl1.1 depedency)
+			# - "create-mime.assign.pl" has been renamed to "create-mime.conf.pl"
+			[[ -f '/usr/share/lighttpd/create-mime.assign.pl' ]] || sed -i 's/create-mime\.assign\.pl/create-mime.conf.pl/g' /etc/lighttpd/lighttpd.conf
+
 			# Configure fastcgi for PHP-FPM
 			cat << _EOF_ > /etc/lighttpd/conf-available/15-fastcgi-php.conf
 # -*- depends: fastcgi -*-
@@ -7246,7 +7274,7 @@ _EOF_
 
 			# Move default page
 			mv /var/www/html/index.lighttpd.html /var/www/
-			[[ $(ls -A /var/www/html 2>&1) ]] || rm -R /var/www/html
+			rmdir --ignore-fail-on-non-empty /var/www/html
 
 		fi
 
@@ -7770,7 +7798,7 @@ _EOF_
 			local redis_conf="/etc/redis/redis*.conf"
 			# - Enable Redis socket and grant www-data access to it:
 			#	- NB: To allow wildcard expansion, do not use quotes around $redis_conf!
-			GCI_PRESERVE=1 G_CONFIG_INJECT 'unixsocket[[:blank:]]' 'unixsocket /var/run/redis/redis-server.sock' $redis_conf
+			GCI_PRESERVE=1 G_CONFIG_INJECT 'unixsocket[[:blank:]]' 'unixsocket /run/redis/redis-server.sock' $redis_conf
 			#	- Current Buster PHP7.3 Redis module cannot access Redis socket even with group + 770 permissions.
 			#	- Obviously group of spawned processes is overridden by only www-data while redis membership is lost.
 			#	- Requires secure solution, however for now we workaround with 777 socket permissions.
@@ -8064,7 +8092,7 @@ The install script will now exit. After applying one of the the above, rerun die
 			local redis_conf="/etc/redis/redis*.conf"
 			# - Enable Redis socket and grant www-data access to it:
 			#	- NB: To allow wildcard expansion, do not use quotes around $redis_conf!
-			GCI_PRESERVE=1 G_CONFIG_INJECT 'unixsocket[[:blank:]]' 'unixsocket /var/run/redis/redis-server.sock' $redis_conf
+			GCI_PRESERVE=1 G_CONFIG_INJECT 'unixsocket[[:blank:]]' 'unixsocket /run/redis/redis-server.sock' $redis_conf
 			#	- Current Buster PHP7.3 Redis module cannot access Redis socket even with group + 770 permissions.
 			#	- Obviously group of spawned processes is overridden by only www-data while redis membership is lost.
 			#	- Requires secure solution, however for now we workaround with 777 socket permissions.
@@ -8331,9 +8359,9 @@ After=network.target sound.target
 User=mpd
 #Group=dietpi # Do not change, use system assigned groups, requires both dietpi and audio groups
 PermissionsStartOnly=true
-RuntimeDirectory=/var/run/mpd
-ExecStartPre=$(command -v mkdir) -p /var/run/mpd
-ExecStartPre=$(command -v chown) -R mpd:dietpi /var/run/mpd
+RuntimeDirectory=/run/mpd
+ExecStartPre=$(command -v mkdir) -p /run/mpd
+ExecStartPre=$(command -v chown) -R mpd:dietpi /run/mpd
 ExecStart=$(command -v mpd) --no-daemon /etc/mpd.conf
 
 # allow MPD to use real-time priority 50
@@ -10442,6 +10470,9 @@ location = /.well-known/caldav {
 			Banner_Configuration
 			Download_Test_Media
 
+			# Permissions
+			usermod -a -G dietpi emby
+
 		fi
 
 		software_id=42 # Plex Media Server
@@ -10449,6 +10480,9 @@ location = /.well-known/caldav {
 
 			Banner_Configuration
 			Download_Test_Media
+
+			# Permissions
+			usermod -a -G dietpi plex
 
 			# Run service as "dietpi" group: https://github.com/MichaIng/DietPi/issues/350#issuecomment-423763518
 			mkdir -p /etc/systemd/system/plexmediaserver.service.d
@@ -12700,11 +12734,12 @@ _EOF_
 			# temp php uploads, if it was created
 			[[ -d '/var/tmp/php_upload_tmp' ]] && rm -R /var/tmp/php_upload_tmp
 
+			## Leave PHP repo in place to avoid issues with remaining dependency packages that were pulled from this repo
 			# APT repo
-			[[ -f '/etc/apt/sources.list.d/dietpi-php.list' ]] && rm /etc/apt/sources.list.d/dietpi-php.list
+			#[[ -f '/etc/apt/sources.list.d/dietpi-php.list' ]] && rm /etc/apt/sources.list.d/dietpi-php.list
 			# APT preferences
-			[[ -f '/etc/apt/preferences.d/dietpi-openssl' ]] && rm /etc/apt/preferences.d/dietpi-openssl
-			[[ -f '/etc/apt/preferences.d/dietpi-php' ]] && rm /etc/apt/preferences.d/dietpi-php
+			#[[ -f '/etc/apt/preferences.d/dietpi-openssl' ]] && rm /etc/apt/preferences.d/dietpi-openssl
+			#[[ -f '/etc/apt/preferences.d/dietpi-php' ]] && rm /etc/apt/preferences.d/dietpi-php
 
 		fi
 
@@ -13284,8 +13319,8 @@ _EOF_
 
 			Banner_Uninstalling
 			G_AGP samba samba-common-bin
-			[[ -f /etc/tmpfiles.d/dietpi-samba_cache.conf ]] && rm /etc/tmpfiles.d/dietpi-samba_cache.conf
-			[[ -d /var/run/samba-cache ]] && rm -R /var/run/samba-cache
+			[[ -f '/etc/tmpfiles.d/dietpi-samba_cache.conf' ]] && rm /etc/tmpfiles.d/dietpi-samba_cache.conf
+			[[ -d '/run/samba-cache' ]] && rm -R /run/samba-cache
 
 		fi
 
@@ -14891,14 +14926,25 @@ _EOF_
 
 						elif [[ $1 == 'reinstall' ]]; then
 
-							if (( ${aSOFTWARE_INSTALL_STATE[$i]} == 2 )); then
+							if (( ! ${aSOFTWARE_AVAIL_G_HW_ARCH[$i,$G_HW_ARCH]:=1} )); then
 
-								# - Flag to be installed
+								G_DIETPI-NOTIFY 1 "Software title (${aSOFTWARE_WHIP_NAME[$i]}) is not supported for $G_HW_ARCH_DESCRIPTION."
+
+							elif (( ! ${aSOFTWARE_AVAIL_G_HW_MODEL[$i,$G_HW_MODEL]:=1} )); then
+
+								G_DIETPI-NOTIFY 1 "Software title (${aSOFTWARE_WHIP_NAME[$i]}) is not supported for $G_HW_MODEL_DESCRIPTION."
+
+							elif (( ! ${aSOFTWARE_AVAIL_G_DISTRO[$i,$G_DISTRO]:=1} )); then
+
+								G_DIETPI-NOTIFY 1 "Software title (${aSOFTWARE_WHIP_NAME[$i]}) is not supported for Debian $G_DISTRO_NAME."
+
+							elif (( ${aSOFTWARE_INSTALL_STATE[$i]} == 2 )); then
+
 								aSOFTWARE_INSTALL_STATE[$i]=1
 								GOSTARTINSTALL=1
 
 								G_DIETPI-NOTIFY 0 "Reinstalling ${aSOFTWARE_WHIP_NAME[$i]}: ${aSOFTWARE_WHIP_DESC[$i]}"
-								sleep 1
+								sleep 0.5
 
 							else
 
@@ -15390,6 +15436,16 @@ Once DietPi has completed your software installations, and rebooted, please foll
 					Read_InstallFileList temp
 
 				fi
+
+			fi
+
+			# phpMyAdmin is currently not compatible with ownCloud and phpBB: https://github.com/MichaIng/DietPi/issues/2808#issuecomment-493220292
+			if (( ${aSOFTWARE_INSTALL_STATE[90]} == 1 && ( ${aSOFTWARE_INSTALL_STATE[47]} > 0 || ${aSOFTWARE_INSTALL_STATE[54]} > 0 ) )); then
+
+				G_WHIP_MSG '[WARNING] Incompatible selection\n
+phpMyAdmin is currently not compatible with ownCloud and phpBB. This will be possible with ownCloud 10.3 and phpBB 3.3. Check out the changelogs of future DietPi updates to get informed.\n
+phpMyAdmin will be deselected!'
+				aSOFTWARE_INSTALL_STATE[90]=0
 
 			fi
 
