@@ -15,7 +15,7 @@
 	#////////////////////////////////////
 
 	# - DietPi-Globals: dietpi-* aliases, G_* functions and variables
-	. /DietPi/dietpi/func/dietpi-globals || { echo -e '[\e[31mFAILED\e[0m] DietPi-Login | DietPi boot scripts failed. Skipping DietPi login scripts...'; exit 1; }
+	. /DietPi/dietpi/func/dietpi-globals || { echo -e '[\e[31mFAILED\e[0m] DietPi-Login | DietPi boot scripts failed. Skipping DietPi login scripts...'; return 1; }
 
 	# - "G_DIETPI-NOFITY -2 message" starts a process animation.
 	#   If scripts fail to kill the animation, e.g. cancelled by user, terminal bash prompt has to do it as last resort:
