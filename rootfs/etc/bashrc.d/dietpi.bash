@@ -14,14 +14,16 @@
 	# - Prepares shell for DietPi and runs autostarts on /dev/tty1
 	#////////////////////////////////////
 
-	# - DietPi-Globals: dietpi-* aliases, G_* functions and variables
-	. /DietPi/dietpi/func/dietpi-globals || { echo -e '[\e[31mFAILED\e[0m] DietPi-Login | DietPi boot scripts failed. Skipping DietPi login scripts...'; return 1; }
+	# Failsafe: Never load this script in non-interactive shells, e.g. SFTP, SCP or rsync
+	[[ -t 0 && $PS1 && $- == *i* ]] || return 0
 
-	# - "G_DIETPI-NOFITY -2 message" starts a process animation.
-	#   If scripts fail to kill the animation, e.g. cancelled by user, terminal bash prompt has to do it as last resort:
+	# DietPi-Globals: dietpi-* aliases, G_* functions and variables
+	. /DietPi/dietpi/func/dietpi-globals || { echo -e '[\e[31mFAILED\e[0m] DietPi-Login | Failed to load DietPi-Globals. Skipping DietPi login scripts...'; return 1; }
+
+	# "G_DIETPI-NOFITY -2 message" starts a process animation. If scripts fail to kill the animation, e.g. cancelled by user, terminal bash prompt has to do it as last resort.
 	PROMPT_COMMAND="[[ -w /tmp/dietpi-process.pid ]] && rm /tmp/dietpi-process.pid && tput cub 9 && tput ed; $PROMPT_COMMAND"
 
-	# - Workaround if SSH client overrides locale with "POSIX" fallback: https://github.com/MichaIng/DietPi/issues/1540#issuecomment-367066178
+	# Workaround if SSH client overrides locale with "POSIX" fallback: https://github.com/MichaIng/DietPi/issues/1540#issuecomment-367066178
 	if [[ $(locale) =~ 'POSIX' ]]; then
 
 		current_locale=$(grep -m1 '^[[:blank:]]*AUTO_SETUP_LOCALE=' /DietPi/dietpi.txt | sed 's/^[^=]*=//')
@@ -31,7 +33,7 @@
 
 	fi
 
-	# - Workaround if SSH client sets an unsupported $TERM string: https://github.com/MichaIng/DietPi/issues/2034	
+	# Workaround if SSH client sets an unsupported $TERM string: https://github.com/MichaIng/DietPi/issues/2034	
 	if [[ $SSH_TTY ]] && ! toe -a | grep -q "^$TERM[[:blank:]]"; then
 
 		TERM_old=$TERM
@@ -57,6 +59,6 @@ Please change your SSH clients terminal, respectively the passed \$TERM string$n
 
 	fi
 
-	# - DietPi-Login: First run setup, autostarts and login banner
+	# DietPi-Login: First run setup, autostarts and login banner
 	/DietPi/dietpi/dietpi-login
 }
