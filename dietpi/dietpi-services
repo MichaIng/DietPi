@@ -7,8 +7,9 @@
 	# Created by Daniel Knight / daniel.knight@dietpi.com / dietpi.com
 	#
 	# Info:
-	# - Allows service control for all listed programs used in dietpi-software
-	# - Disable removes the autostart from init.d and systemd. This allows DietPi to control program services below.
+	# - Allows service control for all listed programs available through dietpi-software
+	# - By default known services are "disabled", thus not started by systemd, but
+	#   started by this script at later boot stage from: /DietPi/dietpi/postboot
 	#
 	USAGE='
 Usage: dietpi-services <command> [<service>]
@@ -23,9 +24,9 @@ Available commands:
   enable/unmask		Enable service to allow its startup
   disable/mask		Disable service to prevent its startup
 Available services:
-  <service_name>	Add any systemd or sysvinit service available and enabled on your system.
+  <service_name>	Add any systemd or sysvinit service available on your system.
   <empty>		Apply command to all services known to DietPi
-  			NB: Some services, required for network or shell session, will be skipped.
+  			NB: Services required for network or shell session will be skipped.
 			NB: You can include/exclude services by editing the following file:
 			    - /DietPi/dietpi/.dietpi-services_include_exclude
 '	#////////////////////////////////////
@@ -36,7 +37,7 @@ Available services:
 	# - pre-v6.25 compatibility
 	[[ $INPUT_SERVICE == 'all' ]] && unset INPUT_SERVICE
 
-	# - Optional input variables to prevent service handling
+	# - Optional env vars to prevent service handling
 	[[ $G_DIETPI_SERVICES_DISABLE == 1 ]] && exit 0
 	[[ $DISABLE_SERVICES_START == 1 ]] && [[ $INPUT_CMD == 'start' || $INPUT_CMD == 'restart' ]] && exit 0
 
@@ -47,7 +48,11 @@ Available services:
 	G_INIT
 	# Import DietPi-Globals --------------------------------------------------------------
 
-	Init_Array(){
+
+	#/////////////////////////////////////////////////////////////////////////////////////
+	# Service Control
+	#/////////////////////////////////////////////////////////////////////////////////////
+	Load_All_Services_Array(){
 
 		aSERVICE_NAME=(
 
@@ -197,8 +202,7 @@ Available services:
 		# Additional services: https://github.com/MichaIng/DietPi/issues/1869#issuecomment-401017251
 		[[ -f '/etc/rsyncd.conf' ]] && aSERVICE_NAME+=('rsync')
 
-		# Hidden/not-controlled services
-		# - Status mode, enable service status
+		# Non-controlled services: Only show in menu and/or status mode!
 		if [[ ! $INPUT_CMD || $INPUT_CMD == 'status' ]]; then
 
 			# - SSH
@@ -237,11 +241,11 @@ Available services:
 	}
 
 
-	# User: read custom services file
-	FP_INCLUDE_CUSTOM_SERVICES='/DietPi/dietpi/.dietpi-services_include_exclude'
+	# Apply custom include/exclude choices
+	FP_INCLUDE_EXCLUDE='/DietPi/dietpi/.dietpi-services_include_exclude'
 	Process_Includes_Excludes(){
 
-		[[ -f $FP_INCLUDE_CUSTOM_SERVICES ]] || cat << _EOF_ > $FP_INCLUDE_CUSTOM_SERVICES
+		[[ -f $FP_INCLUDE_EXCLUDE ]] || cat << _EOF_ > $FP_INCLUDE_EXCLUDE
 # DietPi-Services Include/Exclude configuration
 
 # Include custom service (Use '+ servicename' without the comments to enable DietPi control of that service)
@@ -256,6 +260,7 @@ Available services:
 #- transmission-daemon
 
 _EOF_
+		local scrape i
 
 		while read line
 		do
@@ -263,8 +268,7 @@ _EOF_
 			# - Skip empty and comment lines
 			[[ ! $line || $line == '#'* ]] && continue
 
-			local scrape=${line: +2}
-			local i=''
+			scrape=${line: +2}
 
 			# - Include
 			if [[ $line == '+ '* ]]; then
@@ -307,131 +311,19 @@ _EOF_
 
 			fi
 
-		done < $FP_INCLUDE_CUSTOM_SERVICES
+		done < $FP_INCLUDE_EXCLUDE
 
 	}
 
-	# $1=index
-	FP_DIETPI_PROCESS_TOOL_SYSTEMD_CONF='dietpi-process_tool.conf'
-	Save_Process_Tool(){
+	# Load array of available/chosen services
+	Load_Service_Array(){
 
-		local index=$1
+		[[ $G_DEBUG == 1 ]] && G_DIETPI-NOTIFY 2 'Generating service list, please wait...'
 
-		# Backwards cap for init.d, create systemd wrapper
-		if [[ ${aFP_SERVICE[$index]} == '/etc/init.d/'* ]]; then
+		# Load all services array, skip in case of single service input
+		[[ $INPUT_SERVICE ]] && aSERVICE_NAME=("$INPUT_SERVICE") || Load_All_Services_Array
 
-			aFP_SERVICE[$index]="/etc/systemd/system/${aSERVICE_NAME[$index]}.service"
-			cat << _EOF_ > "${aFP_SERVICE[$index]}"
-[Unit]
-Description=${aSERVICE_NAME[$index]} sysvinit wrapper (DietPi)
-
-[Service]
-Type=forking
-ExecStart=/etc/init.d/${aSERVICE_NAME[$index]} start
-ExecStop=/etc/init.d/${aSERVICE_NAME[$index]} stop
-
-[Install]
-WantedBy=multi-user.target
-_EOF_
-			G_WHIP_MSG "[ INFO ] DietPi has created a systemd service wrapper for /etc/init.d/${aSERVICE_NAME[$index]}. This is required to allow support for applying process tool options.\n
-If you experience any issues with the wrapper, simply remove the file:\n - rm /etc/systemd/system/${aSERVICE_NAME[$index]}.service\n - Then restart the service."
-
-		fi
-
-		# Always create drop-in configs in: /etc/systemd/system/
-		mkdir -p "/etc/systemd/system/${aSERVICE_NAME[$index]}.service.d"
-		cat << _EOF_ > "/etc/systemd/system/${aSERVICE_NAME[$index]}.service.d/$FP_DIETPI_PROCESS_TOOL_SYSTEMD_CONF"
-[Service]
-Nice=${aCPU_NICE[$index]}
-CPUAffinity=${aCPU_AFFINITY[$index]}
-CPUSchedulingPolicy=${aCPU_SCHEDULE_POLICY[$index]}
-CPUSchedulingPriority=${aCPU_SCHEDULE_PRIORITY[$index]}
-IOSchedulingClass=${aIO_SCHEDULE_POLICY[$index]}
-IOSchedulingPriority=${aIO_PRIORITY[$index]}
-_EOF_
-		G_RUN_CMD systemctl daemon-reload
-		aSERVICE_RESTART_REQUIRED[$index]=1
-
-	}
-
-	# $1=index
-	Load_Process_Tool(){
-
-		local index=$1
-
-		# Defaults
-		aCPU_NICE[$index]=0
-		aCPU_AFFINITY[$index]="0-$(( $G_HW_CPU_CORES - 1 ))"
-		aCPU_SCHEDULE_POLICY[$index]='other'
-		aCPU_SCHEDULE_PRIORITY[$index]=0
-		aIO_SCHEDULE_POLICY[$index]='best-effort'
-		aIO_PRIORITY[$index]='3'
-
-		local fp="/etc/systemd/system/${aSERVICE_NAME[$index]}.service.d/$FP_DIETPI_PROCESS_TOOL_SYSTEMD_CONF"
-		[[ -f $fp ]] || return
-
-		aCPU_NICE[$index]=$(grep -m1 '^[[:blank:]]*Nice=' $fp | sed 's/^[^=]*=//g')
-		aCPU_AFFINITY[$index]=$(grep -m1 '^[[:blank:]]*CPUAffinity=' $fp | sed 's/^[^=]*=//g')
-		aCPU_SCHEDULE_POLICY[$index]=$(grep -m1 '^[[:blank:]]*CPUSchedulingPolicy=' $fp | sed 's/^[^=]*=//g')
-		aCPU_SCHEDULE_PRIORITY[$index]=$(grep -m1 '^[[:blank:]]*CPUSchedulingPriority=' $fp | sed 's/^[^=]*=//g')
-		aIO_SCHEDULE_POLICY[$index]=$(grep -m1 '^[[:blank:]]*IOSchedulingClass=' $fp | sed 's/^[^=]*=//g')
-		aIO_PRIORITY[$index]=$(grep -m1 '^[[:blank:]]*IOSchedulingPriority=' $fp | sed 's/^[^=]*=//g')
-
-	}
-
-	# $1=index
-	Reset_Service_Defaults(){
-
-		local index=$1
-
-		local fp="/etc/systemd/system/${aSERVICE_NAME[$index]}.service.d/$FP_DIETPI_PROCESS_TOOL_SYSTEMD_CONF"
-		[[ -f $fp ]] || return
-
-		G_RUN_CMD rm "$fp"
-		G_RUN_CMD rmdir --ignore-fail-on-non-empty "/etc/systemd/system/${aSERVICE_NAME[$index]}.service.d"
-		G_RUN_CMD systemctl unmask "${aSERVICE_NAME[$index]}"
-		G_RUN_CMD systemctl daemon-reload
-		Load_Process_Tool $index
-		aSERVICE_RESTART_REQUIRED[$index]=1
-
-	}
-
-	Load_Process_Tool_Arrays(){
-
-		aSERVICE_MODE=() 		# Enabled/disabled/masked/unmasked
-		aSERVICE_RESTART_REQUIRED=() 	# eg, made changes, prompt to restart this service.
-
-		aCPU_NICE=()
-		aCPU_AFFINITY=()
-		aCPU_SCHEDULE_POLICY=()
-		aCPU_SCHEDULE_PRIORITY=()
-		aIO_SCHEDULE_POLICY=()
-		aIO_PRIORITY=()
-
-		aCPU_SCHEDULE_POLICY_TYPE=('other' 'fifo' 'rr' 'batch' 'idle')
-		aCPU_SCHEDULE_POLICY_DESC=('Normal (Default)' 'First In, First Out (Real-time, time-critical)' 'Round Robin (Real-time, time-critical)' 'Batch style execution' 'Background Jobs (Very low priority)')
-
-		aIO_SCHEDULE_POLICY_TYPE=('best-effort' 'realtime' 'idle')
-		aIO_SCHEDULE_POLICY_DESC=('Normal (Default)' 'Time-critical (Highest priority)' 'Background Jobs (Very low priority)')
-
-		for i in ${!aSERVICE_NAME[@]}
-		do
-
-			aSERVICE_MODE[$i]=$(systemctl is-enabled "${aSERVICE_NAME[$i]}" 2> /dev/null)
-			Load_Process_Tool $i	
-
-		done
-
-	}
-
-	# Check if service name is available on system.
-	Populate_Available_Array(){
-
-		[[ $G_DEBUG == 1 ]] && G_DIETPI-NOTIFY 2 'Generating service and process tool list, please wait...'
-
-		# Create service array, skip in case of single service input
-		[[ $INPUT_SERVICE ]] && aSERVICE_NAME=("$INPUT_SERVICE") || Init_Array
-
+		# Check service availability
 		aFP_SERVICE=()
 		local i j
 		for i in ${!aSERVICE_NAME[@]}
@@ -451,7 +343,7 @@ _EOF_
 
 			done
 
-			# Remove non-available services from array, print info in case of single service input
+			# - Remove non-available services from array
 			[[ ${aFP_SERVICE[$i]} ]] || unset aSERVICE_NAME[$i]
 
 		done
@@ -461,22 +353,7 @@ _EOF_
 	# $1 = command
 	# $2 = service
 	# $3 = exit code
-	Print_Status(){
-
-		# Ok
-		# - NB: systemctl exit code 5 = not loaded/active, so don't trigger a failed result.
-		if [[ $3 == [05] ]]; then
-
-			G_DIETPI-NOTIFY 0 "$1 : $2"
-
-		# Failed
-		else
-
-			G_DIETPI-NOTIFY 1 "$1 : $2"
-
-		fi
-
-	}
+	Print_Status(){ G_DIETPI-NOTIFY ${3/[^0]*/1} "$1 : $2"; }
 
 	# $1 = command (start/stop/restart)
 	# $2 = index (optional)
@@ -525,7 +402,7 @@ _EOF_
 			systemctl $command "${aSERVICE_NAME[$i]}" &> /dev/null
 			Print_Status $command "${aSERVICE_NAME[$i]}" $?
 
-		fi
+		done
 
 		# Disable ownCloud and Nextcloud maintenance mode after all services being started or restarted
 		if [[ $command == 'start' || $command == 'restart' && ! $index ]]; then
@@ -539,7 +416,7 @@ _EOF_
 
 	# $1 = command
 	# $2 = index (optional)
-	Apply_Service_States(){
+	Apply_Service_State(){
 
 		local command=$1
 		local index=$2
@@ -583,22 +460,22 @@ _EOF_
 		# dietpi_controlled/systemd_controlled/mask/unmask/enable/disable
 		else
 
-			local systemd_cmd=''
+			local systemctl_cmd
 			if [[ $command == 'dietpi_controlled' ]]; then
 
-				systemd_cmd='disable'
+				systemctl_cmd='disable'
 
 			elif [[ $command == 'systemd_controlled' ]]; then
 
-				systemd_cmd='enable'
+				systemctl_cmd='enable'
 
 			elif [[ $command == 'enable' || $command == 'unmask' ]]; then
 
-				systemd_cmd='unmask'
+				systemctl_cmd='unmask'
 
 			elif [[ $command == 'disable' || $command == 'mask' ]]; then
 
-				systemd_cmd='mask'
+				systemctl_cmd='mask'
 				# - Stop services before masking them
 				Set_Running_State stop $index
 
@@ -613,7 +490,7 @@ _EOF_
 			for i in $services
 			do
 
-				systemctl $systemd_cmd "${aSERVICE_NAME[$i]}" &> /dev/null
+				systemctl $systemctl_cmd "${aSERVICE_NAME[$i]}" &> /dev/null
 				Print_Status $command "${aSERVICE_NAME[$i]}" $?
 
 			done
@@ -622,23 +499,144 @@ _EOF_
 
 	}
 
+	#/////////////////////////////////////////////////////////////////////////////////////
+	# Process Tool
+	#/////////////////////////////////////////////////////////////////////////////////////
+	# $1=index
+	FP_PROCESS_TOOL_CONF='dietpi-process_tool.conf'
+	Save_Process_Tool(){
+
+		local index=$1
+
+		# Backwards cap for init.d, create systemd wrapper
+		if [[ ${aFP_SERVICE[$index]} == '/etc/init.d/'* ]]; then
+
+			aFP_SERVICE[$index]="/etc/systemd/system/${aSERVICE_NAME[$index]}.service"
+			cat << _EOF_ > "${aFP_SERVICE[$index]}"
+[Unit]
+Description=${aSERVICE_NAME[$index]} sysvinit wrapper (DietPi)
+
+[Service]
+Type=forking
+ExecStart=/etc/init.d/${aSERVICE_NAME[$index]} start
+ExecStop=/etc/init.d/${aSERVICE_NAME[$index]} stop
+
+[Install]
+WantedBy=multi-user.target
+_EOF_
+			G_WHIP_MSG "[ INFO ] DietPi has created a systemd service wrapper for /etc/init.d/${aSERVICE_NAME[$index]}. This is required to allow support for applying process tool options.\n
+If you experience any issues with the wrapper, simply remove the file:\n - rm /etc/systemd/system/${aSERVICE_NAME[$index]}.service\n - Then restart the service."
+
+		fi
+
+		# Always create drop-in configs in: /etc/systemd/system/
+		mkdir -p "/etc/systemd/system/${aSERVICE_NAME[$index]}.service.d"
+		cat << _EOF_ > "/etc/systemd/system/${aSERVICE_NAME[$index]}.service.d/$FP_PROCESS_TOOL_CONF"
+# WARNING: Do not manually edit this file, use "dietpi-services" to adjust values!
+[Service]
+Nice=${aCPU_NICE[$index]}
+CPUAffinity=${aCPU_AFFINITY[$index]}
+CPUSchedulingPolicy=${aCPU_SCHEDULE_POLICY[$index]}
+CPUSchedulingPriority=${aCPU_SCHEDULE_PRIORITY[$index]}
+IOSchedulingClass=${aIO_SCHEDULE_POLICY[$index]}
+IOSchedulingPriority=${aIO_PRIORITY[$index]}
+_EOF_
+		G_RUN_CMD systemctl daemon-reload
+		aSERVICE_RESTART_REQUIRED[$index]=1
+
+	}
+
+	# $1=index
+	Load_Process_Tool(){
+
+		local index=$1
+
+		# Defaults
+		aCPU_NICE[$index]=0
+		aCPU_AFFINITY[$index]="0-$(( $G_HW_CPU_CORES - 1 ))"
+		aCPU_SCHEDULE_POLICY[$index]='other'
+		aCPU_SCHEDULE_PRIORITY[$index]=0
+		aIO_SCHEDULE_POLICY[$index]='best-effort'
+		aIO_PRIORITY[$index]='3'
+
+		local fp="/etc/systemd/system/${aSERVICE_NAME[$index]}.service.d/$FP_PROCESS_TOOL_CONF"
+		[[ -f $fp ]] || return
+
+		# Source values from config file
+		# - [Service] line throws an effectless error that we can simply hide.
+		# - All values are single word strings, so bash assigns them correctly.
+		local Nice CPUAffinity CPUSchedulingPolicy CPUSchedulingPriority IOSchedulingClass IOSchedulingPriority
+		. $fp &> /dev/null
+
+		[[ $Nice ]] && aCPU_NICE[$index]=$Nice
+		[[ $CPUAffinity ]] && aCPU_AFFINITY[$index]=$CPUAffinity
+		[[ $CPUSchedulingPolicy ]] && aCPU_SCHEDULE_POLICY[$index]=$CPUSchedulingPolicy
+		[[ $CPUSchedulingPriority ]] && aCPU_SCHEDULE_PRIORITY[$index]=$CPUSchedulingPriority
+		[[ $IOSchedulingClass ]] && aIO_SCHEDULE_POLICY[$index]=$IOSchedulingClass
+		[[ $IOSchedulingPriority ]] && aIO_PRIORITY[$index]=$IOSchedulingPriority
+
+	}
+
+	# $1=index
+	Reset_Process_Tool(){
+
+		local index=$1
+
+		local fp="/etc/systemd/system/${aSERVICE_NAME[$index]}.service.d/$FP_PROCESS_TOOL_CONF"
+		[[ -f $fp ]] || return
+
+		G_RUN_CMD rm "$fp"
+		G_RUN_CMD rmdir --ignore-fail-on-non-empty "/etc/systemd/system/${aSERVICE_NAME[$index]}.service.d"
+		G_RUN_CMD systemctl unmask "${aSERVICE_NAME[$index]}"
+		G_RUN_CMD systemctl daemon-reload
+		Load_Process_Tool $index
+		aSERVICE_RESTART_REQUIRED[$index]=1
+
+	}
+
+	Load_Process_Tool_Arrays(){
+
+		aSERVICE_MODE=() 		# Enabled/disabled/masked/unmasked
+		aSERVICE_RESTART_REQUIRED=() 	# eg, made changes, prompt to restart this service.
+
+		aCPU_NICE=()
+		aCPU_AFFINITY=()
+		aCPU_SCHEDULE_POLICY=()
+		aCPU_SCHEDULE_PRIORITY=()
+		aIO_SCHEDULE_POLICY=()
+		aIO_PRIORITY=()
+
+		aCPU_SCHEDULE_POLICY_TYPE=('other' 'fifo' 'rr' 'batch' 'idle')
+		aCPU_SCHEDULE_POLICY_DESC=('Normal (Default)' 'First In, First Out (Real-time, time-critical)' 'Round Robin (Real-time, time-critical)' 'Batch style execution' 'Background Jobs (Very low priority)')
+
+		aIO_SCHEDULE_POLICY_TYPE=('best-effort' 'realtime' 'idle')
+		aIO_SCHEDULE_POLICY_DESC=('Normal (Default)' 'Time-critical (Highest priority)' 'Background Jobs (Very low priority)')
+
+		for i in ${!aSERVICE_NAME[@]}
+		do
+
+			aSERVICE_MODE[$i]=$(systemctl is-enabled "${aSERVICE_NAME[$i]}" 2> /dev/null)
+			Load_Process_Tool $i	
+
+		done
+
+	}
 
 	#/////////////////////////////////////////////////////////////////////////////////////
 	# Menu System
 	#/////////////////////////////////////////////////////////////////////////////////////
 	MENU_TARGETID=0
-	MENU_SELECTED_SERVICE_INDEX=0
-	MENU_LAST_SELECTED_MAIN=0 # Main menu
-	MENU_LAST_SELECTED_SUB_0=0 # Sub menus, level 0
+	MENU_SELECTED_SERVICE_INDEX=-1
+	MENU_LAST_SELECTED_MAIN='' # Main menu
+	MENU_LAST_SELECTED_SUB_0='' # Sub menus, level 0
 
 	Menu_Exit(){
 
 		G_WHIP_SIZE_X_MAX=50
 		if G_WHIP_YESNO "Exit $G_PROGRAM_NAME?"; then
 
-			# - Prompt to restart changed services.
-			local service_restart_list_menu=''
-			local service_restart_list_systemd=''
+			# Prompt to restart changed services
+			local service_restart_list_menu service_restart_list_systemd
 			for i in ${!aSERVICE_RESTART_REQUIRED[$i]}
 			do
 
@@ -773,10 +771,10 @@ _EOF_
 
 				'Status')
 
-					systemctl -l --no-pager status "${aSERVICE_NAME[$MENU_SELECTED_SERVICE_INDEX]}"> /tmp/.dietpi-services_systemctl.log
+					systemctl -l --no-pager status "${aSERVICE_NAME[$MENU_SELECTED_SERVICE_INDEX]}" &> systemctl.log
 
-					log=0 G_WHIP_VIEWFILE /tmp/.dietpi-services_systemctl.log
-					rm /tmp/.dietpi-services_systemctl.log
+					log=0 G_WHIP_VIEWFILE systemctl.log
+					rm systemctl.log
 
 				;;
 
@@ -830,7 +828,7 @@ _EOF_
 
 				'Reset')
 
-					Reset_Service_Defaults $MENU_SELECTED_SERVICE_INDEX
+					Reset_Process_Tool $MENU_SELECTED_SERVICE_INDEX
 
 				;;
 
@@ -848,7 +846,7 @@ _EOF_
 					if G_WHIP_MENU "Please select the desired Service Mode for :\n${aSERVICE_NAME[$MENU_SELECTED_SERVICE_INDEX]}"; then
 
 						local cmd_out=$G_WHIP_RETURNED_VALUE
-						unmask_required=0
+						local unmask_required=0
 						if [[ $cmd_out == 'DietPi controlled' ]]; then
 
 							cmd_out='disable'
@@ -891,10 +889,12 @@ _EOF_
 
 				'IO Scheduling Priority')
 
+					local desc
 					G_WHIP_MENU_ARRAY=()
+
 					for i in {7..0}
 					do
-						local desc=''
+						desc=''
 						if (( $i == 0 )); then
 
 							desc='(Highest priority)'
@@ -943,12 +943,12 @@ _EOF_
 					# Get existing nice level
 					# - note: Whiptail will not work with negative numbers. The string cannot start with "-" as it throws subscript error.
 					local nice_current="Nice : ${aCPU_NICE[$MENU_SELECTED_SERVICE_INDEX]}"
-
+					local desc
 					G_WHIP_MENU_ARRAY=()
 
 					for i in {-20..19}
 					do
-						local desc=''
+						desc=''
 						if (( $i == -20 )); then
 
 							desc='(Highest priority)'
@@ -1013,7 +1013,6 @@ Info:\n - Negative values have a higher priority (eg: -10).\n - Positive values 
 
 						local new_affinity=''
 						local loop_count=0
-
 						for i in ${G_WHIP_RETURNED_VALUE[@]}
 						do
 
@@ -1035,7 +1034,6 @@ Info:\n - Negative values have a higher priority (eg: -10).\n - Positive values 
 
 						# Update affinity array with new value, if at least 1 item was selected.
 						[[ $new_affinity ]] && aCPU_AFFINITY[$MENU_SELECTED_SERVICE_INDEX]=$new_affinity
-
 						Save_Process_Tool $MENU_SELECTED_SERVICE_INDEX
 
 					fi
@@ -1074,41 +1072,42 @@ Info:\n - Negative values have a higher priority (eg: -10).\n - Positive values 
 					local scale_value_medium=$(( $scale_value_highest / 6 * 3 ))
 					local scale_value_high=$(( $scale_value_highest / 6 * 4 ))
 					local scale_value_higher=$(( $scale_value_highest / 6 * 5 ))
+					local desc
 					for ((i=0; i<=$scale_value_highest; i++))
 					do
 
-						local description=''
+						desc=''
 						if (( $i == $scale_value_lowest )); then
 
-							description='(Lowest priority)'
+							desc='(Lowest priority)'
 
 						elif (( $i == $scale_value_lower )); then
 
-							description='(Lower priority)'
+							desc='(Lower priority)'
 
 						elif (( $i == $scale_value_low )); then
 
-							description='(Low priority)'
+							desc='(Low priority)'
 
 						elif (( $i == $scale_value_medium )); then
 
-							description='(Medium priority)'
+							desc='(Medium priority)'
 
 						elif (( $i == $scale_value_high )); then
 
-							description='(High priority)'
+							desc='(High priority)'
 
 						elif (( $i == $scale_value_higher )); then
 
-							description='(Higher priority)'
+							desc='(Higher priority)'
 
 						elif (( $i == $scale_value_highest )); then
 
-							description='(Highest priority)'
+							desc='(Highest priority)'
 
 						fi
 
-						G_WHIP_MENU_ARRAY+=($i ": $description")
+						G_WHIP_MENU_ARRAY+=($i ": $desc")
 
 					done
 
@@ -1136,17 +1135,17 @@ Info:\n - Negative values have a higher priority (eg: -10).\n - Positive values 
 	#/////////////////////////////////////////////////////////////////////////////////////
 	# Main
 	#/////////////////////////////////////////////////////////////////////////////////////
-	# Load array of available services
-	Populate_Available_Array
+	# Load array of available/chosen services
+	Load_Service_Array
 	#-----------------------------------------------------------------------------------
-	# Direct service control mode
+	# Direct service control
 	if [[ $INPUT_CMD ]]; then
 
 		# - Exit if input service could not be found
 		[[ $INPUT_SERVICE && ! ${aSERVICE_NAME[@]} ]] && { G_DIETPI-NOTIFY 1 "Service ($INPUT_SERVICE) could not be found."; exit 1; }
 
 		G_DIETPI-NOTIFY 3 "$G_PROGRAM_NAME" "$INPUT_CMD $INPUT_SERVICE"
-		Apply_Service_States $INPUT_CMD $INPUT_SERVICE
+		Apply_Service_State $INPUT_CMD $INPUT_SERVICE
 
 	#-----------------------------------------------------------------------------------
 	# Men You!
