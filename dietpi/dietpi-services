@@ -12,20 +12,20 @@
 	#   started by /DietPi/dietpi/postboot at later boot stage.
 	#
 	USAGE='
-Usage: dietpi-services <command> [<service>]
+Usage: dietpi-services [<command>] [<service>]
 Available commands:
   <empty>		Interactive menu to apply service modes and settings
   status		Print service status info
   start			Start service
   stop			Stop service
   restart		Restart service
-  dietpi_controlled	Let service be started by DietPi on boot
-  systemd_controlled	Let service be started by systemd on boot
+  dietpi_controlled	Let DietPi control start on boot
+  systemd_controlled	Let systemd control start on boot
   enable, unmask	Enable service to allow its startup
-  disable, mask		Disable service to prevent its startup
+  disable, mask		Disable service to prevent its startup completely
 Available services:
-  <service_name>	Add any systemd or sysvinit service available on your system.
-  <empty>		Apply command to all services known to DietPi
+  <service_name>	Apply command to a single available systemd or sysvinit service
+  <empty>		Apply command to all available services known to DietPi
   			NB: Services required for network or shell session will be skipped.
 			NB: You can include/exclude services by editing the following file:
 			    - /DietPi/dietpi/.dietpi-services_include_exclude
@@ -331,6 +331,9 @@ _EOF_
 
 			[[ ${aSERVICE_NAME[$i]} ]] || { unset aSERVICE_NAME[$i]; continue; } # Failsafe
 
+			# Below Stretch, "mariadb" systemd service does not exist, thus "mysql" init.d service will be used.
+			(( $G_DISTRO < 4 )) && [[ ${aSERVICE_NAME[$i]} == 'mariadb' ]] && aSERVICE_NAME[$i]='mysql'
+
 			for j in /{etc,lib}/systemd/system/"${aSERVICE_NAME[$i]}.service" /etc/init.d/"${aSERVICE_NAME[$i]}"
 			do
 
@@ -401,7 +404,7 @@ _EOF_
 		for i in $services
 		do
 
-			[[ ${aSERVICE_MODE[$i]} == 'masked' ]] && continue
+			[[ ${aSERVICE_MODE[$i]} == 'masked' ]] && { G_DIETPI-NOTIFY 2 "skip : ${aSERVICE_NAME[$i]} (due to mask)"; continue; }
 			G_DIETPI-NOTIFY -2 "${aSERVICE_NAME[$i]}"
 			systemctl $command "${aSERVICE_NAME[$i]}" &> /dev/null
 			Print_Status $command "${aSERVICE_NAME[$i]}" $?
@@ -480,8 +483,9 @@ _EOF_
 			elif [[ $command == 'disable' || $command == 'mask' ]]; then
 
 				systemctl_cmd='mask'
-				# - Stop services before masking them
-				Set_Running_State stop $index
+				# - Disable and stop services before masking them
+				Apply_Service_State dietpi_controlled $services
+				Set_Running_State stop $services
 
 			else
 
@@ -495,7 +499,7 @@ _EOF_
 			do
 
 				# - Skip masked services, if not to be unmasked
-				[[ ${aSERVICE_MODE[$i]} == 'masked' && $systemctl_cmd != 'unmask' ]] && continue
+				[[ ${aSERVICE_MODE[$i]} == 'masked' && $systemctl_cmd != 'unmask' ]] && { G_DIETPI-NOTIFY 2 "skip : ${aSERVICE_NAME[$i]} (due to mask)"; continue; }
 				systemctl $systemctl_cmd "${aSERVICE_NAME[$i]}" &> /dev/null
 				Print_Status $command "${aSERVICE_NAME[$i]}" $?
 
@@ -569,7 +573,7 @@ If you experience any issues with the wrapper, remove the file, reload and resta
 		fi
 
 		# Reset all process tool settings
-		if [[ $setting == reset ]]; then
+		if [[ $setting == 'reset' ]]; then
 
 			for i in {0..5}; do unset ${aarray[$i]}[$index]; done
 			[[ -f $fp ]] && G_RUN_CMD rm "$fp"
@@ -621,8 +625,8 @@ If you experience any issues with the wrapper, remove the file, reload and resta
 
 	Load_Process_Tool_Arrays(){
 
-		SYSTEMD_RELOAD_REQUIRED=0 # Set to 1 after systemd unit/drop-in changes
-		aSERVICE_RESTART_REQUIRED=() # Prompt to restart service on exit, when changes to unit file were done
+		SYSTEMD_RELOAD_REQUIRED=0 # Set to 1 after any systemd unit/drop-in changes, apply on exit or running state changes
+		aSERVICE_RESTART_REQUIRED=() # Set to 1 after single systemd unit/drop-in changes, ask to apply on exit
 
 		aCPU_NICE=()
 		aCPU_AFFINITY=()
@@ -772,7 +776,6 @@ If you experience any issues with the wrapper, remove the file, reload and resta
 					fi
 
 					[[ ${aSERVICE_NAME[$new_index]} ]] && break
-
 					not_found="FAILED] Could not find a service file that matches your input ($G_WHIP_RETURNED_VALUE). Please retry or cancel.\n\n"
 
 				done
@@ -836,8 +839,6 @@ If you experience any issues with the wrapper, remove the file, reload and resta
 		[[ $io_class == 'best-effort' ]] && io_priority_default=$(( ( $cpu_nice + 20 ) / 5 ))
 		local io_priority=${aIO_PRIORITY[$MENU_SERVICE_INDEX]:-$io_priority_default}
 
-		G_WHIP_DEFAULT_ITEM=$MENU_LAST_SELECTED_SUB_0
-		G_WHIP_BUTTON_CANCEL_TEXT='Back'
 		G_WHIP_MENU_ARRAY=(
 
 			'' '●─ Service Control '
@@ -883,6 +884,8 @@ If you experience any issues with the wrapper, remove the file, reload and resta
 
 		fi
 
+		G_WHIP_DEFAULT_ITEM=$MENU_LAST_SELECTED_SUB_0
+		G_WHIP_BUTTON_CANCEL_TEXT='Back'
 		if G_WHIP_MENU "Please select an option for ${aSERVICE_NAME[$MENU_SERVICE_INDEX]}:"; then
 
 			MENU_LAST_SELECTED_SUB_0=$G_WHIP_RETURNED_VALUE
@@ -911,6 +914,7 @@ If you experience any issues with the wrapper, remove the file, reload and resta
 						'unmask' ': Un-hide service from system and allow use'
 
 					)
+
 					G_WHIP_DEFAULT_ITEM='DietPi controlled'
 					if G_WHIP_MENU "Please select the desired Service Mode for: ${aSERVICE_NAME[$MENU_SERVICE_INDEX]}"; then
 
@@ -933,9 +937,10 @@ If you experience any issues with the wrapper, remove the file, reload and resta
 						'Exclude' ': Deny DietPi auto-control'
 
 					)
+
 					G_WHIP_DEFAULT_ITEM='Include'
 					if G_WHIP_MENU "Please choose whether to include or exclude ${aSERVICE_NAME[$MENU_SERVICE_INDEX]} from automated DietPi-Services control.
-This affects e.g. auto-stop/start during DietPi-Software installs, DietPi-Update, DietPi-Backup and similar maintenance tasks."; then
+This affects starts/stops/restarts during DietPi-Software installs, DietPi-Update, DietPi-Backup and similar maintenance tasks."; then
 
 						if [[ $G_WHIP_RETURNED_VALUE == 'Include' ]]; then
 
@@ -1267,7 +1272,6 @@ NB: This only has an effect on drives handled by the CFQ scheduler."; then
 	#/////////////////////////////////////////////////////////////////////////////////////
 	# Main
 	#/////////////////////////////////////////////////////////////////////////////////////
-	# Load array of available/chosen services
 	Load_Service_Array
 	#-----------------------------------------------------------------------------------
 	# Direct service control
