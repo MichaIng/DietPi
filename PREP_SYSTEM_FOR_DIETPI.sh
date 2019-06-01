@@ -267,9 +267,9 @@
 			G_DIETPI-NOTIFY 2 'DietPi system found, removing the old files and stopping services. (pre-prep)'
 
 			# - Stop services: RAMdisk includes (Pre|Post)Boot due to dependencies
-			[[ -f /DietPi/dietpi/dietpi-services ]] && /DietPi/dietpi/dietpi-services stop
-			[[ -f /etc/systemd/system/dietpi-ramlog.service ]] && systemctl stop dietpi-ramlog
-			[[ -f /etc/systemd/system/dietpi-ramdisk.service ]] && systemctl stop dietpi-ramdisk
+			[[ -f '/DietPi/dietpi/dietpi-services' ]] && /DietPi/dietpi/dietpi-services stop
+			[[ -f '/etc/systemd/system/dietpi-ramlog.service' ]] && systemctl stop dietpi-ramlog
+			[[ -f '/etc/systemd/system/dietpi-ramdisk.service' ]] && systemctl stop dietpi-ramdisk
 
 			# - Disable services
 			for i in /etc/systemd/system/dietpi-*
@@ -284,12 +284,12 @@
 			# - Delete any previous existing data
 			#	Failsafe
 			umount /DietPi
-			[[ -d /DietPi ]] && rm -R /DietPi
+			[[ -d '/DietPi' ]] && rm -R /DietPi
 			rm -Rf /{boot,mnt,etc,var/lib,var/tmp}/dietpi*
 			rm -f /etc/{bashrc,profile,sysctl}.d/dietpi*
 
-			[[ -f /root/DietPi-Automation.log ]] && rm /root/DietPi-Automation.log
-			[[ -f /boot/Automation_Format_My_Usb_Drive ]] && rm /boot/Automation_Format_My_Usb_Drive
+			[[ -f '/root/DietPi-Automation.log' ]] && rm /root/DietPi-Automation.log
+			[[ -f '/boot/Automation_Format_My_Usb_Drive' ]] && rm /boot/Automation_Format_My_Usb_Drive
 
 		else
 
@@ -1693,7 +1693,7 @@ _EOF_
 		else
 
 			l_message='Enabling automated partition and file system resize for first boot' G_RUN_CMD systemctl enable dietpi-fs_partition_resize
-			l_message='Enabling first boot installation process' G_RUN_CMD systemctl enable dietpi-firstboot.service
+			l_message='Enabling first boot installation process' G_RUN_CMD systemctl enable dietpi-firstboot
 
 		fi
 
