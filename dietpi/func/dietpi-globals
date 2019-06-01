@@ -16,19 +16,9 @@
 	#////////////////////////////////////
 
 	#-----------------------------------------------------------------------------------
-	# Exit script for unsupported terminal and set dumb: https://github.com/MichaIng/DietPi/issues/1703#issue-314330405
-	if [[ -z $TERM || $TERM == 'unknown' ]]; then
-
-		export TERM='dumb'
-		exit
-
-	fi
-	#-----------------------------------------------------------------------------------
-
-	#-----------------------------------------------------------------------------------
 	# Core variables, functions and environment, used at start of all scripts
 	#-----------------------------------------------------------------------------------
-	# To be exported by the originating script, after loading globals and before calling G_INIT()
+	# To be set by the originating script, after loading globals and before calling G_INIT()
 	# - Used in G_ERROR_HANDLER, G_WHIP_* and G_DIETPI-NOTIFY functions
 	unset G_PROGRAM_NAME
 
@@ -49,13 +39,12 @@
 	fi
 
 	# DietPi First-Run Stage | -2 = PREP_SYSTEM/Unknown | -1 = 1st boot | 0 = 1st run dietpi-update | 1 = 1st run dietpi-software | 2 = completed | 10 = Pre-installed image, converts to 2 during 1st boot
-	G_DIETPI_INSTALL_STAGE=-2
-	[[ -f '/DietPi/dietpi/.install_stage' ]] && G_DIETPI_INSTALL_STAGE=$(</DietPi/dietpi/.install_stage)
+	[[ -f '/DietPi/dietpi/.install_stage' ]] && G_DIETPI_INSTALL_STAGE=$(</DietPi/dietpi/.install_stage) || G_DIETPI_INSTALL_STAGE=-2
 
 	# DietPi Versions/Branch
 	G_DIETPI_VERSION_CORE=${G_DIETPI_VERSION_CORE:-6}
-	G_DIETPI_VERSION_SUB=${G_DIETPI_VERSION_SUB:-23}
-	G_DIETPI_VERSION_RC=${G_DIETPI_VERSION_RC:-3}
+	G_DIETPI_VERSION_SUB=${G_DIETPI_VERSION_SUB:-24}
+	G_DIETPI_VERSION_RC=${G_DIETPI_VERSION_RC:-1}
 	G_GITBRANCH=${G_GITBRANCH:-master}
 	G_GITOWNER=${G_GITOWNER:-MichaIng}
 	[[ -f '/DietPi/dietpi/.version' && $(</DietPi/dietpi/.version) == '#!/bin/bash'* ]] && . /DietPi/dietpi/.version
@@ -78,7 +67,8 @@ _EOF_
 	G_FP_DIETPI_USERDATA='/mnt/dietpi_userdata'
 
 	# Allows to disable dietpi-services handling, e.g. if already handled within parent script.
-	G_DIETPI_SERVICES_DISABLE=${G_DIETPI_SERVICES_DISABLE:-0}
+	# - Do no pre-generate to reduce bash session variables: Needs to be checked via: [[ $G_DIETPI_SERVICES_DISABLE == 1 ]]
+	#G_DIETPI_SERVICES_DISABLE=${G_DIETPI_SERVICES_DISABLE:-0}
 
 	# Device details
 	# - Declare
@@ -120,22 +110,28 @@ _EOF_
 
 	# INIT functions for originating script
 	# - Stuff we can't init in main globals/funcs due to /etc/bashrc.d/ load into current session.
+	# - Optional input variables:
+	#	G_INIT_ALLOW_CONCURRENT=1	=> Allow concurrent DietPi script execution (default: 0)
+	#	G_INIT_WAIT_CONCURRENT=<int>	=> Max time to wait for concurrent execution to exit before user prompt (default: 5)
 	G_INIT(){
 
-		G_INIT_ALLOW_CONCURRENT=${G_INIT_ALLOW_CONCURRENT:-0}
-		G_INIT_WAIT_CONCURRENT=${G_INIT_WAIT_CONCURRENT:-5}
+		# Set G_PROGRAM_NAME to originating command if it was not set by originating script
+		[[ $G_PROGRAM_NAME ]] || G_PROGRAM_NAME=$0
+
+		[[ $G_DEBUG == 1 ]] && G_DIETPI-NOTIFY 3 "$G_PROGRAM_NAME" 'Running G_INIT()'
 
 		# Check for concurrent execution
-		if (( ! $G_INIT_ALLOW_CONCURRENT )); then
+		if [[ $G_INIT_ALLOW_CONCURRENT != 1 ]]; then
 
 			local timer=0
+			local limit=${G_INIT_WAIT_CONCURRENT:-5}
 
 			while [[ -d /tmp/$G_PROGRAM_NAME ]]
 			do
 
-				if (( $timer < $G_INIT_WAIT_CONCURRENT )); then
+				if (( $timer < $limit )); then
 
-					G_DIETPI-NOTIFY 2 "Concurrent execution of $G_PROGRAM_NAME detected: Retry ($timer/$G_INIT_WAIT_CONCURRENT), please wait..."
+					G_DIETPI-NOTIFY 2 "Concurrent execution of $G_PROGRAM_NAME detected: Retry ($timer/$limit), please wait..."
 
 					sleep 1
 					((timer++))
@@ -164,10 +160,7 @@ $(ps f -eo pid,user,tty,cmd | grep -i '[d]ietpi')"; then
 		fi
 
 		# HIERARCHY system for G_DIETPI-NOTIFY 3
-		disable_error=1 G_CHECK_VALIDINT $HIERARCHY && export HIERARCHY=$((HIERARCHY+1)) || export HIERARCHY=0
-
-		# DEBUG: Print init header
-		[[ $G_DEBUG == 1 ]] && G_DIETPI-NOTIFY 3 "$G_PROGRAM_NAME" 'Running G_INIT()'
+		disable_error=1 G_CHECK_VALIDINT "$HIERARCHY" 0 && export HIERARCHY=$((HIERARCHY+1)) || export HIERARCHY=0
 
 		# Set locale for scripts to prevent incorrect scraping due to translated command outputs
 		export LANG=en_GB.UTF-8
@@ -188,7 +181,7 @@ $(ps f -eo pid,user,tty,cmd | grep -i '[d]ietpi')"; then
 			fi
 
 			# - Purge working directory, if existent and no concurrency allowed
-			if (( ! $G_INIT_ALLOW_CONCURRENT )) && [[ -d /tmp/$G_PROGRAM_NAME ]]; then
+			if [[ $G_INIT_ALLOW_CONCURRENT != 1 && -d /tmp/$G_PROGRAM_NAME ]]; then
 
 				if rm -R /tmp/$G_PROGRAM_NAME; then
 
@@ -502,12 +495,12 @@ $(ps f -eo pid,user,tty,cmd | grep -i '[d]ietpi')"; then
 	#-----------------------------------------------------------------------------------
 	# DietPi scripts, moved from /etc/bash.bashrc
 	# - sudo command that ensures DietPi-Globals with G_* commands are loaded
-	G_SUDO(){ sudo -s . /DietPi/dietpi/func/dietpi-globals && "$@"; }
+	G_SUDO(){ local input=$@; sudo bash -c ". /DietPi/dietpi/func/dietpi-globals && $input"; }
 	# - sudo alias that allows running other aliases with "sudo"
 	alias sudo='sudo ' # https://github.com/MichaIng/DietPi/issues/424
 
 	# - DietPi programs
-	alias dietpi-process_tool='/DietPi/dietpi/dietpi-process_tool'
+	alias dietpi-process_tool='/DietPi/dietpi/dietpi-services' #Leave this in for few versions for end users, due to switchover to dietpi-services
 	alias dietpi-letsencrypt='/DietPi/dietpi/dietpi-letsencrypt'
 	alias dietpi-autostart='/DietPi/dietpi/dietpi-autostart'
 	alias dietpi-cron='/DietPi/dietpi/dietpi-cron'
@@ -1528,7 +1521,7 @@ $print_logfile_info
 
 		local string=$@
 		local options=''
-		(( $G_DISTRO >= 4 )) && options='--allow-change-held-packages'
+		(( $G_DISTRO > 3 )) && options='--allow-change-held-packages'
 
 		G_ERROR_HANDLER_RETRY=1
 		while (( $G_ERROR_HANDLER_RETRY ))
@@ -1560,7 +1553,7 @@ $print_logfile_info
 
 		local string=$@
 		local options=''
-		(( $G_DISTRO >= 4 )) && options='--allow-change-held-packages'
+		(( $G_DISTRO > 3 )) && options='--allow-change-held-packages'
 
 		G_ERROR_HANDLER_RETRY=1
 		while (( $G_ERROR_HANDLER_RETRY ))
@@ -1569,43 +1562,20 @@ $print_logfile_info
 			G_ERROR_HANDLER_COMMAND="G_AGP $string"
 			G_ERROR_HANDLER_ONERROR_FPLOGFILE=$G_FP_LOG_APT
 
-			# - Remove non-matching packages from string, which are not installed, to prevent failures.
-			# - Following checks are made:
-			#	match[[:space:]]
-			#	match: (eg: match:armhf)
-			#	match* (if wildcard is contained within input string)
-			local fp_temp='/tmp/.G_AGP_CHECK_PKG_INSTALLED'
-			local packages_to_remove=''
-			dpkg --get-selections > $fp_temp
-			local i=0
-			for i in $string; do
+			# - Create list of matching installed packages
+			local packages=$(dpkg --get-selections $string 2> /dev/null | mawk '{print $1}')
 
-				if grep -qi "^$i[[:space:]|:]" $fp_temp ||
-					{ grep -qi '*' <<< $i && grep -qi "^$i" $fp_temp; }; then #wildcard check
+			if [[ $packages ]]; then
 
-					packages_to_remove+="$i "
-					G_DIETPI-NOTIFY 2 "Install verified: $i"
-
-				else
-
-					G_DIETPI-NOTIFY 2 "Not installed, ignoring: $i"
-
-				fi
-
-			done
-			rm $fp_temp
-			unset string #habbit :)
-
-			if [[ $packages_to_remove ]]; then
-
-				G_DIETPI-NOTIFY 2 "\e[0mAPT removal for: \e[33m$packages_to_remove\e[0m, please wait..."
+				G_DIETPI-NOTIFY 2 "\e[0mAPT removal for: \e[33m$packages\e[0m, please wait..."
 				echo -ne '\e[90m'
-				DEBIAN_FRONTEND=noninteractive apt-get -qq $options purge $packages_to_remove 2>&1 | tee $G_FP_LOG_APT
+				DEBIAN_FRONTEND=noninteractive apt-get -qq $options purge $packages 2>&1 | tee $G_FP_LOG_APT
 				G_ERROR_HANDLER_EXITCODE=${PIPESTATUS[0]}
 
 			else
 
 				G_DIETPI-NOTIFY 2 'None of the requested packages are currently installed. Aborting...'
+				G_ERROR_HANDLER_EXITCODE=0
 
 			fi
 
@@ -1733,7 +1703,7 @@ $print_logfile_info
 		G_CHECK_ROOT_USER 1
 
 		local options=''
-		(( $G_DISTRO >= 4 )) && options='--allow-change-held-packages'
+		(( $G_DISTRO > 3 )) && options='--allow-change-held-packages'
 
 		G_ERROR_HANDLER_RETRY=1
 		while (( $G_ERROR_HANDLER_RETRY ))
@@ -1826,11 +1796,11 @@ $print_logfile_info
 	}
 
 	# Returns current CPU temp 'C
-	#	print_full_info=1# optional input to print full colour text output and temp warnings.
+	#	print_full_info=1 # optional input to print full colour text output and temp warnings.
 	G_OBTAIN_CPU_TEMP(){
 
 		local cpu_temp_current='N/A' # We must always return a value, due to VM lacking this feature + benchmark online
-		local print_full_info=${print_full_info:-0}
+		[[ $print_full_info == [01] ]] || local print_full_info=0
 
 		# Read CPU temp from file
 		# - Sparky/Asus: Requires special case as in others array this would break other SBC temp readouts with 2 zones
@@ -1847,6 +1817,7 @@ $print_logfile_info
 				'/sys/class/thermal/thermal_zone0/temp'
 				'/sys/devices/platform/sunxi-i2c.0/i2c-0/0-0034/temp1_input'
 				'/sys/class/hwmon/hwmon0/device/temp_label'
+				'/sys/class/hwmon/hwmon0/temp2_input'
 
 			)
 
@@ -1916,12 +1887,12 @@ $print_logfile_info
 		ps -axo %cpu | sed '1d' | sed 's/ //' > $fp_temp
 		while read line; do
 
-			cpu_usage=$( echo "scale=1;$cpu_usage + $line" | bc -l )
+			cpu_usage=$(echo "scale=1;$cpu_usage + $line" | bc -l)
 
 		done < "$fp_temp"
 
 		# - ps returns usage of each core, so we devide the total by #n cores
-		cpu_usage=$(echo "scale=1;$cpu_usage / $G_HW_CPU_CORES" | bc -l )
+		cpu_usage=$(echo "scale=1;$cpu_usage / $G_HW_CPU_CORES" | bc -l)
 
 		echo $cpu_usage
 

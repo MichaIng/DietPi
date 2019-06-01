@@ -851,11 +851,17 @@ _EOF_
 		#	RPi
 		elif (( $G_HW_MODEL < 10 )); then
 
-			# Remove old kernel modules first
-			rm -Rf /lib/modules/*
-			G_AGI --reinstall libraspberrypi-bin libraspberrypi0 raspberrypi-bootloader raspberrypi-kernel raspberrypi-sys-mods
-			# Buster systemd-udevd doesn't support the current raspi-copies-and-fills: https://github.com/MichaIng/DietPi/issues/1286
-			(( $DISTRO_TARGET < 5 )) && G_AGI raspi-copies-and-fills
+			G_AGI libraspberrypi-bin libraspberrypi0 raspberrypi-bootloader raspberrypi-kernel raspberrypi-sys-mods
+			# Buster systemd doesn't support the current raspi-copies-and-fills: https://github.com/MichaIng/DietPi/issues/1286
+			if (( $DISTRO_TARGET < 5 )); then
+
+				G_AGI raspi-copies-and-fills
+
+			else
+
+				G_AGP raspi-copies-and-fills
+
+			fi
 
 		#	Odroid N2
 		elif (( $G_HW_MODEL == 15 )); then

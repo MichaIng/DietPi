@@ -1,0 +1,204 @@
+#!/bin/bash
+{
+	#////////////////////////////////////
+	# DietPi Image creation/finalise Script
+	#
+	#////////////////////////////////////
+	# Created by Daniel Knight / daniel.knight@dietpi.com / dietpi.com
+	# Updated by MichaIng / micha@dietpi.com / dietpi.com
+	#
+	#////////////////////////////////////
+	# - Reads disk to image | or use existing .img file
+	# - Resizes RootFS partition
+	# - Hashes and 7z's the final image ready for release.
+	#////////////////////////////////////
+
+	# Import DietPi-Globals ---------------------------------------------------------------
+	. /DietPi/dietpi/func/dietpi-globals
+	G_PROGRAM_NAME='DietPi-Imager'
+	G_CHECK_ROOT_USER
+	G_CHECK_ROOTFS_RW
+	G_INIT
+	# Import DietPi-Globals ---------------------------------------------------------------
+
+	FP_SOURCE=''
+	FP_LOOPBACK=''
+	FP_ROOT_DEV=''
+	ROOT_PARTITION_INDEX=''
+	OUTPUT_FILE_NAME=''
+	OUTPUT_7Z_NAME=''
+	GPT=0
+	DIETPI_VERSION='v6.25'
+
+	Menu_Main(){
+
+
+		#Read image?
+		if G_WHIP_YESNO 'Would you like to save an existing disk to image? eg: /dev/sda > myimage.img'; then
+
+			#detect drives and list?
+			blkid -o device > .blkid_list
+			G_WHIP_MENU_ARRAY=()
+			while read line
+			do
+
+				G_WHIP_MENU_ARRAY+=("$line" '')
+
+			done < .blkid_list
+			rm .blkid_list
+
+			! G_WHIP_MENU 'Please select the drive you wish to save as an image:' && exit 1
+			FP_SOURCE="$HOME/myimage.img"
+			! dd if=$G_WHIP_RETURNED_VALUE of=$FP_SOURCE bs=4K status=progress && exit 1
+
+		#Select image
+		else
+
+			/DietPi/dietpi/dietpi-explorer 1 $HOME
+			local fp_selected='/tmp/.dietpi-explorer_selected_location'
+			[[ ! -f $fp_selected ]] && exit 1
+			FP_SOURCE=$(</tmp/.dietpi-explorer_selected_location)
+
+		fi
+
+		G_WHIP_YESNO 'Is this a GPT filesystem?' && GPT=1
+
+		! G_WHIP_INPUTBOX 'Please enter the RootFS parition number (eg: 1)' && exit 1
+		ROOT_PARTITION_INDEX=$G_WHIP_RETURNED_VALUE
+
+		G_WHIP_DEFAULT_ITEM="DietPi_<device>-<arch>-<distro>"
+		! G_WHIP_INPUTBOX "Please enter the output filename\n - DietPi_<device>-<arch>-<distro>\n - EG: DietPi_RPi-armv6-stretch" && exit 1
+		OUTPUT_FILE_NAME=$G_WHIP_RETURNED_VALUE
+
+		G_WHIP_DEFAULT_ITEM=$DIETPI_VERSION
+		! G_WHIP_INPUTBOX "Please enter the DietPi version for this image" && exit 1
+		DIETPI_VERSION=$G_WHIP_RETURNED_VALUE
+
+	}
+
+	Main(){
+
+		Menu_Main
+
+		if [[ ! -f $FP_SOURCE ]]; then
+
+			echo "ERROR: Source image file ($FP_SOURCE) does not exist"; exit 1;
+
+		fi
+
+		# Install required packages
+		G_AG_CHECK_INSTALL_PREREQ gdisk dosfstools parted zerofree p7zip
+
+		# GPT images (RockPro64) after reading the image AND again after shrinking
+		# To fix:
+		# - GPT PMBR size mismatch (4458495 != 15523839) will be corrected by w(rite).
+		# - 15523806
+		# RUN
+		# - gdisk "$IMAGE_FP/$IMAGE_NAME"
+		#	w | y
+		(( $GPT )) && echo 'w\ny\nq\n' | gdisk $FP_SOURCE
+
+		# Attach .img file to loop device
+		modprobe loop
+		FP_LOOPBACK=$(losetup -f)
+		losetup $FP_LOOPBACK "$FP_SOURCE"
+		partprobe $FP_LOOPBACK
+
+		# root partition dev
+		FP_ROOT_DEV="${FP_LOOPBACK}p${ROOT_PARTITION_INDEX}"
+
+		# Fsck
+		e2fsck -f $FP_ROOT_DEV
+
+		# Shrink file system to minimum
+		# - Run multiple times until no change is done any more
+		local out=''
+		FS_SIZE=0
+		while :
+		do
+
+			resize2fs -M $FP_ROOT_DEV 2>&1 | tee resize2fs_out
+			if out=$(grep -m1 -i 'nothing to do!' resize2fs_out); then
+
+				# Re-add 4M to be failsafe, was required on Raspbian Buster for successful boot
+				FS_SIZE=$(mawk '{print $5 + 1024}' <<< $out) # 4k blocks
+				rm resize2fs_out
+				resize2fs $FP_ROOT_DEV $FS_SIZE
+				echo "[  OK  ] Reduced RootFS size to $(( $FS_SIZE / 256 + 1 )) MiB"
+				FS_SIZE=$(( $FS_SIZE * 8 )) # 4k blocks => 512 byte sectors
+				break
+
+			elif out=$(grep -m1 -i 'no such file or directory' resize2fs_out); then
+
+				echo '[FAIL] Partition not found' && exit 1
+
+			fi
+
+		done
+
+		# Estimate minimum end sector
+		PART_START=$(fdisk -l -o Start $FP_SOURCE | tail -1) # 512 byte sectors
+		PART_END=$(( $PART_START + $FS_SIZE ))
+
+		echo "[ INFO ] Shrinking partition to $PART_END."
+		parted $FP_LOOPBACK unit s resizepart $ROOT_PARTITION_INDEX $PART_END yes
+		partprobe $FP_LOOPBACK
+		sync
+
+		# Override free space with zeros to purge removed data and allow further image/archive size reduction
+		zerofree -v $FP_ROOT_DEV
+
+		# GPT images (RockPro64) after reading the image AND again after shrinking
+		# To fix:
+		# - GPT PMBR size mismatch (4458495 != 15523839) will be corrected by w(rite).
+		# - 15523806
+		# RUN
+		# - gdisk "$IMAGE_FP/$IMAGE_NAME"
+		#	w | y
+		(( $GPT )) && gdisk $FP_SOURCE
+
+		# Estimate used size
+		PART_SIZE=$(( ( $(fdisk -l -o End $FP_SOURCE | tail -1) + 1 ) * 512 )) # 512 byte sectors => Byte
+		IMAGE_SIZE=$(( $PART_SIZE + ( 512 * 256 ) )) # 64 byte for secondary GPT + safety net
+
+		# Create final image in $HOME
+		cd $HOME
+
+		# add version number to output file name
+		OUTPUT_7Z_NAME="$OUTPUT_FILE_NAME.7z"
+		OUTPUT_FILE_NAME=${OUTPUT_FILE_NAME//DietPi_/DietPi_${DIETPI_VERSION}_}
+
+		#  truncate to used size
+		truncate --size=$IMAGE_SIZE "$FP_SOURCE"
+		mv $FP_SOURCE $OUTPUT_FILE_NAME.img #TODO: if not same file...
+
+		# Generate hashes: MD5, SHA1, SHA256
+		echo '[INFO] Generating hash.txt, please wait...'
+		cat << _EOF_ > hash.txt
+FILE:	$OUTPUT_FILE_NAME.img
+DATE:	$(date)
+MD5:	$(md5sum $OUTPUT_FILE_NAME.img | mawk '{print $1}')
+SHA1:	$(sha1sum $OUTPUT_FILE_NAME.img | mawk '{print $1}')
+SHA256:	$(sha256sum $OUTPUT_FILE_NAME.img | mawk '{print $1}')
+_EOF_
+
+		# Download current README
+		! wget https://raw.githubusercontent.com/MichaIng/DietPi/master/README.md -O README.md && exit 1
+
+		# Generate 7z archive
+		# NB: LZMA2 ultra compression method requires 2G RAM
+		[[ -f $OUTPUT_7Z_NAME ]] && rm $OUTPUT_7Z_NAME
+		7zr a -m0=lzma2 -mx=9 $OUTPUT_7Z_NAME $OUTPUT_FILE_NAME.img hash.txt README.md
+
+		[[ -f $OUTPUT_7Z_NAME ]] && G_WHIP_MSG "[INFO] $HOME/$OUTPUT_7Z_NAME created"
+
+	}
+
+	#/////////////////////////////////////////////////////////////////////////////////////
+	# Main
+	#/////////////////////////////////////////////////////////////////////////////////////
+	Main
+	#-----------------------------------------------------------------------------------
+	exit
+	#-----------------------------------------------------------------------------------
+}
