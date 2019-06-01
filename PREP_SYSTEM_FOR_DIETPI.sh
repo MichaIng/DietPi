@@ -1693,7 +1693,7 @@ _EOF_
 		else
 
 			l_message='Enabling automated partition and file system resize for first boot' G_RUN_CMD systemctl enable dietpi-fs_partition_resize
-			l_message='Enabling first boot instalation process' G_RUN_CMD systemctl enable dietpi-firstboot.service
+			l_message='Enabling first boot installation process' G_RUN_CMD systemctl enable dietpi-firstboot.service
 
 		fi
 
