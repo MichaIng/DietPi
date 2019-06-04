@@ -25,7 +25,7 @@
 
 	RPi_Set_Clock_Speeds(){
 
-		# If no manual overclock settings have been applied by user, set non/safe overclocking values as commented defaults
+		# If no manual overclock settings have been applied by user, set safe overclocking values or commented defaults: https://www.raspberrypi.org/documentation/configuration/config-txt/overclocking.md
 		if ! grep -qE '^[[:blank:]]*(over_voltage|(arm|core|gpu|sdram)_freq)=' /DietPi/config.txt; then
 
 			# Zero
@@ -52,15 +52,6 @@
 				sed -i '/core_freq=/c\#core_freq=250' /DietPi/config.txt
 				sed -i '/sdram_freq=/c\#sdram_freq=450' /DietPi/config.txt
 
-			# RPi v3 B+
-			elif [[ ${G_HW_MODEL_DESCRIPTION,,} == *'rpi 3 model b+'* ]]; then
-
-				sed -i '/over_voltage=/c\#over_voltage=0' /DietPi/config.txt
-				sed -i '/core_freq=/c\#core_freq=400' /DietPi/config.txt
-				G_CONFIG_INJECT '/temp_limit=' 'temp_limit=75' /DietPi/config.txt # https://github.com/MichaIng/DietPi/issues/356
-				sed -i '/arm_freq=/c\#arm_freq=1400' /DietPi/config.txt
-				sed -i '/sdram_freq=/c\#sdram_freq=500' /DietPi/config.txt
-
 			# RPi v3
 			elif (( $G_HW_MODEL == 3 )); then
 
@@ -69,6 +60,14 @@
 				G_CONFIG_INJECT '/temp_limit=' 'temp_limit=75' /DietPi/config.txt # https://github.com/MichaIng/DietPi/issues/356
 				sed -i '/arm_freq=/c\#arm_freq=1200' /DietPi/config.txt
 				sed -i '/sdram_freq=/c\#sdram_freq=450' /DietPi/config.txt
+
+				# A+/B+
+				if [[ ${G_HW_MODEL_DESCRIPTION,,} == *'+' ]]; then
+
+					sed -i '/arm_freq=/c\#arm_freq=1400' /DietPi/config.txt
+					sed -i '/sdram_freq=/c\#sdram_freq=500' /DietPi/config.txt
+
+				fi
 
 			fi
 
