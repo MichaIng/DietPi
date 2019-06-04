@@ -1682,26 +1682,24 @@ _EOF_
 
 		G_RUN_CMD apt-get clean
 		rm -Rfv /var/lib/apt/lists/* # Clear APT cache, gets regenerated on G_AGUP
-		#rm /var/lib/dpkg/info/* #issue...
-		#dpkg: warning: files list file for package 'libdbus-1-3:armhf' missing; assuming      package has no files currently installed
 
 		# - HW Specific
 		#	RPi remove saved G_HW_MODEL , allowing obtain-hw_model to auto detect RPi model
-		(( $G_HW_MODEL < 10 )) && [[ -f /etc/.dietpi_hw_model_identifier ]] && rm /etc/.dietpi_hw_model_identifier
+		(( $G_HW_MODEL < 10 )) && [[ -f '/etc/.dietpi_hw_model_identifier' ]] && rm /etc/.dietpi_hw_model_identifier
 
 		# - BBB remove fsexpansion: https://github.com/MichaIng/DietPi/issues/931#issuecomment-345451529
 		if (( $G_HW_MODEL == 71 )); then
 
+			systemctl disable dietpi-fs_partition_resize
 			rm /etc/systemd/system/dietpi-fs_partition_resize.service
 			rm /var/lib/dietpi/services/fs_partition_resize.sh
-			systemctl daemon-reload
 
 		else
 
 			l_message='Enabling automated partition and file system resize for first boot' G_RUN_CMD systemctl enable dietpi-fs_partition_resize
-			l_message='Enabling first boot installation process' G_RUN_CMD systemctl enable dietpi-firstboot
 
 		fi
+		l_message='Enabling first boot installation process' G_RUN_CMD systemctl enable dietpi-firstboot
 
 		G_DIETPI-NOTIFY 2 'Storing DietPi version info'
 
