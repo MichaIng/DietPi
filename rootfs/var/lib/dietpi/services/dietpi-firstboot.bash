@@ -282,7 +282,7 @@
 	echo 0 > /DietPi/dietpi/.install_stage
 
 	# Disable originating service to prevent any futher launch of this script
-	systemctl disable dietpi-firstboot.service
+	systemctl disable dietpi-firstboot
 	#-----------------------------------------------------------------------------------
 	exit
 	#-----------------------------------------------------------------------------------
