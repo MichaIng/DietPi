@@ -267,9 +267,9 @@
 			G_DIETPI-NOTIFY 2 'DietPi system found, removing the old files and stopping services. (pre-prep)'
 
 			# - Stop services: RAMdisk includes (Pre|Post)Boot due to dependencies
-			[[ -f /DietPi/dietpi/dietpi-services ]] && /DietPi/dietpi/dietpi-services stop
-			[[ -f /etc/systemd/system/dietpi-ramlog.service ]] && systemctl stop dietpi-ramlog
-			[[ -f /etc/systemd/system/dietpi-ramdisk.service ]] && systemctl stop dietpi-ramdisk
+			[[ -f '/DietPi/dietpi/dietpi-services' ]] && /DietPi/dietpi/dietpi-services stop
+			[[ -f '/etc/systemd/system/dietpi-ramlog.service' ]] && systemctl stop dietpi-ramlog
+			[[ -f '/etc/systemd/system/dietpi-ramdisk.service' ]] && systemctl stop dietpi-ramdisk
 
 			# - Disable services
 			for i in /etc/systemd/system/dietpi-*
@@ -284,12 +284,12 @@
 			# - Delete any previous existing data
 			#	Failsafe
 			umount /DietPi
-			[[ -d /DietPi ]] && rm -R /DietPi
+			[[ -d '/DietPi' ]] && rm -R /DietPi
 			rm -Rf /{boot,mnt,etc,var/lib,var/tmp}/dietpi*
 			rm -f /etc/{bashrc,profile,sysctl}.d/dietpi*
 
-			[[ -f /root/DietPi-Automation.log ]] && rm /root/DietPi-Automation.log
-			[[ -f /boot/Automation_Format_My_Usb_Drive ]] && rm /boot/Automation_Format_My_Usb_Drive
+			[[ -f '/root/DietPi-Automation.log' ]] && rm /root/DietPi-Automation.log
+			[[ -f '/boot/Automation_Format_My_Usb_Drive' ]] && rm /boot/Automation_Format_My_Usb_Drive
 
 		else
 
@@ -1682,25 +1682,24 @@ _EOF_
 
 		G_RUN_CMD apt-get clean
 		rm -Rfv /var/lib/apt/lists/* # Clear APT cache, gets regenerated on G_AGUP
-		#rm /var/lib/dpkg/info/* #issue...
-		#dpkg: warning: files list file for package 'libdbus-1-3:armhf' missing; assuming      package has no files currently installed
 
 		# - HW Specific
 		#	RPi remove saved G_HW_MODEL , allowing obtain-hw_model to auto detect RPi model
-		(( $G_HW_MODEL < 10 )) && [[ -f /etc/.dietpi_hw_model_identifier ]] && rm /etc/.dietpi_hw_model_identifier
+		(( $G_HW_MODEL < 10 )) && [[ -f '/etc/.dietpi_hw_model_identifier' ]] && rm /etc/.dietpi_hw_model_identifier
 
 		# - BBB remove fsexpansion: https://github.com/MichaIng/DietPi/issues/931#issuecomment-345451529
 		if (( $G_HW_MODEL == 71 )); then
 
+			systemctl disable dietpi-fs_partition_resize
 			rm /etc/systemd/system/dietpi-fs_partition_resize.service
 			rm /var/lib/dietpi/services/fs_partition_resize.sh
-			systemctl daemon-reload
 
 		else
 
 			l_message='Enabling automated partition and file system resize for first boot' G_RUN_CMD systemctl enable dietpi-fs_partition_resize
 
 		fi
+		l_message='Enabling first boot installation process' G_RUN_CMD systemctl enable dietpi-firstboot
 
 		G_DIETPI-NOTIFY 2 'Storing DietPi version info'
 
