@@ -174,7 +174,7 @@ $swap_mount
 
 		# - Remove misc items from list
 		#	bind: https://github.com/MichaIng/DietPi/issues/2013#issuecomment-416394374
-		while read line
+		[[ $misc_mounts ]] && while read line
 		do
 
 			local input_mount_target=$(mawk '{print $2}' <<< $line)
@@ -417,23 +417,7 @@ aDRIVE_ISPARTITIONTABLE ${aDRIVE_ISPARTITIONTABLE[$i]}
 
 		fi
 
-		# - Find the drive we are to edit, then set its index (this is due to array list total being not constant)
-		if [[ $MENU_DRIVE_TARGET ]]; then
-
-			for i in ${!aDRIVE_MOUNT_SOURCE[@]}
-			do
-
-				if [[ $MENU_DRIVE_TARGET == ${aDRIVE_MOUNT_TARGET[$i]} ]]; then
-
-					MENU_DRIVE_INDEX=$i
-					[[ $G_DEBUG == 1 ]] && echo "[DEBUG$i] EDIT | ${aDRIVE_MOUNT_TARGET[$MENU_DRIVE_INDEX]} | ${aDRIVE_MOUNT_SOURCE[$MENU_DRIVE_INDEX]} | ${aDRIVE_SOURCE_DEVICE[$MENU_DRIVE_INDEX]}"
-					break
-
-				fi
-
-			done
-
-		fi
+		Update_Menu_Drive_Index
 
 		cp -a $fp_fstab_tmp /etc/fstab
 		systemctl daemon-reload
@@ -445,11 +429,28 @@ aDRIVE_ISPARTITIONTABLE ${aDRIVE_ISPARTITIONTABLE[$i]}
 		sync
 		mount -a
 
+	}				
+
+	Update_Menu_Drive_Index(){
+
+		[[ $MENU_DRIVE_TARGET ]] && for i in ${!aDRIVE_MOUNT_TARGET[@]}
+		do
+
+			if [[ $MENU_DRIVE_TARGET == ${aDRIVE_MOUNT_TARGET[$i]} ]]; then
+
+				MENU_DRIVE_INDEX=$i
+				[[ $G_DEBUG == 1 ]] && echo "[DEBUG$i] EDIT | ${aDRIVE_MOUNT_TARGET[$MENU_DRIVE_INDEX]} | ${aDRIVE_MOUNT_SOURCE[$MENU_DRIVE_INDEX]} | ${aDRIVE_SOURCE_DEVICE[$MENU_DRIVE_INDEX]}"
+				break
+
+			fi
+
+		done
+
 	}
 
+	# $1=source
 	Return_Drive_Without_Partitions(){
 
-		# $1 = dev source
 		local drive=${1#/dev/}
 		# IDE/SATA/SCSI
 		if [[ $drive == [sh]d* ]]; then
@@ -494,36 +495,30 @@ NB: The path must start with /mnt/ and be unique. Spaces will be converted autom
 			if [[ $(ls -A "$target") ]]; then
 
 				G_WHIP_MSG "[FAILED]:\n\nThe mount target directory already exists, and, contains data:\n - $target\n\nPlease retry, using a unique mount target location."
-				apply_mount=0
+				return 1
 
 			else
 
 				G_WHIP_YESNO "[WARNING]:\n\nThe mount target directory already exists, however, it does not contain any files or data at this time:\n - $target\n
-Do you wish to ignore this warning, and, mount the drive regardless?" || apply_mount=0
+Do you wish to ignore this warning, and, mount the drive regardless?" || return 1
 
 			fi
 
 		fi
 
-		if (( $apply_mount )); then
+		# Mount options
+		local options=''
+		# - FS type specific options
+		local fs_type=$(blkid $source -s TYPE -o value)
+		if [[ $fs_type == 'ntfs' ]]; then
 
-			# Additional mount options
-			local options=''
-			# - fstype specific items
-			local fs_type=$(blkid $source -s TYPE -o value)
-			if [[ $fs_type == 'ntfs' ]]; then
-
-				options='-o permissions'
-
-			fi
-
-			G_DIETPI-NOTIFY 2 "Creating mount folder for $target"
-			mkdir -p $target
-			G_ERROR_HANDLER_INFO_ONLY=1 G_RUN_CMD mount $source $target $options
-			MENU_DRIVE_TARGET=$target
+			options='-o permissions'
 
 		fi
 
+		G_ERROR_HANDLER_INFO_ONLY=1 G_RUN_CMD mkdir -p $target || return 1
+		G_ERROR_HANDLER_INFO_ONLY=1 G_RUN_CMD mount $source $target $options || return 1
+		MENU_DRIVE_TARGET=$target
 		Init_Drives_and_Refresh
 
 	}
@@ -537,10 +532,9 @@ Do you wish to ignore this warning, and, mount the drive regardless?" || apply_m
 
 			sed -i "\#[[:blank:]]$target[[:blank:]]#d" /etc/fstab # Only needed for networked drives currently...
 			rmdir "$target"
+			Init_Drives_and_Refresh
 
 		fi
-
-		Init_Drives_and_Refresh
 
 	}
 
@@ -550,7 +544,6 @@ Do you wish to ignore this warning, and, mount the drive regardless?" || apply_m
 
 			systemctl unmask dietpi-fs_partition_resize
 			G_RUN_CMD systemctl enable dietpi-fs_partition_resize
-
 			G_WHIP_YESNO 'RootFS resize will occur on next reboot.\n\nWould you like to reboot the system now?' && reboot
 
 		else
@@ -565,7 +558,7 @@ Do you wish to ignore this warning, and, mount the drive regardless?" || apply_m
 	Run_Format(){
 
 		local text_desc info_format_fs_type
-		local info_format_type_output='Drive format' # used in complete message
+		local info_format_type_output='Drive format' # Used in complete message
 
 		# No partition table, force drive wipe
 		(( ${aDRIVE_ISPARTITIONTABLE[$MENU_DRIVE_INDEX]} )) || FORMAT_MODE=0
@@ -706,21 +699,23 @@ Do you wish to ignore this warning, and, mount the drive regardless?" || apply_m
 
 			G_DIETPI-NOTIFY 0 "Created $info_format_fs_type filesystem: ${aDRIVE_MOUNT_SOURCE[$MENU_DRIVE_INDEX]}"
 			FORMAT_COMPLETED=1
-			local format_previous_mount_source=${aDRIVE_MOUNT_SOURCE[$MENU_DRIVE_INDEX]}
-			local format_previous_mount_target=${aDRIVE_MOUNT_TARGET[$MENU_DRIVE_INDEX]}
 
-			local format_new_uuid=$(blkid $format_previous_mount_source -s UUID -o value)
-			[[ -e $format_previous_mount_target ]] && rm -R $format_previous_mount_target
+			local format_new_uuid=$(blkid ${aDRIVE_MOUNT_SOURCE[$MENU_DRIVE_INDEX]} -s UUID -o value)
+			[[ -e ${aDRIVE_MOUNT_TARGET[$MENU_DRIVE_INDEX]} ]] && rm -R ${aDRIVE_MOUNT_TARGET[$MENU_DRIVE_INDEX]}
 
 			# Automatically mount it
-			MENU_DRIVE_TARGET="/mnt/$format_new_uuid"
-			Mount_Drive $format_previous_mount_source $MENU_DRIVE_TARGET
+			 if ! Mount_Drive ${aDRIVE_MOUNT_SOURCE[$MENU_DRIVE_INDEX]} "/mnt/$format_new_uuid"
 
-			G_WHIP_MSG "Format completed:\n
- - Format Type           : $info_format_type_output
- - Filesystem Type       : $info_format_fs_type
- - Previous Mount Source : $format_previous_mount_target
- - New Mount Source      : ${aDRIVE_MOUNT_TARGET[$MENU_DRIVE_INDEX]}"
+				MENU_DRIVE_TARGET="/mnt/$format_new_uuid"
+				Init_Drives_and_Refresh
+
+			fi
+
+			G_WHIP_MSG "[  OK  ] Format completed\n
+ - Format Type      : $info_format_type_output
+ - Filesystem Type  : $info_format_fs_type
+ - Mount Source     : ${aDRIVE_MOUNT_SOURCE[$MENU_DRIVE_INDEX]}
+ - Mount Target     : $MENU_DRIVE_TARGET"
 
 		fi
 
@@ -751,7 +746,6 @@ Do you wish to ignore this warning, and, mount the drive regardless?" || apply_m
 			G_DIETPI-NOTIFY 1 'Rsync has failed, RootFS transfer has been aborted.'
 			# - Revert fstab changes
 			cp -a /etc/fstab.bak /etc/fstab
-
 			exit
 
 		fi
@@ -818,7 +812,7 @@ Do you wish to ignore this warning, and, mount the drive regardless?" || apply_m
 
 		fi
 
-		(( $exit_status )) && G_WHIP_MSG "Failed to apply:\n\nDue to:\n - $message_result"
+		(( $exit_status )) && G_WHIP_MSG "[FAILED] Could not apply\n\nError log:\n - $message_result"
 		Init_Drives_and_Refresh
 
 	}
@@ -979,7 +973,7 @@ Do you wish to ignore this warning, and, mount the drive regardless?" || apply_m
 
 				G_WHIP_DEFAULT_ITEM=241
 				local current_spindown=''
-				[[ -f /etc/hdparm.conf ]] && current_spindown=$(grep -m1 'spindown_time' /etc/hdparm.conf | awk '{print $3}')
+				[[ -f '/etc/hdparm.conf' ]] && current_spindown=$(mawk '/spindown_time/ {print $3;exit}' /etc/hdparm.conf)
 				disable_error=1 G_CHECK_VALIDINT $current_spindown 0 251 && G_WHIP_DEFAULT_ITEM=$current_spindown
 
 				if G_WHIP_MENU "Please select a idle duration of time, before each drive is powered down:
@@ -1012,7 +1006,8 @@ Do you wish to ignore this warning, and, mount the drive regardless?" || apply_m
 			elif [[ $G_WHIP_RETURNED_VALUE ]]; then
 
 				TARGETMENUID=1
-				MENU_DRIVE_INDEX=$G_WHIP_RETURNED_VALUE
+				MENU_DRIVE_TARGET=$G_WHIP_RETURNED_VALUE
+				Update_Menu_Drive_Index
 
 			fi
 
@@ -1040,14 +1035,10 @@ Do you wish to ignore this warning, and, mount the drive regardless?" || apply_m
 
 	Menu_Drive(){
 
+		G_WHIP_MENU_ARRAY=()
 		local partition_contains_userdata=0
 		local partition_contains_swapfile=0
-
-		# Generate menu
-		local whiptail_desc=''
-		G_WHIP_MENU_ARRAY=()
-
-		whiptail_desc="Mount target: ${aDRIVE_MOUNT_TARGET[$MENU_DRIVE_INDEX]}"
+		local whiptail_desc="Mount target: ${aDRIVE_MOUNT_TARGET[$MENU_DRIVE_INDEX]}"
 		whiptail_desc+="\nMount source: ${aDRIVE_MOUNT_SOURCE[$MENU_DRIVE_INDEX]}"
 
 		# No filesystem
