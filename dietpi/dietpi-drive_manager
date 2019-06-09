@@ -8,12 +8,13 @@
 	#
 	#////////////////////////////////////
 	#
-	# Info: Drive Manager for DietPi
+	# Info:
+	# - Location: /DietPi/dietpi/dietpi-drive_manager
 	#
 	# Usage:
-	# 	  = Drive Manager
-	#	1 = Selectadrive! Provides a list of available drive mount locations, with value on selection saved to: /tmp/dietpi-drive_manager_selmnt
-	#	4 = Generates a new /etc/fstab based on current mounted locally drives (for use in PREP_SYSTEM_FOR_DIETPI.sh). NB: Resets /var/log to RAMLOG and /tmp enabled
+	# - <empty>	= Interactive menu
+	# - 1		= Select an available drive mount which is then saved to: /tmp/dietpi-drive_manager_selmnt
+	# - 4		= Reset /etc/fstab with currently attached local drives and /tmp + /var/log tmpfs mount. Used by: PREP_SYSTEM_FOR_DIETPI.sh
 	#
 	#////////////////////////////////////
 
@@ -36,18 +37,20 @@
 	# APT pre-req check flag, allows to check for required APT packages only once per session
 	APT_CHECK=0
 
-	# Drive data
-	FP_ROOTFS_SOURCE=''
-	FP_USERDATA_CURRENT=''
-	FP_SWAPFILE_CURRENT=''
-
+	# Drive menu
 	MENU_DRIVE_INDEX=0
 	MENU_DRIVE_TARGET=''
 
+	# Format menu
 	FORMAT_GPT=1 # default GPT: https://github.com/MichaIng/DietPi/issues/531. 0=MBR
 	FORMAT_FILESYSTEM_TYPE=0 # 0=ext4 1=ntfs 2=fat32 3=hfs+ 4=btrfs 5=f2fs 6=exfat
 	FORMAT_COMPLETED=0
 	FORMAT_MODE=1 # 0=drive 1=partition
+
+	# Drive data
+	FP_ROOTFS_SOURCE=''
+	FP_USERDATA_CURRENT=''
+	FP_SWAPFILE_CURRENT=''
 
 	Init_New_Device(){
 
@@ -110,7 +113,7 @@
 		FP_SWAPFILE_CURRENT=$(grep -m1 '^[[:blank:]]*AUTO_SETUP_SWAPFILE_LOCATION=' /DietPi/dietpi.txt | sed 's/^[^=]*=//')
 
 		# RootFS location
-		FP_ROOTFS_SOURCE=$(findmnt / -o source -n)
+		FP_ROOTFS_SOURCE=$(findmnt -no source /)
 
 		# Create tmp fstab
 		local fp_fstab_tmp='.fstab'
@@ -279,7 +282,7 @@ $swap_mount
 
 				fi
 
-				# - Additional options for fstype specific items
+				# - Additional options for fs type specific items
 				#	NFTS: Enable POSIX permissions for NTFS
 				if [[ ${aDRIVE_FSTYPE[$index]} == 'ntfs' ]]; then
 
@@ -305,7 +308,7 @@ $swap_mount
 			for i in "${aDRIVE_MOUNT_SOURCE[@]}"
 			do
 
-				[[ $line == $i ]] && continue 2
+				[[ $i == $line* ]] && continue 2
 
 			done
 
@@ -403,7 +406,6 @@ aDRIVE_ISNETWORKED ${aDRIVE_ISNETWORKED[$i]}
 aDRIVE_ISROM ${aDRIVE_ISROM[$i]}
 aDRIVE_ISPARTITIONTABLE ${aDRIVE_ISPARTITIONTABLE[$i]}
 "
-
 			done
 			exit
 
@@ -592,31 +594,21 @@ Do you wish to ignore this warning, and, mount the drive regardless?" || return 
 			else
 
 				# - Umount and zero all partitions on device
-				for i in {1..9}
+				for i in /dev/${aDRIVE_SOURCE_DEVICE[$MENU_DRIVE_INDEX]}?*
 				do
 
-					# - Obtain partition location to wipe
-					#	mmcblkXp1/nvmeXn1p1
-					local fp_target_partition="/dev/${aDRIVE_SOURCE_DEVICE[$MENU_DRIVE_INDEX]}p$i"
-					#	h/sdX1
-					if [[ ${aDRIVE_SOURCE_DEVICE[$MENU_DRIVE_INDEX]} == [sh]d[a-z]* ]]; then
-
-						fp_target_partition="/dev/${aDRIVE_SOURCE_DEVICE[$MENU_DRIVE_INDEX]}$i"
-
-					fi
-
-					if [[ -b $fp_target_partition ]]; then
-
-						umount $fp_target_partition
-						G_DIETPI-NOTIFY 2 "Writing zeros to partition $fp_target_partition"
-						G_RUN_CMD dd if=/dev/zero of=$fp_target_partition bs=4K count=10 # Partition wipe (if it has one), must be done 1st, else blkid still reports UUID's etc
-
-					fi
+					[[ -b $i ]] || continue
+					umount $i
+					G_DIETPI-NOTIFY 2 "Writing zeros to partition: $i"
+					G_RUN_CMD dd if=/dev/zero of=$i bs=4K count=10 # Partition wipe must be done 1st, else blkid still reports UUIDs etc
 
 				done
 
+				# - Unmount whole drive in case of fs on drive without partition table
+				umount ${aDRIVE_MOUNT_SOURCE[$MENU_DRIVE_INDEX]}
+
 				# - Clear partition table from device
-				G_DIETPI-NOTIFY 2 "Writing zeros to partition table /dev/${aDRIVE_SOURCE_DEVICE[$MENU_DRIVE_INDEX]}"
+				G_DIETPI-NOTIFY 2 "Writing zeros to partition table: /dev/${aDRIVE_SOURCE_DEVICE[$MENU_DRIVE_INDEX]}"
 				G_RUN_CMD dd if=/dev/zero of=/dev/${aDRIVE_SOURCE_DEVICE[$MENU_DRIVE_INDEX]} bs=4K count=1337 # Block device wipe
 
 				# - Create partition table type
@@ -624,12 +616,11 @@ Do you wish to ignore this warning, and, mount the drive regardless?" || return 
 				(( $FORMAT_GPT )) || parition_table_type='msdos'
 
 				G_DIETPI-NOTIFY 2 "Creating partition table, with target type: $parition_table_type"
-
 				G_RUN_CMD parted -s /dev/${aDRIVE_SOURCE_DEVICE[$MENU_DRIVE_INDEX]} mklabel $parition_table_type
 				G_RUN_CMD parted -s /dev/${aDRIVE_SOURCE_DEVICE[$MENU_DRIVE_INDEX]} mkpart primary 0% 100%
 				partprobe /dev/${aDRIVE_SOURCE_DEVICE[$MENU_DRIVE_INDEX]}
 
-				sleep 1 # due to systemd automount, wait for it
+				sleep 1 # Due to systemd automount, wait for it
 				umount ${aDRIVE_MOUNT_SOURCE[$MENU_DRIVE_INDEX]}
 
 				# - Generate new aDRIVE_MOUNT_SOURCE location to use
@@ -701,13 +692,14 @@ Do you wish to ignore this warning, and, mount the drive regardless?" || return 
 			G_DIETPI-NOTIFY 0 "Created $info_format_fs_type filesystem: ${aDRIVE_MOUNT_SOURCE[$MENU_DRIVE_INDEX]}"
 			FORMAT_COMPLETED=1
 
-			local format_new_uuid=$(blkid ${aDRIVE_MOUNT_SOURCE[$MENU_DRIVE_INDEX]} -s UUID -o value)
+			# Remove old mount point
 			[[ -e ${aDRIVE_MOUNT_TARGET[$MENU_DRIVE_INDEX]} ]] && rm -R ${aDRIVE_MOUNT_TARGET[$MENU_DRIVE_INDEX]}
 
 			# Automatically mount it
-			if ! Mount_Drive ${aDRIVE_MOUNT_SOURCE[$MENU_DRIVE_INDEX]} "/mnt/$format_new_uuid"; then
+			local new_uuid=$(blkid ${aDRIVE_MOUNT_SOURCE[$MENU_DRIVE_INDEX]} -s UUID -o value)
+			if ! Mount_Drive ${aDRIVE_MOUNT_SOURCE[$MENU_DRIVE_INDEX]} "/mnt/$new_uuid"; then
 
-				MENU_DRIVE_TARGET="/mnt/$format_new_uuid"
+				MENU_DRIVE_TARGET="/mnt/$new_uuid"
 				Init_Drives_and_Refresh
 
 			fi
@@ -716,7 +708,8 @@ Do you wish to ignore this warning, and, mount the drive regardless?" || return 
  - Format Type      : $info_format_type_output
  - Filesystem Type  : $info_format_fs_type
  - Mount Source     : ${aDRIVE_MOUNT_SOURCE[$MENU_DRIVE_INDEX]}
- - Mount Target     : $MENU_DRIVE_TARGET"
+ - Mount Target     : $MENU_DRIVE_TARGET
+ - UUID             : $new_uuid"
 
 		fi
 
@@ -741,20 +734,23 @@ Do you wish to ignore this warning, and, mount the drive regardless?" || return 
 		# Disable swap
 		/DietPi/dietpi/func/dietpi-set_swapfile 0
 
-		rsync -aHv --delete --exclude '/boot/*' --exclude '/lost+found/' --exclude '/mnt/*' --exclude ${aDRIVE_MOUNT_TARGET[$MENU_DRIVE_INDEX]}/ --exclude '/sys/*' --exclude '/proc/*' / "${aDRIVE_MOUNT_TARGET[$MENU_DRIVE_INDEX]}"/
-		if (( $? )); then
+		# Exclude /var/log in case of RAMlog
+		local exclude_var_log=''
+		[[ $(findmnt -no source /var/log) == 'tmpfs' ]] && exclude_var_log='--exclude /var/log/*'
+
+		if ! rsync -aHv --delete --exclude '/dev/*' --exclude '/sys/*' --exclude '/proc/*' --exclude '/run/*' $exclude_var_log --exclude '/lost+found/' --exclude '/boot/*' --exclude '/mnt/*' --exclude "${aDRIVE_MOUNT_TARGET[$MENU_DRIVE_INDEX]}/" / "${aDRIVE_MOUNT_TARGET[$MENU_DRIVE_INDEX]}/"; then
 
 			G_DIETPI-NOTIFY 1 'Rsync has failed, RootFS transfer has been aborted.'
 			# - Revert fstab changes
 			cp -a /etc/fstab.bak /etc/fstab
-			exit
+			exit 1
 
 		fi
 
 		# Recreate swap
 		#/DietPi/dietpi/func/dietpi-set_swapfile 1 ${aDRIVE_MOUNT_TARGET[$MENU_DRIVE_INDEX]}/var/swap
 		# - Manually update location
-		#sed -i "/^[[:blank:]]*AUTO_SETUP_SWAPFILE_LOCATION=/c\AUTO_SETUP_SWAPFILE_LOCATION=/var/swap" /DietPi/dietpi.txt
+		#G_CONFIG_INJECT 'AUTO_SETUP_SWAPFILE_LOCATION=' 'AUTO_SETUP_SWAPFILE_LOCATION=/var/swap' /DietPi/dietpi.txt
 
 		# RPi | cmdline.txt
 		if (( $G_HW_MODEL < 10 )); then
@@ -901,9 +897,9 @@ Do you wish to ignore this warning, and, mount the drive regardless?" || return 
 
 		unset acategory_list
 
-		G_WHIP_MENU_ARRAY+=('' '●─ Global Options')
+		G_WHIP_MENU_ARRAY+=('' '●─ Global Options ')
 		G_WHIP_MENU_ARRAY+=('Idle Spindown' ': Set a global idle duration, before drives power down')
-		G_WHIP_MENU_ARRAY+=('' '●─ Add / Refresh Drives')
+		G_WHIP_MENU_ARRAY+=('' '●─ Add / Refresh Drives ')
 		G_WHIP_MENU_ARRAY+=('Add network drive' ': Select to mount networked drives')
 		if (( $drive_available )); then
 
@@ -1061,17 +1057,11 @@ Do you wish to ignore this warning, and, mount the drive regardless?" || return 
 		else
 
 			whiptail_desc+="\nFilesystem:   ${aDRIVE_FSTYPE[$MENU_DRIVE_INDEX]}"
-
-			if [[ ${aDRIVE_UUID[$MENU_DRIVE_INDEX]} ]]; then
-
-				whiptail_desc+="\nUUID:         ${aDRIVE_UUID[$MENU_DRIVE_INDEX]}"
-
-			fi
+			[[ ${aDRIVE_UUID[$MENU_DRIVE_INDEX]} ]] && whiptail_desc+="\nUUID:         ${aDRIVE_UUID[$MENU_DRIVE_INDEX]}"
 
 			if (( ${aDRIVE_ISMOUNTED[$MENU_DRIVE_INDEX]} )); then
 
-				whiptail_desc+="\nAllocation:   Capacity: ${aDRIVE_SIZE_TOTAL[$MENU_DRIVE_INDEX]}iB | Used: ${aDRIVE_SIZE_USED[$MENU_DRIVE_INDEX]}iB (${aDRIVE_SIZE_PERCENTUSED[$MENU_DRIVE_INDEX]})"
-				whiptail_desc+='\nStatus:       Drive is online and ready for use'
+				whiptail_desc+="\nAllocation:   Capacity: ${aDRIVE_SIZE_TOTAL[$MENU_DRIVE_INDEX]}iB | Used: ${aDRIVE_SIZE_USED[$MENU_DRIVE_INDEX]}iB (${aDRIVE_SIZE_PERCENTUSED[$MENU_DRIVE_INDEX]})\nStatus:       Drive is online and ready for use"
 
 				# Unmount
 				# - Disable mount control for /boot /rootfs
@@ -1102,11 +1092,11 @@ Do you wish to ignore this warning, and, mount the drive regardless?" || return 
 
 							G_WHIP_MENU_ARRAY+=('' '●─ Userdata & Swap options ')
 
-							if { [[ ${aDRIVE_MOUNT_TARGET[$MENU_DRIVE_INDEX]} != '/' && $FP_USERDATA_CURRENT == ${aDRIVE_MOUNT_TARGET[$MENU_DRIVE_INDEX]}* ]]; } || # off rootfs
-								{ [[ ${aDRIVE_MOUNT_TARGET[$MENU_DRIVE_INDEX]} == '/' && $FP_USERDATA_CURRENT == $G_FP_DIETPI_USERDATA ]]; }; then # on rootfs
+							if [[ ${aDRIVE_MOUNT_TARGET[$MENU_DRIVE_INDEX]} != '/' && $FP_USERDATA_CURRENT == ${aDRIVE_MOUNT_TARGET[$MENU_DRIVE_INDEX]}* ]] ||
+								[[ ${aDRIVE_MOUNT_TARGET[$MENU_DRIVE_INDEX]} == '/' && $FP_USERDATA_CURRENT == $G_FP_DIETPI_USERDATA ]]; then
 
-								G_WHIP_MENU_ARRAY+=('User data' ": [X] | DietPi user data is currently located on this drive")
 								partition_contains_userdata=1
+								G_WHIP_MENU_ARRAY+=('User data' ": [X] | DietPi user data is currently located on this drive")
 
 							else
 
@@ -1122,7 +1112,7 @@ Do you wish to ignore this warning, and, mount the drive regardless?" || return 
 								[[ $FP_SWAPFILE_CURRENT == '/var/swap' && ${aDRIVE_MOUNT_TARGET[$MENU_DRIVE_INDEX]} == '/' ]]; }; then
 
 								partition_contains_swapfile=1
-								G_WHIP_MENU_ARRAY+=('Swapfile' ": [X] | ${swapfile_size}MB used on this drive, select to change size")
+								G_WHIP_MENU_ARRAY+=('Swapfile' ": [X] | ${swapfile_size} MiB used on this drive, select to change size")
 
 							else
 
@@ -1160,7 +1150,7 @@ Do you wish to ignore this warning, and, mount the drive regardless?" || return 
 							local reserved_block_count=$(mawk '/^Reserved block count:/ {print $4;exit}' $fp_tmp)
 							rm $fp_tmp
 							reserved_blocks_percent_current=$(bc -l <<< "scale=3;(100*$reserved_block_count)/$block_count")
-							# Correct rounding to final scale:
+							# Correct rounding to final scale
 							reserved_blocks_percent_current=$(bc -l <<< "scale=2;(($reserved_blocks_percent_current*100)+0.5)/100" | sed 's/^\./0\./' | sed '/.0$/s/0$//' | sed 's/\.0$//')
 							G_WHIP_MENU_ARRAY+=('Reserved blocks' ": [$reserved_blocks_percent_current%] | Adjust percentage of reserved blocks on this drive")
 
@@ -1181,26 +1171,24 @@ Do you wish to ignore this warning, and, mount the drive regardless?" || return 
 
 			if ! (( ${aDRIVE_ISROM[$MENU_DRIVE_INDEX]} || ${aDRIVE_ISNETWORKED[$MENU_DRIVE_INDEX]} )); then
 
-				# - fsck
+				# fsck
 				G_WHIP_MENU_ARRAY+=('Check & Repair' ': Check and optionally repair filesystem')
 
-				# - Resize
-				if (( ! ${aDRIVE_ISREADONLY_CURRENTLY[$MENU_DRIVE_INDEX]} )) &&
-					[[ ${aDRIVE_FSTYPE[$MENU_DRIVE_INDEX]} == 'ext4' ]]; then
+				# Resize
+				if [[ ${aDRIVE_ISREADONLY_CURRENTLY[$MENU_DRIVE_INDEX]} == 0 && ${aDRIVE_FSTYPE[$MENU_DRIVE_INDEX]} == 'ext4' ]]; then
 
 					G_WHIP_MENU_ARRAY+=('Resize' ': Maximize the available filesystem size')
 
 				fi
 
-				#- Transfer RootFS
-				if [[ ${aDRIVE_MOUNT_SOURCE[$MENU_DRIVE_INDEX]} != $FP_ROOTFS_SOURCE ]] &&
-					(( $G_HW_MODEL < 13 )); then
+				# Transfer RootFS
+				if [[ ${aDRIVE_MOUNT_SOURCE[$MENU_DRIVE_INDEX]} != $FP_ROOTFS_SOURCE ]] && (( $G_HW_MODEL < 13 )); then
 
 					G_WHIP_MENU_ARRAY+=('Transfer RootFS' ': Transfer RootFS to this drive')
 
 				fi
 
-				# - Disable format for /boot /rootfs
+				# Disable format for /boot /rootfs
 				if [[ ${aDRIVE_MOUNT_TARGET[$MENU_DRIVE_INDEX]} != '/' && ${aDRIVE_MOUNT_TARGET[$MENU_DRIVE_INDEX]} != '/boot' ]]; then
 
 					G_WHIP_MENU_ARRAY+=('Format' ': Select to see formatting options')
@@ -1208,6 +1196,26 @@ Do you wish to ignore this warning, and, mount the drive regardless?" || return 
 				fi
 
 			fi
+
+		fi
+
+		# I/O scheduler
+		local io_schedulers="/sys/block/${aDRIVE_SOURCE_DEVICE[$MENU_DRIVE_INDEX]}/queue/scheduler"
+		if [[ -e $io_schedulers ]]; then
+
+			local aio_schedulers=()
+			for i in $(<$io_schedulers)
+			do
+
+				if [[ $i == \[*\] ]]; then
+
+					i=${i#[}; i=${i%]}
+					local io_scheduler_current=$i
+				fi
+				aio_schedulers+=("$i" '')
+
+			done
+			[[ $aio_schedulers ]] && G_WHIP_MENU_ARRAY+=('I/O Scheduler' ": [${io_scheduler_current:-N/A}]")
 
 		fi
 
@@ -1254,14 +1262,19 @@ Do you wish to ignore this warning, and, mount the drive regardless?" || return 
 				local min=0
 				local current_freespace=$(G_CHECK_FREESPACE ${aDRIVE_MOUNT_TARGET[$MENU_DRIVE_INDEX]})
 				local max=$(( $current_freespace - 2000 ))
-				if (( $max < $min )); then
+				if [[ ${aDRIVE_FSTYPE[$MENU_DRIVE_INDEX]} == 'btrfs' ]]; then
 
-					G_WHIP_MSG "Error: Insufficent free space on ${aDRIVE_MOUNT_TARGET[$MENU_DRIVE_INDEX]}, a minimum of 2GB is required ($current_freespace MB available)."
+					G_WHIP_MSG '[FAILED] The file system BTRFS does not support swap files.\n
+Please choose another drive or format this one with another file system, e.g. ext4.'
+
+				elif (( $max < $min )); then
+
+					G_WHIP_MSG "[FAILED] Insufficent free space on ${aDRIVE_MOUNT_TARGET[$MENU_DRIVE_INDEX]}, a minimum of 2GB is required ($current_freespace MiB available)."
 
 				else
 
 					G_WHIP_DEFAULT_ITEM=$swapfile_size
-					if G_WHIP_INPUTBOX "Please input a new value for swapfile size (MB):
+					if G_WHIP_INPUTBOX "Please input a new value for swapfile size (MiB):
 \nSwapfile has a swapiness setting of 1, and, is used only to prevent out of memory errors.
 \n - Recommended value = 1 (auto)\n - 0 = Disable swapfile\n - 1 = Auto size swapfile (2GB - RAM = size)\n - 2 - $max = Manual size"; then
 
@@ -1345,7 +1358,7 @@ Please enter the desired percentage of reserved blocks, e.g. "0.05" for 0.05% or
 
 					Notification 1
 
-				#	user must unmount partition on this drive, before we can format, this ensures a valid unmount check
+				# - User must unmount partition on this drive, before we can format, this ensures a valid unmount check
 				elif (( ${aDRIVE_ISMOUNTED[$MENU_DRIVE_INDEX]} )); then
 
 					G_WHIP_MSG "The partition (${aDRIVE_MOUNT_SOURCE[$MENU_DRIVE_INDEX]}) must be unmounted, before formatting is allowed.\n\nPlease use the option 'Unmount' on the next screen, then retry the 'Format' option."
@@ -1519,6 +1532,33 @@ NB:
 				# Re-enable swap
 				(( $partition_contains_swapfile )) && G_RUN_CMD swapon -a
 
+			elif [[ $G_WHIP_RETURNED_VALUE == 'I/O Scheduler' ]]; then
+
+				local udev_rules='/etc/udev/rules.d/99-dietpi-io_schedulers.rules'
+				[[ -f $udev_rules ]] && grep -q "KERNEL==\"${aDRIVE_SOURCE_DEVICE[$MENU_DRIVE_INDEX]}\"" $udev_rules && G_WHIP_MENU_ARRAY=('Reset' ': Reset to system defaults') || G_WHIP_MENU_ARRAY=()
+				for i in "${aio_schedulers[@]}"; do G_WHIP_MENU_ARRAY+=("$i"); done
+				G_WHIP_DEFAULT_ITEM=$io_scheduler_current
+				if G_WHIP_MENU "Please select an I/O scheduler.\n
+NB: This will apply to the whole drive: /dev/${aDRIVE_SOURCE_DEVICE[$MENU_DRIVE_INDEX]}
+    It always applies to the drive with this dev name, as well if naming changes due to new attached drives.\n
+Read more about I/O scheduling: https://wiki.archlinux.org/index.php/Improving_performance#Input/output_schedulers"; then
+
+					if [[ $G_WHIP_RETURNED_VALUE == 'Reset' ]]; then
+
+						sed -i "/KERNEL==\"${aDRIVE_SOURCE_DEVICE[$MENU_DRIVE_INDEX]}\"/d" $udev_rules
+						grep -q '^ACTION' $udev_rules || rm $udev_rules
+						G_WHIP_YESNO '[ INFO ] A reboot is required to reset the I/O scheduler to default.\n\nDo you wish to reboot now?' && reboot
+
+					else
+
+						[[ -f $udev_rules ]] || echo '# Please run "dietpi-drive_manager" to adjust I/O schedulers' > $udev_rules
+						G_CONFIG_INJECT "ACTION==\"add\|change\", KERNEL==\"${aDRIVE_SOURCE_DEVICE[$MENU_DRIVE_INDEX]}\"" "ACTION==\"add|change\", KERNEL==\"${aDRIVE_SOURCE_DEVICE[$MENU_DRIVE_INDEX]}\", ATTR{queue/scheduler}=\"$G_WHIP_RETURNED_VALUE\"" $udev_rules
+						echo "$G_WHIP_RETURNED_VALUE" > $io_schedulers
+
+					fi
+
+				fi
+
 			fi
 
 		else
@@ -1571,17 +1611,17 @@ NB:
 		# - Has partition table, offer to format single partition or whole drive
 		if (( ${aDRIVE_ISPARTITIONTABLE[$MENU_DRIVE_INDEX]} )); then
 
-			G_WHIP_MENU_ARRAY+=('Format Mode' ": $format_mode_text")
+			G_WHIP_MENU_ARRAY+=('Format Mode' ": [$format_mode_text]")
 
-		# - No partition table, force drive wipe, allow to choose partition table
+		# - No partition table, force drive wipe
 		else
 
 			FORMAT_MODE=0
-			G_WHIP_MENU_ARRAY+=('Partition Type' ": $partition_table_text")
 
 		fi
 
-		G_WHIP_MENU_ARRAY+=('Filesystem Type' ": $format_type_text")
+		(( $FORMAT_MODE )) || G_WHIP_MENU_ARRAY+=('Partition Type' ": [$partition_table_text]")
+		G_WHIP_MENU_ARRAY+=('Filesystem Type' ": [$format_type_text]")
 		G_WHIP_MENU_ARRAY+=('Format' ': Start the format process with selected options')
 
 		G_WHIP_DEFAULT_ITEM=$MENU_LASTITEM
@@ -1606,10 +1646,10 @@ NB:
 
 				)
 
-				G_WHIP_MENU 'Please select a formatting mode:\n\n - Formatting the drive will DELETE all data on the DRIVE.\n - Formatting the partition, will DELETE all data on the current PARTITION only.\n\nNB: If you are planning to dedicate the drive to this system, it is recommended to format the whole drive where possible, this will ensure full drive capacity is available for use.'
-				if (( ! $? )); then
+				if G_WHIP_MENU 'Please select a formatting mode:\n\n - Formatting the drive will DELETE all data on the DRIVE.\n - Formatting the partition, will DELETE all data on the current PARTITION only.\n
+NB: If you are planning to dedicate the drive to this system, it is recommended to format the whole drive where possible, this will ensure full drive capacity is available for use.'; then
 
-					[[ ${G_WHIP_RETURNED_VALUE,,} == 'partition' ]] && FORMAT_MODE=1 || FORMAT_MODE=0
+					[[ $G_WHIP_RETURNED_VALUE == 'Partition' ]] && FORMAT_MODE=1 || FORMAT_MODE=0
 
 				fi
 
@@ -1859,15 +1899,7 @@ NTFS:\nRecommended if you plan to use this drive on a Windows system. High CPU u
 
 		)
 
-		if G_WHIP_MENU 'Please select the network mount protocol:'; then
-
-			Mount_$G_WHIP_RETURNED_VALUE
-
-		else
-
-			TARGETMENUID=0 # Main menu
-
-		fi
+		G_WHIP_MENU 'Please select the network mount protocol:' && Mount_$G_WHIP_RETURNED_VALUE || TARGETMENUID=0 # Main menu
 
 	}
 
