@@ -13,12 +13,13 @@
 	FP_SCRIPT='/DietPi/dietpi/func/dietpi-set_software'
 	AVAIABLE_COMMANDS="
 Available commands:
-$FP_SCRIPT	locale			en_GB.UTF-8 / any other UTF-8 locale
-$FP_SCRIPT	allo			eth_dhcp / eth_static
+$FP_SCRIPT	locale			xx_XX.UTF-8 (eg: en_GB.UTF-8)
+$FP_SCRIPT	allo			eth_dhcp|eth_static [<address>] [<gateway>] [<netmask>] [<dns-nameserver>]
 $FP_SCRIPT	useradd			X=create user with name X and default permissions, using global DietPi password (dietpi)
 $FP_SCRIPT	userdel			X=delete user with name X
-$FP_SCRIPT	apt-mirror		url / default
-$FP_SCRIPT	ntpd-mode		[0-4] configures time sync mode (eg: daily/hourly/daemon)
+$FP_SCRIPT	apt-mirror		<url>|default
+$FP_SCRIPT	apt-cache		reset|cache|lists|archives [disable|ram|disk]
+$FP_SCRIPT	ntpd-mode		[0-4] Time sync modes: 0=custom|1=boot|2=boot+daily|3=boot+hourly|4=daemon+drift
 $FP_SCRIPT	verify_dietpi.txt	Verifies dietpi.txt entries, adds missing entries if required
 $FP_SCRIPT	passwords		NULL=Prompt user to change DietPi related passwords | X=optional set X as global password for future dietpi-software installations and \"root\" + \"dietpi\" login passwords.
 $FP_SCRIPT	setpermissions		Applies required filesystem permissions to DietPi specific content, and, DietPi userdata directory for software installs
@@ -65,7 +66,7 @@ $FP_SCRIPT	setpermissions		Applies required filesystem permissions to DietPi spe
 	#/////////////////////////////////////////////////////////////////////////////////////
 	Locale_Main(){
 
-		if [[ $INPUT_MODE_VALUE =~ 'UTF-8' ]]; then
+		if [[ $INPUT_MODE_VALUE == *'.UTF-8' ]]; then
 
 			echo "$INPUT_MODE_VALUE UTF-8" > /etc/locale.gen
 
@@ -73,7 +74,7 @@ $FP_SCRIPT	setpermissions		Applies required filesystem permissions to DietPi spe
 			[[ $INPUT_MODE_VALUE != 'en_GB.UTF-8' ]] && echo 'en_GB.UTF-8 UTF-8' >> /etc/locale.gen
 
 			# - Remove exisiting settings that will break dpkg-reconfigure
-			[[ -f /etc/default/locale ]] && rm /etc/default/locale
+			[[ -f '/etc/default/locale' ]] && rm /etc/default/locale
 
 			G_RUN_CMD dpkg-reconfigure -f noninteractive locales
 
@@ -173,6 +174,88 @@ _EOF_
 			Unknown_Input_Mode
 
 		fi
+
+	}
+
+	#/////////////////////////////////////////////////////////////////////////////////////
+	# Set APT Cache
+	#/////////////////////////////////////////////////////////////////////////////////////
+	AptCache_Main(){
+
+		local fp='/etc/apt/apt.conf.d/99-dietpi-cache'
+
+		# Clean current cache dir before changing it
+		apt-get clean
+
+		if [[ $INPUT_MODE_VALUE == 'reset' ]]; then
+
+			[[ -f $fp ]] && rm $fp
+			[[ -d '/tmp/apt' ]] && rm -R /tmp/apt
+			return 0
+
+		else
+
+			[[ -f $fp ]] || echo '# Please use "dietpi-config" > "Advanded Options" > "APT Cache" to edit these settings.' > $fp
+
+		fi
+
+		if [[ $INPUT_MODE_VALUE == 'cache' ]]; then
+
+			if [[ $INPUT_ADDITIONAL_1 == 'disable' ]]; then
+
+				G_CONFIG_INJECT 'Dir::Cache[[:blank:]]' 'Dir::Cache "/tmp/apt/cache";' $fp
+				G_CONFIG_INJECT 'Dir::Cache::pkgcache[[:blank:]]' 'Dir::Cache::pkgcache "";' $fp
+				G_CONFIG_INJECT 'Dir::Cache::srcpkgcache[[:blank:]]' 'Dir::Cache::srcpkgcache "";' $fp
+				[[ -d '/var/cache/apt' ]] && rm -R /var/cache/apt
+
+			elif [[ $INPUT_ADDITIONAL_1 == 'ram' ]]; then
+
+				G_CONFIG_INJECT 'Dir::Cache[[:blank:]]' 'Dir::Cache "/tmp/apt/cache";' $fp
+				G_CONFIG_INJECT 'Dir::Cache::pkgcache[[:blank:]]' 'Dir::Cache::pkgcache "pkgcache.bin";' $fp
+				G_CONFIG_INJECT 'Dir::Cache::srcpkgcache[[:blank:]]' 'Dir::Cache::srcpkgcache "srcpkgcache.bin";' $fp
+				[[ -d '/var/cache/apt' ]] && rm -R /var/cache/apt
+
+			elif [[ $INPUT_ADDITIONAL_1 == 'disk' ]]; then
+
+				sed -i '/^Dir::Cache/d' $fp
+				[[ -d '/tmp/apt/cache' ]] && rm -R /tmp/apt/cache
+
+			fi
+
+		elif [[ $INPUT_MODE_VALUE == 'lists' ]]; then
+
+			if [[ $INPUT_ADDITIONAL_1 == 'ram' ]]; then
+
+				G_CONFIG_INJECT 'Dir::State[[:blank:]]' 'Dir::State "/tmp/apt/state";'
+				G_CONFIG_INJECT 'Dir::State::extended_states[[:blank:]]' 'Dir::State::extended_states "/var/lib/apt/extended_states";'
+				G_CONFIG_INJECT 'Dir::State::status[[:blank:]]' 'Dir::State::status "/var/lib/dpkg/status";'
+				rm -Rf /var/lib/apt/{lists,mirrors,periodic,cdroms.list}
+
+			elif [[ $INPUT_ADDITIONAL_1 == 'disk' ]]; then
+
+				sed -i '/^Dir::State/d' $fp
+				[[ -d '/tmp/apt/state' ]] && rm -R /tmp/apt/state
+
+			fi
+
+		elif [[ $INPUT_MODE_VALUE == 'archives' ]]; then
+
+			if [[ $INPUT_ADDITIONAL_1 == 'ram' ]]; then
+
+				sed -i '/^Dir::Cache::archives/d' $fp
+				[[ -d '/var/cache/apt/archives' ]] && rm -R /var/cache/apt/archives
+
+			elif [[ $INPUT_ADDITIONAL_1 == 'disk' ]]; then
+
+				G_CONFIG_INJECT 'Dir::Cache::archives[[:blank:]]' 'Dir::Cache::archives "/var/cache/apt/archives";' $fp
+				[[ -d '/tmp/apt/cache/archives' ]] && rm -R /tmp/apt/cache/archives
+
+			fi
+
+		fi
+
+		# Remove drop-in config if it does not contain any actual changes
+		[[ -f $fp ]] && ! grep -q '^Dir' $fp && rm $fp
 
 	}
 
@@ -523,8 +606,6 @@ _EOF_
 
 			done
 
-			unset group_array
-
 		else
 
 			Unknown_Input_Mode
@@ -664,11 +745,14 @@ It is highly recommended to change this password, ideally, it should be differen
 	#-----------------------------------------------------------------------------------
 	# Info
 	G_DIETPI-NOTIFY 3 "$G_PROGRAM_NAME" "$INPUT_MODE_NAME ($INPUT_MODE_VALUE)"
-
 	#-----------------------------------------------------------------------------------
 	if [[ $INPUT_MODE_NAME == 'apt-mirror' ]]; then
 
 		AptMirror_Main
+
+	elif [[ $INPUT_MODE_NAME == 'apt-cache' ]]; then
+
+		AptCache_Main
 
 	elif [[ $INPUT_MODE_NAME == 'useradd' ]]; then
 
@@ -700,7 +784,7 @@ It is highly recommended to change this password, ideally, it should be differen
 
 	elif [[ $INPUT_MODE_NAME == 'setpermissions' ]]; then
 
-		Setpermissions_Main &> /dev/null #as no file exist checks are done in bash (quicker to let the program report it missing), hide output
+		Setpermissions_Main &> /dev/null # As no file exist checks are done in bash (quicker to let the program report it missing), hide output
 
 	else
 
