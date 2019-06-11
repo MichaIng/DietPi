@@ -184,7 +184,7 @@ _EOF_
 
 		local fp='/etc/apt/apt.conf.d/99-dietpi-cache'
 
-		# Clean current cache dir before changing it
+		# Clean current cache before changing it, failsafe cleanup if custom dir was chosen before
 		apt-get clean
 
 		if [[ $INPUT_MODE_VALUE == 'reset' ]]; then
@@ -193,21 +193,21 @@ _EOF_
 			[[ -d '/tmp/apt' ]] && rm -R /tmp/apt
 			return 0
 
-		elif [[ $INPUT_MODE_VALUE == 'clean' ]]; then
-
-			rm -Rf /tmp/apt /var/cache/apt /var/lib/apt/{lists,mirrors,periodic,cdroms.list}
-			return 0
-
 		fi
 
 		[[ -f $fp ]] || echo '# Please use "dietpi-config" > "Advanded Options" > "APT Cache" to edit these settings.' > $fp
 
-		if [[ $INPUT_MODE_VALUE == 'cache' ]]; then
+		if [[ $INPUT_MODE_VALUE == 'clean' ]]; then
 
-			# NB: This will affect "archives" as well, so those need to be set afterwards
+			rm -Rf /tmp/apt /var/cache/apt /var/lib/apt/{lists,mirrors,periodic,cdroms.list}
+
+		elif [[ $INPUT_MODE_VALUE == 'cache' ]]; then
+
 			if [[ $INPUT_ADDITIONAL_1 == 'disable' ]]; then
 
 				G_CONFIG_INJECT 'Dir::Cache[[:blank:]]' 'Dir::Cache "/tmp/apt";' $fp
+				# Leave archives on disk by default
+				GCI_PRESERVE=1 G_CONFIG_INJECT 'Dir::Cache::archives[[:blank:]]' 'Dir::Cache::archives "/var/cache/apt/archives";' $fp
 				G_CONFIG_INJECT 'Dir::Cache::pkgcache[[:blank:]]' 'Dir::Cache::pkgcache "";' $fp
 				G_CONFIG_INJECT 'Dir::Cache::srcpkgcache[[:blank:]]' 'Dir::Cache::srcpkgcache "";' $fp
 				[[ -d '/var/cache/apt' ]] && rm -R /var/cache/apt
@@ -215,6 +215,7 @@ _EOF_
 			elif [[ $INPUT_ADDITIONAL_1 == 'ram' ]]; then
 
 				G_CONFIG_INJECT 'Dir::Cache[[:blank:]]' 'Dir::Cache "/tmp/apt";' $fp
+				GCI_PRESERVE=1 G_CONFIG_INJECT 'Dir::Cache::archives[[:blank:]]' 'Dir::Cache::archives "/var/cache/apt/archives";' $fp
 				sed -i '/pkgcache[[:blank:]]/d' $fp
 				[[ -d '/var/cache/apt' ]] && rm -R /var/cache/apt
 
@@ -245,8 +246,10 @@ _EOF_
 
 			if [[ $INPUT_ADDITIONAL_1 == 'ram' ]]; then
 
+				# Cache needs to be in RAM as well for this to work reliable
+				G_CONFIG_INJECT 'Dir::Cache[[:blank:]]' 'Dir::Cache "/tmp/apt";' $fp
 				G_CONFIG_INJECT 'Dir::Cache::archives[[:blank:]]' 'Dir::Cache::archives "/tmp/apt/archives";' $fp
-				[[ -d '/var/cache/apt/archives' ]] && rm -R /var/cache/apt/archives
+				[[ -d '/var/cache/apt' ]] && rm -R /var/cache/apt
 
 			elif [[ $INPUT_ADDITIONAL_1 == 'disk' ]]; then
 
@@ -257,8 +260,21 @@ _EOF_
 
 		fi
 
-		# Remove drop-in config if it does not contain any actual changes
-		[[ -f $fp ]] && ! grep -q '^Dir' $fp && rm $fp
+		if [[ -f $fp ]]; then
+
+			# Remove drop-in config if it does not contain any setting
+			if ! grep -q '^Dir' $fp
+
+				rm $fp
+
+			# Re-create default cache dir if archives on disk while cache in RAM, since parent dirs are not auto-created
+			elif grep -q '/var/cache/apt/archives' $fp; then
+
+				mkdir -p /var/cache/apt
+
+			fi
+
+		fi
 
 	}
 
