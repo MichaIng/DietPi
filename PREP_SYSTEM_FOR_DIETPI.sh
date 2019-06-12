@@ -1202,7 +1202,7 @@ _EOF_
 
 		G_DIETPI-NOTIFY 2 'Disabling apt-daily services to prevent random APT cache lock'
 
-		for i in apt-daily.service apt-daily.timer apt-daily-upgrade.service apt-daily-upgrade.timer
+		for i in apt-daily{,-upgrade}.{service,timer}
 		do
 
 			systemctl stop $i &> /dev/null
@@ -1416,11 +1416,10 @@ _EOF_
 
 #DietPi external USB drive. Power management settings.
 /dev/sda {
-		# 10 mins
-		spindown_time = 120
-
-		#
-		apm = 127
+	# Highest APM value that allows spin-down
+	apm = 127
+	# 10 minutes
+	spindown_time = 120
 }
 _EOF_
 			G_ERROR_HANDLER_EXITCODE=$?
@@ -1532,7 +1531,7 @@ _EOF_
 		fi
 
 		# - ARMbian increase console verbose
-		[[ -f /boot/armbianEnv.txt ]] && sed -i '/verbosity=/c\verbosity=7' /boot/armbianEnv.txt
+		[[ -f '/boot/armbianEnv.txt' ]] && sed -i '/verbosity=/c\verbosity=7' /boot/armbianEnv.txt
 
 
 		#------------------------------------------------------------------------------------------------
@@ -1678,10 +1677,10 @@ This program is distributed in the hope that it will be useful, but WITHOUT ANY 
 You should have received a copy of the GNU General Public License along with this program. If not, please see http://www.gnu.org/licenses/
 _EOF_
 
-		G_DIETPI-NOTIFY 2 'Clearing APT cache'
+		G_DIETPI-NOTIFY 2 'Disabling and clearing APT cache'
 
-		G_RUN_CMD apt-get clean
-		rm -Rfv /var/lib/apt/lists/* # Clear APT cache, gets regenerated on G_AGUP
+		/DietPi/dietpi/func/dietpi-set_software apt-cache cache disable
+		/DietPi/dietpi/func/dietpi-set_software apt-cache cache clean
 
 		# - HW Specific
 		#	RPi remove saved G_HW_MODEL , allowing obtain-hw_model to auto detect RPi model
