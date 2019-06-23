@@ -1028,7 +1028,7 @@ _EOF_
 		do
 
 			# Loop through known service locations
-			for j in /etc/init.d/$i /etc/systemd/system/$i.service /etc/systemd/system/$i.service.d /lib/systemd/system/$i.service /lib/systemd/system/$i.service.d /usr/lib/systemd/system/$i.service /usr/lib/systemd/system/$i.service.d
+			for j in /etc/init.d/$i /{etc,lib,usr/lib}/systemd/system/$i.service{,.d}
 			do
 
 				if [[ -e $j ]]; then
