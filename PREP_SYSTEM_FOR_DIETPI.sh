@@ -438,6 +438,7 @@
 			'43' ': Rock64'
 			'42' ': RockPro64'
 			'70' ': Sparky SBC'
+			'72' ': ROCK Pi 4'
 
 		)
 
