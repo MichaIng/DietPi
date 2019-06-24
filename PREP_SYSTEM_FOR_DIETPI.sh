@@ -403,6 +403,7 @@
 			# '1' ': Raspberry Pi 1/Zero (512mb)'
 			# '2' ': Raspberry Pi 2'
 			# '3' ': Raspberry Pi 3/3+'
+			# '4' ': Raspberry Pi 4'
 			'' '●─ PC '
 			'21' ': x86_64 Native PC'
 			'20' ': x86_64 VMware/VirtualBox'
