@@ -1,0 +1,248 @@
+#!/bin/bash
+{
+	#////////////////////////////////////
+	# DietPi Image creation/finalise Script
+	#
+	#////////////////////////////////////
+	# Created by Daniel Knight / daniel.knight@dietpi.com / dietpi.com
+	# Updated by MichaIng / micha@dietpi.com / dietpi.com
+	#
+	#////////////////////////////////////
+	# - Reads disk to image | or use existing .img file
+	# - Resizes RootFS partition
+	# - Hashes and 7z's the final image ready for release.
+	#////////////////////////////////////
+
+	# Import DietPi-Globals ---------------------------------------------------------------
+	. /DietPi/dietpi/func/dietpi-globals
+	G_PROGRAM_NAME='DietPi-Imager'
+	G_CHECK_ROOT_USER
+	G_CHECK_ROOTFS_RW
+	G_INIT
+	# Import DietPi-Globals ---------------------------------------------------------------
+
+	FP_SOURCE=''
+	FP_LOOPBACK=''
+	FP_ROOT_DEV=''
+	ROOT_PARTITION_INDEX=''
+	OUTPUT_IMG_NAME=''
+	OUTPUT_7Z_NAME=''
+	GPT=0
+	DIETPI_VERSION='v6.25'
+
+	Delete_Loopback(){
+
+		[[ $FP_LOOPBACK ]] && G_RUN_CMD losetup -d $FP_LOOPBACK
+
+	}
+
+	Exit_On_Fail(){
+
+		Delete_Loopback
+		exit 1
+
+	}
+
+	Menu_Main(){
+
+		G_WHIP_MENU_ARRAY=(
+
+			'Drive' ': Save a drive/disk contents to an image, that you can work with'
+			'Image' ': Use an existing image file (.img) to work with'
+
+		)
+
+		G_WHIP_MENU 'Please select a option:' || Exit_On_Fail
+		if [[ $G_WHIP_RETURNED_VALUE == 'Drive' ]]; then
+
+			# Detect drives and list
+			blkid -o device > .blkid_list
+			G_WHIP_MENU_ARRAY=()
+			while read line
+			do
+
+				G_WHIP_MENU_ARRAY+=("${line//[0-9]/}" '')
+
+			done < .blkid_list
+			rm .blkid_list
+
+			G_WHIP_MENU 'Please select the drive you wish to save as an image:' || Exit_On_Fail
+			FP_SOURCE='/root/myimage.img'
+			dd if=$G_WHIP_RETURNED_VALUE of=$FP_SOURCE bs=4K status=progress || Exit_On_Fail
+
+		elif [[ $G_WHIP_RETURNED_VALUE == 'Image' ]]; then
+
+			/DietPi/dietpi/dietpi-explorer 1 /root
+			local fp_selected='/tmp/.dietpi-explorer_selected_location'
+			[[ -f $fp_selected ]] || Exit_On_Fail
+			FP_SOURCE=$(<$fp_selected)
+			rm $fp_selected
+
+		fi
+
+		G_WHIP_YESNO "Is $FP_SOURCE a GPT filesystem?" && GPT=1
+
+		G_WHIP_INPUTBOX "Please enter the RootFS parition number for $FP_SOURCE (eg: 1)" || Exit_On_Fail
+		G_CHECK_VALIDINT "$G_WHIP_RETURNED_VALUE" 1 || Exit_On_Fail
+		ROOT_PARTITION_INDEX=$G_WHIP_RETURNED_VALUE
+
+		G_WHIP_DEFAULT_ITEM='DietPi_<device>-<arch>-<distro>'
+		G_WHIP_INPUTBOX "Please enter the new/output filename for $FP_SOURCE\n - DietPi_<device>-<arch>-<distro>\n - EG: DietPi_RPi-ARMv6-Stretch" || Exit_On_Fail
+		OUTPUT_IMG_NAME=$G_WHIP_RETURNED_VALUE
+
+		G_WHIP_DEFAULT_ITEM=$DIETPI_VERSION
+		G_WHIP_INPUTBOX 'Please enter the DietPi version for this image:' || Exit_On_Fail
+		DIETPI_VERSION=$G_WHIP_RETURNED_VALUE
+
+	}
+
+	Main(){
+
+		Menu_Main
+
+		if [[ ! -f $FP_SOURCE ]]; then
+
+			G_DIETPI-NOTIFY 1 "Source image file ($FP_SOURCE) does not exist"
+			Exit_On_Fail
+
+		fi
+
+		# Install required packages
+		G_AG_CHECK_INSTALL_PREREQ gdisk dosfstools parted zerofree p7zip
+
+		# GPT images (RockPro64) after reading the image AND again after shrinking
+		# To fix:
+		# - GPT PMBR size mismatch (4458495 != 15523839) will be corrected by w(rite).
+		# - 15523806
+		# RUN
+		# - gdisk "$IMAGE_FP/$IMAGE_NAME"
+		#	w | y
+		(( $GPT )) && echo -e 'w\ny\nq\n' | gdisk $FP_SOURCE # Needs testing for automation...
+
+		# Attach .img file to loop device
+		modprobe loop
+		FP_LOOPBACK=$(losetup -f)
+		losetup $FP_LOOPBACK "$FP_SOURCE"
+		partprobe $FP_LOOPBACK
+
+		# root partition dev
+		FP_ROOT_DEV="${FP_LOOPBACK}p${ROOT_PARTITION_INDEX}"
+
+		# Fsck
+		e2fsck -f $FP_ROOT_DEV
+
+		# Shrink file system to minimum
+		# - Run multiple times until no change is done any more
+		local out=''
+		FS_SIZE=0
+		while :
+		do
+
+			resize2fs -M $FP_ROOT_DEV 2>&1 | tee resize2fs_out
+			if out=$(grep -im1 'nothing to do!' resize2fs_out); then
+
+				# Re-add 4M to be failsafe, was required on Raspbian Buster for successful boot
+				FS_SIZE=$(mawk '{print $5 + 1024}' <<< $out) # 4k blocks
+				rm resize2fs_out
+				resize2fs $FP_ROOT_DEV $FS_SIZE
+				G_DIETPI-NOTIFY 2 "Reduced RootFS size to $(( $FS_SIZE / 256 + 1 )) MiB"
+				FS_SIZE=$(( $FS_SIZE * 8 )) # 4k blocks => 512 byte sectors
+				break
+
+			elif out=$(grep -im1 'no such file or directory' resize2fs_out); then
+
+				G_DIETPI-NOTIFY 1 'Partition not found'
+				Exit_On_Fail
+
+			fi
+
+		done
+
+		# Remount image for any required edits.
+		fp_mnt='loopback_rootfs'
+		mkdir -p /mnt/$fp_mnt
+		if G_ERROR_HANDLER_INFO_ONLY=1 G_RUN_CMD mount $FP_ROOT_DEV /mnt/$fp_mnt; then
+
+			G_WHIP_MSG "Image mounted for file editing, make changes if required: $FP_ROOT_DEV > /mnt/$fp_mnt\n\nPress 'Ok' when you are finished."
+			sync
+			G_RUN_CMD umount /mnt/$fp_mnt
+			partprobe $FP_LOOPBACK # Probably not required as no partition changes, regardless, no harm.
+
+		fi
+
+		# Estimate minimum end sector
+		PART_START=$(fdisk -l -o Start $FP_SOURCE | tail -1) # 512 byte sectors
+		PART_END=$(( $PART_START + $FS_SIZE ))
+
+		G_DIETPI-NOTIFY 2 "Shrinking partition to: $(( $PART_END / 2048 + 1 )) MiB"
+		parted $FP_LOOPBACK unit s resizepart $ROOT_PARTITION_INDEX $PART_END yes
+		partprobe $FP_LOOPBACK
+		sync
+
+		# Override free space with zeros to purge removed data and allow further image/archive size reduction
+		zerofree -v $FP_ROOT_DEV
+
+		# GPT images (RockPro64) after reading the image AND again after shrinking
+		# To fix:
+		# - GPT PMBR size mismatch (4458495 != 15523839) will be corrected by w(rite).
+		# - 15523806
+		# RUN
+		# - gdisk "$IMAGE_FP/$IMAGE_NAME"
+		#	w | y
+		(( $GPT )) && echo -e 'w\ny\nq\n' | gdisk $FP_SOURCE
+
+		# Estimate used size
+		PART_SIZE=$(( ( $(fdisk -l -o End $FP_SOURCE | tail -1) + 1 ) * 512 )) # 512 byte sectors => Byte
+		IMAGE_SIZE=$(( $PART_SIZE + ( 512 * 256 ) )) # 64 byte for secondary GPT + safety net
+
+		# Create final image in $HOME
+		cd $HOME
+
+		#  truncate to used size
+		truncate --size=$IMAGE_SIZE "$FP_SOURCE"
+
+		# Loopback finished, clear loop
+		partprobe $FP_LOOPBACK
+		sync
+		Delete_Loopback
+
+		# add version number to output file name
+		OUTPUT_7Z_NAME="$OUTPUT_IMG_NAME.7z"
+		OUTPUT_IMG_NAME="${OUTPUT_IMG_NAME//DietPi_/DietPi_${DIETPI_VERSION}_}.img"
+
+		# Move new img to HOME
+		mv $FP_SOURCE $OUTPUT_IMG_NAME # TODO: if not same already location/file...
+
+		# Generate hashes: MD5, SHA1, SHA256
+		G_DIETPI-NOTIFY 2 'Generating hash.txt, please wait...'
+		cat << _EOF_ > hash.txt
+FILE:	$OUTPUT_IMG_NAME
+DATE:	$(date)
+MD5:	$(md5sum $OUTPUT_IMG_NAME | mawk '{print $1}')
+SHA1:	$(sha1sum $OUTPUT_IMG_NAME | mawk '{print $1}')
+SHA256:	$(sha256sum $OUTPUT_IMG_NAME | mawk '{print $1}')
+_EOF_
+
+		# Download current README
+		wget https://raw.githubusercontent.com/MichaIng/DietPi/master/README.md -O README.md || Exit_On_Fail
+
+		# Generate 7z archive
+		# NB: LZMA2 ultra compression method requires 2G RAM
+		[[ -f $OUTPUT_7Z_NAME ]] && rm $OUTPUT_7Z_NAME
+		if 7zr a -m0=lzma2 -mx=9 $OUTPUT_7Z_NAME $OUTPUT_IMG_NAME hash.txt README.md; then
+
+			rm hash.txt README.md
+			G_WHIP_MSG "[INFO] $HOME/$OUTPUT_7Z_NAME created"
+
+		fi
+
+	}
+
+	#/////////////////////////////////////////////////////////////////////////////////////
+	# Main
+	#/////////////////////////////////////////////////////////////////////////////////////
+	Main
+	#-----------------------------------------------------------------------------------
+	exit
+	#-----------------------------------------------------------------------------------
+}
