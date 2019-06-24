@@ -137,11 +137,10 @@
 	update-locale LC_ALL=en_GB.UTF-8
 
 	# - Export locale vars to assure the following whiptail being beautiful
-	export LC_ALL=en_GB.UTF8
+	export LC_ALL='en_GB.UTF-8'
 
 	# Set Git owner
-	G_GITOWNER=${GITOWNER:-MichaIng}
-	unset GITOWNER
+	GITOWNER=${GITOWNER:-MichaIng}
 
 	# Select Git branch
 	if ! [[ $GITBRANCH =~ ^(master|beta|dev)$ ]]; then
@@ -168,17 +167,15 @@
 		fi
 
 	fi
-	G_GITBRANCH=$GITBRANCH
-	unset GITBRANCH
 
-	echo "[ INFO ] Selected Git branch: $G_GITOWNER/$G_GITBRANCH"
+	echo "[ INFO ] Selected Git branch: $GITOWNER/$GITBRANCH"
 
 	#------------------------------------------------------------------------------------------------
 	# DietPi-Globals
 	#------------------------------------------------------------------------------------------------
 	# - Download
 	# - NB: We'll have to manually handle errors, until DietPi-Globals are successfully loaded.
-	if ! wget "https://raw.githubusercontent.com/$G_GITOWNER/DietPi/$G_GITBRANCH/dietpi/func/dietpi-globals" -O dietpi-globals; then
+	if ! wget "https://raw.githubusercontent.com/$GITOWNER/DietPi/$GITBRANCH/dietpi/func/dietpi-globals" -O dietpi-globals; then
 
 		echo -e '[FAILED] Unable to download dietpi-globals. Aborting...\n'
 		exit 1
@@ -197,6 +194,10 @@
 	# - Reset G_PROGRAM_NAME, which was set to empty string by sourcing dietpi-globals
 	G_PROGRAM_NAME='DietPi-PREP'
 	G_INIT
+
+	# - Applying Git info
+	G_GITOWNER=$GITOWNER; unset GITOWNER
+	G_GITBRANCH=$GITBRANCH; unset GITBRANCH
 
 	# - Detect the the Debian version of this operating system.
 	if grep -q 'jessie' /etc/os-release; then
