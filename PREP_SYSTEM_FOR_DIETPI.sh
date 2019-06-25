@@ -1368,37 +1368,38 @@ _EOF_
 
 		G_DIETPI-NOTIFY 2 'Configuring regional settings (TZdata):'
 
-		[[ -f '/etc/timezone' ]] && rm /etc/timezone
-		[[ -f '/etc/localtime' ]] && rm /etc/localtime
-		ln -sf /usr/share/zoneinfo/Europe/London /etc/localtime
+		rm -Rf /etc/{localtime,timezone}
+		ln -sf /usr/share/zoneinfo/UTC /etc/localtime
 		G_RUN_CMD dpkg-reconfigure -f noninteractive tzdata
 
 		G_DIETPI-NOTIFY 2 'Configuring regional settings (Keyboard):'
 
 		dpkg-reconfigure -f noninteractive keyboard-configuration # Keyboard must be plugged in for this to work!
 
-		#G_DIETPI-NOTIFY 2 "Configuring regional settings (Locale):"
-
-		# Runs at start of script
+		#G_DIETPI-NOTIFY 2 "Configuring regional settings (Locale):" # Runs at start of script
 
 		# G_HW_ARCH specific
 		G_DIETPI-NOTIFY 2 'Applying G_HW_ARCH specific tweaks:'
 
 		if (( $G_HW_ARCH == 10 )); then
 
-			# - i386 APT support
+			# - i386 APT/DPKG support
 			dpkg --add-architecture i386
-			#G_AGUP # Not required here, since this will be done on every update+install
 
-			# - Disable nouveau: https://github.com/MichaIng/DietPi/issues/1244 // https://dietpi.com/phpbb/viewtopic.php?f=11&t=2462&p=9688#p9688
-			cat << _EOF_ > /etc/modprobe.d/blacklist-nouveau.conf
+			# - Disable nouveau: https://github.com/MichaIng/DietPi/issues/1244 // https://dietpi.com/phpbb/viewtopic.php?p=9688#p9688
+			rm -f /etc/modprobe.d/*nouveau*
+			cat << _EOF_ > /etc/modprobe.d/dietpi-disable_nouveau.conf
 blacklist nouveau
 blacklist lbm-nouveau
 options nouveau modeset=0
 alias nouveau off
 alias lbm-nouveau off
 _EOF_
-			echo 'options nouveau modeset=0' > /etc/modprobe.d/nouveau-kms.conf
+
+			# - Apply usb-storage quirks to disable UAS for unsupported drives (Seagate ST5000LM000-2AN170): https://github.com/MichaIng/DietPi/issues/2905
+			echo 'options usb-storage quirks=0bc2:ab30:u' > /etc/modprobe.d/dietpi-usb-storage_quirks.conf
+
+			# - Update initramfs with above changes
 			update-initramfs -u
 
 		fi
