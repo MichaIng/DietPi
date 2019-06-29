@@ -734,6 +734,7 @@ _EOF_
 			'ethtool'		# Ethernet link checking
 			'fake-hwclock'		# Hardware clock emulation, to allow correct timestamps during boot before network time sync
 			'gnupg'			# apt-key add
+			'haveged'		# Entropy daemon: https://github.com/MichaIng/DietPi/issues/2806
 			'htop'			# System monitor
 			'iputils-ping'		# "ping" command
 			'isc-dhcp-client'	# DHCP client
@@ -1405,7 +1406,7 @@ _EOF_
 			G_ERROR_HANDLER_COMMAND='/etc/hdparm.conf'
 			cat << _EOF_ >> $G_ERROR_HANDLER_COMMAND
 
-#DietPi external USB drive. Power management settings.
+# DietPi power management settings for external USB drive
 /dev/sda {
 	# Highest APM value that allows spin-down
 	apm = 127
@@ -1746,9 +1747,9 @@ _EOF_
 
 		# Power off system
 
-		# Read image
+		# Plug SDcard/drive into external DietPi system
 
-		# Resize rootfs partition to minimum size +50MB
+		# Run https://github.com/MichaIng/DietPi/blob/dev/.meta/dietpi-imager
 
 	}
 
