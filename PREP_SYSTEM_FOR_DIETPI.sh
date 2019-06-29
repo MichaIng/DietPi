@@ -734,6 +734,7 @@ _EOF_
 			'ethtool'		# Ethernet link checking
 			'fake-hwclock'		# Hardware clock emulation, to allow correct timestamps during boot before network time sync
 			'gnupg'			# apt-key add
+			'haveged'		# Entropy daemon: https://github.com/MichaIng/DietPi/issues/2806
 			'htop'			# System monitor
 			'iputils-ping'		# "ping" command
 			'isc-dhcp-client'	# DHCP client
@@ -850,17 +851,7 @@ _EOF_
 		#	RPi
 		elif (( $G_HW_MODEL < 10 )); then
 
-			G_AGI libraspberrypi-bin libraspberrypi0 raspberrypi-bootloader raspberrypi-kernel raspberrypi-sys-mods
-			# Buster systemd doesn't support the current raspi-copies-and-fills: https://github.com/MichaIng/DietPi/issues/1286
-			if (( $DISTRO_TARGET < 5 )); then
-
-				G_AGI raspi-copies-and-fills
-
-			else
-
-				G_AGP raspi-copies-and-fills
-
-			fi
+			G_AGI libraspberrypi-bin libraspberrypi0 raspberrypi-bootloader raspberrypi-kernel raspberrypi-sys-mods raspi-copies-and-fills
 
 		#	Odroid N2
 		elif (( $G_HW_MODEL == 15 )); then
@@ -1368,37 +1359,38 @@ _EOF_
 
 		G_DIETPI-NOTIFY 2 'Configuring regional settings (TZdata):'
 
-		[[ -f '/etc/timezone' ]] && rm /etc/timezone
-		[[ -f '/etc/localtime' ]] && rm /etc/localtime
-		ln -sf /usr/share/zoneinfo/Europe/London /etc/localtime
+		rm -Rf /etc/{localtime,timezone}
+		ln -sf /usr/share/zoneinfo/UTC /etc/localtime
 		G_RUN_CMD dpkg-reconfigure -f noninteractive tzdata
 
 		G_DIETPI-NOTIFY 2 'Configuring regional settings (Keyboard):'
 
 		dpkg-reconfigure -f noninteractive keyboard-configuration # Keyboard must be plugged in for this to work!
 
-		#G_DIETPI-NOTIFY 2 "Configuring regional settings (Locale):"
-
-		# Runs at start of script
+		#G_DIETPI-NOTIFY 2 "Configuring regional settings (Locale):" # Runs at start of script
 
 		# G_HW_ARCH specific
 		G_DIETPI-NOTIFY 2 'Applying G_HW_ARCH specific tweaks:'
 
 		if (( $G_HW_ARCH == 10 )); then
 
-			# - i386 APT support
+			# - i386 APT/DPKG support
 			dpkg --add-architecture i386
-			#G_AGUP # Not required here, since this will be done on every update+install
 
-			# - Disable nouveau: https://github.com/MichaIng/DietPi/issues/1244 // https://dietpi.com/phpbb/viewtopic.php?f=11&t=2462&p=9688#p9688
-			cat << _EOF_ > /etc/modprobe.d/blacklist-nouveau.conf
+			# - Disable nouveau: https://github.com/MichaIng/DietPi/issues/1244 // https://dietpi.com/phpbb/viewtopic.php?p=9688#p9688
+			rm -f /etc/modprobe.d/*nouveau*
+			cat << _EOF_ > /etc/modprobe.d/dietpi-disable_nouveau.conf
 blacklist nouveau
 blacklist lbm-nouveau
 options nouveau modeset=0
 alias nouveau off
 alias lbm-nouveau off
 _EOF_
-			echo 'options nouveau modeset=0' > /etc/modprobe.d/nouveau-kms.conf
+
+			# - Apply usb-storage quirks to disable UAS for unsupported drives (Seagate ST5000LM000-2AN170): https://github.com/MichaIng/DietPi/issues/2905
+			echo 'options usb-storage quirks=0bc2:ab30:u' > /etc/modprobe.d/dietpi-usb-storage_quirks.conf
+
+			# - Update initramfs with above changes
 			update-initramfs -u
 
 		fi
@@ -1414,7 +1406,7 @@ _EOF_
 			G_ERROR_HANDLER_COMMAND='/etc/hdparm.conf'
 			cat << _EOF_ >> $G_ERROR_HANDLER_COMMAND
 
-#DietPi external USB drive. Power management settings.
+# DietPi power management settings for external USB drive
 /dev/sda {
 	# Highest APM value that allows spin-down
 	apm = 127
@@ -1755,9 +1747,9 @@ _EOF_
 
 		# Power off system
 
-		# Read image
+		# Plug SDcard/drive into external DietPi system
 
-		# Resize rootfs partition to minimum size +50MB
+		# Run https://github.com/MichaIng/DietPi/blob/dev/.meta/dietpi-imager
 
 	}
 

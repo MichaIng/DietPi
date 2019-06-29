@@ -52,22 +52,17 @@
 
 		)
 
-		G_WHIP_MENU 'Please select a option:' || Exit_On_Fail
+		G_WHIP_MENU 'Please select an option:' || Exit_On_Fail
 		if [[ $G_WHIP_RETURNED_VALUE == 'Drive' ]]; then
 
-			# Detect drives and list
-			blkid -o device > .blkid_list
-			G_WHIP_MENU_ARRAY=()
-			while read line
-			do
+			# Detect drives and list for selection
+			G_WHIP_MENU_ARRAY=($(lsblk -npo NAME,SIZE | grep '^/'))
+			if [[ ! $G_WHIP_MENU_ARRAY ]] || ! G_WHIP_MENU 'Please select the drive you wish to save as an image:'; then
 
-				G_WHIP_MENU_ARRAY+=("${line//[0-9]/}" '')
+				Exit_On_Fail
 
-			done < .blkid_list
-			rm .blkid_list
-
-			G_WHIP_MENU 'Please select the drive you wish to save as an image:' || Exit_On_Fail
-			FP_SOURCE='/root/myimage.img'
+			fi
+			FP_SOURCE='/root/dietpi-imager_tmp.img'
 			dd if=$G_WHIP_RETURNED_VALUE of=$FP_SOURCE bs=4K status=progress || Exit_On_Fail
 
 		elif [[ $G_WHIP_RETURNED_VALUE == 'Image' ]]; then
@@ -77,14 +72,25 @@
 			[[ -f $fp_selected ]] || Exit_On_Fail
 			FP_SOURCE=$(<$fp_selected)
 			rm $fp_selected
+			if [[ ! -f $FP_SOURCE ]]; then
+
+				G_DIETPI-NOTIFY 1 "Source image file ($FP_SOURCE) does not exist, aborting..."
+				Exit_On_Fail
+
+			fi
 
 		fi
 
-		G_WHIP_YESNO "Is $FP_SOURCE a GPT filesystem?" && GPT=1
+		# Attach .img file to loop device
+		modprobe loop || Exit_On_Fail
+		FP_LOOPBACK=$(losetup -f)
+		losetup $FP_LOOPBACK "$FP_SOURCE" || Exit_On_Fail
+		partprobe $FP_LOOPBACK || Exit_On_Fail
 
-		G_WHIP_INPUTBOX "Please enter the RootFS parition number for $FP_SOURCE (eg: 1)" || Exit_On_Fail
-		G_CHECK_VALIDINT "$G_WHIP_RETURNED_VALUE" 1 || Exit_On_Fail
-		ROOT_PARTITION_INDEX=$G_WHIP_RETURNED_VALUE
+		# Detect partitions and list for selection
+		G_WHIP_MENU_ARRAY=($(lsblk -npo NAME,SIZE ${FP_LOOPBACK}?*))
+		G_WHIP_MENU "Please select the root partition of $FP_LOOPBACK" || Exit_On_Fail
+		ROOT_PARTITION_INDEX=${G_WHIP_RETURNED_VALUE: -1}
 
 		G_WHIP_DEFAULT_ITEM='DietPi_<device>-<arch>-<distro>'
 		G_WHIP_INPUTBOX "Please enter the new/output filename for $FP_SOURCE\n - DietPi_<device>-<arch>-<distro>\n - EG: DietPi_RPi-ARMv6-Stretch" || Exit_On_Fail
@@ -100,15 +106,24 @@
 
 		Menu_Main
 
-		if [[ ! -f $FP_SOURCE ]]; then
+		# Install required packages
+		G_AG_CHECK_INSTALL_PREREQ gdisk dosfstools parted zerofree p7zip
 
-			G_DIETPI-NOTIFY 1 "Source image file ($FP_SOURCE) does not exist"
+		# Auto detect GPT partition table, failsafe detection of MBR to debug possibly other wording/partition table types
+		if [[ $(parted $FP_LOOPBACK print) == *'Partition Table: msdos'* ]]; then
+
+			GPT=0
+
+		elif [[ $(parted $FP_LOOPBACK print) == *'Partition Table: gpt'* ]]; then
+
+			GPT=1
+
+		else
+
+			G_DIETPI-NOTIFY 1 "Unknown partition table type ($(parted $FP_LOOPBACK print | mawk '/^Partition Table:/ {print $3;exit}')), aborting..."
 			Exit_On_Fail
 
 		fi
-
-		# Install required packages
-		G_AG_CHECK_INSTALL_PREREQ gdisk dosfstools parted zerofree p7zip
 
 		# GPT images (RockPro64) after reading the image AND again after shrinking
 		# To fix:
@@ -117,13 +132,7 @@
 		# RUN
 		# - gdisk "$IMAGE_FP/$IMAGE_NAME"
 		#	w | y
-		(( $GPT )) && echo -e 'w\ny\nq\n' | gdisk $FP_SOURCE # Needs testing for automation...
-
-		# Attach .img file to loop device
-		modprobe loop
-		FP_LOOPBACK=$(losetup -f)
-		losetup $FP_LOOPBACK "$FP_SOURCE"
-		partprobe $FP_LOOPBACK
+		(( $GPT )) && echo -e 'w\ny\nq\n' | gdisk $FP_LOOPBACK # Needs testing for automation...
 
 		# root partition dev
 		FP_ROOT_DEV="${FP_LOOPBACK}p${ROOT_PARTITION_INDEX}"
@@ -131,9 +140,24 @@
 		# Fsck
 		e2fsck -f $FP_ROOT_DEV
 
+		# Remount image for any required edits.
+		fp_mnt='loopback_rootfs'
+		mkdir -p /mnt/$fp_mnt
+		if G_ERROR_HANDLER_INFO_ONLY=1 G_RUN_CMD mount $FP_ROOT_DEV /mnt/$fp_mnt; then
+
+			G_WHIP_MSG "Image mounted for file editing, make changes if required: $FP_ROOT_DEV > /mnt/$fp_mnt\n\nPress 'Ok' when you are finished."
+			sync
+			G_RUN_CMD umount /mnt/$fp_mnt
+			partprobe $FP_LOOPBACK # Probably not required as no partition changes, regardless, no harm.
+
+		fi
+
+		# Fsck
+		e2fsck -f $FP_ROOT_DEV
+
 		# Shrink file system to minimum
 		# - Run multiple times until no change is done any more
-		local out=''
+		local out
 		FS_SIZE=0
 		while :
 		do
@@ -141,7 +165,7 @@
 			resize2fs -M $FP_ROOT_DEV 2>&1 | tee resize2fs_out
 			if out=$(grep -im1 'nothing to do!' resize2fs_out); then
 
-				# Re-add 4M to be failsafe, was required on Raspbian Buster for successful boot
+				# Re-add 4 MiB to be failsafe, was required on Raspbian Buster for successful boot
 				FS_SIZE=$(mawk '{print $5 + 1024}' <<< $out) # 4k blocks
 				rm resize2fs_out
 				resize2fs $FP_ROOT_DEV $FS_SIZE
@@ -158,23 +182,11 @@
 
 		done
 
-		# Remount image for any required edits.
-		fp_mnt='loopback_rootfs'
-		mkdir -p /mnt/$fp_mnt
-		if G_ERROR_HANDLER_INFO_ONLY=1 G_RUN_CMD mount $FP_ROOT_DEV /mnt/$fp_mnt; then
-
-			G_WHIP_MSG "Image mounted for file editing, make changes if required: $FP_ROOT_DEV > /mnt/$fp_mnt\n\nPress 'Ok' when you are finished."
-			sync
-			G_RUN_CMD umount /mnt/$fp_mnt
-			partprobe $FP_LOOPBACK # Probably not required as no partition changes, regardless, no harm.
-
-		fi
-
 		# Estimate minimum end sector
-		PART_START=$(fdisk -l -o Start $FP_SOURCE | tail -1) # 512 byte sectors
+		PART_START=$(fdisk -l -o Start $FP_LOOPBACK | tail -1) # 512 byte sectors
 		PART_END=$(( $PART_START + $FS_SIZE ))
 
-		G_DIETPI-NOTIFY 2 "Shrinking partition to: $(( $PART_END / 2048 + 1 )) MiB"
+		G_DIETPI-NOTIFY 2 "Shrinking root partition to: $(( $FS_SIZE / 2048 + 1 )) MiB"
 		parted $FP_LOOPBACK unit s resizepart $ROOT_PARTITION_INDEX $PART_END yes
 		partprobe $FP_LOOPBACK
 		sync
@@ -189,16 +201,16 @@
 		# RUN
 		# - gdisk "$IMAGE_FP/$IMAGE_NAME"
 		#	w | y
-		(( $GPT )) && echo -e 'w\ny\nq\n' | gdisk $FP_SOURCE
+		(( $GPT )) && echo -e 'w\ny\nq\n' | gdisk $FP_LOOPBACK
 
 		# Estimate used size
-		PART_SIZE=$(( ( $(fdisk -l -o End $FP_SOURCE | tail -1) + 1 ) * 512 )) # 512 byte sectors => Byte
+		PART_SIZE=$(( ( $(fdisk -l -o End $FP_LOOPBACK | tail -1) + 1 ) * 512 )) # 512 byte sectors => Byte
 		IMAGE_SIZE=$(( $PART_SIZE + ( 512 * 256 ) )) # 64 byte for secondary GPT + safety net
 
-		# Create final image in $HOME
-		cd $HOME
+		# Create final image in /root
+		cd /root
 
-		#  truncate to used size
+		# Truncate image file to used size
 		truncate --size=$IMAGE_SIZE "$FP_SOURCE"
 
 		# Loopback finished, clear loop
@@ -206,11 +218,11 @@
 		sync
 		Delete_Loopback
 
-		# add version number to output file name
+		# Add version number to output file name
 		OUTPUT_7Z_NAME="$OUTPUT_IMG_NAME.7z"
 		OUTPUT_IMG_NAME="${OUTPUT_IMG_NAME//DietPi_/DietPi_${DIETPI_VERSION}_}.img"
 
-		# Move new img to HOME
+		# Move new img to /root
 		mv $FP_SOURCE $OUTPUT_IMG_NAME # TODO: if not same already location/file...
 
 		# Generate hashes: MD5, SHA1, SHA256
@@ -232,7 +244,7 @@ _EOF_
 		if 7zr a -m0=lzma2 -mx=9 $OUTPUT_7Z_NAME $OUTPUT_IMG_NAME hash.txt README.md; then
 
 			rm hash.txt README.md
-			G_WHIP_MSG "[INFO] $HOME/$OUTPUT_7Z_NAME created"
+			G_WHIP_MSG "[INFO] /root/$OUTPUT_7Z_NAME created"
 
 		fi
 

@@ -50,24 +50,32 @@
 				sed -i '/over_voltage=/c\#over_voltage=0' /DietPi/config.txt
 				sed -i '/arm_freq=/c\#arm_freq=900' /DietPi/config.txt
 				sed -i '/core_freq=/c\#core_freq=250' /DietPi/config.txt
-				sed -i '/sdram_freq=/c\#sdram_freq=450' /DietPi/config.txt
+				sed -i '/sdram_freq=/c\#sdram_freq=400' /DietPi/config.txt
 
 			# RPi v3
 			elif (( $G_HW_MODEL == 3 )); then
 
 				sed -i '/over_voltage=/c\#over_voltage=0' /DietPi/config.txt
-				sed -i '/core_freq=/c\#core_freq=400' /DietPi/config.txt
-				G_CONFIG_INJECT '/temp_limit=' 'temp_limit=75' /DietPi/config.txt # https://github.com/MichaIng/DietPi/issues/356
 				sed -i '/arm_freq=/c\#arm_freq=1200' /DietPi/config.txt
+				sed -i '/core_freq=/c\#core_freq=400' /DietPi/config.txt
 				sed -i '/sdram_freq=/c\#sdram_freq=450' /DietPi/config.txt
+				G_CONFIG_INJECT 'temp_limit=' 'temp_limit=75' /DietPi/config.txt # https://github.com/MichaIng/DietPi/issues/356
 
 				# A+/B+
-				if [[ ${G_HW_MODEL_DESCRIPTION,,} == *'+' ]]; then
+				if [[ $G_HW_MODEL_DESCRIPTION == *'+' ]]; then
 
 					sed -i '/arm_freq=/c\#arm_freq=1400' /DietPi/config.txt
 					sed -i '/sdram_freq=/c\#sdram_freq=500' /DietPi/config.txt
 
 				fi
+
+			# RPi v4
+			elif (( $G_HW_MODEL == 4 )); then
+
+				sed -i '/over_voltage=/c\#over_voltage=0' /DietPi/config.txt
+				sed -i '/arm_freq=/c\#arm_freq=1500' /DietPi/config.txt
+				sed -i '/core_freq=/c\#core_freq=500' /DietPi/config.txt
+				sed -i '/sdram_freq=/c\#sdram_freq=3200' /DietPi/config.txt
 
 			fi
 
