@@ -30,7 +30,7 @@
 	disable_error=1 G_CHECK_VALIDINT "$1" && TARGETMENUID=$1
 
 	# - Exit DietPi-Config when going back to previous menu?
-	if disable_error=1 G_CHECK_VALIDINT "$2" 1 1; then
+	if disable_error=1 G_CHECK_VALIDINT "$2"; then
 
 		EXITONBACK=$2
 		TEXT_MENU_BACK='Exit'
@@ -163,7 +163,7 @@
 			(( $REBOOT_REQUIRED )) && G_WHIP_YESNO 'A reboot is required to apply your new settings.\nWould you like to reboot now?' && reboot
 
 		# Return to DietPi-Config main menu
-		elif (( ! $EXITONBACK )); then
+		elif (( $EXITONBACK == 0 )); then
 
 			TARGETMENUID=0
 
@@ -393,7 +393,7 @@
 			elif (( $G_WHIP_RETURNED_VALUE == 2 )); then
 
 				if (( $G_HW_MODEL < 10 || $G_HW_MODEL == 12 ||
-					( $G_HW_MODEL == 10 && $G_DISTRO == 3 ) )); then # REMOVE v6.24
+					( $G_HW_MODEL == 10 && $G_DISTRO == 3 ) )); then #REMOVE v6.24
 
 					G_WHIP_MSG 'GPU/RAM Memory splits are pre-configured and applied during DietPi-Software setup.\n\nThe split value is optimized based on your software installs, however, feel free to tweak them.'
 					TARGETMENUID=6
@@ -452,8 +452,8 @@
 					)
 
 					G_WHIP_DEFAULT_ITEM=$hdmi_boost_current
-					if G_WHIP_MENU 'Please select a HDMI boost level.\n
-A long (or insufficiently manufactured) cable may required a higher boost setting to achieve correct signal.'; then
+					G_WHIP_MENU 'Please select a HDMI boost level.\n\nA long (or insufficiently manufactured) cable may required a higher boost setting to achieve correct signal.'
+					if (( $? == 0 )); then
 
 						G_CONFIG_INJECT 'config_hdmi_boost=' "config_hdmi_boost=$G_WHIP_RETURNED_VALUE" /DietPi/config.txt
 						REBOOT_REQUIRED=1
@@ -515,30 +515,36 @@ A long (or insufficiently manufactured) cable may required a higher boost settin
 				if (( $odroid_remote_enabled )); then
 
 					/DietPi/dietpi/func/dietpi-set_hardware remoteir none
-					REBOOT_REQUIRED=1
 
-				elif G_WHIP_YESNO "This will enable the IR modules, setup Lirc and the Odroid Remote for Odroid C1, C2 and XU4 Cloudshell.
+				else
+
+					if G_WHIP_YESNO "This will enable the IR modules, setup Lirc and the Odroid Remote for Odroid C1, C2 and XU4 Cloudshell.
 \nNB: Other remotes can be configured by running 'irrecord' and applying the codes to '/etc/lirc/lircd.conf'\n\nDo you wish to continue?"; then
 
-					/DietPi/dietpi/func/dietpi-set_hardware remoteir odroid_remote
-					REBOOT_REQUIRED=1
+						/DietPi/dietpi/func/dietpi-set_hardware remoteir odroid_remote
+
+					fi
 
 				fi
+				REBOOT_REQUIRED=1
 
 			elif (( $G_WHIP_RETURNED_VALUE == 11 )); then
 
 				if (( $justboom_ir_remote_enabled )); then
 
 					/DietPi/dietpi/func/dietpi-set_hardware remoteir none
-					REBOOT_REQUIRED=1
 
-				elif G_WHIP_YESNO 'Got a JustBoom IR Remote? Excellent!
+				else
+
+					if G_WHIP_YESNO 'Got a JustBoom IR Remote? Excellent!
 \nDietPi will enable the IR modules, setup Lirc and enable support for MPD controls by default:\n\nDo you wish to continue?'; then
 
-					/DietPi/dietpi/func/dietpi-set_hardware remoteir justboom_ir_remote
-					REBOOT_REQUIRED=1
+						/DietPi/dietpi/func/dietpi-set_hardware remoteir justboom_ir_remote
+
+					fi
 
 				fi
+				REBOOT_REQUIRED=1
 
 			elif (( $G_WHIP_RETURNED_VALUE == 12 )); then
 
@@ -830,6 +836,28 @@ A long (or insufficiently manufactured) cable may required a higher boost settin
 			local framebuffer_y=$(grep -m1 '^[[:blank:]]*framebuffer_height=' /DietPi/config.txt || vcgencmd get_config framebuffer_height)
 			framebuffer_y=${framebuffer_y#*=}; framebuffer_y=${framebuffer_y:-0}
 			local current_value=$(grep -m1 '^[[:blank:]]*dtoverlay=vc4-' /DietPi/config.txt | sed 's/^[^=]*=//') #OpenGL check 1st
+
+			#If framebuffer is not set by user then check if hdmi default is detected and being used
+			if [[ "$framebuffer_y" == 0 ]] && [[ "$framebuffer_x" == 0 ]]; then
+
+					#Save output of tvservice -s to var | NOTE: tvservice will output a default resolution even if hdmi is Disconnected or unable to pull information from connected device
+					value_of_tvservice_s=$(tvservice -s)
+
+					#Transformation of the output of tvservice -s to get detected or default X,Y resolution
+					#get X
+					tvservice_s_framebuffer_x=${value_of_tvservice_s%x*}  # retain the part before last character x
+					tvservice_s_framebuffer_x=${tvservice_s_framebuffer_x##*,}  # retain the part after the last character ,
+					tvservice_s_framebuffer_x=${tvservice_s_framebuffer_x:1}   # Remove the first character of blank space
+					#get Y
+					tvservice_s_framebuffer_y=${value_of_tvservice_s%@*}  # retain the part before last character @
+					tvservice_s_framebuffer_y=${tvservice_s_framebuffer_y##*x}  # retain the part after the last character x
+					tvservice_s_framebuffer_y=${tvservice_s_framebuffer_y::-1} # Remove the last character of blank space
+
+					# default X,Y resolution to framebuffer vars
+					framebuffer_x=$tvservice_s_framebuffer_x
+					framebuffer_y=$tvservice_s_framebuffer_y
+			fi
+
 			if [[ ! $current_value ]]; then
 
 				# - FB
@@ -841,25 +869,182 @@ A long (or insufficiently manufactured) cable may required a higher boost settin
 
 			fi
 
-			G_WHIP_MENU_ARRAY=(
+			#Check if hdmi monitor/tv is detected
+			#Save output of tvservice -m DMT to array by line
+			readarray -t output_of_tvservice_m_DMT_array <<< "$(tvservice -m DMT)"
+			#Save output of tvservice -m CEA to array by line
+			readarray -t output_of_tvservice_m_CEA_array <<< "$(tvservice -m CEA)"
 
-				'vc4-kms-v3d' ': OpenGL | 1920 x 1080'
-				'vc4-fkms-v3d' ': OpenGL | 1920 x 1080'
-				'1080p' ': 1920 x 1080'
-				'720p' ': 1280 x 720'
-				'480p' ': 854 x 480'
-				'RPi Touchscreen' ': 800 x 480'
-				'PC1' ': 1024 x 768'
-				'PC2' ': 800 x 640'
-				'PC3' ': 640 x 480'
-				'DietPi-Cloudshell' ': 320 x 240'
-				'sdtv_mode=0' ': Composite NTSC'
-				'sdtv_mode=1' ': Composite Japanese NTSC'
-				'sdtv_mode=2' ': Composite PAL'
-				'sdtv_mode=3' ': Composite Brazilian PAL'
-				'Headless' ': Disables HDMI & Composite Output'
+			#Monitor?  Get value DMT Modes value of zero if none are supported else any other value than zero it is detecting suported modes
+			DMT_detected=${output_of_tvservice_m_DMT_array[0]:14:1}   #first 1 characters after removing the first 14
+			#TV? Get value CEA Modes value of zero if none are supported else any other value than zero it is detecting suported modes
+			CEA_detected=${output_of_tvservice_m_CEA_array[0]:14:1}   #first 1 characters after removing the first 14
 
-			)
+			if [ "$DMT_detected" != '0' ]] || [[ "$CEA_detected" != '0' ]]; then
+					G_WHIP_MENU_ARRAY=()
+					#Add DMT & resoulutions to main menu array
+					if [[ "$DMT_detected" != '0' ]]; then
+			      #Usable info starts at line 1
+			      DMT_LineNumber=1
+			      #Check when we reach the end of the array
+			      DMT_Nullcheck=${output_of_tvservice_m_DMT_array[$DMT_LineNumber]}
+
+			      until [ ! "$DMT_Nullcheck" ] || [ $DMT_LineNumber -gt 1000 ] ; do #make sure it stops even if array is huge
+
+			          #Transformation - output_of_tvservice_m_DMT_array[]
+			          #Sore value for check if perfered
+			          DMT_perfered=${output_of_tvservice_m_DMT_array[$DMT_LineNumber]%)*} #retain the part before last character )
+			          DMT_perfered=${DMT_perfered##*(}  # retain the part after the character (
+			          #Sore value for check if native
+			          DMT_native=${output_of_tvservice_m_DMT_array[$DMT_LineNumber]%)*} #retain the part before last character )
+			          DMT_native=${DMT_native##*(}  # retain the part after the character (
+
+			          #Perfered?
+			          if [[ "$DMT_perfered" == 'prefer' ]]; then
+
+			              #format to get just the DMT mode #
+			              DMT_perfered_mode_number=${output_of_tvservice_m_DMT_array[$DMT_LineNumber]:16} # removing the first 16 characters
+			              DMT_perfered_mode_number=${DMT_perfered_mode_number%%:*}  # retain the part before character :
+			              #format to get just the DMT resolution information
+			              DMT_perfered_resoulution=${output_of_tvservice_m_DMT_array[$DMT_LineNumber]#*:} # retain everything after first :
+			              DMT_perfered_resoulution=${DMT_perfered_resoulution##?} # Remove the fist space in the string
+
+			              #output to Main Menu array
+			              G_WHIP_MENU_ARRAY+=('Detected DMT '"$DMT_perfered_mode_number"'-Preferd' ': '"$DMT_perfered_resoulution")
+
+			          #Native?
+			          elif [[ "$DMT_native" == 'native' ]]; then
+
+			              #format to get just the DMT mode #
+			              DMT_native_mode_number=${output_of_tvservice_m_DMT_array[$DMT_LineNumber]:16} # removing the first 16 characters
+			              DMT_native_mode_number=${DMT_native_mode_number%%:*}  # retain the part before character :
+			              #format to get just the DMT resolution information
+			              DMT_native_resoulution=${output_of_tvservice_m_DMT_array[$DMT_LineNumber]#*:} # retain everything after first :
+			              DMT_native_resoulution=${DMT_native_resoulution##?} # Remove the fist space in the string
+
+			              #output to Main Menu array
+			              G_WHIP_MENU_ARRAY+=('Detected DMT '"$DMT_native_mode_number"'-Native' ': '"$DMT_native_resoulution")
+
+			          #all other modes and resolutions
+			          else
+
+			            #format to get just the DMT mode #
+			            DMT_mode_number=${output_of_tvservice_m_DMT_array[$DMT_LineNumber]:16} # removing the first 16 characters
+			            DMT_mode_number=${DMT_mode_number%%:*}  # retain the part before character :
+			            #format to get just the DMT resolution information
+			            DMT_resoulution=${output_of_tvservice_m_DMT_array[$DMT_LineNumber]#*:} # retain everything after first :
+			            DMT_resoulution=${DMT_resoulution##?} # Remove the fist space in the string
+
+			            #output to Main Menu array
+			            G_WHIP_MENU_ARRAY+=('Detected DMT '"$DMT_mode_number" ': '"$DMT_resoulution")
+
+			          fi
+
+			          let DMT_LineNumber=DMT_LineNumber+1
+			          DMT_Nullcheck=${output_of_tvservice_m_DMT_array[$DMT_LineNumber]}
+			      done
+			    fi
+
+					#Add CEA & resoulutions to main menu array
+					if [[ "$CEA_detected" != '0' ]]; then
+			      #Usable info starts at line 1
+			      CEA_LineNumber=1
+			      #Check when we reach the end of the array
+			      CEA_Nullcheck=${output_of_tvservice_m_CEA_array[$CEA_LineNumber]}
+
+
+
+			      until [ ! "$CEA_Nullcheck" ] || [ $CEA_LineNumber -gt 1000 ] ; do #make sure it stops even if array is huge
+
+			          #Transformation - output_of_tvservice_m_CEA_array[]
+			          #Sore value for check if perfered
+			          CEA_perfered=${output_of_tvservice_m_CEA_array[$CEA_LineNumber]%)*} #retain the part before last character )
+			          CEA_perfered=${CEA_perfered##*(}  # retain the part after the character (
+			          #Sore value for check if native
+			          CEA_native=${output_of_tvservice_m_CEA_array[$CEA_LineNumber]%)*} #retain the part before last character )
+			          CEA_native=${CEA_native##*(}  # retain the part after the character (
+
+			          #Perfered?
+			          if [[ "$CEA_perfered" == 'prefer' ]]; then
+
+			              #format to get just the CEA mode #
+			              CEA_perfered_mode_number=${output_of_tvservice_m_CEA_array[$CEA_LineNumber]:16} # removing the first 16 characters
+			              CEA_perfered_mode_number=${CEA_perfered_mode_number%%:*}  # retain the part before character :
+			              #format to get just the CEA resolution information
+			              CEA_perfered_resoulution=${output_of_tvservice_m_CEA_array[$CEA_LineNumber]#*:} # retain everything after first :
+			              CEA_perfered_resoulution=${CEA_perfered_resoulution##?} # Remove the fist space in the string
+
+			              #output to Main Menu array
+			              G_WHIP_MENU_ARRAY+=('Detected CEA '"$CEA_perfered_mode_number"'-Preferd' ': '"$CEA_perfered_resoulution")
+
+			          #Native?
+			          elif [[ "$CEA_native" == 'native' ]]; then
+
+			              #format to get just the CEA mode #
+			              CEA_native_mode_number=${output_of_tvservice_m_CEA_array[$CEA_LineNumber]:16} # removing the first 16 characters
+			              CEA_native_mode_number=${CEA_native_mode_number%%:*}  # retain the part before character :
+			              #format to get just the CEA resolution information
+			              CEA_native_resoulution=${output_of_tvservice_m_CEA_array[$CEA_LineNumber]#*:} # retain everything after first :
+			              CEA_native_resoulution=${CEA_native_resoulution##?} # Remove the fist space in the string
+
+			              #output to Main Menu array
+			              G_WHIP_MENU_ARRAY+=('Detected CEA '"$CEA_native_mode_number"'-Native' ': '"$CEA_native_resoulution")
+
+			          #all other modes and resolutions
+			          else
+
+			            #format to get just the CEA mode #
+			            CEA_mode_number=${output_of_tvservice_m_CEA_array[$CEA_LineNumber]:16} # removing the first 16 characters
+			            CEA_mode_number=${CEA_mode_number%%:*}  # retain the part before character :
+			            #format to get just the CEA resolution information
+			            CEA_resoulution=${output_of_tvservice_m_CEA_array[$CEA_LineNumber]#*:} # retain everything after first :
+			            CEA_resoulution=${CEA_resoulution##?} # Remove the fist space in the string
+
+			            #output to Main Menu array
+			            G_WHIP_MENU_ARRAY+=('Detected CEA '"$CEA_mode_number" ': '"$CEA_resoulution")
+
+			          fi
+
+			          let CEA_LineNumber=CEA_LineNumber+1
+			          CEA_Nullcheck=${output_of_tvservice_m_CEA_array[$CEA_LineNumber]}
+			      done
+
+
+			    fi
+					#add Additional Options
+					G_WHIP_MENU_ARRAY+=(
+
+					'vc4-kms-v3d' ': OpenGL | 1920 x 1080'
+					'vc4-fkms-v3d' ': OpenGL | 1920 x 1080'
+					'RPi Touchscreen' ': 800 x 480'
+					'DietPi-Cloudshell' ': 320 x 240'
+					'Headless' ': Disables HDMI & Composite Output'
+
+					)
+
+
+			else
+					#Load default menu if hdmi info is not detected
+					G_WHIP_MENU_ARRAY=(
+
+					'vc4-kms-v3d' ': OpenGL | 1920 x 1080'
+					'vc4-fkms-v3d' ': OpenGL | 1920 x 1080'
+					'1080p' ': 1920 x 1080'
+					'720p' ': 1280 x 720'
+					'480p' ': 854 x 480'
+					'RPi Touchscreen' ': 800 x 480'
+					'PC1' ': 1024 x 768'
+					'PC2' ': 800 x 640'
+					'PC3' ': 640 x 480'
+					'DietPi-Cloudshell' ': 320 x 240'
+					'sdtv_mode=0' ': Composite NTSC'
+					'sdtv_mode=1' ': Composite Japanese NTSC'
+					'sdtv_mode=2' ': Composite PAL'
+					'sdtv_mode=3' ': Composite Brazilian PAL'
+					'Headless' ': Disables HDMI & Composite Output'
+
+					)
+			fi
 
 			G_WHIP_DEFAULT_ITEM=$current_value
 			if G_WHIP_MENU "Hardware: $G_HW_MODEL_DESCRIPTION\nCurrent resolution: $current_value"; then
@@ -902,80 +1087,120 @@ More info here: https://www.raspberrypi.org/forums/viewtopic.php?p=105008#p10500
 
 				elif [[ $G_WHIP_RETURNED_VALUE != 'Headless' ]]; then
 
-					case "$G_WHIP_RETURNED_VALUE" in
+					#Check if a auto detected monitor was connected to hdmi
+					auto_detected_hdmi=${G_WHIP_RETURNED_VALUE:0:8}
+					if [[ "$auto_detected_hdmi" == 'Detected' ]]; then
+					    #Get HDMI goup (DMT=2/CEA=1)
+					    auto_detected_hdmi_group=${G_WHIP_RETURNED_VALUE:9:3} #fisrt 3 char after moving to char 9
+					    #Get HDMI mode
+					    auto_detected_hdmi_mode=${G_WHIP_RETURNED_VALUE:13} #every thing past char 13
+					    auto_detected_hdmi_mode=${auto_detected_hdmi_mode%%-*}  # retain the part before character -
 
-						'sdtv_mode'*)
+					    #set Value to change in dietpi/config.txt
+					    if [[ "$auto_detected_hdmi_group" == 'DMT' ]]; then
+					    hdmi_group_for_config_txt='hdmi_group=2'
+					    fi
 
-							sed -i "/sdtv_mode=/c\\$G_WHIP_RETURNED_VALUE" /DietPi/config.txt
-							framebuffer_x=720
-							framebuffer_y=576
+					    if [[ "$auto_detected_hdmi_group" == 'CEA' ]]; then
+					    hdmi_group_for_config_txt='hdmi_group=1'
+					    fi
+					    hdmi_mode_for_config_txt='hdmi_mode='"$auto_detected_hdmi_mode"
 
-						;;
+					    #write changes to dietpi/config.txt
+					    sed -i "/hdmi_group=/c\\$hdmi_group_for_config_txt" /DietPi/config.txt
+					    sed -i "/hdmi_mode=/c\\$hdmi_mode_for_config_txt" /DietPi/config.txt
 
-						'DietPi-Cloudshell')
+							#disable framebuffer if it exist
+							sed -i "/framebuffer_width=/c\\#framebuffer_width=1280" /DietPi/config.txt
+							sed -i "/framebuffer_height=/c\\#framebuffer_height=720" /DietPi/config.txt
 
-							framebuffer_x=320
-							framebuffer_y=240
+							#disable sdtv_mode if it exist
+							sed -i "/sdtv_mode=/c\\#sdtv_mode=0" /DietPi/config.txt
 
-						;;
+							#add chromium resoulutions !!!!!!!!!!!!USE var tvservice_s_framebuffer_X,Y
+							G_CONFIG_INJECT 'SOFTWARE_CHROMIUM_RES_X=' "SOFTWARE_CHROMIUM_RES_X=$tvservice_s_framebuffer_x" /DietPi/dietpi.txt
+							G_CONFIG_INJECT 'SOFTWARE_CHROMIUM_RES_Y=' "SOFTWARE_CHROMIUM_RES_Y=$tvservice_s_framebuffer_y" /DietPi/dietpi.txt
 
-						'1080p')
+					else
 
-							framebuffer_x=1920
-							framebuffer_y=1080
+					    #disable HDMI goup (DMT=2/CEA=1) if user defided option not autodetected is used
+					    sed -i "/hdmi_group=/c\\#hdmi_group=1" /DietPi/config.txt
+					    sed -i "/hdmi_mode=/c\\#hdmi_mode=1" /DietPi/config.txt
 
-						;;
+							case "$G_WHIP_RETURNED_VALUE" in
 
-						'720p')
+								'sdtv_mode'*)
 
-							framebuffer_x=1280
-							framebuffer_y=720
+								sed -i "/sdtv_mode=/c\\$G_WHIP_RETURNED_VALUE" /DietPi/config.txt
+								framebuffer_x=720
+								framebuffer_y=576
 
-						;;
+								;;
 
-						'480p')
+								'DietPi-Cloudshell')
 
-							framebuffer_x=854
-							framebuffer_y=480
+								framebuffer_x=320
+								framebuffer_y=240
 
-						;;
+								;;
 
-						'RPi Touchscreen')
+								'1080p')
 
-							framebuffer_x=800
-							framebuffer_y=480
+								framebuffer_x=1920
+								framebuffer_y=1080
 
-						;;
+								;;
 
-						'PC1')
+								'720p')
 
-							framebuffer_x=1024
-							framebuffer_y=768
+								framebuffer_x=1280
+								framebuffer_y=720
 
-						;;
+								;;
 
-						'PC2')
+								'480p')
 
-							framebuffer_x=800
-							framebuffer_y=640
+								framebuffer_x=854
+								framebuffer_y=480
 
-						;;
+								;;
 
-						'PC3')
+								'RPi Touchscreen')
 
-							framebuffer_x=640
-							framebuffer_y=480
+								framebuffer_x=800
+								framebuffer_y=480
 
-						;;
+								;;
 
-					esac
+								'PC1')
 
-					# - Apply x/y
-					G_CONFIG_INJECT 'framebuffer_width=' "framebuffer_width=$framebuffer_x" /DietPi/config.txt
-					G_CONFIG_INJECT 'framebuffer_height=' "framebuffer_height=$framebuffer_y" /DietPi/config.txt
-					G_CONFIG_INJECT 'SOFTWARE_CHROMIUM_RES_X=' "SOFTWARE_CHROMIUM_RES_X=$framebuffer_x" /DietPi/dietpi.txt
-					G_CONFIG_INJECT 'SOFTWARE_CHROMIUM_RES_Y=' "SOFTWARE_CHROMIUM_RES_Y=$framebuffer_y" /DietPi/dietpi.txt
+								framebuffer_x=1024
+								framebuffer_y=768
 
+								;;
+
+								'PC2')
+
+								framebuffer_x=800
+								framebuffer_y=640
+
+								;;
+
+								'PC3')
+
+								framebuffer_x=640
+								framebuffer_y=480
+
+								;;
+
+							esac
+
+							# - Apply x/y
+							G_CONFIG_INJECT 'framebuffer_width=' "framebuffer_width=$framebuffer_x" /DietPi/config.txt
+							G_CONFIG_INJECT 'framebuffer_height=' "framebuffer_height=$framebuffer_y" /DietPi/config.txt
+							G_CONFIG_INJECT 'SOFTWARE_CHROMIUM_RES_X=' "SOFTWARE_CHROMIUM_RES_X=$framebuffer_x" /DietPi/dietpi.txt
+							G_CONFIG_INJECT 'SOFTWARE_CHROMIUM_RES_Y=' "SOFTWARE_CHROMIUM_RES_Y=$framebuffer_y" /DietPi/dietpi.txt
+					fi
 				fi
 
 			fi
@@ -1186,73 +1411,10 @@ More info here: https://www.raspberrypi.org/forums/viewtopic.php?p=105008#p10500
 
 	}
 
-	# TARGETMENUID=19
-	Menu_AdvancedOptions_APT(){
-
-		apt-config dump Dir::{Cache,State} > apt_conf
-		local cache_enabled=$(grep -cim1 '^Dir::Cache::pkgcache "[^"]' apt_conf)
-		local cache_in_ram=$(grep -cim1 '^Dir::Cache "/tmp' apt_conf)
-		local lists_in_ram=$(grep -cim1 '^Dir::State "/tmp' apt_conf)
-		local archives_in_ram=0
-		(( $cache_in_ram )) && grep -q '^Dir::Cache::archives "[^/]' apt_conf || grep -q '^Dir::Cache::archives "/tmp' apt_conf && archives_in_ram=1
-
-		local cache_text='On disk'
-		(( $cache_in_ram )) && cache_text='In RAM'
-		(( $cache_enabled )) || cache_text='Disabled'
-
-		local lists_text='On disk'
-		(( $lists_in_ram )) && lists_text='In RAM'
-
-		local archives_text='On disk'
-		(( $archives_in_ram )) && archives_text='In RAM'
-
-		G_WHIP_MENU_ARRAY=(
-
-			'Reset' ': Reset to system defaults'
-			'APT cache' ": [$cache_text]"
-			'APT lists' ": [$lists_text]"
-
-		)
-		(( $cache_in_ram )) && G_WHIP_MENU_ARRAY+=('APT archives' ": [$archives_text]")
-
-		G_WHIP_BUTTON_CANCEL_TEXT='Back'
-		if G_WHIP_MENU 'APT cache: Speeds up apt-cache search/show/... command
- - 50-100 MiB size, gets fully rewritten on every APT update\n
-APT lists: Release files, one each distro and component
- - 50-100 MiB size, get individually rewritten if update available\n
-APT archives: Where APT downloads packages to for install
- - Can temporarily consume much space on large APT installs
- - Resets to disk if cache is set to disk
-\nPlease select an item to adjust:'; then
-
-			[[ $G_WHIP_RETURNED_VALUE == 'Reset' ]] && { /DietPi/dietpi/func/dietpi-set_software apt-cache reset; return 0; }
-
-			local item=${G_WHIP_RETURNED_VALUE#APT }
-			G_WHIP_MENU_ARRAY=(
-
-				'To disk' ": Move APT $item to disk"
-				'To RAM' ": Move APT $item to RAM"
-
-			)
-			[[ $item == 'cache' ]] && G_WHIP_MENU_ARRAY+=('Disable' ": Disable APT $item")
-
-			if G_WHIP_MENU 'Please select an option:'; then
-
-				local option=${G_WHIP_RETURNED_VALUE#To }
-				/DietPi/dietpi/func/dietpi-set_software apt-cache $item ${option,,}
-
-			fi
-
-		else
-
-			TARGETMENUID=3 # Return to Advanced Options	
-
-		fi
-
-	}
-
 	# TARGETMENUID=18
 	Menu_AdvancedOptions_Serial_UART(){
+
+		TARGETMENUID=18 # Return to this menu
 
 		declare -A aSTATE=()
 		G_WHIP_MENU_ARRAY=()
@@ -1277,7 +1439,7 @@ APT archives: Where APT downloads packages to for install
 			G_WHIP_MENU_ARRAY+=('' '●─ Toggle device ')
 
 			# Onboard WiFi/BT: "enable_uart" toggles ttyS0 (mini UART), disabled by default
-			if (( $HW_ONBOARD_WIFI )); then
+			if (( $(sed -n 9p /DietPi/dietpi/.hw_model) )); then
 
 				local rpi_uart='ttyS0 (mini UART)'
 				local rpi_uart_state='[Off]'
@@ -1335,9 +1497,6 @@ APT archives: Where APT downloads packages to for install
 		(( $swap_size )) || swap_size_text='[Off]'
 		G_WHIP_MENU_ARRAY=('Swapfile' ": [$swap_size_text | $swap_location]")
 
-		# APT cache
-		G_WHIP_MENU_ARRAY+=('APT cache' ': Manage APT cache/info storage')
-
 		# Time sync
 		local ntpd_mode_current=$(grep -m1 '^[[:blank:]]*CONFIG_NTP_MODE=' /DietPi/dietpi.txt | sed 's/^[^=]*=//')
 		local ntpd_mode_text=''
@@ -1364,17 +1523,19 @@ APT archives: Where APT downloads packages to for install
 		fi
 		G_WHIP_MENU_ARRAY+=('Time sync mode' ": [$ntpd_mode_text]")
 
-		# RTC clock: Only show option if a hwclock (connector) is available, otherwise fake-hwclock (default) is required anyway!
-		if hwclock &> /dev/null; then
+		# RTC clock
+		local rtc_enabled=1
+		local rtc_text='Hardware'
+		if command -v fake-hwclock &> /dev/null; then
 
-			local rtc_text='Hardware'
-			command -v fake-hwclock &> /dev/null && rtc_text='Emulated'
-			G_WHIP_MENU_ARRAY+=('RTC mode' ": [$rtc_text]")
+			rtc_enabled=0
+			rtc_text='Emulated'
 
 		fi
+		G_WHIP_MENU_ARRAY+=('RTC mode' ": [$rtc_text]")
 
 		# Hide firmware update on RPi. This is done automatically with simple apt upgrade since raspberrypi-kernel it is no meta-package.
-		(( $G_HW_MODEL > 9 )) && G_WHIP_MENU_ARRAY+=('Update firmware' ": [Linux $(uname -r)]")
+		(( $G_HW_MODEL > 9 )) && G_WHIP_MENU_ARRAY+=('Update firmware' '')
 
 		# Serial/UART devices
 		G_WHIP_MENU_ARRAY+=('Serial/UART' ': Manage available devices')
@@ -1382,15 +1543,15 @@ APT archives: Where APT downloads packages to for install
 		# Bluetooth: Not for VM
 		if (( $G_HW_MODEL != 20 )); then
 
-			local bluetooth_state_text='On'
+			local bluetooth_state_text='[On]'
 			local bluetooth_state=1
-			if [[ -f '/etc/modprobe.d/disable_bt.conf' ]]; then
+			if [[ -f /etc/modprobe.d/disable_bt.conf ]]; then
 
 				bluetooth_state=0
-				bluetooth_state_text='Off'
+				bluetooth_state_text='[Off]'
 
 			fi
-			G_WHIP_MENU_ARRAY+=('Bluetooth' ": [$bluetooth_state_text]")
+			G_WHIP_MENU_ARRAY+=('Bluetooth' ": $bluetooth_state_text")
 
 		fi
 
@@ -1411,17 +1572,17 @@ APT archives: Where APT downloads packages to for install
 
 			# USB max current
 			local usb_max_current_enabled=$(grep -ci -m1 '^[[:blank:]]*max_usb_current=1' /DietPi/config.txt)
-			local rpi_usbmaxcurrent_text='Off'
-			(( $usb_max_current_enabled )) && rpi_usbmaxcurrent_text='On'
-			G_WHIP_MENU_ARRAY+=('Max USB current' ": [$rpi_usbmaxcurrent_text]")
+			local rpi_usbmaxcurrent_text='[Off]'
+			(( $usb_max_current_enabled )) && rpi_usbmaxcurrent_text='[On]'
+			G_WHIP_MENU_ARRAY+=('Max USB current' ": $rpi_usbmaxcurrent_text")
 
 			# USB boot option: RPi3 only and not required for RPi3+: https://www.raspberrypi.org/documentation/hardware/raspberrypi/bootmodes/msd.md
-			if [[ $G_HW_MODEL == 3 && $G_HW_MODEL_DESCRIPTION != *'+'* ]]; then
+			if (( $G_HW_MODEL == 3 )) && [[ $G_HW_MODEL_DESCRIPTION == *'3 Model '[AB]'+' ]]; then
 
-				local rpi3_usb_boot_bit_enabled=$(vcgencmd otp_dump | grep -m1 -ci '17:3020000a')
-				local rpi3_usb_boot_bit_enabled_text='Off'
-				(( $rpi3_usb_boot_bit_enabled )) && rpi3_usb_boot_bit_enabled_text='On'
-				G_WHIP_MENU_ARRAY+=('USB boot support' ": [$rpi3_usb_boot_bit_enabled_text]")
+				local rpi3_usb_boot_bit_enabled=$(vcgencmd otp_dump | grep -m1 '17:' | grep -ci -m1 '3020000a')
+				local rpi3_usb_boot_bit_enabled_text='[Off]'
+				(( $rpi3_usb_boot_bit_enabled )) && rpi3_usb_boot_bit_enabled_text='[On]'
+				G_WHIP_MENU_ARRAY+=('USB boot support' ": $rpi3_usb_boot_bit_enabled_text")
 
 			fi
 
@@ -1440,41 +1601,22 @@ APT archives: Where APT downloads packages to for install
 
 				fi
 
-			elif [[ $G_WHIP_RETURNED_VALUE == 'APT cache' ]]; then
-
-				TARGETMENUID=19
-
 			elif [[ $G_WHIP_RETURNED_VALUE == 'RTC mode' ]]; then
 
-				G_WHIP_MENU_ARRAY=(
+				if (( ! $rtc_enabled )); then
 
-					'Emulated' 'Use "fake-hwclock" to apply system clock on early boot'
-					'Hardware' 'Device has an active hardware RTC, purge "fake-hwclock"'
+					G_AGP fake-hwclock
 
-				)
+				else
 
-				G_WHIP_DEFAULT_ITEM=$rtc_text
-				if G_WHIP_MENU 'Before network is available and network time sync can update the system clock, some implementation is required to do this on early boot stage.\n
-RTC hardware clock:
- - Most x86 PCs and some SBCs have a hardware clock with battery attached, or, have a socket where it can optionally be attached to.
- - If active, this hardware clock will apply the correct system time during kernel boot stage.\n
-fake-hwclock:
- - If no hardware RTC is available, the "fake-hwclock" package provides a service that saves the current system time on shutdown to a file, and, re-applies this stored time on early boot.
- - This means that the time is outdated, if the system was shut down for a while, but without this implementation the system time would be 01/01/1970 until network time sync corrects it.\n
-Please choose whether your device have an active RTC or requires "fake-hwclock":'; then
+					G_AGI fake-hwclock
 
-					if [[ $G_WHIP_RETURNED_VALUE == 'Emulated' ]]; then
+					systemctl stop fake-hwclock
 
-						G_AGI fake-hwclock
-						# - Allow times in the past
-						G_CONFIG_INJECT 'FORCE=' 'FORCE=force' /etc/default/fake-hwclock
-						systemctl restart fake-hwclock
+					# - Allow times in the past
+					G_CONFIG_INJECT 'FORCE=' 'FORCE=force' /etc/default/fake-hwclock
 
-					else
-
-						G_AGP fake-hwclock
-
-					fi
+					systemctl restart fake-hwclock
 
 				fi
 
@@ -2051,14 +2193,14 @@ Please choose whether your device have an active RTC or requires "fake-hwclock":
 		# Get Current and/or total (depends on board) mem split settings
 		local gpu_mem_current=0
 		local ram_mem_current=$(free -m | mawk '/Mem:/ {print $2;exit}')
+		local ram_mem_total=$(grep -m1 '^HW_MEMORY_SIZE=' /DietPi/dietpi/.hw_model | sed 's/^[^=]*=//')
 
 		if (( $G_HW_MODEL < 10 )); then
 
-			local ram_mem_total=$(grep -m1 '^HW_MEMORY_SIZE=' /DietPi/dietpi/.hw_model | sed 's/^[^=]*=//')
 			gpu_mem_current=$(grep -m1 '^[[:blank:]]*gpu_mem_1024=' /DietPi/config.txt  | sed 's/^[^=]*=//')
 			ram_mem_current=$((ram_mem_total-gpu_mem_current))
 
-		elif (( $G_HW_MODEL == 10 && $G_DISTRO == 3 )); then # REMOVE v6.24
+		elif (( $G_HW_MODEL == 10 && $G_DISTRO == 3 )); then #REMOVE v6.24
 
 			gpu_mem_current=$((1024-ram_mem_current))
 
@@ -2898,7 +3040,7 @@ _EOF_
 		fi
 
 		# Cleanup tmp
-		[[ -f '/tmp/net_interfaces' ]] && rm /tmp/net_interfaces
+		[[ -f /tmp/net_interfaces ]] && rm /tmp/net_interfaces
 
 	}
 
@@ -4023,7 +4165,9 @@ Additional benchmarks:
 
 		local soundcard_current=$(grep -m1 '^[[:blank:]]*CONFIG_SOUNDCARD=' /DietPi/dietpi.txt | sed 's/^[^=]*=//')
 
-		G_WHIP_MENU_ARRAY=('Soundcard' ": [$soundcard_current]")
+		G_WHIP_MENU_ARRAY=()
+
+		G_WHIP_MENU_ARRAY+=('Soundcard' ": [$soundcard_current]")
 
 		if dpkg-query -s alsa-utils &> /dev/null; then
 
@@ -4039,7 +4183,7 @@ Additional benchmarks:
 			grep -qi 'hdmi_ignore_hotplug=1' /DietPi/config.txt &&
 			grep -qi 'hdmi_ignore_composite=1' /DietPi/config.txt && hdmi_output=0
 			local psu_noise_reduction_enabled=0
-			if [[ $current_cpu_governor == 'powersave' && $hdmi_output == 0 ]]; then
+			if [[ $current_cpu_governor == 'powersave' ]] && (( ! $hdmi_output )); then
 
 				G_WHIP_MENU_ARRAY+=('PSU noise reduction' ': [On]')
 				psu_noise_reduction_enabled=1
@@ -4060,8 +4204,7 @@ Additional benchmarks:
 
 				if (( ! $psu_noise_reduction_enabled )); then
 
-					G_WHIP_YESNO 'PSU noise reduction:\n\nThis mode attempts to reduce power consumption on your SBC. In turn, this may reduce PSU inflicted noise, that may degrade audio output quality.\n
-The following will now be applied:\n - CPU gov = Powersave\n - HDMI output = Disabled\n\nDo you want to continue?' || return
+					G_WHIP_MSG "PSU noise reduction:\n\nThis mode attempts to reduce power consumption on your SBC. In turn, this may reduce PSU inflicted noise, that may degrade audio output quality.\n\nThe following has now been set:\n - CPU gov = Powersave\n - HDMI output = Disabled"
 
 					G_CONFIG_INJECT 'CONFIG_CPU_GOVERNOR=' 'CONFIG_CPU_GOVERNOR=powersave' /DietPi/dietpi.txt
 					/DietPi/dietpi/func/dietpi-set_cpu
@@ -4084,37 +4227,10 @@ The following will now be applied:\n - CPU gov = Powersave\n - HDMI output = Dis
 				G_WHIP_MENU_ARRAY=()
 
 				# - Global:
-				#	RPi, all but rpi-bcm2835 disables 
+				#	RPi, none disables HDMI as well.
 				if (( $G_HW_MODEL < 10 )); then
 
-					G_WHIP_MENU_ARRAY+=('none' ': Disables HDMI sound + 3.5mm analogue')
-					G_WHIP_MENU_ARRAY+=('rpi-bcm2835' ': Onboard: HDMI (if plugged in, else 3.5mm)')
-					G_WHIP_MENU_ARRAY+=('rpi-bcm2835-3.5mm' ': Onboard: 3.5mm forced output')
-					G_WHIP_MENU_ARRAY+=('rpi-bcm2835-ultrahq' ': Onboard HQ: HDMI (if plugged in, else 3.5mm)')
-					G_WHIP_MENU_ARRAY+=('rpi-bcm2835-ultrahq-3.5mm' ': Onboard HQ: 3.5mm forced output')
-					G_WHIP_MENU_ARRAY+=('allo-boss-dac-pcm512x-audio' ': Allo Boss DAC')
-					G_WHIP_MENU_ARRAY+=('allo-boss-dac-pcm512x-audio' ': Allo Mini Boss DAC')
-					G_WHIP_MENU_ARRAY+=('allo-digione' ': Allo DigiOne')
-					G_WHIP_MENU_ARRAY+=('allo-katana-dac-audio' ': Allo Katana DAC')
-					G_WHIP_MENU_ARRAY+=('allo-piano-dac-pcm512x-audio' ': Allo Piano DAC')
-					G_WHIP_MENU_ARRAY+=('allo-piano-dac-plus-pcm512x-audio' ': Allo Piano DAC 2.1')
-					G_WHIP_MENU_ARRAY+=('applepi-dac' ': ApplePi DAC (Orchard Audio)')
-					G_WHIP_MENU_ARRAY+=('dionaudio-loco' ': Dion Audio LOCO')
-					G_WHIP_MENU_ARRAY+=('dionaudio-loco-v2' ': Dion Audio LOCO V2')
-					G_WHIP_MENU_ARRAY+=('googlevoicehat-soundcard' ': Google AIY voice kit')
-					G_WHIP_MENU_ARRAY+=('hifiberry-amp' ': HifiBerry AMP / AMP+')
-					G_WHIP_MENU_ARRAY+=('hifiberry-dac' ': HifiBerry DAC / MiniAMP')
-					G_WHIP_MENU_ARRAY+=('hifiberry-dacplus' ': HifiBerry DAC+ / DAC+ Pro / AMP2')
-					G_WHIP_MENU_ARRAY+=('hifiberry-digi' ': HifiBerry DIGI / DIGI+')
-					G_WHIP_MENU_ARRAY+=('hifiberry-digi-pro' ': HifiBerry DIGI Pro')
-					G_WHIP_MENU_ARRAY+=('i-sabre-q2m' ': AudioPhonics I-Sabre ES9028Q2M / ES9038Q2M')
-					G_WHIP_MENU_ARRAY+=('iqaudio-dacplus' ': Pi-DAC+, Pi-DACZero, Pi-DAC Pro, Pi-DigiAMP+')
-					G_WHIP_MENU_ARRAY+=('iqaudio-digi-wm8804-audio' ': Pi-DIGI+')
-					G_WHIP_MENU_ARRAY+=('iqaudio-dacplus,auto_mute_amp' ': Pi-DigiAMP+')
-					G_WHIP_MENU_ARRAY+=('iqaudio-dacplus,unmute_amp' ': Pi-DigiAMP+')
-					G_WHIP_MENU_ARRAY+=('justboom-dac' ': JustBoom: DAC HAT, Amp HAT, DAC Zero and Amp Zero')
-					G_WHIP_MENU_ARRAY+=('justboom-digi' ': JustBoom: Digi HAT and Digi Zero')
-					G_WHIP_MENU_ARRAY+=('rpi-dac' ': Soekris DAM1021 (pcm1794a)')
+					G_WHIP_MENU_ARRAY+=('none' ': Disables HDMI + 3.5mm Analogue')
 
 				#	NanoPi M2/M3, BPi Pro, OPi Zero
 				elif (( $G_HW_MODEL == 32 || $G_HW_MODEL == 51 || $G_HW_MODEL == 61 || $G_HW_MODEL == 62 )); then
@@ -4163,19 +4279,50 @@ The following will now be applied:\n - CPU gov = Powersave\n - HDMI output = Dis
 
 				fi
 
+				# - RPI
+				if (( $G_HW_MODEL < 10 )); then
+
+					G_WHIP_MENU_ARRAY+=('rpi-bcm2835' ': Onboard: HDMI (if plugged in, else 3.5mm)')
+					G_WHIP_MENU_ARRAY+=('rpi-bcm2835-3.5mm' ': Onboard: 3.5mm forced output')
+					G_WHIP_MENU_ARRAY+=('rpi-bcm2835-ultrahq' ': Onboard HQ: HDMI (if plugged in, else 3.5mm)')
+					G_WHIP_MENU_ARRAY+=('rpi-bcm2835-ultrahq-3.5mm' ': Onboard HQ: 3.5mm forced output')
+					G_WHIP_MENU_ARRAY+=('allo-boss-dac-pcm512x-audio' ': Allo Boss DAC')
+					G_WHIP_MENU_ARRAY+=('allo-boss-dac-pcm512x-audio' ': Allo Mini Boss DAC')
+					G_WHIP_MENU_ARRAY+=('allo-digione' ': Allo DigiOne')
+					G_WHIP_MENU_ARRAY+=('allo-katana-dac-audio' ': Allo Katana')
+					G_WHIP_MENU_ARRAY+=('allo-piano-dac-pcm512x-audio' ': Allo Piano DAC')
+					G_WHIP_MENU_ARRAY+=('allo-piano-dac-plus-pcm512x-audio' ': Allo Piano DAC 2.1')
+					G_WHIP_MENU_ARRAY+=('applepi-dac' ': ApplePi DAC (Orchard Audio)')
+					G_WHIP_MENU_ARRAY+=('dionaudio-loco' ': Dion Audio LOCO')
+					G_WHIP_MENU_ARRAY+=('dionaudio-loco-v2' ': Dion Audio LOCO V2')
+					G_WHIP_MENU_ARRAY+=('googlevoicehat-soundcard' ': Google AIY voice kit')
+					G_WHIP_MENU_ARRAY+=('hifiberry-amp' ': HifiBerry AMP / AMP+')
+					G_WHIP_MENU_ARRAY+=('hifiberry-dac' ': HifiBerry DAC / MiniAMP')
+					G_WHIP_MENU_ARRAY+=('hifiberry-dacplus' ': HifiBerry DAC+ / DAC+ Pro / AMP2')
+					G_WHIP_MENU_ARRAY+=('hifiberry-digi' ': HifiBerry DIGI / DIGI+')
+					G_WHIP_MENU_ARRAY+=('hifiberry-digi-pro' ': HifiBerry DIGI Pro')
+					G_WHIP_MENU_ARRAY+=('i-sabre-k2m' ': AudioPhonics I-Sabre ES9028 Q2M')
+					G_WHIP_MENU_ARRAY+=('iqaudio-dacplus' ': Pi-DAC+, Pi-DACZero, Pi-DAC Pro, Pi-DigiAMP+')
+					G_WHIP_MENU_ARRAY+=('iqaudio-digi-wm8804-audio' ': Pi-DIGI+')
+					G_WHIP_MENU_ARRAY+=('iqaudio-dacplus,auto_mute_amp' ': Pi-DigiAMP+')
+					G_WHIP_MENU_ARRAY+=('iqaudio-dacplus,unmute_amp' ': Pi-DigiAMP+')
+					G_WHIP_MENU_ARRAY+=('justboom-dac' ': JustBoom: DAC HAT, Amp HAT, DAC Zero and Amp Zero')
+					G_WHIP_MENU_ARRAY+=('justboom-digi' ': JustBoom: Digi HAT and Digi Zero')
+					G_WHIP_MENU_ARRAY+=('rpi-dac' ': Soekris DAM1021 (pcm1794a)')
+
 				# - C2
-				if (( $G_HW_MODEL == 12 ||
-					( $G_HW_MODEL == 10 && $G_DISTRO == 3 ) )); then # REMOVE v6.24
+				elif (( $G_HW_MODEL == 12 ||
+					( $G_HW_MODEL == 10 && $G_DISTRO == 3 ) )); then #REMOVE v6.24
 
 					G_WHIP_MENU_ARRAY+=('odroid-hifishield-plus' ': Odroid HiFi Shield 1/Plus')
 					G_WHIP_MENU_ARRAY+=('odroid-hifishield-2' ': Odroid HiFi Shield 2')
 
-				# - H2+ | OPi Zero
+				# - h2+ | OPi Zero
 				elif (( $G_HW_MODEL == 32 )); then
 
 					G_WHIP_MENU_ARRAY+=('h2-hdmi' ': HDMI')
 
-				# - NanoPi M2/M3
+				#	NanoPi M2/M3
 				elif (( $G_HW_MODEL == 61 || $G_HW_MODEL == 62 )); then
 
 					G_WHIP_MENU_ARRAY+=('s5pxx18-hdmi' ': HDMI')
@@ -4199,7 +4346,7 @@ The following will now be applied:\n - CPU gov = Powersave\n - HDMI output = Dis
 					G_WHIP_MENU_ARRAY+=('allo-cheapo-optical' ': Allo Cheapo (Optical output)')
 					G_WHIP_MENU_ARRAY+=('usb-dac-1.1' ': USB 1.1 Audio DAC (any)')
 
-				# - Asus TB
+				# - Asus tb
 				elif (( $G_HW_MODEL == 52 )); then
 
 					G_WHIP_MENU_ARRAY+=('asus-tb-analogue' ': 3.5mm analogue')
@@ -4910,10 +5057,6 @@ _EOF_
 			elif (( $TARGETMENUID == 18 )); then
 
 				Menu_AdvancedOptions_Serial_UART
-
-			elif (( $TARGETMENUID == 19 )); then
-
-				Menu_AdvancedOptions_APT
 
 			else
 
