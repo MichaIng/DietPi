@@ -822,160 +822,441 @@ A long (or insufficiently manufactured) cable may required a higher boost settin
 
 			fi
 
-		# RPi
-		elif (( $G_HW_MODEL < 10 )); then
+			# RPi
+			elif (( $G_HW_MODEL < 10 )); then
 
-			local framebuffer_x=$(grep -m1 '^[[:blank:]]*framebuffer_width=' /DietPi/config.txt || vcgencmd get_config framebuffer_width)
-			framebuffer_x=${framebuffer_x#*=}; framebuffer_x=${framebuffer_x:-0}
-			local framebuffer_y=$(grep -m1 '^[[:blank:]]*framebuffer_height=' /DietPi/config.txt || vcgencmd get_config framebuffer_height)
-			framebuffer_y=${framebuffer_y#*=}; framebuffer_y=${framebuffer_y:-0}
-			local current_value=$(grep -m1 '^[[:blank:]]*dtoverlay=vc4-' /DietPi/config.txt | sed 's/^[^=]*=//') # OpenGL check 1st
-			if [[ ! $current_value ]]; then
+				local framebuffer_x=$(grep -m1 '^[[:blank:]]*framebuffer_width=' /DietPi/config.txt || vcgencmd get_config framebuffer_width)
+				framebuffer_x=${framebuffer_x#*=}; framebuffer_x=${framebuffer_x:-0}
+				local framebuffer_y=$(grep -m1 '^[[:blank:]]*framebuffer_height=' /DietPi/config.txt || vcgencmd get_config framebuffer_height)
+				framebuffer_y=${framebuffer_y#*=}; framebuffer_y=${framebuffer_y:-0}
+				local current_value=$(grep -m1 '^[[:blank:]]*dtoverlay=vc4-' /DietPi/config.txt | sed 's/^[^=]*=//') #OpenGL check 1st
 
-				# - FB
-				current_value="$framebuffer_x X $framebuffer_y"
+				#If framebuffer is not set by user then check if hdmi default is detected and being used
+				if [[ "$framebuffer_y" == 0 ]] && [[ "$framebuffer_x" == 0 ]]; then
 
-				# - Check for headless
-				grep -q '^[[:blank:]]*hdmi_ignore_hotplug=1' /DietPi/config.txt && grep -q '^[[:blank:]]*hdmi_ignore_composite=1' /DietPi/config.txt && current_value='Headless'
+						#Save output of tvservice -s to var | NOTE: tvservice will output a default resolution even if hdmi is Disconnected or unable to pull information from connected device
+						value_of_tvservice_s=$(tvservice -s)
 
-			fi
+						#Transformation of the output of tvservice -s to get detected or default X,Y resolution
+						#get X
+						tvservice_s_framebuffer_x=${value_of_tvservice_s%x*}  # retain the part before last character x
+						tvservice_s_framebuffer_x=${tvservice_s_framebuffer_x##*,}  # retain the part after the last character ,
+						tvservice_s_framebuffer_x=${tvservice_s_framebuffer_x:1}   # Remove the first character of blank space
+						#get Y
+						tvservice_s_framebuffer_y=${value_of_tvservice_s%@*}  # retain the part before last character @
+						tvservice_s_framebuffer_y=${tvservice_s_framebuffer_y##*x}  # retain the part after the last character x
+						tvservice_s_framebuffer_y=${tvservice_s_framebuffer_y::-1} # Remove the last character of blank space
+
+						# default X,Y resolution to framebuffer vars
+						framebuffer_x=$tvservice_s_framebuffer_x
+						framebuffer_y=$tvservice_s_framebuffer_y
+				fi
+
+				if [[ ! $current_value ]]; then
+
+					# - FB
+					current_value="$framebuffer_x X $framebuffer_y"
+
+					# - check for headless
+					grep -qi 'hdmi_ignore_hotplug=1' /DietPi/config.txt &&
+					grep -qi 'hdmi_ignore_composite=1' /DietPi/config.txt && current_value='Headless'
+
+				fi
+
+				#Check if hdmi monitor/tv is detected
+				#Save output of tvservice -m DMT to array by line
+				readarray -t output_of_tvservice_m_DMT_array <<< "$(tvservice -m DMT)"
+				#Save output of tvservice -m CEA to array by line
+				readarray -t output_of_tvservice_m_CEA_array <<< "$(tvservice -m CEA)"
+
+				#Monitor?  Get value DMT Modes value of zero if none are supported else any other value than zero it is detecting suported modes
+				DMT_detected=${output_of_tvservice_m_DMT_array[0]:14:1}   #first 1 characters after removing the first 14
+				#TV? Get value CEA Modes value of zero if none are supported else any other value than zero it is detecting suported modes
+				CEA_detected=${output_of_tvservice_m_CEA_array[0]:14:1}   #first 1 characters after removing the first 14
+
+				if [ "$DMT_detected" != '0' ]] || [[ "$CEA_detected" != '0' ]]; then
+						G_WHIP_MENU_ARRAY=()
+						#Add DMT & resoulutions to main menu array
+						if [[ "$DMT_detected" != '0' ]]; then
+							#Usable info starts at line 1
+							DMT_LineNumber=1
+							#Check when we reach the end of the array
+							DMT_Nullcheck=${output_of_tvservice_m_DMT_array[$DMT_LineNumber]}
+
+							until [ ! "$DMT_Nullcheck" ] || [ $DMT_LineNumber -gt 1000 ] ; do #make sure it stops even if array is huge
+
+									#Transformation - output_of_tvservice_m_DMT_array[]
+									#Sore value for check if perfered
+									DMT_perfered=${output_of_tvservice_m_DMT_array[$DMT_LineNumber]%)*} #retain the part before last character )
+									DMT_perfered=${DMT_perfered##*(}  # retain the part after the character (
+									#Sore value for check if native
+									DMT_native=${output_of_tvservice_m_DMT_array[$DMT_LineNumber]%)*} #retain the part before last character )
+									DMT_native=${DMT_native##*(}  # retain the part after the character (
+
+									#Perfered?
+									if [[ "$DMT_perfered" == 'prefer' ]]; then
+
+											#format to get just the DMT mode #
+											DMT_perfered_mode_number=${output_of_tvservice_m_DMT_array[$DMT_LineNumber]:16} # removing the first 16 characters
+											DMT_perfered_mode_number=${DMT_perfered_mode_number%%:*}  # retain the part before character :
+											#format to get just the DMT resolution information
+											DMT_perfered_resoulution=${output_of_tvservice_m_DMT_array[$DMT_LineNumber]#*:} # retain everything after first :
+											DMT_perfered_resoulution=${DMT_perfered_resoulution##?} # Remove the fist space in the string
+
+											#output to Main Menu array
+											G_WHIP_MENU_ARRAY+=('Detected DMT '"$DMT_perfered_mode_number"'-Preferd' ': '"$DMT_perfered_resoulution")
+
+									#Native?
+									elif [[ "$DMT_native" == 'native' ]]; then
+
+											#format to get just the DMT mode #
+											DMT_native_mode_number=${output_of_tvservice_m_DMT_array[$DMT_LineNumber]:16} # removing the first 16 characters
+											DMT_native_mode_number=${DMT_native_mode_number%%:*}  # retain the part before character :
+											#format to get just the DMT resolution information
+											DMT_native_resoulution=${output_of_tvservice_m_DMT_array[$DMT_LineNumber]#*:} # retain everything after first :
+											DMT_native_resoulution=${DMT_native_resoulution##?} # Remove the fist space in the string
+
+											#output to Main Menu array
+											G_WHIP_MENU_ARRAY+=('Detected DMT '"$DMT_native_mode_number"'-Native' ': '"$DMT_native_resoulution")
+
+									#all other modes and resolutions
+									else
+
+										#format to get just the DMT mode #
+										DMT_mode_number=${output_of_tvservice_m_DMT_array[$DMT_LineNumber]:16} # removing the first 16 characters
+										DMT_mode_number=${DMT_mode_number%%:*}  # retain the part before character :
+										#format to get just the DMT resolution information
+										DMT_resoulution=${output_of_tvservice_m_DMT_array[$DMT_LineNumber]#*:} # retain everything after first :
+										DMT_resoulution=${DMT_resoulution##?} # Remove the fist space in the string
+
+										#output to Main Menu array
+										G_WHIP_MENU_ARRAY+=('Detected DMT '"$DMT_mode_number" ': '"$DMT_resoulution")
+
+									fi
+
+									let DMT_LineNumber=DMT_LineNumber+1
+									DMT_Nullcheck=${output_of_tvservice_m_DMT_array[$DMT_LineNumber]}
+							done
+						fi
+
+						#Add CEA & resoulutions to main menu array
+						if [[ "$CEA_detected" != '0' ]]; then
+							#Usable info starts at line 1
+							CEA_LineNumber=1
+							#Check when we reach the end of the array
+							CEA_Nullcheck=${output_of_tvservice_m_CEA_array[$CEA_LineNumber]}
+
+
+
+							until [ ! "$CEA_Nullcheck" ] || [ $CEA_LineNumber -gt 1000 ] ; do #make sure it stops even if array is huge
+
+									#Transformation - output_of_tvservice_m_CEA_array[]
+									#Sore value for check if perfered
+									CEA_perfered=${output_of_tvservice_m_CEA_array[$CEA_LineNumber]%)*} #retain the part before last character )
+									CEA_perfered=${CEA_perfered##*(}  # retain the part after the character (
+									#Sore value for check if native
+									CEA_native=${output_of_tvservice_m_CEA_array[$CEA_LineNumber]%)*} #retain the part before last character )
+									CEA_native=${CEA_native##*(}  # retain the part after the character (
+
+									#Perfered?
+									if [[ "$CEA_perfered" == 'prefer' ]]; then
+
+											#format to get just the CEA mode #
+											CEA_perfered_mode_number=${output_of_tvservice_m_CEA_array[$CEA_LineNumber]:16} # removing the first 16 characters
+											CEA_perfered_mode_number=${CEA_perfered_mode_number%%:*}  # retain the part before character :
+											#format to get just the CEA resolution information
+											CEA_perfered_resoulution=${output_of_tvservice_m_CEA_array[$CEA_LineNumber]#*:} # retain everything after first :
+											CEA_perfered_resoulution=${CEA_perfered_resoulution##?} # Remove the fist space in the string
+
+											#output to Main Menu array
+											G_WHIP_MENU_ARRAY+=('Detected CEA '"$CEA_perfered_mode_number"'-Preferd' ': '"$CEA_perfered_resoulution")
+
+									#Native?
+									elif [[ "$CEA_native" == 'native' ]]; then
+
+											#format to get just the CEA mode #
+											CEA_native_mode_number=${output_of_tvservice_m_CEA_array[$CEA_LineNumber]:16} # removing the first 16 characters
+											CEA_native_mode_number=${CEA_native_mode_number%%:*}  # retain the part before character :
+											#format to get just the CEA resolution information
+											CEA_native_resoulution=${output_of_tvservice_m_CEA_array[$CEA_LineNumber]#*:} # retain everything after first :
+											CEA_native_resoulution=${CEA_native_resoulution##?} # Remove the fist space in the string
+
+											#output to Main Menu array
+											G_WHIP_MENU_ARRAY+=('Detected CEA '"$CEA_native_mode_number"'-Native' ': '"$CEA_native_resoulution")
+
+									#all other modes and resolutions
+									else
+
+										#format to get just the CEA mode #
+										CEA_mode_number=${output_of_tvservice_m_CEA_array[$CEA_LineNumber]:16} # removing the first 16 characters
+										CEA_mode_number=${CEA_mode_number%%:*}  # retain the part before character :
+										#format to get just the CEA resolution information
+										CEA_resoulution=${output_of_tvservice_m_CEA_array[$CEA_LineNumber]#*:} # retain everything after first :
+										CEA_resoulution=${CEA_resoulution##?} # Remove the fist space in the string
+
+										#output to Main Menu array
+										G_WHIP_MENU_ARRAY+=('Detected CEA '"$CEA_mode_number" ': '"$CEA_resoulution")
+
+									fi
+
+									let CEA_LineNumber=CEA_LineNumber+1
+									CEA_Nullcheck=${output_of_tvservice_m_CEA_array[$CEA_LineNumber]}
+							done
+
+
+						fi
+						#add Additional Options
+						G_WHIP_MENU_ARRAY+=(
+
+						'vc4-kms-v3d' ': OpenGL | 1920 x 1080'
+						'vc4-fkms-v3d' ': OpenGL | 1920 x 1080'
+						'RPi Touchscreen' ': 800 x 480'
+						'DietPi-Cloudshell' ': 320 x 240'
+						'Headless' ': Disables HDMI & Composite Output'
+
+						)
+
+
+				else
+						#Load default menu if hdmi info is not detected
+						G_WHIP_MENU_ARRAY=(
+
+						'vc4-kms-v3d' ': OpenGL | 1920 x 1080'
+						'vc4-fkms-v3d' ': OpenGL | 1920 x 1080'
+						'1080p' ': 1920 x 1080'
+						'720p' ': 1280 x 720'
+						'480p' ': 854 x 480'
+						'RPi Touchscreen' ': 800 x 480'
+						'PC1' ': 1024 x 768'
+						'PC2' ': 800 x 640'
+						'PC3' ': 640 x 480'
+						'DietPi-Cloudshell' ': 320 x 240'
+						'sdtv_mode=0' ': Composite NTSC'
+						'sdtv_mode=1' ': Composite Japanese NTSC'
+						'sdtv_mode=2' ': Composite PAL'
+						'sdtv_mode=3' ': Composite Brazilian PAL'
+						'Headless' ': Disables HDMI & Composite Output'
+
+						)
+				fi
+
+				G_WHIP_DEFAULT_ITEM=$current_value
+				if G_WHIP_MENU "Hardware: $G_HW_MODEL_DESCRIPTION\nCurrent resolution: $current_value"; then
+
+					REBOOT_REQUIRED=1
+
+					TARGETMENUID=2 # Return to this menu
+
+					if [[ $G_WHIP_RETURNED_VALUE == 'Headless' ]]; then
+
+						G_WHIP_YESNO 'Using the Headless option will:
+			- Disable HDMI and composite output
+			- Disable the framebuffer
+			- Lower energy consumption by 0.1+ Watts
+			- Improve RAM performance by 1-5% (VideoCore shares RAM bandwidth)
+			- Lead to some kernel error messages on boot, that can be ignored\n
+			Re-enabling HDMI requires a reboot. If you need emergency HDMI output, comment or remove the following lines within "config.txt" on first partition of the SDcard from external system:
+			- hdmi_ignore_hotplug=1
+			- hdmi_ignore_composite=1\n
+			More info here: https://www.raspberrypi.org/forums/viewtopic.php?p=105008#p105008
+				and here: https://github.com/raspberrypi/userland/issues/447#issuecomment-404399670' || { REBOOT_REQUIRED=0; return; }
+
+						/DietPi/dietpi/func/dietpi-set_hardware headless 1
+
+					else
+
+						/DietPi/dietpi/func/dietpi-set_hardware headless 0
+
+					fi
+
+					# - Always disable composite by default
+					[[ $G_WHIP_RETURNED_VALUE == 'sdtv_mode'* ]] || sed -i '/sdtv_mode=/c\#sdtv_mode=0' /DietPi/config.txt
+
+					# - Always disable OpenGL by default
+					[[ $G_WHIP_RETURNED_VALUE == 'vc4-'* ]] || /DietPi/dietpi/func/dietpi-set_hardware rpi-opengl disable
+
+					if [[ $G_WHIP_RETURNED_VALUE == 'vc4-'* ]]; then
+
+						/DietPi/dietpi/func/dietpi-set_hardware rpi-opengl $G_WHIP_RETURNED_VALUE
+
+					elif [[ $G_WHIP_RETURNED_VALUE != 'Headless' ]]; then
+
+						#Check if a auto detected monitor was connected to hdmi
+						auto_detected_hdmi=${G_WHIP_RETURNED_VALUE:0:8}
+						if [[ "$auto_detected_hdmi" == 'Detected' ]]; then
+								#Get HDMI goup (DMT=2/CEA=1)
+								auto_detected_hdmi_group=${G_WHIP_RETURNED_VALUE:9:3} #fisrt 3 char after moving to char 9
+								#Get HDMI mode
+								auto_detected_hdmi_mode=${G_WHIP_RETURNED_VALUE:13} #every thing past char 13
+								auto_detected_hdmi_mode=${auto_detected_hdmi_mode%%-*}  # retain the part before character -
+
+								#set Value to change in dietpi/config.txt
+								if [[ "$auto_detected_hdmi_group" == 'DMT' ]]; then
+								hdmi_group_for_config_txt='hdmi_group=2'
+								fi
+
+								if [[ "$auto_detected_hdmi_group" == 'CEA' ]]; then
+								hdmi_group_for_config_txt='hdmi_group=1'
+								fi
+								hdmi_mode_for_config_txt='hdmi_mode='"$auto_detected_hdmi_mode"
+
+								#write changes to dietpi/config.txt
+								sed -i "/hdmi_group=/c\\$hdmi_group_for_config_txt" /DietPi/config.txt
+								sed -i "/hdmi_mode=/c\\$hdmi_mode_for_config_txt" /DietPi/config.txt
+
+								#disable framebuffer if it exist
+								sed -i "/framebuffer_width=/c\\#framebuffer_width=1280" /DietPi/config.txt
+								sed -i "/framebuffer_height=/c\\#framebuffer_height=720" /DietPi/config.txt
+
+								#disable sdtv_mode if it exist
+								sed -i "/sdtv_mode=/c\\#sdtv_mode=0" /DietPi/config.txt
+
+								#add chromium resoulutions !!!!!!!!!!!!USE var tvservice_s_framebuffer_X,Y
+								G_CONFIG_INJECT 'SOFTWARE_CHROMIUM_RES_X=' "SOFTWARE_CHROMIUM_RES_X=$tvservice_s_framebuffer_x" /DietPi/dietpi.txt
+								G_CONFIG_INJECT 'SOFTWARE_CHROMIUM_RES_Y=' "SOFTWARE_CHROMIUM_RES_Y=$tvservice_s_framebuffer_y" /DietPi/dietpi.txt
+
+						else
+
+								#disable HDMI goup (DMT=2/CEA=1) if user defided option not autodetected is used
+								sed -i "/hdmi_group=/c\\#hdmi_group=1" /DietPi/config.txt
+								sed -i "/hdmi_mode=/c\\#hdmi_mode=1" /DietPi/config.txt
+
+								case "$G_WHIP_RETURNED_VALUE" in
+
+									'sdtv_mode'*)
+
+									sed -i "/sdtv_mode=/c\\$G_WHIP_RETURNED_VALUE" /DietPi/config.txt
+									framebuffer_x=720
+									framebuffer_y=576
+
+									;;
+
+									'DietPi-Cloudshell')
+
+									framebuffer_x=320
+									framebuffer_y=240
+
+									;;
+
+									'1080p')
+
+									framebuffer_x=1920
+									framebuffer_y=1080
+
+									;;
+
+									'720p')
+
+									framebuffer_x=1280
+									framebuffer_y=720
+
+									;;
+
+									'480p')
+
+									framebuffer_x=854
+									framebuffer_y=480
+
+									;;
+
+									'RPi Touchscreen')
+
+									framebuffer_x=800
+									framebuffer_y=480
+
+									;;
+
+									'PC1')
+
+									framebuffer_x=1024
+									framebuffer_y=768
+
+									;;
+
+									'PC2')
+
+									framebuffer_x=800
+									framebuffer_y=640
+
+									;;
+
+									'PC3')
+
+									framebuffer_x=640
+									framebuffer_y=480
+
+									;;
+
+								esac
+
+								# - Apply x/y
+								G_CONFIG_INJECT 'framebuffer_width=' "framebuffer_width=$framebuffer_x" /DietPi/config.txt
+								G_CONFIG_INJECT 'framebuffer_height=' "framebuffer_height=$framebuffer_y" /DietPi/config.txt
+								G_CONFIG_INJECT 'SOFTWARE_CHROMIUM_RES_X=' "SOFTWARE_CHROMIUM_RES_X=$framebuffer_x" /DietPi/dietpi.txt
+								G_CONFIG_INJECT 'SOFTWARE_CHROMIUM_RES_Y=' "SOFTWARE_CHROMIUM_RES_Y=$framebuffer_y" /DietPi/dietpi.txt
+						fi
+					fi
+
+				fi		# Odroid C1: REMOVE v6.24
+			elif (( $G_HW_MODEL == 10 && $G_DISTRO == 3 )); then
+
+			# Get Current Values
+			local current_resolution=$(mawk -F '"' '/setenv m "/ {print $2;exit}' /DietPi/boot.ini)
 
 			G_WHIP_MENU_ARRAY=(
 
-				'vc4-kms-v3d' ': OpenGL | 1920 x 1080'
-				'vc4-fkms-v3d' ': OpenGL | 1920 x 1080'
 				'1080p' ': 1920 x 1080'
 				'720p' ': 1280 x 720'
-				'480p' ': 854 x 480'
-				'RPi Touchscreen' ': 800 x 480'
+				'480p' ': 720 x 480'
+				'VU7+' ': 1024 x 600'
 				'PC1' ': 1024 x 768'
-				'PC2' ': 800 x 640'
-				'PC3' ': 640 x 480'
-				'DietPi-Cloudshell' ': 320 x 240'
-				'sdtv_mode=0' ': Composite NTSC'
-				'sdtv_mode=1' ': Composite Japanese NTSC'
-				'sdtv_mode=2' ': Composite PAL'
-				'sdtv_mode=3' ': Composite Brazilian PAL'
-				'Headless' ': Disables HDMI & Composite Output'
 
 			)
 
-			G_WHIP_DEFAULT_ITEM=$current_value
-			if G_WHIP_MENU "Hardware: $G_HW_MODEL_DESCRIPTION\nCurrent resolution: $current_value"; then
+			G_WHIP_DEFAULT_ITEM=$current_resolution
+			if G_WHIP_MENU "Hardware : $G_HW_MODEL_DESCRIPTION\nCurrent: $current_resolution"; then
 
 				REBOOT_REQUIRED=1
 
 				TARGETMENUID=2 # Return to this menu
 
-				if [[ $G_WHIP_RETURNED_VALUE == 'Headless' ]]; then
+				# - Always reset to HDMI
+				sed -i '/setenv vout_mode /c\setenv vout_mode "hdmi"' /DietPi/boot.ini
 
-					G_WHIP_YESNO 'Using the Headless option will:
- - Disable HDMI and composite output
- - Disable the framebuffer
- - Lower energy consumption by 0.1+ Watts
- - Improve RAM performance by 1-5% (VideoCore shares RAM bandwidth)
- - Lead to some kernel error messages on boot, that can be ignored\n
-Re-enabling HDMI requires a reboot. If you need emergency HDMI output, comment or remove the following lines within "config.txt" on first partition of the SDcard from external system:
- - hdmi_ignore_hotplug=1
- - hdmi_ignore_composite=1\n
-More info here: https://www.raspberrypi.org/forums/viewtopic.php?p=105008#p105008
-      and here: https://github.com/raspberrypi/userland/issues/447#issuecomment-404399670' || { REBOOT_REQUIRED=0; return; }
+				case "$G_WHIP_RETURNED_VALUE" in
 
-					/DietPi/dietpi/func/dietpi-set_hardware headless 1
+					'1080p')
 
-				else
+						sed -i '/setenv m /c\setenv m "1080p"' /DietPi/boot.ini
 
-					/DietPi/dietpi/func/dietpi-set_hardware headless 0
+					;;
 
-				fi
+					'720p')
 
-				# - Always disable composite by default
-				[[ $G_WHIP_RETURNED_VALUE == 'sdtv_mode'* ]] || sed -i '/sdtv_mode=/c\#sdtv_mode=0' /DietPi/config.txt
+						sed -i '/setenv m /c\setenv m "720p"' /DietPi/boot.ini
 
-				# - Always disable OpenGL by default
-				[[ $G_WHIP_RETURNED_VALUE == 'vc4-'* ]] || /DietPi/dietpi/func/dietpi-set_hardware rpi-opengl disable
+					;;
 
-				if [[ $G_WHIP_RETURNED_VALUE == 'vc4-'* ]]; then
+					'480p')
 
-					/DietPi/dietpi/func/dietpi-set_hardware rpi-opengl $G_WHIP_RETURNED_VALUE
+						sed -i '/setenv m /c\setenv m "480p"' /DietPi/boot.ini
 
-				elif [[ $G_WHIP_RETURNED_VALUE != 'Headless' ]]; then
+					;;
 
-					case "$G_WHIP_RETURNED_VALUE" in
+					'PC1')
 
-						'sdtv_mode'*)
+						sed -i '/setenv m /c\setenv m "1024x768"' /DietPi/boot.ini
 
-							sed -i "/sdtv_mode=/c\\$G_WHIP_RETURNED_VALUE" /DietPi/config.txt
-							framebuffer_x=720
-							framebuffer_y=576
+					;;
 
-						;;
+					'VU7+')
 
-						'DietPi-Cloudshell')
+						sed -i '/setenv m /c\setenv m "1024x600"' /DietPi/boot.ini
+						sed -i '/setenv vout_mode /c\setenv vout_mode "dvi"' /DietPi/boot.ini
 
-							framebuffer_x=320
-							framebuffer_y=240
+					;;
 
-						;;
-
-						'1080p')
-
-							framebuffer_x=1920
-							framebuffer_y=1080
-
-						;;
-
-						'720p')
-
-							framebuffer_x=1280
-							framebuffer_y=720
-
-						;;
-
-						'480p')
-
-							framebuffer_x=854
-							framebuffer_y=480
-
-						;;
-
-						'RPi Touchscreen')
-
-							framebuffer_x=800
-							framebuffer_y=480
-
-						;;
-
-						'PC1')
-
-							framebuffer_x=1024
-							framebuffer_y=768
-
-						;;
-
-						'PC2')
-
-							framebuffer_x=800
-							framebuffer_y=640
-
-						;;
-
-						'PC3')
-
-							framebuffer_x=640
-							framebuffer_y=480
-
-						;;
-
-					esac
-
-					# - Apply x/y
-					G_CONFIG_INJECT 'framebuffer_width=' "framebuffer_width=$framebuffer_x" /DietPi/config.txt
-					G_CONFIG_INJECT 'framebuffer_height=' "framebuffer_height=$framebuffer_y" /DietPi/config.txt
-					G_CONFIG_INJECT 'SOFTWARE_CHROMIUM_RES_X=' "SOFTWARE_CHROMIUM_RES_X=$framebuffer_x" /DietPi/dietpi.txt
-					G_CONFIG_INJECT 'SOFTWARE_CHROMIUM_RES_Y=' "SOFTWARE_CHROMIUM_RES_Y=$framebuffer_y" /DietPi/dietpi.txt
-
-				fi
+				esac
 
 			fi
 
