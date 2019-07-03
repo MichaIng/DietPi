@@ -134,18 +134,13 @@
 	fi
 
 	# - Update /etc/default/locales with new values (not effective until next load of bash session, eg: logout/in)
-	update-locale LANG=en_GB.UTF-8
-	update-locale LC_CTYPE=en_GB.UTF-8
-	update-locale LC_TIME=en_GB.UTF-8
 	update-locale LC_ALL=en_GB.UTF-8
 
 	# - Export locale vars to assure the following whiptail being beautiful
-	export LANG=en_GB.UTF8
-	export LC_ALL=en_GB.UTF8
+	export LC_ALL='en_GB.UTF-8'
 
 	# Set Git owner
-	G_GITOWNER=${GITOWNER:-MichaIng}
-	unset GITOWNER
+	GITOWNER=${GITOWNER:-MichaIng}
 
 	# Select Git branch
 	if ! [[ $GITBRANCH =~ ^(master|beta|dev)$ ]]; then
@@ -172,17 +167,15 @@
 		fi
 
 	fi
-	G_GITBRANCH=$GITBRANCH
-	unset GITBRANCH
 
-	echo "[ INFO ] Selected Git branch: $G_GITOWNER/$G_GITBRANCH"
+	echo "[ INFO ] Selected Git branch: $GITOWNER/$GITBRANCH"
 
 	#------------------------------------------------------------------------------------------------
 	# DietPi-Globals
 	#------------------------------------------------------------------------------------------------
 	# - Download
 	# - NB: We'll have to manually handle errors, until DietPi-Globals are successfully loaded.
-	if ! wget "https://raw.githubusercontent.com/$G_GITOWNER/DietPi/$G_GITBRANCH/dietpi/func/dietpi-globals" -O dietpi-globals; then
+	if ! wget "https://raw.githubusercontent.com/$GITOWNER/DietPi/$GITBRANCH/dietpi/func/dietpi-globals" -O dietpi-globals; then
 
 		echo -e '[FAILED] Unable to download dietpi-globals. Aborting...\n'
 		exit 1
@@ -201,6 +194,10 @@
 	# - Reset G_PROGRAM_NAME, which was set to empty string by sourcing dietpi-globals
 	G_PROGRAM_NAME='DietPi-PREP'
 	G_INIT
+
+	# - Applying Git info
+	G_GITOWNER=$GITOWNER; unset GITOWNER
+	G_GITBRANCH=$GITBRANCH; unset GITBRANCH
 
 	# - Detect the the Debian version of this operating system.
 	if grep -q 'jessie' /etc/os-release; then
@@ -267,9 +264,9 @@
 			G_DIETPI-NOTIFY 2 'DietPi system found, removing the old files and stopping services. (pre-prep)'
 
 			# - Stop services: RAMdisk includes (Pre|Post)Boot due to dependencies
-			[[ -f /DietPi/dietpi/dietpi-services ]] && /DietPi/dietpi/dietpi-services stop
-			[[ -f /etc/systemd/system/dietpi-ramlog.service ]] && systemctl stop dietpi-ramlog
-			[[ -f /etc/systemd/system/dietpi-ramdisk.service ]] && systemctl stop dietpi-ramdisk
+			[[ -f '/DietPi/dietpi/dietpi-services' ]] && /DietPi/dietpi/dietpi-services stop
+			[[ -f '/etc/systemd/system/dietpi-ramlog.service' ]] && systemctl stop dietpi-ramlog
+			[[ -f '/etc/systemd/system/dietpi-ramdisk.service' ]] && systemctl stop dietpi-ramdisk
 
 			# - Disable services
 			for i in /etc/systemd/system/dietpi-*
@@ -284,12 +281,12 @@
 			# - Delete any previous existing data
 			#	Failsafe
 			umount /DietPi
-			[[ -d /DietPi ]] && rm -R /DietPi
+			[[ -d '/DietPi' ]] && rm -R /DietPi
 			rm -Rf /{boot,mnt,etc,var/lib,var/tmp}/dietpi*
 			rm -f /etc/{bashrc,profile,sysctl}.d/dietpi*
 
-			[[ -f /root/DietPi-Automation.log ]] && rm /root/DietPi-Automation.log
-			[[ -f /boot/Automation_Format_My_Usb_Drive ]] && rm /boot/Automation_Format_My_Usb_Drive
+			[[ -f '/root/DietPi-Automation.log' ]] && rm /root/DietPi-Automation.log
+			[[ -f '/boot/Automation_Format_My_Usb_Drive' ]] && rm /boot/Automation_Format_My_Usb_Drive
 
 		else
 
@@ -406,6 +403,7 @@
 			# '1' ': Raspberry Pi 1/Zero (512mb)'
 			# '2' ': Raspberry Pi 2'
 			# '3' ': Raspberry Pi 3/3+'
+			# '4' ': Raspberry Pi 4'
 			'' '●─ PC '
 			'21' ': x86_64 Native PC'
 			'20' ': x86_64 VMware/VirtualBox'
@@ -442,6 +440,7 @@
 			'43' ': Rock64'
 			'42' ': RockPro64'
 			'70' ': Sparky SBC'
+			'72' ': ROCK Pi 4'
 
 		)
 
@@ -735,6 +734,7 @@ _EOF_
 			'ethtool'		# Ethernet link checking
 			'fake-hwclock'		# Hardware clock emulation, to allow correct timestamps during boot before network time sync
 			'gnupg'			# apt-key add
+			'haveged'		# Entropy daemon: https://github.com/MichaIng/DietPi/issues/2806
 			'htop'			# System monitor
 			'iputils-ping'		# "ping" command
 			'isc-dhcp-client'	# DHCP client
@@ -820,9 +820,9 @@ _EOF_
 			local apackages=(
 
 				"armbian-tools-$DISTRO_TARGET_NAME"
-				"linux-dtb-"
-				"linux-u-"
-				"linux-image-"
+				'linux-dtb-'
+				'linux-u-'
+				'linux-image-'
 				"linux-$DISTRO_TARGET_NAME"
 				'sunxi'
 
@@ -851,17 +851,7 @@ _EOF_
 		#	RPi
 		elif (( $G_HW_MODEL < 10 )); then
 
-			G_AGI libraspberrypi-bin libraspberrypi0 raspberrypi-bootloader raspberrypi-kernel raspberrypi-sys-mods
-			# Buster systemd doesn't support the current raspi-copies-and-fills: https://github.com/MichaIng/DietPi/issues/1286
-			if (( $DISTRO_TARGET < 5 )); then
-
-				G_AGI raspi-copies-and-fills
-
-			else
-
-				G_AGP raspi-copies-and-fills
-
-			fi
+			G_AGI libraspberrypi-bin libraspberrypi0 raspberrypi-bootloader raspberrypi-kernel raspberrypi-sys-mods raspi-copies-and-fills
 
 		#	Odroid N2
 		elif (( $G_HW_MODEL == 15 )); then
@@ -935,6 +925,9 @@ _EOF_
 
 		l_message='Marking required packages as manually installed' G_RUN_CMD apt-mark manual ${aPACKAGES_REQUIRED_INSTALL[@]}
 
+		# Workaround: Installing required packages which would be autoremoved below due to missing dependants
+		# - resolvconf to prevent ifupdown removal on Buster mini.iso
+		G_AGI resolvconf
 		# Purging additional packages, that (in some cases) do not get autoremoved:
 		# - dbus: Not required for headless images, but sometimes marked as "important", thus not autoremoved.
 		# - dhcpcd5: https://github.com/MichaIng/DietPi/issues/1560#issuecomment-370136642
@@ -987,33 +980,33 @@ _EOF_
 
 		G_DIETPI-NOTIFY 2 'Removing misc files/folders/services, not required by DietPi'
 
-		[[ -d /home ]] && rm -R /home
-		[[ -d /media ]] && rm -R /media
-		[[ -d /selinux ]] && rm -R /selinux
+		[[ -d '/home' ]] && rm -R /home
+		[[ -d '/media' ]] && rm -R /media
+		[[ -d '/selinux' ]] && rm -R /selinux
 
 		# - www
-		[[ -d /var/www ]] && rm -Rf /var/www/{,.??,.[^.]}*
+		[[ -d '/var/www' ]] && rm -Rf /var/www/{,.??,.[^.]}*
 
-		# - sourcecode (linux-headers etc)
-		[[ -d /usr/src ]] && rm -Rf /usr/src/{,.??,.[^.]}*
+		# - Sourcecode (linux-headers etc)
+		[[ -d '/usr/src' ]] && rm -Rf /usr/src/{,.??,.[^.]}*
 
 		# - root
-		[[ -e /root/.cache ]] && rm -R /root/.cache
-		[[ -e /root/.local ]] && rm -R /root/.local
-		[[ -e /root/.config ]] && rm -R /root/.config
+		[[ -e '/root/.cache' ]] && rm -R /root/.cache
+		[[ -e '/root/.local' ]] && rm -R /root/.local
+		[[ -e '/root/.config' ]] && rm -R /root/.config
 
-		# - documentation folders
-		[[ -d /usr/share/man ]] && rm -R /usr/share/man
-		[[ -d /usr/share/doc ]] && rm -R /usr/share/doc
-		[[ -d /usr/share/doc-base ]] && rm -R /usr/share/doc-base
-		[[ -d /usr/share/calendar ]] && rm -R /usr/share/calendar
+		# - Documentation dirs
+		[[ -d '/usr/share/man' ]] && rm -R /usr/share/man
+		[[ -d '/usr/share/doc' ]] && rm -R /usr/share/doc
+		[[ -d '/usr/share/doc-base' ]] && rm -R /usr/share/doc-base
+		[[ -d '/usr/share/calendar' ]] && rm -R /usr/share/calendar
 
 		# - Previous debconfs
 		rm -f /var/cache/debconf/*-old
 
 		# - Fonts
-		[[ -d /usr/share/fonts ]] && rm -R /usr/share/fonts
-		[[ -d /usr/share/icons ]] && rm -R /usr/share/icons
+		[[ -d '/usr/share/fonts' ]] && rm -R /usr/share/fonts
+		[[ -d '/usr/share/icons' ]] && rm -R /usr/share/icons
 
 		# - Stop, disable and remove not required 3rd party services
 		local aservices=(
@@ -1032,18 +1025,12 @@ _EOF_
 		do
 
 			# Loop through known service locations
-			for j in /etc/init.d/$i /etc/systemd/system/$i.service /etc/systemd/system/$i.service.d /lib/systemd/system/$i.service /lib/systemd/system/$i.service.d
+			for j in /etc/init.d/$i /{etc,lib,usr/lib}/systemd/system/$i.service{,.d}
 			do
 
 				if [[ -e $j ]]; then
 
-					if [[ -f $j ]]; then
-
-						systemctl stop ${j##*/}
-						systemctl disable ${j##*/}
-
-					fi
-
+					[[ -f $j ]] && systemctl disable --now ${j##*/}
 					rm -R $j
 
 				fi
@@ -1054,33 +1041,34 @@ _EOF_
 
 		systemctl daemon-reload
 
-		# - ARMbian
-		[[ -f /usr/local/sbin/log2ram ]] && rm /usr/local/sbin/log2ram
-		[[ -f /usr/bin/armbianmonitor ]] && rm /usr/bin/armbianmonitor
-		[[ -d /usr/lib/armbian ]] && rm -R /usr/lib/armbian
-		[[ -d /usr/share/armbian ]] && rm -R /usr/share/armbian
-		rm -f /etc/profile.d/armbian*
-		#rm -Rf /etc/armbian* armbian-release required for kernel package update success.
-		rm -Rf /etc/default/armbian*
-		rm -Rf /etc/update-motd.d/*armbian*
-		rm -Rf /etc/X11/xorg.conf.d/*armbian*
+		# - ARMbian specific
+		[[ -f '/boot/armbian_first_run.txt.template' ]] && rm /boot/armbian_first_run.txt.template
+		[[ -f '/usr/bin/armbianmonitor' ]] && rm /usr/bin/armbianmonitor
+		[[ -d '/usr/lib/armbian' ]] && rm -R /usr/lib/armbian
+		[[ -f '/usr/local/sbin/log2ram' ]] && rm /usr/local/sbin/log2ram
+		[[ -d '/usr/share/armbian' ]] && rm -R /usr/share/armbian
+		#rm -f /etc/armbian* armbian-release required for kernel package update success.
+		rm -f /etc/apt/apt.conf.d/*armbian*
 		rm -f /etc/cron.*/armbian*
-		[[ -f /boot/armbian_first_run.txt.template ]] && rm /boot/armbian_first_run.txt.template
+		rm -f /etc/default/armbian*
+		rm -f /etc/profile.d/armbian*
+		rm -f /etc/update-motd.d/*armbian*
+		rm -f /etc/X11/xorg.conf.d/*armbian*
 		umount /var/log.hdd 2> /dev/null
-		[[ -d /var/log.hdd ]] && rm -R /var/log.hdd
+		[[ -d '/var/log.hdd' ]] && rm -R /var/log.hdd
 
 		# - Meveric specific
-		[[ -f /usr/local/sbin/setup-odroid ]] && rm /usr/local/sbin/setup-odroid
+		[[ -f '/usr/local/sbin/setup-odroid' ]] && rm /usr/local/sbin/setup-odroid
 
 		# - RPi specific https://github.com/MichaIng/DietPi/issues/1631#issuecomment-373965406
-		[[ -f /etc/profile.d/wifi-country.sh ]] && rm /etc/profile.d/wifi-country.sh
+		[[ -f '/etc/profile.d/wifi-country.sh' ]] && rm /etc/profile.d/wifi-country.sh
 
 		# - make_nas_processes_faster cron job on Rock64 + NanoPi + Pine64(?) images
-		[[ -f /etc/cron.d/make_nas_processes_faster ]] && rm /etc/cron.d/make_nas_processes_faster
+		[[ -f '/etc/cron.d/make_nas_processes_faster' ]] && rm /etc/cron.d/make_nas_processes_faster
 
 		#-----------------------------------------------------------------------------------
 		# Boot Logo
-		[[ -f /boot/boot.bmp ]] && G_RUN_CMD wget https://github.com/$G_GITOWNER/DietPi/raw/$G_GITBRANCH/.meta/images/dietpi-logo_boot.bmp -O /boot/boot.bmp
+		[[ -f '/boot/boot.bmp' ]] && G_RUN_CMD wget https://github.com/$G_GITOWNER/DietPi/raw/$G_GITBRANCH/.meta/images/dietpi-logo_boot.bmp -O /boot/boot.bmp
 
 		#-----------------------------------------------------------------------------------
 		# Bash Profiles
@@ -1153,8 +1141,8 @@ _EOF_
 		G_DIETPI-NOTIFY 2 'Configuring DietPi Services:'
 
 		G_RUN_CMD systemctl enable dietpi-ramlog
-		G_RUN_CMD systemctl enable dietpi-boot
 		G_RUN_CMD systemctl enable dietpi-preboot
+		G_RUN_CMD systemctl enable dietpi-boot
 		G_RUN_CMD systemctl enable dietpi-postboot
 		G_RUN_CMD systemctl enable dietpi-kill_ssh
 
@@ -1185,13 +1173,12 @@ _EOF_
 		G_DIETPI-NOTIFY 2 'Configuring wlan/eth naming to be preferred for networked devices:'
 		ln -sfv /dev/null /etc/systemd/network/99-default.link
 
-		G_DIETPI-NOTIFY 2 'Adding dietpi.com SSH pub host key for DietPi-Survey/Bugreport uploads:'
+		G_DIETPI-NOTIFY 2 'Resetting and adding dietpi.com SSH pub host key for DietPi-Survey/Bugreport uploads:'
 		mkdir -p /root/.ssh
-		>> /root/.ssh/known_hosts
-		G_CONFIG_INJECT 'ssh.dietpi.com ' 'ssh.dietpi.com ssh-rsa AAAAB3NzaC1yc2EAAAADAQABAAABAQDE6aw3r6aOEqendNu376iiCHr9tGBIWPgfrLkzjXjEsHGyVSUFNnZt6pftrDeK7UX+qX4FxOwQlugG4fymOHbimRCFiv6cf7VpYg1Ednquq9TLb7/cIIbX8a6AuRmX4fjdGuqwmBq3OG7ZksFcYEFKt5U4mAJIaL8hXiM2iXjgY02LqiQY/QWATsHI4ie9ZOnwrQE+Rr6mASN1BVFuIgyHIbwX54jsFSnZ/7CdBMkuAd9B8JkxppWVYpYIFHE9oWNfjh/epdK8yv9Oo6r0w5Rb+4qaAc5g+RAaknHeV6Gp75d2lxBdCm5XknKKbGma2+/DfoE8WZTSgzXrYcRlStYN' /root/.ssh/known_hosts
+		echo 'ssh.dietpi.com ssh-rsa AAAAB3NzaC1yc2EAAAADAQABAAABAQDE6aw3r6aOEqendNu376iiCHr9tGBIWPgfrLkzjXjEsHGyVSUFNnZt6pftrDeK7UX+qX4FxOwQlugG4fymOHbimRCFiv6cf7VpYg1Ednquq9TLb7/cIIbX8a6AuRmX4fjdGuqwmBq3OG7ZksFcYEFKt5U4mAJIaL8hXiM2iXjgY02LqiQY/QWATsHI4ie9ZOnwrQE+Rr6mASN1BVFuIgyHIbwX54jsFSnZ/7CdBMkuAd9B8JkxppWVYpYIFHE9oWNfjh/epdK8yv9Oo6r0w5Rb+4qaAc5g+RAaknHeV6Gp75d2lxBdCm5XknKKbGma2+/DfoE8WZTSgzXrYcRlStYN' > /root/.ssh/known_hosts
 
 		G_DIETPI-NOTIFY 2 'Recreating symlink for resolv.conf (DNS):'
-		echo 'nameserver 8.8.8.8' > /etc/resolvconf/run/resolv.conf # Temp apply, in case was not previously symlink, resets on next ifup.
+		echo 'nameserver 8.8.8.8' > /etc/resolvconf/run/resolv.conf # Temp apply, in case was not previously symlink, resets on next ifup
 		ln -sfv /etc/resolvconf/run/resolv.conf /etc/resolv.conf
 
 		# ifupdown starts the daemon outside of systemd, the enabled systemd unit just thows an error on boot due to missing dbus and with dbus might interfere with ifupdown
@@ -1202,16 +1189,15 @@ _EOF_
 
 		G_DIETPI-NOTIFY 2 'Disabling apt-daily services to prevent random APT cache lock'
 
-		for i in apt-daily.service apt-daily.timer apt-daily-upgrade.service apt-daily-upgrade.timer
+		for i in apt-daily{,-upgrade}.{service,timer}
 		do
 
-			systemctl stop $i &> /dev/null
-			systemctl disable $i &> /dev/null
+			systemctl disable --now $i &> /dev/null
 			systemctl mask $i &> /dev/null
 
 		done
 
-		local info_use_drive_manager='can be installed and setup by DietPi-Drive_Manager.\nSimply run: dietpi-drive_manager and select Add Network Drive'
+		local info_use_drive_manager='Can be installed and setup by DietPi-Drive_Manager.\nSimply run "dietpi-drive_manager" and select "Add network drive".'
 		echo -e "Samba client: $info_use_drive_manager" > /mnt/samba/readme.txt
 		echo -e "NFS client: $info_use_drive_manager" > /mnt/nfs_client/readme.txt
 
@@ -1299,11 +1285,11 @@ _EOF_
 
 		G_ERROR_HANDLER_COMMAND='/etc/hosts'
 		cat << _EOF_ > $G_ERROR_HANDLER_COMMAND
-127.0.0.1    localhost
-127.0.1.1    DietPi
-::1          localhost ip6-localhost ip6-loopback
-ff02::1      ip6-allnodes
-ff02::2      ip6-allrouters
+127.0.0.1 localhost
+127.0.1.1 DietPi
+::1       localhost ip6-localhost ip6-loopback
+ff02::1   ip6-allnodes
+ff02::2   ip6-allrouters
 _EOF_
 		G_ERROR_HANDLER_EXITCODE=$?
 		G_ERROR_HANDLER
@@ -1348,14 +1334,22 @@ _EOF_
 
 		systemctl stop fake-hwclock
 
-		# - allow times in the past
+		# - Allow times in the past
 		G_CONFIG_INJECT 'FORCE=' 'FORCE=force' /etc/default/fake-hwclock
 
-		systemctl restart fake-hwclock #failsafe, apply now if date is way far back...
+		systemctl restart fake-hwclock # Failsafe, apply now if date is way far back...
 
 		G_DIETPI-NOTIFY 2 'Configuring enable serial console:'
 
 		/DietPi/dietpi/func/dietpi-set_hardware serialconsole enable
+
+		# - RPi: Depending on current config.txt and model, no all serial devices are available, so enable console manually for both:
+		if (( $G_HW_MODEL < 10 )); then
+
+			systemctl enable serial-getty@ttyAMA0
+			systemctl enable serial-getty@ttyS0
+
+		fi
 
 		G_DIETPI-NOTIFY 2 'Reducing getty count and resource usage:'
 
@@ -1368,37 +1362,38 @@ _EOF_
 
 		G_DIETPI-NOTIFY 2 'Configuring regional settings (TZdata):'
 
-		[[ -f '/etc/timezone' ]] && rm /etc/timezone
-		[[ -f '/etc/localtime' ]] && rm /etc/localtime
-		ln -sf /usr/share/zoneinfo/Europe/London /etc/localtime
+		rm -Rf /etc/{localtime,timezone}
+		ln -sf /usr/share/zoneinfo/UTC /etc/localtime
 		G_RUN_CMD dpkg-reconfigure -f noninteractive tzdata
 
 		G_DIETPI-NOTIFY 2 'Configuring regional settings (Keyboard):'
 
-		dpkg-reconfigure -f noninteractive keyboard-configuration #Keyboard must be plugged in for this to work!
+		dpkg-reconfigure -f noninteractive keyboard-configuration # Keyboard must be plugged in for this to work!
 
-		#G_DIETPI-NOTIFY 2 "Configuring regional settings (Locale):"
-
-		# Runs at start of script
+		#G_DIETPI-NOTIFY 2 "Configuring regional settings (Locale):" # Runs at start of script
 
 		# G_HW_ARCH specific
 		G_DIETPI-NOTIFY 2 'Applying G_HW_ARCH specific tweaks:'
 
 		if (( $G_HW_ARCH == 10 )); then
 
-			# - i386 APT support
+			# - i386 APT/DPKG support
 			dpkg --add-architecture i386
-			#G_AGUP # Not required here, since this will be done on every update+install
 
-			# - Disable nouveau: https://github.com/MichaIng/DietPi/issues/1244 // https://dietpi.com/phpbb/viewtopic.php?f=11&t=2462&p=9688#p9688
-			cat << _EOF_ > /etc/modprobe.d/blacklist-nouveau.conf
+			# - Disable nouveau: https://github.com/MichaIng/DietPi/issues/1244 // https://dietpi.com/phpbb/viewtopic.php?p=9688#p9688
+			rm -f /etc/modprobe.d/*nouveau*
+			cat << _EOF_ > /etc/modprobe.d/dietpi-disable_nouveau.conf
 blacklist nouveau
 blacklist lbm-nouveau
 options nouveau modeset=0
 alias nouveau off
 alias lbm-nouveau off
 _EOF_
-			echo 'options nouveau modeset=0' > /etc/modprobe.d/nouveau-kms.conf
+
+			# - Apply usb-storage quirks to disable UAS for unsupported drives (Seagate ST5000LM000-2AN170): https://github.com/MichaIng/DietPi/issues/2905
+			echo 'options usb-storage quirks=0bc2:ab30:u' > /etc/modprobe.d/dietpi-usb-storage_quirks.conf
+
+			# - Update initramfs with above changes
 			update-initramfs -u
 
 		fi
@@ -1414,13 +1409,12 @@ _EOF_
 			G_ERROR_HANDLER_COMMAND='/etc/hdparm.conf'
 			cat << _EOF_ >> $G_ERROR_HANDLER_COMMAND
 
-#DietPi external USB drive. Power management settings.
+# DietPi power management settings for external USB drive
 /dev/sda {
-		# 10 mins
-		spindown_time = 120
-
-		#
-		apm = 127
+	# Highest APM value that allows spin-down
+	apm = 127
+	# 10 minutes
+	spindown_time = 120
 }
 _EOF_
 			G_ERROR_HANDLER_EXITCODE=$?
@@ -1442,7 +1436,7 @@ _EOF_
 			tar xvf package.tar -C /lib/modules/
 			rm package.tar
 
-			#	patches
+			#	Patches
 			G_RUN_CMD wget https://raw.githubusercontent.com/sparky-sbc/sparky-test/master/dsd-marantz/snd-usb-audio.ko -O /lib/modules/3.10.38/kernel/sound/usb/snd-usb-audio.ko
 			G_RUN_CMD wget https://raw.githubusercontent.com/sparky-sbc/sparky-test/master/dsd-marantz/snd-usbmidi-lib.ko -O /lib/modules/3.10.38/kernel/sound/usb/snd-usbmidi-lib.ko
 
@@ -1450,8 +1444,7 @@ _EOF_
 uenvcmd=setenv os_type linux;
 bootargs=earlyprintk clk_ignore_unused selinux=0 scandelay console=tty0 loglevel=1 real_rootflag=rw root=/dev/mmcblk0p2 rootwait init=/lib/systemd/systemd aotg.urb_fix=1 aotg.aotg1_speed=0
 _EOF_
-
-			cp /DietPi/uEnv.txt /boot/uenv.txt #temp solution
+			cp /DietPi/uEnv.txt /boot/uenv.txt # Temp solution
 
 			#	Blacklist GPU and touch screen modules: https://github.com/MichaIng/DietPi/issues/699#issuecomment-271362441
 			cat << _EOF_ > /etc/modprobe.d/disable_sparkysbc_touchscreen.conf
@@ -1508,10 +1501,10 @@ _EOF_
 			# - Ensure WiFi module pre-exists
 			G_CONFIG_INJECT '8723bs' '8723bs' /etc/modules
 
-		# Rock64, remove HW accell config, as its not currently functional: https://github.com/MichaIng/DietPi/issues/2086
+		# - Rock64, remove HW accell config, as its not currently functional: https://github.com/MichaIng/DietPi/issues/2086
 		elif (( $G_HW_MODEL == 43 )); then
 
-			[[ -f /etc/X11/xorg.conf.d/20-armsoc.conf ]] && rm /etc/X11/xorg.conf.d/20-armsoc.conf
+			[[ -f '/etc/X11/xorg.conf.d/20-armsoc.conf' ]] && rm /etc/X11/xorg.conf.d/20-armsoc.conf
 
 		# - Odroids FFMPEG fix. Prefer debian.org over Meveric for backports: https://github.com/MichaIng/DietPi/issues/1273 + https://github.com/MichaIng/DietPi/issues/1556#issuecomment-369463910
 		elif (( $G_HW_MODEL > 9 && $G_HW_MODEL < 15 )); then
@@ -1532,7 +1525,7 @@ _EOF_
 		fi
 
 		# - ARMbian increase console verbose
-		[[ -f /boot/armbianEnv.txt ]] && sed -i '/verbosity=/c\verbosity=7' /boot/armbianEnv.txt
+		[[ -f '/boot/armbianEnv.txt' ]] && sed -i '/verbosity=/c\verbosity=7' /boot/armbianEnv.txt
 
 
 		#------------------------------------------------------------------------------------------------
@@ -1583,7 +1576,7 @@ _EOF_
 		G_DIETPI-NOTIFY 2 'Generating default wpa_supplicant.conf'
 
 		/DietPi/dietpi/func/dietpi-wifidb 1
-		#	move to /boot/ so users can modify as needed for automated
+		#	Move to /boot/ so users can modify as needed for automated
 		G_RUN_CMD mv /var/lib/dietpi/dietpi-wifi.db /boot/dietpi-wifi.txt
 
 		G_DIETPI-NOTIFY 2 'Disabling generic BT by default'
@@ -1606,7 +1599,7 @@ _EOF_
 		G_DIETPI-NOTIFY 2 "$tmp_info generic WiFi by default"
 		/DietPi/dietpi/func/dietpi-set_hardware wifimodules $tmp_mode
 
-		#	x86_64: kernel cmd line with GRUB
+		# - x86_64: kernel cmd line with GRUB
 		if (( $G_HW_ARCH == 10 )); then
 
 			l_message='Detecting additional OS installed on system' G_RUN_CMD os-prober
@@ -1678,29 +1671,28 @@ This program is distributed in the hope that it will be useful, but WITHOUT ANY 
 You should have received a copy of the GNU General Public License along with this program. If not, please see http://www.gnu.org/licenses/
 _EOF_
 
-		G_DIETPI-NOTIFY 2 'Clearing APT cache'
+		G_DIETPI-NOTIFY 2 'Disabling and clearing APT cache'
 
-		G_RUN_CMD apt-get clean
-		rm -Rfv /var/lib/apt/lists/* # Clear APT cache, gets regenerated on G_AGUP
-		#rm /var/lib/dpkg/info/* #issue...
-		#dpkg: warning: files list file for package 'libdbus-1-3:armhf' missing; assuming      package has no files currently installed
+		/DietPi/dietpi/func/dietpi-set_software apt-cache cache disable
+		/DietPi/dietpi/func/dietpi-set_software apt-cache cache clean
 
 		# - HW Specific
 		#	RPi remove saved G_HW_MODEL , allowing obtain-hw_model to auto detect RPi model
-		(( $G_HW_MODEL < 10 )) && [[ -f /etc/.dietpi_hw_model_identifier ]] && rm /etc/.dietpi_hw_model_identifier
+		(( $G_HW_MODEL < 10 )) && [[ -f '/etc/.dietpi_hw_model_identifier' ]] && rm /etc/.dietpi_hw_model_identifier
 
 		# - BBB remove fsexpansion: https://github.com/MichaIng/DietPi/issues/931#issuecomment-345451529
 		if (( $G_HW_MODEL == 71 )); then
 
+			systemctl disable dietpi-fs_partition_resize
 			rm /etc/systemd/system/dietpi-fs_partition_resize.service
 			rm /var/lib/dietpi/services/fs_partition_resize.sh
-			systemctl daemon-reload
 
 		else
 
 			l_message='Enabling automated partition and file system resize for first boot' G_RUN_CMD systemctl enable dietpi-fs_partition_resize
 
 		fi
+		l_message='Enabling first boot installation process' G_RUN_CMD systemctl enable dietpi-firstboot
 
 		G_DIETPI-NOTIFY 2 'Storing DietPi version info'
 
@@ -1758,9 +1750,9 @@ _EOF_
 
 		# Power off system
 
-		# Read image
+		# Plug SDcard/drive into external DietPi system
 
-		# Resize rootfs partition to minimum size +50MB
+		# Run https://github.com/MichaIng/DietPi/blob/dev/.meta/dietpi-imager
 
 	}
 

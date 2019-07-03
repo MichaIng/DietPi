@@ -13,12 +13,13 @@
 	FP_SCRIPT='/DietPi/dietpi/func/dietpi-set_software'
 	AVAIABLE_COMMANDS="
 Available commands:
-$FP_SCRIPT	locale			en_GB.UTF-8 / any other UTF-8 locale
-$FP_SCRIPT	allo			eth_dhcp / eth_static
+$FP_SCRIPT	locale			xx_XX.UTF-8 (eg: en_GB.UTF-8)
+$FP_SCRIPT	allo			eth_dhcp|eth_static [<address>] [<gateway>] [<netmask>] [<dns-nameserver>]
 $FP_SCRIPT	useradd			X=create user with name X and default permissions, using global DietPi password (dietpi)
 $FP_SCRIPT	userdel			X=delete user with name X
-$FP_SCRIPT	apt-mirror		url / default
-$FP_SCRIPT	ntpd-mode		[0-4] configures time sync mode (eg: daily/hourly/daemon)
+$FP_SCRIPT	apt-mirror		<url>|default
+$FP_SCRIPT	apt-cache		clean|reset|cache|lists|archives [disable|ram|disk]
+$FP_SCRIPT	ntpd-mode		[0-4] Time sync modes: 0=custom|1=boot|2=boot+daily|3=boot+hourly|4=daemon+drift
 $FP_SCRIPT	verify_dietpi.txt	Verifies dietpi.txt entries, adds missing entries if required
 $FP_SCRIPT	passwords		NULL=Prompt user to change DietPi related passwords | X=optional set X as global password for future dietpi-software installations and \"root\" + \"dietpi\" login passwords.
 $FP_SCRIPT	setpermissions		Applies required filesystem permissions to DietPi specific content, and, DietPi userdata directory for software installs
@@ -61,32 +62,30 @@ $FP_SCRIPT	setpermissions		Applies required filesystem permissions to DietPi spe
 
 	#/////////////////////////////////////////////////////////////////////////////////////
 	# locale
-	# NB: auto installs en_GB.UTF-8 alongside any input option
+	# NB: Adds en_GB.UTF-8 alongside any input option
 	#/////////////////////////////////////////////////////////////////////////////////////
 	Locale_Main(){
 
-		if [[ $INPUT_MODE_VALUE =~ 'UTF-8' ]]; then
+		if grep -q "^$INPUT_MODE_VALUE UTF-8$" /usr/share/i18n/SUPPORTED; then
 
+			# List of locales to generate, used by: dpkg-reconfigure => locale-gen
 			echo "$INPUT_MODE_VALUE UTF-8" > /etc/locale.gen
-
 			# - Add en_GB.UTF-8 back in, if not chosen, as DietPi scripts require it
 			[[ $INPUT_MODE_VALUE != 'en_GB.UTF-8' ]] && echo 'en_GB.UTF-8 UTF-8' >> /etc/locale.gen
 
-			# - Remove exisiting settings that will break dpkg-reconfigure
-			[[ -f /etc/default/locale ]] && rm /etc/default/locale
+			# Remove current defaults, will be recreated by dpkg-reconfigure with: LANG=<first /etc/locale.gen entry>
+			[[ -f '/etc/default/locale' ]] && rm /etc/default/locale
 
+			# Generate locales and set default LANG=
 			G_RUN_CMD dpkg-reconfigure -f noninteractive locales
 
-			# - Reassign locale, as in case of error (wrong locale variables) update-locale command will produce ugly errors.
-			export LANG=en_GB.UTF8
-			export LC_ALL=en_GB.UTF8
+			# Reassign override locale to current script, as in case of wrong locale variables update-locale command will produce ugly errors
+			export LC_ALL='en_GB.UTF-8'
 
-			# - Update /etc/default/locales with new values (not effective until next load of bash session, eg: logout/in)
-			update-locale "LANG=$INPUT_MODE_VALUE"
-			update-locale "LC_CTYPE=$INPUT_MODE_VALUE"
-			update-locale "LC_TIME=$INPUT_MODE_VALUE"
+			# Add new override locale to /etc/default/locales which is effective on next shell session (logout+in/reboot)
 			update-locale "LC_ALL=$INPUT_MODE_VALUE"
 
+			# Update dietpi.txt entry
 			G_CONFIG_INJECT 'AUTO_SETUP_LOCALE=' "AUTO_SETUP_LOCALE=$INPUT_MODE_VALUE" /DietPi/dietpi.txt
 
 		else
@@ -114,7 +113,7 @@ $FP_SCRIPT	setpermissions		Applies required filesystem permissions to DietPi spe
 
 				if (( $G_HW_MODEL < 10 )); then
 
-					INPUT_MODE_VALUE='http://raspbian.raspberrypi.org/raspbian'
+					INPUT_MODE_VALUE='http://raspbian.raspberrypi.org/raspbian/'
 
 				else
 
@@ -129,9 +128,6 @@ $FP_SCRIPT	setpermissions		Applies required filesystem permissions to DietPi spe
 
 				echo "deb $INPUT_MODE_VALUE $G_DISTRO_NAME main contrib non-free rpi" > /etc/apt/sources.list
 				echo "deb https://archive.raspberrypi.org/debian/ $G_DISTRO_NAME main ui" > /etc/apt/sources.list.d/raspi.list
-
-				# - Buster branch exists but is not kept updated and misses some packages (e.g. Kodi 18). Lets add both...
-				(( $G_DISTRO > 4 )) && echo 'deb https://archive.raspberrypi.org/debian/ stretch main ui' >> /etc/apt/sources.list.d/raspi.list
 
 				# - Update dietpi.txt entry
 				G_CONFIG_INJECT 'CONFIG_APT_RASPBIAN_MIRROR=' "CONFIG_APT_RASPBIAN_MIRROR=$INPUT_MODE_VALUE" /DietPi/dietpi.txt
@@ -156,11 +152,6 @@ _EOF_
 					#	- ARMv8 has been dropped from security repo
 					(( $G_HW_ARCH == 3 )) && sed -i '/debian-security/d' /etc/apt/sources.list
 
-				# - Buster, remove backports: https://github.com/MichaIng/DietPi/issues/1285#issuecomment-351830101
-				elif (( $G_DISTRO > 4 )); then
-
-					sed -i '/backports/d' /etc/apt/sources.list
-
 				fi
 
 				# - Update dietpi.txt entry
@@ -171,6 +162,107 @@ _EOF_
 		else
 
 			Unknown_Input_Mode
+
+		fi
+
+	}
+
+	#/////////////////////////////////////////////////////////////////////////////////////
+	# Set APT Cache
+	#/////////////////////////////////////////////////////////////////////////////////////
+	AptCache_Main(){
+
+		local fp='/etc/apt/apt.conf.d/99-dietpi-cache'
+
+		# Clean current cache before changing it, failsafe cleanup if custom dir was chosen before
+		apt-get clean
+
+		if [[ $INPUT_MODE_VALUE == 'reset' ]]; then
+
+			[[ -f $fp ]] && rm $fp
+			[[ -d '/tmp/apt' ]] && rm -R /tmp/apt
+			return 0
+
+		fi
+
+		[[ -f $fp ]] || echo '# Please use "dietpi-config" > "Advanded Options" > "APT Cache" to edit these settings.' > $fp
+
+		if [[ $INPUT_MODE_VALUE == 'clean' ]]; then
+
+			rm -Rf /tmp/apt /var/cache/apt /var/lib/apt/{lists,mirrors,periodic,cdroms.list}
+
+		elif [[ $INPUT_MODE_VALUE == 'cache' ]]; then
+
+			if [[ $INPUT_ADDITIONAL_1 == 'disable' ]]; then
+
+				G_CONFIG_INJECT 'Dir::Cache[[:blank:]]' 'Dir::Cache "/tmp/apt";' $fp
+				# Leave archives on disk by default
+				GCI_PRESERVE=1 G_CONFIG_INJECT 'Dir::Cache::archives[[:blank:]]' 'Dir::Cache::archives "/var/cache/apt/archives";' $fp
+				G_CONFIG_INJECT 'Dir::Cache::pkgcache[[:blank:]]' 'Dir::Cache::pkgcache "";' $fp
+				G_CONFIG_INJECT 'Dir::Cache::srcpkgcache[[:blank:]]' 'Dir::Cache::srcpkgcache "";' $fp
+				[[ -d '/var/cache/apt' ]] && rm -R /var/cache/apt
+
+			elif [[ $INPUT_ADDITIONAL_1 == 'ram' ]]; then
+
+				G_CONFIG_INJECT 'Dir::Cache[[:blank:]]' 'Dir::Cache "/tmp/apt";' $fp
+				GCI_PRESERVE=1 G_CONFIG_INJECT 'Dir::Cache::archives[[:blank:]]' 'Dir::Cache::archives "/var/cache/apt/archives";' $fp
+				sed -i '/pkgcache[[:blank:]]/d' $fp
+				[[ -d '/var/cache/apt' ]] && rm -R /var/cache/apt
+
+			elif [[ $INPUT_ADDITIONAL_1 == 'disk' ]]; then
+
+				sed -i '/^Dir::Cache/d' $fp
+				[[ -d '/tmp/apt' ]] && rm -R /tmp/apt
+
+			fi
+
+		elif [[ $INPUT_MODE_VALUE == 'lists' ]]; then
+
+			if [[ $INPUT_ADDITIONAL_1 == 'ram' ]]; then
+
+				G_CONFIG_INJECT 'Dir::State[[:blank:]]' 'Dir::State "/tmp/apt";' $fp
+				G_CONFIG_INJECT 'Dir::State::extended_states[[:blank:]]' 'Dir::State::extended_states "/var/lib/apt/extended_states";' $fp
+				G_CONFIG_INJECT 'Dir::State::status[[:blank:]]' 'Dir::State::status "/var/lib/dpkg/status";' $fp
+				rm -Rf /var/lib/apt/{lists,mirrors,periodic,cdroms.list}
+
+			elif [[ $INPUT_ADDITIONAL_1 == 'disk' ]]; then
+
+				sed -i '/^Dir::State/d' $fp
+				[[ -d '/tmp/apt' ]] && rm -R /tmp/apt
+
+			fi
+
+		elif [[ $INPUT_MODE_VALUE == 'archives' ]]; then
+
+			if [[ $INPUT_ADDITIONAL_1 == 'ram' ]]; then
+
+				# Cache needs to be in RAM as well for this to work reliable
+				G_CONFIG_INJECT 'Dir::Cache[[:blank:]]' 'Dir::Cache "/tmp/apt";' $fp
+				G_CONFIG_INJECT 'Dir::Cache::archives[[:blank:]]' 'Dir::Cache::archives "/tmp/apt/archives";' $fp
+				[[ -d '/var/cache/apt' ]] && rm -R /var/cache/apt
+
+			elif [[ $INPUT_ADDITIONAL_1 == 'disk' ]]; then
+
+				G_CONFIG_INJECT 'Dir::Cache::archives[[:blank:]]' 'Dir::Cache::archives "/var/cache/apt/archives";' $fp
+				[[ -d '/tmp/apt/archives' ]] && rm -R /tmp/apt/archives
+
+			fi
+
+		fi
+
+		if [[ -f $fp ]]; then
+
+			# Remove drop-in config if it does not contain any setting
+			if ! grep -q '^Dir' $fp; then
+
+				rm $fp
+
+			# Re-create default cache dir if archives on disk while cache in RAM, since parent dirs are not auto-created
+			elif grep -q '/var/cache/apt/archives' $fp; then
+
+				mkdir -p /var/cache/apt/archives
+
+			fi
 
 		fi
 
@@ -191,7 +283,8 @@ _EOF_
 			killall -w /DietPi/dietpi/func/run_ntpd &> /dev/null
 
 			local ntp_mirror=$(grep -m1 '^[[:blank:]]*CONFIG_NTP_MIRROR=' /DietPi/dietpi.txt | sed 's/^[^=]*=//')
-			local ntp_mirror_entry='Servers='$ntp_mirror
+			[[ $ntp_mirror ]] || ntp_mirror='default'
+			local ntp_mirror_entry="Servers=$ntp_mirror"
 
 			# - Default, lets timesyncd use DHCP server (Stretch+ only) or fallback to debian.pool.ntp.org.
 			if [[ ${ntp_mirror,,} == 'default' ]]; then
@@ -248,6 +341,7 @@ _EOF_
 			if (( $INPUT_MODE_VALUE == 4 )); then
 
 				G_AG_CHECK_INSTALL_PREREQ dbus
+				systemctl unmask systemd-timesyncd # Failsafe
 				systemctl enable systemd-timesyncd
 				systemctl start systemd-timesyncd
 
@@ -283,10 +377,10 @@ _EOF_
 		elif [[ $INPUT_MODE_VALUE == 'eth_static' ]]; then
 
 			G_CONFIG_INJECT 'iface eth' 'iface eth0 inet static' /etc/network/interfaces
-			G_CONFIG_INJECT 'address ' "address $INPUT_ADDITIONAL_1" /etc/network/interfaces
-			G_CONFIG_INJECT 'gateway ' "gateway $INPUT_ADDITIONAL_2" /etc/network/interfaces
-			G_CONFIG_INJECT 'netmask ' "netmask $INPUT_ADDITIONAL_3" /etc/network/interfaces
-			G_CONFIG_INJECT 'dns-nameservers ' "dns-nameservers $INPUT_ADDITIONAL_4" /etc/network/interfaces
+			G_CONFIG_INJECT 'address ' "address $INPUT_ADDITIONAL_1" /etc/network/interfaces '^[[:blank:]]*iface eth0'
+			G_CONFIG_INJECT 'gateway ' "gateway $INPUT_ADDITIONAL_2" /etc/network/interfaces '^[[:blank:]]*address'
+			G_CONFIG_INJECT 'netmask ' "netmask $INPUT_ADDITIONAL_3" /etc/network/interfaces '^[[:blank:]]*gateway'
+			G_CONFIG_INJECT 'dns-nameservers ' "dns-nameservers $INPUT_ADDITIONAL_4" /etc/network/interfaces '^[[:blank:]]*netmask'
 
 		else
 
@@ -301,44 +395,40 @@ _EOF_
 	#/////////////////////////////////////////////////////////////////////////////////////
 	Setpermissions_Main(){
 
-		# - Failsafe, assure /var/tmp 777 permissions: https://github.com/MichaIng/DietPi/issues/1144#issuecomment-425758727
+		# Failsafe, assure /var/tmp 777 permissions: https://github.com/MichaIng/DietPi/issues/1144#issuecomment-425758727
 		chmod 777 /var/tmp
 
-		# - DietPi-Software secure global_pw encrypted
+		# DietPi-Software secure global_pw encrypted
 		chown root:root /var/lib/dietpi/dietpi-software/.GLOBAL_PW.bin
 		chmod 600 /var/lib/dietpi/dietpi-software/.GLOBAL_PW.bin
 
-		# - /var/www / www-data
+		# Webserver
 		chown -R www-data:www-data /var/www
 		chmod -R 775 /var/www
 
-		#Apply non-root permissions for files and folders in G_FP_DIETPI_USERDATA
-
+		# Apply non-root permissions for files and folders in G_FP_DIETPI_USERDATA
 		# - dietpi user
 		#	Include symlinked locations via $G_FP_DIETPI_USERDATA/*
 		chown -R dietpi:dietpi /home/dietpi $G_FP_DIETPI_USERDATA $G_FP_DIETPI_USERDATA/*
 		chmod -R 775 $G_FP_DIETPI_USERDATA $G_FP_DIETPI_USERDATA/*
 
-		# - Apply program specific permissions
-		#	NB: Following should be ordered ascending by index to prevent dupes.
-
+		# Apply program specific permissions
+		# - NB: Following should be ordered ascending by index to prevent dupes.
 		# - Desktops
 		chown -R 775 /var/lib/dietpi/dietpi-software/installed/desktop
 		#	Set execute to prevent "untrusted" prompt in Mate, and possibily other desktops.
 		chmod +x /usr/share/applications/*
 		chmod +x /root/Desktop/*
 
-		# - O!MPD, requires write permissions
-		chmod -R 777 /var/www/ompd/tmp # Required for database update
-		chmod -R 777 /var/www/ompd/stream # Required for streaming files
-		chmod -R 777 /var/www/ompd/cache # Required for downloading files
+		# - O!MPD, requires write permissions for database, streaming and downloading
+		chmod -R 777 /var/www/ompd/{tmp,stream,cache}
 
 		# - MPD
 		chmod 0664 /var/log/mpd/mpd.log /etc/mpd.conf
 		chmod -R 775 /var/lib/mpd $G_FP_DIETPI_USERDATA/.mpd_cache
 		chown -R mpd:dietpi /etc/mpd.conf /var/log/mpd $G_FP_DIETPI_USERDATA/.mpd_cache /var/lib/mpd
 
-		# - MyMPD
+		# - myMPD
 		chown -R mympd:dietpi /var/lib/mympd
 
 		# - Mopidy
@@ -461,6 +551,9 @@ _EOF_
 		# - Blynk
 		chown -R blynk:dietpi $G_FP_DIETPI_USERDATA/blynk /var/log/blynk
 
+		# - Mycroft AI
+		chown -R mycroft:mycroft $G_FP_DIETPI_USERDATA/mycroft-core /etc/mycroft $G_FP_DIETPI_USERDATA/mycroft-data /var/log/mycroft
+
 		# - Pi-hole
 		#	- NB: Git requies special permissions to allow "pihole -up".
 		if [[ -d '/var/www/html/pihole' ]]; then
@@ -479,8 +572,27 @@ _EOF_
 
 		if [[ $INPUT_MODE_VALUE ]]; then
 
-			mkdir -p /home
-			useradd -m -s /bin/bash "$INPUT_MODE_VALUE" -p "$(grep -m1 '^[[:blank:]]*AUTO_SETUP_GLOBAL_PASSWORD=' /DietPi/dietpi.txt | sed 's/^[^=]*=//')"
+			mkdir -p /home # Failsafe
+
+			# Get global password
+			local pbkdf2=''
+			(( $G_DISTRO > 4 )) && pbkdf2='-iter 10000'
+			# - Encrypted
+			if [[ -f '/var/lib/dietpi/dietpi-software/.GLOBAL_PW.bin' ]]; then
+
+				GLOBAL_PW=$(openssl enc -d -a -md sha256 -aes-256-cbc $pbkdf2 -salt -pass pass:'DietPiRocks!' -in /var/lib/dietpi/dietpi-software/.GLOBAL_PW.bin)
+
+			# - DietPi-PREP, 1st run setup or user cancelled manual password choice
+			else
+
+				GLOBAL_PW=$(grep -m1 '^[[:blank:]]*AUTO_SETUP_GLOBAL_PASSWORD=' /DietPi/dietpi.txt | sed 's/^[^=]*=//')
+
+			fi
+			[[ $GLOBAL_PW ]] || GLOBAL_PW='dietpi'
+
+			local usercmd='useradd -m'
+			getent passwd "$INPUT_MODE_VALUE" &> /dev/null && usercmd='usermod'
+			$usercmd "$INPUT_MODE_VALUE" -p "$GLOBAL_PW" -s /bin/bash
 
 			# Copy existing profile/bashrc
 			cp /root/.profile /home/"$INPUT_MODE_VALUE"/
@@ -489,41 +601,14 @@ _EOF_
 			chown -R "$INPUT_MODE_VALUE":"$INPUT_MODE_VALUE" /home/"$INPUT_MODE_VALUE"
 
 			# Allow sudo without pw
-			if ! grep -q "^$INPUT_MODE_VALUE[[:space:]]" /etc/sudoers.d/dietpi; then
+			if ! grep -q "^$INPUT_MODE_VALUE[[:blank:]]" /etc/sudoers.d/dietpi; then
 
 				echo "$INPUT_MODE_VALUE ALL=NOPASSWD: ALL" >> /etc/sudoers.d/dietpi
 
 			fi
 
-			# Same groups as user pi
-			local group_array=()
-			group_array+=('input')
-			group_array+=('netdev')
-			group_array+=('spi')
-			group_array+=('i2c')
-			group_array+=('gpio')
-			group_array+=('tty')
-			group_array+=('users')
-			group_array+=('games')
-			group_array+=('plugdev')
-			group_array+=('video')
-			group_array+=('audio')
-			group_array+=('sudo')
-			group_array+=('cdrom')
-			group_array+=('dialout')
-			group_array+=('adm')
-
-			# Allow access to www-data
-			group_array+=('www-data')
-
-			for i in ${group_array[@]}
-			do
-
-				usermod -a -G $i "$INPUT_MODE_VALUE"
-
-			done
-
-			unset group_array
+			# Same groups as user pi + tty + www-data
+			usermod -a -G adm,dialout,chrom,sudo,audio,video,plugdev,games,users,input,netdev,spi,i2c,gpio,tty,www-data "$INPUT_MODE_VALUE"
 
 		else
 
@@ -553,50 +638,35 @@ _EOF_
 
 	Verify_DietPi_Txt(){
 
-		#Verify entries with git dietpi.txt
-		local gitbranch=$(grep -m1 '^[[:blank:]]*DEV_GITBRANCH=' /DietPi/dietpi.txt | sed 's/^[^=]*=//')
-		[[ $gitbranch ]] || gitbranch='master'
+		# Add missing entries with dietpi.txt from Git
+		local url="https://raw.githubusercontent.com/MichaIng/DietPi/$G_GITBRANCH/dietpi.txt"
+		if G_CHECK_URL "$url"; then
 
-		INSTALL_URL="https://raw.githubusercontent.com/MichaIng/DietPi/$gitbranch/dietpi.txt"
-		if G_CHECK_URL "$INSTALL_URL"; then
+			G_DIETPI-NOTIFY -2 'Channing dietpi.txt for missing entries'
+			l_message='Downloading current dietpi.txt' G_RUN_CMD wget "$url" -O dietpi.txt_patch
+			sed -Ei '/^(#|$)/d' dietpi.txt_patch
 
-			G_DIETPI-NOTIFY 0 'Patching dietpi.txt'
-			l_message='Downloading current dietpi.txt' G_RUN_CMD wget "$INSTALL_URL" -O /tmp/dietpi.txt_patch
-
-			local entry=0
-			local value=0
+			local entry value
 			while read line
 			do
 
-				entry=$(grep '^[^#;/]' <<< "$line")
+				value=${line#*=}  # *=X
+				entry=${line%%=*} # X=*
+				if ! grep -qi "^[[:blank:]]*$entry=" /DietPi/dietpi.txt; then
 
-				if [[ $entry ]]; then
-
-					value=${entry#*=}  #*=X
-					entry=${entry%%=*} #X=*
-
-					# - Patch new entry if required
-					if ! grep -qi "^[[:blank:]]*$entry=" /DietPi/dietpi.txt; then
-
-						G_DIETPI-NOTIFY 2 "Updating dietpi.txt with new entry: $entry=$value"
-						echo "$entry=$value" >> /DietPi/dietpi.txt
-
-					#else
-
-						#G_DIETPI-NOTIFY 0 "Verified: $entry"
-
-					fi
+					G_DIETPI-NOTIFY 2 "Updating dietpi.txt with new entry: $entry=$value"
+					echo "$entry=$value" >> /DietPi/dietpi.txt
 
 				fi
 
-			done < /tmp/dietpi.txt_patch
-			rm /tmp/dietpi.txt_patch
+			done < dietpi.txt_patch
+			rm dietpi.txt_patch
 
 			G_DIETPI-NOTIFY 0 'dietpi.txt verification completed'
 
 		else
 
-			G_DIETPI-NOTIFY 1 "Failed to verify dietpi.txt, $INSTALL_URL is offline and/or inaccessible"
+			G_DIETPI-NOTIFY 1 "Failed to verify dietpi.txt, $url is offline or inaccessible"
 
 		fi
 
@@ -604,8 +674,7 @@ _EOF_
 
 	Passwords_Main(){
 
-		local pw_dietpi_software=''
-		local pw_root_dietpi_users=''
+		local pw_dietpi_software pw_root_dietpi_users
 
 		# Automation/input mode, set and then apply input password to both dietpi-software and root/dietpi user passwords.
 		if [[ $INPUT_MODE_VALUE ]]; then
@@ -617,19 +686,19 @@ _EOF_
 		else
 
 			# DietPi-Software PW
-			G_WHIP_YESNO 'Do you want to adjust the default global password for DietPi-Software installations and new unix users? We especially recommend to change the default password "dietpi". This does not affect any existing unix user login.\n
-NB: This password will be saved and encrypted within /var/lib/dietpi/dietpi-software/.GLOBAL_PW.bin to be useable by DietPi scripts for e.g. web application and database logins. We highly recommend to adjust all passwords for web services and new unix users independently afterwards.'
+			G_WHIP_YESNO 'Do you want to adjust the default global software password for DietPi-Software installations? We especially recommend to change the default password "dietpi". This does not affect any existing software passwords.\n
+NB: This password will be saved and encrypted within "/var/lib/dietpi/dietpi-software/.GLOBAL_PW.bin" to be useable by DietPi scripts for e.g. web application and database logins. We highly recommend to apply individual passwords for each software title after first login.'
 			if (( ! $? )); then
 
-				G_WHIP_PASSWORD "Please enter a new global password:\nNB: The following characters are not supported \$|\\\"'"
+				G_WHIP_PASSWORD "Please enter a new global software password:\nNB: The following characters are not supported \$|\\\"'"
 				pw_dietpi_software=$result
 				unset result
 
 			fi
 
 			# Root/DietPi user PW
-			G_WHIP_YESNO 'Change unix user passwords?\n\nDietPi has two accounts by default "root" and "dietpi". On first boot, both share the global password "dietpi", respectively the one set in dietpi.txt.\n
-It is highly recommended to change this password, ideally, it should be different than the global DietPi-Software password.\n\nWould you like to change the login passwords for "root" and "dietpi"?'
+			G_WHIP_YESNO 'Change existing unix user passwords?\n\nDietPi has two accounts by default "root" and "dietpi". On first boot, both share the global password "dietpi", respectively the one set in "dietpi.txt".\n
+It is highly recommended to change this password, ideally, it should be different than the global software password.\n\nWould you like to change the login passwords for "root" and "dietpi"?'
 			if (( ! $? )); then
 
 				G_WHIP_PASSWORD 'Please enter a new unix user password:'
@@ -655,11 +724,11 @@ It is highly recommended to change this password, ideally, it should be differen
 
 			Setpermissions_Main &> /dev/null
 
-			G_DIETPI-NOTIFY 2 'Global password successfully changed'
+			G_DIETPI-NOTIFY 2 'Global software password successfully changed'
 
 		fi
 
-		# Apply | Root/DietPi users PW
+		# Apply | root/dietpi users PW
 		if [[ $pw_root_dietpi_users ]]; then
 
 			chpasswd <<< "root:$pw_root_dietpi_users"
@@ -676,11 +745,14 @@ It is highly recommended to change this password, ideally, it should be differen
 	#-----------------------------------------------------------------------------------
 	# Info
 	G_DIETPI-NOTIFY 3 "$G_PROGRAM_NAME" "$INPUT_MODE_NAME ($INPUT_MODE_VALUE)"
-
 	#-----------------------------------------------------------------------------------
 	if [[ $INPUT_MODE_NAME == 'apt-mirror' ]]; then
 
 		AptMirror_Main
+
+	elif [[ $INPUT_MODE_NAME == 'apt-cache' ]]; then
+
+		AptCache_Main
 
 	elif [[ $INPUT_MODE_NAME == 'useradd' ]]; then
 
@@ -712,7 +784,7 @@ It is highly recommended to change this password, ideally, it should be differen
 
 	elif [[ $INPUT_MODE_NAME == 'setpermissions' ]]; then
 
-		Setpermissions_Main &> /dev/null #as no file exist checks are done in bash (quicker to let the program report it missing), hide output
+		Setpermissions_Main &> /dev/null # As no file existence checks are done, hide output
 
 	else
 
