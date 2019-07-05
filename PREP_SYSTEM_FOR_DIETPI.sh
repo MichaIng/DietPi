@@ -199,7 +199,7 @@
 	G_GITOWNER=$GITOWNER; unset GITOWNER
 	G_GITBRANCH=$GITBRANCH; unset GITBRANCH
 
-	# - Detect the the Debian version of this operating system.
+	# - Detect the Debian version of this operating system.
 	if grep -q 'jessie' /etc/os-release; then
 
 		G_DISTRO=3
@@ -222,7 +222,7 @@
 
 	fi
 
-	# - Detect the the hardware architecture of this operating system.
+	# - Detect the hardware architecture of this operating system.
 	G_HW_ARCH_DESCRIPTION=$(uname -m)
 	if [[ $G_HW_ARCH_DESCRIPTION == 'armv6l' ]]; then
 
@@ -495,7 +495,6 @@
 			G_WHIP_DEFAULT_ITEM=1
 			(( $G_HW_MODEL == 20 )) && G_WHIP_DEFAULT_ITEM=0
 			if G_WHIP_MENU 'Please select an option:'; then
-
 
 				WIFI_REQUIRED=$G_WHIP_RETURNED_VALUE
 
@@ -1526,7 +1525,6 @@ _EOF_
 
 		# - ARMbian increase console verbose
 		[[ -f '/boot/armbianEnv.txt' ]] && sed -i '/verbosity=/c\verbosity=7' /boot/armbianEnv.txt
-
 
 		#------------------------------------------------------------------------------------------------
 		echo ''
