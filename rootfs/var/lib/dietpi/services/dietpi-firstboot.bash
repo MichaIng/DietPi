@@ -185,19 +185,9 @@
 		(( $G_HW_MODEL < 10 )) && target_repo='CONFIG_APT_RASPBIAN_MIRROR'
 		/DietPi/dietpi/func/dietpi-set_software apt-mirror "$(grep -m1 "^[[:blank:]]*$target_repo=" /DietPi/dietpi.txt | sed 's/^[^=]*=//')"
 
-		# Generate unique Dropbear host keys:
+		# Regenerate unique Dropbear host keys:
 		rm -f /etc/dropbear/*_host_key
-		# - Distro specific package and on Jessie, ECDSA is not created automatically
-		if (( $G_DISTRO < 4 )); then
-
-			dpkg-reconfigure -f noninteractive dropbear
-			dropbearkey -t ecdsa -f /etc/dropbear/dropbear_ecdsa_host_key
-
-		else
-
-			dpkg-reconfigure -f noninteractive dropbear-run
-
-		fi
+		dpkg-reconfigure -f noninteractive dropbear-run
 
 		# Recreate machine-id: https://github.com/MichaIng/DietPi/issues/2015
 		[[ -f '/etc/machine-id' ]] && rm /etc/machine-id
