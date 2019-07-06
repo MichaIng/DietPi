@@ -513,9 +513,8 @@
 		# Distro Selection
 		DISTRO_LIST_ARRAY=(
 
-			'3' ': jessie-support' #REMOVE v6.24
 			'4' ': Stretch (current stable release, recommended)'
-			'5' ': Buster (testing only, not officially supported)'
+			'5' ': Buster (next stable release)'
 
 		)
 
@@ -579,11 +578,7 @@
 
 		done
 
-		if (( $DISTRO_TARGET == 3 )); then #REMOVE v6.24
-
-			DISTRO_TARGET_NAME='jessie'
-
-		elif (( $DISTRO_TARGET == 4 )); then
+		if (( $DISTRO_TARGET == 4 )); then
 
 			DISTRO_TARGET_NAME='stretch'
 
@@ -948,6 +943,7 @@ _EOF_
 		# - Distro is now target (for APT purposes and G_AGX support due to installed binary, its here, instead of after G_AGUP)
 		G_DISTRO=$DISTRO_TARGET
 		G_DISTRO_NAME=$DISTRO_TARGET_NAME
+		unset DISTRO_TARGET DISTRO_TARGET_NAME
 
 		G_DIETPI-NOTIFY 2 'Installing core DietPi pre-req APT packages'
 
