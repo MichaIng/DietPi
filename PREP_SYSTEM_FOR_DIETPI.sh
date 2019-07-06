@@ -71,7 +71,7 @@
 	[[ -f '/etc/apt/sources.list.d/openmediavault.list' ]] && rm /etc/apt/sources.list.d/openmediavault.list
 
 	# Fixing sources.list due to Debian dropped Jessie support: https://github.com/MichaIng/DietPi/issues/2665
-	if grep -qi 'jessie' /etc/os-release && ! grep -qi 'raspbian' /etc/os-release; then
+	if grep -q 'jessie' /etc/os-release && ! grep -qi 'raspbian' /etc/os-release; then
 
 		if [[ $(uname -m) == 'aarch64' ]]; then
 
@@ -119,7 +119,7 @@
 	# Setup locale
 	# - Remove existing settings that could break dpkg-reconfigure locales
 	> /etc/environment
-	[[ -f /etc/default/locale ]] && rm /etc/default/locale
+	[[ -f '/etc/default/locale' ]] && rm /etc/default/locale
 
 	# - NB: DEV, any changes here must be also rolled into function '/DietPi/dietpi/func/dietpi-set_software locale', for future script use
 	echo 'en_GB.UTF-8 UTF-8' > /etc/locale.gen
@@ -152,8 +152,6 @@
 			'dev' ': Unstable dev branch'
 
 		)
-
-		grep -qi 'jessie' /etc/os-release && aWHIP_BRANCH+=( 'jessie-support' 'EOS') #REMOVE v6.24
 
 		if GITBRANCH=$(whiptail --title "$G_PROGRAM_NAME" --menu 'Please select the Git branch the installer should use:' --default-item 'master' --ok-button 'Ok' --cancel-button 'Exit' --backtitle "$G_PROGRAM_NAME" 12 80 3 "${aWHIP_BRANCH[@]}" 3>&1 1>&2 2>&3); then
 
@@ -259,7 +257,7 @@
 		((SETUP_STEP++))
 		G_DIETPI-NOTIFY 2 '-----------------------------------------------------------------------------------'
 		#------------------------------------------------------------------------------------------------
-		if [[ -d /DietPi/dietpi || -d /boot/dietpi ]]; then
+		if [[ -d '/DietPi/dietpi' || -d '/boot/dietpi' ]]; then
 
 			G_DIETPI-NOTIFY 2 'DietPi system found, removing the old files and stopping services. (pre-prep)'
 
@@ -395,19 +393,19 @@
 			'22' ': Generic device (unknown to DietPi)'
 			'' '●─ SBC─(Core devices, with GPU support) '
 			'52' ': ASUS Tinker Board'
-			'10' ': Odroid C1'
 			'12' ': Odroid C2'
 			'11' ': Odroid XU3/XU4/HC1/HC2'
 			'44' ': Pinebook 1080p'
 			'0' ': Raspberry Pi (All models)'
-			# '1' ': Raspberry Pi 1/Zero (512mb)'
-			# '2' ': Raspberry Pi 2'
-			# '3' ': Raspberry Pi 3/3+'
-			# '4' ': Raspberry Pi 4'
+			#'1' ': Raspberry Pi 1/Zero (512mb)'
+			#'2' ': Raspberry Pi 2'
+			#'3' ': Raspberry Pi 3/3+'
+			#'4' ': Raspberry Pi 4'
 			'' '●─ PC '
 			'21' ': x86_64 Native PC'
-			'20' ': x86_64 VMware/VirtualBox'
+			'20' ': x86_64 Virtual Machine'
 			'' '●─ SBC─(Limited support devices, no GPU support) '
+			'10' ': Odroid C1'
 			'53' ': BananaPi (sinovoip)'
 			'51' ': BananaPi Pro (Lemaker)'
 			'50' ': BananaPi M2+ (sinovoip)'
@@ -611,7 +609,7 @@
 		l_message='Extracting DietPi sourcecode' G_RUN_CMD unzip package.zip
 		rm package.zip
 
-		[[ -d /boot ]] || l_message='Creating /boot' G_RUN_CMD mkdir -p /boot
+		[[ -d '/boot' ]] || l_message='Creating /boot' G_RUN_CMD mkdir -p /boot
 
 		G_DIETPI-NOTIFY 2 'Moving kernel and boot configuration to /boot'
 
@@ -948,13 +946,9 @@ _EOF_
 		G_DIETPI-NOTIFY 2 'Installing core DietPi pre-req APT packages'
 
 		G_AGI ${aPACKAGES_REQUIRED_INSTALL[@]}
-
 		unset aPACKAGES_REQUIRED_INSTALL
 
 		G_AGA
-
-		# Reenable HTTPS for deb.debian.org, since system was dist-upgraded to Stretch+
-		(( $G_HW_MODEL > 9 )) && sed -i 's/http:/https:/g' /etc/apt/sources.list
 
 		#------------------------------------------------------------------------------------------------
 		echo ''
@@ -1024,12 +1018,9 @@ _EOF_
 			for j in /etc/init.d/$i /{etc,lib,usr/lib}/systemd/system/$i.service{,.d}
 			do
 
-				if [[ -e $j ]]; then
-
-					[[ -f $j ]] && systemctl disable --now ${j##*/}
-					rm -R $j
-
-				fi
+				[[ -e $j ]] || continue
+				[[ -f $j ]] && systemctl disable --now ${j##*/}
+				rm -R $j
 
 			done
 
@@ -1352,8 +1343,7 @@ _EOF_
 		systemctl mask getty-static
 		# - logind features disabled by default. Usually not needed and all features besides auto getty creation are not available without libpam-systemd package.
 		#	- It will be unmasked/enabled, automatically if libpam-systemd got installed during dietpi-software install, usually with desktops.
-		systemctl stop systemd-logind
-		systemctl disable systemd-logind &> /dev/null
+		systemctl disable --now systemd-logind &> /dev/null
 		systemctl mask systemd-logind
 
 		G_DIETPI-NOTIFY 2 'Configuring regional settings (TZdata):'
@@ -1508,12 +1498,12 @@ _EOF_
 			rm -f /etc/apt/preferences.d/meveric*
 			cat << _EOF_ > /etc/apt/preferences.d/dietpi-meveric-backports
 Package: *
-Pin: release a=jessie-backports
+Pin: release a=stretch-backports
 Pin: origin "fuzon.co.uk"
 Pin-Priority: 99
 
 Package: *
-Pin: release a=jessie-backports
+Pin: release a=stretch-backports
 Pin: origin "oph.mdrjr.net"
 Pin-Priority: 99
 _EOF_
@@ -1564,7 +1554,7 @@ _EOF_
 		G_DIETPI-NOTIFY 2 'Resetting boot.ini, config.txt, cmdline.txt etc'
 
 		# - PineA64 - delete ethaddr from uEnv.txt file
-		(( $G_HW_MODEL == 40 )) && [[ -f /boot/uEnv.txt ]] && sed -i '/^ethaddr/ d' /boot/uEnv.txt
+		[[ $G_HW_MODEL == 40 && -f '/boot/uEnv.txt' ]] && sed -i '/^ethaddr/ d' /boot/uEnv.txt
 
 		# - Set Pi cmdline.txt back to normal
 		[[ -f '/boot/cmdline.txt' ]] && sed -i 's/ rootdelay=10//g' /boot/cmdline.txt
