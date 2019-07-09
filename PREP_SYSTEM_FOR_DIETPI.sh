@@ -805,7 +805,7 @@ _EOF_
 
 		# - G_HW_MODEL specific required Kernel packages
 		#	ARMbian grab currently installed packages
-		elif dpkg --get-selections | grep -qi armbian; then
+		elif dpkg --get-selections | grep -qi 'armbian'; then
 
 			systemctl stop armbian-*
 
@@ -1325,15 +1325,25 @@ _EOF_
 
 		systemctl restart fake-hwclock # Failsafe, apply now if date is way far back...
 
-		G_DIETPI-NOTIFY 2 'Configuring enable serial console:'
+		G_DIETPI-NOTIFY 2 'Configuring serial login consoles:'
 
-		/DietPi/dietpi/func/dietpi-set_hardware serialconsole enable
+		# - On virtual machines, serial consoles are not required
+		if (( $G_HW_MODEL == 20 )); then
 
-		# - RPi: Depending on current config.txt and model, no all serial devices are available, so enable console manually for both:
-		if (( $G_HW_MODEL < 10 )); then
+			/DietPi/dietpi/func/dietpi-set_hardware serialconsole disable
 
-			systemctl enable serial-getty@ttyAMA0
-			systemctl enable serial-getty@ttyS0
+		else
+
+			/DietPi/dietpi/func/dietpi-set_hardware serialconsole enable
+			# - RPi: Depending on current config.txt and model, not all serial devices are available, so enable console manually for both:
+			if (( $G_HW_MODEL < 10 )); then
+
+				systemctl unmask serial-getty@ttyAMA0
+				systemctl enable serial-getty@ttyAMA0
+				systemctl unmask serial-getty@ttyS0
+				systemctl enable serial-getty@ttyS0
+
+			fi
 
 		fi
 
