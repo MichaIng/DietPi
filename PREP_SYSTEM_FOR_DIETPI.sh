@@ -791,8 +791,7 @@ _EOF_
 			G_AGI linux-image-amd64 os-prober
 
 			#	Grub EFI
-			if dpkg-query -s 'grub-efi-amd64' &> /dev/null ||
-				[[ -d '/boot/efi' ]]; then
+			if dpkg-query -s 'grub-efi-amd64' &> /dev/null || [[ -d '/boot/efi' ]]; then
 
 				G_AGI grub-efi-amd64
 
@@ -826,13 +825,9 @@ _EOF_
 				while read -r line
 				do
 
-					if [[ $line ]]; then
-
-						aPACKAGES_REQUIRED_INSTALL+=("$line")
-						apt-mark hold $line
-						G_DIETPI-NOTIFY 2 "PKG detected and set on hold: $line"
-
-					fi
+					aPACKAGES_REQUIRED_INSTALL+=("$line")
+					apt-mark hold $line
+					G_DIETPI-NOTIFY 2 "PKG detected and set on hold: $line"
 
 				done <<< "$(dpkg --get-selections | mawk -v pat="^$i" '$0~pat {print $1}')"
 
@@ -874,7 +869,7 @@ _EOF_
 		# - Auto detect kernel package incl. ARMbian/others DTB
 		else
 
-			AUTO_DETECT_KERN_PKG=$(dpkg --get-selections | grep -E '^linux-(image|dtb)' | mawk '{print $1}')
+			AUTO_DETECT_KERN_PKG=$(dpkg --get-selections | mawk '/^linux-(image|dtb)/ {print $1}')
 			if [[ $AUTO_DETECT_KERN_PKG ]]; then
 
 				G_AGI $AUTO_DETECT_KERN_PKG
@@ -897,17 +892,31 @@ _EOF_
 			#	Usually no firmware should be necessary for VMs. If user manually passes though some USB device, user might need to install the firmware then.
 			if (( $G_HW_MODEL != 20 )); then
 
-				aPACKAGES_REQUIRED_INSTALL+=('firmware-realtek')	# Eth/WiFi/BT dongle firmware
-				aPACKAGES_REQUIRED_INSTALL+=('firmware-linux-nonfree')  # Various drivers for generic devices
+				aPACKAGES_REQUIRED_INSTALL+=('firmware-realtek')		# Realtek Eth+WiFi+BT dongle firmware
+				if (( $G_HW_ARCH == 10 )); then
+
+					aPACKAGES_REQUIRED_INSTALL+=('firmware-linux')		# Misc free+nonfree firmware
+
+				else
+
+					aPACKAGES_REQUIRED_INSTALL+=('firmware-linux-free')	# Misc free firmware
+					aPACKAGES_REQUIRED_INSTALL+=('firmware-misc-nonfree')	# Misc nonfree firmware + Ralink WiFi
+
+				fi
 
 			fi
 
 			if (( $WIFI_REQUIRED )); then
 
-				aPACKAGES_REQUIRED_INSTALL+=('firmware-atheros')	# WiFi dongle firmware
-				aPACKAGES_REQUIRED_INSTALL+=('firmware-brcm80211')	# WiFi dongle firmware
-				aPACKAGES_REQUIRED_INSTALL+=('firmware-iwlwifi')	# Intel WiFi dongle/PCI-e firwmare
-				aPACKAGES_REQUIRED_INSTALL+=('firmware-misc-nonfree')	# Intel/Nvidia/WiFi (Ralink) dongle firmware
+				aPACKAGES_REQUIRED_INSTALL+=('firmware-atheros')		# Qualcomm/Atheros WiFi+BT dongle firmware
+				aPACKAGES_REQUIRED_INSTALL+=('firmware-brcm80211')		# Breadcom WiFi dongle firmware
+				aPACKAGES_REQUIRED_INSTALL+=('firmware-iwlwifi')		# Intel WiFi dongle+PCIe firmware
+				if (( $G_HW_MODEL == 20 )); then
+
+					aPACKAGES_REQUIRED_INSTALL+=('firmware-realtek')	# Realtek Eth+WiFi+BT dongle firmware
+					aPACKAGES_REQUIRED_INSTALL+=('firmware-misc-nonfree')	# Misc nonfree firmware + Ralink WiFi
+
+				fi
 
 			fi
 
@@ -925,6 +934,8 @@ _EOF_
 		# - dhcpcd5: https://github.com/MichaIng/DietPi/issues/1560#issuecomment-370136642
 		# - mountall: https://github.com/MichaIng/DietPi/issues/2613
 		G_AGP dbus dhcpcd5 mountall
+		# Remove any autoremove prevention
+		rm -f /etc/apt/apt.conf.d/01autoremove*
 		G_AGA
 
 		#------------------------------------------------------------------------------------------------
@@ -960,12 +971,12 @@ _EOF_
 		G_DIETPI-NOTIFY 2 'Deleting list of known users, not required by DietPi'
 
 		getent passwd pi &> /dev/null && userdel -f pi
-		getent passwd test &> /dev/null && userdel -f test #@fourdee
+		getent passwd test &> /dev/null && userdel -f test # @fourdee
 		getent passwd odroid &> /dev/null && userdel -f odroid
 		getent passwd rock64 &> /dev/null && userdel -f rock64
-		getent passwd linaro &> /dev/null && userdel -f linaro #ASUS TB
-		getent passwd dietpi &> /dev/null && userdel -f dietpi #recreated below
-		getent passwd debian &> /dev/null && userdel -f debian #BBB
+		getent passwd linaro &> /dev/null && userdel -f linaro # ASUS TB
+		getent passwd dietpi &> /dev/null && userdel -f dietpi # recreated below
+		getent passwd debian &> /dev/null && userdel -f debian # BBB
 
 		G_DIETPI-NOTIFY 2 'Removing misc files/folders/services, not required by DietPi'
 
@@ -1033,7 +1044,7 @@ _EOF_
 		[[ -d '/usr/lib/armbian' ]] && rm -R /usr/lib/armbian
 		[[ -f '/usr/local/sbin/log2ram' ]] && rm /usr/local/sbin/log2ram
 		[[ -d '/usr/share/armbian' ]] && rm -R /usr/share/armbian
-		#rm -f /etc/armbian* armbian-release required for kernel package update success.
+		#rm -f /etc/armbian* armbian-release required for kernel package update (initramfs postinst)
 		rm -f /etc/apt/apt.conf.d/*armbian*
 		rm -f /etc/cron.*/armbian*
 		rm -f /etc/default/armbian*
