@@ -4151,7 +4151,7 @@ _EOF_
 			# Install
 			wget "$INSTALL_URL_ADDRESS" -O install.sh
 			chmod +x install.sh
-			# - Skip Lighttpd install, since user properly has chosen a different one, which was installed as pre-req.
+			# - Skip Lighttpd install, since we allow to choose and install prior to Pi-hole
 			./install.sh --disable-install-webserver
 			# - We can't do reasonable exit code check, since installer always returns 5!
 			rm install.sh
@@ -6965,9 +6965,11 @@ _EOF_
 
 			Banner_Configuration
 
-			# www path
-			G_BACKUP_FP /etc/lighttpd/lighttpd.conf
+			# Webroot
 			sed -i '/^server.document-root/c\server.document-root        = "/var/www"' /etc/lighttpd/lighttpd.conf
+			# - Move default page
+			mv /var/www/html/index.lighttpd.html /var/www/
+			rmdir --ignore-fail-on-non-empty /var/www/html
 
 			# Fix in case Lighttpd got updated to Buster version (on ARMv6 due to PHP7.3 libssl1.1 depedency)
 			# - "create-mime.assign.pl" has been renamed to "create-mime.conf.pl"
@@ -6987,14 +6989,9 @@ fastcgi.server += ( ".php" =>
         ))
 )
 _EOF_
-
-			# Enable cgi/php
+			# - Enable modules
 			lighttpd-enable-mod fastcgi
 			lighttpd-enable-mod fastcgi-php
-
-			# Move default page
-			mv /var/www/html/index.lighttpd.html /var/www/
-			rmdir --ignore-fail-on-non-empty /var/www/html
 
 		fi
 
@@ -8738,15 +8735,29 @@ _EOF_
 
 			Banner_Configuration
 
-			# - Create symlinks to align Pi-hole admin and blocking page relative to webroot
+			# Generate web interface PW: https://github.com/MichaIng/DietPi/issues/662
+			pihole -a -p "$GLOBAL_PW"
+
+			# Add Lighttpd config
+			if (( ${aSOFTWARE_INSTALL_STATE[84]} > 0 )); then
+
+				# Enable setenv module
+				G_CONFIG_INJECT '"mod_setenv",' '	"mod_setenv",' /etc/lighttpd/lighttpd.conf '"mod_.+",'
+				# Add and enable Pi-hole config
+				dps_index=$software_id Download_Install 'lighttpd.pihole.conf' /etc/lighttpd/conf-available/99-dietpi-pihole.conf
+				lighttpd-enable-mod dietpi-pihole
+
+			fi
+
+			# Create symlinks to align Pi-hole admin and blocking page relative to webroot
 			cd /var/www
-			#	Move existing files/dirs out of the way
-			[[ -L admin ]] || { [[ -e admin ]] && mv -v admin admin.bak; }
+			# - Move existing files/dirs out of the way
+			[[ -L 'admin' ]] || { [[ -e 'admin' ]] && mv -v admin admin.bak; }
 			ln -vsf html/admin admin
-			[[ -L pihole ]] || { [[ -e pihole ]] && mv -v pihole pihole.bak; }
+			[[ -L 'pihole' ]] || { [[ -e 'pihole' ]] && mv -v pihole pihole.bak; }
 			ln -vsf html/pihole pihole
 
-			# - Ask user whether to show blocking page
+			# Ask user whether to show blocking page
 			G_WHIP_BUTTON_OK_TEXT='YES'
 			G_WHIP_BUTTON_CANCEL_TEXT='NO'
 			if G_WHIP_YESNO 'Pi-hole can show a blocking page, when clients access a blocked website. This allows you to whitelist domains directly from the blocking page and prevents the need to access the admin page or use the Pi-hole CLI for this.\n
@@ -8754,8 +8765,8 @@ The downside is additional traffic and less performance compared to a silent req
 Do you want to enable the Pi-hole blocking page?'; then
 
 				G_CONFIG_INJECT 'BLOCKINGMODE=' 'BLOCKINGMODE=IP-NODATA-AAAA' /etc/pihole/pihole-FTL.conf
-				#	Link blocking page to webroot, where it is required
-				[[ -L index.php ]] || { [[ -e index.php ]] && mv -v index.php index.php.bak; }
+				# - Link blocking page to webroot, where it is required
+				[[ -L 'index.php' ]] || { [[ -e 'index.php' ]] && mv -v index.php index.php.bak; }
 				ln -vsf pihole/index.php index.php
 
 			else
@@ -8765,16 +8776,17 @@ Do you want to enable the Pi-hole blocking page?'; then
 			fi
 			cd /tmp/$G_PROGRAM_NAME
 
-			# - Fix service to disable syslog pre-req preventing start
+			# Fix service to disable syslog pre-req preventing start
 			G_CONFIG_INJECT '# Required-Stop:' '# Required-Stop: $network $remote_fs' /etc/init.d/pihole-FTL
 			G_CONFIG_INJECT '# Required-Start:' '# Required-Start: $network $remote_fs' /etc/init.d/pihole-FTL
 			systemctl enable pihole-FTL
 
-			# - Run Gravity
-			pihole -g
+			# Disable pihole.log: https://github.com/pi-hole/FTL/issues/614#issuecomment-510564476
+			pihole -l off
+			rm /var/log/pihole.log
 
-			# - Generate web interface PW: https://github.com/MichaIng/DietPi/issues/662
-			pihole -a -p "$GLOBAL_PW" &> /dev/null # do not print
+			# Run Gravity
+			pihole -g
 
 		fi
 
@@ -12412,10 +12424,10 @@ _EOF_
 			Banner_Uninstalling
 			G_AGP lighttpd
 
-			# Remove certbot renewal hook:
-			rm /etc/systemd/system/certbot.service.d/dietpi-lighttpd.conf &> /dev/null
-			# Remove hook directory only, if empty:
-			rmdir /etc/systemd/system/certbot.service.d &> /dev/null
+			# Remove certbot renewal hook
+			[[ -f 'etc/systemd/system/certbot.service.d/dietpi-lighttpd.conf' ]] && rm /etc/systemd/system/certbot.service.d/dietpi-lighttpd.conf
+			# Remove hook directory if empty
+			rmdir --ignore-fail-on-non-empty /etc/systemd/system/certbot.service.d
 
 		fi
 
@@ -13103,26 +13115,31 @@ _EOF_
 			Banner_Uninstalling
 			pihole uninstall
 
-			# - pihole-FTL service+binary
-			systemctl disable pihole-FTL &> /dev/null
-			systemctl stop pihole-FTL &> /dev/null
-			rm /etc/init.d/pihole-FTL &> /dev/null
-			rm /usr/bin/pihole-FTL &> /dev/null
+			# pihole-FTL service+binary
+			if [[ -f '/etc/init.d/pihole-FTL' ]]; then
 
-			rm -R /etc/pihole &> /dev/null
-			rm -R /etc/.pihole &> /dev/null
-			rm -R /opt/pihole &> /dev/null
-			rm -R /var/www/html/admin &> /dev/null
-			rm -R /var/www/html/pihole &> /dev/null
+				systemctl unmask pihole-FTL
+				systemctl disable --now pihole-FTL
+				rm /etc/init.d/pihole-FTL
 
-			# - symlinks
-			rm /var/www/pihole &> /dev/null
-			rm /var/www/admin &> /dev/null
+			fi
+			[[ -f '/usr/bin/pihole-FTL' ]] && rm /usr/bin/pihole-FTL
+
+			# Dirs
+			[[ -d '/etc/pihole' ]] && rm -R /etc/pihole
+			[[ -d '/etc/.pihole' ]] && rm -R /etc/.pihole
+			[[ -d '/opt/pihole' ]] && rm -R /opt/pihole
+			[[ -d '/var/www/html/admin' ]] && rm -R /var/www/html/admin
+			[[ -d '/var/www/html/pihole' ]] && rm -R /var/www/html/pihole
+
+			# Symlinks
+			[[ -L '/var/www/pihole' ]] && rm /var/www/pihole
+			[[ -L '/var/www/admin' ]] && rm /var/www/admin
 			[[ $(readlink /var/www/index.php) == 'pihole/index.php' ]] && rm /var/www/index.php
 
-			# - pre Pi-hole v4
+			# Pre Pi-hole v4
 			G_AGP dnsmasq
-			rm -R /etc/dnsmasq* &> /dev/null
+			rm -Rf /etc/dnsmasq*
 
 		fi
 
