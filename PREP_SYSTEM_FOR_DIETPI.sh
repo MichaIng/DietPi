@@ -691,8 +691,10 @@ _EOF_
 		G_ERROR_HANDLER_EXITCODE=$?
 		G_ERROR_HANDLER
 
-		G_DIETPI-NOTIFY 2 'Preserve modified config files on APT update:'
+		G_DIETPI-NOTIFY 2 'Disable package state translation downloads:'
+		echo 'Acquire::Languages "none";' > /etc/apt/apt.conf.d/98-dietpi-no_translations
 
+		G_DIETPI-NOTIFY 2 'Preserve modified config files on APT update:'
 		G_ERROR_HANDLER_COMMAND='/etc/apt/apt.conf.d/99-dietpi-forceconf'
 		cat << _EOF_ > $G_ERROR_HANDLER_COMMAND
 Dpkg::options {
