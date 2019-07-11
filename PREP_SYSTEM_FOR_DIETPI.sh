@@ -31,10 +31,10 @@
 	#------------------------------------------------------------------------------------------------
 	# Critical checks and pre-reqs, with exit, prior to initial run of script
 	#------------------------------------------------------------------------------------------------
-	#Exit path for non-root logins
+	# Exit path for non-root executions
 	if (( $UID )); then
 
-		echo -e 'ERROR: Root privileges required, please run the script with "sudo"\nIn case install the "sudo" package with root privileges:\n\t# apt-get install -y sudo\n'
+		echo -e '[FAILED] Root privileges required, please run the script with "sudo"\nIn case install the "sudo" package with root privileges:\n\t# apt-get install -y sudo\n'
 		exit 1
 
 	fi
@@ -67,10 +67,10 @@
 	# Removing conflicting /etc/apt/sources.list.d entries
 	# - Meveric: https://github.com/MichaIng/DietPi/issues/1285#issuecomment-355759321
 	[[ -f '/etc/apt/sources.list.d/deb-multimedia.list' ]] && rm /etc/apt/sources.list.d/deb-multimedia.list
-	# - OMV: https://dietpi.com/phpbb/viewtopic.php?f=11&t=2772&p=10646#p10594
+	# - OMV: https://dietpi.com/phpbb/viewtopic.php?f=11&t=2772
 	[[ -f '/etc/apt/sources.list.d/openmediavault.list' ]] && rm /etc/apt/sources.list.d/openmediavault.list
 
-	# Fixing sources.list due to Debian dropped Jessie support: https://github.com/MichaIng/DietPi/issues/2665
+	# Fixing sources.list as Debian dropped Jessie support: https://github.com/MichaIng/DietPi/issues/2665
 	if grep -q 'jessie' /etc/os-release && ! grep -qi 'raspbian' /etc/os-release; then
 
 		if [[ $(uname -m) == 'aarch64' ]]; then
@@ -134,7 +134,7 @@
 	fi
 
 	# - Update /etc/default/locales with new values (not effective until next load of bash session, eg: logout/in)
-	update-locale LC_ALL=en_GB.UTF-8
+	update-locale 'LC_ALL=en_GB.UTF-8'
 
 	# - Export locale vars to assure the following whiptail being beautiful
 	export LC_ALL='en_GB.UTF-8'
@@ -147,22 +147,19 @@
 
 		aWHIP_BRANCH=(
 
-			'master' ': Stable release (recommended)'
+			'master' ': Stable release branch (recommended)'
 			'beta' ': Public beta testing branch'
-			'dev' ': Unstable dev branch'
+			'dev' ': Unstable development branch'
 
 		)
 
-		if GITBRANCH=$(whiptail --title "$G_PROGRAM_NAME" --menu 'Please select the Git branch the installer should use:' --default-item 'master' --ok-button 'Ok' --cancel-button 'Exit' --backtitle "$G_PROGRAM_NAME" 12 80 3 "${aWHIP_BRANCH[@]}" 3>&1 1>&2 2>&3); then
-
-			unset aWHIP_BRANCH
-
-		else
+		if ! GITBRANCH=$(whiptail --title "$G_PROGRAM_NAME" --menu 'Please select the Git branch the installer should use:' --default-item 'master' --ok-button 'Ok' --cancel-button 'Exit' --backtitle "$G_PROGRAM_NAME" 12 80 3 "${aWHIP_BRANCH[@]}" 3>&1 1>&2 2>&3); then
 
 			echo -e '[ INFO ] No choice detected. Aborting...\n'
 			exit 0
 
 		fi
+		unset aWHIP_BRANCH
 
 	fi
 
@@ -271,7 +268,7 @@
 			do
 
 				[[ -f $i ]] || continue
-				systemctl disable ${i##*/}
+				systemctl disable --now ${i##*/}
 				rm $i
 
 			done
@@ -342,7 +339,6 @@
 					fi
 
 				done
-
 				unset aDISALLOWED_NAMES
 
 				if (( $DISALLOWED_NAME )); then
@@ -510,8 +506,8 @@
 		# Distro Selection
 		DISTRO_LIST_ARRAY=(
 
-			'4' ': Stretch (current stable release, recommended)'
-			'5' ': Buster (next stable release)'
+			'4' ': Stretch (oldstable, if SBC firmware is not yet Buster-compatible)'
+			'5' ': Buster (current stable release, recommended)'
 
 		)
 
@@ -534,7 +530,6 @@
 			fi
 
 		done
-
 		unset DISTRO_LIST_ARRAY
 
 		if (( ! ${#G_WHIP_MENU_ARRAY[@]} )); then
@@ -560,16 +555,16 @@
 
 			G_WHIP_DEFAULT_ITEM=${G_WHIP_MENU_ARRAY[0]} # Downgrades disabled, so first item matches current/lowest supported distro version
 			G_WHIP_BUTTON_CANCEL_TEXT='Exit'
-			G_WHIP_MENU "Please select a distro version to install on this system. Selecting a distro that is older than the current installed on system, is not supported.\n\nCurrently installed:\n - $G_DISTRO $G_DISTRO_NAME"
-			if (( $? )); then
-
-				G_DIETPI-NOTIFY 1 'No choice detected. Aborting...\n'
-				exit 0
-
-			else
+			if G_WHIP_MENU "Please select a Debian version to install on this system.\n
+Currently installed: $G_DISTRO $G_DISTRO_NAME"; then
 
 				DISTRO_TARGET=$G_WHIP_RETURNED_VALUE
 				break
+
+			else
+
+				G_DIETPI-NOTIFY 1 'No choice detected. Aborting...\n'
+				exit 0
 
 			fi
 
