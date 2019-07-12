@@ -1674,7 +1674,7 @@ _EOF_
 		G_DIETPI-NOTIFY 2 'Disabling and clearing APT cache'
 
 		/DietPi/dietpi/func/dietpi-set_software apt-cache cache disable
-		/DietPi/dietpi/func/dietpi-set_software apt-cache cache clean
+		/DietPi/dietpi/func/dietpi-set_software apt-cache clean
 
 		# - HW Specific
 		#	RPi remove saved G_HW_MODEL , allowing obtain-hw_model to auto detect RPi model
