@@ -8,7 +8,7 @@
 	# Updated by MichaIng / micha@dietpi.com / dietpi.com
 	#
 	#////////////////////////////////////
-	# - Read drive to new .img file | or use existing .img file
+	# - Create new .img file from drive | or use existing .img file
 	# - Minimises root partition and file system
 	# - Hashes and 7z's the final image ready for release
 	#////////////////////////////////////
@@ -21,7 +21,7 @@
 	G_INIT
 	# Import DietPi-Globals ---------------------------------------------------------------
 
-	FP_SOURCE_FILE=''
+	FP_SOURCE_IMG=''
 	FP_SOURCE=''
 	FP_ROOT_DEV=''
 	ROOT_PARTITION_INDEX=0
@@ -37,7 +37,7 @@
 
 	Exit_On_Fail(){
 
-		[[ $FP_SOURCE_FILE ]] && Delete_Loopback
+		[[ $FP_SOURCE_IMG ]] && Delete_Loopback
 		exit 1
 
 	}
@@ -66,11 +66,11 @@
 			[[ -f $fp_selected ]] && rm $fp_selected # Failsafe
 			/DietPi/dietpi/dietpi-explorer 1 /root
 			[[ -f $fp_selected && $(<$fp_selected) ]] || Exit_On_Fail
-			FP_SOURCE_FILE=$(<$fp_selected)
+			FP_SOURCE_IMG=$(<$fp_selected)
 			rm $fp_selected
-			if [[ ! -f $FP_SOURCE_FILE ]]; then
+			if [[ ! -f $FP_SOURCE_IMG ]]; then
 
-				G_DIETPI-NOTIFY 1 "Selected image file ($FP_SOURCE_FILE) does not exist, aborting..."
+				G_DIETPI-NOTIFY 1 "Selected image file ($FP_SOURCE_IMG) does not exist, aborting..."
 				Exit_On_Fail
 
 			fi
@@ -78,9 +78,9 @@
 			# Create loopback device from .img file
 			modprobe loop || Exit_On_Fail
 			FP_SOURCE=$(losetup -f)
-			losetup $FP_SOURCE "$FP_SOURCE_FILE" || Exit_On_Fail
+			losetup $FP_SOURCE "$FP_SOURCE_IMG" || Exit_On_Fail
 			partprobe $FP_SOURCE || Exit_On_Fail
-			G_DIETPI-NOTIFY 0 "Mounted the image ($FP_SOURCE_FILE) as loopback device: $FP_SOURCE"
+			G_DIETPI-NOTIFY 0 "Mounted the image ($FP_SOURCE_IMG) as loopback device: $FP_SOURCE"
 
 		fi
 
@@ -117,7 +117,7 @@ Do you want to overwrite or backup the existing file to $OUTPUT_IMG_NAME.bak?" |
 		Menu_Main
 
 		# Install required packages
-		G_AG_CHECK_INSTALL_PREREQ gdisk parted zerofree p7zip
+		G_AG_CHECK_INSTALL_PREREQ parted gdisk zerofree p7zip
 
 		# Auto detect GPT partition table, failsafe detection of MBR to debug possibly other wording/partition table types
 		if [[ $(parted $FP_SOURCE print) == *'Partition Table: msdos'* ]]; then
@@ -148,7 +148,7 @@ Do you want to overwrite or backup the existing file to $OUTPUT_IMG_NAME.bak?" |
 		e2fsck -f $FP_ROOT_DEV
 
 		# Remount image for any required edits.
-		fp_mnt='loopback_rootfs'
+		fp_mnt='tmp_rootfs'
 		mkdir -p /mnt/$fp_mnt
 		if G_ERROR_HANDLER_INFO_ONLY=1 G_RUN_CMD mount $FP_ROOT_DEV /mnt/$fp_mnt; then
 
@@ -196,10 +196,10 @@ Do you want to overwrite or backup the existing file to $OUTPUT_IMG_NAME.bak?" |
 		G_DIETPI-NOTIFY 2 "Shrinking root partition to: $(( $FS_SIZE / 2048 + 1 )) MiB"
 		parted $FP_SOURCE unit s resizepart $ROOT_PARTITION_INDEX $PART_END yes
 		partprobe $FP_SOURCE
-		sync
 
-		# Override free space with zeros to purge removed data and allow further image/archive size reduction
+		# Override free space with zeros to purge removed data and allow further archive size reduction
 		zerofree -v $FP_ROOT_DEV
+		sync
 
 		# GPT images (RockPro64) after reading the image AND again after shrinking
 		# To fix:
@@ -210,28 +210,25 @@ Do you want to overwrite or backup the existing file to $OUTPUT_IMG_NAME.bak?" |
 		#	w | y
 		(( $GPT )) && echo -e 'w\ny\nq\n' | gdisk $FP_SOURCE
 
-		# Finished, re-read partitions (failsafe) and sync to disk
+		# Finished: Re-estimate partition end (failsafe) and derive final image size
 		partprobe $FP_SOURCE
-		sync
-
-		# Estimate used size
-		PART_SIZE=$(( ( $(fdisk -l -o End $FP_SOURCE | tail -1) + 1 ) * 512 )) # 512 byte sectors => Byte
-		IMAGE_SIZE=$(( $PART_SIZE + ( 512 * 256 ) )) # 64 byte for secondary GPT + safety net
+		PART_END=$(( ( $(fdisk -l -o End $FP_SOURCE | tail -1) + 1 ) * 512 )) # 512 byte sectors => Byte
+		IMAGE_SIZE=$(( $PART_END + ( 512 * 256 ) )) # 64 byte for secondary GPT + safety net
 
 		# Created final image + archive in /root
 		cd /root
 
 		# Image file source
-		if [[ $FP_SOURCE_FILE ]]; then
+		if [[ $FP_SOURCE_IMG ]]; then
 
 			# Clear loop
 			Delete_Loopback
 
 			# Truncate image file to used size
-			truncate --size=$IMAGE_SIZE "$FP_SOURCE_FILE"
+			truncate --size=$IMAGE_SIZE "$FP_SOURCE_IMG"
 
 			# Rename and move to /root
-			mv "$FP_SOURCE_FILE" $OUTPUT_IMG_NAME
+			mv "$FP_SOURCE_IMG" $OUTPUT_IMG_NAME
 
 		# Drive source
 		else
@@ -261,7 +258,7 @@ _EOF_
 
 			rm hash.txt README.md
 			G_WHIP_MSG "[  OK  ] DietPi-Imager has successfully finished.\n
-Final image file: /root/OUTPUT_IMG_NAME
+Final image file: /root/$OUTPUT_IMG_NAME
 Final 7z archive: /root/$OUTPUT_7Z_NAME"
 
 		fi
