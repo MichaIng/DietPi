@@ -1051,6 +1051,9 @@ _EOF_
 		umount /var/log.hdd 2> /dev/null
 		[[ -d '/var/log.hdd' ]] && rm -R /var/log.hdd
 
+		# - OMV: https://github.com/MichaIng/DietPi/issues/2994
+		rm -f /etc/cron.*/openmediavault*
+
 		# - Meveric specific
 		[[ -f '/usr/local/sbin/setup-odroid' ]] && rm /usr/local/sbin/setup-odroid
 
