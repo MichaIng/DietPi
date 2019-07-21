@@ -1474,13 +1474,16 @@ _EOF_
 			#	Use performance gov for stability.
 			G_CONFIG_INJECT 'CONFIG_CPU_GOVERNOR=' 'CONFIG_CPU_GOVERNOR=performance' /DietPi/dietpi.txt
 
-		# - RPI:
+		# - RPi:
 		elif (( $G_HW_MODEL < 10 )); then
 
 			# - Scroll lock fix for RPi by Midwan: https://github.com/MichaIng/DietPi/issues/474#issuecomment-243215674
 			cat << _EOF_ > /etc/udev/rules.d/50-leds.rules
 ACTION=="add", SUBSYSTEM=="leds", ENV{DEVPATH}=="*/input*::scrolllock", ATTR{trigger}="kbd-scrollock"
 _EOF_
+
+			# - Disable RPi camera to add modules blacklist
+			/DietPi/dietpi/func/dietpi-set_hardware rpi-camera disable
 
 		# - PINE64 (and possibily others): Cursor fix for FB
 		elif (( $G_HW_MODEL == 40 )); then
@@ -1499,7 +1502,7 @@ _EOF_
 			# - Ensure WiFi module pre-exists
 			G_CONFIG_INJECT '8723bs' '8723bs' /etc/modules
 
-		# - Rock64, remove HW accell config, as its not currently functional: https://github.com/MichaIng/DietPi/issues/2086
+		# - Rock64, remove HW accell config, as it's not currently functional: https://github.com/MichaIng/DietPi/issues/2086
 		elif (( $G_HW_MODEL == 43 )); then
 
 			[[ -f '/etc/X11/xorg.conf.d/20-armsoc.conf' ]] && rm /etc/X11/xorg.conf.d/20-armsoc.conf
