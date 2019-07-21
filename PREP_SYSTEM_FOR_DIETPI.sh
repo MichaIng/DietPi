@@ -1186,7 +1186,6 @@ _EOF_
 		# MISC
 
 		G_DIETPI-NOTIFY 2 'Disabling apt-daily services to prevent random APT cache lock'
-
 		for i in apt-daily{,-upgrade}.{service,timer}
 		do
 
@@ -1208,13 +1207,11 @@ _EOF_
 		cd /tmp/$G_PROGRAM_NAME
 
 		G_DIETPI-NOTIFY 2 'Deleting all log files /var/log'
-
 		/DietPi/dietpi/func/dietpi-logclear 2 &> /dev/null # As this will report missing vars, however, its fine, does not break functionality.
 
 		l_message='Starting DietPi-RAMlog service' G_RUN_CMD systemctl start dietpi-ramlog
 
 		G_DIETPI-NOTIFY 2 'Updating DietPi HW_INFO'
-
 		/DietPi/dietpi/func/dietpi-obtain_hw_model
 
 		G_DIETPI-NOTIFY 2 'Configuring network interfaces:'
@@ -1329,12 +1326,9 @@ _EOF_
 		G_ERROR_HANDLER
 
 		G_DIETPI-NOTIFY 2 'Configuring fake-hwclock:'
-
 		systemctl stop fake-hwclock
-
 		# - Allow times in the past
 		G_CONFIG_INJECT 'FORCE=' 'FORCE=force' /etc/default/fake-hwclock
-
 		systemctl restart fake-hwclock # Failsafe, apply now if date is way far back...
 
 		G_DIETPI-NOTIFY 2 'Configuring serial login consoles:'
@@ -1360,7 +1354,6 @@ _EOF_
 		fi
 
 		G_DIETPI-NOTIFY 2 'Reducing getty count and resource usage:'
-
 		systemctl mask getty-static
 		# - logind features disabled by default. Usually not needed and all features besides auto getty creation are not available without libpam-systemd package.
 		#	- It will be unmasked/enabled, automatically if libpam-systemd got installed during dietpi-software install, usually with desktops.
@@ -1368,13 +1361,11 @@ _EOF_
 		systemctl mask systemd-logind
 
 		G_DIETPI-NOTIFY 2 'Configuring regional settings (TZdata):'
-
 		rm -Rf /etc/{localtime,timezone}
 		ln -sf /usr/share/zoneinfo/UTC /etc/localtime
 		G_RUN_CMD dpkg-reconfigure -f noninteractive tzdata
 
 		G_DIETPI-NOTIFY 2 'Configuring regional settings (Keyboard):'
-
 		dpkg-reconfigure -f noninteractive keyboard-configuration # Keyboard must be plugged in for this to work!
 
 		#G_DIETPI-NOTIFY 2 "Configuring regional settings (Locale):" # Runs at start of script
@@ -1545,30 +1536,24 @@ _EOF_
 		l_message='Enable Dropbear autostart' G_RUN_CMD sed -i '/NO_START=1/c\NO_START=0' /etc/default/dropbear
 
 		G_DIETPI-NOTIFY 2 'Configuring services'
-
 		/DietPi/dietpi/dietpi-services stop
 		/DietPi/dietpi/dietpi-services dietpi_controlled
 
 		G_DIETPI-NOTIFY 2 'Mask cron until 1st run setup is completed'
-
 		G_RUN_CMD systemctl mask cron
 
 		G_DIETPI-NOTIFY 2 'Running general cleanup of misc files'
-
 		# - Remove Bash history file
 		[[ -f '/root/.bash_history' ]] && rm /root/.bash_history
 		rm -f /home/*/.bash_history
-
 		# - Remove Nano history file
 		[[ -f '/root/.nano_history' ]] && rm /root/.nano_history
 		rm -f /home/*/.nano_history
 
 		G_DIETPI-NOTIFY 2 'Removing swapfile from image'
-
 		/DietPi/dietpi/func/dietpi-set_swapfile 0 /var/swap
 		[[ -e '/var/swap' ]] && rm /var/swap # still exists on some images...
-
-		# - re-enable for next run
+		# - Re-enable for next run
 		G_CONFIG_INJECT 'AUTO_SETUP_SWAPFILE_SIZE=' 'AUTO_SETUP_SWAPFILE_SIZE=1' /DietPi/dietpi.txt
 
 		G_DIETPI-NOTIFY 2 'Resetting boot.ini, config.txt, cmdline.txt etc'
@@ -1580,13 +1565,11 @@ _EOF_
 		[[ -f '/boot/cmdline.txt' ]] && sed -i 's/ rootdelay=10//g' /boot/cmdline.txt
 
 		G_DIETPI-NOTIFY 2 'Generating default wpa_supplicant.conf'
-
 		/DietPi/dietpi/func/dietpi-wifidb 1
 		#	Move to /boot/ so users can modify as needed for automated
 		G_RUN_CMD mv /var/lib/dietpi/dietpi-wifi.db /boot/dietpi-wifi.txt
 
 		G_DIETPI-NOTIFY 2 'Disabling generic BT by default'
-
 		/DietPi/dietpi/func/dietpi-set_hardware bluetooth disable
 
 		# - Set WiFi
@@ -1609,6 +1592,9 @@ _EOF_
 		if (( $G_HW_ARCH == 10 )); then
 
 			l_message='Detecting additional OS installed on system' G_RUN_CMD os-prober
+			# Purge "os-prober" again
+			G_AGP os-prober
+			G_AGA
 
 			# - Native PC/EFI (assume x86_64 only possible)
 			if dpkg-query -s 'grub-efi-amd64' &> /dev/null && [[ -d '/boot/efi' ]]; then
@@ -1630,39 +1616,27 @@ _EOF_
 		fi
 
 		G_DIETPI-NOTIFY 2 'Disabling soundcards by default'
-
 		/DietPi/dietpi/func/dietpi-set_hardware soundcard none
-		#	Alsa-utils is auto installed to reset soundcard settings on some ARM devices. uninstall it afterwards
-		#	- The same for firmware-intel-sound (sound over HDMI?) on intel CPU devices
-		#	- Purge "os-prober" from previous step as well
-		G_AGP alsa-utils firmware-intel-sound os-prober
-		G_AGA
 
 		G_DIETPI-NOTIFY 2 'Setting default CPU gov'
-
 		/DietPi/dietpi/func/dietpi-set_cpu
 
 		G_DIETPI-NOTIFY 2 'Clearing log files'
-
 		/DietPi/dietpi/func/dietpi-logclear 2
 
 		G_DIETPI-NOTIFY 2 'Resetting DietPi generated globals/files'
-
 		rm /DietPi/dietpi/.??*
 
 		G_DIETPI-NOTIFY 2 'Set init .install_stage to -1 (first boot)'
-
 		echo -1 > /DietPi/dietpi/.install_stage
 
 		G_DIETPI-NOTIFY 2 'Writing PREP information to file'
-
 		cat << _EOF_ > /DietPi/dietpi/.prep_info
 $IMAGE_CREATOR
 $PREIMAGE_INFO
 _EOF_
 
 		G_DIETPI-NOTIFY 2 'Generating GPL license readme'
-
 		cat << _EOF_ > /var/lib/dietpi/license.txt
 -----------------------
 DietPi - GPLv2 License:
@@ -1678,7 +1652,6 @@ You should have received a copy of the GNU General Public License along with thi
 _EOF_
 
 		G_DIETPI-NOTIFY 2 'Disabling and clearing APT cache'
-
 		/DietPi/dietpi/func/dietpi-set_software apt-cache cache disable
 		/DietPi/dietpi/func/dietpi-set_software apt-cache clean
 
@@ -1700,19 +1673,13 @@ _EOF_
 		fi
 		l_message='Enabling first boot installation process' G_RUN_CMD systemctl enable dietpi-firstboot
 
-		G_DIETPI-NOTIFY 2 'Storing DietPi version info'
-
+		G_DIETPI-NOTIFY 2 'Storing DietPi version info:'
 		G_CONFIG_INJECT 'DEV_GITBRANCH=' "DEV_GITBRANCH=$G_GITBRANCH" /DietPi/dietpi.txt
 		G_CONFIG_INJECT 'DEV_GITOWNER=' "DEV_GITOWNER=$G_GITOWNER" /DietPi/dietpi.txt
-
-		#	Reduce sub_version by 1, allows us to create image, prior to release and patch if needed.
-		((G_DIETPI_VERSION_SUB--))
 		G_VERSIONDB_SAVE
-
 		G_RUN_CMD cp /DietPi/dietpi/.version /var/lib/dietpi/.dietpi_image_version
 
 		G_DIETPI-NOTIFY 2 'Sync changes to disk. Please wait, this may take some time...'
-
 		G_RUN_CMD systemctl stop dietpi-ramlog
 		G_RUN_CMD systemctl stop dietpi-ramdisk
 
