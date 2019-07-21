@@ -15,7 +15,7 @@
 	# - G_DISTRO
 	# - G_DISTRO_NAME
 	#
-	# The following environment variables can be set to automate the this script (adjust example values to your needs):
+	# The following environment variables can be set to automate this script (adjust example values to your needs):
 	# - GITOWNER='MichaIng'			(optional, defaults to 'MichaIng')
 	# - GITBRANCH='master'			(must be one of 'master', 'beta' or 'dev')
 	# - IMAGE_CREATOR='Mr. Tux'
@@ -1050,6 +1050,10 @@ _EOF_
 		rm -f /etc/X11/xorg.conf.d/*armbian*
 		umount /var/log.hdd 2> /dev/null
 		[[ -d '/var/log.hdd' ]] && rm -R /var/log.hdd
+
+		# - OMV: https://github.com/MichaIng/DietPi/issues/2994
+		rm -f /etc/cron.*/openmediavault*
+		rm -f /usr/sbin/omv-*
 
 		# - Meveric specific
 		[[ -f '/usr/local/sbin/setup-odroid' ]] && rm /usr/local/sbin/setup-odroid
