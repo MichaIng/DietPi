@@ -293,7 +293,7 @@ _EOF_
 	#/////////////////////////////////////////////////////////////////////////////////////
 	RemoteIR_Prereqs(){ G_AG_CHECK_INSTALL_PREREQ lirc; }
 
-	RemoteIR_Reset_All(){
+	RemoteIR_Reset(){
 
 		# Disable JustBoom
 		if (( $G_HW_MODEL < 10 )); then
@@ -305,8 +305,7 @@ _EOF_
 
 			fi
 
-			sed -i '/^[[:blank:]]*dtoverlay=lirc-rpi/d' $FP_RPI_CONFIG
-			sed -i '/^[[:blank:]]*dtparam=gpio_in_pin=25/d' $FP_RPI_CONFIG
+			sed -i '/^[[:blank:]]*dtoverlay=gpio-ir/d' $FP_RPI_CONFIG
 
 		# Disable Odroids
 		elif (( $G_HW_MODEL < 20 )) && [[ -f '/etc/systemd/system/odroid-remote.service' ]]; then
@@ -322,12 +321,13 @@ _EOF_
 
 		(( $G_HW_MODEL > 19 )) && { Unsupported_Input_Name; return 1; } # Exit path for non-Odroid/non-RPi
 
+		RemoteIR_Reset
+
 		if [[ $INPUT_DEVICE_VALUE == 'odroid_remote' ]]; then
 
 			(( $G_HW_MODEL < 10 )) && { Unsupported_Input_Mode; return 1; } # Exit path for non-Odroid
 
 			RemoteIR_Prereqs
-			RemoteIR_Reset_All
 
 			# XU4 Cloudshell
 			if (( $G_HW_MODEL == 11 )); then
@@ -393,10 +393,8 @@ _EOF_
 			(( $G_HW_MODEL > 9 )) && { Unsupported_Input_Mode; return 1; } # Exit path for non-RPi
 
 			RemoteIR_Prereqs
-			RemoteIR_Reset_All
 
-			G_CONFIG_INJECT 'dtoverlay=lirc-rpi' 'dtoverlay=lirc-rpi' $FP_RPI_CONFIG
-			G_CONFIG_INJECT 'dtparam=gpio_in_pin=' 'dtparam=gpio_in_pin=25' $FP_RPI_CONFIG
+			G_CONFIG_INJECT 'dtoverlay=gpio-ir' 'dtoverlay=gpio-ir,gpio_pin=25' $FP_RPI_CONFIG
 
 			cat << _EOF_ > /etc/lirc/hardware.conf
 LIRCD_ARGS="--uinput"
@@ -514,11 +512,7 @@ _EOF_
 			systemctl daemon-reload
 			systemctl enable --now justboom-ir-mpd
 
-		elif [[ $INPUT_DEVICE_VALUE == 'none' ]]; then
-
-			RemoteIR_Reset_All
-
-		else
+		elif [[ $INPUT_DEVICE_VALUE != 'none' ]]; then
 
 			Unknown_Input_Mode
 
@@ -1048,21 +1042,31 @@ _EOF_
 
 		)
 
-		[[ -f '/etc/modprobe.d/disable_bt.conf' ]] && rm /etc/modprobe.d/disable_bt.conf
+		[[ -f '/etc/modprobe.d/dietpi-disable_bluetooth.conf' ]] && rm /etc/modprobe.d/dietpi-disable_bluetooth.conf
 
-		# - Disable
 		if [[ $INPUT_DEVICE_VALUE == 'disable' ]]; then
 
-			# + all Broadcom-based models that need brcm_patchram_plus
-			if (( $G_HW_MODEL == 61 || $G_HW_MODEL == 62 )); then
-
-				systemctl disable --now brcm_patchram_plus 2> /dev/null
-
-			# + RPi 3 (apply to all, as pi-bluetooth package is default installed on all RPi's now)
-			# + ASUS TB
-			elif (( $G_HW_MODEL < 10 || $G_HW_MODEL == 52 )); then
+			# RPi: Disable service for all (failsafe)
+			if (( $G_HW_MODEL < 10 )); then
 
 				systemctl disable --now hciuart 2> /dev/null
+				# - Enable dtoverlay only for onboard WiFi/BT models
+				if (( $HW_ONBOARD_WIFI )); then
+
+					G_CONFIG_INJECT 'dtoverlay=disable-bt' 'dtoverlay=disable-bt' $FP_RPI_CONFIG
+					dtoverlay disable-bt
+
+				fi
+
+			# ASUS TB
+			elif (( $G_HW_MODEL == 52 )); then
+
+				systemctl disable --now hciuart 2> /dev/null
+
+			# Broadcom-based models that need brcm_patchram_plus
+			elif (( $G_HW_MODEL == 61 || $G_HW_MODEL == 62 )); then
+
+				systemctl disable --now brcm_patchram_plus 2> /dev/null
 
 			fi
 
@@ -1073,7 +1077,7 @@ _EOF_
 			do
 
 				modprobe -rf "${aBLUETOOTH_MODULES[$i]}" 2> /dev/null
-				echo "blacklist ${aBLUETOOTH_MODULES[$i]}" >> /etc/modprobe.d/disable_bt.conf
+				echo "blacklist ${aBLUETOOTH_MODULES[$i]}" >> /etc/modprobe.d/dietpi-disable_bluetooth.conf
 
 			done
 
@@ -1085,7 +1089,6 @@ _EOF_
 
 			fi
 
-		# - Enable
 		elif [[ $INPUT_DEVICE_VALUE == 'enable' ]]; then
 
 			# Pre-Reqs
@@ -1107,6 +1110,9 @@ Do you want to continue and disable the serial login console?'; then
 
 				fi
 
+				# - Remove dtoverlay
+				sed -i '/^[[:blank:]]*dtoverlay=disable-bt/d' $FP_RPI_CONFIG
+
 				G_AG_CHECK_INSTALL_PREREQ pi-bluetooth
 
 			else
@@ -1124,7 +1130,7 @@ Do you want to continue and disable the serial login console?'; then
 
 			done
 
-			# + all Broadcom-based models that need brcm_patchram_plus
+			# Broadcom-based models that need brcm_patchram_plus
 			if (( $G_HW_MODEL == 61 || $G_HW_MODEL == 62 )); then
 
 				G_RUN_CMD systemctl enable --now brcm_patchram_plus
@@ -1133,12 +1139,8 @@ Do you want to continue and disable the serial login console?'; then
 
 			G_RUN_CMD systemctl enable --now bluetooth
 
-			# + RPi
-			if (( $G_HW_MODEL < 10 )); then
-
-				G_RUN_CMD systemctl enable --now hciuart
-
-			fi
+			# RPi
+			(( $G_HW_MODEL < 10 )) && G_RUN_CMD systemctl enable --now hciuart
 
 		else
 
@@ -1248,6 +1250,7 @@ Do you want to continue and disable the serial login console?'; then
 
 	Wifi_Modules_Main(){
 
+		# Estimate module list
 		# - All
 		local aWIFI_MODULES=('cfg80211')
 
@@ -1297,36 +1300,46 @@ Do you want to continue and disable the serial login console?'; then
 
 		fi
 
-		# - Disable
 		if [[ $INPUT_DEVICE_VALUE == 'disable' ]]; then
 
-			[[ -f '/etc/modprobe.d/disable_wifi.conf' ]] && rm /etc/modprobe.d/disable_wifi.conf
+			# Disable onboard WiFi as well
+			(( $HW_ONBOARD_WIFI )) && INPUT_DEVICE_VALUE='onboard_disable' Wifi_Modules_Main
+
+			# Reset blacklists and remove powersaving settings
+			> /etc/modprobe.d/dietpi-disable_wifi.conf
+			[[ -f '/etc/modprobe.d/dietpi-disable_wifi_powersaving' ]] && rm /etc/modprobe.d/dietpi-disable_wifi_powersaving
 
 			# cfg80211 last
 			for ((i=$(( ${#aWIFI_MODULES[@]} - 1 )); i>=0; i--))
 			do
 
+				echo "blacklist ${aWIFI_MODULES[$i]}" >> /etc/modprobe.d/dietpi-disable_wifi.conf
 				modprobe -rf "${aWIFI_MODULES[$i]}" 2> /dev/null
-				echo "blacklist ${aWIFI_MODULES[$i]}" >> /etc/modprobe.d/disable_wifi.conf
 
 			done
 
-		# - Enable
 		elif [[ $INPUT_DEVICE_VALUE == 'enable' ]]; then
 
-			# - Install prereqs
-			local pre_req_packages='crda iw rfkill wireless-tools wpasupplicant'
+			# Disable known powersaving options for specific chipsets
+			cat << _EOF_ > /etc/modprobe.d/dietpi-disable_wifi_powersaving
+options 8192cu rtw_power_mgnt=0
+options 8188eu rtw_power_mgnt=0
+# OPi Plus
+options 8189es rtw_power_mgnt=0
+# Pine A64
+options 8723bs rtw_power_mgnt=0
+# Sparky/Allo WiFi
+options wlan_8192eu rtw_power_mgnt=0
+_EOF_
 
+			# Remove blacklists
+			[[ -f '/etc/modprobe.d/dietpi-disable_wifi.conf' ]] && rm /etc/modprobe.d/dietpi-disable_wifi.conf
+
+			# Install prereqs
+			local pre_req_packages='crda iw rfkill wireless-tools wpasupplicant'
 			G_AG_CHECK_INSTALL_PREREQ $pre_req_packages || exit 1
 
-			[[ -f '/etc/modprobe.d/disable_wifi.conf' ]] && rm /etc/modprobe.d/disable_wifi.conf
-
-			# - Disable known powersaving options for specific chipsets
-			echo 'options 8192cu rtw_power_mgnt=0' > /etc/modprobe.d/8192cu.conf
-			echo 'options 8188eu rtw_power_mgnt=0' > /etc/modprobe.d/8188eu.conf
-			echo 'options 8189es rtw_power_mgnt=0' > /etc/modprobe.d/8189es.conf # OPi Plus
-			echo 'options 8723bs rtw_power_mgnt=0' > /etc/modprobe.d/8723bs.conf # Pine A64
-			echo 'options wlan_8192eu rtw_power_mgnt=0' > /etc/modprobe.d/wlan_8192eu.conf # Sparky/Allo WiFi
+			G_DIETPI-NOTIFY 2 'Please wait, enabling WiFi modules...'
 
 			# cfg80211 first
 			for i in "${aWIFI_MODULES[@]}"
@@ -1336,42 +1349,35 @@ Do you want to continue and disable the serial login console?'; then
 
 			done
 
-			# - Delay. Without this, kernel reports WiFi device not found with RPi 3 and Pine A64 addon board, when ran straight after this script.
-			G_DIETPI-NOTIFY 2 'Please wait, enabling WiFi Modules...'
-			# - Had to up the delay from 3 seconds to 8 seconds on WPA2-Enterprise, otherwise still get device not found error.
+			# - Delay to allow modules + WPA2-Enterprise being fully loaded and avoid device not found error
 			sleep 8
 
 			# + RPi 3+, unlock scan+wifi https://github.com/MichaIng/DietPi/issues/1627
 			rfkill unblock wifi &> /dev/null
 
-			# Update our networking file (refresh active wlan index)
-			/DietPi/dietpi/func/obtain_network_details
-
 		elif [[ $INPUT_DEVICE_VALUE == 'onboard_enable' ]]; then
 
 			(( $HW_ONBOARD_WIFI )) || { Unsupported_Input_Mode; return 1; }
 
-			# NB: Requires reboot
-			# NB: Do not change filenames, -f check used by DietPi-Config to obtain state
-
-			[[ -f '/etc/modprobe.d/disable_wifi_rpi3_onboard.conf' ]] && rm /etc/modprobe.d/disable_wifi_rpi3_onboard.conf
+			# Remove dtoverlay
+			sed -i '/^[[:blank:]]*dtoverlay=disable-wifi/d' $FP_RPI_CONFIG
 
 		elif [[ $INPUT_DEVICE_VALUE == 'onboard_disable' ]]; then
 
 			(( $HW_ONBOARD_WIFI )) || { Unsupported_Input_Mode; return 1; }
 
-			# NB: Requires reboot
-			# NB: Do not change filenames, -f check used by DietPi-Config to obtain state
-
-			# - RPi 3/Zero W
-			echo 'blacklist brcmfmac' > /etc/modprobe.d/disable_wifi_rpi3_onboard.conf
-			echo 'blacklist brcmutil' >> /etc/modprobe.d/disable_wifi_rpi3_onboard.conf
+			# Disable via dtoverlay
+			G_CONFIG_INJECT 'dtoverlay=disable-wifi' 'dtoverlay=disable-wifi' $FP_RPI_CONFIG
+			dtoverlay disable-wifi
 
 		else
 
 			Unknown_Input_Mode
 
 		fi
+
+		# Update our networking file (refresh active wlan index)
+		/DietPi/dietpi/func/obtain_network_details
 
 	}
 
