@@ -29,11 +29,7 @@
 	OUTPUT_7Z_NAME=''
 	GPT=0
 
-	Delete_Loopback(){
-
-		[[ -b $FP_SOURCE ]] && G_RUN_CMD losetup -d $FP_SOURCE
-
-	}
+	Delete_Loopback(){ [[ -b $FP_SOURCE ]] && G_RUN_CMD losetup -d $FP_SOURCE; }
 
 	Exit_On_Fail(){
 
@@ -56,6 +52,8 @@
 
 			# Detect drives and list for selection
 			G_WHIP_MENU_ARRAY=($(lsblk -npo NAME,SIZE | grep '^/'))
+			# - Visually separate dev name and space
+			for ((i=1;i<${#G_WHIP_MENU_ARRAY};i+=2)); do G_WHIP_MENU_ARRAY[$i]=": ${G_WHIP_MENU_ARRAY[$i]}"
 			[[ $G_WHIP_MENU_ARRAY ]] && G_WHIP_MENU 'Please select the drive you wish to create the image from:' || Exit_On_Fail
 			FP_SOURCE=$G_WHIP_RETURNED_VALUE
 
@@ -86,6 +84,8 @@
 
 		# Detect partitions and list for selection
 		G_WHIP_MENU_ARRAY=($(lsblk -npo NAME,SIZE ${FP_SOURCE}?*))
+		# - Visually separate dev name and space
+		for ((i=1;i<${#G_WHIP_MENU_ARRAY};i+=2)); do G_WHIP_MENU_ARRAY[$i]=": ${G_WHIP_MENU_ARRAY[$i]}"
 		G_WHIP_MENU 'Please select the OS root partition:' || Exit_On_Fail
 		FP_ROOT_DEV=$G_WHIP_RETURNED_VALUE
 		ROOT_PARTITION_INDEX=${FP_ROOT_DEV: -1}
@@ -122,10 +122,12 @@ Do you want to overwrite or backup the existing file to $OUTPUT_IMG_NAME.bak?" |
 		# Auto detect GPT partition table, failsafe detection of MBR to debug possibly other wording/partition table types
 		if [[ $(parted -s $FP_SOURCE print) == *'Partition Table: msdos'* ]]; then
 
+			G_DIETPI-NOTIFY 2 'MBR partition table detected, applying gdisk fix...'
 			GPT=0
 
 		elif [[ $(parted -s $FP_SOURCE print) == *'Partition Table: gpt'* ]]; then
 
+			G_DIETPI-NOTIFY 2 'GPT partition table detected'
 			GPT=1
 
 		else
@@ -141,7 +143,6 @@ Do you want to overwrite or backup the existing file to $OUTPUT_IMG_NAME.bak?" |
 		# - gdisk write will correct this
 		(( $GPT )) && echo -e 'w\ny\nq\n' | gdisk $FP_SOURCE
 
-		# Fsck
 		e2fsck -f $FP_ROOT_DEV
 
 		# Remount image for any required edits.
@@ -152,15 +153,15 @@ Do you want to overwrite or backup the existing file to $OUTPUT_IMG_NAME.bak?" |
 			G_WHIP_MSG "Image mounted for file editing, make changes if required: $FP_ROOT_DEV > /mnt/$fp_mnt\n\nPress 'Ok' when you are finished."
 			sync
 			G_RUN_CMD umount /mnt/$fp_mnt
-			partprobe $FP_SOURCE # Probably not required as no partition changes, regardless, no harm.
+			partprobe $FP_SOURCE # Failsafe
 
 		fi
 
-		# Fsck
-		e2fsck -f $FP_ROOT_DEV
+		e2fsck -f $FP_ROOT_DEV # Failsafe
 
 		# Shrink file system to minimum
 		# - Run multiple times until no change is done any more
+		G_DIETPI-NOTIFY 2 'Shrinking RootFS to minimum size...'
 		local out
 		FS_SIZE=0
 		while :
@@ -194,7 +195,7 @@ Do you want to overwrite or backup the existing file to $OUTPUT_IMG_NAME.bak?" |
 		parted $FP_SOURCE unit s resizepart $ROOT_PARTITION_INDEX $PART_END yes
 		partprobe $FP_SOURCE
 
-		# Override free space with zeros to purge removed data and allow further archive size reduction
+		G_DIETPI-NOTIFY 2 'Overriding root partition free space with zeros to purge removed data and allow further archive size reduction...'
 		zerofree -v $FP_ROOT_DEV
 		sync
 
@@ -218,7 +219,7 @@ Do you want to overwrite or backup the existing file to $OUTPUT_IMG_NAME.bak?" |
 			# Clear loop
 			Delete_Loopback
 
-			# Truncate image file to used size
+			G_DIETPI-NOTIFY 2 "Truncating final image file to actually used size: $(( $IMAGE_SIZE / 1024 / 1024 + 1 )) MiB"
 			truncate --size=$IMAGE_SIZE "$FP_SOURCE_IMG"
 
 			# Rename and move to /root
@@ -227,13 +228,13 @@ Do you want to overwrite or backup the existing file to $OUTPUT_IMG_NAME.bak?" |
 		# Drive source
 		else
 
-			# dd to image file with used size
+			G_DIETPI-NOTIFY 2 "Creating final image with actually used size: $(( $IMAGE_SIZE / 1024 / 1024 + 1 )) MiB"
 			dd if=$FP_SOURCE of=$OUTPUT_IMG_NAME bs=1M status=progress count=$(( $IMAGE_SIZE / 1024 / 1024 + 1 ))
 
 		fi
 
 		# Generate hashes: MD5, SHA1, SHA256
-		G_DIETPI-NOTIFY 2 'Generating hash.txt, please wait...'
+		G_DIETPI-NOTIFY 2 'Generating hashes to pack with image, please wait...'
 		cat << _EOF_ > hash.txt
 FILE:	$OUTPUT_IMG_NAME
 DATE:	$(date)
@@ -243,11 +244,13 @@ SHA256:	$(sha256sum $OUTPUT_IMG_NAME | mawk '{print $1}')
 _EOF_
 
 		# Download current README
+		G_DIETPI-NOTIFY 2 'Downloading current README.md to pack with image...'
 		wget https://raw.githubusercontent.com/MichaIng/DietPi/master/README.md -O README.md || Exit_On_Fail
 
 		# Generate 7z archive
 		# NB: LZMA2 ultra compression method requires 2G RAM
 		[[ -f $OUTPUT_7Z_NAME ]] && rm $OUTPUT_7Z_NAME
+		G_DIETPI-NOTIFY 2 'Creating final 7zip archive...'
 		if 7zr a -m0=lzma2 -mx=9 $OUTPUT_7Z_NAME $OUTPUT_IMG_NAME hash.txt README.md; then
 
 			rm hash.txt README.md
