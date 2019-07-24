@@ -968,7 +968,7 @@ _EOF_
 		G_DIETPI-NOTIFY 2 '-----------------------------------------------------------------------------------'
 		#------------------------------------------------------------------------------------------------
 
-		G_DIETPI-NOTIFY 2 'Deleting list of known users, not required by DietPi'
+		G_DIETPI-NOTIFY 2 'Deleting list of known users and groups, not required by DietPi'
 
 		getent passwd pi &> /dev/null && userdel -f pi
 		getent passwd test &> /dev/null && userdel -f test # @fourdee
@@ -977,6 +977,14 @@ _EOF_
 		getent passwd linaro &> /dev/null && userdel -f linaro # ASUS TB
 		getent passwd dietpi &> /dev/null && userdel -f dietpi # recreated below
 		getent passwd debian &> /dev/null && userdel -f debian # BBB
+		getent passwd openmediavault-webgui &> /dev/null && userdel -f openmediavault-webgui # OMV (NanoPi NEO2)
+		getent passwd admin &> /dev/null && userdel -f admin # OMV (NanoPi NEO2)
+		getent passwd fa &> /dev/null && userdel -f fa # OMV (NanoPi NEO2)
+		getent passwd colord &> /dev/null && userdel -f colord # OMV (NanoPi NEO2)
+		getent passwd saned &> /dev/null && userdel -f saned # OMV (NanoPi NEO2)
+		getent group openmediavault-config &> /dev/null && groupdel openmediavault-config # OMV (NanoPi NEO2)
+		getent group openmediavault-engined &> /dev/null && groupdel openmediavault-engined # OMV (NanoPi NEO2)
+		getent group openmediavault-webgui &> /dev/null && groupdel openmediavault-webgui # OMV (NanoPi NEO2)
 
 		G_DIETPI-NOTIFY 2 'Removing misc files/folders/services, not required by DietPi'
 
@@ -1055,6 +1063,7 @@ _EOF_
 		[[ -d '/var/log.hdd' ]] && rm -R /var/log.hdd
 
 		# - OMV: https://github.com/MichaIng/DietPi/issues/2994
+		[[ -d '/etc/openmediavault' ]] && rm -R /etc/openmediavault
 		rm -f /etc/cron.*/openmediavault*
 		rm -f /usr/sbin/omv-*
 
@@ -1088,14 +1097,14 @@ _EOF_
 		ln -sf /etc/profile.d/bash_completion.sh /etc/bashrc.d/dietpi-bash_completion.sh
 
 		#-----------------------------------------------------------------------------------
-		#Create_DietPi_User
+		# DietPi user
 
 		l_message='Creating DietPi User Account' G_RUN_CMD /DietPi/dietpi/func/dietpi-set_software useradd dietpi
 
 		#-----------------------------------------------------------------------------------
-		#UID bit for sudo: https://github.com/MichaIng/DietPi/issues/794
+		# UID bit for sudo: https://github.com/MichaIng/DietPi/issues/794
 
-		G_DIETPI-NOTIFY 2 'Configuring Sudo UID bit'
+		G_DIETPI-NOTIFY 2 'Configuring sudo UID bit'
 
 		chmod 4755 $(which sudo)
 
