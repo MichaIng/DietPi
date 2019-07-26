@@ -5122,11 +5122,22 @@ Package: wireguard wireguard-dkms wireguard-tools\nPin: release n=sid\nPin-Prior
 
 				G_CHECK_URL 'https://api.github.com/repos/gogs/gogs/releases/latest'
 				INSTALL_URL_ADDRESS=$(curl -s 'https://api.github.com/repos/gogs/gogs/releases/latest' | grep -m1 "browser_download_url.*$file" | cut -d \" -f 4)
+				local no_check_url=1 # G_CHECK_URL faces 403
 
 			fi
 
 			Download_Install "$INSTALL_URL_ADDRESS"
-			mv gogs* /etc/gogs
+
+			# Remove old install dir, but preserve existing configs
+			if [[ -d '/etc/gogs' ]]; then
+
+				[[ -d '/etc/gogs/custom' ]] && mv /etc/gogs/custom gogs
+				mv /etc/gogs/.??* gogs # dot files = SSH and Git user configs
+				rm -R /etc/gogs
+
+			fi
+
+			mv gogs /etc/gogs
 
 		fi
 
@@ -10267,7 +10278,12 @@ _EOF_
 			chown -R gogs:gogs $G_FP_DIETPI_USERDATA/gogs-repo /var/log/gogs
 
 			# Database
-			/DietPi/dietpi/func/create_mysql_db gogs gogs "$GLOBAL_PW"
+			if [[ ! -d '/var/lib/mysql/gogs' ]]; then
+
+				mysql < /etc/gogs/scripts/mysql.sql
+				mysql -e "grant all privileges on gogs.* to gogs@localhost identified by '$GLOBAL_PW'"
+
+			fi
 
 			# Service
 			cat << _EOF_ > /etc/systemd/system/gogs.service
@@ -10968,7 +10984,7 @@ _EOF_
 
 				G_RUN_CMD systemctl start mariadb
 				# - Create database user only, database will be created automatically
-				mysql -e "grant all privileges on ompd.* to ompd@localhost identified by '$GLOBAL_PW';"
+				mysql -e "grant all privileges on ompd.* to ompd@localhost identified by '$GLOBAL_PW'"
 				systemctl stop mariadb
 
 				cat << _EOF_ > /var/www/ompd/include/config.local.inc.php
@@ -13639,11 +13655,17 @@ _EOF_
 
 			Banner_Uninstalling
 
-			userdel -rf gogs
+			if [[ -f '/etc/systemd/system/gogs.service' ]]; then
 
-			rm -R /etc/gogs
-			rm /etc/systemd/system/gogs.service
-			rm -R /var/log/gogs
+				systemctl disable --now gogs
+				rm -R /etc/systemd/system/gogs.service*
+
+			fi
+
+			getent passwd gogs &> /dev/null && userdel -rf gogs
+
+			[[ -d '/etc/gogs' ]] && rm -R /etc/gogs
+			[[ -d '/var/log/gogs' ]] && rm -R /var/log/gogs
 
 			systemctl start mariadb
 			mysqladmin drop gogs -f
