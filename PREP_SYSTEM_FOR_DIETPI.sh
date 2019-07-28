@@ -508,6 +508,7 @@
 
 			'4' ': Stretch (oldstable, if SBC firmware is not yet Buster-compatible)'
 			'5' ': Buster (current stable release, recommended)'
+			'6' ': Bullseye (testing, if you want to live on bleeding edge)'
 
 		)
 
@@ -578,6 +579,10 @@ Currently installed: $G_DISTRO $G_DISTRO_NAME"; then
 
 			DISTRO_TARGET_NAME='buster'
 
+		elif (( $DISTRO_TARGET == 6 )); then
+
+			DISTRO_TARGET_NAME='bullseye'
+
 		else
 
 			G_DIETPI-NOTIFY 1 'Invalid choice detected. Aborting...\n'
@@ -607,7 +612,7 @@ Currently installed: $G_DISTRO $G_DISTRO_NAME"; then
 
 		G_DIETPI-NOTIFY 2 'Moving kernel and boot configuration to /boot'
 
-		# - HW specific config.txt, boot.ini uEnv.txt
+		# HW specific config.txt, boot.ini uEnv.txt
 		if (( $G_HW_MODEL < 10 )); then
 
 			G_RUN_CMD mv "DietPi-$G_GITBRANCH/config.txt" /boot/
@@ -626,12 +631,12 @@ Currently installed: $G_DISTRO $G_DISTRO_NAME"; then
 		G_RUN_CMD mv "DietPi-$G_GITBRANCH/README.md" /boot/dietpi-README.md
 		G_RUN_CMD mv "DietPi-$G_GITBRANCH/CHANGELOG.txt" /boot/dietpi-CHANGELOG.txt
 
-		# - Reading version string for later use
+		# Reading version string for later use
 		G_DIETPI_VERSION_CORE=$(sed -n 1p "DietPi-$G_GITBRANCH/dietpi/server_version-6")
 		G_DIETPI_VERSION_SUB=$(sed -n 2p "DietPi-$G_GITBRANCH/dietpi/server_version-6")
 		G_DIETPI_VERSION_RC=$(sed -n 3p "DietPi-$G_GITBRANCH/dietpi/server_version-6")
 
-		# - Remove server_version* / (pre-)patch_file (downloads fresh from dietpi-update)
+		# Remove server_version* / (pre-)patch_file (downloads fresh from dietpi-update)
 		rm "DietPi-$G_GITBRANCH/dietpi/server_version"*
 		rm "DietPi-$G_GITBRANCH/dietpi/pre-patch_file"
 		rm "DietPi-$G_GITBRANCH/dietpi/patch_file"
@@ -644,7 +649,7 @@ Currently installed: $G_DISTRO $G_DISTRO_NAME"; then
 		G_RUN_CMD systemctl daemon-reload
 		G_RUN_CMD systemctl enable dietpi-ramdisk
 
-		# - Mount tmpfs
+		# Mount tmpfs
 		G_RUN_CMD mkdir -p /DietPi
 		G_RUN_CMD mount -t tmpfs -o size=10m tmpfs /DietPi
 		l_message='Starting DietPi-RAMdisk' G_RUN_CMD systemctl start dietpi-ramdisk
@@ -659,26 +664,26 @@ Currently installed: $G_DISTRO $G_DISTRO_NAME"; then
 
 		G_DIETPI-NOTIFY 2 "Setting APT sources.list: $DISTRO_TARGET_NAME $DISTRO_TARGET"
 
-		# - We need to forward $DISTRO_TARGET* to dietpi-set_software, as well as $G_HW_MODEL for Debian vs Raspbian decision.
+		# We need to forward $DISTRO_TARGET* to dietpi-set_software, as well as $G_HW_MODEL for Debian vs Raspbian decision.
 		G_DISTRO=$DISTRO_TARGET G_DISTRO_NAME=$DISTRO_TARGET_NAME G_HW_MODEL=$G_HW_MODEL G_RUN_CMD /DietPi/dietpi/func/dietpi-set_software apt-mirror 'default'
 
-		# - Meveric, update repo to use our EU mirror: https://github.com/MichaIng/DietPi/issues/1519#issuecomment-368234302
+		# Meveric, update repo to use our EU mirror: https://github.com/MichaIng/DietPi/issues/1519#issuecomment-368234302
 		sed -Ei 's@https?://oph\.mdrjr\.net@http://fuzon.co.uk@' /etc/apt/sources.list.d/meveric* &> /dev/null
 
-		# - (Re)create DietPi logs dir, used by G_AGx
+		# (Re)create DietPi logs dir, used by G_AGx
 		G_RUN_CMD mkdir -p /var/tmp/dietpi/logs
 
 		G_AGUP
 
-		# - @MichaIng https://github.com/MichaIng/DietPi/pull/1266/files
+		# @MichaIng https://github.com/MichaIng/DietPi/pull/1266/files
 		G_DIETPI-NOTIFY 2 'Marking all packages as auto-installed first, to allow effective autoremove afterwards'
 
 		G_RUN_CMD apt-mark auto $(apt-mark showmanual)
 
-		# - @MichaIng https://github.com/MichaIng/DietPi/pull/1266/files
+		# @MichaIng https://github.com/MichaIng/DietPi/pull/1266/files
 		G_DIETPI-NOTIFY 2 'Disable automatic recommends/suggests install and allow them to be autoremoved:'
 
-		#	Remove any existing APT recommends settings
+		# - Remove any existing APT recommends settings
 		rm -f /etc/apt/apt.conf.d/*recommends*
 
 		G_ERROR_HANDLER_COMMAND='/etc/apt/apt.conf.d/99-dietpi-norecommends'
@@ -691,7 +696,7 @@ _EOF_
 		G_ERROR_HANDLER_EXITCODE=$?
 		G_ERROR_HANDLER
 
-		G_DIETPI-NOTIFY 2 'Disable package state translation downloads:'
+		G_DIETPI-NOTIFY 2 'Disable package state translation downloads'
 		echo 'Acquire::Languages "none";' > /etc/apt/apt.conf.d/98-dietpi-no_translations
 
 		G_DIETPI-NOTIFY 2 'Preserve modified config files on APT update:'
@@ -705,7 +710,7 @@ _EOF_
 		G_ERROR_HANDLER_EXITCODE=$?
 		G_ERROR_HANDLER
 
-		# - DietPi list of minimal required packages, which must be installed:
+		# DietPi list of minimal required packages, which must be installed:
 		aPACKAGES_REQUIRED_INSTALL=(
 
 			'apt-transport-https'	# Allows HTTPS sources for ATP
@@ -719,7 +724,6 @@ _EOF_
 			'curl'			# Web address testing, downloading, uploading etc.
 			'debconf'		# APT package pre-configuration, e.g. "debconf-set-selections" for non-interactive install
 			'dirmngr'		# GNU key management required for some APT installs via additional repos
-			'dropbear-run'		# DietPi default SSH-Client, excluding initramfs integration
 			'ethtool'		# Ethernet link checking
 			'fake-hwclock'		# Hardware clock emulation, to allow correct timestamps during boot before network time sync
 			'gnupg'			# apt-key add
@@ -746,7 +750,20 @@ _EOF_
 
 		)
 
-		# - G_HW_MODEL specific required repo key packages: https://github.com/MichaIng/DietPi/issues/1285#issuecomment-358301273
+		# G_DISTRO specific
+		# - Dropbear: DietPi default SSH-Client
+		#   On Buster-, "dropbear" fulls in "dropbear-initramfs", which we don't need
+		if (( $G_DISTRO > 5 )); then
+
+			aPACKAGES_REQUIRED_INSTALL+=('dropbear')
+
+		else
+
+			aPACKAGES_REQUIRED_INSTALL+=('dropbear-run')
+
+		fi
+
+		# G_HW_MODEL specific required repo key packages: https://github.com/MichaIng/DietPi/issues/1285#issuecomment-358301273
 		if (( $G_HW_MODEL > 9 )); then
 
 			G_AGI debian-archive-keyring
@@ -758,7 +775,7 @@ _EOF_
 
 		fi
 
-		# - WiFi related packages
+		# WiFi related
 		if (( $WIFI_REQUIRED )); then
 
 			aPACKAGES_REQUIRED_INSTALL+=('crda')			# WiFi related
@@ -769,7 +786,7 @@ _EOF_
 
 		fi
 
-		# - G_HW_MODEL specific required packages:
+		# G_HW_MODEL specific
 		if (( $G_HW_MODEL != 20 )); then
 
 			aPACKAGES_REQUIRED_INSTALL+=('dosfstools')		# DietPi-Drive_Manager + fat (boot) drive file system check and creation tools
@@ -777,11 +794,9 @@ _EOF_
 
 		fi
 
-		# - Kernel required packages
-		# - G_HW_ARCH specific required Kernel packages
-		#	As these are kernel, or bootloader packages, we need to install them directly to allow autoremove of in case older kernel packages:
-		#	https://github.com/MichaIng/DietPi/issues/1285#issuecomment-354602594
-
+		# Kernel/bootloader/firmware
+		# - We need to install those directly to allow G_AGA() autoremove possible older packages later: https://github.com/MichaIng/DietPi/issues/1285#issuecomment-354602594
+		# - G_HW_ARCH specific
 		#	x86_64
 		if (( $G_HW_ARCH == 10 )); then
 
