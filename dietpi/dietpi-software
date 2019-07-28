@@ -1921,7 +1921,6 @@ DietPi-Software will decrypt and use it for software installs. You can change it
 		aSOFTWARE_WHIP_DESC[$software_id]='vpn server'
 		aSOFTWARE_CATEGORY_INDEX[$software_id]=16
 		aSOFTWARE_TYPE[$software_id]=0
-		aSOFTWARE_REQUIRES_RSYSLOG[$software_id]=1
 		aSOFTWARE_ONLINEDOC_URL[$software_id]='p=613#p613'
 
 		#------------------
@@ -4641,6 +4640,8 @@ _EOF_
 
 			Banner_Installing
 			G_AGI openvpn easy-rsa iptables
+			# Remove obsolete sysvinit service
+			[[ -f '/etc/init.d/openvpn' ]] && rm /etc/init.d/openvpn
 
 		fi
 
@@ -9389,12 +9390,35 @@ _EOF_
 
 			Banner_Configuration
 
-			local key_size=2048
+			# Create initial server and client configs, if not yet present
+			# - Wildcard config file detection via for loop
+			local i
+			for i in /etc/openvpn/*.conf
+			do
 
-			# Start Cert/Key generation.
-			cp -a /usr/share/easy-rsa/ /etc/openvpn
-			mkdir -p /etc/openvpn/easy-rsa/keys
-			cat << _EOF_ >> /etc/openvpn/easy-rsa/vars
+				# Inform user, if config exist, that config generation is skipped
+				if [[ -f $i ]]; then
+
+					G_DIETPI-NOTIFY 2 "Existing OpenVPN configuration found: $i
+ - Config generation will be skipped.
+ - If you need a fresh config set, please remove $i
+   and run: dietpi-software reinstall 97"
+					break
+
+				fi
+
+				# Cert and key generation via easy-rsa
+				local key_size=2048
+				G_DIETPI-NOTIFY 2 'Generating unique OpenVPN certificates and keys. Please wait...\n'
+
+				# - DH param
+				openssl dhparam -out /etc/openvpn/dh${key_size}.pem $key_size
+
+				# - Prepare easy-rsa
+				cp -a /usr/share/easy-rsa /etc/openvpn
+				cd /etc/openvpn/easy-rsa
+				mkdir -p keys
+				cat << _EOF_ >> vars
 export KEY_SIZE=$key_size
 export KEY_COUNTRY='UK'
 export KEY_PROVINCE='DietPi'
@@ -9405,32 +9429,20 @@ export KEY_OU='DietPi'
 export KEY_NAME='DietPi_OpenVPN_Server'
 _EOF_
 
-			# Create Server Cert Auth
-			G_DIETPI-NOTIFY 2 'Generating unique OpenVPN certificates and keys. Please wait...\n'
-			openssl dhparam -out /etc/openvpn/dh${key_size}.pem $key_size
+				# - Server cert and key
+				cp -a openssl-1.0.0.cnf openssl.cnf # https://github.com/MichaIng/DietPi/issues/1450#issuecomment-362608574
+				. ./vars
+				./clean-all
+				./build-ca --batch DietPi_OpenVPN_Server
+				./build-key-server --batch DietPi_OpenVPN_Server
+				cp -a keys/{DietPi_OpenVPN_Server.crt,DietPi_OpenVPN_Server.key,ca.crt} /etc/openvpn/
 
-			# Build Server certs/keys
-			chmod -R +x /etc/openvpn/easy-rsa
-			cd /etc/openvpn/easy-rsa
-			# - https://github.com/MichaIng/DietPi/issues/1450#issuecomment-362608574
-			cp -a openssl-1.0.0.cnf openssl.cnf
+				# - Client cert and key
+				./build-key --batch DietPi_OpenVPN_Client
 
-			. ./vars
-			./clean-all
-			./build-ca --batch DietPi_OpenVPN_Server
-			./build-key-server --batch DietPi_OpenVPN_Server
-
-			# Copy Server cert/keys
-			cp -a /etc/openvpn/easy-rsa/keys/{DietPi_OpenVPN_Server.crt,DietPi_OpenVPN_Server.key,ca.crt} /etc/openvpn/
-
-			# Build client cert/keys
-			./build-key --batch DietPi_OpenVPN_Client
-
-			cd /tmp/$G_PROGRAM_NAME
-			# End Cert/Key generation.
-
-			# Server config
-			cat << _EOF_ > /etc/openvpn/server.conf
+				# Server config
+				cd /etc/openvpn
+				cat << _EOF_ > server.conf
 port 1194
 proto udp
 dev tun
@@ -9460,13 +9472,13 @@ verb 3
 
 _EOF_
 
-			# Client config
-			cat << _EOF_ > /etc/openvpn/easy-rsa/keys/DietPi_OpenVPN_Client.ovpn
+				# Client config
+				cat << _EOF_ > easy-rsa/keys/DietPi_OpenVPN_Client.ovpn
 client
 proto udp
 dev tun
 
-# Ip/Domain name of DietPi system, running OpenVPN server.
+# IP/domain name of DietPi system, running OpenVPN server
 remote mywebsite.com 1194
 
 resolv-retry infinite
@@ -9483,25 +9495,28 @@ comp-lzo
 verb 3
 
 _EOF_
+				# - Add Server cert auth
+				echo '<ca>' >> easy-rsa/keys/DietPi_OpenVPN_Client.ovpn
+				cat ca.crt >> easy-rsa/keys/DietPi_OpenVPN_Client.ovpn
+				echo '</ca>' >> easy-rsa/keys/DietPi_OpenVPN_Client.ovpn
+				# - Add Client cert
+				echo '<cert>' >> easy-rsa/keys/DietPi_OpenVPN_Client.ovpn
+				cat easy-rsa/keys/DietPi_OpenVPN_Client.crt >> easy-rsa/keys/DietPi_OpenVPN_Client.ovpn
+				echo '</cert>' >> easy-rsa/keys/DietPi_OpenVPN_Client.ovpn
+				# - Add Client key
+				echo '<key>' >> easy-rsa/keys/DietPi_OpenVPN_Client.ovpn
+				cat easy-rsa/keys/DietPi_OpenVPN_Client.key >> easy-rsa/keys/DietPi_OpenVPN_Client.ovpn
+				echo '</key>' >> easy-rsa/keys/DietPi_OpenVPN_Client.ovpn
 
-			# Unified client file. Add DietPi generated certs/keys.
-			# - Add Server Cert auth
-			echo '<ca>' >> /etc/openvpn/easy-rsa/keys/DietPi_OpenVPN_Client.ovpn
-			cat /etc/openvpn/ca.crt >> /etc/openvpn/easy-rsa/keys/DietPi_OpenVPN_Client.ovpn
-			echo '</ca>' >> /etc/openvpn/easy-rsa/keys/DietPi_OpenVPN_Client.ovpn
-			# - Add Client Cert
-			echo '<cert>' >> /etc/openvpn/easy-rsa/keys/DietPi_OpenVPN_Client.ovpn
-			cat /etc/openvpn/easy-rsa/keys/DietPi_OpenVPN_Client.crt >> /etc/openvpn/easy-rsa/keys/DietPi_OpenVPN_Client.ovpn
-			echo '</cert>' >> /etc/openvpn/easy-rsa/keys/DietPi_OpenVPN_Client.ovpn
-			# - Add Client Key
-			echo '<key>' >> /etc/openvpn/easy-rsa/keys/DietPi_OpenVPN_Client.ovpn
-			cat /etc/openvpn/easy-rsa/keys/DietPi_OpenVPN_Client.key >> /etc/openvpn/easy-rsa/keys/DietPi_OpenVPN_Client.ovpn
-			echo '</key>' >> /etc/openvpn/easy-rsa/keys/DietPi_OpenVPN_Client.ovpn
+				# Copy client config to userdata location
+				cp easy-rsa/keys/DietPi_OpenVPN_Client.ovpn $G_FP_DIETPI_USERDATA/
+				# - and /boot partition
+				cp easy-rsa/keys/DietPi_OpenVPN_Client.ovpn /boot/
 
-			# Copy client file to userdata location
-			cp /etc/openvpn/easy-rsa/keys/DietPi_OpenVPN_Client.ovpn $G_FP_DIETPI_USERDATA/
-			# - and /boot partition
-			cp /etc/openvpn/easy-rsa/keys/DietPi_OpenVPN_Client.ovpn /boot/
+				cd /tmp/$G_PROGRAM_NAME
+				break # Always break loop which is only for single wildcard file detection
+
+			done
 
 			# Enable IP forwarding
 			echo -e 'net.ipv4.ip_forward=1\nnet.ipv6.conf.all.forwarding=1\nnet.ipv6.conf.default.forwarding=1' > /etc/sysctl.d/dietpi-openvpn.conf
@@ -13331,7 +13346,7 @@ _EOF_
 
 		fi
 
-		software_id=97 # OpenVPN server
+		software_id=97 # OpenVPN Server
 		if (( ${aSOFTWARE_INSTALL_STATE[$software_id]} == -1 )); then
 
 			Banner_Uninstalling
