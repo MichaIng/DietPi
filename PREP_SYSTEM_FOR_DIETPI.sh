@@ -22,7 +22,7 @@
 	# - PREIMAGE_INFO='Some GNU/Linux'
 	# - HW_MODEL=0				(must match one of the supported IDs below)
 	# - WIFI_REQUIRED=0			[01]
-	# - DISTRO_TARGET=4			[45] (Stretch: 4, Buster: 5)
+	# - DISTRO_TARGET=5			[456] (Stretch: 4, Buster: 5, Bullseye: 6)
 	#------------------------------------------------------------------------------------------------
 
 	# Core globals
@@ -209,6 +209,11 @@
 
 		G_DISTRO=5
 		G_DISTRO_NAME='buster'
+
+	elif grep -q 'bullseye' /etc/os-release; then
+
+		G_DISTRO=6
+		G_DISTRO_NAME='bullseye'
 
 	else
 
