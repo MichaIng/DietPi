@@ -76,6 +76,7 @@
 				sed -i '/arm_freq=/c\#arm_freq=1500' /DietPi/config.txt
 				sed -i '/core_freq=/c\#core_freq=500' /DietPi/config.txt
 				sed -i '/sdram_freq=/c\#sdram_freq=3200' /DietPi/config.txt
+				G_CONFIG_INJECT 'temp_limit=' 'temp_limit=75' /DietPi/config.txt # https://github.com/MichaIng/DietPi/issues/3019
 
 			fi
 
