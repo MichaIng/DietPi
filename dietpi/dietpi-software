@@ -3349,13 +3349,12 @@ Package: *php7.3*\nPin: release *\nPin-Priority: -1' > /etc/apt/preferences.d/di
 			(( ${aSOFTWARE_INSTALL_STATE[89]} == 2 )) && package_list+=" $PHP_NAME-mysql"
 			G_AGI "$package_list"
 
-			# - Remove mysql.service as we use mariadb.service, both cannot exist: https://github.com/MichaIng/DietPi/issues/1913#issuecomment-441343798
+			# Remove obsolete sysvinit service as we use the systemd mariadb.service
 			if [[ -f '/etc/init.d/mysql' ]]; then
 
 				G_DIETPI-NOTIFY 2 'Switching from /etc/init.d/mysql to mariadb.service'
-				systemctl stop mysql
+				systemctl disable --now mysql
 				rm /etc/init.d/mysql
-				systemctl daemon-reload
 
 			fi
 
@@ -5104,26 +5103,44 @@ Package: wireguard wireguard-dkms wireguard-tools\nPin: release n=sid\nPin-Prior
 
 			Banner_Installing
 
-			INSTALL_URL_ADDRESS='https://dietpi.com/downloads/binaries/all/gogs_'
-
-			#armv6
+			# ARMv6: No pre-compiled binaries available, thus we use our own: https://github.com/gogs/gogs/releases
 			if (( $G_HW_ARCH == 1 )); then
 
-				INSTALL_URL_ADDRESS+='armv6.zip'
+				INSTALL_URL_ADDRESS='https://dietpi.com/downloads/binaries/all/gogs_armv6.zip'
 
-			#armv7+
-			elif (( $G_HW_ARCH == 2 )); then
+			# Else install latest binaries from GitHub
+			else
 
-				INSTALL_URL_ADDRESS+='armv7.zip'
+				# ARMv7
+				local file='raspi2_armv6.zip'
+				local fallback_url='https://github.com/gogs/gogs/releases/download/v0.11.86/raspi2_armv6.zip'
 
-			#x86_64
-			elif (( $G_HW_ARCH == 10 )); then
+				# x86_64
+				if (( $G_HW_ARCH == 10 )); then
 
-				INSTALL_URL_ADDRESS+='amd64.zip'
+					file='linux_amd64.tar.gz'
+					fallback_url='https://github.com/gogs/gogs/releases/download/v0.11.86/linux_amd64.tar.gz'
+
+				fi
+
+				G_CHECK_URL 'https://api.github.com/repos/gogs/gogs/releases/latest'
+				INSTALL_URL_ADDRESS=$(curl -s 'https://api.github.com/repos/gogs/gogs/releases/latest' | grep -m1 "browser_download_url.*$file" | cut -d \" -f 4)
+				local no_check_url=1 # G_CHECK_URL faces 403
+
 			fi
 
-			Download_Install "$INSTALL_URL_ADDRESS" /etc
-			mv /etc/gogs* /etc/gogs
+			Download_Install "$INSTALL_URL_ADDRESS"
+
+			# Remove old install dir, but preserve existing configs
+			if [[ -d '/etc/gogs' ]]; then
+
+				[[ -d '/etc/gogs/custom' ]] && mv /etc/gogs/custom gogs
+				mv /etc/gogs/.??* gogs # dot files = SSH and Git user configs
+				rm -R /etc/gogs
+
+			fi
+
+			mv gogs /etc/gogs
 
 		fi
 
@@ -7109,7 +7126,25 @@ _EOF_
 
 			Banner_Configuration
 
-			### Also for MariaDB?
+			G_DIETPI-NOTIFY 2 'Assuring 4-byte support and InnoDB Barracuda file format with large prefix'
+			cat << _EOF_ > /etc/mysql/mariadb.conf.d/99-dietpi-4byte.cnf
+[mysqld]
+innodb_large_prefix=1
+innodb_file_format=barracuda
+innodb_file_per_table=1
+character-set-server=utf8mb4
+collation-server=utf8mb4_general_ci
+_EOF_
+			# Since Buster (MariaDB 10.3) the following settings are removed and default to our needs:
+			# - innodb_large_prefix: https://mariadb.com/kb/en/library/innodb-system-variables/#innodb_large_prefix
+			# - innodb_file_format: https://mariadb.com/kb/en/library/innodb-system-variables/#innodb_file_format
+			if (( $G_DISTRO > 4 )); then
+
+				sed -i '/innodb_large_prefix/d' /etc/mysql/mariadb.conf.d/99-dietpi-4byte.cnf
+				sed -i '/innodb_file_format/d' /etc/mysql/mariadb.conf.d/99-dietpi-4byte.cnf
+
+			fi
+
 			# Optimise for reduced memory use: https://github.com/MichaIng/DietPi/issues/605#issue-188930987
 			#cat << _EOF_ > /etc/mysql/mariadb.conf.d/99-dietpi.cnf
 #[mysqld]
@@ -7383,27 +7418,8 @@ location = /.well-known/caldav {
 
 			fi
 
-			G_DIETPI-NOTIFY 2 'Enable 4-byte support for MariaDB.' # https://doc.owncloud.org/server/administration_manual/configuration/database/linux_database_configuration.html#configure-mysql-for-4-byte-unicode-support
-			cat << _EOF_ > /etc/mysql/mariadb.conf.d/99-dietpi-4byte.cnf
-[mysqld]
-innodb_large_prefix=1
-innodb_file_format=barracuda
-innodb_file_per_table=1
-character-set-server=utf8mb4
-collation-server=utf8mb4_general_ci
-_EOF_
-			# On Buster (MariaDB 10.3) the following settings are removed and default to our needs:
-			# - innodb_large_prefix: https://mariadb.com/kb/en/library/innodb-system-variables/#innodb_large_prefix
-			# - innodb_file_format: https://mariadb.com/kb/en/library/innodb-system-variables/#innodb_file_format
-			if (( $G_DISTRO > 4 )); then
-
-				sed -i '/innodb_large_prefix/d' /etc/mysql/mariadb.conf.d/99-dietpi-4byte.cnf
-				sed -i '/innodb_file_format/d' /etc/mysql/mariadb.conf.d/99-dietpi-4byte.cnf
-
-			fi
+			# Start MariaDB and Redis for database creation and occ command
 			G_RUN_CMD systemctl restart mariadb
-
-			# Start redis-server, which is required for ncc command:
 			G_RUN_CMD systemctl start redis-server
 
 			# Initially add occ command shortcut, will be done by Dietpi-Globals automatically, if occ file exist:
@@ -7632,27 +7648,8 @@ location = /.well-known/caldav {
 
 			fi
 
-			G_DIETPI-NOTIFY 2 'Enable 4-byte support for MariaDB' # https://docs.nextcloud.com/server/stable/admin_manual/configuration_database/mysql_4byte_support.html
-			cat << _EOF_ > /etc/mysql/mariadb.conf.d/99-dietpi-4byte.cnf
-[mysqld]
-innodb_large_prefix=1
-innodb_file_format=barracuda
-innodb_file_per_table=1
-character-set-server=utf8mb4
-collation-server=utf8mb4_general_ci
-_EOF_
-			# On Buster (MariaDB 10.3) the following settings are removed and default to our needs:
-			# - innodb_large_prefix: https://mariadb.com/kb/en/library/innodb-system-variables/#innodb_large_prefix
-			# - innodb_file_format: https://mariadb.com/kb/en/library/innodb-system-variables/#innodb_file_format
-			if (( $G_DISTRO > 4 )); then
-
-				sed -i '/innodb_large_prefix/d' /etc/mysql/mariadb.conf.d/99-dietpi-4byte.cnf
-				sed -i '/innodb_file_format/d' /etc/mysql/mariadb.conf.d/99-dietpi-4byte.cnf
-
-			fi
+			# Start MariaDB and Redis for database creation and ncc command
 			G_RUN_CMD systemctl restart mariadb
-
-			# Start redis-server, which is required for ncc command:
 			G_RUN_CMD systemctl start redis-server
 
 			# Initially add occ command shortcut, will be done by Dietpi-Globals automatically, if occ file exist:
@@ -10267,7 +10264,13 @@ _EOF_
 			chown -R gogs:gogs $G_FP_DIETPI_USERDATA/gogs-repo /var/log/gogs
 
 			# Database
-			/DietPi/dietpi/func/create_mysql_db gogs gogs "$GLOBAL_PW"
+			if [[ ! -d '/var/lib/mysql/gogs' ]]; then
+
+				G_RUN_CMD systemctl restart mariadb
+				mysql < /etc/gogs/scripts/mysql.sql
+				mysql -e "grant all privileges on gogs.* to gogs@localhost identified by '$GLOBAL_PW'"
+
+			fi
 
 			# Service
 			cat << _EOF_ > /etc/systemd/system/gogs.service
@@ -10968,7 +10971,7 @@ _EOF_
 
 				G_RUN_CMD systemctl start mariadb
 				# - Create database user only, database will be created automatically
-				mysql -e "grant all privileges on ompd.* to ompd@localhost identified by '$GLOBAL_PW';"
+				mysql -e "grant all privileges on ompd.* to ompd@localhost identified by '$GLOBAL_PW'"
 				systemctl stop mariadb
 
 				cat << _EOF_ > /var/www/ompd/include/config.local.inc.php
@@ -13639,15 +13642,21 @@ _EOF_
 
 			Banner_Uninstalling
 
-			userdel -rf gogs
+			if [[ -f '/etc/systemd/system/gogs.service' ]]; then
 
-			rm -R /etc/gogs
-			rm /etc/systemd/system/gogs.service
-			rm -R /var/log/gogs
+				systemctl disable --now gogs
+				rm -R /etc/systemd/system/gogs.service*
+
+			fi
+
+			getent passwd gogs &> /dev/null && userdel -rf gogs
+
+			[[ -d '/etc/gogs' ]] && rm -R /etc/gogs
+			[[ -d '/var/log/gogs' ]] && rm -R /var/log/gogs
 
 			systemctl start mariadb
 			mysqladmin drop gogs -f
-			mysql -e "drop user 'gogs'@'localhost'"
+			mysql -e 'drop user gogs@localhost'
 
 		fi
 
