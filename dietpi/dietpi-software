@@ -2481,12 +2481,10 @@ DietPi-Software will decrypt and use it for software installs. You can change it
 		fi
 
 		# Software that requires LibSSL1.0.0
-		# - OpenVPN (97) on Stretch for easy-rsa
 		# - Jackett (147)
 		software_id=126
 		if (( ${aSOFTWARE_INSTALL_STATE[37]} == 1 ||
 			${aSOFTWARE_INSTALL_STATE[60]} == 1 ||
-			( ${aSOFTWARE_INSTALL_STATE[97]} == 1 && G_DISTRO == 4 ) ||
 			${aSOFTWARE_INSTALL_STATE[134]} == 1 ||
 			${aSOFTWARE_INSTALL_STATE[147]} == 1 )); then
 
@@ -4640,7 +4638,7 @@ _EOF_
 		if (( ${aSOFTWARE_INSTALL_STATE[$software_id]} == 1 )); then
 
 			Banner_Installing
-			G_AGI openvpn easy-rsa iptables
+			G_AGI openvpn iptables
 			# Remove obsolete sysvinit service
 			[[ -f '/etc/init.d/openvpn' ]] && rm /etc/init.d/openvpn
 
@@ -9408,44 +9406,23 @@ _EOF_
 
 				fi
 
-				# Cert and key generation via easy-rsa
-				local key_size=2048
-				G_DIETPI-NOTIFY 2 'Generating unique OpenVPN certificates and keys. Please wait...\n'
+				# Pre-v6.26 cleanup
+				[[ -f '/etc/openvpn/dh2048.pem' ]] && rm /etc/openvpn/dh2048.pem
+				dpkg-query -s easy-rsa &> /dev/null && G_AGP easy-rsa
 
-				# - DH param
-				openssl dhparam -out /etc/openvpn/dh${key_size}.pem $key_size
-
-				# - Prepare easy-rsa
+				# Download latest easy-rsa from GitHub
+				G_DIETPI-NOTIFY 2 'Downloading latest easy-rsa for certificate and key generation...'
+				INSTALL_URL_ADDRESS='https://api.github.com/repos/OpenVPN/easy-rsa/releases/latest'
+				G_CHECK_URL "$INSTALL_URL_ADDRESS"
+				fallback_url='https://github.com/OpenVPN/easy-rsa/releases/download/v3.0.6/EasyRSA-unix-v3.0.6.tgz'
+				no_check_url=1 Download_Install "$(curl -s "$INSTALL_URL_ADDRESS" | grep -m1 '"browser_download_url.*EasyRSA-.*\.tgz' | cut -d \" -f 4)"
 				[[ -d '/etc/openvpn/easy-rsa' ]] && rm -R /etc/openvpn/easy-rsa
-				cp -a /usr/share/easy-rsa /etc/openvpn
+				mv EasyRSA-* /etc/openvpn/easy-rsa
+
+				# Cert and key generation via easy-rsa
+				G_DIETPI-NOTIFY 2 'Generating unique OpenVPN certificates and keys. Please wait...\n'
 				cd /etc/openvpn/easy-rsa
-
-				if (( $G_DISTRO < 5 )); then
-
-					cat << _EOF_ >> vars
-export KEY_SIZE=$key_size
-export KEY_COUNTRY='UK'
-export KEY_PROVINCE='DietPi'
-export KEY_CITY='DietPi'
-export KEY_ORG='DietPi'
-export KEY_EMAIL='noreply@dietpi.com'
-export KEY_OU='DietPi'
-export KEY_NAME='DietPi_OpenVPN_Server'
-_EOF_
-					cp -a openssl-1.0.0.cnf openssl.cnf # https://github.com/MichaIng/DietPi/issues/1450#issuecomment-362608574
-					. ./vars
-					./clean-all
-					./build-ca --batch
-					./build-key-server --batch DietPi_OpenVPN_Server
-					./build-key --batch DietPi_OpenVPN_Client
-					cp -a keys/{DietPi_OpenVPN_Server.crt,DietPi_OpenVPN_Server.key,ca.crt} /etc/openvpn/
-
-				else
-
-					cp -a vars.example vars
-					cat << _EOF_ >> vars
-set_var EASYRSA_PKI		"$PWD/keys"
-set_var EASYRSA_KEY_SIZE	$key_size
+				cat << _EOF_ > vars
 set_var EASYRSA_REQ_COUNTRY	"UK"
 set_var EASYRSA_REQ_PROVINCE	"DietPi"
 set_var EASYRSA_REQ_CITY	"DietPi"
@@ -9454,15 +9431,14 @@ set_var EASYRSA_REQ_EMAIL	"noreply@dietpi.com"
 set_var EASYRSA_REQ_OU		"DietPi"
 set_var EASYRSA_BATCH		"1"
 _EOF_
-					./easyrsa init-pki
-					./easyrsa build-ca nopass
-					./easyrsa build-server-full DietPi_OpenVPN_Server nopass
-					./easyrsa build-client-full DietPi_OpenVPN_Client nopass
-					cp -a keys/{issued/DietPi_OpenVPN_Server.crt,private/DietPi_OpenVPN_Server.key,ca.crt} /etc/openvpn/
-
-				fi
+				./easyrsa init-pki
+				./easyrsa build-ca nopass
+				./easyrsa gen-dh
+				./easyrsa build-server-full DietPi_OpenVPN_Server nopass
+				./easyrsa build-client-full DietPi_OpenVPN_Client nopass
 
 				# Server config
+				cp -a pki/{ca.crt,dh.pem,issued/DietPi_OpenVPN_Server.crt,private/DietPi_OpenVPN_Server.key} /etc/openvpn/
 				cd /etc/openvpn
 				cat << _EOF_ > server.conf
 port 1194
@@ -9472,7 +9448,7 @@ dev tun
 ca ca.crt
 cert DietPi_OpenVPN_Server.crt
 key DietPi_OpenVPN_Server.key
-dh dh$key_size.pem
+dh dh.pem
 
 server 10.8.0.0 255.255.255.0
 
@@ -9494,8 +9470,7 @@ verb 3
 _EOF_
 
 				# Client config
-				local fp='easy-rsa/keys/DietPi_OpenVPN_Client.ovpn'
-				cat << _EOF_ > $fp
+				cat << _EOF_ > DietPi_OpenVPN_Client.ovpn
 client
 proto udp
 dev tun
@@ -9516,27 +9491,16 @@ ns-cert-type server
 comp-lzo
 verb 3
 _EOF_
-				# Add CA and client cert and key
-				if (( $G_DISTRO < 5 )); then
-
-					echo -e "
+				# - Add CA cert, client cert and key
+				echo -e "
 <ca>\n$(<ca.crt)\n</ca>
-<cert>\n$(<easy-rsa/keys/DietPi_OpenVPN_Client.crt)\n</cert>
-<key>\n$(<easy-rsa/keys/DietPi_OpenVPN_Client.key)\n</key>" >> $fp
+<cert>\n$(<easy-rsa/pki/issued/DietPi_OpenVPN_Client.crt)\n</cert>
+<key>\n$(<easy-rsa/pki/private/DietPi_OpenVPN_Client.key)\n</key>" >> DietPi_OpenVPN_Client.ovpn
 
-				else
-
-					echo -e "
-<ca>\n$(<ca.crt)\n</ca>
-<cert>\n$(<easy-rsa/keys/issued/DietPi_OpenVPN_Client.crt)\n</cert>
-<key>\n$(<easy-rsa/keys/private/DietPi_OpenVPN_Client.key)\n</key>" >> $fp
-
-				fi
-
-				# Copy client config to userdata location
-				cp $fp $G_FP_DIETPI_USERDATA/
+				# - Copy to userdata
+				cp DietPi_OpenVPN_Client.ovpn $G_FP_DIETPI_USERDATA/
 				# - and /boot partition
-				cp $fp /boot/
+				cp DietPi_OpenVPN_Client.ovpn /boot/
 
 				cd /tmp/$G_PROGRAM_NAME
 				break # Always break loop which is only for single wildcard file detection
