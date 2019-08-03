@@ -732,7 +732,6 @@ _EOF_
 			'ethtool'		# Ethernet link checking
 			'fake-hwclock'		# Hardware clock emulation, to allow correct timestamps during boot before network time sync
 			'gnupg'			# apt-key add
-			'haveged'		# Entropy daemon: https://github.com/MichaIng/DietPi/issues/2806
 			'htop'			# System monitor
 			'iputils-ping'		# "ping" command
 			'isc-dhcp-client'	# DHCP client
@@ -773,10 +772,12 @@ _EOF_
 
 			G_AGI debian-archive-keyring
 			aPACKAGES_REQUIRED_INSTALL+=('initramfs-tools')		# RAM file system initialization, required for generic boot loader, but not required/used by RPi bootloader
+			aPACKAGES_REQUIRED_INSTALL+=('haveged')			# Entropy daemon: https://github.com/MichaIng/DietPi/issues/2806
 
 		else
 
 			G_AGI raspbian-archive-keyring
+			aPACKAGES_REQUIRED_INSTALL+=('rng-tools')		# Entropy daemon: Alternative, that does not work on all devices, but is proven to work on RPi, is default on Raspbian and uses less RAM on idle.
 
 		fi
 
