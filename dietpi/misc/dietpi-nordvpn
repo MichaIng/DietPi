@@ -25,6 +25,8 @@
 
 	FP_SETTINGS_DIETPI='/var/lib/dietpi/dietpi-software/installed/dietpi-nordvpn/settings_dietpi.conf'
 	FP_SETTINGS_OVPN='/var/lib/dietpi/dietpi-software/installed/dietpi-nordvpn/settings_ovpn.conf'
+	FP_SETTINGS_UP='/var/lib/dietpi/dietpi-software/installed/dietpi-nordvpn/up.sh'
+	FP_SETTINGS_DOWN='/var/lib/dietpi/dietpi-software/installed/dietpi-nordvpn/down.sh'
 	NORDVPN_USERNAME=''
 	NORDVPN_PASSWORD=''
 	NORDVPN_SERVER=''
@@ -36,11 +38,7 @@
 	MAX_WAIT_FOR_CONNECTION=5
 	WAN_IP=''
 
-	Update_Wan_Ip(){
-
-		WAN_IP=$(curl -sLm 2 https://dietpi.com/myip.php 2>&1)
-
-	}
+	Update_Wan_Ip(){ WAN_IP=$(curl -sLm 2 https://dietpi.com/myip.php 2>&1); }
 
 	Init(){
 
@@ -71,7 +69,7 @@
 	Check_Connected(){
 
 		NORDVPN_CONNECTED=0
-		#if systemctl status dietpi-nordvpn | grep -qi 'initialization sequence completed'; then
+		#systemctl status dietpi-nordvpn | grep -qi 'initialization sequence completed'
 		ip r s dev $NET_DEV &>/dev/null && NORDVPN_CONNECTED=1
 
 		return $(( ! $NORDVPN_CONNECTED ))
@@ -81,6 +79,13 @@
 	Read_Settings(){ [[ -f $FP_SETTINGS_DIETPI ]] && . $FP_SETTINGS_DIETPI; }
 
 	Save_Settings(){
+
+		if [[ ! $NORDVPN_SERVER || ! $NORDVPN_USERNAME || ! $NORDVPN_PASSWORD ]]; then
+
+			G_WHIP_MSG '[FAILED] You need to enter your NordVPN username + password and select a server, before settings can be applied.'
+			return 1
+
+		fi
 
 		(( $NORDVPN_SERVICE )) && systemctl stop dietpi-nordvpn
 
@@ -95,10 +100,15 @@ NORDVPN_PASSWORD='${NORDVPN_PASSWORD//\'/\'\\\'\'}'
 NORDVPN_SERVER='$NORDVPN_SERVER'
 PROTOCOL='$PROTOCOL'
 _EOF_
-		G_CONFIG_INJECT 'auth-user-pass' "auth-user-pass $FP_SETTINGS_OVPN" /etc/openvpn/ovpn_$PROTOCOL/$NORDVPN_SERVER
 
-		chmod 600 $FP_SETTINGS_OVPN $FP_SETTINGS_DIETPI /etc/openvpn/ovpn_$PROTOCOL/$NORDVPN_SERVER
-		chown root:root $FP_SETTINGS_OVPN $FP_SETTINGS_DIETPI /etc/openvpn/ovpn_$PROTOCOL/$NORDVPN_SERVER
+		local fp_ovpn="/etc/openvpn/ovpn_$PROTOCOL/$NORDVPN_SERVER"
+		G_CONFIG_INJECT 'auth-user-pass([[:blank:]]|$)' "auth-user-pass $FP_SETTINGS_OVPN" $fp_ovpn
+		[[ -f $FP_SETTINGS_UP || -f $FP_SETTINGS_DOWN ]] && G_CONFIG_INJECT 'script-security[[:blank:]]' 'script-security 2' $fp_ovpn 'auth[[:blank:]]' || sed -i '/^[[:blank:]]*script-security[[:blank:]]/d' $fp_ovpn
+		[[ -f $FP_SETTINGS_UP ]] && G_CONFIG_INJECT 'up[[:blank:]]' "up $FP_SETTINGS_UP" $fp_ovpn 'auth[[:blank:]]' || sed -i '/^[[:blank:]]*up[[:blank:]]/d' $fp_ovpn
+		[[ -f $FP_SETTINGS_DOWN ]] && G_CONFIG_INJECT 'down[[:blank:]]' "down $FP_SETTINGS_DOWN" $fp_ovpn 'auth[[:blank:]]' || sed -i '/^[[:blank:]]*down[[:blank:]]/d' $fp_ovpn
+
+		chmod 600 $FP_SETTINGS_OVPN $FP_SETTINGS_DIETPI $fp_ovpn
+		chown root:root $FP_SETTINGS_OVPN $FP_SETTINGS_DIETPI $fp_ovpn
 
 		cat << _EOF_ > /lib/systemd/system/dietpi-nordvpn.service
 [Unit]
@@ -106,7 +116,7 @@ Description=NordVPN (DietPi)
 After=network.target dietpi-boot.service
 
 [Service]
-ExecStart=$(command -v openvpn) /etc/openvpn/ovpn_$PROTOCOL/$NORDVPN_SERVER
+ExecStart=$(command -v openvpn) $fp_ovpn
 
 [Install]
 WantedBy=multi-user.target
@@ -118,16 +128,10 @@ _EOF_
 		for (( i=1; i<=$MAX_WAIT_FOR_CONNECTION; i++ ))
 		do
 
-			if Check_Connected; then
+			Check_Connected && break
 
-				break
-
-			else
-
-				G_DIETPI-NOTIFY 2 "Waiting for connection ($i/$MAX_WAIT_FOR_CONNECTION)"
-				sleep 1
-
-			fi
+			G_DIETPI-NOTIFY 2 "Waiting for connection ($i/$MAX_WAIT_FOR_CONNECTION)"
+			sleep 1
 
 		done
 
@@ -166,12 +170,10 @@ _EOF_
 			if [[ -f /sys/class/net/$NET_DEV/statistics/rx_bytes && -f /sys/class/net/$NET_DEV/statistics/tx_bytes ]]; then
 
 				net_rx_byte=$(</sys/class/net/$NET_DEV/statistics/rx_bytes)
-				net_rx_mb='Unknown'
-				disable_error=1 G_CHECK_VALIDINT "$net_rx_byte" 1 && net_rx_mb="$(( $net_rx_byte / 1024 / 1024 ))MB"
+				disable_error=1 G_CHECK_VALIDINT "$net_rx_byte" 0 && net_rx_mb="$(( $net_rx_byte / 1024 / 1024 )) MiB"
 
 				net_tx_byte=$(</sys/class/net/$NET_DEV/statistics/tx_bytes)
-				net_tx_mb='Unknown'
-				disable_error=1 G_CHECK_VALIDINT "$net_tx_byte" 1 && net_tx_mb="$(( $net_tx_byte / 1024 / 1024 ))MB"
+				disable_error=1 G_CHECK_VALIDINT "$net_tx_byte" 0 && net_tx_mb="$(( $net_tx_byte / 1024 / 1024 )) MiB"
 
 			fi
 
@@ -198,6 +200,9 @@ _EOF_
 			(( $NORDVPN_CONNECTED )) && G_WHIP_MENU_ARRAY+=('Disconnect' '')
 
 		fi
+		G_WHIP_MENU_ARRAY+=('' '●─ Connection Up and Down Scripts ')
+		G_WHIP_MENU_ARRAY+=('Edit Up' ': This script gets executed right after the VPN is connected')
+		G_WHIP_MENU_ARRAY+=('Edit Down' ': This script gets executed right after the VPN is disconnected')
 		G_WHIP_MENU_ARRAY+=('' '●─ Save Settings ')
 		G_WHIP_MENU_ARRAY+=('Apply' ': Save settings and restart VPN connection')
 
@@ -210,6 +215,18 @@ _EOF_
 			if [[ $G_WHIP_RETURNED_VALUE == 'Apply' ]]; then
 
 				Save_Settings
+
+			elif [[ $G_WHIP_RETURNED_VALUE == 'Edit Up' ]]; then
+
+				[[ -f $FP_SETTINGS_UP ]] || echo -e '#!/bin/bash\n# Clear this file completely, including line breaks, to have it removed.' > $FP_SETTINGS_UP
+				nano $FP_SETTINGS_UP
+				(( $(stat -c %s $FP_SETTINGS_UP) )) && chmod 700 $FP_SETTINGS_UP || rm $FP_SETTINGS_UP
+
+			elif [[ $G_WHIP_RETURNED_VALUE == 'Edit Down' ]]; then
+
+				[[ -f $FP_SETTINGS_DOWN ]] || echo -e '#!/bin/bash\n# Clear this file completely, including line breaks, to have it removed.' > $FP_SETTINGS_DOWN
+				nano $FP_SETTINGS_DOWN
+				(( $(stat -c %s $FP_SETTINGS_DOWN) )) && chmod 700 $FP_SETTINGS_DOWN || rm $FP_SETTINGS_DOWN
 
 			elif [[ $G_WHIP_RETURNED_VALUE == 'Auto start' ]]; then
 
@@ -255,7 +272,7 @@ _EOF_
 				G_DIETPI-NOTIFY 2 'Populating NordVPN server list, please wait...'
 				cd /etc/openvpn/ovpn_$PROTOCOL
 				G_WHIP_MENU_ARRAY=()
-				for i in *
+				for i in *.ovpn
 				do
 
 					G_WHIP_MENU_ARRAY+=("$i" '')
@@ -264,7 +281,7 @@ _EOF_
 				cd /tmp/$G_PROGRAM_NAME
 
 				G_WHIP_DEFAULT_ITEM=$NORDVPN_SERVER
-				G_WHIP_MENU 'Please select a NordVPN server to use' && NORDVPN_SERVER=$G_WHIP_RETURNED_VALUE
+				G_WHIP_MENU 'Please select a NordVPN server to use:' && NORDVPN_SERVER=$G_WHIP_RETURNED_VALUE
 
 			fi
 
@@ -285,7 +302,7 @@ _EOF_
 	while (( $TARGETMENUID >= 0 ))
 	do
 
-		(( $TARGETMENUID == 0 )) && Menu_Main
+		Menu_Main
 
 	done
 	#-----------------------------------------------------------------------------------
