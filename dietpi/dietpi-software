@@ -4134,8 +4134,8 @@ _EOF_
 			G_CHECK_URL "$INSTALL_URL_ADDRESS"
 
 			# Check free available memory. Increase swapfile size to prevent gravity running out of mem.
-			if (( $(free -m | mawk '/Mem:/ {print $4;exit}') < 512 &&
-				$(grep -m1 '^[[:blank:]]*AUTO_SETUP_SWAPFILE_SIZE=' /DietPi/dietpi.txt | sed 's/^[^=]*=//') < 512 )); then
+			if (( $(free -m | mawk '/^Mem:/{print $4;exit}') < 512 &&
+				$(sed -n '/^[[:blank:]]*AUTO_SETUP_SWAPFILE_SIZE=/{s/^[^=]*=//p;q}' /DietPi/dietpi.txt) < 512 )); then
 
 				G_DIETPI-NOTIFY 2 'Increasing swapfile size to 512 MiB before running gravity.sh, please wait...\n'
 				/DietPi/dietpi/func/dietpi-set_swapfile 512
@@ -8811,12 +8811,21 @@ The downside is additional traffic and less performance compared to a silent req
 Do you want to enable the Pi-hole blocking page?'; then
 
 				G_CONFIG_INJECT 'BLOCKINGMODE=' 'BLOCKINGMODE=IP-NODATA-AAAA' /etc/pihole/pihole-FTL.conf
-				# Backup index page to allow webroot => blocking page 404 handler (for Lighttpd this is done by Pi-hole installer already)
-				[[ -f '/var/www/index.html' ]] && mv /var/www/index.html /var/www/index.html.bak
+				# Enable 404 handler to rewrite all non-existent ad URL paths to blocking page
+				[[ -f '/etc/apache2/sites-available/dietpi-pihole.conf' ]] && G_CONFIG_INJECT 'ErrorDocument[[:blank:]]+404[[:blank:]]' 'ErrorDocument 404 /html/pihole/index.php' /etc/apache2/sites-available/dietpi-pihole.conf
+				[[ -f '/etc/nginx/sites-dietpi/dietpi-pihole.conf' ]] && G_CONFIG_INJECT 'error_page[[:blank:]]+404[[:blank:]]' 'error_page 404 /html/pihole/index.php' /etc/nginx/sites-dietpi/dietpi-pihole.conf
+				[[ -f '/etc/lighttpd/conf-available/99-dietpi-pihole.conf' ]] && G_CONFIG_INJECT 'server\.error-handler-404[[:blank:]]*=' 'server.error-handler-404 = "/html/pihole/index.php"' /etc/lighttpd/conf-available/99-dietpi-pihole.conf
+				# Backup default index page to rewrite webroot ad URL paths to blocking page
+				[[ -f 'index.html' ]] && mv index.html index.html.bak
+				[[ -f 'index.lighttpd.html' ]] && mv index.lighttpd.html index.lighttpd.html.bak
 
 			else
 
 				G_CONFIG_INJECT 'BLOCKINGMODE=' 'BLOCKINGMODE=NULL' /etc/pihole/pihole-FTL.conf
+				# Disable 404 handler to blocking page
+				[[ -f '/etc/apache2/sites-available/dietpi-pihole.conf' ]] && sed -Ei 's/^[[:blank:]]*ErrorDocument[[:blank:]]+404[[:blank:]]/#ErrorDocument 404 ' /etc/apache2/sites-available/dietpi-pihole.conf
+				[[ -f '/etc/nginx/sites-dietpi/dietpi-pihole.conf' ]] && sed -Ei 's/^[[:blank:]]*error_page[[:blank:]]+404[[:blank:]]/#error_page 404 ' /etc/nginx/sites-dietpi/dietpi-pihole.conf
+				[[ -f '/etc/lighttpd/conf-available/99-dietpi-pihole.conf' ]] && sed -Ei 's/^[[:blank:]]*server\.error-handler-404[[:blank:]]*=/#server.error-handler-404 =' /etc/lighttpd/conf-available/99-dietpi-pihole.conf
 
 			fi
 
@@ -8828,6 +8837,9 @@ Do you want to enable the Pi-hole blocking page?'; then
 			G_CONFIG_INJECT '# Required-Stop:' '# Required-Stop: $network $remote_fs' /etc/init.d/pihole-FTL
 			G_CONFIG_INJECT '# Required-Start:' '# Required-Start: $network $remote_fs' /etc/init.d/pihole-FTL
 			systemctl enable pihole-FTL
+
+			# Disable non-required dhcpcd, which is installed by Pi-hole installer
+			systemctl disable dhcpcd
 
 			# Disable pihole.log query logging: https://github.com/pi-hole/FTL/issues/614#issuecomment-510564476
 			pihole -l off
