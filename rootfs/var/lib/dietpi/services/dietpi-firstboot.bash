@@ -188,7 +188,15 @@
 
 		# Regenerate unique Dropbear host keys:
 		rm -f /etc/dropbear/*_host_key
-		dpkg-reconfigure -f noninteractive dropbear-run
+		if (( $G_DISTRO < 6 )); then
+
+			dpkg-reconfigure -f noninteractive dropbear-run
+
+		else
+
+			dpkg-reconfigure -f noninteractive dropbear
+
+		fi
 
 		# Recreate machine-id: https://github.com/MichaIng/DietPi/issues/2015
 		[[ -f '/etc/machine-id' ]] && rm /etc/machine-id
