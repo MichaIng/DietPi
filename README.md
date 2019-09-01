@@ -7,22 +7,18 @@
 		<br><br>
 		optimised • simplified • for everyone
 		<br><br>
-		<a href="https://dietpi.com">find out more</a>
-		•
-		<a href="https://dietpi.com/#download">download image</a>
+		<a href="https://dietpi.com">find out more</a> • <a href="https://dietpi.com/#download">download image</a>
 	</p>
 	<hr>
 	<p align="center">
-		Optional "ready to run" optimised software choices with <b>dietpi-software</b>.
-		<br>
+		Optional "ready to run" optimised software choices with <b>dietpi-software</b>.<br>
 		Feature rich configuration tool for your device with <b>dietpi-config</b>.
 	</p>
 	<hr>
 	<p align="center">
 		<img src="https://dietpi.com/images/mvs_logo_150.jpg" alt="myVirtualServer">
 		<br><br>
-		DietPi's web hosting is powered by
-		<a href="https://www.myvirtualserver.com">myVirtualServer</a>.
+		DietPi's web hosting is powered by <a href="https://www.myvirtualserver.com">myVirtualServer</a>.
 		<br><br>
 		A wide range of SBCs and VMs are supported. <a href="https://dietpi.com/#download">Click here</a> for the full list.
 		<br><br>
@@ -59,17 +55,11 @@ _Joined 2016-06-08_
 
 DietPi forum co-administrator, management, support, testing and valuable feedback.
 
-#### K-Plan
+#### sal666
 
-_Joined 2016-01-01_
+_Joined 2017-07-26_
 
-Contributions to the DietPi in general, in-depth testing, bug finding and valuable feedback, forum moderator.
-
-#### ZombieVirus
-
-_Joined 2016-03-20_
-
-DietPi forum moderator and version history maintainer on forums.
+Creator and maintainer of the Clonezilla based installer images for x86_64 UEFI systems.
 
 ---
 
@@ -85,6 +75,18 @@ https://github.com/MichaIng/DietPi/issues/474
 ---
 
 ### Previous/Inactive Contributors
+
+#### K-Plan
+
+_Joined 2016-01-01_
+
+Contributions to the DietPi in general, in-depth testing, bug finding and valuable feedback, forum moderator.
+
+#### ZombieVirus
+
+_Joined 2016-03-20_
+
+DietPi forum moderator and version history maintainer on forums.
 
 #### Rhkean
 
