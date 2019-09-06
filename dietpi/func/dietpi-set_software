@@ -246,50 +246,46 @@ _EOF_
 
 	#/////////////////////////////////////////////////////////////////////////////////////
 	# Set NTPD Mode
-	# NB: also sets mirror as defined in dietpi.txt CONFIG_NTP_MIRROR
+	# NB: Also sets mirror as defined in dietpi.txt CONFIG_NTP_MIRROR
 	#/////////////////////////////////////////////////////////////////////////////////////
 	NtpdMode_Main(){
 
 		if G_CHECK_VALIDINT "$INPUT_MODE_VALUE" 0 4; then
 
-			# - Reset global to disabled, prevents run_ntpd in dietpi-software
+			# Reset global to disabled, prevents run_ntpd in dietpi-software
 			sed -i '/CONFIG_NTP_MODE=/c\CONFIG_NTP_MODE=0' /DietPi/dietpi.txt
 
-			# - Kill current
-			killall -w /DietPi/dietpi/func/run_ntpd &> /dev/null
-
-			local ntp_mirror=$(grep -m1 '^[[:blank:]]*CONFIG_NTP_MIRROR=' /DietPi/dietpi.txt | sed 's/^[^=]*=//')
+			local ntp_mirror=$(sed -n '/^[[:blank:]]*CONFIG_NTP_MIRROR=/{s/^[^=]*=//p;q}' /DietPi/dietpi.txt)
 			[[ $ntp_mirror ]] || ntp_mirror='default'
-			local ntp_mirror_entry="Servers=$ntp_mirror"
 
-			# - Default, lets timesyncd use DHCP server (Stretch+ only) or fallback to debian.pool.ntp.org.
-			if [[ ${ntp_mirror,,} == 'default' ]]; then
+			# Gateway, auto detect local gateway(s) (router) to use as NTP server.
+			if [[ ${ntp_mirror,,} == 'gateway' ]]; then
 
-				ntp_mirror_entry='#Servers=0.debian.pool.ntp.org 1.debian.pool.ntp.org 2.debian.pool.ntp.org 3.debian.pool.ntp.org'
-
-			# - Gateway, auto detect local gateway(s) (router) to use as NTP server.
-			elif [[ ${ntp_mirror,,} == 'gateway' ]]; then
-
-				# NB: Turn output output into single line string via echo
-				local gateway=$(echo $(ip r | mawk '/^default/ {print $3}'))
+				# NB: Convert output to single line via echo
+				local gateway=$(echo $(ip r s 0.0.0.0/0 | mawk '{print $3}'))
 				if [[ $gateway ]]; then
 
 					G_DIETPI-NOTIFY 0 "Gateway(s) detected: $gateway, adding as NTP server(s)."
-					ntp_mirror_entry="Servers=$gateway"
+					ntp_mirror=$gateway
 
 				else
 
-					G_DIETPI-NOTIFY 1 'No local gateway detected. No NTP mirror change will be applied.'
+					G_DIETPI-NOTIFY 1 'No local gateway detected. Reverting NTP mirror back to system defaults.'
 					EXIT_CODE=1
-					return 1
+					ntp_mirror='default'
 
 				fi
 
-			# - Add pool.ntp.org entries with subdomains "[0-3].", other entries without.
-			elif [[ $ntp_mirror =~ 'pool.ntp.org' ]]; then
+			fi
 
-				ntp_mirror_entry='Servers='
-				local i
+			# Default, lets timesyncd use DHCP server or fallback to debian.pool.ntp.org.
+			if [[ ${ntp_mirror,,} == 'default' ]]; then
+
+				[[ -f '/etc/systemd/timesyncd.conf' ]] && rm /etc/systemd/timesyncd.conf
+
+			else
+
+				local i ntp_mirror_entry
 				for i in $ntp_mirror
 				do
 
@@ -305,29 +301,26 @@ _EOF_
 
 				done
 
+				# Set mirror
+				echo -e "[Time]\nServers=${ntp_mirror_entry% }" > /etc/systemd/timesyncd.conf
+
 			fi
 
-			# - Set mirror
-			cat << _EOF_ > /etc/systemd/timesyncd.conf
-[Time]
-$ntp_mirror_entry
-_EOF_
-
-			# - Daemon mode, dbus required for timedatectl, that users may expect
+			# Daemon mode, dbus required for timedatectl, that users may expect
 			if (( $INPUT_MODE_VALUE == 4 )); then
 
 				G_AG_CHECK_INSTALL_PREREQ dbus
 				systemctl unmask systemd-timesyncd # Failsafe
 				systemctl enable --now systemd-timesyncd
 
-			# - Else, disable systemd-timesyncd to let "run_ntpd" or other time sync system take control
+			# Else, disable systemd-timesyncd to let "run_ntpd" or other time sync system take control
 			else
 
 				systemctl disable --now systemd-timesyncd
 
 			fi
 
-			# - Update DietPi.txt
+			# Update DietPi.txt
 			G_CONFIG_INJECT 'CONFIG_NTP_MODE=' "CONFIG_NTP_MODE=$INPUT_MODE_VALUE" /DietPi/dietpi.txt
 
 		else
@@ -384,7 +377,7 @@ _EOF_
 			# - DietPi-PREP, 1st run setup or user cancelled manual password choice
 			else
 
-				GLOBAL_PW=$(grep -m1 '^[[:blank:]]*AUTO_SETUP_GLOBAL_PASSWORD=' /DietPi/dietpi.txt | sed 's/^[^=]*=//')
+				GLOBAL_PW=$(sed -n '/^[[:blank:]]*AUTO_SETUP_GLOBAL_PASSWORD=/{s/^[^=]*=//p;q}' /DietPi/dietpi.txt)
 
 			fi
 			[[ $GLOBAL_PW ]] || GLOBAL_PW='dietpi'
