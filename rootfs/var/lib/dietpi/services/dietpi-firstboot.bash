@@ -75,7 +75,7 @@
 				sed -i '/over_voltage=/c\#over_voltage=0' /DietPi/config.txt
 				sed -i '/arm_freq=/c\#arm_freq=1500' /DietPi/config.txt
 				sed -i '/core_freq=/c\#core_freq=500' /DietPi/config.txt
-				sed -i '/sdram_freq=/c\#sdram_freq=3200' /DietPi/config.txt
+				sed -i '/sdram_freq=/d' /DietPi/config.txt # Not supported on RPi4, defaults to 3200 MHz
 				G_CONFIG_INJECT 'temp_limit=' 'temp_limit=75' /DietPi/config.txt # https://github.com/MichaIng/DietPi/issues/3019
 
 			fi
