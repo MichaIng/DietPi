@@ -1458,7 +1458,7 @@ _EOF_
 
 			echo 'blacklist bmp085' > /etc/modprobe.d/bmp085.conf
 
-		# - Sparky SBC ONLY:
+		# - Sparky SBC:
 		elif (( $G_HW_MODEL == 70 )); then
 
 			# 	Install latest kernel
@@ -1518,7 +1518,7 @@ _EOF_
 			# - Disable RPi camera to add modules blacklist
 			/DietPi/dietpi/func/dietpi-set_hardware rpi-camera disable
 
-		# - PINE64 (and possibily others): Cursor fix for FB
+		# - Pine A64 (and possibily others): Cursor fix for FB
 		elif (( $G_HW_MODEL == 40 )); then
 
 			mkdir -p /etc/bashrc.d
@@ -1535,13 +1535,24 @@ _EOF_
 			# - Ensure WiFi module pre-exists
 			G_CONFIG_INJECT '8723bs' '8723bs' /etc/modules
 
-		# - Rock64, remove HW accell config, as it's not currently functional: https://github.com/MichaIng/DietPi/issues/2086
-		elif (( $G_HW_MODEL == 43 )); then
+		# - Rock(Pro)64: Apply workaround for kernel-related Ethernet issues: https://github.com/MichaIng/DietPi/issues/3066
+		elif [[ $G_HW_MODEL == 4[23] ]]; then
 
-			[[ -f '/etc/X11/xorg.conf.d/20-armsoc.conf' ]] && rm /etc/X11/xorg.conf.d/20-armsoc.conf
+			local identifier='ff540000'
+			(( $G_HW_MODEL == 43 )) && identifier='fe300000'
 
-		# - Odroids FFMPEG fix. Prefer debian.org over Meveric for backports: https://github.com/MichaIng/DietPi/issues/1273 + https://github.com/MichaIng/DietPi/issues/1556#issuecomment-369463910
-		elif (( $G_HW_MODEL > 9 && $G_HW_MODEL < 15 )); then
+			if [[ -f '/boot/boot.cmd' ]] && ! grep -q "$identifier" /boot/boot.cmd; then
+
+				sed -i "/^fdt resize/{s/$/\
+fdt rm /ethernet@$identifier rockchip,bugged_tx_coe\
+fdt rm /ethernet@$identifier snps,force_thresh_dma_mode\
+fdt set /ethernet@$identifier snps,txpbl <0x21>/;q}" /boot/boot.cmd
+				mkimage -C none -A arm -T script -d /boot/boot.cmd /boot/boot.scr
+
+			fi
+
+		# - Odroids FFmpeg fix for Meveric images. Prefer debian.org over Meveric for backports: https://github.com/MichaIng/DietPi/issues/1273 + https://github.com/MichaIng/DietPi/issues/1556#issuecomment-369463910
+		elif [[ $G_HW_MODEL == 1[0-5] ]] && ls /etc/apt/sources.list.d/meveric*.list &> /dev/null; then
 
 			rm -f /etc/apt/preferences.d/meveric*
 			cat << _EOF_ > /etc/apt/preferences.d/dietpi-meveric-backports
