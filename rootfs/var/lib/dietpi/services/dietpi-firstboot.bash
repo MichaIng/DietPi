@@ -153,7 +153,7 @@
 
 			G_DIETPI-NOTIFY 2 "Setting Keyboard $autoinstall_keyboard. Please wait..."
 			G_CONFIG_INJECT 'XKBLAYOUT=' "XKBLAYOUT=\"$autoinstall_keyboard\"" /etc/default/keyboard
-			#systemctl restart keyboard-setup
+			setupcon --save
 
 		fi
 
