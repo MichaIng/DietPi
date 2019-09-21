@@ -739,7 +739,7 @@ _EOF_
 			'locales'		# Support locales, necessary for DietPi scripts, as we use en_GB.UTF8 as default language
 			'nano'			# Simple text editor
 			'p7zip'			# .7z wrapper
-			'parted'		# Drive partitioning, required by DietPi-Boot + DietPi-Drive_Manager
+			'parted'		# Drive partitioning, required by DietPi-Drive_Manager
 			'procps'		# "kill", "ps", "pgrep", "sysctl", used by several DietPi scripts
 			'psmisc'		# "killall", used by several DietPi scripts
 			'resolvconf'		# Network nameserver handler + depandant for "ifupdown" (network interface handler) => "iproute2" ("ip" command)
