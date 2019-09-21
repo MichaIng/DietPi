@@ -27,24 +27,19 @@
 
 	fi
 
-	# Resize partition, only if drive actually contains a partition table
+	# Maximize partition, only if drive actually contains a partition table
 	if [[ $TARGET_PARTITION == [0-9] ]]; then
 
-		# - Failsafe: Sync changes to disk before touching partitions
+		# Failsafe: Sync changes to disk before touching partitions
 		sync
 
-		# - GPT detection | Modified version of ayufan-rock64 resize script
-		if sfdisk $TARGET_DRIVE -l | grep -qi 'disklabel type: gpt'; then
+		# GPT detection | Modified version of ayufan-rock64 resize script: # Move GPT alternate header to end of disk
+		sfdisk $TARGET_DRIVE -l | grep -qi 'disklabel type: gpt' && sgdisk -e $TARGET_DRIVE
 
-			#	Move GPT alternate header to end of disk
-			sgdisk -e $TARGET_DRIVE
-
-		fi
-
-		# - Maximize partition size
+		# Maximize partition size
 		sfdisk $TARGET_DRIVE -fN$TARGET_PARTITION --no-reread <<< ',+,,,'
 
-		# - Reread partition table
+		# Reread partition table
 		partprobe $TARGET_DRIVE
 
 	else
@@ -53,7 +48,7 @@
 
 	fi
 
-	# Resize file system
+	# Maximize file system
 	resize2fs $TARGET_DEV
 
 	exit 0
