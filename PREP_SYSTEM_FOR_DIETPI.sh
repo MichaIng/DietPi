@@ -831,12 +831,11 @@ _EOF_
 
 			local apackages=(
 
-				"armbian-tools-$DISTRO_TARGET_NAME"
 				'linux-dtb-'
 				'linux-u-'
 				'linux-image-'
-				"linux-$DISTRO_TARGET_NAME"
-				'sunxi'
+				"linux-$DISTRO_TARGET_NAME-"
+				'sunxi-tools'
 
 			)
 
@@ -870,7 +869,6 @@ _EOF_
 		elif (( $G_HW_MODEL == 14 )); then
 
 			G_AGI linux-image-arm64-odroid-n1
-			#G_AGI libdrm-rockchip1 # Not currently on meveric's repo
 
 		#	Odroid C2
 		elif (( $G_HW_MODEL == 12 )); then
