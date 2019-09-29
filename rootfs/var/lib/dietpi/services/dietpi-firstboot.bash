@@ -75,7 +75,8 @@
 				sed -i '/over_voltage=/c\#over_voltage=0' /DietPi/config.txt
 				sed -i '/arm_freq=/c\#arm_freq=1500' /DietPi/config.txt
 				sed -i '/core_freq=/c\#core_freq=500' /DietPi/config.txt
-				sed -i '/sdram_freq=/c\#sdram_freq=3200' /DietPi/config.txt
+				sed -i '/sdram_freq=/d' /DietPi/config.txt # Not supported on RPi4, defaults to 3200 MHz
+				G_CONFIG_INJECT 'temp_limit=' 'temp_limit=75' /DietPi/config.txt # https://github.com/MichaIng/DietPi/issues/3019
 
 			fi
 
@@ -152,7 +153,7 @@
 
 			G_DIETPI-NOTIFY 2 "Setting Keyboard $autoinstall_keyboard. Please wait..."
 			G_CONFIG_INJECT 'XKBLAYOUT=' "XKBLAYOUT=\"$autoinstall_keyboard\"" /etc/default/keyboard
-			#systemctl restart keyboard-setup
+			setupcon --save
 
 		fi
 
@@ -185,17 +186,15 @@
 		(( $G_HW_MODEL < 10 )) && target_repo='CONFIG_APT_RASPBIAN_MIRROR'
 		/DietPi/dietpi/func/dietpi-set_software apt-mirror "$(grep -m1 "^[[:blank:]]*$target_repo=" /DietPi/dietpi.txt | sed 's/^[^=]*=//')"
 
-		# Generate unique Dropbear host keys:
+		# Regenerate unique Dropbear host keys:
 		rm -f /etc/dropbear/*_host_key
-		# - Distro specific package and on Jessie, ECDSA is not created automatically
-		if (( $G_DISTRO < 4 )); then
+		if (( $G_DISTRO < 6 )); then
 
-			dpkg-reconfigure -f noninteractive dropbear
-			dropbearkey -t ecdsa -f /etc/dropbear/dropbear_ecdsa_host_key
+			dpkg-reconfigure -f noninteractive dropbear-run
 
 		else
 
-			dpkg-reconfigure -f noninteractive dropbear-run
+			dpkg-reconfigure -f noninteractive dropbear
 
 		fi
 

@@ -33,7 +33,7 @@
 
 	fi
 
-	# Workaround if SSH client sets an unsupported $TERM string: https://github.com/MichaIng/DietPi/issues/2034	
+	# Workaround if SSH client sets an unsupported $TERM string: https://github.com/MichaIng/DietPi/issues/2034
 	if [[ $SSH_TTY ]] && ! toe -a | grep -q "^$TERM[[:blank:]]"; then
 
 		TERM_old=$TERM

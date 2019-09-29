@@ -10,15 +10,16 @@
 	#////////////////////////////////////
 	#
 	# Info:
+	# - Location: /{DietPi,boot}/dietpi/dietpi-update
 	# - Updates DietPi from Git or dietpi.com repo
 	# - Uses patch_file for incremental online patching
 	# - Uses pre-patch_file for critical fixes and update related changes
 	#
 	# Usage:
-	# - dietpi-update    = Normal
-	# - dietpi-update 1  = noninteractive update
-	# - dietpi-update 2  = Check for updates. print server_version to /DietPi/dietpi/.update_available (-1=new image required)
-	# - dietpi-update -1 = Include reapplying the current subversion patch, e.g. to update dev branch
+	# - dietpi-update	= Normal
+	# - dietpi-update 1	= noninteractive update
+	# - dietpi-update 2	= Check for updates. print server_version to /DietPi/dietpi/.update_available (-1=new image required)
+	# - dietpi-update -1	= Include reapplying the current subversion patch, e.g. to update dev branch
 	#////////////////////////////////////
 
 	# Import DietPi-Globals --------------------------------------------------------------
@@ -45,12 +46,11 @@
 
 	SERVER_ONLINE=0
 	UPDATE_AVAILABLE=0
-	UPDATE_REQUIRESNEWIMAGE=0
 	RUN_UPDATE=0
 
-	GITOWNER_TARGET=$(grep -m1 '^[[:blank:]]*DEV_GITOWNER=' /DietPi/dietpi.txt | sed 's/^[^=]*=//')
+	GITOWNER_TARGET=$(sed -n '/^[[:blank:]]*DEV_GITOWNER=/{s/^[^=]*=//p;q}' /DietPi/dietpi.txt)
 	GITOWNER_TARGET=${GITOWNER_TARGET:-MichaIng}
-	GITBRANCH_TARGET=$(grep -m1 '^[[:blank:]]*DEV_GITBRANCH=' /DietPi/dietpi.txt | sed 's/^[^=]*=//')
+	GITBRANCH_TARGET=$(sed -n '/^[[:blank:]]*DEV_GITBRANCH=/{s/^[^=]*=//p;q}' /DietPi/dietpi.txt)
 	GITBRANCH_TARGET=${GITBRANCH_TARGET:-master}
 
 	COREVERSION_SERVER=0
@@ -158,8 +158,6 @@ If this error persists, please report at: https://github.com/MichaIng/DietPi/iss
 		# Update requires new image
 		if (( $DIETPIUPDATE_VERSION_CORE < $COREVERSION_SERVER )); then
 
-			UPDATE_REQUIRESNEWIMAGE=1
-
 			# Write "-1" to flag file for DietPi-Banner to show info about required new image
 			echo '-1' > /DietPi/dietpi/.update_available
 
@@ -167,7 +165,7 @@ If this error persists, please report at: https://github.com/MichaIng/DietPi/iss
 Please download the latest DietPi image from: https://dietpi.com/#download'
 
 		# Update available
-		elif (( $G_DIETPI_VERSION_SUB < $SUBVERSION_SERVER || 
+		elif (( $G_DIETPI_VERSION_SUB < $SUBVERSION_SERVER ||
 			( $G_DIETPI_VERSION_SUB == $SUBVERSION_SERVER && $G_DIETPI_VERSION_RC < $RCVERSION_SERVER ) )); then
 
 			UPDATE_AVAILABLE=1
@@ -238,7 +236,7 @@ Please download the latest DietPi image from: https://dietpi.com/#download'
 			G_VERSIONDB_SAVE
 
 			# Verify/update dietpi.txt entries:
-			/DietPi/dietpi/func/dietpi-set_software verify_dietpi.txt
+			/DietPi/dietpi/func/dietpi-set_software verify_dietpi.txt || exit 1
 
 			# Failsafe: Sync changes to disk
 			sync
@@ -252,7 +250,7 @@ Please download the latest DietPi image from: https://dietpi.com/#download'
 			while (( $G_DIETPI_VERSION_SUB < $SUBVERSION_SERVER )); do
 
 				G_DIETPI-NOTIFY 2 "Patching $G_DIETPI_VERSION_CORE.$G_DIETPI_VERSION_SUB to $COREVERSION_SERVER.$(( $G_DIETPI_VERSION_SUB + 1 ))"
-				/DietPi/dietpi/patch_file $G_DIETPI_VERSION_SUB
+				/DietPi/dietpi/patch_file $G_DIETPI_VERSION_SUB || exit 1
 				G_DIETPI_VERSION_SUB=$(( $G_DIETPI_VERSION_SUB + 1 ))
 				G_DIETPI_VERSION_RC=$RCVERSION_SERVER # Cancel any RC updates, as subversions override it
 
@@ -262,7 +260,7 @@ Please download the latest DietPi image from: https://dietpi.com/#download'
 			if (( $G_DIETPI_VERSION_RC < $RCVERSION_SERVER )); then
 
 				G_DIETPI-NOTIFY 2 "Patching $G_DIETPI_VERSION_CORE.$G_DIETPI_VERSION_SUB.$G_DIETPI_VERSION_RC to $COREVERSION_SERVER.$SUBVERSION_SERVER.$RCVERSION_SERVER"
-				/DietPi/dietpi/patch_file $(( $G_DIETPI_VERSION_SUB - 1 )) # Rerun current subversion patch for RCs
+				/DietPi/dietpi/patch_file $(( $G_DIETPI_VERSION_SUB - 1 )) || exit 1 # Rerun current subversion patch for RCs
 				G_DIETPI_VERSION_RC=$RCVERSION_SERVER
 
 			fi
@@ -466,7 +464,8 @@ When DietPi applies updates, all system services will be temporarily stopped. Do
 			# - Pre-estimate and override terminal size variables, since they cannot be estimated, if STOUT and STERR are redirected: https://github.com/MichaIng/DietPi/issues/2105
 			export G_WHIP_SIZE_X_OVERRIDE=$(tput cols)
 			export G_WHIP_SIZE_Y_OVERRIDE=$(tput lines)
-			Run_Update 2>&1 | tee $FP_TMP_LOG
+			# - Log to file by redirecting to subshell instead of piping, else G_ERROR_HANDLER cannot exit the script via "kill -INT $$": https://github.com/MichaIng/DietPi/issues/3127
+			Run_Update &> >(tee $FP_TMP_LOG); wait $!
 			unset G_WHIP_SIZE_X_OVERRIDE G_WHIP_SIZE_Y_OVERRIDE
 
 			# Mark 1st run update as completed
@@ -488,6 +487,7 @@ When DietPi applies updates, all system services will be temporarily stopped. Do
 			l_message='Syncing new DietPi scripts to disk' G_RUN_CMD /DietPi/dietpi/func/dietpi-ramdisk 1
 			> /DietPi/.ramdisk
 
+			# Start services only on finished install state, else dietpi-software will follow immediately
 			(( $G_DIETPI_INSTALL_STAGE == 2 )) && /DietPi/dietpi/dietpi-services restart
 
 		fi
