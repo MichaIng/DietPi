@@ -1,8 +1,8 @@
 ### DietPi Project Contribution
 
-Git coders, please use the active development branch: [dev](https://github.com/Fourdee/DietPi/tree/dev)
+Git coders, please use the active development branch: [dev](https://github.com/MichaIng/DietPi/tree/dev)
 
-- [How to add new software installation options to DietPi-Software](https://github.com/Fourdee/DietPi/issues/490#issuecomment-244416570)
+- [How to add new software installation options to DietPi-Software](https://github.com/MichaIng/DietPi/issues/490#issuecomment-244416570)
 
 Are you able to:
 
@@ -18,4 +18,4 @@ We are always looking for talented people who believe in the DietPi project, and
 
 - Send me an Email: daniel.knight@dietpi.com
 - Join our forums: https://dietpi.com/phpbb
-- GitHub: https://github.com/Fourdee/DietPi
+- GitHub: https://github.com/MichaIng/DietPi

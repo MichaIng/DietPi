@@ -1,28 +1,27 @@
 #!/bin/bash
 
-(( $UID )) && echo -e '[\e[31mFAILED\e[0m] Root privileges required. Please run the command with "sudo".\n' && exit 1
+(( $UID )) && echo -e '[\e[31mFAILED\e[0m] Root privileges required. Please run the script with "sudo".' && exit 1
 echo -e '[\e[32m  OK  \e[0m] Root privileges verified.'
 
-apt-get install -y rsync
-(( $? )) && echo -e '[\e[31mFAILED\e[0m] Installation of rsync failed. Please check your internet connection, proper apt-get function or try to install it manually: "apt-get install -y rsync"\n' && exit 1
+! apt-get install -y rsync && echo -e '[\e[31mFAILED\e[0m] "rsync" install failed. Please check your internet connection, proper apt-get function or try to install it manually: "apt install rsync"' && exit 1
 echo -e '[\e[32m  OK  \e[0m] Successfully installed rsync.'
+
+systemctl start mariadb &> /dev/null || systemctl start mysql &> /dev/null || { echo -e '[\e[31mFAILED\e[0m] Could not start MariaDB server. Aborting...'; exit 1; }
+echo -e '[\e[32m  OK  \e[0m] Successfully started MariaDB.'
 
 run_backup(){
 
-	echo '[ INFO ] Enabling maintenance mode...'
-	sudo -u www-data php /var/www/$1/occ maintenance:mode --on
-	(( $? )) && echo -e '[\e[31mFAILED\e[0m] Could not enable maintenance mode, please check running state of your instance and PHP functionality.\n' && exit 1
-
 	fp_config="/var/www/$1/config/config.php"
 
-	echo "[ INFO ] Scanning $fp_config for necessary information..."
-	[[ ! -f $fp_config ]] && echo -e "[\e[31mFAILED\e[0m] File $fp_config not found, please check your installation.\n" && exit 1
+	echo '[ INFO ] Enabling maintenance mode...'
+	! sudo -u www-data php /var/www/$1/occ maintenance:mode --on && echo -e '[\e[31mFAILED\e[0m] Could not enable maintenance mode, please check running state of your instance and PHP functionality.' && exit 1
 
-	local fp_datadir=$(grep -m1 "^[[:blank:]]*'datadirectory'" $fp_config | mawk '{print $3}' | sed "s/[',]//g")
-	local dbname=$(grep -m1 "^[[:blank:]]*'dbname'" $fp_config | mawk '{print $3}' | sed "s/[',]//g")
-	local dbhost=$(grep -m1 "^[[:blank:]]*'dbhost'" $fp_config | mawk '{print $3}' | sed "s/[',]//g")
-	local dbuser=$(grep -m1 "^[[:blank:]]*'dbuser'" $fp_config | mawk '{print $3}' | sed "s/[',]//g")
-	local dbpass=$(grep -m1 "^[[:blank:]]*'dbpassword'" $fp_config | mawk '{print $3}' | sed "s/[',]//g")
+	echo "[ INFO ] Scanning $fp_config for necessary information..."
+	local fp_datadir=$(grep -m1 "^[[:blank:]]*'datadirectory'" $fp_config | cut -d \' -f 4)
+	local dbname=$(grep -m1 "^[[:blank:]]*'dbname'" $fp_config | cut -d \' -f 4)
+	local dbhost=$(grep -m1 "^[[:blank:]]*'dbhost'" $fp_config | cut -d \' -f 4)
+	local dbuser=$(grep -m1 "^[[:blank:]]*'dbuser'" $fp_config | cut -d \' -f 4)
+	local dbpass=$(grep -m1 "^[[:blank:]]*'dbpassword'" $fp_config | cut -d \' -f 4)
 	echo -e " - data directory:	$fp_datadir
  - database name:	$dbname
  - database hostname:	$dbhost
@@ -30,50 +29,47 @@ run_backup(){
  - database password:	$dbpass"
 
 	echo '[ INFO ] Backup database to data directory...'
-	mysqldump -u"$dbuser" -h"$dbhost" -p"$dbpass" "$dbname" > "$fp_datadir"/dietpi-$1-database-backup.sql
-	(( $? )) && echo -e '[\e[31mFAILED\e[0m] Database backup seems to have failed. Check state of your database server, check logs and in case repair table corruptions.\n' && exit 1
+	! mysqldump -u"$dbuser" -h"$dbhost" -p"$dbpass" "$dbname" > "$fp_datadir"/dietpi-$1-database-backup.sql && echo -e '[\e[31mFAILED\e[0m] Database backup failed, please check state of your database server, check logs and in case repair table corruptions.' && exit 1
 	echo -e "[\e[32m  OK  \e[0m] Successfully finished database backup to: $fp_datadir/dietpi-$1-database-backup.sql"
 
 	echo '[ INFO ] Backup installation folder to data directory...'
-	rsync -aHp --delete /var/www/$1/ "$fp_datadir"/dietpi-$1-installation-backup
-	(( $? )) && echo -e '[\e[31mFAILED\e[0m] Rsync failed, check for error reasons and try again.\n' && exit 1
+	! rsync -aHp --delete /var/www/$1/ "$fp_datadir"/dietpi-$1-installation-backup && echo -e '[\e[31mFAILED\e[0m] "rsync" failed, please check for error reasons and try again.' && exit 1
 	echo -e "[\e[32m  OK  \e[0m] Successfully finished installation backup to: $fp_datadir/dietpi-$1-installation-backup/"
 
 	if [[ $2 ]]; then
 
 		echo '[ INFO ] You provided an additional backup location. Moving data directory...'
-		[[ ! -d $2 ]] && echo -e "[\e[31mFAILED\e[0m] $2 is no directory, please check spelling and mount status of your desired backup location.\n" && exit 1
+		[[ ! -d $2 ]] && echo -e "[\e[31mFAILED\e[0m] $2 is no existing directory, please check spelling and mount status of your desired backup drive." && exit 1
 
-		rsync -aHp --delete "$fp_datadir"/ "$2"
-		(( $? )) && echo -e '[\e[31mFAILED\e[0m] Rsync failed, check for error reasons and try again.\n' && exit 1
+		! rsync -aHp --delete "$fp_datadir"/ "$2" && echo -e '[\e[31mFAILED\e[0m] "rsync" failed, please check for error reasons and try again.' && exit 1
 		echo -e "[\e[32m  OK  \e[0m] Successfully synced data directory to: $2"
 
 	else
 
-		echo '[ INFO ] You did not provide an additional backup location. We assume your data directory is already on an external drive, ready for migration? If not, move it there or rerun this script, providing the external backup location as argument.'
+		echo '[ INFO ] You did not provide an additional backup location. We assume your data directory is already on an external drive, ready for migration? If not, move it there, or, rerun this script with the desired external backup path as argument.'
 
 	fi
 
-	echo -e "[\e[32m  OK  \e[0m] Backup successfully completed. On destination server, please move the whole data directory to the one, provided within /DietPi/dietpi.txt (default: \"/mnt/dietpi_userdata/$1_data\"), or create a symlink from there. On reinstallation, DietPi-Software will check this location for backups and in case automatically restore them."
+	echo -e "[\e[32m  OK  \e[0m] Backup successfully completed. On destination server, please move the whole data directory to the one, provided within /DietPi/dietpi.txt (default: \"/mnt/dietpi_userdata/$1_data\"), or create a symlink from there. On reinstall, DietPi-Software will check this location for backups and in case automatically restore them."
 
 }
 
 ### MAIN ###
 
-[[ ! -f /DietPi/dietpi/.installed ]] && echo -e '[\e[31mFAILED\e[0m] No proper DietPi installation found or DietPi-RamDisk is not running. Please ensure you are executing this script from a functional DietPi system and "dietpi-ramdisk" is up.\n' && exit 1
-
-if grep -q 'aSOFTWARE_INSTALL_STATE\[47\]=2' /DietPi/dietpi/.installed; then
+if [[ -f '/var/www/owncloud/config/config.php' ]]; then
 
 	echo '[ INFO ] ownCloud installation found, preparing backup...'
 	run_backup owncloud "$1"
 
 fi
 
-if grep -q 'aSOFTWARE_INSTALL_STATE\[114\]=2' /DietPi/dietpi/.installed; then
+if [[ -f '/var/www/nextcloud/config/config.php' ]]; then
 
         echo '[ INFO ] Nextcloud installation found, preparing backup...'
         run_backup nextcloud "$1"
 
 fi
 
-[[ ! $fp_config ]] && echo -e "[\e[31mFAILED\e[0m] No ownCloud or Nextcloud installation found. Please verify that it was installed via dietpi-software, in case reinstall it, non of your existing data/settings will be overwritten.\n" && exit 1
+[[ ! $fp_config ]] && echo -e '[\e[31mFAILED\e[0m] No ownCloud or Nextcloud instance found at /var/www/owncloud|nextcloud. Aborting...' && exit 1
+
+exit 0

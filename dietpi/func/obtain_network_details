@@ -10,25 +10,21 @@
 	#////////////////////////////////////
 	#
 	# Info:
+	# - Location: /{DietPi,boot}/dietpi/func/obtain_network_details
 	# - Attempts to find the 1st available index numbers for eth[0-9] and wlan[0-9] devices
 	# - Obtains the active network adapter (eth, then wlan).
-	# - Saves the above data to $FP_NETFILE for use systemwide
+	# - Saves the above data to $FP_NETFILE for use system-wide
 	#
-	# $FP_NETFILE line1
-	# - eth index
-	# $FP_NETFILE line2
-	# - wlan index
-	# $FP_NETFILE line3
-	# - Active adapter name (eg: eth0)
-	# $FP_NETFILE line4
-	# - IP address
+	# line1: eth index
+	# line2: wlan index
+	# line3: Active adapter name (eg: eth0)
+	# line4: Active IP address
+	# line5: ETH_IP=<eth ip>
+	# line6: WLAN_IP=<wlan ip>
 	#////////////////////////////////////
 
-	#Import DietPi-Globals ---------------------------------------------------------------
-	. /DietPi/dietpi/func/dietpi-globals
-	G_PROGRAM_NAME='DietPi-Obtain_network_details'
-	G_INIT
-	#Import DietPi-Globals ---------------------------------------------------------------
+	# Exit, if already running
+	pgrep 'obtain_network_details' &> /dev/null && exit
 
 	#/////////////////////////////////////////////////////////////////////////////////////
 	# Global
@@ -36,61 +32,79 @@
 
 	FP_NETFILE='/DietPi/dietpi/.network'
 
-	ETH_INDEX=0
-	WLAN_INDEX=0
-
-	ACTIVE_DEVICE='NONE'
+	ETH_INDEX=''
+	WLAN_INDEX=''
+	ACTIVE_DEVICE=''
+	ACTIVE_IP=''
 	ETH_IP=''
 	WLAN_IP=''
-	IP_ADDRESS='Use dietpi-config to setup a connection'
 
-	DEV_MAX=9
-	Scrape_IP(){
+	Scan(){
 
-		#ETH
-		for (( i=0; i<=$DEV_MAX; i++ ))
+		# ETH
+		local eth_dev eth_index eth_out eth_ip
+		for i in /sys/class/net/eth*
 		do
 
-			if ETH_IP=$(ip -o a s eth$i 2>/dev/null); then
+			# Check if any eth dev exists
+			[[ -e $i ]] || break
 
-				ETH_INDEX=$i
-				ETH_IP=${ETH_IP#*inet* }
-				ETH_IP=${ETH_IP%%/*}
-				if [[ $ETH_IP ]]; then
+			# Get dev name and index, assign not yet if lower index found
+			eth_dev=${i#*net/}
+			eth_index=${eth_dev#eth}
+			[[ $ETH_INDEX ]] || ETH_INDEX=$eth_index
 
-					ACTIVE_DEVICE="eth$ETH_INDEX"
-					IP_ADDRESS=$ETH_IP
-					break
+			# Get and check IP, assign not yet if lower index IP found
+			eth_out=$(ip a s $eth_dev 2>/dev/null) || continue
+			# - Detect IPv4 and, if no available, IPv6
+			[[ $eth_out =~ [[:blank:]]inet6?[[:blank:]] ]] || continue
+			eth_ip=${eth_out#* inet* }
+			eth_ip=${eth_ip%%/*}
+			[[ $eth_ip ]] || continue
+			[[ $ETH_IP ]] || { ETH_IP=$eth_ip; ETH_INDEX=$eth_index; }
 
-				fi
+			# Check connection state
+			[[ $eth_out =~ [[:blank:]]UP[[:blank:]] ]] || continue
 
-			fi
+			# Assign active dev info
+			ETH_INDEX=$eth_index
+			ETH_IP=$eth_ip
+			ACTIVE_DEVICE=$eth_dev
+			ACTIVE_IP=$ETH_IP
+			break
 
 		done
 
-		#WLAN
-		for (( i=0; i<=$DEV_MAX; i++ ))
+		# WLAN
+		local wlan_dev wlan_index wlan_out wlan_ip
+		for i in /sys/class/net/wlan*
 		do
 
-			if WLAN_IP=$(ip -o a s wlan$i 2>/dev/null); then
+			# Check if any wlan dev exists
+			[[ -e $i ]] || break
 
-				WLAN_INDEX=$i
-				WLAN_IP=${WLAN_IP#*inet* }
-				WLAN_IP=${WLAN_IP%%/*}
-				if [[ $WLAN_IP ]]; then
+			# Get dev name and index, assign not yet if lower index found
+			wlan_dev=${i#*net/}
+			wlan_index=${wlan_dev#wlan}
+			[[ $WLAN_INDEX ]] || WLAN_INDEX=$wlan_index
 
-					if [[ ! $ETH_IP ]]; then
+			# Get and check IP, assign not yet if lower index IP found
+			wlan_out=$(ip a s $wlan_dev 2>/dev/null) || continue
+			# - Detect IPv4 and, if no available, IPv6
+			[[ $wlan_out =~ [[:blank:]]inet6?[[:blank:]] ]] || continue
+			wlan_ip=${wlan_out#* inet* }
+			wlan_ip=${wlan_ip%%/*}
+			[[ $wlan_ip ]] || continue
+			[[ $WLAN_IP ]] || { WLAN_IP=$wlan_ip; WLAN_INDEX=$wlan_index; }
 
-						ACTIVE_DEVICE="wlan$WLAN_INDEX"
-						IP_ADDRESS=$WLAN_IP
+			# Check connection state
+			[[ $wlan_out =~ [[:blank:]]UP[[:blank:]] ]] || continue
 
-					fi
-
-					break
-
-				fi
-
-			fi
+			# Assign active dev info if none (eth) assigned yet
+			WLAN_INDEX=$wlan_index
+			WLAN_IP=$wlan_ip
+			[[ $ACTIVE_DEVICE ]] || { ACTIVE_DEVICE=$wlan_dev; ACTIVE_IP=$WLAN_IP; }
+			break
 
 		done
 
@@ -99,19 +113,19 @@
 	#/////////////////////////////////////////////////////////////////////////////////////
 	# Main Loop
 	#/////////////////////////////////////////////////////////////////////////////////////
-	Scrape_IP
+	Scan
 	#-----------------------------------------------------------------------------------
-	#Output to file
+	# Write to file
 	cat << _EOF_ > $FP_NETFILE
-$ETH_INDEX
-$WLAN_INDEX
-$ACTIVE_DEVICE
-$IP_ADDRESS
+${ETH_INDEX:-0}
+${WLAN_INDEX:-0}
+${ACTIVE_DEVICE:-NONE}
+${ACTIVE_IP:-Use dietpi-config to setup a connection}
 ETH_IP=$ETH_IP
 WLAN_IP=$WLAN_IP
 _EOF_
 
-	#Assure that non-root user can read file:
+	# Assure that non-root user can write file
 	(( $UID )) || chmod 666 $FP_NETFILE
 
 	#-----------------------------------------------------------------------------------

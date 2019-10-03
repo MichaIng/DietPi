@@ -1,12 +1,12 @@
 <!--
 Before submitting a pull request:
-- Please ensure the target branch is "dev" (active development): https://github.com/Fourdee/DietPi/tree/dev
+- Please ensure the target branch is "dev" (active development): https://github.com/MichaIng/DietPi/tree/dev
 - Please ensure changes have been tested and verified functional.
 -->
 **Status**: WIP | Testing | Ready | ?
 - [ ] Example task 1
 
-**Reference**: https://github.com/Fourdee/DietPi/issues/XXXX
+**Reference**: https://github.com/MichaIng/DietPi/issues/XXXX
 
 **Commit list/description**:
 <!--
