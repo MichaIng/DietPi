@@ -18,12 +18,6 @@
 	# - ./pre-patch_file $G_DIETPI_VERSION_SUB
 	#////////////////////////////////////
 
-	EXIT_CODE=0
-
-	echo -e '\n \e[38;5;154mDietPi-Pre-patch\e[0m
-\e[90m─────────────────────────────────────────────────────
- Mode: \e[0mApplying pre-patches\n'
-
 	# Grab input, being failsafe when applying to $G_DIETPI_VERSION_SUB
 	if [[ $1 =~ ^-?[0-9]+$ ]]; then
 
@@ -31,147 +25,179 @@
 
 	else
 
-		echo -e "\e[90m[\e[0m\e[31mFAILED\e[0m\e[90m]\e[0m No valid input used: $1"
-		EXIT_CODE=1
+		echo -e "\e[90m[\e[0m\e[31mFAILED\e[0m\e[90m]\e[0m Invalid input argument ($1)"
+		exit -1
 
 	fi
 
 	#///////////////////////////////////////////////////////////////////////////////
 	# Main loop
 	#///////////////////////////////////////////////////////////////////////////////
+	#-------------------------------------------------------------------------------
+	# Pre-patch 1: RAMlog 0 free space check due to issues with failing DietPi cron jobs in v6.11
+	if (( $G_DIETPI_VERSION_SUB < 12 && $(df -m --output=avail /var/log | tail -1) < 2 )); then
 
-	until (( $EXIT_CODE ))
-	do
+		echo -e '\e[90m[\e[0m INFO \e[90m]\e[0m Pre-patch 1 | Clearing /var/log files to free up RAMlog space (<2MB) before update will continue'
+		/DietPi/dietpi/func/dietpi-logclear 1 || exit 1
 
-		#-------------------------------------------------------------------------------
-		# Pre-patch 1: RAMlog 0 free space check due to issues with failing DietPi cron jobs in v6.11
-		if (( $G_DIETPI_VERSION_SUB < 12 && $(df -m --output=avail /var/log | tail -1) < 2 )); then
+	fi
+	#-------------------------------------------------------------------------------
+	# Pre-patch 2: https://github.com/MichaIng/DietPi/pull/2490
+	if (( $G_DIETPI_VERSION_SUB < 21 )) && [[ -f '/etc/mysql/mariadb.conf.d/99-dietpi-4byte.cnf' ]] && grep -qi 'buster' /etc/os-release; then
 
-			echo -e '\e[90m[\e[0m INFO \e[90m]\e[0m Pre-patch 1 | Clearing /var/log files to free up RAMlog space (<2MB) before update will continue'
-			/DietPi/dietpi/func/dietpi-logclear 1 || { EXIT_CODE=1; break; }
+		echo -e '\e[90m[\e[0m INFO \e[90m]\e[0m Pre-patch 2 | Patching /etc/mysql/mariadb.conf.d/99-dietpi-4byte.cnf for MariaDB v10.3/Buster support'
+		sed -i '/innodb_large_prefix/d' /etc/mysql/mariadb.conf.d/99-dietpi-4byte.cnf || exit 2
+		sed -i '/innodb_file_format/d' /etc/mysql/mariadb.conf.d/99-dietpi-4byte.cnf || exit 2
 
-		fi
-		#-------------------------------------------------------------------------------
-		# Pre-patch 2: https://github.com/MichaIng/DietPi/pull/2490
-		if (( $G_DIETPI_VERSION_SUB < 21 )) && [[ -f '/etc/mysql/mariadb.conf.d/99-dietpi-4byte.cnf' ]] && grep -qi 'buster' /etc/os-release; then
+	fi
+	#-------------------------------------------------------------------------------
+	# Pre-patch 3: https://github.com/MichaIng/DietPi/issues/2213
+	if (( $G_DIETPI_VERSION_SUB < 22 )) &&
+		GLOBAL_PW=$(openssl enc -d -a -aes-256-cbc -nosalt -pass pass:'DietPiRocks!' -in /var/lib/dietpi/dietpi-software/.GLOBAL_PW.bin 2> /dev/null); then
 
-			echo -e '\e[90m[\e[0m INFO \e[90m]\e[0m Pre-patch 2 | Patching /etc/mysql/mariadb.conf.d/99-dietpi-4byte.cnf for MariaDB v10.3/Buster support'
-			sed -i '/innodb_large_prefix/d' /etc/mysql/mariadb.conf.d/99-dietpi-4byte.cnf || { EXIT_CODE=2; break; }
-			sed -i '/innodb_file_format/d' /etc/mysql/mariadb.conf.d/99-dietpi-4byte.cnf || { EXIT_CODE=2; break; }
+		echo -e '\e[90m[\e[0m INFO \e[90m]\e[0m Pre-patch 3 | Storing global DietPi-Software password with enhanced security'
+		grep -qi 'buster' /etc/os-release && pbkdf2='-iter 10000' || pbkdf2=''
+		openssl enc -e -a -md sha256 -aes-256-cbc $pbkdf2 -salt -pass pass:'DietPiRocks!' -out /var/lib/dietpi/dietpi-software/.GLOBAL_PW.bin <<< $GLOBAL_PW || exit 3
 
-		fi
-		#-------------------------------------------------------------------------------
-		# Pre-patch 3: https://github.com/MichaIng/DietPi/issues/2213
-		if (( $G_DIETPI_VERSION_SUB < 22 )) &&
-			GLOBAL_PW=$(openssl enc -d -a -aes-256-cbc -nosalt -pass pass:'DietPiRocks!' -in /var/lib/dietpi/dietpi-software/.GLOBAL_PW.bin 2> /dev/null); then
+	fi
+	#-------------------------------------------------------------------------------
+	# Pre-patch 4: https://github.com/MichaIng/DietPi/issues/2656
+	# Pre-patch 5: Add new G_CHECK_URL dietpi.txt settings
+	if (( $G_DIETPI_VERSION_SUB < 23 )); then
 
-			echo -e '\e[90m[\e[0m INFO \e[90m]\e[0m Pre-patch 3 | Storing global DietPi-Software password with enhanced security'
-			grep -qi 'buster' /etc/os-release && pbkdf2='-iter 10000' || pbkdf2=''
-			openssl enc -e -a -md sha256 -aes-256-cbc $pbkdf2 -salt -pass pass:'DietPiRocks!' -out /var/lib/dietpi/dietpi-software/.GLOBAL_PW.bin <<< $GLOBAL_PW || { EXIT_CODE=3; break; }
+		if [[ -f '/etc/apt/preferences.d/dietpi-wireguard' ]]; then
 
-		fi
-		#-------------------------------------------------------------------------------
-		# Pre-patch 4: https://github.com/MichaIng/DietPi/issues/2656
-		# Pre-patch 5: Add new G_CHECK_URL dietpi.txt settings
-		if (( $G_DIETPI_VERSION_SUB < 23 )); then
-
-			if [[ -f '/etc/apt/preferences.d/dietpi-wireguard' ]]; then
-
-				echo -e '\e[90m[\e[0m INFO \e[90m]\e[0m Pre-patch 4 | Hardening Debian Sid repo usage to prevent accidental distro upgrades but allow auto-upgrades for WireGuard packages'
-				echo -e 'Package: *\nPin: release n=sid\nPin-Priority: -1\n
-Package: wireguard wireguard-dkms wireguard-tools\nPin: release n=sid\nPin-Priority: 100' > /etc/apt/preferences.d/dietpi-wireguard || { EXIT_CODE=4; break; }
-
-			fi
-
-			grep -q 'CONFIG_G_CHECK_URL_TIMEOUT' /DietPi/dietpi.txt || echo 'CONFIG_G_CHECK_URL_TIMEOUT=5' >> /DietPi/dietpi.txt || { EXIT_CODE=5; break; }
-			grep -q 'CONFIG_G_CHECK_URL_ATTEMPTS' /DietPi/dietpi.txt || echo 'CONFIG_G_CHECK_URL_ATTEMPTS=3' >> /DietPi/dietpi.txt || { EXIT_CODE=5; break; }
+			echo -e '\e[90m[\e[0m INFO \e[90m]\e[0m Pre-patch 4 | Hardening Debian Sid repo usage to prevent accidental distro upgrades but allow auto-upgrades for WireGuard packages'
+			echo -e 'Package: *\nPin: release n=sid\nPin-Priority: -1\n
+Package: wireguard wireguard-dkms wireguard-tools\nPin: release n=sid\nPin-Priority: 100' > /etc/apt/preferences.d/dietpi-wireguard || exit 4
 
 		fi
-		#-------------------------------------------------------------------------------
-		# Pre-patch 6: Move Jessie systems to "jessie-support" branch: https://github.com/MichaIng/DietPi/issues/2332
-		if grep -qi 'jessie' /etc/os-release; then
 
-			echo -e '\e[90m[\e[0m INFO \e[90m]\e[0m Pre-patch 7 | Migrating Jessie systems to "jessie-support" update branch'
-			if grep -q '^[[:blank:]]*DEV_GITBRANCH=' /DietPi/dietpi.txt; then
+		grep -q 'CONFIG_G_CHECK_URL_TIMEOUT' /DietPi/dietpi.txt || echo 'CONFIG_G_CHECK_URL_TIMEOUT=5' >> /DietPi/dietpi.txt || exit 5
+		grep -q 'CONFIG_G_CHECK_URL_ATTEMPTS' /DietPi/dietpi.txt || echo 'CONFIG_G_CHECK_URL_ATTEMPTS=3' >> /DietPi/dietpi.txt || exit 5
 
-				sed -i '/^[[:blank:]]*DEV_GITBRANCH=/c\DEV_GITBRANCH=jessie-support' /DietPi/dietpi.txt
+	fi
+	#-------------------------------------------------------------------------------
+	# Pre-patch 6: Move Jessie systems to "jessie-support" branch: https://github.com/MichaIng/DietPi/issues/2332
+	if grep -qi 'jessie' /etc/os-release; then
 
-			else
+		echo -e '\e[90m[\e[0m INFO \e[90m]\e[0m Pre-patch 6 | Migrating Jessie systems to "jessie-support" update branch'
+		if grep -q '^[[:blank:]]*DEV_GITBRANCH=' /DietPi/dietpi.txt; then
 
-				echo 'DEV_GITBRANCH=jessie-support' >> /DietPi/dietpi.txt
+			sed -i '/^[[:blank:]]*DEV_GITBRANCH=/c\DEV_GITBRANCH=jessie-support' /DietPi/dietpi.txt
 
-			fi
+		else
 
-			# Remove DietPi-Update working directory to allow concurrent execution.
-			cd /tmp
-			[[ -d '/tmp/DietPi-Update' ]] && rm -R /tmp/DietPi-Update
-
-			# Apply update forcefully, since user has already chosen to do so.
-			/DietPi/dietpi/dietpi-update 1
-
-			# Kill parental dietpi-update instance and exit this script to avoid deprecated update finish.
-			kill $PPID
-			exit
+			echo 'DEV_GITBRANCH=jessie-support' >> /DietPi/dietpi.txt
 
 		fi
-		#-------------------------------------------------------------------------------
-		# Pre-patch 8: https://github.com/MichaIng/DietPi/issues/2795
-		if (( $G_DIETPI_VERSION_SUB < 24 )) && [[ -f '/etc/apt/preferences.d/dietpi-openssl' ]]; then
 
-			echo -e '\e[90m[\e[0m INFO \e[90m]\e[0m Pre-patch 8 | Patching PHP APT repo preferences to prevent possible APT upgrade issues'
-			echo -e '# libssl1.1 from sury.org breaks Lighttpd install
-Package: openssl libssl*\nPin: origin packages.sury.org\nPin-Priority: -1' > /etc/apt/preferences.d/dietpi-openssl || { EXIT_CODE=8; break; }
+		# Remove DietPi-Update working directory to allow concurrent execution.
+		cd /tmp
+		[[ -d '/tmp/DietPi-Update' ]] && rm -R /tmp/DietPi-Update
 
-		fi
-		#-------------------------------------------------------------------------------
-		# Pre-patch 9: https://github.com/MichaIng/DietPi/issues/2808
-		if (( $G_DIETPI_VERSION_SUB < 25 )) && [[ -f '/etc/apt/preferences.d/dietpi-php' ]]; then
+		# Apply update forcefully, since user has already chosen to do so.
+		/DietPi/dietpi/dietpi-update 1
 
-			echo -e '\e[90m[\e[0m INFO \e[90m]\e[0m Pre-patch 9 | Patching Buster APT repo preferences to prevent possible APT issues'
-			echo -e '# Allow to install PHP7.3 dependencies and meta packages from Buster
+		# Kill parental dietpi-update instance and exit this script to avoid deprecated update finish.
+		kill $PPID
+		exit
+
+	fi
+	#-------------------------------------------------------------------------------
+	# Pre-patch 8: https://github.com/MichaIng/DietPi/issues/2795
+	if (( $G_DIETPI_VERSION_SUB < 24 )) && [[ -f '/etc/apt/preferences.d/dietpi-openssl' ]]; then
+
+		echo -e '\e[90m[\e[0m INFO \e[90m]\e[0m Pre-patch 8 | Patching PHP APT repo preferences to prevent possible APT upgrade issues'
+		echo -e '# libssl1.1 from sury.org breaks Lighttpd install
+Package: openssl libssl*\nPin: origin packages.sury.org\nPin-Priority: -1' > /etc/apt/preferences.d/dietpi-openssl || exit 8
+
+	fi
+	#-------------------------------------------------------------------------------
+	# Pre-patch 9: https://github.com/MichaIng/DietPi/issues/2808
+	if (( $G_DIETPI_VERSION_SUB < 25 )) && [[ -f '/etc/apt/preferences.d/dietpi-php' ]]; then
+
+		echo -e '\e[90m[\e[0m INFO \e[90m]\e[0m Pre-patch 9 | Patching Buster APT repo preferences to prevent possible APT issues'
+		echo -e '# Allow to install PHP7.3 dependencies and meta packages from Buster
 # - Lighttpd must be pulled as well from Buster since the Stretch version does not support Buster libssl1.1 (1.1.1)
 Package: php libapache2-mod-php php-* libssl* libc6* libc-* libgssapi-krb5-2 libpcre2-8-0 libk5crypto3 libkrb5-3 libkrb5support0 locales libzip4 curl libcurl4-openssl-dev lighttpd
 Pin: release n=buster\nPin-Priority: 501\n
 # Pin down all other Buster packages to only allow upgrades of already installed ones via: "apt upgrade"
-Package: *\nPin: release n=buster\nPin-Priority: 100' > /etc/apt/preferences.d/dietpi-php || { EXIT_CODE=9; break; }
+Package: *\nPin: release n=buster\nPin-Priority: 100' > /etc/apt/preferences.d/dietpi-php || exit 9
 
-		fi
-		#-------------------------------------------------------------------------------
-		# Pre-patch 10: https://github.com/MichaIng/DietPi/pull/3020
-		if (( $G_DIETPI_VERSION_SUB < 26 )) && command -v xrdp &> /dev/null && grep -qi 'stretch' /etc/os-release; then
+	fi
+	#-------------------------------------------------------------------------------
+	# Pre-patch 10: https://github.com/MichaIng/DietPi/pull/3020
+	if (( $G_DIETPI_VERSION_SUB < 26 )) && command -v xrdp &> /dev/null && grep -qi 'stretch' /etc/os-release; then
 
-			echo -e '\e[90m[\e[0m INFO \e[90m]\e[0m Pre-patch 10 | Allow upgrade of XRDP from backports to resolve certain issues with current Stretch version'
-			cat << _EOF_ > /etc/apt/preferences.d/dietpi-xrdp || { EXIT_CODE=10; break; }
+		echo -e '\e[90m[\e[0m INFO \e[90m]\e[0m Pre-patch 10 | Allow upgrade of XRDP from backports to resolve certain issues with current Stretch version'
+		cat << _EOF_ > /etc/apt/preferences.d/dietpi-xrdp || exit 10
 Package: xrdp
 Pin: release n=stretch-backports
 Pin-Priority: 500
 _EOF_
 
-		fi
-		#-------------------------------------------------------------------------------
-		# Pre-patch 11: https://github.com/MichaIng/DietPi/issues/3029
-		if (( $G_DIETPI_VERSION_SUB < 26 )) && [[ -f '/etc/apt/sources.list.d/sonarr.list' ]]; then
-
-			echo -e '\e[90m[\e[0m INFO \e[90m]\e[0m Pre-patch 11 | Updating Sonarr APT repository key'
-			apt-key adv --keyserver keyserver.ubuntu.com --recv-keys 0xA236C58F409091A18ACA53CBEBFF6B99D9B78493 || { EXIT_CODE=11; break; }
-
-		fi
-		# Pre-patch 12: https://github.com/MichaIng/DietPi/issues/3038
-		if (( $G_DIETPI_VERSION_SUB < 23 )) && [[ -f '/etc/apt/sources.list.d/plex.list' ]] && grep -q 'dev2day' /etc/apt/sources.list.d/plex.list; then
-
-			echo -e '\e[90m[\e[0m INFO \e[90m]\e[0m Pre-patch 12 | Removing obsolete dev2day repo for Plex Media Server, replaced by the new official APT repo'
-			rm /etc/apt/sources.list.d/plex.list || { EXIT_CODE=12; break; }
-
-		fi
-		#-------------------------------------------------------------------------------
-		# Finished
-		echo -e '\e[90m[\e[0m  \e[32mOK\e[0m  \e[90m]\e[0m Successfully applied pre-patches\n'
-		break
-		#-------------------------------------------------------------------------------
-
-	done
-
+	fi
 	#-------------------------------------------------------------------------------
-	exit $EXIT_CODE
+	# Pre-patch 11: https://github.com/MichaIng/DietPi/issues/3029
+	if (( $G_DIETPI_VERSION_SUB < 26 )) && [[ -f '/etc/apt/sources.list.d/sonarr.list' ]]; then
+
+		echo -e '\e[90m[\e[0m INFO \e[90m]\e[0m Pre-patch 11 | Updating Sonarr APT repository key'
+		apt-key adv --keyserver keyserver.ubuntu.com --recv-keys 0xA236C58F409091A18ACA53CBEBFF6B99D9B78493 || exit 11
+
+	fi
+	#-------------------------------------------------------------------------------
+	# Pre-patch 12: https://github.com/MichaIng/DietPi/issues/3038
+	if (( $G_DIETPI_VERSION_SUB < 23 )) && [[ -f '/etc/apt/sources.list.d/plex.list' ]] && grep -q 'dev2day' /etc/apt/sources.list.d/plex.list; then
+
+		echo -e '\e[90m[\e[0m INFO \e[90m]\e[0m Pre-patch 12 | Removing obsolete dev2day repo for Plex Media Server, replaced by the new official APT repo'
+		rm /etc/apt/sources.list.d/plex.list || exit 12
+
+	fi
+	#-------------------------------------------------------------------------------
+	# Pre-patch 13/14: https://github.com/MichaIng/DietPi/issues/3131#issuecomment-536997267
+	# Pre-patch 15: WireGuard: Enable auto-rebuild after kernel upgrades on RPi
+	# Pre-patch 16: https://github.com/MichaIng/DietPi/pull/2571
+	if (( $G_DIETPI_VERSION_SUB < 26 )); then
+
+		echo -e '\e[90m[\e[0m INFO \e[90m]\e[0m Pre-patch 13 | Disabling dpkg status file translations by default, which have hardly any use, but raise APT update times + disk I/O '
+		echo 'Acquire::Languages "none";' > /etc/apt/apt.conf.d/98-dietpi-no_translations || exit 13
+
+		if [[ -f '/etc/apt/sources.list.d/dietpi-wireguard.list' ]]; then
+
+			echo -e '\e[90m[\e[0m INFO \e[90m]\e[0m Pre-patch 14 | Switch to "bullseye" repo for WireGuard installs'
+			# RPi
+			if (( $(mawk 'NR==1' /DietPi/dietpi/.hw_model || mawk 'NR==1' /boot/dietpi/.hw_model) < 10 )); then
+
+				echo 'deb http://raspbian.raspberrypi.org/raspbian/ bullseye main' > /etc/apt/sources.list.d/dietpi-wireguard.list || exit 14
+
+				if command -v wg &> /dev/null && grep -q '^aSOFTWARE_INSTALL_STATE\[172\]=2' /DietPi/dietpi/.installed; then
+
+					echo -e '\e[90m[\e[0m INFO \e[90m]\e[0m Pre-patch 15 | Enable WireGuard auto-rebuild after kernel upgrades on RPi'
+					echo -e '#!/bin/dash\ndpkg-reconfigure wireguard-dkms' > /etc/kernel/postinst.d/dietpi-wireguard || exit 15
+
+				fi
+
+			# non-RPi
+			else
+
+				echo 'deb https://deb.debian.org/debian/ bullseye main' > /etc/apt/sources.list.d/dietpi-wireguard.list || exit 14
+
+			fi
+
+		fi
+
+		if [[ -f '/etc/apt/preferences.d/dietpi-wireguard' ]]; then
+
+			echo -e '\e[90m[\e[0m INFO \e[90m]\e[0m Pre-patch 16 | Harden "bullseye" repo preferences for WireGuard installs'
+			echo -e 'Package: *\nPin: release n=bullseye\nPin-Priority: -1\n
+Package: wireguard wireguard-dkms wireguard-tools\nPin: release n=bullseye\nPin-Priority: 99' > /etc/apt/preferences.d/dietpi-wireguard || exit 16
+
+		fi
+
+	fi
+	#-------------------------------------------------------------------------------
+	# Finished
+	exit 0
 	#-------------------------------------------------------------------------------
 }

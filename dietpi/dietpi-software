@@ -3667,40 +3667,39 @@ _EOF_
 			# NFS support
 			(( $G_DISTRO < 5 )) && package_list+=' libnfs8' || package_list+=' libnfs12'
 
-			# RPi4: https://github.com/MichaIng/DietPi/issues/3031
-			if (( $G_HW_MODEL == 4 )); then
+			# Odroids
+			if [[ $G_HW_MODEL == 1[0-9] ]]; then
 
-				DEPS_LIST=$package_list
-				no_check_url=1 Download_Install 'https://transfer.sh/X7gZH/kodi-rpi4_18.4.0-1_armhf.deb'
+				package_list+=' kodi-odroid'
 
+			# Everything else
 			else
 
-				# Odroids
-				if [[ $G_HW_MODEL == 1[0-9] ]]; then
+				package_list+=' kodi'
 
-					package_list+=' kodi-odroid'
+				# RPi
+				if (( $G_HW_MODEL < 10 )); then
 
-				# Everything else
-				else
+					# fbset required to start with custom screen resolution/remove warning on startup: https://dietpi.com/phpbb/viewtopic.php?p=17550#p17550
+					package_list+=' fbset'
 
-					package_list+=' kodi'
+					# Buster: https://github.com/MichaIng/DietPi/issues/3031
+					if (( $G_DISTRO > 4 )); then
 
-					# RPi1/2/3 
-					if (( $G_HW_MODEL < 10 )); then
+						INSTALL_URL_ADDRESS='http://pipplware.pplware.pt/pipplware/key.asc'
+						G_CHECK_URL "$INSTALL_URL_ADDRESS"
+						curl -sSL "$INSTALL_URL_ADDRESS" | apt-key add -
+						echo 'deb http://pipplware.pplware.pt/pipplware/dists/buster/main/binary /' > /etc/apt/sources.list.d/dietpi-kodi.list
 
-						# - Buster: https://github.com/MichaIng/DietPi/issues/3031
-						if (( $G_DISTRO > 4 )); then
+						# RPi4: fake KMS driver required: https://www.raspberrypi.org/forums/viewtopic.php?f=66&t=251645
+						if (( $G_HW_MODEL == 4 )); then
 
-							INSTALL_URL_ADDRESS='http://pipplware.pplware.pt/pipplware/key.asc'
-							G_CHECK_URL "$INSTALL_URL_ADDRESS"
-							curl -sSL "$INSTALL_URL_ADDRESS" | apt-key add -
-							echo 'deb http://pipplware.pplware.pt/pipplware/dists/buster/main/binary /' > /etc/apt/sources.list.d/dietpi-kodi.list
-							G_AGUP
+							/DietPi/dietpi/func/dietpi-set_hardware rpi-opengl vc4-fkms-v3d
 
-						# - Stretch: fbset required to start with custom screen resolution: https://dietpi.com/phpbb/viewtopic.php?p=17550#p17550
+						# Else legacy (non-GL) driver required
 						else
 
-							package_list+=' fbset'
+							/DietPi/dietpi/func/dietpi-set_hardware rpi-opengl disable
 
 						fi
 
@@ -3708,9 +3707,9 @@ _EOF_
 
 				fi
 
-				G_AGI $package_list
-
 			fi
+
+			G_AGI $package_list
 
 		fi
 
@@ -5143,10 +5142,10 @@ Package: wireguard wireguard-dkms wireguard-tools\nPin: release n=bullseye\nPin-
 
 			G_AGI aria2
 
-			# Web interface
+			# Web UI: Settings are stored client-wise, web UI files are never written by webserver. Thus root:root 022 permissions existing dir removal on reinstall can be done.
 			Download_Install 'https://github.com/ziahamza/webui-aria2/archive/master.zip'
-			cp -a webui-aria2-master /var/www/aria2
-			rm -R webui-aria2-master
+			[[ -d '/var/www/aria2' ]] && rm -R /var/www/aria2
+			mv webui-aria2-master /var/www/aria2
 
 		fi
 
@@ -5754,7 +5753,7 @@ If you want to update ${aSOFTWARE_NAME[$software_id]}, please use it's internal 
 
 			Banner_Installing
 
-			INSTALL_URL_ADDRESS='https://dl.gitea.io/gitea/1.8/gitea-1.8-'
+			INSTALL_URL_ADDRESS='https://dl.gitea.io/gitea/1.9.3/gitea-1.9.3-'
 
 			# armv6
 			if (( $G_HW_ARCH == 1 )); then
@@ -10643,15 +10642,48 @@ _EOF_
 
 			Banner_Configuration
 
-			G_BACKUP_FP /var/lib/dietpi/dietpi-software/installed/aria2.conf
-			cat << _EOF_ > /var/lib/dietpi/dietpi-software/installed/aria2.conf
-# The fallowing options are aria2c options as usual aria2.conf file
-# https://aria2.github.io/manual/en/html/aria2c.html
+			# User
+			local usercmd='useradd -rMN'
+			getent passwd aria2 &> /dev/null && usercmd='usermod'
+			$usercmd -g dietpi -d $G_FP_DIETPI_USERDATA/aria2 -s $(command -v nologin) aria2
 
-# Download directory
-dir=$G_FP_DIETPI_USERDATA/$FOLDER_DOWNLOADS
+			# Config
+			mkdir -p $G_FP_DIETPI_USERDATA/aria2
+			[[ -f $G_FP_DIETPI_USERDATA/aria2/aria2.conf ]] || cat << _EOF_ > $G_FP_DIETPI_USERDATA/aria2/aria2.conf
+# DietPi default aria2c options served as aria2.conf file via --conf-path
+# https://aria2.github.io/manual/en/html/aria2c.html#options
 
-# RPC Options
+# Logging
+log=/var/log/aria2.log
+log-level=warn
+
+# Session
+always-resume=true
+continue=true
+input-file=$G_FP_DIETPI_USERDATA/$FOLDER_DOWNLOADS/aria2.session
+save-session=$G_FP_DIETPI_USERDATA/$FOLDER_DOWNLOADS/aria2.session
+save-session-interval=60
+
+# Connection
+listen-port=6881-6999
+ftp-pasv=true
+check-certificate=false
+# - Count
+max-concurrent-downloads=$(Optimise_BitTorrent 1)
+split=$(Optimise_BitTorrent 1)
+max-connection-per-server=$(Optimise_BitTorrent 1)
+bt-max-peers=$(Optimise_BitTorrent 2)
+# - Bandwidth
+max-overall-upload-limit=0
+max-upload-limit=0
+max-overall-download-limit=0
+max-download-limit=0
+# - Retries
+max-file-not-found=3
+max-tries=5
+retry-wait=60
+
+# RPC
 enable-rpc=true
 rpc-listen-all=true
 rpc-listen-port=6800
@@ -10659,45 +10691,41 @@ rpc-secret=$GLOBAL_PW
 rpc-allow-origin-all=true
 pause=false
 
-# General Options
-log=/var/log/aria2.log
-log-level=warn
-
-split=$(Optimise_BitTorrent 1)
-continue=true
-check-integrity=true
-max-concurrent-downloads=$(Optimise_BitTorrent 1)
-max-connection-per-server=$(Optimise_BitTorrent 1)
-# Bandwidth limits: https://aria2.github.io/manual/en/html/aria2c.html#cmdoption-max-overall-upload-limit
-max-overall-download-limit=0
-max-overall-upload-limit=0
-max-file-not-found=3
-max-tries=5
-retry-wait=60
-ftp-pasv=true
-bt-max-peers=$(Optimise_BitTorrent 2)
-listen-port=6881-6999
-check-certificate=false
-
-max-overall-upload-limit=0
-max-upload-limit=0
-max-overall-download-limit=0
-max-download-limit=0
-seed-ratio=0.1
-seed-time=0
-
+# Store
+dir=$G_FP_DIETPI_USERDATA/$FOLDER_DOWNLOADS
 allow-overwrite=false
-always-resume=true
 auto-file-renaming=false
 file-allocation=none
+check-integrity=true
+
+# Seeding
+seed-ratio=0.1
+seed-time=0
 _EOF_
 
+			# Pre-create log file
+			local fp_log=$(sed -n '/^[[:blank:]]*log=/{s/^[^=]*=//p;q}' $G_FP_DIETPI_USERDATA/aria2/aria2.conf)
+			[[ ${fp_log//\"} && ! -f $fp_log ]] && >> $fp_log
+
+			# Pre-create input file
+			local fp_input=$(sed -n '/^[[:blank:]]*input-file=/{s/^[^=]*=//p;q}' $G_FP_DIETPI_USERDATA/aria2/aria2.conf)
+			[[ ${fp_input//\"} && ! -f $fp_input ]] && >> $fp_input
+
+			# Permissions
+			chown -R aria2:root $G_FP_DIETPI_USERDATA/aria2 $fp_input
+			chown aria2:dietpi $fp_log
+			chmod 600 $G_FP_DIETPI_USERDATA/aria2/aria2.conf
+			unset fp_log fp_input
+
+			# Service
 			cat << _EOF_ > /etc/systemd/system/aria2.service
 [Unit]
 Description=Aria2 (DietPi)
 
 [Service]
-ExecStart=$(command -v aria2c) --conf-path=/var/lib/dietpi/dietpi-software/installed/aria2.conf
+User=aria2
+UMask=002
+ExecStart=$(command -v aria2c) --conf-path=$G_FP_DIETPI_USERDATA/aria2/aria2.conf
 
 [Install]
 WantedBy=multi-user.target
@@ -11851,20 +11879,20 @@ _EOF_
 
 				cat << _EOF_ > /usr/local/bin/sparky_eth_controller.sh
 #!/bin/bash
-#We need to wait until USB eth is established on USB bus. This takes much longer than onboard init and network.target network-pre.target
+# We need to wait until USB eth is established on USB bus. This takes much longer than onboard init and network.target network-pre.target
 sleep 20
 # - Set USB ETH if found
-if ip a | grep -qi 'eth1'; then
+if ip a s eth1 &> /dev/null; then
 
 	echo 'blacklist ethernet' > /etc/modprobe.d/disable_sparkysbc_ethernet.conf
-	rm -f /etc/udev/rules.d/70-persist{a,e}nt-net.rules
+	rm -f /etc/udev/rules.d/70-persist{e,a}nt-net.rules
 	reboot
 
 # - Enable onboard ETH if no adapter found
-elif ! ip a | grep -qi 'eth0'; then
+elif ! ip a s eth0 &> /dev/null; then
 
 	[[ -f '/etc/modprobe.d/disable_sparkysbc_ethernet.conf' ]] && rm /etc/modprobe.d/disable_sparkysbc_ethernet.conf
-	rm -f /etc/udev/rules.d/70-persist{a,e}nt-net.rules
+	rm -f /etc/udev/rules.d/70-persist{e,a}nt-net.rules
 	reboot
 
 fi
@@ -12191,7 +12219,6 @@ _EOF_
 	Uninstall_Software(){
 
 		# NB: systemctl daemon-reload is executed at the end of this function
-
 		local software_id=-1
 
 		software_id=23
@@ -12656,7 +12683,7 @@ _EOF_
 				rm /etc/systemd/system/blynkserver.service
 
 			fi
-			userdel -rf blynk
+			getent passwd blynk &> /dev/null && userdel -rf blynk
 			[[ -d $G_FP_DIETPI_USERDATA/blynk ]] && rm -R $G_FP_DIETPI_USERDATA/blynk
 			[[ -d '/etc/blynkserver' ]] && rm -R /etc/blynkserver # Pre-v6.19
 
@@ -12666,12 +12693,18 @@ _EOF_
 		if (( ${aSOFTWARE_INSTALL_STATE[$software_id]} == -1 )); then
 
 			Banner_Uninstalling
-			rm /etc/systemd/system/aria2.service
-			rm /usr/local/bin/aria2c
-			rm /var/lib/dietpi/dietpi-software/installed/aria2.conf
-			rm -R /var/www/aria2
+			[[ -d '/var/www/aria2' ]] && rm -R /var/www/aria2
+			if [[ -f '/etc/systemd/system/aria2.service' ]]; then
 
+				systemctl disable --now aria2
+				rm /etc/systemd/system/aria2.service
+
+			fi
 			G_AGP aria2
+			getent passwd aria2 &> /dev/null && userdel -rf aria2
+			[[ -d $G_FP_DIETPI_USERDATA/aria2 ]] && rm -R $G_FP_DIETPI_USERDATA/aria2
+			[[ -f $G_FP_DIETPI_USERDATA/downloads/aria2.session ]] && rm $G_FP_DIETPI_USERDATA/downloads/aria2.session
+			[[ -f '/usr/local/bin/aria2c' ]] && rm /usr/local/bin/aria2c # Previous
 
 		fi
 
@@ -14573,7 +14606,7 @@ _EOF_
 				run_custom_script=1
 
 			# Custom 1st run Script (Online file)
-			elif [[ $AUTOINSTALL_CUSTOMSCRIPTURL ]]; then
+			elif [[ ${AUTOINSTALL_CUSTOMSCRIPTURL:-0} != '0' ]]; then
 
 				INSTALL_URL_ADDRESS=$AUTOINSTALL_CUSTOMSCRIPTURL
 				G_CHECK_URL "$INSTALL_URL_ADDRESS"
