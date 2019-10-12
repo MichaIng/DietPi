@@ -47,15 +47,33 @@
 
 		)
 
-		G_WHIP_MENU 'Please select how the input OS is stored:' || Exit_On_Fail
+		G_WHIP_MENU 'Please select how the input OS is stored:
+\nNB: If you want to create a Clonezilla-based installer image, the input OS needs to be attached as physical drive, since Clonezilla currently does neither support .img files nor loop devices.' || Exit_On_Fail
 		if [[ $G_WHIP_RETURNED_VALUE == 'Drive' ]]; then
 
 			# Detect drives and list for selection
 			G_WHIP_MENU_ARRAY=($(lsblk -dnpo NAME,SIZE))
 			# - Visually separate dev name and space
 			for ((i=1;i<${#G_WHIP_MENU_ARRAY[@]};i+=2)); do G_WHIP_MENU_ARRAY[$i]=": ${G_WHIP_MENU_ARRAY[$i]}"; done
-			[[ $G_WHIP_MENU_ARRAY ]] && G_WHIP_MENU 'Please select the drive you wish to create the image from:' || Exit_On_Fail
+			if [[ $G_WHIP_MENU_ARRAY ]]; then
+
+				G_WHIP_MENU 'Please select the drive you wish to create the image from:' || Exit_On_Fail
+
+			else
+
+				G_DIETPI-NOTIFY 1 'No drives found, aborting...'
+				Exit_On_Fail
+
+			fi
 			FP_SOURCE=$G_WHIP_RETURNED_VALUE
+
+			G_DIETPI-NOTIFY 2 'Unmounting all mounted file systems of the selected source drive...'
+			for i in $FP_SOURCE*
+			do
+
+				findmnt $i &> /dev/null && { umount $i || Exit_On_Fail; }
+
+			done			
 
 		elif [[ $G_WHIP_RETURNED_VALUE == 'Image' ]]; then
 
@@ -117,18 +135,24 @@ Do you want to overwrite or backup the existing file to $OUTPUT_IMG_NAME.bak?" |
 		Menu_Main
 
 		# Install required packages
-		G_AG_CHECK_INSTALL_PREREQ parted gdisk zerofree p7zip
+		G_AG_CHECK_INSTALL_PREREQ parted zerofree p7zip
 
-		# Auto detect GPT partition table, failsafe detection of MBR to debug possibly other wording/partition table types
+		# Auto detect partition table type, failsafe detection of MBR to debug possibly other/unknown wording/partition table types
 		if [[ $(parted -s $FP_SOURCE print) == *'Partition Table: msdos'* ]]; then
 
-			G_DIETPI-NOTIFY 2 'MBR partition table detected, applying gdisk fix...'
+			G_DIETPI-NOTIFY 2 'MBR partition table detected'
 			GPT=0
 
+		# GPT images:
+		# - "GPT PMBR size mismatch (4458495 != 15523839)"
+		# - "Error: The backup GPT table is corrupt, but the primary appears OK, so that will be used."
+		# - gdisk write will correct this
 		elif [[ $(parted -s $FP_SOURCE print) == *'Partition Table: gpt'* ]]; then
 
-			G_DIETPI-NOTIFY 2 'GPT partition table detected'
+			G_DIETPI-NOTIFY 2 'GPT partition table detected, applying gdisk fix...'
 			GPT=1
+			G_AG_CHECK_INSTALL_PREREQ gdisk
+			echo -e 'w\ny\nq\n' | gdisk $FP_SOURCE
 
 		else
 
@@ -137,15 +161,9 @@ Do you want to overwrite or backup the existing file to $OUTPUT_IMG_NAME.bak?" |
 
 		fi
 
-		# GPT images:
-		# - "GPT PMBR size mismatch (4458495 != 15523839)"
-		# - "Error: The backup GPT table is corrupt, but the primary appears OK, so that will be used."
-		# - gdisk write will correct this
-		(( $GPT )) && echo -e 'w\ny\nq\n' | gdisk $FP_SOURCE
-
 		e2fsck -f $FP_ROOT_DEV
 
-		# Remount image for any required edits.
+		# Remount image for any required edits
 		fp_mnt='tmp_rootfs'
 		mkdir -p /mnt/$fp_mnt
 		if G_ERROR_HANDLER_INFO_ONLY=1 G_RUN_CMD mount $FP_ROOT_DEV /mnt/$fp_mnt; then
