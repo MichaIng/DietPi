@@ -739,7 +739,7 @@ _EOF_
 			'locales'		# Support locales, necessary for DietPi scripts, as we use en_GB.UTF8 as default language
 			'nano'			# Simple text editor
 			'p7zip'			# .7z wrapper
-			'parted'		# Drive partitioning, required by DietPi-Drive_Manager
+			'parted'		# partprobe + drive partitioning, required by DietPi-Drive_Manager
 			'procps'		# "kill", "ps", "pgrep", "sysctl", used by several DietPi scripts
 			'psmisc'		# "killall", used by several DietPi scripts
 			'resolvconf'		# Network nameserver handler + depandant for "ifupdown" (network interface handler) => "iproute2" ("ip" command)
@@ -770,13 +770,11 @@ _EOF_
 		# G_HW_MODEL specific required repo key packages: https://github.com/MichaIng/DietPi/issues/1285#issuecomment-358301273
 		if (( $G_HW_MODEL > 9 )); then
 
-			G_AGI debian-archive-keyring
-			aPACKAGES_REQUIRED_INSTALL+=('initramfs-tools')		# RAM file system initialization, required for generic boot loader, but not required/used by RPi bootloader
+			aPACKAGES_REQUIRED_INSTALL+=('initramfs-tools')		# RAM file system initialisation, required for generic bootloader, but not required/used by RPi bootloader
 			aPACKAGES_REQUIRED_INSTALL+=('haveged')			# Entropy daemon: https://github.com/MichaIng/DietPi/issues/2806
 
 		else
 
-			G_AGI raspbian-archive-keyring
 			aPACKAGES_REQUIRED_INSTALL+=('rng-tools')		# Entropy daemon: Alternative, that does not work on all devices, but is proven to work on RPi, is default on Raspbian and uses less RAM on idle.
 
 		fi
@@ -1117,15 +1115,12 @@ _EOF_
 
 		#-----------------------------------------------------------------------------------
 		# DietPi user
-
 		l_message='Creating DietPi User Account' G_RUN_CMD /DietPi/dietpi/func/dietpi-set_software useradd dietpi
 
 		#-----------------------------------------------------------------------------------
 		# UID bit for sudo: https://github.com/MichaIng/DietPi/issues/794
-
 		G_DIETPI-NOTIFY 2 'Configuring sudo UID bit'
-
-		chmod 4755 $(which sudo)
+		chmod 4755 $(command -v sudo)
 
 		#-----------------------------------------------------------------------------------
 		# Dirs

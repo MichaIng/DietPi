@@ -9,7 +9,7 @@
 	# - IDE:	/dev/hd[a-z][0-9]
 	# - eMMC:	/dev/mmcblk[0-9]p[0-9]
 	# - NVMe:	/dev/nvme[0-9]n[0-9]p[0-9]
-	TARGET_DEV=$(findmnt / -o source -n)
+	TARGET_DEV=$(findmnt -no SOURCE /)
 	if [[ $TARGET_DEV == '/dev/mmcblk'* || $TARGET_DEV == '/dev/nvme'* ]]; then
 
 		TARGET_PARTITION=${TARGET_DEV##*p}	# /dev/mmcblk0p1 => 1
@@ -37,7 +37,7 @@
 		sfdisk $TARGET_DRIVE -l | grep -qi 'disklabel type: gpt' && sgdisk -e $TARGET_DRIVE
 
 		# Maximize partition size
-		sfdisk $TARGET_DRIVE -fN$TARGET_PARTITION --no-reread <<< ',+,,,'
+		sfdisk --no-reread $TARGET_DRIVE -fN$TARGET_PARTITION <<< ',+,,,'
 
 		# Reread partition table
 		partprobe $TARGET_DRIVE
