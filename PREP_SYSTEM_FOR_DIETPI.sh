@@ -1115,15 +1115,12 @@ _EOF_
 
 		#-----------------------------------------------------------------------------------
 		# DietPi user
-
 		l_message='Creating DietPi User Account' G_RUN_CMD /DietPi/dietpi/func/dietpi-set_software useradd dietpi
 
 		#-----------------------------------------------------------------------------------
 		# UID bit for sudo: https://github.com/MichaIng/DietPi/issues/794
-
 		G_DIETPI-NOTIFY 2 'Configuring sudo UID bit'
-
-		chmod 4755 $(which sudo)
+		chmod 4755 $(command -v sudo)
 
 		#-----------------------------------------------------------------------------------
 		# Dirs
