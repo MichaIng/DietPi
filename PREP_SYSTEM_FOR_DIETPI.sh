@@ -1215,10 +1215,14 @@ _EOF_
 		for i in apt-daily{,-upgrade}.{service,timer}
 		do
 
-			systemctl disable --now $i &> /dev/null
-			systemctl mask $i &> /dev/null
+			systemctl disable --now $i 2> /dev/null
+			systemctl mask $i 2> /dev/null
 
 		done
+
+		G_DIETPI-NOTIFY 2 'Disabling e2scrub services which are for LVM and require lvm2/lvcreate being installed'
+		systemctl disable --now e2scrub_all.timer 2> /dev/null
+		systemctl disable --now e2scrub_reap 2> /dev/null
 
 		local info_use_drive_manager='Can be installed and setup by DietPi-Drive_Manager.\nSimply run "dietpi-drive_manager" and select "Add network drive".'
 		echo -e "Samba client: $info_use_drive_manager" > /mnt/samba/readme.txt
@@ -1237,12 +1241,12 @@ _EOF_
 
 		l_message='Starting DietPi-RAMlog service' G_RUN_CMD systemctl start dietpi-ramlog
 
-		G_DIETPI-NOTIFY 2 'Updating DietPi HW_INFO'
+		G_DIETPI-NOTIFY 2 'Updating /DietPi/dietpi/.hw_model'
 		/DietPi/dietpi/func/dietpi-obtain_hw_model
 
 		G_DIETPI-NOTIFY 2 'Configuring network interfaces:'
 
-		[[ -f '/etc/network/interfaces' ]] && rm -R /etc/network/interfaces # ARMbian symlink for bulky network-manager
+		[[ -L '/etc/network/interfaces' ]] && rm /etc/network/interfaces # ARMbian symlink for bulky network-manager
 
 		G_ERROR_HANDLER_COMMAND='/etc/network/interfaces'
 		cat << _EOF_ > $G_ERROR_HANDLER_COMMAND
@@ -1253,7 +1257,7 @@ _EOF_
 # Drop-in configs
 source interfaces.d/*
 
-# Local
+# Loopback
 auto lo
 iface lo inet loopback
 
@@ -1278,22 +1282,22 @@ _EOF_
 		G_ERROR_HANDLER_EXITCODE=$?
 		G_ERROR_HANDLER
 
-		# - Remove all predefined eth*/wlan* adapter rules
+		# Remove all predefined eth*/wlan* adapter rules
 		rm -f /etc/udev/rules.d/70-persist*nt-net.rules
 
-		#	Add pre-up lines for wifi on OrangePi Zero
+		# Add pre-up lines for WiFi on OrangePi Zero
 		if (( $G_HW_MODEL == 32 )); then
 
 			sed -i '/iface wlan0 inet dhcp/apre-up modprobe xradio_wlan\npre-up iwconfig wlan0 power on' /etc/network/interfaces
 
-		#	ASUS TB WiFi: https://github.com/MichaIng/DietPi/issues/1760
+		# ASUS TB WiFi: https://github.com/MichaIng/DietPi/issues/1760
 		elif (( $G_HW_MODEL == 52 )); then
 
 			G_CONFIG_INJECT '8723bs' '8723bs' /etc/modules
 
 		fi
 
-		#	Fix rare WiFi interface start issue: https://github.com/MichaIng/DietPi/issues/2074
+		# Fix wireless-tools bug on Stretch: https://bugs.debian.org/908886
 		[[ -f '/etc/network/if-pre-up.d/wireless-tools' ]] && sed -i '\|^[[:blank:]]ifconfig "$IFACE" up$|c\\t/sbin/ip link set dev "$IFACE" up' /etc/network/if-pre-up.d/wireless-tools
 
 		G_DIETPI-NOTIFY 2 'Tweaking DHCP timeout:'
@@ -1353,13 +1357,13 @@ _EOF_
 
 		G_DIETPI-NOTIFY 2 'Configuring fake-hwclock:'
 		systemctl stop fake-hwclock
-		# - Allow times in the past
+		# Allow times in the past
 		G_CONFIG_INJECT 'FORCE=' 'FORCE=force' /etc/default/fake-hwclock
 		systemctl restart fake-hwclock # Failsafe, apply now if date is way far back...
 
 		G_DIETPI-NOTIFY 2 'Configuring serial login consoles:'
 
-		# - On virtual machines, serial consoles are not required
+		# On virtual machines, serial consoles are not required
 		if (( $G_HW_MODEL == 20 )); then
 
 			/DietPi/dietpi/func/dietpi-set_hardware serialconsole disable
@@ -1367,13 +1371,12 @@ _EOF_
 		else
 
 			/DietPi/dietpi/func/dietpi-set_hardware serialconsole enable
-			# - RPi: Depending on current config.txt and model, not all serial devices are available, so enable console manually for both:
+			# On RPi the primary serial console depends on model, use "serial0" which links to the primary console, converts to correct device on first boot
 			if (( $G_HW_MODEL < 10 )); then
 
-				systemctl unmask serial-getty@ttyAMA0
-				systemctl enable serial-getty@ttyAMA0
-				systemctl unmask serial-getty@ttyS0
-				systemctl enable serial-getty@ttyS0
+				/DietPi/dietpi/func/dietpi-set_hardware serialconsole disable ttyAMA0
+				/DietPi/dietpi/func/dietpi-set_hardware serialconsole disable ttyS0
+				/DietPi/dietpi/func/dietpi-set_hardware serialconsole enable serial0
 
 			fi
 
