@@ -75,7 +75,8 @@
 				sed -i '/over_voltage=/c\#over_voltage=0' /DietPi/config.txt
 				sed -i '/arm_freq=/c\#arm_freq=1500' /DietPi/config.txt
 				sed -i '/core_freq=/c\#core_freq=500' /DietPi/config.txt
-				sed -i '/sdram_freq=/c\#sdram_freq=3200' /DietPi/config.txt
+				sed -i '/sdram_freq=/d' /DietPi/config.txt # Not supported on RPi4, defaults to 3200 MHz
+				G_CONFIG_INJECT 'temp_limit=' 'temp_limit=75' /DietPi/config.txt # https://github.com/MichaIng/DietPi/issues/3019
 
 			fi
 
@@ -152,18 +153,18 @@
 
 			G_DIETPI-NOTIFY 2 "Setting Keyboard $autoinstall_keyboard. Please wait..."
 			G_CONFIG_INJECT 'XKBLAYOUT=' "XKBLAYOUT=\"$autoinstall_keyboard\"" /etc/default/keyboard
-			#systemctl restart keyboard-setup
+			setupcon --save # https://bugs.debian.org/cgi-bin/bugreport.cgi?bug=818065
 
 		fi
 
 		# Apply headless mode, if set in dietpi.txt (RPi, Odroid C1/C2)
-		(( $G_HW_MODEL < 11 || $G_HW_MODEL == 12 )) && /DietPi/dietpi/func/dietpi-set_hardware headless $(grep -ci -m1 '^[[:blank:]]*AUTO_SETUP_HEADLESS=1' /DietPi/dietpi.txt)
+		(( $G_HW_MODEL < 11 || $G_HW_MODEL == 12 )) && /DietPi/dietpi/func/dietpi-set_hardware headless $(grep -cim1 '^[[:blank:]]*AUTO_SETUP_HEADLESS=1' /DietPi/dietpi.txt)
 
 		# Apply forced eth speed, if set in dietpi.txt
-		/DietPi/dietpi/func/dietpi-set_hardware eth-forcespeed $(grep -m1 '^[[:blank:]]*AUTO_SETUP_NET_ETH_FORCE_SPEED=' /DietPi/dietpi.txt | sed 's/^[^=]*=//')
+		/DietPi/dietpi/func/dietpi-set_hardware eth-forcespeed $(sed -n '/^[[:blank:]]*AUTO_SETUP_NET_ETH_FORCE_SPEED=/{s/^[^=]*=//p;q}' /DietPi/dietpi.txt)
 
 		# Set hostname
-		/DietPi/dietpi/func/change_hostname "$(grep -m1 '^[[:blank:]]*AUTO_SETUP_NET_HOSTNAME=' /DietPi/dietpi.txt | sed 's/^[^=]*=//')"
+		/DietPi/dietpi/func/change_hostname "$(sed -n '/^[[:blank:]]*AUTO_SETUP_NET_HOSTNAME=/{s/^[^=]*=//p;q}' /DietPi/dietpi.txt)"
 
 		# Set auto login for next bootup
 		grep -qi '^[[:blank:]]*AUTO_SETUP_AUTOMATED=1' /DietPi/dietpi.txt && /DietPi/dietpi/dietpi-autostart 7
@@ -172,7 +173,7 @@
 		grep -qi '^[[:blank:]]*CONFIG_SERIAL_CONSOLE_ENABLE=0' /DietPi/dietpi.txt && /DietPi/dietpi/func/dietpi-set_hardware serialconsole disable
 
 		# Set root password?
-		local root_password=$(grep -m1 '^[[:blank:]]*AUTO_SETUP_GLOBAL_PASSWORD=' /DietPi/dietpi.txt | sed 's/^[^=]*=//')
+		local root_password=$(sed -n '/^[[:blank:]]*AUTO_SETUP_GLOBAL_PASSWORD=/{s/^[^=]*=//p;q}' /DietPi/dietpi.txt)
 		if [[ $root_password ]]; then
 
 			chpasswd <<< "root:$root_password"
@@ -183,19 +184,17 @@
 		# Set APT mirror
 		local target_repo='CONFIG_APT_DEBIAN_MIRROR'
 		(( $G_HW_MODEL < 10 )) && target_repo='CONFIG_APT_RASPBIAN_MIRROR'
-		/DietPi/dietpi/func/dietpi-set_software apt-mirror "$(grep -m1 "^[[:blank:]]*$target_repo=" /DietPi/dietpi.txt | sed 's/^[^=]*=//')"
+		/DietPi/dietpi/func/dietpi-set_software apt-mirror "$(sed -n "/^[[:blank:]]*$target_repo=/{s/^[^=]*=//p;q}" /DietPi/dietpi.txt)"
 
-		# Generate unique Dropbear host keys:
+		# Regenerate unique Dropbear host keys:
 		rm -f /etc/dropbear/*_host_key
-		# - Distro specific package and on Jessie, ECDSA is not created automatically
-		if (( $G_DISTRO < 4 )); then
+		if (( $G_DISTRO < 6 )); then
 
-			dpkg-reconfigure -f noninteractive dropbear
-			dropbearkey -t ecdsa -f /etc/dropbear/dropbear_ecdsa_host_key
+			dpkg-reconfigure -f noninteractive dropbear-run
 
 		else
 
-			dpkg-reconfigure -f noninteractive dropbear-run
+			dpkg-reconfigure -f noninteractive dropbear
 
 		fi
 
@@ -218,14 +217,14 @@
 		sed -i "s/wlan[0-9]/wlan$index_wlan/g" /etc/network/interfaces
 
 		# - Grab user requested settings from /dietpi.txt
-		local ethernet_enabled=$(grep -ci -m1 '^[[:blank:]]*AUTO_SETUP_NET_ETHERNET_ENABLED=1' /DietPi/dietpi.txt)
-		local wifi_enabled=$(grep -ci -m1 '^[[:blank:]]*AUTO_SETUP_NET_WIFI_ENABLED=1' /DietPi/dietpi.txt)
+		local ethernet_enabled=$(grep -cim1 '^[[:blank:]]*AUTO_SETUP_NET_ETHERNET_ENABLED=1' /DietPi/dietpi.txt)
+		local wifi_enabled=$(grep -cim1 '^[[:blank:]]*AUTO_SETUP_NET_WIFI_ENABLED=1' /DietPi/dietpi.txt)
 
-		local use_static=$(grep -ci -m1 '^[[:blank:]]*AUTO_SETUP_NET_USESTATIC=1' /DietPi/dietpi.txt)
-		local static_ip=$(grep -m1 '^[[:blank:]]*AUTO_SETUP_NET_STATIC_IP=' /DietPi/dietpi.txt | sed 's/^[^=]*=//')
-		local static_mask=$(grep -m1 '^[[:blank:]]*AUTO_SETUP_NET_STATIC_MASK=' /DietPi/dietpi.txt | sed 's/^[^=]*=//')
-		local static_gateway=$(grep -m1 '^[[:blank:]]*AUTO_SETUP_NET_STATIC_GATEWAY=' /DietPi/dietpi.txt | sed 's/^[^=]*=//')
-		local static_dns=$(grep -m1 '^[[:blank:]]*AUTO_SETUP_NET_STATIC_DNS=' /DietPi/dietpi.txt | sed 's/^[^=]*=//')
+		local use_static=$(grep -cim1 '^[[:blank:]]*AUTO_SETUP_NET_USESTATIC=1' /DietPi/dietpi.txt)
+		local static_ip=$(sed -n '/^[[:blank:]]*AUTO_SETUP_NET_STATIC_IP=/{s/^[^=]*=//p;q}' /DietPi/dietpi.txt)
+		local static_mask=$(sed -n '/^[[:blank:]]*AUTO_SETUP_NET_STATIC_MASK=/{s/^[^=]*=//p;q}' /DietPi/dietpi.txt)
+		local static_gateway=$(sed -n '/^[[:blank:]]*AUTO_SETUP_NET_STATIC_GATEWAY=/{s/^[^=]*=//p;q}' /DietPi/dietpi.txt)
+		local static_dns=$(sed -n '/^[[:blank:]]*AUTO_SETUP_NET_STATIC_DNS=/{s/^[^=]*=//p;q}' /DietPi/dietpi.txt)
 
 		# - WiFi
 		if (( $wifi_enabled )); then

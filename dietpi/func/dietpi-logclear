@@ -16,35 +16,26 @@
 	# - dietpi-logclear 2		| Delete all logs in $FILEPATH_LOGFOLDER and backups.
 	#////////////////////////////////////
 
-	#Import DietPi-Globals ---------------------------------------------------------------
+	# Import DietPi-Globals --------------------------------------------------------------
 	. /DietPi/dietpi/func/dietpi-globals
 	G_PROGRAM_NAME='DietPi-Logclear'
 	G_CHECK_ROOT_USER
 	G_INIT
-	#Import DietPi-Globals ---------------------------------------------------------------
+	# Import DietPi-Globals --------------------------------------------------------------
 
-	INPUT=-1
-	disable_error=1 G_CHECK_VALIDINT "$1" && INPUT=$1
+	disable_error=1 G_CHECK_VALIDINT "$1" && INPUT=$1 || INPUT=-1
 
 	#////////////////////////////////////////////////////////////////
 	# Global
 	#////////////////////////////////////////////////////////////////
-	TEMP_FILE='dietpi-logclear'
-
 	FILEPATH_LOGFOLDER='/var/log'
-	FILEPATH_BACKUPFOLDER="$HOME/logfile_storage"
+	FILEPATH_BACKUPFOLDER='/root/logfile_storage'
 
 	FILE_NAME=''
-	#0=text log, 1=compressed, 2=Pi-hole
+	# 0=text log, 1=compressed
 	FILE_TYPE=0
 	FILESIZE_BYTES=0
 	PROCESS_FILE=0
-
-	#////////////////////////////////////////////////////////////////
-	#Excluded log files (user created)
-	#////////////////////////////////////////////////////////////////
-	FP_EXCLUDED_LOGFILES='/DietPi/dietpi/.dietpi-logclear_exclude'
-	INFO_EXCLUDED_LOGFILES=0
 
 	#////////////////////////////////////////////////////////////////
 	# Info Printouts
@@ -62,155 +53,83 @@
 	Process_Logfiles(){
 
 		#-----------------------------------------------------------------------------------
-		#Remove internally rotated LetsEncrypt log files, prior to log loop
+		# Remove internally rotated LetsEncrypt log files, prior to log loop
 		[[ -d $FILEPATH_LOGFOLDER/letsencrypt ]] && rm -f $FILEPATH_LOGFOLDER/letsencrypt/letsencrypt.log.*
 
 		#-----------------------------------------------------------------------------------
-		#Find existing logs and generate a filepath list.
-		find $FILEPATH_LOGFOLDER -type f > $TEMP_FILE
+		# Find existing logs and generate a filepath array, excluding symlinks
+		local ARRAY_LOG_FILEPATH=()
+		while read -r line
+		do
 
-		#Read logfile filepath list into array.
-		readarray -t ARRAY_LOG_FILEPATH < $TEMP_FILE
+			ARRAY_LOG_FILEPATH+=("$line")
+
+		done <<< "$(find $FILEPATH_LOGFOLDER -type f)"
 
 		#-----------------------------------------------------------------------------------
-		#Process Logfiles
+		# Process Logfiles
 		for ((i=0; i<${#ARRAY_LOG_FILEPATH[@]}; i++))
 		do
 
-			#File details
-			FILE_NAME=${ARRAY_LOG_FILEPATH[$i]//\/var\/log\/}
+			# File details
+			FILE_NAME=${ARRAY_LOG_FILEPATH[$i]#/var/log/}
 			FILESIZE_BYTES=$(stat -c%s "${ARRAY_LOG_FILEPATH[$i]}")
 			PROCESS_FILE=1
 			FILE_TYPE=0
 
-			#Special Filetypes
-			#Pi-hole logs (contains dns stats) | FILE_TYPE 2
-			if [[ ${ARRAY_LOG_FILEPATH[$i]} == '/var/log/pihole.log' ]]; then
-
-				FILE_TYPE=2
-
-			#Compessed files (zip etc) | FILE_TYPE 1
-			elif [[ ${FILE_NAME: -4} == '.zip' || ${FILE_NAME: -3} == '.gz' ]]; then
+			# Filetypes
+			# - Compessed files (zip etc) | FILE_TYPE 1
+			if [[ ${FILE_NAME: -4} == '.zip' || ${FILE_NAME: -3} == '.gz' ]]; then
 
 				FILE_TYPE=1
 
-			#Normal Log Files.
-			# - Exclude <= 10 byte size
-			# - Exclude .db* extentions SQLite (.db .db-shm .db.wal)
-			elif (( $FILESIZE_BYTES <= 10 )) || [[ $FILE_NAME =~ '.db' ]]; then
+			# - Normal Log Files
+			#	Exclude <= 10 byte size
+			#	Exclude .db* extentions SQLite (.db .db-shm .db.wal)
+			elif (( $FILESIZE_BYTES < 11 )) || [[ $FILE_NAME =~ '.db' ]]; then
 
 				PROCESS_FILE=0
 
 			fi
 
-			#Process File
+			# Process File
 			if (( $PROCESS_FILE == 1 )); then
 
-				#Pi-hole
-				if (( $FILE_TYPE == 2 )); then
-
-					local pihole_restart_required=0
-
-					#Find all non-matching lines with todays date
-					#	 NB: day is space padded without trailling 0 (eg: Sep  1, Sep 11)
-					local month_day_today="$(date +'%b %e')"
-
-					# - Check for at least 1 non-matching line before applying. Remove all lines in logfile for all other days, excluding today.
-					if grep -vqi "$month_day_today" /var/log/pihole.log; then
-
-						#	RAMlog mode 2:
-						if (( $INPUT == 0 )); then
-
-							sed "/$month_day_today/d" "${ARRAY_LOG_FILEPATH[$i]}" >> "$FILEPATH_BACKUPFOLDER/$FILE_NAME"
-							((INFO_BACKUPS_MADE++))
-
-						fi
-
-						G_DIETPI-NOTIFY 2 'Clearing log entries for Pi-hole, that are not from today, please wait...'
-						sed -i '/'"$month_day_today"'/!d' /var/log/pihole.log
-						pihole_restart_required=1
-
-					fi
-
-					#	recheck size again
-					FILESIZE_BYTES=$(stat -c%s "${ARRAY_LOG_FILEPATH[$i]}")
-
-					#Clear all entries if over (AUTO_SETUP_RAMLOG_MAXSIZE / 3) (we have to limit and prevent /var/log hitting the 50mb tmpfs limit)
-					local filesize_limit=$(( ( $(grep -m1 '^[[:blank:]]*AUTO_SETUP_RAMLOG_MAXSIZE=' /DietPi/dietpi.txt | sed 's/^[^=]*=//') / 3 ) * 1024 * 1024 ))
-					if (( $FILESIZE_BYTES >= $filesize_limit )); then
-
-						G_DIETPI-NOTIFY 2 "${ARRAY_LOG_FILEPATH[$i]} has exceeded ${filesize_limit}MB, clearing, please wait..."
-
-						#	RAMlog mode 2:
-						if (( $INPUT == 0 )); then
-
-							cat "${ARRAY_LOG_FILEPATH[$i]}" >> "$FILEPATH_BACKUPFOLDER/$FILE_NAME"
-							((INFO_BACKUPS_MADE++))
-
-						fi
-
-						> "${ARRAY_LOG_FILEPATH[$i]}"
-						((INFO_LOGS_CLEARED++))
-
-						pihole_restart_required=1
-
-					#Prevent size effecting results
-					else
-
-						FILESIZE_BYTES=0
-
-					fi
-
-					#restart PiHole if we modified the log file
-					if (( $pihole_restart_required )); then
-
-						G_DIETPI-NOTIFY 2 'PiHole logs have been changed, restarting, please wait...'
-						systemctl stop pihole-FTL
-						# Handle dnsmasq only, if enabled (+installed), otherwise assume FTLDNS, which would be broken by dnsmasq start: https://github.com/MichaIng/DietPi/issues/1696
-						systemctl is-enabled dnsmasq 2> /dev/null | grep -q '^enabled$' && systemctl stop dnsmasq
-						systemctl stop resolvconf
-						sleep 1
-						systemctl start resolvconf
-						systemctl is-enabled dnsmasq 2> /dev/null | grep -q '^enabled$' && systemctl start dnsmasq
-						systemctl start pihole-FTL
-
-					fi
-
-				#Delete all compressed filetypes.
-				elif (( $FILE_TYPE == 1 )); then
+				# Delete all compressed filetypes
+				if (( $FILE_TYPE == 1 )); then
 
 					rm "${ARRAY_LOG_FILEPATH[$i]}"
 					((INFO_LOGS_DELETED++))
 					((INFO_LOGS_NOTSUPPORTED++))
 
-				#Update current log files data to $FILEPATH_BACKUPFOLDER/*. Then clear.
+				# Update current log files data to $FILEPATH_BACKUPFOLDER/*, then clear
 				elif (( $INPUT == 0 )); then
 
-					#Generate filepaths
+					# Generate filepaths
 					if [[ ! -f $FILEPATH_BACKUPFOLDER/$FILE_NAME ]]; then
 
-						#This is a little "hack" to automatically generate the required subdirectories.
+						# This is a little "hack" to automatically generate the required subdirectories.
 						# EG: /this/is/my/logfile.txt | will create the folders /this/is/my
 						mkdir -p "$FILEPATH_BACKUPFOLDER/$FILE_NAME"
 						rm -R "$FILEPATH_BACKUPFOLDER/$FILE_NAME"
 
 					fi
 
-					#Write current logfile contents to existing.
+					# Write current logfile contents to existing.
 					cat "${ARRAY_LOG_FILEPATH[$i]}" >> "$FILEPATH_BACKUPFOLDER/$FILE_NAME"
 					((INFO_BACKUPS_MADE++))
 
-					#Clear logfile contents
+					# Clear logfile contents
 					> "${ARRAY_LOG_FILEPATH[$i]}"
 					((INFO_LOGS_CLEARED++))
 
-				#Clear logfile contents
+				# Clear logfile contents
 				elif (( $INPUT == 1 )); then
 
 					> "${ARRAY_LOG_FILEPATH[$i]}"
 					((INFO_LOGS_CLEARED++))
 
-				#Hard delete log files
+				# Hard delete log files
 				elif (( $INPUT == 2 )); then
 
 					rm "${ARRAY_LOG_FILEPATH[$i]}"
@@ -218,7 +137,7 @@
 
 				fi
 
-				#Update Size cleared.
+				# Update Size cleared
 				INFO_SIZE_CLEARED=$(($INFO_SIZE_CLEARED + $FILESIZE_BYTES))
 
 			fi
@@ -227,12 +146,6 @@
 
 		done
 
-		#Remove temp files
-		rm $TEMP_FILE
-
-		#delete[] array
-		unset ARRAY_LOG_FILEPATH
-
 	}
 
 	#////////////////////////////////////////////////////////////////
@@ -240,61 +153,46 @@
 	#////////////////////////////////////////////////////////////////
 
 	#----------------------------------------------------------------
-	#How to use print.
-	if (( $INPUT == -1 )); then
+	# Print usage
+	if (( $INPUT > 2 || $INPUT < 0 )); then
 
-		G_DIETPI-NOTIFY 2 'Available commands:'
-		echo ''
-		echo -e '\e[1m dietpi-logclear 0\e[0m'
-		echo -e "\e[38;5;244m Backup contents of all log files from $FILEPATH_LOGFOLDER to $FILEPATH_BACKUPFOLDER/*.\n Also clears the contents of all logs files in $FILEPATH_LOGFOLDER.\e[0m"
-		echo ''
-		echo -e '\e[1m dietpi-logclear 1\e[0m'
-		echo -e "\e[38;5;244m Clear contents of all logs files in $FILEPATH_LOGFOLDER.\e[0m"
-		echo ''
-		echo -e '\e[1m dietpi-logclear 2\e[0m'
-		echo -e "\e[38;5;244m Physically delete all files in $FILEPATH_LOGFOLDER and backups in $FILEPATH_BACKUPFOLDER/*.\n May prevent log files from being updated, restart services or reboot. \e[0m"
-		echo ''
+		G_DIETPI-NOTIFY 2 "Available commands:\e[0m
+\n\e[1m dietpi-logclear 0\e[0m
+\e[38;5;244m Backup contents of all log files from $FILEPATH_LOGFOLDER to $FILEPATH_BACKUPFOLDER/*.\n Also clears the contents of all logs files in $FILEPATH_LOGFOLDER.\e[0m
+\n\e[1m dietpi-logclear 1\e[0m
+\e[38;5;244m Clear contents of all logs files in $FILEPATH_LOGFOLDER.\e[0m
+\n\e[1m dietpi-logclear 2\e[0m
+\e[38;5;244m Physically delete all files in $FILEPATH_LOGFOLDER and backups in $FILEPATH_BACKUPFOLDER/*.\n May prevent log files from being updated, restart services or reboot.\e[0m\n"
 
 	#----------------------------------------------------------------
-	#Process log files
-	elif (( $INPUT >= 0 )); then
+	# Process log files
+	else
 
 		Process_Logfiles
 
-		#Delete logfile backups
-		(( $INPUT == 2 )) && rm -R $FILEPATH_BACKUPFOLDER &> /dev/null
+		# Delete logfile backups
+		[[ $INPUT == 2 && -f $FILEPATH_BACKUPFOLDER ]] && rm -R $FILEPATH_BACKUPFOLDER
 
-		#Print Info
-		G_DIETPI-NOTIFY 2
-		echo -e " - Log file directory      \e[90m|\e[0m $FILEPATH_LOGFOLDER"
-		echo -e " - Processed files         \e[90m|\e[0m $INFO_FILES_PROCESSED"
+		# Print Info
+		info="
+ - Log file directory      \e[90m|\e[0m $FILEPATH_LOGFOLDER
+ - Processed files         \e[90m|\e[0m $INFO_FILES_PROCESSED
+ - Cleared log files       \e[90m|\e[0m $INFO_LOGS_CLEARED
+ - Unsupported files       \e[90m|\e[0m $INFO_LOGS_NOTSUPPORTED
+ - Deleted files           \e[90m|\e[0m $INFO_LOGS_DELETED
+ - Space cleared           \e[90m|\e[0m $(($INFO_SIZE_CLEARED / 1024)) KiB"
 
-		#Excluded
-		echo -e " - Excluded files          \e[90m|\e[0m $INFO_EXCLUDED_LOGFILES"
-
-		#Cleared
-		echo -e " - Cleared log files       \e[90m|\e[0m $INFO_LOGS_CLEARED"
-
-		#Deleted
-		echo -e " - Unsupported files       \e[90m|\e[0m $INFO_LOGS_NOTSUPPORTED"
-		echo -e " - Deleted files           \e[90m|\e[0m $INFO_LOGS_DELETED"
-
-		#convert size to kb
-		#/= (i miss it)
-		INFO_SIZE_CLEARED=$(($INFO_SIZE_CLEARED / 1024))
-		echo -e " - Space cleared           \e[90m|\e[0m $INFO_SIZE_CLEARED KB"
-
-		#Backups
+		# + Backups
 		if (( $INPUT == 0 )); then
 
-			echo ''
-			echo -e ' \e[38;5;244mBackup Info:\e[0m'
-			echo -e " - Backup directory        \e[90m|\e[0m $FILEPATH_BACKUPFOLDER"
-			echo -e " - Updated log files       \e[90m|\e[0m $INFO_BACKUPS_MADE"
+			info+="
+ \e[38;5;244mBackup Info:\e[0m
+ - Backup directory        \e[90m|\e[0m $FILEPATH_BACKUPFOLDER
+ - Updated log files       \e[90m|\e[0m $INFO_BACKUPS_MADE"
 
 		fi
 
-		echo ''
+		G_DIETPI-NOTIFY 2 "\e[0mSummary:$info\n"
 
 	fi
 

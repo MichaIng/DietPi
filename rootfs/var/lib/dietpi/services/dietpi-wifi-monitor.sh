@@ -20,7 +20,7 @@
 	# Check for valid WiFi adapter
 	[[ -e /sys/class/net/$ADAPTER ]] || { echo "ERROR: No valid WiFi adapter found on interface: $ADAPTER. Exiting..."; exit 1; }
 
-	echo "Checking connnection for: $ADAPTER via ping to default gateway every $TICKRATE seconds"
+	echo "Checking connection for: $ADAPTER via ping to default gateway every $TICKRATE seconds"
 
 	while :
 	do
@@ -28,7 +28,7 @@
 		# - Get current gateway for ping
 		URL_PING=$(ip r s 0.0.0.0/0 dev $ADAPTER | mawk '{print $3}')
 
-		[[ $G_DEBUG == 1 ]] && echo "Checking connnection for: $ADAPTER via ping to $URL_PING"
+		[[ $G_DEBUG == 1 ]] && echo "Checking connection for: $ADAPTER via ping to $URL_PING"
 		if ping -qI $ADAPTER -c 1 $URL_PING &> /dev/null; then
 
 			[[ $G_DEBUG == 1 ]] && echo "Connection valid for: $ADAPTER"

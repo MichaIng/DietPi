@@ -7,22 +7,18 @@
 		<br><br>
 		optimised • simplified • for everyone
 		<br><br>
-		<a href="https://dietpi.com">find out more</a>
-		•
-		<a href="https://dietpi.com/#download">download image</a>
+		<a href="https://dietpi.com">find out more</a> • <a href="https://dietpi.com/#download">download image</a>
 	</p>
 	<hr>
 	<p align="center">
-		Optional "ready to run" optimised software choices with <b>dietpi-software</b>.
-		<br>
+		Optional "ready to run" optimised software choices with <b>dietpi-software</b>.<br>
 		Feature rich configuration tool for your device with <b>dietpi-config</b>.
 	</p>
 	<hr>
 	<p align="center">
 		<img src="https://dietpi.com/images/mvs_logo_150.jpg" alt="myVirtualServer">
 		<br><br>
-		DietPi's web hosting is powered by
-		<a href="https://www.myvirtualserver.com">myVirtualServer</a>.
+		DietPi's web hosting is powered by <a href="https://www.myvirtualserver.com">myVirtualServer</a>.
 		<br><br>
 		A wide range of SBCs and VMs are supported. <a href="https://dietpi.com/#download">Click here</a> for the full list.
 		<br><br>
@@ -59,17 +55,11 @@ _Joined 2016-06-08_
 
 DietPi forum co-administrator, management, support, testing and valuable feedback.
 
-#### K-Plan
+#### sal666
 
-_Joined 2016-01-01_
+_Joined 2017-07-26_
 
-Contributions to the DietPi in general, in-depth testing, bug finding and valuable feedback, forum moderator.
-
-#### ZombieVirus
-
-_Joined 2016-03-20_
-
-DietPi forum moderator and version history maintainer on forums.
+Creator and maintainer of the Clonezilla based installer images for x86_64 UEFI systems.
 
 ---
 
@@ -85,6 +75,18 @@ https://github.com/MichaIng/DietPi/issues/474
 ---
 
 ### Previous/Inactive Contributors
+
+#### K-Plan
+
+_Joined 2016-01-01_
+
+Contributions to the DietPi in general, in-depth testing, bug finding and valuable feedback, forum moderator.
+
+#### ZombieVirus
+
+_Joined 2016-03-20_
+
+DietPi forum moderator and version history maintainer on forums.
 
 #### Rhkean
 
@@ -195,9 +197,12 @@ Links to additional software used in DietPi and their source and build instructi
 - [Raspberry](https://github.com/raspberrypi) [Pi](https://github.com/RPi-Distro)
 - [Odroid](https://github.com/hardkernel?tab=repositories)
 - [Sparky](https://github.com/sparkysbc?tab=repositories) [SBC](https://github.com/sparky-sbc/sparky-test)
+- [RockChip](https://github.com/rockchip-linux/rk-rootfs-build)
 - [FriendlyARM](https://github.com/friendlyarm?tab=repositories)
+- [Armbian](https://github.com/armbian)
 - [X.Org-X-Server](https://www.x.org/archive//individual/)
 - [LXDE desktop](https://github.com/LXDE)
+- [LXQt desktop](https://github.com/lxqt)
 - [Xfce desktop](https://git.xfce.org/)
 - [MATE desktop](https://github.com/mate-desktop)
 - [GNUstep](https://github.com/gnustep)
@@ -209,33 +214,39 @@ Links to additional software used in DietPi and their source and build instructi
 - [MiniDLNA](https://sourceforge.net/p/minidlna/git/ci/master/tree/)
 - [MPD](https://github.com/MusicPlayerDaemon/MPD)
 - [YMPD](https://github.com/notandy/ympd)
-- [phpBB](https://github.com/phpbb/phpbb)
+- [myMPD](https://github.com/jcorporation/myMPD)
 - [Apache2](https://github.com/apache)
-- [MariaDB](https://github.com/MariaDB)
+- [Nginx](https://hg.nginx.org/nginx/)
+- [Lighttpd](https://redmine.lighttpd.net/projects/lighttpd/repository)
 - [PHP](https://git.php.net/)
+- [PHP OPcache GUI](https://github.com/amnuts/opcache-gui)
+- [MariaDB](https://github.com/MariaDB)
 - [phpMyAdmin](https://github.com/phpmyadmin)
+- [Certbot](https://github.com/certbot/certbot)
+- [Pi-hole](https://github.com/pi-hole/pi-hole)
+- [phpBB](https://github.com/phpbb/phpbb)
 - [ProFTPD](https://github.com/proftpd)
 - [Samba](https://wiki.samba.org/index.php/Using_Git_for_Samba_Development)
 - [No-IP Client Binary](https://www.noip.com/support/knowledgebase/installing-the-linux-dynamic-update-client/)
+- [Dropbear](https://github.com/mkj/dropbear)
+- [OpenSSH](https://github.com/openssh/openssh-portable)
+- [OpenVPN](https://github.com/OpenVPN)
+- [PiVPN](https://github.com/pivpn/pivpn)
+- [Amiberry](https://github.com/midwan/amiberry)
 - [RetroPie Setup Script](https://github.com/petrockblog/RetroPie-Setup)
-- [PiVPN VPN Server](https://github.com/pivpn/pivpn)
 - [OpenTyrian](https://bitbucket.org/opentyrian/opentyrian/wiki/Home)
-- [DietPiCam](https://github.com/MichaIng/RPi_Cam_Web_Interface)
-- [PHP OPcache GUI](https://github.com/amnuts/opcache-gui)
-- [Nginx](https://hg.nginx.org/nginx/)
-- [Lighttpd](https://redmine.lighttpd.net/projects/lighttpd/repository)
+- [DietPiCam](https://github.com/silvanmelchior/RPi_Cam_Web_Interface)
 - [Deluge](https://dev.deluge-torrent.org/wiki/Development#SourceCode)
-- [Pi-hole](https://github.com/pi-hole/pi-hole)
 - [Subsonic](https://sourceforge.net/projects/subsonic/)
 - [Airsonic](https://github.com/airsonic/airsonic)
 - [LMS/SqueezeBox](https://github.com/Logitech/slimserver)
 - [Ampache](https://github.com/ampache/ampache)
 - [FFmpeg](https://github.com/FFmpeg/FFmpeg)
-- [CertBot](https://github.com/certbot/certbot)
 - [Shairport-Sync](https://github.com/mikebrady/shairport-sync)
-- [OpenVPN](https://github.com/OpenVPN)
 - [FreshRSS](https://github.com/FreshRSS/FreshRSS)
 - [Folding@Home](https://github.com/FoldingAtHome)
 - [OpenBazaar](https://github.com/OpenBazaar/openbazaar-go)
 - [Medusa](https://github.com/pymedusa/Medusa)
 - [Grafana](https://github.com/grafana/grafana)
+- [Clonezilla](https://gitlab.com/stevenshiau/clonezilla)
+- [Gitea](https://github.com/go-gitea/gitea)

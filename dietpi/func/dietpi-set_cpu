@@ -14,14 +14,14 @@
 	# - Sets CPU governor user prefs | throttle up percent etc
 	#////////////////////////////////////
 
-	#Import DietPi-Globals ---------------------------------------------------------------
+	# Import DietPi-Globals --------------------------------------------------------------
 	. /DietPi/dietpi/func/dietpi-globals
 	G_PROGRAM_NAME='DietPi-CPU_set'
 	G_CHECK_ROOT_USER
 	G_INIT
-	#Import DietPi-Globals ---------------------------------------------------------------
+	# Import DietPi-Globals --------------------------------------------------------------
 
-	#Exit path for VM
+	# Exit path for VM
 	if (( $G_HW_MODEL == 20 )); then
 
 		echo -e '\nNotice: CPU Governors are not available for VM.\n'
@@ -29,14 +29,11 @@
 
 	fi
 
-	CPU_GOVERNOR=$(grep -m1 '^[[:blank:]]*CONFIG_CPU_GOVERNOR=' /DietPi/dietpi.txt | sed 's/^[^=]*=//')
-	CPU_MAX_FREQ=$(grep -m1 '^[[:blank:]]*CONFIG_CPU_MAX_FREQ=' /DietPi/dietpi.txt | sed 's/^[^=]*=//')
-	CPU_MIN_FREQ=$(grep -m1 '^[[:blank:]]*CONFIG_CPU_MIN_FREQ=' /DietPi/dietpi.txt | sed 's/^[^=]*=//')
-	CPU_DISABLE_TURBO=$(grep -m1 '^[[:blank:]]*CONFIG_CPU_DISABLE_TURBO=' /DietPi/dietpi.txt | sed 's/^[^=]*=//')
+	CPU_GOVERNOR=$(sed -n '/^[[:blank:]]*CONFIG_CPU_GOVERNOR=/{s/^[^=]*=//p;q}' /DietPi/dietpi.txt)
 
 	Check_GPU_Gov_Available(){
 
-		#Check if target Gov is available on system.
+		# Check if target Gov is available on system
 		if ! grep -qi $CPU_GOVERNOR /sys/devices/system/cpu/cpu0/cpufreq/scaling_available_governors; then
 
 			G_DIETPI-NOTIFY 1 "CPU gov: $CPU_GOVERNOR, not supported by kernel"
@@ -57,7 +54,7 @@
 
 			G_DIETPI-NOTIFY 2 "Switching to CPU gov: $CPU_GOVERNOR"
 
-			# - Update dietpi.txt
+			# Update dietpi.txt
 			G_CONFIG_INJECT 'CONFIG_CPU_GOVERNOR=' "CONFIG_CPU_GOVERNOR=$CPU_GOVERNOR" /DietPi/dietpi.txt
 
 		fi
@@ -70,7 +67,7 @@
 		local input_core_start=$2
 		local input_core_end=$3
 
-		#Apply the Gov
+		# Apply the Gov
 		for ((i=$input_core_start; i<$input_core_end; i++))
 		do
 
@@ -78,106 +75,114 @@
 
 		done
 
-		#Apply CPU max/min frequency
-		# - Intel based 0-100%:
-		if [[ -f /sys/devices/system/cpu/intel_pstate/max_perf_pct ]]; then
+		# Apply CPU max/min frequency
+		# - Only on non-RPi
+		if (( $G_HW_MODEL > 9 )); then
 
-			disable_error=1 G_CHECK_VALIDINT "$CPU_MAX_FREQ" || CPU_MAX_FREQ=100
-			disable_error=1 G_CHECK_VALIDINT "$CPU_MIN_FREQ" || CPU_MIN_FREQ=25
+			local cpu_max_freq=$(sed -n '/^[[:blank:]]*CONFIG_CPU_MAX_FREQ=/{s/^[^=]*=//p;q}' /DietPi/dietpi.txt)
+			local cpu_min_freq=$(sed -n '/^[[:blank:]]*CONFIG_CPU_MIN_FREQ=/{s/^[^=]*=//p;q}' /DietPi/dietpi.txt)
 
-			echo $CPU_MAX_FREQ > /sys/devices/system/cpu/intel_pstate/max_perf_pct
-			echo $CPU_MIN_FREQ > /sys/devices/system/cpu/intel_pstate/min_perf_pct
+			# Intel based 0-100%
+			if [[ -f '/sys/devices/system/cpu/intel_pstate/max_perf_pct' ]]; then
 
-			G_DIETPI-NOTIFY 2 "Applied CPU Frequency Limits : Max = $CPU_MAX_FREQ % | Min = $CPU_MIN_FREQ %"
+				disable_error=1 G_CHECK_VALIDINT "$cpu_max_freq" 1 100 || cpu_max_freq=100
+				disable_error=1 G_CHECK_VALIDINT "$cpu_min_freq" 1 100 || cpu_min_freq=25
 
-			if [[ -f /sys/devices/system/cpu/intel_pstate/no_turbo ]]; then
+				echo $cpu_max_freq > /sys/devices/system/cpu/intel_pstate/max_perf_pct
+				echo $cpu_min_freq > /sys/devices/system/cpu/intel_pstate/min_perf_pct
 
-				echo $CPU_DISABLE_TURBO > /sys/devices/system/cpu/intel_pstate/no_turbo
-				G_DIETPI-NOTIFY 2 "Applied Turbo Mode : $CPU_DISABLE_TURBO (1=disabled)"
+				G_DIETPI-NOTIFY 2 "Applied CPU Frequency Limits : Max = $cpu_max_freq % | Min = $cpu_min_freq %"
 
-			fi
+				if [[ -f '/sys/devices/system/cpu/intel_pstate/no_turbo' ]]; then
 
-		# - Standard via kernel (Hz)
-		elif [[ -f /sys/devices/system/cpu/cpu0/cpufreq/scaling_max_freq ]]; then
+					if grep -qi '^[[:blank:]]*CONFIG_CPU_DISABLE_TURBO=1' /DietPi/dietpi.txt; then
 
-			#	Reset to defaults if no/invalid entry
-			local converted_hz_value_max=-1 #-1 indicates reset CPU freqs
-			local converted_hz_value_min=-1 #-1 indicates reset CPU freqs
-			if disable_error=1 G_CHECK_VALIDINT "$CPU_MAX_FREQ"; then
+						echo 1 > /sys/devices/system/cpu/intel_pstate/no_turbo
+						G_DIETPI-NOTIFY 2 'Disabled Intel Turbo Mode'
 
-				converted_hz_value_max=$(( $CPU_MAX_FREQ * 1000 ))
+					else
 
-			fi
+						echo 0 > /sys/devices/system/cpu/intel_pstate/no_turbo
+						G_DIETPI-NOTIFY 2 'Enabled Intel Turbo Mode'
 
-			if disable_error=1 G_CHECK_VALIDINT "$CPU_MIN_FREQ"; then
-
-				converted_hz_value_min=$(( $CPU_MIN_FREQ * 1000 ))
-
-			fi
-
-			G_DIETPI-NOTIFY 2 "Setting CPU freq: Max = $CPU_MAX_FREQ MHz | Min = $CPU_MIN_FREQ"
-			for ((i=$input_core_start; i<$input_core_end; i++))
-			do
-
-				if (( $converted_hz_value_min > 0 )); then
-
-					echo $converted_hz_value_min > /sys/devices/system/cpu/cpu${i}/cpufreq/scaling_min_freq
-
-				else
-
-					mawk '{print $1}' /sys/devices/system/cpu/cpu${i}/cpufreq/scaling_available_frequencies > /sys/devices/system/cpu/cpu${i}/cpufreq/scaling_min_freq
+					fi
 
 				fi
 
-				if (( $converted_hz_value_max > 0 )); then
+			# Standard via kernel (MHz)
+			elif [[ -f '/sys/devices/system/cpu/cpu0/cpufreq/scaling_max_freq' ]]; then
 
-					echo $converted_hz_value_max > /sys/devices/system/cpu/cpu${i}/cpufreq/scaling_max_freq
+				# Reset to defaults if no/invalid entry
+				local converted_hz_value_max=-1 # -1 indicates reset CPU freqs
+				local converted_hz_value_min=-1 # -1 indicates reset CPU freqs
+				disable_error=1 G_CHECK_VALIDINT "$cpu_max_freq" && converted_hz_value_max=$(( $cpu_max_freq * 1000 ))
+				disable_error=1 G_CHECK_VALIDINT "$cpu_min_freq" && converted_hz_value_min=$(( $cpu_min_freq * 1000 ))
 
-				else
+				G_DIETPI-NOTIFY 2 "Setting CPU freq: Max = $cpu_max_freq kHz | Min = $cpu_min_freq kHz"
+				for ((i=$input_core_start; i<$input_core_end; i++))
+				do
 
-					mawk '{print $NF}' /sys/devices/system/cpu/cpu${i}/cpufreq/scaling_available_frequencies > /sys/devices/system/cpu/cpu${i}/cpufreq/scaling_max_freq
+					if (( $converted_hz_value_min > 0 )); then
 
-				fi
+						echo $converted_hz_value_min > /sys/devices/system/cpu/cpu${i}/cpufreq/scaling_min_freq
 
-			done
+					else
+
+						mawk '{print $1}' /sys/devices/system/cpu/cpu${i}/cpufreq/scaling_available_frequencies > /sys/devices/system/cpu/cpu${i}/cpufreq/scaling_min_freq
+
+					fi
+
+					if (( $converted_hz_value_max > 0 )); then
+
+						echo $converted_hz_value_max > /sys/devices/system/cpu/cpu${i}/cpufreq/scaling_max_freq
+
+					else
+
+						mawk '{print $NF}' /sys/devices/system/cpu/cpu${i}/cpufreq/scaling_available_frequencies > /sys/devices/system/cpu/cpu${i}/cpufreq/scaling_max_freq
+
+					fi
+
+				done
+
+			fi
 
 		fi
 
-		local cpu_throttle_up_percent=$(grep -m1 '^CONFIG_CPU_USAGE_THROTTLE_UP=' /DietPi/dietpi.txt | sed 's/.*=//')
+		local cpu_throttle_up_percent=$(sed -n '/^[[:blank:]]*CONFIG_CPU_USAGE_THROTTLE_UP=/{s/[^=]*=//p;q}' /DietPi/dietpi.txt)
 
-		#Set CPU governor interactive settings
-		if [[ $input_gov_name == interactive ]]; then
+		# Set CPU governor interactive settings
+		if [[ $input_gov_name == 'interactive' ]]; then
 
-			#Set hispeed_load, if available on system (eg: XU4 kernel lacks this feature)
-			if [[ -f /sys/devices/system/cpu/cpufreq/interactive/go_hispeed_load ]]; then
+			# Set hispeed_load, if available on system (eg: XU4 kernel lacks this feature)
+			if [[ -f '/sys/devices/system/cpu/cpufreq/interactive/go_hispeed_load' ]]; then
 
 				G_DIETPI-NOTIFY 2 "Setting go_hispeed_load: $cpu_throttle_up_percent %"
 				echo $cpu_throttle_up_percent > /sys/devices/system/cpu/cpufreq/interactive/go_hispeed_load
 
 			fi
 
-		#Set CPU governor ondemand settings
-		elif [[ $input_gov_name == ondemand ]]; then
+		# Set CPU governor ondemand settings
+		elif [[ $input_gov_name == 'ondemand' ]]; then
 
-			local cpu_ondemand_sampling_rate=$(grep -m1 '^CONFIG_CPU_ONDEMAND_SAMPLE_RATE=' /DietPi/dietpi.txt | sed 's/.*=//')
-			local cpu_ondemand_sampling_down_factor=$(grep -m1 '^CONFIG_CPU_ONDEMAND_SAMPLE_DOWNFACTOR=' /DietPi/dietpi.txt | sed 's/.*=//')
+			local cpu_ondemand_sampling_rate=$(sed -n '/^[[:blank:]]*CONFIG_CPU_ONDEMAND_SAMPLE_RATE=/{s/[^=]*=//p;q}' /DietPi/dietpi.txt)
+			local cpu_ondemand_sampling_down_factor=$(sed -n '/^[[:blank:]]*CONFIG_CPU_ONDEMAND_SAMPLE_DOWNFACTOR=/{s/[^=]*=//p;q}' /DietPi/dietpi.txt)
 
 			G_DIETPI-NOTIFY 2 "Setting up_threshold: $cpu_throttle_up_percent %"
 			G_DIETPI-NOTIFY 2 "Setting sampling_rate: $cpu_ondemand_sampling_rate microseconds"
 			G_DIETPI-NOTIFY 2 "Setting sampling_down_factor: $cpu_ondemand_sampling_down_factor"
 
-			#Check for different possible locations
-			#	All
-			if [[ -f /sys/devices/system/cpu/cpufreq/ondemand/up_threshold ]]; then
+			# Check for different possible locations
+			# - All
+			if [[ -f '/sys/devices/system/cpu/cpufreq/ondemand/up_threshold' ]]; then
 
 				echo $cpu_throttle_up_percent > /sys/devices/system/cpu/cpufreq/ondemand/up_threshold
 				echo $cpu_ondemand_sampling_rate > /sys/devices/system/cpu/cpufreq/ondemand/sampling_rate
 				echo $cpu_ondemand_sampling_down_factor > /sys/devices/system/cpu/cpufreq/ondemand/sampling_down_factor
 
-			#	XU4 3.x kernel
+			# - XU4 3.x kernel
 			else
 
-				#	Apply to all cores
+				# Apply to all cores
 				for ((i=$input_core_start; i<$input_core_end; i++))
 				do
 
@@ -189,12 +194,10 @@
 
 			fi
 
-		#Set CPU governor conservative settings
-		elif [[ $input_gov_name == conservative ]]; then
+		# Set CPU governor conservative settings
+		elif [[ $input_gov_name == 'conservative' ]]; then
 
-			cpu_throttle_up_percent=$(grep -m1 '^CONFIG_CPU_USAGE_THROTTLE_UP=' /DietPi/dietpi.txt | sed 's/.*=//')
-
-			#XU3/4 different path (must apply to each core)
+			# XU3/4 different path (must apply to each core)
 			if (( $G_HW_MODEL == 11 )); then
 
 				for ((i=$input_core_start; i<$input_core_end; i++))
@@ -222,7 +225,7 @@
 	#-----------------------------------------------------------------------------------
 	Check_GPU_Gov_Available
 
-	#Apply CPU0 gov to all cores (if required)
+	# Apply CPU0 gov to all cores (if required)
 	Apply_CPU_Gov $CPU_GOVERNOR 0 $G_HW_CPU_CORES
 
 	G_DIETPI-NOTIFY 0 "CPU gov applied: $CPU_GOVERNOR\n"

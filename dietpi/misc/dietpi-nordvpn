@@ -10,37 +10,54 @@
 	#
 	# Info:
 	# - GUI to setup a NordVPN connection
-	# - Automatically starts service during boot
-	# Usage:
-	# - /DietPi/dietpi/misc/dietpi-nordvpn
-	#////////////////////////////////////
+	# - Allows to automatically connect on boot
+	# - Allows to add post-up and pre-down scripts
+	USAGE='
+Usage: dietpi-nordvpn [<command>]
+Available commands:
+  <empty>		Interactive menu to edit, connect and apply NordVPN settings
+  status		Print NordVPN connection status info
+'	#////////////////////////////////////
+
+	# Grab Inputs
+	INPUT=$1
 
 	# Import DietPi-Globals --------------------------------------------------------------
-	. /DietPi/dietpi/func/dietpi-globals
-	G_PROGRAM_NAME='DietPi-NordVPN'
-	G_CHECK_ROOT_USER
-	G_CHECK_ROOTFS_RW
-	G_INIT
+	# - Only load for interactive menu
+	if [[ $INPUT ]]; then
+
+		G_PROGRAM_NAME='DietPi-NordVPN'
+
+	else
+
+		. /DietPi/dietpi/func/dietpi-globals
+		G_PROGRAM_NAME='DietPi-NordVPN'
+		G_CHECK_ROOT_USER
+		G_CHECK_ROOTFS_RW
+		G_INIT
+
+	fi
 	# Import DietPi-Globals --------------------------------------------------------------
 
 	FP_SETTINGS_DIETPI='/var/lib/dietpi/dietpi-software/installed/dietpi-nordvpn/settings_dietpi.conf'
 	FP_SETTINGS_OVPN='/var/lib/dietpi/dietpi-software/installed/dietpi-nordvpn/settings_ovpn.conf'
+	FP_SETTINGS_UP='/var/lib/dietpi/dietpi-software/installed/dietpi-nordvpn/up.sh'
+	FP_SETTINGS_DOWN='/var/lib/dietpi/dietpi-software/installed/dietpi-nordvpn/down.sh'
 	NORDVPN_USERNAME=''
 	NORDVPN_PASSWORD=''
 	NORDVPN_SERVER=''
 	PROTOCOL='udp'
 
-	NET_DEV='tun0'
+	IFACE='tun0'
+	MAX_WAIT_FOR_CONNECTION=5 # seconds
+	NORDVPN_INSTALLED=0
 	NORDVPN_SERVICE=0
 	NORDVPN_CONNECTED=0
-	MAX_WAIT_FOR_CONNECTION=5
 	WAN_IP=''
+	RX='N/A'
+	TX='N/A'
 
-	Update_Wan_Ip(){
-
-		WAN_IP=$(curl -sLm 2 https://dietpi.com/myip.php 2>&1)
-
-	}
+	Update_Wan_Ip(){ WAN_IP=$(curl -sSfLm 2 https://dietpi.com/myip.php 2>&1); }
 
 	Init(){
 
@@ -48,39 +65,63 @@
 		until grep -q 'aSOFTWARE_INSTALL_STATE\[171\]=2' /DietPi/dietpi/.installed
 		do
 
-			if G_WHIP_YESNO "$G_PROGRAM_NAME is not installed, would you like to install it now?"; then
+			# Offer install only for interactive menu
+			if [[ ! $INPUT ]] && G_WHIP_YESNO "$G_PROGRAM_NAME is not installed, would you like to install it now?"; then
 
 				/DietPi/dietpi/dietpi-software install 171
 
 			else
 
-				TARGETMENUID=-1 #Exit path without save.
-				break
+				TARGETMENUID=-1 # Skip menu
+				return
 
 			fi
 
 		done
+		NORDVPN_INSTALLED=1
 
 		# Check service exists
-		[[ -f '/lib/systemd/system/dietpi-nordvpn.service' ]] && NORDVPN_SERVICE=1
-
-		Read_Settings
+		[[ -f '/etc/systemd/system/dietpi-nordvpn.service' ]] && NORDVPN_SERVICE=1
 
 	}
 
 	Check_Connected(){
 
-		NORDVPN_CONNECTED=0
-		#if systemctl status dietpi-nordvpn | grep -qi 'initialization sequence completed'; then
-		ip r s dev $NET_DEV &>/dev/null && NORDVPN_CONNECTED=1
-
+		#systemctl status dietpi-nordvpn | grep -qi 'initialization sequence completed'
+		ip r s dev $IFACE &> /dev/null && NORDVPN_CONNECTED=1 || NORDVPN_CONNECTED=0
 		return $(( ! $NORDVPN_CONNECTED ))
+
+	}
+
+	Get_Connection_Info(){
+
+		RX='N/A'
+		if [[ -f /sys/class/net/$IFACE/statistics/rx_bytes ]]; then
+
+			local rx=$(</sys/class/net/$IFACE/statistics/rx_bytes)
+			[[ $rx =~ ^[0-9]+$ ]] && RX="$(( $rx / 1024 / 1024 )) MiB"
+
+		fi
+		TX='N/A'
+		if [[ -f /sys/class/net/$IFACE/statistics/tx_bytes ]]; then
+
+			local tx=$(</sys/class/net/$IFACE/statistics/tx_bytes)
+			[[ $tx =~ ^[0-9]+$ ]] && TX="$(( $tx / 1024 / 1024 )) MiB"
+
+		fi
 
 	}
 
 	Read_Settings(){ [[ -f $FP_SETTINGS_DIETPI ]] && . $FP_SETTINGS_DIETPI; }
 
 	Save_Settings(){
+
+		if ! [[ $NORDVPN_SERVER && $NORDVPN_USERNAME && $NORDVPN_PASSWORD ]]; then
+
+			G_WHIP_MSG '[FAILED] You need to enter your NordVPN username + password and select a server, before settings can be applied.'
+			return 1
+
+		fi
 
 		(( $NORDVPN_SERVICE )) && systemctl stop dietpi-nordvpn
 
@@ -95,18 +136,23 @@ NORDVPN_PASSWORD='${NORDVPN_PASSWORD//\'/\'\\\'\'}'
 NORDVPN_SERVER='$NORDVPN_SERVER'
 PROTOCOL='$PROTOCOL'
 _EOF_
-		G_CONFIG_INJECT 'auth-user-pass' "auth-user-pass $FP_SETTINGS_OVPN" /etc/openvpn/ovpn_$PROTOCOL/$NORDVPN_SERVER
 
-		chmod 600 $FP_SETTINGS_OVPN $FP_SETTINGS_DIETPI /etc/openvpn/ovpn_$PROTOCOL/$NORDVPN_SERVER
-		chown root:root $FP_SETTINGS_OVPN $FP_SETTINGS_DIETPI /etc/openvpn/ovpn_$PROTOCOL/$NORDVPN_SERVER
+		local fp_ovpn="/etc/openvpn/ovpn_$PROTOCOL/$NORDVPN_SERVER"
+		chmod 600 $FP_SETTINGS_OVPN $FP_SETTINGS_DIETPI $fp_ovpn
+		chown root:root $FP_SETTINGS_OVPN $FP_SETTINGS_DIETPI $fp_ovpn
 
-		cat << _EOF_ > /lib/systemd/system/dietpi-nordvpn.service
+		G_CONFIG_INJECT 'auth-user-pass([[:blank:]]|$)' "auth-user-pass $FP_SETTINGS_OVPN" $fp_ovpn
+		[[ -f $FP_SETTINGS_UP || -f $FP_SETTINGS_DOWN ]] && G_CONFIG_INJECT 'script-security[[:blank:]]' 'script-security 2' $fp_ovpn 'auth[[:blank:]]'
+		[[ -f $FP_SETTINGS_UP ]] && G_CONFIG_INJECT 'route-up[[:blank:]]' "route-up $FP_SETTINGS_UP" $fp_ovpn 'auth[[:blank:]]' || sed -i '/^[[:blank:]]*route-up[[:blank:]]/d' $fp_ovpn
+		[[ -f $FP_SETTINGS_DOWN ]] && G_CONFIG_INJECT 'route-pre-down[[:blank:]]' "route-pre-down $FP_SETTINGS_DOWN" $fp_ovpn 'auth[[:blank:]]' || sed -i '/^[[:blank:]]*route-pre-down[[:blank:]]/d' $fp_ovpn
+
+		cat << _EOF_ > /etc/systemd/system/dietpi-nordvpn.service
 [Unit]
 Description=NordVPN (DietPi)
 After=network.target dietpi-boot.service
 
 [Service]
-ExecStart=$(command -v openvpn) /etc/openvpn/ovpn_$PROTOCOL/$NORDVPN_SERVER
+ExecStart=$(command -v openvpn) $fp_ovpn
 
 [Install]
 WantedBy=multi-user.target
@@ -115,23 +161,25 @@ _EOF_
 		NORDVPN_SERVICE=1
 		G_RUN_CMD systemctl restart dietpi-nordvpn
 
-		for (( i=1; i<=$MAX_WAIT_FOR_CONNECTION; i++ ))
+		local i=1
+		until Check_Connected || (( $i > $MAX_WAIT_FOR_CONNECTION ))
 		do
 
-			if Check_Connected; then
-
-				break
-
-			else
-
-				G_DIETPI-NOTIFY 2 "Waiting for connection ($i/$MAX_WAIT_FOR_CONNECTION)"
-				sleep 1
-
-			fi
+			G_DIETPI-NOTIFY -2 "Waiting for connection ($((i++))/$MAX_WAIT_FOR_CONNECTION)"
+			sleep 1
 
 		done
 
-		(( $NORDVPN_CONNECTED )) || G_WHIP_MSG "Connection failed/time out: $NORDVPN_SERVER\n\nPlease verify account details are correct.\n\nIf problems persist, please check the status of 'systemctl status dietpi-nordvpn -l'"
+		if (( $NORDVPN_CONNECTED )); then
+
+			G_DIETPI-NOTIFY 0 "Connection established: $NORDVPN_SERVER"
+
+		else
+
+			G_DIETPI-NOTIFY 1 "Connection failed/timeout: $NORDVPN_SERVER"
+			G_WHIP_MSG "Connection failed/timeout: $NORDVPN_SERVER\n\nPlease verify account details are correct.\n\nIf problems persist, please check the service status: \"systemctl -l status dietpi-nordvpn\""
+
+		fi
 
 	}
 
@@ -151,36 +199,19 @@ _EOF_
 	# TARGETMENUID=0
 	Menu_Main(){
 
-		Update_Wan_Ip
+		local text_status="WAN IP       : $WAN_IP\nState        : "
+		if (( ! $NORDVPN_SERVICE )); then
 
-		local text_status="Status:\n - WAN IP: $WAN_IP\n"
-		if (( $NORDVPN_SERVICE )) && Check_Connected; then
+			text_status+='Not configured\nSubscription : https://go.nordvpn.net/aff_c?offer_id=15&aff_id=5305&url_id=902'
 
-			text_status+=" - Connected : $NORDVPN_SERVER\n"
+		elif ! Check_Connected; then
 
-			local net_rx_byte=0
-			local net_tx_byte=0
-			local net_rx_mb='N/A'
-			local net_tx_mb='N/A'
-
-			if [[ -f /sys/class/net/$NET_DEV/statistics/rx_bytes && -f /sys/class/net/$NET_DEV/statistics/tx_bytes ]]; then
-
-				net_rx_byte=$(</sys/class/net/$NET_DEV/statistics/rx_bytes)
-				net_rx_mb='Unknown'
-				disable_error=1 G_CHECK_VALIDINT "$net_rx_byte" 1 && net_rx_mb="$(( $net_rx_byte / 1024 / 1024 ))MB"
-
-				net_tx_byte=$(</sys/class/net/$NET_DEV/statistics/tx_bytes)
-				net_tx_mb='Unknown'
-				disable_error=1 G_CHECK_VALIDINT "$net_tx_byte" 1 && net_tx_mb="$(( $net_tx_byte / 1024 / 1024 ))MB"
-
-			fi
-
-			text_status+=" - Usage     : Sent = $net_tx_mb | Recieved = $net_rx_mb"
+			text_status+='Disconnected\nSubscription : https://go.nordvpn.net/aff_c?offer_id=15&aff_id=5305&url_id=902'
 
 		else
 
-			(( $NORDVPN_SERVICE )) && text_status+=' - Disconnected' || text_status+=' - Not configured'
-			text_status+='\n - NordVPN subscription: https://go.nordvpn.net/aff_c?offer_id=15&aff_id=5305&url_id=902'
+			Get_Connection_Info
+			text_status+="Connected\nTraffic      : Sent = $TX | Received = $RX"
 
 		fi
 
@@ -198,6 +229,9 @@ _EOF_
 			(( $NORDVPN_CONNECTED )) && G_WHIP_MENU_ARRAY+=('Disconnect' '')
 
 		fi
+		G_WHIP_MENU_ARRAY+=('' '●─ Connection Up and Down Scripts ')
+		G_WHIP_MENU_ARRAY+=('Edit Up' ': This script gets executed right after the VPN is connected')
+		G_WHIP_MENU_ARRAY+=('Edit Down' ': This script gets executed right before the VPN is disconnected')
 		G_WHIP_MENU_ARRAY+=('' '●─ Save Settings ')
 		G_WHIP_MENU_ARRAY+=('Apply' ': Save settings and restart VPN connection')
 
@@ -210,6 +244,15 @@ _EOF_
 			if [[ $G_WHIP_RETURNED_VALUE == 'Apply' ]]; then
 
 				Save_Settings
+				Update_Wan_Ip
+
+			elif [[ $G_WHIP_RETURNED_VALUE == 'Edit'* ]]; then
+
+				local fp=$FP_SETTINGS_UP
+				[[ $G_WHIP_RETURNED_VALUE == *'Down' ]] && fp=$FP_SETTINGS_DOWN
+				[[ -f $fp ]] || echo -e '#!/bin/bash\n# Clear this file completely, including line breaks, to have it removed.' > $fp
+				nano $fp
+				(( $(stat -c %s $fp) )) && chmod 700 $fp || rm $fp
 
 			elif [[ $G_WHIP_RETURNED_VALUE == 'Auto start' ]]; then
 
@@ -236,11 +279,12 @@ _EOF_
 			elif [[ $G_WHIP_RETURNED_VALUE == 'Disconnect' ]]; then
 
 				G_RUN_CMD systemctl stop dietpi-nordvpn
+				Update_Wan_Ip
 				LAST_SELECTED_NAME='Refresh'
 
 			elif [[ $G_WHIP_RETURNED_VALUE == 'Server' ]]; then
 
-				# - Select protocol
+				# Select protocol
 				G_WHIP_MENU_ARRAY=(
 
 					'UDP' ': Recommended'
@@ -251,20 +295,22 @@ _EOF_
 				G_WHIP_DEFAULT_ITEM=$PROTOCOL
 				G_WHIP_MENU 'Please select the connection protocol type:' && PROTOCOL=${G_WHIP_RETURNED_VALUE,,}
 
-				# - Select server
+				# Select server
 				G_DIETPI-NOTIFY 2 'Populating NordVPN server list, please wait...'
-				cd /etc/openvpn/ovpn_$PROTOCOL
 				G_WHIP_MENU_ARRAY=()
-				for i in *
+				for i in /etc/openvpn/ovpn_$PROTOCOL/*.ovpn
 				do
 
-					G_WHIP_MENU_ARRAY+=("$i" '')
+					G_WHIP_MENU_ARRAY+=("${i##*/}" '')
 
 				done
-				cd /tmp/$G_PROGRAM_NAME
 
 				G_WHIP_DEFAULT_ITEM=$NORDVPN_SERVER
-				G_WHIP_MENU 'Please select a NordVPN server to use' && NORDVPN_SERVER=$G_WHIP_RETURNED_VALUE
+				G_WHIP_MENU 'Please select a NordVPN server to use:' && NORDVPN_SERVER=$G_WHIP_RETURNED_VALUE
+
+			elif [[ $G_WHIP_RETURNED_VALUE == 'Refresh' ]]; then
+
+				Update_Wan_Ip
 
 			fi
 
@@ -282,12 +328,46 @@ _EOF_
 	#-----------------------------------------------------------------------------------
 	Init
 	#-----------------------------------------------------------------------------------
-	while (( $TARGETMENUID >= 0 ))
-	do
+	if [[ $INPUT == 'status' ]]; then
 
-		(( $TARGETMENUID == 0 )) && Menu_Main
+		if (( ! $NORDVPN_INSTALLED )); then
 
-	done
+			echo -e "\e[33m$G_PROGRAM_NAME is not installed! Please run: \"dietpi-software install 171\"\e[0m"
+
+		elif (( ! $NORDVPN_SERVICE )); then
+
+			echo -e "\e[33m$G_PROGRAM_NAME is not configured! Please run: \"dietpi-nordvpn\"\e[0m"
+
+		elif ! Check_Connected; then
+
+			echo -e '\e[1;31mDisconnected\e[0m'
+
+		else
+
+			Get_Connection_Info
+			echo -e "\e[1;32mConnected\e[0m - Sent = $TX | Received = $RX"
+
+		fi
+
+	elif [[ $INPUT ]]; then
+
+		# Unknown input
+		echo -e "\e[90m[\e[0m\e[31mFAILURE\e[0m\e[90m]\e[0m \e[90m$G_PROGRAM_NAME | \e[0mInvalid input command ($INPUT). Aborting...\n$USAGE"
+		exit 1
+
+	else
+
+		Read_Settings
+		Update_Wan_Ip
+
+		while (( $TARGETMENUID >= 0 ))
+		do
+
+			Menu_Main
+
+		done
+
+	fi
 	#-----------------------------------------------------------------------------------
 	exit
 	#-----------------------------------------------------------------------------------
