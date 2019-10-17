@@ -811,7 +811,7 @@ _EOF_
 
 				local efi_packages='grub-efi-amd64'
 				# On Buster+ enable secure boot compatibility: https://packages.debian.org/buster/grub-efi-amd64-signed
-				(( $DISTRO_TARGET > 4 )) && efi_packages+='grub-efi-amd64-signed shim-signed'
+				(( $DISTRO_TARGET > 4 )) && efi_packages+=' grub-efi-amd64-signed shim-signed'
 				G_AGI $efi_packages
 
 			#	Grub BIOS
