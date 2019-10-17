@@ -1718,90 +1718,39 @@ Further info and usage: https://dietpi.com/phpbb/viewtopic.php?f=8&t=5828'
 				fi
 				#-----------------------------------------------------------------------
 				# PHP7.3 migration: https://github.com/MichaIng/DietPi/issues/2367
-				local reinstall_ids=''
-				local upgrade_php=0
-				if grep -q '^aSOFTWARE_INSTALL_STATE\[89\]=2' /DietPi/dietpi/.installed; then
+				local upgrade_php=''
+				# - Only upgrade versions lower than 7.2 and skip any check version Buster+ where this is impossible
+				if (( $G_DISTRO < 5 )) && grep -q '^aSOFTWARE_INSTALL_STATE\[89\]=2' /DietPi/dietpi/.installed && ! command -v php7.{2,3} &> /dev/null; then
 
-					# ownCloud (up to v10.2) does not yet support PHP7.3, so install PHP7.2 for now
-					# phpBB 3.2.X: https://github.com/phpbb/phpbb/blob/3.2.x/phpBB/install/app.php#L23
+					upgrade_php=89
+
+					# Software which does not support PHP7.3, install PHP7.2 instead
 					local PHP_NAME='php7.3'
-					[[ -f '/var/www/owncloud/occ' || -f '/var/www/phpBB3/config.php' ]] && PHP_NAME='php7.2'
+					# - phpBB 3.2.X: https://github.com/phpbb/phpbb/blob/3.2.x/phpBB/install/app.php#L23
+					[[ -f '/var/www/phpBB3/config.php' ]] && PHP_NAME='php7.2'
+					# - ownCloud up to v10.2
+					if [[ -f '/var/www/owncloud/version.php' ]]; then
 
-					if ! command -v $PHP_NAME &> /dev/null; then
-
-						reinstall_ids+=' 89'
-						G_WHIP_MSG "[ INFO ] PHP upgrade\n
-Your PHP instance will be upgraded to ${PHP_NAME^^}. This enhances security and performance of your web applications and is required to run some of the latest web application versions, e.g. Nextcloud 16, ownCloud 10.2 and others.\n
-We will update webserver configurations and backup the whole /etc/php(5) directory to /mnt/dietpi_userdata/php(5)_bak, so you can recover custom settings.\n
-NB: For any custom PHP-dependent web applications, which you have installed manually (outside of DietPi-Software), you might need to adjust the used socket to: /run/php/$PHP_NAME-fpm.sock
-NBB: Reinstall manually installed PHP modules via: G_AGI $PHP_NAME-<mod_name>"
-						upgrade_php=1
-
-						# We need to upgrade Jessie Nextcloud users since NC13 does not support PHP7.3 yet. Check for NC < 14 in general and do incremental upgrading in case.
-						local upgrade_nextcloud=0
-						while [[ -f '/var/www/nextcloud/version.php' ]]
-						do
-
-							# - Estimate Nextcloud version, skip if higher than 13 or invalid
-							local nextcloud_version=$(grep '$OC_VersionString' /var/www/nextcloud/version.php | sed "s/^.*= '//" | sed 's/\..*$//g')
-							disable_error=1 G_CHECK_VALIDINT "$nextcloud_version" 9 13 || break
-
-							# - Inform user
-							G_WHIP_MSG '[ INFO ] Nextcloud will be upgraded\n
-Your Nextcloud version does not yet support PHP7.3. On Jessie systems this is expected where Nextcloud 14+ was not supported.\n
-We will upgrade your Nextcloud version to Nextcloud 14 now to allow the PHP upgrade, which on the other hand enables you to further upgrade Nextcloud to its current major version.\n
-We will create a full backup of your Nextcloud install directory and database to: /mnt/dietpi_userdata/nextcloud_data/
-Your Nextcloud data are not touched.'
-							upgrade_nextcloud=1
-
-							# - Backup database and install dir: Use our cloud migration script
-							#	In case of failure, exit to not create any damage
-							local url="https://raw.githubusercontent.com/$G_GITOWNER/DietPi/$G_GITBRANCH/.meta/dietpi-cloud-migration"
-							G_CHECK_URL "$url"
-							curl -sSL "$url" | bash
-							G_ERROR_HANDLER_EXITCODE=$?
-							G_ERROR_HANDLER_COMMAND='Nextcloud backup'
-							G_ERROR_HANDLER_RETRY=0
-							G_ERROR_HANDLER
-
-							# - Incremental upgrade since skipping major versions is not supported. There should be no installs < NC13 but let's be failsafe.
-							until (( $nextcloud_version > 13 ))
-							do
-
-								((nextcloud_version++))
-								G_CHECK_URL https://download.nextcloud.com/server/releases/latest-$nextcloud_version.tar.bz2
-								G_RUN_CMD wget https://download.nextcloud.com/server/releases/latest-$nextcloud_version.tar.bz2
-								G_RUN_CMD rm -R /var/www/nextcloud
-								G_RUN_CMD tar xf latest-$nextcloud_version.tar.bz2 -C /var/www
-								G_RUN_CMD cp -a /mnt/dietpi_userdata/nextcloud_data/dietpi-nextcloud-installation-backup/config/config.php /var/www/nextcloud/config/config.php
-								# - Restore custom apps but prevent overwriting upgraded ones or adding obsolete files
-								for i in /mnt/dietpi_userdata/nextcloud_data/dietpi-nextcloud-installation-backup/apps/*
-								do
-
-									[[ -d /var/www/nextcloud/apps/${i##*/} ]] || G_RUN_CMD cp -a $i /var/www/nextcloud/apps/
-
-								done
-								# - Permissions
-								G_RUN_CMD chown -R www-data:www-data /var/www/nextcloud
-								G_RUN_CMD find /var/www/nextcloud/ -type d -exec chmod 750 {} \;
-								G_RUN_CMD find /var/www/nextcloud/ -type f -exec chmod 640 {} \;
-								# - Upgrade until NC13, then upgrade after PHP7.3 has been installed, since NC13 does not support PHP5.6 anymore
-								(( $nextcloud_version < 14 )) && { ncc upgrade || exit 1; }
-
-							done
-							break
-
-						done
-
-						[[ -d '/etc/php' ]] && G_RUN_CMD cp -a /etc/php /mnt/dietpi_userdata/php_bak
-						[[ -d '/etc/php5' ]] && G_RUN_CMD cp -a /etc/php5 /mnt/dietpi_userdata/php5_bak
-
-						# - Lighttpd
-						[[ -f '/etc/lighttpd/conf-available/15-fastcgi-php.conf' ]] && sed -i "s@\"socket\".*\$@\"socket\" => \"/run/php/$PHP_NAME-fpm.sock\",@" /etc/lighttpd/conf-available/15-fastcgi-php.conf
-						# - Nginx
-						[[ -f '/etc/nginx/nginx.conf' ]] && sed -i "s#/run/php.*-fpm.sock#/run/php/$PHP_NAME-fpm.sock#g" /etc/nginx/nginx.conf
+						local oc_version_major=$(sed -n '/$OC_VersionString/{s/^[^0-9]*//;s/\..*$//;p;q}' /var/www/owncloud/version.php)
+						local oc_version_minor=$(sed -n '/$OC_VersionString/{s/^[^.]*\.//;s/\..*$//;p;q}' /var/www/owncloud/version.php)
+						(( $oc_version_major < 10 || ( $oc_version_major == 10 && oc_version_minor < 3 ) )) && PHP_NAME='php7.2'
 
 					fi
+
+					G_WHIP_MSG "[ INFO ] PHP upgrade\n
+Your PHP instance will be upgraded to ${PHP_NAME^^}. This enhances security and performance of your web applications and is required to run some of the latest web application versions, e.g. Nextcloud 16, ownCloud 10.2 and others.\n
+We will update webserver configurations and backup the whole /etc/php directory to /mnt/dietpi_userdata/php_bak, so you can recover custom settings.\n
+NB: For any custom PHP-dependent web applications, which you have installed manually (outside of DietPi-Software), you might need to adjust the used socket to: /run/php/$PHP_NAME-fpm.sock
+NBB: Reinstall manually installed PHP modules via: G_AGI $PHP_NAME-<mod_name>"
+
+					# Backup config
+					[[ -d '/etc/php' ]] && G_RUN_CMD cp -a /etc/php /mnt/dietpi_userdata/php_bak
+
+					# Update PHP socket
+					# - Lighttpd
+					[[ -f '/etc/lighttpd/conf-available/15-fastcgi-php.conf' ]] && sed -i "s@\"socket\".*\$@\"socket\" => \"/run/php/$PHP_NAME-fpm.sock\",@" /etc/lighttpd/conf-available/15-fastcgi-php.conf
+					# - Nginx
+					[[ -f '/etc/nginx/nginx.conf' ]] && sed -i "s#/run/php.*-fpm.sock#/run/php/$PHP_NAME-fpm.sock#g" /etc/nginx/nginx.conf
 
 				fi
 				#-----------------------------------------------------------------------
@@ -1833,13 +1782,12 @@ Your Nextcloud data are not touched.'
 					rm -R /opt/jackett/.config
 
 				fi
-				/DietPi/dietpi/dietpi-software reinstall 34 35 42 139 147 $reinstall_ids
+				/DietPi/dietpi/dietpi-software reinstall 34 35 42 139 147 $upgrade_php
 				#-----------------------------------------------------------------------
 				# Remove old PHP version
-				if (( $upgrade_php )); then
+				if [[ $upgrade_php ]]; then
 
-					G_AGP php{5,7.0,7.1}-* libapache2-mod-php{5,7.0,7.1}
-					[[ $PHP_NAME = 'php7.3' ]] && G_AGP php7.2-* libapache2-mod-php7.2
+					G_AGP php{7.0,7.1}-* libapache2-mod-php{7.0,7.1}
 					# New mod-php must be enabled manually since this is skipped by APT as long as prior version is active
 					command -v a2enmod &> /dev/null && a2enmod $PHP_NAME
 
@@ -1861,16 +1809,6 @@ opcache.max_accelerated_files=10000\nopcache.memory_consumption=128\nopcache.sav
 					fi
 					grep -q '^aSOFTWARE_INSTALL_STATE\[48\]=2' /DietPi/dietpi/.installed && G_AGI $PHP_NAME-intl
 
-					# Upgrade Nextcloud
-					if (( $upgrade_nextcloud )); then
-
-						G_RUN_CMD systemctl start mariadb redis-server
-						ncc upgrade
-						ncc db:add-missing-indices
-						ncc db:convert-filecache-bigint
-
-					fi
-
 				fi
 
 			fi
@@ -1880,8 +1818,8 @@ opcache.max_accelerated_files=10000\nopcache.memory_consumption=128\nopcache.sav
 
 			#-------------------------------------------------------------------------------
 			# Add Plex and Emby users to dietpi group to grant media and network mount access
-			getent passwd emby &> /dev/null && usermod -a -G dietpi emby
-			getent passwd plex &> /dev/null && usermod -a -G dietpi plex
+			getent passwd emby &> /dev/null && usermod -aG dietpi emby
+			getent passwd plex &> /dev/null && usermod -aG dietpi plex
 			#-------------------------------------------------------------------------------
 			# Patch Lighttpd config file on ARMv6 (Buster version installed): https://github.com/MichaIng/DietPi/issues/2808
 			if [[ -f '/etc/lighttpd/lighttpd.conf' && ! -f '/usr/share/lighttpd/create-mime.assign.pl' && -f '/usr/share/lighttpd/create-mime.conf.pl' ]]; then
@@ -2005,7 +1943,7 @@ _EOF_
 			G_AGI haveged
 			#-------------------------------------------------------------------------------
 			# RPi3: Remove doubled config.txt temp_limit value due to: https://github.com/MichaIng/DietPi/commit/cafcbc599ef23c337e75003fb8eacc446877eaba#diff-68acf994541fd7b6ea4f6b02d04ee328L60
-			if (( $G_HW_MODEL == 3 )) && (( $(grep -c '^[[:blank:]#]*temp_limit=' /DietPi/config.txt) > 1 )); then
+			if (( $G_HW_MODEL == 3 && $(grep -c '^[[:blank:]#]*temp_limit=' /DietPi/config.txt) > 1 )); then
 
 				local current=$(grep '^[[:blank:]]*temp_limit=' /DietPi/config.txt | sed 's/^[^=]*=//' | tail -1) # Get current effective (last) value
 				disable_error=1 G_CHECK_VALIDINT "$current" || current=75 # If none, use 75'c as DietPi default on RPi3
@@ -2323,6 +2261,13 @@ Would you like to switch back to the Nginx authentication method now?' && certbo
 				/DietPi/dietpi/dietpi-software reinstall 115 132
 
 			fi
+			#-------------------------------------------------------------------------------
+
+		elif (( $G_DIETPI_VERSION_SUB == 26 )); then
+
+			#-------------------------------------------------------------------------------
+			# ownCloud: Remove obsolete PHP7.3 block: https://github.com/MichaIng/DietPi/pull/3169
+			[[ -f '/etc/apt/preferences.d/dietpi-owncloud' ]] && rm /etc/apt/preferences.d/dietpi-owncloud
 			#-------------------------------------------------------------------------------
 
 		fi
