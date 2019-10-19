@@ -1045,6 +1045,8 @@ _EOF_
 			'armbian*'
 			# - Meveric
 			'cpu_governor'
+			# - RPi
+			'sshswitch'
 
 		)
 
@@ -1089,8 +1091,9 @@ _EOF_
 		# - Meveric specific
 		[[ -f '/usr/local/sbin/setup-odroid' ]] && rm /usr/local/sbin/setup-odroid
 
-		# - RPi specific https://github.com/MichaIng/DietPi/issues/1631#issuecomment-373965406
+		# - RPi specific: https://github.com/MichaIng/DietPi/issues/1631#issuecomment-373965406
 		[[ -f '/etc/profile.d/wifi-country.sh' ]] && rm /etc/profile.d/wifi-country.sh
+		[[ -f '/etc/sudoers.d/010_pi-nopasswd' ]] && rm /etc/sudoers.d/010_pi-nopasswd
 
 		# - make_nas_processes_faster cron job on Rock64 + NanoPi + Pine64(?) images
 		[[ -f '/etc/cron.d/make_nas_processes_faster' ]] && rm /etc/cron.d/make_nas_processes_faster
