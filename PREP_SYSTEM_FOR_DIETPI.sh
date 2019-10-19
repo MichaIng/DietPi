@@ -54,7 +54,7 @@
 	# Check/install minimal APT Pre-Reqs
 	a_MIN_APT_PREREQS=(
 
-		'apt-transport-https' # Allows HTTPS sources for APT
+		'apt-transport-https' # Allows HTTPS sources for APT (not required since Buster)
 		'wget' # Download DietPi-Globals...
 		'ca-certificates' # ...via HTTPS
 		'unzip' # Unzip DietPi code
@@ -718,7 +718,6 @@ _EOF_
 		# DietPi list of minimal required packages, which must be installed:
 		aPACKAGES_REQUIRED_INSTALL=(
 
-			'apt-transport-https'	# Allows HTTPS sources for ATP
 			'apt-utils'		# Allows "debconf" to pre-configure APT packages for non-interactive install
 			'bash-completion'	# Auto completes a wide list of bash commands and options via <tab>
 			'bc'			# Bash calculator, e.g. for floating point calculation
@@ -756,7 +755,9 @@ _EOF_
 
 		# G_DISTRO specific
 		# - Dropbear: DietPi default SSH-Client
-		#   On Buster-, "dropbear" fulls in "dropbear-initramfs", which we don't need
+		#   On Buster-, "dropbear" pulls in "dropbear-initramfs", which we don't need
+		# - apt-transport-https: Allows HTTPS sources for ATP
+		#   On Buster+, it is included in "apt" package
 		if (( $G_DISTRO > 5 )); then
 
 			aPACKAGES_REQUIRED_INSTALL+=('dropbear')
@@ -764,6 +765,7 @@ _EOF_
 		else
 
 			aPACKAGES_REQUIRED_INSTALL+=('dropbear-run')
+			(( $G_DISTRO < 5 )) && aPACKAGES_REQUIRED_INSTALL+=('apt-transport-https')
 
 		fi
 
