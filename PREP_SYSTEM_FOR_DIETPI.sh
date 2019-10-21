@@ -54,7 +54,7 @@
 	# Check/install minimal APT Pre-Reqs
 	a_MIN_APT_PREREQS=(
 
-		'apt-transport-https' # Allows HTTPS sources for APT
+		'apt-transport-https' # Allows HTTPS sources for APT (not required since Buster)
 		'wget' # Download DietPi-Globals...
 		'ca-certificates' # ...via HTTPS
 		'unzip' # Unzip DietPi code
@@ -718,7 +718,6 @@ _EOF_
 		# DietPi list of minimal required packages, which must be installed:
 		aPACKAGES_REQUIRED_INSTALL=(
 
-			'apt-transport-https'	# Allows HTTPS sources for ATP
 			'apt-utils'		# Allows "debconf" to pre-configure APT packages for non-interactive install
 			'bash-completion'	# Auto completes a wide list of bash commands and options via <tab>
 			'bc'			# Bash calculator, e.g. for floating point calculation
@@ -756,7 +755,9 @@ _EOF_
 
 		# G_DISTRO specific
 		# - Dropbear: DietPi default SSH-Client
-		#   On Buster-, "dropbear" fulls in "dropbear-initramfs", which we don't need
+		#   On Buster-, "dropbear" pulls in "dropbear-initramfs", which we don't need
+		# - apt-transport-https: Allows HTTPS sources for ATP
+		#   On Buster+, it is included in "apt" package
 		if (( $G_DISTRO > 5 )); then
 
 			aPACKAGES_REQUIRED_INSTALL+=('dropbear')
@@ -764,6 +765,7 @@ _EOF_
 		else
 
 			aPACKAGES_REQUIRED_INSTALL+=('dropbear-run')
+			(( $G_DISTRO < 5 )) && aPACKAGES_REQUIRED_INSTALL+=('apt-transport-https')
 
 		fi
 
@@ -1043,6 +1045,8 @@ _EOF_
 			'armbian*'
 			# - Meveric
 			'cpu_governor'
+			# - RPi
+			'sshswitch'
 
 		)
 
@@ -1087,8 +1091,9 @@ _EOF_
 		# - Meveric specific
 		[[ -f '/usr/local/sbin/setup-odroid' ]] && rm /usr/local/sbin/setup-odroid
 
-		# - RPi specific https://github.com/MichaIng/DietPi/issues/1631#issuecomment-373965406
+		# - RPi specific: https://github.com/MichaIng/DietPi/issues/1631#issuecomment-373965406
 		[[ -f '/etc/profile.d/wifi-country.sh' ]] && rm /etc/profile.d/wifi-country.sh
+		[[ -f '/etc/sudoers.d/010_pi-nopasswd' ]] && rm /etc/sudoers.d/010_pi-nopasswd
 
 		# - make_nas_processes_faster cron job on Rock64 + NanoPi + Pine64(?) images
 		[[ -f '/etc/cron.d/make_nas_processes_faster' ]] && rm /etc/cron.d/make_nas_processes_faster

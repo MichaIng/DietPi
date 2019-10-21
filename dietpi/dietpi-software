@@ -4653,9 +4653,6 @@ Package: wireguard wireguard-dkms wireguard-tools\nPin: release n=bullseye\nPin-
 			# If existing install, reconfigure to rebuild WireGuard kernel module against current kernel + headers
 			(( $existing_install )) && G_RUN_CMD dpkg-reconfigure wireguard-dkms
 
-			# On RPi, the kernel module rebuild is not triggered by kernel upgrades, thus add this task manually
-			(( $G_HW_MODEL > 9 )) || echo -e '#!/bin/dash\ndpkg-reconfigure wireguard-dkms' > /etc/kernel/postinst.d/dietpi-wireguard
-
 			unset kernel_packages existing_install
 
 		fi
@@ -6030,12 +6027,8 @@ Mycroft AI requires at least 2 GiB memory on first start. We will now increase y
 
 			Banner_Installing
 
-			# Assure libegl1-mesa transitional dummy package is skipped (on Stretch via backports) to avoid conflicts with 3rd party repos: https://github.com/MichaIng/DietPi/issues/1794#issuecomment-539138684
-			local libegl1='libegl1'
-			(( $G_DISTRO == 4 )) && libegl1+='/stretch-backports'
-
 			# Xserver + generic Mesa OpenGL libraries and utilities
-			G_AGI $libegl1 xserver-xorg xinit xcompmgr xterm dbus-x11 xfonts-base x11-xserver-utils x11-utils libgl1-mesa-dri mesa-utils mesa-utils-extra
+			G_AGI xserver-xorg xinit xcompmgr xterm dbus-x11 xfonts-base x11-xserver-utils x11-utils libgl1-mesa-dri mesa-utils mesa-utils-extra
 
 			# Improve performance on all desktops and devices (eg: removes window lag in desktops) by limiting compositions
 			dps_index=$software_id Download_Install 'xcompmgr.desktop' /etc/xdg/autostart/xcompmgr.desktop
@@ -9489,7 +9482,7 @@ _EOF_
 			# Server choice
 			if [[ $G_WHIP_RETURNED_VALUE == 'Server' ]]; then
 
-				# - Public IP/domain and desired WireGuard server port
+				# Public IP/domain and desired WireGuard server port
 				local invalid_text=''
 				local domain=$(hostname -f)
 				while :
@@ -9530,19 +9523,19 @@ NB: This port needs to be forwarded by your router and/or opened in your firewal
 
 				done
 
-				# - Create everything inside WireGuard config dir
+				# Create everything inside WireGuard config dir
 				cd /etc/wireguard
 
-				# - For securiy reasons set umask to 077
+				# For security reasons set umask to 077
 				umask 077
 
-				# - Create server and client keys
+				# Create server and client keys
 				[[ -f 'server_private.key' ]] || wg genkey > server_private.key
 				[[ -f 'server_public.key' ]] || wg pubkey < server_private.key > server_public.key
 				[[ -f 'client_private.key' ]] || wg genkey > client_private.key
 				[[ -f 'client_public.key' ]] || wg pubkey < client_private.key > client_public.key
 
-				# - Server config
+				# Server config
 				[[ -f 'wg0.conf' ]] || cat << _EOF_ > wg0.conf
 [Interface]
 Address = 10.9.0.1/24
@@ -9568,16 +9561,16 @@ AllowedIPs = 10.9.0.2/32
 #AllowedIPs = 10.9.0.3/32
 _EOF_
 
-				# - Server local network IP
+				# Server local network IP
 				local server_ip=$(sed -n 4p /DietPi/dietpi/.network)
 
-				# - Server DNS nameserver
+				# Server DNS nameserver
 				local server_dns=$(mawk '/nameserver/ {print $2;exit}' /etc/resolv.conf)
-				#	Replace "127.0.0.1"/"localhost" loopback entries by server wg0 IP: https://github.com/MichaIng/DietPi/issues/2482
+				# - Replace "127.0.0.1"/"localhost" loopback entries by server wg0 IP: https://github.com/MichaIng/DietPi/issues/2482
 				server_dns=${server_dns//127.0.0.1/10.9.0.1}
 				server_dns=${server_dns//localhost/10.9.0.1}
 
-				# - Client config
+				# Client config
 				[[ -f 'wg0-client.conf' ]] || cat << _EOF_ > wg0-client.conf
 [Interface]
 Address = 10.9.0.2/24
@@ -9605,17 +9598,20 @@ Endpoint = $domain:$port
 # Uncomment the following, if you're behind a NAT and want the connection to be kept alive.
 #PersistentKeepalive = 25
 _EOF_
-
-				# - Start WireGuard interface via systemd unit
-				(( $module_active )) && systemctl start wg-quick@wg0
-				#	persistent
-				systemctl enable wg-quick@wg0
-
-				# - Set umask back to default 022
+				# Set umask back to default 022
 				umask 022
 
-				# - Navigate back to DietPi-Software working dir
+				# Navigate back to DietPi-Software working dir
 				cd /tmp/$G_PROGRAM_NAME
+
+				# Use wg-quick@.service to start VPN on boot
+				# - Assure DietPi-Boot has finished first: https://github.com/MichaIng/DietPi/issues/3175#issuecomment-544607657
+				mkdir -p /etc/systemd/system/wg-quick@wg0.service.d
+				echo -e '[Unit]\nAfter=dietpi-boot.service' > /etc/systemd/system/wg-quick@wg0.service.d/dietpi.conf
+				systemctl daemon-reload
+				systemctl enable wg-quick@wg0
+				# - Start now if module is active already
+				(( $module_active )) && systemctl start wg-quick@wg0
 
 			# Client choice
 			elif [[ $G_WHIP_RETURNED_VALUE == 'Client' ]]; then
@@ -13406,9 +13402,9 @@ _EOF_
 			Banner_Uninstalling
 			G_AGP wireguard*
 			[[ -d '/etc/wireguard' ]] && rm -R /etc/wireguard
+			[[ -d '/etc/systemd/system/wg-quick@wg0.service.d' ]] && rm -R /etc/systemd/system/wg-quick@wg0.service.d
 			[[ -f '/etc/apt/sources.list.d/dietpi-wireguard.list' ]] && rm /etc/apt/sources.list.d/dietpi-wireguard.list
 			[[ -f '/etc/apt/preferences.d/dietpi-wireguard' ]] && rm /etc/apt/preferences.d/dietpi-wireguard
-			[[ -f '/etc/kernel/postinst.d/dietpi-wireguard' ]] && rm /etc/kernel/postinst.d/dietpi-wireguard
 
 		fi
 
@@ -13416,8 +13412,15 @@ _EOF_
 		if (( ${aSOFTWARE_INSTALL_STATE[$software_id]} == -1 )); then
 
 			Banner_Uninstalling
-			rm -R /etc/openvpn/ovpn_tcp/*nordvpn* /etc/openvpn/ovpn_udp/*nordvpn*
-			rm -R /var/lib/dietpi/dietpi-software/installed/dietpi-nordvpn /lib/systemd/system/dietpi-nordvpn.service &> /dev/null
+			if [[ -f '/etc/systemd/system/dietpi-nordvpn.service' ]]; then
+
+				systemctl disable --now dietpi-nordvpn
+				rm /etc/systemd/system/dietpi-nordvpn.service
+
+			fi
+			rm -Rf /etc/openvpn/ovpn_{tcp,udp}/*nordvpn*
+			rmdir --ignore-fail-on-non-empty /etc/openvpn/ovpn_{tcp,udp}
+			[[ -d '/var/lib/dietpi/dietpi-software/installed/dietpi-nordvpn' ]] && rm -R /var/lib/dietpi/dietpi-software/installed/dietpi-nordvpn
 
 		fi
 
