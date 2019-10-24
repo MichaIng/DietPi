@@ -1094,6 +1094,13 @@ _EOF_
 		# - RPi specific: https://github.com/MichaIng/DietPi/issues/1631#issuecomment-373965406
 		[[ -f '/etc/profile.d/wifi-country.sh' ]] && rm /etc/profile.d/wifi-country.sh
 		[[ -f '/etc/sudoers.d/010_pi-nopasswd' ]] && rm /etc/sudoers.d/010_pi-nopasswd
+		[[ -d '/etc/systemd/system/dhcpcd.service.d' ]] && rm -R /etc/systemd/system/dhcpcd.service.d # https://github.com/RPi-Distro/pi-gen/blob/master/stage3/01-tweaks/00-run.sh
+		#	Do not ship rc.local anymore. On DietPi /var/lib/dietpi/postboot.d should be used.
+		#	WIP: Mask rc-local.service and create symlink postboot.d/rc.local => /etc/rc.local for backwards compatibility?
+		[[ -f '/etc/rc.local' ]] && rm /etc/rc.local # https://github.com/RPi-Distro/pi-gen/blob/master/stage2/01-sys-tweaks/files/rc.local
+		#	Below required if DietPi-PREP is executed from chroot/container, so RPi firstrun scripts are not executed
+		[[ -f '/etc/init.d/resize2fs_once' ]] && rm /etc/init.d/resize2fs_once # https://github.com/RPi-Distro/pi-gen/blob/master/stage2/01-sys-tweaks/files/resize2fs_once
+		[[ -f '/boot/cmdline.txt' ]] && sed -i 's| init=/usr/lib/raspi-config/init_resize\.sh||' /boot/cmdline.txt # https://github.com/RPi-Distro/pi-gen/blob/master/stage2/01-sys-tweaks/00-patches/07-resize-init.diff
 
 		# - make_nas_processes_faster cron job on Rock64 + NanoPi + Pine64(?) images
 		[[ -f '/etc/cron.d/make_nas_processes_faster' ]] && rm /etc/cron.d/make_nas_processes_faster
