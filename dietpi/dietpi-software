@@ -5168,36 +5168,36 @@ Package: wireguard wireguard-dkms wireguard-tools\nPin: release n=bullseye\nPin-
 
 			Banner_Installing
 
-			if [[ -d '/etc/syncthing' ]]; then
+			if [[ -d '/opt/syncthing' ]]; then
 
-				G_DIETPI-NOTIFY 2 "${aSOFTWARE_NAME[$software_id]} install dir \"/etc/syncthing\" already exists. Download and install steps will be skipped.
- - If you want to update ${aSOFTWARE_NAME[$software_id]}, please use the internal updater from WebUI.
- - if you need to reinstall (e.g. broken instance), please manually backup your config files+data, remove the install dir \"/etc/syncthing\" and rerun \"dietpi-software (re)install $software_id\"."
+				G_DIETPI-NOTIFY 2 "${aSOFTWARE_NAME[$software_id]} install dir \"/opt/syncthing\" already exists. Download and install steps will be skipped.
+ - If you want to update ${aSOFTWARE_NAME[$software_id]}, please use the internal updater \"sudo -u dietpi /opt/syncthing/syncthing -upgrade\" or from web UI.
+ - if you need to reinstall (e.g. broken instance), please manually backup your config files+data, remove the install dir \"/opt/syncthing\" and rerun \"dietpi-software (re)install $software_id\"."
 
 			else
 
+				# Get latest version from GitHub
 				INSTALL_URL_ADDRESS='https://api.github.com/repos/syncthing/syncthing/releases/latest'
 				G_CHECK_URL "$INSTALL_URL_ADDRESS"
 
-				# - armv6+
-				if (( $G_HW_ARCH == 1 || $G_HW_ARCH == 2 )); then
+				# ARMv6/7
+				local arch='arm'
 
-					local arch='arm'
+				# ARMv8
+				if (( $G_HW_ARCH == 3 )); then
 
-				# - arm64
-				elif (( $G_HW_ARCH == 3 )); then
+					arch+='64'
 
-					local arch='arm64'
-
-				# - x86_64
+				# x86_64
 				elif (( $G_HW_ARCH == 10 )); then
 
-					local arch='amd64'
+					arch='amd64'
 
 				fi
 
-				no_check_url=1 Download_Install "$(curl -s "$INSTALL_URL_ADDRESS" | grep -m1 "browser_download_url.*linux-$arch-v[0-9.]*tar\.gz" | cut -d \" -f 4)" /etc
-				mv /etc/syncthing-* /etc/syncthing
+				local fallback_url="https://github.com/syncthing/syncthing/releases/download/v1.3.0/syncthing-linux-$arch-v1.3.0.tar.gz"
+				no_check_url=1 Download_Install "$(curl -s "$INSTALL_URL_ADDRESS" | grep -m1 "browser_download_url.*linux-$arch-v[0-9.]*tar\.gz" | cut -d \" -f 4)"
+				mv syncthing-* /opt/syncthing
 
 			fi
 
@@ -10732,35 +10732,29 @@ _EOF_
 
 			Banner_Configuration
 
-			# Generate dirs
-			mkdir -p $G_FP_DIETPI_USERDATA/syncthing
-			mkdir -p $G_FP_DIETPI_USERDATA/syncthing_data
+			# Pre-create and edit default config only on fresh installs
+			if [[ ! -f $G_FP_DIETPI_USERDATA/syncthing/config.xml ]]; then
 
-			# - Logs/Binary
+				# Run Syncthing to pre-create config dir and exit
+				sudo -u dietpi /opt/syncthing/syncthing -generate=$G_FP_DIETPI_USERDATA/syncthing
+
+				# Allow remote access: https://docs.syncthing.net/users/faq.html#how-do-i-access-the-web-gui-from-another-computer
+				sed -i '\|:8384</address>|c\        <address>0.0.0.0:8384</address>' $G_FP_DIETPI_USERDATA/syncthing/config.xml
+
+				# Set default folder
+				mkdir -p $G_FP_DIETPI_USERDATA/syncthing_data
+				chown -R dietpi:dietpi $G_FP_DIETPI_USERDATA/syncthing_data
+				sed -i '\|<folder id="default"|s|label="[^"]*"|label="Syncthing Data"|' $G_FP_DIETPI_USERDATA/syncthing/config.xml
+				sed -i '\|<folder id="default"|s|path="[^"]*"|path="/mnt/dietpi_userdata/syncthing_data"|' $G_FP_DIETPI_USERDATA/syncthing/config.xml
+
+			fi
+
+			# Log
 			mkdir -p /var/log/syncthing
-   			>> /var/log/syncthing/syncthing.log
-   			chown -R dietpi:dietpi /var/log/syncthing
-   			chown -R dietpi:dietpi /etc/syncthing
+			>> /var/log/syncthing/syncthing.log
+			chown -R dietpi:dietpi /var/log/syncthing
 
-			# Run Syncthing to create cert/config and exit
-			/etc/syncthing/syncthing -generate=$G_FP_DIETPI_USERDATA/syncthing
-
-			# Disable automatic upgrades
-			sed -i '/<\/autoUpgradeIntervalH>/c\        <autoUpgradeIntervalH>0<\/autoUpgradeIntervalH>' $G_FP_DIETPI_USERDATA/syncthing/config.xml
-
-			# Allow external access (LAN).
-			sed -i '/:8384<\/address>/c\        <address>0.0.0.0:8384<\/address>' $G_FP_DIETPI_USERDATA/syncthing/config.xml
-
-			# Set default folder
-			sed -i '/label=\"Default Folder/c\    <folder id=\"0000-0000\" label=\"Syncthing Data\" path=\"'"$G_FP_DIETPI_USERDATA/syncthing_data"'\" type=\"readwrite\" rescanIntervalS=\"60\" ignorePerms=\"false\" autoNormalize=\"true\">' $G_FP_DIETPI_USERDATA/syncthing/config.xml
-
-			# Disable browser starting
-			sed -i '/<\/startBrowser>/c\        <startBrowser>false<\/startBrowser>' $G_FP_DIETPI_USERDATA/syncthing/config.xml
-
-			# Enable filesystem watcher (previously inotify)
-			sed -i 's/fsWatcherEnabled=\"false\"/fsWatcherEnabled=\"true\"/g' $G_FP_DIETPI_USERDATA/syncthing/config.xml
-
-			# Services
+			# Service: https://github.com/syncthing/syncthing/blob/master/etc/linux-systemd/system/syncthing%40.service
 			cat << _EOF_ > /etc/systemd/system/syncthing.service
 [Unit]
 Description=Syncthing (DietPi)
@@ -10768,13 +10762,22 @@ After=network.target
 
 [Service]
 User=dietpi
-ExecStart=/etc/syncthing/syncthing -logfile=/var/log/syncthing/syncthing.log -logflags=3 -home=$G_FP_DIETPI_USERDATA/syncthing
+ExecStart=/opt/syncthing/syncthing -no-browser -no-restart -logfile=/var/log/syncthing/syncthing.log -logflags=3 -home=$G_FP_DIETPI_USERDATA/syncthing
+Restart=on-failure
+SuccessExitStatus=3 4
+RestartForceExitStatus=3 4
+
+# Hardening
+ProtectSystem=full
+PrivateTmp=true
+SystemCallArchitectures=native
+MemoryDenyWriteExecute=true
+NoNewPrivileges=true
 
 [Install]
 WantedBy=multi-user.target
 _EOF_
-
-			# - Increase open file limit:
+			# Increase fs watcher limit: https://docs.syncthing.net/users/faq.html#how-do-i-increase-the-inotify-limit-to-get-my-filesystem-watcher-to-work
 			echo 'fs.inotify.max_user_watches=204800' > /etc/sysctl.d/dietpi-syncthing.conf
 
 		fi
@@ -13734,15 +13737,14 @@ _EOF_
 
 			if [[ -f '/etc/systemd/system/syncthing.service' ]]; then
 
-				systemctl disable syncthing
-				rm /etc/systemd/system/syncthing.service
+				systemctl disable --now syncthing
+				rm -R /etc/systemd/system/syncthing.service*
 
 			fi
+			[[ -d '/opt/syncthing' ]] && rm -R /opt/syncthing
+			[[ -d '/var/log/syncthing' ]] && rm -R /var/log/syncthing
 			[[ -d $G_FP_DIETPI_USERDATA/syncthing ]] && rm -R $G_FP_DIETPI_USERDATA/syncthing
-			[[ -f '/etc/sysctl.d/dietpi-syncthing.conf' ]] && rm /etc/sysctl.d/dietpi-syncthing.conf # DietPi post-v6.18
-
-			[[ -f '/usr/bin/syncthing' ]] && rm /usr/bin/syncthing # DietPi pre-v158
-			[[ -d '/etc/syncthing' ]] && rm -R /etc/syncthing
+			[[ -f '/etc/sysctl.d/dietpi-syncthing.conf' ]] && rm /etc/sysctl.d/dietpi-syncthing.conf
 
 		fi
 
@@ -13752,8 +13754,8 @@ _EOF_
 			Banner_Uninstalling
 			if [[ -f '/etc/systemd/system/medusa.service' ]]; then
 
-				systemctl disable medusa
-				rm /etc/systemd/system/medusa.service
+				systemctl disable --now medusa
+				rm -R /etc/systemd/system/medusa.service*
 
 			fi
 			[[ -d $G_FP_DIETPI_USERDATA/medusa ]] && rm -R $G_FP_DIETPI_USERDATA/medusa
@@ -13771,8 +13773,8 @@ _EOF_
 			[[ -d $G_FP_DIETPI_USERDATA/rtorrent ]] && rm -R $G_FP_DIETPI_USERDATA/rtorrent
 			if [[ -f '/etc/systemd/system/rtorrent.service' ]]; then
 
-				systemctl disable rtorrent
-				rm /etc/systemd/system/rtorrent.service
+				systemctl disable --now rtorrent
+				rm -R /etc/systemd/system/rtorrent.service*
 
 			fi
 
@@ -13797,7 +13799,7 @@ _EOF_
 			if [[ -f '/etc/systemd/system/amiberry.service' ]]; then
 
 				systemctl disable --now amiberry
-				rm /etc/systemd/system/amiberry.service
+				rm -R /etc/systemd/system/amiberry.service*
 
 			fi
 			# Files
