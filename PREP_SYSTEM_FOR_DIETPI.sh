@@ -1559,22 +1559,6 @@ fdt set /ethernet@$identifier snps,txpbl <0x21>/;q}" /boot/boot.cmd
 
 			fi
 
-		# - Odroids FFmpeg fix for Meveric images. Prefer debian.org over Meveric for backports: https://github.com/MichaIng/DietPi/issues/1273 + https://github.com/MichaIng/DietPi/issues/1556#issuecomment-369463910
-		elif [[ $G_HW_MODEL == 1[0-5] ]] && ls /etc/apt/sources.list.d/meveric*.list &> /dev/null; then
-
-			rm -f /etc/apt/preferences.d/meveric*
-			cat << _EOF_ > /etc/apt/preferences.d/dietpi-meveric-backports
-Package: *
-Pin: release a=stretch-backports
-Pin: origin "fuzon.co.uk"
-Pin-Priority: 99
-
-Package: *
-Pin: release a=stretch-backports
-Pin: origin "oph.mdrjr.net"
-Pin-Priority: 99
-_EOF_
-
 		fi
 
 		# - ARMbian increase console verbose
