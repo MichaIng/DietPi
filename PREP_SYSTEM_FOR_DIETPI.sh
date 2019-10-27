@@ -54,7 +54,7 @@
 	# Check/install minimal APT Pre-Reqs
 	a_MIN_APT_PREREQS=(
 
-		'apt-transport-https' # Allows HTTPS sources for APT
+		'apt-transport-https' # Allows HTTPS sources for APT (not required since Buster)
 		'wget' # Download DietPi-Globals...
 		'ca-certificates' # ...via HTTPS
 		'unzip' # Unzip DietPi code
@@ -718,7 +718,6 @@ _EOF_
 		# DietPi list of minimal required packages, which must be installed:
 		aPACKAGES_REQUIRED_INSTALL=(
 
-			'apt-transport-https'	# Allows HTTPS sources for ATP
 			'apt-utils'		# Allows "debconf" to pre-configure APT packages for non-interactive install
 			'bash-completion'	# Auto completes a wide list of bash commands and options via <tab>
 			'bc'			# Bash calculator, e.g. for floating point calculation
@@ -739,7 +738,7 @@ _EOF_
 			'locales'		# Support locales, necessary for DietPi scripts, as we use en_GB.UTF8 as default language
 			'nano'			# Simple text editor
 			'p7zip'			# .7z wrapper
-			'parted'		# Drive partitioning, required by DietPi-Drive_Manager
+			'parted'		# partprobe + drive partitioning, required by DietPi-Drive_Manager
 			'procps'		# "kill", "ps", "pgrep", "sysctl", used by several DietPi scripts
 			'psmisc'		# "killall", used by several DietPi scripts
 			'resolvconf'		# Network nameserver handler + depandant for "ifupdown" (network interface handler) => "iproute2" ("ip" command)
@@ -756,7 +755,9 @@ _EOF_
 
 		# G_DISTRO specific
 		# - Dropbear: DietPi default SSH-Client
-		#   On Buster-, "dropbear" fulls in "dropbear-initramfs", which we don't need
+		#   On Buster-, "dropbear" pulls in "dropbear-initramfs", which we don't need
+		# - apt-transport-https: Allows HTTPS sources for ATP
+		#   On Buster+, it is included in "apt" package
 		if (( $G_DISTRO > 5 )); then
 
 			aPACKAGES_REQUIRED_INSTALL+=('dropbear')
@@ -764,19 +765,18 @@ _EOF_
 		else
 
 			aPACKAGES_REQUIRED_INSTALL+=('dropbear-run')
+			(( $G_DISTRO < 5 )) && aPACKAGES_REQUIRED_INSTALL+=('apt-transport-https')
 
 		fi
 
 		# G_HW_MODEL specific required repo key packages: https://github.com/MichaIng/DietPi/issues/1285#issuecomment-358301273
 		if (( $G_HW_MODEL > 9 )); then
 
-			G_AGI debian-archive-keyring
-			aPACKAGES_REQUIRED_INSTALL+=('initramfs-tools')		# RAM file system initialization, required for generic boot loader, but not required/used by RPi bootloader
+			aPACKAGES_REQUIRED_INSTALL+=('initramfs-tools')		# RAM file system initialisation, required for generic bootloader, but not required/used by RPi bootloader
 			aPACKAGES_REQUIRED_INSTALL+=('haveged')			# Entropy daemon: https://github.com/MichaIng/DietPi/issues/2806
 
 		else
 
-			G_AGI raspbian-archive-keyring
 			aPACKAGES_REQUIRED_INSTALL+=('rng-tools')		# Entropy daemon: Alternative, that does not work on all devices, but is proven to work on RPi, is default on Raspbian and uses less RAM on idle.
 
 		fi
@@ -813,7 +813,7 @@ _EOF_
 
 				local efi_packages='grub-efi-amd64'
 				# On Buster+ enable secure boot compatibility: https://packages.debian.org/buster/grub-efi-amd64-signed
-				(( $DISTRO_TARGET > 4 )) && efi_packages+='grub-efi-amd64-signed shim-signed'
+				(( $DISTRO_TARGET > 4 )) && efi_packages+=' grub-efi-amd64-signed shim-signed'
 				G_AGI $efi_packages
 
 			#	Grub BIOS
@@ -1045,6 +1045,8 @@ _EOF_
 			'armbian*'
 			# - Meveric
 			'cpu_governor'
+			# - RPi
+			'sshswitch'
 
 		)
 
@@ -1089,8 +1091,16 @@ _EOF_
 		# - Meveric specific
 		[[ -f '/usr/local/sbin/setup-odroid' ]] && rm /usr/local/sbin/setup-odroid
 
-		# - RPi specific https://github.com/MichaIng/DietPi/issues/1631#issuecomment-373965406
+		# - RPi specific: https://github.com/MichaIng/DietPi/issues/1631#issuecomment-373965406
 		[[ -f '/etc/profile.d/wifi-country.sh' ]] && rm /etc/profile.d/wifi-country.sh
+		[[ -f '/etc/sudoers.d/010_pi-nopasswd' ]] && rm /etc/sudoers.d/010_pi-nopasswd
+		[[ -d '/etc/systemd/system/dhcpcd.service.d' ]] && rm -R /etc/systemd/system/dhcpcd.service.d # https://github.com/RPi-Distro/pi-gen/blob/master/stage3/01-tweaks/00-run.sh
+		#	Do not ship rc.local anymore. On DietPi /var/lib/dietpi/postboot.d should be used.
+		#	WIP: Mask rc-local.service and create symlink postboot.d/rc.local => /etc/rc.local for backwards compatibility?
+		[[ -f '/etc/rc.local' ]] && rm /etc/rc.local # https://github.com/RPi-Distro/pi-gen/blob/master/stage2/01-sys-tweaks/files/rc.local
+		#	Below required if DietPi-PREP is executed from chroot/container, so RPi firstrun scripts are not executed
+		[[ -f '/etc/init.d/resize2fs_once' ]] && rm /etc/init.d/resize2fs_once # https://github.com/RPi-Distro/pi-gen/blob/master/stage2/01-sys-tweaks/files/resize2fs_once
+		[[ -f '/boot/cmdline.txt' ]] && sed -i 's| init=/usr/lib/raspi-config/init_resize\.sh||' /boot/cmdline.txt # https://github.com/RPi-Distro/pi-gen/blob/master/stage2/01-sys-tweaks/00-patches/07-resize-init.diff
 
 		# - make_nas_processes_faster cron job on Rock64 + NanoPi + Pine64(?) images
 		[[ -f '/etc/cron.d/make_nas_processes_faster' ]] && rm /etc/cron.d/make_nas_processes_faster
@@ -1117,15 +1127,12 @@ _EOF_
 
 		#-----------------------------------------------------------------------------------
 		# DietPi user
-
 		l_message='Creating DietPi User Account' G_RUN_CMD /DietPi/dietpi/func/dietpi-set_software useradd dietpi
 
 		#-----------------------------------------------------------------------------------
 		# UID bit for sudo: https://github.com/MichaIng/DietPi/issues/794
-
 		G_DIETPI-NOTIFY 2 'Configuring sudo UID bit'
-
-		chmod 4755 $(which sudo)
+		chmod 4755 $(command -v sudo)
 
 		#-----------------------------------------------------------------------------------
 		# Dirs
@@ -1220,10 +1227,14 @@ _EOF_
 		for i in apt-daily{,-upgrade}.{service,timer}
 		do
 
-			systemctl disable --now $i &> /dev/null
-			systemctl mask $i &> /dev/null
+			systemctl disable --now $i 2> /dev/null
+			systemctl mask $i 2> /dev/null
 
 		done
+
+		G_DIETPI-NOTIFY 2 'Disabling e2scrub services which are for LVM and require lvm2/lvcreate being installed'
+		systemctl disable --now e2scrub_all.timer 2> /dev/null
+		systemctl disable --now e2scrub_reap 2> /dev/null
 
 		local info_use_drive_manager='Can be installed and setup by DietPi-Drive_Manager.\nSimply run "dietpi-drive_manager" and select "Add network drive".'
 		echo -e "Samba client: $info_use_drive_manager" > /mnt/samba/readme.txt
@@ -1242,12 +1253,12 @@ _EOF_
 
 		l_message='Starting DietPi-RAMlog service' G_RUN_CMD systemctl start dietpi-ramlog
 
-		G_DIETPI-NOTIFY 2 'Updating DietPi HW_INFO'
+		G_DIETPI-NOTIFY 2 'Updating /DietPi/dietpi/.hw_model'
 		/DietPi/dietpi/func/dietpi-obtain_hw_model
 
 		G_DIETPI-NOTIFY 2 'Configuring network interfaces:'
 
-		[[ -f '/etc/network/interfaces' ]] && rm -R /etc/network/interfaces # ARMbian symlink for bulky network-manager
+		[[ -L '/etc/network/interfaces' ]] && rm /etc/network/interfaces # ARMbian symlink for bulky network-manager
 
 		G_ERROR_HANDLER_COMMAND='/etc/network/interfaces'
 		cat << _EOF_ > $G_ERROR_HANDLER_COMMAND
@@ -1258,7 +1269,7 @@ _EOF_
 # Drop-in configs
 source interfaces.d/*
 
-# Local
+# Loopback
 auto lo
 iface lo inet loopback
 
@@ -1283,22 +1294,22 @@ _EOF_
 		G_ERROR_HANDLER_EXITCODE=$?
 		G_ERROR_HANDLER
 
-		# - Remove all predefined eth*/wlan* adapter rules
+		# Remove all predefined eth*/wlan* adapter rules
 		rm -f /etc/udev/rules.d/70-persist*nt-net.rules
 
-		#	Add pre-up lines for wifi on OrangePi Zero
+		# Add pre-up lines for WiFi on OrangePi Zero
 		if (( $G_HW_MODEL == 32 )); then
 
 			sed -i '/iface wlan0 inet dhcp/apre-up modprobe xradio_wlan\npre-up iwconfig wlan0 power on' /etc/network/interfaces
 
-		#	ASUS TB WiFi: https://github.com/MichaIng/DietPi/issues/1760
+		# ASUS TB WiFi: https://github.com/MichaIng/DietPi/issues/1760
 		elif (( $G_HW_MODEL == 52 )); then
 
 			G_CONFIG_INJECT '8723bs' '8723bs' /etc/modules
 
 		fi
 
-		#	Fix rare WiFi interface start issue: https://github.com/MichaIng/DietPi/issues/2074
+		# Fix wireless-tools bug on Stretch: https://bugs.debian.org/908886
 		[[ -f '/etc/network/if-pre-up.d/wireless-tools' ]] && sed -i '\|^[[:blank:]]ifconfig "$IFACE" up$|c\\t/sbin/ip link set dev "$IFACE" up' /etc/network/if-pre-up.d/wireless-tools
 
 		G_DIETPI-NOTIFY 2 'Tweaking DHCP timeout:'
@@ -1358,13 +1369,13 @@ _EOF_
 
 		G_DIETPI-NOTIFY 2 'Configuring fake-hwclock:'
 		systemctl stop fake-hwclock
-		# - Allow times in the past
+		# Allow times in the past
 		G_CONFIG_INJECT 'FORCE=' 'FORCE=force' /etc/default/fake-hwclock
 		systemctl restart fake-hwclock # Failsafe, apply now if date is way far back...
 
 		G_DIETPI-NOTIFY 2 'Configuring serial login consoles:'
 
-		# - On virtual machines, serial consoles are not required
+		# On virtual machines, serial consoles are not required
 		if (( $G_HW_MODEL == 20 )); then
 
 			/DietPi/dietpi/func/dietpi-set_hardware serialconsole disable
@@ -1372,13 +1383,12 @@ _EOF_
 		else
 
 			/DietPi/dietpi/func/dietpi-set_hardware serialconsole enable
-			# - RPi: Depending on current config.txt and model, not all serial devices are available, so enable console manually for both:
+			# On RPi the primary serial console depends on model, use "serial0" which links to the primary console, converts to correct device on first boot
 			if (( $G_HW_MODEL < 10 )); then
 
-				systemctl unmask serial-getty@ttyAMA0
-				systemctl enable serial-getty@ttyAMA0
-				systemctl unmask serial-getty@ttyS0
-				systemctl enable serial-getty@ttyS0
+				/DietPi/dietpi/func/dietpi-set_hardware serialconsole disable ttyAMA0
+				/DietPi/dietpi/func/dietpi-set_hardware serialconsole disable ttyS0
+				/DietPi/dietpi/func/dietpi-set_hardware serialconsole enable serial0
 
 			fi
 
@@ -1548,22 +1558,6 @@ fdt set /ethernet@$identifier snps,txpbl <0x21>/;q}" /boot/boot.cmd
 				mkimage -C none -A arm -T script -d /boot/boot.cmd /boot/boot.scr
 
 			fi
-
-		# - Odroids FFmpeg fix for Meveric images. Prefer debian.org over Meveric for backports: https://github.com/MichaIng/DietPi/issues/1273 + https://github.com/MichaIng/DietPi/issues/1556#issuecomment-369463910
-		elif [[ $G_HW_MODEL == 1[0-5] ]] && ls /etc/apt/sources.list.d/meveric*.list &> /dev/null; then
-
-			rm -f /etc/apt/preferences.d/meveric*
-			cat << _EOF_ > /etc/apt/preferences.d/dietpi-meveric-backports
-Package: *
-Pin: release a=stretch-backports
-Pin: origin "fuzon.co.uk"
-Pin-Priority: 99
-
-Package: *
-Pin: release a=stretch-backports
-Pin: origin "oph.mdrjr.net"
-Pin-Priority: 99
-_EOF_
 
 		fi
 
