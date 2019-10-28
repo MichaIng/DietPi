@@ -127,8 +127,8 @@
 
 			local var_log_size=$(sed -n '/^[[:blank:]]*AUTO_SETUP_RAMLOG_MAXSIZE=/{s/^[^=]*=//p;q}' /DietPi/dietpi.txt)
 			tmpfs_mounts="tmpfs /tmp tmpfs noatime,lazytime,nodev,nosuid,mode=1777
-tmpfs /DietPi tmpfs size=10m,noatime,lazytime,nodev,nosuid,mode=1755
-tmpfs /var/log tmpfs size=${var_log_size}m,noatime,lazytime,nodev,nosuid,mode=1777"
+tmpfs /DietPi tmpfs size=10M,noatime,lazytime,nodev,nosuid,mode=1755
+tmpfs /var/log tmpfs size=${var_log_size:-50}M,noatime,lazytime,nodev,nosuid,mode=1777"
 
 		# Else: Grab current mounts
 		else
@@ -281,11 +281,11 @@ $swap_mounts
 
 					# On RPi we need to use PARTUUID for Root/BootFS
 					(( $G_HW_MODEL < 10 )) && dev_entry="PARTUUID=${aDRIVE_PART_UUID[$index]}"
-					options+=' 0 1' # dump + fsck flag
+					[[ ${aDRIVE_MOUNT_TARGET[$index]} == '/' ]] && options+=' 0 1' || options+=' 0 2' # dump + fsck flag
 
 				else
 
-					options+=',nofail,x-systemd.automount'
+					options+=',nofail,noauto,x-systemd.automount'
 
 				fi
 
@@ -293,7 +293,7 @@ $swap_mounts
 				local type=${aDRIVE_FSTYPE[$index]}
 				(( ${aDRIVE_ISNETWORKED[$index]} )) && type='auto'
 
-				echo "$dev_entry ${aDRIVE_MOUNT_TARGET[$index]} $type noatime,lazytime$options" >> $fp_fstab_tmp
+				echo "$dev_entry ${aDRIVE_MOUNT_TARGET[$index]} ${type:-auto} noatime,lazytime$options" >> $fp_fstab_tmp
 
 			fi
 
@@ -332,7 +332,11 @@ $swap_mounts
 			aDRIVE_FSTYPE[$index]=$(blkid ${aDRIVE_MOUNT_SOURCE[$index]} -s TYPE -o value)
 			[[ ${aDRIVE_FSTYPE[$index]} ]] && aDRIVE_ISFILESYSTEM[$index]=1
 
-			echo "#UUID=${aDRIVE_UUID[$index]} ${aDRIVE_MOUNT_TARGET[$index]} auto defaults,noatime,rw,nofail,x-systemd.automount 0 0" >> $fp_fstab_tmp
+			# FS type: In case of unknown network drive, use "auto", to allow remove FS changes without breaking the fstab entry
+			local type=${aDRIVE_FSTYPE[$index]}
+			(( ${aDRIVE_ISNETWORKED[$index]} )) && type='auto'
+
+			echo "#UUID=${aDRIVE_UUID[$index]} ${aDRIVE_MOUNT_TARGET[$index]} ${type:-auto} noatime,lazytime,nofail,noauto,x-systemd.automount" >> $fp_fstab_tmp
 
 		done < .blkid_out_tmp
 		rm .blkid_out_tmp
@@ -421,8 +425,8 @@ aDRIVE_ISPARTITIONTABLE ${aDRIVE_ISPARTITIONTABLE[$i]}
 		# Remove x-systemd.automount if not supported by kernel: https://github.com/MichaIng/DietPi/issues/1607#issuecomment-372030565
 		if ! modprobe autofs4 --dry-run &> /dev/null; then
 
-			sed -i 's/,x-systemd.automount//g' $fp_fstab_tmp
-			G_DIETPI-NOTIFY 2 'autofs4 module not available in kernel, x-systemd.automount has been disabled'
+			sed -Ei '/x-systemd\.automount/s/,(noauto|x-systemd\.automount)//g' $fp_fstab_tmp
+			G_DIETPI-NOTIFY 2 'autofs4 module not available in kernel, x-systemd.automount has been disabled, all drives will be mounted at boot instead'
 
 		fi
 
@@ -1104,7 +1108,7 @@ Do you wish to ignore this warning, and, mount the drive regardless?" || return 
 
 							# Swapfile
 							# - NB: / rootfs will always be detected in this check, however, no rootFS options for umount and format...
-							local swapfile_size=$(grep -m1 '^[[:blank:]]*AUTO_SETUP_SWAPFILE_SIZE=' /DietPi/dietpi.txt | sed 's/^[^=]*=//')
+							local swapfile_size=$(sed -n '/^[[:blank:]]*AUTO_SETUP_SWAPFILE_SIZE=/{s/^[^=]*=//p;q}' /DietPi/dietpi.txt)
 							if (( $swapfile_size > 0 )) &&
 								{ [[ $FP_SWAPFILE_CURRENT == ${aDRIVE_MOUNT_TARGET[$MENU_DRIVE_INDEX]}* && ${aDRIVE_MOUNT_TARGET[$MENU_DRIVE_INDEX]} != '/' ]] ||
 								[[ $FP_SWAPFILE_CURRENT == '/var/swap' && ${aDRIVE_MOUNT_TARGET[$MENU_DRIVE_INDEX]} == '/' ]]; }; then
@@ -1229,7 +1233,7 @@ Do you wish to ignore this warning, and, mount the drive regardless?" || return 
 
 			elif [[ $G_WHIP_RETURNED_VALUE == 'Unmount' || $G_WHIP_RETURNED_VALUE == 'Remove' ]]; then
 
-				# - Disallow if userdata is located on this drive!
+				# Disallow if userdata is located on this drive!
 				if (( $partition_contains_userdata )); then
 
 					Notification 0
@@ -1782,11 +1786,11 @@ NTFS:\nRecommended if you plan to use this drive on a Windows system. High CPU u
 		do
 
 			G_DIETPI-NOTIFY 2 "Attempting to mount with CIFS version: $i"
-			if mount -t cifs -o username="$samba_clientuser",password="$samba_clientpassword",uid=dietpi,gid=dietpi,file_mode=0770,dir_mode=0770,vers=$i //"$samba_clientname"/"$samba_clientshare" "$samba_fp_mount_target" &>> $fp_tmp; then
+			if mount -t cifs -o username="$samba_clientuser",password="$samba_clientpassword",iocharset=utf8,uid=dietpi,gid=dietpi,file_mode=0770,dir_mode=0770,vers=$i //"$samba_clientname"/"$samba_clientshare" "$samba_fp_mount_target" &>> $fp_tmp; then
 
 				# Apply to fstab
 				sed -i "\#[[:space:]]$samba_fp_mount_target[[:space:]]#d" /etc/fstab
-				echo "//$samba_clientname/$samba_clientshare $samba_fp_mount_target cifs username=$samba_clientuser,password=$samba_clientpassword,iocharset=utf8,uid=dietpi,gid=dietpi,file_mode=0770,dir_mode=0770,vers=$i,_netdev,nofail" >> /etc/fstab
+				echo "//$samba_clientname/$samba_clientshare $samba_fp_mount_target cifs username=$samba_clientuser,password=$samba_clientpassword,iocharset=utf8,uid=dietpi,gid=dietpi,file_mode=0770,dir_mode=0770,vers=$i,_netdev,nofail,noauto,x-systemd.automount" >> /etc/fstab
 
 				MENU_DRIVE_TARGET=$samba_fp_mount_target
 				Init_Drives_and_Refresh
@@ -1871,7 +1875,7 @@ NTFS:\nRecommended if you plan to use this drive on a Windows system. High CPU u
 
 				# Apply to fstab
 				sed -i "\#[[:space:]]$nfs_fp_mount_target[[:space:]]#d" /etc/fstab
-				echo "$nfs_server_ip:$nfs_fp_server_share $nfs_fp_mount_target nfs auto,_netdev,nofail" >> /etc/fstab
+				echo "$nfs_server_ip:$nfs_fp_server_share $nfs_fp_mount_target nfs _netdev,nofail,noauto,x-systemd.automount" >> /etc/fstab
 
 				MENU_DRIVE_TARGET=$nfs_fp_mount_target
 				Init_Drives_and_Refresh
@@ -1897,7 +1901,7 @@ NTFS:\nRecommended if you plan to use this drive on a Windows system. High CPU u
 
 		G_WHIP_MENU_ARRAY=(
 
-			'Samba' ': Setup a connection for a Samba/CIFS/Windows compatible file share'
+			'Samba' ': Setup a connection for a Samba/SMB/CIFS/Windows compatible file share'
 			'NFS' ': Setup a connection for a NFS compatible file share'
 
 		)
