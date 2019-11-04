@@ -6,9 +6,11 @@
 	#////////////////////////////////////
 	# Created by Daniel Knight / daniel.knight@dietpi.com / dietpi.com
 	# Updated by MichaIng / micha@dietpi.com / dietpi.com
+	# Clonezilla integration by sal666
 	#
 	#////////////////////////////////////
 	# - Create new .img file from drive | or use existing .img file
+	#   | or use Clonezilla to take an image from drive and to generate a bootable ISO file
 	# - Minimises root partition and file system
 	# - Hashes and 7z's the final image ready for release
 	#////////////////////////////////////
@@ -28,6 +30,9 @@
 	OUTPUT_IMG_NAME=''
 	OUTPUT_IMG_EXT='img'
 	GPT=0
+	CLONING_TOOL=''
+	CLONEZILLA_REPO='https://sourceforge.net/projects/clonezilla/files/clonezilla_live_alternative'
+	DIETPI_REPO='https://raw.githubusercontent.com/sal666/DietPi/dev'
 
 	Delete_Loopback(){ [[ -b $FP_SOURCE ]] && G_RUN_CMD losetup -d $FP_SOURCE; }
 
@@ -51,9 +56,31 @@
 \nNB: If you want to create a Clonezilla-based installer image, the input OS needs to be attached as physical drive, since Clonezilla currently does neither support .img files nor loop devices.' || Exit_On_Fail
 		if [[ $G_WHIP_RETURNED_VALUE == 'Drive' ]]; then
 
+			G_WHIP_MENU_ARRAY=(
+
+				'dd'         ': Create an image (.img) file with dd.'
+				'Clonezilla' ': Create a bootable image (.iso) file with Clonezilla.'
+
+			)
+
+			G_WHIP_MENU 'Please select which cloning tool to use:' || Exit_On_Fail
+			CLONING_TOOL=$G_WHIP_RETURNED_VALUE
+
+			if [[ $CLONING_TOOL == 'dd' ]]; then
+
+				# List block devices, excluding RAM disks
+				G_WHIP_MENU_ARRAY=$(lsblk -rnpo PKNAME,FSTYPE)
+
+			else
+
+				OUTPUT_IMG_EXT='iso'
+				# List block devices, excluding RAM disks and loop devices
+				G_WHIP_MENU_ARRAY=$(lsblk -rnpo PKNAME,FSTYPE -e 1,7)
+
+			fi
 			# Detect drives with a partition table, containing a partition with ext4 file system, excluding the hosts root FS drive
 			local host_rootfs_dev=$(lsblk -rnpo PKNAME,MOUNTPOINT | mawk '$2=="/" {print $1;exit}')
-			G_WHIP_MENU_ARRAY=($(lsblk -rnpo PKNAME,FSTYPE | mawk -v root=$host_rootfs_dev '{if ( $1!=root && $2=="ext4" ) print $1,$2}' | sort -u))
+			G_WHIP_MENU_ARRAY=($(mawk -v root=$host_rootfs_dev '{if ( $1!=root && $2=="ext4" ) print $1,$2}' <<< "$G_WHIP_MENU_ARRAY" | sort -u))
 
 			if [[ ! $G_WHIP_MENU_ARRAY ]]; then
 
@@ -246,12 +273,135 @@ Do you want to overwrite or backup the existing file to /root/$OUTPUT_IMG_NAME.$
 			# Rename and move to /root, if source image != output image already
 			[[ /root/$OUTPUT_IMG_NAME.$OUTPUT_IMG_EXT != $FP_SOURCE_IMG ]] && mv "$FP_SOURCE_IMG" $OUTPUT_IMG_NAME.$OUTPUT_IMG_EXT
 
-		# Drive source
-		else
+		# Drive source, clone with dd
+		elif [[ $CLONING_TOOL == 'dd' ]]; then
 
 			G_DIETPI-NOTIFY 2 "Creating final image with actually used size: $(( $IMAGE_SIZE / 1024 / 1024 + 1 )) MiB"
 			dd if=$FP_SOURCE of=$OUTPUT_IMG_NAME.$OUTPUT_IMG_EXT bs=1M status=progress count=$(( $IMAGE_SIZE / 1024 / 1024 + 1 ))
 
+		# Drive source, clone with Clonezilla
+		else
+
+			G_DIETPI-NOTIFY 2 'Creating final image with Clonezilla'
+			# Install required packages
+			G_AG_CHECK_INSTALL_PREREQ clonezilla partclone xorriso isolinux syslinux-common unzip curl || Exit_On_Fail
+			# TODO: 'partimage' is also required by Clonezila, but the package for buster is missing.
+
+			# Download last version of Clonezilla Live
+			CLONEZILLA_VERSION=$(curl -s "$CLONEZILLA_REPO/" | grep 'class="folder "' | head -n1 | cut -d\" -f2)
+			if [[ -z "$CLONEZILLA_VERSION" ]]; then
+
+				G_DIETPI-NOTIFY 1 'Could not retrieve version number of last Clonezilla Live, aborting...'
+				Exit_On_Fail
+
+			fi
+			CLONEZILLA_ZIP="clonezilla-live-${CLONEZILLA_VERSION}-amd64.zip"
+			if [[ ! -f "$CLONEZILLA_ZIP" ]]; then
+
+				G_DIETPI-NOTIFY 2 "Downloading Clonezilla Live v$CLONEZILLA_VERSION..."
+				wget "$CLONEZILLA_REPO/${CLONEZILLA_VERSION}/${CLONEZILLA_ZIP}/download" -O "$CLONEZILLA_ZIP" || Exit_On_Fail
+
+			fi
+
+			# Extract Clonezilla Live
+			unzip "$CLONEZILLA_ZIP" -d 'tmpiso' || Exit_On_Fail
+
+			# Clone disk with Clonezilla
+			if [[ ! -d tmpiso/home/partimag/$OUTPUT_IMG_NAME ]]; then
+
+				mkdir -p tmpiso/home/partimag/
+				G_DIETPI-NOTIFY 2 'Cloning disk with Clonezilla...'
+				/usr/sbin/ocs-sr -or /root/tmpiso/home/partimag --nogui -fsck -q2 -c -j2 -z1p -i 4096 -senc -sc savedisk $OUTPUT_IMG_NAME ${FP_SOURCE##*/} || Exit_On_Fail
+
+			fi
+
+			# For the sake of privacy, remove some non vital files that contain SNs and UUIDs
+			rm -f tmpiso/home/partimag/$OUTPUT_IMG_NAME/{Info*txt,*list,clonezilla-img}
+
+			# Check image
+			G_DIETPI-NOTIFY 2 'Checking Clonezilla image...'
+			/usr/sbin/ocs-chkimg -b --nogui --ocsroot /root/tmpiso/home/partimag $OUTPUT_IMG_NAME || Exit_On_Fail
+
+			# Prepare custom files used by the installer when booting in UEFI mode
+			wget "$DIETPI_REPO"/.meta/images/dietpi-background.png -O tmpiso/boot/grub/dietpi-background.png || Exit_On_Fail
+			wget "$DIETPI_REPO"/.meta/images/select_bkg_c.png -O tmpiso/boot/grub/select_bkg_c.png || Exit_On_Fail
+			cat << '_EOF_' > tmpiso/boot/grub/theme.txt
+title-text: ""
+desktop-image: "dietpi-background.png"
+terminal-font: "Unifont Regular 16"
+terminal-width: "100%"
+terminal-height: "100%"
+message-color: "#ffffff"
++ boot_menu {
+    width = 60%
+    height = 80%
+    item_spacing = 10
+    item_color = "#000000"
+    selected_item_color = "#ffffff"
+    selected_item_pixmap_style = "select_bkg_*.png"
+}
+_EOF_
+			mv tmpiso/boot/grub/{grub,clonezilla}.cfg
+			sed '/menuentry /,/}/d' tmpiso/boot/grub/clonezilla.cfg | sed '/submenu /,/}/d' | grep -v '^[ ]*$' > tmpiso/boot/grub/grub.cfg
+			sed -n  -e '/menuentry .*800x600/,/}/p' -e '/menuentry .*KMS/,/}/p' -e '/menuentry .*Safe/,/}/p' \
+				-e '/menuentry .*Failsafe/,/}/p' tmpiso/boot/grub/clonezilla.cfg >> tmpiso/boot/grub/grub.cfg
+			sed -i  -e 's|set timeout=.*|set timeout="-1"|' -e '/set pref=/ a set theme=$pref/theme.txt' \
+				-e 's|"Clonezilla live |"Install DietPi |' -e 's|locales= |locales=en_GB.UTF-8 |' \
+				-e 's|keyboard-layouts= |keyboard-layouts=gb |' -e 's|ocs-live-general|ocs-live-restore|' \
+				-e 's|ocs_live_extra_param=""|ocs_live_extra_param="-icds -k1 -r -e2 -j2 -batch -p poweroff restoredisk ask_user ask_user"|' \
+				-e 's|ocs_live_batch="no"|ocs_live_batch="yes"|' tmpiso/boot/grub/grub.cfg
+			cat << '_EOF_' >> tmpiso/boot/grub/grub.cfg
+submenu "Clonezilla live" {
+  set pref=/boot/grub
+  configfile $pref/clonezilla.cfg
+}
+menuentry "Power off" { halt }
+_EOF_
+
+			# Prepare custom files used by the installer when booting in BIOS/CSM mode
+			wget "$DIETPI_REPO"/.meta/images/dietpibg.png -O tmpiso/syslinux/dietpibg.png || Exit_On_Fail
+			cp /usr/lib/syslinux/modules/bios/poweroff.c32 tmpiso/syslinux/
+			mv tmpiso/syslinux/{syslinux,clonezilla}.cfg
+			sed -i 's|\(MENU TITLE\) .*|\1 Clonezilla live|' tmpiso/syslinux/clonezilla.cfg
+			sed '/^label /,/MENU END/d' tmpiso/syslinux/clonezilla.cfg | grep -v '^[ ]*$' > tmpiso/syslinux/syslinux.cfg
+			sed -i 's|^\(label Clonezilla live\)$|\1 800x600|' tmpiso/syslinux/clonezilla.cfg
+			sed -n  -e '/^label .*800x600/,/append initrd/p' tmpiso/syslinux/clonezilla.cfg >> tmpiso/syslinux/syslinux.cfg
+			cat << '_EOF_' >> tmpiso/syslinux/syslinux.cfg
+  TEXT HELP
+  VGA mode 800x600. OK for most of VGA cards.
+  ENDTEXT
+_EOF_
+			sed -n  -e '/^label .*HiDPI/,/ENDTEXT/p' -e '/^label .*KMS/,/ENDTEXT/p' -e '/^label .*framebuffer/,/ENDTEXT/p' \
+				-e '/^label .*failsafe/,/ENDTEXT/p' tmpiso/syslinux/clonezilla.cfg >> tmpiso/syslinux/syslinux.cfg
+			sed -i  -e 's|^\(timeout\) .*|\1 0|' -e 's|\(MENU BACKGROUND\) .*|\1 dietpibg.png|' -e 's|MENU TITLE .*|MENU TABMSG|' \
+				-e '/menu title/d' -e '/^say /d' -e '/MENU MARGIN/ a MENU HSHIFT 80\n MENU COLOR BORDER 0 #00000000 #00000000 none' -e 's|Clonezilla live |Install DietPi |' \
+				-e 's|locales= |locales=en_GB.UTF-8 |' -e 's|keyboard-layouts= |keyboard-layouts=gb |' -e 's|ocs-live-general|ocs-live-restore|' \
+				-e 's|ocs_live_extra_param=""|ocs_live_extra_param="-icds -k1 -r -e2 -j2 -batch -p poweroff restoredisk ask_user ask_user"|' \
+				-e 's|ocs_live_batch="no"|ocs_live_batch="yes"|' tmpiso/syslinux/syslinux.cfg
+			cat << '_EOF_' >> tmpiso/syslinux/syslinux.cfg
+MENU BEGIN Clonezilla live
+  INCLUDE clonezilla.cfg
+MENU END
+label Power off
+  MENU LABEL Power off
+  COM32 poweroff.c32
+  TEXT HELP
+  Shut down the computer
+  ENDTEXT
+MENU END
+_EOF_
+			cp tmpiso/syslinux/{syslinux,isolinux}.cfg
+
+			# Generate new ISO file with Clonezilla Live + DietPi image
+			G_DIETPI-NOTIFY 2 "Generating $OUTPUT_IMG_NAME.$OUTPUT_IMG_EXT..."
+			xorriso -as mkisofs -R -r -J -joliet-long -l -iso-level 3 \
+				-isohybrid-mbr /usr/lib/ISOLINUX/isohdpfx.bin -partition_offset 16 \
+				-publisher 'DietPi - Lightweight justice for your SBC; https://dietpi.com;' -volid 'DIETPI_INSTALLER' \
+				-A "clonezilla-live-${CLONEZILLA_VERSION}-amd64" \
+				-b syslinux/isolinux.bin -c syslinux/boot.cat -no-emul-boot -boot-load-size 4 \
+				-boot-info-table -eltorito-alt-boot --efi-boot boot/grub/efi.img -isohybrid-gpt-basdat \
+				-isohybrid-apm-hfsplus tmpiso > $OUTPUT_IMG_NAME.$OUTPUT_IMG_EXT || Exit_On_Fail
+			rm -rf tmpiso $CLONEZILLA_ZIP
 		fi
 
 		# Generate hashes: MD5, SHA1, SHA256
@@ -266,7 +416,7 @@ _EOF_
 
 		# Download current README
 		G_DIETPI-NOTIFY 2 'Downloading current README.md to pack with image...'
-		wget https://raw.githubusercontent.com/MichaIng/DietPi/master/README.md -O README.md || Exit_On_Fail
+		wget "$DIETPI_REPO"/README.md -O README.md || Exit_On_Fail
 
 		# Generate 7z archive
 		# NB: LZMA2 ultra compression method requires 2G RAM
