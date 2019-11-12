@@ -162,7 +162,7 @@ _EOF_
 		if [[ -f '/var/lib/dietpi/dietpi-software/.GLOBAL_PW.bin' ]]; then
 
 			GLOBAL_PW=$(openssl enc -d -a -md sha256 -aes-256-cbc $pbkdf2 -salt -pass pass:'DietPiRocks!' -in /var/lib/dietpi/dietpi-software/.GLOBAL_PW.bin)
-			# - Allow decryption and re-encrypt with "-iter 10000" on dist-upgraded Buster systems
+			# - Allow decryption without "-iter 10000" and re-encrypt on dist-upgraded Buster systems
 			if (( $? && $G_DISTRO > 4 )); then
 
 				GLOBAL_PW=$(openssl enc -d -a -md sha256 -aes-256-cbc -salt -pass pass:'DietPiRocks!' -in /var/lib/dietpi/dietpi-software/.GLOBAL_PW.bin)
@@ -175,7 +175,8 @@ _EOF_
 
 			G_CONFIG_INJECT 'AUTO_SETUP_GLOBAL_PASSWORD=' 'AUTO_SETUP_GLOBAL_PASSWORD=Password has been encrypted and secured on rootFS' /DietPi/dietpi.txt
 			openssl enc -e -a -md sha256 -aes-256-cbc $pbkdf2 -salt -pass pass:'DietPiRocks!' -out /var/lib/dietpi/dietpi-software/.GLOBAL_PW.bin <<< $GLOBAL_PW
-			[[ $GLOBAL_PW != 'dietpi' ]] && G_WHIP_MSG '[ INFO ] For security reasons your global software password has been removed from dietpi.txt and instead ecrypted and saved to:
+			# Inform user if encryption is done after update of an old DietPi instance, else firstrun setup does the job
+			(( $G_DIETPI_INSTALL_STAGE == 2 )) && G_WHIP_MSG '[ INFO ] For security reasons your global software password has been removed from dietpi.txt and instead ecrypted and saved to:
  - /var/lib/dietpi/dietpi-software/.GLOBAL_PW.bin\n
 DietPi-Software will decrypt and use it for software installs. You can change it via:
  - dietpi-config > Security Options > Change Passwords'
@@ -14605,13 +14606,7 @@ _EOF_
 		#------------------------------------------------------------
 		# Update & upgrade APT
 		Banner_Apt_Update
-		# - Update APT lists
 		G_AGUP
-		# - Simulated APT installation to check for failures related to apt-cache.
-		G_DIETPI-NOTIFY 2 'Running apt simulation to check for errors, please wait...'
-		local package_to_test='bash-doc'
-		G_AGI $package_to_test -s
-		# - Upgrade APT packages
 		G_AGUG
 		# - Full upgrade on first run installs: https://github.com/MichaIng/DietPi/issues/3098
 		(( $G_DIETPI_INSTALL_STAGE == 1 )) && G_AGDUG
@@ -14634,6 +14629,9 @@ _EOF_
 		# Update required software that needs to be installed
 		Install_Flag_Prereq_Software
 
+		# Read GLOBAL_PW
+		Update_Global_Pw
+
 		# Install Linux Software
 		Install_Linux_Software
 
@@ -14654,10 +14652,10 @@ _EOF_
 		[[ -f '/DietPi/dietpi/.dietpi-autostart_index' ]] && autostart_current=$(</DietPi/dietpi/.dietpi-autostart_index)
 		/DietPi/dietpi/dietpi-autostart $autostart_current
 
-		# Disable services so DietPi-services can take control (DietPi will start all services from dietpi-postboot.service)
+		# Disable services so DietPi-Services can take control (DietPi will start all services from dietpi-postboot.service)
 		/DietPi/dietpi/dietpi-services dietpi_controlled
 
-		# Apply GPU Memory Splits: NB, this only checks for installed state '=2'
+		# Apply GPU Memory Splits
 		Install_Apply_GPU_Settings
 
 		# Install finished, set all installed software to state 2 (installed)
@@ -14684,6 +14682,11 @@ _EOF_
 				grep -qi 'vendor_id.*intel' /proc/cpuinfo && G_AGI intel-microcode
 				grep -qi 'vendor_id.*amd' /proc/cpuinfo && G_AGI amd64-microcode
 
+			# RPi4 EEPROM install/update: https://github.com/MichaIng/DietPi/issues/3217
+			elif (( $G_HW_MODEL == 4 )); then
+
+				/DietPi/dietpi/func/dietpi-set_hardware rpi-eeprom
+
 			fi
 
 			# Custom 1st run Script (Local file)
@@ -14694,7 +14697,7 @@ _EOF_
 				run_custom_script=1
 
 			# Custom 1st run Script (Online file)
-			elif [[ ${AUTOINSTALL_CUSTOMSCRIPTURL:-0} != '0' ]]; then
+			elif [[ $AUTOINSTALL_CUSTOMSCRIPTURL != '0' ]]; then
 
 				INSTALL_URL_ADDRESS=$AUTOINSTALL_CUSTOMSCRIPTURL
 				G_CHECK_URL "$INSTALL_URL_ADDRESS"
@@ -14757,6 +14760,7 @@ _EOF_
 		[[ $AUTOINSTALL_FILESERVERINDEX ]] || AUTOINSTALL_FILESERVERINDEX=0
 		[[ $AUTOINSTALL_LOGGINGINDEX ]] || AUTOINSTALL_LOGGINGINDEX=0
 		[[ $AUTOINSTALL_WEBSERVERINDEX ]] || AUTOINSTALL_WEBSERVERINDEX=0
+		[[ $AUTOINSTALL_CUSTOMSCRIPTURL ]] || AUTOINSTALL_CUSTOMSCRIPTURL=0
 		[[ $AUTOINSTALL_TIMESYNCMODE ]] || AUTOINSTALL_TIMESYNCMODE=2
 
 	}
@@ -16157,9 +16161,6 @@ Do you wish to continue with DietPi as a pure minimal image?'; then
 	# Load .installed file, update vars, if it exists
 	Read_InstallFileList
 	#--------------------------------------------------------------------------------------
-	# Update GLOBAL_PW
-	Update_Global_Pw
-	#--------------------------------------------------------------------------------------
 	# CLI input mode
 	if [[ $1 ]]; then
 
@@ -16180,13 +16181,14 @@ Do you wish to continue with DietPi as a pure minimal image?'; then
 			# - Automation, apply as per dietpi.txt
 			if (( $AUTOINSTALL_ENABLED )); then
 
+				Update_Global_Pw
+				# Set again to apply for UNIX users as well
 				/DietPi/dietpi/func/dietpi-set_software passwords "$GLOBAL_PW"
 
 			# - Prompt change global password and login passwords for root and dietpi users
 			else
 
 				/DietPi/dietpi/func/dietpi-set_software passwords
-				Update_Global_Pw
 
 			fi
 
@@ -16287,12 +16289,12 @@ Do you wish to continue with DietPi as a pure minimal image?'; then
 
 		if (( $DISABLE_REBOOT )); then
 
-			# - Start services (restart to reload configs of possible running services)
+			# Start services (restart to reload configs of possible running services)
 			[[ $G_SERVICE_CONTROL == 0 ]] || /DietPi/dietpi/dietpi-services restart
 
 		else
 
-			# - Reboot
+			# Reboot
 			sync
 			Banner_Reboot
 			reboot
