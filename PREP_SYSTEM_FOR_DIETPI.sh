@@ -738,6 +738,7 @@ _EOF_
 			'usbutils'		# "lsusb", used by DietPi-Software + DietPi-Bugreport
 			'wget'			# Download tool
 			'whiptail'		# DietPi dialogs
+			#'xz-utils'		# (.tar).xz wrapper
 
 		)
 
