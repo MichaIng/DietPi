@@ -11,18 +11,18 @@
 	# Dev notes:
 	# Following items must be exported or assigned to DietPi scripts, if used, until dietpi-obtain_hw_model is executed.
 	# - G_HW_MODEL
-	# - G_HW_ARCH
+	# - G_HW_ARCH=2
 	# - G_DISTRO
 	# - G_DISTRO_NAME
 	#
 	# The following environment variables can be set to automate this script (adjust example values to your needs):
-	# - GITOWNER='MichaIng'			(optional, defaults to 'MichaIng')
-	# - GITBRANCH='master'			(must be one of 'master', 'beta' or 'dev')
-	# - IMAGE_CREATOR='Mr. Tux'
-	# - PREIMAGE_INFO='Some GNU/Linux'
-	# - HW_MODEL=0				(must match one of the supported IDs below)
-	# - WIFI_REQUIRED=0			[01]
-	# - DISTRO_TARGET=5			[456] (Stretch: 4, Buster: 5, Bullseye: 6)
+	GITOWNER='Adityakush'			(optional, defaults to 'Adityakush')
+	GITBRANCH='master'			(must be one of 'master', 'beta' or 'dev')
+	IMAGE_CREATOR='Adi'
+	PREIMAGE_INFO='Armbian'
+	HW_MODEL=32				(must match one of the supported IDs below)
+	WIFI_REQUIRED=0			[01]
+	DISTRO_TARGET=4			[456] (Stretch: 4, Buster: 5, Bullseye: 6)
 	#------------------------------------------------------------------------------------------------
 
 	# Core globals
@@ -40,7 +40,7 @@
 	fi
 
 	# Work inside /tmp as usually ramfs to reduce disk I/O and speed up download and unpacking
-	# - Save full script path, beforehand: https://github.com/MichaIng/DietPi/pull/2341#discussion_r241784962
+	# - Save full script path, beforehand: https://github.com/Adityakush/DietPi/pull/2341#discussion_r241784962
 	FP_PREP_SCRIPT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/$(basename "${BASH_SOURCE[0]}")"
 	cd /tmp
 
@@ -140,7 +140,7 @@
 	export LC_ALL='en_GB.UTF-8'
 
 	# Set Git owner
-	GITOWNER=${GITOWNER:-MichaIng}
+	GITOWNER=${GITOWNER:-Adityakush}
 
 	# Select Git branch
 	if ! [[ $GITBRANCH =~ ^(master|beta|dev)$ ]]; then
