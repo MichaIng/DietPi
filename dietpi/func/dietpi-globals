@@ -542,7 +542,7 @@ $(ps f -eo pid,user,tty,cmd | grep -i '[d]ietpi')"; then
 	# - $1 = input mode | 2: Z=G_WHIP_MENU_ARRAY 3: Z=G_WHIP_CHECKLIST_ARRAY
 	G_WHIP_INIT(){
 
-		# Automagically set size of whiptail box and contents
+		# Automagically set size of whiptail box and contents according to screen size and whiptail type
 		local input_mode=$1
 
 		# Update backtitle
@@ -571,10 +571,9 @@ $(ps f -eo pid,user,tty,cmd | grep -i '[d]ietpi')"; then
 
 		Process_Line(){
 
-			local line=$1
+			local split line=$1
 
 			# Split line by "\n" newline escape sequences, the only one which is interpreted by whiptail, in a strict way: "\\n" still creates a newline, hence the sequence cannot be escaped!
-			local split
 			while [[ $line == *'\n'* ]]
 			do
 
@@ -597,9 +596,9 @@ $(ps f -eo pid,user,tty,cmd | grep -i '[d]ietpi')"; then
 		}
 
 		# - WHIP_MESSAGE
-		if [[ $WHIP_MESSAGE ]]; then
+		if [[ $WHIP_ERROR$WHIP_MESSAGE ]]; then
 
-			while read -r line; do Process_Line "$line" || break; done <<< "$WHIP_MESSAGE"
+			while read -r line; do Process_Line "$line" || break; done <<< "$WHIP_ERROR$WHIP_MESSAGE"
 
 		# - WHIP_TEXTFILE
 		elif [[ $WHIP_TEXTFILE ]]; then
@@ -611,7 +610,6 @@ $(ps f -eo pid,user,tty,cmd | grep -i '[d]ietpi')"; then
 		unset Process_Line
 
 		# Process menu and checklist
-		WHIP_SIZE_Z=0
 		# - G_WHIP_MENU
 		if [[ $input_mode == 2 ]]; then
 
@@ -687,56 +685,54 @@ $(ps f -eo pid,user,tty,cmd | grep -i '[d]ietpi')"; then
 
 		fi
 
-		# Calculate end result
-		# - Message will not fit! Add text scroll ability and info to backtitle
-		if (( $whip_lines_text > $WHIP_SIZE_Y )); then
+		# Adjust sizes to fit content
+		# - G_WHIP_MENU/G_WHIP_CHECKLIST needs to hold text + selection field (WHIP_SIZE_Z)
+		if [[ $input_mode == [23] ]]; then
+
+			# If required lines would exceed screen, reduce WHIP_SIZE_Z
+			if (( $whip_lines_text + $WHIP_SIZE_Z > $WHIP_SIZE_Y )); then
+
+				WHIP_SIZE_Z=$(( $WHIP_SIZE_Y - $whip_lines_text ))
+				# Assure at least 2 lines to have the selection field scroll bar identifiable
+				if (( $WHIP_SIZE_Z < 2 )); then
+
+					WHIP_SIZE_Z=2
+					# Since text is partly hidden now, add text scroll ability and info to backtitle
+					WHIP_SCROLLTEXT='--scrolltext'
+					WHIP_BACKTITLE+=' | Use up/down buttons to scroll text'
+
+				fi
+
+			# else reduce WHIP_SIZE_Y to hold all content
+			else
+
+				WHIP_SIZE_Y=$(( $whip_lines_text + $WHIP_SIZE_Z ))
+
+			fi
+
+		# - Everything else needs to hold text only
+		elif (( $whip_lines_text > $WHIP_SIZE_Y )); then
 
 			WHIP_SCROLLTEXT='--scrolltext'
 			WHIP_BACKTITLE+=' | Use up/down buttons to scroll text'
 
-		# - Calculate a lower size of WHIP_SIZE_Y to fit everything and make it look nice!
 		else
 
-			# If required lines would exceed screen, reduce lines_required_whip_z (selection field lines)
-			if (( $WHIP_SIZE_Z > 0 )); then
-
-				if (( ( $whip_lines_text + $WHIP_SIZE_Z ) > $WHIP_SIZE_Y )); then
-
-					WHIP_SIZE_Z=$(( $WHIP_SIZE_Y - $whip_lines_text ))
-
-					# Assure at least 2 lines, resulting in some missing message text but showing two selection (menu/checkbox) entries at least, for user to identify what to do.
-					if (( $WHIP_SIZE_Z < 2 )); then
-
-						WHIP_SIZE_Z=2
-						# Add text scroll ability and info to backtitle
-						WHIP_SCROLLTEXT='--scrolltext'
-						WHIP_BACKTITLE+=' | Use up/down buttons to scroll text'
-
-					fi
-
-				fi
-
-				WHIP_SIZE_Y=$(( $whip_lines_text + $WHIP_SIZE_Z ))
-
-			else
-
-				WHIP_SIZE_Y=$whip_lines_text
-
-			fi
+			WHIP_SIZE_Y=$whip_lines_text
 
 		fi
 
 	}
 
 	# G_WHIP_MSG "message"
-	# - Display a whip message
+	# - Display a message from input string
 	G_WHIP_MSG(){
 
 		local WHIP_MESSAGE=$@
 
 		if (( $G_INTERACTIVE )); then
 
-			local WHIP_BACKTITLE WHIP_SCROLLTEXT WHIP_SIZE_X WHIP_SIZE_Y
+			local WHIP_ERROR WHIP_BACKTITLE WHIP_SCROLLTEXT WHIP_SIZE_X WHIP_SIZE_Y
 			G_WHIP_INIT
 			whiptail ${G_PROGRAM_NAME+--title "$G_PROGRAM_NAME"} --backtitle "$WHIP_BACKTITLE" --msgbox "$WHIP_MESSAGE" --ok-button "$G_WHIP_BUTTON_OK_TEXT" $WHIP_SCROLLTEXT $WHIP_SIZE_Y $WHIP_SIZE_X
 
@@ -750,16 +746,48 @@ $(ps f -eo pid,user,tty,cmd | grep -i '[d]ietpi')"; then
 
 	}
 
+	# G_WHIP_VIEWFILE "/path/to/file"
+	# - Display content from input file
+	# - Exit code: 1=file not found, else=file shown or noninteractive
+	G_WHIP_VIEWFILE(){
+
+		local result=0
+
+		if (( $G_INTERACTIVE )); then
+
+			local WHIP_ERROR WHIP_MESSAGE WHIP_BACKTITLE WHIP_SCROLLTEXT WHIP_SIZE_X WHIP_SIZE_Y WHIP_TEXTFILE=$1 header='File viewer'
+			[[ $log == 1 ]] && header='Log viewer'
+			if [[ -f $WHIP_TEXTFILE ]]; then
+
+				G_WHIP_INIT
+				whiptail --title "${G_PROGRAM_NAME+$G_PROGRAM_NAME | }$header" --backtitle "$WHIP_BACKTITLE" --textbox "$WHIP_TEXTFILE" --ok-button "$G_WHIP_BUTTON_OK_TEXT" $WHIP_SCROLLTEXT $WHIP_SIZE_Y $WHIP_SIZE_X
+
+			else
+
+				result=1
+				WHIP_ERROR="[FAILED] File does not exist: $WHIP_TEXTFILE"
+				G_WHIP_INIT
+				whiptail --title "${G_PROGRAM_NAME+$G_PROGRAM_NAME | }$header" --backtitle "$WHIP_BACKTITLE" --msgbox "$WHIP_ERROR" --ok-button "$G_WHIP_BUTTON_OK_TEXT" $WHIP_SCROLLTEXT $WHIP_SIZE_Y $WHIP_SIZE_X
+
+			fi
+
+		fi
+
+		G_WHIP_DESTROY
+		return $result
+
+	}
+
 	# G_WHIP_YESNO "message"
-	# - Prompt user for a Yes/No, return result
-	# - returns result 0=Ok, everything else considered a user cancelled result
+	# - Prompt user for Yes/No | Ok/Cancel choice and return result
+	# - Exit code: 0=Yes/Ok, else=No/Cancel or noninteractive
 	G_WHIP_YESNO(){
 
 		local result=1
 
 		if (( $G_INTERACTIVE )); then
 
-			local WHIP_BACKTITLE WHIP_SCROLLTEXT WHIP_SIZE_X WHIP_SIZE_Y WHIP_MESSAGE=$@
+			local WHIP_ERROR WHIP_BACKTITLE WHIP_SCROLLTEXT WHIP_SIZE_X WHIP_SIZE_Y WHIP_MESSAGE=$@
 			G_WHIP_INIT
 			local default_no='--defaultno'
 			[[ ${G_WHIP_DEFAULT_ITEM,,} == 'yes' || ${G_WHIP_DEFAULT_ITEM,,} == 'ok' ]] && default_no=
@@ -775,7 +803,7 @@ $(ps f -eo pid,user,tty,cmd | grep -i '[d]ietpi')"; then
 
 	# G_WHIP_INPUTBOX "message"
 	# - Prompt user to input text and save it to G_WHIP_RETURNED_VALUE
-	# - returns result 0=Ok, everything else considered a user cancelled result
+	# - Exit code: 0=input done, else=user cancelled or noninteractive
 	G_WHIP_INPUTBOX(){
 
 		local result=1
@@ -783,14 +811,14 @@ $(ps f -eo pid,user,tty,cmd | grep -i '[d]ietpi')"; then
 
 		if (( $G_INTERACTIVE )); then
 
-			local error WHIP_BACKTITLE WHIP_SCROLLTEXT WHIP_SIZE_X WHIP_SIZE_Y WHIP_MESSAGE=$@
+			local WHIP_ERROR WHIP_BACKTITLE WHIP_SCROLLTEXT WHIP_SIZE_X WHIP_SIZE_Y WHIP_MESSAGE=$@
 			while :
 			do
 
 				G_WHIP_INIT
-				G_WHIP_RETURNED_VALUE=$(whiptail ${G_PROGRAM_NAME+--title "$G_PROGRAM_NAME"} --backtitle "$WHIP_BACKTITLE" --inputbox "$error$WHIP_MESSAGE" --ok-button "$G_WHIP_BUTTON_OK_TEXT" --cancel-button "$G_WHIP_BUTTON_CANCEL_TEXT" $WHIP_SCROLLTEXT $WHIP_SIZE_Y $WHIP_SIZE_X "$G_WHIP_DEFAULT_ITEM" 3>&1 1>&2 2>&3-; echo $? > /tmp/.G_WHIP_INPUTBOX_RESULT)
+				G_WHIP_RETURNED_VALUE=$(whiptail ${G_PROGRAM_NAME+--title "$G_PROGRAM_NAME"} --backtitle "$WHIP_BACKTITLE" --inputbox "$WHIP_ERROR$WHIP_MESSAGE" --ok-button "$G_WHIP_BUTTON_OK_TEXT" --cancel-button "$G_WHIP_BUTTON_CANCEL_TEXT" $WHIP_SCROLLTEXT $WHIP_SIZE_Y $WHIP_SIZE_X "$G_WHIP_DEFAULT_ITEM" 3>&1 1>&2 2>&3-; echo $? > /tmp/.G_WHIP_INPUTBOX_RESULT)
 				result=$(</tmp/.G_WHIP_INPUTBOX_RESULT); rm /tmp/.G_WHIP_INPUTBOX_RESULT
-				[[ $result == 0 && -z $G_WHIP_RETURNED_VALUE ]] && { error='[FAILED] An input value was not entered, please try again...\n\n'; continue; }
+				[[ $result == 0 && -z $G_WHIP_RETURNED_VALUE ]] && { WHIP_ERROR='[FAILED] An input value was not entered, please try again...\n\n'; continue; }
 				break
 
 			done
@@ -803,8 +831,9 @@ $(ps f -eo pid,user,tty,cmd | grep -i '[d]ietpi')"; then
 	}
 
 	# G_WHIP_PASSWORD "message"
-	# - Prompt user to input password and safe it in variable "result".
-	# - Do not export for security reasons, instead run "unset result" after value has been handled in originating script!
+	# - Prompt user to input password and save it in variable "result"
+	# - Originating script must "unset result" after value has been handled for security reasons!
+	# - Exit code: 0=input done + passwords match, else=noninteractive (Cancelling is disabled since no password in originating script can cause havoc!)
 	G_WHIP_PASSWORD(){
 
 		local return_value=1
@@ -812,15 +841,15 @@ $(ps f -eo pid,user,tty,cmd | grep -i '[d]ietpi')"; then
 
 		if (( $G_INTERACTIVE )); then
 
-			local error WHIP_BACKTITLE WHIP_SCROLLTEXT WHIP_SIZE_X WHIP_SIZE_Y WHIP_MESSAGE=$@
+			local WHIP_ERROR WHIP_BACKTITLE WHIP_SCROLLTEXT WHIP_SIZE_X WHIP_SIZE_Y WHIP_MESSAGE=$@
 			while :
 			do
 
 				G_WHIP_INIT
-				local password_0=$(whiptail ${G_PROGRAM_NAME+--title "$G_PROGRAM_NAME"} --backtitle "$WHIP_BACKTITLE" --passwordbox "$error$WHIP_MESSAGE" --ok-button "$G_WHIP_BUTTON_OK_TEXT" --nocancel $WHIP_SCROLLTEXT $WHIP_SIZE_Y $WHIP_SIZE_X 3>&1 1>&2 2>&3-)
-				[[ $password_0 ]] || { error='[FAILED] No password entered, please try again...\n\n'; continue; }
-				local password_1=$(whiptail ${G_PROGRAM_NAME+--title "$G_PROGRAM_NAME"} --backtitle "$WHIP_BACKTITLE" --passwordbox 'Please enter the new password again:' --ok-button "$G_WHIP_BUTTON_OK_TEXT" --nocancel $WHIP_SCROLLTEXT $WHIP_SIZE_Y $WHIP_SIZE_X 3>&1 1>&2 2>&3-)
-				[[ $password_0 == "$password_1" ]] || { error='[FAILED] Passwords do not match, please try again...\n\n'; continue; }
+				local password_0=$(whiptail ${G_PROGRAM_NAME+--title "$G_PROGRAM_NAME"} --backtitle "$WHIP_BACKTITLE" --passwordbox "$WHIP_ERROR$WHIP_MESSAGE" --ok-button "$G_WHIP_BUTTON_OK_TEXT" --nocancel $WHIP_SCROLLTEXT $WHIP_SIZE_Y $WHIP_SIZE_X 3>&1 1>&2 2>&3-)
+				[[ $password_0 ]] || { WHIP_ERROR='[FAILED] No password entered, please try again...\n\n'; continue; }
+				local password_1=$(whiptail ${G_PROGRAM_NAME+--title "$G_PROGRAM_NAME"} --backtitle "$WHIP_BACKTITLE" --passwordbox 'Please enter the new password again:' --ok-button "$G_WHIP_BUTTON_OK_TEXT" --nocancel 7 $WHIP_SIZE_X 3>&1 1>&2 2>&3-)
+				[[ $password_0 == "$password_1" ]] || { WHIP_ERROR='[FAILED] Passwords do not match, please try again...\n\n'; continue; }
 				result=$password_0
 				return_value=0
 				break
@@ -835,8 +864,8 @@ $(ps f -eo pid,user,tty,cmd | grep -i '[d]ietpi')"; then
 	}
 
 	# G_WHIP_MENU "message"
-	# - Prompt user to select option from G_WHIP_MENU_ARRAY and sets G_WHIP_RETURNED_VALUE
-	# - returns result 0=Ok, everything else considered a user cancelled result
+	# - Prompt user to select option from G_WHIP_MENU_ARRAY and save choice to G_WHIP_RETURNED_VALUE
+	# - Exit code: 0=selection done, else=user cancelled or noninteractive
 	G_WHIP_MENU(){
 
 		local result=1
@@ -844,7 +873,7 @@ $(ps f -eo pid,user,tty,cmd | grep -i '[d]ietpi')"; then
 
 		if (( $G_INTERACTIVE )); then
 
-			local WHIP_BACKTITLE WHIP_SCROLLTEXT WHIP_SIZE_X WHIP_SIZE_Y WHIP_SIZE_Z WHIP_MESSAGE=$@
+			local WHIP_ERROR WHIP_BACKTITLE WHIP_SCROLLTEXT WHIP_SIZE_X WHIP_SIZE_Y WHIP_SIZE_Z WHIP_MESSAGE=$@
 			G_WHIP_INIT 2
 			G_WHIP_RETURNED_VALUE=$(whiptail ${G_PROGRAM_NAME+--title "$G_PROGRAM_NAME"} --backtitle "$WHIP_BACKTITLE" --menu "$WHIP_MESSAGE" --ok-button "$G_WHIP_BUTTON_OK_TEXT" --cancel-button "$G_WHIP_BUTTON_CANCEL_TEXT" --default-item "$G_WHIP_DEFAULT_ITEM" $WHIP_SCROLLTEXT $WHIP_SIZE_Y $WHIP_SIZE_X $WHIP_SIZE_Z "${G_WHIP_MENU_ARRAY[@]}" 3>&1 1>&2 2>&3-; echo $? > /tmp/.WHIP_MENU_RESULT)
 			result=$(</tmp/.WHIP_MENU_RESULT); rm /tmp/.WHIP_MENU_RESULT
@@ -857,8 +886,8 @@ $(ps f -eo pid,user,tty,cmd | grep -i '[d]ietpi')"; then
 	}
 
 	# G_WHIP_CHECKLIST "message"
-	# - Prompt user to select multiple options from G_WHIP_CHECKLIST_ARRAY and sets G_WHIP_RETURNED_VALUE
-	# - returns result 0=Ok, everything else considered a user cancelled result
+	# - Prompt user to select multiple options from G_WHIP_CHECKLIST_ARRAY and save choice to G_WHIP_RETURNED_VALUE
+	# - Exit code: 0=selection done, else=user cancelled or noninteractive
 	G_WHIP_CHECKLIST(){
 
 		local result=1
@@ -866,41 +895,11 @@ $(ps f -eo pid,user,tty,cmd | grep -i '[d]ietpi')"; then
 
 		if (( $G_INTERACTIVE )); then
 
-			local WHIP_BACKTITLE WHIP_SCROLLTEXT WHIP_SIZE_X WHIP_SIZE_Y WHIP_SIZE_Z WHIP_MESSAGE=$@
+			local WHIP_ERROR WHIP_BACKTITLE WHIP_SCROLLTEXT WHIP_SIZE_X WHIP_SIZE_Y WHIP_SIZE_Z WHIP_MESSAGE=$@
 			G_WHIP_INIT 3
 			G_WHIP_RETURNED_VALUE=$(whiptail ${G_PROGRAM_NAME+--title "$G_PROGRAM_NAME"} --backtitle "$WHIP_BACKTITLE" --checklist "$WHIP_MESSAGE" --separate-output --ok-button "$G_WHIP_BUTTON_OK_TEXT" --cancel-button "$G_WHIP_BUTTON_CANCEL_TEXT" --default-item "$G_WHIP_DEFAULT_ITEM" $WHIP_SCROLLTEXT $WHIP_SIZE_Y $WHIP_SIZE_X $WHIP_SIZE_Z "${G_WHIP_CHECKLIST_ARRAY[@]}" 3>&1 1>&2 2>&3-; echo $? > /tmp/.WHIP_CHECKLIST_RESULT)
 			G_WHIP_RETURNED_VALUE=$(echo -e "$G_WHIP_RETURNED_VALUE" | tr '\n' ' ')
 			result=$(</tmp/.WHIP_CHECKLIST_RESULT); rm /tmp/.WHIP_CHECKLIST_RESULT
-
-		fi
-
-		G_WHIP_DESTROY
-		return $result
-
-	}
-
-	# G_WHIP_VIEWFILE /var/log/file.log
-	# - Prompt user to view logfile, then display it as needed.
-	G_WHIP_VIEWFILE(){
-
-		local result=0
-
-		if (( $G_INTERACTIVE )); then
-
-			if [[ -f $1 ]]; then
-
-				local WHIP_BACKTITLE WHIP_SCROLLTEXT WHIP_SIZE_X WHIP_SIZE_Y WHIP_TEXTFILE=$1
-				G_WHIP_INIT
-				local header='File viewer'
-				[[ $log == 1 ]] && header='Log viewer'
-				whiptail --title "${G_PROGRAM_NAME+$G_PROGRAM_NAME | }$header" --backtitle "$WHIP_BACKTITLE" --textbox "$WHIP_TEXTFILE" --ok-button "$G_WHIP_BUTTON_OK_TEXT" $WHIP_SCROLLTEXT $WHIP_SIZE_Y $WHIP_SIZE_X
-
-			else
-
-				G_WHIP_MSG "[FAILED] File does not exist: $1"
-				result=1
-
-			fi
 
 		fi
 
