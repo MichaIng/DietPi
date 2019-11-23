@@ -1105,8 +1105,8 @@ _EOF_
 		rm -f /etc/profile.d/99-dietpi*
 
 		# - Enable /etc/bashrc.d/ support for custom interactive non-login shell scripts:
-		sed -i '\#for i in /etc/bashrc\.d#d' /etc/bash.bashrc
-		G_CONFIG_INJECT '.*/etc/bashrc\.d/.*' 'for i in /etc/bashrc.d/*.sh /etc/bashrc.d/*.bash; do [ -r "$i" ] && . $i; done' /etc/bash.bashrc
+		sed -i '\#/etc/bashrc\.d/#d' /etc/bash.bashrc
+		echo 'for i in /etc/bashrc.d/*.sh /etc/bashrc.d/*.bash; do [ -r "$i" ] && . $i; done; unset i' >> /etc/bash.bashrc
 
 		# - Enable bash-completion for non-login shells:
 		#	- NB: It is called twice on login shells then, but breaks directly if called already once.
