@@ -86,8 +86,7 @@
 		'ca-certificates' # ...via HTTPS
 		'unzip' # Unzip DietPi code
 		'locales' # Set en_GB.UTF-8 locale
-		'whiptail' # G_WHIP...
-		'ncurses-bin' # ...using tput
+		'whiptail' # G_WHIP
 
 	)
 
