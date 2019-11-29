@@ -1024,14 +1024,15 @@ _EOF_
 		# - Stop, disable and remove not required 3rd party services
 		local aservices=(
 
-			# - ARMbian
+			# ARMbian
 			'firstrun'
 			'resize2fs'
 			'log2ram'
 			'armbian*'
-			# - Meveric
+			'tinker-bluetooth'
+			# Meveric
 			'cpu_governor'
-			# - RPi
+			# RPi
 			'sshswitch'
 
 		)
@@ -1045,7 +1046,15 @@ _EOF_
 
 				[[ -e $j ]] || continue
 				[[ -f $j ]] && systemctl disable --now ${j##*/}
-				rm -R $j
+				# Remove if not attached to any APT package, else mask
+				if dpkg -S $j &> /dev/null; then
+
+					systemctl mask ${j##*/}
+
+				else
+					rm -R $j
+
+				fi
 
 			done
 
