@@ -1,5 +1,5 @@
 #!/bin/bash
-# Load the whole script into memory.
+# Load the whole script into memory
 {
 	#////////////////////////////////////
 	# DietPi Update
@@ -155,7 +155,7 @@ If this error persists, please report at: https://github.com/MichaIng/DietPi/iss
 
 	}
 
-	Apply_1st_Run_Update_Success(){ (( $G_DIETPI_INSTALL_STAGE < 2 )) && echo 1 > /DietPi/dietpi/.install_stage; }
+	Apply_1st_Run_Update_Success(){ [[ $G_DIETPI_INSTALL_STAGE == [12] ]] || echo 1 > /DietPi/dietpi/.install_stage; }
 
 	Check_Update_Available(){
 
@@ -202,13 +202,20 @@ Please download the latest DietPi image from: https://dietpi.com/#download'
 	#/////////////////////////////////////////////////////////////////////////////////////
 	Run_Update(){
 
+		# RC-only update: Reapply last subversion patches
+		if (( $G_DIETPI_VERSION_SUB == $SUBVERSION_SERVER )); then
+
+			G_DIETPI_VERSION_SUB=$(( $G_DIETPI_VERSION_SUB - 1 ))
+			G_DIETPI_VERSION_RC=0
+			INFO_VERSIONS_UPDATE
+			G_DIETPI-NOTIFY 2 "RC update: Subversion intentionally reduced to \e[33m\"$G_DIETPI_VERSION_SUB\"\e[90m to reapply the last update"
+
+		fi
+
 		G_DIETPI-NOTIFY 3 "$G_PROGRAM_NAME" 'Applying pre-patches'
 		G_RUN_CMD wget "${aURL_MIRROR_PREPATCH[$URL_MIRROR_INDEX]}" -O pre-patch_file
 		chmod +x pre-patch_file
-		# Rerun last subversion pre-patch for RC-only updates
-		local subversion=$G_DIETPI_VERSION_SUB
-		(( $G_DIETPI_VERSION_SUB == $SUBVERSION_SERVER )) && subversion=$(( $G_DIETPI_VERSION_SUB - 1 ))
-		if ! ./pre-patch_file $subversion; then
+		if ! ./pre-patch_file $G_DIETPI_VERSION_SUB; then
 
 			G_DIETPI-NOTIFY 1 "An error occured during pre-patch $?. Please check the above log or $FP_LOG for errors, and rerun \"dietpi-update\" after the cause has been solved."
 			exit 1
@@ -237,7 +244,7 @@ Please download the latest DietPi image from: https://dietpi.com/#download'
 			l_message='Installing new DietPi system files to disk' G_RUN_CMD cp -Rf DietPi-"$GITBRANCH_TARGET"/rootfs/. /
 			l_message='Setting execute permissions for DietPi scripts' G_RUN_CMD chmod -R +x /DietPi/dietpi /var/lib/dietpi/services /etc/cron.*/dietpi
 
-			# Update Git owner/branch now, to download from matching branch during dietpi.txt verification and incremental patches, e.g. on reinstalls
+			# Save version + Git info now for sub scripts to pull from correct branch
 			G_GITOWNER=$GITOWNER_TARGET
 			G_GITBRANCH=$GITBRANCH_TARGET
 			G_VERSIONDB_SAVE
@@ -257,28 +264,18 @@ Please download the latest DietPi image from: https://dietpi.com/#download'
 			while (( $G_DIETPI_VERSION_SUB < $SUBVERSION_SERVER )); do
 
 				G_DIETPI-NOTIFY 2 "Patching $G_DIETPI_VERSION_CORE.$G_DIETPI_VERSION_SUB to $COREVERSION_SERVER.$(( $G_DIETPI_VERSION_SUB + 1 ))"
-				/DietPi/dietpi/patch_file $G_DIETPI_VERSION_SUB || exit 1
+				/DietPi/dietpi/patch_file || exit 1
 				G_DIETPI_VERSION_SUB=$(( $G_DIETPI_VERSION_SUB + 1 ))
-				G_DIETPI_VERSION_RC=$RCVERSION_SERVER # Subversion patches include latest RC update
+				# Save reached version info, use RC version "0" before last patch has completed
+				(( $G_DIETPI_VERSION_SUB == $SUBVERSION_SERVER )) && G_DIETPI_VERSION_RC=$RCVERSION_SERVER || G_DIETPI_VERSION_RC=0
+				G_VERSIONDB_SAVE
 
 			done
-
-			# RC-only update, rerun last subversion patch
-			if (( $G_DIETPI_VERSION_RC < $RCVERSION_SERVER )); then
-
-				G_DIETPI-NOTIFY 2 "Patching $G_DIETPI_VERSION_CORE.$G_DIETPI_VERSION_SUB.$G_DIETPI_VERSION_RC to $COREVERSION_SERVER.$SUBVERSION_SERVER.$RCVERSION_SERVER"
-				/DietPi/dietpi/patch_file $(( $G_DIETPI_VERSION_SUB - 1 )) || exit 1
-				G_DIETPI_VERSION_RC=$RCVERSION_SERVER
-
-			fi
 
 			G_DIETPI-NOTIFY 0 "Incremental patching to v$COREVERSION_SERVER.$SUBVERSION_SERVER.$RCVERSION_SERVER completed"
 
 			# Remove patch_file
 			rm /DietPi/dietpi/patch_file
-
-			# Save current version and Git owner/branch
-			G_VERSIONDB_SAVE
 
 			# Update info strings
 			INFO_VERSIONS_UPDATE
@@ -381,10 +378,10 @@ Do you wish to continue and update DietPi to v$COREVERSION_SERVER.$SUBVERSION_SE
 				elif [[ $G_WHIP_RETURNED_VALUE == 'Automatic Updates' ]]; then
 
 					(( $auto_updates_enabled == 0 )) && auto_updates_enabled=1 || auto_updates_enabled=0
-					(( $auto_updates_enabled )) && G_WHIP_MSG '[ INFO ] Automatic DietPi updates have been enabled.\n
-Updates will be checked and applied (if update is available) daily via cron job.\n
-We highly recommend you create a system backup with "DietPi-Backup" if using this feature, as automated updates will not prompt user if a failure occurs.\n
-When DietPi applies updates, all system services will be temporarily stopped. Do NOT power off the unit during updates as this could render the system in a unrecoverable state.'
+					(( $auto_updates_enabled )) && G_WHIP_MSG '[ INFO ] Automatic DietPi updates have been enabled.
+\nUpdates will be checked and applied (if update is available) daily via cron job.
+\nWe highly recommend you create a system backup with "DietPi-Backup" if using this feature, as automated updates will not prompt user if a failure occurs.
+\nWhen DietPi applies updates, all system services will be temporarily stopped. Do NOT power off the unit during updates as this could render the system in a unrecoverable state.'
 
 					G_CONFIG_INJECT 'CONFIG_AUTO_DIETPI_UPDATES=' "CONFIG_AUTO_DIETPI_UPDATES=$auto_updates_enabled" /DietPi/dietpi.txt
 
@@ -421,7 +418,9 @@ When DietPi applies updates, all system services will be temporarily stopped. Do
 	if (( $INPUT == -1 )); then
 
 		G_DIETPI_VERSION_SUB=$(( $G_DIETPI_VERSION_SUB - 1 ))
-		G_DIETPI-NOTIFY 0 "Repatch was requested: Subversion internally reduced to \"$G_DIETPI_VERSION_SUB\" to reapply the last update"
+		G_DIETPI_VERSION_RC=0
+		INFO_VERSIONS_UPDATE
+		G_DIETPI-NOTIFY 2 "Repatch was requested: Subversion reduced to \e[33m\"$G_DIETPI_VERSION_SUB\"\e[90m to reapply the last update"
 		INPUT=1
 
 	fi
