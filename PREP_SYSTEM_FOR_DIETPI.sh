@@ -994,33 +994,33 @@ _EOF_
 
 		G_DIETPI-NOTIFY 2 'Removing misc files/folders/services, not required by DietPi'
 
-		[[ -d '/home' ]] && rm -R /home
-		[[ -d '/media' ]] && rm -R /media
-		[[ -d '/selinux' ]] && rm -R /selinux
+		[[ -d '/home' ]] && rm -vR /home
+		[[ -d '/media' ]] && rm -vR /media
+		[[ -d '/selinux' ]] && rm -vR /selinux
 
 		# - www
-		[[ -d '/var/www' ]] && rm -Rf /var/www/{,.??,.[^.]}*
+		[[ -d '/var/www' ]] && rm -vRf /var/www/{,.??,.[^.]}*
 
 		# - Sourcecode (linux-headers etc)
-		[[ -d '/usr/src' ]] && rm -Rf /usr/src/{,.??,.[^.]}*
+		[[ -d '/usr/src' ]] && rm -vRf /usr/src/{,.??,.[^.]}*
 
 		# - root
-		[[ -e '/root/.cache' ]] && rm -R /root/.cache
-		[[ -e '/root/.local' ]] && rm -R /root/.local
-		[[ -e '/root/.config' ]] && rm -R /root/.config
+		[[ -e '/root/.cache' ]] && rm -vR /root/.cache
+		[[ -e '/root/.local' ]] && rm -vR /root/.local
+		[[ -e '/root/.config' ]] && rm -vR /root/.config
 
-		# - Documentation dirs
-		[[ -d '/usr/share/man' ]] && rm -R /usr/share/man
-		[[ -d '/usr/share/doc' ]] && rm -R /usr/share/doc
-		[[ -d '/usr/share/doc-base' ]] && rm -R /usr/share/doc-base
-		[[ -d '/usr/share/calendar' ]] && rm -R /usr/share/calendar
+		# - Documentation dirs: https://github.com/MichaIng/DietPi/issues/3259
+		#[[ -d '/usr/share/man' ]] && rm -vR /usr/share/man
+		#[[ -d '/usr/share/doc' ]] && rm -vR /usr/share/doc
+		#[[ -d '/usr/share/doc-base' ]] && rm -vR /usr/share/doc-base
+		[[ -d '/usr/share/calendar' ]] && rm -vR /usr/share/calendar
 
 		# - Previous debconfs
 		rm -f /var/cache/debconf/*-old
 
 		# - Fonts
-		[[ -d '/usr/share/fonts' ]] && rm -R /usr/share/fonts
-		[[ -d '/usr/share/icons' ]] && rm -R /usr/share/icons
+		[[ -d '/usr/share/fonts' ]] && rm -vR /usr/share/fonts
+		[[ -d '/usr/share/icons' ]] && rm -vR /usr/share/icons
 
 		# - Stop, disable and remove not required 3rd party services
 		local aservices=(
@@ -1053,7 +1053,7 @@ _EOF_
 					systemctl mask ${j##*/}
 
 				else
-					rm -R $j
+					rm -vR $j
 
 				fi
 
@@ -1064,38 +1064,50 @@ _EOF_
 		systemctl daemon-reload
 
 		# - ARMbian specific
-		[[ -f '/boot/armbian_first_run.txt.template' ]] && rm /boot/armbian_first_run.txt.template
-		[[ -f '/usr/bin/armbianmonitor' ]] && rm /usr/bin/armbianmonitor
-		[[ -d '/usr/lib/armbian' ]] && rm -R /usr/lib/armbian
-		[[ -f '/usr/local/sbin/log2ram' ]] && rm /usr/local/sbin/log2ram
-		[[ -d '/usr/share/armbian' ]] && rm -R /usr/share/armbian
-		#rm -f /etc/armbian* armbian-release required for kernel package update (initramfs postinst)
-		rm -f /etc/apt/apt.conf.d/*armbian*
-		rm -f /etc/cron.*/armbian*
-		rm -f /etc/default/armbian*
-		rm -f /etc/profile.d/armbian*
-		rm -f /etc/update-motd.d/*armbian*
-		rm -f /etc/X11/xorg.conf.d/*armbian*
+		[[ -f '/boot/armbian_first_run.txt.template' ]] && rm -v /boot/armbian_first_run.txt.template
+		[[ -f '/usr/bin/armbianmonitor' ]] && rm -v /usr/bin/armbianmonitor
+		[[ -f '/usr/local/sbin/log2ram' ]] && rm -v /usr/local/sbin/log2ram
 		umount /var/log.hdd 2> /dev/null
 		[[ -d '/var/log.hdd' ]] && rm -R /var/log.hdd
+		rm -vf /etc/X11/xorg.conf.d/*armbian*
+		#rm -vf /etc/armbian* armbian-release required for kernel package upgrade (initramfs postinst)
+		rm -vf /etc/apt/apt.conf.d/*armbian*
+		rm -vf /etc/cron.*/*armbian*
+		#rm -vf /etc/default/*armbian* # Required for ARMbian root package upgrade
+		rm -vf /etc/update-motd.d/*armbian*
+		rm -vf /etc/profile.d/*armbian*
+		#[[ -d '/usr/lib/armbian' ]] && rm -vR /usr/lib/armbian # Required for ARMbian root package upgrade
+		[[ -d '/usr/share/armbian' ]] && rm -vR /usr/share/armbian
+		# Place DPKG exclude file, especially to skip cron jobs, which are doomed to fail and an unnecessary overhead + syslog spam on DietPi
+		cat << _EOF_ > /etc/dpkg/dpkg.cfg.d/dietpi-no_armbian
+# Exclude conflicting ARMbian files
+path-exclude /lib/systemd/system/*armbian*
+path-exclude /etc/apt/apt.conf.d/*armbian*
+path-exclude /etc/cron.*/*armbian*
+#path-exclude /etc/default/*armbian* # Required for ARMbian root package upgrade
+path-exclude /etc/update-motd.d/*armbian*
+path-exclude /etc/profile.d/*armbian*
+#path-exclude /usr/lib/armbian # Required for ARMbian root package upgrade
+path-exclude /usr/share/armbian
+_EOF_
 
 		# - OMV: https://github.com/MichaIng/DietPi/issues/2994
-		[[ -d '/etc/openmediavault' ]] && rm -R /etc/openmediavault
-		rm -f /etc/cron.*/openmediavault*
-		rm -f /usr/sbin/omv-*
+		[[ -d '/etc/openmediavault' ]] && rm -vR /etc/openmediavault
+		rm -vf /etc/cron.*/openmediavault*
+		rm -vf /usr/sbin/omv-*
 
 		# - Meveric specific
-		[[ -f '/usr/local/sbin/setup-odroid' ]] && rm /usr/local/sbin/setup-odroid
+		[[ -f '/usr/local/sbin/setup-odroid' ]] && rm -v /usr/local/sbin/setup-odroid
 
 		# - RPi specific: https://github.com/MichaIng/DietPi/issues/1631#issuecomment-373965406
-		[[ -f '/etc/profile.d/wifi-country.sh' ]] && rm /etc/profile.d/wifi-country.sh
-		[[ -f '/etc/sudoers.d/010_pi-nopasswd' ]] && rm /etc/sudoers.d/010_pi-nopasswd
-		[[ -d '/etc/systemd/system/dhcpcd.service.d' ]] && rm -R /etc/systemd/system/dhcpcd.service.d # https://github.com/RPi-Distro/pi-gen/blob/master/stage3/01-tweaks/00-run.sh
+		[[ -f '/etc/profile.d/wifi-country.sh' ]] && rm -v /etc/profile.d/wifi-country.sh
+		[[ -f '/etc/sudoers.d/010_pi-nopasswd' ]] && rm -v /etc/sudoers.d/010_pi-nopasswd
+		[[ -d '/etc/systemd/system/dhcpcd.service.d' ]] && rm -vR /etc/systemd/system/dhcpcd.service.d # https://github.com/RPi-Distro/pi-gen/blob/master/stage3/01-tweaks/00-run.sh
 		#	Do not ship rc.local anymore. On DietPi /var/lib/dietpi/postboot.d should be used.
 		#	WIP: Mask rc-local.service and create symlink postboot.d/rc.local => /etc/rc.local for backwards compatibility?
-		[[ -f '/etc/rc.local' ]] && rm /etc/rc.local # https://github.com/RPi-Distro/pi-gen/blob/master/stage2/01-sys-tweaks/files/rc.local
+		[[ -f '/etc/rc.local' ]] && rm -v /etc/rc.local # https://github.com/RPi-Distro/pi-gen/blob/master/stage2/01-sys-tweaks/files/rc.local
 		#	Below required if DietPi-PREP is executed from chroot/container, so RPi firstrun scripts are not executed
-		[[ -f '/etc/init.d/resize2fs_once' ]] && rm /etc/init.d/resize2fs_once # https://github.com/RPi-Distro/pi-gen/blob/master/stage2/01-sys-tweaks/files/resize2fs_once
+		[[ -f '/etc/init.d/resize2fs_once' ]] && rm -v /etc/init.d/resize2fs_once # https://github.com/RPi-Distro/pi-gen/blob/master/stage2/01-sys-tweaks/files/resize2fs_once
 		[[ -f '/boot/cmdline.txt' ]] && sed -i 's| init=/usr/lib/raspi-config/init_resize\.sh||' /boot/cmdline.txt # https://github.com/RPi-Distro/pi-gen/blob/master/stage2/01-sys-tweaks/00-patches/07-resize-init.diff
 
 		# - make_nas_processes_faster cron job on Rock64 + NanoPi + Pine64(?) images
@@ -1111,7 +1123,7 @@ _EOF_
 		# - Pre v6.9 cleaning:
 		sed -i '/\/DietPi/d' /root/.bashrc
 		sed -i '/\/DietPi/d' /home/dietpi/.bashrc &> /dev/null
-		rm -f /etc/profile.d/99-dietpi*
+		rm -vf /etc/profile.d/99-dietpi*
 
 		# - Enable /etc/bashrc.d/ support for custom interactive non-login shell scripts:
 		sed -i '\#/etc/bashrc\.d/#d' /etc/bash.bashrc
