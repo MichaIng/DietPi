@@ -1031,6 +1031,7 @@ _EOF_
 			'log2ram'
 			'armbian*'
 			'tinker-bluetooth'
+			'rk3399-bluetooth'
 			# Meveric
 			'cpu_governor'
 			# RPi
