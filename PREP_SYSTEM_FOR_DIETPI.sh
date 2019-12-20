@@ -812,9 +812,9 @@ _EOF_
 
 			fi
 
-		# - G_HW_MODEL specific required Kernel packages
+		# - G_HW_MODEL specific required firmware/kernel/bootloader packages
 		#	ARMbian grab currently installed packages
-		elif dpkg --get-selections | grep -qi 'armbian'; then
+		elif dpkg --get-selections | grep -q 'armbian'; then
 
 			systemctl stop armbian-*
 
@@ -835,8 +835,7 @@ _EOF_
 				do
 
 					aPACKAGES_REQUIRED_INSTALL+=("$line")
-					apt-mark hold $line
-					G_DIETPI-NOTIFY 2 "PKG detected and set on hold: $line"
+					G_DIETPI-NOTIFY 2 "ARMbian package detected and added: $line"
 
 				done <<< "$(dpkg --get-selections | mawk -v pat="^$i" '$0~pat {print $1}')"
 
@@ -1029,7 +1028,7 @@ _EOF_
 			'firstrun'
 			'resize2fs'
 			'log2ram'
-			'armbian*'
+			'*armbian*'
 			'tinker-bluetooth'
 			'rk3399-bluetooth'
 			# Meveric
@@ -1071,14 +1070,15 @@ _EOF_
 		umount /var/log.hdd 2> /dev/null
 		[[ -d '/var/log.hdd' ]] && rm -R /var/log.hdd
 		rm -vf /etc/X11/xorg.conf.d/*armbian*
-		#rm -vf /etc/armbian* armbian-release required for kernel package upgrade (initramfs postinst)
+		#rm -vf /etc/armbian* armbian-release # Required for kernel/bootloader package upgrade (initramfs postinst)
+		rm -vf /lib/systemd/system/*armbian*
 		rm -vf /etc/apt/apt.conf.d/*armbian*
 		rm -vf /etc/cron.*/*armbian*
 		#rm -vf /etc/default/*armbian* # Required for ARMbian root package upgrade
 		rm -vf /etc/update-motd.d/*armbian*
 		rm -vf /etc/profile.d/*armbian*
 		#[[ -d '/usr/lib/armbian' ]] && rm -vR /usr/lib/armbian # Required for ARMbian root package upgrade
-		[[ -d '/usr/share/armbian' ]] && rm -vR /usr/share/armbian
+		#[[ -d '/usr/share/armbian' ]] && rm -vR /usr/share/armbian # Required for ARMbian root package upgrade
 		# Place DPKG exclude file, especially to skip cron jobs, which are doomed to fail and an unnecessary overhead + syslog spam on DietPi
 		cat << _EOF_ > /etc/dpkg/dpkg.cfg.d/dietpi-no_armbian
 # Exclude conflicting ARMbian files
@@ -1089,7 +1089,7 @@ path-exclude /etc/cron.*/*armbian*
 path-exclude /etc/update-motd.d/*armbian*
 path-exclude /etc/profile.d/*armbian*
 #path-exclude /usr/lib/armbian # Required for ARMbian root package upgrade
-path-exclude /usr/share/armbian
+#path-exclude /usr/share/armbian # Required for ARMbian root package upgrade
 _EOF_
 
 		# - OMV: https://github.com/MichaIng/DietPi/issues/2994
