@@ -5378,7 +5378,8 @@ Package: wireguard wireguard-dkms wireguard-tools\nPin: release n=bullseye\nPin-
 
 			Banner_Installing
 
-			# Needed PHP modules, (re)install to be failsafe: https://koel.phanan.net/docs/#/?id=requirements, https://laravel.com/docs/5.8/installation#server-requirements
+			# APT dependencies: https://koel.phanan.net/docs/#/?id=requirements, https://laravel.com/docs/5.8/installation#server-requirements
+			# - python: "gyp verb check python checking for Python executable "python2"/"python" in the PATH"
 			# - libpng-dev: "Error: pngquant failed to build, make sure that libpng-dev is installed"
 			DEPS_LIST="python libpng-dev $PHP_NAME-bcmath $PHP_NAME-json $PHP_NAME-mbstring $PHP_NAME-xml"
 
@@ -5389,26 +5390,32 @@ Package: wireguard wireguard-dkms wireguard-tools\nPin: release n=bullseye\nPin-
 			local fallback_url='https://github.com/phanan/koel/archive/v4.2.2.tar.gz'
 			Download_Install "https://github.com/phanan/koel/archive/$version.tar.gz"
 
-			# Reinstall: Clear previous install
-			[[ -d $G_FP_DIETPI_USERDATA/koel ]] && rm -R $G_FP_DIETPI_USERDATA/koel
+			# Reinstall: Clear previous install, but keep existing config file
+			if [[ -d $G_FP_DIETPI_USERDATA/koel ]]; then
+
+				[[ -f $G_FP_DIETPI_USERDATA/koel/.env ]] && mv $G_FP_DIETPI_USERDATA/koel/.env koel-*/
+				rm -R $G_FP_DIETPI_USERDATA/koel
+
+			fi
 			mv koel-* $G_FP_DIETPI_USERDATA/koel
 
 			# Download external assets manually, not included in download archive: https://github.com/phanan/koel/tree/master/resources
 			# - NB: We pull master archive, but this might not match to Koel latest release. Requires testing, else we need to switch to git clone.
 			Download_Install 'https://github.com/koel/core/archive/master.tar.gz'
 			rmdir $G_FP_DIETPI_USERDATA/koel/resources/assets
-			mv core-master $G_FP_DIETPI_USERDATA/koel/resources/assets
+			G_RUN_CMD mv core-master $G_FP_DIETPI_USERDATA/koel/resources/assets
 
-			# Install pre-req yarn
+			# Node.js dependencies
 			npm i -g --unsafe-perm yarn
 
 			# Download and install Composer
 			$PHP_NAME -r "readfile('https://getcomposer.org/installer');" > composer-setup.php
 			$PHP_NAME composer-setup.php
 			$PHP_NAME -r "unlink('composer-setup.php');"
-			mv composer.phar /usr/local/bin/composer
+			G_RUN_CMD mv composer.phar /usr/local/bin/composer
 			rm composer-setup.php
 
+			# Install Koel
 			cd $G_FP_DIETPI_USERDATA/koel
 			composer install
 			cd /tmp/$G_PROGRAM_NAME
@@ -11343,23 +11350,32 @@ _EOF_
 
 			Download_Test_Media
 
-			/DietPi/dietpi/func/create_mysql_db koel koel "$GLOBAL_PW"
-
 			cd $G_FP_DIETPI_USERDATA/koel
 
-			G_CONFIG_INJECT 'DB_CONNECTION=' 'DB_CONNECTION=mysql' .env
-			G_CONFIG_INJECT 'DB_HOST=' 'DB_HOST=127.0.0.1' .env
-			G_CONFIG_INJECT 'DB_DATABASE=' 'DB_DATABASE=koel' .env
-			G_CONFIG_INJECT 'DB_USERNAME=' 'DB_USERNAME=koel' .env
-			GCI_PASSWORD=1 G_CONFIG_INJECT 'DB_PASSWORD=' "DB_PASSWORD=$GLOBAL_PW" .env
-			# ADMIN env vars are not used any more, user prompt will ask for info.
-			#G_CONFIG_INJECT 'ADMIN_EMAIL=' 'ADMIN_EMAIL=dietpi@dietpi.com' .env
-			#G_CONFIG_INJECT 'ADMIN_NAME=' 'ADMIN_NAME=admin' .env
-			#GCI_PASSWORD=1 G_CONFIG_INJECT 'ADMIN_PASSWORD=' "ADMIN_PASSWORD=$GLOBAL_PW" .env
-			G_CONFIG_INJECT 'FFMPEG_PATH=' "FFMPEG_PATH=$(command -v ffmpeg)" .env
+			# Create database and apply to config file, if it does not exist yet
+			if [[ ! -d $G_FP_DIETPI_USERDATA/mysql/koel ]]; then
 
-			G_RUN_CMD systemctl restart mariadb # Assure database server runs, even if database did already exist
+				/DietPi/dietpi/func/create_mysql_db koel koel "$GLOBAL_PW"
+				G_CONFIG_INJECT 'DB_CONNECTION=' 'DB_CONNECTION=mysql' .env
+				G_CONFIG_INJECT 'DB_HOST=' 'DB_HOST=127.0.0.1' .env
+				G_CONFIG_INJECT 'DB_DATABASE=' 'DB_DATABASE=koel' .env
+				G_CONFIG_INJECT 'DB_USERNAME=' 'DB_USERNAME=koel' .env
+				GCI_PASSWORD=1 G_CONFIG_INJECT 'DB_PASSWORD=' "DB_PASSWORD=$GLOBAL_PW" .env
+				# ADMIN env vars are not used any more, user prompt will ask for info.
+				#G_CONFIG_INJECT 'ADMIN_EMAIL=' 'ADMIN_EMAIL=dietpi@dietpi.com' .env
+				#G_CONFIG_INJECT 'ADMIN_NAME=' 'ADMIN_NAME=admin' .env
+				#GCI_PASSWORD=1 G_CONFIG_INJECT 'ADMIN_PASSWORD=' "ADMIN_PASSWORD=$GLOBAL_PW" .env
+				G_CONFIG_INJECT 'FFMPEG_PATH=' "FFMPEG_PATH=$(command -v ffmpeg)" .env
+
+			# Else assure database server runs
+			else
+
+				G_RUN_CMD systemctl restart mariadb
+
+			fi
+
 			$PHP_NAME artisan koel:init
+			$PHP_NAME artisan key:generate # Required with current setup, else .env APP_KEY is missing, leading to 500 on web UI login attempt
 			#$PHP_NAME artisan db:seed --force
 
 			cd /tmp/$G_PROGRAM_NAME
@@ -11377,7 +11393,6 @@ ExecStart=$(command -v $PHP_NAME) $G_FP_DIETPI_USERDATA/koel/artisan serve --hos
 [Install]
 WantedBy=multi-user.target
 _EOF_
-
 			# Permissions
 			chown -R koel:dietpi $G_FP_DIETPI_USERDATA/koel
 
