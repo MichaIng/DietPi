@@ -1312,9 +1312,6 @@ _EOF_
 		G_ERROR_HANDLER_EXITCODE=$?
 		G_ERROR_HANDLER
 
-		# Remove all predefined eth*/wlan* adapter rules
-		rm -f /etc/udev/rules.d/70-persist*nt-net.rules
-
 		# Add pre-up lines for WiFi on OrangePi Zero
 		if (( $G_HW_MODEL == 32 )); then
 
