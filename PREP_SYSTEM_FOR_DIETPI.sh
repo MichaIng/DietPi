@@ -1217,13 +1217,22 @@ _EOF_
 
 		G_DIETPI-NOTIFY 2 'Configuring wlan/eth naming to be preferred for networked devices:'
 		ln -sfv /dev/null /etc/systemd/network/99-default.link
+		ln -sfv /dev/null /etc/udev/rules.d/80-net-setup-link.rules
+		# - RPi: Add cmdline entry, which was required on my Raspbian Bullseye system since last few APT updates
+		if [[ -f '/boot/cmdline.txt' ]]; then
+
+			sed -i 's/net.ifnames=[^[:blank:]]*[[:blank:]]*//g;w /dev/stdout' /boot/cmdline.txt
+			sed -i '/root=/s/[[:blank:]]*$/ net.ifnames=0/;w /dev/stdout' /boot/cmdline.txt
+
+		fi
+		[[ -f '/etc/udev/rules.d/70-persistent-net.rules' ]] rm -v /etc/udev/rules.d/70-persistent-net.rules # Jessie pre-image
 
 		G_DIETPI-NOTIFY 2 'Resetting and adding dietpi.com SSH pub host key for DietPi-Survey/Bugreport uploads:'
 		mkdir -p /root/.ssh
 		echo 'ssh.dietpi.com ssh-rsa AAAAB3NzaC1yc2EAAAADAQABAAABAQDE6aw3r6aOEqendNu376iiCHr9tGBIWPgfrLkzjXjEsHGyVSUFNnZt6pftrDeK7UX+qX4FxOwQlugG4fymOHbimRCFiv6cf7VpYg1Ednquq9TLb7/cIIbX8a6AuRmX4fjdGuqwmBq3OG7ZksFcYEFKt5U4mAJIaL8hXiM2iXjgY02LqiQY/QWATsHI4ie9ZOnwrQE+Rr6mASN1BVFuIgyHIbwX54jsFSnZ/7CdBMkuAd9B8JkxppWVYpYIFHE9oWNfjh/epdK8yv9Oo6r0w5Rb+4qaAc5g+RAaknHeV6Gp75d2lxBdCm5XknKKbGma2+/DfoE8WZTSgzXrYcRlStYN' > /root/.ssh/known_hosts
 
 		G_DIETPI-NOTIFY 2 'Recreating symlink for resolv.conf (DNS):'
-		echo 'nameserver 8.8.8.8' > /etc/resolvconf/run/resolv.conf # Temp apply, in case was not previously symlink, resets on next ifup
+		echo 'nameserver 1.1.1.1' > /etc/resolvconf/run/resolv.conf # Temp apply, in case was not previously symlink, resets on next ifup
 		ln -sfv /etc/resolvconf/run/resolv.conf /etc/resolv.conf
 
 		# ifupdown starts the daemon outside of systemd, the enabled systemd unit just thows an error on boot due to missing dbus and with dbus might interfere with ifupdown
@@ -1411,7 +1420,7 @@ _EOF_
 		systemctl mask systemd-logind
 
 		G_DIETPI-NOTIFY 2 'Configuring regional settings (TZdata):'
-		rm -Rf /etc/{localtime,timezone}
+		rm -f /etc/{localtime,timezone}
 		ln -sf /usr/share/zoneinfo/UTC /etc/localtime
 		G_RUN_CMD dpkg-reconfigure -f noninteractive tzdata
 
@@ -1425,10 +1434,10 @@ _EOF_
 
 		if (( $G_HW_ARCH == 10 )); then
 
-			# - i386 APT/DPKG support
+			# i386 APT/DPKG support
 			dpkg --add-architecture i386
 
-			# - Disable nouveau: https://github.com/MichaIng/DietPi/issues/1244 // https://dietpi.com/phpbb/viewtopic.php?p=9688#p9688
+			# Disable nouveau: https://github.com/MichaIng/DietPi/issues/1244 // https://dietpi.com/phpbb/viewtopic.php?p=9688#p9688
 			rm -f /etc/modprobe.d/*nouveau*
 			cat << _EOF_ > /etc/modprobe.d/dietpi-disable_nouveau.conf
 blacklist nouveau
@@ -1438,10 +1447,10 @@ alias nouveau off
 alias lbm-nouveau off
 _EOF_
 
-			# - Apply usb-storage quirks to disable UAS for unsupported drives (Seagate ST5000LM000-2AN170): https://github.com/MichaIng/DietPi/issues/2905
+			# Apply usb-storage quirks to disable UAS for unsupported drives (Seagate ST5000LM000-2AN170): https://github.com/MichaIng/DietPi/issues/2905
 			echo 'options usb-storage quirks=0bc2:ab30:u' > /etc/modprobe.d/dietpi-usb-storage_quirks.conf
 
-			# - Update initramfs with above changes
+			# Update initramfs with above changes
 			update-initramfs -u
 
 		fi
@@ -1644,7 +1653,7 @@ fdt set /ethernet@$identifier snps,txpbl <0x21>/;q}" /boot/boot.cmd
 			G_AGA
 
 			# - Native PC/EFI (assume x86_64 only possible)
-			if dpkg-query -s 'grub-efi-amd64' &> /dev/null && [[ -d '/boot/efi' ]]; then
+			if [[ -d '/boot/efi' ]] && dpkg-query -s 'grub-efi-amd64' &> /dev/null; then
 
 				l_message='Recreating GRUB-EFI' G_RUN_CMD grub-install --target=x86_64-efi --efi-directory=/boot/efi --bootloader-id=arch_grub --recheck
 
