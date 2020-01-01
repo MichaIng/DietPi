@@ -12,15 +12,14 @@
 	# Info:
 	# - Location: /{DietPi,boot}/dietpi/func/obtain_network_details
 	# - Attempts to find the 1st available index numbers for eth[0-9] and wlan[0-9] devices
-	# - Obtains the active network adapter (eth, then wlan).
-	# - Saves the above data to $FP_NETFILE for use system-wide
-	#
-	# line1: eth index
-	# line2: wlan index
-	# line3: Active adapter name (eg: eth0)
-	# line4: Active IP address
-	# line5: ETH_IP=<eth ip>
-	# line6: WLAN_IP=<wlan ip>
+	# - Obtains the active network interface (eth, then wlan).
+	# - Saves the above data to $FP_NETFILE for system-wide use:
+	#	line1: eth index
+	#	line2: wlan index
+	#	line3: Active interface name (eg: eth0)
+	#	line4: Active IP address
+	#	line5: ETH_IP=<eth IP>
+	#	line6: WLAN_IP=<wlan IP>
 	#////////////////////////////////////
 
 	# Exit, if already running
@@ -29,12 +28,11 @@
 	#/////////////////////////////////////////////////////////////////////////////////////
 	# Global
 	#/////////////////////////////////////////////////////////////////////////////////////
-
 	FP_NETFILE='/DietPi/dietpi/.network'
 
 	ETH_INDEX=''
 	WLAN_INDEX=''
-	ACTIVE_DEVICE=''
+	ACTIVE_IFACE=''
 	ACTIVE_IP=''
 	ETH_IP=''
 	WLAN_IP=''
@@ -42,68 +40,64 @@
 	Scan(){
 
 		# ETH
-		local eth_dev eth_index eth_out eth_ip
+		local eth_iface eth_index eth_out eth_ip
 		for i in /sys/class/net/eth*
 		do
 
 			# Check if any eth dev exists
 			[[ -e $i ]] || break
 
-			# Get dev name and index, assign not yet if lower index found
-			eth_dev=${i#*net/}
-			eth_index=${eth_dev#eth}
+			# Get interface name and index, assign if no lower index was assigned yet
+			eth_iface=${i#*net/}
+			eth_index=${eth_iface#eth}
 			[[ $ETH_INDEX ]] || ETH_INDEX=$eth_index
 
-			# Get and check IP, assign not yet if lower index IP found
-			eth_out=$(ip a s $eth_dev 2>/dev/null) || continue
-			# - Detect IPv4 and, if no available, IPv6
-			[[ $eth_out =~ [[:blank:]]inet6?[[:blank:]] ]] || continue
-			eth_ip=${eth_out#* inet* }
-			eth_ip=${eth_ip%%/*}
+			# Get and check IP, assign if no lower index IP was assigned yet
+			eth_out=$(ip -br a s $eth_iface 2> /dev/null) || continue
+			eth_out=${eth_out%%/*} # Remove trailing white space and net mask, if IP assigned
+			eth_ip=${eth_out##*[[:blank:]]} # Remove everything until IP, if assigned, else will empty string due to trailing white space
 			[[ $eth_ip ]] || continue
 			[[ $ETH_IP ]] || { ETH_IP=$eth_ip; ETH_INDEX=$eth_index; }
 
 			# Check connection state
-			[[ $eth_out =~ [[:blank:]]UP[[:blank:]] ]] || continue
+			[[ $eth_out == *[[:blank:]]UP[[:blank:]]* ]] || continue
 
 			# Assign active dev info
 			ETH_INDEX=$eth_index
 			ETH_IP=$eth_ip
-			ACTIVE_DEVICE=$eth_dev
+			ACTIVE_IFACE=$eth_iface
 			ACTIVE_IP=$ETH_IP
 			break
 
 		done
 
 		# WLAN
-		local wlan_dev wlan_index wlan_out wlan_ip
+		local wlan_iface wlan_index wlan_out wlan_ip
 		for i in /sys/class/net/wlan*
 		do
 
 			# Check if any wlan dev exists
 			[[ -e $i ]] || break
 
-			# Get dev name and index, assign not yet if lower index found
-			wlan_dev=${i#*net/}
-			wlan_index=${wlan_dev#wlan}
+			# Get interface name and index, assign if no lower index was assigned yet
+			wlan_iface=${i#*net/}
+			wlan_index=${wlan_iface#wlan}
 			[[ $WLAN_INDEX ]] || WLAN_INDEX=$wlan_index
 
-			# Get and check IP, assign not yet if lower index IP found
-			wlan_out=$(ip a s $wlan_dev 2>/dev/null) || continue
-			# - Detect IPv4 and, if no available, IPv6
-			[[ $wlan_out =~ [[:blank:]]inet6?[[:blank:]] ]] || continue
-			wlan_ip=${wlan_out#* inet* }
-			wlan_ip=${wlan_ip%%/*}
+			# Get and check IP, assign if no lower index IP was assigned yet
+			wlan_out=$(ip -br a s $wlan_iface 2> /dev/null) || continue
+			wlan_out=${wlan_out%%/*} # Remove trailing white space and net mask, if IP assigned
+			wlan_ip=${wlan_out##*[[:blank:]]} # Remove everything until IP, if assigned, else will empty string due to trailing white space
 			[[ $wlan_ip ]] || continue
 			[[ $WLAN_IP ]] || { WLAN_IP=$wlan_ip; WLAN_INDEX=$wlan_index; }
 
 			# Check connection state
-			[[ $wlan_out =~ [[:blank:]]UP[[:blank:]] ]] || continue
+			[[ $wlan_out == *[[:blank:]]UP[[:blank:]]* ]] || continue
 
-			# Assign active dev info if none (eth) assigned yet
+			# Assign active dev info if none (eth) was assigned yet
 			WLAN_INDEX=$wlan_index
 			WLAN_IP=$wlan_ip
-			[[ $ACTIVE_DEVICE ]] || { ACTIVE_DEVICE=$wlan_dev; ACTIVE_IP=$WLAN_IP; }
+			[[ $ACTIVE_IFACE ]] || { ACTIVE_IFACE=$wlan_iface; ACTIVE_IP=$WLAN_IP; }
 			break
 
 		done
@@ -115,21 +109,42 @@
 	#/////////////////////////////////////////////////////////////////////////////////////
 	Scan
 	#-----------------------------------------------------------------------------------
+	# Active interface fallback due to possible "UNKNOWN" connection state and to always have an interface assigned if any present
+	if [[ ! $ACTIVE_IFACE ]]; then
+
+		if [[ $ETH_IP ]]; then
+
+			ACTIVE_IFACE="eth$ETH_INDEX"
+			ACTIVE_IP=$ETH_IP
+
+		elif [[ $WLAN_IP ]]; then
+
+			ACTIVE_IFACE="wlan$WLAN_INDEX"
+			ACTIVE_IP=$WLAN_IP
+
+		elif [[ $ETH_INDEX ]]; then
+
+			ACTIVE_IFACE="eth$ETH_INDEX"
+
+		elif [[ $WLAN_INDEX ]]; then
+
+			ACTIVE_IFACE="wlan$WLAN_INDEX"
+
+		fi
+
+	fi
+	#-----------------------------------------------------------------------------------
 	# Write to file
-	cat << _EOF_ > $FP_NETFILE
-${ETH_INDEX:-0}
+	echo "${ETH_INDEX:-0}
 ${WLAN_INDEX:-0}
-${ACTIVE_DEVICE:-NONE}
+${ACTIVE_IFACE:-NONE}
 ${ACTIVE_IP:-Use dietpi-config to setup a connection}
 ETH_IP=$ETH_IP
-WLAN_IP=$WLAN_IP
-_EOF_
+WLAN_IP=$WLAN_IP" > $FP_NETFILE
 
 	# Assure that non-root user can write file
 	(( $UID )) || chmod 666 $FP_NETFILE
-
 	#-----------------------------------------------------------------------------------
 	exit
 	#-----------------------------------------------------------------------------------
-
 }

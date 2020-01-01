@@ -33,15 +33,15 @@
 	# Autoboot
 	Run_AutoStart(){
 
-		# - Boot into specific program if we have a valid screen
+		# Boot into specific program if we have a valid screen
 		if [[ ! $DISPLAY && $(tty) == '/dev/tty1' ]]; then
 
-			# - Kodi
+			# Kodi
 			if (( $auto_start_index == 1 )); then
 
 				/DietPi/dietpi/misc/start_kodi
 
-			# - Desktop (LXDE/MATE etc)
+			# Desktop (LXDE/MATE etc)
 			elif (( $auto_start_index == 2 )); then
 
 				clear
@@ -55,46 +55,46 @@
 
 				fi
 
-			# - RetroPie/Emulation station
+			# RetroPie/Emulation station
 			elif (( $auto_start_index == 3 )); then
 
-				#	emulationstation - can no longer be run as root
+				# emulationstation - can no longer be run as root
 				/opt/retropie/supplementary/emulationstation/emulationstation.sh
 
-			# - OpenTyrian
+			# OpenTyrian
 			elif (( $auto_start_index == 4 )); then
 
 				/usr/local/games/opentyrian/run
 
-			# - DietPi-Cloudshell
+			# DietPi-Cloudshell
 			elif (( $auto_start_index == 5 )); then
 
 				setterm --blank 0 --powersave off --cursor off
 				systemctl start dietpi-cloudshell
 
-			# - Amiberry standard boot
+			# Amiberry standard boot
 			elif (( $auto_start_index == 8 )); then
 
 				systemctl start amiberry
 
-			# - DXX-Rebirth
+			# DXX-Rebirth
 			elif (( $auto_start_index == 9 )); then
 
 				$G_FP_DIETPI_USERDATA/dxx-rebirth/run.sh
 
-			# - CAVA
+			# CAVA
 			elif (( $auto_start_index == 10 )); then
 
 				sleep 4 # Wait for MPD fifo to start
 				setterm --blank 0 --powersave off
 				cava
 
-			# - Chromium
+			# Chromium
 			elif (( $auto_start_index == 11 )); then
 
 				/var/lib/dietpi/dietpi-software/installed/chromium-autostart.sh
 
-			# - LightDM
+			# LightDM
 			elif (( $auto_start_index == 16 )); then
 
 				systemctl start lightdm
@@ -105,18 +105,46 @@
 
 	}
 
+	# Force interactive prompt on unexpected state or failure, to allow user choice to retry or exit
+	Prompt_on_Failure(){
+
+		/DietPi/dietpi/func/dietpi-banner 0
+
+		# Force interactive mode to show G_WHIP error prompts
+		# - NB: We need to write this to dietpi.txt as well to not have it overwritten on next loop.
+		export G_INTERACTIVE=1
+		G_CONFIG_INJECT 'AUTO_SETUP_AUTOMATED=' 'AUTO_SETUP_AUTOMATED=0' /DietPi/dietpi.txt
+
+		if G_WHIP_DEFAULT_ITEM='yes' G_WHIP_YESNO "[FAILED] Unknown install state/First run setup failed\n
+An error has occured either during first run update or installs.\n
+First run setup will now attempt to re-apply the last step, forced as interactive run.
+If this repeatedly fails, please collect all terminal output and the content of $FP_DIETPI_FIRSTRUNSETUP_LOG if available and report this issue to: https://github.com/MichaIng/DietPi/issues\n
+Would you like to restart the first run setup and installation?"; then
+
+			# Reset and force re-run of first run
+			killall -qw dietpi-software dietpi-update
+			echo 0 > /DietPi/dietpi/.install_stage
+
+		else
+
+			exit 1
+
+		fi
+
+	}
+
 	# First Run Setup
 	Run_DietPi_First_Run_Setup(){
 
-		# - Set non-interactive if automated firstrun setup has been chosen
+		# Set non-interactive if automated firstrun setup has been chosen
 		grep -qi '^[[:blank:]]*AUTO_SETUP_AUTOMATED=1' /DietPi/dietpi.txt && export G_INTERACTIVE=0
 
-		# - Prompt and wait if this script runs in other session already
+		# Prompt and wait if this script runs in other session already
 		local pid_firstrunsetup
 		[[ -f $FP_DIETPI_FIRSTRUNSETUP_PID ]] && pid_firstrunsetup=$(<$FP_DIETPI_FIRSTRUNSETUP_PID)
 		if [[ $pid_firstrunsetup && $pid_firstrunsetup != $$ ]]; then
 
-			# - First run setup running in other session
+			# First run setup running in other session
 			local additional_text='Please resume setup on the active screen.'
 			[[ $G_INTERACTIVE == 0 ]] && additional_text='Automated setup is in progress. When completed, the system will be rebooted.'
 
@@ -147,23 +175,33 @@ Please login again as user "root" with password "dietpi", respectively the one y
 			# 1st run dietpi-update
 			if (( $G_DIETPI_INSTALL_STAGE == 0 )); then
 
-				# - Check internet
-				optional_cmd_inputs='--no-check-certificate' G_CHECK_URL "$(grep -m1 '^[[:blank:]]*deb[[:blank:]]' /etc/apt/sources.list | mawk '{print $2}')" # Will exit on failure here then prompt user to configure network
+				# Checking network connectivity
+				local timeout=$(sed -n '/^[[:blank:]]*CONFIG_G_CHECK_URL_TIMEOUT=/{s/^[^=]*=//p;q}' /DietPi/dietpi.txt)
+				local ip=$(sed -n '/^[[:blank:]]*CONFIG_CHECK_CONNECTION_IP=/{s/^[^=]*=//p;q}' /DietPi/dietpi.txt)
+				l_message='Checking network connectivity' G_RUN_CMD ping -c 1 -W ${timeout:-5} ${ip:-1.1.1.1}
 
-				# - Check NTP synced
+				# Checking DNS resolver
+				# - NB: The timeout is only valid for ping response while DNS resolver timeout is controlled by: https://manpages.debian.org/resolv.conf
+				local domain=$(sed -n '/^[[:blank:]]*CONFIG_CHECK_DNS_DOMAIN=/{s/^[^=]*=//p;q}' /DietPi/dietpi.txt)
+				l_message='Checking DNS resolver' G_RUN_CMD ping -c 1 -W ${timeout:-5} ${domain:-one.one.one.one}
+
+				# Network time sync
 				/DietPi/dietpi/func/run_ntpd
 
-				# - Start DietPi-Update
+				# Start DietPi-Update
 				/DietPi/dietpi/dietpi-update 1 # Sets G_DIETPI_INSTALL_STAGE=1
+
+				# Prompt on failure
+				(( $(</DietPi/dietpi/.install_stage) == 1 )) || Prompt_on_Failure
 
 			# 1st run dietpi-software installs
 			elif (( $G_DIETPI_INSTALL_STAGE == 1 )); then
 
-				# - Start DietPi-Software
-				export G_WHIP_SIZE_X_OVERRIDE=$(tput cols)
-				export G_WHIP_SIZE_Y_OVERRIDE=$(tput lines)
+				# Start DietPi-Software
 				/DietPi/dietpi/dietpi-software 2>&1 | tee $FP_DIETPI_FIRSTRUNSETUP_LOG # Sets G_DIETPI_INSTALL_STAGE=2
-				unset G_WHIP_SIZE_X_OVERRIDE G_WHIP_SIZE_Y_OVERRIDE
+
+				# Prompt on failure
+				(( $(</DietPi/dietpi/.install_stage) == 2 )) || Prompt_on_Failure
 
 			fi
 
@@ -199,7 +237,6 @@ Please login again as user "root" with password "dietpi", respectively the one y
 			if (( $G_DIETPI_INSTALL_STAGE == 2 )); then
 
 				Show_License
-
 				/DietPi/dietpi/func/dietpi-banner 1
 
 				local auto_start_index=0
@@ -213,35 +250,13 @@ Please login again as user "root" with password "dietpi", respectively the one y
 			elif [[ $G_DIETPI_INSTALL_STAGE == [01] ]]; then
 
 				/DietPi/dietpi/func/dietpi-banner 0
-
 				Run_DietPi_First_Run_Setup
 
 			#----------------------------------------------------------------
 			# Unknown install state
 			else
 
-				/DietPi/dietpi/func/dietpi-banner 0
-
-				# - Force interactive mode to show G_WHIP error prompts
-				#   NB: We need to write this to dietpi.txt as well to not have this overwritten on next loop.
-				export G_INTERACTIVE=1
-				G_CONFIG_INJECT 'AUTO_SETUP_AUTOMATED=' 'AUTO_SETUP_AUTOMATED=0' /DietPi/dietpi.txt
-
-				if G_WHIP_DEFAULT_ITEM='yes' G_WHIP_YESNO "[FAILED] Unknown install state/First run setup failed\n
-An error has occured either during first run update or installs.\n
-First run setup will now attempt to re-apply the last step, forced as interactive run.
-If this repeatedly fails, please collect all terminal output and the content of $FP_DIETPI_FIRSTRUNSETUP_LOG if available and report this issue to: https://github.com/MichaIng/DietPi/issues\n
-Would you like to restart the first run setup and installation?"; then
-
-					# - Reset and force re-run of first run
-					killall -qw dietpi-software dietpi-update
-					echo 0 > /DietPi/dietpi/.install_stage
-
-				else
-
-					break
-
-				fi
+				Prompt_on_Failure
 
 			fi
 

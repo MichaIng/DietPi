@@ -26,9 +26,9 @@
 	Wait_For_Valid_Network_Connection(){
 
 		# Wait mode, max time
-		local boot_wait_for_network=$(grep -m1 '^[[:blank:]]*CONFIG_BOOT_WAIT_FOR_NETWORK=' /DietPi/dietpi.txt | sed 's/^[^=]*=//')
+		local boot_wait_for_network=$(sed -n '/^[[:blank:]]*CONFIG_BOOT_WAIT_FOR_NETWORK=/{s/^[^=]*=//p;q}' /DietPi/dietpi.txt)
 		local max_loops=-1
-		(( $boot_wait_for_network )) && max_loops=10
+		(( ${boot_wait_for_network:=1} )) && max_loops=10
 
 		local loop_count=0
 		while (( $loop_count <= $max_loops ))
@@ -36,7 +36,7 @@
 
 			G_DIETPI-NOTIFY 2 "$(date) | Waiting for valid network connection before continuing boot | Mode=$boot_wait_for_network"
 
-			if [[ $(ip r) =~ ' via ' ]]; then
+			if ip r s 0.0.0.0/0 &> /dev/null; then
 
 				G_DIETPI-NOTIFY 0 "$(date) | Valid network connection found"
 				break
@@ -59,27 +59,25 @@
 
 		#----------------------------------------------------------------
 		# WiFi Country | Additional fallback for (older kernel?) devices that fail with wpa_supplicant.conf https://github.com/MichaIng/DietPi/issues/838
-		command -v iw &> /dev/null && iw reg set "$(grep -m1 '^[[:blank:]]*CONFIG_WIFI_COUNTRY_CODE=' /DietPi/dietpi.txt | sed 's/^[^=]*=//')" &
+		command -v iw &> /dev/null && iw reg set "$(sed -n '/^[[:blank:]]*CONFIG_WIFI_COUNTRY_CODE=/{s/^[^=]*=//p;q}' /DietPi/dietpi.txt)" &
 		#----------------------------------------------------------------
 		# Network failure workarounds
-		# - Failsafe, bring up interfaces, if somehow not done by networking.service. If those are up already, nothing will happen.
-		if grep -qiE '^[[:blank:]]*(allow-hotplug|auto)[[:blank:]]+wlan' /etc/network/interfaces; then
+		# - Failsafe: Bring up network interfaces, since networking.service does not include "allow-hotplug".
+		# - ifup@.service is triggered by udev for those, but Type=simple, hence targets don't need to wait for it to finish: https://bugs.debian.org/cgi-bin/bugreport.cgi?bug=791920
+		if grep -qE '^[[:blank:]]*(allow-hotplug|auto)[[:blank:]]+wlan' /etc/network/interfaces; then
 
-			local wlan_index=$(sed -n 2p /DietPi/dietpi/.network)
+			local wlan_index=$(mawk 'NR==2' /DietPi/dietpi/.network)
 			disable_error=1 G_CHECK_VALIDINT "$wlan_index" 0 || wlan_index=0
-			# - Workaround: WLAN currently fails to connect during boot, so, manually drop and reconnect: https://github.com/MichaIng/DietPi/issues/602#issuecomment-262806470
-			#	OPi Zero 2 / Neo Air
+			# OPi Zero 2 / Neo Air: WLAN currently fails to connect during boot, so, manually drop and reconnect: https://github.com/MichaIng/DietPi/issues/602#issuecomment-262806470
 			(( $G_HW_MODEL == 35 || $G_HW_MODEL == 64 )) && ifdown wlan$wlan_index 2> /dev/null
-
-			ifup wlan$wlan_index &> /dev/null &
+			ifup wlan$wlan_index 2> /dev/null &
 
 		fi
+		if grep -qE '^[[:blank:]]*(allow-hotplug|auto)[[:blank:]]+eth' /etc/network/interfaces; then
 
-		if grep -qiE '^[[:blank:]]*(allow-hotplug|auto)[[:blank:]]+eth' /etc/network/interfaces; then
-
-			local eth_index=$(sed -n 1p /DietPi/dietpi/.network)
+			local eth_index=$(mawk 'NR==1' /DietPi/dietpi/.network)
 			disable_error=1 G_CHECK_VALIDINT "$eth_index" 0 || eth_index=0
-			ifup eth$eth_index &> /dev/null &
+			ifup eth$eth_index 2> /dev/null &
 
 		fi
 		#----------------------------------------------------------------
@@ -87,9 +85,6 @@
 		#----------------------------------------------------------------
 		# Grab IP data
 		/DietPi/dietpi/func/obtain_network_details
-		#----------------------------------------------------------------
-		# Remount all drives (eg: network shares)
-		mount -a
 		#----------------------------------------------------------------
 		# Lower dmesg print level (mostly for Odroid C2 where HiFi Shield prints info when starting/stopping stream on tty1)
 		dmesg -n 1
@@ -103,6 +98,7 @@
 	#----------------------------------------------------------------
 	# Init
 	Run_Init
+	cd /tmp # Allow background jobs to finish after parent, without failing to cd into /tmp/$G_PROGRAM_NAME, which does not exist anymore
 	#----------------------------------------------------------------
 	# Pre-installed image, 1st run
 	if (( $G_DIETPI_INSTALL_STAGE == 10 )); then
@@ -111,12 +107,11 @@
 		swap_size=$(sed -n '/^[[:blank:]]*AUTO_SETUP_SWAPFILE_SIZE=/{s/^[^=]*=//p;q}' /DietPi/dietpi.txt)
 		disable_error=1 G_CHECK_VALIDINT "$swap_size" 0 || swap_size=1
 		swap_location=$(sed -n '/^[[:blank:]]*AUTO_SETUP_SWAPFILE_LOCATION=/{s/^[^=]*=//p;q}' /DietPi/dietpi.txt)
-		[[ $swap_location ]] || swap_location='/var/swap'
+		[[ $swap_location == '/'* ]] || swap_location='/var/swap'
 		/DietPi/dietpi/func/dietpi-set_swapfile $swap_size "$swap_location"
 
 		# Run survey
-		[[ -f '/DietPi/dietpi/.dietpi-survey' ]] && rm /DietPi/dietpi/.dietpi-survey
-		/DietPi/dietpi/dietpi-survey 1 &> /dev/null &
+		/DietPi/dietpi/dietpi-survey 1 &
 
 		# Continue with normal boot
 		G_DIETPI_INSTALL_STAGE=2
@@ -126,7 +121,7 @@
 	#----------------------------------------------------------------
 	# Normal boot
 	# - Run time sync
-	(( $G_DIETPI_INSTALL_STAGE == 2 )) && /DietPi/dietpi/func/run_ntpd 1 &> /dev/null &
+	(( $G_DIETPI_INSTALL_STAGE == 2 )) && /DietPi/dietpi/func/run_ntpd 1 &
 	#-----------------------------------------------------------------------------------
 	exit
 	#-----------------------------------------------------------------------------------
