@@ -1223,7 +1223,7 @@ _EOF_
 			sed -i '/root=/s/[[:blank:]]*$/ net.ifnames=0/;w /dev/stdout' /boot/cmdline.txt
 
 		fi
-		[[ -f '/etc/udev/rules.d/70-persistent-net.rules' ]] rm -v /etc/udev/rules.d/70-persistent-net.rules # Jessie pre-image
+		[[ -f '/etc/udev/rules.d/70-persistent-net.rules' ]] && rm -v /etc/udev/rules.d/70-persistent-net.rules # Jessie pre-image
 
 		G_DIETPI-NOTIFY 2 'Resetting and adding dietpi.com SSH pub host key for DietPi-Survey/Bugreport uploads:'
 		mkdir -p /root/.ssh
