@@ -65,7 +65,7 @@ Creator and maintainer of the Clonezilla based installer images for x86_64 UEFI 
 
 ### Collaborations
 
-#### DietPi + AmiBerry
+#### DietPi + Amiberry
 
 _02/09/2016_
 
@@ -138,7 +138,7 @@ Are you able to:
 If so, let us know!
 We are always looking for talented people who believe in the DietPi project, and, wish to contribute in any way you can.
 
-- Send me an Email: daniel.knight@dietpi.com
+- Send me an Email: micha@dietpi.com
 - Join our forums: https://dietpi.com/phpbb
 - GitHub: https://github.com/MichaIng/DietPi
 
@@ -150,8 +150,8 @@ Vote for new suggestions, feature-, software- or image requests, or add your own
 
 ## License
 
-DietPi Copyright (C) 2016 Daniel Knight
-- Email daniel.knight@dietpi.com
+DietPi Copyright (C) 2020 MichaIng
+- Email micha@dietpi.com
 - Web https://dietpi.com
 
 This program is free software: you can redistribute it and/or modify
