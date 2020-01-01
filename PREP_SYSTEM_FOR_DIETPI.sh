@@ -720,6 +720,7 @@ _EOF_
 			'fake-hwclock'		# Hardware clock emulation, to allow correct timestamps during boot before network time sync
 			'gnupg'			# apt-key add
 			'htop'			# System monitor
+			'ifupdown'		# Network interface configuration
 			'iputils-ping'		# "ping" command
 			'isc-dhcp-client'	# DHCP client
 			'kmod'			# "modprobe", "lsmod", used by several DietPi scripts
@@ -933,9 +934,6 @@ _EOF_
 
 		l_message='Marking required packages as manually installed' G_RUN_CMD apt-mark manual ${aPACKAGES_REQUIRED_INSTALL[@]}
 
-		# Workaround: Installing required packages which would be autoremoved below due to missing dependants
-		# - resolvconf to prevent ifupdown removal on Buster mini.iso
-		G_AGI resolvconf
 		# Purging additional packages, that (in some cases) do not get autoremoved:
 		# - dbus: Not required for headless images, but sometimes marked as "important", thus not autoremoved.
 		# - dhcpcd5: https://github.com/MichaIng/DietPi/issues/1560#issuecomment-370136642
