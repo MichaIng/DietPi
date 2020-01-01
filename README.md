@@ -150,7 +150,7 @@ Vote for new suggestions, feature-, software- or image requests, or add your own
 
 ## License
 
-DietPi Copyright (C) 2019 MichaIng
+DietPi Copyright (C) 2020 MichaIng
 - Email micha@dietpi.com
 - Web https://dietpi.com
 
