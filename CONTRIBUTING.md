@@ -2,7 +2,7 @@
 
 Git coders, please use the active development branch: [dev](https://github.com/MichaIng/DietPi/tree/dev)
 
-- [How to add new software installation options to DietPi-Software](https://github.com/MichaIng/DietPi/issues/490#issuecomment-244416570)
+- [How to add a new software title to DietPi-Software](https://github.com/MichaIng/DietPi/wiki/How-to-add-a-new-software-title)
 
 Are you able to:
 
@@ -16,6 +16,6 @@ Are you able to:
 If so, let us know!
 We are always looking for talented people who believe in the DietPi project, and, wish to contribute in any way you can.
 
-- Send me an Email: daniel.knight@dietpi.com
+- Send me an Email: micha@dietpi.com
 - Join our forums: https://dietpi.com/phpbb
 - GitHub: https://github.com/MichaIng/DietPi
