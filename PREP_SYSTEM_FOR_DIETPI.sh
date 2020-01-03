@@ -1352,10 +1352,9 @@ _EOF_
 		cat << _EOF_ > $G_ERROR_HANDLER_COMMAND
 # DietPi default config for htop
 # Location: /etc/htoprc
-#
-# NB: htop will create "~/.config/htop/htoprc" based on this defaults, when opened the first time by per-user.
-#     Use setup (F2) within htop GUI or edit "~/.config/htop/htoprc" to change settings for your user.
-fields=48 18 46 47 49 1
+# NB: htop will create "~/.config/htop/htoprc" per-user based on this defaults, when opened the first time.
+#     Use setup (F2) within htop GUI or edit "~/.config/htop/htoprc" to change settings according to your needs.
+fields=0 48 39 18 46 49 1
 sort_key=46
 sort_direction=1
 hide_threads=0
@@ -1363,19 +1362,22 @@ hide_kernel_threads=1
 hide_userland_threads=1
 shadow_other_users=0
 show_thread_names=0
+show_program_path=1
 highlight_base_name=1
 highlight_megabytes=1
 highlight_threads=0
-tree_view=0
-header_margin=1
+tree_view=1
+header_margin=0
 detailed_cpu_time=0
-cpu_count_from_zero=0
+cpu_count_from_zero=1
+update_process_names=0
+account_guest_in_cpu_meter=0
 color_scheme=0
 delay=15
-left_meters=AllCPUs Memory Swap
-left_meter_modes=1 1 1
-right_meters=Tasks LoadAverage Uptime
-right_meter_modes=2 2 2
+left_meters=AllCPUs CPU
+left_meter_modes=1 1
+right_meters=Memory Swap Tasks LoadAverage Uptime
+right_meter_modes=1 1 2 2 2
 _EOF_
 		G_ERROR_HANDLER_EXITCODE=$?
 		G_ERROR_HANDLER
