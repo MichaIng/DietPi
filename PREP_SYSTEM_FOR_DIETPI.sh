@@ -994,6 +994,7 @@ _EOF_
 		[[ -d '/home' ]] && rm -vR /home
 		[[ -d '/media' ]] && rm -vR /media
 		[[ -d '/selinux' ]] && rm -vR /selinux
+		[[ -d '/var/cache/apparmor' ]] && rm -vR /var/cache/apparmor
 
 		# - www
 		[[ -d '/var/www' ]] && rm -vRf /var/www/{,.??,.[^.]}*
@@ -1120,8 +1121,8 @@ _EOF_
 		# Bash Profiles
 
 		# - Pre v6.9 cleaning:
-		sed -i '/\/DietPi/d' /root/.bashrc
-		sed -i '/\/DietPi/d' /home/dietpi/.bashrc &> /dev/null
+		[[ -f '/root/.bashrc' ]] && sed -i '/\/DietPi/d' /root/.bashrc
+		[[ -f '/home/dietpi/.bashrc' ]] && sed -i '/\/DietPi/d' /home/dietpi/.bashrc
 		rm -vf /etc/profile.d/99-dietpi*
 
 		# - Enable /etc/bashrc.d/ support for custom interactive non-login shell scripts:
@@ -1617,11 +1618,6 @@ fdt set /ethernet@$identifier snps,txpbl <0x21>/;q}" /boot/boot.cmd
 		# - Set Pi cmdline.txt back to normal
 		[[ -f '/boot/cmdline.txt' ]] && sed -i 's/ rootdelay=10//g' /boot/cmdline.txt
 
-		G_DIETPI-NOTIFY 2 'Generating default wpa_supplicant.conf'
-		/DietPi/dietpi/func/dietpi-wifidb 1
-		#	Move to /boot/ so users can modify as needed for automated
-		G_RUN_CMD mv /var/lib/dietpi/dietpi-wifi.db /boot/dietpi-wifi.txt
-
 		G_DIETPI-NOTIFY 2 'Disabling generic BT by default'
 		/DietPi/dietpi/func/dietpi-set_hardware bluetooth disable
 
@@ -1629,6 +1625,11 @@ fdt set /ethernet@$identifier snps,txpbl <0x21>/;q}" /boot/boot.cmd
 		local tmp_info='Disabling'
 		local tmp_mode='disable'
 		if (( $WIFI_REQUIRED )); then
+
+			G_DIETPI-NOTIFY 2 'Generating default wpa_supplicant.conf'
+			/DietPi/dietpi/func/dietpi-wifidb 1
+			# Move to /boot/ so users can modify as needed for automated
+			G_RUN_CMD mv /var/lib/dietpi/dietpi-wifi.db /boot/dietpi-wifi.txt
 
 			tmp_info='Enabling'
 			tmp_mode='enable'
