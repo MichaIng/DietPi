@@ -1534,13 +1534,40 @@ _EOF_
 		# - RPi:
 		elif (( $G_HW_MODEL < 10 )); then
 
-			# - Scroll lock fix for RPi by Midwan: https://github.com/MichaIng/DietPi/issues/474#issuecomment-243215674
+			# Scroll lock fix for RPi by Midwan: https://github.com/MichaIng/DietPi/issues/474#issuecomment-243215674
 			cat << _EOF_ > /etc/udev/rules.d/50-leds.rules
 ACTION=="add", SUBSYSTEM=="leds", ENV{DEVPATH}=="*/input*::scrolllock", ATTR{trigger}="kbd-scrollock"
 _EOF_
 
-			# - Disable RPi camera to add modules blacklist
+			# Disable RPi camera to add modules blacklist
 			/DietPi/dietpi/func/dietpi-set_hardware rpi-camera disable
+
+			# Update USBridgeSig Ethernet driver via postinst kernel script, until it has been merged into official RPi kernel: https://github.com/allocom/USBridgeSig/tree/master/ethernet
+			cat << _EOF_ > /etc/kernel/postinst.d/dietpi-USBridgeSig
+#!/bin/bash
+# Only apply to ARMv7+ kernel
+[[ \$1 == *'-v7+' ]] || exit 0
+echo "[ INFO ] Updating asix ax88179 driver for kernel \$1, as provided by allo.com:"
+echo '[ INFO ] - https://github.com/allocom/USBridgeSig/tree/master/ethernet'
+echo '[ INFO ] Downloading driver...'
+wget http://3.230.113.73:9011/Allocom/USBridgeSig/rpi-usbs-\$1/ax88179_178a.ko -O /tmp/ax88179_178a.ko || exit 0
+echo '[ INFO ] Installing driver...'
+install -vpm 644 /tmp/ax88179_178a.ko /lib/modules/\$1/kernel/drivers/net/usb || exit 0
+echo '[ INFO ] Running depmod...'
+depmod \$1 || exit 0
+echo '[ INFO ] Cleaning up...'
+rm -v /tmp/ax88179_178a.ko || exit 0
+_EOF_
+			chmod +x /etc/kernel/postinst.d/dietpi-USBridgeSig
+			# - Update for all installed ARMv7+ kernel versions now
+			for i in /lib/modules/*-v7+
+			do
+
+				[[ -d $i ]] || continue
+				i=${i##*/}
+				/etc/kernel/postinst.d/dietpi-USBridgeSig $i
+
+			done
 
 		# - Pine A64 (and possibily others): Cursor fix for FB
 		elif (( $G_HW_MODEL == 40 )); then
