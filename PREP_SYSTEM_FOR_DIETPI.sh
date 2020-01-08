@@ -1265,8 +1265,8 @@ _EOF_
 		mkdir -p /tmp/$G_PROGRAM_NAME
 		cd /tmp/$G_PROGRAM_NAME
 
-		G_DIETPI-NOTIFY 2 'Deleting all log files /var/log'
-		/DietPi/dietpi/func/dietpi-logclear 2 &> /dev/null # As this will report missing vars, however, its fine, does not break functionality.
+		G_DIETPI-NOTIFY 2 'Clearing log files'
+		rm -vRf /var/log/{,.??,.[^.]}*
 
 		l_message='Starting DietPi-RAMlog service' G_RUN_CMD systemctl start dietpi-ramlog
 
@@ -1702,11 +1702,8 @@ fdt set /ethernet@$identifier snps,txpbl <0x21>/;q}" /boot/boot.cmd
 		G_DIETPI-NOTIFY 2 'Setting default CPU gov'
 		/DietPi/dietpi/func/dietpi-set_cpu
 
-		G_DIETPI-NOTIFY 2 'Clearing log files'
-		/DietPi/dietpi/func/dietpi-logclear 2
-
 		G_DIETPI-NOTIFY 2 'Resetting DietPi generated globals/files'
-		rm /DietPi/dietpi/.??*
+		rm -v /DietPi/dietpi/.??*
 
 		G_DIETPI-NOTIFY 2 'Set init .install_stage to -1 (first boot)'
 		echo -1 > /DietPi/dietpi/.install_stage
@@ -1760,20 +1757,19 @@ _EOF_
 		G_VERSIONDB_SAVE
 		G_RUN_CMD cp /DietPi/dietpi/.version /var/lib/dietpi/.dietpi_image_version
 
+		G_DIETPI-NOTIFY 2 'Clearing log files'
+		rm -vRf /var/log/{,.??,.[^.]}*
+
 		G_DIETPI-NOTIFY 2 'Sync changes to disk. Please wait, this may take some time...'
 		G_RUN_CMD systemctl stop dietpi-ramlog
 		G_RUN_CMD systemctl stop dietpi-ramdisk
 
-		# - Clear DietPi logs, written during PREP
+		# Clear DietPi logs, written during PREP
 		rm -Rf /var/tmp/dietpi/logs/{,.??,.[^.]}*
 
-		# - Clear items below mount points, e.g. from previous PREP's
+		# Clear items below mount points, e.g. from previous PREP's
 		umount /DietPi
 		rm -Rf /DietPi/{,.??,.[^.]}*
-
-		umount /var/log
-		rm -Rf /var/log/{,.??,.[^.]}*
-		mount /var/log # Prevent new log files from being written to disk by background processes
 
 		cd /root
 		umount /tmp
