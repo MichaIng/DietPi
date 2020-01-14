@@ -1460,7 +1460,7 @@ _EOF_
 
 			G_DIETPI-NOTIFY 2 'Configuring hdparm:'
 
-			sed -i '/#DietPi/,$d' /etc/hdparm.conf #Prevent dupes
+			sed -i '/# DietPi/,$d' /etc/hdparm.conf # Prevent dupes
 			G_ERROR_HANDLER_COMMAND='/etc/hdparm.conf'
 			cat << _EOF_ >> $G_ERROR_HANDLER_COMMAND
 
@@ -1594,10 +1594,7 @@ _EOF_
 
 			if [[ -f '/boot/boot.cmd' ]] && ! grep -q "$identifier" /boot/boot.cmd; then
 
-				sed -i "/^fdt resize/{s/$/\
-fdt rm /ethernet@$identifier rockchip,bugged_tx_coe\
-fdt rm /ethernet@$identifier snps,force_thresh_dma_mode\
-fdt set /ethernet@$identifier snps,txpbl <0x21>/;q}" /boot/boot.cmd
+				sed -i "/^fdt resize/s|$|\nfdt rm /ethernet@$identifier rockchip,bugged_tx_coe\nfdt rm /ethernet@$identifier snps,force_thresh_dma_mode\nfdt set /ethernet@$identifier snps,txpbl <0x21>|" /boot/boot.cmd
 				mkimage -C none -A arm -T script -d /boot/boot.cmd /boot/boot.scr
 
 			fi
