@@ -61,6 +61,12 @@ _Joined 2017-07-26_
 
 Creator and maintainer of the Clonezilla based installer images for x86_64 UEFI systems.
 
+#### Joulinar
+
+_Joined Q4 2019_
+
+DietPi forum moderator, support, testing, bug reports + investigation and valuable feedback.
+
 ---
 
 ### Collaborations
