@@ -1015,6 +1015,7 @@ _EOF_
 
 		# - Previous debconfs
 		rm -f /var/cache/debconf/*-old
+		rm -f /var/lib/dpkg/*-old
 
 		# - Fonts
 		[[ -d '/usr/share/fonts' ]] && rm -vR /usr/share/fonts
@@ -1302,11 +1303,6 @@ _EOF_
 		# Recreate and navigate to "/tmp/$G_PROGRAM_NAME" working directory
 		mkdir -p /tmp/$G_PROGRAM_NAME
 		cd /tmp/$G_PROGRAM_NAME
-
-		G_DIETPI-NOTIFY 2 'Clearing log files'
-		rm -vRf /var/log/{,.??,.[^.]}*
-
-		l_message='Starting DietPi-RAMlog service' G_RUN_CMD systemctl start dietpi-ramlog
 
 		G_DIETPI-NOTIFY 2 'Updating /DietPi/dietpi/.hw_model'
 		/DietPi/dietpi/func/dietpi-obtain_hw_model
@@ -1761,26 +1757,22 @@ _EOF_
 		G_VERSIONDB_SAVE
 		G_RUN_CMD cp /DietPi/dietpi/.version /var/lib/dietpi/.dietpi_image_version
 
-		G_DIETPI-NOTIFY 2 'Clearing log files'
-		rm -vRf /var/log/{,.??,.[^.]}*
-
 		G_DIETPI-NOTIFY 2 'Sync changes to disk. Please wait, this may take some time...'
-		G_RUN_CMD systemctl stop dietpi-ramlog
 		G_RUN_CMD systemctl stop dietpi-ramdisk
 
-		# Clear DietPi logs, written during PREP
-		rm -Rf /var/tmp/dietpi/logs/{,.??,.[^.]}*
+		G_DIETPI-NOTIFY 2 'Clearing lost+found'
+		rm -vRf /lost+found/{,.??,.[^.]}*
 
-		# Clear items below mount points, e.g. from previous PREP's
-		umount /DietPi
-		rm -Rf /DietPi/{,.??,.[^.]}*
+		G_DIETPI-NOTIFY 2 'Clearing DietPi logs, written during PREP'
+		rm -vRf /var/tmp/dietpi/logs/{,.??,.[^.]}*
 
-		cd /root
-		umount /tmp
-		rm -Rf /tmp/{,.??,.[^.]}*
-		mount /tmp # Prevent new tmp files from being written to disk by background processes
+		G_DIETPI-NOTIFY 2 'Clearing items below mount points'
+		G_RUN_CMD mkdir -p /mnt/tmp_root
+		G_RUN_CMD mount $(findmnt -no source /) /mnt/tmp_root
+		rm -vRf /mnt/tmp_root/{DietPi,dev,proc,run,sys,tmp,var/log}/{,.??,.[^.]}*
+		G_RUN_CMD umount /mnt/tmp_root
 
-		# - Remove PREP script
+		# Remove PREP script
 		[[ -f $FP_PREP_SCRIPT ]] && rm $FP_PREP_SCRIPT
 
 		sync
@@ -1813,5 +1805,4 @@ _EOF_
 	#------------------------------------------------------------------------------------------------
 	Main
 	#------------------------------------------------------------------------------------------------
-
 }
