@@ -1068,6 +1068,8 @@ _EOF_
 		[[ -f '/usr/local/sbin/log2ram' ]] && rm -v /usr/local/sbin/log2ram
 		umount /var/log.hdd 2> /dev/null
 		[[ -d '/var/log.hdd' ]] && rm -R /var/log.hdd
+		[[ -f '/root/.not_logged_in_yet' ]] && rm -v /root/.not_logged_in_yet
+		[[ -f '/root/.desktop_autologin' ]] && rm -v /root/.desktop_autologin
 		rm -vf /etc/X11/xorg.conf.d/*armbian*
 		#rm -vf /etc/armbian* armbian-release # Required for kernel/bootloader package upgrade (initramfs postinst)
 		rm -vf /lib/systemd/system/*armbian*
@@ -1237,6 +1239,42 @@ _EOF_
 		# ifupdown starts the daemon outside of systemd, the enabled systemd unit just thows an error on boot due to missing dbus and with dbus might interfere with ifupdown
 		systemctl disable wpa_supplicant 2> /dev/null && G_DIETPI-NOTIFY 2 'Disabled non-required wpa_supplicant systemd unit'
 
+		G_DIETPI-NOTIFY 2 'Configuring network interfaces:'
+		[[ -L '/etc/network/interfaces' ]] && rm -v /etc/network/interfaces # ARMbian symlink for bulky network-manager
+		G_ERROR_HANDLER_COMMAND='/etc/network/interfaces'
+		cat << _EOF_ > $G_ERROR_HANDLER_COMMAND
+# Location: /etc/network/interfaces
+# Please modify network settings via: dietpi-config
+# Or create your own drop-ins in: /etc/network/interfaces.d/
+
+# Drop-in configs
+source interfaces.d/*
+
+# Loopback
+auto lo
+iface lo inet loopback
+
+# Ethernet
+#allow-hotplug eth0
+iface eth0 inet dhcp
+address 192.168.0.100
+netmask 255.255.255.0
+gateway 192.168.0.1
+#dns-nameservers 8.8.8.8 8.8.4.4
+
+# WiFi
+#allow-hotplug wlan0
+iface wlan0 inet dhcp
+address 192.168.0.100
+netmask 255.255.255.0
+gateway 192.168.0.1
+wireless-power off
+wpa-conf /etc/wpa_supplicant/wpa_supplicant.conf
+#dns-nameservers 8.8.8.8 8.8.4.4
+_EOF_
+		G_ERROR_HANDLER_EXITCODE=$?
+		G_ERROR_HANDLER
+
 		#-----------------------------------------------------------------------------------
 		# MISC
 
@@ -1273,43 +1311,9 @@ _EOF_
 		G_DIETPI-NOTIFY 2 'Updating /DietPi/dietpi/.hw_model'
 		/DietPi/dietpi/func/dietpi-obtain_hw_model
 
-		G_DIETPI-NOTIFY 2 'Configuring network interfaces:'
-
-		[[ -L '/etc/network/interfaces' ]] && rm /etc/network/interfaces # ARMbian symlink for bulky network-manager
-
-		G_ERROR_HANDLER_COMMAND='/etc/network/interfaces'
-		cat << _EOF_ > $G_ERROR_HANDLER_COMMAND
-# Location: /etc/network/interfaces
-# Please modify network settings via: dietpi-config
-# Or create your own drop-ins in: /etc/network/interfaces.d/
-
-# Drop-in configs
-source interfaces.d/*
-
-# Loopback
-auto lo
-iface lo inet loopback
-
-# Ethernet
-#allow-hotplug eth0
-iface eth0 inet dhcp
-address 192.168.0.100
-netmask 255.255.255.0
-gateway 192.168.0.1
-#dns-nameservers 8.8.8.8 8.8.4.4
-
-# WiFi
-#allow-hotplug wlan0
-iface wlan0 inet dhcp
-address 192.168.0.100
-netmask 255.255.255.0
-gateway 192.168.0.1
-wireless-power off
-wpa-conf /etc/wpa_supplicant/wpa_supplicant.conf
-#dns-nameservers 8.8.8.8 8.8.4.4
-_EOF_
-		G_ERROR_HANDLER_EXITCODE=$?
-		G_ERROR_HANDLER
+		# Restoring original MOTD (e.g. Armbian)
+		rm -fv /etc/motd
+		cp -v /usr/share/base-files/motd /etc/motd
 
 		# Add pre-up lines for WiFi on OrangePi Zero
 		if (( $G_HW_MODEL == 32 )); then
@@ -1615,6 +1619,8 @@ fdt set /ethernet@$identifier snps,txpbl <0x21>/;q}" /boot/boot.cmd
 		#------------------------------------------------------------------------------------------------
 
 		l_message='Enable Dropbear autostart' G_RUN_CMD sed -i '/NO_START=1/c\NO_START=0' /etc/default/dropbear
+		G_RUN_CMD systemctl unmask dropbear
+		G_RUN_CMD systemctl enable dropbear
 
 		G_DIETPI-NOTIFY 2 'Configuring services'
 		/DietPi/dietpi/dietpi-services stop
@@ -1625,15 +1631,13 @@ fdt set /ethernet@$identifier snps,txpbl <0x21>/;q}" /boot/boot.cmd
 
 		G_DIETPI-NOTIFY 2 'Running general cleanup of misc files'
 		# - Remove Bash history file
-		[[ -f '/root/.bash_history' ]] && rm /root/.bash_history
-		rm -f /home/*/.bash_history
+		rm -vf /{root,home/*}/.bash_history
 		# - Remove Nano history file
-		[[ -f '/root/.nano_history' ]] && rm /root/.nano_history
-		rm -f /home/*/.nano_history
+		rm -vf /{root,home/*}/.nano_history
 
 		G_DIETPI-NOTIFY 2 'Removing swapfile from image'
 		/DietPi/dietpi/func/dietpi-set_swapfile 0 /var/swap
-		[[ -e '/var/swap' ]] && rm /var/swap # still exists on some images...
+		[[ -e '/var/swap' ]] && rm -v /var/swap # still exists on some images...
 		# - Re-enable for next run
 		G_CONFIG_INJECT 'AUTO_SETUP_SWAPFILE_SIZE=' 'AUTO_SETUP_SWAPFILE_SIZE=1' /DietPi/dietpi.txt
 
