@@ -1586,19 +1586,6 @@ _EOF_
 			# - Ensure WiFi module pre-exists
 			G_CONFIG_INJECT '8723bs' '8723bs' /etc/modules
 
-		# - Rock(Pro)64: Apply workaround for kernel-related Ethernet issues: https://github.com/MichaIng/DietPi/issues/3066
-		elif [[ $G_HW_MODEL == 4[23] ]]; then
-
-			local identifier='ff540000'
-			(( $G_HW_MODEL == 43 )) && identifier='fe300000'
-
-			if [[ -f '/boot/boot.cmd' ]] && ! grep -q "$identifier" /boot/boot.cmd; then
-
-				sed -i "/^fdt resize/s|$|\nfdt rm /ethernet@$identifier rockchip,bugged_tx_coe\nfdt rm /ethernet@$identifier snps,force_thresh_dma_mode\nfdt set /ethernet@$identifier snps,txpbl <0x21>|" /boot/boot.cmd
-				mkimage -C none -A arm -T script -d /boot/boot.cmd /boot/boot.scr
-
-			fi
-
 		fi
 
 		# - ARMbian increase console verbose
