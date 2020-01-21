@@ -1750,11 +1750,12 @@ _EOF_
 		G_DIETPI-NOTIFY 2 'Clearing DietPi logs, written during PREP'
 		rm -vRf /var/tmp/dietpi/logs/{,.??,.[^.]}*
 
-		G_DIETPI-NOTIFY 2 'Clearing items below mount points'
+		G_DIETPI-NOTIFY 2 'Clearing items below tmpfs mount points'
 		G_RUN_CMD mkdir -p /mnt/tmp_root
 		G_RUN_CMD mount $(findmnt -no source /) /mnt/tmp_root
 		rm -vRf /mnt/tmp_root/{DietPi,dev,proc,run,sys,tmp,var/log}/{,.??,.[^.]}*
 		G_RUN_CMD umount /mnt/tmp_root
+		G_RUN_CMD rmdir /mnt/tmp_root
 
 		# Remove PREP script
 		[[ -f $FP_PREP_SCRIPT ]] && rm $FP_PREP_SCRIPT
