@@ -1202,8 +1202,9 @@ _EOF_
 		G_ERROR_HANDLER_COMMAND='/etc/crontab'
 		cat << _EOF_ > $G_ERROR_HANDLER_COMMAND
 # Please use dietpi-cron to change cron start times
-SHELL=/bin/sh
+SHELL=/bin/dash
 PATH=/usr/local/sbin:/usr/local/bin:/sbin:/bin:/usr/sbin:/usr/bin
+MAILTO=""
 
 # m h dom mon dow user command
 #*/0 * * * * root cd / && run-parts --report /etc/cron.minutely
