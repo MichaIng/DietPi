@@ -936,9 +936,10 @@ _EOF_
 
 		# Purging additional packages, that (in some cases) do not get autoremoved:
 		# - dbus: Not required for headless images, but sometimes marked as "important", thus not autoremoved.
+		#	+ Workaround for "The following packages have unmet dependencies: glib-networking libgtk-3-0"
 		# - dhcpcd5: https://github.com/MichaIng/DietPi/issues/1560#issuecomment-370136642
 		# - mountall: https://github.com/MichaIng/DietPi/issues/2613
-		G_AGP dbus dhcpcd5 mountall
+		G_AGP dbus dhcpcd5 mountall *office* *xfce* *qt5* *xserver* *xorg* glib-networking libgtk-3-0
 		# Remove any autoremove prevention
 		rm -f /etc/apt/apt.conf.d/01autoremove*
 		G_AGA
