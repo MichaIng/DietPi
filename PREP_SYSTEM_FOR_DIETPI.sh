@@ -1458,7 +1458,7 @@ _EOF_
 		fi
 
 		# G_HW_MODEL specific
-		G_DIETPI-NOTIFY 2 'Appling G_HW_MODEL specific tweaks:'
+		G_DIETPI-NOTIFY 2 'Applying G_HW_MODEL specific tweaks:'
 
 		if (( $G_HW_MODEL != 20 )); then
 
@@ -1489,24 +1489,24 @@ _EOF_
 		# - Sparky SBC:
 		elif (( $G_HW_MODEL == 70 )); then
 
-			# 	Install latest kernel
-			wget https://raw.githubusercontent.com/sparky-sbc/sparky-test/master/dragon_fly_check/uImage -O /boot/uImage
-			wget https://raw.githubusercontent.com/sparky-sbc/sparky-test/master/dragon_fly_check/3.10.38.bz2 -O package.tar
-			tar xvf package.tar -C /lib/modules/
-			rm package.tar
+			# Install latest kernel/drivers
+			G_RUN_CMD wget https://raw.githubusercontent.com/sparky-sbc/sparky-test/master/dragon_fly_check/uImage -O /boot/uImage
+			G_RUN_CMD wget https://raw.githubusercontent.com/sparky-sbc/sparky-test/master/dragon_fly_check/3.10.38.bz2
+			G_RUN_CMD tar -xf 3.10.38.bz2 -C /lib/modules/
+			rm 3.10.38.bz2
+			# - USB audio update
+			G_RUN_CMD wget https://raw.githubusercontent.com/sparky-sbc/sparky-test/master/dsd-designs/snd-usb-audio.ko -O /lib/modules/3.10.38/kernel/sound/usb/snd-usb-audio.ko
+			# - Ethernet update
+			G_RUN_CMD wget https://raw.githubusercontent.com/sparky-sbc/sparky-test/master/sparky-eth/ethernet.ko -O /lib/modules/3.10.38/kernel/drivers/net/ethernet/acts/ethernet.ko
 
-			#	Patches
-			G_RUN_CMD wget https://raw.githubusercontent.com/sparky-sbc/sparky-test/master/dsd-marantz/snd-usb-audio.ko -O /lib/modules/3.10.38/kernel/sound/usb/snd-usb-audio.ko
-			G_RUN_CMD wget https://raw.githubusercontent.com/sparky-sbc/sparky-test/master/dsd-marantz/snd-usbmidi-lib.ko -O /lib/modules/3.10.38/kernel/sound/usb/snd-usbmidi-lib.ko
-
-			cat << _EOF_ > /DietPi/uEnv.txt
+			# Boot args
+			cat << _EOF_ > /boot/uenv.txt
 uenvcmd=setenv os_type linux;
-bootargs=earlyprintk clk_ignore_unused selinux=0 scandelay console=tty0 loglevel=1 real_rootflag=rw root=/dev/mmcblk0p2 rootwait init=/lib/systemd/systemd aotg.urb_fix=1 aotg.aotg1_speed=0
+bootargs=earlyprintk clk_ignore_unused selinux=0 scandelay console=tty0 loglevel=1 real_rootflag=rw root=/dev/mmcblk0p2 rootwait init=/lib/systemd/systemd aotg.urb_fix=1 aotg.aotg1_speed=0 net.ifnames=0
 _EOF_
-			cp /DietPi/uEnv.txt /boot/uenv.txt # Temp solution
 
-			#	Blacklist GPU and touch screen modules: https://github.com/MichaIng/DietPi/issues/699#issuecomment-271362441
-			cat << _EOF_ > /etc/modprobe.d/disable_sparkysbc_touchscreen.conf
+			# Blacklist GPU and touch screen modules: https://github.com/MichaIng/DietPi/issues/699#issuecomment-271362441
+			cat << _EOF_ > /etc/modprobe.d/dietpi-disable_sparkysbc_touchscreen.conf
 blacklist owl_camera
 blacklist gsensor_stk8313
 blacklist ctp_ft5x06
@@ -1515,25 +1515,51 @@ blacklist gsensor_bma222
 blacklist gsensor_mir3da
 _EOF_
 
-			cat << _EOF_ > /etc/modprobe.d/disable_sparkysbc_gpu.conf
+			cat << _EOF_ > /etc/modprobe.d/dietpi-disable_sparkysbc_gpu.conf
 blacklist pvrsrvkm
 blacklist drm
 blacklist videobuf2_vmalloc
 blacklist bc_example
 _EOF_
 
-			#	Sparky SBC, WiFi rtl8812au driver: https://github.com/sparky-sbc/sparky-test/tree/master/rtl8812au
-			G_RUN_CMD wget https://raw.githubusercontent.com/sparky-sbc/sparky-test/master/rtl8812au/rtl8812au_sparky.tar
-			mkdir -p rtl8812au_sparky
-			tar -xvf rtl8812au_sparky.tar -C rtl8812au_sparky
-			chmod -R +x rtl8812au_sparky
-			cd rtl8812au_sparky
-			G_RUN_CMD ./install.sh
-			cd /tmp/$G_PROGRAM_NAME
-			rm -R rtl8812au_sparky*
-
-			#	Use performance gov for stability.
+			# Use performance gov for stability
 			G_CONFIG_INJECT 'CONFIG_CPU_GOVERNOR=' 'CONFIG_CPU_GOVERNOR=performance' /DietPi/dietpi.txt
+
+			# Install script to toggle between USB and onboard Ethernet automatically
+			cat << _EOF_ > /var/lib/dietpi/services/dietpi-sparkysbc_ethernet.sh
+#!/bin/dash
+# Called from: /etc/systemd/system/dietpi-sparkysbc_ethernet.service
+# We need to wait until USB Ethernet is established on USB bus, which takes much longer than onboard init.
+sleep 20
+# Disable onboard Ethernet if USB Ethernet is found
+if ip a s eth1 > /dev/null 2>&1; then
+
+	echo 'blacklist ethernet' > /etc/modprobe.d/dietpi-disable_sparkysbc_ethernet.conf
+	reboot
+
+# Enable onboard Ethernet if no adapter is found
+elif ! ip a s eth0 > /dev/null 2>&1; then
+
+	rm -f /etc/modprobe.d/dietpi-disable_sparkysbc_ethernet.conf
+	reboot
+
+fi
+_EOF_
+			chmod +x /var/lib/dietpi/services/dietpi-sparkysbc_ethernet.sh
+			cat << _EOF_ > /etc/systemd/system/dietpi-sparkysbc_ethernet.service
+[Unit]
+Description=Sparky SBC auto detect and toggle onboard/USB Ethernet
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+RemainAfterExit=yes
+ExecStart=/var/lib/dietpi/services/dietpi-sparkysbc_ethernet.sh
+
+[Install]
+WantedBy=multi-user.target
+_EOF_
+			systemctl enable dietpi-sparkysbc_ethernet
 
 		# - RPi:
 		elif (( $G_HW_MODEL < 10 )); then
@@ -1587,7 +1613,7 @@ tic terminfo.txt
 tput cnorm
 _EOF_
 
-			# - Ensure WiFi module pre-exists
+			# Ensure WiFi module pre-exists
 			G_CONFIG_INJECT '8723bs' '8723bs' /etc/modules
 
 		fi
@@ -1626,9 +1652,6 @@ _EOF_
 		G_CONFIG_INJECT 'AUTO_SETUP_SWAPFILE_SIZE=' 'AUTO_SETUP_SWAPFILE_SIZE=1' /DietPi/dietpi.txt
 
 		G_DIETPI-NOTIFY 2 'Resetting boot.ini, config.txt, cmdline.txt etc'
-
-		# - PineA64 - delete ethaddr from uEnv.txt file
-		[[ $G_HW_MODEL == 40 && -f '/boot/uEnv.txt' ]] && sed -i '/^ethaddr/ d' /boot/uEnv.txt
 
 		# - Set Pi cmdline.txt back to normal
 		[[ -f '/boot/cmdline.txt' ]] && sed -i 's/ rootdelay=10//g' /boot/cmdline.txt
