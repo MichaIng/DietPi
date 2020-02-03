@@ -798,7 +798,7 @@ _EOF_
 
 			G_AGI linux-image-amd64 os-prober
 
-			#	Grub EFI
+			# Grub EFI
 			if dpkg-query -s 'grub-efi-amd64' &> /dev/null || [[ -d '/boot/efi' ]]; then
 
 				local efi_packages='grub-efi-amd64'
@@ -806,7 +806,7 @@ _EOF_
 				(( $DISTRO_TARGET > 4 )) && efi_packages+=' grub-efi-amd64-signed shim-signed'
 				G_AGI $efi_packages
 
-			#	Grub BIOS
+			# Grub BIOS
 			else
 
 				G_AGI grub-pc
@@ -852,27 +852,22 @@ _EOF_
 		#	Odroid N2
 		elif (( $G_HW_MODEL == 15 )); then
 
-			G_AGI linux-image-arm64-odroid-n2
+			G_AGI linux-image-arm64-odroid-n2 meveric-keyring
 
 		#	Odroid N1
 		elif (( $G_HW_MODEL == 14 )); then
 
-			G_AGI linux-image-arm64-odroid-n1
+			G_AGI linux-image-arm64-odroid-n1 meveric-keyring
 
 		#	Odroid C2
 		elif (( $G_HW_MODEL == 12 )); then
 
-			G_AGI linux-image-arm64-odroid-c2
+			G_AGI linux-image-arm64-odroid-c2 meveric-keyring
 
 		#	Odroid XU3/4/HC1/HC2
 		elif (( $G_HW_MODEL == 11 )); then
 
-			G_AGI linux-image-4.14-armhf-odroid-xu4
-
-		#	BBB
-		elif (( $G_HW_MODEL == 71 )); then
-
-			G_AGI device-tree-compiler # dtoverlay compiler
+			G_AGI linux-image-4.14-armhf-odroid-xu4 meveric-keyring
 
 		# - Auto detect kernel package incl. ARMbian/others DTB
 		else
@@ -1160,7 +1155,7 @@ _EOF_
 		mkdir -p /var/lib/dietpi/dietpi-autostart
 		mkdir -p /var/lib/dietpi/dietpi-config
 		#mkdir -p /var/lib/dietpi/dietpi-software
-		mkdir -p /var/lib/dietpi/dietpi-software/installed #Additional storage for installed apps, eg: custom scripts and data
+		mkdir -p /var/lib/dietpi/dietpi-software/installed # Additional storage for installed apps, eg: custom scripts and data
 		chown dietpi:dietpi /var/lib/dietpi
 		chmod 660 /var/lib/dietpi
 
@@ -1418,7 +1413,7 @@ _EOF_
 		systemctl mask getty-static
 		# - logind features disabled by default. Usually not needed and all features besides auto getty creation are not available without libpam-systemd package.
 		#	- It will be unmasked/enabled, automatically if libpam-systemd got installed during dietpi-software install, usually with desktops.
-		systemctl disable --now systemd-logind &> /dev/null
+		systemctl disable --now systemd-logind 2> /dev/null
 		systemctl mask systemd-logind
 
 		G_DIETPI-NOTIFY 2 'Configuring regional settings (TZdata):'
