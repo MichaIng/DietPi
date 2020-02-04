@@ -1000,9 +1000,7 @@ _EOF_
 		[[ -d '/usr/src' ]] && rm -vRf /usr/src/{,.??,.[^.]}*
 
 		# - root
-		[[ -e '/root/.cache' ]] && rm -vR /root/.cache
-		[[ -e '/root/.local' ]] && rm -vR /root/.local
-		[[ -e '/root/.config' ]] && rm -vR /root/.config
+		rm -Rfv /root/.{cache,local,config,gnupg,wget-hsts,viminfo}
 
 		# - Documentation dirs: https://github.com/MichaIng/DietPi/issues/3259
 		#[[ -d '/usr/share/man' ]] && rm -vR /usr/share/man
@@ -1011,8 +1009,8 @@ _EOF_
 		[[ -d '/usr/share/calendar' ]] && rm -vR /usr/share/calendar
 
 		# - Previous debconfs
-		rm -f /var/cache/debconf/*-old
-		rm -f /var/lib/dpkg/*-old
+		rm -fv /var/cache/debconf/*-old
+		rm -fv /var/lib/dpkg/*-old
 
 		# - Fonts
 		[[ -d '/usr/share/fonts' ]] && rm -vR /usr/share/fonts
@@ -1058,7 +1056,31 @@ _EOF_
 
 		done
 
-		systemctl daemon-reload
+		# - Remove obsolete sysvinit service entries
+		aservices=(
+
+			fake-hwclock
+			haveged
+			hwclock.sh
+			networking
+			resolvconf
+			udev
+			cron
+			console-setup.sh
+			sudo
+			cpu_governor
+			keyboard-setup.sh
+			kmod
+			procps
+
+		)
+
+		for i in ${aservices[@]}
+		do
+
+			G_RUN_CMD update-rc.d -f $i remove
+
+		done
 
 		# - ARMbian specific
 		[[ -f '/boot/armbian_first_run.txt.template' ]] && rm -v /boot/armbian_first_run.txt.template
@@ -1099,6 +1121,8 @@ _EOF_
 
 		# - Meveric specific
 		[[ -f '/usr/local/sbin/setup-odroid' ]] && rm -v /usr/local/sbin/setup-odroid
+		[[ -d '/root/scripts' ]] && rm -R /root/scripts
+		[[ -f '/root/resize--log.txt' ]] && rm /root/resize--log.txt
 
 		# - RPi specific: https://github.com/MichaIng/DietPi/issues/1631#issuecomment-373965406
 		[[ -f '/etc/profile.d/wifi-country.sh' ]] && rm -v /etc/profile.d/wifi-country.sh
