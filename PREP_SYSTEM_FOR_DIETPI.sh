@@ -1001,7 +1001,7 @@ _EOF_
 		[[ -d '/usr/src' ]] && rm -vRf /usr/src/{,.??,.[^.]}*
 
 		# - root
-		rm -Rfv /root/.{cache,local,config,gnupg,wget-hsts,viminfo}
+		rm -Rfv /root/.{cache,local,config,gnupg,viminfo}
 
 		# - Documentation dirs: https://github.com/MichaIng/DietPi/issues/3259
 		#[[ -d '/usr/share/man' ]] && rm -vR /usr/share/man
@@ -1659,12 +1659,6 @@ _EOF_
 		G_DIETPI-NOTIFY 2 'Mask cron until 1st run setup is completed'
 		G_RUN_CMD systemctl mask cron
 
-		G_DIETPI-NOTIFY 2 'Running general cleanup of misc files'
-		# - Remove Bash history file
-		rm -vf /{root,home/*}/.bash_history
-		# - Remove Nano history file
-		rm -vf /{root,home/*}/.nano_history
-
 		G_DIETPI-NOTIFY 2 'Removing swapfile from image'
 		/DietPi/dietpi/func/dietpi-set_swapfile 0 /var/swap
 		[[ -e '/var/swap' ]] && rm -v /var/swap # still exists on some images...
@@ -1803,6 +1797,9 @@ _EOF_
 		rm -vRf /mnt/tmp_root/{DietPi,dev,proc,run,sys,tmp,var/log}/{,.??,.[^.]}*
 		G_RUN_CMD umount /mnt/tmp_root
 		G_RUN_CMD rmdir /mnt/tmp_root
+
+		G_DIETPI-NOTIFY 2 'Running general cleanup of misc files'
+		rm -vf /{root,home/*}/.{bash_history,nano_history,wget-hsts}
 
 		# Remove PREP script
 		[[ -f $FP_PREP_SCRIPT ]] && rm $FP_PREP_SCRIPT
