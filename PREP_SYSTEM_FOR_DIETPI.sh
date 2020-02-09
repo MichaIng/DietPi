@@ -1257,9 +1257,10 @@ _EOF_
 		mkdir -p /root/.ssh
 		echo 'ssh.dietpi.com ssh-rsa AAAAB3NzaC1yc2EAAAADAQABAAABAQDE6aw3r6aOEqendNu376iiCHr9tGBIWPgfrLkzjXjEsHGyVSUFNnZt6pftrDeK7UX+qX4FxOwQlugG4fymOHbimRCFiv6cf7VpYg1Ednquq9TLb7/cIIbX8a6AuRmX4fjdGuqwmBq3OG7ZksFcYEFKt5U4mAJIaL8hXiM2iXjgY02LqiQY/QWATsHI4ie9ZOnwrQE+Rr6mASN1BVFuIgyHIbwX54jsFSnZ/7CdBMkuAd9B8JkxppWVYpYIFHE9oWNfjh/epdK8yv9Oo6r0w5Rb+4qaAc5g+RAaknHeV6Gp75d2lxBdCm5XknKKbGma2+/DfoE8WZTSgzXrYcRlStYN' > /root/.ssh/known_hosts
 
-		G_DIETPI-NOTIFY 2 'Recreating symlink for resolv.conf (DNS):'
-		echo 'nameserver 1.1.1.1' > /etc/resolvconf/run/resolv.conf # Temp apply, in case was not previously symlink, resets on next ifup
-		ln -sfv /etc/resolvconf/run/resolv.conf /etc/resolv.conf
+		G_DIETPI-NOTIFY 2 'Configuring DNS nameserver:'
+		echo 'nameserver 9.9.9.9' > /etc/resolvconf/run/resolv.conf # Apply generic functional DNS nameserver, updated on next service start
+		ln -sfv /etc/resolvconf/run/resolv.conf /etc/resolv.conf # Update symlink, in case it was manually removed
+		rm -fv /etc/resolvconf/resolv.conf.d/{original,tail} # Remove obsolete original and appendix files
 
 		# ifupdown starts the daemon outside of systemd, the enabled systemd unit just thows an error on boot due to missing dbus and with dbus might interfere with ifupdown
 		systemctl disable wpa_supplicant 2> /dev/null && G_DIETPI-NOTIFY 2 'Disabled non-required wpa_supplicant systemd unit'
