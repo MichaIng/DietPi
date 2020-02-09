@@ -798,7 +798,7 @@ _EOF_
 
 			G_AGI linux-image-amd64 os-prober
 
-			#	Grub EFI
+			# Grub EFI
 			if dpkg-query -s 'grub-efi-amd64' &> /dev/null || [[ -d '/boot/efi' ]]; then
 
 				local efi_packages='grub-efi-amd64'
@@ -806,7 +806,7 @@ _EOF_
 				(( $DISTRO_TARGET > 4 )) && efi_packages+=' grub-efi-amd64-signed shim-signed'
 				G_AGI $efi_packages
 
-			#	Grub BIOS
+			# Grub BIOS
 			else
 
 				G_AGI grub-pc
@@ -852,27 +852,22 @@ _EOF_
 		#	Odroid N2
 		elif (( $G_HW_MODEL == 15 )); then
 
-			G_AGI linux-image-arm64-odroid-n2
+			G_AGI linux-image-arm64-odroid-n2 meveric-keyring
 
 		#	Odroid N1
 		elif (( $G_HW_MODEL == 14 )); then
 
-			G_AGI linux-image-arm64-odroid-n1
+			G_AGI linux-image-arm64-odroid-n1 meveric-keyring
 
 		#	Odroid C2
 		elif (( $G_HW_MODEL == 12 )); then
 
-			G_AGI linux-image-arm64-odroid-c2
+			G_AGI linux-image-arm64-odroid-c2 meveric-keyring
 
 		#	Odroid XU3/4/HC1/HC2
 		elif (( $G_HW_MODEL == 11 )); then
 
-			G_AGI linux-image-4.14-armhf-odroid-xu4
-
-		#	BBB
-		elif (( $G_HW_MODEL == 71 )); then
-
-			G_AGI device-tree-compiler # dtoverlay compiler
+			G_AGI linux-image-4.14-armhf-odroid-xu4 meveric-keyring
 
 		# - Auto detect kernel package incl. ARMbian/others DTB
 		else
@@ -936,9 +931,11 @@ _EOF_
 
 		# Purging additional packages, that (in some cases) do not get autoremoved:
 		# - dbus: Not required for headless images, but sometimes marked as "important", thus not autoremoved.
+		#	+ Workaround for "The following packages have unmet dependencies: glib-networking libgtk-3-0"
 		# - dhcpcd5: https://github.com/MichaIng/DietPi/issues/1560#issuecomment-370136642
 		# - mountall: https://github.com/MichaIng/DietPi/issues/2613
-		G_AGP dbus dhcpcd5 mountall
+		# - initscripts: Pre-installed on Jessie systems (?), superseded and masked by systemd, but never autoremoved
+		G_AGP dbus dhcpcd5 mountall initscripts *office* *xfce* *qt5* *xserver* *xorg* glib-networking libgtk-3-0
 		# Remove any autoremove prevention
 		rm -f /etc/apt/apt.conf.d/01autoremove*
 		G_AGA
@@ -995,6 +992,7 @@ _EOF_
 		[[ -d '/media' ]] && rm -vR /media
 		[[ -d '/selinux' ]] && rm -vR /selinux
 		[[ -d '/var/cache/apparmor' ]] && rm -vR /var/cache/apparmor
+		rm -Rfv /var/backups/{,.??,.[^.]}*
 
 		# - www
 		[[ -d '/var/www' ]] && rm -vRf /var/www/{,.??,.[^.]}*
@@ -1003,9 +1001,7 @@ _EOF_
 		[[ -d '/usr/src' ]] && rm -vRf /usr/src/{,.??,.[^.]}*
 
 		# - root
-		[[ -e '/root/.cache' ]] && rm -vR /root/.cache
-		[[ -e '/root/.local' ]] && rm -vR /root/.local
-		[[ -e '/root/.config' ]] && rm -vR /root/.config
+		rm -Rfv /root/.{cache,local,config,gnupg,viminfo}
 
 		# - Documentation dirs: https://github.com/MichaIng/DietPi/issues/3259
 		#[[ -d '/usr/share/man' ]] && rm -vR /usr/share/man
@@ -1014,8 +1010,8 @@ _EOF_
 		[[ -d '/usr/share/calendar' ]] && rm -vR /usr/share/calendar
 
 		# - Previous debconfs
-		rm -f /var/cache/debconf/*-old
-		rm -f /var/lib/dpkg/*-old
+		rm -fv /var/cache/debconf/*-old
+		rm -fv /var/lib/dpkg/*-old
 
 		# - Fonts
 		[[ -d '/usr/share/fonts' ]] && rm -vR /usr/share/fonts
@@ -1061,11 +1057,36 @@ _EOF_
 
 		done
 
-		systemctl daemon-reload
+		# - Remove obsolete sysvinit service entries
+		aservices=(
+
+			fake-hwclock
+			haveged
+			hwclock.sh
+			networking
+			resolvconf
+			udev
+			cron
+			console-setup.sh
+			sudo
+			cpu_governor
+			keyboard-setup.sh
+			kmod
+			procps
+
+		)
+
+		for i in ${aservices[@]}
+		do
+
+			G_RUN_CMD update-rc.d -f $i remove
+
+		done
 
 		# - ARMbian specific
 		[[ -f '/boot/armbian_first_run.txt.template' ]] && rm -v /boot/armbian_first_run.txt.template
 		[[ -f '/usr/bin/armbianmonitor' ]] && rm -v /usr/bin/armbianmonitor
+		[[ -d '/etc/armbianmonitor' ]] && rm -Rv /etc/armbianmonitor
 		[[ -f '/usr/local/sbin/log2ram' ]] && rm -v /usr/local/sbin/log2ram
 		umount /var/log.hdd 2> /dev/null
 		[[ -d '/var/log.hdd' ]] && rm -R /var/log.hdd
@@ -1082,7 +1103,7 @@ _EOF_
 		#[[ -d '/usr/lib/armbian' ]] && rm -vR /usr/lib/armbian # Required for ARMbian root package upgrade
 		#[[ -d '/usr/share/armbian' ]] && rm -vR /usr/share/armbian # Required for ARMbian root package upgrade
 		# Place DPKG exclude file, especially to skip cron jobs, which are doomed to fail and an unnecessary overhead + syslog spam on DietPi
-		cat << _EOF_ > /etc/dpkg/dpkg.cfg.d/dietpi-no_armbian
+		[[ -f '/etc/armbian-release' ]] && cat << _EOF_ > /etc/dpkg/dpkg.cfg.d/dietpi-no_armbian
 # Exclude conflicting ARMbian files
 path-exclude /lib/systemd/system/*armbian*
 path-exclude /etc/apt/apt.conf.d/*armbian*
@@ -1101,6 +1122,8 @@ _EOF_
 
 		# - Meveric specific
 		[[ -f '/usr/local/sbin/setup-odroid' ]] && rm -v /usr/local/sbin/setup-odroid
+		[[ -d '/root/scripts' ]] && rm -R /root/scripts
+		[[ -f '/root/resize--log.txt' ]] && rm /root/resize--log.txt
 
 		# - RPi specific: https://github.com/MichaIng/DietPi/issues/1631#issuecomment-373965406
 		[[ -f '/etc/profile.d/wifi-country.sh' ]] && rm -v /etc/profile.d/wifi-country.sh
@@ -1157,7 +1180,7 @@ _EOF_
 		mkdir -p /var/lib/dietpi/dietpi-autostart
 		mkdir -p /var/lib/dietpi/dietpi-config
 		#mkdir -p /var/lib/dietpi/dietpi-software
-		mkdir -p /var/lib/dietpi/dietpi-software/installed #Additional storage for installed apps, eg: custom scripts and data
+		mkdir -p /var/lib/dietpi/dietpi-software/installed # Additional storage for installed apps, eg: custom scripts and data
 		chown dietpi:dietpi /var/lib/dietpi
 		chmod 660 /var/lib/dietpi
 
@@ -1201,8 +1224,9 @@ _EOF_
 		G_ERROR_HANDLER_COMMAND='/etc/crontab'
 		cat << _EOF_ > $G_ERROR_HANDLER_COMMAND
 # Please use dietpi-cron to change cron start times
-SHELL=/bin/sh
+SHELL=/bin/dash
 PATH=/usr/local/sbin:/usr/local/bin:/sbin:/bin:/usr/sbin:/usr/bin
+MAILTO=""
 
 # m h dom mon dow user command
 #*/0 * * * * root cd / && run-parts --report /etc/cron.minutely
@@ -1233,9 +1257,10 @@ _EOF_
 		mkdir -p /root/.ssh
 		echo 'ssh.dietpi.com ssh-rsa AAAAB3NzaC1yc2EAAAADAQABAAABAQDE6aw3r6aOEqendNu376iiCHr9tGBIWPgfrLkzjXjEsHGyVSUFNnZt6pftrDeK7UX+qX4FxOwQlugG4fymOHbimRCFiv6cf7VpYg1Ednquq9TLb7/cIIbX8a6AuRmX4fjdGuqwmBq3OG7ZksFcYEFKt5U4mAJIaL8hXiM2iXjgY02LqiQY/QWATsHI4ie9ZOnwrQE+Rr6mASN1BVFuIgyHIbwX54jsFSnZ/7CdBMkuAd9B8JkxppWVYpYIFHE9oWNfjh/epdK8yv9Oo6r0w5Rb+4qaAc5g+RAaknHeV6Gp75d2lxBdCm5XknKKbGma2+/DfoE8WZTSgzXrYcRlStYN' > /root/.ssh/known_hosts
 
-		G_DIETPI-NOTIFY 2 'Recreating symlink for resolv.conf (DNS):'
-		echo 'nameserver 1.1.1.1' > /etc/resolvconf/run/resolv.conf # Temp apply, in case was not previously symlink, resets on next ifup
-		ln -sfv /etc/resolvconf/run/resolv.conf /etc/resolv.conf
+		G_DIETPI-NOTIFY 2 'Configuring DNS nameserver:'
+		echo 'nameserver 9.9.9.9' > /etc/resolvconf/run/resolv.conf # Apply generic functional DNS nameserver, updated on next service start
+		ln -sfv /etc/resolvconf/run/resolv.conf /etc/resolv.conf # Update symlink, in case it was manually removed
+		rm -fv /etc/resolvconf/resolv.conf.d/{original,tail} # Remove obsolete original and appendix files
 
 		# ifupdown starts the daemon outside of systemd, the enabled systemd unit just thows an error on boot due to missing dbus and with dbus might interfere with ifupdown
 		systemctl disable wpa_supplicant 2> /dev/null && G_DIETPI-NOTIFY 2 'Disabled non-required wpa_supplicant systemd unit'
@@ -1414,7 +1439,7 @@ _EOF_
 		systemctl mask getty-static
 		# - logind features disabled by default. Usually not needed and all features besides auto getty creation are not available without libpam-systemd package.
 		#	- It will be unmasked/enabled, automatically if libpam-systemd got installed during dietpi-software install, usually with desktops.
-		systemctl disable --now systemd-logind &> /dev/null
+		systemctl disable --now systemd-logind 2> /dev/null
 		systemctl mask systemd-logind
 
 		G_DIETPI-NOTIFY 2 'Configuring regional settings (TZdata):'
@@ -1454,7 +1479,7 @@ _EOF_
 		fi
 
 		# G_HW_MODEL specific
-		G_DIETPI-NOTIFY 2 'Appling G_HW_MODEL specific tweaks:'
+		G_DIETPI-NOTIFY 2 'Applying G_HW_MODEL specific tweaks:'
 
 		if (( $G_HW_MODEL != 20 )); then
 
@@ -1485,24 +1510,24 @@ _EOF_
 		# - Sparky SBC:
 		elif (( $G_HW_MODEL == 70 )); then
 
-			# 	Install latest kernel
-			wget https://raw.githubusercontent.com/sparky-sbc/sparky-test/master/dragon_fly_check/uImage -O /boot/uImage
-			wget https://raw.githubusercontent.com/sparky-sbc/sparky-test/master/dragon_fly_check/3.10.38.bz2 -O package.tar
-			tar xvf package.tar -C /lib/modules/
-			rm package.tar
+			# Install latest kernel/drivers
+			G_RUN_CMD wget https://raw.githubusercontent.com/sparky-sbc/sparky-test/master/dragon_fly_check/uImage -O /boot/uImage
+			G_RUN_CMD wget https://raw.githubusercontent.com/sparky-sbc/sparky-test/master/dragon_fly_check/3.10.38.bz2
+			G_RUN_CMD tar -xf 3.10.38.bz2 -C /lib/modules/
+			rm 3.10.38.bz2
+			# - USB audio update
+			G_RUN_CMD wget https://raw.githubusercontent.com/sparky-sbc/sparky-test/master/dsd-designs/snd-usb-audio.ko -O /lib/modules/3.10.38/kernel/sound/usb/snd-usb-audio.ko
+			# - Ethernet update
+			G_RUN_CMD wget https://raw.githubusercontent.com/sparky-sbc/sparky-test/master/sparky-eth/ethernet.ko -O /lib/modules/3.10.38/kernel/drivers/net/ethernet/acts/ethernet.ko
 
-			#	Patches
-			G_RUN_CMD wget https://raw.githubusercontent.com/sparky-sbc/sparky-test/master/dsd-marantz/snd-usb-audio.ko -O /lib/modules/3.10.38/kernel/sound/usb/snd-usb-audio.ko
-			G_RUN_CMD wget https://raw.githubusercontent.com/sparky-sbc/sparky-test/master/dsd-marantz/snd-usbmidi-lib.ko -O /lib/modules/3.10.38/kernel/sound/usb/snd-usbmidi-lib.ko
-
-			cat << _EOF_ > /DietPi/uEnv.txt
+			# Boot args
+			cat << _EOF_ > /boot/uenv.txt
 uenvcmd=setenv os_type linux;
-bootargs=earlyprintk clk_ignore_unused selinux=0 scandelay console=tty0 loglevel=1 real_rootflag=rw root=/dev/mmcblk0p2 rootwait init=/lib/systemd/systemd aotg.urb_fix=1 aotg.aotg1_speed=0
+bootargs=earlyprintk clk_ignore_unused selinux=0 scandelay console=tty0 loglevel=1 real_rootflag=rw root=/dev/mmcblk0p2 rootwait init=/lib/systemd/systemd aotg.urb_fix=1 aotg.aotg1_speed=0 net.ifnames=0
 _EOF_
-			cp /DietPi/uEnv.txt /boot/uenv.txt # Temp solution
 
-			#	Blacklist GPU and touch screen modules: https://github.com/MichaIng/DietPi/issues/699#issuecomment-271362441
-			cat << _EOF_ > /etc/modprobe.d/disable_sparkysbc_touchscreen.conf
+			# Blacklist GPU and touch screen modules: https://github.com/MichaIng/DietPi/issues/699#issuecomment-271362441
+			cat << _EOF_ > /etc/modprobe.d/dietpi-disable_sparkysbc_touchscreen.conf
 blacklist owl_camera
 blacklist gsensor_stk8313
 blacklist ctp_ft5x06
@@ -1511,25 +1536,51 @@ blacklist gsensor_bma222
 blacklist gsensor_mir3da
 _EOF_
 
-			cat << _EOF_ > /etc/modprobe.d/disable_sparkysbc_gpu.conf
+			cat << _EOF_ > /etc/modprobe.d/dietpi-disable_sparkysbc_gpu.conf
 blacklist pvrsrvkm
 blacklist drm
 blacklist videobuf2_vmalloc
 blacklist bc_example
 _EOF_
 
-			#	Sparky SBC, WiFi rtl8812au driver: https://github.com/sparky-sbc/sparky-test/tree/master/rtl8812au
-			G_RUN_CMD wget https://raw.githubusercontent.com/sparky-sbc/sparky-test/master/rtl8812au/rtl8812au_sparky.tar
-			mkdir -p rtl8812au_sparky
-			tar -xvf rtl8812au_sparky.tar -C rtl8812au_sparky
-			chmod -R +x rtl8812au_sparky
-			cd rtl8812au_sparky
-			G_RUN_CMD ./install.sh
-			cd /tmp/$G_PROGRAM_NAME
-			rm -R rtl8812au_sparky*
-
-			#	Use performance gov for stability.
+			# Use performance gov for stability
 			G_CONFIG_INJECT 'CONFIG_CPU_GOVERNOR=' 'CONFIG_CPU_GOVERNOR=performance' /DietPi/dietpi.txt
+
+			# Install script to toggle between USB and onboard Ethernet automatically
+			cat << _EOF_ > /var/lib/dietpi/services/dietpi-sparkysbc_ethernet.sh
+#!/bin/dash
+# Called from: /etc/systemd/system/dietpi-sparkysbc_ethernet.service
+# We need to wait until USB Ethernet is established on USB bus, which takes much longer than onboard init.
+sleep 20
+# Disable onboard Ethernet if USB Ethernet is found
+if ip a s eth1 > /dev/null 2>&1; then
+
+	echo 'blacklist ethernet' > /etc/modprobe.d/dietpi-disable_sparkysbc_ethernet.conf
+	reboot
+
+# Enable onboard Ethernet if no adapter is found
+elif ! ip a s eth0 > /dev/null 2>&1; then
+
+	rm -f /etc/modprobe.d/dietpi-disable_sparkysbc_ethernet.conf
+	reboot
+
+fi
+_EOF_
+			chmod +x /var/lib/dietpi/services/dietpi-sparkysbc_ethernet.sh
+			cat << _EOF_ > /etc/systemd/system/dietpi-sparkysbc_ethernet.service
+[Unit]
+Description=Sparky SBC auto detect and toggle onboard/USB Ethernet
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+RemainAfterExit=yes
+ExecStart=/var/lib/dietpi/services/dietpi-sparkysbc_ethernet.sh
+
+[Install]
+WantedBy=multi-user.target
+_EOF_
+			systemctl enable dietpi-sparkysbc_ethernet
 
 		# - RPi:
 		elif (( $G_HW_MODEL < 10 )); then
@@ -1583,21 +1634,8 @@ tic terminfo.txt
 tput cnorm
 _EOF_
 
-			# - Ensure WiFi module pre-exists
+			# Ensure WiFi module pre-exists
 			G_CONFIG_INJECT '8723bs' '8723bs' /etc/modules
-
-		# - Rock(Pro)64: Apply workaround for kernel-related Ethernet issues: https://github.com/MichaIng/DietPi/issues/3066
-		elif [[ $G_HW_MODEL == 4[23] ]]; then
-
-			local identifier='ff540000'
-			(( $G_HW_MODEL == 43 )) && identifier='fe300000'
-
-			if [[ -f '/boot/boot.cmd' ]] && ! grep -q "$identifier" /boot/boot.cmd; then
-
-				sed -i "/^fdt resize/s|$|\nfdt rm /ethernet@$identifier rockchip,bugged_tx_coe\nfdt rm /ethernet@$identifier snps,force_thresh_dma_mode\nfdt set /ethernet@$identifier snps,txpbl <0x21>|" /boot/boot.cmd
-				mkimage -C none -A arm -T script -d /boot/boot.cmd /boot/boot.scr
-
-			fi
 
 		fi
 
@@ -1622,12 +1660,6 @@ _EOF_
 		G_DIETPI-NOTIFY 2 'Mask cron until 1st run setup is completed'
 		G_RUN_CMD systemctl mask cron
 
-		G_DIETPI-NOTIFY 2 'Running general cleanup of misc files'
-		# - Remove Bash history file
-		rm -vf /{root,home/*}/.bash_history
-		# - Remove Nano history file
-		rm -vf /{root,home/*}/.nano_history
-
 		G_DIETPI-NOTIFY 2 'Removing swapfile from image'
 		/DietPi/dietpi/func/dietpi-set_swapfile 0 /var/swap
 		[[ -e '/var/swap' ]] && rm -v /var/swap # still exists on some images...
@@ -1635,9 +1667,6 @@ _EOF_
 		G_CONFIG_INJECT 'AUTO_SETUP_SWAPFILE_SIZE=' 'AUTO_SETUP_SWAPFILE_SIZE=1' /DietPi/dietpi.txt
 
 		G_DIETPI-NOTIFY 2 'Resetting boot.ini, config.txt, cmdline.txt etc'
-
-		# - PineA64 - delete ethaddr from uEnv.txt file
-		[[ $G_HW_MODEL == 40 && -f '/boot/uEnv.txt' ]] && sed -i '/^ethaddr/ d' /boot/uEnv.txt
 
 		# - Set Pi cmdline.txt back to normal
 		[[ -f '/boot/cmdline.txt' ]] && sed -i 's/ rootdelay=10//g' /boot/cmdline.txt
@@ -1763,11 +1792,15 @@ _EOF_
 		G_DIETPI-NOTIFY 2 'Clearing DietPi logs, written during PREP'
 		rm -vRf /var/tmp/dietpi/logs/{,.??,.[^.]}*
 
-		G_DIETPI-NOTIFY 2 'Clearing items below mount points'
+		G_DIETPI-NOTIFY 2 'Clearing items below tmpfs mount points'
 		G_RUN_CMD mkdir -p /mnt/tmp_root
 		G_RUN_CMD mount $(findmnt -no source /) /mnt/tmp_root
 		rm -vRf /mnt/tmp_root/{DietPi,dev,proc,run,sys,tmp,var/log}/{,.??,.[^.]}*
 		G_RUN_CMD umount /mnt/tmp_root
+		G_RUN_CMD rmdir /mnt/tmp_root
+
+		G_DIETPI-NOTIFY 2 'Running general cleanup of misc files'
+		rm -vf /{root,home/*}/.{bash_history,nano_history,wget-hsts}
 
 		# Remove PREP script
 		[[ -f $FP_PREP_SCRIPT ]] && rm $FP_PREP_SCRIPT
