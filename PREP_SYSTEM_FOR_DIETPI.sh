@@ -1095,6 +1095,7 @@ _EOF_
 		rm -vf /etc/X11/xorg.conf.d/*armbian*
 		#rm -vf /etc/armbian* armbian-release # Required for kernel/bootloader package upgrade (initramfs postinst)
 		rm -vf /lib/systemd/system/*armbian*
+		rm -vf /etc/systemd/system/logrotate.service # Override to support Armbian zRAM log
 		rm -vf /etc/apt/apt.conf.d/*armbian*
 		rm -vf /etc/cron.*/*armbian*
 		#rm -vf /etc/default/*armbian* # Required for ARMbian root package upgrade
@@ -1106,6 +1107,7 @@ _EOF_
 		[[ -f '/etc/armbian-release' ]] && cat << _EOF_ > /etc/dpkg/dpkg.cfg.d/dietpi-no_armbian
 # Exclude conflicting ARMbian files
 path-exclude /lib/systemd/system/*armbian*
+path-exclude /etc/systemd/system/logrotate.service
 path-exclude /etc/apt/apt.conf.d/*armbian*
 path-exclude /etc/cron.*/*armbian*
 #path-exclude /etc/default/*armbian* # Required for ARMbian root package upgrade
