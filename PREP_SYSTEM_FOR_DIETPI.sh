@@ -45,6 +45,7 @@
 	# Work inside /tmp as usually tmpfs to reduce disk I/O and speed up download and unpacking
 	# - Save full script path, beforehand: https://github.com/MichaIng/DietPi/pull/2341#discussion_r241784962
 	FP_PREP_SCRIPT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/$(basename "${BASH_SOURCE[0]}")"
+	echo "$FP_PREP_SCRIPT" # What happens, if we use bash -c "$(curl -s ...)"?
 	cd /tmp
 
 	# APT: Prefer IPv4 by default to avoid hanging access attempts in some cases
@@ -643,9 +644,9 @@ Currently installed: $G_DISTRO_NAME (ID: $G_DISTRO)"; then
 		G_RUN_CMD systemctl daemon-reload
 		G_RUN_CMD systemctl enable dietpi-ramdisk
 
-		# Mount tmpfs
+		# Initiate DietPi-RAMdisk
 		G_RUN_CMD mkdir -p /DietPi
-		G_RUN_CMD mount -t tmpfs -o size=10m tmpfs /DietPi
+		G_RUN_CMD mount -t tmpfs -o size=10M,noatime,lazytime,nodev,nosuid,mode=1755 tmpfs /DietPi
 		l_message='Starting DietPi-RAMdisk' G_RUN_CMD systemctl start dietpi-ramdisk
 
 		#------------------------------------------------------------------------------------------------
@@ -1319,22 +1320,19 @@ _EOF_
 		systemctl disable --now e2scrub_all.timer 2> /dev/null
 		systemctl disable --now e2scrub_reap 2> /dev/null
 
+		l_message='Generating /DietPi/dietpi/.hw_model' G_RUN_CMD /DietPi/dietpi/func/dietpi-obtain_hw_model
+
+		l_message='Generating /etc/fstab' G_RUN_CMD /DietPi/dietpi/dietpi-drive_manager 4
+
+		# Create and navigate to "/tmp/$G_PROGRAM_NAME" working directory, now assured to be tmpfs
+		mkdir -p /tmp/$G_PROGRAM_NAME
+		cd /tmp/$G_PROGRAM_NAME
+
 		local info_use_drive_manager='Can be installed and setup by DietPi-Drive_Manager.\nSimply run "dietpi-drive_manager" and select "Add network drive".'
 		echo -e "Samba client: $info_use_drive_manager" > /mnt/samba/readme.txt
 		echo -e "NFS client: $info_use_drive_manager" > /mnt/nfs_client/readme.txt
 
-		l_message='Generating DietPi /etc/fstab' G_RUN_CMD /DietPi/dietpi/dietpi-drive_manager 4
-		# Restart DietPi-RAMdisk, as 'dietpi-drive_manager 4' remounts /DietPi.
-		G_RUN_CMD systemctl restart dietpi-ramdisk
-
-		# Recreate and navigate to "/tmp/$G_PROGRAM_NAME" working directory
-		mkdir -p /tmp/$G_PROGRAM_NAME
-		cd /tmp/$G_PROGRAM_NAME
-
-		G_DIETPI-NOTIFY 2 'Updating /DietPi/dietpi/.hw_model'
-		/DietPi/dietpi/func/dietpi-obtain_hw_model
-
-		# Restoring original MOTD (e.g. Armbian)
+		G_DIETPI-NOTIFY 2 'Restoring original MOTD:'
 		rm -fv /etc/motd
 		cp -v /usr/share/base-files/motd /etc/motd
 
@@ -1353,29 +1351,24 @@ _EOF_
 		# Fix wireless-tools bug on Stretch: https://bugs.debian.org/908886
 		[[ -f '/etc/network/if-pre-up.d/wireless-tools' ]] && sed -i '\|^[[:blank:]]ifconfig "$IFACE" up$|c\\t/sbin/ip link set dev "$IFACE" up' /etc/network/if-pre-up.d/wireless-tools
 
-		G_DIETPI-NOTIFY 2 'Tweaking DHCP timeout:'
-
-		# - Reduce DHCP request retry count and timeouts: https://github.com/MichaIng/DietPi/issues/711
+		G_DIETPI-NOTIFY 2 'Tweaking DHCP timeout:' # https://github.com/MichaIng/DietPi/issues/711
 		G_CONFIG_INJECT 'timeout[[:blank:]]' 'timeout 10;' /etc/dhcp/dhclient.conf
 		G_CONFIG_INJECT 'retry[[:blank:]]' 'retry 4;' /etc/dhcp/dhclient.conf
 
-		G_DIETPI-NOTIFY 2 'Configuring hosts:'
-
+		G_DIETPI-NOTIFY 2 'Configuring hostname and hosts:'
+		echo 'DietPi' > /etc/hostname
 		G_ERROR_HANDLER_COMMAND='/etc/hosts'
 		cat << _EOF_ > $G_ERROR_HANDLER_COMMAND
 127.0.0.1 localhost
 127.0.1.1 DietPi
-::1       localhost ip6-localhost ip6-loopback
-ff02::1   ip6-allnodes
-ff02::2   ip6-allrouters
+::1 localhost ip6-localhost ip6-loopback
+ff02::1 ip6-allnodes
+ff02::2 ip6-allrouters
 _EOF_
 		G_ERROR_HANDLER_EXITCODE=$?
 		G_ERROR_HANDLER
 
-		echo 'DietPi' > /etc/hostname
-
 		G_DIETPI-NOTIFY 2 'Configuring htop:'
-
 		G_ERROR_HANDLER_COMMAND='/etc/htoprc'
 		cat << _EOF_ > $G_ERROR_HANDLER_COMMAND
 # DietPi default config for htop
@@ -1417,7 +1410,6 @@ _EOF_
 		systemctl restart fake-hwclock # Failsafe, apply now if date is way far back...
 
 		G_DIETPI-NOTIFY 2 'Configuring serial login consoles:'
-
 		# On virtual machines, serial consoles are not required
 		if (( $G_HW_MODEL == 20 )); then
 
@@ -1445,8 +1437,8 @@ _EOF_
 		systemctl mask systemd-logind
 
 		G_DIETPI-NOTIFY 2 'Configuring regional settings (TZdata):'
-		rm -f /etc/{localtime,timezone}
-		ln -sf /usr/share/zoneinfo/UTC /etc/localtime
+		rm -fv /etc/{localtime,timezone}
+		ln -sv /usr/share/zoneinfo/UTC /etc/localtime
 		G_RUN_CMD dpkg-reconfigure -f noninteractive tzdata
 
 		G_DIETPI-NOTIFY 2 'Configuring regional settings (Keyboard):'
@@ -1456,7 +1448,6 @@ _EOF_
 
 		# G_HW_ARCH specific
 		G_DIETPI-NOTIFY 2 'Applying G_HW_ARCH specific tweaks:'
-
 		if (( $G_HW_ARCH == 10 )); then
 
 			# i386 APT/DPKG support
@@ -1482,7 +1473,6 @@ _EOF_
 
 		# G_HW_MODEL specific
 		G_DIETPI-NOTIFY 2 'Applying G_HW_MODEL specific tweaks:'
-
 		if (( $G_HW_MODEL != 20 )); then
 
 			G_DIETPI-NOTIFY 2 'Configuring hdparm:'
@@ -1641,7 +1631,7 @@ _EOF_
 
 		fi
 
-		# - ARMbian increase console verbose
+		# - ARMbian increase console verbosity
 		[[ -f '/boot/armbianEnv.txt' ]] && sed -i '/verbosity=/c\verbosity=7' /boot/armbianEnv.txt
 
 		#------------------------------------------------------------------------------------------------
@@ -1762,7 +1752,7 @@ _EOF_
 		/DietPi/dietpi/func/dietpi-set_software apt-cache clean
 
 		# - HW Specific
-		#	RPi remove saved G_HW_MODEL , allowing obtain-hw_model to auto detect RPi model
+		#	RPi remove saved G_HW_MODEL, allowing obtain-hw_model to auto detect RPi model
 		(( $G_HW_MODEL < 10 )) && [[ -f '/etc/.dietpi_hw_model_identifier' ]] && rm /etc/.dietpi_hw_model_identifier
 
 		# - BBB remove fsexpansion: https://github.com/MichaIng/DietPi/issues/931#issuecomment-345451529
