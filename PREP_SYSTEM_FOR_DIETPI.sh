@@ -45,7 +45,6 @@
 	# Work inside /tmp as usually tmpfs to reduce disk I/O and speed up download and unpacking
 	# - Save full script path, beforehand: https://github.com/MichaIng/DietPi/pull/2341#discussion_r241784962
 	FP_PREP_SCRIPT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/$(basename "${BASH_SOURCE[0]}")"
-	echo "$FP_PREP_SCRIPT" # What happens, if we use bash -c "$(curl -s ...)"?
 	cd /tmp
 
 	# APT: Prefer IPv4 by default to avoid hanging access attempts in some cases
