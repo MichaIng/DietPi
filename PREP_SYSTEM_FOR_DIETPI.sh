@@ -1000,8 +1000,8 @@ _EOF_
 		# - Sourcecode (linux-headers etc)
 		[[ -d '/usr/src' ]] && rm -vRf /usr/src/{,.??,.[^.]}*
 
-		# - root
-		rm -Rfv /root/.{cache,local,config,gnupg,viminfo}
+		# - root/home
+		rm -Rfv /{root,home/*}/.{cache,local,config,gnupg,viminfo,dbus,gconf,nano}
 
 		# - Documentation dirs: https://github.com/MichaIng/DietPi/issues/3259
 		#[[ -d '/usr/share/man' ]] && rm -vR /usr/share/man
