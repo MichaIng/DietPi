@@ -412,6 +412,7 @@
 			'61' ': NanoPi M2/T2'
 			'62' ': NanoPi M3/T3/Fire3'
 			'68' ': NanoPC T4'
+			'58' ': NanoPi M4v2'
 			'67' ': NanoPi K1 Plus'
 			'10' ': Odroid C1'
 			'14' ': Odroid N1'
