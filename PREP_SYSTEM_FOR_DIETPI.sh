@@ -262,7 +262,7 @@
 		G_DIETPI-NOTIFY 0 "Step $SETUP_STEP: Detecting existing DietPi system"; ((SETUP_STEP++))
 		G_DIETPI-NOTIFY 2 '-----------------------------------------------------------------------------------'
 		#------------------------------------------------------------------------------------------------
-		if [[ -d '/DietPi/dietpi' || -d '/boot/dietpi' ]]; then
+		if [[ -d '/DietPi' || -d '/boot/dietpi' ]]; then
 
 			G_DIETPI-NOTIFY 2 'DietPi system found, uninstalling old instance...'
 
@@ -277,18 +277,18 @@
 
 				[[ -f $i ]] || continue
 				systemctl disable --now ${i##*/}
-				rm $i
+				rm -v $i
 
 			done
 
 			# Delete any previous existing data
 			umount /DietPi # Failsafe
 			[[ -d '/DietPi' ]] && rm -R /DietPi
-			rm -Rf /{boot,mnt,etc,var/lib,var/tmp}/dietpi*
-			rm -f /etc/{bashrc,profile,sysctl}.d/dietpi*
+			rm -Rfv /{boot,mnt,etc,var/lib,var/tmp}/dietpi*
+			rm -fv /etc/{bashrc,profile,sysctl}.d/dietpi*
 
-			[[ -f '/root/DietPi-Automation.log' ]] && rm /root/DietPi-Automation.log
-			[[ -f '/boot/Automation_Format_My_Usb_Drive' ]] && rm /boot/Automation_Format_My_Usb_Drive
+			[[ -f '/root/DietPi-Automation.log' ]] && rm -v /root/DietPi-Automation.log
+			[[ -f '/boot/Automation_Format_My_Usb_Drive' ]] && rm -v /boot/Automation_Format_My_Usb_Drive
 
 		else
 
@@ -634,6 +634,12 @@ Currently installed: $G_DISTRO_NAME (ID: $G_DISTRO)"; then
 		rm "DietPi-$G_GITBRANCH/dietpi/server_version"*
 		rm "DietPi-$G_GITBRANCH/dietpi/pre-patch_file"
 		rm "DietPi-$G_GITBRANCH/dietpi/patch_file"
+
+		G_DIETPI-NOTIFY 2 'Pre-generating DietPi directories'
+		mkdir -pv /var/lib/dietpi/{postboot.d,dietpi-autostart,dietpi-config,dietpi-software/installed}
+		mkdir -pv /var/tmp/dietpi/logs/dietpi-ramlog_store
+		chown -R dietpi:dietpi /var/{var,tmp}/dietpi
+		chmod -R 770 /var/{var,tmp}/dietpi
 
 		l_message='Copy DietPi core files to /boot/dietpi' G_RUN_CMD cp -Rf "DietPi-$G_GITBRANCH/dietpi" /boot/
 		l_message='Copy DietPi rootfs files in place' G_RUN_CMD cp -Rf "DietPi-$G_GITBRANCH/rootfs"/. /
@@ -1172,36 +1178,11 @@ _EOF_
 
 		#-----------------------------------------------------------------------------------
 		# Dirs
-
 		G_DIETPI-NOTIFY 2 'Configuring DietPi Directories'
-
-		# - /var/lib/dietpi : Core storage for installed non-standard APT software, outside of /mnt/dietpi_userdata
-		#mkdir -p /var/lib/dietpi
-		mkdir -p /var/lib/dietpi/postboot.d
-		#	Storage locations for program specifc additional data
-		mkdir -p /var/lib/dietpi/dietpi-autostart
-		mkdir -p /var/lib/dietpi/dietpi-config
-		#mkdir -p /var/lib/dietpi/dietpi-software
-		mkdir -p /var/lib/dietpi/dietpi-software/installed # Additional storage for installed apps, eg: custom scripts and data
-		chown -R dietpi:dietpi /var/lib/dietpi
-		chmod -R 770 /var/lib/dietpi
-
-		# - /var/tmp/dietpi : Temp storage saved during reboots, eg: logs outside of /var/log
-		#mkdir -p /var/tmp/dietpi/logs
-		mkdir -p /var/tmp/dietpi/logs/dietpi-ramlog_store
-		chown -R dietpi:dietpi /var/tmp/dietpi
-		chmod -R 770 /var/tmp/dietpi
-
-		# - /DietPi RAMdisk
-		mkdir -p /DietPi
-		chown dietpi:dietpi /DietPi
-		chmod 770 /DietPi
-
 		# - /mnt/dietpi_userdata : DietPi userdata
 		mkdir -p $G_FP_DIETPI_USERDATA
 		chown dietpi:dietpi $G_FP_DIETPI_USERDATA
 		chmod 775 $G_FP_DIETPI_USERDATA
-
 		# - Networked drives
 		mkdir -p /mnt/samba
 		mkdir -p /mnt/ftp_client
@@ -1209,9 +1190,7 @@ _EOF_
 
 		#-----------------------------------------------------------------------------------
 		# Services
-
 		G_DIETPI-NOTIFY 2 'Configuring DietPi Services:'
-
 		G_RUN_CMD systemctl enable dietpi-ramlog
 		G_RUN_CMD systemctl enable dietpi-preboot
 		G_RUN_CMD systemctl enable dietpi-boot
