@@ -1183,24 +1183,24 @@ _EOF_
 		mkdir -p /var/lib/dietpi/dietpi-config
 		#mkdir -p /var/lib/dietpi/dietpi-software
 		mkdir -p /var/lib/dietpi/dietpi-software/installed # Additional storage for installed apps, eg: custom scripts and data
-		chown dietpi:dietpi /var/lib/dietpi
-		chmod 660 /var/lib/dietpi
+		chown -R dietpi:dietpi /var/lib/dietpi
+		chmod -R 770 /var/lib/dietpi
 
 		# - /var/tmp/dietpi : Temp storage saved during reboots, eg: logs outside of /var/log
 		#mkdir -p /var/tmp/dietpi/logs
 		mkdir -p /var/tmp/dietpi/logs/dietpi-ramlog_store
-		chown dietpi:dietpi /var/tmp/dietpi
-		chmod 660 /var/tmp/dietpi
+		chown -R dietpi:dietpi /var/tmp/dietpi
+		chmod -R 770 /var/tmp/dietpi
 
 		# - /DietPi RAMdisk
 		mkdir -p /DietPi
 		chown dietpi:dietpi /DietPi
-		chmod 660 /DietPi
+		chmod 770 /DietPi
 
 		# - /mnt/dietpi_userdata : DietPi userdata
 		mkdir -p $G_FP_DIETPI_USERDATA
 		chown dietpi:dietpi $G_FP_DIETPI_USERDATA
-		chmod -R 775 $G_FP_DIETPI_USERDATA
+		chmod 775 $G_FP_DIETPI_USERDATA
 
 		# - Networked drives
 		mkdir -p /mnt/samba
