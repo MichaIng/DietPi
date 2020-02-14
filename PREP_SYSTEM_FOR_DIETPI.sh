@@ -636,7 +636,7 @@ Currently installed: $G_DISTRO_NAME (ID: $G_DISTRO)"; then
 		rm "DietPi-$G_GITBRANCH/dietpi/patch_file"
 
 		G_DIETPI-NOTIFY 2 'Pre-generating DietPi directories'
-		mkdir -pv /var/lib/dietpi/{postboot.d,dietpi-autostart,dietpi-config,dietpi-software/installed}
+		mkdir -pv /var/lib/dietpi/{postboot.d,dietpi-software/installed}
 		mkdir -pv /var/tmp/dietpi/logs/dietpi-ramlog_store
 		chown -R dietpi:dietpi /var/{var,tmp}/dietpi
 		chmod -R 770 /var/{var,tmp}/dietpi
