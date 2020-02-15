@@ -636,12 +636,6 @@ Currently installed: $G_DISTRO_NAME (ID: $G_DISTRO)"; then
 		rm "DietPi-$G_GITBRANCH/dietpi/pre-patch_file"
 		rm "DietPi-$G_GITBRANCH/dietpi/patch_file"
 
-		G_DIETPI-NOTIFY 2 'Pre-generating DietPi directories'
-		mkdir -pv /var/lib/dietpi/{postboot.d,dietpi-software/installed}
-		mkdir -pv /var/tmp/dietpi/logs/dietpi-ramlog_store
-		chown -R dietpi:dietpi /var/{var,tmp}/dietpi
-		chmod -R 770 /var/{var,tmp}/dietpi
-
 		l_message='Copy DietPi core files to /boot/dietpi' G_RUN_CMD cp -Rf "DietPi-$G_GITBRANCH/dietpi" /boot/
 		l_message='Copy DietPi rootfs files in place' G_RUN_CMD cp -Rf "DietPi-$G_GITBRANCH/rootfs"/. /
 		l_message='Clean download location' G_RUN_CMD rm -R "DietPi-$G_GITBRANCH"
@@ -1166,32 +1160,29 @@ _EOF_
 
 		# - Enable bash-completion for non-login shells:
 		#	- NB: It is called twice on login shells then, but breaks directly if called already once.
-		ln -sf /etc/profile.d/bash_completion.sh /etc/bashrc.d/dietpi-bash_completion.sh
+		ln -sfv /etc/profile.d/bash_completion.sh /etc/bashrc.d/dietpi-bash_completion.sh
 
 		#-----------------------------------------------------------------------------------
 		# DietPi user
-		l_message='Creating DietPi User Account' G_RUN_CMD /DietPi/dietpi/func/dietpi-set_software useradd dietpi
+		l_message='Creating DietPi user account' G_RUN_CMD /DietPi/dietpi/func/dietpi-set_software useradd dietpi
 
 		#-----------------------------------------------------------------------------------
 		# UID bit for sudo: https://github.com/MichaIng/DietPi/issues/794
-		G_DIETPI-NOTIFY 2 'Configuring sudo UID bit'
+		G_DIETPI-NOTIFY 2 'Setting sudo UID bit'
 		chmod 4755 $(command -v sudo)
 
 		#-----------------------------------------------------------------------------------
 		# Dirs
-		G_DIETPI-NOTIFY 2 'Configuring DietPi Directories'
-		# - /mnt/dietpi_userdata : DietPi userdata
-		mkdir -p $G_FP_DIETPI_USERDATA
-		chown dietpi:dietpi $G_FP_DIETPI_USERDATA
-		chmod 775 $G_FP_DIETPI_USERDATA
-		# - Networked drives
-		mkdir -p /mnt/samba
-		mkdir -p /mnt/ftp_client
-		mkdir -p /mnt/nfs_client
+		G_DIETPI-NOTIFY 2 'Generating DietPi Directories'
+		mkdir -pv /var/lib/dietpi/{postboot.d,dietpi-software/installed}
+		mkdir -pv /var/tmp/dietpi/logs/dietpi-ramlog_store
+		mkdir -pv $G_FP_DIETPI_USERDATA /mnt/{samba,ftp_client,nfs_client}
+		chown -R dietpi:dietpi /var/{lib,tmp}/dietpi $G_FP_DIETPI_USERDATA /mnt/{samba,ftp_client,nfs_client}
+		chmod -R 775 $(find /var/{lib,tmp}/dietpi $G_FP_DIETPI_USERDATA /mnt/{samba,ftp_client,nfs_client} -type d)
 
 		#-----------------------------------------------------------------------------------
 		# Services
-		G_DIETPI-NOTIFY 2 'Configuring DietPi Services:'
+		G_DIETPI-NOTIFY 2 'Enabling DietPi services'
 		G_RUN_CMD systemctl enable dietpi-ramlog
 		G_RUN_CMD systemctl enable dietpi-preboot
 		G_RUN_CMD systemctl enable dietpi-boot
@@ -1199,8 +1190,7 @@ _EOF_
 		G_RUN_CMD systemctl enable dietpi-kill_ssh
 
 		#-----------------------------------------------------------------------------------
-		# Cron Jobs
-
+		# Cron jobs
 		G_DIETPI-NOTIFY 2 'Configuring Cron:'
 
 		G_ERROR_HANDLER_COMMAND='/etc/crontab'
@@ -1222,7 +1212,6 @@ _EOF_
 
 		#-----------------------------------------------------------------------------------
 		# Network
-
 		G_DIETPI-NOTIFY 2 'Configuring wlan/eth naming to be preferred for networked devices:'
 		ln -sfv /dev/null /etc/systemd/network/99-default.link
 		ln -sfv /dev/null /etc/udev/rules.d/80-net-setup-link.rules
@@ -1236,7 +1225,7 @@ _EOF_
 		[[ -f '/etc/udev/rules.d/70-persistent-net.rules' ]] && rm -v /etc/udev/rules.d/70-persistent-net.rules # Jessie pre-image
 
 		G_DIETPI-NOTIFY 2 'Resetting and adding dietpi.com SSH pub host key for DietPi-Survey/Bugreport uploads:'
-		mkdir -p /root/.ssh
+		mkdir -pv /root/.ssh
 		echo 'ssh.dietpi.com ssh-rsa AAAAB3NzaC1yc2EAAAADAQABAAABAQDE6aw3r6aOEqendNu376iiCHr9tGBIWPgfrLkzjXjEsHGyVSUFNnZt6pftrDeK7UX+qX4FxOwQlugG4fymOHbimRCFiv6cf7VpYg1Ednquq9TLb7/cIIbX8a6AuRmX4fjdGuqwmBq3OG7ZksFcYEFKt5U4mAJIaL8hXiM2iXjgY02LqiQY/QWATsHI4ie9ZOnwrQE+Rr6mASN1BVFuIgyHIbwX54jsFSnZ/7CdBMkuAd9B8JkxppWVYpYIFHE9oWNfjh/epdK8yv9Oo6r0w5Rb+4qaAc5g+RAaknHeV6Gp75d2lxBdCm5XknKKbGma2+/DfoE8WZTSgzXrYcRlStYN' > /root/.ssh/known_hosts
 
 		G_DIETPI-NOTIFY 2 'Configuring DNS nameserver:'
@@ -1285,7 +1274,6 @@ _EOF_
 
 		#-----------------------------------------------------------------------------------
 		# MISC
-
 		G_DIETPI-NOTIFY 2 'Disabling apt-daily services to prevent random APT cache lock'
 		for i in apt-daily{,-upgrade}.{service,timer}
 		do
@@ -1478,7 +1466,7 @@ _EOF_
 
 			echo 'blacklist bmp085' > /etc/modprobe.d/bmp085.conf
 
-		# - Sparky SBC:
+		# - Sparky SBC
 		elif (( $G_HW_MODEL == 70 )); then
 
 			# Install latest kernel/drivers
@@ -1553,7 +1541,7 @@ WantedBy=multi-user.target
 _EOF_
 			systemctl enable dietpi-sparkysbc_ethernet
 
-		# - RPi:
+		# - RPi
 		elif (( $G_HW_MODEL < 10 )); then
 
 			# Scroll lock fix for RPi by Midwan: https://github.com/MichaIng/DietPi/issues/474#issuecomment-243215674
@@ -1699,7 +1687,7 @@ _EOF_
 		G_DIETPI-NOTIFY 2 'Setting default CPU gov'
 		/DietPi/dietpi/func/dietpi-set_cpu
 
-		G_DIETPI-NOTIFY 2 'Resetting DietPi generated globals/files'
+		G_DIETPI-NOTIFY 2 'Resetting DietPi auto-generated settings and flag files'
 		rm -v /DietPi/dietpi/.??*
 
 		G_DIETPI-NOTIFY 2 'Set init .install_stage to -1 (first boot)'
@@ -1732,14 +1720,14 @@ _EOF_
 
 		# - HW Specific
 		#	RPi remove saved G_HW_MODEL, allowing obtain-hw_model to auto detect RPi model
-		(( $G_HW_MODEL < 10 )) && [[ -f '/etc/.dietpi_hw_model_identifier' ]] && rm /etc/.dietpi_hw_model_identifier
+		(( $G_HW_MODEL < 10 )) && [[ -f '/etc/.dietpi_hw_model_identifier' ]] && rm -v /etc/.dietpi_hw_model_identifier
 
 		# - BBB remove fsexpansion: https://github.com/MichaIng/DietPi/issues/931#issuecomment-345451529
 		if (( $G_HW_MODEL == 71 )); then
 
 			systemctl disable dietpi-fs_partition_resize
-			rm /etc/systemd/system/dietpi-fs_partition_resize.service
-			rm /var/lib/dietpi/services/fs_partition_resize.sh
+			rm -v /etc/systemd/system/dietpi-fs_partition_resize.service
+			rm -v /var/lib/dietpi/services/fs_partition_resize.sh
 
 		else
 
@@ -1758,10 +1746,10 @@ _EOF_
 		G_RUN_CMD systemctl stop dietpi-ramdisk
 
 		G_DIETPI-NOTIFY 2 'Clearing lost+found'
-		rm -vRf /lost+found/{,.??,.[^.]}*
+		rm -Rfv /lost+found/{,.??,.[^.]}*
 
 		G_DIETPI-NOTIFY 2 'Clearing DietPi logs, written during PREP'
-		rm -vRf /var/tmp/dietpi/logs/{,.??,.[^.]}*
+		rm -Rfv /var/tmp/dietpi/logs/{,.??,.[^.]}*
 
 		G_DIETPI-NOTIFY 2 'Clearing items below tmpfs mount points'
 		G_RUN_CMD mkdir -p /mnt/tmp_root
@@ -1771,10 +1759,10 @@ _EOF_
 		G_RUN_CMD rmdir /mnt/tmp_root
 
 		G_DIETPI-NOTIFY 2 'Running general cleanup of misc files'
-		rm -vf /{root,home/*}/.{bash_history,nano_history,wget-hsts}
+		rm -fv /{root,home/*}/.{bash_history,nano_history,wget-hsts}
 
 		# Remove PREP script
-		[[ -f $FP_PREP_SCRIPT ]] && rm $FP_PREP_SCRIPT
+		[[ -f $FP_PREP_SCRIPT ]] && rm -v $FP_PREP_SCRIPT
 
 		sync
 
@@ -1799,7 +1787,7 @@ _EOF_
 
 		# Plug SDcard/drive into external DietPi system
 
-		# Run: https://github.com/MichaIng/DietPi/blob/dev/.meta/dietpi-imager
+		# Run: bash -c "$(curl -sSL https://github.com/MichaIng/DietPi/blob/dev/.meta/dietpi-imager)"
 
 	}
 
