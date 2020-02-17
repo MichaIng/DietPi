@@ -640,8 +640,8 @@ DietPi-Software will decrypt and use it for software installs. You can change it
 
 		aSOFTWARE_NAME[$software_id]='MPD'
 		aSOFTWARE_DESC[$software_id]='music player daemon'
-		aSOFTWARE_CATEGORY_INDEX[$software_id]=2
 		aSOFTWARE_TYPE[$software_id]=0
+		aSOFTWARE_CATEGORY_INDEX[$software_id]=2
 		#aSOFTWARE_ONLINEDOC_URL[$software_id]
 		aSOFTWARE_REQUIRES_ALSA[$software_id]=1
 		#------------------
@@ -3511,12 +3511,13 @@ _EOF_
 
 			Banner_Installing
 
-			# Sourcebuild pre-reqs: https://github.com/jcorporation/myMPD#dependencies
-			DEPS_LIST='libmpdclient2 libmediainfo0v5 cmake cppcheck pkg-config libmpdclient-dev libssl-dev libmediainfo-dev'
+			# Download source
 			Download_Install 'https://github.com/jcorporation/myMPD/archive/master.tar.gz'
-
+			# Install dependencies, build and install myMPD
 			cd myMPD-master
+			G_RUN_CMD ./build.sh installdeps
 			G_RUN_CMD ./build.sh releaseinstall
+			# Cleanup
 			cd /tmp/$G_PROGRAM_NAME
 			rm -R myMPD-master
 
@@ -7973,65 +7974,46 @@ NB: This port needs to be forwarded by your router and/or opened in your firewal
 
 			Banner_Configuration
 
-			# Create MPD user
-			local usercmd='useradd -rMU'
+			# User
+			local usercmd='useradd -rNM'
 			getent passwd mpd &> /dev/null && usercmd='usermod -a'
-			$usercmd -G dietpi,audio -d $G_FP_DIETPI_USERDATA/.mpd_cache -s $(command -v nologin) mpd
-			# - Add to new "render" group on Buster
-			(( $G_DISTRO > 4 )) && usermod -aG render mpd
+			$usercmd -G dietpi -g audio -d $G_FP_DIETPI_USERDATA/.mpd_cache -s $(command -v nologin) mpd
 
-			# Runtime dirs/files
-			# - Log
-			mkdir -p /var/log/mpd
-			>> /var/log/mpd/mpd.log
-			# - Cache
-			mkdir -p $G_FP_DIETPI_USERDATA/.mpd_cache
-			>> $G_FP_DIETPI_USERDATA/.mpd_cache/db_file
-			>> $G_FP_DIETPI_USERDATA/.mpd_cache/state
-			>> $G_FP_DIETPI_USERDATA/.mpd_cache/sticker.sql
-			# - Symlink from MPD defaults that applications may still expect/use.
+			# Dirs
+			# - Purge old log and cache
+			rm -Rf /var/log/mpd $G_FP_DIETPI_USERDATA/.mpd_cache
+			# - Recreate log and cache dirs
+			mkdir -p /var/log/mpd $G_FP_DIETPI_USERDATA/.mpd_cache
+			# - Remove obsolete cache dir, preserve previous music and playlists, in case of an existing custom install
 			[[ ! -e '/var/lib/mpd/music' || -L '/var/lib/mpd/music' ]] || mv -n /var/lib/mpd/music/* $G_FP_DIETPI_USERDATA/$FOLDER_MUSIC/ &> /dev/null
 			[[ ! -e '/var/lib/mpd/playlists' || -L '/var/lib/mpd/playlists' ]] || mv -n /var/lib/mpd/playlists/* $G_FP_DIETPI_USERDATA/$FOLDER_MUSIC/ &> /dev/null
-			[[ ! -e '/var/lib/mpd/mpd.db' || -L '/var/lib/mpd/mpd.db' ]] || mv -n /var/lib/mpd/mpd.db $G_FP_DIETPI_USERDATA/.mpd_cache/db_file
-			[[ ! -e '/var/lib/mpd/state' || -L '/var/lib/mpd/state' ]] || mv -n /var/lib/mpd/state $G_FP_DIETPI_USERDATA/.mpd_cache/state
-			[[ ! -e '/var/lib/mpd/sticker.sql' || -L '/var/lib/mpd/sticker.sql' ]] || mv -n /var/lib/mpd/sticker.sql $G_FP_DIETPI_USERDATA/.mpd_cache/sticker.sql
 			[[ -d '/var/lib/mpd' ]] && rm -R /var/lib/mpd
-			mkdir -p /var/lib/mpd
-			ln -sf $G_FP_DIETPI_USERDATA/$FOLDER_MUSIC /var/lib/mpd/music
-			ln -sf $G_FP_DIETPI_USERDATA/$FOLDER_MUSIC /var/lib/mpd/playlists
-			ln -sf $G_FP_DIETPI_USERDATA/.mpd_cache/db_file /var/lib/mpd/mpd.db
-			ln -sf $G_FP_DIETPI_USERDATA/.mpd_cache/state /var/lib/mpd/state
-			ln -sf $G_FP_DIETPI_USERDATA/.mpd_cache/sticker.sql /var/lib/mpd/sticker.sql
 
-			# Default config
+			# Config
 			G_BACKUP_FP /etc/mpd.conf
 			dps_index=$software_id Download_Install 'mpd.conf' /etc/mpd.conf
-			# - On Stretch (custom build), symlink /etc/mpd.conf to /usr/local/etc/mpd.conf, where /usr/local/bin/mpd by default searches
-			if [[ $(command -v mpd) == '/usr/local/bin/mpd' ]]; then
 
-				mkdir -p /usr/local/etc
-				ln -sf /etc/mpd.conf /usr/local/etc/mpd.conf
-
-			fi
-
-			# MPD service/confs
+			# Service
+			# - Remove obsolete sysvinit service and config
+			[[ -f '/etc/init.d/mpd' ]] && rm /etc/init.d/mpd
+			update-rc.d -f mpd remove
 			[[ -f '/etc/default/mpd' ]] && rm /etc/default/mpd
-
 			# - Upstream systemd unit: https://github.com/MusicPlayerDaemon/MPD/blob/master/systemd/system/mpd.service.in
 			# - Debian package systemd unit: https://deb.debian.org/debian/pool/main/m/mpd/
+			# - Run systemd unit as mpd user instead of using config-file based user change, to preserve supplementary group permissions (i.e. dietpi)
+			# - Define config file explicitly, since custom /usr/local/bin/mpd binary searches for /usr/local/etc/mpd.conf by default
 			cat << _EOF_ > /lib/systemd/system/mpd.service
 [Unit]
 Description=Music Player Daemon (DietPi)
 Documentation=man:mpd(1) man:mpd.conf(5)
-Documentation=file:///usr/share/doc/mpd/user-manual.html
 After=network.target sound.target
 
 [Service]
+Type=notify
 User=mpd
-#Group=dietpi # Do not change, use system assigned groups, requires both dietpi and audio groups
 PermissionsStartOnly=true
 ExecStartPre=$(command -v mkdir) -p /run/mpd
-ExecStartPre=$(command -v chown) -R mpd:dietpi /run/mpd
+ExecStartPre=$(command -v chown) -R mpd: /run/mpd
 ExecStart=$(command -v mpd) --no-daemon /etc/mpd.conf
 
 # allow MPD to use real-time priority 50
@@ -8054,9 +8036,21 @@ RestrictNamespaces=yes
 WantedBy=multi-user.target
 Also=mpd.socket
 _EOF_
+			# - systemd socket activation, not shipped by our custom package
+			[[ -f '/lib/systemd/system/mpd.socket' ]] || cat << _EOF_ > /lib/systemd/system/mpd.socket
+[Socket]
+ListenStream=/run/mpd/socket
+ListenStream=6600
+Backlog=5
+KeepAlive=true
+PassCredentials=true
+
+[Install]
+WantedBy=sockets.target
+_EOF_
 
 			# JustBoom specials
-			if grep -qi '^[[:blank:]]*CONFIG_SOUNDCARD=justboom' /DietPi/dietpi.txt; then
+			if grep -q '^[[:blank:]]*CONFIG_SOUNDCARD=justboom' /DietPi/dietpi.txt; then
 
 				# Name displayed in YMPD sound button
 				local justboom_soundcard_desc='JustBoom DietPi'
@@ -8071,17 +8065,15 @@ _EOF_
 
 				# Set SOXR quality
 				# - All RPi's can handle SOXR VH @ 192khz 32bit: https://github.com/MichaIng/DietPi/issues/581#issuecomment-256643079
-				G_CONFIG_INJECT 'samplerate_converter "' 'samplerate_converter "soxr very high"' /etc/mpd.conf #highest
+				G_CONFIG_INJECT 'samplerate_converter "' 'samplerate_converter "soxr very high"' /etc/mpd.conf # highest
 
 			fi
 
-			# Grab our test music for the user.
+			# Grab our test music for the user
 			Download_Test_Media
 
 			# Permissions
-			chmod 0664 /var/log/mpd/mpd.log /etc/mpd.conf
-			chmod -R 775 $G_FP_DIETPI_USERDATA/.mpd_cache
-			chown -R mpd:dietpi /etc/mpd.conf /var/log/mpd $G_FP_DIETPI_USERDATA/.mpd_cache
+			chown -R mpd: /var/log/mpd $G_FP_DIETPI_USERDATA/.mpd_cache /etc/mpd.conf
 
 		fi
 
@@ -8168,17 +8160,19 @@ _EOF_
 
 			Banner_Configuration
 
-			# Add user to "dietpi" group
-			usermod -aG dietpi mympd
-			# Add to new "render" group on Buster
-			(( $G_DISTRO > 4 )) && usermod -aG render mympd
+			# Use primary group "dietpi" to allow media access and create media files with "dietpi" group:
+			# - https://github.com/MichaIng/DietPi/issues/3382
+			usermod -g dietpi mympd
+			getent group mympd &> /dev/null && delgroup mympd
 
 			# Adjust config file on fresh install
 			# - On reinstall /etc/mympd/mympd.conf.dist will be created, so use its existence as reinstall flag
 			if [[ ! -f '/etc/mympd.conf.dist' ]]; then
 
-				G_CONFIG_INJECT 'webport[[:blank:]]*=' 'webport = 1333' /etc/mympd.conf
-				G_CONFIG_INJECT 'ssl[[:blank:]]*=' 'ssl = false' /etc/mympd.conf
+				G_CONFIG_INJECT 'host[[:blank:]]*=' 'host = /run/mpd/socket' /etc/mympd.conf '^\[mpd\]'
+				G_CONFIG_INJECT 'playlistdirectory[[:blank:]]*=' "playlistdirectory = $G_FP_DIETPI_USERDATA/Music" /etc/mympd.conf '^\[mpd\]'
+				G_CONFIG_INJECT 'webport[[:blank:]]*=' 'webport = 1333' /etc/mympd.conf '^\[webserver\]'
+				G_CONFIG_INJECT 'ssl[[:blank:]]*=' 'ssl = false' /etc/mympd.conf '^\[webserver\]'
 
 			fi
 
@@ -12586,27 +12580,37 @@ _EOF_
 
 				systemctl unmask mympd
 				systemctl disable --now mympd
-				rm /lib/systemd/system/mympd.service
+				rm -R /lib/systemd/system/mympd.service*
 
 			fi
 			getent passwd mympd &> /dev/null && userdel -rf mympd
+			getent group mympd &> /dev/null && groupdel mympd # pre-v6.29
 			command -v mympd &> /dev/null && rm $(command -v mympd)
-			rm -Rf /{etc,var/lib,usr/share}/mympd
+			rm -Rf /{etc,var/lib,usr/share}/mympd /etc/mympd.conf*
 			rm -f /usr/share/man/man1/mympd.*
 
 		fi
 
-		software_id=128
+		software_id=128 # MPD
 		if (( ${aSOFTWARE_INSTALL_STATE[$software_id]} == -1 )); then
 
 			Banner_Uninstalling
+			if [[ -f '/lib/systemd/system/mpd.service' ]]; then
+
+				systemctl unmask mpd
+				systemctl disable --now mpd
+				rm -R /lib/systemd/system/mpd.service*
+
+			fi
+			[[ -f '/lib/systemd/system/mpd.socket' ]] && rm /lib/systemd/system/mpd.socket
+			getent passwd mpd &> /dev/null && userdel -rf mpd
+			getent group mpd &> /dev/null && groupdel mpd # pre-v6.29
 			#apt-mark auto libavformat57 libupnp6 libao-common libao4 libasound2 libasound2-data libasyncns0 libaudiofile1 libavahi-client3 libavahi-common-data libavahi-common3 libavcodec56 libavformat56 libavresample2 libavutil54 libbinio1ldbl libcaca0 libcdio-cdda1 libcdio-paranoia1 libcdio13 libcups2 libcurl3-gnutls libdirectfb-1.2-9 libdnet libfaad2 libflac8 libfluidsynth1 libgme0 libgomp1 libgsm1 libice6 libid3tag0 libiso9660-8 libjack-jackd2-0 libjson-c2 libldb1 libmad0 libmikmod3 libmms0 libmodplug1 libmp3lame0 libmpcdec6 libmpg123-0 libnfs4 libntdb1 libogg0 libopenal-data libopenal1 libopenjpeg5 libopus0 liborc-0.4-0 libpulse0 libresid-builder0c2a libroar2 libsamplerate0 libschroedinger-1.0-0 libsdl1.2debian libshout3 libsidplay2 libsidutils0 libslp1 libsm6 libsmbclient libsndfile1 libsoxr0 libspeex1 libspeexdsp1 libsqlite3-0 libtalloc2 libtdb1 libtevent0 libtheora0 libva1 libvorbis0a libvorbisenc2 libvorbisfile3 libvpx1 libwavpack1 libwbclient0 libwildmidi-config libwildmidi1 libx11-6 libx11-data libx11-xcb1 libx264-142 libxau6 libxcb1 libxdmcp6 libxext6 libxi6 libxtst6 libxvidcore4 libyajl2 libzzip-0-13 mime-support python python-talloc python2.7 samba-libs x11-common file &> /dev/null
 			G_AGP mpd libmpdclient2
-			getent passwd mpd &> /dev/null && userdel -rf mpd
-			[[ -f '/lib/systemd/system/mpd.service' ]] && rm /lib/systemd/system/mpd.service
+			[[ -d '/var/log/mpd' ]] && rm -R /var/log/mpd
 			[[ -d $G_FP_DIETPI_USERDATA/.mpd_cache ]] && rm -R $G_FP_DIETPI_USERDATA/.mpd_cache
-			[[ -f '/usr/local/etc/mpd.conf' ]] && rm /usr/local/etc/mpd.conf && rmdir --ignore-fail-on-non-empty /usr/local/etc
 			[[ -f '/etc/mpd.conf' ]] && rm /etc/mpd.conf
+			[[ -f '/usr/local/etc/mpd.conf' ]] && rm /usr/local/etc/mpd.conf && rmdir --ignore-fail-on-non-empty /usr/local/etc # Pre-v6.29
 			[[ -f '/etc/default/mpd' ]] && rm /etc/default/mpd # pre-v6.20
 
 		fi
