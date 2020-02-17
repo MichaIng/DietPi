@@ -786,8 +786,14 @@ _EOF_
 		# G_HW_MODEL specific
 		if (( $G_HW_MODEL != 20 )); then
 
-			aPACKAGES_REQUIRED_INSTALL+=('dosfstools')		# DietPi-Drive_Manager + fat (boot) drive file system check and creation tools
 			aPACKAGES_REQUIRED_INSTALL+=('hdparm')			# Drive power management adjustments
+
+		fi
+
+		# Install required filesystem packages
+		if [[ $(lsblk -no FSTYPE) =~ ([[:space:]]|v)'fat' ]]; then
+
+			aPACKAGES_REQUIRED_INSTALL+=('dosfstools')		# DietPi-Drive_Manager + fat (boot) drive file system check and creation tools
 
 		fi
 
