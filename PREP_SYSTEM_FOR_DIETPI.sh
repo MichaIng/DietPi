@@ -431,8 +431,10 @@
 			'40' ': Pine A64'
 			'43' ': Rock64'
 			'42' ': RockPro64'
+			'45' ': Pine H64'
 			'70' ': Sparky SBC'
 			'72' ': ROCK Pi 4'
+			'73' ': ROCK Pi S'
 
 		)
 
