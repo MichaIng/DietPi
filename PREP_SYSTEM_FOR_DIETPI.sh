@@ -878,6 +878,11 @@ _EOF_
 
 			G_AGI linux-image-4.14-armhf-odroid-xu4 meveric-keyring
 
+		#	ROCK Pi S (official Radxa Debian image)
+		elif (( $G_HW_MODEL == 73 )) && grep -q 'apt\.radxa\.com' /etc/apt/sources.list{,.d/*}; then
+
+			G_AGI rockpis-rk-u-boot-latest linux-4.4-rockpis-latest rockpis-dtbo rockchip-overlay rtl8723ds-firmware
+
 		# - Auto detect kernel package incl. ARMbian/others DTB
 		else
 
@@ -983,6 +988,7 @@ _EOF_
 		getent passwd test &> /dev/null && userdel -f test # @fourdee
 		getent passwd odroid &> /dev/null && userdel -f odroid
 		getent passwd rock64 &> /dev/null && userdel -f rock64
+		getent passwd rock &> /dev/null && userdel -f rock # Radxa images
 		getent passwd linaro &> /dev/null && userdel -f linaro # ASUS TB
 		getent passwd dietpi &> /dev/null && userdel -f dietpi # recreated below
 		getent passwd debian &> /dev/null && userdel -f debian # BBB
