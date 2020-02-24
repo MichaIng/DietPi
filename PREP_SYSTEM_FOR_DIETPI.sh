@@ -1478,7 +1478,7 @@ _EOF_
 		# - ARMbian OPi Zero 2: https://github.com/MichaIng/DietPi/issues/876#issuecomment-294350580
 		if (( $G_HW_MODEL == 35 )); then
 
-			echo 'blacklist bmp085' > /etc/modprobe.d/bmp085.conf
+			echo 'blacklist bmp085' > /etc/modprobe.d/dietpi-disable_bmp085.conf
 
 		# - Sparky SBC
 		elif (( $G_HW_MODEL == 70 )); then
@@ -1596,10 +1596,8 @@ _EOF_
 		# - Pine A64 (and possibily others): Cursor fix for FB
 		elif (( $G_HW_MODEL == 40 )); then
 
-			mkdir -p /etc/bashrc.d
 			cat << _EOF_ > /etc/bashrc.d/dietpi-pine64-cursorfix.sh
-#!/bin/bash
-
+#!/bin/dash
 # DietPi: Cursor fix for FB
 infocmp > terminfo.txt
 sed -i -e 's/?0c/?112c/g' -e 's/?8c/?48;0;64c/g' terminfo.txt
@@ -1612,8 +1610,16 @@ _EOF_
 
 		fi
 
-		# - ARMbian increase console verbosity
-		[[ -f '/boot/armbianEnv.txt' ]] && sed -i '/verbosity=/c\verbosity=7' /boot/armbianEnv.txt
+		# - ARMbian special
+		if [[ -f '/boot/armbianEnv.txt' ]]; then
+
+			# Reset default kernel log verbosity, reduced to "1" on most Armbian images
+			sed -i '/verbosity=/c\verbosity=4' /boot/armbianEnv.txt
+
+			# Disable Docker optimisations, since this has some performance drawbacks, enable on Docker install instead
+			G_CONFIG_INJECT 'docker_optimizations=' 'docker_optimizations=off' /boot/armbianEnv.txt
+
+		fi
 
 		#------------------------------------------------------------------------------------------------
 		echo ''
