@@ -879,9 +879,9 @@ _EOF_
 			G_AGI linux-image-4.14-armhf-odroid-xu4 meveric-keyring
 
 		#	ROCK Pi S (official Radxa Debian image)
-		elif (( $G_HW_MODEL == 73 )) && grep -q 'apt\.radxa\.com' /etc/apt/sources.list{,.d/*}; then
+		elif (( $G_HW_MODEL == 73 )) && grep -q 'apt\.radxa\.com' /etc/apt/sources.list.d/*.list; then
 
-			G_AGI rockpis-rk-u-boot-latest linux-4.4-rockpis-latest rockpis-dtbo rockchip-overlay rtl8723ds-firmware
+			G_AGI rockpis-rk-u-boot-latest linux-4.4-rockpis-latest rockpis-dtbo rockchip-overlay
 
 		# - Auto detect kernel package incl. ARMbian/others DTB
 		else
