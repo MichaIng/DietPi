@@ -90,15 +90,6 @@
 	Apply_DietPi_FirstRun_Settings(){
 
 		#----------------------------------------------------------------
-		# Workarounds
-		# - Workaround for NanoPi Fire3 with tty1 disabled: https://github.com/MichaIng/DietPi/issues/2225
-		if (( $G_HW_MODEL == 62 )) && dmesg | grep -qi 'NanoPi Fire3'; then
-
-			chvt 2
-			echo -e '#!/bin/dash\nchvt 2' > /var/lib/dietpi/postboot.d/fire3_tty2
-
-		fi
-		#----------------------------------------------------------------
 		# RPi: Apply safe overclocking values or update comments to show model-specific defaults
 		(( $G_HW_MODEL < 10 )) && RPi_Set_Clock_Speeds
 
@@ -170,10 +161,10 @@
 		/DietPi/dietpi/func/change_hostname "$(sed -n '/^[[:blank:]]*AUTO_SETUP_NET_HOSTNAME=/{s/^[^=]*=//p;q}' /DietPi/dietpi.txt)"
 
 		# Set autologin, if automated firstrun setup was chosen
-		grep -qi '^[[:blank:]]*AUTO_SETUP_AUTOMATED=1' /DietPi/dietpi.txt && /DietPi/dietpi/dietpi-autostart 7
+		grep -q '^[[:blank:]]*AUTO_SETUP_AUTOMATED=1' /DietPi/dietpi.txt && /DietPi/dietpi/dietpi-autostart 7
 
 		# Disable serial console, if set in dietpi.txt
-		grep -qi '^[[:blank:]]*CONFIG_SERIAL_CONSOLE_ENABLE=0' /DietPi/dietpi.txt && /DietPi/dietpi/func/dietpi-set_hardware serialconsole disable
+		grep -q '^[[:blank:]]*CONFIG_SERIAL_CONSOLE_ENABLE=0' /DietPi/dietpi.txt && /DietPi/dietpi/func/dietpi-set_hardware serialconsole disable
 
 		# Set login passwords
 		local root_password=$(sed -n '/^[[:blank:]]*AUTO_SETUP_GLOBAL_PASSWORD=/{s/^[^=]*=//p;q}' /DietPi/dietpi.txt)

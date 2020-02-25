@@ -43,7 +43,7 @@ Project lead of DietPi (20/02/2019 and onwards), source code contributor, bug fi
 
 ---
 
-### Currently active contributors
+### Active Contributors
 
 #### Daniel Knight (Fourdee)
 
@@ -179,7 +179,7 @@ along with this program.  If not, see https://www.gnu.org/licenses/
 - Source: https://github.com/MichaIng/DietPi
 - Build: Not applicable, as DietPi uses Bash scripts only, no building or compiling is required.
 
-### DietPi file list
+### DietPi Files
 
 - All files located in (recursively):
   - `/DietPi/`
@@ -193,18 +193,19 @@ along with this program.  If not, see https://www.gnu.org/licenses/
 
 > The above GPLv2 documentation also applies to all mentioned files!
 
-### Additional Software
+### 3rd Party Sources/Credits
 
-Links to additional software used in DietPi and their source and build instructions where applicable:
+Links to hardware and software manufacturers, sources and build instructions used in DietPi:
 
 - [Linux kernel](https://github.com/torvalds/linux)
 - [GNU operating system](https://www.gnu.org/)
 - [Debian distribution](https://salsa.debian.org/)
 - [Raspberry](https://github.com/raspberrypi) [Pi](https://github.com/RPi-Distro)
-- [Odroid](https://github.com/hardkernel?tab=repositories)
+- [Hardkernel](https://github.com/hardkernel?tab=repositories)
 - [Sparky](https://github.com/sparkysbc?tab=repositories) [SBC](https://github.com/sparky-sbc/sparky-test)
-- [RockChip](https://github.com/rockchip-linux/rk-rootfs-build)
+- [PINE64](https://www.pine64.org/)
 - [FriendlyARM](https://github.com/friendlyarm?tab=repositories)
+- [Rockchip](https://github.com/rockchip-linux/rk-rootfs-build)
 - [Armbian](https://github.com/armbian)
 - [X.Org-X-Server](https://www.x.org/archive//individual/)
 - [LXDE desktop](https://github.com/LXDE)
@@ -245,7 +246,7 @@ Links to additional software used in DietPi and their source and build instructi
 - [Deluge](https://dev.deluge-torrent.org/wiki/Development#SourceCode)
 - [Subsonic](https://sourceforge.net/projects/subsonic/)
 - [Airsonic](https://github.com/airsonic/airsonic)
-- [LMS/SqueezeBox](https://github.com/Logitech/slimserver)
+- [Logitech Media Server](https://github.com/Logitech/slimserver)
 - [Ampache](https://github.com/ampache/ampache)
 - [FFmpeg](https://github.com/FFmpeg/FFmpeg)
 - [Shairport-Sync](https://github.com/mikebrady/shairport-sync)
