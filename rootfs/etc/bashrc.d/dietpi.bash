@@ -9,7 +9,7 @@
 	#////////////////////////////////////
 	#
 	# Info:
-	# - Filename: /etc/bashrc.d/dietpi.bash
+	# - Location: /etc/bashrc.d/dietpi.bash
 	# - Sourced by all interactive bash shells from: /etc/bash.bashrc
 	# - Prepares shell for DietPi and runs autostarts on /dev/tty1
 	#////////////////////////////////////
@@ -21,10 +21,10 @@
 	. /DietPi/dietpi/func/dietpi-globals || { echo -e '[\e[31mFAILED\e[0m] DietPi-Login | Failed to load DietPi-Globals. Skipping DietPi login scripts...'; return 1; }
 
 	# "G_DIETPI-NOFITY -2 message" starts a process animation. If scripts fail to kill the animation, e.g. cancelled by user, terminal bash prompt has to do it as last resort.
-	[[ $PROMPT_COMMAND == *'dietpi-process.pid'* ]] || PROMPT_COMMAND="[[ -w '/tmp/dietpi-process.pid' ]] && rm /tmp/dietpi-process.pid && echo -ne '\r\e[J'; $PROMPT_COMMAND"
+	[[ $PROMPT_COMMAND == *'dietpi-process.pid'* ]] || PROMPT_COMMAND="[[ -w '/tmp/dietpi-process.pid' ]] && rm -f /tmp/dietpi-process.pid &> /dev/null && echo -ne '\r\e[J'; $PROMPT_COMMAND"
 
 	# Workaround if SSH client overrides locale with "POSIX" fallback: https://github.com/MichaIng/DietPi/issues/1540#issuecomment-367066178
-	if [[ $(locale) =~ 'POSIX' ]]; then
+	if [[ $(locale) == *'POSIX'* ]]; then
 
 		current_locale=$(sed -n '/^[[:blank:]]*AUTO_SETUP_LOCALE=/{s/^[^=]*=//p;q}' /DietPi/dietpi.txt)
 		export LC_ALL=${current_locale:-en_GB.UTF-8}

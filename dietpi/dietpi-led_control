@@ -1,0 +1,167 @@
+#!/bin/bash
+{
+	#////////////////////////////////////
+	# DietPi LED control Script
+	#
+	#////////////////////////////////////
+	# Created by Daniel Knight / daniel.knight@dietpi.com / dietpi.com
+	#
+	#////////////////////////////////////
+	#
+	# Info:
+	# - Location: /{DietPi,boot}/dietpi/dietpi-led_control
+	# - Whiptail menu to select LED triggers for all available /sys/class/leds/ entries
+	# - Applies choices immediately and creates udev rules to apply on every boot
+	#
+	#////////////////////////////////////
+
+	# Import DietPi-Globals --------------------------------------------------------------
+	. /DietPi/dietpi/func/dietpi-globals
+	G_PROGRAM_NAME='DietPi-LED_Control'
+	G_CHECK_ROOT_USER
+	G_CHECK_ROOTFS_RW
+	G_INIT
+	# Import DietPi-Globals --------------------------------------------------------------
+
+	#/////////////////////////////////////////////////////////////////////////////////////
+	# Variables and Funktions
+	#/////////////////////////////////////////////////////////////////////////////////////
+	FP_UDEV_RULES='/etc/udev/rules.d/dietpi-led_control.rules'
+	aNAME=()
+	aTRIGGERS_AVAILABLE=()
+	aTRIGGER_CURRENT=()
+	aTRIGGER_SELECTED=()
+
+	Init(){
+
+		local fp i=0
+		for fp in /sys/class/leds/*
+		do
+
+			[[ -e $fp ]] || continue
+			((i++))
+			aNAME[$i]=${fp##*/}
+			aTRIGGERS_AVAILABLE[$i]=$(<$fp/trigger)
+			aTRIGGER_CURRENT[$i]=${aTRIGGERS_AVAILABLE[$i]##*[}
+			aTRIGGER_CURRENT[$i]=${aTRIGGER_CURRENT[$i]%%]*}
+			aTRIGGERS_AVAILABLE[$i]=${aTRIGGERS_AVAILABLE[$i]//[][]}
+			if [[ -f $FP_UDEV_RULES && $(<$FP_UDEV_RULES) == *KERNEL==\"${aNAME[$i]}\"* ]]; then
+
+				aTRIGGER_SELECTED[$i]=$(sed -n "/KERNEL==\"${aNAME[$i]}\"/{s/^.*ATTR{trigger}=\"//;s/\".*$//p;q}" $FP_UDEV_RULES)
+
+			fi
+
+		done
+
+		if (( $i == 0 )); then
+
+			G_DIETPI-NOTIFY 1 'No LED devices found in /sys/class/leds/. Exiting...'
+			TARGETMENUID=-1 # Exit
+
+		fi
+
+	}
+
+	#/////////////////////////////////////////////////////////////////////////////////////
+	# Menu System
+	#/////////////////////////////////////////////////////////////////////////////////////
+	TARGETMENUID=0
+	SELECTED_LED=0
+
+	# TARGETMENUID=0
+	Menu_Main(){
+
+		G_WHIP_MENU_ARRAY=('Reset' 'Reset all LED triggers')
+
+		local i
+		for i in ${!aNAME[@]}
+		do
+
+			G_WHIP_MENU_ARRAY+=($i ": ${aNAME[$i]} [${aTRIGGER_CURRENT[$i]}]")
+
+		done
+
+		G_WHIP_BUTTON_CANCEL_TEXT='Exit'
+		if ! G_WHIP_MENU 'Please select an LED to configure its trigger:'; then
+
+			TARGETMENUID=-1 # Exit
+
+		elif [[ $G_WHIP_RETURNED_VALUE == 'Reset' ]]; then
+
+			[[ ! -f $FP_UDEV_RULES ]] || G_ERROR_HANDLER_INFO_ONLY=1 G_RUN_CMD rm $FP_UDEV_RULES || return 1
+			aTRIGGER_SELECTED=()
+			G_WHIP_MSG 'All LED triggers have been reset to system defaults.\n\nThis will become active from next reboot.'
+
+		else
+
+			SELECTED_LED=$G_WHIP_RETURNED_VALUE
+			TARGETMENUID=1 # Menu_LED
+
+		fi
+
+	}
+
+	# TARGETMENUID=1
+	Menu_LED(){
+
+		TARGETMENUID=0 # Menu_Main
+
+		G_WHIP_MENU_ARRAY=('Reset' "Reset ${aNAME[$SELECTED_LED]} trigger")
+
+		local i
+		for i in ${aTRIGGERS_AVAILABLE[$SELECTED_LED]}
+		do
+
+			G_WHIP_MENU_ARRAY+=($i '')
+
+		done
+
+		G_WHIP_DEFAULT_ITEM=${aTRIGGER_CURRENT[$SELECTED_LED]}
+		if ! G_WHIP_MENU "Please select a trigger for ${aNAME[$SELECTED_LED]}:"; then
+
+			return
+
+		elif [[ $G_WHIP_RETURNED_VALUE == 'Reset' ]]; then
+
+			G_ERROR_HANDLER_INFO_ONLY=1 G_RUN_CMD sed -i "/KERNEL==\"${aNAME[$SELECTED_LED]}\"/d" $FP_UDEV_RULES || return 1
+			unset aTRIGGER_SELECTED[$SELECTED_LED]
+			G_WHIP_MSG "LED trigger for ${aNAME[$SELECTED_LED]} has been reset to system defaults.\n\nThis will become active from next reboot."
+			[[ ${aTRIGGER_SELECTED[@]} || ! -f $FP_UDEV_RULES ]] || G_ERROR_HANDLER_INFO_ONLY=1 G_RUN_CMD rm $FP_UDEV_RULES || return 1
+
+		else
+
+			G_DIETPI-NOTIFY 2 "Applying trigger \e[33m$G_WHIP_RETURNED_VALUE\e[90m to LED \e[33m${aNAME[$SELECTED_LED]}"
+			echo "$G_WHIP_RETURNED_VALUE" > "/sys/class/leds/${aNAME[$SELECTED_LED]}/trigger" || return 1
+			aTRIGGER_CURRENT[$SELECTED_LED]=$G_WHIP_RETURNED_VALUE
+			[[ -f $FP_UDEV_RULES ]] || G_ERROR_HANDLER_INFO_ONLY=1 G_RUN_CMD touch $FP_UDEV_RULES || return 1
+			G_CONFIG_INJECT "SUBSYSTEM==\"leds\", KERNEL==\"${aNAME[$SELECTED_LED]}\"" "SUBSYSTEM==\"leds\", KERNEL==\"${aNAME[$SELECTED_LED]}\", ACTION==\"add\", ATTR{trigger}=\"${aTRIGGER_CURRENT[$SELECTED_LED]}\"" $FP_UDEV_RULES
+			aTRIGGER_SELECTED[$SELECTED_LED]=aTRIGGER_CURRENT[$SELECTED_LED]
+
+		fi
+
+	}
+
+	#/////////////////////////////////////////////////////////////////////////////////////
+	# Main Loop
+	#/////////////////////////////////////////////////////////////////////////////////////
+	#-----------------------------------------------------------------------------------
+	Init
+	#-----------------------------------------------------------------------------------
+	while (( $TARGETMENUID >= 0 ))
+	do
+
+		if (( $TARGETMENUID == 1 )); then
+
+			Menu_LED
+
+		else
+
+			Menu_Main
+
+		fi
+
+	done
+	#-----------------------------------------------------------------------------------
+	exit
+	#-----------------------------------------------------------------------------------
+}
