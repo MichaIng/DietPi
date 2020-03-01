@@ -1,6 +1,5 @@
 #!/bin/bash
 {
-
 	# Check for root permissions
 	(( $UID )) && { echo 'ERROR: Root permissions required. Please run this script with "sudo". Exiting...'; exit 1; }
 
@@ -8,10 +7,10 @@
 	(( $(pgrep -cf 'dietpi-wifi-monitor.sh') > 1 )) && { echo 'ERROR: Concurrent execution detected. Please exit the running instance of DietPi-WiFi-Monitor first. Exiting...'; exit 1; }
 
 	# Update network info
-	/DietPi/dietpi/func/obtain_network_details
+	/boot/dietpi/func/obtain_network_details
 
-	URL_PING=''
-	ADAPTER="wlan$(sed -n 2p /DietPi/dietpi/.network)"
+	URL_PING=
+	ADAPTER="wlan$(mawk 'NR==2' /boot/dietpi/.network)"
 	[[ $TICKRATE =~ ^[0-9]+$ ]] && (( $TICKRATE > 0 )) || TICKRATE=10
 
 	#-------------------------------------------------------------------------------------
@@ -25,7 +24,7 @@
 	while :
 	do
 
-		# - Get current gateway for ping
+		# Get current gateway for ping
 		URL_PING=$(ip r s 0.0.0.0/0 dev $ADAPTER | mawk '{print $3}')
 
 		[[ $G_DEBUG == 1 ]] && echo "Checking connection for: $ADAPTER via ping to $URL_PING"
@@ -50,5 +49,4 @@
 	done
 
 	exit 0
-
 }
