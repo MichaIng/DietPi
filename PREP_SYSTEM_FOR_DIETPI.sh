@@ -1157,6 +1157,13 @@ _EOF_
 		[[ -f '/etc/cron.d/make_nas_processes_faster' ]] && rm /etc/cron.d/make_nas_processes_faster
 
 		#-----------------------------------------------------------------------------------
+		# https://www.debian.org/doc/debian-policy/ch-opersys.html#site-specific-programs
+		G_DIETPI-NOTIFY 2 'Setting modern /usr/local permissions'
+		[[ -f '/etc/staff-group-for-usr-local' ]] && rm -v /etc/staff-group-for-usr-local
+		chown -R root:root /usr/local
+		chmod -R 0755 /usr/local
+
+		#-----------------------------------------------------------------------------------
 		# Boot Logo
 		[[ -f '/boot/boot.bmp' ]] && G_RUN_CMD wget https://github.com/$G_GITOWNER/DietPi/raw/$G_GITBRANCH/.meta/images/dietpi-logo_boot.bmp -O /boot/boot.bmp
 
