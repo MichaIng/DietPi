@@ -661,8 +661,8 @@ Currently installed: $G_DISTRO_NAME (ID: $G_DISTRO)"; then
 		# Meveric, update repo to use our EU mirror: https://github.com/MichaIng/DietPi/issues/1519#issuecomment-368234302
 		sed -Ei 's@https?://oph\.mdrjr\.net@http://fuzon.co.uk@' /etc/apt/sources.list.d/meveric* &> /dev/null
 
-		# (Re)create DietPi logs dir, used by G_AGx
-		G_RUN_CMD mkdir -p /var/tmp/dietpi/logs
+		# (Re)create DietPi runtime and logs dir, used by G_AGx
+		G_RUN_CMD mkdir -p /run/dietpi /var/tmp/dietpi/logs
 
 		G_AGUP
 
