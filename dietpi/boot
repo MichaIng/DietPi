@@ -25,32 +25,29 @@
 
 	Wait_For_Valid_Network_Connection(){
 
-		# Wait mode, max time
-		local boot_wait_for_network=$(sed -n '/^[[:blank:]]*CONFIG_BOOT_WAIT_FOR_NETWORK=/{s/^[^=]*=//p;q}' /boot/dietpi.txt)
-		local loops_left=10
-		[[ $boot_wait_for_network == 0 ]] && loops_left=0
+		local mode=$(sed -n '/^[[:blank:]]*CONFIG_BOOT_WAIT_FOR_NETWORK=/{s/^[^=]*=//p;q}' /boot/dietpi.txt)
+		[[ $mode == 0 ]] && return 0 # Mode 0: Do not wait for network
 
+		local loops_left=10 # Default: Wait up to 10 seconds for network
 		while (( $loops_left ))
 		do
 
-			G_DIETPI-NOTIFY 2 "$(date) | Waiting for valid network connection before continuing boot | Mode=$boot_wait_for_network"
+			G_DIETPI-NOTIFY 2 "$(date) | Waiting for valid network connection before continuing boot | Mode=$mode"
 
 			if ip r s 0.0.0.0/0 &> /dev/null; then
 
 				G_DIETPI-NOTIFY 0 "$(date) | Valid network connection found"
-				break
-
-			elif (( $loop_count >= $max_loops )); then
-
-				G_DIETPI-NOTIFY 1 "$(date) | Valid network connection wait timed out"
-				break
+				return 0
 
 			fi
 
-			[[ $boot_wait_for_network == 2 ]] || ((loops_left--))
+			[[ $mode == 2 ]] || ((loops_left--)) # Mode 2: Wait unlimited for network
 			sleep 1
 
 		done
+
+		G_DIETPI-NOTIFY 1 "$(date) | Waiting for valid network connection timed out"
+		return 1
 
 	}
 
@@ -60,27 +57,10 @@
 		# WiFi Country | Additional fallback for (older kernel?) devices that fail with wpa_supplicant.conf https://github.com/MichaIng/DietPi/issues/838
 		command -v iw &> /dev/null && iw reg set "$(sed -n '/^[[:blank:]]*CONFIG_WIFI_COUNTRY_CODE=/{s/^[^=]*=//p;q}' /boot/dietpi.txt)" &
 		#----------------------------------------------------------------
-		# Network failure workarounds
-		# - Failsafe: Bring up network interfaces, since networking.service does not include "allow-hotplug".
-		# - ifup@.service is triggered by udev for those, but Type=simple, hence targets don't need to wait for it to finish: https://bugs.debian.org/cgi-bin/bugreport.cgi?bug=791920
-		if grep -qE '^[[:blank:]]*(allow-hotplug|auto)[[:blank:]]+wlan' /etc/network/interfaces; then
-
-			local wlan_index=$(mawk 'NR==2' /boot/dietpi/.network)
-			disable_error=1 G_CHECK_VALIDINT "$wlan_index" 0 || wlan_index=0
-			ifup wlan$wlan_index 2> /dev/null &
-
-		fi
-		if grep -qE '^[[:blank:]]*(allow-hotplug|auto)[[:blank:]]+eth' /etc/network/interfaces; then
-
-			local eth_index=$(mawk 'NR==1' /boot/dietpi/.network)
-			disable_error=1 G_CHECK_VALIDINT "$eth_index" 0 || eth_index=0
-			ifup eth$eth_index 2> /dev/null &
-
-		fi
-		#----------------------------------------------------------------
+		# network-online.target should be an alternative, but ifup@.service is Type=simple which means that hotplug interfaces might not be fully configured before the target is reached.
 		Wait_For_Valid_Network_Connection
 		#----------------------------------------------------------------
-		# Update network info for DietPi scripts
+		# Write network details to /run/dietpi/.network
 		/boot/dietpi/func/obtain_network_details
 		#----------------------------------------------------------------
 
@@ -92,7 +72,6 @@
 	#----------------------------------------------------------------
 	# Init
 	Run_Init
-	cd /tmp # Allow background jobs to finish after parent, without failing to cd into /tmp/$G_PROGRAM_NAME, which does not exist anymore
 	#----------------------------------------------------------------
 	# Pre-installed image, 1st run
 	if (( $G_DIETPI_INSTALL_STAGE == 10 )); then
@@ -105,7 +84,7 @@
 		/boot/dietpi/func/dietpi-set_swapfile $swap_size "$swap_location"
 
 		# Run survey
-		/boot/dietpi/dietpi-survey 1 &
+		/boot/dietpi/dietpi-survey 1
 
 		# Continue with normal boot
 		G_DIETPI_INSTALL_STAGE=2
@@ -115,7 +94,7 @@
 	#----------------------------------------------------------------
 	# Normal boot
 	# - Run time sync
-	(( $G_DIETPI_INSTALL_STAGE == 2 )) && /boot/dietpi/func/run_ntpd 1 &
+	(( $G_DIETPI_INSTALL_STAGE == 2 )) && /boot/dietpi/func/run_ntpd 1
 	#-----------------------------------------------------------------------------------
 	exit
 	#-----------------------------------------------------------------------------------
