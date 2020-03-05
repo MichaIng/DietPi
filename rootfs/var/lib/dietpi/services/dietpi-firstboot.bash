@@ -201,12 +201,12 @@
 		# - Grab available network devices
 		/boot/dietpi/func/obtain_network_details
 
-		local index_eth=$(mawk 'NR==1' /boot/dietpi/.network)
+		local index_eth=$(mawk 'NR==1' /run/dietpi/.network)
 		disable_error=1 G_CHECK_VALIDINT "$index_eth" 0 || index_eth=0
-		local index_wlan=$(mawk 'NR==2' /boot/dietpi/.network)
+		local index_wlan=$(mawk 'NR==2' /run/dietpi/.network)
 		disable_error=1 G_CHECK_VALIDINT "$index_wlan" 0 || index_wlan=0
 
-		# - Replace all eth0 and wlan0 values to the indices DietPi has found
+		# - Replace interface names with the ones obtained above
 		sed -i "s/eth[0-9]/eth$index_eth/g" /etc/network/interfaces
 		sed -i "s/wlan[0-9]/wlan$index_wlan/g" /etc/network/interfaces
 
