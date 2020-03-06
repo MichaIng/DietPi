@@ -257,7 +257,7 @@
 		SETUP_STEP=0
 
 		#------------------------------------------------------------------------------------------------
-		echo ''
+		echo
 		G_DIETPI-NOTIFY 2 '-----------------------------------------------------------------------------------'
 		G_DIETPI-NOTIFY 0 "Step $SETUP_STEP: Detecting existing DietPi system"; ((SETUP_STEP++))
 		G_DIETPI-NOTIFY 2 '-----------------------------------------------------------------------------------'
@@ -285,7 +285,7 @@
 			# - /DietPi mount point: Pre-v6.29
 			umount /DietPi # Failsafe
 			[[ -d '/DietPi' ]] && rm -R /DietPi
-			rm -Rfv /{boot,mnt,etc,var/lib,var/tmp}/dietpi*
+			rm -Rfv /{boot,mnt,etc,var/lib,var/tmp,run}/dietpi*
 			rm -fv /etc/{bashrc,profile,sysctl}.d/dietpi*
 
 			[[ -f '/root/DietPi-Automation.log' ]] && rm -v /root/DietPi-Automation.log
@@ -298,7 +298,7 @@
 		fi
 
 		#------------------------------------------------------------------------------------------------
-		echo ''
+		echo
 		G_DIETPI-NOTIFY 2 '-----------------------------------------------------------------------------------'
 		G_DIETPI-NOTIFY 0 "Step $SETUP_STEP: Target system inputs"; ((SETUP_STEP++))
 		G_DIETPI-NOTIFY 2 '-----------------------------------------------------------------------------------'
@@ -592,19 +592,19 @@ Currently installed: $G_DISTRO_NAME (ID: $G_DISTRO)"; then
 		G_DIETPI-NOTIFY 2 "Selected Debian version: $DISTRO_TARGET_NAME (ID: $DISTRO_TARGET)"
 
 		#------------------------------------------------------------------------------------------------
-		echo ''
+		echo
 		G_DIETPI-NOTIFY 2 '-----------------------------------------------------------------------------------'
 		G_DIETPI-NOTIFY 0 "Step $SETUP_STEP: Downloading and installing DietPi source code"; ((SETUP_STEP++))
 		G_DIETPI-NOTIFY 2 '-----------------------------------------------------------------------------------'
 		#------------------------------------------------------------------------------------------------
 
-		local url="https://github.com/$G_GITOWNER/DietPi/archive/$G_GITBRANCH.zip"
+		local url="https://github.com/$G_GITOWNER/DietPi/archive/$G_GITBRANCH.tar.gz"
 		G_CHECK_URL "$url"
-		G_RUN_CMD wget "$url" -O package.zip
+		l_message='Downloading DietPi sourcecode' G_RUN_CMD curl -sSL "$url" -o package.tar.gz
 
 		[[ -d DietPi-$G_GITBRANCH ]] && l_message='Cleaning previously extracted files' G_RUN_CMD rm -R "DietPi-$G_GITBRANCH"
-		l_message='Extracting DietPi sourcecode' G_RUN_CMD unzip package.zip
-		rm package.zip
+		l_message='Extracting DietPi sourcecode' G_RUN_CMD tar xf package.tar.gz
+		rm package.tar.gz
 
 		[[ -d '/boot' ]] || l_message='Creating /boot' G_RUN_CMD mkdir -p /boot
 
@@ -639,15 +639,15 @@ Currently installed: $G_DISTRO_NAME (ID: $G_DISTRO)"; then
 		rm "DietPi-$G_GITBRANCH/dietpi/pre-patch_file"
 		rm "DietPi-$G_GITBRANCH/dietpi/patch_file"
 
-		l_message='Copy DietPi core files to /boot/dietpi' G_RUN_CMD cp -Rf "DietPi-$G_GITBRANCH/dietpi" /boot/
-		l_message='Copy DietPi rootfs files in place' G_RUN_CMD cp -Rf "DietPi-$G_GITBRANCH/rootfs"/. /
+		l_message='Copy DietPi scripts to /boot/dietpi' G_RUN_CMD cp -Rf "DietPi-$G_GITBRANCH/dietpi" /boot/
+		l_message='Copy DietPi system files in place' G_RUN_CMD cp -Rf "DietPi-$G_GITBRANCH/rootfs"/. /
 		l_message='Clean download location' G_RUN_CMD rm -R "DietPi-$G_GITBRANCH"
 		l_message='Set execute permissions for DietPi scripts' G_RUN_CMD chmod -R +x /boot/dietpi /var/lib/dietpi/services /etc/cron.*/dietpi
 
 		G_RUN_CMD systemctl daemon-reload
 
 		#------------------------------------------------------------------------------------------------
-		echo ''
+		echo
 		G_DIETPI-NOTIFY 2 '-----------------------------------------------------------------------------------'
 		G_DIETPI-NOTIFY 0 "Step $SETUP_STEP: APT configuration"; ((SETUP_STEP++))
 		G_DIETPI-NOTIFY 2 '-----------------------------------------------------------------------------------'
@@ -950,7 +950,7 @@ _EOF_
 		G_AGA
 
 		#------------------------------------------------------------------------------------------------
-		echo ''
+		echo
 		G_DIETPI-NOTIFY 2 '-----------------------------------------------------------------------------------'
 		G_DIETPI-NOTIFY 0 "Step $SETUP_STEP: APT installations"; ((SETUP_STEP++))
 		G_DIETPI-NOTIFY 2 '-----------------------------------------------------------------------------------'
@@ -971,7 +971,7 @@ _EOF_
 		G_AGA
 
 		#------------------------------------------------------------------------------------------------
-		echo ''
+		echo
 		G_DIETPI-NOTIFY 2 '-----------------------------------------------------------------------------------'
 		G_DIETPI-NOTIFY 0 "Step $SETUP_STEP: Prep system for DietPi ENV"; ((SETUP_STEP++))
 		G_DIETPI-NOTIFY 2 '-----------------------------------------------------------------------------------'
@@ -1197,6 +1197,12 @@ _EOF_
 		G_RUN_CMD systemctl enable dietpi-boot
 		G_RUN_CMD systemctl enable dietpi-postboot
 		G_RUN_CMD systemctl enable dietpi-kill_ssh
+
+		#-----------------------------------------------------------------------------------
+		# Install vmtouch to lock DietPi scripts and config in file system cache
+		G_RUN_CMD wget https://dietpi.com/downloads/binaries/$G_DISTRO_NAME/vmtouch_$G_HW_ARCH_DESCRIPTION.deb
+		G_RUN_CMD dpkg --force-hold,confdef,confold -i vmtouch_$G_HW_ARCH_DESCRIPTION.deb
+		rm vmtouch_$G_HW_ARCH_DESCRIPTION.deb
 
 		#-----------------------------------------------------------------------------------
 		# Cron jobs
@@ -1617,7 +1623,7 @@ _EOF_
 		fi
 
 		#------------------------------------------------------------------------------------------------
-		echo ''
+		echo
 		G_DIETPI-NOTIFY 2 '-----------------------------------------------------------------------------------'
 		G_DIETPI-NOTIFY 0 "Step $SETUP_STEP: Finalise system for first run of DietPi"; ((SETUP_STEP++))
 		G_DIETPI-NOTIFY 2 '-----------------------------------------------------------------------------------'
