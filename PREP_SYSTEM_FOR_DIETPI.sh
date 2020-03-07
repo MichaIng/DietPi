@@ -1438,8 +1438,7 @@ _EOF_
 		G_DIETPI-NOTIFY 2 'Applying G_HW_ARCH specific tweaks:'
 		if (( $G_HW_ARCH == 10 )); then
 
-			# i386 APT/DPKG support
-			dpkg --add-architecture i386
+			l_message='Removing foreign i386 DPKG architecture' G_RUN_CMD dpkg --remove-architecture i386
 
 			# Disable nouveau: https://github.com/MichaIng/DietPi/issues/1244 // https://dietpi.com/phpbb/viewtopic.php?p=9688#p9688
 			rm -f /etc/modprobe.d/*nouveau*
@@ -1456,6 +1455,10 @@ _EOF_
 
 			# Update initramfs with above changes
 			update-initramfs -u
+
+		elif (( $G_HW_ARCH == 3 )); then
+
+			l_message='Removing foreign armhf DPKG architecture' G_RUN_CMD dpkg --remove-architecture armhf
 
 		fi
 
