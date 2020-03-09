@@ -82,14 +82,14 @@
 	# Check for/Install APT packages required for this script to:
 	aAPT_PREREQS=(
 
-		'apt-transport-https' # Allows HTTPS sources for APT (not required since Buster)
 		'wget' # Download DietPi-Globals...
 		'ca-certificates' # ...via HTTPS
-		'unzip' # Unzip DietPi code
 		'locales' # Set en_GB.UTF-8 locale
 		'whiptail' # G_WHIP
 
 	)
+	# - Pre-Buster: Support HTTPS sources for APT
+	grep -qE '(jessie|stretch)' /etc/os-release && aAPT_PREREQS+=('apt-transport-https')
 
 	for i in "${aAPT_PREREQS[@]}"
 	do
