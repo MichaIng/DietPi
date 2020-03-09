@@ -1011,7 +1011,7 @@ _EOF_
 		[[ -d '/usr/src' ]] && rm -vRf /usr/src/{,.??,.[^.]}*
 
 		# - root/home
-		rm -Rfv /{root,home/*}/.{cache,local,config,gnupg,viminfo,dbus,gconf,nano}
+		rm -Rfv /{root,home/*}/.{cache,local,config,gnupg,viminfo,dbus,gconf,nano,vim}
 
 		# - Documentation dirs: https://github.com/MichaIng/DietPi/issues/3259
 		#[[ -d '/usr/share/man' ]] && rm -vR /usr/share/man
@@ -1136,6 +1136,7 @@ _EOF_
 		[[ -f '/usr/local/sbin/setup-odroid' ]] && rm -v /usr/local/sbin/setup-odroid
 		[[ -d '/root/scripts' ]] && rm -R /root/scripts
 		[[ -f '/root/resize--log.txt' ]] && rm /root/resize--log.txt
+		rm -fv /installed-packages*.txt
 
 		# - RPi specific: https://github.com/MichaIng/DietPi/issues/1631#issuecomment-373965406
 		[[ -f '/etc/profile.d/wifi-country.sh' ]] && rm -v /etc/profile.d/wifi-country.sh
