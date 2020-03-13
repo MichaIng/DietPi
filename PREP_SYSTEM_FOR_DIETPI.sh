@@ -759,7 +759,17 @@ _EOF_
 		# G_HW_MODEL specific required repo key packages: https://github.com/MichaIng/DietPi/issues/1285#issuecomment-358301273
 		if (( $G_HW_MODEL > 9 )); then
 
-			aPACKAGES_REQUIRED_INSTALL+=('initramfs-tools')		# RAM file system initialisation, required for generic bootloader, but not required/used by RPi bootloader
+			# RAM file system initialisation, required for generic bootloader, but not required/used by RPi bootloader
+			# - On VM, install tiny-initramfs with limited features but sufficient and much smaller + faster
+			if (( $G_HW_MODEL == 20 )); then
+
+				aPACKAGES_REQUIRED_INSTALL+=('tiny-initramfs')
+
+			else
+
+				aPACKAGES_REQUIRED_INSTALL+=('initramfs-tools')
+
+			fi
 			aPACKAGES_REQUIRED_INSTALL+=('haveged')			# Entropy daemon: https://github.com/MichaIng/DietPi/issues/2806
 
 		else
@@ -1455,7 +1465,15 @@ _EOF_
 			echo 'options usb-storage quirks=0bc2:ab30:u' > /etc/modprobe.d/dietpi-usb-storage_quirks.conf
 
 			# Update initramfs with above changes
-			update-initramfs -u
+			if command -v update-tirfs &> /dev/null; then
+
+				update-tirfs
+
+			else
+
+				update-initramfs -u
+
+			fi
 
 		elif (( $G_HW_ARCH == 3 )); then
 
