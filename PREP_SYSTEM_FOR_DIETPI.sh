@@ -182,6 +182,9 @@
 
 	fi
 
+	# Assure no obsolete .hw_model is loaded or generated
+	rm -fv /boot/dietpi/{.,func/dietpi-obtain_}hw_model
+
 	# Load
 	if ! . ./dietpi-globals; then
 
@@ -222,32 +225,32 @@
 
 	else
 
-		G_DIETPI-NOTIFY 1 'Unknown or unsupported distribution version. Aborting...\n'
+		G_DIETPI-NOTIFY 1 "Unknown or unsupported distribution version: $(sed -n '/^PRETTY_NAME=/{s/^PRETTY_NAME=//p;q}' /etc/os-release 2>&1). Aborting...\n"
 		exit 1
 
 	fi
 
 	# Detect the hardware architecture of this operating system
-	G_HW_ARCH_DESCRIPTION=$(uname -m)
-	if [[ $G_HW_ARCH_DESCRIPTION == 'armv6l' ]]; then
+	G_HW_ARCH_NAME=$(uname -m)
+	if [[ $G_HW_ARCH_NAME == 'armv6l' ]]; then
 
 		G_HW_ARCH=1
 
-	elif [[ $G_HW_ARCH_DESCRIPTION == 'armv7l' ]]; then
+	elif [[ $G_HW_ARCH_NAME == 'armv7l' ]]; then
 
 		G_HW_ARCH=2
 
-	elif [[ $G_HW_ARCH_DESCRIPTION == 'aarch64' ]]; then
+	elif [[ $G_HW_ARCH_NAME == 'aarch64' ]]; then
 
 		G_HW_ARCH=3
 
-	elif [[ $G_HW_ARCH_DESCRIPTION == 'x86_64' ]]; then
+	elif [[ $G_HW_ARCH_NAME == 'x86_64' ]]; then
 
 		G_HW_ARCH=10
 
 	else
 
-		G_DIETPI-NOTIFY 1 "Unknown or unsupported CPU architecture: \"$G_HW_ARCH_DESCRIPTION\". Aborting...\n"
+		G_DIETPI-NOTIFY 1 "Unknown or unsupported CPU architecture: \"$G_HW_ARCH_NAME\". Aborting...\n"
 		exit 1
 
 	fi
@@ -276,9 +279,8 @@
 			for i in /etc/systemd/system/dietpi-*
 			do
 
-				[[ -f $i ]] || continue
-				systemctl disable --now ${i##*/}
-				rm -v $i
+				[[ -f $i ]] && systemctl disable --now ${i##*/}
+				rm -Rfv $i
 
 			done
 
@@ -286,8 +288,8 @@
 			# - /DietPi mount point: Pre-v6.29
 			umount /DietPi # Failsafe
 			[[ -d '/DietPi' ]] && rm -R /DietPi
-			rm -Rfv /{boot,mnt,etc,var/lib,var/tmp,run}/dietpi*
-			rm -fv /etc/{bashrc,profile,sysctl}.d/dietpi*
+			rm -Rfv /{boot,mnt,etc,var/lib,var/tmp,run}/*dietpi*
+			rm -fv /etc/{cron.*,{bashrc,profile,sysctl,network/if-up,udev/rules}.d}/*dietpi*
 
 			[[ -f '/root/DietPi-Automation.log' ]] && rm -v /root/DietPi-Automation.log
 			[[ -f '/boot/Automation_Format_My_Usb_Drive' ]] && rm -v /boot/Automation_Format_My_Usb_Drive
@@ -475,7 +477,7 @@
 		echo $G_HW_MODEL > /etc/.dietpi_hw_model_identifier
 
 		G_DIETPI-NOTIFY 2 "Selected hardware model ID: $G_HW_MODEL"
-		G_DIETPI-NOTIFY 2 "Detected CPU architecture: $G_HW_ARCH_DESCRIPTION (ID: $G_HW_ARCH)"
+		G_DIETPI-NOTIFY 2 "Detected CPU architecture: $G_HW_ARCH_NAME (ID: $G_HW_ARCH)"
 
 		# WiFi selection
 		if [[ $WIFI_REQUIRED != [01] ]]; then
@@ -1217,9 +1219,9 @@ _EOF_
 
 		#-----------------------------------------------------------------------------------
 		# Install vmtouch to lock DietPi scripts and config in file system cache
-		G_RUN_CMD wget https://dietpi.com/downloads/binaries/$G_DISTRO_NAME/vmtouch_$G_HW_ARCH_DESCRIPTION.deb
-		G_RUN_CMD dpkg --force-hold,confdef,confold -i vmtouch_$G_HW_ARCH_DESCRIPTION.deb
-		rm vmtouch_$G_HW_ARCH_DESCRIPTION.deb
+		G_RUN_CMD wget https://dietpi.com/downloads/binaries/$G_DISTRO_NAME/vmtouch_$G_HW_ARCH_NAME.deb
+		G_RUN_CMD dpkg --force-hold,confdef,confold -i vmtouch_$G_HW_ARCH_NAME.deb
+		rm vmtouch_$G_HW_ARCH_NAME.deb
 
 		#-----------------------------------------------------------------------------------
 		# Cron jobs

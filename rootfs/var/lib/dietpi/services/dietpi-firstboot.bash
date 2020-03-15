@@ -31,7 +31,7 @@
 		grep -qE '^[[:blank:]]*(over_voltage|(arm|core|gpu|sdram)_freq)=' /boot/config.txt || return
 
 		# RPi Zero
-		if [[ ${G_HW_MODEL_DESCRIPTION,,} == *'zero'* ]]; then
+		if [[ $G_HW_MODEL_NAME == *'Zero'* ]]; then
 
 			sed -i '/over_voltage=/c\#over_voltage=0' /boot/config.txt
 			sed -i '/arm_freq=/c\#arm_freq=1000' /boot/config.txt
@@ -62,7 +62,7 @@
 			G_CONFIG_INJECT 'temp_limit=' 'temp_limit=75' /boot/config.txt # https://github.com/MichaIng/DietPi/issues/356
 
 			# A+/B+
-			if [[ $G_HW_MODEL_DESCRIPTION == *'+' ]]; then
+			if [[ $G_HW_MODEL_NAME == *'+' ]]; then
 
 				sed -i '/arm_freq=/c\#arm_freq=1400' /boot/config.txt
 				sed -i '/sdram_freq=/c\#sdram_freq=500' /boot/config.txt
