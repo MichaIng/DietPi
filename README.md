@@ -202,6 +202,7 @@ Links to hardware and software manufacturers, sources and build instructions use
 - [Debian distribution](https://salsa.debian.org/)
 - [Raspberry](https://github.com/raspberrypi) [Pi](https://github.com/RPi-Distro)
 - [Hardkernel](https://github.com/hardkernel?tab=repositories)
+- [Meverics Odroid repository](https://forum.odroid.com/viewtopic.php?f=52&t=5908)
 - [Sparky](https://github.com/sparkysbc?tab=repositories) [SBC](https://github.com/sparky-sbc/sparky-test)
 - [PINE64](https://www.pine64.org/)
 - [FriendlyARM](https://github.com/friendlyarm?tab=repositories)
