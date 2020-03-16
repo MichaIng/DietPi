@@ -23,7 +23,7 @@
 	# Pre-v6.29: DietPi-RAMdisk removal
 	# - Needs to be done before loading DietPi-Globals, else /boot/dietpi still contains the old code
 	# - Skip on Jessie since "jessie-support" branch keeps DietPi-RAMdisk and calling old code is wanted in this case
-	if [[ -d '/DietPi' && $(readlink -f '/DietPi') != '/boot' ]] && ! grep -qi 'jessie' /etc/os-release; then
+	if [[ -d '/DietPi' && $(readlink -f '/DietPi') != '/boot' ]] && ! grep -q 'jessie' /etc/os-release; then
 
 		# Copy new code to disk
 		cp -Rf /DietPi/* /boot/
@@ -51,7 +51,18 @@
 
 	# Pre-v6.22: Update Git owner due to official lead transfer from Fourdee to MichaIng: https://github.com/MichaIng/DietPi/issues/2589
 	grep -q '^[[:blank:]]*DEV_GITOWNER=Fourdee' /boot/dietpi.txt && sed -i 's/^[[:blank:]]*DEV_GITOWNER=Fourdee/DEV_GITOWNER=MichaIng/' /boot/dietpi.txt
-	[[ -f '/boot/dietpi/.version' ]] && grep -q '^[[:blank:]]*G_GITOWNER=Fourdee' /boot/dietpi.txt && sed -i 's/^[[:blank:]]*G_GITOWNER=Fourdee/G_GITOWNER=MichaIng/' /boot/dietpi/.version
+	if [[ -f '/boot/dietpi/.version' ]] && grep -q '^[[:blank:]]*G_GITOWNER=Fourdee' /boot/dietpi.txt; then
+
+		sed -i 's/^[[:blank:]]*G_GITOWNER=Fourdee/G_GITOWNER=MichaIng/' /boot/dietpi/.version
+
+	# Pre-v6.17: New ".version" system
+	# - As loaded pre-v6.17 dietpi-update will overwrite ".version" to previous 2/3 line system, we need to rerun dietpi-update.
+	elif [[ -f '/boot/dietpi/.version' ]] && ! grep -q '^[[:blank:]]*G_GITOWNER=' /boot/dietpi.txt; then
+
+		rm /boot/dietpi/.version
+		RESTART=1
+
+	fi
 
 	# Pre-v6.29: Convert IMAGE_ADDITIONAL_CREDITS line to .prep_info pre-image and migrate existing HW_UUID line to new .hw_model system
 	if [[ -f '/boot/dietpi/.hw_model' ]] && ! grep -q '^G_HW_UUID=' /boot/dietpi/.hw_model; then
@@ -75,36 +86,13 @@ _EOF_
 	# - DietPi-Update includes G_VERSIONDB_SAVE after every subversion patch from v6.27 on.
 	(( $1 )) && G_DIETPI_VERSION_SUB=$1
 
-	# Move Jessie systems to "jessie-support" branch: https://github.com/MichaIng/DietPi/issues/2332
-	# - We check/apply this already via pre-patches but do as well here since older DietPi versions do not yet run pre-patches.
-	if (( $G_DISTRO < 4 )); then
-
-		sed -i '/DEV_GITBRANCH=/c\DEV_GITBRANCH=jessie-support' /boot/dietpi.txt
-
-		# Sync old code back to RAM, so no changes but "jessie-support" branch are applied
-		rm /DietPi/.ramdisk
-		if [[ -f '/boot/dietpi/func/dietpi-ramdisk' ]]; then
-
-			/boot/dietpi/func/dietpi-ramdisk 0
-
-		# Pre-v6.13 location
-		elif [[ -f '/boot/dietpi/dietpi-ramdisk' ]]; then
-
-			/boot/dietpi/dietpi-ramdisk 0
-
-		fi
-
-		RESTART=1
-
-	# Pre-v6.17: New ".version" system
-	# - As loaded pre-v6.17 dietpi-update will overwrite ".version" to previous 2 line system, we need to rerun dietpi-update.
 	# Pre-v6.20: New $G_DIETPI_INSTALL_STAGE system
 	# - As loaded pre-v6.20 dietpi-update will recreate ".update_stage", we need to rerun dietpi-update.
-	elif [[ -f '/boot/dietpi/.update_stage' || ! $(mawk 'NR==6' /boot/dietpi/.version) ]]; then
+	if [[ -f '/boot/dietpi/.update_stage' ]]; then
 
-		[[ -f '/boot/dietpi/.update_stage' ]] && rm /boot/dietpi/.update_stage
+		rm /boot/dietpi/.update_stage
 
-		if (( $(</boot/dietpi/.install_stage) > 0 )); then
+		if (( $G_DIETPI_INSTALL_STAGE > 0 )); then
 
 			echo 2 > /boot/dietpi/.install_stage
 
@@ -120,11 +108,40 @@ _EOF_
 
 	fi
 
+	# Move Jessie systems to "jessie-support" branch: https://github.com/MichaIng/DietPi/issues/2332
+	# - We check/apply this already via pre-patches but do as well here since older DietPi versions do not yet run pre-patches.
+	if (( $G_DISTRO < 4 )); then
+
+		sed -i '/DEV_GITBRANCH=/c\DEV_GITBRANCH=jessie-support' /boot/dietpi.txt
+
+		# Preserve previous .hw_model
+		mv /{DietPi,boot}/dietpi/.hw_model
+
+		# Sync old code back to RAM, so no changes but "jessie-support" branch are applied
+		rm -f /DietPi/.ramdisk
+		if [[ -f '/boot/dietpi/func/dietpi-ramdisk' ]]; then
+
+			/boot/dietpi/func/dietpi-ramdisk 0
+
+		# Pre-v6.13 location
+		elif [[ -f '/boot/dietpi/dietpi-ramdisk' ]]; then
+
+			/boot/dietpi/dietpi-ramdisk 0
+
+		fi
+
+		RESTART=1
+
+	fi
+
 	# Restart DietPi-Update if scheduled
 	if [[ $RESTART == 1 ]]; then
 
 		# Save current version to rerun patch on next launch
 		G_VERSIONDB_SAVE
+
+		# Prevent Jessie systems from another reboot
+		(( $G_DISTRO < 4 )) && sed -i '1i\#!/bin/bash' /DietPi/dietpi/.version
 
 		# Remove DietPi-Update and DietPi-Patch working directories to allow concurrent execution.
 		cd /tmp
