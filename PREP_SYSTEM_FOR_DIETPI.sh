@@ -1489,21 +1489,17 @@ _EOF_
 		if (( $G_HW_MODEL != 20 )); then
 
 			G_DIETPI-NOTIFY 2 'Configuring hdparm:'
-
-			sed -i '/# DietPi/,$d' /etc/hdparm.conf # Prevent dupes
+			# Since Debian Bullseye, spindown_time is not applied if APM is not supported by the drive. force_spindown_time is required to override that.
+			local spindown='spindown_time'
+			(( $G_DISTRO > 5 )) && spindown='force_spindown_time'
 			G_ERROR_HANDLER_COMMAND='/etc/hdparm.conf'
-			cat << _EOF_ >> $G_ERROR_HANDLER_COMMAND
-
-# DietPi power management settings for external USB drive
-/dev/sda {
-	# Highest APM value that allows spin-down
-	apm = 127
-	# 10 minutes
-	spindown_time = 120
-}
+			cat << _EOF_ > $G_ERROR_HANDLER_COMMAND
+apm = 127
+$spindown = 120
 _EOF_
 			G_ERROR_HANDLER_EXITCODE=$?
 			G_ERROR_HANDLER
+			unset spindown
 
 		fi
 
