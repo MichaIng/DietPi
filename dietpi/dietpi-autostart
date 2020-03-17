@@ -13,45 +13,46 @@
 	#
 	# Usage:
 	# - dietpi-autostart		Menu system
-	# - dietpi-autostart int	Apply autostart index non-interactively
+	# - dietpi-autostart <int>	Apply autostart index non-interactively
 	#////////////////////////////////////
 
 	# Import DietPi-Globals --------------------------------------------------------------
 	. /boot/dietpi/func/dietpi-globals
 	G_PROGRAM_NAME='DietPi-Autostart'
 	G_CHECK_ROOT_USER
+	G_CHECK_ROOTFS_RW
 	G_INIT
 	# Import DietPi-Globals --------------------------------------------------------------
 
-	# Grab Input (valid integer)
-	disable_error=1 G_CHECK_VALIDINT "$1" && INPUT=$1 || INPUT=-1
+	# Grab input (valid integer)
+	disable_error=1 G_CHECK_VALIDINT "$1" -1 && INPUT=$1 || INPUT=-1
 
-	#/////////////////////////////////////////////////////////////////////////////////////
-	# MENUS
-	#/////////////////////////////////////////////////////////////////////////////////////
-	TARGETMENUID=0
-
-	AUTO_START_INDEX=0
+	# Global variables and functions
+	FP_SETTINGS='/boot/dietpi/.dietpi-autostart_index'
+	ID_AUTOSTART=0
 	Apply_Boot_Index(){
 
 		# Disable all autostart options first
 		# - LightDM
-		systemctl disable lightdm &> /dev/null
+		rm -f /etc/systemd/system/display-manager.service
 
 		# - Amiberry
-		systemctl disable amiberry &> /dev/null
+		systemctl disable --now amiberry &> /dev/null
 		if (( $G_HW_MODEL < 10 )); then
 
 			sed -i '/^[[:blank:]]*boot_delay=0/d' /boot/config.txt
-			sed -i 's/[[:blank:]]*logo.nologo//' /boot/cmdline.txt
 			sed -i 's/[[:blank:]]*loglevel=3//' /boot/cmdline.txt
 			sed -i 's/console=tty3/console=tty1/' /boot/cmdline.txt
 
 		fi
 
 		# - Custom script
-		systemctl disable dietpi-autostart_custom &> /dev/null
-		[[ -f '/etc/systemd/system/dietpi-autostart_custom.service' ]] && rm /etc/systemd/system/dietpi-autostart_custom.service
+		if [[ -f '/etc/systemd/system/dietpi-autostart_custom.service' ]]; then
+
+			systemctl disable --now dietpi-autostart_custom
+			rm -R /etc/systemd/system/dietpi-autostart_custom.service*
+
+		fi
 
 		# - Auto login
 		local fp_svc='/etc/systemd/system/getty@tty1.service.d'
@@ -65,7 +66,7 @@
 		#----------------------------------------------------------------------
 		# Enable selected autostart option
 		# - Custom script, service without auto login: https://github.com/MichaIng/DietPi/issues/1024
-		if (( $AUTO_START_INDEX == 14 )); then
+		if (( $ID_AUTOSTART == 14 )); then
 
 			cat << _EOF_ > /etc/systemd/system/dietpi-autostart_custom.service
 [Unit]
@@ -88,13 +89,12 @@ _EOF_
 			systemctl enable dietpi-autostart_custom
 
 		# - Amiberry fast boot via enabled service
-		elif (( $AUTO_START_INDEX == 6 )); then
+		elif (( $ID_AUTOSTART == 6 )); then
 
 			systemctl enable amiberry
 
 			# Enable systemd-logind to have a login console ready after exiting Amiberry from fastboot
 			systemctl unmask systemd-logind
-			systemctl enable systemd-logind &> /dev/null
 
 			# Apply tweaks
 			if (( $G_HW_MODEL < 10 )); then
@@ -106,41 +106,67 @@ _EOF_
 
 			fi
 
+		# - LightDM: Install only if startx (a desktop) is already installed. This is re-applied by dietpi-software after install automatically.
+		elif (( $ID_AUTOSTART == 16 )) && command -v startx &> /dev/null; then
+
+			G_AG_CHECK_INSTALL_PREREQ lightdm
+			# graphical.target Wants=display-manager.service
+			ln -sf /lib/systemd/system/lightdm.service /etc/systemd/system/display-manager.service
+
 		# - Enable autologin
-		elif (( $AUTO_START_INDEX > 0 )); then
+		elif (( $ID_AUTOSTART > 0 )); then
 
-			# Autologin user, only ask in interactive mode and skip for LightDM, which must be started as root
+			# Autologin user
 			local user=$(sed -n '/^[[:blank:]]*AUTO_SETUP_AUTOSTART_LOGIN_USER=/{s/^[^=]*=//p;q}' /boot/dietpi.txt)
-			if (( $AUTO_START_INDEX == 16 )); then
-
-				# LightDM pre-req check, but install only if xinit (a desktop) is already installed. This is re-applied by dietpi-software after install automatically.
-				command -v startx &> /dev/null && G_AG_CHECK_INSTALL_PREREQ lightdm
-				user='root'
-
-			elif (( $INPUT == -1 )); then
+			[[ $user ]] || user='root'
+			# Allow selection in interactive mode
+			if (( $INPUT == -1 )); then
 
 				# Only users with ID >= 1000 (+ root) and with valid login shell
 				G_WHIP_MENU_ARRAY=('root' 'UID:0' $(mawk -F: '$3 >= 1000 && $7 ~ /^\/bin\/.*sh$/ {print $1" UID:"$3}' /etc/passwd))
 				G_WHIP_DEFAULT_ITEM=$user
 				G_WHIP_MENU "Please choose a user to login with.
-NB: You might need to grant the user permissions to run the chosen autostart option.\n\nCurrent choice: $user" && user=$G_WHIP_RETURNED_VALUE
+NB: You might need to grant the user permissions to run the chosen autostart option.\n\nCurrent choice: $user" && user=$G_WHIP_RETURNED_VALUE || user='root'
 
-			fi
+				# Apply choice to dietpi.txt
+				G_CONFIG_INJECT 'AUTO_SETUP_AUTOSTART_LOGIN_USER=' "AUTO_SETUP_AUTOSTART_LOGIN_USER=$user" /boot/dietpi.txt
 
-			# Sanity check
-			if ! grep -qE "^$user:[^:]*:(0|[1-9][0-9][0-9][0-9]+):.*:/bin/[^:]*sh$" /etc/passwd; then
+			# Do sanity check, when applying dietpi.txt entry in non-interactive mode
+			elif ! grep -qE "^$user:[^:]*:(0|[1-9][0-9][0-9][0-9]+):.*:/bin/[^:]*sh$" /etc/passwd; then
 
 				G_DIETPI-NOTIFY 1 "User \"$user\" does not exist, is a system user or does not have a valid login shell. Reverting to \"root\"."
 				user='root'
 
 			fi
 
-			# Apply user choice to dietpi.txt
-			G_CONFIG_INJECT 'AUTO_SETUP_AUTOSTART_LOGIN_USER=' "AUTO_SETUP_AUTOSTART_LOGIN_USER=$user" /boot/dietpi.txt
+			# User-specific steps, e.g. permissions: https://github.com/MichaIng/DietPi/issues/3351
+			if [[ $user == 'root' ]]; then
+
+				:
+
+			# - Kodi
+			elif (( $ID_AUTOSTART == 1 )); then
+
+				usermod -aG video $user
+				getent group render &> /dev/null && usermod -aG render $user
+
+			# - systemd service control: Interactive authentication requires policykit-1 (> libpam-systemd > dbus) + systemd-logind
+			elif [[ $ID_AUTOSTART == [58] ]]; then
+
+				systemctl unmask systemd-logind
+				G_AG_CHECK_INSTALL_PREREQ policykit-1
+
+			# - Cava: Copy config and font from root, created on install
+			elif (( $ID_AUTOSTART == 10 )); then
+
+				[[ ! -d ~$user/.config/cava ]] && mkdir -p ~$user/.config && cp /root/.config/cava ~$user/.config/cava && chown -R $user: ~$user/.config
+				[[ ! -f ~$user/cava.psf ]] && cp /root/cava.psf ~$user/cava.psf && chown $user: ~$user/cava.psf
+
+			fi
 
 			# Apply to TTY1 getty
-			mkdir -p /etc/systemd/system/getty@tty1.service.d
-			cat << _EOF_ > /etc/systemd/system/getty@tty1.service.d/dietpi-autologin.conf
+			mkdir -p $fp_svc
+			cat << _EOF_ > $fp_svc/dietpi-autologin.conf
 [Service]
 ExecStart=
 ExecStart=-/sbin/agetty -a $user %I \$TERM
@@ -148,22 +174,26 @@ _EOF_
 
 		else
 
-			[[ -f '/boot/dietpi/.dietpi-autostart_index' ]] && rm /boot/dietpi/.dietpi-autostart_index
+			[[ -f $FP_SETTINGS ]] && rm $FP_SETTINGS
 
 		fi
 
 		# Save boot index, if not default 0
-		(( $AUTO_START_INDEX )) && echo $AUTO_START_INDEX > /boot/dietpi/.dietpi-autostart_index
+		(( $ID_AUTOSTART )) && echo $ID_AUTOSTART > $FP_SETTINGS
 
 		systemctl daemon-reload
 
 	}
 
+	#/////////////////////////////////////////////////////////////////////////////////////
+	# MENUS
+	#/////////////////////////////////////////////////////////////////////////////////////
+	TARGETMENUID=0
 	# TARGETMENUID=0
 	Menu_Main(){
 
 		# Existing boot flag
-		[[ -f '/boot/dietpi/.dietpi-autostart_index' ]] && AUTO_START_INDEX=$(</boot/dietpi/.dietpi-autostart_index)
+		[[ -f $FP_SETTINGS ]] && ID_AUTOSTART=$(<$FP_SETTINGS)
 
 		G_WHIP_MENU_ARRAY=(
 
@@ -191,52 +221,46 @@ _EOF_
 		)
 
 		G_WHIP_BUTTON_CANCEL_TEXT='Exit'
-		G_WHIP_DEFAULT_ITEM=$AUTO_START_INDEX
-		G_WHIP_MENU "Current AutoStart Option: $AUTO_START_INDEX\n\nNB: If your choice is not \"Local Terminal\", please ensure required software is installed (or selected for install) with DietPi-Software."
-		if (( $? == 0 )) && [[ $G_WHIP_RETURNED_VALUE ]]; then
+		G_WHIP_DEFAULT_ITEM=$ID_AUTOSTART
+		if G_WHIP_MENU "Current AutoStart Option: $ID_AUTOSTART\n\nNB: If your choice is not \"Local Terminal\", please ensure required software is installed (or selected for install) with DietPi-Software."; then
 
-			AUTO_START_INDEX=$G_WHIP_RETURNED_VALUE
+			[[ $G_WHIP_RETURNED_VALUE ]] && ID_AUTOSTART=$G_WHIP_RETURNED_VALUE || return
 
 			# Amiberry fast boot info
-			if (( $AUTO_START_INDEX == 6 )); then
+			if (( $ID_AUTOSTART == 6 )); then
 
 				G_WHIP_MSG 'Amiberry fast boot:\nA highly optimised and tweaked boot mode.
 This mode allows for a < 2.5 second boot on an RPi3, into Amiberry.\n\nIf you experience boot issues with this mode, please try the "standard boot" option.'
 
 			# Chromium prompt for URL
-			elif (( $AUTO_START_INDEX == 11 )); then
+			elif (( $ID_AUTOSTART == 11 )); then
 
 				G_WHIP_DEFAULT_ITEM=$(sed -n '/^[[:blank:]]*SOFTWARE_CHROMIUM_AUTOSTART_URL=/{s/^[^=]*=//p;q}' /boot/dietpi.txt)
 				G_WHIP_INPUTBOX 'Please enter a homepage URL to start with Chromium:
  - E.g.: https://dietpi.com' && G_CONFIG_INJECT 'SOFTWARE_CHROMIUM_AUTOSTART_URL=' "SOFTWARE_CHROMIUM_AUTOSTART_URL=$G_WHIP_RETURNED_VALUE" /boot/dietpi.txt
 
-			# Custom info
-			elif (( $AUTO_START_INDEX == 14 )); then
+			# Custom: Create template and info
+			elif [[ $ID_AUTOSTART == 14 && ! -f '/var/lib/dietpi/dietpi-autostart/custom.sh' ]]; then
 
-				# - Create template
-				if [[ ! -f '/var/lib/dietpi/dietpi-autostart/custom.sh' ]]; then
-
-					mkdir -p /var/lib/dietpi/dietpi-autostart
-					cat << _EOF_ > /var/lib/dietpi/dietpi-autostart/custom.sh
+				mkdir -p /var/lib/dietpi/dietpi-autostart
+				cat << _EOF_ > /var/lib/dietpi/dietpi-autostart/custom.sh
 #!/bin/bash
 #---Examples---
 
-# - Chromium
+# Chromium
 #xinit chromium
 
-# - LXDE
+# Desktop
 #startx
 
-# - Print hello
+# Print Hello
 #echo "Hello"
 
 #---Put your code below this line---
 
 _EOF_
-					G_WHIP_MSG 'A template script has been created:\n - /var/lib/dietpi/dietpi-autostart/custom.sh\n
+				G_WHIP_MSG 'A template script has been created:\n - /var/lib/dietpi/dietpi-autostart/custom.sh\n
 Please edit this file and enter the required commands you wish to launch. DietPi will then execute this script during boot.'
-
-				fi
 
 			fi
 
@@ -245,8 +269,7 @@ Please edit this file and enter the required commands you wish to launch. DietPi
 
 		else
 
-			# Exit
-			TARGETMENUID=-1
+			TARGETMENUID=-1 # Exit
 
 		fi
 
@@ -258,7 +281,8 @@ Please edit this file and enter the required commands you wish to launch. DietPi
 	# Start Menu
 	if (( $INPUT == -1 )); then
 
-		while (( $TARGETMENUID >= 0 )); do
+		while (( $TARGETMENUID >= 0 ))
+		do
 
 			G_TERM_CLEAR
 			Menu_Main
@@ -268,7 +292,7 @@ Please edit this file and enter the required commands you wish to launch. DietPi
 	# Apply boot index
 	elif (( $INPUT >= 0 )); then
 
-		AUTO_START_INDEX=$INPUT
+		ID_AUTOSTART=$INPUT
 		Apply_Boot_Index
 
 	fi
