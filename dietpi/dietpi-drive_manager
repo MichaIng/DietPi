@@ -49,7 +49,6 @@
 	FORMAT_MODE=1 # 0=drive 1=partition
 
 	# Drive data
-	FP_ROOTFS_SOURCE=
 	FP_USERDATA_CURRENT=
 	FP_SWAPFILE_CURRENT=
 
@@ -101,9 +100,6 @@
 
 		# Swapfile location
 		FP_SWAPFILE_CURRENT=$(sed -n '/^[[:blank:]]*AUTO_SETUP_SWAPFILE_LOCATION=/{s/^[^=]*=//p;q}' /boot/dietpi.txt)
-
-		# RootFS device location
-		FP_ROOTFS_SOURCE=$(findmnt -no source /)
 
 		# Create tmp fstab
 		local fp_fstab_tmp='.fstab'
@@ -189,7 +185,7 @@ $swap_mounts
 			aDRIVE_SIZE_PERCENTUSED[$index]=$(mawk '{print $5}' <<< $line)
 			aDRIVE_MOUNT_TARGET[$index]=$(mawk '{print $6}' <<< $line)
 			# Workaround for /dev/root under RPi, force physical location
-			[[ ${aDRIVE_MOUNT_TARGET[$index]} == '/' ]] && aDRIVE_MOUNT_SOURCE[$index]=$FP_ROOTFS_SOURCE
+			[[ ${aDRIVE_MOUNT_TARGET[$index]} == '/' ]] && aDRIVE_MOUNT_SOURCE[$index]=$G_ROOTFS_DEV
 
 			aDRIVE_SOURCE_DEVICE[$index]=$(Return_Drive_Without_Partitions ${aDRIVE_MOUNT_SOURCE[$index]})
 			[[ ${aDRIVE_MOUNT_SOURCE[$index]} == /dev/${aDRIVE_SOURCE_DEVICE[$index]} ]] || aDRIVE_ISPARTITIONTABLE[$index]=1
@@ -933,7 +929,11 @@ Do you wish to ignore this warning, and, mount the drive regardless?" || return 
 
 			elif [[ $G_WHIP_RETURNED_VALUE == 'Idle Spindown' ]]; then
 
-				local apm=127
+				local apm=127 # Hardcode to highest value that still allows spin-down
+				local current_spindown=
+				[[ -f '/etc/hdparm.conf' ]] && current_spindown=$(mawk '/spindown_time/{print $3;exit}' /etc/hdparm.conf)
+				disable_error=1 G_CHECK_VALIDINT $current_spindown 0 251 && G_WHIP_DEFAULT_ITEM=$current_spindown || G_WHIP_DEFAULT_ITEM=241
+
 
 				G_WHIP_MENU_ARRAY=('0' ': Disabled')
 
@@ -960,34 +960,20 @@ Do you wish to ignore this warning, and, mount the drive regardless?" || return 
 
 				done
 
-				G_WHIP_DEFAULT_ITEM=241
-				local current_spindown=''
-				[[ -f '/etc/hdparm.conf' ]] && current_spindown=$(mawk '/spindown_time/ {print $3;exit}' /etc/hdparm.conf)
-				disable_error=1 G_CHECK_VALIDINT $current_spindown 0 251 && G_WHIP_DEFAULT_ITEM=$current_spindown
-
-				if G_WHIP_MENU "Please select a idle duration of time, before each drive is powered down:
+				if G_WHIP_MENU 'Please select an idle duration of time, before each drive is powered down:
  - This will be applied to all drives on the system
- - Not all drives support the feature of 'hdparm' and visa versa. End results may vary.
- - You can check status with 'hdparm -C /dev/sd*'"; then
+ - Not all drives support the feature of "hdparm" and visa versa. End results may vary.
+ - You can check status with "hdparm -C [sh]d[a-z]"'; then
 
-					> /etc/hdparm.conf
-					for i in ${!aDRIVE_MOUNT_SOURCE[@]}
-					do
+					# Since Debian Bullseye, spindown_time is not applied if APM is not supported by the drive. force_spindown_time is required to override that.
+					local spindown_setting='spindown_time'
+					(( $G_DISTRO > 5 )) && spindown_setting='force_spindown_time'
 
-						if (( ! ${aDRIVE_ISNETWORKED[$i]} )) && ! grep -q "^/dev/${aDRIVE_SOURCE_DEVICE[$i]}$" /etc/hdparm.conf; then
+					G_DIETPI-NOTIFY 2 'Applying spindown timeout to all drives now...'
+					hdparm -B $apm -S $G_WHIP_RETURNED_VALUE /dev/[sh]d[a-z]
 
-							G_ERROR_HANDLER_NO_FAIL=1 G_RUN_CMD hdparm -B $apm /dev/${aDRIVE_SOURCE_DEVICE[$i]}
-							G_ERROR_HANDLER_NO_FAIL=1 G_RUN_CMD hdparm -S $G_WHIP_RETURNED_VALUE /dev/${aDRIVE_SOURCE_DEVICE[$i]}
-
-							echo "/dev/${aDRIVE_SOURCE_DEVICE[$i]}
-{
-   apm = $apm
-   spindown_time = $G_WHIP_RETURNED_VALUE
-}" >> /etc/hdparm.conf
-
-						fi
-
-					done
+					G_DIETPI-NOTIFY 2 'Applying spindown timeout to /etc/hdparm.conf to be effective from next boot on...'
+					echo -e "apm = $apm\n$spindown_setting = $G_WHIP_RETURNED_VALUE" > /etc/hdparm.conf
 
 				fi
 
@@ -1174,7 +1160,7 @@ Do you wish to ignore this warning, and, mount the drive regardless?" || return 
 				fi
 
 				# Transfer RootFS
-				if [[ ${aDRIVE_MOUNT_SOURCE[$MENU_DRIVE_INDEX]} != $FP_ROOTFS_SOURCE ]] && (( $G_HW_MODEL < 13 )); then
+				if [[ ${aDRIVE_MOUNT_SOURCE[$MENU_DRIVE_INDEX]} != $G_ROOTFS_DEV ]] && (( $G_HW_MODEL < 13 )); then
 
 					G_WHIP_MENU_ARRAY+=('Transfer RootFS' ': Transfer RootFS to this drive')
 

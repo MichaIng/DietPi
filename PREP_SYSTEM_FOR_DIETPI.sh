@@ -58,6 +58,7 @@
 	# - Meveric: https://github.com/MichaIng/DietPi/issues/1285#issuecomment-355759321
 	[[ -f '/etc/apt/sources.list.d/deb-multimedia.list' ]] && rm /etc/apt/sources.list.d/deb-multimedia.list
 	[[ -f '/etc/apt/preferences.d/deb-multimedia-pin-99' ]] && rm /etc/apt/preferences.d/deb-multimedia-pin-99
+	[[ -f '/etc/apt/preferences.d/backports' ]] && rm /etc/apt/preferences.d/backports
 	# - OMV: https://dietpi.com/phpbb/viewtopic.php?f=11&t=2772
 	[[ -f '/etc/apt/sources.list.d/openmediavault.list' ]] && rm /etc/apt/sources.list.d/openmediavault.list
 
@@ -82,14 +83,14 @@
 	# Check for/Install APT packages required for this script to:
 	aAPT_PREREQS=(
 
-		'apt-transport-https' # Allows HTTPS sources for APT (not required since Buster)
 		'wget' # Download DietPi-Globals...
 		'ca-certificates' # ...via HTTPS
-		'unzip' # Unzip DietPi code
 		'locales' # Set en_GB.UTF-8 locale
 		'whiptail' # G_WHIP
 
 	)
+	# - Pre-Buster: Support HTTPS sources for APT
+	grep -qE '(jessie|stretch)' /etc/os-release && aAPT_PREREQS+=('apt-transport-https')
 
 	for i in "${aAPT_PREREQS[@]}"
 	do
@@ -181,6 +182,9 @@
 
 	fi
 
+	# Assure no obsolete .hw_model is loaded or generated
+	rm -fv /boot/dietpi/{.,func/dietpi-obtain_}hw_model
+
 	# Load
 	if ! . ./dietpi-globals; then
 
@@ -221,32 +225,32 @@
 
 	else
 
-		G_DIETPI-NOTIFY 1 'Unknown or unsupported distribution version. Aborting...\n'
+		G_DIETPI-NOTIFY 1 "Unknown or unsupported distribution version: $(sed -n '/^PRETTY_NAME=/{s/^PRETTY_NAME=//p;q}' /etc/os-release 2>&1). Aborting...\n"
 		exit 1
 
 	fi
 
 	# Detect the hardware architecture of this operating system
-	G_HW_ARCH_DESCRIPTION=$(uname -m)
-	if [[ $G_HW_ARCH_DESCRIPTION == 'armv6l' ]]; then
+	G_HW_ARCH_NAME=$(uname -m)
+	if [[ $G_HW_ARCH_NAME == 'armv6l' ]]; then
 
 		G_HW_ARCH=1
 
-	elif [[ $G_HW_ARCH_DESCRIPTION == 'armv7l' ]]; then
+	elif [[ $G_HW_ARCH_NAME == 'armv7l' ]]; then
 
 		G_HW_ARCH=2
 
-	elif [[ $G_HW_ARCH_DESCRIPTION == 'aarch64' ]]; then
+	elif [[ $G_HW_ARCH_NAME == 'aarch64' ]]; then
 
 		G_HW_ARCH=3
 
-	elif [[ $G_HW_ARCH_DESCRIPTION == 'x86_64' ]]; then
+	elif [[ $G_HW_ARCH_NAME == 'x86_64' ]]; then
 
 		G_HW_ARCH=10
 
 	else
 
-		G_DIETPI-NOTIFY 1 "Unknown or unsupported CPU architecture: \"$G_HW_ARCH_DESCRIPTION\". Aborting...\n"
+		G_DIETPI-NOTIFY 1 "Unknown or unsupported CPU architecture: \"$G_HW_ARCH_NAME\". Aborting...\n"
 		exit 1
 
 	fi
@@ -275,9 +279,8 @@
 			for i in /etc/systemd/system/dietpi-*
 			do
 
-				[[ -f $i ]] || continue
-				systemctl disable --now ${i##*/}
-				rm -v $i
+				[[ -f $i ]] && systemctl disable --now ${i##*/}
+				rm -Rfv $i
 
 			done
 
@@ -285,8 +288,8 @@
 			# - /DietPi mount point: Pre-v6.29
 			umount /DietPi # Failsafe
 			[[ -d '/DietPi' ]] && rm -R /DietPi
-			rm -Rfv /{boot,mnt,etc,var/lib,var/tmp,run}/dietpi*
-			rm -fv /etc/{bashrc,profile,sysctl}.d/dietpi*
+			rm -Rfv /{boot,mnt,etc,var/lib,var/tmp,run}/*dietpi*
+			rm -fv /etc/{cron.*,{bashrc,profile,sysctl,network/if-up,udev/rules}.d}/*dietpi*
 
 			[[ -f '/root/DietPi-Automation.log' ]] && rm -v /root/DietPi-Automation.log
 			[[ -f '/boot/Automation_Format_My_Usb_Drive' ]] && rm -v /boot/Automation_Format_My_Usb_Drive
@@ -474,7 +477,7 @@
 		echo $G_HW_MODEL > /etc/.dietpi_hw_model_identifier
 
 		G_DIETPI-NOTIFY 2 "Selected hardware model ID: $G_HW_MODEL"
-		G_DIETPI-NOTIFY 2 "Detected CPU architecture: $G_HW_ARCH_DESCRIPTION (ID: $G_HW_ARCH)"
+		G_DIETPI-NOTIFY 2 "Detected CPU architecture: $G_HW_ARCH_NAME (ID: $G_HW_ARCH)"
 
 		# WiFi selection
 		if [[ $WIFI_REQUIRED != [01] ]]; then
@@ -728,7 +731,6 @@ _EOF_
 			'parted'		# partprobe + drive partitioning, required by DietPi-Drive_Manager
 			'procps'		# "kill", "ps", "pgrep", "sysctl", used by several DietPi scripts
 			'psmisc'		# "killall", used by several DietPi scripts
-			'resolvconf'		# Network nameserver handler + depandant for "ifupdown" (network interface handler) => "iproute2" ("ip" command)
 			'sudo'			# Root permission wrapper for users within /etc/sudoers(.d/)
 			'systemd-sysv'		# Includes systemd and additional commands: "poweroff", "shutdown" etc.
 			'tzdata'		# Time zone data for system clock, auto summer/winter time adjustment
@@ -760,7 +762,17 @@ _EOF_
 		# G_HW_MODEL specific required repo key packages: https://github.com/MichaIng/DietPi/issues/1285#issuecomment-358301273
 		if (( $G_HW_MODEL > 9 )); then
 
-			aPACKAGES_REQUIRED_INSTALL+=('initramfs-tools')		# RAM file system initialisation, required for generic bootloader, but not required/used by RPi bootloader
+			# RAM file system initialisation, required for generic bootloader, but not required/used by RPi bootloader
+			# - On VM, install tiny-initramfs with limited features but sufficient and much smaller + faster
+			if (( $G_HW_MODEL == 20 )); then
+
+				aPACKAGES_REQUIRED_INSTALL+=('tiny-initramfs')
+
+			else
+
+				aPACKAGES_REQUIRED_INSTALL+=('initramfs-tools')
+
+			fi
 			aPACKAGES_REQUIRED_INSTALL+=('haveged')			# Entropy daemon: https://github.com/MichaIng/DietPi/issues/2806
 
 		else
@@ -788,7 +800,7 @@ _EOF_
 		fi
 
 		# Install required filesystem packages
-		if [[ $(lsblk -no FSTYPE) =~ ([[:space:]]|v)'fat' ]]; then
+		if [[ $(blkid -s TYPE -o value) =~ ([[:space:]]|v)'fat' ]]; then
 
 			aPACKAGES_REQUIRED_INSTALL+=('dosfstools')		# DietPi-Drive_Manager + fat (boot) drive file system check and creation tools
 
@@ -1011,7 +1023,7 @@ _EOF_
 		[[ -d '/usr/src' ]] && rm -vRf /usr/src/{,.??,.[^.]}*
 
 		# - root/home
-		rm -Rfv /{root,home/*}/.{cache,local,config,gnupg,viminfo,dbus,gconf,nano}
+		rm -Rfv /{root,home/*}/.{cache,local,config,gnupg,viminfo,dbus,gconf,nano,vim}
 
 		# - Documentation dirs: https://github.com/MichaIng/DietPi/issues/3259
 		#[[ -d '/usr/share/man' ]] && rm -vR /usr/share/man
@@ -1074,7 +1086,6 @@ _EOF_
 			haveged
 			hwclock.sh
 			networking
-			resolvconf
 			udev
 			cron
 			console-setup.sh
@@ -1136,6 +1147,7 @@ _EOF_
 		[[ -f '/usr/local/sbin/setup-odroid' ]] && rm -v /usr/local/sbin/setup-odroid
 		[[ -d '/root/scripts' ]] && rm -R /root/scripts
 		[[ -f '/root/resize--log.txt' ]] && rm /root/resize--log.txt
+		rm -fv /installed-packages*.txt
 
 		# - RPi specific: https://github.com/MichaIng/DietPi/issues/1631#issuecomment-373965406
 		[[ -f '/etc/profile.d/wifi-country.sh' ]] && rm -v /etc/profile.d/wifi-country.sh
@@ -1207,9 +1219,9 @@ _EOF_
 
 		#-----------------------------------------------------------------------------------
 		# Install vmtouch to lock DietPi scripts and config in file system cache
-		G_RUN_CMD wget https://dietpi.com/downloads/binaries/$G_DISTRO_NAME/vmtouch_$G_HW_ARCH_DESCRIPTION.deb
-		G_RUN_CMD dpkg --force-hold,confdef,confold -i vmtouch_$G_HW_ARCH_DESCRIPTION.deb
-		rm vmtouch_$G_HW_ARCH_DESCRIPTION.deb
+		G_RUN_CMD wget https://dietpi.com/downloads/binaries/$G_DISTRO_NAME/vmtouch_$G_HW_ARCH_NAME.deb
+		G_RUN_CMD dpkg --force-hold,confdef,confold -i vmtouch_$G_HW_ARCH_NAME.deb
+		rm vmtouch_$G_HW_ARCH_NAME.deb
 
 		#-----------------------------------------------------------------------------------
 		# Cron jobs
@@ -1251,9 +1263,10 @@ _EOF_
 		echo 'ssh.dietpi.com ssh-rsa AAAAB3NzaC1yc2EAAAADAQABAAABAQDE6aw3r6aOEqendNu376iiCHr9tGBIWPgfrLkzjXjEsHGyVSUFNnZt6pftrDeK7UX+qX4FxOwQlugG4fymOHbimRCFiv6cf7VpYg1Ednquq9TLb7/cIIbX8a6AuRmX4fjdGuqwmBq3OG7ZksFcYEFKt5U4mAJIaL8hXiM2iXjgY02LqiQY/QWATsHI4ie9ZOnwrQE+Rr6mASN1BVFuIgyHIbwX54jsFSnZ/7CdBMkuAd9B8JkxppWVYpYIFHE9oWNfjh/epdK8yv9Oo6r0w5Rb+4qaAc5g+RAaknHeV6Gp75d2lxBdCm5XknKKbGma2+/DfoE8WZTSgzXrYcRlStYN' > /root/.ssh/known_hosts
 
 		G_DIETPI-NOTIFY 2 'Configuring DNS nameserver:'
-		echo 'nameserver 9.9.9.9' > /etc/resolvconf/run/resolv.conf # Apply generic functional DNS nameserver, updated on next service start
-		ln -sfv /etc/resolvconf/run/resolv.conf /etc/resolv.conf # Update symlink, in case it was manually removed
-		rm -fv /etc/resolvconf/resolv.conf.d/{original,tail} # Remove obsolete original and appendix files
+		# Failsafe: Assure that /etc/resolv.conf is not a symlink and disable systemd-resolved
+		systemctl disable --now systemd-resolved
+		rm -fv /etc/resolv.conf
+		echo 'nameserver 9.9.9.9' > /etc/resolv.conf # Apply generic functional DNS nameserver, updated on next service start
 
 		# ifupdown starts the daemon outside of systemd, the enabled systemd unit just thows an error on boot due to missing dbus and with dbus might interfere with ifupdown
 		systemctl disable wpa_supplicant 2> /dev/null && G_DIETPI-NOTIFY 2 'Disabled non-required wpa_supplicant systemd unit'
@@ -1279,7 +1292,7 @@ iface eth0 inet dhcp
 address 192.168.0.100
 netmask 255.255.255.0
 gateway 192.168.0.1
-#dns-nameservers 8.8.8.8 8.8.4.4
+#dns-nameservers 9.9.9.9 149.112.112.112
 
 # WiFi
 #allow-hotplug wlan0
@@ -1289,7 +1302,7 @@ netmask 255.255.255.0
 gateway 192.168.0.1
 wireless-power off
 wpa-conf /etc/wpa_supplicant/wpa_supplicant.conf
-#dns-nameservers 8.8.8.8 8.8.4.4
+#dns-nameservers 9.9.9.9 149.112.112.112
 _EOF_
 		G_ERROR_HANDLER_EXITCODE=$?
 		G_ERROR_HANDLER
@@ -1455,7 +1468,15 @@ _EOF_
 			echo 'options usb-storage quirks=0bc2:ab30:u' > /etc/modprobe.d/dietpi-usb-storage_quirks.conf
 
 			# Update initramfs with above changes
-			update-initramfs -u
+			if command -v update-tirfs &> /dev/null; then
+
+				update-tirfs
+
+			else
+
+				update-initramfs -u
+
+			fi
 
 		elif (( $G_HW_ARCH == 3 )); then
 
@@ -1468,21 +1489,17 @@ _EOF_
 		if (( $G_HW_MODEL != 20 )); then
 
 			G_DIETPI-NOTIFY 2 'Configuring hdparm:'
-
-			sed -i '/# DietPi/,$d' /etc/hdparm.conf # Prevent dupes
+			# Since Debian Bullseye, spindown_time is not applied if APM is not supported by the drive. force_spindown_time is required to override that.
+			local spindown='spindown_time'
+			(( $G_DISTRO > 5 )) && spindown='force_spindown_time'
 			G_ERROR_HANDLER_COMMAND='/etc/hdparm.conf'
-			cat << _EOF_ >> $G_ERROR_HANDLER_COMMAND
-
-# DietPi power management settings for external USB drive
-/dev/sda {
-	# Highest APM value that allows spin-down
-	apm = 127
-	# 10 minutes
-	spindown_time = 120
-}
+			cat << _EOF_ > $G_ERROR_HANDLER_COMMAND
+apm = 127
+$spindown = 120
 _EOF_
 			G_ERROR_HANDLER_EXITCODE=$?
 			G_ERROR_HANDLER
+			unset spindown
 
 		fi
 
@@ -1500,7 +1517,7 @@ _EOF_
 			G_RUN_CMD tar -xf 3.10.38.bz2 -C /lib/modules/
 			rm 3.10.38.bz2
 			# - USB audio update
-			G_RUN_CMD wget https://raw.githubusercontent.com/sparky-sbc/sparky-test/master/dsd-designs/snd-usb-audio.ko -O /lib/modules/3.10.38/kernel/sound/usb/snd-usb-audio.ko
+			G_RUN_CMD wget https://raw.githubusercontent.com/sparky-sbc/sparky-test/master/dsd-marantz/snd-usb-audio.ko -O /lib/modules/3.10.38/kernel/sound/usb/snd-usb-audio.ko
 			# - Ethernet update
 			G_RUN_CMD wget https://raw.githubusercontent.com/sparky-sbc/sparky-test/master/sparky-eth/ethernet.ko -O /lib/modules/3.10.38/kernel/drivers/net/ethernet/acts/ethernet.ko
 
