@@ -21,6 +21,7 @@
 
 	# Move Jessie systems to "jessie-support" branch: https://github.com/MichaIng/DietPi/issues/2332
 	# - We check/apply this already via pre-patches but do as well here since older DietPi versions do not yet run pre-patches.
+	# - Do not apply any further patches, restart immediately, so we don't need to think about Jessie systems when adding further patches.
 	if grep -q 'jessie' /etc/os-release; then
 
 		if grep -q '^[[:blank:]]*DEV_GITOWNER=' /boot/dietpi.txt; then
@@ -47,10 +48,10 @@
 		fi
 
 		# Remove DietPi-Update and DietPi-Patch working directories to allow concurrent execution.
-		cd /root
+		cd /tmp
 		rm -Rf /tmp/DietPi-{Update,Patch}
 
-		G_DIETPI-NOTIFY 0 'Restarting DietPi-Update with new code...'
+		G_DIETPI-NOTIFY 0 'Restarting DietPi-Update to apply "jessie-support" branch...'
 
 		# Failsafe: Sync changes to disk to avoid async-related issues
 		sync
@@ -69,9 +70,7 @@
 	RESTART=
 	REBOOT=
 
-	# Pre-v6.29: DietPi-RAMdisk removal
-	# - Needs to be done before loading DietPi-Globals, else /boot/dietpi still contains the old code
-	# - Skip on Jessie since "jessie-support" branch keeps DietPi-RAMdisk and calling old code is wanted in this case
+	# Pre-v6.29: DietPi-RAMdisk removal needs to be done before loading DietPi-Globals, else /boot/dietpi still contains the old code
 	if [[ -d '/DietPi' && $(readlink -f '/DietPi') != '/boot' ]]; then
 
 		# Copy new code to disk
@@ -96,7 +95,7 @@
 	# - Pre-create new DietPi runtime dir for later used scripts, created via /etc/tmpfiles.d/dietpi.conf from next boot on
 	[[ -d '/run/dietpi' ]] || mkdir -p /run/dietpi
 	# - Create network info file on new location
-	[[ -f '/run/dietpi/.network' ]] || /boot/dietpi/func/obtain_network_details && chown 666 /run/dietpi/.network
+	[[ -f '/run/dietpi/.network' ]] || /boot/dietpi/func/obtain_network_details && chmod 666 /run/dietpi/.network
 
 	if [[ -f '/boot/dietpi/.version' ]] && grep -q '^G_GITOWNER=Fourdee' /boot/dietpi/.version; then
 
@@ -132,6 +131,9 @@ _EOF_
 	# Grab input, if given, else fallback to dietpi-globals estimation
 	# - DietPi-Update includes G_VERSIONDB_SAVE after every subversion patch from v6.27 on.
 	(( $1 )) && G_DIETPI_VERSION_SUB=$1
+
+	# Pre-v6.29: Restart DietPi-Update in any case, to apply single-call patch_file change
+	(( $G_DIETPI_VERSION_SUB > 28 )) || RESTART=1
 
 	# Pre-v6.20: New $G_DIETPI_INSTALL_STAGE system
 	# - As loaded pre-v6.20 dietpi-update will recreate ".update_stage", we need to rerun dietpi-update.
@@ -198,7 +200,7 @@ _EOF_
 	# - Prevent initial and final service control during DietPi-Software reinstalls
 	export G_SERVICE_CONTROL=0
 
-	Incremental_Patch_System(){
+	Subversion_Patch(){
 
 		if (( $G_DIETPI_VERSION_SUB == -1 )); then
 
@@ -244,7 +246,7 @@ _EOF_
 			# 	Kodi: https://github.com/MichaIng/DietPi/issues/1428
 			#	Fail2Ban: https://github.com/MichaIng/DietPi/issues/1431
 			#	Tonido: https://github.com/MichaIng/DietPi/issues/1432
-			(( $G_DIETPI_INSTALL_STAGE == 2 )) && /boot/dietpi/dietpi-software reinstall 31 73 134
+			(( $G_DIETPI_INSTALL_STAGE == 2 )) && echo 31 73 134 >> /var/tmp/dietpi/dietpi-update_reinstalls
 			#-------------------------------------------------------------------------------
 
 		elif (( $G_DIETPI_VERSION_SUB == 1 )); then
@@ -257,8 +259,8 @@ _EOF_
 			G_WHIP_MSG '[ INFO ] Locales reset\n\nTo resolve broken locales, they have been reset to "en_GB.UTF-8".\n\nIf you had a different locale configured on this system, please use "dietpi-config" at a later date to re-configure.\n\nIn relation to that, DietPi does not use "/etc/environment" anymore, thus it is cleaned. In case you manually edited it, a backup was created: /mnt/dietpi_userdata/environment.bak'
 			#------------------------------------------------------------------------------
 			# Removed control from DietPi-Services: https://github.com/MichaIng/DietPi/issues/1501
-			systemctl enable --now dnsmasq &> /dev/null
-			systemctl enable --now openvpn &> /dev/null
+			systemctl enable --now dnsmasq 2> /dev/null
+			systemctl enable --now openvpn 2> /dev/null
 			#-------------------------------------------------------------------------------
 			# https://dietpi.com/phpbb/viewtopic.php?f=11&t=2772&p=10646#p10646
 			[[ -f '/etc/apt/sources.list.d/openmediavault.list' ]] && rm /etc/apt/sources.list.d/openmediavault.list
@@ -348,7 +350,7 @@ _EOF_
 				[[ -d $G_FP_DIETPI_USERDATA/dietpicam ]] && mv $G_FP_DIETPI_USERDATA/dietpicam $G_FP_DIETPI_USERDATA/rpicam
 				[[ -e '/var/www/rpicam/media' ]] && rm /var/www/rpicam/media
 
-				/boot/dietpi/dietpi-software reinstall 59 132
+				echo 59 132 >> /var/tmp/dietpi/dietpi-update_reinstalls
 
 			fi
 			#-------------------------------------------------------------------------------
@@ -356,11 +358,7 @@ _EOF_
 			if [[ -f '/boot/dietpi/.dietpi-letsencrypt' ]]; then
 
 				# Switch Minio to new certbot.service.d/ hook:
-				if [[ -f '/etc/systemd/system/certbot.service' ]] && grep -q '^aSOFTWARE_INSTALL_STATE\[158\]=2' /boot/dietpi/.installed; then
-
-					rm /etc/systemd/system/certbot.service
-
-				fi
+				[[ -f '/etc/systemd/system/certbot.service' ]] && grep -q '^aSOFTWARE_INSTALL_STATE\[158\]=2' /boot/dietpi/.installed && rm /etc/systemd/system/certbot.service
 				# Overall settings and config renewal, skip DietPi-Services:
 				G_DIETPI_SERVICES_DISABLE=1 /boot/dietpi/dietpi-letsencrypt 1
 
@@ -380,7 +378,7 @@ _EOF_
 		elif (( $G_DIETPI_VERSION_SUB == 3 )); then
 
 			#-------------------------------------------------------------------------------
-			# Service updates: https://dietpi.com/phpbb/viewtopic.php?f=11&t=1148&p=11322#p11322
+			# Service updates: https://dietpi.com/phpbb/viewtopic.php?p=11322#p11322
 			mkdir -p /var/tmp/dietpi/logs
 			#-------------------------------------------------------------------------------
 			# Fix microcode installation based on image creation CPU instead of image target CPU: https://github.com/MichaIng/DietPi/pull/1596
@@ -402,7 +400,7 @@ _EOF_
 			#-------------------------------------------------------------------------------
 			# Reinstalls
 			#	UrBackupServer
-			(( $G_DIETPI_INSTALL_STAGE == 2 )) && /boot/dietpi/dietpi-software reinstall 111
+			(( $G_DIETPI_INSTALL_STAGE == 2 )) && echo 111 >> /var/tmp/dietpi/dietpi-update_reinstalls
 			#-------------------------------------------------------------------------------
 			# Cron minutely support: https://github.com/MichaIng/DietPi/pull/1578
 			grep -q 'cron\.minutely' /etc/crontab || echo '#*/0 * * * * root cd / && run-parts --report /etc/cron.minutely' >> /etc/crontab
@@ -440,7 +438,7 @@ _EOF_
 
 				killall -qw squeezeboxserver
 				[[ -f '/var/lib/dietpi/dietpi-software/services/squeezeboxserver.service' ]] && rm /var/lib/dietpi/dietpi-software/services/squeezeboxserver.service
-				/boot/dietpi/dietpi-software reinstall 118
+				echo 118 >> /var/tmp/dietpi/dietpi-update_reinstalls
 
 			fi
 			#-------------------------------------------------------------------------------
@@ -487,15 +485,7 @@ _EOF_
 			fi
 			#-------------------------------------------------------------------------------
 			# Reinstall firmware-misc-nonfree by default (Ralink): https://github.com/MichaIng/DietPi/issues/1675
-			if dpkg-query -s wpasupplicant &> /dev/null; then
-
-				G_AGI firmware-misc-nonfree
-
-			elif (( $G_HW_MODEL == 21 )); then
-
-				G_AGI firmware-misc-nonfree
-
-			fi
+			(( $G_HW_MODEL == 21 )) || dpkg-query -s wpasupplicant &> /dev/null && G_AGI firmware-misc-nonfree
 			#-------------------------------------------------------------------------------
 
 		elif (( $G_DIETPI_VERSION_SUB == 6 )); then
@@ -521,7 +511,7 @@ _EOF_
 			#	XRDP: https://github.com/MichaIng/DietPi/issues/1727#issuecomment-383858979
 			# v6.20	Amiberry 2.19: https://github.com/MichaIng/DietPi/issues/1707
 			#	Pi-SPC
-			(( $G_DIETPI_INSTALL_STAGE == 2 )) && /boot/dietpi/dietpi-software reinstall 29 166
+			(( $G_DIETPI_INSTALL_STAGE == 2 )) && echo 29 166 >> /var/tmp/dietpi/dietpi-update_reinstalls
 			#-------------------------------------------------------------------------------
 			# Pi-hole: Enable FTLDNS support by removing pihole-FTL from DietPi control: https://github.com/MichaIng/DietPi/pull/1714
 			systemctl enable pihole-FTL 2> /dev/null
@@ -550,17 +540,17 @@ _EOF_
 
 			#-------------------------------------------------------------------------------
 			# NTP removal, switch to systemd:
-			killall -w /{DietPi,boot}/dietpi/func/run_ntpd ntpd &> /dev/null
+			killall -qw /{DietPi,boot}/dietpi/func/run_ntpd ntpd
 
 			G_AGP ntp
-			sed -i '/^aSOFTWARE_INSTALL_STATE\[106\]=/c\aSOFTWARE_INSTALL_STATE\[106\]=0' /boot/dietpi/.installed &> /dev/null
+			(( $G_DIETPI_INSTALL_STAGE == 2 )) && sed -i '/^aSOFTWARE_INSTALL_STATE\[106\]=/c\aSOFTWARE_INSTALL_STATE\[106\]=0' /boot/dietpi/.installed
 			/boot/dietpi/func/dietpi-set_software ntpd-mode $(sed -n '/^[[:blank:]]*CONFIG_NTP_MODE=/{s/^[^=]*=//p;q}' /boot/dietpi.txt)
 			/boot/dietpi/func/run_ntpd
 			#-------------------------------------------------------------------------------
 			# Move DietPi globals and login scripts into new /etc/bashrc.d location to load on all interactive shells:
 			mkdir -p /etc/bashrc.d
 			# => v6.22 #G_CONFIG_INJECT '.*/etc/bashrc\.d/.*' 'for i in /etc/bashrc.d/*.sh; do [ -r "$i" ] && . $i; done' /etc/bash.bashrc
-			for i in /{root,home/*}/.bashrc; do [[ -f $i ]] && sed -i '/\/DietPi/d' $i; done # should already be removed, failsafe start clean
+			for i in /{root,home/*}/.bashrc; do [[ -f $i ]] && sed -i '/\/DietPi/d' $i; done # Should already be removed, failsafe start clean
 			rm -f /etc/profile.d/99-dietpi*
 			# - Enable bash-completion for non-login shells:
 			#	- NB: It is called twice on login shells then, but breaks directly if called already once.
@@ -580,9 +570,9 @@ _EOF_
 			# v6.23	SubSonic
 			#	Cava
 			#	CloudPrint
-			#	TightVNC/VNC4/RealVNC: https://github.com/MichaIng/DietPi/pull/1798#issuecomment-392594878
+			#	TigerVNC/RealVNC: https://github.com/MichaIng/DietPi/pull/1798#issuecomment-392594878
 			# v6.19	Xserver: https://github.com/MichaIng/DietPi/issues/1823
-			(( $G_DIETPI_INSTALL_STAGE == 2 )) && /boot/dietpi/dietpi-software reinstall 23 27 28 119 120 137
+			(( $G_DIETPI_INSTALL_STAGE == 2 )) && echo 23 28 119 120 137 >> /var/tmp/dietpi/dietpi-update_reinstalls
 			#-------------------------------------------------------------------------------
 			# Re-run set uid for sudo: https://github.com/MichaIng/DietPi/issues/794#issuecomment-392335392
 			chmod 4755 $(command -v sudo)
@@ -620,28 +610,25 @@ _EOF_
 			fi
 			#-------------------------------------------------------------------------------
 			# Fix Apache2 logging to "/error.log" instead of "/var/log/apache2/error.log": https://github.com/MichaIng/DietPi/commit/c991bd7dc579dbdc7c239e4c887b0962fa204006
-			if [[ -d '/etc/apache2/sites-available' ]]; then
+			for vhost in /etc/apache2/sites-available/*.conf
+			do
 
-				for vhost in /etc/apache2/sites-available/*.conf
-				do
+				[[ -e $vhost ]] || continue
+				[[ -f $vhost ]] && sed -Ei '\|^[[:blank:]]*ErrorLog[[:blank:]]+/error\.log|c\	ErrorLog \$\{APACHE_LOG_DIR\}/error\.log' $vhost
 
-					[[ -f $vhost ]] && sed -Ei '\|^[[:blank:]]*ErrorLog[[:blank:]]+/error\.log|c\	ErrorLog \$\{APACHE_LOG_DIR\}/error\.log' $vhost
-
-				done
-
-			fi
+			done
 			#-------------------------------------------------------------------------------
 			# Remove config.txt for non-RPi devices: https://github.com/MichaIng/DietPi/pull/1863
 			(( $G_HW_MODEL > 9 )) && [[ -f '/boot/config.txt' ]] && rm /boot/config.txt
 			#-------------------------------------------------------------------------------
 			# Removal of NTP from dietpi-software
-			sed -i '/^aSOFTWARE_INSTALL_STATE\[106\]=/c\aSOFTWARE_INSTALL_STATE\[106\]=0' /boot/dietpi/.installed &> /dev/null
+			(( $G_DIETPI_INSTALL_STAGE == 2 )) && sed -i '/^aSOFTWARE_INSTALL_STATE\[106\]=/c\aSOFTWARE_INSTALL_STATE\[106\]=0' /boot/dietpi/.installed
 			# - Cleared for roon extension manager addition
-			sed -i '/^aSOFTWARE_INSTALL_STATE\[86\]=/c\aSOFTWARE_INSTALL_STATE\[86\]=0' /boot/dietpi/.installed &> /dev/null
+			(( $G_DIETPI_INSTALL_STAGE == 2 )) && sed -i '/^aSOFTWARE_INSTALL_STATE\[86\]=/c\aSOFTWARE_INSTALL_STATE\[86\]=0' /boot/dietpi/.installed
 			# - Cleared for ubooquity addition
-			sed -i '/^aSOFTWARE_INSTALL_STATE\[80\]=/c\aSOFTWARE_INSTALL_STATE\[80\]=0' /boot/dietpi/.installed &> /dev/null
+			(( $G_DIETPI_INSTALL_STAGE == 2 )) && sed -i '/^aSOFTWARE_INSTALL_STATE\[80\]=/c\aSOFTWARE_INSTALL_STATE\[80\]=0' /boot/dietpi/.installed
 			# - Moode cleared
-			sed -i '/^aSOFTWARE_INSTALL_STATE\[168\]=/c\aSOFTWARE_INSTALL_STATE\[168\]=0' /boot/dietpi/.installed &> /dev/null
+			(( $G_DIETPI_INSTALL_STAGE == 2 )) && sed -i '/^aSOFTWARE_INSTALL_STATE\[168\]=/c\aSOFTWARE_INSTALL_STATE\[168\]=0' /boot/dietpi/.installed
 			#-------------------------------------------------------------------------------
 			# Unused and replaced with dietpi-fs_partition_resize.service
 			[[ -f '/etc/systemd/system/dietpi-fs_expand.service' ]] && rm /etc/systemd/system/dietpi-fs_expand.service
@@ -667,7 +654,7 @@ _EOF_
 			#-------------------------------------------------------------------------------
 			# Software removals:
 			#	JRiver: https://github.com/MichaIng/DietPi/issues/1080#issuecomment-403489246
-			sed -i '/^aSOFTWARE_INSTALL_STATE\[148\]=/c\aSOFTWARE_INSTALL_STATE\[148\]=0' /boot/dietpi/.installed &> /dev/null
+			(( $G_DIETPI_INSTALL_STAGE == 2 )) && sed -i '/^aSOFTWARE_INSTALL_STATE\[148\]=/c\aSOFTWARE_INSTALL_STATE\[148\]=0' /boot/dietpi/.installed
 			#-------------------------------------------------------------------------------
 			# ASUS TB WiFi: https://github.com/MichaIng/DietPi/issues/1760
 			(( $G_HW_MODEL == 52 )) && G_CONFIG_INJECT '8723bs' '8723bs' /etc/modules
@@ -715,12 +702,12 @@ _EOF_
 
 				fi
 
-				/boot/dietpi/dietpi-software reinstall 32 33 39 143 149 154
+				echo 32 33 39 143 149 154 >> /var/tmp/dietpi/dietpi-update_reinstalls
 
 			fi
 			#-------------------------------------------------------------------------------
 			# Increase /var/log max size to 50MB, if lower than 50MB: https://github.com/pi-hole/pi-hole/issues/2270#issuecomment-405109135
-			if df | grep '^tmpfs.*/var/log' &> /dev/null; then
+			if df | grep -q '^tmpfs.*/var/log'; then
 
 				local var_log_size_new=50
 
@@ -741,44 +728,31 @@ _EOF_
 			grep -q '^mesa-utils-extra[[:space:]]' <<< "$dpkg_list" && apt-mark auto libgles2-mesa
 			#-------------------------------------------------------------------------------
 			# Removal of CurlFTPFS from dietpi-software
-			sed -i '/^aSOFTWARE_INSTALL_STATE\[2\]=/c\aSOFTWARE_INSTALL_STATE\[2\]=0' /boot/dietpi/.installed &> /dev/null
+			[[ -f '/boot/dietpi/.installed' ]] && sed -i '/^aSOFTWARE_INSTALL_STATE\[2\]=/c\aSOFTWARE_INSTALL_STATE\[2\]=0' /boot/dietpi/.installed
 			#-------------------------------------------------------------------------------
 			# /var/lib/dietpi/dietpi-ramlog/storage moved to /var/tmp/dietpi/logs/dietpi-ramlog_store https://github.com/MichaIng/DietPi/pull/1919
 			# automatically generated during ramlog, remove old location only
 			[[ -d '/var/lib/dietpi/dietpi-ramlog/storage' ]] && rm -R /var/lib/dietpi/dietpi-ramlog/storage
 			#-------------------------------------------------------------------------------
 			# Reinstall "netbase", in case of installed NFS client and/or server, to reenable NFSv3 support: https://github.com/MichaIng/DietPi/issues/1898
-			if (( $G_DIETPI_INSTALL_STAGE == 2 )); then
-
-				if grep -qE '^aSOFTWARE_INSTALL_STATE\[(109|110)\]=2' /boot/dietpi/.installed; then
-
-					G_AGI netbase
-
-				fi
-
-			fi
+			(( $G_DIETPI_INSTALL_STAGE == 2 )) &&  grep -qE '^aSOFTWARE_INSTALL_STATE\[(109|110)\]=2' /boot/dietpi/.installed && G_AGI netbase
 			#-------------------------------------------------------------------------------
 
 		elif (( $G_DIETPI_VERSION_SUB == 12 )); then
 
 			#-------------------------------------------------------------------------------
-			#Move Koel from /var/www to /mnt/dietpi_userdata: https://github.com/MichaIng/DietPi/pull/1954
+			# Move Koel from /var/www to /mnt/dietpi_userdata: https://github.com/MichaIng/DietPi/pull/1954
 			if [[ -d '/var/www/koel' ]]; then
 
 				G_RUN_CMD mv /var/www/koel $G_FP_DIETPI_USERDATA/koel
 				chown -R koel:dietpi $G_FP_DIETPI_USERDATA/koel
-				[[ -f /etc/systemd/system/koel.service ]] && sed -i 's|/var/www|/mnt/dietpi_userdata|g' /etc/systemd/system/koel.service
+				[[ -f '/etc/systemd/system/koel.service' ]] && sed -i 's|/var/www|/mnt/dietpi_userdata|g' /etc/systemd/system/koel.service
 				G_WHIP_MSG "INFO:\n\nKoel has been moved to the DietPi userdata directory:\n\n - /var/www/koel > $G_FP_DIETPI_USERDATA/koel"
 
 			fi
 			#-------------------------------------------------------------------------------
 			# Mask systemd-logind as new default, if libpam-systemd is not installed: https://github.com/MichaIng/DietPi/issues/1767
-			if ! dpkg-query -s 'libpam-systemd' &> /dev/null; then
-
-				systemctl disable --now systemd-logind &> /dev/null
-				systemctl mask systemd-logind
-
-			fi
+			dpkg-query -s 'libpam-systemd' &> /dev/null || systemctl mask --now systemd-logind
 			#-------------------------------------------------------------------------------
 			# Disable cron.minutely, if unused to reduce cron executions and logs
 			(( $(find /etc/cron.minutely/ | wc -l) > 2 )) || sed -i '\|cron\.minutely|s|^\*/[0-9]*[[:blank:]]|#*/0 |' /etc/crontab
@@ -788,21 +762,18 @@ _EOF_
 			grep -q 'ntfs' <<< $fs_list || apt-mark auto ntfs-3g
 			grep -q 'hfs' <<< $fs_list || apt-mark auto hfsplus
 			#-------------------------------------------------------------------------------
-			# Pine 64, WiFi module: https://github.com/MichaIng/DietPi/issues/1995#issuecomment-410931618
+			# Pine A64, WiFi module: https://github.com/MichaIng/DietPi/issues/1995#issuecomment-410931618
 			(( $G_HW_MODEL == 40 )) && G_CONFIG_INJECT '8723bs' '8723bs' /etc/modules
-			#-------------------------------------------------------------------------------
-			# Autoremove all marked packages during all patches with a single final call
-			G_AGA
 			#-------------------------------------------------------------------------------
 			# DietPi-Services custom includes has changed
 			local fp_old='/boot/dietpi/.dietpi-services_include'
 			local fp_new='/boot/dietpi/.dietpi-services_include_exclude'
 			if [[ -f $fp_old ]]; then
 
-				# - generate the new file, if not done already
+				# Generate the new file, if not done already
 				[[ -f $fp_new ]] || /boot/dietpi/dietpi-services stop cron
 
-				# - Transfer existing entries over
+				# Transfer existing entries over
 				while read line
 				do
 
@@ -816,13 +787,8 @@ _EOF_
 
 			fi
 			#-------------------------------------------------------------------------------
-			# NZBget Umask: https://github.com/MichaIng/DietPi/issues/1999
-			# qBitTorrent: https://github.com/MichaIng/DietPi/issues/1957
-			if [[ -f $G_FP_DIETPI_USERDATA/nzbget/nzbget.conf ]]; then
-
-				G_CONFIG_INJECT 'UMask=' 'UMask=0002' $G_FP_DIETPI_USERDATA/nzbget/nzbget.conf
-
-			fi
+			# NZBget UMask: https://github.com/MichaIng/DietPi/issues/1999
+			[[ -f $G_FP_DIETPI_USERDATA/nzbget/nzbget.conf ]] && G_CONFIG_INJECT 'UMask=' 'UMask=0002' $G_FP_DIETPI_USERDATA/nzbget/nzbget.conf
 			#-------------------------------------------------------------------------------
 			# Assure absence of dhcpcd5, if dhclient (isc-dhcp-client) is active: https://github.com/MichaIng/DietPi/issues/1560#issuecomment-370136642
 			pgrep 'dhclient' &> /dev/null && G_AGP dhcpcd5
@@ -832,29 +798,29 @@ _EOF_
 
 			#-------------------------------------------------------------------------------
 			# Encrypt and secure GLOBAL_PW used by DietPi-Software: https://github.com/MichaIng/DietPi/issues/2021
-			if [[ ! -r '/var/lib/dietpi/dietpi-software/.GLOBAL_PW.bin' ]]; then
+			if [[ ! -f '/var/lib/dietpi/dietpi-software/.GLOBAL_PW.bin' ]]; then
 
-				local pw_dietpi_software=$(grep -m1 '^[[:blank:]]*AUTO_SETUP_GLOBAL_PASSWORD=' /boot/dietpi.txt | sed 's/^[^=]*=//')
-				# - Failsafe, should never occur.
+				local pw_dietpi_software=$(sed -n '/^[[:blank:]]*AUTO_SETUP_GLOBAL_PASSWORD=/{s/^[^=]*=//p;q}' /boot/dietpi.txt)
+				# Failsafe, should never occur
 				[[ $pw_dietpi_software ]] || pw_dietpi_software='dietpi'
 
 				G_CONFIG_INJECT 'AUTO_SETUP_GLOBAL_PASSWORD=' 'AUTO_SETUP_GLOBAL_PASSWORD=Password has been encrypted and secured on rootFS' /boot/dietpi.txt
 
 				mkdir -p /var/lib/dietpi/dietpi-software # Should already exist, failsafe
 
-				# - Use new "pbkdf2" function on Buster to resolve warning about deprecated key derivation used: https://github.com/MichaIng/DietPi/issues/2213
-				local pbkdf2=''
+				# Use new "pbkdf2" function on Buster to resolve warning about deprecated key derivation used: https://github.com/MichaIng/DietPi/issues/2213
+				local pbkdf2=
 				(( $G_DISTRO > 4 )) && pbkdf2='-iter 10000'
 				openssl enc -e -a -md sha256 -aes-256-cbc $pbkdf2 -salt -pass pass:'DietPiRocks!' -out /var/lib/dietpi/dietpi-software/.GLOBAL_PW.bin <<< $pw_dietpi_software
 
-				unset pw_dietpi_software
+				unset pw_dietpi_software pbkdf2
 
 			fi
 			chown root:root /var/lib/dietpi/dietpi-software/.GLOBAL_PW.bin
 			chmod 600 /var/lib/dietpi/dietpi-software/.GLOBAL_PW.bin
 			#-------------------------------------------------------------------------------
 			# BruteFIR removal
-			sed -i '/^aSOFTWARE_INSTALL_STATE\[38\]=/c\aSOFTWARE_INSTALL_STATE\[38\]=0' /boot/dietpi/.installed &> /dev/null
+			[[ -f '/boot/dietpi/.installed' ]] && sed -i '/^aSOFTWARE_INSTALL_STATE\[38\]=/c\aSOFTWARE_INSTALL_STATE\[38\]=0' /boot/dietpi/.installed
 			#-------------------------------------------------------------------------------
 			# Recreate machine-id: https://github.com/MichaIng/DietPi/issues/2015
 			rm -f /{etc,var/lib/dbus}/machine-id
@@ -873,7 +839,7 @@ _EOF_
 			# Reinstalls:
 			# v6.17 MPD: https://github.com/MichaIng/DietPi/issues/2032#issuecomment-415559451
 			# 	PlexPy: https://github.com/MichaIng/DietPi/issues/2047
-			(( $G_DIETPI_INSTALL_STAGE == 2 )) && /boot/dietpi/dietpi-software reinstall 146
+			(( $G_DIETPI_INSTALL_STAGE == 2 )) && echo 146 >> /var/tmp/dietpi/dietpi-update_reinstalls
 			#-------------------------------------------------------------------------------
 			# Update DietPi-Sync save file to new format
 			if [[ -f '/boot/dietpi/.dietpi-sync_settings' ]] && ! grep -q '^FP_SOURCE=' /boot/dietpi/.dietpi-sync_settings; then
@@ -918,7 +884,7 @@ _EOF_
 			fi
 			#-------------------------------------------------------------------------------
 			# Fix rare WiFi interface start issue: https://github.com/MichaIng/DietPi/issues/2074
-			sed -i '\|^[[:blank:]]ifconfig "$IFACE" up$|c\\t/sbin/ip link set dev "$IFACE" up' /etc/network/if-pre-up.d/wireless-tools &> /dev/null
+			[[ -f '/etc/network/if-pre-up.d/wireless-tools' ]] && sed -i '\|^[[:blank:]]ifconfig "$IFACE" up$|c\\t/sbin/ip link set dev "$IFACE" up' /etc/network/if-pre-up.d/wireless-tools
 			#-------------------------------------------------------------------------------
 
 		elif (( $G_DIETPI_VERSION_SUB == 16 )); then
@@ -1031,7 +997,7 @@ We strongly recommend you select "0 : Re-enable IPv6 on kernel level". By doing 
 			chmod +x /var/lib/dietpi/services/dietpi-wifi-monitor.sh
 			#-------------------------------------------------------------------------------
 			# Remove obsolete EMR patch file and redo removal of obsolete script files, as they were not removed from disk: https://github.com/MichaIng/DietPi/pull/2123#issuecomment-428121908
-			for i in /boot/dietpi
+			for i in /boot/dietpi/*
 			do
 
 				[[ -f $i/dietpi-obtain_hw_model ]] && rm $i/dietpi-obtain_hw_model
@@ -1054,8 +1020,7 @@ We strongly recommend you select "0 : Re-enable IPv6 on kernel level". By doing 
 			if [[ -f '/etc/init.d/mysql' ]]; then
 
 				G_DIETPI-NOTIFY 2 'Switching from /etc/init.d/mysql to mariadb.service'
-				killall -w mariadb &> /dev/null # failsafe
-				killall -w mysqld &> /dev/null # failsafe
+				killall -qw mariadb mysqld # Failsafe
 				systemctl disable --now mysql
 				rm /etc/init.d/mysql
 				update-rc.d -f mysql remove
@@ -1071,7 +1036,7 @@ We strongly recommend you select "0 : Re-enable IPv6 on kernel level". By doing 
 
 			fi
 			#-------------------------------------------------------------------------------
-			#Reinstalls:
+			# Reinstalls:
 			# v6.25	OMPD: https://github.com/MichaIng/DietPi/issues/2156#issue-372201367
 			# v6.25	myMPD: https://github.com/MichaIng/DietPi/issues/2156#issue-372201367
 			#	RoonBridge: https://community.roonlabs.com/t/dietpi-allo-units-not-getting-the-roonbridge-b167-update-from-b164/52503/10?u=dan_knight
@@ -1079,7 +1044,7 @@ We strongly recommend you select "0 : Re-enable IPv6 on kernel level". By doing 
 			#	Mosquitto: https://github.com/MichaIng/DietPi/issues/2243#issuecomment-439492463
 			if (( $G_DIETPI_INSTALL_STAGE == 2 )); then
 
-				/boot/dietpi/dietpi-software reinstall 106 121 123 144 145
+				echo 106 121 123 144 145 >> /var/tmp/dietpi/dietpi-update_reinstalls
 				# - Switch to "mariadb" systemd service on Stretch+: https://github.com/MichaIng/DietPi/pull/2196
 				if grep -q '^aSOFTWARE_INSTALL_STATE\[88\]=2' /boot/dietpi/.installed; then
 
@@ -1138,9 +1103,9 @@ You will not face any practical differences, since both services start the same 
 			#	- Move to v6.19 => v6.20 patch for users, which update directly from v6.19.5 to v6.20
 			#grep -q 'include /etc/nginx/sites-dietpi/\*\.config;' /etc/nginx/sites-available/default &> /dev/null && G_CONFIG_INJECT 'include /etc/nginx/sites-dietpi/\*\.config;' 'include /etc/nginx/sites-dietpi/*.conf;' /etc/nginx/sites-available/default
 			# - Kodi input rules
-			[[ -f /etc/udev/rules.d/99-input.rules ]] && mv /etc/udev/rules.d/99-input.rules /etc/udev/rules.d/99-dietpi-kodi.rules
+			[[ -f '/etc/udev/rules.d/99-input.rules' ]] && mv /etc/udev/rules.d/99-input.rules /etc/udev/rules.d/99-dietpi-kodi.rules
 			#-------------------------------------------------------------------------------
-			#Asus TB 2.0.8 image, fix corrupt characters in desktops
+			# Asus TB 2.0.8 image, fix corrupt characters in desktops
 			if (( $G_HW_MODEL == 52 )) && dpkg --get-selections | grep -q 'fonts-dejavu-core'; then
 
 				G_AGI --reinstall libfreetype6 fonts-dejavu-core
@@ -1157,7 +1122,7 @@ You will not face any practical differences, since both services start the same 
 			# v6.27	GMrender: Due to Allo GUI service enable failure.
 			#	Xorg: XU4 conf
 			#	Pydio: https://github.com/MichaIng/DietPi/issues/2308
-			(( $G_DIETPI_INSTALL_STAGE == 2 )) && /boot/dietpi/dietpi-software reinstall 6 48 113
+			(( $G_DIETPI_INSTALL_STAGE == 2 )) && echo 6 48 113 >> /var/tmp/dietpi/dietpi-update_reinstalls
 			#-------------------------------------------------------------------------------
 
 		elif (( $G_DIETPI_VERSION_SUB == 19 )); then
@@ -1206,7 +1171,7 @@ You will not face any practical differences, since both services start the same 
 			# v6.27	Grafana: https://github.com/MichaIng/DietPi/issues/2449
 			if (( $G_DIETPI_INSTALL_STAGE == 2 )); then
 
-				/boot/dietpi/dietpi-software reinstall 37 65 124 128 131
+				echo 37 65 124 128 131 >> /var/tmp/dietpi/dietpi-update_reinstalls
 
 				# Samba: Link disk cache to RAM: https://github.com/MichaIng/DietPi/issues/2396
 				if grep -q '^aSOFTWARE_INSTALL_STATE\[96\]=2' /boot/dietpi/.installed; then
@@ -1288,11 +1253,7 @@ Also have a look at "Sonarr", another alternative TV show manager, available for
 				fi
 
 				# Apply new headless mode method, if set
-				if grep -q '^[[:blank:]]*CONFIG_HDMI_OUTPUT=0' /boot/dietpi.txt; then
-
-					/boot/dietpi/func/dietpi-set_hardware headless 1
-
-				fi
+				grep -q '^[[:blank:]]*CONFIG_HDMI_OUTPUT=0' /boot/dietpi.txt && /boot/dietpi/func/dietpi-set_hardware headless 1
 
 				# Renamed to: AUTO_SETUP_HEADLESS (added by verify_dietpi.txt automatically)
 				sed -i '/CONFIG_HDMI_OUTPUT/d' /boot/config.txt
@@ -1370,8 +1331,7 @@ Do you still want to keep "p7zip-full"?'; then
 			fi
 			#-------------------------------------------------------------------------------
 			# Fix rc-local.service from old images to match new systemd-rc-local-generator: https://github.com/MichaIng/DietPi/issues/2566
-			systemctl disable rc-local &> /dev/null
-			systemctl disable rc.local &> /dev/null
+			systemctl disable rc-local rc.local
 			grep -q 'dietpi' /lib/systemd/system/rc-local.service && cat << _EOF_ > /lib/systemd/system/rc-local.service
 #  This file is part of systemd.
 #
@@ -1479,7 +1439,7 @@ NB: When accessing "deluge-console" you need to do that as user "debian-deluged"
 
 				fi
 
-				/boot/dietpi/dietpi-software reinstall $reinstall_indices
+				echo $reinstall_indices >> /var/tmp/dietpi/dietpi-update_reinstalls
 
 			fi
 			#-------------------------------------------------------------------------------
@@ -1643,7 +1603,7 @@ NBB: Reinstall manually installed PHP modules via: G_AGI $PHP_NAME-<mod_name>"
 					rm -R /opt/jackett/.config
 
 				fi
-				/boot/dietpi/dietpi-software reinstall 34 35 42 139 $upgrade_php
+				echo 34 35 42 139 $upgrade_php >> /var/tmp/dietpi/dietpi-update_reinstalls
 				#-----------------------------------------------------------------------
 				# Remove old PHP version
 				if [[ $upgrade_php ]]; then
@@ -1827,7 +1787,7 @@ A backup will be created to "/etc/mympd/mympd.conf.bak_DDMMYYY_N" from where you
 					[[ -f '/lib/systemd/system/mympd.service' ]] && rm /lib/systemd/system/mympd.service
 
 				fi
-				/boot/dietpi/dietpi-software reinstall 129 148 165
+				echo 129 148 165 >> /var/tmp/dietpi/dietpi-update_reinstalls
 
 			fi
 			#-------------------------------------------------------------------------------
@@ -2078,7 +2038,7 @@ Would you like to switch back to the Nginx authentication method now?' && certbo
 
 				fi
 				# Webmin: https://github.com/MichaIng/DietPi/commit/ec55d49a488fd9cb1dbb18cbfa067b5d1d1a974e
-				/boot/dietpi/dietpi-software reinstall 115 132
+				echo 115 132 >> /var/tmp/dietpi/dietpi-update_reinstalls
 
 			fi
 			#-------------------------------------------------------------------------------
@@ -2220,7 +2180,7 @@ _EOF_
 				fi
 				grep -q '^aSOFTWARE_INSTALL_STATE\[163\]=2' /boot/dietpi/.installed && G_AGP gmrender gmediarender
 				grep -q '^aSOFTWARE_INSTALL_STATE\[90\]=2' /boot/dietpi/.installed && { G_AGP phpmyadmin; G_AGA; }
-				/boot/dietpi/dietpi-software reinstall 50 77 90 108 147 160 163
+				echo 50 77 90 108 147 160 163 >> /var/tmp/dietpi/dietpi-update_reinstalls
 
 			fi
 			#-------------------------------------------------------------------------------
@@ -2387,12 +2347,24 @@ To reinstall now, run: "dietpi-software reinstall 106 144 145"
 					update-rc.d -f haproxy remove
 
 				fi
-				/boot/dietpi/dietpi-software reinstall 98
+				echo 98 >> /var/tmp/dietpi/dietpi-update_reinstalls
 
 			fi
 			#-------------------------------------------------------------------------------
-			# Reload systemd once after all patches have been applied
+			# Last subversion patch completed
+			# - Apply reinstalls
+			if [[ -f '/var/tmp/dietpi/dietpi-update_reinstalls' ]]; then
+
+				/boot/dietpi/dietpi-software reinstall $(</var/tmp/dietpi/dietpi-update_reinstalls) || exit 1
+				rm /var/tmp/dietpi/dietpi-update_reinstalls
+
+			fi
+			# - Autoremove all marked packages during all patches with a single final call
+			G_AGA
+			# - Reload systemd
 			systemctl daemon-reload
+			# - Exit loop
+			FINISHED=1
 			#-------------------------------------------------------------------------------
 
 		fi
@@ -2403,8 +2375,20 @@ To reinstall now, run: "dietpi-software reinstall 106 144 145"
 	}
 
 	#-------------------------------------------------------------------------------
-	# Run
-	Incremental_Patch_System
+	# Apply subversion patches incrementally
+	FINISHED=0
+	# Store RC version "0" during incremental patching. DietPi-Update applies final RC version afterwards.
+	G_DIETPI_VERSION_RC=0
+	until (( $FINISHED ))
+	do
+
+		G_DIETPI-NOTIFY 2 "Patching $G_DIETPI_VERSION_CORE.$G_DIETPI_VERSION_SUB to $G_DIETPI_VERSION_CORE.$(( $G_DIETPI_VERSION_SUB + 1 ))"
+		Subversion_Patch || exit 1
+		((G_DIETPI_VERSION_SUB++))
+		# Save reached version info
+		G_VERSIONDB_SAVE
+
+	done
 	#-------------------------------------------------------------------------------
 	exit 0
 	#-------------------------------------------------------------------------------
