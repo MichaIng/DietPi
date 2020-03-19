@@ -1105,6 +1105,7 @@ _EOF_
 		[[ -f '/boot/armbian_first_run.txt.template' ]] && rm -v /boot/armbian_first_run.txt.template
 		[[ -f '/usr/bin/armbianmonitor' ]] && rm -v /usr/bin/armbianmonitor
 		[[ -d '/etc/armbianmonitor' ]] && rm -Rv /etc/armbianmonitor
+		[[ -d '/var/lib/apt-xapian-index' ]] && rm  -Rv /var/lib/apt-xapian-index
 		[[ -f '/usr/local/sbin/log2ram' ]] && rm -v /usr/local/sbin/log2ram
 		umount /var/log.hdd 2> /dev/null
 		[[ -d '/var/log.hdd' ]] && rm -R /var/log.hdd
