@@ -1022,9 +1022,6 @@ _EOF_
 		# - Sourcecode (linux-headers etc)
 		[[ -d '/usr/src' ]] && rm -vRf /usr/src/{,.??,.[^.]}*
 
-		# - root/home
-		rm -Rfv /{root,home/*}/.{cache,local,config,gnupg,viminfo,dbus,gconf,nano,vim}
-
 		# - Documentation dirs: https://github.com/MichaIng/DietPi/issues/3259
 		#[[ -d '/usr/share/man' ]] && rm -vR /usr/share/man
 		#[[ -d '/usr/share/doc' ]] && rm -vR /usr/share/doc
@@ -1804,7 +1801,7 @@ _EOF_
 		G_RUN_CMD rmdir /mnt/tmp_root
 
 		G_DIETPI-NOTIFY 2 'Running general cleanup of misc files'
-		rm -fv /{root,home/*}/.{bash_history,nano_history,wget-hsts}
+		rm -Rfv /{root,home/*}/.{bash_history,nano_history,wget-hsts,cache,local,config,gnupg,viminfo,dbus,gconf,nano,vim}
 
 		# Remove PREP script
 		[[ -f $FP_PREP_SCRIPT ]] && rm -v $FP_PREP_SCRIPT
