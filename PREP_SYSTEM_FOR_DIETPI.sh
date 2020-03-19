@@ -1014,6 +1014,7 @@ _EOF_
 		[[ -d '/media' ]] && rm -vR /media
 		[[ -d '/selinux' ]] && rm -vR /selinux
 		[[ -d '/var/cache/apparmor' ]] && rm -vR /var/cache/apparmor
+		rm -Rfv /var/lib/dhcp/{,.??,.[^.]}*
 		rm -Rfv /var/backups/{,.??,.[^.]}*
 
 		# - www
