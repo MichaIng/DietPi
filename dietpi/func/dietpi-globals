@@ -893,6 +893,204 @@ $(ps f -eo pid,user,tty,cmd | grep -i '[d]ietpi')"; then
 	}
 
 	#-----------------------------------------------------------------------------------
+	# Error handled command execution wrapper
+	#-----------------------------------------------------------------------------------
+	# Required input:
+	# - $1=<command>		| Command to executed
+	# Optional input:
+	# - $G_EXEC_OUTPUT=1		| Print full command output instead of animated processing message
+	# - $G_EXEC_DESC=<text>		| Command description to print instead of raw command string
+	# - $G_EXEC_NOFAIL=1		| On error, override as success, only useful to replace verbose output by animated processing message, inherits $G_EXEC_NOHALT=1 and $G_EXEC_NOEXIT=1
+	# - $G_EXEC_NOHALT=1		| On error, print short error message only, skip error handler menu and do not exit script, inherits $G_EXEC_NOEXIT=1
+	# - $G_EXEC_NOEXIT=1		| On error, do not exit script, inherited by $G_EXEC_NOHALT=1
+	# - $G_EXEC_ARRAY_TEXT[]	| Add additional entries to error handler menu
+	# - $G_ECEC_ARRAY_ACTION[]	| Associative array, containing uneven $G_EXEC_ARRAY_TEXT[] values as keys and related commands as values
+	G_EXEC(){
+
+		local exit_code fp_log='/tmp/G_EXEC_LOG'
+
+		# Enter retry loop
+		while :
+		do
+
+			# Execute command, store output to $fp_log file and store exit code to $exit_code variable
+			# - Print full command output if $G_EXEC_OUTPUT=1 is given
+			if [[ $G_EXEC_OUTPUT == 1 ]]; then
+
+				# Print $G_EXEC_DESC if given, else raw input command string
+				G_DIETPI-NOTIFY 2 "${G_EXEC_DESC:-$*}"
+				"$@" 2>&1 | tee $fp_log
+				exit_code=${PIPESTATUS[0]}
+
+			# - Else print animated processing message only
+			else
+
+				G_DIETPI-NOTIFY -2 "${G_EXEC_DESC:-$*}"
+				"$@" &> $fp_log
+				exit_code=$?
+
+			fi
+
+			# Override exit code if $G_EXEC_NOFAIL=1 is given
+			[[ $G_EXEC_NOFAIL == 1 ]] && exit_code=0
+
+			### Success: Print OK and exit retry loop
+			[[ $exit_code == 0 ]] && { G_DIETPI-NOTIFY 0 "${G_EXEC_DESC:-$*}"; break; }
+
+			### Error: Print FAILED, append raw command string if $G_EXEC_DESC is given
+			G_DIETPI-NOTIFY 1 "${G_EXEC_DESC:+$G_EXEC_DESC\n - Command: }$*"
+
+			# Exit retry loop if $G_EXEC_NOHALT=1 is given
+			[[ $G_EXEC_NOHALT == 1 ]] && break
+
+			# Prepare error handler menu and GitHub issue template
+			local fp_error_report='/tmp/G_EXEC_ERROR_REPORT' log_content=$(<$fp_log) image_creator preimage_name dietpi_version="v$G_DIETPI_VERSION_CORE.$G_DIETPI_VERSION_SUB.$G_DIETPI_VERSION_RC ($G_GITOWNER/$G_GITBRANCH)" last_whip_menu_item sent_bug_report
+			if [[ -f '/boot/dietpi/.prep_info' ]]; then
+
+				image_creator=$(mawk 'NR==1' /boot/dietpi/.prep_info)
+				[[ $image_creator == 0 ]] && image_creator='DietPi Core Team'
+				preimage_name=$(mawk 'NR==2' /boot/dietpi/.prep_info)
+
+			fi
+
+			# Create GitHub issue template if error was produced by one of our scripts
+			[[ ${G_PROGRAM_NAME,,} == 'dietpi-'* ]] && echo -e "\e[41m\
+---------------------------------------------------------------------
+- DietPi has encountered an error                                   -
+- Please create a ticket: https://github.com/MichaIng/DietPi/issues -
+- Copy and paste only the BLUE lines below into the ticket          -
+---------------------------------------------------------------------
+\e[44m#### Details:
+- Date           | $(date)
+- DietPi version | $dietpi_version
+- Image creator  | $image_creator
+- Pre-image      | $preimage_name
+- Hardware       | $G_HW_MODEL_NAME (ID=$G_HW_MODEL)
+- Kernel version | $(uname -a)
+- Distro         | $G_DISTRO_NAME (ID=$G_DISTRO)
+- Command        | $*
+- Exit code      | $exit_code
+- Software title | $G_PROGRAM_NAME
+#### Steps to reproduce:
+<!-- Explain how to reproduce the issue -->
+1. ...
+2. ...
+#### Expected behaviour:
+<!-- What SHOULD happen? -->
+- ...
+#### Actual behaviour:
+<!-- What IS happening? -->
+- ...
+#### Extra details:
+<!-- Please post any extra details that might help solve the issue -->
+- ...
+#### Additional logs:
+\`\`\`
+$log_content
+\`\`\`\e[41m
+---------------------------------------------------------------------\e[0m" > $fp_error_report
+
+			# Enter error handler menu loop if not $G_INTERACTIVE=0 is given
+			[[ $G_INTERACTIVE == 0 ]] || while :
+			do
+
+				G_WHIP_MENU_ARRAY=('Retry' ': Re-run the last command that failed')
+				# Add targeted solution suggestions, passed via $G_EXEC_ARRAY_TEXT[] and $G_EXEC_ARRAY_ACTION[${G_EXEC_ARRAY_TEXT[]}]
+				[[ $G_EXEC_ARRAY_TEXT ]] && G_WHIP_MENU_ARRAY+=("${G_EXEC_ARRAY_TEXT[@]}")
+				# Allow to open DietPi-Config if this error was not produced within DietPi-Config
+				pgrep -cf 'dietpi-config' &> /dev/null || G_WHIP_MENU_ARRAY+=('DietPi-Config' ': Edit network, APT/NTP mirror settings etc')
+				G_WHIP_MENU_ARRAY+=('Open subshell' ': Open a subshell to investigate or solve the issue')
+				# Allow to send bug report, if it was produced by one of our scripts
+				[[ ${G_PROGRAM_NAME,,} == 'dietpi-'* ]] && G_WHIP_MENU_ARRAY+=('Send report' ': Uploads bugreport containing system info to DietPi')
+				G_WHIP_MENU_ARRAY+=('' '●─ Devs only ')
+				G_WHIP_MENU_ARRAY+=('Change command' ': Adjust and rerun the command')
+
+				# Show "Ignore" on cancel button if $G_EXEC_NOEXIT=1 is given, else "Exit"
+				[[ $G_EXEC_NOEXIT == 1 ]] && G_WHIP_BUTTON_CANCEL_TEXT='Ignore' || G_WHIP_BUTTON_CANCEL_TEXT='Exit'
+				G_WHIP_DEFAULT_ITEM=${last_whip_menu_item:-Retry}
+				G_WHIP_MENU "${G_EXEC_DESC:+$G_EXEC_DESC\n} - Command: $*
+ - Exit code: $exit_code
+ - DietPi version: $dietpi_version | HW_MODEL: $G_HW_MODEL | HW_ARCH: $G_HW_ARCH | DISTRO: $G_DISTRO
+${image_creator:+ - Image creator: $image_creator\n}${preimage_name:+ - Pre-image: $preimage_name\n} - Error log:
+$log_content" || break # Exit error handler menu loop on cancel
+
+				last_whip_menu_item=$G_WHIP_RETURNED_VALUE
+
+				if [[ $G_WHIP_RETURNED_VALUE == 'Retry' ]]; then
+
+					# Continue retry loop
+					continue 2
+
+				elif [[ $G_WHIP_RETURNED_VALUE == 'DietPi-Config' ]]; then
+
+					/boot/dietpi/dietpi-config
+
+				elif [[ $G_WHIP_RETURNED_VALUE == 'Open subshell' ]]; then
+
+					G_WHIP_MSG 'A bash subshell will now open which allows you to investigate and/or fix the issue.
+\nPlease use the "exit" command when you are finished, to return to this error handler menu.'
+					bash
+
+				elif [[ $G_WHIP_RETURNED_VALUE == 'Send report' ]]; then
+
+					killall -qw dietpi-bugreport
+					/boot/dietpi/dietpi-bugreport 1
+					sent_bug_report=1
+
+				elif [[ $G_WHIP_RETURNED_VALUE == 'Change command' ]]; then
+
+					G_WHIP_DEFAULT_ITEM=$*
+					if G_WHIP_INPUTBOX 'Please enter/alter the command to be executed.
+\nNB: Please only use this solution if you know for sure that it will not cause follow up issues from the originating script. It will e.g. allow you to continue a certain software install, but if you edit the download link, the originating script might expect files which are not present.
+\nUse this work caution!'; then
+
+						G_DIETPI-NOTIFY 2 "Executing alternative command: $G_WHIP_RETURNED_VALUE"
+						$G_WHIP_RETURNED_VALUE
+						exit_code=$?
+						G_DIETPI-NOTIFY -1 $exit_code 'Alternative command execution |'
+						# Exit retry loop if alternative command succeeded, else stay in menu loop and wait for key press to allow reviewing alternative command output
+						[[ $exit_code == 0 ]] && break 2 || read -p 'Press any key to return to error handler menu...'
+
+					fi
+
+				# Attempt targeted solution, passed via $G_EXEC_ARRAY_TEXT[] and $G_EXEC_ARRAY_ACTION[${G_EXEC_ARRAY_TEXT[]}]
+				elif [[ $G_WHIP_RETURNED_VALUE ]]; then
+
+					${G_EXEC_ARRAY_ACTION[$G_WHIP_RETURNED_VALUE]}
+					read -p 'Press any key to return to error handler menu...'
+
+				fi
+
+			done
+
+			# Error has not been solved, print GitHub issue template if it was produced and exit error handler menu loop
+			if [[ -f $fp_error_report ]]; then
+
+				# Add bug report ID if it was sent
+				[[ $sent_bug_report == 1 ]] && sed -i "/^- Date           | /a\- Bug report     | $G_HW_UUID" $fp_error_report
+				cat $fp_error_report
+
+			fi
+			break
+
+		done
+
+		# Cleanup
+		rm -f $fp_log $fp_error_report
+		# - Do not exit originating script if $G_EXEC_NOEXIT=1 or $G_EXEC_NOHALT=1 is given
+		local noexit
+		[[ $G_EXEC_NOEXIT == 1 || $G_EXEC_NOHALT == 1 ]] && noexit=1
+		unset G_EXEC_OUTPUT G_EXEC_DESC G_EXEC_NOFAIL G_EXEC_NOHALT G_EXEC_ARRAY_TEXT G_EXEC_ARRAY_ACTION G_EXEC_NOEXIT
+
+		# In case of unresolved error when exiting originating script, inform user and kill via SIGINT to prevent exiting from interactive shell session
+		[[ $exit_code == 0 || $noexit == 1 ]] || { G_DIETPI-NOTIFY 1 "Unable to continue, ${G_PROGRAM_NAME:-command} will now terminate."; kill -INT $$; }
+
+		# Else return exit code
+		return $exit_code
+
+	}
+
+	#-----------------------------------------------------------------------------------
 	# DietPi Error Handler
 	# https://github.com/MichaIng/DietPi/issues/1311#issuecomment-353716344
 	#-----------------------------------------------------------------------------------
