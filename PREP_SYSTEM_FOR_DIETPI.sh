@@ -674,35 +674,26 @@ Currently installed: $G_DISTRO_NAME (ID: $G_DISTRO)"; then
 
 		G_EXEC apt-mark auto $(apt-mark showmanual)
 
-		# @MichaIng https://github.com/MichaIng/DietPi/pull/1266/files
-		G_DIETPI-NOTIFY 2 'Disable automatic recommends/suggests install and allow them to be autoremoved:'
-
-		# - Remove any existing APT recommends settings
-		rm -f /etc/apt/apt.conf.d/*recommends*
-
-		G_ERROR_HANDLER_COMMAND='/etc/apt/apt.conf.d/99-dietpi-norecommends'
-		cat << _EOF_ > $G_ERROR_HANDLER_COMMAND
+		G_EXEC_DESC='Disable automatic recommends/suggests install and allow them to be autoremoved'
+		# Remove existing/conflicting files first
+		rm -fv /etc/apt/apt.conf.d/*recommends*
+		G_EXEC eval 'cat << _EOF_ > /etc/apt/apt.conf.d/99-dietpi-norecommends
 APT::Install-Recommends "false";
 APT::Install-Suggests "false";
 APT::AutoRemove::RecommendsImportant "false";
 APT::AutoRemove::SuggestsImportant "false";
-_EOF_
-		G_ERROR_HANDLER_EXITCODE=$?
-		G_ERROR_HANDLER
+_EOF_'
 
 		G_DIETPI-NOTIFY 2 'Disable package state translation downloads'
 		echo 'Acquire::Languages "none";' > /etc/apt/apt.conf.d/98-dietpi-no_translations
 
-		G_DIETPI-NOTIFY 2 'Preserve modified config files on APT update:'
-		G_ERROR_HANDLER_COMMAND='/etc/apt/apt.conf.d/99-dietpi-forceconf'
-		cat << _EOF_ > $G_ERROR_HANDLER_COMMAND
+		G_EXEC_DESC='Preserve modified config files on APT update'
+		G_EXEC eval 'cat << _EOF_ > /etc/apt/apt.conf.d/99-dietpi-forceconf
 Dpkg::options {
    "--force-confdef";
    "--force-confold";
 }
-_EOF_
-		G_ERROR_HANDLER_EXITCODE=$?
-		G_ERROR_HANDLER
+_EOF_'
 
 		# DietPi list of minimal required packages, which must be installed:
 		aPACKAGES_REQUIRED_INSTALL=(
@@ -1224,10 +1215,8 @@ _EOF_
 
 		#-----------------------------------------------------------------------------------
 		# Cron jobs
-		G_DIETPI-NOTIFY 2 'Configuring Cron:'
-
-		G_ERROR_HANDLER_COMMAND='/etc/crontab'
-		cat << _EOF_ > $G_ERROR_HANDLER_COMMAND
+		G_EXEC_DESC='Configuring Cron'
+		G_EXEC eval 'cat << _EOF_ > /etc/crontab
 # Please use dietpi-cron to change cron start times
 SHELL=/bin/dash
 PATH=/usr/local/sbin:/usr/local/bin:/sbin:/bin:/usr/sbin:/usr/bin
@@ -1239,9 +1228,7 @@ MAILTO=""
 25 1 * * * root test -x /usr/sbin/anacron || { cd / && run-parts --report /etc/cron.daily; }
 47 1 * * 7 root test -x /usr/sbin/anacron || { cd / && run-parts --report /etc/cron.weekly; }
 52 1 1 * * root test -x /usr/sbin/anacron || { cd / && run-parts --report /etc/cron.monthly; }
-_EOF_
-		G_ERROR_HANDLER_EXITCODE=$?
-		G_ERROR_HANDLER
+_EOF_'
 
 		#-----------------------------------------------------------------------------------
 		# Network
@@ -1270,10 +1257,9 @@ _EOF_
 		# ifupdown starts the daemon outside of systemd, the enabled systemd unit just thows an error on boot due to missing dbus and with dbus might interfere with ifupdown
 		systemctl disable wpa_supplicant 2> /dev/null && G_DIETPI-NOTIFY 2 'Disabled non-required wpa_supplicant systemd unit'
 
-		G_DIETPI-NOTIFY 2 'Configuring network interfaces:'
 		[[ -L '/etc/network/interfaces' ]] && rm -v /etc/network/interfaces # ARMbian symlink for bulky network-manager
-		G_ERROR_HANDLER_COMMAND='/etc/network/interfaces'
-		cat << _EOF_ > $G_ERROR_HANDLER_COMMAND
+		G_EXEC_DESC='Configuring network interfaces'
+		G_EXEC eval 'cat << _EOF_ > /etc/network/interfaces
 # Location: /etc/network/interfaces
 # Please modify network settings via: dietpi-config
 # Or create your own drop-ins in: /etc/network/interfaces.d/
@@ -1302,10 +1288,7 @@ gateway 192.168.0.1
 wireless-power off
 wpa-conf /etc/wpa_supplicant/wpa_supplicant.conf
 #dns-nameservers 9.9.9.9 149.112.112.112
-_EOF_
-		G_ERROR_HANDLER_EXITCODE=$?
-		G_ERROR_HANDLER
-
+_EOF_'
 		#-----------------------------------------------------------------------------------
 		# MISC
 		G_DIETPI-NOTIFY 2 'Disabling apt-daily services to prevent random APT cache lock'
@@ -1356,22 +1339,18 @@ _EOF_
 		G_CONFIG_INJECT 'timeout[[:blank:]]' 'timeout 10;' /etc/dhcp/dhclient.conf
 		G_CONFIG_INJECT 'retry[[:blank:]]' 'retry 4;' /etc/dhcp/dhclient.conf
 
-		G_DIETPI-NOTIFY 2 'Configuring hostname and hosts:'
 		echo 'DietPi' > /etc/hostname
-		G_ERROR_HANDLER_COMMAND='/etc/hosts'
-		cat << _EOF_ > $G_ERROR_HANDLER_COMMAND
+		G_EXEC_DESC='Configuring hostname and hosts'
+		G_EXEC eval 'cat << _EOF_ > /etc/hosts
 127.0.0.1 localhost
 127.0.1.1 DietPi
 ::1 localhost ip6-localhost ip6-loopback
 ff02::1 ip6-allnodes
 ff02::2 ip6-allrouters
-_EOF_
-		G_ERROR_HANDLER_EXITCODE=$?
-		G_ERROR_HANDLER
+_EOF_'
 
-		G_DIETPI-NOTIFY 2 'Configuring htop:'
-		G_ERROR_HANDLER_COMMAND='/etc/htoprc'
-		cat << _EOF_ > $G_ERROR_HANDLER_COMMAND
+		G_EXEC_DESC='Configuring htop'
+		G_EXEC eval 'cat << _EOF_ > /etc/htoprc
 # DietPi default config for htop
 # Location: /etc/htoprc
 # NB: htop will create "~/.config/htop/htoprc" per-user based on this defaults, when opened the first time.
@@ -1400,9 +1379,7 @@ left_meters=AllCPUs CPU
 left_meter_modes=1 1
 right_meters=Memory Swap Tasks LoadAverage Uptime
 right_meter_modes=1 1 2 2 2
-_EOF_
-		G_ERROR_HANDLER_EXITCODE=$?
-		G_ERROR_HANDLER
+_EOF_'
 
 		G_DIETPI-NOTIFY 2 'Configuring fake-hwclock:'
 		systemctl stop fake-hwclock
@@ -1487,17 +1464,14 @@ _EOF_
 		G_DIETPI-NOTIFY 2 'Applying G_HW_MODEL specific tweaks:'
 		if (( $G_HW_MODEL != 20 )); then
 
-			G_DIETPI-NOTIFY 2 'Configuring hdparm:'
+			G_EXEC_DESC='Configuring hdparm'
 			# Since Debian Bullseye, spindown_time is not applied if APM is not supported by the drive. force_spindown_time is required to override that.
 			local spindown='spindown_time'
 			(( $G_DISTRO > 5 )) && spindown='force_spindown_time'
-			G_ERROR_HANDLER_COMMAND='/etc/hdparm.conf'
-			cat << _EOF_ > $G_ERROR_HANDLER_COMMAND
+			G_EXEC eval 'cat << _EOF_ > /etc/hdparm.conf
 apm = 127
 $spindown = 120
-_EOF_
-			G_ERROR_HANDLER_EXITCODE=$?
-			G_ERROR_HANDLER
+_EOF_'
 			unset spindown
 
 		fi
