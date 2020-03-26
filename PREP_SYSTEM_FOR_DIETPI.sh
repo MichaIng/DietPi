@@ -603,34 +603,34 @@ Currently installed: $G_DISTRO_NAME (ID: $G_DISTRO)"; then
 
 		local url="https://github.com/$G_GITOWNER/DietPi/archive/$G_GITBRANCH.tar.gz"
 		G_CHECK_URL "$url"
-		l_message='Downloading DietPi sourcecode' G_RUN_CMD curl -sSL "$url" -o package.tar.gz
+		G_EXEC_DESC='Downloading DietPi sourcecode' G_EXEC curl -sSL "$url" -o package.tar.gz
 
-		[[ -d DietPi-$G_GITBRANCH ]] && l_message='Cleaning previously extracted files' G_RUN_CMD rm -R "DietPi-$G_GITBRANCH"
-		l_message='Extracting DietPi sourcecode' G_RUN_CMD tar xf package.tar.gz
+		[[ -d DietPi-$G_GITBRANCH ]] && G_EXEC_DESC='Cleaning previously extracted files' G_EXEC rm -R "DietPi-$G_GITBRANCH"
+		G_EXEC_DESC='Extracting DietPi sourcecode' G_EXEC tar xf package.tar.gz
 		rm package.tar.gz
 
-		[[ -d '/boot' ]] || l_message='Creating /boot' G_RUN_CMD mkdir -p /boot
+		[[ -d '/boot' ]] || G_EXEC_DESC='Creating /boot' G_EXEC mkdir -p /boot
 
 		G_DIETPI-NOTIFY 2 'Moving kernel and boot configuration to /boot'
 
 		# HW specific config.txt, boot.ini uEnv.txt
 		if (( $G_HW_MODEL < 10 )); then
 
-			G_RUN_CMD mv "DietPi-$G_GITBRANCH/config.txt" /boot/
+			G_EXEC mv "DietPi-$G_GITBRANCH/config.txt" /boot/
 
 		elif (( $G_HW_MODEL == 11 )); then
 
-			G_RUN_CMD mv "DietPi-$G_GITBRANCH/boot_xu4.ini" /boot/boot.ini
+			G_EXEC mv "DietPi-$G_GITBRANCH/boot_xu4.ini" /boot/boot.ini
 
 		elif (( $G_HW_MODEL == 12 )); then
 
-			G_RUN_CMD mv "DietPi-$G_GITBRANCH/boot_c2.ini" /boot/boot.ini
+			G_EXEC mv "DietPi-$G_GITBRANCH/boot_c2.ini" /boot/boot.ini
 
 		fi
 
-		G_RUN_CMD mv "DietPi-$G_GITBRANCH/dietpi.txt" /boot/
-		G_RUN_CMD mv "DietPi-$G_GITBRANCH/README.md" /boot/dietpi-README.md
-		G_RUN_CMD mv "DietPi-$G_GITBRANCH/CHANGELOG.txt" /boot/dietpi-CHANGELOG.txt
+		G_EXEC mv "DietPi-$G_GITBRANCH/dietpi.txt" /boot/
+		G_EXEC mv "DietPi-$G_GITBRANCH/README.md" /boot/dietpi-README.md
+		G_EXEC mv "DietPi-$G_GITBRANCH/CHANGELOG.txt" /boot/dietpi-CHANGELOG.txt
 
 		# Reading version string for later use
 		G_DIETPI_VERSION_CORE=$(mawk 'NR==1' "DietPi-$G_GITBRANCH/dietpi/server_version-6")
@@ -642,12 +642,12 @@ Currently installed: $G_DISTRO_NAME (ID: $G_DISTRO)"; then
 		rm "DietPi-$G_GITBRANCH/dietpi/pre-patch_file"
 		rm "DietPi-$G_GITBRANCH/dietpi/patch_file"
 
-		l_message='Copy DietPi scripts to /boot/dietpi' G_RUN_CMD cp -Rf "DietPi-$G_GITBRANCH/dietpi" /boot/
-		l_message='Copy DietPi system files in place' G_RUN_CMD cp -Rf "DietPi-$G_GITBRANCH/rootfs"/. /
-		l_message='Clean download location' G_RUN_CMD rm -R "DietPi-$G_GITBRANCH"
-		l_message='Set execute permissions for DietPi scripts' G_RUN_CMD chmod -R +x /boot/dietpi /var/lib/dietpi/services /etc/cron.*/dietpi
+		G_EXEC_DESC='Copy DietPi scripts to /boot/dietpi' G_EXEC cp -Rf "DietPi-$G_GITBRANCH/dietpi" /boot/
+		G_EXEC_DESC='Copy DietPi system files in place' G_EXEC cp -Rf "DietPi-$G_GITBRANCH/rootfs"/. /
+		G_EXEC_DESC='Clean download location' G_EXEC rm -R "DietPi-$G_GITBRANCH"
+		G_EXEC_DESC='Set execute permissions for DietPi scripts' G_EXEC chmod -R +x /boot/dietpi /var/lib/dietpi/services /etc/cron.*/dietpi
 
-		G_RUN_CMD systemctl daemon-reload
+		G_EXEC systemctl daemon-reload
 
 		#------------------------------------------------------------------------------------------------
 		echo
@@ -659,20 +659,20 @@ Currently installed: $G_DISTRO_NAME (ID: $G_DISTRO)"; then
 		G_DIETPI-NOTIFY 2 "Setting APT sources.list: $DISTRO_TARGET_NAME $DISTRO_TARGET"
 
 		# We need to forward $DISTRO_TARGET* to dietpi-set_software, as well as $G_HW_MODEL for Debian vs Raspbian decision.
-		G_DISTRO=$DISTRO_TARGET G_DISTRO_NAME=$DISTRO_TARGET_NAME G_HW_MODEL=$G_HW_MODEL G_RUN_CMD /boot/dietpi/func/dietpi-set_software apt-mirror 'default'
+		G_DISTRO=$DISTRO_TARGET G_DISTRO_NAME=$DISTRO_TARGET_NAME G_HW_MODEL=$G_HW_MODEL G_EXEC /boot/dietpi/func/dietpi-set_software apt-mirror 'default'
 
 		# Meveric, update repo to use our EU mirror: https://github.com/MichaIng/DietPi/issues/1519#issuecomment-368234302
 		sed -Ei 's@https?://oph\.mdrjr\.net@http://fuzon.co.uk@' /etc/apt/sources.list.d/meveric* &> /dev/null
 
 		# (Re)create DietPi runtime and logs dir, used by G_AGx
-		G_RUN_CMD mkdir -p /run/dietpi /var/tmp/dietpi/logs
+		G_EXEC mkdir -p /run/dietpi /var/tmp/dietpi/logs
 
 		G_AGUP
 
 		# @MichaIng https://github.com/MichaIng/DietPi/pull/1266/files
 		G_DIETPI-NOTIFY 2 'Marking all packages as auto-installed first, to allow effective autoremove afterwards'
 
-		G_RUN_CMD apt-mark auto $(apt-mark showmanual)
+		G_EXEC apt-mark auto $(apt-mark showmanual)
 
 		# @MichaIng https://github.com/MichaIng/DietPi/pull/1266/files
 		G_DIETPI-NOTIFY 2 'Disable automatic recommends/suggests install and allow them to be autoremoved:'
@@ -948,7 +948,7 @@ _EOF_
 
 		G_DIETPI-NOTIFY 2 'Generating list of minimal packages, required for DietPi installation'
 
-		l_message='Marking required packages as manually installed' G_RUN_CMD apt-mark manual ${aPACKAGES_REQUIRED_INSTALL[@]}
+		G_EXEC_DESC='Marking required packages as manually installed' G_EXEC apt-mark manual ${aPACKAGES_REQUIRED_INSTALL[@]}
 
 		# Purging additional packages, that (in some cases) do not get autoremoved:
 		# - dbus: Not required for headless images, but sometimes marked as "important", thus not autoremoved.
@@ -1098,7 +1098,7 @@ _EOF_
 		for i in ${aservices[@]}
 		do
 
-			G_RUN_CMD update-rc.d -f $i remove
+			G_EXEC update-rc.d -f $i remove
 
 		done
 
@@ -1171,7 +1171,7 @@ _EOF_
 
 		#-----------------------------------------------------------------------------------
 		# Boot Logo
-		[[ -f '/boot/boot.bmp' ]] && G_RUN_CMD wget https://github.com/$G_GITOWNER/DietPi/raw/$G_GITBRANCH/.meta/images/dietpi-logo_boot.bmp -O /boot/boot.bmp
+		[[ -f '/boot/boot.bmp' ]] && G_EXEC wget https://github.com/$G_GITOWNER/DietPi/raw/$G_GITBRANCH/.meta/images/dietpi-logo_boot.bmp -O /boot/boot.bmp
 
 		#-----------------------------------------------------------------------------------
 		# Bash Profiles
@@ -1191,7 +1191,7 @@ _EOF_
 
 		#-----------------------------------------------------------------------------------
 		# DietPi user
-		l_message='Creating DietPi user account' G_RUN_CMD /boot/dietpi/func/dietpi-set_software useradd dietpi
+		G_EXEC_DESC='Creating DietPi user account' G_EXEC /boot/dietpi/func/dietpi-set_software useradd dietpi
 
 		#-----------------------------------------------------------------------------------
 		# UID bit for sudo: https://github.com/MichaIng/DietPi/issues/794
@@ -1210,16 +1210,16 @@ _EOF_
 		#-----------------------------------------------------------------------------------
 		# Services
 		G_DIETPI-NOTIFY 2 'Enabling DietPi services'
-		G_RUN_CMD systemctl enable dietpi-ramlog
-		G_RUN_CMD systemctl enable dietpi-preboot
-		G_RUN_CMD systemctl enable dietpi-boot
-		G_RUN_CMD systemctl enable dietpi-postboot
-		G_RUN_CMD systemctl enable dietpi-kill_ssh
+		G_EXEC systemctl enable dietpi-ramlog
+		G_EXEC systemctl enable dietpi-preboot
+		G_EXEC systemctl enable dietpi-boot
+		G_EXEC systemctl enable dietpi-postboot
+		G_EXEC systemctl enable dietpi-kill_ssh
 
 		#-----------------------------------------------------------------------------------
 		# Install vmtouch to lock DietPi scripts and config in file system cache
-		G_RUN_CMD wget https://dietpi.com/downloads/binaries/$G_DISTRO_NAME/vmtouch_$G_HW_ARCH_NAME.deb
-		G_RUN_CMD dpkg --force-hold,confdef,confold -i vmtouch_$G_HW_ARCH_NAME.deb
+		G_EXEC wget https://dietpi.com/downloads/binaries/$G_DISTRO_NAME/vmtouch_$G_HW_ARCH_NAME.deb
+		G_EXEC dpkg --force-hold,confdef,confold -i vmtouch_$G_HW_ARCH_NAME.deb
 		rm vmtouch_$G_HW_ARCH_NAME.deb
 
 		#-----------------------------------------------------------------------------------
@@ -1321,9 +1321,9 @@ _EOF_
 		systemctl disable --now e2scrub_all.timer 2> /dev/null
 		systemctl disable --now e2scrub_reap 2> /dev/null
 
-		l_message='Generating /boot/dietpi/.hw_model' G_RUN_CMD /boot/dietpi/func/dietpi-obtain_hw_model
+		G_EXEC_DESC='Generating /boot/dietpi/.hw_model' G_EXEC /boot/dietpi/func/dietpi-obtain_hw_model
 
-		l_message='Generating /etc/fstab' G_RUN_CMD /boot/dietpi/dietpi-drive_manager 4
+		G_EXEC_DESC='Generating /etc/fstab' G_EXEC /boot/dietpi/dietpi-drive_manager 4
 
 		# Create and navigate to "/tmp/$G_PROGRAM_NAME" working directory, now assured to be tmpfs
 		mkdir -p /tmp/$G_PROGRAM_NAME
@@ -1440,7 +1440,7 @@ _EOF_
 		G_DIETPI-NOTIFY 2 'Configuring regional settings (TZdata):'
 		rm -fv /etc/{localtime,timezone}
 		ln -sv /usr/share/zoneinfo/UTC /etc/localtime
-		G_RUN_CMD dpkg-reconfigure -f noninteractive tzdata
+		G_EXEC dpkg-reconfigure -f noninteractive tzdata
 
 		G_DIETPI-NOTIFY 2 'Configuring regional settings (Keyboard):'
 		dpkg-reconfigure -f noninteractive keyboard-configuration # Keyboard must be plugged in for this to work!
@@ -1451,7 +1451,7 @@ _EOF_
 		G_DIETPI-NOTIFY 2 'Applying G_HW_ARCH specific tweaks:'
 		if (( $G_HW_ARCH == 10 )); then
 
-			l_message='Removing foreign i386 DPKG architecture' G_RUN_CMD dpkg --remove-architecture i386
+			G_EXEC_DESC='Removing foreign i386 DPKG architecture' G_EXEC dpkg --remove-architecture i386
 
 			# Disable nouveau: https://github.com/MichaIng/DietPi/issues/1244 // https://dietpi.com/phpbb/viewtopic.php?p=9688#p9688
 			rm -f /etc/modprobe.d/*nouveau*
@@ -1479,7 +1479,7 @@ _EOF_
 
 		elif (( $G_HW_ARCH == 3 )); then
 
-			l_message='Removing foreign armhf DPKG architecture' G_RUN_CMD dpkg --remove-architecture armhf
+			G_EXEC_DESC='Removing foreign armhf DPKG architecture' G_EXEC dpkg --remove-architecture armhf
 
 		fi
 
@@ -1511,14 +1511,14 @@ _EOF_
 		elif (( $G_HW_MODEL == 70 )); then
 
 			# Install latest kernel/drivers
-			G_RUN_CMD wget https://raw.githubusercontent.com/sparky-sbc/sparky-test/master/dragon_fly_check/uImage -O /boot/uImage
-			G_RUN_CMD wget https://raw.githubusercontent.com/sparky-sbc/sparky-test/master/dragon_fly_check/3.10.38.bz2
-			G_RUN_CMD tar -xf 3.10.38.bz2 -C /lib/modules/
+			G_EXEC wget https://raw.githubusercontent.com/sparky-sbc/sparky-test/master/dragon_fly_check/uImage -O /boot/uImage
+			G_EXEC wget https://raw.githubusercontent.com/sparky-sbc/sparky-test/master/dragon_fly_check/3.10.38.bz2
+			G_EXEC tar -xf 3.10.38.bz2 -C /lib/modules/
 			rm 3.10.38.bz2
 			# - USB audio update
-			G_RUN_CMD wget https://raw.githubusercontent.com/sparky-sbc/sparky-test/master/dsd-marantz/snd-usb-audio.ko -O /lib/modules/3.10.38/kernel/sound/usb/snd-usb-audio.ko
+			G_EXEC wget https://raw.githubusercontent.com/sparky-sbc/sparky-test/master/dsd-marantz/snd-usb-audio.ko -O /lib/modules/3.10.38/kernel/sound/usb/snd-usb-audio.ko
 			# - Ethernet update
-			G_RUN_CMD wget https://raw.githubusercontent.com/sparky-sbc/sparky-test/master/sparky-eth/ethernet.ko -O /lib/modules/3.10.38/kernel/drivers/net/ethernet/acts/ethernet.ko
+			G_EXEC wget https://raw.githubusercontent.com/sparky-sbc/sparky-test/master/sparky-eth/ethernet.ko -O /lib/modules/3.10.38/kernel/drivers/net/ethernet/acts/ethernet.ko
 
 			# Boot args
 			cat << _EOF_ > /boot/uenv.txt
@@ -1655,16 +1655,16 @@ _EOF_
 		G_DIETPI-NOTIFY 2 '-----------------------------------------------------------------------------------'
 		#------------------------------------------------------------------------------------------------
 
-		l_message='Enable Dropbear autostart' G_RUN_CMD sed -i '/NO_START=1/c\NO_START=0' /etc/default/dropbear
-		G_RUN_CMD systemctl unmask dropbear
-		G_RUN_CMD systemctl enable dropbear
+		G_EXEC_DESC='Enable Dropbear autostart' G_EXEC sed -i '/NO_START=1/c\NO_START=0' /etc/default/dropbear
+		G_EXEC systemctl unmask dropbear
+		G_EXEC systemctl enable dropbear
 
 		G_DIETPI-NOTIFY 2 'Configuring services'
 		/boot/dietpi/dietpi-services stop
 		/boot/dietpi/dietpi-services dietpi_controlled
 
 		G_DIETPI-NOTIFY 2 'Mask cron until 1st run setup is completed'
-		G_RUN_CMD systemctl mask cron
+		G_EXEC systemctl mask cron
 
 		G_DIETPI-NOTIFY 2 'Removing swapfile from image'
 		/boot/dietpi/func/dietpi-set_swapfile 0 /var/swap
@@ -1688,7 +1688,7 @@ _EOF_
 			G_DIETPI-NOTIFY 2 'Generating default wpa_supplicant.conf'
 			/boot/dietpi/func/dietpi-wifidb 1
 			# Move to /boot/ so users can modify as needed for automated
-			G_RUN_CMD mv /var/lib/dietpi/dietpi-wifi.db /boot/dietpi-wifi.txt
+			G_EXEC mv /var/lib/dietpi/dietpi-wifi.db /boot/dietpi-wifi.txt
 
 			tmp_info='Enabling'
 			tmp_mode='enable'
@@ -1704,7 +1704,7 @@ _EOF_
 		# - x86_64: kernel cmd line with GRUB
 		if (( $G_HW_ARCH == 10 )); then
 
-			l_message='Detecting additional OS installed on system' G_RUN_CMD os-prober
+			G_EXEC_DESC='Detecting additional OS installed on system' G_EXEC os-prober
 			# Purge "os-prober" again
 			G_AGP os-prober
 			G_AGA
@@ -1712,7 +1712,7 @@ _EOF_
 			# - Native PC/EFI (assume x86_64 only possible)
 			if [[ -d '/boot/efi' ]] && dpkg-query -s 'grub-efi-amd64' &> /dev/null; then
 
-				l_message='Recreating GRUB-EFI' G_RUN_CMD grub-install --target=x86_64-efi --efi-directory=/boot/efi --bootloader-id=arch_grub --recheck
+				G_EXEC_DESC='Recreating GRUB-EFI' G_EXEC grub-install --target=x86_64-efi --efi-directory=/boot/efi --bootloader-id=arch_grub --recheck
 
 			fi
 
@@ -1722,7 +1722,7 @@ _EOF_
 				G_CONFIG_INJECT 'GRUB_CMDLINE_LINUX_DEFAULT=' 'GRUB_CMDLINE_LINUX_DEFAULT="consoleblank=0 quiet"' /etc/default/grub
 				G_CONFIG_INJECT 'GRUB_CMDLINE_LINUX=' 'GRUB_CMDLINE_LINUX="net.ifnames=0"' /etc/default/grub
 				G_CONFIG_INJECT 'GRUB_TIMEOUT=' 'GRUB_TIMEOUT=0' /etc/default/grub
-				l_message='Finalising GRUB' G_RUN_CMD update-grub
+				G_EXEC_DESC='Finalising GRUB' G_EXEC update-grub
 
 			fi
 
@@ -1778,16 +1778,16 @@ _EOF_
 
 		else
 
-			l_message='Enabling automated partition and file system resize for first boot' G_RUN_CMD systemctl enable dietpi-fs_partition_resize
+			G_EXEC_DESC='Enabling automated partition and file system resize for first boot' G_EXEC systemctl enable dietpi-fs_partition_resize
 
 		fi
-		l_message='Enabling first boot installation process' G_RUN_CMD systemctl enable dietpi-firstboot
+		G_EXEC_DESC='Enabling first boot installation process' G_EXEC systemctl enable dietpi-firstboot
 
 		G_DIETPI-NOTIFY 2 'Storing DietPi version info:'
 		G_CONFIG_INJECT 'DEV_GITBRANCH=' "DEV_GITBRANCH=$G_GITBRANCH" /boot/dietpi.txt
 		G_CONFIG_INJECT 'DEV_GITOWNER=' "DEV_GITOWNER=$G_GITOWNER" /boot/dietpi.txt
 		G_VERSIONDB_SAVE
-		G_RUN_CMD cp /boot/dietpi/.version /var/lib/dietpi/.dietpi_image_version
+		G_EXEC cp /boot/dietpi/.version /var/lib/dietpi/.dietpi_image_version
 
 		G_DIETPI-NOTIFY 2 'Clearing lost+found'
 		rm -Rfv /lost+found/{,.??,.[^.]}*
@@ -1796,11 +1796,11 @@ _EOF_
 		rm -Rfv /var/tmp/dietpi/logs/{,.??,.[^.]}*
 
 		G_DIETPI-NOTIFY 2 'Clearing items below tmpfs mount points'
-		G_RUN_CMD mkdir -p /mnt/tmp_root
-		G_RUN_CMD mount $(findmnt -no source /) /mnt/tmp_root
+		G_EXEC mkdir -p /mnt/tmp_root
+		G_EXEC mount $(findmnt -no source /) /mnt/tmp_root
 		rm -vRf /mnt/tmp_root/{dev,proc,run,sys,tmp,var/log}/{,.??,.[^.]}*
-		G_RUN_CMD umount /mnt/tmp_root
-		G_RUN_CMD rmdir /mnt/tmp_root
+		G_EXEC umount /mnt/tmp_root
+		G_EXEC rmdir /mnt/tmp_root
 
 		G_DIETPI-NOTIFY 2 'Running general cleanup of misc files'
 		rm -Rfv /{root,home/*}/.{bash_history,nano_history,wget-hsts,cache,local,config,gnupg,viminfo,dbus,gconf,nano,vim}
