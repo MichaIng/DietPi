@@ -85,7 +85,7 @@
 
 		'wget' # Download DietPi-Globals...
 		'ca-certificates' # ...via HTTPS
-		'locales' # Set en_GB.UTF-8 locale
+		'locales' # Set C.UTF-8 locale
 		'whiptail' # G_WHIP
 
 	)
@@ -127,7 +127,7 @@
 	[[ -f '/etc/default/locale' ]] && rm /etc/default/locale
 
 	# - NB: DEV, any changes here must be also rolled into function '/boot/dietpi/func/dietpi-set_software locale', for future script use
-	echo 'en_GB.UTF-8 UTF-8' > /etc/locale.gen
+	echo 'C.UTF-8 UTF-8' > /etc/locale.gen
 	# - dpkg-reconfigure includes:
 	#	- "locale-gen": Generate locale(s) based on "/etc/locale.gen" or interactive selection.
 	#	- "update-locale": Add $LANG to "/etc/default/locale" based on generated locale(s) or interactive default language selection.
@@ -139,10 +139,10 @@
 	fi
 
 	# - Update /etc/default/locales with new values (not effective until next load of bash session, eg: logout/in)
-	update-locale 'LC_ALL=en_GB.UTF-8'
+	update-locale 'LC_ALL=C.UTF-8'
 
 	# - Export locale vars to assure the following whiptail being beautiful
-	export LC_ALL='en_GB.UTF-8'
+	export LC_ALL='C.UTF-8'
 
 	# Set Git owner
 	GITOWNER=${GITOWNER:-MichaIng}
@@ -716,7 +716,7 @@ _EOF_'
 			'iputils-ping'		# "ping" command
 			'isc-dhcp-client'	# DHCP client
 			'kmod'			# "modprobe", "lsmod", used by several DietPi scripts
-			'locales'		# Support locales, necessary for DietPi scripts, as we use en_GB.UTF8 as default language
+			'locales'		# Support locales, necessary for DietPi scripts, as we use C.UTF-8 as default
 			'nano'			# Simple text editor
 			'p7zip'			# .7z wrapper
 			'parted'		# partprobe + drive partitioning, required by DietPi-Drive_Manager
