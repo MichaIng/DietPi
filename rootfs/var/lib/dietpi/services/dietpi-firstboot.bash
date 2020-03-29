@@ -133,8 +133,8 @@
 
 		# Apply language (locale)
 		local autoinstall_language=$(sed -n '/^[[:blank:]]*AUTO_SETUP_LOCALE=/{s/^[^=]*=//p;q}' /boot/dietpi.txt)
-		grep -q "^$autoinstall_language UTF-8$" /usr/share/i18n/SUPPORTED || autoinstall_language='en_GB.UTF-8'
-		if ! locale | grep -qE "(LANG|LC_ALL)=[\'\"]?$autoinstall_language[\'\"]?" || ! locale -a | grep -qiE 'en_GB.UTF-?8'; then
+		grep -q "^$autoinstall_language UTF-8$" /usr/share/i18n/SUPPORTED || autoinstall_language='C.UTF-8'
+		if ! locale | grep -qE "(LANG|LC_ALL)=[\'\"]?$autoinstall_language[\'\"]?" || ! locale -a | grep -qiE 'C.UTF-?8'; then
 
 			G_DIETPI-NOTIFY 2 "Setting locale $autoinstall_language. Please wait..."
 			/boot/dietpi/func/dietpi-set_software locale "$autoinstall_language"
