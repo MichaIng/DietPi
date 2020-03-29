@@ -27,7 +27,7 @@
 	if [[ $(locale) == *'POSIX'* ]]; then
 
 		current_locale=$(sed -n '/^[[:blank:]]*AUTO_SETUP_LOCALE=/{s/^[^=]*=//p;q}' /boot/dietpi.txt)
-		export LC_ALL=${current_locale:-en_GB.UTF-8}
+		export LC_ALL=${current_locale:-C.UTF-8}
 		unset current_locale
 
 	fi
