@@ -15,7 +15,7 @@
 
 	Raspimjeg_Stop(){
 
-		killall -w raspimjpeg php &> /dev/null
+		killall -qw raspimjpeg php
 
 	}
 
