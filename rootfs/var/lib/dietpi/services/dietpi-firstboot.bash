@@ -14,8 +14,10 @@
 	#////////////////////////////////////
 
 	# Import DietPi-Globals --------------------------------------------------------------
-	. /DietPi/dietpi/func/dietpi-globals
+	. /boot/dietpi/func/dietpi-globals
 	G_PROGRAM_NAME='DietPi-FirstBoot'
+	G_CHECK_ROOT_USER
+	G_CHECK_ROOTFS_RW
 	G_INIT
 	# Import DietPi-Globals --------------------------------------------------------------
 
@@ -25,60 +27,61 @@
 
 	RPi_Set_Clock_Speeds(){
 
-		# If no manual overclock settings have been applied by user, set safe overclocking values or commented defaults: https://www.raspberrypi.org/documentation/configuration/config-txt/overclocking.md
-		if ! grep -qE '^[[:blank:]]*(over_voltage|(arm|core|gpu|sdram)_freq)=' /DietPi/config.txt; then
+		# If no manual overclock settings have been applied by user, apply safe overclocking values (RPi1) or update comments to show model-specific defaults: https://www.raspberrypi.org/documentation/configuration/config-txt/overclocking.md
+		grep -qE '^[[:blank:]]*(over_voltage|(arm|core|gpu|sdram)_freq)=' /boot/config.txt || return
 
-			# Zero
-			if [[ ${G_HW_MODEL_DESCRIPTION,,} == *'zero'* ]]; then
+		# RPi Zero
+		if [[ $G_HW_MODEL_NAME == *'Zero'* ]]; then
 
-				sed -i '/over_voltage=/c\#over_voltage=0' /DietPi/config.txt
-				sed -i '/arm_freq=/c\#arm_freq=1000' /DietPi/config.txt
-				sed -i '/core_freq=/c\#core_freq=400' /DietPi/config.txt
-				sed -i '/sdram_freq=/c\#sdram_freq=450' /DietPi/config.txt
+			sed -i '/over_voltage=/c\#over_voltage=0' /boot/config.txt
+			sed -i '/arm_freq=/c\#arm_freq=1000' /boot/config.txt
+			sed -i '/core_freq=/c\#core_freq=400' /boot/config.txt
+			sed -i '/sdram_freq=/c\#sdram_freq=450' /boot/config.txt
 
-			# RPi v1 - Apply safe overclock mode
-			elif (( $G_HW_MODEL < 2 )); then
+		# RPi1 - Apply safe overclock mode
+		elif (( $G_HW_MODEL < 2 )); then
 
-				G_CONFIG_INJECT 'over_voltage=' 'over_voltage=2' /DietPi/config.txt
-				G_CONFIG_INJECT 'arm_freq=' 'arm_freq=900' /DietPi/config.txt
-				sed -i '/core_freq=/c\#core_freq=250' /DietPi/config.txt
-				sed -i '/sdram_freq=/c\#sdram_freq=400' /DietPi/config.txt
+			G_CONFIG_INJECT 'over_voltage=' 'over_voltage=2' /boot/config.txt
+			G_CONFIG_INJECT 'arm_freq=' 'arm_freq=900' /boot/config.txt
+			sed -i '/core_freq=/c\#core_freq=250' /boot/config.txt
+			sed -i '/sdram_freq=/c\#sdram_freq=400' /boot/config.txt
 
-			# RPi v2
-			elif (( $G_HW_MODEL == 2 )); then
+		# RPi2
+		elif (( $G_HW_MODEL == 2 )); then
 
-				sed -i '/over_voltage=/c\#over_voltage=0' /DietPi/config.txt
-				sed -i '/arm_freq=/c\#arm_freq=900' /DietPi/config.txt
-				sed -i '/core_freq=/c\#core_freq=250' /DietPi/config.txt
-				sed -i '/sdram_freq=/c\#sdram_freq=400' /DietPi/config.txt
+			sed -i '/over_voltage=/c\#over_voltage=0' /boot/config.txt
+			sed -i '/arm_freq=/c\#arm_freq=900' /boot/config.txt
+			sed -i '/core_freq=/c\#core_freq=250' /boot/config.txt
+			sed -i '/sdram_freq=/c\#sdram_freq=400' /boot/config.txt
 
-			# RPi v3
-			elif (( $G_HW_MODEL == 3 )); then
+		# RPi3
+		elif (( $G_HW_MODEL == 3 )); then
 
-				sed -i '/over_voltage=/c\#over_voltage=0' /DietPi/config.txt
-				sed -i '/arm_freq=/c\#arm_freq=1200' /DietPi/config.txt
-				sed -i '/core_freq=/c\#core_freq=400' /DietPi/config.txt
-				sed -i '/sdram_freq=/c\#sdram_freq=450' /DietPi/config.txt
-				G_CONFIG_INJECT 'temp_limit=' 'temp_limit=75' /DietPi/config.txt # https://github.com/MichaIng/DietPi/issues/356
+			sed -i '/over_voltage=/c\#over_voltage=0' /boot/config.txt
+			sed -i '/core_freq=/c\#core_freq=400' /boot/config.txt
+			G_CONFIG_INJECT 'temp_limit=' 'temp_limit=75' /boot/config.txt # https://github.com/MichaIng/DietPi/issues/356
 
-				# A+/B+
-				if [[ $G_HW_MODEL_DESCRIPTION == *'+' ]]; then
+			# A+/B+
+			if [[ $G_HW_MODEL_NAME == *'+' ]]; then
 
-					sed -i '/arm_freq=/c\#arm_freq=1400' /DietPi/config.txt
-					sed -i '/sdram_freq=/c\#sdram_freq=500' /DietPi/config.txt
+				sed -i '/arm_freq=/c\#arm_freq=1400' /boot/config.txt
+				sed -i '/sdram_freq=/c\#sdram_freq=500' /boot/config.txt
 
-				fi
+			else
 
-			# RPi v4
-			elif (( $G_HW_MODEL == 4 )); then
-
-				sed -i '/over_voltage=/c\#over_voltage=0' /DietPi/config.txt
-				sed -i '/arm_freq=/c\#arm_freq=1500' /DietPi/config.txt
-				sed -i '/core_freq=/c\#core_freq=500' /DietPi/config.txt
-				sed -i '/sdram_freq=/d' /DietPi/config.txt # Not supported on RPi4, defaults to 3200 MHz
-				G_CONFIG_INJECT 'temp_limit=' 'temp_limit=75' /DietPi/config.txt # https://github.com/MichaIng/DietPi/issues/3019
+				sed -i '/arm_freq=/c\#arm_freq=1200' /boot/config.txt
+				sed -i '/sdram_freq=/c\#sdram_freq=450' /boot/config.txt
 
 			fi
+
+		# RPi4
+		elif (( $G_HW_MODEL == 4 )); then
+
+			sed -i '/over_voltage=/c\#over_voltage=0' /boot/config.txt
+			sed -i '/arm_freq=/c\#arm_freq=1500' /boot/config.txt
+			sed -i '/core_freq=/c\#core_freq=500' /boot/config.txt
+			sed -i '/sdram_freq=/d' /boot/config.txt # Not supported on RPi4, defaults to 3200 MHz
+			G_CONFIG_INJECT 'temp_limit=' 'temp_limit=75' /boot/config.txt # https://github.com/MichaIng/DietPi/issues/3019
 
 		fi
 
@@ -87,16 +90,7 @@
 	Apply_DietPi_FirstRun_Settings(){
 
 		#----------------------------------------------------------------
-		# Workarounds
-		# - Workaround for NanoPi Fire3 with tty1 disabled: https://github.com/MichaIng/DietPi/issues/2225
-		if (( $G_HW_MODEL == 62 )) && dmesg | grep -qi 'NanoPi Fire3'; then
-
-			chvt 2
-			echo -e '#!/bin/dash\nchvt 2' > /var/lib/dietpi/postboot.d/fire3_tty2
-
-		fi
-		#----------------------------------------------------------------
-		# Set RPi v1 safe overclocking profile (900MHz) and apply commented defaults based on RPi model
+		# RPi: Apply safe overclocking values or update comments to show model-specific defaults
 		(( $G_HW_MODEL < 10 )) && RPi_Set_Clock_Speeds
 
 		# End user automated script
@@ -119,17 +113,17 @@
 		fi
 
 		# Create swap file
-		local swap_size=$(grep -m1 '^[[:blank:]]*AUTO_SETUP_SWAPFILE_SIZE=' /DietPi/dietpi.txt | sed 's/^[^=]*=//')
+		local swap_size=$(sed -n '/^[[:blank:]]*AUTO_SETUP_SWAPFILE_SIZE=/{s/^[^=]*=//p;q}' /boot/dietpi.txt)
 		disable_error=1 G_CHECK_VALIDINT "$swap_size" 0 || swap_size=1
-		local swap_location=$(grep -m1 '^[[:blank:]]*AUTO_SETUP_SWAPFILE_LOCATION=' /DietPi/dietpi.txt | sed 's/^[^=]*=//')
-		[[ $swap_location ]] || swap_location='/var/swap'
-		/DietPi/dietpi/func/dietpi-set_swapfile $swap_size "$swap_location"
+		local swap_location=$(sed -n '/^[[:blank:]]*AUTO_SETUP_SWAPFILE_LOCATION=/{s/^[^=]*=//p;q}' /boot/dietpi.txt)
+		[[ $swap_location == '/'* ]] || swap_location='/var/swap'
+		/boot/dietpi/func/dietpi-set_swapfile $swap_size "$swap_location"
 
-		# Apply Timezone
-		local autoinstall_timezone=$(grep -m1 '^[[:blank:]]*AUTO_SETUP_TIMEZONE=' /DietPi/dietpi.txt | sed 's/^[^=]*=//')
+		# Apply time zone
+		local autoinstall_timezone=$(sed -n '/^[[:blank:]]*AUTO_SETUP_TIMEZONE=/{s/^[^=]*=//p;q}' /boot/dietpi.txt)
 		if [[ $autoinstall_timezone && $autoinstall_timezone != $(</etc/timezone) ]]; then
 
-			G_DIETPI-NOTIFY 2 "Setting Timezone $autoinstall_timezone. Please wait..."
+			G_DIETPI-NOTIFY 2 "Setting time zone $autoinstall_timezone. Please wait..."
 			[[ -f '/etc/timezone' ]] && rm /etc/timezone
 			[[ -f '/etc/localtime' ]] && rm /etc/localtime
 			ln -sf "/usr/share/zoneinfo/$autoinstall_timezone" /etc/localtime
@@ -137,43 +131,43 @@
 
 		fi
 
-		# Apply Language (Locale)
-		local autoinstall_language=$(grep -m1 '^[[:blank:]]*AUTO_SETUP_LOCALE=' /DietPi/dietpi.txt | sed 's/^[^=]*=//')
-		grep -q "^$autoinstall_language UTF-8$" /usr/share/i18n/SUPPORTED || autoinstall_language='en_GB.UTF-8'
-		if ! locale | grep -qE "(LANG|LC_ALL)=[\'\"]?$autoinstall_language[\'\"]?" || ! locale -a | grep -qiE 'en_GB.UTF-?8'; then
+		# Apply language (locale)
+		local autoinstall_language=$(sed -n '/^[[:blank:]]*AUTO_SETUP_LOCALE=/{s/^[^=]*=//p;q}' /boot/dietpi.txt)
+		grep -q "^$autoinstall_language UTF-8$" /usr/share/i18n/SUPPORTED || autoinstall_language='C.UTF-8'
+		if ! locale | grep -qE "(LANG|LC_ALL)=[\'\"]?$autoinstall_language[\'\"]?" || ! locale -a | grep -qiE 'C.UTF-?8'; then
 
-			G_DIETPI-NOTIFY 2 "Setting Locale $autoinstall_language. Please wait..."
-			/DietPi/dietpi/func/dietpi-set_software locale "$autoinstall_language"
+			G_DIETPI-NOTIFY 2 "Setting locale $autoinstall_language. Please wait..."
+			/boot/dietpi/func/dietpi-set_software locale "$autoinstall_language"
 
 		fi
 
-		# Apply Keyboard
-		local autoinstall_keyboard=$(grep -m1 '^[[:blank:]]*AUTO_SETUP_KEYBOARD_LAYOUT=' /DietPi/dietpi.txt | sed 's/^[^=]*=//')
+		# Apply keyboard layout
+		local autoinstall_keyboard=$(sed -n '/^[[:blank:]]*AUTO_SETUP_KEYBOARD_LAYOUT=/{s/^[^=]*=//p;q}' /boot/dietpi.txt)
 		if [[ $autoinstall_keyboard ]] && ! grep -q "XKBLAYOUT=\"$autoinstall_keyboard\"" /etc/default/keyboard; then
 
-			G_DIETPI-NOTIFY 2 "Setting Keyboard $autoinstall_keyboard. Please wait..."
+			G_DIETPI-NOTIFY 2 "Setting keyboard layout $autoinstall_keyboard. Please wait..."
 			G_CONFIG_INJECT 'XKBLAYOUT=' "XKBLAYOUT=\"$autoinstall_keyboard\"" /etc/default/keyboard
 			setupcon --save # https://bugs.debian.org/cgi-bin/bugreport.cgi?bug=818065
 
 		fi
 
 		# Apply headless mode, if set in dietpi.txt (RPi, Odroid C1/C2)
-		(( $G_HW_MODEL < 11 || $G_HW_MODEL == 12 )) && /DietPi/dietpi/func/dietpi-set_hardware headless $(grep -cim1 '^[[:blank:]]*AUTO_SETUP_HEADLESS=1' /DietPi/dietpi.txt)
+		(( $G_HW_MODEL < 11 || $G_HW_MODEL == 12 )) && /boot/dietpi/func/dietpi-set_hardware headless $(grep -cm1 '^[[:blank:]]*AUTO_SETUP_HEADLESS=1' /boot/dietpi.txt)
 
 		# Apply forced eth speed, if set in dietpi.txt
-		/DietPi/dietpi/func/dietpi-set_hardware eth-forcespeed $(sed -n '/^[[:blank:]]*AUTO_SETUP_NET_ETH_FORCE_SPEED=/{s/^[^=]*=//p;q}' /DietPi/dietpi.txt)
+		/boot/dietpi/func/dietpi-set_hardware eth-forcespeed $(sed -n '/^[[:blank:]]*AUTO_SETUP_NET_ETH_FORCE_SPEED=/{s/^[^=]*=//p;q}' /boot/dietpi.txt)
 
 		# Set hostname
-		/DietPi/dietpi/func/change_hostname "$(sed -n '/^[[:blank:]]*AUTO_SETUP_NET_HOSTNAME=/{s/^[^=]*=//p;q}' /DietPi/dietpi.txt)"
+		/boot/dietpi/func/change_hostname "$(sed -n '/^[[:blank:]]*AUTO_SETUP_NET_HOSTNAME=/{s/^[^=]*=//p;q}' /boot/dietpi.txt)"
 
-		# Set auto login for next bootup
-		grep -qi '^[[:blank:]]*AUTO_SETUP_AUTOMATED=1' /DietPi/dietpi.txt && /DietPi/dietpi/dietpi-autostart 7
+		# Set autologin, if automated firstrun setup was chosen
+		grep -q '^[[:blank:]]*AUTO_SETUP_AUTOMATED=1' /boot/dietpi.txt && /boot/dietpi/dietpi-autostart 7
 
-		# Disable serial console?
-		grep -qi '^[[:blank:]]*CONFIG_SERIAL_CONSOLE_ENABLE=0' /DietPi/dietpi.txt && /DietPi/dietpi/func/dietpi-set_hardware serialconsole disable
+		# Disable serial console, if set in dietpi.txt
+		grep -q '^[[:blank:]]*CONFIG_SERIAL_CONSOLE_ENABLE=0' /boot/dietpi.txt && /boot/dietpi/func/dietpi-set_hardware serialconsole disable
 
-		# Set root password?
-		local root_password=$(sed -n '/^[[:blank:]]*AUTO_SETUP_GLOBAL_PASSWORD=/{s/^[^=]*=//p;q}' /DietPi/dietpi.txt)
+		# Set login passwords
+		local root_password=$(sed -n '/^[[:blank:]]*AUTO_SETUP_GLOBAL_PASSWORD=/{s/^[^=]*=//p;q}' /boot/dietpi.txt)
 		if [[ $root_password ]]; then
 
 			chpasswd <<< "root:$root_password"
@@ -184,9 +178,9 @@
 		# Set APT mirror
 		local target_repo='CONFIG_APT_DEBIAN_MIRROR'
 		(( $G_HW_MODEL < 10 )) && target_repo='CONFIG_APT_RASPBIAN_MIRROR'
-		/DietPi/dietpi/func/dietpi-set_software apt-mirror "$(sed -n "/^[[:blank:]]*$target_repo=/{s/^[^=]*=//p;q}" /DietPi/dietpi.txt)"
+		/boot/dietpi/func/dietpi-set_software apt-mirror "$(sed -n "/^[[:blank:]]*$target_repo=/{s/^[^=]*=//p;q}" /boot/dietpi.txt)"
 
-		# Regenerate unique Dropbear host keys:
+		# Regenerate unique Dropbear host keys
 		rm -f /etc/dropbear/*_host_key
 		if (( $G_DISTRO < 6 )); then
 
@@ -205,52 +199,52 @@
 
 		# Network setup
 		# - Grab available network devices
-		/DietPi/dietpi/func/obtain_network_details
+		/boot/dietpi/func/obtain_network_details
 
-		local index_eth=$(sed -n 1p /DietPi/dietpi/.network)
+		local index_eth=$(mawk 'NR==1' /run/dietpi/.network)
 		disable_error=1 G_CHECK_VALIDINT "$index_eth" 0 || index_eth=0
-		local index_wlan=$(sed -n 2p /DietPi/dietpi/.network)
+		local index_wlan=$(mawk 'NR==2' /run/dietpi/.network)
 		disable_error=1 G_CHECK_VALIDINT "$index_wlan" 0 || index_wlan=0
 
-		# - Replace all eth0 and wlan0 values to the indices DietPi has found.
+		# - Replace interface names with the ones obtained above
 		sed -i "s/eth[0-9]/eth$index_eth/g" /etc/network/interfaces
 		sed -i "s/wlan[0-9]/wlan$index_wlan/g" /etc/network/interfaces
 
-		# - Grab user requested settings from /dietpi.txt
-		local ethernet_enabled=$(grep -cim1 '^[[:blank:]]*AUTO_SETUP_NET_ETHERNET_ENABLED=1' /DietPi/dietpi.txt)
-		local wifi_enabled=$(grep -cim1 '^[[:blank:]]*AUTO_SETUP_NET_WIFI_ENABLED=1' /DietPi/dietpi.txt)
+		# - Grab user requested settings from dietpi.txt
+		local ethernet_enabled=$(grep -cm1 '^[[:blank:]]*AUTO_SETUP_NET_ETHERNET_ENABLED=1' /boot/dietpi.txt)
+		local wifi_enabled=$(grep -cm1 '^[[:blank:]]*AUTO_SETUP_NET_WIFI_ENABLED=1' /boot/dietpi.txt)
 
-		local use_static=$(grep -cim1 '^[[:blank:]]*AUTO_SETUP_NET_USESTATIC=1' /DietPi/dietpi.txt)
-		local static_ip=$(sed -n '/^[[:blank:]]*AUTO_SETUP_NET_STATIC_IP=/{s/^[^=]*=//p;q}' /DietPi/dietpi.txt)
-		local static_mask=$(sed -n '/^[[:blank:]]*AUTO_SETUP_NET_STATIC_MASK=/{s/^[^=]*=//p;q}' /DietPi/dietpi.txt)
-		local static_gateway=$(sed -n '/^[[:blank:]]*AUTO_SETUP_NET_STATIC_GATEWAY=/{s/^[^=]*=//p;q}' /DietPi/dietpi.txt)
-		local static_dns=$(sed -n '/^[[:blank:]]*AUTO_SETUP_NET_STATIC_DNS=/{s/^[^=]*=//p;q}' /DietPi/dietpi.txt)
+		local use_static=$(grep -cm1 '^[[:blank:]]*AUTO_SETUP_NET_USESTATIC=1' /boot/dietpi.txt)
+		local static_ip=$(sed -n '/^[[:blank:]]*AUTO_SETUP_NET_STATIC_IP=/{s/^[^=]*=//p;q}' /boot/dietpi.txt)
+		local static_mask=$(sed -n '/^[[:blank:]]*AUTO_SETUP_NET_STATIC_MASK=/{s/^[^=]*=//p;q}' /boot/dietpi.txt)
+		local static_gateway=$(sed -n '/^[[:blank:]]*AUTO_SETUP_NET_STATIC_GATEWAY=/{s/^[^=]*=//p;q}' /boot/dietpi.txt)
+		local static_dns=$(sed -n '/^[[:blank:]]*AUTO_SETUP_NET_STATIC_DNS=/{s/^[^=]*=//p;q}' /boot/dietpi.txt)
 
 		# - WiFi
 		if (( $wifi_enabled )); then
 
-			# - Enable WiFi, disable Eth
+			# Enable WiFi, disable Eth
 			ethernet_enabled=0
 			sed -i "/allow-hotplug wlan/c\allow-hotplug wlan$index_wlan" /etc/network/interfaces
 			sed -i "/allow-hotplug eth/c\#allow-hotplug eth$index_eth" /etc/network/interfaces
 
-			# - Apply global SSID/Keys from dietpi.txt to wpa_supp
-			/DietPi/dietpi/func/dietpi-wifidb 1
+			# Apply global SSID/keys from dietpi.txt to wpa_supp
+			/boot/dietpi/func/dietpi-wifidb 1
 
 		# - Ethernet
 		elif (( $ethernet_enabled )); then
 
-			# - Enable Eth, disable WiFi
+			# Enable Eth, disable WiFi
 			wifi_enabled=0
 			sed -i "/allow-hotplug eth/c\allow-hotplug eth$index_eth" /etc/network/interfaces
 			sed -i "/allow-hotplug wlan/c\#allow-hotplug wlan$index_wlan" /etc/network/interfaces
 
-			# - Disable WiFi kernel modules
-			/DietPi/dietpi/func/dietpi-set_hardware wifimodules disable
+			# Disable WiFi kernel modules
+			/boot/dietpi/func/dietpi-set_hardware wifimodules disable
 
 		fi
 
-		# - Static IPs
+		# - Static IP
 		if (( $use_static )); then
 
 			if (( $wifi_enabled )); then
@@ -271,21 +265,20 @@
 		fi
 
 		# - IPv6
-		local enable_ipv6=$(grep -ci -m1 '^[[:blank:]]*CONFIG_ENABLE_IPV6=1' /DietPi/dietpi.txt)
-		/DietPi/dietpi/func/dietpi-set_hardware enableipv6 $enable_ipv6
-		(( $enable_ipv6 )) && /DietPi/dietpi/func/dietpi-set_hardware preferipv4 $(grep -ci -m1 '^[[:blank:]]*CONFIG_PREFER_IPV4=1' /DietPi/dietpi.txt)
+		local enable_ipv6=$(grep -cm1 '^[[:blank:]]*CONFIG_ENABLE_IPV6=1' /boot/dietpi.txt)
+		/boot/dietpi/func/dietpi-set_hardware enableipv6 $enable_ipv6
+		(( $enable_ipv6 )) && /boot/dietpi/func/dietpi-set_hardware preferipv4 $(grep -cm1 '^[[:blank:]]*CONFIG_PREFER_IPV4=1' /boot/dietpi.txt)
 
 	}
 
 	#/////////////////////////////////////////////////////////////////////////////////////
 	# Main Loop
 	#/////////////////////////////////////////////////////////////////////////////////////
-	#-----------------------------------------------------------------------------------
 	# Apply dietpi.txt settings, device specific workarounds and reset hardware ID + SSH host keys
 	Apply_DietPi_FirstRun_Settings
 
 	# Set install stage index to trigger automated DietPi-Update on login
-	echo 0 > /DietPi/dietpi/.install_stage
+	echo 0 > /boot/dietpi/.install_stage
 
 	# Disable originating service to prevent any futher launch of this script
 	systemctl disable dietpi-firstboot
