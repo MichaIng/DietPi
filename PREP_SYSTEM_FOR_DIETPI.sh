@@ -775,11 +775,11 @@ _EOF_'
 		# WiFi related
 		if (( $WIFI_REQUIRED )); then
 
-			aPACKAGES_REQUIRED_INSTALL+=('crda')			# WiFi related
-			aPACKAGES_REQUIRED_INSTALL+=('iw')			# WiFi related
-			aPACKAGES_REQUIRED_INSTALL+=('rfkill')	 		# WiFi related: Used by some onboard WiFi chipsets
-			aPACKAGES_REQUIRED_INSTALL+=('wireless-tools')		# WiFi related: Deprecated, replace with "iw" completely
-			aPACKAGES_REQUIRED_INSTALL+=('wpasupplicant')		# WiFi WPA(2) support
+			aPACKAGES_REQUIRED_INSTALL+=('iw')			# Tools to configure WiFi adapters
+			aPACKAGES_REQUIRED_INSTALL+=('wireless-tools')		# Same as "iw", deprecated but still required for non-nl80211 adapters
+			aPACKAGES_REQUIRED_INSTALL+=('crda')			# Set WiFi frequencies according to local regulations, based on WiFi country code
+			aPACKAGES_REQUIRED_INSTALL+=('rfkill')	 		# Block/unblock wireless adapters, including WiFi and Bluetooth
+			aPACKAGES_REQUIRED_INSTALL+=('wpasupplicant')		# Support for WPA-protected WiFi network connection
 
 		fi
 
