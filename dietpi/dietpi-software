@@ -1041,7 +1041,6 @@ DietPi-Software will decrypt and use it for software installs. You can change it
 		aSOFTWARE_CATEGORY_INDEX[$software_id]=4
 		aSOFTWARE_ONLINEDOC_URL[$software_id]='p=42#p42'
 		aSOFTWARE_REQUIRES_BUILDESSENTIAL[$software_id]=1
-		aSOFTWARE_REQUIRES_GIT[$software_id]=1
 		aSOFTWARE_REQUIRES_SQLITE[$software_id]=1
 
 		# Emulation / Gaming
@@ -5314,20 +5313,13 @@ Package: wireguard wireguard-dkms wireguard-tools\nPin: release n=bullseye\nPin-
 			# - Pre-compiling required on ARM
 			(( $G_HW_ARCH < 10 )) && DEPS_LIST+=' libffi-dev libssl-dev'
 
-			INSTALL_URL_ADDRESS='https://github.com/mozilla-services/syncserver'
-
-			# If there is an existing installation update it as per Mozilla's instructions, else fresh install
-			if [[ -d /etc/firefox-sync ]]; then
-				cd /etc/firefox-sync
-				git stash
-				git pull
-				git stash pop
-			else
-				git clone "$INSTALL_URL_ADDRESS" $G_FP_DIETPI_USERDATA/firefox-sync
-				mv $G_FP_DIETPI_USERDATA/firefox-sync /etc/firefox-sync
-				cd /etc/firefox-sync
-			fi
-
+			# Download & Install
+			INSTALL_URL_ADDRESS='https://github.com/mozilla-services/syncserver/archive/master.tar.gz'
+			Download_Install "$INSTALL_URL_ADDRESS"
+			mv syncserver /opt/firefox-sync
+			
+			# Build
+			cd /opt/firefox-sync
 			sudo make build
 
 		fi
@@ -11221,32 +11213,37 @@ _EOF_
 			# User
 			local usercmd='useradd -rMU'
 			getent passwd ffsync &> /dev/null && usercmd='usermod -a'
-			$usercmd -G dietpi -d /opt/ffsync -s $(command -v nologin) ffsync
+			$usercmd -G dietpi -d /opt/firefox-sync -s $(command -v nologin) ffsync
 
 			# Create database directory
-			mkdir -p $G_FP_DIETPI_USERDATA/firefox-sync-db
+			mkdir -p $G_FP_DIETPI_USERDATA/firefox-sync
 
 			# Create database if it doesn't exist
-			if [[ ! -a $G_FP_DIETPI_USERDATA/firefox-sync-db/FF-Sync-DB.db ]]; then
-				sqlite3 $G_FP_DIETPI_USERDATA/firefox-sync-db/FF-Sync-DB.db "create table aTable(field1 int); drop table aTable;"
+			if [[ ! -a $G_FP_DIETPI_USERDATA/firefox-sync/FF-Sync-DB.db ]]; then
+				sqlite3 $G_FP_DIETPI_USERDATA/firefox-sync/FF-Sync-DB.db "create table aTable(field1 int); drop table aTable;"
 			fi
 
-			# Modify config file
+			# Copy and modify config file
+			cp /opt/firefox-sync/syncserver.ini $G_FP_DIETPI_USERDATA/firefox-sync
 			ffsync_ip=$(ip addr | grep 'state UP' -A2 | tail -n1 | awk '{print $2}' | cut -f1 -d'/')
+			# DietPi user data directory with escaped / for sed
 			dietpiUsrDataEsc=$(sed 's|/|\\/|g' <<< $G_FP_DIETPI_USERDATA)
-			sed -i.bak "s/host = 0.0.0.0/host = $ffsync_ip/" /etc/firefox-sync/syncserver.ini
-			#sed -i.bak "s/port = 5000/port = 5000/" /etc/firefox-sync/syncserver.ini
-			sed -i.bak "s/localhost:5000\//$ffsync_ip:5000\//" /etc/firefox-sync/syncserver.ini
-			sed -i.bak "s/#sqluri = sqlite:\/\/\/\/tmp\/syncserver.db/sqluri = sqlite:\/\/\/$dietpiUsrDataEsc\/firefox-sync-db\/FF-Sync-DB.db/" /etc/firefox-sync/syncserver.ini
+			sed -i.bak "s/host = 0.0.0.0/host = $ffsync_ip/" $G_FP_DIETPI_USERDATA/firefox-sync/syncserver.ini
+			#sed -i.bak "s/port = 5000/port = 5000/" $G_FP_DIETPI_USERDATA/firefox-sync/syncserver.ini
+			sed -i.bak "s/localhost:5000\//$ffsync_ip:5000\//" $G_FP_DIETPI_USERDATA/firefox-sync/syncserver.ini
+			sed -i.bak "s/#sqluri = sqlite:\/\/\/\/tmp\/syncserver.db/sqluri = sqlite:\/\/\/$dietpiUsrDataEsc\/firefox-sync\/FF-Sync-DB.db/" $G_FP_DIETPI_USERDATA/firefox-sync/syncserver.ini
+			# Modify make file to point to external config
+			sed -i.bak "s/--paste .\/syncserver.ini/--paste $dietpiUsrDataEsc\/firefox-sync\/syncserver.ini/"
 
 			cat << _EOF_ > /etc/systemd/system/firefox-sync.service
 [Unit]
 Description=Firefox Sync Server (DietPi)
-After=dietpi-boot.service network.target
+Wants=network-online.target
+After=network-online.target dietpi-boot.service
 
 [Service]
 User=ffsync
-WorkingDirectory=/etc/firefox-sync
+WorkingDirectory=/opt/firefox-sync
 ExecStart=make serve
 
 [Install]
@@ -11254,7 +11251,7 @@ WantedBy=multi-user.target
 _EOF_
 
 		# Permissions
-		chown -R ffsync:dietpi $G_FP_DIETPI_USERDATA/firefox-sync-db
+		chown -R ffsync:dietpi $G_FP_DIETPI_USERDATA/firefox-sync
 
 		# Enable startup on boot by default
 		systemctl enable firefox-sync
@@ -12936,7 +12933,7 @@ _EOF_
 
 			fi
 			getent passwd ffsync &> /dev/null && userdel -rf ffsync
-			[[ -d '/etc/firefox-sync' ]] && rm -R /etc/firefox-sync
+			[[ -d '/opt/firefox-sync' ]] && rm -R /opt/firefox-sync
 
 		fi
 
