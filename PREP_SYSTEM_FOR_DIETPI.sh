@@ -603,8 +603,8 @@ Currently installed: $G_DISTRO_NAME (ID: $G_DISTRO)"; then
 		#------------------------------------------------------------------------------------------------
 
 		local url="https://github.com/$G_GITOWNER/DietPi/archive/$G_GITBRANCH.tar.gz"
-		G_CHECK_URL "$url"
-		G_EXEC_DESC='Downloading DietPi sourcecode' G_EXEC curl -sSL "$url" -o package.tar.gz
+		G_CHECK_URL_TIMEOUT=10 G_CHECK_URL_ATTEMPTS=2 G_CHECK_URL "$url"
+		G_EXEC_DESC='Downloading DietPi sourcecode' G_EXEC curl -sSfL "$url" -o package.tar.gz
 
 		[[ -d DietPi-$G_GITBRANCH ]] && G_EXEC_DESC='Cleaning previously extracted files' G_EXEC rm -R "DietPi-$G_GITBRANCH"
 		G_EXEC_DESC='Extracting DietPi sourcecode' G_EXEC tar xf package.tar.gz
