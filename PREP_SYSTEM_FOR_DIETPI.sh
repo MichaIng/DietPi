@@ -736,9 +736,9 @@ _EOF_'
 
 		# G_DISTRO specific
 		# - Dropbear: DietPi default SSH-Client
-		#   On Buster-, "dropbear" pulls in "dropbear-initramfs", which we don't need
+		#   On Buster-, "dropbear" pulls in "dropbear-initramfs", which we don't need: https://packages.debian.org/dropbear
 		# - apt-transport-https: Allows HTTPS sources for ATP
-		#   On Buster+, it is included in "apt" package
+		#   On Buster+, it is included in "apt" package: https://packages.debian.org/apt-transport-https
 		if (( $G_DISTRO > 5 )); then
 
 			aPACKAGES_REQUIRED_INSTALL+=('dropbear')
@@ -749,6 +749,10 @@ _EOF_'
 			(( $G_DISTRO < 5 )) && aPACKAGES_REQUIRED_INSTALL+=('apt-transport-https')
 
 		fi
+		# - systemd-timesyncd: Network time sync daemon
+		#   Available as dedicated package since Bullseye: https://packages.debian.org/systemd-timesyncd
+		#   While the above needs to be checked against current distro to not break SSH or APT before distro upgrade, this one should be checked against target distro version.
+		(( $G_DISTRO_TARGET > 5 )) && aPACKAGES_REQUIRED_INSTALL+=('systemd-timesyncd')
 
 		# G_HW_MODEL specific required repo key packages: https://github.com/MichaIng/DietPi/issues/1285#issuecomment-358301273
 		if (( $G_HW_MODEL > 9 )); then
