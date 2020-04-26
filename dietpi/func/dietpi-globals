@@ -57,7 +57,7 @@
 	# - Assign defaults/code version as fallback
 	[[ $G_DIETPI_VERSION_CORE ]] || G_DIETPI_VERSION_CORE=6
 	[[ $G_DIETPI_VERSION_SUB ]] || G_DIETPI_VERSION_SUB=29
-	[[ $G_DIETPI_VERSION_RC ]] || G_DIETPI_VERSION_RC=0
+	[[ $G_DIETPI_VERSION_RC ]] || G_DIETPI_VERSION_RC=1
 	[[ $G_GITBRANCH ]] || G_GITBRANCH='master'
 	[[ $G_GITOWNER ]] || G_GITOWNER='MichaIng'
 	# - Save current version and Git branch
@@ -919,14 +919,14 @@ $(ps f -eo pid,user,tty,cmd | grep -i '[d]ietpi')"; then
 		while :
 		do
 
-			declare -f G_EXEC_PRE_FUNC &> /dev/null && G_EXEC_PRE_FUNC
+			declare -F G_EXEC_PRE_FUNC &> /dev/null && G_EXEC_PRE_FUNC
 
 			# Execute command, store output to $fp_log file and store exit code to $exit_code variable
 			# - Print full command output if $G_EXEC_OUTPUT=1 is given
 			if [[ $G_EXEC_OUTPUT == 1 ]]; then
 
 				# Print $G_EXEC_DESC if given, else raw input command string and show current non-interactive attempt count if $G_EXEC_RETRIES is given
-				G_DIETPI-NOTIFY 2 "${G_EXEC_DESC:-$*}, please wait... ${G_EXEC_RETRIES:+ ($attempt/$G_EXEC_RETRIES)}"
+				G_DIETPI-NOTIFY 2 "${G_EXEC_DESC:-$*}, please wait... ${G_EXEC_RETRIES:+ ($attempt/$((G_EXEC_RETRIES+1)))}"
 				[[ $G_EXEC_OUTPUT_COL ]] && printf "$G_EXEC_OUTPUT_COL"
 				"${acommand[@]}" 2>&1 | tee $fp_log
 				exit_code=${PIPESTATUS[0]}
@@ -935,13 +935,13 @@ $(ps f -eo pid,user,tty,cmd | grep -i '[d]ietpi')"; then
 			# - Else print animated processing message only
 			else
 
-				G_DIETPI-NOTIFY -2 "${G_EXEC_DESC:-$*}${G_EXEC_RETRIES:+ ($attempt/$G_EXEC_RETRIES)}"
+				G_DIETPI-NOTIFY -2 "${G_EXEC_DESC:-$*}${G_EXEC_RETRIES:+ ($attempt/$((G_EXEC_RETRIES+1)))}"
 				"${acommand[@]}" &> $fp_log
 				exit_code=$?
 
 			fi
 
-			declare -f G_EXEC_POST_FUNC &> /dev/null && G_EXEC_POST_FUNC
+			declare -F G_EXEC_POST_FUNC &> /dev/null && G_EXEC_POST_FUNC
 
 			# Override exit code if $G_EXEC_NOFAIL=1 is given
 			[[ $G_EXEC_NOFAIL == 1 ]] && exit_code=0
@@ -1110,12 +1110,116 @@ $log_content" || break # Exit error handler menu loop on cancel
 
 	}
 
-	# URL Connection test
-	# - $@ = URL + optional arguments
+	#-----------------------------------------------------------------------------------
+	# Network connection checks
+	#-----------------------------------------------------------------------------------
+	# General network connection check
+	# - Checks general network connectivity by pinging a raw IP that must be publicly reachable at all time.
+	# - Uses the given input argument as IP to test against, else CONFIG_CHECK_CONNECTION_IP from dietpi.txt, else defaults to 9.9.9.9 (Quad9 DNS IP).
+	# - Uses G_CHECK_URL_TIMEOUT and G_CHECK_URL_ATTEMPTS variables, else CONFIG_G_CHECK_URL_TIMEOUT + CONFIG_G_CHECK_URL_ATTEMPTS from dietpi.txt, else defaults to 10 seconds and 2 attempts (1 retry).
+	# - Optional arguments:
+	#	$@ = IP + optional ping arguments
 	# - Optional variables:
-	#	- G_CHECK_URL_TIMEOUT to override default and dietpi.txt set timeout
-	#	- G_CHECK_URL_ATTEMPTS to override default and dietpi.txt set attempts
-	# - In case of failure and not $G_INTERACTIVE=0: Prompts user to configure network
+	#	G_CHECK_URL_TIMEOUT to override default and dietpi.txt set timeout
+	#	G_CHECK_URL_ATTEMPTS to override default and dietpi.txt set attempts
+	G_CHECK_CON(){
+
+		# Obtain IP
+		local ip
+		if [[ ! $@ ]]; then
+
+			ip=$(sed -n '/^[[:blank:]]*CONFIG_CHECK_CONNECTION_IP=/{s/^[^=]*=//p;q}' /boot/dietpi.txt)
+			[[ $ip ]] || ip='9.9.9.9'
+
+		fi
+
+		# Obtain timeout
+		if ! disable_error=1 G_CHECK_VALIDINT "$G_CHECK_URL_TIMEOUT" 0; then
+
+			G_CHECK_URL_TIMEOUT=$(sed -n '/^[[:blank:]]*CONFIG_G_CHECK_URL_TIMEOUT=/{s/^[^=]*=//p;q}' /boot/dietpi.txt)
+			disable_error=1 G_CHECK_VALIDINT "$G_CHECK_URL_TIMEOUT" 0 || G_CHECK_URL_TIMEOUT=10
+
+		fi
+
+		# Obtain attempts
+		if ! disable_error=1 G_CHECK_VALIDINT "$G_CHECK_URL_ATTEMPTS" 0; then
+
+			G_CHECK_URL_ATTEMPTS=$(sed -n '/^[[:blank:]]*CONFIG_G_CHECK_URL_ATTEMPTS=/{s/^[^=]*=//p;q}' /boot/dietpi.txt)
+			disable_error=1 G_CHECK_VALIDINT "$G_CHECK_URL_ATTEMPTS" 0 || G_CHECK_URL_ATTEMPTS=2
+
+		fi
+		G_EXEC_RETRIES=$(( $G_CHECK_URL_ATTEMPTS - 1 )) # 2 attempts = 1 retry
+
+		# Re-assign timeout ($5 => acommand[4]) on every retry, in case it is changed as solution attempt
+		declare -F G_EXEC_PRE_FUNC &> /dev/null && eval "G_EXEC_PRE_FUNC_ORIG()$(declare -f G_EXEC_PRE_FUNC | tail -n +2)"
+		G_EXEC_PRE_FUNC(){ acommand[4]=$G_CHECK_URL_TIMEOUT; declare -F G_EXEC_PRE_FUNC_ORIG &> /dev/null && G_EXEC_PRE_FUNC_ORIG; }
+
+		G_EXEC_DESC='Checking network connectivity' G_EXEC ping -c 1 -W $G_CHECK_URL_TIMEOUT ${ip:-"$@"}
+		local exit_code=$?
+
+		unset -v G_CHECK_URL_TIMEOUT G_CHECK_URL_ATTEMPTS
+		unset -f G_EXEC_PRE_FUNC_ORIG
+		return $exit_code
+
+	}
+
+	# General DNS resolver check
+	# - Checks general DNS capabilities by pinging a domain that must be publicly reachable at all time.
+	# - Uses the given input argument as domain to test against, else CONFIG_CHECK_DNS_DOMAIN from dietpi.txt, else defaults to dns9.quad9.net (Quad9 DNS domain).
+	# - Uses G_CHECK_URL_TIMEOUT and G_CHECK_URL_ATTEMPTS variables, else CONFIG_G_CHECK_URL_TIMEOUT + CONFIG_G_CHECK_URL_ATTEMPTS from dietpi.txt, else defaults to 10 seconds and 2 attempts (1 retry).
+	# - Optional arguments:
+	#	$@ = domain + optional ping arguments
+	# - Optional variables:
+	#	G_CHECK_URL_TIMEOUT to override default and dietpi.txt set timeout
+	#	G_CHECK_URL_ATTEMPTS to override default and dietpi.txt set attempts
+	G_CHECK_DNS(){
+
+		# Obtain IP
+		local domain
+		if [[ ! $@ ]]; then
+
+			domain=$(sed -n '/^[[:blank:]]*CONFIG_CHECK_DNS_DOMAIN=/{s/^[^=]*=//p;q}' /boot/dietpi.txt)
+			[[ $domain ]] || domain='dns9.quad9.net'
+
+		fi
+
+		# Obtain timeout
+		if ! disable_error=1 G_CHECK_VALIDINT "$G_CHECK_URL_TIMEOUT" 0; then
+
+			G_CHECK_URL_TIMEOUT=$(sed -n '/^[[:blank:]]*CONFIG_G_CHECK_URL_TIMEOUT=/{s/^[^=]*=//p;q}' /boot/dietpi.txt)
+			disable_error=1 G_CHECK_VALIDINT "$G_CHECK_URL_TIMEOUT" 0 || G_CHECK_URL_TIMEOUT=10
+
+		fi
+
+		# Obtain attempts
+		if ! disable_error=1 G_CHECK_VALIDINT "$G_CHECK_URL_ATTEMPTS" 0; then
+
+			G_CHECK_URL_ATTEMPTS=$(sed -n '/^[[:blank:]]*CONFIG_G_CHECK_URL_ATTEMPTS=/{s/^[^=]*=//p;q}' /boot/dietpi.txt)
+			disable_error=1 G_CHECK_VALIDINT "$G_CHECK_URL_ATTEMPTS" 0 || G_CHECK_URL_ATTEMPTS=2
+
+		fi
+		G_EXEC_RETRIES=$(( $G_CHECK_URL_ATTEMPTS - 1 )) # 2 attempts = 1 retry
+
+		# Re-assign timeout ($5 => acommand[4]) on every retry, in case it is changed as solution attempt
+		declare -F G_EXEC_PRE_FUNC &> /dev/null && eval "G_EXEC_PRE_FUNC_ORIG()$(declare -f G_EXEC_PRE_FUNC | tail -n +2)"
+		G_EXEC_PRE_FUNC(){ acommand[4]=$G_CHECK_URL_TIMEOUT; declare -F G_EXEC_PRE_FUNC_ORIG &> /dev/null && G_EXEC_PRE_FUNC_ORIG; }
+
+		G_EXEC_DESC='Checking DNS resolver' G_EXEC ping -c 1 -W $G_CHECK_URL_TIMEOUT ${domain:-"$@"}
+		local exit_code=$?
+
+		unset -v G_CHECK_URL_TIMEOUT G_CHECK_URL_ATTEMPTS
+		unset -f G_EXEC_PRE_FUNC_ORIG
+		return $exit_code
+
+	}
+
+	# URL connection test
+	# - Checks a specific HTTP/HTTPS/FTP online resource via its URL
+	# - Required arguments:
+	#	$@ = URL + optional wget arguments
+	# - Optional variables:
+	#	G_CHECK_URL_TIMEOUT to override default and dietpi.txt set timeout
+	#	G_CHECK_URL_ATTEMPTS to override default and dietpi.txt set attempts
 	G_CHECK_URL(){
 
 		# Obtain timeout
@@ -1133,17 +1237,18 @@ $log_content" || break # Exit error handler menu loop on cancel
 			disable_error=1 G_CHECK_VALIDINT "$G_CHECK_URL_ATTEMPTS" 0 || G_CHECK_URL_ATTEMPTS=2
 
 		fi
+		G_EXEC_RETRIES=$(( $G_CHECK_URL_ATTEMPTS - 1 )) # 2 attempts = 1 retry
 
 		# Re-assign timeout ($6 => acommand[5]) on every retry, in case it is changed as solution attempt
-		G_EXEC_PRE_FUNC(){ acommand[5]=$G_CHECK_URL_TIMEOUT; }
+		declare -F G_EXEC_PRE_FUNC &> /dev/null && eval "G_EXEC_PRE_FUNC_ORIG()$(declare -f G_EXEC_PRE_FUNC | tail -n +2)"
+		G_EXEC_PRE_FUNC(){ acommand[5]=$G_CHECK_URL_TIMEOUT; declare -F G_EXEC_PRE_FUNC_ORIG &> /dev/null && G_EXEC_PRE_FUNC_ORIG; }
 
-		G_EXEC_DESC="Connection test: $*"
-		G_EXEC_RETRIES=$G_CHECK_URL_ATTEMPTS
 		# Since --tries/-t is not applied on "fatal" errors (resolving failed, connection refused, 404), we need to loop ourself to exclude any temporary issue
-		G_EXEC wget --spider -t 1 -T $G_CHECK_URL_TIMEOUT "$@"
+		G_EXEC_DESC="Checking URL: $*" G_EXEC wget --spider -t 1 -T $G_CHECK_URL_TIMEOUT "$@"
 		local exit_code=$?
 
 		unset -v G_CHECK_URL_TIMEOUT G_CHECK_URL_ATTEMPTS
+		unset -f G_EXEC_PRE_FUNC_ORIG
 		return $exit_code
 
 	}
@@ -1229,16 +1334,19 @@ $log_content" || break # Exit error handler menu loop on cancel
 		G_CHECK_ROOT_USER 1
 
 		# Attempt to purge only installed packages, check on every loop, force succeed if none were found, to avoid related apt-get error due
+		declare -F G_EXEC_PRE_FUNC &> /dev/null && eval "G_EXEC_PRE_FUNC_ORIG()$(declare -f G_EXEC_PRE_FUNC | tail -n +2)"
 		G_EXEC_PRE_FUNC(){
 
 			local packages=$(dpkg --get-selections "${acommand[@]:4}" 2> /dev/null | mawk '{print $1}' ORS=' ')
-			[[ $packages ]] && acommand=("${acommand[@]::4}" $packages) || acommand=(G_DIETPI-NOTIFY 2 'None of the requested packages are currently installed. Aborting...')
+			[[ $packages ]] && acommand=("${acommand[@]::4}" $packages) || { acommand=(G_DIETPI-NOTIFY 2 'None of the requested packages are currently installed. Aborting...'); return; }
+			declare -F G_EXEC_PRE_FUNC_ORIG &> /dev/null && G_EXEC_PRE_FUNC_ORIG
 
 		}
 
 		G_EXEC_DESC="\e[0mAPT purge for: \e[33m$*\e[0m"
 		DEBIAN_FRONTEND=noninteractive G_EXEC_OUTPUT=1 G_EXEC_OUTPUT_COL='\e[90m' G_EXEC apt-get -qq --allow-change-held-packages purge "$@"
 
+		unset -f G_EXEC_PRE_FUNC_ORIG
 		return $?
 
 	}
@@ -1276,11 +1384,13 @@ $log_content" || break # Exit error handler menu loop on cancel
 		G_CHECK_ROOT_USER 1
 
 		# Clean cache before every update, which can corrupt and gets fully rewritten anyway
-		G_EXEC_PRE_FUNC(){ apt-get clean; }
+		declare -F G_EXEC_PRE_FUNC &> /dev/null && eval "G_EXEC_PRE_FUNC_ORIG()$(declare -f G_EXEC_PRE_FUNC | tail -n +2)"
+		G_EXEC_PRE_FUNC(){ apt-get clean; declare -F G_EXEC_PRE_FUNC_ORIG &> /dev/null && G_EXEC_PRE_FUNC_ORIG; }
 
 		G_EXEC_DESC='\e[0mAPT update'
 		G_EXEC_OUTPUT=1 G_EXEC_OUTPUT_COL='\e[90m' G_EXEC apt-get -q update
 
+		unset -f G_EXEC_PRE_FUNC_ORIG
 		return $?
 
 	}

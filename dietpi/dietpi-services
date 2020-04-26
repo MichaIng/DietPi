@@ -331,18 +331,17 @@ _EOF_
 
 			[[ ${aSERVICE_NAME[$i]} ]] || { unset aSERVICE_NAME[$i]; continue; } # Failsafe
 
-			for j in /{etc,lib,usr/lib}/systemd/system/"${aSERVICE_NAME[$i]}.service" /etc/init.d/"${aSERVICE_NAME[$i]}"
+			# Check for sysvinit services from systemd-sysv-generator dir: /run/systemd/generator.late/
+			for j in /{{etc,usr/local/lib,lib,usr/lib}/systemd/system,run/systemd/generator.late}/"${aSERVICE_NAME[$i]}.service"
 			do
 
-				if [[ -e $j ]]; then
+				[[ -e $j ]] || continue
 
-					# Check masked state, in case continue to catch real file
-					[[ -L $j && $(readlink -m "$j") == '/dev/null' ]] && aSERVICE_MODE[$i]='masked' && continue
+				# Check masked state, in case continue to catch real file
+				[[ -L $j && $(readlink -m "$j") == '/dev/null' ]] && aSERVICE_MODE[$i]='masked' && continue
 
-					aFP_SERVICE[$i]=$j
-					break
-
-				fi
+				aFP_SERVICE[$i]=$j
+				break
 
 			done
 
@@ -510,37 +509,6 @@ _EOF_
 	# Process Tool
 	#/////////////////////////////////////////////////////////////////////////////////////
 	# $1 = service index
-	Prepare_Service_Dropin(){
-
-		local index=$1
-
-		# Backwards cap for init.d, create systemd wrapper
-		if [[ ${aFP_SERVICE[$index]} == '/etc/init.d/'* ]]; then
-
-			aFP_SERVICE[$index]="/etc/systemd/system/${aSERVICE_NAME[$index]}.service"
-			cat << _EOF_ > "${aFP_SERVICE[$index]}"
-[Unit]
-Description=${aSERVICE_NAME[$index]} sysvinit wrapper (DietPi)
-
-[Service]
-Type=forking
-ExecStart=/etc/init.d/${aSERVICE_NAME[$index]} start
-ExecStop=/etc/init.d/${aSERVICE_NAME[$index]} stop
-
-[Install]
-WantedBy=multi-user.target
-_EOF_
-			G_WHIP_MSG "[ INFO ] DietPi has created a systemd service wrapper for /etc/init.d/${aSERVICE_NAME[$index]}. This is required to allow support for applying process tool options and custom changes.\n
-If you experience any issues with the wrapper, remove the file, reload and restart the service:\n - rm /etc/systemd/system/${aSERVICE_NAME[$index]}.service\n - systemctl daemon-reload\n - systemctl restart ${aSERVICE_NAME[$index]}"
-
-		fi
-
-		# Always create drop-in configs in: /etc/systemd/system/
-		mkdir -p "/etc/systemd/system/${aSERVICE_NAME[$index]}.service.d"
-
-	}
-
-	# $1 = service index
 	# $2 = setting (reset=reset ALL settings, 0=CPUAffinity, 1=CPUSchedulingPolicy, 2=Nice, 3=CPUSchedulingPriority, 4=IOSchedulingClass, 5=IOSchedulingPriority)
 	# $3 = value (reset=reset $2 setting)
 	FP_PROCESS_TOOL_CONF='dietpi-process_tool.conf'
@@ -574,7 +542,7 @@ If you experience any issues with the wrapper, remove the file, reload and resta
 
 			for i in {0..5}; do unset ${aarray[$i]}[$index]; done
 			[[ -f $fp ]] && G_EXEC rm "$fp"
-			[[ -f $dp ]] && G_EXEC rmdir --ignore-fail-on-non-empty "$dp"
+			[[ -d $dp ]] && G_EXEC rmdir --ignore-fail-on-non-empty "$dp"
 
 		# Reset single process tool setting
 		elif [[ $value == 'reset' ]]; then
@@ -585,8 +553,7 @@ If you experience any issues with the wrapper, remove the file, reload and resta
 		# Apply process tool setting
 		else
 
-			Prepare_Service_Dropin $index
-
+			[[ -d $dp ]] || mkdir -p "$dp"
 			[[ -f $fp ]] || echo -e '# WARNING: Do not manually edit this file, use "dietpi-services" to adjust values!\n[Service]' > "$fp"
 			declare -ag ${aarray[$setting]}[$index]=$value
 			G_CONFIG_INJECT "${asetting[$setting]}=" "${asetting[$setting]}=$value" "$fp"
@@ -745,35 +712,30 @@ If you experience any issues with the wrapper, remove the file, reload and resta
 						for i in "${aSERVICE_NAME[@]}"
 						do
 
-							if [[ $G_WHIP_RETURNED_VALUE == "$i" ]]; then
+							[[ $G_WHIP_RETURNED_VALUE == "$i" ]] || continue
 
-								not_found="[FAILED] The service name you entered ($G_WHIP_RETURNED_VALUE) is already handled by DietPi-Services. Please retry or cancel.\n\n"
-								continue 2
-
-							fi
+							not_found="[FAILED] The service name you entered ($G_WHIP_RETURNED_VALUE) is already handled by DietPi-Services. Please retry or cancel.\n\n"
+							continue 2
 
 						done
 
-						for i in /{etc,lib}/systemd/system/"$G_WHIP_RETURNED_VALUE.service" /etc/init.d/"$G_WHIP_RETURNED_VALUE"
+						for i in /{{etc,usr/local/lib,lib,usr/lib}/systemd/system,run/systemd/generator.late}/"$G_WHIP_RETURNED_VALUE.service"
 						do
 
-							if [[ -f $i ]]; then
+							[[ -f $i ]] || continue
 
-								aSERVICE_NAME[$new_index]=$G_WHIP_RETURNED_VALUE
-								aFP_SERVICE[$new_index]=$i
-								aSERVICE_MODE[$new_index]=$(systemctl is-enabled "$G_WHIP_RETURNED_VALUE" 2> /dev/null)
-								Load_Process_Tool $new_index
-								G_CONFIG_INJECT "+ ${aSERVICE_NAME[$new_index]}" "+ ${aSERVICE_NAME[$new_index]}" $FP_INCLUDE_EXCLUDE
-								break
-
-							fi
+							aSERVICE_NAME[$new_index]=$G_WHIP_RETURNED_VALUE
+							aFP_SERVICE[$new_index]=$i
+							aSERVICE_MODE[$new_index]=$(systemctl is-enabled "$G_WHIP_RETURNED_VALUE" 2> /dev/null)
+							Load_Process_Tool $new_index
+							G_CONFIG_INJECT "+ ${aSERVICE_NAME[$new_index]}" "+ ${aSERVICE_NAME[$new_index]}" $FP_INCLUDE_EXCLUDE
+							break 2
 
 						done
 
 					fi
 
-					[[ ${aSERVICE_NAME[$new_index]} ]] && break
-					not_found="FAILED] Could not find a service file that matches your input ($G_WHIP_RETURNED_VALUE). Please retry or cancel.\n\n"
+					not_found="[FAILED] Could not find a service file that matches your input ($G_WHIP_RETURNED_VALUE). Please retry or cancel.\n\n"
 
 				done
 
@@ -979,14 +941,15 @@ This affects starts/stops/restarts during DietPi-Software installs, DietPi-Updat
 
 				'Edit')
 
-					local fp="/etc/systemd/system/${aSERVICE_NAME[$MENU_SERVICE_INDEX]}.service.d/dietpi-services_edit.conf"
+					local dp="/etc/systemd/system/${aSERVICE_NAME[$MENU_SERVICE_INDEX]}.service.d"
+					local fp="$dp/dietpi-services_edit.conf"
 
 					if [[ ! -f $fp ]]; then
 
 						G_WHIP_YESNO "[ INFO ] To allow safe service editing, a drop-in config with commented original service file content will be created.\n
 Please uncomment and edit only the lines that you need to change.\n\nTo undo changes, remove the drop-in, reload and restart the service:
  - rm $fp\n - systemctl daemon-reload\n - systemctl restart ${aSERVICE_NAME[$MENU_SERVICE_INDEX]}\n\nDo you want to continue?" || return
-						Prepare_Service_Dropin $MENU_SERVICE_INDEX
+						[[ -d $dp ]] || mkdir -p "$dp"
 						cp -a "${aFP_SERVICE[$MENU_SERVICE_INDEX]}" "$fp"
 						sed -Ei 's/^([^[#])/#\1/' "$fp"
 
@@ -1010,7 +973,7 @@ Please uncomment and edit only the lines that you need to change.\n\nTo undo cha
 					if G_WHIP_CHECKLIST "Please select the desired CPU Affinity for: ${aSERVICE_NAME[$MENU_SERVICE_INDEX]}\n
  - Use the spacebar to enable/disable access to specific cores, for this program.\n - The default value is to enable all items.\n - De-select all items to reset to system defaults."; then
 
-						local new_affinity=''
+						local new_affinity=
 						for i in ${G_WHIP_RETURNED_VALUE[@]}
 						do
 

@@ -228,8 +228,11 @@
 			sed -i "/allow-hotplug wlan/c\allow-hotplug wlan$index_wlan" /etc/network/interfaces
 			sed -i "/allow-hotplug eth/c\#allow-hotplug eth$index_eth" /etc/network/interfaces
 
-			# Apply global SSID/keys from dietpi.txt to wpa_supp
+			# Apply global SSID/keys from dietpi.txt to wpa_supplicant
 			/boot/dietpi/func/dietpi-wifidb 1
+
+			# Set WiFi country code
+			/boot/dietpi/func/dietpi-set_hardware wificountrycode "$(sed -n '/^[[:blank:]]*AUTO_SETUP_NET_WIFI_COUNTRY_CODE=/{s/^[^=]*=//p;q}' /boot/dietpi.txt)"
 
 		# - Ethernet
 		elif (( $ethernet_enabled )); then
@@ -268,6 +271,10 @@
 		local enable_ipv6=$(grep -cm1 '^[[:blank:]]*CONFIG_ENABLE_IPV6=1' /boot/dietpi.txt)
 		/boot/dietpi/func/dietpi-set_hardware enableipv6 $enable_ipv6
 		(( $enable_ipv6 )) && /boot/dietpi/func/dietpi-set_hardware preferipv4 $(grep -cm1 '^[[:blank:]]*CONFIG_PREFER_IPV4=1' /boot/dietpi.txt)
+
+		# - Configure enabled interfaces now, /etc/network/interfaces will be effective from next boot on.
+		#	Failsafe: Bring up Ethernet, whenever WiFi is disabled or fails to be configured, e.g. due to wrong credentials.
+		(( $wifi_enabled )) && ifup wlan$index_wlan || ifup eth$index_eth
 
 	}
 
