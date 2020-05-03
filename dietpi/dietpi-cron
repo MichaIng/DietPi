@@ -9,14 +9,15 @@
 	#////////////////////////////////////
 	#
 	# Info:
+	# - Location: /boot/dietpi/dietpi-cron
 	# - Menu system that allows users to change the start dates/times for all cron jobs.
 	#
 	# Usage:
-	# - /DietPi/dietpi/dietpi-cron
+	# - /boot/dietpi/dietpi-cron
 	#////////////////////////////////////
 
 	# Import DietPi-Globals --------------------------------------------------------------
-	. /DietPi/dietpi/func/dietpi-globals
+	. /boot/dietpi/func/dietpi-globals
 	G_PROGRAM_NAME='DietPi-Cron'
 	G_CHECK_ROOT_USER
 	G_INIT
@@ -25,10 +26,127 @@
 	#/////////////////////////////////////////////////////////////////////////////////////
 	# Globals
 	#/////////////////////////////////////////////////////////////////////////////////////
-	TARGETMENUID=0
-	PREVIOUS_MENU_SELECTION='cron.minutely'
+	MAILTO=
 	aCRON_TIME=()
-	aDAY_OF_THE_WEEK_TEXT=(
+	Read_Settings(){
+
+		# Mailto
+		MAILTO=$(sed -n '/^[[:blank:]]*MAILTO=/{s/^[[:blank:]]*=//p;q}' /etc/crontab)
+		MAILTO=${MAILTO#[\'\"]}; MAILTO=${MAILTO%[\'\"]}
+
+		# minutely_min
+		aCRON_TIME[9]=$(mawk -F'[/ ]' '/cron.minutely/{print $2;exit}' /etc/crontab)
+
+		# hourly_min
+		aCRON_TIME[0]=$(mawk '/cron.hourly/{print $1;exit}' /etc/crontab)
+
+		# daily_min / daily_hour
+		aCRON_TIME[1]=$(mawk '/cron.daily/{print $1;exit}' /etc/crontab)
+		aCRON_TIME[2]=$(mawk '/cron.daily/{print $2;exit}' /etc/crontab)
+
+		# weekly_min / weekly_hour / weekly_day_of_week
+		aCRON_TIME[3]=$(mawk '/cron.weekly/{print $1;exit}' /etc/crontab)
+		aCRON_TIME[4]=$(mawk '/cron.weekly/{print $2;exit}' /etc/crontab)
+		aCRON_TIME[5]=$(mawk '/cron.weekly/{print $5;exit}' /etc/crontab)
+
+		# monthly_min / monthly_hour / monthly_day_of_month
+		aCRON_TIME[6]=$(mawk '/cron.monthly/{print $1;exit}' /etc/crontab)
+		aCRON_TIME[7]=$(mawk '/cron.monthly/{print $2;exit}' /etc/crontab)
+		aCRON_TIME[8]=$(mawk '/cron.monthly/{print $3;exit}' /etc/crontab)
+
+		# Failsafe: Override invalid times
+		for i in ${!aCRON_TIME[@]}
+		do
+
+			disable_error=1 G_CHECK_VALIDINT "${aCRON_TIME[$i]}" 0 || aCRON_TIME[$i]=5
+
+		done
+
+	}
+
+	Write_Settings(){
+
+		local mailto_string
+		[[ $MAILTO == 'default' ]] || mailto_string="MAILTO=\"$MAILTO\"
+"
+		local minutely_string="*/${aCRON_TIME[9]}"
+		(( ${aCRON_TIME[9]} )) || minutely_string="#$minutely_string"
+
+		cat << _EOF_ > /etc/crontab
+# Please use dietpi-cron to change cron start times
+SHELL=/bin/dash
+PATH=/usr/local/sbin:/usr/local/bin:/sbin:/bin:/usr/sbin:/usr/bin
+$mailto_string
+# m h dom mon dow user command
+$minutely_string * * * * root cd / && run-parts --report /etc/cron.minutely
+${aCRON_TIME[0]} * * * * root cd / && run-parts --report /etc/cron.hourly
+${aCRON_TIME[1]} ${aCRON_TIME[2]} * * * root test -x /usr/sbin/anacron || { cd / && run-parts --report /etc/cron.daily; }
+${aCRON_TIME[3]} ${aCRON_TIME[4]} * * ${aCRON_TIME[5]} root test -x /usr/sbin/anacron || { cd / && run-parts --report /etc/cron.weekly; }
+${aCRON_TIME[6]} ${aCRON_TIME[7]} ${aCRON_TIME[8]} * * root test -x /usr/sbin/anacron || { cd / && run-parts --report /etc/cron.monthly; }
+_EOF_
+
+	}
+
+	Input_Mailto(){
+
+		local value=$1
+
+		G_WHIP_DEFAULT_ITEM=${value:-0}
+		G_WHIP_INPUTBOX 'Please enter a mail address for cron job outputs:
+ - Enter "default" to have mails sent to the "root" mail alias (Debian default).
+ - Enter "0" to disable mails and if no MTA is configured (DietPi default).' && { value=$G_WHIP_RETURNED_VALUE; [[ $value == 0 ]] && value=; }
+
+		MAILTO=$value
+
+	}
+
+	Input_Minutely_Minute(){
+
+		local value=$1 min=0 max=59
+
+		G_WHIP_DEFAULT_ITEM=$value
+		if G_WHIP_INPUTBOX "Please enter the execution interval in minutes:\n - Valid range: $min - $max
+ - Enter \"0\" to disable this job."; then
+
+			G_CHECK_VALIDINT "$G_WHIP_RETURNED_VALUE" $min $max && value=$G_WHIP_RETURNED_VALUE
+
+		fi
+
+		return $value
+
+	}
+
+	Input_Minute(){
+
+		local value=$1 min=0 max=59
+
+		G_WHIP_DEFAULT_ITEM=$value
+		if G_WHIP_INPUTBOX "Please enter the execution minute:\n - Valid range: $min - $max"; then
+
+			G_CHECK_VALIDINT "$G_WHIP_RETURNED_VALUE" $min $max && value=$G_WHIP_RETURNED_VALUE
+
+		fi
+
+		return $value
+
+	}
+
+	Input_Hour(){
+
+		local value=$1 min=0 max=23
+
+		G_WHIP_DEFAULT_ITEM=$value
+		if G_WHIP_INPUTBOX "Please enter the execution hour in 24h format:\n - Valid range: $min - $max"; then
+
+			G_CHECK_VALIDINT "$G_WHIP_RETURNED_VALUE" $min $max && value=$G_WHIP_RETURNED_VALUE
+
+		fi
+
+		return $value
+
+	}
+
+	aDAY_OF_WEEK_TEXT=(
 
 		'Monday'
 		'Tuesday'
@@ -39,159 +157,49 @@
 		'Sunday'
 
 	)
+	Input_DayOfWeek(){
 
-	Read_Cron_Times(){
-
-		# hourly_min
-		aCRON_TIME[0]=$(mawk '/cron.hourly/ {print $1;exit}' /etc/crontab)
-
-		# daily_min / daily_hour
-		aCRON_TIME[1]=$(mawk '/cron.daily/ {print $1;exit}' /etc/crontab)
-		aCRON_TIME[2]=$(mawk '/cron.daily/ {print $2;exit}' /etc/crontab)
-
-		# weekly_min / weekly_hour / weekly_day_of_week
-		aCRON_TIME[3]=$(mawk '/cron.weekly/ {print $1;exit}' /etc/crontab)
-		aCRON_TIME[4]=$(mawk '/cron.weekly/ {print $2;exit}' /etc/crontab)
-		aCRON_TIME[5]=$(mawk '/cron.weekly/ {print $5;exit}' /etc/crontab)
-
-		# monthly_min / monthly_hour / monthly_day_of_month
-		aCRON_TIME[6]=$(mawk '/cron.monthly/ {print $1;exit}' /etc/crontab)
-		aCRON_TIME[7]=$(mawk '/cron.monthly/ {print $2;exit}' /etc/crontab)
-		aCRON_TIME[8]=$(mawk '/cron.monthly/ {print $3;exit}' /etc/crontab)
-
-		# minutely_min
-		aCRON_TIME[9]=$(mawk -F'[/ ]' '/cron.minutely/ {print $2;exit}' /etc/crontab)
-
-		# Check for valid ints
-		for i in ${!aCRON_TIME[@]}
-		do
-
-			disable_error=1 G_CHECK_VALIDINT "${aCRON_TIME[$i]}" || aCRON_TIME[$i]=1 # Override
-
-		done
-
-	}
-
-	Write_Cron_Times(){
-
-		cat << _EOF_ > /etc/crontab
-# Please use dietpi-cron to change cron start times
-SHELL=/bin/sh
-PATH=/usr/local/sbin:/usr/local/bin:/sbin:/bin:/usr/sbin:/usr/bin
-
-# m h dom mon dow user command
-*/${aCRON_TIME[9]} * * * * root cd / && run-parts --report /etc/cron.minutely
-${aCRON_TIME[0]} * * * * root cd / && run-parts --report /etc/cron.hourly
-${aCRON_TIME[1]} ${aCRON_TIME[2]} * * * root test -x /usr/sbin/anacron || { cd / && run-parts --report /etc/cron.daily; }
-${aCRON_TIME[3]} ${aCRON_TIME[4]} * * ${aCRON_TIME[5]} root test -x /usr/sbin/anacron || { cd / && run-parts --report /etc/cron.weekly; }
-${aCRON_TIME[6]} ${aCRON_TIME[7]} ${aCRON_TIME[8]} * * root test -x /usr/sbin/anacron || { cd / && run-parts --report /etc/cron.monthly; }
-_EOF_
-
-		(( ${aCRON_TIME[9]} == 0 )) && sed -i 's|^*/0 |#*/0 |' /etc/crontab
-
-	}
-
-	Input_Cron_Minutely_Minute(){
-
-		local input_value=$1
-		local min_value=0
-		local max_value=59
-
-		G_WHIP_DEFAULT_ITEM=$input_value
-		if G_WHIP_INPUTBOX "Please enter the execution interval in minutes:
- - Valid range (0 - $max_value)
- - Enter 0 to disable this job"; then
-
-			# Valid input?
-			G_CHECK_VALIDINT "$G_WHIP_RETURNED_VALUE" $min_value $max_value && input_value=$G_WHIP_RETURNED_VALUE
-
-		fi
-
-		return $input_value
-
-	}
-
-	Input_Cron_Minute(){
-
-		local input_value=$1
-		local min_value=0
-		local max_value=59
-
-		G_WHIP_DEFAULT_ITEM=$input_value
-		if G_WHIP_INPUTBOX "Please enter a value for MINUTE:\n - Valid range ($min_value - $max_value)"; then
-
-			# Valid input?
-			G_CHECK_VALIDINT "$G_WHIP_RETURNED_VALUE" $min_value $max_value && input_value=$G_WHIP_RETURNED_VALUE
-
-		fi
-
-		return $input_value
-
-	}
-
-	Input_Cron_Hour(){
-
-		local input_value=$1
-		local min_value=0
-		local max_value=23
-
-		G_WHIP_DEFAULT_ITEM=$input_value
-		if G_WHIP_INPUTBOX "Please enter a value for HOUR (24h):\n - Valid range ($min_value - $max_value)"; then
-
-			# Valid input?
-			G_CHECK_VALIDINT "$G_WHIP_RETURNED_VALUE" $min_value $max_value && input_value=$G_WHIP_RETURNED_VALUE
-
-		fi
-
-		return $input_value
-
-	}
-
-	Input_Cron_DayOfWeek(){
-
-		local input_value=$1
-		local min_value=1
-		local max_value=7
+		local value=$1
 
 		G_WHIP_MENU_ARRAY=(
 
-			'1' ": ${aDAY_OF_THE_WEEK_TEXT[0]}"
-			'2' ": ${aDAY_OF_THE_WEEK_TEXT[1]}"
-			'3' ": ${aDAY_OF_THE_WEEK_TEXT[2]}"
-			'4' ": ${aDAY_OF_THE_WEEK_TEXT[3]}"
-			'5' ": ${aDAY_OF_THE_WEEK_TEXT[4]}"
-			'6' ": ${aDAY_OF_THE_WEEK_TEXT[5]}"
-			'7' ": ${aDAY_OF_THE_WEEK_TEXT[6]}"
+			'1' ": ${aDAY_OF_WEEK_TEXT[0]}"
+			'2' ": ${aDAY_OF_WEEK_TEXT[1]}"
+			'3' ": ${aDAY_OF_WEEK_TEXT[2]}"
+			'4' ": ${aDAY_OF_WEEK_TEXT[3]}"
+			'5' ": ${aDAY_OF_WEEK_TEXT[4]}"
+			'6' ": ${aDAY_OF_WEEK_TEXT[5]}"
+			'7' ": ${aDAY_OF_WEEK_TEXT[6]}"
 
 		)
 
-		G_WHIP_DEFAULT_ITEM=$input_value
-		G_WHIP_MENU 'Please select a day of the week.' && input_value=$G_WHIP_RETURNED_VALUE
+		G_WHIP_DEFAULT_ITEM=$value
+		G_WHIP_MENU 'Please select the execution day of week:' && value=$G_WHIP_RETURNED_VALUE
 
-		return $input_value
+		return $value
 
 	}
 
-	Input_Cron_DayOfMonth(){
+	Input_DayOfMonth(){
 
-		local input_value=$1
-		local min_value=1
-		local max_value=28
+		local value=$1 min=1 max=28
 
-		G_WHIP_DEFAULT_ITEM=$input_value
-		if G_WHIP_INPUTBOX "Please enter a value for DAY of the MONTH:
- - Valid range ($min_value - $max_value)
- - eg: 11 = the 11th day of month"; then
+		G_WHIP_DEFAULT_ITEM=$value
+		if G_WHIP_INPUTBOX "Please enter the execution day of month:\n - Valid range: $min - $max"; then
 
-			# Valid input?
-			G_CHECK_VALIDINT "$G_WHIP_RETURNED_VALUE" $min_value $max_value && input_value=$G_WHIP_RETURNED_VALUE
+			G_CHECK_VALIDINT "$G_WHIP_RETURNED_VALUE" $min $max && value=$G_WHIP_RETURNED_VALUE
 
 		fi
 
-		return $input_value
+		return $value
 
 	}
 
+	#/////////////////////////////////////////////////////////////////////////////////////
+	# Menu System
+	#/////////////////////////////////////////////////////////////////////////////////////
+	TARGETMENUID=0
+	PREVIOUS_MENU_SELECTION='cron.hourly'
 
 	Menu_Exit(){
 
@@ -202,109 +210,130 @@ _EOF_
 
 	Menu_Main(){
 
-		case "${aCRON_TIME[9]}" in
+		# cron.minutely text
+		local minutely_text
+		case ${aCRON_TIME[9]} in
 
-			'0')
+			0) minutely_text='Disabled';;
+			1) minutely_text='Every minute';;
+			*) minutely_text="Every ${aCRON_TIME[9]} minutes";;
 
-				minute_string='Disabled'
+		esac
 
-			;;
+		# cron.hourly time
+		local hourly_time=${aCRON_TIME[0]}
+		(( ${#hourly_time} < 2 )) && hourly_time="0$hourly_time"
 
-			'1')
+		# cron.daily time in 24h format
+		local daily_time=${aCRON_TIME[1]}
+		(( ${#daily_time} < 2 )) && daily_time="0$daily_time"
+		daily_time="${aCRON_TIME[2]}:$daily_time"
+		(( ${#daily_time} < 5 )) && daily_time="0$daily_time"
 
-				minute_string='Every Minute'
+		# cron.weekly time in 24h format
+		local weekly_time=${aCRON_TIME[3]}
+		(( ${#weekly_time} < 2 )) && weekly_time="0$weekly_time"
+		weekly_time="${aCRON_TIME[4]}:$weekly_time"
+		(( ${#weekly_time} < 5 )) && weekly_time="0$weekly_time"
 
-			;;
+		# cron.monthly time in 24h format
+		local monthly_time=${aCRON_TIME[6]}
+		(( ${#monthly_time} < 2 )) && monthly_time="0$monthly_time"
+		monthly_time="${aCRON_TIME[7]}:$monthly_time"
+		(( ${#monthly_time} < 5 )) && monthly_time="0$monthly_time"
 
-			*)
+		# cron.monthly day of month
+		local monthly_dom
+		case ${aCRON_TIME[8]} in
 
-				minute_string="Every ${aCRON_TIME[9]} Minutes"
-
-			;;
+			*1) monthly_dom="${aCRON_TIME[8]}st";;
+			*2) monthly_dom="${aCRON_TIME[8]}nd";;
+			*3) monthly_dom="${aCRON_TIME[8]}rd";;
+			*) monthly_dom="${aCRON_TIME[8]}th";;
 
 		esac
 
 		G_WHIP_MENU_ARRAY=(
 
-			'' '●─ Options '
-			'cron.minutely' ": $minute_string"
-			'cron.hourly' ": Every Hour at ${aCRON_TIME[0]} Minutes"
-			'cron.daily' ": Every Day at ${aCRON_TIME[2]} Hours and ${aCRON_TIME[1]} Minutes"
-			'cron.weekly' ": Every ${aDAY_OF_THE_WEEK_TEXT[$(( ${aCRON_TIME[5]} - 1))]} at ${aCRON_TIME[4]} Hours and ${aCRON_TIME[3]} Minutes"
-			'cron.monthly' ": On Day ${aCRON_TIME[8]} of the month at ${aCRON_TIME[7]} Hours and ${aCRON_TIME[6]} Minutes"
+			'' '●─ Options (times in 24h format) '
+			'Mailto' ": ${MAILTO:-Disabled}"
+			'cron.minutely' ": $minutely_text"
+			'cron.hourly' ": Every hour at :$hourly_time"
+			'cron.daily' ": Every day at $daily_time"
+			'cron.weekly' ": Every ${aDAY_OF_WEEK_TEXT[$(( ${aCRON_TIME[5]} - 1 ))]} at $weekly_time"
+			'cron.monthly' ": Every $monthly_dom day of month at $monthly_time"
 			'' '●─ Save changes '
-			'Apply' ': Saves your cron start times and restarts service.'
+			'Apply' ': Save and apply above cron settings'
 
 		)
 
 		G_WHIP_DEFAULT_ITEM=$PREVIOUS_MENU_SELECTION
 		G_WHIP_BUTTON_CANCEL_TEXT='Exit'
-		if G_WHIP_MENU "$G_PROGRAM_NAME allows you to change the date and times for starting each cron job.
-\n- Example:\nIf you set cron.daily to 22 hours and 20 minutes, all scripts in /etc/cron.daily/* will be run at 10:20pm."; then
+		if G_WHIP_MENU "$G_PROGRAM_NAME allows you to adjust the execution schedule for scripts in /etc/cron.*/* directories.
+\n - Example: If you set cron.daily to hour 22 and minute 20, all scripts in /etc/cron.daily/* will be executed at 10:20pm."; then
 
 			PREVIOUS_MENU_SELECTION=$G_WHIP_RETURNED_VALUE
 
 			case "$G_WHIP_RETURNED_VALUE" in
 
+				'Mailto')
+
+					Input_Mailto "$MAILTO"
+				;;
+
 				'cron.minutely')
 
-					Input_Cron_Minutely_Minute ${aCRON_TIME[9]}
+					Input_Minutely_Minute ${aCRON_TIME[9]}
 					aCRON_TIME[9]=$?
-
 				;;
 
 				'cron.hourly')
 
-					Input_Cron_Minute ${aCRON_TIME[0]}
+					Input_Minute ${aCRON_TIME[0]}
 					aCRON_TIME[0]=$?
 				;;
 
 				'cron.daily')
 
-					Input_Cron_Hour ${aCRON_TIME[2]}
+					Input_Hour ${aCRON_TIME[2]}
 					aCRON_TIME[2]=$?
 
-					Input_Cron_Minute ${aCRON_TIME[1]}
+					Input_Minute ${aCRON_TIME[1]}
 					aCRON_TIME[1]=$?
 				;;
 
 				'cron.weekly')
 
-					Input_Cron_DayOfWeek ${aCRON_TIME[5]}
+					Input_DayOfWeek ${aCRON_TIME[5]}
 					aCRON_TIME[5]=$?
 
-					Input_Cron_Hour ${aCRON_TIME[4]}
+					Input_Hour ${aCRON_TIME[4]}
 					aCRON_TIME[4]=$?
 
-					Input_Cron_Minute ${aCRON_TIME[3]}
+					Input_Minute ${aCRON_TIME[3]}
 					aCRON_TIME[3]=$?
 				;;
 
 				'cron.monthly')
 
-					Input_Cron_DayOfMonth ${aCRON_TIME[8]}
+					Input_DayOfMonth ${aCRON_TIME[8]}
 					aCRON_TIME[8]=$?
 
-					Input_Cron_Hour ${aCRON_TIME[7]}
+					Input_Hour ${aCRON_TIME[7]}
 					aCRON_TIME[7]=$?
 
-					Input_Cron_Minute ${aCRON_TIME[6]}
+					Input_Minute ${aCRON_TIME[6]}
 					aCRON_TIME[6]=$?
-
 				;;
 
 				'Apply')
 
-					Write_Cron_Times
-					/DietPi/dietpi/dietpi-services restart cron
-
+					Write_Settings
 					G_WHIP_MSG 'Cron start times have been saved and applied.'
-
 				;;
 
 			esac
 
-		# Exit
 		else
 
 			Menu_Exit
@@ -317,10 +346,11 @@ _EOF_
 	# Main Loop
 	#/////////////////////////////////////////////////////////////////////////////////////
 	# Get current values
-	Read_Cron_Times
+	Read_Settings
 	#-----------------------------------------------------------------------------------
 	# Start Menu
-	while (( $TARGETMENUID > -1 )); do
+	while (( $TARGETMENUID > -1 ))
+	do
 
 		G_TERM_CLEAR
 		Menu_Main

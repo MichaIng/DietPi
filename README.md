@@ -43,7 +43,7 @@ Project lead of DietPi (20/02/2019 and onwards), source code contributor, bug fi
 
 ---
 
-### Currently active contributors
+### Active Contributors
 
 #### Daniel Knight (Fourdee)
 
@@ -60,6 +60,12 @@ DietPi forum co-administrator, management, support, testing and valuable feedbac
 _Joined 2017-07-26_
 
 Creator and maintainer of the Clonezilla based installer images for x86_64 UEFI systems.
+
+#### Joulinar
+
+_Joined Q4 2019_
+
+DietPi forum moderator, support, testing, bug reports + investigation and valuable feedback.
 
 ---
 
@@ -173,7 +179,7 @@ along with this program.  If not, see https://www.gnu.org/licenses/
 - Source: https://github.com/MichaIng/DietPi
 - Build: Not applicable, as DietPi uses Bash scripts only, no building or compiling is required.
 
-### DietPi file list
+### DietPi Files
 
 - All files located in (recursively):
   - `/DietPi/`
@@ -187,18 +193,20 @@ along with this program.  If not, see https://www.gnu.org/licenses/
 
 > The above GPLv2 documentation also applies to all mentioned files!
 
-### Additional Software
+### 3rd Party Sources/Credits
 
-Links to additional software used in DietPi and their source and build instructions where applicable:
+Links to hardware and software manufacturers, sources and build instructions used in DietPi:
 
 - [Linux kernel](https://github.com/torvalds/linux)
 - [GNU operating system](https://www.gnu.org/)
 - [Debian distribution](https://salsa.debian.org/)
 - [Raspberry](https://github.com/raspberrypi) [Pi](https://github.com/RPi-Distro)
-- [Odroid](https://github.com/hardkernel?tab=repositories)
+- [Hardkernel](https://github.com/hardkernel?tab=repositories)
+- [Meverics Odroid repository](https://forum.odroid.com/viewtopic.php?f=52&t=5908)
 - [Sparky](https://github.com/sparkysbc?tab=repositories) [SBC](https://github.com/sparky-sbc/sparky-test)
-- [RockChip](https://github.com/rockchip-linux/rk-rootfs-build)
+- [PINE64](https://www.pine64.org/)
 - [FriendlyARM](https://github.com/friendlyarm?tab=repositories)
+- [Rockchip](https://github.com/rockchip-linux/rk-rootfs-build)
 - [Armbian](https://github.com/armbian)
 - [X.Org-X-Server](https://www.x.org/archive//individual/)
 - [LXDE desktop](https://github.com/LXDE)
@@ -209,6 +217,9 @@ Links to additional software used in DietPi and their source and build instructi
 - [Chromium](https://chromium.googlesource.com/chromium/src/)
 - [Kodi/XBMC](https://github.com/xbmc/xbmc)
 - [Transmission](https://transmissionbt.com/download/)
+- [rTorrent](https://github.com/rakshasa/rtorrent)
+- [ruTorrent](https://github.com/Novik/ruTorrent)
+- [qBittorrent](https://github.com/qbittorrent/qBittorrent)
 - [Nextcloud](https://github.com/nextcloud/server)
 - [ownCloud](https://github.com/owncloud/core)
 - [MiniDLNA](https://sourceforge.net/p/minidlna/git/ci/master/tree/)
@@ -225,13 +236,16 @@ Links to additional software used in DietPi and their source and build instructi
 - [Certbot](https://github.com/certbot/certbot)
 - [Pi-hole](https://github.com/pi-hole/pi-hole)
 - [phpBB](https://github.com/phpbb/phpbb)
-- [ProFTPD](https://github.com/proftpd)
+- [ProFTPD](https://github.com/proftpd/proftpd)
+- [vsftpd](https://security.appspot.com/vsftpd.html)
 - [Samba](https://wiki.samba.org/index.php/Using_Git_for_Samba_Development)
+- [NFS](http://linux-nfs.org/wiki/index.php/Main_Page)
 - [No-IP Client Binary](https://www.noip.com/support/knowledgebase/installing-the-linux-dynamic-update-client/)
 - [Dropbear](https://github.com/mkj/dropbear)
 - [OpenSSH](https://github.com/openssh/openssh-portable)
 - [OpenVPN](https://github.com/OpenVPN)
 - [PiVPN](https://github.com/pivpn/pivpn)
+- [WireGuard](https://www.wireguard.com/)
 - [Amiberry](https://github.com/midwan/amiberry)
 - [RetroPie Setup Script](https://github.com/petrockblog/RetroPie-Setup)
 - [OpenTyrian](https://bitbucket.org/opentyrian/opentyrian/wiki/Home)
@@ -239,8 +253,9 @@ Links to additional software used in DietPi and their source and build instructi
 - [Deluge](https://dev.deluge-torrent.org/wiki/Development#SourceCode)
 - [Subsonic](https://sourceforge.net/projects/subsonic/)
 - [Airsonic](https://github.com/airsonic/airsonic)
-- [LMS/SqueezeBox](https://github.com/Logitech/slimserver)
+- [Logitech Media Server](https://github.com/Logitech/slimserver)
 - [Ampache](https://github.com/ampache/ampache)
+- [Plex Media Server](https://www.plex.tv/)
 - [FFmpeg](https://github.com/FFmpeg/FFmpeg)
 - [Shairport-Sync](https://github.com/mikebrady/shairport-sync)
 - [FreshRSS](https://github.com/FreshRSS/FreshRSS)
@@ -250,3 +265,6 @@ Links to additional software used in DietPi and their source and build instructi
 - [Grafana](https://github.com/grafana/grafana)
 - [Clonezilla](https://gitlab.com/stevenshiau/clonezilla)
 - [Gitea](https://github.com/go-gitea/gitea)
+- [Home Assistant](https://github.com/home-assistant/core)
+- [TasmoAdmin](https://github.com/reloxx13/TasmoAdmin)
+- [Domoticz](https://github.com/domoticz/domoticz)
