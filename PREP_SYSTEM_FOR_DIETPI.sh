@@ -289,7 +289,7 @@
 			umount /DietPi # Failsafe
 			[[ -d '/DietPi' ]] && rm -R /DietPi
 			rm -Rfv /{boot,mnt,etc,var/lib,var/tmp,run}/*dietpi*
-			rm -fv /etc/{cron.*,{bashrc,profile,sysctl,network/if-up,udev/rules}.d}/*dietpi*
+			rm -fv /etc{,/cron.*,/{bashrc,profile,sysctl,network/if-up,udev/rules}.d}/{,.}*dietpi*
 
 			[[ -f '/root/DietPi-Automation.log' ]] && rm -v /root/DietPi-Automation.log
 			[[ -f '/boot/Automation_Format_My_Usb_Drive' ]] && rm -v /boot/Automation_Format_My_Usb_Drive
@@ -382,6 +382,7 @@
 		#	NB: PLEASE ENSURE HW_MODEL INDEX ENTRIES MATCH dietpi-obtain_hw_model and dietpi-survey_report
 		#	NBB: DO NOT REORDER INDICES. These are now fixed and will never change (due to survey results etc)
 		G_WHIP_BUTTON_CANCEL_TEXT='Exit'
+		G_WHIP_DEFAULT_ITEM=0
 		G_WHIP_MENU_ARRAY=(
 
 			'' '●─ ARM ─ Core devices with GPU support '
@@ -473,9 +474,6 @@
 		done
 		G_HW_MODEL=$HW_MODEL
 		unset HW_MODEL
-
-		# + Set for future scripts
-		echo $G_HW_MODEL > /etc/.dietpi_hw_model_identifier
 
 		G_DIETPI-NOTIFY 2 "Selected hardware model ID: $G_HW_MODEL"
 		G_DIETPI-NOTIFY 2 "Detected CPU architecture: $G_HW_ARCH_NAME (ID: $G_HW_ARCH)"
@@ -660,7 +658,7 @@ Currently installed: $G_DISTRO_NAME (ID: $G_DISTRO)"; then
 		G_DIETPI-NOTIFY 2 "Setting APT sources.list: $DISTRO_TARGET_NAME $DISTRO_TARGET"
 
 		# We need to forward $DISTRO_TARGET* to dietpi-set_software, as well as $G_HW_MODEL for Debian vs Raspbian decision.
-		G_DISTRO=$DISTRO_TARGET G_DISTRO_NAME=$DISTRO_TARGET_NAME G_HW_MODEL=$G_HW_MODEL G_EXEC /boot/dietpi/func/dietpi-set_software apt-mirror 'default'
+		G_DISTRO=$DISTRO_TARGET G_DISTRO_NAME=$DISTRO_TARGET_NAME G_HW_MODEL=$G_HW_MODEL G_EXEC /boot/dietpi/func/dietpi-set_software apt-mirror default
 
 		# Meveric, update repo to use our EU mirror: https://github.com/MichaIng/DietPi/issues/1519#issuecomment-368234302
 		sed -Ei 's@https?://oph\.mdrjr\.net@http://fuzon.co.uk@' /etc/apt/sources.list.d/meveric* &> /dev/null
@@ -1319,6 +1317,7 @@ _EOF_'
 		systemctl disable --now e2scrub_all.timer 2> /dev/null
 		systemctl disable --now e2scrub_reap 2> /dev/null
 
+		(( $G_HW_MODEL > 9 )) && echo $G_HW_MODEL > /etc/.dietpi_hw_model_identifier
 		G_EXEC_DESC='Generating /boot/dietpi/.hw_model' G_EXEC /boot/dietpi/func/dietpi-obtain_hw_model
 
 		G_EXEC_DESC='Generating /etc/fstab' G_EXEC /boot/dietpi/dietpi-drive_manager 4
@@ -1754,11 +1753,7 @@ _EOF_
 		/boot/dietpi/func/dietpi-set_software apt-cache cache disable
 		/boot/dietpi/func/dietpi-set_software apt-cache clean
 
-		# - HW Specific
-		#	RPi remove saved G_HW_MODEL, allowing obtain-hw_model to auto detect RPi model
-		(( $G_HW_MODEL < 10 )) && [[ -f '/etc/.dietpi_hw_model_identifier' ]] && rm -v /etc/.dietpi_hw_model_identifier
-
-		# - BBB remove fsexpansion: https://github.com/MichaIng/DietPi/issues/931#issuecomment-345451529
+		# BBB remove fsexpansion: https://github.com/MichaIng/DietPi/issues/931#issuecomment-345451529
 		if (( $G_HW_MODEL == 71 )); then
 
 			systemctl disable dietpi-fs_partition_resize
