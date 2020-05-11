@@ -178,6 +178,7 @@ along with this program.  If not, see https://www.gnu.org/licenses/
 
 - Source: https://github.com/MichaIng/DietPi
 - Build: Not applicable, as DietPi uses Bash scripts only, no building or compiling is required.
+- [![CodeFactor](https://www.codefactor.io/repository/github/michaing/dietpi/badge)](https://www.codefactor.io/repository/github/michaing/dietpi)
 
 ### DietPi Files
 
@@ -199,6 +200,7 @@ Links to hardware and software manufacturers, sources and build instructions use
 
 - [Linux kernel](https://github.com/torvalds/linux)
 - [GNU operating system](https://www.gnu.org/)
+- [Bash](https://git.savannah.gnu.org/cgit/bash.git)
 - [Debian distribution](https://salsa.debian.org/)
 - [Raspberry](https://github.com/raspberrypi) [Pi](https://github.com/RPi-Distro)
 - [Hardkernel](https://github.com/hardkernel?tab=repositories)
