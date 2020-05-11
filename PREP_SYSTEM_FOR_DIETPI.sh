@@ -289,7 +289,7 @@
 			umount /DietPi # Failsafe
 			[[ -d '/DietPi' ]] && rm -R /DietPi
 			rm -Rfv /{boot,mnt,etc,var/lib,var/tmp,run}/*dietpi*
-			rm -fv /etc/{cron.*,{bashrc,profile,sysctl,network/if-up,udev/rules}.d}/*dietpi*
+			rm -fv /etc{,/cron.*,/{bashrc,profile,sysctl,network/if-up,udev/rules}.d}/{,.}*dietpi*
 
 			[[ -f '/root/DietPi-Automation.log' ]] && rm -v /root/DietPi-Automation.log
 			[[ -f '/boot/Automation_Format_My_Usb_Drive' ]] && rm -v /boot/Automation_Format_My_Usb_Drive
@@ -382,6 +382,7 @@
 		#	NB: PLEASE ENSURE HW_MODEL INDEX ENTRIES MATCH dietpi-obtain_hw_model and dietpi-survey_report
 		#	NBB: DO NOT REORDER INDICES. These are now fixed and will never change (due to survey results etc)
 		G_WHIP_BUTTON_CANCEL_TEXT='Exit'
+		G_WHIP_DEFAULT_ITEM=0
 		G_WHIP_MENU_ARRAY=(
 
 			'' '●─ ARM ─ Core devices with GPU support '
@@ -404,13 +405,14 @@
 			'15' ': Odroid N2'
 			'70' ': Sparky SBC'
 			'52' ': ASUS Tinker Board'
-			'40' ': Pine A64'
-			'43' ': Rock64'
-			'42' ': RockPro64'
-			'45' ': Pine H64'
+			'40' ': PINE A64'
+			'43' ': ROCK64'
+			'42' ': ROCKPro64'
+			'45' ': PINE H64'
 			'59' ': ZeroPi'
 			'60' ': NanoPi NEO'
 			'65' ': NanoPi NEO2'
+			'57' ': NanoPi NEO Plus2'
 			'64' ': NanoPi NEO Air'
 			'63' ': NanoPi M1/T1'
 			'66' ': NanoPi M1 Plus'
@@ -418,7 +420,7 @@
 			'61' ': NanoPi M2/T2'
 			'62' ': NanoPi M3/T3/Fire3'
 			'68' ': NanoPi M4/T4/NEO4'
-			'58' ': NanoPi M4v2'
+			'58' ': NanoPi M4V2'
 			'72' ': ROCK Pi 4'
 			'73' ': ROCK Pi S'
 			'69' ': Firefly RK3399'
@@ -435,10 +437,10 @@
 			'53' ': BananaPi (sinovoip)'
 			'51' ': BananaPi Pro (Lemaker)'
 			'50' ': BananaPi M2+ (sinovoip)'
-			'71' ': Beagle Bone Black'
+			'71' ': BeagleBone Black'
 			'39' ': LeMaker Guitar'
 			'' '●─ Other '
-			'22' ': Generic device'
+			'22' ': Generic Device'
 
 		)
 
@@ -472,9 +474,6 @@
 		done
 		G_HW_MODEL=$HW_MODEL
 		unset HW_MODEL
-
-		# + Set for future scripts
-		echo $G_HW_MODEL > /etc/.dietpi_hw_model_identifier
 
 		G_DIETPI-NOTIFY 2 "Selected hardware model ID: $G_HW_MODEL"
 		G_DIETPI-NOTIFY 2 "Detected CPU architecture: $G_HW_ARCH_NAME (ID: $G_HW_ARCH)"
@@ -602,8 +601,8 @@ Currently installed: $G_DISTRO_NAME (ID: $G_DISTRO)"; then
 		#------------------------------------------------------------------------------------------------
 
 		local url="https://github.com/$G_GITOWNER/DietPi/archive/$G_GITBRANCH.tar.gz"
-		G_CHECK_URL "$url"
-		G_EXEC_DESC='Downloading DietPi sourcecode' G_EXEC curl -sSL "$url" -o package.tar.gz
+		G_CHECK_URL_TIMEOUT=10 G_CHECK_URL_ATTEMPTS=2 G_CHECK_URL "$url"
+		G_EXEC_DESC='Downloading DietPi sourcecode' G_EXEC curl -sSfL "$url" -o package.tar.gz
 
 		[[ -d DietPi-$G_GITBRANCH ]] && G_EXEC_DESC='Cleaning previously extracted files' G_EXEC rm -R "DietPi-$G_GITBRANCH"
 		G_EXEC_DESC='Extracting DietPi sourcecode' G_EXEC tar xf package.tar.gz
@@ -659,7 +658,7 @@ Currently installed: $G_DISTRO_NAME (ID: $G_DISTRO)"; then
 		G_DIETPI-NOTIFY 2 "Setting APT sources.list: $DISTRO_TARGET_NAME $DISTRO_TARGET"
 
 		# We need to forward $DISTRO_TARGET* to dietpi-set_software, as well as $G_HW_MODEL for Debian vs Raspbian decision.
-		G_DISTRO=$DISTRO_TARGET G_DISTRO_NAME=$DISTRO_TARGET_NAME G_HW_MODEL=$G_HW_MODEL G_EXEC /boot/dietpi/func/dietpi-set_software apt-mirror 'default'
+		G_DISTRO=$DISTRO_TARGET G_DISTRO_NAME=$DISTRO_TARGET_NAME G_HW_MODEL=$G_HW_MODEL G_EXEC /boot/dietpi/func/dietpi-set_software apt-mirror default
 
 		# Meveric, update repo to use our EU mirror: https://github.com/MichaIng/DietPi/issues/1519#issuecomment-368234302
 		sed -Ei 's@https?://oph\.mdrjr\.net@http://fuzon.co.uk@' /etc/apt/sources.list.d/meveric* &> /dev/null
@@ -671,8 +670,7 @@ Currently installed: $G_DISTRO_NAME (ID: $G_DISTRO)"; then
 
 		# @MichaIng https://github.com/MichaIng/DietPi/pull/1266/files
 		G_DIETPI-NOTIFY 2 'Marking all packages as auto-installed first, to allow effective autoremove afterwards'
-
-		G_EXEC apt-mark auto $(apt-mark showmanual)
+		G_EXEC apt-mark auto $(dpkg --get-selections | mawk '{print $1}')
 
 		G_EXEC_DESC='Disable automatic recommends/suggests install and allow them to be autoremoved'
 		# Remove existing/conflicting files first
@@ -736,9 +734,9 @@ _EOF_'
 
 		# G_DISTRO specific
 		# - Dropbear: DietPi default SSH-Client
-		#   On Buster-, "dropbear" pulls in "dropbear-initramfs", which we don't need
+		#   On Buster-, "dropbear" pulls in "dropbear-initramfs", which we don't need: https://packages.debian.org/dropbear
 		# - apt-transport-https: Allows HTTPS sources for ATP
-		#   On Buster+, it is included in "apt" package
+		#   On Buster+, it is included in "apt" package: https://packages.debian.org/apt-transport-https
 		if (( $G_DISTRO > 5 )); then
 
 			aPACKAGES_REQUIRED_INSTALL+=('dropbear')
@@ -749,6 +747,10 @@ _EOF_'
 			(( $G_DISTRO < 5 )) && aPACKAGES_REQUIRED_INSTALL+=('apt-transport-https')
 
 		fi
+		# - systemd-timesyncd: Network time sync daemon
+		#   Available as dedicated package since Bullseye: https://packages.debian.org/systemd-timesyncd
+		#   While the above needs to be checked against current distro to not break SSH or APT before distro upgrade, this one should be checked against target distro version.
+		(( $G_DISTRO_TARGET > 5 )) && aPACKAGES_REQUIRED_INSTALL+=('systemd-timesyncd')
 
 		# G_HW_MODEL specific required repo key packages: https://github.com/MichaIng/DietPi/issues/1285#issuecomment-358301273
 		if (( $G_HW_MODEL > 9 )); then
@@ -799,26 +801,29 @@ _EOF_'
 
 		# Kernel/bootloader/firmware
 		# - We need to install those directly to allow G_AGA() autoremove possible older packages later: https://github.com/MichaIng/DietPi/issues/1285#issuecomment-354602594
+		# - Jessie workaround: https://github.com/MichaIng/DietPi/issues/3462
+		(( $G_DISTRO < 4 )) && G_EXEC_PRE_FUNC(){ acommand[2]='--force-yes'; }
 		# - G_HW_ARCH specific
 		#	x86_64
 		if (( $G_HW_ARCH == 10 )); then
 
-			G_AGI linux-image-amd64 os-prober
+			local packages='linux-image-amd64 os-prober'
 
 			# Grub EFI
 			if dpkg-query -s 'grub-efi-amd64' &> /dev/null || [[ -d '/boot/efi' ]]; then
 
-				local efi_packages='grub-efi-amd64'
+				packages+=' grub-efi-amd64'
 				# On Buster+ enable secure boot compatibility: https://packages.debian.org/buster/grub-efi-amd64-signed
-				(( $DISTRO_TARGET > 4 )) && efi_packages+=' grub-efi-amd64-signed shim-signed'
-				G_AGI $efi_packages
+				(( $DISTRO_TARGET > 4 )) && packages+=' grub-efi-amd64-signed shim-signed'
 
 			# Grub BIOS
 			else
 
-				G_AGI grub-pc
+				packages+=' grub-pc'
 
 			fi
+
+			G_AGI $packages
 
 		# - G_HW_MODEL specific required firmware/kernel/bootloader packages
 		#	ARMbian grab currently installed packages
@@ -897,6 +902,9 @@ _EOF_'
 
 		fi
 
+		# - Unset Jessie workaround
+		unset -f G_EXEC_PRE_FUNC
+
 		# - Firmware
 		if dpkg --get-selections | grep -q '^armbian-firmware'; then
 
@@ -939,7 +947,8 @@ _EOF_'
 
 		G_DIETPI-NOTIFY 2 'Generating list of minimal packages, required for DietPi installation'
 
-		G_EXEC_DESC='Marking required packages as manually installed' G_EXEC apt-mark manual ${aPACKAGES_REQUIRED_INSTALL[@]}
+		local packages=$(dpkg --get-selections ${aPACKAGES_REQUIRED_INSTALL[@]} 2> /dev/null | mawk '{print $1}')
+		[[ $packages ]] && G_EXEC_DESC='Marking required packages as manually installed' G_EXEC apt-mark manual $packages
 
 		# Purging additional packages, that (in some cases) do not get autoremoved:
 		# - dbus: Not required for headless images, but sometimes marked as "important", thus not autoremoved.
@@ -947,6 +956,8 @@ _EOF_'
 		# - dhcpcd5: https://github.com/MichaIng/DietPi/issues/1560#issuecomment-370136642
 		# - mountall: https://github.com/MichaIng/DietPi/issues/2613
 		# - initscripts: Pre-installed on Jessie systems (?), superseded and masked by systemd, but never autoremoved
+		#	Jessie workaround: https://github.com/MichaIng/DietPi/issues/3462
+		(( $G_DISTRO < 4 )) && G_EXEC_PRE_FUNC(){ acommand[2]='--force-yes'; }
 		G_AGP dbus dhcpcd5 mountall initscripts *office* *xfce* *qt5* *xserver* *xorg* glib-networking libgtk-3-0
 		# Remove any autoremove prevention
 		rm -f /etc/apt/apt.conf.d/01autoremove*
@@ -959,6 +970,8 @@ _EOF_'
 		G_DIETPI-NOTIFY 2 '-----------------------------------------------------------------------------------'
 		#------------------------------------------------------------------------------------------------
 
+		# - Jessie workaround: https://github.com/MichaIng/DietPi/issues/3462
+		(( $G_DISTRO < 4 )) && G_EXEC_PRE_FUNC(){ acommand[2]='--force-yes'; }
 		G_AGDUG
 
 		# Distro is now target (for APT purposes and G_AGX support due to installed binary, its here, instead of after G_AGUP)
@@ -1304,6 +1317,7 @@ _EOF_'
 		systemctl disable --now e2scrub_all.timer 2> /dev/null
 		systemctl disable --now e2scrub_reap 2> /dev/null
 
+		(( $G_HW_MODEL > 9 )) && echo $G_HW_MODEL > /etc/.dietpi_hw_model_identifier
 		G_EXEC_DESC='Generating /boot/dietpi/.hw_model' G_EXEC /boot/dietpi/func/dietpi-obtain_hw_model
 
 		G_EXEC_DESC='Generating /etc/fstab' G_EXEC /boot/dietpi/dietpi-drive_manager 4
@@ -1739,11 +1753,7 @@ _EOF_
 		/boot/dietpi/func/dietpi-set_software apt-cache cache disable
 		/boot/dietpi/func/dietpi-set_software apt-cache clean
 
-		# - HW Specific
-		#	RPi remove saved G_HW_MODEL, allowing obtain-hw_model to auto detect RPi model
-		(( $G_HW_MODEL < 10 )) && [[ -f '/etc/.dietpi_hw_model_identifier' ]] && rm -v /etc/.dietpi_hw_model_identifier
-
-		# - BBB remove fsexpansion: https://github.com/MichaIng/DietPi/issues/931#issuecomment-345451529
+		# BBB remove fsexpansion: https://github.com/MichaIng/DietPi/issues/931#issuecomment-345451529
 		if (( $G_HW_MODEL == 71 )); then
 
 			systemctl disable dietpi-fs_partition_resize
