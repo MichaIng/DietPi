@@ -958,7 +958,7 @@ _EOF_'
 		# - initscripts: Pre-installed on Jessie systems (?), superseded and masked by systemd, but never autoremoved
 		#	Jessie workaround: https://github.com/MichaIng/DietPi/issues/3462
 		(( $G_DISTRO < 4 )) && G_EXEC_PRE_FUNC(){ acommand[2]='--force-yes'; }
-		G_AGP dbus dhcpcd5 mountall initscripts *office* *xfce* *qt5* *xserver* *xorg* glib-networking libgtk-3-0
+		G_AGP dbus dhcpcd5 mountall initscripts '*office*' '*xfce*' '*qt5*' '*xserver*' '*xorg*' glib-networking libgtk-3-0
 		# Remove any autoremove prevention
 		rm -f /etc/apt/apt.conf.d/01autoremove*
 		G_AGA
