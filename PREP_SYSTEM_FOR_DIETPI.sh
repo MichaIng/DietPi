@@ -750,7 +750,7 @@ _EOF_'
 		# - systemd-timesyncd: Network time sync daemon
 		#   Available as dedicated package since Bullseye: https://packages.debian.org/systemd-timesyncd
 		#   While the above needs to be checked against current distro to not break SSH or APT before distro upgrade, this one should be checked against target distro version.
-		(( $G_DISTRO_TARGET > 5 )) && aPACKAGES_REQUIRED_INSTALL+=('systemd-timesyncd')
+		(( $DISTRO_TARGET > 5 )) && aPACKAGES_REQUIRED_INSTALL+=('systemd-timesyncd')
 
 		# G_HW_MODEL specific required repo key packages: https://github.com/MichaIng/DietPi/issues/1285#issuecomment-358301273
 		if (( $G_HW_MODEL > 9 )); then
