@@ -752,25 +752,29 @@ _EOF_'
 		#   While the above needs to be checked against current distro to not break SSH or APT before distro upgrade, this one should be checked against target distro version.
 		(( $DISTRO_TARGET > 5 )) && aPACKAGES_REQUIRED_INSTALL+=('systemd-timesyncd')
 
-		# G_HW_MODEL specific required repo key packages: https://github.com/MichaIng/DietPi/issues/1285#issuecomment-358301273
-		if (( $G_HW_MODEL > 9 )); then
+		# G_HW_MODEL specific
+		# - initramfs: Required for generic bootloader, but not required/used by RPi bootloader, on VM install tiny-initramfs with limited features but sufficient and much smaller + faster
+		if (( $G_HW_MODEL == 20 )); then
 
-			# RAM file system initialisation, required for generic bootloader, but not required/used by RPi bootloader
-			# - On VM, install tiny-initramfs with limited features but sufficient and much smaller + faster
-			if (( $G_HW_MODEL == 20 )); then
+			aPACKAGES_REQUIRED_INSTALL+=('tiny-initramfs')
 
-				aPACKAGES_REQUIRED_INSTALL+=('tiny-initramfs')
+		elif (( $G_HW_MODEL > 9 )); then
 
-			else
+			aPACKAGES_REQUIRED_INSTALL+=('initramfs-tools')
 
-				aPACKAGES_REQUIRED_INSTALL+=('initramfs-tools')
+		fi
+		# - Entropy daemon: Use modern rng-tools5 on all devices where it has been proven to work, on RPi rng-tools (default on Raspbian), else haveged: https://github.com/MichaIng/DietPi/issues/2806
+		if (( $G_HW_MODEL == 51 )); then
 
-			fi
-			aPACKAGES_REQUIRED_INSTALL+=('haveged')			# Entropy daemon: https://github.com/MichaIng/DietPi/issues/2806
+			aPACKAGES_REQUIRED_INSTALL+=('rng-tools5')
+
+		elif (( $G_HW_MODEL > 9 )); then
+
+			aPACKAGES_REQUIRED_INSTALL+=('haveged')
 
 		else
 
-			aPACKAGES_REQUIRED_INSTALL+=('rng-tools')		# Entropy daemon: Alternative, that does not work on all devices, but is proven to work on RPi, is default on Raspbian and uses less RAM on idle.
+			aPACKAGES_REQUIRED_INSTALL+=('rng-tools')
 
 		fi
 
