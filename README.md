@@ -224,6 +224,7 @@ Links to hardware and software manufacturers, sources and build instructions use
 - [qBittorrent](https://github.com/qbittorrent/qBittorrent)
 - [Nextcloud](https://github.com/nextcloud/server)
 - [ownCloud](https://github.com/owncloud/core)
+- [Syncthing](https://github.com/syncthing/syncthing)
 - [MiniDLNA](https://sourceforge.net/p/minidlna/git/ci/master/tree/)
 - [MPD](https://github.com/MusicPlayerDaemon/MPD)
 - [YMPD](https://github.com/notandy/ympd)
@@ -270,3 +271,4 @@ Links to hardware and software manufacturers, sources and build instructions use
 - [Home Assistant](https://github.com/home-assistant/core)
 - [TasmoAdmin](https://github.com/reloxx13/TasmoAdmin)
 - [Domoticz](https://github.com/domoticz/domoticz)
+- [Firefox Sync Server](https://github.com/mozilla-services/syncserver)
