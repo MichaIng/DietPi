@@ -394,6 +394,7 @@
 			#'4' ': Raspberry Pi 4'
 			'11' ': Odroid XU3/XU4/MC1/HC1/HC2'
 			'12' ': Odroid C2'
+			'15' ': Odroid N2'
 			'44' ': Pinebook'
 			'' '●─ x86_64 '
 			'21' ': x86_64 Native PC'
@@ -402,7 +403,7 @@
 			'10' ': Odroid C1'
 			'13' ': Odroid U3'
 			'14' ': Odroid N1'
-			'15' ': Odroid N2'
+			'16' ': Odroid C4'
 			'70' ': Sparky SBC'
 			'52' ': ASUS Tinker Board'
 			'40' ': PINE A64'
@@ -706,7 +707,7 @@ _EOF_'
 			'curl'			# Web address testing, downloading, uploading etc.
 			'debconf'		# APT package pre-configuration, e.g. "debconf-set-selections" for non-interactive install
 			'dirmngr'		# GNU key management required for some APT installs via additional repos
-			'ethtool'		# Ethernet link checking
+			'ethtool'		# Force Ethernet link speed
 			'fake-hwclock'		# Hardware clock emulation, to allow correct timestamps during boot before network time sync
 			'gnupg'			# apt-key add
 			'htop'			# System monitor
@@ -768,7 +769,7 @@ _EOF_'
 
 		fi
 		# - Entropy daemon: Use modern rng-tools5 on all devices where it has been proven to work, on RPi rng-tools (default on Raspbian), else haveged: https://github.com/MichaIng/DietPi/issues/2806
-		if [[ $G_HW_MODEL =~ ^(14|42|58|68|69|72)$ ]]; then # RK3399
+		if [[ $G_HW_MODEL =~ ^(14|16|42|58|68|69|72)$ ]]; then # RK3399, Odroid C4
 
 			aPACKAGES_REQUIRED_INSTALL+=('rng-tools5')
 
@@ -875,6 +876,11 @@ _EOF_'
 		elif (( $G_HW_MODEL < 10 )); then
 
 			G_AGI libraspberrypi-bin libraspberrypi0 raspberrypi-bootloader raspberrypi-kernel raspberrypi-sys-mods raspi-copies-and-fills
+
+		#	Odroid C4
+		elif (( $G_HW_MODEL == 16 )); then
+
+			G_AGI linux-image-arm64-odroid-c4 meveric-keyring
 
 		#	Odroid N2
 		elif (( $G_HW_MODEL == 15 )); then
