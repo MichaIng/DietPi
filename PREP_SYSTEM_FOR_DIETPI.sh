@@ -752,6 +752,10 @@ _EOF_'
 		#   While the above needs to be checked against current distro to not break SSH or APT before distro upgrade, this one should be checked against target distro version.
 		(( $DISTRO_TARGET > 5 )) && aPACKAGES_REQUIRED_INSTALL+=('systemd-timesyncd')
 
+		# - fdisk: Partitioning tool used by DietPi-FS_partition_resize and DietPi-Imager
+		#   This has become an own package since Debian Buster: https://packages.debian.org/fdisk
+		(( $DISTRO_TARGET > 4 )) && aPACKAGES_REQUIRED_INSTALL+=('fdisk')
+
 		# G_HW_MODEL specific
 		# - initramfs: Required for generic bootloader, but not required/used by RPi bootloader, on VM install tiny-initramfs with limited features but sufficient and much smaller + faster
 		if (( $G_HW_MODEL == 20 )); then
@@ -796,8 +800,15 @@ _EOF_'
 
 		fi
 
+		# Install gdisk if root file system is on a GPT partition, used by DietPi-FS_partition_resize
+		if [[ $(parted -s "$(lsblk -npo PKNAME "$(findmnt -no SOURCE /)")" print) == *'Partition Table: msdos'* ]]; then
+
+			aPACKAGES_REQUIRED_INSTALL+=('gdisk')
+
+		fi
+
 		# Install required filesystem packages
-		if [[ $(blkid -s TYPE -o value) =~ ([[:space:]]|v)'fat' ]]; then
+		if [[ $(blkid -s TYPE -o value) =~ (^|[[:space:]]|v)'fat' ]]; then
 
 			aPACKAGES_REQUIRED_INSTALL+=('dosfstools')		# DietPi-Drive_Manager + fat (boot) drive file system check and creation tools
 
