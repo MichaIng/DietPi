@@ -795,18 +795,10 @@ _EOF_'
 		fi
 
 		# G_HW_MODEL specific
-		if (( $G_HW_MODEL != 20 )); then
-
-			aPACKAGES_REQUIRED_INSTALL+=('hdparm')			# Drive power management adjustments
-
-		fi
+		(( $G_HW_MODEL == 20 )) || aPACKAGES_REQUIRED_INSTALL+=('hdparm') # Drive power management adjustments
 
 		# Install gdisk if root file system is on a GPT partition, used by DietPi-FS_partition_resize
-		if [[ $(parted -s "$(lsblk -npo PKNAME "$(findmnt -no SOURCE /)")" print) == *'Partition Table: msdos'* ]]; then
-
-			aPACKAGES_REQUIRED_INSTALL+=('gdisk')
-
-		fi
+		[[ $(parted -s "$(lsblk -npo PKNAME "$(findmnt -no SOURCE /)")" print) == *'Partition Table: gpt'* ]] && aPACKAGES_REQUIRED_INSTALL+=('gdisk')
 
 		# Install required filesystem packages
 		if [[ $(blkid -s TYPE -o value) =~ (^|[[:space:]]|v)'fat' ]]; then
