@@ -1479,7 +1479,7 @@ $log_content" || break # Exit error handler menu loop on cancel
 
 		# Read CPU temp from file
 		local temp
-		# - Sparky/Asus: Requires special case as in others array this would break other SBC temp readouts with 2 zones
+		# - Sparky/ASUS: Requires special case as in others array this would break other SBC temp readouts with 2 zones
 		if (( $G_HW_MODEL == 70 || $G_HW_MODEL == 52 )); then
 
 			[[ -f '/sys/class/thermal/thermal_zone1/temp' ]] && temp=$(</sys/class/thermal/thermal_zone1/temp)
@@ -1495,10 +1495,11 @@ $log_content" || break # Exit error handler menu loop on cancel
 				'/sys/devices/platform/sunxi-i2c.0/i2c-0/0-0034/temp1_input'
 				'/sys/class/hwmon/hwmon0/device/temp_label'
 				'/sys/class/hwmon/hwmon0/temp2_input'
+				'/sys/class/hwmon/hwmon0/temp1_input' # Odroid C1 Armbian legacy Linux 5.4.40: https://dietpi.com/phpbb/viewtopic.php?p=24860#p24860
 
 			)
 
-			for i in ${afp_temperature[@]}
+			for i in "${afp_temperature[@]}"
 			do
 
 				[[ -f $i ]] && { temp=$(<$i); break; }
@@ -1516,7 +1517,7 @@ $log_content" || break # Exit error handler menu loop on cancel
 		else
 
 			# 2/5 digit output?
-			(( $temp >= 150 )) && temp=$(mawk '{print $1/1000}' <<< $temp | xargs printf "%0.0f")
+			(( $temp >= 200 )) && temp=$(mawk '{print $1/1000}' <<< $temp | xargs printf "%0.0f")
 
 			if [[ $print_full_info == 1 ]]; then
 
@@ -1708,28 +1709,22 @@ $log_content" || break # Exit error handler menu loop on cancel
 	}
 
 	# Prompt user to create a backup before system changes. Exit existing scripts if failed.
-	[[ $G_PROMPT_BACKUP_DISABLED == [01] ]] || G_PROMPT_BACKUP_DISABLED=0
 	G_PROMPT_BACKUP(){
 
-		if (( ! $G_PROMPT_BACKUP_DISABLED )); then
+		[[ $G_PROMPT_BACKUP_DISABLED == 1 ]] && return 0
 
-			if G_WHIP_YESNO 'Would you like to create (or update) a "DietPi-Backup" of the system, before proceeding?\n\n"DietPi-Backup" creates a system restore point, which can be recovered if unexpected issues occur.\n\nFor more information on "DietPi-Backup", please use the link below:\n - https://dietpi.com/phpbb/viewtopic.php?p=255#p255'; then
+		G_WHIP_YESNO 'Would you like to create (or update) a "DietPi-Backup" of the system, before proceeding?\n\n"DietPi-Backup" creates a system restore point, which can be recovered if unexpected issues occur.\n\nFor more information on "DietPi-Backup", please use the link below:\n - https://dietpi.com/phpbb/viewtopic.php?p=255#p255' || return 0
 
-				/boot/dietpi/dietpi-backup 1
-				local exit_code=$?
+		/boot/dietpi/dietpi-backup 1
+		local exit_code=$?
 
-				G_DIETPI-NOTIFY -1 $exit_code 'DietPi-Backup'
-				if (( $exit_code )); then
+		G_DIETPI-NOTIFY -1 $exit_code 'DietPi-Backup'
+		(( $exit_code )) || return 0
 
-					# Kill current scripts, excluding shell
-					G_WHIP_MSG 'DietPi-Backup was unable to complete sucessfully. To avoid issues, the current program will now be terminated.\n - logfile = /var/log/dietpi-backup.log'
-					kill -INT $$
-
-				fi
-
-			fi
-
-		fi
+		# Kill current scripts, excluding shell
+		G_WHIP_MSG '[FAILED] DietPi-Backup was unable to complete sucessfully.\n\nTo avoid issues, the current program will now be terminated.\n\nLog file: /var/log/dietpi-backup.log'
+		kill -INT $$
+		return 1
 
 	}
 
@@ -1744,29 +1739,27 @@ $log_content" || break # Exit error handler menu loop on cancel
 		for i in "${ainput_string[@]}"
 		do
 
-			if [[ -e $i ]]; then
+			[[ -e $i ]] || continue
 
-				local fp_backup_target="$i.bak_$(date +%d%m%y)"
-				local index=0
-				while [[ -e ${fp_backup_target}_$index ]]
-				do
+			local fp_backup_target="$i.bak_$(date +%d%m%y)"
+			local index=0
+			while [[ -e ${fp_backup_target}_$index ]]
+			do
 
-					((index++))
+				((index++))
 
-				done
+			done
 
-				local notify_code=1
-				if cp -a $i ${fp_backup_target}_$index; then
+			local notify_code=1
+			if cp -a "$i" "${fp_backup_target}_$index"; then
 
-					notify_code=0
-					print_fp_db_info=1
-					echo "${fp_backup_target}_$index # $G_PROGRAM_NAME" >> $fp_db_log
-
-				fi
-
-				G_DIETPI-NOTIFY $notify_code "$i: backup to ${fp_backup_target}_$index"
+				notify_code=0
+				print_fp_db_info=1
+				echo "${fp_backup_target}_$index # $G_PROGRAM_NAME" >> $fp_db_log
 
 			fi
+
+			G_DIETPI-NOTIFY $notify_code "$i: backup to ${fp_backup_target}_$index"
 
 		done
 
@@ -1778,12 +1771,17 @@ $log_content" || break # Exit error handler menu loop on cancel
 	# Multithreading handler
 	#-----------------------------------------------------------------------------------
 	# Not yet compatible with dietpi global commands. single bash commands only with no error handling.
-	[[ $G_THREADING_ENABLED == [01] ]] || G_THREADING_ENABLED=1
-
 	G_THREAD_START(){
 
-		# Launch as BG process
-		if (( $G_THREADING_ENABLED )); then
+		# Run in blocking mode
+		if [[ $G_THREADING_ENABLED == 0 ]]; then
+
+			local command=$*
+			G_DIETPI-NOTIFY 2 "G_THREADING disabled, running command in blocking mode | $command"
+			$command
+
+		# Launch as background process
+		else
 
 			[[ $G_THREAD_COUNT =~ ^[0-9]+$ ]] || G_THREAD_COUNT=-1
 			((G_THREAD_COUNT++))
@@ -1793,13 +1791,6 @@ $log_content" || break # Exit error handler menu loop on cancel
 			{ { G_INTERACTIVE=0 ${G_THREAD_COMMAND[$G_THREAD_COUNT]} &> /tmp/.G_THREAD_COMMAND_$G_THREAD_COUNT; echo $? > /tmp/.G_THREAD_EXITCODE_$G_THREAD_COUNT; } & disown; } &> /dev/null
 
 			G_DIETPI-NOTIFY 2 "G_THREAD_START_$G_THREAD_COUNT | ${G_THREAD_COMMAND[$G_THREAD_COUNT]}"
-
-		# Run in blocking mode
-		else
-
-			local command=$*
-			G_DIETPI-NOTIFY 2 "G_THREADING disabled, running command in blocking mode | $command"
-			$command
 
 		fi
 
