@@ -1680,6 +1680,8 @@ _EOF_
 		[[ -e '/var/swap' ]] && rm -v /var/swap # still exists on some images...
 		# - Re-enable for next run
 		G_CONFIG_INJECT 'AUTO_SETUP_SWAPFILE_SIZE=' 'AUTO_SETUP_SWAPFILE_SIZE=1' /boot/dietpi.txt
+		# - Reset /tmp size to default (512 MiB)
+		sed -i '\|/tmp|s|size=[^,]*,||' /etc/fstab
 
 		G_DIETPI-NOTIFY 2 'Resetting boot.ini, config.txt, cmdline.txt etc'
 
