@@ -1232,8 +1232,8 @@ DietPi-Software will decrypt and use it for software installs. You can change it
 
 		aSOFTWARE_NAME[$software_id]='Folding@Home'
 		aSOFTWARE_DESC[$software_id]='distributed disease research project'
-		aSOFTWARE_CATEGORY_INDEX[$software_id]=20
 		aSOFTWARE_TYPE[$software_id]=0
+		aSOFTWARE_CATEGORY_INDEX[$software_id]=20
 		aSOFTWARE_ONLINEDOC_URL[$software_id]='p=13704#p13704'
 		# x86_64 only
 		for ((i=1; i<$MAX_G_HW_ARCH; i++))
@@ -3385,24 +3385,14 @@ _EOF_
 
 			Banner_Installing
 
-			# We must uninstall previous package for reinstall, else it will fail: https://github.com/MichaIng/DietPi/issue_comments#issuecomment-411688073
-			if dpkg-query -s 'fahclient' &> /dev/null; then
-
-				G_DIETPI-NOTIFY 2 'Removing previous package before installing the latest version'
-				G_AGP fahclient
-
-			fi
-
 			G_DIETPI-NOTIFY 2 'Pre-configuring FAHClient deb package'
-			debconf-set-selections <<< 'fahclient fahclient/autostart boolean true' # external bug with setting false https://github.com/FoldingAtHome/fah-issues/issues/1193
+			debconf-set-selections <<< 'fahclient fahclient/autostart boolean false' # Do not start SysV service after package install
 			debconf-set-selections <<< 'fahclient fahclient/power select light'
 			debconf-set-selections <<< 'fahclient fahclient/team string 234437' # Team "DietPi"
-			debconf-set-selections <<< 'fahclient fahclient/user string DietPi' # Default, until user chooses an own username
-			debconf-set-selections <<< 'fahclient fahclient/passkey string 06c869246e88c00cb05cc4d1758a97f9'
+			debconf-set-selections <<< 'fahclient fahclient/user string DietPi' # User "DietPi"
+			debconf-set-selections <<< 'fahclient fahclient/passkey string 06c869246e88c00cb05cc4d1758a97f9' # Passkey for user "DietPi"
 
-			Download_Install 'https://download.foldingathome.org/releases/public/release/fahclient/debian-stable-64bit/v7.5/latest.deb'
-
-			killall -w FAHClient # Due to https://github.com/FoldingAtHome/fah-issues/issues/1193
+			Download_Install 'https://download.foldingathome.org/releases/public/release/fahclient/debian-stable-64bit/v7.6/latest.deb'
 
 		fi
 
@@ -7338,33 +7328,39 @@ _EOF_
 
 			Banner_Configuration
 
-			# Remove old data + config directories and init.d service
+			# Remove obsolete config + data directories and SysV service + config
 			[[ -d '/var/lib/fahclient' ]] && rm -R /var/lib/fahclient
 			[[ -d '/etc/fahclient' ]] && rm -R /etc/fahclient
+			[[ -f '/etc/default/fahclient' ]] && rm /etc/default/fahclient
 			[[ -f '/etc/init.d/FAHClient' ]] && rm /etc/init.d/FAHClient
 			update-rc.d -f FAHClient remove
 
-			# Create new working (data + config) directory and log file
-			mkdir -p $G_FP_DIETPI_USERDATA/fahclient
-			> /var/log/fahclient.log
+			# Prepare our new config + data directory if not yet present
+			if [[ ! -f $G_FP_DIETPI_USERDATA/fahclient/config.xml ]]; then
 
-			# Create new systemd service
-			cat << _EOF_ > /lib/systemd/system/fahclient.service
+				mkdir -p $G_FP_DIETPI_USERDATA/fahclient
+				dps_index=$software_id Download_Install 'config.xml' $G_FP_DIETPI_USERDATA/fahclient/config.xml
+
+			fi
+
+			# Service
+			cat << _EOF_ > /etc/systemd/system/fahclient.service
 [Unit]
 Description=Folding@Home (DietPi)
+Wants=network-online.target
+After=network-online.target dietpi-boot.service
 
 [Service]
 User=fahclient
-Group=dietpi
 WorkingDirectory=$G_FP_DIETPI_USERDATA/fahclient
-ExecStart=$(command -v FAHClient) --allow='0/0' --web-allow='0/0' --daemon=false --user=DietPi --team=234437 --passkey=06c869246e88c00cb05cc4d1758a97f9 --gpu=true --log-rotate=false --log=/var/log/fahclient.log --power=light --data-directory=$G_FP_DIETPI_USERDATA/fahclient
+ExecStart=$(command -v FAHClient)
 
 [Install]
 WantedBy=multi-user.target
 _EOF_
 
 			# Permissions
-			chown -R fahclient:dietpi $G_FP_DIETPI_USERDATA/fahclient /var/log/fahclient.log
+			chown -R fahclient $G_FP_DIETPI_USERDATA/fahclient
 
 		fi
 
@@ -12847,12 +12843,16 @@ _EOF_
 
 			Banner_Uninstalling
 			# Un-check out all work units, so they can be picked up by other donors prior to timeout: https://github.com/FoldingAtHome/fah-issues/issues/1255
-			FAHClient --dump
+			FAHClient --chdir $G_FP_DIETPI_USERDATA/fahclient --dump all
 
+			if [[ -f '/etc/systemd/system/fahclient.service' ]]; then
+
+				systemctl disable --now fahclient
+				rm -R /etc/systemd/system/fahclient.service*
+
+			fi
 			G_AGP fahclient
-			rm -R $G_FP_DIETPI_USERDATA/fahclient
-			rm /lib/systemd/system/fahclient.service
-			rm /var/log/fahclient.log
+			[[ -d $G_FP_DIETPI_USERDATA/fahclient ]] && rm -R $G_FP_DIETPI_USERDATA/fahclient
 
 		fi
 
