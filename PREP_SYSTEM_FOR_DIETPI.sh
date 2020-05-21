@@ -769,7 +769,7 @@ _EOF_'
 
 		fi
 		# - Entropy daemon: Use modern rng-tools5 on all devices where it has been proven to work, on RPi rng-tools (default on Raspbian), else haveged: https://github.com/MichaIng/DietPi/issues/2806
-		if [[ $G_HW_MODEL =~ ^(14|16|42|58|68|69|72)$ ]]; then # RK3399, Odroid C4
+		if [[ $G_HW_MODEL =~ ^(11|14|16|42|58|68|69|72)$ ]]; then # Odroid XU4, RK3399, Odroid C4
 
 			aPACKAGES_REQUIRED_INSTALL+=('rng-tools5')
 
