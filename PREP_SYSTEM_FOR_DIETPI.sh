@@ -897,7 +897,7 @@ _EOF_'
 		#	ROCK Pi S (official Radxa Debian image)
 		elif (( $G_HW_MODEL == 73 )) && grep -q 'apt\.radxa\.com' /etc/apt/sources.list.d/*.list; then
 
-			G_AGI rockpis-rk-u-boot-latest linux-4.4-rockpis-latest rockpis-dtbo rockchip-overlay
+			G_AGI rockpis-rk-u-boot-latest linux-4.4-rockpis-latest rockchip-overlay
 
 		# - Auto detect kernel package incl. ARMbian/others DTB
 		else
