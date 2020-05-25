@@ -1027,10 +1027,10 @@ _EOF_'
 
 		G_DIETPI-NOTIFY 2 'Removing misc files/folders/services, not required by DietPi'
 
-		[[ -d '/home' ]] && rm -vR /home
-		[[ -d '/media' ]] && rm -vR /media
-		[[ -d '/selinux' ]] && rm -vR /selinux
-		[[ -d '/var/cache/apparmor' ]] && rm -vR /var/cache/apparmor
+		[[ -d '/home' ]] && rm -Rfv /home/{,.??,.[^.]}* || mkdir /home
+		[[ -d '/media' ]] && rm -Rfv /media/{,.??,.[^.]}* || mkdir /media
+		[[ -d '/selinux' ]] && rm -Rv /selinux
+		[[ -d '/var/cache/apparmor' ]] && rm -Rv /var/cache/apparmor
 		rm -Rfv /var/lib/dhcp/{,.??,.[^.]}*
 		rm -Rfv /var/backups/{,.??,.[^.]}*
 
