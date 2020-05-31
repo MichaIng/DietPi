@@ -138,11 +138,11 @@
 
 	fi
 
+	# - Export locale vars to assure the following whiptail being beautiful
+	export LC_ALL='C.UTF-8' LANG='C.UTF-8'
+
 	# - Update /etc/default/locales with new values (not effective until next load of bash session, eg: logout/in)
 	update-locale 'LC_ALL=C.UTF-8'
-
-	# - Export locale vars to assure the following whiptail being beautiful
-	export LC_ALL='C.UTF-8'
 
 	# Set Git owner
 	GITOWNER=${GITOWNER:-MichaIng}
