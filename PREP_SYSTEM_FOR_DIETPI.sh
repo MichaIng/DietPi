@@ -54,6 +54,9 @@
 	# Allow PDiffs on RPi since the "slow implementation" argument is outdated and PDiffs allow lower download size and less disk I/O
 	[[ -f '/etc/apt/apt.conf.d/50raspi' ]] && rm /etc/apt/apt.conf.d/50raspi
 
+	# Disable package state translation downloads
+	echo 'Acquire::Languages "none";' > /etc/apt/apt.conf.d/98-dietpi-no_translations
+
 	# Removing conflicting /etc/apt/sources.list.d entries
 	# - Meveric: https://github.com/MichaIng/DietPi/issues/1285#issuecomment-355759321
 	[[ -f '/etc/apt/sources.list.d/deb-multimedia.list' ]] && rm /etc/apt/sources.list.d/deb-multimedia.list
@@ -95,7 +98,7 @@
 	for i in "${aAPT_PREREQS[@]}"
 	do
 
-		if ! dpkg-query -s $i &> /dev/null && ! apt-get -y install $i; then
+		if ! dpkg-query -s $i &> /dev/null && ! apt-get -y --no-install-recommends install $i; then
 
 			echo -e "[FAILED] Unable to install $i, please try to install it manually:\n\t # apt install $i\n"
 			exit 1
