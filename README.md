@@ -1,6 +1,6 @@
 <html>
 	<h1 align="center">
-		<img src="https://dietpi.com/images/dietpi-logo_150.png" alt="DietPi">
+		<img src="https://raw.githubusercontent.com/MichaIng/DietPi/master/.meta/images/dietpi-logo_150.png" alt="DietPi">
 	</h1>
 	<p align="center">
 		<b>Lightweight justice for your single-board computer!</b>
@@ -16,9 +16,8 @@
 	</p>
 	<hr>
 	<p align="center">
-		<img src="https://dietpi.com/images/mvs_logo_150.jpg" alt="myVirtualServer">
-		<br><br>
-		DietPi's web hosting is powered by <a href="https://www.myvirtualserver.com">myVirtualServer</a>.
+		<img src="https://www.myvirtualserver.com/images/myvirtualserver_logo.png" alt="myVirtualserver" width="200"><br>
+		DietPi's web hosting is powered by <a href="https://www.myvirtualserver.com">myVirtualserver</a>.
 		<br><br>
 		A wide range of SBCs and VMs are supported. <a href="https://dietpi.com/#download">Click here</a> for the full list.
 		<br><br>
