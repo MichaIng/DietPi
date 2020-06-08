@@ -875,7 +875,7 @@ _EOF_'
 		#	Odroid C4
 		elif (( $G_HW_MODEL == 16 )); then
 
-			G_AGI linux-image-arm64-odroid-c4 meveric-keyring
+			G_AGI linux-image-arm64-odroid-c4 meveric-keyring u-boot
 
 		#	Odroid N2
 		elif (( $G_HW_MODEL == 15 )); then
