@@ -1239,7 +1239,7 @@ _EOF_
 		#-----------------------------------------------------------------------------------
 		# Install vmtouch to lock DietPi scripts and config in file system cache
 		G_EXEC wget https://dietpi.com/downloads/binaries/$G_DISTRO_NAME/vmtouch_$G_HW_ARCH_NAME.deb
-		G_EXEC dpkg --force-hold,confdef,confold -i vmtouch_$G_HW_ARCH_NAME.deb
+		G_EXEC dpkg --force-hold,confnew -i vmtouch_$G_HW_ARCH_NAME.deb
 		rm vmtouch_$G_HW_ARCH_NAME.deb
 
 		#-----------------------------------------------------------------------------------
