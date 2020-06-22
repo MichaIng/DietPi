@@ -14,6 +14,7 @@
 	# - G_HW_ARCH
 	# - G_DISTRO
 	# - G_DISTRO_NAME
+	# - G_RASPBIAN
 	#
 	# The following environment variables can be set to automate this script (adjust example values to your needs):
 	# - GITOWNER='MichaIng'			(optional, defaults to 'MichaIng')
@@ -185,8 +186,8 @@
 
 	fi
 
-	# Assure no obsolete .hw_model is loaded or generated
-	rm -fv /boot/dietpi/{.,func/dietpi-obtain_}hw_model
+	# Assure no obsolete .hw_model is loaded
+	rm -fv /boot/dietpi/.hw_model
 
 	# Load
 	if ! . ./dietpi-globals; then
@@ -289,7 +290,7 @@
 
 			# Delete any previous existing data
 			# - /DietPi mount point: Pre-v6.29
-			umount /DietPi # Failsafe
+			findmnt /DietPi &> /dev/null && umount /DietPi
 			[[ -d '/DietPi' ]] && rm -R /DietPi
 			rm -Rfv /{boot,mnt,etc,var/lib,var/tmp,run}/*dietpi*
 			rm -fv /etc{,/cron.*,/{bashrc,profile,sysctl,network/if-up,udev/rules}.d}/{,.}*dietpi*
@@ -479,8 +480,24 @@
 		G_HW_MODEL=$HW_MODEL
 		unset HW_MODEL
 
+		# RPi: Detect Debian vs Raspbian and 64 vs 32 bit image
+		if (( $G_HW_MODEL < 10 )); then
+
+			if grep -q '^ID=debian' /etc/os-release; then
+
+				G_RASPBIAN=0
+				[[ $(mawk 'NR==1' /var/lib/dpkg/arch) == 'arm64' ]] && G_HW_ARCH=3 || G_HW_ARCH=2
+
+			else
+
+				G_RASPBIAN=1 G_HW_ARCH=1
+
+			fi
+
+		fi
+
 		G_DIETPI-NOTIFY 2 "Selected hardware model ID: $G_HW_MODEL"
-		G_DIETPI-NOTIFY 2 "Detected CPU architecture: $G_HW_ARCH_NAME (ID: $G_HW_ARCH)"
+		G_DIETPI-NOTIFY 2 "Detected target CPU architecture: $G_HW_ARCH_NAME (ID: $G_HW_ARCH)"
 
 		# WiFi selection
 		if [[ $WIFI_REQUIRED != [01] ]]; then
@@ -612,7 +629,7 @@ Currently installed: $G_DISTRO_NAME (ID: $G_DISTRO)"; then
 		G_EXEC_DESC='Extracting DietPi sourcecode' G_EXEC tar xf package.tar.gz
 		rm package.tar.gz
 
-		[[ -d '/boot' ]] || G_EXEC_DESC='Creating /boot' G_EXEC mkdir -p /boot
+		[[ -d '/boot' ]] || G_EXEC_DESC='Creating /boot' G_EXEC mkdir /boot
 
 		G_DIETPI-NOTIFY 2 'Moving kernel and boot configuration to /boot'
 
@@ -620,6 +637,8 @@ Currently installed: $G_DISTRO_NAME (ID: $G_DISTRO)"; then
 		if (( $G_HW_MODEL < 10 )); then
 
 			G_EXEC mv "DietPi-$G_GITBRANCH/config.txt" /boot/
+			# Boot in 64-bit mode if this is a 64-bit image
+			[[ $G_HW_ARCH == 3 ]] && G_CONFIG_INJECT 'arm_64bit=' 'arm_64bit=1' /boot/config.txt
 
 		elif (( $G_HW_MODEL == 11 )); then
 
@@ -661,8 +680,8 @@ Currently installed: $G_DISTRO_NAME (ID: $G_DISTRO)"; then
 
 		G_DIETPI-NOTIFY 2 "Setting APT sources.list: $DISTRO_TARGET_NAME $DISTRO_TARGET"
 
-		# We need to forward $DISTRO_TARGET* to dietpi-set_software, as well as $G_HW_MODEL for Debian vs Raspbian decision.
-		G_DISTRO=$DISTRO_TARGET G_DISTRO_NAME=$DISTRO_TARGET_NAME G_HW_MODEL=$G_HW_MODEL G_EXEC /boot/dietpi/func/dietpi-set_software apt-mirror default
+		# We need to forward $DISTRO_TARGET* to dietpi-set_software, as well as $G_HW_MODEL + $G_RASPBIAN for Debian vs Raspbian decision.
+		G_DISTRO=$DISTRO_TARGET G_DISTRO_NAME=$DISTRO_TARGET_NAME G_HW_MODEL=$G_HW_MODEL G_RASPBIAN=$G_RASPBIAN G_EXEC /boot/dietpi/func/dietpi-set_software apt-mirror default
 
 		# Meveric, update repo to use our EU mirror: https://github.com/MichaIng/DietPi/issues/1519#issuecomment-368234302
 		sed -Ei 's@https?://oph\.mdrjr\.net@http://fuzon.co.uk@' /etc/apt/sources.list.d/meveric* &> /dev/null
@@ -870,12 +889,15 @@ _EOF_'
 		#	RPi
 		elif (( $G_HW_MODEL < 10 )); then
 
-			G_AGI libraspberrypi-bin libraspberrypi0 raspberrypi-bootloader raspberrypi-kernel raspberrypi-sys-mods raspi-copies-and-fills
+			# Add raspi-copies-and-fills for 32-bit images only
+			[[ $G_HW_ARCH == 3 ]] && arm_mem= || arm_mem='raspi-copies-and-fills'
+			G_AGI libraspberrypi-bin libraspberrypi0 raspberrypi-bootloader raspberrypi-kernel raspberrypi-sys-mods $arm_mem
 
 		#	Odroid C4
 		elif (( $G_HW_MODEL == 16 )); then
 
-			G_AGI linux-image-arm64-odroid-c4 meveric-keyring u-boot
+			G_AGI linux-image-arm64-odroid-c4 meveric-keyring
+			G_EXEC_NOHALT=1 G_EXEC apt-mark manual u-boot # Workaround until C4 u-boot package has been added to repo
 
 		#	Odroid N2
 		elif (( $G_HW_MODEL == 15 )); then
