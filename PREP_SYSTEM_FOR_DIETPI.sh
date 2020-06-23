@@ -1508,7 +1508,7 @@ _EOF_
 
 		elif (( $G_HW_ARCH == 3 )); then
 
-			G_EXEC_DESC='Removing foreign armhf DPKG architecture' G_EXEC dpkg --remove-architecture armhf
+			(( $G_HW_MODEL > 9 )) && G_EXEC_DESC='Removing foreign armhf DPKG architecture' G_EXEC dpkg --remove-architecture armhf
 
 		fi
 
