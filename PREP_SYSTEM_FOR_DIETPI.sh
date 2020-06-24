@@ -1200,8 +1200,9 @@ _EOF_
 		#	Below required if DietPi-PREP is executed from chroot/container, so RPi firstrun scripts are not executed
 		[[ -f '/etc/init.d/resize2fs_once' ]] && rm -v /etc/init.d/resize2fs_once # https://github.com/RPi-Distro/pi-gen/blob/master/stage2/01-sys-tweaks/files/resize2fs_once
 		[[ -f '/boot/cmdline.txt' ]] && sed -i 's| init=/usr/lib/raspi-config/init_resize\.sh||' /boot/cmdline.txt # https://github.com/RPi-Distro/pi-gen/blob/master/stage2/01-sys-tweaks/00-patches/07-resize-init.diff
+		[[ -f '/etc/systemd/system/getty@tty1.service.d/autologin.conf' ]] && rm -v /etc/systemd/system/getty@tty1.service.d/autologin.conf # https://github.com/MichaIng/DietPi/issues/3570#issuecomment-648988475
 
-		# - make_nas_processes_faster cron job on Rock64 + NanoPi + Pine64(?) images
+		# - make_nas_processes_faster cron job on ROCK64 + NanoPi + PINE A64(?) images
 		[[ -f '/etc/cron.d/make_nas_processes_faster' ]] && rm /etc/cron.d/make_nas_processes_faster
 
 		#-----------------------------------------------------------------------------------
