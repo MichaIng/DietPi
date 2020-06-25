@@ -652,6 +652,7 @@ Currently installed: $G_DISTRO_NAME (ID: $G_DISTRO)"; then
 
 		G_EXEC mv "DietPi-$G_GITBRANCH/dietpi.txt" /boot/
 		G_EXEC mv "DietPi-$G_GITBRANCH/README.md" /boot/dietpi-README.md
+		G_EXEC mv "DietPi-$G_GITBRANCH/LICENSE.txt" /boot/dietpi-LICENSE.txt
 		G_EXEC mv "DietPi-$G_GITBRANCH/CHANGELOG.txt" /boot/dietpi-CHANGELOG.txt
 
 		# Reading version string for later use
@@ -1775,7 +1776,7 @@ $IMAGE_CREATOR
 $PREIMAGE_INFO
 _EOF_
 
-		G_DIETPI-NOTIFY 2 'Generating GPL license readme'
+		G_DIETPI-NOTIFY 2 'Generating GPLv2 license readme'
 		cat << _EOF_ > /var/lib/dietpi/license.txt
 -----------------------
 DietPi - GPLv2 License:
