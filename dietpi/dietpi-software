@@ -217,6 +217,7 @@ DietPi-Software will decrypt and use it for software installs. You can change it
 	WIFIHOTSPOT_RTL8188C_DEVICE=0
 	WIFIHOTSPOT_RTL8188C_PACKAGE=0
 	USER_LINUX_AUTOINSTALL_PROMPT_DISPLAYED=0
+	WIREGUARD_BUILTIN=0 # Is the WireGuard kernel module natively shipped by the kernel package?
 
 	# PHP version specific directories, APT package-, module- and command names
 	PHP_NAME='php7.3'
@@ -1782,6 +1783,16 @@ DietPi-Software will decrypt and use it for software installs. You can change it
 		done
 		# - Odroid U3
 		aSOFTWARE_AVAIL_G_HW_MODEL[$software_id,13]=0
+		# Re-enable if module is shipped with (kernel) package, e.g. Armbian 5.X
+		for i in /lib/modules/*/kernel/net/wireguard/wireguard.ko
+		do
+
+			[[ -f $i ]] || continue
+			dpkg-query -S "$i" &> /dev/null || continue
+			aSOFTWARE_AVAIL_G_HW_MODEL[$software_id,$G_HW_MODEL]=1 WIREGUARD_BUILTIN=1
+			break
+
+		done
 		#------------------
 		software_id=117
 
@@ -4574,52 +4585,7 @@ _EOF_
 
 			Banner_Installing
 
-			# Kernel headers and matching kernel image required for wireguard-dkms to build the wireguard kernel module
-			local kernel_packages=
-			# - x86_64
-			if (( $G_HW_ARCH == 10 )); then
-
-				kernel_packages='linux-image-amd64 linux-headers-amd64'
-
-			# - RPi
-			elif (( $G_HW_MODEL < 10 )); then
-
-				kernel_packages='raspberrypi-bootloader raspberrypi-kernel libraspberrypi-bin libraspberrypi0 raspberrypi-kernel-headers'
-
-			# - Odroid XU4
-			elif (( $G_HW_MODEL == 11 )); then
-
-				kernel_packages='linux-image-4.14-armhf-odroid-xu4 linux-headers-4.14-armhf-odroid-xu4'
-
-			# - Odroid C2
-			elif (( $G_HW_MODEL == 12 )); then
-
-				kernel_packages='linux-image-arm64-odroid-c2 linux-headers-arm64-odroid-c2'
-
-			# - Odroid N1
-			elif (( $G_HW_MODEL == 14 )); then
-
-				kernel_packages='linux-image-arm64-odroid-n1 linux-headers-arm64-odroid-n1'
-
-			# - Odroid N2
-			elif (( $G_HW_MODEL == 15 )); then
-
-				kernel_packages='linux-image-arm64-odroid-n2 linux-headers-arm64-odroid-n2'
-
-			# - Odroid C4
-			elif (( $G_HW_MODEL == 16 )); then
-
-				kernel_packages='linux-image-arm64-odroid-c4 linux-headers-arm64-odroid-c4'
-
-			fi
-
-			# Odroids need to purge before we install, else, does not update to latest version...
-			(( $G_HW_MODEL > 9 && $G_HW_MODEL < 20 )) && G_AGP $kernel_packages
-
-			# Since G_AGUG does not upgrade packages with changed dependencies, in case of kernel image meta packages, those need to be installed+upgraded via G_AGI.
-			G_AGI $kernel_packages # apt-get install overrides hold state
-
-			# Package available on Buster backports and Bullseye: For Stretch and Raspbian Buster add Bullseye repo
+			# Packages available on Buster backports and Bullseye: For Stretch and Raspbian Buster add Bullseye repo
 			if (( $G_DISTRO < 5 || ( $G_HW_MODEL < 10 && ${G_RASPBIAN:-1} && $G_DISTRO == 5 ) )); then
 
 				# Raspbian or Debian?
@@ -4637,18 +4603,81 @@ Package: wireguard wireguard-dkms wireguard-tools\nPin: release n=bullseye\nPin-
 
 			fi
 
-			# Check for existing WireGuard install
-			local existing_install=0
-			dpkg-query -s wireguard-dkms &> /dev/null && existing_install=1
+			# If the kernel module is shipped with the kernel (e.g. Armbian 5.X)
+			if [[ $WIREGUARD_BUILTIN == 1 ]]; then
 
-			# iptables required to forward incoming VPN traffic to local LAN/internet interface
-			# qrencode required to print client config QR code to console
-			G_AGI wireguard iptables qrencode
+				# Purge DKMS as it is not required and might mess with available kernel module
+				dpkg-query -s wireguard-dkms &> /dev/null && G_AGP wireguard-dkms
+				# Install userspace tools only
+				G_AGI wireguard-tools iptables qrencode
 
-			# If existing install, reconfigure to rebuild WireGuard kernel module against current kernel + headers
-			(( $existing_install )) && G_EXEC dpkg-reconfigure wireguard-dkms
+			# Else, kernel headers and matching kernel image is required for wireguard-dkms to build the WireGuard kernel module
+			elif
 
-			unset kernel_packages existing_install
+				local kernel_packages=
+				# x86_64
+				if (( $G_HW_ARCH == 10 )); then
+
+					kernel_packages='linux-image-amd64 linux-headers-amd64'
+
+				# RPi
+				elif (( $G_HW_MODEL < 10 )); then
+
+					# Install bootloader package as well to assure we have a corretly booting system with intended kernel
+					kernel_packages='raspberrypi-kernel raspberrypi-kernel-headers raspberrypi-bootloader'
+
+				# Odroid XU4
+				elif (( $G_HW_MODEL == 11 )); then
+
+					kernel_packages='linux-image-4.14-armhf-odroid-xu4 linux-headers-4.14-armhf-odroid-xu4'
+
+				# Odroid C2
+				elif (( $G_HW_MODEL == 12 )); then
+
+					kernel_packages='linux-image-arm64-odroid-c2 linux-headers-arm64-odroid-c2'
+
+				# Odroid N1
+				elif (( $G_HW_MODEL == 14 )); then
+
+					kernel_packages='linux-image-arm64-odroid-n1 linux-headers-arm64-odroid-n1'
+
+				# Odroid N2
+				elif (( $G_HW_MODEL == 15 )); then
+
+					kernel_packages='linux-image-arm64-odroid-n2 linux-headers-arm64-odroid-n2'
+
+				# Odroid C4
+				elif (( $G_HW_MODEL == 16 )); then
+
+					kernel_packages='linux-image-arm64-odroid-c4 linux-headers-arm64-odroid-c4'
+
+				fi
+
+				# Odroids need to purge before we install, else, does not update to latest version...
+				(( $G_HW_MODEL > 9 && $G_HW_MODEL < 20 )) && G_AGP $kernel_packages
+
+				# Since G_AGUG does not upgrade packages with changed dependencies, in case of kernel image meta packages, those need to be installed+upgraded via G_AGI.
+				G_AGI $kernel_packages # apt-get install overrides hold state
+				unset kernel_packages
+
+				# Workaround for missing /lib/modules/<version>/build symlink: https://github.com/MichaIng/DietPi/issues/3577
+				# - Known as issue currently on Odroid C2/N1/N2, check for new build system if linux-<version>/ holds current headers instead of linux-source-<version>/: http://fuzon.co.uk/meveric/pool/c2/l/
+				for i in /lib/modules/*
+				do
+
+					[[ -d $i/build ]] && continue
+					[[ -d /usr/src/linux-headers-${i##*/} ]] && ln -sfv "/usr/src/linux-headers-${i##*/}" "$i/build"
+
+				done
+
+				# If existing install, reconfigure to rebuild WireGuard kernel module against current kernel + headers
+				dpkg-query -s wireguard-dkms &> /dev/null && G_EXEC dpkg-reconfigure -f noninteractive wireguard-dkms
+
+				# iptables required to forward incoming VPN traffic to local LAN/internet interface
+				# qrencode required to print client config QR code to console
+				G_AGI wireguard-dkms wireguard-tools iptables qrencode
+
+			fi
 
 		fi
 
