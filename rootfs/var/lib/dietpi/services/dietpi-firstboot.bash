@@ -177,7 +177,7 @@
 
 		# Set APT mirror
 		local target_repo='CONFIG_APT_DEBIAN_MIRROR'
-		(( $G_HW_MODEL < 10 )) && target_repo='CONFIG_APT_RASPBIAN_MIRROR'
+		(( $G_HW_MODEL < 10 )) && (( $G_RASPBIAN )) && target_repo='CONFIG_APT_RASPBIAN_MIRROR'
 		/boot/dietpi/func/dietpi-set_software apt-mirror "$(sed -n "/^[[:blank:]]*$target_repo=/{s/^[^=]*=//p;q}" /boot/dietpi.txt)"
 
 		# Regenerate unique Dropbear host keys
@@ -263,7 +263,16 @@
 			sed -i "/address/c\address $static_ip" /etc/network/interfaces
 			sed -i "/netmask/c\netmask $static_mask" /etc/network/interfaces
 			sed -i "/gateway/c\gateway $static_gateway" /etc/network/interfaces
-			sed -i "/dns-nameservers/c\dns-nameservers $static_dns" /etc/network/interfaces
+			if command -v resolvconf &> /dev/null; then
+
+				sed -i "/dns-nameservers/c\dns-nameservers $static_dns" /etc/network/interfaces
+
+			else
+
+				> /etc/resolv.conf
+				for i in $static_dns; do echo "nameserver $i" >> /etc/resolv.conf; done
+
+			fi
 
 		fi
 

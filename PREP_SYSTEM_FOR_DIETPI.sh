@@ -14,6 +14,7 @@
 	# - G_HW_ARCH
 	# - G_DISTRO
 	# - G_DISTRO_NAME
+	# - G_RASPBIAN
 	#
 	# The following environment variables can be set to automate this script (adjust example values to your needs):
 	# - GITOWNER='MichaIng'			(optional, defaults to 'MichaIng')
@@ -53,6 +54,9 @@
 
 	# Allow PDiffs on RPi since the "slow implementation" argument is outdated and PDiffs allow lower download size and less disk I/O
 	[[ -f '/etc/apt/apt.conf.d/50raspi' ]] && rm /etc/apt/apt.conf.d/50raspi
+
+	# Disable package state translation downloads
+	echo 'Acquire::Languages "none";' > /etc/apt/apt.conf.d/98-dietpi-no_translations
 
 	# Removing conflicting /etc/apt/sources.list.d entries
 	# - Meveric: https://github.com/MichaIng/DietPi/issues/1285#issuecomment-355759321
@@ -95,7 +99,7 @@
 	for i in "${aAPT_PREREQS[@]}"
 	do
 
-		if ! dpkg-query -s $i &> /dev/null && ! apt-get -y install $i; then
+		if ! dpkg-query -s $i &> /dev/null && ! apt-get -y --no-install-recommends install $i; then
 
 			echo -e "[FAILED] Unable to install $i, please try to install it manually:\n\t # apt install $i\n"
 			exit 1
@@ -138,11 +142,11 @@
 
 	fi
 
+	# - Export locale vars to assure the following whiptail being beautiful
+	export LC_ALL='C.UTF-8' LANG='C.UTF-8'
+
 	# - Update /etc/default/locales with new values (not effective until next load of bash session, eg: logout/in)
 	update-locale 'LC_ALL=C.UTF-8'
-
-	# - Export locale vars to assure the following whiptail being beautiful
-	export LC_ALL='C.UTF-8'
 
 	# Set Git owner
 	GITOWNER=${GITOWNER:-MichaIng}
@@ -182,8 +186,8 @@
 
 	fi
 
-	# Assure no obsolete .hw_model is loaded or generated
-	rm -fv /boot/dietpi/{.,func/dietpi-obtain_}hw_model
+	# Assure no obsolete .hw_model is loaded
+	rm -fv /boot/dietpi/.hw_model
 
 	# Load
 	if ! . ./dietpi-globals; then
@@ -286,7 +290,7 @@
 
 			# Delete any previous existing data
 			# - /DietPi mount point: Pre-v6.29
-			umount /DietPi # Failsafe
+			findmnt /DietPi &> /dev/null && umount /DietPi
 			[[ -d '/DietPi' ]] && rm -R /DietPi
 			rm -Rfv /{boot,mnt,etc,var/lib,var/tmp,run}/*dietpi*
 			rm -fv /etc{,/cron.*,/{bashrc,profile,sysctl,network/if-up,udev/rules}.d}/{,.}*dietpi*
@@ -394,6 +398,7 @@
 			#'4' ': Raspberry Pi 4'
 			'11' ': Odroid XU3/XU4/MC1/HC1/HC2'
 			'12' ': Odroid C2'
+			'15' ': Odroid N2'
 			'44' ': Pinebook'
 			'' '●─ x86_64 '
 			'21' ': x86_64 Native PC'
@@ -402,7 +407,7 @@
 			'10' ': Odroid C1'
 			'13' ': Odroid U3'
 			'14' ': Odroid N1'
-			'15' ': Odroid N2'
+			'16' ': Odroid C4'
 			'70' ': Sparky SBC'
 			'52' ': ASUS Tinker Board'
 			'40' ': PINE A64'
@@ -475,8 +480,24 @@
 		G_HW_MODEL=$HW_MODEL
 		unset HW_MODEL
 
+		# RPi: Detect Debian vs Raspbian and 64 vs 32 bit image
+		if (( $G_HW_MODEL < 10 )); then
+
+			if grep -q '^ID=debian' /etc/os-release; then
+
+				G_RASPBIAN=0
+				[[ $(mawk 'NR==1' /var/lib/dpkg/arch) == 'arm64' ]] && G_HW_ARCH=3 || G_HW_ARCH=2
+
+			else
+
+				G_RASPBIAN=1 G_HW_ARCH=1
+
+			fi
+
+		fi
+
 		G_DIETPI-NOTIFY 2 "Selected hardware model ID: $G_HW_MODEL"
-		G_DIETPI-NOTIFY 2 "Detected CPU architecture: $G_HW_ARCH_NAME (ID: $G_HW_ARCH)"
+		G_DIETPI-NOTIFY 2 "Detected target CPU architecture: $G_HW_ARCH_NAME (ID: $G_HW_ARCH)"
 
 		# WiFi selection
 		if [[ $WIFI_REQUIRED != [01] ]]; then
@@ -608,7 +629,7 @@ Currently installed: $G_DISTRO_NAME (ID: $G_DISTRO)"; then
 		G_EXEC_DESC='Extracting DietPi sourcecode' G_EXEC tar xf package.tar.gz
 		rm package.tar.gz
 
-		[[ -d '/boot' ]] || G_EXEC_DESC='Creating /boot' G_EXEC mkdir -p /boot
+		[[ -d '/boot' ]] || G_EXEC_DESC='Creating /boot' G_EXEC mkdir /boot
 
 		G_DIETPI-NOTIFY 2 'Moving kernel and boot configuration to /boot'
 
@@ -616,6 +637,8 @@ Currently installed: $G_DISTRO_NAME (ID: $G_DISTRO)"; then
 		if (( $G_HW_MODEL < 10 )); then
 
 			G_EXEC mv "DietPi-$G_GITBRANCH/config.txt" /boot/
+			# Boot in 64-bit mode if this is a 64-bit image
+			[[ $G_HW_ARCH == 3 ]] && G_CONFIG_INJECT 'arm_64bit=' 'arm_64bit=1' /boot/config.txt
 
 		elif (( $G_HW_MODEL == 11 )); then
 
@@ -629,6 +652,7 @@ Currently installed: $G_DISTRO_NAME (ID: $G_DISTRO)"; then
 
 		G_EXEC mv "DietPi-$G_GITBRANCH/dietpi.txt" /boot/
 		G_EXEC mv "DietPi-$G_GITBRANCH/README.md" /boot/dietpi-README.md
+		G_EXEC mv "DietPi-$G_GITBRANCH/LICENSE.txt" /boot/dietpi-LICENSE.txt
 		G_EXEC mv "DietPi-$G_GITBRANCH/CHANGELOG.txt" /boot/dietpi-CHANGELOG.txt
 
 		# Reading version string for later use
@@ -657,8 +681,8 @@ Currently installed: $G_DISTRO_NAME (ID: $G_DISTRO)"; then
 
 		G_DIETPI-NOTIFY 2 "Setting APT sources.list: $DISTRO_TARGET_NAME $DISTRO_TARGET"
 
-		# We need to forward $DISTRO_TARGET* to dietpi-set_software, as well as $G_HW_MODEL for Debian vs Raspbian decision.
-		G_DISTRO=$DISTRO_TARGET G_DISTRO_NAME=$DISTRO_TARGET_NAME G_HW_MODEL=$G_HW_MODEL G_EXEC /boot/dietpi/func/dietpi-set_software apt-mirror default
+		# We need to forward $DISTRO_TARGET* to dietpi-set_software, as well as $G_HW_MODEL + $G_RASPBIAN for Debian vs Raspbian decision.
+		G_DISTRO=$DISTRO_TARGET G_DISTRO_NAME=$DISTRO_TARGET_NAME G_HW_MODEL=$G_HW_MODEL G_RASPBIAN=$G_RASPBIAN G_EXEC /boot/dietpi/func/dietpi-set_software apt-mirror default
 
 		# Meveric, update repo to use our EU mirror: https://github.com/MichaIng/DietPi/issues/1519#issuecomment-368234302
 		sed -Ei 's@https?://oph\.mdrjr\.net@http://fuzon.co.uk@' /etc/apt/sources.list.d/meveric* &> /dev/null
@@ -706,7 +730,7 @@ _EOF_'
 			'curl'			# Web address testing, downloading, uploading etc.
 			'debconf'		# APT package pre-configuration, e.g. "debconf-set-selections" for non-interactive install
 			'dirmngr'		# GNU key management required for some APT installs via additional repos
-			'ethtool'		# Ethernet link checking
+			'ethtool'		# Force Ethernet link speed
 			'fake-hwclock'		# Hardware clock emulation, to allow correct timestamps during boot before network time sync
 			'gnupg'			# apt-key add
 			'htop'			# System monitor
@@ -750,27 +774,35 @@ _EOF_'
 		# - systemd-timesyncd: Network time sync daemon
 		#   Available as dedicated package since Bullseye: https://packages.debian.org/systemd-timesyncd
 		#   While the above needs to be checked against current distro to not break SSH or APT before distro upgrade, this one should be checked against target distro version.
-		(( $G_DISTRO_TARGET > 5 )) && aPACKAGES_REQUIRED_INSTALL+=('systemd-timesyncd')
+		(( $DISTRO_TARGET > 5 )) && aPACKAGES_REQUIRED_INSTALL+=('systemd-timesyncd')
 
-		# G_HW_MODEL specific required repo key packages: https://github.com/MichaIng/DietPi/issues/1285#issuecomment-358301273
-		if (( $G_HW_MODEL > 9 )); then
+		# - fdisk: Partitioning tool used by DietPi-FS_partition_resize and DietPi-Imager
+		#   This has become an own package since Debian Buster: https://packages.debian.org/fdisk
+		(( $DISTRO_TARGET > 4 )) && aPACKAGES_REQUIRED_INSTALL+=('fdisk')
 
-			# RAM file system initialisation, required for generic bootloader, but not required/used by RPi bootloader
-			# - On VM, install tiny-initramfs with limited features but sufficient and much smaller + faster
-			if (( $G_HW_MODEL == 20 )); then
+		# G_HW_MODEL specific
+		# - initramfs: Required for generic bootloader, but not required/used by RPi bootloader, on VM install tiny-initramfs with limited features but sufficient and much smaller + faster
+		if (( $G_HW_MODEL == 20 )); then
 
-				aPACKAGES_REQUIRED_INSTALL+=('tiny-initramfs')
+			aPACKAGES_REQUIRED_INSTALL+=('tiny-initramfs')
 
-			else
+		elif (( $G_HW_MODEL > 9 )); then
 
-				aPACKAGES_REQUIRED_INSTALL+=('initramfs-tools')
+			aPACKAGES_REQUIRED_INSTALL+=('initramfs-tools')
 
-			fi
-			aPACKAGES_REQUIRED_INSTALL+=('haveged')			# Entropy daemon: https://github.com/MichaIng/DietPi/issues/2806
+		fi
+		# - Entropy daemon: Use modern rng-tools5 on all devices where it has been proven to work, on RPi rng-tools (default on Raspbian), else haveged: https://github.com/MichaIng/DietPi/issues/2806
+		if [[ $G_HW_MODEL =~ ^(11|14|16|42|58|68|69|72)$ ]]; then # Odroid XU4, RK3399, Odroid C4
+
+			aPACKAGES_REQUIRED_INSTALL+=('rng-tools5')
+
+		elif (( $G_HW_MODEL > 9 )); then
+
+			aPACKAGES_REQUIRED_INSTALL+=('haveged')
 
 		else
 
-			aPACKAGES_REQUIRED_INSTALL+=('rng-tools')		# Entropy daemon: Alternative, that does not work on all devices, but is proven to work on RPi, is default on Raspbian and uses less RAM on idle.
+			aPACKAGES_REQUIRED_INSTALL+=('rng-tools')
 
 		fi
 
@@ -786,14 +818,13 @@ _EOF_'
 		fi
 
 		# G_HW_MODEL specific
-		if (( $G_HW_MODEL != 20 )); then
+		(( $G_HW_MODEL == 20 )) || aPACKAGES_REQUIRED_INSTALL+=('hdparm') # Drive power management adjustments
 
-			aPACKAGES_REQUIRED_INSTALL+=('hdparm')			# Drive power management adjustments
-
-		fi
+		# Install gdisk if root file system is on a GPT partition, used by DietPi-FS_partition_resize
+		[[ $(parted -s "$(lsblk -npo PKNAME "$(findmnt -no SOURCE /)")" print) == *'Partition Table: gpt'* ]] && aPACKAGES_REQUIRED_INSTALL+=('gdisk')
 
 		# Install required filesystem packages
-		if [[ $(blkid -s TYPE -o value) =~ ([[:space:]]|v)'fat' ]]; then
+		if [[ $(blkid -s TYPE -o value) =~ (^|[[:space:]]|v)'fat' ]]; then
 
 			aPACKAGES_REQUIRED_INSTALL+=('dosfstools')		# DietPi-Drive_Manager + fat (boot) drive file system check and creation tools
 
@@ -859,7 +890,15 @@ _EOF_'
 		#	RPi
 		elif (( $G_HW_MODEL < 10 )); then
 
-			G_AGI libraspberrypi-bin libraspberrypi0 raspberrypi-bootloader raspberrypi-kernel raspberrypi-sys-mods raspi-copies-and-fills
+			# Add raspi-copies-and-fills for 32-bit images only
+			[[ $G_HW_ARCH == 3 ]] && arm_mem= || arm_mem='raspi-copies-and-fills'
+			G_AGI libraspberrypi-bin libraspberrypi0 raspberrypi-bootloader raspberrypi-kernel raspberrypi-sys-mods $arm_mem
+
+		#	Odroid C4
+		elif (( $G_HW_MODEL == 16 )); then
+
+			G_AGI linux-image-arm64-odroid-c4 meveric-keyring
+			G_EXEC_NOHALT=1 G_EXEC apt-mark manual u-boot # Workaround until C4 u-boot package has been added to repo
 
 		#	Odroid N2
 		elif (( $G_HW_MODEL == 15 )); then
@@ -884,7 +923,7 @@ _EOF_'
 		#	ROCK Pi S (official Radxa Debian image)
 		elif (( $G_HW_MODEL == 73 )) && grep -q 'apt\.radxa\.com' /etc/apt/sources.list.d/*.list; then
 
-			G_AGI rockpis-rk-u-boot-latest linux-4.4-rockpis-latest rockpis-dtbo rockchip-overlay
+			G_AGI rockpis-rk-u-boot-latest linux-4.4-rockpis-latest rockchip-overlay
 
 		# - Auto detect kernel package incl. ARMbian/others DTB
 		else
@@ -958,7 +997,7 @@ _EOF_'
 		# - initscripts: Pre-installed on Jessie systems (?), superseded and masked by systemd, but never autoremoved
 		#	Jessie workaround: https://github.com/MichaIng/DietPi/issues/3462
 		(( $G_DISTRO < 4 )) && G_EXEC_PRE_FUNC(){ acommand[2]='--force-yes'; }
-		G_AGP dbus dhcpcd5 mountall initscripts *office* *xfce* *qt5* *xserver* *xorg* glib-networking libgtk-3-0
+		G_AGP dbus dhcpcd5 mountall initscripts '*office*' '*xfce*' '*qt5*' '*xserver*' '*xorg*' glib-networking libgtk-3-0
 		# Remove any autoremove prevention
 		rm -f /etc/apt/apt.conf.d/01autoremove*
 		G_AGA
@@ -1014,10 +1053,10 @@ _EOF_'
 
 		G_DIETPI-NOTIFY 2 'Removing misc files/folders/services, not required by DietPi'
 
-		[[ -d '/home' ]] && rm -vR /home
-		[[ -d '/media' ]] && rm -vR /media
-		[[ -d '/selinux' ]] && rm -vR /selinux
-		[[ -d '/var/cache/apparmor' ]] && rm -vR /var/cache/apparmor
+		[[ -d '/home' ]] && rm -Rfv /home/{,.??,.[^.]}* || mkdir /home
+		[[ -d '/media' ]] && rm -Rfv /media/{,.??,.[^.]}* || mkdir /media
+		[[ -d '/selinux' ]] && rm -Rv /selinux
+		[[ -d '/var/cache/apparmor' ]] && rm -Rv /var/cache/apparmor
 		rm -Rfv /var/lib/dhcp/{,.??,.[^.]}*
 		rm -Rfv /var/backups/{,.??,.[^.]}*
 
@@ -1162,8 +1201,9 @@ _EOF_
 		#	Below required if DietPi-PREP is executed from chroot/container, so RPi firstrun scripts are not executed
 		[[ -f '/etc/init.d/resize2fs_once' ]] && rm -v /etc/init.d/resize2fs_once # https://github.com/RPi-Distro/pi-gen/blob/master/stage2/01-sys-tweaks/files/resize2fs_once
 		[[ -f '/boot/cmdline.txt' ]] && sed -i 's| init=/usr/lib/raspi-config/init_resize\.sh||' /boot/cmdline.txt # https://github.com/RPi-Distro/pi-gen/blob/master/stage2/01-sys-tweaks/00-patches/07-resize-init.diff
+		[[ -f '/etc/systemd/system/getty@tty1.service.d/autologin.conf' ]] && rm -v /etc/systemd/system/getty@tty1.service.d/autologin.conf # https://github.com/MichaIng/DietPi/issues/3570#issuecomment-648988475
 
-		# - make_nas_processes_faster cron job on Rock64 + NanoPi + Pine64(?) images
+		# - make_nas_processes_faster cron job on ROCK64 + NanoPi + PINE A64(?) images
 		[[ -f '/etc/cron.d/make_nas_processes_faster' ]] && rm /etc/cron.d/make_nas_processes_faster
 
 		#-----------------------------------------------------------------------------------
@@ -1223,7 +1263,7 @@ _EOF_
 		#-----------------------------------------------------------------------------------
 		# Install vmtouch to lock DietPi scripts and config in file system cache
 		G_EXEC wget https://dietpi.com/downloads/binaries/$G_DISTRO_NAME/vmtouch_$G_HW_ARCH_NAME.deb
-		G_EXEC dpkg --force-hold,confdef,confold -i vmtouch_$G_HW_ARCH_NAME.deb
+		G_EXEC dpkg --force-hold,confnew -i vmtouch_$G_HW_ARCH_NAME.deb
 		rm vmtouch_$G_HW_ARCH_NAME.deb
 
 		#-----------------------------------------------------------------------------------
@@ -1470,7 +1510,7 @@ _EOF_
 
 		elif (( $G_HW_ARCH == 3 )); then
 
-			G_EXEC_DESC='Removing foreign armhf DPKG architecture' G_EXEC dpkg --remove-architecture armhf
+			(( $G_HW_MODEL > 9 )) && G_EXEC_DESC='Removing foreign armhf DPKG architecture' G_EXEC dpkg --remove-architecture armhf
 
 		fi
 
@@ -1659,6 +1699,8 @@ _EOF_
 		[[ -e '/var/swap' ]] && rm -v /var/swap # still exists on some images...
 		# - Re-enable for next run
 		G_CONFIG_INJECT 'AUTO_SETUP_SWAPFILE_SIZE=' 'AUTO_SETUP_SWAPFILE_SIZE=1' /boot/dietpi.txt
+		# - Reset /tmp size to default (512 MiB)
+		sed -i '\|/tmp|s|size=[^,]*,||' /etc/fstab
 
 		G_DIETPI-NOTIFY 2 'Resetting boot.ini, config.txt, cmdline.txt etc'
 
@@ -1734,7 +1776,7 @@ $IMAGE_CREATOR
 $PREIMAGE_INFO
 _EOF_
 
-		G_DIETPI-NOTIFY 2 'Generating GPL license readme'
+		G_DIETPI-NOTIFY 2 'Generating GPLv2 license readme'
 		cat << _EOF_ > /var/lib/dietpi/license.txt
 -----------------------
 DietPi - GPLv2 License:

@@ -3,6 +3,9 @@
 
 	# Created by MichaIng / micha@dietpi.com / dietpi.com
 
+	# Prevent concurrent executions
+	(( $(pgrep -cf dietpi-survey_report) > 1 )) && { echo 'Concurrent execution detected. Exiting...'; exit 1; }
+
 	#-----------------------------------------------------------
 	# Globals - benchmarks
 	#-----------------------------------------------------------
@@ -20,6 +23,7 @@
 	aHW_NAME[13]='Odroid U3'
 	aHW_NAME[14]='Odroid N1'
 	aHW_NAME[15]='Odroid N2'
+	aHW_NAME[16]='Odroid C4'
 	aHW_NAME[20]='x86_64 VM'
 	aHW_NAME[21]='x86_64 PC'
 	aHW_NAME[22]='Generic Device'
@@ -84,7 +88,7 @@
 	declare -A aBENCH_NET_LAN_SPEED
 
 	# Results
-	BENCH_RESULTS_CPU_SCALE=1
+	BENCH_RESULTS_CPU_SCALE=2
 	aBENCH_RESULT_CPU_MIN=()
 	aBENCH_RESULT_CPU_MAX=()
 	aBENCH_RESULT_CPU_AVG=()
@@ -138,13 +142,12 @@
 	declare -A aDISTRO_VERSION
 	declare -A aAUTOSTART_OPTION
 	declare -A aSOFTWARE
-	aAUTO_SETUP_AUTOMATED=(
-		[0]=0
-		[1]=0
-	)
+	aAUTO_SETUP_AUTOMATED=(0 0)
 	declare -A aNETWORK_INTERFACE
 	# v6.17 addition
 	declare -A aGIT_BRANCH
+	# v6.31 addition
+	aRASPBIAN=(0 0)
 
 	# Convert autostart index to name array
 	aAUTOSTART_NAME=()
@@ -258,7 +261,7 @@
 	aSOFTWARE_NAME[89]='PHP'
 	aSOFTWARE_NAME[90]='phpMyAdmin'
 	aSOFTWARE_NAME[91]='Redis'
-	aSOFTWARE_NAME[92]='CertBot'
+	aSOFTWARE_NAME[92]='Certbot'
 	aSOFTWARE_NAME[93]='Pi-hole'
 	aSOFTWARE_NAME[94]='ProFTP'
 	aSOFTWARE_NAME[95]='vsFTPD'
@@ -337,9 +340,8 @@
 	aSOFTWARE_NAME[168]=168
 	aSOFTWARE_NAME[169]='Google AIY'
 
-	# v6.14 (earliest version that uploads to ssh.dietpi.com)
+	# v6.14 (earliest version that can currently upload) + v6.15
 	aSOFTWARE_NAME6_14=()
-	# v6.15
 	aSOFTWARE_NAME6_15=()
 	for i in ${!aSOFTWARE_NAME[@]}
 	do
@@ -441,11 +443,22 @@
 	done
 	aSOFTWARE_NAME6_29[140]='Domoticz'
 
+	# v6.30 + v6.31
+	aSOFTWARE_NAME6_30=()
+	aSOFTWARE_NAME6_31=()
+	for i in ${!aSOFTWARE_NAME6_29[@]}
+	do
+
+		aSOFTWARE_NAME6_30[$i]=${aSOFTWARE_NAME6_29[$i]}
+		aSOFTWARE_NAME6_31[$i]=${aSOFTWARE_NAME6_30[$i]}
+
+	done
+
 	Main(){
 
-		# Copy files to RAM to speed up grep
+		# Copy files to RAM to speed up sourcing
 		#mkdir -p /tmp/dietpi-survey_report
-		#cp /home/dietpi-survey/survey/*.txt /tmp/dietpi-survey_report/ # /etc/cron.minutely/dietpi-survey_report: line 310: /bin/cp: Argument list too long
+		#cp /home/dietpi-survey/survey/*.txt /tmp/dietpi-survey_report/ # cp: Argument list too long
 		[[ -e '/tmp/dietpi-survey_report' ]] && rm -R /tmp/dietpi-survey_report
 		cp -R /home/dietpi-survey/survey /tmp/dietpi-survey_report
 
@@ -463,89 +476,84 @@
 			fi
 
 			# Source survey files
-			if [[ $(<$file) == '#!/bin/bash'* ]]; then
+			[[ $(<$file) == '#!/bin/bash'* ]] || continue
 
-				. $file
+			. $file
 
-				# Add bench to array
-				if [[ $BENCH_HW_MODEL =~ ^[0-9]+$ ]]; then
+			# Add bench to array
+			[[ $BENCH_HW_MODEL =~ ^[0-9]+$ ]] || continue
 
-					# CPU
-					# - Remove decimal places
-					BENCH_CPU_TEMP_START=${BENCH_CPU_TEMP_START%%.*}
-					BENCH_CPU_TEMP_END=${BENCH_CPU_TEMP_END%%.*}
-					if [[ ${BENCH_CPU%%.*} =~ ^[0-9]+$ && $BENCH_CPU_TEMP_START =~ ^-?[0-9]+$ && $BENCH_CPU_TEMP_END =~ ^-?[0-9]+$ ]]; then
+			# CPU
+			# - BENCH_CPU: Remove decimal point, equals times 100 since CPU time is always in x.xx
+			BENCH_CPU=${BENCH_CPU/.}
+			if [[ $BENCH_CPU =~ ^[0-9]+$ && $BENCH_CPU_TEMP_START =~ ^-?[0-9]+$ && $BENCH_CPU_TEMP_END =~ ^-?[0-9]+$ ]]; then
 
-						aBENCH_CPU[$BENCH_HW_MODEL,${aBENCH_CPU_INDEX[$BENCH_HW_MODEL]:=0}]=$BENCH_CPU
+				aBENCH_CPU[$BENCH_HW_MODEL,${aBENCH_CPU_INDEX[$BENCH_HW_MODEL]:=0}]=$BENCH_CPU
 
-						# - Patch for 5 digit CPU temps: https://github.com/MichaIng/DietPi/issues/2715
-						(( $BENCH_CPU_TEMP_START > 130 )) && (( BENCH_CPU_TEMP_START /= 1000 ))
-						(( $BENCH_CPU_TEMP_END > 130 )) && (( BENCH_CPU_TEMP_END /= 1000 ))
+				# Patch for 5 digit CPU temps: https://github.com/MichaIng/DietPi/issues/2715
+				(( $BENCH_CPU_TEMP_START > 200 )) && (( BENCH_CPU_TEMP_START /= 1000 ))
+				(( $BENCH_CPU_TEMP_END > 200 )) && (( BENCH_CPU_TEMP_END /= 1000 ))
 
-						aBENCH_CPU_TEMP_START[$BENCH_HW_MODEL,${aBENCH_CPU_INDEX[$BENCH_HW_MODEL]}]=$BENCH_CPU_TEMP_START
-						aBENCH_CPU_TEMP_END[$BENCH_HW_MODEL,${aBENCH_CPU_INDEX[$BENCH_HW_MODEL]}]=$BENCH_CPU_TEMP_END
-						((aBENCH_CPU_INDEX[$BENCH_HW_MODEL]++))
-
-					fi
-
-					# RootFS
-					# - Remove decimal places
-					BENCH_ROOTFS_WRITE=${BENCH_ROOTFS_WRITE%%.*}
-					BENCH_ROOTFS_READ=${BENCH_ROOTFS_READ%%.*}
-					if [[ $BENCH_ROOTFS_WRITE =~ ^[0-9]+$ && $BENCH_ROOTFS_READ =~ ^[0-9]+$ ]]; then
-
-						aBENCH_ROOTFS_WRITE[$BENCH_HW_MODEL,${aBENCH_ROOTFS_INDEX[$BENCH_HW_MODEL]:=0}]=$BENCH_ROOTFS_WRITE
-						aBENCH_ROOTFS_READ[$BENCH_HW_MODEL,${aBENCH_ROOTFS_INDEX[$BENCH_HW_MODEL]}]=$BENCH_ROOTFS_READ
-						((aBENCH_ROOTFS_INDEX[$BENCH_HW_MODEL]++))
-
-					fi
-
-					# RAM
-					# - https://github.com/MichaIng/DietPi/issues/2715 | nullify this score and ignore it in min/max/avg processing.
-					# - Remove decimal places
-					BENCH_RAM_WRITE=${BENCH_RAM_WRITE%%.*}
-					BENCH_RAM_READ=${BENCH_RAM_READ%%.*}
-					if [[ $BENCH_VERSION =~ ^[0-9]+$ && $BENCH_RAM_WRITE =~ ^[0-9]+$ && $BENCH_RAM_READ =~ ^[0-9]+$ ]] && (( $BENCH_VERSION > 1 )); then
-
-						aBENCH_RAM_WRITE[$BENCH_HW_MODEL,${aBENCH_RAM_INDEX[$BENCH_HW_MODEL]:=0}]=$BENCH_RAM_WRITE
-						aBENCH_RAM_READ[$BENCH_HW_MODEL,${aBENCH_RAM_INDEX[$BENCH_HW_MODEL]}]=$BENCH_RAM_READ
-						((aBENCH_RAM_INDEX[$BENCH_HW_MODEL]++))
-
-					fi
-
-					# Custom FS
-					# - Remove decimal places
-					BENCH_CUSTOMFS_WRITE=${BENCH_CUSTOMFS_WRITE%%.*}
-					BENCH_CUSTOMFS_READ=${BENCH_CUSTOMFS_READ%%.*}
-					if [[ $BENCH_CUSTOMFS_WRITE =~ ^[0-9]+$ && $BENCH_CUSTOMFS_READ =~ ^[0-9]+$ ]]; then
-
-						aBENCH_CUSTOMFS_WRITE[$BENCH_HW_MODEL,${aBENCH_CUSTOMFS_INDEX[$BENCH_HW_MODEL]:=0}]=$BENCH_CUSTOMFS_WRITE
-						aBENCH_CUSTOMFS_READ[$BENCH_HW_MODEL,${aBENCH_CUSTOMFS_INDEX[$BENCH_HW_MODEL]}]=$BENCH_CUSTOMFS_READ
-						((aBENCH_CUSTOMFS_INDEX[$BENCH_HW_MODEL]++))
-
-					fi
-
-					# LAN
-					# - Remove decimal places
-					BENCH_NET_LAN_SPEED=${BENCH_NET_LAN_SPEED%%.*}
-					if [[ $BENCH_NET_LAN_SPEED =~ ^[0-9]+$ ]]; then
-
-						aBENCH_NET_LAN_SPEED[$BENCH_HW_MODEL,${aBENCH_LAN_INDEX[$BENCH_HW_MODEL]:=0}]=$BENCH_NET_LAN_SPEED
-						((aBENCH_LAN_INDEX[$BENCH_HW_MODEL]++))
-
-					fi
-
-					# Done, clear vars
-					unset BENCH_VERSION BENCH_HW_MODEL
-					unset BENCH_CPU BENCH_CPU_TEMP_START BENCH_CPU_TEMP_END
-					unset BENCH_ROOTFS_WRITE BENCH_ROOTFS_READ
-					unset BENCH_RAM_WRITE BENCH_RAM_READ
-					unset BENCH_CUSTOMFS_WRITE BENCH_CUSTOMFS_READ
-					unset BENCH_NET_LAN_SPEED
-
-				fi
+				aBENCH_CPU_TEMP_START[$BENCH_HW_MODEL,${aBENCH_CPU_INDEX[$BENCH_HW_MODEL]}]=$BENCH_CPU_TEMP_START
+				aBENCH_CPU_TEMP_END[$BENCH_HW_MODEL,${aBENCH_CPU_INDEX[$BENCH_HW_MODEL]}]=$BENCH_CPU_TEMP_END
+				((aBENCH_CPU_INDEX[$BENCH_HW_MODEL]++))
 
 			fi
+
+			# RootFS
+			# - Remove decimal places
+			BENCH_ROOTFS_WRITE=${BENCH_ROOTFS_WRITE%%.*}
+			BENCH_ROOTFS_READ=${BENCH_ROOTFS_READ%%.*}
+			if [[ $BENCH_ROOTFS_WRITE =~ ^[0-9]+$ && $BENCH_ROOTFS_READ =~ ^[0-9]+$ ]]; then
+
+				aBENCH_ROOTFS_WRITE[$BENCH_HW_MODEL,${aBENCH_ROOTFS_INDEX[$BENCH_HW_MODEL]:=0}]=$BENCH_ROOTFS_WRITE
+				aBENCH_ROOTFS_READ[$BENCH_HW_MODEL,${aBENCH_ROOTFS_INDEX[$BENCH_HW_MODEL]}]=$BENCH_ROOTFS_READ
+				((aBENCH_ROOTFS_INDEX[$BENCH_HW_MODEL]++))
+
+			fi
+
+			# RAM
+			# - https://github.com/MichaIng/DietPi/issues/2715 | nullify this score and ignore it in min/max/avg processing.
+			# - Remove decimal places
+			BENCH_RAM_WRITE=${BENCH_RAM_WRITE%%.*}
+			BENCH_RAM_READ=${BENCH_RAM_READ%%.*}
+			if [[ $BENCH_VERSION =~ ^[0-9]+$ && $BENCH_RAM_WRITE =~ ^[0-9]+$ && $BENCH_RAM_READ =~ ^[0-9]+$ ]] && (( $BENCH_VERSION > 1 )); then
+
+				aBENCH_RAM_WRITE[$BENCH_HW_MODEL,${aBENCH_RAM_INDEX[$BENCH_HW_MODEL]:=0}]=$BENCH_RAM_WRITE
+				aBENCH_RAM_READ[$BENCH_HW_MODEL,${aBENCH_RAM_INDEX[$BENCH_HW_MODEL]}]=$BENCH_RAM_READ
+				((aBENCH_RAM_INDEX[$BENCH_HW_MODEL]++))
+
+			fi
+
+			# Custom FS
+			# - Remove decimal places
+			BENCH_CUSTOMFS_WRITE=${BENCH_CUSTOMFS_WRITE%%.*}
+			BENCH_CUSTOMFS_READ=${BENCH_CUSTOMFS_READ%%.*}
+			if [[ $BENCH_CUSTOMFS_WRITE =~ ^[0-9]+$ && $BENCH_CUSTOMFS_READ =~ ^[0-9]+$ ]]; then
+
+				aBENCH_CUSTOMFS_WRITE[$BENCH_HW_MODEL,${aBENCH_CUSTOMFS_INDEX[$BENCH_HW_MODEL]:=0}]=$BENCH_CUSTOMFS_WRITE
+				aBENCH_CUSTOMFS_READ[$BENCH_HW_MODEL,${aBENCH_CUSTOMFS_INDEX[$BENCH_HW_MODEL]}]=$BENCH_CUSTOMFS_READ
+				((aBENCH_CUSTOMFS_INDEX[$BENCH_HW_MODEL]++))
+
+			fi
+
+			# LAN
+			# - Remove decimal places
+			BENCH_NET_LAN_SPEED=${BENCH_NET_LAN_SPEED%%.*}
+			if [[ $BENCH_NET_LAN_SPEED =~ ^[0-9]+$ ]]; then
+
+				aBENCH_NET_LAN_SPEED[$BENCH_HW_MODEL,${aBENCH_LAN_INDEX[$BENCH_HW_MODEL]:=0}]=$BENCH_NET_LAN_SPEED
+				((aBENCH_LAN_INDEX[$BENCH_HW_MODEL]++))
+
+			fi
+
+			# Done, clear vars
+			unset BENCH_VERSION BENCH_HW_MODEL
+			unset BENCH_CPU BENCH_CPU_TEMP_START BENCH_CPU_TEMP_END
+			unset BENCH_ROOTFS_WRITE BENCH_ROOTFS_READ
+			unset BENCH_RAM_WRITE BENCH_RAM_READ
+			unset BENCH_CUSTOMFS_WRITE BENCH_CUSTOMFS_READ
+			unset BENCH_NET_LAN_SPEED
 
 		done
 
@@ -554,6 +562,9 @@
 
 		# Clean up reports dir
 		rm -R /tmp/dietpi-survey_report
+
+		# Optin count
+		SURVEY_COUNT_OPTIN=$(( $SURVEY_COUNT_TOTAL - $SURVEY_COUNT_EMPTY ))
 
 		# Process all results, for later use in HTML printout
 		# - NB: HW_MODEL array based
@@ -576,53 +587,26 @@
 			for (( j=0; j<${aBENCH_CPU_INDEX[$i]}; j++ ))
 			do
 
-				# Use bc to allow floats
-				if (( $(bc -l <<< "${aBENCH_CPU[$i,$j]} < ${aBENCH_RESULT_CPU_MIN[$i]}") )); then
+				(( ${aBENCH_CPU[$i,$j]} < ${aBENCH_RESULT_CPU_MIN[$i]} )) && aBENCH_RESULT_CPU_MIN[$i]=${aBENCH_CPU[$i,$j]}
+				(( ${aBENCH_CPU[$i,$j]} > ${aBENCH_RESULT_CPU_MAX[$i]} )) && aBENCH_RESULT_CPU_MAX[$i]=${aBENCH_CPU[$i,$j]}
+				(( aBENCH_RESULT_CPU_AVG[$i] += ${aBENCH_CPU[$i,$j]} ))
 
-					aBENCH_RESULT_CPU_MIN[$i]=${aBENCH_CPU[$i,$j]}
-
-				fi
-				if (( $(bc -l <<< "${aBENCH_CPU[$i,$j]} > ${aBENCH_RESULT_CPU_MAX[$i]}") )); then
-
-					aBENCH_RESULT_CPU_MAX[$i]=${aBENCH_CPU[$i,$j]}
-
-				fi
-				aBENCH_RESULT_CPU_AVG[$i]=$(bc -l <<< "${aBENCH_RESULT_CPU_AVG[$i]} + ${aBENCH_CPU[$i,$j]}")
-
-				if (( ${aBENCH_CPU_TEMP_START[$i,$j]} < ${aBENCH_RESULT_CPU_TEMP_START_MIN[$i]} )); then
-
-					aBENCH_RESULT_CPU_TEMP_START_MIN[$i]=${aBENCH_CPU_TEMP_START[$i,$j]}
-
-				fi
-				if (( ${aBENCH_CPU_TEMP_START[$i,$j]} > ${aBENCH_RESULT_CPU_TEMP_START_MAX[$i]} )); then
-
-					aBENCH_RESULT_CPU_TEMP_START_MAX[$i]=${aBENCH_CPU_TEMP_START[$i,$j]}
-
-				fi
+				(( ${aBENCH_CPU_TEMP_START[$i,$j]} < ${aBENCH_RESULT_CPU_TEMP_START_MIN[$i]} )) && aBENCH_RESULT_CPU_TEMP_START_MIN[$i]=${aBENCH_CPU_TEMP_START[$i,$j]}
+				(( ${aBENCH_CPU_TEMP_START[$i,$j]} > ${aBENCH_RESULT_CPU_TEMP_START_MAX[$i]} )) && aBENCH_RESULT_CPU_TEMP_START_MAX[$i]=${aBENCH_CPU_TEMP_START[$i,$j]}
 				(( aBENCH_RESULT_CPU_TEMP_START_AVG[$i] += ${aBENCH_CPU_TEMP_START[$i,$j]} ))
 
-				if (( ${aBENCH_CPU_TEMP_END[$i,$j]} < ${aBENCH_RESULT_CPU_TEMP_END_MIN[$i]} )); then
-
-					aBENCH_RESULT_CPU_TEMP_END_MIN[$i]=${aBENCH_CPU_TEMP_END[$i,$j]}
-
-				fi
-				if (( ${aBENCH_CPU_TEMP_END[$i,$j]} > ${aBENCH_RESULT_CPU_TEMP_END_MAX[$i]} )); then
-
-					aBENCH_RESULT_CPU_TEMP_END_MAX[$i]=${aBENCH_CPU_TEMP_END[$i,$j]}
-
-				fi
+				(( ${aBENCH_CPU_TEMP_END[$i,$j]} < ${aBENCH_RESULT_CPU_TEMP_END_MIN[$i]} )) && aBENCH_RESULT_CPU_TEMP_END_MIN[$i]=${aBENCH_CPU_TEMP_END[$i,$j]}
+				(( ${aBENCH_CPU_TEMP_END[$i,$j]} > ${aBENCH_RESULT_CPU_TEMP_END_MAX[$i]} )) && aBENCH_RESULT_CPU_TEMP_END_MAX[$i]=${aBENCH_CPU_TEMP_END[$i,$j]}
 				(( aBENCH_RESULT_CPU_TEMP_END_AVG[$i] += ${aBENCH_CPU_TEMP_END[$i,$j]} ))
 
-				# Last item in current array. Scale and work out averages
-				if (( $j == ${aBENCH_CPU_INDEX[$i]} - 1 )); then
-
-					aBENCH_RESULT_CPU_MIN[$i]=$(bc -l <<< "scale=$BENCH_RESULTS_CPU_SCALE; ${aBENCH_RESULT_CPU_MIN[$i]} / 1")
-					aBENCH_RESULT_CPU_MAX[$i]=$(bc -l <<< "scale=$BENCH_RESULTS_CPU_SCALE; ${aBENCH_RESULT_CPU_MAX[$i]} / 1")
-					aBENCH_RESULT_CPU_AVG[$i]=$(bc -l <<< "scale=$BENCH_RESULTS_CPU_SCALE; ${aBENCH_RESULT_CPU_AVG[$i]} / ${aBENCH_CPU_INDEX[$i]}")
-					aBENCH_RESULT_CPU_TEMP_START_AVG[$i]=$(( ${aBENCH_RESULT_CPU_TEMP_START_AVG[$i]} / ${aBENCH_CPU_INDEX[$i]} ))
-					aBENCH_RESULT_CPU_TEMP_END_AVG[$i]=$(( ${aBENCH_RESULT_CPU_TEMP_END_AVG[$i]} / ${aBENCH_CPU_INDEX[$i]} ))
-
-				fi
+				# Last item in current array. Work out averages
+				(( $j == ${aBENCH_CPU_INDEX[$i]} - 1 )) || continue
+				# - Devide CPU times by 100 and scale to revert decimal point removal
+				aBENCH_RESULT_CPU_MIN[$i]=$(bc -l <<< "scale=$BENCH_RESULTS_CPU_SCALE; ${aBENCH_RESULT_CPU_MIN[$i]} / 100")
+				aBENCH_RESULT_CPU_MAX[$i]=$(bc -l <<< "scale=$BENCH_RESULTS_CPU_SCALE; ${aBENCH_RESULT_CPU_MAX[$i]} / 100")
+				aBENCH_RESULT_CPU_AVG[$i]=$(bc -l <<< "scale=$BENCH_RESULTS_CPU_SCALE; ${aBENCH_RESULT_CPU_AVG[$i]} / ${aBENCH_CPU_INDEX[$i]} / 100")
+				aBENCH_RESULT_CPU_TEMP_START_AVG[$i]=$(( ${aBENCH_RESULT_CPU_TEMP_START_AVG[$i]} / ${aBENCH_CPU_INDEX[$i]} ))
+				aBENCH_RESULT_CPU_TEMP_END_AVG[$i]=$(( ${aBENCH_RESULT_CPU_TEMP_END_AVG[$i]} / ${aBENCH_CPU_INDEX[$i]} ))
 
 			done
 
@@ -642,37 +626,18 @@
 			for (( j=0; j<${aBENCH_ROOTFS_INDEX[$i]}; j++ ))
 			do
 
-				if (( ${aBENCH_ROOTFS_WRITE[$i,$j]} < ${aBENCH_RESULT_ROOTFS_WRITE_MIN[$i]} )); then
-
-					aBENCH_RESULT_ROOTFS_WRITE_MIN[$i]=${aBENCH_ROOTFS_WRITE[$i,$j]}
-
-				fi
-				if (( ${aBENCH_ROOTFS_WRITE[$i,$j]} > ${aBENCH_RESULT_ROOTFS_WRITE_MAX[$i]} )); then
-
-					aBENCH_RESULT_ROOTFS_WRITE_MAX[$i]=${aBENCH_ROOTFS_WRITE[$i,$j]}
-
-				fi
+				(( ${aBENCH_ROOTFS_WRITE[$i,$j]} < ${aBENCH_RESULT_ROOTFS_WRITE_MIN[$i]} )) && aBENCH_RESULT_ROOTFS_WRITE_MIN[$i]=${aBENCH_ROOTFS_WRITE[$i,$j]}
+				(( ${aBENCH_ROOTFS_WRITE[$i,$j]} > ${aBENCH_RESULT_ROOTFS_WRITE_MAX[$i]} )) && aBENCH_RESULT_ROOTFS_WRITE_MAX[$i]=${aBENCH_ROOTFS_WRITE[$i,$j]}
 				(( aBENCH_RESULT_ROOTFS_WRITE_AVG[$i] += ${aBENCH_ROOTFS_WRITE[$i,$j]} ))
 
-				if (( ${aBENCH_ROOTFS_READ[$i,$j]} < ${aBENCH_RESULT_ROOTFS_READ_MIN[$i]} )); then
-
-					aBENCH_RESULT_ROOTFS_READ_MIN[$i]=${aBENCH_ROOTFS_READ[$i,$j]}
-
-				fi
-				if (( ${aBENCH_ROOTFS_READ[$i,$j]} > ${aBENCH_RESULT_ROOTFS_READ_MAX[$i]} )); then
-
-					aBENCH_RESULT_ROOTFS_READ_MAX[$i]=${aBENCH_ROOTFS_READ[$i,$j]}
-
-				fi
+				(( ${aBENCH_ROOTFS_READ[$i,$j]} < ${aBENCH_RESULT_ROOTFS_READ_MIN[$i]} )) && aBENCH_RESULT_ROOTFS_READ_MIN[$i]=${aBENCH_ROOTFS_READ[$i,$j]}
+				(( ${aBENCH_ROOTFS_READ[$i,$j]} > ${aBENCH_RESULT_ROOTFS_READ_MAX[$i]} )) && aBENCH_RESULT_ROOTFS_READ_MAX[$i]=${aBENCH_ROOTFS_READ[$i,$j]}
 				(( aBENCH_RESULT_ROOTFS_READ_AVG[$i] += ${aBENCH_ROOTFS_READ[$i,$j]} ))
 
 				# Last item in current array. Work out averages
-				if (( $j == ${aBENCH_ROOTFS_INDEX[$i]} - 1 )); then
-
-					aBENCH_RESULT_ROOTFS_WRITE_AVG[$i]=$(( ${aBENCH_RESULT_ROOTFS_WRITE_AVG[$i]} / ${aBENCH_ROOTFS_INDEX[$i]} ))
-					aBENCH_RESULT_ROOTFS_READ_AVG[$i]=$(( ${aBENCH_RESULT_ROOTFS_READ_AVG[$i]} / ${aBENCH_ROOTFS_INDEX[$i]} ))
-
-				fi
+				(( $j == ${aBENCH_ROOTFS_INDEX[$i]} - 1 )) || continue
+				aBENCH_RESULT_ROOTFS_WRITE_AVG[$i]=$(( ${aBENCH_RESULT_ROOTFS_WRITE_AVG[$i]} / ${aBENCH_ROOTFS_INDEX[$i]} ))
+				aBENCH_RESULT_ROOTFS_READ_AVG[$i]=$(( ${aBENCH_RESULT_ROOTFS_READ_AVG[$i]} / ${aBENCH_ROOTFS_INDEX[$i]} ))
 
 			done
 
@@ -692,37 +657,18 @@
 			for (( j=0; j<${aBENCH_RAM_INDEX[$i]}; j++ ))
 			do
 
-				if (( ${aBENCH_RAM_WRITE[$i,$j]} < ${aBENCH_RESULT_RAM_WRITE_MIN[$i]} )); then
-
-					aBENCH_RESULT_RAM_WRITE_MIN[$i]=${aBENCH_RAM_WRITE[$i,$j]}
-
-				fi
-				if (( ${aBENCH_RAM_WRITE[$i,$j]} > ${aBENCH_RESULT_RAM_WRITE_MAX[$i]} )); then
-
-					aBENCH_RESULT_RAM_WRITE_MAX[$i]=${aBENCH_RAM_WRITE[$i,$j]}
-
-				fi
+				(( ${aBENCH_RAM_WRITE[$i,$j]} < ${aBENCH_RESULT_RAM_WRITE_MIN[$i]} )) && aBENCH_RESULT_RAM_WRITE_MIN[$i]=${aBENCH_RAM_WRITE[$i,$j]}
+				(( ${aBENCH_RAM_WRITE[$i,$j]} > ${aBENCH_RESULT_RAM_WRITE_MAX[$i]} )) && aBENCH_RESULT_RAM_WRITE_MAX[$i]=${aBENCH_RAM_WRITE[$i,$j]}
 				(( aBENCH_RESULT_RAM_WRITE_AVG[$i] += ${aBENCH_RAM_WRITE[$i,$j]} ))
 
-				if (( ${aBENCH_RAM_READ[$i,$j]} < ${aBENCH_RESULT_RAM_READ_MIN[$i]} )); then
-
-					aBENCH_RESULT_RAM_READ_MIN[$i]=${aBENCH_RAM_READ[$i,$j]}
-
-				fi
-				if (( ${aBENCH_RAM_READ[$i,$j]} > ${aBENCH_RESULT_RAM_READ_MAX[$i]} )); then
-
-					aBENCH_RESULT_RAM_READ_MAX[$i]=${aBENCH_RAM_READ[$i,$j]}
-
-				fi
+				(( ${aBENCH_RAM_READ[$i,$j]} < ${aBENCH_RESULT_RAM_READ_MIN[$i]} )) && aBENCH_RESULT_RAM_READ_MIN[$i]=${aBENCH_RAM_READ[$i,$j]}
+				(( ${aBENCH_RAM_READ[$i,$j]} > ${aBENCH_RESULT_RAM_READ_MAX[$i]} )) && aBENCH_RESULT_RAM_READ_MAX[$i]=${aBENCH_RAM_READ[$i,$j]}
 				(( aBENCH_RESULT_RAM_READ_AVG[$i] += ${aBENCH_RAM_READ[$i,$j]} ))
 
 				# Last item in current array. Work out averages
-				if (( $j == ${aBENCH_RAM_INDEX[$i]} - 1 )); then
-
-					aBENCH_RESULT_RAM_WRITE_AVG[$i]=$(( ${aBENCH_RESULT_RAM_WRITE_AVG[$i]} / ${aBENCH_RAM_INDEX[$i]} ))
-					aBENCH_RESULT_RAM_READ_AVG[$i]=$(( ${aBENCH_RESULT_RAM_READ_AVG[$i]} / ${aBENCH_RAM_INDEX[$i]} ))
-
-				fi
+				(( $j == ${aBENCH_RAM_INDEX[$i]} - 1 )) || continue
+				aBENCH_RESULT_RAM_WRITE_AVG[$i]=$(( ${aBENCH_RESULT_RAM_WRITE_AVG[$i]} / ${aBENCH_RAM_INDEX[$i]} ))
+				aBENCH_RESULT_RAM_READ_AVG[$i]=$(( ${aBENCH_RESULT_RAM_READ_AVG[$i]} / ${aBENCH_RAM_INDEX[$i]} ))
 
 			done
 
@@ -739,24 +685,13 @@
 			for (( j=0; j<${aBENCH_LAN_INDEX[$i]}; j++ ))
 			do
 
-				if (( ${aBENCH_NET_LAN_SPEED[$i,$j]} < ${aBENCH_RESULT_NET_LAN_SPEED_MIN[$i]} )); then
-
-					aBENCH_RESULT_NET_LAN_SPEED_MIN[$i]=${aBENCH_NET_LAN_SPEED[$i,$j]}
-
-				fi
-				if (( ${aBENCH_NET_LAN_SPEED[$i,$j]} > ${aBENCH_RESULT_NET_LAN_SPEED_MAX[$i]} )); then
-
-					aBENCH_RESULT_NET_LAN_SPEED_MAX[$i]=${aBENCH_NET_LAN_SPEED[$i,$j]}
-
-				fi
+				(( ${aBENCH_NET_LAN_SPEED[$i,$j]} < ${aBENCH_RESULT_NET_LAN_SPEED_MIN[$i]} )) && aBENCH_RESULT_NET_LAN_SPEED_MIN[$i]=${aBENCH_NET_LAN_SPEED[$i,$j]}
+				(( ${aBENCH_NET_LAN_SPEED[$i,$j]} > ${aBENCH_RESULT_NET_LAN_SPEED_MAX[$i]} )) && aBENCH_RESULT_NET_LAN_SPEED_MAX[$i]=${aBENCH_NET_LAN_SPEED[$i,$j]}
 				(( aBENCH_RESULT_NET_LAN_SPEED_AVG[$i] += ${aBENCH_NET_LAN_SPEED[$i,$j]} ))
 
 				# Last item in current array. Work out averages
-				if (( $j == ${aBENCH_LAN_INDEX[$i]} - 1 )); then
-
-					aBENCH_RESULT_NET_LAN_SPEED_AVG[$i]=$(( ${aBENCH_RESULT_NET_LAN_SPEED_AVG[$i]} / ${aBENCH_LAN_INDEX[$i]} ))
-
-				fi
+				(( $j == ${aBENCH_LAN_INDEX[$i]} - 1 )) || continue
+				aBENCH_RESULT_NET_LAN_SPEED_AVG[$i]=$(( ${aBENCH_RESULT_NET_LAN_SPEED_AVG[$i]} / ${aBENCH_LAN_INDEX[$i]} ))
 
 			done
 
@@ -776,37 +711,18 @@
 			for (( j=0; j<${aBENCH_CUSTOMFS_INDEX[$i]}; j++ ))
 			do
 
-				if (( ${aBENCH_CUSTOMFS_WRITE[$i,$j]} < ${aBENCH_RESULT_CUSTOMFS_WRITE_MIN[$i]} )); then
-
-					aBENCH_RESULT_CUSTOMFS_WRITE_MIN[$i]=${aBENCH_CUSTOMFS_WRITE[$i,$j]}
-
-				fi
-				if (( ${aBENCH_CUSTOMFS_WRITE[$i,$j]} > ${aBENCH_RESULT_CUSTOMFS_WRITE_MAX[$i]} )); then
-
-					aBENCH_RESULT_CUSTOMFS_WRITE_MAX[$i]=${aBENCH_CUSTOMFS_WRITE[$i,$j]}
-
-				fi
+				(( ${aBENCH_CUSTOMFS_WRITE[$i,$j]} < ${aBENCH_RESULT_CUSTOMFS_WRITE_MIN[$i]} )) && aBENCH_RESULT_CUSTOMFS_WRITE_MIN[$i]=${aBENCH_CUSTOMFS_WRITE[$i,$j]}
+				(( ${aBENCH_CUSTOMFS_WRITE[$i,$j]} > ${aBENCH_RESULT_CUSTOMFS_WRITE_MAX[$i]} )) && aBENCH_RESULT_CUSTOMFS_WRITE_MAX[$i]=${aBENCH_CUSTOMFS_WRITE[$i,$j]}
 				(( aBENCH_RESULT_CUSTOMFS_WRITE_AVG[$i] += ${aBENCH_CUSTOMFS_WRITE[$i,$j]} ))
 
-				if (( ${aBENCH_CUSTOMFS_READ[$i,$j]} < ${aBENCH_RESULT_CUSTOMFS_READ_MIN[$i]} )); then
-
-					aBENCH_RESULT_CUSTOMFS_READ_MIN[$i]=${aBENCH_CUSTOMFS_READ[$i,$j]}
-
-				fi
-				if (( ${aBENCH_CUSTOMFS_READ[$i,$j]} > ${aBENCH_RESULT_CUSTOMFS_READ_MAX[$i]} )); then
-
-					aBENCH_RESULT_CUSTOMFS_READ_MAX[$i]=${aBENCH_CUSTOMFS_READ[$i,$j]}
-
-				fi
+				(( ${aBENCH_CUSTOMFS_READ[$i,$j]} < ${aBENCH_RESULT_CUSTOMFS_READ_MIN[$i]} )) && aBENCH_RESULT_CUSTOMFS_READ_MIN[$i]=${aBENCH_CUSTOMFS_READ[$i,$j]}
+				(( ${aBENCH_CUSTOMFS_READ[$i,$j]} > ${aBENCH_RESULT_CUSTOMFS_READ_MAX[$i]} )) && aBENCH_RESULT_CUSTOMFS_READ_MAX[$i]=${aBENCH_CUSTOMFS_READ[$i,$j]}
 				(( aBENCH_RESULT_CUSTOMFS_READ_AVG[$i] += ${aBENCH_CUSTOMFS_READ[$i,$j]} ))
 
 				# Last item in current array. Work out averages
-				if (( $j == ${aBENCH_CUSTOMFS_INDEX[$i]} - 1 )); then
-
-					aBENCH_RESULT_CUSTOMFS_WRITE_AVG[$i]=$(( ${aBENCH_RESULT_CUSTOMFS_WRITE_AVG[$i]} / ${aBENCH_CUSTOMFS_INDEX[$i]} ))
-					aBENCH_RESULT_CUSTOMFS_READ_AVG[$i]=$(( ${aBENCH_RESULT_CUSTOMFS_READ_AVG[$i]} / ${aBENCH_CUSTOMFS_INDEX[$i]} ))
-
-				fi
+				(( $j == ${aBENCH_CUSTOMFS_INDEX[$i]} - 1 )) || continue
+				aBENCH_RESULT_CUSTOMFS_WRITE_AVG[$i]=$(( ${aBENCH_RESULT_CUSTOMFS_WRITE_AVG[$i]} / ${aBENCH_CUSTOMFS_INDEX[$i]} ))
+				aBENCH_RESULT_CUSTOMFS_READ_AVG[$i]=$(( ${aBENCH_RESULT_CUSTOMFS_READ_AVG[$i]} / ${aBENCH_CUSTOMFS_INDEX[$i]} ))
 
 			done
 
@@ -823,13 +739,13 @@
 				background-color: black;
 				font-family: Verdana, Arial, Helvetica, sans-serif;
 			}
-			th, td {
-				padding: 5px;
-			}
+			th, td { padding: 5px; }
 			table, th, td {
 				font-size: 14px;
 				border: 1px solid grey;
 			}
+			a { color: white; }
+			a:hover { color: #c5ff00; }
 		</style>
 	</head>
 	<body>
@@ -838,68 +754,73 @@
                 <i>Last update: $(TZ=UTC date "+%Y-%m-%d %T UTC")</i><br>
 		<br>
 		<table>
-			<tr><td>Total install count</td><td align="right">$SURVEY_COUNT_TOTAL</td></tr>
-			<tr><td>Opted in installs</td><td align="right">$(( $SURVEY_COUNT_TOTAL - $SURVEY_COUNT_EMPTY ))</td></tr>
-			<tr><td>Opted out installs</td><td align="right">$SURVEY_COUNT_EMPTY</td></tr>
+			<tr><td>Total system count</td><td align="right">$SURVEY_COUNT_TOTAL</td></tr>
+			<tr><td>Systems sending survey data</td><td align="right">$SURVEY_COUNT_OPTIN</td><td align="right">$(( $SURVEY_COUNT_OPTIN * 100 / $SURVEY_COUNT_TOTAL ))%</td></tr>
+			<tr><td>Systems opted out DietPi-Survey</td><td align="right">$SURVEY_COUNT_EMPTY</td><td align="right">$(( $SURVEY_COUNT_EMPTY * 100 / $SURVEY_COUNT_TOTAL ))%</td></tr>
 		</table>
 
-		<h4 id="version">DietPi versions:</h4>
+		<a href="#version"><h4 id="version">DietPi versions:</h4></a>
 		<table>
-			$(for i in "${!aDIETPI_VERSION[@]}"; do echo "<tr><td>DietPi v$i</td><td align=\"right\">	${aDIETPI_VERSION[$i]}</td></tr>"; done | sort -nrk 1.17,1.20 -t '	')
+			$(for i in "${!aDIETPI_VERSION[@]}"; do echo "<tr><td>DietPi v$i</td><td align=\"right\">	${aDIETPI_VERSION[$i]}</td><td align="right">$(( ${aDIETPI_VERSION[$i]} * 100 / $SURVEY_COUNT_OPTIN ))%</td></tr>"; done | sort -nrk 1.17,1.20 -t '	')
 		</table>
 
-		<h4 id="git">Git branches:</h4>
+		<a href="#git"><h4 id="git">Git branches:</h4></a>
 		<table>
-			$(for i in "${!aGIT_BRANCH[@]}"; do echo "<tr><td>$i</td><td align=\"right\">	${aGIT_BRANCH[$i]}</td></tr>"; done | sort -nrk 2 -t '	')
+			$(for i in "${!aGIT_BRANCH[@]}"; do echo "<tr><td>$i</td><td align=\"right\">	${aGIT_BRANCH[$i]}</td><td align="right">$(( ${aGIT_BRANCH[$i]} * 100 / $SURVEY_COUNT_OPTIN ))%</td></tr>"; done | sort -nrk 2 -t '	')
 		</table>
 
-		<h4 id="device">Devices:</h4>
+		<a href="#device"><h4 id="device">Devices:</h4></a>
 		<table>
-			$(for i in "${!aDEVICE_NAME[@]}"; do echo "<tr><td>$i</td><td align=\"right\">	${aDEVICE_NAME[$i]}</td></tr>"; done | sort -nrk 2 -t '	')
+			$(for i in "${!aDEVICE_NAME[@]}"; do echo "<tr><td>$i</td><td align=\"right\">	${aDEVICE_NAME[$i]}</td><td align="right">$(( ${aDEVICE_NAME[$i]} * 100 / $SURVEY_COUNT_OPTIN ))%</td></tr>"; done | sort -nrk 2 -t '	')
 		</table>
 
-                <h4 id="arch">CPU architectures:</h4>
-                <table>
-                        $(for i in "${!aCPU_ARCH[@]}"; do echo "<tr><td>$i</td><td align=\"right\">	${aCPU_ARCH[$i]}</td></tr>"; done | sort -nrk 2 -t '	')
-                </table>
-
-                <h4 id="cores">CPU core counts:</h4>
-                <table>
-                        $(for i in ${!aCPU_COUNT[@]}; do echo "<tr><td>$i Core(s)</td><td align=\"right\">	${aCPU_COUNT[$i]}</td></tr>"; done | sort -nrk 2 -t '	')
-                </table>
-
-		<h4 id="distro">Distro versions:</h4>
+		<a href="#arch"><h4 id="arch">CPU architectures:</h4></a>
 		<table>
-			$(for i in "${!aDISTRO_VERSION[@]}"; do echo "<tr><td>$i</td><td align=\"right\">	${aDISTRO_VERSION[$i]}</td></tr>"; done | sort -nrk 2 -t '	')
+			$(for i in "${!aCPU_ARCH[@]}"; do echo "<tr><td>$i</td><td align=\"right\">	${aCPU_ARCH[$i]}</td><td align="right">$(( ${aCPU_ARCH[$i]} * 100 / $SURVEY_COUNT_OPTIN ))%</td></tr>"; done | sort -nrk 2 -t '	')
 		</table>
 
-		<h4 id="autostart">Autostart options:</h4>
+		<a href="#cores"><h4 id="cores">CPU core counts:</h4></a>
 		<table>
-			$(for i in "${!aAUTOSTART_OPTION[@]}"; do echo "<tr><td>$i</td><td align=\"right\">	${aAUTOSTART_OPTION[$i]}</td></tr>"; done | sort -nrk 2 -t '	')
+			$(for i in ${!aCPU_COUNT[@]}; do echo "<tr><td>$i Core(s)</td><td align=\"right\">	${aCPU_COUNT[$i]}</td><td align="right">$(( ${aCPU_COUNT[$i]} * 100 / $SURVEY_COUNT_OPTIN ))%</td></tr>"; done | sort -nrk 2 -t '	')
 		</table>
 
-		<h4 id="automation">DietPi-Automation:</h4>
+		<a href="#distro"><h4 id="distro">Distro versions:</h4></a>
 		<table>
-			<tr><td>Used by</td><td align="right">${aAUTO_SETUP_AUTOMATED[1]} of $((${aAUTO_SETUP_AUTOMATED[1]} + ${aAUTO_SETUP_AUTOMATED[0]})) installs</td></tr>
+			$(for i in "${!aDISTRO_VERSION[@]}"; do echo "<tr><td>$i</td><td align=\"right\">	${aDISTRO_VERSION[$i]}</td><td align="right">$(( ${aDISTRO_VERSION[$i]} * 100 / $SURVEY_COUNT_OPTIN ))%</td></tr>"; done | sort -nrk 2 -t '	')
 		</table>
 
-		<h4 id="network">Network interfaces:</h4>
+		<a href="#raspbian"><h4 id="raspbian">RPi Debian (64-bit) vs Raspbian (32-bit):</h4></a>
 		<table>
-			$(for i in "${!aNETWORK_INTERFACE[@]}"; do echo "<tr><td>$i</td><td align=\"right\">	${aNETWORK_INTERFACE[$i]}</td></tr>"; done | sort -nrk 2 -t '	')
+			<tr><td>Debian (64-bit) is used by</td><td align="right">${aRASPBIAN[0]} of $(( ${aRASPBIAN[0]} + ${aRASPBIAN[1]} )) RPi systems</td><td align="right">$(( ${aRASPBIAN[0]} * 100 / ( ${aRASPBIAN[0]} + ${aRASPBIAN[1]} ) ))%</td></tr>
 		</table>
 
-		<h4 id="software">Installed software titles:</h4>
+		<a href="#autostart"><h4 id="autostart">Autostart options:</h4></a>
 		<table>
-			$(for i in "${!aSOFTWARE[@]}"; do echo "<tr><td>$i</td><td align=\"right\">	${aSOFTWARE[$i]}</td></tr>"; done | sort -nrk 2 -t '	')
+			$(for i in "${!aAUTOSTART_OPTION[@]}"; do echo "<tr><td>$i</td><td align=\"right\">	${aAUTOSTART_OPTION[$i]}</td><td align="right">$(( ${aAUTOSTART_OPTION[$i]} * 100 / $SURVEY_COUNT_OPTIN ))%</td></tr>"; done | sort -nrk 2 -t '	')
 		</table>
 
-		<h4 id="benchmark">DietPi-Benchmarks | CPU:</h4>
+		<a href="#automation"><h4 id="automation">DietPi-Automation:</h4></a>
+		<table>
+			<tr><td>Used by</td><td align="right">${aAUTO_SETUP_AUTOMATED[1]} of $SURVEY_COUNT_OPTIN systems</td><td align="right">$(( ${aAUTO_SETUP_AUTOMATED[1]} * 100 / $SURVEY_COUNT_OPTIN ))%</td></tr>
+		</table>
+
+		<a href="#network"><h4 id="network">Network interfaces:</h4></a>
+		<table>
+			$(for i in "${!aNETWORK_INTERFACE[@]}"; do echo "<tr><td>$i</td><td align=\"right\">	${aNETWORK_INTERFACE[$i]}</td><td align="right">$(( ${aNETWORK_INTERFACE[$i]} * 100 / $SURVEY_COUNT_OPTIN ))%</td></tr>"; done | sort -nrk 2 -t '	')
+		</table>
+
+		<a href="#software"><h4 id="software">Installed software titles:</h4></a>
+		<table>
+			$(for i in "${!aSOFTWARE[@]}"; do echo "<tr><td>$i</td><td align=\"right\">	${aSOFTWARE[$i]}</td><td align="right">$(( ${aSOFTWARE[$i]} * 100 / $SURVEY_COUNT_OPTIN ))%</td></tr>"; done | sort -nrk 2 -t '	')
+		</table>
+
+		<a href="#benchmark"><h4 id="benchmark">DietPi-Benchmarks | CPU:</h4></a>
 		<table>
 			<tr>
 				<td colspan="2"/>
 				<td colspan="3" bgcolor="#5B5B5B">CPU time (seconds, lower is faster):</td>
-				<td colspan="3" bgcolor="#5B5B5B">CPU idle temp ('c):</td>
-				<td colspan="3" bgcolor="#5B5B5B">CPU full load temp ('c):</td>
+				<td colspan="3" bgcolor="#5B5B5B">CPU idle temp (°C):</td>
+				<td colspan="3" bgcolor="#5B5B5B">CPU full load temp (°C):</td>
 			</tr>
 			<tr>
 				<td bgcolor="#5B5B5B">Device:</td>
@@ -914,15 +835,15 @@
 				<td bgcolor="#2B5D00">Lowest:</td>
 				<td bgcolor="#5D0000">Highest:</td>
 			</tr>
-			$(for i in "${!aBENCH_CPU_INDEX[@]}"; do echo "<tr><td>${aHW_NAME[$i]:=$i}</td> <td>${aBENCH_CPU_INDEX[$i]}</td> <td bgcolor="#34005D">${aBENCH_RESULT_CPU_AVG[$i]}</td> <td bgcolor="#2B5D00">${aBENCH_RESULT_CPU_MIN[$i]}</td> <td bgcolor="#5D0000">${aBENCH_RESULT_CPU_MAX[$i]}</td> <td bgcolor="#34005D">${aBENCH_RESULT_CPU_TEMP_START_AVG[$i]}</td> <td bgcolor="#2B5D00">${aBENCH_RESULT_CPU_TEMP_START_MIN[$i]}</td> <td bgcolor="#5D0000">${aBENCH_RESULT_CPU_TEMP_START_MAX[$i]}</td><td bgcolor="#34005D">${aBENCH_RESULT_CPU_TEMP_END_AVG[$i]}</td> <td bgcolor="#2B5D00">${aBENCH_RESULT_CPU_TEMP_END_MIN[$i]}</td> <td bgcolor="#5D0000">${aBENCH_RESULT_CPU_TEMP_END_MAX[$i]}</td>	</tr>"; done | sort -nk 1 -t '	')
+			$(for i in "${!aBENCH_CPU_INDEX[@]}"; do echo "<tr><td>${aHW_NAME[$i]:=$i}</td><td>${aBENCH_CPU_INDEX[$i]}</td><td bgcolor="#34005D">	${aBENCH_RESULT_CPU_AVG[$i]}</td><td bgcolor="#2B5D00">${aBENCH_RESULT_CPU_MIN[$i]}</td><td bgcolor="#5D0000">${aBENCH_RESULT_CPU_MAX[$i]}</td><td bgcolor="#34005D">${aBENCH_RESULT_CPU_TEMP_START_AVG[$i]}</td><td bgcolor="#2B5D00">${aBENCH_RESULT_CPU_TEMP_START_MIN[$i]}</td><td bgcolor="#5D0000">${aBENCH_RESULT_CPU_TEMP_START_MAX[$i]}</td><td bgcolor="#34005D">${aBENCH_RESULT_CPU_TEMP_END_AVG[$i]}</td><td bgcolor="#2B5D00">${aBENCH_RESULT_CPU_TEMP_END_MIN[$i]}</td><td bgcolor="#5D0000">${aBENCH_RESULT_CPU_TEMP_END_MAX[$i]}</td></tr>"; done | sort -nk 2 -t '	')
 		</table>
 
-		<h4 id="bench_ram">DietPi-Benchmarks | IO (RAM):</h4>
+		<a href="#bench_ram"><h4 id="bench_ram">DietPi-Benchmarks | IO (RAM):</h4></a>
 		<table>
 			<tr>
 				<td colspan="2"/>
-				<td colspan="3" bgcolor="#5B5B5B">RAM write (MB/s):</td>
-				<td colspan="3" bgcolor="#5B5B5B">RAM read (MB/s):</td>
+				<td colspan="3" bgcolor="#5B5B5B">RAM write (MiB/s):</td>
+				<td colspan="3" bgcolor="#5B5B5B">RAM read (MiB/s):</td>
 			</tr>
 			<tr>
 				<td bgcolor="#5B5B5B">Device:</td>
@@ -934,15 +855,15 @@
 				<td bgcolor="#2B5D00">Fastest:</td>
 				<td bgcolor="#5D0000">Slowest:</td>
 			</tr>
-			$(for i in "${!aBENCH_RAM_INDEX[@]}"; do echo "<tr><td>${aHW_NAME[$i]:=$i}</td> <td>${aBENCH_RAM_INDEX[$i]}</td> <td bgcolor="#34005D">${aBENCH_RESULT_RAM_WRITE_AVG[$i]}</td> <td bgcolor="#2B5D00">${aBENCH_RESULT_RAM_WRITE_MAX[$i]}</td> <td bgcolor="#5D0000">${aBENCH_RESULT_RAM_WRITE_MIN[$i]}</td> <td bgcolor="#34005D">${aBENCH_RESULT_RAM_READ_AVG[$i]}</td> <td bgcolor="#2B5D00">${aBENCH_RESULT_RAM_READ_MAX[$i]}</td><td bgcolor="#5D0000">${aBENCH_RESULT_RAM_READ_MIN[$i]}</td></tr>"; done )
+			$(for i in "${!aBENCH_RAM_INDEX[@]}"; do echo "<tr><td>${aHW_NAME[$i]:=$i}</td><td>${aBENCH_RAM_INDEX[$i]}</td><td bgcolor="#34005D">	${aBENCH_RESULT_RAM_WRITE_AVG[$i]}</td><td bgcolor="#2B5D00">${aBENCH_RESULT_RAM_WRITE_MAX[$i]}</td><td bgcolor="#5D0000">${aBENCH_RESULT_RAM_WRITE_MIN[$i]}</td><td bgcolor="#34005D">${aBENCH_RESULT_RAM_READ_AVG[$i]}</td><td bgcolor="#2B5D00">${aBENCH_RESULT_RAM_READ_MAX[$i]}</td><td bgcolor="#5D0000">${aBENCH_RESULT_RAM_READ_MIN[$i]}</td></tr>"; done | sort -nrk 2 -t '	')
 		</table>
 
-		<h4 id="bench_disk">DietPi-Benchmarks | IO (RootFS):</h4>
+		<a href="#bench_disk"><h4 id="bench_disk">DietPi-Benchmarks | IO (RootFS):</h4></a>
 		<table>
 			<tr>
 				<td colspan="2"/>
-				<td colspan="3" bgcolor="#5B5B5B">RootFS write (MB/s):</td>
-				<td colspan="3" bgcolor="#5B5B5B">RootFS read (MB/s):</td>
+				<td colspan="3" bgcolor="#5B5B5B">RootFS write (MiB/s):</td>
+				<td colspan="3" bgcolor="#5B5B5B">RootFS read (MiB/s):</td>
 			</tr>
 			<tr>
 				<td bgcolor="#5B5B5B">Device:</td>
@@ -954,15 +875,15 @@
 				<td bgcolor="#2B5D00">Fastest:</td>
 				<td bgcolor="#5D0000">Slowest:</td>
 			</tr>
-			$(for i in "${!aBENCH_ROOTFS_INDEX[@]}"; do echo "<tr><td>${aHW_NAME[$i]:=$i}</td> <td>${aBENCH_ROOTFS_INDEX[$i]}</td> <td bgcolor="#34005D">${aBENCH_RESULT_ROOTFS_WRITE_AVG[$i]}</td> <td bgcolor="#2B5D00">${aBENCH_RESULT_ROOTFS_WRITE_MAX[$i]}</td> <td bgcolor="#5D0000">${aBENCH_RESULT_ROOTFS_WRITE_MIN[$i]}</td> <td bgcolor="#34005D">${aBENCH_RESULT_ROOTFS_READ_AVG[$i]}</td> <td bgcolor="#2B5D00">${aBENCH_RESULT_ROOTFS_READ_MAX[$i]}</td><td bgcolor="#5D0000">${aBENCH_RESULT_ROOTFS_READ_MIN[$i]}</td>	</tr>"; done )
+			$(for i in "${!aBENCH_ROOTFS_INDEX[@]}"; do echo "<tr><td>${aHW_NAME[$i]:=$i}</td><td>${aBENCH_ROOTFS_INDEX[$i]}</td><td bgcolor="#34005D">	${aBENCH_RESULT_ROOTFS_WRITE_AVG[$i]}</td><td bgcolor="#2B5D00">${aBENCH_RESULT_ROOTFS_WRITE_MAX[$i]}</td><td bgcolor="#5D0000">${aBENCH_RESULT_ROOTFS_WRITE_MIN[$i]}</td><td bgcolor="#34005D">${aBENCH_RESULT_ROOTFS_READ_AVG[$i]}</td><td bgcolor="#2B5D00">${aBENCH_RESULT_ROOTFS_READ_MAX[$i]}</td><td bgcolor="#5D0000">${aBENCH_RESULT_ROOTFS_READ_MIN[$i]}</td></tr>"; done | sort -nrk 2 -t '	')
 		</table>
 
-		<h4 id="bench_custom">DietPi-Benchmarks | IO (Custom FS):</h4>
+		<a href="#bench_custom"><h4 id="bench_custom">DietPi-Benchmarks | IO (Custom FS):</h4></a>
 		<table>
 			<tr>
 				<td colspan="2"/>
-				<td colspan="3" bgcolor="#5B5B5B">Custom FS write (MB/s):</td>
-				<td colspan="3" bgcolor="#5B5B5B">Custom FS read (MB/s):</td>
+				<td colspan="3" bgcolor="#5B5B5B">Custom FS write (MiB/s):</td>
+				<td colspan="3" bgcolor="#5B5B5B">Custom FS read (MiB/s):</td>
 			</tr>
 			<tr>
 				<td bgcolor="#5B5B5B">Device:</td>
@@ -974,14 +895,14 @@
 				<td bgcolor="#2B5D00">Fastest:</td>
 				<td bgcolor="#5D0000">Slowest:</td>
 			</tr>
-			$(for i in "${!aBENCH_CUSTOMFS_INDEX[@]}"; do echo "<tr><td>${aHW_NAME[$i]:=$i}</td> <td>${aBENCH_CUSTOMFS_INDEX[$i]}</td> <td bgcolor="#34005D">${aBENCH_RESULT_CUSTOMFS_WRITE_AVG[$i]}</td> <td bgcolor="#2B5D00">${aBENCH_RESULT_CUSTOMFS_WRITE_MAX[$i]}</td> <td bgcolor="#5D0000">${aBENCH_RESULT_CUSTOMFS_WRITE_MIN[$i]}</td> <td bgcolor="#34005D">${aBENCH_RESULT_CUSTOMFS_READ_AVG[$i]}</td> <td bgcolor="#2B5D00">${aBENCH_RESULT_CUSTOMFS_READ_MAX[$i]}</td><td bgcolor="#5D0000">${aBENCH_RESULT_CUSTOMFS_READ_MIN[$i]}</td>	</tr>"; done )
+			$(for i in "${!aBENCH_CUSTOMFS_INDEX[@]}"; do echo "<tr><td>${aHW_NAME[$i]:=$i}</td><td>${aBENCH_CUSTOMFS_INDEX[$i]}</td><td bgcolor="#34005D">	${aBENCH_RESULT_CUSTOMFS_WRITE_AVG[$i]}</td><td bgcolor="#2B5D00">${aBENCH_RESULT_CUSTOMFS_WRITE_MAX[$i]}</td><td bgcolor="#5D0000">${aBENCH_RESULT_CUSTOMFS_WRITE_MIN[$i]}</td><td bgcolor="#34005D">${aBENCH_RESULT_CUSTOMFS_READ_AVG[$i]}</td><td bgcolor="#2B5D00">${aBENCH_RESULT_CUSTOMFS_READ_MAX[$i]}</td><td bgcolor="#5D0000">${aBENCH_RESULT_CUSTOMFS_READ_MIN[$i]}</td></tr>"; done | sort -nrk 2 -t '	')
 		</table>
 
-		<h4 id="bench_lan">DietPi-Benchmarks | IO (Network LAN):</h4>
+		<a href="#bench_lan"><h4 id="bench_lan">DietPi-Benchmarks | IO (Network LAN):</h4></a>
 		<table>
 			<tr>
 				<td colspan="2"/>
-				<td colspan="3" bgcolor="#5B5B5B">Transfer rate (MB/s):</td>
+				<td colspan="3" bgcolor="#5B5B5B">Transfer rate (MiB/s):</td>
 			</tr>
 			<tr>
 				<td bgcolor="#5B5B5B">Device:</td>
@@ -990,7 +911,7 @@
 				<td bgcolor="#2B5D00">Fastest:</td>
 				<td bgcolor="#5D0000">Slowest:</td>
 			</tr>
-			$(for i in "${!aBENCH_LAN_INDEX[@]}"; do echo "<tr><td>${aHW_NAME[$i]:=$i}</td> <td>${aBENCH_LAN_INDEX[$i]}</td> <td bgcolor="#34005D">${aBENCH_RESULT_NET_LAN_SPEED_AVG[$i]}</td> <td bgcolor="#2B5D00">${aBENCH_RESULT_NET_LAN_SPEED_MAX[$i]}</td><td bgcolor="#5D0000">${aBENCH_RESULT_NET_LAN_SPEED_MIN[$i]}</td></tr>"; done )
+			$(for i in "${!aBENCH_LAN_INDEX[@]}"; do echo "<tr><td>${aHW_NAME[$i]:=$i}</td><td>${aBENCH_LAN_INDEX[$i]}</td><td bgcolor="#34005D">	${aBENCH_RESULT_NET_LAN_SPEED_AVG[$i]}</td><td bgcolor="#2B5D00">${aBENCH_RESULT_NET_LAN_SPEED_MAX[$i]}</td><td bgcolor="#5D0000">${aBENCH_RESULT_NET_LAN_SPEED_MIN[$i]}</td></tr>"; done | sort -nrk 2 -t '	')
 		</table>
 	</body>
 </html>
@@ -1012,9 +933,9 @@ _EOF_
 	#-----------------------------------------------------------
 	# Main
 	#-----------------------------------------------------------
-	Main 2>&1 | tee /var/log/dietpi-survey_report.log
+	Main
 	#-----------------------------------------------------------
 	exit 0
 	#-----------------------------------------------------------
 
-}
+} &>> /var/log/dietpi-survey_report.log

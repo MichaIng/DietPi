@@ -56,5 +56,6 @@ Please change your SSH clients terminal, respectively the passed \$TERM string$n
 	fi
 
 	# DietPi-Login: First run setup, autostarts and login banner
-	/boot/dietpi/dietpi-login
+	# - Prevent call if $G_DIETPI_LOGIN has been set. E.g. when shell is called as subshell of G_EXEC or dietpi-login itself, we don't want autostart programs to be launched.
+	[[ $G_DIETPI_LOGIN ]] || /boot/dietpi/dietpi-login
 }

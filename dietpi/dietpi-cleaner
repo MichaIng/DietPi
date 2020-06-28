@@ -31,7 +31,7 @@
 	#/////////////////////////////////////////////////////////////////////////////////////
 	# Globals
 	#/////////////////////////////////////////////////////////////////////////////////////
-	FP_TEMP='.dietpi-cleaner'
+	FP_TMP='.dietpi-cleaner'
 
 	#/////////////////////////////////////////////////////////////////////////////////////
 	# Banners
@@ -77,8 +77,7 @@
 		)
 
 		G_WHIP_BUTTON_CANCEL_TEXT='Exit'
-		G_WHIP_MENU "Free up used space and system resources:\n - RootFS usage current = $ROOT_SPACE_USED_CURRENT MiB\n - RootFS space cleared = $ROOT_SPACE_FREE_DELTA MiB"
-		if (( $? == 0 )); then
+		if G_WHIP_MENU "Free up used space and system resources:\n - RootFS usage current = $ROOT_SPACE_USED_CURRENT MiB\n - RootFS space cleared = $ROOT_SPACE_FREE_DELTA MiB"; then
 
 			case "$G_WHIP_RETURNED_VALUE" in
 
@@ -313,7 +312,7 @@ Would you like to continue and start the cleaning process?" && Run_Cleaners
 	INCLUDE_MNT=0
 	DRY_RUN=0
 
-	INFO_CLEAN_NAME=''
+	INFO_CLEAN_NAME=
 
 	Run_Cleaners(){
 
@@ -361,9 +360,8 @@ $G_PROGRAM_NAME simulation has finished: Press any key to continue..."
 		Banner_Cleaning
 
 		# Find packages and convert into 1 line string
-		local string_package_names=$(echo $(dpkg --get-selections *-dev build-essential make automake autoconf 2> /dev/null | mawk '{print $1}'))
+		local string_package_names=$(dpkg --get-selections '*-dev' build-essential make automake autoconf 2> /dev/null | mawk '{print $1}' ORS=' ')
 
-		# Mark for autoremoval
 		if (( $DRY_RUN )); then
 
 			G_DIETPI-NOTIFY 0 "The following dev packages have been found: ${string_package_names:-<none>}"
@@ -371,10 +369,9 @@ $G_PROGRAM_NAME simulation has finished: Press any key to continue..."
 
 		else
 
-			apt-mark auto $string_package_names
-			G_AGA
-			sed -i '/^aSOFTWARE_INSTALL_STATE\[16\]=/c\aSOFTWARE_INSTALL_STATE\[16\]=0' /boot/dietpi/.installed &> /dev/null
-			sed -i '/^aSOFTWARE_INSTALL_STATE\[17\]=/c\aSOFTWARE_INSTALL_STATE\[17\]=0' /boot/dietpi/.installed &> /dev/null
+			# Mark for autoremoval
+			[[ $string_package_names ]] && { apt-mark auto $string_package_names; G_AGA; }
+			sed -i '/^aSOFTWARE_INSTALL_STATE\[16\]=/c\aSOFTWARE_INSTALL_STATE\[16\]=0' /boot/dietpi/.installed
 
 		fi
 
@@ -387,9 +384,8 @@ $G_PROGRAM_NAME simulation has finished: Press any key to continue..."
 		Banner_Cleaning
 
 		# Find packages and convert into 1 line string
-		local string_package_names=$(echo $(dpkg --get-selections man-db manpages 2> /dev/null | mawk '{print $1}'))
+		local string_package_names=$(dpkg --get-selections man-db manpages 2> /dev/null | mawk '{print $1}' ORS=' ')
 
-		# Mark for autoremoval
 		if (( $DRY_RUN )); then
 
 			G_DIETPI-NOTIFY 0 "The following man page/docs packages have been found: ${string_package_names:-<none>}"
@@ -399,13 +395,10 @@ $G_PROGRAM_NAME simulation has finished: Press any key to continue..."
 
 		else
 
-			apt-mark auto $string_package_names
-			G_AGA
-			if G_WHIP_YESNO '[WARNING] Removing installed man pages and docs causes errors during "apt-get upgrade" in rare cases (https://github.com/MichaIng/DietPi/issues/2751).\n\nNB: If unsure, please select "Cancel".\n\nDo you wish to continue?'; then
-
-				rm -Rf /usr/share/{man,doc,doc-base}
-
-			fi
+			# Mark for autoremoval
+			[[ $string_package_names ]] && { apt-mark auto $string_package_names; G_AGA; }
+			G_WHIP_YESNO '[WARNING] Removing installed man pages and docs causes errors during "apt-get upgrade" in rare cases: https://github.com/MichaIng/DietPi/issues/2751
+\nNB: If unsure, please select "Cancel".\n\nDo you wish to continue?' && rm -Rf /usr/share/{man,doc,doc-base}
 
 		fi
 
@@ -418,77 +411,59 @@ $G_PROGRAM_NAME simulation has finished: Press any key to continue..."
 		Banner_Cleaning
 
 		# Generate list of files to include. Remove lines with (#) or (space) or (empty) from list
-		sed -E '/([#[:blank:]]|^$)/d' $FP_CUSTOM > $FP_TEMP
+		sed -E '/([#[:blank:]]|^$)/d' $FP_CUSTOM > $FP_TMP
 
-		# Check include file has at least one value/line to process.
-		local line_count=$(wc -l < $FP_TEMP)
-		if (( ! $line_count )); then
+		# Check if include file has any left content
+		if [[ ! -s $FP_TMP ]]; then
 
-			echo -e '\nNo files to find. Have you setup the Files options and added filename entries to match?\n'
+			echo -e '\nNo files to find. Have you setup the Files options and added file name entries to match?\n'
 
 		else
 
-			# Create array to hold user includes
-			local aCustomFiles=()
-			readarray aCustomFiles < $FP_TEMP
-
 			# Generate the find string
-			local find_string=''
-			echo -e '\nSearching for filenames matching:'
-			local i
-			for i in ${!aCustomFiles[@]}
+			echo -e '\nSearching for file names matching:'
+			local find_string
+			while read -r line
 			do
 
-				echo -e "- ${aCustomFiles[$i]}"
+				echo "- $line"
+				[[ $find_string ]] && find_string+=' -o '
+				find_string+="-name $line"
 
-				if (( $i == 0 )); then
-
-					find_string="-name ${aCustomFiles[$i]}"
-
-				else
-
-					find_string+=" -or -name ${aCustomFiles[$i]}"
-
-				fi
-
-			done
+			done < $FP_TMP
 
 			echo 'Please wait...'
 
-			# Find all matching filenames.
-			find / -type f $find_string > $FP_TEMP
+			# Find all matching files
+			# - Skip traversing /mnt if not selected for inclusion
+			local exclude_mnt
+			(( $INCLUDE_MNT )) || exclude_mnt='! ( -path /mnt -prune )'
+			find / $exclude_mnt -type f $find_string > $FP_TMP
 
-			# Remove /mnt from find list
-			(( $INCLUDE_MNT )) || sed -i '/\/mnt/d' $FP_TEMP
+			if [[ ! -s $FP_TMP ]]; then
 
-			line_count=$(wc -l < $FP_TEMP)
-			if (( $line_count == 0 )); then
-
-				echo -e '\nNo matching filenames were found.\n'
+				echo -e '\nNo matching files were found.\n'
 
 			else
 
-				echo -e '\nFound the following matching files:\n'
+				echo -e '\nFound the following matching files:'
 
 			fi
 
-			# Remove files
-			while read line
+			# Process matches
+			while read -r line
 			do
 
-				echo "- Filepath: $line"
-				if (( ! $DRY_RUN )); then
+				# Dry run: Print matches only
+				(( $DRY_RUN )) && { echo "- $line"; continue; }
+				# Else remove and print result
+				rm "$line" && echo "- $line ..Deleted!" || echo "- $line ..Failed!"
 
-					echo -e 'Deleted.\n'
-					rm "$line"
-
-				fi
-
-			done < $FP_TEMP
+			done < $FP_TMP
 
 		fi
 
-		rm $FP_TEMP
+		rm $FP_TMP
 
 	}
 
@@ -566,10 +541,10 @@ $G_PROGRAM_NAME simulation has finished: Press any key to continue..."
 # - Press Y
 # - Press Enter
 # ------------------------------------------------------------------
-# Uncomment line below to include temp files during scan.
+# Uncomment line below to include tmp files during scan.
 #*.tmp
 
-# Uncomment line below to include Windows Thumbnail cache during scan.
+# Uncomment line below to include Windows thumbnail cache during scan.
 #Thumbs.db
 _EOF_
 		fi
