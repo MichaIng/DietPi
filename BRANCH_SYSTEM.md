@@ -15,7 +15,7 @@ Beta on an existing installation:
 1. Recommended: Backup your system with ```dietpi-backup``` (or backup quickly with ```dietpi-backup 1```)
 2. Run the following command to switch to 'beta' branch:
 ```
-G_CONFIG_INJECT 'DEV_GITBRANCH=' 'DEV_GITBRANCH=beta' /booti/dietpi.txt
+G_CONFIG_INJECT 'DEV_GITBRANCH=' 'DEV_GITBRANCH=beta' /boot/dietpi.txt
 ```
 3. Run ```dietpi-update``` to update the system, then reboot.
 4. Test away, please report any issues on our GitHub page. Also ensure you mention "Beta branch" in your post: https://github.com/MichaIng/DietPi/issues
