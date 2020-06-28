@@ -263,8 +263,16 @@
 			sed -i "/address/c\address $static_ip" /etc/network/interfaces
 			sed -i "/netmask/c\netmask $static_mask" /etc/network/interfaces
 			sed -i "/gateway/c\gateway $static_gateway" /etc/network/interfaces
-			> /etc/resolv.conf
-			for i in $static_dns; do echo "nameserver $i" >> /etc/resolv.conf; done
+			if command -v resolvconf &> /dev/null; then
+
+				sed -i "/dns-nameservers/c\dns-nameservers $static_dns" /etc/network/interfaces
+
+			else
+
+				> /etc/resolv.conf
+				for i in $static_dns; do echo "nameserver $i" >> /etc/resolv.conf; done
+
+			fi
 
 		fi
 
