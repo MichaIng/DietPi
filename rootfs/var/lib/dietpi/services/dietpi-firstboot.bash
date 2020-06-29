@@ -62,7 +62,7 @@
 			G_CONFIG_INJECT 'temp_limit=' 'temp_limit=75' /boot/config.txt # https://github.com/MichaIng/DietPi/issues/356
 
 			# A+/B+
-			if [[ $G_HW_MODEL_NAME == *'+' ]]; then
+			if [[ $G_HW_MODEL_NAME == *'+'* ]]; then
 
 				sed -i '/arm_freq=/c\#arm_freq=1400' /boot/config.txt
 				sed -i '/sdram_freq=/c\#sdram_freq=500' /boot/config.txt
