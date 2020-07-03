@@ -652,7 +652,7 @@ Currently installed: $G_DISTRO_NAME (ID: $G_DISTRO)"; then
 
 		G_EXEC mv "DietPi-$G_GITBRANCH/dietpi.txt" /boot/
 		G_EXEC mv "DietPi-$G_GITBRANCH/README.md" /boot/dietpi-README.md
-		G_EXEC mv "DietPi-$G_GITBRANCH/LICENSE.txt" /boot/dietpi-LICENSE.txt
+		G_EXEC mv "DietPi-$G_GITBRANCH/LICENSE" /boot/dietpi-LICENSE.txt
 		G_EXEC mv "DietPi-$G_GITBRANCH/CHANGELOG.txt" /boot/dietpi-CHANGELOG.txt
 
 		# Reading version string for later use
