@@ -289,6 +289,11 @@
 	#/////////////////////////////////////////////////////////////////////////////////////
 	# Main Loop
 	#/////////////////////////////////////////////////////////////////////////////////////
+
+	# Failsafe: https://github.com/MichaIng/DietPi/issues/3646#issuecomment-653739919
+	chown root:root /
+	chmod 755 /
+
 	# Apply dietpi.txt settings, device specific workarounds and reset hardware ID + SSH host keys
 	Apply_DietPi_FirstRun_Settings
 
