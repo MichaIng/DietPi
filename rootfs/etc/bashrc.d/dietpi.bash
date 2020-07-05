@@ -33,7 +33,7 @@
 	fi
 
 	# Workaround if SSH client sets an unsupported $TERM string: https://github.com/MichaIng/DietPi/issues/2034
-	if [[ $SSH_TTY ]] && ! toe -a | grep -q "^$TERM[[:blank:]]"; then
+	if [[ $SSH_TTY ]] && ! toe -a | grep -q "^${TERM}[[:blank:]]"; then
 
 		TERM_old=$TERM
 		[[ $TERM == *'256'* ]] && export TERM='xterm-256color' || export TERM='xterm'

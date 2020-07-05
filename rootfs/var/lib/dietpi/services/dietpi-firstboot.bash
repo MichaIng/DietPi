@@ -133,7 +133,7 @@
 		# Apply language (locale)
 		local autoinstall_language=$(sed -n '/^[[:blank:]]*AUTO_SETUP_LOCALE=/{s/^[^=]*=//p;q}' /boot/dietpi.txt)
 		grep -q "^$autoinstall_language UTF-8$" /usr/share/i18n/SUPPORTED || autoinstall_language='C.UTF-8'
-		if ! locale | grep -qE "(LANG|LC_ALL)=[\'\"]?$autoinstall_language[\'\"]?" || ! locale -a | grep -qiE 'C\.UTF-?8'; then
+		if ! locale | grep -qE "(LANG|LC_ALL)=[\'\"]?${autoinstall_language}[\'\"]?" || ! locale -a | grep -qiE 'C\.UTF-?8'; then
 
 			G_DIETPI-NOTIFY 2 "Setting locale $autoinstall_language. Please wait..."
 			/boot/dietpi/func/dietpi-set_software locale "$autoinstall_language"
@@ -289,6 +289,11 @@
 	#/////////////////////////////////////////////////////////////////////////////////////
 	# Main Loop
 	#/////////////////////////////////////////////////////////////////////////////////////
+
+	# Failsafe: https://github.com/MichaIng/DietPi/issues/3646#issuecomment-653739919
+	chown root:root /
+	chmod 755 /
+
 	# Apply dietpi.txt settings, device specific workarounds and reset hardware ID + SSH host keys
 	Apply_DietPi_FirstRun_Settings
 

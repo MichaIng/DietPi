@@ -182,7 +182,6 @@ along with this program.  If not, see https://www.gnu.org/licenses/
 ### DietPi Files
 
 - All files located in (recursively):
-  - `/DietPi/`
   - `/var/lib/dietpi/`
   - `/var/tmp/dietpi/`
   - `/boot/dietpi/`
