@@ -28,7 +28,7 @@
 	RPi_Set_Clock_Speeds(){
 
 		# If no manual overclock settings have been applied by user, apply safe overclocking values (RPi1) or update comments to show model-specific defaults: https://www.raspberrypi.org/documentation/configuration/config-txt/overclocking.md
-		grep -qE '^[[:blank:]]*(over_voltage|(arm|core|gpu|sdram)_freq)=' /boot/config.txt || return
+		grep -qE '^[[:blank:]]*(over_voltage|(arm|core|gpu|sdram)_freq)=' /boot/config.txt && return
 
 		# RPi Zero
 		if [[ $G_HW_MODEL_NAME == *'Zero'* ]]; then
@@ -62,7 +62,7 @@
 			G_CONFIG_INJECT 'temp_limit=' 'temp_limit=75' /boot/config.txt # https://github.com/MichaIng/DietPi/issues/356
 
 			# A+/B+
-			if [[ $G_HW_MODEL_NAME == *'+' ]]; then
+			if [[ $G_HW_MODEL_NAME == *'+'* ]]; then
 
 				sed -i '/arm_freq=/c\#arm_freq=1400' /boot/config.txt
 				sed -i '/sdram_freq=/c\#sdram_freq=500' /boot/config.txt
@@ -89,7 +89,6 @@
 
 	Apply_DietPi_FirstRun_Settings(){
 
-		#----------------------------------------------------------------
 		# RPi: Apply safe overclocking values or update comments to show model-specific defaults
 		(( $G_HW_MODEL < 10 )) && RPi_Set_Clock_Speeds
 
@@ -134,7 +133,7 @@
 		# Apply language (locale)
 		local autoinstall_language=$(sed -n '/^[[:blank:]]*AUTO_SETUP_LOCALE=/{s/^[^=]*=//p;q}' /boot/dietpi.txt)
 		grep -q "^$autoinstall_language UTF-8$" /usr/share/i18n/SUPPORTED || autoinstall_language='C.UTF-8'
-		if ! locale | grep -qE "(LANG|LC_ALL)=[\'\"]?$autoinstall_language[\'\"]?" || ! locale -a | grep -qiE 'C.UTF-?8'; then
+		if ! locale | grep -qE "(LANG|LC_ALL)=[\'\"]?${autoinstall_language}[\'\"]?" || ! locale -a | grep -qiE 'C\.UTF-?8'; then
 
 			G_DIETPI-NOTIFY 2 "Setting locale $autoinstall_language. Please wait..."
 			/boot/dietpi/func/dietpi-set_software locale "$autoinstall_language"
@@ -177,7 +176,7 @@
 
 		# Set APT mirror
 		local target_repo='CONFIG_APT_DEBIAN_MIRROR'
-		(( $G_HW_MODEL < 10 )) && target_repo='CONFIG_APT_RASPBIAN_MIRROR'
+		(( $G_HW_MODEL < 10 )) && (( $G_RASPBIAN )) && target_repo='CONFIG_APT_RASPBIAN_MIRROR'
 		/boot/dietpi/func/dietpi-set_software apt-mirror "$(sed -n "/^[[:blank:]]*$target_repo=/{s/^[^=]*=//p;q}" /boot/dietpi.txt)"
 
 		# Regenerate unique Dropbear host keys
@@ -263,7 +262,16 @@
 			sed -i "/address/c\address $static_ip" /etc/network/interfaces
 			sed -i "/netmask/c\netmask $static_mask" /etc/network/interfaces
 			sed -i "/gateway/c\gateway $static_gateway" /etc/network/interfaces
-			sed -i "/dns-nameservers/c\dns-nameservers $static_dns" /etc/network/interfaces
+			if command -v resolvconf &> /dev/null; then
+
+				sed -i "/dns-nameservers/c\dns-nameservers $static_dns" /etc/network/interfaces
+
+			else
+
+				> /etc/resolv.conf
+				for i in $static_dns; do echo "nameserver $i" >> /etc/resolv.conf; done
+
+			fi
 
 		fi
 
@@ -281,6 +289,11 @@
 	#/////////////////////////////////////////////////////////////////////////////////////
 	# Main Loop
 	#/////////////////////////////////////////////////////////////////////////////////////
+
+	# Failsafe: https://github.com/MichaIng/DietPi/issues/3646#issuecomment-653739919
+	chown root:root /
+	chmod 755 /
+
 	# Apply dietpi.txt settings, device specific workarounds and reset hardware ID + SSH host keys
 	Apply_DietPi_FirstRun_Settings
 

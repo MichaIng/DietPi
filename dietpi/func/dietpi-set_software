@@ -67,21 +67,23 @@ $FP_SCRIPT	passwords		NULL=Prompt user to change DietPi related passwords | X=op
 
 		if [[ $INPUT_MODE_VALUE == 'C.UTF-8' ]] || grep -q "^$INPUT_MODE_VALUE UTF-8$" /usr/share/i18n/SUPPORTED; then
 
-			# List of locales to generate, used by: dpkg-reconfigure => locale-gen
+			# Create list of locales to generate
 			echo "$INPUT_MODE_VALUE UTF-8" > /etc/locale.gen
-			# - Add C.UTF-8 back in, if not chosen, as DietPi scripts require it
+			# - Add C.UTF-8 back in, if not chosen, required by DietPi scripts
 			[[ $INPUT_MODE_VALUE == 'C.UTF-8' ]] || echo 'C.UTF-8 UTF-8' >> /etc/locale.gen
 
-			# Remove current defaults, will be recreated by dpkg-reconfigure with: LANG=<first /etc/locale.gen entry>
+			# Remove current defaults
 			[[ -f '/etc/default/locale' ]] && rm /etc/default/locale
 
-			# Generate locales and set default LANG=
-			G_EXEC dpkg-reconfigure -f noninteractive locales
+			# Generate locales and set new default
+			# - 1. this calls locale-gen to regenerate locale cache with /etc/locale.gen entries.
+			# - 2. this calls update-locale LANG=<first /etc/locale.gen entry> to set the new default locale.
+			G_CHECK_OUTPUT=1 G_EXEC dpkg-reconfigure -f noninteractive locales
 
-			# Reassign override locale to current script, as in case of wrong locale variables update-locale command will produce ugly errors
-			export LC_ALL='C.UTF-8'
+			# Reassign locale to current script, as in case of wrong locale variables update-locale command will produce ugly errors
+			export LC_ALL='C.UTF-8' LANG='C.UTF-8'
 
-			# Add new override locale to /etc/default/locales which is effective on next shell session (logout+in/reboot)
+			# Additionally set new locale via override variable $LC_ALL in /etc/default/locales which is effective from next shell session on
 			update-locale "LC_ALL=$INPUT_MODE_VALUE"
 
 			# Update dietpi.txt entry
@@ -102,17 +104,24 @@ $FP_SCRIPT	passwords		NULL=Prompt user to change DietPi related passwords | X=op
 
 		if [[ $INPUT_MODE_VALUE ]]; then
 
-			# Raspbian
+			# RPi
 			if (( $G_HW_MODEL < 10 )); then
+
+				# Component "ui" is in use until Stretch
+				local components='main'
+				(( $G_DISTRO < 5 )) && components+=' ui'
+				# Bullseye is not yet available, revert to Buster
+				echo "deb https://archive.raspberrypi.org/debian/ ${G_DISTRO_NAME/bullseye/buster} $components" > /etc/apt/sources.list.d/raspi.list
+
+			fi
+
+			# Raspbian
+			if (( $G_HW_MODEL < 10 )) && (( $G_RASPBIAN )); then
 
 				# Default?
 				[[ $INPUT_MODE_VALUE == 'default' ]] && INPUT_MODE_VALUE='http://raspbian.raspberrypi.org/raspbian/'
 
 				echo "deb $INPUT_MODE_VALUE $G_DISTRO_NAME main contrib non-free" > /etc/apt/sources.list
-				# Component "ui" is in use until Stretch
-				local components='main'
-				(( $G_DISTRO < 5 )) && components+=' ui'  
-				echo "deb https://archive.raspberrypi.org/debian/ $G_DISTRO_NAME $components" > /etc/apt/sources.list.d/raspi.list
 
 				# Update dietpi.txt entry
 				G_CONFIG_INJECT 'CONFIG_APT_RASPBIAN_MIRROR=' "CONFIG_APT_RASPBIAN_MIRROR=$INPUT_MODE_VALUE" /boot/dietpi.txt
@@ -264,8 +273,8 @@ _EOF_
 			# Gateway, auto detect local gateway(s) (router) to use as NTP server.
 			if [[ ${ntp_mirror,,} == 'gateway' ]]; then
 
-				# NB: Convert output to single line via echo
-				local gateway=$(echo $(ip r s 0.0.0.0/0 | mawk '{print $3}'))
+				# NB: Convert output to single line via ORS, remove trailing space afterwards
+				local gateway=$(ip r l 0/0 | mawk '{print $3}' ORS=' '); gateway=${gateway% }
 				if [[ $gateway ]]; then
 
 					G_DIETPI-NOTIFY 0 "Gateway(s) detected: $gateway, adding as NTP server(s)."
@@ -415,7 +424,7 @@ _EOF_
 
 			# Remove from sudoers
 			[[ -f /etc/sudoers.d/$INPUT_MODE_VALUE ]] && rm /etc/sudoers.d/"$INPUT_MODE_VALUE"
-			sed -i "/^$INPUT_MODE_VALUE[[:blank:]]/d" /etc/sudoers.d/dietpi # pre-v6.29
+			sed -i "/^${INPUT_MODE_VALUE}[[:blank:]]/d" /etc/sudoers.d/dietpi # pre-v6.29
 
 		else
 
@@ -484,9 +493,8 @@ _EOF_
 		else
 
 			# DietPi-Software PW
-			G_WHIP_YESNO 'Do you want to adjust the default global software password for DietPi-Software installations? We especially recommend to change the default password "dietpi". This does not affect any existing software passwords.\n
-NB: This password will be saved and encrypted within "/var/lib/dietpi/dietpi-software/.GLOBAL_PW.bin" to be useable by DietPi scripts for e.g. web application and database logins. We highly recommend to apply individual passwords for each software title after first login.'
-			if (( ! $? )); then
+			if G_WHIP_YESNO 'Do you want to adjust the default global software password for DietPi-Software installations? We especially recommend to change the default password "dietpi". This does not affect any existing software passwords.\n
+NB: This password will be saved and encrypted within "/var/lib/dietpi/dietpi-software/.GLOBAL_PW.bin" to be useable by DietPi scripts for e.g. web application and database logins. We highly recommend to apply individual passwords for each software title after first login.'; then
 
 				G_WHIP_PASSWORD "Please enter a new global software password:\nNB: The following characters are not supported \$|\\\"'"
 				pw_dietpi_software=$result
@@ -495,9 +503,8 @@ NB: This password will be saved and encrypted within "/var/lib/dietpi/dietpi-sof
 			fi
 
 			# Root/DietPi user PW
-			G_WHIP_YESNO 'Change existing unix user passwords?\n\nDietPi has two accounts by default "root" and "dietpi". On first boot, both share the global password "dietpi", respectively the one set in "dietpi.txt".\n
-It is highly recommended to change this password, ideally, it should be different than the global software password.\n\nWould you like to change the login passwords for "root" and "dietpi"?'
-			if (( ! $? )); then
+			if G_WHIP_YESNO 'Change existing unix user passwords?\n\nDietPi has two accounts by default "root" and "dietpi". On first boot, both share the global password "dietpi", respectively the one set in "dietpi.txt".\n
+It is highly recommended to change this password, ideally, it should be different than the global software password.\n\nWould you like to change the login passwords for "root" and "dietpi"?'; then
 
 				G_WHIP_PASSWORD 'Please enter a new unix user password:'
 				pw_root_dietpi_users=$result

@@ -19,7 +19,7 @@
 	do
 
 		# Get current gateway for ping
-		URL_PING=$(ip r s 0.0.0.0/0 dev $ADAPTER | mawk '{print $3}')
+		URL_PING=$(ip r l 0/0 dev $ADAPTER | mawk '{print $3}')
 
 		[[ $G_DEBUG == 1 ]] && echo "Checking connection for: $ADAPTER via ping to $URL_PING"
 		if [[ $URL_PING ]] && ping -qI $ADAPTER -c 1 $URL_PING &> /dev/null; then

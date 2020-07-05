@@ -33,7 +33,7 @@
 	fi
 
 	# Workaround if SSH client sets an unsupported $TERM string: https://github.com/MichaIng/DietPi/issues/2034
-	if [[ $SSH_TTY ]] && ! toe -a | grep -q "^$TERM[[:blank:]]"; then
+	if [[ $SSH_TTY ]] && ! toe -a | grep -q "^${TERM}[[:blank:]]"; then
 
 		TERM_old=$TERM
 		[[ $TERM == *'256'* ]] && export TERM='xterm-256color' || export TERM='xterm'
@@ -56,5 +56,6 @@ Please change your SSH clients terminal, respectively the passed \$TERM string$n
 	fi
 
 	# DietPi-Login: First run setup, autostarts and login banner
-	/boot/dietpi/dietpi-login
+	# - Prevent call if $G_DIETPI_LOGIN has been set. E.g. when shell is called as subshell of G_EXEC or dietpi-login itself, we don't want autostart programs to be launched.
+	[[ $G_DIETPI_LOGIN ]] || /boot/dietpi/dietpi-login
 }

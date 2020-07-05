@@ -121,8 +121,8 @@ tmpfs /var/log tmpfs size=${var_log_size:-50}M,noatime,lazytime,nodev,nosuid,mod
 			tmpfs_mounts=$(grep '^[[:blank:]]*tmpfs[[:blank:]]' $fp_fstab_tmp)
 			# ecryptfs, vboxsf, glusterfs, bind mounts
 			misc_mounts=$(grep -E '^[[:blank:]]*[^#].*([[:blank:]](ecryptfs|vboxsf|glusterfs)[[:blank:]]|[[:blank:],]bind[[:blank:],])' $fp_fstab_tmp)
-			# CurlFtpFS, CIFS/SMB/Samba, NFS
-			net_mounts=$(grep -E '^[[:blank:]]*(curlftpfs|[^#].*[[:blank:]](cifs|nfs4?)[[:blank:]])' $fp_fstab_tmp)
+			# CurlFtpFS, CIFS/SMB/Samba, NFS, SSHFS
+			net_mounts=$(grep -E '^[[:blank:]]*(curlftpfs|sshfs#|[^#].*[[:blank:]](cifs|nfs4?|fuse.sshfs)[[:blank:]])' $fp_fstab_tmp)
 
 		fi
 
@@ -159,7 +159,7 @@ $swap_mounts
 		df -a --output=source --exclude-type=tmpfs --exclude-type=ecryptfs --exclude-type=vboxsf --exclude-type=glusterfs | mawk '/\// && !x[$0]++' > .df_out_tmp
 
 		# Process df result
-		while read line
+		while read -r line
 		do
 
 			# Workaround for /dev/root under RPi, force physical location
@@ -274,7 +274,7 @@ $swap_mounts
 
 		# Check blkid for unmounted drives, if drive is not mounted, add entry as disabled/commented mount
 		blkid -o device > .blkid_out_tmp
-		while read line
+		while read -r line
 		do
 
 			[[ $line ]] || continue
@@ -316,7 +316,7 @@ $swap_mounts
 		# Find unformated drives
 		# - Exclude mtdblock devices: https://github.com/MichaIng/DietPi/issues/2067#issuecomment-422400520
 		lsblk -nro NAME | sed '/^mtdblock[0-9]/d' > .lsblk_out_tmp
-		while read line
+		while read -r line
 		do
 
 			[[ $line ]] || continue
@@ -522,7 +522,7 @@ Do you wish to ignore this warning, and, mount the drive regardless?" || return 
 
 		if G_EXEC_NOHALT=1 G_EXEC umount "$target"; then
 
-			sed -i "\#[[:blank:]]$target[[:blank:]]#d" /etc/fstab # Only needed for networked drives currently...
+			sed -i "\#[[:blank:]]${target}[[:blank:]]#d" /etc/fstab # Only needed for networked drives currently...
 			rmdir "$target"
 			Init_Drives_and_Refresh
 
@@ -711,56 +711,67 @@ Do you wish to ignore this warning, and, mount the drive regardless?" || return 
 		# Install rsync
 		G_AG_CHECK_INSTALL_PREREQ rsync
 
-		# Update fstab
-		cp -a /etc/fstab /etc/fstab.bak # in case of rsync fail
-		# - Remove automatic entry for new UUID
-		sed -i "\@[[:blank:]]${aDRIVE_MOUNT_TARGET[$MENU_DRIVE_INDEX]}[[:blank:]]@d" /etc/fstab
-		# - Replace old with new rootfs entry
-		local dev_entry="UUID=${aDRIVE_UUID[$MENU_DRIVE_INDEX]}"
-		(( $G_HW_MODEL < 10 )) && dev_entry="PARTUUID=${aDRIVE_PART_UUID[$MENU_DRIVE_INDEX]}"
-		sed -i "\@UUID=[^[:blank:]]*[[:blank:]][[:blank:]]*/[[:blank:]]@c $dev_entry / ${aDRIVE_FSTYPE[$MENU_DRIVE_INDEX]} noatime,lazytime,rw 0 1" /etc/fstab
-
 		# Disable swap
 		/boot/dietpi/func/dietpi-set_swapfile 0
 
-		# Exclude /var/log in case it is a mount point
-		local exclude_var_log
-		findmnt -no SOURCE /var/log &> /dev/null && exclude_var_log='--exclude /var/log/*'
+		# Create new fstab
+		G_EXEC cp -a /etc/fstab /etc/fstab_new
+		# - Remove automatic entry for new UUID
+		G_EXEC sed -i "\@[[:blank:]]${aDRIVE_MOUNT_TARGET[$MENU_DRIVE_INDEX]}[[:blank:]]@d" /etc/fstab_new
+		# - Replace old with new rootfs entry
+		local dev_entry="UUID=${aDRIVE_UUID[$MENU_DRIVE_INDEX]}"
+		(( $G_HW_MODEL < 10 )) && dev_entry="PARTUUID=${aDRIVE_PART_UUID[$MENU_DRIVE_INDEX]}"
+		G_EXEC sed -i "\@UUID=[^[:blank:]]*[[:blank:]]\+/[[:blank:]]@c$dev_entry / ${aDRIVE_FSTYPE[$MENU_DRIVE_INDEX]} noatime,lazytime,rw 0 1" /etc/fstab_new
 
-		if ! rsync -aHv --delete --exclude '/dev/*' --exclude '/sys/*' --exclude '/proc/*' --exclude '/run/*' --exclude '/tmp/*' $exclude_var_log --exclude '/lost+found/' --exclude '/boot/*' --exclude '/mnt/*' --exclude "${aDRIVE_MOUNT_TARGET[$MENU_DRIVE_INDEX]}/" / "${aDRIVE_MOUNT_TARGET[$MENU_DRIVE_INDEX]}/"; then
+		# Mount rootfs to tmp mountpoint to allow rsync
+		# - rsync "-x" option prevents copying mounts content, but it copies permissions of mountpoint dirs according to mount options instead of those of the dir on the parent fs.
+		# - Since mount permissions might not be wanted for the underlying file system dir, we copy from a temporary mountpoint to assure that underlying rootfs content matches 100%.
+		G_EXEC mkdir -p /tmp/tmp_rootfs
+		G_EXEC mount $G_ROOTFS_DEV /tmp/tmp_rootfs
+
+		# Start rsync
+		if ! G_EXEC_NOEXIT=1 G_EXEC rsync -aHv --delete /tmp/tmp_rootfs/ "${aDRIVE_MOUNT_TARGET[$MENU_DRIVE_INDEX]}/"; then
 
 			G_DIETPI-NOTIFY 1 'Rsync has failed, RootFS transfer has been aborted.'
-			# Revert fstab changes
-			cp -a /etc/fstab.bak /etc/fstab
-			exit 1
+			rm /etc/fstab_new
+			umount /tmp/tmp_rootfs
+			rmdir /tmp/tmp_rootfs
+			return 1
 
 		fi
+
+		# Remove volatile systemd service PrivateTmp dirs in /var/tmp and target drive mountpoint dir
+		rm -Rf "${aDRIVE_MOUNT_TARGET[$MENU_DRIVE_INDEX]}"/var/tmp/systemd-private-*
+		rmdir "${aDRIVE_MOUNT_TARGET[$MENU_DRIVE_INDEX]}${aDRIVE_MOUNT_TARGET[$MENU_DRIVE_INDEX]}"
+
+		# Move new fstab in place
+		G_EXEC mv /etc/fstab_new "${aDRIVE_MOUNT_TARGET[$MENU_DRIVE_INDEX]}/etc/fstab"
 
 		# Recreate swap
 		#/boot/dietpi/func/dietpi-set_swapfile 1 "${aDRIVE_MOUNT_TARGET[$MENU_DRIVE_INDEX]}/var/swap"
 		# - Manually update location
 		#G_CONFIG_INJECT 'AUTO_SETUP_SWAPFILE_LOCATION=' 'AUTO_SETUP_SWAPFILE_LOCATION=/var/swap' /boot/dietpi.txt
 
-		# RPi | /boot/cmdline.txt
+		# RPi: /boot/cmdline.txt
 		if (( $G_HW_MODEL < 10 )); then
 
 			# Find current root= and replace
 			local rootfs_current=$(mawk '{for(i=1;i<=NF;i++) {print $i} }' /boot/cmdline.txt | grep -m1 '^root=')
-			sed -i "s#$rootfs_current#root=PARTUUID=${aDRIVE_PART_UUID[$MENU_DRIVE_INDEX]}#g" /boot/cmdline.txt
+			G_EXEC sed -i "s#$rootfs_current#root=PARTUUID=${aDRIVE_PART_UUID[$MENU_DRIVE_INDEX]}#g" /boot/cmdline.txt
 
 			# Set FS type
 			local rootfstype_current=$(mawk '{for(i=1;i<=NF;i++) {print $i} }' /boot/cmdline.txt | grep -m1 '^rootfstype=')
-			sed -i "s#$rootfstype_current#rootfstype=${aDRIVE_FSTYPE[$MENU_DRIVE_INDEX]}#g" /boot/cmdline.txt
+			G_EXEC sed -i "s#$rootfstype_current#rootfstype=${aDRIVE_FSTYPE[$MENU_DRIVE_INDEX]}#g" /boot/cmdline.txt
 
 			# Add root delay
-			grep -qE '(^|[[:blank:]])rootdelay=' /boot/cmdline.txt || sed -i "s#rootfstype=${aDRIVE_FSTYPE[$MENU_DRIVE_INDEX]}#rootfstype=${aDRIVE_FSTYPE[$MENU_DRIVE_INDEX]} rootdelay=10#" /boot/cmdline.txt
+			grep -qE '(^|[[:blank:]])rootdelay=' /boot/cmdline.txt || G_EXEC sed -i "s#rootfstype=${aDRIVE_FSTYPE[$MENU_DRIVE_INDEX]}#rootfstype=${aDRIVE_FSTYPE[$MENU_DRIVE_INDEX]} rootdelay=10#" /boot/cmdline.txt
 
-		# C2/XU4 | /boot/boot.ini
+		# C2/XU4: /boot/boot.ini
 		elif [[ $G_HW_MODEL == 1[12] ]]; then
 
 			# Find current root= to replace
 			local rootfs_current=$(mawk '{for(i=1;i<=NF;i++) {print $i} }' /boot/boot.ini | grep -m1 '^root=' | sed 's/\"//')
-			sed -i "s#$rootfs_current#root=UUID=${aDRIVE_UUID[$MENU_DRIVE_INDEX]}#g" /boot/boot.ini
+			G_EXEC sed -i "s#$rootfs_current#root=UUID=${aDRIVE_UUID[$MENU_DRIVE_INDEX]}#g" /boot/boot.ini
 
 		fi
 
@@ -1177,7 +1188,7 @@ Do you wish to ignore this warning, and, mount the drive regardless?" || return 
 			for i in $(<$io_schedulers)
 			do
 
-				if [[ $i == \[*\] ]]; then
+				if [[ $i == '['*']' ]]; then
 
 					i=${i#[}; i=${i%]}
 					local io_scheduler_current=$i
@@ -1611,8 +1622,7 @@ Read more about I/O scheduling: https://wiki.archlinux.org/index.php/Improving_p
 
 				G_WHIP_BUTTON_OK_TEXT='MBR'
 				G_WHIP_BUTTON_CANCEL_TEXT='GPT'
-				G_WHIP_YESNO 'Would you like to use GPT or MBR parition table?\n - GPT is required for 2TB+ drives\n - MBR does NOT support 2TB+ drives\n\nIf unsure, select GPT (default)'
-				(( $? )) && FORMAT_GPT=1 || FORMAT_GPT=0
+				G_WHIP_YESNO 'Would you like to use GPT or MBR parition table?\n - GPT is required for 2TB+ drives\n - MBR does NOT support 2TB+ drives\n\nIf unsure, select GPT (default)' && FORMAT_GPT=0 || FORMAT_GPT=1
 
 			elif [[ $G_WHIP_RETURNED_VALUE == 'Format Mode' ]]; then
 
@@ -1758,7 +1768,7 @@ NTFS:\nRecommended if you plan to use this drive on a Windows system. High CPU u
 			if mount -t cifs -o username="$samba_clientuser",password="$samba_clientpassword",iocharset=utf8,uid=dietpi,gid=dietpi,file_mode=0770,dir_mode=0770,vers=$i "//$samba_clientname/$samba_clientshare" "$samba_fp_mount_target" &>> $fp_tmp; then
 
 				# Apply to fstab
-				sed -i "\#[[:space:]]$samba_fp_mount_target[[:space:]]#d" /etc/fstab
+				sed -i "\#[[:space:]]${samba_fp_mount_target}[[:space:]]#d" /etc/fstab
 				# - NB: Convert spaces to '\040': https://github.com/MichaIng/DietPi/issues/1201#issuecomment-339720271
 				echo "//$samba_clientname/${samba_clientshare//[[:space:]]/\\040} $samba_fp_mount_target cifs username=$samba_clientuser,password=$samba_clientpassword,iocharset=utf8,uid=dietpi,gid=dietpi,file_mode=0770,dir_mode=0770,vers=$i,_netdev,nofail,noauto,x-systemd.automount" >> /etc/fstab
 
@@ -1821,7 +1831,7 @@ NTFS:\nRecommended if you plan to use this drive on a Windows system. High CPU u
 		if mount -vt nfs -o port=2049 "$nfs_server_ip":/ $nfs_fp_mount_target &>> $fp_tmp; then
 
 			# Apply to fstab
-			sed -i "\#[[:space:]]$nfs_fp_mount_target[[:space:]]#d" /etc/fstab
+			sed -i "\#[[:space:]]${nfs_fp_mount_target}[[:space:]]#d" /etc/fstab
 			echo "$nfs_server_ip:/ $nfs_fp_mount_target nfs _netdev,nofail,noauto,x-systemd.automount" >> /etc/fstab
 
 			MENU_DRIVE_TARGET=$nfs_fp_mount_target
@@ -1844,7 +1854,7 @@ NTFS:\nRecommended if you plan to use this drive on a Windows system. High CPU u
 			if mount -vt nfs -o port=2049 "$nfs_server_ip":"$nfs_fp_server_share" $nfs_fp_mount_target &>> $fp_tmp; then
 
 				# Apply to fstab
-				sed -i "\#[[:space:]]$nfs_fp_mount_target[[:space:]]#d" /etc/fstab
+				sed -i "\#[[:space:]]${nfs_fp_mount_target}[[:space:]]#d" /etc/fstab
 				echo "$nfs_server_ip:$nfs_fp_server_share $nfs_fp_mount_target nfs _netdev,nofail,noauto,x-systemd.automount" >> /etc/fstab
 
 				MENU_DRIVE_TARGET=$nfs_fp_mount_target
@@ -1892,7 +1902,7 @@ NTFS:\nRecommended if you plan to use this drive on a Windows system. High CPU u
 
 		df -Ph | tail -n +2 | sed -E '/(^udev|tmpfs)/d' > .df_out_tmp
 
-		while read line
+		while read -r line
 		do
 
 			G_WHIP_MENU_ARRAY+=("$(mawk '{print $6}' <<< $line)" ": $(mawk '{print $1" | size: "$2"iB | available: "$4"iB"}' <<< $line)")

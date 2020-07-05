@@ -1,6 +1,6 @@
 <html>
 	<h1 align="center">
-		<img src="https://dietpi.com/images/dietpi-logo_150.png" alt="DietPi">
+		<img src="https://raw.githubusercontent.com/MichaIng/DietPi/master/.meta/images/dietpi-logo_150.png" alt="DietPi">
 	</h1>
 	<p align="center">
 		<b>Lightweight justice for your single-board computer!</b>
@@ -16,9 +16,8 @@
 	</p>
 	<hr>
 	<p align="center">
-		<img src="https://dietpi.com/images/mvs_logo_150.jpg" alt="myVirtualServer">
-		<br><br>
-		DietPi's web hosting is powered by <a href="https://www.myvirtualserver.com">myVirtualServer</a>.
+		<img src="https://www.myvirtualserver.com/images/myvirtualserver_logo.png" alt="myVirtualserver" width="200"><br>
+		DietPi's web hosting is powered by <a href="https://www.myvirtualserver.com">myVirtualserver</a>.
 		<br><br>
 		A wide range of SBCs and VMs are supported. <a href="https://dietpi.com/#download">Click here</a> for the full list.
 		<br><br>
@@ -178,11 +177,11 @@ along with this program.  If not, see https://www.gnu.org/licenses/
 
 - Source: https://github.com/MichaIng/DietPi
 - Build: Not applicable, as DietPi uses Bash scripts only, no building or compiling is required.
+- [![CodeFactor](https://www.codefactor.io/repository/github/michaing/dietpi/badge)](https://www.codefactor.io/repository/github/michaing/dietpi)
 
 ### DietPi Files
 
 - All files located in (recursively):
-  - `/DietPi/`
   - `/var/lib/dietpi/`
   - `/var/tmp/dietpi/`
   - `/boot/dietpi/`
@@ -199,6 +198,7 @@ Links to hardware and software manufacturers, sources and build instructions use
 
 - [Linux kernel](https://github.com/torvalds/linux)
 - [GNU operating system](https://www.gnu.org/)
+- [Bash](https://git.savannah.gnu.org/cgit/bash.git)
 - [Debian distribution](https://salsa.debian.org/)
 - [Raspberry](https://github.com/raspberrypi) [Pi](https://github.com/RPi-Distro)
 - [Hardkernel](https://github.com/hardkernel?tab=repositories)
@@ -222,6 +222,7 @@ Links to hardware and software manufacturers, sources and build instructions use
 - [qBittorrent](https://github.com/qbittorrent/qBittorrent)
 - [Nextcloud](https://github.com/nextcloud/server)
 - [ownCloud](https://github.com/owncloud/core)
+- [Syncthing](https://github.com/syncthing/syncthing)
 - [MiniDLNA](https://sourceforge.net/p/minidlna/git/ci/master/tree/)
 - [MPD](https://github.com/MusicPlayerDaemon/MPD)
 - [YMPD](https://github.com/notandy/ympd)
@@ -268,3 +269,4 @@ Links to hardware and software manufacturers, sources and build instructions use
 - [Home Assistant](https://github.com/home-assistant/core)
 - [TasmoAdmin](https://github.com/reloxx13/TasmoAdmin)
 - [Domoticz](https://github.com/domoticz/domoticz)
+- [Firefox Sync Server](https://github.com/mozilla-services/syncserver)
