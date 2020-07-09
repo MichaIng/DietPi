@@ -722,7 +722,6 @@ _EOF_'
 
 			'apt-utils'		# Allows "debconf" to pre-configure APT packages for non-interactive install
 			'bash-completion'	# Auto completes a wide list of bash commands and options via <tab>
-			'bc'			# Bash calculator, e.g. for floating point calculation
 			'bzip2'			# (.tar).bz2 wrapper
 			'ca-certificates'	# Adds known ca-certificates, necessary to practically access HTTPS sources
 			'console-setup'		# DietPi-Config keyboard configuration + console fonts
