@@ -3232,17 +3232,17 @@ Package: openssl libssl*\nPin: origin packages.sury.org\nPin-Priority: -1' > /et
 			fi
 
 			# Base PHP modules
-			# - Apache
+			# - Apache: mod_php
 			if (( ${aSOFTWARE_INSTALL_STATE[83]} > 0 )); then
 
 				local package_list="libapache2-mod-$PHP_NAME"
 
-			# - Lighttpd or Nginx
+			# - Lighttpd and Nginx: PHP-FPM
 			elif (( ${aSOFTWARE_INSTALL_STATE[84]} > 0 || ${aSOFTWARE_INSTALL_STATE[85]} > 0 )); then
 
 				local package_list="$PHP_NAME-fpm"
 
-			# - No webserver, /usr/bin/php cmd usage
+			# - No webserver: CLI usage only (php binary)
 			else
 
 				local package_list="$PHP_NAME-cli"
@@ -5999,7 +5999,7 @@ If you want to update ${aSOFTWARE_NAME[$software_id]}, please use it's internal 
 			ln -s $G_FP_DIETPI_USERDATA/mycroft-data /opt/mycroft
 
 			# Assure 2 GiB overall memory is available
-			if (( $RAM_TOTAL + $(free -m | mawk '/^Swap:/ {print $2;exit}') < 2048 )); then
+			if (( $(free -tm | mawk '/^Total:/{print $2;exit}') < 2048 )); then
 
 				G_WHIP_MSG '[WARNING] Insufficient overall memory size\n
 Mycroft AI requires at least 2 GiB memory on first start. We will now increase your swap file size to satisfy this requirement.'
@@ -7076,90 +7076,67 @@ _EOF_
 
 			Banner_Configuration
 
-			# Apache2 has its own PHP module
-			if (( ${aSOFTWARE_INSTALL_STATE[83]} > 0 )); then
+			# PHP-FPM
+			if (( ${aSOFTWARE_INSTALL_STATE[84]} > 0 || ${aSOFTWARE_INSTALL_STATE[85]} > 0 )); then
 
-				# https://github.com/MichaIng/DietPi/issues/1144
-				local php_service='/lib/systemd/system/apache2.service'
-
-			# Nginx and Lighttpd use PHP-FPM
-			elif (( ${aSOFTWARE_INSTALL_STATE[84]} > 0 || ${aSOFTWARE_INSTALL_STATE[85]} > 0 )); then
-
-				local php_service="/lib/systemd/system/${PHP_NAME}-fpm.service"
-
-				# - PHP-FPM confs
+				# Base
 				sed -i '/cgi.fix_pathinfo=/c\cgi.fix_pathinfo=1' "$FP_PHP_BASE_DIR"/fpm/php.ini
 
-				# - PHP-FPM optimizations based on total cores
+				# Optimizations based on total cores
 				sed -i "/pm.max_children = /c\pm.max_children = $(( $G_HW_CPU_CORES * 3 ))" "$FP_PHP_BASE_DIR"/fpm/pool.d/www.conf
 				sed -i "/pm.start_servers = /c\pm.start_servers = $G_HW_CPU_CORES" "$FP_PHP_BASE_DIR"/fpm/pool.d/www.conf
 				sed -i "/pm.min_spare_servers = /c\pm.min_spare_servers = $G_HW_CPU_CORES" "$FP_PHP_BASE_DIR"/fpm/pool.d/www.conf
 				sed -i "/pm.max_spare_servers = /c\pm.max_spare_servers = $G_HW_CPU_CORES" "$FP_PHP_BASE_DIR"/fpm/pool.d/www.conf
 
-				# - Enviroment PHP settings:
+				# Enviroment settings
 				sed -i "/env\[HOSTNAME\]/c\env\[HOSTNAME\] = \$HOSTNAME" "$FP_PHP_BASE_DIR"/fpm/pool.d/www.conf
 				sed -i "/env\[PATH\]/c\env\[PATH\] = /usr/local/bin:/usr/bin:/bin" "$FP_PHP_BASE_DIR"/fpm/pool.d/www.conf
-
-				#	/tmp is mounted to RAM, so use DISK (/var/tmp) instead
-				sed -i "/env\[TMP\]/c\env\[TMP\] = /var/tmp" "$FP_PHP_BASE_DIR"/fpm/pool.d/www.conf
-				sed -i "/env\[TMPDIR\]/c\env\[TMPDIR\] = /var/tmp" "$FP_PHP_BASE_DIR"/fpm/pool.d/www.conf
-				sed -i "/env\[TEMP\]/c\env\[TEMP\] = /var/tmp" "$FP_PHP_BASE_DIR"/fpm/pool.d/www.conf
 
 			fi
 
 			# We create our own PHP mod to add DietPi specific configs.
 			target_php_ini="$FP_PHP_BASE_DIR/mods-available/dietpi.ini"
-			echo -e '; DietPi PHP settings\n; priority=98' > $target_php_ini
+			echo -e '; DietPi PHP settings\n; priority=97' > $target_php_ini
 
-			# - Set upload_tmp_dir to disk. Can't be /tmp as its ramdisk and limited size. Also used by ownCloud/Nextcloud uploads
-			#	- If PHP uses PrivateTmp, we must not use own subfolder: https://github.com/MichaIng/DietPi/issues/1144
-			if [[ -f $php_service ]] && grep -q '^[[:blank:]]*PrivateTmp=true' $php_service; then
-
-				local upload_tmp_dir='/var/tmp'
-
-			else
-
-				local upload_tmp_dir='/var/tmp/php_upload_tmp'
-				mkdir -p $upload_tmp_dir
-				chown -R www-data:www-data $upload_tmp_dir
-
-			fi
-			G_CONFIG_INJECT 'upload_tmp_dir[[:blank:]]*=' "upload_tmp_dir=$upload_tmp_dir" $target_php_ini
-
-			# - Max upload size
-			local php_max_upload_size="$(( $(php -r 'print(PHP_INT_MAX);') / 1024 / 1024))M"
-			#	- upload_max_filesize
-			G_CONFIG_INJECT 'upload_max_filesize[[:blank:]]*=' "upload_max_filesize=$php_max_upload_size" $target_php_ini
-			#	- post_max_size
-			G_CONFIG_INJECT 'post_max_size[[:blank:]]*=' "post_max_size=$php_max_upload_size" $target_php_ini
-			#	- Nginx: Set client_max_body_size to avoid 2MB upload error: https://github.com/MichaIng/DietPi/issues/546
-			if (( ${aSOFTWARE_INSTALL_STATE[85]} > 0 )); then
-
-				sed -i "/client_max_body_size/c\	client_max_body_size $php_max_upload_size;" /etc/nginx/nginx.conf
-
-			fi
-
-			# - Set UTF-8
+			# Set UTF-8
 			G_CONFIG_INJECT 'default_charset[[:blank:]]*=' 'default_charset="UTF-8"' $target_php_ini
 
-			# - PHP cache settings
+			# Session files need to be outside of /tmp and /var/tmp due to PrivateTmp=true, else phpsessionclean.service cannot clean sessions
+			G_EXEC mkdir -p /run/php_sessions
+			G_EXEC chmod 1733 /run/php_sessions
+			echo -e '# Pre-create PHP sessions dir\nd /run/php_sessions 1733' > /etc/tmpfiles.d/dietpi-php_sessions.conf
+			G_CONFIG_INJECT 'session.save_path[[:blank:]]*=' session.save_path="/run/php_sessions" $target_php_ini
+
+			# File uploads: https://github.com/MichaIng/DietPi/issues/546
+			# - This is especially relevant for cloud software like ownCloud/Nextcloud.
+			# - Generally we want to hold tmp upload files in RAM to reduce disk (especially SD card) writes for performance and disk wear reasons.
+			# - By default only max 2 MiB file uploads are allowed, hold in /tmp tmpfs, which is safe but not usable for usual cloud usage.
+			# - ownCloud/Nextcloud do/did override this limit to 512 MiB, a reasonable limit which can usually still be hold in RAM without issues.
+			# - Low RAM devices (RPi1 256 MiB model) require a swap file for this, however, it is still better to cause disk writes through swap file during large file uploads only, then doing this for each and every uploaded file.
+			# - When larger file uploads are required, it depends on the system total RAM, rootfs disk and available external drives if/where to move tmp file uploads, resize or move swap file. This should be then left to user.
+			G_CONFIG_INJECT 'upload_tmp_dir=[[:blank:]]*' 'upload_tmp_dir=/tmp' $target_php_ini
+			G_CONFIG_INJECT 'upload_max_filesize[[:blank:]]*=' 'upload_max_filesize=512M' $target_php_ini
+			G_CONFIG_INJECT 'post_max_size[[:blank:]]*=' 'post_max_size=512M' $target_php_ini
+			# - Nginx: https://github.com/MichaIng/DietPi/issues/546 => https://github.com/MichaIng/DietPi/blob/dev/.conf/dps_85/nginx.conf
+
+			# Cache settings
 			local target_php_cachesize=$(( $RAM_TOTAL / 30 ))
 			(( $target_php_cachesize < 10 )) && target_php_cachesize=10
-			#	- OPcache
+			# - OPcache
 			G_CONFIG_INJECT 'opcache.enable[[:blank:]]*=' 'opcache.enable=1' $target_php_ini
 			G_CONFIG_INJECT 'opcache.memory_consumption[[:blank:]]*=' "opcache.memory_consumption=$target_php_cachesize" $target_php_ini
-			G_CONFIG_INJECT 'opcache.revalidate_freq[[:blank:]]*=' 'opcache.revalidate_freq=60' $target_php_ini
-			#	- APCu
+			#	Assure that interned_strings_buffer is never larger than hald of memory_consumption: https://github.com/MichaIng/DietPi/issues/2293
+			(( $($PHP_NAME -i | mawk '/^opcache.interned_strings_buffer/{print $5;exit}') > $target_php_cachesize / 2 )) && G_CONFIG_INJECT 'opcache.interned_strings_buffer[[:blank:]]*=' "opcache.interned_strings_buffer=$(( $target_php_cachesize / 2 ))" $target_php_ini
+			G_CONFIG_INJECT 'opcache.revalidate_freq[[:blank:]]*=' 'opcache.revalidate_freq=60' $target_php_ini # 1 minute
+			# - APCu
 			G_CONFIG_INJECT 'apc.shm_size[[:blank:]]*=' "apc.shm_size=${target_php_cachesize}M" $target_php_ini
-			G_CONFIG_INJECT 'apc.ttl[[:blank:]]*=' 'apc.ttl=259200' $target_php_ini # 3 days TTL
+			G_CONFIG_INJECT 'apc.ttl[[:blank:]]*=' 'apc.ttl=259200' $target_php_ini # 3 days
 
 			# Enable all available PHP modules
 			phpenmod $(ls $FP_PHP_BASE_DIR/mods-available | sed -n '/\.ini$/{s/\.ini$//;p}')
 
-			# Create PHP info pages within webroot, if webserver is installed.
-			if (( ${aSOFTWARE_INSTALL_STATE[83]} > 0 ||
-				${aSOFTWARE_INSTALL_STATE[84]} > 0 ||
-				${aSOFTWARE_INSTALL_STATE[85]} > 0 )); then
+			# Create PHP info pages within webroot if webserver is installed
+			if (( ${aSOFTWARE_INSTALL_STATE[83]} > 0 || ${aSOFTWARE_INSTALL_STATE[84]} > 0 || ${aSOFTWARE_INSTALL_STATE[85]} > 0 )); then
 
 				# PHP info page
 				echo '<?php phpinfo(); ?>' > /var/www/phpinfo.php
@@ -7199,7 +7176,7 @@ _EOF_
 			fi
 
 			# Optimise for reduced memory use: https://github.com/MichaIng/DietPi/issues/605#issue-188930987
-			#cat << _EOF_ > /etc/mysql/mariadb.conf.d/99-dietpi.cnf
+			#cat << _EOF_ > /etc/mysql/mariadb.conf.d/97-dietpi.cnf
 #[mysqld]
 #key_buffer_size=8M
 #max_connections=30
@@ -7415,7 +7392,7 @@ _EOF_
 			phpenmod ctype curl dom gd iconv intl json mbstring pdo_mysql posix simplexml xmlreader xmlwriter zip fileinfo opcache apcu redis exif
 
 			G_DIETPI-NOTIFY 2 'Enabling APCu memory cache for PHP command line usage (CLI) as well, including ownCloud occ command and cron jobs.'
-			echo -e '; ownCloud PHP settings\n; priority=99\napc.enable_cli=1' > $FP_PHP_BASE_DIR/mods-available/dietpi-owncloud.ini
+			echo -e '; ownCloud PHP settings\n; priority=98\napc.enable_cli=1' > $FP_PHP_BASE_DIR/mods-available/dietpi-owncloud.ini
 			phpenmod dietpi-owncloud
 
 			# Get version string
@@ -7622,6 +7599,9 @@ location = /.well-known/caldav {
 			# Enable maintenance mode to allow handling by dietpi-services:
 			grep -q "^[[:blank:]]*'maintenance' => true," $config_php || occ maintenance:mode --on
 
+			# On <1 GiB devices assure at least 512 MiB swap space are available to stand 512 MiB file uploads + increased PHP cache and session file usage: https://github.com/MichaIng/DietPi/issues/2293
+			(( $RAM_TOTAL < 900 && $(free -m | mawk '/^Swap:/{print $2;exit}') < 512 )) && /boot/dietpi/func/dietpi-set_swapfile 512
+
 		fi
 
 		software_id=114 # Nextcloud
@@ -7633,7 +7613,7 @@ location = /.well-known/caldav {
 			phpenmod ctype curl dom gd iconv intl json mbstring pdo_mysql posix simplexml xmlreader xmlwriter zip fileinfo opcache apcu redis exif
 
 			G_DIETPI-NOTIFY 2 'Optimising APCu and OPcache modules for Nextcloud.' # https://docs.nextcloud.com/server/stable/admin_manual/configuration_server/server_tuning.html#enable-php-opcache
-			echo -e '; Nextcloud PHP settings\n; priority=99\napc.enable_cli=1\nopcache.enable=1\nopcache.interned_strings_buffer=8
+			echo -e '; Nextcloud PHP settings\n; priority=98\napc.enable_cli=1\nopcache.enable=1\nopcache.interned_strings_buffer=8
 opcache.max_accelerated_files=10000\nopcache.memory_consumption=128\nopcache.save_comments=1\nopcache.revalidate_freq=1' > $FP_PHP_BASE_DIR/mods-available/dietpi-nextcloud.ini
 			phpenmod dietpi-nextcloud
 
@@ -7869,6 +7849,9 @@ The install script will now exit. After applying one of the the above, rerun die
 
 			# Enable maintenance mode to allow handling by dietpi-services:
 			grep -q "^[[:blank:]]*'maintenance' => true," $config_php || ncc maintenance:mode --on
+
+			# On <1 GiB devices assure at least 512 MiB swap space are available to stand 512 MiB file uploads + increased PHP cache and session file usage: https://github.com/MichaIng/DietPi/issues/2293
+			(( $RAM_TOTAL < 900 && $(free -m | mawk '/^Swap:/{print $2;exit}') < 512 )) && /boot/dietpi/func/dietpi-set_swapfile 512
 
 		fi
 
