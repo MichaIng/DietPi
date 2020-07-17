@@ -71,12 +71,7 @@ APT::AutoRemove::SuggestsImportant "false";
 Acquire::Languages "none";
 _EOF_
 	# - Forcing new DEB package config files (during PREP only)
-	cat << _EOF_ > /etc/apt/apt.conf.d/98dietpi-forceconf
-Dpkg::options {
-   "--force-confmiss";
-   "--force-confnew";
-}
-_EOF_
+	echo 'DPkg::options {"--force-confmiss,confnew";};' > /etc/apt/apt.conf.d/98dietpi-forceconf
 	# - Prefer IPv4 by default to avoid hanging access attempts in some cases
 	#	NB: This needs to match the method in: /DietPi/dietpi/func/dietpi-set_hardware preferipv4 enable
 	echo 'Acquire::ForceIPv4 "true";' > /etc/apt/apt.conf.d/99-dietpi-force-ipv4
@@ -112,7 +107,7 @@ _EOF_
 	for i in "${aAPT_PREREQS[@]}"
 	do
 
-		if ! dpkg-query -s $i &> /dev/null && ! apt-get -y install $i; then
+		if ! dpkg-query -s "$i" &> /dev/null && ! apt-get -y install "$i"; then
 
 			echo -e "[FAILED] Unable to install $i, please try to install it manually:\n\t # apt install $i\n"
 			exit 1
@@ -1042,7 +1037,9 @@ Currently installed: $G_DISTRO_NAME (ID: $G_DISTRO)"; then
 
 		G_DIETPI-NOTIFY 2 'Removing misc files/folders/services, not required by DietPi'
 
+		# shellcheck disable=SC2115
 		[[ -d '/home' ]] && rm -Rfv /home/{,.??,.[^.]}* || mkdir /home
+		# shellcheck disable=SC2115
 		[[ -d '/media' ]] && rm -Rfv /media/{,.??,.[^.]}* || mkdir /media
 		[[ -d '/selinux' ]] && rm -Rv /selinux
 		[[ -d '/var/cache/apparmor' ]] && rm -Rv /var/cache/apparmor
@@ -1066,7 +1063,7 @@ Currently installed: $G_DISTRO_NAME (ID: $G_DISTRO)"; then
 		rm -fv /var/lib/dpkg/*-old
 
 		# - Unused DEB package config files
-		find /etc -name '?*\.dpkg-dist' -o -name '?*\.dpkg-old' -o -name '?*\.dpkg-new' | xargs rm -v
+		find /etc \( -name '?*\.dpkg-dist' -o -name '?*\.dpkg-old' -o -name '?*\.dpkg-new' \) -exec rm -v {} +
 
 		# - Fonts
 		[[ -d '/usr/share/fonts' ]] && rm -vR /usr/share/fonts
