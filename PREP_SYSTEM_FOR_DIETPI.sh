@@ -48,25 +48,34 @@
 	FP_PREP_SCRIPT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/$(basename "${BASH_SOURCE[0]}")"
 	cd /tmp
 
-	# APT: Prefer IPv4 by default to avoid hanging access attempts in some cases
-	# - NB: This needs to match the method in: /DietPi/dietpi/func/dietpi-set_hardware preferipv4 enable
+	# APT pre-configuration
+	# - Remove unwanted APT configs
+	#	RPi: Allow PDiffs since the "slow implementation" argument is outdated and PDiffs allow lower download size and less disk I/O
+	[[ -f '/etc/apt/apt.conf.d/50raspi' ]] && rm -v /etc/apt/apt.conf.d/50raspi
+	#	Meveric: https://github.com/MichaIng/DietPi/issues/1285#issuecomment-355759321
+	[[ -f '/etc/apt/sources.list.d/deb-multimedia.list' ]] && rm -v /etc/apt/sources.list.d/deb-multimedia.list
+	[[ -f '/etc/apt/preferences.d/deb-multimedia-pin-99' ]] && rm -v /etc/apt/preferences.d/deb-multimedia-pin-99
+	[[ -f '/etc/apt/preferences.d/backports' ]] && rm -v /etc/apt/preferences.d/backports
+	#	OMV: https://dietpi.com/phpbb/viewtopic.php?f=11&t=2772
+	[[ -f '/etc/apt/sources.list.d/openmediavault.list' ]] && rm -v /etc/apt/sources.list.d/openmediavault.list
+	#	Conflicting configs
+	rm -fv /etc/apt/apt.conf.d/*{recommends,armbian}*
+	# - Apply wanted APT configs: Overwritten by DietPi code archive
+	cat << _EOF_ > /etc/apt/apt.conf.d/97dietpi
+# Disable automatic recommends/suggests install and allow them to be autoremoved
+APT::Install-Recommends "false";
+APT::Install-Suggests "false";
+APT::AutoRemove::RecommendsImportant "false";
+APT::AutoRemove::SuggestsImportant "false";
+# Disable package state translation downloads
+Acquire::Languages "none";
+_EOF_
+	# - Forcing new DEB package config files (during PREP only)
+	echo 'DPkg::options {"--force-confmiss,confnew";};' > /etc/apt/apt.conf.d/98dietpi-forceconf
+	# - Prefer IPv4 by default to avoid hanging access attempts in some cases
+	#	NB: This needs to match the method in: /DietPi/dietpi/func/dietpi-set_hardware preferipv4 enable
 	echo 'Acquire::ForceIPv4 "true";' > /etc/apt/apt.conf.d/99-dietpi-force-ipv4
-
-	# Allow PDiffs on RPi since the "slow implementation" argument is outdated and PDiffs allow lower download size and less disk I/O
-	[[ -f '/etc/apt/apt.conf.d/50raspi' ]] && rm /etc/apt/apt.conf.d/50raspi
-
-	# Disable package state translation downloads
-	echo 'Acquire::Languages "none";' > /etc/apt/apt.conf.d/98-dietpi-no_translations
-
-	# Removing conflicting /etc/apt/sources.list.d entries
-	# - Meveric: https://github.com/MichaIng/DietPi/issues/1285#issuecomment-355759321
-	[[ -f '/etc/apt/sources.list.d/deb-multimedia.list' ]] && rm /etc/apt/sources.list.d/deb-multimedia.list
-	[[ -f '/etc/apt/preferences.d/deb-multimedia-pin-99' ]] && rm /etc/apt/preferences.d/deb-multimedia-pin-99
-	[[ -f '/etc/apt/preferences.d/backports' ]] && rm /etc/apt/preferences.d/backports
-	# - OMV: https://dietpi.com/phpbb/viewtopic.php?f=11&t=2772
-	[[ -f '/etc/apt/sources.list.d/openmediavault.list' ]] && rm /etc/apt/sources.list.d/openmediavault.list
-
-	# Fixing sources.list as Debian dropped Jessie support: https://github.com/MichaIng/DietPi/issues/2665
+	# - Jessie: Fixing sources.list as Debian dropped Jessie support: https://github.com/MichaIng/DietPi/issues/2665
 	if grep -q 'jessie' /etc/os-release && ! grep -qi 'raspbian' /etc/os-release; then
 
 		if [[ $(uname -m) == 'aarch64' ]]; then
@@ -84,7 +93,7 @@
 	apt-get clean
 	apt-get update
 
-	# Check for/Install APT packages required for this script to:
+	# Check for/Install DEB packages required for this script to:
 	aAPT_PREREQS=(
 
 		'wget' # Download DietPi-Globals...
@@ -95,11 +104,10 @@
 	)
 	# - Pre-Buster: Support HTTPS sources for APT
 	grep -qE '(jessie|stretch)' /etc/os-release && aAPT_PREREQS+=('apt-transport-https')
-
 	for i in "${aAPT_PREREQS[@]}"
 	do
 
-		if ! dpkg-query -s $i &> /dev/null && ! apt-get -y --no-install-recommends install $i; then
+		if ! dpkg-query -s "$i" &> /dev/null && ! apt-get -y install "$i"; then
 
 			echo -e "[FAILED] Unable to install $i, please try to install it manually:\n\t # apt install $i\n"
 			exit 1
@@ -129,7 +137,6 @@
 	# - Remove existing settings that could break dpkg-reconfigure locales
 	> /etc/environment
 	[[ -f '/etc/default/locale' ]] && rm /etc/default/locale
-
 	# - NB: DEV, any changes here must be also rolled into function '/boot/dietpi/func/dietpi-set_software locale', for future script use
 	echo 'C.UTF-8 UTF-8' > /etc/locale.gen
 	# - dpkg-reconfigure includes:
@@ -141,10 +148,8 @@
 		exit 1
 
 	fi
-
 	# - Export locale vars to assure the following whiptail being beautiful
 	export LC_ALL='C.UTF-8' LANG='C.UTF-8'
-
 	# - Update /etc/default/locales with new values (not effective until next load of bash session, eg: logout/in)
 	update-locale 'LC_ALL=C.UTF-8'
 
@@ -161,7 +166,6 @@
 			'dev' ': Unstable development branch'
 
 		)
-
 		if ! GITBRANCH=$(whiptail --title "$G_PROGRAM_NAME" --menu 'Please select the Git branch the installer should use:' --default-item 'master' --ok-button 'Ok' --cancel-button 'Exit' --backtitle "$G_PROGRAM_NAME" 12 80 3 "${aWHIP_BRANCH[@]}" 3>&1 1>&2 2>&3-); then
 
 			echo -e '[ INFO ] No choice detected. Aborting...\n'
@@ -171,7 +175,6 @@
 		unset aWHIP_BRANCH
 
 	fi
-
 	echo "[ INFO ] Selected Git branch: $GITOWNER/$GITBRANCH"
 
 	#------------------------------------------------------------------------------------------------
@@ -294,6 +297,7 @@
 			[[ -d '/DietPi' ]] && rm -R /DietPi
 			rm -Rfv /{boot,mnt,etc,var/lib,var/tmp,run}/*dietpi*
 			rm -fv /etc{,/cron.*,/{bashrc,profile,sysctl,network/if-up,udev/rules}.d}/{,.}*dietpi*
+			rm -fv /etc/apt/apt.conf.d/{99-dietpi-norecommends,98-dietpi-no_translations,99-dietpi-forceconf} # Pre-v6.32
 
 			[[ -f '/root/DietPi-Automation.log' ]] && rm -v /root/DietPi-Automation.log
 			[[ -f '/boot/Automation_Format_My_Usb_Drive' ]] && rm -v /boot/Automation_Format_My_Usb_Drive
@@ -696,38 +700,17 @@ Currently installed: $G_DISTRO_NAME (ID: $G_DISTRO)"; then
 		G_DIETPI-NOTIFY 2 'Marking all packages as auto-installed first, to allow effective autoremove afterwards'
 		G_EXEC apt-mark auto $(dpkg --get-selections | mawk '{print $1}')
 
-		G_EXEC_DESC='Disable automatic recommends/suggests install and allow them to be autoremoved'
-		# Remove existing/conflicting files first
-		rm -fv /etc/apt/apt.conf.d/*recommends*
-		G_EXEC eval 'cat << _EOF_ > /etc/apt/apt.conf.d/99-dietpi-norecommends
-APT::Install-Recommends "false";
-APT::Install-Suggests "false";
-APT::AutoRemove::RecommendsImportant "false";
-APT::AutoRemove::SuggestsImportant "false";
-_EOF_'
-
-		G_DIETPI-NOTIFY 2 'Disable package state translation downloads'
-		echo 'Acquire::Languages "none";' > /etc/apt/apt.conf.d/98-dietpi-no_translations
-
-		G_EXEC_DESC='Preserve modified config files on APT update'
-		G_EXEC eval 'cat << _EOF_ > /etc/apt/apt.conf.d/99-dietpi-forceconf
-Dpkg::options {
-   "--force-confdef";
-   "--force-confold";
-}
-_EOF_'
-
 		# DietPi list of minimal required packages, which must be installed:
 		aPACKAGES_REQUIRED_INSTALL=(
 
-			'apt-utils'		# Allows "debconf" to pre-configure APT packages for non-interactive install
+			'apt'			# Debian package manager
 			'bash-completion'	# Auto completes a wide list of bash commands and options via <tab>
 			'bzip2'			# (.tar).bz2 wrapper
 			'ca-certificates'	# Adds known ca-certificates, necessary to practically access HTTPS sources
 			'console-setup'		# DietPi-Config keyboard configuration + console fonts
 			'cron'			# Background job scheduler
 			'curl'			# Web address testing, downloading, uploading etc.
-			'debconf'		# APT package pre-configuration, e.g. "debconf-set-selections" for non-interactive install
+			'debconf'		# DEB package configuration, including "debconf-set-selections" for scripted pre-configuration
 			'dirmngr'		# GNU key management required for some APT installs via additional repos
 			'ethtool'		# Force Ethernet link speed
 			'fake-hwclock'		# Hardware clock emulation, to allow correct timestamps during boot before network time sync
@@ -998,7 +981,7 @@ _EOF_'
 		(( $G_DISTRO < 4 )) && G_EXEC_PRE_FUNC(){ acommand[2]='--force-yes'; }
 		G_AGP dbus dhcpcd5 mountall initscripts '*office*' '*xfce*' '*qt5*' '*xserver*' '*xorg*' glib-networking libgtk-3-0
 		# Remove any autoremove prevention
-		rm -f /etc/apt/apt.conf.d/01autoremove*
+		rm -fv /etc/apt/apt.conf.d/*autoremove*
 		G_AGA
 
 		#------------------------------------------------------------------------------------------------
@@ -1008,7 +991,7 @@ _EOF_'
 		G_DIETPI-NOTIFY 2 '-----------------------------------------------------------------------------------'
 		#------------------------------------------------------------------------------------------------
 
-		# - Jessie workaround: https://github.com/MichaIng/DietPi/issues/3462
+		# Jessie workaround: https://github.com/MichaIng/DietPi/issues/3462
 		(( $G_DISTRO < 4 )) && G_EXEC_PRE_FUNC(){ acommand[2]='--force-yes'; }
 		G_AGDUG
 
@@ -1017,12 +1000,14 @@ _EOF_'
 		G_DISTRO_NAME=$DISTRO_TARGET_NAME
 		unset DISTRO_TARGET DISTRO_TARGET_NAME
 
-		G_DIETPI-NOTIFY 2 'Installing core DietPi pre-req APT packages'
+		G_DIETPI-NOTIFY 2 'Installing core DietPi pre-req DEB packages'
 
 		G_AGI ${aPACKAGES_REQUIRED_INSTALL[@]}
 		unset aPACKAGES_REQUIRED_INSTALL
 
 		G_AGA
+
+		G_EXEC_DESC='Preserving modified DEB package config files from now on' G_EXEC rm -v /etc/apt/apt.conf.d/98dietpi-forceconf
 
 		#------------------------------------------------------------------------------------------------
 		echo
@@ -1052,7 +1037,9 @@ _EOF_'
 
 		G_DIETPI-NOTIFY 2 'Removing misc files/folders/services, not required by DietPi'
 
+		# shellcheck disable=SC2115
 		[[ -d '/home' ]] && rm -Rfv /home/{,.??,.[^.]}* || mkdir /home
+		# shellcheck disable=SC2115
 		[[ -d '/media' ]] && rm -Rfv /media/{,.??,.[^.]}* || mkdir /media
 		[[ -d '/selinux' ]] && rm -Rv /selinux
 		[[ -d '/var/cache/apparmor' ]] && rm -Rv /var/cache/apparmor
@@ -1074,6 +1061,9 @@ _EOF_'
 		# - Previous debconfs
 		rm -fv /var/cache/debconf/*-old
 		rm -fv /var/lib/dpkg/*-old
+
+		# - Unused DEB package config files
+		find /etc \( -name '?*\.dpkg-dist' -o -name '?*\.dpkg-old' -o -name '?*\.dpkg-new' \) -exec rm -v {} +
 
 		# - Fonts
 		[[ -d '/usr/share/fonts' ]] && rm -vR /usr/share/fonts
@@ -1105,7 +1095,7 @@ _EOF_'
 
 				[[ -e $j ]] || continue
 				[[ -f $j ]] && systemctl disable --now ${j##*/}
-				# Remove if not attached to any APT package, else mask
+				# Remove if not attached to any DEB package, else mask
 				if dpkg -S $j &> /dev/null; then
 
 					systemctl mask ${j##*/}
@@ -1840,7 +1830,7 @@ _EOF_
 		kernel_apt_packages=$(dpkg -l | grep -E '[[:blank:]]linux-(image|dtb)-[0-9]')
 		if [[ $kernel_apt_packages ]]; then
 
-			G_DIETPI-NOTIFY 2 'The following kernel APT packages have been found, please purge outdated ones:'
+			G_DIETPI-NOTIFY 2 'The following kernel DEB packages have been found, please purge outdated ones:'
 			echo "$kernel_apt_packages"
 
 		fi
