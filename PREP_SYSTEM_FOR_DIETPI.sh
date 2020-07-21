@@ -1614,8 +1614,8 @@ _EOF_
 			# Update USBridgeSig Ethernet driver via postinst kernel script, until it has been merged into official RPi kernel: https://github.com/allocom/USBridgeSig/tree/master/ethernet
 			cat << _EOF_ > /etc/kernel/postinst.d/dietpi-USBridgeSig
 #!/bin/bash
-# Only apply to ARMv7+ kernel
-[[ \$1 == *'-v7+' ]] || exit 0
+# Only apply to v7+ and v8+ kernel
+[[ \$1 == *'-v'[78]'+' ]] || exit 0
 echo "[ INFO ] Updating asix ax88179 driver for kernel \$1, as provided by allo.com:"
 echo '[ INFO ] - https://github.com/allocom/USBridgeSig/tree/master/ethernet'
 echo '[ INFO ] Downloading driver...'
@@ -1628,8 +1628,8 @@ echo '[ INFO ] Cleaning up...'
 rm -v /tmp/ax88179_178a.ko || exit 0
 _EOF_
 			chmod +x /etc/kernel/postinst.d/dietpi-USBridgeSig
-			# - Update for all installed ARMv7+ kernel versions now
-			for i in /lib/modules/*-v7+
+			# - Update for all installed v7+ and v8+ kernel versions now
+			for i in /lib/modules/*-v[78]+
 			do
 
 				[[ -d $i ]] || continue
@@ -1638,7 +1638,7 @@ _EOF_
 
 			done
 
-		# - Pine A64 (and possibily others): Cursor fix for FB
+		# - PINE A64 (and possibily others): Cursor fix for FB
 		elif (( $G_HW_MODEL == 40 )); then
 
 			cat << _EOF_ > /etc/bashrc.d/dietpi-pine64-cursorfix.sh
@@ -1655,7 +1655,7 @@ _EOF_
 
 		fi
 
-		# - ARMbian special
+		# - Armbian special
 		if [[ -f '/boot/armbianEnv.txt' ]]; then
 
 			# Reset default kernel log verbosity, reduced to "1" on most Armbian images
