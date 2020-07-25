@@ -19,10 +19,10 @@
 	do
 
 		# Get current gateway for ping
-		URL_PING=$(ip r l 0/0 dev $ADAPTER | mawk '{print $3}')
+		URL_PING=$(ip r l 0/0 dev "$ADAPTER" | mawk '{print $3}')
 
 		[[ $G_DEBUG == 1 ]] && echo "Checking connection for: $ADAPTER via ping to $URL_PING"
-		if [[ $URL_PING ]] && ping -qI $ADAPTER -c 1 $URL_PING &> /dev/null; then
+		if [[ $URL_PING ]] && ping -qI "$ADAPTER" -c 1 "$URL_PING" &> /dev/null; then
 
 			[[ $G_DEBUG == 1 ]] && echo "Connection valid for: $ADAPTER"
 
@@ -31,9 +31,9 @@
 			[[ -e /sys/class/net/$ADAPTER ]] || { echo "ERROR: WiFi adapter has been unplugged: $ADAPTER. Exiting..."; exit 1; }
 
 			echo "Detected connection loss: $ADAPTER. Reconnecting..."
-			ifdown $ADAPTER
+			ifdown "$ADAPTER"
 			sleep 1
-			ifup $ADAPTER
+			ifup "$ADAPTER"
 			echo 'Completed'
 
 		fi
