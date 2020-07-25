@@ -23,7 +23,7 @@
 	G_CHECK_ROOTFS_RW
 	FP_ORIGIN=$PWD # Store origin dir
 	G_INIT
-	cd "$FP_ORIGIN" # Process everything in origin dir instead of /tmp/$G_PROGRAM_NAME
+	cd "$FP_ORIGIN" || exit 1 # Process everything in origin dir instead of /tmp/$G_PROGRAM_NAME
 	# Import DietPi-Globals ---------------------------------------------------------------
 
 	FP_SOURCE_IMG=
@@ -38,7 +38,7 @@
 	CLONEZILLA_REPO='https://sourceforge.net/projects/clonezilla/files/clonezilla_live_alternative'
 	DIETPI_REPO="https://raw.githubusercontent.com/$G_GITOWNER/DietPi/$G_GITBRANCH"
 
-	Delete_Loopback(){ losetup $FP_SOURCE &> /dev/null && G_EXEC losetup -d $FP_SOURCE; }
+	Delete_Loopback(){ losetup "$FP_SOURCE" &> /dev/null && G_EXEC losetup -d "$FP_SOURCE"; }
 
 	G_EXIT_CUSTOM(){
 
@@ -80,20 +80,19 @@
 			if [[ $CLONING_TOOL == 'dd' ]]; then
 
 				# List block devices, excluding RAM disks
-				G_WHIP_MENU_ARRAY=$(lsblk -rnpo PKNAME,FSTYPE)
+				local drives=$(lsblk -rnpo PKNAME,FSTYPE)
 
 			else
 
 				OUTPUT_IMG_EXT='iso'
 				# List block devices, excluding RAM disks and loop devices
-				G_WHIP_MENU_ARRAY=$(lsblk -rnpo PKNAME,FSTYPE -e 1,7)
+				local drives=$(lsblk -rnpo PKNAME,FSTYPE -e 1,7)
 
 			fi
 			# Detect drives with a partition table, containing a partition with ext4 file system, excluding the hosts root FS drive
-			local host_rootfs_dev=$(lsblk -rnpo PKNAME,MOUNTPOINT | mawk '$2=="/" {print $1;exit}')
-			G_WHIP_MENU_ARRAY=($(mawk -v root=$host_rootfs_dev '{if ( $1!=root && $2=="ext4" ) print $1,$2}' <<< "$G_WHIP_MENU_ARRAY" | sort -u))
+			G_WHIP_MENU_ARRAY=($(mawk -v root=$(lsblk -npo PKNAME "$G_ROOTFS_DEV") '{if ( $1!=root && $2=="ext4" ) print $1,$2}' <<< "$drives" | sort -u))
 
-			if [[ ! $G_WHIP_MENU_ARRAY ]]; then
+			if [[ ! ${G_WHIP_MENU_ARRAY[0]} ]]; then
 
 				G_DIETPI-NOTIFY 1 'No drive with an ext4 partition found, aborting...'
 				G_DIETPI-NOTIFY 2 'Hint: This is the list of available block devices'
@@ -103,18 +102,18 @@
 			fi
 
 			# Visually separate dev name and size and add model and serial
-			for ((i=1;i<${#G_WHIP_MENU_ARRAY[@]};i+=2)); do G_WHIP_MENU_ARRAY[$i]=": $(lsblk -drno SIZE,MODEL,SERIAL ${G_WHIP_MENU_ARRAY[$i-1]})"; done
+			for ((i=1;i<${#G_WHIP_MENU_ARRAY[@]};i+=2)); do G_WHIP_MENU_ARRAY[$i]=": $(lsblk -drno SIZE,MODEL,SERIAL "${G_WHIP_MENU_ARRAY[$i-1]}")"; done
 			G_WHIP_MENU 'Please select the drive you wish to create the image from:
 \nNB: All mounted partitions of the selected drive will be unmounted.' || exit 1
 			FP_SOURCE=$G_WHIP_RETURNED_VALUE
 
 			G_DIETPI-NOTIFY 2 'Unmounting all mounted file systems of the selected source drive...'
 			local mountpoint
-			for i in $FP_SOURCE?*
+			for i in "$FP_SOURCE"?*
 			do
 
-				mountpoint=$(findmnt -no TARGET $i)
-				[[ $mountpoint ]] && G_EXEC umount -R $mountpoint
+				mountpoint=$(findmnt -no TARGET "$i")
+				[[ $mountpoint ]] && G_EXEC umount -R "$mountpoint"
 
 			done
 
@@ -137,41 +136,38 @@
 			# Create loopback device from .img file
 			G_EXEC modprobe loop
 			FP_SOURCE=$(losetup -f)
-			G_EXEC losetup $FP_SOURCE "$FP_SOURCE_IMG"
-			G_EXEC partprobe $FP_SOURCE
-			G_EXEC partx -u $FP_SOURCE
+			G_EXEC losetup "$FP_SOURCE" "$FP_SOURCE_IMG"
+			G_EXEC partprobe "$FP_SOURCE"
+			G_EXEC partx -u "$FP_SOURCE"
 			G_DIETPI-NOTIFY 0 "Mounted the image ($FP_SOURCE_IMG) as loopback device: $FP_SOURCE"
 
 		fi
 
 		# Detect partitions and list for selection
-		G_WHIP_MENU_ARRAY=($(lsblk -npo NAME,SIZE ${FP_SOURCE}?*))
+		G_WHIP_MENU_ARRAY=($(lsblk -npo NAME,SIZE "$FP_SOURCE"?*))
 		# Visually separate dev name and size and add FS type
-		for ((i=1;i<${#G_WHIP_MENU_ARRAY[@]};i+=2)); do G_WHIP_MENU_ARRAY[$i]=": $(lsblk -drno SIZE,FSTYPE ${G_WHIP_MENU_ARRAY[$i-1]})"; done
+		for ((i=1;i<${#G_WHIP_MENU_ARRAY[@]};i+=2)); do G_WHIP_MENU_ARRAY[$i]=": $(lsblk -drno SIZE,FSTYPE "${G_WHIP_MENU_ARRAY[$i-1]}")"; done
 		G_WHIP_MENU 'Please select the OS root partition:' || exit 1
 		FP_ROOT_DEV=$G_WHIP_RETURNED_VALUE
 		ROOT_PARTITION_INDEX=${FP_ROOT_DEV: -1}
 
-		G_WHIP_DEFAULT_ITEM='DietPi_<device>-<arch>-<distro>'
-		G_WHIP_INPUTBOX 'Please enter the filename for the new image:\n - DietPi_<device>-<arch>-<distro>\n - EG: DietPi_RPi-ARMv6-Buster' || exit 1
+		G_WHIP_DEFAULT_ITEM='DietPi_RPi-ARMv6-Buster'
+		G_WHIP_INPUTBOX 'Please enter the filename for the new image:\n - DietPi_<device>-<arch>-<distro>\n - E.g.: DietPi_RPi-ARMv6-Buster' || exit 1
 		OUTPUT_IMG_NAME=$G_WHIP_RETURNED_VALUE
 
 		# Check for existing file, in case offer backup. Skip if source is image file and matches output file already.
-		if [[ $PWD/$OUTPUT_IMG_NAME.$OUTPUT_IMG_EXT != $FP_SOURCE_IMG && -f $OUTPUT_IMG_NAME.$OUTPUT_IMG_EXT ]]; then
+		if [[ $PWD/$OUTPUT_IMG_NAME.$OUTPUT_IMG_EXT != "$FP_SOURCE_IMG" && -f $OUTPUT_IMG_NAME.$OUTPUT_IMG_EXT ]]; then
 
 			G_WHIP_BUTTON_OK_TEXT='Overwrite'
 			G_WHIP_BUTTON_CANCEL_TEXT='Backup'
 			G_WHIP_YESNO "[WARNING] $PWD/$OUTPUT_IMG_NAME.$OUTPUT_IMG_EXT already exists\n
-Do you want to overwrite or backup the existing file to $PWD/$OUTPUT_IMG_NAME.$OUTPUT_IMG_EXT.bak?" || mv $OUTPUT_IMG_NAME.$OUTPUT_IMG_EXT{,.bak}
+Do you want to overwrite or backup the existing file to $PWD/$OUTPUT_IMG_NAME.$OUTPUT_IMG_EXT.bak?" || mv "$OUTPUT_IMG_NAME.$OUTPUT_IMG_EXT"{,.bak}
 
 		fi
 
 	}
 
 	Main(){
-
-		# Create final image + archive in current dir
-		#cd /root
 
 		Menu_Main
 
@@ -181,7 +177,7 @@ Do you want to overwrite or backup the existing file to $PWD/$OUTPUT_IMG_NAME.$O
 		G_AG_CHECK_INSTALL_PREREQ parted zerofree p7zip $fdisk
 
 		# Auto detect partition table type, failsafe detection of MBR to debug possibly other/unknown wording/partition table types
-		if [[ $(parted -s $FP_SOURCE print) == *'Partition Table: msdos'* ]]; then
+		if [[ $(parted -s "$FP_SOURCE" print) == *'Partition Table: msdos'* ]]; then
 
 			G_DIETPI-NOTIFY 2 'MBR partition table detected'
 			GPT=0
@@ -190,25 +186,25 @@ Do you want to overwrite or backup the existing file to $PWD/$OUTPUT_IMG_NAME.$O
 		# - "GPT PMBR size mismatch (4458495 != 15523839)"
 		# - "Error: The backup GPT table is corrupt, but the primary appears OK, so that will be used."
 		# - gdisk will correct this
-		elif [[ $(parted -s $FP_SOURCE print) == *'Partition Table: gpt'* ]]; then
+		elif [[ $(parted -s "$FP_SOURCE" print) == *'Partition Table: gpt'* ]]; then
 
 			G_DIETPI-NOTIFY 2 'GPT partition table detected, applying gdisk fix...'
 			GPT=1
 			G_AG_CHECK_INSTALL_PREREQ gdisk
-			sgdisk -g $FP_SOURCE
+			sgdisk -g "$FP_SOURCE"
 
 		else
 
-			G_DIETPI-NOTIFY 1 "Unknown partition table type ($(parted -s $FP_SOURCE print | mawk '/^Partition Table:/ {print $3;exit}')), aborting..."
+			G_DIETPI-NOTIFY 1 "Unknown partition table type ($(parted -s "$FP_SOURCE" print | mawk '/^Partition Table:/{print $3;exit}')), aborting..."
 			exit 1
 
 		fi
 
-		G_EXEC_OUTPUT=1 G_EXEC e2fsck -fp $FP_ROOT_DEV
+		G_EXEC_OUTPUT=1 G_EXEC e2fsck -fp "$FP_ROOT_DEV"
 
 		# Remount image for any required edits
 		G_EXEC mkdir -p $FP_MNT_TMP
-		G_EXEC mount $FP_ROOT_DEV $FP_MNT_TMP
+		G_EXEC mount "$FP_ROOT_DEV" $FP_MNT_TMP
 		# - Remove bash history, which is stored on shutdown, hence cannot be removed via DietPi-PREP
 		rm -fv $FP_MNT_TMP/{root,home/*}/.bash_history
 		if G_WHIP_YESNO "Do you want to review/edit contained files?
@@ -222,7 +218,7 @@ Do you want to overwrite or backup the existing file to $PWD/$OUTPUT_IMG_NAME.$O
 			export G_DIETPI_LOGIN=1
 			G_EXEC cd $FP_MNT_TMP
 			bash &> /dev/tty < /dev/tty
-			G_EXEC cd $FP_ORIGIN
+			G_EXEC cd "$FP_ORIGIN"
 			(( $reallow_dietpi_login )) && unset -v G_DIETPI_LOGIN
 
 		fi
@@ -230,9 +226,9 @@ Do you want to overwrite or backup the existing file to $PWD/$OUTPUT_IMG_NAME.$O
 		sleep 1 # Give the system 1 second to avoid "mount is busy"
 		G_EXEC umount $FP_MNT_TMP
 		G_EXEC rmdir $FP_MNT_TMP
-		G_EXEC partprobe $FP_SOURCE # Failsafe
-		G_EXEC partx -u $FP_SOURCE # Failsafe
-		G_EXEC_OUTPUT=1 G_EXEC e2fsck -fp $FP_ROOT_DEV
+		G_EXEC partprobe "$FP_SOURCE" # Failsafe
+		G_EXEC partx -u "$FP_SOURCE" # Failsafe
+		G_EXEC_OUTPUT=1 G_EXEC e2fsck -fp "$FP_ROOT_DEV"
 
 		# Shrink file system to minimum
 		# - Run multiple times until no change is done any more
@@ -242,15 +238,15 @@ Do you want to overwrite or backup the existing file to $PWD/$OUTPUT_IMG_NAME.$O
 		while :
 		do
 
-			resize2fs -M $FP_ROOT_DEV 2>&1 | tee resize2fs_out
+			resize2fs -M "$FP_ROOT_DEV" 2>&1 | tee resize2fs_out
 			if out=$(grep -im1 'nothing to do!' resize2fs_out); then
 
-				FS_SIZE=$(mawk '{print $5}' <<< $out) # blocks
+				FS_SIZE=$(mawk '{print $5}' <<< "$out") # blocks
 				BLOCK_SIZE=${out%%k) *} BLOCK_SIZE=${BLOCK_SIZE##*\(} # KiB
 				# Re-add 4 MiB to be failsafe, was required on Raspbian Buster for successful boot
 				FS_SIZE=$(( $FS_SIZE + 4096/$BLOCK_SIZE )) # blocks
 				rm resize2fs_out
-				resize2fs $FP_ROOT_DEV $FS_SIZE
+				resize2fs "$FP_ROOT_DEV" $FS_SIZE
 				G_DIETPI-NOTIFY 0 "Reduced RootFS size to $(( $FS_SIZE * $BLOCK_SIZE / 1024 + 1 )) MiB"
 				FS_SIZE=$(( $FS_SIZE * $BLOCK_SIZE * 2 )) # blocks => 512 byte sectors
 				break
@@ -264,35 +260,34 @@ Do you want to overwrite or backup the existing file to $PWD/$OUTPUT_IMG_NAME.$O
 
 		done
 
-		# Estimate minimum end sector
-		PART_START=$(sfdisk -qlo Device,Start $FP_SOURCE | grep "^$FP_ROOT_DEV" | mawk '{print $2}') # 512 byte sectors
-		PART_END_CURRENT=$(sfdisk -qlo Device,End $FP_SOURCE | grep "^$FP_ROOT_DEV" | mawk '{print $2}')
-		PART_END_TARGET=$(( $PART_START + $FS_SIZE ))
+		# Estimate minimum size
+		PART_START=$(sfdisk -qlo Device,Start "$FP_SOURCE" | grep -m1 "^$FP_ROOT_DEV" | mawk '{print $2}') # 512 byte sectors
+		PART_SIZE_CURRENT=$(sfdisk -qlo Device,Sectors "$FP_SOURCE" | grep -m1 "^$FP_ROOT_DEV" | mawk '{print $2}') # 512 byte sectors
 
 		# Only try to shrink partition when new end sector is less than current end sector
-		if (( $PART_END_CURRENT > $PART_END_TARGET )); then
+		if (( $PART_SIZE_CURRENT > $FS_SIZE )); then
 
 			G_DIETPI-NOTIFY 2 "Shrinking root partition to: $(( $FS_SIZE / 2048 + 1 )) MiB"
-			G_EXEC_OUTPUT=1 G_EXEC parted $FP_SOURCE unit s resizepart $ROOT_PARTITION_INDEX $PART_END_TARGET
-			G_EXEC partprobe $FP_SOURCE
-			G_EXEC partx -u $FP_SOURCE
+			G_EXEC_OUTPUT=1 G_EXEC eval "sfdisk --no-reread --no-tell-kernel -fN$ROOT_PARTITION_INDEX '$FP_SOURCE' <<< ',$FS_SIZE'"
+			G_EXEC partprobe "$FP_SOURCE"
+			G_EXEC partx -u "$FP_SOURCE"
 
 		fi
 
 		G_DIETPI-NOTIFY 2 'Overriding root partition free space with zeros to purge removed data and allow further archive size reduction...'
-		G_EXEC_OUTPUT=1 G_EXEC zerofree -v $FP_ROOT_DEV
+		G_EXEC_OUTPUT=1 G_EXEC zerofree -v "$FP_ROOT_DEV"
 		sync
 
 		# GPT images:
 		# - "GPT PMBR size mismatch (4458495 != 15523839)"
 		# - "Error: The backup GPT table is corrupt, but the primary appears OK, so that will be used."
 		# - gdisk will correct this
-		(( $GPT )) && G_EXEC_OUTPUT=1 G_EXEC sgdisk -g $FP_SOURCE
+		(( $GPT )) && G_EXEC_OUTPUT=1 G_EXEC sgdisk -g "$FP_SOURCE"
 
 		# Finished: Derive final image size from last partition end + failsafe buffer
-		G_EXEC partprobe $FP_SOURCE
-		G_EXEC partx -u $FP_SOURCE
-		IMAGE_SIZE=$(( ( $(sfdisk -qlo End $FP_SOURCE | tail -1) + 1 ) * 512 )) # 512 byte sectors => Byte
+		G_EXEC partprobe "$FP_SOURCE"
+		G_EXEC partx -u "$FP_SOURCE"
+		IMAGE_SIZE=$(( ( $(sfdisk -qlo End "$FP_SOURCE" | tail -1) + 1 ) * 512 )) # 512 byte sectors => Byte
 		IMAGE_SIZE=$(( $IMAGE_SIZE + ( 512 * 256 ) )) # 64 byte for secondary GPT + safety net
 
 		# Image file source
@@ -301,25 +296,25 @@ Do you want to overwrite or backup the existing file to $PWD/$OUTPUT_IMG_NAME.$O
 			# Clear loop
 			Delete_Loopback
 
-			G_DIETPI-NOTIFY 2 "Truncating final image file to actually used size: $(( $IMAGE_SIZE / 1024 / 1024 + 1 )) MiB"
+			G_DIETPI-NOTIFY 2 "Truncating final image file to actually used size: $(( $IMAGE_SIZE / 1024**2 + 1 )) MiB"
 			G_EXEC truncate --size=$IMAGE_SIZE "$FP_SOURCE_IMG"
 
 			# Rename, if source image != output image already
-			[[ $PWD/$OUTPUT_IMG_NAME.$OUTPUT_IMG_EXT != $FP_SOURCE_IMG ]] && mv "$FP_SOURCE_IMG" $OUTPUT_IMG_NAME.$OUTPUT_IMG_EXT
+			[[ $PWD/$OUTPUT_IMG_NAME.$OUTPUT_IMG_EXT != "$FP_SOURCE_IMG" ]] && mv "$FP_SOURCE_IMG" "$OUTPUT_IMG_NAME.$OUTPUT_IMG_EXT"
 
 			# Check if there is enough free disk space to store the 7z file
-			NEEDED_FREE_SPACE=$(( $IMAGE_SIZE / 100 * 15 / 1024 / 1024 ))
+			NEEDED_FREE_SPACE=$(( $IMAGE_SIZE * 15/100  / 1024**2 ))
 			G_CHECK_FREESPACE . $(( $NEEDED_FREE_SPACE + 100 )) || exit 1 # Assure +100 MiB left partition space
 
 		# Drive source, clone with dd
 		elif [[ $CLONING_TOOL == 'dd' ]]; then
 
 			# Check if there is enough free disk space to store the image and the 7z file
-			NEEDED_FREE_SPACE=$(( $IMAGE_SIZE / 100 * 115 / 1024 / 1024 ))
+			NEEDED_FREE_SPACE=$(( $IMAGE_SIZE * 115/100 / 1024**2 ))
 			G_CHECK_FREESPACE . $(( $NEEDED_FREE_SPACE + 100 )) || exit 1 # Assure +100 MiB left partition space
 
-			G_DIETPI-NOTIFY 2 "Creating final image with actually used size: $(( $IMAGE_SIZE / 1024 / 1024 + 1 )) MiB"
-			G_EXEC dd if=$FP_SOURCE of=$OUTPUT_IMG_NAME.$OUTPUT_IMG_EXT bs=1M status=progress count=$(( $IMAGE_SIZE / 1024 / 1024 + 1 ))
+			G_DIETPI-NOTIFY 2 "Creating final image with actually used size: $(( $IMAGE_SIZE / 1024**2 + 1 )) MiB"
+			G_EXEC dd if="$FP_SOURCE" of="$OUTPUT_IMG_NAME.$OUTPUT_IMG_EXT" bs=1M status=progress count=$(( $IMAGE_SIZE / 1024**2 + 1 ))
 
 		# Drive source, clone with Clonezilla
 		else
@@ -341,11 +336,11 @@ Do you want to overwrite or backup the existing file to $PWD/$OUTPUT_IMG_NAME.$O
 			CLONEZILLA_ZIP_SIZE=$(curl -sIL "$CLONEZILLA_ZIP_URL" | mawk '/^content-length:/{print $2}')
 
 			# Check if there is enough free disk space to store Clonezilla, the final image and the 7z file
-			NEEDED_FREE_SPACE=$(( ( $CLONEZILLA_ZIP_SIZE + $IMAGE_SIZE / 100 * 23 ) * 2 / 1024 / 1024 ))
+			NEEDED_FREE_SPACE=$(( ( $CLONEZILLA_ZIP_SIZE + $IMAGE_SIZE * 23/100 ) * 2 / 1024**2 ))
 			G_CHECK_FREESPACE . $(( $NEEDED_FREE_SPACE + 100 )) || exit 1 # Assure +100 MiB left partition space
 
 			# Download Clonezilla Live
-			if [[ ! -f $CLONEZILLA_ZIP || $(stat -c %s "$CLONEZILLA_ZIP") != $CLONEZILLA_ZIP_SIZE ]]; then
+			if [[ ! -f $CLONEZILLA_ZIP || $(stat -c %s "$CLONEZILLA_ZIP") != "$CLONEZILLA_ZIP_SIZE" ]]; then
 
 				G_DIETPI-NOTIFY 2 "Downloading Clonezilla Live v$CLONEZILLA_VERSION..."
 				G_EXEC wget "$CLONEZILLA_ZIP_URL" -O "$CLONEZILLA_ZIP"
@@ -361,16 +356,16 @@ Do you want to overwrite or backup the existing file to $PWD/$OUTPUT_IMG_NAME.$O
 
 				mkdir -p tmpiso/home/partimag
 				G_DIETPI-NOTIFY 2 'Cloning disk with Clonezilla...'
-				ocs-sr -or $PWD/tmpiso/home/partimag -nogui -fsck -q2 -c -j2 -z1p -i 4096 -senc -sc savedisk $OUTPUT_IMG_NAME ${FP_SOURCE##*/} || exit 1
+				ocs-sr -or "$PWD/tmpiso/home/partimag" -nogui -fsck -q2 -c -j2 -z1p -i 4096 -senc -sc savedisk "$OUTPUT_IMG_NAME" "${FP_SOURCE##*/}" || exit 1
 
 			fi
 
 			# For the sake of privacy, remove some non vital files that contain SNs and UUIDs
-			rm -f tmpiso/home/partimag/$OUTPUT_IMG_NAME/{Info*txt,*list,clonezilla-img}
+			rm -f "tmpiso/home/partimag/$OUTPUT_IMG_NAME/"{Info*txt,*list,clonezilla-img}
 
 			# Check image
 			G_DIETPI-NOTIFY 2 'Checking Clonezilla image...'
-			ocs-chkimg -or $PWD/tmpiso/home/partimag -nogui -b $OUTPUT_IMG_NAME || exit 1
+			ocs-chkimg -or "$PWD/tmpiso/home/partimag" -nogui -b "$OUTPUT_IMG_NAME" || exit 1
 
 			# Prepare custom files used by the installer when booting in UEFI mode
 			G_EXEC wget "$DIETPI_REPO"/.meta/images/dietpi-background_768p.png -O tmpiso/boot/grub/dietpibg.png
@@ -395,7 +390,7 @@ _EOF_
 			sed '/menuentry /,/}/d' tmpiso/boot/grub/clonezilla.cfg | sed '/submenu /,/}/d' | grep -v '^[ ]*$' > tmpiso/boot/grub/grub.cfg
 			sed -n  -e '/menuentry .*800x600/,/}/p' -e '/menuentry .*KMS/,/}/p' -e '/menuentry .*Safe/,/}/p' \
 				-e '/menuentry .*Failsafe/,/}/p' tmpiso/boot/grub/clonezilla.cfg >> tmpiso/boot/grub/grub.cfg
-			sed -i  -e 's|set timeout=.*|set timeout="-1"|' -e '/set pref=/ a set theme=$pref/theme.txt' \
+			sed -i  -e 's|set timeout=.*|set timeout="-1"|' -e '/set pref=/ a set theme=\$pref/theme.txt' \
 				-e 's|"Clonezilla live |"Install DietPi |' -e 's|locales= |locales=en_GB.UTF-8 |' \
 				-e 's|keyboard-layouts= |keyboard-layouts=gb |' -e 's|ocs-live-general|ocs-live-restore|' \
 				-e 's|ocs_live_extra_param=""|ocs_live_extra_param="-icds -k1 -r -e2 -j2 -batch -p poweroff restoredisk ask_user ask_user"|' \
@@ -415,8 +410,8 @@ _EOF_
 			sed -i 's|\(MENU TITLE\) .*|\1 Clonezilla live|' tmpiso/syslinux/clonezilla.cfg
 			sed '/^label /,/MENU END/d' tmpiso/syslinux/clonezilla.cfg | grep -v '^[ ]*$' > tmpiso/syslinux/syslinux.cfg
 			sed -i 's|^\(label Clonezilla live\)$|\1 800x600|' tmpiso/syslinux/clonezilla.cfg
-			sed -n  -e '/^label .*800x600/,/append initrd/p' tmpiso/syslinux/clonezilla.cfg >> tmpiso/syslinux/syslinux.cfg
 			cat << '_EOF_' >> tmpiso/syslinux/syslinux.cfg
+$(sed -n -e '/^label .*800x600/,/append initrd/p' tmpiso/syslinux/clonezilla.cfg)
   TEXT HELP
   VGA mode 800x600. OK for most of VGA cards.
   ENDTEXT
@@ -450,7 +445,7 @@ _EOF_
 				-A "clonezilla-live-${CLONEZILLA_VERSION}-amd64" \
 				-b syslinux/isolinux.bin -c syslinux/boot.cat -no-emul-boot -boot-load-size 4 \
 				-boot-info-table -eltorito-alt-boot --efi-boot boot/grub/efi.img -isohybrid-gpt-basdat \
-				-isohybrid-apm-hfsplus tmpiso > $OUTPUT_IMG_NAME.$OUTPUT_IMG_EXT || exit 1
+				-isohybrid-apm-hfsplus tmpiso > "$OUTPUT_IMG_NAME.$OUTPUT_IMG_EXT" || exit 1
 			rm -rf tmpiso
 		fi
 
@@ -459,9 +454,9 @@ _EOF_
 		cat << _EOF_ > hash.txt
 FILE:	$OUTPUT_IMG_NAME.$OUTPUT_IMG_EXT
 DATE:	$(date)
-MD5:	$(md5sum $OUTPUT_IMG_NAME.$OUTPUT_IMG_EXT | mawk '{print $1}')
-SHA1:	$(sha1sum $OUTPUT_IMG_NAME.$OUTPUT_IMG_EXT | mawk '{print $1}')
-SHA256:	$(sha256sum $OUTPUT_IMG_NAME.$OUTPUT_IMG_EXT | mawk '{print $1}')
+MD5:	$(md5sum "$OUTPUT_IMG_NAME.$OUTPUT_IMG_EXT" | mawk '{print $1}')
+SHA1:	$(sha1sum "$OUTPUT_IMG_NAME.$OUTPUT_IMG_EXT" | mawk '{print $1}')
+SHA256:	$(sha256sum "$OUTPUT_IMG_NAME.$OUTPUT_IMG_EXT" | mawk '{print $1}')
 _EOF_
 
 		# Download current README
@@ -471,8 +466,8 @@ _EOF_
 		# NB: LZMA2 ultra compression requires much memory for usage and allocation, which is an issue on 32bit (ARM) devices. Use "-mmt<N>" to limit used CPU threads to "<N>" and lower memory usage and allocation.
 		local limit_threads
 		(( $(free -m | mawk '/Mem:/{print $2}') < 1750 && $(nproc) > 2 )) && limit_threads='-mmt2'
-		[[ -f $OUTPUT_IMG_NAME.7z ]] && rm $OUTPUT_IMG_NAME.7z
-		G_EXEC_DESC='Creating final 7zip archive' G_EXEC_OUTPUT=1 G_EXEC 7zr a -m0=lzma2 $limit_threads -mx=9 $OUTPUT_IMG_NAME.7z $OUTPUT_IMG_NAME.$OUTPUT_IMG_EXT hash.txt README.md
+		[[ -f $OUTPUT_IMG_NAME.7z ]] && rm "$OUTPUT_IMG_NAME.7z"
+		G_EXEC_DESC='Creating final 7zip archive' G_EXEC_OUTPUT=1 G_EXEC 7zr a -m0=lzma2 $limit_threads -mx=9 "$OUTPUT_IMG_NAME.7z" "$OUTPUT_IMG_NAME.$OUTPUT_IMG_EXT" hash.txt README.md
 
 		rm hash.txt README.md
 		G_WHIP_MSG "[  OK  ] DietPi-Imager has successfully finished.\n
