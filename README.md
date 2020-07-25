@@ -7,17 +7,17 @@
 		<br><br>
 		optimised • simplified • for everyone
 		<br><br>
-		<a href="https://dietpi.com">find out more</a> • <a href="https://dietpi.com/#download">download image</a>
+		<a href="https://dietpi.com/">find out more</a> • <a href="https://dietpi.com/#download">download image</a>
 	</p>
 	<hr>
 	<p align="center">
-		Optional "ready to run" optimised software choices with <b>dietpi-software</b>.<br>
-		Feature rich configuration tool for your device with <b>dietpi-config</b>.
+		Optional "ready to run" optimised software choices with <b>dietpi-software</b>.
+		<br>Feature rich configuration tool for your device with <b>dietpi-config</b>.
 	</p>
 	<hr>
 	<p align="center">
-		<img src="https://www.myvirtualserver.com/images/myvirtualserver_logo.png" alt="myVirtualserver" width="200"><br>
-		DietPi's web hosting is powered by <a href="https://www.myvirtualserver.com">myVirtualserver</a>.
+		<img src="https://www.myvirtualserver.com/images/myvirtualserver_logo.png" alt="myVirtualserver" width="200">
+		<br>DietPi's web hosting is powered by <a href="https://www.myvirtualserver.com">myVirtualserver</a>.
 		<br><br>
 		A wide range of SBCs and VMs are supported. <a href="https://dietpi.com/#download">Click here</a> for the full list.
 		<br><br>
@@ -34,15 +34,11 @@ Use `dietpi-software` to quickly and easily install popular software that's "Rea
 
 ## The DietPi Project Team
 
-### Lead
+### Contributors
 
 #### Micha (MichaIng)
 
 Project lead of DietPi (20/02/2019 and onwards), source code contributor, bug fixes, software improvements, DietPi forum administrator.
-
----
-
-### Active Contributors
 
 #### Daniel Knight (Fourdee)
 
@@ -66,20 +62,32 @@ _Joined Q4 2019_
 
 DietPi forum moderator, support, testing, bug reports + investigation and valuable feedback.
 
+#### StephanStS
+
+_Joined Q4 2019_
+
+NanoPi image creator, tester and maintainer 
+
+#### Petru (fpetru)
+
+_Joined 2020-05-31_
+
+DietPi documentation author, SEO and DietPi visibility recommendations and valuable feedback.
+
 ---
 
 ### Collaborations
 
 #### DietPi + Amiberry
 
-_02/09/2016_
+_Since 2016-09-02_
 
 Joint venture to bring you the ultimate Amiga experience on your SBC, running lightweight and optimised DietPi at its core:
 https://github.com/MichaIng/DietPi/issues/474
 
 ---
 
-### Previous/Inactive Contributors
+### Hall of Fame
 
 #### K-Plan
 
@@ -119,12 +127,6 @@ Created the DietPi image for NanoPi M3/T3.
 
 ---
 
-### Honourable Mentions/Thanks
-
-A personal thanks to **Pilovali** for helping DietPi during our early days with desperately needed web hosting.
-
----
-
 ## Contributing
 
 Git coders, please use the active development branch: [dev](https://github.com/MichaIng/DietPi/tree/dev)
@@ -135,7 +137,7 @@ Are you able to:
 
 - Provide feedback and/or test areas of DietPi, to improve the user experience?
 - Report bugs?
-- Improve/add more features to the [DietPi website](https://dietpi.com)?
+- Improve/add more features to the [DietPi website](https://dietpi.com/)?
 - Compile software for our supported SBCs?
 - Contribute to DietPi with programming on GitHub?
 - Suggest new software that we can add to the `dietpi-software` install system?
@@ -144,7 +146,7 @@ If so, let us know!
 We are always looking for talented people who believe in the DietPi project, and, wish to contribute in any way you can.
 
 - Send me an Email: micha@dietpi.com
-- Join our forums: https://dietpi.com/phpbb
+- Join our forums: https://dietpi.com/phpbb/
 - GitHub: https://github.com/MichaIng/DietPi
 
 ### FeatHub
@@ -157,7 +159,7 @@ Vote for new suggestions, feature-, software- or image requests, or add your own
 
 DietPi Copyright (C) 2020 MichaIng
 - Email micha@dietpi.com
-- Web https://dietpi.com
+- Web https://dietpi.com/
 
 This program is free software: you can redistribute it and/or modify
 it under the terms of the GNU General Public License as published by
@@ -270,3 +272,4 @@ Links to hardware and software manufacturers, sources and build instructions use
 - [TasmoAdmin](https://github.com/reloxx13/TasmoAdmin)
 - [Domoticz](https://github.com/domoticz/domoticz)
 - [Firefox Sync Server](https://github.com/mozilla-services/syncserver)
+- [Jellyfin](https://github.com/jellyfin/jellyfin)
