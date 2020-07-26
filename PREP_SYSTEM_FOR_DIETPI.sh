@@ -46,7 +46,7 @@
 	# Work inside /tmp as usually tmpfs to reduce disk I/O and speed up download and unpacking
 	# - Save full script path, beforehand: https://github.com/MichaIng/DietPi/pull/2341#discussion_r241784962
 	FP_PREP_SCRIPT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/$(basename "${BASH_SOURCE[0]}")"
-	cd /tmp
+	cd /tmp || exit 1
 
 	# APT pre-configuration
 	# - Remove unwanted APT configs
@@ -286,8 +286,8 @@ _EOF_
 			for i in /etc/systemd/system/dietpi-*
 			do
 
-				[[ -f $i ]] && systemctl disable --now ${i##*/}
-				rm -Rfv $i
+				[[ -f $i ]] && systemctl disable --now "${i##*/}"
+				rm -Rfv "$i"
 
 			done
 
@@ -462,7 +462,7 @@ _EOF_
 				for i in "${G_WHIP_MENU_ARRAY[@]}"
 				do
 
-					[[ $HW_MODEL == $i ]] && break 2
+					[[ $HW_MODEL == "$i" ]] && break 2
 
 				done
 
@@ -574,7 +574,7 @@ _EOF_
 				for i in "${G_WHIP_MENU_ARRAY[@]}"
 				do
 
-					[[ $DISTRO_TARGET == $i ]] && break 2
+					[[ $DISTRO_TARGET == "$i" ]] && break 2
 
 				done
 
@@ -968,7 +968,7 @@ Currently installed: $G_DISTRO_NAME (ID: $G_DISTRO)"; then
 
 		G_DIETPI-NOTIFY 2 'Generating list of minimal packages, required for DietPi installation'
 
-		local packages=$(dpkg --get-selections ${aPACKAGES_REQUIRED_INSTALL[@]} 2> /dev/null | mawk '{print $1}')
+		local packages=$(dpkg --get-selections "${aPACKAGES_REQUIRED_INSTALL[@]}" 2> /dev/null | mawk '{print $1}')
 		[[ $packages ]] && G_EXEC_DESC='Marking required packages as manually installed' G_EXEC apt-mark manual $packages
 
 		# Purging additional packages, that (in some cases) do not get autoremoved:
@@ -1002,7 +1002,7 @@ Currently installed: $G_DISTRO_NAME (ID: $G_DISTRO)"; then
 
 		G_DIETPI-NOTIFY 2 'Installing core DietPi pre-req DEB packages'
 
-		G_AGI ${aPACKAGES_REQUIRED_INSTALL[@]}
+		G_AGI "${aPACKAGES_REQUIRED_INSTALL[@]}"
 		unset aPACKAGES_REQUIRED_INSTALL
 
 		G_AGA
@@ -1086,7 +1086,7 @@ Currently installed: $G_DISTRO_NAME (ID: $G_DISTRO)"; then
 
 		)
 
-		for i in ${aservices[@]}
+		for i in "${aservices[@]}"
 		do
 
 			# Loop through known service locations
@@ -1094,14 +1094,14 @@ Currently installed: $G_DISTRO_NAME (ID: $G_DISTRO)"; then
 			do
 
 				[[ -e $j ]] || continue
-				[[ -f $j ]] && systemctl disable --now ${j##*/}
+				[[ -f $j ]] && systemctl disable --now "${j##*/}"
 				# Remove if not attached to any DEB package, else mask
-				if dpkg -S $j &> /dev/null; then
+				if dpkg -S "$j" &> /dev/null; then
 
 					systemctl mask ${j##*/}
 
 				else
-					rm -vR $j
+					rm -Rv "$j"
 
 				fi
 
@@ -1109,7 +1109,7 @@ Currently installed: $G_DISTRO_NAME (ID: $G_DISTRO)"; then
 
 		done
 
-		# - Remove obsolete sysvinit service entries
+		# - Remove obsolete SysV service entries
 		aservices=(
 
 			fake-hwclock
@@ -1127,10 +1127,10 @@ Currently installed: $G_DISTRO_NAME (ID: $G_DISTRO)"; then
 
 		)
 
-		for i in ${aservices[@]}
+		for i in "${aservices[@]}"
 		do
 
-			G_EXEC update-rc.d -f $i remove
+			G_EXEC update-rc.d -f "$i" remove
 
 		done
 
@@ -1205,7 +1205,7 @@ _EOF_
 
 		#-----------------------------------------------------------------------------------
 		# Boot Logo
-		[[ -f '/boot/boot.bmp' ]] && G_EXEC wget https://github.com/$G_GITOWNER/DietPi/raw/$G_GITBRANCH/.meta/images/dietpi-logo_boot.bmp -O /boot/boot.bmp
+		[[ -f '/boot/boot.bmp' ]] && G_EXEC curl -sSfL "https://github.com/$G_GITOWNER/DietPi/raw/$G_GITBRANCH/.meta/images/dietpi-logo_boot.bmp" -o /boot/boot.bmp
 
 		#-----------------------------------------------------------------------------------
 		# Bash Profiles
@@ -1230,7 +1230,7 @@ _EOF_
 		#-----------------------------------------------------------------------------------
 		# UID bit for sudo: https://github.com/MichaIng/DietPi/issues/794
 		G_DIETPI-NOTIFY 2 'Setting sudo UID bit'
-		chmod 4755 $(command -v sudo)
+		chmod 4755 "$(command -v sudo)"
 
 		#-----------------------------------------------------------------------------------
 		# Dirs
@@ -1252,9 +1252,9 @@ _EOF_
 
 		#-----------------------------------------------------------------------------------
 		# Install vmtouch to lock DietPi scripts and config in file system cache
-		G_EXEC wget https://dietpi.com/downloads/binaries/$G_DISTRO_NAME/vmtouch_$G_HW_ARCH_NAME.deb
-		G_EXEC dpkg --force-hold,confnew -i vmtouch_$G_HW_ARCH_NAME.deb
-		rm vmtouch_$G_HW_ARCH_NAME.deb
+		G_EXEC curl -sSfLO "https://dietpi.com/downloads/binaries/$G_DISTRO_NAME/vmtouch_$G_HW_ARCH_NAME.deb"
+		G_EXEC dpkg --force-hold,confnew -i "vmtouch_$G_HW_ARCH_NAME.deb"
+		rm -v "vmtouch_$G_HW_ARCH_NAME.deb"
 
 		#-----------------------------------------------------------------------------------
 		# Cron jobs
@@ -1353,8 +1353,8 @@ _EOF_'
 		G_EXEC_DESC='Generating /etc/fstab' G_EXEC /boot/dietpi/dietpi-drive_manager 4
 
 		# Create and navigate to "/tmp/$G_PROGRAM_NAME" working directory, now assured to be tmpfs
-		mkdir -p /tmp/$G_PROGRAM_NAME
-		cd /tmp/$G_PROGRAM_NAME
+		G_EXEC mkdir -p /tmp/$G_PROGRAM_NAME
+		G_EXEC cd /tmp/$G_PROGRAM_NAME
 
 		local info_use_drive_manager='Can be installed and setup by DietPi-Drive_Manager.\nSimply run "dietpi-drive_manager" and select "Add network drive".'
 		echo -e "Samba client: $info_use_drive_manager" > /mnt/samba/readme.txt
@@ -1512,10 +1512,10 @@ _EOF_
 			# Since Debian Bullseye, spindown_time is not applied if APM is not supported by the drive. force_spindown_time is required to override that.
 			local spindown='spindown_time'
 			(( $G_DISTRO > 5 )) && spindown='force_spindown_time'
-			G_EXEC eval 'cat << _EOF_ > /etc/hdparm.conf
+			G_EXEC eval "cat << _EOF_ > /etc/hdparm.conf
 apm = 127
 $spindown = 120
-_EOF_'
+_EOF_"
 			unset spindown
 
 		fi
@@ -1634,7 +1634,7 @@ _EOF_
 
 				[[ -d $i ]] || continue
 				i=${i##*/}
-				/etc/kernel/postinst.d/dietpi-USBridgeSig $i
+				/etc/kernel/postinst.d/dietpi-USBridgeSig "$i"
 
 			done
 
@@ -1813,7 +1813,7 @@ _EOF_
 
 		G_DIETPI-NOTIFY 2 'Clearing items below tmpfs mount points'
 		G_EXEC mkdir -p /mnt/tmp_root
-		G_EXEC mount $(findmnt -no source /) /mnt/tmp_root
+		G_EXEC mount "$(findmnt -no SOURCE /)" /mnt/tmp_root
 		rm -vRf /mnt/tmp_root/{dev,proc,run,sys,tmp,var/log}/{,.??,.[^.]}*
 		G_EXEC umount /mnt/tmp_root
 		G_EXEC rmdir /mnt/tmp_root
@@ -1822,7 +1822,7 @@ _EOF_
 		rm -Rfv /{root,home/*}/.{bash_history,nano_history,wget-hsts,cache,local,config,gnupg,viminfo,dbus,gconf,nano,vim}
 
 		# Remove PREP script
-		[[ -f $FP_PREP_SCRIPT ]] && rm -v $FP_PREP_SCRIPT
+		[[ -f $FP_PREP_SCRIPT ]] && rm -v "$FP_PREP_SCRIPT"
 
 		sync
 
