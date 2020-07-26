@@ -1098,7 +1098,7 @@ Currently installed: $G_DISTRO_NAME (ID: $G_DISTRO)"; then
 				# Remove if not attached to any DEB package, else mask
 				if dpkg -S "$j" &> /dev/null; then
 
-					systemctl mask ${j##*/}
+					systemctl mask "${j##*/}"
 
 				else
 					rm -Rv "$j"
