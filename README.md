@@ -7,30 +7,27 @@
 		<br><br>
 		optimised • simplified • for everyone
 		<br><br>
-		<a href="https://dietpi.com/">find out more</a> • <a href="https://dietpi.com/#download">download image</a>
+		<a href="https://dietpi.com/">Homepage</a> • <a href="https://dietpi.com/docs/">Documentation</a> • <a href="https://dietpi.com/#download">View all supported platforms</a>
 	</p>
 	<hr>
 	<p align="center">
-		Optional "ready to run" optimised software choices with <b>dietpi-software</b>.
-		<br>Feature rich configuration tool for your device with <b>dietpi-config</b>.
+		<strong>Ready to run</strong> optimised software choices with <a href="https://dietpi.com/dietpi-software.html"><strong>dietpi-software</strong></a>
+		<br>Feature rich configuration tool for your device with <strong>dietpi-config</strong>.
 	</p>
 	<hr>
-	<p align="center">
-		<img src="https://www.myvirtualserver.com/images/myvirtualserver_logo.png" alt="myVirtualserver" width="200">
-		<br>DietPi's web hosting is powered by <a href="https://www.myvirtualserver.com">myVirtualserver</a>.
-		<br><br>
-		A wide range of SBCs and VMs are supported. <a href="https://dietpi.com/#download">Click here</a> for the full list.
-		<br><br>
-	</p>
 </html>
 
 ## Introduction
 
-DietPi is an extremely lightweight Debian-based OS. With images starting at 400MB, that's 3x lighter than "Raspbian Lite". It is highly optimized for minimal CPU and RAM resource usage, ensuring your SBC always runs at its maximum potential. The programs use lightweight Whiptail menus. You'll spend less time staring at the command line, and more time enjoying DietPi.
+DietPi is an extremely lightweight Debian-based OS. It is highly optimised for minimal CPU and RAM resource usage, ensuring your SBC always runs at its maximum potential. 
 
-Use `dietpi-software` to quickly and easily install popular software that's "Ready to run" and optimised for your system. Only the software you need is installed. Use `dietpi-services` to control which installed software has higher or lower priority levels (nice, affinity, policy scheduler).
+The **dietpi programs** use lightweight whiptail menus. You'll spend more time enjoying DietPi and applications you need and less time staring at the command line.
 
-`dietpi-update` automatically checks for updates and informs you when they are available. Update instantly, without having to write a new image. `dietpi-automation` Allows you to completely automate a DietPi installation with no user input, simply by configuring "dietpi.txt" before powering on.
+Use `dietpi-software` to quick and easy install **Ready to Run** & **Optimised** applications for your system. DietPi will do all the necessary configurations, including starting the services. Few highlights: [Desktop Environments](https://dietpi.com/docs/user-optimised-software/#desktops), [Remote Desktop access](https://dietpi.com/docs/user-optimised-software/#remote-desktop-access), [Media systems and Media Players](https://dietpi.com/docs/user-optimised-software/#media-systems), [Torrents and Downloading](https://dietpi.com/docs/user-optimised-software/#bittorrent-download-tools), [Cloud and Backup](https://dietpi.com/docs/user-optimised-software/#cloud-backups), [Gaming](https://dietpi.com/docs/user-optimised-software/#emulation-gaming), [Social & Search](https://dietpi.com/docs/user-optimised-software/#social-search), [Camera and Surveillance](https://dietpi.com/docs/user-optimised-software/#camera-surveillance), [WiFi Hotspot](https://dietpi.com/docs/user-optimised-software/#wifi-hotspot), [System Stats & Management](https://dietpi.com/docs/user-optimised-software/#system-stats-management), [Home automation](https://dietpi.com/docs/user-optimised-software/#home-automation), [Hardware & Voice Projects](https://dietpi.com/docs/user-optimised-software/#hardware-projects), [Webserver Stacks](https://dietpi.com/docs/user-optimised-software/#webserver-stacks), [DNS server / PiHole](https://dietpi.com/docs/user-optimised-software/#dns-servers), [File Servers](https://dietpi.com/docs/user-optimised-software/#file-servers), [Cloud printing and Print 3D](https://dietpi.com/docs/user-optimised-software/#printing) and much more.
+
+Use `dietpi-services` to control which installed software has higher or lower priority levels (nice, affinity, policy scheduler).
+
+`dietpi-update` automatically checks for updates and informs you when they are available. Update instantly, without having to write a new image. **DietPi automation** allows you to completely automate a DietPi installation with no user input, simply by configuring `dietpi.txt` before powering on.
 
 ## The DietPi Project Team
 
@@ -111,7 +108,7 @@ Contributions to the DietPi in general, including source code, testing, new devi
 
 _Joined 2015-10-10_
 
-Provided DietPi.com web hosting for 1 year until April 17th 2016. Additionally: forum moderator, testing, bug reporting.
+Provided dietpi.com web hosting for 1 year until April 17th 2016. Additionally: forum moderator, testing, bug reporting.
 
 #### xenfomation
 
@@ -204,7 +201,7 @@ Links to hardware and software manufacturers, sources and build instructions use
 - [Debian distribution](https://salsa.debian.org/)
 - [Raspberry](https://github.com/raspberrypi) [Pi](https://github.com/RPi-Distro)
 - [Hardkernel](https://github.com/hardkernel?tab=repositories)
-- [Meverics Odroid repository](https://forum.odroid.com/viewtopic.php?f=52&t=5908)
+- [Meveric's Odroid repository](https://forum.odroid.com/viewtopic.php?f=52&t=5908)
 - [Sparky](https://github.com/sparkysbc?tab=repositories) [SBC](https://github.com/sparky-sbc/sparky-test)
 - [PINE64](https://www.pine64.org/)
 - [FriendlyARM](https://github.com/friendlyarm?tab=repositories)
@@ -273,3 +270,12 @@ Links to hardware and software manufacturers, sources and build instructions use
 - [Domoticz](https://github.com/domoticz/domoticz)
 - [Firefox Sync Server](https://github.com/mozilla-services/syncserver)
 - [Jellyfin](https://github.com/jellyfin/jellyfin)
+
+---
+
+<html>
+	<p align="center">
+		<img src="https://www.myvirtualserver.com/images/myvirtualserver_logo.png" alt="myVirtualserver" width="200">
+		<br>DietPi's web hosting is powered by <a href="https://www.myvirtualserver.com">myVirtualserver</a>.
+	</p>
+</html>
