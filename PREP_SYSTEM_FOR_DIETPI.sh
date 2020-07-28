@@ -61,17 +61,20 @@
 	#	Conflicting configs
 	rm -fv /etc/apt/apt.conf.d/*{recommends,armbian}*
 	# - Apply wanted APT configs: Overwritten by DietPi code archive
-	cat << _EOF_ > /etc/apt/apt.conf.d/97dietpi
-# Disable automatic recommends/suggests install and allow them to be autoremoved
+	cat << _EOF_ > /etc/apt/apt.conf.d/97dietpi # https://raw.githubusercontent.com/MichaIng/DietPi/dev/rootfs/etc/apt/apt.conf.d/97dietpi
 APT::Install-Recommends "false";
 APT::Install-Suggests "false";
 APT::AutoRemove::RecommendsImportant "false";
 APT::AutoRemove::SuggestsImportant "false";
-# Disable package state translation downloads
 Acquire::Languages "none";
+Dir::Cache::srcpkgcache "";
+Acquire::GzipIndexes "true";
+Acquire::IndexTargets::deb::Packages::KeepCompressedAs "xz";
+Acquire::IndexTargets::deb::Translations::KeepCompressedAs "xz";
+Acquire::IndexTargets::deb-src::Sources::KeepCompressedAs "xz";
 _EOF_
 	# - Forcing new DEB package config files (during PREP only)
-	echo 'DPkg::options {"--force-confmiss,confnew";};' > /etc/apt/apt.conf.d/98dietpi-forceconf
+	echo 'DPkg::options:: "--force-confmiss,confnew";' > /etc/apt/apt.conf.d/98dietpi-forceconf
 	# - Prefer IPv4 by default to avoid hanging access attempts in some cases
 	#	NB: This needs to match the method in: /DietPi/dietpi/func/dietpi-set_hardware preferipv4 enable
 	echo 'Acquire::ForceIPv4 "true";' > /etc/apt/apt.conf.d/99-dietpi-force-ipv4
