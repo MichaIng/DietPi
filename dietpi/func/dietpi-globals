@@ -186,59 +186,44 @@ $(ps f -eo pid,user,tty,cmd | grep -i '[d]ietpi')"; then
 
 	# DietPi-Notify
 	# $1:
-	#	-2=process animation
-	#	- $2 = text
-	#	-1=autodetect_fail_ok
-	#	- $2 = EXIT_CODE
-	#	0=OK
-	#	- $2 = text
-	#	1=failed
-	#	- $2 = text
-	#	2=info
-	#	- $2 = text
-	#	3=DietPi banner style
-	#	- $2 = txt program name
-	#	- $3 = txt mode, prefixed with "${G_NOTIFY_3_MODE}: ", defaults to "Mode: "
+	#	-2 = Processing
+	#		$2+ = message
+	#	-1 = Autodetect ok or failed
+	#		$2 = exit code
+	#		$3+ = message
+	#	0 = Ok
+	#		$2+ = message
+	#	1 = Failed
+	#		$2+ = message
+	#	2 = Info
+	#		$2+ = message
+	#	3 = Header
+	#		$2 = program name
+	#		$3+ = message, prefixed with "${G_NOTIFY_3_MODE}: ", defaults to "Mode: "
 	G_DIETPI-NOTIFY(){
 
-		local ainput_string=("$@")
-		local output_string
-		local bracket_l='\e[0m\e[90m[\e[0m'
-		local bracket_r='\e[0m\e[90m]\e[0m'
+		local ainput_string=("$@") output_string grey green red reset yellow dietpi_green
+		# If this is a terminal, it understands ANSI escape sequences, so use colour, always start left-aligned with colour reset and clean from cursor until end of screen.
+		# - Assume if STDIN is a terminal that STDOUT is one as well, e.g. covered by "tee"
+		if [[ -t 0 || -t 1 ]]; then
 
-		# Funcs
-		Clean_Process_Animation(){
-
-			if [[ -t 0 && -w '/tmp/dietpi-process.pid' ]]; then
+			output_string='\e[0m\r\e[J' grey='\e[90m' green='\e[32m' red='\e[31m' reset='\e[0m' yellow='\e[33m' dietpi_green='\e[38;5;154m'
+			# Kill existing process animation if this is not a processing message.
+			if [[ $1 != '-2' && -w '/tmp/dietpi-process.pid' ]]; then
 
 				kill -9 $(</tmp/dietpi-process.pid) &> /dev/null
 				rm -f /tmp/dietpi-process.pid &> /dev/null
 
 			fi
-			# To cover multiline output, clean from cursor (animation position) until end of screen.
-			output_string='\r\e[J'
 
-		}
+		fi
+		local bracket_l="${grey}[${reset}" bracket_r="${grey}]${reset}"
+		local ok="$bracket_l  ${green}OK  $bracket_r " failed="$bracket_l${red}FAILED$bracket_r "
 
-		Status_Ok(){
+		# Print input array from index $1
+		Print(){
 
-			Clean_Process_Animation
-			output_string+="$bracket_l\e[32m  OK  $bracket_r "
-
-		}
-
-		Status_Failed(){
-
-			Clean_Process_Animation
-			output_string+="$bracket_l\e[31mFAILED$bracket_r "
-
-		}
-
-		# Print all input string on same line
-		# - $1 = start printing from word number $1
-		Print_Output_String(){
-
-			[[ $1 == 1 && $G_PROGRAM_NAME ]] && output_string+="\e[90m$G_PROGRAM_NAME | \e[0m"
+			[[ $1 == 1 && $G_PROGRAM_NAME ]] && output_string+="${grey}$G_PROGRAM_NAME |${reset} "
 			local i
 			for ((i=$1; i<${#ainput_string[@]}; i++))
 			do
@@ -246,152 +231,172 @@ $(ps f -eo pid,user,tty,cmd | grep -i '[d]ietpi')"; then
 				output_string+=${ainput_string[$i]}
 
 			done
-			echo -ne "$output_string\e[0m"
+			echo -ne "$output_string${reset}"
 
 		}
 
 		#--------------------------------------------------------------------------------------
 		# Main Loop
 		#--------------------------------------------------------------------------------------
-		# Exit code, print OK or Failed
+		# Autodetect ok or failed
 		# $2 = exit code
-		# - Use this at end of DietPi scripts, EG: G_DIETPI-NOTIFY -1 ${EXIT_CODE:=0}
+		# $3+ = message
+		# - Use this at end of DietPi scripts, e.g. G_DIETPI-NOTIFY -1 ${EXIT_CODE:=0}
 		if (( $1 == -1 )); then
 
 			if (( ! $2 )); then
 
-				Status_Ok
+				output_string+=$ok
 				ainput_string+=(' Completed\n')
 
 			else
 
-				Status_Failed
+				output_string+=$failed
 				ainput_string+=(' An issue has occurred\n')
 
 			fi
-			Print_Output_String 2
+			Print 2
 
 		#--------------------------------------------------------------------------------------
-		# Status Processing
-		# $@ = txt desc
+		# Processing
+		# $3+ = message
+		# NB: Do not use this with newlines, literally or "\n", as this would cause parts of the processing message not being overwritten as intended.
 		elif (( $1 == -2 )); then
 
-			output_string="\r\e[J$bracket_l\e[33m .... $bracket_r "
-			Print_Output_String 1
+			# If this is a terminal, it understands control codes, so make any next output overwriting the processing message.
+			if [[ -t 0 || -t 1 ]]; then
 
-			if [[ -t 0 ]]; then
-
-				Print_Process_Animation(){
-
-					local bright_dot='\e[1;33m.'
-					local dimmed_dot='\e[0;33m.'
-					# Alternative: \u23F9
-					local aprocess_string=(
-						"$bright_dot     "
-						"$dimmed_dot$bright_dot    "
-						" $dimmed_dot$bright_dot   "
-						"  $dimmed_dot$bright_dot  "
-						"   $dimmed_dot$bright_dot "
-						"    $dimmed_dot$bright_dot"
-						"     $bright_dot"
-						"    $bright_dot$dimmed_dot"
-						"   $bright_dot$dimmed_dot "
-						"  $bright_dot$dimmed_dot  "
-						" $bright_dot$dimmed_dot   "
-						"$bright_dot$dimmed_dot    "
-					)
-
-					local i
-					for (( i=0; i<=${#aprocess_string[@]}; i++ )); do
-
-						(( i == ${#aprocess_string[@]} )) && i=0
-						[[ -w '/tmp/dietpi-process.pid' ]] && echo -ne "\r$bracket_l${aprocess_string[$i]}$bracket_r " || return
-						sleep 0.15
-
-					done
-
-				}
-
-				# Calculate the amount of output lines and in case move cursor up for correct animation and to allow cleaning the whole output.
+				# Calculate the amount of output lines and in case move cursor up for correct animation position and to allow overwriting the whole output.
 				local input_string=$(mawk '{gsub("\\\e[[0-9][;0-9]*m","");print}' <<< "${G_PROGRAM_NAME:+$G_PROGRAM_NAME | }$*") # Remove colour codes
 				local screen_width=$(stty size)
 				local output_lines=$(( ( ${#input_string} + 5 ) / ${screen_width#* } )) # +5 = [ .... ] - $1
-				(( $output_lines )) && echo -ne "\e[${output_lines}A"
+				(( $output_lines )) && ainput_string+=("\e[${output_lines}A")
+				# If we do not print the animation, move the cursor left as well to allow overwriting the whole first line.
+				[[ -t 0 ]] || ainput_string+=('\r')
+
+			# Else, we add a newline to leave processing message complete.
+			else
+
+				ainput_string+=('\n')
+
+			fi
+
+			# Print animation only if this is the terminal control process as otherwise foreign output might cause a mess and we might be not able to kill the animation.
+			if [[ -t 0 ]]; then
+
+				output_string+="$bracket_l      $bracket_r "
+				Print 1
+
 				# If redirect to existent PID file fails due to noclobber, don't start processing animation.
 				# - This method prevents a tiny condition race from checking file existance until creating it, when doing: [[ ! -e file ]] && > file
 				set -C
 				if { > /tmp/dietpi-process.pid; } &> /dev/null; then
 
 					set +C
-					{ Print_Process_Animation & echo $! > /tmp/dietpi-process.pid; disown; } 2> /dev/null
+					Start_Process_Animation(){
+
+						local bright_dot='\e[1;33m.'
+						local dimmed_dot='\e[0;33m.'
+						# Alternative: \u23F9
+						local aprocess_string=(
+							"$bright_dot     "
+							"$dimmed_dot$bright_dot    "
+							" $dimmed_dot$bright_dot   "
+							"  $dimmed_dot$bright_dot  "
+							"   $dimmed_dot$bright_dot "
+							"    $dimmed_dot$bright_dot"
+							"     $bright_dot"
+							"    $bright_dot$dimmed_dot"
+							"   $bright_dot$dimmed_dot "
+							"  $bright_dot$dimmed_dot  "
+							" $bright_dot$dimmed_dot   "
+							"$bright_dot$dimmed_dot    "
+						)
+
+						local i
+						for (( i=0; i<=${#aprocess_string[@]}; i++ )); do
+
+							(( i == ${#aprocess_string[@]} )) && i=0
+							[[ -w '/tmp/dietpi-process.pid' ]] && echo -ne "\e[2G${aprocess_string[$i]}${reset}\e[C" || return
+							sleep 0.15
+
+						done
+
+					}
+					{ Start_Process_Animation & echo $! > /tmp/dietpi-process.pid; disown; } 2> /dev/null
+					unset -f Start_Process_Animation
 
 				else
 
 					set +C
 
 				fi
+			else
 
-				unset -f Print_Process_Animation
+				output_string+="$bracket_l ${yellow}.... $bracket_r "
+				Print 1
 
 			fi
 
-		# Status Ok
-		# $@ = txt desc
+		#--------------------------------------------------------------------------------------
+		# Ok
+		# $2+ = message
 		elif (( $1 == 0 )); then
 
-			Status_Ok
+			output_string+=$ok
 			ainput_string+=('\n')
-			Print_Output_String 1
+			Print 1
 
-		# Status failed
-		# $@ = txt desc
+		#--------------------------------------------------------------------------------------
+		# Failed
+		# $2+ = message
 		elif (( $1 == 1 )); then
 
-			Status_Failed
+			output_string+=$failed
 			ainput_string+=('\n')
-			Print_Output_String 1
+			Print 1
 
-		# Status Info
-		# $@ = txt desc
+		#--------------------------------------------------------------------------------------
+		# Info
+		# $2+ = message
 		elif (( $1 == 2 )); then
 
-			Clean_Process_Animation
 			output_string+="$bracket_l INFO $bracket_r "
 			# Keep info messages in gray, even if "$G_PROGRAM_NAME | \e[0m" is added:
-			ainput_string[1]="\e[90m${ainput_string[1]}"
+			ainput_string[1]="${grey}${ainput_string[1]}"
 			ainput_string+=('\n')
-			Print_Output_String 1
+			Print 1
 
-		# DietPi banner style
-		# $2 = txt program name
-		# $3 = txt mode
+		#--------------------------------------------------------------------------------------
+		# Header
+		# $2 = program name
+		# $3+ = message, prefixed with "${G_NOTIFY_3_MODE}: ", defaults to "Mode: "
 		elif (( $1 == 3 )); then
 
-			Clean_Process_Animation
 			if disable_error=1 G_CHECK_VALIDINT "$HIERARCHY" 1; then
 
 				local status_subfunction="$HIERARCHY "
 				# > 9 should never occur, however, if it is, lets make it line up regardless
 				(( $HIERARCHY > 9 )) && status_subfunction=$HIERARCHY
 
-				output_string+="$bracket_l\e[33m SUB$status_subfunction$bracket_r $2 > "
+				output_string+="$bracket_l ${yellow}SUB$status_subfunction$bracket_r $2 > "
 				ainput_string+=('\n')
 
 			else
 
 				output_string+="
- \e[38;5;154m$2\e[0m
-\e[90m─────────────────────────────────────────────────────
- ${G_NOTIFY_3_MODE:-Mode}: \e[0m"
+ ${dietpi_green}$2${reset}
+${grey}─────────────────────────────────────────────────────
+ ${G_NOTIFY_3_MODE:-Mode}:${reset} "
 				ainput_string+=('\n\n')
 
 			fi
-			Print_Output_String 2
+			Print 2
 
 		fi
 		#-----------------------------------------------------------------------------------
 		# Unset internal functions, otherwise they are accessible from terminal
-		unset -f Clean_Process_Animation Status_Ok Status_Failed Print_Output_String
+		unset -f Print
 		#-----------------------------------------------------------------------------------
 
 	}
