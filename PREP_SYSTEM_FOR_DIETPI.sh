@@ -1429,7 +1429,6 @@ right_meter_modes=1 1 2 2 2
 _EOF_'
 
 		G_DIETPI-NOTIFY 2 'Configuring fake-hwclock:'
-		systemctl stop fake-hwclock
 		# Allow times in the past
 		G_CONFIG_INJECT 'FORCE=' 'FORCE=force' /etc/default/fake-hwclock
 		systemctl restart fake-hwclock # Failsafe, apply now if date is way far back...
@@ -1455,21 +1454,25 @@ _EOF_'
 		fi
 
 		G_DIETPI-NOTIFY 2 'Reducing getty count and resource usage:'
-		systemctl mask getty-static
+		systemctl mask --now getty-static
 		# - logind features disabled by default. Usually not needed and all features besides auto getty creation are not available without libpam-systemd package.
-		#	- It will be unmasked/enabled, automatically if libpam-systemd got installed during dietpi-software install, usually with desktops.
-		systemctl disable --now systemd-logind 2> /dev/null
-		systemctl mask systemd-logind
+		#	- It will be unmasked, automatically if libpam-systemd got installed during dietpi-software install, usually with desktops.
+		systemctl mask --now systemd-logind
 
-		G_DIETPI-NOTIFY 2 'Configuring regional settings (TZdata):'
+		#G_DIETPI-NOTIFY 2 'Configuring locales:' # Runs at start of script
+
+		G_DIETPI-NOTIFY 2 'Configuring time zone:'
 		rm -fv /etc/{localtime,timezone}
 		ln -sv /usr/share/zoneinfo/UTC /etc/localtime
 		G_EXEC dpkg-reconfigure -f noninteractive tzdata
 
-		G_DIETPI-NOTIFY 2 'Configuring regional settings (Keyboard):'
+		G_DIETPI-NOTIFY 2 'Configuring keyboard:'
 		dpkg-reconfigure -f noninteractive keyboard-configuration # Keyboard must be plugged in for this to work!
 
-		#G_DIETPI-NOTIFY 2 "Configuring regional settings (Locale):" # Runs at start of script
+		G_DIETPI-NOTIFY 2 'Configuring console:' # This can be wrong, e.g. when selecting a non-UTF-8 locale during Debian installer
+		G_CONFIG_INJECT 'CHARMAP=' 'CHARMAP="UTF-8"' /etc/default/console-setup
+		G_EXEC eval "debconf-set-selections <<< 'console-setup console-setup/charmap47 select UTF-8'"
+		G_EXEC setupcon --save
 
 		# G_HW_ARCH specific
 		G_DIETPI-NOTIFY 2 'Applying G_HW_ARCH specific tweaks:'
@@ -1489,6 +1492,9 @@ _EOF_
 
 			# Apply usb-storage quirks to disable UAS for unsupported drives (Seagate ST5000LM000-2AN170): https://github.com/MichaIng/DietPi/issues/2905
 			echo 'options usb-storage quirks=0bc2:ab30:u' > /etc/modprobe.d/dietpi-usb-storage_quirks.conf
+
+			# Fix grub install device: https://github.com/MichaIng/DietPi/issues/3700
+			dpkg-query -s grub-pc &> /dev/null && G_EXEC eval "debconf-set-selections <<< 'grub-pc grub-pc/install_devices multiselect /dev/sda'"
 
 			# Update initramfs with above changes
 			if command -v update-tirfs &> /dev/null; then
