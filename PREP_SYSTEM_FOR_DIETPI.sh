@@ -43,8 +43,11 @@
 	# Set $PATH variable to include all expected default binary locations, since we don't know the current system setup: https://github.com/MichaIng/DietPi/issues/3206
 	export PATH='/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin'
 
-	# Work inside /tmp as usually tmpfs to reduce disk I/O and speed up download and unpacking
-	# - Save full script path, beforehand: https://github.com/MichaIng/DietPi/pull/2341#discussion_r241784962
+	# Make /tmp a tmpfs if it is not yet a dedicated mount
+	findmnt /tmp > /dev/null || mount -t tmpfs none /tmp
+
+	# Work inside /tmp tmpfs to reduce disk I/O and speed up download and unpacking
+	# - Save full script path beforehand: https://github.com/MichaIng/DietPi/pull/2341#discussion_r241784962
 	FP_PREP_SCRIPT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/$(basename "${BASH_SOURCE[0]}")"
 	cd /tmp || exit 1
 
