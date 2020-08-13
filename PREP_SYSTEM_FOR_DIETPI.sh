@@ -427,6 +427,7 @@ _EOF_
 			'59' ': ZeroPi'
 			'60' ': NanoPi NEO'
 			'65' ': NanoPi NEO2'
+			'56' ': NanoPi NEO3'
 			'57' ': NanoPi NEO Plus2'
 			'64' ': NanoPi NEO Air'
 			'63' ': NanoPi M1/T1'
