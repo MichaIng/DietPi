@@ -696,7 +696,7 @@ Currently installed: $G_DISTRO_NAME (ID: $G_DISTRO)"; then
 		G_DISTRO=$DISTRO_TARGET G_DISTRO_NAME=$DISTRO_TARGET_NAME G_HW_MODEL=$G_HW_MODEL G_RASPBIAN=$G_RASPBIAN G_EXEC /boot/dietpi/func/dietpi-set_software apt-mirror default
 
 		# Meveric, update repo to use our EU mirror: https://github.com/MichaIng/DietPi/issues/1519#issuecomment-368234302
-		sed -Ei 's@https?://oph\.mdrjr\.net@http://fuzon.co.uk@' /etc/apt/sources.list.d/meveric* &> /dev/null
+		sed -Ei 's|https?://oph\.mdrjr\.net|https://dietpi.com|' /etc/apt/sources.list.d/meveric*.list &> /dev/null
 
 		# (Re)create DietPi runtime and logs dir, used by G_AGx
 		G_EXEC mkdir -p /run/dietpi /var/tmp/dietpi/logs
