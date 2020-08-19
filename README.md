@@ -7,7 +7,7 @@
 		<br><br>
 		optimised • simplified • for everyone
 		<br><br>
-		<a href="https://dietpi.com">find out more</a> • <a href="https://dietpi.com/#download">download image</a>
+		<a href="https://dietpi.com">find out more</a> • <a href="https://dietpi.com/#download">download image</a> • <a href="https://dietpi.com/docs/">Visit our new documentation website</a>
 	</p>
 	<hr>
 	<p align="center">
