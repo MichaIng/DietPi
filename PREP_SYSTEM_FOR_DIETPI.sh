@@ -712,28 +712,27 @@ Currently installed: $G_DISTRO_NAME (ID: $G_DISTRO)"; then
 
 			'apt'			# Debian package manager
 			'bash-completion'	# Auto completes a wide list of bash commands and options via <tab>
-			'bzip2'			# (.tar).bz2 wrapper
+			'bzip2'			# (.tar).bz2 archiver
 			'ca-certificates'	# Adds known ca-certificates, necessary to practically access HTTPS sources
 			'console-setup'		# DietPi-Config keyboard configuration + console fonts
 			'cron'			# Background job scheduler
 			'curl'			# Web address testing, downloading, uploading etc.
-			'debconf'		# DEB package configuration, including "debconf-set-selections" for scripted pre-configuration
 			'dirmngr'		# GNU key management required for some APT installs via additional repos
 			'ethtool'		# Force Ethernet link speed
 			'fake-hwclock'		# Hardware clock emulation, to allow correct timestamps during boot before network time sync
-			'gnupg'			# apt-key add
+			'gnupg'			# apt-key add / gpg
 			'htop'			# System monitor
 			'ifupdown'		# Network interface configuration
 			'iputils-ping'		# "ping" command
 			'isc-dhcp-client'	# DHCP client
 			'kmod'			# "modprobe", "lsmod", used by several DietPi scripts
-			'locales'		# Support locales, necessary for DietPi scripts, as we use C.UTF-8 as default
+			'locales'		# Support locales, used by dietpi-config > Language/Regional Options > Locale
 			'nano'			# Simple text editor
-			'p7zip'			# .7z wrapper
-			'parted'		# partprobe + drive partitioning, required by DietPi-Drive_Manager
+			'p7zip'			# .7z archiver
+			'parted'		# partprobe + drive partitioning, used by DietPi-Drive_Manager
 			'procps'		# "kill", "ps", "pgrep", "sysctl", used by several DietPi scripts
 			'psmisc'		# "killall", used by several DietPi scripts
-			'sudo'			# Root permission wrapper for users within /etc/sudoers(.d/)
+			'sudo'			# Root permission wrapper for users permitted via /etc/sudoers(.d/)
 			'systemd-sysv'		# Includes systemd and additional commands: "poweroff", "shutdown" etc.
 			'tzdata'		# Time zone data for system clock, auto summer/winter time adjustment
 			'udev'			# /dev/ and hotplug management daemon
@@ -741,7 +740,7 @@ Currently installed: $G_DISTRO_NAME (ID: $G_DISTRO)"; then
 			'usbutils'		# "lsusb", used by DietPi-Software + DietPi-Bugreport
 			'wget'			# Download tool
 			'whiptail'		# DietPi dialogs
-			#'xz-utils'		# (.tar).xz wrapper
+			#'xz-utils'		# (.tar).xz archiver
 
 		)
 
@@ -762,7 +761,7 @@ Currently installed: $G_DISTRO_NAME (ID: $G_DISTRO)"; then
 		fi
 		# - systemd-timesyncd: Network time sync daemon
 		#   Available as dedicated package since Bullseye: https://packages.debian.org/systemd-timesyncd
-		#   While the above needs to be checked against current distro to not break SSH or APT before distro upgrade, this one should be checked against target distro version.
+		#   While the above needs to be checked against "current" distro to not break SSH or APT before distro upgrade, this one should be checked against "target" distro version.
 		(( $DISTRO_TARGET > 5 )) && aPACKAGES_REQUIRED_INSTALL+=('systemd-timesyncd')
 
 		# - fdisk: Partitioning tool used by DietPi-FS_partition_resize and DietPi-Imager
@@ -794,6 +793,8 @@ Currently installed: $G_DISTRO_NAME (ID: $G_DISTRO)"; then
 			aPACKAGES_REQUIRED_INSTALL+=('rng-tools')
 
 		fi
+		# - Drive power management control
+		(( $G_HW_MODEL == 20 )) || aPACKAGES_REQUIRED_INSTALL+=('hdparm')
 
 		# WiFi related
 		if (( $WIFI_REQUIRED )); then
@@ -805,9 +806,6 @@ Currently installed: $G_DISTRO_NAME (ID: $G_DISTRO)"; then
 			aPACKAGES_REQUIRED_INSTALL+=('wpasupplicant')		# Support for WPA-protected WiFi network connection
 
 		fi
-
-		# G_HW_MODEL specific
-		(( $G_HW_MODEL == 20 )) || aPACKAGES_REQUIRED_INSTALL+=('hdparm') # Drive power management adjustments
 
 		# Install gdisk if root file system is on a GPT partition, used by DietPi-FS_partition_resize
 		[[ $(parted -s "$(lsblk -npo PKNAME "$(findmnt -no SOURCE /)")" print) == *'Partition Table: gpt'* ]] && aPACKAGES_REQUIRED_INSTALL+=('gdisk')
@@ -833,7 +831,7 @@ Currently installed: $G_DISTRO_NAME (ID: $G_DISTRO)"; then
 			if dpkg-query -s 'grub-efi-amd64' &> /dev/null || [[ -d '/boot/efi' ]]; then
 
 				packages+=' grub-efi-amd64'
-				# On Buster+ enable secure boot compatibility: https://packages.debian.org/buster/grub-efi-amd64-signed
+				# On Buster+ enable secure boot compatibility: https://packages.debian.org/grub-efi-amd64-signed
 				(( $DISTRO_TARGET > 4 )) && packages+=' grub-efi-amd64-signed shim-signed'
 
 			# Grub BIOS
@@ -887,7 +885,7 @@ Currently installed: $G_DISTRO_NAME (ID: $G_DISTRO)"; then
 		elif (( $G_HW_MODEL == 16 )); then
 
 			G_AGI linux-image-arm64-odroid-c4 meveric-keyring
-			G_EXEC_NOHALT=1 G_EXEC apt-mark manual u-boot # Workaround until C4 u-boot package has been added to repo
+			G_EXEC_NOHALT=1 G_EXEC apt-mark manual u-boot # Workaround until C4 u-boot package has been added to repo: https://dietpi.com/meveric/pool/c4/
 
 		#	Odroid N2
 		elif (( $G_HW_MODEL == 15 )); then
@@ -904,7 +902,7 @@ Currently installed: $G_DISTRO_NAME (ID: $G_DISTRO)"; then
 
 			G_AGI linux-image-arm64-odroid-c2 meveric-keyring
 
-		#	Odroid XU3/4/HC1/HC2
+		#	Odroid XU3/XU4/MC1/HC1/HC2
 		elif (( $G_HW_MODEL == 11 )); then
 
 			G_AGI linux-image-4.14-armhf-odroid-xu4 meveric-keyring
@@ -914,7 +912,7 @@ Currently installed: $G_DISTRO_NAME (ID: $G_DISTRO)"; then
 
 			G_AGI rockpis-rk-u-boot-latest linux-4.4-rockpis-latest rockchip-overlay
 
-		# - Auto detect kernel package incl. ARMbian/others DTB
+		# - Generic kernel + device tree package auto detect
 		else
 
 			AUTO_DETECT_KERN_PKG=$(dpkg --get-selections | mawk '/^linux-(image|dtb)/{print $1}')
