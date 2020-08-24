@@ -270,6 +270,7 @@ Links to hardware and software manufacturers, sources and build instructions use
 - [Domoticz](https://github.com/domoticz/domoticz)
 - [Firefox Sync Server](https://github.com/mozilla-services/syncserver)
 - [Jellyfin](https://github.com/jellyfin/jellyfin)
+- [Komga](https://github.com/gotson/komga)
 
 ---
 
