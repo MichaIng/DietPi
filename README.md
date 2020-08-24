@@ -7,7 +7,7 @@
 		<br><br>
 		optimised • simplified • for everyone
 		<br><br>
-		<a href="https://dietpi.com/">Homepage</a> • <a href="https://dietpi.com/docs/">Documentation</a> • <a href="https://dietpi.com/#download">View all supported platforms</a>
+		<a href="https://dietpi.com/">Website</a> • <a href="https://dietpi.com/docs/">Documentation</a> • <a href="https://dietpi.com/#download">View all supported platforms</a>
 	</p>
 	<hr>
 	<p align="center">
