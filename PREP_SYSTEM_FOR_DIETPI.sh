@@ -732,6 +732,7 @@ Currently installed: $G_DISTRO_NAME (ID: $G_DISTRO)"; then
 			'parted'		# partprobe + drive partitioning, used by DietPi-Drive_Manager
 			'procps'		# "kill", "ps", "pgrep", "sysctl", used by several DietPi scripts
 			'psmisc'		# "killall", used by several DietPi scripts
+			'rfkill' 		# Block/unblock WiFi and Bluetooth adapters, only installed once to unblock everything, purged afterwards!
 			'sudo'			# Root permission wrapper for users permitted via /etc/sudoers(.d/)
 			'systemd-sysv'		# Includes systemd and additional commands: "poweroff", "shutdown" etc.
 			'tzdata'		# Time zone data for system clock, auto summer/winter time adjustment
@@ -802,7 +803,6 @@ Currently installed: $G_DISTRO_NAME (ID: $G_DISTRO)"; then
 			aPACKAGES_REQUIRED_INSTALL+=('iw')			# Tools to configure WiFi adapters
 			aPACKAGES_REQUIRED_INSTALL+=('wireless-tools')		# Same as "iw", deprecated but still required for non-nl80211 adapters
 			aPACKAGES_REQUIRED_INSTALL+=('crda')			# Set WiFi frequencies according to local regulations, based on WiFi country code
-			aPACKAGES_REQUIRED_INSTALL+=('rfkill')	 		# Block/unblock wireless adapters, including WiFi and Bluetooth
 			aPACKAGES_REQUIRED_INSTALL+=('wpasupplicant')		# Support for WPA-protected WiFi network connection
 
 		fi
@@ -1239,7 +1239,7 @@ _EOF_
 
 		#-----------------------------------------------------------------------------------
 		# Dirs
-		G_DIETPI-NOTIFY 2 'Generating DietPi Directories'
+		G_DIETPI-NOTIFY 2 'Generating DietPi directories'
 		mkdir -pv /var/lib/dietpi/{postboot.d,dietpi-software/installed}
 		mkdir -pv /var/tmp/dietpi/logs/dietpi-ramlog_store
 		mkdir -pv $G_FP_DIETPI_USERDATA /mnt/{samba,ftp_client,nfs_client}
@@ -1280,6 +1280,12 @@ _EOF_'
 
 		#-----------------------------------------------------------------------------------
 		# Network
+		G_DIETPI-NOTIFY 2 'Removing all rfkill soft blocks and the rfkill package'
+		rfkill unblock all
+		G_AGP rfkill
+		G_AGA
+		[[ -d '/var/lib/systemd/rfkill' ]] && rm -Rv /var/lib/systemd/rfkill
+
 		G_DIETPI-NOTIFY 2 'Configuring wlan/eth naming to be preferred for networked devices:'
 		ln -sfv /dev/null /etc/systemd/network/99-default.link
 		ln -sfv /dev/null /etc/udev/rules.d/80-net-setup-link.rules
@@ -1708,7 +1714,7 @@ _EOF_
 		# - Set Pi cmdline.txt back to normal
 		[[ -f '/boot/cmdline.txt' ]] && sed -i 's/ rootdelay=10//g' /boot/cmdline.txt
 
-		G_DIETPI-NOTIFY 2 'Disabling generic BT by default'
+		G_DIETPI-NOTIFY 2 'Disabling Bluetooth by default'
 		/boot/dietpi/func/dietpi-set_hardware bluetooth disable
 
 		# - Set WiFi
