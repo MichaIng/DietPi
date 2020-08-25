@@ -35,7 +35,9 @@ Use `dietpi-services` to control which installed software has higher or lower pr
 
 #### Micha (MichaIng)
 
-Project lead of DietPi (20/02/2019 and onwards), source code contributor, bug fixes, software improvements, DietPi forum administrator.
+_Joined Q3 2017_
+
+Project lead (20/02/2019 and onwards), source code contributor, bug fixes, software improvements, DietPi forum administrator.
 
 #### Daniel Knight (Fourdee)
 
@@ -63,13 +65,13 @@ DietPi forum moderator, support, testing, bug reports + investigation and valuab
 
 _Joined Q4 2019_
 
-NanoPi image creator, tester and maintainer 
+NanoPi image creator, tester and bug reports.
 
 #### Petru (fpetru)
 
 _Joined 2020-05-31_
 
-DietPi documentation author, SEO and DietPi visibility recommendations and valuable feedback.
+DietPi documentation author, product manager, SEO and DietPi visibility recommendations.
 
 ---
 
