@@ -437,6 +437,8 @@ _EOF_
 			'62' ': NanoPi M3/T3/Fire3'
 			'68' ': NanoPi M4/T4/NEO4'
 			'58' ': NanoPi M4V2'
+			'55' ': NanoPi R2S'
+			'54' ': NanoPi K2'
 			'72' ': ROCK Pi 4'
 			'73' ': ROCK Pi S'
 			'69' ': Firefly RK3399'
