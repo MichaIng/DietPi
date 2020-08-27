@@ -96,9 +96,8 @@
 		if [[ -f '/boot/Automation_Custom_PreScript.sh' ]]; then
 
 			G_DIETPI-NOTIFY 2 'Running custom script, please wait...'
-
 			chmod +x /boot/Automation_Custom_PreScript.sh
-			if /boot/Automation_Custom_PreScript.sh | tee /tmp/dietpi-automation_custom_prescript.log; then
+			if /boot/Automation_Custom_PreScript.sh 2>&1 | tee /var/tmp/dietpi/logs/dietpi-automation_custom_prescript.log; then
 
 				G_DIETPI-NOTIFY 0 'Custom script'
 
@@ -112,20 +111,15 @@
 		fi
 
 		# Create swap file
-		local swap_size=$(sed -n '/^[[:blank:]]*AUTO_SETUP_SWAPFILE_SIZE=/{s/^[^=]*=//p;q}' /boot/dietpi.txt)
-		disable_error=1 G_CHECK_VALIDINT "$swap_size" 0 || swap_size=1
-		local swap_location=$(sed -n '/^[[:blank:]]*AUTO_SETUP_SWAPFILE_LOCATION=/{s/^[^=]*=//p;q}' /boot/dietpi.txt)
-		[[ $swap_location == '/'* ]] || swap_location='/var/swap'
-		/boot/dietpi/func/dietpi-set_swapfile $swap_size "$swap_location"
+		/boot/dietpi/func/dietpi-set_swapfile
 
 		# Apply time zone
 		local autoinstall_timezone=$(sed -n '/^[[:blank:]]*AUTO_SETUP_TIMEZONE=/{s/^[^=]*=//p;q}' /boot/dietpi.txt)
-		if [[ $autoinstall_timezone && $autoinstall_timezone != $(</etc/timezone) ]]; then
+		if [[ -f /usr/share/zoneinfo/$autoinstall_timezone && $autoinstall_timezone != $(</etc/timezone) ]]; then
 
 			G_DIETPI-NOTIFY 2 "Setting time zone $autoinstall_timezone. Please wait..."
-			[[ -f '/etc/timezone' ]] && rm /etc/timezone
-			[[ -f '/etc/localtime' ]] && rm /etc/localtime
-			ln -sf "/usr/share/zoneinfo/$autoinstall_timezone" /etc/localtime
+			rm -fv /etc/{timezoner,localtime}
+			ln -s "/usr/share/zoneinfo/$autoinstall_timezone" /etc/localtime
 			dpkg-reconfigure -f noninteractive tzdata
 
 		fi
@@ -133,7 +127,7 @@
 		# Apply language (locale)
 		local autoinstall_language=$(sed -n '/^[[:blank:]]*AUTO_SETUP_LOCALE=/{s/^[^=]*=//p;q}' /boot/dietpi.txt)
 		grep -q "^$autoinstall_language UTF-8$" /usr/share/i18n/SUPPORTED || autoinstall_language='C.UTF-8'
-		if ! locale | grep -qE "(LANG|LC_ALL)=[\'\"]?$autoinstall_language[\'\"]?" || ! locale -a | grep -qiE 'C\.UTF-?8'; then
+		if ! locale | grep -qE "(LANG|LC_ALL)=[\'\"]?${autoinstall_language}[\'\"]?" || ! locale -a | grep -qiE 'C\.UTF-?8'; then
 
 			G_DIETPI-NOTIFY 2 "Setting locale $autoinstall_language. Please wait..."
 			/boot/dietpi/func/dietpi-set_software locale "$autoinstall_language"
@@ -154,13 +148,22 @@
 		(( $G_HW_MODEL < 11 || $G_HW_MODEL == 12 )) && /boot/dietpi/func/dietpi-set_hardware headless $(grep -cm1 '^[[:blank:]]*AUTO_SETUP_HEADLESS=1' /boot/dietpi.txt)
 
 		# Apply forced eth speed, if set in dietpi.txt
-		/boot/dietpi/func/dietpi-set_hardware eth-forcespeed $(sed -n '/^[[:blank:]]*AUTO_SETUP_NET_ETH_FORCE_SPEED=/{s/^[^=]*=//p;q}' /boot/dietpi.txt)
+		/boot/dietpi/func/dietpi-set_hardware eth-forcespeed "$(sed -n '/^[[:blank:]]*AUTO_SETUP_NET_ETH_FORCE_SPEED=/{s/^[^=]*=//p;q}' /boot/dietpi.txt)"
 
 		# Set hostname
 		/boot/dietpi/func/change_hostname "$(sed -n '/^[[:blank:]]*AUTO_SETUP_NET_HOSTNAME=/{s/^[^=]*=//p;q}' /boot/dietpi.txt)"
 
-		# Set autologin, if automated firstrun setup was chosen
-		grep -q '^[[:blank:]]*AUTO_SETUP_AUTOMATED=1' /boot/dietpi.txt && /boot/dietpi/dietpi-autostart 7
+		# Set root autologin, if automated firstrun setup was chosen
+		if grep -q '^[[:blank:]]*AUTO_SETUP_AUTOMATED=1' /boot/dietpi.txt; then
+
+			mkdir -p /etc/systemd/system/getty@tty1.service.d
+			cat << _EOF_ > /etc/systemd/system/getty@tty1.service.d/dietpi-autologin.conf
+[Service]
+ExecStart=
+ExecStart=-/sbin/agetty -a root %I \$TERM
+_EOF_
+
+		fi
 
 		# Disable serial console, if set in dietpi.txt
 		grep -q '^[[:blank:]]*CONFIG_SERIAL_CONSOLE_ENABLE=0' /boot/dietpi.txt && /boot/dietpi/func/dietpi-set_hardware serialconsole disable
@@ -180,7 +183,7 @@
 		/boot/dietpi/func/dietpi-set_software apt-mirror "$(sed -n "/^[[:blank:]]*$target_repo=/{s/^[^=]*=//p;q}" /boot/dietpi.txt)"
 
 		# Regenerate unique Dropbear host keys
-		rm -f /etc/dropbear/*_host_key
+		rm -fv /etc/dropbear/dropbear_*_host_key
 		if (( $G_DISTRO < 6 )); then
 
 			dpkg-reconfigure -f noninteractive dropbear-run
@@ -289,6 +292,11 @@
 	#/////////////////////////////////////////////////////////////////////////////////////
 	# Main Loop
 	#/////////////////////////////////////////////////////////////////////////////////////
+
+	# Failsafe: https://github.com/MichaIng/DietPi/issues/3646#issuecomment-653739919
+	chown root:root /
+	chmod 755 /
+
 	# Apply dietpi.txt settings, device specific workarounds and reset hardware ID + SSH host keys
 	Apply_DietPi_FirstRun_Settings
 

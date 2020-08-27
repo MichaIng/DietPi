@@ -7,42 +7,37 @@
 		<br><br>
 		optimised • simplified • for everyone
 		<br><br>
-		<a href="https://dietpi.com">find out more</a> • <a href="https://dietpi.com/#download">download image</a>
+		<a href="https://dietpi.com/">Website</a> • <a href="https://dietpi.com/docs/">Documentation</a> • <a href="https://dietpi.com/#download">View all supported platforms</a>
 	</p>
 	<hr>
 	<p align="center">
-		Optional "ready to run" optimised software choices with <b>dietpi-software</b>.<br>
-		Feature rich configuration tool for your device with <b>dietpi-config</b>.
+		<strong>Ready to run</strong> optimised software choices with <a href="https://dietpi.com/dietpi-software.html"><strong>dietpi-software</strong></a>
+		<br>Feature rich configuration tool for your device with <strong>dietpi-config</strong>.
 	</p>
 	<hr>
-	<p align="center">
-		<img src="https://www.myvirtualserver.com/images/myvirtualserver_logo.png" alt="myVirtualserver" width="200"><br>
-		DietPi's web hosting is powered by <a href="https://www.myvirtualserver.com">myVirtualserver</a>.
-		<br><br>
-		A wide range of SBCs and VMs are supported. <a href="https://dietpi.com/#download">Click here</a> for the full list.
-		<br><br>
-	</p>
 </html>
 
 ## Introduction
 
-DietPi is an extremely lightweight Debian-based OS. With images starting at 400MB, that's 3x lighter than "Raspbian Lite". It is highly optimized for minimal CPU and RAM resource usage, ensuring your SBC always runs at its maximum potential. The programs use lightweight Whiptail menus. You'll spend less time staring at the command line, and more time enjoying DietPi.
+DietPi is an extremely lightweight Debian-based OS. It is highly optimised for minimal CPU and RAM resource usage, ensuring your SBC always runs at its maximum potential. 
 
-Use `dietpi-software` to quickly and easily install popular software that's "Ready to run" and optimised for your system. Only the software you need is installed. Use `dietpi-services` to control which installed software has higher or lower priority levels (nice, affinity, policy scheduler).
+The **dietpi programs** use lightweight whiptail menus. You'll spend more time enjoying DietPi and applications you need and less time staring at the command line.
 
-`dietpi-update` automatically checks for updates and informs you when they are available. Update instantly, without having to write a new image. `dietpi-automation` Allows you to completely automate a DietPi installation with no user input, simply by configuring "dietpi.txt" before powering on.
+Use `dietpi-software` to quick and easy install **Ready to Run** & **Optimised** applications for your system. DietPi will do all the necessary configurations, including starting the services. Few highlights: [Desktop Environments](https://dietpi.com/docs/user-optimised-software/#desktops), [Remote Desktop access](https://dietpi.com/docs/user-optimised-software/#remote-desktop-access), [Media systems and Media Players](https://dietpi.com/docs/user-optimised-software/#media-systems), [Torrents and Downloading](https://dietpi.com/docs/user-optimised-software/#bittorrent-download-tools), [Cloud and Backup](https://dietpi.com/docs/user-optimised-software/#cloud-backups), [Gaming](https://dietpi.com/docs/user-optimised-software/#emulation-gaming), [Social & Search](https://dietpi.com/docs/user-optimised-software/#social-search), [Camera and Surveillance](https://dietpi.com/docs/user-optimised-software/#camera-surveillance), [WiFi Hotspot](https://dietpi.com/docs/user-optimised-software/#wifi-hotspot), [System Stats & Management](https://dietpi.com/docs/user-optimised-software/#system-stats-management), [Home automation](https://dietpi.com/docs/user-optimised-software/#home-automation), [Hardware & Voice Projects](https://dietpi.com/docs/user-optimised-software/#hardware-projects), [Webserver Stacks](https://dietpi.com/docs/user-optimised-software/#webserver-stacks), [DNS server / PiHole](https://dietpi.com/docs/user-optimised-software/#dns-servers), [File Servers](https://dietpi.com/docs/user-optimised-software/#file-servers), [Cloud printing and Print 3D](https://dietpi.com/docs/user-optimised-software/#printing) and much more.
+
+Use `dietpi-services` to control which installed software has higher or lower priority levels (nice, affinity, policy scheduler).
+
+`dietpi-update` automatically checks for updates and informs you when they are available. Update instantly, without having to write a new image. **DietPi automation** allows you to completely automate a DietPi installation with no user input, simply by configuring `dietpi.txt` before powering on.
 
 ## The DietPi Project Team
 
-### Lead
+### Contributors
 
 #### Micha (MichaIng)
 
-Project lead of DietPi (20/02/2019 and onwards), source code contributor, bug fixes, software improvements, DietPi forum administrator.
+_Joined Q3 2017_
 
----
-
-### Active Contributors
+Project lead (20/02/2019 and onwards), source code contributor, bug fixes, software improvements, DietPi forum administrator.
 
 #### Daniel Knight (Fourdee)
 
@@ -66,20 +61,32 @@ _Joined Q4 2019_
 
 DietPi forum moderator, support, testing, bug reports + investigation and valuable feedback.
 
+#### StephanStS
+
+_Joined Q4 2019_
+
+NanoPi image creator, tester and bug reports.
+
+#### Petru (fpetru)
+
+_Joined 2020-05-31_
+
+DietPi documentation author, product manager, SEO and DietPi visibility recommendations.
+
 ---
 
 ### Collaborations
 
 #### DietPi + Amiberry
 
-_02/09/2016_
+_Since 2016-09-02_
 
 Joint venture to bring you the ultimate Amiga experience on your SBC, running lightweight and optimised DietPi at its core:
 https://github.com/MichaIng/DietPi/issues/474
 
 ---
 
-### Previous/Inactive Contributors
+### Hall of Fame
 
 #### K-Plan
 
@@ -103,7 +110,7 @@ Contributions to the DietPi in general, including source code, testing, new devi
 
 _Joined 2015-10-10_
 
-Provided DietPi.com web hosting for 1 year until April 17th 2016. Additionally: forum moderator, testing, bug reporting.
+Provided dietpi.com web hosting for 1 year until April 17th 2016. Additionally: forum moderator, testing, bug reporting.
 
 #### xenfomation
 
@@ -119,12 +126,6 @@ Created the DietPi image for NanoPi M3/T3.
 
 ---
 
-### Honourable Mentions/Thanks
-
-A personal thanks to **Pilovali** for helping DietPi during our early days with desperately needed web hosting.
-
----
-
 ## Contributing
 
 Git coders, please use the active development branch: [dev](https://github.com/MichaIng/DietPi/tree/dev)
@@ -135,7 +136,7 @@ Are you able to:
 
 - Provide feedback and/or test areas of DietPi, to improve the user experience?
 - Report bugs?
-- Improve/add more features to the [DietPi website](https://dietpi.com)?
+- Improve/add more features to the [DietPi website](https://dietpi.com/)?
 - Compile software for our supported SBCs?
 - Contribute to DietPi with programming on GitHub?
 - Suggest new software that we can add to the `dietpi-software` install system?
@@ -144,7 +145,7 @@ If so, let us know!
 We are always looking for talented people who believe in the DietPi project, and, wish to contribute in any way you can.
 
 - Send me an Email: micha@dietpi.com
-- Join our forums: https://dietpi.com/phpbb
+- Join our forums: https://dietpi.com/phpbb/
 - GitHub: https://github.com/MichaIng/DietPi
 
 ### FeatHub
@@ -157,7 +158,7 @@ Vote for new suggestions, feature-, software- or image requests, or add your own
 
 DietPi Copyright (C) 2020 MichaIng
 - Email micha@dietpi.com
-- Web https://dietpi.com
+- Web https://dietpi.com/
 
 This program is free software: you can redistribute it and/or modify
 it under the terms of the GNU General Public License as published by
@@ -182,7 +183,6 @@ along with this program.  If not, see https://www.gnu.org/licenses/
 ### DietPi Files
 
 - All files located in (recursively):
-  - `/DietPi/`
   - `/var/lib/dietpi/`
   - `/var/tmp/dietpi/`
   - `/boot/dietpi/`
@@ -203,7 +203,7 @@ Links to hardware and software manufacturers, sources and build instructions use
 - [Debian distribution](https://salsa.debian.org/)
 - [Raspberry](https://github.com/raspberrypi) [Pi](https://github.com/RPi-Distro)
 - [Hardkernel](https://github.com/hardkernel?tab=repositories)
-- [Meverics Odroid repository](https://forum.odroid.com/viewtopic.php?f=52&t=5908)
+- [Meveric's Odroid repository](https://forum.odroid.com/viewtopic.php?f=52&t=5908)
 - [Sparky](https://github.com/sparkysbc?tab=repositories) [SBC](https://github.com/sparky-sbc/sparky-test)
 - [PINE64](https://www.pine64.org/)
 - [FriendlyARM](https://github.com/friendlyarm?tab=repositories)
@@ -271,3 +271,14 @@ Links to hardware and software manufacturers, sources and build instructions use
 - [TasmoAdmin](https://github.com/reloxx13/TasmoAdmin)
 - [Domoticz](https://github.com/domoticz/domoticz)
 - [Firefox Sync Server](https://github.com/mozilla-services/syncserver)
+- [Jellyfin](https://github.com/jellyfin/jellyfin)
+- [Komga](https://github.com/gotson/komga)
+
+---
+
+<html>
+	<p align="center">
+		<img src="https://www.myvirtualserver.com/images/myvirtualserver_logo.png" alt="myVirtualserver" width="200">
+		<br>DietPi's web hosting is powered by <a href="https://www.myvirtualserver.com">myVirtualserver</a>.
+	</p>
+</html>

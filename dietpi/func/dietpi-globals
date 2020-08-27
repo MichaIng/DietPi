@@ -69,8 +69,8 @@
 	[[ -f '/boot/dietpi/.version' ]] && . /boot/dietpi/.version
 	# - Assign defaults/code version as fallback
 	[[ $G_DIETPI_VERSION_CORE ]] || G_DIETPI_VERSION_CORE=6
-	[[ $G_DIETPI_VERSION_SUB ]] || G_DIETPI_VERSION_SUB=31
-	[[ $G_DIETPI_VERSION_RC ]] || G_DIETPI_VERSION_RC=1
+	[[ $G_DIETPI_VERSION_SUB ]] || G_DIETPI_VERSION_SUB=32
+	[[ $G_DIETPI_VERSION_RC ]] || G_DIETPI_VERSION_RC=0
 	[[ $G_GITBRANCH ]] || G_GITBRANCH='master'
 	[[ $G_GITOWNER ]] || G_GITOWNER='MichaIng'
 	# - Save current version and Git branch
@@ -180,65 +180,50 @@ $(ps f -eo pid,user,tty,cmd | grep -i '[d]ietpi')"; then
 		# Printing terminal height - 1 newlines seems to be the fastes method that is compatible with all terminal types.
 		local lines=$(stty size) i newlines
 		for ((i=1;i<${lines% *};i++)); do newlines+='\n'; done
-		printf "\e[0m$newlines\e[H"
+		echo -ne "\e[0m$newlines\e[H"
 
 	}
 
 	# DietPi-Notify
 	# $1:
-	#	-2=process animation
-	#	- $2 = text
-	#	-1=autodetect_fail_ok
-	#	- $2 = EXIT_CODE
-	#	0=OK
-	#	- $2 = text
-	#	1=failed
-	#	- $2 = text
-	#	2=info
-	#	- $2 = text
-	#	3=DietPi banner style
-	#	- $2 = txt program name
-	#	- $3 = txt mode, prefixed with "${G_NOTIFY_3_MODE}: ", defaults to "Mode: "
+	#	-2 = Processing
+	#		$2+ = message
+	#	-1 = Autodetect ok or failed
+	#		$2  = exit code
+	#		$3+ = message
+	#	0  = Ok
+	#		$2+ = message
+	#	1  = Failed
+	#		$2+ = message
+	#	2  = Info
+	#		$2+ = message
+	#	3  = Header
+	#		$2  = program name
+	#		$3+ = message, prefixed with "${G_NOTIFY_3_MODE}: ", defaults to "Mode: "
 	G_DIETPI-NOTIFY(){
 
-		local ainput_string=("$@")
-		local output_string
-		local bracket_l='\e[0m\e[90m[\e[0m'
-		local bracket_r='\e[0m\e[90m]\e[0m'
+		local ainput_string=("$@") output_string grey green red reset yellow dietpi_green
+		# If this is a terminal, it understands ANSI escape sequences, so use colour, always start left-aligned with colour reset and clear screen from cursor til end.
+		# - Assume if STDIN is a terminal that STDOUT is one as well, e.g. covered by "tee"
+		if [[ -t 0 || -t 1 ]]; then
 
-		# Funcs
-		Clean_Process_Animation(){
+			output_string='\e[0m\r\e[J' grey='\e[90m' green='\e[32m' red='\e[31m' reset='\e[0m' yellow='\e[33m' dietpi_green='\e[38;5;154m'
+			# Kill existing process animation if this is not a processing message
+			if [[ $1 != '-2' && -w '/tmp/dietpi-process.pid' ]]; then
 
-			if [[ -t 0 && -w '/tmp/dietpi-process.pid' ]]; then
-
-				kill -9 $(</tmp/dietpi-process.pid) &> /dev/null
+				kill -9 "$(</tmp/dietpi-process.pid)" &> /dev/null
 				rm -f /tmp/dietpi-process.pid &> /dev/null
 
 			fi
-			# To cover multiline output, clean from cursor (animation position) until end of screen.
-			output_string='\r\e[J'
 
-		}
+		fi
+		local bracket_l="${grey}[$reset" bracket_r="$grey]$reset"
+		local ok="$bracket_l$green  OK  $bracket_r " failed="$bracket_l${red}FAILED$bracket_r "
 
-		Status_Ok(){
+		# Print input array from index $1
+		Print(){
 
-			Clean_Process_Animation
-			output_string+="$bracket_l\e[32m  OK  $bracket_r "
-
-		}
-
-		Status_Failed(){
-
-			Clean_Process_Animation
-			output_string+="$bracket_l\e[31mFAILED$bracket_r "
-
-		}
-
-		# Print all input string on same line
-		# - $1 = start printing from word number $1
-		Print_Output_String(){
-
-			[[ $1 == 1 && $G_PROGRAM_NAME ]] && output_string+="\e[90m$G_PROGRAM_NAME | \e[0m"
+			[[ $1 == 1 && $G_PROGRAM_NAME ]] && output_string+="$grey$G_PROGRAM_NAME |$reset "
 			local i
 			for ((i=$1; i<${#ainput_string[@]}; i++))
 			do
@@ -246,84 +231,101 @@ $(ps f -eo pid,user,tty,cmd | grep -i '[d]ietpi')"; then
 				output_string+=${ainput_string[$i]}
 
 			done
-			echo -ne "$output_string\e[0m"
+			echo -ne "$output_string$reset"
 
 		}
 
 		#--------------------------------------------------------------------------------------
 		# Main Loop
 		#--------------------------------------------------------------------------------------
-		# Exit code, print OK or Failed
+		# Autodetect ok or failed
 		# $2 = exit code
-		# - Use this at end of DietPi scripts, EG: G_DIETPI-NOTIFY -1 ${EXIT_CODE:=0}
+		# $3+ = message
+		# - Use this at end of DietPi scripts, e.g. G_DIETPI-NOTIFY -1 ${EXIT_CODE:=0}
 		if (( $1 == -1 )); then
 
-			if (( ! $2 )); then
+			if (( $2 )); then
 
-				Status_Ok
-				ainput_string+=(' Completed\n')
+				output_string+=$failed
+				ainput_string+=(' | Exited with error\n')
 
 			else
 
-				Status_Failed
-				ainput_string+=(' An issue has occurred\n')
+				output_string+=$ok
+				ainput_string+=(' | Completed\n')
 
 			fi
-			Print_Output_String 2
+			Print 2
 
 		#--------------------------------------------------------------------------------------
-		# Status Processing
-		# $@ = txt desc
+		# Processing
+		# $3+ = message
+		# NB: Do not use this with newlines, literally or "\n", as this would cause parts of the processing message not being overwritten as intended.
 		elif (( $1 == -2 )); then
 
-			output_string="\r\e[J$bracket_l\e[33m .... $bracket_r "
-			Print_Output_String 1
+			# If this is a terminal, it understands control codes, so make any next output overwrite the processing message.
+			if [[ -t 0 || -t 1 ]]; then
 
+				# Calculate the amount of output lines and in case move cursor up for correct animation position and to allow overwriting the whole output.
+				local input_string=$(mawk '{gsub("\\\e[[0-9][;0-9]*m","");print}' <<< "${G_PROGRAM_NAME:+$G_PROGRAM_NAME | }$*") # Remove colour codes
+				local screen_width
+				[[ -t 0 ]] && screen_width=$(stty size) || screen_width=$(tput cols) # stty requires STDIN, tput requires either STDOUT or STDERR until Stretch
+				local output_lines=$(( ( ${#input_string} + 5 ) / ${screen_width#* } )) # +5 = [ .... ] - $1
+				(( $output_lines )) && ainput_string+=("\e[${output_lines}A")
+				# If we do not print the animation, move the cursor left as well to allow overwriting the whole first line.
+				[[ -t 0 ]] || ainput_string+=('\r')
+
+			# Else, we add a newline to leave processing message complete.
+			else
+
+				ainput_string+=('\n')
+
+			fi
+
+			# Print animation only if this is the terminal control process as otherwise foreign output might cause a mess and we might be not able to kill the animation.
 			if [[ -t 0 ]]; then
 
-				Print_Process_Animation(){
+				output_string+="$bracket_l      $bracket_r "
+				Print 1
 
-					local bright_dot='\e[1;33m.'
-					local dimmed_dot='\e[0;33m.'
-					# Alternative: \u23F9
-					local aprocess_string=(
-						"$bright_dot     "
-						"$dimmed_dot$bright_dot    "
-						" $dimmed_dot$bright_dot   "
-						"  $dimmed_dot$bright_dot  "
-						"   $dimmed_dot$bright_dot "
-						"    $dimmed_dot$bright_dot"
-						"     $bright_dot"
-						"    $bright_dot$dimmed_dot"
-						"   $bright_dot$dimmed_dot "
-						"  $bright_dot$dimmed_dot  "
-						" $bright_dot$dimmed_dot   "
-						"$bright_dot$dimmed_dot    "
-					)
-
-					local i
-					for (( i=0; i<=${#aprocess_string[@]}; i++ )); do
-
-						(( i == ${#aprocess_string[@]} )) && i=0
-						[[ -w '/tmp/dietpi-process.pid' ]] && echo -ne "\r$bracket_l${aprocess_string[$i]}$bracket_r " || return
-						sleep 0.15
-
-					done
-
-				}
-
-				# Calculate the amount of output lines and in case move cursor up for correct animation and to allow cleaning the whole output.
-				local input_string=$(mawk '{gsub("\\\e[[0-9][;0-9]*m","");print}' <<< "${G_PROGRAM_NAME:+$G_PROGRAM_NAME | }$*") # Remove colour codes
-				local screen_width=$(stty size)
-				local output_lines=$(( ( ${#input_string} + 5 ) / ${screen_width#* } )) # +5 = [ .... ] - $1
-				(( $output_lines )) && echo -ne "\e[${output_lines}A"
 				# If redirect to existent PID file fails due to noclobber, don't start processing animation.
 				# - This method prevents a tiny condition race from checking file existance until creating it, when doing: [[ ! -e file ]] && > file
 				set -C
 				if { > /tmp/dietpi-process.pid; } &> /dev/null; then
 
 					set +C
-					{ Print_Process_Animation & echo $! > /tmp/dietpi-process.pid; disown; } 2> /dev/null
+					Start_Process_Animation(){
+
+						local bright_dot='\e[1;33m.'
+						local dimmed_dot='\e[0;33m.'
+						# Alternative: \u23F9
+						local aprocess_string=(
+							"$bright_dot     "
+							"$dimmed_dot$bright_dot    "
+							" $dimmed_dot$bright_dot   "
+							"  $dimmed_dot$bright_dot  "
+							"   $dimmed_dot$bright_dot "
+							"    $dimmed_dot$bright_dot"
+							"     $bright_dot"
+							"    $bright_dot$dimmed_dot"
+							"   $bright_dot$dimmed_dot "
+							"  $bright_dot$dimmed_dot  "
+							" $bright_dot$dimmed_dot   "
+							"$bright_dot$dimmed_dot    "
+						)
+
+						local i
+						for (( i=0; i<=${#aprocess_string[@]}; i++ )); do
+
+							(( i == ${#aprocess_string[@]} )) && i=0
+							[[ -w '/tmp/dietpi-process.pid' ]] && echo -ne "\e[2G${aprocess_string[$i]}$reset\e[C" || return
+							sleep 0.15
+
+						done
+
+					}
+					{ Start_Process_Animation & echo $! > /tmp/dietpi-process.pid; disown; } 2> /dev/null
+					unset -f Start_Process_Animation
 
 				else
 
@@ -331,67 +333,72 @@ $(ps f -eo pid,user,tty,cmd | grep -i '[d]ietpi')"; then
 
 				fi
 
-				unset -f Print_Process_Animation
+			else
+
+				output_string+="$bracket_l $yellow.... $bracket_r "
+				Print 1
 
 			fi
 
-		# Status Ok
-		# $@ = txt desc
+		#--------------------------------------------------------------------------------------
+		# Ok
+		# $2+ = message
 		elif (( $1 == 0 )); then
 
-			Status_Ok
+			output_string+=$ok
 			ainput_string+=('\n')
-			Print_Output_String 1
+			Print 1
 
-		# Status failed
-		# $@ = txt desc
+		#--------------------------------------------------------------------------------------
+		# Failed
+		# $2+ = message
 		elif (( $1 == 1 )); then
 
-			Status_Failed
+			output_string+=$failed
 			ainput_string+=('\n')
-			Print_Output_String 1
+			Print 1
 
-		# Status Info
-		# $@ = txt desc
+		#--------------------------------------------------------------------------------------
+		# Info
+		# $2+ = message
 		elif (( $1 == 2 )); then
 
-			Clean_Process_Animation
 			output_string+="$bracket_l INFO $bracket_r "
 			# Keep info messages in gray, even if "$G_PROGRAM_NAME | \e[0m" is added:
-			ainput_string[1]="\e[90m${ainput_string[1]}"
+			ainput_string[1]="$grey${ainput_string[1]}"
 			ainput_string+=('\n')
-			Print_Output_String 1
+			Print 1
 
-		# DietPi banner style
-		# $2 = txt program name
-		# $3 = txt mode
+		#--------------------------------------------------------------------------------------
+		# Header
+		# $2 = program name
+		# $3+ = message, prefixed with "${G_NOTIFY_3_MODE}: ", defaults to "Mode: "
 		elif (( $1 == 3 )); then
 
-			Clean_Process_Animation
 			if disable_error=1 G_CHECK_VALIDINT "$HIERARCHY" 1; then
 
 				local status_subfunction="$HIERARCHY "
 				# > 9 should never occur, however, if it is, lets make it line up regardless
 				(( $HIERARCHY > 9 )) && status_subfunction=$HIERARCHY
 
-				output_string+="$bracket_l\e[33m SUB$status_subfunction$bracket_r $2 > "
+				output_string+="$bracket_l$yellow SUB$status_subfunction$bracket_r $2 > "
 				ainput_string+=('\n')
 
 			else
 
 				output_string+="
- \e[38;5;154m$2\e[0m
-\e[90m─────────────────────────────────────────────────────
- ${G_NOTIFY_3_MODE:-Mode}: \e[0m"
+ $dietpi_green$2$reset
+$grey─────────────────────────────────────────────────────
+ ${G_NOTIFY_3_MODE:-Mode}:$reset "
 				ainput_string+=('\n\n')
 
 			fi
-			Print_Output_String 2
+			Print 2
 
 		fi
 		#-----------------------------------------------------------------------------------
 		# Unset internal functions, otherwise they are accessible from terminal
-		unset -f Clean_Process_Animation Status_Ok Status_Failed Print_Output_String
+		unset -f Print
 		#-----------------------------------------------------------------------------------
 
 	}
@@ -919,7 +926,7 @@ $(ps f -eo pid,user,tty,cmd | grep -i '[d]ietpi')"; then
 
 				# Print $G_EXEC_DESC if given, else raw input command string and show current non-interactive attempt count if $G_EXEC_RETRIES is given
 				G_DIETPI-NOTIFY 2 "${G_EXEC_DESC:-$*}, please wait...${G_EXEC_RETRIES:+ ($attempt/$((G_EXEC_RETRIES+1)))}"
-				[[ $G_EXEC_OUTPUT_COL ]] && printf "$G_EXEC_OUTPUT_COL"
+				[[ $G_EXEC_OUTPUT_COL ]] && echo -ne "$G_EXEC_OUTPUT_COL"
 				"${acommand[@]}" 2>&1 | tee $fp_log
 				exit_code=${PIPESTATUS[0]}
 				[[ $G_EXEC_OUTPUT_COL ]] && printf '\e[0m'
@@ -1062,9 +1069,9 @@ $log_content" || break # Exit error handler menu loop on cancel
 						G_DIETPI-NOTIFY 2 "Executing alternative command: $G_WHIP_RETURNED_VALUE"
 						$G_WHIP_RETURNED_VALUE
 						exit_code=$?
-						G_DIETPI-NOTIFY -1 $exit_code 'Alternative command execution |'
+						G_DIETPI-NOTIFY -1 $exit_code 'Alternative command execution'
 						# Exit retry loop if alternative command succeeded, else stay in menu loop and wait for key press to allow reviewing alternative command output
-						[[ $exit_code == 0 ]] && break 2 || read -p 'Press any key to return to error handler menu...'
+						[[ $exit_code == 0 ]] && break 2 || read -rp 'Press any key to return to error handler menu...'
 
 					fi
 
@@ -1072,7 +1079,7 @@ $log_content" || break # Exit error handler menu loop on cancel
 				elif [[ $G_WHIP_RETURNED_VALUE ]]; then
 
 					${G_EXEC_ARRAY_ACTION[$G_WHIP_RETURNED_VALUE]}
-					read -p 'Press any key to return to error handler menu...'
+					read -rp 'Press any key to return to error handler menu...'
 
 				fi
 
@@ -1257,7 +1264,7 @@ $log_content" || break # Exit error handler menu loop on cancel
 		while :
 		do
 
-			if ! mkdir -p $input; then
+			if ! mkdir -p "$input"; then
 
 				G_WHIP_MSG "Error creating directory $input, unable to check filesystem permissions"
 				break
@@ -1265,7 +1272,7 @@ $log_content" || break # Exit error handler menu loop on cancel
 			fi
 
 			local fp_target="$input/.test"
-			if ! > $fp_target; then
+			if ! > "$fp_target"; then
 
 				G_WHIP_MSG "Error creating test file $fp_target, unable to check filesystem permissions"
 				break
@@ -1275,21 +1282,21 @@ $log_content" || break # Exit error handler menu loop on cancel
 			# Apply and check permissions support, twice (just incase the current value is already set)
 			local permissions_failed=0
 
-			chmod 600 $fp_target
-			if [[ $(stat -c "%a" $fp_target) != '600' ]]; then
+			chmod 600 "$fp_target"
+			if [[ $(stat -c "%a" "$fp_target") != '600' ]]; then
 
 				permissions_failed=1
 
 			else
 
-				chmod 644 $fp_target
-				[[ $(stat -c "%a" $fp_target) != '644' ]] && permissions_failed=1
+				chmod 644 "$fp_target"
+				[[ $(stat -c "%a" "$fp_target") != '644' ]] && permissions_failed=1
 
 			fi
 
 			if (( $permissions_failed )); then
 
-				G_WHIP_MSG "ERROR: Filesystem does not support permissions (eg: FAT16/32):\n\n$fp_target\n\nPlease select a different drive and/or format it with ext4, ensuring support for filesystem permissions.\n\nUnable to continue, aborting..."
+				G_WHIP_MSG "ERROR: Filesystem does not support permissions (e.g.: FAT16/32):\n\n$fp_target\n\nPlease select a different drive and/or format it with ext4, ensuring support for filesystem permissions.\n\nUnable to continue, aborting..."
 				break
 
 			fi
@@ -1300,7 +1307,7 @@ $log_content" || break # Exit error handler menu loop on cancel
 
 		done
 
-		[[ -f $fp_target ]] && rm -f $fp_target
+		[[ -f $fp_target ]] && rm -f "$fp_target"
 		return $result
 
 	}
@@ -1455,26 +1462,18 @@ $log_content" || break # Exit error handler menu loop on cancel
 	# MISC: Commands
 	#-----------------------------------------------------------------------------------
 	# Treesize
-	# - $1 = Optional input directory (eg: G_TREESIZE /etc/apt)
+	# - $1 = Optional input directory, e.g.: G_TREESIZE /var/cache/apt
 	G_TREESIZE(){
 
-		G_CHECK_ROOT_USER 1
-
-		du -k --max-depth=1 $1 | sort -nr | mawk '
-		BEGIN {
-			split("KB,MB,GB,TB", Units, ",");
-		}
+		du -B 1 -d 1 ${1:+"$1"} | sort -nr | mawk '
+		BEGIN { split("bytes,KiB,MiB,GiB,TiB", unit, ",") }
 		{
-			u = 1;
-			while ($1 >= 1024)
-			{
-				$1 = $1 / 1024;
-				u += 1;
-			}
-			$1 = sprintf("%.1f %s", $1, Units[u]);
-			print $0;
-		}
-		'
+			u=1
+			while ($1>=1024) { $1=$1/1024; u+=1 }
+			$1=sprintf("%.1f %s", $1, unit[u])
+			print $0
+		}'
+
 	}
 
 	# Returns current CPU temp 'C
@@ -1503,10 +1502,10 @@ $log_content" || break # Exit error handler menu loop on cancel
 
 			)
 
-			for i in ${afp_temperature[@]}
+			for i in "${afp_temperature[@]}"
 			do
 
-				[[ -f $i ]] && { temp=$(<$i); break; }
+				[[ -f $i ]] && { temp=$(<"$i"); break; }
 
 			done
 
@@ -1560,22 +1559,24 @@ $log_content" || break # Exit error handler menu loop on cancel
 
 	}
 
-	# Returns current CPU usage %
+	# Returns current CPU usage in %
 	G_OBTAIN_CPU_USAGE(){
 
-		# PS (inaccurate, but fast??)
-		local cpu_usage=0
-		while read -r line
+		local usage=0
+
+		# ps: inaccurate but fast
+		while read -r line # Aside reasing raw, -r removes leading and trailing white spaces each line
 		do
 
-			cpu_usage=$(bc -l <<< "scale=1;$cpu_usage + $line")
+			line=${line/.} # Remove decimal dot
+			((usage+=${line#0})) # Remove leading zero, if present, then sum up
 
-		done <<< "$(ps -eo %cpu | sed -n '1!{s/^ //p}')"
+		done < <(ps --no-headers -eo %cpu) # Single core usage in xy.z
 
-		# ps returns usage of each core, so we devide the total by #n cores
-		cpu_usage=$(bc -l <<< "scale=1;$cpu_usage / $G_HW_CPU_CORES")
+		# ps returns single core usage, so we devide by core count 
+		usage=$(printf '%.1f' "$(($usage*10/$G_HW_CPU_CORES+1))e-2") # Divide by 10 to compensate decimal dot removal, re-add decimal dot via printf conversion but assure last digit is rounded correctly
 
-		echo $cpu_usage
+		echo "$usage"
 
 	}
 
@@ -1591,22 +1592,17 @@ $log_content" || break # Exit error handler menu loop on cancel
 		local return_value=1
 		local input_path=$1
 		local input_required_space=$2
-		local available_space=$(df -m --output=avail $input_path | mawk 'NR==2 {print $1}')
+		local available_space=$(df -m --output=avail "$input_path" | mawk 'NR==2 {print $1}')
 
-		if [[ ! $input_required_space ]]; then
+		if ! disable_error=1 G_CHECK_VALIDINT "$available_space"; then
 
-			if (( $info_autoscale )); then
+			G_WHIP_MSG 'G_CHECK_FREESPACE: Invalid integer from df result'
 
-				(( $available_space > 9999 )) && available_space="$(( $available_space / 1024 )) GiB" || available_space+=' MiB'
+		elif [[ ! $input_required_space ]]; then
 
-			fi
-
-			echo $available_space
+			(( $info_autoscale )) && { (( $available_space > 9999 )) && available_space="$(( $available_space / 1024 )) GiB" || available_space+=' MiB'; }
+			echo "$available_space"
 			return_value=0
-
-		elif ! disable_error=1 G_CHECK_VALIDINT $available_space; then
-
-			G_WHIP_MSG 'G_CHECK_FREESPACE: invalid integer from df result'
 
 		else
 
@@ -1696,7 +1692,7 @@ $log_content" || break # Exit error handler menu loop on cancel
 
 			# Check physical location exists and is mounted
 			fp_actual=$(readlink -f $G_FP_DIETPI_USERDATA)
-			df -P $fp_actual &> /dev/null || return_value=1
+			df -P "$fp_actual" &> /dev/null || return_value=1
 
 		fi
 
@@ -1780,21 +1776,20 @@ $log_content" || break # Exit error handler menu loop on cancel
 		# Run in blocking mode
 		if [[ $G_THREADING_ENABLED == 0 ]]; then
 
-			local command=$*
-			G_DIETPI-NOTIFY 2 "G_THREADING disabled, running command in blocking mode | $command"
-			$command
+			G_DIETPI-NOTIFY 2 "G_THREADING disabled, running command in blocking mode | $*"
+			"$@"
 
 		# Launch as background process
 		else
 
 			[[ $G_THREAD_COUNT =~ ^[0-9]+$ ]] || G_THREAD_COUNT=-1
 			((G_THREAD_COUNT++))
-			G_THREAD_COMMAND[$G_THREAD_COUNT]=$*
+			G_THREAD_COMMAND[$G_THREAD_COUNT]=$* # Store for later output with G_THREAD_WAIT
 
-			echo -1337 > /tmp/.G_THREAD_EXITCODE_$G_THREAD_COUNT
-			{ { G_INTERACTIVE=0 ${G_THREAD_COMMAND[$G_THREAD_COUNT]} &> /tmp/.G_THREAD_COMMAND_$G_THREAD_COUNT; echo $? > /tmp/.G_THREAD_EXITCODE_$G_THREAD_COUNT; } & disown; } &> /dev/null
+			echo -1337 > "/tmp/.G_THREAD_EXITCODE_$G_THREAD_COUNT"
+			{ { G_INTERACTIVE=0 "$@" &> "/tmp/.G_THREAD_COMMAND_$G_THREAD_COUNT"; echo $? > "/tmp/.G_THREAD_EXITCODE_$G_THREAD_COUNT"; } & disown; } &> /dev/null
 
-			G_DIETPI-NOTIFY 2 "G_THREAD_START_$G_THREAD_COUNT | ${G_THREAD_COMMAND[$G_THREAD_COUNT]}"
+			G_DIETPI-NOTIFY 2 "G_THREAD_START_$G_THREAD_COUNT | $*"
 
 		fi
 
@@ -1805,43 +1800,38 @@ $log_content" || break # Exit error handler menu loop on cancel
 		#local wait_for_specific_thread_pid=-1
 		#[[ $1 ]] && wait_for_specific_thread_pid=$1
 
-		local thread_active i waiting=-1
+		local i waiting_for exit_code
 
+		# Wait until all theads finished
 		while :
 		do
 
-			thread_active=0
-
-			for i in ${!G_THREAD_COMMAND[@]}
+			for i in "${!G_THREAD_COMMAND[@]}"
 			do
 
-				if [[ -f /tmp/.G_THREAD_EXITCODE_$i && $(</tmp/.G_THREAD_EXITCODE_$i) == '-1337' ]]; then
-
-					(( $waiting == $i )) || G_DIETPI-NOTIFY -2 "G_THREAD_WAIT_$i | ${G_THREAD_COMMAND[$i]}"
-					thread_active=1
-					break
-
-				fi
+				[[ -f /tmp/.G_THREAD_EXITCODE_$i && $(<"/tmp/.G_THREAD_EXITCODE_$i") == '-1337' ]] || continue
+				# Print what we are waiting for, update processing message if thread changed since last loop
+				[[ $waiting_for == "$i" ]] || G_DIETPI-NOTIFY -2 "G_THREAD_WAIT_$i | ${G_THREAD_COMMAND[$i]}"
+				waiting_for=$i
+				sleep 1
+				continue 2
 
 			done
 
-			(( $thread_active )) || break
-
-			waiting=$i
-			sleep 1
+			break
 
 		done
 
 		G_DIETPI-NOTIFY 0 'G_THREAD: All threads finished'
 
-		# - Check all thread exit codes for issues
-		for i in ${!G_THREAD_COMMAND[@]}
+		# Check all thread's exit codes for issues
+		for i in "${!G_THREAD_COMMAND[@]}"
 		do
 
 			if [[ -r /tmp/.G_THREAD_EXITCODE_$i ]]; then
 
-				local exit_code=$(</tmp/.G_THREAD_EXITCODE_$i)
-				(( $exit_code )) && G_WHIP_MSG "G_THREAD ERROR:\n - Command = ${G_THREAD_COMMAND[$i]}\n - Exit code = $exit_code\n\n$(</tmp/.G_THREAD_COMMAND_$i)"
+				exit_code=$(<"/tmp/.G_THREAD_EXITCODE_$i")
+				(( $exit_code )) && G_WHIP_MSG "G_THREAD ERROR:\n - Command = ${G_THREAD_COMMAND[$i]}\n - Exit code = $exit_code\n\n$(<"/tmp/.G_THREAD_COMMAND_$i")"
 
 			else
 
@@ -1926,8 +1916,8 @@ $log_content" || break # Exit error handler menu loop on cancel
 		# Replace password string by asterisks in output string
 		if [[ $GCI_PASSWORD == 1 ]]; then
 
-			local password=$(sed -E "s/^.*$pattern[[:blank:]]*//" <<< "$setting_raw")
-			setting_raw="$(sed -E "s/(^.*$pattern[[:blank:]]*).*$/\1/" <<< "$setting_raw")${password//?/*}"
+			local password=$(sed -E "s/^.*${pattern}[[:blank:]]*//" <<< "$setting_raw")
+			setting_raw="$(sed -E "s/(^.*${pattern}[[:blank:]]*).*$/\1/" <<< "$setting_raw")${password//?/*}"
 			unset -v password
 
 		fi
@@ -1965,18 +1955,18 @@ NB:
 \nRetry with proper permissions or apply the setting manually:
 	$setting_raw"
 
-		elif error=$(grep -Eq "^[[:blank:]]*$pattern" $file 2>&1); then
+		elif error=$(grep -Eq "^[[:blank:]]*$pattern" "$file" 2>&1); then
 			# As an error within the condition leads to result "false", it can be caught only in next "elif"/"else" statement.
 
 			if [[ $GCI_PRESERVE == 1 ]]; then
 
-				G_DIETPI-NOTIFY 0 "Current setting in \e[33m$file\e[0m will be preserved: \e[33m$([[ $GCI_PASSWORD == 1 ]] && echo "${setting_raw//\\/\\\\}" || grep -Em1 "^[[:blank:]]*$pattern" $file | sed 's|\\|\\\\|g')\e[0m"
+				G_DIETPI-NOTIFY 0 "Current setting in \e[33m$file\e[0m will be preserved: \e[33m$([[ $GCI_PASSWORD == 1 ]] && echo "${setting_raw//\\/\\\\}" || grep -Em1 "^[[:blank:]]*$pattern" "$file" | sed 's|\\|\\\\|g')\e[0m"
 
-			elif error=$(grep -Eq "^[[:blank:]]*$setting([[:space:]]|$)" $file 2>&1); then
+			elif error=$(grep -Eq "^[[:blank:]]*$setting([[:space:]]|$)" "$file" 2>&1); then
 
-				G_DIETPI-NOTIFY 0 "Desired setting in \e[33m$file\e[0m was already set: \e[33m$([[ $GCI_PASSWORD == 1 ]] && echo "${setting_raw//\\/\\\\}" || grep -Em1 "^[[:blank:]]*$pattern" $file | sed 's|\\|\\\\|g')\e[0m"
+				G_DIETPI-NOTIFY 0 "Desired setting in \e[33m$file\e[0m was already set: \e[33m$([[ $GCI_PASSWORD == 1 ]] && echo "${setting_raw//\\/\\\\}" || grep -Em1 "^[[:blank:]]*$pattern" "$file" | sed 's|\\|\\\\|g')\e[0m"
 
-			elif error=$( (( $(grep -Ec "^[[:blank:]]*$pattern" $file 2>&1) > 1 )) 2>&1); then
+			elif error=$( (( $(grep -Ec "^[[:blank:]]*$pattern" "$file" 2>&1) > 1 )) 2>&1); then
 				[[ $error ]] && { syntax_error; return 1; }
 
 				G_WHIP_MSG "[FAILED] Setting was found multiple times
@@ -1985,7 +1975,7 @@ NB:
 was found multiple times in file \$3
 	$file
 \n____________
-$(grep -En "^[[:blank:]]*$pattern" $file)
+$(grep -En "^[[:blank:]]*$pattern" "$file")
 ____________
 \nEither the pattern \$1 needs to be more specific or the desired setting can appear multiple times by design and it cannot be predicted which instance to edit.
 Please retry with more specific parameter \$1 or apply the setting manually:
@@ -1994,17 +1984,17 @@ Please retry with more specific parameter \$1 or apply the setting manually:
 			else
 				[[ $error ]] && { syntax_error; return 1; }
 
-				[[ $GCI_BACKUP == 1 && ! -f $file.bak ]] && cp -a $file $file.bak && G_DIETPI-NOTIFY 2 "Config file backup created: \e[33m$file.bak\e[0m"
-				error=$(sed -Ei "0,/^[[:blank:]]*$pattern.*$/s//$setting/" $file 2>&1) || { syntax_error; return 1; }
+				[[ $GCI_BACKUP == 1 && ! -f $file.bak ]] && cp -a "$file" "$file.bak" && G_DIETPI-NOTIFY 2 "Config file backup created: \e[33m$file.bak\e[0m"
+				error=$(sed -Ei "0,/^[[:blank:]]*$pattern.*$/s//$setting/" "$file" 2>&1) || { syntax_error; return 1; }
 				G_DIETPI-NOTIFY 0 "Setting in \e[33m$file\e[0m adjusted: \e[33m${setting_raw//\\/\\\\}\e[0m"
 
 			fi
 
-		elif error=$(grep -Eq "^[[:blank:]#;]*$pattern" $file 2>&1); then
+		elif error=$(grep -Eq "^[[:blank:]#;]*$pattern" "$file" 2>&1); then
 			[[ $error ]] && { syntax_error; return 1; }
 
-			[[ $GCI_BACKUP == 1 && ! -f $file.bak ]] && cp -a $file $file.bak && G_DIETPI-NOTIFY 2 "Config file backup created: \e[33m$file.bak\e[0m"
-			error=$(sed -Ei "0,/^[[:blank:]#;]*$pattern.*$/s//$setting/" $file 2>&1) || { syntax_error; return 1; }
+			[[ $GCI_BACKUP == 1 && ! -f $file.bak ]] && cp -a "$file" "$file.bak" && G_DIETPI-NOTIFY 2 "Config file backup created: \e[33m$file.bak\e[0m"
+			error=$(sed -Ei "0,/^[[:blank:]#;]*$pattern.*$/s//$setting/" "$file" 2>&1) || { syntax_error; return 1; }
 			G_DIETPI-NOTIFY 0 "Comment in \e[33m$file\e[0m converted to setting: \e[33m${setting_raw//\\/\\\\}\e[0m"
 
 		else
@@ -2012,11 +2002,11 @@ Please retry with more specific parameter \$1 or apply the setting manually:
 
 			if [[ $after ]]; then
 
-				if error=$(grep -Eq "^[[:blank:]]*$after" $file 2>&1); then
+				if error=$(grep -Eq "^[[:blank:]]*$after" "$file" 2>&1); then
 
-					[[ $GCI_BACKUP == 1 && ! -f $file.bak ]] && cp -a $file $file.bak && G_DIETPI-NOTIFY 2 "Config file backup created: \e[33m$file.bak\e[0m"
-					error=$(sed -Ei "0,/^[[:blank:]]*$after.*$/s//&\n$setting/" $file 2>&1) || { syntax_error; return 1; }
-					G_DIETPI-NOTIFY 0 "Added setting \e[33m${setting_raw//\\/\\\\}\e[0m to \e[33m$file\e[0m after line \e[33m$(grep -Em1 "^[[:blank:]]*$after" $file | sed 's|\\|\\\\|g')\e[0m"
+					[[ $GCI_BACKUP == 1 && ! -f $file.bak ]] && cp -a "$file" "$file.bak" && G_DIETPI-NOTIFY 2 "Config file backup created: \e[33m$file.bak\e[0m"
+					error=$(sed -Ei "0,/^[[:blank:]]*$after.*$/s//&\n$setting/" "$file" 2>&1) || { syntax_error; return 1; }
+					G_DIETPI-NOTIFY 0 "Added setting \e[33m${setting_raw//\\/\\\\}\e[0m to \e[33m$file\e[0m after line \e[33m$(grep -Em1 "^[[:blank:]]*$after" "$file" | sed 's|\\|\\\\|g')\e[0m"
 
 				else
 					[[ $error ]] && { syntax_error; return 1; }
@@ -2033,10 +2023,10 @@ could not be found in file \$3
 
 			else
 
-				[[ $GCI_BACKUP == 1 && ! -f $file.bak ]] && cp -a $file $file.bak && G_DIETPI-NOTIFY 2 "Config file backup created: \e[33m$file.bak\e[0m"
+				[[ $GCI_BACKUP == 1 && ! -f $file.bak ]] && cp -a "$file" "$file.bak" && G_DIETPI-NOTIFY 2 "Config file backup created: \e[33m$file.bak\e[0m"
 				# The following sed does not work on empty files:
-				[[ ! -s $file ]] && echo '# Added by DietPi:' >> $file
-				error=$(sed -Ei "\$a\\$setting" $file 2>&1) || { syntax_error; return 1; }
+				[[ ! -s $file ]] && echo '# Added by DietPi:' >> "$file"
+				error=$(sed -Ei "\$a\\$setting" "$file" 2>&1) || { syntax_error; return 1; }
 				G_DIETPI-NOTIFY 0 "Added setting \e[33m${setting_raw//\\/\\\\}\e[0m to end of file \e[33m$file\e[0m"
 
 			fi
@@ -2048,7 +2038,6 @@ could not be found in file \$3
 	#-----------------------------------------------------------------------------------
 	[[ $G_DEBUG == 1 ]] && G_DIETPI-NOTIFY 2 'DietPi-Globals loaded'
 	#-----------------------------------------------------------------------------------
-	# Return exit code 0, by triggering null as last command to output
-	:
+	: # Return exit code 0, by triggering null as last command to output
 	#-----------------------------------------------------------------------------------
 }
