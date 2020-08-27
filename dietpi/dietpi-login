@@ -18,6 +18,7 @@
 	#/////////////////////////////////////////////////////////////////////////////////////
 	FP_DIETPI_FIRSTRUNSETUP_LOG='/var/tmp/dietpi/logs/dietpi-firstrun-setup.log'
 	FP_DIETPI_FIRSTRUNSETUP_PID='/tmp/.dietpi-login_firstrun_setup.pid' # Must be on RAM, in case of reboot from dietpi-software etc, to reset file before this script can remove it.
+	FP_DIETPI_FIRSTRUNSETUP_ERR='/tmp/.dietpi-login_firstrun_setup_err' # Error flag to allow a second instance kill and repeat firstrun setup
 
 	Show_License(){
 
@@ -107,18 +108,33 @@
 		export G_INTERACTIVE=1
 		G_CONFIG_INJECT 'AUTO_SETUP_AUTOMATED=' 'AUTO_SETUP_AUTOMATED=0' /boot/dietpi.txt
 
+		local pid_loginerror=$$
+		[[ -f $FP_DIETPI_FIRSTRUNSETUP_ERR ]] && pid_loginerror=$(<$FP_DIETPI_FIRSTRUNSETUP_ERR)
+		if [[ $pid_loginerror != $$ ]]; then
+
+			G_WHIP_BUTTON_OK_TEXT='Take over' G_WHIP_BUTTON_CANCEL_TEXT='Retry'
+			G_WHIP_DEFAULT_ITEM='yes' G_WHIP_YESNO "[FAILED] Unknown install state/First run setup failed on another screen (PID=$pid_loginerror).
+\nYou can <Take over> the error handling on this screen and kill the other DietPi-Login session.
+\nElse you can finish the error handling on the other DietPi-Login session and <Retry> the login script on this session afterwards." || return
+			kill -9 $pid_loginerror
+
+		fi
+
+		echo $$ > $FP_DIETPI_FIRSTRUNSETUP_ERR
 		if G_WHIP_DEFAULT_ITEM='yes' G_WHIP_YESNO "[FAILED] Unknown install state/First run setup failed\n
 An error has occured either during first run update or installs.\n
 First run setup will now attempt to re-apply the last step, forced as interactive run.
 If this repeatedly fails, please collect all terminal output and the content of $FP_DIETPI_FIRSTRUNSETUP_LOG if available and report this issue to: https://github.com/MichaIng/DietPi/issues\n
 Would you like to restart the first run setup and installation?"; then
 
-			# Reset and force re-run of first run
+			# Reset and force re-run of first run setup
+			rm $FP_DIETPI_FIRSTRUNSETUP_ERR
 			killall -qw dietpi-software dietpi-update
 			echo 0 > /boot/dietpi/.install_stage
 
 		else
 
+			rm $FP_DIETPI_FIRSTRUNSETUP_ERR
 			exit 1
 
 		fi
@@ -132,15 +148,20 @@ Would you like to restart the first run setup and installation?"; then
 		grep -q '^[[:blank:]]*AUTO_SETUP_AUTOMATED=1' /boot/dietpi.txt && export G_INTERACTIVE=0
 
 		# Prompt and wait if this script runs in other session already
-		local pid_firstrunsetup
+		local pid_firstrunsetup=$$
 		[[ -f $FP_DIETPI_FIRSTRUNSETUP_PID ]] && pid_firstrunsetup=$(<$FP_DIETPI_FIRSTRUNSETUP_PID)
-		if [[ $pid_firstrunsetup && $pid_firstrunsetup != $$ ]]; then
 
-			# First run setup running in other session
+		# Unknown install state/First run setup failed in other session, forcing interactive whiptail prompt. Allow to take over and repeat on this session.
+		if [[ -f $FP_DIETPI_FIRSTRUNSETUP_ERR ]]; then
+
+			Prompt_on_Failure
+
+		elif [[ $pid_firstrunsetup != $$ ]]; then
+
 			local additional_text='Please resume setup on the active screen.'
 			[[ $G_INTERACTIVE == 0 ]] && additional_text='Automated setup is in progress. When completed, the system will be rebooted.'
 
-			G_WHIP_MSG "[INFO] DietPi first run setup: Currently running on another screen (PID=$pid_firstrunsetup).\n\n$additional_text"
+			G_WHIP_MSG "[ INFO ] DietPi first run setup is currently running on another screen (PID=$pid_firstrunsetup).\n\n$additional_text"
 
 			local restart_loop_delay=5
 			G_DIETPI-NOTIFY 2 "Waiting $restart_loop_delay seconds before checking again. Please wait... (Press CTRL+C to abort)"
@@ -148,9 +169,9 @@ Would you like to restart the first run setup and installation?"; then
 
 		elif (( $UID )); then
 
-			G_WHIP_MSG '[ERROR] Root login required\n
+			G_WHIP_MSG '[FAILED] Root login required\n
 To finish DietPi first run setup, root permissions are required.\n
-Please login again as user "root" with password "dietpi", respectively the one you chose in "dietpi.txt".'
+Please login again as user "root" with password "dietpi", respectively the one you chose via "dietpi.txt".'
 
 			exit 1
 

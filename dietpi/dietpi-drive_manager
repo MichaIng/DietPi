@@ -235,10 +235,10 @@ $swap_mounts
 				(( ${aDRIVE_ISREADONLY_CURRENTLY[$index]} )) && options=',ro'
 
 				# Additional FS-specific options
-				# - NFTS: Enable POSIX permissions
+				# - NTFS: Enable POSIX permissions and prevent splitting write buffers into 4k chunks: https://manpages.debian.org/ntfs-3g#OPTIONS
 				if [[ ${aDRIVE_FSTYPE[$index]} == 'ntfs' ]]; then
 
-					options+=',permissions'
+					options+=',permissions,big_writes'
 
 				fi
 
@@ -1124,15 +1124,12 @@ Do you wish to ignore this warning, and, mount the drive regardless?" || return 
 						# Show reserved blocks percentage for ext4 drives behind capacity:
 						if [[ ${aDRIVE_FSTYPE[$MENU_DRIVE_INDEX]} == 'ext4' ]]; then
 
-							local reserved_blocks_percent_current=0
-							local fp_tmp='.dumpe2fs_out_tmp'
+							local fp_tmp='.dumpe2fs_out_tmp' reserved_blocks_percent_current=0
 							dumpe2fs -h "${aDRIVE_MOUNT_SOURCE[$MENU_DRIVE_INDEX]}" > $fp_tmp
-							local block_count=$(mawk '/^Block count:/ {print $3;exit}' $fp_tmp)
-							local reserved_block_count=$(mawk '/^Reserved block count:/ {print $4;exit}' $fp_tmp)
+							local block_count=$(mawk '/^Block count:/{print $3;exit}' $fp_tmp)
+							local reserved_block_count=$(mawk '/^Reserved block count:/{print $4;exit}' $fp_tmp)
 							rm $fp_tmp
-							reserved_blocks_percent_current=$(bc -l <<< "scale=3;(100*$reserved_block_count)/$block_count")
-							# Correct rounding to final scale
-							reserved_blocks_percent_current=$(bc -l <<< "scale=2;(($reserved_blocks_percent_current*100)+0.5)/100" | sed 's/^\./0\./' | sed '/.0$/s/0$//' | sed 's/\.0$//')
+							reserved_blocks_percent_current=$(printf '%0.2f' "$(($reserved_block_count*100000/$block_count+1))e-3")
 							G_WHIP_MENU_ARRAY+=('Reserved blocks' ": [$reserved_blocks_percent_current%] | Adjust percentage of reserved blocks on this drive")
 
 						fi
@@ -1280,26 +1277,18 @@ Please choose another drive or format this one with another file system, e.g. ex
 				do
 
 					G_WHIP_DEFAULT_ITEM=$reserved_blocks_percent_current
-					if G_WHIP_INPUTBOX 'Ext4 formatted drives allow the reservation of drive space for the root user to assure system functionality, if filled by other users or processes, and to avoid fragmentation of large files.\n
+					G_WHIP_INPUTBOX 'Ext4 formatted drives allow the reservation of drive space for the root user to assure system functionality, if filled by other users or processes, and to avoid fragmentation of large files.\n
 However, on modern drives, the default of 5% reserved blocks is often by orders of magnitude larger than necessary. You may want to reduce the percentage to an absolute reserved space of about 500 MiB, which should be enough, to enable root user starting and maintaining the system. Additionally, on non rootfs drives reserved blocks are not necessary at all.\n
-Please enter the desired percentage of reserved blocks, e.g. "0.05" for 0.05% or "10" for 10%.\nNote: Only values between "0" and "50" are allowed.'; then
+Please enter the desired percentage of reserved blocks, e.g. "0.05" for 0.05% or "10" for 10%.\nNote: Only values between "0" and "50" are allowed.' || break
 
-						if grep -qE '^[0-9]*\.?[0-9]*$' <<< "$G_WHIP_RETURNED_VALUE" &&
-							[[ $G_WHIP_RETURNED_VALUE != '.' ]] &&
-							(( $(bc -l <<< "$G_WHIP_RETURNED_VALUE <= 50") )); then
+					if [[ $G_WHIP_RETURNED_VALUE =~ ^[0-9]*\.?[0-9]*$ && $G_WHIP_RETURNED_VALUE != '.' && $(mawk '$1 <= 50' <<< $G_WHIP_RETURNED_VALUE) ]]; then
 
-							G_EXEC tune2fs -m "$G_WHIP_RETURNED_VALUE" "${aDRIVE_MOUNT_SOURCE[$MENU_DRIVE_INDEX]}"
-							break
-
-						else
-
-							G_WHIP_MSG 'Error: Allowed are only integers or floats between "0" and "50", e.g. "10" or "0.5".\n\nPlease try again...'
-
-						fi
+						G_EXEC tune2fs -m "$G_WHIP_RETURNED_VALUE" "${aDRIVE_MOUNT_SOURCE[$MENU_DRIVE_INDEX]}"
+						break
 
 					else
 
-						break
+						G_WHIP_MSG 'Error: Allowed are only integers or floats between "0" and "50", e.g. "10" or "0.5".\n\nPlease try again...'
 
 					fi
 

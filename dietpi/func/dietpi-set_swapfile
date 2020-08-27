@@ -1,7 +1,7 @@
 #!/bin/bash
 {
 	#////////////////////////////////////
-	# DietPi Function: Swapfile
+	# DietPi Function: swap file
 	#
 	#////////////////////////////////////
 	# Created by Daniel Knight / daniel.knight@dietpi.com / dietpi.com
@@ -9,12 +9,13 @@
 	#////////////////////////////////////
 	#
 	# Info:
-	# - DietPi Swapfile control for setting enable/disable/size/location.
+	# - Location: /boot/dietpi/func/dietpi-set_swapfile
+	# - Allows set the swap file size and path or disable it, based in input arguments, dietpi.txt entry, existing swap file or default, in that priority order.
 	#
 	# Usage:
-	# - $1 = 0=disable, 1=enable+autosize, >=2=enable+size
-	# - $2 = optional location
-	# - /boot/dietpi/func/dietpi-set_swapfile     = Print current swap size and location
+	# - <empty>	= Print currently active swap locations from /proc/swaps
+	# - $1		= swap file size [MiB], use "0" to disable or "1" for auto-choice assuring min 2048 MiB total memory, respectively 50% of RAM size when used with "zram"
+	# - $2		= swap file path, or use "zram" to create a zram-swap on /dev/zram0 instead
 	#////////////////////////////////////
 
 	# Import DietPi-Globals --------------------------------------------------------------
@@ -24,130 +25,184 @@
 	G_INIT
 	# Import DietPi-Globals --------------------------------------------------------------
 
-	SWAP_SIZE=$(sed -n '/^[[:blank:]]*AUTO_SETUP_SWAPFILE_SIZE=/{s/^[^=]*=//p;q}' /boot/dietpi.txt)
-	SWAP_LOCATION=$(sed -n '/^[[:blank:]]*AUTO_SETUP_SWAPFILE_LOCATION=/{s/^[^=]*=//p;q}' /boot/dietpi.txt)
+	EXIT_CODE=0
 
-	disable_error=1 G_CHECK_VALIDINT "$1" && SWAP_SIZE_TARGET=$1 || SWAP_SIZE_TARGET=$SWAP_SIZE
-	[[ $2 ]] && SWAP_LOCATION_TARGET=$2 || SWAP_LOCATION_TARGET=$SWAP_LOCATION
+	# Check and apply valid input, else dietpi.txt entry, else current swap file, else revert to defaults
+	# - Size
+	if disable_error=1 G_CHECK_VALIDINT "$1"; then
+
+		SWAP_SIZE=$1
+
+	elif ! SWAP_SIZE=$(sed -n '/^[[:blank:]]*AUTO_SETUP_SWAPFILE_SIZE=/{s/^[^=]*=//p;q}' /boot/dietpi.txt) || ! disable_error=1 G_CHECK_VALIDINT "$SWAP_SIZE"; then
+
+		SWAP_SIZE=$(mawk '$2=="file" {printf "%.0f",$3/1024;exit}' /proc/swaps) && disable_error=1 G_CHECK_VALIDINT "$SWAP_SIZE" || SWAP_SIZE=1
+
+	fi
+	# - Path: Store current saved (only absolute paths to exclude zram) and active paths for later use
+	SWAP_PATH_CURRENT=$(sed -n '/^[[:blank:]]*AUTO_SETUP_SWAPFILE_LOCATION=\//{s/^[^=]*=//p;q}' /boot/dietpi.txt)
+	read -ra SWAP_FILES_ACTIVE < <(mawk '$2=="file" {print $1}' /proc/swaps)
+	if [[ $2 == '/'* || $2 == 'zram' ]]; then
+
+		SWAP_PATH=$2
+
+	elif SWAP_PATH=$SWAP_PATH_CURRENT; [[ $SWAP_PATH != '/'* && $2 != 'zram' ]]; then
+
+		SWAP_SIZE=$(mawk '$2=="file" {print $1;exit}' /proc/swaps) && [[ $2 == '/'* || $2 == 'zram' ]] || SWAP_PATH='/var/swap'
+
+	fi
 
 	Update_DietPi_Conf(){
 
 		G_CONFIG_INJECT 'AUTO_SETUP_SWAPFILE_SIZE=' "AUTO_SETUP_SWAPFILE_SIZE=$SWAP_SIZE" /boot/dietpi.txt
-		G_CONFIG_INJECT 'AUTO_SETUP_SWAPFILE_LOCATION=' "AUTO_SETUP_SWAPFILE_LOCATION=$SWAP_LOCATION" /boot/dietpi.txt
+		[[ $SWAP_FS == 'zram' ]] && SWAP_PATH='zram' # Revert zram path to input value
+		G_CONFIG_INJECT 'AUTO_SETUP_SWAPFILE_LOCATION=' "AUTO_SETUP_SWAPFILE_LOCATION=$SWAP_PATH" /boot/dietpi.txt
 
 	}
 
 	Update_Tmp(){
 
 		# Set /tmp to 50% of RAM+SWAP: https://github.com/MichaIng/DietPi/issues/1027#issuecomment-369373082
-		local tmp_target_size="$(( $(free -tm | mawk '/^Total:/{print $2;exit}') / 2 ))M"
+		local tmp_size=$(( $(free -tm | mawk '/^Total:/{print $2;exit}') / 2 ))
 
-		G_DIETPI-NOTIFY 2 "Setting /tmp tmpfs size: $tmp_target_size"
+		G_DIETPI-NOTIFY 2 "Setting /tmp tmpfs size: $tmp_size MiB"
 
-		sed -i "/[[:blank:]]\/tmp[[:blank:]]/ctmpfs \/tmp tmpfs size=$tmp_target_size,noatime,lazytime,nodev,nosuid,mode=1777" /etc/fstab
+		# Apply to existing fstab entry
+		sed -i "/[[:blank:]]\/tmp[[:blank:]]/ctmpfs \/tmp tmpfs size=${tmp_size}M,noatime,lazytime,nodev,nosuid,mode=1777" /etc/fstab
 		systemctl daemon-reload
-		mount -a # Required if /tmp was somehow not mounted before. Will be skipped if already mounted
-		G_EXEC mount -o remount /tmp # Required to apply new settings/size. "remount" required to preserve current content, or, doubled mount
+
+		# Apply now to existing mount via "remount" to preserve current content and avoid doubled mount
+		findmnt /tmp > /dev/null && G_EXEC mount -o remount /tmp
 
 	}
 
 	Swap_Disable(){
 
-		G_DIETPI-NOTIFY 0 'Disable swapfile'
-
+		G_DIETPI-NOTIFY 2 'Disabling and deleting all existing swap files'
 		G_EXEC swapoff -a
-		if [[ -f $SWAP_LOCATION ]]; then
-
-			G_DIETPI-NOTIFY 2 "Deleting existing swapfile: $SWAP_LOCATION"
-			rm "$SWAP_LOCATION"
-
-		fi
+		rm -fv "$SWAP_PATH_CURRENT" "${SWAP_FILES_ACTIVE[@]}"
 		sed -i '/[[:blank:]]swap[[:blank:]]/d' /etc/fstab
-
-		SWAP_SIZE=0
-		SWAP_LOCATION='/var/swap'
+		# zram-swap
+		[[ -f '/etc/modules-load.d/dietpi-zram-swap.conf' ]] && rm -v /etc/modules-load.d/dietpi-zram-swap.conf
+		[[ -f '/etc/udev/rules.d/98-dietpi-zram-swap.rules' ]] && rm -v /etc/udev/rules.d/98-dietpi-zram-swap.rules
 
 	}
 
+	# Create new swappey whappey
 	Swap_Enable(){
 
-		local swap_dir="${SWAP_LOCATION_TARGET%/*}/"
-		local fs_type=$(findmnt -no FSTYPE -T "$swap_dir")
+		G_DIETPI-NOTIFY 0 'Generating new swap space'
+		G_DIETPI-NOTIFY 2 "Size = $SWAP_SIZE MiB"
+		G_DIETPI-NOTIFY 2 "Path = $SWAP_PATH"
 
-		# Exclude devices
-		# - BBB
-		if (( $G_HW_MODEL == 71 )); then
+		# zram
+		if [[ $SWAP_FS == 'zram' ]]; then
 
-			G_DIETPI-NOTIFY 1 "Disabled swapfile generation for: $G_HW_MODEL_NAME"
+			[[ -b '/dev/zram0' ]] || G_EXEC modprobe zram
+			G_EXEC eval 'echo 1 > /sys/block/zram0/reset'
+			G_EXEC eval "echo '${SWAP_SIZE}M' > /sys/block/zram0/disksize"
 
-		# Exclude file systems
-		elif [[ $fs_type == 'btrfs' ]]; then
+		# Pre-allocate for filesystems which do no support quick-allocate with fallocate
+		elif [[ $SWAP_FS == 'f2fs' || $SWAP_FS == 'xfs' || $SWAP_FS == 'vfat' ]]; then
 
-			G_DIETPI-NOTIFY 1 "Swapfile not supported on file system: $fs_type"
+			G_EXEC dd if=/dev/zero of="$SWAP_PATH" bs=4K count=$(( $SWAP_SIZE * 1024 / 4 ))
 
-		# Free spacey, checkey weckey
-		elif ! G_CHECK_FREESPACE "$swap_dir" $SWAP_SIZE_TARGET; then
-
-			G_DIETPI-NOTIFY 1 'Unable to generate swapfile due to insufficient disk space. Swap has been disabled.'
-
-		# Create new swappey whappey
 		else
 
-			SWAP_SIZE=$SWAP_SIZE_TARGET
-			SWAP_LOCATION=$SWAP_LOCATION_TARGET
-
-			G_DIETPI-NOTIFY 0 'Generating new swapfile'
-			G_DIETPI-NOTIFY 2 "Size     = $SWAP_SIZE MB"
-			G_DIETPI-NOTIFY 2 "Location = $SWAP_LOCATION"
-
-			# - Pre-allocate for filesystems which do no support quick-allocate with fallocate
-			if [[ $fs_type == 'f2fs' || $fs_type == 'xfs' || $fs_type == 'vfat' ]]; then
-
-				G_EXEC dd if=/dev/zero of="$SWAP_LOCATION" bs=4K count=$(( $SWAP_SIZE * 1024 / 4 ))
-
-			else
-
-				G_EXEC fallocate -l $SWAP_SIZE'M' "$SWAP_LOCATION"
-
-			fi
-
-			G_EXEC mkswap "$SWAP_LOCATION"
-			chmod 600 "$SWAP_LOCATION"
-			G_EXEC swapon "$SWAP_LOCATION"
-
-			echo "$SWAP_LOCATION none swap sw 0 0" >> /etc/fstab
+			G_EXEC fallocate -l $SWAP_SIZE'M' "$SWAP_PATH"
 
 		fi
+
+		G_EXEC mkswap "$SWAP_PATH"
+		[[ $SWAP_FS == 'zram' ]] || G_EXEC_NOHALT=1 G_EXEC chmod 600 "$SWAP_PATH" # Allow to fail on filesystems without UNIX permission support
+		G_EXEC swapon "$SWAP_PATH"
+
+		# Make persistent, proceed with failure in case of R/O rootfs
+		# - zram
+		if [[ $SWAP_FS == 'zram' ]]; then
+
+			G_EXEC_NOHALT=1 G_EXEC eval "echo 'zram' > /etc/modules-load.d/dietpi-zram-swap.conf" || EXIT_CODE=1
+			G_EXEC_NOHALT=1 G_EXEC eval "echo 'SUBSYSTEM==\"block\", KERNEL==\"zram0\", ACTION==\"add\", ATTR{disksize}=\"${SWAP_SIZE}M\", RUN+=\"/sbin/mkswap /dev/zram0\", RUN+=\"/sbin/swapon /dev/zram0\"' > /etc/udev/rules.d/98-dietpi-zram-swap.rules" || EXIT_CODE=1
+			G_EXEC_NOHALT=1 G_EXEC eval "echo 'swappiness=50' > /etc/sysctl.d/98-dietpi-zram-swap.conf" || EXIT_CODE=1
+
+		# - swap file
+		else
+
+			G_EXEC_NOHALT=1 G_EXEC eval "echo '$SWAP_PATH none swap sw' >> /etc/fstab" || EXIT_CODE=1
+
+		fi
+
+	}
+
+	Error_Reset(){
+
+		G_DIETPI-NOTIFY 1 "$*"
+		G_DIETPI-NOTIFY 2 'Leaving swap space disabled'
+		SWAP_SIZE=0 EXIT_CODE=1
 
 	}
 
 	#/////////////////////////////////////////////////////////////////////////////////////
 	# Main Loop
 	#/////////////////////////////////////////////////////////////////////////////////////
-	# Info mode - Print Size / Location
-	if [[ ! $1 ]]; then
+	G_DIETPI-NOTIFY 3 "$G_PROGRAM_NAME" "Applying $SWAP_SIZE $SWAP_PATH"
 
-		echo "$SWAP_SIZE $SWAP_LOCATION"
+	# Always reset existing swap files
+	Swap_Disable
 
-	# Remove/Create swap
+	# zram-swap
+	if [[ $SWAP_PATH == 'zram' ]]; then
+
+		(( $SWAP_SIZE == 1 )) && SWAP_SIZE=$(( $(free -m | mawk '/^Mem:/{print $2;exit}') / 2 )) # Auto size
+		SWAP_PATH='/dev/zram0' SWAP_FS='zram'
+
+	# swap file
 	else
 
-		G_DIETPI-NOTIFY 3 "$G_PROGRAM_NAME" 'Apply'
+		# Auto size: Skip if size would be less than 100 MiB, since else on all 2 GiB SBCs there is a non-reasonable ~50 MiB swap file created
+		if (( $SWAP_SIZE == 1 )); then
 
-		# Always reset/remove existing swap
-		Swap_Disable
+			SWAP_SIZE=$(( 2048 - $(free -m | mawk '/^Mem:/{print $2;exit}') ))
+			if (( $SWAP_SIZE > 1 && $SWAP_SIZE < 100 )); then
 
-		# Auto size?
-		(( $SWAP_SIZE_TARGET == 1 )) && SWAP_SIZE_TARGET=$(( 2048 - $(free -m | mawk '/^Mem:/{print $2;exit}') ))
+				G_DIETPI-NOTIFY 0 "Skipping the auto-creation of a tiny $SWAP_SIZE MiB swap file"
+				G_DIETPI-NOTIFY 0 'Set < 100 MiB values manually to create such small swap files'
+				SWAP_SIZE=0
 
-		# Configure new swapfile?
-		(( $SWAP_SIZE_TARGET > 0 )) && Swap_Enable
+			fi
 
-		Update_DietPi_Conf
-		Update_Tmp
+		fi
+		SWAP_DIR="${SWAP_PATH%/*}/" SWAP_FS=$(findmnt -no FSTYPE -T "$SWAP_DIR")
 
 	fi
+
+	# Disable
+	if (( $SWAP_SIZE < 1 )); then
+
+		SWAP_SIZE=0
+
+	# Unsupported on Btrfs
+	elif [[ $SWAP_FS == 'btrfs' ]]; then
+
+		Error_Reset 'Swap files are not supported on Btrfs file system.'
+
+	# Free spacey, checkey weckey: zram < RAM size
+	elif [[ $SWAP_FS == 'zram' ]] && (( $(free -m | mawk '/^Mem:/{print $2;exit}') <= $SWAP_SIZE )); then
+
+		Error_Reset 'Insufficient RAM size for desired zram-swap size'
+
+	elif [[ $SWAP_FS != 'zram' ]] && ! G_CHECK_FREESPACE "$SWAP_DIR" $SWAP_SIZE; then
+
+		Error_Reset 'Insufficient free space for desired swap files size'
+
+	else
+
+		Swap_Enable
+
+	fi
+
+	Update_DietPi_Conf
+	Update_Tmp
 	#-----------------------------------------------------------------------------------
-	exit 0
+	exit $EXIT_CODE
 	#-----------------------------------------------------------------------------------
 }

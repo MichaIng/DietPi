@@ -1379,12 +1379,6 @@ NB: You now need to run "apt update" or "G_AGUP" once after each reboot, before 
 			rpi_i2c_baudrate=$(( ${rpi_i2c_baudrate:-100000} / 1000 ))
 			G_WHIP_MENU_ARRAY+=('I2C frequency' ": [$rpi_i2c_baudrate kHz]")
 
-			# USB max current
-			local rpi_max_usb_current_enabled=$(grep -cm1 '^[[:blank:]]*max_usb_current=1' /boot/config.txt)
-			local rpi_max_usb_current_text='Off'
-			(( $rpi_max_usb_current_enabled )) && rpi_max_usb_current_text='On'
-			G_WHIP_MENU_ARRAY+=('Max USB current' ": [$rpi_max_usb_current_text]")
-
 			# USB boot option: RPi3 only and not required for RPi3+: https://www.raspberrypi.org/documentation/hardware/raspberrypi/bootmodes/msd.md
 			if [[ $G_HW_MODEL == 3 && $G_HW_MODEL_NAME != *'+'* ]]; then
 
@@ -1509,26 +1503,6 @@ Further information: https://www.raspberrypi.org/documentation/hardware/raspberr
 \nDo you want to continue?' || return
 				/boot/dietpi/func/dietpi-set_hardware rpi-eeprom
 
-			elif [[ $G_WHIP_RETURNED_VALUE == 'Max USB current' ]]; then
-
-				if (( $rpi_max_usb_current_enabled )); then
-
-					if G_WHIP_YESNO "Current setting: [$rpi_max_usb_current_text] (1.2AMP)\nWould you like to disable this setting?
-\nOnce disabled:\n - Max USB current will be limited to 0.6AMP.\n - Shared by all USB ports."; then
-
-						G_CONFIG_INJECT 'max_usb_current=' 'max_usb_current=0' /boot/config.txt
-						REBOOT_REQUIRED=1
-
-					fi
-
-				elif G_WHIP_YESNO "Current setting: [$rpi_max_usb_current_text] (0.6AMP)\nWould you like to enable this setting?
-\nOnce enabled:\n - Max USB current will be set to 1.2AMP.\n - Shared by all USB ports."; then
-
-					G_CONFIG_INJECT 'max_usb_current=' 'max_usb_current=1' /boot/config.txt
-					REBOOT_REQUIRED=1
-
-				fi
-
 			elif [[ $G_WHIP_RETURNED_VALUE == 'I2C state' ]]; then
 
 				if (( $rpi_i2c_enabled )); then
@@ -1593,18 +1567,20 @@ Please reboot this system once, the HW bit which allows USB boot support will th
 		TARGETMENUID=0
 
 		# All devices
-		local current_cpu_governor=$(sed -n '/^[[:blank:]]*CONFIG_CPU_GOVERNOR=/{s/^[^=]*=//p;q}' /boot/dietpi.txt)
+		local current_cpu_governor='N/A'
+		local fp_current_cpu_governor='/sys/devices/system/cpu/cpu0/cpufreq/scaling_governor'
+		[[ -f $fp_current_cpu_governor ]] && current_cpu_governor=$(<$fp_current_cpu_governor)
 
-		local frequency_min_cpu_governor=1
+		local frequency_min_cpu_governor='N/A'
 		local fp_frequency_min_cpu_governor='/sys/devices/system/cpu/cpu0/cpufreq/scaling_min_freq'
 		[[ -f $fp_frequency_min_cpu_governor ]] && frequency_min_cpu_governor=$(( $(<$fp_frequency_min_cpu_governor) / 1000 ))
 
-		local frequency_max_cpu_governor=2
+		local frequency_max_cpu_governor='N/A'
 		local fp_frequency_max_cpu_governor='/sys/devices/system/cpu/cpu0/cpufreq/scaling_max_freq'
 		[[ -f $fp_frequency_max_cpu_governor ]] && frequency_max_cpu_governor=$(( $(<$fp_frequency_max_cpu_governor) / 1000 ))
 
 		local cpu_temp=$(G_OBTAIN_CPU_TEMP)
-		local cpu_temp_f='Unknown'
+		local cpu_temp_f='N/A'
 		if disable_error=1 G_CHECK_VALIDINT "$cpu_temp"; then
 
 			cpu_temp_f="$(( $cpu_temp * 9/5 + 32 ))'f"
@@ -1612,8 +1588,8 @@ Please reboot this system once, the HW bit which allows USB boot support will th
 
 		fi
 
-		local memory_total=$(( $(mawk '/MemTotal:/{print $2;exit}' /proc/meminfo) / 1000 ))
-		local memory_free=$(( $(mawk '/MemFree:/{print $2;exit}' /proc/meminfo) / 1000 ))
+		local memory_total=$(mawk '/MemTotal:/{printf "%.0f",$2/1024;exit}' /proc/meminfo)
+		local memory_free=$(mawk '/MemAvailable:/{printf "%.0f",$2/1024;exit}' /proc/meminfo)
 		local memory_usage=$(( $memory_total - $memory_free ))
 
 		# Create Menu List for Whiptail
@@ -1626,10 +1602,8 @@ Please reboot this system once, the HW bit which allows USB boot support will th
 		# CPU GOV
 		G_WHIP_MENU_ARRAY+=('CPU Governor' ": [$current_cpu_governor]")
 
-		# Ondemand/Interactive Throttle up menu
-		if [[ $current_cpu_governor == 'ondemand' ||
-			$current_cpu_governor == 'conservative' ||
-			$current_cpu_governor == 'interactive' ]]; then
+		# ondemand/conservative/interactive throttle up menu
+		if [[ $current_cpu_governor == 'ondemand' || $current_cpu_governor == 'conservative' || $current_cpu_governor == 'interactive' ]]; then
 
 			local current_cpu_throttle_up=$(sed -n '/^[[:blank:]]*CONFIG_CPU_USAGE_THROTTLE_UP=/{s/^[^=]*=//p;q}' /boot/dietpi.txt)
 			G_WHIP_MENU_ARRAY+=('CPU Throttle Up' ": [${current_cpu_throttle_up}%]")
@@ -1689,14 +1663,14 @@ Please reboot this system once, the HW bit which allows USB boot support will th
 
 			local arm_freq_min=$(sed -n '/^[[:blank:]]*arm_freq_min=/{s/^[^=]*=//p;q}' /boot/config.txt)
 			[[ $arm_freq_min ]] || { [[ $G_HW_MODEL == [01] ]] && arm_freq_min=700 || arm_freq_min=600; } # 700 on RPi1+Zero, 600 on all others
-			G_WHIP_MENU_ARRAY+=('ARM Idle Frequency' ": [$arm_freq_min MHz]")
+			G_WHIP_MENU_ARRAY+=('ARM Idle Frequency' ": [$arm_freq_min MHz]") # https://github.com/MichaIng/DietPi/issues/3690
 
 			local initial_turbo=$(sed -n '/^[[:blank:]]*initial_turbo=/{s/^[^=]*=//p;q}' /boot/config.txt)
 			G_WHIP_MENU_ARRAY+=('ARM Initial Turbo' ": [${initial_turbo:=0} seconds]")
 
 		fi
 
-		if G_WHIP_MENU "Hardware : $G_HW_MODEL_NAME\nCPU Temp: $cpu_temp : $cpu_temp_f\nRAM: $memory_total MB | Used: $memory_usage MB | Free: $memory_free MB"; then
+		if G_WHIP_MENU "Hardware : $G_HW_MODEL_NAME\nCPU Temp: $cpu_temp : $cpu_temp_f\nRAM: $memory_total MiB | Used: $memory_usage MiB | Free: $memory_free MiB"; then
 
 			TARGETMENUID=4 # Return to this menu
 
@@ -1712,8 +1686,7 @@ Please reboot this system once, the HW bit which allows USB boot support will th
 
 				'Ondemand Down Factor')
 
-					MIN_VALUE=1
-					MAX_VALUE=200
+					MIN_VALUE=1 MAX_VALUE=200
 					G_WHIP_DEFAULT_ITEM=$current_cpu_down_factor
 					if G_WHIP_INPUTBOX "After Ondemand throttles up, how long before the next sample to check if CPU clocks can be reduced.\n\n - This value * 'Ondemand Sample Rate' = total miliseconds\n - Lower values may help reduce power consumption, however, a 500-1000ms value is recommended to prevent excessive sampling.\n - Valid range: $MIN_VALUE - $MAX_VALUE\n
 If unsure, set any value, 'Ondemand Down Factor' option on the next screen will list the calculated miliseconds." && G_CHECK_VALIDINT "$G_WHIP_RETURNED_VALUE" $MIN_VALUE $MAX_VALUE; then
@@ -1737,7 +1710,7 @@ If unsure, set any value, 'Ondemand Down Factor' option on the next screen will 
 
 					)
 
-					for i in ${afile[@]}
+					for i in "${afile[@]}"
 					do
 
 						[[ -f $i ]] && file=$i && break
@@ -1794,7 +1767,6 @@ If unsure, set any value, 'Ondemand Down Factor' option on the next screen will 
 								G_WHIP_MENU_ARRAY+=($(( ${available_frequency_array[$i]} / $division_factor )) "$type_cpu_freq_info")
 
 							done
-
 							G_WHIP_MENU_ARRAY+=('Disabled' ': Returns clocks to default')
 
 							# MAX
@@ -1841,44 +1813,50 @@ Current setting: $user_frequency_min_text" && G_CONFIG_INJECT 'CONFIG_CPU_MIN_FR
 					# Obtain available Govs. Setup their menu and description. (Yes Gavnor!)
 					else
 
-						local Description='CPU Governor:'
+						local Description='CPU Governor: https://www.kernel.org/doc/html/latest/admin-guide/pm/cpufreq.html#generic-scaling-governors'
 						G_WHIP_MENU_ARRAY=()
+						if grep -qi 'schedutil' $FP_CPU_SCALING_GOV; then
 
+							G_WHIP_MENU_ARRAY+=('schedutil' ": Scales CPU frequency between $frequency_min_cpu_governor MHz and $frequency_max_cpu_governor MHz")
+							Description+='\nSchedutil    | Dynamic CPU frequency based on CPU scheduler metrics (recommended on modern kernels)'
+
+						fi
 						if grep -qi 'ondemand' $FP_CPU_SCALING_GOV; then
 
-							G_WHIP_MENU_ARRAY+=('ondemand' ": Scales CPU frequency between $frequency_min_cpu_governor MHz and $frequency_max_cpu_governor MHz.")
-							Description+='\nOndemand     | Dynamic CPU frequency based on usage (recommended).'
+							G_WHIP_MENU_ARRAY+=('ondemand' ": Scales CPU frequency between $frequency_min_cpu_governor MHz and $frequency_max_cpu_governor MHz")
+							Description+='\nOndemand     | Dynamic CPU frequency based on usage (recommended on older kernels)'
 
 						fi
-
 						if grep -qi 'interactive' $FP_CPU_SCALING_GOV; then
 
-							G_WHIP_MENU_ARRAY+=('interactive' ": Scales CPU frequency between $frequency_min_cpu_governor MHz and $frequency_max_cpu_governor MHz.")
-							Description+='\nInteractive  | Dynamic CPU frequency based on usage.'
+							G_WHIP_MENU_ARRAY+=('interactive' ": Scales CPU frequency between $frequency_min_cpu_governor MHz and $frequency_max_cpu_governor MHz")
+							Description+='\nInteractive  | Same as ondemand. Bias towards low latency, faster scaling'
 
 						fi
-
 						if grep -qi 'conservative' $FP_CPU_SCALING_GOV; then
 
-							G_WHIP_MENU_ARRAY+=('conservative' ": Scales CPU frequency between $frequency_min_cpu_governor MHz and $frequency_max_cpu_governor MHz.")
-							Description+='\nConservative | Same as ondemand. Bias towards powersaving, slower scaling.'
+							G_WHIP_MENU_ARRAY+=('conservative' ": Scales CPU frequency between $frequency_min_cpu_governor MHz and $frequency_max_cpu_governor MHz")
+							Description+='\nConservative | Same as ondemand. Bias towards powersaving, slower scaling'
 
 						fi
-
 						if grep -qi 'powersave' $FP_CPU_SCALING_GOV; then
 
-							G_WHIP_MENU_ARRAY+=('powersave' ": Limits CPU frequency to $frequency_min_cpu_governor MHz.")
-							Description+='\nPowersave    | Static. Reduces energy consumption, heat, performance.'
+							G_WHIP_MENU_ARRAY+=('powersave' ": Limits CPU frequency to $frequency_min_cpu_governor MHz")
+							Description+='\nPowersave    | Static. Reduces energy consumption, heat, performance'
 
 						fi
-
 						if grep -qi 'performance' $FP_CPU_SCALING_GOV; then
 
-							G_WHIP_MENU_ARRAY+=('performance' ": Forces CPU frequency to $frequency_max_cpu_governor MHz.")
-							Description+='\nPerformance  | Static. Increases energy consumption, heat, performance.'
+							G_WHIP_MENU_ARRAY+=('performance' ": Forces CPU frequency to $frequency_max_cpu_governor MHz")
+							Description+='\nPerformance  | Static. Increases energy consumption, heat, performance'
 
 						fi
+						if grep -qi 'userspace' $FP_CPU_SCALING_GOV; then
 
+							G_WHIP_MENU_ARRAY+=('userspace' ": No-op governor, allows setting frequency manually")
+							Description+='\nUserspace    | No-op. Governor does not touch CPU frequency at all'
+
+						fi
 						G_WHIP_DEFAULT_ITEM=$current_cpu_governor
 						if G_WHIP_MENU "$Description"; then
 
@@ -1893,8 +1871,7 @@ Current setting: $user_frequency_min_text" && G_CONFIG_INJECT 'CONFIG_CPU_MIN_FR
 
 				'CPU Throttle Up')
 
-					MIN_VALUE=30
-					MAX_VALUE=95
+					MIN_VALUE=30 MAX_VALUE=95
 					G_WHIP_DEFAULT_ITEM=$current_cpu_throttle_up
 					if G_WHIP_INPUTBOX "When the CPU usage (%) is greater than this value, the CPU frequency will increase from $frequency_min_cpu_governor MHz to $frequency_max_cpu_governor MHz.
  - Valid range: $MIN_VALUE - $MAX_VALUE\n - Recommended settings: Desktop = 50%, Server = 85%" && G_CHECK_VALIDINT "$G_WHIP_RETURNED_VALUE" $MIN_VALUE $MAX_VALUE; then
@@ -1908,14 +1885,12 @@ Current setting: $user_frequency_min_text" && G_CONFIG_INJECT 'CONFIG_CPU_MIN_FR
 
 				'ARM Temp Limit')
 
-					MIN_VALUE=45
-					MAX_VALUE=85
+					MIN_VALUE=45 MAX_VALUE=85
 					G_WHIP_DEFAULT_ITEM=$temp_limit
 					if G_WHIP_INPUTBOX "When the ARM temperature ('c) reaches this value, the ARM will underclock to reduce heat.
  - Recommended value: 65\n - Valid range: $MIN_VALUE - $MAX_VALUE" && G_CHECK_VALIDINT "$G_WHIP_RETURNED_VALUE" $MIN_VALUE $MAX_VALUE; then
 
 						(( $G_WHIP_RETURNED_VALUE > 65 )) && G_WHIP_MSG "Higher operating temperatures will reduce the life of your ARM SoC. Heat also dissipates through the PCB into other components, decreasing the lifespan of the whole device. Use at your own risk.\n\nDietPi recommends 65'c as a safe value (75'c for RPi 3/4).\n\nMore info: https://github.com/MichaIng/DietPi/issues/356"
-
 						G_CONFIG_INJECT 'temp_limit=' "temp_limit=$G_WHIP_RETURNED_VALUE" /boot/config.txt
 						REBOOT_REQUIRED=1
 
@@ -1925,8 +1900,7 @@ Current setting: $user_frequency_min_text" && G_CONFIG_INJECT 'CONFIG_CPU_MIN_FR
 
 				'ARM Idle Frequency')
 
-					MIN_VALUE=100
-					MAX_VALUE=600
+					MIN_VALUE=200 MAX_VALUE=600
 					G_WHIP_DEFAULT_ITEM=$arm_freq_min
 					if G_WHIP_INPUTBOX "ARM frequency (MHz) used by CPU governors powersave and conservative/ondemand/interactive when on idle.
  - Recommended value: 300\n - Valid range: $MIN_VALUE - $MAX_VALUE\n - Setting a value outside of range will reset to RPi defaults."; then
@@ -1948,8 +1922,7 @@ Current setting: $user_frequency_min_text" && G_CONFIG_INJECT 'CONFIG_CPU_MIN_FR
 
 				'ARM Initial Turbo')
 
-					MIN_VALUE=1
-					MAX_VALUE=60
+					MIN_VALUE=1 MAX_VALUE=60
 					G_WHIP_DEFAULT_ITEM=$initial_turbo
 					if G_WHIP_INPUTBOX "Amount of seconds on boot, where the CPU runs at highest clock, before it starts to respect the CPU governor. This reduces boot time quite much since RPi boots with powersave governor until the chosen one is applied at later boot stage.
  - Recommended value: 20\n - Valid range: $MIN_VALUE - $MAX_VALUE\n - Setting a value outside of range will disable this feature."; then

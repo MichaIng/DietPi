@@ -1065,11 +1065,11 @@ _EOF_
 		if [[ $INPUT_DEVICE_VALUE == 'disable' ]]; then
 
 			# RPi
-			if (( $G_HW_MODEL < 10 )); then
+			if (( $G_HW_MODEL < 10 )) && (( $G_HW_ONBOARD_WIFI )); then
 
 				systemctl disable --now hciuart 2> /dev/null
 				# Disable onboard BT via dtoverlay
-				(( $G_HW_ONBOARD_WIFI )) && G_CONFIG_INJECT 'dtoverlay=disable-bt' 'dtoverlay=disable-bt' /boot/config.txt
+				G_CONFIG_INJECT 'dtoverlay=disable-bt' 'dtoverlay=disable-bt' /boot/config.txt
 
 			# ASUS TB
 			elif (( $G_HW_MODEL == 52 )); then
@@ -1077,7 +1077,7 @@ _EOF_
 				systemctl disable --now hciuart 2> /dev/null
 
 			# Broadcom-based models that need brcm_patchram_plus
-			elif (( $G_HW_MODEL == 61 || $G_HW_MODEL == 62 )); then
+			elif [[ $G_HW_MODEL == 6[12] ]]; then
 
 				systemctl disable --now brcm_patchram_plus 2> /dev/null
 
@@ -1109,21 +1109,14 @@ _EOF_
 			[[ -f '/etc/modprobe.d/dietpi-disable_bluetooth.conf' ]] && rm /etc/modprobe.d/dietpi-disable_bluetooth.conf
 
 			# Pre-Reqs
-			if (( $G_HW_MODEL < 10 )); then
+			if (( $G_HW_MODEL < 10 )) && (( $G_HW_ONBOARD_WIFI )); then
 
 				# Login console on ttyAMA0 must be disabled: https://github.com/MichaIng/DietPi/issues/2607#issuecomment-470523194
 				if systemctl -q is-active serial-getty@ttyAMA0; then
 
-					if G_WHIP_YESNO '[WARNING] A serial login console is currently active on ttyAMA0\n
-Do you want to continue and disable the serial login console?'; then
-
-						INPUT_DEVICE_VALUE='disable' INPUT_ADDITIONAL='ttyAMA0' Serial_Main
-
-					else
-
-						exit 0
-
-					fi
+					G_WHIP_YESNO '[WARNING] A serial login console is currently active on ttyAMA0\n
+Do you want to continue and disable the serial login console?' || return 1
+					INPUT_DEVICE_VALUE='disable' INPUT_ADDITIONAL='ttyAMA0' Serial_Main
 
 				fi
 
@@ -1152,10 +1145,10 @@ Do you want to continue and disable the serial login console?'; then
 			done
 
 			# Failsafe, unblock all Bluetooth adapters
-			rfkill unblock bluetooth &> /dev/null
+			command -v rfkill > /dev/null && rfkill unblock bluetooth
 
 			# Broadcom-based models that need brcm_patchram_plus
-			if (( $G_HW_MODEL == 61 || $G_HW_MODEL == 62 )); then
+			if [[ $G_HW_MODEL == 6[12] ]]; then
 
 				G_EXEC systemctl enable --now brcm_patchram_plus
 
@@ -1164,7 +1157,7 @@ Do you want to continue and disable the serial login console?'; then
 			G_EXEC systemctl enable --now bluetooth
 
 			# RPi
-			(( $G_HW_MODEL < 10 )) && G_EXEC systemctl enable --now hciuart
+			(( $G_HW_MODEL > 9 )) || (( ! $G_HW_ONBOARD_WIFI )) || G_EXEC systemctl enable --now hciuart
 
 		else
 
@@ -1222,11 +1215,13 @@ Do you want to continue and disable the serial login console?'; then
 		fi
 
 		# Failsafe: Comment "disable_ipv6" entries in all other sysctl config files
-		local i=''
+		local i
 		for i in /etc/sysctl{,.d/*}.conf
 		do
 
-			[[ ! -f $i || $i == *'dietpi-disable_ipv6.conf' ]] && continue
+			[[ $i != '/etc/sysctl.d/dietpi-disable_ipv6.conf' && -f $i ]] || continue
+			grep -q '^[[:blank:]]*net.ipv6.conf.[^[:blank:]]*.disable_ipv6[[:blank:]]*=' $i || continue
+			i=$(readlink -f $i) # https://github.com/MichaIng/DietPi/issues/3003#issuecomment-669464255
 			sed -i 's/^[[:blank:]]*net.ipv6.conf.[^[:blank:]]*.disable_ipv6[[:blank:]]*=/#&/' $i
 
 		done
@@ -1325,7 +1320,7 @@ Do you want to continue and disable the serial login console?'; then
 		fi
 
 		# APT packages
-		local packages='iw wireless-tools crda rfkill wpasupplicant'
+		local packages='iw wireless-tools crda wpasupplicant'
 
 		if [[ $INPUT_DEVICE_VALUE == 'disable' ]]; then
 
@@ -1389,7 +1384,7 @@ _EOF_
 			G_AG_CHECK_INSTALL_PREREQ $packages || EXIT_CODE=1
 
 			# Failsafe, unblock all WiFi adapters: https://github.com/MichaIng/DietPi/issues/1627
-			rfkill unblock wifi &> /dev/null
+			command -v rfkill > /dev/null && rfkill unblock wifi
 
 		elif [[ $INPUT_DEVICE_VALUE == 'onboard_enable' ]]; then
 
@@ -1455,16 +1450,9 @@ _EOF_
 				# RPi: Warn if on RPi ttyAMA0 is about to be enabled while Bluetooth is up
 				if [[ $G_HW_MODEL == [0-9] && $INPUT_ADDITIONAL == 'ttyAMA0' ]] && systemctl -q is-active hciuart; then
 
-					if G_WHIP_YESNO '[WARNING] ttyAMA0 is currently used by Bluetooth\n
-Do you want to continue and DISABLE Bluetooth now?'; then
-
-						INPUT_DEVICE_VALUE='disable' Bluetooth_Main
-
-					else
-
-						exit 0
-
-					fi
+					G_WHIP_YESNO '[WARNING] ttyAMA0 is currently used by Bluetooth\n
+Do you want to continue and DISABLE Bluetooth now?' || return 1
+					INPUT_DEVICE_VALUE='disable' Bluetooth_Main
 
 				fi
 
@@ -1481,30 +1469,30 @@ Do you want to continue and DISABLE Bluetooth now?'; then
 				# - RPi
 				if (( $G_HW_MODEL < 10 )); then
 
-					grep -q "console=$INPUT_ADDITIONAL" /boot/cmdline.txt || sed -i "/root=/s/$/ console=$INPUT_ADDITIONAL,115200/" /boot/cmdline.txt
+					grep -q "console=$INPUT_ADDITIONAL" /boot/cmdline.txt || sed -i "/root=/s/[[:blank:]]*$/ console=$INPUT_ADDITIONAL,115200/" /boot/cmdline.txt
 
 				# - Odroid C2
 				elif (( $G_HW_MODEL == 12 )); then
 
-					local old=''
-					[[ -f '/boot/boot.ini' ]] && old=$(grep -m1 '^setenv condev "' /boot/boot.ini) || return
-					[[ $old =~ console=$INPUT_ADDITIONAL ]] && return
+					local old=
+					[[ -f '/boot/boot.ini' ]] && old=$(grep -m1 '^setenv condev "' /boot/boot.ini) || return 0
+					[[ $old == *"console=$INPUT_ADDITIONAL"* ]] && return 0
 					old=$(cut -d \" -f 2 <<< "$old")
 					G_CONFIG_INJECT 'setenv condev "' "setenv condev \"$old console=$INPUT_ADDITIONAL,115200n8\"" /boot/boot.ini
 
 				# - Odroid XU4
 				elif (( $G_HW_MODEL == 11 )); then
 
-					local old=''
-					[[ -f '/boot/boot.ini' ]] && old=$(grep -m1 '^setenv bootrootfs "' /boot/boot.ini) || return
-					[[ $old =~ console=$INPUT_ADDITIONAL ]] && return
+					local old=
+					[[ -f '/boot/boot.ini' ]] && old=$(grep -m1 '^setenv bootrootfs "' /boot/boot.ini) || return 0
+					[[ $old == *"console=$INPUT_ADDITIONAL"* ]] && return 0
 					old=$(cut -d \" -f 2 <<< "$old")
 					G_CONFIG_INJECT 'setenv bootrootfs "' "setenv bootrootfs \"$old console=$INPUT_ADDITIONAL,115200n8\"" /boot/boot.ini
 
-				# - ARMbian: armbianEnv.txt only allows to toggle a fixed serial console depending on device
+				# - Armbian: armbianEnv.txt only allows to toggle a fixed serial console depending on device
 				elif (( $ARMBIAN )); then
 
-					grep -q "console=$INPUT_ADDITIONAL" /boot/boot.cmd || return
+					grep -q "console=$INPUT_ADDITIONAL" /boot/boot.cmd || return 0
 					if grep -qE 'console=(display|both)' $FP_UENV; then
 
 						G_CONFIG_INJECT 'console=' 'console=both' $FP_UENV
@@ -1515,10 +1503,10 @@ Do you want to continue and DISABLE Bluetooth now?'; then
 
 					fi
 
-				# - Pine A64: On ARMbian ttyS0 boot output is forced and custom console is not possible via armbianEnv.txt
+				# - PINE A64: On Armbian ttyS0 boot output is forced and custom console is not possible via armbianEnv.txt
 				elif (( $G_HW_MODEL == 40 )); then
 
-					[[ ! -f $FP_UENV ]] || grep -q "console=$INPUT_ADDITIONAL" $FP_UENV && return
+					[[ ! -f $FP_UENV ]] || grep -q "console=$INPUT_ADDITIONAL" $FP_UENV && return 0
 					echo "console=$INPUT_ADDITIONAL,115200n8" >> $FP_UENV
 
 				#elif (( $G_HW_MODEL == 70 )); then
@@ -1540,7 +1528,7 @@ Do you want to continue and DISABLE Bluetooth now?'; then
 				done
 
 				# On RPi enable primary UART device
-				(( $G_HW_MODEL < 10 )) && G_CONFIG_INJECT 'enable_uart=' 'enable_uart=1' /boot/config.txt
+				(( $G_HW_MODEL > 9 )) || G_CONFIG_INJECT 'enable_uart=' 'enable_uart=1' /boot/config.txt
 
 				# Update dietpi.txt global var
 				G_CONFIG_INJECT 'CONFIG_SERIAL_CONSOLE_ENABLE=' 'CONFIG_SERIAL_CONSOLE_ENABLE=1' /boot/dietpi.txt
@@ -1557,7 +1545,7 @@ Do you want to continue and DISABLE Bluetooth now?'; then
 				G_DIETPI-NOTIFY 2 "Disabling serial-getty on: /dev/$INPUT_ADDITIONAL"
 				# Stop getty only if not currently attached, failsafe estimation in case of symlinks
 				local stop='--now'
-				[[ $(readlink -f $(tty)) == $(readlink -f /dev/$INPUT_ADDITIONAL) ]] && stop=''
+				[[ $(readlink -f $(tty)) == $(readlink -f /dev/$INPUT_ADDITIONAL) ]] && stop=
 				systemctl disable $stop serial-getty@$INPUT_ADDITIONAL
 				# Place a mask only if device exists
 				[[ -e /dev/$INPUT_ADDITIONAL ]] && systemctl mask serial-getty@$INPUT_ADDITIONAL
@@ -1566,7 +1554,7 @@ Do you want to continue and DISABLE Bluetooth now?'; then
 				# - RPi
 				if (( $G_HW_MODEL < 10 )); then
 
-					sed -i "s/[[:blank:]]*console=${INPUT_ADDITIONAL}[^\"[:blank:]]*//" /boot/cmdline.txt
+					sed -Ei "s/[[:blank:]]*console=${INPUT_ADDITIONAL}[^[:blank:]]*([[:blank:]]*$)?//" /boot/cmdline.txt
 
 				# - Odroid C1/C2/XU4
 				elif (( $G_HW_MODEL < 12 )); then
@@ -1575,7 +1563,7 @@ Do you want to continue and DISABLE Bluetooth now?'; then
 
 				elif (( $ARMBIAN )); then
 
-					grep -q "console=$INPUT_ADDITIONAL" /boot/boot.cmd || return
+					grep -q "console=$INPUT_ADDITIONAL" /boot/boot.cmd || return 0
 					if grep -qE 'console=(display|both)' $FP_UENV; then
 
 						G_CONFIG_INJECT 'console=' 'console=display' $FP_UENV
@@ -1586,10 +1574,10 @@ Do you want to continue and DISABLE Bluetooth now?'; then
 
 					fi
 
-				# - Pine A64: On ARMbian ttyS0 boot output is forced and custom console is not possible via armbianEnv.txt
+				# - PINE A64: On Armbian ttyS0 boot output is forced and custom console is not possible via armbianEnv.txt
 				elif (( $G_HW_MODEL == 40 )); then
 
-					sed -i "/^[[:blank:]]*console=${INPUT_ADDITIONAL}[^\"[:blank:]]*$/d" $FP_UENV # New style: One variable each line
+					sed -i "/^[[:blank:]]*console=${INPUT_ADDITIONAL}[^\"[:blank:]]*[[:blank:]]*$/d" $FP_UENV # New style: One variable each line
 					sed -i "s/[[:blank:]]*console=${INPUT_ADDITIONAL}[^\"[:blank:]]*//" $FP_UENV # Old style: Multiple variables possible each line
 
 				#elif (( $G_HW_MODEL == 70 )); then
@@ -1621,7 +1609,7 @@ Do you want to continue and DISABLE Bluetooth now?'; then
 				done
 
 				# On RPi disable primary UART device
-				(( $G_HW_MODEL < 10 )) && G_CONFIG_INJECT 'enable_uart=' 'enable_uart=0' /boot/config.txt
+				(( $G_HW_MODEL > 9 )) || G_CONFIG_INJECT 'enable_uart=' 'enable_uart=0' /boot/config.txt
 
 				# Update dietpi.txt global var
 				G_CONFIG_INJECT 'CONFIG_SERIAL_CONSOLE_ENABLE=' 'CONFIG_SERIAL_CONSOLE_ENABLE=0' /boot/dietpi.txt
@@ -1747,14 +1735,14 @@ Do you want to continue and DISABLE Bluetooth now?'; then
 	Soundcard_Reset_H2(){
 
 		# Set 3.5mm
-		[[ $INPUT_DEVICE_VALUE == 'none' ]] || amixer set -c 0 'Audio lineout' unmute &> /dev/null
+		[[ $INPUT_DEVICE_VALUE == 'none' ]] || amixer set -c 0 'Audio lineout' unmute 2> /dev/null
 
 	}
 
 	Soundcard_Reset_H3(){
 
 		# Set HDMI
-		[[ $INPUT_DEVICE_VALUE == 'none' ]] || amixer set -c 0 'Audio lineout' mute &> /dev/null
+		[[ $INPUT_DEVICE_VALUE == 'none' ]] || amixer set -c 0 'Audio lineout' mute 2> /dev/null
 		SOUNDCARD_TARGET_CARD=1
 
 	}
@@ -2197,7 +2185,7 @@ _EOF_
 
 	elif [[ $INPUT_DEVICE_NAME == 'bluetooth' ]]; then
 
-		Bluetooth_Main
+		Bluetooth_Main || EXIT_CODE=1
 
 	elif [[ $INPUT_DEVICE_NAME == 'wifimodules' ]]; then
 
@@ -2262,7 +2250,7 @@ _EOF_
 	fi
 
 	#-----------------------------------------------------------------------------------
-	G_DIETPI-NOTIFY -1 $EXIT_CODE "$INPUT_DEVICE_NAME $INPUT_DEVICE_VALUE |"
+	G_DIETPI-NOTIFY -1 $EXIT_CODE "$INPUT_DEVICE_NAME $INPUT_DEVICE_VALUE"
 	#-----------------------------------------------------------------------------------
 	exit $EXIT_CODE
 	#-----------------------------------------------------------------------------------
