@@ -10058,7 +10058,7 @@ _EOF_
 			# Update apt package stats
 			/usr/share/rpimonitor/scripts/updatePackagesStatus.pl
 
-			# USBdrive stats implimentation by Rich
+			# USB drive stats implimentation by Rich
 			if (( $USBDRIVE )); then
 
 				sed -i '\/include=\/etc\/rpimonitor\/template\/sdcard.conf/a include=\/etc\/rpimonitor\/template\/usb_hdd.conf' /etc/rpimonitor/data.conf
@@ -10096,7 +10096,6 @@ web.statistics.1.content.9.ds_graph_options.usbhdd_used.label=USB HDD used space
 web.statistics.1.content.9.ds_graph_options.usbhdd_used.lines={ fill: true }
 web.statistics.1.content.9.ds_graph_options.usbhdd_used.color="#7777FF"
 _EOF_
-
 			fi
 
 		fi
@@ -10117,8 +10116,8 @@ _EOF_
 
 				# User
 				local usercmd='useradd -rMU'
-				getent passwd netdata &> /dev/null && usercmd='usermod'
-				$usercmd -d /var/lib/netdata -s $(command -v nologin) netdata
+				getent passwd netdata > /dev/null && usercmd='usermod'
+				G_EXEC $usercmd -d /var/lib/netdata -s $(command -v nologin) netdata
 
 				# Permissions: https://docs.netdata.cloud/docs/netdata-security/#netdata-directories
 				# - R/O
@@ -10219,9 +10218,9 @@ location = /.well-known/caldav {
 			Download_Test_Media
 
 			# Permissions
-			usermod -aG dietpi emby
-			# - Add to new "render" group on Buster
-			getent group render &> /dev/null && usermod -aG render emby
+			G_EXEC usermod -aG dietpi,video emby
+			# - Enable DRI access
+			getent group render > /dev/null && G_EXEC usermod -aG render emby
 
 		fi
 
@@ -10232,12 +10231,12 @@ location = /.well-known/caldav {
 			Download_Test_Media
 
 			# Permissions
-			usermod -aG dietpi plex
-			# - Add to new "render" group on Buster
-			(( $G_DISTRO > 4 )) && usermod -aG render plex
+			G_EXEC usermod -aG dietpi,video plex
+			# - Enable DRI access
+			getent group render > /dev/null && G_EXEC usermod -aG render plex
 
 			# Run service as "dietpi" group: https://github.com/MichaIng/DietPi/issues/350#issuecomment-423763518
-			mkdir -p /etc/systemd/system/plexmediaserver.service.d
+			G_EXEC mkdir -p /etc/systemd/system/plexmediaserver.service.d
 			echo -e '[Service]\nGroup=dietpi' > /etc/systemd/system/plexmediaserver.service.d/dietpi-group.conf
 
 		fi
@@ -10249,8 +10248,8 @@ location = /.well-known/caldav {
 
 			# User
 			local usercmd='useradd -rMU'
-			getent passwd cuberite &> /dev/null && usercmd='usermod'
-			$usercmd -d $G_FP_DIETPI_USERDATA/cubrite -s $(command -v nologin) cuberite
+			getent passwd cuberite > /dev/null && usercmd='usermod'
+			G_EXEC $usercmd -d $G_FP_DIETPI_USERDATA/cubrite -s $(command -v nologin) cuberite
 
 			# Service
 			cat << _EOF_ > /etc/systemd/system/cuberite.service
@@ -12132,7 +12131,7 @@ _EOF_
 			getent passwd gmrender &> /dev/null && usercmd='usermod -a'
 			$usercmd -G audio -s $(command -v nologin) gmrender
 			# - Add to new "render" group on Buster
-			getent group render &> /dev/null && usermod -aG render gmrender
+			getent group render > /dev/null && usermod -aG render gmrender
 
 			# Service
 			cat << _EOF_ > /etc/systemd/system/gmrender.service
@@ -12347,8 +12346,10 @@ _EOF_
 
 			Banner_Configuration
 
-			# Grant dietpi group permissions
-			G_EXEC usermod -aG dietpi -d $G_FP_DIETPI_USERDATA/jellyfin jellyfin
+			# Grant dietpi group permissions and assure video access
+			G_EXEC usermod -aG dietpi,video -d $G_FP_DIETPI_USERDATA/jellyfin jellyfin
+			# - Grant DRI access
+			getent group render > /dev/null && G_EXEC usermod -aG render jellyfin
 
 			# Config: Only apply on fresh install, assumed when $G_FP_DIETPI_USERDATA/jellyfin does not yet exist
 			if [[ ! -d $G_FP_DIETPI_USERDATA/jellyfin ]]; then
@@ -12365,6 +12366,10 @@ _EOF_
 			# Permissions
 			G_EXEC chown -R jellyfin: $G_FP_DIETPI_USERDATA/jellyfin
 
+			# Assure 128 MiB GPU memory on non-interactive installs, 320 MiB will be offered at the end of interactive installs: https://jellyfin.org/docs/general/administration/hardware-acceleration.html#raspberry-pi-3-and-4
+			local gpu_mem=$(sed -n '/^[[:blank:]]*gpu_mem_1024=/{s/^[^=]*=//p;q}' /boot/config.txt)
+			disable_error=1 G_CHECK_VALIDINT "$gpu_mem" 128 944 || /boot/dietpi/func/dietpi-set_hardware gpumemsplit 128
+
 			Download_Test_Media
 
 		fi
@@ -12374,46 +12379,43 @@ _EOF_
 	Install_Apply_GPU_Settings(){
 
 		# Disable headless mode based on installed software
-		local gpu_enabled=0
+		local gpu_enabled=1
 
 		# RPi: Define minimal memory split based on installed software
 		local gpu_memory=0
 
-		# Kodi
-		if (( ${aSOFTWARE_INSTALL_STATE[31]} == 1 )); then
+		# Kodi, Jellyfin
+		if (( ${aSOFTWARE_INSTALL_STATE[31]} == 1 ||
+		      ${aSOFTWARE_INSTALL_STATE[178]} == 1 )); then
 
-			gpu_enabled=1
 			gpu_memory=320
 			(( ${G_HW_MEMORY_SIZE:-0} <= 512 )) && gpu_memory=256
 
-		# Mode 4 (Descent)
+		# Descent
 		elif (( ${aSOFTWARE_INSTALL_STATE[112]} == 1 )); then
 
-			gpu_enabled=1
 			gpu_memory=192
 
-		# Mode 3 (DIETPICAM / UAE4ARM / Chromium)
+		# RPi Cam Control, Amiberry, Chromium
 		elif (( ${aSOFTWARE_INSTALL_STATE[59]} == 1 ||
 			${aSOFTWARE_INSTALL_STATE[108]} == 1 ||
 			${aSOFTWARE_INSTALL_STATE[113]} == 1 )); then
 
-			gpu_enabled=1
 			gpu_memory=128
 
-		# Mode 2 (Desktops / OpenTyrian)
+		# Desktops, OpenTyrian
 		elif (( ${aSOFTWARE_INSTALL_STATE[23]} == 1 ||
 			${aSOFTWARE_INSTALL_STATE[24]} == 1 ||
 			${aSOFTWARE_INSTALL_STATE[25]} == 1 ||
 			${aSOFTWARE_INSTALL_STATE[26]} == 1 ||
 			${aSOFTWARE_INSTALL_STATE[51]} == 1 )); then
 
-			gpu_enabled=1
 			gpu_memory=64
 
-		# Mode 1 - DIETPICLOUDSHELL (forces display output)
-		elif (( ${aSOFTWARE_INSTALL_STATE[62]} == 1 )); then
+		# DietPi-Cloudshell: Enable display output
+		elif (( ${aSOFTWARE_INSTALL_STATE[62]} != 1 )); then
 
-			gpu_enabled=1
+			gpu_enabled=0
 
 		fi
 
@@ -12423,8 +12425,8 @@ _EOF_
 			# Never override a higher existing value
 			local current_gpu_mem=$(sed -n '/^[[:blank:]]*gpu_mem_1024=/{s/^[^=]*=//p;q}' /boot/config.txt)
 			G_WHIP_DEFAULT_ITEM='Ok'
-			if (( $current_gpu_mem < $gpu_memory )) &&
-				G_WHIP_YESNO "[ INFO ] DietPi has detected an increased GPU memory is required for your installed software:\n - Current: $current_gpu_mem MiB\n - Recommended: $gpu_memory MiB\n\nWould you like DietPi to apply the recommended GPU memory split?\n\nIf unsure, select 'Ok'."; then
+			if (( $current_gpu_mem < $gpu_memory )) && G_WHIP_YESNO "[ INFO ] DietPi has detected an increased GPU memory is required for your installed software:
+ - Current: $current_gpu_mem MiB\n - Recommended: $gpu_memory MiB\n\nWould you like DietPi to apply the recommended GPU memory split?\n\nIf unsure, select 'Ok'."; then
 
 				/boot/dietpi/func/dietpi-set_hardware gpumemsplit $gpu_memory
 
@@ -12441,7 +12443,7 @@ _EOF_
 
 		USBDRIVE=0
 
-		FP_DIETPI_DEDICATED_USBDRIVE=$(df -P | mawk '/^\/dev\/sda1/ {print $6;exit}')
+		FP_DIETPI_DEDICATED_USBDRIVE=$(df -P | mawk '/^\/dev\/sda1/{print $6;exit}')
 
 		# Only enable if mounted
 		[[ $FP_DIETPI_DEDICATED_USBDRIVE ]] && df -P | grep -qi "$FP_DIETPI_DEDICATED_USBDRIVE" && USBDRIVE=1
