@@ -15,7 +15,7 @@
 
 	# Import DietPi-Globals --------------------------------------------------------------
 	. /boot/dietpi/func/dietpi-globals
-	G_PROGRAM_NAME='DietPi-FirstBoot'
+	readonly G_PROGRAM_NAME='DietPi-FirstBoot'
 	G_CHECK_ROOT_USER
 	G_CHECK_ROOTFS_RW
 	G_INIT
@@ -145,7 +145,7 @@
 		fi
 
 		# Apply headless mode, if set in dietpi.txt (RPi, Odroid C1/C2)
-		(( $G_HW_MODEL < 11 || $G_HW_MODEL == 12 )) && /boot/dietpi/func/dietpi-set_hardware headless $(grep -cm1 '^[[:blank:]]*AUTO_SETUP_HEADLESS=1' /boot/dietpi.txt)
+		(( $G_HW_MODEL < 11 || $G_HW_MODEL == 12 )) && /boot/dietpi/func/dietpi-set_hardware headless "$(grep -cm1 '^[[:blank:]]*AUTO_SETUP_HEADLESS=1' /boot/dietpi.txt)"
 
 		# Apply forced eth speed, if set in dietpi.txt
 		/boot/dietpi/func/dietpi-set_hardware eth-forcespeed "$(sed -n '/^[[:blank:]]*AUTO_SETUP_NET_ETH_FORCE_SPEED=/{s/^[^=]*=//p;q}' /boot/dietpi.txt)"
@@ -157,10 +157,10 @@
 		if grep -q '^[[:blank:]]*AUTO_SETUP_AUTOMATED=1' /boot/dietpi.txt; then
 
 			mkdir -p /etc/systemd/system/getty@tty1.service.d
-			cat << _EOF_ > /etc/systemd/system/getty@tty1.service.d/dietpi-autologin.conf
+			cat << '_EOF_' > /etc/systemd/system/getty@tty1.service.d/dietpi-autologin.conf
 [Service]
 ExecStart=
-ExecStart=-/sbin/agetty -a root %I \$TERM
+ExecStart=-/sbin/agetty -a root %I $TERM
 _EOF_
 
 		fi
@@ -280,11 +280,12 @@ _EOF_
 
 		# - IPv6
 		local enable_ipv6=$(grep -cm1 '^[[:blank:]]*CONFIG_ENABLE_IPV6=1' /boot/dietpi.txt)
-		/boot/dietpi/func/dietpi-set_hardware enableipv6 $enable_ipv6
-		(( $enable_ipv6 )) && /boot/dietpi/func/dietpi-set_hardware preferipv4 $(grep -cm1 '^[[:blank:]]*CONFIG_PREFER_IPV4=1' /boot/dietpi.txt)
+		/boot/dietpi/func/dietpi-set_hardware enableipv6 "$enable_ipv6"
+		(( $enable_ipv6 )) && /boot/dietpi/func/dietpi-set_hardware preferipv4 "$(grep -cm1 '^[[:blank:]]*CONFIG_PREFER_IPV4=1' /boot/dietpi.txt)"
 
 		# - Configure enabled interfaces now, /etc/network/interfaces will be effective from next boot on.
 		#	Failsafe: Bring up Ethernet, whenever WiFi is disabled or fails to be configured, e.g. due to wrong credentials.
+		# shellcheck disable=SC2015
 		(( $wifi_enabled )) && ifup wlan$index_wlan || ifup eth$index_eth
 
 	}
@@ -295,7 +296,7 @@ _EOF_
 
 	# Failsafe: https://github.com/MichaIng/DietPi/issues/3646#issuecomment-653739919
 	chown root:root /
-	chmod 755 /
+	chmod 0755 /
 
 	# Apply dietpi.txt settings, device specific workarounds and reset hardware ID + SSH host keys
 	Apply_DietPi_FirstRun_Settings
