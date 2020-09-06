@@ -2759,10 +2759,9 @@ DietPi-Software will decrypt and use it for software installs. You can change it
 
 	Create_UserContent_Folders(){
 
-		mkdir -p $G_FP_DIETPI_USERDATA/{$FOLDER_MUSIC,$FOLDER_PICTURES,$FOLDER_VIDEO,$FOLDER_DOWNLOADS}
-		chown dietpi:dietpi $G_FP_DIETPI_USERDATA/{$FOLDER_MUSIC,$FOLDER_PICTURES,$FOLDER_VIDEO,$FOLDER_DOWNLOADS}
-		chmod 775 $G_FP_DIETPI_USERDATA/{$FOLDER_MUSIC,$FOLDER_PICTURES,$FOLDER_VIDEO,$FOLDER_DOWNLOADS}
-		mkdir -p /var/www
+		G_EXEC mkdir -p $G_FP_DIETPI_USERDATA/{$FOLDER_MUSIC,$FOLDER_PICTURES,$FOLDER_VIDEO,$FOLDER_DOWNLOADS} /var/www
+		G_EXEC chown dietpi:dietpi $G_FP_DIETPI_USERDATA/{$FOLDER_MUSIC,$FOLDER_PICTURES,$FOLDER_VIDEO,$FOLDER_DOWNLOADS}
+		G_EXEC chmod 775 $G_FP_DIETPI_USERDATA/{$FOLDER_MUSIC,$FOLDER_PICTURES,$FOLDER_VIDEO,$FOLDER_DOWNLOADS}
 
 	}
 
@@ -2924,11 +2923,12 @@ DietPi-Software will decrypt and use it for software installs. You can change it
 		else
 
 			# For all other types a target must be given to move/rename the download
-			G_EXEC_DESC="Verifying download target: ${target:-missing!}" G_EXEC eval "[[ $target ]]"
+			G_EXEC_DESC="Verifying download target: ${target:-missing!}" G_EXEC test "$target"
 
-			# Pre-create target dir, if giveb
-			local fp_dir=${target%/*}
-			[[ ! $fp_dir || -d $fp_dir ]] || G_EXEC mkdir -p "$fp_dir"
+			# Pre-create target dir, if given
+			local fp_dir
+			[[ $target == *'/'* ]] && fp_dir=${target%/*}
+			[[ $fp_dir && ! -d $fp_dir ]] && G_EXEC mkdir -p "$fp_dir"
 
 			[[ -f $target ]] && G_DIETPI-NOTIFY 2 "Updating file: $target"
 			G_EXEC mv $file "$target"
@@ -2936,8 +2936,49 @@ DietPi-Software will decrypt and use it for software installs. You can change it
 		fi
 
 		[[ -f $file ]] && G_EXEC rm $file
-		unset fallback_url dps_index no_check_url
+		unset -v fallback_url dps_index no_check_url
 
+	}
+
+	Create_User()
+	{
+		# Parse input
+		local group_primary groups_supplementary home shell password user
+		while [[ $1 ]]
+		do
+			# Mark as read-only to throw an error on doubled input
+			case $1 in
+				-g) shift; readonly group_primary=$1; shift;; # Primary group is always pre-created and defaults to same name as user for new users
+				-G) shift; readonly groups_supplementary=$1; shift;; # User is only added to supplementary groups that do exist
+				-d) shift; readonly home=$1; shift;; # Home is never pre-created and defaults to "/nonexistent" which prevents login
+				-s) shift; readonly shell=$1; shift;; # Shell defaults to "nologin" which prevents shell access on login even if home exists
+				-p) shift; readonly password=$1; shift;; # Password is only set for new users while existing users passwords stay untouched
+				*) readonly user=$1
+			esac
+		done
+
+		# Validate input
+		# - User name needs to be given
+		G_EXEC_DESC="Verifying user name: ${user:-missing!}" G_EXEC test "$user"
+		# - Pre-create given primary group as useradd and usermod fail if it does not exist
+		[[ $group_primary ]] && ! getent group "$group_primary" > /dev/null && G_EXEC groupadd -r "$group_primary"
+		# - Only add to supplementary groups that do exist
+		local group groups
+		for group in ${groups_supplementary//,/ }
+		do
+			getent group "$group" && groups+=",$group"
+		done
+		groups=${groups#,}
+
+		if getent passwd "$user" > /dev/null
+		then
+			G_EXEC usermod ${group_primary:+-g "$group_primary"} ${groups:+-aG "$groups"} -d "${home:-/nonexistent}" -s "${shell:-$(command -v nologin)}" "$user"
+		else		
+			local options='-rMU'
+			[[ $group_primary ]] && options='-rMN'
+			G_EXEC useradd "$options" ${group_primary:+-g "$group_primary"} ${groups:+-G "$groups"} -d "${home:-/nonexistent}" -s "${shell:-$(command -v nologin)}" "$user"
+			[[ $password ]] && G_EXEC_DESC="Applying user password: \e[33m${password//?/*}\e[0m" G_EXEC eval "chpasswd <<< '$user:$password'"
+		fi
 	}
 
 	# Run marked software installs
@@ -3517,9 +3558,9 @@ _EOF_
 			# We have no Buster binaries yet, so always use Stretch binaries
 			binary_name+='_stretch'
 
-			mv $binary_name /usr/bin/ympd
-			chmod +x /usr/bin/ympd
-			rm ympd_*
+			G_EXEC mv $binary_name /usr/bin/ympd
+			G_EXEC chmod +x /usr/bin/ympd
+			G_EXEC_NOEXIT=1 G_EXEC rm ympd_*
 
 		fi
 
@@ -4594,27 +4635,16 @@ _EOF_
 			INSTALL_URL_ADDRESS='https://install.pivpn.io'
 			G_CHECK_URL "$INSTALL_URL_ADDRESS"
 
-			G_AGI dnsutils net-tools bsdmainutils # https://github.com/pivpn/pivpn/blob/650032e5f2d81b42ac493e9be2e8b5d0b8efaa38/auto_install/install.sh#L37
-
-			# Requires underpriv user: https://github.com/MichaIng/DietPi/issues/570#issuecomment-255588307
-			getent passwd pivpn &> /dev/null || useradd pivpn
-			mkdir -p /home/pivpn
-
 			G_EXEC curl -sSfL "$INSTALL_URL_ADDRESS" -o install.bash
-			chmod +x install.bash
+			G_EXEC chmod +x install.bash
+			G_DIETPI-NOTIFY 2 'Preventing reboot from within PiVPN installer'
+			G_EXEC sed -i '/shutdown[[:space:]]/d' install.bash
 
-			# Disable reboot
-			sed -i '/shutdown[[:space:]]/d' install.bash
+			# APT deps
+			G_AGI dnsutils net-tools bsdmainutils # https://github.com/pivpn/pivpn/blob/master/auto_install/install.sh#L43
 
-			until ./install.bash
-			do
-
-				G_WHIP_YESNO 'The PiVPN installer was not successful and/or cancelled prior to its completion.\n\nWould you like DietPi to rerun the PiVPN installer?' && continue
-				aSOFTWARE_INSTALL_STATE[$software_id]=0
-				break
-
-			done
-			rm install.bash
+			G_EXEC_NOEXIT=1 G_EXEC ./install.bash || aSOFTWARE_INSTALL_STATE[$software_id]=0
+			G_EXEC_NOHALT=1 G_EXEC rm install.bash
 
 		fi
 
@@ -6015,9 +6045,7 @@ If you want to update ${aSOFTWARE_NAME[$software_id]}, please use it's internal 
 			dps_index=$software_id Download_Install 'mycroft.conf' /etc/mycroft/mycroft.conf
 
 			# Create "mycroft" user with home=data dir beforehand, to have everything at right locations with right permissions directly
-			local usercmd='useradd -rMU'
-			getent passwd mycroft > /dev/null && usercmd='usermod -a'
-			G_EXEC $usercmd -G audio -d $G_FP_DIETPI_USERDATA/mycroft-data -s "$(command -v nologin)" mycroft
+			Create_User -G audio -d $G_FP_DIETPI_USERDATA/mycroft-data mycroft
 			mkdir -p $G_FP_DIETPI_USERDATA/mycroft-data
 			chown -R mycroft:mycroft /etc/mycroft $G_FP_DIETPI_USERDATA/mycroft-{core,data}
 
@@ -6169,11 +6197,7 @@ Mycroft AI requires at least 2 GiB memory on first start. We will now increase y
 			G_DIETPI-NOTIFY 2 "ha_python_version: $ha_python_version"
 
 			# User
-			local usercmd='useradd -rMU'
-			getent passwd $ha_user > /dev/null && usercmd='usermod -a'
-			G_EXEC $usercmd -G dialout -d $ha_home -s "$(command -v nologin)" $ha_user
-			getent group gpio > /dev/null && usermod -aG gpio $ha_user
-			getent group i2c > /dev/null && usermod -aG i2c $ha_user
+			Create_User -G dialout,gpio,i2c -d $ha_home $ha_user
 
 			# Start with fresh instance, to allow clean pyenv and Python updates and fix broken instances. All userdata and configs are preserved in: /mnt/dietpi_userdata/homeassistant
 			[[ -d $ha_home/.pyenv ]] && rm -R $ha_home/.pyenv
@@ -8119,9 +8143,7 @@ NB: This port needs to be forwarded by your router and/or opened in your firewal
 			Banner_Configuration
 
 			# User
-			local usercmd='useradd -rNM'
-			getent passwd mpd > /dev/null && usercmd='usermod -a'
-			G_EXEC $usercmd -G dietpi -g audio -d $G_FP_DIETPI_USERDATA/.mpd_cache -s "$(command -v nologin)" mpd
+			Create_User -g audio -G dietpi -d $G_FP_DIETPI_USERDATA/.mpd_cache mpd
 
 			# Dirs
 			# - Purge old log and cache
@@ -8280,9 +8302,7 @@ _EOF_
 			Banner_Configuration
 
 			# User
-			local usercmd='useradd -rMU'
-			getent passwd ympd > /dev/null && usercmd='usermod -a'
-			G_EXEC $usercmd -G dietpi,audio -s "$(command -v nologin)" ympd
+			Create_User -g dietpi ympd
 
 			# Service
 			cat << _EOF_ > /etc/systemd/system/ympd.service
@@ -8291,14 +8311,11 @@ Description=ympd (DietPi)
 After=mpd.service
 
 [Service]
-#User=ympd # Changes to ympd during run
-Group=dietpi
 ExecStart=/usr/bin/ympd --user ympd --webport 1337
 
 [Install]
 WantedBy=multi-user.target
 _EOF_
-
 		fi
 
 		software_id=148 # myMPD
@@ -8306,9 +8323,9 @@ _EOF_
 
 			Banner_Configuration
 
-			# Use primary group "dietpi" to allow media access and create media files with "dietpi" group: https://github.com/MichaIng/DietPi/issues/3382
-			usermod -g dietpi mympd
-			getent group mympd > /dev/null && delgroup mympd
+			# Switch to primary group "dietpi" to allow media access and create media files with "dietpi" group: https://github.com/MichaIng/DietPi/issues/3382
+			G_EXEC usermod -g dietpi mympd
+			getent group mympd > /dev/null && G_EXEC_NOFAIL=1 G_EXEC delgroup mympd
 
 			# Adjust config file on fresh install
 			# - On reinstall /etc/mympd/mympd.conf.dist will be created, so use its existence as reinstall flag
@@ -8328,7 +8345,7 @@ _EOF_
 
 			Banner_Configuration
 
-			#useradd -rMU -G dietpi,audio,render -d $G_FP_DIETPI_USERDATA/roon -s $(command -v nologin) roon
+			#Create_User -G dietpi,audio,render -d $G_FP_DIETPI_USERDATA/roon roon
 			# root required for remote updates
 
 			dps_index=$software_id Download_Install 'roonbridge.service' /etc/systemd/system/roonbridge.service
@@ -8354,15 +8371,7 @@ _EOF_
 			mkdir -p $G_FP_DIETPI_USERDATA/node-red
 
 			# User
-			local usercmd='useradd -rMU'
-			getent passwd nodered > /dev/null && usercmd='usermod'
-			G_EXEC $usercmd -d $G_FP_DIETPI_USERDATA/node-red -s "$(command -v nologin)" nodered
-
-			# - Add user to "gpio" and "i2c" groups, if present
-			#	NB: This must be an own command, since useradd/usermod would fail in case group(s) do(es) not exist, e.g. on non-RPi/SBC devices: https://github.com/MichaIng/DietPi/issues/2975#issuecomment-513917360
-			getent group gpio > /dev/null && usermod -aG gpio nodered
-			getent group i2c > /dev/null && usermod -aG i2c nodered
-
+			Create_User -G gpio,i2c -d $G_FP_DIETPI_USERDATA/node-red nodered
 			# - Allow sudo calls
 			echo 'nodered ALL=NOPASSWD: ALL' > /etc/sudoers.d/nodered
 
@@ -8506,9 +8515,7 @@ _EOF_
 
 			Banner_Configuration
 
-			local usercmd='useradd -rMU'
-			getent passwd minidlna > /dev/null && usercmd='usermod -a'
-			G_EXEC $usercmd -G dietpi -s "$(command -v nologin)" minidlna
+			Create_User -G dietpi -d /var/lib/minidlna minidlna
 
 			[[ -f '/etc/init.d/minidlna' ]] && rm /etc/init.d/minidlna
 			update-rc.d -f minidlna remove
@@ -8689,13 +8696,13 @@ _EOF_
 
 			Banner_Configuration
 
-			local usercmd='useradd -rMU'
-			getent passwd debian-deluged > /dev/null && usercmd='usermod -a'
-			G_EXEC $usercmd -G dietpi -d $G_FP_DIETPI_USERDATA/deluge -s "$(command -v nologin)" debian-deluged
+			# User
+			Create_User -G dietpi -d $G_FP_DIETPI_USERDATA/deluge debian-deluged
 
+			# Dirs
 			G_EXEC mkdir -p $G_FP_DIETPI_USERDATA/deluge/.config/deluge /var/log/deluged
 
-			# https://git.deluge-torrent.org/deluge/tree/packaging/systemd/deluged.service
+			# Service: https://git.deluge-torrent.org/deluge/tree/packaging/systemd/deluged.service
 			cat << _EOF_ > /etc/systemd/system/deluged.service
 [Unit]
 Description=Deluge Daemon (DietPi)
@@ -8712,7 +8719,6 @@ TimeoutStopSec=300
 [Install]
 WantedBy=multi-user.target
 _EOF_
-
 			# https://git.deluge-torrent.org/deluge/tree/packaging/systemd/deluge-web.service
 			cat << _EOF_ > /etc/systemd/system/deluge-web.service
 [Unit]
@@ -8728,7 +8734,6 @@ Restart=on-failure
 [Install]
 WantedBy=multi-user.target
 _EOF_
-
 			# Add web.log to logrotate config
 			if [[ -f '/etc/logrotate.d/deluged' ]] && ! grep -q 'web.log' /etc/logrotate.d/deluged; then
 
@@ -8907,9 +8912,7 @@ Do you want to enable the Pi-hole blocking page?'; then
 			Banner_Configuration
 
 			# User
-			local usercmd='useradd -rMU'
-			getent passwd airsonic > /dev/null && usercmd='usermod -a'
-			G_EXEC $usercmd -G dietpi,audio -d $G_FP_DIETPI_USERDATA/airsonic -s "$(command -v nologin)" airsonic
+			Create_User -G dietpi,audio -d $G_FP_DIETPI_USERDATA/airsonic airsonic
 
 			# Optimise memory limit
 			local memory_limit=$(( $RAM_TOTAL / 5 ))
@@ -8950,9 +8953,7 @@ _EOF_
 			Banner_Configuration
 
 			# User
-			local usercmd='useradd -rMU'
-			getent passwd subsonic > /dev/null && usercmd='usermod -a'
-			G_EXEC $usercmd -G dietpi,audio -d /var/subsonic -s "$(command -v nologin)" subsonic
+			Create_User -G dietpi,audio -d /var/subsonic subsonic
 
 			# Config
 			# - Optimise memory limit
@@ -9391,9 +9392,7 @@ _EOF_
 			Banner_Configuration
 
 			# User
-			local usercmd='useradd -rMU'
-			getent passwd ubooquity > /dev/null && usercmd='usermod -a'
-			G_EXEC $usercmd -G dietpi -d $G_FP_DIETPI_USERDATA/ubooquity -s "$(command -v nologin)" ubooquity
+			Create_User -G dietpi -d $G_FP_DIETPI_USERDATA/ubooquity ubooquity
 
 			# Data
 			G_EXEC mkdir -p $G_FP_DIETPI_USERDATA/{ebooks,comics}
@@ -9437,9 +9436,7 @@ _EOF_
 			Banner_Configuration
 
 			# User
-			local usercmd='useradd -rMU'
-			getent passwd komga > /dev/null && usercmd='usermod -a'
-			G_EXEC $usercmd -G dietpi -d $G_FP_DIETPI_USERDATA/komga -s "$(command -v nologin)" komga
+			Create_User -G dietpi -d $G_FP_DIETPI_USERDATA/komga komga
 
 			# Data
 			G_EXEC mkdir -p $G_FP_DIETPI_USERDATA/{ebooks,comics}
@@ -10166,9 +10163,7 @@ _EOF_
 				mkdir -p /var/lib/netdata
 
 				# User
-				local usercmd='useradd -rMU'
-				getent passwd netdata > /dev/null && usercmd='usermod'
-				G_EXEC $usercmd -d /var/lib/netdata -s "$(command -v nologin)" netdata
+				Create_User -d /var/lib/netdata netdata
 
 				# Permissions: https://docs.netdata.cloud/docs/netdata-security/#netdata-directories
 				# - R/O
@@ -10299,9 +10294,7 @@ location = /.well-known/caldav {
 			Banner_Configuration
 
 			# User
-			local usercmd='useradd -rMU'
-			getent passwd cuberite > /dev/null && usercmd='usermod'
-			G_EXEC $usercmd -d $G_FP_DIETPI_USERDATA/cubrite -s "$(command -v nologin)" cuberite
+			Create_User -d $G_FP_DIETPI_USERDATA/cubrite cuberite
 
 			# Service
 			cat << _EOF_ > /etc/systemd/system/cuberite.service
@@ -10338,9 +10331,9 @@ _EOF_
 			Banner_Configuration
 
 			# Add underprivilged user for web access | no longer works, could be a nodejs v8 issue?
-			getent passwd mineos > /dev/null || useradd -p "$GLOBAL_PW" mineos
+			getent passwd mineos > /dev/null || { G_EXEC useradd mineos; chpasswd <<< "mineos:$GLOBAL_PW"; }
 
-			# Stop mineos from running while we config it. When we didnt do this, the program would constantly overwrite our symlink from (/var/games/minecraft).
+			# Stop mineos from running while we config it. When we didn't do this, the program would constantly overwrite our symlink from (/var/games/minecraft).
 			#/boot/dietpi/dietpi-services stop # Already done after install step now
 			killall -w supervisord &> /dev/null
 			killall -w node &> /dev/null
@@ -10386,9 +10379,7 @@ _EOF_
 			Banner_Configuration
 
 			# User
-			local usercmd='useradd -rMU'
-			getent passwd gogs > /dev/null && usercmd='usermod'
-			G_EXEC $usercmd -d /etc/gogs -s "$(command -v nologin)" gogs
+			Ceate_User -d /etc/gogs gogs
 
 			# Directories + permissions
 			mkdir -p $G_FP_DIETPI_USERDATA/gogs-repo /var/log/gogs
@@ -10427,11 +10418,7 @@ _EOF_
 			Banner_Configuration
 
 			# User
-			local usercmd='useradd -rMN'
-			getent passwd qbittorrent > /dev/null && usercmd='usermod'
-			G_EXEC $usercmd -g dietpi -s "$(command -v nologin)" qbittorrent
-			# - Set password on fresh install
-			[[ $usercmd == 'useradd'* ]] && chpasswd <<< "qbittorrent:$GLOBAL_PW"
+			Create_User -g dietpi -d /home/qbittorrent -p "$GLOBAL_PW" qbittorrent
 
 			# Config: Create only on fresh install
 			if [[ ! -f '/home/qbittorrent/.config/qBittorrent/qBittorrent.conf' ]]; then
@@ -10647,9 +10634,7 @@ _EOF_
 			mkdir -p $G_FP_DIETPI_USERDATA/$FOLDER_DOWNLOADS/.session
 
 			# Create rTorrent run user
-			local usercmd='useradd -rMN'
-			getent passwd rtorrent > /dev/null && usercmd='usermod'
-			G_EXEC $usercmd -g dietpi -d $G_FP_DIETPI_USERDATA/rtorrent -s "$(command -v nologin)" rtorrent
+			Create_User -g dietpi -d $G_FP_DIETPI_USERDATA/rtorrent rtorrent
 
 			# Service using screen | '/usr/bin/rtorrent &> /var/log/rtorrent.log &' doesnt work, hangs program after 5 seconds
 			cat << _EOF_ > /etc/systemd/system/rtorrent.service
@@ -10753,9 +10738,7 @@ _EOF_
 			Banner_Configuration
 
 			# User
-			local usercmd='useradd -rMN'
-			getent passwd aria2 > /dev/null && usercmd='usermod'
-			G_EXEC $usercmd -g dietpi -d $G_FP_DIETPI_USERDATA/aria2 -s "$(command -v nologin)" aria2
+			Create_User -g dietpi -d $G_FP_DIETPI_USERDATA/aria2 aria2
 
 			# Config
 			mkdir -p $G_FP_DIETPI_USERDATA/aria2
@@ -10918,9 +10901,7 @@ _EOF_
 			Banner_Configuration
 
 			# User
-			local usercmd='useradd -rMU'
-			getent passwd medusa > /dev/null && usercmd='usermod -a'
-			G_EXEC $usercmd -G dietpi -d $G_FP_DIETPI_USERDATA/medusa -s "$(command -v nologin)" medusa
+			Create_User -G dietpi -d $G_FP_DIETPI_USERDATA/medusa medusa
 
 			# Service
 			cp $G_FP_DIETPI_USERDATA/medusa/runscripts/init.systemd /etc/systemd/system/medusa.service
@@ -10937,9 +10918,8 @@ _EOF_
 
 			Banner_Configuration
 
-			local usercmd='useradd -rMU'
-			getent passwd tonido > /dev/null && usercmd='usermod -a'
-			G_EXEC $usercmd -G dietpi -s "$(command -v nologin)" tonido
+			# User
+			Create_User -G dietpi -d /home/tonido tonido
 
 			# Service
 			cat << _EOF_ > /etc/systemd/system/tonido.service
@@ -11219,9 +11199,7 @@ _EOF_
 			fi
 
 			# User
-			local usercmd='useradd -rMU'
-			getent passwd blynk > /dev/null && usercmd='usermod -a'
-			G_EXEC $usercmd -G dietpi -d $G_FP_DIETPI_USERDATA/blynk -s "$(command -v nologin)" blynk
+			Create_User -G dietpi -d $G_FP_DIETPI_USERDATA/blynk blynk
 
 			# Service
 			cat << _EOF_ > /etc/systemd/system/blynkserver.service
@@ -11307,9 +11285,7 @@ _EOF_
 			Banner_Configuration
 
 			# User
-			local usercmd='useradd -rMU'
-			getent passwd sabnzbd > /dev/null && usercmd='usermod -a'
-			G_EXEC $usercmd -G dietpi -d /etc/sabnzbd -s "$(command -v nologin)" sabnzbd
+			Create_User -G dietpi -d /etc/sabnzbd sabnzbd
 
 			# Service: https://github.com/sabnzbd/sabnzbd/blob/master/linux/sabnzbd%40.service
 			# - Options: https://sabnzbd.org/wiki/advanced/command-line-parameters
@@ -11383,9 +11359,7 @@ _EOF_
 			Banner_Configuration
 
 			# User
-			local usercmd='useradd -rMU'
-			getent passwd ffsync > /dev/null && usercmd='usermod'
-			G_EXEC $usercmd -d /opt/firefox-sync -s "$(command -v nologin)" ffsync
+			Create_User -d /opt/firefox-sync ffsync
 
 			# Create database and config directory
 			mkdir -p $G_FP_DIETPI_USERDATA/firefox-sync
@@ -11467,7 +11441,7 @@ _EOF_
 			sed -i "/CP_DATA=/c\CP_DATA=$G_FP_DIETPI_USERDATA/couchpotato" /etc/default/couchpotato
 
 			mkdir -p $G_FP_DIETPI_USERDATA/couchpotato
-			#useradd -d $G_FP_DIETPI_USERDATA/couchpotato couchpotato
+			#Create_User -d $G_FP_DIETPI_USERDATA/couchpotato couchpotato
 
 			cp /etc/couchpotato/init/ubuntu /etc/init.d/couchpotato
 
@@ -11478,9 +11452,8 @@ _EOF_
 
 			Banner_Configuration
 
-			local usercmd='useradd -rMU'
-			getent passwd koel > /dev/null && usercmd='usermod -a'
-			G_EXEC $usercmd -G dietpi -d $G_FP_DIETPI_USERDATA/koel -s "$(command -v nologin)" koel
+			# User
+			Create_User -G dietpi -d $G_FP_DIETPI_USERDATA/koel koel
 
 			Download_Test_Media
 
@@ -11541,9 +11514,7 @@ _EOF_
 			mkdir -p $G_FP_DIETPI_USERDATA/sonarr
 
 			# User
-			local usercmd='useradd -rNM'
-			getent passwd sonarr > /dev/null && usercmd='usermod'
-			G_EXEC $usercmd -g dietpi -d $G_FP_DIETPI_USERDATA/sonarr -s "$(command -v nologin)" sonarr
+			Create_User -g dietpi -d $G_FP_DIETPI_USERDATA/sonarr sonarr
 
 			# Service: https://github.com/Sonarr/Sonarr/blob/phantom-develop/distribution/debian/sonarr.service
 			cat << _EOF_ > /etc/systemd/system/sonarr.service
@@ -11595,9 +11566,7 @@ _EOF_
 			mkdir -p $G_FP_DIETPI_USERDATA/radarr
 
 			# User
-			local usercmd='useradd -rNM'
-			getent passwd radarr > /dev/null && usercmd='usermod'
-			G_EXEC $usercmd -g dietpi -d $G_FP_DIETPI_USERDATA/radarr -s "$(command -v nologin)" radarr
+			Create_User -g dietpi -d $G_FP_DIETPI_USERDATA/radarr radarr
 
 			# Service: https://github.com/Radarr/Radarr/wiki/Autostart-on-Linux#service-file
 			cat << _EOF_ > /etc/systemd/system/radarr.service
@@ -11649,9 +11618,7 @@ _EOF_
 			mkdir -p $G_FP_DIETPI_USERDATA/lidarr
 
 			# User
-			local usercmd='useradd -rNM'
-			getent passwd lidarr > /dev/null && usercmd='usermod'
-			G_EXEC $usercmd -g dietpi -d $G_FP_DIETPI_USERDATA/lidarr -s "$(command -v nologin)" lidarr
+			Create_User -g dietpi -d $G_FP_DIETPI_USERDATA/lidarr lidarr
 
 			# Service: https://github.com/lidarr/Lidarr/wiki/Autostart-on-Linux#systemd
 			cat << _EOF_ > /etc/systemd/system/lidarr.service
@@ -11700,9 +11667,7 @@ _EOF_
 			Banner_Configuration
 
 			# User
-			local usercmd='useradd -rMU'
-			getent passwd plexpy > /dev/null && usercmd='usermod -a'
-			G_EXEC $usercmd -G dietpi -d /opt/plexpy -s "$(command -v nologin)" plexpy
+			Create_User -G dietpi -d /opt/plexpy plexpy
 
 			# Directory
 			mkdir -p $G_FP_DIETPI_USERDATA/plexpy
@@ -11735,9 +11700,7 @@ _EOF_
 			Banner_Configuration
 
 			# User
-			local usercmd='useradd -rMU'
-			getent passwd jackett > /dev/null && usercmd='usermod'
-			G_EXEC $usercmd -d /opt/jackett -s "$(command -v nologin)" jackett
+			Create_User -d /opt/jackett jackett
 
 			# Permissions
 			chown -R jackett:jackett /opt/jackett
@@ -11780,9 +11743,7 @@ _EOF_
 
 			Banner_Configuration
 
-			local usercmd='useradd -rMU'
-			getent passwd nzbget > /dev/null && usercmd='usermod -a'
-			G_EXEC $usercmd -G dietpi -s "$(command -v nologin)" nzbget
+			Create_User -G dietpi -d $G_FP_DIETPI_USERDATA/nzbget nzbget
 
 			G_BACKUP_FP $G_FP_DIETPI_USERDATA/nzbget/nzbget.conf
 			sed -i "/MainDir=/c\MainDir=$G_FP_DIETPI_USERDATA/$FOLDER_DOWNLOADS" $G_FP_DIETPI_USERDATA/nzbget/nzbget.conf
@@ -11979,10 +11940,7 @@ _EOF_
 			fi
 
 			# User
-			# - Grant serial port access
-			local usercmd='useradd -rMU'
-			getent passwd domoticz > /dev/null && usercmd='usermod -a'
-			G_EXEC $usercmd -G dialout -d $G_FP_DIETPI_USERDATA/domoticz -s "$(command -v nologin)" domoticz
+			Create_User -G dialout -d $G_FP_DIETPI_USERDATA/domoticz domoticz
 
 			# Permissions
 			chown -R domoticz:domoticz /opt/domoticz $G_FP_DIETPI_USERDATA/domoticz
@@ -12135,11 +12093,7 @@ _EOF_
 			Banner_Configuration
 
 			# Create allo user for GUI
-			local usercmd='useradd -rMU'
-			getent passwd allo &> /dev/null && usercmd='usermod -a'
-			$usercmd -G www-data -s /bin/bash allo
-			# - Set password only on fresh install
-			[[ $usercmd == 'useradd'* ]] && chpasswd <<< 'allo:allo'
+			Create_User -G www-data -d /home/allo -s /bin/bash -p allo allo
 			# - Create home dir separately to avoid skeleton creation
 			mkdir -p /home/allo
 			chown -R allo:allo /home/allo
@@ -12179,11 +12133,7 @@ _EOF_
 			Banner_Configuration
 
 			# User
-			local usercmd='useradd -rMU'
-			getent passwd gmrender > /dev/null && usercmd='usermod -a'
-			G_EXEC $usercmd -G audio -s "$(command -v nologin)" gmrender
-			# - Add to new "render" group on Buster
-			getent group render > /dev/null && usermod -aG render gmrender
+			Create_User -G audio,render gmrender
 
 			# Service
 			cat << _EOF_ > /etc/systemd/system/gmrender.service
@@ -12202,7 +12152,6 @@ ExecStart=/usr/local/bin/gmediarender -u '$G_HW_UUID' -f '$(</etc/hostname)' --g
 [Install]
 WantedBy=multi-user.target
 _EOF_
-
 		fi
 
 		software_id=166 # AudioPhonics Pi-SPC
@@ -12861,6 +12810,7 @@ _EOF_
 			fi
 			[[ -d '/etc/systemd/system/ympd.service.d' ]] && rm -R /etc/systemd/system/ympd.service.d
 			getent passwd ympd > /dev/null && userdel -rf ympd
+			getent group ympd > /dev/null && groupdel ympd # pre-v6.33
 			[[ -f '/usr/bin/ympd' ]] && rm /usr/bin/ympd
 
 		fi
@@ -13217,8 +13167,8 @@ _EOF_
 
 			fi
 			G_AGP nzbdrone
-			getent passwd sonarr &> /dev/null && userdel -rf sonarr
-			getent group sonarr &> /dev/null && groupdel sonarr # Pre-v6.29
+			getent passwd sonarr > /dev/null && userdel -rf sonarr
+			getent group sonarr > /dev/null && groupdel sonarr # Pre-v6.29
 			rm -Rf /opt/NzbDrone $G_FP_DIETPI_USERDATA/sonarr /var/log/sonarr /etc/apt/sources.list.d/sonarr.list
 
 		fi
@@ -13233,8 +13183,8 @@ _EOF_
 				rm -R /etc/systemd/system/radarr.service*
 
 			fi
-			getent passwd radarr &> /dev/null && userdel -rf radarr
-			getent group radarr &> /dev/null && groupdel radarr # Pre-v6.29
+			getent passwd radarr > /dev/null && userdel -rf radarr
+			getent group radarr > /dev/null && groupdel radarr # Pre-v6.29
 			rm -Rf /opt/Radarr $G_FP_DIETPI_USERDATA/radarr /var/log/radarr
 
 		fi
@@ -13249,13 +13199,13 @@ _EOF_
 				rm -R /etc/systemd/system/lidarr.service*
 
 			fi
-			getent passwd lidarr &> /dev/null && userdel -rf lidarr
-			getent group lidarr &> /dev/null && groupdel lidarr # Pre-v6.29
+			getent passwd lidarr > /dev/null && userdel -rf lidarr
+			getent group lidarr > /dev/null && groupdel lidarr # Pre-v6.29
 			rm -Rf /opt/Lidarr $G_FP_DIETPI_USERDATA/lidarr /var/log/lidarr
 
 		fi
 
-		software_id=146
+		software_id=146 # PlexPy
 		if (( ${aSOFTWARE_INSTALL_STATE[$software_id]} == -1 )); then
 
 			Banner_Uninstalling
@@ -13271,25 +13221,33 @@ _EOF_
 		if (( ${aSOFTWARE_INSTALL_STATE[$software_id]} == -1 )); then
 
 			Banner_Uninstalling
-			getent passwd jackett &> /dev/null && userdel -rf jackett
-			[[ -d '/opt/jackett' ]] && rm -R /opt/jackett
 			if [[ -f '/etc/systemd/system/jackett.service' ]]; then
 
 				systemctl disable --now jackett
-				rm /etc/systemd/system/jackett.service
+				rm -R /etc/systemd/system/jackett.service*
 
 			fi
+			[[ -d '/etc/systemd/system/jackett.service.d' ]] && rm -R /etc/systemd/system/jackett.service.d
+			getent passwd jackett > /dev/null && userdel -rf jackett
+			getent group jackett > /dev/null && groupdel jackett
+			[[ -d '/opt/jackett' ]] && rm -R /opt/jackett
 
 		fi
 
-		software_id=149
+		software_id=149 # NZBget
 		if (( ${aSOFTWARE_INSTALL_STATE[$software_id]} == -1 )); then
 
 			Banner_Uninstalling
-			rm -R $G_FP_DIETPI_USERDATA/nzbget
-			rm /etc/systemd/system/nzbget.service
+			if [[ -f '/etc/systemd/system/nzbget.service' ]]; then
 
-			userdel -rf nzbget
+				systemctl disable --now nzbget
+				rm -R /etc/systemd/system/nzbget.service*
+
+			fi
+			[[ -d '/etc/systemd/system/nzbget.service.d' ]] && rm -R /etc/systemd/system/nzbget.service.d
+			getent passwd nzbget > /dev/null && userdel -rf nzbget
+			getent group nzbget > /dev/null && groupdel nzbget
+			[[ -d $G_FP_DIETPI_USERDATA/nzbget ]] && rm -R $G_FP_DIETPI_USERDATA/nzbget
 
 		fi
 
@@ -14124,7 +14082,7 @@ _EOF_
 
 		fi
 
-		software_id=53
+		software_id=53 # MineOS
 		if (( ${aSOFTWARE_INSTALL_STATE[$software_id]} == -1 )); then
 
 			Banner_Uninstalling
@@ -14510,7 +14468,8 @@ _EOF_
 
 			fi
 			[[ -d '/etc/systemd/system/gmrender.service.d' ]] && rm -R /etc/systemd/system/gmrender.service.d
-			getent passwd gmrender &> /dev/null && userdel -rf gmrender
+			getent passwd gmrender > /dev/null && userdel -rf gmrender
+			getent group gmrender > /dev/null && groupdel gmrender
 			[[ -f '/usr/local/bin/gmediarender' ]] && rm /usr/local/bin/gmediarender
 
 		fi
