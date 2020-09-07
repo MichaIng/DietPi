@@ -1266,9 +1266,9 @@ _EOF_
 		G_DIETPI-NOTIFY 2 'Generating DietPi directories'
 		mkdir -pv /var/lib/dietpi/{postboot.d,dietpi-software/installed}
 		mkdir -pv /var/tmp/dietpi/logs/dietpi-ramlog_store
-		mkdir -pv $G_FP_DIETPI_USERDATA /mnt/{samba,ftp_client,nfs_client}
-		chown -R dietpi:dietpi /var/{lib,tmp}/dietpi $G_FP_DIETPI_USERDATA /mnt/{samba,ftp_client,nfs_client}
-		find /var/{lib,tmp}/dietpi $G_FP_DIETPI_USERDATA /mnt/{samba,ftp_client,nfs_client} -type d -exec chmod 0775 {} +
+		mkdir -pv /mnt/{dietpi_userdata,samba,ftp_client,nfs_client}
+		chown -R dietpi:dietpi /var/{lib,tmp}/dietpi /mnt/{dietpi_userdata,samba,ftp_client,nfs_client}
+		find /var/{lib,tmp}/dietpi /mnt/{dietpi_userdata,samba,ftp_client,nfs_client} -type d -exec chmod 0775 {} +
 
 		#-----------------------------------------------------------------------------------
 		# Services
