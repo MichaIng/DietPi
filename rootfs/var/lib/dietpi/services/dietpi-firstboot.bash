@@ -153,14 +153,19 @@
 		# Set hostname
 		/boot/dietpi/func/change_hostname "$(sed -n '/^[[:blank:]]*AUTO_SETUP_NET_HOSTNAME=/{s/^[^=]*=//p;q}' /boot/dietpi.txt)"
 
-		# Set root autologin if automated firstrun setup was chosen, will be reverted after firstrun installs
+		# Set root # if automated firstrun setup was chosen, will be reverted after firstrun installs
 		if grep -q '^[[:blank:]]*AUTO_SETUP_AUTOMATED=1' /boot/dietpi.txt; then
 
-			mkdir -p /etc/systemd/system/getty@tty1.service.d
+			mkdir -p /etc/systemd/system/{getty@tty1,console-getty}.service.d
 			cat << '_EOF_' > /etc/systemd/system/getty@tty1.service.d/dietpi-autologin.conf
 [Service]
 ExecStart=
-ExecStart=-/sbin/agetty -a root %I $TERM
+ExecStart=-/sbin/agetty -a root --noclear %I $TERM
+_EOF_
+			cat << '_EOF_' > /etc/systemd/system/console-getty.service.d/dietpi-autologin.conf
+[Service]
+ExecStart=
+ExecStart=-/sbin/agetty -a root --noclear --keep-baud console 115200,38400,9600 $TERM
 _EOF_
 
 		fi
