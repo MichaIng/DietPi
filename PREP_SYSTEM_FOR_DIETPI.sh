@@ -831,7 +831,7 @@ Currently installed: $G_DISTRO_NAME (ID: $G_DISTRO)"; then
 		#	x86_64
 		if (( $G_HW_ARCH == 10 )); then
 
-			local apackages=('linux-image-amd64 os-prober')
+			local apackages=('linux-image-amd64' 'os-prober')
 
 			# Grub EFI
 			if dpkg-query -s 'grub-efi-amd64' &> /dev/null || [[ -d '/boot/efi' ]]; then
