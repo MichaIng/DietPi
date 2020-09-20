@@ -77,7 +77,7 @@ Acquire::IndexTargets::deb::Translations::KeepCompressedAs "xz";
 Acquire::IndexTargets::deb-src::Sources::KeepCompressedAs "xz";
 _EOF_
 	# - Forcing new DEB package config files (during PREP only)
-	echo 'DPkg::options:: "--force-confmiss,confnew";' > /etc/apt/apt.conf.d/98dietpi-forceconf
+	echo -e '#clear DPkg::options;\nDPkg::options:: "--force-confmiss,confnew";' > /etc/apt/apt.conf.d/98dietpi-forceconf
 	# - Prefer IPv4 by default to avoid hanging access attempts in some cases
 	#	NB: This needs to match the method in: /DietPi/dietpi/func/dietpi-set_hardware preferipv4 enable
 	echo 'Acquire::ForceIPv4 "true";' > /etc/apt/apt.conf.d/99-dietpi-force-ipv4
