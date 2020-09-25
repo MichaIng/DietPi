@@ -77,7 +77,7 @@ Acquire::IndexTargets::deb::Translations::KeepCompressedAs "xz";
 Acquire::IndexTargets::deb-src::Sources::KeepCompressedAs "xz";
 _EOF_
 	# - Forcing new DEB package config files (during PREP only)
-	echo 'DPkg::options:: "--force-confmiss,confnew";' > /etc/apt/apt.conf.d/98dietpi-forceconf
+	echo -e '#clear DPkg::options;\nDPkg::options:: "--force-confmiss,confnew";' > /etc/apt/apt.conf.d/98dietpi-forceconf
 	# - Prefer IPv4 by default to avoid hanging access attempts in some cases
 	#	NB: This needs to match the method in: /DietPi/dietpi/func/dietpi-set_hardware preferipv4 enable
 	echo 'Acquire::ForceIPv4 "true";' > /etc/apt/apt.conf.d/99-dietpi-force-ipv4
@@ -536,6 +536,7 @@ _EOF_
 
 		fi
 
+		# shellcheck disable=SC2015
 		(( $WIFI_REQUIRED )) && G_DIETPI-NOTIFY 2 'Marking WiFi as required' || G_DIETPI-NOTIFY 2 'Marking WiFi as NOT required'
 
 		# Distro Selection
@@ -707,7 +708,10 @@ Currently installed: $G_DISTRO_NAME (ID: $G_DISTRO)"; then
 
 		# @MichaIng https://github.com/MichaIng/DietPi/pull/1266/files
 		G_DIETPI-NOTIFY 2 'Marking all packages as auto-installed first, to allow effective autoremove afterwards'
-		G_EXEC apt-mark auto $(dpkg --get-selections | mawk '{print $1}')
+		local apackages
+		mapfile -t apackages < <(apt-mark showmanual)
+		[[ ${apackages[0]} ]] && G_EXEC apt-mark auto "${apackages[@]}"
+		unset -v apackages
 
 		# DietPi list of minimal required packages, which must be installed:
 		aPACKAGES_REQUIRED_INSTALL=(
@@ -827,27 +831,28 @@ Currently installed: $G_DISTRO_NAME (ID: $G_DISTRO)"; then
 		#	x86_64
 		if (( $G_HW_ARCH == 10 )); then
 
-			local packages='linux-image-amd64 os-prober'
+			local apackages=('linux-image-amd64' 'os-prober')
 
 			# Grub EFI
 			if dpkg-query -s 'grub-efi-amd64' &> /dev/null || [[ -d '/boot/efi' ]]; then
 
-				packages+=' grub-efi-amd64'
+				apackages+=('grub-efi-amd64')
 				# On Buster+ enable secure boot compatibility: https://packages.debian.org/grub-efi-amd64-signed
-				(( $DISTRO_TARGET > 4 )) && packages+=' grub-efi-amd64-signed shim-signed'
+				(( $DISTRO_TARGET > 4 )) && apackages+=('grub-efi-amd64-signed' 'shim-signed')
 
 			# Grub BIOS
 			else
 
-				packages+=' grub-pc'
+				apackages+=('grub-pc')
 
 			fi
 
-			G_AGI $packages
+			G_AGI "${apackages[@]}"
+			unset -v apackages
 
 		# - G_HW_MODEL specific required firmware/kernel/bootloader packages
 		#	ARMbian grab currently installed packages
-		elif dpkg --get-selections | grep -q 'armbian'; then
+		elif [[ $(dpkg-query -Wf '${Package} ') == *'armbian'* ]]; then
 
 			systemctl stop armbian-*
 
@@ -870,11 +875,10 @@ Currently installed: $G_DISTRO_NAME (ID: $G_DISTRO)"; then
 					aPACKAGES_REQUIRED_INSTALL+=("$line")
 					G_DIETPI-NOTIFY 2 "ARMbian package detected and added: $line"
 
-				done <<< "$(dpkg --get-selections | mawk -v pat="^$i" '$0~pat {print $1}')"
+				done <<< "$(dpkg-query -Wf '${Package}\n' | mawk -v pat="^$i" '$0~pat')"
 
 			done
-
-			unset apackages
+			unset -v apackages
 
 		#	RPi
 		elif (( $G_HW_MODEL < 10 )); then
@@ -917,16 +921,17 @@ Currently installed: $G_DISTRO_NAME (ID: $G_DISTRO)"; then
 		# - Generic kernel + device tree package auto detect
 		else
 
-			AUTO_DETECT_KERN_PKG=$(dpkg --get-selections | mawk '/^linux-(image|dtb)/{print $1}')
-			if [[ $AUTO_DETECT_KERN_PKG ]]; then
+			mapfile -t apackages < <(dpkg-query -Wf '${Package}\n' | grep -E '^linux-(image|dtb)')
+			if [[ ${apackages[0]} ]]; then
 
-				G_AGI $AUTO_DETECT_KERN_PKG
+				G_AGI "${apackages[@]}"
 
 			else
 
 				G_DIETPI-NOTIFY 2 'Unable to find kernel packages for installation. Assuming non-APT/.deb kernel installation.'
 
 			fi
+			unset -v apackages
 
 		fi
 
@@ -934,7 +939,7 @@ Currently installed: $G_DISTRO_NAME (ID: $G_DISTRO)"; then
 		unset -f G_EXEC_PRE_FUNC
 
 		# - Firmware
-		if dpkg --get-selections | grep -q '^armbian-firmware'; then
+		if dpkg-query -Wf '${Package}\n' | grep -q '^armbian-firmware'; then
 
 			aPACKAGES_REQUIRED_INSTALL+=('armbian-firmware')
 
@@ -975,8 +980,10 @@ Currently installed: $G_DISTRO_NAME (ID: $G_DISTRO)"; then
 
 		G_DIETPI-NOTIFY 2 'Generating list of minimal packages, required for DietPi installation'
 
-		local packages=$(dpkg --get-selections "${aPACKAGES_REQUIRED_INSTALL[@]}" 2> /dev/null | mawk '{print $1}')
-		[[ $packages ]] && G_EXEC_DESC='Marking required packages as manually installed' G_EXEC apt-mark manual $packages
+		local apackages
+		mapfile -t apackages < <(dpkg --get-selections "${aPACKAGES_REQUIRED_INSTALL[@]}" 2> /dev/null | mawk '{print $1}')
+		[[ ${apackages[0]} ]] && G_EXEC_DESC='Marking required packages as manually installed' G_EXEC apt-mark manual "${apackages[@]}"
+		unset -v apackages
 
 		# Purging additional packages, that (in some cases) do not get autoremoved:
 		# - dbus: Not required for headless images, but sometimes marked as "important", thus not autoremoved.
@@ -1005,12 +1012,12 @@ Currently installed: $G_DISTRO_NAME (ID: $G_DISTRO)"; then
 		# Distro is now target (for APT purposes and G_AGX support due to installed binary, its here, instead of after G_AGUP)
 		G_DISTRO=$DISTRO_TARGET
 		G_DISTRO_NAME=$DISTRO_TARGET_NAME
-		unset DISTRO_TARGET DISTRO_TARGET_NAME
+		unset -v DISTRO_TARGET DISTRO_TARGET_NAME
 
 		G_DIETPI-NOTIFY 2 'Installing core DietPi pre-req DEB packages'
 
 		G_AGI "${aPACKAGES_REQUIRED_INSTALL[@]}"
-		unset aPACKAGES_REQUIRED_INSTALL
+		unset -v aPACKAGES_REQUIRED_INSTALL
 
 		G_AGA
 
@@ -1038,28 +1045,28 @@ Currently installed: $G_DISTRO_NAME (ID: $G_DISTRO)"; then
 
 		G_DIETPI-NOTIFY 2 'Deleting list of known users and groups, not required by DietPi'
 
-		getent passwd pi &> /dev/null && userdel -f pi
-		getent passwd test &> /dev/null && userdel -f test # @fourdee
-		getent passwd odroid &> /dev/null && userdel -f odroid
-		getent passwd rock64 &> /dev/null && userdel -f rock64
-		getent passwd rock &> /dev/null && userdel -f rock # Radxa images
-		getent passwd linaro &> /dev/null && userdel -f linaro # ASUS TB
-		getent passwd dietpi &> /dev/null && userdel -f dietpi # recreated below
-		getent passwd debian &> /dev/null && userdel -f debian # BBB
-		getent passwd openmediavault-webgui &> /dev/null && userdel -f openmediavault-webgui # OMV (NanoPi NEO2)
-		getent passwd admin &> /dev/null && userdel -f admin # OMV (NanoPi NEO2)
-		getent passwd fa &> /dev/null && userdel -f fa # OMV (NanoPi NEO2)
-		getent passwd colord &> /dev/null && userdel -f colord # OMV (NanoPi NEO2)
-		getent passwd saned &> /dev/null && userdel -f saned # OMV (NanoPi NEO2)
-		getent group openmediavault-config &> /dev/null && groupdel openmediavault-config # OMV (NanoPi NEO2)
-		getent group openmediavault-engined &> /dev/null && groupdel openmediavault-engined # OMV (NanoPi NEO2)
-		getent group openmediavault-webgui &> /dev/null && groupdel openmediavault-webgui # OMV (NanoPi NEO2)
+		getent passwd pi > /dev/null && userdel -f pi
+		getent passwd test > /dev/null && userdel -f test # @fourdee
+		getent passwd odroid > /dev/null && userdel -f odroid
+		getent passwd rock64 > /dev/null && userdel -f rock64
+		getent passwd rock > /dev/null && userdel -f rock # Radxa images
+		getent passwd linaro > /dev/null && userdel -f linaro # ASUS TB
+		getent passwd dietpi > /dev/null && userdel -f dietpi # recreated below
+		getent passwd debian > /dev/null && userdel -f debian # BBB
+		getent passwd openmediavault-webgui > /dev/null && userdel -f openmediavault-webgui # OMV (NanoPi NEO2)
+		getent passwd admin > /dev/null && userdel -f admin # OMV (NanoPi NEO2)
+		getent passwd fa > /dev/null && userdel -f fa # OMV (NanoPi NEO2)
+		getent passwd colord > /dev/null && userdel -f colord # OMV (NanoPi NEO2)
+		getent passwd saned > /dev/null && userdel -f saned # OMV (NanoPi NEO2)
+		getent group openmediavault-config > /dev/null && groupdel openmediavault-config # OMV (NanoPi NEO2)
+		getent group openmediavault-engined > /dev/null && groupdel openmediavault-engined # OMV (NanoPi NEO2)
+		getent group openmediavault-webgui > /dev/null && groupdel openmediavault-webgui # OMV (NanoPi NEO2)
 
 		G_DIETPI-NOTIFY 2 'Removing misc files/folders/services, not required by DietPi'
 
-		# shellcheck disable=SC2115
+		# shellcheck disable=SC2015,SC2115
 		[[ -d '/home' ]] && rm -Rfv /home/{,.??,.[^.]}* || mkdir /home
-		# shellcheck disable=SC2115
+		# shellcheck disable=SC2015,SC2115
 		[[ -d '/media' ]] && rm -Rfv /media/{,.??,.[^.]}* || mkdir /media
 		[[ -d '/selinux' ]] && rm -Rv /selinux
 		[[ -d '/var/cache/apparmor' ]] && rm -Rv /var/cache/apparmor
@@ -1153,6 +1160,7 @@ Currently installed: $G_DISTRO_NAME (ID: $G_DISTRO)"; then
 			G_EXEC update-rc.d -f "$i" remove
 
 		done
+		unset -v aservices
 
 		# - ARMbian specific
 		[[ -f '/boot/armbian_first_run.txt.template' ]] && rm -v /boot/armbian_first_run.txt.template
@@ -1258,9 +1266,9 @@ _EOF_
 		G_DIETPI-NOTIFY 2 'Generating DietPi directories'
 		mkdir -pv /var/lib/dietpi/{postboot.d,dietpi-software/installed}
 		mkdir -pv /var/tmp/dietpi/logs/dietpi-ramlog_store
-		mkdir -pv $G_FP_DIETPI_USERDATA /mnt/{samba,ftp_client,nfs_client}
-		chown -R dietpi:dietpi /var/{lib,tmp}/dietpi $G_FP_DIETPI_USERDATA /mnt/{samba,ftp_client,nfs_client}
-		chmod 775 $(find /var/{lib,tmp}/dietpi $G_FP_DIETPI_USERDATA /mnt/{samba,ftp_client,nfs_client} -type d)
+		mkdir -pv /mnt/{dietpi_userdata,samba,ftp_client,nfs_client}
+		chown -R dietpi:dietpi /var/{lib,tmp}/dietpi /mnt/{dietpi_userdata,samba,ftp_client,nfs_client}
+		find /var/{lib,tmp}/dietpi /mnt/{dietpi_userdata,samba,ftp_client,nfs_client} -type d -exec chmod 0775 {} +
 
 		#-----------------------------------------------------------------------------------
 		# Services

@@ -19,7 +19,7 @@
 
 	# Import DietPi-Globals --------------------------------------------------------------
 	. /boot/dietpi/func/dietpi-globals
-	G_PROGRAM_NAME='DietPi-Config'
+	readonly G_PROGRAM_NAME='DietPi-Config'
 	G_CHECK_ROOT_USER
 	G_CHECK_ROOTFS_RW
 	G_INIT
@@ -39,16 +39,6 @@
 		fi
 
 	fi
-
-	#/////////////////////////////////////////////////////////////////////////////////////
-	# Obtain Hardware Details
-	#/////////////////////////////////////////////////////////////////////////////////////
-	FP_CPU_SCALING_GOV='/sys/devices/system/cpu/cpu0/cpufreq/scaling_available_governors'
-
-	#/////////////////////////////////////////////////////////////////////////////////////
-	# Obtain Installed software
-	#/////////////////////////////////////////////////////////////////////////////////////
-	Load_Installed_Software(){ [[ -f '/boot/dietpi/.installed' ]] && . /boot/dietpi/.installed; }
 
 	#/////////////////////////////////////////////////////////////////////////////////////
 	# Whiltail Info
@@ -129,7 +119,6 @@
 			elif (( $G_WHIP_RETURNED_VALUE == 9 )); then
 
 				/boot/dietpi/dietpi-autostart
-				REBOOT_REQUIRED=1
 
 			elif (( $G_WHIP_RETURNED_VALUE == 10 )); then
 
@@ -152,7 +141,7 @@
 		if G_WHIP_YESNO "Exit $G_PROGRAM_NAME?"; then
 
 			# Disable reboot when run from dietpi-software
-			pgrep 'dietpi-software' &> /dev/null && REBOOT_REQUIRED=0
+			pgrep 'dietpi-software' > /dev/null && REBOOT_REQUIRED=0
 
 			# Reboot required
 			(( $REBOOT_REQUIRED )) && G_WHIP_YESNO 'A reboot is required to apply your new settings.\nWould you like to reboot now?' && reboot
@@ -170,31 +159,27 @@
 
 	Display_Rotation_Calc_XY_Invert(){
 
+		# RPi only
+		(( $G_HW_MODEL < 10 )) || { Info_HW_OptionNotSupported; return; }
+
+		# 0=landscape 1=portrait
 		local input=$1
 
-		if (( $G_HW_MODEL < 10 )); then
+		local framebuffer_x=$(grep -m1 '^[[:blank:]]*framebuffer_width=' /boot/config.txt || vcgencmd get_config framebuffer_width)
+		framebuffer_x=${framebuffer_x#*=}; framebuffer_x=${framebuffer_x:-0}
+		local framebuffer_y=$(grep -m1 '^[[:blank:]]*framebuffer_height=' /boot/config.txt || vcgencmd get_config framebuffer_height)
+		framebuffer_y=${framebuffer_y#*=}; framebuffer_y=${framebuffer_y:-0}
+		# 0/180 landscape
+		if (( $input == 0 && $framebuffer_x < $framebuffer_y )); then
 
-			local framebuffer_x=$(grep -m1 '^[[:blank:]]*framebuffer_width=' /boot/config.txt || vcgencmd get_config framebuffer_width)
-			framebuffer_x=${framebuffer_x#*=}; framebuffer_x=${framebuffer_x:-0}
-			local framebuffer_y=$(grep -m1 '^[[:blank:]]*framebuffer_height=' /boot/config.txt || vcgencmd get_config framebuffer_height)
-			framebuffer_y=${framebuffer_y#*=}; framebuffer_y=${framebuffer_y:-0}
-			#	0/180 landscape
-			if (( $input == 0 && $framebuffer_x < $framebuffer_y )); then
+			G_CONFIG_INJECT 'framebuffer_width=' "framebuffer_width=$framebuffer_y" /boot/config.txt
+			G_CONFIG_INJECT 'framebuffer_height=' "framebuffer_height=$framebuffer_x" /boot/config.txt
 
-				G_CONFIG_INJECT 'framebuffer_width=' "framebuffer_width=$framebuffer_y" /boot/config.txt
-				G_CONFIG_INJECT 'framebuffer_height=' "framebuffer_height=$framebuffer_x" /boot/config.txt
+		# 90/270 portrait
+		elif (( $input == 1 && $framebuffer_x > $framebuffer_y )); then
 
-			#	90/270 portrait | flip XY FB values
-			elif (( $input == 1 && $framebuffer_x > $framebuffer_y )); then
-
-				G_CONFIG_INJECT 'framebuffer_width=' "framebuffer_width=$framebuffer_y" /boot/config.txt
-				G_CONFIG_INJECT 'framebuffer_height=' "framebuffer_height=$framebuffer_x" /boot/config.txt
-
-			fi
-
-		else
-
-			Info_HW_OptionNotSupported
+			G_CONFIG_INJECT 'framebuffer_width=' "framebuffer_width=$framebuffer_y" /boot/config.txt
+			G_CONFIG_INJECT 'framebuffer_height=' "framebuffer_height=$framebuffer_x" /boot/config.txt
 
 		fi
 
@@ -230,7 +215,7 @@
 		local xorg_dpi_current=$(sed -n '/^[[:blank:]]*SOFTWARE_XORG_DPI=/{s/^[^=]*=//p;q}' /boot/dietpi.txt)
 		G_WHIP_MENU_ARRAY+=('17' ": X.Org DPI: [${xorg_dpi_current:-N/A}]")
 
-		(( $G_HW_MODEL != 20 )) && G_WHIP_MENU_ARRAY+=('14' ': LED Control')
+		(( $G_HW_MODEL == 20 )) || G_WHIP_MENU_ARRAY+=('14' ': LED Control')
 
 		# RPi only
 		if (( $G_HW_MODEL < 10 )); then
@@ -622,26 +607,22 @@ A long (or insufficiently manufactured) cable may required a higher boost settin
 				MIN_VALUE=0
 				MAX_VALUE=255
 				local fp_brightness current_brightness
-
 				for fp_brightness in "${afp_current_set_brightness[@]}"
 				do
 
-					if [[ -f $fp_brightness/brightness ]]; then
-
-						current_brightness=$(<$fp_brightness/brightness)
-						[[ -f $fp_brightness/max_brightness ]] && MAX_VALUE=$(<$fp_brightness/max_brightness)
-						break
-
-					fi
+					[[ -f $fp_brightness/brightness ]] || continue
+					current_brightness=$(<"$fp_brightness/brightness")
+					[[ -f $fp_brightness/max_brightness ]] && MAX_VALUE=$(<"$fp_brightness/max_brightness")
+					break
 
 				done
 
 				if disable_error=1 G_CHECK_VALIDINT "$current_brightness"; then
 
 					G_WHIP_DEFAULT_ITEM=$current_brightness
-					if G_WHIP_INPUTBOX "Please enter a brightness value:\n - Min = $MIN_VALUE | Max = $MAX_VALUE" && G_CHECK_VALIDINT "$G_WHIP_RETURNED_VALUE" $MIN_VALUE $MAX_VALUE; then
+					if G_WHIP_INPUTBOX "Please enter a brightness value:\n - Min = $MIN_VALUE | Max = $MAX_VALUE" && G_CHECK_VALIDINT "$G_WHIP_RETURNED_VALUE" "$MIN_VALUE" "$MAX_VALUE"; then
 
-						echo $G_WHIP_RETURNED_VALUE > $fp_brightness/brightness
+						echo "$G_WHIP_RETURNED_VALUE" > "$fp_brightness/brightness"
 
 					fi
 
@@ -905,7 +886,7 @@ Re-enabling HDMI requires a reboot. If you need emergency HDMI output, edit the 
 
 				if [[ $G_WHIP_RETURNED_VALUE == 'vc4-'* ]]; then
 
-					/boot/dietpi/func/dietpi-set_hardware rpi-opengl $G_WHIP_RETURNED_VALUE
+					/boot/dietpi/func/dietpi-set_hardware rpi-opengl "$G_WHIP_RETURNED_VALUE"
 
 				elif [[ $G_WHIP_RETURNED_VALUE != 'Headless' ]]; then
 
@@ -1026,11 +1007,7 @@ Re-enabling HDMI requires a reboot. If you need emergency HDMI output, edit the 
 
 				# Always reset to HDMI
 				sed -i '/setenv vout /c\setenv vout "hdmi"' /boot/boot.ini
-				if [[ $G_WHIP_RETURNED_VALUE == '1024x600' ]]; then
-
-					sed -i '/setenv vout /c\setenv vout "dvi"' /boot/boot.ini
-
-				fi
+				[[ $G_WHIP_RETURNED_VALUE == '1024x600' ]] && sed -i '/setenv vout /c\setenv vout "dvi"' /boot/boot.ini
 
 				sed -i "/setenv videoconfig /c\setenv videoconfig \"drm_kms_helper.edid_firmware=edid/$G_WHIP_RETURNED_VALUE.bin\"" /boot/boot.ini
 
@@ -1040,7 +1017,7 @@ Re-enabling HDMI requires a reboot. If you need emergency HDMI output, edit the 
 		elif (( $G_HW_MODEL == 12 )); then
 
 			# Get Current Values
-			local current_resolution=$(mawk -F '"' '/setenv m "/ {print $2;exit}' /boot/boot.ini | sed 's/p/p /')
+			local current_resolution=$(mawk -F '"' '/setenv m "/{print $2;exit}' /boot/boot.ini | sed 's/p/p /')
 			# - NB: also added space after xxxp, so its easier to read, and selects default item.
 
 			G_WHIP_MENU_ARRAY=(
@@ -1065,7 +1042,7 @@ Re-enabling HDMI requires a reboot. If you need emergency HDMI output, edit the 
 			G_WHIP_DEFAULT_ITEM=$current_resolution
 			if G_WHIP_MENU "Hardware : $G_HW_MODEL_NAME\nCurrent: $current_resolution"; then
 
-				[[ $current_resolution != $G_WHIP_RETURNED_VALUE ]] && REBOOT_REQUIRED=1
+				[[ $current_resolution != "$G_WHIP_RETURNED_VALUE" ]] && REBOOT_REQUIRED=1
 
 				# Always reset vga/dvi options
 				sed -i '/^[[:blank:]]*setenv vout "dvi"/c\#setenv vout "dvi"' /boot/boot.ini
@@ -1113,7 +1090,7 @@ Re-enabling HDMI requires a reboot. If you need emergency HDMI output, edit the 
 			G_WHIP_DEFAULT_ITEM=$current_resolution
 			if G_WHIP_MENU "Hardware : $G_HW_MODEL_NAME\nCurrent: $current_resolution"; then
 
-				if [[ $current_resolution != $G_WHIP_RETURNED_VALUE ]]; then
+				if [[ $current_resolution != "$G_WHIP_RETURNED_VALUE" ]]; then
 
 					G_CONFIG_INJECT 'hdmi_mode=' "hdmi_mode=$G_WHIP_RETURNED_VALUE" /boot/uEnv.txt
 					REBOOT_REQUIRED=1
@@ -1185,7 +1162,7 @@ Re-enabling HDMI requires a reboot. If you need emergency HDMI output, edit the 
 			G_WHIP_MENU "Please select an option for $item:" || return
 
 			local option=${G_WHIP_RETURNED_VALUE#To }
-			/boot/dietpi/func/dietpi-set_software apt-cache ${item#APT } ${option,,}
+			/boot/dietpi/func/dietpi-set_software apt-cache "${item#APT }" "${option,,}"
 
 			if [[ $item == 'APT lists' ]]; then
 
@@ -1217,7 +1194,7 @@ NB: You now need to run "apt update" or "G_AGUP" once after each reboot, before 
 			[[ -e $i ]] || continue
 			i=${i#/dev/}
 			aSTATE[$i]='Off'
-			systemctl -q is-active serial-getty@$i && aSTATE[$i]='On'
+			systemctl -q is-active "serial-getty@$i" && aSTATE[$i]='On'
 			G_WHIP_MENU_ARRAY+=("$i console" ": [${aSTATE[$i]}]")
 
 		done
@@ -1256,7 +1233,7 @@ NB: You now need to run "apt update" or "G_AGUP" once after each reboot, before 
 			if [[ $G_WHIP_RETURNED_VALUE == *'device' ]]; then
 
 				local toggle=1
-				[[ $rpi_uart_state == 'On' ]] && toggle=0 && /boot/dietpi/func/dietpi-set_hardware serialconsole disable ${G_WHIP_RETURNED_VALUE%% *}
+				[[ $rpi_uart_state == 'On' ]] && toggle=0 && /boot/dietpi/func/dietpi-set_hardware serialconsole disable "${G_WHIP_RETURNED_VALUE%% *}"
 				G_CONFIG_INJECT 'enable_uart=' "enable_uart=$toggle" /boot/config.txt
 				REBOOT_REQUIRED=1
 
@@ -1264,7 +1241,7 @@ NB: You now need to run "apt update" or "G_AGUP" once after each reboot, before 
 
 				local toggle='enable'
 				[[ ${aSTATE[${G_WHIP_RETURNED_VALUE%% *}]} == 'On' ]] && toggle='disable'
-				/boot/dietpi/func/dietpi-set_hardware serialconsole $toggle ${G_WHIP_RETURNED_VALUE%% *}
+				/boot/dietpi/func/dietpi-set_hardware serialconsole $toggle "${G_WHIP_RETURNED_VALUE%% *}"
 
 			fi
 
@@ -1460,10 +1437,10 @@ Please choose whether your device have an active RTC or requires "fake-hwclock":
  - Mode 4:\nsystemd-timesyncd will run as a background daemon/service. Differences in time will be gradually adjusted over time, rather than instantly.\n
  - Mode 0:\nIf you use a custom time sync method, e.g. the NTP package for high precision demand, select custom mode to avoid systemd-timesyncd interference.'; then
 
-					/boot/dietpi/func/dietpi-set_software ntpd-mode $G_WHIP_RETURNED_VALUE
+					/boot/dietpi/func/dietpi-set_software ntpd-mode "$G_WHIP_RETURNED_VALUE"
 					# Run time sync only, if not currently running, to avoid concurrent execution if dietpi-config was called from DietPi-Run_NTPD error handler
 					# - Run non-interactively to avoid its internal error handler allowing to open a concurrent dietpi-config instance
-					pgrep -cif /dietpi/func/run_ntpd &> /dev/null || G_INTERACTIVE=0 MAX_LOOPS_CHECK=10 /boot/dietpi/func/run_ntpd 1
+					pgrep -cif /dietpi/func/run_ntpd > /dev/null || G_INTERACTIVE=0 MAX_LOOPS_CHECK=10 /boot/dietpi/func/run_ntpd 1
 
 				fi
 
@@ -1522,7 +1499,7 @@ Further information: https://www.raspberrypi.org/documentation/hardware/raspberr
 				G_WHIP_DEFAULT_ITEM=$rpi_i2c_baudrate
 				if G_WHIP_INPUTBOX 'Please enter the required I2C baudrate frequency (kHz).' && G_CHECK_VALIDINT "$G_WHIP_RETURNED_VALUE" 0; then
 
-					/boot/dietpi/func/dietpi-set_hardware i2c $G_WHIP_RETURNED_VALUE
+					/boot/dietpi/func/dietpi-set_hardware i2c "$G_WHIP_RETURNED_VALUE"
 					REBOOT_REQUIRED=1
 
 				fi
@@ -1633,9 +1610,22 @@ Please reboot this system once, the HW bit which allows USB boot support will th
 
 		fi
 
+		# RPi extras
+		if (( $G_HW_MODEL < 10 )); then
+
+			local temp_limit=$(sed -n '/^[[:blank:]]*temp_limit=/{s/^[^=]*=//p;q}' /boot/config.txt)
+			G_WHIP_MENU_ARRAY+=('ARM Temp Limit' ": [${temp_limit:=85}'c]")
+
+			local arm_freq_min=$(sed -n '/^[[:blank:]]*arm_freq_min=/{s/^[^=]*=//p;q}' /boot/config.txt)
+			[[ $arm_freq_min ]] || { [[ $G_HW_MODEL == [01] ]] && arm_freq_min=700 || arm_freq_min=600; } # 700 on RPi1+Zero, 600 on all others
+			G_WHIP_MENU_ARRAY+=('ARM Idle Frequency' ": [$arm_freq_min MHz]") # https://github.com/MichaIng/DietPi/issues/3690
+
+			local initial_turbo=$(sed -n '/^[[:blank:]]*initial_turbo=/{s/^[^=]*=//p;q}' /boot/config.txt)
+			G_WHIP_MENU_ARRAY+=('ARM Initial Turbo' ": [${initial_turbo:=0} seconds]")
+
 		# Define CPU scaling frequency or percent
-		# - Disable on RPi since ondemand only jumps between lowest and highest by default. RPi user hence should use "ARM Idle Frequency" option + overclocking to set those two freqs.
-		if (( $G_HW_MODEL > 9 )); then
+		# - Disabled on RPi since ondemand only jumps between lowest and highest by default. RPi user hence should use "ARM Idle Frequency" option + overclocking to set those two freqs.
+		else
 
 			local type_cpu_freq_info='MHz'
 			# Intel
@@ -1652,21 +1642,6 @@ Please reboot this system once, the HW bit which allows USB boot support will th
 			(( $user_frequency_min_current )) || user_frequency_min_text='Off'
 
 			G_WHIP_MENU_ARRAY+=('CPU Frequency Limits' ": Max = [$user_frequency_max_text] | Min = [$user_frequency_min_text]")
-
-		fi
-
-		# RPi extras
-		if (( $G_HW_MODEL < 10 )); then
-
-			local temp_limit=$(sed -n '/^[[:blank:]]*temp_limit=/{s/^[^=]*=//p;q}' /boot/config.txt)
-			G_WHIP_MENU_ARRAY+=('ARM Temp Limit' ": [${temp_limit:=85}'c]")
-
-			local arm_freq_min=$(sed -n '/^[[:blank:]]*arm_freq_min=/{s/^[^=]*=//p;q}' /boot/config.txt)
-			[[ $arm_freq_min ]] || { [[ $G_HW_MODEL == [01] ]] && arm_freq_min=700 || arm_freq_min=600; } # 700 on RPi1+Zero, 600 on all others
-			G_WHIP_MENU_ARRAY+=('ARM Idle Frequency' ": [$arm_freq_min MHz]") # https://github.com/MichaIng/DietPi/issues/3690
-
-			local initial_turbo=$(sed -n '/^[[:blank:]]*initial_turbo=/{s/^[^=]*=//p;q}' /boot/config.txt)
-			G_WHIP_MENU_ARRAY+=('ARM Initial Turbo' ": [${initial_turbo:=0} seconds]")
 
 		fi
 
@@ -1719,7 +1694,7 @@ If unsure, set any value, 'Ondemand Down Factor' option on the next screen will 
 
 					if [[ $file ]]; then
 
-						MIN_VALUE=$(( $(<$file) / 1000 ))
+						MIN_VALUE=$(( $(<"$file") / 1000 ))
 
 					# Unable to find min value, hard set it
 					else
@@ -1742,6 +1717,7 @@ If unsure, set any value, 'Ondemand Down Factor' option on the next screen will 
 
 				'CPU Frequency Limits')
 
+					# Create /tmp/dietpi-available_cpu_freqs containing available scaling frequencies
 					/boot/dietpi/dietpi-cpuinfo 2
 
 					if [[ ! -f '/tmp/dietpi-available_cpu_freqs' ]]; then
@@ -1750,10 +1726,14 @@ If unsure, set any value, 'Ondemand Down Factor' option on the next screen will 
 
 					else
 
+						# Map to array
 						local available_frequency_array=()
-						readarray available_frequency_array < /tmp/dietpi-available_cpu_freqs
-						local division_factor=1000 # display MHz for user menu
-						# Intel (disable conversion)
+						mapfile -t available_frequency_array < /tmp/dietpi-available_cpu_freqs
+						rm /tmp/dietpi-available_cpu_freqs
+
+						# Convert to MHz
+						local division_factor=1000
+						# Intel: Skip conversion
 						[[ -f '/sys/devices/system/cpu/intel_pstate/max_perf_pct' ]] && division_factor=1
 
 						local index=0 # 0=max | 1=min
@@ -1761,10 +1741,10 @@ If unsure, set any value, 'Ondemand Down Factor' option on the next screen will 
 						do
 
 							G_WHIP_MENU_ARRAY=()
-							for i in ${!available_frequency_array[@]}
+							for i in "${available_frequency_array[@]}"
 							do
 
-								G_WHIP_MENU_ARRAY+=($(( ${available_frequency_array[$i]} / $division_factor )) "$type_cpu_freq_info")
+								G_WHIP_MENU_ARRAY+=($(( $i / $division_factor )) "$type_cpu_freq_info")
 
 							done
 							G_WHIP_MENU_ARRAY+=('Disabled' ': Returns clocks to default')
@@ -1788,8 +1768,7 @@ Current setting: $user_frequency_min_text" && G_CONFIG_INJECT 'CONFIG_CPU_MIN_FR
 							((index++))
 
 						done
-
-						unset available_frequency_array
+						unset -v available_frequency_array
 
 						/boot/dietpi/func/dietpi-set_cpu
 
@@ -1805,8 +1784,10 @@ Current setting: $user_frequency_min_text" && G_CONFIG_INJECT 'CONFIG_CPU_MIN_FR
 
 				'CPU Governor')
 
+					local fp_governor='/sys/devices/system/cpu/cpu0/cpufreq/scaling_available_governors'
+
 					# Scaling govs not available (No Gavnor!)
-					if [[ ! -f $FP_CPU_SCALING_GOV ]]; then
+					if [[ ! -f $fp_governor ]]; then
 
 						G_WHIP_MSG 'Your processor, or kernel, does not support this feature.\n\n(Info): scaling_available_governors does not exist.'
 
@@ -1815,43 +1796,43 @@ Current setting: $user_frequency_min_text" && G_CONFIG_INJECT 'CONFIG_CPU_MIN_FR
 
 						local Description='CPU Governor: https://www.kernel.org/doc/html/latest/admin-guide/pm/cpufreq.html#generic-scaling-governors'
 						G_WHIP_MENU_ARRAY=()
-						if grep -qi 'schedutil' $FP_CPU_SCALING_GOV; then
+						if grep -qi 'schedutil' $fp_governor; then
 
 							G_WHIP_MENU_ARRAY+=('schedutil' ": Scales CPU frequency between $frequency_min_cpu_governor MHz and $frequency_max_cpu_governor MHz")
 							Description+='\nSchedutil    | Dynamic CPU frequency based on CPU scheduler metrics (recommended on modern kernels)'
 
 						fi
-						if grep -qi 'ondemand' $FP_CPU_SCALING_GOV; then
+						if grep -qi 'ondemand' $fp_governor; then
 
 							G_WHIP_MENU_ARRAY+=('ondemand' ": Scales CPU frequency between $frequency_min_cpu_governor MHz and $frequency_max_cpu_governor MHz")
 							Description+='\nOndemand     | Dynamic CPU frequency based on usage (recommended on older kernels)'
 
 						fi
-						if grep -qi 'interactive' $FP_CPU_SCALING_GOV; then
+						if grep -qi 'interactive' $fp_governor; then
 
 							G_WHIP_MENU_ARRAY+=('interactive' ": Scales CPU frequency between $frequency_min_cpu_governor MHz and $frequency_max_cpu_governor MHz")
 							Description+='\nInteractive  | Same as ondemand. Bias towards low latency, faster scaling'
 
 						fi
-						if grep -qi 'conservative' $FP_CPU_SCALING_GOV; then
+						if grep -qi 'conservative' $fp_governor; then
 
 							G_WHIP_MENU_ARRAY+=('conservative' ": Scales CPU frequency between $frequency_min_cpu_governor MHz and $frequency_max_cpu_governor MHz")
 							Description+='\nConservative | Same as ondemand. Bias towards powersaving, slower scaling'
 
 						fi
-						if grep -qi 'powersave' $FP_CPU_SCALING_GOV; then
+						if grep -qi 'powersave' $fp_governor; then
 
 							G_WHIP_MENU_ARRAY+=('powersave' ": Limits CPU frequency to $frequency_min_cpu_governor MHz")
 							Description+='\nPowersave    | Static. Reduces energy consumption, heat, performance'
 
 						fi
-						if grep -qi 'performance' $FP_CPU_SCALING_GOV; then
+						if grep -qi 'performance' $fp_governor; then
 
 							G_WHIP_MENU_ARRAY+=('performance' ": Forces CPU frequency to $frequency_max_cpu_governor MHz")
 							Description+='\nPerformance  | Static. Increases energy consumption, heat, performance'
 
 						fi
-						if grep -qi 'userspace' $FP_CPU_SCALING_GOV; then
+						if grep -qi 'userspace' $fp_governor; then
 
 							G_WHIP_MENU_ARRAY+=('userspace' ": No-op governor, allows setting frequency manually")
 							Description+='\nUserspace    | No-op. Governor does not touch CPU frequency at all'
@@ -1900,9 +1881,9 @@ Current setting: $user_frequency_min_text" && G_CONFIG_INJECT 'CONFIG_CPU_MIN_FR
 
 				'ARM Idle Frequency')
 
-					MIN_VALUE=200 MAX_VALUE=600
+					MIN_VALUE=100 MAX_VALUE=600
 					G_WHIP_DEFAULT_ITEM=$arm_freq_min
-					if G_WHIP_INPUTBOX "ARM frequency (MHz) used by CPU governors powersave and conservative/ondemand/interactive when on idle.
+					if G_WHIP_INPUTBOX "ARM frequency (MHz) used by CPU governors powersave and schedutil/conservative/ondemand/interactive when on idle.
  - Recommended value: 300\n - Valid range: $MIN_VALUE - $MAX_VALUE\n - Setting a value outside of range will reset to RPi defaults."; then
 
 						if disable_error=1 G_CHECK_VALIDINT "$G_WHIP_RETURNED_VALUE" $MIN_VALUE $MAX_VALUE; then
@@ -1952,7 +1933,7 @@ Current setting: $user_frequency_min_text" && G_CONFIG_INJECT 'CONFIG_CPU_MIN_FR
 
 		local hostname_current=$(</etc/hostname)
 		G_WHIP_DEFAULT_ITEM=$hostname_current
-		if G_WHIP_INPUTBOX 'Please enter a new hostname' && [[ $hostname_current != $G_WHIP_RETURNED_VALUE ]]; then
+		if G_WHIP_INPUTBOX 'Please enter a new hostname' && [[ $hostname_current != "$G_WHIP_RETURNED_VALUE" ]]; then
 
 			if /boot/dietpi/func/change_hostname "$G_WHIP_RETURNED_VALUE"; then
 
@@ -2049,7 +2030,7 @@ Current setting: $user_frequency_min_text" && G_CONFIG_INJECT 'CONFIG_CPU_MIN_FR
 			if G_WHIP_MENU "Hardware : $G_HW_MODEL_NAME\nCurrent: $gpu_mem_current MiB GPU | $ram_mem_current MiB RAM"; then
 
 				TARGETMENUID=6 # Return to this menu
-				/boot/dietpi/func/dietpi-set_hardware gpumemsplit $G_WHIP_RETURNED_VALUE
+				/boot/dietpi/func/dietpi-set_hardware gpumemsplit "$G_WHIP_RETURNED_VALUE"
 				REBOOT_REQUIRED=1
 
 			fi
@@ -2187,15 +2168,12 @@ Current setting: $user_frequency_min_text" && G_CONFIG_INJECT 'CONFIG_CPU_MIN_FR
 		NET_RX_MB='N/A'
 		NET_TX_MB='N/A'
 
-		if [[ -f '/sys/class/net/$input/statistics/rx_bytes' && -f '/sys/class/net/$input/statistics/tx_bytes' ]]; then
+		[[ -f /sys/class/net/$input/statistics/rx_bytes && -f /sys/class/net/$input/statistics/tx_bytes ]] || return
 
-			NET_RX_BYTE=$(</sys/class/net/$input/statistics/rx_bytes)
-			disable_error=1 G_CHECK_VALIDINT "$NET_RX_BYTE" 1 && NET_RX_MB="$(( $NET_RX_BYTE / 1024 / 1024 )) MiB"
-
-			NET_TX_BYTE=$(</sys/class/net/$input/statistics/tx_bytes)
-			disable_error=1 G_CHECK_VALIDINT "$NET_TX_BYTE" 1 && NET_TX_MB="$(( $NET_TX_BYTE / 1024 / 1024 )) MiB"
-
-		fi
+		NET_RX_BYTE=$(<"/sys/class/net/$input/statistics/rx_bytes")
+		disable_error=1 G_CHECK_VALIDINT "$NET_RX_BYTE" 1 && NET_RX_MB="$(( $NET_RX_BYTE / 1024 / 1024 )) MiB"
+		NET_TX_BYTE=$(<"/sys/class/net/$input/statistics/tx_bytes")
+		disable_error=1 G_CHECK_VALIDINT "$NET_TX_BYTE" 1 && NET_TX_MB="$(( $NET_TX_BYTE / 1024 / 1024 )) MiB"
 
 	}
 
@@ -2299,8 +2277,8 @@ Current setting: $user_frequency_min_text" && G_CONFIG_INJECT 'CONFIG_CPU_MIN_FR
 
 		G_DIETPI-NOTIFY 0 'Network restarted'
 
-		if [[ $ETH_MODE_TARGET == 0 && $ETH_IP != $ETH_IP_STATIC ]] ||
-			[[ $WIFI_MODE_TARGET == 0 && $WIFI_IP != $WIFI_IP_STATIC ]]; then
+		if [[ $ETH_MODE_TARGET == 0 && $ETH_IP != "$ETH_IP_STATIC" ]] ||
+			[[ $WIFI_MODE_TARGET == 0 && $WIFI_IP != "$WIFI_IP_STATIC" ]]; then
 
 			G_WHIP_MSG 'IP STATIC address change detected. A reboot is required to apply the new IP.\n\nPlease reboot the system.'
 			REBOOT_REQUIRED=1
@@ -2313,7 +2291,7 @@ Current setting: $user_frequency_min_text" && G_CONFIG_INJECT 'CONFIG_CPU_MIN_FR
 
 		# Check if resolvconf is available, else apply static DNS server via /etc/resolv.conf directly instead of /etc/network/interfaces entry
 		local i resolvconf=0
-		command -v resolvconf &> /dev/null && resolvconf=1
+		command -v resolvconf > /dev/null && resolvconf=1
 		if (( ! $resolvconf )); then
 
 			if (( ! $ETH_DISABLED && $ETH_MODE_TARGET == 0 )); then
@@ -2544,7 +2522,7 @@ _EOF_
 		fi
 		wifi_country_code_target=$G_WHIP_RETURNED_VALUE
 
-		/boot/dietpi/func/dietpi-set_hardware wificountrycode $wifi_country_code_target
+		/boot/dietpi/func/dietpi-set_hardware wificountrycode "$wifi_country_code_target"
 
 		# Restart networking
 		Network_Restart
@@ -2553,7 +2531,7 @@ _EOF_
 		# - Wait a bid until setting got applied
 		sleep 0.1
 		WIFI_COUNTRYCODE=$(iw reg get | mawk '/country/{print $2;exit}' | tr -d ':')
-		if [[ $WIFI_COUNTRYCODE != $wifi_country_code_target ]]; then
+		if [[ $WIFI_COUNTRYCODE != "$wifi_country_code_target" ]]; then
 
 			G_WHIP_MSG "[FAILED] Country code \"$wifi_country_code_target\" could not been applied.\n\nPlease check the country code and try again.\n\nIf problems persist, this may be a limitation with the driver/chipset."
 			return 1
@@ -2672,14 +2650,14 @@ NB: All Ethernet connections will be dropped!' && Network_ApplyChanges
 			ETH_MODE_TARGET=$ETH_MODE
 
 			# Connected and valid IP?
-			ETH_CONNECTED=$(ip -o r l dev eth$ETH_DEV_INDEX | grep -vcm1 '[[:blank:]]linkdown')
+			ETH_CONNECTED=$(ip -o r l dev "eth$ETH_DEV_INDEX" | grep -vcm1 '[[:blank:]]linkdown')
 
 			# Enabled and connected
 			if (( ! $ETH_DISABLED && $ETH_CONNECTED )); then
 
-				ETH_IP=$(ip a s eth$ETH_DEV_INDEX | grep -m1 '^[[:blank:]]*inet ' | mawk '{print $2}' | sed 's|/.*$||')
+				ETH_IP=$(ip a s "eth$ETH_DEV_INDEX" | grep -m1 '^[[:blank:]]*inet ' | mawk '{print $2}' | sed 's|/.*$||')
 				ETH_GATEWAY=$(ip r | mawk '/default/{print $3;exit}')
-				ETH_MASK=$(cidr2mask $(ip a s eth$ETH_DEV_INDEX | grep -m1 '^[[:blank:]]*inet ' | mawk '{print $2}' | sed 's|^.*/||'))
+				ETH_MASK=$(cidr2mask "$(ip a s "eth$ETH_DEV_INDEX" | grep -m1 '^[[:blank:]]*inet ' | mawk '{print $2}' | sed 's|^.*/||')")
 				ETH_DNS=$(mawk '/nameserver/{print $2;exit}' /etc/resolv.conf)
 
 			fi
@@ -2697,19 +2675,19 @@ NB: All Ethernet connections will be dropped!' && Network_ApplyChanges
 			WIFI_MODE_TARGET=$WIFI_MODE
 
 			# Connected and valid IP?
-			WIFI_CONNECTED=$(ip -o r l dev wlan$ETH_DEV_INDEX | grep -vcm1 '[[:blank:]]linkdown')
+			WIFI_CONNECTED=$(ip -o r l dev "wlan$ETH_DEV_INDEX" | grep -vcm1 '[[:blank:]]linkdown')
 
 			# Enabled and connected
 			if (( ! $WIFI_DISABLED && $WIFI_CONNECTED )); then
 
-				WIFI_IP=$(ip a s wlan$WIFI_DEV_INDEX | grep -m1 '^[[:blank:]]*inet ' | mawk '{print $2}' | sed 's|/.*$||')
+				WIFI_IP=$(ip a s "wlan$WIFI_DEV_INDEX" | grep -m1 '^[[:blank:]]*inet ' | mawk '{print $2}' | sed 's|/.*$||')
 				WIFI_GATEWAY=$(ip r | mawk '/default/{print $3;exit}')
-				WIFI_MASK=$(cidr2mask $(ip a s wlan$WIFI_DEV_INDEX | grep -m1 '^[[:blank:]]*inet ' | mawk '{print $2}' | sed 's|^.*/||'))
+				WIFI_MASK=$(cidr2mask "$(ip a s "wlan$WIFI_DEV_INDEX" | grep -m1 '^[[:blank:]]*inet ' | mawk '{print $2}' | sed 's|^.*/||')")
 				WIFI_DNS=$(mawk '/nameserver/{print $2;exit}' /etc/resolv.conf)
 
 				# Get extra WiFi stats
-				WIFI_BITRATE=$(iwconfig wlan$WIFI_DEV_INDEX | mawk '/Bit Rate/{print $2;exit}' | sed 's/Rate[:=]//g')
-				WIFI_SIGNALSTRENGTH=$(iwconfig wlan$WIFI_DEV_INDEX | mawk '/Signal level=/{print $4;exit}' | sed 's/level=//g' | cut -f1 -d "/")
+				WIFI_BITRATE=$(iwconfig "wlan$WIFI_DEV_INDEX" | mawk '/Bit Rate/{print $2;exit}' | sed 's/Rate[:=]//g')
+				WIFI_SIGNALSTRENGTH=$(iwconfig "wlan$WIFI_DEV_INDEX" | mawk '/Signal level=/{print $4;exit}' | sed 's/level=//g' | cut -f1 -d "/")
 
 				# Try and detect if this is dBm (contains -) or %
 				if disable_error=1 G_CHECK_VALIDINT "$WIFI_SIGNALSTRENGTH" -500 -1; then
@@ -3004,7 +2982,7 @@ Would you like to disable WiFi?\n - NB: Connections may drop!'; then
 		G_WHIP_MENU_ARRAY+=('' '●─ Apply ')
 		G_WHIP_MENU_ARRAY+=('Apply' ': Save all changes and restart networking')
 
-		Net_Update_UsageStats eth$ETH_DEV_INDEX
+		Net_Update_UsageStats "eth$ETH_DEV_INDEX"
 
 		G_WHIP_DEFAULT_ITEM=$WHIP_SELECTION_PREVIOUS
 		if G_WHIP_MENU "Ethernet Details:\nUsage   : Sent = $NET_TX_MB | Recieved = $NET_RX_MB\nAddress : IP = $ETH_IP | Mask = $ETH_MASK | Gateway = $ETH_GATEWAY | DNS = $ETH_DNS"; then
@@ -3026,16 +3004,16 @@ Would you like to disable WiFi?\n - NB: Connections may drop!'; then
 
 					G_AG_CHECK_INSTALL_PREREQ ethtool
 					G_WHIP_MENU_ARRAY=('0' ': Auto-negotiation (default, recommended)')
-					local aspeeds=( $(ethtool eth0 | sed -n '/Supported link modes:/,/^[[:blank:]]*[[:alpha:]]/p' | head -n -1 | mawk '{print $NF}') )
-					for i in ${aspeeds[@]//[^0-9]}
+					while read -r speed
 					do
 
-						G_WHIP_MENU_ARRAY+=("$i" ": Force $i Mbit link speed")
+						speed=${speed//[^0-9]}
+						[[ $speed ]] && G_WHIP_MENU_ARRAY+=("$speed" ": Force $speed Mbit link speed")
 
-					done
+					done < <(ethtool "eth$ETH_DEV_INDEX" | sed -n '/Supported link modes:/,/^[[:blank:]]*[[:alpha:]]/p' | head -n -1 | mawk '{print $NF}')
 					G_WHIP_MENU 'Please select a supported Ethernet link speed to force or auto-negotiation.
 NB: Auto-negotiation is highly recommended as long as you do not have issues with the auto estimated link speed.
-    This is mainly aimed at PINE A64 which may have a hardware issue that causes unstable 1000 Mbit link.' && /boot/dietpi/func/dietpi-set_hardware eth-forcespeed $G_WHIP_RETURNED_VALUE
+    This is mainly aimed at PINE A64 which may have a hardware issue that causes unstable 1000 Mbit link.' && /boot/dietpi/func/dietpi-set_hardware eth-forcespeed "$G_WHIP_RETURNED_VALUE"
 
 				;;
 
@@ -3106,7 +3084,7 @@ NB: Auto-negotiation is highly recommended as long as you do not have issues wit
 
 		TARGETMENUID=8
 
-		Net_Update_UsageStats wlan$WIFI_DEV_INDEX
+		Net_Update_UsageStats "wlan$WIFI_DEV_INDEX"
 
 		local description_text="WiFi Details:\nUsage   : Sent = $NET_TX_MB | Recieved = $NET_RX_MB\n"
 
@@ -3266,7 +3244,7 @@ NB: Auto-negotiation is highly recommended as long as you do not have issues wit
 					for ((i=$channel_min; i<=$channel_max; i++))
 					do
 
-						G_WHIP_MENU_ARRAY+=($i ": $channel_mhz MHz")
+						G_WHIP_MENU_ARRAY+=("$i" ": $channel_mhz MHz")
 						((channel_mhz+=5))
 
 					done
@@ -4062,8 +4040,8 @@ The following will now be applied:\n - CPU governor = Powersave\n - Display outp
 
 							if [[ -f /proc/asound/card$i/pcm${j}p/info ]]; then
 
-								local card_name=$(</proc/asound/card$i/id)
-								card_name+=$(sed -n '/^name:/{s/^name://p;q}' /proc/asound/card$i/pcm${j}p/info)
+								local card_name=$(<"/proc/asound/card$i/id")
+								card_name+=$(sed -n '/^name:/{s/^name://p;q}' "/proc/asound/card$i/pcm${j}p/info")
 								G_WHIP_MENU_ARRAY+=("hw:$i,$j" ": $card_name")
 
 							fi
@@ -4168,24 +4146,24 @@ The following will now be applied:\n - CPU governor = Powersave\n - Display outp
 
 				elif (( $STRESS_TEST_MODE == 1 )); then
 
-					stress -c $(( $G_HW_CPU_CORES * 2 )) -i $G_HW_CPU_CORES -m $G_HW_CPU_CORES --vm-bytes "$memory_per_thread"M -t "$STRESS_TEST_DURATION"s &
+					stress -c $(( $G_HW_CPU_CORES * 2 )) -i "$G_HW_CPU_CORES" -m "$G_HW_CPU_CORES" --vm-bytes "$memory_per_thread"M -t "$STRESS_TEST_DURATION"s &
 
 				elif (( $STRESS_TEST_MODE == 2 )); then
 
-					stress -c $(( $G_HW_CPU_CORES * 2 )) -i $G_HW_CPU_CORES -m $G_HW_CPU_CORES --vm-bytes "$memory_per_thread"M -d 2 -t "$STRESS_TEST_DURATION"s &
+					stress -c $(( $G_HW_CPU_CORES * 2 )) -i "$G_HW_CPU_CORES" -m "$G_HW_CPU_CORES" --vm-bytes "$memory_per_thread"M -d 2 -t "$STRESS_TEST_DURATION"s &
 
 				fi
 
-				# - Reset
+				# Reset
 				STRESS_TEST_RESULTS_TEMP_MIN=1000
 				STRESS_TEST_RESULTS_TEMP_MAX=0
 
-				# - Check if system supports temp readouts
+				# Check if system supports temp readouts
 				local cpu_supports_temp=0
 				local cpu_temp=$(G_OBTAIN_CPU_TEMP)
 				disable_error=1 G_CHECK_VALIDINT "$cpu_temp" && cpu_supports_temp=1
 
-				# - Loop until stress completed
+				# Loop until stress completed
 				local remaning_time=0
 				while pgrep 'stress' &> /dev/null
 				do
@@ -4244,19 +4222,16 @@ The following will now be applied:\n - CPU governor = Powersave\n - Display outp
 
 		TARGETMENUID=0
 
-		# Update installed software
-		Load_Installed_Software
-
 		# No-IP Client
 		local noip_installed=0
 		local noip_menutext='[Not Installed] Install No-IP now'
-		if (( ${aSOFTWARE_INSTALL_STATE[67]:=0} == 2 )); then
+		if grep -q '^aSOFTWARE_INSTALL_STATE\[67\]=2' /boot/dietpi/.installed; then
 
 			noip_installed=1
 			noip_menutext='[Offline] Enter/Setup No-IP details'
 
 			# Check if No-IP is running (indicates login details are valid)
-			pgrep 'noip2' &> /dev/null && noip_menutext='[Online] Change No-IP details'
+			pgrep 'noip2' > /dev/null && noip_menutext='[Online] Change No-IP details'
 
 		fi
 
@@ -4398,7 +4373,7 @@ Please enter a value between $min and $max." && G_CHECK_VALIDINT "$G_WHIP_RETURN
 
 						fi
 
-						/boot/dietpi/func/dietpi-set_software apt-mirror $G_WHIP_RETURNED_VALUE || { failure='[FAILED] An internal error occurred, please report this issue to:\n - https://github.com/MichaIng/DietPi/issues\n\n'; continue; }
+						/boot/dietpi/func/dietpi-set_software apt-mirror "$G_WHIP_RETURNED_VALUE" || { failure='[FAILED] An internal error occurred, please report this issue to:\n - https://github.com/MichaIng/DietPi/issues\n\n'; continue; }
 						apt_mirror_current=$G_WHIP_RETURNED_VALUE
 						G_EXEC_NOHALT=1 G_AGUP && break || failure='[FAILED] APT update failed, please try another APT mirror.\n\n'
 
@@ -4448,7 +4423,7 @@ NB: If you need to use *.pool.ntp.org servers, enter the base domain only. The s
 						esac
 
 						G_CONFIG_INJECT 'CONFIG_NTP_MIRROR=' "CONFIG_NTP_MIRROR=$G_WHIP_RETURNED_VALUE" /boot/dietpi.txt
-						/boot/dietpi/func/dietpi-set_software ntpd-mode $(sed -n '/^[[:blank:]]*CONFIG_NTP_MODE=/{s/^[^=]*=//p;q}' /boot/dietpi.txt)
+						/boot/dietpi/func/dietpi-set_software ntpd-mode "$(sed -n '/^[[:blank:]]*CONFIG_NTP_MODE=/{s/^[^=]*=//p;q}' /boot/dietpi.txt)"
 						# Run time sync only, if not currently running, to avoid concurrent execution if dietpi-config was called from DietPi-Run_NTPD error handler
 						# - Run non-interactively to avoid its internal error handler allowing to open a concurrent dietpi-config instance
 						pgrep -cif /dietpi/func/run_ntpd &> /dev/null && return
@@ -4456,7 +4431,7 @@ NB: If you need to use *.pool.ntp.org servers, enter the base domain only. The s
 
 							G_WHIP_MSG "Time sync failed:\n - $G_WHIP_RETURNED_VALUE\n\nSetting reverted to previous."
 							G_CONFIG_INJECT 'CONFIG_NTP_MIRROR=' "CONFIG_NTP_MIRROR=$ntp_mirror_current" /boot/dietpi.txt
-							/boot/dietpi/func/dietpi-set_software ntpd-mode $(sed -n '/^[[:blank:]]*CONFIG_NTP_MODE=/{s/^[^=]*=//p;q}' /boot/dietpi.txt)
+							/boot/dietpi/func/dietpi-set_software ntpd-mode "$(sed -n '/^[[:blank:]]*CONFIG_NTP_MODE=/{s/^[^=]*=//p;q}' /boot/dietpi.txt)"
 
 						fi
 
@@ -4513,6 +4488,9 @@ NB: If you need to use *.pool.ntp.org servers, enter the base domain only. The s
 	# So we can call this in other menus (eg: submenu of this)
 	Load_Proxy_Vars(){
 
+		# Satisfy shellcheck
+		[[ $http_proxy ]] || http_proxy=
+
 		if [[ -f '/etc/bashrc.d/dietpi-proxy.sh' ]]; then
 
 			PROXY_ENABLED=1
@@ -4532,13 +4510,10 @@ NB: If you need to use *.pool.ntp.org servers, enter the base domain only. The s
 
 			PROXY_ADDRESS=${http_proxy#*//}; PROXY_ADDRESS=${PROXY_ADDRESS%:*}
 			PROXY_PORT=${http_proxy##*:}
-			if [[ $http_proxy == *@* ]]; then
-
-				PROXY_ADDRESS=${PROXY_ADDRESS#*@}
-				PROXY_USERNAME=${http_proxy#*//}; PROXY_USERNAME=${PROXY_USERNAME%%:*}
-				PROXY_PASSWORD=${http_proxy%%@*}; PROXY_PASSWORD=${PROXY_PASSWORD##*:}
-
-			fi
+			[[ $http_proxy == *'@'* ]] || return
+			PROXY_ADDRESS=${PROXY_ADDRESS#*@}
+			PROXY_USERNAME=${http_proxy#*//}; PROXY_USERNAME=${PROXY_USERNAME%%:*}
+			PROXY_PASSWORD=${http_proxy%%@*}; PROXY_PASSWORD=${PROXY_PASSWORD##*:}
 
 		else
 
@@ -4651,7 +4626,8 @@ _EOF_
 	if (( $G_DIETPI_INSTALL_STAGE >= 0 )); then
 
 		# Start DietPi-Config
-		while (( $TARGETMENUID >= 0 )); do
+		until (( $TARGETMENUID < 0 ))
+		do
 
 			G_TERM_CLEAR
 			G_WHIP_BUTTON_CANCEL_TEXT=$TEXT_MENU_BACK
