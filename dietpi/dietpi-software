@@ -12,15 +12,16 @@
 	# - Location: /boot/dietpi/dietpi-software
 	# - Installs "ready to run" software with optimisations unique to the device.
 	# - Generates and uses /boot/dietpi/.installed (software list) # -1=selected for uninstall, 0=not installed, 1=selected for install, 2=installed
-	#
-	# Usage:
-	# - dietpi-software			# Menu to select software for (un)install
-	# - dietpi-software install		$software_id (OR) $INDEX_{SSHSERVER,FILESERVER,LOGGING,WEBSERVER}_TARGET=-int
-	# - dietpi-software reinstall		# Same as installed, however, only reinstalls if state =2. Does not uninstall due to package removal danger (eg: Xserver removes Kodi), simply flags to be installed (=1).
-	# - dietpi-software uninstall		$software_id
-	# - dietpi-software list		# Lists all available software titles with ID and info
-	# - dietpi-software free		# List currently unused software IDs to be used for new software implementations
-	#////////////////////////////////////
+	USAGE='
+Usage: dietpi-software [<command> [<software_id>...]]
+Available commands:
+  <empty>			Interactive menu to install or uninstall software
+  install <software_id>...	Install each software given by space-separated list of IDs
+  reinstall <software_id>...	Reinstall each software given by space-separated list of IDs
+  uninstall <software_id>...	Uninstall each software given by space-separated list of IDs
+  list				Print a list with IDs and info for all available software titles
+  free				Print an unused software ID, free for a new software implementation
+'	#////////////////////////////////////
 
 	# Import DietPi-Globals ---------------------------------------------------------------
 	. /boot/dietpi/func/dietpi-globals
@@ -402,7 +403,6 @@ DietPi-Software will decrypt and use it for software installs. You can change it
  		aSOFTWARE_TYPE[$software_id]=0
  		aSOFTWARE_CATEGORY_INDEX[$software_id]=0
  		aSOFTWARE_REQUIRES_XSERVERXORG[$software_id]=1
- 		#aSOFTWARE_ONLINEDOC_URL[$software_id]
 
 		# Remote Desktops
 		#--------------------------------------------------------------------------------
@@ -642,7 +642,6 @@ DietPi-Software will decrypt and use it for software installs. You can change it
 		aSOFTWARE_DESC[$software_id]='music player daemon'
 		aSOFTWARE_TYPE[$software_id]=0
 		aSOFTWARE_CATEGORY_INDEX[$software_id]=2
-		#aSOFTWARE_ONLINEDOC_URL[$software_id]
 		aSOFTWARE_REQUIRES_ALSA[$software_id]=1
 		#------------------
 		software_id=129
@@ -733,7 +732,6 @@ DietPi-Software will decrypt and use it for software installs. You can change it
 		aSOFTWARE_DESC[$software_id]='web interface'
 		aSOFTWARE_TYPE[$software_id]=-1
 		aSOFTWARE_CATEGORY_INDEX[$software_id]=2
-		#aSOFTWARE_ONLINEDOC_URL[$software_id]
 		aSOFTWARE_REQUIRES_ALSA[$software_id]=1
 		aSOFTWARE_REQUIRES_WEBSERVER[$software_id]=1
 		aSOFTWARE_REQUIRES_PHP[$software_id]=1
@@ -745,7 +743,6 @@ DietPi-Software will decrypt and use it for software installs. You can change it
 		aSOFTWARE_DESC[$software_id]='quick reinstall/update web only'
 		aSOFTWARE_TYPE[$software_id]=-1
 		aSOFTWARE_CATEGORY_INDEX[$software_id]=2
-		#aSOFTWARE_ONLINEDOC_URL[$software_id]
 		#------------------
 		software_id=163
 
@@ -5870,9 +5867,9 @@ If you want to update ${aSOFTWARE_NAME[$software_id]}, please use its internal u
 			INSTALL_URL_ADDRESS='https://get.docker.com'
 			G_CHECK_URL "$INSTALL_URL_ADDRESS"
 			G_EXEC curl -sSfL "$INSTALL_URL_ADDRESS" -o DockerInstall.sh
-			chmod +x DockerInstall.sh
+			G_EXEC chmod +x DockerInstall.sh
 			G_EXEC_DESC='Running Docker installer' G_EXEC_OUTPUT=1 G_EXEC ./DockerInstall.sh
-			rm DockerInstall.sh
+			G_EXEC_NOFAIL=1 G_EXEC rm DockerInstall.sh
 
 		fi
 
@@ -11981,16 +11978,29 @@ _EOF_
 			mkdir -p /lib/systemd/system/docker.service.d
 			echo -e '[Service]\nType=simple' > /lib/systemd/system/docker.service.d/dietpi-simple.conf
 
-			# Move docker containers to dietpi_userdata
+			# Config: https://docs.docker.com/engine/reference/commandline/dockerd/#daemon-configuration-file
+			# - Move docker containers to dietpi_userdata
+			# - Log to systemd-journald (journalctl) by default with reduced log level: https://github.com/MichaIng/DietPi/issues/2388
+			#	+ containerd: https://github.com/docker/docker.github.io/issues/9091
+			G_CONFIG_INJECT '\[debug\]' '[debug]' /etc/containerd/config.toml
+			GCI_PRESERVE=1 G_CONFIG_INJECT 'level[[:blank:]]*=' '  level = "warn"' /etc/containerd/config.toml '^\[debug\]'
 			mkdir -p /mnt/dietpi_userdata/docker-data
 			if [[ -f '/etc/docker/daemon.json' ]]; then
 
-				GCI_PRESERVE=1 G_CONFIG_INJECT '"data-root":' '    "data-root": "/mnt/dietpi_userdata/docker-data",' /etc/docker/daemon.json '^\{([[:space:]]\|$)'
+				GCI_PRESERVE=1 G_CONFIG_INJECT '"data-root":' '    "data-root": "/mnt/dietpi_userdata/docker-data",' /etc/docker/daemon.json '^\{([[:space:]]|$)'
+				GCI_PRESERVE=1 G_CONFIG_INJECT '"debug":' '    "debug": false,' /etc/docker/daemon.json '^\{([[:space:]]|$)'
+				GCI_PRESERVE=1 G_CONFIG_INJECT '"log-level":' '    "log-level": "warn",' /etc/docker/daemon.json '^\{([[:space:]]|$)'
+				GCI_PRESERVE=1 G_CONFIG_INJECT '"log-driver":' '    "log-driver": "journald",' /etc/docker/daemon.json '^\{([[:space:]]|$)'
 
 			else
 
 				mkdir -p /etc/docker
-				echo -e '{\n    "data-root": "/mnt/dietpi_userdata/docker-data"\n}' > /etc/docker/daemon.json
+				echo '{
+    "data-root": "/mnt/dietpi_userdata/docker-data",
+    "debug": false,
+    "log-level": "warn",
+    "log-driver": "journald",
+}' > /etc/docker/daemon.json
 
 			fi
 
@@ -15465,7 +15475,8 @@ _EOF_
 
 		else
 
-			G_DIETPI-NOTIFY 2 "Unknown command $1"
+			G_DIETPI-NOTIFY 1 "Invalid input command ($1). Aborting...\n$USAGE"
+			exit 1
 
 		fi
 
