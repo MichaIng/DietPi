@@ -1462,22 +1462,18 @@ _EOF_'
 
 			# Disable nouveau: https://github.com/MichaIng/DietPi/issues/1244 // https://dietpi.com/phpbb/viewtopic.php?p=9688#p9688
 			rm -f /etc/modprobe.d/*nouveau*
-			cat << _EOF_ > /etc/modprobe.d/dietpi-disable_nouveau.conf
+			cat << '_EOF_' > /etc/modprobe.d/dietpi-disable_nouveau.conf
 blacklist nouveau
 blacklist lbm-nouveau
 options nouveau modeset=0
 alias nouveau off
 alias lbm-nouveau off
 _EOF_
-
-			# Apply usb-storage quirks to disable UAS for unsupported drives (Seagate ST5000LM000-2AN170): https://github.com/MichaIng/DietPi/issues/2905
-			echo 'options usb-storage quirks=0bc2:ab30:u' > /etc/modprobe.d/dietpi-usb-storage_quirks.conf
-
 			# Fix grub install device: https://github.com/MichaIng/DietPi/issues/3700
 			dpkg-query -s grub-pc &> /dev/null && G_EXEC eval "debconf-set-selections <<< 'grub-pc grub-pc/install_devices multiselect /dev/sda'"
 
 			# Update initramfs with above changes
-			if command -v update-tirfs &> /dev/null; then
+			if command -v update-tirfs > /dev/null; then
 
 				update-tirfs
 
