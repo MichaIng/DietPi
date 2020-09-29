@@ -274,6 +274,7 @@ Links to hardware and software manufacturers, sources and build instructions use
 - [Jellyfin](https://github.com/jellyfin/jellyfin)
 - [Komga](https://github.com/gotson/komga)
 - [HTPC Manager](https://github.com/HTPC-Manager/HTPC-Manager)
+- [Bazarr](https://github.com/morpheus65535/bazarr)
 
 ---
 
