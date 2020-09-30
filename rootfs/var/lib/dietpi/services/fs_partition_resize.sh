@@ -35,8 +35,8 @@
 		# Failsafe: Sync changes to disk before touching partitions
 		sync
 
-		# GPT detection | Modified version of ayufan-rock64 resize script: # Move GPT alternate header to end of disk
-		sfdisk "$ROOT_DRIVE" -l | grep -qi 'disklabel type: gpt' && sgdisk -e "$ROOT_DRIVE"
+		# GPT partition table: Move backup GPT data structures to the end of the disk
+		sfdisk -l "$ROOT_DRIVE" | grep -q '^Disklabel type: gpt$' && sgdisk -e "$ROOT_DRIVE"
 
 		# Maximize partition size
 		sfdisk --no-reread --no-tell-kernel -fN"$ROOT_PART" "$ROOT_DRIVE" <<< ',+'
