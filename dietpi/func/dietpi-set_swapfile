@@ -78,7 +78,7 @@
 	Swap_Disable(){
 
 		G_DIETPI-NOTIFY 2 'Disabling and deleting all existing swap files'
-		G_EXEC swapoff -a
+		G_EXEC_NOHALT=1 G_EXEC swapoff -a
 		rm -fv "$SWAP_PATH_CURRENT" "${SWAP_FILES_ACTIVE[@]}"
 		sed -i '/[[:blank:]]swap[[:blank:]]/d' /etc/fstab
 		# zram-swap
@@ -100,36 +100,28 @@
 			[[ -b '/dev/zram0' ]] || G_EXEC modprobe zram
 			G_EXEC eval 'echo 1 > /sys/block/zram0/reset'
 			G_EXEC eval "echo '${SWAP_SIZE}M' > /sys/block/zram0/disksize"
+			G_EXEC mkswap "$SWAP_PATH"
+			G_EXEC swapon "$SWAP_PATH"
+			# Make persistent, proceed with failure in case of R/O rootfs
+			G_EXEC_NOHALT=1 G_EXEC eval "echo 'zram' > /etc/modules-load.d/dietpi-zram-swap.conf" || return 1
+			G_EXEC_NOHALT=1 G_EXEC eval "echo 'SUBSYSTEM==\"block\", KERNEL==\"zram0\", ACTION==\"add\", ATTR{disksize}=\"${SWAP_SIZE}M\", RUN+=\"/sbin/mkswap /dev/zram0\", RUN+=\"/sbin/swapon /dev/zram0\"' > /etc/udev/rules.d/98-dietpi-zram-swap.rules" || return 1
+			G_EXEC_NOHALT=1 G_EXEC eval "echo 'swappiness=50' > /etc/sysctl.d/98-dietpi-zram-swap.conf" || return 1
+			return 0
 
-		# Pre-allocate for filesystems which do no support quick-allocate with fallocate
-		elif [[ $SWAP_FS == 'f2fs' || $SWAP_FS == 'xfs' || $SWAP_FS == 'vfat' ]]; then
+		# Swap file pre-allocation: Try faster and less write-intense fallocate first and dd as fallback
+		elif ! G_EXEC_NOHALT=1 G_EXEC fallocate -l "${SWAP_SIZE}M" "$SWAP_PATH" || ! G_EXEC_NOHALT=1 G_EXEC mkswap "$SWAP_PATH" || ! G_EXEC_NOHALT=1 G_EXEC swapon "$SWAP_PATH"; then
 
+			G_DIETPI-NOTIFY 2 'Swap file generation via "fallocate" failed, falling back to "dd"...'
 			G_EXEC dd if=/dev/zero of="$SWAP_PATH" bs=1M count=$SWAP_SIZE
-
-		else
-
-			G_EXEC fallocate -l "${SWAP_SIZE}M" "$SWAP_PATH"
+			G_EXEC mkswap "$SWAP_PATH"
+			G_EXEC swapon "$SWAP_PATH"
 
 		fi
 
-		G_EXEC mkswap "$SWAP_PATH"
-		[[ $SWAP_FS == 'zram' ]] || G_EXEC_NOHALT=1 G_EXEC chmod 600 "$SWAP_PATH" # Allow to fail on filesystems without UNIX permission support
-		G_EXEC swapon "$SWAP_PATH"
-
+		# Harden permissions, allow to fail on filesystems without UNIX permission support
+		G_EXEC_NOHALT=1 G_EXEC chmod 600 "$SWAP_PATH" 
 		# Make persistent, proceed with failure in case of R/O rootfs
-		# - zram
-		if [[ $SWAP_FS == 'zram' ]]; then
-
-			G_EXEC_NOHALT=1 G_EXEC eval "echo 'zram' > /etc/modules-load.d/dietpi-zram-swap.conf" || EXIT_CODE=1
-			G_EXEC_NOHALT=1 G_EXEC eval "echo 'SUBSYSTEM==\"block\", KERNEL==\"zram0\", ACTION==\"add\", ATTR{disksize}=\"${SWAP_SIZE}M\", RUN+=\"/sbin/mkswap /dev/zram0\", RUN+=\"/sbin/swapon /dev/zram0\"' > /etc/udev/rules.d/98-dietpi-zram-swap.rules" || EXIT_CODE=1
-			G_EXEC_NOHALT=1 G_EXEC eval "echo 'swappiness=50' > /etc/sysctl.d/98-dietpi-zram-swap.conf" || EXIT_CODE=1
-
-		# - swap file
-		else
-
-			G_EXEC_NOHALT=1 G_EXEC eval "echo '$SWAP_PATH none swap sw' >> /etc/fstab" || EXIT_CODE=1
-
-		fi
+		G_EXEC_NOHALT=1 G_EXEC eval "echo '$SWAP_PATH none swap sw' >> /etc/fstab" || return 1
 
 	}
 
@@ -180,6 +172,11 @@
 
 		SWAP_SIZE=0
 
+	# Unsupported in container
+	elif grep -qza '^container=' /proc/1/environ; then
+
+		Error_Reset 'Swap space cannot be controlled form within a container.'
+
 	# Unsupported on Btrfs
 	elif [[ $SWAP_FS == 'btrfs' ]]; then
 
@@ -196,7 +193,7 @@
 
 	else
 
-		Swap_Enable
+		Swap_Enable || EXIT_CODE=1
 
 	fi
 
