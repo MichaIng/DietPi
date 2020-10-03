@@ -12,7 +12,7 @@
 	<hr>
 	<p align="center">
 		<strong>Ready to run</strong> optimised software choices with <a href="https://dietpi.com/dietpi-software.html"><strong>dietpi-software</strong></a>
-		<br>Feature rich configuration tool for your device with <strong>dietpi-config</strong>.
+		<br>Feature-rich configuration tool for your device with <strong>dietpi-config</strong>.
 	</p>
 	<hr>
 </html>
@@ -273,6 +273,8 @@ Links to hardware and software manufacturers, sources and build instructions use
 - [Firefox Sync Server](https://github.com/mozilla-services/syncserver)
 - [Jellyfin](https://github.com/jellyfin/jellyfin)
 - [Komga](https://github.com/gotson/komga)
+- [HTPC Manager](https://github.com/HTPC-Manager/HTPC-Manager)
+- [Bazarr](https://github.com/morpheus65535/bazarr)
 
 ---
 
