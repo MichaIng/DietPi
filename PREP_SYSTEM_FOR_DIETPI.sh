@@ -1601,11 +1601,11 @@ _EOF_
 #!/bin/bash
 # Only available for v7+ and v8+ kernel
 [[ $1 == *'-v'[78]'+' ]] || exit 0
-echo "[ INFO ] Updating ASIX AX88179 driver for kernel $1, as provided by allo.com:"
-echo '[ INFO ] - https://github.com/allocom/USBridgeSig/tree/master/ethernet'
+echo "[ INFO ] Updating ASIX AX88179 driver for kernel $1 with ARM-optimised builds"
+echo '[ INFO ] - by Allo: https://github.com/allocom/USBridgeSig/tree/master/ethernet'
 echo '[ INFO ] Estimating required module layout...'
 module_layout=$(modprobe --dump-modversions /lib/modules/$1/kernel/drivers/net/usb/asix.ko | mawk '/module_layout/{print $1;exit}') || exit 0
-echo '[ INFO ] Downloading driver...'
+echo '[ INFO ] Downloading stable branch driver...'
 if ! curl -#fL http://3.230.113.73:9011/Allocom/USBridgeSig/stable_rel/rpi-usbs-$1/ax88179_178a.ko -o /tmp/ax88179_178a.ko ||
 	[[ $module_layout != $(modprobe --dump-modversions /tmp/ax88179_178a.ko | mawk '/module_layout/{print $1;exit}') ]]; then
 
@@ -1615,6 +1615,7 @@ if ! curl -#fL http://3.230.113.73:9011/Allocom/USBridgeSig/stable_rel/rpi-usbs-
 
 		echo '[ INFO ] No matching driver found, cleaning up and aborting...'
 		rm -fv /tmp/ax88179_178a.ko || :
+		echo '[ INFO ] Do not worry, the default RPi kernel driver will be used instead.'
 		exit 0
 
 	fi
@@ -1624,7 +1625,7 @@ echo '[ INFO ] Installing driver...'
 install -vpm 644 /tmp/ax88179_178a.ko /lib/modules/$1/kernel/drivers/net/usb || exit 0
 echo '[ INFO ] Running depmod...'
 depmod $1 || exit 0
-echo '[ INFO ] Cleaning up...'
+echo '[ INFO ] All succeeded, cleaning up...'
 rm -v /tmp/ax88179_178a.ko || exit 0
 _EOF_
 			chmod +x /etc/kernel/postinst.d/dietpi-USBridgeSig
