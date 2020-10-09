@@ -1162,6 +1162,8 @@ _EOF_
 		#	Do not ship rc.local anymore. On DietPi /var/lib/dietpi/postboot.d should be used.
 		#	WIP: Mask rc-local.service and create symlink postboot.d/rc.local => /etc/rc.local for backwards compatibility?
 		[[ -f '/etc/rc.local' ]] && rm -v /etc/rc.local # https://github.com/RPi-Distro/pi-gen/blob/master/stage2/01-sys-tweaks/files/rc.local
+		[[ -d '/etc/systemd/system/rc-local.service.d' ]] && rm -Rv /etc/systemd/system/rc-local.service.d # Raspberry Pi OS
+		[[ -d '/etc/systemd/system/rc.local.service.d' ]] && rm -Rv /etc/systemd/system/rc.local.service.d
 		#	Below required if DietPi-PREP is executed from chroot/container, so RPi firstrun scripts are not executed
 		[[ -f '/etc/init.d/resize2fs_once' ]] && rm -v /etc/init.d/resize2fs_once # https://github.com/RPi-Distro/pi-gen/blob/master/stage2/01-sys-tweaks/files/resize2fs_once
 		[[ -f '/boot/cmdline.txt' ]] && sed -i 's| init=/usr/lib/raspi-config/init_resize\.sh||' /boot/cmdline.txt # https://github.com/RPi-Distro/pi-gen/blob/master/stage2/01-sys-tweaks/00-patches/07-resize-init.diff

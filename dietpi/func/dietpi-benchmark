@@ -44,7 +44,7 @@
 	SHOW_RESULTS=${SHOW_RESULTS:-1} # Optional input: Show results for individual tests?
 	CPUBENCH_INT_MAX=${CPUBENCH_INT_MAX:-1000000} # Optional input
 	BENCH_FILESIZE=${BENCH_FILESIZE:-0} # Optional input for automated
-	FP_BENCHFILE=${FP_BENCHFILE:-/} # Optional input for automated
+	[[ ${FP_BENCHFILE:=/} == '/'* ]] || { G_DIETPI-NOTIFY 1 '$FP_BENCHFILE must be an absolute file path, aborting...'; exit 1; } # Optional input
 
 	BENCH_ROOTFS_WRITE='Not tested'
 	BENCH_ROOTFS_READ='Not tested'
@@ -61,7 +61,7 @@
 
 	Save_Results(){
 
-		mkdir -p /var/lib/dietpi/dietpi-benchmark
+		G_EXEC mkdir -p /var/lib/dietpi/dietpi-benchmark
 		cat << _EOF_ > /var/lib/dietpi/dietpi-benchmark/results
 # -------------------------
 # DietPi-Benchmark
@@ -79,7 +79,6 @@ BENCH_CPU_TEMP_START='$BENCH_CPU_TEMP_START'
 BENCH_CPU_TEMP_END='$BENCH_CPU_TEMP_END'
 BENCH_NET_LAN_SPEED='$BENCH_NET_LAN_SPEED'
 _EOF_
-
 	}
 
 	Update_Survey_Opted_Status(){ SURVEY_OPTED_IN=$(sed -n '/^[[:blank:]]*SURVEY_OPTED_IN=[01]$/{s/^[^=]*=//p;q}' /boot/dietpi.txt); }
@@ -150,7 +149,7 @@ do
 
 done
 _EOF_
-		chmod +x bench
+		G_EXEC chmod +x bench
 
 		sync
 		sleep 1
@@ -176,13 +175,13 @@ _EOF_
 
 	Filesystem_Benchmark(){
 
-		local benchmark_file_name='benchmark.file'
+		G_EXEC mkdir -p "$FP_BENCHFILE" # Failsafe
 		local min_benchmark_size=10
 		local max_benchmark_size=$(( $(G_CHECK_FREESPACE "$FP_BENCHFILE") - 50 )) # Assure 50 MiB stays free
 		#(( $max_benchmark_size > 10000 )) && max_benchmark_size=10000
 
-		[[ $FP_BENCHFILE != *'/' ]] && FP_BENCHFILE+='/'
-		FP_BENCHFILE+=$benchmark_file_name
+		local benchmark_file_name='benchmark.file'
+		FP_BENCHFILE="${FP_BENCHFILE%/}/$benchmark_file_name"
 
 		G_TERM_CLEAR
 
@@ -190,11 +189,9 @@ _EOF_
 		if (( $BENCH_FILESIZE == 0 )); then
 
 			G_WHIP_DEFAULT_ITEM=$min_benchmark_size
-			if G_WHIP_INPUTBOX "Please enter a filesize test value (MiB). A value of 100 is recommended.\n- Minimum value: $min_benchmark_size\n- Maximum possible value: $max_benchmark_size"; then
-
-				BENCH_FILESIZE=$G_WHIP_RETURNED_VALUE
-
-			fi
+			G_WHIP_INPUTBOX "Please enter a filesize test value (MiB). A value of 100 is recommended.
+ - Minimum value: $min_benchmark_size
+ - Maximum possible value: $max_benchmark_size" && BENCH_FILESIZE=$G_WHIP_RETURNED_VALUE
 
 		fi
 
@@ -207,7 +204,7 @@ _EOF_
 
 		G_DIETPI-NOTIFY 2 "Testing Seq Write Speed ($BENCH_FILESIZE MiB)"
 		sleep 1
-		local bench_write_result=$(dd bs=4K count=$(( $BENCH_FILESIZE * 256 )) if=/dev/zero of=$FP_BENCHFILE conv=fdatasync 2>&1 | grep -m1 'copied')
+		local bench_write_result=$(dd bs=4K count=$(( $BENCH_FILESIZE * 256 )) if=/dev/zero of="$FP_BENCHFILE" conv=fdatasync 2>&1 | grep -m1 'copied')
 		bench_write_result=$(mawk '{printf "%.0f",$1/$8/1024^2}' <<< "$bench_write_result")
 
 		# - Clear cache
@@ -216,7 +213,7 @@ _EOF_
 
 		G_DIETPI-NOTIFY 2 "Testing Seq Read Speed ($BENCH_FILESIZE MiB)"
 		sleep 1
-		local bench_read_result=$(dd bs=4K count=$(( $BENCH_FILESIZE * 256 )) if=$FP_BENCHFILE of=/dev/null 2>&1 | grep -m1 'copied')
+		local bench_read_result=$(dd bs=4K count=$(( $BENCH_FILESIZE * 256 )) if="$FP_BENCHFILE" of=/dev/null 2>&1 | grep -m1 'copied')
 		bench_read_result=$(mawk '{printf "%.0f",$1/$8/1024^2}' <<< "$bench_read_result")
 
 		# - RootFS
@@ -249,14 +246,14 @@ _EOF_
 
 		fi
 
-		[[ -f $FP_BENCHFILE ]] && rm $FP_BENCHFILE
+		[[ -f $FP_BENCHFILE ]] && rm -v "$FP_BENCHFILE"
 
 	}
 
 	Benchmark_Survey(){
 
 		SHOW_RESULTS=0
-		mkdir -p /var/lib/dietpi/dietpi-benchmark
+		G_EXEC mkdir -p /var/lib/dietpi/dietpi-benchmark
 
 		if (( $G_INTERACTIVE )); then
 
@@ -265,11 +262,7 @@ The test duration will depend on hardware specs, however, most devices will not 
 You can compare results against other users and hardware using the following link:\n - https://dietpi.com/survey#benchmark\n\nPlease select 'Ok' to begin the benchmark tests."; then
 
 				# Additional checks
-				if (( $G_HW_CPU_CORES < 3 )); then
-
-					G_WHIP_YESNO "We have detected a low CPU core count ($G_HW_CPU_CORES). The tests may take upto 5 minutes to complete (eg: RaspberryPi Zero).\n\nDo you wish to continue?" || exit 0
-
-				fi
+				(( $G_HW_CPU_CORES > 2 )) || G_WHIP_YESNO "We have detected a low CPU core count ($G_HW_CPU_CORES). The tests may take up to 5 minutes to complete.\n\nDo you wish to continue?" || exit 0
 
 			else
 
@@ -355,7 +348,7 @@ Compare these results online with other users, using the link below:
 	# Main Loop
 	#/////////////////////////////////////////////////////////////////////////////////////
 	#-----------------------------------------------------------------------------------
-	# Run at highest CPU priority and IO
+	# Run at highest CPU and I/O priority
 	renice -n -19 $$
 	ionice -p $$ -c 1 -n 0
 	#-----------------------------------------------------------------------------------
@@ -364,7 +357,7 @@ Compare these results online with other users, using the link below:
 
 		Save_Results
 
-	# Lan bench server
+	# LAN bench server
 	elif (( $INPUT == 3 )); then
 
 		Benchmark_Lan_Server
