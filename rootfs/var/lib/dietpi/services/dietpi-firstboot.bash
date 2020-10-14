@@ -33,7 +33,7 @@
 		# RPi Zero
 		if [[ $G_HW_MODEL_NAME == *'Zero'* ]]; then
 
-			sed -i '/over_voltage=/c\#over_voltage=0' /boot/config.txt
+			sed -i '/over_voltage=/c\#over_voltage=6' /boot/config.txt
 			sed -i '/arm_freq=/c\#arm_freq=1000' /boot/config.txt
 			sed -i '/core_freq=/c\#core_freq=400' /boot/config.txt
 			sed -i '/sdram_freq=/c\#sdram_freq=450' /boot/config.txt
