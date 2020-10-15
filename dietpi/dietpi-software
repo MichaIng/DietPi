@@ -915,7 +915,8 @@ DietPi-Software will decrypt and use it for software installs. You can change it
 		aSOFTWARE_ONLINEDOC_URL[$software_id]='p=27577#p27577'
 		aSOFTWARE_REQUIRES_GIT[$software_id]=1
 		# FFmpeg required on ARM, x86_64 binaries are shipped with the Bazarr repo: https://github.com/morpheus65535/bazarr/tree/master/bin/Linux
-		(( $G_HW_MODEL == 10 )) || aSOFTWARE_REQUIRES_FFMPEG[$software_id]=1
+		# build-essential required on ARM to assure all required Python modules build successfully: https://github.com/MichaIng/DietPi/pull/3796#issuecomment-706768323
+		(( $G_HW_MODEL == 10 )) || aSOFTWARE_REQUIRES_FFMPEG[$software_id]=1 aSOFTWARE_REQUIRES_BUILDESSENTIAL[$software_id]=1
 		# - Stretch due to Python >= 3.7.0 requirement
 		aSOFTWARE_AVAIL_G_DISTRO[$software_id,4]=0
 		#------------------
@@ -6738,10 +6739,14 @@ exec sudo -u $ha_user dash -c '$ha_pyenv_activation; exec pip3 install -U homeas
 			echo "tmpfs /var/log tmpfs size=${tmpfs_max_size:-50}M,noatime,lazytime,nodev,nosuid,mode=1777" >> /etc/fstab
 
 			# Enable DietPi-RAMdisk
-			systemctl enable dietpi-ramlog
+			G_EXEC systemctl enable dietpi-ramlog
 
 			# To assure a cleaned mountpoint we need to start RAMlog now
-			G_EXEC_DESC='Storing /var/log metadata to disk' G_EXEC /boot/dietpi/func/dietpi-ramlog 1
+			local acommand=('/boot/dietpi/func/dietpi-ramlog' '1')
+			systemctl is-active dietpi-ramlog > /dev/null && acommand=('systemctl' 'stop' 'dietpi-ramlog')
+			G_EXEC_DESC='Storing /var/log metadata to disk' G_EXEC "${acommand[@]}"
+			unset -v acommand
+			findmnt /var/log > /dev/null && G_EXEC_DESC='Unmounting /var/log' G_EXEC umount -R /var/log
 			G_EXEC_DESC='Cleaning /var/log mountpoint' G_EXEC rm -Rf /var/log/{,.??,.[^.]}*
 			G_EXEC_DESC='Mounting tmpfs to /var/log' G_EXEC mount /var/log
 			G_EXEC_DESC='Restoring metadata to /var/log tmpfs' G_EXEC systemctl start dietpi-ramlog
@@ -7082,31 +7087,16 @@ exec sudo -u $ha_user dash -c '$ha_pyenv_activation; exec pip3 install -U homeas
 
 			Banner_Configuration
 
-			# Apache2 confs
+			# Config
 			G_BACKUP_FP /etc/apache2/apache2.conf
 			dps_index=$software_id Download_Install 'apache2.conf' /etc/apache2/apache2.conf
-			cat << _EOF_ > /etc/apache2/sites-available/000-default.conf
+			cat << '_EOF_' > /etc/apache2/sites-available/000-default.conf
 <VirtualHost *:80>
-	ServerAdmin webmaster@localhost
 	DocumentRoot /var/www
-
-	ErrorLog \${APACHE_LOG_DIR}/error.log
-	#CustomLog \${APACHE_LOG_DIR}/access.log combined
+	ErrorLog ${APACHE_LOG_DIR}/error.log
+	#CustomLog ${APACHE_LOG_DIR}/access.log combined
 </VirtualHost>
 _EOF_
-
-			cat << _EOF_ > /etc/apache2/mods-available/mpm_event.conf
-<IfModule mpm_event_module>
-	StartServers		$G_HW_CPU_CORES
-	MinSpareThreads		1
-	MaxSpareThreads		8
-	ThreadLimit		16
-	ThreadsPerChild		4
-	MaxRequestWorkers	50
-	MaxConnectionsPerChild	0
-</IfModule>
-_EOF_
-
 			cat << _EOF_ > /etc/apache2/mods-available/mpm_prefork.conf
 <IfModule mpm_prefork_module>
 	StartServers		$G_HW_CPU_CORES
@@ -7116,25 +7106,12 @@ _EOF_
 	MaxConnectionsPerChild	0
 </IfModule>
 _EOF_
-
-			cat << _EOF_ > /etc/apache2/mods-available/mpm_worker.conf
-<IfModule mpm_worker_module>
-	StartServers		$G_HW_CPU_CORES
-	MinSpareThreads		1
-	MaxSpareThreads		8
-	ThreadLimit		16
-	ThreadsPerChild		4
-	MaxRequestWorkers	50
-	MaxConnectionsPerChild	0
-</IfModule>
-_EOF_
-
-			# Use /var/www as default webroot
-			[[ -f '/var/www/html/index.html' ]] && mv /var/www/html/index.html /var/www/
-			rmdir --ignore-fail-on-non-empty /var/www/html
+			# Webroot
+			[[ -f '/var/www/html/index.html' ]] && G_EXEC mv /var/www/html/index.html /var/www/
+			G_EXEC rmdir --ignore-fail-on-non-empty /var/www/html
 
 			# Change error log level
-			sed -i '/LogLevel[[:blank:]]/c\	LogLevel error' /etc/apache2/sites-available/*
+			G_EXEC sed -i '/LogLevel[[:blank:]]/c\	LogLevel error' /etc/apache2/sites-available/*
 
 		fi
 
@@ -7144,22 +7121,22 @@ _EOF_
 			Banner_Configuration
 
 			# Custom confs, included by sites-enabled/default within server directive, while nginx/(conf.d|sites-enabled) is included by nginx.conf outside server directive
-			mkdir -p /etc/nginx/sites-dietpi
+			G_EXEC mkdir -p /etc/nginx/sites-dietpi
 
 			G_BACKUP_FP /etc/nginx/nginx.conf
 			dps_index=$software_id Download_Install 'nginx.conf' /etc/nginx/nginx.conf
 			# Adjust socket name to PHP version
-			sed -i "s#/run/php/php.*-fpm.sock#/run/php/$PHP_NAME-fpm.sock#g" /etc/nginx/nginx.conf
+			G_EXEC sed -i "s#/run/php/php.*-fpm.sock#/run/php/$PHP_NAME-fpm.sock#g" /etc/nginx/nginx.conf
 
 			# CPU core count
-			sed -i "/worker_processes/c\worker_processes $G_HW_CPU_CORES;" /etc/nginx/nginx.conf
+			G_EXEV sed -i "/worker_processes/c\worker_processes $G_HW_CPU_CORES;" /etc/nginx/nginx.conf
 
 			# Default site
 			dps_index=$software_id Download_Install 'nginx.default' /etc/nginx/sites-available/default
 
-			# Nginx index page
-			[[ -f '/var/www/html/index.nginx-debian.html' ]] && mv /var/www/html/index.nginx-debian.html /var/www/
-			rmdir --ignore-fail-on-non-empty /var/www/html
+			# Webroot
+			[[ -f '/var/www/html/index.nginx-debian.html' ]] && G_EXEC mv /var/www/html/index.nginx-debian.html /var/www/
+			G_EXEC rmdir --ignore-fail-on-non-empty /var/www/html
 
 		fi
 
@@ -7175,31 +7152,12 @@ _EOF_
 			# Webroot
 			G_CONFIG_INJECT 'server.document-root' 'server.document-root = "/var/www"' /etc/lighttpd/lighttpd.conf
 			# - Move default page
-			[[ -f '/var/www/html/index.lighttpd.html' ]] && mv /var/www/html/index.lighttpd.html /var/www/
-			rmdir --ignore-fail-on-non-empty /var/www/html
+			[[ -f '/var/www/html/index.lighttpd.html' ]] && G_EXEC mv /var/www/html/index.lighttpd.html /var/www/
+			G_EXEC rmdir --ignore-fail-on-non-empty /var/www/html
 
 			# Fix in case Lighttpd got updated to Buster version (on ARMv6 due to PHP7.3 libssl1.1 depedency)
 			# - "create-mime.assign.pl" has been renamed to "create-mime.conf.pl"
-			[[ -f '/usr/share/lighttpd/create-mime.assign.pl' ]] || sed -i 's/create-mime\.assign\.pl/create-mime.conf.pl/g' /etc/lighttpd/lighttpd.conf
-
-			# Disable all URL parsing options, which break PHP applications where $_GET is automatically decoded (a second time) and other web applications which expect query strings as they were entered:
-			# - https://github.com/nextcloud/server/issues/17065
-			# - https://redmine.lighttpd.net/projects/lighttpd/wiki/Server_http-parseoptsDetails
-			sed -i '/server.http-parseopts/s/"enable"/"disable"/g' /etc/lighttpd/lighttpd.conf
-			sed -i '/"url-normalize"/s/"enable"/"disable"/g' /etc/lighttpd/lighttpd.conf
-			sed -i '/"url-normalize-unreserved"/s/"enable"/"disable"/g' /etc/lighttpd/lighttpd.conf
-			sed -i '/"url-normalize-required"/s/"enable"/"disable"/g' /etc/lighttpd/lighttpd.conf
-			sed -i '/"url-ctrls-reject"/s/"enable"/"disable"/g' /etc/lighttpd/lighttpd.conf
-			sed -i '/"url-path-backslash-trans"/s/"enable"/"disable"/g' /etc/lighttpd/lighttpd.conf
-			sed -i '/"url-path-2f-decode"/s/"enable"/"disable"/g' /etc/lighttpd/lighttpd.conf
-			sed -i '/"url-path-2f-reject"/s/"enable"/"disable"/g' /etc/lighttpd/lighttpd.conf
-			sed -i '/"url-path-dotseg-remove"/s/"enable"/"disable"/g' /etc/lighttpd/lighttpd.conf
-			sed -i '/"url-path-dotseg-reject"/s/"enable"/"disable"/g' /etc/lighttpd/lighttpd.conf
-			sed -i '/"url-query-20-plus"/s/"enable"/"disable"/g' /etc/lighttpd/lighttpd.conf
-			sed -i '/"header-strict"/s/"enable"/"disable"/g' /etc/lighttpd/lighttpd.conf
-			sed -i '/"host-strict/s/"enable"/"disable"/g' /etc/lighttpd/lighttpd.conf
-			sed -i '/"host-normalize"/s/"enable"/"disable"/g' /etc/lighttpd/lighttpd.conf
-			sed -i '/"method-get-body"/s/"enable"/"disable"/g' /etc/lighttpd/lighttpd.conf
+			[[ -f '/usr/share/lighttpd/create-mime.assign.pl' ]] || G_EXEC sed -i 's/create-mime\.assign\.pl/create-mime.conf.pl/g' /etc/lighttpd/lighttpd.conf
 
 			# Configure fastcgi for PHP-FPM
 			cat << _EOF_ > /etc/lighttpd/conf-available/15-fastcgi-php.conf
@@ -7216,8 +7174,8 @@ fastcgi.server += ( ".php" =>
 )
 _EOF_
 			# - Enable modules
-			lighty-enable-mod fastcgi
-			lighty-enable-mod fastcgi-php
+			G_EXEC lighty-enable-mod fastcgi
+			G_EXEC lighty-enable-mod fastcgi-php
 
 		fi
 
@@ -7232,7 +7190,7 @@ _EOF_
 				# Base
 				sed -i '/cgi.fix_pathinfo=/c\cgi.fix_pathinfo=1' "$FP_PHP_BASE_DIR"/fpm/php.ini
 
-				# Optimizations based on total cores
+				# Optimisations based on total cores
 				sed -i "/pm.max_children = /c\pm.max_children = $(( $G_HW_CPU_CORES * 3 ))" "$FP_PHP_BASE_DIR"/fpm/pool.d/www.conf
 				sed -i "/pm.start_servers = /c\pm.start_servers = $G_HW_CPU_CORES" "$FP_PHP_BASE_DIR"/fpm/pool.d/www.conf
 				sed -i "/pm.min_spare_servers = /c\pm.min_spare_servers = $G_HW_CPU_CORES" "$FP_PHP_BASE_DIR"/fpm/pool.d/www.conf
@@ -10637,7 +10595,7 @@ _EOF_
 				# Add to /etc/lighttpd/lighttpd.conf
 				if ! grep -q '^#RUTORRENT_DIETPI' /etc/lighttpd/lighttpd.conf; then
 
-					cat << _EOF_ >> /etc/lighttpd/lighttpd.conf
+					cat << '_EOF_' >> /etc/lighttpd/lighttpd.conf
 #RUTORRENT_DIETPI
 server.modules += ( "mod_fastcgi" )
 server.modules += ( "mod_scgi" )

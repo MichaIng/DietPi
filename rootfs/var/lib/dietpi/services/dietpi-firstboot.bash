@@ -52,7 +52,7 @@
 			sed -i '/over_voltage=/c\#over_voltage=0' /boot/config.txt
 			sed -i '/arm_freq=/c\#arm_freq=900' /boot/config.txt
 			sed -i '/core_freq=/c\#core_freq=250' /boot/config.txt
-			sed -i '/sdram_freq=/c\#sdram_freq=400' /boot/config.txt
+			sed -i '/sdram_freq=/c\#sdram_freq=450' /boot/config.txt
 
 		# RPi 3
 		elif (( $G_HW_MODEL == 3 )); then
