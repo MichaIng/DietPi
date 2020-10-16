@@ -4501,7 +4501,7 @@ amvdec_vp9' > /etc/modules-load.d/dietpi-c4-kodi.conf
 			Banner_Installing
 
 			# Create jail.conf (backend = systemd) first, to prevent APT failure due to missing /var/log/auth.log: https://github.com/MichaIng/DietPi/issues/475#issuecomment-310873879
-			mkdir -p /etc/fail2ban
+			mkdir -p /etc/fail2ban/fail2ban.conf.d
 			[[ -f '/etc/fail2ban/jail.conf' ]] || cat << _EOF_ > /etc/fail2ban/jail.conf
 [DEFAULT]
 enabled = true
@@ -4523,6 +4523,11 @@ action = %(banaction)s[blocktype=blackhole]
 # See "filter.d/sshd.conf" for details.
 #mode = normal
 _EOF_
+			# Log to systemd by default
+			local logtarget='SYSOUT'
+			(( $G_DISTRO < 5 )) && logtarget='SYSLOG'
+			echo -e "[Definition]\nlogtarget = $logtarget" > /etc/fail2ban/fail2ban.d/97_dietpi.conf
+			unset -v logtarget
 
 			G_AGI python3-systemd fail2ban
 
@@ -6746,7 +6751,7 @@ exec sudo -u $ha_user dash -c '$ha_pyenv_activation; exec pip3 install -U homeas
 			systemctl is-active dietpi-ramlog > /dev/null && acommand=('systemctl' 'stop' 'dietpi-ramlog')
 			G_EXEC_DESC='Storing /var/log metadata to disk' G_EXEC "${acommand[@]}"
 			unset -v acommand
-			findmnt /var/log > /dev/null && G_EXEC_DESC='Unmounting /var/log' G_EXEC umount -R /var/log
+			findmnt /var/log > /dev/null && G_EXEC_DESC='Unmounting /var/log' G_EXEC_NOHALT=1 G_EXEC umount -R /var/log
 			G_EXEC_DESC='Cleaning /var/log mountpoint' G_EXEC rm -Rf /var/log/{,.??,.[^.]}*
 			G_EXEC_DESC='Mounting tmpfs to /var/log' G_EXEC mount /var/log
 			G_EXEC_DESC='Restoring metadata to /var/log tmpfs' G_EXEC systemctl start dietpi-ramlog
@@ -13970,16 +13975,16 @@ _EOF_
 
 			Banner_Uninstalling
 			G_AGP fail2ban
-			apt-mark auto python3-systemd
-			[[ -d '/etc/fail2ban' ]] && rm -R /etc/fail2ban
+			dpkg-query -s python3-systemd &> /dev/null && G_EXEC apt-mark auto python3-systemd
+			[[ -d '/etc/fail2ban' ]] && G_EXEC_NOHALT=1 G_EXEC rm -R /etc/fail2ban
 
 		fi
 
-		software_id=64
+		software_id=64 # phpSysInfo
 		if (( ${aSOFTWARE_INSTALL_STATE[$software_id]} == -1 )); then
 
 			Banner_Uninstalling
-			rm -R /var/www/phpsysinfo
+			[[ -d '/var/www/phpsysinfo' ]] && G_EXEC_NOHALT=1 G_EXEC rm -R /var/www/phpsysinfo
 
 		fi
 
@@ -15096,11 +15101,24 @@ _EOF_
 
 			Banner_Uninstalling
 
-			sed -i '/[[:blank:]]\/var\/log[[:blank:]]/d' /etc/fstab
+			G_EXEC sed -i '/[[:blank:]]\/var\/log[[:blank:]]/d' /etc/fstab
 
-			cat << _EOF_ > /etc/systemd/system/dietpi-ramlog_disable.service
+			G_EXEC mkdir -p /var/lib/dietpi/dietpi-ramlog
+			cat << '_EOF_' > /var/lib/dietpi/dietpi-ramlog/disable.sh
+#!/bin/dash
+{
+	systemctl disable --now dietpi-ramlog
+	rm -R /var/tmp/dietpi/logs/dietpi-ramlog_store
+	systemctl disable dietpi-ramlog_disable
+	rm /etc/systemd/system/dietpi-ramlog_disable.service
+	rm /var/lib/dietpi/dietpi-ramlog/disable.sh
+}
+_EOF_
+			G_EXEC chmod +x /var/lib/dietpi/dietpi-ramlog/disable.sh
+
+			cat << '_EOF_' > /etc/systemd/system/dietpi-ramlog_disable.service
 [Unit]
-Description=DietPi-RAMlog_disable | Disables DietPi-RAMlog after it has restored log metadata back to /var/log
+Description=DietPi-RAMlog_disable
 After=dietpi-ramlog.service
 Before=dietpi-preboot.service rsyslog.service syslog.service
 
@@ -15112,22 +15130,8 @@ ExecStart=/bin/dash -c '/var/lib/dietpi/dietpi-ramlog/disable.sh > /var/tmp/diet
 [Install]
 WantedBy=local-fs.target
 _EOF_
-			systemctl daemon-reload
-			systemctl enable dietpi-ramlog_disable
-
-			mkdir -p /var/lib/dietpi/dietpi-ramlog
-			cat << _EOF_ > /var/lib/dietpi/dietpi-ramlog/disable.sh
-#!/bin/dash
-{
-	systemctl stop dietpi-ramlog
-	systemctl disable dietpi-ramlog
-	rm -R /var/tmp/dietpi/logs/dietpi-ramlog_store
-	systemctl disable dietpi-ramlog_disable
-	rm /etc/systemd/system/dietpi-ramlog_disable.service
-	rm /var/lib/dietpi/dietpi-ramlog/disable.sh
-}
-_EOF_
-			chmod +x /var/lib/dietpi/dietpi-ramlog/disable.sh
+			G_EXEC systemctl daemon-reload
+			G_EXEC systemctl enable dietpi-ramlog_disable
 
 		fi
 
