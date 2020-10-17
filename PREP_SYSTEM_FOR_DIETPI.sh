@@ -4,7 +4,7 @@
 	# Optimise current Debian install and prepare for DietPi installation
 	#------------------------------------------------------------------------------------------------
 	# REQUIREMENTS
-	# - Currently running Debian, ideally minimal, eg: Raspbian Lite-ish =))
+	# - Currently running Debian Stretch or above, ideally minimal, eg: Raspbian Lite-ish =))
 	# - systemd as system/init/service manager
 	# - Either Ethernet connection or local (non-SSH) terminal access
 	#------------------------------------------------------------------------------------------------
@@ -77,24 +77,10 @@ Acquire::IndexTargets::deb::Translations::KeepCompressedAs "xz";
 Acquire::IndexTargets::deb-src::Sources::KeepCompressedAs "xz";
 _EOF_
 	# - Forcing new DEB package config files (during PREP only)
-	echo 'DPkg::options:: "--force-confmiss,confnew";' > /etc/apt/apt.conf.d/98dietpi-forceconf
+	echo -e '#clear DPkg::options;\nDPkg::options:: "--force-confmiss,confnew";' > /etc/apt/apt.conf.d/98dietpi-forceconf
 	# - Prefer IPv4 by default to avoid hanging access attempts in some cases
 	#	NB: This needs to match the method in: /DietPi/dietpi/func/dietpi-set_hardware preferipv4 enable
 	echo 'Acquire::ForceIPv4 "true";' > /etc/apt/apt.conf.d/99-dietpi-force-ipv4
-	# - Jessie: Fixing sources.list as Debian dropped Jessie support: https://github.com/MichaIng/DietPi/issues/2665
-	if grep -q 'jessie' /etc/os-release && ! grep -qi 'raspbian' /etc/os-release; then
-
-		if [[ $(uname -m) == 'aarch64' ]]; then
-
-			echo 'deb http://archive.debian.org/debian/ main contrib non-free' > /etc/apt/sources.list
-
-		else
-
-			sed -Ei '/jessie-(backports|updates)/d' /etc/apt/sources.list
-
-		fi
-
-	fi
 
 	apt-get clean
 	apt-get update
@@ -109,7 +95,7 @@ _EOF_
 
 	)
 	# - Pre-Buster: Support HTTPS sources for APT
-	grep -qE '(jessie|stretch)' /etc/os-release && aAPT_PREREQS+=('apt-transport-https')
+	grep -q 'stretch' /etc/os-release && aAPT_PREREQS+=('apt-transport-https')
 	for i in "${aAPT_PREREQS[@]}"
 	do
 
@@ -121,7 +107,7 @@ _EOF_
 		fi
 
 	done
-	unset aAPT_PREREQS
+	unset -v aAPT_PREREQS
 
 	# Wget: Prefer IPv4 by default to avoid hanging access attempts in some cases
 	# - NB: This needs to match the method in: /boot/dietpi/func/dietpi-set_hardware preferipv4 enable
@@ -178,7 +164,7 @@ _EOF_
 			exit 0
 
 		fi
-		unset aWHIP_BRANCH
+		unset -v aWHIP_BRANCH
 
 	fi
 	echo "[ INFO ] Selected Git branch: $GITOWNER/$GITBRANCH"
@@ -208,20 +194,16 @@ _EOF_
 	rm dietpi-globals
 
 	# Reset G_PROGRAM_NAME, which was set to empty string by sourcing dietpi-globals
-	G_PROGRAM_NAME='DietPi-PREP'
+	readonly G_PROGRAM_NAME='DietPi-PREP'
 	G_INIT
 
 	# Apply Git info
-	G_GITOWNER=$GITOWNER; unset GITOWNER
-	G_GITBRANCH=$GITBRANCH; unset GITBRANCH
+	G_GITOWNER=$GITOWNER
+	G_GITBRANCH=$GITBRANCH
+	unset -v GITOWNER GITBRANCH
 
 	# Detect the Debian version of this operating system
-	if grep -q 'jessie' /etc/os-release; then
-
-		G_DISTRO=3
-		G_DISTRO_NAME='jessie'
-
-	elif grep -q 'stretch' /etc/os-release; then
+	if grep -q 'stretch' /etc/os-release; then
 
 		G_DISTRO=4
 		G_DISTRO_NAME='stretch'
@@ -270,14 +252,11 @@ _EOF_
 
 	Main(){
 
-		# Setup step, current (used in info)
-		SETUP_STEP=0
-
 		#------------------------------------------------------------------------------------------------
-		echo
-		G_DIETPI-NOTIFY 2 '-----------------------------------------------------------------------------------'
-		G_DIETPI-NOTIFY 0 "Step $SETUP_STEP: Detecting existing DietPi system"; ((SETUP_STEP++))
-		G_DIETPI-NOTIFY 2 '-----------------------------------------------------------------------------------'
+		# Init setup step headers
+		SETUP_STEP=0
+		readonly G_NOTIFY_3_MODE='Step'
+		G_DIETPI-NOTIFY 3 "[$SETUP_STEP] Detecting existing DietPi system"; ((SETUP_STEP++))
 		#------------------------------------------------------------------------------------------------
 		if [[ -d '/DietPi' || -d '/boot/dietpi' ]]; then
 
@@ -299,7 +278,7 @@ _EOF_
 
 			# Delete any previous existing data
 			# - /DietPi mount point: Pre-v6.29
-			findmnt /DietPi &> /dev/null && umount /DietPi
+			findmnt /DietPi > /dev/null && umount -R /DietPi
 			[[ -d '/DietPi' ]] && rm -R /DietPi
 			rm -Rfv /{boot,mnt,etc,var/lib,var/tmp,run}/*dietpi*
 			rm -fv /etc{,/cron.*,/{bashrc,profile,sysctl,network/if-up,udev/rules}.d}/{,.}*dietpi*
@@ -315,10 +294,7 @@ _EOF_
 		fi
 
 		#------------------------------------------------------------------------------------------------
-		echo
-		G_DIETPI-NOTIFY 2 '-----------------------------------------------------------------------------------'
-		G_DIETPI-NOTIFY 0 "Step $SETUP_STEP: Target system inputs"; ((SETUP_STEP++))
-		G_DIETPI-NOTIFY 2 '-----------------------------------------------------------------------------------'
+		G_DIETPI-NOTIFY 3 "[$SETUP_STEP] Target system inputs"; ((SETUP_STEP++))
 		#------------------------------------------------------------------------------------------------
 
 		# Image creator
@@ -328,7 +304,7 @@ _EOF_
 
 				G_WHIP_RETURNED_VALUE=$IMAGE_CREATOR
 				# unset to force interactive input if disallowed name is detected
-				unset IMAGE_CREATOR
+				unset -v IMAGE_CREATOR
 
 			else
 
@@ -354,15 +330,12 @@ _EOF_
 				for i in "${aDISALLOWED_NAMES[@]}"
 				do
 
-					if [[ ${G_WHIP_RETURNED_VALUE,,} =~ $i ]]; then
-
-						DISALLOWED_NAME=1
-						break
-
-					fi
+					[[ ${G_WHIP_RETURNED_VALUE,,} =~ $i ]] || continue
+					DISALLOWED_NAME=1
+					break
 
 				done
-				unset aDISALLOWED_NAMES
+				unset -v aDISALLOWED_NAMES
 
 				if (( $DISALLOWED_NAME )); then
 
@@ -393,8 +366,8 @@ _EOF_
 		G_DIETPI-NOTIFY 2 "Entered pre-image info: $PREIMAGE_INFO"
 
 		# Hardware selection
-		#	NB: PLEASE ENSURE HW_MODEL INDEX ENTRIES MATCH dietpi-obtain_hw_model and dietpi-survey_report
-		#	NBB: DO NOT REORDER INDICES. These are now fixed and will never change (due to survey results etc)
+		# - NB: PLEASE ENSURE HW_MODEL INDEX ENTRIES MATCH dietpi-obtain_hw_model and dietpi-survey_report
+		# - NBB: DO NOT REORDER INDICES. These are now fixed and will never change (due to survey results etc)
 		G_WHIP_BUTTON_CANCEL_TEXT='Exit'
 		G_WHIP_DEFAULT_ITEM=0
 		G_WHIP_MENU_ARRAY=(
@@ -409,6 +382,7 @@ _EOF_
 			'11' ': Odroid XU3/XU4/MC1/HC1/HC2'
 			'12' ': Odroid C2'
 			'15' ': Odroid N2'
+			'16' ': Odroid C4'
 			'44' ': Pinebook'
 			'' '●─ x86_64 '
 			'21' ': x86_64 Native PC'
@@ -417,7 +391,6 @@ _EOF_
 			'10' ': Odroid C1'
 			'13' ': Odroid U3'
 			'14' ': Odroid N1'
-			'16' ': Odroid C4'
 			'70' ': Sparky SBC'
 			'52' ': ASUS Tinker Board'
 			'40' ': PINE A64'
@@ -491,7 +464,7 @@ _EOF_
 
 		done
 		G_HW_MODEL=$HW_MODEL
-		unset HW_MODEL
+		unset -v HW_MODEL
 
 		# RPi: Detect Debian vs Raspbian and 64 vs 32 bit image
 		if (( $G_HW_MODEL < 10 )); then
@@ -536,12 +509,12 @@ _EOF_
 
 		fi
 
+		# shellcheck disable=SC2015
 		(( $WIFI_REQUIRED )) && G_DIETPI-NOTIFY 2 'Marking WiFi as required' || G_DIETPI-NOTIFY 2 'Marking WiFi as NOT required'
 
 		# Distro Selection
 		DISTRO_LIST_ARRAY=(
 
-			'4' ': Stretch (oldstable, if SBC firmware is not yet Buster-compatible)'
 			'5' ': Buster (current stable release, recommended)'
 			'6' ': Bullseye (testing, if you want to live on bleeding edge)'
 
@@ -561,12 +534,12 @@ _EOF_
 			# Enable option
 			else
 
-				G_WHIP_MENU_ARRAY+=( "${DISTRO_LIST_ARRAY[$i]}" "${DISTRO_LIST_ARRAY[$i+1]}" )
+				G_WHIP_MENU_ARRAY+=("${DISTRO_LIST_ARRAY[$i]}" "${DISTRO_LIST_ARRAY[$i+1]}")
 
 			fi
 
 		done
-		unset DISTRO_LIST_ARRAY
+		unset -v DISTRO_LIST_ARRAY
 
 		if (( ! ${#G_WHIP_MENU_ARRAY[@]} )); then
 
@@ -606,11 +579,7 @@ Currently installed: $G_DISTRO_NAME (ID: $G_DISTRO)"; then
 
 		done
 
-		if (( $DISTRO_TARGET == 4 )); then
-
-			DISTRO_TARGET_NAME='stretch'
-
-		elif (( $DISTRO_TARGET == 5 )); then
+		if (( $DISTRO_TARGET == 5 )); then
 
 			DISTRO_TARGET_NAME='buster'
 
@@ -628,10 +597,7 @@ Currently installed: $G_DISTRO_NAME (ID: $G_DISTRO)"; then
 		G_DIETPI-NOTIFY 2 "Selected Debian version: $DISTRO_TARGET_NAME (ID: $DISTRO_TARGET)"
 
 		#------------------------------------------------------------------------------------------------
-		echo
-		G_DIETPI-NOTIFY 2 '-----------------------------------------------------------------------------------'
-		G_DIETPI-NOTIFY 0 "Step $SETUP_STEP: Downloading and installing DietPi source code"; ((SETUP_STEP++))
-		G_DIETPI-NOTIFY 2 '-----------------------------------------------------------------------------------'
+		G_DIETPI-NOTIFY 3 "[$SETUP_STEP] Downloading and installing DietPi source code"; ((SETUP_STEP++))
 		#------------------------------------------------------------------------------------------------
 
 		local url="https://github.com/$G_GITOWNER/DietPi/archive/$G_GITBRANCH.tar.gz"
@@ -686,10 +652,7 @@ Currently installed: $G_DISTRO_NAME (ID: $G_DISTRO)"; then
 		G_EXEC systemctl daemon-reload
 
 		#------------------------------------------------------------------------------------------------
-		echo
-		G_DIETPI-NOTIFY 2 '-----------------------------------------------------------------------------------'
-		G_DIETPI-NOTIFY 0 "Step $SETUP_STEP: APT configuration"; ((SETUP_STEP++))
-		G_DIETPI-NOTIFY 2 '-----------------------------------------------------------------------------------'
+		G_DIETPI-NOTIFY 3 "[$SETUP_STEP] APT configuration"; ((SETUP_STEP++))
 		#------------------------------------------------------------------------------------------------
 
 		G_DIETPI-NOTIFY 2 "Setting APT sources.list: $DISTRO_TARGET_NAME $DISTRO_TARGET"
@@ -707,7 +670,10 @@ Currently installed: $G_DISTRO_NAME (ID: $G_DISTRO)"; then
 
 		# @MichaIng https://github.com/MichaIng/DietPi/pull/1266/files
 		G_DIETPI-NOTIFY 2 'Marking all packages as auto-installed first, to allow effective autoremove afterwards'
-		G_EXEC apt-mark auto $(dpkg --get-selections | mawk '{print $1}')
+		local apackages
+		mapfile -t apackages < <(apt-mark showmanual)
+		[[ ${apackages[0]} ]] && G_EXEC apt-mark auto "${apackages[@]}"
+		unset -v apackages
 
 		# DietPi list of minimal required packages, which must be installed:
 		aPACKAGES_REQUIRED_INSTALL=(
@@ -821,33 +787,32 @@ Currently installed: $G_DISTRO_NAME (ID: $G_DISTRO)"; then
 
 		# Kernel/bootloader/firmware
 		# - We need to install those directly to allow G_AGA() autoremove possible older packages later: https://github.com/MichaIng/DietPi/issues/1285#issuecomment-354602594
-		# - Jessie workaround: https://github.com/MichaIng/DietPi/issues/3462
-		(( $G_DISTRO < 4 )) && G_EXEC_PRE_FUNC(){ acommand[2]='--force-yes'; }
 		# - G_HW_ARCH specific
 		#	x86_64
 		if (( $G_HW_ARCH == 10 )); then
 
-			local packages='linux-image-amd64 os-prober'
+			local apackages=('linux-image-amd64' 'os-prober')
 
 			# Grub EFI
 			if dpkg-query -s 'grub-efi-amd64' &> /dev/null || [[ -d '/boot/efi' ]]; then
 
-				packages+=' grub-efi-amd64'
+				apackages+=('grub-efi-amd64')
 				# On Buster+ enable secure boot compatibility: https://packages.debian.org/grub-efi-amd64-signed
-				(( $DISTRO_TARGET > 4 )) && packages+=' grub-efi-amd64-signed shim-signed'
+				(( $DISTRO_TARGET > 4 )) && apackages+=('grub-efi-amd64-signed' 'shim-signed')
 
 			# Grub BIOS
 			else
 
-				packages+=' grub-pc'
+				apackages+=('grub-pc')
 
 			fi
 
-			G_AGI $packages
+			G_AGI "${apackages[@]}"
+			unset -v apackages
 
 		# - G_HW_MODEL specific required firmware/kernel/bootloader packages
 		#	ARMbian grab currently installed packages
-		elif dpkg --get-selections | grep -q 'armbian'; then
+		elif [[ $(dpkg-query -Wf '${Package} ') == *'armbian'* ]]; then
 
 			systemctl stop armbian-*
 
@@ -870,11 +835,10 @@ Currently installed: $G_DISTRO_NAME (ID: $G_DISTRO)"; then
 					aPACKAGES_REQUIRED_INSTALL+=("$line")
 					G_DIETPI-NOTIFY 2 "ARMbian package detected and added: $line"
 
-				done <<< "$(dpkg --get-selections | mawk -v pat="^$i" '$0~pat {print $1}')"
+				done <<< "$(dpkg-query -Wf '${Package}\n' | mawk -v pat="^$i" '$0~pat')"
 
 			done
-
-			unset apackages
+			unset -v apackages
 
 		#	RPi
 		elif (( $G_HW_MODEL < 10 )); then
@@ -917,24 +881,22 @@ Currently installed: $G_DISTRO_NAME (ID: $G_DISTRO)"; then
 		# - Generic kernel + device tree package auto detect
 		else
 
-			AUTO_DETECT_KERN_PKG=$(dpkg --get-selections | mawk '/^linux-(image|dtb)/{print $1}')
-			if [[ $AUTO_DETECT_KERN_PKG ]]; then
+			mapfile -t apackages < <(dpkg-query -Wf '${Package}\n' | grep -E '^linux-(image|dtb)')
+			if [[ ${apackages[0]} ]]; then
 
-				G_AGI $AUTO_DETECT_KERN_PKG
+				G_AGI "${apackages[@]}"
 
 			else
 
 				G_DIETPI-NOTIFY 2 'Unable to find kernel packages for installation. Assuming non-APT/.deb kernel installation.'
 
 			fi
+			unset -v apackages
 
 		fi
 
-		# - Unset Jessie workaround
-		unset -f G_EXEC_PRE_FUNC
-
 		# - Firmware
-		if dpkg --get-selections | grep -q '^armbian-firmware'; then
+		if dpkg-query -Wf '${Package}\n' | grep -q '^armbian-firmware'; then
 
 			aPACKAGES_REQUIRED_INSTALL+=('armbian-firmware')
 
@@ -975,8 +937,10 @@ Currently installed: $G_DISTRO_NAME (ID: $G_DISTRO)"; then
 
 		G_DIETPI-NOTIFY 2 'Generating list of minimal packages, required for DietPi installation'
 
-		local packages=$(dpkg --get-selections "${aPACKAGES_REQUIRED_INSTALL[@]}" 2> /dev/null | mawk '{print $1}')
-		[[ $packages ]] && G_EXEC_DESC='Marking required packages as manually installed' G_EXEC apt-mark manual $packages
+		local apackages
+		mapfile -t apackages < <(dpkg --get-selections "${aPACKAGES_REQUIRED_INSTALL[@]}" 2> /dev/null | mawk '{print $1}')
+		[[ ${apackages[0]} ]] && G_EXEC_DESC='Marking required packages as manually installed' G_EXEC apt-mark manual "${apackages[@]}"
+		unset -v apackages
 
 		# Purging additional packages, that (in some cases) do not get autoremoved:
 		# - dbus: Not required for headless images, but sometimes marked as "important", thus not autoremoved.
@@ -984,43 +948,33 @@ Currently installed: $G_DISTRO_NAME (ID: $G_DISTRO)"; then
 		# - dhcpcd5: https://github.com/MichaIng/DietPi/issues/1560#issuecomment-370136642
 		# - mountall: https://github.com/MichaIng/DietPi/issues/2613
 		# - initscripts: Pre-installed on Jessie systems (?), superseded and masked by systemd, but never autoremoved
-		#	Jessie workaround: https://github.com/MichaIng/DietPi/issues/3462
-		(( $G_DISTRO < 4 )) && G_EXEC_PRE_FUNC(){ acommand[2]='--force-yes'; }
 		G_AGP dbus dhcpcd5 mountall initscripts '*office*' '*xfce*' '*qt5*' '*xserver*' '*xorg*' glib-networking libgtk-3-0
 		# Remove any autoremove prevention
 		rm -fv /etc/apt/apt.conf.d/*autoremove*
 		G_AGA
 
 		#------------------------------------------------------------------------------------------------
-		echo
-		G_DIETPI-NOTIFY 2 '-----------------------------------------------------------------------------------'
-		G_DIETPI-NOTIFY 0 "Step $SETUP_STEP: APT installations"; ((SETUP_STEP++))
-		G_DIETPI-NOTIFY 2 '-----------------------------------------------------------------------------------'
+		G_DIETPI-NOTIFY 3 "[$SETUP_STEP] APT installations"; ((SETUP_STEP++))
 		#------------------------------------------------------------------------------------------------
 
-		# Jessie workaround: https://github.com/MichaIng/DietPi/issues/3462
-		(( $G_DISTRO < 4 )) && G_EXEC_PRE_FUNC(){ acommand[2]='--force-yes'; }
 		G_AGDUG
 
 		# Distro is now target (for APT purposes and G_AGX support due to installed binary, its here, instead of after G_AGUP)
 		G_DISTRO=$DISTRO_TARGET
 		G_DISTRO_NAME=$DISTRO_TARGET_NAME
-		unset DISTRO_TARGET DISTRO_TARGET_NAME
+		unset -v DISTRO_TARGET DISTRO_TARGET_NAME
 
 		G_DIETPI-NOTIFY 2 'Installing core DietPi pre-req DEB packages'
 
 		G_AGI "${aPACKAGES_REQUIRED_INSTALL[@]}"
-		unset aPACKAGES_REQUIRED_INSTALL
+		unset -v aPACKAGES_REQUIRED_INSTALL
 
 		G_AGA
 
 		G_EXEC_DESC='Preserving modified DEB package config files from now on' G_EXEC rm -v /etc/apt/apt.conf.d/98dietpi-forceconf
 
 		#------------------------------------------------------------------------------------------------
-		echo
-		G_DIETPI-NOTIFY 2 '-----------------------------------------------------------------------------------'
-		G_DIETPI-NOTIFY 0 "Step $SETUP_STEP: Prep system for DietPi ENV"; ((SETUP_STEP++))
-		G_DIETPI-NOTIFY 2 '-----------------------------------------------------------------------------------'
+		G_DIETPI-NOTIFY 3 "[$SETUP_STEP] Applying DietPi tweaks and cleanup"; ((SETUP_STEP++))
 		#------------------------------------------------------------------------------------------------
 
 		# https://github.com/jirka-h/haveged/pull/7 https://github.com/MichaIng/DietPi/issues/3689#issuecomment-678322767
@@ -1038,28 +992,28 @@ Currently installed: $G_DISTRO_NAME (ID: $G_DISTRO)"; then
 
 		G_DIETPI-NOTIFY 2 'Deleting list of known users and groups, not required by DietPi'
 
-		getent passwd pi &> /dev/null && userdel -f pi
-		getent passwd test &> /dev/null && userdel -f test # @fourdee
-		getent passwd odroid &> /dev/null && userdel -f odroid
-		getent passwd rock64 &> /dev/null && userdel -f rock64
-		getent passwd rock &> /dev/null && userdel -f rock # Radxa images
-		getent passwd linaro &> /dev/null && userdel -f linaro # ASUS TB
-		getent passwd dietpi &> /dev/null && userdel -f dietpi # recreated below
-		getent passwd debian &> /dev/null && userdel -f debian # BBB
-		getent passwd openmediavault-webgui &> /dev/null && userdel -f openmediavault-webgui # OMV (NanoPi NEO2)
-		getent passwd admin &> /dev/null && userdel -f admin # OMV (NanoPi NEO2)
-		getent passwd fa &> /dev/null && userdel -f fa # OMV (NanoPi NEO2)
-		getent passwd colord &> /dev/null && userdel -f colord # OMV (NanoPi NEO2)
-		getent passwd saned &> /dev/null && userdel -f saned # OMV (NanoPi NEO2)
-		getent group openmediavault-config &> /dev/null && groupdel openmediavault-config # OMV (NanoPi NEO2)
-		getent group openmediavault-engined &> /dev/null && groupdel openmediavault-engined # OMV (NanoPi NEO2)
-		getent group openmediavault-webgui &> /dev/null && groupdel openmediavault-webgui # OMV (NanoPi NEO2)
+		getent passwd pi > /dev/null && userdel -f pi
+		getent passwd test > /dev/null && userdel -f test # @fourdee
+		getent passwd odroid > /dev/null && userdel -f odroid
+		getent passwd rock64 > /dev/null && userdel -f rock64
+		getent passwd rock > /dev/null && userdel -f rock # Radxa images
+		getent passwd linaro > /dev/null && userdel -f linaro # ASUS TB
+		getent passwd dietpi > /dev/null && userdel -f dietpi # recreated below
+		getent passwd debian > /dev/null && userdel -f debian # BBB
+		getent passwd openmediavault-webgui > /dev/null && userdel -f openmediavault-webgui # OMV (NanoPi NEO2)
+		getent passwd admin > /dev/null && userdel -f admin # OMV (NanoPi NEO2)
+		getent passwd fa > /dev/null && userdel -f fa # OMV (NanoPi NEO2)
+		getent passwd colord > /dev/null && userdel -f colord # OMV (NanoPi NEO2)
+		getent passwd saned > /dev/null && userdel -f saned # OMV (NanoPi NEO2)
+		getent group openmediavault-config > /dev/null && groupdel openmediavault-config # OMV (NanoPi NEO2)
+		getent group openmediavault-engined > /dev/null && groupdel openmediavault-engined # OMV (NanoPi NEO2)
+		getent group openmediavault-webgui > /dev/null && groupdel openmediavault-webgui # OMV (NanoPi NEO2)
 
 		G_DIETPI-NOTIFY 2 'Removing misc files/folders/services, not required by DietPi'
 
-		# shellcheck disable=SC2115
+		# shellcheck disable=SC2015,SC2115
 		[[ -d '/home' ]] && rm -Rfv /home/{,.??,.[^.]}* || mkdir /home
-		# shellcheck disable=SC2115
+		# shellcheck disable=SC2015,SC2115
 		[[ -d '/media' ]] && rm -Rfv /media/{,.??,.[^.]}* || mkdir /media
 		[[ -d '/selinux' ]] && rm -Rv /selinux
 		[[ -d '/var/cache/apparmor' ]] && rm -Rv /var/cache/apparmor
@@ -1153,6 +1107,7 @@ Currently installed: $G_DISTRO_NAME (ID: $G_DISTRO)"; then
 			G_EXEC update-rc.d -f "$i" remove
 
 		done
+		unset -v aservices
 
 		# - ARMbian specific
 		[[ -f '/boot/armbian_first_run.txt.template' ]] && rm -v /boot/armbian_first_run.txt.template
@@ -1207,6 +1162,8 @@ _EOF_
 		#	Do not ship rc.local anymore. On DietPi /var/lib/dietpi/postboot.d should be used.
 		#	WIP: Mask rc-local.service and create symlink postboot.d/rc.local => /etc/rc.local for backwards compatibility?
 		[[ -f '/etc/rc.local' ]] && rm -v /etc/rc.local # https://github.com/RPi-Distro/pi-gen/blob/master/stage2/01-sys-tweaks/files/rc.local
+		[[ -d '/etc/systemd/system/rc-local.service.d' ]] && rm -Rv /etc/systemd/system/rc-local.service.d # Raspberry Pi OS
+		[[ -d '/etc/systemd/system/rc.local.service.d' ]] && rm -Rv /etc/systemd/system/rc.local.service.d
 		#	Below required if DietPi-PREP is executed from chroot/container, so RPi firstrun scripts are not executed
 		[[ -f '/etc/init.d/resize2fs_once' ]] && rm -v /etc/init.d/resize2fs_once # https://github.com/RPi-Distro/pi-gen/blob/master/stage2/01-sys-tweaks/files/resize2fs_once
 		[[ -f '/boot/cmdline.txt' ]] && sed -i 's| init=/usr/lib/raspi-config/init_resize\.sh||' /boot/cmdline.txt # https://github.com/RPi-Distro/pi-gen/blob/master/stage2/01-sys-tweaks/00-patches/07-resize-init.diff
@@ -1238,7 +1195,7 @@ _EOF_
 		# - Enable /etc/bashrc.d/ support for custom interactive non-login shell scripts:
 		sed -i '\#/etc/bashrc\.d/#d' /etc/bash.bashrc
 		# shellcheck disable=SC2016
-		echo 'for i in /etc/bashrc.d/*.sh /etc/bashrc.d/*.bash; do [ -r "$i" ] && . $i; done; unset i' >> /etc/bash.bashrc
+		echo 'for i in /etc/bashrc.d/*.sh /etc/bashrc.d/*.bash; do [ -r "$i" ] && . $i; done; unset -v i' >> /etc/bash.bashrc
 
 		# - Enable bash-completion for non-login shells:
 		#	- NB: It is called twice on login shells then, but breaks directly if called already once.
@@ -1258,9 +1215,9 @@ _EOF_
 		G_DIETPI-NOTIFY 2 'Generating DietPi directories'
 		mkdir -pv /var/lib/dietpi/{postboot.d,dietpi-software/installed}
 		mkdir -pv /var/tmp/dietpi/logs/dietpi-ramlog_store
-		mkdir -pv $G_FP_DIETPI_USERDATA /mnt/{samba,ftp_client,nfs_client}
-		chown -R dietpi:dietpi /var/{lib,tmp}/dietpi $G_FP_DIETPI_USERDATA /mnt/{samba,ftp_client,nfs_client}
-		chmod 775 $(find /var/{lib,tmp}/dietpi $G_FP_DIETPI_USERDATA /mnt/{samba,ftp_client,nfs_client} -type d)
+		mkdir -pv /mnt/{dietpi_userdata,samba,ftp_client,nfs_client}
+		chown -R dietpi:dietpi /var/{lib,tmp}/dietpi /mnt/{dietpi_userdata,samba,ftp_client,nfs_client}
+		find /var/{lib,tmp}/dietpi /mnt/{dietpi_userdata,samba,ftp_client,nfs_client} -type d -exec chmod 0775 {} +
 
 		#-----------------------------------------------------------------------------------
 		# Services
@@ -1507,22 +1464,18 @@ _EOF_'
 
 			# Disable nouveau: https://github.com/MichaIng/DietPi/issues/1244 // https://dietpi.com/phpbb/viewtopic.php?p=9688#p9688
 			rm -f /etc/modprobe.d/*nouveau*
-			cat << _EOF_ > /etc/modprobe.d/dietpi-disable_nouveau.conf
+			cat << '_EOF_' > /etc/modprobe.d/dietpi-disable_nouveau.conf
 blacklist nouveau
 blacklist lbm-nouveau
 options nouveau modeset=0
 alias nouveau off
 alias lbm-nouveau off
 _EOF_
-
-			# Apply usb-storage quirks to disable UAS for unsupported drives (Seagate ST5000LM000-2AN170): https://github.com/MichaIng/DietPi/issues/2905
-			echo 'options usb-storage quirks=0bc2:ab30:u' > /etc/modprobe.d/dietpi-usb-storage_quirks.conf
-
 			# Fix grub install device: https://github.com/MichaIng/DietPi/issues/3700
 			dpkg-query -s grub-pc &> /dev/null && G_EXEC eval "debconf-set-selections <<< 'grub-pc grub-pc/install_devices multiselect /dev/sda'"
 
 			# Update initramfs with above changes
-			if command -v update-tirfs &> /dev/null; then
+			if command -v update-tirfs > /dev/null; then
 
 				update-tirfs
 
@@ -1550,7 +1503,7 @@ _EOF_
 apm = 127
 $spindown = 120
 _EOF_"
-			unset spindown
+			unset -v spindown
 
 		fi
 
@@ -1646,19 +1599,35 @@ _EOF_
 			/boot/dietpi/func/dietpi-set_hardware rpi-camera disable
 
 			# Update USBridgeSig Ethernet driver via postinst kernel script, until it has been merged into official RPi kernel: https://github.com/allocom/USBridgeSig/tree/master/ethernet
-			cat << _EOF_ > /etc/kernel/postinst.d/dietpi-USBridgeSig
+			cat << '_EOF_' > /etc/kernel/postinst.d/dietpi-USBridgeSig
 #!/bin/bash
-# Only apply to v7+ and v8+ kernel
-[[ \$1 == *'-v'[78]'+' ]] || exit 0
-echo "[ INFO ] Updating asix ax88179 driver for kernel \$1, as provided by allo.com:"
-echo '[ INFO ] - https://github.com/allocom/USBridgeSig/tree/master/ethernet'
-echo '[ INFO ] Downloading driver...'
-wget http://3.230.113.73:9011/Allocom/USBridgeSig/rpi-usbs-\$1/ax88179_178a.ko -O /tmp/ax88179_178a.ko || exit 0
+# Only available for v7+ and v8+ kernel
+[[ $1 == *'-v'[78]'+' ]] || exit 0
+echo "[ INFO ] Updating ASIX AX88179 driver for kernel $1 with ARM-optimised builds"
+echo '[ INFO ] - by Allo: https://github.com/allocom/USBridgeSig/tree/master/ethernet'
+echo '[ INFO ] Estimating required module layout...'
+module_layout=$(modprobe --dump-modversions /lib/modules/$1/kernel/drivers/net/usb/asix.ko | mawk '/module_layout/{print $1;exit}') || exit 0
+echo '[ INFO ] Downloading stable branch driver...'
+if ! curl -#fL http://3.230.113.73:9011/Allocom/USBridgeSig/stable_rel/rpi-usbs-$1/ax88179_178a.ko -o /tmp/ax88179_178a.ko ||
+	[[ $module_layout != $(modprobe --dump-modversions /tmp/ax88179_178a.ko | mawk '/module_layout/{print $1;exit}') ]]; then
+
+	echo '[ INFO ] No matching stable branch driver found, trying master branch driver...'
+	if ! curl -#fL http://3.230.113.73:9011/Allocom/USBridgeSig/rpi-usbs-$1/ax88179_178a.ko -o /tmp/ax88179_178a.ko ||
+		[[ $module_layout != $(modprobe --dump-modversions /tmp/ax88179_178a.ko | mawk '/module_layout/{print $1;exit}') ]]; then
+
+		echo '[ INFO ] No matching driver found, cleaning up and aborting...'
+		rm -fv /tmp/ax88179_178a.ko || :
+		echo '[ INFO ] Do not worry, the default RPi kernel driver will be used instead.'
+		exit 0
+
+	fi
+
+fi
 echo '[ INFO ] Installing driver...'
-install -vpm 644 /tmp/ax88179_178a.ko /lib/modules/\$1/kernel/drivers/net/usb || exit 0
+install -vpm 644 /tmp/ax88179_178a.ko /lib/modules/$1/kernel/drivers/net/usb || exit 0
 echo '[ INFO ] Running depmod...'
-depmod \$1 || exit 0
-echo '[ INFO ] Cleaning up...'
+depmod $1 || exit 0
+echo '[ INFO ] All succeeded, cleaning up...'
 rm -v /tmp/ax88179_178a.ko || exit 0
 _EOF_
 			chmod +x /etc/kernel/postinst.d/dietpi-USBridgeSig
@@ -1701,10 +1670,7 @@ _EOF_
 		fi
 
 		#------------------------------------------------------------------------------------------------
-		echo
-		G_DIETPI-NOTIFY 2 '-----------------------------------------------------------------------------------'
-		G_DIETPI-NOTIFY 0 "Step $SETUP_STEP: Finalise system for first run of DietPi"; ((SETUP_STEP++))
-		G_DIETPI-NOTIFY 2 '-----------------------------------------------------------------------------------'
+		G_DIETPI-NOTIFY 3 "[$SETUP_STEP] Finalise system for first boot of DietPi"; ((SETUP_STEP++))
 		#------------------------------------------------------------------------------------------------
 
 		G_EXEC_DESC='Enable Dropbear autostart' G_EXEC sed -i '/NO_START=1/c\NO_START=0' /etc/default/dropbear

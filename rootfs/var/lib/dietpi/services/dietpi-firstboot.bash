@@ -9,13 +9,13 @@
 	#////////////////////////////////////
 	#
 	# Info:
-	# - Filename: /var/lib/dietpi/services/dietpi-firstboot.bash
+	# - Location: /var/lib/dietpi/services/dietpi-firstboot.bash
 	# - Activates on first boot from dietpi-firstboot.service, runs before dietpi-boot.service and networking
 	#////////////////////////////////////
 
 	# Import DietPi-Globals --------------------------------------------------------------
 	. /boot/dietpi/func/dietpi-globals
-	G_PROGRAM_NAME='DietPi-FirstBoot'
+	readonly G_PROGRAM_NAME='DietPi-FirstBoot'
 	G_CHECK_ROOT_USER
 	G_CHECK_ROOTFS_RW
 	G_INIT
@@ -38,7 +38,7 @@
 			sed -i '/core_freq=/c\#core_freq=400' /boot/config.txt
 			sed -i '/sdram_freq=/c\#sdram_freq=450' /boot/config.txt
 
-		# RPi1 - Apply safe overclock mode
+		# RPi 1: Apply safe overclock mode
 		elif (( $G_HW_MODEL < 2 )); then
 
 			G_CONFIG_INJECT 'over_voltage=' 'over_voltage=2' /boot/config.txt
@@ -46,15 +46,15 @@
 			sed -i '/core_freq=/c\#core_freq=250' /boot/config.txt
 			sed -i '/sdram_freq=/c\#sdram_freq=400' /boot/config.txt
 
-		# RPi2
+		# RPi 2
 		elif (( $G_HW_MODEL == 2 )); then
 
 			sed -i '/over_voltage=/c\#over_voltage=0' /boot/config.txt
 			sed -i '/arm_freq=/c\#arm_freq=900' /boot/config.txt
 			sed -i '/core_freq=/c\#core_freq=250' /boot/config.txt
-			sed -i '/sdram_freq=/c\#sdram_freq=400' /boot/config.txt
+			sed -i '/sdram_freq=/c\#sdram_freq=450' /boot/config.txt
 
-		# RPi3
+		# RPi 3
 		elif (( $G_HW_MODEL == 3 )); then
 
 			sed -i '/over_voltage=/c\#over_voltage=0' /boot/config.txt
@@ -74,7 +74,7 @@
 
 			fi
 
-		# RPi4
+		# RPi 4
 		elif (( $G_HW_MODEL == 4 )); then
 
 			sed -i '/over_voltage=/c\#over_voltage=0' /boot/config.txt
@@ -110,7 +110,7 @@
 
 		fi
 
-		# Create swap file
+		# Apply swap settings
 		/boot/dietpi/func/dietpi-set_swapfile
 
 		# Apply time zone
@@ -144,8 +144,8 @@
 
 		fi
 
-		# Apply headless mode, if set in dietpi.txt (RPi, Odroid C1/C2)
-		(( $G_HW_MODEL < 11 || $G_HW_MODEL == 12 )) && /boot/dietpi/func/dietpi-set_hardware headless $(grep -cm1 '^[[:blank:]]*AUTO_SETUP_HEADLESS=1' /boot/dietpi.txt)
+		# Apply headless mode if set in dietpi.txt (RPi, Odroid C1/C2)
+		(( $G_HW_MODEL < 11 || $G_HW_MODEL == 12 )) && /boot/dietpi/func/dietpi-set_hardware headless "$(grep -cm1 '^[[:blank:]]*AUTO_SETUP_HEADLESS=1' /boot/dietpi.txt)"
 
 		# Apply forced eth speed, if set in dietpi.txt
 		/boot/dietpi/func/dietpi-set_hardware eth-forcespeed "$(sed -n '/^[[:blank:]]*AUTO_SETUP_NET_ETH_FORCE_SPEED=/{s/^[^=]*=//p;q}' /boot/dietpi.txt)"
@@ -153,27 +153,37 @@
 		# Set hostname
 		/boot/dietpi/func/change_hostname "$(sed -n '/^[[:blank:]]*AUTO_SETUP_NET_HOSTNAME=/{s/^[^=]*=//p;q}' /boot/dietpi.txt)"
 
-		# Set root autologin, if automated firstrun setup was chosen
+		# Set root # if automated firstrun setup was chosen, will be reverted after firstrun installs
 		if grep -q '^[[:blank:]]*AUTO_SETUP_AUTOMATED=1' /boot/dietpi.txt; then
 
-			mkdir -p /etc/systemd/system/getty@tty1.service.d
-			cat << _EOF_ > /etc/systemd/system/getty@tty1.service.d/dietpi-autologin.conf
+			mkdir -p /etc/systemd/system/{getty@tty1,console-getty}.service.d
+			cat << '_EOF_' > /etc/systemd/system/getty@tty1.service.d/dietpi-autologin.conf
 [Service]
 ExecStart=
-ExecStart=-/sbin/agetty -a root %I \$TERM
+ExecStart=-/sbin/agetty -a root --noclear %I $TERM
+_EOF_
+			cat << '_EOF_' > /etc/systemd/system/console-getty.service.d/dietpi-autologin.conf
+[Service]
+ExecStart=
+ExecStart=-/sbin/agetty -a root --noclear --keep-baud console 115200,38400,9600 $TERM
 _EOF_
 
 		fi
 
-		# Disable serial console, if set in dietpi.txt
+		# Disable serial console if set in dietpi.txt
 		grep -q '^[[:blank:]]*CONFIG_SERIAL_CONSOLE_ENABLE=0' /boot/dietpi.txt && /boot/dietpi/func/dietpi-set_hardware serialconsole disable
 
-		# Set login passwords
-		local root_password=$(sed -n '/^[[:blank:]]*AUTO_SETUP_GLOBAL_PASSWORD=/{s/^[^=]*=//p;q}' /boot/dietpi.txt)
-		if [[ $root_password ]]; then
+		# Apply login password if it has not been encrypted before to avoid applying the informational text
+		if [[ ! -f '/var/lib/dietpi/dietpi-software/.GLOBAL_PW.bin' ]]; then
 
-			chpasswd <<< "root:$root_password"
-			chpasswd <<< "dietpi:$root_password"
+			local password=$(sed -n '/^[[:blank:]]*AUTO_SETUP_GLOBAL_PASSWORD=/{s/^[^=]*=//p;q}' /boot/dietpi.txt)
+			if [[ $password ]]; then
+
+				chpasswd <<< "root:$password"
+				chpasswd <<< "dietpi:$password"
+
+			fi
+			unset -v password
 
 		fi
 
@@ -200,9 +210,8 @@ _EOF_
 		systemd-machine-id-setup
 
 		# Network setup
-		# - Grab available network devices
+		# - Grab available network interfaces
 		/boot/dietpi/func/obtain_network_details
-
 		local index_eth=$(mawk 'NR==1' /run/dietpi/.network)
 		disable_error=1 G_CHECK_VALIDINT "$index_eth" 0 || index_eth=0
 		local index_wlan=$(mawk 'NR==2' /run/dietpi/.network)
@@ -215,7 +224,6 @@ _EOF_
 		# - Grab user requested settings from dietpi.txt
 		local ethernet_enabled=$(grep -cm1 '^[[:blank:]]*AUTO_SETUP_NET_ETHERNET_ENABLED=1' /boot/dietpi.txt)
 		local wifi_enabled=$(grep -cm1 '^[[:blank:]]*AUTO_SETUP_NET_WIFI_ENABLED=1' /boot/dietpi.txt)
-
 		local use_static=$(grep -cm1 '^[[:blank:]]*AUTO_SETUP_NET_USESTATIC=1' /boot/dietpi.txt)
 		local static_ip=$(sed -n '/^[[:blank:]]*AUTO_SETUP_NET_STATIC_IP=/{s/^[^=]*=//p;q}' /boot/dietpi.txt)
 		local static_mask=$(sed -n '/^[[:blank:]]*AUTO_SETUP_NET_STATIC_MASK=/{s/^[^=]*=//p;q}' /boot/dietpi.txt)
@@ -225,7 +233,7 @@ _EOF_
 		# - WiFi
 		if (( $wifi_enabled )); then
 
-			# Enable WiFi, disable Eth
+			# Enable WiFi, disable Ethernet
 			ethernet_enabled=0
 			sed -i "/allow-hotplug wlan/c\allow-hotplug wlan$index_wlan" /etc/network/interfaces
 			sed -i "/allow-hotplug eth/c\#allow-hotplug eth$index_eth" /etc/network/interfaces
@@ -261,11 +269,10 @@ _EOF_
 				sed -i "/iface eth/c\iface eth$index_eth inet static" /etc/network/interfaces
 
 			fi
-
 			sed -i "/address/c\address $static_ip" /etc/network/interfaces
 			sed -i "/netmask/c\netmask $static_mask" /etc/network/interfaces
 			sed -i "/gateway/c\gateway $static_gateway" /etc/network/interfaces
-			if command -v resolvconf &> /dev/null; then
+			if command -v resolvconf > /dev/null; then
 
 				sed -i "/dns-nameservers/c\dns-nameservers $static_dns" /etc/network/interfaces
 
@@ -280,11 +287,12 @@ _EOF_
 
 		# - IPv6
 		local enable_ipv6=$(grep -cm1 '^[[:blank:]]*CONFIG_ENABLE_IPV6=1' /boot/dietpi.txt)
-		/boot/dietpi/func/dietpi-set_hardware enableipv6 $enable_ipv6
-		(( $enable_ipv6 )) && /boot/dietpi/func/dietpi-set_hardware preferipv4 $(grep -cm1 '^[[:blank:]]*CONFIG_PREFER_IPV4=1' /boot/dietpi.txt)
+		/boot/dietpi/func/dietpi-set_hardware enableipv6 "$enable_ipv6"
+		(( $enable_ipv6 )) && /boot/dietpi/func/dietpi-set_hardware preferipv4 "$(grep -cm1 '^[[:blank:]]*CONFIG_PREFER_IPV4=1' /boot/dietpi.txt)"
 
-		# - Configure enabled interfaces now, /etc/network/interfaces will be effective from next boot on.
-		#	Failsafe: Bring up Ethernet, whenever WiFi is disabled or fails to be configured, e.g. due to wrong credentials.
+		# - Configure enabled interfaces now, /etc/network/interfaces will be effective from next boot on
+		#	Failsafe: Bring up Ethernet, whenever WiFi is disabled or fails to be configured, e.g. due to wrong credentials
+		# shellcheck disable=SC2015
 		(( $wifi_enabled )) && ifup wlan$index_wlan || ifup eth$index_eth
 
 	}
@@ -295,7 +303,7 @@ _EOF_
 
 	# Failsafe: https://github.com/MichaIng/DietPi/issues/3646#issuecomment-653739919
 	chown root:root /
-	chmod 755 /
+	chmod 0755 /
 
 	# Apply dietpi.txt settings, device specific workarounds and reset hardware ID + SSH host keys
 	Apply_DietPi_FirstRun_Settings
