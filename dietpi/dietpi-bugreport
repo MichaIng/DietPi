@@ -12,7 +12,7 @@
 	# - Location: /boot/dietpi/dietpi-bugreport
 	# - Called from G_EXEC
 	# - Generates $G_HW_UUID.7z and uploads to dietpi.com
-	USAGE='
+	readonly USAGE='
 Usage: dietpi-bugreport <command>
 Available commands:
   0, <empty>	Interactive menu to send or remove bug reports and review upload content
@@ -22,7 +22,7 @@ Available commands:
 
 	# Import DietPi-Globals --------------------------------------------------------------
 	. /boot/dietpi/func/dietpi-globals
-	G_PROGRAM_NAME='DietPi-Bugreport'
+	readonly G_PROGRAM_NAME='DietPi-Bugreport'
 	G_CHECK_ROOT_USER
 	G_CHECK_ROOTFS_RW
 	G_INIT
@@ -30,17 +30,14 @@ Available commands:
 
 	disable_error=1 G_CHECK_VALIDINT "$1" && INPUT=$1 || INPUT=0
 
-	UPLOAD_FILENAME="$G_HW_UUID.7z"
-
-	UPLOAD_FILESIZE_LIMIT=20000000 # Byte
-	UPLOAD_FILESIZE=0
-
-	SFTP_ADDR='ssh.dietpi.com'
-	SFTP_USER='dietpi-survey'
-	SFTP_PASS='upload2dietpi'
+	readonly SFTP_ADDR='ssh.dietpi.com:22'
+	readonly SFTP_USER='dietpi-survey'
+	readonly SFTP_PASS='upload2dietpi'
+	readonly UPLOAD_FILENAME="$G_HW_UUID.7z"
+	readonly UPLOAD_FILESIZE_LIMIT=20000000 # bytes
 
 	# List of commands we want to run and redirect to upload archive
-	aCOMMAND_LIST=(
+	readonly aCOMMAND_LIST=(
 
 		'dpkg -l'
 		'ip l'
@@ -69,7 +66,7 @@ Available commands:
 	)
 
 	# List of files and folders we want to add to upload archive
-	aFILE_LIST=(
+	readonly aFILE_LIST=(
 
 		# aCOMMAND_LIST output file
 		'CMD_OUT.txt'
@@ -129,6 +126,7 @@ Available commands:
 		'/etc/apt/sources.list.d'
 		'/etc/apt/preferences'
 		'/etc/apt/preferences.d'
+		'/etc/apt/apt.conf.d'
 
 	)
 
@@ -142,74 +140,33 @@ Available commands:
 			$i &>> CMD_OUT.txt
 
 		done
-		unset -v aCOMMAND_LIST
 
 		# Have the Git error in 1st directory
-		[[ -f '/tmp/G_EXEC_ERROR_REPORT' ]] && cp /tmp/G_EXEC_ERROR_REPORT G_EXEC_ERROR_REPORT
+		[[ -f '/tmp/G_EXEC_ERROR_REPORT' ]] && G_EXEC cp /tmp/G_EXEC_ERROR_REPORT G_EXEC_ERROR_REPORT
 
-		G_DIETPI-NOTIFY 2 'Packing upload archive, please wait...'
-		7zr a -m0=lzma2 -mx=9 -spf "$UPLOAD_FILENAME" "${aFILE_LIST[@]}" &> dietpi-bugreport_compress.log
+		# Allow warnings, e.g. when files are missing or could not be compressed (but have been added to archive)
+		G_EXEC_POST_FUNC(){ [[ $exit_code == 1 ]] && exit_code=0; }
+
+		G_EXEC_DESC='Packing upload archive' G_EXEC 7zr a -m0=lzma2 -mx=9 -spf "$UPLOAD_FILENAME" "${aFILE_LIST[@]}"
+
+		# Exit if size of upload archive exceeds limit
+		(( $(stat -c '%s' "$UPLOAD_FILENAME") > $UPLOAD_FILESIZE_LIMIT )) || return 0
+
+		G_DIETPI-NOTIFY 1 'The bug report upload archive appears to be unexpected large. Please inspect and in case clean up the locations to be uploaded, as their size should never be that large:'
+		printf "%s\n" "${aFILE_LIST[@]}"
+		exit 1
 
 	}
 
 	Upload_Bug_Report(){
 
-		# Check upload location is online
-		if G_CHECK_URL "$SFTP_ADDR"; then
+		G_CHECK_URL "$SFTP_ADDR"
 
-			if [[ ! -f $UPLOAD_FILENAME ]]; then
+		[[ $INPUT == 1 ]] && G_EXEC_DESC='Sending bug report' || G_EXEC_DESC='Purging bug report'
 
-				G_WHIP_MSG "Failed to create compressed upload file: $UPLOAD_FILENAME\n\nOn the next screen you will be prompted to view the log. If problems persist, please contact DietPi for support."
-				log=1 G_WHIP_VIEWFILE dietpi-bugreport_compress.log
-				exit 1
+		G_EXEC curl --connect-timeout 4 --retry 1 --retry-delay 4 -sST "$UPLOAD_FILENAME" "sftp://$SFTP_USER:$SFTP_PASS@$SFTP_ADDR/bugreport/"
 
-			fi
-
-			[[ -f 'dietpi-bugreport_compress.log' ]] && rm dietpi-bugreport_compress.log
-
-			# Limit filesize
-			UPLOAD_FILESIZE=$(stat -c%s "$UPLOAD_FILENAME")
-
-			# Upload
-			if (( $UPLOAD_FILESIZE <= $UPLOAD_FILESIZE_LIMIT )); then
-
-				G_DIETPI-NOTIFY -2 'Running cURL'
-				if curl --connect-timeout 4 --retry 1 --retry-delay 4 -sST "$UPLOAD_FILENAME" sftp://"$SFTP_USER":"$SFTP_PASS"@"$SFTP_ADDR"/bugreport/; then
-
-					# Bug report removal via empty file upload
-					if (( $UPLOAD_FILESIZE == 0 )); then
-
-						G_DIETPI-NOTIFY 0 'Bug report successfully purged'
-
-					else
-
-						G_DIETPI-NOTIFY 0 "Bug report sent, reference code: $G_HW_UUID"
-
-					fi
-
-				else
-
-					G_DIETPI-NOTIFY 1 'Failed to connect to SFTP server. Please try again later or report this to DietPi forum or GitHub repo in the first place.'
-					exit 1
-
-				fi
-
-			else
-
-				G_DIETPI-NOTIFY 1 'The bug report upload archive appears to be unexpected large. Please inspect and in case clean up the locations to be uploaded, as their size should never be that large:'
-				printf "%s\n" "${aFILE_LIST[@]}"
-				exit 1
-
-			fi
-
-		else
-
-			G_DIETPI-NOTIFY 1 'Failed to connect to "dietpi.com". Please try again later or report this to DietPi forum or GitHub repo in the first place.'
-			exit 1
-
-		fi
-
-		unset -v aFILE_LIST
+		[[ $INPUT == 1 ]] && G_DIETPI-NOTIFY 2 "Reference code: \e[33m$G_HW_UUID"
 
 	}
 
@@ -228,42 +185,36 @@ Available commands:
 
 		)
 
-		if G_WHIP_MENU 'By sending a bug report file, you can help the developers to investigate your issue, in relation to your report on GitHub or the DietPi forum.
+		G_WHIP_MENU 'By sending a bug report file, you can help the developers to investigate your issue, in relation to your report on GitHub or the DietPi forum.
 The file is sent via secured connection to our SFTP server and is stored there unreadable to the public upload user.
 The file will be removed after your issue is solved and you can remove it by yourself as well by running "dietpi-bugreport -1" or via this menu.\n
-Would you like to send a bug report archive or remove an already uploaded one?'; then
+Would you like to send a bug report archive or remove an already uploaded one?' || exit 0
 
-			if (( $G_WHIP_RETURNED_VALUE == 1 )); then
+		if (( $G_WHIP_RETURNED_VALUE == 1 )); then
 
-				INPUT=1
+			INPUT=1
 
-			elif (( $G_WHIP_RETURNED_VALUE == 2 )); then
+		elif (( $G_WHIP_RETURNED_VALUE == 2 )); then
 
-				INPUT=-1
+			INPUT=-1
 
-			elif (( $G_WHIP_RETURNED_VALUE == 3 )); then
+		elif (( $G_WHIP_RETURNED_VALUE == 3 )); then
 
-				G_WHIP_MSG "The upload will contain the following command outputs:
+			G_WHIP_MSG "The upload will contain the following command outputs:
 \n$(printf "\t- %s\n" "${aCOMMAND_LIST[@]}")
 \nIt will contain as well the following files and directories:
 \n$(printf "\t- %s\n" "${aFILE_LIST[@]}")"
-
-			fi
-
-		else
-
-			exit 0
 
 		fi
 
 	done
 
-	if (( $INPUT == 1 )); then
+	if [[ $INPUT == 1 ]]; then
 
 		# Generate 7z bug report file
 		Generate_Upload_File
 
-	elif (( $INPUT == -1 )); then
+	elif [[ $INPUT == -1 ]]; then
 
 		# Send empty file to clear already uploaded bug report
 		> "$UPLOAD_FILENAME"
