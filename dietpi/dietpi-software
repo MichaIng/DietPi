@@ -37,7 +37,7 @@ Available commands:
 	readonly FP_INSTALLED_FILE='/boot/dietpi/.installed'
 	readonly FP_INSTALLED_FILE_TMP='.installed'
 
-	# Used to set user/personal data directories (eg: usbdrive)
+	# Used to set user/personal data directories (e.g.: usbdrive)
 	FP_DIETPI_DEDICATED_USBDRIVE=
 
 	Write_InstallFileList(){
@@ -915,7 +915,8 @@ DietPi-Software will decrypt and use it for software installs. You can change it
 		aSOFTWARE_ONLINEDOC_URL[$software_id]='p=27577#p27577'
 		aSOFTWARE_REQUIRES_GIT[$software_id]=1
 		# FFmpeg required on ARM, x86_64 binaries are shipped with the Bazarr repo: https://github.com/morpheus65535/bazarr/tree/master/bin/Linux
-		(( $G_HW_MODEL == 10 )) || aSOFTWARE_REQUIRES_FFMPEG[$software_id]=1
+		# build-essential required on ARM to assure all required Python modules build successfully: https://github.com/MichaIng/DietPi/pull/3796#issuecomment-706768323
+		(( $G_HW_MODEL == 10 )) || aSOFTWARE_REQUIRES_FFMPEG[$software_id]=1 aSOFTWARE_REQUIRES_BUILDESSENTIAL[$software_id]=1
 		# - Stretch due to Python >= 3.7.0 requirement
 		aSOFTWARE_AVAIL_G_DISTRO[$software_id,4]=0
 		#------------------
@@ -4510,7 +4511,7 @@ amvdec_vp9' > /etc/modules-load.d/dietpi-c4-kodi.conf
 			Banner_Installing
 
 			# Create jail.conf (backend = systemd) first, to prevent APT failure due to missing /var/log/auth.log: https://github.com/MichaIng/DietPi/issues/475#issuecomment-310873879
-			mkdir -p /etc/fail2ban
+			mkdir -p /etc/fail2ban/fail2ban.conf.d
 			[[ -f '/etc/fail2ban/jail.conf' ]] || cat << _EOF_ > /etc/fail2ban/jail.conf
 [DEFAULT]
 enabled = true
@@ -4532,6 +4533,11 @@ action = %(banaction)s[blocktype=blackhole]
 # See "filter.d/sshd.conf" for details.
 #mode = normal
 _EOF_
+			# Log to systemd by default
+			local logtarget='SYSOUT'
+			(( $G_DISTRO < 5 )) && logtarget='SYSLOG'
+			echo -e "[Definition]\nlogtarget = $logtarget" > /etc/fail2ban/fail2ban.d/97_dietpi.conf
+			unset -v logtarget
 
 			G_AGI python3-systemd fail2ban
 
@@ -4687,7 +4693,7 @@ _EOF_
 			# APT deps
 			G_AGI dnsutils net-tools bsdmainutils # https://github.com/pivpn/pivpn/blob/master/auto_install/install.sh#L43
 
-			G_EXEC_NOEXIT=1 G_EXEC ./install.bash || aSOFTWARE_INSTALL_STATE[$software_id]=0
+			G_EXEC_OUTPUT=1 G_EXEC_NOEXIT=1 G_EXEC ./install.bash || aSOFTWARE_INSTALL_STATE[$software_id]=0
 			G_EXEC_NOHALT=1 G_EXEC rm install.bash
 
 		fi
@@ -6271,7 +6277,7 @@ Mycroft AI requires at least 2 GiB memory on first start. We will now increase y
 			local ha_user='homeassistant'
 			local ha_home="/home/$ha_user"
 			local ha_pyenv_activation=". $ha_home/pyenv-activate.sh"
-			local ha_python_version='3.8.5'
+			local ha_python_version='3.8.6'
 
 			G_DIETPI-NOTIFY 2 "Home Assistant user:  $ha_user"
 			G_DIETPI-NOTIFY 2 "Home Assistent home:  $ha_home"
@@ -6293,10 +6299,10 @@ Mycroft AI requires at least 2 GiB memory on first start. We will now increase y
 			(( $G_HW_ARCH == 10 )) || DEPS_LIST+=' libjpeg-dev' # Pillow compiling on ARM
 
 			# Install pyenv to $ha_home
-			mkdir -p $ha_home
+			G_EXEC mkdir -p $ha_home
 			Download_Install 'https://github.com/pyenv/pyenv/archive/master.tar.gz'
-			mv pyenv-master $ha_home/.pyenv
-			chown -R $ha_user:$ha_user $ha_home
+			G_EXEC mv pyenv-master $ha_home/.pyenv
+			G_EXEC chown -R $ha_user:$ha_user $ha_home
 
 			# Generate script to activate pyenv: This must be sourced from the originating shell, hence it does not require execute permissions.
 			echo "#!/bin/dash
@@ -6324,12 +6330,12 @@ exec pip3 install homeassistant"
 			echo "#!/bin/dash
 $ha_pyenv_activation
 exec hass -c '/mnt/dietpi_userdata/homeassistant'" > $ha_home/homeassistant-start.sh
-			chmod +x $ha_home/homeassistant-start.sh
+			G_EXEC chmod +x $ha_home/homeassistant-start.sh
 
 			# Generate script to update HA within pyenv
 			echo "#!/bin/dash
 exec sudo -u $ha_user dash -c '$ha_pyenv_activation; exec pip3 install -U homeassistant'" > $ha_home/homeassistant-update.sh
-			chmod +x $ha_home/homeassistant-update.sh
+			G_EXEC chmod +x $ha_home/homeassistant-update.sh
 
 		fi
     
@@ -6365,7 +6371,7 @@ exec sudo -u $ha_user dash -c '$ha_pyenv_activation; exec pip3 install -U homeas
 
 	Install_Linux_Software(){
 
-		local software_id=-1
+		local software_id
 
 		software_id=5 # ALSA
 		if (( ${aSOFTWARE_INSTALL_STATE[$software_id]} == 1 )); then
@@ -6771,7 +6777,7 @@ exec sudo -u $ha_user dash -c '$ha_pyenv_activation; exec pip3 install -U homeas
 			systemctl is-active dietpi-ramlog > /dev/null && acommand=('systemctl' 'stop' 'dietpi-ramlog')
 			G_EXEC_DESC='Storing /var/log metadata to disk' G_EXEC "${acommand[@]}"
 			unset -v acommand
-			findmnt /var/log > /dev/null && G_EXEC_DESC='Unmounting /var/log' G_EXEC umount -R /var/log
+			findmnt /var/log > /dev/null && G_EXEC_DESC='Unmounting /var/log' G_EXEC_NOHALT=1 G_EXEC umount -R /var/log
 			G_EXEC_DESC='Cleaning /var/log mountpoint' G_EXEC rm -Rf /var/log/{,.??,.[^.]}*
 			G_EXEC_DESC='Mounting tmpfs to /var/log' G_EXEC mount /var/log
 			G_EXEC_DESC='Restoring metadata to /var/log tmpfs' G_EXEC systemctl start dietpi-ramlog
@@ -7022,10 +7028,7 @@ exec sudo -u $ha_user dash -c '$ha_pyenv_activation; exec pip3 install -U homeas
 	# Configure marked software titles
 	Install_Apply_Configs(){
 
-		# Copy/Set optimised Software settings.
-		# Set install states to 2 (installed).
-
-		local software_id=-1
+		local software_id
 
 		software_id=23 # LXDE
 		if (( ${aSOFTWARE_INSTALL_STATE[$software_id]} == 1 )); then
@@ -7040,10 +7043,13 @@ exec sudo -u $ha_user dash -c '$ha_pyenv_activation; exec pip3 install -U homeas
 			G_THREAD_START curl -sSfL https://raw.githubusercontent.com/MichaIng/DietPi/$G_GITBRANCH/.conf/desktop/lxde/panel -o /root/.config/lxpanel/LXDE/panels/panel
 
 			# Remove LXRandR menu item (monitor configuration tool as we set res in dietpi-config)
-			[[ -f '/usr/share/applications/lxrandr.desktop' ]] && rm /usr/share/applications/lxrandr.desktop
+			[[ -f '/usr/share/applications/lxrandr.desktop' ]] && G_EXEC rm /usr/share/applications/lxrandr.desktop
 
 			# Disable trash
-			G_CONFIG_INJECT 'use_trash=' 'use_trash=0' /etc/xdg/libfm/libfm.conf
+			G_CONFIG_INJECT 'use_trash=' 'use_trash=0' /etc/xdg/libfm/libfm.conf '\[config\]'
+
+			# Execute desktop icons and executable files directly without asking what to do
+			G_CONFIG_INJECT 'quick_exec=' 'quick_exec=1' /etc/xdg/libfm/libfm.conf '\[config\]'
 
 			# Firefox optimisations
 			#	??? These keep adding new entries, ignore existing entry???
@@ -7055,7 +7061,7 @@ exec sudo -u $ha_user dash -c '$ha_pyenv_activation; exec pip3 install -U homeas
 			Create_Desktop_Shared_Items
 
 			# File manager desktop icon
-			ln -sf /usr/share/applications/pcmanfm.desktop /root/Desktop/pcmanfm.desktop
+			G_EXEC ln -sf /usr/share/applications/pcmanfm.desktop /root/Desktop/pcmanfm.desktop
 
 			G_THREAD_WAIT
 
@@ -7112,31 +7118,16 @@ exec sudo -u $ha_user dash -c '$ha_pyenv_activation; exec pip3 install -U homeas
 
 			Banner_Configuration
 
-			# Apache2 confs
+			# Config
 			G_BACKUP_FP /etc/apache2/apache2.conf
 			dps_index=$software_id Download_Install 'apache2.conf' /etc/apache2/apache2.conf
-			cat << _EOF_ > /etc/apache2/sites-available/000-default.conf
+			cat << '_EOF_' > /etc/apache2/sites-available/000-default.conf
 <VirtualHost *:80>
-	ServerAdmin webmaster@localhost
 	DocumentRoot /var/www
-
-	ErrorLog \${APACHE_LOG_DIR}/error.log
-	#CustomLog \${APACHE_LOG_DIR}/access.log combined
+	ErrorLog ${APACHE_LOG_DIR}/error.log
+	#CustomLog ${APACHE_LOG_DIR}/access.log combined
 </VirtualHost>
 _EOF_
-
-			cat << _EOF_ > /etc/apache2/mods-available/mpm_event.conf
-<IfModule mpm_event_module>
-	StartServers		$G_HW_CPU_CORES
-	MinSpareThreads		1
-	MaxSpareThreads		8
-	ThreadLimit		16
-	ThreadsPerChild		4
-	MaxRequestWorkers	50
-	MaxConnectionsPerChild	0
-</IfModule>
-_EOF_
-
 			cat << _EOF_ > /etc/apache2/mods-available/mpm_prefork.conf
 <IfModule mpm_prefork_module>
 	StartServers		$G_HW_CPU_CORES
@@ -7146,25 +7137,12 @@ _EOF_
 	MaxConnectionsPerChild	0
 </IfModule>
 _EOF_
-
-			cat << _EOF_ > /etc/apache2/mods-available/mpm_worker.conf
-<IfModule mpm_worker_module>
-	StartServers		$G_HW_CPU_CORES
-	MinSpareThreads		1
-	MaxSpareThreads		8
-	ThreadLimit		16
-	ThreadsPerChild		4
-	MaxRequestWorkers	50
-	MaxConnectionsPerChild	0
-</IfModule>
-_EOF_
-
-			# Use /var/www as default webroot
-			[[ -f '/var/www/html/index.html' ]] && mv /var/www/html/index.html /var/www/
-			rmdir --ignore-fail-on-non-empty /var/www/html
+			# Webroot
+			[[ -f '/var/www/html/index.html' ]] && G_EXEC mv /var/www/html/index.html /var/www/
+			G_EXEC rmdir --ignore-fail-on-non-empty /var/www/html
 
 			# Change error log level
-			sed -i '/LogLevel[[:blank:]]/c\	LogLevel error' /etc/apache2/sites-available/*
+			G_EXEC sed -i '/LogLevel[[:blank:]]/c\	LogLevel error' /etc/apache2/sites-available/*
 
 		fi
 
@@ -7174,22 +7152,22 @@ _EOF_
 			Banner_Configuration
 
 			# Custom confs, included by sites-enabled/default within server directive, while nginx/(conf.d|sites-enabled) is included by nginx.conf outside server directive
-			mkdir -p /etc/nginx/sites-dietpi
+			G_EXEC mkdir -p /etc/nginx/sites-dietpi
 
 			G_BACKUP_FP /etc/nginx/nginx.conf
 			dps_index=$software_id Download_Install 'nginx.conf' /etc/nginx/nginx.conf
 			# Adjust socket name to PHP version
-			sed -i "s#/run/php/php.*-fpm.sock#/run/php/$PHP_NAME-fpm.sock#g" /etc/nginx/nginx.conf
+			G_EXEC sed -i "s#/run/php/php.*-fpm.sock#/run/php/$PHP_NAME-fpm.sock#g" /etc/nginx/nginx.conf
 
 			# CPU core count
-			sed -i "/worker_processes/c\worker_processes $G_HW_CPU_CORES;" /etc/nginx/nginx.conf
+			G_EXEV sed -i "/worker_processes/c\worker_processes $G_HW_CPU_CORES;" /etc/nginx/nginx.conf
 
 			# Default site
 			dps_index=$software_id Download_Install 'nginx.default' /etc/nginx/sites-available/default
 
-			# Nginx index page
-			[[ -f '/var/www/html/index.nginx-debian.html' ]] && mv /var/www/html/index.nginx-debian.html /var/www/
-			rmdir --ignore-fail-on-non-empty /var/www/html
+			# Webroot
+			[[ -f '/var/www/html/index.nginx-debian.html' ]] && G_EXEC mv /var/www/html/index.nginx-debian.html /var/www/
+			G_EXEC rmdir --ignore-fail-on-non-empty /var/www/html
 
 		fi
 
@@ -7205,31 +7183,12 @@ _EOF_
 			# Webroot
 			G_CONFIG_INJECT 'server.document-root' 'server.document-root = "/var/www"' /etc/lighttpd/lighttpd.conf
 			# - Move default page
-			[[ -f '/var/www/html/index.lighttpd.html' ]] && mv /var/www/html/index.lighttpd.html /var/www/
-			rmdir --ignore-fail-on-non-empty /var/www/html
+			[[ -f '/var/www/html/index.lighttpd.html' ]] && G_EXEC mv /var/www/html/index.lighttpd.html /var/www/
+			G_EXEC rmdir --ignore-fail-on-non-empty /var/www/html
 
 			# Fix in case Lighttpd got updated to Buster version (on ARMv6 due to PHP7.3 libssl1.1 depedency)
 			# - "create-mime.assign.pl" has been renamed to "create-mime.conf.pl"
-			[[ -f '/usr/share/lighttpd/create-mime.assign.pl' ]] || sed -i 's/create-mime\.assign\.pl/create-mime.conf.pl/g' /etc/lighttpd/lighttpd.conf
-
-			# Disable all URL parsing options, which break PHP applications where $_GET is automatically decoded (a second time) and other web applications which expect query strings as they were entered:
-			# - https://github.com/nextcloud/server/issues/17065
-			# - https://redmine.lighttpd.net/projects/lighttpd/wiki/Server_http-parseoptsDetails
-			sed -i '/server.http-parseopts/s/"enable"/"disable"/g' /etc/lighttpd/lighttpd.conf
-			sed -i '/"url-normalize"/s/"enable"/"disable"/g' /etc/lighttpd/lighttpd.conf
-			sed -i '/"url-normalize-unreserved"/s/"enable"/"disable"/g' /etc/lighttpd/lighttpd.conf
-			sed -i '/"url-normalize-required"/s/"enable"/"disable"/g' /etc/lighttpd/lighttpd.conf
-			sed -i '/"url-ctrls-reject"/s/"enable"/"disable"/g' /etc/lighttpd/lighttpd.conf
-			sed -i '/"url-path-backslash-trans"/s/"enable"/"disable"/g' /etc/lighttpd/lighttpd.conf
-			sed -i '/"url-path-2f-decode"/s/"enable"/"disable"/g' /etc/lighttpd/lighttpd.conf
-			sed -i '/"url-path-2f-reject"/s/"enable"/"disable"/g' /etc/lighttpd/lighttpd.conf
-			sed -i '/"url-path-dotseg-remove"/s/"enable"/"disable"/g' /etc/lighttpd/lighttpd.conf
-			sed -i '/"url-path-dotseg-reject"/s/"enable"/"disable"/g' /etc/lighttpd/lighttpd.conf
-			sed -i '/"url-query-20-plus"/s/"enable"/"disable"/g' /etc/lighttpd/lighttpd.conf
-			sed -i '/"header-strict"/s/"enable"/"disable"/g' /etc/lighttpd/lighttpd.conf
-			sed -i '/"host-strict/s/"enable"/"disable"/g' /etc/lighttpd/lighttpd.conf
-			sed -i '/"host-normalize"/s/"enable"/"disable"/g' /etc/lighttpd/lighttpd.conf
-			sed -i '/"method-get-body"/s/"enable"/"disable"/g' /etc/lighttpd/lighttpd.conf
+			[[ -f '/usr/share/lighttpd/create-mime.assign.pl' ]] || G_EXEC sed -i 's/create-mime\.assign\.pl/create-mime.conf.pl/g' /etc/lighttpd/lighttpd.conf
 
 			# Configure fastcgi for PHP-FPM
 			cat << _EOF_ > /etc/lighttpd/conf-available/15-fastcgi-php.conf
@@ -7246,8 +7205,8 @@ fastcgi.server += ( ".php" =>
 )
 _EOF_
 			# - Enable modules
-			lighty-enable-mod fastcgi
-			lighty-enable-mod fastcgi-php
+			G_EXEC lighty-enable-mod fastcgi
+			G_EXEC lighty-enable-mod fastcgi-php
 
 		fi
 
@@ -7262,7 +7221,7 @@ _EOF_
 				# Base
 				sed -i '/cgi.fix_pathinfo=/c\cgi.fix_pathinfo=1' "$FP_PHP_BASE_DIR"/fpm/php.ini
 
-				# Optimizations based on total cores
+				# Optimisations based on total cores
 				sed -i "/pm.max_children = /c\pm.max_children = $(( $G_HW_CPU_CORES * 3 ))" "$FP_PHP_BASE_DIR"/fpm/pool.d/www.conf
 				sed -i "/pm.start_servers = /c\pm.start_servers = $G_HW_CPU_CORES" "$FP_PHP_BASE_DIR"/fpm/pool.d/www.conf
 				sed -i "/pm.min_spare_servers = /c\pm.min_spare_servers = $G_HW_CPU_CORES" "$FP_PHP_BASE_DIR"/fpm/pool.d/www.conf
@@ -10667,7 +10626,7 @@ _EOF_
 				# Add to /etc/lighttpd/lighttpd.conf
 				if ! grep -q '^#RUTORRENT_DIETPI' /etc/lighttpd/lighttpd.conf; then
 
-					cat << _EOF_ >> /etc/lighttpd/lighttpd.conf
+					cat << '_EOF_' >> /etc/lighttpd/lighttpd.conf
 #RUTORRENT_DIETPI
 server.modules += ( "mod_fastcgi" )
 server.modules += ( "mod_scgi" )
@@ -10996,7 +10955,7 @@ _EOF_
 
 			# Service: https://github.com/pymedusa/Medusa/blob/master/runscripts/init.systemd
 			G_EXEC cp /mnt/dietpi_userdata/medusa/runscripts/init.systemd /etc/systemd/system/medusa.service
-			G_EXEC sed -i 's/^[[:blank:]]Group=/#Group=/' /etc/systemd/system/medusa.service
+			G_EXEC sed -i 's/^[[:blank:]]*Group=/#Group=/' /etc/systemd/system/medusa.service
 			G_CONFIG_INJECT 'ExecStart=' "ExecStart=$(command -v python3) /mnt/dietpi_userdata/medusa/start.py -q --nolaunch --datadir=/mnt/dietpi_userdata/medusa" /etc/systemd/system/medusa.service
 
 			# Permissions
@@ -12737,7 +12696,7 @@ _EOF_
 	Uninstall_Software(){
 
 		# NB: systemctl daemon-reload is executed at the end of this function
-		local software_id=-1
+		local software_id
 
 		software_id=23 # LXDE
 		if (( ${aSOFTWARE_INSTALL_STATE[$software_id]} == -1 )); then
@@ -14095,16 +14054,16 @@ _EOF_
 
 			Banner_Uninstalling
 			G_AGP fail2ban
-			apt-mark auto python3-systemd
-			[[ -d '/etc/fail2ban' ]] && rm -R /etc/fail2ban
+			dpkg-query -s python3-systemd &> /dev/null && G_EXEC apt-mark auto python3-systemd
+			[[ -d '/etc/fail2ban' ]] && G_EXEC_NOHALT=1 G_EXEC rm -R /etc/fail2ban
 
 		fi
 
-		software_id=64
+		software_id=64 # phpSysInfo
 		if (( ${aSOFTWARE_INSTALL_STATE[$software_id]} == -1 )); then
 
 			Banner_Uninstalling
-			rm -R /var/www/phpsysinfo
+			[[ -d '/var/www/phpsysinfo' ]] && G_EXEC_NOHALT=1 G_EXEC rm -R /var/www/phpsysinfo
 
 		fi
 
@@ -15231,11 +15190,24 @@ _EOF_
 
 			Banner_Uninstalling
 
-			sed -i '/[[:blank:]]\/var\/log[[:blank:]]/d' /etc/fstab
+			G_EXEC sed -i '/[[:blank:]]\/var\/log[[:blank:]]/d' /etc/fstab
 
-			cat << _EOF_ > /etc/systemd/system/dietpi-ramlog_disable.service
+			G_EXEC mkdir -p /var/lib/dietpi/dietpi-ramlog
+			cat << '_EOF_' > /var/lib/dietpi/dietpi-ramlog/disable.sh
+#!/bin/dash
+{
+	systemctl disable --now dietpi-ramlog
+	rm -R /var/tmp/dietpi/logs/dietpi-ramlog_store
+	systemctl disable dietpi-ramlog_disable
+	rm /etc/systemd/system/dietpi-ramlog_disable.service
+	rm /var/lib/dietpi/dietpi-ramlog/disable.sh
+}
+_EOF_
+			G_EXEC chmod +x /var/lib/dietpi/dietpi-ramlog/disable.sh
+
+			cat << '_EOF_' > /etc/systemd/system/dietpi-ramlog_disable.service
 [Unit]
-Description=DietPi-RAMlog_disable | Disables DietPi-RAMlog after it has restored log metadata back to /var/log
+Description=DietPi-RAMlog_disable
 After=dietpi-ramlog.service
 Before=dietpi-preboot.service rsyslog.service syslog.service
 
@@ -15247,22 +15219,8 @@ ExecStart=/bin/dash -c '/var/lib/dietpi/dietpi-ramlog/disable.sh > /var/tmp/diet
 [Install]
 WantedBy=local-fs.target
 _EOF_
-			systemctl daemon-reload
-			systemctl enable dietpi-ramlog_disable
-
-			mkdir -p /var/lib/dietpi/dietpi-ramlog
-			cat << _EOF_ > /var/lib/dietpi/dietpi-ramlog/disable.sh
-#!/bin/dash
-{
-	systemctl stop dietpi-ramlog
-	systemctl disable dietpi-ramlog
-	rm -R /var/tmp/dietpi/logs/dietpi-ramlog_store
-	systemctl disable dietpi-ramlog_disable
-	rm /etc/systemd/system/dietpi-ramlog_disable.service
-	rm /var/lib/dietpi/dietpi-ramlog/disable.sh
-}
-_EOF_
-			chmod +x /var/lib/dietpi/dietpi-ramlog/disable.sh
+			G_EXEC systemctl daemon-reload
+			G_EXEC systemctl enable dietpi-ramlog_disable
 
 		fi
 

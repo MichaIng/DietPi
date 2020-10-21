@@ -6,7 +6,7 @@
 	# Detect root device
 	ROOT_DEV=$(findmnt -no SOURCE /)
 
-	# Detect partition and parent drive for supported naming schemes:
+	# Detect root partition and parent drive for supported naming schemes:
 	# - SCSI/SATA:	/dev/sd[a-z][1-9]
 	# - IDE:	/dev/hd[a-z][1-9]
 	# - eMMC:	/dev/mmcblk[0-9]p[1-9]
@@ -29,7 +29,7 @@
 
 	fi
 
-	# Maximize partition, only if drive actually contains a partition table
+	# Maximize root partition if drive contains a partition table
 	if [[ $ROOT_PART == [1-9] ]]; then
 
 		# Failsafe: Sync changes to disk before touching partitions
@@ -38,11 +38,12 @@
 		# GPT partition table: Move backup GPT data structures to the end of the disk
 		sfdisk -l "$ROOT_DRIVE" | grep -q '^Disklabel type: gpt$' && sgdisk -e "$ROOT_DRIVE"
 
-		# Maximize partition size
+		# Maximize root partition size
 		sfdisk --no-reread --no-tell-kernel -fN"$ROOT_PART" "$ROOT_DRIVE" <<< ',+'
 
-		# Reread partition table
+		# Inform kernel about changed partition table, be failsafe by using two differet methods
 		partprobe "$ROOT_DRIVE"
+		partx -u "$ROOT_DRIVE"
 
 	else
 
@@ -50,7 +51,7 @@
 
 	fi
 
-	# Maximize file system
+	# Maximize root file system
 	resize2fs "$ROOT_DEV"
 
 	exit 0
