@@ -30,34 +30,6 @@ Available commands:
 	G_CHECK_ROOTFS_RW
 	G_INIT
 	# Import DietPi-Globals ---------------------------------------------------------------
-  
-  # Configuration Creation
-  CONFIG_CREATE(){
-    local file=$1 
-    local service=$2 
-    local timeout=${3:-15} 
-    local content=$CONFIG_CREATE_CONTENT 
-    unset -v CONFIG_CREATE_CONTENT 
-    if [[ -f $file ]] && { [[ ! $content ]] || grep -q "$content" "$file"; } && return 0
-		then
-      G_EXEC_DESC="Starting {$service^} to pre-create config file" G_EXEC systemctl start "$service" 
-      local i=0 
-      until [[ -f $file ]] && { [[ ! $content ]] || grep -q "$content" "$file"; } || [[ $i -ge $timeout ]] 
-      do 
-         ((i++)) 
-         G_DIETPI-NOTIFY -2 "Waiting for {$service^} config file to be created ($i/$timeout)" 
-         sleep 1 
-      done 
-    fi
-    sleep 1 
-    G_EXEC_NOHALT=1 G_EXEC systemctl stop "$service" 
-    sleep 1
-    if [[ -f $file ]] && { [[ ! $content ]] || grep -q "$content" "$file"; } && return 0
-    then
-      G_DIETPI-NOTIFY 1 "Waiting for {$service^} config file to be created timed out, skipping pre-configuration"
-      return 1
-    fi
-  }
 
 	#/////////////////////////////////////////////////////////////////////////////////////
 	# Filepath
@@ -3015,6 +2987,39 @@ DietPi-Software will decrypt and use it for software installs. You can change it
 			G_EXEC useradd "$options" ${group_primary:+-g "$group_primary"} ${groups:+-G "$groups"} -d "${home:-/nonexistent}" -s "${shell:-$(command -v nologin)}" "$user"
 			[[ $password ]] && G_EXEC_DESC="Applying user password: \e[33m${password//?/*}\e[0m" G_EXEC eval "chpasswd <<< '$user:$password'"
 		fi
+	}
+
+	# Start a service and wait for a default config file to be created.
+	Create_Config()
+	{
+		local file=$1 service=$2
+		local timeout=${3:-15} # Optional
+		local content=$CREATE_CONFIG_CONTENT # Optional
+		unset -v CREATE_CONFIG_CONTENT
+
+		# If file exists already and contains required content, continue install
+		[[ -f $file ]] && { [[ ! $content ]] || grep -q "$content" "$file"; } && return 0
+
+		# File does not exist or does not contain required content: Start service
+		G_EXEC_DESC="Starting ${service^} to pre-create config file" G_EXEC systemctl start "$service"
+
+		# Wait for max $timeout seconds until config file has been created and required content added, if given
+		local i=0
+		until [[ -f $file ]] && { [[ ! $content ]] || grep -q "$content" "$file"; } || (( $i >= $timeout ))
+		do
+			((i++))
+			G_DIETPI-NOTIFY -2 "Waiting for ${service^} config file to be created ($i/$timeout)"
+			sleep 1
+		done
+		sleep 1
+		G_EXEC_NOHALT=1 G_EXEC systemctl stop "$service"
+		sleep 1
+
+		# If file exists already and contains required content, continue install
+		[[ -f $file ]] && { [[ ! $content ]] || grep -q "$content" "$file"; } && return 0
+
+		G_DIETPI-NOTIFY 1 "Waiting for ${service^} config file timed out, skipping pre-configuration"
+		return 1
 	}
 
 	# Run marked software installs
@@ -11749,39 +11754,29 @@ _EOF_
 			G_EXEC chown -R bazarr:dietpi /mnt/dietpi_userdata/bazarr /opt/bazarr /var/log/bazarr
 
 			# On fresh install, pre-configure for Sonarr and Radarr when found
-			if (( ${aSOFTWARE_INSTALL_STATE[144]} + ${aSOFTWARE_INSTALL_STATE[145]} > 0 ))
+			if (( ${aSOFTWARE_INSTALL_STATE[144]} + ${aSOFTWARE_INSTALL_STATE[145]} > 0 )) && Create_Config /mnt/dietpi_userdata/bazarr/config/config.ini bazarr 25
 			then
-				if CONFIG_CREATE /mnt/dietpi_userdata/bazarr/config/config.ini bazarr 25
+				# Sonarr
+				if (( ${aSOFTWARE_INSTALL_STATE[144]} > 0 )) && CREATE_CONFIG_CONTENT='ApiKey' Create_Config /mnt/dietpi_userdata/sonarr/config.xml sonarr 25
 				then
-					# Sonarr
-					if (( ${aSOFTWARE_INSTALL_STATE[144]} > 0 ))
-					then
-            CONFIG_CREATE_CONTENT='ApiKey'
-						if [[ -f '/mnt/dietpi_userdata/sonarr/config.xml' ]] || CONFIG_CREATE /mnt/dietpi_userdata/sonarr/config.xml sonarr 25
-						then
-							local port=$(sed -nE '/<Port>[0-9]+<\/Port>/{s/^.*<Port>([0-9]+)<\/Port>.*$/\1/p;q}' /mnt/dietpi_userdata/sonarr/config.xml)
-							local apikey=$(sed -nE '/<ApiKey>.+<\/ApiKey>/{s/^.*<ApiKey>(.+)<\/ApiKey>.*$/\1/p;q}' /mnt/dietpi_userdata/sonarr/config.xml)
-							G_EXEC sed -i '/\[sonarr\]/,/^$/s/^ip = .*$/ip = 127.0.0.1/' /mnt/dietpi_userdata/bazarr/config/config.ini
-							G_EXEC sed -i "/\[sonarr\]/,/^$/s/^port = .*$/port = $port/" /mnt/dietpi_userdata/bazarr/config/config.ini
-							G_EXEC sed -i '/\[sonarr\]/,/^$/s/^base_url = .*$/base_url = \//' /mnt/dietpi_userdata/bazarr/config/config.ini
-							G_EXEC sed -i "/\[sonarr\]/,/^$/s/^apikey = .*$/apikey = $apikey/" /mnt/dietpi_userdata/bazarr/config/config.ini
-							G_CONFIG_INJECT 'use_sonarr[[:blank:]]*=' 'use_sonarr = True' /mnt/dietpi_userdata/bazarr/config/config.ini '\[general\]'
-						fi
-					fi
-					# Radarr
-					if (( ${aSOFTWARE_INSTALL_STATE[145]} > 0 ))
-					then
-            if [[ -f '/mnt/dietpi_userdata/radarr/config.xml' ]] || CONFIG_CREATE /mnt/dietpi_userdata/radarr/config.xml radarr 25
-						then
-							local port=$(sed -nE '/<Port>[0-9]+<\/Port>/{s/^.*<Port>([0-9]+)<\/Port>.*$/\1/p;q}' /mnt/dietpi_userdata/radarr/config.xml)
-							local apikey=$(sed -nE '/<ApiKey>.+<\/ApiKey>/{s/^.*<ApiKey>(.+)<\/ApiKey>.*$/\1/p;q}' /mnt/dietpi_userdata/radarr/config.xml)
-							G_EXEC sed -i '/\[radarr\]/,/^$/s/^ip = .*$/ip = 127.0.0.1/' /mnt/dietpi_userdata/bazarr/config/config.ini
-							G_EXEC sed -i "/\[radarr\]/,/^$/s/^port = .*$/port = $port/" /mnt/dietpi_userdata/bazarr/config/config.ini
-							G_EXEC sed -i '/\[radarr\]/,/^$/s/^base_url = .*$/base_url = \//' /mnt/dietpi_userdata/bazarr/config/config.ini
-							G_EXEC sed -i "/\[radarr\]/,/^$/s/^apikey = .*$/apikey = $apikey/" /mnt/dietpi_userdata/bazarr/config/config.ini
-							G_CONFIG_INJECT 'use_radarr[[:blank:]]*=' 'use_radarr = True' /mnt/dietpi_userdata/bazarr/config/config.ini '\[general\]'
-						fi
-					fi
+					local port=$(sed -nE '/<Port>[0-9]+<\/Port>/{s/^.*<Port>([0-9]+)<\/Port>.*$/\1/p;q}' /mnt/dietpi_userdata/sonarr/config.xml)
+					local apikey=$(sed -nE '/<ApiKey>.+<\/ApiKey>/{s/^.*<ApiKey>(.+)<\/ApiKey>.*$/\1/p;q}' /mnt/dietpi_userdata/sonarr/config.xml)
+					G_EXEC sed -i '/\[sonarr\]/,/^$/s/^ip = .*$/ip = 127.0.0.1/' /mnt/dietpi_userdata/bazarr/config/config.ini
+					G_EXEC sed -i "/\[sonarr\]/,/^$/s/^port = .*$/port = $port/" /mnt/dietpi_userdata/bazarr/config/config.ini
+					G_EXEC sed -i '/\[sonarr\]/,/^$/s/^base_url = .*$/base_url = \//' /mnt/dietpi_userdata/bazarr/config/config.ini
+					G_EXEC sed -i "/\[sonarr\]/,/^$/s/^apikey = .*$/apikey = $apikey/" /mnt/dietpi_userdata/bazarr/config/config.ini
+					G_CONFIG_INJECT 'use_sonarr[[:blank:]]*=' 'use_sonarr = True' /mnt/dietpi_userdata/bazarr/config/config.ini '\[general\]'
+				fi
+				# Radarr
+				if (( ${aSOFTWARE_INSTALL_STATE[145]} > 0 )) && CREATE_CONFIG_CONTENT='ApiKey' Create_Config /mnt/dietpi_userdata/radarr/config.xml radarr 25
+				then
+					local port=$(sed -nE '/<Port>[0-9]+<\/Port>/{s/^.*<Port>([0-9]+)<\/Port>.*$/\1/p;q}' /mnt/dietpi_userdata/radarr/config.xml)
+					local apikey=$(sed -nE '/<ApiKey>.+<\/ApiKey>/{s/^.*<ApiKey>(.+)<\/ApiKey>.*$/\1/p;q}' /mnt/dietpi_userdata/radarr/config.xml)
+					G_EXEC sed -i '/\[radarr\]/,/^$/s/^ip = .*$/ip = 127.0.0.1/' /mnt/dietpi_userdata/bazarr/config/config.ini
+					G_EXEC sed -i "/\[radarr\]/,/^$/s/^port = .*$/port = $port/" /mnt/dietpi_userdata/bazarr/config/config.ini
+					G_EXEC sed -i '/\[radarr\]/,/^$/s/^base_url = .*$/base_url = \//' /mnt/dietpi_userdata/bazarr/config/config.ini
+					G_EXEC sed -i "/\[radarr\]/,/^$/s/^apikey = .*$/apikey = $apikey/" /mnt/dietpi_userdata/bazarr/config/config.ini
+					G_CONFIG_INJECT 'use_radarr[[:blank:]]*=' 'use_radarr = True' /mnt/dietpi_userdata/bazarr/config/config.ini '\[general\]'
 				fi
 			fi
 		fi
