@@ -2991,6 +2991,39 @@ DietPi-Software will decrypt and use it for software installs. You can change it
 		fi
 	}
 
+	# Start a service and wait for a default config file to be created.
+	Create_Config()
+	{
+		local file=$1 service=$2
+		local timeout=${3:-15} # Optional
+		local content=$CREATE_CONFIG_CONTENT # Optional
+		unset -v CREATE_CONFIG_CONTENT
+
+		# If file exists already and contains required content, continue install
+		[[ -f $file ]] && { [[ ! $content ]] || grep -q "$content" "$file"; } && return 0
+
+		# File does not exist or does not contain required content: Start service
+		G_EXEC_DESC="Starting ${service^} to pre-create config file" G_EXEC systemctl start "$service"
+
+		# Wait for max $timeout seconds until config file has been created and required content added, if given
+		local i=0
+		until [[ -f $file ]] && { [[ ! $content ]] || grep -q "$content" "$file"; } || (( $i >= $timeout ))
+		do
+			((i++))
+			G_DIETPI-NOTIFY -2 "Waiting for ${service^} config file to be created ($i/$timeout)"
+			sleep 1
+		done
+		sleep 1
+		G_EXEC_NOHALT=1 G_EXEC systemctl stop "$service"
+		sleep 1
+
+		# If file exists already and contains required content, continue install
+		[[ -f $file ]] && { [[ ! $content ]] || grep -q "$content" "$file"; } && return 0
+
+		G_DIETPI-NOTIFY 1 "Waiting for ${service^} config file timed out, skipping pre-configuration"
+		return 1
+	}
+
 	# Run marked software installs
 	Install_Dietpi_Software(){
 
@@ -11722,85 +11755,29 @@ _EOF_
 			G_EXEC chown -R bazarr:dietpi /mnt/dietpi_userdata/bazarr /opt/bazarr /var/log/bazarr
 
 			# On fresh install, pre-configure for Sonarr and Radarr when found
-			if [[ ! -f '/mnt/dietpi_userdata/bazarr/config/config.ini' ]] && (( ${aSOFTWARE_INSTALL_STATE[144]} + ${aSOFTWARE_INSTALL_STATE[145]} > 0 ))
+			if (( ${aSOFTWARE_INSTALL_STATE[144]} + ${aSOFTWARE_INSTALL_STATE[145]} > 0 )) && Create_Config /mnt/dietpi_userdata/bazarr/config/config.ini bazarr 25
 			then
-				local timeout=15
-				(( $G_HW_ARCH > 2 )) || timeout=20
-				G_EXEC_DESC='Starting Bazarr to pre-create config file and pre-configure Sonarr and/or Radarr connection' G_EXEC systemctl start bazarr
-				local i=0
-				until [[ -f '/mnt/dietpi_userdata/bazarr/config/config.ini' || $i -ge $timeout ]]
-				do
-					((i++))
-					G_DIETPI-NOTIFY -2 "Waiting for Bazarr config file to be created ($i/$timeout)"
-					sleep 1
-				done
-				sleep 1
-				G_EXEC_NOHALT=1 G_EXEC systemctl stop bazarr
-				sleep 1
-				if [[ ! -f '/mnt/dietpi_userdata/bazarr/config/config.ini' ]]
+				# Sonarr
+				if (( ${aSOFTWARE_INSTALL_STATE[144]} > 0 )) && CREATE_CONFIG_CONTENT='ApiKey' Create_Config /mnt/dietpi_userdata/sonarr/config.xml sonarr 25
 				then
-					G_DIETPI-NOTIFY 1 'Waiting for Bazarr config file to be created timed out, skipping Sonarr and Radarr pre-configuration'
-				else
-					# Sonarr
-					if (( ${aSOFTWARE_INSTALL_STATE[144]} > 0 ))
-					then
-						if [[ ! -f '/mnt/dietpi_userdata/sonarr/config.xml' ]]
-						then
-							G_EXEC_DESC='Starting Sonarr to pre-create config file' G_EXEC systemctl start sonarr
-							i=0
-							until [[ -f '/mnt/dietpi_userdata/sonarr/config.xml' ]] && grep -q ApiKey /mnt/dietpi_userdata/sonarr/config.xml || (( $i >= $timeout ))
-							do
-								((i++))
-								G_DIETPI-NOTIFY -2 "Waiting for Sonarr config file to be created ($i/$timeout)"
-								sleep 1
-							done
-						fi
-						sleep 1
-						G_EXEC_NOHALT=1 G_EXEC systemctl stop sonarr
-						sleep 1
-						if [[ ! -f '/mnt/dietpi_userdata/sonarr/config.xml' ]]
-						then
-							G_DIETPI-NOTIFY 1 'Sonarr config file creation timed out, skipping Sonarr pre-configuration'
-						else
-							local port=$(sed -nE '/<Port>[0-9]+<\/Port>/{s/^.*<Port>([0-9]+)<\/Port>.*$/\1/p;q}' /mnt/dietpi_userdata/sonarr/config.xml)
-							local apikey=$(sed -nE '/<ApiKey>.+<\/ApiKey>/{s/^.*<ApiKey>(.+)<\/ApiKey>.*$/\1/p;q}' /mnt/dietpi_userdata/sonarr/config.xml)
-							G_EXEC sed -i '/\[sonarr\]/,/^$/s/^ip = .*$/ip = 127.0.0.1/' /mnt/dietpi_userdata/bazarr/config/config.ini
-							G_EXEC sed -i "/\[sonarr\]/,/^$/s/^port = .*$/port = $port/" /mnt/dietpi_userdata/bazarr/config/config.ini
-							G_EXEC sed -i '/\[sonarr\]/,/^$/s/^base_url = .*$/base_url = \//' /mnt/dietpi_userdata/bazarr/config/config.ini
-							G_EXEC sed -i "/\[sonarr\]/,/^$/s/^apikey = .*$/apikey = $apikey/" /mnt/dietpi_userdata/bazarr/config/config.ini
-							G_CONFIG_INJECT 'use_sonarr[[:blank:]]*=' 'use_sonarr = True' /mnt/dietpi_userdata/bazarr/config/config.ini '\[general\]'
-						fi
-					fi
-					# Radarr
-					if (( ${aSOFTWARE_INSTALL_STATE[145]} > 0 ))
-					then
-						if [[ ! -f '/mnt/dietpi_userdata/radarr/config.xml' ]]
-						then
-							G_EXEC_DESC='Starting Radarr to pre-create config file' G_EXEC systemctl start radarr
-							i=0
-							until [[ -f '/mnt/dietpi_userdata/radarr/config.xml' ]] && grep -q ApiKey /mnt/dietpi_userdata/radarr/config.xml || (( $i >= $timeout ))
-							do
-								((i++))
-								G_DIETPI-NOTIFY -2 "Waiting for Radarr config file to be created ($i/$timeout)"
-								sleep 1
-							done
-						fi
-						sleep 1
-						G_EXEC_NOHALT=1 G_EXEC systemctl stop radarr
-						sleep 1
-						if [[ ! -f '/mnt/dietpi_userdata/radarr/config.xml' ]]
-						then
-							G_DIETPI-NOTIFY 1 'Radarr config file creation timed out, skipping Radarr pre-configuration'
-						else
-							local port=$(sed -nE '/<Port>[0-9]+<\/Port>/{s/^.*<Port>([0-9]+)<\/Port>.*$/\1/p;q}' /mnt/dietpi_userdata/radarr/config.xml)
-							local apikey=$(sed -nE '/<ApiKey>.+<\/ApiKey>/{s/^.*<ApiKey>(.+)<\/ApiKey>.*$/\1/p;q}' /mnt/dietpi_userdata/radarr/config.xml)
-							G_EXEC sed -i '/\[radarr\]/,/^$/s/^ip = .*$/ip = 127.0.0.1/' /mnt/dietpi_userdata/bazarr/config/config.ini
-							G_EXEC sed -i "/\[radarr\]/,/^$/s/^port = .*$/port = $port/" /mnt/dietpi_userdata/bazarr/config/config.ini
-							G_EXEC sed -i '/\[radarr\]/,/^$/s/^base_url = .*$/base_url = \//' /mnt/dietpi_userdata/bazarr/config/config.ini
-							G_EXEC sed -i "/\[radarr\]/,/^$/s/^apikey = .*$/apikey = $apikey/" /mnt/dietpi_userdata/bazarr/config/config.ini
-							G_CONFIG_INJECT 'use_radarr[[:blank:]]*=' 'use_radarr = True' /mnt/dietpi_userdata/bazarr/config/config.ini '\[general\]'
-						fi
-					fi
+					local port=$(sed -nE '/<Port>[0-9]+<\/Port>/{s/^.*<Port>([0-9]+)<\/Port>.*$/\1/p;q}' /mnt/dietpi_userdata/sonarr/config.xml)
+					local apikey=$(sed -nE '/<ApiKey>.+<\/ApiKey>/{s/^.*<ApiKey>(.+)<\/ApiKey>.*$/\1/p;q}' /mnt/dietpi_userdata/sonarr/config.xml)
+					G_EXEC sed -i '/\[sonarr\]/,/^$/s/^ip = .*$/ip = 127.0.0.1/' /mnt/dietpi_userdata/bazarr/config/config.ini
+					G_EXEC sed -i "/\[sonarr\]/,/^$/s/^port = .*$/port = $port/" /mnt/dietpi_userdata/bazarr/config/config.ini
+					G_EXEC sed -i '/\[sonarr\]/,/^$/s/^base_url = .*$/base_url = \//' /mnt/dietpi_userdata/bazarr/config/config.ini
+					G_EXEC sed -i "/\[sonarr\]/,/^$/s/^apikey = .*$/apikey = $apikey/" /mnt/dietpi_userdata/bazarr/config/config.ini
+					G_CONFIG_INJECT 'use_sonarr[[:blank:]]*=' 'use_sonarr = True' /mnt/dietpi_userdata/bazarr/config/config.ini '\[general\]'
+				fi
+				# Radarr
+				if (( ${aSOFTWARE_INSTALL_STATE[145]} > 0 )) && CREATE_CONFIG_CONTENT='ApiKey' Create_Config /mnt/dietpi_userdata/radarr/config.xml radarr 25
+				then
+					local port=$(sed -nE '/<Port>[0-9]+<\/Port>/{s/^.*<Port>([0-9]+)<\/Port>.*$/\1/p;q}' /mnt/dietpi_userdata/radarr/config.xml)
+					local apikey=$(sed -nE '/<ApiKey>.+<\/ApiKey>/{s/^.*<ApiKey>(.+)<\/ApiKey>.*$/\1/p;q}' /mnt/dietpi_userdata/radarr/config.xml)
+					G_EXEC sed -i '/\[radarr\]/,/^$/s/^ip = .*$/ip = 127.0.0.1/' /mnt/dietpi_userdata/bazarr/config/config.ini
+					G_EXEC sed -i "/\[radarr\]/,/^$/s/^port = .*$/port = $port/" /mnt/dietpi_userdata/bazarr/config/config.ini
+					G_EXEC sed -i '/\[radarr\]/,/^$/s/^base_url = .*$/base_url = \//' /mnt/dietpi_userdata/bazarr/config/config.ini
+					G_EXEC sed -i "/\[radarr\]/,/^$/s/^apikey = .*$/apikey = $apikey/" /mnt/dietpi_userdata/bazarr/config/config.ini
+					G_CONFIG_INJECT 'use_radarr[[:blank:]]*=' 'use_radarr = True' /mnt/dietpi_userdata/bazarr/config/config.ini '\[general\]'
 				fi
 			fi
 		fi
