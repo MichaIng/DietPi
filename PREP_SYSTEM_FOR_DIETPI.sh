@@ -871,7 +871,7 @@ Currently installed: $G_DISTRO_NAME (ID: $G_DISTRO)"; then
 		#	Odroid XU3/XU4/MC1/HC1/HC2
 		elif (( $G_HW_MODEL == 11 )); then
 
-			G_AGI linux-image-4.14-armhf-odroid-xu4 meveric-keyring
+			G_AGI linux-image-5.4-armhf-odroid-xu4 meveric-keyring
 
 		#	ROCK Pi S (official Radxa Debian image)
 		elif (( $G_HW_MODEL == 73 )) && grep -q 'apt\.radxa\.com' /etc/apt/sources.list.d/*.list; then
