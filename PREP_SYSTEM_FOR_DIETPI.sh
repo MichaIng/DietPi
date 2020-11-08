@@ -1591,9 +1591,10 @@ _EOF_
 		elif (( $G_HW_MODEL < 10 )); then
 
 			# Scroll lock fix for RPi by Midwan: https://github.com/MichaIng/DietPi/issues/474#issuecomment-243215674
-			cat << _EOF_ > /etc/udev/rules.d/50-leds.rules
-ACTION=="add", SUBSYSTEM=="leds", ENV{DEVPATH}=="*/input*::scrolllock", ATTR{trigger}="kbd-scrollock"
-_EOF_
+			echo 'ACTION=="add", SUBSYSTEM=="leds", ENV{DEVPATH}=="*/input*::scrolllock", ATTR{trigger}="kbd-scrollock"' > /etc/udev/rules.d/50-leds.rules
+
+			# Apply minimum GPU memory split for server usage: This applies a custom dtoverlay to disable VCSM: https://github.com/MichaIng/DietPi/pull/3900
+			/boot/dietpi/func/dietpi-set_hardware gpumemsplit 16
 
 			# Disable RPi camera to add modules blacklist
 			/boot/dietpi/func/dietpi-set_hardware rpi-camera disable

@@ -25,7 +25,7 @@ $FP_SCRIPT	soundcard		target_card (non-matching name for reset to default). Add 
 $FP_SCRIPT	remoteir		odroid_remote/justboom_ir_remote # Odroid/RPi only
 $FP_SCRIPT	lcdpanel		target_panel (none to remove all)
 $FP_SCRIPT	headless		enable/disable
-$FP_SCRIPT	gpumemsplit		64/128/256 # RPi only
+$FP_SCRIPT	gpumemsplit		64/128/256... Range: 16-944, RPi only
 $FP_SCRIPT	rpi-camera		enable/disable
 $FP_SCRIPT	rpi-opengl		vc4-kms-v3d/vc4-kms-v3d-pi4/vc4-fkms-v3d/disable
 $FP_SCRIPT	rpi3_usb_boot		enable
@@ -206,15 +206,15 @@ _EOF_
 	#/////////////////////////////////////////////////////////////////////////////////////
 	# gpumemsplit
 	#/////////////////////////////////////////////////////////////////////////////////////
-	Gpu_Memory_Split_Main(){
-
+	Gpu_Memory_Split_Main()
+	{
 		(( $G_HW_MODEL > 9 )) && { Unsupported_Input_Name; return 1; } # Exit path for non-RPi
 
-		# Remove overridden "gpu_mem" setting
-		sed -i '/^[[:blank:]]*gpu_mem=/d' /boot/config.txt
-
 		# https://www.raspberrypi.org/documentation/configuration/config-txt/memory.md
-		if disable_error=1 G_CHECK_VALIDINT "$INPUT_DEVICE_VALUE" 16 944; then
+		if disable_error=1 G_CHECK_VALIDINT "$INPUT_DEVICE_VALUE" 16 944
+		then
+			# Remove overridden "gpu_mem" setting
+			grep -q '^[[:blank:]]*gpu_mem=' /boot/config.txt && G_EXEC sed -i '/^[[:blank:]]*gpu_mem=/d' /boot/config.txt
 
 			local gpu_mem=$INPUT_DEVICE_VALUE
 			G_CONFIG_INJECT 'gpu_mem_1024=' "gpu_mem_1024=$gpu_mem" /boot/config.txt
@@ -223,12 +223,37 @@ _EOF_
 			(( $gpu_mem > 192 )) && gpu_mem=192
 			G_CONFIG_INJECT 'gpu_mem_256=' "gpu_mem_256=$gpu_mem" /boot/config.txt
 
+			# Disable VCSM if less than 32M are applied, since it is doomed to fail with cut-down firmware loaded.
+			if (( $gpu_mem < 32 ))
+			then
+				# Blacklist kernel module
+				echo 'blacklist vc_sm_cma' > /etc/modprobe.d/dietpi-disable_vcsm.conf
+				# Disable device via dtoverlay: Re-compile on every kernel upgrade
+				cat << '_EOF_' > /etc/kernel/postinst.d/dietpi-disable_vcsm
+#/bin/dash
+dtc -I dts -O dtb -o /boot/overlays/dietpi-disable_vcsm.dtbo <<< '/dts-v1/;
+/plugin/;
+/ {
+	compatible = "brcm,bcm2835";
+	fragment@0 {
+		target-path = "/soc/vcsm";
+		__overlay__ {
+			status = "disabled";
+		};
+	};
+};'
+_EOF_
+				G_EXEC chmod +x /etc/kernel/postinst.d/dietpi-disable_vcsm
+				G_EXEC /etc/kernel/postinst.d/dietpi-disable_vcsm
+				G_CONFIG_INJECT 'dtoverlay=dietpi-disable_vcsm' 'dtoverlay=dietpi-disable_vcsm' /boot/config.txt
+			else
+				G_EXEC sed -i '/dtoverlay=dietpi-disable_vcsm/d' /boot/config.txt
+				[[ -f '/boot/overlays/dietpi-disable_vcsm.dtbo' ]] && G_EXEC rm /boot/overlays/dietpi-disable_vcsm.dtbo
+				[[ -f '/etc/kernel/postinst.d/dietpi-disable_vcsm' ]] && G_EXEC rm /etc/kernel/postinst.d/dietpi-disable_vcsm
+			fi
 		else
-
 			Unknown_Input_Mode
-
 		fi
-
 	}
 
 	#/////////////////////////////////////////////////////////////////////////////////////
