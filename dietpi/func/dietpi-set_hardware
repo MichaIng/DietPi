@@ -1633,6 +1633,7 @@ Do you want to continue and DISABLE Bluetooth now?' || return 1
 	# NB: When adding a new dtoverlay soundcard, we must add the dtoverlay name for deletion in Soundcard_Reset_RPi()
 	SOUNDCARD_TARGET_CARD=0
 	SOUNDCARD_TARGET_DEVICE=0
+	ALSA_PLUG_ENABLED=0
 	ALSA_EQ_ENABLED=0
 
 	# Disable all soundcards and revert back to default output if available.
@@ -1641,6 +1642,7 @@ Do you want to continue and DISABLE Bluetooth now?' || return 1
 		# All
 		SOUNDCARD_TARGET_CARD=0
 		SOUNDCARD_TARGET_DEVICE=0
+		ALSA_PLUG_ENABLED=0
 		ALSA_EQ_ENABLED=0
 
 		# - Remove previous asound.conf
@@ -1650,7 +1652,7 @@ Do you want to continue and DISABLE Bluetooth now?' || return 1
 		[[ -f '/var/lib/alsa/asound.state' ]] && rm /var/lib/alsa/asound.state
 
 		# - Reset active alsactl/amixer state
-		[[ $INPUT_DEVICE_VALUE != 'none' ]] && alsactl -g init
+		[[ $INPUT_DEVICE_VALUE == 'none' ]] || alsactl -g init
 
 		# HW specific
 		# - RPi
@@ -1729,7 +1731,7 @@ Do you want to continue and DISABLE Bluetooth now?' || return 1
 		if [[ -f '/etc/systemd/system/odroid-hifishield2.service' ]]; then
 
 			systemctl disable --now odroid-hifishield2
-			rm /etc/systemd/system/odroid-hifishield2.service
+			rm -R /etc/systemd/system/odroid-hifishield2.service*
 
 		fi
 
@@ -1767,24 +1769,22 @@ Do you want to continue and DISABLE Bluetooth now?' || return 1
 
 		# Set HDMI
 		SOUNDCARD_TARGET_DEVICE=1
-		[[ $INPUT_DEVICE_VALUE != 'none' ]] && amixer -c 0 sset 'audio output mode switch' 'hdmi'
+		[[ $INPUT_DEVICE_VALUE == 'none' ]] || amixer -c 0 sset 'audio output mode switch' 'hdmi'
 
 	}
 
 	Soundcard_Reset_BPi_Pro(){
 
 		# Set 3.5mm: https://github.com/MichaIng/DietPi/issues/732#issuecomment-275915919
-		if [[ $INPUT_DEVICE_VALUE != 'none' ]]; then
+		[[ $INPUT_DEVICE_VALUE == 'none' ]] && return
 
-			amixer sset 'Left Mixer Left DAC' off
-			amixer sset 'Power Amplifier' 62
-			amixer sset 'Power Amplifier DAC' on
-			amixer sset 'Power Amplifier Mixer' off
-			amixer sset 'Power Amplifier Mute' on
-			amixer sset 'Right Mixer Left DAC' off
-			amixer sset 'Right Mixer Right DAC' off
-
-		fi
+		amixer sset 'Left Mixer Left DAC' off
+		amixer sset 'Power Amplifier' 62
+		amixer sset 'Power Amplifier DAC' on
+		amixer sset 'Power Amplifier Mixer' off
+		amixer sset 'Power Amplifier Mute' on
+		amixer sset 'Right Mixer Left DAC' off
+		amixer sset 'Right Mixer Right DAC' off
 
 	}
 
@@ -1801,13 +1801,19 @@ Do you want to continue and DISABLE Bluetooth now?' || return 1
 		[[ $INPUT_DEVICE_VALUE == 'none' ]] && return
 		#-----------------------------------------------------------------------------
 		# Apply specific asound.conf and additional settings
-		# - ALSA EQ enabled?
+		# - ALSA equalizer enabled?
 		if [[ $INPUT_DEVICE_VALUE == *'-eq' ]]; then
 
 			ALSA_EQ_ENABLED=1
-
-			# Remove -eq from string so it doesn't get sent as a dtoverlay= on rpi and dietpi.txt entry
+			# Remove suffic so it doesn't get sent as a dtoverlay on RPi
 			INPUT_DEVICE_VALUE=${INPUT_DEVICE_VALUE%-eq}
+
+		# - ALSA automatic conversion (plug) enabled?
+		elif [[ $INPUT_DEVICE_VALUE == *'-plug' ]]; then
+
+			ALSA_PLUG_ENABLED=1
+			# Remove suffic so it doesn't get sent as a dtoverlay on RPi
+			INPUT_DEVICE_VALUE=${INPUT_DEVICE_VALUE%-plug}
 
 		fi
 
@@ -1852,7 +1858,7 @@ Do you want to continue and DISABLE Bluetooth now?' || return 1
 					# Odroid C2: https://github.com/MichaIng/DietPi/issues/2101
 					elif (( $G_HW_MODEL == 12 )); then
 
-						cat << _EOF_ > /var/lib/dietpi/postboot.d/c2_smp.sh
+						cat << '_EOF_' > /var/lib/dietpi/postboot.d/c2_smp.sh
 #!/bin/dash
 echo 4 > /proc/irq/63/smp_affinity
 echo 8 > /proc/irq/62/smp_affinity
@@ -1890,9 +1896,9 @@ _EOF_
 
 					INSTALL_URL_ADDRESS='https://raw.githubusercontent.com/sparky-sbc/sparky-test/master/piano-firmware/piano-firmware.tar'
 					G_CHECK_URL "$INSTALL_URL_ADDRESS"
-					wget "$INSTALL_URL_ADDRESS" -O package.tar
-					tar -xvf package.tar -C /lib/
-					rm package.tar
+					G_EXEC curl -sSfL "$INSTALL_URL_ADDRESS" -o package.tar
+					G_EXEC tar -xvf package.tar -C /lib/
+					G_EXEC rm package.tar
 
 				fi
 
@@ -2089,7 +2095,7 @@ _EOF_
 		# - Apply asound.conf
 		if [[ $INPUT_DEVICE_VALUE == 'googlevoicehat-soundcard'* ]]; then
 
-			cat << _EOF_ > /etc/asound.conf
+			cat << '_EOF_' > /etc/asound.conf
 pcm.softvol {
 	type softvol
 	slave.pcm dmix
@@ -2119,7 +2125,6 @@ ctl.!default {
 	card 0
 }
 _EOF_
-
 		elif (( $ALSA_EQ_ENABLED )); then
 
 			G_AG_CHECK_INSTALL_PREREQ libasound2-plugin-equal
@@ -2147,7 +2152,23 @@ ctl.!default {
 	card $SOUNDCARD_TARGET_CARD
 }
 _EOF_
+		elif (( $ALSA_PLUG_ENABLED )); then
 
+			cat << _EOF_ > /etc/asound.conf
+pcm.!default {
+	type plug
+	slave.pcm {
+		type hw
+		card $SOUNDCARD_TARGET_CARD
+		device $SOUNDCARD_TARGET_DEVICE
+	}
+}
+
+ctl.!default {
+	type hw
+	card $SOUNDCARD_TARGET_CARD
+}
+_EOF_
 		else
 
 			cat << _EOF_ > /etc/asound.conf
@@ -2162,7 +2183,6 @@ ctl.!default {
 	card $SOUNDCARD_TARGET_CARD
 }
 _EOF_
-
 		fi
 
 		# Store control states once and force restore service, to assure it is active (states preserved) for next reboot
