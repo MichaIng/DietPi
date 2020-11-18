@@ -15,15 +15,17 @@
 	# - Uses patch_file for incremental patching after APT calls and DietPi code update
 	#
 	# Usage:
-	# - dietpi-update	= Check for updates and in case open interactive menu
-	# - dietpi-update 1	= Check for updates and in case apply noninteractively
-	# - dietpi-update 2	= Check for updates only and in case store result to /run/dietpi/.update_available to be used by DietPi-Banner
+	# - dietpi-update	= Check for update and in case open interactive menu
+	# - dietpi-update 1	= Check for update and in case apply noninteractively
+	# - dietpi-update 2	= Check for update only and in case store result to /run/dietpi/.update_available to be used by DietPi-Banner
+	#			  Else, if CONFIG_CHECK_APT_UPDATES is set, check for APT updates and store results to /run/dietpi/.apt_updates
+	#			  If CONFIG_CHECK_APT_UPDATES=2 is set, apply APT upgrades automatically.
 	# - dietpi-update -1	= Like "1" but internally reduce subversion by 1 to reapply the last update, e.g. to apply latest dev branch changes
 	#////////////////////////////////////
 
 	# Import DietPi-Globals --------------------------------------------------------------
 	. /boot/dietpi/func/dietpi-globals
-	G_PROGRAM_NAME='DietPi-Update'
+	readonly G_PROGRAM_NAME='DietPi-Update'
 	G_CHECK_ROOT_USER
 	G_CHECK_ROOTFS_RW
 	G_INIT
@@ -42,9 +44,6 @@
 	readonly DIETPIUPDATE_VERSION_CORE=6 # Version of dietpi-update / set server_version-6 line one to value++ and obsolete previous dietpi-update scripts
 
 	CHANGELOG_DOWNLOADED=0 # Prevent redownload of changelog if already done in this session
-	SERVER_ONLINE=0
-	UPDATE_AVAILABLE=0
-	RUN_UPDATE=0
 
 	GITOWNER_TARGET=$(sed -n '/^[[:blank:]]*DEV_GITOWNER=/{s/^[^=]*=//p;q}' /boot/dietpi.txt)
 	GITOWNER_TARGET=${GITOWNER_TARGET:-MichaIng}
@@ -118,11 +117,10 @@
 					disable_error=1 G_CHECK_VALIDINT "$SUBVERSION_SERVER" &&
 					disable_error=1 G_CHECK_VALIDINT "$RCVERSION_SERVER"; then
 
-					SERVER_ONLINE=1
 					G_DIETPI-NOTIFY 0 "Using update server: ${aURL_MIRROR_SERVERVERSION[$i]}"
 					URL_MIRROR_INDEX=$i
 					INFO_VERSIONS_UPDATE
-					break
+					return 0
 
 				else
 
@@ -139,19 +137,17 @@
 		done
 
 		# No valid update server response
-		if (( ! $SERVER_ONLINE )); then
-
-			G_DIETPI-NOTIFY 1 'Unable to access any update server. Please check your network connection, then rerun dietpi-update.
+		G_DIETPI-NOTIFY 1 'Unable to access any update server. Please check your network connection, then rerun dietpi-update.
 If this error persists, please report at: https://github.com/MichaIng/DietPi/issues'
-			exit 1
-
-		fi
+		return 1
 
 	}
 
 	Apply_1st_Run_Update_Success(){ [[ $G_DIETPI_INSTALL_STAGE == [12] ]] || echo 1 > /boot/dietpi/.install_stage; }
 
-	Check_Update_Available(){
+	Check_DietPi_Update(){
+
+		local result=1
 
 		# Update requires new image
 		if (( $DIETPIUPDATE_VERSION_CORE < $COREVERSION_SERVER )); then
@@ -165,7 +161,7 @@ Please download the latest DietPi image from: https://dietpi.com/#download'
 		# Update available
 		elif (( $G_DIETPI_VERSION_SUB < $SUBVERSION_SERVER || ( $G_DIETPI_VERSION_SUB == $SUBVERSION_SERVER && $G_DIETPI_VERSION_RC < $RCVERSION_SERVER ) )); then
 
-			UPDATE_AVAILABLE=1
+			result=0
 
 			# Write available update version to flag file
 			echo "$COREVERSION_SERVER.$SUBVERSION_SERVER.$RCVERSION_SERVER" > /run/dietpi/.update_available
@@ -188,12 +184,14 @@ Please download the latest DietPi image from: https://dietpi.com/#download'
 		G_DIETPI-NOTIFY 2 "$INFO_CURRENT_VERSION"
 		G_DIETPI-NOTIFY 2 "$INFO_SERVER_VERSION"
 
+		return $result
+
 	}
 
 	#/////////////////////////////////////////////////////////////////////////////////////
 	# Update DietPi
 	#/////////////////////////////////////////////////////////////////////////////////////
-	Run_Update(){
+	Run_DietPi_Update(){
 
 		# RC-only update: Reapply last subversion patches
 		if (( $G_DIETPI_VERSION_SUB == $SUBVERSION_SERVER )); then
@@ -338,17 +336,12 @@ Please select 'Update' option to apply the update."; then
 				if [[ $G_WHIP_RETURNED_VALUE == 'Update' ]]; then
 
 					G_WHIP_SIZE_X_MAX=80
-					if G_WHIP_YESNO ">----------------------------------Notice----------------------------------<
+					G_WHIP_YESNO ">----------------------------------Notice----------------------------------<
 - A benefit of DietPi is: We use standard Linux (Debian) configurations and commands.
 - A potential downside is: We can't possibly accommodate or predict all modification to Linux configurations files by the end user, outside of DietPi programs, during updates.\n
 Although we test the updates thoroughly, if you have made any custom changes to Linux configuration files outside of the DietPi programs, an update may trigger a potential issue.
 >--------------------------------------------------------------------------<\n
-Do you wish to continue and update DietPi to v$COREVERSION_SERVER.$SUBVERSION_SERVER.$RCVERSION_SERVER?"; then
-
-						RUN_UPDATE=1
-						return
-
-					fi
+Do you wish to continue and update DietPi to v$COREVERSION_SERVER.$SUBVERSION_SERVER.$RCVERSION_SERVER?" && return 0
 
 				elif [[ $G_WHIP_RETURNED_VALUE == 'Changelog' ]]; then
 
@@ -362,7 +355,7 @@ Do you wish to continue and update DietPi to v$COREVERSION_SERVER.$SUBVERSION_SE
 
 			else
 
-				return # Exit
+				return 1 # Exit
 
 			fi
 
@@ -377,7 +370,7 @@ Do you wish to continue and update DietPi to v$COREVERSION_SERVER.$SUBVERSION_SE
 	G_DIETPI-NOTIFY 3 "$G_PROGRAM_NAME" 'Checking for available DietPi update'
 	#----------------------------------------------------------------
 	# Select mirror and download server version info
-	Get_Server_Version
+	Get_Server_Version || exit 1
 	#----------------------------------------------------------------
 	# If requested, reduce current subversion by 1 to reapply last update
 	if (( $INPUT == -1 )); then
@@ -390,11 +383,9 @@ Do you wish to continue and update DietPi to v$COREVERSION_SERVER.$SUBVERSION_SE
 
 	fi
 	#----------------------------------------------------------------
-	# Check for update and in case store result to /run/dietpi/.update_available for use by DietPi-Banner
-	Check_Update_Available
-	#----------------------------------------------------------------
-	# Update available and no check-only chosen
-	if (( $UPDATE_AVAILABLE && $INPUT != 2 )); then
+	# Check for DietPi update and in case store result to /run/dietpi/.update_available for use by DietPi-Banner
+	# Run update if no check-only input
+	if Check_DietPi_Update && (( $INPUT != 2 )); then
 
 		G_DIETPI-NOTIFY 3 "$G_PROGRAM_NAME" 'Checking for update pre-requirements'
 
@@ -404,13 +395,9 @@ Do you wish to continue and update DietPi to v$COREVERSION_SERVER.$SUBVERSION_SE
 		# Check for sufficient free space
 		G_CHECK_FREESPACE / 100 || exit 1
 
-		# Noninteractive update or ask user
-		# shellcheck disable=SC2015
-		(( $INPUT == 1 )) && RUN_UPDATE=1 || Menu_Update
-
 		#----------------------------------------------------------------
-		# Run Update
-		if (( $RUN_UPDATE )); then
+		# Noninteractive update or ask user
+		if (( $INPUT == 1 )) || Menu_Update; then
 
 			# Disable powersaving on main screen
 			setterm -blank 0 -powersave off 2> /dev/null
@@ -418,9 +405,9 @@ Do you wish to continue and update DietPi to v$COREVERSION_SERVER.$SUBVERSION_SE
 			# Stop Services
 			/boot/dietpi/dietpi-services stop
 
-			# Run_Update: https://github.com/MichaIng/DietPi/issues/1877#issuecomment-403866204
+			# Run_DietPi_Update: https://github.com/MichaIng/DietPi/issues/1877#issuecomment-403866204
 			# - Log to file by redirecting to subshell instead of piping, else G_EXEC cannot exit the script via "kill -INT $$": https://github.com/MichaIng/DietPi/issues/3127
-			Run_Update &> >(tee $FP_LOG); wait $!
+			Run_DietPi_Update &> >(tee $FP_LOG); wait $!
 
 			# Mark 1st run update as completed
 			Apply_1st_Run_Update_Success
@@ -442,12 +429,18 @@ Do you wish to continue and update DietPi to v$COREVERSION_SERVER.$SUBVERSION_SE
 			(( $G_DIETPI_INSTALL_STAGE == 2 )) && /boot/dietpi/dietpi-services restart
 
 		fi
-
 		#----------------------------------------------------------------
 		# Desktop run, exit key prompt
 		pgrep 'lxsession' > /dev/null && read -rp 'Press any key to exit DietPi-Update...'
+		exit 0
 
 	fi
+
+	# Check for APT updates and in case store result to /run/dietpi/.apt_updates for use by DietPi-Banner
+	mode=$(sed -n '/^[[:blank:]]*CONFIG_CHECK_APT_UPDATES=/{s/^[^=]*=//p;q}' /boot/dietpi.txt)
+	[[ -f '/run/dietpi/.apt_updates' ]] && rm /run/dietpi/.apt_updates
+	[[ $mode != 0 ]] && G_EXEC_NOHALT=1 G_AGUP && count=$(apt -qq list --upgradeable 2> /dev/null | wc -l) && (( $count )) && echo "$count" > /run/dietpi/.apt_updates
+	[[ $mode == 2 ]] && (( $count )) && G_EXEC_NOHALT=1 G_AGUG &> >(tee /var/tmp/dietpi/logs/dietpi-upgrade_apt.log)
 	#----------------------------------------------------------------
 	exit 0
 	#----------------------------------------------------------------
