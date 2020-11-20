@@ -985,12 +985,12 @@ DietPi-Software will decrypt and use it for software installs. You can change it
 
 		aSOFTWARE_NAME[$software_id]='Pydio'
 		aSOFTWARE_DESC[$software_id]='feature-rich backup and sync server'
-		aSOFTWARE_CATEGORY_INDEX[$software_id]=4
 		aSOFTWARE_TYPE[$software_id]=0
+		aSOFTWARE_CATEGORY_INDEX[$software_id]=4
+		aSOFTWARE_ONLINEDOC_URL[$software_id]='p=1064#p1064'
 		aSOFTWARE_REQUIRES_WEBSERVER[$software_id]=1
 		aSOFTWARE_REQUIRES_PHP[$software_id]=1
 		aSOFTWARE_REQUIRES_MYSQL[$software_id]=1
-		aSOFTWARE_ONLINEDOC_URL[$software_id]='p=1064#p1064'
 		#------------------
 		software_id=111
 
@@ -1006,20 +1006,18 @@ DietPi-Software will decrypt and use it for software installs. You can change it
 
 		aSOFTWARE_NAME[$software_id]='Gogs'
 		aSOFTWARE_DESC[$software_id]='personal github server with web interface'
-		aSOFTWARE_CATEGORY_INDEX[$software_id]=4
 		aSOFTWARE_TYPE[$software_id]=0
+		aSOFTWARE_CATEGORY_INDEX[$software_id]=4
+		aSOFTWARE_ONLINEDOC_URL[$software_id]='p=2187#p2187'
 		aSOFTWARE_REQUIRES_GIT[$software_id]=1
 		aSOFTWARE_REQUIRES_MYSQL[$software_id]=1
-		aSOFTWARE_ONLINEDOC_URL[$software_id]='p=2187#p2187'
-		# - ARMv8
-		aSOFTWARE_AVAIL_G_HW_ARCH[$software_id,3]=0
 		#------------------
 		software_id=50
 
 		aSOFTWARE_NAME[$software_id]='Syncthing'
 		aSOFTWARE_DESC[$software_id]='backup and sync server with web interface'
-		aSOFTWARE_CATEGORY_INDEX[$software_id]=4
 		aSOFTWARE_TYPE[$software_id]=0
+		aSOFTWARE_CATEGORY_INDEX[$software_id]=4
 		aSOFTWARE_ONLINEDOC_URL[$software_id]='p=2363#p2363'
 		#------------------
 		software_id=158
@@ -5220,19 +5218,23 @@ Package: wireguard wireguard-dkms wireguard-tools\nPin: release n=bullseye\nPin-
 			else
 
 				# ARMv7
-				local file='raspi_armv7.tar.gz'
-				local fallback_url='https://github.com/gogs/gogs/releases/download/v0.11.91/raspi_armv7.tar.gz'
+				local arch='armv7'
+
+				# ARMv8
+				if (( $G_HW_ARCH == 3 )); then
+
+					arch='armv8'
 
 				# x86_64
-				if (( $G_HW_ARCH == 10 )); then
+				elif (( $G_HW_ARCH == 10 )); then
 
-					file='linux_amd64.tar.gz'
-					fallback_url='https://github.com/gogs/gogs/releases/download/v0.11.91/linux_amd64.tar.gz'
+					arch='amd64'
 
 				fi
 
+				fallback_url="https://github.com/gogs/gogs/releases/download/v0.12.3/gogs_0.12.3_linux_$arch.tar.gz"
 				G_CHECK_URL 'https://api.github.com/repos/gogs/gogs/releases/latest'
-				INSTALL_URL_ADDRESS=$(curl -sf 'https://api.github.com/repos/gogs/gogs/releases/latest' | grep -m1 "browser_download_url.*$file" | cut -d \" -f 4)
+				INSTALL_URL_ADDRESS=$(curl -sf 'https://api.github.com/repos/gogs/gogs/releases/latest' | grep -m1 "browser_download_url.*linux_$arch.tar.gz" | cut -d \" -f 4)
 				local no_check_url=1 # G_CHECK_URL faces 403
 
 			fi
@@ -5242,13 +5244,13 @@ Package: wireguard wireguard-dkms wireguard-tools\nPin: release n=bullseye\nPin-
 			# Remove old install dir, but preserve existing configs
 			if [[ -d '/etc/gogs' ]]; then
 
-				[[ -d '/etc/gogs/custom' ]] && mv /etc/gogs/custom gogs
-				mv /etc/gogs/.??* gogs # dot files = SSH and Git user configs
-				rm -R /etc/gogs
+				[[ -d '/etc/gogs/custom' ]] && G_EXEC mv /etc/gogs/custom gogs
+				G_EXEC mv /etc/gogs/.??* gogs # dot files = SSH and Git user configs
+				G_EXEC rm -R /etc/gogs
 
 			fi
 
-			mv gogs /etc/gogs
+			G_EXEC mv gogs /etc/gogs
 
 		fi
 
@@ -10578,37 +10580,44 @@ _EOF_
 			Banner_Configuration
 
 			# User
-			Ceate_User -d /etc/gogs gogs
+			Create_User -d /etc/gogs gogs
 
 			# Directories + permissions
-			mkdir -p /mnt/dietpi_userdata/gogs-repo /var/log/gogs
-			chown -R gogs:gogs /etc/gogs /mnt/dietpi_userdata/gogs-repo /var/log/gogs
+			G_EXEC mkdir -p /mnt/dietpi_userdata/gogs-repo /var/log/gogs
+			G_EXEC chown -R gogs:gogs /etc/gogs /mnt/dietpi_userdata/gogs-repo /var/log/gogs
 
 			# Database
 			if [[ ! -d '/var/lib/mysql/gogs' ]]; then
 
 				G_EXEC systemctl restart mariadb
-				mysql < /etc/gogs/scripts/mysql.sql
+				mysql -f < /etc/gogs/scripts/mysql.sql # -f until: https://github.com/gogs/gogs/pull/6424
 				mysql -e "grant all privileges on gogs.* to gogs@localhost identified by '$GLOBAL_PW'"
 
 			fi
 
-			# Service
-			cat << _EOF_ > /etc/systemd/system/gogs.service
+			# Service: https://github.com/gogs/gogs/blob/main/scripts/systemd/gogs.service
+			cat << '_EOF_' > /etc/systemd/system/gogs.service
+  
 [Unit]
 Description=Gogs (DietPi)
-DefaultDependencies=no
-After=mysqld.service mysql.service mariadb.service
+Wants=network-online.target
+After=network-online.target dietpi-boot.service mariadb.service
 
 [Service]
 User=gogs
 WorkingDirectory=/etc/gogs
-ExecStart=/bin/dash -c '/etc/gogs/gogs web 2>&1 > /var/log/gogs/gogs_daemon.log'
+ExecStart=/etc/gogs/gogs web
+
+# Hardening
+ProtectSystem=full
+PrivateDevices=yes
+PrivateTmp=yes
+NoNewPrivileges=true
+ReadWritePaths=/etc/gogs
 
 [Install]
 WantedBy=multi-user.target
 _EOF_
-
 		fi
 
 		software_id=46 # qBittorrent
