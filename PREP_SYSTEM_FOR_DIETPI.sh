@@ -876,7 +876,8 @@ Currently installed: $G_DISTRO_NAME (ID: $G_DISTRO)"; then
 		#	ROCK Pi S (official Radxa Debian image)
 		elif (( $G_HW_MODEL == 73 )) && grep -q 'apt\.radxa\.com' /etc/apt/sources.list.d/*.list; then
 
-			G_AGI rockpis-rk-u-boot-latest linux-4.4-rockpis-latest rockchip-overlay
+			# NB: rockpis-dtbo is not required as it doubles the overlays that are already provided (among others) with the kernel package
+			G_AGI rockpis-rk-ubootimg linux-4.4-rock-pi-s-latest rockchip-overlay
 
 		# - Generic kernel + device tree package auto detect
 		else
