@@ -1603,27 +1603,28 @@ _EOF_
 			# Update USBridgeSig Ethernet driver via postinst kernel script, until it has been merged into official RPi kernel: https://github.com/allocom/USBridgeSig/tree/master/ethernet
 			cat << '_EOF_' > /etc/kernel/postinst.d/dietpi-USBridgeSig
 #!/bin/bash
-# Only available for v7+ and v8+ kernel
-[[ $1 == *'-v'[78]'+' ]] || exit 0
-echo "[ INFO ] Updating ASIX AX88179 driver for kernel $1 with ARM-optimised builds"
+# Only available for v7+
+[[ $1 == *'-v7+' ]] || exit 0
+# Only reasonable for USBridgeSig = CM 3+
+grep -q '^Revision.*10.$' /proc/cpuinfo || exit 0
+echo "[ INFO ] Updating ASIX AX88179 driver for kernel $1 with ARM-optimised build"
 echo '[ INFO ] - by Allo: https://github.com/allocom/USBridgeSig/tree/master/ethernet'
 echo '[ INFO ] Estimating required module layout...'
 module_layout=$(modprobe --dump-modversions /lib/modules/$1/kernel/drivers/net/usb/asix.ko | mawk '/module_layout/{print $1;exit}') || exit 0
 echo '[ INFO ] Downloading stable branch driver...'
 if ! curl -#fL http://3.230.113.73:9011/Allocom/USBridgeSig/stable_rel/rpi-usbs-$1/ax88179_178a.ko -o /tmp/ax88179_178a.ko ||
-	[[ $module_layout != $(modprobe --dump-modversions /tmp/ax88179_178a.ko | mawk '/module_layout/{print $1;exit}') ]]; then
-
+	[[ $module_layout != $(modprobe --dump-modversions /tmp/ax88179_178a.ko | mawk '/module_layout/{print $1;exit}') ]]
+then
 	echo '[ INFO ] No matching stable branch driver found, trying master branch driver...'
 	if ! curl -#fL http://3.230.113.73:9011/Allocom/USBridgeSig/rpi-usbs-$1/ax88179_178a.ko -o /tmp/ax88179_178a.ko ||
-		[[ $module_layout != $(modprobe --dump-modversions /tmp/ax88179_178a.ko | mawk '/module_layout/{print $1;exit}') ]]; then
-
+		[[ $module_layout != $(modprobe --dump-modversions /tmp/ax88179_178a.ko | mawk '/module_layout/{print $1;exit}') ]]
+	then
 		echo '[ INFO ] No matching driver found, cleaning up and aborting...'
 		rm -fv /tmp/ax88179_178a.ko || :
-		echo '[ INFO ] Do not worry, the default RPi kernel driver will be used instead.'
+		echo '[ INFO ] The default RPi kernel driver will be used instead, which might result in pops and ticks in your audio stream. If so, please try to rerun this script later:'
+		echo " - /etc/kernel/postinst.d/dietpi-USBridgeSig $1"
 		exit 0
-
 	fi
-
 fi
 echo '[ INFO ] Installing driver...'
 install -vpm 644 /tmp/ax88179_178a.ko /lib/modules/$1/kernel/drivers/net/usb || exit 0
@@ -1632,16 +1633,16 @@ depmod $1 || exit 0
 echo '[ INFO ] All succeeded, cleaning up...'
 rm -v /tmp/ax88179_178a.ko || exit 0
 _EOF_
-			chmod +x /etc/kernel/postinst.d/dietpi-USBridgeSig
-			# - Update for all installed v7+ and v8+ kernel versions now
-			for i in /lib/modules/*-v[78]+
+			G_EXEC chmod +x /etc/kernel/postinst.d/dietpi-USBridgeSig
+			# Force upgrade now, regardless of current host machine
+			G_EXEC sed -i 's/^grep/#grep/' /etc/kernel/postinst.d/dietpi-USBridgeSig
+			for i in /lib/modules/*-v7+
 			do
-
 				[[ -d $i ]] || continue
 				i=${i##*/}
 				/etc/kernel/postinst.d/dietpi-USBridgeSig "$i"
-
 			done
+			G_EXEC sed -i 's/^#grep/grep/' /etc/kernel/postinst.d/dietpi-USBridgeSig
 
 		# - PINE A64 (and possibily others): Cursor fix for FB
 		elif (( $G_HW_MODEL == 40 )); then
