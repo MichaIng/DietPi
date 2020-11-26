@@ -4183,7 +4183,7 @@ amvdec_vp9' > /etc/modules-load.d/dietpi-c4-kodi.conf
 			INSTALL_URL_ADDRESS='https://install.pi-hole.net'
 			G_CHECK_URL "$INSTALL_URL_ADDRESS"
 
-			# Check free available memory. Increase swapfile size to prevent gravity running out of mem.
+			# Check free available memory. Increase swap file size to prevent gravity running out of mem.
 			if (( $(free -m | mawk '/^Mem:/{print $7;exit}') < 512 && $(free -m | mawk '/^Swap:/{print $2;exit}') < 512 )); then
 
 				G_DIETPI-NOTIFY 2 'Increasing swapfile size to 512 MiB for running gravity.sh, please wait...\n'
@@ -5536,25 +5536,39 @@ Package: wireguard wireguard-dkms wireguard-tools\nPin: release n=bullseye\nPin-
 			# Dependencies: https://github.com/dani-garcia/bitwarden_rs/wiki/Building-binary#dependencies
 			DEPS_LIST='pkg-config libssl-dev'
 
-			# Override $HOME to allow temporary Rust install to /tmp
-			export HOME='/tmp'
-
-			# Rust from https://rustup.rs/
-			G_EXEC eval 'curl -sSfL https://sh.rustup.rs | dash -s -- -y --default-toolchain none'
-			source /tmp/.cargo/env
-
 			# Download
 			INSTALL_URL_ADDRESS='https://api.github.com/repos/dani-garcia/bitwarden_rs/releases/latest'
 			local version=$(curl -sSfL "$INSTALL_URL_ADDRESS" | mawk -F\" '/^[[:blank:]]*"tag_name":/{print $4;exit}')
-			Download_Install "https://github.com/dani-garcia/bitwarden_rs/archive/${version:-1.17.0}.tar.gz"
+			Download_Install "https://github.com/dani-garcia/bitwarden_rs/archive/${version:=1.17.0}.tar.gz"
 
 			# Replace old instance on reinstall
 			[[ -d '/opt/bitwarden_rs' ]] && G_EXEC rm -R /opt/bitwarden_rs
-			G_EXEC mv bitwarden_rs-* /opt/bitwarden_rs
+			G_EXEC mv "bitwarden_rs-$version" /opt/bitwarden_rs
 
-			# Build
+			# Assure 2 GiB overall memory (-100 MiB to avoid tiny swap space) is available
+			if (( $(free -tm | mawk '/^Total:/{print $2;exit}') < 1948 )); then
+
+				G_DIETPI-NOTIFY 2 'Bitwaden_RS build requires at least 2 GiB memory. We will now increase your swap file size to satisfy this requirement.'
+				/boot/dietpi/func/dietpi-set_swapfile 1
+
+			fi
+
+			# Temporarily assure 1.5 GiB /tmp size for temporary Rust install
+			(( $(findmnt -bno SIZE /tmp) < 1610612736 )) && G_EXEC mount -o remount,size=1610612736 /tmp
+
+			# Override $HOME to allow temporary Rust install to RAMdisk and DietPi-Software working directory, so all leftovers are automatically removed on script exit and/or reboot
+			export HOME="/tmp/$G_PROGRAM_NAME"
+
+			# Install Rust via https://rustup.rs/
+			G_EXEC curl -sSfL https://sh.rustup.rs -o rustup-init.sh
+			G_EXEC chmod +x rustup-init.sh
+			G_EXEC ./rustup-init.sh -y --default-toolchain none
+			G_EXEC_NOHALT=1 G_EXEC rm rustup-init.sh
+			G_EXEC . .cargo/env
+
+			# Build: Don't run multiple jobs concurrently, as one job can require > 500 MiB memory and can utilize all cores as well.
 			G_EXEC cd /opt/bitwarden_rs
-			G_EXEC_OUTPUT=1 G_EXEC cargo build --features sqlite --release
+			G_EXEC_OUTPUT=1 G_EXEC cargo build -j 1 --features sqlite --release
 			G_EXEC cd /tmp/$G_PROGRAM_NAME
 
 			# Uninstall rust after compiling
@@ -6222,8 +6236,8 @@ If you want to update ${aSOFTWARE_NAME[$software_id]}, please use its internal u
 			rm -Rf /opt/mycroft
 			ln -s /mnt/dietpi_userdata/mycroft-data /opt/mycroft
 
-			# Assure 2 GiB overall memory is available
-			if (( $(free -tm | mawk '/^Total:/{print $2;exit}') < 2048 )); then
+			# Assure 2 GiB overall memory (-100 MiB to avoid tiny swap space) is available
+			if (( $(free -tm | mawk '/^Total:/{print $2;exit}') < 1948 )); then
 
 				G_WHIP_MSG '[WARNING] Insufficient overall memory size\n
 Mycroft AI requires at least 2 GiB memory on first start. We will now increase your swap file size to satisfy this requirement.'
