@@ -811,7 +811,7 @@ Currently installed: $G_DISTRO_NAME (ID: $G_DISTRO)"; then
 			unset -v apackages
 
 		# - G_HW_MODEL specific required firmware/kernel/bootloader packages
-		#	ARMbian grab currently installed packages
+		#	Armbian grab currently installed packages
 		elif [[ $(dpkg-query -Wf '${Package} ') == *'armbian'* ]]; then
 
 			systemctl stop armbian-*
@@ -833,7 +833,7 @@ Currently installed: $G_DISTRO_NAME (ID: $G_DISTRO)"; then
 				do
 
 					aPACKAGES_REQUIRED_INSTALL+=("$line")
-					G_DIETPI-NOTIFY 2 "ARMbian package detected and added: $line"
+					G_DIETPI-NOTIFY 2 "Armbian package detected and added: $line"
 
 				done <<< "$(dpkg-query -Wf '${Package}\n' | mawk -v pat="^$i" '$0~pat')"
 
@@ -875,6 +875,12 @@ Currently installed: $G_DISTRO_NAME (ID: $G_DISTRO)"; then
 
 		#	ROCK Pi S (official Radxa Debian image)
 		elif (( $G_HW_MODEL == 73 )) && grep -q 'apt\.radxa\.com' /etc/apt/sources.list.d/*.list; then
+
+			# Install Radxa APT repo cleanly: No Bullseye repo available yet
+			G_EXEC rm -Rf /etc/apt/{trusted.gpg,sources.list.d/{,.??,.[^.]}*
+			G_EXEC eval "curl -sSfL https://apt.radxa.com/${DISTRO_TARGET_NAME/bullseye/buster}-stable/public.key | gpg --dearmor -o /etc/apt/trusted.gpg.d/dietpi-radxa.gpg --yes"
+			G_EXEC eval "echo -e 'deb https://apt.radxa.com/${DISTRO_TARGET_NAME/bullseye/buster}-stable/ ${DISTRO_TARGET_NAME/bullseye/buster} main\n#deb https://apt.radxa.com/${DISTRO_TARGET_NAME/bullseye/buster}-testing/ ${DISTRO_TARGET_NAME/bullseye/buster} main' > /etc/apt/sources.list.d/dietpi-radxa.list"
+			G_AGUP
 
 			# NB: rockpis-dtbo is not required as it doubles the overlays that are already provided (among others) with the kernel package
 			G_AGI rockpis-rk-ubootimg linux-4.4-rock-pi-s-latest rockchip-overlay
@@ -1047,7 +1053,7 @@ Currently installed: $G_DISTRO_NAME (ID: $G_DISTRO)"; then
 		# - Stop, disable and remove not required 3rd party services
 		local aservices=(
 
-			# ARMbian
+			# Armbian
 			'firstrun'
 			'resize2fs'
 			'log2ram'
@@ -1058,6 +1064,10 @@ Currently installed: $G_DISTRO_NAME (ID: $G_DISTRO)"; then
 			'cpu_governor'
 			# RPi
 			'sshswitch'
+			# Radxa
+			rockchip-adbd
+			rtl8723ds-btfw-load
+			install-module-hci-uart
 
 		)
 
@@ -1065,10 +1075,10 @@ Currently installed: $G_DISTRO_NAME (ID: $G_DISTRO)"; then
 		do
 
 			# Loop through known service locations
-			for j in /etc/init.d/$i /{etc,lib,usr/lib}/systemd/system/$i.service{,.d}
+			for j in /etc/init.d/$i /{etc,lib,usr/lib,usr/local/lib}/systemd/system/{$i.service{,.d},*.wants/$i.service}
 			do
 
-				[[ -e $j ]] || continue
+				[[ -e $j || -L $j ]] || continue
 				[[ -f $j ]] && systemctl disable --now "${j##*/}"
 				# Remove if not attached to any DEB package, else mask
 				if dpkg -S "$j" &> /dev/null; then
@@ -1110,7 +1120,7 @@ Currently installed: $G_DISTRO_NAME (ID: $G_DISTRO)"; then
 		done
 		unset -v aservices
 
-		# - ARMbian specific
+		# - Armbian specific
 		[[ -f '/boot/armbian_first_run.txt.template' ]] && rm -v /boot/armbian_first_run.txt.template
 		[[ -f '/usr/bin/armbianmonitor' ]] && rm -v /usr/bin/armbianmonitor
 		[[ -d '/etc/armbianmonitor' ]] && rm -Rv /etc/armbianmonitor
@@ -1126,23 +1136,23 @@ Currently installed: $G_DISTRO_NAME (ID: $G_DISTRO)"; then
 		rm -vf /etc/systemd/system/logrotate.service # Override to support Armbian zRAM log
 		rm -vf /etc/apt/apt.conf.d/*armbian*
 		rm -vf /etc/cron.*/*armbian*
-		#rm -vf /etc/default/*armbian* # Required for ARMbian root package upgrade
+		#rm -vf /etc/default/*armbian* # Required for Armbian root package upgrade
 		rm -vf /etc/update-motd.d/*armbian*
 		rm -vf /etc/profile.d/*armbian*
-		#[[ -d '/usr/lib/armbian' ]] && rm -vR /usr/lib/armbian # Required for ARMbian root package upgrade
-		#[[ -d '/usr/share/armbian' ]] && rm -vR /usr/share/armbian # Required for ARMbian root package upgrade
+		#[[ -d '/usr/lib/armbian' ]] && rm -vR /usr/lib/armbian # Required for Armbian root package upgrade
+		#[[ -d '/usr/share/armbian' ]] && rm -vR /usr/share/armbian # Required for Armbian root package upgrade
 		# Place DPKG exclude file, especially to skip cron jobs, which are doomed to fail and an unnecessary overhead + syslog spam on DietPi
 		[[ -f '/etc/armbian-release' ]] && cat << _EOF_ > /etc/dpkg/dpkg.cfg.d/dietpi-no_armbian
-# Exclude conflicting ARMbian files
+# Exclude conflicting Armbian files
 path-exclude /lib/systemd/system/*armbian*
 path-exclude /etc/systemd/system/logrotate.service
 path-exclude /etc/apt/apt.conf.d/*armbian*
 path-exclude /etc/cron.*/*armbian*
-#path-exclude /etc/default/*armbian* # Required for ARMbian root package upgrade
+#path-exclude /etc/default/*armbian* # Required for Armbian root package upgrade
 path-exclude /etc/update-motd.d/*armbian*
 path-exclude /etc/profile.d/*armbian*
-#path-exclude /usr/lib/armbian # Required for ARMbian root package upgrade
-#path-exclude /usr/share/armbian # Required for ARMbian root package upgrade
+#path-exclude /usr/lib/armbian # Required for Armbian root package upgrade
+#path-exclude /usr/share/armbian # Required for Armbian root package upgrade
 _EOF_
 
 		# - OMV: https://github.com/MichaIng/DietPi/issues/2994
@@ -1285,7 +1295,7 @@ _EOF_'
 		# ifupdown starts the daemon outside of systemd, the enabled systemd unit just thows an error on boot due to missing dbus and with dbus might interfere with ifupdown
 		systemctl disable wpa_supplicant 2> /dev/null && G_DIETPI-NOTIFY 2 'Disabled non-required wpa_supplicant systemd unit'
 
-		[[ -L '/etc/network/interfaces' ]] && rm -v /etc/network/interfaces # ARMbian symlink for bulky network-manager
+		[[ -L '/etc/network/interfaces' ]] && rm -v /etc/network/interfaces # Armbian symlink for bulky network-manager
 		G_EXEC_DESC='Configuring network interfaces'
 		G_EXEC eval 'cat << _EOF_ > /etc/network/interfaces
 # Location: /etc/network/interfaces
@@ -1432,6 +1442,12 @@ _EOF_'
 				/boot/dietpi/func/dietpi-set_hardware serialconsole disable ttyS0
 				/boot/dietpi/func/dietpi-set_hardware serialconsole enable serial0
 
+			# ROCK Pi S: Enable on ttyS0 only
+			elif (( $G_HW_MODEL == 73 )); then
+
+				/boot/dietpi/func/dietpi-set_hardware serialconsole disable
+				/boot/dietpi/func/dietpi-set_hardware serialconsole enable ttyS0
+
 			fi
 
 		fi
@@ -1508,7 +1524,7 @@ _EOF_"
 
 		fi
 
-		# - ARMbian OPi Zero 2: https://github.com/MichaIng/DietPi/issues/876#issuecomment-294350580
+		# - Armbian OPi Zero 2: https://github.com/MichaIng/DietPi/issues/876#issuecomment-294350580
 		if (( $G_HW_MODEL == 35 )); then
 
 			echo 'blacklist bmp085' > /etc/modprobe.d/dietpi-disable_bmp085.conf
