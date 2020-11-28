@@ -275,6 +275,9 @@ Links to hardware and software manufacturers, sources and build instructions use
 - [Komga](https://github.com/gotson/komga)
 - [HTPC Manager](https://github.com/HTPC-Manager/HTPC-Manager)
 - [Bazarr](https://github.com/morpheus65535/bazarr)
+- [PaperMC](https://github.com/PaperMC/Paper)
+- [Unbound](https://github.com/NLnetLabs/unbound)
+- [Bitwarden_RS](https://github.com/dani-garcia/bitwarden_rs)
 
 ---
 
