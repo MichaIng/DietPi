@@ -1626,13 +1626,7 @@ Do you want to continue and DISABLE Bluetooth now?' || return 1
 	#/////////////////////////////////////////////////////////////////////////////////////
 	# soundcard
 	#/////////////////////////////////////////////////////////////////////////////////////
-	# NB: When adding a new dtoverlay soundcard, we must add the dtoverlay name for deletion in Soundcard_Reset_RPi()
-	SOUNDCARD_TARGET_CARD=0
-	SOUNDCARD_TARGET_DEVICE=0
-	ALSA_PLUG_ENABLED=0
-	ALSA_EQ_ENABLED=0
-
-	# Disable all soundcards and revert back to default output if available.
+	# Disable all sound cards and reset all settings
 	Soundcard_Reset_All(){
 
 		# All
@@ -1644,10 +1638,10 @@ Do you want to continue and DISABLE Bluetooth now?' || return 1
 		# - Remove previous asound.conf
 		[[ -f '/etc/asound.conf' ]] && rm /etc/asound.conf
 
-		# - Remove previously stored alsactl state
+		# - Remove stored amixer state
 		[[ -f '/var/lib/alsa/asound.state' ]] && rm /var/lib/alsa/asound.state
 
-		# - Reset active alsactl/amixer state
+		# - Reset active amixer state
 		[[ $INPUT_DEVICE_VALUE == 'none' ]] || alsactl -g init
 
 		# HW specific
@@ -1692,7 +1686,7 @@ Do you want to continue and DISABLE Bluetooth now?' || return 1
 
 	Soundcard_Reset_RPi(){
 
-		# Remove known soundcard dtoverlays
+		# Remove known sound card device tree overlays
 		sed -i '/^[[:blank:]]*dtoverlay=hifiberry-/d' /boot/config.txt
 		sed -i '/^[[:blank:]]*dtoverlay=iqaudio-/d' /boot/config.txt
 		sed -i '/^[[:blank:]]*dtoverlay=justboom-/d' /boot/config.txt
@@ -1705,6 +1699,9 @@ Do you want to continue and DISABLE Bluetooth now?' || return 1
 
 		# Disable I2S
 		sed -i '/^[[:blank:]]*dtparam=i2s=/d' /boot/config.txt
+
+		# Disable HDMI drive
+		sed -Ei 's/^[[:blank:]]*(hdmi_drive(:[01])?=.*$)/#\1/' /boot/config.txt
 
 		# Disable onboard sound
 		G_CONFIG_INJECT 'dtparam=audio=' 'dtparam=audio=off' /boot/config.txt
@@ -1723,13 +1720,13 @@ Do you want to continue and DISABLE Bluetooth now?' || return 1
 		sed -i '/^[[:blank:]]*snd-soc-pcm512x/d' /etc/modules
 		sed -i '/^[[:blank:]]*snd-soc-pcm512x-i2c/d' /etc/modules
 		sed -i '/^[[:blank:]]*snd-soc-odroid-dac2/d' /etc/modules
-
 		if [[ -f '/etc/systemd/system/odroid-hifishield2.service' ]]; then
 
 			systemctl disable --now odroid-hifishield2
 			rm -R /etc/systemd/system/odroid-hifishield2.service*
 
 		fi
+		[[ -d '/etc/systemd/system/odroid-hifishield2.service.d' ]] && rm -R /etc/systemd/system/odroid-hifishield2.service.d
 
 	}
 
@@ -1743,8 +1740,8 @@ Do you want to continue and DISABLE Bluetooth now?' || return 1
 	Soundcard_Reset_H3(){
 
 		# Set HDMI
-		[[ $INPUT_DEVICE_VALUE == 'none' ]] || amixer set -c 0 'Audio lineout' mute 2> /dev/null
 		SOUNDCARD_TARGET_CARD=1
+		[[ $INPUT_DEVICE_VALUE == 'none' ]] || amixer set -c 0 'Audio lineout' mute 2> /dev/null
 
 	}
 
@@ -1831,8 +1828,8 @@ Do you want to continue and DISABLE Bluetooth now?' || return 1
 			# Auto detect USB DAC
 			usb-dac*)
 
-				local usb_detection_card_index=$(aplay -l | mawk '/USB Audio/{print $2;exit}' | sed 's/://g')
-				if disable_error=1 G_CHECK_VALIDINT "$usb_detection_card_index"; then
+				local usb_detection_card_index=$(aplay -l | mawk '/USB Audio/{print $2;exit}' | tr -d :)
+				if disable_error=1 G_CHECK_VALIDINT "$usb_detection_card_index" 0; then
 
 					SOUNDCARD_TARGET_CARD=$usb_detection_card_index
 					SOUNDCARD_TARGET_DEVICE=0
@@ -1840,10 +1837,10 @@ Do you want to continue and DISABLE Bluetooth now?' || return 1
 					# Sparky SBC
 					if (( $G_HW_MODEL == 70 )); then
 
-						# - USB 1.1 compat mode (Sparky currently)
+						# USB 1.1 compat mode (Sparky currently)
 						[[ $INPUT_DEVICE_VALUE == *'1.1' ]] && sed -i 's/aotg\.aotg1_speed=0/aotg.aotg1_speed=1/' $FP_UENV
 
-						# - Unmute all (re: @sudeep)
+						# Unmute all (re: @sudeep)
 						for x in $(amixer -c "$SOUNDCARD_TARGET_CARD" controls | grep layback)
 						do
 
@@ -1888,14 +1885,13 @@ _EOF_
 			#	snd-soc-allo-piano-dac-plus (2.1)
 			snd-soc-allo-piano-dac*)
 
-				if [[ ! -d '/lib/firmware/allo' ]]; then
-
-					INSTALL_URL_ADDRESS='https://raw.githubusercontent.com/sparky-sbc/sparky-test/master/piano-firmware/piano-firmware.tar'
-					G_CHECK_URL "$INSTALL_URL_ADDRESS"
-					G_EXEC curl -sSfL "$INSTALL_URL_ADDRESS" -o package.tar
-					G_EXEC tar -xvf package.tar -C /lib/
-					G_EXEC rm package.tar
-
+				if [[ ! -d '/lib/firmware/allo' ]]
+				then
+					local url='https://raw.githubusercontent.com/sparky-sbc/sparky-test/master/piano-firmware/piano-firmware.tar'
+					G_CHECK_URL "$url"
+					G_EXEC curl -sSfL "$url" -o package.tar
+					G_EXEC tar -xf package.tar -C /lib/
+					G_EXEC_NOHALT=1 G_EXEC rm package.tar
 				fi
 
 				G_CONFIG_INJECT "$INPUT_DEVICE_VALUE" "$INPUT_DEVICE_VALUE" /etc/modules
@@ -1933,48 +1929,54 @@ _EOF_
 			# --------------- RPi -------------------
 			# Onboard
 			#	rpi-bcm2835-auto
-			#	rpi-bcm2835-hdmi
 			#	rpi-bcm2835-3.5mm
-			rpi-bcm2835*)
+			#	rpi-bcm2835-hdmi (hdmi[01] on RPi4)
+			rpi-bcm2835-*)
 
 				# Enable onboard audio dtparm
 				G_CONFIG_INJECT 'dtparam=audio=' 'dtparam=audio=on' /boot/config.txt
 				dtparam audio=on
-				sleep 1 # Allow hardware to init
 
 				# Force 3.5mm out?
 				if [[ $INPUT_DEVICE_VALUE == *'3.5mm' ]]; then
 
-					amixer -c $SOUNDCARD_TARGET_CARD cset numid=3 1
+					G_CONFIG_INJECT 'hdmi_drive:0=' 'hdmi_drive:0=1' /boot/config.txt
+					G_CONFIG_INJECT 'hdmi_drive:1=' 'hdmi_drive:1=1' /boot/config.txt
 
 				elif [[ $INPUT_DEVICE_VALUE == *'hdmi' ]]; then
 
-					amixer -c $SOUNDCARD_TARGET_CARD cset numid=3 2
+					G_CONFIG_INJECT 'hdmi_drive:0=' 'hdmi_drive:0=2' /boot/config.txt
+					G_CONFIG_INJECT 'hdmi_drive:1=' 'hdmi_drive:1=2' /boot/config.txt
 
-				else
+				elif [[ $INPUT_DEVICE_VALUE == *'hdmi0' ]]; then
 
-					amixer -c $SOUNDCARD_TARGET_CARD cset numid=3 0
+					G_CONFIG_INJECT 'hdmi_drive:0=' 'hdmi_drive:0=2' /boot/config.txt
+					G_CONFIG_INJECT 'hdmi_drive:1=' 'hdmi_drive:1=1' /boot/config.txt
+
+				elif [[ $INPUT_DEVICE_VALUE == *'hdmi1' ]]; then
+
+					G_CONFIG_INJECT 'hdmi_drive:0=' 'hdmi_drive:0=1' /boot/config.txt
+					G_CONFIG_INJECT 'hdmi_drive:1=' 'hdmi_drive:1=2' /boot/config.txt
 
 				fi
 
 			;;
 
-			# Allo Piano DAC (firmware + dtoverlay)
+			# Allo Piano DAC (DSP firmware + dtoverlay)
 			#	allo-piano-dac-pcm512x-audio
 			#	allo-piano-dac-plus-pcm512x-audio (2.1)
 			allo-piano-dac*)
 
-				if [[ ! -d '/lib/firmware/allo' ]]; then
-
-					INSTALL_URL_ADDRESS='https://github.com/allocom/piano-firmware/archive/master.zip'
-					G_CHECK_URL "$INSTALL_URL_ADDRESS"
-					wget "$INSTALL_URL_ADDRESS" -O package.zip
-					unzip -o package.zip
-					rm package.zip
-					mkdir -p /lib/firmware
-					mv piano-firmware-master/lib/firmware/allo /lib/firmware/
-					rm -R piano-firmware-master
-
+				if [[ ! -d '/lib/firmware/allo' ]]
+				then
+					local url='https://github.com/allocom/piano-firmware/archive/master.tar.gz'
+					G_CHECK_URL "$url"
+					G_EXEC curl -sSfL "$url" -o package.tar.gz
+					G_EXEC tar -xf package.tar.gz
+					G_EXEC_NOHALT=1 G_EXEC rm package.tar.gz
+					G_EXEC mkdir -p /lib/firmware
+					G_EXEC mv piano-firmware-master/lib/firmware/allo /lib/firmware/
+					G_EXEC_NOHALT=1 G_EXEC rm -R piano-firmware-master
 				fi
 
 				G_CONFIG_INJECT "dtoverlay=$INPUT_DEVICE_VALUE" "dtoverlay=$INPUT_DEVICE_VALUE" /boot/config.txt
