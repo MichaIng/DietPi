@@ -1466,6 +1466,7 @@ _EOF_'
 		G_EXEC dpkg-reconfigure -f noninteractive tzdata
 
 		G_DIETPI-NOTIFY 2 'Configuring keyboard:'
+		echo -e 'XKBMODEL="pc105"\nXKBLAYOUT="gb"' > /etc/default/keyboard
 		dpkg-reconfigure -f noninteractive keyboard-configuration # Keyboard must be plugged in for this to work!
 
 		G_DIETPI-NOTIFY 2 'Configuring console:' # This can be wrong, e.g. when selecting a non-UTF-8 locale during Debian installer
