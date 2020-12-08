@@ -203,7 +203,7 @@ Links to hardware and software manufacturers, sources and build instructions use
 - [Debian distribution](https://salsa.debian.org/)
 - [Raspberry](https://github.com/raspberrypi) [Pi](https://github.com/RPi-Distro)
 - [Hardkernel](https://github.com/hardkernel?tab=repositories)
-- [Meveric's Odroid repository](https://forum.odroid.com/viewtopic.php?f=52&t=5908)
+- [Meveric's Odroid repository](https://forum.odroid.com/viewtopic.php?t=5908)
 - [Sparky](https://github.com/sparkysbc?tab=repositories) [SBC](https://github.com/sparky-sbc/sparky-test)
 - [PINE64](https://www.pine64.org/)
 - [FriendlyARM](https://github.com/friendlyarm?tab=repositories)
@@ -275,6 +275,12 @@ Links to hardware and software manufacturers, sources and build instructions use
 - [Komga](https://github.com/gotson/komga)
 - [HTPC Manager](https://github.com/HTPC-Manager/HTPC-Manager)
 - [Bazarr](https://github.com/morpheus65535/bazarr)
+- [PaperMC](https://github.com/PaperMC/Paper)
+- [Unbound](https://github.com/NLnetLabs/unbound)
+- [Bitwarden_RS](https://github.com/dani-garcia/bitwarden_rs)
+- [Docker](https://github.com/docker/docker-ce)
+- [Portainer](https://github.com/portainer/portainer)
+- [Tor](https://gitlab.torproject.org/tpo/core/tor)
 
 ---
 
