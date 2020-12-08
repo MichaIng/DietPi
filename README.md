@@ -278,6 +278,9 @@ Links to hardware and software manufacturers, sources and build instructions use
 - [PaperMC](https://github.com/PaperMC/Paper)
 - [Unbound](https://github.com/NLnetLabs/unbound)
 - [Bitwarden_RS](https://github.com/dani-garcia/bitwarden_rs)
+- [Docker](https://github.com/docker/docker-ce)
+- [Portainer](https://github.com/portainer/portainer)
+- [Tor](https://gitlab.torproject.org/tpo/core/tor)
 
 ---
 
