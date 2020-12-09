@@ -33,45 +33,51 @@ Use `dietpi-services` to control which installed software has higher or lower pr
 
 ### Contributors
 
-#### Micha (MichaIng)
+#### [Micha](https://github.com/MichaIng)
 
 _Joined Q3 2017_
 
 Project lead (20/02/2019 and onwards), source code contributor, bug fixes, software improvements, DietPi forum administrator.
 
-#### Daniel Knight (Fourdee)
+#### [Daniel Knight](https://github.com/Fourdee)
 
 Project founder and previous project lead (19/02/2019 and previous), source code contributor and tester.
 
-#### JohnVick
+#### [JohnVick](https://dietpi.com/phpbb/memberlist.php?mode=viewprofile&u=575)
 
 _Joined 2016-06-08_
 
 DietPi forum co-administrator, management, support, testing and valuable feedback.
 
-#### sal666
+#### [sal666](https://github.com/sal666)
 
 _Joined 2017-07-26_
 
 Creator and maintainer of the Clonezilla based installer images for x86_64 UEFI systems.
 
-#### Joulinar
+#### [Joulinar](https://github.com/Joulinar)
 
 _Joined Q4 2019_
 
 DietPi forum moderator, support, testing, bug reports + investigation and valuable feedback.
 
-#### StephanStS
+#### [StephanStS](https://github.com/StephanStS)
 
 _Joined Q4 2019_
 
 NanoPi image creator, tester and bug reports.
 
-#### Petru (fpetru)
+#### [Petru](https://github.com/fpetru)
 
 _Joined 2020-05-31_
 
 DietPi documentation author, product manager, SEO and DietPi visibility recommendations.
+
+#### [ravenclaw900](https://github.com/ravenclaw900)
+
+_Joined 2020-10-11_
+
+Source code contributor, implemented PaperMC, Unbound, Tor Relay and related features and functions.
 
 ---
 
