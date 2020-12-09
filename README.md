@@ -1,6 +1,6 @@
 <html>
 	<h1 align="center">
-		<img src="https://raw.githubusercontent.com/MichaIng/DietPi/master/.meta/images/dietpi-logo_150.png" alt="DietPi">
+		<img src="https://raw.githubusercontent.com/MichaIng/DietPi-Website/master/images/dietpi-logo_180x180.png" alt="DietPi Logo">
 	</h1>
 	<p align="center">
 		<b>Lightweight justice for your single-board computer!</b>
@@ -292,7 +292,7 @@ Links to hardware and software manufacturers, sources and build instructions use
 
 <html>
 	<p align="center">
-		<img src="https://www.myvirtualserver.com/images/myvirtualserver_logo.png" alt="myVirtualserver" width="200">
+		<img src="https://www.myvirtualserver.com/images/myvirtualserver_logo.png" alt="myVirtualserver Logo" width="200">
 		<br>DietPi's web hosting is powered by <a href="https://www.myvirtualserver.com">myVirtualserver</a>.
 	</p>
 </html>
