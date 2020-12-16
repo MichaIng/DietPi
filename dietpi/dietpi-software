@@ -5948,7 +5948,14 @@ Package: wireguard wireguard-dkms wireguard-tools\nPin: release n=bullseye\nPin-
 				pip='pip2'
 			fi
 
-			G_EXEC_OUTPUT=1 G_EXEC $pip install -U octoprint
+			# Pre-create user and its home directory to allow user-level Python instance
+			Create_User -G dialout,tty,video -d /mnt/dietpi_userdata/octoprint octoprint
+			G_EXEC mkdir -p /mnt/dietpi_userdata/octoprint
+			G_EXEC chown -R octoprint:octoprint /mnt/dietpi_userdata/octoprint
+
+			# Clear user-level pip cache before installing OctoPrint
+			[[ -d '/mnt/dietpi_userdata/octoprint/.cache' ]] && G_EXEC rm -R /mnt/dietpi_userdata/octoprint/.cache
+			G_EXEC_OUTPUT=1 G_EXEC $pip install -U --user octoprint
 			unset -v pip
 		fi
 
@@ -12367,14 +12374,8 @@ _EOF_
 		then
 			Banner_Configuration
 
-			# User: Grant serial and console devices (3D printer ports) and RPi vcgencmd
-			Create_User -G dialout,tty,video -d /mnt/dietpi_userdata/octoprint octoprint
-
-			# Data
-			G_EXEC mkdir -p /mnt/dietpi_userdata/octoprint
-
 			# Service: https://github.com/OctoPrint/OctoPrint/blob/master/scripts/octoprint.service
-			cat << _EOF_ > /etc/systemd/system/octoprint.service
+			cat << '_EOF_' > /etc/systemd/system/octoprint.service
 [Unit]
 Description=OctoPrint (DietPi)
 Documentation=https://docs.octoprint.org/
@@ -12384,29 +12385,16 @@ After=network-online.target dietpi-boot.service
 [Service]
 Environment="LC_ALL=C.UTF-8" "LANG=C.UTF-8"
 User=octoprint
-ExecStart=$(command -v octoprint) serve
+ExecStart=/mnt/dietpi_userdata/octoprint/.local/bin/octoprint serve
 
 [Install]
 WantedBy=multi-user.target
 _EOF_
 			# CLI alias
-			echo "alias octoprint='sudo -u octoprint octoprint'" > /etc/bashrc.d/dietpi-octoprint.sh
+			echo "alias octoprint='sudo -u octoprint /mnt/dietpi_userdata/octoprint/.local/bin/octoprint'" > /etc/bashrc.d/dietpi-octoprint.sh
 
-			# Permissions
-			G_EXEC chown -R octoprint:octoprint /mnt/dietpi_userdata/octoprint
-			local pip='pip3'
-			(( $G_DISTRO > 4 )) || pip='pip2'
-			echo "octoprint ALL=NOPASSWD: $(command -v systemctl) restart octoprint, $(command -v reboot), $(command -v poweroff), SETENV: $(command -v $pip)" > /etc/sudoers.d/octoprint
-
-			# Force global Python module installs/upgrades via shell sudo wrapper. $TESTBALLOON_OUTPUT needs to be passed which is used for OctoPrint pip check: https://github.com/OctoPrint/OctoPrint/blob/master/src/octoprint/util/pip.py#L408
-			# The implementation of localPipCommand allows a single absolut file path only, hence the little script: https://github.com/OctoPrint/OctoPrint/issues/3700
-			# - Stretch: "--preserve-env=list" does not yet exist in sudo 1.8.19, hence use "TESTBALLOON_OUTPUT=$TESTBALLOON_OUTPUT" to pass the variable, which is slightly less beautiful since it declares an empty variable as well.
-			echo -e "#!/bin/dash\nexec sudo TESTBALLOON_OUTPUT=\$TESTBALLOON_OUTPUT $(command -v $pip) \"\$@\"" > /mnt/dietpi_userdata/octoprint/$pip
-			G_EXEC chmod +x /mnt/dietpi_userdata/octoprint/$pip
-			G_EXEC sudo -u octoprint octoprint config set server.commands.localPipCommand /mnt/dietpi_userdata/octoprint/$pip
-			unset -v pip
-
-			# Apply service and system commands
+			# Apply service and system commands: Allow execution via specific sudoers config
+			echo "octoprint ALL=NOPASSWD: $(command -v systemctl) restart octoprint, $(command -v reboot), $(command -v poweroff)" > /etc/sudoers.d/octoprint
 			G_EXEC sudo -u octoprint octoprint config set server.commands.serverRestartCommand 'sudo systemctl restart octoprint'
 			G_EXEC sudo -u octoprint octoprint config set server.commands.systemRestartCommand 'sudo reboot'
 			G_EXEC sudo -u octoprint octoprint config set server.commands.systemShutdownCommand 'sudo poweroff'
@@ -14070,9 +14058,6 @@ _EOF_
 			# User
 			getent passwd octoprint > /dev/null && userdel octoprint
 			getent group octoprint > /dev/null && groupdel octoprint
-			# Uninstall via pip
-			command -v pip3 > /dev/null && pip3 uninstall -y OctoPrint
-			command -v pip2 > /dev/null && pip2 uninstall -y OctoPrint # Stretch + pre-v6.32
 			# Data
 			[[ -d '/mnt/dietpi_userdata/octoprint' ]] && rm -R /mnt/dietpi_userdata/octoprint
 			# CLI alias
