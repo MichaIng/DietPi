@@ -50,7 +50,7 @@
 
 			clear
 			echo -e '\n\nScreen will be powered down in under 1 minute\n'
-			setterm --blank 1 --powersave on # blank after 1 minute as force requires a poke to bring it back up.
+			setterm --blank 1 --powersave on # Blank after 1 minute as force requires a poke to bring it back up
 			BLANK_SCREEN_ACTIVE=1
 
 		# Turn screen on
@@ -1057,9 +1057,10 @@
 
 	}
 
-	# Tor Relay: Start nyx if not already running
+	# Tor Relay: Switch to nyx TTY, if not already there
 	NYX_PID=
-	Update_Scene_9(){ [[ $NYX_PID ]] || { clear; nyx & NYX_PID=$!; }; }
+	NYX_ACTIVE=
+	Update_Scene_9(){ [[ $NYX_ACTIVE ]] || { chvt 9; NYX_ACTIVE=1; }; }
 
 	#/////////////////////////////////////////////////////////////////////////////////////
 	# Settings File
@@ -1136,6 +1137,7 @@ _EOF_
 	# Start/Stop Control for Menu
 	#/////////////////////////////////////////////////////////////////////////////////////
 	# 0=tty1 1=current
+	TTY=$(readlink -f /proc/$$/fd/1)
 	OUTPUT_DISPLAY_INDEX=0
 
 	Menu_Stop()
@@ -1159,7 +1161,7 @@ _EOF_
 		then
 			output_current_screen=1
 
-		elif [[ $(readlink -f /proc/$$/fd/1) == '/dev/tty1' ]]
+		elif [[ $TTY == '/dev/tty1' ]]
 		then
 			output_current_screen=1
 		fi
@@ -1181,27 +1183,17 @@ _EOF_
 
 	Run_Cloudshell(){
 
-		# Pre-create nyx configuration if enabled and not present yet
-		if [[ ${aEnabledScenes[9]} == 1 && ! -f ~/'.nyx/config' ]]
-		then
-			G_EXEC mkdir -p ~/.nyx
-			cat << '_EOF_' > ~/.nyx/config
-data_directory disabled
-redraw_rate 2
-show_bits true
-show_accounting false
-show_log false
-show_torrc false
-show_interpreter false
-_EOF_
-		fi
-
 		Init_Term_Options
 
-		# Reset terminal and kill nyx on exit, to prevent it from still printing to the screen
+		# Reset terminal and kill nyx on exit
 		G_EXIT_CUSTOM()
 		{
-			[[ $NYX_PID ]] && kill $NYX_PID
+			if [[ $NYX_PID ]]
+			then
+				kill -9 "$NYX_PID"
+				[[ $NYX_ACTIVE ]] && chvt "${TTY#/dev/tty}"
+				deallocvt 9
+			fi
 			clear
 			[[ -f /tmp/$G_PROGRAM_NAME/previous_font ]] && setfont /tmp/$G_PROGRAM_NAME/previous_font
 			setterm --reset
@@ -1210,8 +1202,33 @@ _EOF_
 		# Start Intro
 		(( $RUN_INTRO )) && Run_Intro
 
+		# Tor Relay
+		if [[ ${aEnabledScenes[9]} == 1 ]]
+		then
+			if [[ $TTY == '/dev/tty'[1-9]* ]]
+			then
+				# Pre-create nyx configuration
+				G_EXEC mkdir -p ~/.nyx
+				[[ -f ~/'.nyx/config' ]] || cat << '_EOF_' > ~/.nyx/config
+data_directory disabled
+redraw_rate 2
+show_bits true
+show_accounting false
+show_log false
+show_torrc false
+show_interpreter false
+_EOF_
+			else
+				G_DIETPI-NOTIFY 2 'Tor Relay scene cannot run on pseudo (SSH) or serial terminals, disabling it...'
+				aEnabledScenes[9]=0
+				sleep 1
+			fi
+			nyx &> /dev/tty9 &
+			NYX_PID=$!
+		fi
+
 		# Set Nice to +10 (not critical)
-		renice -n 10 $$ &> /dev/null
+		renice 10 $$
 
 		# Start display updates
 		while :
@@ -1222,8 +1239,8 @@ _EOF_
 			# Disable updates when screen is blanked
 			if (( $BLANK_SCREEN_ACTIVE )); then
 
-				# Tor Relay: Kill nyx if running
-				[[ $NYX_PID ]] && { kill $NYX_PID; NYX_PID=; }
+				# Tor Relay: Switch away from nyx TTY
+				[[ $NYX_ACTIVE ]] && { chvt "${TTY#/dev/tty}"; NYX_ACTIVE=; }
 
 				sleep 60
 
@@ -1232,8 +1249,8 @@ _EOF_
 
 				if (( ${aEnabledScenes[$SCENE_CURRENT]} )); then
 
-					# Tor Relay: Kill nyx if running but not the current scene
-					[[ $NYX_PID && $SCENE_CURRENT != 9 ]] && { kill "$NYX_PID"; NYX_PID=; }
+					# Tor Relay: Switch away from nyx TTY, if not the current scene
+					[[ $NYX_ACTIVE && $SCENE_CURRENT != 9 ]] && { chvt "${TTY#/dev/tty}"; NYX_ACTIVE=; }
 
 					Update_Banner
 
@@ -1311,7 +1328,7 @@ _EOF_
 		(( $TEMPERATURE_OUTPUT_TYPE == 1 )) && temp_output_text='Celsius'
 
 		local target_output_text='Main screen: tty1'
-		(( $OUTPUT_DISPLAY_INDEX == 1 )) && target_output_text="Current screen: $(readlink -f /proc/$$/fd/1)"
+		(( $OUTPUT_DISPLAY_INDEX == 1 )) && target_output_text="Current screen: $TTY"
 
 		local bitbyte_output_text='Bit (Kbit, Mbit, Gbit)'
 		(( $NETWORK_USAGE_CURRENT_OUTPUT_TYPE == 1 )) && bitbyte_output_text='Byte (KiB, MiB, GiB)'
@@ -1480,7 +1497,7 @@ _EOF_
 			aEnabledScenes[$i]=1
 
 			# If selected, assure that nyx Tor monitor is installed
-			[[ $i == 9 ]] && G_AG_CHECK_INSTALL_PREREQ nyx
+			[[ $i == 9 ]] && G_AG_CHECK_INSTALL_PREREQ nyx kbd
 		done
 
 	}
