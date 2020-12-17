@@ -150,7 +150,8 @@ We are always looking for talented people who believe in the DietPi project, and
 
 ### FeatHub
 
-Vote for new suggestions, feature-, software- or image requests, or add your own to our new [FeatHub page](https://feathub.com/MichaIng/DietPi):
+Vote for new suggestions, feature-, software- or image requests, or add your own to our new [FeatHub page](https://feathub.com/MichaIng/DietPi):  
+_Please do always open and cross-reference a  [GitHub issue](https://github.com/MichaIng/DietPi/issues) as well._
 
 [![Feature Requests](https://feathub.com/MichaIng/DietPi?format=svg)](https://feathub.com/MichaIng/DietPi)
 
