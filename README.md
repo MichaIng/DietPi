@@ -83,7 +83,7 @@ Source code contributor, implemented PaperMC, Unbound, Tor Relay and related fea
 
 ### Collaborations
 
-#### DietPi + Amiberry
+#### DietPi + [Amiberry](https://github.com/midwan/amiberry)
 
 _Since 2016-09-02_
 
@@ -94,31 +94,31 @@ https://github.com/MichaIng/DietPi/issues/474
 
 ### Hall of Fame
 
-#### K-Plan
+#### [K-Plan](https://github.com/k-plan)
 
 _Joined 2016-01-01_
 
 Contributions to the DietPi in general, in-depth testing, bug finding and valuable feedback, forum moderator.
 
-#### ZombieVirus
+#### [ZombieVirus](https://dietpi.com/phpbb/memberlist.php?username=ZombieVirus)
 
 _Joined 2016-03-20_
 
 DietPi forum moderator and version history maintainer on forums.
 
-#### Rhkean
+#### [Rhkean](https://github.com/rhkean)
 
 _Joined 2018-03-01_
 
 Contributions to the DietPi in general, including source code, testing, new devices, forum moderator.
 
-#### Pilovali
+#### [Pilovali](https://github.com/pilovali)
 
 _Joined 2015-10-10_
 
 Provided dietpi.com web hosting for 1 year until April 17th 2016. Additionally: forum moderator, testing, bug reporting.
 
-#### xenfomation
+#### [Xenfomation](https://github.com/xenfomation)
 
 _Joined 2016-04-01_
 
