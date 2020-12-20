@@ -59,7 +59,7 @@
 	[[ -f '/etc/apt/sources.list.d/deb-multimedia.list' ]] && rm -v /etc/apt/sources.list.d/deb-multimedia.list
 	[[ -f '/etc/apt/preferences.d/deb-multimedia-pin-99' ]] && rm -v /etc/apt/preferences.d/deb-multimedia-pin-99
 	[[ -f '/etc/apt/preferences.d/backports' ]] && rm -v /etc/apt/preferences.d/backports
-	#	OMV: https://dietpi.com/phpbb/viewtopic.php?f=11&t=2772
+	#	OMV: https://dietpi.com/phpbb/viewtopic.php?t=2772
 	[[ -f '/etc/apt/sources.list.d/openmediavault.list' ]] && rm -v /etc/apt/sources.list.d/openmediavault.list
 	#	Conflicting configs
 	rm -fv /etc/apt/apt.conf.d/*{recommends,armbian}*
@@ -358,7 +358,7 @@ _EOF_
 		until [[ $PREIMAGE_INFO ]]
 		do
 
-			G_WHIP_INPUTBOX 'Please enter the name or URL of the pre-image you installed on this system, prior to running this script. This will be used to identify the pre-image credits.\n\nEG: Debian, Raspbian Lite, Meveric, FriendlyARM, or "forum.odroid.com/viewtopic.php?f=ABC&t=XYZ" etc.\n\nNB: An entry is required.'
+			G_WHIP_INPUTBOX 'Please enter the name or URL of the pre-image you installed on this system, prior to running this script. This will be used to identify the pre-image credits.\n\nEG: Debian, Raspbian Lite, Meveric, FriendlyARM, or "forum.odroid.com/viewtopic.php?t=123456" etc.\n\nNB: An entry is required.'
 			PREIMAGE_INFO=$G_WHIP_RETURNED_VALUE
 
 		done
@@ -811,7 +811,7 @@ Currently installed: $G_DISTRO_NAME (ID: $G_DISTRO)"; then
 			unset -v apackages
 
 		# - G_HW_MODEL specific required firmware/kernel/bootloader packages
-		#	ARMbian grab currently installed packages
+		#	Armbian grab currently installed packages
 		elif [[ $(dpkg-query -Wf '${Package} ') == *'armbian'* ]]; then
 
 			systemctl stop armbian-*
@@ -833,7 +833,7 @@ Currently installed: $G_DISTRO_NAME (ID: $G_DISTRO)"; then
 				do
 
 					aPACKAGES_REQUIRED_INSTALL+=("$line")
-					G_DIETPI-NOTIFY 2 "ARMbian package detected and added: $line"
+					G_DIETPI-NOTIFY 2 "Armbian package detected and added: $line"
 
 				done <<< "$(dpkg-query -Wf '${Package}\n' | mawk -v pat="^$i" '$0~pat')"
 
@@ -876,7 +876,14 @@ Currently installed: $G_DISTRO_NAME (ID: $G_DISTRO)"; then
 		#	ROCK Pi S (official Radxa Debian image)
 		elif (( $G_HW_MODEL == 73 )) && grep -q 'apt\.radxa\.com' /etc/apt/sources.list.d/*.list; then
 
-			G_AGI rockpis-rk-u-boot-latest linux-4.4-rockpis-latest rockchip-overlay
+			# Install Radxa APT repo cleanly: No Bullseye repo available yet
+			G_EXEC rm -Rf /etc/apt/{trusted.gpg,sources.list.d/{,.??,.[^.]}*}
+			G_EXEC eval "curl -sSfL https://apt.radxa.com/${DISTRO_TARGET_NAME/bullseye/buster}-stable/public.key | gpg --dearmor -o /etc/apt/trusted.gpg.d/dietpi-radxa.gpg --yes"
+			G_EXEC eval "echo -e 'deb https://apt.radxa.com/${DISTRO_TARGET_NAME/bullseye/buster}-stable/ ${DISTRO_TARGET_NAME/bullseye/buster} main\n#deb https://apt.radxa.com/${DISTRO_TARGET_NAME/bullseye/buster}-testing/ ${DISTRO_TARGET_NAME/bullseye/buster} main' > /etc/apt/sources.list.d/dietpi-radxa.list"
+			G_AGUP
+
+			# NB: rockpis-dtbo is not required as it doubles the overlays that are already provided (among others) with the kernel package
+			G_AGI rockpis-rk-ubootimg linux-4.4-rock-pi-s-latest rockchip-overlay
 
 		# - Generic kernel + device tree package auto detect
 		else
@@ -1046,7 +1053,7 @@ Currently installed: $G_DISTRO_NAME (ID: $G_DISTRO)"; then
 		# - Stop, disable and remove not required 3rd party services
 		local aservices=(
 
-			# ARMbian
+			# Armbian
 			'firstrun'
 			'resize2fs'
 			'log2ram'
@@ -1057,6 +1064,10 @@ Currently installed: $G_DISTRO_NAME (ID: $G_DISTRO)"; then
 			'cpu_governor'
 			# RPi
 			'sshswitch'
+			# Radxa
+			rockchip-adbd
+			rtl8723ds-btfw-load
+			install-module-hci-uart
 
 		)
 
@@ -1064,10 +1075,10 @@ Currently installed: $G_DISTRO_NAME (ID: $G_DISTRO)"; then
 		do
 
 			# Loop through known service locations
-			for j in /etc/init.d/$i /{etc,lib,usr/lib}/systemd/system/$i.service{,.d}
+			for j in /etc/init.d/$i /{etc,lib,usr/lib,usr/local/lib}/systemd/system/{$i.service{,.d},*.wants/$i.service}
 			do
 
-				[[ -e $j ]] || continue
+				[[ -e $j || -L $j ]] || continue
 				[[ -f $j ]] && systemctl disable --now "${j##*/}"
 				# Remove if not attached to any DEB package, else mask
 				if dpkg -S "$j" &> /dev/null; then
@@ -1109,7 +1120,7 @@ Currently installed: $G_DISTRO_NAME (ID: $G_DISTRO)"; then
 		done
 		unset -v aservices
 
-		# - ARMbian specific
+		# - Armbian specific
 		[[ -f '/boot/armbian_first_run.txt.template' ]] && rm -v /boot/armbian_first_run.txt.template
 		[[ -f '/usr/bin/armbianmonitor' ]] && rm -v /usr/bin/armbianmonitor
 		[[ -d '/etc/armbianmonitor' ]] && rm -Rv /etc/armbianmonitor
@@ -1125,23 +1136,23 @@ Currently installed: $G_DISTRO_NAME (ID: $G_DISTRO)"; then
 		rm -vf /etc/systemd/system/logrotate.service # Override to support Armbian zRAM log
 		rm -vf /etc/apt/apt.conf.d/*armbian*
 		rm -vf /etc/cron.*/*armbian*
-		#rm -vf /etc/default/*armbian* # Required for ARMbian root package upgrade
+		#rm -vf /etc/default/*armbian* # Required for Armbian root package upgrade
 		rm -vf /etc/update-motd.d/*armbian*
 		rm -vf /etc/profile.d/*armbian*
-		#[[ -d '/usr/lib/armbian' ]] && rm -vR /usr/lib/armbian # Required for ARMbian root package upgrade
-		#[[ -d '/usr/share/armbian' ]] && rm -vR /usr/share/armbian # Required for ARMbian root package upgrade
+		#[[ -d '/usr/lib/armbian' ]] && rm -vR /usr/lib/armbian # Required for Armbian root package upgrade
+		#[[ -d '/usr/share/armbian' ]] && rm -vR /usr/share/armbian # Required for Armbian root package upgrade
 		# Place DPKG exclude file, especially to skip cron jobs, which are doomed to fail and an unnecessary overhead + syslog spam on DietPi
 		[[ -f '/etc/armbian-release' ]] && cat << _EOF_ > /etc/dpkg/dpkg.cfg.d/dietpi-no_armbian
-# Exclude conflicting ARMbian files
+# Exclude conflicting Armbian files
 path-exclude /lib/systemd/system/*armbian*
 path-exclude /etc/systemd/system/logrotate.service
 path-exclude /etc/apt/apt.conf.d/*armbian*
 path-exclude /etc/cron.*/*armbian*
-#path-exclude /etc/default/*armbian* # Required for ARMbian root package upgrade
+#path-exclude /etc/default/*armbian* # Required for Armbian root package upgrade
 path-exclude /etc/update-motd.d/*armbian*
 path-exclude /etc/profile.d/*armbian*
-#path-exclude /usr/lib/armbian # Required for ARMbian root package upgrade
-#path-exclude /usr/share/armbian # Required for ARMbian root package upgrade
+#path-exclude /usr/lib/armbian # Required for Armbian root package upgrade
+#path-exclude /usr/share/armbian # Required for Armbian root package upgrade
 _EOF_
 
 		# - OMV: https://github.com/MichaIng/DietPi/issues/2994
@@ -1284,7 +1295,7 @@ _EOF_'
 		# ifupdown starts the daemon outside of systemd, the enabled systemd unit just thows an error on boot due to missing dbus and with dbus might interfere with ifupdown
 		systemctl disable wpa_supplicant 2> /dev/null && G_DIETPI-NOTIFY 2 'Disabled non-required wpa_supplicant systemd unit'
 
-		[[ -L '/etc/network/interfaces' ]] && rm -v /etc/network/interfaces # ARMbian symlink for bulky network-manager
+		[[ -L '/etc/network/interfaces' ]] && rm -v /etc/network/interfaces # Armbian symlink for bulky network-manager
 		G_EXEC_DESC='Configuring network interfaces'
 		G_EXEC eval 'cat << _EOF_ > /etc/network/interfaces
 # Location: /etc/network/interfaces
@@ -1431,6 +1442,12 @@ _EOF_'
 				/boot/dietpi/func/dietpi-set_hardware serialconsole disable ttyS0
 				/boot/dietpi/func/dietpi-set_hardware serialconsole enable serial0
 
+			# ROCK Pi S: Enable on ttyS0 only
+			elif (( $G_HW_MODEL == 73 )); then
+
+				/boot/dietpi/func/dietpi-set_hardware serialconsole disable
+				/boot/dietpi/func/dietpi-set_hardware serialconsole enable ttyS0
+
 			fi
 
 		fi
@@ -1449,6 +1466,7 @@ _EOF_'
 		G_EXEC dpkg-reconfigure -f noninteractive tzdata
 
 		G_DIETPI-NOTIFY 2 'Configuring keyboard:'
+		echo -e 'XKBMODEL="pc105"\nXKBLAYOUT="gb"' > /etc/default/keyboard
 		dpkg-reconfigure -f noninteractive keyboard-configuration # Keyboard must be plugged in for this to work!
 
 		G_DIETPI-NOTIFY 2 'Configuring console:' # This can be wrong, e.g. when selecting a non-UTF-8 locale during Debian installer
@@ -1507,7 +1525,7 @@ _EOF_"
 
 		fi
 
-		# - ARMbian OPi Zero 2: https://github.com/MichaIng/DietPi/issues/876#issuecomment-294350580
+		# - Armbian OPi Zero 2: https://github.com/MichaIng/DietPi/issues/876#issuecomment-294350580
 		if (( $G_HW_MODEL == 35 )); then
 
 			echo 'blacklist bmp085' > /etc/modprobe.d/dietpi-disable_bmp085.conf
@@ -1591,9 +1609,10 @@ _EOF_
 		elif (( $G_HW_MODEL < 10 )); then
 
 			# Scroll lock fix for RPi by Midwan: https://github.com/MichaIng/DietPi/issues/474#issuecomment-243215674
-			cat << _EOF_ > /etc/udev/rules.d/50-leds.rules
-ACTION=="add", SUBSYSTEM=="leds", ENV{DEVPATH}=="*/input*::scrolllock", ATTR{trigger}="kbd-scrollock"
-_EOF_
+			echo 'ACTION=="add", SUBSYSTEM=="leds", ENV{DEVPATH}=="*/input*::scrolllock", ATTR{trigger}="kbd-scrollock"' > /etc/udev/rules.d/50-leds.rules
+
+			# Apply minimum GPU memory split for server usage: This applies a custom dtoverlay to disable VCSM: https://github.com/MichaIng/DietPi/pull/3900
+			/boot/dietpi/func/dietpi-set_hardware gpumemsplit 16
 
 			# Disable RPi camera to add modules blacklist
 			/boot/dietpi/func/dietpi-set_hardware rpi-camera disable
@@ -1601,27 +1620,28 @@ _EOF_
 			# Update USBridgeSig Ethernet driver via postinst kernel script, until it has been merged into official RPi kernel: https://github.com/allocom/USBridgeSig/tree/master/ethernet
 			cat << '_EOF_' > /etc/kernel/postinst.d/dietpi-USBridgeSig
 #!/bin/bash
-# Only available for v7+ and v8+ kernel
-[[ $1 == *'-v'[78]'+' ]] || exit 0
-echo "[ INFO ] Updating ASIX AX88179 driver for kernel $1 with ARM-optimised builds"
+# Only available for v7+
+[[ $1 == *'-v7+' ]] || exit 0
+# Only reasonable for USBridgeSig = CM 3+
+grep -q '^Revision.*10.$' /proc/cpuinfo || exit 0
+echo "[ INFO ] Updating ASIX AX88179 driver for kernel $1 with ARM-optimised build"
 echo '[ INFO ] - by Allo: https://github.com/allocom/USBridgeSig/tree/master/ethernet'
 echo '[ INFO ] Estimating required module layout...'
 module_layout=$(modprobe --dump-modversions /lib/modules/$1/kernel/drivers/net/usb/asix.ko | mawk '/module_layout/{print $1;exit}') || exit 0
 echo '[ INFO ] Downloading stable branch driver...'
 if ! curl -#fL http://3.230.113.73:9011/Allocom/USBridgeSig/stable_rel/rpi-usbs-$1/ax88179_178a.ko -o /tmp/ax88179_178a.ko ||
-	[[ $module_layout != $(modprobe --dump-modversions /tmp/ax88179_178a.ko | mawk '/module_layout/{print $1;exit}') ]]; then
-
+	[[ $module_layout != $(modprobe --dump-modversions /tmp/ax88179_178a.ko | mawk '/module_layout/{print $1;exit}') ]]
+then
 	echo '[ INFO ] No matching stable branch driver found, trying master branch driver...'
 	if ! curl -#fL http://3.230.113.73:9011/Allocom/USBridgeSig/rpi-usbs-$1/ax88179_178a.ko -o /tmp/ax88179_178a.ko ||
-		[[ $module_layout != $(modprobe --dump-modversions /tmp/ax88179_178a.ko | mawk '/module_layout/{print $1;exit}') ]]; then
-
+		[[ $module_layout != $(modprobe --dump-modversions /tmp/ax88179_178a.ko | mawk '/module_layout/{print $1;exit}') ]]
+	then
 		echo '[ INFO ] No matching driver found, cleaning up and aborting...'
 		rm -fv /tmp/ax88179_178a.ko || :
-		echo '[ INFO ] Do not worry, the default RPi kernel driver will be used instead.'
+		echo '[ INFO ] The default RPi kernel driver will be used instead, which might result in pops and ticks in your audio stream. If so, please try to rerun this script later:'
+		echo " - /etc/kernel/postinst.d/dietpi-USBridgeSig $1"
 		exit 0
-
 	fi
-
 fi
 echo '[ INFO ] Installing driver...'
 install -vpm 644 /tmp/ax88179_178a.ko /lib/modules/$1/kernel/drivers/net/usb || exit 0
@@ -1630,16 +1650,16 @@ depmod $1 || exit 0
 echo '[ INFO ] All succeeded, cleaning up...'
 rm -v /tmp/ax88179_178a.ko || exit 0
 _EOF_
-			chmod +x /etc/kernel/postinst.d/dietpi-USBridgeSig
-			# - Update for all installed v7+ and v8+ kernel versions now
-			for i in /lib/modules/*-v[78]+
+			G_EXEC chmod +x /etc/kernel/postinst.d/dietpi-USBridgeSig
+			# Force upgrade now, regardless of current host machine
+			G_EXEC sed -i 's/^grep/#grep/' /etc/kernel/postinst.d/dietpi-USBridgeSig
+			for i in /lib/modules/*-v7+
 			do
-
 				[[ -d $i ]] || continue
 				i=${i##*/}
 				/etc/kernel/postinst.d/dietpi-USBridgeSig "$i"
-
 			done
+			G_EXEC sed -i 's/^#grep/grep/' /etc/kernel/postinst.d/dietpi-USBridgeSig
 
 		# - PINE A64 (and possibily others): Cursor fix for FB
 		elif (( $G_HW_MODEL == 40 )); then

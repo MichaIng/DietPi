@@ -65,7 +65,7 @@
 	[[ -f '/boot/dietpi/.version' ]] && . /boot/dietpi/.version
 	# - Assign defaults/code version as fallback
 	[[ $G_DIETPI_VERSION_CORE ]] || G_DIETPI_VERSION_CORE=6
-	[[ $G_DIETPI_VERSION_SUB ]] || G_DIETPI_VERSION_SUB=33
+	[[ $G_DIETPI_VERSION_SUB ]] || G_DIETPI_VERSION_SUB=34
 	[[ $G_DIETPI_VERSION_RC ]] || G_DIETPI_VERSION_RC=3
 	[[ $G_GITBRANCH ]] || G_GITBRANCH='master'
 	[[ $G_GITOWNER ]] || G_GITOWNER='MichaIng'
@@ -87,55 +87,46 @@ G_GITOWNER='$G_GITOWNER'" > /boot/dietpi/.version
 	#	G_INIT_WAIT_CONCURRENT=<int>	= Max time to wait for concurrent execution to exit before user prompt (default: 5)
 	G_INIT(){
 
+		# Set locale to prevent incorrect scraping due to translated command outputs
+		# Set PATH to expected default to rule out issues due to borken environment, e.g. in combination with "su" or "sudo -E"
+		export LC_ALL='C.UTF-8' LANG='C.UTF-8' PATH='/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin'
+
 		# Set G_PROGRAM_NAME to originating script file (or shell executable) name if it was not set by originating script
 		[[ $G_PROGRAM_NAME ]] || G_PROGRAM_NAME=${0##*/}
 
-		# Check for concurrent execution
-		if [[ $G_INIT_ALLOW_CONCURRENT != 1 ]]; then
+		# HIERARCHY system for G_DIETPI-NOTIFY 3 to reduce highlight or sub script output
+		# shellcheck disable=SC2015
+		[[ $HIERARCHY =~ ^[0-9]+$ ]] && export HIERARCHY=$((HIERARCHY+1)) || export HIERARCHY=0
 
-			local timer=0
-			local limit=${G_INIT_WAIT_CONCURRENT:-5}
+		# Check for concurrent execution
+		if [[ $G_INIT_ALLOW_CONCURRENT != 1 ]]
+		then
+			local timer=0 limit=${G_INIT_WAIT_CONCURRENT:-5}
 
 			while [[ -d /tmp/$G_PROGRAM_NAME ]]
 			do
-
-				if (( $timer < $limit )); then
-
-					G_DIETPI-NOTIFY 2 "Concurrent execution of $G_PROGRAM_NAME detected: Retry ($timer/$limit), please wait..."
-
-					sleep 1
+				if (( $timer < $limit ))
+				then
 					((timer++))
-
+					G_DIETPI-NOTIFY 2 "Concurrent execution of $G_PROGRAM_NAME detected, retrying... ($timer/$limit)"
+					sleep 1
 				else
-
 					G_WHIP_BUTTON_OK_TEXT='Retry'
 					# shellcheck disable=SC2009
-					if ! G_WHIP_YESNO "WARNING: Concurrent execution of $G_PROGRAM_NAME detected\n
+					G_WHIP_YESNO "WARNING: Concurrent execution of $G_PROGRAM_NAME detected\n
 Please check if one of the following applies:
  - This script already runs on another terminal/SSH session.
  - Currently a cron or systemd background job executes the script.
  - You started this script from within another DietPi program, causing a loop.\n
 Please assure that the concurrent execution has finished, before retrying, otherwise cancel this instance.\n
 The following info might help:
-$(ps f -eo pid,user,tty,cmd | grep -i '[d]ietpi')"; then
+$(ps f -eo pid,user,tty,cmd | grep -i '[d]ietpi')" && continue
 
-						G_DIETPI-NOTIFY 1 "Cancelled $G_PROGRAM_NAME due to concurrent execution"
-						exit 1
-
-					fi
-
+					G_DIETPI-NOTIFY 1 "Cancelled $G_PROGRAM_NAME due to concurrent execution"
+					exit 1
 				fi
-
 			done
-
 		fi
-
-		# HIERARCHY system for G_DIETPI-NOTIFY 3 to reduce highlight or sub script output
-		disable_error=1 G_CHECK_VALIDINT "$HIERARCHY" 0 || HIERARCHY=0
-		export HIERARCHY=$((HIERARCHY+1))
-
-		# Set locale for scripts to prevent incorrect scraping due to translated command outputs
-		export LC_ALL='C.UTF-8' LANG='C.UTF-8'
 
 		# Declare exit trap, that runs on EXIT signal, which includes INT (interruption) and TERM (kill)
 		G_EXIT(){
@@ -144,10 +135,9 @@ $(ps f -eo pid,user,tty,cmd | grep -i '[d]ietpi')"; then
 			cd /tmp || G_DIETPI-NOTIFY 1 'Failed to navigate to /tmp'
 
 			# Purge working directory, if existent and no concurrency allowed
-			if [[ $G_INIT_ALLOW_CONCURRENT != 1 && -d /tmp/$G_PROGRAM_NAME ]]; then
-
+			if [[ $G_INIT_ALLOW_CONCURRENT != 1 && -d /tmp/$G_PROGRAM_NAME ]]
+			then
 				rm -R "/tmp/$G_PROGRAM_NAME" || G_DIETPI-NOTIFY 1 "Failed to remove scripts working directory: /tmp/$G_PROGRAM_NAME"
-
 			fi
 
 			# Execute custom exit function, if existent
@@ -159,11 +149,10 @@ $(ps f -eo pid,user,tty,cmd | grep -i '[d]ietpi')"; then
 		# Ensure we are in script working dir or users home dir, if available: https://github.com/MichaIng/DietPi/issues/905#issuecomment-298223705
 		mkdir -p "/tmp/$G_PROGRAM_NAME" && cd "/tmp/$G_PROGRAM_NAME" && return
 		G_DIETPI-NOTIFY 1 "Failed to create or enter scripts working directory: /tmp/$G_PROGRAM_NAME"
-		if [[ $HOME && -d $HOME ]]; then
-
+		if [[ $HOME && -d $HOME ]]
+		then
 			cd "$HOME" && { G_DIETPI-NOTIFY 2 "Entered users home directory: $HOME"; return; }
 			G_DIETPI-NOTIFY 1 "Failed to enter users home directory: $HOME"
-
 		fi
 		G_DIETPI-NOTIFY 2 "Will stay in current directory: $PWD"
 
@@ -200,20 +189,27 @@ $(ps f -eo pid,user,tty,cmd | grep -i '[d]ietpi')"; then
 	#		$3+ = message, prefixed with "${G_NOTIFY_3_MODE}: ", defaults to "Mode: "
 	G_DIETPI-NOTIFY(){
 
-		local ainput_string=("$@") output_string grey green red reset yellow dietpi_green
+		local i ainput_string=("$@") output_string grey green red reset yellow dietpi_green
 		# If this is a terminal, it understands ANSI escape sequences, so use colour, always start left-aligned with colour reset and clear screen from cursor til end.
 		# - Assume if STDIN is a terminal that STDOUT is one as well, e.g. covered by "tee"
-		if [[ -t 0 || -t 1 ]]; then
-
+		if [[ -t 0 || -t 1 ]]
+		then
 			output_string='\e[0m\r\e[J' grey='\e[90m' green='\e[32m' red='\e[31m' reset='\e[0m' yellow='\e[33m' dietpi_green='\e[38;5;154m'
 			# Kill existing process animation if this is not a processing message
-			if [[ $1 != '-2' && -w '/tmp/dietpi-process.pid' ]]; then
-
+			if [[ $1 != '-2' && -w '/tmp/dietpi-process.pid' ]]
+			then
 				kill -9 "$(</tmp/dietpi-process.pid)" &> /dev/null
 				rm -f /tmp/dietpi-process.pid &> /dev/null
-
 			fi
 
+		# Else remove all colour codes from input string
+		else
+			shopt -s extglob
+			for i in "${!ainput_string[@]}"
+			do
+				ainput_string[$i]=${ainput_string[$i]//\\e[[0-9]*([;0-9])m}
+			done
+			shopt -u extglob
 		fi
 		local bracket_l="${grey}[$reset" bracket_r="$grey]$reset"
 		local ok="$bracket_l$green  OK  $bracket_r " failed="$bracket_l${red}FAILED$bracket_r "
@@ -222,7 +218,6 @@ $(ps f -eo pid,user,tty,cmd | grep -i '[d]ietpi')"; then
 		Print(){
 
 			[[ $1 == 1 && $G_PROGRAM_NAME ]] && output_string+="$grey$G_PROGRAM_NAME |$reset "
-			local i
 			for ((i=$1; i<${#ainput_string[@]}; i++))
 			do
 
@@ -262,10 +257,14 @@ $(ps f -eo pid,user,tty,cmd | grep -i '[d]ietpi')"; then
 		elif (( $1 == -2 )); then
 
 			# If this is a terminal, it understands control codes, so make any next output overwrite the processing message.
-			if [[ -t 0 || -t 1 ]]; then
-
+			if [[ -t 0 || -t 1 ]]
+			then
 				# Calculate the amount of output lines and in case move cursor up for correct animation position and to allow overwriting the whole output.
-				local input_string=$(mawk '{gsub("\\\e[[0-9][;0-9]*m","");print}' <<< "${G_PROGRAM_NAME:+$G_PROGRAM_NAME | }$*") # Remove colour codes
+				local input_string="${G_PROGRAM_NAME:+$G_PROGRAM_NAME | }$*"
+				# - Remove colour codes: Use extended globbing
+				shopt -s extglob
+				input_string=${input_string//\\e[[0-9]*([;0-9])m}
+				shopt -u extglob
 				local screen_width
 				[[ -t 0 ]] && screen_width=$(stty size) || screen_width=$(tput cols) # stty requires STDIN, tput requires either STDOUT or STDERR until Stretch
 				local output_lines=$(( ( ${#input_string} + 5 ) / ${screen_width#* } )) # +5 = [ .... ] - $1
@@ -275,9 +274,7 @@ $(ps f -eo pid,user,tty,cmd | grep -i '[d]ietpi')"; then
 
 			# Else, we add a newline to leave processing message complete.
 			else
-
 				ainput_string+=('\n')
-
 			fi
 
 			# Print animation only if this is the terminal control process as otherwise foreign output might cause a mess and we might be not able to kill the animation.
@@ -312,7 +309,6 @@ $(ps f -eo pid,user,tty,cmd | grep -i '[d]ietpi')"; then
 							"$bright_dot$dimmed_dot    "
 						)
 
-						local i
 						for (( i=0; i<=${#aprocess_string[@]}; i++ )); do
 
 							(( i == ${#aprocess_string[@]} )) && i=0
@@ -448,51 +444,11 @@ $grey─────────────────────────
 	}
 
 	#-----------------------------------------------------------------------------------
-	# Alias defines
+	# Shortcut functions
 	#-----------------------------------------------------------------------------------
-	# DietPi scripts, moved from /etc/bash.bashrc
-	# - sudo wrapper that ensures DietPi-Globals with G_* commands are loaded
+	# sudo wrapper that ensures DietPi-Globals with G_* commands are loaded
 	G_SUDO(){ local input=$*; sudo bash -c ". /boot/dietpi/func/dietpi-globals && $input"; }
-	# - sudo alias that allows running other aliases with "sudo": https://github.com/MichaIng/DietPi/issues/424
-	alias sudo='sudo '
-
-	# - DietPi programs
-	alias dietpi-process_tool='/boot/dietpi/dietpi-services' # Leave this in for few versions for end users, due to switchover to dietpi-services
-	alias dietpi-letsencrypt='/boot/dietpi/dietpi-letsencrypt'
-	alias dietpi-autostart='/boot/dietpi/dietpi-autostart'
-	alias dietpi-cron='/boot/dietpi/dietpi-cron'
-	alias dietpi-launcher='/boot/dietpi/dietpi-launcher'
-	alias dietpi-cleaner='/boot/dietpi/dietpi-cleaner'
-	alias dietpi-morsecode='/boot/dietpi/dietpi-morsecode'
-	alias dietpi-sync='/boot/dietpi/dietpi-sync'
-	alias dietpi-backup='/boot/dietpi/dietpi-backup'
-	alias dietpi-bugreport='/boot/dietpi/dietpi-bugreport'
-	alias dietpi-services='/boot/dietpi/dietpi-services'
-	alias dietpi-config='/boot/dietpi/dietpi-config'
-	alias dietpi-software='/boot/dietpi/dietpi-software'
-	alias dietpi-update='/boot/dietpi/dietpi-update'
-	alias dietpi-drive_manager='/boot/dietpi/dietpi-drive_manager'
-	alias dietpi-logclear='/boot/dietpi/func/dietpi-logclear'
-	alias dietpi-survey='/boot/dietpi/dietpi-survey'
-	alias dietpi-explorer='/boot/dietpi/dietpi-explorer'
-	alias dietpi-banner='/boot/dietpi/func/dietpi-banner 2'
-	alias dietpi-justboom='/boot/dietpi/misc/dietpi-justboom'
-	alias dietpi-led_control='/boot/dietpi/dietpi-led_control'
-	alias cpu='/boot/dietpi/dietpi-cpuinfo'
-
-	# - 1337 moments ;)
-	alias 1337='echo Indeed, you are =\)'
-
-	# - Optional DietPi software aliases/functions
-	[[ -d '/var/lib/dietpi/dietpi-software/installed/dietpi-nordvpn' ]] && alias dietpi-nordvpn='/boot/dietpi/misc/dietpi-nordvpn'
-	[[ -f '/opt/retropie/supplementary/emulationstation/emulationstation' ]] && alias emulationstation='/opt/retropie/supplementary/emulationstation/emulationstation'
-	[[ -f '/usr/local/games/opentyrian/run' ]] && alias opentyrian='/usr/local/games/opentyrian/run'
-	# shellcheck disable=SC2139
-	[[ -f '/mnt/dietpi_userdata/dxx-rebirth/run.sh' ]] && alias dxx-rebirth='/mnt/dietpi_userdata/dxx-rebirth/run.sh'
-	[[ -f '/usr/share/applications/kodi.desktop' ]] && alias startkodi='/boot/dietpi/misc/start_kodi'
-	[[ -f '/etc/systemd/system/dietpi-cloudshell.service' ]] && alias dietpi-cloudshell='/boot/dietpi/dietpi-cloudshell'
-	[[ -d '/mnt/dietpi_userdata/sonarr' || -d '/mnt/dietpi_userdata/radarr' || -d '/mnt/dietpi_userdata/lidarr' ]] && alias dietpi-arr_to_RAM='/boot/dietpi/misc/dietpi-arr_to_RAM'
-	# - occ/ncc need to be global function, as aliases are not accessible from non-interactive scripts:
+	# ownCloud/Nextcloud CLI: Implemented as functions to make then available in scripts
 	[[ -f '/var/www/owncloud/occ' ]] && occ(){ sudo -u www-data php /var/www/owncloud/occ "$@"; }
 	[[ -f '/var/www/nextcloud/occ' ]] && ncc(){ sudo -u www-data php /var/www/nextcloud/occ "$@"; }
 
@@ -848,46 +804,43 @@ $grey─────────────────────────
 	# G_WHIP_MENU "message"
 	# - Prompt user to select option from G_WHIP_MENU_ARRAY and save choice to G_WHIP_RETURNED_VALUE
 	# - Exit code: 0=selection done, else=user cancelled or noninteractive
-	G_WHIP_MENU(){
-
+	G_WHIP_MENU()
+	{
 		local result=1
 		unset -v G_WHIP_RETURNED_VALUE # in case left from last call
 
-		if (( $G_INTERACTIVE )); then
-
+		(( $G_INTERACTIVE )) && until [[ $G_WHIP_RETURNED_VALUE ]] # Stay in menu if empty option was selected (separator line)
+		do
 			local WHIP_ERROR WHIP_BACKTITLE WHIP_SCROLLTEXT WHIP_SIZE_X WHIP_SIZE_Y WHIP_SIZE_Z WHIP_MESSAGE=$*
 			G_WHIP_INIT 2
 			G_WHIP_RETURNED_VALUE=$(whiptail ${G_PROGRAM_NAME:+--title "$G_PROGRAM_NAME"} --backtitle "$WHIP_BACKTITLE" --menu "$WHIP_MESSAGE" --ok-button "$G_WHIP_BUTTON_OK_TEXT" --cancel-button "$G_WHIP_BUTTON_CANCEL_TEXT" --default-item "$G_WHIP_DEFAULT_ITEM" $WHIP_SCROLLTEXT "$WHIP_SIZE_Y" "$WHIP_SIZE_X" $WHIP_SIZE_Z "${G_WHIP_MENU_ARRAY[@]}" 3>&1 1>&2 2>&3-; echo $? > /tmp/.WHIP_MENU_RESULT)
 			result=$(</tmp/.WHIP_MENU_RESULT); rm -f /tmp/.WHIP_MENU_RESULT
-
-		fi
+			(( ${result:=1} )) && break # Exit loop in case of cancel button selection or error or if .WHIP_MENU_RESULT could not be created
+		done
 
 		G_WHIP_DESTROY
 		return "$result"
-
 	}
 
 	# G_WHIP_CHECKLIST "message"
 	# - Prompt user to select multiple options from G_WHIP_CHECKLIST_ARRAY and save choice to G_WHIP_RETURNED_VALUE
 	# - Exit code: 0=selection done, else=user cancelled or noninteractive
-	G_WHIP_CHECKLIST(){
-
+	G_WHIP_CHECKLIST()
+	{
 		local result=1
 		unset -v G_WHIP_RETURNED_VALUE # in case left from last call
 
-		if (( $G_INTERACTIVE )); then
-
+		if (( $G_INTERACTIVE ))
+		then
 			local WHIP_ERROR WHIP_BACKTITLE WHIP_SCROLLTEXT WHIP_SIZE_X WHIP_SIZE_Y WHIP_SIZE_Z WHIP_MESSAGE=$*
 			G_WHIP_INIT 3
 			G_WHIP_RETURNED_VALUE=$(whiptail ${G_PROGRAM_NAME:+--title "$G_PROGRAM_NAME"} --backtitle "$WHIP_BACKTITLE" --checklist "$WHIP_MESSAGE" --separate-output --ok-button "$G_WHIP_BUTTON_OK_TEXT" --cancel-button "$G_WHIP_BUTTON_CANCEL_TEXT" --default-item "$G_WHIP_DEFAULT_ITEM" $WHIP_SCROLLTEXT "$WHIP_SIZE_Y" "$WHIP_SIZE_X" $WHIP_SIZE_Z "${G_WHIP_CHECKLIST_ARRAY[@]}" 3>&1 1>&2 2>&3-; echo $? > /tmp/.WHIP_CHECKLIST_RESULT)
 			G_WHIP_RETURNED_VALUE=$(echo -e "$G_WHIP_RETURNED_VALUE" | tr '\n' ' ')
 			result=$(</tmp/.WHIP_CHECKLIST_RESULT); rm -f /tmp/.WHIP_CHECKLIST_RESULT
-
 		fi
 
 		G_WHIP_DESTROY
-		return "$result"
-
+		return "${result:-1}"
 	}
 
 	#-----------------------------------------------------------------------------------
@@ -928,7 +881,7 @@ $grey─────────────────────────
 				[[ $G_EXEC_OUTPUT_COL ]] && echo -ne "$G_EXEC_OUTPUT_COL"
 				"${acommand[@]}" 2>&1 | tee $fp_log
 				exit_code=${PIPESTATUS[0]}
-				[[ $G_EXEC_OUTPUT_COL ]] && printf '\e[0m'
+				[[ $G_EXEC_OUTPUT_COL ]] && echo -ne '\e[0m'
 
 			# - Else print animated processing message only
 			else
@@ -1217,7 +1170,7 @@ $log_content" || break # Exit error handler menu loop on cancel
 	# URL connection test
 	# - Checks a specific HTTP/HTTPS/FTP online resource via its URL
 	# - Required arguments:
-	#	$* = URL + optional wget arguments
+	#	$* = URL + optional curl arguments
 	# - Optional variables:
 	#	G_CHECK_URL_TIMEOUT to override default and dietpi.txt set timeout
 	#	G_CHECK_URL_ATTEMPTS to override default and dietpi.txt set attempts
@@ -1240,12 +1193,12 @@ $log_content" || break # Exit error handler menu loop on cancel
 		fi
 		G_EXEC_RETRIES=$(( $G_CHECK_URL_ATTEMPTS - 1 )) # 2 attempts = 1 retry
 
-		# Re-assign timeout ($6 => acommand[5]) on every retry, in case it is changed as solution attempt
+		# Re-assign timeout ($3 => acommand[2]) on every retry, in case it is changed as solution attempt
 		declare -F G_EXEC_PRE_FUNC &> /dev/null && eval "G_EXEC_PRE_FUNC_ORIG()$(declare -f G_EXEC_PRE_FUNC | tail -n +2)"
-		G_EXEC_PRE_FUNC(){ acommand[5]=$G_CHECK_URL_TIMEOUT; declare -F G_EXEC_PRE_FUNC_ORIG &> /dev/null && G_EXEC_PRE_FUNC_ORIG; }
+		G_EXEC_PRE_FUNC(){ acommand[2]=$G_CHECK_URL_TIMEOUT; declare -F G_EXEC_PRE_FUNC_ORIG &> /dev/null && G_EXEC_PRE_FUNC_ORIG; }
 
-		# Since --tries/-t is not applied on "fatal" errors (resolving failed, connection refused, 404), we need to loop ourself to exclude any temporary issue
-		G_EXEC_DESC="Checking URL: $*" G_EXEC wget --spider -t 1 -T $G_CHECK_URL_TIMEOUT "$@"
+		# "--retry" only applies on "a timeout, an FTP 4xx response code or an HTTP 5xx response code", hence we loop outself.
+		G_EXEC_DESC="Checking URL: $*" G_EXEC curl -ILfvm $G_CHECK_URL_TIMEOUT "$@"
 		local exit_code=$?
 
 		unset -v G_CHECK_URL_TIMEOUT G_CHECK_URL_ATTEMPTS
@@ -1259,7 +1212,7 @@ $log_content" || break # Exit error handler menu loop on cancel
 	G_CHECK_FS_PERMISSION_SUPPORT(){
 
 		local input=$1
-		local result=1
+		local exit_code=1
 
 		while :
 		do
@@ -1302,21 +1255,20 @@ $log_content" || break # Exit error handler menu loop on cancel
 			fi
 
 			# Else ok
-			result=0
+			exit_code=0
 			break
 
 		done
 
 		[[ -f $fp_target ]] && rm -f "$fp_target"
-		return $result
+		return $exit_code
 
 	}
 
 	#-----------------------------------------------------------------------------------
-	# APT
+	# APT: Non-interactive and error-handled wrappers for apt-get commands
 	#-----------------------------------------------------------------------------------
 	# apt-get install
-	#	NB: automatically error handled (G_EXEC)
 	G_AGI(){
 
 		G_CHECK_ROOT_USER 1
@@ -1329,7 +1281,6 @@ $log_content" || break # Exit error handler menu loop on cancel
 	}
 
 	# apt-get purge
-	#	NB: automatically error handled (G_EXEC)
 	G_AGP(){
 
 		G_CHECK_ROOT_USER 1
@@ -1348,14 +1299,14 @@ $log_content" || break # Exit error handler menu loop on cancel
 
 		G_EXEC_DESC="\e[0mAPT purge for: \e[33m$*\e[0m"
 		DEBIAN_FRONTEND=noninteractive G_EXEC_OUTPUT=1 G_EXEC_OUTPUT_COL='\e[90m' G_EXEC apt-get -qq --allow-change-held-packages purge "$@"
+		local exit_code=$?
 
 		unset -f G_EXEC_PRE_FUNC_ORIG
-		return $?
+		return $exit_code
 
 	}
 
-	# apt-get autoremove
-	#	NB: automatically error handled (G_EXEC)
+	# apt-get autopurge
 	G_AGA(){
 
 		G_CHECK_ROOT_USER 1
@@ -1368,7 +1319,6 @@ $log_content" || break # Exit error handler menu loop on cancel
 	}
 
 	# apt-get -f install
-	#	NB: automatically error handled (G_EXEC)
 	G_AGF(){
 
 		G_CHECK_ROOT_USER 1
@@ -1381,7 +1331,11 @@ $log_content" || break # Exit error handler menu loop on cancel
 	}
 
 	# apt-get clean + update
-	#	NB: automatically error handled (G_EXEC)
+	# - $1 = -f: Store number of available APT upgrades to file, which defaults to: /run/dietpi/.apt_updates
+	#	$2 = Optional file path to store number of available APT upgrades to
+	# - $1 = -v: Store number of available APT upgrades to variable, which defaults to: G_AGUP_COUNT
+	#	$2 = Optional variable name to store number of available APT upgrades to
+	# shellcheck disable=SC2120
 	G_AGUP(){
 
 		G_CHECK_ROOT_USER 1
@@ -1392,14 +1346,45 @@ $log_content" || break # Exit error handler menu loop on cancel
 
 		G_EXEC_DESC='\e[0mAPT update'
 		G_EXEC_OUTPUT=1 G_EXEC_OUTPUT_COL='\e[90m' G_EXEC apt-get -q update
+		local exit_code=$?
 
 		unset -f G_EXEC_PRE_FUNC_ORIG
-		return $?
+
+		if [[ $1 == '-'[fv] ]]
+		then
+			local count=0
+			(( $exit_code )) || count=$(apt -qq list --upgradeable 2> /dev/null | wc -l) # Mute "apt" CLI warning
+			if [[ $1 == '-f' ]]
+			then
+				local file=${2:-/run/dietpi/.apt_updates}
+				if (( $count ))
+				then
+					G_DIETPI-NOTIFY 2 "Storing number of available APT upgrades to file: $file"
+					echo "$count" > "$file"
+				else
+					G_DIETPI-NOTIFY 2 "No APT upgrades were found, not creating file: $file"
+					[[ -f $file ]] && rm "$file"
+				fi
+
+			elif [[ $1 == '-v' ]]
+			then
+				local var=${2:-G_AGUP_COUNT}
+				if (( $count ))
+				then
+					G_DIETPI-NOTIFY 2 "Storing number of available APT upgrades to variable: $var"
+					declare -g "$var=$count"
+				else
+					G_DIETPI-NOTIFY 2 "No APT upgrades were found, not creating variable: $var"
+					unset -v "$var"
+				fi
+			fi
+		fi
+
+		return $exit_code
 
 	}
 
 	# apt-get upgrade
-	#	NB: automatically error handled (G_EXEC)
 	G_AGUG(){
 
 		G_CHECK_ROOT_USER 1
@@ -1412,7 +1397,6 @@ $log_content" || break # Exit error handler menu loop on cancel
 	}
 
 	# apt-get dist-upgrade
-	#	NB: automatically error handled (G_EXEC)
 	G_AGDUG(){
 
 		G_CHECK_ROOT_USER 1
@@ -1493,7 +1477,7 @@ $log_content" || break # Exit error handler menu loop on cancel
 		else
 
 			# Array to store possible locations for temp read
-			local afp_temperature=(
+			local i afp_temperature=(
 
 				'/sys/devices/platform/coretemp.*/hwmon/hwmon*/temp*_input' # Intel Mini PCs: https://github.com/MichaIng/DietPi/issues/3172, https://github.com/MichaIng/DietPi/issues/3412
 				'/sys/class/thermal/thermal_zone0/temp'
@@ -1917,6 +1901,10 @@ $log_content" || break # Exit error handler menu loop on cancel
 		local after=${4//\//\\\/}
 		local error
 
+		# Clouring output
+		local yellow reset
+		[[ -t 0 || -t 1 ]] && yellow='\e[33m' reset='\e[0m'
+
 		# Replace password string by asterisks in output string
 		if [[ $GCI_PASSWORD == 1 ]]; then
 
@@ -1965,12 +1953,12 @@ NB:
 			if [[ $GCI_PRESERVE == 1 ]]; then
 
 				# shellcheck disable=SC2015
-				G_DIETPI-NOTIFY 0 "Current setting in \e[33m$file\e[0m will be preserved: \e[33m$([[ $GCI_PASSWORD == 1 ]] && echo "${setting_raw//\\/\\\\}" || grep -Em1 "^[[:blank:]]*$pattern" "$file" | sed 's|\\|\\\\|g')\e[0m"
+				G_DIETPI-NOTIFY 0 "Current setting in $yellow$file$reset will be preserved: $yellow$([[ $GCI_PASSWORD == 1 ]] && echo "${setting_raw//\\/\\\\}" || grep -Em1 "^[[:blank:]]*$pattern" "$file" | sed 's|\\|\\\\|g')$reset"
 
 			elif error=$(grep -Eq "^[[:blank:]]*$setting([[:space:]]|$)" "$file" 2>&1); then
 
 				# shellcheck disable=SC2015
-				G_DIETPI-NOTIFY 0 "Desired setting in \e[33m$file\e[0m was already set: \e[33m$([[ $GCI_PASSWORD == 1 ]] && echo "${setting_raw//\\/\\\\}" || grep -Em1 "^[[:blank:]]*$pattern" "$file" | sed 's|\\|\\\\|g')\e[0m"
+				G_DIETPI-NOTIFY 0 "Desired setting in $yellow$file$reset was already set: $yellow$([[ $GCI_PASSWORD == 1 ]] && echo "${setting_raw//\\/\\\\}" || grep -Em1 "^[[:blank:]]*$pattern" "$file" | sed 's|\\|\\\\|g')$reset"
 
 			elif error=$( (( $(grep -Ec "^[[:blank:]]*$pattern" "$file" 2>&1) > 1 )) 2>&1); then
 				[[ $error ]] && { syntax_error; return 1; }
@@ -1990,18 +1978,18 @@ Please retry with more specific parameter \$1 or apply the setting manually:
 			else
 				[[ $error ]] && { syntax_error; return 1; }
 
-				[[ $GCI_BACKUP == 1 && ! -f $file.bak ]] && cp -a "$file" "$file.bak" && G_DIETPI-NOTIFY 2 "Config file backup created: \e[33m$file.bak\e[0m"
+				[[ $GCI_BACKUP == 1 && ! -f $file.bak ]] && cp -a "$file" "$file.bak" && G_DIETPI-NOTIFY 2 "Config file backup created: $yellow$file.bak$reset"
 				error=$(sed -Ei "0,/^[[:blank:]]*$pattern.*$/s//$setting/" "$file" 2>&1) || { syntax_error; return 1; }
-				G_DIETPI-NOTIFY 0 "Setting in \e[33m$file\e[0m adjusted: \e[33m${setting_raw//\\/\\\\}\e[0m"
+				G_DIETPI-NOTIFY 0 "Setting in $yellow$file$reset adjusted: $yellow${setting_raw//\\/\\\\}$reset"
 
 			fi
 
 		elif error=$(grep -Eq "^[[:blank:]#;]*$pattern" "$file" 2>&1); then
 			[[ $error ]] && { syntax_error; return 1; }
 
-			[[ $GCI_BACKUP == 1 && ! -f $file.bak ]] && cp -a "$file" "$file.bak" && G_DIETPI-NOTIFY 2 "Config file backup created: \e[33m$file.bak\e[0m"
+			[[ $GCI_BACKUP == 1 && ! -f $file.bak ]] && cp -a "$file" "$file.bak" && G_DIETPI-NOTIFY 2 "Config file backup created: $yellow$file.bak$reset"
 			error=$(sed -Ei "0,/^[[:blank:]#;]*$pattern.*$/s//$setting/" "$file" 2>&1) || { syntax_error; return 1; }
-			G_DIETPI-NOTIFY 0 "Comment in \e[33m$file\e[0m converted to setting: \e[33m${setting_raw//\\/\\\\}\e[0m"
+			G_DIETPI-NOTIFY 0 "Comment in $yellow$file$reset converted to setting: $yellow${setting_raw//\\/\\\\}$reset"
 
 		else
 			[[ $error ]] && { syntax_error; return 1; }
@@ -2010,9 +1998,9 @@ Please retry with more specific parameter \$1 or apply the setting manually:
 
 				if error=$(grep -Eq "^[[:blank:]]*$after" "$file" 2>&1); then
 
-					[[ $GCI_BACKUP == 1 && ! -f $file.bak ]] && cp -a "$file" "$file.bak" && G_DIETPI-NOTIFY 2 "Config file backup created: \e[33m$file.bak\e[0m"
+					[[ $GCI_BACKUP == 1 && ! -f $file.bak ]] && cp -a "$file" "$file.bak" && G_DIETPI-NOTIFY 2 "Config file backup created: $yellow$file.bak$reset"
 					error=$(sed -Ei "0,/^[[:blank:]]*$after.*$/s//&\n$setting/" "$file" 2>&1) || { syntax_error; return 1; }
-					G_DIETPI-NOTIFY 0 "Added setting \e[33m${setting_raw//\\/\\\\}\e[0m to \e[33m$file\e[0m after line \e[33m$(grep -Em1 "^[[:blank:]]*$after" "$file" | sed 's|\\|\\\\|g')\e[0m"
+					G_DIETPI-NOTIFY 0 "Added setting $yellow${setting_raw//\\/\\\\}$reset to $yellow$file$reset after line $yellow$(grep -Em1 "^[[:blank:]]*$after" "$file" | sed 's|\\|\\\\|g')$reset"
 
 				else
 					[[ $error ]] && { syntax_error; return 1; }
@@ -2029,11 +2017,11 @@ could not be found in file \$3
 
 			else
 
-				[[ $GCI_BACKUP == 1 && ! -f $file.bak ]] && cp -a "$file" "$file.bak" && G_DIETPI-NOTIFY 2 "Config file backup created: \e[33m$file.bak\e[0m"
+				[[ $GCI_BACKUP == 1 && ! -f $file.bak ]] && cp -a "$file" "$file.bak" && G_DIETPI-NOTIFY 2 "Config file backup created: $yellow$file.bak$reset"
 				# The following sed does not work on empty files:
 				[[ ! -s $file ]] && echo '# Added by DietPi:' >> "$file"
 				error=$(sed -Ei "\$a\\$setting" "$file" 2>&1) || { syntax_error; return 1; }
-				G_DIETPI-NOTIFY 0 "Added setting \e[33m${setting_raw//\\/\\\\}\e[0m to end of file \e[33m$file\e[0m"
+				G_DIETPI-NOTIFY 0 "Added setting $yellow${setting_raw//\\/\\\\}$reset to end of file $yellow$file$reset"
 
 			fi
 
