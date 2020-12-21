@@ -256,7 +256,7 @@ _EOF_
 		# Init setup step headers
 		SETUP_STEP=0
 		readonly G_NOTIFY_3_MODE='Step'
-		G_DIETPI-NOTIFY 3 "[$SETUP_STEP] Detecting existing DietPi system"; ((SETUP_STEP++))
+		G_DIETPI-NOTIFY 3 "$G_PROGRAM_NAME" "[$SETUP_STEP] Detecting existing DietPi system"; ((SETUP_STEP++))
 		#------------------------------------------------------------------------------------------------
 		if [[ -d '/DietPi' || -d '/boot/dietpi' ]]; then
 
@@ -294,7 +294,7 @@ _EOF_
 		fi
 
 		#------------------------------------------------------------------------------------------------
-		G_DIETPI-NOTIFY 3 "[$SETUP_STEP] Target system inputs"; ((SETUP_STEP++))
+		G_DIETPI-NOTIFY 3 "$G_PROGRAM_NAME" "[$SETUP_STEP] Target system inputs"; ((SETUP_STEP++))
 		#------------------------------------------------------------------------------------------------
 
 		# Image creator
@@ -597,7 +597,7 @@ Currently installed: $G_DISTRO_NAME (ID: $G_DISTRO)"; then
 		G_DIETPI-NOTIFY 2 "Selected Debian version: $DISTRO_TARGET_NAME (ID: $DISTRO_TARGET)"
 
 		#------------------------------------------------------------------------------------------------
-		G_DIETPI-NOTIFY 3 "[$SETUP_STEP] Downloading and installing DietPi source code"; ((SETUP_STEP++))
+		G_DIETPI-NOTIFY 3 "$G_PROGRAM_NAME" "[$SETUP_STEP] Downloading and installing DietPi source code"; ((SETUP_STEP++))
 		#------------------------------------------------------------------------------------------------
 
 		local url="https://github.com/$G_GITOWNER/DietPi/archive/$G_GITBRANCH.tar.gz"
@@ -652,7 +652,7 @@ Currently installed: $G_DISTRO_NAME (ID: $G_DISTRO)"; then
 		G_EXEC systemctl daemon-reload
 
 		#------------------------------------------------------------------------------------------------
-		G_DIETPI-NOTIFY 3 "[$SETUP_STEP] APT configuration"; ((SETUP_STEP++))
+		G_DIETPI-NOTIFY 3 "$G_PROGRAM_NAME" "[$SETUP_STEP] APT configuration"; ((SETUP_STEP++))
 		#------------------------------------------------------------------------------------------------
 
 		G_DIETPI-NOTIFY 2 "Setting APT sources.list: $DISTRO_TARGET_NAME $DISTRO_TARGET"
@@ -961,7 +961,7 @@ Currently installed: $G_DISTRO_NAME (ID: $G_DISTRO)"; then
 		G_AGA
 
 		#------------------------------------------------------------------------------------------------
-		G_DIETPI-NOTIFY 3 "[$SETUP_STEP] APT installations"; ((SETUP_STEP++))
+		G_DIETPI-NOTIFY 3 "$G_PROGRAM_NAME" "[$SETUP_STEP] APT installations"; ((SETUP_STEP++))
 		#------------------------------------------------------------------------------------------------
 
 		G_AGDUG
@@ -981,7 +981,7 @@ Currently installed: $G_DISTRO_NAME (ID: $G_DISTRO)"; then
 		G_EXEC_DESC='Preserving modified DEB package config files from now on' G_EXEC rm -v /etc/apt/apt.conf.d/98dietpi-forceconf
 
 		#------------------------------------------------------------------------------------------------
-		G_DIETPI-NOTIFY 3 "[$SETUP_STEP] Applying DietPi tweaks and cleanup"; ((SETUP_STEP++))
+		G_DIETPI-NOTIFY 3 "$G_PROGRAM_NAME" "[$SETUP_STEP] Applying DietPi tweaks and cleanup"; ((SETUP_STEP++))
 		#------------------------------------------------------------------------------------------------
 
 		# https://github.com/jirka-h/haveged/pull/7 https://github.com/MichaIng/DietPi/issues/3689#issuecomment-678322767
@@ -1690,7 +1690,7 @@ _EOF_
 		fi
 
 		#------------------------------------------------------------------------------------------------
-		G_DIETPI-NOTIFY 3 "[$SETUP_STEP] Finalise system for first boot of DietPi"; ((SETUP_STEP++))
+		G_DIETPI-NOTIFY 3 "$G_PROGRAM_NAME" "[$SETUP_STEP] Finalise system for first boot of DietPi"; ((SETUP_STEP++))
 		#------------------------------------------------------------------------------------------------
 
 		G_EXEC_DESC='Enable Dropbear autostart' G_EXEC sed -i '/NO_START=1/c\NO_START=0' /etc/default/dropbear
