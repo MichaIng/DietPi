@@ -47,9 +47,9 @@
 	alias dietpi-wifidb='/boot/dietpi/func/dietpi-wifidb'
 	alias dietpi-optimal_mtu='/boot/dietpi/func/dietpi-optimal_mtu'
 	alias dietpi-cloudshell='/boot/dietpi/dietpi-cloudshell'
+	alias dietpi-nordvpn='/boot/dietpi/misc/dietpi-nordvpn'
 	alias cpu='/boot/dietpi/dietpi-cpuinfo'
 	# - Optional DietPi software aliases
-	[[ -f '/etc/systemd/system/dietpi-nordvpn.service' ]] && alias dietpi-nordvpn='/boot/dietpi/misc/dietpi-nordvpn'
 	[[ -d '/mnt/dietpi_userdata/sonarr' || -d '/mnt/dietpi_userdata/radarr' || -d '/mnt/dietpi_userdata/lidarr' ]] && alias dietpi-arr_to_RAM='/boot/dietpi/misc/dietpi-arr_to_RAM'
 	command -v kodi > /dev/null && alias startkodi='/boot/dietpi/misc/start_kodi'
 	[[ -f '/usr/local/games/opentyrian/run' ]] && alias opentyrian='/usr/local/games/opentyrian/run'
