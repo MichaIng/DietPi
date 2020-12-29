@@ -373,7 +373,7 @@ _EOF_
 		G_WHIP_MENU_ARRAY=(
 
 			'' '●─ ARM ─ Core devices with GPU support '
-			'0' ': Raspberry Pi (All models)'
+			'0' ': Raspberry Pi (all models)'
 			#'0' ': Raspberry Pi 1 (256 MiB)
 			#'1' ': Raspberry Pi 1/Zero (512 MiB)'
 			#'2' ': Raspberry Pi 2'
@@ -382,7 +382,7 @@ _EOF_
 			'11' ': Odroid XU3/XU4/MC1/HC1/HC2'
 			'12' ': Odroid C2'
 			'15' ': Odroid N2'
-			'16' ': Odroid C4'
+			'16' ': Odroid C4/HC4'
 			'44' ': Pinebook'
 			'' '●─ x86_64 '
 			'21' ': x86_64 Native PC'
