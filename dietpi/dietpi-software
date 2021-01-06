@@ -4176,45 +4176,99 @@ amvdec_vp9' > /etc/modules-load.d/dietpi-c4-kodi.conf
 
 		fi
 
-		software_id=93 # Pi-hole
-		if (( ${aSOFTWARE_INSTALL_STATE[$software_id]} == 1 )); then
+		software_id=182 # Unbound
+		if (( ${aSOFTWARE_INSTALL_STATE[$software_id]} == 1 ))
+		then
+			Banner_Installing
 
+			G_DIETPI-NOTIFY 2 'Pre-configuring Unbound to avoid port binding conflicts'
+
+			# Download/update list of root hints
+			Download_Install 'https://www.internic.net/domain/named.root' /var/lib/unbound/root.hints
+
+			# Download base configuration if it does not exist yet
+			[[ -f '/etc/unbound/unbound.conf.d/dietpi.conf' ]] || dps_index=$software_id Download_Install 'unbound.conf' /etc/unbound/unbound.conf.d/dietpi.conf
+
+			# Toggle IPv6 preference based on dietpi.txt settings
+			if grep -q 'CONFIG_ENABLE_IPV6=0' /boot/dietpi.txt
+			then
+				G_CONFIG_INJECT 'do-ip6:[[:blank:]]' '	do-ip6: no' /etc/unbound/unbound.conf.d/dietpi.conf
+
+			elif grep -q 'CONFIG_PREFER_IPV4=0' /boot/dietpi.txt
+			then
+				G_CONFIG_INJECT 'prefer-ip6:[[:blank:]]' '	prefer-ip6: yes' /etc/unbound/unbound.conf.d/dietpi.conf
+			fi
+
+			# Stretch: Remove incompatile setting
+			(( $G_DISTRO < 5 )) && sed -i '/log-replies/d' /etc/unbound/unbound.conf.d/dietpi.conf
+
+			# Pi-hole
+			if (( ${aSOFTWARE_INSTALL_STATE[93]} > 0 )) && grep -q '^[[:blank:]]*port:[[:blank:]][[:blank:]]*53$' /etc/unbound/unbound.conf.d/dietpi.conf
+			then
+				G_DIETPI-NOTIFY 2 'Configuring Unbound to work for Pi-hole'
+				grep '^[[:blank:]]*nameserver[[:blank:]]' /etc/resolv.conf | grep -qvE '[[:blank:]]127.0.0.1(:53)?$' || echo 'nameserver 9.9.9.9' >> /etc/resolv.conf # Failsafe
+				G_CONFIG_INJECT 'port:[[:blank:]]' '	port: 5335' /etc/unbound/unbound.conf.d/dietpi.conf
+				G_CONFIG_INJECT 'interface:[[:blank:]]' '	interface: 127.0.0.1' /etc/unbound/unbound.conf.d/dietpi.conf
+			fi
+
+			[[ -f '/lib/systemd/system/unbound.service' ]] && G_EXEC systemctl restart unbound
+			G_AGI unbound
+			G_EXEC systemctl enable --now unbound # failsafe
+
+			# Pi-hole
+			if (( ${aSOFTWARE_INSTALL_STATE[93]} == 2 ))
+			then
+				G_DIETPI-NOTIFY 2 'Configuring Pi-hole to use Unbound'
+				if [[ -f '/etc/dnsmasq.d/01-pihole.conf' ]]
+				then
+					G_EXEC sed -i '/^[[:blank:]]*server=/d' /etc/dnsmasq.d/01-pihole.conf
+					G_CONFIG_INJECT 'server=' 'server=127.0.0.1#5335' /etc/dnsmasq.d/01-pihole.conf
+					systemctl -q is-active pihole-FTL && G_EXEC systemctl restart pihole-FTL
+				fi
+				if [[ -f '/etc/pihole/setupVars.conf' ]]
+				then
+					G_CONFIG_INJECT 'PIHOLE_DNS_1=' 'PIHOLE_DNS_1=127.0.0.1#5335' /etc/pihole/setupVars.conf
+					G_EXEC sed -i '/^[[:blank:]]*PIHOLE_DNS_2=/d' /etc/pihole/setupVars.conf
+				fi
+			fi
+		fi
+
+		software_id=93 # Pi-hole
+		if (( ${aSOFTWARE_INSTALL_STATE[$software_id]} == 1 ))
+		then
 			Banner_Installing
 
 			INSTALL_URL_ADDRESS='https://install.pi-hole.net'
 			G_CHECK_URL "$INSTALL_URL_ADDRESS"
 
 			# Check free available memory. Increase swap size to prevent gravity running out of mem.
-			if (( $(free -m | mawk '/^Mem:/{print $7;exit}') < 512 && $(free -m | mawk '/^Swap:/{print $2;exit}') < 512 )); then
-
+			if (( $(free -m | mawk '/^Mem:/{print $7;exit}') < 512 && $(free -m | mawk '/^Swap:/{print $2;exit}') < 512 ))
+			then
 				G_DIETPI-NOTIFY 2 'Increasing swap size to 512 MiB for running gravity.sh, please wait...\n'
 				/boot/dietpi/func/dietpi-set_swapfile 512
-
 			fi
 
 			# Dependencies: https://github.com/pi-hole/pi-hole/blob/development/automated%20install/basic-install.sh#L250
 			G_AGI $PHP_NAME-xml $PHP_NAME-sqlite3 $PHP_NAME-intl
 
-			# Unbound
-			if (( ${aSOFTWARE_INSTALL_STATE[182]} > 1 )) && [[ ! -f '/etc/unbound/unbound.conf.d/dietpi-pihole.conf' ]]
+			# Unbound: Switch port to 5335 if it was installed before, else it got just configured within its install step above
+			if (( ${aSOFTWARE_INSTALL_STATE[182]} == 2 )) && grep -q '^[[:blank:]]*port:[[:blank:]][[:blank:]]*53$' /etc/unbound/unbound.conf.d/dietpi.conf
 			then
-				G_WHIP_MSG 'You are installing Pi-hole while Unbound is already installed.  The Unbound port will be changed to 5353.\n\nTo add it to Pi-hole, change one of your DNS servers to 127.0.0.1:5353.'
-				cat << '_EOF_' > /etc/unbound/unbound.conf.d/dietpi-pihole.conf
-port: 5353
-interface: 127.0.0.1
-_EOF_
+				G_WHIP_MSG 'You are installing Pi-hole while Unbound is already installed. The Unbound port will be changed to 5335.\n\nTo add it to Pi-hole, set "127.0.0.1#5335" as only custom (IPv4) upstream DNS server.'
+				grep '^[[:blank:]]*nameserver[[:blank:]]' /etc/resolv.conf | grep -qvE '[[:blank:]]127.0.0.1(:53)?$' || echo 'nameserver 9.9.9.9' >> /etc/resolv.conf # Failsafe
+				G_CONFIG_INJECT 'port:[[:blank:]]' '	port: 5335' /etc/unbound/unbound.conf.d/dietpi.conf
+				G_CONFIG_INJECT 'interface:[[:blank:]]' '	interface: 127.0.0.1' /etc/unbound/unbound.conf.d/dietpi.conf
 				G_EXEC systemctl restart unbound
 			fi
 
 			# Install
 			G_EXEC curl -sSfL "$INSTALL_URL_ADDRESS" -o install.sh
 			G_EXEC chmod +x install.sh
-			# - Skip Lighttpd install, since we allow to choose and install prior to Pi-hole
+			# - Skip web server install, since we allow to choose and install it prior to Pi-hole
 			# - Skip supported OS check. We do not support Debian testing suite but we are testing it already now.
 			export PIHOLE_SKIP_OS_CHECK=true
 			G_EXEC_NOEXIT=1 G_EXEC_OUTPUT=1 G_EXEC ./install.sh --disable-install-webserver || aSOFTWARE_INSTALL_STATE[$software_id]=0
 			G_EXEC_NOHALT=1 G_EXEC rm install.sh
-
 		fi
 
 		software_id=33 # Airsonic
@@ -7023,14 +7077,6 @@ exec sudo -u $ha_user dash -c '$ha_pyenv_activation; exec pip3 install -U homeas
 
 		fi
 
-		software_id=182 # Unbound
-		if (( ${aSOFTWARE_INSTALL_STATE[$software_id]} == 1 ))
-		then
-			Banner_Installing
-			G_AGI unbound
-			G_DIETPI-NOTIFY  2 'It is possible that Unbound just gave an error. This is safe to ignore.'
-		fi
-
 	}
 
 	Apply_SSHServer_Choices(){
@@ -8687,123 +8733,6 @@ _EOF_
 			[[ $nickname ]] && echo "Nickname $nickname" >> /etc/tor/torrc
 			[[ $email ]] && echo "ContactInfo $email" >> /etc/tor/torrc
 			[[ $ipv6 ]] && echo "ORPort [$ipv6]:$orport" >> /etc/tor/torrc
-
-		fi
-
-		software_id=182 # Unbound
-		if (( ${aSOFTWARE_INSTALL_STATE[$software_id]} == 1 )); then
-
-			Banner_Configuration
-
-			# Download list of root hints
-			Download_Install https://www.internic.net/domain/named.root /var/lib/unbound/root.hints
-
-			cat << _EOF_ > /etc/unbound/unbound.conf.d/dietpi.conf
-server:
-    verbosity: 0
-
-    interface: 0.0.0.0
-    port: 53
-    do-ip4: yes
-    do-udp: yes
-    do-tcp: yes
-
-    do-ip6: yes
-
-    prefer-ip6: no
-
-    root-hints: "/var/lib/unbound/root.hints"
-
-    harden-glue: yes
-    harden-large-queries: yes
-
-    harden-dnssec-stripped: yes
-
-    use-caps-for-id: yes
-
-    edns-buffer-size: 1472
-
-    rrset-roundrobin: yes
-
-    cache-min-ttl: 300
-    cache-max-ttl: 86400
-
-    serve-expired: yes
-
-    harden-algo-downgrade: yes
-
-    harden-short-bufsize: yes
-
-    hide-identity: yes
-
-    identity: "Server"
-
-    hide-version: yes
-
-    do-daemonize: no
-
-    neg-cache-size: 4M
-
-    qname-minimisation: yes
-
-    minimal-responses: yes
-
-    prefetch: yes
-    prefetch-key: yes
-
-    num-threads: 1
-
-    msg-cache-size: 50m
-    rrset-cache-size: 100m
-
-    so-reuseport: yes
-
-    so-rcvbuf: 4m
-    so-sndbuf: 4m
-
-    unwanted-reply-threshold: 10000
-
-    ratelimit: 1000
-
-    log-queries: no
-    log-replies: no
-    logfile: ''
-
-    access-control: 0.0.0.0/0 refuse
-    access-control: 127.0.0.1 allow
-    access-control: $(hostname -I | grep -o '192.168.[[:digit:]]').0/24 allow
-
-    private-address: 192.168.0.0/16
-    private-address: 169.254.0.0/16
-    private-address: 172.16.0.0/12
-    private-address: 10.0.0.0/8
-    private-address: fd00::/8
-    private-address: fe80::/10
-_EOF_
-			# Configuration
-			if grep -q 'CONFIG_ENABLE_IPV6=0' /boot/dietpi.txt
-			then
-				G_CONFIG_INJECT 'do-ip6:[[:blank:]]' '    do-ip6: no' /etc/unbound/unbound.conf.d/dietpi.conf
-
-			elif grep -q 'CONFIG_PREFER_IPV4=0' /boot/dietpi.txt
-			then
-				G_CONFIG_INJECT 'prefer-ip6:[[:blank:]]' '    prefer-ip6: yes' /etc/unbound/unbound.conf.d/dietpi.conf
-			fi
-
-			(( $G_DISTRO < 5 )) && sed -i '/log-replies/d' /etc/unbound/unbound.conf.d/dietpi.conf
-
-			if (( ${aSOFTWARE_INSTALL_STATE[93]} > 0 ))
-			then
-				G_DIETPI-NOTIFY 2 'Configuring Unbound to work with Pi-hole'
-				cat << '_EOF_' > /etc/unbound/unbound.conf.d/dietpi-pihole.conf
-port: 5353
-interface: 127.0.0.1
-_EOF_
-				G_CONFIG_INJECT 'PIHOLE_DNS_1=' 'PIHOLE_DNS_1=127.0.0.1#5353' /etc/pihole/setupVars.conf
-				G_CONFIG_INJECT 'PIHOLE_DNS_2=' 'PIHOLE_DNS_2=' /etc/pihole/setupVars.conf
-			fi
-
-			G_EXEC systemctl restart unbound
 
 		fi
 
@@ -13785,25 +13714,33 @@ _EOF_
 		if (( ${aSOFTWARE_INSTALL_STATE[$software_id]} == -1 )); then
 
 			Banner_Uninstalling
-			rm -R /mnt/dietpi_userdata/spotify-connect-web
-			rm /etc/systemd/system/spotify-connect-web.service
+			if [[ -f '/etc/systemd/system/spotify-connect-web.service' ]]; then
+
+				systemctl disable --now spotify-connect-web
+				rm -R /etc/systemd/system/spotify-connect-web.service*
+
+			fi
+			[[ -d '/etc/systemd/system/spotify-connect-web.service.d' ]] && rm -R /etc/systemd/system/spotify-connect-web.service.d
+			[[ -d '/mnt/dietpi_userdata/spotify-connect-web' ]] && rm -R /mnt/dietpi_userdata/spotify-connect-web
 
 		fi
 
-    	software_id=182 # Unbound
-		if (( ${aSOFTWARE_INSTALL_STATE[$software_id]} == -1 )); then
-
+		software_id=182 # Unbound
+		if (( ${aSOFTWARE_INSTALL_STATE[$software_id]} == -1 ))
+		then
 			Banner_Uninstalling
+
+			# Pi-hole: Assure that it does not resolve via Unbound anymore
+			if [[ -f '/etc/dnsmasq.d/01-pihole.conf' ]] && grep -q '^[[:blank:]]*server=127.0.0.1' /etc/dnsmasq.d/01-pihole.conf
+			then
+				G_WHIP_MSG 'The Pi-hole upstream DNS server has been changed to Quad9 due to Unbound being uninstalled.'
+				G_CONFIG_INJECT 'server=127.0.0.1' 'server=9.9.9.9' /etc/dnsmasq.d/01-pihole.conf
+				systemctl -q is-active pihole-FTL && G_EXEC systemctl restart pihole-FTL
+			fi
+			[[ -f '/etc/pihole/setupVars.conf' ]] && grep -q '^[[:blank:]]*PIHOLE_DNS_1=127.0.0.1' /etc/pihole/setupVars.conf && G_CONFIG_INJECT 'PIHOLE_DNS_1=' 'PIHOLE_DNS_1=9.9.9.9' /etc/pihole/setupVars.conf
 
 			G_AGP unbound
 			[[ -d '/etc/unbound' ]] && rm -R /etc/unbound
-
-			if [[ -f '/etc/pihole/setupVars.conf' ]] && grep -q 'PIHOLE_DNS_1=127.0.0.1#5353' /etc/pihole/setupVars.conf
-			then
-				G_WHIP_MSG 'The Pi-hole upstream DNS server has been changed to Quad9 due to Unbound being uninstalled.'
-				G_CONFIG_INJECT 'PIHOLE_DNS_1=' "PIHOLE_DNS_1=9.9.9.9" /etc/pihole/setupVars.conf
-			fi
-
 		fi
 
 		software_id=142 # CouchPotato
