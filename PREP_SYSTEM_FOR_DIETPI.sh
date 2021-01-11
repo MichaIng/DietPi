@@ -373,7 +373,7 @@ _EOF_
 		G_WHIP_MENU_ARRAY=(
 
 			'' '●─ ARM ─ Core devices with GPU support '
-			'0' ': Raspberry Pi (All models)'
+			'0' ': Raspberry Pi (all models)'
 			#'0' ': Raspberry Pi 1 (256 MiB)
 			#'1' ': Raspberry Pi 1/Zero (512 MiB)'
 			#'2' ': Raspberry Pi 2'
@@ -382,7 +382,7 @@ _EOF_
 			'11' ': Odroid XU3/XU4/MC1/HC1/HC2'
 			'12' ': Odroid C2'
 			'15' ': Odroid N2'
-			'16' ': Odroid C4'
+			'16' ': Odroid C4/HC4'
 			'44' ': Pinebook'
 			'' '●─ x86_64 '
 			'21' ': x86_64 Native PC'
@@ -852,11 +852,17 @@ Currently installed: $G_DISTRO_NAME (ID: $G_DISTRO)"; then
 
 			G_AGI linux-image-arm64-odroid-c4 meveric-keyring
 			G_EXEC_NOHALT=1 G_EXEC apt-mark manual u-boot # Workaround until C4 u-boot package has been added to repo: https://dietpi.com/meveric/pool/c4/
+			# Apply kernel postinst steps manually, that depend on /proc/cpuinfo content, not matching when running in a container.
+			[[ -f '/boot/Image' ]] && G_EXEC mv /boot/Image /boot/Image.gz
+			[[ -f '/boot/Image.gz.bak' ]] && G_EXEC rm /boot/Image.gz.bak
 
 		#	Odroid N2
 		elif (( $G_HW_MODEL == 15 )); then
 
 			G_AGI linux-image-arm64-odroid-n2 meveric-keyring
+			# Apply kernel postinst steps manually, that depend on /proc/cpuinfo content, not matching when running in a container.
+			[[ -f '/boot/Image' ]] && G_EXEC mv /boot/Image /boot/Image.gz
+			[[ -f '/boot/Image.gz.bak' ]] && G_EXEC rm /boot/Image.gz.bak
 
 		#	Odroid N1
 		elif (( $G_HW_MODEL == 14 )); then
