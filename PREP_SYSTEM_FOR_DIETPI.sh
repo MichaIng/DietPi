@@ -1161,8 +1161,8 @@ path-exclude /etc/profile.d/*armbian*
 #path-exclude /usr/share/armbian # Required for Armbian root package upgrade
 _EOF_
 		# Armbian auto-login
-		[[ -f '/etc/systemd/system/getty@.service.d/override.conf' ]] && rm -v /etc/systemd/system/getty@.service.d/override.conf
-		[[ -d '/etc/systemd/system/getty@.service.d' ]] && rmdir --ignore-fail-on-non-empty -v /etc/systemd/system/getty@.service.d
+		[[ -d '/etc/systemd/system/getty@.service.d' ]] && rm -Rv /etc/systemd/system/getty@.service.d
+		[[ -d '/etc/systemd/system/serial-getty@.service.d' ]] && rm -Rv /etc/systemd/system/serial-getty@.service.d
 
 		# - OMV: https://github.com/MichaIng/DietPi/issues/2994
 		[[ -d '/etc/openmediavault' ]] && rm -vR /etc/openmediavault
