@@ -1429,12 +1429,6 @@ left_meter_modes=1 1
 right_meters=Memory Swap Tasks LoadAverage Uptime
 right_meter_modes=1 1 2 2 2
 _EOF_'
-
-		G_DIETPI-NOTIFY 2 'Configuring fake-hwclock:'
-		# Allow times in the past
-		G_CONFIG_INJECT 'FORCE=' 'FORCE=force' /etc/default/fake-hwclock
-		systemctl restart fake-hwclock # Failsafe, apply now if date is way far back...
-
 		G_DIETPI-NOTIFY 2 'Configuring serial login consoles:'
 		# On virtual machines, serial consoles are not required
 		if (( $G_HW_MODEL == 20 )); then
@@ -1461,11 +1455,11 @@ _EOF_'
 
 		fi
 
-		G_DIETPI-NOTIFY 2 'Reducing getty count and resource usage:'
-		systemctl mask --now getty-static
-		# - logind features disabled by default. Usually not needed and all features besides auto getty creation are not available without libpam-systemd package.
-		#	- It will be unmasked, automatically if libpam-systemd got installed during dietpi-software install, usually with desktops.
-		systemctl mask --now systemd-logind
+		G_DIETPI-NOTIFY 2 'Disabling static and automatic login prompts on consoles tty2 to tty6:'
+		G_EXEC systemctl mask --now getty-static
+		# - logind features are usually not needed and (aside of automatic getty spawn) require the libpam-systemd package.
+		# - It will be unmasked automatically if libpam-systemd got installed during dietpi-software install, e.g. with desktops.
+		G_EXEC systemctl mask --now systemd-logind
 
 		#G_DIETPI-NOTIFY 2 'Configuring locales:' # Runs at start of script
 
