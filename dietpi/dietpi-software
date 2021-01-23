@@ -1145,7 +1145,7 @@ DietPi-Software will decrypt and use it for software installs. You can change it
 		aSOFTWARE_REQUIRES_DESKTOP[$software_id]=1
 		# Native PC and ARMv7 only
 		aSOFTWARE_AVAIL_G_HW_ARCH[$software_id,1]=0
-		aSOFTWARE_AVAIL_G_HW_MODEL[$software_id,3]=0
+		aSOFTWARE_AVAIL_G_HW_ARCH[$software_id,3]=0
 		#------------------
 		software_id=164
 
@@ -2455,7 +2455,6 @@ DietPi-Software will decrypt and use it for software installs. You can change it
 		if [[ ${aSOFTWARE_INSTALL_STATE[156]} == 1 && $G_HW_ARCH == 2 ]]; then
 
 			aSOFTWARE_INSTALL_STATE[$software_id]=1
-			G_WHIP_MSG 'Warning: The piece of software you are about to install is meant for the x86 platform.\n\nBox86 will be used to run it on ARM, however there may be performance and compatibally issues.'
 			G_DIETPI-NOTIFY 2 "${aSOFTWARE_NAME[$software_id]} will be installed"
 
 		fi
@@ -6083,11 +6082,7 @@ If you want to update ${aSOFTWARE_NAME[$software_id]}, please use its internal u
 			# Add Nvidia i386 driver libs, if Nvidia driver is installed and runnning on x86_64
 			if [[ $G_HW_ARCH == 10 ]]
 			then
-				local nvidia=
-				dpkg-query -s nvidia-driver &> /dev/null && nvidia='nvidia-driver-libs-i386'
-
-				debconf-set-selections <<< 'steam steam/question select I AGREE'
-				G_AGI $nvidia
+				dpkg-query -s nvidia-driver &> /dev/null && G_AGI nvidia-driver-libs-i386
 			elif [[ $G_HW_ARCH == 2 ]]
 			then
 				G_AGI libappindicator1 libtcmalloc-minimal4
@@ -6397,32 +6392,28 @@ If you want to update ${aSOFTWARE_NAME[$software_id]}, please use its internal u
 
 			G_AGI cmake
 
-			Download_Install 'https://github.com/ptitSeb/box86/archive/v0.1.8.tar.gz'
-			G_EXEC mkdir box86-0.1.8/build
-			G_EXEC cd box86-0.1.8/build
+			local version=$(curl -sSfL https://api.github.com/repos/ptitSeb/box86/tags | mawk '/"name": /{print $4;exit}')
+			[[ $version ]] || version='v0.2.0' # Fallback
+			Download_Install "https://github.com/ptitSeb/box86/archive/$version.tar.gz"
+			G_EXEC mkdir box86-${version#v}/build
+			G_EXEC cd box86-${version#v}/build
 
-			if (( $G_HW_MODEL < 10 ))
-			then
-				if [[ $G_HW_MODEL == 2 ]]; then
-					G_EXEC cmake .. -DRPI2=1 -DNOGIT=1 -DCMAKE_BUILD_TYPE=RelWithDebInfo
-				elif [[ $G_HW_MODEL == 3 ]]; then
-					G_EXEC cmake .. -DRPI3=1 -DNOGIT=1 -DCMAKE_BUILD_TYPE=RelWithDebInfo
-				elif [[ $G_HW_MODEL == 4 ]]; then
-					G_EXEC cmake .. -DRPI4=1 -DNOGIT=1 -DCMAKE_BUILD_TYPE=RelWithDebInfo
-				fi
-				G_EXEC_OUTPUT=1 G_EXEC make -j4
-				G_EXEC make install
-				G_EXEC systemctl restart systemd-binfmt
+			if [[ $G_HW_MODEL == 2 ]]; then
+				G_EXEC cmake .. -DRPI2=1 -DNOGIT=1 -DCMAKE_BUILD_TYPE=RelWithDebInfo
+			elif [[ $G_HW_MODEL == 3 ]]; then
+				G_EXEC cmake .. -DRPI3=1 -DNOGIT=1 -DCMAKE_BUILD_TYPE=RelWithDebInfo
+			elif [[ $G_HW_MODEL == 4 ]]; then
+				G_EXEC cmake .. -DRPI4=1 -DNOGIT=1 -DCMAKE_BUILD_TYPE=RelWithDebInfo
 			elif (( $G_HW_MODEL < 20 ))
 			then
 				G_EXEC cmake .. -DODROID=1 -DNOGIT=1 -DCMAKE_BUILD_TYPE=RelWithDebInfo
-				G_EXEC_OUTPUT=1 G_EXEC make
-				G_EXEC make install
 			else
 				G_EXEC cmake .. -DARM_DYNAREC=ON -DNOGIT=1 -DCMAKE_BUILD_TYPE=RelWithDebInfo
-				G_EXEC_OUTPUT=1 G_EXEC make
-				G_EXEC make install
 			fi
+			G_EXEC_OUTPUT=1 G_EXEC make CFLAGS='-g0 -O3' -j$(nproc)
+			G_EXEC strip --remove-section=.comment --remove-section=.note box86
+			G_EXEC make install
+			(( $G_HW_MODEL < 10 )) && G_EXEC systemctl restart systemd-binfmt
 		fi
 
 		software_id=27 # TasmoAdmin
@@ -12429,9 +12420,9 @@ _EOF_
 			ln -s /mnt/dietpi_userdata/steam /root/.steam
 			if [[ $G_HW_ARCH == 2 ]]; then
 				# Stop Steam from trying to install i386 packages on ARM
-				G_EXEC rm /etc/apt/sources.list.d/steam.list 
+				G_EXEC rm /etc/apt/{sources.list.d/steam.list,trusted.gpg.d/steam.gpg}
 				cat << '_EOF_' > /usr/bin/steamdeps
-#!/bin/bash
+#!/bin/dash
 
 exit 0
 _EOF_
@@ -12439,7 +12430,7 @@ _EOF_
 				cat << '_EOF_' > /home/dietpi/Desktop/steam.desktop
 [Desktop Entry]
 Name=Steam
-Exec=sh -c "STEAMOS=1 STEAM_RUNTiME=1 /usr/bin/steam +open steam://open/minigameslist %U"
+Exec=env STEAMOS=1 STEAM_RUNTIME=1 /usr/bin/steam +open steam://open/minigameslist %U
 Icon=steam
 Terminal=false
 Type=Application
@@ -13345,7 +13336,9 @@ _EOF_
 			Banner_Uninstalling
 			rm /usr/local/bin/box86
 			rm /etc/binfmt.d/box86.conf
-			rm -R /usr/lib/i386-linux-gnu/
+			rm /usr/lib/i386-linux-gnu/libstdc++.so.6
+			rm /usr/lib/i386-linux-gnu/libstdc++.so.5
+			rm /usr/lib/i386-linux-gnu/libgcc_s.so.1
 
 		fi
 
@@ -14114,6 +14107,7 @@ _EOF_
 
 			Banner_Uninstalling
 			G_AGP steam-launcher
+			G_AGP steam
 			rm -Rf /{root,home/*}/{.steam,.local/share/Steam} /mnt/dietpi_userdata/steam
 
 		fi
@@ -16569,6 +16563,13 @@ _EOF_
 
 				G_WHIP_MSG 'The DietPi installation of Certbot supports all offered web servers.\n\nOnce the installation has finished, you can setup your free SSL cert with:
  - DietPi-LetsEncrypt\n\nThis is a easy to use frontend for Certbot and allows integration into DietPi systems.\n\nMore information:\n - https://dietpi.com/docs/software/system_security/#lets-encrypt'
+
+			fi
+
+			# Box86
+			if (( ${aSOFTWARE_INSTALL_STATE[186] == 1} )); then
+
+				G_WHIP_MSG 'Warning: The piece of software you are about to install is meant for the x86 platform.\n\nBox86 will be used to run it on ARM, however there may be performance and compatibally issues.'
 
 			fi
 
