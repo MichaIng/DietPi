@@ -150,52 +150,46 @@ _EOF_
 
 	# Global password for software installs
 	GLOBAL_PW=
-	Update_Global_Pw(){
-
-		GLOBAL_PW=
-
+	Update_Global_Pw()
+	{
 		# Use new "pbkdf2" function on Buster to resolve warning about deprecated key derivation used: https://github.com/MichaIng/DietPi/issues/2213
-		local pbkdf2=()
+		local pbkdf2=() encrypt=0
 		(( $G_DISTRO > 4 )) && pbkdf2=('-iter' '10000')
 
 		# Read encrypted password
-		if [[ -f '/var/lib/dietpi/dietpi-software/.GLOBAL_PW.bin' ]]; then
-
-			GLOBAL_PW=$(openssl enc -d -a -md sha256 -aes-256-cbc "${pbkdf2[@]}" -salt -pass pass:'DietPiRocks!' -in /var/lib/dietpi/dietpi-software/.GLOBAL_PW.bin)
-			# - Allow decryption without "-iter 10000" and re-encrypt on dist-upgraded Buster systems
-			if (( $? && $G_DISTRO > 4 )); then
-
-				GLOBAL_PW=$(openssl enc -d -a -md sha256 -aes-256-cbc -salt -pass pass:'DietPiRocks!' -in /var/lib/dietpi/dietpi-software/.GLOBAL_PW.bin)
-				# shellcheck disable=SC2181
-				[[ $? == 0 && $GLOBAL_PW ]] && openssl enc -e -a -md sha256 -aes-256-cbc -iter 10000 -salt -pass pass:'DietPiRocks!' -out /var/lib/dietpi/dietpi-software/.GLOBAL_PW.bin <<< "$GLOBAL_PW"
-
+		if [[ -f '/var/lib/dietpi/dietpi-software/.GLOBAL_PW.bin' ]]
+		then
+			if ! GLOBAL_PW=$(openssl enc -d -a -md sha256 -aes-256-cbc "${pbkdf2[@]}" -salt -pass pass:'DietPiRocks!' -in /var/lib/dietpi/dietpi-software/.GLOBAL_PW.bin)
+			then
+				# Allow decryption without "-iter 10000" and re-encrypt on dist-upgraded Buster systems
+				encrypt=1
+				# In case of error, assure empty password to fallback to default
+				(( $G_DISTRO > 4 )) && GLOBAL_PW=$(openssl enc -d -a -md sha256 -aes-256-cbc -salt -pass pass:'DietPiRocks!' -in /var/lib/dietpi/dietpi-software/.GLOBAL_PW.bin) || GLOBAL_PW=
 			fi
 
 		# If encryption has not yet been done, do it now!
-		elif GLOBAL_PW=$(sed -n '/^[[:blank:]]*AUTO_SETUP_GLOBAL_PASSWORD=/{s/^[^=]*=//p;q}' /boot/dietpi.txt); then
-
-			G_CONFIG_INJECT 'AUTO_SETUP_GLOBAL_PASSWORD=' 'AUTO_SETUP_GLOBAL_PASSWORD=Password has been encrypted and secured on rootFS' /boot/dietpi.txt
-			openssl enc -e -a -md sha256 -aes-256-cbc "${pbkdf2[@]}" -salt -pass pass:'DietPiRocks!' -out /var/lib/dietpi/dietpi-software/.GLOBAL_PW.bin <<< "$GLOBAL_PW"
-			# Inform user if encryption is done after update of an old DietPi instance, else firstrun setup does the job
-			(( $G_DIETPI_INSTALL_STAGE == 2 )) && G_WHIP_MSG '[ INFO ] For security reasons your global software password has been removed from dietpi.txt and instead ecrypted and saved to:
- - /var/lib/dietpi/dietpi-software/.GLOBAL_PW.bin\n
-DietPi-Software will decrypt and use it for software installs. You can change it via:
- - dietpi-config > Security Options > Change Passwords'
-
+		else
+			encrypt=1
+			GLOBAL_PW=$(sed -n '/^[[:blank:]]*AUTO_SETUP_GLOBAL_PASSWORD=/{s/^[^=]*=//p;q}' /boot/dietpi.txt)
+			G_EXEC sed -i '/^[[:blank:]]*AUTO_SETUP_GLOBAL_PASSWORD=/c\#AUTO_SETUP_GLOBAL_PASSWORD= # Password has been ecrypted and saved to rootfs' /boot/dietpi.txt
 		fi
+
+		# Fallback
+		if [[ ! $GLOBAL_PW ]]
+		then
+			encrypt=1
+			GLOBAL_PW='dietpi'
+			G_WHIP_MSG "[FAILED] Unable to obtain your global software password
+\nThe following fallback password will be used:\n - $GLOBAL_PW
+\nYou can change it via:\n - dietpi-config > Security Options > Change Passwords"
+		fi
+
+		# Encrypt
+		[[ $encrypt == 1 ]] && openssl enc -e -a -md sha256 -aes-256-cbc "${pbkdf2[@]}" -salt -pass pass:'DietPiRocks!' -out /var/lib/dietpi/dietpi-software/.GLOBAL_PW.bin <<< $GLOBAL_PW
 
 		# Apply safe permissions
 		chown root:root /var/lib/dietpi/dietpi-software/.GLOBAL_PW.bin
 		chmod 600 /var/lib/dietpi/dietpi-software/.GLOBAL_PW.bin
-
-		# Failsafe
-		if [[ ! $GLOBAL_PW ]]; then
-
-			GLOBAL_PW='dietpi'
-			G_WHIP_MSG "[FAILED] Unable to obtain your global software password\n\nThe following fallback password will be used:\n - $GLOBAL_PW"
-
-		fi
-
 	}
 
 	# Total system RAM: Used to calculate percentage based value for software cache limits, e.g.: OPcache/APCu
