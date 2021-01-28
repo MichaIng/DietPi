@@ -126,23 +126,23 @@ _EOF_
  	fi
 
 	# Setup locale
-	# - Remove existing settings that could break dpkg-reconfigure locales
+	# - Reset existing configs
 	> /etc/environment
 	[[ -f '/etc/default/locale' ]] && rm /etc/default/locale
-	# - NB: DEV, any changes here must be also rolled into function '/boot/dietpi/func/dietpi-set_software locale', for future script use
+	# - Prepare C.UTF-8 generation only, statically shipped as /usr/lib/locale/C.UTF-8 via libc-bin essential package
 	echo 'C.UTF-8 UTF-8' > /etc/locale.gen
+	# - Apply override LC_ALL and default LANG for current script
+	export LC_ALL='C.UTF-8' LANG='C.UTF-8'
 	# - dpkg-reconfigure includes:
 	#	- "locale-gen": Generate locale(s) based on "/etc/locale.gen" or interactive selection.
-	#	- "update-locale": Add $LANG to "/etc/default/locale" based on generated locale(s) or interactive default language selection.
+	#	- "update-locale": Add LANG to "/etc/default/locale" based on generated locale(s) or interactive default language selection.
 	if ! dpkg-reconfigure -f noninteractive locales; then
 
 		echo -e '[FAILED] Locale generation failed. Aborting...\n'
 		exit 1
 
 	fi
-	# - Export locale vars to assure the following whiptail being beautiful
-	export LC_ALL='C.UTF-8' LANG='C.UTF-8'
-	# - Update /etc/default/locales with new values (not effective until next load of bash session, eg: logout/in)
+	# - Add override LC_ALL to "/etc/default/locale" as well
 	update-locale 'LC_ALL=C.UTF-8'
 
 	# Set Git owner
