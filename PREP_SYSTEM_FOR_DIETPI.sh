@@ -262,29 +262,26 @@ _EOF_
 
 			G_DIETPI-NOTIFY 2 'DietPi system found, uninstalling old instance...'
 
-			# Stop services: RAMdisk includes (Pre|Post)Boot due to dependencies
+			# Stop services
 			[[ -f '/boot/dietpi/dietpi-services' ]] && /boot/dietpi/dietpi-services stop
 			[[ -f '/etc/systemd/system/dietpi-ramlog.service' ]] && systemctl stop dietpi-ramlog
-			[[ -f '/etc/systemd/system/dietpi-ramdisk.service' ]] && systemctl stop dietpi-ramdisk
+			[[ -f '/etc/systemd/system/dietpi-ramdisk.service' ]] && systemctl stop dietpi-ramdisk # Includes (Pre|Post)Boot on pre-v6.29 systems
+			[[ -f '/etc/systemd/system/dietpi-preboot.service' ]] && systemctl stop dietpi-preboot # Includes (Pre|Post)Boot on post-v6.28 systems
 
 			# Disable DietPi services
 			for i in /etc/systemd/system/dietpi-*
 			do
-
 				[[ -f $i ]] && systemctl disable --now "${i##*/}"
 				rm -Rfv "$i"
-
 			done
 
 			# Delete any previous existing data
-			# - /DietPi mount point: Pre-v6.29
+			# - Pre-v6.29: /DietPi mount point
 			findmnt /DietPi > /dev/null && umount -R /DietPi
 			[[ -d '/DietPi' ]] && rm -R /DietPi
 			rm -Rfv /{boot,mnt,etc,var/lib,var/tmp,run}/*dietpi*
 			rm -fv /etc{,/cron.*,/{bashrc,profile,sysctl,network/if-up,udev/rules}.d}/{,.}*dietpi*
 			rm -fv /etc/apt/apt.conf.d/{99-dietpi-norecommends,98-dietpi-no_translations,99-dietpi-forceconf} # Pre-v6.32
-
-			[[ -f '/root/DietPi-Automation.log' ]] && rm -v /root/DietPi-Automation.log
 			[[ -f '/boot/Automation_Format_My_Usb_Drive' ]] && rm -v /boot/Automation_Format_My_Usb_Drive
 
 		else
@@ -1024,10 +1021,6 @@ Currently installed: $G_DISTRO_NAME (ID: $G_DISTRO)"; then
 
 		G_DIETPI-NOTIFY 2 'Removing misc files/folders/services, not required by DietPi'
 
-		# shellcheck disable=SC2015,SC2115
-		[[ -d '/home' ]] && rm -Rfv /home/{,.??,.[^.]}* || mkdir /home
-		# shellcheck disable=SC2015,SC2115
-		[[ -d '/media' ]] && rm -Rfv /media/{,.??,.[^.]}* || mkdir /media
 		[[ -d '/selinux' ]] && rm -Rv /selinux
 		[[ -d '/var/cache/apparmor' ]] && rm -Rv /var/cache/apparmor
 		rm -Rfv /var/lib/dhcp/{,.??,.[^.]}*
@@ -1134,8 +1127,6 @@ Currently installed: $G_DISTRO_NAME (ID: $G_DISTRO)"; then
 		[[ -f '/usr/local/sbin/log2ram' ]] && rm -v /usr/local/sbin/log2ram
 		umount /var/log.hdd 2> /dev/null
 		[[ -d '/var/log.hdd' ]] && rm -R /var/log.hdd
-		[[ -f '/root/.not_logged_in_yet' ]] && rm -v /root/.not_logged_in_yet
-		[[ -f '/root/.desktop_autologin' ]] && rm -v /root/.desktop_autologin
 		rm -vf /etc/X11/xorg.conf.d/*armbian*
 		#rm -vf /etc/armbian* armbian-release # Required for kernel/bootloader package upgrade (initramfs postinst)
 		rm -vf /lib/systemd/system/*armbian*
@@ -1145,6 +1136,7 @@ Currently installed: $G_DISTRO_NAME (ID: $G_DISTRO)"; then
 		#rm -vf /etc/default/*armbian* # Required for Armbian root package upgrade
 		rm -vf /etc/update-motd.d/*armbian*
 		rm -vf /etc/profile.d/*armbian*
+		rm -Rfv /etc/skel/.config
 		#[[ -d '/usr/lib/armbian' ]] && rm -vR /usr/lib/armbian # Required for Armbian root package upgrade
 		#[[ -d '/usr/share/armbian' ]] && rm -vR /usr/share/armbian # Required for Armbian root package upgrade
 		# Place DPKG exclude file, especially to skip cron jobs, which are doomed to fail and an unnecessary overhead + syslog spam on DietPi
@@ -1154,6 +1146,7 @@ path-exclude /lib/systemd/system/*armbian*
 path-exclude /etc/systemd/system/logrotate.service
 path-exclude /etc/apt/apt.conf.d/*armbian*
 path-exclude /etc/cron.*/*armbian*
+path-exclude /etc/skel/.config/htop/htoprc
 #path-exclude /etc/default/*armbian* # Required for Armbian root package upgrade
 path-exclude /etc/update-motd.d/*armbian*
 path-exclude /etc/profile.d/*armbian*
@@ -1171,8 +1164,6 @@ _EOF_
 
 		# - Meveric specific
 		[[ -f '/usr/local/sbin/setup-odroid' ]] && rm -v /usr/local/sbin/setup-odroid
-		[[ -d '/root/scripts' ]] && rm -R /root/scripts
-		[[ -f '/root/resize--log.txt' ]] && rm /root/resize--log.txt
 		rm -fv /installed-packages*.txt
 
 		# - RPi specific: https://github.com/MichaIng/DietPi/issues/1631#issuecomment-373965406
@@ -1206,11 +1197,6 @@ _EOF_
 
 		#-----------------------------------------------------------------------------------
 		# Bash Profiles
-
-		# - Pre v6.9 cleaning:
-		[[ -f '/root/.bashrc' ]] && sed -i '/\/DietPi/d' /root/.bashrc
-		[[ -f '/home/dietpi/.bashrc' ]] && sed -i '/\/DietPi/d' /home/dietpi/.bashrc
-		rm -vf /etc/profile.d/99-dietpi*
 
 		# - Enable /etc/bashrc.d/ support for custom interactive non-login shell scripts:
 		sed -i '\#/etc/bashrc\.d/#d' /etc/bash.bashrc
@@ -1364,9 +1350,9 @@ _EOF_'
 		echo -e "Samba client: $info_use_drive_manager" > /mnt/samba/readme.txt
 		echo -e "NFS client: $info_use_drive_manager" > /mnt/nfs_client/readme.txt
 
-		G_DIETPI-NOTIFY 2 'Restoring original MOTD:'
-		rm -fv /etc/motd
-		cp -v /usr/share/base-files/motd /etc/motd
+		G_DIETPI-NOTIFY 2 'Restoring default base files:'
+		rm -Rfv /etc/{motd,profile,update-motd.d,issue{,.net}} /root /home /media /var/mail
+		G_AGI --reinstall base-files # Restores /root/.{profile,bashrc} /etc/{motd,profile} /media /var/mail via postinst
 
 		# Add pre-up lines for WiFi on OrangePi Zero
 		if (( $G_HW_MODEL == 32 )); then
@@ -1860,9 +1846,6 @@ _EOF_
 
 		G_DIETPI-NOTIFY 2 'Please delete outdated non-APT kernel modules:'
 		ls -lAh /lib/modules
-
-		G_DIETPI-NOTIFY 2 'Please check and delete all non-required home diretory content:'
-		ls -lAh /root /home/*/
 
 		G_DIETPI-NOTIFY 0 'Completed, disk can now be saved to .img for later use, or, reboot system to start first run of DietPi.'
 
