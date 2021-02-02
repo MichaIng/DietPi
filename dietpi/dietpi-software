@@ -192,8 +192,10 @@ _EOF_
 		chmod 600 /var/lib/dietpi/dietpi-software/.GLOBAL_PW.bin
 	}
 
-	# Total system RAM: Used to calculate percentage based value for software cache limits, e.g.: OPcache/APCu
-	RAM_TOTAL=$(free -m | mawk '/^Mem:/{print $2;exit}')
+	# Total physical system RAM: Used to calculate percentage based value for software cache limits, e.g.: OPcache/APCu
+	RAM_PHYS=$(free -m | mawk '/^Mem:/{print $2;exit}')
+	# Total RAM + swap space: Used to estimate whether the swap file size needs to be increased.
+	RAM_TOTAL=$(free -tm | mawk '/^Total:/{print $2;exit}')
 
 	# Run Installation Flag (1 = run installs)
 	GOSTARTINSTALL=0
@@ -2805,7 +2807,7 @@ _EOF_
 		# Cache size (MB) 1/10th of total mem
 		if (( $1 == 0 )); then
 
-			output=$(( $RAM_TOTAL / 10 ))
+			output=$(( $RAM_PHYS / 10 ))
 
 		# Max active downloads
 		elif (( $1 == 1 )); then
@@ -3004,6 +3006,7 @@ _EOF_
 	{
 		local file=$1 service=$2
 		local timeout=${3:-25} # Optional
+		local output=$4 pid # Optional, if timeout is set, hence for startups which may take long so that showing some process becomes reasonable
 		local content=$CREATE_CONFIG_CONTENT # Optional
 		unset -v CREATE_CONFIG_CONTENT
 
@@ -3014,16 +3017,24 @@ _EOF_
 		G_EXEC systemctl daemon-reload
 
 		# File does not exist or does not contain required content: Start service
-		G_EXEC_DESC="Starting ${aSOFTWARE_NAME[$software_id]} to pre-create config file" G_EXEC systemctl start "$service"
+		G_EXEC_DESC="Starting ${aSOFTWARE_NAME[$software_id]} to pre-create config file in max $timeout seconds" G_EXEC systemctl start "$service"
+
+		# Print and follow output of the service startup
+		[[ $output ]] && { journalctl -fu "$service" & pid=$!; }
 
 		# Wait for max $timeout seconds until config file has been created and required content added, if given
 		local i=0
-		until [[ -f $file ]] && { [[ ! $content ]] || grep -q "$content" "$file"; } || (( $i >= $timeout ))
+		until [[ -f $file ]] && { [[ ! $content ]] || grep -q "$content" "$file"; } || (( $i >= $timeout )) || ! systemctl -q is-active "$service"
 		do
 			((i++))
-			G_DIETPI-NOTIFY -2 "Waiting for ${aSOFTWARE_NAME[$software_id]} config file to be created ($i/$timeout)"
+			[[ $output ]] || G_DIETPI-NOTIFY -2 "Waiting for ${aSOFTWARE_NAME[$software_id]} config file to be created ($i/$timeout)"
 			sleep 1
 		done
+
+		# Stop journal prints
+		[[ $output ]] && { kill $pid; wait $pid; } 2> /dev/null
+
+		# Stop service
 		sleep 1
 		G_EXEC_NOHALT=1 G_EXEC systemctl stop "$service"
 		sleep 1
@@ -3035,7 +3046,7 @@ _EOF_
 			return 0
 		fi
 
-		G_DIETPI-NOTIFY 1 "Waiting for ${aSOFTWARE_NAME[$software_id]} config file timed out, skipping pre-configuration"
+		G_DIETPI-NOTIFY 1 "Waiting for ${aSOFTWARE_NAME[$software_id]} config file failed, skipping pre-configuration"
 		return 1
 	}
 
@@ -5592,14 +5603,14 @@ Package: wireguard wireguard-dkms wireguard-tools\nPin: release n=bullseye\nPin-
 			G_EXEC mv "bitwarden_rs-$version" /opt/bitwarden_rs
 
 			# Assure 2 GiB overall memory (-100 MiB to avoid tiny swap space) is available and limit concurrent cargo build jobs to 2 if less than 3 GiB memory is available.
-			local memory=$(free -tm | mawk '/^Total:/{print $2;exit}') jobs=
-			if (( $memory < 1948 ))
+			local jobs=
+			if (( $RAM_TOTAL < 1948 ))
 			then
 				G_DIETPI-NOTIFY 2 'Bitwaden_RS build requires at least 2 GiB memory. We will now increase your swap size to satisfy this requirement.'
 				/boot/dietpi/func/dietpi-set_swapfile 1
 				(( $G_HW_CPU_CORES > 2 )) && jobs=2
 
-			elif (( $memory < 3072 && $G_HW_CPU_CORES > 2 ))
+			elif (( $RAM_TOTAL < 3072 && $G_HW_CPU_CORES > 2 ))
 			then
 				jobs=2
 			fi
@@ -6339,7 +6350,7 @@ If you want to update ${aSOFTWARE_NAME[$software_id]}, please use its internal u
 			G_EXEC eval "echo 'mycroft ALL=NOPASSWD: ALL' > /etc/sudoers.d/mycroft"
 
 			# Assure 2 GiB overall memory (-100 MiB to avoid tiny swap space) is available
-			if (( $(free -tm | mawk '/^Total:/{print $2;exit}') < 1948 )); then
+			if (( $RAM_TOTAL < 1948 )); then
 
 				G_DIETPI-NOTIFY 2 '\e[33m[WARNING] Insufficient overall memory size: Mycroft AI requires at least 2 GiB memory on first start. We will now attempt to increase your swap size to satisfy this requirement.'
 				/boot/dietpi/func/dietpi-set_swapfile 1
@@ -6541,9 +6552,15 @@ exec sudo -u $ha_user dash -c '$ha_pyenv_activation; exec pip3 install -U homeas
 			# Make sure user agrees to the EULA
 			G_WHIP_BUTTON_OK_TEXT='YES'
 			G_WHIP_BUTTON_CANCEL_TEXT='NO'
-			if G_WHIP_YESNO 'Do you agree to the Minecraft EULA found at:\n\nhttps://account.mojang.com/documents/minecraft_eula'
+			if [[ -f '/mnt/dietpi_userdata/papermc/eula.txt' ]] || G_WHIP_YESNO 'Do you agree to the Minecraft EULA found at:\n\nhttps://account.mojang.com/documents/minecraft_eula'
 			then
-				Download_Install 'https://papermc.io/ci/job/Paper-1.16/lastStableBuild/artifact/paperclip.jar' /opt/papermc/paperclip.jar
+				# Collect latest version of PaperMC
+				local url='https://papermc.io/api/v2/projects/paper'
+				local version=$(curl -sSfL "$url"); version=${version%\"*} version=${version##*\"}
+				local build=$(curl -sSfL "$url/versions/$version"); build=${build%]*} build=${build##*[,[]}
+				#local file=$(curl -sSfL "$url/versions/$version/builds/$build"); file=${file##*\"name\":\"} file=${file%%\"*}
+				# Download and install PaperMC
+				Download_Install "$url/versions/$version/builds/$build/downloads/paper-$version-$build.jar" /opt/papermc/paperclip.jar
 				G_EXEC mkdir -p /mnt/dietpi_userdata/papermc
 				G_EXEC eval 'echo "eula=true" > /mnt/dietpi_userdata/papermc/eula.txt'
 			else
@@ -7461,7 +7478,7 @@ _EOF_
 			# - Nginx: https://github.com/MichaIng/DietPi/issues/546 => https://github.com/MichaIng/DietPi/blob/dev/.conf/dps_85/nginx.conf
 
 			# Cache settings
-			local target_php_cachesize=$(( $RAM_TOTAL / 30 ))
+			local target_php_cachesize=$(( $RAM_PHYS / 30 ))
 			(( $target_php_cachesize < 10 )) && target_php_cachesize=10
 			# - OPcache
 			G_CONFIG_INJECT 'opcache.enable[[:blank:]]*=' 'opcache.enable=1' $target_php_ini
@@ -7956,7 +7973,7 @@ location = /.well-known/caldav {
 			grep -q "^[[:blank:]]*'maintenance' => true," $config_php || occ maintenance:mode --on
 
 			# On <1 GiB devices assure at least 512 MiB swap space are available to stand 512 MiB file uploads + increased PHP cache and session file usage: https://github.com/MichaIng/DietPi/issues/2293
-			(( $RAM_TOTAL < 924 && $(free -m | mawk '/^Swap:/{print $2;exit}') < 512 )) && /boot/dietpi/func/dietpi-set_swapfile 512
+			(( $RAM_PHYS < 924 && $(free -m | mawk '/^Swap:/{print $2;exit}') < 512 )) && /boot/dietpi/func/dietpi-set_swapfile 512
 
 		fi
 
@@ -8217,7 +8234,7 @@ The install script will now exit. After applying one of the the above, rerun die
 			grep -q "^[[:blank:]]*'maintenance' => true," $config_php || ncc maintenance:mode --on
 
 			# On <1 GiB devices assure at least 512 MiB swap space are available to stand 512 MiB file uploads + increased PHP cache and session file usage: https://github.com/MichaIng/DietPi/issues/2293
-			(( $RAM_TOTAL < 924 && $(free -m | mawk '/^Swap:/{print $2;exit}') < 512 )) && /boot/dietpi/func/dietpi-set_swapfile 512
+			(( $RAM_PHYS < 924 && $(free -m | mawk '/^Swap:/{print $2;exit}') < 512 )) && /boot/dietpi/func/dietpi-set_swapfile 512
 
 		fi
 
@@ -9370,7 +9387,7 @@ Do you want to block public access to the admin panel now?" && eval "$enable_cmd
 			Create_User -g dietpi -G audio -d /mnt/dietpi_userdata/airsonic airsonic
 
 			# Optimise memory limit
-			local memory_limit=$(( $RAM_TOTAL / 5 ))
+			local memory_limit=$(( $RAM_PHYS / 5 ))
 			(( $memory_limit < 200 )) && memory_limit=200
 
 			# Service
@@ -9411,7 +9428,7 @@ _EOF_
 
 			# Config
 			# - Optimise memory limit
-			local memory_limit=$(( $RAM_TOTAL / 5 ))
+			local memory_limit=$(( $RAM_PHYS / 5 ))
 			(( $memory_limit < 200 )) && memory_limit=200
 			G_CONFIG_INJECT 'SUBSONIC_USER=' 'SUBSONIC_USER=subsonic' /etc/default/subsonic
 			G_CONFIG_INJECT 'SUBSONIC_ARGS=' "SUBSONIC_ARGS='--quiet --pidfile=/run/subsonic.pid --max-memory=$memory_limit --default-music-folder=/mnt/dietpi_userdata/Music --default-podcast-folder=/mnt/dietpi_userdata/Music --default-playlist-folder=/mnt/dietpi_userdata/Music'" /etc/default/subsonic
@@ -9826,7 +9843,7 @@ _EOF_
 			G_EXEC ln -s /var/log/ubooquity /mnt/dietpi_userdata/ubooquity/logs
 
 			# Optimise memory limit
-			local memory_limit=$(( $RAM_TOTAL / 5 ))
+			local memory_limit=$(( $RAM_PHYS / 5 ))
 			(( $memory_limit < 200 )) && memory_limit=200
 
 			# Service
@@ -9890,7 +9907,7 @@ spring:
     url: jdbc:h2:/mnt/dietpi_userdata/komga/database.h2
 _EOF_
 			# Optimise memory limit
-			local memory_limit=$(( $RAM_TOTAL / 5 ))
+			local memory_limit=$(( $RAM_PHYS / 5 ))
 			(( $memory_limit < 200 )) && memory_limit=200
 
 			# Service
@@ -11119,7 +11136,7 @@ schedule2 = session_save, 240, 300, ((session.save))
 schedule2 = monitor_diskspace, 15, 60, ((close_low_diskspace, 1000M))
 system.umask.set = 002
 # Max memory mapping size, not max physical RAM usage!
-pieces.memory.max.set = ${RAM_TOTAL}M
+pieces.memory.max.set = ${RAM_PHYS}M
 pieces.hash.on_completion.set = no
 
 ### Connection settings
@@ -12859,6 +12876,19 @@ _EOF_
 			# Permissions
 			G_EXEC chown -R papermc:papermc /{mnt/dietpi_userdata,var/log}/papermc
 
+			# Assure 1.5 GiB overall memory (-100 MiB to avoid tiny swap space) is available.
+			local heap_size='512'
+			if (( $RAM_TOTAL < 1436 ))
+			then
+				G_DIETPI-NOTIFY 2 'Stable PaperMC operation requires at least 1.5 GiB system memory. We will now increase your swap size to satisfy this requirement.'
+				/boot/dietpi/func/dietpi-set_swapfile $(( 1536 - $RAM_PHYS ))
+
+			# On 2 GiB+ physical RAM devices, apply 1 GiB heap size by default
+			elif (( $RAM_PHYS > 1848 ))
+			then
+				heap_size='1024'
+			fi
+
 			# Service
 			cat << _EOF_ > /etc/systemd/system/papermc.service
 [Unit]
@@ -12869,7 +12899,7 @@ Documentation=https://paper.readthedocs.io/
 User=papermc
 SyslogIdentifier=papermc
 WorkingDirectory=/mnt/dietpi_userdata/papermc
-ExecStart=$(command -v java) -jar /opt/papermc/paperclip.jar --nogui --noconsole
+ExecStart=$(command -v java) -Xmx${heap_size}m -jar /opt/papermc/paperclip.jar --nogui --noconsole
 
 [Install]
 WantedBy=multi-user.target
@@ -12877,10 +12907,10 @@ _EOF_
 			# Config
 			if [[ -f '/mnt/dietpi_userdata/papermc/plugins/Geyser-Spigot.jar' && -f '/mnt/dietpi_userdata/papermc/plugins/floodgate-bukkit.jar' ]]
 			then
-				Create_Config /mnt/dietpi_userdata/papermc/plugins/Geyser-Spigot/config.yml papermc 180 &&
+				Create_Config /mnt/dietpi_userdata/papermc/plugins/Geyser-Spigot/config.yml papermc 1800 1 &&
 				G_CONFIG_INJECT 'auth-type:[[:blank:]]' 'auth-type: floodgate' /mnt/dietpi_userdata/papermc/plugins/Geyser-Spigot/config.yml
 			else
-				Create_Config /mnt/dietpi_userdata/papermc/permissions.yml papermc
+				Create_Config /mnt/dietpi_userdata/papermc/permissions.yml papermc 1800 1
 			fi
 			G_CONFIG_INJECT 'enable-rcon=' 'enable-rcon=true' /mnt/dietpi_userdata/papermc/server.properties
 			GCI_PASSWORD=1 G_CONFIG_INJECT 'rcon.password=' "rcon.password=$GLOBAL_PW" /mnt/dietpi_userdata/papermc/server.properties
@@ -16358,6 +16388,16 @@ _EOF_
 				G_WHIP_MSG "NFS/Samba client info:\n\nDietPi-Drive_Manager is a powerful tool which vastly simplifies the mounting of NFS and Samba shares.
 \nOnce $G_PROGRAM_NAME has finished installation, simply run 'dietpi-drive_manager' to setup required network mounts."
 
+			fi
+
+			# PaperMC: Inform user about long install/startup time and possible swap file usage
+			if (( ${aSOFTWARE_INSTALL_STATE[181]} == 1 ))
+			then
+				local swap_info=
+				(( $RAM_PHYS < 924 )) && swap_info='\n\nThe server will be started with with minimal required memory usage, but a swap file will be created to assure that no out-of-memory crash can happen.
+On servers with less than 1 GiB physical memory, we strongly recommend to move the swap file to an external drive, if your system runs on an SD card, since during normal PaperMC operation this swap space will be heavily used.'
+				G_WHIP_MSG "PaperMC will be started during install to allow pre-configuring it's default configuration files. Especially on smaller SBCs, like Raspberry Pi Zero, this can take a long time.
+We allow it to take up to 30 minutes, it's process can be followed, please be patient.$swap_info"
 			fi
 
 			# Gogs: Requires OpenSSH for ssh-keygen binary: https://github.com/MichaIng/DietPi/issues/442
