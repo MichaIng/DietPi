@@ -55,6 +55,8 @@
 	# - Remove unwanted APT configs
 	#	RPi: Allow PDiffs since the "slow implementation" argument is outdated and PDiffs allow lower download size and less disk I/O
 	[[ -f '/etc/apt/apt.conf.d/50raspi' ]] && rm -v /etc/apt/apt.conf.d/50raspi
+	#	https://github.com/MichaIng/DietPi/issues/4083
+	rm -f /etc/apt/sources.list.d/vscode.list /etc/apt/trusted.gpg.d/microsoft.gpg
 	#	Meveric: https://github.com/MichaIng/DietPi/issues/1285#issuecomment-355759321
 	[[ -f '/etc/apt/sources.list.d/deb-multimedia.list' ]] && rm -v /etc/apt/sources.list.d/deb-multimedia.list
 	[[ -f '/etc/apt/preferences.d/deb-multimedia-pin-99' ]] && rm -v /etc/apt/preferences.d/deb-multimedia-pin-99
