@@ -1321,15 +1321,22 @@ _EOF_'
 		G_DIETPI-NOTIFY 2 'Disabling apt-daily services to prevent random APT cache lock'
 		for i in apt-daily{,-upgrade}.{service,timer}
 		do
-
-			systemctl disable --now $i 2> /dev/null
-			systemctl mask $i 2> /dev/null
-
+			G_EXEC systemctl disable --now $i
+			G_EXEC systemctl mask $i
 		done
 
-		G_DIETPI-NOTIFY 2 'Disabling e2scrub services which are for LVM and require lvm2/lvcreate being installed'
-		systemctl disable --now e2scrub_all.timer 2> /dev/null
-		systemctl disable --now e2scrub_reap 2> /dev/null
+		if (( $G_DISTRO > 5 ))
+		then
+			G_DIETPI-NOTIFY 2 'Disabling e2scrub services which are for LVM and require lvm2/lvcreate being installed'
+			G_EXEC systemctl disable --now e2scrub_all.timer
+			G_EXEC systemctl disable --now e2scrub_reap
+		fi
+
+		if (( $G_DISTRO > 4 ))
+		then
+			G_DIETPI-NOTIFY 2 'Enabling weekly TRIM'
+			G_EXEC systemctl enable fstrim.timer
+		fi
 
 		(( $G_HW_MODEL > 9 )) && echo "$G_HW_MODEL" > /etc/.dietpi_hw_model_identifier
 		G_EXEC_DESC='Generating /boot/dietpi/.hw_model' G_EXEC /boot/dietpi/func/dietpi-obtain_hw_model
@@ -1346,11 +1353,11 @@ _EOF_'
 
 		G_DIETPI-NOTIFY 2 'Restoring default base files:'
 		rm -Rfv /etc/{motd,profile,update-motd.d,issue{,.net}} /root /home /media /var/mail
-		G_AGI -o 'Dpkg::Options::=--force-confmiss,confnew' --reinstall base-files base-files # Restore /etc/{update-motd.d,issue{,.net}} /root /home
+		G_AGI -o 'Dpkg::Options::=--force-confmiss,confnew' --reinstall base-files # Restore /etc/{update-motd.d,issue{,.net}} /root /home
 		G_EXEC /var/lib/dpkg/info/base-files.postinst configure # Restore /root/.{profile,bashrc} /etc/{motd,profile} /media /var/mail
 
 		G_DIETPI-NOTIFY 2 'Resetting and adding dietpi.com SSH pub host key for DietPi-Survey/Bugreport uploads:'
-		mkdir -pv /root/.ssh
+		G_EXEC mkdir -p /root/.ssh
 		echo 'ssh.dietpi.com ssh-rsa AAAAB3NzaC1yc2EAAAADAQABAAABAQDE6aw3r6aOEqendNu376iiCHr9tGBIWPgfrLkzjXjEsHGyVSUFNnZt6pftrDeK7UX+qX4FxOwQlugG4fymOHbimRCFiv6cf7VpYg1Ednquq9TLb7/cIIbX8a6AuRmX4fjdGuqwmBq3OG7ZksFcYEFKt5U4mAJIaL8hXiM2iXjgY02LqiQY/QWATsHI4ie9ZOnwrQE+Rr6mASN1BVFuIgyHIbwX54jsFSnZ/7CdBMkuAd9B8JkxppWVYpYIFHE9oWNfjh/epdK8yv9Oo6r0w5Rb+4qaAc5g+RAaknHeV6Gp75d2lxBdCm5XknKKbGma2+/DfoE8WZTSgzXrYcRlStYN' > /root/.ssh/known_hosts
 
 		# Add pre-up lines for WiFi on OrangePi Zero
