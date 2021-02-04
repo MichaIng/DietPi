@@ -288,6 +288,9 @@ Links to hardware and software manufacturers, sources and build instructions use
 - [Docker](https://github.com/docker/docker-ce)
 - [Portainer](https://github.com/portainer/portainer)
 - [Tor](https://gitlab.torproject.org/tpo/core/tor)
+- [Docker Compose](https://github.com/docker/compose)
+- [Box86](https://github.com/ptitSeb/box86)
+- [Steam](https://steamcommunity.com/)
 
 ---
 
