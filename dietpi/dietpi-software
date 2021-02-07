@@ -2308,6 +2308,14 @@ _EOF_
 
 		fi
 
+		# If OctoPrint and mjpg-streamer both are installed, OctoPrint is automatically configured to use mjpg-streamer. For the integrated time-lapse feature, FFmpeg is required.
+		software_id=7
+		if (( ${aSOFTWARE_INSTALL_STATE[137]} > 0 && ${aSOFTWARE_INSTALL_STATE[153]} > 0 && ${aSOFTWARE_INSTALL_STATE[137]} + ${aSOFTWARE_INSTALL_STATE[153]} < 4 ))
+		then
+			aSOFTWARE_INSTALL_STATE[$software_id]=1
+			G_DIETPI-NOTIFY 2 "${aSOFTWARE_NAME[$software_id]} will be installed"
+		fi
+
 		# Software that requires WiringPi
 		# - Audiophonics Pi-SPC (166)
 		software_id=70
@@ -11839,17 +11847,32 @@ _EOF_
 [Unit]
 Description=mjpg-streamer (DietPi)
 Documentation=https://github.com/jacksonliam/mjpg-streamer/tree/master/mjpg-streamer-experimental
+Wants=network-online.target
+After=network-online.target dietpi-boot.service
 
 [Service]
 User=mjpg-streamer
 WorkingDirectory=/opt/mjpg-streamer
-ExecStart=/opt/mjpg-streamer/mjpg_streamer -i '$input' -o 'output_http.so -p 8082 -c dietpi:$GLOBAL_PW'
+ExecStart=/opt/mjpg-streamer/mjpg_streamer -i '$input' -o 'output_http.so -p 8082 -n'
+
+# Hardening
+ProtectSystem=strict
+PrivateTmp=true
+ProtectHome=true
+ProtectKernelTunables=true
+ProtectControlGroups=true
 
 [Install]
 WantedBy=multi-user.target
 _EOF_
-			# Apply strict modes since this unit contains the plain text global software password
-			G_EXEC chmod 0600 /etc/systemd/system/mjpg-streamer.service
+			# OctoPrint: Configure it to use mjpg-streamer, if installed
+			if [[ ${aSOFTWARE_INSTALL_STATE[153]} == 2 && -f '/mnt/dietpi_userdata/octoprint/.octoprint/config.yaml' ]]
+			then
+				G_DIETPI-NOTIFY 2 'Configuring OctoPrint to use mjpg-streamer for webcam support'
+				G_EXEC sudo -u octoprint /mnt/dietpi_userdata/octoprint/.local/bin/octoprint config set webcam.stream "http://$(mawk 'NR==4' /run/dietpi/.network):8082/?action=stream"
+				G_EXEC sudo -u octoprint /mnt/dietpi_userdata/octoprint/.local/bin/octoprint config set webcam.snapshot 'http://127.0.0.1:8082/?action=snapshot'
+				G_EXEC sudo -u octoprint /mnt/dietpi_userdata/octoprint/.local/bin/octoprint config set webcam.ffmpeg "$(command -v ffmpeg)"
+			fi
 		fi
 
 		software_id=138 # VirtualHere
@@ -11996,7 +12019,6 @@ ReadWritePaths=/mnt/dietpi_userdata/firefox-sync
 [Install]
 WantedBy=multi-user.target
 _EOF_
-
 			# Permissions
 			G_EXEC chown -R ffsync:ffsync /mnt/dietpi_userdata/firefox-sync
 
@@ -12547,7 +12569,7 @@ _EOF_
 Description=OctoPrint (DietPi)
 Documentation=https://dietpi.com/docs/software/printing/#octoprint
 Wants=network-online.target
-After=network-online.target dietpi-boot.service
+After=network-online.target dietpi-boot.service mjpg-streamer.service
 
 [Service]
 Environment="LC_ALL=C.UTF-8" "LANG=C.UTF-8"
@@ -12565,6 +12587,15 @@ _EOF_
 			G_EXEC sudo -u octoprint /mnt/dietpi_userdata/octoprint/.local/bin/octoprint config set server.commands.serverRestartCommand 'sudo systemctl restart octoprint'
 			G_EXEC sudo -u octoprint /mnt/dietpi_userdata/octoprint/.local/bin/octoprint config set server.commands.systemRestartCommand 'sudo reboot'
 			G_EXEC sudo -u octoprint /mnt/dietpi_userdata/octoprint/.local/bin/octoprint config set server.commands.systemShutdownCommand 'sudo poweroff'
+
+			# mjpg-streamer: Configure OctoPrint to use it, if installed
+			if (( ${aSOFTWARE_INSTALL_STATE[137]} > 0 ))
+			then
+				G_DIETPI-NOTIFY 2 'Configuring OctoPrint to use mjpg-streamer for webcam support'
+				G_EXEC sudo -u octoprint /mnt/dietpi_userdata/octoprint/.local/bin/octoprint config set webcam.stream "http://$(mawk 'NR==4' /run/dietpi/.network):8082/?action=stream"
+				G_EXEC sudo -u octoprint /mnt/dietpi_userdata/octoprint/.local/bin/octoprint config set webcam.snapshot 'http://127.0.0.1:8082/?action=snapshot'
+				G_EXEC sudo -u octoprint /mnt/dietpi_userdata/octoprint/.local/bin/octoprint config set webcam.ffmpeg "$(command -v ffmpeg)"
+			fi
 		fi
 
 		software_id=154 # Roon Server
@@ -16621,8 +16652,13 @@ On servers with less than 1 GiB physical memory, we strongly recommend to move t
 We allow it to take up to 30 minutes, it's process can be followed, please be patient.$swap_info"
 			fi
 
-			# mjpg-streamer: Inform about additional plugins
-			(( ${aSOFTWARE_INSTALL_STATE[137]} == 1 )) && G_WHIP_MSG 'mjpg-streamer will not be compiled with all available plugins by default.
+			# mjpg-streamer: Warn about unprotected stream and inform about additional plugins
+			(( ${aSOFTWARE_INSTALL_STATE[137]} == 1 )) && G_WHIP_MSG '[ WARN ] The mjpg-streamer camera stream will be accessible unprotected at port 8082 by default.
+\nYou can configure a password protection, but this will break embedding the stream into other web interfaces, like OctoPrint.
+\nWe hence recommend to not forward port 8082 through your NAT and/or block public access via firewall.
+\nIf you require access from outside your local network to a web interface that embeds the camera stream, we recommend to setup a VPN connection for this.
+\nRead more about this matter and how to configure mjpg-streamer at our online documentation: https://dietpi.com/docs/software/camera/#mjpg-streamer
+\n[ INFO ] mjpg-streamer will not be compiled with all available plugins by default.
 \nIf you require other input or output plugins, simply install the required dependencies. Plugins will be compiled automatically if dependencies are met.
 \nFor available plugins and their dependencies, watch the info printed during the build and check out the official GitHub repository: https://github.com/jacksonliam/mjpg-streamer'
 
