@@ -142,8 +142,8 @@ _EOF_
 	#/////////////////////////////////////////////////////////////////////////////////////
 	# Installation System
 	#/////////////////////////////////////////////////////////////////////////////////////
-	# Reboot after installation has finished
-	DISABLE_REBOOT=0
+	# Since no automated reboot is done anymore after installs, collect services to start manually, when not controlled by DietPi-Services
+	aSTART_SERVICES=()
 
 	# Uninstall flag, used in software installations + removals, runs Uninstall_Software()
 	UNINSTALL_REQUIRED=0
@@ -200,7 +200,7 @@ _EOF_
 	# Run Installation Flag (1 = run installs)
 	GOSTARTINSTALL=0
 
-	# Install variables
+	# Temporary placeholder variables
 	INSTALL_URL_ADDRESS=
 	UNINSTALL_URL_ADDRESS=
 	DEPS_LIST=
@@ -362,7 +362,7 @@ _EOF_
 		#------------------
 		software_id=26
 
-		aSOFTWARE_NAME[$software_id]='GNUStep'
+		aSOFTWARE_NAME[$software_id]='GNUstep'
 		aSOFTWARE_DESC[$software_id]='lightweight desktop based on OpenStep'
 		aSOFTWARE_TYPE[$software_id]=0
 		aSOFTWARE_CATEGORY_INDEX[$software_id]=0
@@ -3190,7 +3190,7 @@ _EOF_
 
 		fi
 
-		software_id=26 # GNUStep
+		software_id=26 # GNUstep
 		if (( ${aSOFTWARE_INSTALL_STATE[$software_id]} == 1 )); then
 
 			Banner_Installing
@@ -3222,7 +3222,7 @@ _EOF_
 
 		fi
 
-		software_id=175 # Xfce4 Power
+		software_id=175 # Xfce Power Manager
 		if (( ${aSOFTWARE_INSTALL_STATE[$software_id]} == 1 )); then
 
 			Banner_Installing
@@ -3246,6 +3246,9 @@ _EOF_
 			G_CONFIG_INJECT 'Option "CoreKeyboard"' '    Option "CoreKeyboard"' /etc/X11/xrdp/xorg.conf 'Driver "xrdpkeyb"'
 			G_CONFIG_INJECT 'Option "CorePointer"' '    Option "CorePointer"' /etc/X11/xrdp/xorg.conf 'Driver "xrdpmouse"'
 
+			G_EXEC systemctl enable xrdp
+			aSTART_SERVICES+=('xrdp')
+
 		fi
 
 		software_id=30 # NoMachine
@@ -3253,6 +3256,8 @@ _EOF_
 
 			Banner_Installing
 			Download_Install "https://dietpi.com/downloads/binaries/all/nomachine_$G_HW_ARCH_NAME.deb"
+			G_EXEC systemctl enable nxserver
+			aSTART_SERVICES+=('nxserver')
 
 		fi
 
@@ -4113,7 +4118,7 @@ amvdec_vp9' > /etc/modules-load.d/dietpi-c4-kodi.conf
 
 		fi
 
-		software_id=112 # DDX-Rebirth
+		software_id=112 # DXX-Rebirth
 		if (( ${aSOFTWARE_INSTALL_STATE[$software_id]} == 1 )); then
 
 			Banner_Installing
@@ -4284,9 +4289,9 @@ amvdec_vp9' > /etc/modules-load.d/dietpi-c4-kodi.conf
 			Banner_Installing
 
 			Download_Install 'https://github.com/afaqurk/linux-dash/archive/master.tar.gz'
-			mkdir -p /var/www/linuxdash
-			cp -a linux-dash-master/* /var/www/linuxdash/
-			rm -R linux-dash-master
+			G_EXEC mkdir -p /var/www/linuxdash
+			G_EXEC cp -a linux-dash-master/* /var/www/linuxdash/
+			G_EXEC_NOHALT=1 G_EXEC rm -R linux-dash-master
 
 		fi
 
@@ -4477,11 +4482,12 @@ amvdec_vp9' > /etc/modules-load.d/dietpi-c4-kodi.conf
 			mv wiringPi* wiringPi &> /dev/null # eg: RPi, wiringPi-HEAD-8d188fa
 
 			G_EXEC cd wiringPi
-			chmod +x build
-			./build
-
+			G_EXEC chmod +x build
+			G_EXEC_OUTPUT=1 G_EXEC ./build
 			G_EXEC cd /tmp/$G_PROGRAM_NAME
-			mv wiringPi /root/
+
+			G_EXEC rm -Rf /root/wiringPi
+			G_EXEC mv wiringPi /root/
 
 		fi
 
@@ -4501,11 +4507,11 @@ amvdec_vp9' > /etc/modules-load.d/dietpi-c4-kodi.conf
 			# Pre-reqs
 			local apackages=('python' 'python3')
 			# - RPi: GPIO control for Node-RED
-			(( $G_HW_MODEL < 10 )) && apackages+=('python-rpi.gpio')
+			(( $G_HW_MODEL > 9 )) || apackages+=('python-rpi.gpio')
 			G_AGI "${apackages[@]}"
 
 			# Serialport fails to build unless below flags are provided
-			npm i -g --unsafe-perm node-red
+			G_EXEC_OUTPUT=1 G_EXEC npm i -g --unsafe-perm node-red
 
 		fi
 
@@ -4616,7 +4622,7 @@ amvdec_vp9' > /etc/modules-load.d/dietpi-c4-kodi.conf
 			G_EXEC cd WebIOPi-0.7.1
 
 			# Automate Weaved prompt
-			sed -i '/read response/c\response="n"' setup.sh
+			G_EXEC sed -i '/read response/c\response="n"' setup.sh
 
 			# Run setup script
 			G_EXEC_OUTPUT=1 G_EXEC ./setup.sh
@@ -4680,8 +4686,6 @@ amvdec_vp9' > /etc/modules-load.d/dietpi-c4-kodi.conf
 
 			Banner_Installing
 			Download_Install 'https://wordpress.org/latest.tar.gz' /var/www
-
-			G_EXEC chown -R www-data:www-data /var/www/wordpress
 
 		fi
 
@@ -4820,8 +4824,16 @@ _EOF_
 
 			Banner_Installing
 
-			Download_Install 'https://github.com/phpsysinfo/phpsysinfo/archive/master.tar.gz' /var/www
-			mv /var/www/phpsysinfo-* /var/www/phpsysinfo
+			# Download
+			Download_Install 'https://github.com/phpsysinfo/phpsysinfo/archive/master.tar.gz'
+
+			# Clean reinstall, but preserve previous config
+			if [[ -d '/var/www/phpsysinfo' ]]
+			then
+				G_EXEC mv /var/www/phpsysinfo/phpsysinfo.ini phpsysinfo-master/phpsysinfo.ini
+				G_EXEC rm -R /var/www/phpsysinfo
+			fi
+			G_EXEC mv phpsysinfo-master /var/www/phpsysinfo
 
 		fi
 
@@ -5030,7 +5042,7 @@ Package: wireguard wireguard-dkms wireguard-tools\nPin: release n=bullseye\nPin-
 
 			Download_Install 'https://downloads.nordcdn.com/configs/archives/servers/ovpn.zip' /etc/openvpn
 
-			mkdir -p /var/lib/dietpi/dietpi-software/installed/dietpi-nordvpn
+			G_EXEC mkdir -p /var/lib/dietpi/dietpi-software/installed/dietpi-nordvpn
 
 			G_WHIP_MSG '[ INFO ] DietPi-NordVPN has been installed.\n\nOnce DietPi-Software has finished all other installations, you can run the GUI using the following command:\n - dietpi-nordvpn'
 
@@ -5798,8 +5810,8 @@ Package: wireguard wireguard-dkms wireguard-tools\nPin: release n=bullseye\nPin-
 			DEPS_LIST='libffi-dev libssl-dev python-lxml python-pip python-dev'
 			Download_Install 'https://github.com/CouchPotato/CouchPotatoServer/archive/master.tar.gz'
 
-			[[ -d /etc/couchpotato ]] && rm -R /etc/couchpotato
-			mv CouchPotato* /etc/couchpotato
+			[[ -d '/etc/couchpotato' ]] && rm -R /etc/couchpotato
+			G_EXEC mv CouchPotatoServer-master /etc/couchpotato
 
 			pip2 install -U pip setuptools wheel
 			pip2 install -U pyopenssl
@@ -6801,7 +6813,7 @@ exec sudo -u $ha_user dash -c '$ha_pyenv_activation; exec pip3 install -U homeas
 
 		fi
 
-		software_id=6 # Xserver
+		software_id=6 # X.Org X server
 		if (( ${aSOFTWARE_INSTALL_STATE[$software_id]} == 1 )); then
 
 			Banner_Installing
@@ -7106,7 +7118,8 @@ exec sudo -u $ha_user dash -c '$ha_pyenv_activation; exec pip3 install -U homeas
 			G_CONFIG_INJECT 'NO_START=' 'NO_START=0' /etc/default/dropbear
 
 			# Failsafe: Enable Dropbear service
-			systemctl enable dropbear
+			G_EXEC systemctl enable dropbear
+			aSTART_SERVICES+=('dropbear')
 
 			# Mark OpenSSH for uninstall and update choice system
 			dpkg-query -s 'openssh-server' &> /dev/null && aSOFTWARE_INSTALL_STATE[105]=-1 && UNINSTALL_REQUIRED=1
@@ -7136,7 +7149,8 @@ exec sudo -u $ha_user dash -c '$ha_pyenv_activation; exec pip3 install -U homeas
 			systemctl reload ssh
 
 			# Failsafe: Enable OpenSSH service
-			systemctl enable ssh
+			G_EXEC systemctl enable ssh
+			aSTART_SERVICES+=('ssh')
 
 			# Mark Dropbear for uninstall and update choice system
 			grep -q '^dropbear[^[:blank:]]*[[:blank:]]' <<< "$(dpkg --get-selections)" && aSOFTWARE_INSTALL_STATE[104]=-1 && UNINSTALL_REQUIRED=1
@@ -7183,9 +7197,9 @@ exec sudo -u $ha_user dash -c '$ha_pyenv_activation; exec pip3 install -U homeas
 			Banner_Installing
 
 			# Workaround for dpkg failure on 1st install if service is already running but APT not installed: https://github.com/MichaIng/DietPi/pull/2277/#issuecomment-441460925
-			systemctl stop rsyslog &> /dev/null
+			systemctl stop rsyslog 2> /dev/null
 			G_AGI rsyslog
-			systemctl start rsyslog &> /dev/null
+			G_EXEC systemctl enable --now rsyslog
 
 		fi
 
@@ -7480,7 +7494,7 @@ exec sudo -u $ha_user dash -c '$ha_pyenv_activation; exec pip3 install -U homeas
 
 		fi
 
-		software_id=26 # GNUStep
+		software_id=26 # GNUstep
 		if (( ${aSOFTWARE_INSTALL_STATE[$software_id]} == 1 )); then
 
 			Banner_Configuration
@@ -9259,7 +9273,7 @@ _EOF_
 
 		fi
 
-		software_id=112 # DDX-Rebirth
+		software_id=112 # DXX-Rebirth
 		if (( ${aSOFTWARE_INSTALL_STATE[$software_id]} == 1 )); then
 
 			Banner_Configuration
@@ -9739,6 +9753,9 @@ _EOF_
 
 			Banner_Configuration
 
+			# Permissions
+			G_EXEC chown -R www-data:www-data /var/www/wordpress
+
 			# Create MariaDB database
 			/boot/dietpi/func/create_mysql_db wordpress wordpress "$GLOBAL_PW"
 
@@ -9801,6 +9818,7 @@ _EOF_
 			(( ${aSOFTWARE_INSTALL_STATE[28]} == 1 )) && software_id=28 || software_id=120
 			Banner_Configuration
 
+			# Service
 			cat << '_EOF_' > /etc/systemd/system/vncserver.service
 [Unit]
 Description=Manage VNC Server (DietPi)
@@ -9819,8 +9837,9 @@ ExecStop=/usr/local/bin/vncserver stop
 [Install]
 WantedBy=multi-user.target
 _EOF_
-			systemctl daemon-reload
-			systemctl enable vncserver
+			G_EXEC systemctl daemon-reload
+			G_EXEC systemctl enable vncserver
+			aSTART_SERVICES+=('vncserver')
 
 			cat << '_EOF_' > /usr/local/bin/vncserver
 #!/bin/bash
@@ -9890,41 +9909,41 @@ esac
 
 exit 0
 _EOF_
-			chmod +x /usr/local/bin/vncserver
+			G_EXEC chmod +x /usr/local/bin/vncserver
 
 			# Stretch + TigerVNC: Disable Localhost only by default
 			# shellcheck disable=SC2016
 			[[ -f '/etc/vnc.conf' ]] && GCI_PRESERVE=1 G_CONFIG_INJECT '\$localhost[[:blank:]]*=' '$localhost = "no";' /etc/vnc.conf
 
 			local cmd_launch_desktop=
-			# DESKTOP_LXDE
+			# LXDE
 			if (( ${aSOFTWARE_INSTALL_STATE[23]} > 0 )); then
 
 				cmd_launch_desktop='lxsession -s LXDE -e LXDE'
 
-			# DESKTOP_MATE
+			# MATE
 			elif (( ${aSOFTWARE_INSTALL_STATE[24]} > 0 )); then
 
 				cmd_launch_desktop='mate-session'
 
-			# DESKTOP_GNUSTEP
+			# GNUstep
 			elif (( ${aSOFTWARE_INSTALL_STATE[26]} > 0 )); then
 
 				cmd_launch_desktop='x-window-manager'
 
-			# DESKTOP_XFCE
+			# Xfce
 			elif (( ${aSOFTWARE_INSTALL_STATE[25]} > 0 )); then
 
 				cmd_launch_desktop='xfce4-session'
 
-			# DESKTOP_LXQT
+			# LXQt
 			elif (( ${aSOFTWARE_INSTALL_STATE[173]} > 0 )); then
 
 				cmd_launch_desktop='startlxqt'
 
 			fi
 
-			mkdir -p /root/.vnc
+			G_EXEC mkdir -p /root/.vnc
 			cat << _EOF_ > /root/.vnc/xstartup
 #!/bin/dash
 export SHELL='/bin/bash'
@@ -9934,7 +9953,7 @@ xsetroot -solid grey
 vncconfig -iconic &
 exec $cmd_launch_desktop
 _EOF_
-			chmod +x /root/.vnc/xstartup
+			G_EXEC chmod +x /root/.vnc/xstartup
 
 			# TigerVNC: Set control + read-only passwords (RealVNC uses UNIX user authentication by default, does not support the "-f" option and uses different files!)
 			if command -v tigervncpasswd > /dev/null; then
@@ -9943,7 +9962,7 @@ _EOF_
 $GLOBAL_PW
 $GLOBAL_PW
 _EOF_
-				chmod 600 /root/.vnc/passwd
+				G_EXEC chmod 600 /root/.vnc/passwd
 
 			fi
 
@@ -10110,9 +10129,7 @@ _EOF_
 		if (( ${aSOFTWARE_INSTALL_STATE[$software_id]} == 1 )); then
 
 			Banner_Configuration
-
-			G_BACKUP_FP /var/www/phpsysinfo/phpsysinfo.ini
-			dps_index=$software_id Download_Install 'phpsysinfo.ini' /var/www/phpsysinfo/phpsysinfo.ini
+			[[ -f '/var/www/phpsysinfo/phpsysinfo.ini' ]] || dps_index=$software_id Download_Install 'phpsysinfo.ini' /var/www/phpsysinfo/phpsysinfo.ini
 
 		fi
 
@@ -10226,12 +10243,12 @@ _EOF_
 				local fallback_url='https://github.com/OpenVPN/easy-rsa/releases/download/v3.0.8/EasyRSA-3.0.8.tgz'
 				no_check_url=1 Download_Install "$(curl -sf "$INSTALL_URL_ADDRESS" | grep -m1 '"browser_download_url.*EasyRSA-.*\.tgz' | cut -d \" -f 4)"
 				[[ -d '/etc/openvpn/easy-rsa' ]] && rm -R /etc/openvpn/easy-rsa
-				mv EasyRSA-* /etc/openvpn/easy-rsa
+				G_EXEC mv EasyRSA-* /etc/openvpn/easy-rsa
 
 				# Cert and key generation via easy-rsa
 				G_DIETPI-NOTIFY 2 'Generating unique OpenVPN certificates and keys. Please wait...\n'
 				G_EXEC cd /etc/openvpn/easy-rsa
-				cat << _EOF_ > vars
+				cat << '_EOF_' > vars
 set_var EASYRSA_REQ_COUNTRY	"UK"
 set_var EASYRSA_REQ_PROVINCE	"DietPi"
 set_var EASYRSA_REQ_CITY	"DietPi"
@@ -10249,7 +10266,7 @@ _EOF_
 				# Server config
 				cp -a pki/{ca.crt,dh.pem,issued/DietPi_OpenVPN_Server.crt,private/DietPi_OpenVPN_Server.key} /etc/openvpn/
 				G_EXEC cd /etc/openvpn
-				cat << _EOF_ > server.conf
+				cat << '_EOF_' > server.conf
 port 1194
 proto udp
 dev tun
@@ -10279,7 +10296,7 @@ verb 3
 _EOF_
 
 				# Client config
-				cat << _EOF_ > DietPi_OpenVPN_Client.ovpn
+				cat << '_EOF_' > DietPi_OpenVPN_Client.ovpn
 client
 proto udp
 dev tun
@@ -10307,9 +10324,9 @@ _EOF_
 <key>\n$(<easy-rsa/pki/private/DietPi_OpenVPN_Client.key)\n</key>" >> DietPi_OpenVPN_Client.ovpn
 
 				# - Copy to userdata
-				cp DietPi_OpenVPN_Client.ovpn /mnt/dietpi_userdata/
+				G_EXEC cp DietPi_OpenVPN_Client.ovpn /mnt/dietpi_userdata/
 				# - and /boot partition
-				cp DietPi_OpenVPN_Client.ovpn /boot/
+				G_EXEC cp DietPi_OpenVPN_Client.ovpn /boot/
 
 				G_EXEC cd /tmp/$G_PROGRAM_NAME
 				break # Always break loop which is only for single wildcard file detection
@@ -10323,10 +10340,14 @@ _EOF_
 			# Web Fowarding (Setup IPtables, must also be run during boot)
 			#iptables -t nat -A POSTROUTING -s 10.8.0.0/24 -o "$(mawk 'NR==3' /run/dietpi/.network)" -j MASQUERADE
 
+			aSTART_SERVICES+=('openvpn')
+
 		fi
 
 		software_id=172 # WireGuard
 		if (( ${aSOFTWARE_INSTALL_STATE[$software_id]} == 1 )); then
+
+			Banner_Configuration
 
 			# Try to enable module, if it fails, a reboot is required
 			local module_active=0
@@ -10501,13 +10522,13 @@ If no WireGuard (auto)start is included, but you require it, please do the follo
 
 			fi
 
-			(( $module_active )) || { [[ $DISABLE_REBOOT == 1 ]] && G_WHIP_MSG '[ INFO ] WireGuard install finished\n\nNB: WireGuard has been successfully installed, but a reboot is required, before it can be started.'; }
+			(( $module_active )) || G_WHIP_MSG '[ INFO ] WireGuard install finished\n\nNB: WireGuard has been successfully installed, but a reboot is required, before it can be started.'
 
 			unset -v module_active choice_required domain port invalid_text server_ip
 
 		fi
 
-		software_id=60 # WiFi Hostspot
+		software_id=60 # WiFi Hotspot
 		if (( ${aSOFTWARE_INSTALL_STATE[$software_id]} == 1 )); then
 
 			Banner_Configuration
@@ -10517,7 +10538,7 @@ If no WireGuard (auto)start is included, but you require it, please do the follo
 
 			# DHCPD Config
 			G_BACKUP_FP /etc/dhcp/dhcpd.conf
-			cat << _EOF_ > /etc/dhcp/dhcpd.conf
+			cat << '_EOF_' > /etc/dhcp/dhcpd.conf
 ddns-update-style none;
 default-lease-time 600;
 max-lease-time 7200;
@@ -10537,7 +10558,7 @@ _EOF_
 			echo "INTERFACESv4=\"wlan$wifi_index\"" > /etc/default/isc-dhcp-server
 
 			# Remove all entries below wlan, so we can recreate them
-			sed -i '/allow-hotplug wlan/q0' /etc/network/interfaces
+			G_EXEC sed -i '/allow-hotplug wlan/q0' /etc/network/interfaces
 
 			# Enable up wlan
 			G_CONFIG_INJECT 'allow-hotplug wlan' "allow-hotplug wlan$wifi_index" /etc/network/interfaces
@@ -10554,7 +10575,6 @@ wireless-power off
 # IP tables
 up iptables-restore < /etc/iptables.ipv4.nat
 _EOF_
-
 			# Assign static IP for wlan now
 			ip a add 192.168.42.1 dev "wlan$wifi_index"
 
@@ -10575,7 +10595,6 @@ wpa_key_mgmt=WPA-PSK
 wpa_pairwise=TKIP
 rsn_pairwise=CCMP
 _EOF_
-
 			# Check for RTL8188C* device, use the patched driver with compiled binary: https://github.com/pritambaral/hostapd-rtl871xdrv#why
 			# - Stay with default driver on RPi, where the issue seems to have been resolved differently and "rtl871xdrv" is not supported: https://github.com/MichaIng/DietPi/issues/2531#issuecomment-650810121
 			(( $WIFIHOTSPOT_RTL8188C_DEVICE && $G_HW_MODEL > 9 && $G_HW_ARCH < 4 || $WIFIHOTSPOT_RTL8188C_PACKAGE )) && G_CONFIG_INJECT 'driver=' 'driver=rtl871xdrv' /etc/hostapd/hostapd.conf
@@ -13362,7 +13381,7 @@ _EOF_
 
 		fi
 
-		software_id=175 # Xfce4 Power
+		software_id=175 # Xfce Power Manager
 		if (( ${aSOFTWARE_INSTALL_STATE[$software_id]} == -1 )); then
 
 			Banner_Uninstalling
@@ -13379,7 +13398,7 @@ _EOF_
 
 		fi
 
-		software_id=26 # GNUStep
+		software_id=26 # GNUstep
 		if (( ${aSOFTWARE_INSTALL_STATE[$software_id]} == -1 )); then
 
 			Banner_Uninstalling
@@ -14664,7 +14683,7 @@ _EOF_
 			Banner_Uninstalling
 			systemctl start mariadb
 			mysqladmin drop wordpress -f
-			mysql -e "drop user 'wordpress'@'localhost'"
+			mysql -e 'drop user wordpress@localhost'
 			rm -R /var/www/wordpress
 
 		fi
@@ -16099,16 +16118,11 @@ _EOF_
 		# Generate userdata folders
 		Create_UserContent_Folders
 		#------------------------------------------------------------
-		# Update & upgrade APT
-		Banner_Apt_Update
+		# Update package cache
 		G_AGUP
-		G_AGUG
-		# - Full upgrade on first run installs: https://github.com/MichaIng/DietPi/issues/3098
-		(( $G_DIETPI_INSTALL_STAGE == 1 )) && G_AGDUG
 
-		# Generate dir for dietpi-software installed "non-service" based control scripts
-		G_EXEC mkdir -p /var/lib/dietpi/dietpi-software/services
-		G_EXEC chmod -R +x /var/lib/dietpi/dietpi-software/services
+		# Full package upgrade on first run installs: https://github.com/MichaIng/DietPi/issues/3098
+		(( $G_DIETPI_INSTALL_STAGE == 1 )) && G_AGDUG
 
 		# Disable software installation for automated installs, if user input is required
 		Install_Disable_Requires_UserInput
@@ -16137,15 +16151,9 @@ _EOF_
 		# Apply Uninstall script, if required by e.g. DietPi choice system
 		(( $UNINSTALL_REQUIRED )) && Uninstall_Software
 
-		# Apply DietPi configurations and optimizations
+		# Apply DietPi configurations and optimisations
 		/boot/dietpi/dietpi-services stop
-		Banner_Configs
 		Install_Apply_Configs
-
-		# Apply autostart index
-		local autostart_current=0
-		[[ -f '/boot/dietpi/.dietpi-autostart_index' ]] && autostart_current=$(</boot/dietpi/.dietpi-autostart_index)
-		/boot/dietpi/dietpi-autostart "$autostart_current"
 
 		# Disable services so DietPi-Services can take control (DietPi will start all services from dietpi-postboot.service)
 		/boot/dietpi/dietpi-services dietpi_controlled
@@ -16189,7 +16197,7 @@ _EOF_
 			# Custom 1st run Script (Local file)
 			if [[ -f '/boot/Automation_Custom_Script.sh' ]]; then
 
-				cp /boot/Automation_Custom_Script.sh /root/AUTO_CustomScript.sh
+				G_EXEC cp /boot/Automation_Custom_Script.sh /root/AUTO_CustomScript.sh
 
 			# Custom 1st run Script (Online file)
 			elif [[ $AUTOINSTALL_CUSTOMSCRIPTURL != '0' ]]; then
@@ -16204,7 +16212,7 @@ _EOF_
 				local fp_log='/var/tmp/dietpi/logs/dietpi-automation_custom_script.log'
 
 				G_DIETPI-NOTIFY 2 'Running custom script, please wait...'
-				chmod +x /root/AUTO_CustomScript.sh
+				G_EXEC chmod +x /root/AUTO_CustomScript.sh
 				/root/AUTO_CustomScript.sh 2>&1 | tee $fp_log
 				if (( ${PIPESTATUS[0]} )); then
 
@@ -16216,7 +16224,7 @@ _EOF_
 
 				fi
 
-				rm /root/AUTO_CustomScript.sh
+				G_EXEC rm /root/AUTO_CustomScript.sh
 
 			fi
 
@@ -17466,7 +17474,6 @@ List of installed software and their online documentation URLs:
 \nDo you wish to continue with DietPi as a pure minimal image?' || return 0
 
 			TARGETMENUID=-1 # Exit menu loop
-			DISABLE_REBOOT=1 # Skip reboot as no software will be installed
 			GOSTARTINSTALL=1 # Set install start flag
 
 		# After first run setup has finished, abort install without any selections
@@ -17558,46 +17565,9 @@ List of installed software and their online documentation URLs:
 	# Banner Print
 	#/////////////////////////////////////////////////////////////////////////////////////
 
-	Banner_Installing(){
-
-		G_DIETPI-NOTIFY 3 "$G_PROGRAM_NAME" "Installing ${aSOFTWARE_NAME[$software_id]}: ${aSOFTWARE_DESC[$software_id]}"
-
-	}
-
-	Banner_Configuration(){
-
-		G_DIETPI-NOTIFY 3 "$G_PROGRAM_NAME" "Configuring ${aSOFTWARE_NAME[$software_id]}: ${aSOFTWARE_DESC[$software_id]}"
-
-	}
-
-	Banner_Uninstalling(){
-
-		G_DIETPI-NOTIFY 3 "$G_PROGRAM_NAME" "Uninstalling ${aSOFTWARE_NAME[$software_id]}: ${aSOFTWARE_DESC[$software_id]}"
-
-	}
-
-	Banner_Apt_Update(){
-
-		G_DIETPI-NOTIFY 3 "$G_PROGRAM_NAME" 'Update & upgrade APT'
-
-	}
-
-	Banner_Reboot(){
-
-		local delay=3
-		G_WHIP_MSG 'DietPi-Software installation is complete, however a reboot is required to finalise the installation.\n\nPlease select "Ok" to continue and reboot the system.'
-		G_DIETPI-NOTIFY 0 "System rebooting in $delay seconds to finalise DietPi-Software installations. Please wait..."
-		sleep $delay
-
-	}
-
-	Banner_Configs(){
-
-		G_DIETPI-NOTIFY 3 "$G_PROGRAM_NAME" 'Optimise and configure software'
-		G_DIETPI-NOTIFY 2 "Applying DietPi optimisations and configurations for $G_HW_MODEL_NAME, please wait...\n"
-
-	}
-
+	Banner_Installing(){ G_DIETPI-NOTIFY 3 "$G_PROGRAM_NAME" "Installing ${aSOFTWARE_NAME[$software_id]}: ${aSOFTWARE_DESC[$software_id]}"; }
+	Banner_Configuration(){ G_DIETPI-NOTIFY 3 "$G_PROGRAM_NAME" "Configuring ${aSOFTWARE_NAME[$software_id]}: ${aSOFTWARE_DESC[$software_id]}"; }
+	Banner_Uninstalling(){ G_DIETPI-NOTIFY 3 "$G_PROGRAM_NAME" "Uninstalling ${aSOFTWARE_NAME[$software_id]}: ${aSOFTWARE_DESC[$software_id]}"; }
 	Banner_Aborted(){
 
 		# 1st run abort
@@ -17629,7 +17599,6 @@ List of installed software and their online documentation URLs:
 	if [[ $1 ]]; then
 
 		Input_Modes "$@"
-		DISABLE_REBOOT=1 # Skip reboot on automated (re)installs
 
 	#--------------------------------------------------------------------------------------
 	# Standard launch
@@ -17754,18 +17723,17 @@ List of installed software and their online documentation URLs:
 
 		G_DIETPI-NOTIFY 3 "$G_PROGRAM_NAME" 'Installation completed'
 
-		if (( $DISABLE_REBOOT )); then
+		# Start services (restart to reload configs of possible running services)
+		[[ $G_SERVICE_CONTROL == 0 ]] || /boot/dietpi/dietpi-services restart
 
-			# Start services (restart to reload configs of possible running services)
-			[[ $G_SERVICE_CONTROL == 0 ]] || /boot/dietpi/dietpi-services restart
-
-		else
-
-			# Reboot
-			sync
-			Banner_Reboot
-			reboot
-
+		# Start installed services, not controlled by DietPi-Services
+		if [[ ${aSTART_SERVICES[0]} ]]
+		then
+			G_DIETPI-NOTIFY 2 'Starting installed services, not controlled by DietPi-Services'
+			for i in "${aSTART_SERVICES[@]}"
+			do
+				G_EXEC_NOHALT=1 G_EXEC systemctl start "$i"
+			done
 		fi
 
 	fi
