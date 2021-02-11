@@ -45,22 +45,36 @@
 
 	CHANGELOG_DOWNLOADED=0 # Prevent redownload of changelog if already done in this session
 
+	# Git repo to update from
 	GITOWNER_TARGET=$(sed -n '/^[[:blank:]]*DEV_GITOWNER=/{s/^[^=]*=//p;q}' /boot/dietpi.txt)
 	GITOWNER_TARGET=${GITOWNER_TARGET:-MichaIng}
 	GITBRANCH_TARGET=$(sed -n '/^[[:blank:]]*DEV_GITBRANCH=/{s/^[^=]*=//p;q}' /boot/dietpi.txt)
 	GITBRANCH_TARGET=${GITBRANCH_TARGET:-master}
 
-	COREVERSION_SERVER=0
-	SUBVERSION_SERVER=0
-	RCVERSION_SERVER=0
+	# Remote version variables
+	# - Available DietPi version
+	G_REMOTE_VERSION_CORE=
+	G_REMOTE_VERSION_SUB=
+	G_REMOTE_VERSION_RC=
+	# - Minimum DietPi version to allow update
+	G_MIN_VERSION_CORE=
+	G_MIN_VERSION_SUB=
+	# - Alternative Git branch to automatically migrate to when version is too low
+	G_OLD_VERSION_BRANCH=
+	# - Minimum Debian version to allow update
+	G_MIN_DEBIAN=
+	# - Alternative Git branch to automatically migrate to when Debian version is too low
+	G_OLD_DEBIAN_BRANCH=
 
+	# Version info to print to console
 	INFO_CURRENT_VERSION=
 	INFO_SERVER_VERSION=
 	INFO_VERSIONS_UPDATE(){
 
 		INFO_CURRENT_VERSION="Current version : v$G_DIETPI_VERSION_CORE.$G_DIETPI_VERSION_SUB.$G_DIETPI_VERSION_RC"
-		INFO_SERVER_VERSION="Latest version  : v$COREVERSION_SERVER.$SUBVERSION_SERVER.$RCVERSION_SERVER"
+		INFO_SERVER_VERSION="Latest version  : v$G_REMOTE_VERSION_CORE.$G_REMOTE_VERSION_SUB.$G_REMOTE_VERSION_RC"
 
+		# Show Git repo, when it changed
 		if [[ $G_GITBRANCH != "$GITBRANCH_TARGET" || $G_GITOWNER != "$GITOWNER_TARGET" ]]; then
 
 			INFO_CURRENT_VERSION+=" (branch: $G_GITOWNER/$G_GITBRANCH)"
@@ -73,30 +87,26 @@
 	URL_MIRROR_INDEX=0
 	aURL_MIRROR_SERVERVERSION=(
 
-		"https://raw.githubusercontent.com/$GITOWNER_TARGET/DietPi/$GITBRANCH_TARGET/dietpi/server_version-6"
-		"https://dietpi.com/downloads/dietpi-update_mirror/$GITBRANCH_TARGET/server_version-6"
-
+		"https://raw.githubusercontent.com/$GITOWNER_TARGET/DietPi/$GITBRANCH_TARGET/.update/version"
+		"https://dietpi.com/downloads/dietpi-update_mirror/$GITBRANCH_TARGET/version"
 	)
 
 	aURL_MIRROR_PREPATCH=(
 
-		"https://raw.githubusercontent.com/$GITOWNER_TARGET/DietPi/$GITBRANCH_TARGET/dietpi/pre-patch_file"
-		"https://dietpi.com/downloads/dietpi-update_mirror/$GITBRANCH_TARGET/pre-patch_file"
-
+		"https://raw.githubusercontent.com/$GITOWNER_TARGET/DietPi/$GITBRANCH_TARGET/.update/pre-patches"
+		"https://dietpi.com/downloads/dietpi-update_mirror/$GITBRANCH_TARGET/pre-patches"
 	)
 
 	aURL_MIRROR_ARCHIVE=(
 
 		"https://github.com/$GITOWNER_TARGET/DietPi/archive/$GITBRANCH_TARGET.tar.gz"
 		"https://dietpi.com/downloads/dietpi-update_mirror/$GITBRANCH_TARGET/DietPi-$GITBRANCH_TARGET.tar.gz"
-
 	)
 
 	aURL_MIRROR_CHANGELOG=(
 
 		"https://raw.githubusercontent.com/$GITOWNER_TARGET/DietPi/$GITBRANCH_TARGET/CHANGELOG.txt"
 		"https://dietpi.com/downloads/dietpi-update_mirror/$GITBRANCH_TARGET/CHANGELOG.txt"
-
 	)
 
 	Get_Server_Version(){
@@ -106,17 +116,15 @@
 		do
 
 			G_DIETPI-NOTIFY 2 "Checking mirror: ${aURL_MIRROR_SERVERVERSION[$i]}"
-			if curl -sSfL "${aURL_MIRROR_SERVERVERSION[$i]}" > server_version; then
+			if curl -sSfL "${aURL_MIRROR_SERVERVERSION[$i]}" -o version; then
 
-				# Get server version
-				COREVERSION_SERVER=$(mawk 'NR==1' server_version)
-				SUBVERSION_SERVER=$(mawk 'NR==2' server_version)
-				RCVERSION_SERVER=$(mawk 'NR==3' server_version)
+				# Source file
+				. version
 
 				# Check if server version contains valid intergers
-				if disable_error=1 G_CHECK_VALIDINT "$COREVERSION_SERVER" &&
-					disable_error=1 G_CHECK_VALIDINT "$SUBVERSION_SERVER" &&
-					disable_error=1 G_CHECK_VALIDINT "$RCVERSION_SERVER"; then
+				if disable_error=1 G_CHECK_VALIDINT "$G_REMOTE_VERSION_CORE" &&
+					disable_error=1 G_CHECK_VALIDINT "$G_REMOTE_VERSION_SUB" &&
+					disable_error=1 G_CHECK_VALIDINT "$G_REMOTE_VERSION_RC"; then
 
 					G_DIETPI-NOTIFY 0 "Using update server: ${aURL_MIRROR_SERVERVERSION[$i]}"
 					URL_MIRROR_INDEX=$i
@@ -124,7 +132,7 @@
 
 				else
 
-					G_DIETPI-NOTIFY 2 "Invalid server version string: ${COREVERSION_SERVER:-NULL}.${SUBVERSION_SERVER:-NULL}.${RCVERSION_SERVER:-NULL}"
+					G_DIETPI-NOTIFY 2 "Invalid server version string: ${G_REMOTE_VERSION_CORE:-NULL}.${G_REMOTE_VERSION_SUB:-NULL}.${G_REMOTE_VERSION_RC:-NULL}"
 
 				fi
 
@@ -145,6 +153,27 @@ If this error persists, please report at: https://github.com/MichaIng/DietPi/iss
 
 	Apply_1st_Run_Update_Success(){ [[ $G_DIETPI_INSTALL_STAGE == [12] ]] || echo 1 > /boot/dietpi/.install_stage; }
 
+	Check_Git_Migration()
+	{
+		# Automatically migrate to alternative branch if Debian or DietPi version is too low.
+		if (( $G_DISTRO < $G_MIN_DEBIAN ))
+		then
+			G_DIETPI-NOTIFY 2 "Your Debian version is too low to update to the current branch: $G_DISTRO_NAME ($G_DISTRO)"
+			G_DIETPI-NOTIFY 2 "We're switching to an alternative branch: $G_OLD_DEBIAN_BRANCH"
+			G_GITBRANCH=$G_OLD_DEBIAN_BRANCH
+			G_VERSIONDB_SAVE || return 1
+			Get_Server_Version || return 1
+
+		elif (( $G_DIETPI_VERSION_CORE < $G_MIN_VERSION_CORE || ( $G_DIETPI_VERSION_CORE == $G_MIN_VERSION_CORE && $G_DIETPI_VERSION_SUB < $G_MIN_VERSION_SUB ) ))
+		then
+			G_DIETPI-NOTIFY 2 "Your DietPi version is too low to update to the current branch: v$G_DIETPI_VERSION_CORE.$G_DIETPI_VERSION_SUB"
+			G_DIETPI-NOTIFY 2 "We're switching to an alternative branch: $G_OLD_VERSION_BRANCH"
+			G_GITBRANCH=$G_OLD_VERSION_BRANCH
+			G_VERSIONDB_SAVE || return 1
+			Get_Server_Version || return 1
+		fi
+	}
+
 	Check_DietPi_Update(){
 
 		# If requested, reduce current subversion by 1 to reapply last update
@@ -160,14 +189,14 @@ If this error persists, please report at: https://github.com/MichaIng/DietPi/iss
 		local result=1
 
 		# Update available
-		if (( $G_DIETPI_VERSION_CORE < $COREVERSION_SERVER ||
-			( $G_DIETPI_VERSION_CORE == $COREVERSION_SERVER && ( $G_DIETPI_VERSION_SUB < $SUBVERSION_SERVER ||
-			( $G_DIETPI_VERSION_SUB == $SUBVERSION_SERVER && $G_DIETPI_VERSION_RC < $RCVERSION_SERVER ) ) ) )); then
+		if (( $G_DIETPI_VERSION_CORE < $G_REMOTE_VERSION_CORE ||
+			( $G_DIETPI_VERSION_CORE == $G_REMOTE_VERSION_CORE && ( $G_DIETPI_VERSION_SUB < $G_REMOTE_VERSION_SUB ||
+			( $G_DIETPI_VERSION_SUB == $G_REMOTE_VERSION_SUB && $G_DIETPI_VERSION_RC < $G_REMOTE_VERSION_RC ) ) ) )); then
 
 			result=0
 
 			# Write available update version to flag file
-			echo "$COREVERSION_SERVER.$SUBVERSION_SERVER.$RCVERSION_SERVER" > /run/dietpi/.update_available
+			echo "$G_REMOTE_VERSION_CORE.$G_REMOTE_VERSION_SUB.$G_REMOTE_VERSION_RC" > /run/dietpi/.update_available
 
 			G_DIETPI-NOTIFY 0 'Update available:'
 
@@ -198,7 +227,7 @@ If this error persists, please report at: https://github.com/MichaIng/DietPi/iss
 	Run_DietPi_Update(){
 
 		# RC-only update: Reapply last subversion patches
-		if (( $G_DIETPI_VERSION_CORE == $COREVERSION_SERVER && $G_DIETPI_VERSION_SUB == $SUBVERSION_SERVER )); then
+		if (( $G_DIETPI_VERSION_CORE == $G_REMOTE_VERSION_CORE && $G_DIETPI_VERSION_SUB == $G_REMOTE_VERSION_SUB )); then
 
 			((G_DIETPI_VERSION_SUB--))
 			G_DIETPI_VERSION_RC=0
@@ -207,11 +236,11 @@ If this error persists, please report at: https://github.com/MichaIng/DietPi/iss
 		fi
 
 		G_DIETPI-NOTIFY 3 "$G_PROGRAM_NAME" 'Applying pre-patches'
-		G_EXEC_DESC='Downloading pre-patch file' G_EXEC curl -sSfL "${aURL_MIRROR_PREPATCH[$URL_MIRROR_INDEX]}" -o pre-patch_file
-		G_EXEC_DESC='Applying execute permission' G_EXEC chmod +x pre-patch_file
-		if ! ./pre-patch_file $G_DIETPI_VERSION_SUB; then
+		G_EXEC_DESC='Downloading pre-patches' G_EXEC curl -sSfL "${aURL_MIRROR_PREPATCH[$URL_MIRROR_INDEX]}" -o pre-patches
+		G_EXEC_DESC='Applying execute permission' G_EXEC chmod +x pre-patches
+		if ! ./pre-patches; then
 
-			G_DIETPI-NOTIFY 1 "An error occured during pre-patch $?. Please check the above log or $FP_LOG for errors, and rerun \"dietpi-update\" after the cause has been solved."
+			G_DIETPI-NOTIFY 1 "An error occured during pre-patching. Please check the above log or $FP_LOG for errors, and rerun \"dietpi-update\" after the cause has been solved."
 			exit 1
 
 		fi
@@ -223,16 +252,11 @@ If this error persists, please report at: https://github.com/MichaIng/DietPi/iss
 
 		G_DIETPI-NOTIFY 3 "$G_PROGRAM_NAME" 'Installing new DietPi code'
 		G_EXEC_DESC='Downloading update archive' G_EXEC curl -sSfL "${aURL_MIRROR_ARCHIVE[$URL_MIRROR_INDEX]}" -o update.tar.gz
-
 		G_EXEC_DESC='Unpacking update archive' G_EXEC tar xf update.tar.gz
 		rm update.tar.gz
 
 		# Remove files from Git archive that are not to be installed on client
 		rm DietPi-"$GITBRANCH_TARGET"/dietpi/{pre-patch_file,server_version*}
-
-		# Remove old code before updating, so we dont need to patch for removals
-		# - https://github.com/MichaIng/DietPi/issues/905#issuecomment-298241622
-		#rm -R /boot/dietpi/{func,misc,dietpi-*}
 
 		G_EXEC_DESC='Installing new DietPi scripts' G_EXEC cp -Rf DietPi-"$GITBRANCH_TARGET"/dietpi /boot/
 		G_EXEC_DESC='Installing new DietPi system files' G_EXEC cp -Rf DietPi-"$GITBRANCH_TARGET"/rootfs/. /
@@ -266,12 +290,12 @@ If this error persists, please report at: https://github.com/MichaIng/DietPi/iss
 			exit 1
 
 		fi
-		G_DIETPI_VERSION_CORE=$COREVERSION_SERVER
-		G_DIETPI_VERSION_SUB=$SUBVERSION_SERVER
-		G_DIETPI_VERSION_RC=$RCVERSION_SERVER
+		G_DIETPI_VERSION_CORE=$G_REMOTE_VERSION_CORE
+		G_DIETPI_VERSION_SUB=$G_REMOTE_VERSION_SUB
+		G_DIETPI_VERSION_RC=$G_REMOTE_VERSION_RC
 		G_VERSIONDB_SAVE
 
-		G_DIETPI-NOTIFY 0 "Incremental patching to v$COREVERSION_SERVER.$SUBVERSION_SERVER.$RCVERSION_SERVER completed"
+		G_DIETPI-NOTIFY 0 "Incremental patching to v$G_REMOTE_VERSION_CORE.$G_REMOTE_VERSION_SUB.$G_REMOTE_VERSION_RC completed"
 
 		# Remove patch_file
 		rm /boot/dietpi/patch_file
@@ -283,13 +307,13 @@ If this error persists, please report at: https://github.com/MichaIng/DietPi/iss
 	#/////////////////////////////////////////////////////////////////////////////////////
 	Get_View_Changelog(){
 
-		local i fp_changelog='CHANGELOG.txt'
+		local i
 
 		(( $CHANGELOG_DOWNLOADED )) || for i in "${!aURL_MIRROR_CHANGELOG[@]}"
 		do
 
 			G_DIETPI-NOTIFY 2 "Checking mirror: ${aURL_MIRROR_CHANGELOG[$i]}"
-			if curl -sSfL "${aURL_MIRROR_CHANGELOG[$i]}" > $fp_changelog; then
+			if curl -sSfL "${aURL_MIRROR_CHANGELOG[$i]}" > CHANGELOG.txt; then
 
 				CHANGELOG_DOWNLOADED=1
 				break
@@ -304,7 +328,7 @@ If this error persists, please report at: https://github.com/MichaIng/DietPi/iss
 
 		if (( $CHANGELOG_DOWNLOADED )); then
 
-			G_WHIP_VIEWFILE	$fp_changelog
+			G_WHIP_VIEWFILE	CHANGELOG.txt
 
 		else
 
@@ -323,7 +347,7 @@ If this error persists, please report at: https://github.com/MichaIng/DietPi/iss
 			G_WHIP_MENU_ARRAY=(
 
 				'' '●─ Update DietPi '
-				'Update' ": Apply update to: v$COREVERSION_SERVER.$SUBVERSION_SERVER.$RCVERSION_SERVER"
+				'Update' ": Apply update to: v$G_REMOTE_VERSION_CORE.$G_REMOTE_VERSION_SUB.$G_REMOTE_VERSION_RC"
 				'' '●─ Additional Options '
 				'Changelog' ': View recent changelog and patch notes.'
 				'Backup' ': Create a system backup before updating.'
@@ -342,7 +366,7 @@ Please select 'Update' option to apply the update."; then
 - A potential downside is: We can't possibly accommodate or predict all modification to Linux configurations files by the end user, outside of DietPi programs, during updates.\n
 Although we test the updates thoroughly, if you have made any custom changes to Linux configuration files outside of the DietPi programs, an update may trigger a potential issue.
 >--------------------------------------------------------------------------<\n
-Do you wish to continue and update DietPi to v$COREVERSION_SERVER.$SUBVERSION_SERVER.$RCVERSION_SERVER?" && return 0
+Do you wish to continue and update DietPi to v$G_REMOTE_VERSION_CORE.$G_REMOTE_VERSION_SUB.$G_REMOTE_VERSION_RC?" && return 0
 
 				elif [[ $G_WHIP_RETURNED_VALUE == 'Changelog' ]]; then
 
@@ -371,7 +395,7 @@ Do you wish to continue and update DietPi to v$COREVERSION_SERVER.$SUBVERSION_SE
 	G_DIETPI-NOTIFY 3 "$G_PROGRAM_NAME" 'Checking for available DietPi update'
 	#----------------------------------------------------------------
 	# Check for DietPi update and in case store result to /run/dietpi/.update_available for use by DietPi-Banner
-	if Get_Server_Version && Check_DietPi_Update; then
+	if Get_Server_Version && Check_Git_Migration && Check_DietPi_Update; then
 
 		# Exit if check-only input
 		(( $INPUT == 2 )) && exit 0
