@@ -52,7 +52,7 @@
 	# - Optional DietPi software aliases
 	[[ -d '/mnt/dietpi_userdata/sonarr' || -d '/mnt/dietpi_userdata/radarr' || -d '/mnt/dietpi_userdata/lidarr' ]] && alias dietpi-arr_to_RAM='/boot/dietpi/misc/dietpi-arr_to_RAM'
 	command -v kodi > /dev/null && alias startkodi='/boot/dietpi/misc/start_kodi'
-	[[ -f '/usr/local/games/opentyrian/run' ]] && alias opentyrian='/usr/local/games/opentyrian/run'
+	[[ -f '/usr/games/opentyrian/run' ]] && alias opentyrian='/usr/games/opentyrian/run'
 	[[ -f '/mnt/dietpi_userdata/dxx-rebirth/run.sh' ]] && alias dxx-rebirth='/mnt/dietpi_userdata/dxx-rebirth/run.sh'
 	# - 1337 moments ;)
 	alias 1337='echo Indeed, you are =\)'
