@@ -41,7 +41,7 @@
 	alias dietpi-logclear='/boot/dietpi/func/dietpi-logclear'
 	alias dietpi-survey='/boot/dietpi/dietpi-survey'
 	alias dietpi-explorer='/boot/dietpi/dietpi-explorer'
-	alias dietpi-banner='/boot/dietpi/func/dietpi-banner 2'
+	alias dietpi-banner='/boot/dietpi/func/dietpi-banner'
 	alias dietpi-justboom='/boot/dietpi/misc/dietpi-justboom'
 	alias dietpi-led_control='/boot/dietpi/dietpi-led_control'
 	alias dietpi-wifidb='/boot/dietpi/func/dietpi-wifidb'
