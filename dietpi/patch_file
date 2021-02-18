@@ -66,8 +66,7 @@
 
 	fi
 
-	# Whether to schedule a DietPi-Update restart, with or without system reboot
-	RESTART=
+	# Whether to schedue a reboot after DietPi-Update
 	REBOOT=
 
 	# Pre-v6.29: DietPi-RAMdisk removal needs to be done before loading DietPi-Globals, else /boot/dietpi still contains the old code
@@ -88,9 +87,6 @@
 		# Failsafe
 		sync
 
-		# DietPi-Update restart required since old version calls DietPi-RAMdisk forcefully and error-handled
-		RESTART=1
-
 	fi
 	# - Pre-create new DietPi runtime dir for later used scripts, created via /etc/tmpfiles.d/dietpi.conf from next boot on
 	[[ -d '/run/dietpi' ]] || { mkdir -p /run/dietpi; chmod 777 /run/dietpi; }
@@ -109,7 +105,6 @@
 	elif [[ ! -f '/boot/dietpi/.version' ]] || ! grep -q '^G_GITOWNER=' /boot/dietpi/.version; then
 
 		rm /boot/dietpi/.version
-		RESTART=1
 
 	fi
 
@@ -127,7 +122,7 @@ _EOF_
 	# Pre-v6.29: Assure that C.UTF-8 locale is available
 	if ! locale -a | grep -qiE '^C.UTF-?8'; then
 
-		apt-get -qq install --reinstall locales libc-bin
+		apt-get -qq install --reinstall libc-bin
 		# libc-bin ships C.UTF-8 as static locale already but let's add it to memory-mapped archive as well
 		localedef --add-to-archive /usr/lib/locale/C.UTF-8
 
@@ -136,7 +131,7 @@ _EOF_
 	# Import DietPi-Globals --------------------------------------------------------------
 	/boot/dietpi/func/dietpi-obtain_hw_model # Always update
 	. /boot/dietpi/func/dietpi-globals
-	G_PROGRAM_NAME='DietPi-Patch'
+	readonly G_PROGRAM_NAME='DietPi-Patch'
 	G_INIT
 	# Import DietPi-Globals --------------------------------------------------------------
 
@@ -144,8 +139,8 @@ _EOF_
 	# - DietPi-Update includes G_VERSIONDB_SAVE after every subversion patch from v6.27 on.
 	(( $1 )) && G_DIETPI_VERSION_SUB=$1
 
-	# Migrate newly supported SBCs from dev to master branch
-	if (( $G_DIETPI_VERSION_SUB < 29 )) && [[ -f '/etc/.dietpi_hw_model_identifier' ]]; then
+	# Pre-v6.29: Migrate newly supported SBCs from dev to master branch
+	if [[ $G_DIETPI_VERSION_SUB -lt 29 && -f '/etc/.dietpi_hw_model_identifier' ]]; then
 
 		# NanoPi M4v2 (58)
 		# Pine H64 (45)
@@ -158,9 +153,6 @@ _EOF_
 		fi
 
 	fi
-
-	# Pre-v6.29: Restart DietPi-Update in any case, to apply single-call patch_file change
-	(( $G_DIETPI_VERSION_SUB > 28 || $(pgrep -c patch_file) > 1 )) || RESTART=1
 
 	# Pre-v6.20: New $G_DIETPI_INSTALL_STAGE system
 	# - As loaded pre-v6.20 dietpi-update will recreate ".update_stage", we need to rerun dietpi-update.
@@ -180,12 +172,10 @@ _EOF_
 
 		fi
 
-		RESTART=1
-
 	fi
 
-	# Restart DietPi-Update if scheduled
-	if [[ $RESTART == 1 ]]; then
+	# Restart DietPi-Update when not yet done, to migrate to v7
+	if (( $(pgrep -c patch_file) < 2 )); then
 
 		# Save current version to rerun patch on next launch
 		G_VERSIONDB_SAVE
@@ -279,10 +269,10 @@ _EOF_
 
 			#-------------------------------------------------------------------------------
 			# locale rework/reset: https://github.com/MichaIng/DietPi/issues/1430#issuecomment-364763302
-			[[ -f '/etc/environment' ]] && mv /etc/environment /mnt/dietpi_userdata/environment.bak
+			[[ -f '/etc/environment' ]] && G_EXEC mv /etc/environment{,.bak}
 			> /etc/environment
 			/boot/dietpi/func/dietpi-set_software locale C.UTF-8
-			G_WHIP_MSG '[ INFO ] Locales reset\n\nTo resolve broken locales, they have been reset to "C.UTF-8".\n\nIf you had a different locale configured on this system, please use "dietpi-config" at a later date to re-configure.\n\nIn relation to that, DietPi does not use "/etc/environment" anymore, thus it is cleaned. In case you manually edited it, a backup was created: /mnt/dietpi_userdata/environment.bak'
+			G_WHIP_MSG '[ INFO ] Locales reset\n\nTo resolve broken locales, they have been reset to "C.UTF-8".\n\nIf you had a different locale configured on this system, please use "dietpi-config" at a later date to re-configure.\n\nIn relation to that, DietPi does not use "/etc/environment" anymore, thus it is cleaned. In case you manually edited it, a backup was created: /etc/environment.bak'
 			#------------------------------------------------------------------------------
 			# Removed control from DietPi-Services: https://github.com/MichaIng/DietPi/issues/1501
 			systemctl enable --now dnsmasq 2> /dev/null
@@ -324,8 +314,8 @@ _EOF_
 			systemctl enable dietpi-postboot
 			if [[ -f '/etc/rc.local' ]]; then
 
-				G_WHIP_MSG 'DietPi will not use "/etc/rc.local" for its own scripts anymore.\n\nHowever, in case you manually added something, we safe a backup to "/mnt/dietpi_userdata/rc.local.bak", from where you can copy & paste back to the cleaned "/etc/rc.local".\n\nIt will work as before.'
-				mv /etc/rc.local /mnt/dietpi_userdata/rc.local.bak
+				G_WHIP_MSG 'DietPi will not use "/etc/rc.local" for its own scripts anymore.\n\nHowever, in case you manually added something, we safe a backup to "/etc/rc.local.bak", from where you can copy & paste back to the cleaned "/etc/rc.local".\n\nIt will work as before.'
+				G_EXEC mv /etc/rc.local{,.bak}
 				cat << '_EOF_' > /etc/rc.local
 #!/bin/sh -e
 #
@@ -359,16 +349,16 @@ APT::AutoRemove::SuggestsImportant "false";
 _EOF_'
 			#-------------------------------------------------------------------------------
 			# Reinstalls:
-			# v6.5	Shairport-sync 3.1.7
+			# v6.5	Shairport Sync 3.1.7
 			# 	RPi Cam
 			# v6.26	Aria2 for .conf addition: https://github.com/MichaIng/DietPi/issues/1575#issuecomment-370248708
 			# v6.34	Sonarr/Radarr: https://github.com/MichaIng/DietPi/issues/1566#issuecomment-369334473
 			if (( $G_DIETPI_INSTALL_STAGE == 2 )); then
 
 				# RPi cam pre-patch
-				[[ -d '/var/www/dietpicam' ]] && mv /var/www/dietpicam /var/www/rpicam
-				[[ -d '/mnt/dietpi_userdata/dietpicam' ]] && mv /mnt/dietpi_userdata/dietpicam /mnt/dietpi_userdata/rpicam
-				[[ -e '/var/www/rpicam/media' ]] && rm /var/www/rpicam/media
+				[[ -d '/var/www/dietpicam' ]] && G_EXEC mv /var/www/dietpicam /var/www/rpicam
+				[[ -d '/mnt/dietpi_userdata/dietpicam' ]] && G_EXEC mv /mnt/dietpi_userdata/dietpicam /mnt/dietpi_userdata/rpicam
+				[[ -e '/var/www/rpicam/media' ]] && G_EXEC rm -R /var/www/rpicam/media
 
 				echo 59 >> /var/tmp/dietpi/dietpi-update_reinstalls
 
@@ -377,7 +367,7 @@ _EOF_'
 			# Add certificate combining for Lighttpd to Certbot auto renewal: https://github.com/MichaIng/DietPi/pull/1553
 			if [[ -f '/boot/dietpi/.dietpi-letsencrypt' ]]; then
 
-				# Switch Minio to new certbot.service.d/ hook:
+				# Switch MinIO to new certbot.service.d/ hook:
 				[[ -f '/etc/systemd/system/certbot.service' ]] && grep -q '^aSOFTWARE_INSTALL_STATE\[158\]=2' /boot/dietpi/.installed && rm /etc/systemd/system/certbot.service
 				# Overall settings and config renewal, skip DietPi-Services:
 				G_DIETPI_SERVICES_DISABLE=1 /boot/dietpi/dietpi-letsencrypt 1
@@ -489,12 +479,7 @@ _EOF_'
 			[[ -f '/etc/cron.d/make_nas_processes_faster' ]] && rm /etc/cron.d/make_nas_processes_faster
 			#-------------------------------------------------------------------------------
 			# Add Dropbear ecdsa and dss host keys, if missing: https://github.com/MichaIng/DietPi/issues/1670
-			if command -v dropbearkey > /dev/null; then
-
-				[[ -f '/etc/dropbear/dropbear_ecdsa_host_key' ]] || dropbearkey -t ecdsa -f /etc/dropbear/dropbear_ecdsa_host_key
-				[[ -f '/etc/dropbear/dropbear_dss_host_key' ]] || dropbearkey -t dss -f /etc/dropbear/dropbear_dss_host_key
-
-			fi
+			command -v dropbearkey > /dev/null && [[ ! -f '/etc/dropbear/dropbear_ecdsa_host_key' ]] && dropbearkey -t ecdsa -f /etc/dropbear/dropbear_ecdsa_host_key
 			#-------------------------------------------------------------------------------
 			# Reinstall firmware-misc-nonfree by default (Ralink): https://github.com/MichaIng/DietPi/issues/1675
 			(( $G_HW_MODEL == 21 )) || dpkg-query -s wpasupplicant &> /dev/null && G_AGI firmware-misc-nonfree
@@ -691,11 +676,13 @@ _EOF_'
 			then
 				if [[ ! -d '/mnt/dietpi_userdata/sonarr' && -d '/root/.config/NzbDrone' ]]
 				then
+					G_EXEC mkdir -p /mnt/dietpi_userdata
 					G_EXEC mv /root/.config/NzbDrone /mnt/dietpi_userdata/sonarr
 					G_WHIP_MSG 'INFO:\n\nSonarr userdata has been moved to the DietPi userdata directory:\n\n - /root/.config/NzbDrone > /mnt/dietpi_userdata/sonarr'
 				fi
 				if [[ ! -d '/mnt/dietpi_userdata/radarr' && -d '/root/.config/Radarr' ]]
 				then
+					G_EXEC mkdir -p /mnt/dietpi_userdata
 					G_EXEC mv /root/.config/Radarr /mnt/dietpi_userdata/radarr
 					G_WHIP_MSG 'INFO:\n\nRadarr userdata has been moved to the DietPi userdata directory:\n\n - /root/.config/Radarr > /mnt/dietpi_userdata/radarr'
 				fi
@@ -746,8 +733,9 @@ _EOF_'
 			# Move Koel from /var/www to /mnt/dietpi_userdata: https://github.com/MichaIng/DietPi/pull/1954
 			if [[ -d '/var/www/koel' ]]; then
 
+				G_EXEC mkdir -p /mnt/dietpi_userdata
 				G_EXEC mv /var/www/koel /mnt/dietpi_userdata/koel
-				chown -R koel:dietpi /mnt/dietpi_userdata/koel
+				G_EXEC chown -R koel:dietpi /mnt/dietpi_userdata/koel
 				[[ -f '/etc/systemd/system/koel.service' ]] && sed -i 's|/var/www|/mnt/dietpi_userdata|g' /etc/systemd/system/koel.service
 				G_WHIP_MSG 'INFO:\n\nKoel has been moved to the DietPi userdata directory:\n\n - /var/www/koel > /mnt/dietpi_userdata/koel'
 
@@ -802,13 +790,15 @@ _EOF_'
 			# Encrypt and secure GLOBAL_PW used by DietPi-Software: https://github.com/MichaIng/DietPi/issues/2021
 			if [[ ! -f '/var/lib/dietpi/dietpi-software/.GLOBAL_PW.bin' ]]; then
 
+				G_WHIP_MSG '[ INFO ] For security reasons your global software password will be removed from dietpi.txt and instead ecrypted and saved to:
+ - /var/lib/dietpi/dietpi-software/.GLOBAL_PW.bin
+\nDietPi-Software will decrypt and use it as default for software installs. You can change it via:
+ - dietpi-config > Security Options > Change Passwords'
+ 				G_EXEC mkdir -p /var/lib/dietpi/dietpi-software
+
 				local pw_dietpi_software=$(sed -n '/^[[:blank:]]*AUTO_SETUP_GLOBAL_PASSWORD=/{s/^[^=]*=//p;q}' /boot/dietpi.txt)
-				# Failsafe, should never occur
-				[[ $pw_dietpi_software ]] || pw_dietpi_software='dietpi'
-
-				G_CONFIG_INJECT 'AUTO_SETUP_GLOBAL_PASSWORD=' 'AUTO_SETUP_GLOBAL_PASSWORD=Password has been encrypted and secured on rootFS' /boot/dietpi.txt
-
-				mkdir -p /var/lib/dietpi/dietpi-software # Should already exist, failsafe
+				G_EXEC sed -i '/^[[:blank:]]*AUTO_SETUP_GLOBAL_PASSWORD=/c\#AUTO_SETUP_GLOBAL_PASSWORD= # Password has been ecrypted and saved to rootfs' /boot/dietpi.txt
+				[[ $pw_dietpi_software ]] || pw_dietpi_software='dietpi' # Fallback to default
 
 				# Use new "pbkdf2" function on Buster to resolve warning about deprecated key derivation used: https://github.com/MichaIng/DietPi/issues/2213
 				local pbkdf2=()
@@ -1136,11 +1126,11 @@ We strongly recommend you select "0 : Re-enable IPv6 on kernel level". By doing 
 			if (( $G_DIETPI_INSTALL_STAGE == 2 )) && grep -q '^aSOFTWARE_INSTALL_STATE\[131\]=2' /boot/dietpi/.installed &&
 				[[ -d '/mnt/dietpi_userdata/blynk' && ! -d '/mnt/dietpi_userdata/blynk/data' ]]; then
 
-				mv /mnt/dietpi_userdata/blynk /mnt/dietpi_userdata/blynk_bak
-				mv /etc/blynkserver /mnt/dietpi_userdata/blynk
-				mv /mnt/dietpi_userdata/blynk/server.jar /mnt/dietpi_userdata/blynk/blynkserver.jar
-				mv /mnt/dietpi_userdata/blynk_bak/server.properties /mnt/dietpi_userdata/blynk/
-				mv /mnt/dietpi_userdata/blynk_bak /mnt/dietpi_userdata/blynk/data
+				G_EXEC mv /mnt/dietpi_userdata/blynk /mnt/dietpi_userdata/blynk_bak
+				G_EXEC mv /etc/blynkserver /mnt/dietpi_userdata/blynk
+				G_EXEC mv /mnt/dietpi_userdata/blynk/server.jar /mnt/dietpi_userdata/blynk/blynkserver.jar
+				G_EXEC mv /mnt/dietpi_userdata/blynk_bak/server.properties /mnt/dietpi_userdata/blynk/
+				G_EXEC mv /mnt/dietpi_userdata/blynk_bak /mnt/dietpi_userdata/blynk/data
 				G_CONFIG_INJECT 'data.folder=' 'data.folder=/mnt/dietpi_userdata/blynk/data' /mnt/dietpi_userdata/blynk/server.properties
 
 			fi
@@ -1281,7 +1271,7 @@ Also have a look at "Sonarr", another alternative TV show manager, available for
 			rm -f /etc/bashrc.d/dietpi-*.sh
 			#-------------------------------------------------------------------------------
 			# Mopidy fix: https://github.com/MichaIng/DietPi/issues/2536
-			getent passwd mopidy &> /dev/null && usermod -aG dietpi,audio -d /mnt/dietpi_userdata/mopidy mopidy
+			getent passwd mopidy > /dev/null && usermod -aG dietpi,audio -d /mnt/dietpi_userdata/mopidy mopidy
 			#-------------------------------------------------------------------------------
 			# Removed dependency on "p7zip-full", use "7zr" (p7zip) instead: https://github.com/MichaIng/DietPi/pull/2559
 			G_AGI p7zip
@@ -1299,9 +1289,10 @@ Do you still want to keep "p7zip-full"?'; then
 			fi
 			#-------------------------------------------------------------------------------
 			# Fix Pi-hole permissions to allow "pihole -up"
-			if [[ -d '/var/www/html/pihole' ]]; then
+			if [[ -d '/var/www/html/pihole' && -d '/var/www/html/admin' ]]; then
 
-				cd /var/www/html/admin && git reset --hard HEAD
+				G_EXEC cd /var/www/html/admin
+				git reset --hard HEAD
 				G_EXEC cd /tmp/$G_PROGRAM_NAME
 
 			fi
@@ -1395,23 +1386,22 @@ Redirect permanent /ocs-provider /nextcloud/ocs-provider' >> /etc/apache2/sites-
 
 					reinstall_indices+=' 107'
 					G_CONFIG_INJECT 'system.umask.set[[:blank:]=]' 'system.umask.set = 002' /root/.rtorrent.rc
-					mkdir -p /mnt/dietpi_userdata/rtorrent
-					mv /root/.rtorrent.rc /mnt/dietpi_userdata/rtorrent/
+					G_EXEC mkdir -p /mnt/dietpi_userdata/rtorrent
+					G_EXEC mv /root/.rtorrent.rc /mnt/dietpi_userdata/rtorrent/
 
 				fi
 
-				if grep -q '^aSOFTWARE_INSTALL_STATE\[45\]=2' /boot/dietpi/.installed &&
-					getent passwd deluge &> /dev/null; then # Only do this once, regardless of re-patches
+				if grep -q '^aSOFTWARE_INSTALL_STATE\[45\]=2' /boot/dietpi/.installed && getent passwd deluge > /dev/null; then # Only do this once, regardless of re-patches
 
 					reinstall_indices+=' 45'
 
 					G_AGP deluge-webui
-					[[ -e ~deluge ]] && mv ~deluge /mnt/dietpi_userdata/deluge_home_backup
-					userdel -rf deluge
-					rm -Rf /{root,home/*}/.config/deluge
-					mkdir -p /var/log/deluged
-					[[ -f '/var/log/deluged.log' ]] && mv /var/log/deluged.log /var/log/deluged/daemon.log
-					[[ -f '/var/log/deluge-web.log' ]] && mv /var/log/deluge-web.log /var/log/deluged/web.log
+					G_EXEC mkdir -p /var/log/deluged /mnt/dietpi_userdata
+					[[ -e ~deluge ]] && G_EXEC mv ~deluge /mnt/dietpi_userdata/deluge_home_backup
+					G_EXEC userdel -rf deluge
+					G_EXEC rm -Rf /{root,home/*}/.config/deluge
+					[[ -f '/var/log/deluged.log' ]] && G_EXEC mv /var/log/deluged.log /var/log/deluged/daemon.log
+					[[ -f '/var/log/deluge-web.log' ]] && G_EXEC mv /var/log/deluge-web.log /var/log/deluged/web.log
 
 					G_WHIP_MSG '[ INFO ] Deluge rework\n
 Our Deluge installer has been reworked to match Debian APT package defaults and official documentations. This also resolves an issue when attempting to access "deluge-console".
@@ -1553,12 +1543,12 @@ Further info and usage: https://dietpi.com/phpbb/viewtopic.php?t=5828'
 
 					G_WHIP_MSG "[ INFO ] PHP upgrade\n
 Your PHP instance will be upgraded to ${PHP_NAME^^}. This enhances security and performance of your web applications and is required to run some of the latest web application versions, e.g. Nextcloud 17, ownCloud 10.3, phpBB 3.3 and others.\n
-We will update webserver configurations and backup the whole /etc/php directory to /mnt/dietpi_userdata/php_bak, so you can recover custom settings.\n
+We will update webserver configurations and backup the whole /etc/php directory to /etc/php_bak, so you can recover custom settings.\n
 NB: For any custom PHP-dependent web applications, which you have installed manually (outside of DietPi-Software), you might need to adjust the used socket to: /run/php/$PHP_NAME-fpm.sock
 NBB: Reinstall manually installed PHP modules via: G_AGI $PHP_NAME-<mod_name>"
 
 					# Backup config
-					[[ -d '/etc/php' ]] && G_EXEC cp -a /etc/php /mnt/dietpi_userdata/php_bak
+					[[ -d '/etc/php' ]] && G_EXEC cp -a /etc/php{,_bak}
 
 					# Update PHP socket
 					# - Lighttpd
@@ -1629,7 +1619,7 @@ NBB: Reinstall manually installed PHP modules via: G_AGI $PHP_NAME-<mod_name>"
 			if [[ -f '/usr/share/applications/dietpi-process_tool.desktop' ]]; then
 
 				rm /usr/share/applications/dietpi-process_tool.desktop
-				G_EXEC wget https://github.com/$G_GITOWNER/DietPi/raw/$G_GITBRANCH/.conf/desktop/apps/dietpi-services.desktop -O /usr/share/applications/dietpi-services.desktop
+				G_EXEC curl -sSfL https://github.com/$G_GITOWNER/DietPi/raw/$G_GITBRANCH/.conf/desktop/apps/dietpi-services.desktop -o /usr/share/applications/dietpi-services.desktop
 				chmod +x /usr/share/applications/dietpi-services.desktop
 
 			fi
@@ -1685,20 +1675,17 @@ Use "dietpi-config" to adjust these settings to your needs.'
 
 			fi
 			#-------------------------------------------------------------------------------
-			# Update x86_64 kernel module settings
+			# x86_64: Cleanup config files to disable nouveau
 			if (( $G_HW_ARCH == 10 )); then
 
-				# Cleanup nouveau disabling
 				rm -f /etc/modprobe.d/*nouveau*
-				cat << _EOF_ > /etc/modprobe.d/dietpi-disable_nouveau.conf
+				cat << '_EOF_' > /etc/modprobe.d/dietpi-disable_nouveau.conf
 blacklist nouveau
 blacklist lbm-nouveau
 options nouveau modeset=0
 alias nouveau off
 alias lbm-nouveau off
 _EOF_
-				# Apply usb-storage quirks to disable UAS for unsupported drives (Seagate ST5000LM000-2AN170): https://github.com/MichaIng/DietPi/issues/2905
-				echo 'options usb-storage quirks=0bc2:ab30:u' > /etc/modprobe.d/dietpi-usb-storage_quirks.conf
 				# Update initramfs with above changes
 				if command -v update-tirfs > /dev/null; then
 
@@ -1715,7 +1702,7 @@ _EOF_
 			# RPi Buster: Re-apply firmware Buster-only repo, remove Stretch branch, reinstall raspi-copies-and-fills (on ARMv6/7 models) which is now compatible
 			if (( $G_HW_MODEL < 10 && $G_DISTRO > 4 )); then
 
-				echo 'deb https://archive.raspberrypi.org/debian/ buster main ui' > /etc/apt/sources.list.d/raspi.list
+				echo 'deb https://archive.raspberrypi.org/debian/ buster main' > /etc/apt/sources.list.d/raspi.list
 				G_AGUP
 				(( $G_HW_ARCH == 3 )) || G_AGI raspi-copies-and-fills
 
@@ -1885,8 +1872,8 @@ Do you want to have the recommended "initial_turbo=20" re-added to your config.t
 					[[ -L '/var/www/index.php' && $(readlink -f '/var/www/index.php') == '/var/www/html/pihole/index.php' ]] && rm /var/www/index.php
 					if command -v a2ensite > /dev/null && grep -q '^aSOFTWARE_INSTALL_STATE\[83\]=2' /boot/dietpi/.installed; then
 
-						G_EXEC wget "https://raw.githubusercontent.com/$G_GITOWNER/DietPi/$G_GITBRANCH/.conf/dps_93/apache.block_public_admin.conf" -O /etc/apache2/sites-available/dietpi-pihole-block_public_admin.conf
-						G_EXEC wget "https://raw.githubusercontent.com/$G_GITOWNER/DietPi/$G_GITBRANCH/.conf/dps_93/apache.pihole.conf" -O /etc/apache2/sites-available/dietpi-pihole.conf
+						G_EXEC curl -sSfL "https://raw.githubusercontent.com/$G_GITOWNER/DietPi/$G_GITBRANCH/.conf/dps_93/apache.block_public_admin.conf" -o /etc/apache2/sites-available/dietpi-pihole-block_public_admin.conf
+						G_EXEC curl -sSfL "https://raw.githubusercontent.com/$G_GITOWNER/DietPi/$G_GITBRANCH/.conf/dps_93/apache.pihole.conf" -o /etc/apache2/sites-available/dietpi-pihole.conf
 						a2ensite dietpi-pihole
 						if grep -q 'BLOCKINGMODE=IP-NODATA-AAAA' /etc/pihole/pihole-FTL.conf; then
 
@@ -1898,8 +1885,8 @@ Do you want to have the recommended "initial_turbo=20" re-added to your config.t
 					fi
 					if command -v lighttpd-enable-mod > /dev/null && grep -q '^aSOFTWARE_INSTALL_STATE\[84\]=2' /boot/dietpi/.installed; then
 
-						G_EXEC wget "https://raw.githubusercontent.com/$G_GITOWNER/DietPi/$G_GITBRANCH/.conf/dps_93/lighttpd.block_public_admin.conf" -O /etc/lighttpd/conf-available/99-dietpi-pihole-block_public_admin.conf
-						G_EXEC wget "https://raw.githubusercontent.com/$G_GITOWNER/DietPi/$G_GITBRANCH/.conf/dps_93/lighttpd.pihole.conf" -O /etc/lighttpd/conf-available/99-dietpi-pihole.conf
+						G_EXEC curl -sSfL "https://raw.githubusercontent.com/$G_GITOWNER/DietPi/$G_GITBRANCH/.conf/dps_93/lighttpd.block_public_admin.conf" -o /etc/lighttpd/conf-available/99-dietpi-pihole-block_public_admin.conf
+						G_EXEC curl -sSfL "https://raw.githubusercontent.com/$G_GITOWNER/DietPi/$G_GITBRANCH/.conf/dps_93/lighttpd.pihole.conf" -o /etc/lighttpd/conf-available/99-dietpi-pihole.conf
 						lighttpd-enable-mod dietpi-pihole
 						if grep -q 'BLOCKINGMODE=IP-NODATA-AAAA' /etc/pihole/pihole-FTL.conf; then
 
@@ -1913,9 +1900,9 @@ Do you want to have the recommended "initial_turbo=20" re-added to your config.t
 
 						# Update Nginx default vhost, which is required to assure access restrictions for Pi-hole
 						G_BACKUP_FP /etc/nginx/sites-available/default
-						G_EXEC wget "https://raw.githubusercontent.com/$G_GITOWNER/DietPi/$G_GITBRANCH/.conf/dps_85/nginx.default" -O /etc/nginx/sites-available/default
-						G_EXEC wget "https://raw.githubusercontent.com/$G_GITOWNER/DietPi/$G_GITBRANCH/.conf/dps_93/nginx.block_public_admin.conf" -O /etc/nginx/sites-dietpi/dietpi-pihole-block_public_admin.off
-						G_EXEC wget "https://raw.githubusercontent.com/$G_GITOWNER/DietPi/$G_GITBRANCH/.conf/dps_93/nginx.pihole.conf" -O /etc/nginx/sites-dietpi/dietpi-pihole.conf
+						G_EXEC curl -sSfL "https://raw.githubusercontent.com/$G_GITOWNER/DietPi/$G_GITBRANCH/.conf/dps_85/nginx.default" -o /etc/nginx/sites-available/default
+						G_EXEC curl -sSfL "https://raw.githubusercontent.com/$G_GITOWNER/DietPi/$G_GITBRANCH/.conf/dps_93/nginx.block_public_admin.conf" -o /etc/nginx/sites-dietpi/dietpi-pihole-block_public_admin.off
+						G_EXEC curl -sSfL "https://raw.githubusercontent.com/$G_GITOWNER/DietPi/$G_GITBRANCH/.conf/dps_93/nginx.pihole.conf" -o /etc/nginx/sites-dietpi/dietpi-pihole.conf
 						if grep -q 'BLOCKINGMODE=IP-NODATA-AAAA' /etc/pihole/pihole-FTL.conf; then
 
 							[[ -f '/var/www/index.html' ]] && mv /var/www/index.html /var/www/index.html.bak
@@ -1931,7 +1918,7 @@ Do you want to have the recommended "initial_turbo=20" re-added to your config.t
 				if (( $G_HW_MODEL == 12 )) && grep -q '^aSOFTWARE_INSTALL_STATE\[6\]=2' /boot/dietpi/.installed; then
 
 					G_BACKUP_FP /etc/X11/xorg.conf
-					G_EXEC wget "https://raw.githubusercontent.com/$G_GITOWNER/DietPi/$G_GITBRANCH/.conf/dps_6/xorg_c2.conf" -O /etc/X11/xorg.conf
+					G_EXEC curl -sSfL "https://raw.githubusercontent.com/$G_GITOWNER/DietPi/$G_GITBRANCH/.conf/dps_6/xorg_c2.conf" -o /etc/X11/xorg.conf
 					apt-mark auto xf86-video-mali-odroid
 					# Kodi: Remove PulseAudio, not required by Kodi anymore, but ask user first
 					if grep -q '^aSOFTWARE_INSTALL_STATE\[31\]=2' /boot/dietpi/.installed; then
@@ -1989,7 +1976,7 @@ Would you like to switch back to the Nginx authentication method now?' && certbo
 					# If aria2.conf exists on new location, it must have been installed with new code already, thus old file is obsolete.
 					if [[ -f '/mnt/dietpi_userdata/aria2/aria2.conf' ]]; then
 
-						rm /var/lib/dietpi/dietpi-software/installed/aria2.conf
+						G_EXEC rm /var/lib/dietpi/dietpi-software/installed/aria2.conf
 
 					else
 
@@ -1999,8 +1986,8 @@ Would you like to switch back to the Nginx authentication method now?' && certbo
 						GCI_PRESERVE=1 G_CONFIG_INJECT 'save-session=' "save-session=$fp_input" /var/lib/dietpi/dietpi-software/installed/aria2.conf
 						GCI_PRESERVE=1 G_CONFIG_INJECT 'save-session-interval=' 'save-session-interval=60' /var/lib/dietpi/dietpi-software/installed/aria2.conf
 						# Move aria2.conf to new location
-						mkdir -p /mnt/dietpi_userdata/aria2
-						mv /var/lib/dietpi/dietpi-software/installed/aria2.conf /mnt/dietpi_userdata/aria2/
+						G_EXEC mkdir -p /mnt/dietpi_userdata/aria2
+						G_EXEC mv /var/lib/dietpi/dietpi-software/installed/aria2.conf /mnt/dietpi_userdata/aria2/
 
 					fi
 
@@ -2170,7 +2157,7 @@ _EOF_
 			rm -fv /boot/dietpi/{.,func/}dietpi-led_control
 			#-------------------------------------------------------------------------------
 			G_DIETPI-NOTIFY 2 'Installing vmtouch as replacement for DietPi-RAMdisk' # https://github.com/MichaIng/DietPi/issues/3288
-			G_EXEC wget "https://dietpi.com/downloads/binaries/$G_DISTRO_NAME/vmtouch_$G_HW_ARCH_NAME.deb"
+			G_EXEC curl -sSfLO "https://dietpi.com/downloads/binaries/$G_DISTRO_NAME/vmtouch_$G_HW_ARCH_NAME.deb"
 			G_AGI "./vmtouch_$G_HW_ARCH_NAME.deb"
 			rm "vmtouch_$G_HW_ARCH_NAME.deb"
 			#-------------------------------------------------------------------------------
@@ -2352,7 +2339,7 @@ To reinstall now, run: "dietpi-software reinstall 106 144 145"
 
 			#-------------------------------------------------------------------------------
 			# Make userdata dir world-executable so service users don't need to be in dietpi group to access their data dir: https://github.com/MichaIng/DietPi/pull/3536#issuecomment-628515444
-			G_EXEC chmod a+x /mnt/dietpi_userdata
+			[[ -d '/mnt/dietpi_userdata' ]] && G_EXEC chmod a+x /mnt/dietpi_userdata
 			#-------------------------------------------------------------------------------
 			# Assure /media exists to fulfil FHS, fix htpdate service startup and probably other issues: https://github.com/MichaIng/DietPi/issues/3558
 			[[ -d '/media' ]] || G_EXEC mkdir /media
@@ -2442,18 +2429,6 @@ To reinstall now, run: "dietpi-software reinstall 106 144 145"
 
 			fi
 			#-------------------------------------------------------------------------------
-			# https://github.com/jirka-h/haveged/pull/7 https://github.com/MichaIng/DietPi/issues/3689#issuecomment-678322767
-			if [[ $G_DISTRO == 5 && $G_HW_ARCH == [23] && $G_HW_MODEL -gt 9 ]] && dpkg-query -s haveged &> /dev/null; then
-
-				G_DIETPI-NOTIFY 2 'Upgrading haveged entropy daemon to fix an issue on ARM:'
-				G_DIETPI-NOTIFY 2 ' - https://github.com/jirka-h/haveged/pull/7'
-				G_EXEC curl -sSfLO "https://dietpi.com/downloads/binaries/buster/libhavege2_$G_HW_ARCH_NAME.deb"
-				G_EXEC curl -sSfLO "https://dietpi.com/downloads/binaries/buster/haveged_$G_HW_ARCH_NAME.deb"
-				G_AGI "./libhavege2_$G_HW_ARCH_NAME.deb" "./haveged_$G_HW_ARCH_NAME.deb"
-				G_EXEC_NOHALT=1 G_EXEC rm "./libhavege2_$G_HW_ARCH_NAME.deb" "./haveged_$G_HW_ARCH_NAME.deb"
-
-			fi
-			#-------------------------------------------------------------------------------
 
 		elif (( $G_DIETPI_VERSION_SUB == 32 )); then
 
@@ -2537,6 +2512,7 @@ opcache.max_accelerated_files=10000\nopcache.memory_consumption=128\nopcache.sav
 - /etc/cubrite > /mnt/dietpi_userdata/cuberite
 \nFor this, it will be reinstalled. A backup is stored at:
 - /mnt/dietpi_userdata/cuberite_bak'
+					G_EXEC mkdir -p /mnt/dietpi_userdata
 					G_EXEC mv /etc/cubrite /mnt/dietpi_userdata/cuberite
 					G_EXEC cp -a /mnt/dietpi_userdata/cuberite{,_bak}
 					echo 52 >> /var/tmp/dietpi/dietpi-update_reinstalls
@@ -2737,8 +2713,45 @@ _EOF_
 				G_CONFIG_INJECT 'memory_limit[[:blank:]]*=' 'memory_limit=512M' "$i"
 			done
 			#-------------------------------------------------------------------------------
-			# Last subversion patch completed
-			# - Apply reinstalls
+
+		elif (( $G_DIETPI_VERSION_SUB == 34 )); then
+
+			#-------------------------------------------------------------------------------
+			# Unbound: Merge dietpi-pihole.conf into dietpi.conf
+			if [[ -f '/etc/unbound/unbound.conf.d/dietpi-pihole.conf' && -f '/etc/unbound/unbound.conf.d/dietpi.conf' ]]
+			then
+				G_DIETPI-NOTIFY 2 'Unbound: Merging dietpi-pihole.conf into dietpi.conf'
+				local interface=$(mawk '/^[ \t]*interface:/{print $2;exit}' /etc/unbound/unbound.conf.d/dietpi-pihole.conf)
+				local port=$(mawk '/^[ \t]*port:/{print $2;exit}' /etc/unbound/unbound.conf.d/dietpi-pihole.conf)
+				G_CONFIG_INJECT 'interface:[[:blank:]]' "	interface: $interface" /etc/unbound/unbound.conf.d/dietpi.conf
+				G_CONFIG_INJECT 'port:[[:blank:]]' "	port: $port" /etc/unbound/unbound.conf.d/dietpi.conf
+				G_EXEC rm /etc/unbound/unbound.conf.d/dietpi-pihole.conf
+			fi
+			#-------------------------------------------------------------------------------
+			# ReadyMedia: Fix database rebuild on service start
+			[[ -f '/etc/systemd/system/minidlna.service' ]] && G_EXEC sed -i '/^ExecStart=/s/ -SR / -S -R /' /etc/systemd/system/minidlna.service
+			#-------------------------------------------------------------------------------
+			# https://github.com/jirka-h/haveged/pull/7 https://github.com/MichaIng/DietPi/issues/3689#issuecomment-678322767
+			if [[ $G_DISTRO == 5 && $G_HW_ARCH == [23] && $G_HW_MODEL -gt 9 ]] && dpkg-query -s haveged &> /dev/null; then
+
+				G_DIETPI-NOTIFY 2 'Upgrading haveged entropy daemon to fix an issue on ARM:'
+				G_DIETPI-NOTIFY 2 ' - https://github.com/jirka-h/haveged/pull/7'
+				G_EXEC curl -sSfLO "https://dietpi.com/downloads/binaries/buster/libhavege2_$G_HW_ARCH_NAME.deb"
+				G_EXEC curl -sSfLO "https://dietpi.com/downloads/binaries/buster/haveged_$G_HW_ARCH_NAME.deb"
+				G_AGI "./libhavege2_$G_HW_ARCH_NAME.deb" "./haveged_$G_HW_ARCH_NAME.deb"
+				G_EXEC_NOHALT=1 G_EXEC rm "./libhavege2_$G_HW_ARCH_NAME.deb" "./haveged_$G_HW_ARCH_NAME.deb"
+
+			fi
+			#-------------------------------------------------------------------------------
+			# Raspberry Pi Microsoft VS Code repo: https://github.com/MichaIng/DietPi/issues/4083
+			[[ $G_HW_MODEL -le 9 && -f '/etc/apt/sources.list.d/vscode.list' ]] && { G_WHIP_BUTTON_OK_TEXT='Keep it' G_WHIP_BUTTON_CANCEL_TEXT='Remove it' G_WHIP_YESNO 'The Microsoft Visual Studio Code APT repository has been found on your system.
+\nThis repository was added by the "raspberrypi-sys-mods" package from the Raspberry Pi Foundation, to support development around the new Raspberry Pi Pico.
+\nIf you do no VS Code development, we suggest to remove this APT repository and its key from your system.' || G_EXEC rm -f /etc/apt/sources.list.d/vscode.list /etc/apt/trusted.gpg.d/microsoft.gpg /etc/apt/preferences.d/3rd_parties.pref; }
+			#-------------------------------------------------------------------------------
+			# Remove obsolete directory
+			[[ -d '/var/lib/dietpi/dietpi-software/services' ]] && G_EXEC rmdir --ignore-fail-on-non-empty /var/lib/dietpi/dietpi-software/services
+			#-------------------------------------------------------------------------------
+			# Last subversion patch completed: Apply reinstalls
 			if [[ -f '/var/tmp/dietpi/dietpi-update_reinstalls' ]]
 			then
 				# Coders NB: Assigning to array is not easily possible here since we need to split at newline AND space.
@@ -2746,12 +2759,6 @@ _EOF_
 				(( $G_DIETPI_INSTALL_STAGE == 2 )) && { /boot/dietpi/dietpi-software reinstall $(</var/tmp/dietpi/dietpi-update_reinstalls) || exit 1; }
 				rm /var/tmp/dietpi/dietpi-update_reinstalls
 			fi
-			# - Autoremove all marked packages during all patches with a single final call
-			G_AGA
-			# - Reload systemd
-			systemctl daemon-reload
-			# - Exit loop
-			FINISHED=1
 			#-------------------------------------------------------------------------------
 
 		fi
@@ -2760,10 +2767,9 @@ _EOF_
 
 	#-------------------------------------------------------------------------------
 	# Apply subversion patches incrementally
-	FINISHED=0
 	# Store RC version "0" during incremental patching. DietPi-Update applies final RC version afterwards.
 	G_DIETPI_VERSION_RC=0
-	until (( $FINISHED ))
+	until (( $G_DIETPI_VERSION_SUB > 34 ))
 	do
 		G_DIETPI-NOTIFY 2 "Patching $G_DIETPI_VERSION_CORE.$G_DIETPI_VERSION_SUB to $G_DIETPI_VERSION_CORE.$(( $G_DIETPI_VERSION_SUB + 1 ))"
 		Subversion_Patch || exit 1
