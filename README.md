@@ -1,21 +1,17 @@
-<html>
-	<h1 align="center">
-		<img src="https://raw.githubusercontent.com/MichaIng/DietPi-Website/master/images/dietpi-logo_180x180.png" alt="DietPi Logo">
-	</h1>
-	<p align="center">
-		<b>Lightweight justice for your single-board computer!</b>
-		<br><br>
-		optimised • simplified • for everyone
-		<br><br>
-		<a href="https://dietpi.com/">Website</a> • <a href="https://dietpi.com/docs/">Documentation</a> • <a href="https://dietpi.com/#download">View all supported platforms</a>
-	</p>
-	<hr>
-	<p align="center">
-		<strong>Ready to run</strong> optimised software choices with <a href="https://dietpi.com/dietpi-software.html"><strong>dietpi-software</strong></a>
-		<br>Feature-rich configuration tool for your device with <strong>dietpi-config</strong>.
-	</p>
-	<hr>
-</html>
+<h1 align="center"><img src="https://raw.githubusercontent.com/MichaIng/DietPi-Website/master/images/dietpi-logo_180x180.png" alt="DietPi Logo"></h1>
+<p align="center">
+	<b>Lightweight justice for your single-board computer!</b>
+	<br><br>
+	optimised • simplified • for everyone
+	<br><br>
+	<a href="https://dietpi.com/">Website</a> • <a href="https://dietpi.com/docs/">Documentation</a> • <a href="https://dietpi.com/#download">View all supported platforms</a> • <a href="https://dietpi.com/phpbb/">Forum</a>
+</p>
+<hr>
+<p align="center">
+	<strong>Ready to run</strong> optimised software choices with <a href="https://dietpi.com/dietpi-software.html"><strong>dietpi-software</strong></a>
+	<br>Feature-rich configuration tool for your device with <strong>dietpi-config</strong>.
+</p>
+<hr>
 
 ## Introduction
 
@@ -151,7 +147,7 @@ If so, let us know!
 We are always looking for talented people who believe in the DietPi project, and, wish to contribute in any way you can.
 
 - Send me an Email: micha@dietpi.com
-- Join our forums: https://dietpi.com/phpbb/
+- Join our forum: https://dietpi.com/phpbb/
 - GitHub: https://github.com/MichaIng/DietPi
 
 ### FeatHub
