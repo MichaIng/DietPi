@@ -64,7 +64,7 @@
 	readonly aRSYNC_LOGGING_OPTIONS=('-v' "--log-file=$FP_LOG")
 
 	# Date format for logs
-	Print_Date(){ date +"%Y-%m-%d_%T"; }
+	Print_Date(){ date '+%Y-%m-%d_%T'; }
 
 	Create_Filter_Include_Exclude(){
 
@@ -176,8 +176,7 @@ _EOF_
 
 				fi
 
-				# Done
-				break
+				break # Done
 
 			done
 
@@ -194,12 +193,14 @@ _EOF_
 	# When restoring a backup, assure that either the UUIDs stored in the backup fstab/boot config matches the current system drive, or that we know all relevant files to adjust afterwards.
 	Check_UUIDs()
 	{
-		UPDATE_GRUB=0 UPDATE_RPI=0 UPDATE_ARMBIAN=0 UPDATE_ODROID=0 UPDATE_UBOOT=0
-		local uuid_root=$(lsblk -no UUID "$G_ROOTFS_DEV")
-		local partuuid_root=$(lsblk -no PARTUUID "$G_ROOTFS_DEV")
+		UPDATE_UUIDs=0 UPDATE_GRUB=0 UPDATE_RPI=0 UPDATE_ARMBIAN=0 UPDATE_ODROID=0 UPDATE_UBOOT=0
+		UUID_ROOT=$(findmnt -no UUID /)
+		PARTUUID_ROOT=$(findmnt -no PARTUUID /)
 
 		# If the current rootfs' UUID or PARTUUID can be found in the the backups fstab, it can be assumed that it was created from the same drives.
-		grep -q "^UUID=${uuid_root}[[:blank:]]" "$FP_TARGET/data/etc/fstab" || grep -q "^PARTUUID=${partuuid_root}[[:blank:]]" "$FP_TARGET/data/etc/fstab" && return 0
+		grep -q "^UUID=${UUID_ROOT}[[:blank:]]" "$FP_TARGET/data/etc/fstab" || grep -q "^PARTUUID=${PARTUUID_ROOT}[[:blank:]]" "$FP_TARGET/data/etc/fstab" && return 0
+
+		UPDATE_UUIDs=1
 
 		# Else check if we know how to adjust the boot config after the backup has been restored.
 		# - x86_64
@@ -246,9 +247,55 @@ _EOF_
 \nDo you want to restore this backup?' && return 0 || return 1
 	}
 
-	Restore_UUIDs()
+	Update_UUIDs()
 	{
-		:
+		# fstab
+		# - root
+		G_EXEC sed -i "\|[[:blank:]]/[[:blank:]]|s|^[[:blank:]]*UUID=[^[:blank:]]*|UUID=$UUID_ROOT|" /etc/fstab
+		G_EXEC sed -i "\|[[:blank:]]/[[:blank:]]|s|^[[:blank:]]*PARTUUID=[^[:blank:]]*|PARTUUID=$PARTUUID_ROOT|" /etc/fstab
+		# - boot and others
+		while read -r mountpoint
+		do
+			[[ $mountpoint ]] || continue
+			local uuid=$(findmnt -no UUID "$mountpoint")
+			[[ $uuid ]] && G_EXEC sed -i "\|[[:blank:]]$mountpoint[[:blank:]]|s|^[[:blank:]]*UUID=[^[:blank:]]*|UUID=$uuid|" /etc/fstab
+			local partuuid=$(findmnt -no PARTUUID "$mountpoint")
+			[[ $partuuid ]] && G_EXEC sed -i "\|[[:blank:]]$mountpoint[[:blank:]]|s|^[[:blank:]]*PARTUUID=[^[:blank:]]*|PARTUUID=$PARTUUID_ROOT|" /etc/fstab
+
+		done < <(lsblk -no MOUNTPOINT "/dev/$(lsblk -no PKNAME "$G_ROOTFS_DEV")")
+
+		# boot configs
+		# - x86_64
+		if (( UPDATE_GRUB == 1 ))
+		then
+			G_EXEC update-grub
+			command -v update-tirfs > /dev/null && G_EXEC update-tirfs && return
+			command -v update-initramfs > /dev/null && G_EXEC update-initramfs -u
+
+		# - RPi
+		elif (( UPDATE_RPI == 1 ))
+		then
+			G_EXEC sed -Ei "s/(^|[[:blank:]])root=[^[:blank:]]*/\1root=PARTUUID=$PARTUUID_ROOT/" /boot/cmdline.txt
+
+		# - Armbian
+		elif (( UPDATE_ARMBIAN == 1 ))
+		then
+			grep -q '^[[:blank:]]*rootdev=UUID=' /boot/armbianEnv.txt && G_CONFIG_INJECT 'rootdev=UUID=' "rootdev=UUID=$UUID_ROOT" /boot/armbianEnv.txt && return
+			grep -q '^[[:blank:]]*rootdev=PARTUUID=' /boot/armbianEnv.txt && G_CONFIG_INJECT 'rootdev=PARTUUID=' "rootdev=PARTUUID=$PARTUUID_ROOT" /boot/armbianEnv.txt
+
+		# - Odroids / classic U-Boot
+		elif (( UPDATE_ODROID == 1 ))
+		then
+			G_EXEC sed -Ei "s/(\"|root=)UUID=[^[:blank:]\"]*/\1UUID=$UUID_ROOT/" /boot/boot.ini
+			G_EXEC sed -Ei "s/(\"|root=)PARTUUID=[^[:blank:]\"]*/\1PARTUUID=$PARTUUID_ROOT/" /boot/boot.ini
+
+		# - Modern U-Boot
+		elif (( UPDATE_UBOOT == 1 ))
+		then
+			G_EXEC sed -Ei "s/(\"|root=)UUID=[^[:blank:]\"]*/\1UUID=$UUID_ROOT/" /boot/boot.cmd
+			G_EXEC sed -Ei "s/(\"|root=)PARTUUID=[^[:blank:]\"]*/\1PARTUUID=$PARTUUID_ROOT/" /boot/boot.cmd
+			G_EXEC mkimage -C none -A arm -T script -d /boot/boot.cmd /boot/boot.scr
+		fi
 	}
 
 	Run_Restore(){
@@ -298,7 +345,7 @@ _EOF_
 
 			fi
 
-			Restore_UUIDs
+			(( $UPDATE_UUIDs )) && Update_UUIDs
 
 			/boot/dietpi/dietpi-services start
 
