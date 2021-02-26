@@ -31,13 +31,11 @@
 	# Import DietPi-Globals --------------------------------------------------------------
 
 	# Grab input
-	disable_error=1 G_CHECK_VALIDINT "$1" && INPUT=$1 || INPUT=0
+	[[ $1 =~ ^-?1$ ]] && INPUT=$1 || INPUT=0
 
 	#/////////////////////////////////////////////////////////////////////////////////////
 	# Backup System
 	#/////////////////////////////////////////////////////////////////////////////////////
-	RSYNC_MODE_TEXT=0
-
 	readonly FP_LOG='/var/log/dietpi-backup.log'
 
 	# Backup Filepaths
@@ -99,92 +97,80 @@ _EOF_
 
 	Run_Backup(){
 
-		RSYNC_MODE_TEXT='Backup'
-
-		G_DIETPI-NOTIFY 3 "$G_PROGRAM_NAME" "$RSYNC_MODE_TEXT"
+		G_DIETPI-NOTIFY 3 "$G_PROGRAM_NAME" 'Backup'
 
 		# Check valid FS
 		Check_Supported_Directory_Location || return 1
 
 		# Generate target dir
-		mkdir -p "$FP_TARGET"
+		mkdir -p "$FP_TARGET/data"
 
 		# Error: Unable to create target folder.
-		if [[ ! -d $FP_TARGET ]]; then
+		if [[ ! -d $FP_TARGET/data ]]; then
 
-			G_WHIP_MSG "$RSYNC_MODE_TEXT failed:\n\nUnable to create $FP_TARGET"
+			G_WHIP_MSG "Backup failed:\n\nUnable to create $FP_TARGET/data"
 
 		else
 
 			/boot/dietpi/dietpi-services stop
 
 			# Check if rsync is already running, while the daemon should have been stopped above
-			pgrep 'rsync' &> /dev/null && { Error_Rsync_Already_Running; return 1; }
-
-			# Start Backup
-			echo -e "DietPi-Backup Log File. $(Print_Date)\n\n" > $FP_LOG
+			pgrep 'rsync' &> /dev/null && { Error_Rsync_Already_Running 'Backup'; return 1; }
 
 			# Generate Exclude/Include lists
 			Create_Filter_Include_Exclude
 
-			while :
-			do
+			# Check for sufficient free space
+			local old_backup_size=$(du -sB1 "$FP_TARGET/data" | mawk '{print $1}') # Actual disk usage in bytes
+			# - Dry run to obtain transferred data size
+			rsync --dry-run --stats "${aRSYNC_RUN_OPTIONS_BACKUP[@]}" "$FP_SOURCE" "$FP_TARGET/data/" > .dietpi-backup_result
+			local new_backup_size=$(grep -m1 '^Total file size:' .dietpi-backup_result | sed 's/[^0-9]*//g') # Apparent data size without block size related overhead
+			local total_file_count=$(mawk '/^Number of files:/{print $6;exit}' .dietpi-backup_result | sed 's/[^0-9]*//g')
+			local total_folder_count=$(mawk '/^Number of files:/{print $8;exit}' .dietpi-backup_result | sed 's/[^0-9]*//g')
+			rm .dietpi-backup_result
+			local target_fs_blocksize=$(stat -fc '%s' "$FP_TARGET/data")
+			new_backup_size=$(( $new_backup_size + ( $total_file_count + $total_folder_count ) * $target_fs_blocksize )) # Add one block size for each file + dir as worst case result
+			local end_result=$(( ( $new_backup_size - $old_backup_size ) / 1024**2 + 1 )) # bytes => MiB rounded up
+			# - Perform check
+			if ! G_CHECK_FREESPACE "$FP_TARGET/data" $end_result; then
 
-				# System
-				G_EXEC mkdir -p "$FP_TARGET/data"
-
-				# Check for sufficient free space
-				# - NB: working in KiB until end MiB conversion, as, don't like using long long int, and, KiB should offer a good end result.
-				local old_backup_size=$(du -ks "$FP_TARGET/data" | mawk '{print $1}') # Actual disk space usage
-
-				rsync --dry-run --stats "${aRSYNC_RUN_OPTIONS_BACKUP[@]}" "$FP_SOURCE" "$FP_TARGET/data/" > /tmp/dietpi-backup_result
-				local new_backup_size=$(( $(grep -m1 '^Total file size:' /tmp/dietpi-backup_result | sed 's/[^0-9]*//g') / 1024 +1 ))  # Theoretical, data size only
-				local total_file_count=$(mawk '/^Number of files:/{print $6;exit}' /tmp/dietpi-backup_result | sed 's/[^0-9]*//g')
-				local total_folder_count=$(mawk '/^Number of files:/{print $8;exit}' /tmp/dietpi-backup_result | sed 's/[^0-9]*//g')
-				local target_fs_blocksize=$(stat -fc %s "$FP_TARGET/data")
-				new_backup_size=$(( $new_backup_size + ( $total_file_count + $total_folder_count ) * $target_fs_blocksize / 1024 + 1 )) # Add one block size to each file + dir as worst case result
-				local end_result=$(( ( $new_backup_size - $old_backup_size ) / 1024 + 1 ))
-				rm /tmp/dietpi-backup_result
-
-				if ! G_CHECK_FREESPACE "$FP_TARGET/data" $end_result; then
-
-					G_WHIP_BUTTON_OK_TEXT='Ignore'
-					G_WHIP_BUTTON_CANCEL_TEXT='Exit'
-					if ! G_WHIP_YESNO 'The backup target location appears to have insufficient free space to successfully finish the backup.\nHowever, this check is a rough estimation in reasonable time, thus it could be marginally incorrect.
+				G_WHIP_BUTTON_OK_TEXT='Ignore'
+				G_WHIP_BUTTON_CANCEL_TEXT='Exit'
+				if ! G_WHIP_YESNO 'The backup target location appears to have insufficient free space to successfully finish the backup.
+However, this check is a rough estimation in reasonable time, thus it could be marginally incorrect.
 \nWould you like to override this warning and continue with the backup?'; then
 
-						echo -e "$RSYNC_MODE_TEXT cancelled due to insufficient free space    : $(Print_Date)" >> "$FP_TARGET/$BACKUP_STATS_FILENAME"
-						break
-
-					fi
-
-				fi
-
-				G_DIETPI-NOTIFY 2 "$RSYNC_MODE_TEXT to $FP_TARGET in progress, please wait..."
-
-				rsync "${aRSYNC_RUN_OPTIONS_BACKUP[@]}" "${aRSYNC_LOGGING_OPTIONS[@]}" "$FP_SOURCE" "$FP_TARGET/data/"
-				EXIT_CODE=$?
-				G_DIETPI-NOTIFY -1 $EXIT_CODE "$G_PROGRAM_NAME: $RSYNC_MODE_TEXT"
-				if (( $EXIT_CODE == 0 )); then
-
-					echo -e "$RSYNC_MODE_TEXT completed    : $(Print_Date)" >> "$FP_TARGET/$BACKUP_STATS_FILENAME"
-					G_WHIP_MSG "$RSYNC_MODE_TEXT completed:\n - $FP_TARGET"
-
-				else
-
-					G_WHIP_MSG "$RSYNC_MODE_TEXT failed:\n - $FP_TARGET\n\nYou will see the log file on the next screen. Please check it for information and/or errors."
+					echo -e "Backup cancelled due to insufficient free space    : $(Print_Date)" >> "$FP_TARGET/$BACKUP_STATS_FILENAME"
+					/boot/dietpi/dietpi-services start
+					return 1
 
 				fi
 
-				break # Done
+			fi
 
-			done
+			G_DIETPI-NOTIFY 2 "Backup to $FP_TARGET in progress, please wait..."
+
+			# Init log file
+			echo -e "Backup log from $(Print_Date)\n" > $FP_LOG
+
+			rsync "${aRSYNC_RUN_OPTIONS_BACKUP[@]}" "${aRSYNC_LOGGING_OPTIONS[@]}" "$FP_SOURCE" "$FP_TARGET/data/"
+			EXIT_CODE=$?
 
 			/boot/dietpi/dietpi-services start
 
-			log=1 G_WHIP_VIEWFILE $FP_LOG
+			G_DIETPI-NOTIFY -1 $EXIT_CODE "$G_PROGRAM_NAME: Backup"
+			if (( $EXIT_CODE == 0 )); then
 
-			TARGETMENUID=0 # Return to main menu
+				echo -e "Backup completed    : $(Print_Date)" >> "$FP_TARGET/$BACKUP_STATS_FILENAME"
+				G_WHIP_MSG "Backup completed:\n - $FP_TARGET"
+
+			else
+
+				G_WHIP_MSG "Backup failed:\n - $FP_TARGET\n\nYou will see the log file on the next screen. Please check it for information and/or errors."
+
+			fi
+
+			log=1 G_WHIP_VIEWFILE $FP_LOG
 
 		fi
 
@@ -300,9 +286,7 @@ _EOF_
 
 	Run_Restore(){
 
-		RSYNC_MODE_TEXT='Restore'
-
-		G_DIETPI-NOTIFY 3 "$G_PROGRAM_NAME" "$RSYNC_MODE_TEXT"
+		G_DIETPI-NOTIFY 3 "$G_PROGRAM_NAME" 'Restore'
 
 		# Check valid FS
 		Check_Supported_Directory_Location || return 1
@@ -310,10 +294,7 @@ _EOF_
 		# Error: Backup not found
 		if [[ ! -f $FP_TARGET/$BACKUP_STATS_FILENAME ]]; then
 
-			G_DIETPI-NOTIFY 2 "No Backup was found in $FP_TARGET"
-			G_DIETPI-NOTIFY 1 "$RSYNC_MODE_TEXT failed.\n"
-
-			G_WHIP_MSG "$RSYNC_MODE_TEXT failed:\n\n$FP_TARGET/$BACKUP_STATS_FILENAME does not exist\n\nHave you created a backup?"
+			G_WHIP_MSG "Restore failed:\n\n$FP_TARGET/$BACKUP_STATS_FILENAME does not exist\n\nHave you created a backup?"
 
 		# Restore
 		else
@@ -323,35 +304,37 @@ _EOF_
 			/boot/dietpi/dietpi-services stop
 
 			# Check if rsync is already running, while the daemon should have been stopped above
-			pgrep 'rsync' &> /dev/null && { Error_Rsync_Already_Running; return 1; }
+			pgrep 'rsync' &> /dev/null && { Error_Rsync_Already_Running 'Restore'; return 1; }
 
 			# Generate Exclude/Include lists
 			Create_Filter_Include_Exclude
 
-			G_DIETPI-NOTIFY 2 "$RSYNC_MODE_TEXT from $FP_TARGET in progress, please wait..."
+			G_DIETPI-NOTIFY 2 "Restore from $FP_TARGET in progress, please wait..."
+
+			# Init log file
+			echo -e "Restore log from $(Print_Date)\n" > $FP_LOG
 
 			rsync "${aRSYNC_RUN_OPTIONS_RESTORE[@]}" "${aRSYNC_LOGGING_OPTIONS[@]}" "$FP_TARGET/data/" "$FP_SOURCE"
 			EXIT_CODE=$?
+
 			hash -d # Clear PATH cache
-			G_DIETPI-NOTIFY -1 $EXIT_CODE "$G_PROGRAM_NAME: $RSYNC_MODE_TEXT"
-			if (( $EXIT_CODE == 0 )); then
-
-				echo -e "$RSYNC_MODE_TEXT completed    : $(Print_Date)" >> "$FP_TARGET/$BACKUP_STATS_FILENAME"
-				G_WHIP_MSG "$RSYNC_MODE_TEXT completed:\n - $FP_TARGET\n\nNB: A Reboot is highly recommended."
-
-			else
-
-				G_WHIP_MSG "$RSYNC_MODE_TEXT failed:\n - $FP_TARGET\n\nYou will see the log file on the next screen. Please check it for information and/or errors."
-
-			fi
-
 			(( $UPDATE_UUIDs )) && Update_UUIDs
 
 			/boot/dietpi/dietpi-services start
 
-			log=1 G_WHIP_VIEWFILE $FP_LOG
+			G_DIETPI-NOTIFY -1 $EXIT_CODE "$G_PROGRAM_NAME: Restore"
+			if (( $EXIT_CODE == 0 )); then
 
-			TARGETMENUID=0 # Return to main menu
+				echo -e "Restore completed    : $(Print_Date)" >> "$FP_TARGET/$BACKUP_STATS_FILENAME"
+				G_WHIP_MSG "Restore completed:\n - $FP_TARGET\n\nNB: A Reboot is highly recommended."
+
+			else
+
+				G_WHIP_MSG "Restore failed:\n - $FP_TARGET\n\nYou will see the log file on the next screen. Please check it for information and/or errors."
+
+			fi
+
+			log=1 G_WHIP_VIEWFILE $FP_LOG
 
 		fi
 
@@ -574,11 +557,12 @@ _EOF_
 
 	}
 
+	# $1=Backup/Restore
 	Error_Rsync_Already_Running(){
 
 		G_DIETPI-NOTIFY 1 'Another rsync process is already running.'
-		echo -e "$RSYNC_MODE_TEXT failed: $(Print_Date). rsync is already running." >> "$FP_TARGET/$BACKUP_STATS_FILENAME"
-		G_WHIP_MSG "$RSYNC_MODE_TEXT Error:\n\nA $RSYNC_MODE_TEXT could not be started as rsync is already running."
+		echo -e "$1 failed: $(Print_Date). rsync is already running." >> "$FP_TARGET/$BACKUP_STATS_FILENAME"
+		G_WHIP_MSG "$1 Error:\n\nA $1 could not be started as rsync is already running."
 		/boot/dietpi/dietpi-services start
 
 	}
