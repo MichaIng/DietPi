@@ -16235,6 +16235,7 @@ _EOF_
 		AUTOINSTALL_WEBSERVERINDEX=$(sed -n '/^[[:blank:]]*AUTO_SETUP_WEB_SERVER_INDEX=/{s/^[^=]*=//p;q}' /boot/dietpi.txt)
 		AUTOINSTALL_CUSTOMSCRIPTURL=$(sed -n '/^[[:blank:]]*AUTO_SETUP_CUSTOM_SCRIPT_EXEC=/{s/^[^=]*=//p;q}' /boot/dietpi.txt)
 		AUTOINSTALL_TIMESYNCMODE=$(sed -n '/^[[:blank:]]*CONFIG_NTP_MODE=/{s/^[^=]*=//p;q}' /boot/dietpi.txt)
+		AUTOINSTALL_RESTORE=$(sed -n '/^[[:blank:]]*AUTO_SETUP_BACKUP_RESTORE=/{s/^[^=]*=//p;q}' /boot/dietpi.txt)
 		# Else set defaults
 		[[ $AUTOINSTALL_ENABLED ]] || AUTOINSTALL_ENABLED=0
 		[[ $AUTOINSTALL_AUTOSTARTTARGET ]] || AUTOINSTALL_AUTOSTARTTARGET=0
@@ -16244,6 +16245,7 @@ _EOF_
 		[[ $AUTOINSTALL_WEBSERVERINDEX ]] || AUTOINSTALL_WEBSERVERINDEX=0
 		[[ $AUTOINSTALL_CUSTOMSCRIPTURL ]] || AUTOINSTALL_CUSTOMSCRIPTURL=0
 		[[ $AUTOINSTALL_TIMESYNCMODE ]] || AUTOINSTALL_TIMESYNCMODE=2
+		[[ $AUTOINSTALL_RESTORE ]] || AUTOINSTALL_RESTORE=0
 
 	}
 
@@ -17545,6 +17547,88 @@ List of installed software and their online documentation URLs:
 
 			# Load all automation vars
 			FirstRun_Automation_Init
+
+			# Restore DietPi-Backup
+			if (( $AUTOINSTALL_RESTORE )); then
+
+				# Reboot only when backup restore succeeded
+				restore_succeeded=0
+
+				G_DIETPI-NOTIFY 2 'DietPi-Backup restore selected, scanning and mounting attached drives...'
+				i=0
+				while read -r line
+				do
+					# Mount drives to temporary mount points
+					mkdir -p "/mnt/dietpi-backup$i" && mount "$line" "/mnt/dietpi-backup$i"
+					((i++))
+
+				done < <(lsblk -rnpo NAME,UUID,MOUNTPOINT | mawk '$2 && ! $3 {print $1}')
+
+				G_DIETPI-NOTIFY 2 'Searching all drives for DietPi-Backup instances...'
+				mapfile -t alist < <(find /mnt -type f -name '.dietpi-backup_stats')
+
+				# Interactive restore
+				if [[ $AUTOINSTALL_RESTORE == 1 ]]; then
+
+					# Do we have any results?
+					if [[ ${alist[0]} ]]; then
+
+						# Create List for Whiptail
+						G_WHIP_MENU_ARRAY=()
+						for i in "${alist[@]}"
+						do
+							last_backup_date=$(sed -n '/ompleted/s/^.*: //p' "$i" | tail -1) # Date of last backup for this backup
+							backup_directory=${i%/.dietpi-backup_stats} # Backup directory (minus the backup file), that we can use for target backup directory.
+							G_WHIP_MENU_ARRAY+=("$backup_directory" ": $last_backup_date")
+						done
+
+						export G_DIETPI_SERVICES_DISABLE=1
+						G_WHIP_MENU 'Please select a previous backup to restore:' && /boot/dietpi/dietpi-backup -1 "$G_WHIP_RETURNED_VALUE" && restore_succeeded=1
+						unset -v G_DIETPI_SERVICES_DISABLE
+
+					else
+
+						G_WHIP_MSG 'No previous backups were found in /mnt/*. Install will continue like normal.'
+
+					fi
+
+				# Non-interactive restore
+				elif [[ $AUTOINSTALL_RESTORE == 2 ]]; then
+
+					# Do we have any results?
+					if [[ ${alist[0]} ]]; then
+
+						# Restore first found backup
+						export G_DIETPI_SERVICES_DISABLE=1
+						/boot/dietpi/dietpi-backup -1 "${alist[0]%/.dietpi-backup_stats}" && restore_succeeded=1
+						unset -v G_DIETPI_SERVICES_DISABLE
+
+					else
+
+						G_DIETPI-NOTIFY 1 'DietPi-Backup auto-restore was selected but no backup has been found in /mnt/*. Install will continue like normal.'
+
+					fi
+
+					# Downgrade dietpi.txt option
+					G_CONFIG_INJECT 'AUTO_SETUP_BACKUP_RESTORE=' 'AUTO_SETUP_BACKUP_RESTORE=1' /boot/dietpi.txt
+
+				fi
+
+				# Remove mounted drives and mount points
+				findmnt /mnt/dietpi-backup[0-9]* > /dev/null && umount /mnt/dietpi-backup[0-9]*
+				[[ -d '/mnt/dietpi-backup0' ]] && rmdir /mnt/dietpi-backup[0-9]*
+
+				# Reboot on successful restore
+				if (( $restore_succeeded )); then
+
+					G_DIETPI-NOTIFY 2 'The system will now reboot into the restored system'
+					sync # Failsafe
+					sleep 3
+					reboot
+
+				fi
+
+			fi
 
 			# Global PW
 			# - Automation, apply as per dietpi.txt

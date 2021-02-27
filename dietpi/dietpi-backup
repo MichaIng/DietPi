@@ -30,14 +30,12 @@
 	G_INIT
 	# Import DietPi-Globals --------------------------------------------------------------
 
-	# Grab Input
-	disable_error=1 G_CHECK_VALIDINT "$1" && INPUT=$1 || INPUT=0
+	# Grab input
+	[[ $1 =~ ^-?1$ ]] && INPUT=$1 || INPUT=0
 
 	#/////////////////////////////////////////////////////////////////////////////////////
 	# Backup System
 	#/////////////////////////////////////////////////////////////////////////////////////
-	RSYNC_MODE_TEXT=0
-
 	readonly FP_LOG='/var/log/dietpi-backup.log'
 
 	# Backup Filepaths
@@ -64,7 +62,7 @@
 	readonly aRSYNC_LOGGING_OPTIONS=('-v' "--log-file=$FP_LOG")
 
 	# Date format for logs
-	Print_Date(){ date +"%Y-%m-%d_%T"; }
+	Print_Date(){ date '+%Y-%m-%d_%T'; }
 
 	Create_Filter_Include_Exclude(){
 
@@ -97,167 +95,244 @@ _EOF_
 
 	}
 
-	Services_Stop(){
-
-		/boot/dietpi/dietpi-services stop
-		killall -w rsync &> /dev/null # https://github.com/MichaIng/DietPi/issues/1869#issuecomment-400036370
-
-	}
-
-	Services_Start(){ /boot/dietpi/dietpi-services start; }
-
 	Run_Backup(){
 
-		RSYNC_MODE_TEXT='Backup'
-
-		G_DIETPI-NOTIFY 3 "$G_PROGRAM_NAME" "$RSYNC_MODE_TEXT"
+		G_DIETPI-NOTIFY 3 "$G_PROGRAM_NAME" 'Backup'
 
 		# Check valid FS
 		Check_Supported_Directory_Location || return 1
-
-		Services_Stop
 
 		# Generate target dir
-		mkdir -p "$FP_TARGET"
+		G_EXEC_NOHALT=1 G_EXEC mkdir -p "$FP_TARGET/data"
 
 		# Error: Unable to create target folder.
-		if [[ ! -d $FP_TARGET ]]; then
+		if [[ ! -d $FP_TARGET/data ]]; then
 
-			G_WHIP_MSG "$RSYNC_MODE_TEXT failed:\n\nUnable to create $FP_TARGET"
-
-		# Error: Rsync is already running
-		elif pgrep 'rsync' &> /dev/null; then
-
-			Error_Rsync_Already_Running
+			G_WHIP_MSG "Backup failed:\n\nUnable to create $FP_TARGET/data"
 
 		else
 
-			# Start Backup
-			echo -e "DietPi-Backup Log File. $(Print_Date)\n\n" > $FP_LOG
+			/boot/dietpi/dietpi-services stop
+
+			# Check if rsync is already running, while the daemon should have been stopped above
+			pgrep 'rsync' &> /dev/null && { Error_Rsync_Already_Running 'Backup'; return 1; }
 
 			# Generate Exclude/Include lists
 			Create_Filter_Include_Exclude
 
-			while :
-			do
+			# Check for sufficient free space
+			local old_backup_size=$(du -sB1 "$FP_TARGET/data" | mawk '{print $1}') # Actual disk usage in bytes
+			# - Dry run to obtain transferred data size
+			rsync --dry-run --stats "${aRSYNC_RUN_OPTIONS_BACKUP[@]}" "$FP_SOURCE" "$FP_TARGET/data/" > .dietpi-backup_result
+			local new_backup_size=$(grep -m1 '^Total file size:' .dietpi-backup_result | sed 's/[^0-9]*//g') # Apparent data size without block size related overhead
+			local total_file_count=$(mawk '/^Number of files:/{print $6;exit}' .dietpi-backup_result | sed 's/[^0-9]*//g')
+			local total_folder_count=$(mawk '/^Number of files:/{print $8;exit}' .dietpi-backup_result | sed 's/[^0-9]*//g')
+			rm .dietpi-backup_result
+			local target_fs_blocksize=$(stat -fc '%s' "$FP_TARGET/data")
+			new_backup_size=$(( $new_backup_size + ( $total_file_count + $total_folder_count ) * $target_fs_blocksize )) # Add one block size for each file + dir as worst case result
+			local end_result=$(( ( $new_backup_size - $old_backup_size ) / 1024**2 + 1 )) # bytes => MiB rounded up
+			# - Perform check
+			if ! G_CHECK_FREESPACE "$FP_TARGET/data" $end_result; then
 
-				# System
-				G_EXEC mkdir -p "$FP_TARGET"/data
-
-				# Check for sufficient free space
-				# - NB: working in KiB until end MiB conversion, as, don't like using long long int, and, KiB should offer a good end result.
-				local old_backup_size=$(du -ks "$FP_TARGET"/data | mawk '{print $1}') # Actual disk space usage
-
-				rsync --dry-run --stats "${aRSYNC_RUN_OPTIONS_BACKUP[@]}" "$FP_SOURCE" "$FP_TARGET"/data/ > /tmp/dietpi-backup_result
-				local new_backup_size=$(( $(grep -m1 '^Total file size:' /tmp/dietpi-backup_result | sed 's/[^0-9]*//g') / 1024 +1 ))  # Theoretical, data size only
-				local total_file_count=$(mawk '/^Number of files:/{print $6;exit}' /tmp/dietpi-backup_result | sed 's/[^0-9]*//g')
-				local total_folder_count=$(mawk '/^Number of files:/{print $8;exit}' /tmp/dietpi-backup_result | sed 's/[^0-9]*//g')
-				local target_fs_blocksize=$(stat -fc %s "$FP_TARGET"/data)
-				new_backup_size=$(( $new_backup_size + ( $total_file_count + $total_folder_count ) * $target_fs_blocksize / 1024 + 1 )) # Add one block size to each file + dir as worst case result
-				local end_result=$(( ( $new_backup_size - $old_backup_size ) / 1024 + 1 ))
-				rm /tmp/dietpi-backup_result
-
-				if ! G_CHECK_FREESPACE "$FP_TARGET"/data $end_result; then
-
-					G_WHIP_BUTTON_OK_TEXT='Ignore'
-					G_WHIP_BUTTON_CANCEL_TEXT='Exit'
-					if ! G_WHIP_YESNO 'The backup target location appears to have insufficient free space to successfully finish the backup.\nHowever, this check is a rough estimation in reasonable time, thus it could be marginally incorrect.
+				G_WHIP_BUTTON_OK_TEXT='Ignore'
+				G_WHIP_BUTTON_CANCEL_TEXT='Exit'
+				if ! G_WHIP_YESNO 'The backup target location appears to have insufficient free space to successfully finish the backup.
+However, this check is a rough estimation in reasonable time, thus it could be marginally incorrect.
 \nWould you like to override this warning and continue with the backup?'; then
 
-						echo -e "$RSYNC_MODE_TEXT cancelled due to insufficient free space    : $(Print_Date)" >> "$FP_TARGET/$BACKUP_STATS_FILENAME"
-						break
-
-					fi
-
-				fi
-
-				G_DIETPI-NOTIFY 2 "$RSYNC_MODE_TEXT to $FP_TARGET in progress, please wait..."
-
-				rsync "${aRSYNC_RUN_OPTIONS_BACKUP[@]}" "${aRSYNC_LOGGING_OPTIONS[@]}" "$FP_SOURCE" "$FP_TARGET"/data/
-				EXIT_CODE=$?
-				G_DIETPI-NOTIFY -1 $EXIT_CODE "$G_PROGRAM_NAME: $RSYNC_MODE_TEXT"
-				if (( $EXIT_CODE == 0 )); then
-
-					echo -e "$RSYNC_MODE_TEXT completed    : $(Print_Date)" >> "$FP_TARGET/$BACKUP_STATS_FILENAME"
-					G_WHIP_MSG "$RSYNC_MODE_TEXT completed:\n - $FP_TARGET"
-
-				else
-
-					G_WHIP_MSG "$RSYNC_MODE_TEXT failed:\n - $FP_TARGET\n\nYou will see the log file on the next screen. Please check it for information and/or errors."
+					echo -e "Backup cancelled due to insufficient free space    : $(Print_Date)" >> "$FP_TARGET/$BACKUP_STATS_FILENAME"
+					/boot/dietpi/dietpi-services start
+					return 1
 
 				fi
 
-				# Done
-				break
+			fi
 
-			done
+			G_DIETPI-NOTIFY 2 "Backup to $FP_TARGET in progress, please wait..."
 
-			log=1 G_WHIP_VIEWFILE $FP_LOG
+			# Init log file
+			echo -e "Backup log from $(Print_Date)\n" > $FP_LOG
 
-			# Return to main menu
-			TARGETMENUID=0
-
-		fi
-
-		Services_Start
-
-	}
-
-	Run_Restore(){
-
-		RSYNC_MODE_TEXT='Restore'
-
-		G_DIETPI-NOTIFY 3 "$G_PROGRAM_NAME" "$RSYNC_MODE_TEXT"
-
-		# Check valid FS
-		Check_Supported_Directory_Location || return 1
-
-		Services_Stop
-
-		# Error: Backup not found
-		if [[ ! -f $FP_TARGET/$BACKUP_STATS_FILENAME ]]; then
-
-			G_DIETPI-NOTIFY 2 "No Backup was found in $FP_TARGET"
-			G_DIETPI-NOTIFY 1 "$RSYNC_MODE_TEXT failed.\n"
-
-			G_WHIP_MSG "$RSYNC_MODE_TEXT failed:\n\n$FP_TARGET/$BACKUP_STATS_FILENAME does not exist\n\nHave you created a backup?"
-
-		# Error: Rsync is already running
-		elif pgrep 'rsync' &> /dev/null; then
-
-			Error_Rsync_Already_Running
-
-		# Restore
-		else
-
-			# Generate Exclude/Include lists
-			Create_Filter_Include_Exclude
-
-			G_DIETPI-NOTIFY 2 "$RSYNC_MODE_TEXT from $FP_TARGET in progress, please wait..."
-
-			rsync "${aRSYNC_RUN_OPTIONS_RESTORE[@]}" "${aRSYNC_LOGGING_OPTIONS[@]}" "$FP_TARGET"/data/ "$FP_SOURCE"
+			rsync "${aRSYNC_RUN_OPTIONS_BACKUP[@]}" "${aRSYNC_LOGGING_OPTIONS[@]}" "$FP_SOURCE" "$FP_TARGET/data/"
 			EXIT_CODE=$?
-			hash -d # Clear PATH cache
-			G_DIETPI-NOTIFY -1 $EXIT_CODE "$G_PROGRAM_NAME: $RSYNC_MODE_TEXT"
+
+			/boot/dietpi/dietpi-services start
+
+			G_DIETPI-NOTIFY -1 $EXIT_CODE "$G_PROGRAM_NAME: Backup"
 			if (( $EXIT_CODE == 0 )); then
 
-				echo -e "$RSYNC_MODE_TEXT completed    : $(Print_Date)" >> "$FP_TARGET/$BACKUP_STATS_FILENAME"
-				G_WHIP_MSG "$RSYNC_MODE_TEXT completed:\n - $FP_TARGET\n\nNB: A Reboot is highly recommended."
+				echo -e "Backup completed    : $(Print_Date)" >> "$FP_TARGET/$BACKUP_STATS_FILENAME"
+				G_WHIP_MSG "Backup completed:\n - $FP_TARGET"
 
 			else
 
-				G_WHIP_MSG "$RSYNC_MODE_TEXT failed:\n - $FP_TARGET\n\nYou will see the log file on the next screen. Please check it for information and/or errors."
+				G_WHIP_MSG "Backup failed:\n - $FP_TARGET\n\nYou will see the log file on the next screen. Please check it for information and/or errors."
 
 			fi
 
 			log=1 G_WHIP_VIEWFILE $FP_LOG
 
-			# Done
-			TARGETMENUID=0
-
 		fi
 
-		Services_Start
+	}
+
+	# When restoring a backup, assure that either the UUIDs stored in the backup fstab/boot config matches the current system drive, or that we know all relevant files to adjust afterwards.
+	Check_UUIDs()
+	{
+		UPDATE_UUIDs=0 UPDATE_GRUB=0 UPDATE_RPI=0 UPDATE_ARMBIAN=0 UPDATE_ODROID=0 UPDATE_UBOOT=0
+		UUID_ROOT=$(findmnt -no UUID /)
+		PARTUUID_ROOT=$(findmnt -no PARTUUID /)
+
+		# If the current rootfs' UUID or PARTUUID can be found in the the backups fstab, it can be assumed that it was created from the same drives.
+		grep -q "^UUID=${UUID_ROOT}[[:blank:]]" "$FP_TARGET/data/etc/fstab" || grep -q "^PARTUUID=${PARTUUID_ROOT}[[:blank:]]" "$FP_TARGET/data/etc/fstab" && return 0
+
+		UPDATE_UUIDs=1
+
+		# Else check if we know how to adjust the boot config after the backup has been restored.
+		# - x86_64
+		if (( $G_HW_ARCH == 10 )) && command -v update-grub > /dev/null
+		then
+			UPDATE_GRUB=1
+
+		# - RPi
+		elif (( $G_HW_MODEL < 10 )) && [[ -f $FP_TARGET/data/boot/cmdline.txt ]]
+		then
+			UPDATE_RPI=1
+
+		# - Armbian
+		elif [[ -f $FP_TARGET/data/boot/armbianEnv.txt ]]
+		then
+			UPDATE_ARMBIAN=1
+
+		# - Odroids / classic U-Boot
+		elif [[ -f $FP_TARGET/data/boot/boot.ini ]]
+		then
+			UPDATE_ODROID=1
+
+		# - Modern U-Boot
+		elif [[ -f $FP_TARGET/data/boot/boot.cmd ]] && command -v mkimage > /dev/null
+		then
+			UPDATE_UBOOT=1
+
+		# - Else we cannot assure that the restored image will boot.
+		else
+			# Let user decide, but default to "no"
+			G_WHIP_YESNO '[WARNING] UUIDs of the backup and the current system differ
+\nThe file systems unique identifiers, usually used to mount the drives at boot, seem to differ between the backup and the current system.
+\nThis usually indicates that you try to restore an old backup onto a newly flashed DietPi system.
+\nMoreover are we not able to find the boot configuration, where those UUIDs would need to be adjusted, to assure that the system will boot.
+\nWe hence do not recommend to restore this backup on this system. If you continue, you will need to assure yourself that fstab and boot configurations match the UUIDs, else the system may not boot.
+\nDo you want to restore this backup?' && return 0 || return 1
+		fi
+
+		G_WHIP_DEFAULT_ITEM='ok' G_WHIP_YESNO '[WARNING] UUIDs of the backup and the current system differ
+\nThe file systems unique identifiers, usually used to mount the drives at boot, seem to differ between the backup and the current system.
+\nThis usually indicates that you try to restore an old backup onto a newly flashed DietPi system.
+\nBut we were able to find the boot configuration, where those UUIDs would need to be adjusted, to assure that the system will boot.
+\nIt should be hence safe to restore this backup, but if the UUIDs were used elsewhere, you might need to adjust it manually.
+\nDo you want to restore this backup?' && return 0 || return 1
+	}
+
+	Update_UUIDs()
+	{
+		# fstab
+		while read -r mountpoint
+		do
+			[[ $mountpoint ]] || continue
+			local uuid=$(findmnt -no UUID "$mountpoint")
+			[[ $uuid ]] && G_EXEC sed -i "\|[[:blank:]]${mountpoint}[[:blank:]]|s|^[[:blank:]]*UUID=[^[:blank:]]*|UUID=$uuid|" /etc/fstab
+			local partuuid=$(findmnt -no PARTUUID "$mountpoint")
+			[[ $partuuid ]] && G_EXEC sed -i "\|[[:blank:]]${mountpoint}[[:blank:]]|s|^[[:blank:]]*PARTUUID=[^[:blank:]]*|PARTUUID=$partuuid|" /etc/fstab
+
+		done < <(lsblk -no MOUNTPOINT "/dev/$(lsblk -no PKNAME "$G_ROOTFS_DEV")")
+
+		# boot configs
+		# - x86_64
+		if (( UPDATE_GRUB == 1 ))
+		then
+			G_EXEC update-grub
+			command -v update-tirfs > /dev/null && G_EXEC update-tirfs && return
+			command -v update-initramfs > /dev/null && G_EXEC update-initramfs -u
+
+		# - RPi
+		elif (( UPDATE_RPI == 1 ))
+		then
+			G_EXEC sed -Ei "s/(^|[[:blank:]])root=[^[:blank:]]*/\1root=PARTUUID=$PARTUUID_ROOT/" /boot/cmdline.txt
+
+		# - Armbian
+		elif (( UPDATE_ARMBIAN == 1 ))
+		then
+			grep -q '^[[:blank:]]*rootdev=UUID=' /boot/armbianEnv.txt && G_CONFIG_INJECT 'rootdev=UUID=' "rootdev=UUID=$UUID_ROOT" /boot/armbianEnv.txt && return
+			grep -q '^[[:blank:]]*rootdev=PARTUUID=' /boot/armbianEnv.txt && G_CONFIG_INJECT 'rootdev=PARTUUID=' "rootdev=PARTUUID=$PARTUUID_ROOT" /boot/armbianEnv.txt
+
+		# - Odroids / classic U-Boot
+		elif (( UPDATE_ODROID == 1 ))
+		then
+			G_EXEC sed -Ei "s/(\"|root=)UUID=[^[:blank:]\"]*/\1UUID=$UUID_ROOT/" /boot/boot.ini
+			G_EXEC sed -Ei "s/(\"|root=)PARTUUID=[^[:blank:]\"]*/\1PARTUUID=$PARTUUID_ROOT/" /boot/boot.ini
+
+		# - Modern U-Boot
+		elif (( UPDATE_UBOOT == 1 ))
+		then
+			G_EXEC sed -Ei "s/(\"|root=)UUID=[^[:blank:]\"]*/\1UUID=$UUID_ROOT/" /boot/boot.cmd
+			G_EXEC sed -Ei "s/(\"|root=)PARTUUID=[^[:blank:]\"]*/\1PARTUUID=$PARTUUID_ROOT/" /boot/boot.cmd
+			G_EXEC mkimage -C none -A arm -T script -d /boot/boot.cmd /boot/boot.scr
+		fi
+	}
+
+	Run_Restore(){
+
+		G_DIETPI-NOTIFY 3 "$G_PROGRAM_NAME" 'Restore'
+
+		# Check valid FS
+		Check_Supported_Directory_Location || return 1
+
+		# Error: Backup not found
+		if [[ ! -f $FP_TARGET/$BACKUP_STATS_FILENAME ]]; then
+
+			G_WHIP_MSG "Restore failed:\n\n$FP_TARGET/$BACKUP_STATS_FILENAME does not exist\n\nHave you created a backup?"
+
+		# Restore
+		else
+
+			Check_UUIDs || return 1
+
+			/boot/dietpi/dietpi-services stop
+
+			# Check if rsync is already running, while the daemon should have been stopped above
+			pgrep 'rsync' &> /dev/null && { Error_Rsync_Already_Running 'Restore'; return 1; }
+
+			# Generate Exclude/Include lists
+			Create_Filter_Include_Exclude
+
+			G_DIETPI-NOTIFY 2 "Restore from $FP_TARGET in progress, please wait..."
+
+			# Init log file
+			echo -e "Restore log from $(Print_Date)\n" > $FP_LOG
+
+			rsync "${aRSYNC_RUN_OPTIONS_RESTORE[@]}" "${aRSYNC_LOGGING_OPTIONS[@]}" "$FP_TARGET/data/" "$FP_SOURCE"
+			EXIT_CODE=$?
+
+			hash -d # Clear PATH cache
+			(( $UPDATE_UUIDs )) && Update_UUIDs
+
+			/boot/dietpi/dietpi-services start
+
+			G_DIETPI-NOTIFY -1 $EXIT_CODE "$G_PROGRAM_NAME: Restore"
+			if (( $EXIT_CODE == 0 )); then
+
+				echo -e "Restore completed    : $(Print_Date)" >> "$FP_TARGET/$BACKUP_STATS_FILENAME"
+				G_WHIP_MSG "Restore completed:\n - $FP_TARGET\n\nNB: A Reboot is highly recommended."
+
+			else
+
+				G_WHIP_MSG "Restore failed:\n - $FP_TARGET\n\nYou will see the log file on the next screen. Please check it for information and/or errors."
+
+			fi
+
+			log=1 G_WHIP_VIEWFILE $FP_LOG
+
+		fi
 
 	}
 
@@ -275,10 +350,10 @@ _EOF_
 			if [[ ! -d $FP_TARGET ]]
 			then
 				G_EXEC mkdir -p "$FP_TARGET"
-				TARGET_FILESYSTEM_TYPE=$(df -T $FP_TARGET | mawk 'NR==2 {print $2}')
+				TARGET_FILESYSTEM_TYPE=$(df -T "$FP_TARGET" | mawk 'NR==2 {print $2}')
 				G_EXEC rmdir "$FP_TARGET"
 			else
-				TARGET_FILESYSTEM_TYPE=$(df -T $FP_TARGET | mawk 'NR==2 {print $2}')
+				TARGET_FILESYSTEM_TYPE=$(df -T "$FP_TARGET" | mawk 'NR==2 {print $2}')
 			fi
 
 			for i in "${aSUPPORTED_FILESYSTEMS[@]}"
@@ -355,7 +430,7 @@ _EOF_
 \nSimply choose a location where you want to save and restore your backups from, then, select Backup or Restore.
 \nMore information: https://dietpi.com/docs/dietpi_tools/#dietpi-backup-backuprestore";;
 
-				'Delete') G_WHIP_YESNO "Do you wish to DELETE the following backup?\n - $FP_TARGET" && rm -R "$FP_TARGET";;
+				'Delete') G_WHIP_YESNO "Do you wish to DELETE the following backup?\n - $FP_TARGET" && G_EXEC_NOEXIT=1 G_EXEC rm -R "$FP_TARGET";;
 
 				'Backup') G_WHIP_YESNO "The system will be backed up to:\n - $FP_TARGET\n\nDo you wish to continue and start the backup?" && Run_Backup;;
 
@@ -448,8 +523,7 @@ _EOF_
 
 		else
 
-			# Return to main menu
-			TARGETMENUID=0
+			TARGETMENUID=0 # Return to main menu
 
 		fi
 
@@ -479,11 +553,13 @@ _EOF_
 
 	}
 
+	# $1=Backup/Restore
 	Error_Rsync_Already_Running(){
 
-		G_DIETPI-NOTIFY 1 'Another Rsync process is already running.'
-		echo -e "$RSYNC_MODE_TEXT failed: $(Print_Date). Rsync is already running." >> "$FP_TARGET/$BACKUP_STATS_FILENAME"
-		G_WHIP_MSG "$RSYNC_MODE_TEXT Error:\n\nA $RSYNC_MODE_TEXT could not be started as rsync is already running."
+		G_DIETPI-NOTIFY 1 'Another rsync process is already running.'
+		echo -e "$1 failed: $(Print_Date). rsync is already running." >> "$FP_TARGET/$BACKUP_STATS_FILENAME"
+		G_WHIP_MSG "$1 Error:\n\nA $1 could not be started as rsync is already running."
+		/boot/dietpi/dietpi-services start
 
 	}
 
@@ -512,7 +588,6 @@ _EOF_
 #	NB: To exclude from a custom located dietpi_userdata, you need to add its symlinked path: /mnt/dietpi_userdata/excludeThis
 #- /path/to/my/file
 #- /path/to/my/directory/
-
 _EOF_
 
 	#-----------------------------------------------------------------------------
