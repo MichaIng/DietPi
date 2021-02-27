@@ -21,6 +21,7 @@ $FP_SCRIPT	wificountrycode		GB/US/DE/...
 $FP_SCRIPT	bluetooth		enable/disable
 $FP_SCRIPT	serialconsole		enable/disable		[tty(S|AMA|SAC)[0-9]] (optional Serial/UART device)
 $FP_SCRIPT	i2c			enable/disable/khz
+$FP_SCRIPT	spi			enable/disable
 $FP_SCRIPT	soundcard		target_card (non-matching name for reset to default). Add '-eq' to target_card string to enable ALSA equalizer on card. HW:x,x (specify target card and device index eg: HW:9,1)
 $FP_SCRIPT	remoteir		odroid_remote/justboom_ir_remote # Odroid/RPi only
 $FP_SCRIPT	lcdpanel		target_panel (none to remove all)
@@ -830,7 +831,7 @@ _EOF_
 			G_EXEC sed -i '/^[[:blank:]]*dtoverlay=ads7846,cs=1,penirq=17/d' /boot/config.txt
 			G_EXEC sed -i '/^[[:blank:]]*dtoverlay=w1-gpio-pullup,gpiopin=4,extpullup=1/d' /boot/config.txt
 
-			# - Leave these enabled, just in case the user has other hardware that may use them.
+			# Leave these enabled, just in case the user has other hardware that may use them.
 			#G_EXEC sed -i '/^[[:blank:]]*dtparam=i2c_arm=/c\dtparam=i2c_arm=on' /boot/config.txt
 			#G_EXEC sed -i '/^[[:blank:]]*dtparam=spi=/c\dtparam=spi=on' /boot/config.txt
 
@@ -1004,7 +1005,7 @@ _EOF_
 		if [[ $INPUT_DEVICE_VALUE == 'enable' ]]; then
 
 			# Check/install pre-reqs
-			G_AG_CHECK_INSTALL_PREREQ python-smbus i2c-tools
+			G_AG_CHECK_INSTALL_PREREQ python3-smbus i2c-tools
 
 			# Kernel modules
 			G_CONFIG_INJECT 'i2c-bcm2708' 'i2c-bcm2708' /etc/modules
@@ -1015,7 +1016,7 @@ _EOF_
 			G_CONFIG_INJECT 'dtparam=i2c1=' 'dtparam=i2c1=on' /boot/config.txt
 
 			# DietPi-Software, set installed
-			G_EXEC sed -i '/^aSOFTWARE_INSTALL_STATE\[72\]=/c\aSOFTWARE_INSTALL_STATE\[72\]=2' /boot/dietpi/.installed
+			[[ -f '/boot/dietpi/.installed' ]] && G_EXEC sed -i '/^aSOFTWARE_INSTALL_STATE\[72\]=/c\aSOFTWARE_INSTALL_STATE\[72\]=2' /boot/dietpi/.installed
 
 		elif [[ $INPUT_DEVICE_VALUE == 'disable' ]]; then
 
@@ -1035,6 +1036,38 @@ _EOF_
 
 			# Inform user
 			INPUT_DEVICE_VALUE+=' kHz'
+
+		else
+
+			Unknown_Input_Mode
+
+		fi
+
+	}
+
+	#/////////////////////////////////////////////////////////////////////////////////////
+	# SPI: https://github.com/raspberrypi/documentation/tree/master/hardware/raspberrypi/spi
+	#/////////////////////////////////////////////////////////////////////////////////////
+	SPI_Main(){
+
+		(( $G_HW_MODEL > 9 )) && { Unsupported_Input_Name; return 1; } # Exit path for non-RPi
+
+		if [[ $INPUT_DEVICE_VALUE == 'enable' ]]; then
+
+			# config.txt
+			G_CONFIG_INJECT 'dtparam=spi=' 'dtparam=spi=on' /boot/config.txt
+
+			# Enable in runtime seems to be possible?
+			#dtparam spi=on
+
+		elif [[ $INPUT_DEVICE_VALUE == 'disable' ]]; then
+
+			# config.txt
+			G_CONFIG_INJECT 'dtparam=spi=' 'dtparam=spi=off' /boot/config.txt
+			G_EXEC sed -i '/^[[:blank:]]*dtoverlay=spi[0-9]-[0-9]cs/d' /boot/config.txt # Alternative SPI interfaces and chip select lines
+
+			# Disable in runtime seems to be possible?
+			#dtparam spi=off
 
 		else
 
@@ -1067,7 +1100,7 @@ _EOF_
 			if (( $G_HW_MODEL < 10 )) && (( $G_HW_ONBOARD_WIFI )); then
 
 				systemctl disable --now hciuart 2> /dev/null
-				# Disable onboard BT via dtoverlay
+				# Disable onboard Bluetooth via device tree overlay
 				G_CONFIG_INJECT 'dtoverlay=disable-bt' 'dtoverlay=disable-bt' /boot/config.txt
 
 			# ASUS TB
@@ -1084,12 +1117,12 @@ _EOF_
 
 			systemctl disable --now bluetooth 2> /dev/null
 
-			# Unload and blacklist modules, bluetooth last
+			# Unload and blacklist kernel modules, bluetooth last
 			> /etc/modprobe.d/dietpi-disable_bluetooth.conf
 			for ((i=$(( ${#aBLUETOOTH_MODULES[@]} - 1 )); i>=0; i--))
 			do
 
-				modprobe -rf "${aBLUETOOTH_MODULES[$i]}" 2> /dev/null
+				modprobe -r "${aBLUETOOTH_MODULES[$i]}" 2> /dev/null
 				echo "blacklist ${aBLUETOOTH_MODULES[$i]}" >> /etc/modprobe.d/dietpi-disable_bluetooth.conf
 
 			done
@@ -1104,10 +1137,10 @@ _EOF_
 
 		elif [[ $INPUT_DEVICE_VALUE == 'enable' ]]; then
 
-			# Remove module blacklist
-			[[ -f '/etc/modprobe.d/dietpi-disable_bluetooth.conf' ]] && rm /etc/modprobe.d/dietpi-disable_bluetooth.conf
+			# Remove kernel module blacklist
+			[[ -f '/etc/modprobe.d/dietpi-disable_bluetooth.conf' ]] && G_EXEC rm /etc/modprobe.d/dietpi-disable_bluetooth.conf
 
-			# Pre-Reqs
+			# RPi
 			if (( $G_HW_MODEL < 10 )) && (( $G_HW_ONBOARD_WIFI )); then
 
 				# Login console on ttyAMA0 must be disabled: https://github.com/MichaIng/DietPi/issues/2607#issuecomment-470523194
@@ -1120,7 +1153,7 @@ Do you want to continue and disable the serial login console?' || return 1
 				fi
 
 				# Remove dtoverlay
-				sed -i '/^[[:blank:]]*dtoverlay=disable-bt/d' /boot/config.txt
+				G_EXEC sed -i '/^[[:blank:]]*dtoverlay=disable-bt/d' /boot/config.txt
 
 				G_AG_CHECK_INSTALL_PREREQ pi-bluetooth
 
@@ -1128,14 +1161,14 @@ Do you want to continue and disable the serial login console?' || return 1
 
 				# ROCK Pi S: https://wiki.radxa.com/RockpiS/Debian#Bluetooth
 				local rockpis
-				(( $G_HW_MODEL == 73 )) && apt-cache show rtl8723ds-firmware &> /dev/null && rockpis=rtl8723ds-firmware
+				(( $G_HW_MODEL == 73 )) && apt-cache show rtl8723ds-firmware &> /dev/null && rockpis='rtl8723ds-firmware'
 
 				# bluez-firmware: BCM203x dongles: https://packages.debian.org/bluez-firmware
 				G_AG_CHECK_INSTALL_PREREQ bluez bluez-firmware $rockpis
 
 			fi
 
-			# Load modules, bluetooth first
+			# Load kernel modules, bluetooth first
 			for i in "${aBLUETOOTH_MODULES[@]}"
 			do
 
@@ -1143,7 +1176,7 @@ Do you want to continue and disable the serial login console?' || return 1
 
 			done
 
-			# Failsafe, unblock all Bluetooth adapters
+			# Failsafe: Unblock all Bluetooth adapters if rfkill is installed
 			command -v rfkill > /dev/null && rfkill unblock bluetooth
 
 			# Broadcom-based models that need brcm_patchram_plus
@@ -1156,7 +1189,7 @@ Do you want to continue and disable the serial login console?' || return 1
 			G_EXEC systemctl enable --now bluetooth
 
 			# RPi
-			(( $G_HW_MODEL > 9 )) || (( ! $G_HW_ONBOARD_WIFI )) || G_EXEC systemctl enable --now hciuart
+			(( $G_HW_MODEL > 9 )) || (( ! $G_HW_ONBOARD_WIFI )) || G_EXEC systemctl enable hciuart
 
 		else
 
@@ -1508,10 +1541,6 @@ Do you want to continue and DISABLE Bluetooth now?' || return 1
 					[[ ! -f $FP_UENV ]] || grep -q "console=$INPUT_ADDITIONAL" $FP_UENV && return 0
 					echo "console=$INPUT_ADDITIONAL,115200n8" >> $FP_UENV
 
-				#elif (( $G_HW_MODEL == 70 )); then
-
-				#	grep -q "console=$INPUT_ADDITIONAL" $FP_UENV || sed -i "/bootargs=/s/$/ console=$INPUT_ADDITIONAL,115200n8/" $FP_UENV
-
 				fi
 
 			# Enable for all detected Serial/UART devices
@@ -1579,10 +1608,6 @@ Do you want to continue and DISABLE Bluetooth now?' || return 1
 					sed -i "/^[[:blank:]]*console=${INPUT_ADDITIONAL}[^\"[:blank:]]*[[:blank:]]*$/d" $FP_UENV # New style: One variable each line
 					sed -i "s/[[:blank:]]*console=${INPUT_ADDITIONAL}[^\"[:blank:]]*//" $FP_UENV # Old style: Multiple variables possible each line
 
-				#elif (( $G_HW_MODEL == 70 )); then
-
-				#	sed -i "s/[[:blank:]]*console=${INPUT_ADDITIONAL}[^\"[:blank:]]*//" $FP_UENV
-
 				fi
 
 			# Disable for all detected Serial/UART devices
@@ -1629,6 +1654,8 @@ Do you want to continue and DISABLE Bluetooth now?' || return 1
 	# Disable all sound cards and reset all settings
 	Soundcard_Reset_All(){
 
+		G_DIETPI-NOTIFY 2 'Resetting all sound card settings...'
+
 		# All
 		SOUNDCARD_TARGET_CARD=0
 		SOUNDCARD_TARGET_DEVICE=0
@@ -1636,13 +1663,13 @@ Do you want to continue and DISABLE Bluetooth now?' || return 1
 		ALSA_EQ_ENABLED=0
 
 		# - Remove previous asound.conf
-		[[ -f '/etc/asound.conf' ]] && rm /etc/asound.conf
+		[[ -f '/etc/asound.conf' ]] && G_EXEC rm /etc/asound.conf
 
 		# - Remove stored amixer state
-		[[ -f '/var/lib/alsa/asound.state' ]] && rm /var/lib/alsa/asound.state
+		[[ -f '/var/lib/alsa/asound.state' ]] && G_EXEC rm /var/lib/alsa/asound.state
 
 		# - Reset active amixer state
-		[[ $INPUT_DEVICE_VALUE == 'none' ]] || alsactl -g init
+		[[ $INPUT_DEVICE_VALUE != 'none' && -f '/proc/asound/cards' && $(</proc/asound/cards) ]] && alsactl init
 
 		# HW specific
 		# - RPi
@@ -1767,7 +1794,7 @@ Do you want to continue and DISABLE Bluetooth now?' || return 1
 
 		# Set HDMI
 		SOUNDCARD_TARGET_DEVICE=1
-		[[ $INPUT_DEVICE_VALUE == 'none' ]] || amixer -c 0 sset 'audio output mode switch' 'hdmi'
+		[[ $INPUT_DEVICE_VALUE != 'none' && -f '/proc/' ]] || amixer -c 0 sset 'audio output mode switch' 'hdmi'
 
 	}
 
@@ -1789,10 +1816,15 @@ Do you want to continue and DISABLE Bluetooth now?' || return 1
 	Soundcard_Main(){
 
 		#-----------------------------------------------------------------------------
+		# An input is required
+		[[ $INPUT_DEVICE_VALUE ]] || Unknown_Input_Mode
+		#-----------------------------------------------------------------------------
 		# Failsafe: Assure installed alsa-utils, if soundcard has been selected
 		[[ $INPUT_DEVICE_VALUE == 'none' ]] || G_AG_CHECK_INSTALL_PREREQ alsa-utils
 		# Always reset soundcards and revert back to defaults
 		Soundcard_Reset_All
+		# Print info
+		G_DIETPI-NOTIFY 2 'Applying new sound card settings...'
 		# Save selection to dietpi.txt
 		G_CONFIG_INJECT 'CONFIG_SOUNDCARD=' "CONFIG_SOUNDCARD=$INPUT_DEVICE_VALUE" /boot/dietpi.txt
 		# Return now if no soundcard has been selected
@@ -1815,8 +1847,11 @@ Do you want to continue and DISABLE Bluetooth now?' || return 1
 
 		fi
 
-		# - RPi: Quick workaround for dtoverlay=vc4-kms-v3d taking card 0: https://github.com/MichaIng/DietPi/issues/3356#issuecomment-578215611
+		# Workaround for RPi VC4 full KMS driver
+		# - RPi: An additional HDMI sound device exists as card 0: https://github.com/MichaIng/DietPi/issues/3356#issuecomment-578215611
 		(( $G_HW_MODEL < 10 )) && grep -q '^[[:blank:]]*dtoverlay=vc4-kms-v3d' /boot/config.txt && ((SOUNDCARD_TARGET_CARD++))
+		# - RPi4: card 1 is additionally used for the second HDMI port: https://github.com/MichaIng/DietPi/issues/4059
+		(( $G_HW_MODEL == 4 )) && grep -q '^[[:blank:]]*dtoverlay=vc4-kms-v3d-pi4' /boot/config.txt && ((SOUNDCARD_TARGET_CARD++))
 
 		# - Cards
 		case "$INPUT_DEVICE_VALUE" in
@@ -1833,8 +1868,8 @@ Do you want to continue and DISABLE Bluetooth now?' || return 1
 			# Auto detect USB DAC
 			usb-dac*)
 
-				local usb_detection_card_index=$(aplay -l | mawk '/USB Audio/{print $2;exit}' | tr -d :)
-				if disable_error=1 G_CHECK_VALIDINT "$usb_detection_card_index" 0; then
+				local usb_detection_card_index=$([[ -f '/proc/asound/cards' ]] && mawk '/USB/ && $1 == /[0-9]/ {print $1;exit}' /proc/asound/cards)
+				if [[ $usb_detection_card_index ]]; then
 
 					SOUNDCARD_TARGET_CARD=$usb_detection_card_index
 					SOUNDCARD_TARGET_DEVICE=0
@@ -1843,14 +1878,12 @@ Do you want to continue and DISABLE Bluetooth now?' || return 1
 					if (( $G_HW_MODEL == 70 )); then
 
 						# USB 1.1 compat mode (Sparky currently)
-						[[ $INPUT_DEVICE_VALUE == *'1.1' ]] && sed -i 's/aotg\.aotg1_speed=0/aotg.aotg1_speed=1/' $FP_UENV
+						[[ $INPUT_DEVICE_VALUE == *'1.1' ]] && G_EXEC sed -i 's/aotg\.aotg1_speed=0/aotg.aotg1_speed=1/' $FP_UENV
 
 						# Unmute all (re: @sudeep)
 						for x in $(amixer -c "$SOUNDCARD_TARGET_CARD" controls | grep layback)
 						do
-
-							amixer -c "$SOUNDCARD_TARGET_CARD" cset "$x" 100%
-
+							G_EXEC amixer -c "$SOUNDCARD_TARGET_CARD" cset "$x" 100%
 						done
 
 					# Odroid C2: https://github.com/MichaIng/DietPi/issues/2101
@@ -1868,7 +1901,7 @@ _EOF_
 				# Not found
 				else
 
-					G_DIETPI-NOTIFY 1 'Unable to find a USB DAC on your system, reverting to "none"...'
+					G_DIETPI-NOTIFY 1 'Unable to find any USB DAC on your system, reverting to "none"...'
 					EXIT_CODE=1
 					G_CONFIG_INJECT 'CONFIG_SOUNDCARD=' 'CONFIG_SOUNDCARD=none' /boot/dietpi.txt
 					return
@@ -1878,11 +1911,7 @@ _EOF_
 			;;
 
 			# Intel SST DSP
-			intel-sst-dsp)
-
-				G_AG_CHECK_INSTALL_PREREQ 'firmware-intel-sound'
-
-			;;
+			intel-sst-dsp) G_AG_CHECK_INSTALL_PREREQ 'firmware-intel-sound';;
 
 			# --------------- Sparky SBC ------------
 			# Allo Piano DAC (firmware + module)
@@ -1900,10 +1929,10 @@ _EOF_
 				fi
 
 				G_CONFIG_INJECT "$INPUT_DEVICE_VALUE" "$INPUT_DEVICE_VALUE" /etc/modules
-				modprobe "$INPUT_DEVICE_VALUE"
+				G_EXEC modprobe "$INPUT_DEVICE_VALUE"
 				SOUNDCARD_TARGET_CARD=1
 				SOUNDCARD_TARGET_DEVICE=0
-				amixer -c 0 sset 'audio output mode switch' 'i2s'
+				G_EXEC amixer -c 0 sset 'audio output mode switch' 'i2s'
 
 			;;
 
@@ -1916,15 +1945,15 @@ _EOF_
 				SOUNDCARD_TARGET_DEVICE=0
 
 				# Vol
-				amixer –c 0 set 'DAC PA' 35
+				G_EXEC amixer –c 0 set 'DAC PA' 35
 
 				if [[ $INPUT_DEVICE_VALUE == 'allo-cheapo-analogue' ]]; then
 
-					amixer -c 0 sset 'audio output mode switch' 'i2s'
+					G_EXEC amixer -c 0 sset 'audio output mode switch' 'i2s'
 
 				else
 
-					amixer -c 0 sset 'audio output mode switch' 'spdif'
+					G_EXEC amixer -c 0 sset 'audio output mode switch' 'spdif'
 					SOUNDCARD_TARGET_DEVICE=2
 
 				fi
@@ -1935,12 +1964,11 @@ _EOF_
 			# Onboard
 			#	rpi-bcm2835-auto
 			#	rpi-bcm2835-3.5mm
-			#	rpi-bcm2835-hdmi (hdmi[01] on RPi4)
+			#	rpi-bcm2835-hdmi
 			rpi-bcm2835-*)
 
-				# Enable onboard audio dtparm
+				# Enable onboard audio
 				G_CONFIG_INJECT 'dtparam=audio=' 'dtparam=audio=on' /boot/config.txt
-				dtparam audio=on
 
 				# Force 3.5mm out?
 				if [[ $INPUT_DEVICE_VALUE == *'3.5mm' ]]; then
@@ -1960,6 +1988,7 @@ _EOF_
 };'\'''
 					G_CONFIG_INJECT 'dtoverlay=dietpi-disable_hdmi_audio' 'dtoverlay=dietpi-disable_hdmi_audio' /boot/config.txt
 
+				# Force HDMI output?
 				elif [[ $INPUT_DEVICE_VALUE == *'hdmi' ]]; then
 
 					# Disable headphones via dtoverlay
@@ -2001,7 +2030,6 @@ _EOF_
 				fi
 
 				G_CONFIG_INJECT "dtoverlay=$INPUT_DEVICE_VALUE" "dtoverlay=$INPUT_DEVICE_VALUE" /boot/config.txt
-				dtoverlay "$INPUT_DEVICE_VALUE"
 
 			;;
 
@@ -2020,7 +2048,6 @@ _EOF_
 
 				# Enable dtoverlay
 				G_CONFIG_INJECT "dtoverlay=$INPUT_DEVICE_VALUE" "dtoverlay=$INPUT_DEVICE_VALUE" /boot/config.txt
-				dtoverlay "$INPUT_DEVICE_VALUE"
 
 			;;
 
@@ -2030,9 +2057,7 @@ _EOF_
 
 				# Enable dtoverlay + I2S
 				G_CONFIG_INJECT 'dtparam=i2s=' 'dtparam=i2s=on' /boot/config.txt
-				dtparam i2s=on
 				G_CONFIG_INJECT "dtoverlay=$INPUT_DEVICE_VALUE" "dtoverlay=$INPUT_DEVICE_VALUE" /boot/config.txt
-				dtoverlay "$INPUT_DEVICE_VALUE"
 
 			;;
 
@@ -2041,7 +2066,7 @@ _EOF_
 
 				G_CONFIG_INJECT 'snd-soc-pcm5102' 'snd-soc-pcm5102' /etc/modules
 				G_CONFIG_INJECT 'snd-soc-odroid-dac' 'snd-soc-odroid-dac' /etc/modules
-				modprobe snd-soc-pcm5102 snd-soc-odroid-dac
+				G_EXEC modprobe snd-soc-pcm5102 snd-soc-odroid-dac
 
 				SOUNDCARD_TARGET_CARD=1
 
@@ -2053,7 +2078,7 @@ _EOF_
 				G_CONFIG_INJECT 'snd-soc-pcm512x' 'snd-soc-pcm512x' /etc/modules
 				G_CONFIG_INJECT 'snd-soc-pcm512x-i2c' 'snd-soc-pcm512x-i2c' /etc/modules
 				G_CONFIG_INJECT 'snd-soc-odroid-dac2' 'snd-soc-odroid-dac2' /etc/modules
-				modprobe aml_i2c snd-soc-pcm512x snd-soc-pcm512x-i2c snd-soc-odroid-dac2
+				G_EXEC modprobe aml_i2c snd-soc-pcm512x snd-soc-pcm512x-i2c snd-soc-odroid-dac2
 
 				SOUNDCARD_TARGET_CARD=1
 
@@ -2073,15 +2098,15 @@ ExecStart=$(command -v amixer) -c 1 sset Deemphasis on
 [Install]
 WantedBy=sound.target
 _EOF_
-				systemctl daemon-reload
-				systemctl enable --now odroid-hifishield2
+				G_EXEC systemctl daemon-reload
+				G_EXEC systemctl enable --now odroid-hifishield2
 
 			;;
 
 			# --------------- H2 --------------------
 			h2-hdmi)
 
-				amixer set -c 0 'Audio lineout' mute
+				G_EXEC amixer set -c 0 'Audio lineout' mute
 				SOUNDCARD_TARGET_CARD=1
 
 			;;
@@ -2089,7 +2114,7 @@ _EOF_
 			# --------------- H3 --------------------
 			h3-analogue)
 
-				amixer set -c 0 'Audio lineout' unmute
+				G_EXEC amixer set -c 0 'Audio lineout' unmute
 				SOUNDCARD_TARGET_CARD=0
 
 			;;
@@ -2211,9 +2236,13 @@ ctl.!default {
 _EOF_
 		fi
 
-		# Store control states once and force restore service, to assure it is active (states preserved) for next reboot
-		alsactl store
-		systemctl restart alsa-restore
+		# Store control states once to assure they are not lost on ungraceful shutdown
+		G_EXEC alsactl -g store
+
+		# Buster: Avoid alsa-state.service start if its config file does not exist: https://bugs.debian.org/cgi-bin/bugreport.cgi?bug=932209
+		(( $G_DISTRO == 5 )) || return
+		G_EXEC mkdir -p /etc/systemd/system/alsa-state.service.d
+		echo -e '[Unit]\nConditionPathExists=\nConditionPathExists=/etc/alsa/state-daemon.conf' > /etc/systemd/system/alsa-state.service.d/dietpi.conf
 
 	}
 
@@ -2255,6 +2284,10 @@ _EOF_
 	elif [[ $INPUT_DEVICE_NAME == 'i2c' ]]; then
 
 		I2c_Main
+
+	elif [[ $INPUT_DEVICE_NAME == 'spi' ]]; then
+
+		SPI_Main
 
 	elif [[ $INPUT_DEVICE_NAME == 'lcdpanel' ]]; then
 

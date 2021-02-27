@@ -1263,7 +1263,7 @@ NB: You now need to run "apt update" or "G_AGUP" once after each reboot, before 
 		local swap_location=$(sed -n '/^[[:blank:]]*AUTO_SETUP_SWAPFILE_LOCATION=/{s/^[^=]*=//p;q}' /boot/dietpi.txt)
 		local swap_size_text="$swap_size MB"
 		(( $swap_size )) || swap_size_text='Off'
-		G_WHIP_MENU_ARRAY=('Swapfile' ": [$swap_size_text | $swap_location]")
+		G_WHIP_MENU_ARRAY=('Swap file' ": [$swap_size_text | $swap_location]")
 
 		# APT cache
 		G_WHIP_MENU_ARRAY+=('APT cache' ': Manage APT cache/info storage')
@@ -1327,19 +1327,9 @@ NB: You now need to run "apt update" or "G_AGUP" once after each reboot, before 
 		G_WHIP_MENU_ARRAY+=('Serial/UART' ': Manage available devices')
 
 		# Bluetooth: Not for VM
-		if (( $G_HW_MODEL != 20 )); then
-
-			local bluetooth_state_text='On'
-			local bluetooth_state=1
-			if [[ -f '/etc/modprobe.d/dietpi-disable_bluetooth.conf' ]]; then
-
-				bluetooth_state=0
-				bluetooth_state_text='Off'
-
-			fi
-			G_WHIP_MENU_ARRAY+=('Bluetooth' ": [$bluetooth_state_text]")
-
-		fi
+		local bluetooth_state=1 bluetooth_state_text='On'
+		[[ -f '/etc/modprobe.d/dietpi-disable_bluetooth.conf' ]] && bluetooth_state=0 bluetooth_state_text='Off'
+		G_WHIP_MENU_ARRAY+=('Bluetooth' ": [$bluetooth_state_text]")
 
 		# RPi specific
 		if (( $G_HW_MODEL < 10 )); then
@@ -1355,6 +1345,12 @@ NB: You now need to run "apt update" or "G_AGUP" once after each reboot, before 
 			# - Allow commented/non-existent entry, using default value: https://github.com/raspberrypi/firmware/blob/d69aadedb7c146ba5d3b0b45a661e5669a9141c4/boot/overlays/README#L115-L116
 			rpi_i2c_baudrate=$(( ${rpi_i2c_baudrate:-100000} / 1000 ))
 			G_WHIP_MENU_ARRAY+=('I2C frequency' ": [$rpi_i2c_baudrate kHz]")
+
+			# SPI state
+			local rpi_spi_enabled=$(grep -cm1 '^[[:blank:]]*dtparam=spi=on' /boot/config.txt)
+			local rpi_spi_text='Off'
+			(( $rpi_spi_enabled )) && rpi_spi_text='On'
+			G_WHIP_MENU_ARRAY+=('SPI state' ": [$rpi_spi_text]")
 
 			# USB boot option: RPi3 only and not required for RPi3+: https://www.raspberrypi.org/documentation/hardware/raspberrypi/bootmodes/msd.md
 			if [[ $G_HW_MODEL == 3 && $G_HW_MODEL_NAME != *'+'* ]]; then
@@ -1372,14 +1368,10 @@ NB: You now need to run "apt update" or "G_AGUP" once after each reboot, before 
 
 			TARGETMENUID=3 # Return to this menu
 
-			if [[ $G_WHIP_RETURNED_VALUE == 'Swapfile' ]]; then
+			if [[ $G_WHIP_RETURNED_VALUE == 'Swap file' ]]; then
 
-				if G_WHIP_YESNO 'Swapfile control has been moved to DietPi-Drive_Manager, would you like to run the application now?
-\nOnce finished, exit to resume DietPi-Config'; then
-
-					/boot/dietpi/dietpi-drive_manager
-
-				fi
+				G_WHIP_YESNO 'Swapfile control has been moved to DietPi-Drive_Manager, would you like to run the application now?
+\nOnce finished, exit to resume DietPi-Config' && /boot/dietpi/dietpi-drive_manager
 
 			elif [[ $G_WHIP_RETURNED_VALUE == 'APT cache' ]]; then
 
@@ -1407,9 +1399,7 @@ Please choose whether your device have an active RTC or requires "fake-hwclock":
 					if [[ $G_WHIP_RETURNED_VALUE == 'Emulated' ]]; then
 
 						G_AGI fake-hwclock
-						# - Allow times in the past
-						G_CONFIG_INJECT 'FORCE=' 'FORCE=force' /etc/default/fake-hwclock
-						systemctl restart fake-hwclock
+						G_EXEC systemctl enable --now fake-hwclock
 
 					else
 
@@ -1482,15 +1472,7 @@ Further information: https://www.raspberrypi.org/documentation/hardware/raspberr
 
 			elif [[ $G_WHIP_RETURNED_VALUE == 'I2C state' ]]; then
 
-				if (( $rpi_i2c_enabled )); then
-
-					/boot/dietpi/func/dietpi-set_hardware i2c disable
-
-				else
-
-					/boot/dietpi/func/dietpi-set_hardware i2c enable
-
-				fi
+				/boot/dietpi/func/dietpi-set_hardware i2c $(( ! $rpi_i2c_enabled ))
 				REBOOT_REQUIRED=1
 
 			elif [[ $G_WHIP_RETURNED_VALUE == 'I2C frequency' ]]; then
@@ -1504,21 +1486,20 @@ Further information: https://www.raspberrypi.org/documentation/hardware/raspberr
 
 				fi
 
+			elif [[ $G_WHIP_RETURNED_VALUE == 'SPI state' ]]; then
+
+				/boot/dietpi/func/dietpi-set_hardware spi $(( ! $rpi_spi_enabled ))
+				REBOOT_REQUIRED=1
+
 			elif [[ $G_WHIP_RETURNED_VALUE == 'Serial/UART' ]]; then
 
 				TARGETMENUID=18
 
 			elif [[ $G_WHIP_RETURNED_VALUE == 'Bluetooth' ]]; then
 
-				if (( $bluetooth_state )); then
-
-					/boot/dietpi/func/dietpi-set_hardware bluetooth disable
-
-				else
-
-					/boot/dietpi/func/dietpi-set_hardware bluetooth enable
-
-				fi
+				/boot/dietpi/func/dietpi-set_hardware bluetooth $(( ! $bluetooth_state ))
+				# On RPi, when enabling onboard Bluetooth, a reboot is required to have the device tree changes taking effect.
+				(( $bluetooth_state || G_HW_MODEL > 9 )) || (( ! $G_HW_ONBOARD_WIFI )) || REBOOT_REQUIRED=1
 
 			elif [[ $G_WHIP_RETURNED_VALUE == 'USB boot support' && $rpi3_usb_boot_bit_enabled == 0 ]] &&
 				G_WHIP_YESNO 'The following will enable the RPi 3 to boot from USB mass storage devices. A hardware bit "17:3020000a", specific to the device is set to enable the feature.
@@ -2251,15 +2232,15 @@ Current setting: $user_frequency_min_text" && G_CONFIG_INJECT 'CONFIG_CPU_MIN_FR
 
 		# Drop Connections
 		G_DIETPI-NOTIFY 0 'Dropping connections, please wait...'
-		ifdown eth$ETH_DEV_INDEX --force &> /dev/null
-		ifdown wlan$WIFI_DEV_INDEX --force &> /dev/null
+		ifdown eth$ETH_DEV_INDEX --force 2> /dev/null
+		ifdown wlan$WIFI_DEV_INDEX --force 2> /dev/null
 
 		# Kill dhclient
-		killall dhclient &> /dev/null
+		killall dhclient 2> /dev/null
 
-		# Flush, not viable to handle this if change of IP, requires a detect of SSH loss/ip change, then exit script.
-		# - ip addr flush dev eth$ETH_DEV_INDEX &> /dev/null
-		# - ip addr flush dev wlan$WIFI_DEV_INDEX &> /dev/null
+		# Flush, not viable to handle this if change of IP, requires a detect of SSH loss/IP change, then exit script.
+		#ip a flush dev eth$ETH_DEV_INDEX &> /dev/null
+		#ip a flush dev wlan$WIFI_DEV_INDEX &> /dev/null
 
 		# Restart Networking
 		G_DIETPI-NOTIFY 2 'Restarting network, please wait...'
@@ -2272,7 +2253,7 @@ Current setting: $user_frequency_min_text" && G_CONFIG_INJECT 'CONFIG_CPU_MIN_FR
 		# Restart all services (required for hotspot)
 		/boot/dietpi/dietpi-services start
 
-		# - Add a little delay to ensure all network device data are updated (eg: SSID current takes a little longer)
+		# Add a little delay to ensure all network device data are updated (eg: SSID current takes a little longer)
 		G_DIETPI-NOTIFY 2 'Reloading networking data, please wait...'
 		sleep 2
 
@@ -2281,8 +2262,7 @@ Current setting: $user_frequency_min_text" && G_CONFIG_INJECT 'CONFIG_CPU_MIN_FR
 
 		G_DIETPI-NOTIFY 0 'Network restarted'
 
-		if [[ $ETH_MODE_TARGET == 0 && $ETH_IP != "$ETH_IP_STATIC" ]] ||
-			[[ $WIFI_MODE_TARGET == 0 && $WIFI_IP != "$WIFI_IP_STATIC" ]]; then
+		if [[ $ETH_MODE_TARGET == 0 && $ETH_IP != "$ETH_IP_STATIC" ]] || [[ $WIFI_MODE_TARGET == 0 && $WIFI_IP != "$WIFI_IP_STATIC" ]]; then
 
 			G_WHIP_MSG 'IP STATIC address change detected. A reboot is required to apply the new IP.\n\nPlease reboot the system.'
 			REBOOT_REQUIRED=1
@@ -2344,6 +2324,7 @@ Current setting: $user_frequency_min_text" && G_CONFIG_INJECT 'CONFIG_CPU_MIN_FR
 
 		fi
 
+		# Create interface config
 		cat << _EOF_ > /etc/network/interfaces
 # Location: /etc/network/interfaces
 # Please modify network settings via: dietpi-config
@@ -2351,10 +2332,6 @@ Current setting: $user_frequency_min_text" && G_CONFIG_INJECT 'CONFIG_CPU_MIN_FR
 
 # Drop-in configs
 source interfaces.d/*
-
-# Local
-auto lo
-iface lo inet loopback
 
 # Ethernet
 ${eth_enabled_text}allow-hotplug eth$ETH_DEV_INDEX
@@ -2366,6 +2343,24 @@ ${eth_dns_text}dns-nameservers $ETH_DNS
 
 # WiFi
 ${wifi_enabled_text}allow-hotplug wlan$WIFI_DEV_INDEX
+_EOF_
+		# WiFi Hotspot
+		if (( $WIFI_HOTSPOT )); then
+
+			cat << _EOF_ >> /etc/network/interfaces
+iface wlan$WIFI_DEV_INDEX inet static
+address 192.168.42.1
+netmask 255.255.255.0
+#gateway 192.168.0.1
+#dns-nameservers 9.9.9.9 149.112.112.112
+wireless-power off
+
+# IP tables
+up iptables-restore < /etc/iptables.ipv4.nat
+_EOF_
+		# WiFi client
+		else
+			cat << _EOF_ >> /etc/network/interfaces
 iface wlan$WIFI_DEV_INDEX inet $wifi_dhcp_static_text
 address $WIFI_IP
 netmask $WIFI_MASK
@@ -2374,38 +2369,19 @@ ${wifi_dns_text}dns-nameservers $WIFI_DNS
 wireless-power off
 wpa-conf /etc/wpa_supplicant/wpa_supplicant.conf
 _EOF_
-
-		# - Additional settings/changes, required for hotspot mode
-		if (( $WIFI_HOTSPOT )); then
-
-			# - Remove all entries below wlan, so we can recreate them.
-			sed -i '/allow-hotplug wlan/q0' /etc/network/interfaces
-
-			cat << _EOF_ >> /etc/network/interfaces
-iface wlan$WIFI_DEV_INDEX inet static
-address 192.168.42.1
-netmask 255.255.255.0
-#gateway 192.168.0.1
-wireless-power off
-#dns-nameservers 9.9.9.9 149.112.112.112
-
-# IP tables
-up iptables-restore < /etc/iptables.ipv4.nat
-_EOF_
-
 		fi
 
-		# - Remove wireless-power setting, if not supported by adapter/firmware
-		iwconfig wlan$WIFI_DEV_INDEX power off &> /dev/null || sed -i '/^wireless-power/d' /etc/network/interfaces
+		# Remove wireless-power setting, if not supported by adapter/firmware
+		iwconfig wlan$WIFI_DEV_INDEX power off 2> /dev/null || sed -i '/^wireless-power/d' /etc/network/interfaces
 
-		# - Update WiFi db/wpa_supplicant
+		# Update WiFi db/wpa_supplicant
 		/boot/dietpi/func/dietpi-wifidb 1
 
 		# Update Current Mode for network restart
 		ETH_MODE=$ETH_MODE_TARGET
 		WIFI_MODE=$WIFI_MODE_TARGET
 
-		# Restart net
+		# Restart network
 		Network_Restart
 
 	}
@@ -2859,8 +2835,8 @@ NB: All Ethernet connections will be dropped!' && Network_ApplyChanges
 					# Disabled
 					elif (( $ETH_DISABLED )); then
 
-						if G_WHIP_YESNO 'Ethernet must be enabled before settings can be changed.\n
-Would you like to enable Ethernet now?\n - (NOTICE) Connections may drop!'; then
+						if G_WHIP_YESNO 'Ethernet must be enabled before settings can be changed.
+\nWould you like to enable Ethernet now?\n - (NOTICE) Connections may drop!'; then
 
 							ETH_DISABLED=0
 							Network_ApplyChanges
@@ -2881,8 +2857,8 @@ Would you like to enable Ethernet now?\n - (NOTICE) Connections may drop!'; then
 					# Disabled | Offer chance to enable (also enables WiFi modules)
 					if (( $WIFI_DISABLED )); then
 
-						if G_WHIP_YESNO 'WiFi must be enabled before settings can be changed.\n
-Would you like to enable WiFi now?\n - NB: Connections may drop!'; then
+						if G_WHIP_YESNO 'WiFi must be enabled before settings can be changed.
+\nWould you like to enable WiFi now?\n - NB: Connections may drop!'; then
 
 							WIFI_DISABLED=0
 							Network_ApplyChanges
@@ -2892,8 +2868,8 @@ Would you like to enable WiFi now?\n - NB: Connections may drop!'; then
 					# No hardware found
 					elif (( ! $WIFI_HARDWARE )); then
 
-						if G_WHIP_YESNO 'No supported WiFi hardware was found.\n
-Would you like to disable WiFi?\n - NB: Connections may drop!'; then
+						if G_WHIP_YESNO 'No supported WiFi hardware was found.
+\nWould you like to disable WiFi?\n - NB: Connections may drop!'; then
 
 							WIFI_DISABLED=1
 							Network_ApplyChanges
@@ -3905,8 +3881,8 @@ Additional benchmarks:
 
 				if [[ $psu_noise_reduction == 'Off' ]]; then
 
-					G_WHIP_YESNO 'PSU noise reduction:\n\nThis mode attempts to reduce power consumption on your SBC. In turn, this may reduce PSU inflicted noise, that may degrade audio output quality.\n
-The following will now be applied:\n - CPU governor = Powersave\n - Display output = Disabled\n\nDo you want to continue?' || return
+					G_WHIP_YESNO 'PSU noise reduction:\n\nThis mode attempts to reduce power consumption on your SBC. In turn, this may reduce PSU inflicted noise, that may degrade audio output quality.
+\nThe following will now be applied:\n - CPU governor = powersave\n - Display output = disabled\n\nDo you want to continue?' || return
 
 					G_CONFIG_INJECT 'CONFIG_CPU_GOVERNOR=' 'CONFIG_CPU_GOVERNOR=powersave' /boot/dietpi.txt
 					/boot/dietpi/func/dietpi-set_cpu
@@ -4037,6 +4013,9 @@ The following will now be applied:\n - CPU governor = Powersave\n - Display outp
 				G_WHIP_DEFAULT_ITEM=$soundcard_current
 				G_WHIP_MENU "Please select a soundcard\n - Current : $soundcard_current" || return
 				/boot/dietpi/func/dietpi-set_hardware soundcard "$G_WHIP_RETURNED_VALUE"
+
+				# RPi: Reboot required to apply device tree changes, which applies to all but auto-detected selections
+				(( $G_HW_MODEL > 9 )) || [[ $G_WHIP_RETURNED_VALUE == 'hw:'[0-9]','[0-9] || $G_WHIP_RETURNED_VALUE == 'usb-dac' ]] || REBOOT_REQUIRED=1
 
 			elif [[ $G_WHIP_RETURNED_VALUE == 'Auto-conversion' ]]; then
 
@@ -4222,7 +4201,7 @@ The following will now be applied:\n - CPU governor = Powersave\n - Display outp
 		# No-IP Client
 		local noip_installed=0
 		local noip_menutext='[Not Installed] Install No-IP now'
-		if grep -q '^aSOFTWARE_INSTALL_STATE\[67\]=2' /boot/dietpi/.installed; then
+		if command -v noip2 > /dev/null && [[ -f '/etc/systemd/system/noip2.service' ]]; then
 
 			noip_installed=1
 			noip_menutext='[Offline] Enter/Setup No-IP details'
@@ -4450,7 +4429,7 @@ NB: If you need to use *.pool.ntp.org servers, enter the base domain only. The s
 						G_TERM_CLEAR
 						G_EXEC systemctl stop noip2
 						# Failsafe: Directory required for "noip2 -C" to create the config file there
-						mkdir -p /usr/local/etc
+						G_EXEC mkdir -p /usr/local/etc
 						noip2 -C
 						read -rp 'Press any key to continue...'
 						G_EXEC systemctl restart noip2
@@ -4712,8 +4691,8 @@ _EOF_
 
 			else
 
-				G_WHIP_MSG "[FAILED] Unknown menu ID $TARGETMENUID, reverting to DietPi-Config main menu\n
-This error should never show up. Please try to reproduce it. If it reappears, you found a coding bug.
+				G_WHIP_MSG "[FAILED] Unknown menu ID $TARGETMENUID, reverting to DietPi-Config main menu
+\nThis error should never show up. Please try to reproduce it. If it reappears, you found a coding bug.
 Please report it to: https://github.com/MichaIng/DietPi/issues"
 				TARGETMENUID=0
 

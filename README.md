@@ -1,21 +1,17 @@
-<html>
-	<h1 align="center">
-		<img src="https://raw.githubusercontent.com/MichaIng/DietPi-Website/master/images/dietpi-logo_180x180.png" alt="DietPi Logo">
-	</h1>
-	<p align="center">
-		<b>Lightweight justice for your single-board computer!</b>
-		<br><br>
-		optimised • simplified • for everyone
-		<br><br>
-		<a href="https://dietpi.com/">Website</a> • <a href="https://dietpi.com/docs/">Documentation</a> • <a href="https://dietpi.com/#download">View all supported platforms</a>
-	</p>
-	<hr>
-	<p align="center">
-		<strong>Ready to run</strong> optimised software choices with <a href="https://dietpi.com/dietpi-software.html"><strong>dietpi-software</strong></a>
-		<br>Feature-rich configuration tool for your device with <strong>dietpi-config</strong>.
-	</p>
-	<hr>
-</html>
+<h1 align="center"><img src="https://raw.githubusercontent.com/MichaIng/DietPi-Website/master/images/dietpi-logo_180x180.png" alt="DietPi Logo"></h1>
+<p align="center">
+	<b>Lightweight justice for your single-board computer!</b>
+	<br><br>
+	optimised • simplified • for everyone
+	<br><br>
+	<a href="https://dietpi.com/">Website</a> • <a href="https://dietpi.com/docs/">Documentation</a> • <a href="https://dietpi.com/#download">View all supported platforms</a> • <a href="https://dietpi.com/phpbb/">Forum</a>
+</p>
+<hr>
+<p align="center">
+	<strong>Ready to run</strong> optimised software choices with <a href="https://dietpi.com/dietpi-software.html"><strong>dietpi-software</strong></a>
+	<br>Feature-rich configuration tool for your device with <strong>dietpi-config</strong>.
+</p>
+<hr>
 
 ## Introduction
 
@@ -83,7 +79,7 @@ Source code contributor, implemented PaperMC, Unbound, Tor Relay and related fea
 
 ### Collaborations
 
-#### DietPi + Amiberry
+#### DietPi + [Amiberry](https://github.com/midwan/amiberry)
 
 _Since 2016-09-02_
 
@@ -94,31 +90,31 @@ https://github.com/MichaIng/DietPi/issues/474
 
 ### Hall of Fame
 
-#### K-Plan
+#### [K-Plan](https://github.com/k-plan)
 
 _Joined 2016-01-01_
 
 Contributions to the DietPi in general, in-depth testing, bug finding and valuable feedback, forum moderator.
 
-#### ZombieVirus
+#### [ZombieVirus](https://dietpi.com/phpbb/memberlist.php?username=ZombieVirus)
 
 _Joined 2016-03-20_
 
 DietPi forum moderator and version history maintainer on forums.
 
-#### Rhkean
+#### [Rhkean](https://github.com/rhkean)
 
 _Joined 2018-03-01_
 
 Contributions to the DietPi in general, including source code, testing, new devices, forum moderator.
 
-#### Pilovali
+#### [Pilovali](https://github.com/pilovali)
 
 _Joined 2015-10-10_
 
 Provided dietpi.com web hosting for 1 year until April 17th 2016. Additionally: forum moderator, testing, bug reporting.
 
-#### xenfomation
+#### [Xenfomation](https://github.com/xenfomation)
 
 _Joined 2016-04-01_
 
@@ -151,12 +147,13 @@ If so, let us know!
 We are always looking for talented people who believe in the DietPi project, and, wish to contribute in any way you can.
 
 - Send me an Email: micha@dietpi.com
-- Join our forums: https://dietpi.com/phpbb/
+- Join our forum: https://dietpi.com/phpbb/
 - GitHub: https://github.com/MichaIng/DietPi
 
 ### FeatHub
 
-Vote for new suggestions, feature-, software- or image requests, or add your own to our new FeatHub page:
+Vote for new suggestions, feature-, software- or image requests, or add your own to our new [FeatHub page](https://feathub.com/MichaIng/DietPi):  
+_Please do always open and cross-reference a  [GitHub issue](https://github.com/MichaIng/DietPi/issues) as well._
 
 [![Feature Requests](https://feathub.com/MichaIng/DietPi?format=svg)](https://feathub.com/MichaIng/DietPi)
 
@@ -287,6 +284,10 @@ Links to hardware and software manufacturers, sources and build instructions use
 - [Docker](https://github.com/docker/docker-ce)
 - [Portainer](https://github.com/portainer/portainer)
 - [Tor](https://gitlab.torproject.org/tpo/core/tor)
+- [Docker Compose](https://github.com/docker/compose)
+- [Box86](https://github.com/ptitSeb/box86)
+- [Steam](https://steamcommunity.com/)
+- [mjpg-streamer](https://github.com/jacksonliam/mjpg-streamer)
 
 ---
 
