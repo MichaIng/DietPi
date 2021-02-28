@@ -30,8 +30,8 @@
 	SERVICES_STOPPED=0
 	G_EXIT_CUSTOM(){ (( $SERVICES_STOPPED )) && /boot/dietpi/dietpi-services start; }
 
-	# Grab input (valid interger)
-	disable_error=1 G_CHECK_VALIDINT "$1" && INPUT=$1 || INPUT=0
+	# Grab input
+	[[ $1 == [134] ]] && INPUT=$1 || INPUT=0
 
 	EXIT_CODE=0
 
@@ -65,7 +65,6 @@
 		aDRIVE_SIZE_TOTAL[$index]=
 		aDRIVE_SIZE_USED[$index]=
 		aDRIVE_SIZE_PERCENTUSED[$index]=
-
 		aDRIVE_ISFILESYSTEM[$index]=0
 		aDRIVE_ISMOUNTED[$index]=0
 		aDRIVE_ISREADONLY_CURRENTLY[$index]=0
@@ -126,7 +125,8 @@ tmpfs /var/log tmpfs size=${var_log_size:-50}M,noatime,lazytime,nodev,nosuid,mod
 
 		fi
 
-		echo "# Please use \"dietpi-drive_manager\" to setup mounts
+		echo "# You can use \"dietpi-drive_manager\" to setup mounts.
+# NB: It overwrites and re-creates physical drive mount entries on use.
 #----------------------------------------------------------------
 # NETWORK
 #----------------------------------------------------------------
@@ -151,20 +151,15 @@ $swap_mounts
 # PHYSICAL DRIVES
 #----------------------------------------------------------------" > $fp_fstab_tmp
 
-		# Detect mounted drives
 		G_DIETPI-NOTIFY 2 'Detecting drives, please wait...'
-		# - Exclude special treated fs types: tmpfs, ecryptfs, vboxsf, glusterfs
-		# - Only detect mounts with "/" in source path, which excludes other special/pseudo fs types
-		# - Remove duplicates, which excludes bind mounts: https://github.com/MichaIng/DietPi/issues/2013#issuecomment-417413867
-		df -a --output=source --exclude-type=tmpfs --exclude-type=ecryptfs --exclude-type=vboxsf --exclude-type=glusterfs | mawk '/\// && !x[$0]++' > .df_out_tmp
 
-		# Process df result
-		# shellcheck disable=SC2094
+		# Detect mounted drives via df
+		# - Exclude special treated fs types: tmpfs, ecryptfs, vboxsf, glusterfs
+		# - Workaround for /dev/root on RPi: Replace with actual device path $G_ROOTFS_DEV
+		# - Only detect mounts with "/" in source path, which excludes other special/pseudo fs types
+		# - Remove duplicates, e.g. from bind mounts and due to /dev/root conversion: https://github.com/MichaIng/DietPi/issues/2013#issuecomment-417413867
 		while read -r line
 		do
-
-			# Workaround for /dev/root under RPi, force physical location
-			[[ $line == '/dev/root' ]] && { grep -q "^$G_ROOTFS_DEV$" .df_out_tmp && continue || line=$G_ROOTFS_DEV; }
 
 			Init_New_Device
 
@@ -270,11 +265,9 @@ $swap_mounts
 
 			fi
 
-		done < .df_out_tmp
-		rm .df_out_tmp
+		done < <(df -a --output=source --exclude-type=tmpfs --exclude-type=ecryptfs --exclude-type=vboxsf --exclude-type=glusterfs | sed "\|^/dev/root$|c$G_ROOTFS_DEV" | mawk '/\// && !x[$0]++')
 
 		# Check blkid for unmounted drives, if drive is not mounted, add entry as disabled/commented mount
-		blkid -o device > .blkid_out_tmp
 		while read -r line
 		do
 
@@ -283,9 +276,7 @@ $swap_mounts
 			# Exclude drives already found
 			for i in "${aDRIVE_MOUNT_SOURCE[@]}"
 			do
-
-				[[ $i == $line* ]] && continue 2
-
+				[[ $i == "$line"* ]] && continue 2
 			done
 
 			# Must have a valid UUID! (this excludes /dev/mmcblk0)
@@ -311,12 +302,10 @@ $swap_mounts
 
 			echo "#UUID=${aDRIVE_UUID[$index]} ${aDRIVE_MOUNT_TARGET[$index]} ${type:-auto} noatime,lazytime,rw,nofail,noauto,x-systemd.automount" >> $fp_fstab_tmp
 
-		done < .blkid_out_tmp
-		rm .blkid_out_tmp
+		done < <(blkid -o device)
 
 		# Find unformated drives
 		# - Exclude mtdblock devices: https://github.com/MichaIng/DietPi/issues/2067#issuecomment-422400520
-		lsblk -nro NAME | sed '/^mtdblock[0-9]/d' > .lsblk_out_tmp
 		while read -r line
 		do
 
@@ -325,9 +314,7 @@ $swap_mounts
 			# Exclude drives already found
 			for i in "${aDRIVE_SOURCE_DEVICE[@]}"
 			do
-
 				[[ $line == $i* ]] && continue 2
-
 			done
 
 			G_DIETPI-NOTIFY 2 " - Detected unformated drive: /dev/$line"
@@ -338,8 +325,7 @@ $swap_mounts
 			aDRIVE_MOUNT_TARGET[$index]="/tmp/$line"
 			aDRIVE_SOURCE_DEVICE[$index]=$line
 
-		done < .lsblk_out_tmp
-		rm .lsblk_out_tmp
+		done < <(lsblk -nro NAME | sed '/^mtdblock[0-9]/d')
 
 		# Set required global flags and deps for all drives found
 		for i in "${!aDRIVE_MOUNT_SOURCE[@]}"
@@ -371,7 +357,6 @@ $swap_mounts
 			G_DIETPI-NOTIFY 0 'DEBUG INFO:'
 			for i in "${!aDRIVE_MOUNT_SOURCE[@]}"
 			do
-
 				G_DIETPI-NOTIFY 0 "Index=$i
 aDRIVE_UUID ${aDRIVE_UUID[$i]}
 aDRIVE_PART_UUID ${aDRIVE_PART_UUID[$i]}
@@ -422,15 +407,10 @@ aDRIVE_ISPARTITIONTABLE ${aDRIVE_ISPARTITIONTABLE[$i]}
 		local i
 		[[ $MENU_DRIVE_TARGET ]] && for i in "${!aDRIVE_MOUNT_TARGET[@]}"
 		do
-
-			if [[ $MENU_DRIVE_TARGET == "${aDRIVE_MOUNT_TARGET[$i]}" ]]; then
-
-				MENU_DRIVE_INDEX=$i
-				[[ $G_DEBUG == 1 ]] && echo "[DEBUG$i] EDIT | ${aDRIVE_MOUNT_TARGET[$MENU_DRIVE_INDEX]} | ${aDRIVE_MOUNT_SOURCE[$MENU_DRIVE_INDEX]} | ${aDRIVE_SOURCE_DEVICE[$MENU_DRIVE_INDEX]}"
-				break
-
-			fi
-
+			[[ $MENU_DRIVE_TARGET == "${aDRIVE_MOUNT_TARGET[$i]}" ]] || continue
+			MENU_DRIVE_INDEX=$i
+			[[ $G_DEBUG == 1 ]] && echo "[DEBUG$i] EDIT | ${aDRIVE_MOUNT_TARGET[$MENU_DRIVE_INDEX]} | ${aDRIVE_MOUNT_SOURCE[$MENU_DRIVE_INDEX]} | ${aDRIVE_SOURCE_DEVICE[$MENU_DRIVE_INDEX]}"
+			break
 		done
 
 	}
@@ -1001,7 +981,7 @@ Do you wish to ignore this warning, and, mount the drive regardless?" || return 
 
 		if (( $1 == 0 )); then
 
-			G_WHIP_MSG "[FAILED]\n\nYour DietPi userdata is currently located on this drive:\n - $FP_USERDATA_CURRENT\n\nThe requested option for this drive is not currently possible.\n\nPlease move your userdata elsewhere, before trying again:\nhttps://dietpi.com/phpbb/viewtopic.php?t=478"
+			G_WHIP_MSG "[FAILED]\n\nYour DietPi userdata is currently located on this drive:\n - $FP_USERDATA_CURRENT\n\nThe requested option for this drive is not currently possible.\n\nPlease move your userdata elsewhere, before trying again:\nhttps://dietpi.com/docs/dietpi_tools/#quick-selections"
 
 		elif (( $1 == 1 )); then
 
@@ -1645,7 +1625,7 @@ NB: If you are planning to dedicate the drive to this system, it is recommended 
 
 				G_WHIP_DEFAULT_ITEM=$FORMAT_FILESYSTEM_TYPE
 				if G_WHIP_MENU 'Please select a filesystem type for this format:\n\nEXT4:\nHighly recommended if you plan to use this drive solely on this system (dedicated drive).\n
-NTFS:\nRecommended if you plan to use this drive on a Windows system. High CPU usage during transfers.\n\nFull list of different filesystem types:\nhttps://dietpi.com/phpbb/viewtopic.php?p=2898#p2898'; then
+NTFS:\nRecommended if you plan to use this drive on a Windows system. High CPU usage during transfers.\n\nFull list of different filesystem types:\nhttps://dietpi.com/docs/dietpi_tools/#dietpi-drive-manager'; then
 
 					# Install FS pre-reqs
 					# - NTFS
@@ -1744,7 +1724,7 @@ NTFS:\nRecommended if you plan to use this drive on a Windows system. High CPU u
 		G_AG_CHECK_INSTALL_PREREQ smbclient cifs-utils
 
 		# Mount now
-		mkdir -p "$samba_fp_mount_target"
+		G_EXEC mkdir -p "$samba_fp_mount_target"
 		> $fp_tmp
 
 		# - Mount attempts from highest CIFS version to lowest, until one succeeds
@@ -1759,7 +1739,7 @@ NTFS:\nRecommended if you plan to use this drive on a Windows system. High CPU u
 				# Apply to fstab
 				sed -i "\#[[:space:]]${samba_fp_mount_target}[[:space:]]#d" /etc/fstab
 				# - NB: Convert spaces to '\040': https://github.com/MichaIng/DietPi/issues/1201#issuecomment-339720271
-				echo "//$samba_clientname/${samba_clientshare//[[:space:]]/\\040} $samba_fp_mount_target cifs username=$samba_clientuser,password=$samba_clientpassword,iocharset=utf8,uid=dietpi,gid=dietpi,file_mode=0770,dir_mode=0770,vers=$i,_netdev,nofail,noauto,x-systemd.automount" >> /etc/fstab
+				echo "//$samba_clientname/${samba_clientshare//[[:space:]]/\\040} $samba_fp_mount_target cifs username=$samba_clientuser,password=$samba_clientpassword,iocharset=utf8,uid=dietpi,gid=dietpi,file_mode=0770,dir_mode=0770,vers=$i,nofail,noauto,x-systemd.automount" >> /etc/fstab
 
 				MENU_DRIVE_TARGET=$samba_fp_mount_target
 				Init_Drives_and_Refresh
@@ -1814,14 +1794,14 @@ NTFS:\nRecommended if you plan to use this drive on a Windows system. High CPU u
 		G_AG_CHECK_INSTALL_PREREQ nfs-common netbase
 
 		# Mount now
-		mkdir -p "$nfs_fp_mount_target"
+		G_EXEC mkdir -p "$nfs_fp_mount_target"
 		> $fp_tmp
 
 		if mount -vt nfs -o port=2049 "$nfs_server_ip":/ "$nfs_fp_mount_target" &>> $fp_tmp; then
 
 			# Apply to fstab
 			sed -i "\#[[:space:]]${nfs_fp_mount_target}[[:space:]]#d" /etc/fstab
-			echo "$nfs_server_ip:/ $nfs_fp_mount_target nfs _netdev,nofail,noauto,x-systemd.automount" >> /etc/fstab
+			echo "$nfs_server_ip:/ $nfs_fp_mount_target nfs nofail,noauto,x-systemd.automount" >> /etc/fstab
 
 			MENU_DRIVE_TARGET=$nfs_fp_mount_target
 			Init_Drives_and_Refresh
@@ -1844,7 +1824,7 @@ NTFS:\nRecommended if you plan to use this drive on a Windows system. High CPU u
 
 				# Apply to fstab
 				sed -i "\#[[:space:]]${nfs_fp_mount_target}[[:space:]]#d" /etc/fstab
-				echo "$nfs_server_ip:$nfs_fp_server_share $nfs_fp_mount_target nfs _netdev,nofail,noauto,x-systemd.automount" >> /etc/fstab
+				echo "$nfs_server_ip:$nfs_fp_server_share $nfs_fp_mount_target nfs nofail,noauto,x-systemd.automount" >> /etc/fstab
 
 				MENU_DRIVE_TARGET=$nfs_fp_mount_target
 				Init_Drives_and_Refresh
@@ -1889,24 +1869,18 @@ NTFS:\nRecommended if you plan to use this drive on a Windows system. High CPU u
 		# Generate menu
 		G_WHIP_MENU_ARRAY=()
 
-		df -Ph | tail -n +2 | sed -E '/(^udev|tmpfs)/d' > .df_out_tmp
-
 		while read -r line
 		do
 
 			G_WHIP_MENU_ARRAY+=("$(mawk '{print $6}' <<< "$line")" ": $(mawk '{print $1" | size: "$2"iB | available: "$4"iB"}' <<< "$line")")
 
-		done < .df_out_tmp
-		rm .df_out_tmp
+		done < <(df -Ph | tail -n +2 | sed -E '/(^udev|tmpfs)/d')
 
-		if G_WHIP_MENU 'Please select a mount location to use:'; then
+		G_WHIP_MENU 'Please select a mount location to use:' || exit 1
 
-			G_DIETPI-NOTIFY 0 "Drive mount selected: $G_WHIP_RETURNED_VALUE"
-			echo "$G_WHIP_RETURNED_VALUE" > $fp_mount_selection
-			exit 0
-
-		fi
-		exit 1
+		G_DIETPI-NOTIFY 0 "Drive mount selected: $G_WHIP_RETURNED_VALUE"
+		echo "$G_WHIP_RETURNED_VALUE" > $fp_mount_selection
+		exit 0
 
 	}
 
