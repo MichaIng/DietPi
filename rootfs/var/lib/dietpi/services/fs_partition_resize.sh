@@ -1,7 +1,10 @@
 #!/bin/bash
 {
+	# Error out on command failures
+	set -e
+
 	# Disable this service
-	systemctl disable dietpi-fs_partition_resize
+	! systemctl is-enabled dietpi-fs_partition_resize > /dev/null || systemctl disable dietpi-fs_partition_resize
 
 	# Detect root device
 	ROOT_DEV=$(findmnt -no SOURCE /)
@@ -12,47 +15,54 @@
 	# - eMMC:	/dev/mmcblk[0-9]p[1-9]
 	# - NVMe:	/dev/nvme[0-9]n[0-9]p[1-9]
 	# - loop:	/dev/loop[0-9]p[1-9]
-	if [[ $ROOT_DEV =~ ^/dev/(mmcblk|nvme[0-9]n|loop)[0-9](p[1-9])?$ ]]; then
+	if [[ $ROOT_DEV =~ ^/dev/(mmcblk|nvme[0-9]n|loop)[0-9]p[1-9]$ ]]; then
 
 		ROOT_PART=${ROOT_DEV##*[0-9]p}	# /dev/mmcblk0p1 => 1
 		ROOT_DRIVE=${ROOT_DEV%p[1-9]}	# /dev/mmcblk0p1 => /dev/mmcblk0
 
-	elif [[ $ROOT_DEV =~ ^/dev/[sh]d[a-z][1-9]?$ ]]; then
+	elif [[ $ROOT_DEV =~ ^/dev/[sh]d[a-z][1-9]$ ]]; then
 
 		ROOT_PART=${ROOT_DEV: -1}	# /dev/sda1 => 1
 		ROOT_DRIVE=${ROOT_DEV%[1-9]}	# /dev/sda1 => /dev/sda
 
 	else
 
-		echo "[FAILED] Unsupported block device naming scheme ($ROOT_DEV). Aborting..."
+		echo "[FAILED] Unsupported root device naming scheme ($ROOT_DEV). Aborting..."
 		exit 1
 
 	fi
 
-	# Maximize root partition if drive contains a partition table
-	if [[ $ROOT_PART == [1-9] ]]; then
+	# Failsafe: Sync changes to disk before touching partitions
+	sync
 
-		# Failsafe: Sync changes to disk before touching partitions
-		sync
+	# GPT partition table: Move backup GPT data structures to the end of the disk
+	[[ $(lsblk -dno PTTYPE "$ROOT_DRIVE") != 'gpt' ]] || sgdisk -e "$ROOT_DRIVE"
 
-		# GPT partition table: Move backup GPT data structures to the end of the disk
-		sfdisk -l "$ROOT_DRIVE" | grep -q '^Disklabel type: gpt$' && sgdisk -e "$ROOT_DRIVE"
+	# Maximise root partition size
+	sfdisk --no-reread --no-tell-kernel -fN"$ROOT_PART" "$ROOT_DRIVE" <<< ',+'
 
-		# Maximize root partition size
-		sfdisk --no-reread --no-tell-kernel -fN"$ROOT_PART" "$ROOT_DRIVE" <<< ',+'
+	# Inform kernel about changed partition table, be failsafe by using two differet methods
+	partprobe "$ROOT_DRIVE"
+	partx -u "$ROOT_DRIVE"
 
-		# Inform kernel about changed partition table, be failsafe by using two differet methods
-		partprobe "$ROOT_DRIVE"
-		partx -u "$ROOT_DRIVE"
+	# Detect root file system type
+	ROOT_FSTYPE=$(findmnt -no FSTYPE /)
+
+	# Maximise root file system if type is supported
+	if [[ $ROOT_FSTYPE == ext[2-4] ]]; then
+
+		resize2fs "$ROOT_DEV"
+
+	elif [[ $ROOT_FSTYPE == 'f2fs' ]]; then
+
+		resize.f2fs "$ROOT_DEV"
 
 	else
 
-		echo "[ INFO ] The root file system ($ROOT_DEV) does not seem to be on a partition. Skipping partition resize..."
+		echo "[FAILED] Unsupported root file system type ($ROOT_FSTYPE). Aborting..."
+		exit 1
 
 	fi
-
-	# Maximize root file system
-	resize2fs "$ROOT_DEV"
 
 	exit 0
 }
