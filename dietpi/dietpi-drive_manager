@@ -172,13 +172,13 @@ $swap_mounts
 
 			aDRIVE_SOURCE_DEVICE[$index]=$(Return_Drive_Without_Partitions "${aDRIVE_MOUNT_SOURCE[$index]}")
 			[[ ${aDRIVE_MOUNT_SOURCE[$index]} == /dev/${aDRIVE_SOURCE_DEVICE[$index]} ]] || aDRIVE_ISPARTITIONTABLE[$index]=1
-			aDRIVE_UUID[$index]=$(blkid -s UUID -o value "${aDRIVE_MOUNT_SOURCE[$index]}")
-			(( ${aDRIVE_ISPARTITIONTABLE[$index]} )) && aDRIVE_PART_UUID[$index]=$(blkid -s PARTUUID -o value "${aDRIVE_MOUNT_SOURCE[$index]}")
+			aDRIVE_UUID[$index]=$(findmnt -no UUID "${aDRIVE_MOUNT_TARGET[$index]}")
+			(( ${aDRIVE_ISPARTITIONTABLE[$index]} )) && aDRIVE_PART_UUID[$index]=$(findmnt -no PARTUUID "${aDRIVE_MOUNT_TARGET[$index]}")
 
 			# Physical?
 			if [[ -d '/sys/block/'${aDRIVE_SOURCE_DEVICE[$index]} ]]; then
 
-				aDRIVE_FSTYPE[$index]=$(blkid -s TYPE -o value "${aDRIVE_MOUNT_SOURCE[$index]}")
+				aDRIVE_FSTYPE[$index]=$(findmnt -no FSTYPE "${aDRIVE_MOUNT_TARGET[$index]}")
 				[[ ${aDRIVE_FSTYPE[$index]} ]] && aDRIVE_ISFILESYSTEM[$index]=1
 
 			# Networked
@@ -248,7 +248,7 @@ $swap_mounts
 				if [[ ${aDRIVE_MOUNT_TARGET[$index]} =~ ^/(boot(/efi)?)?$ ]]; then
 
 					# On RPi we need to use PARTUUID for Root/BootFS
-					(( $G_HW_MODEL < 10 )) && dev_entry="PARTUUID=${aDRIVE_PART_UUID[$index]}"
+					(( $G_HW_MODEL > 9 )) || dev_entry="PARTUUID=${aDRIVE_PART_UUID[$index]}"
 					[[ ${aDRIVE_MOUNT_TARGET[$index]} == '/' ]] && options+=' 0 1' || options+=' 0 2' # dump + fsck flag
 
 				else
@@ -267,20 +267,20 @@ $swap_mounts
 
 		done < <(df -a --output=source --exclude-type=tmpfs --exclude-type=ecryptfs --exclude-type=vboxsf --exclude-type=glusterfs | sed "\|^/dev/root$|c$G_ROOTFS_DEV" | mawk '/\// && !x[$0]++')
 
-		# Check blkid for unmounted drives, if drive is not mounted, add entry as disabled/commented mount
+		# Check blkid for unmounted filesystems
 		while read -r line
 		do
 
 			[[ $line ]] || continue
 
-			# Exclude drives already found
+			# Exclude drives already found (mounted)
 			for i in "${aDRIVE_MOUNT_SOURCE[@]}"
 			do
 				[[ $i == "$line"* ]] && continue 2
 			done
 
-			# Must have a valid UUID! (this excludes /dev/mmcblk0)
-			local uuid=$(blkid -s UUID -o value "$line")
+			# Failsafe: Must have a valid UUID! But blkid should print only drives with filesytems.
+			local uuid=$(lsblk -no UUID "$line")
 			[[ $uuid ]] || continue
 
 			G_DIETPI-NOTIFY 2 " - Detected unmounted drive: $line"
@@ -292,26 +292,20 @@ $swap_mounts
 			aDRIVE_MOUNT_TARGET[$index]="/mnt/${aDRIVE_UUID[$index]}"
 			aDRIVE_SOURCE_DEVICE[$index]=$(Return_Drive_Without_Partitions "${aDRIVE_MOUNT_SOURCE[$index]}")
 			[[ ${aDRIVE_MOUNT_SOURCE[$index]} == /dev/${aDRIVE_SOURCE_DEVICE[$index]} ]] || aDRIVE_ISPARTITIONTABLE[$index]=1
-			(( ${aDRIVE_ISPARTITIONTABLE[$index]} )) && aDRIVE_PART_UUID[$index]=$(blkid -s PARTUUID -o value "${aDRIVE_MOUNT_SOURCE[$index]}")
-			aDRIVE_FSTYPE[$index]=$(blkid -s TYPE -o value "${aDRIVE_MOUNT_SOURCE[$index]}")
+			(( ${aDRIVE_ISPARTITIONTABLE[$index]} )) && aDRIVE_PART_UUID[$index]=$(lsblk -no PARTUUID "${aDRIVE_MOUNT_SOURCE[$index]}")
+			aDRIVE_FSTYPE[$index]=$(lsblk -no FSTYPE "${aDRIVE_MOUNT_SOURCE[$index]}")
 			[[ ${aDRIVE_FSTYPE[$index]} ]] && aDRIVE_ISFILESYSTEM[$index]=1
-
-			# FS type: In case of unknown network drive, use "auto", to allow remove FS changes without breaking the fstab entry
-			local type=${aDRIVE_FSTYPE[$index]}
-			(( ${aDRIVE_ISNETWORKED[$index]} )) && type='auto'
-
-			echo "#UUID=${aDRIVE_UUID[$index]} ${aDRIVE_MOUNT_TARGET[$index]} ${type:-auto} noatime,lazytime,rw,nofail,noauto,x-systemd.automount" >> $fp_fstab_tmp
 
 		done < <(blkid -o device)
 
-		# Find unformated drives
+		# Find unformatted drives
 		# - Exclude mtdblock devices: https://github.com/MichaIng/DietPi/issues/2067#issuecomment-422400520
 		while read -r line
 		do
 
 			[[ $line ]] || continue
 
-			# Exclude drives already found
+			# Exclude drives already found (formatted)
 			for i in "${aDRIVE_SOURCE_DEVICE[@]}"
 			do
 				[[ $line == $i* ]] && continue 2
@@ -390,15 +384,14 @@ aDRIVE_ISPARTITIONTABLE ${aDRIVE_ISPARTITIONTABLE[$i]}
 		Update_Menu_Drive_Index
 
 		# Move new fstab in place and reload systemd generators
-		cp -a $fp_fstab_tmp /etc/fstab
-		systemctl daemon-reload
-		rm $fp_fstab_tmp
+		G_EXEC mv $fp_fstab_tmp /etc/fstab
+		G_EXEC systemctl daemon-reload
 
 		# Install required APT packages for FS R/W access
 		[[ $APT_CHECK == 0 && $need_ntfs$need_hfs$need_exfat ]] && G_AG_CHECK_INSTALL_PREREQ $need_ntfs $need_hfs $need_exfat && APT_CHECK=1
 
-		sync
-		mount -a
+		G_EXEC sync
+		G_EXEC mount -a
 
 	}
 
@@ -481,7 +474,7 @@ Do you wish to ignore this warning, and, mount the drive regardless?" || return 
 		# Mount options
 		local aoptions=()
 		# - FS type specific options
-		local fs_type=$(blkid "$source" -s TYPE -o value)
+		local fs_type=$(lsblk -no FSTYPE "$source")
 		if [[ $fs_type == 'ntfs' ]]; then
 
 			aoptions=('-o' 'permissions')
@@ -514,16 +507,23 @@ Do you wish to ignore this warning, and, mount the drive regardless?" || return 
 
 		if [[ ${aDRIVE_MOUNT_TARGET[$MENU_DRIVE_INDEX]} == '/' ]]; then
 
-			systemctl unmask dietpi-fs_partition_resize
 			G_EXEC systemctl enable dietpi-fs_partition_resize
-			G_WHIP_YESNO 'RootFS resize will occur on next reboot.\n\nWould you like to reboot the system now?' && reboot
+			G_WHIP_YESNO 'RootFS resize will occur on next reboot.\n\nWould you like to reboot the system now?' && reboot || return
 
-		else
+		elif [[ ${aDRIVE_FSTYPE[$MENU_DRIVE_INDEX]} == ext[2-4] ]]; then
 
-			G_EXEC_NOHALT=1 G_EXEC resize2fs "${aDRIVE_MOUNT_SOURCE[$MENU_DRIVE_INDEX]}"
-			Init_Drives_and_Refresh
+			G_EXEC_NOEXIT=1 G_EXEC resize2fs "${aDRIVE_MOUNT_SOURCE[$MENU_DRIVE_INDEX]}"
+
+		elif [[ ${aDRIVE_FSTYPE[$MENU_DRIVE_INDEX]} == 'f2fs' ]]; then
+
+			G_EXEC_NOEXIT=1 G_EXEC resize.f2fs "${aDRIVE_MOUNT_SOURCE[$MENU_DRIVE_INDEX]}"
+
+		elif [[ ${aDRIVE_FSTYPE[$MENU_DRIVE_INDEX]} == 'btrfs' ]]; then
+
+			G_EXEC_NOEXIT=1 G_EXEC btrfs filesystem resize max "${aDRIVE_MOUNT_TARGET[$MENU_DRIVE_INDEX]}"
 
 		fi
+		Init_Drives_and_Refresh
 
 	}
 
@@ -563,18 +563,17 @@ Do you wish to ignore this warning, and, mount the drive regardless?" || return 
 			else
 
 				# Umount and zero all partitions on device
+				# - Partition wipe must be done 1st, else UUIDs are still reported.
 				for i in "/dev/${aDRIVE_SOURCE_DEVICE[$MENU_DRIVE_INDEX]}"?*
 				do
-
 					[[ -b $i ]] || continue
-					umount "$i"
+					findmnt "$i" > /dev/null && G_EXEC umount "$i"
 					G_DIETPI-NOTIFY 2 "Writing zeros to partition: $i"
-					G_EXEC dd if=/dev/zero of="$i" bs=4K count=10 # Partition wipe must be done 1st, else blkid still reports UUIDs etc
-
+					G_EXEC dd if=/dev/zero of="$i" bs=4K count=10
 				done
 
 				# Unmount whole drive in case of fs on drive without partition table
-				umount "${aDRIVE_MOUNT_SOURCE[$MENU_DRIVE_INDEX]}"
+				findmnt "${aDRIVE_MOUNT_SOURCE[$MENU_DRIVE_INDEX]}" > /dev/null && G_EXEC umount "${aDRIVE_MOUNT_SOURCE[$MENU_DRIVE_INDEX]}"
 
 				# Clear partition table from device
 				G_DIETPI-NOTIFY 2 "Writing zeros to partition table: /dev/${aDRIVE_SOURCE_DEVICE[$MENU_DRIVE_INDEX]}"
@@ -588,23 +587,20 @@ Do you wish to ignore this warning, and, mount the drive regardless?" || return 
 				G_EXEC parted -s "/dev/${aDRIVE_SOURCE_DEVICE[$MENU_DRIVE_INDEX]}" mklabel $parition_table_type
 				G_EXEC parted -s "/dev/${aDRIVE_SOURCE_DEVICE[$MENU_DRIVE_INDEX]}" mkpart primary 0% 100%
 				partprobe "/dev/${aDRIVE_SOURCE_DEVICE[$MENU_DRIVE_INDEX]}"
+				partx -u "/dev/${aDRIVE_SOURCE_DEVICE[$MENU_DRIVE_INDEX]}"
 
 				sleep 1 # Due to systemd automount, wait for it
-				umount "${aDRIVE_MOUNT_SOURCE[$MENU_DRIVE_INDEX]}"
+				findmnt "${aDRIVE_MOUNT_SOURCE[$MENU_DRIVE_INDEX]}" > /dev/null && G_EXEC umount "${aDRIVE_MOUNT_SOURCE[$MENU_DRIVE_INDEX]}"
 
 				# Generate new aDRIVE_MOUNT_SOURCE location to use
-				# - mmcblkXp1/nvmeXn1p1
-				aDRIVE_MOUNT_SOURCE[$MENU_DRIVE_INDEX]="/dev/${aDRIVE_SOURCE_DEVICE[$MENU_DRIVE_INDEX]}p1"
-				# - h/sdX1
-				if [[ ${aDRIVE_SOURCE_DEVICE[$MENU_DRIVE_INDEX]} == [sh]d[a-z]* ]]; then
-
+				# - hda1/sda1
+				if [[ ${aDRIVE_SOURCE_DEVICE[$MENU_DRIVE_INDEX]} == [sh]d[a-z] ]]
+				then
 					aDRIVE_MOUNT_SOURCE[$MENU_DRIVE_INDEX]="/dev/${aDRIVE_SOURCE_DEVICE[$MENU_DRIVE_INDEX]}1"
 
-				# - NanoPC-T4 + NVMe special: https://github.com/MichaIng/DietPi/issues/2102#issue-366001513
-				elif [[ $G_HW_MODEL == 68 && ${aDRIVE_SOURCE_DEVICE[$MENU_DRIVE_INDEX]} == nvme* ]]; then
-
-					aDRIVE_MOUNT_SOURCE[$MENU_DRIVE_INDEX]="/dev/${aDRIVE_SOURCE_DEVICE[$MENU_DRIVE_INDEX]}p6"
-
+				# - mmcblk0p1/nvme0n0p1
+				else
+					aDRIVE_MOUNT_SOURCE[$MENU_DRIVE_INDEX]="/dev/${aDRIVE_SOURCE_DEVICE[$MENU_DRIVE_INDEX]}p1"
 				fi
 
 			fi
@@ -613,23 +609,23 @@ Do you wish to ignore this warning, and, mount the drive regardless?" || return 
 			if (( $FORMAT_FILESYSTEM_TYPE == 0 )); then
 
 				# force
-				info_format_fs_type='EXT4'
+				info_format_fs_type='ext4'
 				G_EXEC mkfs.ext4 -F -m 0 "${aDRIVE_MOUNT_SOURCE[$MENU_DRIVE_INDEX]}"
 				resize2fs "${aDRIVE_MOUNT_SOURCE[$MENU_DRIVE_INDEX]}"
 
 			# Format NTFS
 			elif (( $FORMAT_FILESYSTEM_TYPE == 1 )); then
 
-				# fast format / no indexing / force
+				# -f: fast format | -I: no indexing | -F: force
 				info_format_fs_type='NTFS'
 				G_EXEC mkfs.ntfs -f -I -F "${aDRIVE_MOUNT_SOURCE[$MENU_DRIVE_INDEX]}"
 
 			# Format FAT32
 			elif (( $FORMAT_FILESYSTEM_TYPE == 2 )); then
 
-				# Use 1 parition on whole device
+				# -I: Use 1 parition on whole device
 				info_format_fs_type='FAT'
-				G_EXEC mkfs.vfat -I "${aDRIVE_MOUNT_SOURCE[$MENU_DRIVE_INDEX]}"
+				G_EXEC mkfs.fat -I "${aDRIVE_MOUNT_SOURCE[$MENU_DRIVE_INDEX]}"
 
 			# Format HFS+
 			elif (( $FORMAT_FILESYSTEM_TYPE == 3 )); then
@@ -640,8 +636,8 @@ Do you wish to ignore this warning, and, mount the drive regardless?" || return 
 			# Format btrfs
 			elif (( $FORMAT_FILESYSTEM_TYPE == 4 )); then
 
-				# force
-				info_format_fs_type='BTRFS'
+				# -f: force
+				info_format_fs_type='Btrfs'
 				G_EXEC mkfs.btrfs -f "${aDRIVE_MOUNT_SOURCE[$MENU_DRIVE_INDEX]}"
 
 			# Format f2fs
@@ -656,6 +652,13 @@ Do you wish to ignore this warning, and, mount the drive regardless?" || return 
 				info_format_fs_type='exFAT'
 				G_EXEC mkfs.exfat "${aDRIVE_MOUNT_SOURCE[$MENU_DRIVE_INDEX]}"
 
+			# Format XFS
+			elif (( $FORMAT_FILESYSTEM_TYPE == 7 )); then
+
+				# -f: force
+				info_format_fs_type='XFS'
+				G_EXEC mkfs.xfs -f "${aDRIVE_MOUNT_SOURCE[$MENU_DRIVE_INDEX]}"
+
 			fi
 
 			G_DIETPI-NOTIFY 0 "Created $info_format_fs_type filesystem: ${aDRIVE_MOUNT_SOURCE[$MENU_DRIVE_INDEX]}"
@@ -665,7 +668,7 @@ Do you wish to ignore this warning, and, mount the drive regardless?" || return 
 			[[ -e ${aDRIVE_MOUNT_TARGET[$MENU_DRIVE_INDEX]} ]] && rm -R "${aDRIVE_MOUNT_TARGET[$MENU_DRIVE_INDEX]}"
 
 			# Automatically mount it
-			local new_uuid=$(blkid -s UUID -o value "${aDRIVE_MOUNT_SOURCE[$MENU_DRIVE_INDEX]}")
+			local new_uuid=$(lsblk -no UUID "${aDRIVE_MOUNT_SOURCE[$MENU_DRIVE_INDEX]}")
 			if ! Mount_Drive "${aDRIVE_MOUNT_SOURCE[$MENU_DRIVE_INDEX]}" "/mnt/$new_uuid"; then
 
 				MENU_DRIVE_TARGET="/mnt/$new_uuid"
@@ -705,7 +708,7 @@ Do you wish to ignore this warning, and, mount the drive regardless?" || return 
 
 		# Mount rootfs to tmp mountpoint to allow rsync
 		# - rsync "-x" option prevents copying mounts content, but it copies permissions of mountpoint dirs according to mount options instead of those of the dir on the parent fs.
-		# - Since mount permissions might not be wanted for the underlying file system dir, we copy from a temporary mountpoint to assure that underlying rootfs content matches 100%.
+		# - Since mount permissions might not be wanted for the underlying filesystem dir, we copy from a temporary mountpoint to assure that underlying rootfs content matches 100%.
 		G_EXEC mkdir -p /tmp/tmp_rootfs
 		G_EXEC mount "$G_ROOTFS_DEV" /tmp/tmp_rootfs
 
@@ -1133,7 +1136,7 @@ Do you wish to ignore this warning, and, mount the drive regardless?" || return 
 				G_WHIP_MENU_ARRAY+=('Check & Repair' ': Check and optionally repair filesystem')
 
 				# Resize
-				if [[ ${aDRIVE_ISREADONLY_CURRENTLY[$MENU_DRIVE_INDEX]} == 0 && ${aDRIVE_FSTYPE[$MENU_DRIVE_INDEX]} == 'ext4' ]]; then
+				if [[ ${aDRIVE_ISREADONLY_CURRENTLY[$MENU_DRIVE_INDEX]} == 0 && ${aDRIVE_FSTYPE[$MENU_DRIVE_INDEX]} =~ ^(ext[2-4]|f2fs|btrfs)$ ]]; then
 
 					G_WHIP_MENU_ARRAY+=('Resize' ': Maximize the available filesystem size')
 
@@ -1222,8 +1225,8 @@ Do you wish to ignore this warning, and, mount the drive regardless?" || return 
 				local max=$(( $current_freespace - 2000 ))
 				if [[ ${aDRIVE_FSTYPE[$MENU_DRIVE_INDEX]} == 'btrfs' ]]; then
 
-					G_WHIP_MSG '[FAILED] The file system BTRFS does not support swap files.\n
-Please choose another drive or format this one with another file system, e.g. ext4.'
+					G_WHIP_MSG '[FAILED] The filesystem Btrfs does not support swap files.\n
+Please choose another drive or format this one with another filesystem, e.g. ext4.'
 
 				elif (( $max < $min )); then
 
@@ -1341,7 +1344,7 @@ We recommend \"ext4\" as filesystem type for the RootFS."
 
 					if G_WHIP_YESNO 'This process will move the root filesystem data to another location. This may increase R/W performance when using a USB drive over SDcard, however, there are some limitations:
 \n - The SD/eMMC card, which holds kernel and bootloader, is still required for the boot process. On RPi3, which supports full USB boot, instead it is recommended to flash the whole DietPi image to a USB drive and boot the system without SDcard.
-\n - Custom software installs might use info of the old root mount/filesystem, hence we recommend to move the root file system on fresh DietPi systems only.
+\n - Custom software installs might use info of the old root mount/filesystem, hence we recommend to move the root filesystem on fresh DietPi systems only.
 \n - An immediate reboot is done after the transfer has successfully finished to assure that fstab and cmdline cannot be reverted.
 \nDo you wish to continue?'; then
 
@@ -1386,8 +1389,8 @@ We recommend \"ext4\" as filesystem type for the RootFS."
 
 				if [[ ${aDRIVE_MOUNT_TARGET[$MENU_DRIVE_INDEX]} == '/' ]]; then
 
-					if G_WHIP_YESNO 'The root file system can only be checked on reboot.
-\nDo you want to force a file system check of root partition on next reboot?
+					if G_WHIP_YESNO 'The root filesystem can only be checked on reboot.
+\nDo you want to force a filesystem check of root partition on next reboot?
 \nNB: Logs can be found after reboot either via "journalctl -t systemd-fsck" or "cat /run/initramfs/fsck.log"'; then
 
 						> /forcefsck
@@ -1413,7 +1416,7 @@ We recommend \"ext4\" as filesystem type for the RootFS."
 
 				fi
 
-				if [[ ${aDRIVE_FSTYPE[$MENU_DRIVE_INDEX]} =~ 'ext' ]]; then
+				if [[ ${aDRIVE_FSTYPE[$MENU_DRIVE_INDEX]} == ext[2-4] ]]; then
 
 					local fsck_dry='e2fsck -n -f'
 					local fsck_fix='e2fsck -y -f'
@@ -1453,15 +1456,21 @@ We recommend \"ext4\" as filesystem type for the RootFS."
 					local fsck_dry='btrfs check --readonly'
 					local fsck_fix='btrfs check --repair'
 
+				elif [[ ${aDRIVE_FSTYPE[$MENU_DRIVE_INDEX]} == 'xfs' ]]; then
+
+					G_AG_CHECK_INSTALL_PREREQ xfsprogs
+					local fsck_dry='xfs_repair -n'
+					local fsck_fix='xfs_repair'
+
 				else
 
-					G_WHIP_MSG "File system checks are currently not supported for '${aDRIVE_FSTYPE[$MENU_DRIVE_INDEX]}'. Aborting..."
+					G_WHIP_MSG "Filesystem checks are currently not supported for '${aDRIVE_FSTYPE[$MENU_DRIVE_INDEX]}'. Aborting..."
 					TARGETMENUID=1
 					return
 
 				fi
 
-				# Do dry-run first for file systems supporting it:
+				# Do dry-run first for filesystems supporting it:
 				if [[ $fsck_dry ]]; then
 
 					G_WHIP_MSG "The following drive will now be checked for errors:\n${aDRIVE_MOUNT_SOURCE[$MENU_DRIVE_INDEX]}\n\nNo repair will be completed during this process. An option to repair the drive, will be provided after the check."
@@ -1536,7 +1545,7 @@ Read more about I/O scheduling: https://wiki.archlinux.org/index.php/Improving_p
 		local format_mode_text='Drive'
 		(( $FORMAT_MODE )) && format_mode_text='Partition'
 
-		local format_type_text='EXT4'
+		local format_type_text='ext4'
 		if (( $FORMAT_FILESYSTEM_TYPE == 1 )); then
 
 			format_type_text='NTFS'
@@ -1551,7 +1560,7 @@ Read more about I/O scheduling: https://wiki.archlinux.org/index.php/Improving_p
 
 		elif (( $FORMAT_FILESYSTEM_TYPE == 4 )); then
 
-			format_type_text='BTRFS'
+			format_type_text='Btrfs'
 
 		elif (( $FORMAT_FILESYSTEM_TYPE == 5 )); then
 
@@ -1560,6 +1569,10 @@ Read more about I/O scheduling: https://wiki.archlinux.org/index.php/Improving_p
 		elif (( $FORMAT_FILESYSTEM_TYPE == 6 )); then
 
 			format_type_text='exFAT'
+
+		elif (( $FORMAT_FILESYSTEM_TYPE == 7 )); then
+
+			format_type_text='XFS'
 
 		fi
 
@@ -1613,19 +1626,22 @@ NB: If you are planning to dedicate the drive to this system, it is recommended 
 
 				G_WHIP_MENU_ARRAY=(
 
-					'0' ': EXT4   | Default (Recommended)'
+					'0' ': ext4   | Default (Recommended)'
 					'1' ': NTFS   | Windows (High CPU usage)'
 					'2' ': FAT32  | All OS (4GB filesize limit)'
-					'3' ': HFS+   | Mac OS X (Intel Mac default file system)'
-					'4' ': BTRFS  | Linux (Modern filesystem)'
+					'3' ': HFS+   | macOS (Apple default filesystem)'
+					'4' ': Btrfs  | Linux (Modern filesystem)'
 					'5' ': F2FS   | Linux (Flash filesystem)'
 					'6' ': exFAT  | Windows (Flash filesystem)'
+					'7' ': XFS    | Linux (Modern filesystem)'
 
 				)
 
 				G_WHIP_DEFAULT_ITEM=$FORMAT_FILESYSTEM_TYPE
-				if G_WHIP_MENU 'Please select a filesystem type for this format:\n\nEXT4:\nHighly recommended if you plan to use this drive solely on this system (dedicated drive).\n
-NTFS:\nRecommended if you plan to use this drive on a Windows system. High CPU usage during transfers.\n\nFull list of different filesystem types:\nhttps://dietpi.com/docs/dietpi_tools/#dietpi-drive-manager'; then
+				if G_WHIP_MENU 'Please select a filesystem type for this format:
+\next4:\nHighly recommended if you plan to use this drive solely on this system (dedicated drive).
+\nNTFS:\nRecommended if you plan to use this drive on a Windows system. High CPU usage during transfers.
+\nFull list of different filesystem types:\nhttps://dietpi.com/docs/dietpi_tools/#dietpi-drive-manager'; then
 
 					# Install FS pre-reqs
 					# - NTFS
@@ -1657,6 +1673,11 @@ NTFS:\nRecommended if you plan to use this drive on a Windows system. High CPU u
 					elif (( $G_WHIP_RETURNED_VALUE == 6 )); then
 
 						G_AG_CHECK_INSTALL_PREREQ exfat-utils exfat-fuse
+
+					# - XFS
+					elif (( $G_WHIP_RETURNED_VALUE == 7 )); then
+
+						G_AG_CHECK_INSTALL_PREREQ xfsprogs
 
 					fi
 
