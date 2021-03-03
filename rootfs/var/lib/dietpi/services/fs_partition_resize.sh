@@ -36,7 +36,7 @@
 	sync
 
 	# GPT partition table: Move backup GPT data structures to the end of the disk
-	[[ $(lsblk -dno PTTYPE "$ROOT_DRIVE") != 'gpt' ]] || sgdisk -e "$ROOT_DRIVE"
+	[[ $(lsblk -ndo PTTYPE "$ROOT_DRIVE") != 'gpt' ]] || sgdisk -e "$ROOT_DRIVE"
 
 	# Maximise root partition size
 	sfdisk --no-reread --no-tell-kernel -fN"$ROOT_PART" "$ROOT_DRIVE" <<< ',+'
@@ -56,6 +56,10 @@
 	elif [[ $ROOT_FSTYPE == 'f2fs' ]]; then
 
 		resize.f2fs "$ROOT_DEV"
+
+	elif [[ $ROOT_FSTYPE == 'btrfs' ]]; then
+
+		btrfs filesystem resize max /
 
 	else
 
