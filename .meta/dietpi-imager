@@ -329,6 +329,8 @@
 					exit 1
 				fi
 			done
+			G_DIETPI-NOTIFY 2 'Overriding root filesystem free space with zeros to purge removed data and allow further archive size reduction...'
+			G_EXEC_OUTPUT=1 G_EXEC zerofree -v "$FP_ROOT_DEV"
 
 		elif [[ $ROOT_FS_TYPE == 'f2fs' && $(lsblk -rno FSUSE% "$FP_ROOT_DEV") =~ ^(9[5-9]|100)%$ ]]
 		then
@@ -350,13 +352,11 @@
 			G_EXEC mount "$FP_ROOT_DEV" $FP_MNT_TMP
 			G_EXEC cp -a ${FP_MNT_TMP}_backup/. $FP_MNT_TMP/
 			G_EXEC rm -R ${FP_MNT_TMP}_backup
+			G_EXEC fstrim $FP_MNT_TMP
 			sync
 			sleep 1 # Give the system 1 second to avoid "mount is busy"
 			G_EXEC umount $FP_MNT_TMP
 			G_EXEC rmdir $FP_MNT_TMP
-			G_EXEC partprobe "$FP_SOURCE" # Failsafe
-			G_EXEC partx -u "$FP_SOURCE" # Failsafe
-			Run_fsck
 			# Assure root filesystem size is in 512 byte sectors, as this is what sfdisk assmes
 			FS_SIZE=$(( $FS_SIZE * $sector_size / 512 ))
 		elif [[ $ROOT_FS_TYPE == 'btrfs' ]]
@@ -365,9 +365,19 @@
 			G_EXEC mkdir -p $FP_MNT_TMP
 			G_EXEC mount -o ro "$FP_ROOT_DEV" $FP_MNT_TMP
 			FS_SIZE=$(( $(btrfs inspect-internal min-dev-size $FP_MNT_TMP) + 4*1024**2 )) # bytes? + 4 MiB buffer
-			G_EXEC_OUTPUT=1 G_EXEC btrfs filesystem resize $FS_SIZE
+			G_EXEC_OUTPUT=1 G_EXEC btrfs filesystem resize $FS_SIZE $FP_MNT_TMP
+			G_EXEC fstrim $FP_MNT_TMP
+			sync
+			sleep 1 # Give the system 1 second to avoid "mount is busy"
+			G_EXEC umount $FP_MNT_TMP
+			G_EXEC rmdir $FP_MNT_TMP
 			FS_SIZE=$(( $FS_SIZE / 512 )) # bytes => 512 byte sectors
 		fi
+
+		G_EXEC sync
+		G_EXEC partprobe "$FP_SOURCE" # Failsafe
+		G_EXEC partx -u "$FP_SOURCE" # Failsafe
+		Run_fsck
 
 		# Only resize partition when new size would be less than current size
 		if (( $(</sys/class/block/"${FP_ROOT_DEV##*/}"/size) > $FS_SIZE ))
@@ -378,16 +388,7 @@
 			G_EXEC partx -u "$FP_SOURCE"
 		fi
 
-		if [[ $ROOT_FS_TYPE == 'ext4' ]]
-		then
-			G_DIETPI-NOTIFY 2 'Overriding root filesystem free space with zeros to purge removed data and allow further archive size reduction...'
-			G_EXEC_OUTPUT=1 G_EXEC zerofree -v "$FP_ROOT_DEV"
-			G_EXEC sync
-		fi
-
 		# Finished: Derive final image size from last partition end + failsafe buffer
-		G_EXEC partprobe "$FP_SOURCE"
-		G_EXEC partx -u "$FP_SOURCE"
 		IMAGE_SIZE=$(( ( $(sfdisk -qlo End "$FP_SOURCE" | tail -1) + 1 ) * 512 )) # 512 byte sectors => Byte
 		IMAGE_SIZE=$(( $IMAGE_SIZE + ( 512 * 256 ) )) # 64 byte for secondary GPT + safety net
 
@@ -556,11 +557,8 @@ _EOF_
 		# - gdisk will correct this
 		if [[ $PART_TABLE_TYPE == 'gpt' ]]
 		then
-			local loop=$(losetup -f)
-			G_EXEC losetup "$loop" "$OUTPUT_IMG_NAME.$OUTPUT_IMG_EXT"			
-			G_EXEC_DESC='Reapplying GPT partition backup table fix' G_EXEC_OUTPUT=1 G_EXEC sgdisk -e "$loop"
+			G_EXEC_DESC='Reapplying GPT partition backup table fix' G_EXEC_OUTPUT=1 G_EXEC sgdisk -e "$OUTPUT_IMG_NAME.$OUTPUT_IMG_EXT"
 			G_EXEC sync
-			G_EXEC losetup -d "$loop"
 		fi
 
 		# Generate hashes: MD5, SHA1, SHA256
