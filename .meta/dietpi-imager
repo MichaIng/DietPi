@@ -331,34 +331,36 @@
 			done
 			G_DIETPI-NOTIFY 2 'Overriding root filesystem free space with zeros to purge removed data and allow further archive size reduction...'
 			G_EXEC_OUTPUT=1 G_EXEC zerofree -v "$FP_ROOT_DEV"
+			G_EXEC sync
 
-		elif [[ $ROOT_FS_TYPE == 'f2fs' && $(lsblk -rno FSUSE% "$FP_ROOT_DEV") =~ ^(9[5-9]|100)%$ ]]
+		elif [[ $ROOT_FS_TYPE == 'f2fs' ]] #&& $(lsblk -rno FSUSE% "$FP_ROOT_DEV") =~ ^(9[5-9]|100)%$ ]]
 		then
 			# F2FS does not support shrinking: https://www.reddit.com/r/archlinux/comments/bpp77f/shrinking_a_f2fs_partition/
 			# Hence copy all data outside, remove and re-create a smaller filesytem, then copy them back in, as long as disk usage is not >=95% already.
-			local usage=$(lsblk -rnbo FSUSED "$FP_ROOT_DEV") # bytes
-			local sector_size=$(lsblk -rnbo LOG-SEC "$FP_ROOT_DEV") # bytes
-			FS_SIZE=$(( ( $usage + 4*1024**2 ) / $sector_size )) # bytes + 4 MiB buffer => sectors
-			G_DIETPI-NOTIFY 2 'Copying root filesystem content to temporary directory'
+			# The UUID changes and there is currently no way to change it back...
+			#local usage=$(lsblk -rnbo FSUSED "$FP_ROOT_DEV") # bytes
+			#local sector_size=$(lsblk -rnbo LOG-SEC "$FP_ROOT_DEV") # bytes
+			#FS_SIZE=$(( ( $usage + 4*1024**2 ) / $sector_size )) # bytes + 4 MiB buffer => sectors
+			#G_DIETPI-NOTIFY 2 'Copying root filesystem content to temporary directory'
 			G_EXEC mkdir -p ${FP_MNT_TMP}{,_backup}
 			G_EXEC mount -o ro "$FP_ROOT_DEV" $FP_MNT_TMP
-			G_EXEC cp -a $FP_MNT_TMP/. ${FP_MNT_TMP}_backup/
-			G_EXEC umount $FP_MNT_TMP
-			G_DIETPI-NOTIFY 2 'Purging root filesystem'
-			G_EXEC dd if=/dev/zero of="$FP_ROOT_DEV" bs=4K count=10
-			G_DIETPI-NOTIFY 2 'Re-creating smaller root filesystem' # Probably sload.f2fs can replace this? https://manpages.debian.org/sload.f2fs
-			G_EXEC_OUTPUT=1 G_EXEC mkfs.f2fs -w "$sector_size" "$FP_ROOT_DEV" $FS_SIZE
-			G_DIETPI-NOTIFY 2 'Moving root filesystem content back'
-			G_EXEC mount "$FP_ROOT_DEV" $FP_MNT_TMP
-			G_EXEC cp -a ${FP_MNT_TMP}_backup/. $FP_MNT_TMP/
-			G_EXEC rm -R ${FP_MNT_TMP}_backup
+			#G_EXEC cp -a $FP_MNT_TMP/. ${FP_MNT_TMP}_backup/
+			#G_EXEC umount $FP_MNT_TMP
+			#G_DIETPI-NOTIFY 2 'Purging root filesystem'
+			#G_EXEC dd if=/dev/zero of="$FP_ROOT_DEV" bs=4K count=10
+			#G_DIETPI-NOTIFY 2 'Re-creating smaller root filesystem' # Probably sload.f2fs can replace this? https://manpages.debian.org/sload.f2fs
+			#G_EXEC_OUTPUT=1 G_EXEC mkfs.f2fs -w "$sector_size" "$FP_ROOT_DEV" $FS_SIZE
+			#G_DIETPI-NOTIFY 2 'Moving root filesystem content back'
+			#G_EXEC mount "$FP_ROOT_DEV" $FP_MNT_TMP
+			#G_EXEC cp -a ${FP_MNT_TMP}_backup/. $FP_MNT_TMP/
+			#G_EXEC rm -R ${FP_MNT_TMP}_backup
 			G_EXEC fstrim $FP_MNT_TMP
-			sync
-			sleep 1 # Give the system 1 second to avoid "mount is busy"
+			G_EXEC sync
+			G_EXEC sleep 1 # Give the system 1 second to avoid "mount is busy"
 			G_EXEC umount $FP_MNT_TMP
 			G_EXEC rmdir $FP_MNT_TMP
 			# Assure root filesystem size is in 512 byte sectors, as this is what sfdisk assmes
-			FS_SIZE=$(( $FS_SIZE * $sector_size / 512 ))
+			#FS_SIZE=$(( $FS_SIZE * $sector_size / 512 ))
 		elif [[ $ROOT_FS_TYPE == 'btrfs' ]]
 		then
 			G_DIETPI-NOTIFY 2 'Shrinking root filesystem to minimum size...'
@@ -367,20 +369,17 @@
 			FS_SIZE=$(( $(btrfs inspect-internal min-dev-size $FP_MNT_TMP) + 4*1024**2 )) # bytes? + 4 MiB buffer
 			G_EXEC_OUTPUT=1 G_EXEC btrfs filesystem resize $FS_SIZE $FP_MNT_TMP
 			G_EXEC fstrim $FP_MNT_TMP
-			sync
-			sleep 1 # Give the system 1 second to avoid "mount is busy"
+			G_EXEC sync
+			G_EXEC sleep 1 # Give the system 1 second to avoid "mount is busy"
 			G_EXEC umount $FP_MNT_TMP
 			G_EXEC rmdir $FP_MNT_TMP
 			FS_SIZE=$(( $FS_SIZE / 512 )) # bytes => 512 byte sectors
 		fi
 
-		G_EXEC sync
-		G_EXEC partprobe "$FP_SOURCE" # Failsafe
-		G_EXEC partx -u "$FP_SOURCE" # Failsafe
 		Run_fsck
 
 		# Only resize partition when new size would be less than current size
-		if (( $(</sys/class/block/"${FP_ROOT_DEV##*/}"/size) > $FS_SIZE ))
+		if [[ $ROOT_FS_TYPE != 'f2fs' ]] && (( $(</sys/class/block/"${FP_ROOT_DEV##*/}"/size) > $FS_SIZE ))
 		then
 			G_DIETPI-NOTIFY 2 "Shrinking root partition to: $(( $FS_SIZE / 2048 + 1 )) MiB"
 			G_EXEC_OUTPUT=1 G_EXEC eval "sfdisk --no-reread --no-tell-kernel -fN${FP_ROOT_DEV: -1} '$FP_SOURCE' <<< ',$FS_SIZE'"
