@@ -43,7 +43,10 @@ Available commands:
 	readonly FP_SETTINGS_OVPN='/var/lib/dietpi/dietpi-software/installed/dietpi-vpn/settings_ovpn.conf'
 	readonly FP_SETTINGS_UP='/var/lib/dietpi/dietpi-software/installed/dietpi-vpn/up.sh'
 	readonly FP_SETTINGS_DOWN='/var/lib/dietpi/dietpi-software/installed/dietpi-vpn/down.sh'
+	readonly PROTONVPN_SERVERS=[[ -f '/var/lib/dietpi/dietpi-software/installed/dietpi-vpn/protonserverlist.json' ]]
 	readonly IFACE='tun0'
+	readonly PROTONVPN_INSTALLED=[[ -f '/var/lib/dietpi/dietpi-software/installed/dietpi-vpn/.protonvpn' ]]
+	readonly NORDVPN_INSTALLED=[[ -f '/var/lib/dietpi/dietpi-software/installed/dietpi-vpn/.nordvpn' ]]
 	readonly MAX_WAIT_FOR_CONNECTION=5 # seconds
 	VPN_USERNAME=
 	VPN_PASSWORD=
@@ -72,7 +75,7 @@ Available commands:
 				return
 			fi
 		done
-		NVPN_INSTALLED=1
+		VPN_INSTALLED=1
 
 		# Check service exists
 		[[ -f '/etc/systemd/system/dietpi-vpn.service' ]] && VPN_SERVICE=1
@@ -110,7 +113,7 @@ Available commands:
 			return 1
 		fi
 
-		(( $NORDVPN_SERVICE )) && systemctl stop dietpi-vpn
+		(( $VPN_SERVICE )) && systemctl stop dietpi-vpn
 
 		cat << _EOF_ > $FP_SETTINGS_OVPN
 ${VPN_USERNAME//\'/\'\\\'\'}
@@ -167,7 +170,7 @@ _EOF_
 			sleep 1
 		done
 
-		if (( $NORDVPN_CONNECTED ))
+		if (( $VPN_CONNECTED ))
 		then
 			G_DIETPI-NOTIFY 0 "Connection established: $VPN_SERVER"
 		else
@@ -192,7 +195,7 @@ _EOF_
 	Menu_Main()
 	{
 		local text_status="WAN IP       : $WAN_IP\nState        : "
-		if (( ! $NORDVPN_SERVICE ))
+		if (( ! $VPN_SERVICE ))
 		then
 			text_status+='Not configured\nSubscription : https://go.nordvpn.net/aff_c?offer_id=15&aff_id=5305&url_id=902'
 
@@ -221,7 +224,7 @@ _EOF_
 				'Autostart' ": [$autostart_text]"
 				'Refresh' ': Update VPN connection status'
 			)
-			(( $NORDVPN_CONNECTED )) && G_WHIP_MENU_ARRAY+=('Disconnect' '')
+			(( $VPN_CONNECTED )) && G_WHIP_MENU_ARRAY+=('Disconnect' '')
 		fi
 		G_WHIP_MENU_ARRAY+=(
 
@@ -294,15 +297,21 @@ _EOF_
 				G_WHIP_MENU 'Please select the connection protocol type:' && PROTOCOL=${G_WHIP_RETURNED_VALUE,,}
 
 				# Select server
-				G_DIETPI-NOTIFY 2 'Populating NordVPN server list, please wait...'
+				G_DIETPI-NOTIFY 2 'Populating VPN server list, please wait...'
 				G_WHIP_MENU_ARRAY=()
-				for i in /etc/openvpn/"ovpn_$PROTOCOL"/*.ovpn
-				do
-					G_WHIP_MENU_ARRAY+=("${i##*/}" '')
-				done
-
+				if (( $NORDVPN_INSTALLED )); then
+					for i in /etc/openvpn/"ovpn_$PROTOCOL"/*.ovpn
+					do
+						G_WHIP_MENU_ARRAY+=("${i##*/}" '')
+					done
+				elif (( $PROTONVPN_INSTALLED )); then
+					while read server
+					do
+  						G_WHIP_MENU_ARRAY+=("$(echo $server | awk -F\" '/"Name":/{print $4;exit}')" '')
+					done < $PROTONVPN_SERVERS
+				fi
 				G_WHIP_DEFAULT_ITEM=$VPN_SERVER
-				G_WHIP_MENU 'Please select a NordVPN server to use:' && NORDVPN_SERVER=$G_WHIP_RETURNED_VALUE
+				G_WHIP_MENU 'Please select a VPN server to use:' && VPN_SERVER=$G_WHIP_RETURNED_VALUE
 
 			elif [[ $G_WHIP_RETURNED_VALUE == 'Refresh' ]]
 			then
@@ -310,12 +319,20 @@ _EOF_
 
 			elif [[ $G_WHIP_RETURNED_VALUE == 'Update' ]]
 			then
-				G_WHIP_YESNO 'This will remove all NordVPN server files and perform a fresh download of NordVPN server configurations. Once completed, you will need to reselect a NordVPN server from the new list.\n\nDo you want to continue?' || return 0
-				G_EXEC curl -sSfLO 'https://downloads.nordcdn.com/configs/archives/servers/ovpn.zip'
-				NORDVPN_SERVER=
-				G_EXEC_DESC='Removing old NordVPN server configs' G_EXEC rm -Rf /etc/openvpn/ovpn_{tcp,udp}/*.nordvpn.com.{tcp,udp}.ovpn
-				G_EXEC unzip -o ovpn.zip -d/etc/openvpn
-				G_EXEC_NOEXIT=1 G_EXEC rm ovpn.zip
+				if (( $NORDVPN_INSTALLED )); then
+					G_WHIP_YESNO 'This will remove all NordVPN server files and perform a fresh download of NordVPN server configurations. Once completed, you will need to reselect a NordVPN server from the new list.\n\nDo you want to continue?' || return 0
+					G_EXEC curl -sSfLO 'https://downloads.nordcdn.com/configs/archives/servers/ovpn.zip'
+					VPN_SERVER=
+					G_EXEC_DESC='Removing old NordVPN server configs' G_EXEC rm -Rf /etc/openvpn/ovpn_{tcp,udp}/*.nordvpn.com.{tcp,udp}.ovpn
+					G_EXEC unzip -o ovpn.zip -d/etc/openvpn
+					G_EXEC_NOEXIT=1 G_EXEC rm ovpn.zip
+				elif (( $PROTONVPN_INSTALLED )); then
+					G_WHIP_YESNO 'This will remove all ProtonVPN server files and perform a fresh download of the ProtonVPN server list. Once completed, you will need to reselect a ProtonVPN server from the new list.\n\nDo you want to continue?' || return 0
+					G_EXEC curl -sSfLO 'https://api.protonvpn.ch/vpn/logicals' -o /var/lib/dietpi/dietpi-software/installed/dietpi-vpn/protonserverlist.json
+					G_EXEC sed -i 's/\(:[[:digit:]]\+\)},/\1},\n/g' /var/lib/dietpi/dietpi-software/installed/dietpi-vpn/protonserverlist.json
+					VPN_SERVER=
+					G_EXEC_DESC='Removing old ProtonVPN server configs' G_EXEC rm -Rf /etc/openvpn/ovpn_{tcp,udp}/*.protonvpn.com.{tcp,udp}.ovpn
+				fi
 			fi
 		else
 			Menu_Exit
