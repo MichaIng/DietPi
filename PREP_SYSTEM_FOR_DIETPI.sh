@@ -828,11 +828,10 @@ Currently installed: $G_DISTRO_NAME (ID: $G_DISTRO)"; then
 
 			local apackages=(
 
-				'linux-dtb-'
-				'linux-u-'
 				'linux-image-'
-				"linux-$DISTRO_TARGET_NAME-"
-				'sunxi-tools'
+				'linux-dtb-'
+				'linux-u-boot-'
+				"linux-$DISTRO_TARGET_NAME-root-"
 
 			)
 
@@ -845,7 +844,7 @@ Currently installed: $G_DISTRO_NAME (ID: $G_DISTRO)"; then
 					aPACKAGES_REQUIRED_INSTALL+=("$line")
 					G_DIETPI-NOTIFY 2 "Armbian package detected and added: $line"
 
-				done <<< "$(dpkg-query -Wf '${Package}\n' | mawk -v pat="^$i" '$0~pat')"
+				done < <(dpkg-query -Wf '${Package}\n' | mawk -v pat="^$i" '$0~pat')
 
 			done
 			unset -v apackages
