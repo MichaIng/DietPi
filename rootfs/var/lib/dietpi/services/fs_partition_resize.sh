@@ -55,7 +55,9 @@
 
 	elif [[ $ROOT_FSTYPE == 'f2fs' ]]; then
 
+		mount -o remount,ro /
 		resize.f2fs "$ROOT_DEV"
+		mount -o remount,rw /
 
 	elif [[ $ROOT_FSTYPE == 'btrfs' ]]; then
 
