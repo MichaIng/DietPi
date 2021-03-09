@@ -634,12 +634,13 @@ Currently installed: $G_DISTRO_NAME (ID: $G_DISTRO)"; then
 		G_EXEC mv "DietPi-$G_GITBRANCH/CHANGELOG.txt" /boot/dietpi-CHANGELOG.txt
 
 		# Reading version string for later use
-		G_DIETPI_VERSION_CORE=$(mawk 'NR==1' "DietPi-$G_GITBRANCH/dietpi/server_version-6")
-		G_DIETPI_VERSION_SUB=$(mawk 'NR==2' "DietPi-$G_GITBRANCH/dietpi/server_version-6")
-		G_DIETPI_VERSION_RC=$(mawk 'NR==3' "DietPi-$G_GITBRANCH/dietpi/server_version-6")
+		. "DietPi-$G_GITBRANCH/.update/version"
+		G_DIETPI_VERSION_CORE=$G_REMOTE_VERSION_CORE
+		G_DIETPI_VERSION_SUB=$G_REMOTE_VERSION_SUB
+		G_DIETPI_VERSION_RC=$G_REMOTE_VERSION_RC
 
-		# Remove server_version* / (pre-)patch_file (downloads fresh from dietpi-update)
-		rm "DietPi-$G_GITBRANCH/dietpi/server_version"*
+		# Remove server_version-6 / (pre-)patch_file (downloads fresh from dietpi-update)
+		rm "DietPi-$G_GITBRANCH/dietpi/server_version-6"
 		rm "DietPi-$G_GITBRANCH/dietpi/pre-patch_file"
 		rm "DietPi-$G_GITBRANCH/dietpi/patch_file"
 
@@ -775,14 +776,25 @@ Currently installed: $G_DISTRO_NAME (ID: $G_DISTRO)"; then
 		fi
 
 		# Install gdisk if root file system is on a GPT partition, used by DietPi-FS_partition_resize
-		[[ $(parted -s "$(lsblk -npo PKNAME "$(findmnt -no SOURCE /)")" print) == *'Partition Table: gpt'* ]] && aPACKAGES_REQUIRED_INSTALL+=('gdisk')
+		[[ $(lsblk -ndo PTTYPE "$(lsblk -npo PKNAME "$(findmnt -no SOURCE /)")") == 'gpt' ]] && aPACKAGES_REQUIRED_INSTALL+=('gdisk')
 
-		# Install required filesystem packages
-		if [[ $(blkid -s TYPE -o value) =~ (^|[[:space:]]|v)'fat' ]]; then
+		# Install file system tools required for file system resizing and fsck
+		while read -r line
+		do
+			if [[ $line == 'vfat' ]]
+			then
+				aPACKAGES_REQUIRED_INSTALL+=('dosfstools')
 
-			aPACKAGES_REQUIRED_INSTALL+=('dosfstools')		# DietPi-Drive_Manager + fat (boot) drive file system check and creation tools
+			elif [[ $line == 'f2fs' ]]
+			then
+				aPACKAGES_REQUIRED_INSTALL+=('f2fs-tools')
 
-		fi
+			elif [[ $line == 'btrfs' ]]
+			then
+				aPACKAGES_REQUIRED_INSTALL+=('btrfs-progs')
+			fi
+
+		done < <(lsblk -no FSTYPE | sort -u)
 
 		# Kernel/bootloader/firmware
 		# - We need to install those directly to allow G_AGA() autoremove possible older packages later: https://github.com/MichaIng/DietPi/issues/1285#issuecomment-354602594
@@ -817,11 +829,10 @@ Currently installed: $G_DISTRO_NAME (ID: $G_DISTRO)"; then
 
 			local apackages=(
 
-				'linux-dtb-'
-				'linux-u-'
 				'linux-image-'
-				"linux-$DISTRO_TARGET_NAME-"
-				'sunxi-tools'
+				'linux-dtb-'
+				'linux-u-boot-'
+				"linux-$DISTRO_TARGET_NAME-root-"
 
 			)
 
@@ -834,7 +845,7 @@ Currently installed: $G_DISTRO_NAME (ID: $G_DISTRO)"; then
 					aPACKAGES_REQUIRED_INSTALL+=("$line")
 					G_DIETPI-NOTIFY 2 "Armbian package detected and added: $line"
 
-				done <<< "$(dpkg-query -Wf '${Package}\n' | mawk -v pat="^$i" '$0~pat')"
+				done < <(dpkg-query -Wf '${Package}\n' | mawk -v pat="^$i" '$0~pat')
 
 			done
 			unset -v apackages
