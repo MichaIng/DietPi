@@ -626,6 +626,10 @@ Currently installed: $G_DISTRO_NAME (ID: $G_DISTRO)"; then
 
 			G_EXEC mv "DietPi-$G_GITBRANCH/boot_c2.ini" /boot/boot.ini
 
+		elif (( $G_HW_MODEL == 15 )); then
+
+			G_EXEC mv "DietPi-$G_GITBRANCH/boot_n2.ini" /boot/boot.ini
+
 		fi
 
 		G_EXEC mv "DietPi-$G_GITBRANCH/dietpi.txt" /boot/
