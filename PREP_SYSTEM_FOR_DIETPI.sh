@@ -864,8 +864,7 @@ Currently installed: $G_DISTRO_NAME (ID: $G_DISTRO)"; then
 		#	Odroid C4
 		elif (( $G_HW_MODEL == 16 )); then
 
-			G_AGI linux-image-arm64-odroid-c4 meveric-keyring
-			G_EXEC_NOHALT=1 G_EXEC apt-mark manual u-boot # Workaround until C4 u-boot package has been added to repo: https://dietpi.com/meveric/pool/c4/
+			G_AGI linux-image-arm64-odroid-c4 meveric-keyring u-boot # On C4, the kernel package does not depend on the U-Boot package
 			# Apply kernel postinst steps manually, that depend on /proc/cpuinfo content, not matching when running in a container.
 			[[ -f '/boot/Image' ]] && G_EXEC mv /boot/Image /boot/Image.gz
 			[[ -f '/boot/Image.gz.bak' ]] && G_EXEC rm /boot/Image.gz.bak
