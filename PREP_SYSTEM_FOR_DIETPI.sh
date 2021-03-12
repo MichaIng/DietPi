@@ -40,6 +40,12 @@
 
 	fi
 
+	# Set locale
+	# - Reset possibly conflicting environment for sub scripts
+	> /etc/environment
+	# - Apply override LC_ALL and default LANG for current script
+	export LC_ALL='C.UTF-8' LANG='C.UTF-8'
+
 	# Set $PATH variable to include all expected default binary locations, since we don't know the current system setup: https://github.com/MichaIng/DietPi/issues/3206
 	export PATH='/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin'
 
@@ -56,7 +62,7 @@
 	#	RPi: Allow PDiffs since the "slow implementation" argument is outdated and PDiffs allow lower download size and less disk I/O
 	[[ -f '/etc/apt/apt.conf.d/50raspi' ]] && rm -v /etc/apt/apt.conf.d/50raspi
 	#	https://github.com/MichaIng/DietPi/issues/4083
-	rm -f /etc/apt/sources.list.d/vscode.list /etc/apt/trusted.gpg.d/microsoft.gpg /etc/apt/preferences.d/3rd_parties.pref
+	rm -fv /etc/apt/sources.list.d/vscode.list /etc/apt/trusted.gpg.d/microsoft.gpg /etc/apt/preferences.d/3rd_parties.pref
 	#	Meveric: https://github.com/MichaIng/DietPi/issues/1285#issuecomment-355759321
 	[[ -f '/etc/apt/sources.list.d/deb-multimedia.list' ]] && rm -v /etc/apt/sources.list.d/deb-multimedia.list
 	[[ -f '/etc/apt/preferences.d/deb-multimedia-pin-99' ]] && rm -v /etc/apt/preferences.d/deb-multimedia-pin-99
@@ -66,7 +72,7 @@
 	#	Conflicting configs
 	rm -fv /etc/apt/apt.conf.d/*{recommends,armbian}*
 	# - Apply wanted APT configs: Overwritten by DietPi code archive
-	cat << _EOF_ > /etc/apt/apt.conf.d/97dietpi # https://raw.githubusercontent.com/MichaIng/DietPi/dev/rootfs/etc/apt/apt.conf.d/97dietpi
+	cat << '_EOF_' > /etc/apt/apt.conf.d/97dietpi # https://raw.githubusercontent.com/MichaIng/DietPi/dev/rootfs/etc/apt/apt.conf.d/97dietpi
 APT::Install-Recommends "false";
 APT::Install-Suggests "false";
 APT::AutoRemove::RecommendsImportant "false";
@@ -80,7 +86,7 @@ Acquire::IndexTargets::deb-src::Sources::KeepCompressedAs "xz";
 _EOF_
 	# - Forcing new DEB package config files (during PREP only)
 	echo -e '#clear DPkg::options;\nDPkg::options:: "--force-confmiss,confnew";' > /etc/apt/apt.conf.d/98dietpi-forceconf
-	# - Prefer IPv4 by default to avoid hanging access attempts in some cases
+	# - Prefer IPv4 by default to avoid hanging access attempts in some cases, e.g. WiFi bridges
 	#	NB: This needs to match the method in: /DietPi/dietpi/func/dietpi-set_hardware preferipv4 enable
 	echo 'Acquire::ForceIPv4 "true";' > /etc/apt/apt.conf.d/99-dietpi-force-ipv4
 
@@ -92,7 +98,6 @@ _EOF_
 
 		'curl' # Download DietPi-Globals...
 		'ca-certificates' # ...via HTTPS
-		'locales' # Set C.UTF-8 locale
 		'whiptail' # G_WHIP
 
 	)
@@ -100,14 +105,9 @@ _EOF_
 	grep -q 'stretch' /etc/os-release && aAPT_PREREQS+=('apt-transport-https')
 	for i in "${aAPT_PREREQS[@]}"
 	do
-
-		if ! dpkg-query -s "$i" &> /dev/null && ! apt-get -y install "$i"; then
-
-			echo -e "[FAILED] Unable to install $i, please try to install it manually:\n\t # apt install $i\n"
-			exit 1
-
-		fi
-
+		dpkg-query -s "$i" &> /dev/null && apt-get -y install "$i" && continue
+		echo -e "[FAILED] Unable to install $i, please try to install it manually:\n\t # apt install $i\n"
+		exit 1
 	done
 	unset -v aAPT_PREREQS
 
@@ -127,26 +127,6 @@ _EOF_
 
  	fi
 
-	# Setup locale
-	# - Reset existing configs
-	> /etc/environment
-	[[ -f '/etc/default/locale' ]] && rm /etc/default/locale
-	# - Prepare C.UTF-8 generation only, statically shipped as /usr/lib/locale/C.UTF-8 via libc-bin essential package
-	echo 'C.UTF-8 UTF-8' > /etc/locale.gen
-	# - Apply override LC_ALL and default LANG for current script
-	export LC_ALL='C.UTF-8' LANG='C.UTF-8'
-	# - dpkg-reconfigure includes:
-	#	- "locale-gen": Generate locale(s) based on "/etc/locale.gen" or interactive selection.
-	#	- "update-locale": Add LANG to "/etc/default/locale" based on generated locale(s) or interactive default language selection.
-	if ! dpkg-reconfigure -f noninteractive locales; then
-
-		echo -e '[FAILED] Locale generation failed. Aborting...\n'
-		exit 1
-
-	fi
-	# - Add override LC_ALL to "/etc/default/locale" as well
-	update-locale 'LC_ALL=C.UTF-8'
-
 	# Set Git owner
 	GITOWNER=${GITOWNER:-MichaIng}
 
@@ -162,7 +142,7 @@ _EOF_
 		)
 		if ! GITBRANCH=$(whiptail --title "$G_PROGRAM_NAME" --menu 'Please select the Git branch the installer should use:' --default-item 'master' --ok-button 'Ok' --cancel-button 'Exit' --backtitle "$G_PROGRAM_NAME" 12 80 3 "${aWHIP_BRANCH[@]}" 3>&1 1>&2 2>&3-); then
 
-			echo -e '[ INFO ] No choice detected. Aborting...\n'
+			echo -e '[ INFO ] Exit selected. Aborting...\n'
 			exit 0
 
 		fi
@@ -204,7 +184,7 @@ _EOF_
 	G_GITBRANCH=$GITBRANCH
 	unset -v GITOWNER GITBRANCH
 
-	# Detect the Debian version of this operating system
+	# Detect the distro version of this operating system
 	if grep -q 'stretch' /etc/os-release; then
 
 		G_DISTRO=4
@@ -222,35 +202,44 @@ _EOF_
 
 	else
 
-		G_DIETPI-NOTIFY 1 "Unknown or unsupported distribution version: $(sed -n '/^PRETTY_NAME=/{s/^PRETTY_NAME=//p;q}' /etc/os-release 2>&1). Aborting...\n"
+		G_DIETPI-NOTIFY 1 "Unsupported distribution version: $(sed -n '/^PRETTY_NAME=/{s/^PRETTY_NAME=//p;q}' /etc/os-release 2>&1). Aborting...\n"
 		exit 1
 
 	fi
+	G_DIETPI-NOTIFY 2 "Detected distribution version: ${G_DISTRO_NAME^} (ID: $G_DISTRO)"
 
 	# Detect the hardware architecture of this operating system
 	G_HW_ARCH_NAME=$(uname -m)
-	if [[ $G_HW_ARCH_NAME == 'armv6l' ]]; then
+	if grep -q '^ID=raspbian' /etc/os-release; then
 
-		G_HW_ARCH=1
-
-	elif [[ $G_HW_ARCH_NAME == 'armv7l' ]]; then
-
-		G_HW_ARCH=2
-
-	elif [[ $G_HW_ARCH_NAME == 'aarch64' ]]; then
-
-		G_HW_ARCH=3
-
-	elif [[ $G_HW_ARCH_NAME == 'x86_64' ]]; then
-
-		G_HW_ARCH=10
+		# Raspbian: Force ARMv6
+		G_RASPBIAN=1 G_HW_ARCH=1
 
 	else
 
-		G_DIETPI-NOTIFY 1 "Unknown or unsupported CPU architecture: \"$G_HW_ARCH_NAME\". Aborting...\n"
-		exit 1
+		# Debian: ARMv6 is not supported here
+		G_RASPBIAN=0
+		if [[ $G_HW_ARCH_NAME == 'armv7l' ]]; then
+
+			G_HW_ARCH=2
+
+		elif [[ $G_HW_ARCH_NAME == 'aarch64' ]]; then
+
+			G_HW_ARCH=3
+
+		elif [[ $G_HW_ARCH_NAME == 'x86_64' ]]; then
+
+			G_HW_ARCH=10
+
+		else
+
+			G_DIETPI-NOTIFY 1 "Unsupported CPU architecture: \"$G_HW_ARCH_NAME\". Aborting...\n"
+			exit 1
+
+		fi
 
 	fi
+	G_DIETPI-NOTIFY 2 "Detected target CPU architecture: $G_HW_ARCH_NAME (ID: $G_HW_ARCH)"
 
 	Main(){
 
@@ -307,61 +296,55 @@ _EOF_
 
 			else
 
-				G_WHIP_INPUTBOX 'Please enter your name. This will be used to identify the image creator within credits banner.\n\nYou can add your contact information as well for end users.\n\nNB: An entry is required.'
+				G_WHIP_BUTTON_CANCEL_TEXT='Exit'
+				if ! G_WHIP_INPUTBOX 'Please enter your name. This will be used to identify the image creator within credits banner.\n\nYou can add your contact information as well for end users.\n\nNB: An entry is required.'; then
 
-			fi
-
-			if [[ $G_WHIP_RETURNED_VALUE ]]; then
-
-				# Disallowed?
-				DISALLOWED_NAME=0
-				aDISALLOWED_NAMES=(
-
-					'official'
-					'fourdee'
-					'daniel knight'
-					'dan knight'
-					'michaing'
-					'diet'
-
-				)
-
-				for i in "${aDISALLOWED_NAMES[@]}"
-				do
-
-					[[ ${G_WHIP_RETURNED_VALUE,,} =~ $i ]] || continue
-					DISALLOWED_NAME=1
-					break
-
-				done
-				unset -v aDISALLOWED_NAMES
-
-				if (( $DISALLOWED_NAME )); then
-
-					G_WHIP_MSG "\"$G_WHIP_RETURNED_VALUE\" is reserved and cannot be used. Please try again."
-
-				else
-
-					IMAGE_CREATOR=$G_WHIP_RETURNED_VALUE
-					break
+					G_DIETPI-NOTIFY 1 'Exit selected. Aborting...\n'
+					exit 0
 
 				fi
 
 			fi
 
-		done
+			# Disallowed names
+			aDISALLOWED_NAMES=(
 
+				'official'
+				'fourdee'
+				'daniel knight'
+				'dan knight'
+				'michaing'
+				'diet'
+
+			)
+
+			for i in "${aDISALLOWED_NAMES[@]}"
+			do
+				[[ ${G_WHIP_RETURNED_VALUE,,} =~ $i ]] || continue
+				G_WHIP_MSG "\"$G_WHIP_RETURNED_VALUE\" is reserved and cannot be used. Please try again."
+				continue 2
+			done
+			unset -v aDISALLOWED_NAMES
+
+			IMAGE_CREATOR=$G_WHIP_RETURNED_VALUE
+			break
+
+		done
 		G_DIETPI-NOTIFY 2 "Entered image creator: $IMAGE_CREATOR"
 
-		# Pre-image used/name
-		until [[ $PREIMAGE_INFO ]]
-		do
+		# Pre-image used/name: Respect environment variable
+		if [[ ! $PREIMAGE_INFO ]]; then
 
-			G_WHIP_INPUTBOX 'Please enter the name or URL of the pre-image you installed on this system, prior to running this script. This will be used to identify the pre-image credits.\n\nEG: Debian, Raspbian Lite, Meveric, FriendlyARM, or "forum.odroid.com/viewtopic.php?t=123456" etc.\n\nNB: An entry is required.'
+			G_WHIP_BUTTON_CANCEL_TEXT='Exit'
+			if ! G_WHIP_INPUTBOX 'Please enter the name or URL of the pre-image you installed on this system, prior to running this script. This will be used to identify the pre-image credits.\n\nEG: Debian, Raspberry Pi OS Lite, Meveric or "forum.odroid.com/viewtopic.php?t=123456" etc.\n\nNB: An entry is required.'; then
+
+				G_DIETPI-NOTIFY 1 'Exit selected. Aborting...\n'
+				exit 0
+
+			fi
 			PREIMAGE_INFO=$G_WHIP_RETURNED_VALUE
 
-		done
-
+		fi
 		G_DIETPI-NOTIFY 2 "Entered pre-image info: $PREIMAGE_INFO"
 
 		# Hardware selection
@@ -436,53 +419,26 @@ _EOF_
 
 		while :
 		do
+			# Check for valid environment variabe
+			[[ $HW_MODEL =~ ^[0-9]+$ ]] && for i in "${G_WHIP_MENU_ARRAY[@]}"
+			do
+				[[ $HW_MODEL == "$i" ]] && break 2
+			done
 
-			# Check for valid entry, e.g. when set via environment variabe
-			if disable_error=1 G_CHECK_VALIDINT "$HW_MODEL" 0; then
+			G_WHIP_BUTTON_CANCEL_TEXT='Exit'
+			if ! G_WHIP_MENU 'Please select the current device this is being installed on:\n - NB: Select "Generic device" if not listed.\n - "Core devices": Fully supported by DietPi, offering full GPU acceleration + Kodi support.\n - "Limited support devices": No GPU acceleration guaranteed.'; then
 
-				for i in "${G_WHIP_MENU_ARRAY[@]}"
-				do
-
-					[[ $HW_MODEL == "$i" ]] && break 2
-
-				done
-
-			fi
-
-			if ! G_WHIP_MENU 'Please select the current device this is being installed on:\n - NB: Select "Generic device" if not listed.\n - "Core devices": Are fully supported by DietPi, offering full GPU + Kodi support.\n - "Limited support devices": No GPU support, supported limited to DietPi specific issues only (eg: excludes Kernel/GPU/VPU related items).'; then
-
-				G_DIETPI-NOTIFY 1 'No choice detected. Aborting...\n'
+				G_DIETPI-NOTIFY 0 'Exit selected. Aborting...\n'
 				exit 0
 
-			elif [[ $G_WHIP_RETURNED_VALUE ]]; then
-
-				HW_MODEL=$G_WHIP_RETURNED_VALUE
-				break
-
 			fi
-
+			HW_MODEL=$G_WHIP_RETURNED_VALUE
+			break
 		done
 		G_HW_MODEL=$HW_MODEL
 		unset -v HW_MODEL
 
-		# RPi: Detect Debian vs Raspbian and 64 vs 32 bit image
-		if (( $G_HW_MODEL < 10 )); then
-
-			if grep -q '^ID=debian' /etc/os-release; then
-
-				G_RASPBIAN=0
-				[[ $(mawk 'NR==1' /var/lib/dpkg/arch) == 'arm64' ]] && G_HW_ARCH=3 || G_HW_ARCH=2
-
-			else
-
-				G_RASPBIAN=1 G_HW_ARCH=1
-
-			fi
-
-		fi
-
 		G_DIETPI-NOTIFY 2 "Selected hardware model ID: $G_HW_MODEL"
-		G_DIETPI-NOTIFY 2 "Detected target CPU architecture: $G_HW_ARCH_NAME (ID: $G_HW_ARCH)"
 
 		# WiFi selection
 		if [[ $WIFI_REQUIRED != [01] ]]; then
@@ -495,23 +451,23 @@ _EOF_
 			)
 
 			(( $G_HW_MODEL == 20 )) && G_WHIP_DEFAULT_ITEM=0 || G_WHIP_DEFAULT_ITEM=1
+			G_WHIP_BUTTON_CANCEL_TEXT='Exit'
 			if G_WHIP_MENU 'Please select an option:'; then
 
 				WIFI_REQUIRED=$G_WHIP_RETURNED_VALUE
 
 			else
 
-				G_DIETPI-NOTIFY 1 'No choice detected. Aborting...\n'
+				G_DIETPI-NOTIFY 0 'Exit selected. Aborting...\n'
 				exit 0
 
 			fi
 
 		fi
-
 		# shellcheck disable=SC2015
 		(( $WIFI_REQUIRED )) && G_DIETPI-NOTIFY 2 'Marking WiFi as required' || G_DIETPI-NOTIFY 2 'Marking WiFi as NOT required'
 
-		# Distro Selection
+		# Distro selection
 		DISTRO_LIST_ARRAY=(
 
 			'5' ': Buster (current stable release, recommended)'
@@ -524,7 +480,6 @@ _EOF_
 		G_WHIP_MENU_ARRAY=()
 		for ((i=0; i<${#DISTRO_LIST_ARRAY[@]}; i+=2))
 		do
-
 			# Disable downgrades
 			if (( ${DISTRO_LIST_ARRAY[$i]} < $G_DISTRO )); then
 
@@ -536,7 +491,6 @@ _EOF_
 				G_WHIP_MENU_ARRAY+=("${DISTRO_LIST_ARRAY[$i]}" "${DISTRO_LIST_ARRAY[$i+1]}")
 
 			fi
-
 		done
 		unset -v DISTRO_LIST_ARRAY
 
@@ -549,17 +503,10 @@ _EOF_
 
 		while :
 		do
-
-			if disable_error=1 G_CHECK_VALIDINT "$DISTRO_TARGET" 0; then
-
-				for i in "${G_WHIP_MENU_ARRAY[@]}"
-				do
-
-					[[ $DISTRO_TARGET == "$i" ]] && break 2
-
-				done
-
-			fi
+			[[ $DISTRO_TARGET =~ ^[0-9]+$ ]] && for i in "${G_WHIP_MENU_ARRAY[@]}"
+			do
+				[[ $DISTRO_TARGET == "$i" ]] && break 2
+			done
 
 			G_WHIP_DEFAULT_ITEM=${G_WHIP_MENU_ARRAY[0]} # Downgrades disabled, so first item matches current/lowest supported distro version
 			G_WHIP_BUTTON_CANCEL_TEXT='Exit'
@@ -569,13 +516,9 @@ Currently installed: $G_DISTRO_NAME (ID: $G_DISTRO)"; then
 				DISTRO_TARGET=$G_WHIP_RETURNED_VALUE
 				break
 
-			else
-
-				G_DIETPI-NOTIFY 1 'No choice detected. Aborting...\n'
-				exit 0
-
 			fi
-
+			G_DIETPI-NOTIFY 0 'Exit selected. Aborting...\n'
+			exit 0
 		done
 
 		if (( $DISTRO_TARGET == 5 )); then
@@ -588,6 +531,7 @@ Currently installed: $G_DISTRO_NAME (ID: $G_DISTRO)"; then
 
 		else
 
+			# Failsafe: This can actually never happen
 			G_DIETPI-NOTIFY 1 'Invalid choice detected. Aborting...\n'
 			exit 1
 
@@ -1470,7 +1414,8 @@ _EOF_'
 		# - It will be unmasked automatically if libpam-systemd got installed during dietpi-software install, e.g. with desktops.
 		G_EXEC systemctl mask --now systemd-logind
 
-		#G_DIETPI-NOTIFY 2 'Configuring locales:' # Runs at start of script
+		G_DIETPI-NOTIFY 2 'Configuring locales:'
+		/boot/dietpi/func/dietpi-set_software locale 'C.UTF-8'
 
 		G_DIETPI-NOTIFY 2 'Configuring time zone:'
 		rm -fv /etc/{localtime,timezone}
