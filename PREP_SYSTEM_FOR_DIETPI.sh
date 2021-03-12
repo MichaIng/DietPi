@@ -354,7 +354,7 @@ _EOF_
 		G_WHIP_DEFAULT_ITEM=0
 		G_WHIP_MENU_ARRAY=(
 
-			'' '●─ ARM ─ Core devices with GPU support '
+			'' '●─ ARM ─ Core devices with GPU acceleration '
 			'0' ': Raspberry Pi (all models)'
 			#'0' ': Raspberry Pi 1 (256 MiB)
 			#'1' ': Raspberry Pi 1/Zero (512 MiB)'
@@ -369,7 +369,7 @@ _EOF_
 			'' '●─ x86_64 '
 			'21' ': x86_64 Native PC'
 			'20' ': x86_64 Virtual Machine'
-			'' '●─ ARM ─ Limited support devices without GPU support '
+			'' '●─ ARM ─ Limited GPU acceleration '
 			'10' ': Odroid C1'
 			'13' ': Odroid U3'
 			'14' ': Odroid N1'
@@ -396,23 +396,14 @@ _EOF_
 			'54' ': NanoPi K2'
 			'72' ': ROCK Pi 4'
 			'73' ': ROCK Pi S'
-			'69' ': Firefly RK3399'
-			'38' ': OrangePi PC 2'
-			'37' ': OrangePi Prime'
-			'36' ': OrangePi Win'
-			'35' ': OrangePi Zero Plus 2 (H3/H5)'
-			'34' ': OrangePi Plus'
-			'33' ': OrangePi Lite'
-			'32' ': OrangePi Zero (H2+)'
-			'31' ': OrangePi One'
-			'30' ': OrangePi PC'
-			'41' ': OrangePi PC Plus'
-			'53' ': BananaPi (sinovoip)'
-			'51' ': BananaPi Pro (Lemaker)'
-			'50' ': BananaPi M2+ (sinovoip)'
-			'71' ': BeagleBone Black'
-			'39' ': LeMaker Guitar'
 			'' '●─ Other '
+			'29' ': Generic Amlogic S922X'
+			'28' ': Generic Amlogic S905'
+			'27' ': Generic Allwinner H6'
+			'26' ': Generic Allwinner H5'
+			'25' ': Generic Allwinner H3'
+			'24' ': Generic Rockchip RK3399'
+			'23' ': Generic Rockchip RK3328'
 			'22' ': Generic Device'
 
 		)
