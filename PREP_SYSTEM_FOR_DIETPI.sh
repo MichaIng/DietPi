@@ -354,7 +354,7 @@ _EOF_
 		G_WHIP_DEFAULT_ITEM=0
 		G_WHIP_MENU_ARRAY=(
 
-			'' '●─ ARM ─ Core devices with GPU support '
+			'' '●─ ARM ─ Core devices with GPU acceleration '
 			'0' ': Raspberry Pi (all models)'
 			#'0' ': Raspberry Pi 1 (256 MiB)
 			#'1' ': Raspberry Pi 1/Zero (512 MiB)'
@@ -369,7 +369,7 @@ _EOF_
 			'' '●─ x86_64 '
 			'21' ': x86_64 Native PC'
 			'20' ': x86_64 Virtual Machine'
-			'' '●─ ARM ─ Limited support devices without GPU support '
+			'' '●─ ARM ─ Limited GPU acceleration '
 			'10' ': Odroid C1'
 			'13' ': Odroid U3'
 			'14' ': Odroid N1'
@@ -396,23 +396,14 @@ _EOF_
 			'54' ': NanoPi K2'
 			'72' ': ROCK Pi 4'
 			'73' ': ROCK Pi S'
-			'69' ': Firefly RK3399'
-			'38' ': OrangePi PC 2'
-			'37' ': OrangePi Prime'
-			'36' ': OrangePi Win'
-			'35' ': OrangePi Zero Plus 2 (H3/H5)'
-			'34' ': OrangePi Plus'
-			'33' ': OrangePi Lite'
-			'32' ': OrangePi Zero (H2+)'
-			'31' ': OrangePi One'
-			'30' ': OrangePi PC'
-			'41' ': OrangePi PC Plus'
-			'53' ': BananaPi (sinovoip)'
-			'51' ': BananaPi Pro (Lemaker)'
-			'50' ': BananaPi M2+ (sinovoip)'
-			'71' ': BeagleBone Black'
-			'39' ': LeMaker Guitar'
 			'' '●─ Other '
+			'29' ': Generic Amlogic S922X'
+			'28' ': Generic Amlogic S905'
+			'27' ': Generic Allwinner H6'
+			'26' ': Generic Allwinner H5'
+			'25' ': Generic Allwinner H3'
+			'24' ': Generic Rockchip RK3399'
+			'23' ': Generic Rockchip RK3328'
 			'22' ': Generic Device'
 
 		)
@@ -969,7 +960,6 @@ Currently installed: $G_DISTRO_NAME (ID: $G_DISTRO)"; then
 		getent passwd rock > /dev/null && userdel -f rock # Radxa images
 		getent passwd linaro > /dev/null && userdel -f linaro # ASUS TB
 		getent passwd dietpi > /dev/null && userdel -f dietpi # recreated below
-		getent passwd debian > /dev/null && userdel -f debian # BBB
 		getent passwd openmediavault-webgui > /dev/null && userdel -f openmediavault-webgui # OMV (NanoPi NEO2)
 		getent passwd admin > /dev/null && userdel -f admin # OMV (NanoPi NEO2)
 		getent passwd fa > /dev/null && userdel -f fa # OMV (NanoPi NEO2)
@@ -1321,17 +1311,8 @@ _EOF_'
 		G_EXEC mkdir -p /root/.ssh
 		echo 'ssh.dietpi.com ssh-rsa AAAAB3NzaC1yc2EAAAADAQABAAABAQDE6aw3r6aOEqendNu376iiCHr9tGBIWPgfrLkzjXjEsHGyVSUFNnZt6pftrDeK7UX+qX4FxOwQlugG4fymOHbimRCFiv6cf7VpYg1Ednquq9TLb7/cIIbX8a6AuRmX4fjdGuqwmBq3OG7ZksFcYEFKt5U4mAJIaL8hXiM2iXjgY02LqiQY/QWATsHI4ie9ZOnwrQE+Rr6mASN1BVFuIgyHIbwX54jsFSnZ/7CdBMkuAd9B8JkxppWVYpYIFHE9oWNfjh/epdK8yv9Oo6r0w5Rb+4qaAc5g+RAaknHeV6Gp75d2lxBdCm5XknKKbGma2+/DfoE8WZTSgzXrYcRlStYN' > /root/.ssh/known_hosts
 
-		# Add pre-up lines for WiFi on OrangePi Zero
-		if (( $G_HW_MODEL == 32 )); then
-
-			sed -i '/iface wlan0 inet dhcp/apre-up modprobe xradio_wlan\npre-up iwconfig wlan0 power on' /etc/network/interfaces
-
 		# ASUS TB WiFi: https://github.com/MichaIng/DietPi/issues/1760
-		elif (( $G_HW_MODEL == 52 )); then
-
-			G_CONFIG_INJECT '8723bs' '8723bs' /etc/modules
-
-		fi
+		(( $G_HW_MODEL == 52 )) && G_CONFIG_INJECT '8723bs' '8723bs' /etc/modules
 
 		# Fix wireless-tools bug on Stretch: https://bugs.debian.org/908886
 		# shellcheck disable=SC2016
@@ -1482,13 +1463,8 @@ _EOF_"
 
 		fi
 
-		# - Armbian OPi Zero 2: https://github.com/MichaIng/DietPi/issues/876#issuecomment-294350580
-		if (( $G_HW_MODEL == 35 )); then
-
-			echo 'blacklist bmp085' > /etc/modprobe.d/dietpi-disable_bmp085.conf
-
 		# - Sparky SBC
-		elif (( $G_HW_MODEL == 70 )); then
+		if (( $G_HW_MODEL == 70 )); then
 
 			# Install latest kernel/drivers
 			G_EXEC curl -sSfL https://raw.githubusercontent.com/sparky-sbc/sparky-test/master/dragon_fly_check/uImage -o /boot/uImage
@@ -1762,18 +1738,7 @@ _EOF_
 		/boot/dietpi/func/dietpi-set_software apt-cache cache disable
 		/boot/dietpi/func/dietpi-set_software apt-cache clean
 
-		# BBB remove fsexpansion: https://github.com/MichaIng/DietPi/issues/931#issuecomment-345451529
-		if (( $G_HW_MODEL == 71 )); then
-
-			systemctl disable dietpi-fs_partition_resize
-			rm -v /etc/systemd/system/dietpi-fs_partition_resize.service
-			rm -v /var/lib/dietpi/services/fs_partition_resize.sh
-
-		else
-
-			G_EXEC_DESC='Enabling automated partition and file system resize for first boot' G_EXEC systemctl enable dietpi-fs_partition_resize
-
-		fi
+		G_EXEC_DESC='Enabling automated partition and file system resize for first boot' G_EXEC systemctl enable dietpi-fs_partition_resize
 		G_EXEC_DESC='Enabling first boot installation process' G_EXEC systemctl enable dietpi-firstboot
 
 		G_DIETPI-NOTIFY 2 'Storing DietPi version info:'
