@@ -2721,10 +2721,8 @@ _EOF_
 			# ownCloud up to v10.2
 			elif [[ -f '/var/www/owncloud/version.php' ]]; then
 
-				# shellcheck disable=SC2016
-				local oc_version_major=$(sed -n '/$OC_VersionString/{s/^[^0-9]*//;s/\..*$//;p;q}' /var/www/owncloud/version.php)
-				# shellcheck disable=SC2016
-				local oc_version_minor=$(sed -n '/$OC_VersionString/{s/^[^.]*\.//;s/\..*$//;p;q}' /var/www/owncloud/version.php)
+				local oc_version_major=$(sed -n '/\$OC_VersionString/{s/^[^0-9]*//;s/\..*$//p;q}' /var/www/owncloud/version.php)
+				local oc_version_minor=$(sed -n '/\$OC_VersionString/{s/^[^.]*\.//;s/\..*$//p;q}' /var/www/owncloud/version.php)
 				if (( $oc_version_major < 10 || ( $oc_version_major == 10 && $oc_version_minor < 3 ) )); then
 
 					PHP_NAME='php7.2'
@@ -3677,10 +3675,7 @@ _EOF_
 
 			fi
 
-			chown -R www-data:www-data /var/www/owncloud
-
-			[[ $DEPS_LIST ]] && G_DIETPI-NOTIFY 2 'Installing required PHP modules' && G_AGI $DEPS_LIST
-			DEPS_LIST=
+			[[ $DEPS_LIST ]] && { G_DIETPI-NOTIFY 2 'Installing required PHP modules'; G_AGI $DEPS_LIST; DEPS_LIST=''; }
 
 		fi
 
@@ -3713,10 +3708,7 @@ _EOF_
 
 			fi
 
-			chown -R www-data:www-data /var/www/nextcloud
-
-			[[ $DEPS_LIST ]] && G_DIETPI-NOTIFY 2 'Installing required PHP modules' && G_AGI $DEPS_LIST
-			DEPS_LIST=
+			[[ $DEPS_LIST ]] && { G_DIETPI-NOTIFY 2 'Installing required PHP modules'; G_AGI $DEPS_LIST; DEPS_LIST=''; }
 
 		fi
 
@@ -7895,7 +7887,7 @@ _EOF_
 
 			Banner_Configuration
 
-			G_DIETPI-NOTIFY 2 'Enabling needed PHP modules.' # https://doc.owncloud.org/server/administration_manual/installation/manual_installation.html#php-extensions
+			G_DIETPI-NOTIFY 2 'Enabling required PHP modules.' # https://doc.owncloud.org/server/administration_manual/installation/manual_installation.html#php-extensions
 			G_EXEC phpenmod ctype curl dom gd iconv intl json mbstring pdo_mysql posix simplexml xmlreader xmlwriter zip fileinfo opcache apcu redis exif
 
 			G_DIETPI-NOTIFY 2 'Enabling APCu memory cache for PHP command line usage (CLI) as well, including ownCloud occ command and cron jobs.'
@@ -7903,11 +7895,9 @@ _EOF_
 			G_EXEC phpenmod dietpi-owncloud
 
 			# Get version string
-			# shellcheck disable=SC2016
-			local oc_version_major=$(sed -n '/$OC_VersionString/{s/^[^0-9]*//;s/\..*$//;p;q}' /var/www/owncloud/version.php)
+			local oc_version_major=$(sed -n '/\$OC_VersionString/{s/^[^0-9]*//;s/\..*$//p;q}' /var/www/owncloud/version.php)
 			[[ $oc_version_major ]] || oc_version_major=10
-			# shellcheck disable=SC2016
-			local oc_version_minor=$(sed -n '/$OC_VersionString/{s/^[^.]*\.//;s/\..*$//;p;q}' /var/www/owncloud/version.php)
+			local oc_version_minor=$(sed -n '/\$OC_VersionString/{s/^[^.]*\.//;s/\..*$//p;q}' /var/www/owncloud/version.php)
 			[[ $oc_version_minor ]] || oc_version_minor=3
 
 			if (( ${aSOFTWARE_INSTALL_STATE[83]} > 0 )); then
@@ -8015,49 +8005,69 @@ location = /.well-known/caldav {
 			# Adjusting config file:
 			local config_php='/var/www/owncloud/config/config.php'
 
-			local datadir=$(grep -m1 '^[[:blank:]]*SOFTWARE_OWNCLOUD_DATADIR=' /boot/dietpi.txt | sed 's/^[^=]*=//')
+			local datadir=$(sed -n '/^[[:blank:]]*SOFTWARE_OWNCLOUD_DATADIR=/{s/^[^=]*=//p;q}' /boot/dietpi.txt)
 			[[ $datadir ]] || datadir='/mnt/dietpi_userdata/owncloud_data'
-			mkdir -p $datadir
-			chown -R www-data:www-data $datadir
+			G_EXEC mkdir -p "$datadir"
+			G_EXEC chown -R www-data:www-data /var/www/owncloud "$datadir"
 
 			if [[ -d '/mnt/dietpi_userdata/mysql/owncloud' ]]; then
 
 				G_DIETPI-NOTIFY 2 'ownCloud database found, will NOT overwrite.'
+				if [[ ! -f $config_php ]]; then
 
-			else
+					G_WHIP_MSG '[WARNING] Existing ownCloud database was found, but no related install directory\n
+A remaining MariaDB "owncloud" database from an earlier installed instance was found. But the related install directory "/var/www/owncloud/config/config.php" does not exist.
+Since running a fresh install with an existing database can produce data corruption, if the versions do not exactly match, you either need to remove the database or find and place the related install directory.\n
+We cannot predict your aim and do not want to mess or break your data, so please do this manually.\n
+To remove the existing database (including e.g. contacts, calendar, file tags etc.):
+	# mysqladmin drop owncloud
+Otherwise to copy an existing instance in place:
+	# rm -R /var/www/owncloud
+	# mkdir /var/www/owncloud
+	# cp -a /path/to/existing/owncloud/. /var/www/owncloud/
+The install script will now exit. After applying one of the the above, rerun dietpi-software, e.g.:
+	# dietpi-software install 47'
 
-				if [[ -f $datadir/dietpi-owncloud-database-backup.sql ]]; then
-
-					G_DIETPI-NOTIFY 2 'ownCloud database backup found, starting recovery...'
-					local dbuser=$(grep -m1 "^[[:blank:]]*'dbuser'" $config_php | mawk '{print $3}' | sed "s/[',]//g")
-					local dbpass=$(grep -m1 "^[[:blank:]]*'dbpassword'" $config_php | mawk '{print $3}' | sed "s/[',]//g")
-					/boot/dietpi/func/create_mysql_db owncloud "$dbuser" "$dbpass"
-					mysql owncloud < "$datadir"/dietpi-owncloud-database-backup.sql
-					### Seems to be not needed anymore and can cause double entries: https://help.nextcloud.com/t/howto-change-move-data-directory-after-installation/17170/3?u=michaing
-					# Adjust database data directory entry, in case it changed due to server migration:
-					#mysql -e "update owncloud.oc_storages set id='local::$datadir/' where id rlike 'local::'"
-
-				elif ! grep -q "'installed' => true," $config_php 2>/dev/null; then
-
-					local username=$(grep -m1 '^[[:blank:]]*SOFTWARE_OWNCLOUD_NEXTCLOUD_USERNAME=' /boot/dietpi.txt | sed 's/^[^=]*=//')
-					[[ $username ]] || username='admin'
-
-					# For MariaDB, temporary database admin user needs to be created, as 'root' uses unix_socket login, which cannot be accessed by sudo -u www-data.
-					mysql -e "grant all privileges on *.* to 'tmp_root'@'localhost' identified by '$GLOBAL_PW' with grant option"
-
-					G_EXEC_DESC='ownCloud occ install'
-					# - Replace password string internally to avoid printing it to console
-					G_EXEC_PRE_FUNC(){ acommand[10]=$GLOBAL_PW acommand[14]=$GLOBAL_PW; }
-					# - Checking output for stack trace to handle internal errors that do not lead to php error exit code
-					G_EXEC_POST_FUNC(){ grep -qi 'Stack trace' $fp_log && exit_code=1337; }
-					G_EXEC occ maintenance:install --no-interaction --database 'mysql' --database-name 'owncloud' --database-user 'tmp_root' --database-pass '<omitted>' --admin-user "$username" --admin-pass '<omitted>' --data-dir "$datadir"
-
-					# Remove obsolete default data dir
-					[[ $(readlink -f $datadir) != $(readlink -f /var/www/owncloud/data) ]] && rm -R /var/www/owncloud/data
-
-					mysql -e 'drop user tmp_root@localhost'
+					[[ -f '/var/www/owncloud/occ' ]] && G_EXEC rm /var/www/owncloud/occ
+					/boot/dietpi/dietpi-services start
+					exit 1
 
 				fi
+
+			elif [[ -f $datadir/dietpi-owncloud-database-backup.sql ]]; then
+
+				G_DIETPI-NOTIFY 2 'ownCloud database backup found, starting recovery...'
+				local dbuser=$(grep -m1 "^[[:blank:]]*'dbuser'" $config_php | mawk -F\' '{print $4}')
+				local dbpass=$(grep -m1 "^[[:blank:]]*'dbpassword'" $config_php | mawk -F\' '{print $4}')
+				/boot/dietpi/func/create_mysql_db owncloud "$dbuser" "$dbpass"
+				mysql owncloud < "$datadir/dietpi-owncloud-database-backup.sql"
+				### Seems to be not needed anymore and can cause double entries: https://help.nextcloud.com/t/howto-change-move-data-directory-after-installation/17170/3?u=michaing
+				# Adjust database data directory entry, in case it changed due to server migration:
+				#G_EXEC mysql -e "update owncloud.oc_storages set id='local::$datadir/' where id rlike 'local::'"
+
+			elif ! grep -q "'installed' => true," $config_php 2>/dev/null; then
+
+				local username=$(sed -n '/^[[:blank:]]*SOFTWARE_OWNCLOUD_NEXTCLOUD_USERNAME=/{s/^[^=]*=//p;q}' /boot/dietpi.txt)
+				[[ $username ]] || username='admin'
+
+				# For MariaDB, temporary database admin user needs to be created, as 'root' uses unix_socket login, which cannot be accessed by sudo -u www-data.
+				# - Create random temporary alphanumeric 30 characters password
+				local oc_password=$(tr -dc '[:alnum:]' < /dev/random | head -c30)
+				# - Failsafe: Use non-blocking entropy source, if /dev/random fails
+				(( ${#oc_password} == 30 )) || oc_password=$(tr -dc '[:alnum:]' < /dev/urandom | head -c30)
+				G_EXEC mysql -e "grant all privileges on *.* to tmp_root@localhost identified by '$oc_password' with grant option"
+
+				G_EXEC_DESC='ownCloud occ install'
+				# - Replace password strings internally to avoid printing it to console
+				G_EXEC_PRE_FUNC(){ acommand[10]=$oc_password acommand[14]=$GLOBAL_PW; }
+				# - Checking output for stack trace to handle internal errors that do not lead to php error exit code
+				G_EXEC_POST_FUNC(){ grep -qi 'Stack trace' $fp_log && exit_code=255; }
+				G_EXEC occ maintenance:install --no-interaction --database 'mysql' --database-name 'owncloud' --database-user 'tmp_root' --database-pass '<omitted>' --admin-user "$username" --admin-pass '<omitted>' --data-dir "$datadir"
+				G_EXEC mysql -e 'drop user tmp_root@localhost'
+				unset -v oc_password
+
+				# Remove obsolete default data dir
+				[[ $(readlink -f "$datadir") != $(readlink -f /var/www/owncloud/data) ]] && G_EXEC rm -R /var/www/owncloud/data
 
 			fi
 
@@ -8125,7 +8135,7 @@ location = /.well-known/caldav {
 
 			G_DIETPI-NOTIFY 2 'Apply PHP override settings for Nextcloud.' # https://docs.nextcloud.com/server/stable/admin_manual/configuration_server/server_tuning.html#enable-php-opcache
 			echo -e '; Nextcloud PHP settings\n; priority=98\napc.enable_cli=1\nopcache.enable=1\nopcache.interned_strings_buffer=8
-opcache.max_accelerated_files=10000\nopcache.memory_consumption=128\nopcache.save_comments=1\nopcache.revalidate_freq=1\nmemory_limit=512M' > $FP_PHP_BASE_DIR/mods-available/dietpi-nextcloud.ini
+opcache.max_accelerated_files=10000\nopcache.memory_consumption=128\nopcache.save_comments=1\nopcache.revalidate_freq=5\nmemory_limit=512M' > $FP_PHP_BASE_DIR/mods-available/dietpi-nextcloud.ini
 			G_EXEC phpenmod dietpi-nextcloud
 
 			if (( ${aSOFTWARE_INSTALL_STATE[83]} > 0 )); then
@@ -8205,8 +8215,7 @@ url.redirect += (
 				fi
 
 				# Disable pretty URLs (front controller), if Nextcloud version is lower than 13
-				# shellcheck disable=SC2016
-				if (( $(sed -n '/$OC_VersionString/{s/^[^0-9]*//;s/\..*$//;p;q}' /var/www/nextcloud/version.php) < 13 )); then
+				if (( $(sed -n '/\$OC_VersionString/{s/^[^0-9]*//;s/\..*$//p;q}' /var/www/nextcloud/version.php) < 13 )); then
 
 					sed -i 's/^[[:blank:]]*fastcgi_param front_controller_active true;/\t\t#fastcgi_param front_controller_active true;/g' $nextcloud_conf
 
@@ -8238,10 +8247,10 @@ location = /.well-known/caldav {
 			# Adjusting config file:
 			local config_php='/var/www/nextcloud/config/config.php'
 
-			local datadir=$(grep -m1 '^[[:blank:]]*SOFTWARE_NEXTCLOUD_DATADIR=' /boot/dietpi.txt | sed 's/^[^=]*=//')
+			local datadir=$(sed -n '/^[[:blank:]]*SOFTWARE_NEXTCLOUD_DATADIR=/{s/^[^=]*=//p;q}' /boot/dietpi.txt)
 			[[ $datadir ]] || datadir='/mnt/dietpi_userdata/nextcloud_data'
-			mkdir -p $datadir
-			chown www-data:www-data $datadir
+			G_EXEC mkdir -p "$datadir"
+			G_EXEC chown -R www-data:www-data /var/www/nextcloud "$datadir"
 
 			if [[ -d '/mnt/dietpi_userdata/mysql/nextcloud' ]]; then
 
@@ -8256,64 +8265,64 @@ To remove the existing database (including e.g. contacts, calendar, file tags et
 	# mysqladmin drop nextcloud
 Otherwise to copy an existing instance in place:
 	# rm -R /var/www/nextcloud
+	# mkdir /var/www/nextcloud
 	# cp -a /path/to/existing/nextcloud/. /var/www/nextcloud/
-	# chown -R www-data:www-data /var/www/nextcloud\n
 The install script will now exit. After applying one of the the above, rerun dietpi-software, e.g.:
 	# dietpi-software install 114'
 
-					[[ -f /var/www/nextcloud/occ ]] && rm /var/www/nextcloud/occ
+					[[ -f '/var/www/nextcloud/occ' ]] && G_EXEC rm /var/www/nextcloud/occ
 					/boot/dietpi/dietpi-services start
 					exit 1
 
 				fi
 
-			else
+			elif [[ -f $datadir/dietpi-nextcloud-database-backup.sql ]]; then
 
-				if [[ -f $datadir/dietpi-nextcloud-database-backup.sql ]]; then
+				G_DIETPI-NOTIFY 2 'Nextcloud database backup found, starting recovery...'
+				local dbuser=$(grep -m1 "^[[:blank:]]*'dbuser'" $config_php | mawk -F\' '{print $4}')
+				local dbpass=$(grep -m1 "^[[:blank:]]*'dbpassword'" $config_php | mawk -F\' '{print $4}')
+				/boot/dietpi/func/create_mysql_db nextcloud "$dbuser" "$dbpass"
+				mysql nextcloud < "$datadir/dietpi-nextcloud-database-backup.sql"
+				### Seems to be not needed anymore and can cause double entries: https://help.nextcloud.com/t/howto-change-move-data-directory-after-installation/17170/3?u=michaing
+				# Adjust database data directory entry, in case it changed due to server migration:
+				#G_EXEC mysql -e "update nextcloud.oc_storages set id='local::$datadir/' where id rlike 'local::'"
 
-					G_DIETPI-NOTIFY 2 'Nextcloud database backup found, starting recovery...'
-					local dbuser=$(grep -m1 "^[[:blank:]]*'dbuser'" $config_php | mawk '{print $3}' | sed "s/[',]//g")
-					local dbpass=$(grep -m1 "^[[:blank:]]*'dbpassword'" $config_php | mawk '{print $3}' | sed "s/[',]//g")
-					/boot/dietpi/func/create_mysql_db nextcloud "$dbuser" "$dbpass"
-					mysql nextcloud < $datadir/dietpi-nextcloud-database-backup.sql
-					### Seems to be not needed anymore and can cause double entries: https://help.nextcloud.com/t/howto-change-move-data-directory-after-installation/17170/3?u=michaing
-					# Adjust database data directory entry, in case it changed due to server migration:
-					#mysql -e "update nextcloud.oc_storages set id='local::$datadir/' where id rlike 'local::'"
+			elif ! grep -q "'installed' => true," $config_php 2>/dev/null; then
 
-				elif ! grep -q "'installed' => true," $config_php 2>/dev/null; then
+				local username=$(sed -n '/^[[:blank:]]*SOFTWARE_OWNCLOUD_NEXTCLOUD_USERNAME=/{s/^[^=]*=//p;q}' /boot/dietpi.txt)
+				[[ $username ]] || username='admin'
 
-					local username=$(grep -m1 '^[[:blank:]]*SOFTWARE_OWNCLOUD_NEXTCLOUD_USERNAME=' /boot/dietpi.txt | sed 's/^[^=]*=//')
-					[[ $username ]] || username='admin'
+				# For MariaDB, temporary database admin user needs to be created, as 'root' uses unix_socket login, which cannot be accessed by sudo -u www-data.
+				# - Create random temporary alphanumeric 30 characters password
+				local nc_password=$(tr -dc '[:alnum:]' < /dev/random | head -c30)
+				# - Failsafe: Use non-blocking entropy source, if /dev/random fails
+				(( ${#nc_password} == 30 )) || nc_password=$(tr -dc '[:alnum:]' < /dev/urandom | head -c30)
+				G_EXEC mysql -e "grant all privileges on *.* to tmp_root@localhost identified by '$nc_password' with grant option"
 
-					# For MariaDB, temporary database admin user needs to be created, as 'root' uses unix_socket login, which cannot be accessed by sudo -u www-data.
-					mysql -e "grant all privileges on *.* to 'tmp_root'@'localhost' identified by '$GLOBAL_PW' with grant option"
+				G_EXEC_DESC='Nextcloud ncc install'
+				# - Replace password strings internally to avoid printing it to console
+				G_EXEC_PRE_FUNC(){ acommand[10]=$nc_password acommand[14]=$GLOBAL_PW; }
+				# - Checking output for stack trace to handle internal errors that do not lead to php error exit code
+				# - Workaround Nextcloud 14.0.3 throwing an error, when data dir path contains a symlink: https://github.com/nextcloud/server/issues/12247
+				G_EXEC_POST_FUNC(){
 
-					G_EXEC_DESC='Nextcloud ncc install'
-					# - Replace password string internally to avoid printing it to console
-					G_EXEC_PRE_FUNC(){ acommand[10]=$GLOBAL_PW acommand[14]=$GLOBAL_PW; }
-					# - Checking output for stack trace to handle internal errors that do not lead to php error exit code
-					# - Workaround Nextcloud 14.0.3 throwing an error, when data dir path contains a symlink: https://github.com/nextcloud/server/issues/12247
-					G_EXEC_POST_FUNC(){
+					if (( $exit_code )); then
 
-						if (( $exit_code )); then
+						grep -q 'Following symlinks is not allowed' $fp_log && { cp -a /var/www/nextcloud/core/skeleton/. "$datadir/$username/files/"; exit_code=0; }
 
-							grep -q 'Following symlinks is not allowed' $fp_log && { cp -a /var/www/nextcloud/core/skeleton/. "$datadir/$username/files/"; exit_code=0; }
+					else
 
-						else
+						grep -qi 'Stack trace' $fp_log && exit_code=255
 
-							grep -qi 'Stack trace' $fp_log && exit_code=1337
+					fi
 
-						fi
+				}
+				G_EXEC ncc maintenance:install --no-interaction --database 'mysql' --database-name 'nextcloud' --database-user 'tmp_root' --database-pass '<omitted>' --admin-user "$username" --admin-pass '<omitted>' --data-dir "$datadir"
+				G_EXEC mysql -e 'drop user tmp_root@localhost'
+				unset -v nc_password
 
-					}
-					G_EXEC ncc maintenance:install --no-interaction --database 'mysql' --database-name 'nextcloud' --database-user 'tmp_root' --database-pass '<omitted>' --admin-user "$username" --admin-pass '<omitted>' --data-dir "$datadir"
-
-					# Remove obsolete default data dir
-					[[ $(readlink -f $datadir) != $(readlink -f /var/www/nextcloud/data) ]] && rm -R /var/www/nextcloud/data
-
-					mysql -e 'drop user tmp_root@localhost'
-
-				fi
+				# Remove obsolete default data dir
+				[[ $(readlink -f "$datadir") != $(readlink -f /var/www/nextcloud/data) ]] && G_EXEC rm -R /var/www/nextcloud/data
 
 			fi
 
@@ -8367,6 +8376,7 @@ The install script will now exit. After applying one of the the above, rerun die
 			# Add missing database columns and indices, which is not done automatically by Nextcloud
 			ncc db:add-missing-columns
 			ncc db:add-missing-indices
+			ncc db:add-missing-primary-keys
 
 			# Enable maintenance mode to allow handling by dietpi-services:
 			grep -q "^[[:blank:]]*'maintenance' => true," $config_php || ncc maintenance:mode --on
