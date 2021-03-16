@@ -86,8 +86,8 @@ Acquire::IndexTargets::deb-src::Sources::KeepCompressedAs "xz";
 _EOF_
 	# - Forcing new DEB package config files (during PREP only)
 	echo -e '#clear DPkg::options;\nDPkg::options:: "--force-confmiss,confnew";' > /etc/apt/apt.conf.d/98dietpi-forceconf
-	# - Prefer IPv4 by default to avoid hanging access attempts in some cases, e.g. WiFi bridges
-	#	NB: This needs to match the method in: /DietPi/dietpi/func/dietpi-set_hardware preferipv4 enable
+	# - Force IPv4 by default to avoid hanging access attempts in some cases, e.g. WiFi bridges
+	#	NB: This needs to match the method in: /boot/dietpi/func/dietpi-set_hardware preferipv4 enable
 	echo 'Acquire::ForceIPv4 "true";' > /etc/apt/apt.conf.d/99-dietpi-force-ipv4
 
 	apt-get clean
@@ -105,27 +105,11 @@ _EOF_
 	grep -q 'stretch' /etc/os-release && aAPT_PREREQS+=('apt-transport-https')
 	for i in "${aAPT_PREREQS[@]}"
 	do
-		dpkg-query -s "$i" &> /dev/null && apt-get -y install "$i" && continue
+		dpkg-query -s "$i" &> /dev/null || apt-get -y install "$i" && continue
 		echo -e "[FAILED] Unable to install $i, please try to install it manually:\n\t # apt install $i\n"
 		exit 1
 	done
 	unset -v aAPT_PREREQS
-
-	# Wget: Prefer IPv4 by default to avoid hanging access attempts in some cases
-	# - NB: This needs to match the method in: /boot/dietpi/func/dietpi-set_hardware preferipv4 enable
-	if grep -q '^[[:blank:]]*prefer-family[[:blank:]]*=' /etc/wgetrc; then
-
- 		sed -i '/^[[:blank:]]*prefer-family[[:blank:]]*=/c\prefer-family = IPv4' /etc/wgetrc
-
- 	elif grep -q '^[[:blank:]#;]*prefer-family[[:blank:]]*=' /etc/wgetrc; then
-
- 		sed -i '/^[[:blank:]#;]*prefer-family[[:blank:]]*=/c\prefer-family = IPv4' /etc/wgetrc
-
- 	else
-
- 		echo 'prefer-family = IPv4' >> /etc/wgetrc
-
- 	fi
 
 	# Set Git owner
 	GITOWNER=${GITOWNER:-MichaIng}
@@ -1022,11 +1006,9 @@ Currently installed: $G_DISTRO_NAME (ID: $G_DISTRO)"; then
 
 		for i in "${aservices[@]}"
 		do
-
 			# Loop through known service locations
 			for j in /etc/init.d/$i /{etc,lib,usr/lib,usr/local/lib}/systemd/system/{$i.service{,.d},*.wants/$i.service}
 			do
-
 				[[ -e $j || -L $j ]] || continue
 				[[ -f $j ]] && systemctl disable --now "${j##*/}"
 				# Remove if not attached to any DEB package, else mask
@@ -1038,9 +1020,7 @@ Currently installed: $G_DISTRO_NAME (ID: $G_DISTRO)"; then
 					rm -Rv "$j"
 
 				fi
-
 			done
-
 		done
 
 		# - Remove obsolete SysV service entries
@@ -1204,7 +1184,6 @@ MAILTO=""
 47 1 * * 7 root test -x /usr/sbin/anacron || { cd / && run-parts --report /etc/cron.weekly; }
 52 1 1 * * root test -x /usr/sbin/anacron || { cd / && run-parts --report /etc/cron.monthly; }
 _EOF_'
-
 		#-----------------------------------------------------------------------------------
 		# Network
 		G_DIETPI-NOTIFY 2 'Removing all rfkill soft blocks and the rfkill package'
@@ -1262,6 +1241,9 @@ gateway 192.168.0.1
 wireless-power off
 wpa-conf /etc/wpa_supplicant/wpa_supplicant.conf
 _EOF_'
+		# Prefer IPv4 by default
+		/boot/dietpi/func/dietpi-set_hardware preferipv4 enable
+
 		#-----------------------------------------------------------------------------------
 		# MISC
 		G_DIETPI-NOTIFY 2 'Disabling apt-daily services to prevent random APT cache lock'
