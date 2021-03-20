@@ -43,6 +43,8 @@ Available commands:
 	readonly FP_SETTINGS_OVPN='/var/lib/dietpi/dietpi-vpn/settings_ovpn.conf'
 	readonly FP_SETTINGS_UP='/var/lib/dietpi/dietpi-vpn/up.sh'
 	readonly FP_SETTINGS_DOWN='/var/lib/dietpi/dietpi-vpn/down.sh'
+	readonly KILLSWITCH_UP='/var/lib/dietpi/dietpi-vpn/ks-up.sh'
+	readonly KILLSWITCH_DOWN='/var/lib/dietpi/dietpi-vpn/ks-down.sh'
 	readonly PROTONVPN_SERVERS='/etc/openvpn/protonvpn/serverlist.txt'
 	readonly CLIENT_FILE='/etc/openvpn/client.ovpn'
 	readonly IFACE='tun0'
@@ -127,13 +129,19 @@ Available commands:
 				# Download .ovpn file template
 				G_EXEC curl -sSfL https://raw.githubusercontent.com/$G_GITOWNER/DietPi/$G_GITBRANCH/.conf/dpv/protonvpn.template -o /etc/openvpn/protonvpn/ovpn.template
 
-				if grep -q 'CONFIG_ENABLE_IPV6=1' /boot/dietpi.txt
-				then
-					G_WHIP_MSG 'Note that IPv6 will be disabled when VPN is connected, to prevent IP leakage.'
-					G_EXEC eval "echo -e '#Disables IPv6 on startup.\n#WARNING: Do not remove, this prevents IP address leakage\n/boot/dietpi/func/dietpi-set_software enableipv6 0' > /var/lib/dietpi/dietpi-vpn/up.sh"
-					G_EXEC eval "echo -e '#Re-enables IPv6 on disconnect.\n/boot/dietpi/func/dietpi-set_software enableipv6 1' > /var/lib/dietpi/dietpi-vpn/down.sh"
-				fi
-
+				grep -q 'CONFIG_ENABLE_IPV6=1' /boot/dietpi.txt && G_WHIP_MSG 'Note that IPv6 will be disabled when VPN is connected, to prevent IP leakage.'
+				cat << '_EOF_' > $FP_SETTINGS_UP
+# Disables IPv6 on startup.
+# WARNING: Do not remove, this prevents IP address leakage
+ip6tables-save > /var/lib/dietpi/dietpi-vpn/ip6tables.bak
+ip6tables -P INPUT DROP
+ip6tables -P FORWARD DROP
+ip6tables -P OUTPUT DROP
+_EOF_
+				cat << '_EOF_' > $FP_SETTINGS_DOVN
+# Re-enables IPv6 on disconnect.
+ip6tables-restore < /var/lib/dietpi/dietpi-vpn/ip6tables.bak
+_EOF_
 				PROTONVPN_INSTALLED=1
 			elif [[ $G_WHIP_RETURNED_VALUE == 'None' ]]
 			then
@@ -253,9 +261,13 @@ _EOF_
 		)
 		local autostart_enabled=0 autostart_text='Off'
 		systemctl -q is-enabled dietpi-vpn && { autostart_enabled=1 autostart_text='On'; }
+		local killswitch_enabled=0 killswitch_text='Off'
+		[[ -f '/var/lib/dietpi/dietpi-vpn/killswitch.rules' ]] && { killswitch_enabled=1 killswitch_text='On'; }
+
 		G_WHIP_MENU_ARRAY+=(
 
 			'Autostart' ": [$autostart_text]"
+			'Killswitch' ": [$killswitch_text]"
 			'Refresh' ': Update VPN connection status'
 		)
 		(( $VPN_CONNECTED )) && G_WHIP_MENU_ARRAY+=('Disconnect' '')
@@ -299,6 +311,51 @@ _EOF_
 					G_EXEC_NOEXIT=1 G_EXEC systemctl disable dietpi-vpn
 				else
 					G_EXEC_NOEXIT=1 G_EXEC systemctl enable dietpi-vpn
+				fi
+
+			elif [[ $G_WHIP_RETURNED_VALUE == 'Killswitch' ]]
+			then
+				if (( $killswitch_enabled ))
+				then
+					cat << '_EOF_' > /var/lib/dietpi/dietpi-vpn/killswitch.rules
+*filter
+:INPUT DROP [0:0]
+:FORWARD DROP [0:0]
+:OUTPUT DROP [0:0]
+iptables -P INPUT DROP
+iptables -P FORWARD DROP
+iptables -P OUTPUT DROP
+iptables -A INPUT -m conntrack --ctstate RELATED,ESTABLISHED -j ACCEPT
+iptables -A OUTPUT -o lo -j ACCEPT
+iptables -A OUTPUT -o tun0 -p icmp -j ACCEPT
+iptables -A OUTPUT -d 192.168.0.0/18 -j ACCEPT
+iptables -A OUTPUT -d 172.16.0.0/12 -j ACCEPT
+iptables -A OUTPUT -d 10.0.0.0/8 -j ACCEPT
+iptables -A OUTPUT -p tcp -m multiport --dports 80,443,1194,5060,4569 -d ${VPN_SERVER%.{tcp,udp}.ovpn} -j ACCEPT
+iptables -A OUTPUT -p udp -o -m multiport --dports 80,443,1194,5060,4569 -d ${VPN_SERVER%.{tcp,udp}.ovpn} -j ACCEPT
+iptables -A OUTPUT -o tun0 -j ACCEPT
+COMMIT
+_EOF_
+					cat << _EOF_ > $KILLSWITCH_UP
+iptables-save > /var/lib/dietpi/dietpi-vpn/iptables.bak
+. $FP_SETTINGS_DIETPI
+export VPN_SERVER
+iptables-restore < <(envsubst < /var/lib/dietpi/dietpi-vpn/killswitch.rules)
+_EOF_
+					cat << '_EOF_' > $KILLSWITCH_DOWN
+# Turns off killswitch
+iptables-restore < /var/lib/dietpi/dietpi-vpn/iptables.bak
+rm /var/lib/dietpi/dietpi-vpn/iptables.bak
+_EOF_
+					cat << _EOF_ >> $FP_SETTINGS_UP
+# Turns on killswitch
+$KILLSWITCH_UP
+_EOF_
+					cat << _EOF_ >> $FP_SETTINGS_DOWN
+$KILLSWITCH_DOWN
+_EOF_
+				else
+					G_EXEC rm /var/lib/dietpi/dietpi-vpn/killswitch.rules $KILLSWITCH_DOWN $KILLSWITCH_UP
 				fi
 
 			elif [[ $G_WHIP_RETURNED_VALUE == 'Username' ]]
