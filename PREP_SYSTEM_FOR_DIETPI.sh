@@ -671,18 +671,14 @@ Currently installed: $G_DISTRO_NAME (ID: $G_DISTRO)"; then
 			aPACKAGES_REQUIRED_INSTALL+=('initramfs-tools')
 
 		fi
-		# - Entropy daemon: Use modern rng-tools5 on all devices where it has been proven to work, on RPi rng-tools (default on Raspbian), else haveged: https://github.com/MichaIng/DietPi/issues/2806
-		if [[ $G_HW_MODEL =~ ^(11|14|16|42|58|68|69|72)$ ]]; then # Odroid XU4, RK3399, Odroid C4
+		# - Entropy daemon: Use modern rng-tools5 on all devices where it has been proven to work, else haveged: https://github.com/MichaIng/DietPi/issues/2806
+		if [[ $G_HW_MODEL -lt 10 || $G_HW_MODEL =~ ^(11|14|15|16|24|29|42|58|68|72)$ ]]; then # RPi, Odroid XU4, RK3399, S922X, Odroid C4
 
 			aPACKAGES_REQUIRED_INSTALL+=('rng-tools5')
 
-		elif (( $G_HW_MODEL > 9 )); then
-
-			aPACKAGES_REQUIRED_INSTALL+=('haveged')
-
 		else
 
-			aPACKAGES_REQUIRED_INSTALL+=('rng-tools')
+			aPACKAGES_REQUIRED_INSTALL+=('haveged')
 
 		fi
 		# - Drive power management control
