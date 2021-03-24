@@ -695,7 +695,7 @@ Currently installed: $G_DISTRO_NAME (ID: $G_DISTRO)"; then
 		fi
 
 		# Install gdisk if root file system is on a GPT partition, used by DietPi-FS_partition_resize
-		[[ $(lsblk -ndo PTTYPE "$(lsblk -npo PKNAME "$(findmnt -no SOURCE /)")") == 'gpt' ]] && aPACKAGES_REQUIRED_INSTALL+=('gdisk')
+		[[ $(blkid -s PTTYPE -o value "$(lsblk -npo PKNAME "$(findmnt -no SOURCE /)")") == 'gpt' ]] && aPACKAGES_REQUIRED_INSTALL+=('gdisk')
 
 		# Install file system tools required for file system resizing and fsck
 		while read -r line
@@ -713,7 +713,7 @@ Currently installed: $G_DISTRO_NAME (ID: $G_DISTRO)"; then
 				aPACKAGES_REQUIRED_INSTALL+=('btrfs-progs')
 			fi
 
-		done < <(lsblk -no FSTYPE | sort -u)
+		done < <(blkid -s TYPE -o value | sort -u)
 
 		# Kernel/bootloader/firmware
 		# - We need to install those directly to allow G_AGA() autoremove possible older packages later: https://github.com/MichaIng/DietPi/issues/1285#issuecomment-354602594
