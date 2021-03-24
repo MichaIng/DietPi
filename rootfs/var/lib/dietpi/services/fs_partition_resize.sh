@@ -36,7 +36,8 @@
 	sync
 
 	# GPT partition table: Move backup GPT data structures to the end of the disk
-	[[ $(lsblk -ndo PTTYPE "$ROOT_DRIVE") != 'gpt' ]] || sgdisk -e "$ROOT_DRIVE"
+	# - lsblk -ndo PTTYPE "$ROOT_DRIVE" does not work inside systemd-nspawn containers.
+	[[ $(blkid -s PTTYPE -o value "$ROOT_DRIVE") != 'gpt' ]] || sgdisk -e "$ROOT_DRIVE"
 
 	# Maximise root partition size
 	sfdisk --no-reread --no-tell-kernel -fN"$ROOT_PART" "$ROOT_DRIVE" <<< ',+'
