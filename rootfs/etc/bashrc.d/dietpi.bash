@@ -47,8 +47,7 @@
 	alias dietpi-wifidb='/boot/dietpi/func/dietpi-wifidb'
 	alias dietpi-optimal_mtu='/boot/dietpi/func/dietpi-optimal_mtu'
 	alias dietpi-cloudshell='/boot/dietpi/dietpi-cloudshell'
-	# Deprecated! Use DietPi-VPN
-	alias dietpi-nordvpn='/boot/dietpi/misc/dietpi-vpn'
+	alias dietpi-nordvpn='G_DIETPI-NOTIFY 1 "DietPi-NordVPN has been renamed to DietPi-VPN. Please use the \"dietpi-vpn\" command."'
 	alias dietpi-vpn="/boot/dietpi/misc/dietpi-vpn"
 	alias cpu='/boot/dietpi/dietpi-cpuinfo'
 	# - Optional DietPi software aliases
