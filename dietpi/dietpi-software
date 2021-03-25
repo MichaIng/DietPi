@@ -1404,8 +1404,6 @@ _EOF_
 		do
 			aSOFTWARE_AVAIL_G_HW_MODEL[$software_id,$i]=0
 		done
-		# + BPi Pro
-		aSOFTWARE_AVAIL_G_HW_MODEL[$software_id,51]=1
 		#------------------
 		software_id=71
 
@@ -2715,10 +2713,8 @@ _EOF_
 			# ownCloud up to v10.2
 			elif [[ -f '/var/www/owncloud/version.php' ]]; then
 
-				# shellcheck disable=SC2016
-				local oc_version_major=$(sed -n '/$OC_VersionString/{s/^[^0-9]*//;s/\..*$//;p;q}' /var/www/owncloud/version.php)
-				# shellcheck disable=SC2016
-				local oc_version_minor=$(sed -n '/$OC_VersionString/{s/^[^.]*\.//;s/\..*$//;p;q}' /var/www/owncloud/version.php)
+				local oc_version_major=$(sed -n '/\$OC_VersionString/{s/^[^0-9]*//;s/\..*$//p;q}' /var/www/owncloud/version.php)
+				local oc_version_minor=$(sed -n '/\$OC_VersionString/{s/^[^.]*\.//;s/\..*$//p;q}' /var/www/owncloud/version.php)
 				if (( $oc_version_major < 10 || ( $oc_version_major == 10 && $oc_version_minor < 3 ) )); then
 
 					PHP_NAME='php7.2'
@@ -2871,7 +2867,7 @@ _EOF_
 		local output=0
 
 		local gigabit_device=1
-		(( $G_HW_MODEL < 4 || $G_HW_MODEL == 30 || $G_HW_MODEL == 32 || $G_HW_MODEL == 40 || $G_HW_MODEL == 60 || $G_HW_MODEL == 70 )) && gigabit_device=0
+		(( $G_HW_MODEL < 4 || $G_HW_MODEL == 40 || $G_HW_MODEL == 60 || $G_HW_MODEL == 70 )) && gigabit_device=0
 
 		# Cache size (MB) 1/10th of total mem
 		if (( $1 == 0 )); then
@@ -3135,6 +3131,17 @@ _EOF_
 		return 1
 	}
 
+	# Remove obsolete SysV service
+	# $1: Service name
+	# $2: If set, remove defaults file as well (optional)
+	Remove_SysV()
+	{
+		G_DIETPI-NOTIFY 2 "Removing obsolete SysV $1 service"
+		[[ -f /etc/init.d/$1 ]] && G_EXEC rm "/etc/init.d/$1"
+		G_EXEC update-rc.d "$1" remove
+		[[ $2 && -f /etc/default/$1 ]] && G_EXEC rm "/etc/default/$1"
+	}
+
 	# Run marked software installs
 	Install_Dietpi_Software(){
 
@@ -3145,18 +3152,19 @@ _EOF_
 
 			Banner_Installing
 			# RPi: Block packages from RPi desktop which conflict with a native LXDE desktop: https://github.com/MichaIng/DietPi/issues/1558#issuecomment-691206284
-			if (( $G_HW_MODEL < 10 )); then
-
-				cat << '_EOF_' > /etc/apt/preferences.d/dietpi-lxde
+			(( $G_HW_MODEL > 9 )) || cat << '_EOF_' > /etc/apt/preferences.d/dietpi-lxde
 Package: pcmanfm libfm4 libfm-gtk4 lxpanel lxpanel-data
 Pin: origin archive.raspberrypi.org
 Pin-Priority: -1
 _EOF_
-			fi
 			# https://github.com/MichaIng/DietPi/issues/1558#issuecomment-701547904
 			local dbus_package=
 			(( ${aSOFTWARE_INSTALL_STATE[28]} > 0 )) && dbus_package='dbus-user-session'
+			# LXDE pulls in LightDM as dependency, which sets up itself as display manager so that the system boots automatically into it. So check whether a default display manager is present first, and if not, remove it afterwards.
+			local display_manager=0
+			[[ -f '/etc/systemd/system/display-manager.service' ]] && display_manager=1
 			G_AGI lxde upower firefox-esr $dbus_package xcompmgr
+			[[ $display_manager == 0 && -f '/etc/systemd/system/display-manager.service' ]] && G_EXEC rm /etc/systemd/system/display-manager.service
 
 		fi
 
@@ -3380,15 +3388,7 @@ _EOF_
 			(( ${aSOFTWARE_INSTALL_STATE[89]} == 2 )) && apackages+=("$PHP_NAME-mysql")
 			G_AGI "${apackages[@]}"
 
-			# Remove obsolete sysvinit service as we use the systemd mariadb.service
-			if [[ -f '/etc/init.d/mysql' ]]; then
-
-				G_DIETPI-NOTIFY 2 'Switching from /etc/init.d/mysql to mariadb.service'
-				systemctl disable --now mysql
-				rm /etc/init.d/mysql
-				update-rc.d -f mysql remove
-
-			fi
+			Remove_SysV mysql 1
 
 		fi
 
@@ -3441,11 +3441,8 @@ Package: *\nPin: release n=buster\nPin-Priority: 100' > /etc/apt/preferences.d/d
 
 				else
 
-					# Check URL
-					INSTALL_URL_ADDRESS='https://packages.sury.org/php/apt.gpg'
-					G_CHECK_URL "$INSTALL_URL_ADDRESS"
 					# APT key
-					curl -sSfL "$INSTALL_URL_ADDRESS" | apt-key add -
+					G_EXEC curl -sSfL 'https://packages.sury.org/php/apt.gpg' -o /etc/apt/trusted.gpg.d/dietpi-php.gpg
 					# APT source
 					echo "deb https://packages.sury.org/php/ $G_DISTRO_NAME main" > /etc/apt/sources.list.d/dietpi-php.list
 					# Pin down libssl1.1 version from this repo on Stretch: https://github.com/MichaIng/DietPi/issues/2734
@@ -3667,10 +3664,7 @@ _EOF_
 
 			fi
 
-			chown -R www-data:www-data /var/www/owncloud
-
-			[[ $DEPS_LIST ]] && G_DIETPI-NOTIFY 2 'Installing required PHP modules' && G_AGI $DEPS_LIST
-			DEPS_LIST=
+			[[ $DEPS_LIST ]] && { G_DIETPI-NOTIFY 2 'Installing required PHP modules'; G_AGI $DEPS_LIST; DEPS_LIST=''; }
 
 		fi
 
@@ -3703,10 +3697,7 @@ _EOF_
 
 			fi
 
-			chown -R www-data:www-data /var/www/nextcloud
-
-			[[ $DEPS_LIST ]] && G_DIETPI-NOTIFY 2 'Installing required PHP modules' && G_AGI $DEPS_LIST
-			DEPS_LIST=
+			[[ $DEPS_LIST ]] && { G_DIETPI-NOTIFY 2 'Installing required PHP modules'; G_AGI $DEPS_LIST; DEPS_LIST=''; }
 
 		fi
 
@@ -4452,11 +4443,6 @@ amvdec_vp9' > /etc/modules-load.d/dietpi-c4-kodi.conf
 
 				Download_Install 'https://github.com/hardkernel/wiringPi/archive/master.tar.gz'
 
-			# BPi Pro
-			elif (( $G_HW_MODEL == 51 )); then
-
-				Download_Install 'https://github.com/LeMaker/WiringBP/archive/bananapro.zip'
-
 			fi
 
 			mv WiringBP* wiringPi &> /dev/null # BPi
@@ -4762,9 +4748,7 @@ _EOF_
 
 			G_AGI python3-systemd fail2ban
 
-			# Remove obsolete sysvinit service and traces
-			rm -f /etc/{init.d,default}/fail2ban
-			update-rc.d -f fail2ban remove
+			Remove_SysV fail2ban 1
 
 			# Failsafe
 			G_EXEC systemctl unmask fail2ban
@@ -4899,9 +4883,7 @@ _EOF_
 
 			Banner_Installing
 			G_AGI openvpn iptables
-			# Remove obsolete sysvinit service
-			[[ -f '/etc/init.d/openvpn' ]] && rm /etc/init.d/openvpn
-			update-rc.d -f openvpn remove
+			Remove_SysV openvpn
 
 		fi
 
@@ -6777,6 +6759,9 @@ exec sudo -u $ha_user dash -c '$ha_pyenv_activation; exec pip3 install -U homeas
 			# Generic X server + Mesa OpenGL libraries and utilities
 			DEPS_LIST='xserver-xorg-core xserver-xorg-input-libinput xinit dbus-x11 xfonts-base x11-xserver-utils x11-utils libgl1-mesa-dri mesa-utils mesa-utils-extra'
 
+			# On RPi, add fbdev display driver, as modesetting requires the full- or fake KMS driver overlay being enabled, so that /dev/dri/card0 exists.
+			(( $G_HW_MODEL > 9 )) || DEPS_LIST+=' xserver-xorg-video-fbdev'
+
 			# On VM, add VMware display driver, which offers slightly better performance. VirtualBox can emulate it as well, which es even the nowadays recommended default.
 			(( $G_HW_MODEL == 20 )) && DEPS_LIST+=' xserver-xorg-video-vmware'
 
@@ -7534,9 +7519,7 @@ _EOF_
 
 			Banner_Configuration
 
-			# Remove obsolete sysvinit service
-			[[ -f '/etc/init.d/lighttpd' ]] && rm /etc/init.d/lighttpd
-			update-rc.d -f lighttpd remove
+			Remove_SysV lighttpd
 
 			# Webroot
 			G_CONFIG_INJECT 'server.document-root' 'server.document-root = "/var/www"' /etc/lighttpd/lighttpd.conf
@@ -7655,35 +7638,18 @@ _EOF_
 		if (( ${aSOFTWARE_INSTALL_STATE[$software_id]} == 1 )); then
 
 			Banner_Configuration
-
-			G_DIETPI-NOTIFY 2 'Assuring 4-byte support and InnoDB Barracuda file format with large prefix'
-			cat << _EOF_ > /etc/mysql/mariadb.conf.d/99-dietpi-4byte.cnf
+			# Stretch: Since Buster (MariaDB 10.3) the following settings are removed and default to our needs:
+			# - innodb_large_prefix: https://mariadb.com/kb/en/library/innodb-system-variables/#innodb_large_prefix
+			# - innodb_file_format: https://mariadb.com/kb/en/library/innodb-system-variables/#innodb_file_format
+			if (( $G_DISTRO < 5 ))
+			then
+				G_DIETPI-NOTIFY 2 'Switch to modern InnoDB Barracuda file format'
+				cat << '_EOF_' > /etc/mysql/mariadb.conf.d/97-dietpi.cnf
 [mysqld]
 innodb_large_prefix=1
 innodb_file_format=barracuda
-innodb_file_per_table=1
-character-set-server=utf8mb4
-collation-server=utf8mb4_general_ci
 _EOF_
-			# Since Buster (MariaDB 10.3) the following settings are removed and default to our needs:
-			# - innodb_large_prefix: https://mariadb.com/kb/en/library/innodb-system-variables/#innodb_large_prefix
-			# - innodb_file_format: https://mariadb.com/kb/en/library/innodb-system-variables/#innodb_file_format
-			if (( $G_DISTRO > 4 )); then
-
-				sed -i '/innodb_large_prefix/d' /etc/mysql/mariadb.conf.d/99-dietpi-4byte.cnf
-				sed -i '/innodb_file_format/d' /etc/mysql/mariadb.conf.d/99-dietpi-4byte.cnf
-
 			fi
-
-			# Optimise for reduced memory use: https://github.com/MichaIng/DietPi/issues/605#issue-188930987
-			#cat << _EOF_ > /etc/mysql/mariadb.conf.d/97-dietpi.cnf
-#[mysqld]
-#key_buffer_size=8M
-#max_connections=30
-#query_cache_size=8M
-#query_cache_limit=512K
-#thread_stack=128K
-#_EOF_
 
 		fi
 
@@ -7860,8 +7826,7 @@ _EOF_
 			[[ -d '/var/lib/fahclient' ]] && rm -R /var/lib/fahclient
 			[[ -d '/etc/fahclient' ]] && rm -R /etc/fahclient
 			[[ -f '/etc/default/fahclient' ]] && rm /etc/default/fahclient
-			[[ -f '/etc/init.d/FAHClient' ]] && rm /etc/init.d/FAHClient
-			update-rc.d -f FAHClient remove
+			Remove_SysV FAHClient
 
 			# Prepare our new config + data directory if not yet present
 			if [[ ! -f '/mnt/dietpi_userdata/fahclient/config.xml' ]]; then
@@ -7896,7 +7861,7 @@ _EOF_
 
 			Banner_Configuration
 
-			G_DIETPI-NOTIFY 2 'Enabling needed PHP modules.' # https://doc.owncloud.org/server/administration_manual/installation/manual_installation.html#php-extensions
+			G_DIETPI-NOTIFY 2 'Enabling required PHP modules.' # https://doc.owncloud.org/server/administration_manual/installation/manual_installation.html#php-extensions
 			G_EXEC phpenmod ctype curl dom gd iconv intl json mbstring pdo_mysql posix simplexml xmlreader xmlwriter zip fileinfo opcache apcu redis exif
 
 			G_DIETPI-NOTIFY 2 'Enabling APCu memory cache for PHP command line usage (CLI) as well, including ownCloud occ command and cron jobs.'
@@ -7904,11 +7869,9 @@ _EOF_
 			G_EXEC phpenmod dietpi-owncloud
 
 			# Get version string
-			# shellcheck disable=SC2016
-			local oc_version_major=$(sed -n '/$OC_VersionString/{s/^[^0-9]*//;s/\..*$//;p;q}' /var/www/owncloud/version.php)
+			local oc_version_major=$(sed -n '/\$OC_VersionString/{s/^[^0-9]*//;s/\..*$//p;q}' /var/www/owncloud/version.php)
 			[[ $oc_version_major ]] || oc_version_major=10
-			# shellcheck disable=SC2016
-			local oc_version_minor=$(sed -n '/$OC_VersionString/{s/^[^.]*\.//;s/\..*$//;p;q}' /var/www/owncloud/version.php)
+			local oc_version_minor=$(sed -n '/\$OC_VersionString/{s/^[^.]*\.//;s/\..*$//p;q}' /var/www/owncloud/version.php)
 			[[ $oc_version_minor ]] || oc_version_minor=3
 
 			if (( ${aSOFTWARE_INSTALL_STATE[83]} > 0 )); then
@@ -8016,49 +7979,69 @@ location = /.well-known/caldav {
 			# Adjusting config file:
 			local config_php='/var/www/owncloud/config/config.php'
 
-			local datadir=$(grep -m1 '^[[:blank:]]*SOFTWARE_OWNCLOUD_DATADIR=' /boot/dietpi.txt | sed 's/^[^=]*=//')
+			local datadir=$(sed -n '/^[[:blank:]]*SOFTWARE_OWNCLOUD_DATADIR=/{s/^[^=]*=//p;q}' /boot/dietpi.txt)
 			[[ $datadir ]] || datadir='/mnt/dietpi_userdata/owncloud_data'
-			mkdir -p $datadir
-			chown -R www-data:www-data $datadir
+			G_EXEC mkdir -p "$datadir"
+			G_EXEC chown -R www-data:www-data /var/www/owncloud "$datadir"
 
 			if [[ -d '/mnt/dietpi_userdata/mysql/owncloud' ]]; then
 
 				G_DIETPI-NOTIFY 2 'ownCloud database found, will NOT overwrite.'
+				if [[ ! -f $config_php ]]; then
 
-			else
+					G_WHIP_MSG '[WARNING] Existing ownCloud database was found, but no related install directory\n
+A remaining MariaDB "owncloud" database from an earlier installed instance was found. But the related install directory "/var/www/owncloud/config/config.php" does not exist.
+Since running a fresh install with an existing database can produce data corruption, if the versions do not exactly match, you either need to remove the database or find and place the related install directory.\n
+We cannot predict your aim and do not want to mess or break your data, so please do this manually.\n
+To remove the existing database (including e.g. contacts, calendar, file tags etc.):
+	# mysqladmin drop owncloud
+Otherwise to copy an existing instance in place:
+	# rm -R /var/www/owncloud
+	# mkdir /var/www/owncloud
+	# cp -a /path/to/existing/owncloud/. /var/www/owncloud/
+The install script will now exit. After applying one of the the above, rerun dietpi-software, e.g.:
+	# dietpi-software install 47'
 
-				if [[ -f $datadir/dietpi-owncloud-database-backup.sql ]]; then
-
-					G_DIETPI-NOTIFY 2 'ownCloud database backup found, starting recovery...'
-					local dbuser=$(grep -m1 "^[[:blank:]]*'dbuser'" $config_php | mawk '{print $3}' | sed "s/[',]//g")
-					local dbpass=$(grep -m1 "^[[:blank:]]*'dbpassword'" $config_php | mawk '{print $3}' | sed "s/[',]//g")
-					/boot/dietpi/func/create_mysql_db owncloud "$dbuser" "$dbpass"
-					mysql owncloud < "$datadir"/dietpi-owncloud-database-backup.sql
-					### Seems to be not needed anymore and can cause double entries: https://help.nextcloud.com/t/howto-change-move-data-directory-after-installation/17170/3?u=michaing
-					# Adjust database data directory entry, in case it changed due to server migration:
-					#mysql -e "update owncloud.oc_storages set id='local::$datadir/' where id rlike 'local::'"
-
-				elif ! grep -q "'installed' => true," $config_php 2>/dev/null; then
-
-					local username=$(grep -m1 '^[[:blank:]]*SOFTWARE_OWNCLOUD_NEXTCLOUD_USERNAME=' /boot/dietpi.txt | sed 's/^[^=]*=//')
-					[[ $username ]] || username='admin'
-
-					# For MariaDB, temporary database admin user needs to be created, as 'root' uses unix_socket login, which cannot be accessed by sudo -u www-data.
-					mysql -e "grant all privileges on *.* to 'tmp_root'@'localhost' identified by '$GLOBAL_PW' with grant option"
-
-					G_EXEC_DESC='ownCloud occ install'
-					# - Replace password string internally to avoid printing it to console
-					G_EXEC_PRE_FUNC(){ acommand[10]=$GLOBAL_PW acommand[14]=$GLOBAL_PW; }
-					# - Checking output for stack trace to handle internal errors that do not lead to php error exit code
-					G_EXEC_POST_FUNC(){ grep -qi 'Stack trace' $fp_log && exit_code=1337; }
-					G_EXEC occ maintenance:install --no-interaction --database 'mysql' --database-name 'owncloud' --database-user 'tmp_root' --database-pass '<omitted>' --admin-user "$username" --admin-pass '<omitted>' --data-dir "$datadir"
-
-					# Remove obsolete default data dir
-					[[ $(readlink -f $datadir) != $(readlink -f /var/www/owncloud/data) ]] && rm -R /var/www/owncloud/data
-
-					mysql -e 'drop user tmp_root@localhost'
+					[[ -f '/var/www/owncloud/occ' ]] && G_EXEC rm /var/www/owncloud/occ
+					/boot/dietpi/dietpi-services start
+					exit 1
 
 				fi
+
+			elif [[ -f $datadir/dietpi-owncloud-database-backup.sql ]]; then
+
+				G_DIETPI-NOTIFY 2 'ownCloud database backup found, starting recovery...'
+				local dbuser=$(grep -m1 "^[[:blank:]]*'dbuser'" $config_php | mawk -F\' '{print $4}')
+				local dbpass=$(grep -m1 "^[[:blank:]]*'dbpassword'" $config_php | mawk -F\' '{print $4}')
+				/boot/dietpi/func/create_mysql_db owncloud "$dbuser" "$dbpass"
+				mysql owncloud < "$datadir/dietpi-owncloud-database-backup.sql"
+				### Seems to be not needed anymore and can cause double entries: https://help.nextcloud.com/t/howto-change-move-data-directory-after-installation/17170/3?u=michaing
+				# Adjust database data directory entry, in case it changed due to server migration:
+				#G_EXEC mysql -e "update owncloud.oc_storages set id='local::$datadir/' where id rlike 'local::'"
+
+			elif ! grep -q "'installed' => true," $config_php 2>/dev/null; then
+
+				local username=$(sed -n '/^[[:blank:]]*SOFTWARE_OWNCLOUD_NEXTCLOUD_USERNAME=/{s/^[^=]*=//p;q}' /boot/dietpi.txt)
+				[[ $username ]] || username='admin'
+
+				# For MariaDB, temporary database admin user needs to be created, as 'root' uses unix_socket login, which cannot be accessed by sudo -u www-data.
+				# - Create random temporary alphanumeric 30 characters password
+				local oc_password=$(tr -dc '[:alnum:]' < /dev/random | head -c30)
+				# - Failsafe: Use non-blocking entropy source, if /dev/random fails
+				(( ${#oc_password} == 30 )) || oc_password=$(tr -dc '[:alnum:]' < /dev/urandom | head -c30)
+				G_EXEC mysql -e "grant all privileges on *.* to tmp_root@localhost identified by '$oc_password' with grant option"
+
+				G_EXEC_DESC='ownCloud occ install'
+				# - Replace password strings internally to avoid printing it to console
+				G_EXEC_PRE_FUNC(){ acommand[10]=$oc_password acommand[14]=$GLOBAL_PW; }
+				# - Checking output for stack trace to handle internal errors that do not lead to php error exit code
+				G_EXEC_POST_FUNC(){ grep -qi 'Stack trace' $fp_log && exit_code=255; }
+				G_EXEC occ maintenance:install --no-interaction --database 'mysql' --database-name 'owncloud' --database-user 'tmp_root' --database-pass '<omitted>' --admin-user "$username" --admin-pass '<omitted>' --data-dir "$datadir"
+				G_EXEC mysql -e 'drop user tmp_root@localhost'
+				unset -v oc_password
+
+				# Remove obsolete default data dir
+				[[ $(readlink -f "$datadir") != $(readlink -f /var/www/owncloud/data) ]] && G_EXEC rm -R /var/www/owncloud/data
 
 			fi
 
@@ -8126,7 +8109,7 @@ location = /.well-known/caldav {
 
 			G_DIETPI-NOTIFY 2 'Apply PHP override settings for Nextcloud.' # https://docs.nextcloud.com/server/stable/admin_manual/configuration_server/server_tuning.html#enable-php-opcache
 			echo -e '; Nextcloud PHP settings\n; priority=98\napc.enable_cli=1\nopcache.enable=1\nopcache.interned_strings_buffer=8
-opcache.max_accelerated_files=10000\nopcache.memory_consumption=128\nopcache.save_comments=1\nopcache.revalidate_freq=1\nmemory_limit=512M' > $FP_PHP_BASE_DIR/mods-available/dietpi-nextcloud.ini
+opcache.max_accelerated_files=10000\nopcache.memory_consumption=128\nopcache.save_comments=1\nopcache.revalidate_freq=5\nmemory_limit=512M' > $FP_PHP_BASE_DIR/mods-available/dietpi-nextcloud.ini
 			G_EXEC phpenmod dietpi-nextcloud
 
 			if (( ${aSOFTWARE_INSTALL_STATE[83]} > 0 )); then
@@ -8206,8 +8189,7 @@ url.redirect += (
 				fi
 
 				# Disable pretty URLs (front controller), if Nextcloud version is lower than 13
-				# shellcheck disable=SC2016
-				if (( $(sed -n '/$OC_VersionString/{s/^[^0-9]*//;s/\..*$//;p;q}' /var/www/nextcloud/version.php) < 13 )); then
+				if (( $(sed -n '/\$OC_VersionString/{s/^[^0-9]*//;s/\..*$//p;q}' /var/www/nextcloud/version.php) < 13 )); then
 
 					sed -i 's/^[[:blank:]]*fastcgi_param front_controller_active true;/\t\t#fastcgi_param front_controller_active true;/g' $nextcloud_conf
 
@@ -8239,10 +8221,10 @@ location = /.well-known/caldav {
 			# Adjusting config file:
 			local config_php='/var/www/nextcloud/config/config.php'
 
-			local datadir=$(grep -m1 '^[[:blank:]]*SOFTWARE_NEXTCLOUD_DATADIR=' /boot/dietpi.txt | sed 's/^[^=]*=//')
+			local datadir=$(sed -n '/^[[:blank:]]*SOFTWARE_NEXTCLOUD_DATADIR=/{s/^[^=]*=//p;q}' /boot/dietpi.txt)
 			[[ $datadir ]] || datadir='/mnt/dietpi_userdata/nextcloud_data'
-			mkdir -p $datadir
-			chown www-data:www-data $datadir
+			G_EXEC mkdir -p "$datadir"
+			G_EXEC chown -R www-data:www-data /var/www/nextcloud "$datadir"
 
 			if [[ -d '/mnt/dietpi_userdata/mysql/nextcloud' ]]; then
 
@@ -8257,64 +8239,64 @@ To remove the existing database (including e.g. contacts, calendar, file tags et
 	# mysqladmin drop nextcloud
 Otherwise to copy an existing instance in place:
 	# rm -R /var/www/nextcloud
+	# mkdir /var/www/nextcloud
 	# cp -a /path/to/existing/nextcloud/. /var/www/nextcloud/
-	# chown -R www-data:www-data /var/www/nextcloud\n
 The install script will now exit. After applying one of the the above, rerun dietpi-software, e.g.:
 	# dietpi-software install 114'
 
-					[[ -f /var/www/nextcloud/occ ]] && rm /var/www/nextcloud/occ
+					[[ -f '/var/www/nextcloud/occ' ]] && G_EXEC rm /var/www/nextcloud/occ
 					/boot/dietpi/dietpi-services start
 					exit 1
 
 				fi
 
-			else
+			elif [[ -f $datadir/dietpi-nextcloud-database-backup.sql ]]; then
 
-				if [[ -f $datadir/dietpi-nextcloud-database-backup.sql ]]; then
+				G_DIETPI-NOTIFY 2 'Nextcloud database backup found, starting recovery...'
+				local dbuser=$(grep -m1 "^[[:blank:]]*'dbuser'" $config_php | mawk -F\' '{print $4}')
+				local dbpass=$(grep -m1 "^[[:blank:]]*'dbpassword'" $config_php | mawk -F\' '{print $4}')
+				/boot/dietpi/func/create_mysql_db nextcloud "$dbuser" "$dbpass"
+				mysql nextcloud < "$datadir/dietpi-nextcloud-database-backup.sql"
+				### Seems to be not needed anymore and can cause double entries: https://help.nextcloud.com/t/howto-change-move-data-directory-after-installation/17170/3?u=michaing
+				# Adjust database data directory entry, in case it changed due to server migration:
+				#G_EXEC mysql -e "update nextcloud.oc_storages set id='local::$datadir/' where id rlike 'local::'"
 
-					G_DIETPI-NOTIFY 2 'Nextcloud database backup found, starting recovery...'
-					local dbuser=$(grep -m1 "^[[:blank:]]*'dbuser'" $config_php | mawk '{print $3}' | sed "s/[',]//g")
-					local dbpass=$(grep -m1 "^[[:blank:]]*'dbpassword'" $config_php | mawk '{print $3}' | sed "s/[',]//g")
-					/boot/dietpi/func/create_mysql_db nextcloud "$dbuser" "$dbpass"
-					mysql nextcloud < $datadir/dietpi-nextcloud-database-backup.sql
-					### Seems to be not needed anymore and can cause double entries: https://help.nextcloud.com/t/howto-change-move-data-directory-after-installation/17170/3?u=michaing
-					# Adjust database data directory entry, in case it changed due to server migration:
-					#mysql -e "update nextcloud.oc_storages set id='local::$datadir/' where id rlike 'local::'"
+			elif ! grep -q "'installed' => true," $config_php 2>/dev/null; then
 
-				elif ! grep -q "'installed' => true," $config_php 2>/dev/null; then
+				local username=$(sed -n '/^[[:blank:]]*SOFTWARE_OWNCLOUD_NEXTCLOUD_USERNAME=/{s/^[^=]*=//p;q}' /boot/dietpi.txt)
+				[[ $username ]] || username='admin'
 
-					local username=$(grep -m1 '^[[:blank:]]*SOFTWARE_OWNCLOUD_NEXTCLOUD_USERNAME=' /boot/dietpi.txt | sed 's/^[^=]*=//')
-					[[ $username ]] || username='admin'
+				# For MariaDB, temporary database admin user needs to be created, as 'root' uses unix_socket login, which cannot be accessed by sudo -u www-data.
+				# - Create random temporary alphanumeric 30 characters password
+				local nc_password=$(tr -dc '[:alnum:]' < /dev/random | head -c30)
+				# - Failsafe: Use non-blocking entropy source, if /dev/random fails
+				(( ${#nc_password} == 30 )) || nc_password=$(tr -dc '[:alnum:]' < /dev/urandom | head -c30)
+				G_EXEC mysql -e "grant all privileges on *.* to tmp_root@localhost identified by '$nc_password' with grant option"
 
-					# For MariaDB, temporary database admin user needs to be created, as 'root' uses unix_socket login, which cannot be accessed by sudo -u www-data.
-					mysql -e "grant all privileges on *.* to 'tmp_root'@'localhost' identified by '$GLOBAL_PW' with grant option"
+				G_EXEC_DESC='Nextcloud ncc install'
+				# - Replace password strings internally to avoid printing it to console
+				G_EXEC_PRE_FUNC(){ acommand[10]=$nc_password acommand[14]=$GLOBAL_PW; }
+				# - Checking output for stack trace to handle internal errors that do not lead to php error exit code
+				# - Workaround Nextcloud 14.0.3 throwing an error, when data dir path contains a symlink: https://github.com/nextcloud/server/issues/12247
+				G_EXEC_POST_FUNC(){
 
-					G_EXEC_DESC='Nextcloud ncc install'
-					# - Replace password string internally to avoid printing it to console
-					G_EXEC_PRE_FUNC(){ acommand[10]=$GLOBAL_PW acommand[14]=$GLOBAL_PW; }
-					# - Checking output for stack trace to handle internal errors that do not lead to php error exit code
-					# - Workaround Nextcloud 14.0.3 throwing an error, when data dir path contains a symlink: https://github.com/nextcloud/server/issues/12247
-					G_EXEC_POST_FUNC(){
+					if (( $exit_code )); then
 
-						if (( $exit_code )); then
+						grep -q 'Following symlinks is not allowed' $fp_log && { cp -a /var/www/nextcloud/core/skeleton/. "$datadir/$username/files/"; exit_code=0; }
 
-							grep -q 'Following symlinks is not allowed' $fp_log && { cp -a /var/www/nextcloud/core/skeleton/. "$datadir/$username/files/"; exit_code=0; }
+					else
 
-						else
+						grep -qi 'Stack trace' $fp_log && exit_code=255
 
-							grep -qi 'Stack trace' $fp_log && exit_code=1337
+					fi
 
-						fi
+				}
+				G_EXEC ncc maintenance:install --no-interaction --database 'mysql' --database-name 'nextcloud' --database-user 'tmp_root' --database-pass '<omitted>' --admin-user "$username" --admin-pass '<omitted>' --data-dir "$datadir"
+				G_EXEC mysql -e 'drop user tmp_root@localhost'
+				unset -v nc_password
 
-					}
-					G_EXEC ncc maintenance:install --no-interaction --database 'mysql' --database-name 'nextcloud' --database-user 'tmp_root' --database-pass '<omitted>' --admin-user "$username" --admin-pass '<omitted>' --data-dir "$datadir"
-
-					# Remove obsolete default data dir
-					[[ $(readlink -f $datadir) != $(readlink -f /var/www/nextcloud/data) ]] && rm -R /var/www/nextcloud/data
-
-					mysql -e 'drop user tmp_root@localhost'
-
-				fi
+				# Remove obsolete default data dir
+				[[ $(readlink -f "$datadir") != $(readlink -f /var/www/nextcloud/data) ]] && G_EXEC rm -R /var/www/nextcloud/data
 
 			fi
 
@@ -8368,6 +8350,7 @@ The install script will now exit. After applying one of the the above, rerun die
 			# Add missing database columns and indices, which is not done automatically by Nextcloud
 			ncc db:add-missing-columns
 			ncc db:add-missing-indices
+			ncc db:add-missing-primary-keys
 
 			# Enable maintenance mode to allow handling by dietpi-services:
 			grep -q "^[[:blank:]]*'maintenance' => true," $config_php || ncc maintenance:mode --on
@@ -8386,10 +8369,7 @@ The install script will now exit. After applying one of the the above, rerun die
 			# Buster: systemd unit
 			if [[ -f '/lib/systemd/system/coturn.service' ]]; then
 
-				# Remove sysvinit service traces
-				[[ -f '/etc/init.d/coturn' ]] && rm /etc/init.d/coturn
-				update-rc.d -f coturn remove
-				[[ -f '/etc/default/coturn' ]] && rm /etc/default/coturn
+				Remove_SysV coturn 1
 
 				# Disable coturn logging by default, this can be overridden via /etc/turnserver.conf
 				G_EXEC mkdir -p /etc/systemd/system/coturn.service.d
@@ -8514,9 +8494,7 @@ NB: This port needs to be forwarded by your router and/or opened in your firewal
 			Banner_Configuration
 
 			# Remove obsolete service and environment files
-			[[ -f '/etc/init.d/transmission-daemon' ]] && rm -v /etc/init.d/transmission-daemon
-			update-rc.d -f transmission-daemon remove
-			[[ -f '/etc/default/transmission-daemon' ]] && rm -v /etc/default/transmission-daemon
+			Remove_SysV transmission-daemon 1
 			[[ -f '/etc/init/transmission-daemon.conf' ]] && rm -v /etc/init/transmission-daemon.conf
 
 			# Make "dietpi" the primary group and "debian-transmission" a supplementary group, to make downloads R/W accessible for other media software and network shares.
@@ -8586,10 +8564,7 @@ NB: This port needs to be forwarded by your router and/or opened in your firewal
 			dps_index=$software_id Download_Install 'mpd.conf' /etc/mpd.conf
 
 			# Service
-			# - Remove obsolete sysvinit service and config
-			[[ -f '/etc/init.d/mpd' ]] && rm /etc/init.d/mpd
-			update-rc.d -f mpd remove
-			[[ -f '/etc/default/mpd' ]] && rm /etc/default/mpd
+			Remove_SysV mpd 1
 			# - Upstream systemd unit: https://github.com/MusicPlayerDaemon/MPD/blob/master/systemd/system/mpd.service.in
 			# - Debian package systemd unit: https://deb.debian.org/debian/pool/main/m/mpd/
 			# - Run systemd unit as mpd user instead of using config-file based user change, to preserve supplementary group permissions (i.e. dietpi)
@@ -9114,10 +9089,8 @@ _EOF_
 			Create_User -g dietpi -G minidlna -d /var/lib/minidlna minidlna
 
 			# Remove obsolete service files
-			[[ -f '/etc/init.d/minidlna' ]] && G_EXEC rm /etc/init.d/minidlna
-			G_EXEC update-rc.d -f minidlna remove
+			Remove_SysV minidlna 1
 			[[ -f '/lib/systemd/system/minidlna.service' ]] && G_EXEC rm /lib/systemd/system/minidlna.service
-			[[ -f '/etc/default/minidlna' ]] && G_EXEC rm /etc/default/minidlna
 			[[ -d '/var/log/minidlna' ]] && G_EXEC rm -R /var/log/minidlna
 
 			# Service
@@ -9365,9 +9338,7 @@ _EOF_
 			fi
 
 			# Remove sysvinit service leftovers, installed by Debian APT package
-			[[ -f '/etc/init.d/deluged' ]] && rm -v /etc/init.d/deluged
-			update-rc.d -f deluged remove
-			[[ -f '/etc/default/deluged' ]] && rm -v /etc/default/deluged
+			Remove_SysV deluged 1
 			[[ -d '/var/lib/deluged' ]] && rm -R /var/lib/deluged
 
 			# Permissions
@@ -9381,9 +9352,7 @@ _EOF_
 
 			Banner_Configuration
 
-			# Remove obsolete SysV service
-			[[ -f '/etc/init.d/webmin' ]] && rm /etc/init.d/webmin
-			update-rc.d -f webmin remove
+			Remove_SysV webmin
 
 			# Service
 			cat << '_EOF_' > /etc/systemd/system/webmin.service
@@ -9649,9 +9618,7 @@ _EOF_
 			# Remove bundled SysVinit service
 			systemctl disable --now logitechmediaserver &> /dev/null
 			killall -qwr squeezeboxserver* # Provided service may not wait for exit, kill: https://github.com/MichaIng/DietPi/issues/1613#issuecomment-372787574
-			[[ -f '/etc/init.d/logitechmediaserver' ]] && rm /etc/init.d/logitechmediaserver
-			update-rc.d -f logitechmediaserver remove
-			[[ -f '/etc/default/logitechmediaserver' ]] && rm /etc/default/logitechmediaserver
+			Remove_SysV logitechmediaserver 1
 
 			# Grant user access to DietPi media files
 			G_EXEC usermod -aG dietpi squeezeboxserver
@@ -9915,9 +9882,7 @@ _EOF_
 
 			Banner_Configuration
 
-			# Remove obsolete sysvinit service
-			[[ -f '/etc/init.d/grafana-server' ]] && rm /etc/init.d/grafana-server
-			update-rc.d -f grafana-server remove
+			Remove_SysV grafana-server
 
 			# Link DB/plugins to userdata location
 			if [[ -d '/mnt/dietpi_userdata/grafana' ]]; then
@@ -10549,10 +10514,7 @@ _EOF_
 
 			Banner_Configuration
 
-			# Remove obsolete sysvinit service and config
-			[[ -f '/etc/init.d/tor' ]] && rm /etc/init.d/tor
-			update-rc.d -f tor remove
-			[[ -f '/etc/default/tor' ]] && rm /etc/default/tor
+			Remove_SysV tor 1
 
 			# Tor config
 			cat << _EOF_ > /etc/tor/torrc
@@ -10652,14 +10614,14 @@ _EOF_
 			Banner_Configuration
 
 			# Copy config
-			cp /etc/emonhub/conf/default/emonhub /etc/default/emonhub
+			G_EXEC cp /etc/emonhub/conf/default/emonhub /etc/default/emonhub
 
 			# Setup service
-			cp /etc/emonhub/service/emonhub /etc/init.d/emonhub
-			chmod +x /etc/init.d/emonhub
-			update-rc.d emonhub defaults
+			G_EXEC cp /etc/emonhub/service/emonhub /etc/init.d/emonhub
+			G_EXEC chmod +x /etc/init.d/emonhub
+			G_EXEC update-rc.d emonhub defaults
 
-			chmod +x -R /etc/emonhub
+			G_EXEC chmod -R +x /etc/emonhub
 
 			# Disable onboard Bluetooth, if present, to recover ttyAMA0
 			if (( $G_HW_ONBOARD_WIFI )); then
@@ -10676,7 +10638,7 @@ _EOF_
 			# Disable console on ttyAMA0
 			/boot/dietpi/func/dietpi-set_hardware serialconsole disable ttyAMA0
 
-			# Apply user API KEY
+			# Apply user API key
 			USER_EMONHUB_APIKEY_CURRENT=$(sed -n '/^[[:blank:]]*SOFTWARE_EMONHUB_APIKEY=/{s/^[^=]*=//p;q}' /boot/dietpi.txt)
 			sed -i "/apikey/c\        apikey = $USER_EMONHUB_APIKEY_CURRENT" /etc/emonhub/conf/emonhub.conf
 
@@ -11669,9 +11631,7 @@ genre         = none
 public        = no
 #localDumpFile = /mnt/dietpi_userdata/darkice_recording.ogg
 _EOF_
-			# systemd service for DarkIce
-			[[ -f '/etc/init.d/darkice' ]] && rm /etc/init.d/darkice
-			update-rc.d -f darkice remove
+			Remove_SysV darkice
 			[[ -f '/etc/default/icecast2' ]] && rm /etc/default/icecast2
 			cat << _EOF_ > /etc/systemd/system/darkice.service
 [Unit]
@@ -11692,9 +11652,7 @@ _EOF_
 
 			Banner_Configuration
 
-			# Remove obsolete sysvinit service
-			[[ -f '/etc/init.d/mosquitto' ]] && rm -v /etc/init.d/mosquitto
-			update-rc.d -f mosquitto remove
+			Remove_SysV mosquitto
 
 			# Add systemd unit if missing, since Buster and with official repo it is part of the DEB package: https://github.com/eclipse/mosquitto/tree/master/service/systemd
 			[[ -f '/lib/systemd/system/mosquitto.service' ]] || cat << '_EOF_' > /etc/systemd/system/mosquitto.service
@@ -12056,15 +12014,15 @@ _EOF_
 
 			Banner_Configuration
 
-			cp /etc/couchpotato/init/ubuntu.default /etc/default/couchpotato
+			G_EXEC cp /etc/couchpotato/init/ubuntu.default /etc/default/couchpotato
 			sed -i '/CP_USER=/c\CP_USER=root' /etc/default/couchpotato
 			sed -i '/CP_HOME=/c\CP_HOME=/etc/couchpotato' /etc/default/couchpotato
 			sed -i '/CP_DATA=/c\CP_DATA=/mnt/dietpi_userdata/couchpotato' /etc/default/couchpotato
 
-			mkdir -p /mnt/dietpi_userdata/couchpotato
+			G_EXEC mkdir -p /mnt/dietpi_userdata/couchpotato
 			#Create_User -d /mnt/dietpi_userdata/couchpotato couchpotato
 
-			cp /etc/couchpotato/init/ubuntu /etc/init.d/couchpotato
+			G_EXEC cp /etc/couchpotato/init/ubuntu /etc/init.d/couchpotato
 
 		fi
 
@@ -13579,6 +13537,7 @@ _EOF_
 			## Leave PHP repo in place to avoid issues with remaining dependency packages that were pulled from this repo
 			# APT repo
 			#[[ -f '/etc/apt/sources.list.d/dietpi-php.list' ]] && rm /etc/apt/sources.list.d/dietpi-php.list
+			#[[ -f '/etc/apt/trusted.gpg.d/dietpi-php.gpg' ]] && rm /etc/apt/trusted.gpg.d/dietpi-php.gpg
 			# APT preferences
 			#[[ -f '/etc/apt/preferences.d/dietpi-openssl' ]] && rm /etc/apt/preferences.d/dietpi-openssl
 			#[[ -f '/etc/apt/preferences.d/dietpi-php' ]] && rm /etc/apt/preferences.d/dietpi-php
@@ -15501,8 +15460,8 @@ _EOF_
 		if (( ${aSOFTWARE_INSTALL_STATE[$software_id]} == -1 )); then
 
 			Banner_Uninstalling
-			# Do a full database backup, if mariadb binary is still available: https://github.com/MichaIng/DietPi/issues/3257#issuecomment-568764107
-			if command -v mysql > /dev/null; then
+			# Do a full database backup, if binary is still available: https://github.com/MichaIng/DietPi/issues/3257#issuecomment-568764107
+			if command -v mysqldump > /dev/null; then
 
 				G_WHIP_MSG "Creating MariaDB database backup before uninstallation:\n\nIn case of accident, we create a database backup for you. You can remove it manually, if you are sure, that you don't need it any more.\n\n/mnt/dietpi_userdata/mariadb-database-backup.sql"
 				G_EXEC systemctl start mariadb
@@ -15511,9 +15470,8 @@ _EOF_
 
 			fi
 
-			G_AGP mariadb-server php*-mysql
-			rm -Rf /{mnt/dietpi_userdata,var/lib,var/log,etc}/mysql
-			[[ -d '/root/.mysql_history' ]] && rm -R /root/.mysql_history
+			G_AGP mariadb-server 'php*-mysql'
+			rm -Rf /{mnt/dietpi_userdata,var/lib,var/log,etc}/mysql /{root,home/*}/.mysql_history
 
 		fi
 
@@ -16338,14 +16296,13 @@ _EOF_
 			done
 
 			# Reinstall, prompt for backup
-			if [[ $1 == 'reinstall' ]]; then
+			if [[ $command == 'reinstall' && $GOSTARTINSTALL == 1 ]]; then
 
-				(( $GOSTARTINSTALL )) && G_PROMPT_BACKUP
+				G_PROMPT_BACKUP
 
 			# Uninstall | Finish up and clear non-required packages
-			elif [[ $1 == 'uninstall' ]]; then
+			elif [[ $command == 'uninstall' && $UNINSTALL_REQUIRED == 1 ]]; then
 
-				(( $UNINSTALL_REQUIRED )) || return 0
 				Uninstall_Software
 				Write_InstallFileList
 
