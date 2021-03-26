@@ -4530,7 +4530,8 @@ _EOF_
 				INSTALL_URL_ADDRESS='https://repo.mosquitto.org/debian/mosquitto-repo.gpg.key'
 				G_CHECK_URL "$INSTALL_URL_ADDRESS"
 				G_EXEC eval "curl -sSLf '$INSTALL_URL_ADDRESS' | gpg --dearmor -o /etc/apt/trusted.gpg.d/dietpi-mosquitto.gpg --yes"
-				G_EXEC eval "echo 'deb https://repo.mosquitto.org/debian/ $G_DISTRO_NAME main' > /etc/apt/sources.list.d/dietpi-mosquitto.list"
+				# The Bullseye suite does not yet exist: https://repo.mosquitto.org/debian/dists/
+				G_EXEC eval "echo 'deb https://repo.mosquitto.org/debian/ ${G_DISTRO_NAME/bullseye/buster} main' > /etc/apt/sources.list.d/dietpi-mosquitto.list"
 				G_AGUP
 
 			fi
@@ -8602,9 +8603,7 @@ After=network-online.target sound.target dietpi-boot.service
 [Service]
 Type=notify
 User=mpd
-PermissionsStartOnly=true
-ExecStartPre=$(command -v mkdir) -p /run/mpd
-ExecStartPre=$(command -v chown) -R mpd: /run/mpd
+RuntimeDirectory=mpd
 ExecStart=$(command -v mpd) --no-daemon /etc/mpd.conf
 
 # allow MPD to use real-time priority 50
@@ -8628,7 +8627,7 @@ WantedBy=multi-user.target
 Also=mpd.socket
 _EOF_
 			# - systemd socket activation, not shipped by our custom package
-			[[ -f '/lib/systemd/system/mpd.socket' ]] || cat << _EOF_ > /lib/systemd/system/mpd.socket
+			[[ -f '/lib/systemd/system/mpd.socket' ]] || cat << '_EOF_' > /lib/systemd/system/mpd.socket
 [Socket]
 ListenStream=/run/mpd/socket
 ListenStream=6600
@@ -8664,7 +8663,7 @@ _EOF_
 			Download_Test_Media
 
 			# Permissions
-			chown -R mpd: /var/log/mpd /mnt/dietpi_userdata/.mpd_cache /etc/mpd.conf
+			G_EXEC chown -R mpd: /var/log/mpd /mnt/dietpi_userdata/.mpd_cache /etc/mpd.conf
 
 		fi
 
@@ -11677,8 +11676,18 @@ _EOF_
 
 			Remove_SysV mosquitto
 
-			# Add systemd unit if missing, since Buster and with official repo it is part of the DEB package: https://github.com/eclipse/mosquitto/tree/master/service/systemd
-			[[ -f '/lib/systemd/system/mosquitto.service' ]] || cat << '_EOF_' > /etc/systemd/system/mosquitto.service
+			# Config: /etc/mosquitto/conf.d exists, but doubled settings do not override each other and lead to a startup failure instead, which breaks the purpose we want to use it for.
+			# - Disable PID file, not required for systemd handling
+			G_EXEC sed -i '/^[[:blank:]]*pid_file[[:blank:]]/d' /etc/mosquitto/mosquitto.conf
+			# - Log to default STDERR > systemd-journald
+			G_EXEC sed -i '/^[[:blank:]]*log_dest[[:blank:]]/d' /etc/mosquitto/mosquitto.conf
+			# - Add default listener at port 1883 not bound to loopback IP: https://github.com/MichaIng/DietPi/issues/4133
+			G_PRESERVE=1 G_CONFIG_INJECT 'listener[[:blank:]]' 'listener 1883' /etc/mosquitto/mosquitto.conf
+			# - Allow anonymous client connections by default: https://github.com/MichaIng/DietPi/issues/4133
+			G_PRESERVE=1 G_CONFIG_INJECT 'allow_anonymous[[:blank:]]' 'allow_anonymous true' /etc/mosquitto/mosquitto.conf
+
+			# Add/override default systemd unit: https://github.com/eclipse/mosquitto/tree/master/service/systemd
+			cat << '_EOF_' > /etc/systemd/system/mosquitto.service
 [Unit]
 Description=Mosquitto MQTT Broker (DietPi)
 Documentation=man:mosquitto.conf(5) man:mosquitto(8)
@@ -11688,11 +11697,9 @@ After=network-online.target dietpi-boot.service
 [Service]
 Type=notify
 NotifyAccess=main
-ExecStartPre=/bin/mkdir -m 740 -p /var/log/mosquitto
-ExecStartPre=/bin/chown mosquitto: /var/log/mosquitto
+User=mosquitto
 ExecStart=/usr/sbin/mosquitto -c /etc/mosquitto/mosquitto.conf
 ExecReload=/bin/kill -HUP $MAINPID
-Restart=on-failure
 
 [Install]
 WantedBy=multi-user.target
@@ -13725,6 +13732,7 @@ _EOF_
 			[[ -d '/etc/systemd/system/mosquitto.service.d' ]] && rm -R /etc/systemd/system/mosquitto.service.d
 			G_AGP mosquitto
 
+			[[ -d '/etc/mosquitto' ]] && rm -R /etc/mosquitto
 			[[ -f '/etc/apt/sources.list.d/dietpi-mosquitto.list' ]] && rm -v /etc/apt/sources.list.d/dietpi-mosquitto.list
 			[[ -f '/etc/apt/trusted.gpg.d/dietpi-mosquitto.gpg' ]] && rm -v /etc/apt/trusted.gpg.d/dietpi-mosquitto.gpg
 
