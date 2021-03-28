@@ -1,22 +1,26 @@
 #!/bin/bash
 {
 	#////////////////////////////////////
-	# DietPi VPN
+	# DietPi-VPN
 	#
 	#////////////////////////////////////
 	# Created by Daniel Knight / daniel.knight@dietpi.com / dietpi.com
+	# Updated by MichaIng / micha@dietpi.com / dietpi.com
+	# Reworked by ravenclaw900 / https://github.com/ravenclaw900
 	#
 	#////////////////////////////////////
 	#
 	# Info:
-	# - GUI to setup a NordVPN or ProtonVPN connection
+	# - Location: /boot/dietpi/dietpi-vpn
+	# - GUI to setup a VPN client connection
 	# - Allows to automatically connect on boot
-	# - Allows to add post-up and pre-down scripts
+	# - Allows to enable a killswitch
+	# - Allows to add custom post-up and pre-down scripts
 	readonly USAGE='
 Usage: dietpi-vpn [<command>]
 Available commands:
-  <empty>		Interactive menu to edit, connect and apply VPN settings
-  status		Print VPN connection status info
+  <empty>		Interactive menu to control VPN settings and connection
+  status		Print VPN connection status
 '	#////////////////////////////////////
 
 	# Grab input
@@ -36,16 +40,21 @@ Available commands:
 	fi
 	# Import DietPi-Globals --------------------------------------------------------------
 
-	readonly FP_SETTINGS_DIETPI='/var/lib/dietpi/dietpi-vpn/settings_dietpi.conf'
-	readonly FP_SETTINGS_OVPN='/var/lib/dietpi/dietpi-vpn/settings_ovpn.conf'
-	readonly FP_SETTINGS_UP='/var/lib/dietpi/dietpi-vpn/up.sh'
-	readonly FP_SETTINGS_DOWN='/var/lib/dietpi/dietpi-vpn/down.sh'
-	readonly VPN_UP='/var/lib/dietpi/dietpi-vpn/vpn-up.sh'
-	readonly VPN_DOWN='/var/lib/dietpi/dietpi-vpn/vpn-down.sh'
-	readonly PROTONVPN_SERVERS='/etc/openvpn/protonvpn/serverlist.txt'
-	readonly CLIENT_FILE='/etc/openvpn/client.ovpn'
+	readonly FP_SETTINGS='/var/lib/dietpi/dietpi-vpn'
+	readonly FP_SETTINGS_DIETPI="$FP_SETTINGS/settings_dietpi.conf"
+	readonly FP_SETTINGS_OVPN="$FP_SETTINGS/settings_ovpn.conf"
+	readonly FP_CUSTOM_UP="$FP_SETTINGS/up.sh"
+	readonly FP_CUSTOM_DOWN="$FP_SETTINGS/down.sh"
+	readonly FP_STATIC_UP="$FP_SETTINGS/static_up.sh"
+	readonly FP_STATIC_DOWN="$FP_SETTINGS/static_down.sh"
+	readonly FP_NORDVPN='/etc/openvpn/nordvpn'
+	readonly FP_PROTONVPN='/etc/openvpn/protonvpn'
+	readonly FP_PROTONVPN_SERVERS="$FP_PROTONVPN/serverlist.txt"
+	readonly FP_PROTONVPN_TEMPLATE="$FP_PROTONVPN/template.ovpn"
+	readonly FP_CLIENT_OVPN='/etc/openvpn/client.ovpn'
 	readonly IFACE='tun0'
-	readonly MAX_WAIT_FOR_CONNECTION=10 # seconds
+	readonly CONNECTION_TIMEOUT=10 # seconds
+
 	VPN_PROVIDER=
 	VPN_USERNAME=
 	VPN_PASSWORD=
@@ -56,7 +65,7 @@ Available commands:
 	RX='N/A'
 	TX='N/A'
 
-	Update_Wan_Ip(){ WAN_IP=$(curl -sSfLm 3 https://ifconfig.co/json 2>&1 | mawk -F\" '/"ip"/{o=$4}/"country"/{c=$4}/"region_name"/{c=$4"-"c}END{if(c){o=o" "c}if(o){print o;exit}{print}}'); }
+	Update_WAN_IP(){ WAN_IP=$(curl -sSfLm 3 https://ifconfig.co/json 2>&1 | mawk -F\" '/"ip"/{o=$4}/"country"/{c=$4}/"region_name"/{c=$4"-"c}END{if(c){o=o" "c}if(o){print o;exit}{print}}'); }
 
 	Check_Connected()
 	{
@@ -85,71 +94,72 @@ Available commands:
 	{
 		if [[ $VPN_PROVIDER == 'NordVPN' ]]
 		then
-			[[ -d '/etc/openvpn/nordvpn' && $1 != '-f' ]] && return 0
+			[[ $1 != '-f' && -d $FP_NORDVPN ]] && return 0
 			[[ $1 != '-f' ]] || G_WHIP_YESNO 'This will remove all NordVPN server files and perform a fresh download of NordVPN server configurations. Once completed, you will need to reselect a NordVPN server from the new list.\n\nDo you want to continue?' || return 0
 			G_EXEC curl -sSfLO 'https://downloads.nordcdn.com/configs/archives/servers/ovpn.zip'
 			VPN_SERVER=
-			[[ -d '/etc/openvpn/nordvpn' ]] && G_EXEC_DESC='Removing old NordVPN server configs' G_EXEC rm -R /etc/openvpn/nordvpn
-			G_EXEC mkdir -p /etc/openvpn/nordvpn
-			G_EXEC unzip -o ovpn.zip -d /etc/openvpn/nordvpn
+			[[ -d $FP_NORDVPN ]] && G_EXEC_DESC='Removing old NordVPN server configs' G_EXEC rm -R $FP_NORDVPN
+			G_EXEC mkdir -p $FP_NORDVPN
+			G_EXEC unzip -o ovpn.zip -d $FP_NORDVPN
 			G_EXEC_NOEXIT=1 G_EXEC rm ovpn.zip
 
 		elif [[ $VPN_PROVIDER == 'ProtonVPN' ]]
 		then
-			[[ -d '/etc/openvpn/protonvpn' && $1 != '-f' ]] && return 0
+			[[ $1 != '-f' && -d $FP_PROTONVPN ]] && return 0
 			[[ $1 != '-f' ]] || G_WHIP_YESNO 'This will remove all ProtonVPN server files and perform a fresh download of the ProtonVPN server list. Once completed, you will need to reselect a ProtonVPN server from the new list.\n\nDo you want to continue?' || return 0
 			G_EXEC curl -sSfLO 'https://api.protonvpn.ch/vpn/logicals'
 			VPN_SERVER=
-			[[ -d '/etc/openvpn/protonvpn' ]] && G_EXEC_DESC='Removing old ProtonVPN server configs' G_EXEC rm -R /etc/openvpn/protonvpn
-			G_EXEC mkdir -p /etc/openvpn/protonvpn
-			sed 's/"Domain":"/\n/g' logicals | mawk -F\" 'NR % 2 == 0 {print $1}' > $PROTONVPN_SERVERS
+			[[ -d $FP_PROTONVPN ]] && G_EXEC_DESC='Removing old ProtonVPN server configs' G_EXEC rm -R $FP_PROTONVPN
+			G_EXEC mkdir -p $FP_PROTONVPN
+			sed 's/"Domain":"/\n/g' logicals | mawk -F\" 'NR % 2 == 0 {print $1}' > $FP_PROTONVPN_SERVERS
 			G_EXEC_NOEXIT=1 G_EXEC rm logicals
 
 			# Download .ovpn file template
-			G_EXEC curl -sSfL "https://raw.githubusercontent.com/$G_GITOWNER/DietPi/$G_GITBRANCH/.conf/dpv/protonvpn.template" -o /etc/openvpn/protonvpn/ovpn.template
+			G_EXEC curl -sSfL "https://raw.githubusercontent.com/$G_GITOWNER/DietPi/$G_GITBRANCH/.conf/dpv/protonvpn.template" -o $FP_PROTONVPN_TEMPLATE
 
 		elif [[ $VPN_PROVIDER == 'Custom' ]]
 		then
-			G_WHIP_MSG 'Please select your custom .ovpn client config file from the next file browser dialogue. It will be copied to /etc/openvpn/client.ovpn and loaded from there.'
+			G_WHIP_MSG "Please select your custom .ovpn client config file from the next file browser dialogue. It will be copied to $FP_CLIENT_OVPN and loaded from there."
 			/boot/dietpi/dietpi-explorer 1 /etc/openvpn || return 1
 			G_EXEC umask 0077
-			G_EXEC cp "$(</tmp/.dietpi-explorer_selected_location)" /etc/openvpn/client.ovpn
+			G_EXEC cp "$(</tmp/.dietpi-explorer_selected_location)" $FP_CLIENT_OVPN
 			G_EXEC umask 0022
+			# Parse server IP/domain from client config, required for killswitch
+			VPN_SERVER=$(mawk '$1=="remote" {print $2;exit}' $FP_CLIENT_OVPN)
 		fi
 
 			grep -q 'CONFIG_ENABLE_IPV6=1' /boot/dietpi.txt && G_WHIP_MSG 'Note that IPv6 will be disabled when VPN is connected, to prevent IPv6 leakage.'
-			cat << '_EOF_' > $VPN_UP
+			cat << _EOF_ > $FP_STATIC_UP
 #!/bin/bash
-# Disables IPv6 on startup.
-# WARNING: Do not remove, this prevents IPv6 address leakage
+# Disable IPv6 on connect to prevent IPv6 leakage
 sysctl -w net.ipv6.conf.all.disable_ipv6=1
 sysctl -w net.ipv6.conf.default.disable_ipv6=1
 # If enabled, turn on killswitch
-if [[ -f /var/lib/dietpi/dietpi-vpn/killswitch.rules ]]
-	then
-	iptables-save > /var/lib/dietpi/dietpi-vpn/iptables.bak
+if [[ -f $FP_SETTINGS/killswitch.rules ]]
+then
+	iptables-save > $FP_SETTINGS/iptables.bak
 	. $FP_SETTINGS_DIETPI
 	[[ \$VPN_SERVER == *'udp'* ]] && VPN_SERVER=\${VPN_SERVER%.udp.ovpn} || VPN_SERVER=\${VPN_SERVER%.tcp.ovpn}
 	export VPN_SERVER
-	iptables-restore < <(envsubst < /var/lib/dietpi/dietpi-vpn/killswitch.rules)
+	iptables-restore < <(envsubst < $FP_SETTINGS/killswitch.rules)
 fi
 _EOF_
-			cat << '_EOF_' > $VPN_DOWN
+			cat << _EOF_ > $FP_STATIC_DOWN
 #!/bin/dash
-# Re-enables IPv6 on disconnect.
+# Re-enables IPv6 on disconnect
 if grep -q 'CONFIG_ENABLE_IPV6=1' /boot/dietpi.txt
 then
 	sysctl -w net.ipv6.conf.all.disable_ipv6=0
 	sysctl -w net.ipv6.conf.default.disable_ipv6=0
 fi
 # If enabled, turn off killswitch
-if [ -f /var/lib/dietpi/dietpi-vpn/killswitch.rules ]
+if [ -f $FP_SETTINGS/killswitch.rules ]
 then
-	iptables-restore < /var/lib/dietpi/dietpi-vpn/iptables.bak
-	rm /var/lib/dietpi/dietpi-vpn/iptables.bak
+	iptables-restore < $FP_SETTINGS/iptables.bak
+	rm $FP_SETTINGS/iptables.bak
 fi
 _EOF_
-			G_EXEC chmod +x "$VPN_UP" "$VPN_DOWN"
+			G_EXEC chmod +x $FP_STATIC_UP $FP_STATIC_DOWN
 	}
 
 	Read_Settings(){ [[ -f $FP_SETTINGS_DIETPI ]] && . $FP_SETTINGS_DIETPI; }
@@ -161,8 +171,6 @@ _EOF_
 			G_WHIP_MSG '[FAILED] You need to enter your VPN username + password and select a server, before settings can be applied.'
 			return 1
 		fi
-
-		G_EXEC systemctl stop dietpi-vpn
 
 		# Assure files are generated with strict modes right form the start
 		G_EXEC umask 0077
@@ -182,36 +190,37 @@ _EOF_
 		if [[ $VPN_PROVIDER == 'ProtonVPN' ]]
 		then
 			export PROTOCOL VPN_SERVER
-			G_EXEC eval "envsubst < '/etc/openvpn/protonvpn/ovpn.template' > $CLIENT_FILE"
+			G_EXEC eval "envsubst < $FP_PROTONVPN_TEMPLATE > $FP_CLIENT_OVPN"
 
 		elif [[ $VPN_PROVIDER == 'NordVPN' ]]
 		then
-			G_EXEC cp -f "/etc/openvpn/nordvpn/ovpn_$PROTOCOL/$VPN_SERVER" $CLIENT_FILE
+			G_EXEC cp -f "$FP_NORDVPN/ovpn_$PROTOCOL/$VPN_SERVER" $FP_CLIENT_OVPN
 		fi
 
 		G_EXEC umask 0022
-		G_EXEC chmod 0600 $FP_SETTINGS_OVPN $FP_SETTINGS_DIETPI $CLIENT_FILE
-		G_EXEC chown root:root $FP_SETTINGS_OVPN $FP_SETTINGS_DIETPI $CLIENT_FILE
+		G_EXEC chmod 0600 $FP_SETTINGS_OVPN $FP_SETTINGS_DIETPI $FP_CLIENT_OVPN
+		G_EXEC chown root:root $FP_SETTINGS_OVPN $FP_SETTINGS_DIETPI $FP_CLIENT_OVPN
 
-		G_CONFIG_INJECT 'auth-user-pass([[:blank:]]|$)' "auth-user-pass $FP_SETTINGS_OVPN" $CLIENT_FILE
-		G_CONFIG_INJECT 'script-security[[:blank:]]' 'script-security 2' $CLIENT_FILE 'auth[[:blank:]]'
-		# Apply or remove user-written scripts
+		# Apply credentials to client config
+		G_CONFIG_INJECT 'auth-user-pass([[:blank:]]|$)' "auth-user-pass $FP_SETTINGS_OVPN" $FP_CLIENT_OVPN
+
+		# Apply static up/down scripts to client config
+		G_CONFIG_INJECT 'script-security[[:blank:]]' 'script-security 2' $FP_CLIENT_OVPN 'auth[[:blank:]]'
+		G_CONFIG_INJECT 'up[[:blank:]]' "up $FP_STATIC_UP" $FP_CLIENT_OVPN 'script-security[[:blank:]]'
+		G_CONFIG_INJECT 'down[[:blank:]]' "down $FP_STATIC_DOWN" $FP_CLIENT_OVPN 'up[[:blank:]]'
+
+		# Apply or remove custom up/down scripts from client file
 		# shellcheck disable=SC2015
-		[[ -f $FP_SETTINGS_UP ]] && G_CONFIG_INJECT 'route-up[[:blank:]]' "route-up $FP_SETTINGS_UP" $CLIENT_FILE 'auth[[:blank:]]' || G_EXEC sed -i '/^[[:blank:]]*route-up[[:blank:]]/d' $CLIENT_FILE
+		[[ -f $FP_CUSTOM_UP ]] && G_CONFIG_INJECT 'route-up[[:blank:]]' "route-up $FP_CUSTOM_UP" $FP_CLIENT_OVPN 'up[[:blank:]]' || G_EXEC sed -i '/^[[:blank:]]*route-up[[:blank:]]/d' $FP_CLIENT_OVPN
 		# shellcheck disable=SC2015
-		[[ -f $FP_SETTINGS_DOWN ]] && G_CONFIG_INJECT 'route-pre-down[[:blank:]]' "route-pre-down $FP_SETTINGS_DOWN" $CLIENT_FILE 'auth[[:blank:]]' || G_EXEC sed -i '/^[[:blank:]]*route-pre-down[[:blank:]]/d' $CLIENT_FILE
+		[[ -f $FP_CUSTOM_DOWN ]] && G_CONFIG_INJECT 'route-pre-down[[:blank:]]' "route-pre-down $FP_CUSTOM_DOWN" $FP_CLIENT_OVPN 'down[[:blank:]]' || G_EXEC sed -i '/^[[:blank:]]*route-pre-down[[:blank:]]/d' $FP_CLIENT_OVPN
+
+		# Establish and test connection
 		G_EXEC systemctl restart dietpi-vpn
-
-		# Apply or remove the default scripts that are run on VPN up or down
-		# shellcheck disable=SC2015
-		[[ -f $VPN_UP ]] && G_CONFIG_INJECT 'up[[:blank:]]' "up $VPN_UP" $CLIENT_FILE 'auth[[:blank:]]' || G_EXEC sed -i "\|^[[:blank:]]*up $VPN_UP|d" $CLIENT_FILE
-		# shellcheck disable=SC2015
-		[[ -f $VPN_DOWN ]] && G_CONFIG_INJECT 'down[[:blank:]]' "down $VPN_DOWN" $CLIENT_FILE 'auth[[:blank:]]' || G_EXEC sed -i "\|^[[:blank:]]*down $VPN_UP|d" $CLIENT_FILE
-
 		local i=1
-		until Check_Connected || (( $i > $MAX_WAIT_FOR_CONNECTION ))
+		until Check_Connected || (( $i > $CONNECTION_TIMEOUT ))
 		do
-			G_DIETPI-NOTIFY -2 "Waiting for connection ($((i++))/$MAX_WAIT_FOR_CONNECTION)"
+			G_DIETPI-NOTIFY -2 "Waiting for connection ($((i++))/$CONNECTION_TIMEOUT)"
 			sleep 1
 		done
 
@@ -268,7 +277,7 @@ _EOF_
 		local autostart_enabled=0 autostart_text='Off'
 		systemctl -q is-enabled dietpi-vpn && { autostart_enabled=1 autostart_text='On'; }
 		local killswitch_enabled=0 killswitch_text='Off'
-		[[ -f '/var/lib/dietpi/dietpi-vpn/killswitch.rules' ]] && { killswitch_enabled=1 killswitch_text='On'; }
+		[[ -f $FP_SETTINGS/killswitch.rules ]] && { killswitch_enabled=1 killswitch_text='On'; }
 
 		G_WHIP_MENU_ARRAY=(
 
@@ -303,12 +312,12 @@ _EOF_
 			if [[ $G_WHIP_RETURNED_VALUE == 'Apply' ]]
 			then
 				Save_Settings
-				Update_Wan_Ip
+				Update_WAN_IP
 
 			elif [[ $G_WHIP_RETURNED_VALUE == 'Edit'* ]]
 			then
-				local fp=$FP_SETTINGS_UP
-				[[ $G_WHIP_RETURNED_VALUE == *'Down' ]] && fp=$FP_SETTINGS_DOWN
+				local fp=$FP_CUSTOM_UP
+				[[ $G_WHIP_RETURNED_VALUE == *'Down' ]] && fp=$FP_CUSTOM_DOWN
 				[[ -f $fp ]] || echo -e '#!/bin/bash\n# Clear this file completely, including line breaks, to have it removed.' > $fp
 				nano $fp
 				if [[ -s $fp ]]
@@ -329,10 +338,12 @@ _EOF_
 
 			elif [[ $G_WHIP_RETURNED_VALUE == 'Killswitch' ]]
 			then
-				if (( ! $killswitch_enabled ))
+				if (( $killswitch_enabled ))
 				then
+					G_EXEC rm $FP_SETTINGS/killswitch.rules
+				else
 					G_AG_CHECK_INSTALL_PREREQ iptables
-					cat << '_EOF_' > /var/lib/dietpi/dietpi-vpn/killswitch.rules
+					cat << '_EOF_' > $FP_SETTINGS/killswitch.rules
 *filter
 :INPUT DROP [0:0]
 :FORWARD DROP [0:0]
@@ -347,9 +358,6 @@ _EOF_
 -A INPUT -m conntrack --ctstate RELATED,ESTABLISHED -j ACCEPT
 COMMIT
 _EOF_
-
-				else
-					G_EXEC rm -f /var/lib/dietpi/dietpi-vpn/killswitch.rules
 				fi
 
 			elif [[ $G_WHIP_RETURNED_VALUE == 'Provider' ]]
@@ -369,7 +377,7 @@ _EOF_
 			elif [[ $G_WHIP_RETURNED_VALUE == 'Disconnect' ]]
 			then
 				G_EXEC systemctl stop dietpi-vpn
-				Update_Wan_Ip
+				Update_WAN_IP
 				LAST_SELECTED_NAME='Refresh'
 
 			elif [[ $G_WHIP_RETURNED_VALUE == 'Server' ]]
@@ -389,7 +397,7 @@ _EOF_
 				G_WHIP_MENU_ARRAY=()
 				if [[ $VPN_PROVIDER == 'NordVPN' ]]
 				then
-					for i in "/etc/openvpn/nordvpn/ovpn_$PROTOCOL/"*.ovpn
+					for i in "$FP_NORDVPN/ovpn_$PROTOCOL/"*.ovpn
 					do
 						G_WHIP_MENU_ARRAY+=("${i##*/}" '')
 					done
@@ -399,16 +407,16 @@ _EOF_
 					# Get the list of server names from the file
 					while read -r server
 					do
-  						G_WHIP_MENU_ARRAY+=("$server" '')
+						G_WHIP_MENU_ARRAY+=("$server" '')
 
-					done < "$PROTONVPN_SERVERS"
+					done < "$FP_PROTONVPN_SERVERS"
 				fi
 				G_WHIP_DEFAULT_ITEM=$VPN_SERVER
 				G_WHIP_MENU 'Please select a VPN server to use:' && VPN_SERVER=$G_WHIP_RETURNED_VALUE
 
 			elif [[ $G_WHIP_RETURNED_VALUE == 'Refresh' ]]
 			then
-				Update_Wan_Ip
+				Update_WAN_IP
 
 			elif [[ $G_WHIP_RETURNED_VALUE == 'Update' ]]
 			then
@@ -418,7 +426,7 @@ _EOF_
 			then
 				G_WHIP_YESNO 'WARNING: This will turn off DietPi-VPN and will remove all configuration files.\n\nIf you want to use DietPi-VPN in the future, you will have to go through the setup again.'
 				G_EXEC systemctl disable --now dietpi-vpn
-				G_EXEC rm -Rf /etc/openvpn/{client.o,nord,proton}vpn /var/lib/dietpi/dietpi-vpn
+				G_EXEC rm -Rf $FP_CLIENT_OVPN $FP_SETTINGS $FP_NORDVPN $FP_PROTONVPN
 				exit 0
 			fi
 		else
@@ -432,7 +440,7 @@ _EOF_
 	#-----------------------------------------------------------------------------------
 	if [[ $INPUT == 'status' ]]
 	then
-		if [[ ! -f $CLIENT_FILE ]]
+		if [[ ! -f $FP_CLIENT_OVPN ]]
 		then
 			echo -e "\e[33m$G_PROGRAM_NAME is not configured! Please run: \"dietpi-vpn\"\e[0m"
 
@@ -452,9 +460,9 @@ _EOF_
 	else
 		G_AG_CHECK_INSTALL_PREREQ openvpn
 		Read_Settings
-		[[ -d '/var/lib/dietpi/dietpi-vpn' ]] || G_EXEC mkdir -p /var/lib/dietpi/dietpi-vpn
+		[[ -d $FP_SETTINGS ]] || G_EXEC mkdir -p $FP_SETTINGS
 		[[ $VPN_PROVIDER ]] || Menu_Provider || exit 0
-		Update_Wan_Ip
+		Update_WAN_IP
 
 		until (( $TARGETMENUID < 0 ))
 		do
