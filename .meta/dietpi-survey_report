@@ -141,8 +141,10 @@
 	#-----------------------------------------------------------
 	# Globals - Survey
 	#-----------------------------------------------------------
+	DATE=
 	SURVEY_COUNT_TOTAL=0
 	SURVEY_COUNT_OPTIN=0
+	SURVEY_COUNT_OPTOUT=0
 
 	declare -A aDIETPI_VERSION
 	declare -A aDEVICE_NAME
@@ -499,106 +501,166 @@
 		aSOFTWARE_NAME7_1[$i]=${aSOFTWARE_NAME7_0[$i]}
 	done
 
+	# $1 = File name
+	Process_File()
+	{
+		local file=$1 version branch device arch cpu_count distro autostart automated iface raspbian software asoftware=()
+		local BENCH_VERSION BENCH_HW_MODEL BENCH_CPU BENCH_ROOTFS_WRITE BENCH_ROOTFS_READ BENCH_RAM_WRITE BENCH_RAM_READ BENCH_CUSTOMFS_WRITE BENCH_CUSTOMFS_READ BENCH_CPU_TEMP_START BENCH_CPU_TEMP_END BENCH_NET_LAN_SPEED
+		while read -r line
+		do
+			case line in
+
+				'#'*) :;; # Pre-v7.1
+				'((aDIETPI_VERSION['7.[[:digit:]]']++))'|'((aDIETPI_VERSION['6.[123][[:digit:]]']++))') version=${line#*'['} version=${line%']'*};;
+				'((aGIT_BRANCH['+([[:graph:]])']++))') version=${line#*'['} version=${line%']'*};; # since v6.17
+				'((aDEVICE_NAME['+([[:print:]])']++))') device=${line#*'['} device=${line%']'*};;
+				'((aCPU_ARCH['+([[:graph:]])']++))') arch=${line#*'['} arch=${line%']'*};;
+				'((aCPU_COUNT['+([[:digit:]])']++))') cpu_count=${line#*'['} cpu_count=${line%']'*};;
+				'((aDISTRO_VERSION['+([[:alpha:]])']++))') distro=${line#*'['} distro=${line%']'*};;
+				'((aAUTOSTART_OPTION[${aAUTOSTART_NAME['+([[:digit:]])']:='+([[:digit:]])'}]++))') autostart=${line##*'['} autostart=${line%%']'*};;
+				'((aAUTO_SETUP_AUTOMATED['[01]']++))') automated=${line#*'['} automated=${line%']'*};;
+				'((aNETWORK_INTERFACE['+([[:graph:]])']++))') iface=${line#*'['} iface=${line%']'*};;
+				'((aRASPBIAN['[01]']++))') raspbian=${line#*'['} raspbian=${line%']'*};; # since v6.31
+				'((aSOFTWARE[${aSOFTWARE_NAME'${version/./_}'['+([[:digit:]])']:='+([[:digit:]])'}]++))') software=${line##*'['} software=${line%%']'*};;
+				'BENCH_VERSION='[12]) BENCH_VERSION=${line#*'='};; # 1 until v6.23, 2 afterwards
+				'BENCH_HW_MODEL='+([[:digit:]])) BENCH_HW_MODEL=${line#*'='};;
+				'BENCH_CPU=') BENCH_CPU=${line#*\'} BENCH_CPU=${line%\'};;
+				'BENCH_ROOTFS_WRITE=') BENCH_ROOTFS_WRITE=${line#*\'} BENCH_ROOTFS_WRITE=${line%\'};;
+				'BENCH_ROOTFS_READ=') BENCH_ROOTFS_READ=${line#*\'} BENCH_ROOTFS_READ=${line%\'};;
+				'BENCH_RAM_WRITE=') BENCH_RAM_WRITE=${line#*\'} BENCH_RAM_WRITE=${line%\'};;
+				'BENCH_RAM_READ=') BENCH_RAM_READ=${line#*\'} BENCH_RAM_READ=${line%\'};;
+				'BENCH_CUSTOMFS_WRITE=') BENCH_CUSTOMFS_WRITE=${line#*\'} BENCH_CUSTOMFS_WRITE=${line%\'};;
+				'BENCH_CUSTOMFS_READ=') BENCH_CUSTOMFS_READ=${line#*\'} BENCH_CUSTOMFS_READ=${line%\'};;
+				'BENCH_CPU_TEMP_START=') BENCH_CPU_TEMP_START=${line#*\'} BENCH_CPU_TEMP_START=${line%\'};;
+				'BENCH_CPU_TEMP_END=') BENCH_CPU_TEMP_END=${line#*\'} BENCH_CPU_TEMP_END=${line%\'};;
+				'BENCH_NET_LAN_SPEED=') BENCH_NET_LAN_SPEED=${line#*\'} BENCH_NET_LAN_SPEED=${line%\'};;
+				*) mv -v "/home/dietpi-survey/survey/$file" /home/dietpi-survey/invalid/; return 1; # Invalid line
+
+			esac
+
+			# Validate and process software name if present
+			[[ $software ]] || continue
+			eval "software=\${aSOFTWARE_NAME${version/./_}[$software]}"
+			[[ $software ]] || { mv -v "/home/dietpi-survey/survey/$file" /home/dietpi-survey/invalid/; return 1; }
+			asoftware+=("$software")
+			unset -v software
+
+		done < "$file"
+
+		# Values that must exist
+		[[ $version && $device && $arch && $cpu_count && $distro && $autostart && ${aAUTOSTART_NAME[$autostart]} && $automated && $iface ]] || { mv -v "/home/dietpi-survey/survey/$file" /home/dietpi-survey/invalid/; return 1; }
+
+		# Valid content
+		((SURVEY_COUNT_OPTIN++))
+
+		# Add to global arrays
+		((aDIETPI_VERSION["$version"]++))
+		[[ $branch ]] && ((aGIT_BRANCH["$branch"]++))
+		((aDEVICE_NAME["$device"]++))
+		((aCPU_ARCH["$arch"]++))
+		((aCPU_COUNT["$cpu_count"]++))
+		((aAUTOSTART_OPTION[${aAUTOSTART_NAME["$autostart"]}]++))
+		((aAUTO_SETUP_AUTOMATED["$automated"]++))
+		((aNETWORK_INTERFACE["$iface"]++))
+		((aRASPBIAN["$raspbian"]++))
+		((aDIETPI_VERSION["$version"]++))
+		for i in "${asoftware[@]}"
+		do
+			((aSOFTWARE["$i"]++))
+		done
+
+		# Process benchmark results is present and hardware ID valid
+		[[ $BENCH_VERSION && $BENCH_HW_MODEL && ${aHW_NAME[$BENCH_HW_MODEL]} ]] || continue
+
+		# CPU
+		# - BENCH_CPU: Remove decimal point, equals times 100 since CPU time is always in x.xx
+		BENCH_CPU=${BENCH_CPU/.}
+		if [[ $BENCH_CPU =~ ^[0-9]*[1-9][0-9]*$ && $BENCH_CPU_TEMP_START =~ ^[0-9]+$ && $BENCH_CPU_TEMP_END =~ ^[0-9]+$ ]]; then
+
+			aBENCH_CPU[$BENCH_HW_MODEL,${aBENCH_CPU_INDEX[$BENCH_HW_MODEL]:=0}]=$BENCH_CPU
+
+			# Patch for 5 digit CPU temps: https://github.com/MichaIng/DietPi/issues/2715
+			(( $BENCH_CPU_TEMP_START > 200 )) && (( BENCH_CPU_TEMP_START /= 1000 ))
+			(( $BENCH_CPU_TEMP_END > 200 )) && (( BENCH_CPU_TEMP_END /= 1000 ))
+
+			aBENCH_CPU_TEMP_START[$BENCH_HW_MODEL,${aBENCH_CPU_INDEX[$BENCH_HW_MODEL]}]=$BENCH_CPU_TEMP_START
+			aBENCH_CPU_TEMP_END[$BENCH_HW_MODEL,${aBENCH_CPU_INDEX[$BENCH_HW_MODEL]}]=$BENCH_CPU_TEMP_END
+			((aBENCH_CPU_INDEX[$BENCH_HW_MODEL]++))
+
+		fi
+
+		# RootFS
+		# - Remove decimal places
+		BENCH_ROOTFS_WRITE=${BENCH_ROOTFS_WRITE%%.*}
+		BENCH_ROOTFS_READ=${BENCH_ROOTFS_READ%%.*}
+		if [[ $BENCH_ROOTFS_WRITE =~ ^[0-9]*[1-9][0-9]*$ && $BENCH_ROOTFS_READ =~ ^[0-9]*[1-9][0-9]*$ ]]; then
+
+			aBENCH_ROOTFS_WRITE[$BENCH_HW_MODEL,${aBENCH_ROOTFS_INDEX[$BENCH_HW_MODEL]:=0}]=$BENCH_ROOTFS_WRITE
+			aBENCH_ROOTFS_READ[$BENCH_HW_MODEL,${aBENCH_ROOTFS_INDEX[$BENCH_HW_MODEL]}]=$BENCH_ROOTFS_READ
+			((aBENCH_ROOTFS_INDEX[$BENCH_HW_MODEL]++))
+
+		fi
+
+		# RAM
+		# - https://github.com/MichaIng/DietPi/issues/2715 | nullify this score and ignore it in min/max/avg processing.
+		# - Remove decimal places
+		BENCH_RAM_WRITE=${BENCH_RAM_WRITE%%.*}
+		BENCH_RAM_READ=${BENCH_RAM_READ%%.*}
+		if [[ $BENCH_VERSION =~ ^[0-9]+$ && $BENCH_RAM_WRITE =~ ^[0-9]*[1-9][0-9]*$ && $BENCH_RAM_READ =~ ^[0-9]*[1-9][0-9]*$ ]] && (( $BENCH_VERSION > 1 )); then
+
+			aBENCH_RAM_WRITE[$BENCH_HW_MODEL,${aBENCH_RAM_INDEX[$BENCH_HW_MODEL]:=0}]=$BENCH_RAM_WRITE
+			aBENCH_RAM_READ[$BENCH_HW_MODEL,${aBENCH_RAM_INDEX[$BENCH_HW_MODEL]}]=$BENCH_RAM_READ
+			((aBENCH_RAM_INDEX[$BENCH_HW_MODEL]++))
+
+		fi
+
+		# Custom FS
+		# - Remove decimal places
+		BENCH_CUSTOMFS_WRITE=${BENCH_CUSTOMFS_WRITE%%.*}
+		BENCH_CUSTOMFS_READ=${BENCH_CUSTOMFS_READ%%.*}
+		if [[ $BENCH_CUSTOMFS_WRITE =~ ^[0-9]*[1-9][0-9]*$ && $BENCH_CUSTOMFS_READ =~ ^[0-9]*[1-9][0-9]*$ ]]; then
+
+			aBENCH_CUSTOMFS_WRITE[$BENCH_HW_MODEL,${aBENCH_CUSTOMFS_INDEX[$BENCH_HW_MODEL]:=0}]=$BENCH_CUSTOMFS_WRITE
+			aBENCH_CUSTOMFS_READ[$BENCH_HW_MODEL,${aBENCH_CUSTOMFS_INDEX[$BENCH_HW_MODEL]}]=$BENCH_CUSTOMFS_READ
+			((aBENCH_CUSTOMFS_INDEX[$BENCH_HW_MODEL]++))
+
+		fi
+
+		# LAN
+		# - Remove decimal places
+		BENCH_NET_LAN_SPEED=${BENCH_NET_LAN_SPEED%%.*}
+		if [[ $BENCH_NET_LAN_SPEED =~ ^[0-9]*[1-9][0-9]*$ ]]; then
+
+			aBENCH_NET_LAN_SPEED[$BENCH_HW_MODEL,${aBENCH_LAN_INDEX[$BENCH_HW_MODEL]:=0}]=$BENCH_NET_LAN_SPEED
+			((aBENCH_LAN_INDEX[$BENCH_HW_MODEL]++))
+
+		fi
+	}
+
 	Main()
 	{
 		# Copy files to RAM to speed up sourcing
 		#mkdir -p /tmp/dietpi-survey_report
 		#cp /home/dietpi-survey/survey/*.txt /tmp/dietpi-survey_report/ # cp: Argument list too long
 		rm -Rf /tmp/dietpi-survey_report || exit 1
+		DATE=$(date -u '+%Y-%m-%d %T UTC') # Store date of last possible upload
 		cp -R /home/dietpi-survey/survey /tmp/dietpi-survey_report || exit 1
 		cd /tmp/dietpi-survey_report || exit 1
 
 		# Loop through files, including dot files, so that we can detect and sort out invalid file names
-		shopt -s dotglob
+		shopt -s dotglob extglob
 		for file in *
 		do
-			# Skip and move match with invalid name, when not a file or unexpected first line
-			[[ $file =~ ^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\.txt$ && -f $file && ( ! -s $file || $(<"$file") == '#!/bin/bash'* ) ]] || { mv -v "/home/dietpi-survey/survey/$file" /home/dietpi-survey/invalid/; continue; }
+			# Skip and move away match with invalid name or when not a file
+			[[ $file =~ ^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\.txt$ && -f $file ]] || { mv -v "/home/dietpi-survey/survey/$file" /home/dietpi-survey/invalid/; continue; }
 
-			# Count total and optin files
-			((SURVEY_COUNT_TOTAL++))
-			[[ -s $file ]] || continue
-			((SURVEY_COUNT_OPTIN++))
+			# Optout files
+			[[ -s $file ]] || { ((SURVEY_COUNT_OPTOUT++)); continue; }
 
-			# Source survey files
-			. "$file"
-
-			# Add bench to array
-			[[ $BENCH_HW_MODEL =~ ^[0-9]+$ ]] || continue
-
-			# CPU
-			# - BENCH_CPU: Remove decimal point, equals times 100 since CPU time is always in x.xx
-			BENCH_CPU=${BENCH_CPU/.}
-			if [[ $BENCH_CPU =~ ^[0-9]*[1-9][0-9]*$ && $BENCH_CPU_TEMP_START =~ ^[0-9]+$ && $BENCH_CPU_TEMP_END =~ ^[0-9]+$ ]]; then
-
-				aBENCH_CPU[$BENCH_HW_MODEL,${aBENCH_CPU_INDEX[$BENCH_HW_MODEL]:=0}]=$BENCH_CPU
-
-				# Patch for 5 digit CPU temps: https://github.com/MichaIng/DietPi/issues/2715
-				(( $BENCH_CPU_TEMP_START > 200 )) && (( BENCH_CPU_TEMP_START /= 1000 ))
-				(( $BENCH_CPU_TEMP_END > 200 )) && (( BENCH_CPU_TEMP_END /= 1000 ))
-
-				aBENCH_CPU_TEMP_START[$BENCH_HW_MODEL,${aBENCH_CPU_INDEX[$BENCH_HW_MODEL]}]=$BENCH_CPU_TEMP_START
-				aBENCH_CPU_TEMP_END[$BENCH_HW_MODEL,${aBENCH_CPU_INDEX[$BENCH_HW_MODEL]}]=$BENCH_CPU_TEMP_END
-				((aBENCH_CPU_INDEX[$BENCH_HW_MODEL]++))
-
-			fi
-
-			# RootFS
-			# - Remove decimal places
-			BENCH_ROOTFS_WRITE=${BENCH_ROOTFS_WRITE%%.*}
-			BENCH_ROOTFS_READ=${BENCH_ROOTFS_READ%%.*}
-			if [[ $BENCH_ROOTFS_WRITE =~ ^[0-9]*[1-9][0-9]*$ && $BENCH_ROOTFS_READ =~ ^[0-9]*[1-9][0-9]*$ ]]; then
-
-				aBENCH_ROOTFS_WRITE[$BENCH_HW_MODEL,${aBENCH_ROOTFS_INDEX[$BENCH_HW_MODEL]:=0}]=$BENCH_ROOTFS_WRITE
-				aBENCH_ROOTFS_READ[$BENCH_HW_MODEL,${aBENCH_ROOTFS_INDEX[$BENCH_HW_MODEL]}]=$BENCH_ROOTFS_READ
-				((aBENCH_ROOTFS_INDEX[$BENCH_HW_MODEL]++))
-
-			fi
-
-			# RAM
-			# - https://github.com/MichaIng/DietPi/issues/2715 | nullify this score and ignore it in min/max/avg processing.
-			# - Remove decimal places
-			BENCH_RAM_WRITE=${BENCH_RAM_WRITE%%.*}
-			BENCH_RAM_READ=${BENCH_RAM_READ%%.*}
-			if [[ $BENCH_VERSION =~ ^[0-9]+$ && $BENCH_RAM_WRITE =~ ^[0-9]*[1-9][0-9]*$ && $BENCH_RAM_READ =~ ^[0-9]*[1-9][0-9]*$ ]] && (( $BENCH_VERSION > 1 )); then
-
-				aBENCH_RAM_WRITE[$BENCH_HW_MODEL,${aBENCH_RAM_INDEX[$BENCH_HW_MODEL]:=0}]=$BENCH_RAM_WRITE
-				aBENCH_RAM_READ[$BENCH_HW_MODEL,${aBENCH_RAM_INDEX[$BENCH_HW_MODEL]}]=$BENCH_RAM_READ
-				((aBENCH_RAM_INDEX[$BENCH_HW_MODEL]++))
-
-			fi
-
-			# Custom FS
-			# - Remove decimal places
-			BENCH_CUSTOMFS_WRITE=${BENCH_CUSTOMFS_WRITE%%.*}
-			BENCH_CUSTOMFS_READ=${BENCH_CUSTOMFS_READ%%.*}
-			if [[ $BENCH_CUSTOMFS_WRITE =~ ^[0-9]*[1-9][0-9]*$ && $BENCH_CUSTOMFS_READ =~ ^[0-9]*[1-9][0-9]*$ ]]; then
-
-				aBENCH_CUSTOMFS_WRITE[$BENCH_HW_MODEL,${aBENCH_CUSTOMFS_INDEX[$BENCH_HW_MODEL]:=0}]=$BENCH_CUSTOMFS_WRITE
-				aBENCH_CUSTOMFS_READ[$BENCH_HW_MODEL,${aBENCH_CUSTOMFS_INDEX[$BENCH_HW_MODEL]}]=$BENCH_CUSTOMFS_READ
-				((aBENCH_CUSTOMFS_INDEX[$BENCH_HW_MODEL]++))
-
-			fi
-
-			# LAN
-			# - Remove decimal places
-			BENCH_NET_LAN_SPEED=${BENCH_NET_LAN_SPEED%%.*}
-			if [[ $BENCH_NET_LAN_SPEED =~ ^[0-9]*[1-9][0-9]*$ ]]; then
-
-				aBENCH_NET_LAN_SPEED[$BENCH_HW_MODEL,${aBENCH_LAN_INDEX[$BENCH_HW_MODEL]:=0}]=$BENCH_NET_LAN_SPEED
-				((aBENCH_LAN_INDEX[$BENCH_HW_MODEL]++))
-
-			fi
-
-			# Done, clear vars
-			unset -v BENCH_VERSION BENCH_HW_MODEL
-			unset -v BENCH_CPU BENCH_CPU_TEMP_START BENCH_CPU_TEMP_END
-			unset -v BENCH_ROOTFS_WRITE BENCH_ROOTFS_READ
-			unset -v BENCH_RAM_WRITE BENCH_RAM_READ
-			unset -v BENCH_CUSTOMFS_WRITE BENCH_CUSTOMFS_READ
-			unset -v BENCH_NET_LAN_SPEED
+			# Process file
+			Process_File "$file"
 		done
-		shopt -u dotglob
+		shopt -u dotglob extglob
 
 		# Navigate to parent /tmp
 		cd /tmp || exit 1
@@ -606,8 +668,8 @@
 		# Clean up reports dir
 		rm -R /tmp/dietpi-survey_report || exit 1
 
-		# Optin count
-		SURVEY_COUNT_EMPTY=$(( $SURVEY_COUNT_TOTAL - $SURVEY_COUNT_OPTIN ))
+		# Total count
+		SURVEY_COUNT_TOTAL=$(( $SURVEY_COUNT_OPTOUT + $SURVEY_COUNT_OPTIN ))
 
 		# Merge old and new hardware model names
 		for i in "${!aDEVICE_NAME[@]}"
@@ -877,12 +939,12 @@
 		<a href="#" class="scrollup">^</a>
 		<h2 style="padding-top: 60px">DietPi-Survey statistics</h2>
 		<p>Uploads since: 2020-07-01 00:00:00 UTC +0100</p>
-		<p>Last update: $(date -u '+%Y-%m-%d %T UTC')</p>
+		<p>Last update: $DATE</p>
 		<br>
 		<table>
 			<tr><td>Total system count</td><td align="right">$SURVEY_COUNT_TOTAL</td></tr>
 			<tr><td>Systems sending survey data</td><td align="right">$SURVEY_COUNT_OPTIN</td><td align="right">$(( $SURVEY_COUNT_OPTIN * 100 / $SURVEY_COUNT_TOTAL ))%</td></tr>
-			<tr><td>Systems opted out DietPi-Survey</td><td align="right">$SURVEY_COUNT_EMPTY</td><td align="right">$(( $SURVEY_COUNT_EMPTY * 100 / $SURVEY_COUNT_TOTAL ))%</td></tr>
+			<tr><td>Systems opted out DietPi-Survey</td><td align="right">$SURVEY_COUNT_OPTOUT</td><td align="right">$(( $SURVEY_COUNT_EMPTY * 100 / $SURVEY_COUNT_TOTAL ))%</td></tr>
 		</table>
 
 		<h3 id="version"><a href="#version">DietPi versions &para</a></h3>
