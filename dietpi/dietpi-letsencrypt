@@ -94,7 +94,7 @@
 
 			fi
 
-			# Create combined key
+			# Stretch: Create combined key. From Debian Buster (Lighttpd v1.4.53) on, ssl.privkey + ssl.pemfile can be used with key and cert separated.
 			cat "$fp_cert_dir/privkey.pem" "$fp_cert_dir/cert.pem" > "$fp_cert_dir/combined.pem"
 			if [[ ! -f $fp_cert_dir'/combined.pem' ]]; then
 
@@ -115,7 +115,9 @@ _EOF_
 			G_CONFIG_INJECT '"mod_setenv"' '	"mod_setenv",' /etc/lighttpd/lighttpd.conf '"mod_.+",'
 
 			cat << _EOF_ > /etc/lighttpd/conf-available/50-dietpi-https.conf
-# Based on: https://ssl-config.mozilla.org/#server=lighttpd&version=1.4.45&config=intermediate&openssl=1.1.0l&guideline=5.6
+# Based on: https://ssl-config.mozilla.org/#server=lighttpd
+server.modules += ( "mod_openssl" )
+# IPv4
 \$SERVER["socket"] == ":443" {
 	protocol = "https://"
 	ssl.engine = "enable"
@@ -133,19 +135,48 @@ _EOF_
 	setenv.add-environment = ( "HTTPS" => "on" )
 
 	# Intermediate configuration, tweak to your needs
-	ssl.use-sslv2 = "disable"
-	ssl.use-sslv3 = "disable"
+	ssl.openssl.ssl-conf-cmd = ("MinProtocol" => "TLSv1.2", "Options" => "-SessionTicket")
+	ssl.cipher-list = "ECDHE-ECDSA-AES128-GCM-SHA256:ECDHE-RSA-AES128-GCM-SHA256:ECDHE-ECDSA-AES256-GCM-SHA384:ECDHE-RSA-AES256-GCM-SHA384:ECDHE-ECDSA-CHACHA20-POLY1305:ECDHE-RSA-CHACHA20-POLY1305:DHE-RSA-AES128-GCM-SHA256:DHE-RSA-AES256-GCM-SHA384"
+	ssl.honor-cipher-order = "disable"
+	ssl.disable-client-renegotiation = "enable"
+}
+# IPv6
+\$SERVER["socket"] == "[::]:443" {
+	protocol = "https://"
+	ssl.engine = "enable"
+
+	# pemfile is cert+privkey, ca-file is the intermediate chain in one file
+	ssl.pemfile = "$fp_cert_dir/combined.pem"
+	ssl.ca-file = "$fp_cert_dir/fullchain.pem"
+
+	# For DH/DHE ciphers, dhparam should be >= 2048-bit
+	#ssl.dh-file = "/path/to/dhparam.pem"
+	# ECDH/ECDHE ciphers curve strength, see "openssl ecparam -list_curves"
+	ssl.ec-curve = "secp384r1"
+
+	# Environment flag for HTTPS enabled
+	setenv.add-environment = ( "HTTPS" => "on" )
+
+	# Intermediate configuration, tweak to your needs
+	ssl.openssl.ssl-conf-cmd = ("MinProtocol" => "TLSv1.2", "Options" => "-SessionTicket")
 	ssl.cipher-list = "ECDHE-ECDSA-AES128-GCM-SHA256:ECDHE-RSA-AES128-GCM-SHA256:ECDHE-ECDSA-AES256-GCM-SHA384:ECDHE-RSA-AES256-GCM-SHA384:ECDHE-ECDSA-CHACHA20-POLY1305:ECDHE-RSA-CHACHA20-POLY1305:DHE-RSA-AES128-GCM-SHA256:DHE-RSA-AES256-GCM-SHA384"
 	ssl.honor-cipher-order = "disable"
 	ssl.disable-client-renegotiation = "enable"
 }
 _EOF_
-			# Enable new "mod_openssl" on Buster
-			(( $G_DISTRO > 4 )) && G_EXEC sed -i '1i\server.modules += ( "mod_openssl" )\n' /etc/lighttpd/conf-available/50-dietpi-https.conf
+			# Stretch: Remove builtin mod_openssl and use old protocol directives on Stretch
+			if (( $G_DISTRO < 5 ))
+			then
+				G_EXEC sed -i '2d' /etc/lighttpd/conf-available/50-dietpi-https.conf
+				G_EXEC sed -i '/ssl.openssl.ssl-conf-cmd/c\\tssl.use-sslv2 = "disable"\n\tssl.use-sslv3 = "disable"' /etc/lighttpd/conf-available/50-dietpi-https.conf
+			fi
 			G_EXEC lighty-enable-mod dietpi-https
 
 			# Redirect
 			if (( $LETSENCRYPT_REDIRECT )); then
+
+				# Enable redirects via: url.redirect
+				G_CONFIG_INJECT '"mod_redirect"' '	"mod_redirect",' /etc/lighttpd/lighttpd.conf '"mod_.+",'
 
 				cat << '_EOF_' > /etc/lighttpd/conf-available/98-dietpi-https_redirect.conf
 $HTTP["scheme"] == "http" {
