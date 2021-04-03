@@ -23,7 +23,7 @@
 	# - PREIMAGE_INFO='Some GNU/Linux'
 	# - HW_MODEL=0				(must match one of the supported IDs below)
 	# - WIFI_REQUIRED=0			[01]
-	# - DISTRO_TARGET=5			[456] (Stretch: 4, Buster: 5, Bullseye: 6)
+	# - DISTRO_TARGET=5			[456] (Buster: 5, Bullseye: 6)
 	#------------------------------------------------------------------------------------------------
 
 	# Core globals
@@ -611,6 +611,7 @@ Currently installed: $G_DISTRO_NAME (ID: $G_DISTRO)"; then
 			'dirmngr'		# GNU key management required for some APT installs via additional repos
 			'ethtool'		# Force Ethernet link speed
 			'fake-hwclock'		# Hardware clock emulation, to allow correct timestamps during boot before network time sync
+			'fdisk'			# Partitioning tool used by DietPi-FS_partition_resize and DietPi-Imager
 			'gnupg'			# apt-key add / gpg
 			'htop'			# System monitor
 			'ifupdown'		# Network interface configuration
@@ -648,6 +649,7 @@ Currently installed: $G_DISTRO_NAME (ID: $G_DISTRO)"; then
 		else
 
 			aPACKAGES_REQUIRED_INSTALL+=('dropbear-run')
+			# On Stretch pre-images we need to assure that apt-transport-https stays installed until the distro upgrade is done.
 			(( $G_DISTRO < 5 )) && aPACKAGES_REQUIRED_INSTALL+=('apt-transport-https')
 
 		fi
@@ -655,10 +657,6 @@ Currently installed: $G_DISTRO_NAME (ID: $G_DISTRO)"; then
 		#   Available as dedicated package since Bullseye: https://packages.debian.org/systemd-timesyncd
 		#   While the above needs to be checked against "current" distro to not break SSH or APT before distro upgrade, this one should be checked against "target" distro version.
 		(( $DISTRO_TARGET > 5 )) && aPACKAGES_REQUIRED_INSTALL+=('systemd-timesyncd')
-
-		# - fdisk: Partitioning tool used by DietPi-FS_partition_resize and DietPi-Imager
-		#   This has become an own package since Debian Buster: https://packages.debian.org/fdisk
-		(( $DISTRO_TARGET > 4 )) && aPACKAGES_REQUIRED_INSTALL+=('fdisk')
 
 		# G_HW_MODEL specific
 		# - initramfs: Required for generic bootloader, but not required/used by RPi bootloader, on VM install tiny-initramfs with limited features but sufficient and much smaller + faster
@@ -723,12 +721,10 @@ Currently installed: $G_DISTRO_NAME (ID: $G_DISTRO)"; then
 
 			local apackages=('linux-image-amd64' 'os-prober')
 
-			# Grub EFI
+			# Grub EFI with secure boot compatibility
 			if dpkg-query -s 'grub-efi-amd64' &> /dev/null || [[ -d '/boot/efi' ]]; then
 
-				apackages+=('grub-efi-amd64')
-				# On Buster+ enable secure boot compatibility: https://packages.debian.org/grub-efi-amd64-signed
-				(( $DISTRO_TARGET > 4 )) && apackages+=('grub-efi-amd64-signed' 'shim-signed')
+				apackages+=('grub-efi-amd64' 'grub-efi-amd64-signed' 'shim-signed')
 
 			# Grub BIOS
 			else
@@ -1106,7 +1102,14 @@ _EOF_
 		rm -fv /etc/systemd/system/*getty@*.service.d/*autologin*.conf
 
 		# - make_nas_processes_faster cron job on ROCK64 + NanoPi + PINE A64(?) images
-		[[ -f '/etc/cron.d/make_nas_processes_faster' ]] && rm /etc/cron.d/make_nas_processes_faster
+		[[ -f '/etc/cron.d/make_nas_processes_faster' ]] && rm -v /etc/cron.d/make_nas_processes_faster
+
+		#-----------------------------------------------------------------------------------
+		G_DIETPI-NOTIFY 2 'Restoring default base files:'
+		# shellcheck disable=SC2114
+		rm -Rfv /etc/{motd,profile,update-motd.d,issue{,.net}} /root /home /media /var/mail
+		G_AGI -o 'Dpkg::Options::=--force-confmiss,confnew' --reinstall base-files # Restore /etc/{update-motd.d,issue{,.net}} /root /home
+		G_EXEC /var/lib/dpkg/info/base-files.postinst configure # Restore /root/.{profile,bashrc} /etc/{motd,profile} /media /var/mail
 
 		#-----------------------------------------------------------------------------------
 		# https://www.debian.org/doc/debian-policy/ch-opersys.html#site-specific-programs
@@ -1201,8 +1204,8 @@ _EOF_'
 		[[ -f '/etc/udev/rules.d/70-persistent-net.rules' ]] && rm -v /etc/udev/rules.d/70-persistent-net.rules # Jessie pre-image
 
 		G_DIETPI-NOTIFY 2 'Configuring DNS nameserver:'
-		# Failsafe: Assure that /etc/resolv.conf is not a symlink and disable systemd-resolved
-		systemctl disable --now systemd-resolved
+		# Failsafe: Assure that /etc/resolv.conf is not a symlink and disable systemd-resolved + systemd-networkd
+		systemctl disable --now systemd-{resolve,network}d
 		rm -fv /etc/resolv.conf
 		echo 'nameserver 9.9.9.9' > /etc/resolv.conf # Apply generic functional DNS nameserver, updated on next service start
 
@@ -1252,15 +1255,11 @@ _EOF_'
 		if (( $G_DISTRO > 5 ))
 		then
 			G_DIETPI-NOTIFY 2 'Disabling e2scrub services which are for LVM and require lvm2/lvcreate being installed'
-			G_EXEC systemctl disable --now e2scrub_all.timer
-			G_EXEC systemctl disable --now e2scrub_reap
+			G_EXEC systemctl disable --now e2scrub_{all.timer,reap}
 		fi
 
-		if (( $G_DISTRO > 4 ))
-		then
-			G_DIETPI-NOTIFY 2 'Enabling weekly TRIM'
-			G_EXEC systemctl enable fstrim.timer
-		fi
+		G_DIETPI-NOTIFY 2 'Enabling weekly TRIM'
+		G_EXEC systemctl enable fstrim.timer
 
 		(( $G_HW_MODEL > 9 )) && echo "$G_HW_MODEL" > /etc/.dietpi_hw_model_identifier
 		G_EXEC_DESC='Generating /boot/dietpi/.hw_model' G_EXEC /boot/dietpi/func/dietpi-obtain_hw_model
@@ -1275,22 +1274,12 @@ _EOF_'
 		echo -e "Samba client: $info_use_drive_manager" > /mnt/samba/readme.txt
 		echo -e "NFS client: $info_use_drive_manager" > /mnt/nfs_client/readme.txt
 
-		G_DIETPI-NOTIFY 2 'Restoring default base files:'
-		# shellcheck disable=SC2114
-		rm -Rfv /etc/{motd,profile,update-motd.d,issue{,.net}} /root /home /media /var/mail
-		G_AGI -o 'Dpkg::Options::=--force-confmiss,confnew' --reinstall base-files # Restore /etc/{update-motd.d,issue{,.net}} /root /home
-		G_EXEC /var/lib/dpkg/info/base-files.postinst configure # Restore /root/.{profile,bashrc} /etc/{motd,profile} /media /var/mail
-
 		G_DIETPI-NOTIFY 2 'Resetting and adding dietpi.com SSH pub host key for DietPi-Survey/Bugreport uploads:'
 		G_EXEC mkdir -p /root/.ssh
 		echo 'ssh.dietpi.com ssh-rsa AAAAB3NzaC1yc2EAAAADAQABAAABAQDE6aw3r6aOEqendNu376iiCHr9tGBIWPgfrLkzjXjEsHGyVSUFNnZt6pftrDeK7UX+qX4FxOwQlugG4fymOHbimRCFiv6cf7VpYg1Ednquq9TLb7/cIIbX8a6AuRmX4fjdGuqwmBq3OG7ZksFcYEFKt5U4mAJIaL8hXiM2iXjgY02LqiQY/QWATsHI4ie9ZOnwrQE+Rr6mASN1BVFuIgyHIbwX54jsFSnZ/7CdBMkuAd9B8JkxppWVYpYIFHE9oWNfjh/epdK8yv9Oo6r0w5Rb+4qaAc5g+RAaknHeV6Gp75d2lxBdCm5XknKKbGma2+/DfoE8WZTSgzXrYcRlStYN' > /root/.ssh/known_hosts
 
 		# ASUS TB WiFi: https://github.com/MichaIng/DietPi/issues/1760
 		(( $G_HW_MODEL == 52 )) && G_CONFIG_INJECT '8723bs' '8723bs' /etc/modules
-
-		# Fix wireless-tools bug on Stretch: https://bugs.debian.org/908886
-		# shellcheck disable=SC2016
-		[[ -f '/etc/network/if-pre-up.d/wireless-tools' ]] && sed -i '\|^[[:blank:]]ifconfig "$IFACE" up$|c\\t/sbin/ip link set dev "$IFACE" up' /etc/network/if-pre-up.d/wireless-tools
 
 		G_DIETPI-NOTIFY 2 'Tweaking DHCP timeout:' # https://github.com/MichaIng/DietPi/issues/711
 		G_CONFIG_INJECT 'timeout[[:blank:]]' 'timeout 10;' /etc/dhcp/dhclient.conf
