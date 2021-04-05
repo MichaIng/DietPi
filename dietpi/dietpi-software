@@ -641,8 +641,6 @@ _EOF_
 		aSOFTWARE_CATEGORY_INDEX[$software_id]=2
 		aSOFTWARE_ONLINEDOC_URL[$software_id]='https://dietpi.com/docs/software/media/#icecast'
 		aSOFTWARE_REQUIRES_ALSA[$software_id]=1
-		# - VM
-		aSOFTWARE_AVAIL_G_HW_MODEL[$software_id,20]=0
 		#------------------
 		software_id=141
 
@@ -4625,6 +4623,10 @@ _EOF_
 
 			Banner_Installing
 
+			# Check for reinstall
+			local reinstall=0
+			[[ -f '/etc/webiopi/config' ]] && reinstall=1
+
 			DEPS_LIST='python-dev python-setuptools'
 			Download_Install 'https://sourceforge.net/projects/webiopi/files/WebIOPi-0.7.1.tar.gz/download' webiopi.tar.gz
 			G_EXEC tar xf webiopi.tar.gz
@@ -4632,16 +4634,19 @@ _EOF_
 
 			G_EXEC cd WebIOPi-0.7.1
 
-			# Automate Weaved prompt
+			# Skip Weaved install prompt
 			G_EXEC sed -i '/read response/c\response="n"' setup.sh
 
-			# Run setup script
-			G_EXEC_OUTPUT=1 G_EXEC ./setup.sh
+			# Run setup script, skipping APT installs
+			G_EXEC_OUTPUT=1 G_EXEC ./setup.sh skip-apt
 
 			G_EXEC cd /tmp/$G_PROGRAM_NAME
 
 			# Cleanup
 			G_EXEC_NOHALT=1 G_EXEC rm -R WebIOPi-0.7.1
+
+			# On fresh installs, change port to 8002 to avoid conflict with IceCast
+			(( $reinstall )) || G_EXEC sed -i 's/^port = 8000$/port = 8002/' /etc/webiopi/config
 
 		fi
 
@@ -4892,7 +4897,7 @@ _EOF_
 			[[ -d '/var/www/ampache' ]] && G_EXEC rm -R /var/www/ampache
 			G_EXEC mv ampache-master /var/www/ampache
 
-			# Download and install composer
+			# Download and install composer (lastest v1): https://github.com/ampache/ampache/wiki/Installation#composer
 			G_EXEC curl -sSfL https://getcomposer.org/composer-1.phar -o /usr/local/bin/composer
 			G_EXEC chmod +x /usr/local/bin/composer
 
@@ -5818,7 +5823,7 @@ Package: wireguard wireguard-dkms wireguard-tools\nPin: release n=bullseye\nPin-
 			DEPS_LIST="python libpng-dev $PHP_NAME-bcmath $PHP_NAME-json $PHP_NAME-mbstring $PHP_NAME-xml"
 
 			# Grab latest release
-			local fallback_url='https://github.com/koel/koel/releases/download/v5.0.2/koel-v5.0.2.tar.gz'
+			local fallback_url='https://github.com/koel/koel/releases/download/v5.1.0/koel-v5.1.0.tar.gz'
 			Download_Install "$(curl -sSfL 'https://api.github.com/repos/koel/koel/releases/latest' | mawk -F\" '/"browser_download_url": .*\/koel-[^"\/]*\.tar\.gz"/{print $4}')"
 
 			# Reinstall: Clear previous install, but keep existing config file
@@ -5837,7 +5842,7 @@ Package: wireguard wireguard-dkms wireguard-tools\nPin: release n=bullseye\nPin-
 			G_EXEC mv core-master /mnt/dietpi_userdata/koel/resources/assets
 
 			# Node.js dependencies
-			npm i -g --unsafe-perm yarn
+			G_EXEC_OUTPUT=1 G_EXEC npm i -g --unsafe-perm yarn
 
 			# Download and install composer
 			G_EXEC curl -sSfL https://getcomposer.org/composer-stable.phar -o /usr/local/bin/composer
@@ -5845,7 +5850,7 @@ Package: wireguard wireguard-dkms wireguard-tools\nPin: release n=bullseye\nPin-
 
 			# Install Koel
 			G_EXEC cd /mnt/dietpi_userdata/koel
-			composer install
+			G_EXEC_OUTPUT=1 G_EXEC composer install
 			G_EXEC cd /tmp/$G_PROGRAM_NAME
 
 		fi
@@ -9579,16 +9584,6 @@ _EOF_
 
 		fi
 
-		software_id=71 # WebIOPi
-		if (( ${aSOFTWARE_INSTALL_STATE[$software_id]} == 1 )); then
-
-			Banner_Configuration
-
-			# Autostart
-			update-rc.d webiopi defaults
-
-		fi
-
 		software_id=98 # HAProxy
 		if (( ${aSOFTWARE_INSTALL_STATE[$software_id]} == 1 )); then
 
@@ -11121,7 +11116,7 @@ ExecStart=$(command -v qbittorrent-nox)
 WantedBy=multi-user.target
 _EOF_
 			# Permissions
-			G_EXEC chown -R qbittorrent: /home/qbittorrent
+			G_EXEC chown -R qbittorrent:dietpi /home/qbittorrent
 
 		fi
 
@@ -11130,44 +11125,38 @@ _EOF_
 
 			Banner_Configuration
 
-			# Create username/password for rutorrent based on webserver type
+			# ruTorrent: Enable HTTP authentication and RPC
 			# - Apache2
 			if (( ${aSOFTWARE_INSTALL_STATE[83]} > 0 )); then
 
-				# Install SCGI module
-				G_AGI libapache2-mod-scgi
-				a2enmod rewrite scgi
+				# Enable SCGI module
+				G_EXEC a2enmod authn_core authn_file authz_user proxy proxy_scgi
 
-				# Enable password protection
-				htpasswd -cb /etc/.rutorrent-htaccess root "$GLOBAL_PW"
-				cat << _EOF_ > /var/www/rutorrent/.htaccess
-AuthUserFile /etc/.rutorrent-htaccess
-AuthName "ruTorrent_login"
-AuthType Basic
-require user root
-_EOF_
-
-				# Allow overrides/.htaccess and enable SCGI + authentication
-				cat << _EOF_ > /etc/apache2/sites-available/dietpi-rutorrent.conf
-<Directory /var/www/rutorrent/>
-	AllowOverride All
-</Directory>
-
-SCGIMount /RPC2 127.0.0.1:5000
-<location /RPC2>
-	AuthName "rTorrent secure access"
+				# Enable HTTP authentication and rTorrent access via SCGI
+				[[ -f '/etc/.rutorrent-htaccess' ]] || htpasswd -cb /etc/.rutorrent-htaccess root "$GLOBAL_PW"
+				cat << '_EOF_' > /etc/apache2/sites-available/dietpi-rutorrent.conf
+<Directory /var/www/rutorrent>
 	AuthType Basic
+	AuthName "ruTorrent login"
 	AuthBasicProvider file
-	AuthUserFile /etc/.rutorrent-htaccess
+	AuthUserFile "/etc/.rutorrent-htaccess"
 	Require user root
-</location>
+</Directory>
+<Location /RPC2>
+	AuthType Basic
+	AuthName "rTorrent secure access"
+	AuthBasicProvider file
+	AuthUserFile "/etc/.rutorrent-htaccess"
+	Require user root
+</Location>
+ProxyPass "/RPC2" "scgi:///mnt/dietpi_userdata/downloads/.session/rpc.socket"
 _EOF_
-				a2ensite dietpi-rutorrent
+				G_EXEC a2ensite dietpi-rutorrent
 
 			# - Lighttpd
 			elif (( ${aSOFTWARE_INSTALL_STATE[84]} > 0 )); then
 
-				echo "root:rtorrent:$(echo -n 'root:rtorrent:dietpi' | md5sum | cut -b -32)" > /etc/.rutorrent-htaccess
+				[[ -f '/etc/.rutorrent-htaccess' ]] || echo "root:rtorrent:$(echo -n 'root:rtorrent:dietpi' | md5sum | cut -b -32)" > /etc/.rutorrent-htaccess
 
 				# Add to /etc/lighttpd/lighttpd.conf
 				if ! grep -q '^#RUTORRENT_DIETPI' /etc/lighttpd/lighttpd.conf; then
@@ -11180,79 +11169,74 @@ server.modules += ( "mod_auth" )
 auth.debug = 0
 auth.backend = "htdigest"
 auth.backend.htdigest.userfile = "/etc/.rutorrent-htaccess"
-
-auth.require = ( "/rutorrent/" => (
-                    "method"  => "digest",
-                    "realm"   => "rtorrent",
-                    "require" => "valid-user"
-               ))
-
+auth.require = ( "/rutorrent/" =>
+	(
+		"method"  => "digest",
+		"realm"   => "rtorrent",
+		"require" => "valid-user"
+	)
+)
 scgi.server = ( "/RPC2" =>
-    ( "127.0.0.1" =>
-        (
-            "host" => "127.0.0.1",
-            "port" => 5000,
-            "check-local" => "disable"
-        )
-    )
+	( "rtorrent" =>
+		(
+			"socket" => "/mnt/dietpi_userdata/downloads/.session/rpc.socket",
+			"check-local" => "disable"
+		)
+	)
 )
 #RUTORRENT_DIETPI
 _EOF_
-
 				fi
 
 			# - Nginx
 			elif (( ${aSOFTWARE_INSTALL_STATE[85]} > 0 )); then
 
-				echo "root:$(openssl passwd -crypt dietpi)" > /etc/.rutorrent-htaccess
-
-				cat << _EOF_ > /etc/nginx/sites-dietpi/dietpi-rutorrent.conf
+				[[ -f '/etc/.rutorrent-htaccess' ]] || echo "root:$(openssl passwd -crypt dietpi)" > /etc/.rutorrent-htaccess
+				cat << '_EOF_' > /etc/nginx/sites-dietpi/dietpi-rutorrent.conf
 location /rutorrent {
-    auth_basic "Restricted Content";
-    auth_basic_user_file /etc/.rutorrent-htaccess;
+	auth_basic "ruTorrent login";
+	auth_basic_user_file /etc/.rutorrent-htaccess;
 }
-
 location /RPC2 {
-    include scgi_params;
-    scgi_pass 127.0.0.1:5000;
+	include scgi_params;
+	scgi_pass unix:/mnt/dietpi_userdata/downloads/.session/rpc.socket;
 }
 _EOF_
-
 			fi
+
+			G_EXEC chmod 0400 /etc/.rutorrent-htaccess
+			G_EXEC chown www-data:www-data /etc/.rutorrent-htaccess
 
 			# Define curl location in config.php (for Lighttpd and Nginx)
 			G_CONFIG_INJECT '"curl"[[:blank:]]' '		"curl"	=> "/usr/bin/curl",' /var/www/rutorrent/conf/config.php
 
-			chown www-data:www-data /etc/.rutorrent-htaccess
-			chmod 400 /etc/.rutorrent-htaccess
+			# Session dir
+			G_EXEC mkdir -p /mnt/dietpi_userdata/downloads/.session
 
-			# Session folder
-			mkdir -p /mnt/dietpi_userdata/downloads/.session
-
-			# Create rTorrent run user
+			# User
 			Create_User -g dietpi -d /mnt/dietpi_userdata/rtorrent rtorrent
 
-			# Service using screen | '/usr/bin/rtorrent &> /var/log/rtorrent.log &' doesnt work, hangs program after 5 seconds
+			# Service
 			cat << _EOF_ > /etc/systemd/system/rtorrent.service
 [Unit]
 Description=rTorrent (DietPi)
 Wants=network-online.target
-After=network-online.target
+After=network-online.target dietpi-boot.service
 
 [Service]
 Type=forking
 User=rtorrent
-KillMode=none
 ExecStart=$(command -v screen) -fa -dmS rtorrent $(command -v rtorrent)
 ExecStop=$(command -v screen) -S rtorrent -X quit
+KillMode=none
 
 [Install]
 WantedBy=multi-user.target
 _EOF_
-			# On Buster we use new daemon mode
+			# Since Buster we use new daemon mode
 			if (( $G_DISTRO > 4 )); then
 
-				sed -Ei '/^(Type|KillMode|ExecStop)=/d' /etc/systemd/system/rtorrent.service
+				G_EXEC sed -Ei '/^(Type|KillMode|ExecStop)=/d' /etc/systemd/system/rtorrent.service
 				G_CONFIG_INJECT 'ExecStart=' "ExecStart=$(command -v rtorrent)" /etc/systemd/system/rtorrent.service
 
 			fi
@@ -11263,7 +11247,14 @@ _EOF_
 			#	https://github.com/rakshasa/rtorrent/wiki/rTorrent-0.9-Comprehensive-Command-list-(WIP)
 			#	https://github.com/rakshasa/rtorrent/blob/master/doc/scripts/update_commands_0.9.sed
 			G_EXEC mkdir -p /mnt/dietpi_userdata/rtorrent
-			[[ -f '/mnt/dietpi_userdata/rtorrent/.rtorrent.rc' ]] || cat << _EOF_ > /mnt/dietpi_userdata/rtorrent/.rtorrent.rc
+			if [[ -f '/mnt/dietpi_userdata/rtorrent/.rtorrent.rc' ]]
+			then
+				# Reinstall: Assire that rpi.socket is used
+				G_EXEC sed -i '/^[[:blank:]]*network.scgi.open_port/d' /mnt/dietpi_userdata/rtorrent/.rtorrent.rc
+				G_CONFIG_INJECT 'network.scgi.open_local' 'network.scgi.open_local = /mnt/dietpi_userdata/downloads/.session/rpc.socket' /mnt/dietpi_userdata/rtorrent/.rtorrent.rc
+				G_CONFIG_INJECT 'execute.nothrow = chmod,666,/mnt/dietpi_userdata/downloads/.session/rpc.socket' 'execute.nothrow = chmod,666,/mnt/dietpi_userdata/downloads/.session/rpc.socket' /mnt/dietpi_userdata/rtorrent/.rtorrent.rc
+			else
+				cat << _EOF_ > /mnt/dietpi_userdata/rtorrent/.rtorrent.rc
 ### Miscellaneous settings
 #system.daemon.set = true
 # Default download dir
@@ -11285,9 +11276,8 @@ network.port_open.set = no
 network.port_random.set = no
 #network.port_range.set = 33101-33199
 # SCGI connection, e.g. for ruTorrent web UI
-network.scgi.open_port = 127.0.0.1:5000
-#network.scgi.open_local = /mnt/dietpi_userdata/downloads/.session/rpc.socket
-#execute.nothrow = chmod,777,/mnt/dietpi_userdata/downloads/.session/rpc.socket
+network.scgi.open_local = /mnt/dietpi_userdata/downloads/.session/rpc.socket
+execute.nothrow = chmod,666,/mnt/dietpi_userdata/downloads/.session/rpc.socket
 
 ### Network limits
 network.http.max_open.set = $(Optimise_BitTorrent 2)
@@ -11317,14 +11307,16 @@ dht.mode.set = on
 protocol.pex.set = yes
 protocol.encryption.set = allow_incoming,try_outgoing,enable_retry
 _EOF_
-			# On Buster use new daemon mode
+			fi
+
+			# Since Buster use new daemon mode
 			(( $G_DISTRO > 4 )) && G_CONFIG_INJECT 'system.daemon.set[[:blank:]=]' 'system.daemon.set = true' /mnt/dietpi_userdata/rtorrent/.rtorrent.rc
 
 			# Permissions
-			chown -R rtorrent:dietpi /mnt/dietpi_userdata/rtorrent /mnt/dietpi_userdata/downloads/.session
+			G_EXEC chown -R rtorrent:dietpi /mnt/dietpi_userdata/rtorrent /mnt/dietpi_userdata/downloads/.session
 			# - ruTorrent: https://github.com/Novik/ruTorrent/wiki/Config
-			chown -R www-data:dietpi /var/www/rutorrent/share
-			chown root:root /var/www/rutorrent/share/.htaccess
+			G_EXEC chown -R www-data:dietpi /var/www/rutorrent/share
+			G_EXEC chown root:root /var/www/rutorrent/share/.htaccess
 
 		fi
 
@@ -11950,12 +11942,13 @@ _EOF_
 				G_EXEC cp -a /opt/firefox-sync/syncserver.ini $ffsync_conf
 				local ffsync_ip=$(mawk 'NR==4' /run/dietpi/.network)
 				G_CONFIG_INJECT 'host =' "host = $ffsync_ip" $ffsync_conf
-				G_CONFIG_INJECT 'port =' 'port = 5000' $ffsync_conf # To be failsafe if the default changes in future releases
-				G_CONFIG_INJECT 'public_url =' "public_url = http://$ffsync_ip:5000/" $ffsync_conf
+				G_CONFIG_INJECT 'port =' 'port = 5002' $ffsync_conf # Avoid port conflict with Shairport Sync
+				G_CONFIG_INJECT 'public_url =' "public_url = http://$ffsync_ip:5002/" $ffsync_conf
 				G_CONFIG_INJECT 'sqluri = sqlite:' 'sqluri = sqlite:////mnt/dietpi_userdata/firefox-sync/FF-Sync-DB.db' $ffsync_conf
 
 			fi
 
+			# Service
 			cat << _EOF_ > /etc/systemd/system/firefox-sync.service
 [Unit]
 Description=Firefox Sync Server (DietPi)
@@ -12005,7 +11998,7 @@ _EOF_
 					-x509 -days 7200 -sha256 -extensions SAN -out /mnt/dietpi_userdata/bitwarden_rs/cert.pem\
 					-newkey rsa:4096 -nodes -keyout /mnt/dietpi_userdata/bitwarden_rs/privkey.pem
 				G_CONFIG_INJECT 'ROCKET_TLS=' 'ROCKET_TLS={certs="./cert.pem",key="./privkey.pem"}' /mnt/dietpi_userdata/bitwarden_rs/bitwarden_rs.env
-				G_CONFIG_INJECT 'ROCKET_PORT=' 'ROCKET_PORT=8001' /mnt/dietpi_userdata/bitwarden_rs/bitwarden_rs.env # Avoid port conflict with WebIOPi, IceCast and Koel
+				G_CONFIG_INJECT 'ROCKET_PORT=' 'ROCKET_PORT=8001' /mnt/dietpi_userdata/bitwarden_rs/bitwarden_rs.env # Avoid port conflict with IceCast
 				G_CONFIG_INJECT 'WEB_VAULT_ENABLED=' 'WEB_VAULT_ENABLED=true' /mnt/dietpi_userdata/bitwarden_rs/bitwarden_rs.env
 			fi
 
@@ -12109,14 +12102,17 @@ _EOF_
 				/boot/dietpi/func/create_mysql_db koel koel "$GLOBAL_PW"
 				G_CONFIG_INJECT 'DB_CONNECTION=' 'DB_CONNECTION=mysql' .env
 				G_CONFIG_INJECT 'DB_HOST=' 'DB_HOST=127.0.0.1' .env
+				#G_CONFIG_INJECT 'DB_PORT=' 'DB_HOST=0' .env # Socket connection?
 				G_CONFIG_INJECT 'DB_DATABASE=' 'DB_DATABASE=koel' .env
 				G_CONFIG_INJECT 'DB_USERNAME=' 'DB_USERNAME=koel' .env
 				GCI_PASSWORD=1 G_CONFIG_INJECT 'DB_PASSWORD=' "DB_PASSWORD=$GLOBAL_PW" .env
+				G_CONFIG_INJECT 'MEDIA_PATH=' 'MEDIA_PATH=/mnt/dietpi_userdata/Music' .env
+				G_CONFIG_INJECT 'FFMPEG_PATH=' "FFMPEG_PATH=$(command -v ffmpeg)" .env
+				### Re-test below: https://github.com/koel/koel/issues/1302
 				# ADMIN env vars are not used any more, user prompt will ask for info.
 				#G_CONFIG_INJECT 'ADMIN_EMAIL=' 'ADMIN_EMAIL=dietpi@dietpi.com' .env
 				#G_CONFIG_INJECT 'ADMIN_NAME=' 'ADMIN_NAME=admin' .env
 				#GCI_PASSWORD=1 G_CONFIG_INJECT 'ADMIN_PASSWORD=' "ADMIN_PASSWORD=$GLOBAL_PW" .env
-				G_CONFIG_INJECT 'FFMPEG_PATH=' "FFMPEG_PATH=$(command -v ffmpeg)" .env
 
 			# Else assure database server runs
 			else
@@ -12125,26 +12121,29 @@ _EOF_
 
 			fi
 
-			$PHP_NAME artisan koel:init
-			$PHP_NAME artisan key:generate # Required with current setup, else .env APP_KEY is missing, leading to 500 on web UI login attempt
-			#$PHP_NAME artisan db:seed --force
-
+			G_EXEC_OUTPUT=1 G_EXEC $PHP_NAME artisan koel:init
+			G_EXEC_OUTPUT=1 G_EXEC $PHP_NAME artisan key:generate # Required with current setup, else .env APP_KEY is missing, leading to 500 on web UI login attempt
+			#G_EXEC_OUTPUT=1 G_EXEC $PHP_NAME artisan db:seed --force
 			G_EXEC cd /tmp/$G_PROGRAM_NAME
 
+			# Service: Run on port 8003 by default to avoid conflict with IceCast
 			cat << _EOF_ > /etc/systemd/system/koel.service
 [Unit]
 Description=Koel (DietPi)
+Documentation=https://docs.koel.dev/
+Wants=network-online.target
+After=network-online.target dietpi-boot.service
 
 [Service]
 User=koel
 WorkingDirectory=/mnt/dietpi_userdata/koel
-ExecStart=$(command -v $PHP_NAME) /mnt/dietpi_userdata/koel/artisan serve --host 0.0.0.0
+ExecStart=$(command -v $PHP_NAME) /mnt/dietpi_userdata/koel/artisan serve --host 0.0.0.0 --port 8003
 
 [Install]
 WantedBy=multi-user.target
 _EOF_
 			# Permissions
-			chown -R koel:dietpi /mnt/dietpi_userdata/koel
+			G_EXEC chown -R koel:dietpi /mnt/dietpi_userdata/koel
 
 		fi
 
@@ -12542,6 +12541,9 @@ _EOF_
 			# CLI alias
 			echo "alias octoprint='sudo -u octoprint /mnt/dietpi_userdata/octoprint/.local/bin/octoprint'" > /etc/bashrc.d/dietpi-octoprint.sh
 
+			# On fresh installs, change listening port to 5001 to avoid conflict with Shairport Sync.
+			[[ -f '/mnt/dietpi_userdata/octoprint/.octoprint/config.yaml' ]] || G_EXEC sudo -u octoprint /mnt/dietpi_userdata/octoprint/.local/bin/octoprint config set server.port '5001'
+
 			# Apply service and system commands: Allow execution via specific sudoers config
 			echo "octoprint ALL=NOPASSWD: $(command -v systemctl) restart octoprint, $(command -v reboot), $(command -v poweroff)" > /etc/sudoers.d/octoprint
 			G_EXEC sudo -u octoprint /mnt/dietpi_userdata/octoprint/.local/bin/octoprint config set server.commands.serverRestartCommand 'sudo systemctl restart octoprint'
@@ -12556,9 +12558,6 @@ _EOF_
 				G_EXEC sudo -u octoprint /mnt/dietpi_userdata/octoprint/.local/bin/octoprint config set webcam.snapshot 'http://127.0.0.1:8082/?action=snapshot'
 				G_EXEC sudo -u octoprint /mnt/dietpi_userdata/octoprint/.local/bin/octoprint config set webcam.ffmpeg "$(command -v ffmpeg)"
 			fi
-			
-			# change default port to 5555
-			G_EXEC eval "echo -e '    port: 5555' >> /mnt/dietpi_userdata/octoprint/.octoprint/config.yaml"
 		fi
 
 		software_id=154 # Roon Server
@@ -14576,15 +14575,23 @@ _EOF_
 
 		fi
 
-		software_id=71
+		software_id=71 # WebIOPi
 		if (( ${aSOFTWARE_INSTALL_STATE[$software_id]} == -1 )); then
 
 			Banner_Uninstalling
-			update-rc.d webiopi remove
-			rm -R /etc/webiopi
-			rm -R /usr/share/webiopi
-			rm /usr/bin/webiopi
-			rm /etc/init.d/webiopi
+			if [[ -f '/etc/init.d/webiopi' ]]; then
+
+				systemctl unmask webiopi
+				systemctl disable --now webiopi
+				rm /etc/init.d/webiopi
+
+			fi
+			[[ -d '/etc/systemd/system/webiopi.service.d' ]] && rm -R /etc/systemd/system/webiopi.service.d
+			update-rc.d -f webiopi remove
+			[[ -f '/usr/bin/webiopi' ]] && rm /usr/bin/webiopi # Executable
+			[[ -f '/usr/bin/webiopi-passwd' ]] && rm /usr/bin/webiopi-passwd # Password generator
+			[[ -d '/etc/webiopi' ]] && rm -R /etc/webiopi # Config dir
+			[[ -d '/usr/share/webiopi' ]] && rm -R /usr/share/webiopi # HTML resources
 
 		fi
 
