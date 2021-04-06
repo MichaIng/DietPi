@@ -4314,7 +4314,7 @@ amvdec_vp9' > /etc/modules-load.d/dietpi-c4-kodi.conf
 
 			[[ -f '/lib/systemd/system/unbound.service' ]] && G_EXEC systemctl restart unbound
 			G_AGI unbound
-			G_EXEC systemctl enable --now unbound # failsafe
+			G_EXEC systemctl enable --now unbound # Failsafe
 
 			# Pi-hole part 2
 			if (( ${aSOFTWARE_INSTALL_STATE[93]} == 2 ))
@@ -4355,7 +4355,7 @@ amvdec_vp9' > /etc/modules-load.d/dietpi-c4-kodi.conf
 			# Unbound: Switch port to 5335 if it was installed before, else it got just configured within its install step above
 			if (( ${aSOFTWARE_INSTALL_STATE[182]} == 2 )) && grep -q '^[[:blank:]]*port:[[:blank:]][[:blank:]]*53$' /etc/unbound/unbound.conf.d/dietpi.conf
 			then
-				G_WHIP_MSG 'You are installing Pi-hole while Unbound is already installed. The Unbound port will be changed to 5335.\n\nTo add it to Pi-hole, set "127.0.0.1#5335" as only custom (IPv4) upstream DNS server.'
+				G_DIETPI-NOTIFY 2 'Configuring Unbound to work for Pi-hole'
 				grep '^[[:blank:]]*nameserver[[:blank:]]' /etc/resolv.conf | grep -qvE '[[:blank:]]127.0.0.1(:53)?$' || echo 'nameserver 9.9.9.9' >> /etc/resolv.conf # Failsafe
 				G_CONFIG_INJECT 'port:[[:blank:]]' '	port: 5335' /etc/unbound/unbound.conf.d/dietpi.conf
 				G_CONFIG_INJECT 'interface:[[:blank:]]' '	interface: 127.0.0.1' /etc/unbound/unbound.conf.d/dietpi.conf
@@ -9374,6 +9374,26 @@ _EOF_
 
 			Banner_Configuration
 
+			# Disable non-required dhcpcd, which is installed by Pi-hole installer
+			systemctl disable --now dhcpcd
+
+			# Apply most resource friendly and officially recommended NULL blocking: https://docs.pi-hole.net/ftldns/blockingmode/
+			G_CONFIG_INJECT 'BLOCKINGMODE=' 'BLOCKINGMODE=NULL' /etc/pihole/pihole-FTL.conf
+
+			# Disable pihole.log query logging: https://github.com/pi-hole/FTL/issues/614#issuecomment-510564476
+			G_EXEC pihole -l off
+
+			# Unbound: Configure Pi-hole to use it
+			if (( ${aSOFTWARE_INSTALL_STATE[182]} > 0 ))
+			then
+				G_DIETPI-NOTIFY 2 'Configuring Pi-hole to use Unbound'
+				G_EXEC sed -i '/^[[:blank:]]*server=/d' /etc/dnsmasq.d/01-pihole.conf
+				G_CONFIG_INJECT 'server=' 'server=127.0.0.1#5335' /etc/dnsmasq.d/01-pihole.conf
+				systemctl -q is-active pihole-FTL && G_EXEC systemctl restart pihole-FTL
+				G_CONFIG_INJECT 'PIHOLE_DNS_1=' 'PIHOLE_DNS_1=127.0.0.1#5335' /etc/pihole/setupVars.conf
+				G_EXEC sed -i '/^[[:blank:]]*PIHOLE_DNS_2=/d' /etc/pihole/setupVars.conf
+			fi
+
 			# Enable required PHP modules: https://github.com/pi-hole/pi-hole/blob/development/automated%20install/basic-install.sh#L250
 			G_EXEC phpenmod xml sqlite3 intl
 
@@ -9425,36 +9445,25 @@ _EOF_
 			# Ask user if they want to block public access to the admin panel
 			G_WHIP_BUTTON_OK_TEXT='YES'
 			G_WHIP_BUTTON_CANCEL_TEXT='NO'
-			G_WHIP_YESNO "In order to increase security, it is recommended that you block public access to the Pi-hole admin panel, so that unless you're on a local network, or connected via VPN, the Pi-hole admin panel isn't accessible.\n
-You can always enable/disable this at a later point using the commands:
+			G_WHIP_YESNO "In order to increase security, it is recommended to block public access to the Pi-hole admin panel, so that only connections from within your LAN or via VPN are possible.
+\nPractically this means to deny access from all IPs that do not match the reserved loopback and LAN ranges:
+ - 127.*
+ - 192.168.*
+ - 10.*
+ - 172.16.* - 172.31.*
+\nYou can always enable/disable this later using the commands:
  - $enable_cmd
- - $disable_cmd\n
-Do you want to block public access to the admin panel now?" && eval "$enable_cmd"
+ - $disable_cmd
+\nDo you want to block public access to the admin panel now?" && eval "$enable_cmd"
 
 			# Create symlinks to align Pi-hole admin and 404 page relative to webroot
-			G_EXEC cd /var/www
-			# - Move existing files/dirs out of the way
-			[[ ! -L 'admin' && -e 'admin' ]] && G_EXEC mv admin admin.bak
-			G_EXEC ln -sf html/admin admin
-			[[ ! -L 'pihole' && -e 'pihole' ]] && G_EXEC mv pihole pihole.bak
-			G_EXEC ln -sf html/pihole pihole
+			[[ -e '/var/www/admin' && ! -L '/var/www/admin' ]] && G_EXEC mv /var/www/admin{,.bak}
+			G_EXEC ln -sf /var/www/{html/admin,admin}
+			[[ -e '/var/www/pihole' && ! -L '/var/www/pihole' ]] && G_EXEC mv /var/www/pihole{,.bak}
+			G_EXEC ln -sf /var/www/{html/pihole,pihole}
 
 			# Pi-hole v5: Add webserver user to pihole group to allow gravity.db access from web UI: https://github.com/MichaIng/DietPi/issues/3391
 			G_EXEC usermod -aG pihole www-data
-
-			# Apply most resource friendly and officially recommended NULL blocking: https://docs.pi-hole.net/ftldns/blockingmode/
-			G_CONFIG_INJECT 'BLOCKINGMODE=' 'BLOCKINGMODE=NULL' /etc/pihole/pihole-FTL.conf
-
-			# Failsafe: Reset permissions
-			G_EXEC cd /var/www/html/admin
-			G_EXEC git reset --hard HEAD
-			G_EXEC cd /tmp/$G_PROGRAM_NAME
-
-			# Disable non-required dhcpcd, which is installed by Pi-hole installer
-			systemctl disable --now dhcpcd
-
-			# Disable pihole.log query logging: https://github.com/pi-hole/FTL/issues/614#issuecomment-510564476
-			G_EXEC pihole -l off
 
 			# Set web interface PW: https://github.com/MichaIng/DietPi/issues/662
 			pihole -a -p "$GLOBAL_PW"
