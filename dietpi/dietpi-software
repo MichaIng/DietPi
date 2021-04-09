@@ -666,10 +666,8 @@ _EOF_
 		aSOFTWARE_ONLINEDOC_URL[$software_id]='https://dietpi.com/docs/software/media/#koel'
 		aSOFTWARE_REQUIRES_PHP[$software_id]=1
  		aSOFTWARE_REQUIRES_MYSQL[$software_id]=1
-		aSOFTWARE_REQUIRES_NODEJS[$software_id]=1
-		aSOFTWARE_REQUIRES_BUILDESSENTIAL[$software_id]=1
 		aSOFTWARE_REQUIRES_FFMPEG[$software_id]=1
-		# Currently user prompt asks for admin user credentials
+		# Currently user prompt asks for media dir and admin user credentials
 		aSOFTWARE_REQUIRES_USERINPUT[$software_id]=1
 		#------------------
 		software_id=146
@@ -5778,9 +5776,7 @@ Package: wireguard wireguard-dkms wireguard-tools\nPin: release n=bullseye\nPin-
 			Banner_Installing
 
 			# APT dependencies: https://docs.koel.dev/#server > https://laravel.com/docs/master/deployment#server-requirements
-			# - python: "gyp verb check python checking for Python executable "python2"/"python" in the PATH"
-			# - libpng-dev: "Error: pngquant failed to build, make sure that libpng-dev is installed"
-			DEPS_LIST="python libpng-dev $PHP_NAME-bcmath $PHP_NAME-json $PHP_NAME-mbstring $PHP_NAME-xml $PHP_NAME-sqlite3"
+			DEPS_LIST="$PHP_NAME-bcmath $PHP_NAME-json $PHP_NAME-mbstring $PHP_NAME-xml $PHP_NAME-sqlite3"
 
 			# Grab latest release
 			local fallback_url='https://github.com/koel/koel/releases/download/v5.1.0/koel-v5.1.0.tar.gz'
@@ -5795,12 +5791,12 @@ Package: wireguard wireguard-dkms wireguard-tools\nPin: release n=bullseye\nPin-
 			fi
 			G_EXEC mv koel /mnt/dietpi_userdata/koel
 
-			# Node.js dependencies
-			G_EXEC_OUTPUT=1 G_EXEC npm i -g --unsafe-perm yarn
-
 			# Download and install composer
 			G_EXEC curl -sSfL https://getcomposer.org/composer-stable.phar -o /usr/local/bin/composer
 			G_EXEC chmod +x /usr/local/bin/composer
+
+			# Enable required PHP modules
+			G_EXEC phpenmod bcmath ctype fileinfo json mbstring tokenizer xml sqlite3
 
 			# Install Koel
 			G_EXEC cd /mnt/dietpi_userdata/koel
@@ -12066,28 +12062,29 @@ _EOF_
 			# User
 			Create_User -g dietpi -d /mnt/dietpi_userdata/koel koel
 
-			Download_Test_Media
-
+			# Permissions
 			G_EXEC cd /mnt/dietpi_userdata/koel
+			G_EXEC chmod 0600 .env
+			G_EXEC chown -R koel:dietpi .
 
 			# Create database and apply to config file, if it does not exist yet
 			if [[ ! -d '/mnt/dietpi_userdata/mysql/koel' ]]; then
 
-				/boot/dietpi/func/create_mysql_db koel koel "$GLOBAL_PW"
-				# Limit read access to Koel service user, before applying plain text global software password
-				G_EXEC chmod 0600 .env
+				# Create random alphanumeric 30 characters password
+				local password=$(tr -dc '[:alnum:]' < /dev/random | head -c30)
+				/boot/dietpi/func/create_mysql_db koel koel "$password"
 				G_CONFIG_INJECT 'DB_CONNECTION=' 'DB_CONNECTION=mysql' .env
 				G_CONFIG_INJECT 'DB_HOST=' 'DB_HOST=localhost' .env
 				G_CONFIG_INJECT 'DB_DATABASE=' 'DB_DATABASE=koel' .env
 				G_CONFIG_INJECT 'DB_USERNAME=' 'DB_USERNAME=koel' .env
-				GCI_PASSWORD=1 G_CONFIG_INJECT 'DB_PASSWORD=' "DB_PASSWORD=$GLOBAL_PW" .env
+				GCI_PASSWORD=1 G_CONFIG_INJECT 'DB_PASSWORD=' "DB_PASSWORD=$password" .env
+				unset -v password
 				G_CONFIG_INJECT 'FFMPEG_PATH=' "FFMPEG_PATH=$(command -v ffmpeg)" .env
 				# With pre-configured media path, koel:init returns: "Oops! Koel installation or upgrade didn't finish successfully."
 				#G_CONFIG_INJECT 'MEDIA_PATH=' 'MEDIA_PATH=/mnt/dietpi_userdata/Music' .env
-				### Re-test below: https://github.com/koel/koel/issues/1302
-				# ADMIN env vars are not used any more, user prompt will ask for info.
+				# Admin credentials cannot be pre-configured anymore: https://github.com/koel/koel/issues/1302
 				#G_CONFIG_INJECT 'ADMIN_EMAIL=' 'ADMIN_EMAIL=dietpi@dietpi.com' .env
-				#G_CONFIG_INJECT 'ADMIN_NAME=' 'ADMIN_NAME=admin' .env
+				#G_CONFIG_INJECT 'ADMIN_NAME=' 'ADMIN_NAME=dietpi' .env
 				#GCI_PASSWORD=1 G_CONFIG_INJECT 'ADMIN_PASSWORD=' "ADMIN_PASSWORD=$GLOBAL_PW" .env
 
 			# Else assure database server runs
@@ -12097,9 +12094,10 @@ _EOF_
 
 			fi
 
-			# Permissions
-			G_EXEC chown -R koel:dietpi /mnt/dietpi_userdata/koel
+			# Download test media
+			Download_Test_Media
 
+			# Init
 			G_EXEC_OUTPUT=1 G_EXEC sudo -u koel $PHP_NAME artisan koel:init --no-assets
 			G_EXEC_OUTPUT=1 G_EXEC sudo -u koel $PHP_NAME artisan koel:sync
 			G_EXEC cd /tmp/$G_PROGRAM_NAME
