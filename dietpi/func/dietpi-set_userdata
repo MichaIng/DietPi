@@ -39,34 +39,31 @@
 		# Stop all running services
 		/boot/dietpi/dietpi-services stop
 
-		# Copy source to target, if it contains any files/folders
-		if [[ -z $(find "$SOURCE_DIRECTORY" -maxdepth 0 -empty) ]]; then
+		G_DIETPI-NOTIFY 2 "Moving your existing data from $SOURCE_DIRECTORY to $TARGET_DIRECTORY, please wait..."
 
-			G_DIETPI-NOTIFY 0 "Moving your existing data from $SOURCE_DIRECTORY to $TARGET_DIRECTORY"
-			G_DIETPI-NOTIFY 2 'Please wait...\n'
+		# Begin transfer
+		if cp -a "$SOURCE_DIRECTORY/." "$TARGET_DIRECTORY/"; then
 
-			# Begin transfer
-			if cp -a "$SOURCE_DIRECTORY/." "$TARGET_DIRECTORY/"; then
+			# Remove source
+			rm -R "$SOURCE_DIRECTORY"
 
-				# Remove source
-				rm -R "$SOURCE_DIRECTORY"
+			# Create symlink at /mnt/dietpi_userdata if required
+			if [[ $TARGET_DIRECTORY != '/mnt/dietpi_userdata' ]]; then
 
-				# Create symlink to G_FP_DIETPI_USERDATA if required
-				if [[ $TARGET_DIRECTORY != '/mnt/dietpi_userdata' ]]; then
-
-					rm -Rf /mnt/dietpi_userdata
-					ln -s "$TARGET_DIRECTORY" /mnt/dietpi_userdata
-
-				fi
-
-				LOGFILE_OUTPUT_TEXT="[  OK  ] Successfully moved your data from $SOURCE_DIRECTORY to $TARGET_DIRECTORY"
-
-			else
-
-				LOGFILE_OUTPUT_TEXT="[FAILED] Failed to copy $SOURCE_DIRECTORY/ to $TARGET_DIRECTORY."
-				EXIT_CODE=1
+				rm -Rf /mnt/dietpi_userdata
+				ln -s "$TARGET_DIRECTORY" /mnt/dietpi_userdata
 
 			fi
+
+			# Apply dietpi:dietpi owner, used by some software titles like Syncthing and file servers to permit creating files and directories
+			chown dietpi:dietpi "$TARGET_DIRECTORY"
+
+			LOGFILE_OUTPUT_TEXT="Successfully moved your data from $SOURCE_DIRECTORY to $TARGET_DIRECTORY."
+
+		else
+
+			LOGFILE_OUTPUT_TEXT="Failed to copy $SOURCE_DIRECTORY/ to $TARGET_DIRECTORY."
+			EXIT_CODE=1
 
 		fi
 
@@ -86,55 +83,57 @@
 
 	# Sanity checks
 	# - Check for both inputs
-	if [[ ! $SOURCE_DIRECTORY || ! $TARGET_DIRECTORY ]]; then
+	if ! [[ $SOURCE_DIRECTORY && $TARGET_DIRECTORY ]]; then
 
-		LOGFILE_OUTPUT_TEXT="[FAILED] Please provide a source ($SOURCE_DIRECTORY) and target ($TARGET_DIRECTORY) directory for input."
+		LOGFILE_OUTPUT_TEXT="Please provide a source ($SOURCE_DIRECTORY) and target ($TARGET_DIRECTORY) directory for input."
 		EXIT_CODE=1
 
 	# - Check if symlink is already pointing to target directory
 	elif [[ $(readlink -f /mnt/dietpi_userdata) == "$TARGET_DIRECTORY" ]]; then
 
-		LOGFILE_OUTPUT_TEXT='[ INFO ] /mnt/dietpi_userdata is already symlinked to target directory.'
+		LOGFILE_OUTPUT_TEXT="/mnt/dietpi_userdata has already been moved to $TARGET_DIRECTORY, nothing to do."
 
 	# - Check if source directory exists
 	elif [[ ! -d $SOURCE_DIRECTORY ]]; then
 
-		LOGFILE_OUTPUT_TEXT="[FAILED] Source directory $SOURCE_DIRECTORY does not exist."
+		LOGFILE_OUTPUT_TEXT="Source directory $SOURCE_DIRECTORY does not exist."
 		EXIT_CODE=1
 
 	# - Check for disallowed directory match
-	elif [[ $SOURCE_DIRECTORY =~ $TARGET_DIRECTORY || $TARGET_DIRECTORY =~ $SOURCE_DIRECTORY ]]; then
+	elif [[ $SOURCE_DIRECTORY == "$TARGET_DIRECTORY" || $SOURCE_DIRECTORY == "$TARGET_DIRECTORY/"* || $TARGET_DIRECTORY == "$SOURCE_DIRECTORY/"* ]]; then
 
-		LOGFILE_OUTPUT_TEXT="[FAILED] $SOURCE_DIRECTORY and $TARGET_DIRECTORY cannot be within each other. Disallowed directory match."
+		LOGFILE_OUTPUT_TEXT="$SOURCE_DIRECTORY and $TARGET_DIRECTORY cannot be within each other. Disallowed directory match."
 		EXIT_CODE=1
 
 	# - Only allow full filepaths
 	elif [[ $SOURCE_DIRECTORY != '/'* || $TARGET_DIRECTORY != '/'* ]]; then
 
-		LOGFILE_OUTPUT_TEXT="[FAILED] Both source ($SOURCE_DIRECTORY) and target directories ($TARGET_DIRECTORY) must contain the full filepath (eg: /mnt/drive1)"
+		LOGFILE_OUTPUT_TEXT="Source ($SOURCE_DIRECTORY) and target directories ($TARGET_DIRECTORY) must be given with absolute path, e.g.: /mnt/drive1"
 		EXIT_CODE=1
 
 	else
 
-		# - Remove /mnt/dietpi_userdata symlink, if chosen as target
+		# Remove /mnt/dietpi_userdata symlink, if chosen as target
 		[[ $TARGET_DIRECTORY == '/mnt/dietpi_userdata' && -L '/mnt/dietpi_userdata' ]] && rm /mnt/dietpi_userdata
+
+		# Create target directory
 		mkdir -p "$TARGET_DIRECTORY"
 
-		# - Ensure we can create, write and set permissions to target directory
+		# Ensure target directory supports POSIX permissions
 		if ! G_CHECK_FS_PERMISSION_SUPPORT "$TARGET_DIRECTORY"; then
 
-			LOGFILE_OUTPUT_TEXT="[FAILED] $TARGET_DIRECTORY does not support filesystem permissions. Transfer aborted."
+			LOGFILE_OUTPUT_TEXT="$TARGET_DIRECTORY does not support POSIX permissions. Transfer aborted."
 			EXIT_CODE=1
 
 		else
 
-			# - Ensure enough freespace in target
-			#	"-m" => result in MiB actual disc usage, respecting disk block size, e.g. "144"
-			#	Trailing slash required with "du" to correctly check symlink target in case
+			# Check for sufficient free space in target directory
+			# - "-m" => result in MiB actual disk usage, respecting disk block size, e.g. "144"
+			# - Trailing slash required with "du" to correctly check symlink target in case
 			FREESPACE_REQUIRED_SOURCE=$(du -sm "$SOURCE_DIRECTORY/" | mawk '{print $1}')
 			if ! G_CHECK_FREESPACE "$TARGET_DIRECTORY" "$FREESPACE_REQUIRED_SOURCE"; then
 
-				LOGFILE_OUTPUT_TEXT="[FAILED] Not enough free space in target directory $TARGET_DIRECTORY.\n - Required: $FREESPACE_REQUIRED_SOURCE MiB"
+				LOGFILE_OUTPUT_TEXT="Not enough free space in target directory $TARGET_DIRECTORY.\n - Required: $FREESPACE_REQUIRED_SOURCE MiB"
 				EXIT_CODE=1
 
 			else
@@ -150,23 +149,21 @@
 
 	#-----------------------------------------------------------------------------------
 	# Print results and send to logfile
-	[[ -f $FP_LOG ]] && rm $FP_LOG
 	if [[ $LOGFILE_OUTPUT_TEXT ]]; then
 
-		# Error
+		# Failed
 		if (( $EXIT_CODE )); then
 
 			G_DIETPI-NOTIFY 1 "$LOGFILE_OUTPUT_TEXT"
+			echo -e "[FAILED] $LOGFILE_OUTPUT_TEXT" > $FP_LOG
 
-		# Info
+		# Ok
 		else
 
-			G_DIETPI-NOTIFY 2 "$LOGFILE_OUTPUT_TEXT"
+			G_DIETPI-NOTIFY 0 "$LOGFILE_OUTPUT_TEXT"
+			echo -e "[  OK  ] $LOGFILE_OUTPUT_TEXT" > $FP_LOG
 
 		fi
-
-		# Send to logfile
-		echo -e "$LOGFILE_OUTPUT_TEXT" > $FP_LOG
 
 	fi
 
