@@ -288,6 +288,7 @@ Links to hardware and software manufacturers, sources and build instructions use
 - [Box86](https://github.com/ptitSeb/box86)
 - [Steam](https://steamcommunity.com/)
 - [mjpg-streamer](https://github.com/jacksonliam/mjpg-streamer)
+- [VSCodium](https://github.com/VSCodium/vscodium)
 
 ---
 
