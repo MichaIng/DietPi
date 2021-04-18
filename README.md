@@ -291,6 +291,7 @@ Links to hardware and software manufacturers, sources and build instructions use
 - [IPFS](https://github.com/ipfs/ipfs)
 - [CUPS](https://github.com/OpenPrinting/cups)
 - [Go](https://github.com/golang/go)
+- [VSCodium](https://github.com/VSCodium/vscodium)
 
 ---
 
