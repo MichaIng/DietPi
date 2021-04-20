@@ -47,7 +47,9 @@
 	alias dietpi-wifidb='/boot/dietpi/func/dietpi-wifidb'
 	alias dietpi-optimal_mtu='/boot/dietpi/func/dietpi-optimal_mtu'
 	alias dietpi-cloudshell='/boot/dietpi/dietpi-cloudshell'
-	alias dietpi-nordvpn='/boot/dietpi/misc/dietpi-nordvpn'
+	alias dietpi-nordvpn='G_DIETPI-NOTIFY 1 "DietPi-NordVPN has been renamed to DietPi-VPN. Please use the \"dietpi-vpn\" command."'
+	alias dietpi-vpn='/boot/dietpi/dietpi-vpn'
+	alias dietpi-ddns='/boot/dietpi/dietpi-ddns'
 	alias cpu='/boot/dietpi/dietpi-cpuinfo'
 	# - Optional DietPi software aliases
 	[[ -d '/mnt/dietpi_userdata/sonarr' || -d '/mnt/dietpi_userdata/radarr' || -d '/mnt/dietpi_userdata/lidarr' ]] && alias dietpi-arr_to_RAM='/boot/dietpi/misc/dietpi-arr_to_RAM'
@@ -55,7 +57,7 @@
 	[[ -f '/usr/games/opentyrian/run' ]] && alias opentyrian='/usr/games/opentyrian/run'
 	[[ -f '/mnt/dietpi_userdata/dxx-rebirth/run.sh' ]] && alias dxx-rebirth='/mnt/dietpi_userdata/dxx-rebirth/run.sh'
 	# - 1337 moments ;)
-	alias 1337='echo Indeed, you are =\)'
+	alias 1337='echo "Indeed, you are =)"'
 
 	# "G_DIETPI-NOFITY -2 message" starts a process animation. If scripts fail to kill the animation, e.g. cancelled by user, terminal bash prompt has to do it as last resort.
 	[[ $PROMPT_COMMAND == *'dietpi-process.pid'* ]] || PROMPT_COMMAND="[[ -w '/tmp/dietpi-process.pid' ]] && rm -f /tmp/dietpi-process.pid &> /dev/null && echo -ne '\r\e[J'; $PROMPT_COMMAND"

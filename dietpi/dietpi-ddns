@@ -1,0 +1,378 @@
+#!/bin/bash
+# --------------------------------------------
+# DietPi-DDNS
+# Setup background jobs to regularly update dynamic IPs against DDNS providers
+# --------------------------------------------
+# Created by MichaIng / micha@dietpi.com / dietpi.com
+# Content by ravenclaw900 / https://github.com/ravenclaw900
+# License: https://github.com/MichaIng/DietPi/blob/master/LICENSE
+# --------------------------------------------
+# Location: /boot/dietpi/dietpi-ddns
+{
+readonly USAGE='
+Usage: dietpi-ddns [[<options>...] <command> [<provider>]]
+Available commands:
+  <empty>		Interactive menu to setup dynamic DNS updates
+  apply	<provider>	Apply or update DDNS updates for <provider>, using <options> for setup details
+  remove		Remove any DDNS updates from this system
+Available options:
+  -d <domains>		Comma-separated list of domains that shall point to this system
+  -u <username>		Username or identifier, depending on provider
+			In combination with a custom provider, this is used for HTTP authentication.
+  -p <password>		Password or token, depending on provider
+			In combination with a custom provider, this is used for HTTP authentication.
+  -t <timespan>		Duration between DDNS updates in minutes (optional, defaults to 10)
+Available providers:
+  <custom>		Full URL to update against a custom DDNS provider
+  DuckDNS		Read more: https://www.duckdns.org/about.jsp
+  No-IP			Read more: https://www.noip.com/about
+'
+
+# Load DietPi-Globals
+. /boot/dietpi/func/dietpi-globals
+readonly G_PROGRAM_NAME='DietPi-DDNS'
+G_CHECK_ROOT_USER
+G_CHECK_ROOTFS_RW
+G_INIT
+
+# Variables
+COMMAND=
+PROVIDER=
+DOMAINS=
+USERNAME=
+PASSWORD=
+TIMESPAN=
+
+# --------------------------------------------
+# Functions
+# --------------------------------------------
+# Process input: Requires script input to be passed
+Input()
+{
+	while [[ $1 ]]
+	do
+		case "$1" in
+			'-d') shift; DOMAINS=$1; shift;;
+			'-u') shift; USERNAME=$1; shift;;
+			'-p') shift; PASSWORD=$1; shift;;
+			'-t') shift; TIMESPAN=$1; shift;;
+			'apply') COMMAND=$1; shift; PROVIDER=$1; shift;;
+			'remove') COMMAND=$1; shift;;
+			*) G_DIETPI-NOTIFY 1 "Invalid input ($1). Aborting...$USAGE"; exit 1;;
+		esac
+	done
+}
+
+# Read current settings from existing cURL command, if not set via input already
+Read()
+{
+	[[ -f '/var/lib/dietpi/dietpi-ddns/update.sh' ]] || return
+	local command=$(tail -1 /var/lib/dietpi/dietpi-ddns/update.sh)
+
+	# DuckDNS
+	if [[ $command == *'duckdns.org'* ]]
+	then
+		[[ $PROVIDER ]] || PROVIDER='DuckDNS'
+		[[ $DOMAINS ]] || DOMAINS=${command#*domains=} DOMAINS=${DOMAINS%&token*}
+		[[ $PASSWORD ]] || PASSWORD=${command#*token=} PASSWORD=${PASSWORD%\'*}
+
+	# No-IP
+	elif [[ $command == *'noip.com'* ]]
+	then
+		[[ $PROVIDER ]] || PROVIDER='No-IP'
+		[[ $DOMAINS ]] || DOMAINS=${command#*hostname=} DOMAINS=${DOMAINS%\'*}
+		[[ $USERNAME ]] || USERNAME=${command#*\'} USERNAME=${USERNAME%%:*}
+		[[ $PASSWORD ]] || PASSWORD=${command#*:} PASSWORD=${PASSWORD%%\'*}
+
+	# Dynu
+	elif [[ $command == *'dynu.com'* ]]
+	then
+		[[ $PROVIDER ]] || PROVIDER='Dynu'
+		[[ $DOMAINS ]] || DOMAINS=${command#*hostname=} DOMAINS=${DOMAINS%&password*}
+		[[ $PASSWORD ]] || PASSWORD=${command#*password=} PASSWORD=${PASSWORD%\'*}
+
+	# Custom
+	else
+		[[ $PROVIDER ]] || PROVIDER=${command%\'*} PROVIDER=${PROVIDER##*\'}
+		# HTTP authentication
+		if [[ $command == *' -u '* ]]
+		then
+			[[ $USERNAME ]] || USERNAME=${command#*\'} USERNAME=${USERNAME%%:*}
+			[[ $PASSWORD ]] || PASSWORD=${command#*:} PASSWORD=${PASSWORD%%\'*}
+		fi
+	fi
+
+	# Time span
+	[[ ! $TIMESPAN && -f '/var/spool/cron/crontabs/dietpi-ddns' ]] || return
+	TIMESPAN=$(tail -1 /var/spool/cron/crontabs/dietpi-ddns)
+	TIMESPAN=${TIMESPAN#\*/} TIMESPAN=${TIMESPAN%% *}
+}
+
+# Apply chosen settings and create a Cron job for dynamic DNS updates
+Apply()
+{
+	# Generate URL and set HTTP authentication flag based on provider
+	local url http_auth=1
+	# - DuckDNS
+	if [[ $PROVIDER == 'DuckDNS' ]]
+	then
+		url="https://www.duckdns.org/update?domains=$DOMAINS&token=$PASSWORD"
+		http_auth=
+
+	# - No-IP
+	elif [[ $PROVIDER == 'No-IP' ]]
+	then
+		url="https://dynupdate.noip.com/nic/update?hostname=$DOMAINS"
+
+	# - Dynu
+	elif [[ $PROVIDER == 'Dynu' ]]
+	then
+		url="https://api.dynu.com/nic/update?hostname=$DOMAINS&password=$PASSWORD"
+		http_auth=
+
+	# - Custom
+	else
+		url=$PROVIDER
+		# Assure that no HTTP authentication is attempted if username and password are not set
+		[[ $USERNAME$PASSWORD ]] || http_auth=
+	fi
+
+	# Create DietPi-DDNS group
+	G_DIETPI-NOTIFY 2 'Preparing unprivileged DietPi-DDNS UNIX group...'
+	if getent group dietpi-ddns > /dev/null
+	then
+		G_EXEC groupmod -p '!' dietpi-ddns
+	else
+		G_EXEC groupadd -r -p '!' dietpi-ddns
+	fi
+
+	# Create DietPi-DDNS user
+	G_DIETPI-NOTIFY 2 'Preparing unprivileged DietPi-DDNS UNIX user...'
+	if getent passwd dietpi-ddns > /dev/null
+	then
+		G_EXEC usermod -g 'dietpi-ddns' -G '' -d '/nonexistent' -s '/usr/sbin/nologin' -p '!' dietpi-ddns
+	else
+		G_EXEC useradd -r -g 'dietpi-ddns' -G '' -d '/nonexistent' -s '/usr/sbin/nologin' -p '!' dietpi-ddns
+	fi
+
+	# Test DDNS update
+	G_DIETPI-NOTIFY 2 'Testing DDNS update...'
+	local result
+	if ! result=$(curl -sSfL ${http_auth:+ -u "$USERNAME:$PASSWORD"} "$url" 2>&1) ||
+		[[ $PROVIDER == 'DuckDNS' && $result == 'KO' ]] ||
+		[[ $PROVIDER == 'Dynu' && $result != 'good*' && $result != 'nochg*' ]]
+	then
+		G_DIETPI-NOTIFY 1 "DDNS update test failed, please check your input${result:+:\n$result}"
+		STATUS="DDNS update test failed, please check your input${result:+:\n$result}"
+		return 1
+	else
+		G_DIETPI-NOTIFY 2 "DDNS update test succeeded${result:+:\n$result}"
+		STATUS="DDNS update test succeeded${result:+:\n$result}"
+	fi
+
+	# Check and in case remove obsolete No-IP client
+	if command -v noip2 > /dev/null
+	then
+		G_DIETPI-NOTIFY 2 'Removing obsolete No-IP client from your system...'
+		if [[ -f '/etc/systemd/system/noip2.service' ]]
+		then
+			systemctl disable --now noip2
+			rm -v /etc/systemd/system/noip2.service
+		fi
+		if [[ -f '/etc/init.d/noip2.sh' ]]
+		then
+			systemctl unmask noip2
+			systemctl disable --now noip2
+			rm -v /etc/init.d/noip2.sh
+		fi
+		[[ -d '/etc/systemd/system/noip2.service.d' ]] && rm -Rv /etc/systemd/system/noip2.service.d
+		[[ -f '/usr/local/bin/noip2' ]] && rm -v /usr/local/bin/noip2
+		[[ -f '/usr/local/etc/no-ip2.conf' ]] && rm -v /usr/local/etc/no-ip2.conf
+	fi
+
+	# Create update script
+	G_DIETPI-NOTIFY 2 'Creating DietPi-DDNS update script...'
+	G_EXEC mkdir -p /var/lib/dietpi/dietpi-ddns
+	echo '#!/bin/dash' > /var/lib/dietpi/dietpi-ddns/update.sh
+	G_EXEC chmod 0500 /var/lib/dietpi/dietpi-ddns/update.sh
+	G_EXEC chown dietpi-ddns:dietpi-ddns /var/lib/dietpi/dietpi-ddns/update.sh
+	# Shellcheck false positive: https://github.com/koalaman/shellcheck/issues/2168
+	# shellcheck disable=SC2016
+	echo "curl -sSfL${http_auth:+ -u '$USERNAME:$PASSWORD'} '$url' 2>&1 > /dev/null | logger -t dietpi-ddns -p 3" >> /var/lib/dietpi/dietpi-ddns/update.sh
+
+	# Apply Cron job
+	G_DIETPI-NOTIFY 2 'Applying DietPi-DDNS Cron job...'
+	crontab -u dietpi-ddns - <<< "*/${TIMESPAN:-10} * * * * /var/lib/dietpi/dietpi-ddns/update.sh"
+}
+
+# Remove any DDNS updates from this system
+Remove()
+{
+	# Remove Cron job
+	[[ -f '/var/spool/cron/crontabs/dietpi-ddns' ]] && G_EXEC_DESC='Removing DietPi-DDNS Cron job' G_EXEC crontab -u dietpi-ddns -r
+	[[ -d '/var/lib/dietpi/dietpi-ddns' ]] && G_EXEC_DESC='Removing DietPi-DDNS update script' G_EXEC rm -R /var/lib/dietpi/dietpi-ddns
+
+	# Remove DietPi-DDNS user and group
+	getent passwd dietpi-ddns > /dev/null && G_EXEC_DESC='Removing DietPi-DDNS UNIX user' G_EXEC userdel dietpi-ddns
+	getent group dietpi-ddns > /dev/null && G_EXEC_DESC='Removing DietPi-DDNS UNIX group' G_EXEC groupdel dietpi-ddns
+
+	# Unset variables
+	unset -v USERNAME PASSWORD TIMESPAN PROVIDER
+}
+
+# --------------------------------------------
+# Menus
+# --------------------------------------------
+Menu_Provider()
+{
+	# No or known provider selected
+	local custom_text='Use a custom provider and enter its URL manually'
+	G_WHIP_DEFAULT_ITEM=${PROVIDER:-DuckDNS}
+
+	# Custom provider selected
+	if [[ $PROVIDER && $PROVIDER != 'DuckDNS' && $PROVIDER != 'No-IP' && $PROVIDER != 'Dynu' ]]
+	then
+		G_WHIP_DEFAULT_ITEM='Custom'
+		custom_text="[$PROVIDER]"
+	fi
+
+	G_WHIP_MENU_ARRAY=(
+		'DuckDNS' ': Read more: https://www.duckdns.org/about.jsp'
+		'No-IP' ': Read more: https://www.noip.com/about'
+		'Dynu' ': Read more: https://www.dynu.com/DynamicDNS'
+		'Custom' ": $custom_text"
+	)
+	G_WHIP_MENU 'Please select your DDNS provider:' || return 1
+
+	case "$G_WHIP_RETURNED_VALUE" in
+		'Custom')
+			G_WHIP_DEFAULT_ITEM=$PROVIDER G_WHIP_INPUTBOX 'Please enter the full URL used to update your dynamic IP against your custom DDNS provider:' && PROVIDER=$G_WHIP_RETURNED_VALUE || return 1
+		;;
+		*) PROVIDER=$G_WHIP_RETURNED_VALUE;;
+	esac
+
+	# Update credentials names
+	[[ $PROVIDER == 'DuckDNS' ]] && password='Token' || password='Password'
+}
+
+Menu_Domains()
+{
+	# Skip with custom provider
+	[[ $PROVIDER == 'DuckDNS' || $PROVIDER == 'No-IP' || $PROVIDER == 'Dynu' ]] || return 0
+
+	G_WHIP_DEFAULT_ITEM=$DOMAINS
+	G_WHIP_INPUTBOX 'Please enter a comma-separated list of domains that shall point to this system:' || return 1
+	DOMAINS=$G_WHIP_RETURNED_VALUE
+}
+
+Menu_Username()
+{
+	# Skip with DuckDNS and Dynu
+	[[ $PROVIDER == 'DuckDNS' || $PROVIDER == 'Dynu' ]] && return 0
+
+	# Add note for custom provider
+	local text="Please enter the $username to update your dynamic IP against your DDNS provider.\n - The colon character : is currently not supported!"
+	[[ $PROVIDER == 'No-IP' ]] || text+='\nThis is used for HTTP authentication. If no HTTP authentication is required, type in a \"0\" to skip the username.'
+
+	G_WHIP_DEFAULT_ITEM=$USERNAME
+	G_WHIP_INPUTBOX "$text" || return 1
+	USERNAME=$G_WHIP_RETURNED_VALUE
+
+	# Unset with custom provider when "0" is given
+	[[ $PROVIDER == 'No-IP' || $G_WHIP_RETURNED_VALUE != 0 ]] || unset -v USERNAME
+}
+
+Menu_Password()
+{
+	# Add note for custom provider
+	local text="Please enter the $password to update your dynamic IP against your DDNS provider.\n - The single quote character ' is currently not supported!"
+	[[ $PROVIDER == 'DuckDNS' || $PROVIDER == 'No-IP' || $PROVIDER == 'Dynu' ]] || text+='\n\nThis is used for HTTP authentication. If no HTTP authentication is required, type in a \"0\" to skip the password.'
+
+	G_WHIP_PASSWORD "$text" || return 1
+	PASSWORD=$result
+	unset -v result
+
+	# Unset with custom provider when "0" is given
+	[[ $PROVIDER == 'DuckDNS' || $PROVIDER == 'No-IP' || $PROVIDER == 'Dynu' || $G_WHIP_RETURNED_VALUE != 0 ]] || unset -v PASSWORD
+}
+
+Menu_Timespan()
+{
+	G_WHIP_DEFAULT_ITEM=$TIMESPAN
+	G_WHIP_INPUTBOX 'Please enter the duration between DDNS updates in minutes:' || return 1
+	TIMESPAN=$G_WHIP_RETURNED_VALUE
+}
+
+Menu_Main()
+{
+	# Adjust credentials names
+	local username='Username' password='Password'
+	[[ $PROVIDER == 'DuckDNS' ]] && password='Token'
+
+	# Loop through sub menus directly if no provider has been chosen yet, else show main menu
+	[[ $PROVIDER ]] || { G_WHIP_BUTTON_CANCEL_TEXT='Exit' Menu_Provider || exit 0 && Menu_Domains && Menu_Username && Menu_Password && NEXT_MENU_START='Apply'; }
+
+	G_WHIP_MENU_ARRAY=('Provider' ": [$PROVIDER]")
+	[[ $PROVIDER == 'DuckDNS' || $PROVIDER == 'No-IP' || $PROVIDER == 'Dynu' ]] && G_WHIP_MENU_ARRAY+=('Domains' ": [$DOMAINS]")
+	[[ $PROVIDER == 'DuckDNS' || $PROVIDER == 'Dynu' ]] || G_WHIP_MENU_ARRAY+=("$username" ": [$USERNAME]")
+	G_WHIP_MENU_ARRAY+=(
+		"$password" ": [${PASSWORD//?/*}]"
+		'Timespan' ": [${TIMESPAN:-10} minutes]"
+		'' '●─ Apply '
+		'Apply' ': Create or update Cron job with above settings'
+		'Remove' ': Remove any DDNS updates from this system'
+	)
+	G_WHIP_BUTTON_CANCEL_TEXT='Exit'
+	G_WHIP_DEFAULT_ITEM=$NEXT_MENU_START
+	G_WHIP_MENU "$STATUS" || exit 1
+
+	case "$G_WHIP_RETURNED_VALUE" in
+		'Provider') Menu_Provider && Menu_Domains && Menu_Username && Menu_Password && NEXT_MENU_START='Apply';;
+		'Domains') Menu_Domains && Menu_Username && Menu_Password && NEXT_MENU_START='Apply';;
+		"$username") Menu_Username && Menu_Password && NEXT_MENU_START='Apply';;
+		"$password") Menu_Password && NEXT_MENU_START='Apply';;
+		'Timespan') Menu_Timespan;;
+		'Apply') Apply;;
+		'Remove') Remove;;
+	esac
+
+	return 0
+}
+
+# --------------------------------------------
+# Main
+# --------------------------------------------
+# CLI
+if [[ $1 ]]
+then
+	Input "$@"
+	if [[ $COMMAND == 'apply' ]]
+	then
+		# Complement settings from existing Cron job
+		Read
+
+		Apply || exit 1
+
+	elif [[ $COMMAND == 'remove' ]]
+	then
+		Remove || exit 1
+	else
+		G_DIETPI-NOTIFY 1 "Input found but no command. Aborting...$USAGE"
+		exit 1
+	fi
+
+# Menu
+else
+	# Read current settings from existing Cron job
+	Read
+
+	# Read status of existing Cron job via last two journal lines: "dietpi-ddns" tag shows curl errors, "cron" tag with "dietpi-ddns" string shows Cron job execution
+	STATUS='Manage DDNS settings to keep your dynamic IP with the static domain provided by your DDNS provider in sync'
+	[[ $PROVIDER ]] && STATUS="Last DietPi-DDNS logs:\n$(journalctl -r -t dietpi-ddns -t CRON | grep -m2 dietpi-ddns)"
+
+	NEXT_MENU_START='Provider'
+	while Menu_Main; do :; done
+fi
+
+exit 0
+}
