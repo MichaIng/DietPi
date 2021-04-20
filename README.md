@@ -245,7 +245,6 @@ Links to hardware and software manufacturers, sources and build instructions use
 - [vsftpd](https://security.appspot.com/vsftpd.html)
 - [Samba](https://wiki.samba.org/index.php/Using_Git_for_Samba_Development)
 - [NFS](http://linux-nfs.org/wiki/index.php/Main_Page)
-- [No-IP Client Binary](https://www.noip.com/support/knowledgebase/installing-the-linux-dynamic-update-client/)
 - [Dropbear](https://github.com/mkj/dropbear)
 - [OpenSSH](https://github.com/openssh/openssh-portable)
 - [OpenVPN](https://github.com/OpenVPN)
