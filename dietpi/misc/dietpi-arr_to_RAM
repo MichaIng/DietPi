@@ -100,15 +100,20 @@ $USAGE"; exit 1; }
 	Link_To_Ram(){
 
 		Print "Linking $FP_DISK to RAM ($FP_RAM)..."
-		# For actual database file, create a backup first, which includes -shm and -wal, then copy that to RAM. If it fails, skip that program.
-		if [[ $FP_RAM == *'.db' ]]
-		then
-			sqlite3 "$FP_DISK" ".save ${FP_DISK}.bak" || { error=$? Print "Creating ${i^} database backup failed. Skipping this program..."; return 1; }
-			cp -a --no-preserve=timestamps "${FP_DISK}.bak" "$FP_RAM" || { error=$? Print "Copying ${i^} database to RAM failed. Skipping this program..."; return 1; }
-		fi
-		ln -sf "$FP_RAM" "$FP_DISK" || EXIT_CODE=$?
-		# chown link in case created by root but program user wants to store back to disk
-		chown -h "$i" "$FP_DISK" || EXIT_CODE=$?
+
+		# Create a backup first, which includes -shm and -wal, then copy that to RAM. If it fails, skip that program.
+		sqlite3 "$FP_DISK" ".save ${FP_DISK}.bak" || { error=$? Print "Creating ${i^} database backup failed. Skipping this program..."; return 1; }
+		cp -aL --no-preserve=timestamps "${FP_DISK}.bak" "$FP_RAM" || { error=$? Print "Copying ${i^} database to RAM failed. Skipping this program..."; return 1; }
+
+		# Create all symlinks and chown them in case created by root but program user wants to store back to disk
+		local j
+		for j in '' '-shm' '-wal'
+		do
+			ln -sf "$FP_RAM$j" "$FP_DISK$j" || EXIT_CODE=$?
+			chown -h "$i" "$FP_DISK$j" || EXIT_CODE=$?
+		done
+
+		Print "Linked ${i^} database to RAM."
 
 	}
 
@@ -117,6 +122,7 @@ $USAGE"; exit 1; }
 		local astart_services=()
 
 		# Loop through programs
+		local i
 		for i in "${!aFILE[@]}"
 		do
 
@@ -173,55 +179,44 @@ $USAGE"; exit 1; }
 				# - chown dir in case created by root but program user wants to store back to disk
 				chown "$i" "$FP_RAM" || EXIT_CODE=$?
 
-				# Loop through database file, shm and wal
-				for j in "${aFILE[$i]}"{,-shm,-wal}
-				do
+				# Process database file
+				FP_DISK+="/${aFILE[$i]}"
+				FP_RAM+="/${aFILE[$i]}"
 
-					FP_DISK="/mnt/dietpi_userdata/$i/$j"
-					FP_RAM="/tmp/${i}_db_link/$j"
-					local fp_target=
+				# Source exists
+				local fp_target
+				if [[ fp_target=$(readlink -e "$FP_DISK") ]]; then
 
-					# Source exists and is no symlink, expected situation
-					if [[ -f $FP_DISK && ! -L $FP_DISK ]]; then
+					# Link to target exists, should only happen when running the script two times in same session
+					if [[ $fp_target == "$FP_RAM" ]]; then
 
-						Link_To_Ram || continue 2
+						Print "$FP_DISK already linked to RAM ($FP_RAM). Skipping this program..."
 
-					# Link + target exists, should only happen when running the script two times in same session
-					elif [[ -L $FP_DISK ]] && fp_target=$(readlink -e "$FP_DISK"); then
-
-						if [[ $fp_target == "$FP_RAM" ]]; then
-
-							Print "$FP_DISK already linked to RAM ($FP_RAM). Skipping this file..."
-
-						# Failsafe: Restore file from wrong symlink, should never occur but required for this script to function
-						else
-
-							Print "$FP_DISK already linked to $fp_target. Restoring original file location before linking to RAM..."
-							rm "$FP_DISK" || { error=$? Print "Removing symlink failed ($FP_DISK). Skipping this file..."; continue; }
-							mv "$fp_target" "$FP_DISK" || { error=$? Print "Restoring original file failed ($fp_target). Skipping this file..."; continue; }
-							Link_To_Ram || continue 2
-
-						fi
-
-					# Source does not exist or is orphaned link, should only happen after crash
-					elif [[ -f ${FP_DISK}.bak ]]; then
-
-						Print "$FP_DISK not found. Recovering from backup first (${FP_DISK}.bak)..."
-						# Remove possible orphaned symlink
-						[[ ! -L $FP_DISK ]] || rm "$FP_DISK" || { error=$? Print "Removing orphaned symlink failed ($FP_DISK). Skipping this file..."; continue; }
-						# Recover from backup
-						mv "${FP_DISK}.bak" "$FP_DISK" || { error=$? Print "Recovering file from backup failed (${FP_DISK}.bak). Skipping this file..."; continue; }
-						Link_To_Ram || continue 2
-
+					# Source exist, but is not linked to RAM yet
 					else
 
-						Print "$FP_DISK not found. Skipping this file..."
+						Link_To_Ram || continue
 
 					fi
 
-				done
+				# Source does not exist or is orphaned link, but backup exists, which is expected after system crash
+				elif [[ -f ${FP_DISK}.bak ]]; then
 
-				Print "Linked ${i^} database to RAM."
+					Print "$FP_DISK not found. Recovering from backup first (${FP_DISK}.bak)..."
+
+					# Remove possible orphaned symlink
+					[[ ! -L $FP_DISK ]] || rm "$FP_DISK" || { error=$? Print "Removing orphaned database symlink failed ($FP_DISK). Skipping this program..."; continue; }
+
+					# Recover from backup
+					mv "${FP_DISK}.bak" "$FP_DISK" || { error=$? Print "Recovering database from backup failed (${FP_DISK}.bak). Skipping this program..."; continue; }
+
+					Link_To_Ram || continue
+
+				else
+
+					Print "$FP_DISK not found. Skipping this program..."
+
+				fi
 
 			# Store back to disk
 			elif (( $INPUT == 0 )); then
@@ -233,6 +228,12 @@ $USAGE"; exit 1; }
 					# "--remove-destination" will remove expected existing symlinks.
 					cp -au --remove-destination "$FP_RAM/." "$FP_DISK" || { error=$? Print "Storing ${i^} database from RAM back to disk failed."; continue; }
 					rm -R "$FP_RAM"
+					# Remove orphaned symlinks, possible when -shm and -wal do currently not exist
+					local j
+					for j in "$FP_DISK/${aFILE[$i]}"{,-shm,-wal}
+					do
+						[[ ! -L $j || -f $j ]] || rm "$j" || EXIT_CODE=$?
+					done
 					Print "Stored ${i^} database from RAM back to disk."
 
 				else
