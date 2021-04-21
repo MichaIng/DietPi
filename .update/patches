@@ -4,8 +4,79 @@
 # Created by MichaIng / micha@dietpi.com / https://dietpi.com/
 # License: GPLv2 / https://github.com/MichaIng/DietPi#license
 
-# Remove obsolete udev rule, as WiFi power saving is disabled via /etc/network/intefaces > "wireless-power off" > /etc/network/if-pre-up.d/wireless-tools (wireless-tools package) when the WiFi interface is configured.
-[[ -f '/etc/udev/rules.d/10-wifi-disable-powermanagement.rules' ]] && rm -v /etc/udev/rules.d/10-wifi-disable-powermanagement.rules
+# v7.1: Update changed hardware IDs before dietpi-obtain_hw_model would reset them to 22
+if [[ -f '/etc/.dietpi_hw_model_identifier' ]]
+then
+	G_HW_MODEL=$(</etc/.dietpi_hw_model_identifier)
+	# https://github.com/MichaIng/DietPi/pull/4193
+	if [[ $G_HW_MODEL == 69 ]] # Firefly RK3399
+	then
+		echo 24 > /etc/.dietpi_hw_model_identifier # Generic Rockchip RK3399
+
+	elif [[ $G_HW_MODEL == 50 || $G_HW_MODEL == 41 || $G_HW_MODEL == 3[54310] ]] # BananaPi M2+, OrangePi PC Plus, OPi Zero 2 Plus, OrangePi Plus, OrangePi Lite, OrangePi One, OrangePi PC
+	then
+		echo 25 > /etc/.dietpi_hw_model_identifier # Generic Allwinner H3
+
+	elif [[  $G_HW_MODEL == 3[87] ]] # OPi PC2, OPi Prime
+	then
+		echo 26 > /etc/.dietpi_hw_model_identifier # Generic Allwinner H5
+	fi
+fi
+
+# Load DietPi-Globals
+/boot/dietpi/func/dietpi-obtain_hw_model # Always update
+. /boot/dietpi/func/dietpi-globals
+readonly G_PROGRAM_NAME='DietPi-Patch'
+G_CHECK_ROOT_USER
+G_CHECK_ROOTFS_RW
+G_INIT
+
+# v7.0: Remove obsolete udev rule, as WiFi power saving is disabled via /etc/network/intefaces > "wireless-power off" > /etc/network/if-pre-up.d/wireless-tools (wireless-tools package) when the WiFi interface is configured.
+[[ -f '/etc/udev/rules.d/10-wifi-disable-powermanagement.rules' ]] && G_EXEC rm /etc/udev/rules.d/10-wifi-disable-powermanagement.rules
+
+# v7.1: Migrate from DietPi-NordVPN to DietPi-VPN
+[[ -f '/boot/dietpi/misc/dietpi-nordvpn' ]] && G_EXEC rm /boot/dietpi/misc/dietpi-nordvpn
+[[ -d '/var/lib/dietpi/dietpi-software/installed/dietpi-nordvpn' ]] && G_EXEC mv /var/lib/dietpi/dietpi-software/installed/dietpi-nordvpn /var/lib/dietpi/dietpi-vpn
+if [[ -f '/var/lib/dietpi/dietpi-vpn/settings_dietpi.conf' ]]
+then
+	G_EXEC sed -Ei 's/^NORDVPN_(SERVER|USERNAME|PASSWORD)=/VPN_\1=/' /var/lib/dietpi/dietpi-vpn/settings_dietpi.conf
+	. /var/lib/dietpi/dietpi-vpn/settings_dietpi.conf
+	[[ -f '/etc/openvpn/client.ovpn' ]] || G_EXEC cp -a "/etc/openvpn/ovpn_$PROTOCOL/$VPN_SERVER" /etc/openvpn/client.ovpn
+	unset -v VPN_SERVER PROTOCOL VPN_USERNAME VPN_PASSWORD
+	G_EXEC sed -i 's|/var/lib/dietpi/dietpi-software/installed/dietpi-nordvpn/|/var/lib/dietpi/dietpi-vpn/|' /etc/openvpn/client.ovpn
+fi
+if [[ -f '/etc/systemd/system/dietpi-nordvpn.service' ]]
+then
+	systemctl -q is-enabled dietpi-nordvpn && G_EXEC systemctl enable dietpi-vpn
+	G_EXEC systemctl disable dietpi-nordvpn
+	G_EXEC rm /etc/systemd/system/dietpi-nordvpn.service
+fi
+
+# v7.1: MariaDB: Rename config file: https://github.com/MichaIng/DietPi/commit/c306d449a7c4ed86a1e9ff7c4914d9e1c2afd11a
+[[ -f '/etc/mysql/mariadb.conf.d/99-dietpi-4byte.cnf' ]] && G_EXEC mv /etc/mysql/mariadb.conf.d/99-dietpi-4byte.cnf /etc/mysql/mariadb.conf.d/97-dietpi.cnf
+
+# v7.1: RPi: Additionally blacklist the bcm2835_isp kernel module when the RPi camera feature is disabled: https://github.com/MichaIng/DietPi/issues/4203
+[[ -f '/etc/modprobe.d/dietpi-disable_rpi_camera.conf' ]] && ! grep -q 'bcm2835_isp' /etc/modprobe.d/dietpi-disable_rpi_camera.conf && echo 'blacklist bcm2835_isp' >> /etc/modprobe.d/dietpi-disable_rpi_camera.conf
+
+# v7.1: Mark now dedicated Go as installed if OpenBazaar is
+[[ -d '/usr/local/go' ]] && ! grep -q '^[[:blank:]]*aSOFTWARE_INSTALL_STATE\[188\]=2' /boot/dietpi/.installed && grep -q '^[[:blank:]]*aSOFTWARE_INSTALL_STATE\[58\]=2' /boot/dietpi/.installed && G_CONFIG_INJECT 'aSOFTWARE_INSTALL_STATE\[188\]=' 'aSOFTWARE_INSTALL_STATE[188]=2' /boot/dietpi/.installed
+
+# v7.1: Interactively inform user about possible No-IP => DietPi-DDNS migration
+[[ -f '/boot/dietpi/.installed' ]] && grep -q '^[[:blank:]]*aSOFTWARE_INSTALL_STATE\[67)\]=2' /boot/dietpi/.installed && G_WHIP_MSG '[ INFO ] No-IP client installation found
+\nThe No-IP client install option has been replaced by our new DietPi-DDNS tool. The No-IP client remains functional on your system but we recommend a migration to our new tool.
+\nSimply run "dietpi-ddns" from console, select "No-IP" as provider, enter domain and credentials, then select "Apply". The old No-IP client and service will be removed automatically as last step, once a final DDNS update test succeeded.'
+
+# v7.1: Remove obsolete DietPi-NordVPN and No-IP install states
+[[ -f '/boot/dietpi/.installed' ]] && grep -qE '^[[:blank:]]*aSOFTWARE_INSTALL_STATE\[(67|171)\]=' /boot/dietpi/.installed && G_EXEC sed -Ei '/^[[:blank:]]*aSOFTWARE_INSTALL_STATE\[(67|171)\]=/d' /boot/dietpi/.installed
+
+# v7.1: Inform user about possible Sonarr v2 => v3 upgrade
+[[ -f '/mnt/dietpi_userdata/sonarr/nzbdrone.pid' ]] && G_WHIP_MSG '[ INFO ] Sonarr v3 has been released
+\nYou seem to use Sonarr v2 while Sonarr v3 is now available. A migration is safe to do, but in some cases you might need to redo some configuration, so we do not force the upgrade now.
+\nTo migrate to Sonarr v3, run the following command from console:
+ - dietpi-software reinstall 144'
+
+# v7.1: Removing obsolete DietPi-Arr_to_RAM backup files
+rm -f /mnt/dietpi_userdata/{{sonarr,radarr}/nzbdrone.db-{shm,wal},lidarr/lidarr.db-{shm,wal}}.bak
 
 exit 0
 }
