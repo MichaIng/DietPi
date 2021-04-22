@@ -1399,8 +1399,7 @@ _EOF_'
 		G_EXEC eval "debconf-set-selections <<< 'console-setup console-setup/charmap47 select UTF-8'"
 		G_EXEC setupcon --save
 
-		# G_HW_ARCH specific
-		G_DIETPI-NOTIFY 2 'Applying G_HW_ARCH specific tweaks:'
+		G_DIETPI-NOTIFY 2 'Applying architecture-specific tweaks:'
 		if (( $G_HW_ARCH == 10 )); then
 
 			G_EXEC_DESC='Removing foreign i386 DPKG architecture' G_EXEC dpkg --remove-architecture i386
@@ -1430,12 +1429,11 @@ _EOF_
 
 		elif (( $G_HW_ARCH == 3 )); then
 
-			(( $G_HW_MODEL > 9 )) && G_EXEC_DESC='Removing foreign armhf DPKG architecture' G_EXEC dpkg --remove-architecture armhf
+			G_EXEC_DESC='Removing foreign armhf DPKG architecture' G_EXEC dpkg --remove-architecture armhf
 
 		fi
 
-		# G_HW_MODEL specific
-		G_DIETPI-NOTIFY 2 'Applying G_HW_MODEL specific tweaks:'
+		G_DIETPI-NOTIFY 2 'Applying board-specific tweaks:'
 		if (( $G_HW_MODEL != 20 )); then
 
 			G_EXEC_DESC='Configuring hdparm'
