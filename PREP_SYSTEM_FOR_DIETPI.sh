@@ -736,6 +736,9 @@ Currently installed: $G_DISTRO_NAME (ID: $G_DISTRO)"; then
 			G_AGI "${apackages[@]}"
 			unset -v apackages
 
+			# Remove obsolete combined keyring
+			[[ -f '/etc/apt/trusted.gpg' ]] && G_EXEC rm /etc/apt/trusted.gpg
+
 		# - G_HW_MODEL specific required firmware/kernel/bootloader packages
 		#	Armbian grab currently installed packages
 		elif [[ $(dpkg-query -Wf '${Package} ') == *'armbian'* ]]; then
@@ -768,17 +771,26 @@ Currently installed: $G_DISTRO_NAME (ID: $G_DISTRO)"; then
 		#	RPi
 		elif (( $G_HW_MODEL < 10 )); then
 
-			# Add raspi-copies-and-fills for 32-bit images only
-			[[ $G_HW_ARCH == 3 ]] && arm_mem= || arm_mem='raspi-copies-and-fills'
-			G_AGI libraspberrypi-bin libraspberrypi0 raspberrypi-bootloader raspberrypi-kernel raspberrypi-sys-mods $arm_mem
+			# Add raspbian-archive-keyring and raspi-copies-and-fills for 32-bit images only
+			local a32bit=()
+			[[ $G_HW_ARCH == 3 ]] || a32bit=('raspbian-archive-keyring' 'raspi-copies-and-fills')
+			G_AGI raspberrypi-bootloader raspberrypi-kernel libraspberrypi0 libraspberrypi-bin raspberrypi-sys-mods raspberrypi-archive-keyring "${a32bit[@]}"
+
+			# Move Raspbian key to active place and remove obsolete combined keyring
+			[[ -f '/usr/share/keyrings/raspbian-archive-keyring.gpg' ]] && G_EXEC ln -sf /usr/share/keyrings/raspbian-archive-keyring.gpg /etc/apt/trusted.gpg.d/raspbian-archive-keyring.gpg
+			[[ -f '/etc/apt/trusted.gpg' ]] && G_EXEC rm /etc/apt/trusted.gpg
 
 		#	Odroid C4
 		elif (( $G_HW_MODEL == 16 )); then
 
 			G_AGI linux-image-arm64-odroid-c4 meveric-keyring u-boot # On C4, the kernel package does not depend on the U-Boot package
+
 			# Apply kernel postinst steps manually, that depend on /proc/cpuinfo content, not matching when running in a container.
 			[[ -f '/boot/Image' ]] && G_EXEC mv /boot/Image /boot/Image.gz
 			[[ -f '/boot/Image.gz.bak' ]] && G_EXEC rm /boot/Image.gz.bak
+
+			# Remove obsolete combined keyring
+			[[ -f '/etc/apt/trusted.gpg' ]] && G_EXEC rm /etc/apt/trusted.gpg
 
 		#	Odroid N2
 		elif (( $G_HW_MODEL == 15 )); then
@@ -788,20 +800,32 @@ Currently installed: $G_DISTRO_NAME (ID: $G_DISTRO)"; then
 			[[ -f '/boot/Image' ]] && G_EXEC mv /boot/Image /boot/Image.gz
 			[[ -f '/boot/Image.gz.bak' ]] && G_EXEC rm /boot/Image.gz.bak
 
+			# Remove obsolete combined keyring
+			[[ -f '/etc/apt/trusted.gpg' ]] && G_EXEC rm /etc/apt/trusted.gpg
+
 		#	Odroid N1
 		elif (( $G_HW_MODEL == 14 )); then
 
 			G_AGI linux-image-arm64-odroid-n1 meveric-keyring
+
+			# Remove obsolete combined keyring
+			[[ -f '/etc/apt/trusted.gpg' ]] && G_EXEC rm /etc/apt/trusted.gpg
 
 		#	Odroid C2
 		elif (( $G_HW_MODEL == 12 )); then
 
 			G_AGI linux-image-arm64-odroid-c2 meveric-keyring
 
+			# Remove obsolete combined keyring
+			[[ -f '/etc/apt/trusted.gpg' ]] && G_EXEC rm /etc/apt/trusted.gpg
+
 		#	Odroid XU3/XU4/MC1/HC1/HC2
 		elif (( $G_HW_MODEL == 11 )); then
 
 			G_AGI linux-image-4.14-armhf-odroid-xu4 meveric-keyring
+
+			# Remove obsolete combined keyring
+			[[ -f '/etc/apt/trusted.gpg' ]] && G_EXEC rm /etc/apt/trusted.gpg
 
 		#	ROCK Pi S (official Radxa Debian image)
 		elif (( $G_HW_MODEL == 73 )) && grep -q 'apt\.radxa\.com' /etc/apt/sources.list.d/*.list; then
