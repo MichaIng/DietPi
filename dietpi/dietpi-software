@@ -1130,8 +1130,7 @@ _EOF_
 		aSOFTWARE_DESC[$software_id]='decentralised peer to peer bitcoin market'
 		aSOFTWARE_CATEGORY_INDEX[$software_id]=6
 		aSOFTWARE_ONLINEDOC_URL[$software_id]='https://dietpi.com/docs/software/social/#openbazaar'
-		aSOFTWARE_REQUIRES_BUILDESSENTIAL[$software_id]=1
-		aSOFTWARE_REQUIRES_GIT[$software_id]=1
+		(( $G_HW_ARCH == 10 )) || aSOFTWARE_REQUIRES_BUILDESSENTIAL[$software_id]=1
 		aSOFTWARE_REQUIRES_USERINPUT[$software_id]=1
 
 		# Camera & Surveillance
@@ -1869,8 +1868,8 @@ _EOF_
 		#--------------------------------------------------------------------------------
 		software_id=16
 
-		aSOFTWARE_NAME[$software_id]='Build-Essentials'
-		aSOFTWARE_DESC[$software_id]='common packages for compiling'
+		aSOFTWARE_NAME[$software_id]='Build-Essential'
+		aSOFTWARE_DESC[$software_id]='GNU C/C++ compiler, development libraries and headers'
 		aSOFTWARE_CATEGORY_INDEX[$software_id]=26
 		#------------------
 		software_id=17
@@ -1899,6 +1898,7 @@ _EOF_
 		aSOFTWARE_NAME[$software_id]='Go'
 		aSOFTWARE_DESC[$software_id]='Runtime environment and package installer'
 		aSOFTWARE_CATEGORY_INDEX[$software_id]=26
+		aSOFTWARE_REQUIRES_GIT[$software_id]=1
 		#------------------
 		software_id=8
 
@@ -2211,9 +2211,9 @@ _EOF_
 		fi
 
 		# Software that requires Go
-		# - OpenBazaar (58)
+		# - OpenBazaar on ARM (58)
 		software_id=188
-		if (( ${aSOFTWARE_INSTALL_STATE[58]} == 1 )); then
+		if (( ${aSOFTWARE_INSTALL_STATE[58]} == 1 && G_HW_ARCH != 10 )); then
 
 			aSOFTWARE_INSTALL_STATE[$software_id]=1
 			G_DIETPI-NOTIFY 2 "${aSOFTWARE_NAME[$software_id]} will be installed"
@@ -2443,7 +2443,7 @@ _EOF_
 				G_DIETPI-NOTIFY 2 "${aSOFTWARE_NAME[$software_id]} will be installed"
 			fi
 
-			software_id=16 # Build essentials
+			software_id=16 # Build-Essential
 			if (( ${aSOFTWARE_REQUIRES_BUILDESSENTIAL[$i]:=0} && aSOFTWARE_INSTALL_STATE[$software_id] != 1 )); then
 
 				aSOFTWARE_INSTALL_STATE[$software_id]=1
@@ -3142,11 +3142,11 @@ _EOF_
 
 		fi
 
-		software_id=16 # Build essentials
+		software_id=16 # Build-Essential
 		if (( ${aSOFTWARE_INSTALL_STATE[$software_id]} == 1 )); then
 
 			Banner_Installing
-			G_AGI build-essential automake
+			G_AGI g++ make automake
 
 		fi
 
@@ -3508,13 +3508,13 @@ _EOF_
 			# - ARMv6/7
 			local arch='armv6l'
 			# - ARMv8
-			if (( $G_HW_ARCH == 3 )); then
-
+			if (( $G_HW_ARCH == 3 ))
+			then
 				arch='arm64'
 
 			# - x86_64
-			elif (( $G_HW_ARCH == 10 )); then
-
+			elif (( $G_HW_ARCH == 10 ))
+			then
 				arch='amd64'
 
 			fi
@@ -3529,12 +3529,11 @@ _EOF_
 			Download_Install "https://golang.org/dl/$file" /usr/local/
 
 			# Export Go path variables
-			G_EXEC mkdir -p /mnt/dietpi_userdata/go
+			G_EXEC mkdir -p /mnt/dietpi_userdata/go/{bin,pkg,src}
 			cat << '_EOF_' > /etc/bashrc.d/go.sh
 #!/bin/dash
-export GO111MODULE=auto
 export GOPATH=/mnt/dietpi_userdata/go
-export PATH=$PATH:/usr/local/go/bin:/mnt/dietpi_userdata/go/bin
+export PATH="$PATH:/usr/local/go/bin:$GOPATH/bin"
 _EOF_
 			. /etc/bashrc.d/go.sh
 
@@ -3977,7 +3976,36 @@ Package: openssl libssl*\nPin: origin packages.sury.org\nPin-Priority: -1' > /et
 		if (( ${aSOFTWARE_INSTALL_STATE[$software_id]} == 1 )); then
 
 			Banner_Installing
-			GO111MODULE=off G_EXEC_OUTPUT=1 G_EXEC go get -u -v github.com/OpenBazaar/openbazaar-go
+
+			# Pre-v7.1 reinstall: Remove old non-module install
+			command -v go > /dev/null && GO111MODULE='off' GOPATH='/mnt/dietpi_userdata/go' G_EXEC_NOEXIT=1 G_EXEC go clean -i github.com/OpenBazaar...
+			[[ -f '/mnt/dietpi_userdata/go/bin/openbazaar-go' ]] && G_EXEC_NOEXIT=1 G_EXEC rm /mnt/dietpi_userdata/go/bin/openbazaar-go
+			[[ -d '/mnt/dietpi_userdata/go/src/github.com/OpenBazaar' ]] && G_EXEC_NOEXIT=1 G_EXEC rm -R /mnt/dietpi_userdata/go/src/github.com/OpenBazaar
+			[[ -d '/mnt/dietpi_userdata/go/src/github.com' ]] && G_EXEC_NOEXIT=1 G_EXEC rmdir --ignore-fail-on-non-empty /mnt/dietpi_userdata/go/src/github.com
+			[[ -d '/etc/openbazaar-server' ]] && G_EXEC_NOEXIT=1 G_EXEC rm -R /etc/openbazaar-server # Pre-v6.15
+
+			# Failsafe: Local bin dir
+			[[ -d '/usr/local/bin' ]] || G_EXEC mkdir -p /usr/local/bin
+
+			# x86_64: Download pre-compiled binary
+			if (( $G_HW_ARCH == 10 ))
+			then
+				local fallback_url='https://github.com/OpenBazaar/openbazaar-go/releases/download/v0.14.6/openbazaar-go-linux-amd64'
+				Download_Install "$(curl -sSfL 'https://api.github.com/repos/OpenBazaar/openbazaar-go/releases/latest' | mawk -F\" '/"browser_download_url": ".*\/openbazaar-go-linux-amd64"/{print $4}')"
+				command -v strip > /dev/null && G_EXEC strip --remove-section=.comment --remove-section=.note openbazaar-go-linux-amd64
+				G_EXEC mv openbazaar-go-linux-amd64 /usr/local/bin/openbazaar-go
+				G_EXEC chmod +x /usr/local/bin/openbazaar-go
+
+			# ARM: Go build required
+			else
+				# OpenBazaar cannot be installed in module mode yet: https://github.com/OpenBazaar/openbazaar-go/issues/2072
+				# Build it in legacy mode in tmpfs and move only binary in place
+				G_EXEC cd /tmp/$G_PROGRAM_NAME # Failsafe
+				GO111MODULE=off GOPATH=$PWD HOME=$PWD G_EXEC_OUTPUT=1 G_EXEC go get -v github.com/OpenBazaar/openbazaar-go
+				G_EXEC strip --remove-section=.comment --remove-section=.note bin/openbazaar-go
+				G_EXEC mv bin/openbazaar-go /usr/local/bin/openbazaar-go
+				G_EXEC_NOEXIT=1 G_EXEC rm -R .cache src bin
+			fi
 
 		fi
 
@@ -7664,9 +7692,8 @@ After=network-online.target dietpi-boot.service
 
 [Service]
 User=openbazaar
-Environment=GOPATH=/mnt/dietpi_userdata/go
 WorkingDirectory=/mnt/dietpi_userdata/openbazaar
-ExecStart=/mnt/dietpi_userdata/go/bin/openbazaar-go start -d /mnt/dietpi_userdata/openbazaar -f -l notice
+ExecStart=/usr/local/bin/openbazaar-go start -d /mnt/dietpi_userdata/openbazaar -f -l notice
 
 [Install]
 WantedBy=multi-user.target
@@ -13189,7 +13216,7 @@ _EOF_
 		if (( ${aSOFTWARE_INSTALL_STATE[$software_id]} == -1 )); then
 
 			Banner_Uninstalling
-			apt-mark auto upower policykit-1 firefox-esr dbus-user-session
+			apt-mark auto upower policykit-1 firefox-esr dbus-user-session 2> /dev/null
 			G_AGP lxde 'lxde-*'
 			rm -Rf /{root,home/*}/.config/{lxpanel,lxsession,lxterminal}
 			[[ -f '/etc/apt/preferences.d/dietpi-lxde' ]] && rm -v /etc/apt/preferences.d/dietpi-lxde
@@ -13200,7 +13227,7 @@ _EOF_
 		if (( ${aSOFTWARE_INSTALL_STATE[$software_id]} == -1 )); then
 
 			Banner_Uninstalling
-			apt-mark auto qterminal firefox-esr xarchiver lxde-icon-theme upower xscreensaver leafpad featherpad speedcrunch
+			apt-mark auto qterminal firefox-esr xarchiver lxde-icon-theme upower xscreensaver leafpad featherpad speedcrunch 2> /dev/null
 			G_AGP lxqt
 			rm -Rf /{root,home/*}/.config/lxqt
 
@@ -13226,7 +13253,7 @@ _EOF_
 		if (( ${aSOFTWARE_INSTALL_STATE[$software_id]} == -1 )); then
 
 			Banner_Uninstalling
-			apt-mark auto upower policykit-1 firefox-esr
+			apt-mark auto upower policykit-1 firefox-esr 2> /dev/null
 			G_AGP mate-desktop-environment-core mate-media
 
 		fi
@@ -13235,7 +13262,7 @@ _EOF_
 		if (( ${aSOFTWARE_INSTALL_STATE[$software_id]} == -1 )); then
 
 			Banner_Uninstalling
-			apt-mark auto upower policykit-1 firefox-esr
+			apt-mark auto upower policykit-1 firefox-esr 2> /dev/null
 			G_AGP x-window-system-core wmaker gnustep gnustep-devel gnustep-games
 
 		fi
@@ -13244,7 +13271,7 @@ _EOF_
 		if (( ${aSOFTWARE_INSTALL_STATE[$software_id]} == -1 )); then
 
 			Banner_Uninstalling
-			apt-mark auto gnome-icon-theme tango-icon-theme upower policykit-1 firefox-esr
+			apt-mark auto gnome-icon-theme tango-icon-theme upower policykit-1 firefox-esr 2> /dev/null
 			G_AGP xfce4
 
 		fi
@@ -13684,7 +13711,8 @@ _EOF_
 		if (( ${aSOFTWARE_INSTALL_STATE[$software_id]} == -1 )); then
 
 			Banner_Uninstalling
-			apt-mark auto libssl1.0.0 multiarch-support
+			# shellcheck disable=SC2046
+			apt-mark auto $(dpkg --get-selections libssl1.0.0 multiarch-support 2> /dev/null | mawk '{print $1}') 2> /dev/null
 
 		fi
 
@@ -14286,7 +14314,8 @@ _EOF_
 		if (( ${aSOFTWARE_INSTALL_STATE[$software_id]} == -1 )); then
 
 			Banner_Uninstalling
-			apt-mark auto libsdl1.2debian libsdl-net1.2
+			# shellcheck disable=SC2046
+			apt-mark auto $(dpkg --get-selections libsdl1.2debian libsdl-net1.2 2> /dev/null | mawk '{print $1}') 2> /dev/null
 
 			rm -f /{usr/share/applications,{root,home/*}/Desktop}/opentyrian.desktop
 			[[ -d '/usr/games/opentyrian' ]] && rm -R /usr/games/opentyrian
@@ -14575,7 +14604,7 @@ _EOF_
 			systemctl unmask vncserver-virtuald 2> /dev/null
 			systemctl disable --now vncserver-virtuald 2> /dev/null
 
-			apt-mark auto dbus-user-session
+			apt-mark auto dbus-user-session 2> /dev/null
 
 			G_AGP 'tigervnc-*' x11vnc realvnc-vnc-server
 
@@ -14914,18 +14943,19 @@ _EOF_
 			if [[ -f '/etc/systemd/system/openbazaar.service' ]]
 			then
 				systemctl disable --now openbazaar
-				rm -R /etc/systemd/system/openbazaar.service*
+				G_EXEC_NOEXIT=1 G_EXEC rm /etc/systemd/system/openbazaar.service
 			fi
-			[[ -d '/etc/systemd/system/openbazaar.service.d' ]] && rm -R /etc/systemd/system/openbazaar.service.d
-			getent passwd openbazaar > /dev/null && userdel openbazaar
-			getent group openbazaar > /dev/null && groupdel openbazaar
-			command -v go > /dev/null && GO111MODULE='off' GOPATH='/mnt/dietpi_userdata/go' go clean -i github.com/OpenBazaar...
-			[[ -d '/mnt/dietpi_userdata/go/src/github.com/OpenBazaar' ]] && rm -R /mnt/dietpi_userdata/go/src/github.com/OpenBazaar
-			[[ -d '/mnt/dietpi_userdata/go/src/github.com' ]] && rmdir --ignore-fail-on-non-empty /mnt/dietpi_userdata/go/src/github.com
-			[[ -d '/mnt/dietpi_userdata/go/src' ]] && rmdir --ignore-fail-on-non-empty /mnt/dietpi_userdata/go/src
-			[[ -d '/mnt/dietpi_userdata/go/bin' ]] && rmdir --ignore-fail-on-non-empty /mnt/dietpi_userdata/go/bin
-			[[ -d '/mnt/dietpi_userdata/openbazaar' ]] && rm -R /mnt/dietpi_userdata/openbazaar
-			[[ -d '/etc/openbazaar-server' ]] && rm -R /etc/openbazaar-server # Pre v6.15 OB1.0
+			[[ -d '/etc/systemd/system/openbazaar.service.d' ]] && G_EXEC_NOEXIT=1 G_EXEC rm -R /etc/systemd/system/openbazaar.service.d
+			getent passwd openbazaar > /dev/null && G_EXEC_NOEXIT=1 G_EXEC userdel openbazaar
+			getent group openbazaar > /dev/null && G_EXEC_NOEXIT=1 G_EXEC groupdel openbazaar
+			[[ -f '/usr/local/bin/openbazaar-go' ]] && G_EXEC_NOEXIT=1 G_EXEC rm /usr/local/bin/openbazaar-go
+			[[ -d '/mnt/dietpi_userdata/openbazaar' ]] && G_EXEC_NOEXIT=1 G_EXEC rm -R /mnt/dietpi_userdata/openbazaar
+			# Pre-v7.1
+			command -v go > /dev/null && GO111MODULE='off' GOPATH='/mnt/dietpi_userdata/go' G_EXEC_NOEXIT=1 G_EXEC go clean -i github.com/OpenBazaar...
+			[[ -f '/mnt/dietpi_userdata/go/bin/openbazaar-go' ]] && G_EXEC_NOEXIT=1 G_EXEC rm /mnt/dietpi_userdata/go/bin/openbazaar-go
+			[[ -d '/mnt/dietpi_userdata/go/src/github.com/OpenBazaar' ]] && G_EXEC_NOEXIT=1 G_EXEC rm -R /mnt/dietpi_userdata/go/src/github.com/OpenBazaar
+			[[ -d '/mnt/dietpi_userdata/go/src/github.com' ]] && G_EXEC_NOEXIT=1 G_EXEC rmdir --ignore-fail-on-non-empty /mnt/dietpi_userdata/go/src/github.com
+			[[ -d '/etc/openbazaar-server' ]] && G_EXEC_NOEXIT=1 G_EXEC rm -R /etc/openbazaar-server # Pre-v6.15
 		fi
 
 		software_id=42 # Plex Media Server
@@ -15719,11 +15749,12 @@ _EOF_
 
 		fi
 
-		software_id=16
+		software_id=16 # Build-Essential
 		if (( ${aSOFTWARE_INSTALL_STATE[$software_id]} == -1 )); then
 
 			Banner_Uninstalling
-			G_AGP build-essential
+			# shellcheck disable=SC2046
+			apt-mark auto $(dpkg --get-selections build-essential g++ make automake 2> /dev/null | mawk '{print $1}') 2> /dev/null
 
 		fi
 
@@ -15749,7 +15780,7 @@ _EOF_
 
 			Banner_Uninstalling
 			# shellcheck disable=SC2046
-			apt-mark auto $(dpkg --get-selections 'x11-*' dbus-x11 'libegl1*' 'libgles2*' libgl1-mesa-dri 'mesa-*' libdrm-rockchip1 libmali-rk-utgard-450-r7p0 'xf86-video-*' malit628-odroid mali450-odroid aml-libs-odroid 'libump*' firmware-samsung 2> /dev/null | mawk '{print $1}')
+			apt-mark auto $(dpkg --get-selections 'x11-*' dbus-x11 'libegl1*' 'libgles2*' libgl1-mesa-dri 'mesa-*' libdrm-rockchip1 libmali-rk-utgard-450-r7p0 'xf86-video-*' malit628-odroid mali450-odroid aml-libs-odroid 'libump*' firmware-samsung 2> /dev/null | mawk '{print $1}') 2> /dev/null
 			G_AGP 'xorg*' 'xserver-xorg*' xinit xcompmgr xterm xfonts-base
 			rm -f /etc/xdg/autostart/xcompmgr.desktop /etc/X11/xorg.conf /etc/X11/xorg.conf.d/98-dietpi-disable_dpms.conf
 
@@ -15768,7 +15799,7 @@ _EOF_
 
 			Banner_Uninstalling
 			# shellcheck disable=SC2046
-			apt-mark auto $(dpkg --get-selections 'default-jre*' 'default-jdk*' 'openjdk-*' ca-certificates-java 2> /dev/null | mawk '{print $1}')
+			apt-mark auto $(dpkg --get-selections 'default-jre*' 'default-jdk*' 'openjdk-*' ca-certificates-java 2> /dev/null | mawk '{print $1}') 2> /dev/null
 
 		fi
 
@@ -15861,7 +15892,7 @@ _EOF_
 
 			Banner_Uninstalling
 			G_DIETPI-NOTIFY 2 'Marking rsyslog for autoremoval, hence it stays installed if any other package depends on it'
-			apt-mark auto rsyslog # https://github.com/MichaIng/DietPi/issues/2454
+			apt-mark auto rsyslog 2> /dev/null # https://github.com/MichaIng/DietPi/issues/2454
 
 		fi
 
