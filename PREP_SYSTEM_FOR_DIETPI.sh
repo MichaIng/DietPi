@@ -23,7 +23,7 @@
 	# - PREIMAGE_INFO='Some GNU/Linux'
 	# - HW_MODEL=0				(must match one of the supported IDs below)
 	# - WIFI_REQUIRED=0			[01]
-	# - DISTRO_TARGET=5			[456] (Buster: 5, Bullseye: 6)
+	# - DISTRO_TARGET=5			[56] (Buster: 5, Bullseye: 6)
 	#------------------------------------------------------------------------------------------------
 
 	# Core globals
