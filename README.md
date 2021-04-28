@@ -291,6 +291,7 @@ Links to hardware and software manufacturers, sources and build instructions use
 - [CUPS](https://github.com/OpenPrinting/cups)
 - [Go](https://github.com/golang/go)
 - [VSCodium](https://github.com/VSCodium/vscodium)
+- [WebIOPi](https://github.com/Freenove/WebIOPi)
 
 ---
 
