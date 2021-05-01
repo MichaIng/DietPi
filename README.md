@@ -253,7 +253,7 @@ Links to hardware and software manufacturers, sources and build instructions use
 - [Amiberry](https://github.com/midwan/amiberry)
 - [RetroPie Setup Script](https://github.com/petrockblog/RetroPie-Setup)
 - [OpenTyrian](https://bitbucket.org/opentyrian/opentyrian/wiki/Home)
-- [DietPiCam](https://github.com/silvanmelchior/RPi_Cam_Web_Interface)
+- [RPi Cam Control](https://github.com/silvanmelchior/RPi_Cam_Web_Interface)
 - [Deluge](https://dev.deluge-torrent.org/wiki/Development#SourceCode)
 - [Subsonic](https://sourceforge.net/projects/subsonic/)
 - [Airsonic](https://github.com/airsonic/airsonic)
@@ -292,6 +292,7 @@ Links to hardware and software manufacturers, sources and build instructions use
 - [Go](https://github.com/golang/go)
 - [VSCodium](https://github.com/VSCodium/vscodium)
 - [WebIOPi](https://github.com/Freenove/WebIOPi)
+- [WiringPi](https://github.com/WiringPi/WiringPi)
 
 ---
 
