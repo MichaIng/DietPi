@@ -350,7 +350,7 @@ _EOF_
 			'15' ': Odroid N2'
 			'16' ': Odroid C4/HC4'
 			'44' ': Pinebook'
-			'74' ': Pinebook Pro'
+			'46' ': Pinebook Pro'
 			'' '●─ x86_64 '
 			'21' ': x86_64 Native PC'
 			'20' ': x86_64 Virtual Machine'
