@@ -1611,8 +1611,8 @@ _EOF_
 		#--------------------------------------------------------------------------------
 		software_id=99
 
-		aSOFTWARE_NAME[$software_id]='EmonPi'
-		aSOFTWARE_DESC[$software_id]='energy usage addon board with web interface'
+		aSOFTWARE_NAME[$software_id]='emonHub'
+		aSOFTWARE_DESC[$software_id]='Web interface for the emonPi energy monitor addon board'
 		aSOFTWARE_CATEGORY_INDEX[$software_id]=17
 		aSOFTWARE_ONLINEDOC_URL[$software_id]='https://dietpi.com/docs/software/home_automation/#emonpi'
 		# RPi only
@@ -1620,8 +1620,6 @@ _EOF_
 		do
 			aSOFTWARE_AVAIL_G_HW_MODEL[$software_id,$i]=0
 		done
-		# Python 2 only, hence not supported on Bullseye
-		aSOFTWARE_AVAIL_G_DISTRO[$software_id,6]=0
 		#------------------
 		software_id=157
 
@@ -2214,6 +2212,7 @@ _EOF_
 		fi
 
 		# Software that requires Python 3: https://github.com/MichaIng/DietPi/issues/784
+		# - emonHub (99)
 		# - Mopidy (118) from Buster on
 		# - SABnzbd (139)
 		# - OctoPrint (153) from Buster on
@@ -2222,7 +2221,8 @@ _EOF_
 		# - Bazarr (180)
 		# - Docker Compose (134)
 		software_id=130
-		if (( ( ${aSOFTWARE_INSTALL_STATE[118]} == 1 && $G_DISTRO > 4 ) ||
+		if (( ${aSOFTWARE_INSTALL_STATE[99]} == 1 ||
+		      ( ${aSOFTWARE_INSTALL_STATE[118]} == 1 && $G_DISTRO > 4 ) ||
 			${aSOFTWARE_INSTALL_STATE[139]} == 1 ||
 		      ( ${aSOFTWARE_INSTALL_STATE[153]} == 1 && $G_DISTRO > 4 ) ||
 			${aSOFTWARE_INSTALL_STATE[155]} == 1 ||
@@ -2292,10 +2292,12 @@ _EOF_
 
 		# Software that requires Python 3 RPi.GPIO
 		# - WebIOPi (71)
+		# - emonHub (99)
 		# - Node-RED (122)
 		# - Google AIY (169)
 		software_id=69
 		if (( $G_HW_MODEL < 10 )) && (( ${aSOFTWARE_INSTALL_STATE[71]} == 1 ||
+			${aSOFTWARE_INSTALL_STATE[99]} == 1 ||
 			${aSOFTWARE_INSTALL_STATE[122]} == 1 ||
 			${aSOFTWARE_INSTALL_STATE[169]} == 1 )); then
 
@@ -5647,20 +5649,39 @@ Package: wireguard wireguard-dkms wireguard-tools\nPin: release n=bullseye\nPin-
 
 		fi
 
-		software_id=99 # EmonPi
+		software_id=99 # emonHub
 		if (( ${aSOFTWARE_INSTALL_STATE[$software_id]} == 1 )); then
 
-			Banner_Installing
+			Banner_Installing # https://github.com/openenergymonitor/emonhub/blob/master/install.sh
 
-			DEPS_LIST='minicom python-serial python-configobj python-pip python-dev'
-			Download_Install 'https://github.com/Fourdee/emonhub/archive/emon-pi.zip'
+			DEPS_LIST='python3-serial python3-configobj python3-pymodbus bluetooth libbluetooth-dev'
+			Download_Install 'https://github.com/openenergymonitor/emonhub/archive/stable.tar.gz'
 
-			G_EXEC_OUTPUT=1 G_EXEC pip2 install -U pip setuptools wheel
-			G_EXEC_OUTPUT=1 G_EXEC pip2 install -U paho-mqtt pydispatcher
+			G_EXEC_OUTPUT=1 G_EXEC pip3 install -U paho-mqtt requests pybluez py-sds011 sdm_modbus
 
-			# Move everything to /etc/emonhub
-			[[ -d '/etc/emonhub' ]] && rm -R /etc/emonhub
-			G_EXEC mv emonhub-emon-pi /etc/emonhub
+			# Config: Preserve old
+			if [[ ! -f '/mnt/dietpi_userdata/emonhub/emonhub.conf' ]]
+			then
+				G_EXEC mkdir -p /mnt/dietpi_userdata/emonhub
+
+				# Pre-v7.2: Preserve old
+				if [[ -f '/etc/emonhub/conf/emonhub.conf' ]]
+				then
+					G_EXEC mv /{etc/emonhub/conf,mnt/dietpi_userdata/emonhub}/emonhub.conf
+					G_EXEC mv {emonhub-stable/conf,/mnt/dietpi_userdata/emonhub}/emonpi.default.emonhub.conf
+				else
+					G_EXEC mv {emonhub-stable/conf/emonpi.default.,/mnt/dietpi_userdata/emonhub/}emonhub.conf
+					local apikey==$(sed -n '/^[[:blank:]]*SOFTWARE_EMONHUB_APIKEY=/{s/^[^=]*=//p;q}' /boot/dietpi.txt)
+					G_CONFIG_INJECT 'apikey[[:blank:]]*=' "        apikey = $apikey" /mnt/dietpi_userdata/emonhub/emonhub.conf
+					G_CONFIG_INJECT 'loglevel[[:blank:]]*=' '        loglevel = WARNING' /mnt/dietpi_userdata/emonhub/emonhub.conf
+				fi
+			fi
+
+			# Install to /opt/emonhub
+			[[ -d '/etc/emonhub' ]] && G_EXEC rm -R /etc/emonhub # pre-v7.2
+			[[ -d '/opt/emonhub' ]] && G_EXEC rm -R /opt/emonhub # Reinstall
+			G_EXEC mv emonhub-stable/src /opt/emonhub
+			G_EXEC_NOHALT=1 G_EXEC rm -R emonhub-stable
 
 		fi
 
@@ -10590,21 +10611,35 @@ _EOF_
 
 		fi
 
-		software_id=99 # EmonPi
+		software_id=99 # emonHub
 		if (( ${aSOFTWARE_INSTALL_STATE[$software_id]} == 1 )); then
 
 			Banner_Configuration
 
-			# Copy config
-			G_EXEC cp /etc/emonhub/conf/default/emonhub /etc/default/emonhub
+			# User
+			Create_User -g gpio -G dialout,tty emonhub
 
-			# Setup service
-			G_EXEC cp /etc/emonhub/service/emonhub /etc/init.d/emonhub
-			G_EXEC chmod +x /etc/init.d/emonhub
-			G_EXEC update-rc.d emonhub defaults
+			# Permissions
+			G_EXEC chown emonhub /mnt/dietpi_userdata/emonhub/emonhub.conf
 
-			G_EXEC chmod -R +x /etc/emonhub
+			# Service
+			Remove_SysV emonhub 1 # pre-v7.2
+			cat << _EOF_ > /etc/systemd/system/emonhub.service
+[Unit]
+Description=emonHub (DietPi)
+Documentation=https://github.com/openenergymonitor/emonhub/blob/master/configuration.md
+Wants=network-online.target
+After=network-online.target dietpi-boot.service
 
+[Service]
+SyslogIdentifier=emonHub
+User=emonhub
+Type=exec
+ExecStart=$(command -v python3) -OO /opt/emonhub/emonhub.py --config-file=/mnt/dietpi_userdata/emonhub/emonhub.conf
+
+[Install]
+WantedBy=multi-user.target
+_EOF_
 			# Disable onboard Bluetooth, if present, to recover ttyAMA0
 			if (( $G_HW_ONBOARD_WIFI )); then
 
@@ -10619,10 +10654,6 @@ _EOF_
 
 			# Disable console on ttyAMA0
 			/boot/dietpi/func/dietpi-set_hardware serialconsole disable ttyAMA0
-
-			# Apply user API key
-			USER_EMONHUB_APIKEY_CURRENT=$(sed -n '/^[[:blank:]]*SOFTWARE_EMONHUB_APIKEY=/{s/^[^=]*=//p;q}' /boot/dietpi.txt)
-			sed -i "/apikey/c\        apikey = $USER_EMONHUB_APIKEY_CURRENT" /etc/emonhub/conf/emonhub.conf
 
 		fi
 
@@ -14894,21 +14925,32 @@ _EOF_
 
 		fi
 
-		software_id=99 # EmonPi
+		software_id=99 # emonHub
 		if (( ${aSOFTWARE_INSTALL_STATE[$software_id]} == -1 )); then
 
 			Banner_Uninstalling
-			if [[ -f '/etc/init.d/emonhub' ]]; then
+			if [[ -f '/etc/systemd/system/emonhub.service' ]]; then
 
-				systemctl unmask emonhub
-				systemctl disable --now emonhub
-				rm /etc/init.d/emonhub
-				update-rc.d -f emonhub remove
+				G_EXEC_NOEXIT=1 G_EXEC systemctl disable --now emonhub
+				G_EXEC_NOEXIT=1 G_EXEC rm /etc/systemd/system/emonhub.service
 
 			fi
-			[[ -d '/etc/systemd/system/emonhub.service.d' ]] && rm -R /etc/systemd/system/emonhub.service.d
-			[[ -f '/etc/default/emonhub' ]] && rm /etc/default/emonhub
-			[[ -d '/etc/emonhub' ]] && rm -R /etc/emonhub
+			[[ -d '/etc/systemd/system/emonhub.service.d' ]] && G_EXEC_NOEXIT=1 G_EXEC rm -R /etc/systemd/system/emonhub.service.d
+			getent passwd emonhub > /dev/null && G_EXEC_NOEXIT=1 G_EXEC userdel emonhub
+			[[ -d '/opt/emonhub' ]] && G_EXEC_NOEXIT=1 G_EXEC rm -R /opt/emonhub
+			[[ -d '/mnt/dietpi_userdata/emonhub' ]] G_EXEC_NOEXIT=1 G_EXEC rm -R /mnt/dietpi_userdata/emonhub
+
+			# Pre-v7.2
+			if [[ -f '/etc/init.d/emonhub' ]]; then
+
+				G_EXEC_NOEXIT=1 G_EXEC systemctl unmask emonhub
+				G_EXEC_NOEXIT=1 G_EXEC systemctl disable --now emonhub
+				G_EXEC_NOEXIT=1 G_EXEC rm /etc/init.d/emonhub
+				G_EXEC_NOEXIT=1 G_EXEC update-rc.d -f emonhub remove
+
+			fi
+			[[ -f '/etc/default/emonhub' ]] && G_EXEC_NOEXIT=1 G_EXEC rm /etc/default/emonhub
+			[[ -d '/etc/emonhub' ]] && G_EXEC_NOEXIT=1 G_EXEC rm -R /etc/emonhub
 
 		fi
 
