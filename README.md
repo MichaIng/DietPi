@@ -293,6 +293,7 @@ Links to hardware and software manufacturers, sources and build instructions use
 - [VSCodium](https://github.com/VSCodium/vscodium)
 - [WebIOPi](https://github.com/Freenove/WebIOPi)
 - [WiringPi](https://github.com/WiringPi/WiringPi)
+- [emonHub](https://github.com/openenergymonitor/emonhub)
 
 ---
 
