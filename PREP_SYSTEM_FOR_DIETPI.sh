@@ -572,6 +572,13 @@ Currently installed: $G_DISTRO_NAME (ID: $G_DISTRO)"; then
 		G_EXEC_DESC='Clean download location' G_EXEC rm -R "DietPi-$G_GITBRANCH"
 		G_EXEC_DESC='Set execute permissions for DietPi scripts' G_EXEC chmod -R +x /boot/dietpi /var/lib/dietpi/services /etc/cron.*/dietpi
 
+		# Apply MOTD live-patches
+		G_EXEC_DESC='Applying live-patches to fix known bugs in this DietPi version'
+		G_EXEC curl -sSfLO https://dietpi.com/motd
+		. ./motd
+		G_EXEC rm motd
+		unset -v motd
+
 		G_EXEC systemctl daemon-reload
 
 		#------------------------------------------------------------------------------------------------
