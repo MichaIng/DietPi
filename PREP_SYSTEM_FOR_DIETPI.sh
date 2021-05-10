@@ -738,6 +738,7 @@ Currently installed: $G_DISTRO_NAME (ID: $G_DISTRO)"; then
 
 			# Remove obsolete combined keyring
 			[[ -f '/etc/apt/trusted.gpg' ]] && G_EXEC rm /etc/apt/trusted.gpg
+			[[ -f '/etc/apt/trusted.gpg~' ]] && G_EXEC rm '/etc/apt/trusted.gpg~'
 
 		# - G_HW_MODEL specific required firmware/kernel/bootloader packages
 		#	Armbian grab currently installed packages
@@ -756,10 +757,8 @@ Currently installed: $G_DISTRO_NAME (ID: $G_DISTRO)"; then
 
 			for i in "${apackages[@]}"
 			do
-
 				while read -r line
 				do
-
 					aPACKAGES_REQUIRED_INSTALL+=("$line")
 					G_DIETPI-NOTIFY 2 "Armbian package detected and added: $line"
 
@@ -779,6 +778,7 @@ Currently installed: $G_DISTRO_NAME (ID: $G_DISTRO)"; then
 			# Move Raspbian key to active place and remove obsolete combined keyring
 			[[ -f '/usr/share/keyrings/raspbian-archive-keyring.gpg' ]] && G_EXEC ln -sf /usr/share/keyrings/raspbian-archive-keyring.gpg /etc/apt/trusted.gpg.d/raspbian-archive-keyring.gpg
 			[[ -f '/etc/apt/trusted.gpg' ]] && G_EXEC rm /etc/apt/trusted.gpg
+			[[ -f '/etc/apt/trusted.gpg~' ]] && G_EXEC rm '/etc/apt/trusted.gpg~'
 
 		#	Odroid C4
 		elif (( $G_HW_MODEL == 16 )); then
@@ -791,6 +791,7 @@ Currently installed: $G_DISTRO_NAME (ID: $G_DISTRO)"; then
 
 			# Remove obsolete combined keyring
 			[[ -f '/etc/apt/trusted.gpg' ]] && G_EXEC rm /etc/apt/trusted.gpg
+			[[ -f '/etc/apt/trusted.gpg~' ]] && G_EXEC rm '/etc/apt/trusted.gpg~'
 
 		#	Odroid N2
 		elif (( $G_HW_MODEL == 15 )); then
@@ -802,6 +803,7 @@ Currently installed: $G_DISTRO_NAME (ID: $G_DISTRO)"; then
 
 			# Remove obsolete combined keyring
 			[[ -f '/etc/apt/trusted.gpg' ]] && G_EXEC rm /etc/apt/trusted.gpg
+			[[ -f '/etc/apt/trusted.gpg~' ]] && G_EXEC rm '/etc/apt/trusted.gpg~'
 
 		#	Odroid N1
 		elif (( $G_HW_MODEL == 14 )); then
@@ -810,6 +812,7 @@ Currently installed: $G_DISTRO_NAME (ID: $G_DISTRO)"; then
 
 			# Remove obsolete combined keyring
 			[[ -f '/etc/apt/trusted.gpg' ]] && G_EXEC rm /etc/apt/trusted.gpg
+			[[ -f '/etc/apt/trusted.gpg~' ]] && G_EXEC rm '/etc/apt/trusted.gpg~'
 
 		#	Odroid C2
 		elif (( $G_HW_MODEL == 12 )); then
@@ -818,6 +821,7 @@ Currently installed: $G_DISTRO_NAME (ID: $G_DISTRO)"; then
 
 			# Remove obsolete combined keyring
 			[[ -f '/etc/apt/trusted.gpg' ]] && G_EXEC rm /etc/apt/trusted.gpg
+			[[ -f '/etc/apt/trusted.gpg~' ]] && G_EXEC rm '/etc/apt/trusted.gpg~'
 
 		#	Odroid XU3/XU4/MC1/HC1/HC2
 		elif (( $G_HW_MODEL == 11 )); then
@@ -826,6 +830,7 @@ Currently installed: $G_DISTRO_NAME (ID: $G_DISTRO)"; then
 
 			# Remove obsolete combined keyring
 			[[ -f '/etc/apt/trusted.gpg' ]] && G_EXEC rm /etc/apt/trusted.gpg
+			[[ -f '/etc/apt/trusted.gpg~' ]] && G_EXEC rm '/etc/apt/trusted.gpg~'
 
 		#	ROCK Pi S (official Radxa Debian image)
 		elif (( $G_HW_MODEL == 73 )) && grep -q 'apt\.radxa\.com' /etc/apt/sources.list.d/*.list; then
@@ -835,6 +840,10 @@ Currently installed: $G_DISTRO_NAME (ID: $G_DISTRO)"; then
 			G_EXEC eval "curl -sSfL https://apt.radxa.com/${DISTRO_TARGET_NAME/bullseye/buster}-stable/public.key | gpg --dearmor -o /etc/apt/trusted.gpg.d/dietpi-radxa.gpg --yes"
 			G_EXEC eval "echo -e 'deb https://apt.radxa.com/${DISTRO_TARGET_NAME/bullseye/buster}-stable/ ${DISTRO_TARGET_NAME/bullseye/buster} main\n#deb https://apt.radxa.com/${DISTRO_TARGET_NAME/bullseye/buster}-testing/ ${DISTRO_TARGET_NAME/bullseye/buster} main' > /etc/apt/sources.list.d/dietpi-radxa.list"
 			G_AGUP
+
+			# Remove obsolete combined keyring
+			[[ -f '/etc/apt/trusted.gpg' ]] && G_EXEC rm /etc/apt/trusted.gpg
+			[[ -f '/etc/apt/trusted.gpg~' ]] && G_EXEC rm '/etc/apt/trusted.gpg~'
 
 			# NB: rockpis-dtbo is not required as it doubles the overlays that are already provided (among others) with the kernel package
 			G_AGI rockpis-rk-ubootimg linux-4.4-rock-pi-s-latest rockchip-overlay
