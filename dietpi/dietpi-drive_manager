@@ -89,6 +89,9 @@
 
 	Init_Drives_and_Refresh(){
 
+		# Trigger automounts to assure those are detected as mounted
+		ls -d /mnt/*/. &> /dev/null
+
 		# Reset current index and delete arrays
 		local i index=-1
 		Destroy
@@ -143,7 +146,7 @@ $tmpfs_mounts
 $misc_mounts
 
 #----------------------------------------------------------------
-# SWAPFILE
+# SWAP SPACE
 #----------------------------------------------------------------
 $swap_mounts
 
@@ -160,38 +163,38 @@ $swap_mounts
 		# - Remove duplicates, e.g. from bind mounts and due to /dev/root conversion: https://github.com/MichaIng/DietPi/issues/2013#issuecomment-417413867
 		while read -r line
 		do
-
 			Init_New_Device
 
 			aDRIVE_ISMOUNTED[$index]=1
+			aDRIVE_ISFILESYSTEM[$index]=1
 			aDRIVE_MOUNT_SOURCE[$index]=$line
-			aDRIVE_MOUNT_TARGET[$index]=$(findmnt -no TARGET "${aDRIVE_MOUNT_SOURCE[$index]}" | head -1) # Use only first result since bind mounts lead to multiple matches
-			aDRIVE_SIZE_TOTAL[$index]=$(findmnt -rno SIZE "${aDRIVE_MOUNT_TARGET[$index]}")
-			aDRIVE_SIZE_USED[$index]=$(findmnt -rno USED "${aDRIVE_MOUNT_TARGET[$index]}")
-			aDRIVE_SIZE_PERCENTUSED[$index]=$(findmnt -rno USE% "${aDRIVE_MOUNT_TARGET[$index]}")
+			aDRIVE_MOUNT_TARGET[$index]=$(findmnt -Ufnro TARGET -S "${aDRIVE_MOUNT_SOURCE[$index]}") # Use only first result since bind mounts lead to multiple matches
+			aDRIVE_SIZE_TOTAL[$index]=$(findmnt -Ufnro SIZE -T "${aDRIVE_MOUNT_TARGET[$index]}")
+			aDRIVE_SIZE_USED[$index]=$(findmnt -Ufnro USED -T "${aDRIVE_MOUNT_TARGET[$index]}")
+			aDRIVE_SIZE_PERCENTUSED[$index]=$(findmnt -Ufnro USE% -T "${aDRIVE_MOUNT_TARGET[$index]}")
 
-			aDRIVE_SOURCE_DEVICE[$index]=$(Return_Drive_Without_Partitions "${aDRIVE_MOUNT_SOURCE[$index]}")
-			[[ ${aDRIVE_MOUNT_SOURCE[$index]} == /dev/${aDRIVE_SOURCE_DEVICE[$index]} ]] || aDRIVE_ISPARTITIONTABLE[$index]=1
-			aDRIVE_UUID[$index]=$(findmnt -no UUID "${aDRIVE_MOUNT_TARGET[$index]}")
-			(( ${aDRIVE_ISPARTITIONTABLE[$index]} )) && aDRIVE_PART_UUID[$index]=$(findmnt -no PARTUUID "${aDRIVE_MOUNT_TARGET[$index]}")
-
-			# Physical?
+			# Physical
 			if [[ -d '/sys/block/'${aDRIVE_SOURCE_DEVICE[$index]} ]]; then
 
+				G_DIETPI-NOTIFY 2 " - Detected mounted physical drive: ${aDRIVE_MOUNT_SOURCE[$index]} > ${aDRIVE_MOUNT_TARGET[$index]}"
+
+				aDRIVE_UUID[$index]=$(findmnt -Ufnro UUID -T "${aDRIVE_MOUNT_TARGET[$index]}")
+				aDRIVE_SOURCE_DEVICE[$index]=$(Return_Drive_Without_Partitions "${aDRIVE_MOUNT_SOURCE[$index]}")
+				[[ ${aDRIVE_MOUNT_SOURCE[$index]} == /dev/${aDRIVE_SOURCE_DEVICE[$index]} ]] || aDRIVE_ISPARTITIONTABLE[$index]=1
+				(( ${aDRIVE_ISPARTITIONTABLE[$index]} )) && aDRIVE_PART_UUID[$index]=$(findmnt -Ufnro PARTUUID -T "${aDRIVE_MOUNT_TARGET[$index]}")
 				# blkid is required here, as findmnt will show "fuseblk" for NTFS filesytems, which is a correct result but cannot be used in fstab or for mounting the drive.
 				aDRIVE_FSTYPE[$index]=$(blkid -s TYPE -o value -c /dev/null "${aDRIVE_MOUNT_SOURCE[$index]}")
-				[[ ${aDRIVE_FSTYPE[$index]} ]] && aDRIVE_ISFILESYSTEM[$index]=1
 
-			# Networked
+			# Network
 			else
 
+				G_DIETPI-NOTIFY 2 " - Detected mounted network drive: ${aDRIVE_MOUNT_SOURCE[$index]} > ${aDRIVE_MOUNT_TARGET[$index]}"
+
 				aDRIVE_ISNETWORKED[$index]=1
-				aDRIVE_FSTYPE[$index]='Net'
-				aDRIVE_ISFILESYSTEM[$index]=1
+				# findmnt is required here, as blkid works only for physical block devices
+				aDRIVE_FSTYPE[$index]=$(findmnt -Ufnro FSTYPE -T "${aDRIVE_MOUNT_SOURCE[$index]}")
 
 			fi
-
-			G_DIETPI-NOTIFY 2 " - Detected mounted drive: ${aDRIVE_MOUNT_SOURCE[$index]} > ${aDRIVE_MOUNT_TARGET[$index]}"
 
 			# R/O mounted?
 			# NB: We can't use -m1 for initial check as results can be:
@@ -223,8 +226,11 @@ $swap_mounts
 
 			fi
 
-			# Add entry to fstab
-			if [[ ${aDRIVE_UUID[$index]} ]]; then
+			# Add only physical drives to fstab, network drives are handled outside of this loop
+			if [[ ${aDRIVE_ISNETWORKED[$index]} == 0 ]]; then
+
+				# Print error when physical drive has not UUID, as we cannot add it to fstab then
+				[[ ${aDRIVE_UUID[$index]} ]] || { G_DIETPI-NOTIFY 1 "The following drive seems to not have a UUID, skipping fstab entry:\n$(findmnt -Ufo SOURCE,TARGET,FSTYPE,UUID -T "${aDRIVE_MOUNT_TARGET[$index]}")"; continue; }
 
 				# R/W or R/O?
 				# - Add rw flag to mount options. This should be default but seems to be not in rare cases: https://github.com/MichaIng/DietPi/issues/3268
@@ -258,20 +264,15 @@ $swap_mounts
 
 				fi
 
-				# FS type: In case of unknown network drive, use "auto", to allow remove FS changes without breaking the fstab entry
-				local type=${aDRIVE_FSTYPE[$index]}
-				(( ${aDRIVE_ISNETWORKED[$index]} )) && type='auto'
-
-				echo "$dev_entry ${aDRIVE_MOUNT_TARGET[$index]} ${type:-auto} noatime,lazytime$options" >> $fp_fstab_tmp
+				echo "$dev_entry ${aDRIVE_MOUNT_TARGET[$index]} ${aDRIVE_FSTYPE[$index]:-auto} noatime,lazytime$options" >> $fp_fstab_tmp
 
 			fi
 
 		done < <(df -a --output=source --exclude-type=tmpfs --exclude-type=ecryptfs --exclude-type=vboxsf --exclude-type=glusterfs | sed "\|^/dev/root$|c$G_ROOTFS_DEV" | mawk '/\// && !x[$0]++')
 
-		# Check blkid for unmounted filesystems: lsblk may be preferred in the future, but blkid has the benefit of showing only drives with filesystems, which is what we want.
+		# Check blkid for unmounted filesystems
 		while read -r line
 		do
-
 			[[ $line ]] || continue
 
 			# Exclude drives already found (mounted)
@@ -280,8 +281,8 @@ $swap_mounts
 				[[ $i == "$line"* ]] && continue 2
 			done
 
-			# Failsafe: Must have a valid UUID! But blkid should print only drives with filesytems.
-			local uuid=$(lsblk -no UUID "$line")
+			# Failsafe: Must have a valid UUID! But blkid should print only drives with filesystems.
+			local uuid=$(blkid -s UUID -o value -c /dev/null -no UUID "$line")
 			[[ $uuid ]] || continue
 
 			G_DIETPI-NOTIFY 2 " - Detected unmounted drive: $line"
@@ -293,8 +294,7 @@ $swap_mounts
 			aDRIVE_MOUNT_TARGET[$index]="/mnt/${aDRIVE_UUID[$index]}"
 			aDRIVE_SOURCE_DEVICE[$index]=$(Return_Drive_Without_Partitions "${aDRIVE_MOUNT_SOURCE[$index]}")
 			[[ ${aDRIVE_MOUNT_SOURCE[$index]} == /dev/${aDRIVE_SOURCE_DEVICE[$index]} ]] || aDRIVE_ISPARTITIONTABLE[$index]=1
-			(( ${aDRIVE_ISPARTITIONTABLE[$index]} )) && aDRIVE_PART_UUID[$index]=$(lsblk -no PARTUUID "${aDRIVE_MOUNT_SOURCE[$index]}")
-			# blkid needs to be used here, as lsblk does not work in containers.
+			(( ${aDRIVE_ISPARTITIONTABLE[$index]} )) && aDRIVE_PART_UUID[$index]=$(blkid -s PARTUUID -o value -c /dev/null "${aDRIVE_MOUNT_SOURCE[$index]}")
 			aDRIVE_FSTYPE[$index]=$(blkid -s TYPE -o value -c /dev/null "${aDRIVE_MOUNT_SOURCE[$index]}")
 			[[ ${aDRIVE_FSTYPE[$index]} ]] && aDRIVE_ISFILESYSTEM[$index]=1
 
@@ -304,7 +304,6 @@ $swap_mounts
 		# - Exclude mtdblock devices: https://github.com/MichaIng/DietPi/issues/2067#issuecomment-422400520
 		while read -r line
 		do
-
 			[[ $line ]] || continue
 
 			# Exclude drives already found (formatted)
@@ -326,7 +325,6 @@ $swap_mounts
 		# Set required global flags and deps for all drives found
 		for i in "${!aDRIVE_MOUNT_SOURCE[@]}"
 		do
-
 			# Detect and set ROM drives
 			[[ ${aDRIVE_MOUNT_SOURCE[$i]} == '/dev/sr'* ]] && aDRIVE_ISROM[$i]=1
 
@@ -344,7 +342,6 @@ $swap_mounts
 				local need_exfat='exfat-fuse'
 
 			fi
-
 		done
 
 		# Debug drive detection, exit after first init
@@ -495,7 +492,11 @@ Do you wish to ignore this warning, and, mount the drive regardless?" || return 
 		local target=$1
 
 		G_EXEC_NOEXIT=1 G_EXEC umount "$target" || return 1
-		sed -i "\#[[:blank:]]${target}[[:blank:]]#d" /etc/fstab # Only needed for networked drives currently...
+		sed -i "\#[[:blank:]]${target}[[:blank:]]#d" /etc/fstab # Only needed for network drives currently, as unmounted physical drives wont be re-added via Init_Drives_and_Refresh
+		# Stop automount to unlock mount point
+		local automount=${target#/}
+		[[ $automount ]] && automount=${automount//\//-}
+		[[ -f /run/systemd/generator/$automount.automount ]] && G_EXEC systemctl stop "$automount.automount"
 		G_EXEC_NOEXIT=1 G_EXEC rmdir "$target"
 		Init_Drives_and_Refresh
 
@@ -576,7 +577,7 @@ Do you wish to ignore this warning, and, mount the drive regardless?" || return 
 				for i in "/dev/${aDRIVE_SOURCE_DEVICE[$MENU_DRIVE_INDEX]}"?*
 				do
 					[[ -b $i ]] || continue
-					local target=$(findmnt -no TARGET "$i")
+					local target=$(findmnt -Ufnro TARGET -S "$i")
 					[[ $target ]] && { Unmount_Drive "$target"  || return 1; }
 					G_DIETPI-NOTIFY 2 "Writing zeros to partition: $i"
 					G_EXEC dd if=/dev/zero of="$i" bs=4K count=10
@@ -680,7 +681,7 @@ Do you wish to ignore this warning, and, mount the drive regardless?" || return 
 			[[ -e ${aDRIVE_MOUNT_TARGET[$MENU_DRIVE_INDEX]} ]] && G_EXEC_NOEXIT=1 G_EXEC rm -R "${aDRIVE_MOUNT_TARGET[$MENU_DRIVE_INDEX]}"
 
 			# Automatically mount it
-			local new_uuid=$(lsblk -no UUID "${aDRIVE_MOUNT_SOURCE[$MENU_DRIVE_INDEX]}")
+			local new_uuid=$(blkid -s UUID -o value -c /dev/null "${aDRIVE_MOUNT_SOURCE[$MENU_DRIVE_INDEX]}")
 			if ! Mount_Drive "${aDRIVE_MOUNT_SOURCE[$MENU_DRIVE_INDEX]}" "/mnt/$new_uuid"; then
 
 				MENU_DRIVE_TARGET="/mnt/$new_uuid"
@@ -855,16 +856,18 @@ Do you wish to ignore this warning, and, mount the drive regardless?" || return 
 
 				if [[ ${aDRIVE_SOURCE_DEVICE[$j]} == "${acategory_list[$i]}" ]]; then
 
-					local string_fstype=${aDRIVE_FSTYPE[$j]}
-					(( ${aDRIVE_ISNETWORKED[$j]} )) && string_fstype='Net'
-
-					# Drive is fully mounted:
+					# Drive is fully mounted
 					if (( ${aDRIVE_ISMOUNTED[$j]} )); then
 
-						G_WHIP_MENU_ARRAY+=("${aDRIVE_MOUNT_TARGET[$j]}" ": ${aDRIVE_MOUNT_SOURCE[$j]} | $string_fstype | Capacity: ${aDRIVE_SIZE_TOTAL[$j]} | Used: ${aDRIVE_SIZE_USED[$j]} (${aDRIVE_SIZE_PERCENTUSED[$j]})")
+						G_WHIP_MENU_ARRAY+=("${aDRIVE_MOUNT_TARGET[$j]}" ": ${aDRIVE_MOUNT_SOURCE[$j]} | ${aDRIVE_FSTYPE[$j]} | Capacity: ${aDRIVE_SIZE_TOTAL[$j]} | Used: ${aDRIVE_SIZE_USED[$j]} (${aDRIVE_SIZE_PERCENTUSED[$j]})")
 
-					# Drive has no FS:
-					elif (( ! ${aDRIVE_ISFILESYSTEM[$j]} )); then
+					# Drive has filesystem
+					elif (( ${aDRIVE_ISFILESYSTEM[$j]} )); then
+
+						G_WHIP_MENU_ARRAY+=("${aDRIVE_MOUNT_TARGET[$j]}" ": ${aDRIVE_MOUNT_SOURCE[$j]} | ${aDRIVE_FSTYPE[$j]} | Not mounted")
+
+					# Drive is not formatted
+					else
 
 						# ROM device with no ROM attached
 						if (( ${aDRIVE_ISROM[$j]} )); then
@@ -876,11 +879,6 @@ Do you wish to ignore this warning, and, mount the drive regardless?" || return 
 							G_WHIP_MENU_ARRAY+=("${aDRIVE_MOUNT_TARGET[$j]}" ": ${aDRIVE_MOUNT_SOURCE[$j]} | No filesystem / format required")
 
 						fi
-
-					# Drive is not mounted:
-					else
-
-						G_WHIP_MENU_ARRAY+=("${aDRIVE_MOUNT_TARGET[$j]}" ": ${aDRIVE_MOUNT_SOURCE[$j]} | $string_fstype | Not mounted")
 
 					fi
 
