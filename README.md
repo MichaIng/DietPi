@@ -294,6 +294,7 @@ Links to hardware and software manufacturers, sources and build instructions use
 - [WebIOPi](https://github.com/Freenove/WebIOPi)
 - [WiringPi](https://github.com/WiringPi/WiringPi)
 - [emonHub](https://github.com/openenergymonitor/emonhub)
+- [Firefox](https://hg.mozilla.org/mozilla-unified)
 
 ---
 
