@@ -62,6 +62,7 @@ Available commands:
 	VPN_PASSWORD=
 	VPN_SERVER=
 	PROTOCOL='udp'
+	VPN_PORT=1194
 	VPN_CONNECTED=0
 	WAN_IP=
 	RX='N/A'
@@ -99,7 +100,7 @@ Available commands:
 			[[ $1 != '-f' && -d $FP_NORDVPN ]] && return 0
 			[[ $1 != '-f' ]] || G_WHIP_YESNO 'This will remove all NordVPN server files and perform a fresh download of NordVPN server configurations. Once completed, you will need to reselect a NordVPN server from the new list.\n\nDo you want to continue?' || return 0
 			G_EXEC curl -sSfLO 'https://downloads.nordcdn.com/configs/archives/servers/ovpn.zip'
-			VPN_SERVER=
+			VPN_PORT=1194 VPN_SERVER=
 			[[ -d $FP_NORDVPN ]] && G_EXEC_DESC='Removing old NordVPN server configs' G_EXEC rm -R $FP_NORDVPN
 			G_EXEC mkdir -p $FP_NORDVPN
 			G_EXEC unzip -o ovpn.zip -d $FP_NORDVPN
@@ -110,7 +111,7 @@ Available commands:
 			[[ $1 != '-f' && -d $FP_PROTONVPN ]] && return 0
 			[[ $1 != '-f' ]] || G_WHIP_YESNO 'This will remove all ProtonVPN server files and perform a fresh download of the ProtonVPN server list. Once completed, you will need to reselect a ProtonVPN server from the new list.\n\nDo you want to continue?' || return 0
 			G_EXEC curl -sSfLO 'https://api.protonvpn.ch/vpn/logicals'
-			VPN_SERVER=
+			VPN_PORT=1194 VPN_SERVER=
 			[[ -d $FP_PROTONVPN ]] && G_EXEC_DESC='Removing old ProtonVPN server configs' G_EXEC rm -R $FP_PROTONVPN
 			G_EXEC mkdir -p $FP_PROTONVPN
 			sed 's/"Domain":"/\n/g' logicals | mawk -F\" 'NR % 2 == 0 {print $1}' > $FP_PROTONVPN_SERVERS
@@ -124,7 +125,7 @@ Available commands:
 			[[ $1 != '-f' && -d $FP_IPVANISH ]] && return 0
 			[[ $1 != '-f' ]] || G_WHIP_YESNO 'This will remove all IPVanish server files and perform a fresh download of IPVanish server configurations. Once completed, you will need to reselect a IPVanish server from the new list.\n\nDo you want to continue?' || return 0
 			G_EXEC curl -sSfLO 'https://www.ipvanish.com/software/configs/configs.zip'
-			VPN_SERVER=
+			VPN_PORT=1194 VPN_SERVER=
 			[[ -d $FP_IPVANISH ]] && G_EXEC_DESC='Removing old IPVanish server configs' G_EXEC rm -R $FP_IPVANISH
 			G_EXEC mkdir -p $FP_IPVANISH
 			G_EXEC unzip -o configs.zip -d $FP_IPVANISH
@@ -135,7 +136,7 @@ Available commands:
 			[[ $1 != '-f' && -d $FP_PIA ]] && return 0
 			[[ $1 != '-f' ]] || G_WHIP_YESNO 'This will remove all PIA server files and perform a fresh download of PIA server configurations. Once completed, you will need to reselect a PIA server from the new list.\n\nDo you want to continue?' || return 0
 			G_EXEC curl -sSfLO 'https://www.privateinternetaccess.com/openvpn/openvpn-strong.zip'
-			VPN_SERVER=
+			VPN_PORT=1197 VPN_SERVER=
 			[[ -d $FP_PIA ]] && G_EXEC_DESC='Removing old PIA server configs' G_EXEC rm -R $FP_PIA
 			G_EXEC mkdir -p $FP_PIA
 			G_EXEC unzip -o openvpn-strong.zip -d $FP_PIA
@@ -149,8 +150,18 @@ Available commands:
 			G_EXEC cp "$(</tmp/.dietpi-explorer_selected_location)" $FP_CLIENT_OVPN
 			G_EXEC umask 0022
 			G_EXEC_NOEXIT=1 G_EXEC rm /tmp/.dietpi-explorer_selected_location
-			# Parse server IP/domain from client config, required for killswitch
+			# Parse server IP/domain, port and protocol from client config, required for killswitch
 			VPN_SERVER=$(mawk '$1=="remote" {print $2;exit}' $FP_CLIENT_OVPN)
+			# - Port can be 2nd argument of "remote" option or dedicated "port" option, else defaults to "1194".
+			VPN_PORT=$(mawk '$1=="remote" {print $3;exit}' $FP_CLIENT_OVPN)
+			[[ $VPN_PORT =~ ^[0-9]+$ ]] || VPN_PORT=$(mawk '$1=="port" {print $2;exit}' $FP_CLIENT_OVPN)
+			[[ $VPN_PORT =~ ^[0-9]+$ ]] || VPN_PORT=1194
+			# - Protocol can be 3rd argument of "remote" option (when port is given) or 2nd argument of "remote" option (when port is not given) or dedicated "proto" option, else defaults to "udp".
+			PROTOCOL=$(mawk '$1=="remote" {print $4;exit}' $FP_CLIENT_OVPN)
+			[[ $PROTOCOL == 'udp' || $PROTOCOL == 'tcp' ]] || PROTOCOL=$(mawk '$1=="remote" {print $3;exit}' $FP_CLIENT_OVPN)
+			# - When given via "proto" option, it is prefixed with "-client" (or "-server").
+			[[ $PROTOCOL == 'udp' || $PROTOCOL == 'tcp' ]] || { PROTOCOL=$(mawk '$1=="proto" {print $2;exit}' $FP_CLIENT_OVPN); PROTOCOL=${PROTOCOL%-*}; }
+			[[ $PROTOCOL == 'udp' || $PROTOCOL == 'tcp' ]] || PROTOCOL='udp'
 		fi
 	}
 
@@ -176,8 +187,8 @@ if [[ -f $FP_SETTINGS/killswitch.rules ]]
 then
 	iptables-save > $FP_SETTINGS/iptables.bak
 	. $FP_SETTINGS_DIETPI
-	[[ \$VPN_SERVER == *'udp'* ]] && VPN_SERVER=\${VPN_SERVER%.udp.ovpn} || VPN_SERVER=\${VPN_SERVER%.tcp.ovpn}
-	export VPN_SERVER
+	VPN_SERVER=\$(mawk '$1=="remote" {print $2;exit}' $FP_CLIENT_OVPN)
+	export VPN_SERVER PROTOCOL VPN_PORT
 	iptables-restore < <(envsubst < $FP_SETTINGS/killswitch.rules)
 fi
 _EOF_
@@ -211,6 +222,7 @@ VPN_USERNAME='${VPN_USERNAME//\'/\'\\\'\'}'
 VPN_PASSWORD='${VPN_PASSWORD//\'/\'\\\'\'}'
 VPN_SERVER='$VPN_SERVER'
 PROTOCOL='$PROTOCOL'
+VPN_PORT='$VPN_PORT'
 _EOF_
 		G_DIETPI-NOTIFY 2 'Generating OVPN file, please wait...'
 		if [[ $VPN_PROVIDER == 'ProtonVPN' ]]
@@ -227,18 +239,16 @@ _EOF_
 			G_EXEC cp -f "$FP_IPVANISH/$VPN_SERVER" $FP_CLIENT_OVPN
 			# Fix CA path, as it is in subdirectory now
 			G_CONFIG_INJECT 'ca[[:blank:]]' "ca $FP_IPVANISH/ca.ipvanish.com.crt" $FP_CLIENT_OVPN
-			# Set port: 443 is default but we use 1194 which is supported as well.
-			G_EXEC sed -i '/^[[:blank:]]*remote[[:blank:]]/s/[[:blank:]][0-9][0-9]*$/ 1194/' $FP_CLIENT_OVPN
-			# Set protocol: UDP is default but TCP is supported as well.
+			# Set protocol and port: UDP port 443 is default, but TCP 1194 and UDP 1194 are supported as well.
 			G_CONFIG_INJECT 'proto[[:blank:]]' "proto $PROTOCOL" $FP_CLIENT_OVPN
+			G_EXEC sed -i '/^[[:blank:]]*remote[[:blank:]]/s/[[:blank:]][0-9][0-9]*$/ 1194/' $FP_CLIENT_OVPN
 
 		elif [[ $VPN_PROVIDER == 'PIA' ]]
 		then
 			G_EXEC cp -f "$FP_PIA/$VPN_SERVER" $FP_CLIENT_OVPN
-			# Set port: 1197 is default but we use 1194 which is supported as well.
-			G_EXEC sed -i '/^[[:blank:]]*remote[[:blank:]]/s/[[:blank:]][0-9][0-9]*$/ 1194/' $FP_CLIENT_OVPN
-			# Set protocol: UDP is default but TCP is supported as well.
+			# Set protocol and port: UDP on 1197 is default but TCP on 501 is supported as well.
 			G_CONFIG_INJECT 'proto[[:blank:]]' "proto $PROTOCOL" $FP_CLIENT_OVPN
+			G_EXEC sed -i "/^[[:blank:]]*remote[[:blank:]]/s/[[:blank:]][0-9][0-9]*\$/ $VPN_PORT/" $FP_CLIENT_OVPN
 		fi
 
 		G_EXEC umask 0022
@@ -397,8 +407,7 @@ _EOF_
 -A OUTPUT -d 192.168.0.0/16 -j ACCEPT
 -A OUTPUT -d 172.16.0.0/12 -j ACCEPT
 -A OUTPUT -d 10.0.0.0/8 -j ACCEPT
--A OUTPUT -d $VPN_SERVER -p tcp --dport 1194 -j ACCEPT
--A OUTPUT -d $VPN_SERVER -p udp --dport 1194 -j ACCEPT
+-A OUTPUT -d $VPN_SERVER -p $PROTOCOL --dport $VPN_PORT -j ACCEPT
 -A INPUT -m conntrack --ctstate RELATED,ESTABLISHED -j ACCEPT
 COMMIT
 _EOF_
@@ -468,6 +477,8 @@ _EOF_
 					do
 						G_WHIP_MENU_ARRAY+=("${i##*/}" '')
 					done
+					# UDP requires port 1197 and TCP requires port 501.
+					[[ $PROTOVOL == 'udp' ]] && VPN_PORT=1197 || VPN_PORT=501
 				fi
 				G_WHIP_DEFAULT_ITEM=$VPN_SERVER
 				G_WHIP_MENU 'Please select a VPN server to use:' && VPN_SERVER=$G_WHIP_RETURNED_VALUE
