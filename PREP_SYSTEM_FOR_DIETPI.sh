@@ -703,7 +703,7 @@ Currently installed: $G_DISTRO_NAME (ID: $G_DISTRO)"; then
 		fi
 
 		# Install gdisk if root file system is on a GPT partition, used by DietPi-FS_partition_resize
-		[[ $(blkid -s PTTYPE -o value "$(lsblk -npo PKNAME "$(findmnt -no SOURCE /)")") == 'gpt' ]] && aPACKAGES_REQUIRED_INSTALL+=('gdisk')
+		[[ $(blkid -s PTTYPE -o value -c /dev/null "$(lsblk -npo PKNAME "$(findmnt -Ufnro SOURCE -M /)")") == 'gpt' ]] && aPACKAGES_REQUIRED_INSTALL+=('gdisk')
 
 		# Install file system tools required for file system resizing and fsck
 		while read -r line
@@ -721,7 +721,7 @@ Currently installed: $G_DISTRO_NAME (ID: $G_DISTRO)"; then
 				aPACKAGES_REQUIRED_INSTALL+=('btrfs-progs')
 			fi
 
-		done < <(blkid -s TYPE -o value | sort -u)
+		done < <(blkid -s TYPE -o value -c /dev/null | sort -u)
 
 		# Kernel/bootloader/firmware
 		# - We need to install those directly to allow G_AGA() autoremove possible older packages later: https://github.com/MichaIng/DietPi/issues/1285#issuecomment-354602594
@@ -1759,7 +1759,7 @@ _EOF_
 
 		G_DIETPI-NOTIFY 2 'Clearing items below tmpfs mount points'
 		G_EXEC mkdir -p /mnt/tmp_root
-		G_EXEC mount "$(findmnt -no SOURCE /)" /mnt/tmp_root
+		G_EXEC mount "$(findmnt -Ufnro SOURCE -M /)" /mnt/tmp_root
 		rm -vRf /mnt/tmp_root/{dev,proc,run,sys,tmp,var/log}/{,.??,.[^.]}*
 		G_EXEC umount /mnt/tmp_root
 		G_EXEC rmdir /mnt/tmp_root
