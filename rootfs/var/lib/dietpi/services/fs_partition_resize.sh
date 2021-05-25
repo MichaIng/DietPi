@@ -7,7 +7,7 @@
 	! systemctl is-enabled dietpi-fs_partition_resize > /dev/null || systemctl disable dietpi-fs_partition_resize
 
 	# Detect root device
-	ROOT_DEV=$(findmnt -no SOURCE /)
+	ROOT_DEV=$(findmnt -Ufnro SOURCE -M /)
 
 	# Detect root partition and parent drive for supported naming schemes:
 	# - SCSI/SATA:	/dev/sd[a-z][1-9]
@@ -46,10 +46,10 @@
 	partprobe "$ROOT_DRIVE"
 	partx -u "$ROOT_DRIVE"
 
-	# Detect root file system type
-	ROOT_FSTYPE=$(findmnt -no FSTYPE /)
+	# Detect root filesystem type
+	ROOT_FSTYPE=$(findmnt -Ufnro FSTYPE -M /)
 
-	# Maximise root file system if type is supported
+	# Maximise root filesystem if type is supported
 	if [[ $ROOT_FSTYPE == ext[2-4] ]]; then
 
 		resize2fs "$ROOT_DEV"
@@ -66,7 +66,7 @@
 
 	else
 
-		echo "[FAILED] Unsupported root file system type ($ROOT_FSTYPE). Aborting..."
+		echo "[FAILED] Unsupported root filesystem type ($ROOT_FSTYPE). Aborting..."
 		exit 1
 
 	fi
