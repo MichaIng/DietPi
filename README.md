@@ -259,6 +259,7 @@ Links to hardware and software manufacturers, sources and build instructions use
 - [Subsonic](https://sourceforge.net/projects/subsonic/)
 - [Airsonic](https://github.com/airsonic/airsonic)
 - [Logitech Media Server](https://github.com/Logitech/slimserver)
+- [Squeezelite](https://github.com/ralph-irving/squeezelite)
 - [Ampache](https://github.com/ampache/ampache)
 - [Plex Media Server](https://www.plex.tv/)
 - [FFmpeg](https://github.com/FFmpeg/FFmpeg)
