@@ -762,6 +762,7 @@ Currently installed: $G_DISTRO_NAME (ID: $G_DISTRO)"; then
 				'linux-dtb-'
 				'linux-u-boot-'
 				"linux-$DISTRO_TARGET_NAME-root-"
+				'armbian-bsp-cli-'
 
 			)
 
