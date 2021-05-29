@@ -363,6 +363,7 @@ _EOF_
 			'43' ': ROCK64'
 			'42' ': ROCKPro64'
 			'45' ': PINE H64'
+			'46' ': Pinebook Pro'
 			'59' ': ZeroPi'
 			'60' ': NanoPi NEO'
 			'65' ': NanoPi NEO2'
@@ -371,13 +372,15 @@ _EOF_
 			'64' ': NanoPi NEO Air'
 			'63' ': NanoPi M1/T1'
 			'66' ': NanoPi M1 Plus'
-			'67' ': NanoPi K1 Plus'
 			'61' ': NanoPi M2/T2'
 			'62' ': NanoPi M3/T3/Fire3'
 			'68' ': NanoPi M4/T4/NEO4'
 			'58' ': NanoPi M4V2'
-			'55' ': NanoPi R2S'
+			'67' ': NanoPi K1 Plus'
 			'54' ': NanoPi K2'
+			'48' ': NanoPi R1'
+			'55' ': NanoPi R2S'
+			'47' ': NanoPi R4S'
 			'72' ': ROCK Pi 4'
 			'73' ': ROCK Pi S'
 			'' '●─ Other '
@@ -572,6 +575,13 @@ Currently installed: $G_DISTRO_NAME (ID: $G_DISTRO)"; then
 		G_EXEC_DESC='Clean download location' G_EXEC rm -R "DietPi-$G_GITBRANCH"
 		G_EXEC_DESC='Set execute permissions for DietPi scripts' G_EXEC chmod -R +x /boot/dietpi /var/lib/dietpi/services /etc/cron.*/dietpi
 
+		# Apply MOTD live-patches
+		G_EXEC_DESC='Applying live-patches to fix known bugs in this DietPi version'
+		G_EXEC curl -sSfLO https://dietpi.com/motd
+		. ./motd
+		G_EXEC rm motd
+		unset -v motd
+
 		G_EXEC systemctl daemon-reload
 
 		#------------------------------------------------------------------------------------------------
@@ -670,7 +680,7 @@ Currently installed: $G_DISTRO_NAME (ID: $G_DISTRO)"; then
 
 		fi
 		# - Entropy daemon: Use modern rng-tools5 on all devices where it has been proven to work, else haveged: https://github.com/MichaIng/DietPi/issues/2806
-		if [[ $G_HW_MODEL -lt 10 || $G_HW_MODEL =~ ^(11|14|15|16|24|29|42|58|68|72)$ ]]; then # RPi, Odroid XU4, RK3399, S922X, Odroid C4
+		if [[ $G_HW_MODEL -lt 10 || $G_HW_MODEL =~ ^(14|15|16|24|29|42|46|47|58|68|72)$ ]]; then # RPi, RK3399, S922X, Odroid C4
 
 			aPACKAGES_REQUIRED_INSTALL+=('rng-tools5')
 
@@ -693,7 +703,7 @@ Currently installed: $G_DISTRO_NAME (ID: $G_DISTRO)"; then
 		fi
 
 		# Install gdisk if root file system is on a GPT partition, used by DietPi-FS_partition_resize
-		[[ $(blkid -s PTTYPE -o value "$(lsblk -npo PKNAME "$(findmnt -no SOURCE /)")") == 'gpt' ]] && aPACKAGES_REQUIRED_INSTALL+=('gdisk')
+		[[ $(blkid -s PTTYPE -o value -c /dev/null "$(lsblk -npo PKNAME "$(findmnt -Ufnro SOURCE -M /)")") == 'gpt' ]] && aPACKAGES_REQUIRED_INSTALL+=('gdisk')
 
 		# Install file system tools required for file system resizing and fsck
 		while read -r line
@@ -711,7 +721,7 @@ Currently installed: $G_DISTRO_NAME (ID: $G_DISTRO)"; then
 				aPACKAGES_REQUIRED_INSTALL+=('btrfs-progs')
 			fi
 
-		done < <(blkid -s TYPE -o value | sort -u)
+		done < <(blkid -s TYPE -o value -c /dev/null | sort -u)
 
 		# Kernel/bootloader/firmware
 		# - We need to install those directly to allow G_AGA() autoremove possible older packages later: https://github.com/MichaIng/DietPi/issues/1285#issuecomment-354602594
@@ -738,6 +748,7 @@ Currently installed: $G_DISTRO_NAME (ID: $G_DISTRO)"; then
 
 			# Remove obsolete combined keyring
 			[[ -f '/etc/apt/trusted.gpg' ]] && G_EXEC rm /etc/apt/trusted.gpg
+			[[ -f '/etc/apt/trusted.gpg~' ]] && G_EXEC rm '/etc/apt/trusted.gpg~'
 
 		# - G_HW_MODEL specific required firmware/kernel/bootloader packages
 		#	Armbian grab currently installed packages
@@ -751,15 +762,14 @@ Currently installed: $G_DISTRO_NAME (ID: $G_DISTRO)"; then
 				'linux-dtb-'
 				'linux-u-boot-'
 				"linux-$DISTRO_TARGET_NAME-root-"
+				'armbian-bsp-cli-'
 
 			)
 
 			for i in "${apackages[@]}"
 			do
-
 				while read -r line
 				do
-
 					aPACKAGES_REQUIRED_INSTALL+=("$line")
 					G_DIETPI-NOTIFY 2 "Armbian package detected and added: $line"
 
@@ -779,6 +789,7 @@ Currently installed: $G_DISTRO_NAME (ID: $G_DISTRO)"; then
 			# Move Raspbian key to active place and remove obsolete combined keyring
 			[[ -f '/usr/share/keyrings/raspbian-archive-keyring.gpg' ]] && G_EXEC ln -sf /usr/share/keyrings/raspbian-archive-keyring.gpg /etc/apt/trusted.gpg.d/raspbian-archive-keyring.gpg
 			[[ -f '/etc/apt/trusted.gpg' ]] && G_EXEC rm /etc/apt/trusted.gpg
+			[[ -f '/etc/apt/trusted.gpg~' ]] && G_EXEC rm '/etc/apt/trusted.gpg~'
 
 		#	Odroid C4
 		elif (( $G_HW_MODEL == 16 )); then
@@ -791,6 +802,7 @@ Currently installed: $G_DISTRO_NAME (ID: $G_DISTRO)"; then
 
 			# Remove obsolete combined keyring
 			[[ -f '/etc/apt/trusted.gpg' ]] && G_EXEC rm /etc/apt/trusted.gpg
+			[[ -f '/etc/apt/trusted.gpg~' ]] && G_EXEC rm '/etc/apt/trusted.gpg~'
 
 		#	Odroid N2
 		elif (( $G_HW_MODEL == 15 )); then
@@ -802,6 +814,7 @@ Currently installed: $G_DISTRO_NAME (ID: $G_DISTRO)"; then
 
 			# Remove obsolete combined keyring
 			[[ -f '/etc/apt/trusted.gpg' ]] && G_EXEC rm /etc/apt/trusted.gpg
+			[[ -f '/etc/apt/trusted.gpg~' ]] && G_EXEC rm '/etc/apt/trusted.gpg~'
 
 		#	Odroid N1
 		elif (( $G_HW_MODEL == 14 )); then
@@ -810,6 +823,7 @@ Currently installed: $G_DISTRO_NAME (ID: $G_DISTRO)"; then
 
 			# Remove obsolete combined keyring
 			[[ -f '/etc/apt/trusted.gpg' ]] && G_EXEC rm /etc/apt/trusted.gpg
+			[[ -f '/etc/apt/trusted.gpg~' ]] && G_EXEC rm '/etc/apt/trusted.gpg~'
 
 		#	Odroid C2
 		elif (( $G_HW_MODEL == 12 )); then
@@ -818,6 +832,7 @@ Currently installed: $G_DISTRO_NAME (ID: $G_DISTRO)"; then
 
 			# Remove obsolete combined keyring
 			[[ -f '/etc/apt/trusted.gpg' ]] && G_EXEC rm /etc/apt/trusted.gpg
+			[[ -f '/etc/apt/trusted.gpg~' ]] && G_EXEC rm '/etc/apt/trusted.gpg~'
 
 		#	Odroid XU3/XU4/MC1/HC1/HC2
 		elif (( $G_HW_MODEL == 11 )); then
@@ -826,6 +841,7 @@ Currently installed: $G_DISTRO_NAME (ID: $G_DISTRO)"; then
 
 			# Remove obsolete combined keyring
 			[[ -f '/etc/apt/trusted.gpg' ]] && G_EXEC rm /etc/apt/trusted.gpg
+			[[ -f '/etc/apt/trusted.gpg~' ]] && G_EXEC rm '/etc/apt/trusted.gpg~'
 
 		#	ROCK Pi S (official Radxa Debian image)
 		elif (( $G_HW_MODEL == 73 )) && grep -q 'apt\.radxa\.com' /etc/apt/sources.list.d/*.list; then
@@ -835,6 +851,10 @@ Currently installed: $G_DISTRO_NAME (ID: $G_DISTRO)"; then
 			G_EXEC eval "curl -sSfL https://apt.radxa.com/${DISTRO_TARGET_NAME/bullseye/buster}-stable/public.key | gpg --dearmor -o /etc/apt/trusted.gpg.d/dietpi-radxa.gpg --yes"
 			G_EXEC eval "echo -e 'deb https://apt.radxa.com/${DISTRO_TARGET_NAME/bullseye/buster}-stable/ ${DISTRO_TARGET_NAME/bullseye/buster} main\n#deb https://apt.radxa.com/${DISTRO_TARGET_NAME/bullseye/buster}-testing/ ${DISTRO_TARGET_NAME/bullseye/buster} main' > /etc/apt/sources.list.d/dietpi-radxa.list"
 			G_AGUP
+
+			# Remove obsolete combined keyring
+			[[ -f '/etc/apt/trusted.gpg' ]] && G_EXEC rm /etc/apt/trusted.gpg
+			[[ -f '/etc/apt/trusted.gpg~' ]] && G_EXEC rm '/etc/apt/trusted.gpg~'
 
 			# NB: rockpis-dtbo is not required as it doubles the overlays that are already provided (among others) with the kernel package
 			G_AGI rockpis-rk-ubootimg linux-4.4-rock-pi-s-latest rockchip-overlay
@@ -938,6 +958,18 @@ Currently installed: $G_DISTRO_NAME (ID: $G_DISTRO)"; then
 		G_DIETPI-NOTIFY 3 "$G_PROGRAM_NAME" "[$SETUP_STEP] Applying DietPi tweaks and cleanup"; ((SETUP_STEP++))
 		#------------------------------------------------------------------------------------------------
 
+		# Remove old gcc-*-base packages, e.g. accumulated on Raspberry Pi OS images
+		if [[ $G_DISTRO == 5 ]]
+		then
+			mapfile -t apackages < <(dpkg --get-selections 'gcc-*-base' | mawk '$1!~/^gcc-8-/{print $1}')
+			[[ ${apackages[0]} ]] && G_AGP "${apackages[@]}"
+
+		elif [[ $G_DISTRO == 6 ]]
+		then
+			mapfile -t apackages < <(dpkg --get-selections 'gcc-*-base' | mawk '$1!~/^gcc-10-/{print $1}')
+			[[ ${apackages[0]} ]] && G_AGP "${apackages[@]}"
+		fi
+
 		# https://github.com/jirka-h/haveged/pull/7 https://github.com/MichaIng/DietPi/issues/3689#issuecomment-678322767
 		if [[ $G_DISTRO == 5 && $G_HW_ARCH == [23] && $G_HW_MODEL -gt 9 ]] && dpkg-query -s haveged &> /dev/null; then
 
@@ -953,7 +985,7 @@ Currently installed: $G_DISTRO_NAME (ID: $G_DISTRO)"; then
 
 		G_DIETPI-NOTIFY 2 'Deleting list of known users and groups, not required by DietPi'
 
-		getent passwd pi > /dev/null && userdel -f pi
+		getent passwd pi > /dev/null && userdel -f pi # Raspberry Pi OS
 		getent passwd test > /dev/null && userdel -f test # @fourdee
 		getent passwd odroid > /dev/null && userdel -f odroid
 		getent passwd rock64 > /dev/null && userdel -f rock64
@@ -1740,13 +1772,13 @@ _EOF_
 
 		G_DIETPI-NOTIFY 2 'Clearing items below tmpfs mount points'
 		G_EXEC mkdir -p /mnt/tmp_root
-		G_EXEC mount "$(findmnt -no SOURCE /)" /mnt/tmp_root
+		G_EXEC mount "$(findmnt -Ufnro SOURCE -M /)" /mnt/tmp_root
 		rm -vRf /mnt/tmp_root/{dev,proc,run,sys,tmp,var/log}/{,.??,.[^.]}*
 		G_EXEC umount /mnt/tmp_root
 		G_EXEC rmdir /mnt/tmp_root
 
 		G_DIETPI-NOTIFY 2 'Running general cleanup of misc files'
-		rm -Rfv /{root,home/*}/.{bash_history,nano_history,wget-hsts,cache,local,config,gnupg,viminfo,dbus,gconf,nano,vim,zshrc,oh-my-zsh}
+		rm -Rfv /{root,home/*}/.{bash_history,nano_history,wget-hsts,cache,local,config,gnupg,viminfo,dbus,gconf,nano,vim,zshrc,oh-my-zsh} /etc/*-
 
 		# Remove PREP script
 		[[ -f $FP_PREP_SCRIPT ]] && rm -v "$FP_PREP_SCRIPT"

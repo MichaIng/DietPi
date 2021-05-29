@@ -1,14 +1,14 @@
-<h1 align="center"><img src="https://raw.githubusercontent.com/MichaIng/DietPi-Website/master/images/dietpi-logo_180x180.png" alt="DietPi Logo"></h1>
+<h1 align="center"><img src="https://raw.githubusercontent.com/MichaIng/DietPi-Website/master/images/dietpi-logo_180x180.png" alt="DietPi logo" width="180" height="180" loading="lazy"></h1>
 <p align="center">
 	<b>Lightweight justice for your single-board computer!</b>
 	<br><br>
 	optimised • simplified • for everyone
 	<br><br>
-	<a href="https://dietpi.com/">Website</a> • <a href="https://dietpi.com/docs/">Documentation</a> • <a href="https://dietpi.com/#download">View all supported platforms</a> • <a href="https://dietpi.com/phpbb/">Forum</a>
+	<a href="https://dietpi.com/" target="_blank" rel="noopener">Website</a> • <a href="https://dietpi.com/docs/" target="_blank" rel="noopener">Documentation</a> • <a href="https://dietpi.com/#download" target="_blank" rel="noopener">View all supported platforms</a> • <a href="https://dietpi.com/phpbb/" target="_blank" rel="noopener">Forum</a>
 </p>
 <hr>
 <p align="center">
-	<strong>Ready to run</strong> optimised software choices with <a href="https://dietpi.com/dietpi-software.html"><strong>dietpi-software</strong></a>
+	<strong>Ready to run</strong> optimised software choices with <a href="https://dietpi.com/dietpi-software.html" target="_blank" rel="noopener"><strong>dietpi-software</strong></a>
 	<br>Feature-rich configuration tool for your device with <strong>dietpi-config</strong>.
 </p>
 <hr>
@@ -19,7 +19,7 @@ DietPi is an extremely lightweight Debian-based OS. It is highly optimised for m
 
 The **dietpi programs** use lightweight whiptail menus. You'll spend more time enjoying DietPi and applications you need and less time staring at the command line.
 
-Use `dietpi-software` to quick and easy install **Ready to Run** & **Optimised** applications for your system. DietPi will do all the necessary configurations, including starting the services. Few highlights: [Desktop Environments](https://dietpi.com/docs/dietpi_optimised_software/#desktops), [Remote Desktop access](https://dietpi.com/docs/dietpi_optimised_software/#remote-desktop-remote-access), [Media Systems and Players](https://dietpi.com/docs/dietpi_optimised_software/#media-systems), [BitTorrent & Downloading](https://dietpi.com/docs/dietpi_optimised_software/#bittorrent-download-tools), [Cloud and Backup](https://dietpi.com/docs/dietpi_optimised_software/#cloud-backup-systems), [Gaming](https://dietpi.com/docs/dietpi_optimised_software/#gaming-emulation), [Social & Search](https://dietpi.com/docs/dietpi_optimised_software/#social-search), [Camera & Surveillance](https://dietpi.com/docs/dietpi_optimised_software/#camera-surveillance), [Networking](https://dietpi.com/docs/dietpi_optimised_software/#advanced-networking), [System Stats & Management](https://dietpi.com/docs/dietpi_optimised_software/#system-stats-management), [Home Automation](https://dietpi.com/docs/dietpi_optimised_software/#home-automation), [Hardware & Voice Projects](https://dietpi.com/docs/dietpi_optimised_software/#hardware-projects), [web server stacks](https://dietpi.com/docs/dietpi_optimised_software/#web-development), [DNS Servers / Pi-hole](https://dietpi.com/docs/dietpi_optimised_software/#dns-servers), [File Servers](https://dietpi.com/docs/dietpi_optimised_software/#file-servers), [Cloud printing & Print 3D](https://dietpi.com/docs/dietpi_optimised_software/#printing-server) and much more.
+Use `dietpi-software` to quick and easy install **Ready to Run** & **Optimised** applications for your system. DietPi will do all the necessary configurations, including starting the services. Few highlights: [Desktop Environments](https://dietpi.com/docs/software/desktop/), [Remote Desktop Access](https://dietpi.com/docs/software/remote_desktop/), [Media Systems & Players](https://dietpi.com/docs/software/media/), [BitTorrent & Downloading](https://dietpi.com/docs/software/bittorrent/), [Cloud & Backup](https://dietpi.com/docs/software/cloud/), [Gaming & Emulation](https://dietpi.com/docs/software/gaming/), [Social & Search](https://dietpi.com/docs/software/social/), [Camera & Surveillance](https://dietpi.com/docs/software/camera/), [Networking](https://dietpi.com/docs/software/advanced_networking/), [System Stats & Management](https://dietpi.com/docs/software/system_stats/), [Home Automation](https://dietpi.com/docs/software/home_automation/), [Hardware & Voice Projects](https://dietpi.com/docs/software/hardware_projects/), [Webserver Stacks](https://dietpi.com/docs/software/webserver_stack/), [DNS Servers / Pi-hole](https://dietpi.com/docs/software/dns_servers/), [File Servers](https://dietpi.com/docs/software/file_servers/), [Printing](https://dietpi.com/docs/software/printing/) and much more.
 
 Use `dietpi-services` to control which installed software has higher or lower priority levels (nice, affinity, policy scheduler).
 
@@ -210,8 +210,9 @@ Links to hardware and software manufacturers, sources and build instructions use
 - [Sparky](https://github.com/sparkysbc?tab=repositories) [SBC](https://github.com/sparky-sbc/sparky-test)
 - [PINE64](https://www.pine64.org/)
 - [FriendlyARM](https://github.com/friendlyarm?tab=repositories)
-- [Rockchip](https://github.com/rockchip-linux/rk-rootfs-build)
 - [Armbian](https://github.com/armbian)
+- [curl](https://github.com/curl/curl)
+- [vmtouch](https://github.com/hoytech/vmtouch)
 - [X.Org-X-Server](https://www.x.org/archive//individual/)
 - [LXDE desktop](https://github.com/LXDE)
 - [LXQt desktop](https://github.com/lxqt)
@@ -253,11 +254,12 @@ Links to hardware and software manufacturers, sources and build instructions use
 - [Amiberry](https://github.com/midwan/amiberry)
 - [RetroPie Setup Script](https://github.com/petrockblog/RetroPie-Setup)
 - [OpenTyrian](https://bitbucket.org/opentyrian/opentyrian/wiki/Home)
-- [DietPiCam](https://github.com/silvanmelchior/RPi_Cam_Web_Interface)
+- [RPi Cam Control](https://github.com/silvanmelchior/RPi_Cam_Web_Interface)
 - [Deluge](https://dev.deluge-torrent.org/wiki/Development#SourceCode)
 - [Subsonic](https://sourceforge.net/projects/subsonic/)
 - [Airsonic](https://github.com/airsonic/airsonic)
 - [Logitech Media Server](https://github.com/Logitech/slimserver)
+- [Squeezelite](https://github.com/ralph-irving/squeezelite)
 - [Ampache](https://github.com/ampache/ampache)
 - [Plex Media Server](https://www.plex.tv/)
 - [FFmpeg](https://github.com/FFmpeg/FFmpeg)
@@ -279,7 +281,7 @@ Links to hardware and software manufacturers, sources and build instructions use
 - [Bazarr](https://github.com/morpheus65535/bazarr)
 - [PaperMC](https://github.com/PaperMC/Paper)
 - [Unbound](https://github.com/NLnetLabs/unbound)
-- [Bitwarden_RS](https://github.com/dani-garcia/bitwarden_rs)
+- [vaultwarden](https://github.com/dani-garcia/vaultwarden)
 - [Docker](https://github.com/docker/docker-ce)
 - [Portainer](https://github.com/portainer/portainer)
 - [Tor](https://gitlab.torproject.org/tpo/core/tor)
@@ -292,12 +294,13 @@ Links to hardware and software manufacturers, sources and build instructions use
 - [Go](https://github.com/golang/go)
 - [VSCodium](https://github.com/VSCodium/vscodium)
 - [WebIOPi](https://github.com/Freenove/WebIOPi)
+- [WiringPi](https://github.com/WiringPi/WiringPi)
+- [emonHub](https://github.com/openenergymonitor/emonhub)
+- [Firefox](https://hg.mozilla.org/mozilla-unified)
 
 ---
 
-<html>
-	<p align="center">
-		<img src="https://www.myvirtualserver.com/images/myvirtualserver_logo.png" alt="myVirtualserver Logo" width="200">
-		<br>DietPi's web hosting is powered by <a href="https://www.myvirtualserver.com">myVirtualserver</a>.
-	</p>
-</html>
+<p align="center">
+	<img src="https://www.myvirtualserver.com/images/myvirtualserver_logo.png" alt="myVirtualserver logo" width="200" height="44" loading="lazy">
+	<br>DietPi's web hosting is powered by <a href="https://www.myvirtualserver.com" target="_blank" rel="noopener">myVirtualserver</a>.
+</p>

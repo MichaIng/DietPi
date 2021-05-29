@@ -51,6 +51,8 @@ Available commands:
 	readonly FP_PROTONVPN='/etc/openvpn/protonvpn'
 	readonly FP_PROTONVPN_SERVERS="$FP_PROTONVPN/serverlist.txt"
 	readonly FP_PROTONVPN_TEMPLATE="$FP_PROTONVPN/template.ovpn"
+	readonly FP_IPVANISH='/etc/openvpn/ipvanish'
+	readonly FP_PIA='/etc/openvpn/pia'
 	readonly FP_CLIENT_OVPN='/etc/openvpn/client.ovpn'
 	readonly IFACE='tun0'
 	readonly CONNECTION_TIMEOUT=20 # seconds
@@ -60,12 +62,13 @@ Available commands:
 	VPN_PASSWORD=
 	VPN_SERVER=
 	PROTOCOL='udp'
+	VPN_PORT=1194
 	VPN_CONNECTED=0
 	WAN_IP=
 	RX='N/A'
 	TX='N/A'
 
-	Update_WAN_IP(){ WAN_IP=$(curl -sSfLm 3 https://ifconfig.co/json 2>&1 | mawk -F\" '/"ip"/{o=$4}/"country"/{c=$4}/"region_name"/{c=$4"-"c}END{if(c){o=o" "c}if(o){print o;exit}{print}}'); }
+	Update_WAN_IP(){ WAN_IP=$(curl -sSfLm 3 https://freegeoip.app/csv/ 2>&1 | mawk -F, '($5){r=$5" "}{print $1" "r$3}'); }
 
 	Check_Connected()
 	{
@@ -117,6 +120,28 @@ Available commands:
 			# Download .ovpn file template
 			G_EXEC curl -sSfL "https://raw.githubusercontent.com/$G_GITOWNER/DietPi/$G_GITBRANCH/.conf/dpv/protonvpn.template" -o $FP_PROTONVPN_TEMPLATE
 
+		elif [[ $VPN_PROVIDER == 'IPVanish' ]]
+		then
+			[[ $1 != '-f' && -d $FP_IPVANISH ]] && return 0
+			[[ $1 != '-f' ]] || G_WHIP_YESNO 'This will remove all IPVanish server files and perform a fresh download of IPVanish server configurations. Once completed, you will need to reselect a IPVanish server from the new list.\n\nDo you want to continue?' || return 0
+			G_EXEC curl -sSfLO 'https://www.ipvanish.com/software/configs/configs.zip'
+			VPN_SERVER=
+			[[ -d $FP_IPVANISH ]] && G_EXEC_DESC='Removing old IPVanish server configs' G_EXEC rm -R $FP_IPVANISH
+			G_EXEC mkdir -p $FP_IPVANISH
+			G_EXEC unzip -o configs.zip -d $FP_IPVANISH
+			G_EXEC_NOEXIT=1 G_EXEC rm configs.zip || :
+
+		elif [[ $VPN_PROVIDER == 'PIA' ]]
+		then
+			[[ $1 != '-f' && -d $FP_PIA ]] && return 0
+			[[ $1 != '-f' ]] || G_WHIP_YESNO 'This will remove all PIA server files and perform a fresh download of PIA server configurations. Once completed, you will need to reselect a PIA server from the new list.\n\nDo you want to continue?' || return 0
+			G_EXEC curl -sSfLO 'https://www.privateinternetaccess.com/openvpn/openvpn-strong.zip'
+			VPN_SERVER=
+			[[ -d $FP_PIA ]] && G_EXEC_DESC='Removing old PIA server configs' G_EXEC rm -R $FP_PIA
+			G_EXEC mkdir -p $FP_PIA
+			G_EXEC unzip -o openvpn-strong.zip -d $FP_PIA
+			G_EXEC_NOEXIT=1 G_EXEC rm openvpn-strong.zip || :
+
 		elif [[ $VPN_PROVIDER == 'Custom' ]]
 		then
 			G_WHIP_MSG "Please select your custom .ovpn client config file from the next file browser dialogue. It will be copied to $FP_CLIENT_OVPN and loaded from there."
@@ -125,8 +150,18 @@ Available commands:
 			G_EXEC cp "$(</tmp/.dietpi-explorer_selected_location)" $FP_CLIENT_OVPN
 			G_EXEC umask 0022
 			G_EXEC_NOEXIT=1 G_EXEC rm /tmp/.dietpi-explorer_selected_location
-			# Parse server IP/domain from client config, required for killswitch
+			# Parse server IP/domain, port and protocol from client config, required for killswitch
 			VPN_SERVER=$(mawk '$1=="remote" {print $2;exit}' $FP_CLIENT_OVPN)
+			# - Port can be 2nd argument of "remote" option or dedicated "port" option, else defaults to "1194".
+			VPN_PORT=$(mawk '$1=="remote" {print $3;exit}' $FP_CLIENT_OVPN)
+			[[ $VPN_PORT =~ ^[0-9]+$ ]] || VPN_PORT=$(mawk '$1=="port" {print $2;exit}' $FP_CLIENT_OVPN)
+			[[ $VPN_PORT =~ ^[0-9]+$ ]] || VPN_PORT=1194
+			# - Protocol can be 3rd argument of "remote" option (when port is given) or 2nd argument of "remote" option (when port is not given) or dedicated "proto" option, else defaults to "udp".
+			PROTOCOL=$(mawk '$1=="remote" {print $4;exit}' $FP_CLIENT_OVPN)
+			[[ $PROTOCOL == 'udp' || $PROTOCOL == 'tcp' ]] || PROTOCOL=$(mawk '$1=="remote" {print $3;exit}' $FP_CLIENT_OVPN)
+			# - When given via "proto" option, it is prefixed with "-client" (or "-server").
+			[[ $PROTOCOL == 'udp' || $PROTOCOL == 'tcp' ]] || { PROTOCOL=$(mawk '$1=="proto" {print $2;exit}' $FP_CLIENT_OVPN); PROTOCOL=${PROTOCOL%-*}; }
+			[[ $PROTOCOL == 'udp' || $PROTOCOL == 'tcp' ]] || PROTOCOL='udp'
 		fi
 	}
 
@@ -152,8 +187,8 @@ if [[ -f $FP_SETTINGS/killswitch.rules ]]
 then
 	iptables-save > $FP_SETTINGS/iptables.bak
 	. $FP_SETTINGS_DIETPI
-	[[ \$VPN_SERVER == *'udp'* ]] && VPN_SERVER=\${VPN_SERVER%.udp.ovpn} || VPN_SERVER=\${VPN_SERVER%.tcp.ovpn}
-	export VPN_SERVER
+	VPN_SERVER=\$(mawk '\$1=="remote" {print \$2;exit}' $FP_CLIENT_OVPN)
+	export VPN_SERVER PROTOCOL VPN_PORT
 	iptables-restore < <(envsubst < $FP_SETTINGS/killswitch.rules)
 fi
 _EOF_
@@ -177,6 +212,37 @@ _EOF_
 		# Assure files are generated with strict modes right form the start
 		G_EXEC umask 0077
 
+		G_DIETPI-NOTIFY 2 'Generating OVPN file, please wait...'
+		if [[ $VPN_PROVIDER == 'ProtonVPN' ]]
+		then
+			VPN_PORT=1194
+			export PROTOCOL VPN_SERVER
+			G_EXEC eval "envsubst < $FP_PROTONVPN_TEMPLATE > $FP_CLIENT_OVPN"
+
+		elif [[ $VPN_PROVIDER == 'NordVPN' ]]
+		then
+			VPN_PORT=1194
+			G_EXEC cp -f "$FP_NORDVPN/ovpn_$PROTOCOL/$VPN_SERVER" $FP_CLIENT_OVPN
+
+		elif [[ $VPN_PROVIDER == 'IPVanish' ]]
+		then
+			VPN_PORT=1194
+			G_EXEC cp -f "$FP_IPVANISH/$VPN_SERVER" $FP_CLIENT_OVPN
+			# Fix CA path, as it is in subdirectory now
+			G_CONFIG_INJECT 'ca[[:blank:]]' "ca $FP_IPVANISH/ca.ipvanish.com.crt" $FP_CLIENT_OVPN
+			# Set protocol and port: UDP port 443 is default, but TCP 1194 and UDP 1194 are supported as well.
+			G_CONFIG_INJECT 'proto[[:blank:]]' "proto $PROTOCOL" $FP_CLIENT_OVPN
+			G_EXEC sed -i '/^[[:blank:]]*remote[[:blank:]]/s/[[:blank:]][0-9][0-9]*$/ 1194/' $FP_CLIENT_OVPN
+
+		elif [[ $VPN_PROVIDER == 'PIA' ]]
+		then
+			G_EXEC cp -f "$FP_PIA/$VPN_SERVER" $FP_CLIENT_OVPN
+			# Set protocol and port: UDP on 1197 is default but TCP on 501 is supported as well.
+			G_CONFIG_INJECT 'proto[[:blank:]]' "proto $PROTOCOL" $FP_CLIENT_OVPN
+			[[ $PROTOCOL == 'udp' ]] && VPN_PORT=1197 || VPN_PORT=501
+			G_EXEC sed -i "/^[[:blank:]]*remote[[:blank:]]/s/[[:blank:]][0-9][0-9]*\$/ $VPN_PORT/" $FP_CLIENT_OVPN
+		fi
+
 		cat << _EOF_ > $FP_SETTINGS_OVPN
 ${VPN_USERNAME//\'/\'\\\'\'}
 ${VPN_PASSWORD//\'/\'\\\'\'}
@@ -187,18 +253,8 @@ VPN_USERNAME='${VPN_USERNAME//\'/\'\\\'\'}'
 VPN_PASSWORD='${VPN_PASSWORD//\'/\'\\\'\'}'
 VPN_SERVER='$VPN_SERVER'
 PROTOCOL='$PROTOCOL'
+VPN_PORT='$VPN_PORT'
 _EOF_
-		G_DIETPI-NOTIFY 2 'Generating OVPN file, please wait...'
-		if [[ $VPN_PROVIDER == 'ProtonVPN' ]]
-		then
-			export PROTOCOL VPN_SERVER
-			G_EXEC eval "envsubst < $FP_PROTONVPN_TEMPLATE > $FP_CLIENT_OVPN"
-
-		elif [[ $VPN_PROVIDER == 'NordVPN' ]]
-		then
-			G_EXEC cp -f "$FP_NORDVPN/ovpn_$PROTOCOL/$VPN_SERVER" $FP_CLIENT_OVPN
-		fi
-
 		G_EXEC umask 0022
 		G_EXEC chmod 0600 $FP_SETTINGS_OVPN $FP_SETTINGS_DIETPI $FP_CLIENT_OVPN
 		G_EXEC chown root:root $FP_SETTINGS_OVPN $FP_SETTINGS_DIETPI $FP_CLIENT_OVPN
@@ -248,6 +304,8 @@ _EOF_
 
 			'NordVPN' ': Connect to NordVPN'
 			'ProtonVPN' ': Connect to ProtonVPN'
+			'IPVanish' ': Connect to IPVanish'
+			'PIA' ': Connect to Private Internet Access'
 			'Custom' ': Use your own .ovpn file'
 		)
 		G_WHIP_DEFAULT_ITEM=$VPN_PROVIDER
@@ -257,11 +315,7 @@ _EOF_
 		VPN_PROVIDER=$provider
 	}
 
-	Menu_Exit()
-	{
-		G_WHIP_SIZE_X_MAX=50
-		G_WHIP_YESNO "Exit $G_PROGRAM_NAME?" && TARGETMENUID=-1 # Exit
-	}
+	Menu_Exit(){ G_WHIP_SIZE_X_MAX=50 G_WHIP_YESNO "Exit $G_PROGRAM_NAME?" && TARGETMENUID=-1; }
 
 	# TARGETMENUID=0
 	Menu_Main()
@@ -295,9 +349,9 @@ _EOF_
 		(( $VPN_CONNECTED )) && G_WHIP_MENU_ARRAY+=('Disconnect' '')
 		G_WHIP_MENU_ARRAY+=('Refresh' ': Update VPN connection status')
 		[[ $VPN_PROVIDER == 'Custom' ]] || G_WHIP_MENU_ARRAY+=('Update' ': Update VPN server list')
-		G_WHIP_MENU_ARRAY+=('Reset' ': Remove and reset ALL configs and settings')
 		G_WHIP_MENU_ARRAY+=(
 
+			'Reset' ': Remove and reset ALL configs and settings'
 			'' '●─ Advanced Options '
 			'Autostart' ": [$autostart_text]"
 			'Killswitch' ": [$killswitch_text]"
@@ -357,8 +411,8 @@ _EOF_
 -A OUTPUT -d 192.168.0.0/16 -j ACCEPT
 -A OUTPUT -d 172.16.0.0/12 -j ACCEPT
 -A OUTPUT -d 10.0.0.0/8 -j ACCEPT
--A OUTPUT -d $VPN_SERVER -p tcp --dport 1194 -j ACCEPT
--A OUTPUT -d $VPN_SERVER -p udp --dport 1194 -j ACCEPT
+-A OUTPUT -d $VPN_SERVER -p $PROTOCOL --dport $VPN_PORT -j ACCEPT
+-A INPUT -i lo -j ACCEPT
 -A INPUT -m conntrack --ctstate RELATED,ESTABLISHED -j ACCEPT
 COMMIT
 _EOF_
@@ -371,11 +425,11 @@ _EOF_
 			elif [[ $G_WHIP_RETURNED_VALUE == 'Username' ]]
 			then
 				G_WHIP_DEFAULT_ITEM=$VPN_USERNAME
-				G_WHIP_INPUTBOX 'Please enter your NordVPN or ProtonVPN username:\n\nNB: For ProtonVPN, use the OpenVPN credentials located at https://account.protonvpn.com/account' && VPN_USERNAME=$G_WHIP_RETURNED_VALUE
+				G_WHIP_INPUTBOX 'Please enter your VPN account username:\n\nNB: For ProtonVPN, use the OpenVPN credentials located at https://account.protonvpn.com/account' && VPN_USERNAME=$G_WHIP_RETURNED_VALUE
 
 			elif [[ $G_WHIP_RETURNED_VALUE == 'Password' ]]
 			then
-				G_WHIP_PASSWORD 'Please enter your NordVPN or ProtonVPN password:\n\nNB: For ProtonVPN, use the OpenVPN credentials located at https://account.protonvpn.com/account' && VPN_PASSWORD=$result
+				G_WHIP_PASSWORD 'Please enter your VPN account password:\n\nNB: For ProtonVPN, use the OpenVPN credentials located at https://account.protonvpn.com/account' && VPN_PASSWORD=$result
 				unset -v result
 
 			elif [[ $G_WHIP_RETURNED_VALUE == 'Disconnect' ]]
@@ -393,7 +447,7 @@ _EOF_
 					'TCP' ': Reliable'
 				)
 
-				G_WHIP_DEFAULT_ITEM=$PROTOCOL
+				G_WHIP_DEFAULT_ITEM=${PROTOCOL^^}
 				G_WHIP_MENU 'Please select the connection protocol type:' && PROTOCOL=${G_WHIP_RETURNED_VALUE,,}
 
 				# Select server
@@ -414,6 +468,20 @@ _EOF_
 						G_WHIP_MENU_ARRAY+=("$server" '')
 
 					done < "$FP_PROTONVPN_SERVERS"
+
+				elif [[ $VPN_PROVIDER == 'IPVanish' ]]
+				then
+					for i in "$FP_IPVANISH/"*.ovpn
+					do
+						G_WHIP_MENU_ARRAY+=("${i##*/}" '')
+					done
+
+				elif [[ $VPN_PROVIDER == 'PIA' ]]
+				then
+					for i in "$FP_PIA/"*.ovpn
+					do
+						G_WHIP_MENU_ARRAY+=("${i##*/}" '')
+					done
 				fi
 				G_WHIP_DEFAULT_ITEM=$VPN_SERVER
 				G_WHIP_MENU 'Please select a VPN server to use:' && VPN_SERVER=$G_WHIP_RETURNED_VALUE
@@ -430,7 +498,9 @@ _EOF_
 			then
 				G_WHIP_YESNO 'WARNING: This will turn off DietPi-VPN and will remove all configuration files.\n\nIf you want to use DietPi-VPN in the future, you will have to go through the setup again.'
 				G_EXEC systemctl disable --now dietpi-vpn
-				G_EXEC rm -Rf $FP_CLIENT_OVPN $FP_SETTINGS $FP_NORDVPN $FP_PROTONVPN
+				G_EXEC rm -Rf $FP_CLIENT_OVPN $FP_SETTINGS $FP_NORDVPN $FP_PROTONVPN $FP_IPVANISH $FP_PIA
+				# Offer to purge OpenVPN, if neither OpenVPN (server) nor PiVPN is installed
+				! grep -qE '^[[:blank:]]*aSOFTWARE_INSTALL_STATE\[(9|11)7\]=2' /boot/dietpi/.installed && G_WHIP_YESNO 'Do you want to have the underlying OpenVPN package removed as well?' && G_AGP openvpn
 				exit 0
 			fi
 		else
