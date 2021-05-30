@@ -1135,10 +1135,14 @@ _EOF_
 		unset -v aservices
 
 		# - Armbian specific
-		[[ -f '/boot/armbian_first_run.txt.template' ]] && rm -v /boot/armbian_first_run.txt.template
-		[[ -d '/var/lib/apt-xapian-index' ]] && rm  -Rv /var/lib/apt-xapian-index
+		[[ -d '/var/lib/apt-xapian-index' ]] && rm  -Rv /var/lib/apt-xapian-index # ??
 		umount /var/log.hdd 2> /dev/null
 		[[ -d '/var/log.hdd' ]] && rm -R /var/log.hdd
+		[[ -f '/etc/armbian-image-release' ]] && rm -v /etc/armbian-image-release
+		[[ -f '/boot/armbian_first_run.txt.template' ]] && rm -v /boot/armbian_first_run.txt.template
+		[[ -d '/etc/armbianmonitor' ]] && rm -R /etc/armbianmonitor
+		rm -vf /etc/{default,logrotate.d}/armbian*
+		[[ -f '/lib/firmware/bootsplash.armbian' ]] && rm -v /lib/firmware/bootsplash.armbian
 
 		# - OMV: https://github.com/MichaIng/DietPi/issues/2994
 		[[ -d '/etc/openmediavault' ]] && rm -vR /etc/openmediavault
