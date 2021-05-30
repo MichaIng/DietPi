@@ -761,8 +761,6 @@ Currently installed: $G_DISTRO_NAME (ID: $G_DISTRO)"; then
 				'linux-image-'
 				'linux-dtb-'
 				'linux-u-boot-'
-				"linux-$DISTRO_TARGET_NAME-root-"
-				'armbian-bsp-cli-'
 
 			)
 
@@ -777,6 +775,54 @@ Currently installed: $G_DISTRO_NAME (ID: $G_DISTRO)"; then
 
 			done
 			unset -v apackages
+
+			# Generate and cleanup uInitrd
+			local arch='arm'
+			(( $G_HW_ARCH == 3 )) && arch='arm64'
+			cat << _EOF_ > /etc/initramfs/post-update.d/99-dietpi-uboot
+#!/bin/sh
+echo 'update-initramfs: Converting to u-boot format' >&2
+mkimage -A $arch -O linux -T ramdisk -C gzip -n uInitrd -d \$2 /boot/uInitrd-\$1 > /dev/null
+ln -sf uInitrd-\$1 /boot/uInitrd > /dev/null 2>&1 || mv /boot/uInitrd-\$1 /boot/uInitrd
+exit 0
+_EOF_
+			cat << '_EOF_' > /etc/kernel/preinst.d/dietpi-initramfs_cleanup
+#!/bin/sh
+
+# skip if initramfs-tools is not installed
+[ -x /usr/sbin/update-initramfs ] || exit 0
+
+# passing the kernel version is required
+version="$1"
+if [ -z "$version" ]; then
+        echo "W: initramfs-tools: ${DPKG_MAINTSCRIPT_PACKAGE:-kernel package} did not pass a version number" >&2
+        exit 0
+fi
+
+# avoid running multiple times
+if [ -n "$DEB_MAINT_PARAMS" ]; then
+        eval set -- "$DEB_MAINT_PARAMS"
+        if [ -z "$1" ] || [ "$1" != 'upgrade' ]; then
+                exit 0
+        fi
+fi
+
+# loop through existing initramfs images
+for v in $(ls -1 /var/lib/initramfs-tools | linux-version sort --reverse) do
+        if ! linux-version compare $v eq $version; then
+                # try to delete delete old initrd images via update-initramfs
+                INITRAMFS_TOOLS_KERNEL_HOOK=y update-initramfs -d -k $v 2>/dev/null
+                # delete unused state files
+                find /var/lib/initramfs-tools -type f ! -name "$version" -printf 'Removing obsolete file %f\n' -delete
+                # delete unused initrd images
+                find /boot -name 'initrd.img*' -o -name 'uInitrd-*' ! -name "*$version" -printf 'Removing obsolete file %f\n' -delete
+        fi
+done
+
+exit 0
+_EOF_
+			# Remove obsolete components from Armbian list and connect via HTTPS
+			echo "deb https://apt.armbian.com/ $DISTRO_TARGET_NAME main" > /etc/apt/sources.list.d/armbian.list
 
 		#	RPi
 		elif (( $G_HW_MODEL < 10 )); then
@@ -883,7 +929,7 @@ Currently installed: $G_DISTRO_NAME (ID: $G_DISTRO)"; then
 
 		else
 
-			#	Usually no firmware should be necessary for VMs. If user manually passes though some USB device, user might need to install the firmware then.
+			# Usually no firmware should be necessary for VMs. If user manually passes though some USB device, user might need to install the firmware then.
 			if (( $G_HW_MODEL != 20 )); then
 
 				aPACKAGES_REQUIRED_INSTALL+=('firmware-realtek')		# Realtek Eth+WiFi+BT dongle firmware
@@ -1034,21 +1080,14 @@ Currently installed: $G_DISTRO_NAME (ID: $G_DISTRO)"; then
 		# - Stop, disable and remove not required 3rd party services
 		local aservices=(
 
-			# Armbian
-			'firstrun'
-			'resize2fs'
-			'log2ram'
-			'*armbian*'
-			'tinker-bluetooth'
-			'rk3399-bluetooth'
 			# Meveric
 			'cpu_governor'
 			# RPi
 			'sshswitch'
 			# Radxa
-			rockchip-adbd
-			rtl8723ds-btfw-load
-			install-module-hci-uart
+			'rockchip-adbd'
+			'rtl8723ds-btfw-load'
+			'install-module-hci-uart'
 
 		)
 
@@ -1074,18 +1113,18 @@ Currently installed: $G_DISTRO_NAME (ID: $G_DISTRO)"; then
 		# - Remove obsolete SysV service entries
 		aservices=(
 
-			fake-hwclock
-			haveged
-			hwclock.sh
-			networking
-			udev
-			cron
-			console-setup.sh
-			sudo
-			cpu_governor
-			keyboard-setup.sh
-			kmod
-			procps
+			'fake-hwclock'
+			'haveged'
+			'hwclock.sh'
+			'networking'
+			'udev'
+			'cron'
+			'console-setup.sh'
+			'sudo'
+			'cpu_governor'
+			'keyboard-setup.sh'
+			'kmod'
+			'procps'
 
 		)
 
@@ -1097,41 +1136,9 @@ Currently installed: $G_DISTRO_NAME (ID: $G_DISTRO)"; then
 
 		# - Armbian specific
 		[[ -f '/boot/armbian_first_run.txt.template' ]] && rm -v /boot/armbian_first_run.txt.template
-		[[ -f '/usr/bin/armbianmonitor' ]] && rm -v /usr/bin/armbianmonitor
-		[[ -d '/etc/armbianmonitor' ]] && rm -Rv /etc/armbianmonitor
 		[[ -d '/var/lib/apt-xapian-index' ]] && rm  -Rv /var/lib/apt-xapian-index
-		[[ -f '/usr/local/sbin/log2ram' ]] && rm -v /usr/local/sbin/log2ram
 		umount /var/log.hdd 2> /dev/null
 		[[ -d '/var/log.hdd' ]] && rm -R /var/log.hdd
-		rm -vf /etc/X11/xorg.conf.d/*armbian*
-		#rm -vf /etc/armbian* armbian-release # Required for kernel/bootloader package upgrade (initramfs postinst)
-		rm -vf /lib/systemd/system/*armbian*
-		rm -vf /etc/systemd/system/logrotate.service # Override to support Armbian zRAM log
-		rm -vf /etc/apt/apt.conf.d/*armbian*
-		rm -vf /etc/cron.*/*armbian*
-		#rm -vf /etc/default/*armbian* # Required for Armbian root package upgrade
-		rm -vf /etc/update-motd.d/*armbian*
-		rm -vf /etc/profile.d/*armbian*
-		rm -Rfv /etc/skel/.config
-		#[[ -d '/usr/lib/armbian' ]] && rm -vR /usr/lib/armbian # Required for Armbian root package upgrade
-		#[[ -d '/usr/share/armbian' ]] && rm -vR /usr/share/armbian # Required for Armbian root package upgrade
-		# Place DPKG exclude file, especially to skip cron jobs, which are doomed to fail and an unnecessary overhead + syslog spam on DietPi
-		[[ -f '/etc/armbian-release' ]] && cat << _EOF_ > /etc/dpkg/dpkg.cfg.d/dietpi-no_armbian
-# Exclude conflicting Armbian files
-path-exclude /lib/systemd/system/*armbian*
-path-exclude /etc/systemd/system/logrotate.service
-path-exclude /etc/apt/apt.conf.d/*armbian*
-path-exclude /etc/cron.*/*armbian*
-path-exclude /etc/skel/.config/htop/htoprc
-#path-exclude /etc/default/*armbian* # Required for Armbian root package upgrade
-path-exclude /etc/update-motd.d/*armbian*
-path-exclude /etc/profile.d/*armbian*
-#path-exclude /usr/lib/armbian # Required for Armbian root package upgrade
-#path-exclude /usr/share/armbian # Required for Armbian root package upgrade
-_EOF_
-		# Armbian auto-login
-		[[ -d '/etc/systemd/system/getty@.service.d' ]] && rm -Rv /etc/systemd/system/getty@.service.d
-		[[ -d '/etc/systemd/system/serial-getty@.service.d' ]] && rm -Rv /etc/systemd/system/serial-getty@.service.d
 
 		# - OMV: https://github.com/MichaIng/DietPi/issues/2994
 		[[ -d '/etc/openmediavault' ]] && rm -vR /etc/openmediavault
@@ -1268,7 +1275,6 @@ _EOF_'
 		# ifupdown starts the daemon outside of systemd, the enabled systemd unit just thows an error on boot due to missing dbus and with dbus might interfere with ifupdown
 		systemctl disable wpa_supplicant 2> /dev/null && G_DIETPI-NOTIFY 2 'Disabled non-required wpa_supplicant systemd unit'
 
-		[[ -L '/etc/network/interfaces' ]] && rm -v /etc/network/interfaces # Armbian symlink for bulky network-manager
 		G_EXEC_DESC='Configuring network interfaces'
 		G_EXEC eval 'cat << _EOF_ > /etc/network/interfaces
 # Location: /etc/network/interfaces
