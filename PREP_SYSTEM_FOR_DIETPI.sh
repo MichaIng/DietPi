@@ -776,6 +776,9 @@ Currently installed: $G_DISTRO_NAME (ID: $G_DISTRO)"; then
 			done
 			unset -v apackages
 
+			# Add u-boot-tools, required to convert initramfs images into u-boot format
+			aPACKAGES_REQUIRED_INSTALL+=('u-boot-tools')
+
 			# Generate and cleanup uInitrd
 			local arch='arm'
 			(( $G_HW_ARCH == 3 )) && arch='arm64'
