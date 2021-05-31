@@ -4446,9 +4446,19 @@ _EOF_
 			Download_Install "$INSTALL_URL_ADDRESS"
 			
 			# Reinstall: Stop service
-			[[ -f '/etc/systemd/system/adguardhome.service' ]] && systemctl stop AdGuardHome
+			[[ -f '/etc/systemd/system/adguardhome.service' ]] && systemctl stop adguardhome
 			
 			G_EXEC cp -r AdGuardHome /opt/
+			
+			# Unbound: Switch port to 5335 if it was installed before, else it got just configured within its install step above
+			if (( ${aSOFTWARE_INSTALL_STATE[182]} == 2 )) && grep -q '^[[:blank:]]*port:[[:blank:]][[:blank:]]*53$' /etc/unbound/unbound.conf.d/dietpi.conf
+			then
+				G_DIETPI-NOTIFY 2 'Configuring Unbound to work for AdGuard Home'
+				grep '^[[:blank:]]*nameserver[[:blank:]]' /etc/resolv.conf | grep -qvE '[[:blank:]]127.0.0.1(:53)?$' || echo 'nameserver 9.9.9.9' >> /etc/resolv.conf # Failsafe
+				G_CONFIG_INJECT 'port:[[:blank:]]' '	port: 5335' /etc/unbound/unbound.conf.d/dietpi.conf
+				G_CONFIG_INJECT 'interface:[[:blank:]]' '	interface: 127.0.0.1' /etc/unbound/unbound.conf.d/dietpi.conf
+				G_EXEC systemctl restart unbound
+			fi
 
 		fi
 
@@ -9039,6 +9049,20 @@ _EOF_
 				dps_index=$software_id Download_Install 'AdGuardHome.yaml' /opt/AdGuardHome/AdGuardHome.yaml
 				# shellcheck disable=SC2016
 				G_CONFIG_INJECT 'password:[[:blank:]]' "  password: $(htpasswd -bnBC 10 '' "$GLOBAL_PW" | tr -d ':\n' | sed 's/\$2y/\$2a/')" /opt/AdGuardHome/AdGuardHome.yaml
+			fi
+			
+			# Unbound: Configure AdGuard Home to use it
+			if (( ${aSOFTWARE_INSTALL_STATE[182]} > 0 ))
+			then
+				G_DIETPI-NOTIFY 2 'Configuring AdGuard Home to use Unbound'
+				if [[ ! -f '/opt/AdGuardHome/dietpi-unbound.conf' ]]
+				then
+					cat << '_EOF_' > /opt/AdGuardHome/dietpi-unbound.conf
+127.0.0.1:5335
+_EOF_
+					G_CONFIG_INJECT 'upstream_dns_file:[[:blank:]]' '  upstream_dns_file: /opt/AdGuardHome/dietpi-unbound.conf' /opt/AdGuardHome/AdGuardHome.yaml
+					systemctl -q is-active adguardhome && G_EXEC systemctl restart adguardhome
+				fi
 			fi
 
 			# Service
@@ -13645,6 +13669,16 @@ _EOF_
 			fi
 			[[ -f '/etc/pihole/setupVars.conf' ]] && grep -q '^[[:blank:]]*PIHOLE_DNS_1=127.0.0.1' /etc/pihole/setupVars.conf && G_CONFIG_INJECT 'PIHOLE_DNS_1=' 'PIHOLE_DNS_1=9.9.9.9' /etc/pihole/setupVars.conf
 
+			# AdGuard Home: Assure that it does not resolve via Unbound anymore
+			if [[ -f '/opt/AdGuardHome/dietpi-unbound.conf' ]]; then
+
+				G_WHIP_MSG 'AdGuard Home upstream DNS server has been changed back to default settings due to Unbound being uninstalled.'
+				G_CONFIG_INJECT 'upstream_dns_file:[[:blank:]]' '  upstream_dns_file: ""' /opt/AdGuardHome/AdGuardHome.yaml
+				[[ -f '/opt/AdGuardHome/dietpi-unbound.conf' ]]  && G_EXEC rm /opt/AdGuardHome/dietpi-unbound.conf
+				systemctl -q is-active adguardhome && G_EXEC systemctl restart adguardhome
+
+			fi
+
 			G_AGP unbound
 			[[ -d '/etc/unbound' ]] && rm -R /etc/unbound
 			[[ -d '/var/cache/unbound' ]] && rm -R /var/cache/unbound
@@ -14146,11 +14180,21 @@ _EOF_
 			# - Nginx
 			[[ -d '/etc/nginx/sites-dietpi' ]] && rm -f /etc/nginx/sites-dietpi/dietpi-pihole*
 
-			# Unbound
+			# Unbound - old configuration pre 7.1
 			if (( ${aSOFTWARE_INSTALL_STATE[182]} > 1 )) && [[ -f '/etc/unbound/unbound.conf.d/dietpi-pihole.conf' ]]
 			then
 				G_DIETPI-NOTIFY 2 'Reconfiguring Unbound to work on its own'
 				rm /etc/unbound/unbound.conf.d/dietpi-pihole.conf
+			fi
+			
+			# Unbound: Switch port to 53 if it is still installed
+			if (( ${aSOFTWARE_INSTALL_STATE[182]} == 2 )) && grep -q '^[[:blank:]]*port:[[:blank:]][[:blank:]]*5335$' /etc/unbound/unbound.conf.d/dietpi.conf
+			then
+				G_DIETPI-NOTIFY 2 'Reconfiguring Unbound to work on its own'
+				grep '^[[:blank:]]*nameserver[[:blank:]]' /etc/resolv.conf | grep -qvE '[[:blank:]]127.0.0.1(:53)?$' || echo 'nameserver 9.9.9.9' >> /etc/resolv.conf # Failsafe
+				G_CONFIG_INJECT 'port:[[:blank:]]' '	port: 53' /etc/unbound/unbound.conf.d/dietpi.conf
+				G_CONFIG_INJECT 'interface:[[:blank:]]' '	interface: 0.0.0.0' /etc/unbound/unbound.conf.d/dietpi.conf
+				G_EXEC systemctl restart unbound
 			fi
 		fi
 		
@@ -14166,7 +14210,16 @@ _EOF_
 			fi
 			[[ -d '/etc/systemd/system/adguardhome.service.d' ]] && rm -R /etc/systemd/system/adguardhome.service.d
 			[[ -d '/opt/AdGuardHome' ]] && rm -R /opt/AdGuardHome
-
+			
+			# Unbound: Switch port to 53 if it is still installed
+			if (( ${aSOFTWARE_INSTALL_STATE[182]} == 2 )) && grep -q '^[[:blank:]]*port:[[:blank:]][[:blank:]]*5335$' /etc/unbound/unbound.conf.d/dietpi.conf
+			then
+				G_DIETPI-NOTIFY 2 'Reconfiguring Unbound to work on its own'
+				grep '^[[:blank:]]*nameserver[[:blank:]]' /etc/resolv.conf | grep -qvE '[[:blank:]]127.0.0.1(:53)?$' || echo 'nameserver 9.9.9.9' >> /etc/resolv.conf # Failsafe
+				G_CONFIG_INJECT 'port:[[:blank:]]' '	port: 53' /etc/unbound/unbound.conf.d/dietpi.conf
+				G_CONFIG_INJECT 'interface:[[:blank:]]' '	interface: 0.0.0.0' /etc/unbound/unbound.conf.d/dietpi.conf
+				G_EXEC systemctl restart unbound
+			fi
 		fi
 
 		software_id=33 # Airsonic
