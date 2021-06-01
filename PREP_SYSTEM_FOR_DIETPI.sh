@@ -827,6 +827,10 @@ _EOF_
 			# Remove obsolete components from Armbian list and connect via HTTPS
 			echo "deb https://apt.armbian.com/ $DISTRO_TARGET_NAME main" > /etc/apt/sources.list.d/armbian.list
 
+			# Exclude doubled device tree files, shipped with the kernel package
+			echo 'path-exclude /usr/lib/linux-image-current-*' > /etc/dpkg/dpkg.cfg.d/01-dietpi-exclude_doubled_devicetrees
+			G_EXEC rm -Rf /usr/lib/linux-image-current-*
+
 		#	RPi
 		elif (( $G_HW_MODEL < 10 )); then
 
