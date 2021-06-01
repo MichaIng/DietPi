@@ -1263,7 +1263,6 @@ _EOF_'
 		G_DIETPI-NOTIFY 2 'Removing all rfkill soft blocks and the rfkill package'
 		rfkill unblock all
 		G_AGP rfkill
-		G_AGA
 		[[ -d '/var/lib/systemd/rfkill' ]] && rm -Rv /var/lib/systemd/rfkill
 
 		G_DIETPI-NOTIFY 2 'Configuring wlan/eth naming to be preferred for networked devices:'
@@ -1720,7 +1719,6 @@ _EOF_
 			G_EXEC_DESC='Detecting additional OS installed on system' G_EXEC os-prober
 			# Purge "os-prober" again
 			G_AGP os-prober
-			G_AGA
 
 			# - Native PC/EFI (assume x86_64 only possible)
 			if [[ -d '/boot/efi' ]] && dpkg-query -s 'grub-efi-amd64' &> /dev/null; then
