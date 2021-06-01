@@ -1058,6 +1058,7 @@ _EOF_
 
 		[[ -d '/selinux' ]] && rm -Rv /selinux
 		[[ -d '/var/cache/apparmor' ]] && rm -Rv /var/cache/apparmor
+		[[ -d '/usr/lib/firefox-esr' ]] && rm -Rv /usr/lib/firefox-esr # Armbian desktop images
 		rm -Rfv /var/lib/dhcp/{,.??,.[^.]}*
 		rm -Rfv /var/backups/{,.??,.[^.]}*
 
