@@ -861,7 +861,7 @@ Currently installed: $G_DISTRO_NAME (ID: $G_DISTRO)"; then
 		#	Odroid N1
 		elif (( $G_HW_MODEL == 14 )); then
 
-			G_AGI linux-image-arm64-odroid-n1 meveric-keyring
+			G_AGI linux-image-5.10-arm64-odroid-n1 meveric-keyring
 
 		#	Odroid C2
 		elif (( $G_HW_MODEL == 12 )); then
