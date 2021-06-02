@@ -1653,8 +1653,11 @@ _EOF_
 		# - Armbian special
 		if [[ -f '/boot/armbianEnv.txt' ]]; then
 
+			# Disable bootsplash logo, as we removed the file above: https://github.com/MichaIng/DietPi/issues/3932#issuecomment-852376681
+			G_CONFIG_INJECT 'bootlogo=' 'bootlogo=false' /boot/armbianEnv.txt
+
 			# Reset default kernel log verbosity, reduced to "1" on most Armbian images
-			sed -i '/verbosity=/c\verbosity=4' /boot/armbianEnv.txt
+			G_CONFIG_INJECT 'verbosity=' 'verbosity=4' /boot/armbianEnv.txt
 
 			# Disable Docker optimisations, since this has some performance drawbacks, enable on Docker install instead
 			G_CONFIG_INJECT 'docker_optimizations=' 'docker_optimizations=off' /boot/armbianEnv.txt
