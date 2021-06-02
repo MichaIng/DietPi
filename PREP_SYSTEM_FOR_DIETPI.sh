@@ -193,16 +193,16 @@ _EOF_
 	G_DIETPI-NOTIFY 2 "Detected distribution version: ${G_DISTRO_NAME^} (ID: $G_DISTRO)"
 
 	# Detect the hardware architecture of this operating system
-	G_HW_ARCH_NAME=$(uname -m)
 	if grep -q '^ID=raspbian' /etc/os-release; then
 
 		# Raspbian: Force ARMv6
-		G_RASPBIAN=1 G_HW_ARCH=1
+		G_RASPBIAN=1 G_HW_ARCH=1 G_HW_ARCH_NAME='armv6l'
 
 	else
 
 		# Debian: ARMv6 is not supported here
 		G_RASPBIAN=0
+		G_HW_ARCH_NAME=$(uname -m)
 		if [[ $G_HW_ARCH_NAME == 'armv7l' ]]; then
 
 			G_HW_ARCH=2
