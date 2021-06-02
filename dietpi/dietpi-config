@@ -1263,7 +1263,7 @@ NB: You now need to run "apt update" or "G_AGUP" once after each reboot, before 
 		local swap_location=$(sed -n '/^[[:blank:]]*AUTO_SETUP_SWAPFILE_LOCATION=/{s/^[^=]*=//p;q}' /boot/dietpi.txt)
 		local swap_size_text="$swap_size MB"
 		(( $swap_size )) || swap_size_text='Off'
-		G_WHIP_MENU_ARRAY=('Swapfile' ": [$swap_size_text | $swap_location]")
+		G_WHIP_MENU_ARRAY=('Swap file' ": [$swap_size_text | $swap_location]")
 
 		# APT cache
 		G_WHIP_MENU_ARRAY+=('APT cache' ': Manage APT cache/info storage')
@@ -1327,19 +1327,9 @@ NB: You now need to run "apt update" or "G_AGUP" once after each reboot, before 
 		G_WHIP_MENU_ARRAY+=('Serial/UART' ': Manage available devices')
 
 		# Bluetooth: Not for VM
-		if (( $G_HW_MODEL != 20 )); then
-
-			local bluetooth_state_text='On'
-			local bluetooth_state=1
-			if [[ -f '/etc/modprobe.d/dietpi-disable_bluetooth.conf' ]]; then
-
-				bluetooth_state=0
-				bluetooth_state_text='Off'
-
-			fi
-			G_WHIP_MENU_ARRAY+=('Bluetooth' ": [$bluetooth_state_text]")
-
-		fi
+		local bluetooth_state=1 bluetooth_state_text='On'
+		[[ -f '/etc/modprobe.d/dietpi-disable_bluetooth.conf' ]] && bluetooth_state=0 bluetooth_state_text='Off'
+		G_WHIP_MENU_ARRAY+=('Bluetooth' ": [$bluetooth_state_text]")
 
 		# RPi specific
 		if (( $G_HW_MODEL < 10 )); then
@@ -1355,6 +1345,12 @@ NB: You now need to run "apt update" or "G_AGUP" once after each reboot, before 
 			# - Allow commented/non-existent entry, using default value: https://github.com/raspberrypi/firmware/blob/d69aadedb7c146ba5d3b0b45a661e5669a9141c4/boot/overlays/README#L115-L116
 			rpi_i2c_baudrate=$(( ${rpi_i2c_baudrate:-100000} / 1000 ))
 			G_WHIP_MENU_ARRAY+=('I2C frequency' ": [$rpi_i2c_baudrate kHz]")
+
+			# SPI state
+			local rpi_spi_enabled=$(grep -cm1 '^[[:blank:]]*dtparam=spi=on' /boot/config.txt)
+			local rpi_spi_text='Off'
+			(( $rpi_spi_enabled )) && rpi_spi_text='On'
+			G_WHIP_MENU_ARRAY+=('SPI state' ": [$rpi_spi_text]")
 
 			# USB boot option: RPi3 only and not required for RPi3+: https://www.raspberrypi.org/documentation/hardware/raspberrypi/bootmodes/msd.md
 			if [[ $G_HW_MODEL == 3 && $G_HW_MODEL_NAME != *'+'* ]]; then
@@ -1372,14 +1368,10 @@ NB: You now need to run "apt update" or "G_AGUP" once after each reboot, before 
 
 			TARGETMENUID=3 # Return to this menu
 
-			if [[ $G_WHIP_RETURNED_VALUE == 'Swapfile' ]]; then
+			if [[ $G_WHIP_RETURNED_VALUE == 'Swap file' ]]; then
 
-				if G_WHIP_YESNO 'Swapfile control has been moved to DietPi-Drive_Manager, would you like to run the application now?
-\nOnce finished, exit to resume DietPi-Config'; then
-
-					/boot/dietpi/dietpi-drive_manager
-
-				fi
+				G_WHIP_YESNO 'Swapfile control has been moved to DietPi-Drive_Manager, would you like to run the application now?
+\nOnce finished, exit to resume DietPi-Config' && /boot/dietpi/dietpi-drive_manager
 
 			elif [[ $G_WHIP_RETURNED_VALUE == 'APT cache' ]]; then
 
@@ -1407,9 +1399,7 @@ Please choose whether your device have an active RTC or requires "fake-hwclock":
 					if [[ $G_WHIP_RETURNED_VALUE == 'Emulated' ]]; then
 
 						G_AGI fake-hwclock
-						# - Allow times in the past
-						G_CONFIG_INJECT 'FORCE=' 'FORCE=force' /etc/default/fake-hwclock
-						systemctl restart fake-hwclock
+						G_EXEC systemctl enable --now fake-hwclock
 
 					else
 
@@ -1482,15 +1472,7 @@ Further information: https://www.raspberrypi.org/documentation/hardware/raspberr
 
 			elif [[ $G_WHIP_RETURNED_VALUE == 'I2C state' ]]; then
 
-				if (( $rpi_i2c_enabled )); then
-
-					/boot/dietpi/func/dietpi-set_hardware i2c disable
-
-				else
-
-					/boot/dietpi/func/dietpi-set_hardware i2c enable
-
-				fi
+				/boot/dietpi/func/dietpi-set_hardware i2c $(( ! $rpi_i2c_enabled ))
 				REBOOT_REQUIRED=1
 
 			elif [[ $G_WHIP_RETURNED_VALUE == 'I2C frequency' ]]; then
@@ -1504,21 +1486,20 @@ Further information: https://www.raspberrypi.org/documentation/hardware/raspberr
 
 				fi
 
+			elif [[ $G_WHIP_RETURNED_VALUE == 'SPI state' ]]; then
+
+				/boot/dietpi/func/dietpi-set_hardware spi $(( ! $rpi_spi_enabled ))
+				REBOOT_REQUIRED=1
+
 			elif [[ $G_WHIP_RETURNED_VALUE == 'Serial/UART' ]]; then
 
 				TARGETMENUID=18
 
 			elif [[ $G_WHIP_RETURNED_VALUE == 'Bluetooth' ]]; then
 
-				if (( $bluetooth_state )); then
-
-					/boot/dietpi/func/dietpi-set_hardware bluetooth disable
-
-				else
-
-					/boot/dietpi/func/dietpi-set_hardware bluetooth enable
-
-				fi
+				/boot/dietpi/func/dietpi-set_hardware bluetooth $(( ! $bluetooth_state ))
+				# On RPi, when enabling onboard Bluetooth, a reboot is required to have the device tree changes taking effect.
+				(( $bluetooth_state || G_HW_MODEL > 9 )) || (( ! $G_HW_ONBOARD_WIFI )) || REBOOT_REQUIRED=1
 
 			elif [[ $G_WHIP_RETURNED_VALUE == 'USB boot support' && $rpi3_usb_boot_bit_enabled == 0 ]] &&
 				G_WHIP_YESNO 'The following will enable the RPi 3 to boot from USB mass storage devices. A hardware bit "17:3020000a", specific to the device is set to enable the feature.
@@ -1618,13 +1599,9 @@ Please reboot this system once, the HW bit which allows USB boot support will th
 			local temp_limit=$(sed -n '/^[[:blank:]]*temp_limit=/{s/^[^=]*=//p;q}' /boot/config.txt)
 			G_WHIP_MENU_ARRAY+=('ARM Temp Limit' ": [${temp_limit:=85}'c]")
 
-			if (( $G_HW_MODEL == 4 )); then
-
-				local arm_freq_min=$(sed -n '/^[[:blank:]]*arm_freq_min=/{s/^[^=]*=//p;q}' /boot/config.txt)
-				[[ $arm_freq_min ]] || { [[ $G_HW_MODEL == [01] ]] && arm_freq_min=700 || arm_freq_min=600; } # 700 on RPi1+Zero else 600
-				G_WHIP_MENU_ARRAY+=('ARM Idle Frequency' ": [$arm_freq_min MHz]") # https://github.com/MichaIng/DietPi/issues/3690
-
-			fi
+			local arm_freq_min=$(sed -n '/^[[:blank:]]*arm_freq_min=/{s/^[^=]*=//p;q}' /boot/config.txt)
+			[[ $arm_freq_min ]] || { [[ $G_HW_MODEL == [01] ]] && arm_freq_min=700 || arm_freq_min=600; } # 700 on RPi1+Zero else 600
+			G_WHIP_MENU_ARRAY+=('ARM Idle Frequency' ": [$arm_freq_min MHz]") # https://github.com/MichaIng/DietPi/issues/3690
 
 			local initial_turbo=$(sed -n '/^[[:blank:]]*initial_turbo=/{s/^[^=]*=//p;q}' /boot/config.txt)
 			G_WHIP_MENU_ARRAY+=('ARM Initial Turbo' ": [${initial_turbo:=0} seconds]")
@@ -2255,15 +2232,15 @@ Current setting: $user_frequency_min_text" && G_CONFIG_INJECT 'CONFIG_CPU_MIN_FR
 
 		# Drop Connections
 		G_DIETPI-NOTIFY 0 'Dropping connections, please wait...'
-		ifdown eth$ETH_DEV_INDEX --force &> /dev/null
-		ifdown wlan$WIFI_DEV_INDEX --force &> /dev/null
+		ifdown eth$ETH_DEV_INDEX --force 2> /dev/null
+		ifdown wlan$WIFI_DEV_INDEX --force 2> /dev/null
 
 		# Kill dhclient
-		killall dhclient &> /dev/null
+		killall dhclient 2> /dev/null
 
-		# Flush, not viable to handle this if change of IP, requires a detect of SSH loss/ip change, then exit script.
-		# - ip addr flush dev eth$ETH_DEV_INDEX &> /dev/null
-		# - ip addr flush dev wlan$WIFI_DEV_INDEX &> /dev/null
+		# Flush, not viable to handle this if change of IP, requires a detect of SSH loss/IP change, then exit script.
+		#ip a flush dev eth$ETH_DEV_INDEX &> /dev/null
+		#ip a flush dev wlan$WIFI_DEV_INDEX &> /dev/null
 
 		# Restart Networking
 		G_DIETPI-NOTIFY 2 'Restarting network, please wait...'
@@ -2276,7 +2253,7 @@ Current setting: $user_frequency_min_text" && G_CONFIG_INJECT 'CONFIG_CPU_MIN_FR
 		# Restart all services (required for hotspot)
 		/boot/dietpi/dietpi-services start
 
-		# - Add a little delay to ensure all network device data are updated (eg: SSID current takes a little longer)
+		# Add a little delay to ensure all network device data are updated (eg: SSID current takes a little longer)
 		G_DIETPI-NOTIFY 2 'Reloading networking data, please wait...'
 		sleep 2
 
@@ -2285,8 +2262,7 @@ Current setting: $user_frequency_min_text" && G_CONFIG_INJECT 'CONFIG_CPU_MIN_FR
 
 		G_DIETPI-NOTIFY 0 'Network restarted'
 
-		if [[ $ETH_MODE_TARGET == 0 && $ETH_IP != "$ETH_IP_STATIC" ]] ||
-			[[ $WIFI_MODE_TARGET == 0 && $WIFI_IP != "$WIFI_IP_STATIC" ]]; then
+		if [[ $ETH_MODE_TARGET == 0 && $ETH_IP != "$ETH_IP_STATIC" ]] || [[ $WIFI_MODE_TARGET == 0 && $WIFI_IP != "$WIFI_IP_STATIC" ]]; then
 
 			G_WHIP_MSG 'IP STATIC address change detected. A reboot is required to apply the new IP.\n\nPlease reboot the system.'
 			REBOOT_REQUIRED=1
@@ -2348,6 +2324,7 @@ Current setting: $user_frequency_min_text" && G_CONFIG_INJECT 'CONFIG_CPU_MIN_FR
 
 		fi
 
+		# Create interface config
 		cat << _EOF_ > /etc/network/interfaces
 # Location: /etc/network/interfaces
 # Please modify network settings via: dietpi-config
@@ -2355,10 +2332,6 @@ Current setting: $user_frequency_min_text" && G_CONFIG_INJECT 'CONFIG_CPU_MIN_FR
 
 # Drop-in configs
 source interfaces.d/*
-
-# Local
-auto lo
-iface lo inet loopback
 
 # Ethernet
 ${eth_enabled_text}allow-hotplug eth$ETH_DEV_INDEX
@@ -2370,6 +2343,24 @@ ${eth_dns_text}dns-nameservers $ETH_DNS
 
 # WiFi
 ${wifi_enabled_text}allow-hotplug wlan$WIFI_DEV_INDEX
+_EOF_
+		# WiFi Hotspot
+		if (( $WIFI_HOTSPOT )); then
+
+			cat << _EOF_ >> /etc/network/interfaces
+iface wlan$WIFI_DEV_INDEX inet static
+address 192.168.42.1
+netmask 255.255.255.0
+#gateway 192.168.0.1
+#dns-nameservers 9.9.9.9 149.112.112.112
+wireless-power off
+
+# IP tables
+up iptables-restore < /etc/iptables.ipv4.nat
+_EOF_
+		# WiFi client
+		else
+			cat << _EOF_ >> /etc/network/interfaces
 iface wlan$WIFI_DEV_INDEX inet $wifi_dhcp_static_text
 address $WIFI_IP
 netmask $WIFI_MASK
@@ -2378,38 +2369,19 @@ ${wifi_dns_text}dns-nameservers $WIFI_DNS
 wireless-power off
 wpa-conf /etc/wpa_supplicant/wpa_supplicant.conf
 _EOF_
-
-		# - Additional settings/changes, required for hotspot mode
-		if (( $WIFI_HOTSPOT )); then
-
-			# - Remove all entries below wlan, so we can recreate them.
-			sed -i '/allow-hotplug wlan/q0' /etc/network/interfaces
-
-			cat << _EOF_ >> /etc/network/interfaces
-iface wlan$WIFI_DEV_INDEX inet static
-address 192.168.42.1
-netmask 255.255.255.0
-#gateway 192.168.0.1
-wireless-power off
-#dns-nameservers 9.9.9.9 149.112.112.112
-
-# IP tables
-up iptables-restore < /etc/iptables.ipv4.nat
-_EOF_
-
 		fi
 
-		# - Remove wireless-power setting, if not supported by adapter/firmware
-		iwconfig wlan$WIFI_DEV_INDEX power off &> /dev/null || sed -i '/^wireless-power/d' /etc/network/interfaces
+		# Remove wireless-power setting, if not supported by adapter/firmware
+		iwconfig wlan$WIFI_DEV_INDEX power off 2> /dev/null || sed -i '/^wireless-power/d' /etc/network/interfaces
 
-		# - Update WiFi db/wpa_supplicant
+		# Update WiFi db/wpa_supplicant
 		/boot/dietpi/func/dietpi-wifidb 1
 
 		# Update Current Mode for network restart
 		ETH_MODE=$ETH_MODE_TARGET
 		WIFI_MODE=$WIFI_MODE_TARGET
 
-		# Restart net
+		# Restart network
 		Network_Restart
 
 	}
@@ -2863,8 +2835,8 @@ NB: All Ethernet connections will be dropped!' && Network_ApplyChanges
 					# Disabled
 					elif (( $ETH_DISABLED )); then
 
-						if G_WHIP_YESNO 'Ethernet must be enabled before settings can be changed.\n
-Would you like to enable Ethernet now?\n - (NOTICE) Connections may drop!'; then
+						if G_WHIP_YESNO 'Ethernet must be enabled before settings can be changed.
+\nWould you like to enable Ethernet now?\n - (NOTICE) Connections may drop!'; then
 
 							ETH_DISABLED=0
 							Network_ApplyChanges
@@ -2885,8 +2857,8 @@ Would you like to enable Ethernet now?\n - (NOTICE) Connections may drop!'; then
 					# Disabled | Offer chance to enable (also enables WiFi modules)
 					if (( $WIFI_DISABLED )); then
 
-						if G_WHIP_YESNO 'WiFi must be enabled before settings can be changed.\n
-Would you like to enable WiFi now?\n - NB: Connections may drop!'; then
+						if G_WHIP_YESNO 'WiFi must be enabled before settings can be changed.
+\nWould you like to enable WiFi now?\n - NB: Connections may drop!'; then
 
 							WIFI_DISABLED=0
 							Network_ApplyChanges
@@ -2896,8 +2868,8 @@ Would you like to enable WiFi now?\n - NB: Connections may drop!'; then
 					# No hardware found
 					elif (( ! $WIFI_HARDWARE )); then
 
-						if G_WHIP_YESNO 'No supported WiFi hardware was found.\n
-Would you like to disable WiFi?\n - NB: Connections may drop!'; then
+						if G_WHIP_YESNO 'No supported WiFi hardware was found.
+\nWould you like to disable WiFi?\n - NB: Connections may drop!'; then
 
 							WIFI_DISABLED=1
 							Network_ApplyChanges
@@ -3573,8 +3545,7 @@ Additional benchmarks:
 		local core_freq_value=$(sed -n '/core_freq=/{s/^[^=]*=//p;q}' /boot/config.txt)
 		(( $G_HW_MODEL == 4 )) || local sdram_freq_value=$(sed -n '/sdram_freq=/{s/^[^=]*=//p;q}' /boot/config.txt)
 
-		# Overclocking RPi1
-		# - Zero
+		# RPi Zero
 		if [[ $G_HW_MODEL_NAME == 'RPi Zero'* ]]; then
 
 			G_WHIP_MENU_ARRAY=('none' ': 1000 MHz ARM | 400 MHz core | 450 MHz SDRAM | 0 overvolt')
@@ -3591,6 +3562,7 @@ Additional benchmarks:
 
 			fi
 
+		# RPi 1
 		elif (( $G_HW_MODEL < 2 )); then
 
 			G_WHIP_MENU_ARRAY=(
@@ -3620,27 +3592,21 @@ Additional benchmarks:
 
 					'high')
 
-						if Warning_Overclocking; then
-
-							Reset_Overclocking
-							G_CONFIG_INJECT 'over_voltage=' 'over_voltage=4' /boot/config.txt
-							G_CONFIG_INJECT 'arm_freq=' 'arm_freq=900' /boot/config.txt
-							G_CONFIG_INJECT 'core_freq=' 'core_freq=500' /boot/config.txt
-
-						fi
+						Warning_Overclocking || return
+						Reset_Overclocking
+						G_CONFIG_INJECT 'over_voltage=' 'over_voltage=4' /boot/config.txt
+						G_CONFIG_INJECT 'arm_freq=' 'arm_freq=900' /boot/config.txt
+						G_CONFIG_INJECT 'core_freq=' 'core_freq=500' /boot/config.txt
 
 					;;
 
 					'extreme')
 
-						if Warning_Overclocking; then
-
-							Reset_Overclocking
-							G_CONFIG_INJECT 'over_voltage=' 'over_voltage=6' /boot/config.txt
-							G_CONFIG_INJECT 'arm_freq=' 'arm_freq=1025' /boot/config.txt
-							G_CONFIG_INJECT 'core_freq=' 'core_freq=500' /boot/config.txt
-
-						fi
+						Warning_Overclocking || return
+						Reset_Overclocking
+						G_CONFIG_INJECT 'over_voltage=' 'over_voltage=6' /boot/config.txt
+						G_CONFIG_INJECT 'arm_freq=' 'arm_freq=1025' /boot/config.txt
+						G_CONFIG_INJECT 'core_freq=' 'core_freq=500' /boot/config.txt
 
 					;;
 
@@ -3648,7 +3614,7 @@ Additional benchmarks:
 
 			fi
 
-		# Overclocking Pi2
+		# RPi 2
 		elif (( $G_HW_MODEL == 2 )); then
 
 			G_WHIP_MENU_ARRAY=(
@@ -3670,39 +3636,30 @@ Additional benchmarks:
 
 					'low')
 
-						if Warning_Overclocking; then
-
-							Reset_Overclocking
-							G_CONFIG_INJECT 'over_voltage=' 'over_voltage=3' /boot/config.txt
-							G_CONFIG_INJECT 'arm_freq=' 'arm_freq=1000' /boot/config.txt
-
-						fi
+						Warning_Overclocking || return
+						Reset_Overclocking
+						G_CONFIG_INJECT 'over_voltage=' 'over_voltage=3' /boot/config.txt
+						G_CONFIG_INJECT 'arm_freq=' 'arm_freq=1000' /boot/config.txt
 
 					;;
 
 					'med')
 
-						if Warning_Overclocking; then
-
-							Reset_Overclocking
-							G_CONFIG_INJECT 'over_voltage=' 'over_voltage=5' /boot/config.txt
-							G_CONFIG_INJECT 'arm_freq=' 'arm_freq=1000' /boot/config.txt
-							G_CONFIG_INJECT 'core_freq=' 'core_freq=500' /boot/config.txt
-
-						fi
+						Warning_Overclocking || return
+						Reset_Overclocking
+						G_CONFIG_INJECT 'over_voltage=' 'over_voltage=5' /boot/config.txt
+						G_CONFIG_INJECT 'arm_freq=' 'arm_freq=1000' /boot/config.txt
+						G_CONFIG_INJECT 'core_freq=' 'core_freq=500' /boot/config.txt
 
 					;;
 
 					'extreme')
 
-						if Warning_Overclocking; then
-
-							Reset_Overclocking
-							G_CONFIG_INJECT 'over_voltage=' 'over_voltage=6' /boot/config.txt
-							G_CONFIG_INJECT 'arm_freq=' 'arm_freq=1050' /boot/config.txt
-							G_CONFIG_INJECT 'core_freq=' 'core_freq=500' /boot/config.txt
-
-						fi
+						Warning_Overclocking || return
+						Reset_Overclocking
+						G_CONFIG_INJECT 'over_voltage=' 'over_voltage=6' /boot/config.txt
+						G_CONFIG_INJECT 'arm_freq=' 'arm_freq=1050' /boot/config.txt
+						G_CONFIG_INJECT 'core_freq=' 'core_freq=500' /boot/config.txt
 
 					;;
 
@@ -3710,13 +3667,20 @@ Additional benchmarks:
 
 			fi
 
-		# Overclocking Pi3
+		# RPi 3/3+
 		elif (( $G_HW_MODEL == 3 )); then
 
+			# RPi 3+
 			if [[ $G_HW_MODEL_NAME == *'+'* ]]; then
 
-				G_WHIP_MENU_ARRAY=('none' ': 1400 MHz ARM | 400 MHz core | 500 MHz SDRAM | 0 overvolt')
+				G_WHIP_MENU_ARRAY=(
 
+					'none' ': 1400 MHz ARM | 400 MHz core | 500 MHz SDRAM | 0 overvolt'
+					'safe' ': 1450 MHz ARM | 400 MHz core | 500 MHz SDRAM | 0 overvolt'
+
+				)
+
+			# RPi 3
 			else
 
 				G_WHIP_MENU_ARRAY=(
@@ -3738,42 +3702,40 @@ Additional benchmarks:
 
 					'none') Reset_Overclocking;;
 
+					'safe')
+
+						Reset_Overclocking
+						G_CONFIG_INJECT 'arm_freq=' 'arm_freq=1450' /boot/config.txt
+
+					;;
+
 					'low')
 
-						if Warning_Overclocking; then
-
-							Reset_Overclocking
-							G_CONFIG_INJECT 'over_voltage=' 'over_voltage=3' /boot/config.txt
-							G_CONFIG_INJECT 'arm_freq=' 'arm_freq=1300' /boot/config.txt
-							G_CONFIG_INJECT 'core_freq=' 'core_freq=400' /boot/config.txt
-
-						fi
+						Warning_Overclocking || return
+						Reset_Overclocking
+						G_CONFIG_INJECT 'over_voltage=' 'over_voltage=3' /boot/config.txt
+						G_CONFIG_INJECT 'arm_freq=' 'arm_freq=1300' /boot/config.txt
+						G_CONFIG_INJECT 'core_freq=' 'core_freq=400' /boot/config.txt
 
 					;;
 
 					'med')
 
-						if Warning_Overclocking; then
-
-							Reset_Overclocking
-							G_CONFIG_INJECT 'over_voltage=' 'over_voltage=4' /boot/config.txt
-							G_CONFIG_INJECT 'arm_freq=' 'arm_freq=1325' /boot/config.txt
-							G_CONFIG_INJECT 'core_freq=' 'core_freq=400' /boot/config.txt
-
-						fi
+						Warning_Overclocking || return
+						Reset_Overclocking
+						G_CONFIG_INJECT 'over_voltage=' 'over_voltage=4' /boot/config.txt
+						G_CONFIG_INJECT 'arm_freq=' 'arm_freq=1325' /boot/config.txt
+						G_CONFIG_INJECT 'core_freq=' 'core_freq=400' /boot/config.txt
 
 					;;
 
 					'high')
 
-						if Warning_Overclocking; then
-
-							Reset_Overclocking
-							G_CONFIG_INJECT 'over_voltage=' 'over_voltage=5' /boot/config.txt
-							G_CONFIG_INJECT 'arm_freq=' 'arm_freq=1350' /boot/config.txt
-							G_CONFIG_INJECT 'core_freq=' 'core_freq=400' /boot/config.txt
-
-						fi
+						Warning_Overclocking || return
+						Reset_Overclocking
+						G_CONFIG_INJECT 'over_voltage=' 'over_voltage=5' /boot/config.txt
+						G_CONFIG_INJECT 'arm_freq=' 'arm_freq=1350' /boot/config.txt
+						G_CONFIG_INJECT 'core_freq=' 'core_freq=400' /boot/config.txt
 
 					;;
 
@@ -3781,7 +3743,7 @@ Additional benchmarks:
 
 			fi
 
-		# Overclocking Pi4
+		# RPi 4
 		elif (( $G_HW_MODEL == 4 )); then
 
 			G_WHIP_MENU_ARRAY=(
@@ -3867,22 +3829,20 @@ Additional benchmarks:
 		else
 
 			local soundcard_current=$(sed -n '/^[[:blank:]]*CONFIG_SOUNDCARD=/{s/^[^=]*=//;p;q}' /boot/dietpi.txt)
-			G_WHIP_MENU_ARRAY=('Soundcard' ": [$soundcard_current]")
-			G_WHIP_MENU_ARRAY+=('DietPi-JustBoom' ': Launches EQ and MPD audio options menu')
+			local plug_current='Off'
+			[[ $soundcard_current =~ .*'-'(plug|eq)$ ]] && plug_current='On'
+			G_WHIP_MENU_ARRAY=(
+				'Sound card' ": [$soundcard_current]"
+				'Auto-conversion' ": [$plug_current] Automatic software conversions"
+				'DietPi-JustBoom' ': Launches EQ and MPD audio options menu'
+			)
 
 			# RPi, low power mode (PSU noise ripple reduction): https://github.com/MichaIng/DietPi/issues/757
 			if (( $G_HW_MODEL < 10 )); then
 
-				local psu_noise_reduction_enabled=0
-				local psu_noise_reduction_text='Off'
-				if grep -q '^[[:blank:]]*CONFIG_CPU_GOVERNOR=powersave' /boot/dietpi.txt &&
-					grep -q '^[[:blank:]]*AUTO_SETUP_HEADLESS=1' /boot/dietpi.txt; then
-
-					psu_noise_reduction_enabled=1
-					psu_noise_reduction_text='On'
-
-				fi
-				G_WHIP_MENU_ARRAY+=('PSU noise reduction' ": [$psu_noise_reduction_text]")
+				local psu_noise_reduction='Off'
+				grep -q '^[[:blank:]]*CONFIG_CPU_GOVERNOR=powersave' /boot/dietpi.txt && grep -q '^[[:blank:]]*AUTO_SETUP_HEADLESS=1' /boot/dietpi.txt && psu_noise_reduction='On'
+				G_WHIP_MENU_ARRAY+=('PSU noise reduction' ": [$psu_noise_reduction]")
 
 			fi
 
@@ -3890,7 +3850,7 @@ Additional benchmarks:
 
 		fi
 
-		G_WHIP_DEFAULT_ITEM='Soundcard'
+		G_WHIP_DEFAULT_ITEM='Sound card'
 		if G_WHIP_MENU 'Please select an option:'; then
 
 			TARGETMENUID=14 # Return to this menu
@@ -3898,8 +3858,7 @@ Additional benchmarks:
 			if [[ $G_WHIP_RETURNED_VALUE == 'Disable' ]]; then
 
 				/boot/dietpi/func/dietpi-set_hardware soundcard none
-				G_AGP alsa-utils firmware-intel-sound
-				G_AGA
+				G_AGP alsa-utils libasound2-plugin-equal firmware-intel-sound
 				[[ -f '/boot/dietpi/.installed' ]] && G_CONFIG_INJECT 'aSOFTWARE_INSTALL_STATE\[5\]=' 'aSOFTWARE_INSTALL_STATE[5]=0' /boot/dietpi/.installed
 
 			elif [[ $G_WHIP_RETURNED_VALUE == 'Enable' ]]; then
@@ -3909,10 +3868,10 @@ Additional benchmarks:
 
 			elif [[ $G_WHIP_RETURNED_VALUE == 'PSU noise reduction' ]]; then
 
-				if (( ! $psu_noise_reduction_enabled )); then
+				if [[ $psu_noise_reduction == 'Off' ]]; then
 
-					G_WHIP_YESNO 'PSU noise reduction:\n\nThis mode attempts to reduce power consumption on your SBC. In turn, this may reduce PSU inflicted noise, that may degrade audio output quality.\n
-The following will now be applied:\n - CPU governor = Powersave\n - Display output = Disabled\n\nDo you want to continue?' || return
+					G_WHIP_YESNO 'PSU noise reduction:\n\nThis mode attempts to reduce power consumption on your SBC. In turn, this may reduce PSU inflicted noise, that may degrade audio output quality.
+\nThe following will now be applied:\n - CPU governor = powersave\n - Display output = disabled\n\nDo you want to continue?' || return
 
 					G_CONFIG_INJECT 'CONFIG_CPU_GOVERNOR=' 'CONFIG_CPU_GOVERNOR=powersave' /boot/dietpi.txt
 					/boot/dietpi/func/dietpi-set_cpu
@@ -3921,24 +3880,25 @@ The following will now be applied:\n - CPU governor = Powersave\n - Display outp
 
 				else
 
-					G_CONFIG_INJECT 'CONFIG_CPU_GOVERNOR=' 'CONFIG_CPU_GOVERNOR=ondemand' /boot/dietpi.txt
+					G_CONFIG_INJECT 'CONFIG_CPU_GOVERNOR=' 'CONFIG_CPU_GOVERNOR=schedutil' /boot/dietpi.txt
 					/boot/dietpi/func/dietpi-set_cpu
 					/boot/dietpi/func/dietpi-set_hardware headless 0
 					tvservice -p
 
 				fi
 
-			elif [[ $G_WHIP_RETURNED_VALUE == 'Soundcard' ]]; then
+			elif [[ $G_WHIP_RETURNED_VALUE == 'Sound card' ]]; then
 
 				G_WHIP_MENU_ARRAY=()
 
-				#	RPi, all but rpi-bcm2835 disables
+				# RPi, all but rpi-bcm2835 disables
 				if (( $G_HW_MODEL < 10 )); then
 
 					G_WHIP_MENU_ARRAY+=('rpi-bcm2835-auto' ': Onboard: HDMI if plugged in, else 3.5mm')
 					G_WHIP_MENU_ARRAY+=('rpi-bcm2835-3.5mm' ': Onboard: 3.5mm forced output')
 					G_WHIP_MENU_ARRAY+=('rpi-bcm2835-hdmi' ': Onboard: HDMI forced output')
 					G_WHIP_MENU_ARRAY+=('allo-boss-dac-pcm512x-audio' ': Allo Boss DAC')
+					G_WHIP_MENU_ARRAY+=('allo-boss2-dac-audio' ': Allo Boss2 DAC')
 					G_WHIP_MENU_ARRAY+=('allo-digione' ': Allo DigiOne')
 					G_WHIP_MENU_ARRAY+=('allo-katana-dac-audio' ': Allo Katana DAC')
 					G_WHIP_MENU_ARRAY+=('allo-piano-dac-pcm512x-audio' ': Allo Piano DAC')
@@ -3968,37 +3928,26 @@ The following will now be applied:\n - CPU governor = Powersave\n - Display outp
 					G_WHIP_MENU_ARRAY+=('justboom-both' ': JustBoom: Simultaneous DAC and Digi usage')
 					G_WHIP_MENU_ARRAY+=('rpi-dac' ': Soekris DAM1021 (pcm1794a)')
 
-				# - C2
+				# C2
 				elif (( $G_HW_MODEL == 12 )); then
 
 					G_WHIP_MENU_ARRAY+=('default' ': HDMI')
 					G_WHIP_MENU_ARRAY+=('odroid-hifishield-plus' ': Odroid HiFi Shield 1/Plus')
 					G_WHIP_MENU_ARRAY+=('odroid-hifishield-2' ': Odroid HiFi Shield 2')
 
-				# - H2+ | OPi Zero
-				elif (( $G_HW_MODEL == 32 )); then
-
-					G_WHIP_MENU_ARRAY+=('default' ': 3.5mm Analogue')
-					G_WHIP_MENU_ARRAY+=('h2-hdmi' ': HDMI')
-
-				# - BPi Pro
-				elif (( $G_HW_MODEL == 51 )); then
-
-					G_WHIP_MENU_ARRAY+=('default' ': 3.5mm Analogue')
-
-				# - NanoPi M2/M3
-				elif (( $G_HW_MODEL == 61 || $G_HW_MODEL == 62 )); then
+				# NanoPi M2/M3
+				elif [[ $G_HW_MODEL == 6[12] ]]; then
 
 					G_WHIP_MENU_ARRAY+=('default' ': 3.5mm Analogue')
 					G_WHIP_MENU_ARRAY+=('s5pxx18-hdmi' ': HDMI')
 
-				# - H3
+				# H3
 				elif (( $G_HW_CPUID == 1 )); then
 
 					G_WHIP_MENU_ARRAY+=('default' ': HDMI')
 					G_WHIP_MENU_ARRAY+=('H3-analogue' ': 3.5mm Analogue')
 
-				# - Sparky
+				# Sparky SBC
 				elif (( $G_HW_MODEL == 70 )); then
 
 					G_WHIP_MENU_ARRAY+=('default' ': HDMI')
@@ -4008,7 +3957,7 @@ The following will now be applied:\n - CPU governor = Powersave\n - Display outp
 					G_WHIP_MENU_ARRAY+=('allo-cheapo-optical' ': Allo Cheapo (Optical output)')
 					G_WHIP_MENU_ARRAY+=('usb-dac-1.1' ': USB 1.1 Audio DAC (any)')
 
-				# - Asus TB
+				# ASUS TB
 				elif (( $G_HW_MODEL == 52 )); then
 
 					G_WHIP_MENU_ARRAY+=('default' ': HDMI')
@@ -4016,37 +3965,51 @@ The following will now be applied:\n - CPU governor = Powersave\n - Display outp
 
 				fi
 
-				# - Intel SST DSP
+				# Intel SST DSP
 				grep -qi 'vendor_id.*intel' /proc/cpuinfo && G_WHIP_MENU_ARRAY+=('intel-sst-dsp' ': Intel SST DSP firmware')
 
-				# - Global usb-dac, prefer at bottom of list
+				# Global usb-dac, prefer at bottom of list
 				G_WHIP_MENU_ARRAY+=('' '●─ Auto detection' 'usb-dac' ': USB Audio DAC (any)')
 
 				for i in {0..9}
 				do
 
-					if [[ -f /proc/asound/card$i/id ]]; then
+					[[ -f /proc/asound/card$i/id ]] || continue
 
-						for j in {0..9}
-						do
+					for j in {0..9}
+					do
 
-							if [[ -f /proc/asound/card$i/pcm${j}p/info ]]; then
+						[[ -f /proc/asound/card$i/pcm${j}p/info ]] || continue
 
-								local card_name=$(<"/proc/asound/card$i/id")
-								card_name+=$(sed -n '/^name:/{s/^name://p;q}' "/proc/asound/card$i/pcm${j}p/info")
-								G_WHIP_MENU_ARRAY+=("hw:$i,$j" ": $card_name")
+						local card_name=$(<"/proc/asound/card$i/id")
+						card_name+=$(sed -n '/^name:/{s/^name://p;q}' "/proc/asound/card$i/pcm${j}p/info")
+						G_WHIP_MENU_ARRAY+=("hw:$i,$j" ": $card_name")
 
-							fi
-
-						done
-
-					fi
+					done
 
 				done
 
 				G_WHIP_DEFAULT_ITEM=$soundcard_current
 				G_WHIP_MENU "Please select a soundcard\n - Current : $soundcard_current" || return
 				/boot/dietpi/func/dietpi-set_hardware soundcard "$G_WHIP_RETURNED_VALUE"
+
+				# RPi: Reboot required to apply device tree changes, which applies to all but auto-detected selections
+				(( $G_HW_MODEL > 9 )) || [[ $G_WHIP_RETURNED_VALUE == 'hw:'[0-9]','[0-9] || $G_WHIP_RETURNED_VALUE == 'usb-dac' ]] || REBOOT_REQUIRED=1
+
+			elif [[ $G_WHIP_RETURNED_VALUE == 'Auto-conversion' ]]; then
+
+				# Remove equalizer and plug suffix
+				local soundcard_target=${soundcard_current%-eq}
+				soundcard_target=${soundcard_target%-plug}
+				if [[ $plug_current == 'Off' ]]; then
+
+					/boot/dietpi/func/dietpi-set_hardware soundcard "$soundcard_target-plug"
+
+				else
+
+					/boot/dietpi/func/dietpi-set_hardware soundcard "$soundcard_target"
+
+				fi
 
 			elif [[ $G_WHIP_RETURNED_VALUE == 'DietPi-JustBoom' ]]; then
 
@@ -4214,19 +4177,6 @@ The following will now be applied:\n - CPU governor = Powersave\n - Display outp
 
 		TARGETMENUID=0
 
-		# No-IP Client
-		local noip_installed=0
-		local noip_menutext='[Not Installed] Install No-IP now'
-		if grep -q '^aSOFTWARE_INSTALL_STATE\[67\]=2' /boot/dietpi/.installed; then
-
-			noip_installed=1
-			noip_menutext='[Offline] Enter/Setup No-IP details'
-
-			# Check if No-IP is running (indicates login details are valid)
-			pgrep 'noip2' > /dev/null && noip_menutext='[Online] Change No-IP details'
-
-		fi
-
 		# APT mirror
 		local apt_mirror_current=$(grep -m1 '^[[:blank:]]*deb[[:blank:]]' /etc/apt/sources.list | mawk '{print $2}')
 		[[ $apt_mirror_current ]] || apt_mirror_current='Unknown, no string from scrape'
@@ -4263,8 +4213,8 @@ The following will now be applied:\n - CPU governor = Powersave\n - Display outp
 			'G_CHECK_URL Timeout' ": [$check_url_timeout Seconds]"
 			'G_CHECK_URL Attempts' ": [$check_url_attempts Tries]"
 			'' '●─ Additional Options '
-			'Network Drives' ': Mount/control networked storage'
-			'No-IP' ": $noip_menutext"
+			'Network Drives' ': Mount/control network storage'
+			'Dynamic DNS' ': Manage domains for your dynamic IP'
 
 		)
 
@@ -4431,28 +4381,7 @@ NB: If you need to use *.pool.ntp.org servers, enter the base domain only. The s
 
 				;;
 
-				'No-IP')
-
-					# Installed?
-					if (( ! $noip_installed )); then
-
-						G_WHIP_YESNO 'No-IP Client is not installed, would you like to install it now?\n
-- No-IP will allow you to use a fixed web address, regardless of your internet IP.
-  Eg: MySuperDooperWebsite.noip2.biz would always point to this device!' && /boot/dietpi/dietpi-software install 67
-
-					else
-
-						G_TERM_CLEAR
-						G_EXEC systemctl stop noip2
-						# Failsafe: Directory required for "noip2 -C" to create the config file there
-						mkdir -p /usr/local/etc
-						noip2 -C
-						read -rp 'Press any key to continue...'
-						G_EXEC systemctl restart noip2
-
-					fi
-
-				;;
+				'Dynamic DNS') /boot/dietpi/dietpi-ddns;;
 
 			esac
 
@@ -4707,8 +4636,8 @@ _EOF_
 
 			else
 
-				G_WHIP_MSG "[FAILED] Unknown menu ID $TARGETMENUID, reverting to DietPi-Config main menu\n
-This error should never show up. Please try to reproduce it. If it reappears, you found a coding bug.
+				G_WHIP_MSG "[FAILED] Unknown menu ID $TARGETMENUID, reverting to DietPi-Config main menu
+\nThis error should never show up. Please try to reproduce it. If it reappears, you found a coding bug.
 Please report it to: https://github.com/MichaIng/DietPi/issues"
 				TARGETMENUID=0
 

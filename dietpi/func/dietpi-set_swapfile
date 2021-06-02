@@ -38,16 +38,17 @@
 		SWAP_SIZE=$(mawk '$2=="file" {printf "%.0f",$3/1024;exit}' /proc/swaps) && disable_error=1 G_CHECK_VALIDINT "$SWAP_SIZE" || SWAP_SIZE=1
 
 	fi
-	# - Path: Store current saved (only absolute paths to exclude zram) and active paths for later use
-	SWAP_PATH_CURRENT=$(sed -n '/^[[:blank:]]*AUTO_SETUP_SWAPFILE_LOCATION=\//{s/^[^=]*=//p;q}' /boot/dietpi.txt)
+	# - Path: Store dietpi.txt entry (excluding zram-swap) and active swap files for disabling and removal before creating a new swap space
+	SWAP_PATH=$(sed -n '/^[[:blank:]]*AUTO_SETUP_SWAPFILE_LOCATION=/{s/^[^=]*=//p;q}' /boot/dietpi.txt)
 	read -ra SWAP_FILES_ACTIVE < <(mawk '$2=="file" {print $1}' /proc/swaps)
-	if [[ $2 == '/'* || $2 == 'zram' ]]; then
+	[[ $SWAP_PATH == '/'* && $SWAP_PATH != '/dev/zram0' ]] && SWAP_FILES_ACTIVE+=("$SWAP_PATH")
+	if [[ $2 == '/'* || $2 == 'zram' || $2 == 'zram0' ]]; then
 
 		SWAP_PATH=$2
 
-	elif SWAP_PATH=$SWAP_PATH_CURRENT; [[ $SWAP_PATH != '/'* && $SWAP_PATH != 'zram' ]]; then
+	elif [[ $SWAP_PATH != '/'* && $SWAP_PATH != 'zram' && $SWAP_PATH != 'zram0' ]]; then
 
-		SWAP_PATH=$(mawk '$2=="file" {print $1;exit}' /proc/swaps) && [[ $SWAP_PATH == '/'* || $SWAP_PATH == 'zram' ]] || SWAP_PATH='/var/swap'
+		SWAP_PATH=$(mawk '$2=="file" {print $1;exit}' /proc/swaps) && [[ $SWAP_PATH == '/'* || $SWAP_PATH == 'zram' || $SWAP_PATH == 'zram0' ]] || SWAP_PATH='/var/swap'
 
 	fi
 
@@ -79,7 +80,7 @@
 
 		G_DIETPI-NOTIFY 2 'Disabling and deleting all existing swap files'
 		G_EXEC_NOHALT=1 G_EXEC swapoff -a
-		rm -fv "$SWAP_PATH_CURRENT" "${SWAP_FILES_ACTIVE[@]}"
+		rm -fv "${SWAP_FILES_ACTIVE[@]}"
 		sed -i '/[[:blank:]]swap[[:blank:]]/d' /etc/fstab
 		# zram-swap
 		[[ -f '/etc/modules-load.d/dietpi-zram-swap.conf' ]] && rm -v /etc/modules-load.d/dietpi-zram-swap.conf
@@ -97,14 +98,15 @@
 		# zram
 		if [[ $SWAP_FS == 'zram' ]]; then
 
-			[[ -b '/dev/zram0' ]] || G_EXEC modprobe zram
+			[[ -b $SWAP_PATH ]] || G_EXEC modprobe zram
 			G_EXEC eval 'echo 1 > /sys/block/zram0/reset'
 			G_EXEC eval "echo '${SWAP_SIZE}M' > /sys/block/zram0/disksize"
+			G_EXEC chmod 0600 "$SWAP_PATH"
 			G_EXEC mkswap "$SWAP_PATH"
 			G_EXEC swapon "$SWAP_PATH"
 			# Make persistent, proceed with failure in case of R/O rootfs
 			G_EXEC_NOHALT=1 G_EXEC eval "echo 'zram' > /etc/modules-load.d/dietpi-zram-swap.conf" || return 1
-			G_EXEC_NOHALT=1 G_EXEC eval "echo 'SUBSYSTEM==\"block\", KERNEL==\"zram0\", ACTION==\"add\", ATTR{disksize}=\"${SWAP_SIZE}M\", RUN+=\"/sbin/mkswap /dev/zram0\", RUN+=\"/sbin/swapon /dev/zram0\"' > /etc/udev/rules.d/98-dietpi-zram-swap.rules" || return 1
+			G_EXEC_NOHALT=1 G_EXEC eval "echo 'SUBSYSTEM==\"block\", KERNEL==\"zram0\", ACTION==\"add\", ATTR{disksize}=\"${SWAP_SIZE}M\", RUN+=\"chmod 0600 /dev/zram0\", RUN+=\"/sbin/mkswap /dev/zram0\", RUN+=\"/sbin/swapon /dev/zram0\"' > /etc/udev/rules.d/98-dietpi-zram-swap.rules" || return 1
 			G_EXEC_NOHALT=1 G_EXEC eval "echo 'swappiness=50' > /etc/sysctl.d/98-dietpi-zram-swap.conf" || return 1
 			return 0
 
@@ -112,6 +114,7 @@
 		elif ! G_EXEC_NOHALT=1 G_EXEC fallocate -l "${SWAP_SIZE}M" "$SWAP_PATH" || ! G_EXEC_NOHALT=1 G_EXEC mkswap "$SWAP_PATH" || ! G_EXEC_NOHALT=1 G_EXEC swapon "$SWAP_PATH"; then
 
 			G_DIETPI-NOTIFY 2 'Swap file generation via "fallocate" failed, falling back to "dd"...'
+			G_EXEC swapoff -a
 			G_EXEC dd if=/dev/zero of="$SWAP_PATH" bs=1M count=$SWAP_SIZE
 			G_EXEC mkswap "$SWAP_PATH"
 			G_EXEC swapon "$SWAP_PATH"
@@ -119,7 +122,7 @@
 		fi
 
 		# Harden permissions, allow to fail on filesystems without UNIX permission support
-		G_EXEC_NOHALT=1 G_EXEC chmod 600 "$SWAP_PATH" 
+		G_EXEC_NOHALT=1 G_EXEC chmod 0600 "$SWAP_PATH"
 		# Make persistent, proceed with failure in case of R/O rootfs
 		G_EXEC_NOHALT=1 G_EXEC eval "echo '$SWAP_PATH none swap sw' >> /etc/fstab" || return 1
 
@@ -142,7 +145,7 @@
 	Swap_Disable
 
 	# zram-swap
-	if [[ $SWAP_PATH == 'zram' ]]; then
+	if [[ $SWAP_PATH == 'zram' || $SWAP_PATH == 'zram0' || $SWAP_PATH == '/dev/zram0' ]]; then
 
 		(( $SWAP_SIZE == 1 )) && SWAP_SIZE=$(( $(free -m | mawk '/^Mem:/{print $2;exit}') / 2 )) # Auto size
 		SWAP_PATH='/dev/zram0' SWAP_FS='zram'
@@ -163,7 +166,7 @@
 			fi
 
 		fi
-		SWAP_DIR="${SWAP_PATH%/*}/" SWAP_FS=$(findmnt -no FSTYPE -T "$SWAP_DIR")
+		SWAP_DIR="${SWAP_PATH%/*}/" SWAP_FS=$(findmnt -Ufnro FSTYPE -T "$SWAP_DIR")
 
 	fi
 
