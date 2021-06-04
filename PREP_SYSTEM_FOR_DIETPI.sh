@@ -680,7 +680,7 @@ Currently installed: $G_DISTRO_NAME (ID: $G_DISTRO)"; then
 
 		fi
 		# - Entropy daemon: Use modern rng-tools5 on all devices where it has been proven to work, else haveged: https://github.com/MichaIng/DietPi/issues/2806
-		if [[ $G_HW_MODEL -lt 10 || $G_HW_MODEL =~ ^(14|15|16|24|29|42|46|58|68|72)$ ]]; then # RPi, RK3399, S922X, Odroid C4
+		if [[ $G_HW_MODEL -lt 10 || $G_HW_MODEL =~ ^(14|15|16|24|29|42|46|47|58|68|72)$ ]]; then # RPi, RK3399, S922X, Odroid C4
 
 			aPACKAGES_REQUIRED_INSTALL+=('rng-tools5')
 
@@ -703,7 +703,7 @@ Currently installed: $G_DISTRO_NAME (ID: $G_DISTRO)"; then
 		fi
 
 		# Install gdisk if root file system is on a GPT partition, used by DietPi-FS_partition_resize
-		[[ $(blkid -s PTTYPE -o value "$(lsblk -npo PKNAME "$(findmnt -no SOURCE /)")") == 'gpt' ]] && aPACKAGES_REQUIRED_INSTALL+=('gdisk')
+		[[ $(blkid -s PTTYPE -o value -c /dev/null "$(lsblk -npo PKNAME "$(findmnt -Ufnro SOURCE -M /)")") == 'gpt' ]] && aPACKAGES_REQUIRED_INSTALL+=('gdisk')
 
 		# Install file system tools required for file system resizing and fsck
 		while read -r line
@@ -721,7 +721,7 @@ Currently installed: $G_DISTRO_NAME (ID: $G_DISTRO)"; then
 				aPACKAGES_REQUIRED_INSTALL+=('btrfs-progs')
 			fi
 
-		done < <(blkid -s TYPE -o value | sort -u)
+		done < <(blkid -s TYPE -o value -c /dev/null | sort -u)
 
 		# Kernel/bootloader/firmware
 		# - We need to install those directly to allow G_AGA() autoremove possible older packages later: https://github.com/MichaIng/DietPi/issues/1285#issuecomment-354602594
@@ -762,6 +762,7 @@ Currently installed: $G_DISTRO_NAME (ID: $G_DISTRO)"; then
 				'linux-dtb-'
 				'linux-u-boot-'
 				"linux-$DISTRO_TARGET_NAME-root-"
+				'armbian-bsp-cli-'
 
 			)
 
@@ -957,6 +958,18 @@ Currently installed: $G_DISTRO_NAME (ID: $G_DISTRO)"; then
 		G_DIETPI-NOTIFY 3 "$G_PROGRAM_NAME" "[$SETUP_STEP] Applying DietPi tweaks and cleanup"; ((SETUP_STEP++))
 		#------------------------------------------------------------------------------------------------
 
+		# Remove old gcc-*-base packages, e.g. accumulated on Raspberry Pi OS images
+		if [[ $G_DISTRO == 5 ]]
+		then
+			mapfile -t apackages < <(dpkg --get-selections 'gcc-*-base' | mawk '$1!~/^gcc-8-/{print $1}')
+			[[ ${apackages[0]} ]] && G_AGP "${apackages[@]}"
+
+		elif [[ $G_DISTRO == 6 ]]
+		then
+			mapfile -t apackages < <(dpkg --get-selections 'gcc-*-base' | mawk '$1!~/^gcc-10-/{print $1}')
+			[[ ${apackages[0]} ]] && G_AGP "${apackages[@]}"
+		fi
+
 		# https://github.com/jirka-h/haveged/pull/7 https://github.com/MichaIng/DietPi/issues/3689#issuecomment-678322767
 		if [[ $G_DISTRO == 5 && $G_HW_ARCH == [23] && $G_HW_MODEL -gt 9 ]] && dpkg-query -s haveged &> /dev/null; then
 
@@ -972,7 +985,7 @@ Currently installed: $G_DISTRO_NAME (ID: $G_DISTRO)"; then
 
 		G_DIETPI-NOTIFY 2 'Deleting list of known users and groups, not required by DietPi'
 
-		getent passwd pi > /dev/null && userdel -f pi
+		getent passwd pi > /dev/null && userdel -f pi # Raspberry Pi OS
 		getent passwd test > /dev/null && userdel -f test # @fourdee
 		getent passwd odroid > /dev/null && userdel -f odroid
 		getent passwd rock64 > /dev/null && userdel -f rock64
@@ -1759,13 +1772,13 @@ _EOF_
 
 		G_DIETPI-NOTIFY 2 'Clearing items below tmpfs mount points'
 		G_EXEC mkdir -p /mnt/tmp_root
-		G_EXEC mount "$(findmnt -no SOURCE /)" /mnt/tmp_root
+		G_EXEC mount "$(findmnt -Ufnro SOURCE -M /)" /mnt/tmp_root
 		rm -vRf /mnt/tmp_root/{dev,proc,run,sys,tmp,var/log}/{,.??,.[^.]}*
 		G_EXEC umount /mnt/tmp_root
 		G_EXEC rmdir /mnt/tmp_root
 
 		G_DIETPI-NOTIFY 2 'Running general cleanup of misc files'
-		rm -Rfv /{root,home/*}/.{bash_history,nano_history,wget-hsts,cache,local,config,gnupg,viminfo,dbus,gconf,nano,vim,zshrc,oh-my-zsh}
+		rm -Rfv /{root,home/*}/.{bash_history,nano_history,wget-hsts,cache,local,config,gnupg,viminfo,dbus,gconf,nano,vim,zshrc,oh-my-zsh} /etc/*-
 
 		# Remove PREP script
 		[[ -f $FP_PREP_SCRIPT ]] && rm -v "$FP_PREP_SCRIPT"
