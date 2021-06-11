@@ -297,13 +297,6 @@ _EOF_
 		# shellcheck disable=SC2015
 		(( $wifi_enabled )) && ifup wlan$index_wlan || ifup eth$index_eth
 
-		# If the user has flagged AUTO_SETUP_ACCEPT_LICENSE, rename the file to mark it as auto-accepted.
-		#
-		# Historically, this was invoked on first-interactive-login in Show_License, but we've moved it 
-		# to first-run because we consider modifying the license file to be the responsibility of root,
-		# (the file's owner), not whomever is the first user to open an interactive shell.
-		grep -q '^[[:blank:]]*AUTO_SETUP_ACCEPT_LICENSE=1' /boot/dietpi.txt && mv /var/lib/dietpi/license.txt /var/lib/dietpi/license.auto-accepted.txt
-
 	}
 
 	#/////////////////////////////////////////////////////////////////////////////////////
