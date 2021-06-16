@@ -298,6 +298,7 @@ Links to hardware and software manufacturers, sources and build instructions use
 - [emonHub](https://github.com/openenergymonitor/emonhub)
 - [Firefox](https://hg.mozilla.org/mozilla-unified)
 - [frp](https://github.com/fatedier/frp)
+- [AdGuard Home](https://github.com/AdguardTeam/AdGuardHome)
 
 ---
 
