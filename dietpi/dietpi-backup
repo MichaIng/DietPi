@@ -41,18 +41,13 @@
 	# Backup Filepaths
 	FP_SOURCE='/'
 	FP_TARGET='/mnt/dietpi-backup'
-	readonly FP_DIETPI_USERDATA_ACTUAL=$(readlink -f /mnt/dietpi_userdata)
 
-	# File applied to successful backups (stored in "$FP_TARGET/$BACKUP_STATS_FILENAME"
-	BACKUP_STATS_FILENAME='.dietpi-backup_stats'
+	# File applied to successful backups, stored in "$FP_TARGET/$FP_STATS"
+	readonly FP_STATS='.dietpi-backup_stats'
 
-	# Exclude/include file
+	# Include/exclude file
 	readonly FP_FILTER='.dietpi-backup_filter_inc_exc'
 	readonly FP_FILTER_CUSTOM='/boot/dietpi/.dietpi-backup_inc_exc'
-
-	# Supported filesystems
-	TARGET_FILESYSTEM_TYPE=
-	readonly aSUPPORTED_FILESYSTEMS=('ext4' 'ext3' 'ext2' 'nfs' 'nfs4' 'btrfs' 'f2fs' 'xfs' 'zfs')
 
 	# rsync options
 	# - Backup: Delete files in target which are not present in source, or excluded
@@ -64,30 +59,76 @@
 	# Date format for logs
 	Print_Date(){ date '+%Y-%m-%d_%T'; }
 
+	# rsync already running error: $1=Backup/Restore
+	Error_Rsync_Already_Running(){
+
+		G_DIETPI-NOTIFY 1 'Another rsync process is already running.'
+		echo -e "$1 failed: $(Print_Date). rsync is already running." >> "$FP_TARGET/$FP_STATS"
+		G_WHIP_MSG "$1 Error:\n\nA $1 could not be started as rsync is already running."
+		/boot/dietpi/dietpi-services start
+
+	}
+
+	Check_Supported_Directory_Location(){
+
+		# Check location contains /mnt/
+		if [[ $FP_TARGET == '/mnt/'* ]]; then
+
+			# Check file system type. Create directory temporarily, if necessary.
+			if [[ ! -d $FP_TARGET ]]
+			then
+				G_EXEC mkdir -p "$FP_TARGET"
+				local fs_type=$(df -T "$FP_TARGET" | mawk 'NR==2 {print $2}')
+				G_EXEC rmdir "$FP_TARGET"
+			else
+				local fs_type=$(df -T "$FP_TARGET" | mawk 'NR==2 {print $2}')
+			fi
+
+			for i in 'ext4' 'ext3' 'ext2' 'nfs' 'nfs4' 'btrfs' 'f2fs' 'xfs' 'zfs'
+			do
+				[[ $fs_type == "$i" ]] || continue
+				return 0
+			done
+
+			# Not supported
+			G_DIETPI-NOTIFY 1 "Filesystem type $fs_type not supported in $FP_TARGET"
+			G_WHIP_MSG "Filesystem type not supported:\n\n$FP_TARGET has a filesystem type of $fs_type, which is not supported.\n\nThe filesystem type must be ext2/3/4, F2FS, Btrfs, XFS or ZFS for symlink and POSIX permissions compatibilities."
+
+
+		# Not inside /mnt
+		else
+
+			G_DIETPI-NOTIFY 1 "Target directory is not inside /mnt ($FP_TARGET)"
+			G_WHIP_MSG "Directory not supported:\n- $FP_TARGET\n\nThe location must be inside the /mnt/* directory.\n - E.g.: /mnt/dietpi-backup"
+
+		fi
+
+		return 1
+
+	}
+
 	Create_Filter_Include_Exclude(){
 
-		# Default - Include/Exclude
 		cat << _EOF_ > $FP_FILTER
-# Dirs
+# Backup data, log and config
 - $FP_TARGET/
-+ $FP_DIETPI_USERDATA_ACTUAL/
-+ /mnt/dietpi_userdata/
-- /mnt/*
-- /media/
-- /dev/
-- /lost+found/
-- /proc/
-- /sys/
-- /tmp/
-- /run/
-- /var/cache/apt/*
-
-# Files
-- /var/swap
-- .swap*
 - $FP_LOG
 - $FP_SETTINGS
-- fake-hwclock.data
+# RAM dirs
+- /dev/
+- /proc/
+- /run/
+- /sys/
+- /tmp/
+# Swap files
+- /var/swap
+- .swap*
+# Fake RTC timestamp
+- /etc/fake-hwclock.data
+# Unlinked inodes
+- /lost+found/
+# APT cache
+- /var/cache/apt/*
 _EOF_
 
 		# Add users filter list
@@ -117,6 +158,9 @@ _EOF_
 			# Check if rsync is already running, while the daemon should have been stopped above
 			pgrep 'rsync' &> /dev/null && { Error_Rsync_Already_Running 'Backup'; return 1; }
 
+			# Install required rsync if missing
+			G_AG_CHECK_INSTALL_PREREQ rsync
+
 			# Generate Exclude/Include lists
 			Create_Filter_Include_Exclude
 
@@ -140,7 +184,7 @@ _EOF_
 However, this check is a rough estimation in reasonable time, thus it could be marginally incorrect.
 \nWould you like to override this warning and continue with the backup?'; then
 
-					echo -e "Backup cancelled due to insufficient free space    : $(Print_Date)" >> "$FP_TARGET/$BACKUP_STATS_FILENAME"
+					echo -e "Backup cancelled due to insufficient free space    : $(Print_Date)" >> "$FP_TARGET/$FP_STATS"
 					/boot/dietpi/dietpi-services start
 					return 1
 
@@ -161,7 +205,7 @@ However, this check is a rough estimation in reasonable time, thus it could be m
 			G_DIETPI-NOTIFY -1 $EXIT_CODE "$G_PROGRAM_NAME: Backup"
 			if (( $EXIT_CODE == 0 )); then
 
-				echo -e "Backup completed    : $(Print_Date)" >> "$FP_TARGET/$BACKUP_STATS_FILENAME"
+				echo -e "Backup completed    : $(Print_Date)" >> "$FP_TARGET/$FP_STATS"
 				G_WHIP_MSG "Backup completed:\n - $FP_TARGET"
 
 			else
@@ -288,9 +332,9 @@ However, this check is a rough estimation in reasonable time, thus it could be m
 		Check_Supported_Directory_Location || return 1
 
 		# Error: Backup not found
-		if [[ ! -f $FP_TARGET/$BACKUP_STATS_FILENAME ]]; then
+		if [[ ! -f $FP_TARGET/$FP_STATS ]]; then
 
-			G_WHIP_MSG "Restore failed:\n\n$FP_TARGET/$BACKUP_STATS_FILENAME does not exist\n\nHave you created a backup?"
+			G_WHIP_MSG "Restore failed:\n\n$FP_TARGET/$FP_STATS does not exist\n\nHave you created a backup?"
 
 		# Restore
 		else
@@ -301,6 +345,9 @@ However, this check is a rough estimation in reasonable time, thus it could be m
 
 			# Check if rsync is already running, while the daemon should have been stopped above
 			pgrep 'rsync' &> /dev/null && { Error_Rsync_Already_Running 'Restore'; return 1; }
+
+			# Install required rsync if missing
+			G_AG_CHECK_INSTALL_PREREQ rsync
 
 			# Generate Exclude/Include lists
 			Create_Filter_Include_Exclude
@@ -321,7 +368,7 @@ However, this check is a rough estimation in reasonable time, thus it could be m
 			G_DIETPI-NOTIFY -1 $EXIT_CODE "$G_PROGRAM_NAME: Restore"
 			if (( $EXIT_CODE == 0 )); then
 
-				echo -e "Restore completed    : $(Print_Date)" >> "$FP_TARGET/$BACKUP_STATS_FILENAME"
+				echo -e "Restore completed    : $(Print_Date)" >> "$FP_TARGET/$FP_STATS"
 				G_WHIP_MSG "Restore completed:\n - $FP_TARGET\n\nNB: A Reboot is highly recommended."
 
 			else
@@ -336,48 +383,8 @@ However, this check is a rough estimation in reasonable time, thus it could be m
 
 	}
 
-	Check_Supported_Directory_Location(){
-
-		# Disallow dietpi_userdata location, due to includes in that location
-		if [[ $FP_TARGET == '/mnt/dietpi_userdata'* || $FP_TARGET == "$FP_DIETPI_USERDATA_ACTUAL"* ]]; then
-
-			Error_DietpiUserdata_Directory
-
-		# Check location contains /mnt/
-		elif [[ $FP_TARGET == '/mnt/'* ]]; then
-
-			# Check file system type. Create directory temporarily, if necessary.
-			if [[ ! -d $FP_TARGET ]]
-			then
-				G_EXEC mkdir -p "$FP_TARGET"
-				TARGET_FILESYSTEM_TYPE=$(df -T "$FP_TARGET" | mawk 'NR==2 {print $2}')
-				G_EXEC rmdir "$FP_TARGET"
-			else
-				TARGET_FILESYSTEM_TYPE=$(df -T "$FP_TARGET" | mawk 'NR==2 {print $2}')
-			fi
-
-			for i in "${aSUPPORTED_FILESYSTEMS[@]}"
-			do
-				[[ $TARGET_FILESYSTEM_TYPE == "$i" ]] || continue
-				return 0
-			done
-
-			# Not supported
-			Error_Filesystem_Not_Supported
-
-		# Not inside /mnt
-		else
-
-			Error_Not_Mnt_Directory
-
-		fi
-
-		return 1
-
-	}
-
 	#/////////////////////////////////////////////////////////////////////////////////////
-	# Settings File
+	# Settings
 	#/////////////////////////////////////////////////////////////////////////////////////
 	readonly FP_SETTINGS='/boot/dietpi/.dietpi-backup_settings'
 
@@ -386,7 +393,7 @@ However, this check is a rough estimation in reasonable time, thus it could be m
 	Read_Settings_File(){ [[ -f $FP_SETTINGS ]] && . $FP_SETTINGS; }
 
 	#/////////////////////////////////////////////////////////////////////////////////////
-	# MENUS
+	# Menus
 	#/////////////////////////////////////////////////////////////////////////////////////
 	MENU_LASTITEM='Help' # Select "Help" by default
 	TARGETMENUID=0 # Main menu
@@ -402,11 +409,11 @@ However, this check is a rough estimation in reasonable time, thus it could be m
 		G_WHIP_MENU_ARRAY+=('Help' "What does $G_PROGRAM_NAME do?")
 		G_WHIP_MENU_ARRAY+=('' '●─ Options ')
 		G_WHIP_MENU_ARRAY+=('Location' ': Change where your backup will be saved and restored from.')
-		G_WHIP_MENU_ARRAY+=('Custom Filters' ': Modify custom include/exclude filters for backups.')
-		if [[ -f $FP_TARGET'/'$BACKUP_STATS_FILENAME ]]; then
+		G_WHIP_MENU_ARRAY+=('Filter' ': Modify include/exclude filter for backups.')
+		if [[ -f $FP_TARGET'/'$FP_STATS ]]; then
 
 			G_WHIP_MENU_ARRAY+=('Delete' ": Remove backup ($FP_TARGET)")
-			backup_last_completed=$(grep 'ompleted' "$FP_TARGET/$BACKUP_STATS_FILENAME" | tail -1)
+			backup_last_completed=$(grep 'ompleted' "$FP_TARGET/$FP_STATS" | tail -1)
 
 		fi
 		G_WHIP_MENU_ARRAY+=('' '●─ Run ')
@@ -423,7 +430,7 @@ However, this check is a rough estimation in reasonable time, thus it could be m
 
 				'Location') TARGETMENUID=1;;
 
-				'Custom Filters') nano $FP_FILTER_CUSTOM;;
+				'Filter') nano $FP_FILTER_CUSTOM;;
 
 				'Help') G_WHIP_MSG "DietPi-Backup is a program that allows you to Backup and Restore your DietPi system.
 \nIf you have broken your system, or want to reset your system to an earlier date, this can all be done with DietPi-Backup.
@@ -469,7 +476,7 @@ However, this check is a rough estimation in reasonable time, thus it could be m
 
 					G_DIETPI-NOTIFY 2 'Searching /mnt/* for previous backups, please wait...'
 					local alist=()
-					mapfile -t alist < <(find /mnt -type f -name "$BACKUP_STATS_FILENAME")
+					mapfile -t alist < <(find /mnt -type f -name "$FP_STATS")
 
 					# Do we have any results?
 					if [[ ${alist[0]} ]]; then
@@ -480,7 +487,7 @@ However, this check is a rough estimation in reasonable time, thus it could be m
 						do
 
 							local last_backup_date=$(sed -n '/ompleted/s/^.*: //p' "$i" | tail -1) # Date of last backup for this backup
-							local backup_directory=${i%/$BACKUP_STATS_FILENAME} # Backup directory (minus the backup file), that we can use for target backup directory.
+							local backup_directory=${i%/$FP_STATS} # Backup directory (minus the backup file), that we can use for target backup directory.
 							G_WHIP_MENU_ARRAY+=("$backup_directory" ": $last_backup_date")
 
 						done
@@ -530,66 +537,37 @@ However, this check is a rough estimation in reasonable time, thus it could be m
 	}
 
 	#/////////////////////////////////////////////////////////////////////////////////////
-	# Errors
-	#/////////////////////////////////////////////////////////////////////////////////////
-	Error_Filesystem_Not_Supported(){
-
-		G_DIETPI-NOTIFY 1 "File system type $TARGET_FILESYSTEM_TYPE not supported in $FP_TARGET"
-		G_WHIP_MSG "File system not supported:\n\n$FP_TARGET Has a file system of: $TARGET_FILESYSTEM_TYPE, which is not supported.\n\nThe file system type must be EXT2/3/4, F2FS, Btrfs, XFS or ZFS for symlink and POSIX permissions compatibilities."
-
-	}
-
-	Error_Not_Mnt_Directory(){
-
-		G_DIETPI-NOTIFY 1 "Target directory is not inside /mnt ($FP_TARGET)"
-		G_WHIP_MSG "Directory not supported:\n- $FP_TARGET\n\nThe location must be inside the /mnt/* directory.\n - eg: /mnt/dietpi-backup"
-
-	}
-
-	Error_DietpiUserdata_Directory(){
-
-		G_DIETPI-NOTIFY 1 "Target directory can not be contained within DietPi user data location ($FP_TARGET)"
-		G_WHIP_MSG "Directory not supported:\n- $FP_TARGET\n\nTarget directory can not be contained within DietPi user data location (/mnt/dietpi_userdata)"
-
-	}
-
-	# $1=Backup/Restore
-	Error_Rsync_Already_Running(){
-
-		G_DIETPI-NOTIFY 1 'Another rsync process is already running.'
-		echo -e "$1 failed: $(Print_Date). rsync is already running." >> "$FP_TARGET/$BACKUP_STATS_FILENAME"
-		G_WHIP_MSG "$1 Error:\n\nA $1 could not be started as rsync is already running."
-		/boot/dietpi/dietpi-services start
-
-	}
-
-	#/////////////////////////////////////////////////////////////////////////////////////
 	# Main Loop
 	#/////////////////////////////////////////////////////////////////////////////////////
-	# Install required rsync if missing
-	G_AG_CHECK_INSTALL_PREREQ rsync
-
-	# Read settings file
+	# Read settings
 	Read_Settings_File
 
 	# $2 Optional directory input
 	[[ $2 ]] && FP_TARGET=$2
 
-	# Create user inc/exc template, if missing
-	[[ -f $FP_FILTER_CUSTOM ]] || cat << _EOF_ > $FP_FILTER_CUSTOM
-# $G_PROGRAM_NAME | Custom include/exclude filters
-#
-# To INCLUDE (+) a file/directory:
-#	NB: dietpi_userdata is included by default, as well, if moved to a custom location.
-#+ /path/to/my/file
-#+ /path/to/my/directory/
-#
-# To EXCLUDE (-) a file/directory:
-#	NB: To exclude from a custom located dietpi_userdata, you need to add its symlinked path: /mnt/dietpi_userdata/excludeThis
-#- /path/to/my/file
-#- /path/to/my/directory/
-_EOF_
+	# Create default filter file, if not yet present
+	[[ -f $FP_FILTER_CUSTOM ]] || cat << '_EOF_' > $FP_FILTER_CUSTOM
+# DietPi-Backup include/exclude filter
 
+# Prefix "-" exclude items, "+" include items which would match a wildcard exclude rule.
+# Suffix "/" match directories only, no files or symlinks.
+# Using wildcard "*" matches any item name or part of it.
+# Since the list is processed from top to bottom and the first match defines the result,
+#   includes need to be defined before their wildcard exclude rule
+#   and in case excludes before their wildcard include rule.
+# Symlinks are handled as such and never processed recursively.
+# Excluded directories are not processed recursively, so contained items cannot be included.
+# Hence, to include items within an excluded directory:
+# - Do not exclude the directory itself, but contained items via wildcard.
+# - Define includes first, to override the wildcard exclude rule.
+# - See the below default rules, how we exclude all items below /mnt
+#   but include the dietpi_userdata directory, if it is no symlink.
+# To prevent loops, the backup target dir, log and config are excluded internally.
+
++ /mnt/dietpi_userdata/
+- /mnt/*
+- /media/
+_EOF_
 	#-----------------------------------------------------------------------------
 	# Run Backup
 	if (( $INPUT == 1 )); then
@@ -607,7 +585,6 @@ _EOF_
 
 		until (( $TARGETMENUID < 0 ))
 		do
-
 			G_TERM_CLEAR
 
 			if (( $TARGETMENUID == 1 )); then
@@ -619,7 +596,6 @@ _EOF_
 				Menu_Main
 
 			fi
-
 		done
 
 		# Save settings
