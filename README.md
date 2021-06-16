@@ -297,6 +297,7 @@ Links to hardware and software manufacturers, sources and build instructions use
 - [WiringPi](https://github.com/WiringPi/WiringPi)
 - [emonHub](https://github.com/openenergymonitor/emonhub)
 - [Firefox](https://hg.mozilla.org/mozilla-unified)
+- [Beets](https://github.com/beetbox/beets)
 - [frp](https://github.com/fatedier/frp)
 - [AdGuard Home](https://github.com/AdguardTeam/AdGuardHome)
 
