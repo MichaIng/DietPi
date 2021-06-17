@@ -1775,10 +1775,6 @@ This program is distributed in the hope that it will be useful, but WITHOUT ANY 
 You should have received a copy of the GNU General Public License along with this program. If not, please see http://www.gnu.org/licenses/
 _EOF_
 
-		# Allow any user to accept license without confirmation.
-		# This prevents the interactive "remove write-protected regular file" prompt when the first interactive login is non-root.
-		G_EXEC chmod 666 /var/lib/dietpi/license.txt
-
 		G_DIETPI-NOTIFY 2 'Disabling and clearing APT cache'
 		/boot/dietpi/func/dietpi-set_software apt-cache cache disable
 		/boot/dietpi/func/dietpi-set_software apt-cache clean
