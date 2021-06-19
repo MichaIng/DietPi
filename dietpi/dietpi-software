@@ -16211,6 +16211,7 @@ This requires an account at: https://remote.it/
 		AUTOINSTALL_TIMESYNCMODE=$(sed -n '/^[[:blank:]]*CONFIG_NTP_MODE=/{s/^[^=]*=//p;q}' /boot/dietpi.txt)
 		AUTOINSTALL_RESTORE=$(sed -n '/^[[:blank:]]*AUTO_SETUP_BACKUP_RESTORE=/{s/^[^=]*=//p;q}' /boot/dietpi.txt)
 		AUTOINSTALL_RAMLOG_SIZE=$(sed -n '/^[[:blank:]]*AUTO_SETUP_RAMLOG_MAXSIZE=/{s/^[^=]*=//p;q}' /boot/dietpi.txt)
+		AUTO_SETUP_DHCP_TO_STATIC=$(sed -n '/^[[:blank:]]*AUTO_SETUP_DHCP_TO_STATIC=/{s/^[^=]*=//p;q}' /boot/dietpi.txt)
 
 		# Else set defaults
 		[[ $AUTOINSTALL_ENABLED ]] || AUTOINSTALL_ENABLED=0
@@ -16225,6 +16226,7 @@ This requires an account at: https://remote.it/
 		[[ $AUTOINSTALL_TIMESYNCMODE ]] || AUTOINSTALL_TIMESYNCMODE=2
 		[[ $AUTOINSTALL_RESTORE ]] || AUTOINSTALL_RESTORE=0
 		[[ $AUTOINSTALL_RAMLOG_SIZE ]] || AUTOINSTALL_RAMLOG_SIZE=50
+		[[ $AUTO_SETUP_DHCP_TO_STATIC == 1 ]] || AUTO_SETUP_DHCP_TO_STATIC=0
 
 		# Restore DietPi-Backup
 		if (( $AUTOINSTALL_RESTORE )); then
@@ -16426,6 +16428,92 @@ This requires an account at: https://remote.it/
 
 		# Apply AutoStart choice
 		/boot/dietpi/dietpi-autostart "$AUTOINSTALL_AUTOSTARTTARGET"
+
+		# Apply DHCP leased network settings as static network settings, if requested
+		if (( $AUTO_SETUP_DHCP_TO_STATIC ))
+		then
+			G_DIETPI-NOTIFY 2 'Applying DHCP leased network settings as static network settings'
+
+			# Function to convert CIDR notation into dot-decimal notation
+			cidr2mask()
+			{
+				local i mask full_octets=$(( $1 / 8 )) partial_octet=$(( $1%8 ))
+				for i in {0..3}
+				do
+					if (( $i < $full_octets ))
+					then
+						mask+=255
+
+					elif (( $i == $full_octets ))
+					then
+						mask+=$(( 256 - 2 ** ( 8 - $partial_octet ) ))
+
+					else
+						mask+=0
+					fi
+					(( $i < 3 )) && mask+=.
+				done
+				echo $mask
+			}
+
+			# Get Ethernet index
+			local nameservers eth_index=$(sed -En '/^[[:blank:]]*(allow-hotplug|auto)[[:blank:]]+eth[0-9]+$/{s/^.*eth//p;q}' /etc/network/interfaces)
+			# - Is enabled and uses DHCP
+			if [[ $eth_index ]] && grep -Eq "^[[:blank:]]*iface[[:blank:]]+eth${eth_index}[[:blank:]]+inet[[:blank:]]+dhcp$" /etc/network/interfaces
+			then
+				G_DIETPI-NOTIFY 2 'Applying DHCP leased Ethernet settings as static Ethernet settings'
+
+				# Get current network info
+				local eth_ip=$(ip -br -f inet a s "eth$eth_index" | mawk '{print $3}' | sed 's|/.*$||')
+				local eth_mask=$(cidr2mask "$(ip -br -f inet a s "eth$eth_index" | mawk '{print $3}' | sed 's|^.*/||')")
+				local eth_gateway=$(ip r l dev "eth$eth_index" 0/0 | mawk '{print $3;exit}')
+				nameservers=$(mawk '/^[[:blank:]]*nameserver[[:blank:]]/{print $2}' ORS=' ' /etc/resolv.conf)
+
+				# Apply current network settings statically
+				G_CONFIG_INJECT "iface[[:blank:]]+eth$eth_index" "iface eth$eth_index inet static" /etc/network/interfaces
+				sed -i "0,\|^.*address[[:blank:]].*\$|s||address $eth_ip|" /etc/network/interfaces
+				sed -i "0,\|^.*netmask[[:blank:]].*\$|s||netmask $eth_mask|" /etc/network/interfaces
+				sed -i "0,\|^.*gateway[[:blank:]].*\$|s||gateway $eth_gateway|" /etc/network/interfaces
+			fi
+
+			# Get WiFi index
+			local wlan_index=$(sed -En '/^[[:blank:]]*(allow-hotplug|auto)[[:blank:]]+wlan[0-9]+$/{s/^.*wlan//p;q}' /etc/network/interfaces)
+			# - Is enabled and uses DHCP
+			if [[ $wlan_index ]] && grep -Eq "^[[:blank:]]*iface[[:blank:]]+wlan${wlan_index}[[:blank:]]+inet[[:blank:]]+dhcp$" /etc/network/interfaces
+			then
+				G_DIETPI-NOTIFY 2 'Applying DHCP leased WiFi settings as static WiFi settings'
+
+				# Get current network info
+				local wlan_ip=$(ip -br -f inet a s "wlan$wlan_index" | mawk '{print $3}' | sed 's|/.*$||')
+				local wlan_mask=$(cidr2mask "$(ip -br -f inet a s "wlan$wlan_index" | mawk '{print $3}' | sed 's|^.*/||')")
+				local wlan_gateway=$(ip r l dev "wlan$wlan_index" 0/0 | mawk '{print $3;exit}')
+				[[ $nameservers ]] || nameservers=$(mawk '/^[[:blank:]]*nameserver[[:blank:]]/{print $2}' ORS=' ' /etc/resolv.conf)
+
+				# Apply current network settings statically
+				G_CONFIG_INJECT "iface[[:blank:]]+wlan$wlan_index" "iface wlan$wlan_index inet static" /etc/network/interfaces
+				sed -i "\|^iface wlan|,\$s|^.*address[[:blank:]].*\$|address $wlan_ip|" /etc/network/interfaces
+				sed -i "\|^iface wlan|,\$s|^.*netmask[[:blank:]].*\$|netmask $wlan_mask|" /etc/network/interfaces
+				sed -i "\|^iface wlan|,\$s|^.*gateway[[:blank:]].*\$|gateway $wlan_gateway|" /etc/network/interfaces
+			fi
+			unset -f cidr2mask
+
+			# Apply DNS nameservers
+			if [[ $nameservers ]]
+			then
+				G_DIETPI-NOTIFY 2 'Applying DHCP leased DNS nameservers as static nameservers'
+
+				if command -v resolvconf > /dev/null
+				then
+					sed -i "/dns-nameservers[[:blank:]]/c\dns-nameservers ${nameservers% }" /etc/network/interfaces
+				else
+					sed -i "/dns-nameservers[[:blank:]]/c\#dns-nameservers ${nameservers% }" /etc/network/interfaces
+					> /etc/resolv.conf
+					for i in $nameservers; do echo "nameserver $i" >> /etc/resolv.conf; done
+				fi
+			fi
+
+			G_DIETPI-NOTIFY 0 'Network changes will become effective with next reboot'
+		fi
 
 		# Set install stage to finished
 		G_DIETPI_INSTALL_STAGE=2
