@@ -243,8 +243,8 @@ _EOF_
 
 			# Enable WiFi, disable Ethernet
 			ethernet_enabled=0
-			sed -i "/allow-hotplug wlan/c\allow-hotplug wlan$index_wlan" /etc/network/interfaces
-			sed -i "/allow-hotplug eth/c\#allow-hotplug eth$index_eth" /etc/network/interfaces
+			sed -Ei "/(allow-hotplug|auto)[[:blank:]]+wlan/c\allow-hotplug wlan$index_wlan" /etc/network/interfaces
+			sed -Ei "/(allow-hotplug|auto)[[:blank:]]+eth/c\#allow-hotplug eth$index_eth" /etc/network/interfaces
 
 			# Apply global SSID/keys from dietpi.txt to wpa_supplicant
 			/boot/dietpi/func/dietpi-wifidb 1
@@ -257,8 +257,8 @@ _EOF_
 
 			# Enable Eth, disable WiFi
 			wifi_enabled=0
-			sed -i "/allow-hotplug eth/c\allow-hotplug eth$index_eth" /etc/network/interfaces
-			sed -i "/allow-hotplug wlan/c\#allow-hotplug wlan$index_wlan" /etc/network/interfaces
+			sed -Ei "/(allow-hotplug|auto)[[:blank:]]+eth/c\allow-hotplug eth$index_eth" /etc/network/interfaces
+			sed -Ei "/(allow-hotplug|auto)[[:blank:]]+wlan/c\#allow-hotplug wlan$index_wlan" /etc/network/interfaces
 
 			# Disable WiFi kernel modules
 			/boot/dietpi/func/dietpi-set_hardware wifimodules disable
