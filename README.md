@@ -301,6 +301,7 @@ Links to hardware and software manufacturers, sources and build instructions use
 - [frp](https://github.com/fatedier/frp)
 - [AdGuard Home](https://github.com/AdguardTeam/AdGuardHome)
 - [Snapcast](https://github.com/badaix/snapcast)
+- [K3s](https://github.com/k3s-io/k3s)
 
 ---
 
