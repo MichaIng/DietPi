@@ -193,16 +193,16 @@ _EOF_
 	G_DIETPI-NOTIFY 2 "Detected distribution version: ${G_DISTRO_NAME^} (ID: $G_DISTRO)"
 
 	# Detect the hardware architecture of this operating system
-	G_HW_ARCH_NAME=$(uname -m)
 	if grep -q '^ID=raspbian' /etc/os-release; then
 
 		# Raspbian: Force ARMv6
-		G_RASPBIAN=1 G_HW_ARCH=1
+		G_RASPBIAN=1 G_HW_ARCH=1 G_HW_ARCH_NAME='armv6l'
 
 	else
 
 		# Debian: ARMv6 is not supported here
 		G_RASPBIAN=0
+		G_HW_ARCH_NAME=$(uname -m)
 		if [[ $G_HW_ARCH_NAME == 'armv7l' ]]; then
 
 			G_HW_ARCH=2
@@ -680,7 +680,7 @@ Currently installed: $G_DISTRO_NAME (ID: $G_DISTRO)"; then
 
 		fi
 		# - Entropy daemon: Use modern rng-tools5 on all devices where it has been proven to work, else haveged: https://github.com/MichaIng/DietPi/issues/2806
-		if [[ $G_HW_MODEL -lt 10 || $G_HW_MODEL =~ ^(14|15|16|24|29|42|46|47|58|68|72)$ ]]; then # RPi, RK3399, S922X, Odroid C4
+		if [[ $G_HW_MODEL -lt 10 || $G_HW_MODEL =~ ^(14|15|16|24|29|42|46|58|68|72)$ ]]; then # RPi, S922X, Odroid C4, RK3399 - 47 NanoPi R4S
 
 			aPACKAGES_REQUIRED_INSTALL+=('rng-tools5')
 
@@ -761,8 +761,6 @@ Currently installed: $G_DISTRO_NAME (ID: $G_DISTRO)"; then
 				'linux-image-'
 				'linux-dtb-'
 				'linux-u-boot-'
-				"linux-$DISTRO_TARGET_NAME-root-"
-				'armbian-bsp-cli-'
 
 			)
 
@@ -777,6 +775,61 @@ Currently installed: $G_DISTRO_NAME (ID: $G_DISTRO)"; then
 
 			done
 			unset -v apackages
+
+			# Add u-boot-tools, required to convert initramfs images into u-boot format
+			aPACKAGES_REQUIRED_INSTALL+=('u-boot-tools')
+
+			# Generate and cleanup uInitrd
+			local arch='arm'
+			(( $G_HW_ARCH == 3 )) && arch='arm64'
+			cat << _EOF_ > /etc/initramfs/post-update.d/99-dietpi-uboot
+#!/bin/sh
+echo 'update-initramfs: Converting to u-boot format' >&2
+mkimage -A $arch -O linux -T ramdisk -C gzip -n uInitrd -d \$2 /boot/uInitrd-\$1 > /dev/null
+ln -sf uInitrd-\$1 /boot/uInitrd > /dev/null 2>&1 || mv /boot/uInitrd-\$1 /boot/uInitrd
+exit 0
+_EOF_
+			cat << '_EOF_' > /etc/kernel/preinst.d/dietpi-initramfs_cleanup
+#!/bin/sh
+
+# skip if initramfs-tools is not installed
+[ -x /usr/sbin/update-initramfs ] || exit 0
+
+# passing the kernel version is required
+version="$1"
+if [ -z "$version" ]; then
+        echo "W: initramfs-tools: ${DPKG_MAINTSCRIPT_PACKAGE:-kernel package} did not pass a version number" >&2
+        exit 0
+fi
+
+# avoid running multiple times
+if [ -n "$DEB_MAINT_PARAMS" ]; then
+        eval set -- "$DEB_MAINT_PARAMS"
+        if [ -z "$1" ] || [ "$1" != 'upgrade' ]; then
+                exit 0
+        fi
+fi
+
+# loop through existing initramfs images
+for v in $(ls -1 /var/lib/initramfs-tools | linux-version sort --reverse) do
+        if ! linux-version compare $v eq $version; then
+                # try to delete delete old initrd images via update-initramfs
+                INITRAMFS_TOOLS_KERNEL_HOOK=y update-initramfs -d -k $v 2>/dev/null
+                # delete unused state files
+                find /var/lib/initramfs-tools -type f ! -name "$version" -printf 'Removing obsolete file %f\n' -delete
+                # delete unused initrd images
+                find /boot -name 'initrd.img*' -o -name 'uInitrd-*' ! -name "*$version" -printf 'Removing obsolete file %f\n' -delete
+        fi
+done
+
+exit 0
+_EOF_
+			# Remove obsolete components from Armbian list and connect via HTTPS
+			echo "deb https://apt.armbian.com/ $DISTRO_TARGET_NAME main" > /etc/apt/sources.list.d/armbian.list
+
+			# Exclude doubled device tree files, shipped with the kernel package
+			echo 'path-exclude /usr/lib/linux-image-current-*' > /etc/dpkg/dpkg.cfg.d/01-dietpi-exclude_doubled_devicetrees
+			G_EXEC rm -Rf /usr/lib/linux-image-current-*
 
 		#	RPi
 		elif (( $G_HW_MODEL < 10 )); then
@@ -883,7 +936,7 @@ Currently installed: $G_DISTRO_NAME (ID: $G_DISTRO)"; then
 
 		else
 
-			#	Usually no firmware should be necessary for VMs. If user manually passes though some USB device, user might need to install the firmware then.
+			# Usually no firmware should be necessary for VMs. If user manually passes though some USB device, user might need to install the firmware then.
 			if (( $G_HW_MODEL != 20 )); then
 
 				aPACKAGES_REQUIRED_INSTALL+=('firmware-realtek')		# Realtek Eth+WiFi+BT dongle firmware
@@ -1005,6 +1058,7 @@ Currently installed: $G_DISTRO_NAME (ID: $G_DISTRO)"; then
 
 		[[ -d '/selinux' ]] && rm -Rv /selinux
 		[[ -d '/var/cache/apparmor' ]] && rm -Rv /var/cache/apparmor
+		[[ -d '/usr/lib/firefox-esr' ]] && rm -Rv /usr/lib/firefox-esr # Armbian desktop images
 		rm -Rfv /var/lib/dhcp/{,.??,.[^.]}*
 		rm -Rfv /var/backups/{,.??,.[^.]}*
 
@@ -1034,21 +1088,14 @@ Currently installed: $G_DISTRO_NAME (ID: $G_DISTRO)"; then
 		# - Stop, disable and remove not required 3rd party services
 		local aservices=(
 
-			# Armbian
-			'firstrun'
-			'resize2fs'
-			'log2ram'
-			'*armbian*'
-			'tinker-bluetooth'
-			'rk3399-bluetooth'
 			# Meveric
 			'cpu_governor'
 			# RPi
 			'sshswitch'
 			# Radxa
-			rockchip-adbd
-			rtl8723ds-btfw-load
-			install-module-hci-uart
+			'rockchip-adbd'
+			'rtl8723ds-btfw-load'
+			'install-module-hci-uart'
 
 		)
 
@@ -1074,18 +1121,18 @@ Currently installed: $G_DISTRO_NAME (ID: $G_DISTRO)"; then
 		# - Remove obsolete SysV service entries
 		aservices=(
 
-			fake-hwclock
-			haveged
-			hwclock.sh
-			networking
-			udev
-			cron
-			console-setup.sh
-			sudo
-			cpu_governor
-			keyboard-setup.sh
-			kmod
-			procps
+			'fake-hwclock'
+			'haveged'
+			'hwclock.sh'
+			'networking'
+			'udev'
+			'cron'
+			'console-setup.sh'
+			'sudo'
+			'cpu_governor'
+			'keyboard-setup.sh'
+			'kmod'
+			'procps'
 
 		)
 
@@ -1096,42 +1143,14 @@ Currently installed: $G_DISTRO_NAME (ID: $G_DISTRO)"; then
 		unset -v aservices
 
 		# - Armbian specific
-		[[ -f '/boot/armbian_first_run.txt.template' ]] && rm -v /boot/armbian_first_run.txt.template
-		[[ -f '/usr/bin/armbianmonitor' ]] && rm -v /usr/bin/armbianmonitor
-		[[ -d '/etc/armbianmonitor' ]] && rm -Rv /etc/armbianmonitor
-		[[ -d '/var/lib/apt-xapian-index' ]] && rm  -Rv /var/lib/apt-xapian-index
-		[[ -f '/usr/local/sbin/log2ram' ]] && rm -v /usr/local/sbin/log2ram
+		[[ -d '/var/lib/apt-xapian-index' ]] && rm  -Rv /var/lib/apt-xapian-index # ??
 		umount /var/log.hdd 2> /dev/null
 		[[ -d '/var/log.hdd' ]] && rm -R /var/log.hdd
-		rm -vf /etc/X11/xorg.conf.d/*armbian*
-		#rm -vf /etc/armbian* armbian-release # Required for kernel/bootloader package upgrade (initramfs postinst)
-		rm -vf /lib/systemd/system/*armbian*
-		rm -vf /etc/systemd/system/logrotate.service # Override to support Armbian zRAM log
-		rm -vf /etc/apt/apt.conf.d/*armbian*
-		rm -vf /etc/cron.*/*armbian*
-		#rm -vf /etc/default/*armbian* # Required for Armbian root package upgrade
-		rm -vf /etc/update-motd.d/*armbian*
-		rm -vf /etc/profile.d/*armbian*
-		rm -Rfv /etc/skel/.config
-		#[[ -d '/usr/lib/armbian' ]] && rm -vR /usr/lib/armbian # Required for Armbian root package upgrade
-		#[[ -d '/usr/share/armbian' ]] && rm -vR /usr/share/armbian # Required for Armbian root package upgrade
-		# Place DPKG exclude file, especially to skip cron jobs, which are doomed to fail and an unnecessary overhead + syslog spam on DietPi
-		[[ -f '/etc/armbian-release' ]] && cat << _EOF_ > /etc/dpkg/dpkg.cfg.d/dietpi-no_armbian
-# Exclude conflicting Armbian files
-path-exclude /lib/systemd/system/*armbian*
-path-exclude /etc/systemd/system/logrotate.service
-path-exclude /etc/apt/apt.conf.d/*armbian*
-path-exclude /etc/cron.*/*armbian*
-path-exclude /etc/skel/.config/htop/htoprc
-#path-exclude /etc/default/*armbian* # Required for Armbian root package upgrade
-path-exclude /etc/update-motd.d/*armbian*
-path-exclude /etc/profile.d/*armbian*
-#path-exclude /usr/lib/armbian # Required for Armbian root package upgrade
-#path-exclude /usr/share/armbian # Required for Armbian root package upgrade
-_EOF_
-		# Armbian auto-login
-		[[ -d '/etc/systemd/system/getty@.service.d' ]] && rm -Rv /etc/systemd/system/getty@.service.d
-		[[ -d '/etc/systemd/system/serial-getty@.service.d' ]] && rm -Rv /etc/systemd/system/serial-getty@.service.d
+		[[ -f '/etc/armbian-image-release' ]] && rm -v /etc/armbian-image-release
+		[[ -f '/boot/armbian_first_run.txt.template' ]] && rm -v /boot/armbian_first_run.txt.template
+		[[ -d '/etc/armbianmonitor' ]] && rm -R /etc/armbianmonitor
+		rm -vf /etc/{default,logrotate.d}/armbian*
+		[[ -f '/lib/firmware/bootsplash.armbian' ]] && rm -v /lib/firmware/bootsplash.armbian
 
 		# - OMV: https://github.com/MichaIng/DietPi/issues/2994
 		[[ -d '/etc/openmediavault' ]] && rm -vR /etc/openmediavault
@@ -1244,7 +1263,6 @@ _EOF_'
 		G_DIETPI-NOTIFY 2 'Removing all rfkill soft blocks and the rfkill package'
 		rfkill unblock all
 		G_AGP rfkill
-		G_AGA
 		[[ -d '/var/lib/systemd/rfkill' ]] && rm -Rv /var/lib/systemd/rfkill
 
 		G_DIETPI-NOTIFY 2 'Configuring wlan/eth naming to be preferred for networked devices:'
@@ -1255,6 +1273,11 @@ _EOF_'
 
 			sed -i 's/net.ifnames=[^[:blank:]]*[[:blank:]]*//g;w /dev/stdout' /boot/cmdline.txt
 			sed -i '/root=/s/[[:blank:]]*$/ net.ifnames=0/;w /dev/stdout' /boot/cmdline.txt
+
+		# - Armbian
+		elif [[ -f '/boot/armbianEnv.txt' ]]; then
+
+			G_CONFIG_INJECT 'extraargs=' 'extraargs="net.ifnames=0"' /boot/armbianEnv.txt
 
 		fi
 		[[ -f '/etc/udev/rules.d/70-persistent-net.rules' ]] && rm -v /etc/udev/rules.d/70-persistent-net.rules # Jessie pre-image
@@ -1268,7 +1291,6 @@ _EOF_'
 		# ifupdown starts the daemon outside of systemd, the enabled systemd unit just thows an error on boot due to missing dbus and with dbus might interfere with ifupdown
 		systemctl disable wpa_supplicant 2> /dev/null && G_DIETPI-NOTIFY 2 'Disabled non-required wpa_supplicant systemd unit'
 
-		[[ -L '/etc/network/interfaces' ]] && rm -v /etc/network/interfaces # Armbian symlink for bulky network-manager
 		G_EXEC_DESC='Configuring network interfaces'
 		G_EXEC eval 'cat << _EOF_ > /etc/network/interfaces
 # Location: /etc/network/interfaces
@@ -1631,8 +1653,11 @@ _EOF_
 		# - Armbian special
 		if [[ -f '/boot/armbianEnv.txt' ]]; then
 
+			# Disable bootsplash logo, as we removed the file above: https://github.com/MichaIng/DietPi/issues/3932#issuecomment-852376681
+			G_CONFIG_INJECT 'bootlogo=' 'bootlogo=false' /boot/armbianEnv.txt
+
 			# Reset default kernel log verbosity, reduced to "1" on most Armbian images
-			sed -i '/verbosity=/c\verbosity=4' /boot/armbianEnv.txt
+			G_CONFIG_INJECT 'verbosity=' 'verbosity=4' /boot/armbianEnv.txt
 
 			# Disable Docker optimisations, since this has some performance drawbacks, enable on Docker install instead
 			G_CONFIG_INJECT 'docker_optimizations=' 'docker_optimizations=off' /boot/armbianEnv.txt
@@ -1697,7 +1722,6 @@ _EOF_
 			G_EXEC_DESC='Detecting additional OS installed on system' G_EXEC os-prober
 			# Purge "os-prober" again
 			G_AGP os-prober
-			G_AGA
 
 			# - Native PC/EFI (assume x86_64 only possible)
 			if [[ -d '/boot/efi' ]] && dpkg-query -s 'grub-efi-amd64' &> /dev/null; then
