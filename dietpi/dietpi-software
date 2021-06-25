@@ -4713,11 +4713,12 @@ _EOF_
 			DEPS_LIST='apache2-utils'
 			Download_Install "$INSTALL_URL_ADDRESS"
 
-			# Reinstall: Stop service and remove install directory
-			[[ -f '/etc/systemd/system/adguardhome.service' ]] && G_EXEC systemctl stop adguardhome
-			[[ -d '/opt/adguardhome' ]] && G_EXEC rm -R /opt/adguardhome
+			# Install to userdata until it is possible to split binary and data/config without breaking the updater: https://github.com/AdguardTeam/AdGuardHome/issues/3286
+			[[ -d '/mnt/dietpi_userdata/adguardhome' ]] || G_EXEC mkdir -p /mnt/dietpi_userdata/adguardhome
+			G_EXEC cp -a AdGuardHome/. /mnt/dietpi_userdata/adguardhome/
+			G_EXEC rm -R AdGuardHome
 
-			G_EXEC mv AdGuardHome /opt/adguardhome
+			[[ -d '/opt/adguardhome' ]] && G_EXEC rm -R /opt/adguardhome # v7.3 beta
 
 			# Unbound: Switch port to 5335 if it was installed before, else it got just configured within its install step above
 			if (( ${aSOFTWARE_INSTALL_STATE[182]} == 2 )) && grep -q '^[[:blank:]]*port:[[:blank:]][[:blank:]]*53$' /etc/unbound/unbound.conf.d/dietpi.conf
@@ -9340,12 +9341,10 @@ _EOF_
 
 			Banner_Configuration
 
-			# Directory
-			G_EXEC mkdir -p /mnt/dietpi_userdata/adguardhome
-
 			# User
 			Create_User -d /mnt/dietpi_userdata/adguardhome adguardhome
 
+			# Config
 			if [[ ! -f '/mnt/dietpi_userdata/adguardhome/AdGuardHome.yaml' ]]
 			then
 				dps_index=$software_id Download_Install 'AdGuardHome.yaml' /mnt/dietpi_userdata/adguardhome/AdGuardHome.yaml
@@ -9354,20 +9353,17 @@ _EOF_
 			fi
 
 			# Unbound: Configure AdGuard Home to use it
-			if (( ${aSOFTWARE_INSTALL_STATE[182]} > 0 ))
+			if [[ ${aSOFTWARE_INSTALL_STATE[182]} -gt 0 && ! -f '/mnt/dietpi_userdata/adguardhome/dietpi-unbound.conf' ]]
 			then
 				G_DIETPI-NOTIFY 2 'Configuring AdGuard Home to use Unbound'
-				if [[ ! -f '/mnt/dietpi_userdata/adguardhome/dietpi-unbound.conf' ]]
-				then
-					echo '127.0.0.1:5335' > /mnt/dietpi_userdata/adguardhome/dietpi-unbound.conf
-					G_CONFIG_INJECT 'upstream_dns_file:[[:blank:]]' '  upstream_dns_file: /mnt/dietpi_userdata/adguardhome/dietpi-unbound.conf' /mnt/dietpi_userdata/adguardhome/AdGuardHome.yaml
-					systemctl -q is-active adguardhome && G_EXEC systemctl restart adguardhome
-				fi
+				echo '127.0.0.1:5335' > /mnt/dietpi_userdata/adguardhome/dietpi-unbound.conf
+				G_CONFIG_INJECT 'upstream_dns_file:[[:blank:]]' '  upstream_dns_file: /mnt/dietpi_userdata/adguardhome/dietpi-unbound.conf' /mnt/dietpi_userdata/adguardhome/AdGuardHome.yaml
+				systemctl -q is-active adguardhome && G_EXEC systemctl restart adguardhome
 			fi
 
 			# Permissions
-			G_EXEC chown -R adguardhome:adguardhome /mnt/dietpi_userdata/adguardhome /opt/adguardhome
-			G_EXEC chmod 755 /opt/adguardhome{,/AdGuardHome}
+			G_EXEC chown -R adguardhome:adguardhome /mnt/dietpi_userdata/adguardhome
+			G_EXEC chmod 0755 /mnt/dietpi_userdata/adguardhome/AdGuardHome
 
 			# Service
 			cat << '_EOF_' > /etc/systemd/system/adguardhome.service
@@ -9383,8 +9379,8 @@ StartLimitBurst=5
 [Service]
 User=adguardhome
 AmbientCapabilities=CAP_NET_BIND_SERVICE CAP_NET_RAW
-ExecStart=/opt/adguardhome/AdGuardHome -w /mnt/dietpi_userdata/adguardhome
-ExecReload=/opt/adguardhome/AdGuardHome -s reload
+ExecStart=/mnt/dietpi_userdata/adguardhome/AdGuardHome
+ExecReload=/mnt/dietpi_userdata/adguardhome/AdGuardHome -s reload
 Restart=on-failure
 RestartSec=5
 
@@ -14504,10 +14500,12 @@ _EOF_
 			if (( ${aSOFTWARE_INSTALL_STATE[182]} == 2 )) && grep -q '^[[:blank:]]*port:[[:blank:]][[:blank:]]*5335$' /etc/unbound/unbound.conf.d/dietpi.conf
 			then
 				G_DIETPI-NOTIFY 2 'Reconfiguring Unbound to work on its own'
-				grep '^[[:blank:]]*nameserver[[:blank:]]' /etc/resolv.conf | grep -qvE '[[:blank:]]127.0.0.1(:53)?$' || echo 'nameserver 9.9.9.9' >> /etc/resolv.conf # Failsafe
 				G_CONFIG_INJECT 'port:[[:blank:]]' '	port: 53' /etc/unbound/unbound.conf.d/dietpi.conf
 				G_CONFIG_INJECT 'interface:[[:blank:]]' '	interface: 0.0.0.0' /etc/unbound/unbound.conf.d/dietpi.conf
+				grep -E '^[[:blank:]]*nameserver[[:blank:]]+127.0.0.1:5335$' /etc/resolv.conf && sed -Ei '/^[[:blank:]]*nameserver[[:blank:]]+127.0.0.1:5335$/c\nameserver 127.0.0.1' /etc/resolv.conf # Failsafe
 				G_EXEC_NOEXIT=1 G_EXEC systemctl restart unbound
+			else
+				grep '^[[:blank:]]*nameserver[[:blank:]]' /etc/resolv.conf | grep -qvE '[[:blank:]]127.0.0.1(:53)?$' || echo 'nameserver 9.9.9.9' >> /etc/resolv.conf # Failsafe
 			fi
 		fi
 
@@ -14522,20 +14520,22 @@ _EOF_
 
 			fi
 			[[ -d '/etc/systemd/system/adguardhome.service.d' ]] && G_EXEC rm -R /etc/systemd/system/adguardhome.service.d
-			[[ -d '/opt/adguardhome' ]] && G_EXEC rm -R /opt/adguardhome
-			
+			[[ -d '/opt/adguardhome' ]] && G_EXEC rm -R /opt/adguardhome # v7.3 beta
+
 			# Remove user and home directory
-			getent passwd adguardhome > /dev/null && userdel adguardhome
-			G_EXEC rm -Rf /mnt/dietpi_userdata/adguardhome
+			getent passwd adguardhome > /dev/null && G_EXEC userdel adguardhome
+			[[ -d '/mnt/dietpi_userdata/adguardhome' ]] && G_EXEC rm -R /mnt/dietpi_userdata/adguardhome
 
 			# Unbound: Switch port to 53 if it is still installed
 			if (( ${aSOFTWARE_INSTALL_STATE[182]} == 2 )) && grep -q '^[[:blank:]]*port:[[:blank:]][[:blank:]]*5335$' /etc/unbound/unbound.conf.d/dietpi.conf
 			then
 				G_DIETPI-NOTIFY 2 'Reconfiguring Unbound to work on its own'
-				grep '^[[:blank:]]*nameserver[[:blank:]]' /etc/resolv.conf | grep -qvE '[[:blank:]]127.0.0.1(:53)?$' || echo 'nameserver 9.9.9.9' >> /etc/resolv.conf # Failsafe
 				G_CONFIG_INJECT 'port:[[:blank:]]' '	port: 53' /etc/unbound/unbound.conf.d/dietpi.conf
 				G_CONFIG_INJECT 'interface:[[:blank:]]' '	interface: 0.0.0.0' /etc/unbound/unbound.conf.d/dietpi.conf
+				grep -E '^[[:blank:]]*nameserver[[:blank:]]+127.0.0.1:5335$' /etc/resolv.conf && sed -Ei '/^[[:blank:]]*nameserver[[:blank:]]+127.0.0.1:5335$/c\nameserver 127.0.0.1' /etc/resolv.conf # Failsafe
 				G_EXEC_NOEXIT=1 G_EXEC systemctl restart unbound
+			else
+				grep '^[[:blank:]]*nameserver[[:blank:]]' /etc/resolv.conf | grep -qvE '[[:blank:]]127.0.0.1(:53)?$' || echo 'nameserver 9.9.9.9' >> /etc/resolv.conf # Failsafe
 			fi
 		fi
 
