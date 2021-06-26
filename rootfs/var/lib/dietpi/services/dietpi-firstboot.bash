@@ -155,9 +155,9 @@
 		# Set hostname
 		/boot/dietpi/func/change_hostname "$(sed -n '/^[[:blank:]]*AUTO_SETUP_NET_HOSTNAME=/{s/^[^=]*=//p;q}' /boot/dietpi.txt)"
 
-		# Set root # if automated firstrun setup was chosen, will be reverted after firstrun installs
 		if grep -q '^[[:blank:]]*AUTO_SETUP_AUTOMATED=1' /boot/dietpi.txt; then
 
+			# Enable root autologin on local console (/dev/tty1) and container console (/dev/console), reverted during firstrun setup
 			mkdir -p /etc/systemd/system/{getty@tty1,console-getty}.service.d
 			cat << '_EOF_' > /etc/systemd/system/getty@tty1.service.d/dietpi-autologin.conf
 [Service]
@@ -169,6 +169,12 @@ _EOF_
 ExecStart=
 ExecStart=-/sbin/agetty -a root --noclear --keep-baud console 115200,38400,9600 $TERM
 _EOF_
+			# Assume accepted license in automated installs: https://github.com/MichaIng/DietPi/pull/4477
+			rm /var/lib/dietpi/license.txt
+
+		elif grep -q '^[[:blank:]]*AUTO_SETUP_ACCEPT_LICENSE=1' /boot/dietpi.txt; then
+
+			rm /var/lib/dietpi/license.txt
 
 		fi
 
@@ -237,8 +243,8 @@ _EOF_
 
 			# Enable WiFi, disable Ethernet
 			ethernet_enabled=0
-			sed -i "/allow-hotplug wlan/c\allow-hotplug wlan$index_wlan" /etc/network/interfaces
-			sed -i "/allow-hotplug eth/c\#allow-hotplug eth$index_eth" /etc/network/interfaces
+			sed -Ei "/(allow-hotplug|auto)[[:blank:]]+wlan/c\allow-hotplug wlan$index_wlan" /etc/network/interfaces
+			sed -Ei "/(allow-hotplug|auto)[[:blank:]]+eth/c\#allow-hotplug eth$index_eth" /etc/network/interfaces
 
 			# Apply global SSID/keys from dietpi.txt to wpa_supplicant
 			/boot/dietpi/func/dietpi-wifidb 1
@@ -251,8 +257,8 @@ _EOF_
 
 			# Enable Eth, disable WiFi
 			wifi_enabled=0
-			sed -i "/allow-hotplug eth/c\allow-hotplug eth$index_eth" /etc/network/interfaces
-			sed -i "/allow-hotplug wlan/c\#allow-hotplug wlan$index_wlan" /etc/network/interfaces
+			sed -Ei "/(allow-hotplug|auto)[[:blank:]]+eth/c\allow-hotplug eth$index_eth" /etc/network/interfaces
+			sed -Ei "/(allow-hotplug|auto)[[:blank:]]+wlan/c\#allow-hotplug wlan$index_wlan" /etc/network/interfaces
 
 			# Disable WiFi kernel modules
 			/boot/dietpi/func/dietpi-set_hardware wifimodules disable

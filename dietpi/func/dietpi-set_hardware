@@ -24,7 +24,7 @@ $FP_SCRIPT	i2c			enable/disable/khz
 $FP_SCRIPT	spi			enable/disable
 $FP_SCRIPT	soundcard		target_card (non-matching name for reset to default). Add '-eq' to target_card string to enable ALSA equalizer on card. HW:x,x (specify target card and device index eg: HW:9,1)
 $FP_SCRIPT	remoteir		odroid_remote/justboom_ir_remote # Odroid/RPi only
-$FP_SCRIPT	lcdpanel		target_panel (none to remove all)
+$FP_SCRIPT	lcdpanel		target_panel (\"none\" to remove all)
 $FP_SCRIPT	headless		enable/disable
 $FP_SCRIPT	gpumemsplit		64/128/256... Range: 16-944, RPi only
 $FP_SCRIPT	rpi-camera		enable/disable
@@ -264,18 +264,13 @@ _EOF_
 
 				# Prevent any framebuffer from being allocated
 				G_CONFIG_INJECT 'max_framebuffers=' 'max_framebuffers=0' /boot/config.txt
-				# Apply lowest possible framebuffer size
-				G_CONFIG_INJECT 'framebuffer_width=' 'framebuffer_width=16' /boot/config.txt
-				G_CONFIG_INJECT 'framebuffer_height=' 'framebuffer_height=16' /boot/config.txt
-				G_CONFIG_INJECT 'max_framebuffer_width=' 'max_framebuffer_width=16' /boot/config.txt
-				G_CONFIG_INJECT 'max_framebuffer_height=' 'max_framebuffer_height=16' /boot/config.txt
-				# - Splash cannot be seen anyway without video output
+				# Splash cannot be seen anyway without video output
 				G_CONFIG_INJECT 'disable_splash=' 'disable_splash=1' /boot/config.txt
-				# - hdmi_blanking should not play a role, however mode 1 should be generally preferred, which on idle disables HDMI output completely instead of just blanking the screen
+				# hdmi_blanking should not play a role, however mode 1 should be generally preferred, which on idle disables HDMI output completely instead of just blanking the screen
 				G_CONFIG_INJECT 'hdmi_blanking=' 'hdmi_blanking=1' /boot/config.txt
-				# - Disable HDMI hotplug detection, which requires it to be generally responsive/active
+				# Disable HDMI hotplug detection, which requires it to be generally responsive/active
 				G_CONFIG_INJECT 'hdmi_ignore_hotplug=' 'hdmi_ignore_hotplug=1' /boot/config.txt
-				# - Disable SDTV on RPi4
+				# Disable SDTV on RPi4 (default)
 				G_EXEC sed -i '/^[[:blank:]]*enable_tvout=/c\#enable_tvout=0' /boot/config.txt
 
 			# Odroid C2
@@ -297,10 +292,7 @@ _EOF_
 			if (( $G_HW_MODEL < 10 )); then
 
 				G_EXEC sed -i '/^[[:blank:]]*max_framebuffers=/c\#max_framebuffers=2' /boot/config.txt
-				G_EXEC sed -i '/^[[:blank:]]*framebuffer_width=/c\#framebuffer_width=16' /boot/config.txt
-				G_EXEC sed -i '/^[[:blank:]]*framebuffer_height=/c\#framebuffer_height=16' /boot/config.txt
-				G_EXEC sed -i '/^[[:blank:]]*max_framebuffer_width=/c\#max_framebuffer_width=16' /boot/config.txt
-				G_EXEC sed -i '/^[[:blank:]]*max_framebuffer_height=/c\#max_framebuffer_height=16' /boot/config.txt
+				#G_EXEC sed -i '/^[[:blank:]]*disable_splash=/c\#disable_splash=0' /boot/config.txt
 				G_EXEC sed -i '/^[[:blank:]]*hdmi_blanking=/c\#hdmi_blanking=0' /boot/config.txt
 				G_EXEC sed -i '/^[[:blank:]]*hdmi_ignore_hotplug=/c\#hdmi_ignore_hotplug=0' /boot/config.txt
 				G_EXEC sed -i '/^[[:blank:]]*enable_tvout=/c\#enable_tvout=0' /boot/config.txt
@@ -658,6 +650,10 @@ _EOF_
 
 			Lcd_Panel_ESP01215E_Enable
 
+		elif [[ ${INPUT_DEVICE_VALUE,,} == 'allo-boss2-oled' ]]; then
+
+			OLED_Allo_Boss2_Enable
+
 		# Disable all
 		elif [[ $INPUT_DEVICE_VALUE == 'none' ]]; then
 
@@ -665,6 +661,7 @@ _EOF_
 			Lcd_Panel_Odroidcloudshell_Disable
 			Lcd_Panel_OdroidLCD35_Disable
 			Lcd_Panel_ESP01215E_Disable
+			OLED_Allo_Boss2_Disable
 
 		else
 
@@ -693,6 +690,8 @@ _EOF_
 	}
 
 	Lcd_Panel_ESP01215E_Disable(){
+
+		(( $G_HW_MODEL > 9 )) && return # Skip on non-RPi
 
 		G_EXEC sed -i '/^[[:blank:]]*hdmi_force_hotplug=/c\#hdmi_force_hotplug=1' /boot/config.txt
 		G_EXEC sed -i '/^[[:blank:]]*hdmi_group=/c\#hdmi_group=2' /boot/config.txt
@@ -994,6 +993,72 @@ _EOF_
 		fi
 		[[ -d '/etc/systemd/system/odroid-lcd35.service.d' ]] && G_EXEC rm -R /etc/systemd/system/odroid-lcd35.service.d
 		[[ -f '/etc/X11/xorg.conf.d/99-odroid-lcd35.conf' ]] && G_EXEC rm /etc/X11/xorg.conf.d/99-odroid-lcd35.conf
+
+	}
+
+	OLED_Allo_Boss2_Enable(){
+
+		(( $G_HW_MODEL > 9 )) && { Unsupported_Input_Mode; return 1; } # Exit path for non-RPi
+
+		# Enable I2C
+		INPUT_DEVICE_VALUE='enable' I2c_Main
+
+		# Install further requirements
+		G_AG_CHECK_INSTALL_PREREQ python3-{rpi.gpio,pil}
+
+		# Download and install Python 3 script
+		G_EXEC curl -sSfLO https://raw.githubusercontent.com/allocom/allo_boss2_oled_p3/main/boss2_oled_p3.tar.gz
+		G_EXEC tar xf boss2_oled_p3.tar.gz
+		[[ -d '/opt/allo_boss2_oled' ]] && G_EXEC rm -R /opt/allo_boss2_oled
+		G_EXEC mv boss2_oled_p3 /opt/allo_boss2_oled
+
+		# Create systemd service
+		cat << _EOF_ > /etc/systemd/system/allo_boss2_oled.service
+[Unit]
+Description=Allo Boss2 OLED (DietPi)
+After=sound.target
+
+[Service]
+SyslogIdentifier=Allo Boss2 OLED
+ExecStart=$(command -v python3) /opt/allo_boss2_oled/boss2_oled.py
+Restart=on-abort
+
+[Install]
+WantedBy=multi-user.target
+_EOF_
+		G_EXEC systemctl daemon-reload
+		G_EXEC systemctl unmask allo_boss2_oled
+		G_EXEC systemctl enable allo_boss2_oled
+
+		# Remove possible files from Allo installer
+		if [[ -f '/etc/systemd/system/boss2oled.service' ]]
+		then
+			G_EXEC systemctl disable --now boss2oled
+			G_EXEC rm /etc/systemd/system/boss2oled.service
+		fi
+		[[ -d '/etc/systemd/system/boss2oled.service.d' ]] && G_EXEC rm -R /etc/systemd/system/boss2oled.service.d
+		[[ -d '/opt/boss2_oled_p3' ]] && G_EXEC rm -R /opt/boss2_oled_p3
+		[[ -d '/opt/boss2_oled' ]] && G_EXEC rm -R /opt/boss2_oled
+
+	}
+
+	OLED_Allo_Boss2_Disable(){
+
+		(( $G_HW_MODEL > 9 )) && return # Skip on non-RPi
+
+		# Disable and remove service
+		if [[ -f '/etc/systemd/system/allo_boss2_oled.service' ]]
+		then
+			G_EXEC systemctl disable --now allo_boss2_oled
+			G_EXEC rm /etc/systemd/system/allo_boss2_oled.service
+		fi
+		[[ -d '/etc/systemd/system/allo_boss2_oled.service.d' ]] && G_EXEC rm -R /etc/systemd/system/allo_boss2_oled.service.d
+
+		# Remove scripts
+		[[ -d '/opt/allo_boss2_oled' ]] && G_EXEC rm -R /opt/allo_boss2_oled
+
+		# Disable I2C
+		INPUT_DEVICE_VALUE='disable' I2c_Main
 
 	}
 

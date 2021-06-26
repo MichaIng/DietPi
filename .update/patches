@@ -31,6 +31,11 @@ G_CHECK_ROOT_USER
 G_CHECK_ROOTFS_RW
 G_INIT
 
+# Prevent backup prompts during patching e.g. from DietPi-Software reinstalls
+export G_PROMPT_BACKUP_DISABLED=1
+# Prevent initial and final service control during DietPi-Software reinstalls
+export G_SERVICE_CONTROL=0
+
 # Version-based incremental patches
 Patch_7_0()
 {
@@ -199,6 +204,64 @@ then
 	G_DIETPI-NOTIFY 2 'Please run "dietpi-update" to repeat the regular update path.'
 	exit 1
 fi
+
+Patch_7_3()
+{
+	# If the user did not remove the "dietpi" sodoers manually, update it to allow "sudo -u <user> -g <group>" with all target users and groups.
+	# This is required to call our software CLI wrapper scripts, which contain "sudo -u <service_user>" to assure correct config and data is loaded.
+	[[ -f '/etc/sudoers.d/dietpi' ]] && echo 'dietpi ALL=(ALL:ALL) NOPASSWD: ALL' > /etc/sudoers.d/dietpi
+
+	# When haveged from Bullseye was installed on Buster (on ARM to workaround a bug), mark the related library as auto-installed so that it can be autoremoved when haveged itself is removed.
+	dpkg-query -s haveged &> /dev/null && dpkg-query -s libhavege2 &> /dev/null && G_EXEC apt-mark auto libhavege2
+
+	# Update DietPi-Backup filter file
+	if [[ -f '/boot/dietpi/.dietpi-backup_inc_exc' && $(head -1 /boot/dietpi/.dietpi-backup_inc_exc) != '# DietPi-Backup include/exclude filter' ]]
+	then
+		G_DIETPI-NOTIFY 2 'Updating DietPi-Backup filter file: /boot/dietpi/.dietpi-backup_inc_exc'
+		if grep -q '^[[:blank:]]*[^#]' /boot/dietpi/.dietpi-backup_inc_exc
+		then
+			cat << _EOF_ > .dietpi-backup_inc_exc
+# DietPi-Backup include/exclude filter
+
+# Prefix "-" exclude items, "+" include items which would match a wildcard exclude rule.
+# Suffix "/" match directories only, no files or symlinks.
+# Using wildcard "*" matches any item name or part of it.
+# Since the list is processed from top to bottom and the first match defines the result,
+#   includes need to be defined before their wildcard exclude rule
+#   and in case excludes before their wildcard include rule.
+# Symlinks are handled as such and never processed recursively.
+# Excluded directories are not processed recursively, so contained items cannot be included.
+# Hence, to include items within an excluded directory:
+# - Do not exclude the directory itself, but contained items via wildcard.
+# - Define includes first, to override the wildcard exclude rule.
+# - See the below default rules, how we exclude all items below /mnt
+#   but include the dietpi_userdata directory, if it is no symlink.
+# To prevent loops, the backup target dir, log and config are excluded internally.
+
++ /mnt/dietpi_userdata/
+- /mnt/*
+- /media/
+
+$(grep '^[[:blank:]]*[^#]' /boot/dietpi/.dietpi-backup_inc_exc)
+_EOF_
+			G_EXEC mv {,/boot/dietpi/}.dietpi-backup_inc_exc
+		else
+			G_EXEC rm /boot/dietpi/.dietpi-backup_inc_exc
+		fi
+	fi
+
+	# RPi: Remove deprecated I2C setting from config.txt
+	(( $G_HW_MODEL > 9 )) || G_EXEC sed -i '/dtparam=i2c1=/d' /boot/config.txt
+
+	# Tomcat 8: Remove obsolete install state
+	[[ -f '/boot/dietpi/.installed' ]] && grep -q '^[[:blank:]]*aSOFTWARE_INSTALL_STATE\[125\]=' /boot/dietpi/.installed && G_EXEC sed -i '/^[[:blank:]]*aSOFTWARE_INSTALL_STATE\[125\]=/d' /boot/dietpi/.installed
+
+	# Remove license (flag) file if AUTO_SETUP_AUTOMATED=1 is set, which would otherwise never happen on pre-v7.2 images, and if AUTO_SETUP_ACCEPT_LICENSE=1 is set, to assure the prompt is skipped when for some reason the script is reloaded between update and first installs.
+	[[ -f '/var/lib/dietpi/license.txt' ]] && grep -Eq '^[[:blank:]]*AUTO_SETUP_A(UTOMATED|CCEPT_LICENSE)=1' /boot/dietpi.txt && G_EXEC rm /var/lib/dietpi/license.txt
+
+	# Update Allo web UI with Squeezelite control fix and Allo Boss2 DAC support
+	[[ -f '/boot/dietpi/.installed' ]] && grep -q '^[[:blank:]]*aSOFTWARE_INSTALL_STATE\[160\]=2' /boot/dietpi/.installed && /boot/dietpi/dietpi-software reinstall 160
+}
 
 # Main loop
 while :
