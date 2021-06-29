@@ -1080,7 +1080,7 @@ INDEX_BROWSER_TARGET=$INDEX_BROWSER_TARGET"
 		aSOFTWARE_DESC[$software_id]='Matrix homeserver implementation'
 		aSOFTWARE_CATX[$software_id]=6
 		aSOFTWARE_DOCS[$software_id]='https://dietpi.com/docs/software/social/#synapse'
-		aSOFTWARE_DEPS[$software_id]='194'
+		aSOFTWARE_DEPS[$software_id]='194 16 130'
 		aSOFTWARE_INTERACTIVE[$software_id]=1
 
 		# Camera & Surveillance
@@ -3647,8 +3647,10 @@ Package: openssl libssl*\nPin: origin packages.sury.org\nPin-Priority: -1' > /et
 
 			Banner_Installing
 
-			# APT package (have to install from backports until official repo supports ARM)
-			G_AGI -t buster-backports matrix-synapse
+			# Install dependencies for building
+			G_AGI libffi-dev libssl-dev libjpeg-dev libxslt1-dev python3-psycopg2
+
+			pip3 install matrix-synapse
 
 		fi
 
@@ -10299,7 +10301,7 @@ _EOF_
 				do
 
 					G_WHIP_DEFAULT_ITEM=$port
-					if G_WHIP_INPUTBOX "${invalid_text}Please enter the network port, that should be used to access your WireGuard server:\n
+					if G_WHIP_INPUTBOX "${invalid_text}Please enter the network port that will be used to access your WireGuard server:\n
 NB: This port needs to be forwarded by your router and/or opened in your firewall settings. Default value is: 51820" && disable_error=1 G_CHECK_VALIDINT "$G_WHIP_RETURNED_VALUE" 0; then
 
 						port=$G_WHIP_RETURNED_VALUE
@@ -10851,19 +10853,58 @@ location = /.well-known/caldav  { return 301 /baikal/html/dav.php; }' > /etc/ngi
 
 			Banner_Configuration
 
+			G_EXEC mkdir -p /mnt/dietpi_userdata/synapse
+
 			G_EXEC sudo -u postgres psql -c "create role synapse with login password '$GLOBAL_PW';"
 			G_EXEC sudo -u postgres createdb --encoding=UTF8 --locale=C --template=template0 --owner=synapse synapse
 
-			dps_index=$software_id Download_Install 'homeserver.yaml' /etc/matrix-synapse/homeserver.yaml
+			invalid_text=
+			local servername=
+			local analytics=
+			while :
+			do
+				if G_WHIP_INPUTBOX "${invalid_text}Please enter the name for this homeserver.\nIt is recommended that this be the domain that this server will be hosted on."
+				then
+					servername=$G_WHIP_RETURNED_VALUE
+					break
+				else
+					invalid_text='[ERROR] Please enter a name for your Matrix homserver.\n\n'
+				fi
+			done
 
-			# Allow user to configure server
-			G_EXEC_OUTPUT=1 G_EXEC dpkg-reconfigure matrix-synapse
+			if G_WHIP_YESNO 'Would you like to report basic anonymous analytics, like number of users, to the Matrix foundation?'
+			then
+				analytics='yes'
+			else
+				analytics='no'
+			fi
 
-			G_CONFIG_INJECT '[[:blank:]]*#registration_shared_secret: ' "registration_shared_secret: $(openssl rand -hex 16)" /etc/matrix-synapse/homeserver.yaml
-			G_CONFIG_INJECT '[[:blank:]]*password: ' "    password: $GLOBAL_PW" /etc/matrix-synapse/homeserver.yaml
+			G_EXEC python3 -m synapse.app.homeserver --server-name $servername --config-path /mnt/dietpi_userdata/synapse/homeserver.yaml --generate-config --report-stats=$analytics
 
-			G_EXEC chown matrix-synapse:root /etc/matrix-synapse/homeserver.yaml
-			G_EXEC chmod 0660 /etc/matrix-synapse/conf.d/homeserver.yaml
+			G_CONFIG_INJECT '[[:blank:]]*#registration_shared_secret: ' "registration_shared_secret: $(openssl rand -hex 16)" /mnt/dietpi_userdata/homeserver.yaml
+			G_CONFIG_INJECT '[[:blank:]]*name: ' '  name: psycopg2' /mnt/dietpi_userdata/homeserver.yaml
+			G_CONFIG_INJECT '[[:blank:]]*database: ' "    user: synapse\n    password: $GLOBAL_PW\n    database: synapse\n    host: localhost\n    cp_min: 5\n    cp_max:10" /mnt/dietpi_userdata/homeserver.yaml
+
+			Create_User -d /mnt/dietpi_userdata/synapse synapse
+
+			G_EXEC chown -R synapse:synapse /mnt/dietpi_userdata/synapse
+			G_EXEC chmod 0660 /mnt/dietpi_userdata/synapse/homeserver.yaml
+
+			cat << '_EOF_' > /etc/systemd/system/synapse.service
+[Unit]
+Description=Synapse (DietPi)
+Wants=network-online.target
+After=network-online.target dietpi-boot.service
+
+[Service]
+SyslogIdentifier=Synapse
+User=synapse
+WorkingDirectory=/mnt/dietpi_userdata/synapse
+ExecStart=$(command -v synctl) start
+
+[Install]
+WantedBy=multi-user.target
+_EOF_
 
 			G_EXEC systemctl restart matrix-synapse
 
@@ -13839,8 +13880,8 @@ _EOF_
 
 			Banner_Uninstalling
 			
-			G_AGP matrix-synapse
-			[[ -d '/etc/matrix-synapse' ]] && rm -r /etc/matrix-synapse
+			pip3 uninstall -y matrix-synapse
+			[[ -d '/mnt/dietpi-userdata/synapse' ]] && rm -r /mnt/dietpi-userdata/synapse
 
 			sudo -u postgres dropdb synapse
 			sudo -u postgres dropuser synapse
