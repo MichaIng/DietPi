@@ -1962,21 +1962,21 @@ INDEX_BROWSER_TARGET=$INDEX_BROWSER_TARGET"
 		software_id=101
 
 		aSOFTWARE_NAME[$software_id]='Logrotate'
-		aSOFTWARE_DESC[$software_id]='rotates log files'
+		aSOFTWARE_DESC[$software_id]='Rotates and compresses old log files in /var/log'
 		aSOFTWARE_CATX[$software_id]=-1
 		aSOFTWARE_DOCS[$software_id]='https://dietpi.com/docs/software/log_system/#full-logging'
 		#------------------
 		software_id=102
 
 		aSOFTWARE_NAME[$software_id]='Rsyslog'
-		aSOFTWARE_DESC[$software_id]='system logging'
+		aSOFTWARE_DESC[$software_id]='Writes system logs (journalctl) as plain text files to /var/log'
 		aSOFTWARE_CATX[$software_id]=-1
 		aSOFTWARE_DOCS[$software_id]='https://dietpi.com/docs/software/log_system/#full-logging'
 		#------------------
 		software_id=103
 
 		aSOFTWARE_NAME[$software_id]='DietPi-RAMlog'
-		aSOFTWARE_DESC[$software_id]='minimal, optimised logging'
+		aSOFTWARE_DESC[$software_id]='Makes /var/log a RAM disk, preserves file structure on reboot'
 		aSOFTWARE_CATX[$software_id]=-1
 		aSOFTWARE_DOCS[$software_id]='https://dietpi.com/docs/software/log_system/#dietpi-ramlog'
 
@@ -2389,7 +2389,7 @@ _EOF_
 
 		G_EXEC mkdir -p /mnt/dietpi_userdata/{Music,Pictures,Video,downloads} /var/www /opt
 		G_EXEC chown dietpi:dietpi /mnt/dietpi_userdata/{Music,Pictures,Video,downloads}
-		G_EXEC chmod 775 /mnt/dietpi_userdata/{Music,Pictures,Video,downloads}
+		G_EXEC chmod 0775 /mnt/dietpi_userdata/{Music,Pictures,Video,downloads}
 
 	}
 
@@ -2398,7 +2398,7 @@ _EOF_
 		[[ -f '/mnt/dietpi_userdata/Music/fourdee_tech.ogg' ]] && return
 		G_EXEC curl -sSfL https://dietpi.com/downloads/audio/fourdee_tech.ogg -o /mnt/dietpi_userdata/Music/fourdee_tech.ogg
 		G_EXEC chown dietpi:dietpi /mnt/dietpi_userdata/Music/fourdee_tech.ogg
-		G_EXEC chmod 664 /mnt/dietpi_userdata/Music/fourdee_tech.ogg
+		G_EXEC chmod 0664 /mnt/dietpi_userdata/Music/fourdee_tech.ogg
 
 	}
 
@@ -3679,12 +3679,100 @@ Package: openssl libssl*\nPin: origin packages.sury.org\nPin-Priority: -1' > /et
 			then
 				G_AGI libopenjp2-7 libtiff5 libxcb1
 
-			# - ARMv8/x86_64: Only psycopg2 needs to be compiled
+			# - ARMv8: psycopg2 and PyNaCl (dependency) need to be compiled
+			elif [[ $G_HW_ARCH == 3 ]]
+			then
+				G_AGI gcc libpq-dev make
+
+			# - x86_64: Only psycopg2 needs to be compiled
 			else
 				G_AGI gcc libpq-dev
 			fi
 
+			# Install
 			G_EXEC_OUTPUT=1 G_EXEC pip3 install -U matrix-synapse psycopg2
+
+			# User
+			Create_User -d /mnt/dietpi_userdata/synapse synapse
+
+			# Service
+			cat << '_EOF_' > /etc/systemd/system/synapse.service
+[Unit]
+Description=Synapse (DietPi)
+Wants=network-online.target
+After=network-online.target dietpi-boot.service
+
+[Service]
+SyslogIdentifier=Synapse
+User=synapse
+WorkingDirectory=/mnt/dietpi_userdata/synapse
+ExecStart=synctl start --no-daemonize
+
+[Install]
+WantedBy=multi-user.target
+_EOF_
+			# Database
+			local synapse_pass=$(tr -dc '[:alnum:]' < /dev/random | head -c30)
+			if [[ $(sudo -u postgres psql -tAc "SELECT 1 FROM pg_roles WHERE rolname='synapse'") != 1 ]]
+			then
+				G_EXEC sudo -u postgres psql -c "CREATE ROLE synapse WITH LOGIN PASSWORD '$synapse_pass';"
+			else
+				G_EXEC sudo -u postgres psql -c "ALTER ROLE synapse WITH PASSWORD '$synapse_pass';"
+			fi
+			if [[ $(sudo -u postgres psql -tAc "SELECT 1 FROM pg_database WHERE datname='synapse'") != 1 ]]
+			then
+				G_EXEC sudo -u postgres createdb --encoding=UTF8 --locale=C --template=template0 --owner=synapse synapse
+			fi
+
+			# Config
+			if [[ ! -f '/mnt/dietpi_userdata/synapse/homeserver.yaml' ]]
+			then
+				local invalid_text=
+				while :
+				do
+					if G_WHIP_INPUTBOX "${invalid_text}Please enter the name for this homeserver.\nIt is recommended that this be the domain that this server will be hosted on."
+					then
+						local servername=$G_WHIP_RETURNED_VALUE
+						break
+					else
+						invalid_text='[ERROR] Please enter a name for your Matrix homserver.\n\n'
+					fi
+				done
+
+				if G_WHIP_BUTTON_OK_TEXT='Yes' G_WHIP_BUTTON_CANCEL_TEXT='No' G_WHIP_YESNO 'Would you like to report basic anonymous analytics, like number of users, to the Matrix foundation?'
+				then
+					local analytics='yes'
+				else
+					local analytics='no'
+				fi
+
+				G_EXEC mkdir -p /mnt/dietpi_userdata/synapse
+				G_EXEC cd /mnt/dietpi_userdata/synapse
+
+				G_EXEC python3 -m synapse.app.homeserver --server-name "$servername" --config-path /mnt/dietpi_userdata/synapse/homeserver.yaml --generate-config --report-stats="$analytics"
+
+				GCI_PASSWORD=1 G_CONFIG_INJECT 'registration_shared_secret:[[:blank:]]' "registration_shared_secret: $(openssl rand -hex 16)" homeserver.yaml
+				G_CONFIG_INJECT 'bind_addresses:[[:blank:]]' "    bind_addresses: ['::', '0.0.0.0']" homeserver.yaml
+				G_CONFIG_INJECT 'name:[[:blank:]]' '  name: psycopg2' homeserver.yaml
+				G_EXEC sed -i "s/^[[:blank:]]*database:[[:blank:]].*/    user: synapse\n    password: $synapse_pass\n    database: synapse\n    host: localhost\n    cp_min: 5\n    cp_max: 10/" homeserver.yaml
+
+				# Permissions
+				G_EXEC chown -R synapse:synapse .
+				G_EXEC chmod 0660 homeserver.yaml
+
+				G_EXEC cd /tmp/$G_PROGRAM_NAME
+
+				G_EXEC systemctl daemon-reload
+				G_EXEC systemctl start synapse
+				G_EXEC_OUTPUT=1 G_EXEC register_new_matrix_user -c /mnt/dietpi_userdata/synapse/homeserver.yaml http://localhost:8008
+			else
+				# Permissions
+				G_EXEC chown -R synapse:synapse /mnt/dietpi_userdata/synapse
+				G_EXEC chmod 0660 /mnt/dietpi_userdata/synapse/homeserver.yaml
+
+				# Update database password
+				G_EXEC sed -i "/^[[:blank:]]*database:\$/,/^[[:blank:]]*password:/s/^[[:blank:]]*password:.*/    password: $synapse_pass/" /mnt/dietpi_userdata/synapse/homeserver.yaml
+			fi
 
 		fi
 
@@ -10879,95 +10967,6 @@ location = /.well-known/caldav  { return 301 /baikal/html/dav.php; }' > /etc/ngi
 			(( ${aSOFTWARE_INSTALL_STATE[182]} == 2 )) && echo -e 'server:\n\tprivate-domain: "plex.direct"' > /etc/unbound/unbound.conf.d/dietpi-plex.conf
 
 			Download_Test_Media
-
-		fi
-
-		software_id=125 # Synapse Server
-		if (( ${aSOFTWARE_INSTALL_STATE[$software_id]} == 1 )); then
-
-			Banner_Configuration
-
-			# User
-			Create_User -d /mnt/dietpi_userdata/synapse synapse
-
-			# Service
-			cat << '_EOF_' > /etc/systemd/system/synapse.service
-[Unit]
-Description=Synapse (DietPi)
-Wants=network-online.target
-After=network-online.target dietpi-boot.service
-
-[Service]
-SyslogIdentifier=Synapse
-User=synapse
-WorkingDirectory=/mnt/dietpi_userdata/synapse
-ExecStart=synctl start --no-daemonize
-
-[Install]
-WantedBy=multi-user.target
-_EOF_
-			# Database
-			local synapse_pass=$(tr -dc '[:alnum:]' < /dev/random | head -c30)
-			if [[ $(sudo -u postgres psql -tAc "SELECT 1 FROM pg_roles WHERE rolname='synapse'") != 1 ]]
-			then
-				G_EXEC sudo -u postgres psql -c "CREATE ROLE synapse WITH LOGIN PASSWORD '$synapse_pass';"
-			else
-				G_EXEC sudo -u postgres psql -c "ALTER ROLE synapse WITH PASSWORD '$synapse_pass';"
-			fi
-			if [[ $(sudo -u postgres psql -tAc "SELECT 1 FROM pg_database WHERE datname='synapse'") != 1 ]]
-			then
-				G_EXEC sudo -u postgres createdb --encoding=UTF8 --locale=C --template=template0 --owner=synapse synapse
-			fi
-
-			# Config
-			if [[ ! -f '/mnt/dietpi_userdata/synapse/homeserver.yaml' ]]
-			then
-				local invalid_text=
-				while :
-				do
-					if G_WHIP_INPUTBOX "${invalid_text}Please enter the name for this homeserver.\nIt is recommended that this be the domain that this server will be hosted on."
-					then
-						local servername=$G_WHIP_RETURNED_VALUE
-						break
-					else
-						invalid_text='[ERROR] Please enter a name for your Matrix homserver.\n\n'
-					fi
-				done
-
-				if G_WHIP_BUTTON_OK_TEXT='Yes' G_WHIP_BUTTON_CANCEL_TEXT='No' G_WHIP_YESNO 'Would you like to report basic anonymous analytics, like number of users, to the Matrix foundation?'
-				then
-					local analytics='yes'
-				else
-					local analytics='no'
-				fi
-
-				G_EXEC mkdir -p /mnt/dietpi_userdata/synapse
-				G_EXEC cd /mnt/dietpi_userdata/synapse
-
-				G_EXEC python3 -m synapse.app.homeserver --server-name "$servername" --config-path /mnt/dietpi_userdata/synapse/homeserver.yaml --generate-config --report-stats="$analytics"
-
-				GCI_PASSWORD=1 G_CONFIG_INJECT 'registration_shared_secret:[[:blank:]]' "registration_shared_secret: $(openssl rand -hex 16)" homeserver.yaml
-				G_CONFIG_INJECT 'bind_addresses:[[:blank:]]' "    bind_addresses: ['::', '0.0.0.0']" homeserver.yaml
-				G_CONFIG_INJECT 'name:[[:blank:]]' '  name: psycopg2' homeserver.yaml
-				G_EXEC sed -i "s/^[[:blank:]]*database:[[:blank:]].*/    user: synapse\n    password: $synapse_pass\n    database: synapse\n    host: localhost\n    cp_min: 5\n    cp_max: 10/" homeserver.yaml
-
-				# Permissions
-				G_EXEC chown -R synapse:synapse .
-				G_EXEC chmod 0660 homeserver.yaml
-
-				G_EXEC cd /tmp/$G_PROGRAM_NAME
-
-				G_EXEC systemctl daemon-reload
-				G_EXEC systemctl start synapse
-				G_EXEC_OUTPUT=1 G_EXEC register_new_matrix_user -c /mnt/dietpi_userdata/synapse/homeserver.yaml http://localhost:8008
-			else
-				# Permissions
-				G_EXEC chown -R synapse:synapse /mnt/dietpi_userdata/synapse
-				G_EXEC chmod 0660 /mnt/dietpi_userdata/synapse/homeserver.yaml
-
-				# Update database password
-				G_EXEC sed -i "/^[[:blank:]]*database:\$/,/^[[:blank:]]*password:/s/^[[:blank:]]*password:.*/    password: $synapse_pass/" /mnt/dietpi_userdata/synapse/homeserver.yaml
-			fi
 
 		fi
 
