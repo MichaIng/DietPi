@@ -302,6 +302,7 @@ Links to hardware and software manufacturers, sources and build instructions use
 - [AdGuard Home](https://github.com/AdguardTeam/AdGuardHome)
 - [Snapcast](https://github.com/badaix/snapcast)
 - [K3s](https://github.com/k3s-io/k3s)
+- [Synapse](https://github.com/matrix-org/synapse)
 
 ---
 
