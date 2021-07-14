@@ -7416,15 +7416,18 @@ If you want to update ${aSOFTWARE_NAME[$software_id]}, please use its internal u
 			Create_User -G dialout,gpio,i2c -d $ha_home $ha_user
 
 			# Start with fresh instance, to allow clean pyenv and Python updates and fix broken instances. All userdata and configs are preserved in: /mnt/dietpi_userdata/homeassistant
-			[[ -d $ha_home/.pyenv ]] && rm -R $ha_home/.pyenv
-			[[ -d '/srv/homeassistant' ]] && rm -R /srv/homeassistant # pre-v6-27
+			[[ -d $ha_home/.pyenv ]] && G_EXEC rm -R $ha_home/.pyenv
+			[[ -d '/srv/homeassistant' ]] && G_EXEC rm -R /srv/homeassistant # pre-v6-27
 
-			# APT dependencies
+			# Build dependencies
 			# - MariaDB support: G_AGI libmariadb-dev
 			# - Read custom build dependencies
 			local custom_apt_deps=$(sed -n '/^[[:blank:]]*SOFTWARE_HOMEASSISTANT_APT_DEPS=/{s/^[^=]*=//p;q}' /boot/dietpi.txt)
-			DEPS_LIST="gcc libc6-dev make zlib1g-dev libbz2-dev libreadline-dev libssl-dev libsqlite3-dev libffi-dev $custom_apt_deps"
-			(( $G_HW_ARCH == 10 )) || DEPS_LIST+=' libjpeg-dev' # Pillow compiling on ARM
+			# - All: gcc, libc6-dev, make, libssl-dev, zlib1g-dev for Python built and libbz2-dev, libreadline-dev, libsqlite3-dev to suppress warnings
+			# - All: libffi-dev for cffi on ARMv6/7 and for python-slugify==4.0.1 on ARMv8/x86_64
+			DEPS_LIST="gcc libc6-dev make libssl-dev zlib1g-dev libffi-dev libbz2-dev libreadline-dev libsqlite3-dev $custom_apt_deps"
+			# - ARMv6/7: libjpeg-dev for Pillow and g++ for greenlet
+			[[ $G_HW_ARCH == [12] ]] && DEPS_LIST+=' libjpeg-dev g++'
 
 			# Install pyenv to $ha_home
 			G_EXEC mkdir -p $ha_home
@@ -7443,6 +7446,13 @@ export PYENV_ROOT='$ha_home/.pyenv'
 export PATH=\"\$PYENV_ROOT/bin:\$PATH\"
 eval \"\$(pyenv init --path)\"
 eval \"\$(pyenv init -)\"" > $ha_home/pyenv-activate.sh
+
+			# ARMv6/7: Create pip config to pull wheels from piwheels.org
+			if [[ $G_HW_ARCH == [12] ]]
+			then
+				G_EXEC $ha_home/.pip
+				G_EXEC eval "echo -e '[global]\nextra-index-url=https://www.piwheels.org/simple/' > $ha_home/.pip/pip.conf"
+			fi
 
 			G_EXEC_DESC='Installing Python with Home Assistant module into pyenv'
 			# - Read custom Python modules
@@ -7466,6 +7476,34 @@ exec hass -c '/mnt/dietpi_userdata/homeassistant'" > $ha_home/homeassistant-star
 			echo "#!/bin/dash
 exec sudo -u $ha_user dash -c '$ha_pyenv_activation; exec pip3 install -U homeassistant'" > $ha_home/homeassistant-update.sh
 			G_EXEC chmod +x $ha_home/homeassistant-update.sh
+
+			cat << '_EOF_' > /etc/systemd/system/home-assistant.service
+[Unit]
+Description=Home Assistant (DietPi)
+Wants=network-online.target
+After=network-online.target dietpi-boot.service mariadb.service
+
+[Service]
+SyslogIdentifier=homeassistant
+User=homeassistant
+ExecStart=/home/homeassistant/homeassistant-start.sh
+
+[Install]
+WantedBy=multi-user.target
+_EOF_
+			# Link config and data to DietPi userdata
+			if [[ ! -d '/mnt/dietpi_userdata/homeassistant' ]]
+			then
+				if [[ -d '/home/homeassistant/.homeassistant' ]]
+				then
+					G_EXEC mv /home/homeassistant/.homeassistant /mnt/dietpi_userdata/homeassistant
+				else
+					G_EXEC mkdir -p /mnt/dietpi_userdata/homeassistant
+				fi
+			fi
+			G_EXEC rm -Rf /home/homeassistant/.homeassistant
+			G_EXEC ln -s /mnt/dietpi_userdata/homeassistant /home/homeassistant/.homeassistant
+			G_EXEC chown -R homeassistant:homeassistant /mnt/dietpi_userdata/homeassistant
 
 		fi
 
@@ -12803,41 +12841,6 @@ _EOF_
 
 		fi
 
-		software_id=157 # Home Assistant
-		if (( ${aSOFTWARE_INSTALL_STATE[$software_id]} == 1 )); then
-
-			Banner_Configuration
-
-			cat << '_EOF_' > /etc/systemd/system/home-assistant.service
-[Unit]
-Description=Home Assistant (DietPi)
-Wants=network-online.target
-After=network-online.target mariadb.service
-
-[Service]
-SyslogIdentifier=homeassistant
-User=homeassistant
-ExecStart=/home/homeassistant/homeassistant-start.sh
-
-[Install]
-WantedBy=multi-user.target
-_EOF_
-			# Link to the default ha location for the homeassistant user, this makes
-			# the configuration avaliable for the user to edit. Configuration generated
-			# when service is started at /home/homeassistant/.homeassistant
-			# - Move default home location to userdata, if not existing yet
-			if [[ ! -d '/mnt/dietpi_userdata/homeassistant' ]]; then
-
-				[[ -d '/home/homeassistant/.homeassistant' ]] && G_EXEC mv /home/homeassistant/.homeassistant /mnt/dietpi_userdata/homeassistant
-				G_EXEC mkdir -p /mnt/dietpi_userdata/homeassistant
-
-			fi
-			rm -Rf /home/homeassistant/.homeassistant
-			G_EXEC ln -s /mnt/dietpi_userdata/homeassistant /home/homeassistant/.homeassistant
-			G_EXEC chown -R homeassistant:homeassistant /mnt/dietpi_userdata/homeassistant
-
-		fi
-
 		software_id=140 # Domoticz: https://www.domoticz.com/wiki/Linux
 		if (( ${aSOFTWARE_INSTALL_STATE[$software_id]} == 1 )); then
 
@@ -15557,19 +15560,18 @@ _EOF_
 			Banner_Uninstalling
 
 			# Service
-			if [[ -f '/etc/systemd/system/home-assistant.service' ]]; then
-
-				systemctl disable --now home-assistant
-				rm -R /etc/systemd/system/home-assistant.service*
-
+			if [[ -f '/etc/systemd/system/home-assistant.service' ]]
+			then
+				G_EXEC systemctl disable --now home-assistant
+				G_EXEC rm /etc/systemd/system/home-assistant.service
 			fi
-			[[ -d '/etc/systemd/system/home-assistant.service.d' ]] && rm -R /etc/systemd/system/home-assistant.service.d
+			[[ -d '/etc/systemd/system/home-assistant.service.d' ]] && G_EXEC rm -R /etc/systemd/system/home-assistant.service.d
 
 			# User and pyenv
-			getent passwd homeassistant > /dev/null && userdel homeassistant
-			getent group homeassistant > /dev/null && groupdel homeassistant
-			[[ -d '/home/homeassistant' ]] && rm -R /home/homeassistant
-			[[ -d '/srv/homeassistant' ]] && rm -R /srv/homeassistant # pre-v6-27
+			getent passwd homeassistant > /dev/null && G_EXEC userdel homeassistant
+			getent group homeassistant > /dev/null && G_EXEC groupdel homeassistant
+			[[ -d '/home/homeassistant' ]] && G_EXEC rm -R /home/homeassistant
+			[[ -d '/srv/homeassistant' ]] && G_EXEC rm -R /srv/homeassistant # pre-v6-27
 
 			G_DIETPI-NOTIFY 2 'Home Assistant data and settings are not removed: /mnt/dietpi_userdata/homeassistant
  - You might want to do this manually: rm -R /mnt/dietpi_userdata/homeassistant'
