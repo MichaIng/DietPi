@@ -401,7 +401,7 @@ INDEX_BROWSER_TARGET=$INDEX_BROWSER_TARGET"
 		aSOFTWARE_DESC[$software_id]='fork of ympd with improved features'
 		aSOFTWARE_CATX[$software_id]=2
 		aSOFTWARE_DOCS[$software_id]='https://dietpi.com/docs/software/media/#mympd'
-		aSOFTWARE_DEPS[$software_id]='5 16 128'
+		aSOFTWARE_DEPS[$software_id]='5 128'
 		#------------------
 		software_id=119
 
@@ -4093,15 +4093,44 @@ _EOF_
 
 			Banner_Installing
 
+			# Install dependencies: https://github.com/jcorporation/myMPD/blob/master/build.sh#L615-L616
+			DEPS_LIST='make gcc cmake perl libc6-dev libssl-dev libid3tag0-dev libflac-dev liblua5.3-dev pkg-config libpcre3-dev'
+
 			# Download source
 			Download_Install 'https://github.com/jcorporation/myMPD/archive/master.tar.gz'
-			# Install dependencies, build and install myMPD
+
+			# Build and install myMPD
 			G_EXEC cd myMPD-master
-			G_EXEC ./build.sh installdeps
 			G_EXEC ./build.sh releaseinstall
+
 			# Cleanup
 			G_EXEC cd /tmp/$G_PROGRAM_NAME
 			G_EXEC_NOEXIT=1 G_EXEC rm -R myMPD-master
+
+			# User: Switch to primary group "dietpi" to allow media access and create media files as "dietpi" group: https://github.com/MichaIng/DietPi/issues/3382
+			G_EXEC usermod -g dietpi mympd
+			getent group mympd > /dev/null && G_EXEC_NOEXIT=1 G_EXEC groupdel mympd
+
+			# Config: Create on fresh install
+			# - On reinstall /var/lib/mympd exists, so use its existence as reinstall flag
+			if [[ ! -d '/var/lib/mympd' ]]
+			then
+				export MYMPD_HTTP_PORT=1333
+				export MYMPD_SSL=false
+				export MYMPD_MPD_HOST='/run/mpd/socket'
+				export MYMPD_LOGLEVEL=4
+				G_EXEC mympd -c
+				G_EXEC mkdir -pm 0700 /var/lib/mympd/state
+				echo '/mnt/dietpi_userdata/Music' > /var/lib/mympd/state/playlist_directory
+				echo '/mnt/dietpi_userdata/Music' > /var/lib/mympd/state/music_directory
+				G_EXEC chmod 0600 /var/lib/mympd/state/*
+				G_EXEC chown -R mympd:dietpi /var/lib/mympd/state
+			fi
+
+			# myMPD pre-v8.0.0 migration: Remove obsolete file
+			[[ -f '/etc/mympd.conf' ]] && G_EXEC_NOEXIT=1 G_EXEC rm /etc/mympd.conf
+			[[ -f '/etc/mympd.conf.dist' ]] && G_EXEC_NOEXIT=1 G_EXEC rm /etc/mympd.conf.dist
+			command -v mympd-config > /dev/null && G_EXEC rm "$(command -v mympd-config)"
 
 		fi
 
@@ -9058,28 +9087,6 @@ WantedBy=multi-user.target
 _EOF_
 		fi
 
-		software_id=148 # myMPD
-		if (( ${aSOFTWARE_INSTALL_STATE[$software_id]} == 1 )); then
-
-			Banner_Configuration
-
-			# Switch to primary group "dietpi" to allow media access and create media files with "dietpi" group: https://github.com/MichaIng/DietPi/issues/3382
-			G_EXEC usermod -g dietpi mympd
-			getent group mympd > /dev/null && G_EXEC_NOFAIL=1 G_EXEC delgroup mympd
-
-			# Adjust config file on fresh install
-			# - On reinstall /etc/mympd/mympd.conf.dist will be created, so use its existence as reinstall flag
-			if [[ ! -f '/etc/mympd.conf.dist' ]]; then
-
-				G_CONFIG_INJECT 'host[[:blank:]]*=' 'host = /run/mpd/socket' /etc/mympd.conf '^\[mpd\]'
-				G_CONFIG_INJECT 'playlistdirectory[[:blank:]]*=' 'playlistdirectory = /mnt/dietpi_userdata/Music' /etc/mympd.conf '^\[mpd\]'
-				G_CONFIG_INJECT 'httpport[[:blank:]]*=' 'httpport = 1333' /etc/mympd.conf '^\[webserver\]'
-				G_CONFIG_INJECT 'ssl[[:blank:]]*=' 'ssl = false' /etc/mympd.conf '^\[webserver\]'
-
-			fi
-
-		fi
-
 		software_id=121 # Roon Bridge
 		if (( ${aSOFTWARE_INSTALL_STATE[$software_id]} == 1 )); then
 
@@ -13855,18 +13862,21 @@ _EOF_
 		software_id=148 # myMPD
 		if (( ${aSOFTWARE_INSTALL_STATE[$software_id]} == -1 )); then
 
-			if [[ -f '/lib/systemd/system/mympd.service' ]]; then
-
-				systemctl unmask mympd
-				systemctl disable --now mympd
-				rm -v /lib/systemd/system/mympd.service
-
+			if [[ -f '/lib/systemd/system/mympd.service' ]]
+			then
+				G_EXEC systemctl unmask mympd
+				G_EXEC systemctl disable --now mympd
+				G_EXEC rm /lib/systemd/system/mympd.service
 			fi
-			[[ -d '/etc/systemd/system/mympd.service.d' ]] && rm -R /etc/systemd/system/mympd.service.d
-			getent passwd mympd > /dev/null && userdel mympd
-			getent group mympd > /dev/null && groupdel mympd # pre-v6.29
-			command -v mympd > /dev/null && rm -v "$(command -v mympd)"
-			rm -Rf /{etc,var/lib,usr/share}/mympd /etc/mympd.conf* /usr/share/man/man1/mympd.*
+			[[ -d '/etc/systemd/system/mympd.service.d' ]] && G_EXEC rm -R /etc/systemd/system/mympd.service.d
+
+			getent passwd mympd > /dev/null && G_EXEC_NOEXIT=1 G_EXEC userdel mympd
+			getent group mympd > /dev/null && G_EXEC_NOEXIT=1 G_EXEC groupdel mympd # pre-v6.29
+
+			command -v mympd > /dev/null && G_EXEC rm "$(command -v mympd)"
+			command -v mympd-config > /dev/null && G_EXEC rm "$(command -v mympd-config)" # myMPD pre-v8.0.0
+			command -v mympd-script > /dev/null && G_EXEC rm "$(command -v mympd-script)"
+			G_EXEC rm -Rf /{usr/share/doc,var/lib}/mympd /usr/share/man/man1/mympd.* /etc/mympd.conf* # /etc: myMPD pre-v8.0.0
 
 		fi
 
