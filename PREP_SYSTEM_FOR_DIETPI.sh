@@ -50,7 +50,7 @@
 	export PATH='/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin'
 
 	# Make /tmp a tmpfs if it is not yet a dedicated mount
-	findmnt /tmp > /dev/null || mount -t tmpfs none /tmp
+	findmnt -M /tmp > /dev/null || mount -t tmpfs tmpfs /tmp
 
 	# Work inside /tmp tmpfs to reduce disk I/O and speed up download and unpacking
 	# - Save full script path beforehand: https://github.com/MichaIng/DietPi/pull/2341#discussion_r241784962
@@ -575,12 +575,28 @@ Currently installed: $G_DISTRO_NAME (ID: $G_DISTRO)"; then
 		G_EXEC_DESC='Clean download location' G_EXEC rm -R "DietPi-$G_GITBRANCH"
 		G_EXEC_DESC='Set execute permissions for DietPi scripts' G_EXEC chmod -R +x /boot/dietpi /var/lib/dietpi/services /etc/cron.*/dietpi
 
-		# Apply MOTD live-patches
-		G_EXEC_DESC='Applying live-patches to fix known bugs in this DietPi version'
-		G_EXEC curl -sSfLO https://dietpi.com/motd
-		. ./motd
-		G_EXEC rm motd
-		unset -v motd
+		G_DIETPI-NOTIFY 2 'Storing DietPi version info:'
+		G_CONFIG_INJECT 'DEV_GITBRANCH=' "DEV_GITBRANCH=$G_GITBRANCH" /boot/dietpi.txt
+		G_CONFIG_INJECT 'DEV_GITOWNER=' "DEV_GITOWNER=$G_GITOWNER" /boot/dietpi.txt
+		G_VERSIONDB_SAVE
+		G_EXEC cp /boot/dietpi/.version /var/lib/dietpi/.dietpi_image_version
+
+		# Apply live patches
+		G_DIETPI-NOTIFY 2 'Applying DietPi live patches to fix known bugs in this version'
+		for i in "${!G_LIVE_PATCH[@]}"
+		do
+			if eval "${G_LIVE_PATCH_COND[$i]}"
+			then
+				G_DIETPI-NOTIFY 2 "Applying live patch $i"
+				eval "${G_LIVE_PATCH[$i]}"
+				G_LIVE_PATCH_STATUS[$i]='applied'
+			else
+				G_LIVE_PATCH_STATUS[$i]='not applicable'
+			fi
+
+			# Store new status of live patch to /boot/dietpi/.version
+			G_CONFIG_INJECT "G_LIVE_PATCH_STATUS\[$i\]=" "G_LIVE_PATCH_STATUS[$i]='${G_LIVE_PATCH_STATUS[$i]}'" /boot/dietpi/.version.version
+		done
 
 		G_EXEC systemctl daemon-reload
 
@@ -1751,14 +1767,13 @@ _EOF_
 		G_DIETPI-NOTIFY 2 'Resetting DietPi auto-generated settings and flag files'
 		rm -v /boot/dietpi/.??*
 
+		G_EXEC cp /var/lib/dietpi/.dietpi_image_version /boot/dietpi/.version
+
 		G_DIETPI-NOTIFY 2 'Set init .install_stage to -1 (first boot)'
 		echo -1 > /boot/dietpi/.install_stage
 
 		G_DIETPI-NOTIFY 2 'Writing PREP information to file'
-		cat << _EOF_ > /boot/dietpi/.prep_info
-$IMAGE_CREATOR
-$PREIMAGE_INFO
-_EOF_
+		echo -e "$IMAGE_CREATOR\n$PREIMAGE_INFO" > /boot/dietpi/.prep_info
 
 		G_DIETPI-NOTIFY 2 'Generating GPLv2 license readme'
 		cat << _EOF_ > /var/lib/dietpi/license.txt
@@ -1781,12 +1796,6 @@ _EOF_
 
 		G_EXEC_DESC='Enabling automated partition and file system resize for first boot' G_EXEC systemctl enable dietpi-fs_partition_resize
 		G_EXEC_DESC='Enabling first boot installation process' G_EXEC systemctl enable dietpi-firstboot
-
-		G_DIETPI-NOTIFY 2 'Storing DietPi version info:'
-		G_CONFIG_INJECT 'DEV_GITBRANCH=' "DEV_GITBRANCH=$G_GITBRANCH" /boot/dietpi.txt
-		G_CONFIG_INJECT 'DEV_GITOWNER=' "DEV_GITOWNER=$G_GITOWNER" /boot/dietpi.txt
-		G_VERSIONDB_SAVE
-		G_EXEC cp /boot/dietpi/.version /var/lib/dietpi/.dietpi_image_version
 
 		G_DIETPI-NOTIFY 2 'Clearing lost+found'
 		rm -Rfv /lost+found/{,.??,.[^.]}*
