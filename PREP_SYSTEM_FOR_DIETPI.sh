@@ -588,7 +588,7 @@ Currently installed: $G_DISTRO_NAME (ID: $G_DISTRO)"; then
 			if eval "${G_LIVE_PATCH_COND[$i]}"
 			then
 				G_DIETPI-NOTIFY 2 "Applying live patch $i"
-				eval "${G_LIVE_PATCH[@]}"
+				eval "${G_LIVE_PATCH[$i]}"
 				G_LIVE_PATCH_STATUS[$i]='applied'
 			else
 				G_LIVE_PATCH_STATUS[$i]='not applicable'
