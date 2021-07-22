@@ -10,21 +10,22 @@
 	#
 	# Info:
 	# - Location: /boot/dietpi/dietpi-update
-	# - Updates DietPi from Git or dietpi.com repo
-	# - Uses pre-patch_file for patches that need to be done prior to APT calls and DietPi code update
-	# - Uses patch_file for incremental patching after APT calls and DietPi code update
+	# - Updates DietPi from a chosen GitHub repository
+	# - Uses pre-patch_file/pre-patches for patches that need to be done prior to APT calls or DietPi code updates
+	# - Uses patch_file/patches for incremental patching after APT calls and DietPi code updates
 	#
 	# Usage:
-	# - dietpi-update	= Check for DietPi update and in case open interactive menu
-	#			  Else, if CONFIG_CHECK_APT_UPDATES is set, check for APT updates and store results to /run/dietpi/.apt_updates to be used by DietPi-Banner
+	# - dietpi-update	= Check for DietPi update and if available open interactive menu
+	#			  Else, if CONFIG_CHECK_APT_UPDATES=[12] is set, check for APT updates and store results to /run/dietpi/.apt_updates to be used by DietPi-Banner
 	# - dietpi-update 1	= Check for DietPi update and in case apply noninteractively
-	#			  Else, if CONFIG_CHECK_APT_UPDATES=2 is set, check for and apply APT upgrades noninteractively.
-	# - dietpi-update 2	= Check for DietPi update only and in case store result to /run/dietpi/.update_available to be used by DietPi-Banner
-	#			  If CONFIG_CHECK_APT_UPDATES is set, check for APT updates and store results to /run/dietpi/.apt_updates to be used by DietPi-Banner
+	#			  Else, if CONFIG_CHECK_APT_UPDATES=2 is set, check for and apply APT updates noninteractively
+	# - dietpi-update 2	= Check for DietPi update and in case store result to /run/dietpi/.update_available to be used by DietPi-Banner
+	#			  Else, if CONFIG_CHECK_APT_UPDATES=[12] is set, check for APT updates and store results to /run/dietpi/.apt_updates to be used by DietPi-Banner
 	# - dietpi-update -1	= Like "1" but internally reduce subversion by 1 to reapply the last update, e.g. to apply latest dev branch changes
 	#////////////////////////////////////
 
 	# Import DietPi-Globals --------------------------------------------------------------
+	G_LIVE_PATCH_STATUS=() # Reset potentially exported array, to be freshly sourced via DietPi-Globals
 	. /boot/dietpi/func/dietpi-globals
 	readonly G_PROGRAM_NAME='DietPi-Update'
 	G_CHECK_ROOT_USER
@@ -33,7 +34,7 @@
 	# Import DietPi-Globals --------------------------------------------------------------
 
 	# Grab input
-	disable_error=1 G_CHECK_VALIDINT "$1" && INPUT=$1 || INPUT=0
+	[[ $1 =~ ^(-?1|2)$ ]] && INPUT=$1 || INPUT=0
 
 	# Prefix G_DIETPI-NOTIFY 3 header text with "Phase" instead of "Mode" when not checking for available updates only
 	[[ $INPUT == 2 ]] || G_NOTIFY_3_MODE='Phase'
@@ -63,29 +64,33 @@
 	G_MIN_DEBIAN=
 	# - Alternative Git branch to automatically migrate to when Debian version is too low
 	G_OLD_DEBIAN_BRANCH=
+	# - Live patch arrays
+	G_LIVE_PATCH_DESC=()
+	G_LIVE_PATCH_COND=()
+	G_LIVE_PATCH=()
 
 	# Version info to print to console
 	INFO_CURRENT_VERSION=
-	INFO_SERVER_VERSION=
+	INFO_REMOTE_VERSION=
 	INFO_VERSIONS_UPDATE(){
 
 		INFO_CURRENT_VERSION="Current version : v$G_DIETPI_VERSION_CORE.$G_DIETPI_VERSION_SUB.$G_DIETPI_VERSION_RC"
-		INFO_SERVER_VERSION="Latest version  : v$G_REMOTE_VERSION_CORE.$G_REMOTE_VERSION_SUB.$G_REMOTE_VERSION_RC"
+		INFO_REMOTE_VERSION="Latest version  : v$G_REMOTE_VERSION_CORE.$G_REMOTE_VERSION_SUB.$G_REMOTE_VERSION_RC"
 
 		# Show Git repo, when it changed
 		[[ $G_GITBRANCH != "$GITBRANCH_TARGET" || $G_GITOWNER != "$GITOWNER_TARGET" ]] || return
 
 		INFO_CURRENT_VERSION+=" (branch: $G_GITOWNER/$G_GITBRANCH)"
-		INFO_SERVER_VERSION+=" (branch: $GITOWNER_TARGET/$GITBRANCH_TARGET)"
+		INFO_REMOTE_VERSION+=" (branch: $GITOWNER_TARGET/$GITBRANCH_TARGET)"
 
 	}
 
-	Get_Server_Version(){
+	Get_Remote_Version(){
 
 		local url="https://raw.githubusercontent.com/$GITOWNER_TARGET/DietPi/$GITBRANCH_TARGET/.update/version"
 
-		G_DIETPI-NOTIFY 2 "Getting repository version: $url"
-		if curl -sSfL "$url" -o version; then
+		G_DIETPI-NOTIFY 2 "Getting latest version from: $url"
+		if curl -sSfLO "$url"; then
 
 			# Source file
 			. version
@@ -95,23 +100,24 @@
 				disable_error=1 G_CHECK_VALIDINT "$G_REMOTE_VERSION_SUB" &&
 				disable_error=1 G_CHECK_VALIDINT "$G_REMOTE_VERSION_RC"; then
 
-				G_DIETPI-NOTIFY 0 'Got valid repository version'
+				G_DIETPI-NOTIFY 0 "Got valid latest version: $G_REMOTE_VERSION_CORE.$G_REMOTE_VERSION_SUB.$G_REMOTE_VERSION_RC"
 				return 0
 
 			else
 
-				G_DIETPI-NOTIFY 1 "Got invalid repository version (${G_REMOTE_VERSION_CORE:-NULL}.${G_REMOTE_VERSION_SUB:-NULL}.${G_REMOTE_VERSION_RC:-NULL}). Please check the target Git reposiory and your network connection, then rerun dietpi-update."
+				G_DIETPI-NOTIFY 1 "Got invalid latest version: ${G_REMOTE_VERSION_CORE:-NULL}.${G_REMOTE_VERSION_SUB:-NULL}.${G_REMOTE_VERSION_RC:-NULL}"
 
 			fi
 
 		else
 
-			G_DIETPI-NOTIFY 1 'Unable to get repository version. Please check your network connection, then rerun dietpi-update.'
+			G_DIETPI-NOTIFY 1 'Unable to get latest version.'
 
 		fi
 
 		# No valid update server response
-		G_DIETPI-NOTIFY 1 'If this error persists, please report at: https://github.com/MichaIng/DietPi/issues'
+		G_DIETPI-NOTIFY 2 'Please check the target Git repository and your network connection, then rerun dietpi-update.'
+		G_DIETPI-NOTIFY 2 'If this error persists, please report at: https://github.com/MichaIng/DietPi/issues'
 		return 1
 
 	}
@@ -126,7 +132,7 @@
 			G_DIETPI-NOTIFY 2 "Your Debian version is too low to update to the current branch: $G_DISTRO_NAME ($G_DISTRO)"
 			G_DIETPI-NOTIFY 2 "We're switching to an alternative branch: $G_OLD_DEBIAN_BRANCH"
 			GITBRANCH_TARGET=$G_OLD_DEBIAN_BRANCH
-			Get_Server_Version || return 1
+			Get_Remote_Version || return 1
 			G_CONFIG_INJECT 'DEV_GITBRANCH=' "DEV_GITBRANCH=$GITBRANCH_TARGET" /boot/dietpi.txt
 
 		elif (( $G_DIETPI_VERSION_CORE < $G_MIN_VERSION_CORE || ( $G_DIETPI_VERSION_CORE == $G_MIN_VERSION_CORE && $G_DIETPI_VERSION_SUB < $G_MIN_VERSION_SUB ) ))
@@ -134,7 +140,7 @@
 			G_DIETPI-NOTIFY 2 "Your DietPi version is too low to update to the current branch: v$G_DIETPI_VERSION_CORE.$G_DIETPI_VERSION_SUB"
 			G_DIETPI-NOTIFY 2 "We're switching to an alternative branch: $G_OLD_VERSION_BRANCH"
 			GITBRANCH_TARGET=$G_OLD_VERSION_BRANCH
-			Get_Server_Version || return 1
+			Get_Remote_Version || return 1
 			G_CONFIG_INJECT 'DEV_GITBRANCH=' "DEV_GITBRANCH=$GITBRANCH_TARGET" /boot/dietpi.txt
 		fi
 	}
@@ -181,10 +187,74 @@
 
 		INFO_VERSIONS_UPDATE
 		G_DIETPI-NOTIFY 2 "$INFO_CURRENT_VERSION"
-		G_DIETPI-NOTIFY 2 "$INFO_SERVER_VERSION"
+		G_DIETPI-NOTIFY 2 "$INFO_REMOTE_VERSION"
 
 		return $result
 
+	}
+
+	Check_Live_Patches()
+	{
+		# Skip live patches when Git repo changed and remove flag, else patches for repo code may not match installed DietPi code
+		[[ $G_GITBRANCH == "$GITBRANCH_TARGET" && $G_GITOWNER == "$GITOWNER_TARGET" ]] || { [[ -f '/run/dietpi/.live_patches' ]] && rm /run/dietpi/.live_patches; return 1; }
+
+		G_DIETPI-NOTIFY 2 'Checking for available live patches'
+
+		# Loop through live patches sourced from version file in Get_Remote_Version()
+		local i
+		for i in "${!G_LIVE_PATCH[@]}"
+		do
+			# Check whether all expected array entries are set
+			if [[ ${G_LIVE_PATCH[$i]} && ${G_LIVE_PATCH_DESC[$i]} && ${G_LIVE_PATCH_COND[$i]} ]]
+			then
+				G_DIETPI-NOTIFY 2 "Found valid live patch $i:\n - Description: ${G_LIVE_PATCH_DESC[$i]}\n - Condition: ${G_LIVE_PATCH_COND[$i]}\n - Patch: ${G_LIVE_PATCH[$i]}"
+
+				# Skip patches already known
+				[[ ${G_LIVE_PATCH_STATUS[$i]} ]] && { G_DIETPI-NOTIFY 2 "Live patch $i is already known."; continue; }
+
+				# Check whether patch is applicable or not
+				if eval "${G_LIVE_PATCH_COND[$i]}"
+				then
+					G_DIETPI-NOTIFY 2 "Live patch $i is applicable on your system"
+					G_LIVE_PATCH_STATUS[$i]='not applied'
+
+					# When checking for updates only, store flag file
+					[[ $INPUT == 2 ]] && > /run/dietpi/.live_patches
+				else
+					G_DIETPI-NOTIFY 2 "Live patch $i is not applicable on your system"
+					G_LIVE_PATCH_STATUS[$i]='not applicable'
+				fi
+
+				# Store status of new live patch to /boot/dietpi/.version to be sourced by future DietPi-Update executions
+				G_CONFIG_INJECT "G_LIVE_PATCH_STATUS\[$i\]=" "G_LIVE_PATCH_STATUS[$i]='${G_LIVE_PATCH_STATUS[$i]}'" /boot/dietpi/.version
+			else
+				G_DIETPI-NOTIFY 1 "Found invalid live patch $i:\n${G_LIVE_PATCH_DESC[$i]:-NULL}\n - Condition: ${G_LIVE_PATCH_COND[$i]:-NULL}\n - Patch: ${G_LIVE_PATCH[$i]:-NULL}"
+				G_DIETPI-NOTIFY 1 "Please report this issue at: https://github.com/$GITOWNER/DietPi/issues"
+				unset -v "G_LIVE_PATCH[$i]" "G_LIVE_PATCH_DESC[$i]" "G_LIVE_PATCH_COND[$i]"
+			fi
+
+			# Remove flag file when patches have been applied or will be shown in menu (no check only mode)
+			[[ $INPUT != 2 && -f '/run/dietpi/.live_patches' ]] && rm /run/dietpi/.live_patches
+		done
+
+		# No live patches available
+		[[ ${G_LIVE_PATCH[0]} ]] || { G_DIETPI-NOTIFY 2 'No live patches are currently available'; return 1; }
+	}
+
+	# $1: Optional argument to apply a single live patch only, used in menu
+	Apply_Live_Patches()
+	{
+		# If no argument given, apply all applicable and not applied live patches
+		for i in "${1:-${!G_LIVE_PATCH[@]}}"
+		do
+			[[ ${G_LIVE_PATCH_STATUS[$i]} == 'not applied' ]] || continue
+			G_DIETPI-NOTIFY 2 "Applying live patch $i"
+			eval "${G_LIVE_PATCH[@]}"
+
+			# Store new status of live patch to /boot/dietpi/.version
+			G_LIVE_PATCH_STATUS[$i]='applied'
+			G_CONFIG_INJECT "G_LIVE_PATCH_STATUS\[$i\]=" "G_LIVE_PATCH_STATUS[$i]='${G_LIVE_PATCH_STATUS[$i]}'" /boot/dietpi/.version
+		done
 	}
 
 	#/////////////////////////////////////////////////////////////////////////////////////
@@ -210,17 +280,17 @@
 			G_EXEC_DESC='Applying execute permission' G_EXEC chmod +x pre-patch_file
 			if ! ./pre-patch_file $G_DIETPI_VERSION_SUB
 			then
-				G_DIETPI-NOTIFY 1 "An error occured during pre-patch $?. Please check the above log or $FP_LOG for errors, and rerun \"dietpi-update\" after the cause has been solved."
+				G_DIETPI-NOTIFY 1 "An error occurred during pre-patch $?. Please check the above log or $FP_LOG for errors, and rerun \"dietpi-update\" after the cause has been solved."
 				exit 1
 			fi
 
-		# DietPi v6 pre-patches internally apply DietPi v7 pre-patches, hence do not apply then separately.
+		# DietPi v6 pre-patches internally apply DietPi v7 pre-patches, hence do not apply them separately.
 		else
 			G_EXEC_DESC='Downloading pre-patches' G_EXEC curl -sSfLO "https://raw.githubusercontent.com/$GITOWNER_TARGET/DietPi/$GITBRANCH_TARGET/.update/pre-patches"
 			G_EXEC_DESC='Applying execute permission' G_EXEC chmod +x pre-patches
 			if ! ./pre-patches
 			then
-				G_DIETPI-NOTIFY 1 "An error occured during pre-patching. Please check the above log or $FP_LOG for errors, and rerun \"dietpi-update\" after the cause has been solved."
+				G_DIETPI-NOTIFY 1 "An error occurred during pre-patching. Please check the above log or $FP_LOG for errors, and rerun \"dietpi-update\" after the cause has been solved."
 				exit 1
 			fi
 		fi
@@ -251,7 +321,7 @@
 		# Verify/update dietpi.txt entries
 		if ! /boot/dietpi/func/dietpi-set_software verify_dietpi.txt; then
 
-			G_DIETPI-NOTIFY 1 "An error occured during dietpi.txt updates. Please check the above log or $FP_LOG for errors, and rerun \"dietpi-update\" after the cause has been solved."
+			G_DIETPI-NOTIFY 1 "An error occurred during dietpi.txt updates. Please check the above log or $FP_LOG for errors, and rerun \"dietpi-update\" after the cause has been solved."
 			exit 1
 
 		fi
@@ -265,12 +335,12 @@
 		G_DIETPI-NOTIFY 3 "$G_PROGRAM_NAME" 'Applying incremental patches'
 		INFO_VERSIONS_UPDATE
 		G_DIETPI-NOTIFY 2 "$INFO_CURRENT_VERSION"
-		G_DIETPI-NOTIFY 2 "$INFO_SERVER_VERSION"
+		G_DIETPI-NOTIFY 2 "$INFO_REMOTE_VERSION"
 
 		# DietPi v6 incremental patches
 		if (( $G_DIETPI_VERSION_CORE == 6 )) && ! /boot/dietpi/patch_file; then
 
-			G_DIETPI-NOTIFY 1 "An error occured during incremental patching. Please check the above log or $FP_LOG for errors, and rerun \"dietpi-update\" after the cause has been solved."
+			G_DIETPI-NOTIFY 1 "An error occurred during incremental patching. Please check the above log or $FP_LOG for errors, and rerun \"dietpi-update\" after the cause has been solved."
 			exit 1
 
 		fi
@@ -279,7 +349,7 @@
 
 		if ! "DietPi-$G_GITBRANCH/.update/patches"; then
 
-			G_DIETPI-NOTIFY 1 "An error occured during incremental patching. Please check the above log or $FP_LOG for errors, and rerun \"dietpi-update\" after the cause has been solved."
+			G_DIETPI-NOTIFY 1 "An error occurred during incremental patching. Please check the above log or $FP_LOG for errors, and rerun \"dietpi-update\" after the cause has been solved."
 			exit 1
 
 		fi
@@ -293,6 +363,10 @@
 		G_DIETPI_VERSION_RC=$G_REMOTE_VERSION_RC
 		G_VERSIONDB_SAVE
 		G_DIETPI-NOTIFY 0 "Incremental patching to v$G_REMOTE_VERSION_CORE.$G_REMOTE_VERSION_SUB.$G_REMOTE_VERSION_RC completed"
+
+		# Reset and check for and apply all applicable live patches
+		G_LIVE_PATCH_STATUS=()
+		Check_Live_Patches && Apply_Live_Patches
 
 	}
 
@@ -310,7 +384,6 @@
 
 		while :
 		do
-
 			G_WHIP_BUTTON_CANCEL_TEXT='Exit'
 			G_WHIP_MENU_ARRAY=(
 
@@ -323,7 +396,7 @@
 			)
 
 			G_WHIP_DEFAULT_ITEM='Update'
-			if G_WHIP_MENU "Update available:\n - $INFO_CURRENT_VERSION\n - $INFO_SERVER_VERSION\n
+			if G_WHIP_MENU "Update available:\n - $INFO_CURRENT_VERSION\n - $INFO_REMOTE_VERSION\n
 Please select 'Update' option to apply the update."; then
 
 				if [[ $G_WHIP_RETURNED_VALUE == 'Update' ]]; then
@@ -351,9 +424,49 @@ Do you wish to continue and update DietPi to v$G_REMOTE_VERSION_CORE.$G_REMOTE_V
 				return 1 # Exit
 
 			fi
-
 		done
 
+	}
+
+	Menu_Live_Patches()
+	{
+		local i G_WHIP_MENU_ARRAY G_WHIP_LAST_ITEM=0 info
+		while :
+		do
+			G_WHIP_MENU_ARRAY=()
+			for i in "${!G_LIVE_PATCH[@]}"
+			do
+				G_WHIP_MENU_ARRAY+=($i "[${G_LIVE_PATCH_STATUS[$i]}]")
+			done
+
+			G_WHIP_BUTTON_CANCEL_TEXT='Exit'
+			G_WHIP_DEFAULT_ITEM=$G_WHIP_LAST_ITEM
+			if G_WHIP_MENU 'No DietPi update is available, but live patches have been found for your current version to fix little bugs until the next version is released.\n\nSelect a patch below for further details:'
+			then
+				i=$G_WHIP_RETURNED_VALUE
+				G_WHIP_LAST_ITEM=$i
+
+				info="Live patch $i:\n\n${G_LIVE_PATCH_DESC[$i]}\n\nCondition: ${G_LIVE_PATCH_COND[$i]}\n\nPatch: ${G_LIVE_PATCH[$i]}"
+
+				# Not applicable
+				if [[ ${G_LIVE_PATCH_STATUS[$i]} == 'not applicable' ]]
+				then
+					G_WHIP_MSG "$info\n\nYour system does not fulfil the conditions for this patch."
+
+				# Already applied
+				elif [[ ${G_LIVE_PATCH_STATUS[$i]} == 'applied' ]]
+				then
+					G_WHIP_MSG "$info\n\nThis patch has been applied already."
+
+				# Applicable and not applied yet
+				elif G_WHIP_YESNO "$info\n\nDo you want to apply this patch now?"
+				then
+					Apply_Live_Patches $i
+				fi
+			else
+				return 0 # Exit
+			fi
+		done
 	}
 
 	#/////////////////////////////////////////////////////////////////////////////////////
@@ -362,78 +475,95 @@ Do you wish to continue and update DietPi to v$G_REMOTE_VERSION_CORE.$G_REMOTE_V
 	#----------------------------------------------------------------
 	G_DIETPI-NOTIFY 3 "$G_PROGRAM_NAME" 'Checking for available DietPi update'
 	#----------------------------------------------------------------
-	# Check for DietPi update and in case store result to /run/dietpi/.update_available for use by DietPi-Banner
-	if Get_Server_Version && Check_Git_Migration && Check_DietPi_Update; then
-
-		# Exit if check-only input
-		(( $INPUT == 2 )) && exit 0
-
-		G_DIETPI-NOTIFY 3 "$G_PROGRAM_NAME" 'Checking for update pre-requirements'
-
-		# Verify userdata location
-		G_CHECK_USERDATA
-
-		# Check for sufficient free space
-		G_CHECK_FREESPACE / 100 || exit 1
-
-		#----------------------------------------------------------------
-		# Noninteractive update or ask user
-		if (( $INPUT == 1 )) || Menu_Update; then
-
-			# Disable powersaving on main screen
-			setterm -blank 0 -powersave off 2> /dev/null
-
-			# Stop Services
-			/boot/dietpi/dietpi-services stop
-
-			# Run_DietPi_Update: https://github.com/MichaIng/DietPi/issues/1877#issuecomment-403866204
-			# - Log to file by redirecting to subshell instead of piping, else G_EXEC cannot exit the script via "kill -INT $$": https://github.com/MichaIng/DietPi/issues/3127
-			Run_DietPi_Update &> >(tee $FP_LOG); wait $!
-
-			# Mark 1st run update as completed
-			Apply_1st_Run_Update_Success
-
-			# Remove .update_available flag file
-			rm /run/dietpi/.update_available
-
-			G_DIETPI-NOTIFY 3 "$G_PROGRAM_NAME" 'Completed'
-			INFO_VERSIONS_UPDATE
-			G_DIETPI-NOTIFY 2 "$INFO_CURRENT_VERSION"
-			G_DIETPI-NOTIFY 2 "$INFO_SERVER_VERSION"
-
-			# Update DietPi-Survey
-			/boot/dietpi/dietpi-survey 1
-
-			# Failsafe: Force sync to disk
-			sync
-
-			# Start services only on finished install state, else dietpi-software will follow immediately
-			(( $G_DIETPI_INSTALL_STAGE == 2 )) && /boot/dietpi/dietpi-services restart
-
-		fi
-		#----------------------------------------------------------------
-		# Desktop run, exit key prompt
-		[[ $DISPLAY ]] && read -rp 'Press any key to exit DietPi-Update...'
-
-	# Else, check for and in case apply APT updates based on input mode and dietpi.txt choice
-	else
-		mode=$(sed -n '/^[[:blank:]]*CONFIG_CHECK_APT_UPDATES=/{s/^[^=]*=//p;q}' /boot/dietpi.txt)
-		# Forced update input and mode 2: Apply APT upgrades, if available
-		if [[ $INPUT == 1 && $mode == 2 ]]
+	# Check for valid Git repository
+	if Get_Remote_Version && Check_Git_Migration
+	then
+		# Check for DietPi update and in case store result to /run/dietpi/.update_available for use by DietPi-Banner
+		if Check_DietPi_Update
 		then
-			G_AGUP -v
-			if (( $G_AGUP_COUNT ))
+			# Exit if check-only input
+			(( $INPUT == 2 )) && exit 0
+
+			G_DIETPI-NOTIFY 3 "$G_PROGRAM_NAME" 'Checking for update pre-requirements'
+
+			# Verify userdata location
+			G_CHECK_USERDATA
+
+			# Check for sufficient free space
+			G_CHECK_FREESPACE / 100 || exit 1
+
+			# Noninteractive update or ask user
+			if (( $INPUT == 1 )) || Menu_Update
 			then
-				G_AGUG &> >(tee /var/tmp/dietpi/logs/dietpi-upgrade_apt.log)
-				# Assure all services are up since APT upgrades might stop them
-				(( $G_DIETPI_INSTALL_STAGE == 2 )) && /boot/dietpi/dietpi-services start
+				# Disable powersaving on main screen
+				setterm -blank 0 -powersave off 2> /dev/null
+
+				# Stop Services
+				/boot/dietpi/dietpi-services stop
+
+				# Run_DietPi_Update: https://github.com/MichaIng/DietPi/issues/1877#issuecomment-403866204
+				# - Log to file by redirecting to subshell instead of piping, else G_EXEC cannot exit the script via "kill -INT $$": https://github.com/MichaIng/DietPi/issues/3127
+				Run_DietPi_Update &> >(tee $FP_LOG); wait $!
+
+				# Mark 1st run update as completed
+				Apply_1st_Run_Update_Success
+
+				# Remove .update_available flag file
+				rm /run/dietpi/.update_available
+
+				G_DIETPI-NOTIFY 3 "$G_PROGRAM_NAME" 'Completed'
+				INFO_VERSIONS_UPDATE
+				G_DIETPI-NOTIFY 2 "$INFO_CURRENT_VERSION"
+				G_DIETPI-NOTIFY 2 "$INFO_REMOTE_VERSION"
+
+				# Update DietPi-Survey
+				/boot/dietpi/dietpi-survey 1
+
+				# Failsafe: Force sync to disk
+				sync
+
+				# Start services only on finished install state, else dietpi-software will follow immediately
+				(( $G_DIETPI_INSTALL_STAGE == 2 )) && /boot/dietpi/dietpi-services restart
 			fi
 
-		# No forced update input but APT updates check not disabled: Check for APT updates and store result to /run/dietpi/.apt_updates to be used by DietPi-Banner
-		elif [[ $mode != 0 ]]
+			# Desktop run, exit key prompt
+			[[ $DISPLAY ]] && read -rp 'Press any key to exit DietPi-Update...'
+			exit 0
+
+		# No update available: Check for live patches
+		elif Check_Live_Patches
 		then
-			G_AGUP -f
+			# Forced update mode
+			if (( $INPUT == 1 ))
+			then
+				Apply_Live_Patches
+
+			# Menu mode
+			elif (( $INPUT == 0 ))
+			then
+				Menu_Live_Patches
+				exit 0
+			fi
 		fi
+	fi
+
+	# If no DietPi update is available, check for and in case apply APT updates based on input mode and dietpi.txt choice
+	mode=$(sed -n '/^[[:blank:]]*CONFIG_CHECK_APT_UPDATES=/{s/^[^=]*=//p;q}' /boot/dietpi.txt)
+	# Forced update input and mode 2: Apply APT updates if available
+	if [[ $INPUT == 1 && $mode == 2 ]]
+	then
+		G_AGUP -v
+		if (( $G_AGUP_COUNT ))
+		then
+			G_AGUG &> >(tee /var/tmp/dietpi/logs/dietpi-upgrade_apt.log)
+			# Assure all services are up since APT updates might stop some
+			(( $G_DIETPI_INSTALL_STAGE == 2 )) && /boot/dietpi/dietpi-services start
+		fi
+
+	# No forced update input but APT updates check not disabled: Check for APT updates and store result to /run/dietpi/.apt_updates to be used by DietPi-Banner
+	elif [[ $mode != 0 ]]
+	then
+		G_AGUP -f
 	fi
 	#----------------------------------------------------------------
 	exit 0
