@@ -50,7 +50,7 @@
 	export PATH='/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin'
 
 	# Make /tmp a tmpfs if it is not yet a dedicated mount
-	findmnt /tmp > /dev/null || mount -t tmpfs none /tmp
+	findmnt -M /tmp > /dev/null || mount -t tmpfs tmpfs /tmp
 
 	# Work inside /tmp tmpfs to reduce disk I/O and speed up download and unpacking
 	# - Save full script path beforehand: https://github.com/MichaIng/DietPi/pull/2341#discussion_r241784962
