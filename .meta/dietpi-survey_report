@@ -142,6 +142,8 @@ shopt -s extglob
 	SURVEY_COUNT_TOTAL=0
 	SURVEY_COUNT_OPTIN=0
 	SURVEY_COUNT_OPTOUT=0
+	SURVEY_COUNT_INACTIVE=0
+	SURVEY_COUNT_REACTIVE=0
 
 	declare -A aDIETPI_VERSION
 	declare -A aDEVICE_NAME
@@ -304,7 +306,7 @@ shopt -s extglob
 		[122]='Node-RED'
 		[123]='Mosquitto '
 		[124]='NAA daemon'
-		[125]='Tomcat8'
+		[125]='Tomcat 8'
 		[126]='LibSSL1.0.0'
 		[127]='NeoVim'
 		[128]='MPD'
@@ -511,7 +513,6 @@ shopt -s extglob
 	do
 		aSOFTWARE_NAME7_2[$i]=${aSOFTWARE_NAME7_1[$i]}
 	done
-	# shellcheck disable=SC2034
 	aSOFTWARE_NAME7_2[67]='Firefox'
 	unset -v 'aSOFTWARE_NAME7_2[126]' # LibSSL1.0.0
 
@@ -526,9 +527,19 @@ shopt -s extglob
 	aSOFTWARE_NAME7_3[190]='Beets'
 	aSOFTWARE_NAME7_3[191]='Snapcast Server'
 	aSOFTWARE_NAME7_3[192]='Snapcast Client'
-	# shellcheck disable=SC2034
 	aSOFTWARE_NAME7_3[193]='K3s'
 	unset -v 'aSOFTWARE_NAME7_3[125]' # Tomcat 8
+
+	# v7.4
+	aSOFTWARE_NAME7_4=()
+	for i in "${!aSOFTWARE_NAME7_3[@]}"
+	do
+		aSOFTWARE_NAME7_4[$i]=${aSOFTWARE_NAME7_3[$i]}
+	done
+	aSOFTWARE_NAME7_4[125]='Synapse Server'
+	aSOFTWARE_NAME7_4[194]='PostgreSQL'
+	# shellcheck disable=SC2034
+	aSOFTWARE_NAME7_4[195]='youtube-dl'
 
 	# $1 = File name
 	Process_File()
@@ -539,7 +550,6 @@ shopt -s extglob
 		do
 			# shellcheck disable=SC2016
 			case "$line" in
-
 				'#'*) :;; # Pre-v7.1
 				'((aSURVEY_VERSION[6]++))') :;; # Pre-v6.22
 				'((aSURVEY_SENTCOUNT['+([[:digit:]])']++))') :;; # Pre-v6.22
@@ -570,7 +580,6 @@ shopt -s extglob
 				'BENCH_CPU_TEMP_END='*) BENCH_CPU_TEMP_END=${line#*\'} BENCH_CPU_TEMP_END=${BENCH_CPU_TEMP_END%\'};;
 				'BENCH_NET_LAN_SPEED='*) BENCH_NET_LAN_SPEED=${line#*\'} BENCH_NET_LAN_SPEED=${BENCH_NET_LAN_SPEED%\'};;
 				*) mv -v "/home/dietpi-survey/survey/$file" /home/dietpi-survey/invalid/; return 1;; # Invalid line
-
 			esac
 
 			# Validate and process software name if present
@@ -586,10 +595,18 @@ shopt -s extglob
 		[[ $version && $device && $arch && $cpu_count && $distro && $autostart && ${aAUTOSTART_NAME[$autostart]} && $automated && $iface ]] || { mv -v "/home/dietpi-survey/survey/$file" /home/dietpi-survey/invalid/; return 1; }
 
 		# Sort out files that are > 6 months old
-		(( $DATE_NOW - $(date -u '+%s' -r "$file") < 15724800 )) || { mv "/home/dietpi-survey/survey/$file" /home/dietpi-survey/2020H2/; return 0; }
+		(( $DATE_NOW - $(date -u '+%s' -r "$file") < 15724800 )) || { mv "/home/dietpi-survey/survey/$file" /home/dietpi-survey/old/; ((SURVEY_COUNT_INACTIVE++)); return 0; }
 
 		# Valid content
 		((SURVEY_COUNT_OPTIN++))
+
+		# Count re-activated systems which didn't show activity for at least 6 months but uploaded a new survey file
+		if [[ -f /home/dietpi-survey/old/$file ]]
+		then
+			((SURVEY_COUNT_REACTIVE++))
+			# Remove old file
+			rm "/home/dietpi-survey/old/$file"
+		fi
 
 		# Add to global arrays
 		((aDIETPI_VERSION["$version"]++))
@@ -686,8 +703,17 @@ shopt -s extglob
 			if [[ ! -s $file ]]
 			then
 				# Sort out files that are > 6 months old
-				(( $DATE_NOW - $(date -u '+%s' -r "$file") < 15724800 )) || { mv "/home/dietpi-survey/survey/$file" /home/dietpi-survey/2020H2/; continue; }
+				(( $DATE_NOW - $(date -u '+%s' -r "$file") < 15724800 )) || { mv "/home/dietpi-survey/survey/$file" /home/dietpi-survey/old/; ((SURVEY_COUNT_INACTIVE++)); continue; }
 				((SURVEY_COUNT_OPTOUT++))
+
+				# Count re-activated systems which didn't show activity for at least 6 months but uploaded a new survey file
+				if [[ -f /home/dietpi-survey/old/$file ]]
+				then
+					((SURVEY_COUNT_REACTIVE++))
+					# Remove old file
+					rm "/home/dietpi-survey/old/$file"
+				fi
+
 				continue
 			fi
 
@@ -1143,6 +1169,56 @@ shopt -s extglob
 _EOF_
 		# Move HTML page in place
 		mv index.html /var/www/survey/index.html
+
+		# Create InfluxDB query
+		query=("insert systems total=$SURVEY_COUNT_TOTAL")
+		query+=("insert systems optin=$SURVEY_COUNT_OPTIN")
+		query+=("insert systems optout=$SURVEY_COUNT_OPTOUT")
+		query+=("insert systems inactive=$SURVEY_COUNT_INACTIVE")
+		query+=("insert systems reactive=$SURVEY_COUNT_REACTIVE")
+		for i in "${!aDIETPI_VERSION[@]}"
+		do
+			query+=("insert version $i=${aDIETPI_VERSION[$i]}")
+		done
+		for i in "${!aGIT_BRANCH[@]}"
+		do
+			query+=("insert branch $i=${aGIT_BRANCH[$i]}")
+		done
+		for i in "${!aDISTRO_VERSION[@]}"
+		do
+			query+=("insert distro $i=${aDISTRO_VERSION[$i]}")
+		done
+		for i in "${!aDEVICE_NAME[@]}"
+		do
+			query+=("insert device ${i// /_}=${aDEVICE_NAME[$i]}")
+		done
+		for i in "${!aCPU_ARCH[@]}"
+		do
+			query+=("insert arch $i=${aCPU_ARCH[$i]}")
+		done
+		for i in "${!aCPU_COUNT[@]}"
+		do
+			query+=("insert cores $i=${aCPU_COUNT[$i]}")
+		done
+		query+=("insert raspbian raspbian=${aRASPBIAN[1]}")
+		query+=("insert raspbian debian=${aRASPBIAN[0]}")
+		for i in "${!aAUTOSTART_OPTION[@]}"
+		do
+			query+=("insert autostart ${i// /_}=${aAUTOSTART_OPTION[$i]}")
+		done
+		query+=("insert automation enabled=${aAUTO_SETUP_AUTOMATED[1]}")
+		query+=("insert automation disabled=${aAUTO_SETUP_AUTOMATED[0]}")
+		for i in "${!aNETWORK_INTERFACE[@]}"
+		do
+			query+=("insert network $i=${aNETWORK_INTERFACE[$i]}")
+		done
+		for i in "${!aSOFTWARE[@]}"
+		do
+			query+=("insert software ${i// /_}=${aSOFTWARE[$i]}")
+		done
+
+		# Write to InfluxDB
+		influx -database 'survey' -precision 'h' -execute "$(printf '%s\n' "${query[@]}")"
 	}
 
 	#-----------------------------------------------------------

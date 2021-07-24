@@ -4,16 +4,16 @@ The goal of the beta branch, is to allow for public testing of our next release.
 
 By joining the Beta and reporting issues, you will be assisting DietPi (and all our users) to ensure stability before stable release.
 
-Beta on fresh image:
+#### Beta on a fresh image:
 1. Write the DietPi image to SD card.
 2. Open the file `/boot/dietpi.txt` on the 1st partition.
-3. Change `DEV_GITBRANCH=master` to `DEV_GITBRANCH=beta` (located at the bottom of file).
+3. Change `DEV_GITBRANCH=master` to `DEV_GITBRANCH=beta` (located near the bottom of the file).
 4. Save the file, eject media and power on.
 
-Beta on an existing installation:
+#### Beta on an existing installation:
 1. Recommended: Backup your system with `dietpi-backup` (or backup quickly with `dietpi-backup 1`).
 2. Run the following command to switch to "beta" branch:
-    ```
+    ```sh
     G_CONFIG_INJECT 'DEV_GITBRANCH=' 'DEV_GITBRANCH=beta' /boot/dietpi.txt
     ```
 3. Run `dietpi-update` to update the system, then reboot (or update quickly with `dietpi-backup 1`).
