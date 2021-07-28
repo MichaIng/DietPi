@@ -1304,7 +1304,7 @@ INDEX_BROWSER_TARGET=$INDEX_BROWSER_TARGET"
 		aSOFTWARE_DESC[$software_id]='msg controller for blynk mobile app and sbcs'
 		aSOFTWARE_CATX[$software_id]=10
 		aSOFTWARE_DOCS[$software_id]='https://dietpi.com/docs/software/hardware_projects/#blynk-server'
-		aSOFTWARE_DEPS[$software_id]='8 9 16'
+		aSOFTWARE_DEPS[$software_id]='8 9'
 		#------------------
 		software_id=166
 
@@ -5284,15 +5284,65 @@ _EOF_
 
 			Banner_Installing
 
-			# On Stretch ships Java 8
-			local fallback_url='https://github.com/blynkkk/blynk-server/releases/download/v0.41.16/server-0.41.16.jar' java=
-			(( $G_DISTRO < 5 )) && fallback_url='https://github.com/blynkkk/blynk-server/releases/download/v0.41.16/server-0.41.16-java8.jar' java='-java8'
+			# Stretch: Install Java 8 build
+			local fallback_url='https://github.com/Peterkn2001/blynk-server/releases/download/v0.41.16/server-0.41.16.jar' java=
+			(( $G_DISTRO < 5 )) && fallback_url='https://github.com/Peterkn2001/blynk-server/releases/download/v0.41.16/server-0.41.16-java8.jar' java='-java8'
 
-			DEPS_LIST='python' Download_Install "$(curl -sSfL 'https://api.github.com/repos/blynkkk/blynk-server/releases/latest' | mawk -F\" "/\"browser_download_url\": .*\/server-[0-9.]*$java\.jar\"/{print \$4}")" /mnt/dietpi_userdata/blynk/blynkserver.jar
+			# RPi: Install build deps for the "onoff" Node module
+			(( $G_HW_MODEL > 9 )) || DEPS_LIST='python3 make g++'
+
+			Download_Install "$(curl -sSfL 'https://api.github.com/repos/Peterkn2001/blynk-server/releases/latest' | mawk -F\" "/\"browser_download_url\": .*\/server-[0-9.]*$java\.jar\"/{print \$4}")" /mnt/dietpi_userdata/blynk/blynkserver.jar
+
+			# RPi: Install "onoff" for GPIO access
+			(( $G_HW_MODEL > 9 )) || G_EXEC_OUTPUT=1 G_EXEC npm i -g --unsafe-perm --no-audit onoff
 
 			# Install Blynk JS libary
-			G_EXEC_OUTPUT=1 G_EXEC npm i -g --unsafe-perm --no-audit onoff
 			G_EXEC_OUTPUT=1 G_EXEC npm i -g --unsafe-perm --no-audit blynk-library
+
+			# Preserve existing config
+			if [[ ! -f '/mnt/dietpi_userdata/blynk/server.properties' ]]
+			then
+				G_EXEC curl -sSfL 'https://raw.githubusercontent.com/Peterkn2001/blynk-server/master/server/core/src/main/resources/server.properties' -o /mnt/dietpi_userdata/blynk/server.properties
+				G_EXEC chmod 0600 /mnt/dietpi_userdata/blynk/server.properties
+				G_EXEC mkdir -p /var/log/blynk
+				G_CONFIG_INJECT 'logs.folder=' 'logs.folder=/var/log/blynk' /mnt/dietpi_userdata/blynk/server.properties
+				G_CONFIG_INJECT 'data.folder=' 'data.folder=/mnt/dietpi_userdata/blynk/data' /mnt/dietpi_userdata/blynk/server.properties
+				G_CONFIG_INJECT 'http.port=' 'http.port=8442' /mnt/dietpi_userdata/blynk/server.properties
+				GCI_PASSWORD=1 G_CONFIG_INJECT 'admin.pass=' "admin.pass=$GLOBAL_PW" /mnt/dietpi_userdata/blynk/server.properties
+			fi
+
+			# Example local TCP connection script
+			if [[ ! -f '/mnt/dietpi_userdata/blynk/client-tcp-local.js' ]]
+			then
+				G_EXEC curl -sSfL 'https://raw.githubusercontent.com/vshymanskyy/blynk-library-js/master/examples/nodejs/client-tcp-local.js' -o /mnt/dietpi_userdata/blynk/client-tcp-local.js
+				G_EXEC sed -i "s|require('blynk-library')|require('/usr/local/lib/node_modules/blynk-library')|" /mnt/dietpi_userdata/blynk/client-tcp-local.js
+				G_EXEC chmod +x /mnt/dietpi_userdata/blynk/client-tcp-local.js
+			fi
+
+			# User
+			Create_User -d /mnt/dietpi_userdata/blynk blynk
+
+			# Service
+			cat << _EOF_ > /etc/systemd/system/blynkserver.service
+[Unit]
+Description=Blynk Server (DietPi)
+Wants=network-online.target
+After=network-online.target dietpi-boot.service
+
+[Service]
+SyslogIdentifier=Blynk
+User=blynk
+WorkingDirectory=/mnt/dietpi_userdata/blynk
+ExecStart=$(command -v java) -jar /mnt/dietpi_userdata/blynk/blynkserver.jar
+
+# Hardening
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target
+_EOF_
+			# Permissions
+			G_EXEC chown -R blynk:blynk /mnt/dietpi_userdata/blynk /var/log/blynk
 
 		fi
 
@@ -11956,46 +12006,6 @@ WantedBy=multi-user.target
 _EOF_
 		fi
 
-		software_id=131 # Blynk Server
-		if (( ${aSOFTWARE_INSTALL_STATE[$software_id]} == 1 )); then
-
-			Banner_Configuration
-
-			# Preserve existing config
-			if [[ ! -f '/mnt/dietpi_userdata/blynk/server.properties' ]]; then
-
-				Download_Install 'https://raw.githubusercontent.com/blynkkk/blynk-server/master/server/core/src/main/resources/server.properties' /mnt/dietpi_userdata/blynk/server.properties
-				G_CONFIG_INJECT 'data.folder=' 'data.folder=/mnt/dietpi_userdata/blynk/data' /mnt/dietpi_userdata/blynk/server.properties
-				# Log to RAMlog
-				G_EXEC mkdir -p /var/log/blynk
-				G_CONFIG_INJECT 'logs.folder=' 'logs.folder=/var/log/blynk' /mnt/dietpi_userdata/blynk/server.properties
-
-			fi
-
-			# User
-			Create_User -g dietpi -d /mnt/dietpi_userdata/blynk blynk
-
-			# Service
-			cat << _EOF_ > /etc/systemd/system/blynkserver.service
-[Unit]
-Description=Blynk Server (DietPi)
-Wants=network-online.target
-After=network-online.target dietpi-boot.service
-
-[Service]
-SyslogIdentifier=Blynk
-User=blynk
-WorkingDirectory=/mnt/dietpi_userdata/blynk
-ExecStart=$(command -v java) -jar /mnt/dietpi_userdata/blynk/blynkserver.jar
-
-[Install]
-WantedBy=multi-user.target
-_EOF_
-			# Permissions
-			G_EXEC chown -R blynk:dietpi /mnt/dietpi_userdata/blynk /var/log/blynk
-
-		fi
-
 		software_id=136 # MotionEye
 		if (( ${aSOFTWARE_INSTALL_STATE[$software_id]} == 1 )); then
 
@@ -13930,7 +13940,7 @@ _EOF_
 			G_EXEC_NOEXIT=1 G_EXEC rm -Rf /{root,home/*}/.node-red # Pre-v6.25
 
 			# Pre-v7.0
-			npm r -g --unsafe-perm node-red
+			command -v npm > /dev/null && npm r -g --unsafe-perm node-red
 			[[ -f '/usr/local/bin/node-red' ]] && G_EXEC_NOEXIT=1 G_EXEC rm /usr/local/bin/node-red
 			[[ -f '/usr/local/bin/node-red-pi' ]] && G_EXEC_NOEXIT=1 G_EXEC rm /usr/local/bin/node-red-pi
 
@@ -13992,18 +14002,20 @@ _EOF_
 		if (( ${aSOFTWARE_INSTALL_STATE[$software_id]} == -1 )); then
 
 			Banner_Uninstalling
-			if [[ -f '/etc/systemd/system/blynkserver.service' ]]; then
-
-				systemctl disable --now blynkserver
-				rm -R /etc/systemd/system/blynkserver.service*
-
+			if [[ -f '/etc/systemd/system/blynkserver.service' ]]
+			then
+				G_EXEC systemctl disable --now blynkserver
+				G_EXEC rm /etc/systemd/system/blynkserver.service
 			fi
-			[[ -d '/etc/systemd/system/blynkserver.service.d' ]] && rm -R /etc/systemd/system/blynkserver.service.d
+			[[ -d '/etc/systemd/system/blynkserver.service.d' ]] && G_EXEC rm -R /etc/systemd/system/blynkserver.service.d
+			[[ -d '/mnt/dietpi_userdata/blynk' ]] && G_EXEC rm -R /mnt/dietpi_userdata/blynk
+			[[ -d '/var/log/blynk' ]] && G_EXEC rm -R /var/log/blynk
 			getent passwd blynk > /dev/null && userdel blynk
-			getent group blynk > /dev/null && groupdel blynk # Pre-v6.33
-			[[ -d '/mnt/dietpi_userdata/blynk' ]] && rm -R /mnt/dietpi_userdata/blynk
-			[[ -d '/var/log/blynk' ]] && rm -R /var/log/blynk
-			[[ -d '/etc/blynkserver' ]] && rm -R /etc/blynkserver # Pre-v6.19
+			getent group blynk > /dev/null && groupdel blynk
+			command -v npm > /dev/null && npm r -g --unsafe-perm blynk-library
+			[[ -f '/usr/local/bin/blynk-ctrl' ]] && G_EXEC rm /usr/local/bin/blynk-ctrl
+			[[ -f '/usr/local/bin/blynk-client' ]] && G_EXEC rm /usr/local/bin/blynk-client
+			[[ -d '/etc/blynkserver' ]] && G_EXEC rm -R /etc/blynkserver # Pre-v6.19
 
 		fi
 
