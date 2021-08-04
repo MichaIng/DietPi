@@ -741,6 +741,8 @@ Currently installed: $G_DISTRO_NAME (ID: $G_DISTRO)"; then
 
 		# Kernel/bootloader/firmware
 		# - We need to install those directly to allow G_AGA() autoremove possible older packages later: https://github.com/MichaIng/DietPi/issues/1285#issuecomment-354602594
+		# - Assure that dir for additional sources is present
+		[[ -d '/etc/apt/sources.list.d' ]] || G_EXEC mkdir /etc/apt/sources.list.d
 		# - G_HW_ARCH specific
 		#	x86_64
 		if (( $G_HW_ARCH == 10 )); then
@@ -841,7 +843,7 @@ done
 exit 0
 _EOF_
 			# Remove obsolete components from Armbian list and connect via HTTPS
-			echo "deb https://apt.armbian.com/ $DISTRO_TARGET_NAME main" > /etc/apt/sources.list.d/armbian.list
+			G_EXEC eval "echo 'deb https://apt.armbian.com/ $DISTRO_TARGET_NAME main' > /etc/apt/sources.list.d/armbian.list"
 
 			# Exclude doubled device tree files, shipped with the kernel package
 			echo 'path-exclude /usr/lib/linux-image-current-*' > /etc/dpkg/dpkg.cfg.d/01-dietpi-exclude_doubled_devicetrees
