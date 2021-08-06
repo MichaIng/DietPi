@@ -313,6 +313,7 @@ Links to hardware and software manufacturers, sources and build instructions use
 - [PostgreSQL](https://git.postgresql.org/gitweb/?p=postgresql.git)
 - [OpenJDK](https://github.com/openjdk)
 - [Blynk Server](https://github.com/Peterkn2001/blynk-server)
+- [Box64](https://github.com/ptitSeb/box64)
 
 ---
 
