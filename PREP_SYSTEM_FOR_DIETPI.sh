@@ -761,6 +761,10 @@ Currently installed: $G_DISTRO_NAME (ID: $G_DISTRO)"; then
 
 			fi
 
+			# Skip creating kernel symlinks and remove existing ones
+			echo 'do_symlinks=0' > /etc/kernel-img.conf
+			G_EXEC rm -f /{,boot/}{initrd.img,vmlinuz}{,.old}
+
 			G_AGI "${apackages[@]}"
 			unset -v apackages
 
@@ -790,7 +794,6 @@ Currently installed: $G_DISTRO_NAME (ID: $G_DISTRO)"; then
 					G_DIETPI-NOTIFY 2 "Armbian package detected and added: $line"
 
 				done < <(dpkg-query -Wf '${Package}\n' | mawk -v pat="^$i" '$0~pat')
-
 			done
 			unset -v apackages
 
@@ -800,15 +803,17 @@ Currently installed: $G_DISTRO_NAME (ID: $G_DISTRO)"; then
 			# Generate and cleanup uInitrd
 			local arch='arm'
 			(( $G_HW_ARCH == 3 )) && arch='arm64'
+			G_EXEC mkdir -p /etc/initramfs/post-update.d
 			cat << _EOF_ > /etc/initramfs/post-update.d/99-dietpi-uboot
-#!/bin/sh
+#!/bin/dash
 echo 'update-initramfs: Converting to u-boot format' >&2
 mkimage -A $arch -O linux -T ramdisk -C gzip -n uInitrd -d \$2 /boot/uInitrd-\$1 > /dev/null
 ln -sf uInitrd-\$1 /boot/uInitrd > /dev/null 2>&1 || mv /boot/uInitrd-\$1 /boot/uInitrd
 exit 0
 _EOF_
+			G_EXEC mkdir -p /etc/kernel/preinst.d
 			cat << '_EOF_' > /etc/kernel/preinst.d/dietpi-initramfs_cleanup
-#!/bin/sh
+#!/bin/dash
 
 # skip if initramfs-tools is not installed
 [ -x /usr/sbin/update-initramfs ] || exit 0
@@ -828,20 +833,34 @@ if [ -n "$DEB_MAINT_PARAMS" ]; then
         fi
 fi
 
+_EOF_
+			# Bullseye: initramfs-tools' /var/lib/initramfs-tools state directory is not used anymore
+			if (( $DISTRO_TARGET > 5 ))
+			then
+				cat << '_EOF_' >> /etc/kernel/preinst.d/dietpi-initramfs_cleanup
+# delete unused initrd images
+find /boot -name 'initrd.img-*' -o -name 'uInitrd-*' ! -name "*-$version" -printf 'Removing obsolete file %f\n' -delete
+
+exit 0
+_EOF_
+			else
+				cat << '_EOF_' >> /etc/kernel/preinst.d/dietpi-initramfs_cleanup
 # loop through existing initramfs images
-for v in $(ls -1 /var/lib/initramfs-tools | linux-version sort --reverse) do
+for v in $(ls -1 /var/lib/initramfs-tools | linux-version sort --reverse); do
         if ! linux-version compare $v eq $version; then
                 # try to delete delete old initrd images via update-initramfs
                 INITRAMFS_TOOLS_KERNEL_HOOK=y update-initramfs -d -k $v 2>/dev/null
                 # delete unused state files
                 find /var/lib/initramfs-tools -type f ! -name "$version" -printf 'Removing obsolete file %f\n' -delete
                 # delete unused initrd images
-                find /boot -name 'initrd.img*' -o -name 'uInitrd-*' ! -name "*$version" -printf 'Removing obsolete file %f\n' -delete
+                find /boot -name 'initrd.img-*' -o -name 'uInitrd-*' ! -name "*-$version" -printf 'Removing obsolete file %f\n' -delete
         fi
 done
 
 exit 0
 _EOF_
+			fi
+
 			# Remove obsolete components from Armbian list and connect via HTTPS
 			G_EXEC eval "echo 'deb https://apt.armbian.com/ $DISTRO_TARGET_NAME main' > /etc/apt/sources.list.d/armbian.list"
 
