@@ -1249,6 +1249,7 @@ _EOF_
 		#-----------------------------------------------------------------------------------
 		# DietPi user
 		G_EXEC_DESC='Creating DietPi user account' G_EXEC /boot/dietpi/func/dietpi-set_software useradd dietpi
+		chpasswd <<< 'root:dietpi'
 
 		#-----------------------------------------------------------------------------------
 		# UID bit for sudo: https://github.com/MichaIng/DietPi/issues/794
