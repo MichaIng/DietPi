@@ -595,7 +595,7 @@ Currently installed: $G_DISTRO_NAME (ID: $G_DISTRO)"; then
 			fi
 
 			# Store new status of live patch to /boot/dietpi/.version
-			G_CONFIG_INJECT "G_LIVE_PATCH_STATUS\[$i\]=" "G_LIVE_PATCH_STATUS[$i]='${G_LIVE_PATCH_STATUS[$i]}'" /boot/dietpi/.version.version
+			G_CONFIG_INJECT "G_LIVE_PATCH_STATUS\[$i\]=" "G_LIVE_PATCH_STATUS[$i]='${G_LIVE_PATCH_STATUS[$i]}'" /boot/dietpi/.version
 		done
 
 		G_EXEC systemctl daemon-reload
