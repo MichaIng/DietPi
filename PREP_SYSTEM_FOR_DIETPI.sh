@@ -84,8 +84,17 @@ Acquire::IndexTargets::deb::Packages::KeepCompressedAs "xz";
 Acquire::IndexTargets::deb::Translations::KeepCompressedAs "xz";
 Acquire::IndexTargets::deb-src::Sources::KeepCompressedAs "xz";
 _EOF_
-	# - Forcing new DEB package config files (during PREP only)
-	echo -e '#clear DPkg::options;\nDPkg::options:: "--force-confmiss,confnew";' > /etc/apt/apt.conf.d/98dietpi-forceconf
+	# - During PREP only: Force new DEB package config files and tmpfs lists + archives
+	cat << '_EOF_' > /etc/apt/apt.conf.d/98dietpi-prep
+#clear DPkg::options;
+DPkg::options:: "--force-confmiss,confnew";
+Dir::Cache "/tmp/apt";
+Dir::Cache::archives "/tmp/apt/archives";
+Dir::State "/tmp/apt";
+Dir::State::extended_states "/var/lib/apt/extended_states";
+Dir::State::status "/var/lib/dpkg/status";
+Dir::Cache::pkgcache "";
+_EOF_
 	# - Force IPv4 by default to avoid hanging access attempts in some cases, e.g. WiFi bridges
 	#	NB: This needs to match the method in: /boot/dietpi/func/dietpi-set_hardware preferipv4 enable
 	echo 'Acquire::ForceIPv4 "true";' > /etc/apt/apt.conf.d/99-dietpi-force-ipv4
@@ -536,6 +545,8 @@ Currently installed: $G_DISTRO_NAME (ID: $G_DISTRO)"; then
 		# HW specific config.txt, boot.ini uEnv.txt
 		if (( $G_HW_MODEL < 10 )); then
 
+			echo "root=PARTUUID=$(findmnt -Ufnro PARTUUID -M /) rootfstype=ext4 rootwait fsck.repair=yes net.ifnames=0 console=tty1 console=serial0,115200 quiet
+" > /boot/cmdline.txt
 			G_EXEC mv "DietPi-$G_GITBRANCH/config.txt" /boot/
 			# Boot in 64-bit mode if this is a 64-bit image
 			[[ $G_HW_ARCH == 3 ]] && G_CONFIG_INJECT 'arm_64bit=' 'arm_64bit=1' /boot/config.txt
@@ -543,6 +554,7 @@ Currently installed: $G_DISTRO_NAME (ID: $G_DISTRO)"; then
 		elif (( $G_HW_MODEL == 11 )); then
 
 			G_EXEC mv "DietPi-$G_GITBRANCH/boot_xu4.ini" /boot/boot.ini
+			G_EXEC sed -i "s/root=UUID=[^[:blank:]]*/root=UUID=$(findmnt -Ufnro UUID -M /)/" /boot/boot.ini
 
 		elif (( $G_HW_MODEL == 12 )); then
 
@@ -551,6 +563,7 @@ Currently installed: $G_DISTRO_NAME (ID: $G_DISTRO)"; then
 		elif (( $G_HW_MODEL == 15 )); then
 
 			G_EXEC mv "DietPi-$G_GITBRANCH/boot_n2.ini" /boot/boot.ini
+			G_EXEC sed -i "s/root=UUID=[^[:blank:]]*/root=UUID=$(findmnt -Ufnro UUID -M /)/" /boot/boot.ini
 
 		fi
 
@@ -964,6 +977,7 @@ _EOF_
 			unset -v apackages
 
 		fi
+		G_EXEC apt-get clean # Remove downloaded archives
 
 		# - Firmware
 		if dpkg-query -Wf '${Package}\n' | grep -q '^armbian-firmware'; then
@@ -1028,6 +1042,7 @@ _EOF_
 		#------------------------------------------------------------------------------------------------
 
 		G_AGDUG
+		G_EXEC apt-get clean # Remove downloaded archives
 
 		# Distro is now target (for APT purposes and G_AGX support due to installed binary, its here, instead of after G_AGUP)
 		G_DISTRO=$DISTRO_TARGET
@@ -1040,8 +1055,6 @@ _EOF_
 		unset -v aPACKAGES_REQUIRED_INSTALL
 
 		G_AGA
-
-		G_EXEC_DESC='Preserving modified DEB package config files from now on' G_EXEC rm -v /etc/apt/apt.conf.d/98dietpi-forceconf
 
 		#------------------------------------------------------------------------------------------------
 		G_DIETPI-NOTIFY 3 "$G_PROGRAM_NAME" "[$SETUP_STEP] Applying DietPi tweaks and cleanup"; ((SETUP_STEP++))
@@ -1071,6 +1084,7 @@ _EOF_
 			G_AGA
 
 		fi
+		G_EXEC apt-get clean # Remove downloaded archives
 
 		G_DIETPI-NOTIFY 2 'Deleting list of known users and groups, not required by DietPi'
 
@@ -1208,7 +1222,6 @@ _EOF_
 		[[ -d '/etc/systemd/system/rc.local.service.d' ]] && rm -Rv /etc/systemd/system/rc.local.service.d
 		#	Below required if DietPi-PREP is executed from chroot/container, so RPi firstrun scripts are not executed
 		[[ -f '/etc/init.d/resize2fs_once' ]] && rm -v /etc/init.d/resize2fs_once # https://github.com/RPi-Distro/pi-gen/blob/master/stage2/01-sys-tweaks/files/resize2fs_once
-		[[ -f '/boot/cmdline.txt' ]] && sed -i 's| init=/usr/lib/raspi-config/init_resize\.sh||' /boot/cmdline.txt # https://github.com/RPi-Distro/pi-gen/blob/master/stage2/01-sys-tweaks/00-patches/07-resize-init.diff
 		# - Remove all autologin configs for all TTYs: https://github.com/MichaIng/DietPi/issues/3570#issuecomment-648988475, https://github.com/MichaIng/DietPi/issues/3628#issuecomment-653693758
 		rm -fv /etc/systemd/system/*getty@*.service.d/*autologin*.conf
 
@@ -1219,8 +1232,9 @@ _EOF_
 		G_DIETPI-NOTIFY 2 'Restoring default base files:'
 		# shellcheck disable=SC2114
 		rm -Rfv /etc/{motd,profile,update-motd.d,issue{,.net}} /root /home /media /var/mail
-		G_AGI -o 'Dpkg::Options::=--force-confmiss,confnew' --reinstall base-files # Restore /etc/{update-motd.d,issue{,.net}} /root /home
+		G_AGI --reinstall base-files # Restore /etc/{update-motd.d,issue{,.net}} /root /home
 		G_EXEC /var/lib/dpkg/info/base-files.postinst configure # Restore /root/.{profile,bashrc} /etc/{motd,profile} /media /var/mail
+		G_EXEC apt-get clean # Remove downloaded archives
 
 		#-----------------------------------------------------------------------------------
 		# https://www.debian.org/doc/debian-policy/ch-opersys.html#site-specific-programs
@@ -1305,19 +1319,8 @@ _EOF_'
 		G_DIETPI-NOTIFY 2 'Configuring wlan/eth naming to be preferred for networked devices:'
 		ln -sfv /dev/null /etc/systemd/network/99-default.link
 		ln -sfv /dev/null /etc/udev/rules.d/80-net-setup-link.rules
-		# - RPi: Add cmdline entry, which was required on my Raspbian Bullseye system since last few APT updates
-		if [[ -f '/boot/cmdline.txt' ]]; then
-
-			sed -i 's/net.ifnames=[^[:blank:]]*[[:blank:]]*//g;w /dev/stdout' /boot/cmdline.txt
-			sed -i '/root=/s/[[:blank:]]*$/ net.ifnames=0/;w /dev/stdout' /boot/cmdline.txt
-
-		# - Armbian
-		elif [[ -f '/boot/armbianEnv.txt' ]]; then
-
-			G_CONFIG_INJECT 'extraargs=' 'extraargs="net.ifnames=0"' /boot/armbianEnv.txt
-
-		fi
-		[[ -f '/etc/udev/rules.d/70-persistent-net.rules' ]] && rm -v /etc/udev/rules.d/70-persistent-net.rules # Jessie pre-image
+		# - Armbian: Add cmdline entry, which was required on my Raspbian Bullseye system since last few APT updates
+		[[ -f '/boot/armbianEnv.txt' ]] && G_CONFIG_INJECT 'extraargs=' 'extraargs="net.ifnames=0"' /boot/armbianEnv.txt
 
 		G_DIETPI-NOTIFY 2 'Configuring DNS nameserver:'
 		# Failsafe: Assure that /etc/resolv.conf is not a symlink and disable systemd-resolved + systemd-networkd
@@ -1724,11 +1727,6 @@ _EOF_
 		# - Reset /tmp size to default (512 MiB)
 		sed -i '\|/tmp|s|size=[^,]*,||' /etc/fstab
 
-		G_DIETPI-NOTIFY 2 'Resetting boot.ini, config.txt, cmdline.txt etc'
-
-		# - Set Pi cmdline.txt back to normal
-		[[ -f '/boot/cmdline.txt' ]] && sed -i 's/ rootdelay=10//g' /boot/cmdline.txt
-
 		G_DIETPI-NOTIFY 2 'Disabling Bluetooth by default'
 		/boot/dietpi/func/dietpi-set_hardware bluetooth disable
 
@@ -1812,6 +1810,7 @@ You should have received a copy of the GNU General Public License along with thi
 _EOF_
 
 		G_DIETPI-NOTIFY 2 'Disabling and clearing APT cache'
+		G_EXEC rm /etc/apt/apt.conf.d/98dietpi-prep
 		/boot/dietpi/func/dietpi-set_software apt-cache cache disable
 		/boot/dietpi/func/dietpi-set_software apt-cache clean
 
