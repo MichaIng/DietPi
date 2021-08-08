@@ -882,9 +882,9 @@ _EOF_
 		#	RPi
 		elif (( $G_HW_MODEL < 10 )); then
 
-			# Add raspbian-archive-keyring and raspi-copies-and-fills for 32-bit images only
+			# ARMv6/7: Add raspi-copies-and-fills
 			local a32bit=()
-			[[ $G_HW_ARCH == 3 ]] || a32bit=('raspbian-archive-keyring' 'raspi-copies-and-fills')
+			[[ $G_HW_ARCH == 3 ]] || a32bit=('raspi-copies-and-fills')
 			G_AGI raspberrypi-bootloader raspberrypi-kernel libraspberrypi0 libraspberrypi-bin raspberrypi-sys-mods raspberrypi-archive-keyring "${a32bit[@]}"
 
 			# Move Raspbian key to active place and remove obsolete combined keyring
