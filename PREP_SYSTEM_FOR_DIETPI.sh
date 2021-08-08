@@ -634,7 +634,6 @@ Currently installed: $G_DISTRO_NAME (ID: $G_DISTRO)"; then
 			'console-setup'		# DietPi-Config keyboard configuration + console fonts
 			'cron'			# Background job scheduler
 			'curl'			# Web address testing, downloading, uploading etc.
-			'dirmngr'		# GNU key management required for some APT installs via additional repos
 			'ethtool'		# Force Ethernet link speed
 			'fake-hwclock'		# Hardware clock emulation, to allow correct timestamps during boot before network time sync
 			'fdisk'			# Partitioning tool used by DietPi-FS_partition_resize and DietPi-Imager
