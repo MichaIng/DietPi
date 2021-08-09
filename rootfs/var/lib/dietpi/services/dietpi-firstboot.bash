@@ -208,7 +208,10 @@ _EOF_
 
 		else
 
+			# Prevent Dropbear restart during package configuration, which hangs forever, and it is started after dietpi-boot.service.
+			ln -s /dev/null /etc/systemd/system/dropbear.service
 			dpkg-reconfigure -f noninteractive dropbear
+			[[ $(readlink -f '/etc/systemd/system/dropbear.service') == '/dev/null' ]] && rm /etc/systemd/system/dropbear.service
 
 		fi
 
