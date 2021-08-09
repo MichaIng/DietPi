@@ -201,19 +201,14 @@ _EOF_
 		/boot/dietpi/func/dietpi-set_software apt-mirror "$(sed -n "/^[[:blank:]]*$target_repo=/{s/^[^=]*=//p;q}" /boot/dietpi.txt)"
 
 		# Regenerate unique Dropbear host keys
-		rm -fv /etc/dropbear/dropbear_*_host_key
-		if (( $G_DISTRO < 6 )); then
-
-			dpkg-reconfigure -f noninteractive dropbear-run
-
-		else
-
-			# Prevent Dropbear restart during package configuration, which hangs forever, and it is started after dietpi-boot.service.
-			ln -s /dev/null /etc/systemd/system/dropbear.service
-			dpkg-reconfigure -f noninteractive dropbear
-			[[ $(readlink -f '/etc/systemd/system/dropbear.service') == '/dev/null' ]] && rm /etc/systemd/system/dropbear.service
-
-		fi
+		local i type
+		for i in /etc/dropbear/dropbear_*_host_key
+		do
+			type=${i#/etc/dropbear/dropbear_}
+			type=${type%_host_key}
+			rm -v "$i"
+			dropbearkey -t "$type" -f "$i"
+		done
 
 		# Recreate machine-id: https://github.com/MichaIng/DietPi/issues/2015
 		[[ -f '/etc/machine-id' ]] && rm /etc/machine-id
