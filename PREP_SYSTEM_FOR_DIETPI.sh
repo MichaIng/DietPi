@@ -610,6 +610,9 @@ Currently installed: $G_DISTRO_NAME (ID: $G_DISTRO)"; then
 			G_CONFIG_INJECT "G_LIVE_PATCH_STATUS\[$i\]=" "G_LIVE_PATCH_STATUS[$i]='${G_LIVE_PATCH_STATUS[$i]}'" /boot/dietpi/.version
 		done
 
+		# Temporary workaround for hanging DietPi-FirstBoot on Bullseye: https://github.com/MichaIng/DietPi/issues/4573#issuecomment-895208258
+		[[ $DISTRO_TARGET == 6 && $G_GITBRANCH == 'master' ]] && G_EXEC curl -sSfL 'https://github.com/MichaIng/DietPi/blob/1ecf972/rootfs/var/lib/dietpi/services/dietpi-firstboot.bash' -o /var/lib/dietpi/services/dietpi-firstboot.bash
+
 		G_EXEC systemctl daemon-reload
 
 		#------------------------------------------------------------------------------------------------
@@ -1084,6 +1087,19 @@ _EOF_
 
 		fi
 		G_EXEC apt-get clean # Remove downloaded archives
+
+		# RPi Bullseye workaround, until new firmware packages have been built: https://archive.raspberrypi.org/debian/pool/main/f/firmware-nonfree/?C=M;O=D
+		if (( $G_DISTRO == 6 && $G_HW_MODEL == 0 ))
+		then
+			G_EXEC curl -sSfLO 'https://archive.raspberrypi.org/debian/pool/main/f/firmware-nonfree/firmware-brcm80211_20190114-2+rpt1_all.deb'
+			G_EXEC dpkg-deb -x 'firmware-brcm80211_20190114-2+rpt1_all.deb' .
+			G_EXEC rm -R 'firmware-brcm80211_20190114-2+rpt1_all.deb' usr
+			for i in lib/firmware/brcm/*
+			do
+				[[ -f /$i ]] || G_EXEC mv {,/}"$i"
+			done
+			G_EXEC rm -R lib
+		fi
 
 		G_DIETPI-NOTIFY 2 'Deleting list of known users and groups, not required by DietPi'
 
