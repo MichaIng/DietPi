@@ -545,7 +545,7 @@ Currently installed: $G_DISTRO_NAME (ID: $G_DISTRO)"; then
 		# HW specific config.txt, boot.ini uEnv.txt
 		if (( $G_HW_MODEL < 10 )); then
 
-			echo "root=PARTUUID=$(findmnt -Ufnro PARTUUID -M /) rootfstype=ext4 rootwait fsck.repair=yes net.ifnames=0 console=serial0,115200 console=tty1 quiet" > /boot/cmdline.txt
+			echo "root=PARTUUID=$(findmnt -Ufnro PARTUUID -M /) rootfstype=ext4 rootwait fsck.repair=yes net.ifnames=0 logo.nologo quiet console=serial0,115200 console=tty1" > /boot/cmdline.txt
 			G_EXEC mv "DietPi-$G_GITBRANCH/config.txt" /boot/
 			# Boot in 64-bit mode if this is a 64-bit image
 			[[ $G_HW_ARCH == 3 ]] && G_CONFIG_INJECT 'arm_64bit=' 'arm_64bit=1' /boot/config.txt
@@ -1635,8 +1635,10 @@ _EOF_
 		# - RPi
 		elif (( $G_HW_MODEL < 10 )); then
 
-			# Scroll lock fix for RPi by Midwan: https://github.com/MichaIng/DietPi/issues/474#issuecomment-243215674
-			echo 'ACTION=="add", SUBSYSTEM=="leds", ENV{DEVPATH}=="*/input*::scrolllock", ATTR{trigger}="kbd-scrollock"' > /etc/udev/rules.d/50-leds.rules
+			# Creating RPi-specific groups
+			G_EXEC groupadd -rf spi
+			G_EXEC groupadd -rf i2c
+			G_EXEC groupadd -rf gpio
 
 			# Apply minimum GPU memory split for server usage: This applies a custom dtoverlay to disable VCSM: https://github.com/MichaIng/DietPi/pull/3900
 			/boot/dietpi/func/dietpi-set_hardware gpumemsplit 16
