@@ -611,7 +611,7 @@ Currently installed: $G_DISTRO_NAME (ID: $G_DISTRO)"; then
 		done
 
 		# Temporary workaround for hanging DietPi-FirstBoot on Bullseye: https://github.com/MichaIng/DietPi/issues/4573#issuecomment-895208258
-		[[ $DISTRO_TARGET == 6 && $G_GITBRANCH == 'master' ]] && G_EXEC curl -sSfL 'https://github.com/MichaIng/DietPi/blob/1ecf972/rootfs/var/lib/dietpi/services/dietpi-firstboot.bash' -o /var/lib/dietpi/services/dietpi-firstboot.bash
+		[[ $DISTRO_TARGET == 6 && $G_GITBRANCH == 'master' ]] && G_EXEC curl -sSfL 'https://raw.githubusercontent.com/MichaIng/DietPi/1ecf972/rootfs/var/lib/dietpi/services/dietpi-firstboot.bash' -o /var/lib/dietpi/services/dietpi-firstboot.bash
 
 		G_EXEC systemctl daemon-reload
 
