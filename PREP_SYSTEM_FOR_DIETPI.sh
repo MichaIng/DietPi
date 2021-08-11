@@ -591,7 +591,6 @@ Currently installed: $G_DISTRO_NAME (ID: $G_DISTRO)"; then
 		G_CONFIG_INJECT 'DEV_GITBRANCH=' "DEV_GITBRANCH=$G_GITBRANCH" /boot/dietpi.txt
 		G_CONFIG_INJECT 'DEV_GITOWNER=' "DEV_GITOWNER=$G_GITOWNER" /boot/dietpi.txt
 		G_VERSIONDB_SAVE
-		G_EXEC cp /boot/dietpi/.version /var/lib/dietpi/.dietpi_image_version
 
 		# Apply live patches
 		G_DIETPI-NOTIFY 2 'Applying DietPi live patches to fix known bugs in this version'
@@ -609,6 +608,8 @@ Currently installed: $G_DISTRO_NAME (ID: $G_DISTRO)"; then
 			# Store new status of live patch to /boot/dietpi/.version
 			G_CONFIG_INJECT "G_LIVE_PATCH_STATUS\[$i\]=" "G_LIVE_PATCH_STATUS[$i]='${G_LIVE_PATCH_STATUS[$i]}'" /boot/dietpi/.version
 		done
+
+		G_EXEC cp /boot/dietpi/.version /var/lib/dietpi/.dietpi_image_version
 
 		# Temporary workaround for hanging DietPi-FirstBoot on Bullseye: https://github.com/MichaIng/DietPi/issues/4573#issuecomment-895208258
 		[[ $DISTRO_TARGET == 6 && $G_GITBRANCH == 'master' ]] && G_EXEC curl -sSfL 'https://raw.githubusercontent.com/MichaIng/DietPi/1ecf972/rootfs/var/lib/dietpi/services/dietpi-firstboot.bash' -o /var/lib/dietpi/services/dietpi-firstboot.bash
