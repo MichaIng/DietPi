@@ -612,7 +612,10 @@ Currently installed: $G_DISTRO_NAME (ID: $G_DISTRO)"; then
 		G_EXEC cp /boot/dietpi/.version /var/lib/dietpi/.dietpi_image_version
 
 		# Temporary workaround for hanging DietPi-FirstBoot on Bullseye: https://github.com/MichaIng/DietPi/issues/4573#issuecomment-895208258
-		[[ $DISTRO_TARGET == 6 && $G_GITBRANCH == 'master' ]] && G_EXEC curl -sSfL 'https://raw.githubusercontent.com/MichaIng/DietPi/1ecf972/rootfs/var/lib/dietpi/services/dietpi-firstboot.bash' -o /var/lib/dietpi/services/dietpi-firstboot.bash
+		(( $DISTRO_TARGET == 6 && $G_DIETPI_VERSION_SUB == 4 )) && G_EXEC curl -sSfL 'https://raw.githubusercontent.com/MichaIng/DietPi/1ecf972/rootfs/var/lib/dietpi/services/dietpi-firstboot.bash' -o /var/lib/dietpi/services/dietpi-firstboot.bash
+
+		# Temporary fix for takeover of failed first run setup: https://github.com/MichaIng/DietPi/commit/a8f291caee8f1760020984a385f4831b0c954327
+		(( $G_DIETPI_VERSION_SUB == 4 )) && sed -i '/kill -9/a\\t\t\t\[\[ -f \$FP_DIETPI_FIRSTRUNSETUP_PID \]\] \&\& rm \$FP_DIETPI_FIRSTRUNSETUP_PID' /boot/dietpi/dietpi-login
 
 		G_EXEC systemctl daemon-reload
 
