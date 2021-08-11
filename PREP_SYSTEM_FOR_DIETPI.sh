@@ -1872,9 +1872,9 @@ _EOF_
 
 		# Power off system
 
-		# Plug SDcard/drive into external DietPi system
+		# Plug SD card/drive into external DietPi system
 
-		# Run: bash -c "$(curl -sSL https://github.com/MichaIng/DietPi/blob/dev/.meta/dietpi-imager)"
+		# Run: bash -c "$(curl -sSfL https://github.com/MichaIng/DietPi/blob/master/.meta/dietpi-imager)"
 
 	}
 
