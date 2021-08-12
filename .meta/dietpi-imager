@@ -26,7 +26,7 @@
 	G_EXEC cd "$FP_ORIGIN" # Process everything in origin dir instead of /tmp/$G_PROGRAM_NAME
 	# Import DietPi-Globals ---------------------------------------------------------------
 
-	readonly FP_MNT_TMP="/tmp/${G_PROGRAM_NAME}_rootfs"
+	readonly FP_MNT_TMP="/tmp/${G_PROGRAM_NAME}_mnt"
 	readonly CLONEZILLA_REPO='https://sourceforge.net/projects/clonezilla/files/clonezilla_live_alternative'
 	readonly DIETPI_REPO="https://raw.githubusercontent.com/$G_GITOWNER/DietPi/$G_GITBRANCH"
 
@@ -58,7 +58,8 @@
 
 	G_EXIT_CUSTOM()
 	{
-		findmnt $FP_MNT_TMP > /dev/null && G_EXEC umount -R $FP_MNT_TMP
+		findmnt $FP_MNT_TMP > /dev/null && Unmount_tmp
+		[[ -d $FP_MNT_TMP ]] && G_EXEC rmdir $FP_MNT_TMP
 		[[ $FP_SOURCE_IMG ]] && Delete_Loopback
 	}
 
@@ -245,6 +246,13 @@
 		fi
 	}
 
+	Unmount_tmp()
+	{
+		G_EXEC sync
+		G_EXEC sleep 1 # Give the system 1 second to avoid "mount is busy"
+		G_EXEC umount -R $FP_MNT_TMP
+	}
+
 	Main(){
 
 		# Skip menu if all inputs are provided via environment variables
@@ -310,7 +318,7 @@
 		Run_fsck
 
 		# Remount image for any required edits
-		G_EXEC mkdir -p $FP_MNT_TMP
+		G_EXEC mkdir $FP_MNT_TMP
 		G_EXEC mount "$FP_ROOT_DEV" $FP_MNT_TMP
 		# - Remove bash history, which is stored on shutdown, hence cannot be removed via DietPi-PREP
 		rm -fv $FP_MNT_TMP/{root,home/*}/.bash_history
@@ -328,12 +336,10 @@
 			G_EXEC cd "$FP_ORIGIN"
 			(( $reallow_dietpi_login )) && unset -v G_DIETPI_LOGIN
 		fi
-		sync
-		sleep 1 # Give the system 1 second to avoid "mount is busy"
-		G_EXEC umount -R $FP_MNT_TMP
-		G_EXEC rmdir $FP_MNT_TMP
-		G_EXEC partprobe "$FP_SOURCE" # Failsafe
-		G_EXEC partx -u "$FP_SOURCE" # Failsafe
+		Unmount_tmp
+		# Failsafe
+		G_EXEC partprobe "$FP_SOURCE"
+		G_EXEC partx -u "$FP_SOURCE"
 		Run_fsck
 
 		# Shrink filesystem to minimum
@@ -367,12 +373,9 @@
 					exit 1
 				fi
 			done
-			G_DIETPI-NOTIFY 2 'Overriding root filesystem free space with zeros to purge removed data and allow further archive size reduction...'
-			G_EXEC_OUTPUT=1 G_EXEC zerofree -v "$FP_ROOT_DEV"
-			G_EXEC sync
 
-		elif [[ $ROOT_FS_TYPE == 'f2fs' ]] #&& $(lsblk -rno FSUSE% "$FP_ROOT_DEV") =~ ^(9[5-9]|100)%$ ]]
-		then
+		#elif [[ $ROOT_FS_TYPE == 'f2fs' && ! $(lsblk -rno FSUSE% "$FP_ROOT_DEV") =~ ^(9[5-9]|100)%$ ]]
+		#then
 			# F2FS does not support shrinking: https://www.reddit.com/r/archlinux/comments/bpp77f/shrinking_a_f2fs_partition/
 			# Hence copy all data outside, remove and re-create a smaller filesytem, then copy them back in, as long as disk usage is not >=95% already.
 			# The UUID changes and there is currently no way to change it back...
@@ -380,8 +383,8 @@
 			#local sector_size=$(lsblk -rnbo LOG-SEC "$FP_ROOT_DEV") # bytes
 			#FS_SIZE=$(( ( $usage + 4*1024**2 ) / $sector_size )) # bytes + 4 MiB buffer => sectors
 			#G_DIETPI-NOTIFY 2 'Copying root filesystem content to temporary directory'
-			G_EXEC mkdir -p ${FP_MNT_TMP}{,_backup}
-			G_EXEC mount -o ro "$FP_ROOT_DEV" $FP_MNT_TMP
+			#G_EXEC mkdir ${FP_MNT_TMP}_backup
+			#G_EXEC mount -o ro "$FP_ROOT_DEV" $FP_MNT_TMP
 			#G_EXEC cp -a $FP_MNT_TMP/. ${FP_MNT_TMP}_backup/
 			#G_EXEC umount $FP_MNT_TMP
 			#G_DIETPI-NOTIFY 2 'Purging root filesystem'
@@ -392,43 +395,38 @@
 			#G_EXEC mount "$FP_ROOT_DEV" $FP_MNT_TMP
 			#G_EXEC cp -a ${FP_MNT_TMP}_backup/. $FP_MNT_TMP/
 			#G_EXEC rm -R ${FP_MNT_TMP}_backup
-			G_EXEC_OUTPUT=1 G_EXEC fstrim -v $FP_MNT_TMP
-			G_EXEC sync
-			G_EXEC sleep 1 # Give the system 1 second to avoid "mount is busy"
-			G_EXEC umount $FP_MNT_TMP
-			G_EXEC rmdir $FP_MNT_TMP
+			#Unmount_tmp
 			# Assure root filesystem size is in 512 byte sectors, as this is what sfdisk assmes
 			#FS_SIZE=$(( $FS_SIZE * $sector_size / 512 ))
+
 		elif [[ $ROOT_FS_TYPE == 'btrfs' ]]
 		then
 			G_DIETPI-NOTIFY 2 'Shrinking root filesystem to minimum size...'
-			G_EXEC mkdir -p $FP_MNT_TMP
 			G_EXEC mount "$FP_ROOT_DEV" $FP_MNT_TMP
 			FS_SIZE=$(( $(btrfs inspect-internal min-dev-size $FP_MNT_TMP) + 4*1024**2 )) # bytes? + 4 MiB buffer
 			G_EXEC_OUTPUT=1 G_EXEC btrfs filesystem resize $FS_SIZE $FP_MNT_TMP
-			G_EXEC_OUTPUT=1 G_EXEC fstrim -v $FP_MNT_TMP
-			G_EXEC sync
-			G_EXEC sleep 1 # Give the system 1 second to avoid "mount is busy"
-			G_EXEC umount $FP_MNT_TMP
-			G_EXEC rmdir $FP_MNT_TMP
+			Unmount_tmp
 			FS_SIZE=$(( $FS_SIZE / 512 )) # bytes => 512 byte sectors
 		fi
 
 		Run_fsck
 
+		G_DIETPI-NOTIFY 2 'Overriding filesystems free space with zeros to purge removed data and allow better compression...'
 		while read -r path type
 		do
-			[[ $type && $path != $FP_ROOT_DEV ]] || continue
+			[[ $type ]] || continue
 			if [[ $type == 'ext'[234] ]]
 			then
 				G_EXEC_OUTPUT=1 G_EXEC zerofree -v "$path"
 			else
 				G_EXEC mount "$path" $FP_MNT_TMP
 				G_EXEC_OUTPUT=1 G_EXEC fstrim -v $FP_MNT_TMP
-				G_EXEC umount $FP_MNT_TMP
+				Unmount_tmp
+				[[ $path == "$FP_ROOT_DEV" ]] && Run_fsck || G_EXEC fsck "$path"
 			fi
 
 		done < <(lsblk -rnpo NAME,FSTYPE "$FP_SOURCE"?*)
+		G_EXEC rmdir $FP_MNT_TMP
 
 		# Only resize partition when new size would be less than current size
 		if [[ $ROOT_FS_TYPE != 'f2fs' ]] && (( $(</sys/class/block/"${FP_ROOT_DEV##*/}"/size) > $FS_SIZE ))
