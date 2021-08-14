@@ -26,26 +26,40 @@
 	G_EXEC cd "$FP_ORIGIN" # Process everything in origin dir instead of /tmp/$G_PROGRAM_NAME
 	# Import DietPi-Globals ---------------------------------------------------------------
 
-	readonly FP_MNT_TMP="/tmp/${G_PROGRAM_NAME}_rootfs"
+	readonly FP_MNT_TMP="/tmp/${G_PROGRAM_NAME}_mnt"
 	readonly CLONEZILLA_REPO='https://sourceforge.net/projects/clonezilla/files/clonezilla_live_alternative'
 	readonly DIETPI_REPO="https://raw.githubusercontent.com/$G_GITOWNER/DietPi/$G_GITBRANCH"
 
-	SOURCE_TYPE='Drive'
-	FP_SOURCE_IMG=
-	FP_SOURCE=
+	# Inputs
+	if [[ -b $1 ]]
+	then
+		SOURCE_TYPE='Drive'
+		FP_SOURCE=$1
+
+	elif [[ -f $1 ]]
+	then
+		SOURCE_TYPE='Image'
+		FP_SOURCE_IMG=$1
+
+	elif [[ $1 ]]
+	then
+		G_DIETPI-NOTIFY 1 "Input source $1 does not exist, aborting..."
+		exit 1
+	fi
 	PART_TABLE_TYPE=
-	FP_ROOT_DEV=
+	#FP_ROOT_DEV=
 	ROOT_FS_TYPE=
-	CLONING_TOOL='dd'
+	#CLONING_TOOL=
 	OUTPUT_IMG_EXT='img'
-	OUTPUT_IMG_NAME='DietPi_RPi-ARMv6-Buster'
-	MOUNT_IT='Off'
+	#OUTPUT_IMG_NAME=
+	#MOUNT_IT=
 
 	Delete_Loopback(){ [[ $FP_SOURCE ]] && losetup "$FP_SOURCE" &> /dev/null && G_EXEC losetup -d "$FP_SOURCE"; }
 
 	G_EXIT_CUSTOM()
 	{
-		findmnt $FP_MNT_TMP > /dev/null && G_EXEC umount -R $FP_MNT_TMP
+		findmnt $FP_MNT_TMP > /dev/null && Unmount_tmp
+		[[ -d $FP_MNT_TMP ]] && G_EXEC rmdir $FP_MNT_TMP
 		[[ $FP_SOURCE_IMG ]] && Delete_Loopback
 	}
 
@@ -168,7 +182,7 @@
 		main_menu_choice='Target name' # On cancel, keep this entry selected
 
 		G_WHIP_DEFAULT_ITEM=$OUTPUT_IMG_NAME
-		G_WHIP_INPUTBOX 'Please enter a name for the new image:\n - DietPi_<device>-<arch>-<distro>\n - E.g.: DietPi_RPi-ARMv6-Buster' || return
+		G_WHIP_INPUTBOX 'Please enter a name for the new image:\n - DietPi_<device>-<arch>-<distro>\n - E.g.: DietPi_RPi-ARMv6-Bullseye' || return
 		OUTPUT_IMG_NAME=$G_WHIP_RETURNED_VALUE
 
 		# Check for existing file, in case offer backup. Skip if source is image file and matches output file already.
@@ -186,15 +200,15 @@
 	Menu_Main()
 	{
 		G_WHIP_MENU_ARRAY=(
-			'Source type' ": [$SOURCE_TYPE] Select how the input OS is stored"
+			'Source type' ": [${SOURCE_TYPE:=Drive}] Select how the input OS is stored"
 			'Source path' ": [${FP_SOURCE_IMG:-$FP_SOURCE}] Select the input $SOURCE_TYPE"
 		)
 		[[ $FP_SOURCE ]] && G_WHIP_MENU_ARRAY+=('Source rootfs' ": [$FP_ROOT_DEV] Select input OS root partition")
 		G_WHIP_MENU_ARRAY+=(
-			'Target type' ": [$CLONING_TOOL] Select output image type"
-			'Target name' ": [$OUTPUT_IMG_NAME] Choose the output image name"
+			'Target type' ": [${CLONING_TOOL:=dd}] Select output image type"
+			'Target name' ": [${OUTPUT_IMG_NAME:=DietPi_RPi-ARMv6-Bullseye}] Choose the output image name"
 			'' '●─'
-			'Mount' ": [$MOUNT_IT] Review or edit drive content before image creation"
+			'Mount' ": [${MOUNT_IT:=Off}] Review or edit drive content before image creation"
 		)
 		[[ $FP_SOURCE && $FP_ROOT_DEV ]] && G_WHIP_MENU_ARRAY+=('' '●─' 'Start' ": Start creating $OUTPUT_IMG_NAME.$OUTPUT_IMG_EXT")
 
@@ -232,15 +246,45 @@
 		fi
 	}
 
+	Unmount_tmp()
+	{
+		G_EXEC sync
+		G_EXEC sleep 1 # Give the system 1 second to avoid "mount is busy"
+		G_EXEC umount -R $FP_MNT_TMP
+	}
+
 	Main(){
 
-		local main_menu_choice
-		Menu_Source_Type
-		until [[ $main_menu_choice == 'Start' ]]
-		do
-			Menu_Main
-		done
-		unset -v main_menu_choice
+		# Skip menu if all inputs are provided via environment variables
+		if [[ ( $SOURCE_TYPE$FP_SOURCE == 'Drive'?* || $SOURCE_TYPE$FP_SOURCE_IMG == 'Image'?* ) && $FP_ROOT_DEV && $CLONING_TOOL =~ ^(dd|Clonezilla)$ && $OUTPUT_IMG_NAME && $MOUNT_IT =~ ^O(n|ff)$ ]]
+		then
+			if [[ $SOURCE_TYPE == 'Image' ]]
+			then
+				# Create loopback device from .img file
+				G_EXEC modprobe loop
+				Delete_Loopback # Prevent doubled loop device
+				FP_SOURCE=$(losetup -f)
+				G_EXEC_NOEXIT=1 G_EXEC losetup "$FP_SOURCE" "$FP_SOURCE_IMG" || return
+				G_EXEC_NOEXIT=1 G_EXEC partprobe "$FP_SOURCE" || return
+				G_EXEC_NOEXIT=1 G_EXEC partx -u "$FP_SOURCE" || return
+				G_DIETPI-NOTIFY 0 "Mounted the image ($FP_SOURCE_IMG) as loopback device: $FP_SOURCE"
+				FP_ROOT_DEV="${FP_SOURCE}p${FP_ROOT_DEV: -1}"
+			fi
+			[[ $CLONING_TOOL == 'dd' ]] && OUTPUT_IMG_EXT='img' || OUTPUT_IMG_EXT='iso'
+			G_DIETPI-NOTIFY 0 "\e[0mCreating minified image from:
+- $SOURCE_TYPE: ${FP_SOURCE_IMG:-$FP_SOURCE}
+- Root device: $FP_ROOT_DEV
+- Via $CLONING_TOOL to $OUTPUT_IMG_NAME.$OUTPUT_IMG_EXT
+- With intermediate mounting turned $MOUNT_IT"
+		else
+			local main_menu_choice
+			Menu_Source_Type
+			until [[ $main_menu_choice == 'Start' ]]
+			do
+				Menu_Main
+			done
+			unset -v main_menu_choice
+		fi
 
 		# Install required packages: fdisk is an own package since Debian Buster: https://packages.debian.org/fdisk
 		local fdisk
@@ -274,7 +318,7 @@
 		Run_fsck
 
 		# Remount image for any required edits
-		G_EXEC mkdir -p $FP_MNT_TMP
+		G_EXEC mkdir $FP_MNT_TMP
 		G_EXEC mount "$FP_ROOT_DEV" $FP_MNT_TMP
 		# - Remove bash history, which is stored on shutdown, hence cannot be removed via DietPi-PREP
 		rm -fv $FP_MNT_TMP/{root,home/*}/.bash_history
@@ -292,12 +336,10 @@
 			G_EXEC cd "$FP_ORIGIN"
 			(( $reallow_dietpi_login )) && unset -v G_DIETPI_LOGIN
 		fi
-		sync
-		sleep 1 # Give the system 1 second to avoid "mount is busy"
-		G_EXEC umount -R $FP_MNT_TMP
-		G_EXEC rmdir $FP_MNT_TMP
-		G_EXEC partprobe "$FP_SOURCE" # Failsafe
-		G_EXEC partx -u "$FP_SOURCE" # Failsafe
+		Unmount_tmp
+		# Failsafe
+		G_EXEC partprobe "$FP_SOURCE"
+		G_EXEC partx -u "$FP_SOURCE"
 		Run_fsck
 
 		# Shrink filesystem to minimum
@@ -312,12 +354,15 @@
 				resize2fs -M "$FP_ROOT_DEV" 2>&1 | tee resize2fs_out
 				if out=$(grep -im1 'nothing to do!' resize2fs_out)
 				then
+					rm resize2fs_out
 					FS_SIZE=$(mawk '{print $5}' <<< "$out") # blocks
 					BLOCK_SIZE=${out%%k) *} BLOCK_SIZE=${BLOCK_SIZE##*\(} # KiB
-					# Re-add 4 MiB to be failsafe, was required on Raspbian Buster for successful boot
-					FS_SIZE=$(( $FS_SIZE + 4096/$BLOCK_SIZE )) # blocks
-					rm resize2fs_out
-					G_EXEC resize2fs "$FP_ROOT_DEV" $FS_SIZE
+					# Re-add 4 MiB if it would still fit into the partition, which was required on Raspbian Buster for successful boot.
+					if (( $(</sys/class/block/"${FP_ROOT_DEV##*/}"/size) > $FS_SIZE * $BLOCK_SIZE * 2 + 8 )) # 512 byte sectors
+					then
+						FS_SIZE=$(( $FS_SIZE + 4096/$BLOCK_SIZE )) # blocks
+						G_EXEC resize2fs "$FP_ROOT_DEV" $FS_SIZE
+					fi
 					G_DIETPI-NOTIFY 0 "Reduced RootFS size to $(( $FS_SIZE * $BLOCK_SIZE / 1024 + 1 )) MiB"
 					FS_SIZE=$(( $FS_SIZE * $BLOCK_SIZE * 2 )) # blocks => 512 byte sectors
 					break
@@ -328,12 +373,9 @@
 					exit 1
 				fi
 			done
-			G_DIETPI-NOTIFY 2 'Overriding root filesystem free space with zeros to purge removed data and allow further archive size reduction...'
-			G_EXEC_OUTPUT=1 G_EXEC zerofree -v "$FP_ROOT_DEV"
-			G_EXEC sync
 
-		elif [[ $ROOT_FS_TYPE == 'f2fs' ]] #&& $(lsblk -rno FSUSE% "$FP_ROOT_DEV") =~ ^(9[5-9]|100)%$ ]]
-		then
+		#elif [[ $ROOT_FS_TYPE == 'f2fs' && ! $(lsblk -rno FSUSE% "$FP_ROOT_DEV") =~ ^(9[5-9]|100)%$ ]]
+		#then
 			# F2FS does not support shrinking: https://www.reddit.com/r/archlinux/comments/bpp77f/shrinking_a_f2fs_partition/
 			# Hence copy all data outside, remove and re-create a smaller filesytem, then copy them back in, as long as disk usage is not >=95% already.
 			# The UUID changes and there is currently no way to change it back...
@@ -341,8 +383,8 @@
 			#local sector_size=$(lsblk -rnbo LOG-SEC "$FP_ROOT_DEV") # bytes
 			#FS_SIZE=$(( ( $usage + 4*1024**2 ) / $sector_size )) # bytes + 4 MiB buffer => sectors
 			#G_DIETPI-NOTIFY 2 'Copying root filesystem content to temporary directory'
-			G_EXEC mkdir -p ${FP_MNT_TMP}{,_backup}
-			G_EXEC mount -o ro "$FP_ROOT_DEV" $FP_MNT_TMP
+			#G_EXEC mkdir ${FP_MNT_TMP}_backup
+			#G_EXEC mount -o ro "$FP_ROOT_DEV" $FP_MNT_TMP
 			#G_EXEC cp -a $FP_MNT_TMP/. ${FP_MNT_TMP}_backup/
 			#G_EXEC umount $FP_MNT_TMP
 			#G_DIETPI-NOTIFY 2 'Purging root filesystem'
@@ -353,29 +395,38 @@
 			#G_EXEC mount "$FP_ROOT_DEV" $FP_MNT_TMP
 			#G_EXEC cp -a ${FP_MNT_TMP}_backup/. $FP_MNT_TMP/
 			#G_EXEC rm -R ${FP_MNT_TMP}_backup
-			G_EXEC fstrim $FP_MNT_TMP
-			G_EXEC sync
-			G_EXEC sleep 1 # Give the system 1 second to avoid "mount is busy"
-			G_EXEC umount $FP_MNT_TMP
-			G_EXEC rmdir $FP_MNT_TMP
+			#Unmount_tmp
 			# Assure root filesystem size is in 512 byte sectors, as this is what sfdisk assmes
 			#FS_SIZE=$(( $FS_SIZE * $sector_size / 512 ))
+
 		elif [[ $ROOT_FS_TYPE == 'btrfs' ]]
 		then
 			G_DIETPI-NOTIFY 2 'Shrinking root filesystem to minimum size...'
-			G_EXEC mkdir -p $FP_MNT_TMP
 			G_EXEC mount "$FP_ROOT_DEV" $FP_MNT_TMP
 			FS_SIZE=$(( $(btrfs inspect-internal min-dev-size $FP_MNT_TMP) + 4*1024**2 )) # bytes? + 4 MiB buffer
 			G_EXEC_OUTPUT=1 G_EXEC btrfs filesystem resize $FS_SIZE $FP_MNT_TMP
-			G_EXEC fstrim $FP_MNT_TMP
-			G_EXEC sync
-			G_EXEC sleep 1 # Give the system 1 second to avoid "mount is busy"
-			G_EXEC umount $FP_MNT_TMP
-			G_EXEC rmdir $FP_MNT_TMP
+			Unmount_tmp
 			FS_SIZE=$(( $FS_SIZE / 512 )) # bytes => 512 byte sectors
 		fi
 
 		Run_fsck
+
+		G_DIETPI-NOTIFY 2 'Overriding filesystems free space with zeros to purge removed data and allow better compression...'
+		while read -r path type
+		do
+			[[ $type ]] || continue
+			if [[ $type == 'ext'[234] ]]
+			then
+				G_EXEC_OUTPUT=1 G_EXEC zerofree -v "$path"
+			else
+				G_EXEC mount "$path" $FP_MNT_TMP
+				G_EXEC_OUTPUT=1 G_EXEC fstrim -v $FP_MNT_TMP
+				Unmount_tmp
+				[[ $path == "$FP_ROOT_DEV" ]] && Run_fsck || G_EXEC fsck "$path"
+			fi
+
+		done < <(lsblk -rnpo NAME,FSTYPE "$FP_SOURCE"?*)
+		G_EXEC rmdir $FP_MNT_TMP
 
 		# Only resize partition when new size would be less than current size
 		if [[ $ROOT_FS_TYPE != 'f2fs' ]] && (( $(</sys/class/block/"${FP_ROOT_DEV##*/}"/size) > $FS_SIZE ))
@@ -400,7 +451,7 @@
 			G_EXEC truncate --size=$IMAGE_SIZE "$FP_SOURCE_IMG"
 
 			# Rename, if source image != output image already
-			[[ $PWD/$OUTPUT_IMG_NAME.$OUTPUT_IMG_EXT != "$FP_SOURCE_IMG" ]] && mv "$FP_SOURCE_IMG" "$OUTPUT_IMG_NAME.$OUTPUT_IMG_EXT"
+			[[ $PWD/$OUTPUT_IMG_NAME.$OUTPUT_IMG_EXT != "$(readlink -f "$FP_SOURCE_IMG")" ]] && G_EXEC mv "$FP_SOURCE_IMG" "$OUTPUT_IMG_NAME.$OUTPUT_IMG_EXT"
 
 			# Check if there is enough free disk space to store the 7z file
 			NEEDED_FREE_SPACE=$(( $IMAGE_SIZE * 15/100  / 1024**2 ))
@@ -580,7 +631,7 @@ _EOF_
 		G_EXEC_DESC='Creating final 7zip archive' G_EXEC_OUTPUT=1 G_EXEC 7zr a -bsp1 -bso1 -bse2 -m0=lzma2 -mx=9 $limit_threads "$OUTPUT_IMG_NAME.7z" "$OUTPUT_IMG_NAME.$OUTPUT_IMG_EXT" hash.txt README.md
 
 		G_EXEC_NOHALT=1 G_EXEC rm hash.txt README.md
-		G_WHIP_MSG "[  OK  ] DietPi-Imager has successfully finished.\n
+		G_DIETPI-NOTIFY 0 "DietPi-Imager has successfully finished.
 Final image file: $PWD/$OUTPUT_IMG_NAME.$OUTPUT_IMG_EXT
 Final 7z archive: $PWD/$OUTPUT_IMG_NAME.7z"
 
