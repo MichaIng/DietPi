@@ -1772,29 +1772,28 @@ _EOF_
 		G_DIETPI-NOTIFY 2 "$tmp_info generic WiFi by default"
 		/boot/dietpi/func/dietpi-set_hardware wifimodules $tmp_mode
 
-		# - x86_64: kernel cmd line with GRUB
+		# - x86_64: GRUB install and config
 		if (( $G_HW_ARCH == 10 )); then
 
 			G_EXEC_DESC='Detecting additional OS installed on system' G_EXEC os-prober
 			# Purge "os-prober" again
 			G_AGP os-prober
 
-			# - Native PC/EFI (assume x86_64 only possible)
-			if [[ -d '/boot/efi' ]] && dpkg-query -s 'grub-efi-amd64' &> /dev/null; then
+			# UEFI
+			if [[ -d '/boot/efi' ]] && dpkg-query -s 'grub-efi-amd64' &> /dev/null
+			then
+				G_EXEC_DESC='Installing GRUB for UEFI' G_EXEC_OUTPUT=1 G_EXEC grub-install --target=x86_64-efi --efi-directory=/boot/efi --bootloader-id=arch_grub --uefi-secure-boot --recheck
 
-				G_EXEC_DESC='Recreating GRUB-EFI' G_EXEC grub-install --target=x86_64-efi --efi-directory=/boot/efi --bootloader-id=arch_grub --recheck
-
+			# BIOS
+			else
+				G_EXEC_DESC='Installing GRUB for BIOS' G_EXEC_OUTPUT=1 G_EXEC grub-install --recheck "$(lsblk -npo PKNAME "$(findmnt -Ufnro SOURCE -M /)")"
 			fi
 
-			# - Finalise GRUB
-			if [[ -f '/etc/default/grub' ]]; then
-
-				G_CONFIG_INJECT 'GRUB_CMDLINE_LINUX_DEFAULT=' 'GRUB_CMDLINE_LINUX_DEFAULT="consoleblank=0 quiet"' /etc/default/grub
-				G_CONFIG_INJECT 'GRUB_CMDLINE_LINUX=' 'GRUB_CMDLINE_LINUX="net.ifnames=0"' /etc/default/grub
-				G_CONFIG_INJECT 'GRUB_TIMEOUT=' 'GRUB_TIMEOUT=0' /etc/default/grub
-				G_EXEC_DESC='Finalising GRUB' G_EXEC update-grub
-
-			fi
+			# Update config
+			G_CONFIG_INJECT 'GRUB_CMDLINE_LINUX_DEFAULT=' 'GRUB_CMDLINE_LINUX_DEFAULT="consoleblank=0 quiet"' /etc/default/grub
+			G_CONFIG_INJECT 'GRUB_CMDLINE_LINUX=' 'GRUB_CMDLINE_LINUX="net.ifnames=0"' /etc/default/grub
+			G_CONFIG_INJECT 'GRUB_TIMEOUT=' 'GRUB_TIMEOUT=0' /etc/default/grub
+			G_EXEC_DESC='Regenerating GRUB config' G_EXEC_OUTPUT=1 G_EXEC grub-mkconfig -o /boot/grub/grub.cfg
 
 		fi
 
