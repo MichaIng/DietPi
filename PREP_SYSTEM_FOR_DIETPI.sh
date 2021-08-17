@@ -615,6 +615,7 @@ Currently installed: $G_DISTRO_NAME (ID: $G_DISTRO)"; then
 		(( $DISTRO_TARGET == 6 && $G_DIETPI_VERSION_SUB == 4 )) && G_EXEC curl -sSfL 'https://raw.githubusercontent.com/MichaIng/DietPi/1ecf972/rootfs/var/lib/dietpi/services/dietpi-firstboot.bash' -o /var/lib/dietpi/services/dietpi-firstboot.bash
 
 		# Temporary fix for takeover of failed first run setup: https://github.com/MichaIng/DietPi/commit/a8f291caee8f1760020984a385f4831b0c954327
+		# shellcheck disable=SC2016
 		(( $G_DIETPI_VERSION_SUB == 4 )) && sed -i '/kill -9/a\\t\t\t\[\[ -f \$FP_DIETPI_FIRSTRUNSETUP_PID \]\] \&\& rm \$FP_DIETPI_FIRSTRUNSETUP_PID' /boot/dietpi/dietpi-login
 
 		G_EXEC systemctl daemon-reload
@@ -768,7 +769,7 @@ Currently installed: $G_DISTRO_NAME (ID: $G_DISTRO)"; then
 			local apackages=('linux-image-amd64' 'os-prober')
 
 			# Grub EFI with secure boot compatibility
-			if dpkg-query -s 'grub-efi-amd64' &> /dev/null || [[ -d '/boot/efi' ]]; then
+			if [[ -d '/boot/efi' ]] || dpkg-query -s 'grub-efi-amd64' &> /dev/null; then
 
 				apackages+=('grub-efi-amd64' 'grub-efi-amd64-signed' 'shim-signed')
 
@@ -1775,14 +1776,22 @@ _EOF_
 		# - x86_64: GRUB install and config
 		if (( $G_HW_ARCH == 10 )); then
 
-			G_EXEC_DESC='Detecting additional OS installed on system' G_EXEC os-prober
-			# Purge "os-prober" again
-			G_AGP os-prober
+			G_EXEC_DESC='Detecting additional OS installed on system' G_EXEC_OUTPUT=1 os-prober
 
 			# UEFI
 			if [[ -d '/boot/efi' ]] && dpkg-query -s 'grub-efi-amd64' &> /dev/null
 			then
-				G_EXEC_DESC='Installing GRUB for UEFI' G_EXEC_OUTPUT=1 G_EXEC grub-install --target=x86_64-efi --efi-directory=/boot/efi --bootloader-id=arch_grub --uefi-secure-boot --recheck
+				# Force GRUB installation to the EFI removable media path, if no (other) bootloader is installed there yet
+				shopt -s nocaseglob
+				local efi_fallback=
+				for i in /boot/efi/EFI/boot/bootx64.efi
+				do
+					[[ -d $i ]] && break
+					efi_fallback='--force-extra-removable'
+					debconf-set-selections <<< 'grub-efi-amd64 grub2/force_efi_extra_removable boolean true'
+				done
+				shopt -u nocaseglob
+				G_EXEC_DESC='Installing GRUB for UEFI' G_EXEC_OUTPUT=1 G_EXEC grub-install --target=x86_64-efi --efi-directory=/boot/efi --bootloader-id=DietPi $efi_fallback --uefi-secure-boot --recheck
 
 			# BIOS
 			else
@@ -1795,6 +1804,8 @@ _EOF_
 			G_CONFIG_INJECT 'GRUB_TIMEOUT=' 'GRUB_TIMEOUT=0' /etc/default/grub
 			G_EXEC_DESC='Regenerating GRUB config' G_EXEC_OUTPUT=1 G_EXEC grub-mkconfig -o /boot/grub/grub.cfg
 
+			# Purge "os-prober" again
+			G_AGP os-prober
 		fi
 
 		G_DIETPI-NOTIFY 2 'Disabling soundcards by default'
