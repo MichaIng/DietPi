@@ -1791,7 +1791,7 @@ _EOF_
 					debconf-set-selections <<< 'grub-efi-amd64 grub2/force_efi_extra_removable boolean true'
 				done
 				shopt -u nocaseglob
-				G_EXEC_DESC='Installing GRUB for UEFI' G_EXEC_OUTPUT=1 G_EXEC grub-install --target=x86_64-efi --efi-directory=/boot/efi --bootloader-id=DietPi $efi_fallback --uefi-secure-boot --recheck
+				G_EXEC_DESC='Installing GRUB for UEFI' G_EXEC_OUTPUT=1 G_EXEC grub-install --recheck --target=x86_64-efi --efi-directory=/boot/efi $efi_fallback --uefi-secure-boot
 
 			# BIOS
 			else
