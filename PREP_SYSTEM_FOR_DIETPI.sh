@@ -1776,7 +1776,7 @@ _EOF_
 		# - x86_64: GRUB install and config
 		if (( $G_HW_ARCH == 10 )); then
 
-			G_EXEC_DESC='Detecting additional OS installed on system' G_EXEC_OUTPUT=1 os-prober
+			G_EXEC_DESC='Detecting additional OS installed on system' G_EXEC_OUTPUT=1 G_EXEC os-prober
 
 			# UEFI
 			if [[ -d '/boot/efi' ]] && dpkg-query -s 'grub-efi-amd64' &> /dev/null
