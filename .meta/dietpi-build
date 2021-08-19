@@ -1,0 +1,226 @@
+#!/bin/bash
+# Created by MichaIng / micha@dietpi.com / dietpi.com
+{
+# Load DietPi-Globals
+. /boot/dietpi/func/dietpi-globals
+readonly G_PROGRAM_NAME='DietPi-Build'
+G_CHECK_ROOT_USER
+G_CHECK_ROOTFS_RW
+readonly FP_ORIGIN=$PWD # Store origin dir
+G_INIT
+G_EXEC cd "$FP_ORIGIN" # Process everything in origin dir instead of /tmp/$G_PROGRAM_NAME
+G_EXIT_CUSTOM(){
+	findmnt -M "$FP_ORIGIN/rootfs" &> /dev/null && G_EXEC umount -R "$FP_ORIGIN/rootfs"
+	[[ -d $FP_ORIGIN/rootfs ]] && G_EXEC rmdir "$FP_ORIGIN/rootfs"
+	losetup /dev/loop0 &> /dev/null && G_EXEC losetup -d /dev/loop0
+	(( $mask_dbus )) && G_EXEC systemctl mask --now dbus dbus.socket
+}
+
+# Inputs
+HW_MODEL=
+HW_ARCH=
+PTTYPE='msdos'
+FSTYPE='ext4'
+ITYPE=
+while (( $# ))
+do
+	case $1 in
+		'-m') shift; HW_MODEL=$1;;
+		'-a') shift; HW_ARCH=$1;;
+		'-p') shift; PTTYPE=$1;;
+		'-f') shift; FSTYPE=$1;;
+		'-i') ITYPE='Installer';;
+		*) G_DIETPI-NOTIFY 1 "Invalid input \"$1\", aborting..."; exit 1;;
+	esac
+	shift
+done
+
+# Check for valid target hardware model and set variables accordingly
+WIFI_REQUIRED=1
+partition_start=4
+efi_size=64
+boot_size=128
+root_size=892
+CLONING_TOOL='dd'
+case $HW_MODEL in
+	0) iname='RPi';;
+	20) iname='VM' WIFI_REQUIRED=1 boot_size=0;;
+	21) iname='NativePC-BIOS' HW_ARCH=10 root_size=1152;;
+	*) G_DIETPI-NOTIFY 1 "Invalid hardware model \"$HW_MODEL\" passed, aborting..."; exit 1;;
+esac
+
+# Check for valid target architecture and set variables accordingly
+case $HW_ARCH in
+	1) iarch='ARMv6' parch='armhf' repo='http://raspbian.raspberrypi.org/raspbian/';;
+	2) iarch='ARMv7' parch='armhf' repo='https://deb.debian.org/debian/';;
+	3) iarch='ARMv8' parch='arm64' repo='https://deb.debian.org/debian/';;
+	10) iarch='x86_64' parch='amd64' repo='https://deb.debian.org/debian/' partition_start=1;;
+	*) G_DIETPI-NOTIFY 1 "Invalid architecture \"$HW_ARCH\" passed, aborting..."; exit 1;;
+esac
+
+case $PTTYPE in
+	'msdos') efi_size=0;;
+	'gpt') [[ $HW_ARCH == 10 ]] && iname='NativePC-UEFI' ITYPE='Installer';;
+	*) G_DIETPI-NOTIFY 1 "Invalid partition table type \"$PTTYPE\" passed, aborting..."; exit 1;;
+esac
+
+case $FSTYPE in
+	'ext4'|'f2fs'|'btrfs') :;;
+	*) G_DIETPI-NOTIFY 1 "Invalid filesystem type \"$FSTYPE\" passed, aborting..."; exit 1;;
+esac
+
+# Image name
+OUTPUT_IMG_NAME="DietPi_$iname-$iarch-Bullseye"
+[[ $ITYPE ]] && OUTPUT_IMG_NAME+="_$ITYPE"
+
+# For installer images, disable dedicated boot partition, as it cannot be accessed to edit dietpi.txt anyway
+[[ $ITYPE == 'Installer' ]] && root_size=$((root_size+boot_size)) boot_size=0 CLONING_TOOL='Clonezilla'
+
+# Dependencies
+G_AG_CHECK_INSTALL_PREREQ parted dosfstools debootstrap dbus systemd-container
+
+# Create image file
+G_EXEC fallocate -l "$((partition_start+efi_size+boot_size+root_size))M" "$OUTPUT_IMG_NAME.img"
+
+# GPT: Create EFI partition and set partition labels instead of types
+if [[ $PTTYPE == 'gpt' ]]
+then
+	G_EXEC parted -s "$OUTPUT_IMG_NAME.img" unit MiB mklabel gpt mkpart 'EFI' fat32 $partition_start $((partition_start+efi_size)) set 1 esp on
+	# Create boot partition it set
+	(( $boot_size )) && G_EXEC parted -s "$OUTPUT_IMG_NAME.img" unit MiB mkpart 'boot' fat32 $((partition_start+efi_size)) $((partition_start+efi_size+boot_size))
+	# root partition
+	G_EXEC parted -s "$OUTPUT_IMG_NAME.img" unit MiB mkpart 'root' "$FSTYPE" $((partition_start+efi_size+boot_size)) 100%
+
+# MBR: Set partition types instead of labels
+else
+	G_EXEC parted -s "$OUTPUT_IMG_NAME.img" unit MiB mklabel msdos
+	# Create boot partition it set
+	(( $boot_size )) && G_EXEC parted -s "$OUTPUT_IMG_NAME.img" unit MiB mkpart primary fat32 $((partition_start)) $((partition_start+boot_size))
+	# root partition
+	G_EXEC parted -s "$OUTPUT_IMG_NAME.img" unit MiB mkpart primary "$FSTYPE" $((partition_start+boot_size)) 100%
+	# x86_64: Set boot flag
+	G_EXEC parted -s "$OUTPUT_IMG_NAME.img" set 1 boot on
+fi
+
+# Create loop device
+G_EXEC losetup loop0 "$OUTPUT_IMG_NAME.img"
+G_EXEC partprobe /dev/loop0
+G_EXEC partx -u /dev/loop0
+
+# Create and mount filesystems and fstab
+G_EXEC mkdir rootfs
+if [[ $PTTYPE == 'gpt' ]] && (( $boot_size ))
+then
+	FP_ROOT_DEV=3
+	G_EXEC mkfs.fat -F 32 /dev/loop0p1
+	G_EXEC mkfs.fat -F 32 /dev/loop0p2
+	G_EXEC "mkfs.$FSTYPE" /dev/loop0p3
+	G_EXEC mount /dev/loop0p3 rootfs
+	G_EXEC mkdir rootfs/boot
+	G_EXEC mount /dev/loop0p2 rootfs/boot
+	G_EXEC mkdir rootfs/boot/efi
+	G_EXEC mount /dev/loop0p1 rootfs/boot/efi
+	G_EXEC mkdir rootfs/etc
+	cat << _EOF_ > rootfs/etc/fstab
+PARTUUID=$(lsblk -no PARTUUID /dev/loop0p3) / $FSTYPE noatime,lazytime 0 1
+PARTUUID=$(lsblk -no PARTUUID /dev/loop0p2) /boot vfat noatime,lazytime 0 2
+PARTUUID=$(lsblk -no PARTUUID /dev/loop0p1) /boot/efi vfat noatime,lazytime 0 3
+_EOF_
+
+elif [[ $PTTYPE == 'gpt' ]]
+then
+	FP_ROOT_DEV=2
+	G_EXEC mkfs.fat -F 32 /dev/loop0p1
+	G_EXEC "mkfs.$FSTYPE" /dev/loop0p2
+	G_EXEC mount /dev/loop0p2 rootfs
+	G_EXEC mkdir -p rootfs/boot/efi
+	G_EXEC mount /dev/loop0p1 rootfs/boot/efi
+	G_EXEC mkdir rootfs/etc
+	cat << _EOF_ > rootfs/etc/fstab
+PARTUUID=$(lsblk -no PARTUUID /dev/loop0p2) / $FSTYPE noatime,lazytime 0 1
+PARTUUID=$(lsblk -no PARTUUID /dev/loop0p1) /boot/efi vfat noatime,lazytime 0 2
+_EOF_
+
+elif (( $boot_size ))
+then
+	FP_ROOT_DEV=2
+	G_EXEC mkfs.fat -F 32 /dev/loop0p1
+	G_EXEC "mkfs.$FSTYPE" /dev/loop0p2
+	G_EXEC mount /dev/loop0p2 rootfs
+	G_EXEC mkdir rootfs/boot
+	G_EXEC mount /dev/loop0p1 rootfs/boot
+	G_EXEC mkdir rootfs/etc
+	cat << _EOF_ > rootfs/etc/fstab
+PARTUUID=$(lsblk -no PARTUUID /dev/loop0p2) / $FSTYPE noatime,lazytime 0 1
+PARTUUID=$(lsblk -no PARTUUID /dev/loop0p1) /boot vfat noatime,lazytime 0 2
+_EOF_
+
+else
+	FP_ROOT_DEV=1
+	G_EXEC "mkfs.$FSTYPE" /dev/loop0p1
+	G_EXEC mount /dev/loop0p1 rootfs
+	G_EXEC mkdir rootfs/etc
+	cat << _EOF_ > rootfs/etc/fstab
+PARTUUID=$(lsblk -no PARTUUID /dev/loop0p1) / $FSTYPE noatime,lazytime 0 1
+_EOF_
+fi
+
+# Create rc.local to automate DietPi-PREP
+cat << '_EOF_' > rootfs/etc/rc.local
+#!/bin/dash
+{
+_EOF_
+G_EXEC chmod +x rootfs/etc/rc.local
+
+# - RPi only: https://github.com/RPi-Distro/repo/issues/253
+[[ $HW_MODEL == 0 ]] && cat << '_EOF_' >> rootfs/etc/rc.local
+curl -sSfLO 'https://archive.raspberrypi.org/debian/pool/main/r/raspberrypi-archive-keyring/raspberrypi-archive-keyring_2016.10.31_all.deb' || exit 1
+dpkg -i raspberrypi-archive-keyring_2016.10.31_all.deb || exit 1
+rm raspberrypi-archive-keyring_2016.10.31_all.deb || exit 1
+_EOF_
+
+cat << _EOF_ >> rootfs/etc/rc.local
+export GITBRANCH='master' HW_MODEL='$HW_MODEL' IMAGE_CREATOR=0 PREIMAGE_INFO='from scratch' WIFI_REQUIRED=$WIFI_REQUIRED DISTRO_TARGET=6
+bash -c "\$(curl -sSfL 'https://raw.githubusercontent.com/$G_GITOWNER/DietPi/$G_GITBRANCH/PREP_SYSTEM_FOR_DIETPI.sh')"
+poweroff
+exit 0
+} > /dev/console 2>&1 < /dev/console
+_EOF_
+
+# Bootstrap
+G_EXEC_OUTPUT=1 G_EXEC debootstrap --arch="$parch" --variant=minbase --exclude='gcc-7-base,gcc-8-base,gcc-9-base' --include='bash-completion,bzip2,ca-certificates,console-setup,cron,curl,dropbear,ethtool,fake-hwclock,fdisk,gnupg,htop,ifupdown,isc-dhcp-client,kmod,locales,nano,p7zip,parted,procps,psmisc,rfkill,sudo,systemd-sysv,systemd-timesyncd,tzdata,udev,unzip,usbutils,wget,whiptail' --no-check-gpg bullseye ./rootfs "$repo"
+
+# Remove cached archives and list files created by debootstrap
+G_EXEC rm -Rf rootfs/var/{cache/apt,lib/apt/lists}/*
+
+# Start container
+# - dbus required for container spawn
+mask_dbus=0
+if [[ $(readlink /etc/systemd/system/dbus.socket) == '/dev/null' ]]
+then
+	mask_dbus=1
+	G_EXEC systemctl unmask dbus.socket dbus
+	G_EXEC systemctl start dbus.socket dbus
+fi
+# - Bind mounts required to allow container reading its own drive info, /dev/disk for GRUB and probably other tools to detect UUIDs
+# - CAP_IPC_LOCK required for mlock/mlockall, used by vmtouch
+abind=()
+[[ -b '/dev/loop0p2' ]] && abind=('--bind=/dev/loop0p2')
+[[ -b '/dev/loop0p3' ]] && abind+=('--bind=/dev/loop0p3')
+systemd-nspawn -bD rootfs --bind=/dev/loop0 --bind=/dev/loop0p1 "${abind[@]}" --bind=/dev/disk --capability=CAP_IPC_LOCK || exit 1
+G_EXEC sync
+G_EXEC sleep 1
+G_EXEC umount -R rootfs
+G_EXEC rmdir rootfs
+G_EXEC losetup -d /dev/loop0
+(( $mask_dbus )) && { G_EXEC systemctl mask --now dbus dbus.socket && mask_dbus=0; }
+
+# Imager
+export FP_ROOT_DEV CLONING_TOOL OUTPUT_IMG_NAME MOUNT_IT='Off'
+bash -c "$(curl -sSfL "https://raw.githubusercontent.com/$G_GITOWNER/DietPi/$G_GITBRANCH/.meta/dietpi-imager")" 'DietPi-Imager' "$OUTPUT_IMG_NAME.img" || exit 1
+
+# Upload
+[[ -x 'upload.sh' ]] && ./upload.sh "$OUTPUT_IMG_NAME.7z"
+
+exit 0
+}
