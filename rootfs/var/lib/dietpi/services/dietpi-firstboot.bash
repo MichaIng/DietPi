@@ -301,6 +301,13 @@ _EOF_
 		# shellcheck disable=SC2015
 		(( $wifi_enabled )) && ifup wlan$index_wlan || ifup eth$index_eth
 
+		# x86_64 BIOS: Set GRUB install device: https://github.com/MichaIng/DietPi/issues/4542
+		if (( $G_HW_MODEL == 10 )) && dpkg-query -s grub-pc &> /dev/null
+		then
+			local root_drive=$(lsblk -npo PKNAME "$(findmnt -Ufnro SOURCE -M /)")
+			[[ $root_drive == '/dev/'* ]] && debconf-set-selections <<< "grub-pc grub-pc/install_devices multiselect $root_drive"
+		fi
+
 	}
 
 	#/////////////////////////////////////////////////////////////////////////////////////
