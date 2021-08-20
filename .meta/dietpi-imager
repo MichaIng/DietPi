@@ -52,7 +52,7 @@
 	#CLONING_TOOL=
 	OUTPUT_IMG_EXT='img'
 	#OUTPUT_IMG_NAME=
-	#MOUNT_IT=
+	[[ $MOUNT_IT == 'On' ]] || MOUNT_IT='Off'
 
 	Delete_Loopback(){ [[ $FP_SOURCE ]] && losetup "$FP_SOURCE" &> /dev/null && G_EXEC losetup -d "$FP_SOURCE"; }
 
@@ -208,7 +208,7 @@
 			'Target type' ": [${CLONING_TOOL:=dd}] Select output image type"
 			'Target name' ": [${OUTPUT_IMG_NAME:=DietPi_RPi-ARMv6-Bullseye}] Choose the output image name"
 			'' '●─'
-			'Mount' ": [${MOUNT_IT:=Off}] Review or edit drive content before image creation"
+			'Mount' ": [$MOUNT_IT] Review or edit drive content before image creation"
 		)
 		[[ $FP_SOURCE && $FP_ROOT_DEV ]] && G_WHIP_MENU_ARRAY+=('' '●─' 'Start' ": Start creating $OUTPUT_IMG_NAME.$OUTPUT_IMG_EXT")
 
@@ -256,7 +256,7 @@
 	Main(){
 
 		# Skip menu if all inputs are provided via environment variables
-		if [[ ( $SOURCE_TYPE$FP_SOURCE == 'Drive'?* || $SOURCE_TYPE$FP_SOURCE_IMG == 'Image'?* ) && $FP_ROOT_DEV && $CLONING_TOOL =~ ^(dd|Clonezilla)$ && $OUTPUT_IMG_NAME && $MOUNT_IT =~ ^O(n|ff)$ ]]
+		if [[ ( $SOURCE_TYPE$FP_SOURCE == 'Drive'?* || $SOURCE_TYPE$FP_SOURCE_IMG == 'Image'?* ) && $FP_ROOT_DEV && $CLONING_TOOL =~ ^(dd|Clonezilla)$ && $OUTPUT_IMG_NAME ]]
 		then
 			if [[ $SOURCE_TYPE == 'Image' ]]
 			then
@@ -298,13 +298,10 @@
 		then
 			G_DIETPI-NOTIFY 2 'MBR partition table detected'
 
-		# GPT images:
-		# - "GPT PMBR size mismatch (4458495 != 15523839)"
-		# - "Error: The backup GPT table is corrupt, but the primary appears OK, so that will be used."
-		# - gdisk will correct this
+		# Move GPT backup partition table to end of drive
 		elif [[ $PART_TABLE_TYPE == 'gpt' ]]
 		then
-			G_DIETPI-NOTIFY 2 'GPT partition table detected, applying backup table fix...'
+			G_DIETPI-NOTIFY 2 'GPT partition table detected, moving GPT backup partition table to end of drive...'
 			G_AG_CHECK_INSTALL_PREREQ gdisk
 			G_EXEC_OUTPUT=1 G_EXEC sgdisk -e "$FP_SOURCE"
 		else
@@ -422,7 +419,8 @@
 				G_EXEC mount "$path" $FP_MNT_TMP
 				G_EXEC_OUTPUT=1 G_EXEC fstrim -v $FP_MNT_TMP
 				Unmount_tmp
-				[[ $path == "$FP_ROOT_DEV" ]] && Run_fsck || G_EXEC fsck "$path"
+				# shellcheck disable=SC2015
+				[[ $path == "$FP_ROOT_DEV" ]] && Run_fsck || G_EXEC_OUTPUT=1 G_EXEC fsck "$path"
 			fi
 
 		done < <(lsblk -rnpo NAME,FSTYPE "$FP_SOURCE"?*)
@@ -471,7 +469,7 @@
 		else
 			G_DIETPI-NOTIFY 2 'Creating final image with Clonezilla'
 			# Install required packages
-			G_AG_CHECK_INSTALL_PREREQ clonezilla partclone xorriso isolinux syslinux-common unzip curl
+			G_AG_CHECK_INSTALL_PREREQ clonezilla partclone xorriso isolinux syslinux-common unzip curl pigz file
 
 			# Download last version of Clonezilla Live
 			CLONEZILLA_VERSION=$(curl -s "$CLONEZILLA_REPO/" | grep 'class="folder "' | head -n1 | cut -d\" -f2)
@@ -489,30 +487,24 @@
 			G_CHECK_FREESPACE . $(( $NEEDED_FREE_SPACE + 100 )) || exit 1 # Assure +100 MiB left partition space
 
 			# Download Clonezilla Live
-			if [[ ! -f $CLONEZILLA_ZIP || $(stat -c %s "$CLONEZILLA_ZIP") != "$CLONEZILLA_ZIP_SIZE" ]]
-			then
-				G_DIETPI-NOTIFY 2 "Downloading Clonezilla Live v$CLONEZILLA_VERSION..."
-				G_EXEC curl -sSfL "$CLONEZILLA_ZIP_URL" -o "$CLONEZILLA_ZIP"
-			fi
+			G_DIETPI-NOTIFY 2 "Downloading Clonezilla Live v$CLONEZILLA_VERSION..."
+			G_EXEC curl -sSfL "$CLONEZILLA_ZIP_URL" -o "$CLONEZILLA_ZIP"
 
 			# Extract Clonezilla Live
+			[[ -e 'tmpiso' ]] && G_EXEC rm -R tmpiso
 			G_EXEC unzip "$CLONEZILLA_ZIP" -d 'tmpiso'
 			G_EXEC rm "$CLONEZILLA_ZIP"
 
 			# Clone disk with Clonezilla
-			if [[ ! -d tmpiso/home/partimag/$OUTPUT_IMG_NAME ]]
-			then
-				G_EXEC mkdir -p tmpiso/home/partimag
-				G_DIETPI-NOTIFY 2 'Cloning disk with Clonezilla...'
-				ocs-sr -or "$PWD/tmpiso/home/partimag" -nogui -fsck -q2 -c -j2 -z1p -i 4096 -senc -sc savedisk "$OUTPUT_IMG_NAME" "${FP_SOURCE##*/}" || exit 1
-			fi
+			G_EXEC mkdir -p tmpiso/home/partimag
+			G_EXEC_DESC='Cloning disk with Clonezilla' G_EXEC_OUTPUT=1 G_EXEC ocs-sr -or "$PWD/tmpiso/home/partimag" -nogui -fsck -q2 -c -j2 -z1p -i 4096 -senc -sc savedisk "$OUTPUT_IMG_NAME" "${FP_SOURCE##*/}"
 
 			# For the sake of privacy, remove some non vital files that contain SNs and UUIDs
 			G_EXEC rm -f "tmpiso/home/partimag/$OUTPUT_IMG_NAME/"{Info*txt,*list,clonezilla-img}
 
 			# Check image
 			G_DIETPI-NOTIFY 2 'Checking Clonezilla image...'
-			ocs-chkimg -or "$PWD/tmpiso/home/partimag" -nogui -b "$OUTPUT_IMG_NAME" || exit 1
+			G_EXEC_OUTPUT=1 G_EXEC ocs-chkimg -or "$PWD/tmpiso/home/partimag" -nogui -b "$OUTPUT_IMG_NAME"
 
 			# Prepare custom files used by the installer when booting in UEFI mode
 			G_EXEC curl -sSfL "$DIETPI_REPO"/.meta/images/dietpi-background_768p.png -o tmpiso/boot/grub/dietpibg.png
@@ -538,10 +530,10 @@ _EOF_
 			sed -n  -e '/menuentry .*800x600/,/}/p' -e '/menuentry .*KMS/,/}/p' -e '/menuentry .*Safe/,/}/p' \
 				-e '/menuentry .*Failsafe/,/}/p' tmpiso/boot/grub/clonezilla.cfg >> tmpiso/boot/grub/grub.cfg
 			# shellcheck disable=SC2016
-			sed -i  -e 's|set timeout=.*|set timeout="-1"|' -e '/set pref=/ a set theme=$pref/theme.txt' \
+			sed -i  -e 's|set timeout=.*|set timeout="-1"|' -e '/set pref=/a set theme=\$pref/theme.txt' \
 				-e 's|"Clonezilla live |"Install DietPi |' -e 's|locales= |locales=C.UTF-8 |' \
 				-e 's|keyboard-layouts= |keyboard-layouts=gb |' -e 's|ocs-live-general|ocs-live-restore|' \
-				-e 's|ocs_live_extra_param=""|ocs_live_extra_param="-icds -k1 -r -e2 -j2 -batch -p poweroff restoredisk ask_user ask_user"|' \
+				-e "s|ocs_live_extra_param=\"\"|ocs_live_extra_param=\"-icds -k1 -r -e2 -j2 -b -p poweroff restoredisk $OUTPUT_IMG_NAME ask_user\"|" \
 				-e 's|ocs_live_batch="no"|ocs_live_batch="yes"|' tmpiso/boot/grub/grub.cfg
 			cat << '_EOF_' >> tmpiso/boot/grub/grub.cfg
 submenu "Clonezilla live" {
@@ -550,7 +542,6 @@ submenu "Clonezilla live" {
 }
 menuentry "Power off" { halt }
 _EOF_
-
 			# Prepare custom files used by the installer when booting in BIOS/CSM mode
 			G_EXEC curl -sSfL "$DIETPI_REPO"/.meta/images/dietpi-background_480p.png -o tmpiso/syslinux/dietpibg.png
 			G_EXEC cp /usr/lib/syslinux/modules/bios/poweroff.c32 tmpiso/syslinux/
@@ -569,7 +560,7 @@ _EOF_
 			sed -i  -e 's|^\(timeout\) .*|\1 0|' -e 's|\(MENU BACKGROUND\) .*|\1 dietpibg.png|' -e 's|MENU TITLE .*|MENU TABMSG|' \
 				-e '/menu title/d' -e '/^say /d' -e '/MENU MARGIN/ a MENU HSHIFT 80\n MENU COLOR BORDER 0 #00000000 #00000000 none' -e 's|Clonezilla live |Install DietPi |' \
 				-e 's|locales= |locales=C.UTF-8 |' -e 's|keyboard-layouts= |keyboard-layouts=gb |' -e 's|ocs-live-general|ocs-live-restore|' \
-				-e 's|ocs_live_extra_param=""|ocs_live_extra_param="-icds -k1 -r -e2 -j2 -batch -p poweroff restoredisk ask_user ask_user"|' \
+				-e "s|ocs_live_extra_param=\"\"|ocs_live_extra_param=\"-icds -k1 -r -e2 -j2 -b -p poweroff restoredisk $OUTPUT_IMG_NAME ask_user\"|" \
 				-e 's|ocs_live_batch="no"|ocs_live_batch="yes"|' tmpiso/syslinux/syslinux.cfg
 			cat << '_EOF_' >> tmpiso/syslinux/syslinux.cfg
 MENU BEGIN Clonezilla live
@@ -600,13 +591,10 @@ _EOF_
 			[[ $SOURCE_TYPE == 'Image' ]] && Delete_Loopback
 		fi
 
-		# GPT images:
-		# - "GPT PMBR size mismatch (4458495 != 15523839)"
-		# - "Error: The backup GPT table is corrupt, but the primary appears OK, so that will be used."
-		# - gdisk will correct this
-		if [[ $PART_TABLE_TYPE == 'gpt' ]]
+		# Move GPT backup partition table to end of drive
+		if [[ $CLONING_TOOL != 'Clonezilla' && $PART_TABLE_TYPE == 'gpt' ]]
 		then
-			G_EXEC_DESC='Reapplying GPT partition backup table fix' G_EXEC_OUTPUT=1 G_EXEC sgdisk -e "$OUTPUT_IMG_NAME.$OUTPUT_IMG_EXT"
+			G_EXEC_DESC='Moving GPT backup partition table to end of drive' G_EXEC_OUTPUT=1 G_EXEC sgdisk -e "$OUTPUT_IMG_NAME.$OUTPUT_IMG_EXT"
 			G_EXEC sync
 		fi
 
