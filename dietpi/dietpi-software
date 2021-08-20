@@ -773,7 +773,8 @@ INDEX_BROWSER_TARGET=$INDEX_BROWSER_TARGET"
 		aSOFTWARE_DESC[$software_id]='automatically download music'
 		aSOFTWARE_CATX[$software_id]=3
 		aSOFTWARE_DOCS[$software_id]='https://dietpi.com/docs/software/bittorrent/#lidarr'
-		aSOFTWARE_DEPS[$software_id]='87 150'
+		aSOFTWARE_DEPS[$software_id]='87'
+		(( $G_HW_ARCH == 1 )) && aSOFTWARE_DEPS[$software_id]+=' 150'
 		#------------------
 		software_id=180
 
@@ -6947,19 +6948,114 @@ _EOF_
 
 			Banner_Installing
 
-			# Reinstall: Skip download and install, advice to use internal updater from web UI
-			if [[ -d '/opt/Lidarr' ]]; then
+			# APT dependencies
+			DEPS_LIST='mediainfo'
+			# - .NET: https://packages.microsoft.com/debian/
+			if (( $G_HW_ARCH != 1 ))
+			then
+				if (( $G_DISTRO < 5 ))
+				then
+					DEPS_LIST+=' libicu57'
 
-				G_DIETPI-NOTIFY 2 "${aSOFTWARE_NAME[$software_id]} install dir \"/opt/Lidarr\" already exists. Download and install steps will be skipped.
+				elif (( $G_DISTRO == 5 ))
+				then
+					DEPS_LIST+=' libicu63'
+
+				elif (( $G_DISTRO == 6 ))
+				then
+					DEPS_LIST+=' libicu67'
+				fi
+			fi
+
+			# Pre-v7.5 ARMv6: Migrate old install dir
+			[[ -d '/opt/Lidarr' && ! -d '/opt/lidarr' ]] && G_EXEC mv /opt/{L,l}idarr
+
+			# Reinstall: Skip download and install, advice to use internal updater from web UI
+			if [[ -d '/opt/lidarr' ]]
+			then
+				# shellcheck disable=SC2086
+				G_AGI $DEPS_LIST
+				DEPS_LIST=
+				G_DIETPI-NOTIFY 2 "${aSOFTWARE_NAME[$software_id]} install dir \"/opt/lidarr\" already exists. Download and install steps will be skipped.
  - If you want to update ${aSOFTWARE_NAME[$software_id]}, please use the internal updater from web UI.
- - If you need to reinstall (e.g. broken instance), please manually remove the install dir \"/opt/Lidarr\" and rerun \"dietpi-software reinstall $software_id\"."
+ - If you need to reinstall (e.g. broken instance), please manually remove the install dir \"/opt/lidarr\" and rerun \"dietpi-software reinstall $software_id\"."
 
 			else
+				# ARMv6
+				if (( $G_HW_ARCH == 1 ))
+				then
+					INSTALL_URL_ADDRESS=$(curl -sSfL 'https://api.github.com/repos/Lidarr/Lidarr/releases/latest' | mawk -F\" '/"browser_download_url": .*linux\.tar\.gz"/{print $4}')
+					local fallback_url='https://github.com/Lidarr/Lidarr/releases/download/v0.8.1.2135/Lidarr.master.0.8.1.2135.linux.tar.gz'
 
-				local fallback_url='https://github.com/lidarr/Lidarr/releases/download/v0.8.1.2135/Lidarr.master.0.8.1.2135.linux.tar.gz'
-				DEPS_LIST='mediainfo' Download_Install "$(curl -sSfL 'https://api.github.com/repos/Lidarr/Lidarr/releases/latest' | mawk -F\" '/"browser_download_url": .*linux\.tar\.gz"/{print $4}')" /opt
+				# ARMv7
+				elif (( $G_HW_ARCH == 2 ))
+				then
+					INSTALL_URL_ADDRESS=$(curl -sSfL 'https://api.github.com/repos/Lidarr/Lidarr/releases/latest' | mawk -F\" '/"browser_download_url": .*linux-core-arm\.tar\.gz"/{print $4}')
+					local fallback_url='https://github.com/Lidarr/Lidarr/releases/download/v0.8.1.2135/Lidarr.master.0.8.1.2135.linux-core-arm.tar.gz'
 
+				# ARMv8
+				elif (( $G_HW_ARCH == 3 ))
+				then
+					INSTALL_URL_ADDRESS=$(curl -sSfL 'https://api.github.com/repos/Lidarr/Lidarr/releases/latest' | mawk -F\" '/"browser_download_url": .*linux-core-arm64\.tar\.gz"/{print $4}')
+					local fallback_url='https://github.com/Lidarr/Lidarr/releases/download/v0.8.1.2135/Lidarr.master.0.8.1.2135.linux-core-arm64.tar.gz'
+
+				# x86_64
+				elif (( $G_HW_ARCH == 10 ))
+				then
+					INSTALL_URL_ADDRESS=$(curl -sSfL 'https://api.github.com/repos/Lidarr/Lidarr/releases/latest' | mawk -F\" '/"browser_download_url": .*linux-core-x64\.tar\.gz"/{print $4}')
+					local fallback_url='https://github.com/Lidarr/Lidarr/releases/download/v0.8.1.2135/Lidarr.master.0.8.1.2135.linux-core-x64.tar.gz'
+				fi
+
+				Download_Install "$INSTALL_URL_ADDRESS"
+				G_EXEC mv Lidarr /opt/lidarr
 			fi
+
+			# Data dir
+			G_EXEC mkdir -p /mnt/dietpi_userdata/lidarr
+
+			# User
+			Create_User -g dietpi -d /mnt/dietpi_userdata/lidarr lidarr
+
+			# Service: https://github.com/lidarr/Lidarr/wiki/Autostart-on-Linux#systemd
+			cat << _EOF_ > /etc/systemd/system/lidarr.service
+[Unit]
+Description=Lidarr Daemon (DietPi)
+Wants=network-online.target
+After=network-online.target dietpi-boot.service
+
+[Service]
+SyslogIdentifier=Lidarr
+User=lidarr
+UMask=002
+ExecStart=/opt/lidarr/Lidarr -nobrowser -data=/mnt/dietpi_userdata/lidarr
+TimeoutStopSec=20
+KillMode=process
+Restart=on-failure
+
+# Hardening
+ProtectSystem=strict
+ProtectHome=true
+PrivateDevices=true
+ProtectKernelTunables=true
+ProtectControlGroups=true
+ReadWritePaths=/opt/lidarr /mnt /media /var/log/lidarr /tmp
+
+[Install]
+WantedBy=multi-user.target
+_EOF_
+			# - ARMv6 devices use Mono
+			(( $G_HW_ARCH == 1 )) && G_CONFIG_INJECT 'ExecStart=' "ExecStart=$(command -v mono) /opt/lidarr/Lidarr.exe -nobrowser -data=/mnt/dietpi_userdata/lidarr" /etc/systemd/system/lidarr.service
+
+			# Logs to RAM
+			G_EXEC rm -Rf /mnt/dietpi_userdata/lidarr/logs*
+			G_EXEC mkdir -p /var/log/lidarr
+			G_EXEC ln -s /var/log/lidarr /mnt/dietpi_userdata/lidarr/logs
+			G_EXEC ln -s /var/log/lidarr/logs.db /mnt/dietpi_userdata/lidarr/logs.db
+			G_EXEC ln -s /var/log/lidarr/logs.db-shm /mnt/dietpi_userdata/lidarr/logs.db-shm
+			G_EXEC ln -s /var/log/lidarr/logs.db-wal /mnt/dietpi_userdata/lidarr/logs.db-wal
+
+			# Permissions
+			G_EXEC chown -R lidarr:dietpi /mnt/dietpi_userdata/lidarr /opt/lidarr /var/log/lidarr
 
 		fi
 
@@ -12646,57 +12742,6 @@ _EOF_
 
 		fi
 
-		software_id=106 # Lidarr
-		if (( ${aSOFTWARE_INSTALL_STATE[$software_id]} == 1 )); then
-
-			Banner_Configuration
-
-			# Data dir
-			G_EXEC mkdir -p /mnt/dietpi_userdata/lidarr
-
-			# User
-			Create_User -g dietpi -d /mnt/dietpi_userdata/lidarr lidarr
-
-			# Service: https://github.com/lidarr/Lidarr/wiki/Autostart-on-Linux#systemd
-			cat << _EOF_ > /etc/systemd/system/lidarr.service
-[Unit]
-Description=Lidarr Daemon (DietPi)
-Wants=network-online.target
-After=network-online.target dietpi-boot.service
-
-[Service]
-SyslogIdentifier=Lidarr
-User=lidarr
-UMask=002
-ExecStart=$(command -v mono) /opt/Lidarr/Lidarr.exe -nobrowser -data=/mnt/dietpi_userdata/lidarr
-TimeoutStopSec=20
-KillMode=process
-Restart=on-failure
-
-# Hardening
-ProtectSystem=strict
-ProtectHome=true
-PrivateDevices=true
-ProtectKernelTunables=true
-ProtectControlGroups=true
-ReadWritePaths=/opt/Lidarr /mnt /media /var/log/lidarr /tmp
-
-[Install]
-WantedBy=multi-user.target
-_EOF_
-			# Logs to RAM
-			G_EXEC rm -Rf /mnt/dietpi_userdata/lidarr/logs*
-			G_EXEC mkdir -p /var/log/lidarr
-			G_EXEC ln -s /var/log/lidarr /mnt/dietpi_userdata/lidarr/logs
-			G_EXEC ln -s /var/log/lidarr/logs.db /mnt/dietpi_userdata/lidarr/logs.db
-			G_EXEC ln -s /var/log/lidarr/logs.db-shm /mnt/dietpi_userdata/lidarr/logs.db-shm
-			G_EXEC ln -s /var/log/lidarr/logs.db-wal /mnt/dietpi_userdata/lidarr/logs.db-wal
-
-			# Permissions
-			G_EXEC chown -R lidarr:dietpi /mnt/dietpi_userdata/lidarr /opt/Lidarr /var/log/lidarr
-
-		fi
-
 		software_id=180 # Bazarr
 		if (( ${aSOFTWARE_INSTALL_STATE[$software_id]} == 1 )); then
 
@@ -14368,14 +14413,14 @@ _EOF_
 			Banner_Uninstalling
 			if [[ -f '/etc/systemd/system/lidarr.service' ]]; then
 
-				systemctl disable --now lidarr
-				rm -R /etc/systemd/system/lidarr.service*
+				G_EXEC systemctl disable --now lidarr
+				G_EXEC rm /etc/systemd/system/lidarr.service
 
 			fi
-			[[ -d '/etc/systemd/system/lidarr.service.d' ]] && rm -R /etc/systemd/system/lidarr.service.d
+			[[ -d '/etc/systemd/system/lidarr.service.d' ]] && G_EXEC rm -R /etc/systemd/system/lidarr.service.d
 			getent passwd lidarr > /dev/null && userdel lidarr
 			getent group lidarr > /dev/null && groupdel lidarr # Pre-v6.29
-			rm -Rf /opt/Lidarr /mnt/dietpi_userdata/lidarr /var/log/lidarr
+			G_EXEC rm -Rf /opt/{L,l}idarr /mnt/dietpi_userdata/lidarr /var/log/lidarr
 
 		fi
 
