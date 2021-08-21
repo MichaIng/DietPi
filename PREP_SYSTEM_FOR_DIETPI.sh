@@ -84,8 +84,17 @@ Acquire::IndexTargets::deb::Packages::KeepCompressedAs "xz";
 Acquire::IndexTargets::deb::Translations::KeepCompressedAs "xz";
 Acquire::IndexTargets::deb-src::Sources::KeepCompressedAs "xz";
 _EOF_
-	# - Forcing new DEB package config files (during PREP only)
-	echo -e '#clear DPkg::options;\nDPkg::options:: "--force-confmiss,confnew";' > /etc/apt/apt.conf.d/98dietpi-forceconf
+	# - During PREP only: Force new DEB package config files and tmpfs lists + archives
+	cat << '_EOF_' > /etc/apt/apt.conf.d/98dietpi-prep
+#clear DPkg::options;
+DPkg::options:: "--force-confmiss,confnew";
+Dir::Cache "/tmp/apt";
+Dir::Cache::archives "/tmp/apt/archives";
+Dir::State "/tmp/apt";
+Dir::State::extended_states "/var/lib/apt/extended_states";
+Dir::State::status "/var/lib/dpkg/status";
+Dir::Cache::pkgcache "";
+_EOF_
 	# - Force IPv4 by default to avoid hanging access attempts in some cases, e.g. WiFi bridges
 	#	NB: This needs to match the method in: /boot/dietpi/func/dietpi-set_hardware preferipv4 enable
 	echo 'Acquire::ForceIPv4 "true";' > /etc/apt/apt.conf.d/99-dietpi-force-ipv4
@@ -536,6 +545,7 @@ Currently installed: $G_DISTRO_NAME (ID: $G_DISTRO)"; then
 		# HW specific config.txt, boot.ini uEnv.txt
 		if (( $G_HW_MODEL < 10 )); then
 
+			echo "root=PARTUUID=$(findmnt -Ufnro PARTUUID -M /) rootfstype=ext4 rootwait fsck.repair=yes net.ifnames=0 logo.nologo quiet console=serial0,115200 console=tty1" > /boot/cmdline.txt
 			G_EXEC mv "DietPi-$G_GITBRANCH/config.txt" /boot/
 			# Boot in 64-bit mode if this is a 64-bit image
 			[[ $G_HW_ARCH == 3 ]] && G_CONFIG_INJECT 'arm_64bit=' 'arm_64bit=1' /boot/config.txt
@@ -543,6 +553,7 @@ Currently installed: $G_DISTRO_NAME (ID: $G_DISTRO)"; then
 		elif (( $G_HW_MODEL == 11 )); then
 
 			G_EXEC mv "DietPi-$G_GITBRANCH/boot_xu4.ini" /boot/boot.ini
+			G_EXEC sed -i "s/root=UUID=[^[:blank:]]*/root=UUID=$(findmnt -Ufnro UUID -M /)/" /boot/boot.ini
 
 		elif (( $G_HW_MODEL == 12 )); then
 
@@ -551,6 +562,7 @@ Currently installed: $G_DISTRO_NAME (ID: $G_DISTRO)"; then
 		elif (( $G_HW_MODEL == 15 )); then
 
 			G_EXEC mv "DietPi-$G_GITBRANCH/boot_n2.ini" /boot/boot.ini
+			G_EXEC sed -i "s/root=UUID=[^[:blank:]]*/root=UUID=$(findmnt -Ufnro UUID -M /)/" /boot/boot.ini
 
 		fi
 
@@ -579,7 +591,6 @@ Currently installed: $G_DISTRO_NAME (ID: $G_DISTRO)"; then
 		G_CONFIG_INJECT 'DEV_GITBRANCH=' "DEV_GITBRANCH=$G_GITBRANCH" /boot/dietpi.txt
 		G_CONFIG_INJECT 'DEV_GITOWNER=' "DEV_GITOWNER=$G_GITOWNER" /boot/dietpi.txt
 		G_VERSIONDB_SAVE
-		G_EXEC cp /boot/dietpi/.version /var/lib/dietpi/.dietpi_image_version
 
 		# Apply live patches
 		G_DIETPI-NOTIFY 2 'Applying DietPi live patches to fix known bugs in this version'
@@ -595,8 +606,17 @@ Currently installed: $G_DISTRO_NAME (ID: $G_DISTRO)"; then
 			fi
 
 			# Store new status of live patch to /boot/dietpi/.version
-			G_CONFIG_INJECT "G_LIVE_PATCH_STATUS\[$i\]=" "G_LIVE_PATCH_STATUS[$i]='${G_LIVE_PATCH_STATUS[$i]}'" /boot/dietpi/.version.version
+			G_CONFIG_INJECT "G_LIVE_PATCH_STATUS\[$i\]=" "G_LIVE_PATCH_STATUS[$i]='${G_LIVE_PATCH_STATUS[$i]}'" /boot/dietpi/.version
 		done
+
+		G_EXEC cp /boot/dietpi/.version /var/lib/dietpi/.dietpi_image_version
+
+		# Temporary workaround for hanging DietPi-FirstBoot on Bullseye: https://github.com/MichaIng/DietPi/issues/4573#issuecomment-895208258
+		(( $DISTRO_TARGET == 6 && $G_DIETPI_VERSION_SUB == 4 )) && G_EXEC curl -sSfL 'https://raw.githubusercontent.com/MichaIng/DietPi/1ecf972/rootfs/var/lib/dietpi/services/dietpi-firstboot.bash' -o /var/lib/dietpi/services/dietpi-firstboot.bash
+
+		# Temporary fix for takeover of failed first run setup: https://github.com/MichaIng/DietPi/commit/a8f291caee8f1760020984a385f4831b0c954327
+		# shellcheck disable=SC2016
+		(( $G_DIETPI_VERSION_SUB == 4 )) && sed -i '/kill -9/a\\t\t\t\[\[ -f \$FP_DIETPI_FIRSTRUNSETUP_PID \]\] \&\& rm \$FP_DIETPI_FIRSTRUNSETUP_PID' /boot/dietpi/dietpi-login
 
 		G_EXEC systemctl daemon-reload
 
@@ -634,7 +654,6 @@ Currently installed: $G_DISTRO_NAME (ID: $G_DISTRO)"; then
 			'console-setup'		# DietPi-Config keyboard configuration + console fonts
 			'cron'			# Background job scheduler
 			'curl'			# Web address testing, downloading, uploading etc.
-			'dirmngr'		# GNU key management required for some APT installs via additional repos
 			'ethtool'		# Force Ethernet link speed
 			'fake-hwclock'		# Hardware clock emulation, to allow correct timestamps during boot before network time sync
 			'fdisk'			# Partitioning tool used by DietPi-FS_partition_resize and DietPi-Imager
@@ -741,6 +760,8 @@ Currently installed: $G_DISTRO_NAME (ID: $G_DISTRO)"; then
 
 		# Kernel/bootloader/firmware
 		# - We need to install those directly to allow G_AGA() autoremove possible older packages later: https://github.com/MichaIng/DietPi/issues/1285#issuecomment-354602594
+		# - Assure that dir for additional sources is present
+		[[ -d '/etc/apt/sources.list.d' ]] || G_EXEC mkdir /etc/apt/sources.list.d
 		# - G_HW_ARCH specific
 		#	x86_64
 		if (( $G_HW_ARCH == 10 )); then
@@ -748,7 +769,7 @@ Currently installed: $G_DISTRO_NAME (ID: $G_DISTRO)"; then
 			local apackages=('linux-image-amd64' 'os-prober')
 
 			# Grub EFI with secure boot compatibility
-			if dpkg-query -s 'grub-efi-amd64' &> /dev/null || [[ -d '/boot/efi' ]]; then
+			if [[ -d '/boot/efi' ]] || dpkg-query -s 'grub-efi-amd64' &> /dev/null; then
 
 				apackages+=('grub-efi-amd64' 'grub-efi-amd64-signed' 'shim-signed')
 
@@ -758,6 +779,10 @@ Currently installed: $G_DISTRO_NAME (ID: $G_DISTRO)"; then
 				apackages+=('grub-pc')
 
 			fi
+
+			# Skip creating kernel symlinks and remove existing ones
+			echo 'do_symlinks=0' > /etc/kernel-img.conf
+			G_EXEC rm -f /{,boot/}{initrd.img,vmlinuz}{,.old}
 
 			G_AGI "${apackages[@]}"
 			unset -v apackages
@@ -788,7 +813,6 @@ Currently installed: $G_DISTRO_NAME (ID: $G_DISTRO)"; then
 					G_DIETPI-NOTIFY 2 "Armbian package detected and added: $line"
 
 				done < <(dpkg-query -Wf '${Package}\n' | mawk -v pat="^$i" '$0~pat')
-
 			done
 			unset -v apackages
 
@@ -798,15 +822,17 @@ Currently installed: $G_DISTRO_NAME (ID: $G_DISTRO)"; then
 			# Generate and cleanup uInitrd
 			local arch='arm'
 			(( $G_HW_ARCH == 3 )) && arch='arm64'
+			G_EXEC mkdir -p /etc/initramfs/post-update.d
 			cat << _EOF_ > /etc/initramfs/post-update.d/99-dietpi-uboot
-#!/bin/sh
+#!/bin/dash
 echo 'update-initramfs: Converting to u-boot format' >&2
 mkimage -A $arch -O linux -T ramdisk -C gzip -n uInitrd -d \$2 /boot/uInitrd-\$1 > /dev/null
 ln -sf uInitrd-\$1 /boot/uInitrd > /dev/null 2>&1 || mv /boot/uInitrd-\$1 /boot/uInitrd
 exit 0
 _EOF_
+			G_EXEC mkdir -p /etc/kernel/preinst.d
 			cat << '_EOF_' > /etc/kernel/preinst.d/dietpi-initramfs_cleanup
-#!/bin/sh
+#!/bin/dash
 
 # skip if initramfs-tools is not installed
 [ -x /usr/sbin/update-initramfs ] || exit 0
@@ -826,22 +852,36 @@ if [ -n "$DEB_MAINT_PARAMS" ]; then
         fi
 fi
 
+_EOF_
+			# Bullseye: initramfs-tools' /var/lib/initramfs-tools state directory is not used anymore
+			if (( $DISTRO_TARGET > 5 ))
+			then
+				cat << '_EOF_' >> /etc/kernel/preinst.d/dietpi-initramfs_cleanup
+# delete unused initrd images
+find /boot -name 'initrd.img-*' -o -name 'uInitrd-*' ! -name "*-$version" -printf 'Removing obsolete file %f\n' -delete
+
+exit 0
+_EOF_
+			else
+				cat << '_EOF_' >> /etc/kernel/preinst.d/dietpi-initramfs_cleanup
 # loop through existing initramfs images
-for v in $(ls -1 /var/lib/initramfs-tools | linux-version sort --reverse) do
+for v in $(ls -1 /var/lib/initramfs-tools | linux-version sort --reverse); do
         if ! linux-version compare $v eq $version; then
                 # try to delete delete old initrd images via update-initramfs
                 INITRAMFS_TOOLS_KERNEL_HOOK=y update-initramfs -d -k $v 2>/dev/null
                 # delete unused state files
                 find /var/lib/initramfs-tools -type f ! -name "$version" -printf 'Removing obsolete file %f\n' -delete
                 # delete unused initrd images
-                find /boot -name 'initrd.img*' -o -name 'uInitrd-*' ! -name "*$version" -printf 'Removing obsolete file %f\n' -delete
+                find /boot -name 'initrd.img-*' -o -name 'uInitrd-*' ! -name "*-$version" -printf 'Removing obsolete file %f\n' -delete
         fi
 done
 
 exit 0
 _EOF_
+			fi
+
 			# Remove obsolete components from Armbian list and connect via HTTPS
-			echo "deb https://apt.armbian.com/ $DISTRO_TARGET_NAME main" > /etc/apt/sources.list.d/armbian.list
+			G_EXEC eval "echo 'deb https://apt.armbian.com/ $DISTRO_TARGET_NAME main' > /etc/apt/sources.list.d/armbian.list"
 
 			# Exclude doubled device tree files, shipped with the kernel package
 			echo 'path-exclude /usr/lib/linux-image-current-*' > /etc/dpkg/dpkg.cfg.d/01-dietpi-exclude_doubled_devicetrees
@@ -850,9 +890,9 @@ _EOF_
 		#	RPi
 		elif (( $G_HW_MODEL < 10 )); then
 
-			# Add raspbian-archive-keyring and raspi-copies-and-fills for 32-bit images only
+			# ARMv6/7: Add raspi-copies-and-fills
 			local a32bit=()
-			[[ $G_HW_ARCH == 3 ]] || a32bit=('raspbian-archive-keyring' 'raspi-copies-and-fills')
+			[[ $G_HW_ARCH == 3 ]] || a32bit=('raspi-copies-and-fills')
 			G_AGI raspberrypi-bootloader raspberrypi-kernel libraspberrypi0 libraspberrypi-bin raspberrypi-sys-mods raspberrypi-archive-keyring "${a32bit[@]}"
 
 			# Move Raspbian key to active place and remove obsolete combined keyring
@@ -944,6 +984,7 @@ _EOF_
 			unset -v apackages
 
 		fi
+		G_EXEC apt-get clean # Remove downloaded archives
 
 		# - Firmware
 		if dpkg-query -Wf '${Package}\n' | grep -q '^armbian-firmware'; then
@@ -1008,6 +1049,7 @@ _EOF_
 		#------------------------------------------------------------------------------------------------
 
 		G_AGDUG
+		G_EXEC apt-get clean # Remove downloaded archives
 
 		# Distro is now target (for APT purposes and G_AGX support due to installed binary, its here, instead of after G_AGUP)
 		G_DISTRO=$DISTRO_TARGET
@@ -1020,8 +1062,6 @@ _EOF_
 		unset -v aPACKAGES_REQUIRED_INSTALL
 
 		G_AGA
-
-		G_EXEC_DESC='Preserving modified DEB package config files from now on' G_EXEC rm -v /etc/apt/apt.conf.d/98dietpi-forceconf
 
 		#------------------------------------------------------------------------------------------------
 		G_DIETPI-NOTIFY 3 "$G_PROGRAM_NAME" "[$SETUP_STEP] Applying DietPi tweaks and cleanup"; ((SETUP_STEP++))
@@ -1050,6 +1090,20 @@ _EOF_
 			G_EXEC_NOHALT=1 G_EXEC rm "./libhavege2_$G_HW_ARCH_NAME.deb" "./haveged_$G_HW_ARCH_NAME.deb"
 			G_AGA
 
+		fi
+		G_EXEC apt-get clean # Remove downloaded archives
+
+		# RPi Bullseye workaround, until new firmware packages have been built: https://archive.raspberrypi.org/debian/pool/main/f/firmware-nonfree/?C=M;O=D
+		if (( $G_DISTRO == 6 && $G_HW_MODEL == 0 ))
+		then
+			G_EXEC curl -sSfLO 'https://archive.raspberrypi.org/debian/pool/main/f/firmware-nonfree/firmware-brcm80211_20190114-2+rpt1_all.deb'
+			G_EXEC dpkg-deb -x 'firmware-brcm80211_20190114-2+rpt1_all.deb' .
+			G_EXEC rm -R 'firmware-brcm80211_20190114-2+rpt1_all.deb' usr
+			for i in lib/firmware/brcm/*
+			do
+				[[ -f /$i ]] || G_EXEC mv {,/}"$i"
+			done
+			G_EXEC rm -R lib
 		fi
 
 		G_DIETPI-NOTIFY 2 'Deleting list of known users and groups, not required by DietPi'
@@ -1188,7 +1242,6 @@ _EOF_
 		[[ -d '/etc/systemd/system/rc.local.service.d' ]] && rm -Rv /etc/systemd/system/rc.local.service.d
 		#	Below required if DietPi-PREP is executed from chroot/container, so RPi firstrun scripts are not executed
 		[[ -f '/etc/init.d/resize2fs_once' ]] && rm -v /etc/init.d/resize2fs_once # https://github.com/RPi-Distro/pi-gen/blob/master/stage2/01-sys-tweaks/files/resize2fs_once
-		[[ -f '/boot/cmdline.txt' ]] && sed -i 's| init=/usr/lib/raspi-config/init_resize\.sh||' /boot/cmdline.txt # https://github.com/RPi-Distro/pi-gen/blob/master/stage2/01-sys-tweaks/00-patches/07-resize-init.diff
 		# - Remove all autologin configs for all TTYs: https://github.com/MichaIng/DietPi/issues/3570#issuecomment-648988475, https://github.com/MichaIng/DietPi/issues/3628#issuecomment-653693758
 		rm -fv /etc/systemd/system/*getty@*.service.d/*autologin*.conf
 
@@ -1199,8 +1252,9 @@ _EOF_
 		G_DIETPI-NOTIFY 2 'Restoring default base files:'
 		# shellcheck disable=SC2114
 		rm -Rfv /etc/{motd,profile,update-motd.d,issue{,.net}} /root /home /media /var/mail
-		G_AGI -o 'Dpkg::Options::=--force-confmiss,confnew' --reinstall base-files # Restore /etc/{update-motd.d,issue{,.net}} /root /home
+		G_AGI --reinstall base-files # Restore /etc/{update-motd.d,issue{,.net}} /root /home
 		G_EXEC /var/lib/dpkg/info/base-files.postinst configure # Restore /root/.{profile,bashrc} /etc/{motd,profile} /media /var/mail
+		G_EXEC apt-get clean # Remove downloaded archives
 
 		#-----------------------------------------------------------------------------------
 		# https://www.debian.org/doc/debian-policy/ch-opersys.html#site-specific-programs
@@ -1228,6 +1282,7 @@ _EOF_
 		#-----------------------------------------------------------------------------------
 		# DietPi user
 		G_EXEC_DESC='Creating DietPi user account' G_EXEC /boot/dietpi/func/dietpi-set_software useradd dietpi
+		chpasswd <<< 'root:dietpi'
 
 		#-----------------------------------------------------------------------------------
 		# UID bit for sudo: https://github.com/MichaIng/DietPi/issues/794
@@ -1284,19 +1339,8 @@ _EOF_'
 		G_DIETPI-NOTIFY 2 'Configuring wlan/eth naming to be preferred for networked devices:'
 		ln -sfv /dev/null /etc/systemd/network/99-default.link
 		ln -sfv /dev/null /etc/udev/rules.d/80-net-setup-link.rules
-		# - RPi: Add cmdline entry, which was required on my Raspbian Bullseye system since last few APT updates
-		if [[ -f '/boot/cmdline.txt' ]]; then
-
-			sed -i 's/net.ifnames=[^[:blank:]]*[[:blank:]]*//g;w /dev/stdout' /boot/cmdline.txt
-			sed -i '/root=/s/[[:blank:]]*$/ net.ifnames=0/;w /dev/stdout' /boot/cmdline.txt
-
-		# - Armbian
-		elif [[ -f '/boot/armbianEnv.txt' ]]; then
-
-			G_CONFIG_INJECT 'extraargs=' 'extraargs="net.ifnames=0"' /boot/armbianEnv.txt
-
-		fi
-		[[ -f '/etc/udev/rules.d/70-persistent-net.rules' ]] && rm -v /etc/udev/rules.d/70-persistent-net.rules # Jessie pre-image
+		# - Armbian: Add cmdline entry, which was required on my Raspbian Bullseye system since last few APT updates
+		[[ -f '/boot/armbianEnv.txt' ]] && G_CONFIG_INJECT 'extraargs=' 'extraargs="net.ifnames=0"' /boot/armbianEnv.txt
 
 		G_DIETPI-NOTIFY 2 'Configuring DNS nameserver:'
 		# Failsafe: Assure that /etc/resolv.conf is not a symlink and disable systemd-resolved + systemd-networkd
@@ -1596,8 +1640,10 @@ _EOF_
 		# - RPi
 		elif (( $G_HW_MODEL < 10 )); then
 
-			# Scroll lock fix for RPi by Midwan: https://github.com/MichaIng/DietPi/issues/474#issuecomment-243215674
-			echo 'ACTION=="add", SUBSYSTEM=="leds", ENV{DEVPATH}=="*/input*::scrolllock", ATTR{trigger}="kbd-scrollock"' > /etc/udev/rules.d/50-leds.rules
+			# Creating RPi-specific groups
+			G_EXEC groupadd -rf spi
+			G_EXEC groupadd -rf i2c
+			G_EXEC groupadd -rf gpio
 
 			# Apply minimum GPU memory split for server usage: This applies a custom dtoverlay to disable VCSM: https://github.com/MichaIng/DietPi/pull/3900
 			/boot/dietpi/func/dietpi-set_hardware gpumemsplit 16
@@ -1703,11 +1749,6 @@ _EOF_
 		# - Reset /tmp size to default (512 MiB)
 		sed -i '\|/tmp|s|size=[^,]*,||' /etc/fstab
 
-		G_DIETPI-NOTIFY 2 'Resetting boot.ini, config.txt, cmdline.txt etc'
-
-		# - Set Pi cmdline.txt back to normal
-		[[ -f '/boot/cmdline.txt' ]] && sed -i 's/ rootdelay=10//g' /boot/cmdline.txt
-
 		G_DIETPI-NOTIFY 2 'Disabling Bluetooth by default'
 		/boot/dietpi/func/dietpi-set_hardware bluetooth disable
 
@@ -1732,30 +1773,39 @@ _EOF_
 		G_DIETPI-NOTIFY 2 "$tmp_info generic WiFi by default"
 		/boot/dietpi/func/dietpi-set_hardware wifimodules $tmp_mode
 
-		# - x86_64: kernel cmd line with GRUB
+		# - x86_64: GRUB install and config
 		if (( $G_HW_ARCH == 10 )); then
 
-			G_EXEC_DESC='Detecting additional OS installed on system' G_EXEC os-prober
+			G_EXEC_DESC='Detecting additional OS installed on system' G_EXEC_OUTPUT=1 G_EXEC os-prober
+
+			# UEFI
+			if [[ -d '/boot/efi' ]] && dpkg-query -s 'grub-efi-amd64' &> /dev/null
+			then
+				# Force GRUB installation to the EFI removable media path, if no (other) bootloader is installed there yet
+				shopt -s nocaseglob
+				local efi_fallback=
+				for i in /boot/efi/EFI/boot/bootx64.efi
+				do
+					[[ -d $i ]] && break
+					efi_fallback='--force-extra-removable'
+					debconf-set-selections <<< 'grub-efi-amd64 grub2/force_efi_extra_removable boolean true'
+				done
+				shopt -u nocaseglob
+				G_EXEC_DESC='Installing GRUB for UEFI' G_EXEC_OUTPUT=1 G_EXEC grub-install --recheck --target=x86_64-efi --efi-directory=/boot/efi $efi_fallback --uefi-secure-boot
+
+			# BIOS
+			else
+				G_EXEC_DESC='Installing GRUB for BIOS' G_EXEC_OUTPUT=1 G_EXEC grub-install --recheck "$(lsblk -npo PKNAME "$(findmnt -Ufnro SOURCE -M /)")"
+			fi
+
+			# Update config
+			G_CONFIG_INJECT 'GRUB_CMDLINE_LINUX_DEFAULT=' 'GRUB_CMDLINE_LINUX_DEFAULT="consoleblank=0 quiet"' /etc/default/grub
+			G_CONFIG_INJECT 'GRUB_CMDLINE_LINUX=' 'GRUB_CMDLINE_LINUX="net.ifnames=0"' /etc/default/grub
+			G_CONFIG_INJECT 'GRUB_TIMEOUT=' 'GRUB_TIMEOUT=0' /etc/default/grub
+			G_EXEC_DESC='Regenerating GRUB config' G_EXEC_OUTPUT=1 G_EXEC grub-mkconfig -o /boot/grub/grub.cfg
+
 			# Purge "os-prober" again
 			G_AGP os-prober
-
-			# - Native PC/EFI (assume x86_64 only possible)
-			if [[ -d '/boot/efi' ]] && dpkg-query -s 'grub-efi-amd64' &> /dev/null; then
-
-				G_EXEC_DESC='Recreating GRUB-EFI' G_EXEC grub-install --target=x86_64-efi --efi-directory=/boot/efi --bootloader-id=arch_grub --recheck
-
-			fi
-
-			# - Finalise GRUB
-			if [[ -f '/etc/default/grub' ]]; then
-
-				G_CONFIG_INJECT 'GRUB_CMDLINE_LINUX_DEFAULT=' 'GRUB_CMDLINE_LINUX_DEFAULT="consoleblank=0 quiet"' /etc/default/grub
-				G_CONFIG_INJECT 'GRUB_CMDLINE_LINUX=' 'GRUB_CMDLINE_LINUX="net.ifnames=0"' /etc/default/grub
-				G_CONFIG_INJECT 'GRUB_TIMEOUT=' 'GRUB_TIMEOUT=0' /etc/default/grub
-				G_EXEC_DESC='Finalising GRUB' G_EXEC update-grub
-
-			fi
-
 		fi
 
 		G_DIETPI-NOTIFY 2 'Disabling soundcards by default'
@@ -1791,6 +1841,7 @@ You should have received a copy of the GNU General Public License along with thi
 _EOF_
 
 		G_DIETPI-NOTIFY 2 'Disabling and clearing APT cache'
+		G_EXEC rm /etc/apt/apt.conf.d/98dietpi-prep
 		/boot/dietpi/func/dietpi-set_software apt-cache cache disable
 		/boot/dietpi/func/dietpi-set_software apt-cache clean
 
@@ -1834,9 +1885,9 @@ _EOF_
 
 		# Power off system
 
-		# Plug SDcard/drive into external DietPi system
+		# Plug SD card/drive into external DietPi system
 
-		# Run: bash -c "$(curl -sSL https://github.com/MichaIng/DietPi/blob/dev/.meta/dietpi-imager)"
+		# Run: bash -c "$(curl -sSfL https://github.com/MichaIng/DietPi/blob/master/.meta/dietpi-imager)"
 
 	}
 
