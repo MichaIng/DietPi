@@ -7,7 +7,7 @@
 	! systemctl is-enabled dietpi-fs_partition_resize > /dev/null || systemctl disable dietpi-fs_partition_resize
 
 	# Detect root device
-	ROOT_DEV=$(findmnt -no SOURCE /)
+	ROOT_DEV=$(findmnt -Ufnro SOURCE -M /)
 
 	# Detect root partition and parent drive for supported naming schemes:
 	# - SCSI/SATA:	/dev/sd[a-z][1-9]
@@ -37,7 +37,7 @@
 
 	# GPT partition table: Move backup GPT data structures to the end of the disk
 	# - lsblk -ndo PTTYPE "$ROOT_DRIVE" does not work inside systemd-nspawn containers.
-	[[ $(blkid -s PTTYPE -o value "$ROOT_DRIVE") != 'gpt' ]] || sgdisk -e "$ROOT_DRIVE"
+	[[ $(blkid -s PTTYPE -o value -c /dev/null "$ROOT_DRIVE") != 'gpt' ]] || sgdisk -e "$ROOT_DRIVE"
 
 	# Maximise root partition size
 	sfdisk --no-reread --no-tell-kernel -fN"$ROOT_PART" "$ROOT_DRIVE" <<< ',+'
@@ -46,10 +46,10 @@
 	partprobe "$ROOT_DRIVE"
 	partx -u "$ROOT_DRIVE"
 
-	# Detect root file system type
-	ROOT_FSTYPE=$(findmnt -no FSTYPE /)
+	# Detect root filesystem type
+	ROOT_FSTYPE=$(findmnt -Ufnro FSTYPE -M /)
 
-	# Maximise root file system if type is supported
+	# Maximise root filesystem if type is supported
 	if [[ $ROOT_FSTYPE == ext[2-4] ]]; then
 
 		resize2fs "$ROOT_DEV"
@@ -66,7 +66,7 @@
 
 	else
 
-		echo "[FAILED] Unsupported root file system type ($ROOT_FSTYPE). Aborting..."
+		echo "[FAILED] Unsupported root filesystem type ($ROOT_FSTYPE). Aborting..."
 		exit 1
 
 	fi

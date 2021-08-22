@@ -24,7 +24,7 @@ $FP_SCRIPT	i2c			enable/disable/khz
 $FP_SCRIPT	spi			enable/disable
 $FP_SCRIPT	soundcard		target_card (non-matching name for reset to default). Add '-eq' to target_card string to enable ALSA equalizer on card. HW:x,x (specify target card and device index eg: HW:9,1)
 $FP_SCRIPT	remoteir		odroid_remote/justboom_ir_remote # Odroid/RPi only
-$FP_SCRIPT	lcdpanel		target_panel (none to remove all)
+$FP_SCRIPT	lcdpanel		target_panel (\"none\" to remove all)
 $FP_SCRIPT	headless		enable/disable
 $FP_SCRIPT	gpumemsplit		64/128/256... Range: 16-944, RPi only
 $FP_SCRIPT	rpi-camera		enable/disable
@@ -68,7 +68,7 @@ $FP_SCRIPT	rpi-eeprom
 		ARMBIAN=0
 		FP_UENV='/tmp/uEnv.txt'
 		for i in /boot/u{e,E}nv.txt; do [[ -f $i ]] && FP_UENV=$i && break; done
-		unset i
+		unset -v i
 
 	fi
 
@@ -119,14 +119,14 @@ $FP_SCRIPT	rpi-eeprom
 
 			# Requires 128 MiB memory split at least
 			local gpu_mem=$(sed -n '/^[[:blank:]]*gpu_mem[_0-9]*=/{s/^[^=]*=//p;q}' /boot/config.txt)
-			(( ${gpu_mem:-64} < 128 )) && INPUT_DEVICE_VALUE=128 Gpu_Memory_Split_Main
+			(( ${gpu_mem:-76} < 96 )) && INPUT_DEVICE_VALUE=96 Gpu_Memory_Split_Main
 
 		elif [[ $INPUT_DEVICE_VALUE == 'disable' ]]; then
 
 			# Comment extended start setting
 			G_EXEC sed -i '/^[[:blank:]]*start_x=/c\#start_x=1' /boot/config.txt
 
-			# Add modules blacklist, which are otherwise loaded by default since kernel 4.19
+			# Add modules blacklist, which are otherwise loaded by default since kernel 4.19/5.10
 			echo -e 'blacklist bcm2835_codec\nblacklist bcm2835_v4l2\nblacklist bcm2835_isp' > /etc/modprobe.d/dietpi-disable_rpi_camera.conf
 
 		else
@@ -148,32 +148,31 @@ $FP_SCRIPT	rpi-eeprom
 
 			G_CONFIG_INJECT 'program_usb_boot_mode=' 'program_usb_boot_mode=1' /boot/config.txt
 
-			cat << _EOF_ > /etc/systemd/system/dietpi-rm_program_usb_boot_mode.service
+			cat << '_EOF_' > /etc/systemd/system/dietpi-rm_program_usb_boot_mode.service
 [Unit]
 Description=DietPi-rm_program_usb_boot_mode.service
-After=dietpi-boot.service
 
 [Service]
 Type=oneshot
 RemainAfterExit=yes
-ExecStartPre=$(command -v sed) -i '/^[[:blank:]]*program_usb_boot_mode=/d' /boot/config.txt
-ExecStartPre=$(command -v systemctl) disable dietpi-rm_program_usb_boot_mode
-ExecStart=$(command -v rm) /etc/systemd/system/dietpi-rm_program_usb_boot_mode.service
+ExecStartPre=/bin/sed -i '/^[[:blank:]]*program_usb_boot_mode=/d' /boot/config.txt
+ExecStartPre=/bin/systemctl disable dietpi-rm_program_usb_boot_mode
+ExecStart=/bin/rm /etc/systemd/system/dietpi-rm_program_usb_boot_mode.service
 
 [Install]
 WantedBy=multi-user.target
 _EOF_
-			systemctl daemon-reload
-			systemctl enable dietpi-rm_program_usb_boot_mode
+			G_EXEC systemctl daemon-reload
+			G_EXEC systemctl enable dietpi-rm_program_usb_boot_mode
 
 		elif [[ $INPUT_DEVICE_VALUE == 'disable' ]]; then
 
-			sed -i '/^[[:blank:]]*program_usb_boot_mode=/d' /boot/config.txt
+			G_EXEC sed -i '/^[[:blank:]]*program_usb_boot_mode=/d' /boot/config.txt
 
 			if [[ -f '/etc/systemd/system/dietpi-rm_program_usb_boot_mode.service' ]]; then
 
-				systemctl disable dietpi-rm_program_usb_boot_mode
-				rm /etc/systemd/system/dietpi-rm_program_usb_boot_mode.service
+				G_EXEC systemctl disable --now dietpi-rm_program_usb_boot_mode
+				G_EXEC rm /etc/systemd/system/dietpi-rm_program_usb_boot_mode.service
 
 			fi
 
@@ -192,15 +191,15 @@ _EOF_
 
 		(( $G_HW_MODEL == 4 )) || { Unsupported_Input_Name; return 1; } # Exit path for non-RPi4
 
-		# Install required APT package, be failsafe and install/upgrade VC firmware and bootloader as well
+		# Install required APT package
 		G_AGUP
-		G_AGI rpi-eeprom libraspberrypi-bin raspberrypi-bootloader
+		G_AGI rpi-eeprom
 
 		# Update/flash new bootloader and VL805 USB firmware to EEPROM
 		rpi-eeprom-update -a
 
-		# Required? Enable update service to run on every boot
-		systemctl enable rpi-eeprom-update
+		# Failsafe
+		G_EXEC systemctl enable rpi-eeprom-update
 
 	}
 
@@ -263,19 +262,16 @@ _EOF_
 			# RPi
 			if (( $G_HW_MODEL < 10 )); then
 
-				# Apply lowest possible framebuffer size
-				G_CONFIG_INJECT 'framebuffer_width=' 'framebuffer_width=16' /boot/config.txt
-				G_CONFIG_INJECT 'framebuffer_height=' 'framebuffer_height=16' /boot/config.txt
-				G_CONFIG_INJECT 'max_framebuffer_width=' 'max_framebuffer_width=16' /boot/config.txt
-				G_CONFIG_INJECT 'max_framebuffer_height=' 'max_framebuffer_height=16' /boot/config.txt
-				# - Splash cannot be seen anyway without video output
+				# Prevent any framebuffer from being allocated
+				G_CONFIG_INJECT 'max_framebuffers=' 'max_framebuffers=0' /boot/config.txt
+				# Splash cannot be seen anyway without video output
 				G_CONFIG_INJECT 'disable_splash=' 'disable_splash=1' /boot/config.txt
-				# - hdmi_blanking should not play a role, however mode 1 should be generally preferred, which on idle disables HDMI output completely instead of just blanking the screen
+				# hdmi_blanking should not play a role, however mode 1 should be generally preferred, which on idle disables HDMI output completely instead of just blanking the screen
 				G_CONFIG_INJECT 'hdmi_blanking=' 'hdmi_blanking=1' /boot/config.txt
-				# - Disable HDMI hotplug detection, which requires it to be generally responsive/active
+				# Disable HDMI hotplug detection, which requires it to be generally responsive/active
 				G_CONFIG_INJECT 'hdmi_ignore_hotplug=' 'hdmi_ignore_hotplug=1' /boot/config.txt
-				# - Disable SDTV on RPi4
-				sed -i '/^[[:blank:]]*enable_tvout=/c\#enable_tvout=0' /boot/config.txt
+				# Disable SDTV on RPi4 (default)
+				G_EXEC sed -i '/^[[:blank:]]*enable_tvout=/c\#enable_tvout=0' /boot/config.txt
 
 			# Odroid C2
 			elif (( $G_HW_MODEL == 12 )); then
@@ -295,13 +291,11 @@ _EOF_
 			# RPi
 			if (( $G_HW_MODEL < 10 )); then
 
-				sed -i '/^[[:blank:]]*framebuffer_width=/c\#framebuffer_width=16' /boot/config.txt
-				sed -i '/^[[:blank:]]*framebuffer_height=/c\#framebuffer_height=16' /boot/config.txt
-				sed -i '/^[[:blank:]]*max_framebuffer_width=/c\#max_framebuffer_width=16' /boot/config.txt
-				sed -i '/^[[:blank:]]*max_framebuffer_height=/c\#max_framebuffer_height=16' /boot/config.txt
-				sed -i '/^[[:blank:]]*hdmi_blanking=/c\#hdmi_blanking=0' /boot/config.txt
-				sed -i '/^[[:blank:]]*hdmi_ignore_hotplug=/c\#hdmi_ignore_hotplug=0' /boot/config.txt
-				sed -i '/^[[:blank:]]*enable_tvout=/c\#enable_tvout=0' /boot/config.txt
+				G_EXEC sed -i '/^[[:blank:]]*max_framebuffers=/c\#max_framebuffers=2' /boot/config.txt
+				#G_EXEC sed -i '/^[[:blank:]]*disable_splash=/c\#disable_splash=0' /boot/config.txt
+				G_EXEC sed -i '/^[[:blank:]]*hdmi_blanking=/c\#hdmi_blanking=0' /boot/config.txt
+				G_EXEC sed -i '/^[[:blank:]]*hdmi_ignore_hotplug=/c\#hdmi_ignore_hotplug=0' /boot/config.txt
+				G_EXEC sed -i '/^[[:blank:]]*enable_tvout=/c\#enable_tvout=0' /boot/config.txt
 
 			# Odroid C2
 			elif (( $G_HW_MODEL == 12 )); then
@@ -336,18 +330,24 @@ _EOF_
 
 			if [[ -f '/etc/systemd/system/justboom-ir-mpd.service' ]]; then
 
-				systemctl disable --now justboom-ir-mpd
-				rm -R /etc/systemd/system/justboom-ir-mpd.service*
+				G_EXEC systemctl disable --now justboom-ir-mpd
+				G_EXEC rm /etc/systemd/system/justboom-ir-mpd.service
 
 			fi
+			[[ -d '/etc/systemd/system/justboom-ir-mpd.service.d' ]] && G_EXEC rm -R /etc/systemd/system/justboom-ir-mpd.service.d
 
-			sed -i '/^[[:blank:]]*dtoverlay=gpio-ir/d' /boot/config.txt
+			G_EXEC sed -i '/^[[:blank:]]*dtoverlay=gpio-ir/d' /boot/config.txt
 
 		# Disable Odroids
-		elif (( $G_HW_MODEL < 20 )) && [[ -f '/etc/systemd/system/odroid-remote.service' ]]; then
+		elif (( $G_HW_MODEL < 20 )); then
 
-			systemctl disable --now odroid-remote
-			rm -R /etc/systemd/system/odroid-remote.service*
+			if [[ -f '/etc/systemd/system/odroid-remote.service' ]]; then
+
+				G_EXEC systemctl disable --now odroid-remote
+				G_EXEC rm /etc/systemd/system/odroid-remote.service
+
+			fi
+			[[ -d '/etc/systemd/system/odroid-remote.service.d' ]] && G_EXEC rm -R /etc/systemd/system/odroid-remote.service.d
 
 		fi
 
@@ -382,12 +382,8 @@ _EOF_
 
 			fi
 
-			# All
-			# - systemd
-			systemctl enable lircd
-
-			# - Lircd conf for Odroid Remote
-			cat << _EOF_ > /etc/lirc/lircd.conf
+			# Config
+			cat << '_EOF_' > /etc/lirc/lircd.conf
 begin remote
 
   name lircd.conf
@@ -423,6 +419,8 @@ begin remote
 
 end remote
 _EOF_
+			# Service
+			G_EXEC systemctl enable --now lircd
 
 		elif [[ $INPUT_DEVICE_VALUE == 'justboom_ir_remote' ]]; then
 
@@ -432,7 +430,8 @@ _EOF_
 
 			G_CONFIG_INJECT 'dtoverlay=gpio-ir' 'dtoverlay=gpio-ir,gpio_pin=25' /boot/config.txt
 
-			cat << _EOF_ > /etc/lirc/hardware.conf
+			# Config
+			cat << '_EOF_' > /etc/lirc/hardware.conf
 LIRCD_ARGS="--uinput"
 LOAD_MODULES=true
 DRIVER="default"
@@ -441,8 +440,7 @@ MODULES="lirc_rpi"
 LIRCD_CONF=""
 LIRCMD_CONF=""
 _EOF_
-
-			cat << _EOF_ > /etc/lirc/lircd.conf
+			cat << '_EOF_' > /etc/lirc/lircd.conf
 begin remote
 
   name  lircd.conf
@@ -481,11 +479,10 @@ begin remote
 
 end remote
 _EOF_
-
 			# MPD control
 			G_AG_CHECK_INSTALL_PREREQ mpc
 
-			cat << _EOF_ > /root/.lircrc
+			cat << '_EOF_' > /root/.lircrc
 begin
 prog = irexec
 button = KEY_ENTER
@@ -532,7 +529,6 @@ button = KEY_MENU
 config = mpc repeat off
 end
 _EOF_
-
 			# Service
 			cat << _EOF_ > /etc/systemd/system/justboom-ir-mpd.service
 [Unit]
@@ -545,8 +541,8 @@ ExecStart=$(command -v irexec)
 [Install]
 WantedBy=default.target
 _EOF_
-			systemctl daemon-reload
-			systemctl enable --now justboom-ir-mpd
+			G_EXEC systemctl daemon-reload
+			G_EXEC systemctl enable --now justboom-ir-mpd
 
 		elif [[ $INPUT_DEVICE_VALUE != 'none' ]]; then
 
@@ -579,17 +575,18 @@ ExecStart=$(command -v ethtool) -s $iface speed $speed_mbit duplex full autoneg 
 [Install]
 WantedBy=ifup@$iface.service
 _EOF_
-			systemctl daemon-reload
-			systemctl enable --now ethtool_force_speed
+			G_EXEC systemctl daemon-reload
+			G_EXEC systemctl enable --now ethtool_force_speed
 
 		elif [[ $INPUT_DEVICE_VALUE == 'disable' ]]; then # 0 is converted to "disable"
 
 			if [[ -f '/etc/systemd/system/ethtool_force_speed.service' ]]; then
 
-				systemctl disable --now ethtool_force_speed
-				rm -R /etc/systemd/system/ethtool_force_speed.service*
+				G_EXEC systemctl disable --now ethtool_force_speed
+				G_EXEC rm /etc/systemd/system/ethtool_force_speed.service
 
 			fi
+			[[ -d '/etc/systemd/system/ethtool_force_speed.service.d' ]] && G_EXEC rm -R /etc/systemd/system/ethtool_force_speed.service.d
 
 		else
 
@@ -606,8 +603,8 @@ _EOF_
 
 		(( $G_HW_MODEL > 9 )) && { Unsupported_Input_Name; return 1; } # Exit path for non-RPi
 
-		# Always remove previous vc4 overlay entry
-		sed -i '/^[[:blank:]]*dtoverlay=vc4-/d' /boot/config.txt
+		# Always remove previous VC4 overlay entry
+		G_EXEC sed -i '/^[[:blank:]]*dtoverlay=vc4-/d' /boot/config.txt
 
 		if [[ $INPUT_DEVICE_VALUE == 'vc4-kms-v3d' || $INPUT_DEVICE_VALUE == 'vc4-kms-v3d-pi4' || $INPUT_DEVICE_VALUE == 'vc4-fkms-v3d' ]]; then
 
@@ -621,10 +618,6 @@ _EOF_
 			G_AG_CHECK_INSTALL_PREREQ libgl1-mesa-dri libgles2 $libegl1 mesa-utils
 
 			G_CONFIG_INJECT "dtoverlay=$INPUT_DEVICE_VALUE" "dtoverlay=$INPUT_DEVICE_VALUE" /boot/config.txt
-
-			# Set 1080p by default
-			G_CONFIG_INJECT 'framebuffer_width=' 'framebuffer_width=1920' /boot/config.txt
-			G_CONFIG_INJECT 'framebuffer_height=' 'framebuffer_height=1080' /boot/config.txt
 
 		elif [[ $INPUT_DEVICE_VALUE != 'disable' ]]; then
 
@@ -657,6 +650,10 @@ _EOF_
 
 			Lcd_Panel_ESP01215E_Enable
 
+		elif [[ ${INPUT_DEVICE_VALUE,,} == 'allo-boss2-oled' ]]; then
+
+			OLED_Allo_Boss2_Enable
+
 		# Disable all
 		elif [[ $INPUT_DEVICE_VALUE == 'none' ]]; then
 
@@ -664,6 +661,7 @@ _EOF_
 			Lcd_Panel_Odroidcloudshell_Disable
 			Lcd_Panel_OdroidLCD35_Disable
 			Lcd_Panel_ESP01215E_Disable
+			OLED_Allo_Boss2_Disable
 
 		else
 
@@ -692,6 +690,8 @@ _EOF_
 	}
 
 	Lcd_Panel_ESP01215E_Disable(){
+
+		(( $G_HW_MODEL > 9 )) && return # Skip on non-RPi
 
 		G_EXEC sed -i '/^[[:blank:]]*hdmi_force_hotplug=/c\#hdmi_force_hotplug=1' /boot/config.txt
 		G_EXEC sed -i '/^[[:blank:]]*hdmi_group=/c\#hdmi_group=2' /boot/config.txt
@@ -988,10 +988,77 @@ _EOF_
 		if [[ -f '/etc/systemd/system/odroid-lcd35.service' ]]; then
 
 			G_EXEC systemctl disable --now odroid-lcd35
-			G_EXEC rm -R /etc/systemd/system/odroid-lcd35.service*
+			G_EXEC rm /etc/systemd/system/odroid-lcd35.service
 
 		fi
+		[[ -d '/etc/systemd/system/odroid-lcd35.service.d' ]] && G_EXEC rm -R /etc/systemd/system/odroid-lcd35.service.d
 		[[ -f '/etc/X11/xorg.conf.d/99-odroid-lcd35.conf' ]] && G_EXEC rm /etc/X11/xorg.conf.d/99-odroid-lcd35.conf
+
+	}
+
+	OLED_Allo_Boss2_Enable(){
+
+		(( $G_HW_MODEL > 9 )) && { Unsupported_Input_Mode; return 1; } # Exit path for non-RPi
+
+		# Enable I2C
+		INPUT_DEVICE_VALUE='enable' I2c_Main
+
+		# Install further requirements
+		G_AG_CHECK_INSTALL_PREREQ python3-{rpi.gpio,pil}
+
+		# Download and install Python 3 script
+		G_EXEC curl -sSfLO https://raw.githubusercontent.com/allocom/allo_boss2_oled_p3/main/boss2_oled_p3.tar.gz
+		G_EXEC tar xf boss2_oled_p3.tar.gz
+		[[ -d '/opt/allo_boss2_oled' ]] && G_EXEC rm -R /opt/allo_boss2_oled
+		G_EXEC mv boss2_oled_p3 /opt/allo_boss2_oled
+
+		# Create systemd service
+		cat << _EOF_ > /etc/systemd/system/allo_boss2_oled.service
+[Unit]
+Description=Allo Boss2 OLED (DietPi)
+After=sound.target
+
+[Service]
+SyslogIdentifier=Allo Boss2 OLED
+ExecStart=$(command -v python3) /opt/allo_boss2_oled/boss2_oled.py
+Restart=on-abort
+
+[Install]
+WantedBy=multi-user.target
+_EOF_
+		G_EXEC systemctl daemon-reload
+		G_EXEC systemctl unmask allo_boss2_oled
+		G_EXEC systemctl enable allo_boss2_oled
+
+		# Remove possible files from Allo installer
+		if [[ -f '/etc/systemd/system/boss2oled.service' ]]
+		then
+			G_EXEC systemctl disable --now boss2oled
+			G_EXEC rm /etc/systemd/system/boss2oled.service
+		fi
+		[[ -d '/etc/systemd/system/boss2oled.service.d' ]] && G_EXEC rm -R /etc/systemd/system/boss2oled.service.d
+		[[ -d '/opt/boss2_oled_p3' ]] && G_EXEC rm -R /opt/boss2_oled_p3
+		[[ -d '/opt/boss2_oled' ]] && G_EXEC rm -R /opt/boss2_oled
+
+	}
+
+	OLED_Allo_Boss2_Disable(){
+
+		(( $G_HW_MODEL > 9 )) && return # Skip on non-RPi
+
+		# Disable and remove service
+		if [[ -f '/etc/systemd/system/allo_boss2_oled.service' ]]
+		then
+			G_EXEC systemctl disable --now allo_boss2_oled
+			G_EXEC rm /etc/systemd/system/allo_boss2_oled.service
+		fi
+		[[ -d '/etc/systemd/system/allo_boss2_oled.service.d' ]] && G_EXEC rm -R /etc/systemd/system/allo_boss2_oled.service.d
+
+		# Remove scripts
+		[[ -d '/opt/allo_boss2_oled' ]] && G_EXEC rm -R /opt/allo_boss2_oled
+
+		# Disable I2C
+		INPUT_DEVICE_VALUE='disable' I2c_Main
 
 	}
 
@@ -1013,7 +1080,6 @@ _EOF_
 
 			# config.txt
 			G_CONFIG_INJECT 'dtparam=i2c_arm=' 'dtparam=i2c_arm=on' /boot/config.txt
-			G_CONFIG_INJECT 'dtparam=i2c1=' 'dtparam=i2c1=on' /boot/config.txt
 
 			# DietPi-Software, set installed
 			[[ -f '/boot/dietpi/.installed' ]] && G_EXEC sed -i '/^aSOFTWARE_INSTALL_STATE\[72\]=/c\aSOFTWARE_INSTALL_STATE\[72\]=2' /boot/dietpi/.installed
@@ -1025,9 +1091,7 @@ _EOF_
 			G_EXEC sed -i '/^[[:blank:]]*i2c-dev/d' /etc/modules
 
 			# config.txt
-			G_CONFIG_INJECT 'dtparam=i2c_arm=' 'dtparam=i2c_arm=off' /boot/config.txt
-			G_CONFIG_INJECT 'dtparam=i2c1=' 'dtparam=i2c1=off' /boot/config.txt
-			G_CONFIG_INJECT 'dtparam=i2c_arm_baudrate=' 'dtparam=i2c_arm_baudrate=100000' /boot/config.txt
+			G_EXEC sed -Ei 's/^[[:blank:]]*(dtparam=i2c.*)$/#\1/' /boot/config.txt
 
 		# Set baudrate (kHz) | valid int
 		elif disable_error=1 G_CHECK_VALIDINT "$INPUT_DEVICE_VALUE" 2 10000000; then
@@ -1250,12 +1314,10 @@ Do you want to continue and disable the serial login console?' || return 1
 		local i
 		for i in /etc/sysctl{,.d/*}.conf
 		do
-
 			[[ $i != '/etc/sysctl.d/dietpi-disable_ipv6.conf' && -f $i ]] || continue
 			grep -q '^[[:blank:]]*net.ipv6.conf.[^[:blank:]]*.disable_ipv6[[:blank:]]*=' "$i" || continue
 			i=$(readlink -f $i) # https://github.com/MichaIng/DietPi/issues/3003#issuecomment-669464255
 			sed -i 's/^[[:blank:]]*net.ipv6.conf.[^[:blank:]]*.disable_ipv6[[:blank:]]*=/#&/' "$i"
-
 		done
 
 	}
@@ -1291,10 +1353,8 @@ Do you want to continue and disable the serial login console?' || return 1
 		local i
 		for i in /etc/apt/apt.conf.d/*
 		do
-
 			[[ ! -f $i || $i == *'99-dietpi-force-ipv4' ]] && continue
 			sed -i 's/^[[:blank:]]*Acquire::ForceIPv[46][[:blank:]]*=/#&/' "$i"
-
 		done
 
 	}
@@ -1356,10 +1416,8 @@ Do you want to continue and disable the serial login console?' || return 1
 			# cfg80211 last
 			for ((i=$(( ${#aWIFI_MODULES[@]} - 1 )); i>=0; i--))
 			do
-
 				echo "blacklist ${aWIFI_MODULES[$i]}" >> /etc/modprobe.d/dietpi-disable_wifi.conf
 				modprobe -rf "${aWIFI_MODULES[$i]}" 2> /dev/null
-
 			done
 
 			if G_WHIP_YESNO 'Would you like to purge all WiFi related APT packages?
@@ -1394,9 +1452,7 @@ _EOF_
 			# cfg80211 first
 			for i in "${aWIFI_MODULES[@]}"
 			do
-
 				modprobe "$i" 2> /dev/null
-
 			done
 
 			# Delay to allow modules + WPA2-Enterprise being fully loaded and avoid device not found error
@@ -1539,10 +1595,8 @@ Do you want to continue and DISABLE Bluetooth now?' || return 1
 				# ttyFIQ[0-9]: https://github.com/MichaIng/DietPi/issues/1829#issuecomment-398302497
 				for i in /dev/tty{S,AMA,SAC}[0-9]
 				do
-
 					[[ -e $i ]] || continue
 					INPUT_ADDITIONAL=${i/\/dev\/} Serial_Main
-
 				done
 
 				# On RPi enable primary UART device
@@ -1606,20 +1660,16 @@ Do you want to continue and DISABLE Bluetooth now?' || return 1
 				# ttyFIQ[0-9]: https://github.com/MichaIng/DietPi/issues/1829#issuecomment-398302497
 				for i in /dev/tty{S,AMA,SAC}[0-9]
 				do
-
 					[[ -e $i ]] || continue
 					INPUT_ADDITIONAL=${i/\/dev\/} Serial_Main
-
 				done
 
 				# Cleanup: Disable for left non-existent devices
 				for i in /etc/systemd/system/getty.target.wants/serial-getty@*
 				do
-
 					[[ -e $i ]] || continue
 					i=${i%.service}
 					INPUT_ADDITIONAL=${i##*@} Serial_Main
-
 				done
 
 				# On RPi disable primary UART device
@@ -1658,7 +1708,7 @@ Do you want to continue and DISABLE Bluetooth now?' || return 1
 		# - Remove stored amixer state
 		[[ -f '/var/lib/alsa/asound.state' ]] && G_EXEC rm /var/lib/alsa/asound.state
 
-		# - Reset active amixer state
+		# - Reset active amixer state ("-g" option has been added upstream: https://github.com/alsa-project/alsa-utils/issues/75)
 		[[ $INPUT_DEVICE_VALUE != 'none' && -f '/proc/asound/cards' && $(</proc/asound/cards) ]] && alsactl init
 
 		# HW specific
@@ -1735,7 +1785,7 @@ Do you want to continue and DISABLE Bluetooth now?' || return 1
 		if [[ -f '/etc/systemd/system/odroid-hifishield2.service' ]]; then
 
 			systemctl disable --now odroid-hifishield2
-			rm -R /etc/systemd/system/odroid-hifishield2.service*
+			rm /etc/systemd/system/odroid-hifishield2.service
 
 		fi
 		[[ -d '/etc/systemd/system/odroid-hifishield2.service.d' ]] && rm -R /etc/systemd/system/odroid-hifishield2.service.d
@@ -1989,6 +2039,7 @@ _EOF_
 			#	hifiberry-*
 			#	JustBoom-[dac|digi|both]
 			#	allo-boss-dac-pcm512x-audio
+			#	allo-boss2-dac-audio
 			#	allo-digione
 			#	allo-katana-dac-audio
 			#	rpi-dac
@@ -2121,25 +2172,25 @@ _EOF_
 			G_EXEC chmod 0775 /var/lib/dietpi/dietpi-config
 			G_EXEC chown dietpi:dietpi /var/lib/dietpi/dietpi-config
 			cat << _EOF_ > /etc/asound.conf
+pcm.!default {
+	type plug
+	slave.pcm {
+		type equal
+		slave.pcm {
+			type plug
+			slave.pcm {
+				type hw
+				card $SOUNDCARD_TARGET_CARD
+				device $SOUNDCARD_TARGET_DEVICE
+			}
+		}
+		controls "/var/lib/dietpi/dietpi-config/.alsaequal.bin"
+	}
+}
+
 ctl.eq {
 	type equal
 	controls "/var/lib/dietpi/dietpi-config/.alsaequal.bin"
-}
-
-pcm.plugequal {
-	type equal
-	slave.pcm {
-		type hw
-		card $SOUNDCARD_TARGET_CARD
-		device $SOUNDCARD_TARGET_DEVICE
-	}
-	controls "/var/lib/dietpi/dietpi-config/.alsaequal.bin"
-}
-
-pcm.!default {
-	type plug
-	slave.pcm plugequal
-	slave.channels 2
 }
 
 ctl.!default {
@@ -2181,6 +2232,8 @@ _EOF_
 		fi
 
 		# Store control states once to assure they are not lost on ungraceful shutdown
+		# - On RPi, this can fail, fake success for now until we find time to further investigate the when and why: https://github.com/MichaIng/DietPi/issues/4306
+		(( $G_HW_MODEL > 9 )) || G_EXEC_NOFAIL=1
 		G_EXEC alsactl -g store
 
 		# Buster: Avoid alsa-state.service start if its config file does not exist: https://bugs.debian.org/cgi-bin/bugreport.cgi?bug=932209
