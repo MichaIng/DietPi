@@ -1781,9 +1781,10 @@ _EOF_
 			# UEFI
 			if [[ -d '/boot/efi' ]] && dpkg-query -s 'grub-efi-amd64' &> /dev/null
 			then
-				# Force GRUB installation to the EFI removable media path, if no (other) bootloader is installed there yet
+				# Force GRUB installation to the EFI removable media path, if no (other) bootloader is installed there yet, which is checked via single case-insensitive glob
 				shopt -s nocaseglob
 				local efi_fallback=
+				# shellcheck disable=SC2043
 				for i in /boot/efi/EFI/boot/bootx64.efi
 				do
 					[[ -d $i ]] && break
