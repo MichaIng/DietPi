@@ -5678,16 +5678,14 @@ _EOF_
 		if (( ${aSOFTWARE_INSTALL_STATE[$software_id]} == 1 )); then
 
 			Banner_Installing
-			# TigerVNC allows connecting to a virtual desktop
-			# X11VNC allows connecting to a real desktop session, thus shared desktop sessions as well
 			# netbase is required until Bullseye to solve: "Use of uninitialized value $proto in socket at /usr/bin/tigervncserver"
 			# - It is a recommendation and no dependency of perl, but expected by some packages depending on perl only: https://bugs.debian.org/cgi-bin/bugreport.cgi?bug=939055
-			local netbase=
-			(( $G_DISTRO < 6 )) && netbase='netbase'
+			# tigervnc-common is required as it is a recommendation only until Bullseye.
+			local apackages=()
+			(( $G_DISTRO > 5 )) || apackages=('tigervnc-common' 'netbase')
 			# https://github.com/MichaIng/DietPi/issues/1558#issuecomment-701547904
-			local dbus_package=
-			(( ${aSOFTWARE_INSTALL_STATE[23]} > 0 )) && dbus_package='dbus-user-session'
-			G_AGI tigervnc-standalone-server tigervnc-common x11vnc $netbase $dbus_package
+			(( ${aSOFTWARE_INSTALL_STATE[23]} > 0 )) && apackages+=('dbus-user-session')
+			G_AGI tigervnc-standalone-server tigervnc-scraping-server "${apackages[@]}"
 
 		fi
 
@@ -10286,21 +10284,18 @@ _EOF_
 			aSTART_SERVICES+=('vncserver')
 
 			cat << '_EOF_' > /usr/local/bin/vncserver
-#!/bin/bash
-
-# Shared or virtual desktop?
-SHARED_MODE=$(grep -cm1 '^[[:blank:]]*SOFTWARE_VNCSERVER_SHARE_DESKTOP=1' /boot/dietpi.txt)
+#!/bin/dash
 
 # RealVNC or TigerVNC?
-if [[ -f '/usr/bin/vncserver-virtual' ]]; then
+if [ -f '/usr/bin/vncserver-virtual' ]; then
 
-	REALVNC=1
 	FP_BINARY='/usr/bin/vncserver-virtual -Authentication VncAuth'
+	FP_SHARED='/usr/bin/vncserver-x11-serviced'
 
-elif [[ -f '/usr/bin/tigervncserver' ]]; then
+elif [ -f '/usr/bin/tigervncserver' ]; then
 
-	REALVNC=0
 	FP_BINARY='/usr/bin/tigervncserver -fg'
+	FP_SHARED='/usr/bin/x0tigervncserver :0'
 
 else
 
@@ -10312,33 +10307,39 @@ fi
 case "$1" in
 
 	start)
-		# Virtual desktop mode
-		if (( ! $SHARED_MODE )); then
+		# Shared desktop mode
+		if grep -q '^[[:blank:]]*SOFTWARE_VNCSERVER_SHARE_DESKTOP=1' /boot/dietpi.txt; then
 
+			exec $FP_SHARED -fg || exit 1
+
+		# Virtual desktop mode
+		else
+
+			DISPLAY=$(sed -n '/^[[:blank:]]*SOFTWARE_VNCSERVER_DISPLAY_INDEX=/{s/^[^=]*=//p;q}' /boot/dietpi.txt)
 			WIDTH=$(sed -n '/^[[:blank:]]*SOFTWARE_VNCSERVER_WIDTH=/{s/^[^=]*=//p;q}' /boot/dietpi.txt)
 			HEIGHT=$(sed -n '/^[[:blank:]]*SOFTWARE_VNCSERVER_HEIGHT=/{s/^[^=]*=//p;q}' /boot/dietpi.txt)
 			DEPTH=$(sed -n '/^[[:blank:]]*SOFTWARE_VNCSERVER_DEPTH=/{s/^[^=]*=//p;q}' /boot/dietpi.txt)
-			DISPLAY=$(sed -n '/^[[:blank:]]*SOFTWARE_VNCSERVER_DISPLAY_INDEX=/{s/^[^=]*=//p;q}' /boot/dietpi.txt)
 			exec $FP_BINARY ":${DISPLAY:-1}" -geometry "${WIDTH:-1280}x${HEIGHT:-720}" -depth "${DEPTH:-16}" || exit 1
-
-		# TigerVNC shared desktop mode
-		elif (( ! $REALVNC )); then
-
-			exec x11vnc -display 'WAIT:0' -usepw -forever || exit 1
-
-		# RealVNC shared desktop mode
-		else
-
-			systemctl start vncserver-x11-serviced || exit 1
 
 		fi
 	;;
 
 	stop)
-		DISPLAY=$(sed -n '/^[[:blank:]]*SOFTWARE_VNCSERVER_DISPLAY_INDEX=/{s/^[^=]*=//p;q}' /boot/dietpi.txt)
-		$FP_BINARY -kill ":${DISPLAY:-1}" 2> /dev/null
-		(( $REALVNC )) && systemctl stop vncserver-x11-serviced
-		killall -qw x11vnc Xtigervnc /usr/bin/vncserver-x11-serviced vncserver-x11-serviced Xvnc-core
+		# Shared desktop mode
+		if grep -q '^[[:blank:]]*SOFTWARE_VNCSERVER_SHARE_DESKTOP=1' /boot/dietpi.txt; then
+
+			$FP_SHARED -kill ':0' 2> /dev/null
+			killall -qw X0tigervnc x0tigervncserver /usr/bin/vncserver-x11-serviced vncserver-x11-serviced Xvnc-core
+
+		# Virtual desktop mode
+		else
+
+			DISPLAY=$(sed -n '/^[[:blank:]]*SOFTWARE_VNCSERVER_DISPLAY_INDEX=/{s/^[^=]*=//p;q}' /boot/dietpi.txt)
+			$FP_BINARY -kill ":${DISPLAY:-1}" 2> /dev/null
+			killall -qw Xtigervnc tigervncserver /usr/bin/vncserver-virtual vncserver-virtual Xvnc-core
+
+		fi
+		
 	;;
 
 esac
@@ -10391,17 +10392,22 @@ exec $cmd_launch_desktop
 _EOF_
 			G_EXEC chmod +x /root/.vnc/xstartup
 
-			# TigerVNC: Set control + read-only passwords (RealVNC uses UNIX user authentication by default, does not support the "-f" option and uses different files!)
-			if command -v tigervncpasswd > /dev/null; then
-
-				tigervncpasswd -f << _EOF_ > /root/.vnc/passwd
-$GLOBAL_PW
-$GLOBAL_PW
-_EOF_
+			# TigerVNC: Set control + read-only passwords
+			if [[ ${aSOFTWARE_INSTALL_STATE[28]} == 1 && ! -f '/root/.vnc/passwd' ]]
+			then
+				tigervncpasswd -f <<< "$GLOBAL_PW
+$GLOBAL_PW" > /root/.vnc/passwd
 				G_EXEC chmod 600 /root/.vnc/passwd
-
 			fi
 
+			# RealVNC: Set virtual + shared desktop passwords
+			if [[ ${aSOFTWARE_INSTALL_STATE[120]} == 1 && ! -f '/root/.vnc/config.d/Xvnc' ]]
+			then
+				vncpasswd -virtual <<< "$GLOBAL_PW
+$GLOBAL_PW"
+				vncpasswd -service <<< "$GLOBAL_PW
+$GLOBAL_PW"
+			fi
 		fi
 
 		software_id=74 # InfluxDB
@@ -15022,19 +15028,21 @@ _EOF_
 
 			if [[ -f '/etc/systemd/system/vncserver.service' ]]; then
 
-				systemctl disable --now vncserver
-				rm -R /etc/systemd/system/vncserver.service*
+				G_EXEC systemctl disable --now vncserver
+				G_EXEC rm /etc/systemd/system/vncserver.service
 
 			fi
-			[[ -d '/etc/systemd/system/vncserver.service.d' ]] && rm -R /etc/systemd/system/vncserver.service.d
+			[[ -d '/etc/systemd/system/vncserver.service.d' ]] && G_EXEC rm -R /etc/systemd/system/vncserver.service.d
 			if [[ -f '/etc/init.d/vncserver' ]]; then
 
-				rm /etc/init.d/vncserver
-				update-rc.d -f vncserver remove
+				G_EXEC systemctl unmask vncserver
+				G_EXEC systemctl disable --now vncserver
+				G_EXEC rm /etc/init.d/vncserver
+				G_EXEC update-rc.d -f vncserver remove
 
 			fi
-			[[ -f '/usr/local/bin/vncserver' ]] && rm /usr/local/bin/vncserver
-			rm -Rf /{root,home/*}/.vnc
+			[[ -f '/usr/local/bin/vncserver' ]] && G_EXEC rm /usr/local/bin/vncserver
+			G_EXEC rm -Rf /{root,home/*}/.vnc
 
 		fi
 
