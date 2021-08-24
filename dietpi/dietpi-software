@@ -10257,8 +10257,8 @@ After=network-online.target dietpi-boot.service
 
 [Service]
 RemainAfterExit=yes
-User=root
 PAMName=login
+User=root
 Environment=HOME=/root
 ExecStart=/usr/local/bin/vncserver start
 ExecStop=/usr/local/bin/vncserver stop
@@ -10277,14 +10277,15 @@ _EOF_
 if [ -f '/usr/bin/vncserver-virtual' ]; then
 
 	echo '[  OK  ] RealVNC detected'
-	FP_BINARY='/usr/bin/vncserver-virtual -Authentication VncAuth'
-	FP_SHARED='/usr/bin/vncserver-x11-serviced -fg'
+	FP_BINARY='/usr/bin/vncserver-virtual -Authentication VncAuth,TLSVnc'
+	FP_SHARED='/usr/bin/vncserver-x11 -Authentication VncAuth,TLSVnc'
 
 elif [ -f '/usr/bin/tigervncserver' ]; then
 
 	echo '[  OK  ] TigerVNC detected'
-	FP_BINARY='/usr/bin/tigervncserver -fg'
-	FP_SHARED='/usr/bin/x0tigervncserver :0'
+	FP_BINARY='/usr/bin/tigervncserver'
+	[ -f '/usr/bin/X0tigervnc' ] && FP_SHARED='/usr/bin/X0tigervnc' || FP_SHARED='/usr/bin/x0tigervncserver'
+	FP_SHARED="$FP_SHARED -display :0  -rfbauth $HOME/.vnc/passwd"
 
 else
 
@@ -10299,8 +10300,16 @@ case "$1" in
 		# Shared desktop mode
 		if grep -q '^[[:blank:]]*SOFTWARE_VNCSERVER_SHARE_DESKTOP=1' /boot/dietpi.txt; then
 
-			echo '[ INFO ] Connecting to shared desktop'
-			exec $FP_SHARED || exit $?
+			echo '[ INFO ] Waiting for X server...'
+			while :
+			do
+				until pgrep Xorg > /dev/null 2>&1; do sleep 1; done
+				echo '[ INFO ] Connecting to shared desktop'
+				$FP_SHARED
+				sleep 2
+				pgrep Xorg > /dev/null 2>&1 && exit 1
+				echo '[ INFO ] X server stopped, waiting for next session...'
+			done
 
 		# Virtual desktop mode
 		else
@@ -10310,7 +10319,7 @@ case "$1" in
 			HEIGHT=$(sed -n '/^[[:blank:]]*SOFTWARE_VNCSERVER_HEIGHT=/{s/^[^=]*=//p;q}' /boot/dietpi.txt)
 			DEPTH=$(sed -n '/^[[:blank:]]*SOFTWARE_VNCSERVER_DEPTH=/{s/^[^=]*=//p;q}' /boot/dietpi.txt)
 			echo "[ INFO ] Starting virtual desktop at display :${DISPLAY:-1} in ${WIDTH:-1280}x${HEIGHT:-720}x${DEPTH:-16}"
-			exec $FP_BINARY ":${DISPLAY:-1}" -geometry "${WIDTH:-1280}x${HEIGHT:-720}" -depth "${DEPTH:-16}" || exit $?
+			exec $FP_BINARY ":${DISPLAY:-1}" -geometry "${WIDTH:-1280}x${HEIGHT:-720}" -depth "${DEPTH:-16}"
 
 		fi
 	;;
@@ -10320,69 +10329,30 @@ case "$1" in
 		if grep -q '^[[:blank:]]*SOFTWARE_VNCSERVER_SHARE_DESKTOP=1' /boot/dietpi.txt; then
 
 			echo '[ INFO ] Disconnecting from shared desktop'
-			$FP_SHARED -kill ':0' 2> /dev/null
-			killall -qw X0tigervnc x0tigervncserver vncserver-x11-serviced
+			killall -qw vncserver-x11 x0tigervncserver
 
 		# Virtual desktop mode
 		else
 
 			DISPLAY=$(sed -n '/^[[:blank:]]*SOFTWARE_VNCSERVER_DISPLAY_INDEX=/{s/^[^=]*=//p;q}' /boot/dietpi.txt)
 			echo "[ INFO ] Stopping virtual desktop at display :${DISPLAY:-1}"
-			$FP_BINARY -kill ":${DISPLAY:-1}" 2> /dev/null
-			killall -qw Xtigervnc tigervncserver vncserver-virtual
+			$FP_BINARY -kill ":${DISPLAY:-1}"
 
 		fi
 	;;
+	
+        *)
+                echo "[FAILED] Invalid command ($1), please use \"start\" or \"stop\""
+                exit 1
+        ;;
 
 esac
-
-exit 0
 _EOF_
 			G_EXEC chmod +x /usr/local/bin/vncserver
 
-			# Stretch + TigerVNC: Disable Localhost only by default
+			# Stretch + TigerVNC: Permit remote connections which implies TLSVnc authentications being enabled additionally
 			# shellcheck disable=SC2016
 			[[ -f '/etc/vnc.conf' ]] && GCI_PRESERVE=1 G_CONFIG_INJECT '\$localhost[[:blank:]]*=' '$localhost = "no";' /etc/vnc.conf
-
-			local cmd_launch_desktop=
-			# LXDE
-			if (( ${aSOFTWARE_INSTALL_STATE[23]} > 0 )); then
-
-				cmd_launch_desktop='lxsession -s LXDE -e LXDE'
-
-			# MATE
-			elif (( ${aSOFTWARE_INSTALL_STATE[24]} > 0 )); then
-
-				cmd_launch_desktop='mate-session'
-
-			# GNUstep
-			elif (( ${aSOFTWARE_INSTALL_STATE[26]} > 0 )); then
-
-				cmd_launch_desktop='x-window-manager'
-
-			# Xfce
-			elif (( ${aSOFTWARE_INSTALL_STATE[25]} > 0 )); then
-
-				cmd_launch_desktop='xfce4-session'
-
-			# LXQt
-			elif (( ${aSOFTWARE_INSTALL_STATE[173]} > 0 )); then
-
-				cmd_launch_desktop='startlxqt'
-
-			fi
-
-			G_EXEC mkdir -p /root/.vnc
-			cat << _EOF_ > /root/.vnc/xstartup
-#!/bin/dash
-export SHELL='/bin/bash'
-[ -x '/etc/vnc/xstartup' ] && exec /etc/vnc/xstartup
-[ -r '/root/.Xresources' ] && xrdb /root/.Xresources
-xsetroot -solid grey
-vncconfig -iconic &
-exec $cmd_launch_desktop
-_EOF_
-			G_EXEC chmod +x /root/.vnc/xstartup
 
 			# TigerVNC: Set control + read-only passwords
 			if [[ ${aSOFTWARE_INSTALL_STATE[28]} == 1 && ! -f '/root/.vnc/passwd' ]]
