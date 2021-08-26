@@ -8,7 +8,7 @@ about: Create a report to help us improve
 
 #### Required Information
 - DietPi version | `cat /boot/dietpi/.version`
-- Distro version | `echo $G_DISTRO_NAME` or `cat /etc/debian_version`
+- Distro version | `echo $G_DISTRO_NAME $G_RASPBIAN`
 - Kernel version | `uname -a`
 - SBC model | `echo $G_HW_MODEL_NAME` or (EG: RPi3)
 - Power supply used | (EG: 5V 1A RAVpower)
