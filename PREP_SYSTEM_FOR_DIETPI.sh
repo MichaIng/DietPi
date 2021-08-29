@@ -23,7 +23,7 @@
 	# - PREIMAGE_INFO='Some GNU/Linux'
 	# - HW_MODEL=0				(must match one of the supported IDs below)
 	# - WIFI_REQUIRED=0			[01]
-	# - DISTRO_TARGET=5			[56] (Buster: 5, Bullseye: 6)
+	# - DISTRO_TARGET=6			[567] (Buster: 5, Bullseye: 6, Bookworm: 7)
 	#------------------------------------------------------------------------------------------------
 
 	# Core globals
@@ -178,27 +178,34 @@ _EOF_
 	unset -v GITOWNER GITBRANCH
 
 	# Detect the distro version of this operating system
-	if grep -q 'stretch' /etc/os-release; then
+	distro=$(</etc/debian_version)
+	if [[ $distro == '9.'* ]]; then
 
 		G_DISTRO=4
 		G_DISTRO_NAME='stretch'
 
-	elif grep -q 'buster' /etc/os-release; then
+	elif [[ $distro == '10.'* ]]; then
 
 		G_DISTRO=5
 		G_DISTRO_NAME='buster'
 
-	elif grep -q 'bullseye' /etc/os-release; then
+	elif [[ $distro == '11.'* ]]; then
 
 		G_DISTRO=6
 		G_DISTRO_NAME='bullseye'
 
+	elif [[ $distro == 'bookworm/sid' ]]; then
+
+		G_DISTRO=7
+		G_DISTRO_NAME='bookworm'
+
 	else
 
-		G_DIETPI-NOTIFY 1 "Unsupported distribution version: $(sed -n '/^PRETTY_NAME=/{s/^PRETTY_NAME=//p;q}' /etc/os-release 2>&1). Aborting...\n"
+		G_DIETPI-NOTIFY 1 "Unsupported distribution version: \"$distro\". Aborting...\n"
 		exit 1
 
 	fi
+	unset -v distro
 	G_DIETPI-NOTIFY 2 "Detected distribution version: ${G_DISTRO_NAME^} (ID: $G_DISTRO)"
 
 	# Detect the hardware architecture of this operating system
@@ -457,8 +464,9 @@ _EOF_
 		# Distro selection
 		DISTRO_LIST_ARRAY=(
 
-			'5' ': Buster (current stable release, recommended)'
-			'6' ': Bullseye (testing, if you want to live on bleeding edge)'
+			'5' ': Buster (oldstable, if you must stay with an old release)'
+			'6' ': Bullseye (current stable release, recommended)'
+			'7' ': Bookworm (testing, if you want to live on bleeding edge)'
 
 		)
 
@@ -515,6 +523,10 @@ Currently installed: $G_DISTRO_NAME (ID: $G_DISTRO)"; then
 		elif (( $DISTRO_TARGET == 6 )); then
 
 			DISTRO_TARGET_NAME='bullseye'
+
+		elif (( $DISTRO_TARGET == 7 )); then
+
+			DISTRO_TARGET_NAME='bookworm'
 
 		else
 
@@ -610,13 +622,6 @@ Currently installed: $G_DISTRO_NAME (ID: $G_DISTRO)"; then
 		done
 
 		G_EXEC cp /boot/dietpi/.version /var/lib/dietpi/.dietpi_image_version
-
-		# Temporary workaround for hanging DietPi-FirstBoot on Bullseye: https://github.com/MichaIng/DietPi/issues/4573#issuecomment-895208258
-		(( $DISTRO_TARGET == 6 && $G_DIETPI_VERSION_SUB == 4 )) && G_EXEC curl -sSfL 'https://raw.githubusercontent.com/MichaIng/DietPi/1ecf972/rootfs/var/lib/dietpi/services/dietpi-firstboot.bash' -o /var/lib/dietpi/services/dietpi-firstboot.bash
-
-		# Temporary fix for takeover of failed first run setup: https://github.com/MichaIng/DietPi/commit/a8f291caee8f1760020984a385f4831b0c954327
-		# shellcheck disable=SC2016
-		(( $G_DIETPI_VERSION_SUB == 4 )) && sed -i '/kill -9/a\\t\t\t\[\[ -f \$FP_DIETPI_FIRSTRUNSETUP_PID \]\] \&\& rm \$FP_DIETPI_FIRSTRUNSETUP_PID' /boot/dietpi/dietpi-login
 
 		G_EXEC systemctl daemon-reload
 
@@ -881,7 +886,7 @@ _EOF_
 			fi
 
 			# Remove obsolete components from Armbian list and connect via HTTPS
-			G_EXEC eval "echo 'deb https://apt.armbian.com/ $DISTRO_TARGET_NAME main' > /etc/apt/sources.list.d/armbian.list"
+			G_EXEC eval "echo 'deb https://apt.armbian.com/ ${DISTRO_TARGET_NAME/bookworm/bullseye} main' > /etc/apt/sources.list.d/armbian.list"
 
 			# Exclude doubled device tree files, shipped with the kernel package
 			echo 'path-exclude /usr/lib/linux-image-current-*' > /etc/dpkg/dpkg.cfg.d/01-dietpi-exclude_doubled_devicetrees
