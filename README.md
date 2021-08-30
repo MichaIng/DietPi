@@ -1,21 +1,17 @@
-<html>
-	<h1 align="center">
-		<img src="https://raw.githubusercontent.com/MichaIng/DietPi/master/.meta/images/dietpi-logo_150.png" alt="DietPi">
-	</h1>
-	<p align="center">
-		<b>Lightweight justice for your single-board computer!</b>
-		<br><br>
-		optimised • simplified • for everyone
-		<br><br>
-		<a href="https://dietpi.com/">Website</a> • <a href="https://dietpi.com/docs/">Documentation</a> • <a href="https://dietpi.com/#download">View all supported platforms</a>
-	</p>
-	<hr>
-	<p align="center">
-		<strong>Ready to run</strong> optimised software choices with <a href="https://dietpi.com/dietpi-software.html"><strong>dietpi-software</strong></a>
-		<br>Feature-rich configuration tool for your device with <strong>dietpi-config</strong>.
-	</p>
-	<hr>
-</html>
+<h1 align="center"><img src="https://raw.githubusercontent.com/MichaIng/DietPi-Website/master/images/dietpi-logo_180x180.png" alt="DietPi logo" width="180" height="180" loading="lazy"></h1>
+<p align="center">
+	<b>Lightweight justice for your single-board computer!</b>
+	<br><br>
+	optimised • simplified • for everyone
+	<br><br>
+	<a href="https://dietpi.com/" target="_blank" rel="noopener">Website</a> • <a href="https://dietpi.com/#download" target="_blank" rel="noopener">Downloads</a> • <a href="https://dietpi.com/docs/" target="_blank" rel="noopener">Documentation</a> • <a href="https://dietpi.com/phpbb/" target="_blank" rel="noopener">Forum</a> • <a href="https://dietpi.com/blog/" target="_blank" rel="noopener">Blog</a>
+</p>
+<hr>
+<p align="center">
+	<strong>Ready to run</strong> optimised software choices with <a href="https://dietpi.com/dietpi-software.html" target="_blank" rel="noopener"><strong>dietpi-software</strong></a>
+	<br>Feature-rich configuration tool for your device with <strong>dietpi-config</strong>.
+</p>
+<hr>
 
 ## Introduction
 
@@ -23,7 +19,7 @@ DietPi is an extremely lightweight Debian-based OS. It is highly optimised for m
 
 The **dietpi programs** use lightweight whiptail menus. You'll spend more time enjoying DietPi and applications you need and less time staring at the command line.
 
-Use `dietpi-software` to quick and easy install **Ready to Run** & **Optimised** applications for your system. DietPi will do all the necessary configurations, including starting the services. Few highlights: [Desktop Environments](https://dietpi.com/docs/user-optimised-software/#desktops), [Remote Desktop access](https://dietpi.com/docs/user-optimised-software/#remote-desktop-access), [Media systems and Media Players](https://dietpi.com/docs/user-optimised-software/#media-systems), [Torrents and Downloading](https://dietpi.com/docs/user-optimised-software/#bittorrent-download-tools), [Cloud and Backup](https://dietpi.com/docs/user-optimised-software/#cloud-backups), [Gaming](https://dietpi.com/docs/user-optimised-software/#emulation-gaming), [Social & Search](https://dietpi.com/docs/user-optimised-software/#social-search), [Camera and Surveillance](https://dietpi.com/docs/user-optimised-software/#camera-surveillance), [WiFi Hotspot](https://dietpi.com/docs/user-optimised-software/#wifi-hotspot), [System Stats & Management](https://dietpi.com/docs/user-optimised-software/#system-stats-management), [Home automation](https://dietpi.com/docs/user-optimised-software/#home-automation), [Hardware & Voice Projects](https://dietpi.com/docs/user-optimised-software/#hardware-projects), [Webserver Stacks](https://dietpi.com/docs/user-optimised-software/#webserver-stacks), [DNS server / PiHole](https://dietpi.com/docs/user-optimised-software/#dns-servers), [File Servers](https://dietpi.com/docs/user-optimised-software/#file-servers), [Cloud printing and Print 3D](https://dietpi.com/docs/user-optimised-software/#printing) and much more.
+Use `dietpi-software` to quick and easy install **Ready to Run** & **Optimised** applications for your system. DietPi will do all the necessary configurations, including starting the services. Few highlights: [Desktop Environments](https://dietpi.com/docs/software/desktop/), [Remote Desktop Access](https://dietpi.com/docs/software/remote_desktop/), [Media Systems & Players](https://dietpi.com/docs/software/media/), [BitTorrent & Downloading](https://dietpi.com/docs/software/bittorrent/), [Cloud & Backup](https://dietpi.com/docs/software/cloud/), [Gaming & Emulation](https://dietpi.com/docs/software/gaming/), [Social & Search](https://dietpi.com/docs/software/social/), [Camera & Surveillance](https://dietpi.com/docs/software/camera/), [Networking](https://dietpi.com/docs/software/advanced_networking/), [System Stats & Management](https://dietpi.com/docs/software/system_stats/), [Home Automation](https://dietpi.com/docs/software/home_automation/), [Hardware & Voice Projects](https://dietpi.com/docs/software/hardware_projects/), [Webserver Stacks](https://dietpi.com/docs/software/webserver_stack/), [DNS Servers / Pi-hole](https://dietpi.com/docs/software/dns_servers/), [File Servers](https://dietpi.com/docs/software/file_servers/), [Printing](https://dietpi.com/docs/software/printing/) and much more.
 
 Use `dietpi-services` to control which installed software has higher or lower priority levels (nice, affinity, policy scheduler).
 
@@ -33,51 +29,57 @@ Use `dietpi-services` to control which installed software has higher or lower pr
 
 ### Contributors
 
-#### Micha (MichaIng)
+#### [Micha](https://github.com/MichaIng)
 
 _Joined Q3 2017_
 
 Project lead (20/02/2019 and onwards), source code contributor, bug fixes, software improvements, DietPi forum administrator.
 
-#### Daniel Knight (Fourdee)
+#### [Daniel Knight](https://github.com/Fourdee)
 
 Project founder and previous project lead (19/02/2019 and previous), source code contributor and tester.
 
-#### JohnVick
+#### [JohnVick](https://dietpi.com/phpbb/memberlist.php?mode=viewprofile&u=575)
 
 _Joined 2016-06-08_
 
 DietPi forum co-administrator, management, support, testing and valuable feedback.
 
-#### sal666
+#### [sal666](https://github.com/sal666)
 
 _Joined 2017-07-26_
 
 Creator and maintainer of the Clonezilla based installer images for x86_64 UEFI systems.
 
-#### Joulinar
+#### [Joulinar](https://github.com/Joulinar)
 
 _Joined Q4 2019_
 
 DietPi forum moderator, support, testing, bug reports + investigation and valuable feedback.
 
-#### StephanStS
+#### [StephanStS](https://github.com/StephanStS)
 
 _Joined Q4 2019_
 
 NanoPi image creator, tester and bug reports.
 
-#### Petru (fpetru)
+#### [Petru](https://github.com/fpetru)
 
 _Joined 2020-05-31_
 
 DietPi documentation author, product manager, SEO and DietPi visibility recommendations.
 
+#### [ravenclaw900](https://github.com/ravenclaw900)
+
+_Joined 2020-10-11_
+
+Source code contributor, implemented PaperMC, Unbound, Tor Relay and related features and functions.
+
 ---
 
 ### Collaborations
 
-#### DietPi + Amiberry
+#### DietPi + [Amiberry](https://github.com/midwan/amiberry)
 
 _Since 2016-09-02_
 
@@ -88,31 +90,31 @@ https://github.com/MichaIng/DietPi/issues/474
 
 ### Hall of Fame
 
-#### K-Plan
+#### [K-Plan](https://github.com/k-plan)
 
 _Joined 2016-01-01_
 
 Contributions to the DietPi in general, in-depth testing, bug finding and valuable feedback, forum moderator.
 
-#### ZombieVirus
+#### [ZombieVirus](https://dietpi.com/phpbb/memberlist.php?username=ZombieVirus)
 
 _Joined 2016-03-20_
 
 DietPi forum moderator and version history maintainer on forums.
 
-#### Rhkean
+#### [Rhkean](https://github.com/rhkean)
 
 _Joined 2018-03-01_
 
 Contributions to the DietPi in general, including source code, testing, new devices, forum moderator.
 
-#### Pilovali
+#### [Pilovali](https://github.com/pilovali)
 
 _Joined 2015-10-10_
 
 Provided dietpi.com web hosting for 1 year until April 17th 2016. Additionally: forum moderator, testing, bug reporting.
 
-#### xenfomation
+#### [Xenfomation](https://github.com/xenfomation)
 
 _Joined 2016-04-01_
 
@@ -145,12 +147,13 @@ If so, let us know!
 We are always looking for talented people who believe in the DietPi project, and, wish to contribute in any way you can.
 
 - Send me an Email: micha@dietpi.com
-- Join our forums: https://dietpi.com/phpbb/
+- Join our forum: https://dietpi.com/phpbb/
 - GitHub: https://github.com/MichaIng/DietPi
 
 ### FeatHub
 
-Vote for new suggestions, feature-, software- or image requests, or add your own to our new FeatHub page:
+Vote for new suggestions, feature-, software- or image requests, or add your own to our new [FeatHub page](https://feathub.com/MichaIng/DietPi):  
+_Please do always open and cross-reference a  [GitHub issue](https://github.com/MichaIng/DietPi/issues) as well._
 
 [![Feature Requests](https://feathub.com/MichaIng/DietPi?format=svg)](https://feathub.com/MichaIng/DietPi)
 
@@ -203,12 +206,13 @@ Links to hardware and software manufacturers, sources and build instructions use
 - [Debian distribution](https://salsa.debian.org/)
 - [Raspberry](https://github.com/raspberrypi) [Pi](https://github.com/RPi-Distro)
 - [Hardkernel](https://github.com/hardkernel?tab=repositories)
-- [Meveric's Odroid repository](https://forum.odroid.com/viewtopic.php?f=52&t=5908)
+- [Meveric's Odroid repository](https://forum.odroid.com/viewtopic.php?t=5908)
 - [Sparky](https://github.com/sparkysbc?tab=repositories) [SBC](https://github.com/sparky-sbc/sparky-test)
 - [PINE64](https://www.pine64.org/)
 - [FriendlyARM](https://github.com/friendlyarm?tab=repositories)
-- [Rockchip](https://github.com/rockchip-linux/rk-rootfs-build)
 - [Armbian](https://github.com/armbian)
+- [curl](https://github.com/curl/curl)
+- [vmtouch](https://github.com/hoytech/vmtouch)
 - [X.Org-X-Server](https://www.x.org/archive//individual/)
 - [LXDE desktop](https://github.com/LXDE)
 - [LXQt desktop](https://github.com/lxqt)
@@ -242,7 +246,6 @@ Links to hardware and software manufacturers, sources and build instructions use
 - [vsftpd](https://security.appspot.com/vsftpd.html)
 - [Samba](https://wiki.samba.org/index.php/Using_Git_for_Samba_Development)
 - [NFS](http://linux-nfs.org/wiki/index.php/Main_Page)
-- [No-IP Client Binary](https://www.noip.com/support/knowledgebase/installing-the-linux-dynamic-update-client/)
 - [Dropbear](https://github.com/mkj/dropbear)
 - [OpenSSH](https://github.com/openssh/openssh-portable)
 - [OpenVPN](https://github.com/OpenVPN)
@@ -251,11 +254,12 @@ Links to hardware and software manufacturers, sources and build instructions use
 - [Amiberry](https://github.com/midwan/amiberry)
 - [RetroPie Setup Script](https://github.com/petrockblog/RetroPie-Setup)
 - [OpenTyrian](https://bitbucket.org/opentyrian/opentyrian/wiki/Home)
-- [DietPiCam](https://github.com/silvanmelchior/RPi_Cam_Web_Interface)
+- [RPi Cam Control](https://github.com/silvanmelchior/RPi_Cam_Web_Interface)
 - [Deluge](https://dev.deluge-torrent.org/wiki/Development#SourceCode)
 - [Subsonic](https://sourceforge.net/projects/subsonic/)
 - [Airsonic](https://github.com/airsonic/airsonic)
 - [Logitech Media Server](https://github.com/Logitech/slimserver)
+- [Squeezelite](https://github.com/ralph-irving/squeezelite)
 - [Ampache](https://github.com/ampache/ampache)
 - [Plex Media Server](https://www.plex.tv/)
 - [FFmpeg](https://github.com/FFmpeg/FFmpeg)
@@ -274,12 +278,39 @@ Links to hardware and software manufacturers, sources and build instructions use
 - [Jellyfin](https://github.com/jellyfin/jellyfin)
 - [Komga](https://github.com/gotson/komga)
 - [HTPC Manager](https://github.com/HTPC-Manager/HTPC-Manager)
+- [Bazarr](https://github.com/morpheus65535/bazarr)
+- [PaperMC](https://github.com/PaperMC/Paper)
+- [Unbound](https://github.com/NLnetLabs/unbound)
+- [vaultwarden](https://github.com/dani-garcia/vaultwarden)
+- [Docker](https://github.com/docker/docker-ce)
+- [Portainer](https://github.com/portainer/portainer)
+- [Tor](https://gitlab.torproject.org/tpo/core/tor)
+- [Docker Compose](https://github.com/docker/compose)
+- [Box86](https://github.com/ptitSeb/box86)
+- [Steam](https://steamcommunity.com/)
+- [mjpg-streamer](https://github.com/jacksonliam/mjpg-streamer)
+- [IPFS](https://github.com/ipfs/ipfs)
+- [CUPS](https://github.com/OpenPrinting/cups)
+- [Go](https://github.com/golang/go)
+- [VSCodium](https://github.com/VSCodium/vscodium)
+- [WebIOPi](https://github.com/Freenove/WebIOPi)
+- [WiringPi](https://github.com/WiringPi/WiringPi)
+- [emonHub](https://github.com/openenergymonitor/emonhub)
+- [Firefox](https://hg.mozilla.org/mozilla-unified)
+- [Beets](https://github.com/beetbox/beets)
+- [frp](https://github.com/fatedier/frp)
+- [AdGuard Home](https://github.com/AdguardTeam/AdGuardHome)
+- [Snapcast](https://github.com/badaix/snapcast)
+- [K3s](https://github.com/k3s-io/k3s)
+- [Synapse](https://github.com/matrix-org/synapse)
+- [youtube-dl](https://github.com/ytdl-org/youtube-dl)
+- [PostgreSQL](https://git.postgresql.org/gitweb/?p=postgresql.git)
+- [OpenJDK](https://github.com/openjdk)
+- [Blynk Server](https://github.com/Peterkn2001/blynk-server)
 
 ---
 
-<html>
-	<p align="center">
-		<img src="https://www.myvirtualserver.com/images/myvirtualserver_logo.png" alt="myVirtualserver" width="200">
-		<br>DietPi's web hosting is powered by <a href="https://www.myvirtualserver.com">myVirtualserver</a>.
-	</p>
-</html>
+<p align="center">
+	<img src="https://www.myvirtualserver.com/images/myvirtualserver_logo.png" alt="myVirtualserver logo" width="200" height="44" loading="lazy">
+	<br>DietPi's web hosting is powered by <a href="https://www.myvirtualserver.com" target="_blank" rel="noopener">myVirtualserver</a>.
+</p>

@@ -25,66 +25,68 @@
 	# Globals
 	#/////////////////////////////////////////////////////////////////////////////////////
 
-	RPi_Set_Clock_Speeds(){
-
+	RPi_Set_Clock_Speeds()
+	{
 		# If no manual overclock settings have been applied by user, apply safe overclocking values (RPi1) or update comments to show model-specific defaults: https://www.raspberrypi.org/documentation/configuration/config-txt/overclocking.md
 		grep -qE '^[[:blank:]]*(over_voltage|(arm|core|gpu|sdram)_freq)=' /boot/config.txt && return
 
 		# RPi Zero
-		if [[ $G_HW_MODEL_NAME == *'Zero'* ]]; then
-
-			sed -i '/over_voltage=/c\#over_voltage=0' /boot/config.txt
-			sed -i '/arm_freq=/c\#arm_freq=1000' /boot/config.txt
-			sed -i '/core_freq=/c\#core_freq=400' /boot/config.txt
-			sed -i '/sdram_freq=/c\#sdram_freq=450' /boot/config.txt
+		if [[ $G_HW_MODEL_NAME == *'Zero'* ]]
+		then
+			sed -i '/#over_voltage=/c\#over_voltage=0' /boot/config.txt
+			sed -i '/#arm_freq=/c\#arm_freq=1000' /boot/config.txt
+			sed -i '/#core_freq=/c\#core_freq=400' /boot/config.txt
+			sed -i '/#sdram_freq=/c\#sdram_freq=450' /boot/config.txt
 
 		# RPi 1: Apply safe overclock mode
-		elif (( $G_HW_MODEL < 2 )); then
-
+		elif (( $G_HW_MODEL < 2 ))
+		then
 			G_CONFIG_INJECT 'over_voltage=' 'over_voltage=2' /boot/config.txt
 			G_CONFIG_INJECT 'arm_freq=' 'arm_freq=900' /boot/config.txt
-			sed -i '/core_freq=/c\#core_freq=250' /boot/config.txt
-			sed -i '/sdram_freq=/c\#sdram_freq=400' /boot/config.txt
+			sed -i '/#core_freq=/c\#core_freq=250' /boot/config.txt
+			sed -i '/#sdram_freq=/c\#sdram_freq=400' /boot/config.txt
 
 		# RPi 2
-		elif (( $G_HW_MODEL == 2 )); then
-
-			sed -i '/over_voltage=/c\#over_voltage=0' /boot/config.txt
-			sed -i '/arm_freq=/c\#arm_freq=900' /boot/config.txt
-			sed -i '/core_freq=/c\#core_freq=250' /boot/config.txt
-			sed -i '/sdram_freq=/c\#sdram_freq=400' /boot/config.txt
+		elif (( $G_HW_MODEL == 2 ))
+		then
+			sed -i '/#over_voltage=/c\#over_voltage=0' /boot/config.txt
+			sed -i '/#arm_freq=/c\#arm_freq=900' /boot/config.txt
+			sed -i '/#core_freq=/c\#core_freq=250' /boot/config.txt
+			sed -i '/#sdram_freq=/c\#sdram_freq=450' /boot/config.txt
 
 		# RPi 3
-		elif (( $G_HW_MODEL == 3 )); then
-
-			sed -i '/over_voltage=/c\#over_voltage=0' /boot/config.txt
-			sed -i '/core_freq=/c\#core_freq=400' /boot/config.txt
+		elif (( $G_HW_MODEL == 3 ))
+		then
+			sed -i '/#over_voltage=/c\#over_voltage=0' /boot/config.txt
+			sed -i '/#core_freq=/c\#core_freq=400' /boot/config.txt
 			G_CONFIG_INJECT 'temp_limit=' 'temp_limit=75' /boot/config.txt # https://github.com/MichaIng/DietPi/issues/356
 
 			# A+/B+
-			if [[ $G_HW_MODEL_NAME == *'+'* ]]; then
-
-				sed -i '/arm_freq=/c\#arm_freq=1400' /boot/config.txt
-				sed -i '/sdram_freq=/c\#sdram_freq=500' /boot/config.txt
-
+			if [[ $G_HW_MODEL_NAME == *'+'* ]]
+			then
+				sed -i '/#arm_freq=/c\#arm_freq=1400' /boot/config.txt
+				sed -i '/#sdram_freq=/c\#sdram_freq=500' /boot/config.txt
 			else
-
-				sed -i '/arm_freq=/c\#arm_freq=1200' /boot/config.txt
-				sed -i '/sdram_freq=/c\#sdram_freq=450' /boot/config.txt
-
+				sed -i '/#arm_freq=/c\#arm_freq=1200' /boot/config.txt
+				sed -i '/#sdram_freq=/c\#sdram_freq=450' /boot/config.txt
 			fi
 
 		# RPi 4
-		elif (( $G_HW_MODEL == 4 )); then
-
-			sed -i '/over_voltage=/c\#over_voltage=0' /boot/config.txt
-			sed -i '/arm_freq=/c\#arm_freq=1500' /boot/config.txt
-			sed -i '/core_freq=/c\#core_freq=500' /boot/config.txt
-			sed -i '/sdram_freq=/d' /boot/config.txt # Not supported on RPi4, defaults to 3200 MHz
+		elif (( $G_HW_MODEL == 4 ))
+		then
+			sed -i '/#over_voltage=/c\#over_voltage=0' /boot/config.txt
+			sed -i '/#core_freq=/c\#core_freq=500' /boot/config.txt
+			sed -i '/#sdram_freq=/d' /boot/config.txt # Not supported on RPi4, defaults to 3200 MHz
 			G_CONFIG_INJECT 'temp_limit=' 'temp_limit=75' /boot/config.txt # https://github.com/MichaIng/DietPi/issues/3019
 
+			# 400
+			if [[ $G_HW_MODEL_NAME == *'400'* ]]
+			then
+				sed -i '/#arm_freq=/c\#arm_freq=1800' /boot/config.txt
+			else
+				sed -i '/#arm_freq=/c\#arm_freq=1500' /boot/config.txt
+			fi
 		fi
-
 	}
 
 	Apply_DietPi_FirstRun_Settings(){
@@ -153,9 +155,9 @@
 		# Set hostname
 		/boot/dietpi/func/change_hostname "$(sed -n '/^[[:blank:]]*AUTO_SETUP_NET_HOSTNAME=/{s/^[^=]*=//p;q}' /boot/dietpi.txt)"
 
-		# Set root # if automated firstrun setup was chosen, will be reverted after firstrun installs
 		if grep -q '^[[:blank:]]*AUTO_SETUP_AUTOMATED=1' /boot/dietpi.txt; then
 
+			# Enable root autologin on local console (/dev/tty1) and container console (/dev/console), reverted during firstrun setup
 			mkdir -p /etc/systemd/system/{getty@tty1,console-getty}.service.d
 			cat << '_EOF_' > /etc/systemd/system/getty@tty1.service.d/dietpi-autologin.conf
 [Service]
@@ -167,6 +169,12 @@ _EOF_
 ExecStart=
 ExecStart=-/sbin/agetty -a root --noclear --keep-baud console 115200,38400,9600 $TERM
 _EOF_
+			# Assume accepted license in automated installs: https://github.com/MichaIng/DietPi/pull/4477
+			rm /var/lib/dietpi/license.txt
+
+		elif grep -q '^[[:blank:]]*AUTO_SETUP_ACCEPT_LICENSE=1' /boot/dietpi.txt; then
+
+			rm /var/lib/dietpi/license.txt
 
 		fi
 
@@ -193,16 +201,14 @@ _EOF_
 		/boot/dietpi/func/dietpi-set_software apt-mirror "$(sed -n "/^[[:blank:]]*$target_repo=/{s/^[^=]*=//p;q}" /boot/dietpi.txt)"
 
 		# Regenerate unique Dropbear host keys
-		rm -fv /etc/dropbear/dropbear_*_host_key
-		if (( $G_DISTRO < 6 )); then
-
-			dpkg-reconfigure -f noninteractive dropbear-run
-
-		else
-
-			dpkg-reconfigure -f noninteractive dropbear
-
-		fi
+		local i type
+		for i in /etc/dropbear/dropbear_*_host_key
+		do
+			type=${i#/etc/dropbear/dropbear_}
+			type=${type%_host_key}
+			rm -v "$i"
+			dropbearkey -t "$type" -f "$i"
+		done
 
 		# Recreate machine-id: https://github.com/MichaIng/DietPi/issues/2015
 		[[ -f '/etc/machine-id' ]] && rm /etc/machine-id
@@ -235,8 +241,8 @@ _EOF_
 
 			# Enable WiFi, disable Ethernet
 			ethernet_enabled=0
-			sed -i "/allow-hotplug wlan/c\allow-hotplug wlan$index_wlan" /etc/network/interfaces
-			sed -i "/allow-hotplug eth/c\#allow-hotplug eth$index_eth" /etc/network/interfaces
+			sed -Ei "/(allow-hotplug|auto)[[:blank:]]+wlan/c\allow-hotplug wlan$index_wlan" /etc/network/interfaces
+			sed -Ei "/(allow-hotplug|auto)[[:blank:]]+eth/c\#allow-hotplug eth$index_eth" /etc/network/interfaces
 
 			# Apply global SSID/keys from dietpi.txt to wpa_supplicant
 			/boot/dietpi/func/dietpi-wifidb 1
@@ -249,8 +255,8 @@ _EOF_
 
 			# Enable Eth, disable WiFi
 			wifi_enabled=0
-			sed -i "/allow-hotplug eth/c\allow-hotplug eth$index_eth" /etc/network/interfaces
-			sed -i "/allow-hotplug wlan/c\#allow-hotplug wlan$index_wlan" /etc/network/interfaces
+			sed -Ei "/(allow-hotplug|auto)[[:blank:]]+eth/c\allow-hotplug eth$index_eth" /etc/network/interfaces
+			sed -Ei "/(allow-hotplug|auto)[[:blank:]]+wlan/c\#allow-hotplug wlan$index_wlan" /etc/network/interfaces
 
 			# Disable WiFi kernel modules
 			/boot/dietpi/func/dietpi-set_hardware wifimodules disable
@@ -294,6 +300,13 @@ _EOF_
 		#	Failsafe: Bring up Ethernet, whenever WiFi is disabled or fails to be configured, e.g. due to wrong credentials
 		# shellcheck disable=SC2015
 		(( $wifi_enabled )) && ifup wlan$index_wlan || ifup eth$index_eth
+
+		# x86_64 BIOS: Set GRUB install device: https://github.com/MichaIng/DietPi/issues/4542
+		if (( $G_HW_MODEL == 10 )) && dpkg-query -s grub-pc &> /dev/null
+		then
+			local root_drive=$(lsblk -npo PKNAME "$(findmnt -Ufnro SOURCE -M /)")
+			[[ $root_drive == '/dev/'* ]] && debconf-set-selections <<< "grub-pc grub-pc/install_devices multiselect $root_drive"
+		fi
 
 	}
 

@@ -1,0 +1,109 @@
+#!/bin/bash
+{
+# DietPi-Update pre-patches that need to run before new scripts are downloaded and/or before APT upgrades
+# Created by MichaIng / micha@dietpi.com / https://dietpi.com/
+# License: GPLv2 / https://github.com/MichaIng/DietPi#license
+
+# Load DietPi-Globals
+. /boot/dietpi/func/dietpi-globals
+readonly G_PROGRAM_NAME='DietPi-Pre-patches'
+G_CHECK_ROOT_USER
+G_CHECK_ROOTFS_RW
+G_INIT
+
+# IMPORTANT: This script can be called with DietPi v6.17, hence assure compatibility!
+# - Pre-v6.29: Create G_EXEC as G_RUN_CMD wrapper
+declare -F G_EXEC > /dev/null || G_EXEC(){ G_RUN_CMD "$@"; }
+
+# v7.0: Update Jellyfin APT repo key: https://dietpi.com/phpbb/viewtopic.php?t=8703
+if [[ -f '/etc/apt/trusted.gpg.d/dietpi-jellyfin.gpg' && $(date -u '+%Y%m%d' -r '/etc/apt/trusted.gpg.d/dietpi-jellyfin.gpg') -lt 20201216 ]]
+then
+	G_DIETPI-NOTIFY 2 'Updating Jellyfin APT repo key: https://dietpi.com/phpbb/viewtopic.php?t=8703'
+	G_EXEC curl -sSfLO 'https://repo.jellyfin.org/jellyfin_team.gpg.key'
+	G_EXEC gpg --dearmor -o /etc/apt/trusted.gpg.d/dietpi-jellyfin.gpg --yes jellyfin_team.gpg.key
+	G_EXEC rm jellyfin_team.gpg.key
+fi
+
+# v7.1: Update Ondrej's PHP APT repo key: https://github.com/MichaIng/DietPi/issues/4219
+if apt-key list '95BD4743' 2> /dev/null | grep -q 'expires: 2021-'
+then
+	G_DIETPI-NOTIFY 2 'Updating PHP APT repo key: https://github.com/MichaIng/DietPi/issues/4219'
+	G_EXEC apt-key del '95BD4743'
+	G_EXEC curl -sSfL 'https://packages.sury.org/php/apt.gpg' -o /etc/apt/trusted.gpg.d/dietpi-php.gpg
+	# Clean APT cache and remove lists: https://dietpi.com/phpbb/viewtopic.php?t=8972
+	# Use manual method as "dietpi-set_software apt-cache clean" has been added with v6.25 while this script can be called with earlier code.
+	G_EXEC apt-get clean
+	G_EXEC rm -Rf /{var/lib,tmp}/apt/lists
+fi
+
+# v7.2: Update InfluxDB APT repo key: https://github.com/MichaIng/DietPi/issues/4341
+if [[ -f '/etc/apt/trusted.gpg.d/dietpi-influxdb.gpg' && $(date -u '+%Y%m%d' -r '/etc/apt/trusted.gpg.d/dietpi-influxdb.gpg') -lt 20210504 ]]
+then
+	G_DIETPI-NOTIFY 2 'Updating InfluxDB APT repo key: https://github.com/MichaIng/DietPi/issues/4341'
+	G_EXEC curl -sSfLO 'https://repos.influxdata.com/influxdb.key'
+	G_EXEC gpg --dearmor -o /etc/apt/trusted.gpg.d/dietpi-influxdb.gpg --yes influxdb.key
+	G_EXEC rm influxdb.key
+fi
+
+# v7.2: Rename Bitwarden_RS into vaultwarden: https://github.com/MichaIng/DietPi/issues/4325
+if [[ -d '/mnt/dietpi_userdata/bitwarden_rs' ]]
+then
+	G_WHIP_BUTTON_OK_TEXT='Continue'
+	G_WHIP_BUTTON_CANCEL_TEXT='Cancel'
+	if G_WHIP_YESNO '[ INFO ] Bitwarden_RS detected
+\nDue to user confusion and to avoid any possible trademark/brand issues with the official Bitwarden server, Bitwarden_RS has been renamed to vaultwarden by its author: https://github.com/dani-garcia/vaultwarden/discussions/1642
+\nTo be able to continue providing support for vaultwarden, DietPi-Update will force a re-installation. This process can take 30 minutes up to several hours, especially on slower SBCs like RPi Zero and similar, like it was on the initial Bitwarden_RS install you did.
+\nContinue DietPi-Update now, if you are ok with the re-installation of vaultwarden and grab yourself a coffee or tea. If not, you are ok to cancel the update process and return later.
+\nNB: All your passwords, data and config will be preserved by the re-installation process.'
+	then
+		G_DIETPI-NOTIFY 2 'vaultwarden will be reinstalled during DietPi-Update incremental patches.'
+	else
+		G_DIETPI-NOTIFY 2 'DietPi-Update aborted by user.'
+		exit 1
+	fi
+fi
+
+# v7.4: On Stretch, migrate Armbian APT repository to Buster, but limit to install kernel, dtb, bootloader and firmware packages: https://github.com/MichaIng/DietPi/issues/4564
+if [[ $G_DISTRO -lt 5 && -f '/etc/apt/sources.list.d/armbian.list' && ! -f '/etc/apt/preferences.d/dietpi-armbian' ]]
+then
+	G_DIETPI-NOTIFY 2 'Since Armbian dropped support for Debian Stretch, kernel, device tree, bootloader and firmware packages will be pulled from the Buster suite instead.'
+	G_EXEC eval "echo 'deb https://apt.armbian.com/ buster main' > /etc/apt/sources.list.d/armbian.list"
+	G_EXEC eval "echo -e '# Only allow install of kernel, device tree, bootloader and firmware packages from Armbian Buster suite on Debian Stretch systems:
+Package: linux-image-* linux-headers-* linux-dtb-* linux-u-boot-* armbian-firmware\nPin: origin apt.armbian.com\nPin-Priority: 500
+\nPackage: *\nPin: origin apt.armbian.com\nPin-Priority: -1' > /etc/apt/preferences.d/dietpi-armbian"
+fi
+
+# v7.4: Update APT repositories once, accepting the suite change, when Bullseye has been released, as pre-v7.4 G_AGUP does not include this yet.
+if (( $G_DIETPI_VERSION_CORE < 7 || ( $G_DIETPI_VERSION_CORE == 7 && $G_DIETPI_VERSION_SUB < 4 ) )) && curl -sSfL 'https://deb.debian.org/debian/dists/bullseye/Release' | grep -q '^Suite: stable$'
+then
+	if (( $G_DISTRO > 4 ))
+	then
+		G_DIETPI-NOTIFY 2 'Debian Bullseye has been released, so we accept the repository suite change once.'
+		G_EXEC apt-get --allow-releaseinfo-change-suite -q update
+
+	# On Stretch that option is not supported yet. If it's an interactive call, allow to accept it manually:
+	elif [[ $G_INTERACTIVE == 1 ]]
+	then
+		G_DIETPI-NOTIFY 2 'Debian Bullseye has been released, so you need to accept the repository suite change once.'
+		apt-get update
+	fi	
+fi
+
+# v7.4
+if getent passwd debian-transmission > /dev/null && ! getent group debian-transmission > /dev/null
+then
+	G_DIETPI-NOTIFY 2 'Recreating the "debian-transmission" group for the "debian-transmission" user to prevent Transmission package upgrade issues: https://github.com/MichaIng/DietPi/issues/4244'
+	G_EXEC groupadd -r debian-transmission
+	G_EXEC usermod -aG debian-transmission debian-transmission
+
+fi
+
+# v7.6
+if [[ $G_HW_MODEL -le 9 && -f '/etc/apt/preferences.d/dietpi-lxde' ]] && ! grep -q ' lx\*$' /etc/apt/preferences.d/dietpi-lxde
+then
+	G_DIETPI-NOTIFY 2 'Updating the Raspberry Pi desktop package blocks'
+	G_EXEC sed -i '/^Package:/c\Package: openbox* obconf* libob* pcmanfm* libfm* libgtk* lx*' /etc/apt/preferences.d/dietpi-lxde
+fi
+
+exit 0
+}

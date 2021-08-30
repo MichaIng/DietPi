@@ -14,7 +14,7 @@
 	readonly AVAIABLE_COMMANDS="
 Available commands:
 $FP_SCRIPT	locale			xx_XX.UTF-8 (eg: en_GB.UTF-8)
-$FP_SCRIPT	allo			eth_dhcp|eth_static [<address>] [<gateway>] [<netmask>] [<dns-nameserver>]
+$FP_SCRIPT	allo			eth_dhcp|eth_static [<address>] [<gateway>] [<netmask>] [<dns-nameservers>]
 $FP_SCRIPT	useradd			X=create user with name X and default permissions, using global DietPi password (dietpi)
 $FP_SCRIPT	userdel			X=delete user with name X
 $FP_SCRIPT	apt-mirror		<url>|default
@@ -61,7 +61,7 @@ $FP_SCRIPT	passwords		NULL=Prompt user to change DietPi related passwords | X=op
 
 	#/////////////////////////////////////////////////////////////////////////////////////
 	# locale
-	# NB: Adds en_GB.UTF-8 alongside any input option
+	# NB: Adds C.UTF-8 alongside any input option
 	#/////////////////////////////////////////////////////////////////////////////////////
 	Locale_Main(){
 
@@ -69,22 +69,19 @@ $FP_SCRIPT	passwords		NULL=Prompt user to change DietPi related passwords | X=op
 
 			# Create list of locales to generate
 			echo "$INPUT_MODE_VALUE UTF-8" > /etc/locale.gen
-			# - Add C.UTF-8 back in, if not chosen, required by DietPi scripts
+			# - Add C.UTF-8 back in, if not chosen, required by DietPi scripts. It's statically pre-compiled, but adding it here adds it to the faster (?) locale cache.
 			[[ $INPUT_MODE_VALUE == 'C.UTF-8' ]] || echo 'C.UTF-8 UTF-8' >> /etc/locale.gen
 
-			# Remove current defaults
-			[[ -f '/etc/default/locale' ]] && rm /etc/default/locale
+			# Remove current default
+			[[ -f '/etc/default/locale' ]] && G_EXEC rm /etc/default/locale
+
+			# Assign new default via debconf: This is set to "None" during noninteractive reconfiguration when the previous default is not compiled anymore.
+			debconf-set-selections <<< "locales locales/default_environment_locale select $INPUT_MODE_VALUE"
 
 			# Generate locales and set new default
-			# - 1. this calls locale-gen to regenerate locale cache with /etc/locale.gen entries.
-			# - 2. this calls update-locale LANG=<first /etc/locale.gen entry> to set the new default locale.
+			# - 1. this calls "locale-gen" to regenerate a fresh locale cache based on /etc/locale.gen to /usr/lib/locale/locale-archive.
+			# - 2. this calls "update-locale LANG=<default>" to apply the new default locale form the debconf default assigned above.
 			G_CHECK_OUTPUT=1 G_EXEC dpkg-reconfigure -f noninteractive locales
-
-			# Reassign locale to current script, as in case of wrong locale variables update-locale command will produce ugly errors
-			export LC_ALL='C.UTF-8' LANG='C.UTF-8'
-
-			# Additionally set new locale via override variable $LC_ALL in /etc/default/locales which is effective from next shell session on
-			update-locale "LC_ALL=$INPUT_MODE_VALUE"
 
 			# Update dietpi.txt entry
 			G_CONFIG_INJECT 'AUTO_SETUP_LOCALE=' "AUTO_SETUP_LOCALE=$INPUT_MODE_VALUE" /boot/dietpi.txt
@@ -102,54 +99,38 @@ $FP_SCRIPT	passwords		NULL=Prompt user to change DietPi related passwords | X=op
 	#/////////////////////////////////////////////////////////////////////////////////////
 	AptMirror_Main(){
 
-		if [[ $INPUT_MODE_VALUE ]]; then
+		[[ $INPUT_MODE_VALUE ]] || { Unknown_Input_Mode; return 1; }
 
-			# RPi
-			if (( $G_HW_MODEL < 10 )); then
+		# RPi
+		(( $G_HW_MODEL < 10 )) && G_EXEC eval "echo 'deb https://archive.raspberrypi.org/debian/ ${G_DISTRO_NAME/bookworm/bullseye} main' > /etc/apt/sources.list.d/raspi.list"
 
-				# Component "ui" is in use until Stretch
-				local components='main'
-				(( $G_DISTRO < 5 )) && components+=' ui'
-				# Bullseye is not yet available, revert to Buster
-				echo "deb https://archive.raspberrypi.org/debian/ ${G_DISTRO_NAME/bullseye/buster} $components" > /etc/apt/sources.list.d/raspi.list
+		# Raspbian
+		if (( $G_HW_MODEL < 10 )) && (( $G_RASPBIAN )); then
 
-			fi
+			# Default?
+			[[ $INPUT_MODE_VALUE == 'default' ]] && INPUT_MODE_VALUE='http://raspbian.raspberrypi.org/raspbian/'
 
-			# Raspbian
-			if (( $G_HW_MODEL < 10 )) && (( $G_RASPBIAN )); then
+			G_EXEC eval "echo 'deb $INPUT_MODE_VALUE $G_DISTRO_NAME main contrib non-free' > /etc/apt/sources.list"
 
-				# Default?
-				[[ $INPUT_MODE_VALUE == 'default' ]] && INPUT_MODE_VALUE='http://raspbian.raspberrypi.org/raspbian/'
+			# Update dietpi.txt entry
+			G_CONFIG_INJECT 'CONFIG_APT_RASPBIAN_MIRROR=' "CONFIG_APT_RASPBIAN_MIRROR=$INPUT_MODE_VALUE" /boot/dietpi.txt
 
-				echo "deb $INPUT_MODE_VALUE $G_DISTRO_NAME main contrib non-free" > /etc/apt/sources.list
-
-				# Update dietpi.txt entry
-				G_CONFIG_INJECT 'CONFIG_APT_RASPBIAN_MIRROR=' "CONFIG_APT_RASPBIAN_MIRROR=$INPUT_MODE_VALUE" /boot/dietpi.txt
-
-			# Debian
-			else
-
-				# Default?
-				[[ $INPUT_MODE_VALUE == 'default' ]] && INPUT_MODE_VALUE='https://deb.debian.org/debian/'
-
-				cat << _EOF_ > /etc/apt/sources.list
-deb $INPUT_MODE_VALUE $G_DISTRO_NAME main contrib non-free
-deb $INPUT_MODE_VALUE $G_DISTRO_NAME-updates main contrib non-free
-deb https://deb.debian.org/debian-security/ $G_DISTRO_NAME/updates main contrib non-free
-deb $INPUT_MODE_VALUE $G_DISTRO_NAME-backports main contrib non-free
-_EOF_
-
-				# On Bullseye, dir structure has changed: https://deb.debian.org/debian-security/dists/
-				(( $G_DISTRO > 5 )) && sed -i '3s|/updates|-security|' /etc/apt/sources.list
-
-				# Update dietpi.txt entry
-				G_CONFIG_INJECT 'CONFIG_APT_DEBIAN_MIRROR=' "CONFIG_APT_DEBIAN_MIRROR=$INPUT_MODE_VALUE" /boot/dietpi.txt
-
-			fi
-
+		# Debian
 		else
 
-			Unknown_Input_Mode
+			# Default?
+			[[ $INPUT_MODE_VALUE == 'default' ]] && INPUT_MODE_VALUE='https://deb.debian.org/debian/'
+
+			G_EXEC eval "echo 'deb $INPUT_MODE_VALUE $G_DISTRO_NAME main contrib non-free
+deb $INPUT_MODE_VALUE $G_DISTRO_NAME-updates main contrib non-free
+deb https://deb.debian.org/debian-security/ $G_DISTRO_NAME/updates main contrib non-free
+deb $INPUT_MODE_VALUE $G_DISTRO_NAME-backports main contrib non-free' > /etc/apt/sources.list"
+
+			# On Bullseye, dir structure has changed: https://deb.debian.org/debian-security/dists/
+			(( $G_DISTRO > 5 )) && G_EXEC sed -i '3s|/updates|-security|' /etc/apt/sources.list
+
+			# Update dietpi.txt entry
+			G_CONFIG_INJECT 'CONFIG_APT_DEBIAN_MIRROR=' "CONFIG_APT_DEBIAN_MIRROR=$INPUT_MODE_VALUE" /boot/dietpi.txt
 
 		fi
 
@@ -257,23 +238,27 @@ _EOF_
 	}
 
 	#/////////////////////////////////////////////////////////////////////////////////////
-	# Set NTPD Mode
+	# Set time sync mode
 	# NB: Also sets mirror as defined in dietpi.txt CONFIG_NTP_MIRROR
 	#/////////////////////////////////////////////////////////////////////////////////////
 	NtpdMode_Main(){
 
-		if G_CHECK_VALIDINT "$INPUT_MODE_VALUE" 0 4; then
+		if [[ ! $INPUT_MODE_VALUE || $INPUT_MODE_VALUE == [01234] ]]; then
 
-			# Reset global to disabled, prevents run_ntpd in dietpi-software
+			# If no input given, re-apply current dietpi.txt setting, else revert to default mode 2
+			[[ $INPUT_MODE_VALUE ]] || INPUT_MODE_VALUE=$(sed -n '/^[[:blank:]]*CONFIG_NTP_MODE=/{s/^[^=]*=//p;q}' /boot/dietpi.txt)
+			[[ $INPUT_MODE_VALUE ]] || INPUT_MODE_VALUE=2
+
+			# Disable temporarily, prevents run_ntpd in dietpi-software
 			sed -i '/CONFIG_NTP_MODE=/c\CONFIG_NTP_MODE=0' /boot/dietpi.txt
 
 			local ntp_mirror=$(sed -n '/^[[:blank:]]*CONFIG_NTP_MIRROR=/{s/^[^=]*=//p;q}' /boot/dietpi.txt)
 			[[ $ntp_mirror ]] || ntp_mirror='default'
 
-			# Gateway, auto detect local gateway(s) (router) to use as NTP server.
+			# Gateway, auto detect local gateway(s)/router(s) to use as NTP server(s).
 			if [[ ${ntp_mirror,,} == 'gateway' ]]; then
 
-				# NB: Convert output to single line via ORS, remove trailing space afterwards
+				# Convert mawk output to single line via ORS, remove trailing space afterwards
 				local gateway=$(ip r l 0/0 | mawk '{print $3}' ORS=' '); gateway=${gateway% }
 				if [[ $gateway ]]; then
 
@@ -293,14 +278,13 @@ _EOF_
 			# Default, lets timesyncd use DHCP server or fallback to debian.pool.ntp.org.
 			if [[ ${ntp_mirror,,} == 'default' ]]; then
 
-				[[ -f '/etc/systemd/timesyncd.conf' ]] && rm /etc/systemd/timesyncd.conf
+				[[ -f '/etc/systemd/timesyncd.conf' ]] && G_EXEC rm /etc/systemd/timesyncd.conf
 
 			else
 
 				local i ntp_mirror_entry
 				for i in $ntp_mirror
 				do
-
 					if [[ $i == *'pool.ntp.org' ]]; then
 
 						ntp_mirror_entry+="0.$i 1.$i 2.$i 3.$i "
@@ -310,11 +294,10 @@ _EOF_
 						ntp_mirror_entry+="$i "
 
 					fi
-
 				done
 
 				# Set mirror
-				echo -e "[Time]\nServers=${ntp_mirror_entry% }" > /etc/systemd/timesyncd.conf
+				echo -e "[Time]\nNTP=${ntp_mirror_entry% }" > /etc/systemd/timesyncd.conf
 
 			fi
 
@@ -332,7 +315,7 @@ _EOF_
 
 			fi
 
-			# Update DietPi.txt
+			# Update dietpi.txt
 			G_CONFIG_INJECT 'CONFIG_NTP_MODE=' "CONFIG_NTP_MODE=$INPUT_MODE_VALUE" /boot/dietpi.txt
 
 		else
@@ -351,15 +334,23 @@ _EOF_
 		if [[ $INPUT_MODE_VALUE == 'eth_dhcp' ]]; then
 
 			G_CONFIG_INJECT 'iface eth' 'iface eth0 inet dhcp' /etc/network/interfaces
-			sed -i '0,/^.*dns-nameservers .*$/s//#dns-nameservers 8.8.8.8/' /etc/network/interfaces
+			sed -i '0,/^.*dns-nameservers[[:blank:]].*$/s//#dns-nameservers 9.9.9.9 149.112.112.112/' /etc/network/interfaces
 
 		elif [[ $INPUT_MODE_VALUE == 'eth_static' ]]; then
 
 			G_CONFIG_INJECT 'iface eth' 'iface eth0 inet static' /etc/network/interfaces
-			G_CONFIG_INJECT 'address ' "address $INPUT_ADDITIONAL_1" /etc/network/interfaces '^[[:blank:]]*iface eth0'
-			G_CONFIG_INJECT 'gateway ' "gateway $INPUT_ADDITIONAL_2" /etc/network/interfaces '^[[:blank:]]*address'
-			G_CONFIG_INJECT 'netmask ' "netmask $INPUT_ADDITIONAL_3" /etc/network/interfaces '^[[:blank:]]*gateway'
-			G_CONFIG_INJECT 'dns-nameservers ' "dns-nameservers $INPUT_ADDITIONAL_4" /etc/network/interfaces '^[[:blank:]]*netmask'
+			sed -i "0,\|^.*address[[:blank:]].*\$|s||address $INPUT_ADDITIONAL_1|" /etc/network/interfaces
+			sed -i "0,\|^.*gateway[[:blank:]].*\$|s||gateway $INPUT_ADDITIONAL_2|" /etc/network/interfaces
+			sed -i "0,\|^.*netmask[[:blank:]].*\$|s||netmask $INPUT_ADDITIONAL_3|" /etc/network/interfaces
+			if command -v resolvconf > /dev/null
+			then
+				sed -i "0,\|^.*dns-nameservers[[:blank:]].*\$|s||dns-nameservers $INPUT_ADDITIONAL_4|" /etc/network/interfaces
+			else
+				sed -i "0,\|^.*dns-nameservers[[:blank:]].*\$|s||#dns-nameservers $INPUT_ADDITIONAL_4|" /etc/network/interfaces
+				> /etc/resolv.conf
+				local i
+				for i in $INPUT_ADDITIONAL_4; do echo "nameserver $i" >> /etc/resolv.conf; done
+			fi
 
 		else
 
@@ -376,7 +367,7 @@ _EOF_
 
 		if [[ $INPUT_MODE_VALUE ]]; then
 
-			mkdir -p /home # Failsafe
+			G_EXEC mkdir -p /home # Failsafe
 
 			# Get global password
 			local pbkdf2=()
@@ -392,20 +383,21 @@ _EOF_
 				GLOBAL_PW=$(sed -n '/^[[:blank:]]*AUTO_SETUP_GLOBAL_PASSWORD=/{s/^[^=]*=//p;q}' /boot/dietpi.txt)
 
 			fi
+			# - Fallback
 			[[ $GLOBAL_PW ]] || GLOBAL_PW='dietpi'
 
 			local usercmd='useradd -m'
 			getent passwd "$INPUT_MODE_VALUE" > /dev/null && usercmd='usermod'
 			$usercmd "$INPUT_MODE_VALUE" -p "$GLOBAL_PW" -s /bin/bash
 
-			# Copy existing profile/bashrc
-			cp /root/.profile /home/"$INPUT_MODE_VALUE"/
-			cp /root/.bashrc /home/"$INPUT_MODE_VALUE"/
+			# Copy root profile/bashrc
+			[[ -f '/root/.profile' ]] && G_EXEC cp /root/.profile "/home/$INPUT_MODE_VALUE/"
+			[[ -f '/root/.bashrc' ]] && G_EXEC cp /root/.bashrc "/home/$INPUT_MODE_VALUE/"
 
-			chown -R "$INPUT_MODE_VALUE:$INPUT_MODE_VALUE" /home/"$INPUT_MODE_VALUE"
+			G_EXEC chown -R "$INPUT_MODE_VALUE:$INPUT_MODE_VALUE" "/home/$INPUT_MODE_VALUE"
 
 			# Allow sudo without pw
-			echo "$INPUT_MODE_VALUE ALL=NOPASSWD: ALL" > /etc/sudoers.d/"$INPUT_MODE_VALUE"
+			echo "$INPUT_MODE_VALUE ALL=(ALL:ALL) NOPASSWD: ALL" > "/etc/sudoers.d/$INPUT_MODE_VALUE"
 
 		else
 
@@ -420,11 +412,10 @@ _EOF_
 		if [[ $INPUT_MODE_VALUE ]]; then
 
 			# Delete $INPUT_MODE_VALUE
-			userdel -rf "$INPUT_MODE_VALUE"
+			getent passwd "$INPUT_MODE_VALUE" > /dev/null && G_EXEC userdel -rf "$INPUT_MODE_VALUE"
 
 			# Remove from sudoers
-			[[ -f /etc/sudoers.d/$INPUT_MODE_VALUE ]] && rm /etc/sudoers.d/"$INPUT_MODE_VALUE"
-			sed -i "/^${INPUT_MODE_VALUE}[[:blank:]]/d" /etc/sudoers.d/dietpi # pre-v6.29
+			[[ -f /etc/sudoers.d/$INPUT_MODE_VALUE ]] && G_EXEC rm "/etc/sudoers.d/$INPUT_MODE_VALUE"
 
 		else
 
@@ -446,36 +437,25 @@ _EOF_
 		[[ -d '/DietPi' && $(readlink -f '/DietPi') != '/boot' ]] && return 0
 
 		# Add missing entries with dietpi.txt from Git
-		local url="https://raw.githubusercontent.com/$G_GITOWNER/DietPi/$G_GITBRANCH/dietpi.txt"
-		if G_CHECK_URL "$url"; then
+		G_EXEC_DESC='Downloading current dietpi.txt' G_EXEC curl -sSfL "https://raw.githubusercontent.com/$G_GITOWNER/DietPi/$G_GITBRANCH/dietpi.txt" -o dietpi.txt_patch
 
-			G_DIETPI-NOTIFY -2 'Channing dietpi.txt for missing entries'
-			G_EXEC_DESC='Downloading current dietpi.txt' G_EXEC wget "$url" -O dietpi.txt_patch
-			sed -Ei '/^[[:blank:]]*(#|$)/d' dietpi.txt_patch
+		# Remove empty and commented lines
+		sed -Ei '/^[[:blank:]]*(#|$)/d' dietpi.txt_patch
 
-			local entry value
-			while read -r line
-			do
+		local line entry value
+		while read -r line
+		do
+			entry=${line%%=*} # X=*
+			value=${line#*=}  # *=X
 
-				value=${line#*=}  # *=X
-				entry=${line%%=*} # X=*
-				if ! grep -qi "^[[:blank:]]*$entry=" /boot/dietpi.txt; then
+			# Entry exists already, continue with next line
+			grep -q "^[[:blank:]]*$entry=" /boot/dietpi.txt && continue
 
-					G_DIETPI-NOTIFY 2 "Updating dietpi.txt with new entry: $entry=$value"
-					echo "$entry=$value" >> /boot/dietpi.txt
+			# Entry does not exist yet, add it transparently via G_CONFIG_INJECT
+			G_CONFIG_INJECT "$entry=" "$entry=$value" /boot/dietpi.txt
 
-				fi
-
-			done < dietpi.txt_patch
-			rm dietpi.txt_patch
-
-			G_DIETPI-NOTIFY 0 'dietpi.txt verification completed'
-
-		else
-
-			G_DIETPI-NOTIFY 1 "Failed to verify dietpi.txt, $url is offline or inaccessible"
-
-		fi
+		done < dietpi.txt_patch
+		rm dietpi.txt_patch
 
 	}
 
@@ -488,6 +468,7 @@ _EOF_
 
 			pw_dietpi_software=$INPUT_MODE_VALUE
 			pw_root_dietpi_users=$INPUT_MODE_VALUE
+			INPUT_MODE_VALUE=${INPUT_MODE_VALUE//?/*}
 
 		# Prompt to change
 		else
@@ -517,18 +498,18 @@ It is highly recommended to change this password, ideally, it should be differen
 		# Apply | dietpi-software PW
 		if [[ $pw_dietpi_software ]]; then
 
-			# - Nullify automated PW
-			G_CONFIG_INJECT 'AUTO_SETUP_GLOBAL_PASSWORD=' 'AUTO_SETUP_GLOBAL_PASSWORD=Password has been encrypted and secured on rootFS' /boot/dietpi.txt
+			# Nullify automated PW
+			grep -q '^[[:blank:]]*AUTO_SETUP_GLOBAL_PASSWORD=' /boot/dietpi.txt && G_EXEC sed -i '/^[[:blank:]]*AUTO_SETUP_GLOBAL_PASSWORD=/c\#AUTO_SETUP_GLOBAL_PASSWORD= # Password has been encrypted and saved to rootfs' /boot/dietpi.txt
 
-			mkdir -p /var/lib/dietpi/dietpi-software # Should already exist, failsafe
+			G_EXEC mkdir -p /var/lib/dietpi/dietpi-software # Should already exist, failsafe
 
-			# - Use new "pbkdf2" function on Buster to resolve warning about deprecated key derivation used: https://github.com/MichaIng/DietPi/issues/2213
+			# Use new "pbkdf2" function on Buster to resolve warning about deprecated key derivation used: https://github.com/MichaIng/DietPi/issues/2213
 			local pbkdf2=()
 			(( $G_DISTRO > 4 )) && pbkdf2=('-iter' '10000')
-			openssl enc -e -a -md sha256 -aes-256-cbc "${pbkdf2[@]}" -salt -pass pass:'DietPiRocks!' -out /var/lib/dietpi/dietpi-software/.GLOBAL_PW.bin <<< $pw_dietpi_software
+			openssl enc -e -a -md sha256 -aes-256-cbc "${pbkdf2[@]}" -salt -pass pass:'DietPiRocks!' -out /var/lib/dietpi/dietpi-software/.GLOBAL_PW.bin <<< "$pw_dietpi_software"
 
-			chown root:root /var/lib/dietpi/dietpi-software/.GLOBAL_PW.bin
-			chmod 600 /var/lib/dietpi/dietpi-software/.GLOBAL_PW.bin
+			G_EXEC chown root:root /var/lib/dietpi/dietpi-software/.GLOBAL_PW.bin
+			G_EXEC chmod 0600 /var/lib/dietpi/dietpi-software/.GLOBAL_PW.bin
 
 			G_DIETPI-NOTIFY 2 'Global software password successfully changed'
 
@@ -539,7 +520,7 @@ It is highly recommended to change this password, ideally, it should be differen
 
 			chpasswd <<< "root:$pw_root_dietpi_users"
 			chpasswd <<< "dietpi:$pw_root_dietpi_users"
-			G_DIETPI-NOTIFY 2 '"root" and "dietpi" login password successfully changed'
+			G_DIETPI-NOTIFY 2 '"root" and "dietpi" login passwords successfully changed'
 
 		fi
 
@@ -550,7 +531,7 @@ It is highly recommended to change this password, ideally, it should be differen
 	#/////////////////////////////////////////////////////////////////////////////////////
 	#-----------------------------------------------------------------------------------
 	# Info
-	G_DIETPI-NOTIFY 3 "$G_PROGRAM_NAME" "$INPUT_MODE_NAME ($INPUT_MODE_VALUE)"
+	G_DIETPI-NOTIFY 3 "$G_PROGRAM_NAME" "$INPUT_MODE_NAME${INPUT_MODE_VALUE:+ ($INPUT_MODE_VALUE)}"
 	#-----------------------------------------------------------------------------------
 	if [[ $INPUT_MODE_NAME == 'apt-mirror' ]]; then
 
