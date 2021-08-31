@@ -11,7 +11,7 @@
 	# Info:
 	# - Location: /boot/dietpi/dietpi-software
 	# - Installs "ready to run" software with optimisations unique to the device.
-	# - Generates and uses /boot/dietpi/.installed (software list) # -1=selected for uninstall, 0=not installed, 1=selected for install, 2=installed
+	# - Generates and uses /boot/dietpi/.installed listing installed software.
 	USAGE='
 Usage: dietpi-software [<command> [<software_id>...]]
 Available commands:
@@ -43,7 +43,7 @@ Available commands:
 		# Save installed states
 		for i in "${!aSOFTWARE_NAME[@]}"
 		do
-			# Save pending states (1/-1) or invalid states as not installed (0)
+			# Don't save pending or uninstalled states (-1/0/1)
 			if (( ${aSOFTWARE_INSTALL_STATE[$i]} == 2 )); then
 
 				install_states+="aSOFTWARE_INSTALL_STATE[$i]=2
@@ -82,28 +82,23 @@ INDEX_DESKTOP_TARGET=$INDEX_DESKTOP_TARGET
 INDEX_BROWSER_CURRENT=$INDEX_BROWSER_CURRENT
 INDEX_BROWSER_TARGET=$INDEX_BROWSER_TARGET"
 
-		echo -e "$install_states" > $FP_INSTALLED_FILE
+		echo "$install_states" > $FP_INSTALLED_FILE
 
 	}
 
 	Read_InstallFileList(){
 
-		G_DIETPI-NOTIFY -2 'Reading database'
-
-		# Load
-		[[ -f $FP_INSTALLED_FILE ]] && . $FP_INSTALLED_FILE
-
-		G_DIETPI-NOTIFY 0 'Reading database'
+		[[ -f $FP_INSTALLED_FILE ]] && G_EXEC_DESC 'Reading database' G_EXEC . $FP_INSTALLED_FILE
 
 	}
 
-	Check_Internet_and_NTPD(){
+	Check_Net_and_Time_sync(){
 
-		# Checking network connectivity
+		# Check network connectivity
 		# shellcheck disable=SC2119
 		G_CHECK_CON
 
-		# Checking DNS resolver
+		# Check DNS resolver
 		# shellcheck disable=SC2119
 		G_CHECK_DNS
 
@@ -115,11 +110,42 @@ INDEX_BROWSER_TARGET=$INDEX_BROWSER_TARGET"
 	#/////////////////////////////////////////////////////////////////////////////////////
 	# Installation System
 	#/////////////////////////////////////////////////////////////////////////////////////
+	# Run Install flag to trigger Run_Installations()
+	GOSTARTINSTALL=0
+
+	# Run uninstall flag, used in software installs + removals to trigger Uninstall_Software()
+	UNINSTALL_REQUIRED=0
+
+	# Choices made flag
+	INSTALL_SOFTWARE_CHOICESMADE=0
+
+	# DietPi Choice System
+	# - SSH Server
+	INSTALL_SSHSERVER_CHOICESMADE=0
+	INDEX_SSHSERVER_CURRENT=-1
+	INDEX_SSHSERVER_TARGET=-1
+	# - Fileserver
+	INSTALL_FILESERVER_CHOICESMADE=0
+	INDEX_FILESERVER_CURRENT=0
+	INDEX_FILESERVER_TARGET=0
+	# - Logging
+	INSTALL_LOGGING_CHOICESMADE=0
+	INDEX_LOGGING_CURRENT=-1
+	INDEX_LOGGING_TARGET=-1
+
+	# DietPi Preference System
+	# - Webserver
+	INDEX_WEBSERVER_CURRENT=-2
+	INDEX_WEBSERVER_TARGET=-2
+	# - Desktop
+	INDEX_DESKTOP_CURRENT=0
+	INDEX_DESKTOP_TARGET=0
+	# - Browser
+	INDEX_BROWSER_CURRENT=-1
+	INDEX_BROWSER_TARGET=-1
+
 	# Since no automated reboot is done anymore after installs, collect services to start manually, when not controlled by DietPi-Services
 	aSTART_SERVICES=()
-
-	# Uninstall flag, used in software installations + removals, runs Uninstall_Software()
-	UNINSTALL_REQUIRED=0
 
 	# Global password for software installs
 	GLOBAL_PW=
@@ -166,20 +192,15 @@ INDEX_BROWSER_TARGET=$INDEX_BROWSER_TARGET"
 	}
 
 	# Total physical system RAM: Used to calculate percentage based value for software cache limits, e.g.: OPcache/APCu
-	RAM_PHYS=$(free -m | mawk '/^Mem:/{print $2;exit}')
+	readonly RAM_PHYS=$(free -m | mawk '/^Mem:/{print $2;exit}')
 	# Total RAM + swap space: Used to estimate whether the swap file size needs to be increased.
-	RAM_TOTAL=$(free -tm | mawk '/^Total:/{print $2;exit}')
+	readonly RAM_TOTAL=$(free -tm | mawk '/^Total:/{print $2;exit}')
 
-	# Run Installation Flag (1 = run installs)
-	GOSTARTINSTALL=0
-
-	# Temporary placeholder variables
-	INSTALL_URL_ADDRESS=
-	UNINSTALL_URL_ADDRESS=
+	# Variable used to pass APT package dependencies to Download_Install()
 	DEPS_LIST=
 
-	# Special installation vars
-	WIREGUARD_BUILTIN=0 # Is the WireGuard kernel module natively shipped by the kernel package?
+	# Is the WireGuard kernel module natively shipped by the kernel package?
+	WIREGUARD_BUILTIN=0
 
 	# PHP version specific directories, APT package-, module- and command names
 	PHP_NAME='php7.3'
@@ -190,34 +211,6 @@ INDEX_BROWSER_TARGET=$INDEX_BROWSER_TARGET"
 		FP_PHP_BASE_DIR='/etc/php/7.4'
 
 	fi
-
-	# Choices made?
-	INSTALL_SOFTWARE_CHOICESMADE=0
-
-	# DietPi Choice System
-	# - SSH Server
-	INSTALL_SSHSERVER_CHOICESMADE=0
-	INDEX_SSHSERVER_CURRENT=-1
-	INDEX_SSHSERVER_TARGET=-1
-	# - Fileserver
-	INSTALL_FILESERVER_CHOICESMADE=0
-	INDEX_FILESERVER_CURRENT=0
-	INDEX_FILESERVER_TARGET=0
-	# - Logging
-	INSTALL_LOGGING_CHOICESMADE=0
-	INDEX_LOGGING_CURRENT=-1
-	INDEX_LOGGING_TARGET=-1
-
-	# DietPi Preference System
-	# - Webserver
-	INDEX_WEBSERVER_CURRENT=-2
-	INDEX_WEBSERVER_TARGET=-2
-	# - Desktop
-	INDEX_DESKTOP_CURRENT=0
-	INDEX_DESKTOP_TARGET=0
-	# - Browser
-	INDEX_BROWSER_CURRENT=-1
-	INDEX_BROWSER_TARGET=-1
 
 	# Available for (need to match highest value in dietpi-obtain_hw_model)
 	readonly MAX_G_HW_MODEL=73
@@ -3227,9 +3220,9 @@ unix_socket_directories = '/run/postgresql'" > "$i/00dietpi.conf"
 			[[ $G_HW_ARCH != [12] || -f '/etc/pip.conf' ]] || G_EXEC eval "echo -e '[global]\nextra-index-url=https://www.piwheels.org/simple/' > /etc/pip.conf"
 
 			# Perform pip3 installation
-			INSTALL_URL_ADDRESS='https://bootstrap.pypa.io/pip/get-pip.py'
-			(( $G_DISTRO > 4 )) || INSTALL_URL_ADDRESS='https://bootstrap.pypa.io/pip/3.5/get-pip.py' # https://pip.pypa.io/en/stable/news/#id1
-			DEPS_LIST='python3-dev' Download_Install "$INSTALL_URL_ADDRESS"
+			local url='https://bootstrap.pypa.io/pip/get-pip.py'
+			(( $G_DISTRO > 4 )) || url='https://bootstrap.pypa.io/pip/3.5/get-pip.py' # https://pip.pypa.io/en/stable/news/#id1
+			DEPS_LIST='python3-dev' Download_Install "$url"
 			G_EXEC_OUTPUT=1 G_EXEC python3 ./get-pip.py
 			G_EXEC_NOHALT=1 G_EXEC rm get-pip.py
 
@@ -3687,12 +3680,12 @@ _EOF_
 				# Debian (+sury.org) armhf is not ARMv6 compatible: https://github.com/MichaIng/DietPi/issues/2794
 				if (( $G_HW_ARCH < 2 )); then
 
-					INSTALL_URL_ADDRESS='http://raspbian.raspberrypi.org/raspbian/'
+					local url='http://raspbian.raspberrypi.org/raspbian/'
 					# Actually we do not support any non-RPi ARMv6 devices currently, but lets be failsafe here
-					(( $G_HW_MODEL > 9 )) && INSTALL_URL_ADDRESS='https://deb.debian.org/debian/'
+					(( $G_HW_MODEL > 9 )) && url='https://deb.debian.org/debian/'
 
 					# APT source
-					echo "deb $INSTALL_URL_ADDRESS buster main" > /etc/apt/sources.list.d/dietpi-php.list
+					echo "deb $url buster main" > /etc/apt/sources.list.d/dietpi-php.list
 					# Set priority for Buster: No auto install but auto upgrade
 					echo -e '# Allow to install PHP7.3 dependencies and meta packages from Buster
 # - Lighttpd must be pulled as well from Buster since the Stretch version does not support Buster libssl1.1 (1.1.1)
@@ -3763,7 +3756,7 @@ Package: openssl libssl*\nPin: origin packages.sury.org\nPin-Priority: -1' > /et
 			# Quick install: https://docs.phpmyadmin.net/en/latest/setup.html#quick-install
 			# - Get latest version name
 			local version=$(curl -sSfL 'https://api.github.com/repos/phpmyadmin/phpmyadmin/releases/latest' | mawk -F\" '/"name": /{print $4}')
-			[[ $version ]] || { version='5.0.4'; G_DIETPI-NOTIFY 1 "Automatic latest ${aSOFTWARE_NAME[$software_id]} version detection failed. Version \"$version\" will be installed as fallback, but a newer version might be available. Please report this at: https://github.com/MichaIng/DietPi/issues"; }
+			[[ $version ]] || { version='5.1.1'; G_DIETPI-NOTIFY 1 "Automatic latest ${aSOFTWARE_NAME[$software_id]} version detection failed. Version \"$version\" will be installed as fallback, but a newer version might be available. Please report this at: https://github.com/MichaIng/DietPi/issues"; }
 			Download_Install "https://files.phpmyadmin.net/phpMyAdmin/$version/phpMyAdmin-$version-english.tar.gz"
 			# - Reinstall: Clean install but preserve existing config file
 			[[ -f '/var/www/phpmyadmin/config.inc.php' ]] && G_EXEC mv /var/www/phpmyadmin/config.inc.php "phpMyAdmin-$version-english/"
@@ -4224,24 +4217,21 @@ _EOF_
 
 			Banner_Installing
 
-			# x86_64
-			if (( $G_HW_ARCH == 10 )); then
-
-				INSTALL_URL_ADDRESS='https://download.roonlabs.com/builds/RoonBridge_linuxx64.tar.bz2'
+			# ARMv7
+			local url='https://download.roonlabs.com/builds/RoonBridge_linuxarmv7hf.tar.bz2'
 
 			# ARMv8
-			elif (( $G_HW_ARCH == 3 )); then
+			if (( $G_HW_ARCH == 3 ))
+			then
+				url='https://download.roonlabs.com/builds/RoonBridge_linuxarmv8.tar.bz2'
 
-				INSTALL_URL_ADDRESS='https://download.roonlabs.com/builds/RoonBridge_linuxarmv8.tar.bz2'
-
-			# ARMv7
-			else
-
-				INSTALL_URL_ADDRESS='https://download.roonlabs.com/builds/RoonBridge_linuxarmv7hf.tar.bz2'
-
+			# x86_64
+			elif (( $G_HW_ARCH == 10 ))
+			then
+				url='https://download.roonlabs.com/builds/RoonBridge_linuxx64.tar.bz2'
 			fi
 
-			Download_Install "$INSTALL_URL_ADDRESS"
+			Download_Install "$url"
 
 			# Clear dir on reinstall
 			[[ -d '/etc/roonbridge' ]] && G_EXEC rm -R /etc/roonbridge
@@ -4255,33 +4245,30 @@ _EOF_
 			Banner_Installing
 
 			# ARMv6
-			if (( $G_HW_ARCH == 1 )); then
-
-				INSTALL_URL_ADDRESS='https://dietpi.com/downloads/binaries/all/cava_0.6.1-1_armv6.deb'
+			local url='https://dietpi.com/downloads/binaries/all/cava_0.6.1-1_armv6.deb'
 
 			# ARMv7
-			elif (( $G_HW_ARCH == 2 )); then
+			if (( $G_HW_ARCH == 2 )); then
 
-				INSTALL_URL_ADDRESS='https://dietpi.com/downloads/binaries/all/cava_0.6.1-1_armv7.deb'
+				url='https://dietpi.com/downloads/binaries/all/cava_0.6.1-1_armv7.deb'
 
 			# ARMv8
 			elif (( $G_HW_ARCH == 3 )); then
 
-				INSTALL_URL_ADDRESS='https://dietpi.com/downloads/binaries/all/cava_0.6.1-1_arm64.deb'
+				url='https://dietpi.com/downloads/binaries/all/cava_0.6.1-1_arm64.deb'
 				# Using older binary for Odroid C2 due to: https://github.com/MichaIng/DietPi/issues/1340#issuecomment-393225267
-				(( $G_HW_MODEL == 12 )) && INSTALL_URL_ADDRESS='https://dietpi.com/downloads/binaries/all/cava_0.4.2_arm64.deb'
+				(( $G_HW_MODEL == 12 )) && url='https://dietpi.com/downloads/binaries/all/cava_0.4.2_arm64.deb'
 
 			# x86_64
 			elif (( $G_HW_ARCH == 10 )); then
 
-				INSTALL_URL_ADDRESS='https://dietpi.com/downloads/binaries/all/cava_0.6.1-1_amd64.deb'
+				url='https://dietpi.com/downloads/binaries/all/cava_0.6.1-1_amd64.deb'
 
 			fi
 
-			G_THREAD_START curl -sSfL https://dietpi.com/downloads/binaries/all/cava.psf -o /root/cava.psf # + Font for cava, nice bars
+			G_THREAD_START curl -sSfL 'https://dietpi.com/downloads/binaries/all/cava.psf' -o /root/cava.psf # Font for nice bars
 
-			DEPS_LIST='libpulse0 libfftw3-3 libncursesw5'
-			Download_Install "$INSTALL_URL_ADDRESS"
+			DEPS_LIST='libpulse0 libfftw3-3 libncursesw5' Download_Install "$url"
 
 		fi
 
@@ -4297,10 +4284,12 @@ _EOF_
 			# Official repo does not support ARMv8 + Stretch, using distro repo instead: https://github.com/mopidy/apt/tree/master/dists/stretch/main
 			if (( $G_HW_ARCH != 3 || $G_DISTRO > 4 )); then
 
-				INSTALL_URL_ADDRESS='https://apt.mopidy.com/mopidy.gpg'
-				G_CHECK_URL "$INSTALL_URL_ADDRESS"
-				curl -sSfL "$INSTALL_URL_ADDRESS" | apt-key add -
-				# No bullseye.list available yet, use buster.list instead: https://github.com/mopidy/apt/tree/master/dists
+				# APT key
+				local url='https://apt.mopidy.com/mopidy.gpg'
+				G_CHECK_URL "$url"
+				G_EXEC eval "curl -sSLf '$url' | gpg --dearmor -o /etc/apt/trusted.gpg.d/dietpi-mopidy.gpg --yes"
+
+				# APT list
 				G_EXEC curl -sSfL "https://apt.mopidy.com/${G_DISTRO_NAME/bullseye/buster}.list" -o /etc/apt/sources.list.d/mopidy.list
 				G_AGUP
 
@@ -4310,14 +4299,14 @@ _EOF_
 			if (( $G_DISTRO < 5 )); then
 
 				G_AGI mopidy gstreamer1.0-alsa python-pip python-dev
-				pip2 install -U pip setuptools wheel
-				pip2 install -U Mopidy-MusicBox-Webclient Mopidy-Local-Images
+				G_EXEC_OUTPUT=1 G_EXEC pip2 install -U pip setuptools wheel
+				G_EXEC_OUTPUT=1 G_EXEC pip2 install -U Mopidy-MusicBox-Webclient Mopidy-Local-Images
 
 			# Buster+: Mopidy v3, pip3 (ID=130) and mopidy-local: https://mopidy.com/ext/local/
 			else
 
 				G_AGI mopidy gstreamer1.0-alsa mopidy-local
-				pip3 install -U Mopidy-MusicBox-Webclient
+				G_EXEC_OUTPUT=1 G_EXEC pip3 install -U Mopidy-MusicBox-Webclient
 
 			fi
 
@@ -4522,37 +4511,35 @@ amvdec_vp9' > /etc/modules-load.d/dietpi-c4-kodi.conf
 			Banner_Installing
 
 			# Grab latest version
-			INSTALL_URL_ADDRESS='https://hndl.urbackup.org/Server/latest'
-			G_CHECK_URL "$INSTALL_URL_ADDRESS"
+			local url='https://hndl.urbackup.org/Server/latest'
+			G_CHECK_URL "$url"
 
 			# Latest known version
 			local latest='2.4.13'
 
 			# ARMv7
-			if (( $G_HW_ARCH == 2 )); then
+			local fallback_url="https://hndl.urbackup.org/Server/$latest/urbackup-server_${latest}_armhf.deb"
+			local file=$(curl -sfL "$url" | grep -m1 'urbackup-server_.*_armhf\.deb' | cut -d \" -f 8)
 
-				local fallback_url="https://hndl.urbackup.org/Server/$latest/urbackup-server_${latest}_armhf.deb"
-				local file=$(curl -sfL "$INSTALL_URL_ADDRESS" | grep -m1 'urbackup-server_.*_armhf\.deb' | cut -d \" -f 8)
+			# ARMv8
+			if (( $G_HW_ARCH == 3 )); then
+
+				fallback_url="https://hndl.urbackup.org/Server/$latest/urbackup-server_${latest}_arm64.deb"
+				file=$(curl -sfL "$url" | grep -m1 'urbackup-server-.*_arm64\.deb' | cut -d \" -f 8)
 
 			# x86_64
 			elif (( $G_HW_ARCH == 10 )); then
 
-				local fallback_url="https://hndl.urbackup.org/Server/$latest/urbackup-server_${latest}_amd64.deb"
-				local file=$(curl -sfL "$INSTALL_URL_ADDRESS" | grep -m1 'urbackup-server_.*_amd64\.deb' | cut -d \" -f 8)
-
-			# ARMv8
-			elif (( $G_HW_ARCH == 3 )); then
-
-				local fallback_url="https://hndl.urbackup.org/Server/$latest/urbackup-server_${latest}_arm64.deb"
-				local file=$(curl -sfL "$INSTALL_URL_ADDRESS" | grep -m1 'urbackup-server-.*_arm64\.deb' | cut -d \" -f 8)
+				fallback_url="https://hndl.urbackup.org/Server/$latest/urbackup-server_${latest}_amd64.deb"
+				file=$(curl -sfL "$url" | grep -m1 'urbackup-server_.*_amd64\.deb' | cut -d \" -f 8)
 
 			fi
 
-			[[ $file ]] && INSTALL_URL_ADDRESS="$INSTALL_URL_ADDRESS/$file" || INSTALL_URL_ADDRESS=$fallback_url
-			unset file fallback_url
+			[[ $file ]] && url="$url/$file" || url=$fallback_url
+			unset -v file fallback_url
 
 			debconf-set-selections <<< 'urbackup-server urbackup/backuppath string /mnt/dietpi_userdata/urbackup'
-			Download_Install "$INSTALL_URL_ADDRESS"
+			Download_Install "$url"
 
 		fi
 
@@ -4630,12 +4617,12 @@ amvdec_vp9' > /etc/modules-load.d/dietpi-c4-kodi.conf
 			Banner_Installing
 
 			# APT key
-			INSTALL_URL_ADDRESS='https://webmin.com/jcameron-key.asc'
-			G_CHECK_URL "$INSTALL_URL_ADDRESS"
-			G_EXEC eval "curl -sSLf '$INSTALL_URL_ADDRESS' | gpg --dearmor -o /etc/apt/trusted.gpg.d/dietpi-webmin.gpg --yes"
+			local url='https://webmin.com/jcameron-key.asc'
+			G_CHECK_URL "$url"
+			G_EXEC eval "curl -sSLf '$url' | gpg --dearmor -o /etc/apt/trusted.gpg.d/dietpi-webmin.gpg --yes"
 
 			# APT list
-			echo 'deb https://download.webmin.com/download/repository/ sarge contrib' > /etc/apt/sources.list.d/webmin.list
+			G_EXEC eval "echo 'deb https://download.webmin.com/download/repository/ sarge contrib' > /etc/apt/sources.list.d/webmin.list"
 			G_AGUP
 
 			# APT package
@@ -4976,8 +4963,8 @@ _EOF_
 		then
 			Banner_Installing
 
-			INSTALL_URL_ADDRESS='https://raw.githubusercontent.com/pi-hole/pi-hole/master/automated%20install/basic-install.sh'
-			G_CHECK_URL "$INSTALL_URL_ADDRESS"
+			local url='https://raw.githubusercontent.com/pi-hole/pi-hole/master/automated%20install/basic-install.sh'
+			G_CHECK_URL "$url"
 
 			# Check free available memory. Increase swap size to prevent gravity running out of mem.
 			if (( $(free -m | mawk '/^Mem:/{print $7;exit}') < 512 && $(free -m | mawk '/^Swap:/{print $2;exit}') < 512 ))
@@ -5000,7 +4987,7 @@ _EOF_
 			fi
 
 			# Install
-			G_EXEC curl -sSfL "$INSTALL_URL_ADDRESS" -o install.sh
+			G_EXEC curl -sSfL "$url" -o install.sh
 			G_EXEC chmod +x install.sh
 			# - Skip web server install, since we allow to choose and install it prior to Pi-hole
 			# - Skip supported OS check. We do not support Debian testing suite but we are testing it already now.
@@ -5015,30 +5002,28 @@ _EOF_
 			Banner_Installing
 
 			# ARMv6
-			if (( $G_HW_ARCH == 1 )); then
-
-				INSTALL_URL_ADDRESS='https://static.adguard.com/adguardhome/release/AdGuardHome_linux_armv6.tar.gz'
+			local url='https://static.adguard.com/adguardhome/release/AdGuardHome_linux_armv6.tar.gz'
 
 			# ARMv7
-			elif (( $G_HW_ARCH == 2 )); then
+			if (( $G_HW_ARCH == 2 )); then
 
-				INSTALL_URL_ADDRESS='https://static.adguard.com/adguardhome/release/AdGuardHome_linux_armv7.tar.gz'
+				url='https://static.adguard.com/adguardhome/release/AdGuardHome_linux_armv7.tar.gz'
 
 			# ARMv8
 			elif (( $G_HW_ARCH == 3 )); then
 
-				INSTALL_URL_ADDRESS='https://static.adguard.com/adguardhome/release/AdGuardHome_linux_arm64.tar.gz'
+				url='https://static.adguard.com/adguardhome/release/AdGuardHome_linux_arm64.tar.gz'
 
 			# x86_64
 			elif (( $G_HW_ARCH == 10 )); then
 
-				INSTALL_URL_ADDRESS='https://static.adguard.com/adguardhome/release/AdGuardHome_linux_amd64.tar.gz'
+				url='https://static.adguard.com/adguardhome/release/AdGuardHome_linux_amd64.tar.gz'
 
 			fi
 
 			# Deps: apache2-utils is required for htpasswd command to create bcrypt password hashes
 			DEPS_LIST='apache2-utils'
-			Download_Install "$INSTALL_URL_ADDRESS"
+			Download_Install "$url"
 
 			# Install to userdata until it is possible to split binary and data/config without breaking the updater: https://github.com/AdguardTeam/AdGuardHome/issues/3286
 			[[ -d '/mnt/dietpi_userdata/adguardhome' ]] || G_EXEC mkdir -p /mnt/dietpi_userdata/adguardhome
@@ -5248,7 +5233,7 @@ _EOF_
 			fi
 
 			# Download
-			local fallback_url="https://github.com/fatedier/frp/releases/download/v0.37.0/frp_0.37.0_linux_$arch.tar.gz"
+			local fallback_url="https://github.com/fatedier/frp/releases/download/v0.37.1/frp_0.37.1_linux_$arch.tar.gz"
 			local pattern="\"browser_download_url\": .*\/frp_[0-9.]*_linux_$arch\.tar\.gz\""
 			Download_Install "$(curl -sSfL 'https://api.github.com/repos/fatedier/frp/releases/latest' | mawk -v pat="$pattern" -F\" '$0 ~ pat {print $4}')"
 
@@ -5431,9 +5416,9 @@ _EOF_
 			if [[ $G_HW_ARCH != 3 && $G_DISTRO -le 5 ]]; then
 
 				# APT key
-				INSTALL_URL_ADDRESS='https://repo.mosquitto.org/debian/mosquitto-repo.gpg.key'
-				G_CHECK_URL "$INSTALL_URL_ADDRESS"
-				G_EXEC eval "curl -sSLf '$INSTALL_URL_ADDRESS' | gpg --dearmor -o /etc/apt/trusted.gpg.d/dietpi-mosquitto.gpg --yes"
+				local url='https://repo.mosquitto.org/debian/mosquitto-repo.gpg.key'
+				G_CHECK_URL "$url"
+				G_EXEC eval "curl -sSLf '$url' | gpg --dearmor -o /etc/apt/trusted.gpg.d/dietpi-mosquitto.gpg --yes"
 
 				# APT list
 				G_EXEC eval "echo 'deb https://repo.mosquitto.org/debian/ $G_DISTRO_NAME main' > /etc/apt/sources.list.d/dietpi-mosquitto.list"
@@ -5747,12 +5732,12 @@ _EOF_
 			Banner_Installing
 
 			# APT key
-			INSTALL_URL_ADDRESS='https://repos.influxdata.com/influxdb.key'
-			G_CHECK_URL "$INSTALL_URL_ADDRESS"
-			G_EXEC eval "curl -sSLf '$INSTALL_URL_ADDRESS' | gpg --dearmor -o /etc/apt/trusted.gpg.d/dietpi-influxdb.gpg --yes"
+			local url='https://repos.influxdata.com/influxdb.key'
+			G_CHECK_URL "$url"
+			G_EXEC eval "curl -sSLf '$url' | gpg --dearmor -o /etc/apt/trusted.gpg.d/dietpi-influxdb.gpg --yes"
 
 			# APT list
-			echo "deb https://repos.influxdata.com/debian/ ${G_DISTRO_NAME/bookworm/bullseye} stable" > /etc/apt/sources.list.d/influxdb.list
+			G_EXEC eval "echo 'deb https://repos.influxdata.com/debian/ ${G_DISTRO_NAME/bookworm/bullseye} stable' > /etc/apt/sources.list.d/influxdb.list"
 			G_AGUP
 
 			# APT package
@@ -5774,12 +5759,12 @@ _EOF_
 			else
 
 				# APT key
-				INSTALL_URL_ADDRESS='https://packages.grafana.com/gpg.key'
-				G_CHECK_URL "$INSTALL_URL_ADDRESS"
-				G_EXEC eval "curl -sSLf '$INSTALL_URL_ADDRESS' | gpg --dearmor -o /etc/apt/trusted.gpg.d/dietpi-grafana.gpg --yes"
+				local url='https://packages.grafana.com/gpg.key'
+				G_CHECK_URL "$url"
+				G_EXEC eval "curl -sSLf '$url' | gpg --dearmor -o /etc/apt/trusted.gpg.d/dietpi-grafana.gpg --yes"
 
 				# APT list
-				echo 'deb https://packages.grafana.com/oss/deb/ stable main' > /etc/apt/sources.list.d/grafana.list
+				E_EXEC eval "echo 'deb https://packages.grafana.com/oss/deb/ stable main' > /etc/apt/sources.list.d/grafana.list"
 				G_AGUP
 
 				# APT package
@@ -5824,7 +5809,7 @@ _EOF_
 		if (( ${aSOFTWARE_INSTALL_STATE[$software_id]} == 1 )); then
 
 			Banner_Installing
-			local fallback_url='https://github.com/gotson/komga/releases/download/v0.101.2/komga-0.101.2.jar'
+			local fallback_url='https://github.com/gotson/komga/releases/download/v0.120.1/komga-0.120.1.jar'
 			Download_Install "$(curl -sSfL 'https://api.github.com/repos/gotson/komga/releases/latest' | mawk -F\" '/"browser_download_url": .*\/komga-[^"\/]*\.jar"/{print $4}')" /mnt/dietpi_userdata/komga/komga.jar
 
 		fi
@@ -5850,12 +5835,12 @@ _EOF_
 			# Bullseye+
 			if (( $G_DISTRO > 5 ))
 			then
-				local fallback_url='https://github.com/ampache/ampache/releases/download/4.4.2/ampache-4.4.2_all.zip'
+				local fallback_url='https://github.com/ampache/ampache/releases/download/4.4.3/ampache-4.4.3_all.zip'
 				Download_Install "$(curl -sSfL 'https://api.github.com/repos/ampache/ampache/releases/latest' | mawk -F\" '/"browser_download_url": ".*\/ampache-[0-9\.]*_all.zip"/{print $4}')" ampache
 
 			# Ampache v5 requires PHP7.4, hence pull latest Ampache v4 on Buster and below: https://github.com/ampache/ampache/wiki/Ampache-Next-Changes
 			else
-				local fallback_url='https://github.com/ampache/ampache/releases/download/4.4.2/ampache-4.4.2_all.zip'
+				local fallback_url='https://github.com/ampache/ampache/releases/download/4.4.3/ampache-4.4.3_all.zip'
 				Download_Install "$(curl -sSfL 'https://api.github.com/repos/ampache/ampache/releases' | mawk -F\" '/"browser_download_url": ".*\/ampache-4[0-9\.]*_all.zip"/{print $4}' | head -1)" ampache
 			fi
 
@@ -6241,7 +6226,7 @@ Package: wireguard wireguard-dkms wireguard-tools\nPin: release n=bullseye\nPin-
 
 			fi
 
-			local fallback_url="https://github.com/MediaBrowser/Emby.Releases/releases/download/4.6.0.50/emby-server-deb_4.6.0.50_$arch.deb"
+			local fallback_url="https://github.com/MediaBrowser/Emby.Releases/releases/download/4.6.4.0/emby-server-deb_4.6.4.0_$arch.deb"
 			Download_Install "$(curl -sSfL 'https://api.github.com/repos/MediaBrowser/Emby.Releases/releases/latest' | mawk -F\" "/\"browser_download_url\": .*\/emby-server-deb_[^\"\/]*_$arch\.deb\"/{print \$4}")"
 
 		fi
@@ -6251,18 +6236,16 @@ Package: wireguard wireguard-dkms wireguard-tools\nPin: release n=bullseye\nPin-
 
 			Banner_Installing
 
-			# Apply APT key
-			INSTALL_URL_ADDRESS='https://downloads.plex.tv/plex-keys/PlexSign.key'
-			G_CHECK_URL "$INSTALL_URL_ADDRESS"
-			curl -sSfL "$INSTALL_URL_ADDRESS" | apt-key add -
+			# APT key
+			local url='https://downloads.plex.tv/plex-keys/PlexSign.key'
+			G_CHECK_URL "$url"
+			G_EXEC eval "curl -sSLf '$url' | gpg --dearmor -o /etc/apt/trusted.gpg.d/dietpi-plexmediaserver.gpg --yes"
 
-			# Apply APT repo
-			echo 'deb https://downloads.plex.tv/repo/deb/ public main' > /etc/apt/sources.list.d/plexmediaserver.list
-
-			# Update APT lists
+			# APT list
+			G_EXEC eval "echo 'deb https://downloads.plex.tv/repo/deb/ public main' > /etc/apt/sources.list.d/plexmediaserver.list"
 			G_AGUP
 
-			# Install PMS
+			# APT package
 			G_AGI plexmediaserver
 
 		fi
@@ -6272,19 +6255,13 @@ Package: wireguard wireguard-dkms wireguard-tools\nPin: release n=bullseye\nPin-
 
 			Banner_Installing
 
-			# x86_64
-			if (( $G_HW_ARCH == 10 )); then
-
-				INSTALL_URL_ADDRESS='https://download.cuberite.org/linux-x86_64/Cuberite.tar.gz'
-
 			# ARMv6/7/8: https://github.com/cuberite/cuberite/issues/5221
-			else
+			local url='https://download.cuberite.org/linux-armhf-raspbian/Cuberite.tar.gz'
 
-				INSTALL_URL_ADDRESS='https://download.cuberite.org/linux-armhf-raspbian/Cuberite.tar.gz'
+			# x86_64
+			(( $G_HW_ARCH == 10 )) && url='https://download.cuberite.org/linux-x86_64/Cuberite.tar.gz'
 
-			fi
-
-			Download_Install "$INSTALL_URL_ADDRESS" /mnt/dietpi_userdata/cuberite
+			Download_Install "$url" /mnt/dietpi_userdata/cuberite
 
 			# User
 			Create_User -d /mnt/dietpi_userdata/cuberite cuberite
@@ -6324,8 +6301,8 @@ _EOF_
 		then
 			Banner_Installing # https://minecraft.codeemo.com/mineoswiki/index.php?title=MineOS-node_(apt-get)
 
-			INSTALL_URL_ADDRESS='https://github.com/hexparrot/mineos-node.git'
-			G_CHECK_URL "$INSTALL_URL_ADDRESS"
+			local url='https://github.com/hexparrot/mineos-node.git'
+			G_CHECK_URL "$url"
 
 			# APT deps
 			G_AGI python rdiff-backup rsync screen
@@ -6345,7 +6322,7 @@ _EOF_
 					G_EXEC_OUTPUT=1 G_EXEC git merge origin/master
 				fi
 			else
-				G_EXEC_OUTPUT=1 G_EXEC git clone "$INSTALL_URL_ADDRESS" minecraft
+				G_EXEC_OUTPUT=1 G_EXEC git clone "$url" minecraft
 				G_EXEC cd minecraft
 			fi
 
@@ -6368,34 +6345,30 @@ _EOF_
 			Banner_Installing
 
 			# ARMv6: No pre-compiled binaries available, thus we use our own: https://github.com/gogs/gogs/releases
-			if (( $G_HW_ARCH == 1 )); then
-
-				INSTALL_URL_ADDRESS='https://dietpi.com/downloads/binaries/all/gogs_armv6.zip'
+			local url='https://dietpi.com/downloads/binaries/all/gogs_armv6.zip'
 
 			# Else install latest binaries from GitHub
-			else
-
+			if (( $G_HW_MODEL != 1 ))
+			then
 				# ARMv7
 				local arch='armv7'
 
 				# ARMv8
-				if (( $G_HW_ARCH == 3 )); then
-
+				if (( $G_HW_ARCH == 3 ))
+				then
 					arch='armv8'
 
 				# x86_64
-				elif (( $G_HW_ARCH == 10 )); then
-
+				elif (( $G_HW_ARCH == 10 ))
+				then
 					arch='amd64'
-
 				fi
 
 				local fallback_url="https://github.com/gogs/gogs/releases/download/v0.12.3/gogs_0.12.3_linux_$arch.tar.gz"
-				INSTALL_URL_ADDRESS=$(curl -sSfL 'https://api.github.com/repos/gogs/gogs/releases/latest' | mawk -F\" "/\"browser_download_url\": .*\/gogs_[^\"\/]*_linux_$arch.tar.gz\"/{print \$4}")
-
+				url=$(curl -sSfL 'https://api.github.com/repos/gogs/gogs/releases/latest' | mawk -F\" "/\"browser_download_url\": .*\/gogs_[^\"\/]*_linux_$arch.tar.gz\"/{print \$4}")
 			fi
 
-			Download_Install "$INSTALL_URL_ADDRESS"
+			Download_Install "$url"
 
 			# Remove old install dir, but preserve existing configs
 			if [[ -d '/etc/gogs' ]]; then
@@ -6530,7 +6503,7 @@ _EOF_
 
 				fi
 
-				local fallback_url="https://github.com/syncthing/syncthing/releases/download/v1.16.1/syncthing-linux-$arch-v1.16.1.tar.gz"
+				local fallback_url="https://github.com/syncthing/syncthing/releases/download/v1.18.1/syncthing-linux-$arch-v1.18.1.tar.gz"
 				Download_Install "$(curl -sSfL 'https://api.github.com/repos/syncthing/syncthing/releases/latest' | mawk -F\" "/\"browser_download_url\": .*\/syncthing-linux-$arch-[^\"\/]*\.tar\.gz\"/{print \$4}")"
 				G_EXEC mv syncthing-* /opt/syncthing
 
@@ -6611,29 +6584,27 @@ _EOF_
 
 			Banner_Installing
 
-			INSTALL_URL_ADDRESS='https://virtualhere.com/sites/default/files/usbserver/vhusbd'
+			local url='https://virtualhere.com/sites/default/files/usbserver/vhusbd'
 
 			# ARMv6/7
 			if [[ $G_HW_ARCH == [12] ]]; then
 
-				INSTALL_URL_ADDRESS+='arm'
+				url+='arm'
 
 			# ARMv8
 			elif (( $G_HW_ARCH == 3 )); then
 
-				INSTALL_URL_ADDRESS+='arm64'
+				url+='arm64'
 
 			# x86_64
 			elif (( $G_HW_ARCH == 10 )); then
 
-				INSTALL_URL_ADDRESS+='x86_64'
+				url+='x86_64'
 
 			fi
 
-			G_CHECK_URL "$INSTALL_URL_ADDRESS"
-
 			G_EXEC mkdir -p /etc/vhusbd
-			G_EXEC curl -sSfL "$INSTALL_URL_ADDRESS" -o /etc/vhusbd/vhusbd
+			G_EXEC curl -sSfL "$url" -o /etc/vhusbd/vhusbd
 			G_EXEC chmod +x /etc/vhusbd/vhusbd
 
 		fi
@@ -6707,7 +6678,7 @@ _EOF_
 
 			# Download
 			local version=$(curl -sSfL 'https://api.github.com/repos/dani-garcia/vaultwarden/releases/latest' | mawk -F\" '/"tag_name": /{print $4}')
-			[[ $version ]] || { version='1.21.0'; G_DIETPI-NOTIFY 1 "Automatic latest ${aSOFTWARE_NAME[$software_id]} version detection failed. Version \"$version\" will be installed as fallback, but a newer version might be available. Please report this at: https://github.com/MichaIng/DietPi/issues"; }
+			[[ $version ]] || { version='1.22.2'; G_DIETPI-NOTIFY 1 "Automatic latest ${aSOFTWARE_NAME[$software_id]} version detection failed. Version \"$version\" will be installed as fallback, but a newer version might be available. Please report this at: https://github.com/MichaIng/DietPi/issues"; }
 			Download_Install "https://github.com/dani-garcia/vaultwarden/archive/$version.tar.gz"
 
 			# Replace old instance on reinstall using new project name
@@ -6755,7 +6726,7 @@ _EOF_
 			HOME='/root'
 
 			# Install web vault
-			local fallback_url='https://github.com/dani-garcia/bw_web_builds/releases/download/v2.20.1/bw_web_v2.20.1.tar.gz'
+			local fallback_url='https://github.com/dani-garcia/bw_web_builds/releases/download/v2.21.1/bw_web_v2.21.1.tar.gz'
 			Download_Install "$(curl -sSfL 'https://api.github.com/repos/dani-garcia/bw_web_builds/releases/latest' | mawk -F\" '/"browser_download_url": .*\/bw_web_[^"\/]*\.tar\.gz"/{print $4}')" /mnt/dietpi_userdata/vaultwarden
 
 		fi
@@ -6823,7 +6794,7 @@ _EOF_
 			DEPS_LIST="$PHP_NAME-bcmath $PHP_NAME-json $PHP_NAME-mbstring $PHP_NAME-xml $PHP_NAME-curl $PHP_NAME-sqlite3"
 
 			# Grab latest release
-			local fallback_url='https://github.com/koel/koel/releases/download/v5.1.4/koel-v5.1.4.tar.gz'
+			local fallback_url='https://github.com/koel/koel/releases/download/v5.1.5/koel-v5.1.5.tar.gz'
 			Download_Install "$(curl -sSfL 'https://api.github.com/repos/koel/koel/releases/latest' | mawk -F\" '/"browser_download_url": .*\/koel-[^"\/]*\.tar\.gz"/{print $4}')"
 
 			# Reinstall: Clear previous install, but keep existing config file
@@ -6914,31 +6885,30 @@ _EOF_
 
 			else
 				# ARMv6
-				if (( $G_HW_ARCH == 1 ))
-				then
-					INSTALL_URL_ADDRESS=$(curl -sSfL 'https://api.github.com/repos/Radarr/Radarr/releases/latest' | mawk -F\" '/"browser_download_url": .*linux\.tar\.gz"/{print $4}')
-					local fallback_url='https://github.com/Radarr/Radarr/releases/download/v3.2.0.5048/Radarr.master.3.2.0.5048.linux.tar.gz'
+				local url=$(curl -sSfL 'https://api.github.com/repos/Radarr/Radarr/releases/latest' | mawk -F\" '/"browser_download_url": .*linux\.tar\.gz"/{print $4}')
+				local version='3.2.2.5080'
+				local fallback_url="https://github.com/Radarr/Radarr/releases/download/v$version/Radarr.master.$version.linux.tar.gz"
 
 				# ARMv7
-				elif (( $G_HW_ARCH == 2 ))
+				if (( $G_HW_ARCH == 2 ))
 				then
-					INSTALL_URL_ADDRESS=$(curl -sSfL 'https://api.github.com/repos/Radarr/Radarr/releases/latest' | mawk -F\" '/"browser_download_url": .*linux-core-arm\.tar\.gz"/{print $4}')
-					local fallback_url='https://github.com/Radarr/Radarr/releases/download/v3.2.0.5048/Radarr.master.3.2.0.5048.linux-core-arm.tar.gz'
+					url=$(curl -sSfL 'https://api.github.com/repos/Radarr/Radarr/releases/latest' | mawk -F\" '/"browser_download_url": .*linux-core-arm\.tar\.gz"/{print $4}')
+					fallback_url="https://github.com/Radarr/Radarr/releases/download/v$version/Radarr.master.$version.linux-core-arm.tar.gz"
 
 				# ARMv8
 				elif (( $G_HW_ARCH == 3 ))
 				then
-					INSTALL_URL_ADDRESS=$(curl -sSfL 'https://api.github.com/repos/Radarr/Radarr/releases/latest' | mawk -F\" '/"browser_download_url": .*linux-core-arm64\.tar\.gz"/{print $4}')
-					local fallback_url='https://github.com/Radarr/Radarr/releases/download/v3.2.0.5048/Radarr.master.3.2.0.5048.linux-core-arm64.tar.gz'
+					url=$(curl -sSfL 'https://api.github.com/repos/Radarr/Radarr/releases/latest' | mawk -F\" '/"browser_download_url": .*linux-core-arm64\.tar\.gz"/{print $4}')
+					fallback_url="https://github.com/Radarr/Radarr/releases/download/v$version/Radarr.master.$version.linux-core-arm64.tar.gz"
 
 				# x86_64
 				elif (( $G_HW_ARCH == 10 ))
 				then
-					INSTALL_URL_ADDRESS=$(curl -sSfL 'https://api.github.com/repos/Radarr/Radarr/releases/latest' | mawk -F\" '/"browser_download_url": .*linux-core-x64\.tar\.gz"/{print $4}')
-					local fallback_url='https://github.com/Radarr/Radarr/releases/download/v3.2.0.5048/Radarr.master.3.2.0.5048.linux-core-x64.tar.gz'
+					url=$(curl -sSfL 'https://api.github.com/repos/Radarr/Radarr/releases/latest' | mawk -F\" '/"browser_download_url": .*linux-core-x64\.tar\.gz"/{print $4}')
+					fallback_url="https://github.com/Radarr/Radarr/releases/download/v$version/Radarr.master.$version.linux-core-x64.tar.gz"
 				fi
 
-				Download_Install "$INSTALL_URL_ADDRESS"
+				Download_Install "$url"
 				G_EXEC mv Radarr /opt/radarr
 			fi
 
@@ -6986,31 +6956,30 @@ _EOF_
 
 			else
 				# ARMv6
-				if (( $G_HW_ARCH == 1 ))
-				then
-					INSTALL_URL_ADDRESS=$(curl -sSfL 'https://api.github.com/repos/Lidarr/Lidarr/releases/latest' | mawk -F\" '/"browser_download_url": .*linux\.tar\.gz"/{print $4}')
-					local fallback_url='https://github.com/Lidarr/Lidarr/releases/download/v0.8.1.2135/Lidarr.master.0.8.1.2135.linux.tar.gz'
+				local url=$(curl -sSfL 'https://api.github.com/repos/Lidarr/Lidarr/releases/latest' | mawk -F\" '/"browser_download_url": .*linux\.tar\.gz"/{print $4}')
+				local version='0.8.1.2135'
+				local fallback_url="https://github.com/Lidarr/Lidarr/releases/download/v$version/Lidarr.master.$version.linux.tar.gz"
 
 				# ARMv7
-				elif (( $G_HW_ARCH == 2 ))
+				if (( $G_HW_ARCH == 2 ))
 				then
-					INSTALL_URL_ADDRESS=$(curl -sSfL 'https://api.github.com/repos/Lidarr/Lidarr/releases/latest' | mawk -F\" '/"browser_download_url": .*linux-core-arm\.tar\.gz"/{print $4}')
-					local fallback_url='https://github.com/Lidarr/Lidarr/releases/download/v0.8.1.2135/Lidarr.master.0.8.1.2135.linux-core-arm.tar.gz'
+					url=$(curl -sSfL 'https://api.github.com/repos/Lidarr/Lidarr/releases/latest' | mawk -F\" '/"browser_download_url": .*linux-core-arm\.tar\.gz"/{print $4}')
+					fallback_url="https://github.com/Lidarr/Lidarr/releases/download/v$version/Lidarr.master.$version.linux-core-arm.tar.gz"
 
 				# ARMv8
 				elif (( $G_HW_ARCH == 3 ))
 				then
-					INSTALL_URL_ADDRESS=$(curl -sSfL 'https://api.github.com/repos/Lidarr/Lidarr/releases/latest' | mawk -F\" '/"browser_download_url": .*linux-core-arm64\.tar\.gz"/{print $4}')
-					local fallback_url='https://github.com/Lidarr/Lidarr/releases/download/v0.8.1.2135/Lidarr.master.0.8.1.2135.linux-core-arm64.tar.gz'
+					url=$(curl -sSfL 'https://api.github.com/repos/Lidarr/Lidarr/releases/latest' | mawk -F\" '/"browser_download_url": .*linux-core-arm64\.tar\.gz"/{print $4}')
+					fallback_url="https://github.com/Lidarr/Lidarr/releases/download/v$version/Lidarr.master.$version.linux-core-arm64.tar.gz"
 
 				# x86_64
 				elif (( $G_HW_ARCH == 10 ))
 				then
-					INSTALL_URL_ADDRESS=$(curl -sSfL 'https://api.github.com/repos/Lidarr/Lidarr/releases/latest' | mawk -F\" '/"browser_download_url": .*linux-core-x64\.tar\.gz"/{print $4}')
-					local fallback_url='https://github.com/Lidarr/Lidarr/releases/download/v0.8.1.2135/Lidarr.master.0.8.1.2135.linux-core-x64.tar.gz'
+					url=$(curl -sSfL 'https://api.github.com/repos/Lidarr/Lidarr/releases/latest' | mawk -F\" '/"browser_download_url": .*linux-core-x64\.tar\.gz"/{print $4}')
+					fallback_url="https://github.com/Lidarr/Lidarr/releases/download/v$version/Lidarr.master.$version.linux-core-x64.tar.gz"
 				fi
 
-				Download_Install "$INSTALL_URL_ADDRESS"
+				Download_Install "$url"
 				G_EXEC mv Lidarr /opt/lidarr
 			fi
 
@@ -7103,9 +7072,9 @@ _EOF_
 
 			else
 
-				INSTALL_URL_ADDRESS='https://github.com/Tautulli/Tautulli.git'
-				G_CHECK_URL "$INSTALL_URL_ADDRESS"
-				G_THREAD_START git clone --depth 1 "$INSTALL_URL_ADDRESS"
+				local url='https://github.com/Tautulli/Tautulli.git'
+				G_CHECK_URL "$url"
+				G_THREAD_START git clone --depth 1 "$url"
 				G_AGI python3-pkg-resources
 				G_THREAD_WAIT
 				G_EXEC mv Tautulli /opt/tautulli
@@ -7122,25 +7091,25 @@ _EOF_
 			# Grab latest version download link
 
 			# - ARMv6: Requires Mono: https://github.com/Jackett/Jackett#installation-on-linux-armv6-or-below
-			INSTALL_URL_ADDRESS=$(curl -sSfL 'https://api.github.com/repos/Jackett/Jackett/releases/latest' | mawk -F\" '/"browser_download_url": .*\/Jackett\.Binaries\.Mono\.tar\.gz"/{print $4}')
-			local fallback_url='https://github.com/Jackett/Jackett/releases/download/v0.18.106/Jackett.Binaries.Mono.tar.gz'
+			local url=$(curl -sSfL 'https://api.github.com/repos/Jackett/Jackett/releases/latest' | mawk -F\" '/"browser_download_url": .*\/Jackett\.Binaries\.Mono\.tar\.gz"/{print $4}')
+			local fallback_url='https://github.com/Jackett/Jackett/releases/download/v0.18.636/Jackett.Binaries.Mono.tar.gz'
 
 			# - ARMv7
 			if (( $G_HW_ARCH == 2 )); then
 
-				INSTALL_URL_ADDRESS=${INSTALL_URL_ADDRESS/Mono/LinuxARM32}
+				url=${url/Mono/LinuxARM32}
 				fallback_url=${fallback_url/Mono/LinuxARM32}
 
 			# - ARMv8
 			elif (( $G_HW_ARCH == 3 )); then
 
-				INSTALL_URL_ADDRESS=${INSTALL_URL_ADDRESS/Mono/LinuxARM64}
+				url=${url/Mono/LinuxARM64}
 				fallback_url=${fallback_url/Mono/LinuxARM64}
 
 			# - x86_64
 			elif (( $G_HW_ARCH == 10 )); then
 
-				INSTALL_URL_ADDRESS=${INSTALL_URL_ADDRESS/Mono/LinuxAMDx64}
+				url=${url/Mono/LinuxAMDx64}
 				fallback_url=${fallback_url/Mono/LinuxAMDx64}
 
 			fi
@@ -7163,7 +7132,7 @@ _EOF_
 				fi
 			fi
 
-			Download_Install "$INSTALL_URL_ADDRESS" /opt
+			Download_Install "$url" /opt
 
 			# Move existing configs to unpacked install dir
 			[[ -d '/opt/jackett/Jackett' ]] && G_EXEC mv /opt/jackett/Jackett /opt/Jackett/
@@ -7182,11 +7151,7 @@ _EOF_
 
 			Banner_Installing
 
-			INSTALL_URL_ADDRESS='https://nzbget.net'
-			G_CHECK_URL "$INSTALL_URL_ADDRESS"
-			INSTALL_URL_ADDRESS+='/download/nzbget-latest-bin-linux.run'
-
-			G_EXEC curl -sSfL "$INSTALL_URL_ADDRESS" -o package.run
+			G_EXEC curl -sSfL 'https://nzbget.net/download/nzbget-latest-bin-linux.run' -o package.run
 			G_EXEC mkdir -p /mnt/dietpi_userdata/nzbget
 			G_EXEC_OUTPUT=1 G_EXEC dash package.run --destdir /mnt/dietpi_userdata/nzbget
 			G_EXEC_NOHALT=1 G_EXEC rm package.run
@@ -7198,8 +7163,8 @@ _EOF_
 
 			Banner_Installing
 
-			INSTALL_URL_ADDRESS='https://github.com/HTPC-Manager/HTPC-Manager.git'
-			G_CHECK_URL "$INSTALL_URL_ADDRESS"
+			local url='https://github.com/HTPC-Manager/HTPC-Manager.git'
+			G_CHECK_URL "$url"
 
 			# Python build dependencies for ARM
 			(( $G_HW_ARCH < 10 )) && G_AGI libffi-dev libssl-dev zlib1g-dev libjpeg-dev
@@ -7207,14 +7172,14 @@ _EOF_
 			if [[ -d '/mnt/dietpi_userdata/htpc-manager/.git' ]]; then
 
 				G_EXEC cd /mnt/dietpi_userdata/htpc-manager
-				G_EXEC_OUTPUT=1 G_EXEC git remote set-url origin "$INSTALL_URL_ADDRESS"
+				G_EXEC_OUTPUT=1 G_EXEC git remote set-url origin "$url"
 				G_EXEC_OUTPUT=1 G_EXEC git fetch origin
 				G_EXEC_OUTPUT=1 G_EXEC git reset --hard origin
 				G_EXEC_OUTPUT=1 G_EXEC git clean -dxfe '/userdata'
 
 			else
 
-				G_EXEC_OUTPUT=1 G_EXEC git clone --depth 1 "$INSTALL_URL_ADDRESS"
+				G_EXEC_OUTPUT=1 G_EXEC git clone --depth 1 "$url"
 				G_EXEC mkdir -p /mnt/dietpi_userdata/htpc-manager
 				G_EXEC cp -a HTPC-Manager/. /mnt/dietpi_userdata/htpc-manager/
 				G_EXEC_NOHALT=1 G_EXEC rm -R HTPC-Manager
@@ -7323,27 +7288,25 @@ If you want to update ${aSOFTWARE_NAME[$software_id]}, please use its internal u
 
 			Banner_Installing
 
-			# Executable
-			if [[ $G_HW_ARCH == [12] ]]; then
+			# ARMv6/7
+			local url='https://dl.minio.io/server/minio/release/linux-arm/minio'
 
-				INSTALL_URL_ADDRESS='https://dl.minio.io/server/minio/release/linux-arm/minio'
+			# ARMv8
+			if (( $G_HW_ARCH == 3 )); then
 
-			elif (( $G_HW_ARCH == 3 )); then
+				url='https://dl.minio.io/server/minio/release/linux-arm64/minio'
 
-				INSTALL_URL_ADDRESS='https://dl.minio.io/server/minio/release/linux-arm64/minio'
-
+			# x86_64
 			elif (( $G_HW_ARCH == 10 )); then
 
-				INSTALL_URL_ADDRESS='https://dl.minio.io/server/minio/release/linux-amd64/minio'
+				url='https://dl.minio.io/server/minio/release/linux-amd64/minio'
 
 			fi
-			G_EXEC curl -sSfLo /usr/local/bin/minio "$INSTALL_URL_ADDRESS"
+			G_EXEC curl -sSfLo /usr/local/bin/minio "$url"
 			G_EXEC chmod +x /usr/local/bin/minio
 
 			# Service
-			INSTALL_URL_ADDRESS='https://github.com/minio/minio-service/raw/master/linux-systemd/minio.service'
-			G_CHECK_URL "$INSTALL_URL_ADDRESS"
-			G_EXEC curl -sSfLo /etc/systemd/system/minio.service "$INSTALL_URL_ADDRESS"
+			G_EXEC curl -sSfLo /etc/systemd/system/minio.service 'https://github.com/minio/minio-service/raw/master/linux-systemd/minio.service'
 
 			# User
 			Create_User -d /mnt/dietpi_userdata/minio-data minio-user
@@ -7396,22 +7359,19 @@ If you want to update ${aSOFTWARE_NAME[$software_id]}, please use its internal u
 
 			Banner_Installing
 
-			if (( $G_HW_ARCH == 10 )); then
+			# ARM
+			local url='https://fuguhub.com/releases/raspberrypi/install.sh'
 
-				INSTALL_URL_ADDRESS='https://fuguhub.com/install/FuguHub.linux.install'
+			# x86_64
+			(( $G_HW_ARCH == 10 )) && url='https://fuguhub.com/install/FuguHub.linux.install'
 
-			else
-
-				INSTALL_URL_ADDRESS='https://fuguhub.com/releases/raspberrypi/install.sh'
-
-			fi
-			Download_Install "$INSTALL_URL_ADDRESS" FuguHubInstall.sh
+			Download_Install "$url" FuguHubInstall.sh
 
 			G_EXEC chmod +x FuguHubInstall.sh
 			G_EXEC_OUTPUT=1 G_EXEC ./FuguHubInstall.sh
 			G_EXEC_NOHALT=1 G_EXEC rm FuguHubInstall.sh
 
-			G_EXEC curl -sSfL https://fuguhub.com/box.zip -o /home/bd/applications/box.zip
+			G_EXEC curl -sSfL 'https://fuguhub.com/box.zip' -o /home/bd/applications/box.zip
 
 		fi
 
@@ -7446,7 +7406,7 @@ If you want to update ${aSOFTWARE_NAME[$software_id]}, please use its internal u
 
 			fi
 
-			local fallback_url="https://github.com/go-gitea/gitea/releases/download/v1.14.2/gitea-1.14.2-linux-$arch"
+			local fallback_url="https://github.com/go-gitea/gitea/releases/download/v1.15.0/gitea-1.15.0-linux-$arch"
 			Download_Install "$(curl -sSfL 'https://api.github.com/repos/go-gitea/gitea/releases/latest' | mawk -F\" "/\"browser_download_url\": .*\/gitea-[^\"\/]*-linux-$arch\"/{print \$4}")" /mnt/dietpi_userdata/gitea/gitea
 
 		fi
@@ -7496,13 +7456,16 @@ If you want to update ${aSOFTWARE_NAME[$software_id]}, please use its internal u
 
 			Banner_Installing # https://dtcooper.github.io/raspotify/#hard-installation
 
-			INSTALL_URL_ADDRESS='https://dtcooper.github.io/raspotify/key.asc'
-			G_CHECK_URL "$INSTALL_URL_ADDRESS"
+			# APT key
+			local url='https://dtcooper.github.io/raspotify/key.asc'
+			G_CHECK_URL "$url"
+			G_EXEC eval "curl -sSLf '$url' | gpg --dearmor -o /etc/apt/trusted.gpg.d/dietpi-raspotify.gpg --yes"
 
-			curl -sSfL "$INSTALL_URL_ADDRESS" | apt-key add -
-			echo 'deb https://dtcooper.github.io/raspotify/ raspotify main' > /etc/apt/sources.list.d/raspotify.list
+			# APT list
+			G_EXEC eval "echo 'deb https://dtcooper.github.io/raspotify/ raspotify main' > /etc/apt/sources.list.d/raspotify.list"
 			G_AGUP
 
+			# APT package
 			G_AGI raspotify
 
 		fi
@@ -7512,31 +7475,28 @@ If you want to update ${aSOFTWARE_NAME[$software_id]}, please use its internal u
 
 			Banner_Installing
 
-			INSTALL_URL_ADDRESS='https://github.com/google/aiyprojects-raspbian.git'
-			G_CHECK_URL "$INSTALL_URL_ADDRESS"
-
-			git clone -b voicekit "$INSTALL_URL_ADDRESS" /mnt/dietpi_userdata/voice-recognizer-raspi
+			G_EXEC_OUTPUT=1 G_EXEC git clone -b voicekit 'https://github.com/google/aiyprojects-raspbian.git' /mnt/dietpi_userdata/voice-recognizer-raspi
 			G_EXEC cd /mnt/dietpi_userdata/voice-recognizer-raspi
 
-			pip3 install -U pip virtualenv
-			virtualenv --system-site-packages -p python3 env
-			env/bin/pip install -Ur requirements.txt
+			G_EXEC_OUTPUT=1 G_EXEC pip3 install -U pip virtualenv
+			G_EXEC_OUTPUT=1 G_EXEC virtualenv --system-site-packages -p python3 env
+			G_EXEC_OUTPUT=1 G_EXEC env/bin/pip install -Ur requirements.txt
 
 			#??? ARMv7 only
-			(( $G_HW_ARCH == 2 )) && env/bin/pip install google-assistant-library==0.0.3
+			(( $G_HW_ARCH == 2 )) && G_EXEC_OUTPUT=1 G_EXEC env/bin/pip install google-assistant-library==0.0.3
 
 			# Services
 			sed -i 's#/home/pi#/mnt/dietpi_userdata#g' systemd/voice-recognizer.service
 			sed -i '/^User=/c\User=dietpi' systemd/voice-recognizer.service
 
-			cp systemd/voice-recognizer.service /etc/systemd/system/
-			cp systemd/alsa-init.service /etc/systemd/system/
-			#cp systemd/ntpdate.service /etc/systemd/system/
+			G_EXEC cp systemd/voice-recognizer.service /etc/systemd/system/
+			G_EXEC cp systemd/alsa-init.service /etc/systemd/system/
+			#G_EXEC cp systemd/ntpdate.service /etc/systemd/system/
 
 			source env/bin/activate
 
 			# Enable default app for service start
-			cp src/assistant_library_with_button_demo.py src/main.py
+			G_EXEC cp src/assistant_library_with_button_demo.py src/main.py
 
 			G_EXEC cd /tmp/$G_PROGRAM_NAME
 
@@ -7601,13 +7561,10 @@ If you want to update ${aSOFTWARE_NAME[$software_id]}, please use its internal u
 			G_EXEC systemctl daemon-reload
 			G_EXEC systemctl restart docker
 
-			INSTALL_URL_ADDRESS='https://raw.githubusercontent.com/TheAppgineer/roon-extension-manager/v1.x/rem-setup.sh'
-			G_CHECK_URL "$INSTALL_URL_ADDRESS"
-
 			# Unset SUDO_USER variable to avoid download, install and run as sudo-calling user, which fails due to /tmp/$G_PROGRAM_NAME write permissions: https://github.com/MichaIng/DietPi/issues/4462
 			unset -v SUDO_USER
 
-			G_EXEC curl -sSfLO "$INSTALL_URL_ADDRESS"
+			G_EXEC curl -sSfLO 'https://raw.githubusercontent.com/TheAppgineer/roon-extension-manager/v1.x/rem-setup.sh'
 			G_EXEC chmod +x rem-setup.sh
 			G_EXEC_OUTPUT=1 G_EXEC ./rem-setup.sh
 			G_EXEC_NOHALT=1 G_EXEC rm rem-setup.sh
@@ -7619,13 +7576,13 @@ If you want to update ${aSOFTWARE_NAME[$software_id]}, please use its internal u
 
 			Banner_Installing
 
-			# APT repo key
-			INSTALL_URL_ADDRESS='https://repo.jellyfin.org/jellyfin_team.gpg.key'
-			G_CHECK_URL "$INSTALL_URL_ADDRESS"
-			G_EXEC eval "curl -sSfL '$INSTALL_URL_ADDRESS' | gpg --dearmor -o /etc/apt/trusted.gpg.d/dietpi-jellyfin.gpg --yes"
+			# APT key
+			local url='https://repo.jellyfin.org/jellyfin_team.gpg.key'
+			G_CHECK_URL "$url"
+			G_EXEC eval "curl -sSfL '$url' | gpg --dearmor -o /etc/apt/trusted.gpg.d/dietpi-jellyfin.gpg --yes"
 
-			# APT repo
-			echo "deb https://repo.jellyfin.org/debian/ $G_DISTRO_NAME main" > /etc/apt/sources.list.d/dietpi-jellyfin.list
+			# APT list
+			G_EXEC eval "echo 'deb https://repo.jellyfin.org/debian/ $G_DISTRO_NAME main' > /etc/apt/sources.list.d/dietpi-jellyfin.list"
 			G_AGUP
 
 			# APT packages: Jellyfin + FFmpeg implementation
@@ -16021,9 +15978,7 @@ _EOF_
 		if (( ${aSOFTWARE_INSTALL_STATE[$software_id]} == -1 )); then
 
 			Banner_Uninstalling
-			UNINSTALL_URL_ADDRESS='https://raw.githubusercontent.com/TheAppgineer/roon-extension-manager/v1.x/rem-setup.sh'
-			G_CHECK_URL "$UNINSTALL_URL_ADDRESS"
-			G_EXEC curl -sSfL "$UNINSTALL_URL_ADDRESS" -o rem-setup.sh
+			G_EXEC curl -sSfL 'https://raw.githubusercontent.com/TheAppgineer/roon-extension-manager/v1.x/rem-setup.sh' -o rem-setup.sh
 			G_EXEC chmod +x rem-setup.sh
 			G_EXEC_OUTPUT=1 G_EXEC ./rem-setup.sh --uninstall
 			G_EXEC_NOHALT=1 G_EXEC rm rem-setup.sh
@@ -16035,11 +15990,10 @@ _EOF_
 
 			Banner_Uninstalling
 			G_AGP jellyfin jellyfin-ffmpeg
-			rm -f /usr/bin/jellyfin # Symlink created but left on package purge: https://github.com/jellyfin/jellyfin/pull/3690
-			[[ -f '/etc/apt/sources.list.d/dietpi-jellyfin.list' ]] && G_EXEC_NOHALT=1 G_EXEC rm /etc/apt/sources.list.d/dietpi-jellyfin.list
-			[[ -f '/etc/apt/trusted.gpg.d/dietpi-jellyfin.gpg' ]] && G_EXEC_NOHALT=1 G_EXEC rm /etc/apt/trusted.gpg.d/dietpi-jellyfin.gpg
-			[[ -d '/etc/systemd/system/jellyfin.service.d' ]] && G_EXEC_NOHALT=1 G_EXEC rm -R /etc/systemd/system/jellyfin.service.d
-			[[ -d '/mnt/dietpi_userdata/jellyfin' ]] && G_EXEC_NOHALT=1 G_EXEC rm -R /mnt/dietpi_userdata/jellyfin
+			[[ -f '/etc/apt/sources.list.d/dietpi-jellyfin.list' ]] && G_EXEC rm /etc/apt/sources.list.d/dietpi-jellyfin.list
+			[[ -f '/etc/apt/trusted.gpg.d/dietpi-jellyfin.gpg' ]] && G_EXEC rm /etc/apt/trusted.gpg.d/dietpi-jellyfin.gpg
+			[[ -d '/etc/systemd/system/jellyfin.service.d' ]] && G_EXEC rm -R /etc/systemd/system/jellyfin.service.d
+			[[ -d '/mnt/dietpi_userdata/jellyfin' ]] && G_EXEC rm -R /mnt/dietpi_userdata/jellyfin
 
 		fi
 
@@ -16524,7 +16478,7 @@ _EOF_
 
 		#------------------------------------------------------------
 		# Prevent continue if Network or NTPD is not completed: https://github.com/MichaIng/DietPi/issues/786
-		Check_Internet_and_NTPD
+		Check_Net_and_Time_sync
 		#------------------------------------------------------------
 		# Disable powersaving on main screen during installation
 		command -v setterm > /dev/null && setterm -blank 0 -powersave off 2> /dev/null
