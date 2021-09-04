@@ -773,6 +773,9 @@ Currently installed: $G_DISTRO_NAME (ID: $G_DISTRO)"; then
 
 			local apackages=('linux-image-amd64' 'os-prober')
 
+			# As linux-image-amd64 pulls initramfs already, pre-install the intended implementation here already
+			(( $G_HW_MODEL == 20 )) && apackages+=('tiny-initramfs') || apackages+=('initramfs-tools')
+
 			# Grub EFI with secure boot compatibility
 			if [[ -d '/boot/efi' ]] || dpkg-query -s 'grub-efi-amd64' &> /dev/null; then
 
