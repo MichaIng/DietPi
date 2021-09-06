@@ -1542,7 +1542,7 @@ _EOF_
 
 				# tiny-initramfs auto-detection for required kernel modules does not work when PREP runs within a container, hence select required modules (AHCI, SCSI disk, ext4) manually.
 				local version=$(dpkg --get-selections | mawk '/linux-image-*-amd64/{print $1;exit}'); version=${version#linux-image-}
-				G_EXEC mktirfs -m no -M no --include-modules='ahci,sd_mod,ext4' -o "/boot/initrd.img-$version" "$version"
+				G_EXEC mktirfs -m no -M no --include-modules='ahci,sd_mod,vmw_pvscsi,ext4' -o "/boot/initrd.img-$version" "$version"
 
 			else
 
