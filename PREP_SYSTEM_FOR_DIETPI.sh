@@ -1540,13 +1540,11 @@ _EOF_
 			# Update initramfs with above changes
 			if command -v update-tirfs > /dev/null; then
 
-				# tiny-initramfs auto-detection for required kernel modules does not work when PREP runs within a container, hence select required modules (AHCI, SCSI disk, ext4) manually.
-				local version=$(dpkg --get-selections | mawk '/linux-image-*-amd64/{print $1;exit}'); version=${version#linux-image-}
-				G_EXEC mktirfs -m no -M no --include-modules='ahci,sd_mod,vmw_pvscsi,ext4' -o "/boot/initrd.img-$version" "$version"
+				G_EXEC_OUTPUT=1 G_EXEC update-tirfs
 
 			else
 
-				update-initramfs -u
+				G_EXEC_OUTPUT=1 G_EXEC update-initramfs -u
 
 			fi
 
