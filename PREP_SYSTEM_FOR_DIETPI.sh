@@ -1069,6 +1069,8 @@ _EOF_
 		G_AGI "${aPACKAGES_REQUIRED_INSTALL[@]}"
 		unset -v aPACKAGES_REQUIRED_INSTALL
 
+		G_EXEC apt-get clean
+
 		G_AGA
 
 		#------------------------------------------------------------------------------------------------
@@ -1099,7 +1101,6 @@ _EOF_
 			G_AGA
 
 		fi
-		G_EXEC apt-get clean # Remove downloaded archives
 
 		# RPi Bullseye workaround, until new firmware packages have been built: https://archive.raspberrypi.org/debian/pool/main/f/firmware-nonfree/?C=M;O=D
 		if (( $G_DISTRO == 6 && $G_HW_MODEL == 0 ))
@@ -1113,6 +1114,20 @@ _EOF_
 			done
 			G_EXEC rm -R lib
 		fi
+
+		# Install vmtouch to lock DietPi scripts and config in file system cache
+		G_EXEC curl -sSfLO "https://dietpi.com/downloads/binaries/$G_DISTRO_NAME/vmtouch_$G_HW_ARCH_NAME.deb"
+		G_EXEC dpkg --force-hold,confnew -i "vmtouch_$G_HW_ARCH_NAME.deb"
+		rm -v "vmtouch_$G_HW_ARCH_NAME.deb"
+
+		G_DIETPI-NOTIFY 2 'Restoring default base files:'
+		# shellcheck disable=SC2114
+		rm -Rfv /etc/{motd,profile,update-motd.d,issue{,.net}} /root /home /media /var/mail
+		G_AGI --reinstall base-files # Restore /etc/{update-motd.d,issue{,.net}} /root /home
+		G_EXEC /var/lib/dpkg/info/base-files.postinst configure # Restore /root/.{profile,bashrc} /etc/{motd,profile} /media /var/mail
+
+		# Remove downloaded archives
+		G_EXEC apt-get clean
 
 		G_DIETPI-NOTIFY 2 'Deleting list of known users and groups, not required by DietPi'
 
@@ -1131,6 +1146,9 @@ _EOF_
 		getent group openmediavault-config > /dev/null && groupdel openmediavault-config # OMV (NanoPi NEO2)
 		getent group openmediavault-engined > /dev/null && groupdel openmediavault-engined # OMV (NanoPi NEO2)
 		getent group openmediavault-webgui > /dev/null && groupdel openmediavault-webgui # OMV (NanoPi NEO2)
+
+		G_EXEC_DESC='Creating DietPi user account' G_EXEC /boot/dietpi/func/dietpi-set_software useradd dietpi
+		chpasswd <<< 'root:dietpi'
 
 		G_DIETPI-NOTIFY 2 'Removing misc files/folders/services, not required by DietPi'
 
@@ -1257,19 +1275,11 @@ _EOF_
 		[[ -f '/etc/cron.d/make_nas_processes_faster' ]] && rm -v /etc/cron.d/make_nas_processes_faster
 
 		#-----------------------------------------------------------------------------------
-		G_DIETPI-NOTIFY 2 'Restoring default base files:'
-		# shellcheck disable=SC2114
-		rm -Rfv /etc/{motd,profile,update-motd.d,issue{,.net}} /root /home /media /var/mail
-		G_AGI --reinstall base-files # Restore /etc/{update-motd.d,issue{,.net}} /root /home
-		G_EXEC /var/lib/dpkg/info/base-files.postinst configure # Restore /root/.{profile,bashrc} /etc/{motd,profile} /media /var/mail
-		G_EXEC apt-get clean # Remove downloaded archives
-
-		#-----------------------------------------------------------------------------------
 		# https://www.debian.org/doc/debian-policy/ch-opersys.html#site-specific-programs
 		G_DIETPI-NOTIFY 2 'Setting modern /usr/local permissions'
 		[[ -f '/etc/staff-group-for-usr-local' ]] && rm -v /etc/staff-group-for-usr-local
-		chown -R root:root /usr/local
-		chmod -R 0755 /usr/local
+		G_EXEC chown -R root:root /usr/local
+		G_EXEC chmod -R 0755 /usr/local
 
 		#-----------------------------------------------------------------------------------
 		# Boot Logo
@@ -1286,11 +1296,6 @@ _EOF_
 		# - Enable bash-completion for non-login shells:
 		#	- NB: It is called twice on login shells then, but breaks directly if called already once.
 		ln -sfv /etc/profile.d/bash_completion.sh /etc/bashrc.d/dietpi-bash_completion.sh
-
-		#-----------------------------------------------------------------------------------
-		# DietPi user
-		G_EXEC_DESC='Creating DietPi user account' G_EXEC /boot/dietpi/func/dietpi-set_software useradd dietpi
-		chpasswd <<< 'root:dietpi'
 
 		#-----------------------------------------------------------------------------------
 		# UID bit for sudo: https://github.com/MichaIng/DietPi/issues/794
@@ -1314,12 +1319,6 @@ _EOF_
 		G_EXEC systemctl enable dietpi-boot
 		G_EXEC systemctl enable dietpi-postboot
 		G_EXEC systemctl enable dietpi-kill_ssh
-
-		#-----------------------------------------------------------------------------------
-		# Install vmtouch to lock DietPi scripts and config in file system cache
-		G_EXEC curl -sSfLO "https://dietpi.com/downloads/binaries/$G_DISTRO_NAME/vmtouch_$G_HW_ARCH_NAME.deb"
-		G_EXEC dpkg --force-hold,confnew -i "vmtouch_$G_HW_ARCH_NAME.deb"
-		rm -v "vmtouch_$G_HW_ARCH_NAME.deb"
 
 		#-----------------------------------------------------------------------------------
 		# Cron jobs
@@ -1873,7 +1872,7 @@ _EOF_
 		G_EXEC rmdir /mnt/tmp_root
 
 		G_DIETPI-NOTIFY 2 'Running general cleanup of misc files'
-		rm -Rfv /{root,home/*}/.{bash_history,nano_history,wget-hsts,cache,local,config,gnupg,viminfo,dbus,gconf,nano,vim,zshrc,oh-my-zsh} /etc/*-
+		rm -Rfv /{root,home/*}/.{bash_history,nano_history,wget-hsts,cache,local,config,gnupg,viminfo,dbus,gconf,nano,vim,zshrc,oh-my-zsh} /etc/*- /var/cache/debconf/*-old
 
 		# Remove PREP script
 		[[ -f $FP_PREP_SCRIPT ]] && rm -v "$FP_PREP_SCRIPT"
