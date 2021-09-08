@@ -75,6 +75,12 @@ _Joined 2020-10-11_
 
 Source code contributor, implemented PaperMC, Unbound, Tor Relay and related features and functions.
 
+#### [yumiris](https://github.com/yumiris)
+
+_Joined 2018-04-16_
+
+Creator and maintainer of the [DietPi Hyper-V images](https://github.com/yumiris/DietPi.Hyper-V).
+
 ---
 
 ### Collaborations
