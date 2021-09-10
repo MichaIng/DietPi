@@ -3,6 +3,15 @@
 	# Error out on command failures
 	set -e
 
+	Reboot_to_load_Partition_table()
+	{
+		> /dietpi_skip_partition_resize
+		systemctl enable dietpi-fs_partition_resize
+		echo '[ INFO ] Rebooting to load the new partition table'
+		reboot
+		exit 0
+	}
+
 	# Disable this service
 	! systemctl is-enabled dietpi-fs_partition_resize > /dev/null || systemctl disable dietpi-fs_partition_resize
 
@@ -32,19 +41,25 @@
 
 	fi
 
-	# Failsafe: Sync changes to disk before touching partitions
-	sync
+	# Only increase partition size if not yet done on first boot
+	if [[ ! -f '/dietpi_skip_partition_resize' ]]
+	then
+		# Failsafe: Sync changes to disk before touching partitions
+		sync
 
-	# GPT partition table: Move backup GPT data structures to the end of the disk
-	# - lsblk -ndo PTTYPE "$ROOT_DRIVE" does not work inside systemd-nspawn containers.
-	[[ $(blkid -s PTTYPE -o value -c /dev/null "$ROOT_DRIVE") != 'gpt' ]] || sgdisk -e "$ROOT_DRIVE"
+		# GPT partition table: Move backup GPT data structures to the end of the disk
+		# - lsblk -ndo PTTYPE "$ROOT_DRIVE" does not work inside systemd-nspawn containers.
+		[[ $(blkid -s PTTYPE -o value -c /dev/null "$ROOT_DRIVE") != 'gpt' ]] || sgdisk -e "$ROOT_DRIVE"
 
-	# Maximise root partition size
-	sfdisk --no-reread --no-tell-kernel -fN"$ROOT_PART" "$ROOT_DRIVE" <<< ',+'
+		# Maximise root partition size
+		sfdisk --no-reread --no-tell-kernel -fN"$ROOT_PART" "$ROOT_DRIVE" <<< ',+'
 
-	# Inform kernel about changed partition table, be failsafe by using two differet methods
-	partprobe "$ROOT_DRIVE"
-	partx -u "$ROOT_DRIVE"
+		# Inform kernel about changed partition table, be failsafe by using two differet methods and reboot if any fails
+		partprobe "$ROOT_DRIVE" || Reboot_to_load_Partition_table
+		partx -u "$ROOT_DRIVE" || Reboot_to_load_Partition_table
+	else
+		rm /dietpi_skip_partition_resize
+	fi
 
 	# Detect root filesystem type
 	ROOT_FSTYPE=$(findmnt -Ufnro FSTYPE -M /)
