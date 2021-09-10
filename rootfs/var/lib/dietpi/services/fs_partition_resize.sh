@@ -9,6 +9,7 @@
 		systemctl enable dietpi-fs_partition_resize
 		echo '[ INFO ] Rebooting to load the new partition table'
 		reboot
+		exit 0
 	}
 
 	# Disable this service
