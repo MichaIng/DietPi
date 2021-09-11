@@ -44,7 +44,7 @@ root_size=892
 CLONING_TOOL='dd'
 case $HW_MODEL in
 	0) iname='RPi';;
-	20) iname='VM' WIFI_REQUIRED=1 boot_size=0;;
+	20) iname='VM' WIFI_REQUIRED=0 boot_size=0;;
 	21) iname='NativePC-BIOS' HW_ARCH=10 root_size=1152;;
 	*) G_DIETPI-NOTIFY 1 "Invalid hardware model \"$HW_MODEL\" passed, aborting..."; exit 1;;
 esac
@@ -109,6 +109,7 @@ G_EXEC partx -u /dev/loop0
 
 # Create and mount filesystems and fstab
 G_EXEC mkdir rootfs
+# + EFI + boot partition
 if [[ $PTTYPE == 'gpt' ]] && (( $boot_size ))
 then
 	FP_ROOT_DEV=3
@@ -126,7 +127,7 @@ PARTUUID=$(lsblk -no PARTUUID /dev/loop0p3) / $FSTYPE noatime,lazytime 0 1
 PARTUUID=$(lsblk -no PARTUUID /dev/loop0p2) /boot vfat noatime,lazytime 0 2
 PARTUUID=$(lsblk -no PARTUUID /dev/loop0p1) /boot/efi vfat noatime,lazytime 0 3
 _EOF_
-
+# + EFI partition
 elif [[ $PTTYPE == 'gpt' ]]
 then
 	FP_ROOT_DEV=2
@@ -140,7 +141,7 @@ then
 PARTUUID=$(lsblk -no PARTUUID /dev/loop0p2) / $FSTYPE noatime,lazytime 0 1
 PARTUUID=$(lsblk -no PARTUUID /dev/loop0p1) /boot/efi vfat noatime,lazytime 0 2
 _EOF_
-
+# + boot partition
 elif (( $boot_size ))
 then
 	FP_ROOT_DEV=2
@@ -154,7 +155,7 @@ then
 PARTUUID=$(lsblk -no PARTUUID /dev/loop0p2) / $FSTYPE noatime,lazytime 0 1
 PARTUUID=$(lsblk -no PARTUUID /dev/loop0p1) /boot vfat noatime,lazytime 0 2
 _EOF_
-
+# - single partition
 else
 	FP_ROOT_DEV=1
 	G_EXEC "mkfs.$FSTYPE" /dev/loop0p1
@@ -172,7 +173,7 @@ cat << '_EOF_' > rootfs/etc/rc.local
 _EOF_
 G_EXEC chmod +x rootfs/etc/rc.local
 
-# - RPi only: https://github.com/RPi-Distro/repo/issues/253
+# - RPi: https://github.com/RPi-Distro/repo/issues/253
 [[ $HW_MODEL == 0 ]] && cat << '_EOF_' >> rootfs/etc/rc.local
 curl -sSfLO 'https://archive.raspberrypi.org/debian/pool/main/r/raspberrypi-archive-keyring/raspberrypi-archive-keyring_2016.10.31_all.deb' || exit 1
 dpkg -i raspberrypi-archive-keyring_2016.10.31_all.deb || exit 1
@@ -182,13 +183,24 @@ _EOF_
 cat << _EOF_ >> rootfs/etc/rc.local
 export GITBRANCH='master' HW_MODEL='$HW_MODEL' IMAGE_CREATOR=0 PREIMAGE_INFO='from scratch' WIFI_REQUIRED=$WIFI_REQUIRED DISTRO_TARGET=6
 bash -c "\$(curl -sSfL 'https://raw.githubusercontent.com/$G_GITOWNER/DietPi/$G_GITBRANCH/PREP_SYSTEM_FOR_DIETPI.sh')"
+_EOF_
+
+# - VM: Generate tiny-initramfs with explicit kernel modules, as auto-detection doesn't work correctly within container and loop devices
+[[ $HW_MODEL == 20 ]] && cat << _EOF_ >> rootfs/etc/rc.local
+version=\$(dpkg --get-selections | mawk '/linux-image-*-amd64/{print \$1;exit}') || exit 1
+version=\${version#linux-image-}
+mktirfs -m no -M no --include-modules='ahci,sd_mod,vmw_pvscsi,hv_storvsc,$FSTYPE' -o "/boot/initrd.img-\$version" "\$version" || exit 1
+_EOF_
+
+cat << '_EOF_' >> rootfs/etc/rc.local
+> /success
 poweroff
 exit 0
 } > /dev/console 2>&1 < /dev/console
 _EOF_
 
 # Bootstrap
-G_EXEC_OUTPUT=1 G_EXEC debootstrap --arch="$parch" --variant=minbase --exclude='gcc-7-base,gcc-8-base,gcc-9-base' --include='bash-completion,bzip2,ca-certificates,console-setup,cron,curl,dropbear,ethtool,fake-hwclock,fdisk,gnupg,htop,ifupdown,isc-dhcp-client,kmod,locales,nano,p7zip,parted,procps,psmisc,rfkill,sudo,systemd-sysv,systemd-timesyncd,tzdata,udev,unzip,usbutils,wget,whiptail' --no-check-gpg bullseye ./rootfs "$repo"
+G_EXEC_OUTPUT=1 G_EXEC debootstrap --arch="$parch" --variant=minbase --exclude='gcc-7-base,gcc-8-base,gcc-9-base' --include='bash-completion,bzip2,ca-certificates,console-setup,cron,curl,dropbear,ethtool,fake-hwclock,fdisk,gnupg,htop,ifupdown,isc-dhcp-client,kmod,locales,nano,p7zip,parted,procps,psmisc,rfkill,sudo,systemd-sysv,systemd-timesyncd,tzdata,udev,unzip,usbutils,wget,whiptail' bullseye ./rootfs "$repo"
 
 # Remove cached archives and list files created by debootstrap
 G_EXEC rm -Rf rootfs/var/{cache/apt,lib/apt/lists}/*
@@ -208,6 +220,8 @@ abind=()
 [[ -b '/dev/loop0p2' ]] && abind=('--bind=/dev/loop0p2')
 [[ -b '/dev/loop0p3' ]] && abind+=('--bind=/dev/loop0p3')
 systemd-nspawn -bD rootfs --bind=/dev/loop0 --bind=/dev/loop0p1 "${abind[@]}" --bind=/dev/disk --capability=CAP_IPC_LOCK || exit 1
+[[ -f 'rootfs/success' ]] || { G_DIETPI-NOTIFY 1 'The container setup did not finish successfully, aborting...'; exit 1; }
+G_EXEC rm rootfs/success
 G_EXEC sync
 G_EXEC sleep 1
 G_EXEC umount -R rootfs
