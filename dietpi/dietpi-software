@@ -3929,14 +3929,119 @@ _EOF_
 				DEPS_LIST='libnfs8 libsmbclient libsqlite3-0 libupnp6 libwrap0 libmpdclient2 libflac8 libyajl2 libavahi-client3 libvorbisfile3 libwavpack1 libmad0 libmpg123-0 libopus0 libavformat57 libfaad2 libcdio-paranoia1 libiso9660-8 libshout3 libid3tag0'
 				Download_Install "https://dietpi.com/downloads/binaries/all/mpd_0.20.23-1_$G_HW_ARCH_NAME.deb"
 
+				# Config
+				G_BACKUP_FP /etc/mpd.conf
+				dps_index=$software_id Download_Install 'mpd.conf' /etc/mpd.conf
+
+				# Service
+				# - Run systemd unit as mpd user instead of using config-file based user change, to preserve supplementary group permissions (i.e. dietpi)
+				# - Define config file explicitly, since custom /usr/local/bin/mpd binary searches for /usr/local/etc/mpd.conf by default
+				cat << '_EOF_' > /lib/systemd/system/mpd.service
+[Unit]
+Description=Music Player Daemon (DietPi)
+Documentation=man:mpd(1) man:mpd.conf(5)
+Wants=network-online.target
+After=network-online.target sound.target dietpi-boot.service
+
+[Service]
+Type=notify
+User=mpd
+RuntimeDirectory=mpd
+ExecStart=/usr/local/bin/mpd --no-daemon /etc/mpd.conf
+
+# allow MPD to use real-time priority 50
+LimitRTPRIO=50
+LimitRTTIME=infinity
+
+# disallow writing to /usr, /bin, /sbin, ...
+ProtectSystem=yes
+
+# more paranoid security settings
+NoNewPrivileges=yes
+ProtectKernelTunables=yes
+ProtectControlGroups=yes
+ProtectKernelModules=yes
+# AF_NETLINK is required by libsmbclient, or it will exit() .. *sigh*
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX AF_NETLINK
+RestrictNamespaces=yes
+
+[Install]
+WantedBy=multi-user.target
+Also=mpd.socket
+_EOF_
+				# systemd socket activation
+				cat << '_EOF_' > /lib/systemd/system/mpd.socket
+[Socket]
+ListenStream=/run/mpd/socket
+ListenStream=6600
+Backlog=5
+KeepAlive=true
+PassCredentials=true
+
+[Install]
+WantedBy=sockets.target
+_EOF_
 			# Buster+
 			else
 
-				# libcdio-paranoia1, libiso9660-8 and libupnp6 not available, but ibcdio-paranoia2, libiso9660-11 and libupnp13 instead
-				# Buster repo version >= 0.21.5, thus stay with APT for now
 				G_AGI mpd
 
+				# Service
+				# - Run systemd unit as "mpd" user instead of using config file based user change, to preserve supplementary group permissions (i.e. "dietpi")
+				# - Skip environment file so that usage of our config file is assured
+				[[ -d '/etc/systemd/system/mpd.service.d' ]] || G_EXEC mkdir -p /etc/systemd/system/mpd.service.d
+				cat << '_EOF_' > /etc/systemd/system/mpd.service.d/dietpi.conf
+[Service]
+User=mpd
+RuntimeDirectory=mpd
+EnvironmentFile=
+ExecStart=/usr/bin/mpd --no-daemon
+_EOF_
+				Remove_SysV mpd 1
+
+				# Config
+				G_CONFIG_INJECT 'music_directory[[:blank:]]' 'music_directory "/mnt/dietpi_userdata/Music"' /etc/mpd.conf
+				G_CONFIG_INJECT 'playlist_directory [[:blank:]]' 'playlist_directory "/mnt/dietpi_userdata/Music"' /etc/mpd.conf
+				G_CONFIG_INJECT 'db_file[[:blank:]]' 'db_file "/mnt/dietpi_userdata/.mpd_cache/db_file"' /etc/mpd.conf
+				# - Log to journal
+				G_EXEC sed -i 's/^[[:blank:]]*log_file[[:blank:]]/#log_file /' /etc/mpd.conf
+				# - PID file is not required for systemd
+				G_EXEC sed -i 's/^[[:blank:]]*pid_file[[:blank:]]/#pid_file /' /etc/mpd.conf
+				G_CONFIG_INJECT 'state_file[[:blank:]]' 'state_file "/mnt/dietpi_userdata/.mpd_cache/state"' /etc/mpd.conf
+				G_CONFIG_INJECT 'sticker_file[[:blank:]]' 'sticker_file "/mnt/dietpi_userdata/.mpd_cache/sticker.sql"' /etc/mpd.conf
+				# - Our service starts as "mpd" user already
+				G_EXEC sed -i 's/^[[:blank:]]*user[[:blank:]]/#user /' /etc/mpd.conf
+				G_EXEC sed -i 's/^[[:blank:]]*group[[:blank:]]/#group /' /etc/mpd.conf
+				# - Enable UNIX socket
+				G_CONFIG_INJECT 'bind_to_address[[:blank:]]+"/run/mpd/socket"' 'bind_to_address "/run/mpd/socket"' /etc/mpd
 			fi
+
+			# RPi JustBoom can handle SOXR VH @ 192khz 32bit: https://github.com/MichaIng/DietPi/issues/581#issuecomment-256643079
+			if grep -q '^[[:blank:]]*CONFIG_SOUNDCARD=justboom' /boot/dietpi.txt
+			then
+				# Force 192khz 32bit for all outputs: Better would be to apply it to the single JustBoom output device, but we'll leave this for now for simplicity.
+				G_CONFIG_INJECT 'audio_output_format[[:blank:]]' 'audio_output_format "32:192000:2"' /etc/mpd.conf
+				# Use highest SOXR quality: "samplerate_converter" is actually deprecated with v0.20.0 and replaced by a "resampler" block, but we'll leave this for now for simplicity.
+				G_CONFIG_INJECT 'samplerate_converter[[:blank:]]' 'samplerate_converter "soxr very high"' /etc/mpd.conf
+			fi
+
+			# User
+			Create_User -g audio -G dietpi -d /mnt/dietpi_userdata/.mpd_cache mpd
+
+			# Dirs
+			# - Move possibly existing audio and playlist files to userdata
+			[[ ! -e '/var/lib/mpd/music' || -L '/var/lib/mpd/music' ]] || G_EXEC mv -n /var/lib/mpd/music/* /mnt/dietpi_userdata/Music/
+			[[ ! -e '/var/lib/mpd/playlists' || -L '/var/lib/mpd/playlists' ]] || G_EXEC mv -n /var/lib/mpd/playlists/* /mnt/dietpi_userdata/Music/
+			# - Purge obsolete data and log dirs and clear cache
+			G_EXEC rm -Rf /var/lib/mpd /var/log/mpd /mnt/dietpi_userdata/.mpd_cache
+			# - Recreate cache dir
+			G_EXEC mkdir -p /mnt/dietpi_userdata/.mpd_cache
+
+			# Grab our test music for the user
+			Download_Test_Media
+
+			# Permissions
+			G_EXEC chown -R mpd:root /mnt/dietpi_userdata/.mpd_cache /etc/mpd.conf
 
 		fi
 
@@ -9221,108 +9326,6 @@ NB: This port needs to be forwarded by your router and/or opened in your firewal
 
 		fi
 
-		software_id=128 # MPD
-		if (( ${aSOFTWARE_INSTALL_STATE[$software_id]} == 1 )); then
-
-			Banner_Configuration
-
-			# User
-			Create_User -g audio -G dietpi -d /mnt/dietpi_userdata/.mpd_cache mpd
-
-			# Dirs
-			# - Purge old log and cache
-			G_EXEC rm -Rf /var/log/mpd /mnt/dietpi_userdata/.mpd_cache
-			# - Recreate log and cache dirs
-			G_EXEC mkdir -p /var/log/mpd /mnt/dietpi_userdata/.mpd_cache
-			# - Remove obsolete cache dir, preserve previous music and playlists, in case of an existing custom install
-			[[ ! -e '/var/lib/mpd/music' || -L '/var/lib/mpd/music' ]] || mv -n /var/lib/mpd/music/* /mnt/dietpi_userdata/Music/ &> /dev/null
-			[[ ! -e '/var/lib/mpd/playlists' || -L '/var/lib/mpd/playlists' ]] || mv -n /var/lib/mpd/playlists/* /mnt/dietpi_userdata/Music/ &> /dev/null
-			[[ -d '/var/lib/mpd' ]] && G_EXEC rm -R /var/lib/mpd
-
-			# Config
-			G_BACKUP_FP /etc/mpd.conf
-			dps_index=$software_id Download_Install 'mpd.conf' /etc/mpd.conf
-
-			# Service
-			Remove_SysV mpd 1
-			# - Upstream systemd unit: https://github.com/MusicPlayerDaemon/MPD/blob/master/systemd/system/mpd.service.in
-			# - Debian package systemd unit: https://deb.debian.org/debian/pool/main/m/mpd/
-			# - Run systemd unit as mpd user instead of using config-file based user change, to preserve supplementary group permissions (i.e. dietpi)
-			# - Define config file explicitly, since custom /usr/local/bin/mpd binary searches for /usr/local/etc/mpd.conf by default
-			cat << _EOF_ > /lib/systemd/system/mpd.service
-[Unit]
-Description=Music Player Daemon (DietPi)
-Documentation=man:mpd(1) man:mpd.conf(5)
-Wants=network-online.target
-After=network-online.target sound.target dietpi-boot.service
-
-[Service]
-Type=notify
-User=mpd
-RuntimeDirectory=mpd
-ExecStart=$(command -v mpd) --no-daemon /etc/mpd.conf
-
-# allow MPD to use real-time priority 50
-LimitRTPRIO=50
-LimitRTTIME=infinity
-
-# disallow writing to /usr, /bin, /sbin, ...
-ProtectSystem=yes
-
-# more paranoid security settings
-NoNewPrivileges=yes
-ProtectKernelTunables=yes
-ProtectControlGroups=yes
-ProtectKernelModules=yes
-# AF_NETLINK is required by libsmbclient, or it will exit() .. *sigh*
-RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX AF_NETLINK
-RestrictNamespaces=yes
-
-[Install]
-WantedBy=multi-user.target
-Also=mpd.socket
-_EOF_
-			# - systemd socket activation, not shipped by our custom package
-			[[ -f '/lib/systemd/system/mpd.socket' ]] || cat << '_EOF_' > /lib/systemd/system/mpd.socket
-[Socket]
-ListenStream=/run/mpd/socket
-ListenStream=6600
-Backlog=5
-KeepAlive=true
-PassCredentials=true
-
-[Install]
-WantedBy=sockets.target
-_EOF_
-
-			# JustBoom specials
-			if grep -q '^[[:blank:]]*CONFIG_SOUNDCARD=justboom' /boot/dietpi.txt; then
-
-				# Name displayed in ympd sound button
-				local justboom_soundcard_desc='JustBoom DietPi'
-				G_CONFIG_INJECT 'name "' "name \"$justboom_soundcard_desc\"" /etc/mpd.conf
-				G_CONFIG_INJECT 'zeroconf_name "' "zeroconf_name \"$justboom_soundcard_desc\"" /etc/mpd.conf
-
-				# Output (192khz 32bit)
-				local target_bitdepth=32
-				local target_rate=192000
-				G_CONFIG_INJECT 'format "' "format \"$target_rate:$target_bitdepth:2\"" /etc/mpd.conf
-				G_CONFIG_INJECT 'audio_output_format "' "audio_output_format \"$target_rate:$target_bitdepth:2\"" /etc/mpd.conf
-
-				# Set SOXR quality
-				# - All RPi's can handle SOXR VH @ 192khz 32bit: https://github.com/MichaIng/DietPi/issues/581#issuecomment-256643079
-				G_CONFIG_INJECT 'samplerate_converter "' 'samplerate_converter "soxr very high"' /etc/mpd.conf # highest
-
-			fi
-
-			# Grab our test music for the user
-			Download_Test_Media
-
-			# Permissions
-			G_EXEC chown -R mpd: /var/log/mpd /mnt/dietpi_userdata/.mpd_cache /etc/mpd.conf
-
-		fi
-
 		software_id=94 # ProFTPD
 		if (( ${aSOFTWARE_INSTALL_STATE[$software_id]} == 1 )); then
 
@@ -13889,21 +13892,21 @@ _EOF_
 			Banner_Uninstalling
 			if [[ -f '/lib/systemd/system/mpd.service' ]]; then
 
-				systemctl unmask mpd
-				systemctl disable --now mpd
-				rm -R /lib/systemd/system/mpd.service*
+				G_EXEC systemctl unmask mpd
+				G_EXEC systemctl disable --now mpd
+				G_EXEC rm /lib/systemd/system/mpd.service
 
 			fi
-			[[ -d '/etc/systemd/system/mpd.service.d' ]] && rm -R /etc/systemd/system/mpd.service.d
-			[[ -f '/lib/systemd/system/mpd.socket' ]] && rm -v /lib/systemd/system/mpd.socket
+			[[ -d '/etc/systemd/system/mpd.service.d' ]] && G_EXEC rm -R /etc/systemd/system/mpd.service.d
+			[[ -f '/lib/systemd/system/mpd.socket' ]] && G_EXEC rm /lib/systemd/system/mpd.socket
 			getent passwd mpd > /dev/null && userdel mpd
 			getent group mpd > /dev/null && groupdel mpd # pre-v6.29
 			G_AGP mpd libmpdclient2
-			[[ -d '/var/log/mpd' ]] && rm -R /var/log/mpd
-			[[ -d '/mnt/dietpi_userdata/.mpd_cache' ]] && rm -R /mnt/dietpi_userdata/.mpd_cache
-			[[ -f '/etc/mpd.conf' ]] && rm -v /etc/mpd.conf
-			[[ -f '/usr/local/etc/mpd.conf' ]] && rm /usr/local/etc/mpd.conf && rmdir --ignore-fail-on-non-empty /usr/local/etc # Pre-v6.29
-			[[ -f '/etc/default/mpd' ]] && rm -v /etc/default/mpd # pre-v6.20
+			[[ -d '/var/log/mpd' ]] && G_EXEC rm -R /var/log/mpd
+			[[ -d '/mnt/dietpi_userdata/.mpd_cache' ]] && G_EXEC rm -R /mnt/dietpi_userdata/.mpd_cache
+			[[ -f '/etc/mpd.conf' ]] && G_EXEC rm /etc/mpd.conf
+			[[ -f '/usr/local/etc/mpd.conf' ]] && G_EXEC rm /usr/local/etc/mpd.conf && G_EXEC rmdir --ignore-fail-on-non-empty /usr/local/etc # Pre-v6.29
+			[[ -f '/etc/default/mpd' ]] && G_EXEC rm /etc/default/mpd # pre-v6.20
 
 		fi
 
