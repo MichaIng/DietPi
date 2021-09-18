@@ -4,7 +4,7 @@
 	<br><br>
 	optimised • simplified • for everyone
 	<br><br>
-	<a href="https://dietpi.com/" target="_blank" rel="noopener">Website</a> • <a href="https://dietpi.com/docs/" target="_blank" rel="noopener">Documentation</a> • <a href="https://dietpi.com/#download" target="_blank" rel="noopener">View all supported platforms</a> • <a href="https://dietpi.com/phpbb/" target="_blank" rel="noopener">Forum</a>
+	<a href="https://dietpi.com/" target="_blank" rel="noopener">Website</a> • <a href="https://dietpi.com/#download" target="_blank" rel="noopener">Downloads</a> • <a href="https://dietpi.com/docs/" target="_blank" rel="noopener">Documentation</a> • <a href="https://dietpi.com/phpbb/" target="_blank" rel="noopener">Forum</a> • <a href="https://dietpi.com/blog/" target="_blank" rel="noopener">Blog</a>
 </p>
 <hr>
 <p align="center">
@@ -74,6 +74,12 @@ DietPi documentation author, product manager, SEO and DietPi visibility recommen
 _Joined 2020-10-11_
 
 Source code contributor, implemented PaperMC, Unbound, Tor Relay and related features and functions.
+
+#### [yumiris](https://github.com/yumiris)
+
+_Joined 2018-04-16_
+
+Creator and maintainer of the [DietPi Hyper-V images](https://github.com/yumiris/DietPi.Hyper-V).
 
 ---
 
@@ -287,6 +293,7 @@ Links to hardware and software manufacturers, sources and build instructions use
 - [Tor](https://gitlab.torproject.org/tpo/core/tor)
 - [Docker Compose](https://github.com/docker/compose)
 - [Box86](https://github.com/ptitSeb/box86)
+- [Box64](https://github.com/ptitSeb/box64)
 - [Steam](https://steamcommunity.com/)
 - [mjpg-streamer](https://github.com/jacksonliam/mjpg-streamer)
 - [IPFS](https://github.com/ipfs/ipfs)
@@ -307,6 +314,8 @@ Links to hardware and software manufacturers, sources and build instructions use
 - [PostgreSQL](https://git.postgresql.org/gitweb/?p=postgresql.git)
 - [OpenJDK](https://github.com/openjdk)
 - [Blynk Server](https://github.com/Peterkn2001/blynk-server)
+- [File Browser](https://github.com/filebrowser/filebrowser)
+- [Spotifyd](https://github.com/Spotifyd/spotifyd)
 
 ---
 

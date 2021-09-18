@@ -23,7 +23,7 @@
 	# - PREIMAGE_INFO='Some GNU/Linux'
 	# - HW_MODEL=0				(must match one of the supported IDs below)
 	# - WIFI_REQUIRED=0			[01]
-	# - DISTRO_TARGET=5			[56] (Buster: 5, Bullseye: 6)
+	# - DISTRO_TARGET=6			[567] (Buster: 5, Bullseye: 6, Bookworm: 7)
 	#------------------------------------------------------------------------------------------------
 
 	# Core globals
@@ -178,27 +178,34 @@ _EOF_
 	unset -v GITOWNER GITBRANCH
 
 	# Detect the distro version of this operating system
-	if grep -q 'stretch' /etc/os-release; then
+	distro=$(</etc/debian_version)
+	if [[ $distro == '9.'* ]]; then
 
 		G_DISTRO=4
 		G_DISTRO_NAME='stretch'
 
-	elif grep -q 'buster' /etc/os-release; then
+	elif [[ $distro == '10.'* ]]; then
 
 		G_DISTRO=5
 		G_DISTRO_NAME='buster'
 
-	elif grep -q 'bullseye' /etc/os-release; then
+	elif [[ $distro == '11.'* ]]; then
 
 		G_DISTRO=6
 		G_DISTRO_NAME='bullseye'
 
+	elif [[ $distro == 'bookworm/sid' ]]; then
+
+		G_DISTRO=7
+		G_DISTRO_NAME='bookworm'
+
 	else
 
-		G_DIETPI-NOTIFY 1 "Unsupported distribution version: $(sed -n '/^PRETTY_NAME=/{s/^PRETTY_NAME=//p;q}' /etc/os-release 2>&1). Aborting...\n"
+		G_DIETPI-NOTIFY 1 "Unsupported distribution version: \"$distro\". Aborting...\n"
 		exit 1
 
 	fi
+	unset -v distro
 	G_DIETPI-NOTIFY 2 "Detected distribution version: ${G_DISTRO_NAME^} (ID: $G_DISTRO)"
 
 	# Detect the hardware architecture of this operating system
@@ -457,8 +464,9 @@ _EOF_
 		# Distro selection
 		DISTRO_LIST_ARRAY=(
 
-			'5' ': Buster (current stable release, recommended)'
-			'6' ': Bullseye (testing, if you want to live on bleeding edge)'
+			'5' ': Buster (oldstable, if you must stay with an old release)'
+			'6' ': Bullseye (current stable release, recommended)'
+			'7' ': Bookworm (testing, if you want to live on bleeding edge)'
 
 		)
 
@@ -515,6 +523,10 @@ Currently installed: $G_DISTRO_NAME (ID: $G_DISTRO)"; then
 		elif (( $DISTRO_TARGET == 6 )); then
 
 			DISTRO_TARGET_NAME='bullseye'
+
+		elif (( $DISTRO_TARGET == 7 )); then
+
+			DISTRO_TARGET_NAME='bookworm'
 
 		else
 
@@ -610,13 +622,6 @@ Currently installed: $G_DISTRO_NAME (ID: $G_DISTRO)"; then
 		done
 
 		G_EXEC cp /boot/dietpi/.version /var/lib/dietpi/.dietpi_image_version
-
-		# Temporary workaround for hanging DietPi-FirstBoot on Bullseye: https://github.com/MichaIng/DietPi/issues/4573#issuecomment-895208258
-		(( $DISTRO_TARGET == 6 && $G_DIETPI_VERSION_SUB == 4 )) && G_EXEC curl -sSfL 'https://raw.githubusercontent.com/MichaIng/DietPi/1ecf972/rootfs/var/lib/dietpi/services/dietpi-firstboot.bash' -o /var/lib/dietpi/services/dietpi-firstboot.bash
-
-		# Temporary fix for takeover of failed first run setup: https://github.com/MichaIng/DietPi/commit/a8f291caee8f1760020984a385f4831b0c954327
-		# shellcheck disable=SC2016
-		(( $G_DIETPI_VERSION_SUB == 4 )) && sed -i '/kill -9/a\\t\t\t\[\[ -f \$FP_DIETPI_FIRSTRUNSETUP_PID \]\] \&\& rm \$FP_DIETPI_FIRSTRUNSETUP_PID' /boot/dietpi/dietpi-login
 
 		G_EXEC systemctl daemon-reload
 
@@ -768,6 +773,9 @@ Currently installed: $G_DISTRO_NAME (ID: $G_DISTRO)"; then
 
 			local apackages=('linux-image-amd64' 'os-prober')
 
+			# As linux-image-amd64 pulls initramfs already, pre-install the intended implementation here already
+			(( $G_HW_MODEL == 20 )) && apackages+=('tiny-initramfs') || apackages+=('initramfs-tools')
+
 			# Grub EFI with secure boot compatibility
 			if [[ -d '/boot/efi' ]] || dpkg-query -s 'grub-efi-amd64' &> /dev/null; then
 
@@ -881,7 +889,7 @@ _EOF_
 			fi
 
 			# Remove obsolete components from Armbian list and connect via HTTPS
-			G_EXEC eval "echo 'deb https://apt.armbian.com/ $DISTRO_TARGET_NAME main' > /etc/apt/sources.list.d/armbian.list"
+			G_EXEC eval "echo 'deb https://apt.armbian.com/ ${DISTRO_TARGET_NAME/bookworm/bullseye} main' > /etc/apt/sources.list.d/armbian.list"
 
 			# Exclude doubled device tree files, shipped with the kernel package
 			echo 'path-exclude /usr/lib/linux-image-current-*' > /etc/dpkg/dpkg.cfg.d/01-dietpi-exclude_doubled_devicetrees
@@ -1061,6 +1069,8 @@ _EOF_
 		G_AGI "${aPACKAGES_REQUIRED_INSTALL[@]}"
 		unset -v aPACKAGES_REQUIRED_INSTALL
 
+		G_EXEC apt-get clean
+
 		G_AGA
 
 		#------------------------------------------------------------------------------------------------
@@ -1077,6 +1087,11 @@ _EOF_
 		then
 			mapfile -t apackages < <(dpkg --get-selections 'gcc-*-base' | mawk '$1!~/^gcc-10-/{print $1}')
 			[[ ${apackages[0]} ]] && G_AGP "${apackages[@]}"
+
+		elif [[ $G_DISTRO == 7 ]]
+		then
+			mapfile -t apackages < <(dpkg --get-selections 'gcc-*-base' | mawk '$1!~/^gcc-11-/{print $1}')
+			[[ ${apackages[0]} ]] && G_AGP "${apackages[@]}"
 		fi
 
 		# https://github.com/jirka-h/haveged/pull/7 https://github.com/MichaIng/DietPi/issues/3689#issuecomment-678322767
@@ -1091,7 +1106,6 @@ _EOF_
 			G_AGA
 
 		fi
-		G_EXEC apt-get clean # Remove downloaded archives
 
 		# RPi Bullseye workaround, until new firmware packages have been built: https://archive.raspberrypi.org/debian/pool/main/f/firmware-nonfree/?C=M;O=D
 		if (( $G_DISTRO == 6 && $G_HW_MODEL == 0 ))
@@ -1105,6 +1119,20 @@ _EOF_
 			done
 			G_EXEC rm -R lib
 		fi
+
+		# Install vmtouch to lock DietPi scripts and config in file system cache
+		G_EXEC curl -sSfLO "https://dietpi.com/downloads/binaries/$G_DISTRO_NAME/vmtouch_$G_HW_ARCH_NAME.deb"
+		G_EXEC dpkg --force-hold,confnew -i "vmtouch_$G_HW_ARCH_NAME.deb"
+		rm -v "vmtouch_$G_HW_ARCH_NAME.deb"
+
+		G_DIETPI-NOTIFY 2 'Restoring default base files:'
+		# shellcheck disable=SC2114
+		rm -Rfv /etc/{motd,profile,update-motd.d,issue{,.net}} /root /home /media /var/mail
+		G_AGI --reinstall base-files # Restore /etc/{update-motd.d,issue{,.net}} /root /home
+		G_EXEC /var/lib/dpkg/info/base-files.postinst configure # Restore /root/.{profile,bashrc} /etc/{motd,profile} /media /var/mail
+
+		# Remove downloaded archives
+		G_EXEC apt-get clean
 
 		G_DIETPI-NOTIFY 2 'Deleting list of known users and groups, not required by DietPi'
 
@@ -1123,6 +1151,9 @@ _EOF_
 		getent group openmediavault-config > /dev/null && groupdel openmediavault-config # OMV (NanoPi NEO2)
 		getent group openmediavault-engined > /dev/null && groupdel openmediavault-engined # OMV (NanoPi NEO2)
 		getent group openmediavault-webgui > /dev/null && groupdel openmediavault-webgui # OMV (NanoPi NEO2)
+
+		G_EXEC_DESC='Creating DietPi user account' G_EXEC /boot/dietpi/func/dietpi-set_software useradd dietpi
+		chpasswd <<< 'root:dietpi'
 
 		G_DIETPI-NOTIFY 2 'Removing misc files/folders/services, not required by DietPi'
 
@@ -1249,19 +1280,11 @@ _EOF_
 		[[ -f '/etc/cron.d/make_nas_processes_faster' ]] && rm -v /etc/cron.d/make_nas_processes_faster
 
 		#-----------------------------------------------------------------------------------
-		G_DIETPI-NOTIFY 2 'Restoring default base files:'
-		# shellcheck disable=SC2114
-		rm -Rfv /etc/{motd,profile,update-motd.d,issue{,.net}} /root /home /media /var/mail
-		G_AGI --reinstall base-files # Restore /etc/{update-motd.d,issue{,.net}} /root /home
-		G_EXEC /var/lib/dpkg/info/base-files.postinst configure # Restore /root/.{profile,bashrc} /etc/{motd,profile} /media /var/mail
-		G_EXEC apt-get clean # Remove downloaded archives
-
-		#-----------------------------------------------------------------------------------
 		# https://www.debian.org/doc/debian-policy/ch-opersys.html#site-specific-programs
 		G_DIETPI-NOTIFY 2 'Setting modern /usr/local permissions'
 		[[ -f '/etc/staff-group-for-usr-local' ]] && rm -v /etc/staff-group-for-usr-local
-		chown -R root:root /usr/local
-		chmod -R 0755 /usr/local
+		G_EXEC chown -R root:root /usr/local
+		G_EXEC chmod -R 0755 /usr/local
 
 		#-----------------------------------------------------------------------------------
 		# Boot Logo
@@ -1278,11 +1301,6 @@ _EOF_
 		# - Enable bash-completion for non-login shells:
 		#	- NB: It is called twice on login shells then, but breaks directly if called already once.
 		ln -sfv /etc/profile.d/bash_completion.sh /etc/bashrc.d/dietpi-bash_completion.sh
-
-		#-----------------------------------------------------------------------------------
-		# DietPi user
-		G_EXEC_DESC='Creating DietPi user account' G_EXEC /boot/dietpi/func/dietpi-set_software useradd dietpi
-		chpasswd <<< 'root:dietpi'
 
 		#-----------------------------------------------------------------------------------
 		# UID bit for sudo: https://github.com/MichaIng/DietPi/issues/794
@@ -1306,12 +1324,6 @@ _EOF_
 		G_EXEC systemctl enable dietpi-boot
 		G_EXEC systemctl enable dietpi-postboot
 		G_EXEC systemctl enable dietpi-kill_ssh
-
-		#-----------------------------------------------------------------------------------
-		# Install vmtouch to lock DietPi scripts and config in file system cache
-		G_EXEC curl -sSfLO "https://dietpi.com/downloads/binaries/$G_DISTRO_NAME/vmtouch_$G_HW_ARCH_NAME.deb"
-		G_EXEC dpkg --force-hold,confnew -i "vmtouch_$G_HW_ARCH_NAME.deb"
-		rm -v "vmtouch_$G_HW_ARCH_NAME.deb"
 
 		#-----------------------------------------------------------------------------------
 		# Cron jobs
@@ -1533,11 +1545,11 @@ _EOF_
 			# Update initramfs with above changes
 			if command -v update-tirfs > /dev/null; then
 
-				update-tirfs
+				G_EXEC_OUTPUT=1 G_EXEC update-tirfs
 
 			else
 
-				update-initramfs -u
+				G_EXEC_OUTPUT=1 G_EXEC update-initramfs -u
 
 			fi
 
@@ -1781,9 +1793,10 @@ _EOF_
 			# UEFI
 			if [[ -d '/boot/efi' ]] && dpkg-query -s 'grub-efi-amd64' &> /dev/null
 			then
-				# Force GRUB installation to the EFI removable media path, if no (other) bootloader is installed there yet
+				# Force GRUB installation to the EFI removable media path, if no (other) bootloader is installed there yet, which is checked via single case-insensitive glob
 				shopt -s nocaseglob
 				local efi_fallback=
+				# shellcheck disable=SC2043
 				for i in /boot/efi/EFI/boot/bootx64.efi
 				do
 					[[ -d $i ]] && break
@@ -1862,7 +1875,7 @@ _EOF_
 		G_EXEC rmdir /mnt/tmp_root
 
 		G_DIETPI-NOTIFY 2 'Running general cleanup of misc files'
-		rm -Rfv /{root,home/*}/.{bash_history,nano_history,wget-hsts,cache,local,config,gnupg,viminfo,dbus,gconf,nano,vim,zshrc,oh-my-zsh} /etc/*-
+		rm -Rfv /{root,home/*}/.{bash_history,nano_history,wget-hsts,cache,local,config,gnupg,viminfo,dbus,gconf,nano,vim,zshrc,oh-my-zsh} /etc/*- /var/cache/debconf/*-old
 
 		# Remove PREP script
 		[[ -f $FP_PREP_SCRIPT ]] && rm -v "$FP_PREP_SCRIPT"

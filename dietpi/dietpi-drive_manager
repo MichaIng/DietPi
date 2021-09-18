@@ -239,10 +239,14 @@ $swap_mounts
 
 				# Additional FS-specific options
 				# - NTFS: Enable POSIX permissions and prevent splitting write buffers into 4k chunks: https://manpages.debian.org/ntfs-3g#OPTIONS
-				if [[ ${aDRIVE_FSTYPE[$index]} == 'ntfs' ]]; then
-
+				if [[ ${aDRIVE_FSTYPE[$index]} == 'ntfs' ]]
+				then
 					options+=',permissions,big_writes'
 
+				# - exFAT: Grant (only) "dietpi" group R/W access: https://github.com/MichaIng/DietPi/issues/4680
+				elif [[ ${aDRIVE_FSTYPE[$index]} == 'exfat' ]]
+				then
+					getent group dietpi > /dev/null && options+=',gid=dietpi,fmask=0002,dmask=0002'
 				fi
 
 				# Root/BootFS dependant flags
@@ -339,37 +343,16 @@ $swap_mounts
 
 			elif [[ ${aDRIVE_FSTYPE[$i]} == 'exfat' ]]; then
 
-				local need_exfat='exfat-fuse'
+				# Install exFAT FUSE driver if the kernel does not support it natively yet, else purge it
+				if modprobe -nq exfat
+				then
+					dpkg-query -s 'exfat-fuse' &> /dev/null && G_AGP exfat-fuse
+				else
+					local need_exfat='exfat-fuse'
+				fi
 
 			fi
 		done
-
-		# Debug drive detection, exit after first init
-		if [[ $G_DEBUG == 1 ]]
-		then
-			G_DIETPI-NOTIFY 0 'DEBUG INFO:'
-			for i in "${!aDRIVE_MOUNT_SOURCE[@]}"
-			do
-				G_DIETPI-NOTIFY 0 "Index=$i
-aDRIVE_UUID ${aDRIVE_UUID[$i]}
-aDRIVE_PART_UUID ${aDRIVE_PART_UUID[$i]}
-aDRIVE_MOUNT_SOURCE ${aDRIVE_MOUNT_SOURCE[$i]}
-aDRIVE_MOUNT_TARGET ${aDRIVE_MOUNT_TARGET[$i]}
-aDRIVE_SOURCE_DEVICE ${aDRIVE_SOURCE_DEVICE[$i]}
-aDRIVE_FSTYPE ${aDRIVE_FSTYPE[$i]}
-aDRIVE_SIZE_TOTAL ${aDRIVE_SIZE_TOTAL[$i]}
-aDRIVE_SIZE_USED ${aDRIVE_SIZE_USED[$i]}
-aDRIVE_SIZE_PERCENTUSED ${aDRIVE_SIZE_PERCENTUSED[$i]}
-aDRIVE_ISFILESYSTEM ${aDRIVE_ISFILESYSTEM[$i]}
-aDRIVE_ISMOUNTED ${aDRIVE_ISMOUNTED[$i]}
-aDRIVE_ISREADONLY_CURRENTLY ${aDRIVE_ISREADONLY_CURRENTLY[$i]}
-aDRIVE_ISNETWORKED ${aDRIVE_ISNETWORKED[$i]}
-aDRIVE_ISROM ${aDRIVE_ISROM[$i]}
-aDRIVE_ISPARTITIONTABLE ${aDRIVE_ISPARTITIONTABLE[$i]}
-"
-			done
-			exit
-		fi
 
 		# Remove x-systemd.automount if not supported by kernel: https://github.com/MichaIng/DietPi/issues/1607#issuecomment-372030565
 		if ! modprobe -nq autofs4
@@ -398,7 +381,6 @@ aDRIVE_ISPARTITIONTABLE ${aDRIVE_ISPARTITIONTABLE[$i]}
 		do
 			[[ $MENU_DRIVE_TARGET == "${aDRIVE_MOUNT_TARGET[$i]}" ]] || continue
 			MENU_DRIVE_INDEX=$i
-			[[ $G_DEBUG == 1 ]] && echo "[DEBUG$i] EDIT | ${aDRIVE_MOUNT_TARGET[$MENU_DRIVE_INDEX]} | ${aDRIVE_MOUNT_SOURCE[$MENU_DRIVE_INDEX]} | ${aDRIVE_SOURCE_DEVICE[$MENU_DRIVE_INDEX]}"
 			break
 		done
 
@@ -467,18 +449,21 @@ Do you wish to ignore this warning, and, mount the drive regardless?" || return 
 
 		fi
 
-		# Mount options
-		local aoptions=()
-		# - FS type specific options
-		local fs_type=$(blkid -s TYPE -o value "$source")
-		if [[ $fs_type == 'ntfs' ]]; then
+		# FS-specific mount options
+		local fs_type=$(blkid -s TYPE -o value "$source") options='noatime,lazytime,rw'
+		# - NTFS: Enable POSIX permissions and prevent splitting write buffers into 4k chunks: https://manpages.debian.org/ntfs-3g#OPTIONS
+		if [[ $fs_type == 'ntfs' ]]
+		then
+			options+=',permissions,big_writes'
 
-			aoptions=('-o' 'permissions')
-
+		# - exFAT: Grant (only) "dietpi" group R/W access: https://github.com/MichaIng/DietPi/issues/4680
+		elif [[ $fs_type == 'exfat' ]]
+		then
+			getent group dietpi > /dev/null && options+=',gid=dietpi,fmask=0002,dmask=0002'
 		fi
 
 		G_EXEC_NOHALT=1 G_EXEC mkdir -p "$target" || return 1
-		G_EXEC_NOHALT=1 G_EXEC mount "$source" "$target" "${aoptions[@]}" || return 1
+		G_EXEC_NOHALT=1 G_EXEC mount "$source" "$target" -o "$options" || return 1
 		MENU_DRIVE_TARGET=$target
 		Init_Drives_and_Refresh
 
@@ -490,10 +475,10 @@ Do you wish to ignore this warning, and, mount the drive regardless?" || return 
 		local target=$1
 
 		G_EXEC_NOEXIT=1 G_EXEC umount "$target" || return 1
-		sed -i "\#[[:blank:]]${target}[[:blank:]]#d" /etc/fstab # Only needed for network drives currently, as unmounted physical drives wont be re-added via Init_Drives_and_Refresh
+		sed -i "\#[[:blank:]]${target}[[:blank:]]#d" /etc/fstab # Only needed for network drives currently, as unmounted physical drives won't be re-added via Init_Drives_and_Refresh
 		# Stop automount to unlock mount point
 		local automount=${target#/}
-		[[ $automount ]] && automount=${automount//\//-}
+		[[ $automount ]] && { automount=${automount//-/\\x2d}; automount=${automount//\//-}; }
 		[[ -f /run/systemd/generator/$automount.automount ]] && G_EXEC systemctl stop "$automount.automount"
 		G_EXEC_NOEXIT=1 G_EXEC rmdir "$target"
 		Init_Drives_and_Refresh
@@ -750,7 +735,7 @@ Do you wish to ignore this warning, and, mount the drive regardless?" || return 
 		if (( $G_HW_MODEL < 10 )); then
 
 			# Find current root= and replace
-			local rootfs_current=$(mawk '{for(i=1;i<=NF;i++) {print $i} }' /boot/cmdline.txt | grep -m1 '^root=')
+			local rootfs_current=$(mawk '{for(i=1;i<=NF;i++) if($i~/^root=/) {print $i;exit}}' /boot/cmdline.txt)
 			G_EXEC sed -i "s#$rootfs_current#root=PARTUUID=${aDRIVE_PART_UUID[$MENU_DRIVE_INDEX]}#g" /boot/cmdline.txt
 
 			# Set FS type
@@ -760,11 +745,11 @@ Do you wish to ignore this warning, and, mount the drive regardless?" || return 
 			# Add root delay
 			grep -qE '(^|[[:blank:]])rootdelay=' /boot/cmdline.txt || G_EXEC sed -i "s#rootfstype=${aDRIVE_FSTYPE[$MENU_DRIVE_INDEX]}#rootfstype=${aDRIVE_FSTYPE[$MENU_DRIVE_INDEX]} rootdelay=10#" /boot/cmdline.txt
 
-		# C2/XU4: /boot/boot.ini
-		elif [[ $G_HW_MODEL == 1[12] ]]; then
+		# C2/XU4/N2: /boot/boot.ini
+		elif [[ $G_HW_MODEL == 1[125] ]]; then
 
 			# Find current root= to replace
-			local rootfs_current=$(mawk '{for(i=1;i<=NF;i++) {print $i} }' /boot/boot.ini | grep -m1 '^root=' | sed 's/\"//')
+			local rootfs_current=$(mawk '-F[" ]' '{for(i=1;i<=NF;i++) if($i~/^root=/) {print $i;exit}}' /boot/boot.ini)
 			G_EXEC sed -i "s#$rootfs_current#root=UUID=${aDRIVE_UUID[$MENU_DRIVE_INDEX]}#g" /boot/boot.ini
 
 		fi
@@ -992,6 +977,20 @@ Do you wish to ignore this warning, and, mount the drive regardless?" || return 
 
 	}
 
+	Install_exFAT_Tools()
+	{
+		# Install FUSE driver if kernel does not support exFAT natively and on Bullseye exfatprogs if it does, else exfat-utils
+		local apackages=()
+		if modprobe -nq exfat
+		then
+			(( $G_DISTRO > 5 )) && apackages=('exfatprogs') || apackages=('exfat-utils')
+			dpkg-query -s 'exfat-fuse' &> /dev/null && G_AGP exfat-fuse
+		else
+			apackages=('exfat-fuse' 'exfat-utils')
+		fi
+		G_AG_CHECK_INSTALL_PREREQ "${apackages[@]}"
+	}
+
 	# TARGETMENUID=1
 	Menu_Drive(){
 
@@ -1141,8 +1140,8 @@ Do you wish to ignore this warning, and, mount the drive regardless?" || return 
 
 				fi
 
-				# Transfer RootFS
-				if [[ ${aDRIVE_MOUNT_SOURCE[$MENU_DRIVE_INDEX]} != "$G_ROOTFS_DEV" ]] && (( $G_HW_MODEL < 13 )); then
+				# Transfer RootFS: Supported on RPi and Odroids C2/XU4/N2
+				if [[ ${aDRIVE_MOUNT_SOURCE[$MENU_DRIVE_INDEX]} != "$G_ROOTFS_DEV" && ( $G_HW_MODEL -le 9 || $G_HW_MODEL == 1[125] ) ]]; then
 
 					G_WHIP_MENU_ARRAY+=('Transfer RootFS' ': Transfer RootFS to this drive')
 
@@ -1404,8 +1403,15 @@ We recommend \"ext4\" as filesystem type for the RootFS."
 
 				elif [[ ${aDRIVE_FSTYPE[$MENU_DRIVE_INDEX]} == 'exfat' ]]; then
 
-					G_AG_CHECK_INSTALL_PREREQ exfat-utils exfat-fuse
-					local fsck_fix='exfatfsck'
+					Install_exFAT_Tools
+					# On Stretch, fsck.exfat does not support repairing yet
+					if (( $G_DISTRO > 4 ))
+					then
+						local fsck_dry='fsck.exfat -n'
+						local fsck_fix='fsck.exfat -p'
+					else
+						local fsck_dry='exfatfsck'
+					fi
 
 				elif [[ ${aDRIVE_FSTYPE[$MENU_DRIVE_INDEX]} =~ 'fat' ]]; then
 
@@ -1464,17 +1470,13 @@ We recommend \"ext4\" as filesystem type for the RootFS."
 					G_EXEC umount "${aDRIVE_MOUNT_TARGET[$MENU_DRIVE_INDEX]}"
 				fi
 
-				# Do dry-run first for filesystems supporting it:
-				if [[ $fsck_dry ]]; then
+				# Do a dry-run first
+				G_WHIP_MSG "The following drive will now be checked for errors:\n${aDRIVE_MOUNT_SOURCE[$MENU_DRIVE_INDEX]}\n\nNo repair will be completed during this process. An option to repair the drive, will be provided after the check."
+				$fsck_dry "${aDRIVE_MOUNT_SOURCE[$MENU_DRIVE_INDEX]}" &> .fsck_out_tmp
+				log=1 G_WHIP_VIEWFILE .fsck_out_tmp
+				rm .fsck_out_tmp
 
-					G_WHIP_MSG "The following drive will now be checked for errors:\n${aDRIVE_MOUNT_SOURCE[$MENU_DRIVE_INDEX]}\n\nNo repair will be completed during this process. An option to repair the drive, will be provided after the check."
-					$fsck_dry "${aDRIVE_MOUNT_SOURCE[$MENU_DRIVE_INDEX]}" &> .fsck_out_tmp
-					log=1 G_WHIP_VIEWFILE .fsck_out_tmp
-					rm .fsck_out_tmp
-
-				fi
-
-				if G_WHIP_YESNO "Would you like to run an automated repair on the following drive now?\n${aDRIVE_MOUNT_SOURCE[$MENU_DRIVE_INDEX]}
+				if [[ $fsck_fix ]] && G_WHIP_YESNO "Would you like to run an automated repair on the following drive now?\n${aDRIVE_MOUNT_SOURCE[$MENU_DRIVE_INDEX]}
 \nNB:
 - Automated repair steps potentially lead to data loss, which would have been able to recover by professional drive recovery services.
 - If the data is extremely important and you don't have any backup, you might want to hand the drive to a recovery service as is.
@@ -1483,6 +1485,12 @@ We recommend \"ext4\" as filesystem type for the RootFS."
 					$fsck_fix "${aDRIVE_MOUNT_SOURCE[$MENU_DRIVE_INDEX]}" &> .fsck_out_tmp
 					log=1 G_WHIP_VIEWFILE .fsck_out_tmp
 					rm .fsck_out_tmp
+
+				elif [[ ! $fsck_fix ]]; then
+
+					G_WHIP_MSG "The fsck tool for ${aDRIVE_FSTYPE[$MENU_DRIVE_INDEX]} filesystems does not support repairing yet on Debian ${G_DISTRO_NAME^}.
+\nWe recommend to migrate to a new Debian release which supports this feature, either by installing a new DietPi image or following our HowTo to upgrade your system:
+=> https://dietpi.com/docs/usage/#how-to-upgrade-to-buster"
 
 				fi
 
@@ -1669,7 +1677,7 @@ NB: If you are planning to dedicate the drive to this system, it is recommended 
 					# - exFAT
 					elif (( $G_WHIP_RETURNED_VALUE == 6 )); then
 
-						G_AG_CHECK_INSTALL_PREREQ exfat-utils exfat-fuse
+						Install_exFAT_Tools
 
 					# - XFS
 					elif (( $G_WHIP_RETURNED_VALUE == 7 )); then
