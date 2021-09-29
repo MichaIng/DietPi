@@ -792,6 +792,30 @@ Currently installed: $G_DISTRO_NAME (ID: $G_DISTRO)"; then
 			echo 'do_symlinks=0' > /etc/kernel-img.conf
 			G_EXEC rm -f /{,boot/}{initrd.img,vmlinuz}{,.old}
 
+			# If /boot is on a FAT partition, create a kernel upgrade hook script to remove existing files first: https://github.com/MichaIng/DietPi/issues/4785
+			if [[ $(findmnt -Ufnro FSTYPE -M /boot) == 'vfat' ]]
+			then
+				G_EXEC mkdir -p /etc/kernel/preinst.d
+				cat << '_EOF_' > /etc/kernel/preinst.d/dietpi
+#!/bin/sh -e
+# Remove old kernel files if existing: https://github.com/MichaIng/DietPi/issues/4788
+{
+# Fail if the package name was not passed, which is done when being invoked by dpkg
+if [ -z "$DPKG_MAINTSCRIPT_PACKAGE" ]
+then
+        echo 'DPKG_MAINTSCRIPT_PACKAGE was not set, this script must be invoked by dpkg.'
+        exit 1
+fi
+
+# Loop through files in /boot, shipped by the package, and remove them, if existing
+for file in $(dpkg -L "$DPKG_MAINTSCRIPT_PACKAGE" | grep '^/boot/')
+do
+        [ ! -f "$file" ] || rm "$file"
+done
+}
+_EOF_
+			fi
+
 			G_AGI "${apackages[@]}"
 			unset -v apackages
 
