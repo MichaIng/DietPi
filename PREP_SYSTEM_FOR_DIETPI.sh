@@ -1183,8 +1183,10 @@ _EOF_
 
 		[[ -d '/selinux' ]] && rm -Rv /selinux
 		[[ -d '/var/cache/apparmor' ]] && rm -Rv /var/cache/apparmor
+		[[ -d '/var/lib/udisks2' ]] && rm -Rv /var/lib/udisks2
 		[[ -d '/usr/lib/firefox-esr' ]] && rm -Rv /usr/lib/firefox-esr # Armbian desktop images
 		rm -Rfv /var/lib/dhcp/{,.??,.[^.]}*
+		rm -Rfv /var/lib/misc/*.leases
 		rm -Rfv /var/backups/{,.??,.[^.]}*
 
 		# - www
