@@ -1184,10 +1184,13 @@ _EOF_
 		[[ -d '/selinux' ]] && rm -Rv /selinux
 		[[ -d '/var/cache/apparmor' ]] && rm -Rv /var/cache/apparmor
 		[[ -d '/var/lib/udisks2' ]] && rm -Rv /var/lib/udisks2
+		[[ -d '/var/lib/bluetooth' ]] && rm -Rv /var/lib/bluetooth
 		[[ -d '/usr/lib/firefox-esr' ]] && rm -Rv /usr/lib/firefox-esr # Armbian desktop images
 		rm -Rfv /var/lib/dhcp/{,.??,.[^.]}*
 		rm -Rfv /var/lib/misc/*.leases
 		rm -Rfv /var/backups/{,.??,.[^.]}*
+		[[ -f '/etc/udhcpd.conf.org' ]] && rm -v /etc/udhcpd.conf.org
+		[[ -f '/etc/fs.resized' ]] && rm -v /etc/fs.resized
 
 		# - www
 		[[ -d '/var/www' ]] && rm -vRf /var/www/{,.??,.[^.]}*
