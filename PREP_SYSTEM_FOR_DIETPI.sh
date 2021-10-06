@@ -857,11 +857,12 @@ _EOF_
 			G_EXEC mkdir -p /etc/initramfs/post-update.d
 			cat << _EOF_ > /etc/initramfs/post-update.d/99-dietpi-uboot
 #!/bin/dash
-echo 'update-initramfs: Converting to u-boot format' >&2
+echo 'update-initramfs: Converting to U-Boot format' >&2
 mkimage -A $arch -O linux -T ramdisk -C gzip -n uInitrd -d \$2 /boot/uInitrd-\$1 > /dev/null
 ln -sf uInitrd-\$1 /boot/uInitrd > /dev/null 2>&1 || mv /boot/uInitrd-\$1 /boot/uInitrd
 exit 0
 _EOF_
+			G_EXEC chmod +x /etc/initramfs/post-update.d/99-dietpi-uboot
 			G_EXEC mkdir -p /etc/kernel/preinst.d
 			cat << '_EOF_' > /etc/kernel/preinst.d/dietpi-initramfs_cleanup
 #!/bin/dash
@@ -879,7 +880,7 @@ fi
 # avoid running multiple times
 if [ -n "$DEB_MAINT_PARAMS" ]; then
         eval set -- "$DEB_MAINT_PARAMS"
-        if [ -z "$1" ] || [ "$1" != 'upgrade' ]; then
+        if [ "$1" != 'upgrade' ]; then
                 exit 0
         fi
 fi
@@ -911,6 +912,7 @@ done
 exit 0
 _EOF_
 			fi
+			G_EXEC chmod +x /etc/kernel/preinst.d/dietpi-initramfs_cleanup
 
 			# Remove obsolete components from Armbian list and connect via HTTPS
 			G_EXEC eval "echo 'deb http://apt.armbian.com/ ${DISTRO_TARGET_NAME/bookworm/bullseye} main' > /etc/apt/sources.list.d/armbian.list"
