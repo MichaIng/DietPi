@@ -4817,8 +4817,74 @@ _EOF_
 		if (( ${aSOFTWARE_INSTALL_STATE[$software_id]} == 1 )); then
 
 			Banner_Installing
+
+			# Packages
 			G_AGI deluged deluge-web deluge-console
 
+			# Remove SysV service leftovers, installed by Debian APT package
+			Remove_SysV deluged 1
+			[[ -d '/var/lib/deluged' ]] && G_EXEC rm -R /var/lib/deluged
+			[[ -d '/var/log/deluged' ]] && G_EXEC rm -R /var/log/deluged
+
+			# User
+			Create_User -g dietpi -G debian-deluged -d /mnt/dietpi_userdata/deluge debian-deluged
+
+			# Config
+			if [[ ! -f '/mnt/dietpi_userdata/deluge/.config/deluge/core.conf' ]]; then
+
+				[[ -d '/mnt/dietpi_userdata/deluge/.config/deluge' ]] || G_EXEC mkdir -p /mnt/dietpi_userdata/deluge/.config/deluge
+
+				# Copy DietPi configs
+				dps_index=$software_id Download_Install 'deluge.conf' /mnt/dietpi_userdata/deluge/.config/deluge/core.conf
+				dps_index=$software_id Download_Install 'deluge_web.conf' /mnt/dietpi_userdata/deluge/.config/deluge/web.conf
+
+				# Set remote access login details
+				echo "root:$GLOBAL_PW:10" > /mnt/dietpi_userdata/deluge/.config/deluge/auth
+
+				# Apply optimised settings
+				# - Cache size is in steps of 16 KiB. (Cache size * 16 = total KiB)
+				sed -i '/"cache_size": /c\ "cache_size": '$(( $(Optimise_BitTorrent 0) * 1024 / 16 ))',' /mnt/dietpi_userdata/deluge/.config/deluge/core.conf
+				sed -i '/"max_active_limit": /c\ "max_active_limit": '"$(Optimise_BitTorrent 1)"',' /mnt/dietpi_userdata/deluge/.config/deluge/core.conf
+				sed -i '/"max_active_downloading": /c\ "max_active_downloading": '"$(Optimise_BitTorrent 1)"',' /mnt/dietpi_userdata/deluge/.config/deluge/core.conf
+				sed -i '/"max_connections_global": /c\ "max_connections_global": '"$(Optimise_BitTorrent 2)"',' /mnt/dietpi_userdata/deluge/.config/deluge/core.conf
+				sed -i '/"max_upload_slots_global": /c\ "max_upload_slots_global": '"$(Optimise_BitTorrent 3)"',' /mnt/dietpi_userdata/deluge/.config/deluge/core.conf
+
+			fi
+
+			# Permissions
+			G_EXEC chown -R debian-deluged:root /mnt/dietpi_userdata/deluge
+
+			# Service: https://github.com/deluge-torrent/deluge/blob/develop/packaging/systemd/deluged.service
+			cat << _EOF_ > /etc/systemd/system/deluged.service
+[Unit]
+Description=Deluge Daemon (DietPi)
+Documentation=man:deluged
+
+[Service]
+User=debian-deluged
+UMask=002
+ExecStart=$(command -v deluged) -d
+
+[Install]
+WantedBy=multi-user.target
+_EOF_
+			# https://github.com/deluge-torrent/deluge/blob/develop/packaging/systemd/deluge-web.service
+			# - Bullseye: deluge-web v2 requires the "-d" flag to stay in foreground, but v1 does not understand it yet
+			local flag=
+			(( $G_DISTRO < 6 )) || flag=' -d'
+			cat << _EOF_ > /etc/systemd/system/deluge-web.service
+[Unit]
+Description=Deluge Web UI (DietPi)
+Documentation=man:deluge-web
+
+[Service]
+User=debian-deluged
+UMask=027
+ExecStart=$(command -v deluge-web)$flag
+
+[Install]
+WantedBy=multi-user.target
+_EOF_
 		fi
 
 		software_id=115 # Webmin
@@ -10031,90 +10097,6 @@ _EOF_
 
 		fi
 
-		software_id=45 # Deluge
-		if (( ${aSOFTWARE_INSTALL_STATE[$software_id]} == 1 )); then
-
-			Banner_Configuration
-
-			# User
-			Create_User -G dietpi -d /mnt/dietpi_userdata/deluge debian-deluged
-
-			# Dirs
-			G_EXEC mkdir -p /mnt/dietpi_userdata/deluge/.config/deluge /var/log/deluged
-
-			# Service: https://git.deluge-torrent.org/deluge/tree/packaging/systemd/deluged.service
-			cat << _EOF_ > /etc/systemd/system/deluged.service
-[Unit]
-Description=Deluge Daemon (DietPi)
-Documentation=man:deluged
-
-[Service]
-User=debian-deluged
-Group=dietpi
-UMask=002
-ExecStart=$(command -v deluged) -d -l /var/log/deluged/daemon.log -L warning
-Restart=on-failure
-TimeoutStopSec=300
-
-[Install]
-WantedBy=multi-user.target
-_EOF_
-			# https://git.deluge-torrent.org/deluge/tree/packaging/systemd/deluge-web.service
-			cat << _EOF_ > /etc/systemd/system/deluge-web.service
-[Unit]
-Description=Deluge Web UI (DietPi)
-Documentation=man:deluge-web
-
-[Service]
-User=debian-deluged
-UMask=027
-ExecStart=$(command -v deluge-web) -l /var/log/deluged/web.log -L warning
-Restart=on-failure
-
-[Install]
-WantedBy=multi-user.target
-_EOF_
-			# Bullseye: deluge-web requires the "-d" flag now to stay in foreground
-			(( $G_DISTRO < 6 )) || G_EXEC sed -i 's/deluge-web -l/deluge-web -d -l/' /etc/systemd/system/deluge-web.service
-
-			# Add web.log to Logrotate config
-			if [[ -f '/etc/logrotate.d/deluged' ]] && ! grep -q 'web.log' /etc/logrotate.d/deluged; then
-
-				echo -e "\n$(</etc/logrotate.d/deluged)" >> /etc/logrotate.d/deluged
-				sed -i '1,1s/daemon.log/web.log/' /etc/logrotate.d/deluged
-
-			fi
-
-			# Adjust config files only, if not yet existent
-			if [[ ! -f '/mnt/dietpi_userdata/deluge/.config/deluge/core.conf' ]]; then
-
-				# Copy DietPi configs
-				dps_index=$software_id Download_Install 'deluge.conf' /mnt/dietpi_userdata/deluge/.config/deluge/core.conf
-				dps_index=$software_id Download_Install 'deluge_web.conf' /mnt/dietpi_userdata/deluge/.config/deluge/web.conf
-
-				# Set remote access login details
-				echo "root:$GLOBAL_PW:10" > /mnt/dietpi_userdata/deluge/.config/deluge/auth
-
-				# Apply optimised settings
-				# - Cache size is in steps of 16 KiB. (Cache size * 16 = total KiB)
-				sed -i '/"cache_size": /c\ "cache_size": '$(( $(Optimise_BitTorrent 0) * 1024 / 16 ))',' /mnt/dietpi_userdata/deluge/.config/deluge/core.conf
-				sed -i '/"max_active_limit": /c\ "max_active_limit": '"$(Optimise_BitTorrent 1)"',' /mnt/dietpi_userdata/deluge/.config/deluge/core.conf
-				sed -i '/"max_active_downloading": /c\ "max_active_downloading": '"$(Optimise_BitTorrent 1)"',' /mnt/dietpi_userdata/deluge/.config/deluge/core.conf
-				sed -i '/"max_connections_global": /c\ "max_connections_global": '"$(Optimise_BitTorrent 2)"',' /mnt/dietpi_userdata/deluge/.config/deluge/core.conf
-				sed -i '/"max_upload_slots_global": /c\ "max_upload_slots_global": '"$(Optimise_BitTorrent 3)"',' /mnt/dietpi_userdata/deluge/.config/deluge/core.conf
-
-			fi
-
-			# Remove sysvinit service leftovers, installed by Debian APT package
-			Remove_SysV deluged 1
-			[[ -d '/var/lib/deluged' ]] && rm -R /var/lib/deluged
-
-			# Permissions
-			chown -R debian-deluged:debian-deluged /mnt/dietpi_userdata/deluge
-			chown -R debian-deluged /var/log/deluged
-
-		fi
-
 		software_id=115 # Webmin
 		if (( ${aSOFTWARE_INSTALL_STATE[$software_id]} == 1 )); then
 
@@ -14780,22 +14762,22 @@ _EOF_
 			Banner_Uninstalling
 			if [[ -f '/etc/systemd/system/deluge-web.service' ]]; then
 
-				systemctl disable --now deluge-web
-				rm -R /etc/systemd/system/deluge-web.service*
+				G_EXEC systemctl disable --now deluge-web
+				G_EXEC rm /etc/systemd/system/deluge-web.service
 
 			fi
-			[[ -d '/etc/systemd/system/deluge-web.service.d' ]] && rm -R /etc/systemd/system/deluge-web.service.d
+			[[ -d '/etc/systemd/system/deluge-web.service.d' ]] && G_EXEC rm -R /etc/systemd/system/deluge-web.service.d
 			if [[ -f '/etc/systemd/system/deluged.service' ]]; then
 
-				systemctl disable --now deluged
-				rm -R /etc/systemd/system/deluged.service*
+				G_EXEC systemctl disable --now deluged
+				G_EXEC rm /etc/systemd/system/deluged.service
 
 			fi
-			[[ -d '/etc/systemd/system/deluged.service.d' ]] && rm -R /etc/systemd/system/deluged.service.d
+			[[ -d '/etc/systemd/system/deluged.service.d' ]] && G_EXEC rm -R /etc/systemd/system/deluged.service.d
+			[[ -d '/mnt/dietpi_userdata/deluge' ]] && G_EXEC rm -R /mnt/dietpi_userdata/deluge
 			G_AGP deluged deluge-web deluge-console
-			getent passwd debian-deluged > /dev/null && userdel debian-deluged
-			getent group debian-deluged > /dev/null && groupdel debian-deluged
-			[[ -d '/mnt/dietpi_userdata/deluge' ]] && rm -R /mnt/dietpi_userdata/deluge
+			getent passwd debian-deluged > /dev/null && G_EXEC userdel debian-deluged
+			getent group debian-deluged > /dev/null && G_EXEC groupdel debian-deluged
 
 		fi
 
