@@ -814,6 +814,7 @@ do
 done
 }
 _EOF_
+				G_EXEC chmod +x /etc/kernel/preinst.d/dietpi
 			fi
 
 			G_AGI "${apackages[@]}"
