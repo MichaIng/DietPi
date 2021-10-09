@@ -792,6 +792,31 @@ Currently installed: $G_DISTRO_NAME (ID: $G_DISTRO)"; then
 			echo 'do_symlinks=0' > /etc/kernel-img.conf
 			G_EXEC rm -f /{,boot/}{initrd.img,vmlinuz}{,.old}
 
+			# If /boot is on a FAT partition, create a kernel upgrade hook script to remove existing files first: https://github.com/MichaIng/DietPi/issues/4788
+			if [[ $(findmnt -Ufnro FSTYPE -M /boot) == 'vfat' ]]
+			then
+				G_EXEC mkdir -p /etc/kernel/preinst.d
+				cat << '_EOF_' > /etc/kernel/preinst.d/dietpi
+#!/bin/sh -e
+# Remove old kernel files if existing: https://github.com/MichaIng/DietPi/issues/4788
+{
+# Fail if the package name was not passed, which is done when being invoked by dpkg
+if [ -z "$DPKG_MAINTSCRIPT_PACKAGE" ]
+then
+        echo 'DPKG_MAINTSCRIPT_PACKAGE was not set, this script must be invoked by dpkg.'
+        exit 1
+fi
+
+# Loop through files in /boot, shipped by the package, and remove them, if existing
+for file in $(dpkg -L "$DPKG_MAINTSCRIPT_PACKAGE" | grep '^/boot/')
+do
+        [ ! -f "$file" ] || rm "$file"
+done
+}
+_EOF_
+				G_EXEC chmod +x /etc/kernel/preinst.d/dietpi
+			fi
+
 			G_AGI "${apackages[@]}"
 			unset -v apackages
 
@@ -833,11 +858,12 @@ Currently installed: $G_DISTRO_NAME (ID: $G_DISTRO)"; then
 			G_EXEC mkdir -p /etc/initramfs/post-update.d
 			cat << _EOF_ > /etc/initramfs/post-update.d/99-dietpi-uboot
 #!/bin/dash
-echo 'update-initramfs: Converting to u-boot format' >&2
+echo 'update-initramfs: Converting to U-Boot format' >&2
 mkimage -A $arch -O linux -T ramdisk -C gzip -n uInitrd -d \$2 /boot/uInitrd-\$1 > /dev/null
 ln -sf uInitrd-\$1 /boot/uInitrd > /dev/null 2>&1 || mv /boot/uInitrd-\$1 /boot/uInitrd
 exit 0
 _EOF_
+			G_EXEC chmod +x /etc/initramfs/post-update.d/99-dietpi-uboot
 			G_EXEC mkdir -p /etc/kernel/preinst.d
 			cat << '_EOF_' > /etc/kernel/preinst.d/dietpi-initramfs_cleanup
 #!/bin/dash
@@ -855,7 +881,7 @@ fi
 # avoid running multiple times
 if [ -n "$DEB_MAINT_PARAMS" ]; then
         eval set -- "$DEB_MAINT_PARAMS"
-        if [ -z "$1" ] || [ "$1" != 'upgrade' ]; then
+        if [ "$1" != 'upgrade' ]; then
                 exit 0
         fi
 fi
@@ -887,9 +913,10 @@ done
 exit 0
 _EOF_
 			fi
+			G_EXEC chmod +x /etc/kernel/preinst.d/dietpi-initramfs_cleanup
 
 			# Remove obsolete components from Armbian list and connect via HTTPS
-			G_EXEC eval "echo 'deb https://apt.armbian.com/ ${DISTRO_TARGET_NAME/bookworm/bullseye} main' > /etc/apt/sources.list.d/armbian.list"
+			G_EXEC eval "echo 'deb http://apt.armbian.com/ ${DISTRO_TARGET_NAME/bookworm/bullseye} main' > /etc/apt/sources.list.d/armbian.list"
 
 			# Exclude doubled device tree files, shipped with the kernel package
 			echo 'path-exclude /usr/lib/linux-image-current-*' > /etc/dpkg/dpkg.cfg.d/01-dietpi-exclude_doubled_devicetrees
@@ -1159,9 +1186,14 @@ _EOF_
 
 		[[ -d '/selinux' ]] && rm -Rv /selinux
 		[[ -d '/var/cache/apparmor' ]] && rm -Rv /var/cache/apparmor
+		[[ -d '/var/lib/udisks2' ]] && rm -Rv /var/lib/udisks2
+		[[ -d '/var/lib/bluetooth' ]] && rm -Rv /var/lib/bluetooth
 		[[ -d '/usr/lib/firefox-esr' ]] && rm -Rv /usr/lib/firefox-esr # Armbian desktop images
 		rm -Rfv /var/lib/dhcp/{,.??,.[^.]}*
+		rm -Rfv /var/lib/misc/*.leases
 		rm -Rfv /var/backups/{,.??,.[^.]}*
+		[[ -f '/etc/udhcpd.conf.org' ]] && rm -v /etc/udhcpd.conf.org
+		[[ -f '/etc/fs.resized' ]] && rm -v /etc/fs.resized
 
 		# - www
 		[[ -d '/var/www' ]] && rm -vRf /var/www/{,.??,.[^.]}*

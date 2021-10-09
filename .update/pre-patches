@@ -73,11 +73,11 @@ Package: linux-image-* linux-headers-* linux-dtb-* linux-u-boot-* armbian-firmwa
 \nPackage: *\nPin: origin apt.armbian.com\nPin-Priority: -1' > /etc/apt/preferences.d/dietpi-armbian"
 fi
 
-# v7.4: On Stretch, allow interactive suite change once, to assure the update does not hang or fail on G_AGUP. From Buster on, the suite change throws a notice only and does not require any confirmation.
-if (( $G_DISTRO < 5 )) && (( $G_DIETPI_VERSION_CORE < 7 || ( $G_DIETPI_VERSION_CORE == 7 && $G_DIETPI_VERSION_SUB < 4 ) )) && curl -sSfL 'https://deb.debian.org/debian/dists/bullseye/Release' | grep -q '^Suite: stable$'
+# v7.5: Perform Debian suite change once, if the installed APT version does not allow it by default yet
+if (( $G_DIETPI_VERSION_CORE < 7 || ( $G_DIETPI_VERSION_CORE == 7 && $G_DIETPI_VERSION_SUB < 5 ) )) && dpkg --compare-versions "$(dpkg-query -Wf '${VERSION}' apt)" lt 1.8.2.3
 then
-	G_DIETPI-NOTIFY 2 'Debian Bullseye has been released, so you need to accept the Stretch suite change from "oldstable" to "oldoldstable" once.'
-	apt-get update	
+	G_DIETPI-NOTIFY 2 'Debian Bullseye has been released, so we accept the repository suite change once.'
+	G_EXEC apt-get -o 'Acquire::AllowReleaseInfoChange::Suite=true' -q update
 fi
 
 # v7.4
@@ -94,6 +94,50 @@ if [[ $G_HW_MODEL -le 9 && -f '/etc/apt/preferences.d/dietpi-lxde' ]] && ! grep 
 then
 	G_DIETPI-NOTIFY 2 'Updating the Raspberry Pi desktop package blocks'
 	G_EXEC sed -i '/^Package:/c\Package: openbox* obconf* libob* pcmanfm* libfm* libgtk* lx*' /etc/apt/preferences.d/dietpi-lxde
+fi
+
+# v7.7
+if (( $G_DIETPI_VERSION_CORE < 7 || ( $G_DIETPI_VERSION_CORE == 7 && $G_DIETPI_VERSION_SUB < 7 ) )) && [[ $G_HW_ARCH == 10 && $(findmnt -Ufnro FSTYPE -M /boot) == 'vfat' ]]
+then
+	G_DIETPI-NOTIFY 2 'Creating kernel upgrade hook to remove existing files from /boot FAT partition before installing the new files: https://github.com/MichaIng/DietPi/issues/4788'
+	G_EXEC mkdir -p /etc/kernel/preinst.d
+	cat << '_EOF_' > /etc/kernel/preinst.d/dietpi
+#!/bin/sh -e
+# Remove old kernel files if existing: https://github.com/MichaIng/DietPi/issues/4788
+{
+# Fail if the package name was not passed, which is done when being invoked by dpkg
+if [ -z "$DPKG_MAINTSCRIPT_PACKAGE" ]
+then
+        echo 'DPKG_MAINTSCRIPT_PACKAGE was not set, this script must be invoked by dpkg.'
+        exit 1
+fi
+# Loop through files in /boot, shipped by the package, and remove them, if existing
+for file in $(dpkg -L "$DPKG_MAINTSCRIPT_PACKAGE" | grep '^/boot/')
+do
+        [ ! -f "$file" ] || rm "$file"
+done
+}
+_EOF_
+	G_EXEC chmod +x /etc/kernel/preinst.d/dietpi
+fi
+
+# v7.7
+if [[ -f '/etc/apt/sources.list.d/armbian.list' ]] && grep -q 'https://apt.armbian.com' /etc/apt/sources.list.d/armbian.list
+then
+	G_DIETPI-NOTIFY 2 'Connecting to apt.armbian.com via plain HTTP until their router handles HTTPS redirects reliably'
+	G_EXEC sed -i 's|https://apt.armbian.com|http://apt.armbian.com|' /etc/apt/sources.list.d/armbian.list
+fi
+
+# v7.7
+if (( $G_DIETPI_VERSION_CORE < 7 || ( $G_DIETPI_VERSION_CORE == 7 && $G_DIETPI_VERSION_SUB < 7 ) ))
+then
+	G_DIETPI-NOTIFY 2 'Connecting to Mosquitto and Webmin repositories via plain HTTP once until latest OpenSSL has been installed: https://github.com/MichaIng/DietPi/issues/4795'
+	G_EXEC sed -Ei 's#https://(repo.mosquitto.org|download.webmin.com)#http://\1#' /etc/apt/sources.list
+	[[ $(find /etc/apt/sources.list/*.list 2> /dev/null) ]] && G_EXEC sed -Ei 's#https://(repo.mosquitto.org|download.webmin.com)#http://\1#' /etc/apt/sources.list.d/*.list
+
+	# Add execute permissions to kernel/initramfs hooks
+	[[ -f '/etc/initramfs/post-update.d/99-dietpi-uboot' && ! -x '/etc/initramfs/post-update.d/99-dietpi-uboot' ]] && G_EXEC chmod +x /etc/initramfs/post-update.d/99-dietpi-uboot
+	[[ -f '/etc/kernel/preinst.d/dietpi-initramfs_cleanup' && ! -x '/etc/kernel/preinst.d/dietpi-initramfs_cleanup' ]] && G_EXEC chmod +x /etc/kernel/preinst.d/dietpi-initramfs_cleanup
 fi
 
 exit 0

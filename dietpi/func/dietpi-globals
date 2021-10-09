@@ -56,8 +56,8 @@
 	[[ -f '/boot/dietpi/.version' ]] && . /boot/dietpi/.version
 	# - Assign defaults/code version as fallback
 	[[ $G_DIETPI_VERSION_CORE ]] || G_DIETPI_VERSION_CORE=7
-	[[ $G_DIETPI_VERSION_SUB ]] || G_DIETPI_VERSION_SUB=6
-	[[ $G_DIETPI_VERSION_RC ]] || G_DIETPI_VERSION_RC=2
+	[[ $G_DIETPI_VERSION_SUB ]] || G_DIETPI_VERSION_SUB=7
+	[[ $G_DIETPI_VERSION_RC ]] || G_DIETPI_VERSION_RC=0
 	[[ $G_GITBRANCH ]] || G_GITBRANCH='master'
 	[[ $G_GITOWNER ]] || G_GITOWNER='MichaIng'
 	# - Save current version and Git branch
@@ -1020,6 +1020,82 @@ $log_content" || break # Exit error handler menu loop on cancel
 
 	}
 
+	#-----------------------------------------------------------------------------------
+	# Multithreading handler
+	#-----------------------------------------------------------------------------------
+	# Not yet compatible with dietpi global commands. single bash commands only with no error handling.
+	G_THREAD_START(){
+
+		# Run in blocking mode
+		if [[ $G_THREADING_ENABLED == 0 ]]; then
+
+			G_DIETPI-NOTIFY 2 "G_THREADING disabled, running command in blocking mode | $*"
+			"$@"
+
+		# Launch as background process
+		else
+
+			[[ $G_THREAD_COUNT =~ ^[0-9]+$ ]] || G_THREAD_COUNT=-1
+			((G_THREAD_COUNT++))
+			G_THREAD_COMMAND[$G_THREAD_COUNT]=$* # Store for later output with G_THREAD_WAIT
+
+			echo -1337 > "/tmp/.G_THREAD_EXITCODE_$G_THREAD_COUNT"
+			{ { G_INTERACTIVE=0 "$@" &> "/tmp/.G_THREAD_COMMAND_$G_THREAD_COUNT"; echo $? > "/tmp/.G_THREAD_EXITCODE_$G_THREAD_COUNT"; } & disown; } &> /dev/null
+
+			G_DIETPI-NOTIFY 2 "G_THREAD_START_$G_THREAD_COUNT | $*"
+
+		fi
+
+	}
+
+	G_THREAD_WAIT(){
+
+		#local wait_for_specific_thread_pid=-1
+		#[[ $1 ]] && wait_for_specific_thread_pid=$1
+
+		local i waiting_for exit_code
+
+		# Wait until all theads finished
+		while :
+		do
+			for i in "${!G_THREAD_COMMAND[@]}"
+			do
+				[[ -f /tmp/.G_THREAD_EXITCODE_$i && $(<"/tmp/.G_THREAD_EXITCODE_$i") == '-1337' ]] || continue
+				# Print what we are waiting for, update processing message if thread changed since last loop
+				[[ $waiting_for == "$i" ]] || G_DIETPI-NOTIFY -2 "G_THREAD_WAIT_$i | ${G_THREAD_COMMAND[$i]}"
+				waiting_for=$i
+				sleep 1
+				continue 2
+			done
+
+			break
+		done
+
+		G_DIETPI-NOTIFY 0 'G_THREAD: All threads finished'
+
+		# Check all thread's exit codes for issues
+		for i in "${!G_THREAD_COMMAND[@]}"
+		do
+			if [[ -r /tmp/.G_THREAD_EXITCODE_$i ]]; then
+
+				exit_code=$(<"/tmp/.G_THREAD_EXITCODE_$i")
+				(( $exit_code )) && G_WHIP_MSG "G_THREAD ERROR:\n - Command = ${G_THREAD_COMMAND[$i]}\n - Exit code = $exit_code\n\n$(<"/tmp/.G_THREAD_COMMAND_$i")"
+
+			else
+
+				G_DIETPI-NOTIFY 2 "DEBUG: /tmp/.G_THREAD_EXITCODE_$i does not exist or is not readable"
+
+			fi
+		done
+
+		rm -f /tmp/.G_THREAD*
+		unset -v G_THREAD_COUNT G_THREAD_COMMAND
+
+	}
+
+	#-----------------------------------------------------------------------------------
+	# Network connection checks
+	#-----------------------------------------------------------------------------------
 	# General network connection check
 	# - Checks general network connectivity by pinging a raw IP that must be publicly reachable at all time.
 	# - Uses the given input argument as IP to test against, else CONFIG_CHECK_CONNECTION_IP from dietpi.txt, else defaults to 9.9.9.9 (Quad9 DNS IP).
@@ -1160,6 +1236,144 @@ $log_content" || break # Exit error handler menu loop on cancel
 
 	}
 
+	#-----------------------------------------------------------------------------------
+	# Print network details
+	#-----------------------------------------------------------------------------------
+	# Commands:
+	#	"gateway": Print the default gateway IP
+	#	"iface": Print the interface name
+	#	"ip": Print the IP address
+	# Options:
+	#	"-4": Print info for interfaces with an IPv4 address only if available, else return 1
+	#	"-6": Print info for interfaces with an IPv6 address only if available, else return 1
+	#	"-t TYPE": Print info for interfaces of type TYPE only if available, else return 1
+	#		TYPE can be one of "eth" and "wlan". 
+	#	"-i IFACE": Print info for the network interface named IFACE only it present, else return 1
+	# Notes:
+	#	Info is shown for the one matching interface, following the following priorities:
+	#	- 1. the interface which has the default gateway assigned
+	#	- 2. the first interface with state "UP"
+	#	- 3. the first interface with an IP address assigned
+	#	- 4. the first available interface
+	#	- If no interface exists, the function returns error 1.
+	#	If not defined, IPv4 addresses are shown if available, else IPv6 addresses if available.
+	G_GET_NET()
+	{
+		# Grab input
+		local fam type iface command
+		while (( $# ))
+		do
+			case "$1" in
+				'-'[46]) fam=$1;;
+				'-t') shift; type=$1;;
+				'-i') shift; iface=$1;;
+				'gateway'|'iface'|'ip') command=$1;;
+				*) G_DIETPI-NOTIFY 2 "An invalid argument \"${1:-<empty>}\" was given."; return 1;;
+			esac
+			shift
+		done
+
+		# A command is required
+		[[ $command ]] || { G_DIETPI-NOTIFY 2 "No command was given."; return 1; }
+
+		# Early return if given interface does not exists or does not match given type
+		if [[ $iface ]]
+		then
+			if [[ ! -e /sys/class/net/$iface ]]
+			then
+				G_DIETPI-NOTIFY 2 "The given interface \"$iface\" does not exist."
+				return 1
+
+			elif [[ $type && $iface != $type* ]]
+			then
+				G_DIETPI-NOTIFY 2 "The given interface \"$iface\" is not of type \"$type\"."
+				return 1
+			fi
+		fi
+
+		# Get default gateway if requested or no interface given
+		local ip if
+		if [[ $command == 'gateway' || ! $iface ]]
+		then
+			local gateway
+			[[ $fam != '-6' ]] && read -r gateway if < <(ip r l 0/0 ${iface:+dev "$iface"} | mawk '{print $3,$5;exit}')
+			[[ ! $gateway && $fam != '-4' ]] && read -r gateway if < <(ip -6 r l ::/0 ${iface:+dev "$iface"} | mawk '{print $3,$5;exit}')
+
+			# ip r does not print the interface name if one was given, so used the given one to check for type.
+			[[ $iface ]] && if=$iface
+
+			# Print default gateway if requested
+			if [[ $command == 'gateway' ]]
+			then
+				if [[ $gateway ]]
+				then
+					# Check for interface type
+					if [[ $type && $if != $type* ]]
+					then
+						G_DIETPI-NOTIFY 2 "The default gateway is not assigned to any interface of type \"$type\"."
+						return 1
+					fi
+					echo "$gateway"
+				else
+					G_DIETPI-NOTIFY 2 "A default gateway${fam:+ for IPv${fam#-}}${iface:+ on interface \"$iface\"} does not exist."
+					return 1
+				fi
+				return 0
+			fi
+
+			# Print interface/IP address if matching default gateway was found
+			if [[ $gateway && ( ! $type || $if == $type* ) ]]
+			then
+				iface=$if
+				[[ $command == 'ip' ]] && ip=$(ip -br $fam a s dev "$iface" | mawk '{print $3}') ip=${ip%/*}
+				echo "${!command}"
+				return 0
+			fi
+		fi
+
+		local state if_final ip_final
+		while read -r if state ip
+		do
+			[[ $type && $if != $type* ]] && continue
+
+			# Return state UP
+			if [[ $state == 'UP' ]]
+			then
+				iface=$if
+				echo "${!command}"
+				return 0
+			fi
+
+			# Store info in separate variables to return if no UP state interface was found
+			if [[ $ip && ! $ip_final ]]
+			then
+				if_final=$if
+				ip_final=$ip
+
+			elif [[ ! $if_final ]]
+			then
+				if_final=$if
+			fi
+
+		done < <(ip -br $fam a ${iface:+s dev "$iface"})
+
+		# Return final values
+		iface=$if_final
+		ip=$ip_final ip=${ip%/*}
+		if [[ $command == 'ip' && ! $ip ]]
+		then
+			G_DIETPI-NOTIFY 2 "An interface${iface:+ named \"$iface\"}${type:+ of type \"$type\"} with an IP${fam:+v${fam#-}} address does not exist."
+			return 1
+
+		elif [[ $command == 'iface' && ! $iface ]]
+		then
+			G_DIETPI-NOTIFY 2 "An interface${iface:+ named \"$iface\"}${type:+ of type \"$type\"}${fam:+ with an IPv${fam#-} address} does not exist."
+			return 1
+		fi
+		echo "${!command}"
+		return 0
+	}
+
 	# Print public IP address and location info
 	# - Optional arguments:
 	#	-t <timeout>: Set timeout in seconds, supports floats, default: 3
@@ -1177,10 +1391,7 @@ $log_content" || break # Exit error handler menu loop on cancel
 			esac
 			shift
 		done
-		local response=$(curl -sSfLm "$timeout" https://freegeoip.app/csv/ 2>&1 | mawk -F, '($5){r=$5" "}{print $1" "r$3}')
-		# https://github.com/MichaIng/DietPi/issues/4445
-		[[ $response == 'curl: (60)'* ]] && response='freegeoip.app seems to be blocked via DNS, please add it to the whitelist to allow WAN IP retrieval.'
-		echo "$response"		
+		curl -sSfLm "$timeout" 'https://dietpi.com/geoip'
 	}
 
 	# $1 = directory to test permissions support
@@ -1731,113 +1942,12 @@ $log_content" || break # Exit error handler menu loop on cancel
 
 	}
 
-	#-----------------------------------------------------------------------------------
-	# Multithreading handler
-	#-----------------------------------------------------------------------------------
-	# Not yet compatible with dietpi global commands. single bash commands only with no error handling.
-	G_THREAD_START(){
-
-		# Run in blocking mode
-		if [[ $G_THREADING_ENABLED == 0 ]]; then
-
-			G_DIETPI-NOTIFY 2 "G_THREADING disabled, running command in blocking mode | $*"
-			"$@"
-
-		# Launch as background process
-		else
-
-			[[ $G_THREAD_COUNT =~ ^[0-9]+$ ]] || G_THREAD_COUNT=-1
-			((G_THREAD_COUNT++))
-			G_THREAD_COMMAND[$G_THREAD_COUNT]=$* # Store for later output with G_THREAD_WAIT
-
-			echo -1337 > "/tmp/.G_THREAD_EXITCODE_$G_THREAD_COUNT"
-			{ { G_INTERACTIVE=0 "$@" &> "/tmp/.G_THREAD_COMMAND_$G_THREAD_COUNT"; echo $? > "/tmp/.G_THREAD_EXITCODE_$G_THREAD_COUNT"; } & disown; } &> /dev/null
-
-			G_DIETPI-NOTIFY 2 "G_THREAD_START_$G_THREAD_COUNT | $*"
-
-		fi
-
-	}
-
-	G_THREAD_WAIT(){
-
-		#local wait_for_specific_thread_pid=-1
-		#[[ $1 ]] && wait_for_specific_thread_pid=$1
-
-		local i waiting_for exit_code
-
-		# Wait until all theads finished
-		while :
-		do
-			for i in "${!G_THREAD_COMMAND[@]}"
-			do
-				[[ -f /tmp/.G_THREAD_EXITCODE_$i && $(<"/tmp/.G_THREAD_EXITCODE_$i") == '-1337' ]] || continue
-				# Print what we are waiting for, update processing message if thread changed since last loop
-				[[ $waiting_for == "$i" ]] || G_DIETPI-NOTIFY -2 "G_THREAD_WAIT_$i | ${G_THREAD_COMMAND[$i]}"
-				waiting_for=$i
-				sleep 1
-				continue 2
-			done
-
-			break
-		done
-
-		G_DIETPI-NOTIFY 0 'G_THREAD: All threads finished'
-
-		# Check all thread's exit codes for issues
-		for i in "${!G_THREAD_COMMAND[@]}"
-		do
-			if [[ -r /tmp/.G_THREAD_EXITCODE_$i ]]; then
-
-				exit_code=$(<"/tmp/.G_THREAD_EXITCODE_$i")
-				(( $exit_code )) && G_WHIP_MSG "G_THREAD ERROR:\n - Command = ${G_THREAD_COMMAND[$i]}\n - Exit code = $exit_code\n\n$(<"/tmp/.G_THREAD_COMMAND_$i")"
-
-			else
-
-				G_DIETPI-NOTIFY 2 "DEBUG: /tmp/.G_THREAD_EXITCODE_$i does not exist or is not readable"
-
-			fi
-		done
-
-		rm -f /tmp/.G_THREAD*
-		unset -v G_THREAD_COUNT G_THREAD_COMMAND
-
-	}
-
-	#-----------------------------------------------------------------------------------
-	# DEV tools (Not for public use! All mine! :D)
-	#-----------------------------------------------------------------------------------
-	# Restore backup and update DietPi to latest development branch code
-	# - Restore backup
-	# - Set dev branch
-	# - Reapply latest DietPi update
-	# - Update backup
-	G_DEV_1(){
-
-		G_CHECK_ROOT_USER 1
-		export G_INTERACTIVE=0
-		/boot/dietpi/dietpi-backup -1
-		G_CONFIG_INJECT 'DEV_GITBRANCH=' 'DEV_GITBRANCH=dev' /boot/dietpi.txt
-		/boot/dietpi/dietpi-update -1
-		/boot/dietpi/dietpi-backup 1
-		unset -v G_INTERACTIVE
-
-	}
-
 	# Apply and update to different branch
 	G_DEV_BRANCH(){
 
 		G_CHECK_ROOT_USER 1
 		G_CONFIG_INJECT 'DEV_GITBRANCH=' "DEV_GITBRANCH=$1" /boot/dietpi.txt
 		/boot/dietpi/dietpi-update -1
-
-	}
-
-	# Automatically opt in to DietPi-Survey and run + send benchmark + data
-	G_DEV_BENCH(){
-
-		G_CONFIG_INJECT 'SURVEY_OPTED_IN=' 'SURVEY_OPTED_IN=1' /boot/dietpi.txt
-		G_INTERACTIVE=0 /boot/dietpi/func/dietpi-benchmark 2
 
 	}
 
