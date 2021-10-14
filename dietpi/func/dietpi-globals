@@ -57,7 +57,7 @@
 	# - Assign defaults/code version as fallback
 	[[ $G_DIETPI_VERSION_CORE ]] || G_DIETPI_VERSION_CORE=7
 	[[ $G_DIETPI_VERSION_SUB ]] || G_DIETPI_VERSION_SUB=7
-	[[ $G_DIETPI_VERSION_RC ]] || G_DIETPI_VERSION_RC=0
+	[[ $G_DIETPI_VERSION_RC ]] || G_DIETPI_VERSION_RC=1
 	[[ $G_GITBRANCH ]] || G_GITBRANCH='master'
 	[[ $G_GITOWNER ]] || G_GITOWNER='MichaIng'
 	# - Save current version and Git branch
@@ -339,7 +339,8 @@ $(ps f -eo pid,user,tty,cmd | grep -i '[d]ietpi')" && continue
 
 			output_string+=$failed
 			ainput_string+=('\n')
-			Print 1
+			# Print error messages to STDERR
+			Print 1 >&2
 
 		#--------------------------------------------------------------------------------------
 		# Info
@@ -461,7 +462,8 @@ $grey─────────────────────────
 
 		# Update backtitle
 		WHIP_BACKTITLE=$G_HW_MODEL_NAME
-		[[ -f '/run/dietpi/.network' ]] && WHIP_BACKTITLE+=" | IP: $(mawk 'NR==4' /run/dietpi/.network)"
+		local active_ip=$(G_GET_NET ip)
+		[[ $active_ip ]] && WHIP_BACKTITLE+=" | IP: $active_ip"
 
 		# Set default button text, if not defined
 		G_WHIP_BUTTON_OK_TEXT=${G_WHIP_BUTTON_OK_TEXT:-Ok}
@@ -823,6 +825,23 @@ $grey─────────────────────────
 
 		local exit_code fp_log='/tmp/G_EXEC_LOG' attempt=1 acommand=("$@") ecommand=${*//\\/\\\\}
 
+		Stretch_systemctl_workaround()
+		{
+			# Stretch: Workaround for systemctl enable/disable --now bug: https://github.com/MichaIng/DietPi/issues/4815
+			[[ $G_DISTRO -le 4 && ${acommand[*]::3} =~ ^'systemctl '(en|dis)'able --now'$ && $(dpkg-query -Wf '${version}' systemd) == '232'* ]] || return
+
+			local command='stop'
+			[[ ${acommand[1]} == 'enable' ]] && command='start'
+
+			if [[ $G_EXEC_OUTPUT == 1 ]]
+			then
+				systemctl "$command" "${acommand[@]:3}" 2>&1 | tee -a $fp_log
+			else
+				systemctl "$command" "${acommand[@]:3}" &>> $fp_log
+			fi
+			[[ $exit_code == 0 ]] && exit_code=$?
+		}				
+
 		# Enter retry loop
 		while :
 		do
@@ -837,6 +856,7 @@ $grey─────────────────────────
 				[[ $G_EXEC_OUTPUT_COL ]] && echo -ne "$G_EXEC_OUTPUT_COL"
 				"${acommand[@]}" 2>&1 | tee $fp_log
 				exit_code=${PIPESTATUS[0]}
+				Stretch_systemctl_workaround
 				[[ $G_EXEC_OUTPUT_COL ]] && echo -ne '\e[0m'
 
 			# - Else print animated processing message only
@@ -845,6 +865,7 @@ $grey─────────────────────────
 				G_DIETPI-NOTIFY -2 "${G_EXEC_DESC:-$ecommand}${G_EXEC_RETRIES:+ ($attempt/$((G_EXEC_RETRIES+1)))}"
 				"${acommand[@]}" &> $fp_log
 				exit_code=$?
+				Stretch_systemctl_workaround
 
 			fi
 
@@ -1010,7 +1031,7 @@ $log_content" || break # Exit error handler menu loop on cancel
 		# Cleanup
 		rm -f $fp_log $fp_error_report
 		unset -v G_EXEC_DESC G_EXEC_RETRIES G_EXEC_OUTPUT G_EXEC_OUTPUT_COL G_EXEC_NOFAIL G_EXEC_NOHALT G_EXEC_NOEXIT G_EXEC_ARRAY_TEXT G_EXEC_ARRAY_ACTION
-		unset -f G_EXEC_PRE_FUNC G_EXEC_POST_FUNC
+		unset -f G_EXEC_PRE_FUNC G_EXEC_POST_FUNC Stretch_systemctl_workaround
 
 		# In case of unresolved error when exiting originating script, inform user and kill via SIGINT to prevent exiting from interactive shell session
 		[[ $exit_code == 0 || $noexit == 1 ]] || { G_DIETPI-NOTIFY 1 "Unable to continue, ${G_PROGRAM_NAME:-command} will now terminate."; kill -INT $$; }
@@ -1244,6 +1265,7 @@ $log_content" || break # Exit error handler menu loop on cancel
 	#	"iface": Print the interface name
 	#	"ip": Print the IP address
 	# Options:
+	#	"-q": Hide all error messages that are not related to invalid arguments
 	#	"-4": Print info for interfaces with an IPv4 address only if available, else return 1
 	#	"-6": Print info for interfaces with an IPv6 address only if available, else return 1
 	#	"-t TYPE": Print info for interfaces of type TYPE only if available, else return 1
@@ -1260,10 +1282,11 @@ $log_content" || break # Exit error handler menu loop on cancel
 	G_GET_NET()
 	{
 		# Grab input
-		local fam type iface command
+		local quite=0 fam type iface command
 		while (( $# ))
 		do
 			case "$1" in
+				'-q') quite=1;;
 				'-'[46]) fam=$1;;
 				'-t') shift; type=$1;;
 				'-i') shift; iface=$1;;
@@ -1281,12 +1304,12 @@ $log_content" || break # Exit error handler menu loop on cancel
 		then
 			if [[ ! -e /sys/class/net/$iface ]]
 			then
-				G_DIETPI-NOTIFY 2 "The given interface \"$iface\" does not exist."
+				(( $quite )) || G_DIETPI-NOTIFY 2 "The given interface \"$iface\" does not exist."
 				return 1
 
 			elif [[ $type && $iface != $type* ]]
 			then
-				G_DIETPI-NOTIFY 2 "The given interface \"$iface\" is not of type \"$type\"."
+				(( $quite )) || G_DIETPI-NOTIFY 2 "The given interface \"$iface\" is not of type \"$type\"."
 				return 1
 			fi
 		fi
@@ -1310,12 +1333,12 @@ $log_content" || break # Exit error handler menu loop on cancel
 					# Check for interface type
 					if [[ $type && $if != $type* ]]
 					then
-						G_DIETPI-NOTIFY 2 "The default gateway is not assigned to any interface of type \"$type\"."
+						(( $quite )) || G_DIETPI-NOTIFY 2 "The default gateway is not assigned to any interface of type \"$type\"."
 						return 1
 					fi
 					echo "$gateway"
 				else
-					G_DIETPI-NOTIFY 2 "A default gateway${fam:+ for IPv${fam#-}}${iface:+ on interface \"$iface\"} does not exist."
+					(( $quite )) || G_DIETPI-NOTIFY 2 "A default gateway${fam:+ for IPv${fam#-}}${iface:+ on interface \"$iface\"} does not exist."
 					return 1
 				fi
 				return 0
@@ -1325,15 +1348,18 @@ $log_content" || break # Exit error handler menu loop on cancel
 			if [[ $gateway && ( ! $type || $if == $type* ) ]]
 			then
 				iface=$if
-				[[ $command == 'ip' ]] && ip=$(ip -br $fam a s dev "$iface" | mawk '{print $3}') ip=${ip%/*}
+				# shellcheck disable=SC2086
+				[[ $command == 'ip' ]] && ip=$(ip -br $fam a s dev "$iface" | mawk '{print $3;exit}') ip=${ip%/*}
 				echo "${!command}"
 				return 0
 			fi
 		fi
 
 		local state if_final ip_final
+		# shellcheck disable=SC2086
 		while read -r if state ip
 		do
+			[[ $if == 'lo' ]] && continue
 			[[ $type && $if != $type* ]] && continue
 
 			# Return state UP
@@ -1359,15 +1385,15 @@ $log_content" || break # Exit error handler menu loop on cancel
 
 		# Return final values
 		iface=$if_final
-		ip=$ip_final ip=${ip%/*}
+		ip=$ip_final ip=${ip%%/*}
 		if [[ $command == 'ip' && ! $ip ]]
 		then
-			G_DIETPI-NOTIFY 2 "An interface${iface:+ named \"$iface\"}${type:+ of type \"$type\"} with an IP${fam:+v${fam#-}} address does not exist."
+			(( $quite )) || G_DIETPI-NOTIFY 2 "An interface${iface:+ named \"$iface\"}${type:+ of type \"$type\"} with an IP${fam:+v${fam#-}} address does not exist."
 			return 1
 
 		elif [[ $command == 'iface' && ! $iface ]]
 		then
-			G_DIETPI-NOTIFY 2 "An interface${iface:+ named \"$iface\"}${type:+ of type \"$type\"}${fam:+ with an IPv${fam#-} address} does not exist."
+			(( $quite )) || G_DIETPI-NOTIFY 2 "An interface${iface:+ named \"$iface\"}${type:+ of type \"$type\"}${fam:+ with an IPv${fam#-} address} does not exist."
 			return 1
 		fi
 		echo "${!command}"

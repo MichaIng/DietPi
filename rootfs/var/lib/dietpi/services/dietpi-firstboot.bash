@@ -217,15 +217,14 @@ _EOF_
 
 		# Network setup
 		# - Grab available network interfaces
-		/boot/dietpi/func/obtain_network_details
-		local index_eth=$(mawk 'NR==1' /run/dietpi/.network)
-		disable_error=1 G_CHECK_VALIDINT "$index_eth" 0 || index_eth=0
-		local index_wlan=$(mawk 'NR==2' /run/dietpi/.network)
-		disable_error=1 G_CHECK_VALIDINT "$index_wlan" 0 || index_wlan=0
+		local iface_eth=$(G_GET_NET -t eth iface)
+		[[ $iface_eth ]] || iface_eth='eth0'
+		local iface_wlan=$(G_GET_NET -t wlan iface)
+		[[ $iface_wlan ]] || iface_wlan='wlan0'
 
 		# - Replace interface names with the ones obtained above
-		sed -i "s/eth[0-9]/eth$index_eth/g" /etc/network/interfaces
-		sed -i "s/wlan[0-9]/wlan$index_wlan/g" /etc/network/interfaces
+		sed -i "s/eth[0-9]/$iface_eth/g" /etc/network/interfaces
+		sed -i "s/wlan[0-9]/$iface_wlan/g" /etc/network/interfaces
 
 		# - Grab user requested settings from dietpi.txt
 		local ethernet_enabled=$(grep -cm1 '^[[:blank:]]*AUTO_SETUP_NET_ETHERNET_ENABLED=1' /boot/dietpi.txt)
@@ -241,8 +240,8 @@ _EOF_
 
 			# Enable WiFi, disable Ethernet
 			ethernet_enabled=0
-			sed -Ei "/(allow-hotplug|auto)[[:blank:]]+wlan/c\allow-hotplug wlan$index_wlan" /etc/network/interfaces
-			sed -Ei "/(allow-hotplug|auto)[[:blank:]]+eth/c\#allow-hotplug eth$index_eth" /etc/network/interfaces
+			sed -Ei "/(allow-hotplug|auto)[[:blank:]]+wlan/c\allow-hotplug $iface_wlan" /etc/network/interfaces
+			sed -Ei "/(allow-hotplug|auto)[[:blank:]]+eth/c\#allow-hotplug $iface_eth" /etc/network/interfaces
 
 			# Apply global SSID/keys from dietpi.txt to wpa_supplicant
 			/boot/dietpi/func/dietpi-wifidb 1
@@ -255,8 +254,8 @@ _EOF_
 
 			# Enable Eth, disable WiFi
 			wifi_enabled=0
-			sed -Ei "/(allow-hotplug|auto)[[:blank:]]+eth/c\allow-hotplug eth$index_eth" /etc/network/interfaces
-			sed -Ei "/(allow-hotplug|auto)[[:blank:]]+wlan/c\#allow-hotplug wlan$index_wlan" /etc/network/interfaces
+			sed -Ei "/(allow-hotplug|auto)[[:blank:]]+eth/c\allow-hotplug $iface_eth" /etc/network/interfaces
+			sed -Ei "/(allow-hotplug|auto)[[:blank:]]+wlan/c\#allow-hotplug $iface_wlan" /etc/network/interfaces
 
 			# Disable WiFi kernel modules
 			/boot/dietpi/func/dietpi-set_hardware wifimodules disable
@@ -268,11 +267,11 @@ _EOF_
 
 			if (( $wifi_enabled )); then
 
-				sed -i "/iface wlan/c\iface wlan$index_wlan inet static" /etc/network/interfaces
+				sed -i "/iface wlan/c\iface $iface_wlan inet static" /etc/network/interfaces
 
 			elif (( $ethernet_enabled )); then
 
-				sed -i "/iface eth/c\iface eth$index_eth inet static" /etc/network/interfaces
+				sed -i "/iface eth/c\iface $iface_eth inet static" /etc/network/interfaces
 
 			fi
 			sed -i "/address/c\address $static_ip" /etc/network/interfaces
@@ -299,7 +298,7 @@ _EOF_
 		# - Configure enabled interfaces now, /etc/network/interfaces will be effective from next boot on
 		#	Failsafe: Bring up Ethernet, whenever WiFi is disabled or fails to be configured, e.g. due to wrong credentials
 		# shellcheck disable=SC2015
-		(( $wifi_enabled )) && ifup wlan$index_wlan || ifup eth$index_eth
+		(( $wifi_enabled )) && ifup "$iface_wlan" || ifup "$iface_eth"
 
 		# x86_64 BIOS: Set GRUB install device: https://github.com/MichaIng/DietPi/issues/4542
 		if (( $G_HW_MODEL == 10 )) && dpkg-query -s grub-pc &> /dev/null
