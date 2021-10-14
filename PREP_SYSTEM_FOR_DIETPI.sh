@@ -1133,19 +1133,6 @@ _EOF_
 
 		fi
 
-		# RPi Bullseye workaround, until new firmware packages have been built: https://archive.raspberrypi.org/debian/pool/main/f/firmware-nonfree/?C=M;O=D
-		if (( $G_DISTRO == 6 && $G_HW_MODEL == 0 ))
-		then
-			G_EXEC curl -sSfLO 'https://archive.raspberrypi.org/debian/pool/main/f/firmware-nonfree/firmware-brcm80211_20190114-2+rpt1_all.deb'
-			G_EXEC dpkg-deb -x 'firmware-brcm80211_20190114-2+rpt1_all.deb' .
-			G_EXEC rm -R 'firmware-brcm80211_20190114-2+rpt1_all.deb' usr
-			for i in lib/firmware/brcm/*
-			do
-				[[ -f /$i ]] || G_EXEC mv {,/}"$i"
-			done
-			G_EXEC rm -R lib
-		fi
-
 		# Install vmtouch to lock DietPi scripts and config in file system cache
 		G_EXEC curl -sSfLO "https://dietpi.com/downloads/binaries/$G_DISTRO_NAME/vmtouch_$G_HW_ARCH_NAME.deb"
 		G_EXEC dpkg --force-hold,confnew -i "vmtouch_$G_HW_ARCH_NAME.deb"
