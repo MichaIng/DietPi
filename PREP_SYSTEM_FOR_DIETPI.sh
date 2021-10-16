@@ -1608,7 +1608,7 @@ _EOF_"
 			# Boot args
 			cat << '_EOF_' > /boot/uenv.txt
 uenvcmd=setenv os_type linux;
-bootargs=earlyprintk clk_ignore_unused selinux=0 scandelay console=tty0 loglevel=1 real_rootflag=rw root=/dev/mmcblk0p2 rootwait init=/lib/systemd/systemd aotg.urb_fix=1 aotg.aotg1_speed=0 net.ifnames=0 systemd.unified_cgroup_hierarchy=0 systemd.legacy_systemd_cgroup_controller=0
+bootargs=earlyprintk clk_ignore_unused selinux=0 scandelay console=tty0 loglevel=1 real_rootflag=rw root=/dev/mmcblk0p2 rootwait init=/lib/systemd/systemd aotg.urb_fix=1 aotg.aotg1_speed=0 net.ifnames=0 systemd.unified_cgroup_hierarchy=0 systemd.legacy_systemd_cgroup_controller
 _EOF_
 			# Blacklist GPU and touch screen modules: https://github.com/MichaIng/DietPi/issues/699#issuecomment-271362441
 			cat << '_EOF_' > /etc/modprobe.d/dietpi-disable_sparkysbc_touchscreen.conf
@@ -1760,13 +1760,13 @@ _EOF_
 			if [[ $G_HW_MODEL -gt 9 && $G_HW_MODEL -le 16 && -f '/boot/boot.ini' ]]
 			then
 				grep -q 'systemd.unified_cgroup_hierarchy=0' /boot/boot.ini || G_EXEC sed -i '/setenv bootargs "/s/"$/ systemd.unified_cgroup_hierarchy=0"' /boot/boot.ini
-				grep -q 'systemd.legacy_systemd_cgroup_controller=0' /boot/boot.ini || G_EXEC sed -i '/setenv bootargs "/s/"$/ systemd.legacy_systemd_cgroup_controller=0"' /boot/boot.ini
+				grep -q 'systemd.legacy_systemd_cgroup_controller' /boot/boot.ini || G_EXEC sed -i '/setenv bootargs "/s/"$/ systemd.legacy_systemd_cgroup_controller"' /boot/boot.ini
 
 			# Sparky SBC
 			elif [[ $G_HW_MODEL == 70 && -f '/boot/uenv.txt' ]]
 			then
 				grep -q 'systemd.unified_cgroup_hierarchy=0' /boot/uenv.txt || G_EXEC sed -i '/bootargs=/s/$/ systemd.unified_cgroup_hierarchy=0' /boot/uenv.txt
-				grep -q 'systemd.legacy_systemd_cgroup_controller=0' /boot/uenv.txt || G_EXEC sed -i '/bootargs=/s/$/ systemd.legacy_systemd_cgroup_controller=0' /boot/uenv.txt
+				grep -q 'systemd.legacy_systemd_cgroup_controller' /boot/uenv.txt || G_EXEC sed -i '/bootargs=/s/$/ systemd.legacy_systemd_cgroup_controller' /boot/uenv.txt
 			fi
 		fi
 
