@@ -157,13 +157,6 @@ Patch_7_2()
 \nYou may upgrade via: dietpi-software reinstall 86
 \nNB: Roon extensions which were installed via the legacy method must be reinstalled with the new Roon Extension Manager. Extensions which were installed as Docker images already, will continue to function.'
 
-	# Pi-hole: Whitelist domain of GEO IP API we use in banner and DietPi-VPN as this is part of public blocklists: https://github.com/MichaIng/DietPi/pull/4398#issuecomment-845477200
-	if command -v pihole > /dev/null
-	then
-		G_DIETPI-NOTIFY 2 'Whitelisting "freegeoip.app" in Pi-hole, which is used by dietpi-banner and dietpi-vpn to obtain your public IP and location...'
-		pihole -w freegeoip.app --comment 'Used by dietpi-banner and dietpi-vpn to obtain your public IP and location'
-	fi
-
 	# Inform about available software updates
 	if [[ -f '/boot/dietpi/.installed' ]]
 	then
@@ -328,6 +321,142 @@ Patch_7_6()
 		G_EXEC eval "echo -e '[Service]\nSystemCallFilter=uname' > /etc/systemd/system/haveged.service.d/dietpi.conf"
 		G_EXEC systemctl daemon-reload
 		G_EXEC systemctl restart haveged
+	fi
+}
+
+Patch_7_7()
+{
+	G_DIETPI-NOTIFY 2 'Reverting Mosquitto and Webmin repositories back to HTTPS'
+	G_EXEC sed -Ei 's#http://(repo.mosquitto.org|download.webmin.com)#https://\1#' /etc/apt/sources.list
+	[[ $(find /etc/apt/sources.list/*.list 2> /dev/null) ]] && G_EXEC sed -Ei 's#http://(repo.mosquitto.org|download.webmin.com)#https://\1#' /etc/apt/sources.list.d/*.list
+
+	# Inform users about abandoned CouchPotato and in case add systemd service to DietPi-Services includes, at it has been removed from the hardcoded list
+	if [[ -f '/boot/dietpi/.installed' ]] && grep -q '^[[:blank:]]*aSOFTWARE_INSTALL_STATE\[142\]=2' /boot/dietpi/.installed
+	then
+		G_WHIP_MSG '[ INFO ] CouchPotato has been abandoned
+\nSadly, the CouchPotato project is not maintained anymore and has been abandoned. In turn we removed it from DietPi.
+\nThe instance installed on your system will remain, but it cannot be installed, reinstalled or uninstalled anymore.
+\nWe recommend to migrate to an alternative project, like Radarr, which can be found in DietPi-Software was well.
+\nManual CouchPotato uninstall instructions: https://github.com/MichaIng/DietPi/issues/4323#issuecomment-927128724
+'
+		if [[ -f '/etc/init.d/couchpotato' ]]
+		then
+			# shellcheck disable=SC2015
+			[[ -f '/boot/dietpi/.dietpi-services_include_exclude' ]] && grep -q 'couchpotato' /boot/dietpi/.dietpi-services_include_exclude || G_EXEC eval "echo '+ couchpotato' >> /boot/dietpi/.dietpi-services_include_exclude"
+		fi
+	fi
+	# Remove obsolete CouchPotato install state
+	[[ -f '/boot/dietpi/.installed' ]] && grep -q '^[[:blank:]]*aSOFTWARE_INSTALL_STATE\[142\]=' /boot/dietpi/.installed && G_EXEC sed -i '/^[[:blank:]]*aSOFTWARE_INSTALL_STATE\[142\]=/d' /boot/dietpi/.installed
+
+	# Fix Deluge web interface service on Bullseye: https://github.com/MichaIng/DietPi/issues/4785
+	if [[ $G_DISTRO -ge 6 && -f '/boot/dietpi/.installed' ]] && grep -q '^[[:blank:]]*aSOFTWARE_INSTALL_STATE\[45\]=2' /boot/dietpi/.installed && ! grep -q 'ExecStart.* -d ' /etc/systemd/system/deluge-web.service
+	then
+		G_DIETPI-NOTIFY 2 'Patching Deluge web interface service to fix startup at Bullseye'
+		G_EXEC sed -i 's/deluge-web -l/deluge-web -d -l/' /etc/systemd/system/deluge-web.service
+	fi
+
+	# Mono: Migrate APT list and key to new location and naming
+	if [[ -f '/boot/dietpi/.installed' ]] && grep -q '^[[:blank:]]*aSOFTWARE_INSTALL_STATE\[150\]=2' /boot/dietpi/.installed
+	then
+		G_DIETPI-NOTIFY 2 'Migrating Mono APT list and key to new location and naming'
+		[[ -f '/etc/apt/sources.list.d/mono-xamarin.list' ]] && G_EXEC mv /etc/apt/sources.list.d/mono-xamarin.list /etc/apt/sources.list.d/dietpi-mono.list
+		[[ -f '/etc/apt/trusted.gpg.d/dietpi-mono.gpg' ]] || G_EXEC curl -sSfL 'https://download.mono-project.com/repo/xamarin_ring.gpg' -o /etc/apt/trusted.gpg.d/dietpi-mono.gpg
+		[[ -f '/etc/apt/trusted.gpg' ]] && G_EXEC apt-key --keyring /etc/apt/trusted.gpg del '3FA7E0328081BFF6A14DA29AA6A19B38D3D831EF'
+	fi
+
+	# WireGuard: Patch config
+	if [[ -f '/etc/wireguard/wg0.conf' ]]
+	then
+		G_DIETPI-NOTIFY 2 'Updating WireGuard wg0 configuration'
+		G_EXEC sed -i '\|/boot/dietpi/func/obtain_network_details|d' /etc/wireguard/wg0.conf
+		G_EXEC sed -Ei "s#mawk .NR==3. /(run|boot|DietPi)/dietpi/.network#ip r l 0/0 | mawk '{print \$5;exit}'#g" /etc/wireguard/wg0.conf
+	fi
+
+	# GMediaRender: Patch service
+	if [[ -f '/boot/dietpi/.installed' ]] && grep -q '^[[:blank:]]*aSOFTWARE_INSTALL_STATE\[163\]=2' /boot/dietpi/.installed
+	then
+		G_DIETPI-NOTIFY 2 'Updating GMediaRender service'
+		cat << _EOF_ > /etc/systemd/system/gmrender.service
+[Unit]
+Description=GMediaRender (DietPi)
+Documentation=https://github.com/hzeller/gmrender-resurrect/blob/master/INSTALL.md#commandline-options
+Wants=network-online.target
+After=network-online.target sound.target dietpi-boot.service
+
+[Service]
+User=gmrender
+ExecStartPre=+/bin/bash -c '. /boot/dietpi/func/dietpi-globals; systemctl set-environment ACTIVE_IP=\$(G_GET_NET ip)'
+ExecStart=/usr/local/bin/gmediarender -u '$G_HW_UUID' -f '$(</etc/hostname)' --gstout-audiosink=alsasink --gstout-audiodevice=default --logfile=stdout -I "\$ACTIVE_IP"
+
+[Install]
+WantedBy=multi-user.target
+_EOF_
+	fi
+
+	# Disable obsolete DietPi-Boot service (do not stop it due to dependencies)
+	systemctl -q is-enabled dietpi-boot 2> /dev/null && G_EXEC systemctl disable dietpi-boot
+
+	# Remove obsolete files
+	[[ -f '/boot/dietpi-CHANGELOG.txt' ]] && G_EXEC rm /boot/dietpi-CHANGELOG.txt
+	[[ -f '/boot/dietpi/func/obtain_network_details' ]] && G_EXEC rm /boot/dietpi/func/obtain_network_details
+	[[ -f '/boot/dietpi/boot' ]] && G_EXEC rm /boot/dietpi/boot
+	[[ -f '/etc/systemd/system/dietpi-boot.service' ]] && G_EXEC rm /etc/systemd/system/dietpi-boot.service
+	[[ -f '/etc/systemd/system/wg-quick@wg0.service.d/dietpi.conf' ]] && G_EXEC rm /etc/systemd/system/wg-quick@wg0.service.d/dietpi.conf
+	[[ -d '/etc/systemd/system/wg-quick@wg0.service.d' ]] && G_EXEC rmdir --ignore-fail-on-non-empty /etc/systemd/system/wg-quick@wg0.service.d
+	[[ -d '/opt/FreshRSS/FreshRSS-master' ]] && G_EXEC rm -R /opt/FreshRSS/FreshRSS-master
+	[[ -L '/opt/FreshRSS/p/p' ]] && G_EXEC rm /opt/FreshRSS/p/p
+
+	# Translate and apply boot wait for network setting
+	local boot_wait_for_network=$(sed -n '/^[[:blank:]]*CONFIG_BOOT_WAIT_FOR_NETWORK=/{s/^[^=]*=//p;q}' /boot/dietpi.txt)
+	if [[ $boot_wait_for_network == 0 ]]
+	then
+		/boot/dietpi/func/dietpi-set_software boot_wait_for_network 0
+
+	elif ! grep -q 'AUTO_SETUP_BOOT_WAIT_FOR_NETWORK' /boot/dietpi.txt
+	then
+		/boot/dietpi/func/dietpi-set_software boot_wait_for_network 1
+	fi
+	G_EXEC sed -i '/^[[:blank:]]*CONFIG_BOOT_WAIT_FOR_NETWORK=/d' /boot/dietpi.txt
+
+	# Enable systemd-timesyncd on oneshot modes to start early at boot
+	local time_sync_mode=$(sed -n '/^[[:blank:]]*CONFIG_NTP_MODE=/{s/^[^=]*=//p;q}' /boot/dietpi.txt)
+	[[ $time_sync_mode == [123] ]] && G_EXEC systemctl enable systemd-timesyncd
+
+	# Apply cgroups-v2 workaround on Bullseye if the kernel does not support it: https://github.com/MichaIng/DietPi/issues/4705
+	if (( $G_DISTRO > 5 && ( $(uname -r | mawk -F'.' '{print $1}') < 4 || ( $(uname -r | mawk -F'.' '{print $1}') == 4 && $(uname -r | mawk -F'.' '{print $2}') < 15 ) ) ))
+	then
+		# Odroids
+		if [[ $G_HW_MODEL -gt 9 && $G_HW_MODEL -le 16 && -f '/boot/boot.ini' ]]
+		then
+			G_DIETPI-NOTIFY 2 'Forcing legacy cgroups v1 hierarchy on old kernel device'
+			grep -q 'systemd.unified_cgroup_hierarchy=0' /boot/boot.ini || G_EXEC sed -i '/^setenv bootargs "/s/"$/ systemd.unified_cgroup_hierarchy=0"/' /boot/boot.ini
+
+		# Sparky SBC
+		elif [[ $G_HW_MODEL == 70 && -f '/boot/uenv.txt' ]]
+		then
+			G_DIETPI-NOTIFY 2 'Forcing legacy cgroups v1 hierarchy on old kernel device'
+			grep -q 'systemd.unified_cgroup_hierarchy=0' /boot/uenv.txt || G_EXEC sed -i '/^bootargs=/s/$/ systemd.unified_cgroup_hierarchy=0/' /boot/uenv.txt
+
+		# ROCK Pi S
+		elif [[ $G_HW_MODEL == 73 && -f '/boot/boot.cmd' ]]
+		then
+			G_DIETPI-NOTIFY 2 'Forcing legacy cgroups v1 hierarchy on old kernel device'
+			grep -q 'systemd.unified_cgroup_hierarchy=0' /boot/boot.cmd || G_EXEC sed -i '/^setenv bootargs "/s/"$/ systemd.unified_cgroup_hierarchy=0"/' /boot/boot.cmd
+			G_AGI u-boot-tools
+			G_EXEC mkimage -C none -A arm64 -T script -d /boot/boot.cmd /boot/boot.scr
+		fi
+	fi
+
+	# Inform and offer to re-apply the ssh.dietpi.com host key if missing: https://github.com/MichaIng/DietPi/issues/4844
+	if [[ ! -f '/root/.ssh/known_hosts' ]] || ! grep -q '^ssh.dietpi.com' /root/.ssh/known_hosts && G_WHIP_DEFAULT_ITEM='yes' G_WHIP_YESNO '[WARNING] ssh.dietpi.com SSH/SFTP host key missing
+\nThe host key to connect to our SSH/SFTP server is missing on your system, which means that uploading bug reports and sending or purging survey data fails.
+\nDo you want to re-add that host key now?'
+	then
+		[[ -d '/root/.ssh' ]] || G_EXEC mkdir -p /root/.ssh
+		[[ -f '/root/.ssh/known_hosts' ]] || > /root/.ssh/known_hosts
+		G_EXEC sed -i '/^dietpi.com/d' /root/.ssh/known_hosts
+		G_EXEC sed -i '/^185.101.93.93/d' /root/.ssh/known_hosts
+		G_CONFIG_INJECT 'ssh.dietpi.com[[:blank:]]' 'ssh.dietpi.com ssh-rsa AAAAB3NzaC1yc2EAAAADAQABAAABAQDE6aw3r6aOEqendNu376iiCHr9tGBIWPgfrLkzjXjEsHGyVSUFNnZt6pftrDeK7UX+qX4FxOwQlugG4fymOHbimRCFiv6cf7VpYg1Ednquq9TLb7/cIIbX8a6AuRmX4fjdGuqwmBq3OG7ZksFcYEFKt5U4mAJIaL8hXiM2iXjgY02LqiQY/QWATsHI4ie9ZOnwrQE+Rr6mASN1BVFuIgyHIbwX54jsFSnZ/7CdBMkuAd9B8JkxppWVYpYIFHE9oWNfjh/epdK8yv9Oo6r0w5Rb+4qaAc5g+RAaknHeV6Gp75d2lxBdCm5XknKKbGma2+/DfoE8WZTSgzXrYcRlStYN' /root/.ssh/known_hosts
 	fi
 }
 

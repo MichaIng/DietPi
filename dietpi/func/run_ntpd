@@ -14,120 +14,101 @@
 	#
 	# Usage:
 	# - /boot/dietpi/func/run_ntpd
-	# - /boot/dietpi/func/run_ntpd 1 | Same as above, resets any pre-existing sucessful synced flag before running
+	# - /boot/dietpi/func/run_ntpd 1 | Force new sync despite success flag
 	#////////////////////////////////////
 
 	# Import DietPi-Globals --------------------------------------------------------------
 	. /boot/dietpi/func/dietpi-globals
-	readonly G_PROGRAM_NAME='DietPi-Run_NTPD'
+	readonly G_PROGRAM_NAME='DietPi-TimeSync'
 	G_CHECK_ROOT_USER
 	G_INIT
 	# Import DietPi-Globals --------------------------------------------------------------
 
-	disable_error=1 G_CHECK_VALIDINT "$1" && INPUT=$1 || INPUT=0
+	[[ $1 == 1 ]] && INPUT=1 || INPUT=0
 
 	EXIT_CODE=1
-	readonly FP_EXIT_CODE='/run/dietpi/.timesync_exit_status'
 	MAX_LOOPS_CHECK=${MAX_LOOPS_CHECK:-60} # seconds
 
 	Update_NTPD(){
 
 		NTP_UPDATE_MODE=$(sed -n '/^[[:blank:]]*CONFIG_NTP_MODE=/{s/^[^=]*=//p;q}' /boot/dietpi.txt)
 		# Assume status okay when manual mode is detected
-		if [[ $NTP_UPDATE_MODE != [1-4] ]]; then
-
-			G_DIETPI-NOTIFY 0 'Manual mode detected'
+		if [[ $NTP_UPDATE_MODE != [1-4] ]]
+		then
+			G_DIETPI-NOTIFY 2 'Manual mode detected, skipping time sync'
 			EXIT_CODE=0
 			return
-
 		fi
 
-		# Loop NTP check until sucess, or, non-G_INTERACTIVE and timeout
+		# Loop NTP check until success, or, non-G_INTERACTIVE and timeout
 		while (( $EXIT_CODE ))
 		do
+			G_EXEC systemctl start systemd-timesyncd
 
-			G_EXEC systemctl restart systemd-timesyncd
-
-			for ((i=0; i<=$MAX_LOOPS_CHECK; i++))
+			for ((i=1; i<=$MAX_LOOPS_CHECK; i++))
 			do
-
-				# NB: Following will always report "Synced", once systemd has completed it once
-				if systemctl -ln 0 status systemd-timesyncd | grep -qiE '^[[:blank:]]*status: "(synchronized|initial synchronization) to time server'; then
-
-					G_DIETPI-NOTIFY 0 'systemd-timesyncd synced'
-					(( $NTP_UPDATE_MODE < 4 )) && systemctl stop systemd-timesyncd
+				# NB: Following will always report "Synced" when completed once
+				if systemctl -n 0 status systemd-timesyncd | grep -qE '^[[:blank:]]*Status: "(Synchronized|Initial)'
+				then
+					G_DIETPI-NOTIFY 2 'Time sync completed'
 					EXIT_CODE=0
+					(( $NTP_UPDATE_MODE < 4 )) && systemctl stop systemd-timesyncd
 					break 2
 
-				elif (( $i == $MAX_LOOPS_CHECK )); then
+				elif [[ $i == "$MAX_LOOPS_CHECK" ]]
+				then
+					G_DIETPI-NOTIFY 2 'Time sync timed out'
 
-					G_DIETPI-NOTIFY 2 'Timed out waiting for systemd-timesyncd'
+					# Exit if non-interactive 
+					[[ $G_INTERACTIVE == 1 ]] || break 2
 
-					if [[ $G_INTERACTIVE != 0 ]]; then
+					G_WHIP_MENU_ARRAY=(
 
-						G_WHIP_MENU_ARRAY=(
+						'Retry' ': (Recommended) Rerun network time sync'
+						'NTP mirror' ': Change the NTP mirror used'
+						'Override' ': (NOT RECOMMENDED) Ignore failure and override time sync status'
 
-							'Retry' ': (Recommended) Rerun network time sync'
-							'NTP mirror' ': Change the NTP mirror used'
-							'Override' ': (NOT RECOMMENDED) Ignore failure and override time sync status'
+					)
 
-						)
+					G_WHIP_BUTTON_CANCEL_TEXT='Retry'
+					G_WHIP_MENU 'Network time sync has not yet completed or failed to update.\nTo prevent issues with outdated system time during installations, please select an option below.\n
+NB: We highly recommend choosing "Retry" first. Failing that, try to change the "NTP mirror".\n"Override" is a last resort and may cause follow-up issues due to incorrect system clock time.'
 
-						G_WHIP_BUTTON_CANCEL_TEXT='Retry'
-						if G_WHIP_MENU 'Network time sync has not yet completed, or, failed to update.\nTo prevent issues with outdated system time during installations, please select an option below.\n
-NB: We highly recommend choosing "Retry" first. Failing that, try to change the "NTP mirror".\n"Override" is a last resort and may cause follow-up issues due to incorrect system clock time.'; then
+					if [[ $G_WHIP_RETURNED_VALUE == 'NTP mirror' ]]
+					then
+						G_WHIP_MSG 'DietPi-Config will now be launched, on the next screen:\n - Select "NTP Mirror"\n - Select a different NTP mirror\n\nOnce completed, exit dietpi-config to resume.'
+						/boot/dietpi/dietpi-config 16 1
 
-							if [[ $G_WHIP_RETURNED_VALUE == 'NTP mirror' ]]; then
-
-								G_WHIP_MSG 'DietPi-Config will now be launched, on the next screen:\n - Select "NTP Mirror"\n - Select a different NTP mirror\n\nOnce completed, exit dietpi-config to resume setup'
-								/boot/dietpi/dietpi-config 16 1
-
-							elif [[ $G_WHIP_RETURNED_VALUE == 'Override' ]]; then
-
-								EXIT_CODE=0
-
-							fi
-
-						fi
-
-					# Automated, allow fail
-					else
-
-						break 2
-
+					elif [[ $G_WHIP_RETURNED_VALUE == 'Override' ]]
+					then
+						EXIT_CODE=0
 					fi
-
 				else
-
-					G_DIETPI-NOTIFY 2 "Waiting for completion of systemd-timesyncd ($(( $i + 1 ))/$MAX_LOOPS_CHECK)"
+					G_DIETPI-NOTIFY 2 "Waiting for time sync ($i/$MAX_LOOPS_CHECK)"
 					sleep 1
-
 				fi
-
 			done
-
 		done
 
-		# Log status of completion, prevent software installs: https://github.com/MichaIng/DietPi/issues/786
-		echo $EXIT_CODE > $FP_EXIT_CODE
+		# Create flag file on success
+		if [[ $EXIT_CODE == 0 && ! -f '/run/systemd/timesync/synchronized' ]]
+		then
+			[[ -d '/run/systemd/timesync' ]] || G_EXEC mkdir -p /run/systemd/timesync
+			> /run/systemd/timesync/synchronized
+		fi
 
 	}
 
 	#/////////////////////////////////////////////////////////////////////////////////////
 	# Main Loop
 	#/////////////////////////////////////////////////////////////////////////////////////
-	# Run only once each boot session, or if $1 == 1 is given
+	# Run only once each boot session or when forced via $1 == 1
 	# shellcheck disable=SC2015
-	[[ $INPUT != 1 && -f $FP_EXIT_CODE && $(<$FP_EXIT_CODE) == 0 ]] && EXIT_CODE=0 || Update_NTPD
+	[[ $INPUT != 1 && -f '/run/systemd/timesync/synchronized' ]] && EXIT_CODE=0 || Update_NTPD
 
 	# Return status
 	G_DIETPI-NOTIFY -1 $EXIT_CODE 'Network time sync'
-	if (( $EXIT_CODE )); then
-
-		G_DIETPI-NOTIFY 2 'Please check the service status for more information:'
-		G_DIETPI-NOTIFY 2 ' - systemctl -l status systemd-timesyncd'
-
-	fi
+	(( $EXIT_CODE )) && G_DIETPI-NOTIFY 2 'Please check the service status for more information:\n         - systemctl status systemd-timesyncd'
 	#-----------------------------------------------------------------------------------
 	exit $EXIT_CODE
 	#-----------------------------------------------------------------------------------

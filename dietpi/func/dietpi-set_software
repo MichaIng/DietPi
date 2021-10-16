@@ -22,6 +22,7 @@ $FP_SCRIPT	apt-cache		clean|reset|cache|lists|archives [disable|ram|disk]
 $FP_SCRIPT	ntpd-mode		[0-4] Time sync modes: 0=custom|1=boot|2=boot+daily|3=boot+hourly|4=daemon+drift
 $FP_SCRIPT	verify_dietpi.txt	Verifies dietpi.txt entries, adds missing entries if required
 $FP_SCRIPT	passwords		NULL=Prompt user to change DietPi related passwords | X=optional set X as global password for future dietpi-software installations and \"root\" + \"dietpi\" login passwords.
+$FP_SCRIPT	boot_wait_for_network	[01] Enable or disable waiting for network interface configuration before DietPi-PostBoot is started, including postboot.d custom scripts and service startups
 "	#////////////////////////////////////
 
 	# Grab inputs
@@ -301,18 +302,23 @@ deb $INPUT_MODE_VALUE $G_DISTRO_NAME-backports main contrib non-free' > /etc/apt
 
 			fi
 
-			# Daemon mode, dbus required for timedatectl, that users may expect
-			if (( $INPUT_MODE_VALUE == 4 )); then
-
+			# Daemon mode: dbus required for timedatectl, that users may expect
+			if [[ $INPUT_MODE_VALUE == 4 ]]
+			then
 				G_AG_CHECK_INSTALL_PREREQ dbus
-				systemctl unmask systemd-timesyncd # Failsafe
-				systemctl enable --now systemd-timesyncd
+				G_EXEC systemctl unmask systemd-timesyncd # Failsafe
+				G_EXEC systemctl enable --now systemd-timesyncd
 
-			# Else, disable systemd-timesyncd to let "run_ntpd" or other time sync system take control
+			# Oneshot modes: Enable systemd-timesyncd to start early at boot, but stop it now
+			elif [[ $INPUT_MODE_VALUE == [123] ]]
+			then
+				G_EXEC systemctl unmask systemd-timesyncd # Failsafe
+				G_EXEC systemctl enable systemd-timesyncd
+				G_EXEC systemctl stop systemd-timesyncd
+
+			# Custom mode: Disable systemd-timesyncd to let other time sync system take control
 			else
-
-				systemctl disable --now systemd-timesyncd
-
+				G_EXEC systemctl disable --now systemd-timesyncd
 			fi
 
 			# Update dietpi.txt
@@ -526,6 +532,24 @@ It is highly recommended to change this password, ideally, it should be differen
 
 	}
 
+	Boot_Wait_For_Network()
+	{
+		if [[ $INPUT_MODE_VALUE == 1 ]]
+		then
+			[[ -d '/etc/systemd/system/dietpi-postboot.service.d' ]] || G_EXEC mkdir -p /etc/systemd/system/dietpi-postboot.service.d
+			echo -e '[Unit]\nWants=network-online.target\nAfter=network-online.target' > /etc/systemd/system/dietpi-postboot.service.d/dietpi.conf
+
+		elif [[ $INPUT_MODE_VALUE == 0 ]]
+		then
+			[[ -f '/etc/systemd/system/dietpi-postboot.service.d/dietpi.conf' ]] && G_EXEC rm /etc/systemd/system/dietpi-postboot.service.d/dietpi.conf
+			[[ -d '/etc/systemd/system/dietpi-postboot.service.d' ]] && G_EXEC rmdir --ignore-fail-on-non-empty /etc/systemd/system/dietpi-postboot.service.d
+		else
+			Unknown_Input_Mode
+			return 1
+		fi
+		G_CONFIG_INJECT 'AUTO_SETUP_BOOT_WAIT_FOR_NETWORK=' "AUTO_SETUP_BOOT_WAIT_FOR_NETWORK=$INPUT_MODE_VALUE" /boot/dietpi.txt
+	}
+
 	#/////////////////////////////////////////////////////////////////////////////////////
 	# Main Loop
 	#/////////////////////////////////////////////////////////////////////////////////////
@@ -568,6 +592,10 @@ It is highly recommended to change this password, ideally, it should be differen
 	elif [[ $INPUT_MODE_NAME == 'passwords' ]]; then
 
 		Passwords_Main
+
+	elif [[ $INPUT_MODE_NAME == 'boot_wait_for_network' ]]; then
+
+		Boot_Wait_For_Network
 
 	else
 

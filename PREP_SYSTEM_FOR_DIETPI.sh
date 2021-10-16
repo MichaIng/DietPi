@@ -581,7 +581,6 @@ Currently installed: $G_DISTRO_NAME (ID: $G_DISTRO)"; then
 		G_EXEC mv "DietPi-$G_GITBRANCH/dietpi.txt" /boot/
 		G_EXEC mv "DietPi-$G_GITBRANCH/README.md" /boot/dietpi-README.md
 		G_EXEC mv "DietPi-$G_GITBRANCH/LICENSE" /boot/dietpi-LICENSE.txt
-		G_EXEC mv "DietPi-$G_GITBRANCH/CHANGELOG.txt" /boot/dietpi-CHANGELOG.txt
 
 		# Reading version string for later use
 		. "DietPi-$G_GITBRANCH/.update/version"
@@ -792,6 +791,31 @@ Currently installed: $G_DISTRO_NAME (ID: $G_DISTRO)"; then
 			echo 'do_symlinks=0' > /etc/kernel-img.conf
 			G_EXEC rm -f /{,boot/}{initrd.img,vmlinuz}{,.old}
 
+			# If /boot is on a FAT partition, create a kernel upgrade hook script to remove existing files first: https://github.com/MichaIng/DietPi/issues/4788
+			if [[ $(findmnt -Ufnro FSTYPE -M /boot) == 'vfat' ]]
+			then
+				G_EXEC mkdir -p /etc/kernel/preinst.d
+				cat << '_EOF_' > /etc/kernel/preinst.d/dietpi
+#!/bin/sh -e
+# Remove old kernel files if existing: https://github.com/MichaIng/DietPi/issues/4788
+{
+# Fail if the package name was not passed, which is done when being invoked by dpkg
+if [ -z "$DPKG_MAINTSCRIPT_PACKAGE" ]
+then
+        echo 'DPKG_MAINTSCRIPT_PACKAGE was not set, this script must be invoked by dpkg.'
+        exit 1
+fi
+
+# Loop through files in /boot, shipped by the package, and remove them, if existing
+for file in $(dpkg -L "$DPKG_MAINTSCRIPT_PACKAGE" | grep '^/boot/')
+do
+        [ ! -f "$file" ] || rm "$file"
+done
+}
+_EOF_
+				G_EXEC chmod +x /etc/kernel/preinst.d/dietpi
+			fi
+
 			G_AGI "${apackages[@]}"
 			unset -v apackages
 
@@ -833,11 +857,12 @@ Currently installed: $G_DISTRO_NAME (ID: $G_DISTRO)"; then
 			G_EXEC mkdir -p /etc/initramfs/post-update.d
 			cat << _EOF_ > /etc/initramfs/post-update.d/99-dietpi-uboot
 #!/bin/dash
-echo 'update-initramfs: Converting to u-boot format' >&2
+echo 'update-initramfs: Converting to U-Boot format' >&2
 mkimage -A $arch -O linux -T ramdisk -C gzip -n uInitrd -d \$2 /boot/uInitrd-\$1 > /dev/null
 ln -sf uInitrd-\$1 /boot/uInitrd > /dev/null 2>&1 || mv /boot/uInitrd-\$1 /boot/uInitrd
 exit 0
 _EOF_
+			G_EXEC chmod +x /etc/initramfs/post-update.d/99-dietpi-uboot
 			G_EXEC mkdir -p /etc/kernel/preinst.d
 			cat << '_EOF_' > /etc/kernel/preinst.d/dietpi-initramfs_cleanup
 #!/bin/dash
@@ -855,7 +880,7 @@ fi
 # avoid running multiple times
 if [ -n "$DEB_MAINT_PARAMS" ]; then
         eval set -- "$DEB_MAINT_PARAMS"
-        if [ -z "$1" ] || [ "$1" != 'upgrade' ]; then
+        if [ "$1" != 'upgrade' ]; then
                 exit 0
         fi
 fi
@@ -887,9 +912,10 @@ done
 exit 0
 _EOF_
 			fi
+			G_EXEC chmod +x /etc/kernel/preinst.d/dietpi-initramfs_cleanup
 
 			# Remove obsolete components from Armbian list and connect via HTTPS
-			G_EXEC eval "echo 'deb https://apt.armbian.com/ ${DISTRO_TARGET_NAME/bookworm/bullseye} main' > /etc/apt/sources.list.d/armbian.list"
+			G_EXEC eval "echo 'deb http://apt.armbian.com/ ${DISTRO_TARGET_NAME/bookworm/bullseye} main' > /etc/apt/sources.list.d/armbian.list"
 
 			# Exclude doubled device tree files, shipped with the kernel package
 			echo 'path-exclude /usr/lib/linux-image-current-*' > /etc/dpkg/dpkg.cfg.d/01-dietpi-exclude_doubled_devicetrees
@@ -974,7 +1000,7 @@ _EOF_
 			[[ -f '/etc/apt/trusted.gpg~' ]] && G_EXEC rm '/etc/apt/trusted.gpg~'
 
 			# NB: rockpis-dtbo is not required as it doubles the overlays that are already provided (among others) with the kernel package
-			G_AGI rockpis-rk-ubootimg linux-4.4-rock-pi-s-latest rockchip-overlay
+			G_AGI rockpis-rk-ubootimg linux-4.4-rock-pi-s-latest rockchip-overlay u-boot-tools
 
 		# - Generic kernel + device tree package auto detect
 		else
@@ -1043,11 +1069,11 @@ _EOF_
 
 		# Purging additional packages, that (in some cases) do not get autoremoved:
 		# - dbus: Not required for headless images, but sometimes marked as "important", thus not autoremoved.
-		#	+ Workaround for "The following packages have unmet dependencies: glib-networking libgtk-3-0"
+		#	+ Workaround for "The following packages have unmet dependencies: glib-networking libgtk-3-0 libgirepository-1.0-1"
 		# - dhcpcd5: https://github.com/MichaIng/DietPi/issues/1560#issuecomment-370136642
 		# - mountall: https://github.com/MichaIng/DietPi/issues/2613
 		# - initscripts: Pre-installed on Jessie systems (?), superseded and masked by systemd, but never autoremoved
-		G_AGP dbus dhcpcd5 mountall initscripts '*office*' '*xfce*' '*qt5*' '*xserver*' '*xorg*' glib-networking libgtk-3-0
+		G_AGP dbus dhcpcd5 mountall initscripts '*office*' '*xfce*' '*qt5*' '*xserver*' '*xorg*' glib-networking libgtk-3-0 libgirepository-1.0-1
 		# Remove any autoremove prevention
 		rm -fv /etc/apt/apt.conf.d/*autoremove*
 		G_AGA
@@ -1107,19 +1133,6 @@ _EOF_
 
 		fi
 
-		# RPi Bullseye workaround, until new firmware packages have been built: https://archive.raspberrypi.org/debian/pool/main/f/firmware-nonfree/?C=M;O=D
-		if (( $G_DISTRO == 6 && $G_HW_MODEL == 0 ))
-		then
-			G_EXEC curl -sSfLO 'https://archive.raspberrypi.org/debian/pool/main/f/firmware-nonfree/firmware-brcm80211_20190114-2+rpt1_all.deb'
-			G_EXEC dpkg-deb -x 'firmware-brcm80211_20190114-2+rpt1_all.deb' .
-			G_EXEC rm -R 'firmware-brcm80211_20190114-2+rpt1_all.deb' usr
-			for i in lib/firmware/brcm/*
-			do
-				[[ -f /$i ]] || G_EXEC mv {,/}"$i"
-			done
-			G_EXEC rm -R lib
-		fi
-
 		# Install vmtouch to lock DietPi scripts and config in file system cache
 		G_EXEC curl -sSfLO "https://dietpi.com/downloads/binaries/$G_DISTRO_NAME/vmtouch_$G_HW_ARCH_NAME.deb"
 		G_EXEC dpkg --force-hold,confnew -i "vmtouch_$G_HW_ARCH_NAME.deb"
@@ -1159,9 +1172,14 @@ _EOF_
 
 		[[ -d '/selinux' ]] && rm -Rv /selinux
 		[[ -d '/var/cache/apparmor' ]] && rm -Rv /var/cache/apparmor
+		[[ -d '/var/lib/udisks2' ]] && rm -Rv /var/lib/udisks2
+		[[ -d '/var/lib/bluetooth' ]] && rm -Rv /var/lib/bluetooth
 		[[ -d '/usr/lib/firefox-esr' ]] && rm -Rv /usr/lib/firefox-esr # Armbian desktop images
 		rm -Rfv /var/lib/dhcp/{,.??,.[^.]}*
+		rm -Rfv /var/lib/misc/*.leases
 		rm -Rfv /var/backups/{,.??,.[^.]}*
+		[[ -f '/etc/udhcpd.conf.org' ]] && rm -v /etc/udhcpd.conf.org
+		[[ -f '/etc/fs.resized' ]] && rm -v /etc/fs.resized
 
 		# - www
 		[[ -d '/var/www' ]] && rm -vRf /var/www/{,.??,.[^.]}*
@@ -1512,8 +1530,8 @@ _EOF_'
 		/boot/dietpi/func/dietpi-set_software locale 'C.UTF-8'
 
 		G_DIETPI-NOTIFY 2 'Configuring time zone:'
-		rm -fv /etc/{localtime,timezone}
-		ln -sv /usr/share/zoneinfo/UTC /etc/localtime
+		G_EXEC rm -f /etc/{localtime,timezone}
+		G_EXEC ln -s /usr/share/zoneinfo/UTC /etc/localtime
 		G_EXEC dpkg-reconfigure -f noninteractive tzdata
 
 		G_DIETPI-NOTIFY 2 'Configuring keyboard:'
@@ -1581,20 +1599,19 @@ _EOF_"
 			G_EXEC curl -sSfL https://raw.githubusercontent.com/sparky-sbc/sparky-test/master/dragon_fly_check/uImage -o /boot/uImage
 			G_EXEC curl -sSfLO https://raw.githubusercontent.com/sparky-sbc/sparky-test/master/dragon_fly_check/3.10.38.bz2
 			G_EXEC tar -xf 3.10.38.bz2 -C /lib/modules/
-			rm 3.10.38.bz2
+			G_EXEC rm 3.10.38.bz2
 			# - USB audio update
 			G_EXEC curl -sSfL https://raw.githubusercontent.com/sparky-sbc/sparky-test/master/dsd-marantz/snd-usb-audio.ko -o /lib/modules/3.10.38/kernel/sound/usb/snd-usb-audio.ko
 			# - Ethernet update
 			G_EXEC curl -sSfL https://raw.githubusercontent.com/sparky-sbc/sparky-test/master/sparky-eth/ethernet.ko -o /lib/modules/3.10.38/kernel/drivers/net/ethernet/acts/ethernet.ko
 
 			# Boot args
-			cat << _EOF_ > /boot/uenv.txt
+			cat << '_EOF_' > /boot/uenv.txt
 uenvcmd=setenv os_type linux;
-bootargs=earlyprintk clk_ignore_unused selinux=0 scandelay console=tty0 loglevel=1 real_rootflag=rw root=/dev/mmcblk0p2 rootwait init=/lib/systemd/systemd aotg.urb_fix=1 aotg.aotg1_speed=0 net.ifnames=0
+bootargs=earlyprintk clk_ignore_unused selinux=0 scandelay console=tty0 loglevel=1 real_rootflag=rw root=/dev/mmcblk0p2 rootwait init=/lib/systemd/systemd aotg.urb_fix=1 aotg.aotg1_speed=0 net.ifnames=0 systemd.unified_cgroup_hierarchy=0
 _EOF_
-
 			# Blacklist GPU and touch screen modules: https://github.com/MichaIng/DietPi/issues/699#issuecomment-271362441
-			cat << _EOF_ > /etc/modprobe.d/dietpi-disable_sparkysbc_touchscreen.conf
+			cat << '_EOF_' > /etc/modprobe.d/dietpi-disable_sparkysbc_touchscreen.conf
 blacklist owl_camera
 blacklist gsensor_stk8313
 blacklist ctp_ft5x06
@@ -1602,19 +1619,17 @@ blacklist ctp_gsl3680
 blacklist gsensor_bma222
 blacklist gsensor_mir3da
 _EOF_
-
-			cat << _EOF_ > /etc/modprobe.d/dietpi-disable_sparkysbc_gpu.conf
+			cat << '_EOF_' > /etc/modprobe.d/dietpi-disable_sparkysbc_gpu.conf
 blacklist pvrsrvkm
 blacklist drm
 blacklist videobuf2_vmalloc
 blacklist bc_example
 _EOF_
-
 			# Use performance gov for stability
 			G_CONFIG_INJECT 'CONFIG_CPU_GOVERNOR=' 'CONFIG_CPU_GOVERNOR=performance' /boot/dietpi.txt
 
 			# Install script to toggle between USB and onboard Ethernet automatically
-			cat << _EOF_ > /var/lib/dietpi/services/dietpi-sparkysbc_ethernet.sh
+			cat << '_EOF_' > /var/lib/dietpi/services/dietpi-sparkysbc_ethernet.sh
 #!/bin/dash
 # Called from: /etc/systemd/system/dietpi-sparkysbc_ethernet.service
 # We need to wait until USB Ethernet is established on USB bus, which takes much longer than onboard init.
@@ -1633,8 +1648,8 @@ elif ! ip a s eth0 > /dev/null 2>&1; then
 
 fi
 _EOF_
-			chmod +x /var/lib/dietpi/services/dietpi-sparkysbc_ethernet.sh
-			cat << _EOF_ > /etc/systemd/system/dietpi-sparkysbc_ethernet.service
+			G_EXEC chmod +x /var/lib/dietpi/services/dietpi-sparkysbc_ethernet.sh
+			cat << '_EOF_' > /etc/systemd/system/dietpi-sparkysbc_ethernet.service
 [Unit]
 Description=Sparky SBC auto detect and toggle onboard/USB Ethernet
 Wants=network-online.target
@@ -1647,7 +1662,7 @@ ExecStart=/var/lib/dietpi/services/dietpi-sparkysbc_ethernet.sh
 [Install]
 WantedBy=multi-user.target
 _EOF_
-			systemctl enable dietpi-sparkysbc_ethernet
+			G_EXEC systemctl enable dietpi-sparkysbc_ethernet
 
 		# - RPi
 		elif (( $G_HW_MODEL < 10 )); then
@@ -1707,7 +1722,7 @@ _EOF_
 			done
 			G_EXEC sed -i 's/^#grep/grep/' /etc/kernel/postinst.d/dietpi-USBridgeSig
 
-		# - PINE A64 (and possibily others): Cursor fix for FB
+		# - PINE A64 (and possibly others): Cursor fix for FB
 		elif (( $G_HW_MODEL == 40 )); then
 
 			cat << _EOF_ > /etc/bashrc.d/dietpi-pine64-cursorfix.sh
@@ -1718,7 +1733,6 @@ sed -i -e 's/?0c/?112c/g' -e 's/?8c/?48;0;64c/g' terminfo.txt
 tic terminfo.txt
 tput cnorm
 _EOF_
-
 			# Ensure WiFi module pre-exists
 			G_CONFIG_INJECT '8723bs' '8723bs' /etc/modules
 
@@ -1736,6 +1750,30 @@ _EOF_
 			# Disable Docker optimisations, since this has some performance drawbacks, enable on Docker install instead
 			G_CONFIG_INJECT 'docker_optimizations=' 'docker_optimizations=off' /boot/armbianEnv.txt
 
+		fi
+
+		# Apply cgroups-v2 workaround on Bullseye if the kernel does not support it: https://github.com/MichaIng/DietPi/issues/4705
+		if (( $G_DISTRO > 5 )) && ! find /lib/modules -maxdepth 1 -type d -name '5.[0-9]*' > /dev/null
+		then
+			# Odroids
+			if [[ $G_HW_MODEL -gt 9 && $G_HW_MODEL -le 16 && -f '/boot/boot.ini' ]]
+			then
+				G_DIETPI-NOTIFY 2 'Forcing legacy cgroups v1 hierarchy on old kernel device'
+				grep -q 'systemd.unified_cgroup_hierarchy=0' /boot/boot.ini || G_EXEC sed -i '/^setenv bootargs "/s/"$/ systemd.unified_cgroup_hierarchy=0"/' /boot/boot.ini
+
+			# Sparky SBC
+			elif [[ $G_HW_MODEL == 70 && -f '/boot/uenv.txt' ]]
+			then
+				G_DIETPI-NOTIFY 2 'Forcing legacy cgroups v1 hierarchy on old kernel device'
+				grep -q 'systemd.unified_cgroup_hierarchy=0' /boot/uenv.txt || G_EXEC sed -i '/^bootargs=/s/$/ systemd.unified_cgroup_hierarchy=0/' /boot/uenv.txt
+
+			# ROCK Pi S
+			elif [[ $G_HW_MODEL == 73 && -f '/boot/boot.cmd' ]]
+			then
+				G_DIETPI-NOTIFY 2 'Forcing legacy cgroups v1 hierarchy on old kernel device'
+				grep -q 'systemd.unified_cgroup_hierarchy=0' /boot/boot.cmd || G_EXEC sed -i '/^setenv bootargs "/s/"$/ systemd.unified_cgroup_hierarchy=0"/' /boot/boot.cmd
+				G_EXEC mkimage -C none -A arm64 -T script -d /boot/boot.cmd /boot/boot.scr
+			fi
 		fi
 
 		#------------------------------------------------------------------------------------------------
@@ -1839,7 +1877,7 @@ _EOF_
 		echo -e "$IMAGE_CREATOR\n$PREIMAGE_INFO" > /boot/dietpi/.prep_info
 
 		G_DIETPI-NOTIFY 2 'Generating GPLv2 license readme'
-		cat << _EOF_ > /var/lib/dietpi/license.txt
+		cat << '_EOF_' > /var/lib/dietpi/license.txt
 -----------------------
 DietPi - GPLv2 License:
 -----------------------

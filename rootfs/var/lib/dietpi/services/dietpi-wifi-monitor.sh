@@ -1,45 +1,39 @@
 #!/bin/bash
 {
-	# Check for root permissions
-	(( $UID )) && { echo 'ERROR: Root permissions required. Please run this script with "sudo". Exiting...'; exit 1; }
+	# Import DietPi-Globals ---------------------------------------------------------------
+	. /boot/dietpi/func/dietpi-globals
+	readonly G_PROGRAM_NAME='DietPi-WiFi_Monitor'
+	G_CHECK_ROOT_USER
+	G_INIT
+	# Import DietPi-Globals ---------------------------------------------------------------
 
-	# Check for concurrent execution
-	(( $(pgrep -cf 'dietpi-wifi-monitor.sh') > 1 )) && { echo 'ERROR: Concurrent execution detected. Please exit the running instance of DietPi-WiFi-Monitor first. Exiting...'; exit 1; }
-
-	URL_PING=
-	ADAPTER="wlan$(mawk 'NR==2' /run/dietpi/.network)"
-	[[ $TICKRATE =~ ^[0-9]+$ ]] && (( $TICKRATE > 0 )) || TICKRATE=10
+	readonly ADAPTER=$(G_GET_NET -t wlan iface)
+	[[ $ADAPTER ]] || { G_DIETPI-NOTIFY 1 'No WiFi adapter has been found. Exiting...'; exit 1; }
+	[[ $TICKRATE =~ ^[1-9][0-9]*$ ]] || readonly TICKRATE=10
+	GATEWAY=
 
 	#-------------------------------------------------------------------------------------
 	# Main
 	#-------------------------------------------------------------------------------------
-	echo "Checking connection for: $ADAPTER via ping to default gateway every $TICKRATE seconds"
+	G_DIETPI-NOTIFY 2 "Checking connection for $ADAPTER via ping to default gateway every $TICKRATE seconds"
 
 	while :
 	do
+		if [[ ! -e /sys/class/net/$ADAPTER ]]
+		then
+			G_DIETPI-NOTIFY 1 "WiFi adapter $ADAPTER has been unplugged. Exiting..."
+			exit 1
 
-		# Get current gateway for ping
-		URL_PING=$(ip r l 0/0 dev "$ADAPTER" | mawk '{print $3}')
-
-		[[ $G_DEBUG == 1 ]] && echo "Checking connection for: $ADAPTER via ping to $URL_PING"
-		if [[ $URL_PING ]] && ping -qI "$ADAPTER" -c 1 "$URL_PING" &> /dev/null; then
-
-			[[ $G_DEBUG == 1 ]] && echo "Connection valid for: $ADAPTER"
-
-		else
-
-			[[ -e /sys/class/net/$ADAPTER ]] || { echo "ERROR: WiFi adapter has been unplugged: $ADAPTER. Exiting..."; exit 1; }
-
-			echo "Detected connection loss: $ADAPTER. Reconnecting..."
+		elif ! GATEWAY=$(G_GET_NET -i "$ADAPTER" gateway) || ! ping -qI "$ADAPTER" -c 1 "$GATEWAY" &> /dev/null
+		then
+			G_DIETPI-NOTIFY 2 "Detected $ADAPTER connection loss. Reconnecting..."
 			ifdown "$ADAPTER"
 			sleep 1
 			ifup "$ADAPTER"
-			echo 'Completed'
-
+			G_DIETPI-NOTIFY 0 'Completed'
 		fi
 
 		sleep $TICKRATE
-
 	done
 
 	exit 0

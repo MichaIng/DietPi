@@ -11,6 +11,10 @@ G_CHECK_ROOT_USER
 G_CHECK_ROOTFS_RW
 G_INIT
 
+# Use DietPi version from inputs to reapply pre-patches on updater internal subversion decrease
+[[ $1 ]] && G_DIETPI_VERSION_CORE=$1
+[[ $2 ]] && G_DIETPI_VERSION_SUB=$2
+
 # IMPORTANT: This script can be called with DietPi v6.17, hence assure compatibility!
 # - Pre-v6.29: Create G_EXEC as G_RUN_CMD wrapper
 declare -F G_EXEC > /dev/null || G_EXEC(){ G_RUN_CMD "$@"; }
@@ -73,11 +77,11 @@ Package: linux-image-* linux-headers-* linux-dtb-* linux-u-boot-* armbian-firmwa
 \nPackage: *\nPin: origin apt.armbian.com\nPin-Priority: -1' > /etc/apt/preferences.d/dietpi-armbian"
 fi
 
-# v7.4: On Stretch, allow interactive suite change once, to assure the update does not hang or fail on G_AGUP. From Buster on, the suite change throws a notice only and does not require any confirmation.
-if (( $G_DISTRO < 5 )) && (( $G_DIETPI_VERSION_CORE < 7 || ( $G_DIETPI_VERSION_CORE == 7 && $G_DIETPI_VERSION_SUB < 4 ) )) && curl -sSfL 'https://deb.debian.org/debian/dists/bullseye/Release' | grep -q '^Suite: stable$'
+# v7.5: Perform Debian suite change once, if the installed APT version does not allow it by default yet
+if (( $G_DIETPI_VERSION_CORE < 7 || ( $G_DIETPI_VERSION_CORE == 7 && $G_DIETPI_VERSION_SUB < 5 ) )) && dpkg --compare-versions "$(dpkg-query -Wf '${VERSION}' apt)" lt 1.8.2.3
 then
-	G_DIETPI-NOTIFY 2 'Debian Bullseye has been released, so you need to accept the Stretch suite change from "oldstable" to "oldoldstable" once.'
-	apt-get update	
+	G_DIETPI-NOTIFY 2 'Debian Bullseye has been released, so we accept the repository suite change once.'
+	G_EXEC apt-get -o 'Acquire::AllowReleaseInfoChange::Suite=true' -q update
 fi
 
 # v7.4
@@ -118,6 +122,26 @@ do
 done
 }
 _EOF_
+	G_EXEC chmod +x /etc/kernel/preinst.d/dietpi
+fi
+
+# v7.7
+if [[ -f '/etc/apt/sources.list.d/armbian.list' ]] && grep -q 'https://apt.armbian.com' /etc/apt/sources.list.d/armbian.list
+then
+	G_DIETPI-NOTIFY 2 'Connecting to apt.armbian.com via plain HTTP until their router handles HTTPS redirects reliably'
+	G_EXEC sed -i 's|https://apt.armbian.com|http://apt.armbian.com|' /etc/apt/sources.list.d/armbian.list
+fi
+
+# v7.7
+if (( $G_DIETPI_VERSION_CORE < 7 || ( $G_DIETPI_VERSION_CORE == 7 && $G_DIETPI_VERSION_SUB < 7 ) ))
+then
+	G_DIETPI-NOTIFY 2 'Connecting to Mosquitto and Webmin repositories via plain HTTP once until latest OpenSSL has been installed: https://github.com/MichaIng/DietPi/issues/4795'
+	G_EXEC sed -Ei 's#https://(repo.mosquitto.org|download.webmin.com)#http://\1#' /etc/apt/sources.list
+	[[ $(find /etc/apt/sources.list/*.list 2> /dev/null) ]] && G_EXEC sed -Ei 's#https://(repo.mosquitto.org|download.webmin.com)#http://\1#' /etc/apt/sources.list.d/*.list
+
+	# Add execute permissions to kernel/initramfs hooks
+	[[ -f '/etc/initramfs/post-update.d/99-dietpi-uboot' && ! -x '/etc/initramfs/post-update.d/99-dietpi-uboot' ]] && G_EXEC chmod +x /etc/initramfs/post-update.d/99-dietpi-uboot
+	[[ -f '/etc/kernel/preinst.d/dietpi-initramfs_cleanup' && ! -x '/etc/kernel/preinst.d/dietpi-initramfs_cleanup' ]] && G_EXEC chmod +x /etc/kernel/preinst.d/dietpi-initramfs_cleanup
 fi
 
 exit 0
