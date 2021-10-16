@@ -300,6 +300,9 @@ _EOF_
 		# shellcheck disable=SC2015
 		(( $wifi_enabled )) && ifup "$iface_wlan" || ifup "$iface_eth"
 
+		# - Boot wait for network
+		/boot/dietpi/func/dietpi-set_software boot_wait_for_network "$(( ! $(grep -cm1 '^[[:blank:]]*AUTO_SETUP_BOOT_WAIT_FOR_NETWORK=0' /boot/dietpi.txt) ))"
+
 		# x86_64 BIOS: Set GRUB install device: https://github.com/MichaIng/DietPi/issues/4542
 		if (( $G_HW_MODEL == 10 )) && dpkg-query -s grub-pc &> /dev/null
 		then
