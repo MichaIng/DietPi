@@ -397,6 +397,9 @@ INDEX_BROWSER_TARGET=$INDEX_BROWSER_TARGET"
 		aSOFTWARE_CATX[$software_id]=2
 		aSOFTWARE_DOCS[$software_id]='https://dietpi.com/docs/software/media/#airsonic'
 		aSOFTWARE_DEPS[$software_id]='5 7 196'
+		# - Bullseye due to missing Java 17 support: https://github.com/MichaIng/DietPi/issues/4847
+		aSOFTWARE_AVAIL_G_DISTRO[$software_id,6]=0
+		aSOFTWARE_AVAIL_G_DISTRO[$software_id,7]=0
 		#------------------
 		software_id=34
 
@@ -5984,8 +5987,15 @@ _EOF_
 			# Install required PHP modules: https://github.com/FreshRSS/FreshRSS#example-of-full-installation-on-linux-debianubuntu
 			DEPS_LIST="$PHP_NAME-curl $PHP_NAME-gmp $PHP_NAME-intl $PHP_NAME-json $PHP_NAME-mbstring $PHP_NAME-xml $PHP_NAME-zip"
 
-			Download_Install 'https://github.com/FreshRSS/FreshRSS/archive/master.tar.gz' /opt
-			mv /opt/FreshRSS-master /opt/FreshRSS
+			if [[ -d '/opt/FreshRSS' ]]
+			then
+				G_DIETPI-NOTIFY 2 "${aSOFTWARE_NAME[$software_id]} install dir \"/opt/FreshRSS\" already exists. Download and install steps will be skipped.
+ - If you want to update ${aSOFTWARE_NAME[$software_id]}, please use the internal updater from web UI.
+ - if you need to reinstall (e.g. broken instance), please manually backup your config files+data, remove the install dir \"/opt/FreshRSS\" and rerun \"dietpi-software (re)install $software_id\"."
+			else
+				Download_Install 'https://github.com/FreshRSS/FreshRSS/archive/master.tar.gz' /opt
+				G_EXEC mv /opt/FreshRSS-master /opt/FreshRSS
+			fi
 
 		fi
 
@@ -7217,21 +7227,17 @@ _EOF_
 			[[ -d '/opt/vaultwarden' ]] && G_EXEC rm -R /opt/vaultwarden
 			G_EXEC mv "vaultwarden-$version" /opt/vaultwarden
 
-			# Assure 2 GiB overall memory (-100 MiB to avoid tiny swap space) is available and limit concurrent cargo build jobs to 2 if less than 3 GiB memory is available.
-			local jobs=
-			if (( $RAM_TOTAL < 1948 ))
+			# Assure 3 GiB overall memory on single-core and 4 GiB on multi-core systems (-200 MiB to avoid tiny swap space)
+			local ram_min=3
+			(( $(nproc) > 1 )) && ram_min=4
+			if (( $RAM_TOTAL < $ram_min * 1024 - 200 ))
 			then
-				G_DIETPI-NOTIFY 2 'Vaultwarden build requires at least 2 GiB memory. We will now increase your swap size to satisfy this requirement.'
-				/boot/dietpi/func/dietpi-set_swapfile 1
-				(( $G_HW_CPU_CORES > 2 )) && jobs=2
-
-			elif (( $RAM_TOTAL < 3072 && $G_HW_CPU_CORES > 2 ))
-			then
-				jobs=2
+				G_DIETPI-NOTIFY 2 "Vaultwarden build requires at least $ram_min GiB memory. We will now increase your swap size to satisfy this requirement."
+				/boot/dietpi/func/dietpi-set_swapfile $(( $ram_min * 1024 - $RAM_TOTAL ))
 			fi
 
-			# Temporarily assure 1.5 GiB /tmp size for temporary Rust install
-			(( $(findmnt -bno SIZE /tmp) < 1610612736 )) && G_EXEC mount -o remount,size=1610612736 /tmp
+			# Temporarily assure 2 GiB /tmp size for temporary Rust install
+			(( $(findmnt -bno SIZE /tmp) < 2147483648 )) && G_EXEC mount -o remount,size=2G /tmp
 
 			# Clean APT cache (which includes temporarily downloaded archives) when moved to RAM
 			[[ -d '/tmp/apt' ]] && G_EXEC apt-get clean
@@ -7248,7 +7254,7 @@ _EOF_
 
 			# Build
 			G_EXEC cd /opt/vaultwarden
-			G_EXEC_OUTPUT=1 G_EXEC cargo build ${jobs:+-j $jobs} --features sqlite --release
+			G_EXEC_OUTPUT=1 G_EXEC cargo build --features sqlite --release
 			G_EXEC cd /tmp/$G_PROGRAM_NAME
 
 			# Uninstall rust after compiling
@@ -10587,11 +10593,11 @@ _EOF_
 			if (( ${aSOFTWARE_INSTALL_STATE[83]} > 0 )); then
 
 				# Required modules
-				a2enmod headers expires rewrite
+				G_EXEC a2enmod headers expires rewrite
 
 				# Better compatibility with mobile clients
 				echo 'AllowEncodedSlashes On' > /etc/apache2/conf-available/dietpi-freshrss.conf
-				a2enconf dietpi-freshrss
+				G_EXEC a2enconf dietpi-freshrss
 
 			fi
 
@@ -10608,8 +10614,8 @@ _EOF_
 			fi
 
 			# Set permissions for webserver access
-			chown -R :www-data /opt/FreshRSS
-			chmod -R g+r+w /opt/FreshRSS
+			G_EXEC chgrp -R www-data /opt/FreshRSS
+			G_EXEC chmod -R g+r+w /opt/FreshRSS
 
 			# CLI install: https://github.com/FreshRSS/FreshRSS/blob/master/cli/README.md#commands
 			G_EXEC cd /opt/FreshRSS
@@ -10619,7 +10625,8 @@ _EOF_
 			G_EXEC cd /tmp/$G_PROGRAM_NAME
 
 			# Link web interface to webroot
-			ln -sf /opt/FreshRSS/p /var/www/freshrss
+			G_EXEC rm -Rf /var/www/freshrss
+			G_EXEC ln -s /opt/FreshRSS/p /var/www/freshrss
 
 			# Create cron job for feed update every 30 minutes, if it does not yet exist
 			crontab -u www-data -l 2>/dev/null | grep -q '/opt/FreshRSS/app/actualize_script.php' || ( crontab -u www-data -l 2>/dev/null ; echo '*/30 * * * * php /opt/FreshRSS/app/actualize_script.php' ) | crontab -u www-data -
@@ -14995,15 +15002,15 @@ _EOF_
 			crontab -u www-data -l | grep -v '/opt/FreshRSS/app/actualize_script.php' | crontab -u www-data -
 
 			a2disconf dietpi-freshrss 2> /dev/null
-			[[ -f '/etc/apache2/conf-available/dietpi-freshrss.conf' ]] && rm -v /etc/apache2/conf-available/dietpi-freshrss.conf
+			[[ -f '/etc/apache2/conf-available/dietpi-freshrss.conf' ]] && G_EXEC rm /etc/apache2/conf-available/dietpi-freshrss.conf
 
 			systemctl start mariadb
 			mysqladmin drop freshrss -f
 			mysql -e "drop user 'freshrss'@'localhost'"
 
-			rm -R /var/www/freshrss
-			rm -R /opt/FreshRSS
-			rm /var/log/freshrss.log
+			G_EXEC rm -Rf /var/www/freshrss # symlink
+			[[ -d '/opt/FreshRSS' ]] && G_EXEC rm -R /opt/FreshRSS
+			[[ -f '/var/log/freshrss.log' ]] && G_EXEC rm /var/log/freshrss.log
 
 		fi
 

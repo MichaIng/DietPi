@@ -394,7 +394,7 @@ _EOF_
 	fi
 
 	# Disable obsolete DietPi-Boot service (do not stop it due to dependencies)
-	systemctl -q is-active dietpi-boot && G_EXEC systemctl disable dietpi-boot
+	systemctl -q is-enabled dietpi-boot 2> /dev/null && G_EXEC systemctl disable dietpi-boot
 
 	# Remove obsolete files
 	[[ -f '/boot/dietpi-CHANGELOG.txt' ]] && G_EXEC rm /boot/dietpi-CHANGELOG.txt
@@ -403,13 +403,17 @@ _EOF_
 	[[ -f '/etc/systemd/system/dietpi-boot.service' ]] && G_EXEC rm /etc/systemd/system/dietpi-boot.service
 	[[ -f '/etc/systemd/system/wg-quick@wg0.service.d/dietpi.conf' ]] && G_EXEC rm /etc/systemd/system/wg-quick@wg0.service.d/dietpi.conf
 	[[ -d '/etc/systemd/system/wg-quick@wg0.service.d' ]] && G_EXEC rmdir --ignore-fail-on-non-empty /etc/systemd/system/wg-quick@wg0.service.d
+	[[ -d '/opt/FreshRSS/FreshRSS-master' ]] && G_EXEC rm -R /opt/FreshRSS/FreshRSS-master
+	[[ -L '/opt/FreshRSS/p/p' ]] && G_EXEC rm /opt/FreshRSS/p/p
 
 	# Translate and apply boot wait for network setting
 	local boot_wait_for_network=$(sed -n '/^[[:blank:]]*CONFIG_BOOT_WAIT_FOR_NETWORK=/{s/^[^=]*=//p;q}' /boot/dietpi.txt)
 	if [[ $boot_wait_for_network == 0 ]]
 	then
 		/boot/dietpi/func/dietpi-set_software boot_wait_for_network 0
-	else
+
+	elif ! grep -q 'AUTO_SETUP_BOOT_WAIT_FOR_NETWORK' /boot/dietpi.txt
+	then
 		/boot/dietpi/func/dietpi-set_software boot_wait_for_network 1
 	fi
 	G_EXEC sed -i '/^[[:blank:]]*CONFIG_BOOT_WAIT_FOR_NETWORK=/d' /boot/dietpi.txt
@@ -417,6 +421,43 @@ _EOF_
 	# Enable systemd-timesyncd on oneshot modes to start early at boot
 	local time_sync_mode=$(sed -n '/^[[:blank:]]*CONFIG_NTP_MODE=/{s/^[^=]*=//p;q}' /boot/dietpi.txt)
 	[[ $time_sync_mode == [123] ]] && G_EXEC systemctl enable systemd-timesyncd
+
+	# Apply cgroups-v2 workaround on Bullseye if the kernel does not support it: https://github.com/MichaIng/DietPi/issues/4705
+	if (( $G_DISTRO > 5 && ( $(uname -r | mawk -F'.' '{print $1}') < 4 || ( $(uname -r | mawk -F'.' '{print $1}') == 4 && $(uname -r | mawk -F'.' '{print $2}') < 15 ) ) ))
+	then
+		# Odroids
+		if [[ $G_HW_MODEL -gt 9 && $G_HW_MODEL -le 16 && -f '/boot/boot.ini' ]]
+		then
+			G_DIETPI-NOTIFY 2 'Forcing legacy cgroups v1 hierarchy on old kernel device'
+			grep -q 'systemd.unified_cgroup_hierarchy=0' /boot/boot.ini || G_EXEC sed -i '/^setenv bootargs "/s/"$/ systemd.unified_cgroup_hierarchy=0"/' /boot/boot.ini
+
+		# Sparky SBC
+		elif [[ $G_HW_MODEL == 70 && -f '/boot/uenv.txt' ]]
+		then
+			G_DIETPI-NOTIFY 2 'Forcing legacy cgroups v1 hierarchy on old kernel device'
+			grep -q 'systemd.unified_cgroup_hierarchy=0' /boot/uenv.txt || G_EXEC sed -i '/^bootargs=/s/$/ systemd.unified_cgroup_hierarchy=0/' /boot/uenv.txt
+
+		# ROCK Pi S
+		elif [[ $G_HW_MODEL == 73 && -f '/boot/boot.cmd' ]]
+		then
+			G_DIETPI-NOTIFY 2 'Forcing legacy cgroups v1 hierarchy on old kernel device'
+			grep -q 'systemd.unified_cgroup_hierarchy=0' /boot/boot.cmd || G_EXEC sed -i '/^setenv bootargs "/s/"$/ systemd.unified_cgroup_hierarchy=0"/' /boot/boot.cmd
+			G_AGI u-boot-tools
+			G_EXEC mkimage -C none -A arm64 -T script -d /boot/boot.cmd /boot/boot.scr
+		fi
+	fi
+
+	# Inform and offer to re-apply the ssh.dietpi.com host key if missing: https://github.com/MichaIng/DietPi/issues/4844
+	if [[ ! -f '/root/.ssh/known_hosts' ]] || ! grep -q '^ssh.dietpi.com' /root/.ssh/known_hosts && G_WHIP_DEFAULT_ITEM='yes' G_WHIP_YESNO '[WARNING] ssh.dietpi.com SSH/SFTP host key missing
+\nThe host key to connect to our SSH/SFTP server is missing on your system, which means that uploading bug reports and sending or purging survey data fails.
+\nDo you want to re-add that host key now?'
+	then
+		[[ -d '/root/.ssh' ]] || G_EXEC mkdir -p /root/.ssh
+		[[ -f '/root/.ssh/known_hosts' ]] || > /root/.ssh/known_hosts
+		G_EXEC sed -i '/^dietpi.com/d' /root/.ssh/known_hosts
+		G_EXEC sed -i '/^185.101.93.93/d' /root/.ssh/known_hosts
+		G_CONFIG_INJECT 'ssh.dietpi.com[[:blank:]]' 'ssh.dietpi.com ssh-rsa AAAAB3NzaC1yc2EAAAADAQABAAABAQDE6aw3r6aOEqendNu376iiCHr9tGBIWPgfrLkzjXjEsHGyVSUFNnZt6pftrDeK7UX+qX4FxOwQlugG4fymOHbimRCFiv6cf7VpYg1Ednquq9TLb7/cIIbX8a6AuRmX4fjdGuqwmBq3OG7ZksFcYEFKt5U4mAJIaL8hXiM2iXjgY02LqiQY/QWATsHI4ie9ZOnwrQE+Rr6mASN1BVFuIgyHIbwX54jsFSnZ/7CdBMkuAd9B8JkxppWVYpYIFHE9oWNfjh/epdK8yv9Oo6r0w5Rb+4qaAc5g+RAaknHeV6Gp75d2lxBdCm5XknKKbGma2+/DfoE8WZTSgzXrYcRlStYN' /root/.ssh/known_hosts
+	fi
 }
 
 # v6.35 => v7 migration
