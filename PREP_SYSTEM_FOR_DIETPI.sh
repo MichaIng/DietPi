@@ -1530,8 +1530,8 @@ _EOF_'
 		/boot/dietpi/func/dietpi-set_software locale 'C.UTF-8'
 
 		G_DIETPI-NOTIFY 2 'Configuring time zone:'
-		rm -fv /etc/{localtime,timezone}
-		ln -sv /usr/share/zoneinfo/UTC /etc/localtime
+		G_EXEC rm -f /etc/{localtime,timezone}
+		G_EXEC ln -s /usr/share/zoneinfo/UTC /etc/localtime
 		G_EXEC dpkg-reconfigure -f noninteractive tzdata
 
 		G_DIETPI-NOTIFY 2 'Configuring keyboard:'
@@ -1599,20 +1599,19 @@ _EOF_"
 			G_EXEC curl -sSfL https://raw.githubusercontent.com/sparky-sbc/sparky-test/master/dragon_fly_check/uImage -o /boot/uImage
 			G_EXEC curl -sSfLO https://raw.githubusercontent.com/sparky-sbc/sparky-test/master/dragon_fly_check/3.10.38.bz2
 			G_EXEC tar -xf 3.10.38.bz2 -C /lib/modules/
-			rm 3.10.38.bz2
+			G_EXEC rm 3.10.38.bz2
 			# - USB audio update
 			G_EXEC curl -sSfL https://raw.githubusercontent.com/sparky-sbc/sparky-test/master/dsd-marantz/snd-usb-audio.ko -o /lib/modules/3.10.38/kernel/sound/usb/snd-usb-audio.ko
 			# - Ethernet update
 			G_EXEC curl -sSfL https://raw.githubusercontent.com/sparky-sbc/sparky-test/master/sparky-eth/ethernet.ko -o /lib/modules/3.10.38/kernel/drivers/net/ethernet/acts/ethernet.ko
 
 			# Boot args
-			cat << _EOF_ > /boot/uenv.txt
+			cat << '_EOF_' > /boot/uenv.txt
 uenvcmd=setenv os_type linux;
-bootargs=earlyprintk clk_ignore_unused selinux=0 scandelay console=tty0 loglevel=1 real_rootflag=rw root=/dev/mmcblk0p2 rootwait init=/lib/systemd/systemd aotg.urb_fix=1 aotg.aotg1_speed=0 net.ifnames=0
+bootargs=earlyprintk clk_ignore_unused selinux=0 scandelay console=tty0 loglevel=1 real_rootflag=rw root=/dev/mmcblk0p2 rootwait init=/lib/systemd/systemd aotg.urb_fix=1 aotg.aotg1_speed=0 net.ifnames=0 systemd.unified_cgroup_hierarchy=0 systemd.legacy_systemd_cgroup_controller=0
 _EOF_
-
 			# Blacklist GPU and touch screen modules: https://github.com/MichaIng/DietPi/issues/699#issuecomment-271362441
-			cat << _EOF_ > /etc/modprobe.d/dietpi-disable_sparkysbc_touchscreen.conf
+			cat << '_EOF_' > /etc/modprobe.d/dietpi-disable_sparkysbc_touchscreen.conf
 blacklist owl_camera
 blacklist gsensor_stk8313
 blacklist ctp_ft5x06
@@ -1620,19 +1619,17 @@ blacklist ctp_gsl3680
 blacklist gsensor_bma222
 blacklist gsensor_mir3da
 _EOF_
-
-			cat << _EOF_ > /etc/modprobe.d/dietpi-disable_sparkysbc_gpu.conf
+			cat << '_EOF_' > /etc/modprobe.d/dietpi-disable_sparkysbc_gpu.conf
 blacklist pvrsrvkm
 blacklist drm
 blacklist videobuf2_vmalloc
 blacklist bc_example
 _EOF_
-
 			# Use performance gov for stability
 			G_CONFIG_INJECT 'CONFIG_CPU_GOVERNOR=' 'CONFIG_CPU_GOVERNOR=performance' /boot/dietpi.txt
 
 			# Install script to toggle between USB and onboard Ethernet automatically
-			cat << _EOF_ > /var/lib/dietpi/services/dietpi-sparkysbc_ethernet.sh
+			cat << '_EOF_' > /var/lib/dietpi/services/dietpi-sparkysbc_ethernet.sh
 #!/bin/dash
 # Called from: /etc/systemd/system/dietpi-sparkysbc_ethernet.service
 # We need to wait until USB Ethernet is established on USB bus, which takes much longer than onboard init.
@@ -1651,8 +1648,8 @@ elif ! ip a s eth0 > /dev/null 2>&1; then
 
 fi
 _EOF_
-			chmod +x /var/lib/dietpi/services/dietpi-sparkysbc_ethernet.sh
-			cat << _EOF_ > /etc/systemd/system/dietpi-sparkysbc_ethernet.service
+			G_EXEC chmod +x /var/lib/dietpi/services/dietpi-sparkysbc_ethernet.sh
+			cat << '_EOF_' > /etc/systemd/system/dietpi-sparkysbc_ethernet.service
 [Unit]
 Description=Sparky SBC auto detect and toggle onboard/USB Ethernet
 Wants=network-online.target
@@ -1665,7 +1662,7 @@ ExecStart=/var/lib/dietpi/services/dietpi-sparkysbc_ethernet.sh
 [Install]
 WantedBy=multi-user.target
 _EOF_
-			systemctl enable dietpi-sparkysbc_ethernet
+			G_EXEC systemctl enable dietpi-sparkysbc_ethernet
 
 		# - RPi
 		elif (( $G_HW_MODEL < 10 )); then
@@ -1725,7 +1722,7 @@ _EOF_
 			done
 			G_EXEC sed -i 's/^#grep/grep/' /etc/kernel/postinst.d/dietpi-USBridgeSig
 
-		# - PINE A64 (and possibily others): Cursor fix for FB
+		# - PINE A64 (and possibly others): Cursor fix for FB
 		elif (( $G_HW_MODEL == 40 )); then
 
 			cat << _EOF_ > /etc/bashrc.d/dietpi-pine64-cursorfix.sh
@@ -1736,7 +1733,6 @@ sed -i -e 's/?0c/?112c/g' -e 's/?8c/?48;0;64c/g' terminfo.txt
 tic terminfo.txt
 tput cnorm
 _EOF_
-
 			# Ensure WiFi module pre-exists
 			G_CONFIG_INJECT '8723bs' '8723bs' /etc/modules
 
@@ -1754,6 +1750,24 @@ _EOF_
 			# Disable Docker optimisations, since this has some performance drawbacks, enable on Docker install instead
 			G_CONFIG_INJECT 'docker_optimizations=' 'docker_optimizations=off' /boot/armbianEnv.txt
 
+		fi
+
+		# Apply cgroups-v2 workaround on Bullseye if the kernel does not support it: https://github.com/MichaIng/DietPi/issues/4705
+		if (( $G_DISTRO > 5 )) && ! grep -q 'cgroup2' /proc/filesystems
+		then
+			G_DIETPI-NOTIFY 2 'Applying workaround on Bullseye and up for kernel versions which do not support cgroups-v2'
+			# Odroids
+			if [[ $G_HW_MODEL -gt 9 && $G_HW_MODEL -le 16 && -f '/boot/boot.ini' ]]
+			then
+				grep -q 'systemd.unified_cgroup_hierarchy=0' /boot/boot.ini || G_EXEC sed -i '/setenv bootargs "/s/"$/ systemd.unified_cgroup_hierarchy=0"' /boot/boot.ini
+				grep -q 'systemd.legacy_systemd_cgroup_controller=0' /boot/boot.ini || G_EXEC sed -i '/setenv bootargs "/s/"$/ systemd.legacy_systemd_cgroup_controller=0"' /boot/boot.ini
+
+			# Sparky SBC
+			elif [[ $G_HW_MODEL == 70 && -f '/boot/uenv.txt' ]]
+			then
+				grep -q 'systemd.unified_cgroup_hierarchy=0' /boot/uenv.txt || G_EXEC sed -i '/bootargs=/s/$/ systemd.unified_cgroup_hierarchy=0' /boot/uenv.txt
+				grep -q 'systemd.legacy_systemd_cgroup_controller=0' /boot/uenv.txt || G_EXEC sed -i '/bootargs=/s/$/ systemd.legacy_systemd_cgroup_controller=0' /boot/uenv.txt
+			fi
 		fi
 
 		#------------------------------------------------------------------------------------------------
@@ -1857,7 +1871,7 @@ _EOF_
 		echo -e "$IMAGE_CREATOR\n$PREIMAGE_INFO" > /boot/dietpi/.prep_info
 
 		G_DIETPI-NOTIFY 2 'Generating GPLv2 license readme'
-		cat << _EOF_ > /var/lib/dietpi/license.txt
+		cat << '_EOF_' > /var/lib/dietpi/license.txt
 -----------------------
 DietPi - GPLv2 License:
 -----------------------
