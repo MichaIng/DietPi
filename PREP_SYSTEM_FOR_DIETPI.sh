@@ -1000,7 +1000,7 @@ _EOF_
 			[[ -f '/etc/apt/trusted.gpg~' ]] && G_EXEC rm '/etc/apt/trusted.gpg~'
 
 			# NB: rockpis-dtbo is not required as it doubles the overlays that are already provided (among others) with the kernel package
-			G_AGI rockpis-rk-ubootimg linux-4.4-rock-pi-s-latest rockchip-overlay
+			G_AGI rockpis-rk-ubootimg linux-4.4-rock-pi-s-latest rockchip-overlay u-boot-tools
 
 		# - Generic kernel + device tree package auto detect
 		else
@@ -1608,7 +1608,7 @@ _EOF_"
 			# Boot args
 			cat << '_EOF_' > /boot/uenv.txt
 uenvcmd=setenv os_type linux;
-bootargs=earlyprintk clk_ignore_unused selinux=0 scandelay console=tty0 loglevel=1 real_rootflag=rw root=/dev/mmcblk0p2 rootwait init=/lib/systemd/systemd aotg.urb_fix=1 aotg.aotg1_speed=0 net.ifnames=0 systemd.unified_cgroup_hierarchy=0 systemd.legacy_systemd_cgroup_controller
+bootargs=earlyprintk clk_ignore_unused selinux=0 scandelay console=tty0 loglevel=1 real_rootflag=rw root=/dev/mmcblk0p2 rootwait init=/lib/systemd/systemd aotg.urb_fix=1 aotg.aotg1_speed=0 net.ifnames=0 systemd.unified_cgroup_hierarchy=0
 _EOF_
 			# Blacklist GPU and touch screen modules: https://github.com/MichaIng/DietPi/issues/699#issuecomment-271362441
 			cat << '_EOF_' > /etc/modprobe.d/dietpi-disable_sparkysbc_touchscreen.conf
@@ -1753,20 +1753,26 @@ _EOF_
 		fi
 
 		# Apply cgroups-v2 workaround on Bullseye if the kernel does not support it: https://github.com/MichaIng/DietPi/issues/4705
-		if (( $G_DISTRO > 5 )) && ! grep -q 'cgroup2' /proc/filesystems
+		if (( $G_DISTRO > 5 )) && ! find /lib/modules -maxdepth 1 -type d -name '5.[0-9]*' > /dev/null
 		then
-			G_DIETPI-NOTIFY 2 'Applying workaround on Bullseye and up for kernel versions which do not support cgroups-v2'
 			# Odroids
 			if [[ $G_HW_MODEL -gt 9 && $G_HW_MODEL -le 16 && -f '/boot/boot.ini' ]]
 			then
-				grep -q 'systemd.unified_cgroup_hierarchy=0' /boot/boot.ini || G_EXEC sed -i '/setenv bootargs "/s/"$/ systemd.unified_cgroup_hierarchy=0"' /boot/boot.ini
-				grep -q 'systemd.legacy_systemd_cgroup_controller' /boot/boot.ini || G_EXEC sed -i '/setenv bootargs "/s/"$/ systemd.legacy_systemd_cgroup_controller"' /boot/boot.ini
+				G_DIETPI-NOTIFY 2 'Forcing legacy cgroups v1 hierarchy on old kernel device'
+				grep -q 'systemd.unified_cgroup_hierarchy=0' /boot/boot.ini || G_EXEC sed -i '/^setenv bootargs "/s/"$/ systemd.unified_cgroup_hierarchy=0"' /boot/boot.ini
 
 			# Sparky SBC
 			elif [[ $G_HW_MODEL == 70 && -f '/boot/uenv.txt' ]]
 			then
-				grep -q 'systemd.unified_cgroup_hierarchy=0' /boot/uenv.txt || G_EXEC sed -i '/bootargs=/s/$/ systemd.unified_cgroup_hierarchy=0' /boot/uenv.txt
-				grep -q 'systemd.legacy_systemd_cgroup_controller' /boot/uenv.txt || G_EXEC sed -i '/bootargs=/s/$/ systemd.legacy_systemd_cgroup_controller' /boot/uenv.txt
+				G_DIETPI-NOTIFY 2 'Forcing legacy cgroups v1 hierarchy on old kernel device'
+				grep -q 'systemd.unified_cgroup_hierarchy=0' /boot/uenv.txt || G_EXEC sed -i '/^bootargs=/s/$/ systemd.unified_cgroup_hierarchy=0' /boot/uenv.txt
+
+			# ROCK Pi S
+			elif [[ $G_HW_MODEL == 73 && -f '/boot/boot.cmd' ]]
+			then
+				G_DIETPI-NOTIFY 2 'Forcing legacy cgroups v1 hierarchy on old kernel device'
+				grep -q 'systemd.unified_cgroup_hierarchy=0' /boot/boot.cmd || G_EXEC sed -i '/^setenv bootargs "/s/"$/ systemd.unified_cgroup_hierarchy=0"' /boot/boot.cmd
+				G_EXEC mkimage -C none -A arm64 -T script -d /boot/boot.cmd /boot/boot.scr
 			fi
 		fi
 
