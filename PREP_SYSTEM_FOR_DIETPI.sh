@@ -1419,7 +1419,7 @@ _EOF_'
 		/boot/dietpi/func/dietpi-set_hardware preferipv4 enable
 
 		# Wait for network at boot by default
-		/boot/dietpi/func/dietpi-set_hardware boot_wait_for_network 1
+		/boot/dietpi/func/dietpi-set_software boot_wait_for_network 1
 
 		#-----------------------------------------------------------------------------------
 		# MISC
