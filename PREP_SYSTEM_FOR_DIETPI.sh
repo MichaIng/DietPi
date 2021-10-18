@@ -1010,10 +1010,10 @@ _EOF_
 			# NB: rockpis-dtbo is not required as it doubles the overlays that are already provided (among others) with the kernel package
 			G_AGI rockpis-rk-ubootimg linux-4.4-rock-pi-s-latest rockchip-overlay u-boot-tools
 
-		# - Generic kernel + device tree package auto detect
+		# - Generic kernel + device tree + U-Boot package auto detect
 		else
 
-			mapfile -t apackages < <(dpkg-query -Wf '${Package}\n' | grep -E '^linux-(image|dtb)')
+			mapfile -t apackages < <(dpkg-query -Wf '${Package}\n' | grep -E '^linux-(image|dtb|u-boot)-|^u-boot')
 			if [[ ${apackages[0]} ]]; then
 
 				G_AGI "${apackages[@]}"
