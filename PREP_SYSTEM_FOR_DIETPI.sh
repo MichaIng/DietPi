@@ -1418,6 +1418,9 @@ _EOF_'
 		# Prefer IPv4 by default
 		/boot/dietpi/func/dietpi-set_hardware preferipv4 enable
 
+		# Wait for network at boot by default
+		/boot/dietpi/func/dietpi-set_hardware boot_wait_for_network 1
+
 		#-----------------------------------------------------------------------------------
 		# MISC
 		G_DIETPI-NOTIFY 2 'Disabling apt-daily services to prevent random APT cache lock'
