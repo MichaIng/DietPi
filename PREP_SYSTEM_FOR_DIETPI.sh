@@ -898,7 +898,8 @@ _EOF_
 			else
 				cat << '_EOF_' >> /etc/kernel/preinst.d/dietpi-initramfs_cleanup
 # loop through existing initramfs images
-for v in $(ls -1 /var/lib/initramfs-tools | linux-version sort --reverse); do
+for v in $(ls -1 /var/lib/initramfs-tools | linux-version sort --reverse);
+do
         if ! linux-version compare $v eq $version; then
                 # try to delete delete old initrd images via update-initramfs
                 INITRAMFS_TOOLS_KERNEL_HOOK=y update-initramfs -d -k $v 2>/dev/null
