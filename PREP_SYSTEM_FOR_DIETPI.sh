@@ -189,7 +189,7 @@ _EOF_
 		G_DISTRO=5
 		G_DISTRO_NAME='buster'
 
-	elif [[ $distro == '11.'* ]]; then
+	elif [[ $distro == '11.'* || $distro == 'bullseye/sid' ]]; then
 
 		G_DISTRO=6
 		G_DISTRO_NAME='bullseye'
