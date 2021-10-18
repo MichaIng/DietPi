@@ -1339,7 +1339,6 @@ _EOF_
 		G_DIETPI-NOTIFY 2 'Enabling DietPi services'
 		G_EXEC systemctl enable dietpi-ramlog
 		G_EXEC systemctl enable dietpi-preboot
-		G_EXEC systemctl enable dietpi-boot
 		G_EXEC systemctl enable dietpi-postboot
 		G_EXEC systemctl enable dietpi-kill_ssh
 
