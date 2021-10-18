@@ -620,6 +620,9 @@ Currently installed: $G_DISTRO_NAME (ID: $G_DISTRO)"; then
 			G_CONFIG_INJECT "G_LIVE_PATCH_STATUS\[$i\]=" "G_LIVE_PATCH_STATUS[$i]='${G_LIVE_PATCH_STATUS[$i]}'" /boot/dietpi/.version
 		done
 
+		# Temporary fix for invalid interfaces at DietPi-FirstBoot
+		G_EXEC sed -i 's/G_GET_NET -t/G_GET_NET -q -t/' /var/lib/dietpi/services/dietpi-firstboot.bash
+
 		G_EXEC cp /boot/dietpi/.version /var/lib/dietpi/.dietpi_image_version
 
 		G_EXEC systemctl daemon-reload
