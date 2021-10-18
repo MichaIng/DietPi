@@ -217,9 +217,9 @@ _EOF_
 
 		# Network setup
 		# - Grab available network interfaces
-		local iface_eth=$(G_GET_NET -t eth iface)
+		local iface_eth=$(G_GET_NET -q -t eth iface)
 		[[ $iface_eth ]] || iface_eth='eth0'
-		local iface_wlan=$(G_GET_NET -t wlan iface)
+		local iface_wlan=$(G_GET_NET -q -t wlan iface)
 		[[ $iface_wlan ]] || iface_wlan='wlan0'
 
 		# - Replace interface names with the ones obtained above
