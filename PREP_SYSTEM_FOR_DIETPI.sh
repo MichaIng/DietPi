@@ -50,7 +50,12 @@
 	export PATH='/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin'
 
 	# Make /tmp a tmpfs if it is not yet a dedicated mount
-	findmnt -M /tmp > /dev/null || mount -t tmpfs tmpfs /tmp
+	if findmnt -M /tmp > /dev/null
+	then
+		(( $(findmnt -Ufnrbo SIZE -M /tmp) < 536870912 )) && mount -o remount,size=536870912 /tmp
+	else
+		mount -t tmpfs -o size=536870912 tmpfs /tmp
+	fi
 
 	# Work inside /tmp tmpfs to reduce disk I/O and speed up download and unpacking
 	# - Save full script path beforehand: https://github.com/MichaIng/DietPi/pull/2341#discussion_r241784962
