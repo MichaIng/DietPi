@@ -1071,6 +1071,7 @@ _EOF_
 		# - dhcpcd5: https://github.com/MichaIng/DietPi/issues/1560#issuecomment-370136642
 		# - mountall: https://github.com/MichaIng/DietPi/issues/2613
 		# - initscripts: Pre-installed on Jessie systems (?), superseded and masked by systemd, but never autoremoved
+		# - chrony: Fround left with strange "deinstall ok installed" mark left on Armbian images
 		G_AGP dbus dhcpcd5 mountall initscripts '*office*' '*xfce*' '*qt5*' '*xserver*' '*xorg*' glib-networking libgtk-3-0 libgirepository-1.0-1
 		# Remove any autoremove prevention
 		rm -fv /etc/apt/apt.conf.d/*autoremove*
@@ -1209,6 +1210,14 @@ _EOF_
 			'rockchip-adbd'
 			'rtl8723ds-btfw-load'
 			'install-module-hci-uart'
+			# Armbian
+			'chrony'
+			'chronyd'
+			'armbian-resize-filesystem'
+			'bootsplash-hide-when-booted'
+			'bootsplash-show-on-shutdown'
+			'armbian-firstrun-config'
+			'bootsplash-ask-password-console'
 
 		)
 
@@ -1218,14 +1227,14 @@ _EOF_
 			for j in /etc/init.d/$i /{etc,lib,usr/lib,usr/local/lib}/systemd/system/{$i.service{,.d},*.wants/$i.service}
 			do
 				[[ -e $j || -L $j ]] || continue
-				[[ -f $j ]] && systemctl disable --now "${j##*/}"
+				[[ -f $j ]] && G_EXEC systemctl disable --now "${j##*/}"
 				# Remove if not attached to any DEB package, else mask
 				if dpkg -S "$j" &> /dev/null; then
 
-					systemctl mask "${j##*/}"
+					G_EXEC systemctl mask "${j##*/}"
 
 				else
-					rm -Rv "$j"
+					G_EXEC rm -R "$j"
 
 				fi
 			done
@@ -1264,6 +1273,7 @@ _EOF_
 		[[ -d '/etc/armbianmonitor' ]] && rm -R /etc/armbianmonitor
 		rm -vf /etc/{default,logrotate.d}/armbian*
 		[[ -f '/lib/firmware/bootsplash.armbian' ]] && rm -v /lib/firmware/bootsplash.armbian
+		[[ -L '/etc/systemd/system/sysinit.target.wants/bootsplash-ask-password-console.path' ]] && G_EXEC rm /etc/systemd/system/sysinit.target.wants/bootsplash-ask-password-console.path
 
 		# - OMV: https://github.com/MichaIng/DietPi/issues/2994
 		[[ -d '/etc/openmediavault' ]] && rm -vR /etc/openmediavault
