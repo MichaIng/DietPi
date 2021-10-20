@@ -377,7 +377,6 @@ _EOF_
 			'' '●─ ARM ─ Limited GPU acceleration '
 			'10' ': Odroid C1'
 			'13' ': Odroid U3'
-			'14' ': Odroid N1'
 			'70' ': Sparky SBC'
 			'52' ': ASUS Tinker Board'
 			'40' ': PINE A64'
@@ -962,15 +961,6 @@ _EOF_
 			# Apply kernel postinst steps manually, that depend on /proc/cpuinfo content, not matching when running in a container.
 			[[ -f '/boot/Image' ]] && G_EXEC mv /boot/Image /boot/Image.gz
 			[[ -f '/boot/Image.gz.bak' ]] && G_EXEC rm /boot/Image.gz.bak
-
-			# Remove obsolete combined keyring
-			[[ -f '/etc/apt/trusted.gpg' ]] && G_EXEC rm /etc/apt/trusted.gpg
-			[[ -f '/etc/apt/trusted.gpg~' ]] && G_EXEC rm '/etc/apt/trusted.gpg~'
-
-		#	Odroid N1
-		elif (( $G_HW_MODEL == 14 )); then
-
-			G_AGI linux-image-arm64-odroid-n1 meveric-keyring
 
 			# Remove obsolete combined keyring
 			[[ -f '/etc/apt/trusted.gpg' ]] && G_EXEC rm /etc/apt/trusted.gpg
