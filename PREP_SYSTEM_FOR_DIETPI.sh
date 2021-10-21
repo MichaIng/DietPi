@@ -1072,7 +1072,7 @@ _EOF_
 		# - mountall: https://github.com/MichaIng/DietPi/issues/2613
 		# - initscripts: Pre-installed on Jessie systems (?), superseded and masked by systemd, but never autoremoved
 		# - chrony: Fround left with strange "deinstall ok installed" mark left on Armbian images
-		G_AGP dbus dhcpcd5 mountall initscripts '*office*' '*xfce*' '*qt5*' '*xserver*' '*xorg*' glib-networking libgtk-3-0 libgirepository-1.0-1
+		G_AGP dbus dhcpcd5 mountall initscripts chrony '*office*' '*xfce*' '*qt5*' '*xserver*' '*xorg*' glib-networking libgtk-3-0 libgirepository-1.0-1
 		# Remove any autoremove prevention
 		rm -fv /etc/apt/apt.conf.d/*autoremove*
 		G_AGA
