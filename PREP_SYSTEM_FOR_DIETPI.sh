@@ -1192,7 +1192,7 @@ _EOF_
 		[[ -d '/usr/share/calendar' ]] && rm -vR /usr/share/calendar
 
 		# - Unused DEB package config files
-		find /etc \( -name '?*\.dpkg-dist' -o -name '?*\.dpkg-old' -o -name '?*\.dpkg-new' \) -exec rm -v {} +
+		find /etc \( -name '?*\.dpkg-dist' -o -name '?*\.dpkg-old' -o -name '?*\.dpkg-new' -o -name '?*\.dpkg-bak' \) -exec rm -v {} +
 
 		# - Fonts
 		[[ -d '/usr/share/fonts' ]] && rm -vR /usr/share/fonts
