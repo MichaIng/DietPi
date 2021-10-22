@@ -1169,13 +1169,15 @@ _EOF_
 		[[ -d '/var/cache/apparmor' ]] && G_EXEC rm -R /var/cache/apparmor
 		[[ -d '/var/lib/udisks2' ]] && G_EXEC rm -R /var/lib/udisks2
 		[[ -d '/var/lib/bluetooth' ]] && G_EXEC rm -R /var/lib/bluetooth
-		[[ -d '/usr/lib/firefox-esr' ]] && G_EXEC rm -R /usr/lib/firefox-esr # Armbian desktop images
 		G_EXEC rm -Rf /var/lib/dhcp/{,.??,.[^.]}*
 		G_EXEC rm -f /var/lib/misc/*.leases
 		G_EXEC rm -Rf /var/backups/{,.??,.[^.]}*
 		G_EXEC rm -f /etc/*.org
 		[[ -f '/etc/fs.resized' ]] && G_EXEC rm /etc/fs.resized
-		[[ -d '/etc/chromium.d' ]] && G_EXEC rm -R /etc/chromium.d # Armbian desktop images
+		# Armbian desktop images
+		[[ -d '/usr/lib/firefox-esr' ]] && G_EXEC rm -R /usr/lib/firefox-esr
+		[[ -d '/etc/chromium.d' ]] && G_EXEC rm -R /etc/chromium.d
+		[[ -d '/etc/lightdm' ]] G_EXEC rm -R /etc/lightdm
 
 		# - www
 		[[ -d '/var/www' ]] && rm -vRf /var/www/{,.??,.[^.]}*
