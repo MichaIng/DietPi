@@ -1063,12 +1063,12 @@ _EOF_
 
 		# Purging additional packages, that (in some cases) do not get autoremoved:
 		# - dbus: Not required for headless images, but sometimes marked as "important", thus not autoremoved.
-		#	+ Workaround for "The following packages have unmet dependencies: glib-networking libgtk-3-0 libgirepository-1.0-1"
+		#	+ Workaround for "The following packages have unmet dependencies: glib-networking libgtk-3-0" and alike
 		# - dhcpcd5: https://github.com/MichaIng/DietPi/issues/1560#issuecomment-370136642
 		# - mountall: https://github.com/MichaIng/DietPi/issues/2613
 		# - initscripts: Pre-installed on Jessie systems (?), superseded and masked by systemd, but never autoremoved
 		# - chrony: Fround left with strange "deinstall ok installed" mark left on Armbian images
-		G_AGP dbus dhcpcd5 mountall initscripts chrony '*office*' '*xfce*' '*qt5*' '*xserver*' '*xorg*' glib-networking libgtk-3-0 libgirepository-1.0-1
+		G_AGP dbus dhcpcd5 mountall initscripts chrony '*office*' '*xfce*' '*qt5*' '*xserver*' '*xorg*' glib-networking libgtk-3-0 libsoup2.4-1 libglib2.0-0
 		# Remove any autoremove prevention
 		rm -fv /etc/apt/apt.conf.d/*autoremove*
 		G_AGA
