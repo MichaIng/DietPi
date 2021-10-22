@@ -1165,16 +1165,17 @@ _EOF_
 
 		G_DIETPI-NOTIFY 2 'Removing misc files/folders/services, not required by DietPi'
 
-		[[ -d '/selinux' ]] && rm -Rv /selinux
-		[[ -d '/var/cache/apparmor' ]] && rm -Rv /var/cache/apparmor
-		[[ -d '/var/lib/udisks2' ]] && rm -Rv /var/lib/udisks2
-		[[ -d '/var/lib/bluetooth' ]] && rm -Rv /var/lib/bluetooth
-		[[ -d '/usr/lib/firefox-esr' ]] && rm -Rv /usr/lib/firefox-esr # Armbian desktop images
-		rm -Rfv /var/lib/dhcp/{,.??,.[^.]}*
-		rm -Rfv /var/lib/misc/*.leases
-		rm -Rfv /var/backups/{,.??,.[^.]}*
-		[[ -f '/etc/udhcpd.conf.org' ]] && rm -v /etc/udhcpd.conf.org
-		[[ -f '/etc/fs.resized' ]] && rm -v /etc/fs.resized
+		[[ -d '/selinux' ]] && G_EXEC rm -R /selinux
+		[[ -d '/var/cache/apparmor' ]] && G_EXEC rm -R /var/cache/apparmor
+		[[ -d '/var/lib/udisks2' ]] && G_EXEC rm -R /var/lib/udisks2
+		[[ -d '/var/lib/bluetooth' ]] && G_EXEC rm -R /var/lib/bluetooth
+		[[ -d '/usr/lib/firefox-esr' ]] && G_EXEC rm -R /usr/lib/firefox-esr # Armbian desktop images
+		G_EXEC rm -Rf /var/lib/dhcp/{,.??,.[^.]}*
+		G_EXEC rm -f /var/lib/misc/*.leases
+		G_EXEC rm -Rf /var/backups/{,.??,.[^.]}*
+		G_EXEC rm -f /etc/*.org
+		[[ -f '/etc/fs.resized' ]] && G_EXEC rm /etc/fs.resized
+		[[ -d '/etc/chromium.d' ]] && G_EXEC rm -R /etc/chromium.d # Armbian desktop images
 
 		# - www
 		[[ -d '/var/www' ]] && rm -vRf /var/www/{,.??,.[^.]}*
