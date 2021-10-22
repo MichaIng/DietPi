@@ -1177,7 +1177,7 @@ _EOF_
 		# Armbian desktop images
 		[[ -d '/usr/lib/firefox-esr' ]] && G_EXEC rm -R /usr/lib/firefox-esr
 		[[ -d '/etc/chromium.d' ]] && G_EXEC rm -R /etc/chromium.d
-		[[ -d '/etc/lightdm' ]] G_EXEC rm -R /etc/lightdm
+		[[ -d '/etc/lightdm' ]] && G_EXEC rm -R /etc/lightdm
 
 		# - www
 		[[ -d '/var/www' ]] && rm -vRf /var/www/{,.??,.[^.]}*
