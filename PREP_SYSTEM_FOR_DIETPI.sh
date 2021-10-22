@@ -100,10 +100,6 @@ Dir::State::extended_states "/var/lib/apt/extended_states";
 Dir::State::status "/var/lib/dpkg/status";
 Dir::Cache::pkgcache "";
 _EOF_
-	# - Force IPv4 by default to avoid hanging access attempts in some cases, e.g. WiFi bridges
-	#	NB: This needs to match the method in: /boot/dietpi/func/dietpi-set_hardware preferipv4 enable
-	echo 'Acquire::ForceIPv4 "true";' > /etc/apt/apt.conf.d/99-dietpi-force-ipv4
-
 	apt-get clean
 	apt-get update
 
@@ -1411,9 +1407,6 @@ gateway 192.168.0.1
 wireless-power off
 wpa-conf /etc/wpa_supplicant/wpa_supplicant.conf
 _EOF_'
-		# Prefer IPv4 by default
-		/boot/dietpi/func/dietpi-set_hardware preferipv4 enable
-
 		# Wait for network at boot by default
 		/boot/dietpi/func/dietpi-set_software boot_wait_for_network 1
 
