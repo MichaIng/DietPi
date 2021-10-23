@@ -1517,6 +1517,7 @@ _EOF_'
 
 				/boot/dietpi/func/dietpi-set_hardware serialconsole disable
 				/boot/dietpi/func/dietpi-set_hardware serialconsole enable ttyS0
+				G_CONFIG_INJECT 'CONFIG_SERIAL_CONSOLE_ENABLE=' 'CONFIG_SERIAL_CONSOLE_ENABLE=1' /boot/dietpi.txt
 
 			fi
 
