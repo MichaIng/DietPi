@@ -1089,6 +1089,13 @@ _EOF_
 		G_AGI "${aPACKAGES_REQUIRED_INSTALL[@]}"
 		unset -v aPACKAGES_REQUIRED_INSTALL
 
+		# Adjust Dropbear package marks when Buster was upgraded to Bullseye
+		if (( $G_DISTRO > 5 )) && dpkg-query -s 'dropbear-run' &> /dev/null
+		then
+			G_EXEC apt-mark manual dropbear
+			G_EXEC apt-mark auto dropbear-run
+		fi
+
 		G_EXEC apt-get clean
 
 		G_AGA
