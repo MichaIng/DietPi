@@ -1915,7 +1915,7 @@ _EOF_
 		G_EXEC rmdir /mnt/tmp_root
 
 		G_DIETPI-NOTIFY 2 'Running general cleanup of misc files'
-		rm -Rfv /{root,home/*}/.{bash_history,nano_history,wget-hsts,cache,local,config,gnupg,viminfo,dbus,gconf,nano,vim,zshrc,oh-my-zsh} /etc/*- /var/{cache/debconf,lib/dpkg}/*-old
+		rm -Rfv /{root,home/*}/.{bash_history,nano_history,wget-hsts,cache,local,config,gnupg,viminfo,dbus,gconf,nano,vim,zshrc,oh-my-zsh} /etc/*- /var/{cache/debconf,lib/dpkg}/*-old /var/lib/dhcp/{,.??,.[^.]}*
 
 		# Remove PREP script
 		[[ -f $FP_PREP_SCRIPT ]] && rm -v "$FP_PREP_SCRIPT"
