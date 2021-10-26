@@ -5706,6 +5706,49 @@ _EOF_
 
 			G_AGI mosquitto
 
+			Remove_SysV mosquitto
+
+			# Password file
+			if [[ ! -f '/etc/mosquitto/passwd' ]]
+			then
+				G_EXEC umask 0037
+				> /etc/mosquitto/passwd # Pre-create file, required for pre-v1.6.10 (ARMv8 up to Buster): https://github.com/MichaIng/DietPi/issues/4424
+				G_EXEC_PRE_FUNC(){ acommand[4]=$GLOBAL_PW; }
+				G_EXEC mosquitto_passwd -b /etc/mosquitto/passwd mosquitto "${GLOBAL_PW//?/X}"
+				G_EXEC chown root:mosquitto /etc/mosquitto/passwd
+				G_EXEC umask 0022
+			fi
+
+			# Config: /etc/mosquitto/conf.d exists, but doubled settings do not override each other and lead to a startup failure instead, which breaks the purpose we want to use it for.
+			# - Disable PID file, not required for systemd handling
+			G_EXEC sed -i '/^[[:blank:]]*pid_file[[:blank:]]/d' /etc/mosquitto/mosquitto.conf
+			[[ -d '/run/mosquitto' ]] && G_EXEC rm -R /run/mosquitto
+			# - Log to default STDERR > systemd-journald
+			G_EXEC sed -i '/^[[:blank:]]*log_dest[[:blank:]]/d' /etc/mosquitto/mosquitto.conf
+			[[ -d '/var/log/mosquitto' ]] && G_EXEC rm -R /var/log/mosquitto
+			# - Add default password file for authenticated requests: https://github.com/MichaIng/DietPi/issues/4133
+			GCI_PRESERVE=1 G_CONFIG_INJECT 'password_file[[:blank:]]' 'password_file /etc/mosquitto/passwd' /etc/mosquitto/mosquitto.conf
+			# - Add default listener at port 1883 not bound to loopback IP: https://github.com/MichaIng/DietPi/issues/4133
+			GCI_PRESERVE=1 G_CONFIG_INJECT 'listener[[:blank:]]' 'listener 1883' /etc/mosquitto/mosquitto.conf
+
+			# Add/override default systemd unit: https://github.com/eclipse/mosquitto/tree/master/service/systemd
+			cat << '_EOF_' > /etc/systemd/system/mosquitto.service
+[Unit]
+Description=Mosquitto MQTT Broker (DietPi)
+Documentation=man:mosquitto.conf(5) man:mosquitto(8)
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Type=notify
+NotifyAccess=main
+User=mosquitto
+ExecStart=/usr/sbin/mosquitto -c /etc/mosquitto/mosquitto.conf
+ExecReload=/bin/kill -HUP $MAINPID
+
+[Install]
+WantedBy=multi-user.target
+_EOF_
 		fi
 
 		software_id=131 # Blynk Server
@@ -5919,6 +5962,31 @@ _EOF_
 			# Grab latest package URL: Force HTTPS!
 			local fallback_url="https://downloads.slimdevices.com/LogitechMediaServer_v8.2.0/logitechmediaserver_8.2.0_$arch.deb"
 			Download_Install "$(curl -sSfL "https://www.mysqueezebox.com/update/?version=8.2&geturl=1&os=deb$arch" | sed 's|^http://|https://|')"
+
+			# Remove bundled SysVinit service
+			systemctl -q is-enabled logitechmediaserver 2> /dev/null || systemctl -q is-active logitechmediaserver && G_EXEC systemctl disable --now logitechmediaserver
+			killall -qwr squeezeboxserver* # Provided service may not wait for exit, kill: https://github.com/MichaIng/DietPi/issues/1613#issuecomment-372787574
+			Remove_SysV logitechmediaserver 1
+
+			# Grant user access to DietPi media files
+			G_EXEC usermod -aG dietpi squeezeboxserver
+
+			# systemd service
+			cat << _EOF_ > /etc/systemd/system/logitechmediaserver.service
+[Unit]
+Description=Logitech Media Server (DietPi)
+
+[Service]
+User=squeezeboxserver
+ExecStart=$(command -v squeezeboxserver) --prefsdir /var/lib/squeezeboxserver/prefs --logdir /var/log/squeezeboxserver/ --cachedir /var/lib/squeezeboxserver/cache --charset=utf8 --logfile /var/log/squeezeboxserver/error.log
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target
+_EOF_
+			# Grab our test media for user
+			Download_Test_Media
 
 		fi
 
@@ -10509,38 +10577,6 @@ backend nodes
 _EOF_
 		fi
 
-		software_id=35 # Logitech Media Server
-		if (( ${aSOFTWARE_INSTALL_STATE[$software_id]} == 1 )); then
-
-			Banner_Configuration
-
-			# Remove bundled SysVinit service
-			systemctl -q is-enabled logitechmediaserver 2> /dev/null || systemctl -q is-active logitechmediaserver && G_EXEC systemctl disable --now logitechmediaserver
-			killall -qwr squeezeboxserver* # Provided service may not wait for exit, kill: https://github.com/MichaIng/DietPi/issues/1613#issuecomment-372787574
-			Remove_SysV logitechmediaserver 1
-
-			# Grant user access to DietPi media files
-			G_EXEC usermod -aG dietpi squeezeboxserver
-
-			# systemd service
-			cat << _EOF_ > /etc/systemd/system/logitechmediaserver.service
-[Unit]
-Description=Logitech Media Server (DietPi)
-
-[Service]
-User=squeezeboxserver
-ExecStart=$(command -v squeezeboxserver) --prefsdir /var/lib/squeezeboxserver/prefs --logdir /var/log/squeezeboxserver/ --cachedir /var/lib/squeezeboxserver/cache --charset=utf8 --logfile /var/log/squeezeboxserver/error.log
-Restart=on-failure
-RestartSec=5
-
-[Install]
-WantedBy=multi-user.target
-_EOF_
-			# Grab our test media for user
-			Download_Test_Media
-
-		fi
-
 		software_id=55 # Wordpress
 		if (( ${aSOFTWARE_INSTALL_STATE[$software_id]} == 1 )); then
 
@@ -12237,56 +12273,6 @@ After=icecast2.service
 
 [Service]
 ExecStart=$(command -v darkice)
-
-[Install]
-WantedBy=multi-user.target
-_EOF_
-		fi
-
-		software_id=123 # Mosquitto
-		if (( ${aSOFTWARE_INSTALL_STATE[$software_id]} == 1 )); then
-
-			Banner_Configuration
-
-			Remove_SysV mosquitto
-
-			# Password file
-			if [[ ! -f '/etc/mosquitto/passwd' ]]
-			then
-				G_EXEC umask 0037
-				> /etc/mosquitto/passwd # Pre-create file, required for pre-v1.6.10 (ARMv8 up to Buster): https://github.com/MichaIng/DietPi/issues/4424
-				G_EXEC_PRE_FUNC(){ acommand[4]=$GLOBAL_PW; }
-				G_EXEC mosquitto_passwd -b /etc/mosquitto/passwd mosquitto "${GLOBAL_PW//?/X}"
-				G_EXEC chown root:mosquitto /etc/mosquitto/passwd
-				G_EXEC umask 0022
-			fi
-
-			# Config: /etc/mosquitto/conf.d exists, but doubled settings do not override each other and lead to a startup failure instead, which breaks the purpose we want to use it for.
-			# - Disable PID file, not required for systemd handling
-			G_EXEC sed -i '/^[[:blank:]]*pid_file[[:blank:]]/d' /etc/mosquitto/mosquitto.conf
-			[[ -d '/run/mosquitto' ]] && G_EXEC rm -R /run/mosquitto
-			# - Log to default STDERR > systemd-journald
-			G_EXEC sed -i '/^[[:blank:]]*log_dest[[:blank:]]/d' /etc/mosquitto/mosquitto.conf
-			[[ -d '/var/log/mosquitto' ]] && G_EXEC rm -R /var/log/mosquitto
-			# - Add default password file for authenticated requests: https://github.com/MichaIng/DietPi/issues/4133
-			GCI_PRESERVE=1 G_CONFIG_INJECT 'password_file[[:blank:]]' 'password_file /etc/mosquitto/passwd' /etc/mosquitto/mosquitto.conf
-			# - Add default listener at port 1883 not bound to loopback IP: https://github.com/MichaIng/DietPi/issues/4133
-			GCI_PRESERVE=1 G_CONFIG_INJECT 'listener[[:blank:]]' 'listener 1883' /etc/mosquitto/mosquitto.conf
-
-			# Add/override default systemd unit: https://github.com/eclipse/mosquitto/tree/master/service/systemd
-			cat << '_EOF_' > /etc/systemd/system/mosquitto.service
-[Unit]
-Description=Mosquitto MQTT Broker (DietPi)
-Documentation=man:mosquitto.conf(5) man:mosquitto(8)
-Wants=network-online.target
-After=network-online.target
-
-[Service]
-Type=notify
-NotifyAccess=main
-User=mosquitto
-ExecStart=/usr/sbin/mosquitto -c /etc/mosquitto/mosquitto.conf
-ExecReload=/bin/kill -HUP $MAINPID
 
 [Install]
 WantedBy=multi-user.target
@@ -14798,13 +14784,13 @@ _EOF_
 		if (( ${aSOFTWARE_INSTALL_STATE[$software_id]} == -1 )); then
 
 			Banner_Uninstalling
-			G_AGP logitechmediaserver
 			if [[ -f '/etc/systemd/system/logitechmediaserver.service' ]]
 			then
 				G_EXEC systemctl disable --now logitechmediaserver
 				G_EXEC rm /etc/systemd/system/logitechmediaserver.service
 			fi
 			[[ -d '/etc/systemd/system/logitechmediaserver.service.d' ]] && G_EXEC rm -R /etc/systemd/system/logitechmediaserver.service.d
+			G_AGP logitechmediaserver
 			getent passwd squeezeboxserver > /dev/null && G_EXEC userdel squeezeboxserver
 			getent group squeezeboxserver > /dev/null && G_EXEC groupdel squeezeboxserver
 			[[ -d '/var/lib/squeezeboxserver' ]] && G_EXEC rm -R /var/lib/squeezeboxserver
