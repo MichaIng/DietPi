@@ -1011,8 +1011,9 @@ _EOF_
 
 			# Preserve all installed kernel, device tree and bootloader packages, until fixed meta packages are available: https://github.com/radxa/apt
 			# Additionally install bc, required to calculate the initramfs size via custom hook (by Radxa) which updates /boot/uEnv.txt accordingly on initramfs updates
+			# And install "file" which is used to detect whether the kernel image is compressed and in case uncompress it
 			# shellcheck disable=SC2046
-			G_AGI $(dpkg-query -Wf '${Package}\n' | grep -E '^linux-(image|dtb|u-boot)-|^u-boot') bc
+			G_AGI $(dpkg-query -Wf '${Package}\n' | grep -E '^linux-(image|dtb|u-boot)-|^u-boot') bc file
 
 		# - Generic kernel + device tree + U-Boot package auto detect
 		else
