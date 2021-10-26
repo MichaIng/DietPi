@@ -1777,7 +1777,7 @@ _EOF_
 			if [[ -d '/boot/uEnv.txt' ]]
 			then
 				# Reduce console log verbosity to default 4 to mute regular USB detection info messages
-				[[ -d '/boot/uEnv.txt' ]] && G_CONFIG_INJECT 'verbosity=' 'verbosity=4' /boot/uEnv.txt
+				G_CONFIG_INJECT 'verbosity=' 'verbosity=4' /boot/uEnv.txt
 
 				# Disable Docker optimisations, since this has some performance drawbacks, enable on Docker install instead
 				G_CONFIG_INJECT 'docker_optimizations=' 'docker_optimizations=off' /boot/uEnv.txt
