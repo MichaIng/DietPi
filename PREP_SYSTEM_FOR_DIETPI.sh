@@ -395,6 +395,7 @@ _EOF_
 			'47' ': NanoPi R4S'
 			'72' ': ROCK Pi 4'
 			'73' ': ROCK Pi S'
+			'74' ': Radxa Zero'
 			'' '●─ x86_64 '
 			'21' ': x86_64 Native PC'
 			'20' ': x86_64 Virtual Machine'
@@ -721,7 +722,7 @@ Currently installed: $G_DISTRO_NAME (ID: $G_DISTRO)"; then
 
 		fi
 		# - Entropy daemon: Use modern rng-tools5 on all devices where it has been proven to work, else haveged: https://github.com/MichaIng/DietPi/issues/2806
-		if [[ $G_HW_MODEL -lt 10 || $G_HW_MODEL =~ ^(14|15|16|24|29|42|46|58|68|72)$ ]]; then # RPi, S922X, Odroid C4, RK3399 - 47 NanoPi R4S
+		if [[ $G_HW_MODEL -lt 10 || $G_HW_MODEL =~ ^(14|15|16|24|29|42|46|58|68|72|74)$ ]]; then # RPi, S922X, Odroid C4, RK3399 - 47 NanoPi R4S, Radxa Zero
 
 			aPACKAGES_REQUIRED_INSTALL+=('rng-tools5')
 
@@ -995,6 +996,25 @@ _EOF_
 			# NB: rockpis-dtbo is not required as it doubles the overlays that are already provided (among others) with the kernel package
 			G_AGI rockpis-rk-ubootimg linux-4.4-rock-pi-s-latest rockchip-overlay u-boot-tools
 
+		#	Radxa Zero (official Radxa Debian image)
+		elif (( $G_HW_MODEL == 74 )) && grep -q 'apt\.radxa\.com' /etc/apt/sources.list.d/*.list; then
+
+			# Install Radxa APT repo cleanly: No Bullseye repo available yet
+			G_EXEC rm -Rf /etc/apt/{trusted.gpg,sources.list.d/{,.??,.[^.]}*}
+			G_EXEC eval "curl -sSfL https://apt.radxa.com/${DISTRO_TARGET_NAME/bullseye/buster}-stable/public.key | gpg --dearmor -o /etc/apt/trusted.gpg.d/dietpi-radxa.gpg --yes"
+			G_EXEC eval "echo -e 'deb https://apt.radxa.com/${DISTRO_TARGET_NAME/bullseye/buster}-stable/ ${DISTRO_TARGET_NAME/bullseye/buster} main\n#deb https://apt.radxa.com/${DISTRO_TARGET_NAME/bullseye/buster}-testing/ ${DISTRO_TARGET_NAME/bullseye/buster} main' > /etc/apt/sources.list.d/dietpi-radxa.list"
+			G_AGUP
+
+			# Remove obsolete combined keyring
+			[[ -f '/etc/apt/trusted.gpg' ]] && G_EXEC rm /etc/apt/trusted.gpg
+			[[ -f '/etc/apt/trusted.gpg~' ]] && G_EXEC rm '/etc/apt/trusted.gpg~'
+
+			# Preserve all installed kernel, device tree and bootloader packages, until fixed meta packages are available: https://github.com/radxa/apt
+			# Additionally install bc, required to calculate the initramfs size via custom hook (by Radxa) which updates /boot/uEnv.txt accordingly on initramfs updates
+			# And install "file" which is used to detect whether the kernel image is compressed and in case uncompress it
+			# shellcheck disable=SC2046
+			G_AGI $(dpkg-query -Wf '${Package}\n' | grep -E '^linux-(image|dtb|u-boot)-|^u-boot') bc file
+
 		# - Generic kernel + device tree + U-Boot package auto detect
 		else
 
@@ -1018,7 +1038,9 @@ _EOF_
 
 			aPACKAGES_REQUIRED_INSTALL+=('armbian-firmware')
 
-		else
+		# - Do not install additional firmware on Radxa Zero for now
+		elif [[ $G_HW_MODEL != 74 ]]
+		then
 
 			# Usually no firmware should be necessary for VMs. If user manually passes though some USB device, user might need to install the firmware then.
 			if (( $G_HW_MODEL != 20 )); then
@@ -1745,6 +1767,21 @@ _EOF_
 			# Ensure WiFi module pre-exists
 			G_CONFIG_INJECT '8723bs' '8723bs' /etc/modules
 
+		# - Radxa Zero
+		elif (( $G_HW_MODEL == 74 ))
+		then
+			# Use ondemand CPU governor since schedutil currently causes kernel errors and hangs
+			G_CONFIG_INJECT 'CONFIG_CPU_GOVERNOR=' 'CONFIG_CPU_GOVERNOR=ondemand' /boot/dietpi.txt
+
+			# uEnv.txt version (Radxa Debian image)
+			if [[ -d '/boot/uEnv.txt' ]]
+			then
+				# Reduce console log verbosity to default 4 to mute regular USB detection info messages
+				G_CONFIG_INJECT 'verbosity=' 'verbosity=4' /boot/uEnv.txt
+
+				# Disable Docker optimisations, since this has some performance drawbacks, enable on Docker install instead
+				G_CONFIG_INJECT 'docker_optimizations=' 'docker_optimizations=off' /boot/uEnv.txt
+			fi
 		fi
 
 		# - Armbian special

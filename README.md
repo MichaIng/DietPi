@@ -216,6 +216,7 @@ Links to hardware and software manufacturers, sources and build instructions use
 - [Sparky](https://github.com/sparkysbc?tab=repositories) [SBC](https://github.com/sparky-sbc/sparky-test)
 - [PINE64](https://www.pine64.org/)
 - [FriendlyARM](https://github.com/friendlyarm?tab=repositories)
+- [Radxa](https://github.com/radxa/apt)
 - [Armbian](https://github.com/armbian)
 - [curl](https://github.com/curl/curl)
 - [vmtouch](https://github.com/hoytech/vmtouch)
