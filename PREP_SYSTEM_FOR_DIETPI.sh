@@ -1773,8 +1773,15 @@ _EOF_
 			# Use ondemand CPU governor since schedutil currently causes kernel errors and hangs
 			G_CONFIG_INJECT 'CONFIG_CPU_GOVERNOR=' 'CONFIG_CPU_GOVERNOR=ondemand' /boot/dietpi.txt
 
-			# Reduce console log verbosity to default 4 to mute regular USB detection info messages
-			[[ -d '/boot/uEnv.txt' ]] && G_CONFIG_INJECT 'verbosity=' 'verbosity=4' /boot/uEnv.txt
+			# uEnv.txt version (Radxa Debian image)
+			if [[ -d '/boot/uEnv.txt' ]]
+			then
+				# Reduce console log verbosity to default 4 to mute regular USB detection info messages
+				[[ -d '/boot/uEnv.txt' ]] && G_CONFIG_INJECT 'verbosity=' 'verbosity=4' /boot/uEnv.txt
+
+				# Disable Docker optimisations, since this has some performance drawbacks, enable on Docker install instead
+				G_CONFIG_INJECT 'docker_optimizations=' 'docker_optimizations=off' /boot/uEnv.txt
+			fi
 		fi
 
 		# - Armbian special
