@@ -30,7 +30,7 @@
 		# If no manual overclock settings have been applied by user, apply safe overclocking values (RPi1) or update comments to show model-specific defaults: https://www.raspberrypi.org/documentation/configuration/config-txt/overclocking.md
 		grep -qE '^[[:blank:]]*(over_voltage|(arm|core|gpu|sdram)_freq)=' /boot/config.txt && return
 
-		# RPi Zero (and Zero 2? ARM freq at least is correct!)
+		# RPi Zero/Zero 2 W
 		if [[ $G_HW_MODEL_NAME == *'Zero'* ]]
 		then
 			sed -i '/#over_voltage=/c\#over_voltage=0' /boot/config.txt
