@@ -691,18 +691,6 @@ Do you wish to ignore this warning, and, mount the drive regardless?" || return 
 		# Install rsync
 		G_AG_CHECK_INSTALL_PREREQ rsync
 
-		# Disable swap
-		/boot/dietpi/func/dietpi-set_swapfile 0
-
-		# Create new fstab
-		G_EXEC cp -a /etc/fstab /etc/fstab_new
-		# - Remove automatic entry for new UUID
-		G_EXEC sed -i "\@[[:blank:]]${aDRIVE_MOUNT_TARGET[$MENU_DRIVE_INDEX]}[[:blank:]]@d" /etc/fstab_new
-		# - Replace old with new rootfs entry
-		local dev_entry="UUID=${aDRIVE_UUID[$MENU_DRIVE_INDEX]}"
-		(( $G_HW_MODEL < 10 )) && dev_entry="PARTUUID=${aDRIVE_PART_UUID[$MENU_DRIVE_INDEX]}"
-		G_EXEC sed -i "\@UUID=[^[:blank:]]*[[:blank:]]\+/[[:blank:]]@c$dev_entry / ${aDRIVE_FSTYPE[$MENU_DRIVE_INDEX]} noatime,lazytime,rw 0 1" /etc/fstab_new
-
 		# Mount rootfs to tmp mount point to allow rsync
 		# - rsync "-x" option prevents copying mounts content, but it copies permissions of mount point dirs according to mount options instead of those of the dir on the parent fs.
 		# - Since mount permissions might not be wanted for the underlying filesystem dir, we copy from a temporary mount point to assure that underlying rootfs content matches 100%.
@@ -713,7 +701,6 @@ Do you wish to ignore this warning, and, mount the drive regardless?" || return 
 		if ! G_EXEC_NOEXIT=1 G_EXEC rsync -aHv --delete /tmp/tmp_rootfs/ "${aDRIVE_MOUNT_TARGET[$MENU_DRIVE_INDEX]}/"; then
 
 			G_DIETPI-NOTIFY 1 'Rsync has failed, RootFS transfer has been aborted.'
-			rm /etc/fstab_new
 			umount /tmp/tmp_rootfs
 			rmdir /tmp/tmp_rootfs
 			return 1
@@ -724,32 +711,31 @@ Do you wish to ignore this warning, and, mount the drive regardless?" || return 
 		rm -Rf "${aDRIVE_MOUNT_TARGET[$MENU_DRIVE_INDEX]}"/var/tmp/systemd-private-*
 		rmdir "${aDRIVE_MOUNT_TARGET[$MENU_DRIVE_INDEX]}${aDRIVE_MOUNT_TARGET[$MENU_DRIVE_INDEX]}"
 
-		# Move new fstab in place
-		G_EXEC mv /etc/fstab_new "${aDRIVE_MOUNT_TARGET[$MENU_DRIVE_INDEX]}/etc/fstab"
+		# Update fstab
+		# - Remove automatic entry for target drive
+		G_EXEC sed -i "\@[[:blank:]]${aDRIVE_MOUNT_TARGET[$MENU_DRIVE_INDEX]}[[:blank:]]@d" "${aDRIVE_MOUNT_TARGET[$MENU_DRIVE_INDEX]}/etc/fstab"
+		# - Replace old with new rootfs entry
+		local dev_entry="UUID=${aDRIVE_UUID[$MENU_DRIVE_INDEX]}"
+		(( $G_HW_MODEL < 10 )) && dev_entry="PARTUUID=${aDRIVE_PART_UUID[$MENU_DRIVE_INDEX]}"
+		G_EXEC sed -i "\@[[:blank:]]/[[:blank:]]@c$dev_entry / ${aDRIVE_FSTYPE[$MENU_DRIVE_INDEX]} noatime,lazytime,rw 0 1" "${aDRIVE_MOUNT_TARGET[$MENU_DRIVE_INDEX]}/etc/fstab"
 
-		# Recreate swap
-		#/boot/dietpi/func/dietpi-set_swapfile 1 "${aDRIVE_MOUNT_TARGET[$MENU_DRIVE_INDEX]}/var/swap"
-		# - Manually update location
-		#G_CONFIG_INJECT 'AUTO_SETUP_SWAPFILE_LOCATION=' 'AUTO_SETUP_SWAPFILE_LOCATION=/var/swap' /boot/dietpi.txt
-
-		# RPi: /boot/cmdline.txt
-		if (( $G_HW_MODEL < 10 )); then
-
-			# Find current root= and replace
+		# Find and replace current root and rootfstype kernel command line entries
+		# - RPi: /boot/cmdline.txt
+		if (( $G_HW_MODEL < 10 ))
+		then
 			local rootfs_current=$(mawk '{for(i=1;i<=NF;i++) if($i~/^root=/) {print $i;exit}}' /boot/cmdline.txt)
 			G_EXEC sed -i "s#$rootfs_current#root=PARTUUID=${aDRIVE_PART_UUID[$MENU_DRIVE_INDEX]}#g" /boot/cmdline.txt
 
-			# Set FS type
-			local rootfstype_current=$(mawk '{for(i=1;i<=NF;i++) {print $i} }' /boot/cmdline.txt | grep -m1 '^rootfstype=')
-			G_EXEC sed -i "s#$rootfstype_current#rootfstype=${aDRIVE_FSTYPE[$MENU_DRIVE_INDEX]}#g" /boot/cmdline.txt
+			local rootfstype_current=$(mawk '{for(i=1;i<=NF;i++) if($i~/^rootfstype=/) {print $i;exit}}' /boot/cmdline.txt)
+			[[ $rootfstype_current ]] && G_EXEC sed -i "s#$rootfstype_current#rootfstype=${aDRIVE_FSTYPE[$MENU_DRIVE_INDEX]}#g" /boot/cmdline.txt
 
-		# C2/XU4/N2/C4: /boot/boot.ini
-		elif [[ $G_HW_MODEL == 1[1256] ]]; then
-
-			# Find current root= to replace
+		# - Odroids: /boot/boot.ini
+		else
 			local rootfs_current=$(mawk '-F[" ]' '{for(i=1;i<=NF;i++) if($i~/^root=/) {print $i;exit}}' /boot/boot.ini)
 			G_EXEC sed -i "s#$rootfs_current#root=UUID=${aDRIVE_UUID[$MENU_DRIVE_INDEX]}#g" /boot/boot.ini
 
+			local rootfstype_current=$(mawk '-F[" ]' '{for(i=1;i<=NF;i++) if($i~/^rootfstype=/) {print $i;exit}}' /boot/boot.ini)
+			[[ $rootfstype_current ]] && G_EXEC sed -i "s#$rootfstype_current#rootfstype=${aDRIVE_FSTYPE[$MENU_DRIVE_INDEX]}#g" /boot/boot.ini)
 		fi
 
 		systemctl daemon-reload
@@ -1089,29 +1075,10 @@ Do you wish to ignore this warning, and, mount the drive regardless?" || return 
 						G_WHIP_MENU_ARRAY+=('' '●─ Advanced options ')
 
 						# Read only?
-						local read_only_state='[ ]'
-						local read_only_state_text='Disabled'
-						if (( ${aDRIVE_ISREADONLY_CURRENTLY[$MENU_DRIVE_INDEX]} )); then
-
-							read_only_state='[X]'
-							read_only_state_text='Enabled'
-
-						fi
+						local read_only_state='[ ]' read_only_state_text='Disabled'
+						(( ${aDRIVE_ISREADONLY_CURRENTLY[$MENU_DRIVE_INDEX]} )) && read_only_state='[X]' read_only_state_text='Enabled'
 						G_WHIP_MENU_ARRAY+=('Read Only' ": $read_only_state | Select to toggle RW/RO modes")
 						whiptail_desc+="\nRead only:    $read_only_state_text"
-
-						# Show reserved blocks percentage for ext4 drives behind capacity:
-						if [[ ${aDRIVE_FSTYPE[$MENU_DRIVE_INDEX]} == 'ext4' ]]; then
-
-							local fp_tmp='.dumpe2fs_out_tmp' reserved_blocks_percent_current=0
-							dumpe2fs -h "${aDRIVE_MOUNT_SOURCE[$MENU_DRIVE_INDEX]}" > $fp_tmp
-							local block_count=$(mawk '/^Block count:/{print $3;exit}' $fp_tmp)
-							local reserved_block_count=$(mawk '/^Reserved block count:/{print $4;exit}' $fp_tmp)
-							rm $fp_tmp
-							reserved_blocks_percent_current=$(printf '%0.2f' "$(($reserved_block_count*100000/$block_count+1))e-3")
-							G_WHIP_MENU_ARRAY+=('Reserved blocks' ": [$reserved_blocks_percent_current%] | Adjust percentage of reserved blocks on this drive")
-
-						fi
 
 					fi
 
@@ -1128,6 +1095,15 @@ Do you wish to ignore this warning, and, mount the drive regardless?" || return 
 
 			if ! (( ${aDRIVE_ISROM[$MENU_DRIVE_INDEX]} || ${aDRIVE_ISNETWORKED[$MENU_DRIVE_INDEX]} )); then
 
+				# Reserved blocks percentage on ext4 filesystems
+				if [[ ${aDRIVE_FSTYPE[$MENU_DRIVE_INDEX]} == 'ext4' ]]
+				then
+					local block_count reserved_block_count
+					read -r block_count reserved_block_count < <(dumpe2fs -h "${aDRIVE_MOUNT_SOURCE[$MENU_DRIVE_INDEX]}" 2> /dev/null | mawk '$0~/^(Block|Reserved block) count:/ {print $NF}' ORS=' ')
+					reserved_blocks_percent_current=$(printf '%0.2f' "$(($reserved_block_count*100000/$block_count+1))e-3")
+					G_WHIP_MENU_ARRAY+=('Reserved blocks' ": [$reserved_blocks_percent_current%] | Adjust percentage of reserved blocks on this filesystem")
+				fi
+
 				# fsck
 				G_WHIP_MENU_ARRAY+=('Check & Repair' ': Check and optionally repair filesystem')
 
@@ -1138,14 +1114,14 @@ Do you wish to ignore this warning, and, mount the drive regardless?" || return 
 
 				fi
 
-				# Transfer RootFS: Supported on RPi and Odroids C2/XU4/N2/C4
-				if [[ ${aDRIVE_MOUNT_SOURCE[$MENU_DRIVE_INDEX]} != "$G_ROOTFS_DEV" && ( $G_HW_MODEL -le 9 || $G_HW_MODEL == 1[1256] ) ]]; then
+				# Transfer RootFS: Supported on RPi and Odroids C2/XU4/N2/C4 if /boot is a dedicated mount/partiton
+				if [[ ${aDRIVE_MOUNT_SOURCE[$MENU_DRIVE_INDEX]} != "$G_ROOTFS_DEV" && ( $G_HW_MODEL -le 9 || $G_HW_MODEL == 1[1256] ) ]] && findmnt -M /boot > /dev/null; then
 
 					G_WHIP_MENU_ARRAY+=('Transfer RootFS' ': Transfer RootFS to this drive')
 
 				fi
 
-				# Disable format for /boot /rootfs
+				# Disable format for /boot and rootfs
 				if [[ ${aDRIVE_MOUNT_TARGET[$MENU_DRIVE_INDEX]} != '/' && ${aDRIVE_MOUNT_TARGET[$MENU_DRIVE_INDEX]} != '/boot' ]]; then
 
 					G_WHIP_MENU_ARRAY+=('Format' ': Select to see formatting options')
@@ -1339,6 +1315,22 @@ Please enter the desired percentage of reserved blocks, e.g. "0.05" for 0.05% or
 
 			# Transfer RootFS
 			elif [[ $G_WHIP_RETURNED_VALUE == 'Transfer RootFS' ]]; then
+
+				# Check whether required kernel command line config file is present
+				if [[ $G_HW_MODEL -le 9 && ! -f '/boot/cmdline.txt' ]]
+				then
+					G_WHIP_MSG '[ INFO ] /boot/cmdline.txt not found
+\nThe required /boot/cmdline.txt file to adjust the root filesystem entry for the kernel has not been found.
+\nTransferring the root filesystem is not supported on your device. Aborting...'
+					return 1
+
+				elif [[ $G_HW_MODEL -gt 9 && ! -f '/boot/boot.ini' ]]
+				then
+					G_WHIP_MSG '[ INFO ] /boot/boot.ini not found
+\nThe required /boot/boot.ini file to adjust the root filesystem entry for the kernel has not been found.
+\nTransferring the root filesystem is not supported on your device. Aborting...'
+					return 1
+				fi
 
 				G_WHIP_YESNO 'This process will move the root filesystem data to another location. This may increase R/W performance when using a USB drive over SDcard, however, there are some limitations:
 \n - The SD/eMMC card, which holds kernel and bootloader, is still required for the boot process. On RPi 3 and RPi 4 models, which support full USB boot, instead it is recommended to flash the whole DietPi image to a USB drive and boot the system without SDcard.
