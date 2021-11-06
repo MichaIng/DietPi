@@ -315,6 +315,7 @@ Links to hardware and software manufacturers, sources and build instructions use
 - [Blynk Server](https://github.com/Peterkn2001/blynk-server)
 - [File Browser](https://github.com/filebrowser/filebrowser)
 - [Spotifyd](https://github.com/Spotifyd/spotifyd)
+- [DietPi-Dashboard](https://github.com/ravenclaw900/dietpi-dashboard)
 
 ---
 
