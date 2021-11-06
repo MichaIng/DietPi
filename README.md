@@ -216,6 +216,7 @@ Links to hardware and software manufacturers, sources and build instructions use
 - [Sparky](https://github.com/sparkysbc?tab=repositories) [SBC](https://github.com/sparky-sbc/sparky-test)
 - [PINE64](https://www.pine64.org/)
 - [FriendlyARM](https://github.com/friendlyarm?tab=repositories)
+- [Radxa](https://github.com/radxa/apt)
 - [Armbian](https://github.com/armbian)
 - [curl](https://github.com/curl/curl)
 - [vmtouch](https://github.com/hoytech/vmtouch)
@@ -262,7 +263,6 @@ Links to hardware and software manufacturers, sources and build instructions use
 - [OpenTyrian](https://bitbucket.org/opentyrian/opentyrian/wiki/Home)
 - [RPi Cam Control](https://github.com/silvanmelchior/RPi_Cam_Web_Interface)
 - [Deluge](https://dev.deluge-torrent.org/wiki/Development#SourceCode)
-- [Subsonic](https://sourceforge.net/projects/subsonic/)
 - [Airsonic](https://github.com/airsonic/airsonic)
 - [Logitech Media Server](https://github.com/Logitech/slimserver)
 - [Squeezelite](https://github.com/ralph-irving/squeezelite)
@@ -302,7 +302,6 @@ Links to hardware and software manufacturers, sources and build instructions use
 - [VSCodium](https://github.com/VSCodium/vscodium)
 - [WebIOPi](https://github.com/Freenove/WebIOPi)
 - [WiringPi](https://github.com/WiringPi/WiringPi)
-- [emonHub](https://github.com/openenergymonitor/emonhub)
 - [Firefox](https://hg.mozilla.org/mozilla-unified)
 - [Beets](https://github.com/beetbox/beets)
 - [frp](https://github.com/fatedier/frp)
@@ -316,6 +315,7 @@ Links to hardware and software manufacturers, sources and build instructions use
 - [Blynk Server](https://github.com/Peterkn2001/blynk-server)
 - [File Browser](https://github.com/filebrowser/filebrowser)
 - [Spotifyd](https://github.com/Spotifyd/spotifyd)
+- [DietPi-Dashboard](https://github.com/ravenclaw900/dietpi-dashboard)
 
 ---
 

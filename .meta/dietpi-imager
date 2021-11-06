@@ -31,9 +31,9 @@
 	readonly DIETPI_REPO="https://raw.githubusercontent.com/$G_GITOWNER/DietPi/$G_GITBRANCH"
 
 	# Inputs
+	SOURCE_TYPE='Drive'
 	if [[ -b $1 ]]
 	then
-		SOURCE_TYPE='Drive'
 		FP_SOURCE=$1
 
 	elif [[ -f $1 ]]
@@ -131,7 +131,8 @@
 			G_EXEC_NOEXIT=1 G_EXEC losetup "$FP_SOURCE" "$FP_SOURCE_IMG" || return
 			G_EXEC_NOEXIT=1 G_EXEC partprobe "$FP_SOURCE" || return
 			G_EXEC_NOEXIT=1 G_EXEC partx -u "$FP_SOURCE" || return
-			G_DIETPI-NOTIFY 0 "Mounted the image ($FP_SOURCE_IMG) as loopback device: $FP_SOURCE"
+			G_DIETPI-NOTIFY 0 "Attached the image ($FP_SOURCE_IMG) as loopback device: $FP_SOURCE"
+			sleep 0.5 # Give the root filesystem a little time to be detected
 		fi
 
 		Menu_Source_RootFS # Directly open this menu next
@@ -317,8 +318,8 @@
 		# Remount image for any required edits
 		G_EXEC mkdir $FP_MNT_TMP
 		G_EXEC mount "$FP_ROOT_DEV" $FP_MNT_TMP
-		# - Remove bash history, which is stored on shutdown, hence cannot be removed via DietPi-PREP
-		rm -fv $FP_MNT_TMP/{root,home/*}/.bash_history
+		# - Remove bash history and DHCP leases, which are stored on shutdown, hence cannot be removed via DietPi-PREP
+		G_EXEC rm -f $FP_MNT_TMP/{root,home/*}/.bash_history $FP_MNT_TMP/var/lib/dhcp/*.leases
 		if [[ $MOUNT_IT == 'On' ]] && G_WHIP_MSG "The ${SOURCE_TYPE,,} has been mounted to allow you reviewing or editing its content:
 - $FP_ROOT_DEV > $FP_MNT_TMP
 \nAn interactive bash subshell will open.
@@ -342,6 +343,10 @@
 		# Shrink filesystem to minimum
 		if [[ $ROOT_FS_TYPE == 'ext4' ]]
 		then
+			# Disable and enable journal to clear it and allow further size reduction
+			G_EXEC tune2fs -O '^has_journal' "$FP_ROOT_DEV"
+			G_EXEC tune2fs -O 'has_journal' "$FP_ROOT_DEV"
+			
 			# Run multiple times until no change is done any more
 			G_DIETPI-NOTIFY 2 'Shrinking root filesystem to minimum size...'
 			local out
@@ -414,13 +419,19 @@
 			[[ $type ]] || continue
 			if [[ $type == 'ext'[234] ]]
 			then
-				G_EXEC_OUTPUT=1 G_EXEC zerofree -v "$path"
+				# Disable and enable journal on ext3 and ext3 to clear it, when not root filesystem (where it was done already)
+				if [[ $type != 'ext2' && $path != "$FP_ROOT_DEV" ]]
+				then
+					G_EXEC tune2fs -O '^has_journal' "$path" < /dev/tty
+					G_EXEC tune2fs -O 'has_journal' "$path" < /dev/tty
+				fi
+				G_EXEC_OUTPUT=1 G_EXEC zerofree -v "$path" < /dev/tty
 			else
-				G_EXEC mount "$path" $FP_MNT_TMP
-				G_EXEC_OUTPUT=1 G_EXEC fstrim -v $FP_MNT_TMP
-				Unmount_tmp
+				G_EXEC mount "$path" $FP_MNT_TMP < /dev/tty
+				G_EXEC_OUTPUT=1 G_EXEC fstrim -v $FP_MNT_TMP < /dev/tty
+				Unmount_tmp < /dev/tty
 				# shellcheck disable=SC2015
-				[[ $path == "$FP_ROOT_DEV" ]] && Run_fsck || G_EXEC_OUTPUT=1 G_EXEC fsck "$path"
+				[[ $path == "$FP_ROOT_DEV" ]] && Run_fsck < /dev/tty || G_EXEC_OUTPUT=1 G_EXEC fsck "$path" < /dev/tty
 			fi
 
 		done < <(lsblk -rnpo NAME,FSTYPE "$FP_SOURCE"?*)
@@ -622,6 +633,9 @@ _EOF_
 		G_DIETPI-NOTIFY 0 "DietPi-Imager has successfully finished.
 Final image file: $PWD/$OUTPUT_IMG_NAME.$OUTPUT_IMG_EXT
 Final 7z archive: $PWD/$OUTPUT_IMG_NAME.7z"
+
+		# Upload archive automatically if there is an upload.sh in the same directory
+		[[ -x 'upload.sh' ]] && ./upload.sh "$OUTPUT_IMG_NAME.7z"
 
 	}
 
