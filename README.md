@@ -257,7 +257,7 @@ Links to hardware and software manufacturers, sources and build instructions use
 - [OpenTyrian](https://bitbucket.org/opentyrian/opentyrian/wiki/Home)
 - [RPi Cam Control](https://github.com/silvanmelchior/RPi_Cam_Web_Interface)
 - [Deluge](https://dev.deluge-torrent.org/wiki/Development#SourceCode)
-- [Airsonic](https://github.com/airsonic/airsonic)
+- [Airsonic-Advanced](https://github.com/airsonic-advanced/airsonic-advanced)
 - [Logitech Media Server](https://github.com/Logitech/slimserver)
 - [Squeezelite](https://github.com/ralph-irving/squeezelite)
 - [Ampache](https://github.com/ampache/ampache)
