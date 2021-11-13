@@ -27,64 +27,63 @@
 
 	RPi_Set_Clock_Speeds()
 	{
-		# If no manual overclock settings have been applied by user, apply safe overclocking values (RPi1) or update comments to show model-specific defaults: https://www.raspberrypi.org/documentation/configuration/config-txt/overclocking.md
-		grep -qE '^[[:blank:]]*(over_voltage|(arm|core|gpu|sdram)_freq)=' /boot/config.txt && return
+		# Update comments to show model-specific defaults and apply safe overclocking profile on RPi 1: https://github.com/raspberrypi/documentation/blob/develop/documentation/asciidoc/computers/config_txt/overclocking.adoc
 
-		# RPi Zero
+		# RPi Zero/Zero 2 W
 		if [[ $G_HW_MODEL_NAME == *'Zero'* ]]
 		then
-			sed -i '/#over_voltage=/c\#over_voltage=0' /boot/config.txt
-			sed -i '/#arm_freq=/c\#arm_freq=1000' /boot/config.txt
-			sed -i '/#core_freq=/c\#core_freq=400' /boot/config.txt
-			sed -i '/#sdram_freq=/c\#sdram_freq=450' /boot/config.txt
+			sed -i '/^#over_voltage=/c\#over_voltage=0' /boot/config.txt
+			sed -i '/^#arm_freq=/c\#arm_freq=1000' /boot/config.txt
+			sed -i '/^#core_freq=/c\#core_freq=400' /boot/config.txt
+			sed -i '/^#sdram_freq=/c\#sdram_freq=450' /boot/config.txt
 
 		# RPi 1: Apply safe overclock mode
 		elif (( $G_HW_MODEL < 2 ))
 		then
-			G_CONFIG_INJECT 'over_voltage=' 'over_voltage=2' /boot/config.txt
-			G_CONFIG_INJECT 'arm_freq=' 'arm_freq=900' /boot/config.txt
-			sed -i '/#core_freq=/c\#core_freq=250' /boot/config.txt
-			sed -i '/#sdram_freq=/c\#sdram_freq=400' /boot/config.txt
+			GCI_PRESERVE=1 G_CONFIG_INJECT 'arm_freq=' 'arm_freq=900' /boot/config.txt
+			grep -q '^arm_freq=900$' /boot/config.txt && G_CONFIG_INJECT 'over_voltage=' 'over_voltage=2' /boot/config.txt
+			sed -i '/^#core_freq=/c\#core_freq=250' /boot/config.txt
+			sed -i '/^#sdram_freq=/c\#sdram_freq=400' /boot/config.txt
 
 		# RPi 2
 		elif (( $G_HW_MODEL == 2 ))
 		then
-			sed -i '/#over_voltage=/c\#over_voltage=0' /boot/config.txt
-			sed -i '/#arm_freq=/c\#arm_freq=900' /boot/config.txt
-			sed -i '/#core_freq=/c\#core_freq=250' /boot/config.txt
-			sed -i '/#sdram_freq=/c\#sdram_freq=450' /boot/config.txt
+			sed -i '/^#over_voltage=/c\#over_voltage=0' /boot/config.txt
+			sed -i '/^#arm_freq=/c\#arm_freq=900' /boot/config.txt
+			sed -i '/^#core_freq=/c\#core_freq=250' /boot/config.txt
+			sed -i '/^#sdram_freq=/c\#sdram_freq=450' /boot/config.txt
 
 		# RPi 3
 		elif (( $G_HW_MODEL == 3 ))
 		then
-			sed -i '/#over_voltage=/c\#over_voltage=0' /boot/config.txt
-			sed -i '/#core_freq=/c\#core_freq=400' /boot/config.txt
-			G_CONFIG_INJECT 'temp_limit=' 'temp_limit=75' /boot/config.txt # https://github.com/MichaIng/DietPi/issues/356
+			sed -i '/^#over_voltage=/c\#over_voltage=0' /boot/config.txt
+			sed -i '/^#core_freq=/c\#core_freq=400' /boot/config.txt
+			grep -q '^temp_limit=65$' /boot/config.txt && G_CONFIG_INJECT 'temp_limit=' 'temp_limit=75' /boot/config.txt # https://github.com/MichaIng/DietPi/issues/356
 
 			# A+/B+
 			if [[ $G_HW_MODEL_NAME == *'+'* ]]
 			then
-				sed -i '/#arm_freq=/c\#arm_freq=1400' /boot/config.txt
-				sed -i '/#sdram_freq=/c\#sdram_freq=500' /boot/config.txt
+				sed -i '/^#arm_freq=/c\#arm_freq=1400' /boot/config.txt
+				sed -i '/^#sdram_freq=/c\#sdram_freq=500' /boot/config.txt
 			else
-				sed -i '/#arm_freq=/c\#arm_freq=1200' /boot/config.txt
-				sed -i '/#sdram_freq=/c\#sdram_freq=450' /boot/config.txt
+				sed -i '/^#arm_freq=/c\#arm_freq=1200' /boot/config.txt
+				sed -i '/^#sdram_freq=/c\#sdram_freq=450' /boot/config.txt
 			fi
 
 		# RPi 4
 		elif (( $G_HW_MODEL == 4 ))
 		then
-			sed -i '/#over_voltage=/c\#over_voltage=0' /boot/config.txt
-			sed -i '/#core_freq=/c\#core_freq=500' /boot/config.txt
-			sed -i '/#sdram_freq=/d' /boot/config.txt # Not supported on RPi4, defaults to 3200 MHz
-			G_CONFIG_INJECT 'temp_limit=' 'temp_limit=75' /boot/config.txt # https://github.com/MichaIng/DietPi/issues/3019
+			sed -i '/^#over_voltage=/c\#over_voltage=0' /boot/config.txt
+			sed -i '/^#core_freq=/c\#core_freq=500' /boot/config.txt
+			sed -i '/^#sdram_freq=/d' /boot/config.txt # Not supported on RPi4, defaults to 3200 MHz
+			grep -q '^temp_limit=65$' /boot/config.txt && G_CONFIG_INJECT 'temp_limit=' 'temp_limit=75' /boot/config.txt # https://github.com/MichaIng/DietPi/issues/3019
 
 			# 400
 			if [[ $G_HW_MODEL_NAME == *'400'* ]]
 			then
-				sed -i '/#arm_freq=/c\#arm_freq=1800' /boot/config.txt
+				sed -i '/^#arm_freq=/c\#arm_freq=1800' /boot/config.txt
 			else
-				sed -i '/#arm_freq=/c\#arm_freq=1500' /boot/config.txt
+				sed -i '/^#arm_freq=/c\#arm_freq=1500' /boot/config.txt
 			fi
 		fi
 	}
@@ -217,9 +216,9 @@ _EOF_
 
 		# Network setup
 		# - Grab available network interfaces
-		local iface_eth=$(G_GET_NET -t eth iface)
+		local iface_eth=$(G_GET_NET -q -t eth iface)
 		[[ $iface_eth ]] || iface_eth='eth0'
-		local iface_wlan=$(G_GET_NET -t wlan iface)
+		local iface_wlan=$(G_GET_NET -q -t wlan iface)
 		[[ $iface_wlan ]] || iface_wlan='wlan0'
 
 		# - Replace interface names with the ones obtained above
@@ -293,7 +292,6 @@ _EOF_
 		# - IPv6
 		local enable_ipv6=$(grep -cm1 '^[[:blank:]]*CONFIG_ENABLE_IPV6=1' /boot/dietpi.txt)
 		/boot/dietpi/func/dietpi-set_hardware enableipv6 "$enable_ipv6"
-		(( $enable_ipv6 )) && /boot/dietpi/func/dietpi-set_hardware preferipv4 "$(grep -cm1 '^[[:blank:]]*CONFIG_PREFER_IPV4=1' /boot/dietpi.txt)"
 
 		# - Configure enabled interfaces now, /etc/network/interfaces will be effective from next boot on
 		#	Failsafe: Bring up Ethernet, whenever WiFi is disabled or fails to be configured, e.g. due to wrong credentials

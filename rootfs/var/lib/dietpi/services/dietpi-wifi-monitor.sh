@@ -24,7 +24,7 @@
 			G_DIETPI-NOTIFY 1 "WiFi adapter $ADAPTER has been unplugged. Exiting..."
 			exit 1
 
-		elif ! GATEWAY=$(G_GET_NET -i "$ADAPTER" gateway) || ! ping -qI "$ADAPTER" -c 1 "$GATEWAY" &> /dev/null
+		elif ! GATEWAY=$(G_GET_NET -i "$ADAPTER" gateway) || ! ping -nqc 1 -I "$ADAPTER" "$GATEWAY" &> /dev/null
 		then
 			G_DIETPI-NOTIFY 2 "Detected $ADAPTER connection loss. Reconnecting..."
 			ifdown "$ADAPTER"

@@ -36,9 +36,9 @@
 	#/////////////////////////////////////////////////////////////////////////////////////
 	# Backup System
 	#/////////////////////////////////////////////////////////////////////////////////////
-	readonly FP_LOG='/var/log/dietpi-backup.log'
+	readonly FP_LOG='dietpi-backup.log'
 
-	# Backup Filepaths
+	# Backup file paths
 	FP_SOURCE='/'
 	FP_TARGET='/mnt/dietpi-backup'
 
@@ -54,7 +54,7 @@
 	readonly aRSYNC_RUN_OPTIONS_BACKUP=('-aH' '--info=name0' '--info=progress2' '--delete-excluded' "--exclude-from=$FP_FILTER")
 	# - Restore: Delete files in target which are not present in source, but after the transfer has finished, and leave excluded files untouched
 	readonly aRSYNC_RUN_OPTIONS_RESTORE=('-aH' '--info=name0' '--info=progress2' '--delete-after' "--exclude-from=$FP_FILTER")
-	readonly aRSYNC_LOGGING_OPTIONS=('-v' "--log-file=$FP_LOG")
+	readonly aRSYNC_LOGGING_OPTIONS=('-v' "--log-file=$FP_TARGET/$FP_LOG")
 
 	# Date format for logs
 	Print_Date(){ date '+%Y-%m-%d_%T'; }
@@ -72,8 +72,8 @@
 	Check_Supported_Directory_Location(){
 
 		# Check location contains /mnt/
-		if [[ $FP_TARGET == '/mnt/'* ]]; then
-
+		if [[ $FP_TARGET == '/mnt/'* ]]
+		then
 			# Check file system type. Create directory temporarily, if necessary.
 			if [[ ! -d $FP_TARGET ]]
 			then
@@ -84,23 +84,25 @@
 				local fs_type=$(df -T "$FP_TARGET" | mawk 'NR==2 {print $2}')
 			fi
 
-			for i in 'ext4' 'ext3' 'ext2' 'nfs' 'nfs4' 'btrfs' 'f2fs' 'xfs' 'zfs'
-			do
-				[[ $fs_type == "$i" ]] || continue
+			# Check for supported filesystem type
+			if [[ $fs_type =~ ^(ext[2-4]|(f2|btr|x|z)fs)$ ]]
+			then
 				return 0
-			done
 
-			# Not supported
-			G_DIETPI-NOTIFY 1 "Filesystem type $fs_type not supported in $FP_TARGET"
-			G_WHIP_MSG "Filesystem type not supported:\n\n$FP_TARGET has a filesystem type of $fs_type, which is not supported.\n\nThe filesystem type must be ext2/3/4, F2FS, Btrfs, XFS or ZFS for symlink and POSIX permissions compatibilities."
-
+			elif [[ $fs_type =~ ^nfs4?$ ]]
+			then
+				G_CHECK_FS_PERMISSION_SUPPORT "$FP_TARGET" && return 0
+				G_DIETPI-NOTIFY 1 "NFS mount $FP_TARGET does not support UNIX permissions"
+				G_WHIP_MSG "Unsupported NFS share:\n\n$FP_TARGET is an NFS share which does not support UNIX permissions.\n\nMake sure that the NFS share at the server is located on a filesystem with native symlink and UNIX permissions support."
+			else
+				G_DIETPI-NOTIFY 1 "Filesystem type $fs_type not supported in $FP_TARGET"
+				G_WHIP_MSG "Filesystem type not supported:\n\n$FP_TARGET has a filesystem type of $fs_type, which is not supported.\n\nThe filesystem type must be ext2/3/4, F2FS, Btrfs, XFS, ZFS or a proper NFS mount with native symlink and UNIX permissions support."
+			fi
 
 		# Not inside /mnt
 		else
-
 			G_DIETPI-NOTIFY 1 "Target directory is not inside /mnt ($FP_TARGET)"
 			G_WHIP_MSG "Directory not supported:\n- $FP_TARGET\n\nThe location must be inside the /mnt/* directory.\n - E.g.: /mnt/dietpi-backup"
-
 		fi
 
 		return 1
@@ -112,7 +114,6 @@
 		cat << _EOF_ > $FP_FILTER
 # Backup data, log and config
 - $FP_TARGET/
-- $FP_LOG
 - $FP_SETTINGS
 # RAM dirs
 - /dev/
@@ -195,7 +196,7 @@ However, this check is a rough estimation in reasonable time, thus it could be m
 			G_DIETPI-NOTIFY 2 "Backup to $FP_TARGET in progress, please wait..."
 
 			# Init log file
-			echo -e "Backup log from $(Print_Date)\n" > $FP_LOG
+			echo -e "Backup log from $(Print_Date)\n" > "$FP_TARGET/$FP_LOG"
 
 			rsync "${aRSYNC_RUN_OPTIONS_BACKUP[@]}" "${aRSYNC_LOGGING_OPTIONS[@]}" "$FP_SOURCE" "$FP_TARGET/data/"
 			EXIT_CODE=$?
@@ -214,7 +215,7 @@ However, this check is a rough estimation in reasonable time, thus it could be m
 
 			fi
 
-			log=1 G_WHIP_VIEWFILE $FP_LOG
+			log=1 G_WHIP_VIEWFILE "$FP_TARGET/$FP_LOG"
 
 		fi
 
@@ -356,7 +357,7 @@ However, this check is a rough estimation in reasonable time, thus it could be m
 			G_DIETPI-NOTIFY 2 "Restore from $FP_TARGET in progress, please wait..."
 
 			# Init log file
-			echo -e "Restore log from $(Print_Date)\n" > $FP_LOG
+			echo -e "Restore log from $(Print_Date)\n" > "$FP_TARGET/$FP_LOG"
 
 			rsync "${aRSYNC_RUN_OPTIONS_RESTORE[@]}" "${aRSYNC_LOGGING_OPTIONS[@]}" "$FP_TARGET/data/" "$FP_SOURCE"
 			EXIT_CODE=$?
@@ -378,7 +379,7 @@ However, this check is a rough estimation in reasonable time, thus it could be m
 
 			fi
 
-			log=1 G_WHIP_VIEWFILE $FP_LOG
+			log=1 G_WHIP_VIEWFILE "$FP_TARGET/$FP_LOG"
 
 		fi
 
@@ -388,8 +389,15 @@ However, this check is a rough estimation in reasonable time, thus it could be m
 	# Settings
 	#/////////////////////////////////////////////////////////////////////////////////////
 	readonly FP_SETTINGS='/boot/dietpi/.dietpi-backup_settings'
+	DAILY_BACKUP=0
 
-	Write_Settings_File(){ echo "FP_TARGET=$FP_TARGET" > $FP_SETTINGS; }
+	Write_Settings_File()
+	{
+		cat << _EOF_ > $FP_SETTINGS
+FP_TARGET=$FP_TARGET
+DAILY_BACKUP=$DAILY_BACKUP
+_EOF_
+	}
 
 	Read_Settings_File(){ [[ -f $FP_SETTINGS ]] && . $FP_SETTINGS; }
 
@@ -404,22 +412,30 @@ However, this check is a rough estimation in reasonable time, thus it could be m
 	Menu_Main(){
 
 		local backup_last_completed='Backup not found. Please create one.'
+		local daily_backup_text='Off'
+		(( $DAILY_BACKUP )) && daily_backup_text='On'
 
-		G_WHIP_MENU_ARRAY=()
-		G_WHIP_MENU_ARRAY+=('' '●─ Info ')
-		G_WHIP_MENU_ARRAY+=('Help' "What does $G_PROGRAM_NAME do?")
-		G_WHIP_MENU_ARRAY+=('' '●─ Options ')
-		G_WHIP_MENU_ARRAY+=('Location' ': Change where your backup will be saved and restored from.')
-		G_WHIP_MENU_ARRAY+=('Filter' ': Modify include/exclude filter for backups.')
-		if [[ -f $FP_TARGET'/'$FP_STATS ]]; then
-
+		G_WHIP_MENU_ARRAY=(
+			'' '●─ Info '
+			'Help' ": What does $G_PROGRAM_NAME do?"
+		)
+		[[ -f $FP_TARGET/$FP_LOG ]] && G_WHIP_MENU_ARRAY+=('Last log' ': Review last backup/restore log for current location')
+		G_WHIP_MENU_ARRAY+=(
+			'' '●─ Options '
+			'Location' ': Change where your backup will be saved and restored from.'
+			'Filter' ': Modify include/exclude filter for backups.'
+			'Daily Backup' ": [$daily_backup_text] Daily backups via cron job"
+		)
+		if [[ -f $FP_TARGET/$FP_STATS ]]
+		then
 			G_WHIP_MENU_ARRAY+=('Delete' ": Remove backup ($FP_TARGET)")
 			backup_last_completed=$(grep 'ompleted' "$FP_TARGET/$FP_STATS" | tail -1)
-
 		fi
-		G_WHIP_MENU_ARRAY+=('' '●─ Run ')
-		G_WHIP_MENU_ARRAY+=('Backup' 'Create (or update) a backup of this device.')
-		G_WHIP_MENU_ARRAY+=('Restore' 'Restore this device from a previous backup.')
+		G_WHIP_MENU_ARRAY+=(
+			'' '●─ Run '
+			'Backup' ': Create (or update) a backup of this device.'
+			'Restore' ': Restore this device from a previous backup.'
+		)
 
 		G_WHIP_DEFAULT_ITEM=$MENU_LASTITEM
 		G_WHIP_BUTTON_CANCEL_TEXT='Exit'
@@ -429,14 +445,19 @@ However, this check is a rough estimation in reasonable time, thus it could be m
 
 			case "$G_WHIP_RETURNED_VALUE" in
 
-				'Location') TARGETMENUID=1;;
-
-				'Filter') nano $FP_FILTER_CUSTOM;;
-
-				'Help') G_WHIP_MSG "DietPi-Backup is a program that allows you to Backup and Restore your DietPi system.
+				'Help') G_WHIP_MSG 'DietPi-Backup is a program that allows you to Backup and Restore your DietPi system.
 \nIf you have broken your system, or want to reset your system to an earlier date, this can all be done with DietPi-Backup.
 \nSimply choose a location where you want to save and restore your backups from, then, select Backup or Restore.
-\nMore information: https://dietpi.com/docs/dietpi_tools/#dietpi-backup-backuprestore";;
+\nEnable a daily system backup to run it once a day via daily cron job. The execution time can be changed in "dietpi-cron". Note that this temporarily stops server services. Also we recommend to configure and test the backup with a manual call before enabling this feature.
+\nMore information: https://dietpi.com/docs/dietpi_tools/#dietpi-backup-backuprestore';;
+
+				'Last log') log=1 G_WHIP_VIEWFILE "$FP_TARGET/$FP_LOG";;
+
+				'Location') TARGETMENUID=1;;
+
+				'Daily Backup') DAILY_BACKUP=$(( ! $DAILY_BACKUP ));;
+
+				'Filter') nano $FP_FILTER_CUSTOM;;
 
 				'Delete') G_WHIP_YESNO "Do you wish to DELETE the following backup?\n - $FP_TARGET" && G_EXEC_NOEXIT=1 G_EXEC rm -R "$FP_TARGET";;
 
@@ -486,11 +507,9 @@ However, this check is a rough estimation in reasonable time, thus it could be m
 						G_WHIP_MENU_ARRAY=()
 						for i in "${alist[@]}"
 						do
-
 							local last_backup_date=$(sed -n '/ompleted/s/^.*: //p' "$i" | tail -1) # Date of last backup for this backup
 							local backup_directory=${i%/$FP_STATS} # Backup directory (minus the backup file), that we can use for target backup directory.
 							G_WHIP_MENU_ARRAY+=("$backup_directory" ": $last_backup_date")
-
 						done
 
 						G_WHIP_MENU 'Please select a previous backup to use:' || return

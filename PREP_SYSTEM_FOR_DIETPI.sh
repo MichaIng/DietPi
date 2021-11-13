@@ -50,7 +50,12 @@
 	export PATH='/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin'
 
 	# Make /tmp a tmpfs if it is not yet a dedicated mount
-	findmnt -M /tmp > /dev/null || mount -t tmpfs tmpfs /tmp
+	if findmnt -M /tmp > /dev/null
+	then
+		(( $(findmnt -Ufnrbo SIZE -M /tmp) < 536870912 )) && mount -o remount,size=536870912 /tmp
+	else
+		mount -t tmpfs -o size=536870912 tmpfs /tmp
+	fi
 
 	# Work inside /tmp tmpfs to reduce disk I/O and speed up download and unpacking
 	# - Save full script path beforehand: https://github.com/MichaIng/DietPi/pull/2341#discussion_r241784962
@@ -95,10 +100,6 @@ Dir::State::extended_states "/var/lib/apt/extended_states";
 Dir::State::status "/var/lib/dpkg/status";
 Dir::Cache::pkgcache "";
 _EOF_
-	# - Force IPv4 by default to avoid hanging access attempts in some cases, e.g. WiFi bridges
-	#	NB: This needs to match the method in: /boot/dietpi/func/dietpi-set_hardware preferipv4 enable
-	echo 'Acquire::ForceIPv4 "true";' > /etc/apt/apt.conf.d/99-dietpi-force-ipv4
-
 	apt-get clean
 	apt-get update
 
@@ -189,7 +190,7 @@ _EOF_
 		G_DISTRO=5
 		G_DISTRO_NAME='buster'
 
-	elif [[ $distro == '11.'* ]]; then
+	elif [[ $distro == '11.'* || $distro == 'bullseye/sid' ]]; then
 
 		G_DISTRO=6
 		G_DISTRO_NAME='bullseye'
@@ -354,31 +355,26 @@ _EOF_
 		G_WHIP_DEFAULT_ITEM=0
 		G_WHIP_MENU_ARRAY=(
 
-			'' '●─ ARM ─ Core devices with GPU acceleration '
+			'' '●─ ARM '
 			'0' ': Raspberry Pi (all models)'
 			#'0' ': Raspberry Pi 1 (256 MiB)
 			#'1' ': Raspberry Pi 1/Zero (512 MiB)'
 			#'2' ': Raspberry Pi 2'
 			#'3' ': Raspberry Pi 3/3+'
 			#'4' ': Raspberry Pi 4'
+			'13' ': Odroid U3'
+			'10' ': Odroid C1'
 			'11' ': Odroid XU3/XU4/MC1/HC1/HC2'
 			'12' ': Odroid C2'
 			'15' ': Odroid N2'
 			'16' ': Odroid C4/HC4'
-			'44' ': Pinebook'
-			'' '●─ x86_64 '
-			'21' ': x86_64 Native PC'
-			'20' ': x86_64 Virtual Machine'
-			'' '●─ ARM ─ Limited GPU acceleration '
-			'10' ': Odroid C1'
-			'13' ': Odroid U3'
-			'14' ': Odroid N1'
 			'70' ': Sparky SBC'
 			'52' ': ASUS Tinker Board'
 			'40' ': PINE A64'
+			'45' ': PINE H64'
 			'43' ': ROCK64'
 			'42' ': ROCKPro64'
-			'45' ': PINE H64'
+			'44' ': Pinebook'
 			'46' ': Pinebook Pro'
 			'59' ': ZeroPi'
 			'60' ': NanoPi NEO'
@@ -399,6 +395,10 @@ _EOF_
 			'47' ': NanoPi R4S'
 			'72' ': ROCK Pi 4'
 			'73' ': ROCK Pi S'
+			'74' ': Radxa Zero'
+			'' '●─ x86_64 '
+			'21' ': x86_64 Native PC'
+			'20' ': x86_64 Virtual Machine'
 			'' '●─ Other '
 			'29' ': Generic Amlogic S922X'
 			'28' ': Generic Amlogic S905'
@@ -567,11 +567,11 @@ Currently installed: $G_DISTRO_NAME (ID: $G_DISTRO)"; then
 			G_EXEC mv "DietPi-$G_GITBRANCH/boot_xu4.ini" /boot/boot.ini
 			G_EXEC sed -i "s/root=UUID=[^[:blank:]]*/root=UUID=$(findmnt -Ufnro UUID -M /)/" /boot/boot.ini
 
-		elif (( $G_HW_MODEL == 12 )); then
+		elif [[ $G_HW_MODEL == 12 && -f '/boot/boot.ini' ]]; then
 
 			G_EXEC mv "DietPi-$G_GITBRANCH/boot_c2.ini" /boot/boot.ini
 
-		elif (( $G_HW_MODEL == 15 )); then
+		elif [[ $G_HW_MODEL == 15 && -f '/boot/boot.ini' ]]; then
 
 			G_EXEC mv "DietPi-$G_GITBRANCH/boot_n2.ini" /boot/boot.ini
 			G_EXEC sed -i "s/root=UUID=[^[:blank:]]*/root=UUID=$(findmnt -Ufnro UUID -M /)/" /boot/boot.ini
@@ -620,9 +620,6 @@ Currently installed: $G_DISTRO_NAME (ID: $G_DISTRO)"; then
 			G_CONFIG_INJECT "G_LIVE_PATCH_STATUS\[$i\]=" "G_LIVE_PATCH_STATUS[$i]='${G_LIVE_PATCH_STATUS[$i]}'" /boot/dietpi/.version
 		done
 
-		# Temporary fix for invalid interfaces at DietPi-FirstBoot
-		G_EXEC sed -i 's/G_GET_NET -t/G_GET_NET -q -t/' /var/lib/dietpi/services/dietpi-firstboot.bash
-
 		G_EXEC cp /boot/dietpi/.version /var/lib/dietpi/.dietpi_image_version
 
 		G_EXEC systemctl daemon-reload
@@ -636,7 +633,7 @@ Currently installed: $G_DISTRO_NAME (ID: $G_DISTRO)"; then
 		# We need to forward $DISTRO_TARGET* to dietpi-set_software, as well as $G_HW_MODEL + $G_RASPBIAN for Debian vs Raspbian decision.
 		G_DISTRO=$DISTRO_TARGET G_DISTRO_NAME=$DISTRO_TARGET_NAME G_HW_MODEL=$G_HW_MODEL G_RASPBIAN=$G_RASPBIAN G_EXEC /boot/dietpi/func/dietpi-set_software apt-mirror default
 
-		# Meveric, update repo to use our EU mirror: https://github.com/MichaIng/DietPi/issues/1519#issuecomment-368234302
+		# Meveric: Update repo to use our own mirror: https://github.com/MichaIng/DietPi/issues/1519#issuecomment-368234302
 		sed -Ei 's|https?://oph\.mdrjr\.net|https://dietpi.com|' /etc/apt/sources.list.d/meveric*.list &> /dev/null
 
 		# (Re)create DietPi runtime and logs dir, used by G_AGx
@@ -722,7 +719,7 @@ Currently installed: $G_DISTRO_NAME (ID: $G_DISTRO)"; then
 
 		fi
 		# - Entropy daemon: Use modern rng-tools5 on all devices where it has been proven to work, else haveged: https://github.com/MichaIng/DietPi/issues/2806
-		if [[ $G_HW_MODEL -lt 10 || $G_HW_MODEL =~ ^(14|15|16|24|29|42|46|58|68|72)$ ]]; then # RPi, S922X, Odroid C4, RK3399 - 47 NanoPi R4S
+		if [[ $G_HW_MODEL -lt 10 || $G_HW_MODEL =~ ^(14|15|16|24|29|42|46|58|68|72|74)$ ]]; then # RPi, S922X, Odroid C4, RK3399 - 47 NanoPi R4S, Radxa Zero
 
 			aPACKAGES_REQUIRED_INSTALL+=('rng-tools5')
 
@@ -962,15 +959,6 @@ _EOF_
 			[[ -f '/etc/apt/trusted.gpg' ]] && G_EXEC rm /etc/apt/trusted.gpg
 			[[ -f '/etc/apt/trusted.gpg~' ]] && G_EXEC rm '/etc/apt/trusted.gpg~'
 
-		#	Odroid N1
-		elif (( $G_HW_MODEL == 14 )); then
-
-			G_AGI linux-image-arm64-odroid-n1 meveric-keyring
-
-			# Remove obsolete combined keyring
-			[[ -f '/etc/apt/trusted.gpg' ]] && G_EXEC rm /etc/apt/trusted.gpg
-			[[ -f '/etc/apt/trusted.gpg~' ]] && G_EXEC rm '/etc/apt/trusted.gpg~'
-
 		#	Odroid C2
 		elif (( $G_HW_MODEL == 12 )); then
 
@@ -1005,10 +993,29 @@ _EOF_
 			# NB: rockpis-dtbo is not required as it doubles the overlays that are already provided (among others) with the kernel package
 			G_AGI rockpis-rk-ubootimg linux-4.4-rock-pi-s-latest rockchip-overlay u-boot-tools
 
-		# - Generic kernel + device tree package auto detect
+		#	Radxa Zero (official Radxa Debian image)
+		elif (( $G_HW_MODEL == 74 )) && grep -q 'apt\.radxa\.com' /etc/apt/sources.list.d/*.list; then
+
+			# Install Radxa APT repo cleanly: No Bullseye repo available yet
+			G_EXEC rm -Rf /etc/apt/{trusted.gpg,sources.list.d/{,.??,.[^.]}*}
+			G_EXEC eval "curl -sSfL https://apt.radxa.com/${DISTRO_TARGET_NAME/bullseye/buster}-stable/public.key | gpg --dearmor -o /etc/apt/trusted.gpg.d/dietpi-radxa.gpg --yes"
+			G_EXEC eval "echo -e 'deb https://apt.radxa.com/${DISTRO_TARGET_NAME/bullseye/buster}-stable/ ${DISTRO_TARGET_NAME/bullseye/buster} main\n#deb https://apt.radxa.com/${DISTRO_TARGET_NAME/bullseye/buster}-testing/ ${DISTRO_TARGET_NAME/bullseye/buster} main' > /etc/apt/sources.list.d/dietpi-radxa.list"
+			G_AGUP
+
+			# Remove obsolete combined keyring
+			[[ -f '/etc/apt/trusted.gpg' ]] && G_EXEC rm /etc/apt/trusted.gpg
+			[[ -f '/etc/apt/trusted.gpg~' ]] && G_EXEC rm '/etc/apt/trusted.gpg~'
+
+			# Preserve all installed kernel, device tree and bootloader packages, until fixed meta packages are available: https://github.com/radxa/apt
+			# Additionally install bc, required to calculate the initramfs size via custom hook (by Radxa) which updates /boot/uEnv.txt accordingly on initramfs updates
+			# And install "file" which is used to detect whether the kernel image is compressed and in case uncompress it
+			# shellcheck disable=SC2046
+			G_AGI $(dpkg-query -Wf '${Package}\n' | grep -E '^linux-(image|dtb|u-boot)-|^u-boot') bc file
+
+		# - Generic kernel + device tree + U-Boot package auto detect
 		else
 
-			mapfile -t apackages < <(dpkg-query -Wf '${Package}\n' | grep -E '^linux-(image|dtb)')
+			mapfile -t apackages < <(dpkg-query -Wf '${Package}\n' | grep -E '^linux-(image|dtb|u-boot)-|^u-boot')
 			if [[ ${apackages[0]} ]]; then
 
 				G_AGI "${apackages[@]}"
@@ -1028,7 +1035,9 @@ _EOF_
 
 			aPACKAGES_REQUIRED_INSTALL+=('armbian-firmware')
 
-		else
+		# - Do not install additional firmware on Radxa Zero for now
+		elif [[ $G_HW_MODEL != 74 ]]
+		then
 
 			# Usually no firmware should be necessary for VMs. If user manually passes though some USB device, user might need to install the firmware then.
 			if (( $G_HW_MODEL != 20 )); then
@@ -1072,11 +1081,12 @@ _EOF_
 
 		# Purging additional packages, that (in some cases) do not get autoremoved:
 		# - dbus: Not required for headless images, but sometimes marked as "important", thus not autoremoved.
-		#	+ Workaround for "The following packages have unmet dependencies: glib-networking libgtk-3-0 libgirepository-1.0-1"
+		#	+ Workaround for "The following packages have unmet dependencies: glib-networking libgtk-3-0" and alike
 		# - dhcpcd5: https://github.com/MichaIng/DietPi/issues/1560#issuecomment-370136642
 		# - mountall: https://github.com/MichaIng/DietPi/issues/2613
 		# - initscripts: Pre-installed on Jessie systems (?), superseded and masked by systemd, but never autoremoved
-		G_AGP dbus dhcpcd5 mountall initscripts '*office*' '*xfce*' '*qt5*' '*xserver*' '*xorg*' glib-networking libgtk-3-0 libgirepository-1.0-1
+		# - chrony: Found left with strange "deinstall ok installed" mark left on Armbian images
+		G_AGP dbus dhcpcd5 mountall initscripts chrony '*office*' '*xfce*' '*qt5*' '*xserver*' '*xorg*' glib-networking libgtk-3-0 libsoup2.4-1 libglib2.0-0
 		# Remove any autoremove prevention
 		rm -fv /etc/apt/apt.conf.d/*autoremove*
 		G_AGA
@@ -1097,6 +1107,13 @@ _EOF_
 
 		G_AGI "${aPACKAGES_REQUIRED_INSTALL[@]}"
 		unset -v aPACKAGES_REQUIRED_INSTALL
+
+		# Adjust Dropbear package marks when Buster was upgraded to Bullseye
+		if (( $G_DISTRO > 5 )) && dpkg-query -s 'dropbear-run' &> /dev/null
+		then
+			G_EXEC apt-mark manual dropbear
+			G_EXEC apt-mark auto dropbear-run
+		fi
 
 		G_EXEC apt-get clean
 
@@ -1153,7 +1170,7 @@ _EOF_
 		G_DIETPI-NOTIFY 2 'Deleting list of known users and groups, not required by DietPi'
 
 		getent passwd pi > /dev/null && userdel -f pi # Raspberry Pi OS
-		getent passwd test > /dev/null && userdel -f test # @fourdee
+		getent passwd test > /dev/null && userdel -f test # @Fourdee
 		getent passwd odroid > /dev/null && userdel -f odroid
 		getent passwd rock64 > /dev/null && userdel -f rock64
 		getent passwd rock > /dev/null && userdel -f rock # Radxa images
@@ -1173,39 +1190,38 @@ _EOF_
 
 		G_DIETPI-NOTIFY 2 'Removing misc files/folders/services, not required by DietPi'
 
-		[[ -d '/selinux' ]] && rm -Rv /selinux
-		[[ -d '/var/cache/apparmor' ]] && rm -Rv /var/cache/apparmor
-		[[ -d '/var/lib/udisks2' ]] && rm -Rv /var/lib/udisks2
-		[[ -d '/var/lib/bluetooth' ]] && rm -Rv /var/lib/bluetooth
-		[[ -d '/usr/lib/firefox-esr' ]] && rm -Rv /usr/lib/firefox-esr # Armbian desktop images
-		rm -Rfv /var/lib/dhcp/{,.??,.[^.]}*
-		rm -Rfv /var/lib/misc/*.leases
-		rm -Rfv /var/backups/{,.??,.[^.]}*
-		[[ -f '/etc/udhcpd.conf.org' ]] && rm -v /etc/udhcpd.conf.org
-		[[ -f '/etc/fs.resized' ]] && rm -v /etc/fs.resized
+		[[ -d '/selinux' ]] && G_EXEC rm -R /selinux
+		[[ -d '/var/cache/apparmor' ]] && G_EXEC rm -R /var/cache/apparmor
+		[[ -d '/var/lib/udisks2' ]] && G_EXEC rm -R /var/lib/udisks2
+		[[ -d '/var/lib/bluetooth' ]] && G_EXEC rm -R /var/lib/bluetooth
+		G_EXEC rm -Rf /var/lib/dhcp/{,.??,.[^.]}*
+		G_EXEC rm -f /var/lib/misc/*.leases
+		G_EXEC rm -Rf /var/backups/{,.??,.[^.]}*
+		G_EXEC rm -f /etc/*.org
+		[[ -f '/etc/fs.resized' ]] && G_EXEC rm /etc/fs.resized
+		# Armbian desktop images
+		[[ -d '/usr/lib/firefox-esr' ]] && G_EXEC rm -R /usr/lib/firefox-esr
+		[[ -d '/etc/chromium.d' ]] && G_EXEC rm -R /etc/chromium.d
+		[[ -d '/etc/lightdm' ]] && G_EXEC rm -R /etc/lightdm
 
 		# - www
-		[[ -d '/var/www' ]] && rm -vRf /var/www/{,.??,.[^.]}*
+		[[ -d '/var/www' ]] && G_EXEC rm -Rf /var/www/{,.??,.[^.]}*
 
-		# - Sourcecode (linux-headers etc)
-		[[ -d '/usr/src' ]] && rm -vRf /usr/src/{,.??,.[^.]}*
+		# - Source code and Linux headers
+		[[ -d '/usr/src' ]] && G_EXEC rm -Rf /usr/src/{,.??,.[^.]}*
 
 		# - Documentation dirs: https://github.com/MichaIng/DietPi/issues/3259
-		#[[ -d '/usr/share/man' ]] && rm -vR /usr/share/man
-		#[[ -d '/usr/share/doc' ]] && rm -vR /usr/share/doc
-		#[[ -d '/usr/share/doc-base' ]] && rm -vR /usr/share/doc-base
-		[[ -d '/usr/share/calendar' ]] && rm -vR /usr/share/calendar
-
-		# - Previous debconfs
-		rm -fv /var/cache/debconf/*-old
-		rm -fv /var/lib/dpkg/*-old
+		#[[ -d '/usr/share/man' ]] && G_EXEC rm -R /usr/share/man
+		#[[ -d '/usr/share/doc' ]] && G_EXEC rm -R /usr/share/doc
+		#[[ -d '/usr/share/doc-base' ]] && G_EXEC rm -R /usr/share/doc-base
+		[[ -d '/usr/share/calendar' ]] && G_EXEC rm -R /usr/share/calendar
 
 		# - Unused DEB package config files
-		find /etc \( -name '?*\.dpkg-dist' -o -name '?*\.dpkg-old' -o -name '?*\.dpkg-new' \) -exec rm -v {} +
+		find /etc \( -name '?*\.dpkg-dist' -o -name '?*\.dpkg-old' -o -name '?*\.dpkg-new' -o -name '?*\.dpkg-bak' \) -exec rm -v {} +
 
 		# - Fonts
-		[[ -d '/usr/share/fonts' ]] && rm -vR /usr/share/fonts
-		[[ -d '/usr/share/icons' ]] && rm -vR /usr/share/icons
+		[[ -d '/usr/share/fonts' ]] && G_EXEC rm -R /usr/share/fonts
+		[[ -d '/usr/share/icons' ]] && G_EXEC rm -R /usr/share/icons
 
 		# - Stop, disable and remove not required 3rd party services
 		local aservices=(
@@ -1218,6 +1234,14 @@ _EOF_
 			'rockchip-adbd'
 			'rtl8723ds-btfw-load'
 			'install-module-hci-uart'
+			# Armbian
+			'chrony'
+			'chronyd'
+			'armbian-resize-filesystem'
+			'bootsplash-hide-when-booted'
+			'bootsplash-show-on-shutdown'
+			'armbian-firstrun-config'
+			'bootsplash-ask-password-console'
 
 		)
 
@@ -1227,14 +1251,14 @@ _EOF_
 			for j in /etc/init.d/$i /{etc,lib,usr/lib,usr/local/lib}/systemd/system/{$i.service{,.d},*.wants/$i.service}
 			do
 				[[ -e $j || -L $j ]] || continue
-				[[ -f $j ]] && systemctl disable --now "${j##*/}"
+				[[ -f $j ]] && G_EXEC systemctl disable --now "${j##*/}"
 				# Remove if not attached to any DEB package, else mask
 				if dpkg -S "$j" &> /dev/null; then
 
-					systemctl mask "${j##*/}"
+					G_EXEC systemctl mask "${j##*/}"
 
 				else
-					rm -Rv "$j"
+					G_EXEC rm -R "$j"
 
 				fi
 			done
@@ -1265,45 +1289,46 @@ _EOF_
 		unset -v aservices
 
 		# - Armbian specific
-		[[ -d '/var/lib/apt-xapian-index' ]] && rm  -Rv /var/lib/apt-xapian-index # ??
+		[[ -d '/var/lib/apt-xapian-index' ]] && G_EXEC rm -R /var/lib/apt-xapian-index # ??
 		umount /var/log.hdd 2> /dev/null
-		[[ -d '/var/log.hdd' ]] && rm -R /var/log.hdd
-		[[ -f '/etc/armbian-image-release' ]] && rm -v /etc/armbian-image-release
-		[[ -f '/boot/armbian_first_run.txt.template' ]] && rm -v /boot/armbian_first_run.txt.template
-		[[ -d '/etc/armbianmonitor' ]] && rm -R /etc/armbianmonitor
-		rm -vf /etc/{default,logrotate.d}/armbian*
-		[[ -f '/lib/firmware/bootsplash.armbian' ]] && rm -v /lib/firmware/bootsplash.armbian
+		[[ -d '/var/log.hdd' ]] && G_EXEC rm -R /var/log.hdd
+		[[ -f '/etc/armbian-image-release' ]] && G_EXEC rm /etc/armbian-image-release
+		[[ -f '/boot/armbian_first_run.txt.template' ]] && G_EXEC rm /boot/armbian_first_run.txt.template
+		[[ -d '/etc/armbianmonitor' ]] && G_EXEC rm -R /etc/armbianmonitor
+		G_EXEC rm -f /etc/{default,logrotate.d}/armbian*
+		[[ -f '/lib/firmware/bootsplash.armbian' ]] && G_EXEC rm /lib/firmware/bootsplash.armbian
+		[[ -L '/etc/systemd/system/sysinit.target.wants/bootsplash-ask-password-console.path' ]] && G_EXEC rm /etc/systemd/system/sysinit.target.wants/bootsplash-ask-password-console.path
 
 		# - OMV: https://github.com/MichaIng/DietPi/issues/2994
-		[[ -d '/etc/openmediavault' ]] && rm -vR /etc/openmediavault
-		rm -vf /etc/cron.*/openmediavault*
-		rm -vf /usr/sbin/omv-*
+		[[ -d '/etc/openmediavault' ]] && G_EXEC rm -R /etc/openmediavault
+		G_EXEC rm -f /etc/cron.*/openmediavault*
+		G_EXEC rm -f /usr/sbin/omv-*
 
 		# - Meveric specific
-		[[ -f '/usr/local/sbin/setup-odroid' ]] && rm -v /usr/local/sbin/setup-odroid
-		rm -fv /installed-packages*.txt
+		[[ -f '/usr/local/sbin/setup-odroid' ]] && G_EXEC rm /usr/local/sbin/setup-odroid
+		G_EXEC rm -f /installed-packages*.txt
 
 		# - RPi specific: https://github.com/MichaIng/DietPi/issues/1631#issuecomment-373965406
-		[[ -f '/etc/profile.d/wifi-country.sh' ]] && rm -v /etc/profile.d/wifi-country.sh
-		[[ -f '/etc/sudoers.d/010_pi-nopasswd' ]] && rm -v /etc/sudoers.d/010_pi-nopasswd
-		[[ -d '/etc/systemd/system/dhcpcd.service.d' ]] && rm -vR /etc/systemd/system/dhcpcd.service.d # https://github.com/RPi-Distro/pi-gen/blob/master/stage3/01-tweaks/00-run.sh
+		[[ -f '/etc/profile.d/wifi-country.sh' ]] && G_EXEC rm /etc/profile.d/wifi-country.sh
+		[[ -f '/etc/sudoers.d/010_pi-nopasswd' ]] && G_EXEC rm /etc/sudoers.d/010_pi-nopasswd
+		[[ -d '/etc/systemd/system/dhcpcd.service.d' ]] && G_EXEC rm -R /etc/systemd/system/dhcpcd.service.d # https://github.com/RPi-Distro/pi-gen/blob/master/stage3/01-tweaks/00-run.sh
 		#	Do not ship rc.local anymore. On DietPi /var/lib/dietpi/postboot.d should be used.
 		#	WIP: Mask rc-local.service and create symlink postboot.d/rc.local => /etc/rc.local for backwards compatibility?
 		[[ -f '/etc/rc.local' ]] && rm -v /etc/rc.local # https://github.com/RPi-Distro/pi-gen/blob/master/stage2/01-sys-tweaks/files/rc.local
-		[[ -d '/etc/systemd/system/rc-local.service.d' ]] && rm -Rv /etc/systemd/system/rc-local.service.d # Raspberry Pi OS
-		[[ -d '/etc/systemd/system/rc.local.service.d' ]] && rm -Rv /etc/systemd/system/rc.local.service.d
+		[[ -d '/etc/systemd/system/rc-local.service.d' ]] && G_EXEC rm -R /etc/systemd/system/rc-local.service.d # Raspberry Pi OS
+		[[ -d '/etc/systemd/system/rc.local.service.d' ]] && G_EXEC rm -R /etc/systemd/system/rc.local.service.d
 		#	Below required if DietPi-PREP is executed from chroot/container, so RPi firstrun scripts are not executed
-		[[ -f '/etc/init.d/resize2fs_once' ]] && rm -v /etc/init.d/resize2fs_once # https://github.com/RPi-Distro/pi-gen/blob/master/stage2/01-sys-tweaks/files/resize2fs_once
+		[[ -f '/etc/init.d/resize2fs_once' ]] && G_EXEC rm /etc/init.d/resize2fs_once # https://github.com/RPi-Distro/pi-gen/blob/master/stage2/01-sys-tweaks/files/resize2fs_once
 		# - Remove all autologin configs for all TTYs: https://github.com/MichaIng/DietPi/issues/3570#issuecomment-648988475, https://github.com/MichaIng/DietPi/issues/3628#issuecomment-653693758
-		rm -fv /etc/systemd/system/*getty@*.service.d/*autologin*.conf
+		G_EXEC rm -f /etc/systemd/system/*getty@*.service.d/*autologin*.conf
 
 		# - make_nas_processes_faster cron job on ROCK64 + NanoPi + PINE A64(?) images
-		[[ -f '/etc/cron.d/make_nas_processes_faster' ]] && rm -v /etc/cron.d/make_nas_processes_faster
+		[[ -f '/etc/cron.d/make_nas_processes_faster' ]] && G_EXEC rm /etc/cron.d/make_nas_processes_faster
 
 		#-----------------------------------------------------------------------------------
 		# https://www.debian.org/doc/debian-policy/ch-opersys.html#site-specific-programs
 		G_DIETPI-NOTIFY 2 'Setting modern /usr/local permissions'
-		[[ -f '/etc/staff-group-for-usr-local' ]] && rm -v /etc/staff-group-for-usr-local
+		[[ -f '/etc/staff-group-for-usr-local' ]] && G_EXEC rm /etc/staff-group-for-usr-local
 		G_EXEC chown -R root:root /usr/local
 		G_EXEC chmod -R 0755 /usr/local
 
@@ -1410,8 +1435,8 @@ gateway 192.168.0.1
 wireless-power off
 wpa-conf /etc/wpa_supplicant/wpa_supplicant.conf
 _EOF_'
-		# Prefer IPv4 by default
-		/boot/dietpi/func/dietpi-set_hardware preferipv4 enable
+		# Wait for network at boot by default
+		/boot/dietpi/func/dietpi-set_software boot_wait_for_network 1
 
 		#-----------------------------------------------------------------------------------
 		# MISC
@@ -1517,6 +1542,7 @@ _EOF_'
 
 				/boot/dietpi/func/dietpi-set_hardware serialconsole disable
 				/boot/dietpi/func/dietpi-set_hardware serialconsole enable ttyS0
+				G_CONFIG_INJECT 'CONFIG_SERIAL_CONSOLE_ENABLE=' 'CONFIG_SERIAL_CONSOLE_ENABLE=1' /boot/dietpi.txt
 
 			fi
 
@@ -1738,6 +1764,21 @@ _EOF_
 			# Ensure WiFi module pre-exists
 			G_CONFIG_INJECT '8723bs' '8723bs' /etc/modules
 
+		# - Radxa Zero
+		elif (( $G_HW_MODEL == 74 ))
+		then
+			# Use ondemand CPU governor since schedutil currently causes kernel errors and hangs
+			G_CONFIG_INJECT 'CONFIG_CPU_GOVERNOR=' 'CONFIG_CPU_GOVERNOR=ondemand' /boot/dietpi.txt
+
+			# uEnv.txt version (Radxa Debian image)
+			if [[ -d '/boot/uEnv.txt' ]]
+			then
+				# Reduce console log verbosity to default 4 to mute regular USB detection info messages
+				G_CONFIG_INJECT 'verbosity=' 'verbosity=4' /boot/uEnv.txt
+
+				# Disable Docker optimisations, since this has some performance drawbacks, enable on Docker install instead
+				G_CONFIG_INJECT 'docker_optimizations=' 'docker_optimizations=off' /boot/uEnv.txt
+			fi
 		fi
 
 		# - Armbian special
@@ -1915,7 +1956,7 @@ _EOF_
 		G_EXEC rmdir /mnt/tmp_root
 
 		G_DIETPI-NOTIFY 2 'Running general cleanup of misc files'
-		rm -Rfv /{root,home/*}/.{bash_history,nano_history,wget-hsts,cache,local,config,gnupg,viminfo,dbus,gconf,nano,vim,zshrc,oh-my-zsh} /etc/*- /var/cache/debconf/*-old
+		rm -Rfv /{root,home/*}/.{bash_history,nano_history,wget-hsts,cache,local,config,gnupg,viminfo,dbus,gconf,nano,vim,zshrc,oh-my-zsh} /etc/*- /var/{cache/debconf,lib/dpkg}/*-old /var/lib/dhcp/{,.??,.[^.]}*
 
 		# Remove PREP script
 		[[ -f $FP_PREP_SCRIPT ]] && rm -v "$FP_PREP_SCRIPT"

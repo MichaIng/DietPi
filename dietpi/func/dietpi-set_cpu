@@ -10,17 +10,21 @@
 	#
 	# Info:
 	# - Location: /boot/dietpi/func/dietpi-set_cpu
-	# - Runs at boot, called by /boot/dietpi/preboot
+	# - Runs at boot, called by dietpi-preboot.service > /boot/dietpi/preboot
 	# - Applies CPU governor: ondemand, powersave, performance, etc.
 	# - Applies CPU governor settings: throttle up percent etc.
 	#////////////////////////////////////
 
 	# Exit if not supported
-	if [[ ! -f '/sys/devices/system/cpu/cpu0/cpufreq/scaling_available_governors' ]]; then
-
-		echo 'DietPi-CPU_set | CPU governors are not supported on this device. Aborting...'
-		exit
-
+	if [[ ! -w '/sys/devices/system/cpu/cpu0/cpufreq/scaling_available_governors' ]]
+	then
+		if [[ -f '/sys/devices/system/cpu/cpu0/cpufreq/scaling_available_governors' ]]
+		then
+			echo 'DietPi-CPU_set | CPU governors cannot be changed on this system. This is probably a container guest. Aborting...'
+		else
+			echo 'DietPi-CPU_set | CPU governors are not available on this system. This is probably a virtual machine. Aborting...'
+		fi
+		exit 0
 	fi
 
 	# Import DietPi-Globals --------------------------------------------------------------
@@ -37,35 +41,33 @@
 
 		local available_governors=$(</sys/devices/system/cpu/cpu0/cpufreq/scaling_available_governors)
 
-		# Check if target Gov is available on system
-		if [[ $available_governors != *"$CPU_GOVERNOR"* ]]; then
+		# Check if target governor is available on system
+		[[ $available_governors != *"$CPU_GOVERNOR"* ]] || return 0
 
-			G_DIETPI-NOTIFY 1 "CPU governor $CPU_GOVERNOR is not supported by kernel"
+		G_DIETPI-NOTIFY 1 "CPU governor $CPU_GOVERNOR is not supported by system"
 
-			if [[ $available_governors == *'schedutil'* ]]; then
+		if [[ $available_governors == *'schedutil'* ]]; then
 
-				CPU_GOVERNOR='schedutil'
+			CPU_GOVERNOR='schedutil'
 
-			elif [[ $available_governors == *'ondemand'* ]]; then
+		elif [[ $available_governors == *'ondemand'* ]]; then
 
-				CPU_GOVERNOR='ondemand'
+			CPU_GOVERNOR='ondemand'
 
-			elif [[ $available_governors == *'interactive'* ]]; then
+		elif [[ $available_governors == *'interactive'* ]]; then
 
-				CPU_GOVERNOR='interactive'
+			CPU_GOVERNOR='interactive'
 
-			else
+		else
 
-				CPU_GOVERNOR='performance'
-
-			fi
-
-			G_DIETPI-NOTIFY 2 "Switching to CPU governor: $CPU_GOVERNOR"
-
-			# Update dietpi.txt
-			G_CONFIG_INJECT 'CONFIG_CPU_GOVERNOR=' "CONFIG_CPU_GOVERNOR=$CPU_GOVERNOR" /boot/dietpi.txt
+			CPU_GOVERNOR='performance'
 
 		fi
+
+		G_DIETPI-NOTIFY 2 "Switching to CPU governor: $CPU_GOVERNOR"
+
+		# Update dietpi.txt
+		G_CONFIG_INJECT 'CONFIG_CPU_GOVERNOR=' "CONFIG_CPU_GOVERNOR=$CPU_GOVERNOR" /boot/dietpi.txt
 
 	}
 
@@ -75,9 +77,7 @@
 		local i
 		for i in /sys/devices/system/cpu/cpu[0-9]*/cpufreq/scaling_governor
 		do
-
 			echo "$CPU_GOVERNOR" > "$i"
-
 		done
 
 		# Apply CPU max/min frequency
@@ -87,7 +87,7 @@
 			local cpu_max_freq=$(sed -n '/^[[:blank:]]*CONFIG_CPU_MAX_FREQ=/{s/^[^=]*=//p;q}' /boot/dietpi.txt)
 			local cpu_min_freq=$(sed -n '/^[[:blank:]]*CONFIG_CPU_MIN_FREQ=/{s/^[^=]*=//p;q}' /boot/dietpi.txt)
 
-			# Intel based 0-100%
+			# Intel pstate scheduler: 0-100%
 			if [[ -f '/sys/devices/system/cpu/intel_pstate/max_perf_pct' ]]; then
 
 				disable_error=1 G_CHECK_VALIDINT "$cpu_max_freq" 1 100 || cpu_max_freq=100
@@ -100,7 +100,7 @@
 
 				if [[ -f '/sys/devices/system/cpu/intel_pstate/no_turbo' ]]; then
 
-					if grep -qi '^[[:blank:]]*CONFIG_CPU_DISABLE_TURBO=1' /boot/dietpi.txt; then
+					if grep -q '^[[:blank:]]*CONFIG_CPU_DISABLE_TURBO=1' /boot/dietpi.txt; then
 
 						G_DIETPI-NOTIFY 2 'Disabling Intel Turbo Mode'
 						echo 1 > /sys/devices/system/cpu/intel_pstate/no_turbo
@@ -118,7 +118,7 @@
 
 				fi
 
-			# Standard via kernel (MHz)
+			# Linux CPUfreq: kHz
 			elif [[ -f '/sys/devices/system/cpu/cpu0/cpufreq/scaling_max_freq' ]]; then
 
 				# Reset to defaults if no/invalid entry
@@ -131,7 +131,6 @@
 
 				for i in /sys/devices/system/cpu/cpu[0-9]*/cpufreq
 				do
-
 					if (( $converted_khz_value_min > 0 )); then
 
 						echo "$converted_khz_value_min" > "$i/scaling_min_freq"
@@ -151,7 +150,6 @@
 						mawk '{print $NF}' "$i/scaling_available_frequencies" > "$i/scaling_max_freq"
 
 					fi
-
 				done
 
 			else
@@ -162,14 +160,15 @@
 
 		fi
 
-		local cpu_throttle_up_percent=$(sed -n '/^[[:blank:]]*CONFIG_CPU_USAGE_THROTTLE_UP=/{s/[^=]*=//p;q}' /boot/dietpi.txt)
-
 		# Set CPU governor interactive settings
 		if [[ $CPU_GOVERNOR == 'interactive' ]]; then
 
-			# Set hispeed_load, if available on system (eg: XU4 kernel lacks this feature)
+			# Set hispeed_load if supported by system (e.g. Odroid XU4 kernel lacks this feature)
 			if [[ -f '/sys/devices/system/cpu/cpufreq/interactive/go_hispeed_load' ]]; then
 
+				local cpu_throttle_up_percent=$(sed -n '/^[[:blank:]]*CONFIG_CPU_USAGE_THROTTLE_UP=/{s/[^=]*=//p;q}' /boot/dietpi.txt)
+				disable_error=1 G_CHECK_VALIDINT "$cpu_throttle_up_percent" 1 100 || cpu_throttle_up_percent=50
+				
 				G_DIETPI-NOTIFY 2 "Setting go_hispeed_load: $cpu_throttle_up_percent %"
 				echo "$cpu_throttle_up_percent" > /sys/devices/system/cpu/cpufreq/interactive/go_hispeed_load
 
@@ -182,12 +181,16 @@
 		# Set CPU governor ondemand settings
 		elif [[ $CPU_GOVERNOR == 'ondemand' ]]; then
 
+			local cpu_throttle_up_percent=$(sed -n '/^[[:blank:]]*CONFIG_CPU_USAGE_THROTTLE_UP=/{s/[^=]*=//p;q}' /boot/dietpi.txt)
 			local cpu_ondemand_sampling_rate=$(sed -n '/^[[:blank:]]*CONFIG_CPU_ONDEMAND_SAMPLE_RATE=/{s/[^=]*=//p;q}' /boot/dietpi.txt)
 			local cpu_ondemand_sampling_down_factor=$(sed -n '/^[[:blank:]]*CONFIG_CPU_ONDEMAND_SAMPLE_DOWNFACTOR=/{s/[^=]*=//p;q}' /boot/dietpi.txt)
+			disable_error=1 G_CHECK_VALIDINT "$cpu_throttle_up_percent" 1 100 || cpu_throttle_up_percent=50
+			disable_error=1 G_CHECK_VALIDINT "$cpu_ondemand_sampling_rate" 10000 || cpu_ondemand_sampling_rate=25000
+			disable_error=1 G_CHECK_VALIDINT "$cpu_ondemand_sampling_down_factor" 1 100 || cpu_ondemand_sampling_down_factor=40
 
 			G_DIETPI-NOTIFY 2 "Setting up_threshold: $cpu_throttle_up_percent %"
 			G_DIETPI-NOTIFY 2 "Setting sampling_rate: $cpu_ondemand_sampling_rate microseconds"
-			G_DIETPI-NOTIFY 2 "Setting sampling_down_factor: $cpu_ondemand_sampling_down_factor"
+			G_DIETPI-NOTIFY 2 "Setting sampling_down_factor: $cpu_ondemand_sampling_down_factor x"
 
 			# Check for different possible locations
 			# - All
@@ -197,17 +200,15 @@
 				echo "$cpu_ondemand_sampling_rate" > /sys/devices/system/cpu/cpufreq/ondemand/sampling_rate
 				echo "$cpu_ondemand_sampling_down_factor" > /sys/devices/system/cpu/cpufreq/ondemand/sampling_down_factor
 
-			# - XU4 3.x kernel
+			# - Odroid XU4 3.x kernel
 			elif [[ -f '/sys/devices/system/cpu/cpu0/cpufreq/ondemand/up_threshold' ]]; then
 
 				# Apply to all cores
 				for i in /sys/devices/system/cpu/cpu[0-9]*/cpufreq/ondemand
 				do
-
 					echo "$cpu_throttle_up_percent" > "$i/up_threshold"
 					echo "$cpu_ondemand_sampling_rate" > "$i/sampling_rate"
 					echo "$cpu_ondemand_sampling_down_factor" > "$i/sampling_down_factor"
-
 				done
 
 			else
@@ -219,9 +220,12 @@
 		# Set CPU governor conservative settings
 		elif [[ $CPU_GOVERNOR == 'conservative' ]]; then
 
+			local cpu_throttle_up_percent=$(sed -n '/^[[:blank:]]*CONFIG_CPU_USAGE_THROTTLE_UP=/{s/[^=]*=//p;q}' /boot/dietpi.txt)
+			disable_error=1 G_CHECK_VALIDINT "$cpu_throttle_up_percent" 1 100 || cpu_throttle_up_percent=50
+
 			G_DIETPI-NOTIFY 2 "Setting up_threshold: $cpu_throttle_up_percent %"
 
-			# XU3/4 different path (must apply to each core)
+			# Odroid XU4: Must apply to each core
 			if [[ $G_HW_MODEL != 11 && -f '/sys/devices/system/cpu/cpufreq/conservative/up_threshold' ]]; then
 
 				echo "$cpu_throttle_up_percent" > /sys/devices/system/cpu/cpufreq/conservative/up_threshold
@@ -230,9 +234,7 @@
 
 				for i in /sys/devices/system/cpu/cpu[0-9]*/cpufreq/conservative
 				do
-
 					echo "$cpu_throttle_up_percent" > "$i/up_threshold"
-
 				done
 
 			else
@@ -253,12 +255,12 @@
 	#-----------------------------------------------------------------------------------
 	Check_CPU_Gov_Available
 
-	# Apply CPU0 gov to all cores (if required)
+	# Apply CPU governor to all cores
 	Apply_CPU_Gov
 
 	G_DIETPI-NOTIFY 0 "Applied CPU governor settings: $CPU_GOVERNOR"
 
 	#-----------------------------------------------------------------------------------
-	exit
+	exit 0
 	#-----------------------------------------------------------------------------------
 }

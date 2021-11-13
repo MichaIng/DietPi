@@ -73,7 +73,7 @@ DietPi documentation author, product manager, SEO and DietPi visibility recommen
 
 _Joined 2020-10-11_
 
-Source code contributor, implemented PaperMC, Unbound, Tor Relay and related features and functions.
+Source code contributor, creator of the [DietPi-Dashboard](https://github.com/ravenclaw900/DietPi-Dashboard) and many software implementations.
 
 #### [yumiris](https://github.com/yumiris)
 
@@ -144,24 +144,19 @@ Are you able to:
 
 - Provide feedback and/or test areas of DietPi, to improve the user experience?
 - Report bugs?
-- Improve/add more features to the [DietPi website](https://dietpi.com/)?
+- Improve/add more features to the [DietPi website](https://github.com/MichaIng/DietPi-Website) or [documentation](https://github.com/MichaIng/DietPi-Website)?
 - Compile software for our supported SBCs?
 - Contribute to DietPi with programming on GitHub?
 - Suggest new software that we can add to the `dietpi-software` install system?
 
-If so, let us know!
+If so, let us know!  
 We are always looking for talented people who believe in the DietPi project, and, wish to contribute in any way you can.
 
 - Send me an Email: micha@dietpi.com
 - Join our forum: https://dietpi.com/phpbb/
 - GitHub: https://github.com/MichaIng/DietPi
 
-### FeatHub
-
-Vote for new suggestions, feature-, software- or image requests, or add your own to our new [FeatHub page](https://feathub.com/MichaIng/DietPi):  
-_Please do always open and cross-reference a  [GitHub issue](https://github.com/MichaIng/DietPi/issues) as well._
-
-[![Feature Requests](https://feathub.com/MichaIng/DietPi?format=svg)](https://feathub.com/MichaIng/DietPi)
+Also read our [contribute page](https://dietpi.com/contribute.html) for an overview of way to support DietPi.
 
 ## License
 
@@ -216,6 +211,7 @@ Links to hardware and software manufacturers, sources and build instructions use
 - [Sparky](https://github.com/sparkysbc?tab=repositories) [SBC](https://github.com/sparky-sbc/sparky-test)
 - [PINE64](https://www.pine64.org/)
 - [FriendlyARM](https://github.com/friendlyarm?tab=repositories)
+- [Radxa](https://github.com/radxa/apt)
 - [Armbian](https://github.com/armbian)
 - [curl](https://github.com/curl/curl)
 - [vmtouch](https://github.com/hoytech/vmtouch)
@@ -262,7 +258,6 @@ Links to hardware and software manufacturers, sources and build instructions use
 - [OpenTyrian](https://bitbucket.org/opentyrian/opentyrian/wiki/Home)
 - [RPi Cam Control](https://github.com/silvanmelchior/RPi_Cam_Web_Interface)
 - [Deluge](https://dev.deluge-torrent.org/wiki/Development#SourceCode)
-- [Subsonic](https://sourceforge.net/projects/subsonic/)
 - [Airsonic](https://github.com/airsonic/airsonic)
 - [Logitech Media Server](https://github.com/Logitech/slimserver)
 - [Squeezelite](https://github.com/ralph-irving/squeezelite)
@@ -302,7 +297,6 @@ Links to hardware and software manufacturers, sources and build instructions use
 - [VSCodium](https://github.com/VSCodium/vscodium)
 - [WebIOPi](https://github.com/Freenove/WebIOPi)
 - [WiringPi](https://github.com/WiringPi/WiringPi)
-- [emonHub](https://github.com/openenergymonitor/emonhub)
 - [Firefox](https://hg.mozilla.org/mozilla-unified)
 - [Beets](https://github.com/beetbox/beets)
 - [frp](https://github.com/fatedier/frp)
@@ -316,6 +310,7 @@ Links to hardware and software manufacturers, sources and build instructions use
 - [Blynk Server](https://github.com/Peterkn2001/blynk-server)
 - [File Browser](https://github.com/filebrowser/filebrowser)
 - [Spotifyd](https://github.com/Spotifyd/spotifyd)
+- [DietPi-Dashboard](https://github.com/ravenclaw900/dietpi-dashboard)
 
 ---
 
