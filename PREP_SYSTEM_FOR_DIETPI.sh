@@ -567,11 +567,11 @@ Currently installed: $G_DISTRO_NAME (ID: $G_DISTRO)"; then
 			G_EXEC mv "DietPi-$G_GITBRANCH/boot_xu4.ini" /boot/boot.ini
 			G_EXEC sed -i "s/root=UUID=[^[:blank:]]*/root=UUID=$(findmnt -Ufnro UUID -M /)/" /boot/boot.ini
 
-		elif (( $G_HW_MODEL == 12 )); then
+		elif [[ $G_HW_MODEL == 12 && -f '/boot/boot.ini' ]]; then
 
 			G_EXEC mv "DietPi-$G_GITBRANCH/boot_c2.ini" /boot/boot.ini
 
-		elif (( $G_HW_MODEL == 15 )); then
+		elif [[ $G_HW_MODEL == 15 && -f '/boot/boot.ini' ]]; then
 
 			G_EXEC mv "DietPi-$G_GITBRANCH/boot_n2.ini" /boot/boot.ini
 			G_EXEC sed -i "s/root=UUID=[^[:blank:]]*/root=UUID=$(findmnt -Ufnro UUID -M /)/" /boot/boot.ini
@@ -620,9 +620,6 @@ Currently installed: $G_DISTRO_NAME (ID: $G_DISTRO)"; then
 			G_CONFIG_INJECT "G_LIVE_PATCH_STATUS\[$i\]=" "G_LIVE_PATCH_STATUS[$i]='${G_LIVE_PATCH_STATUS[$i]}'" /boot/dietpi/.version
 		done
 
-		# Temporary fix for invalid interfaces at DietPi-FirstBoot
-		G_EXEC sed -i 's/G_GET_NET -t/G_GET_NET -q -t/' /var/lib/dietpi/services/dietpi-firstboot.bash
-
 		G_EXEC cp /boot/dietpi/.version /var/lib/dietpi/.dietpi_image_version
 
 		G_EXEC systemctl daemon-reload
@@ -636,7 +633,7 @@ Currently installed: $G_DISTRO_NAME (ID: $G_DISTRO)"; then
 		# We need to forward $DISTRO_TARGET* to dietpi-set_software, as well as $G_HW_MODEL + $G_RASPBIAN for Debian vs Raspbian decision.
 		G_DISTRO=$DISTRO_TARGET G_DISTRO_NAME=$DISTRO_TARGET_NAME G_HW_MODEL=$G_HW_MODEL G_RASPBIAN=$G_RASPBIAN G_EXEC /boot/dietpi/func/dietpi-set_software apt-mirror default
 
-		# Meveric, update repo to use our EU mirror: https://github.com/MichaIng/DietPi/issues/1519#issuecomment-368234302
+		# Meveric: Update repo to use our own mirror: https://github.com/MichaIng/DietPi/issues/1519#issuecomment-368234302
 		sed -Ei 's|https?://oph\.mdrjr\.net|https://dietpi.com|' /etc/apt/sources.list.d/meveric*.list &> /dev/null
 
 		# (Re)create DietPi runtime and logs dir, used by G_AGx
@@ -1088,7 +1085,7 @@ _EOF_
 		# - dhcpcd5: https://github.com/MichaIng/DietPi/issues/1560#issuecomment-370136642
 		# - mountall: https://github.com/MichaIng/DietPi/issues/2613
 		# - initscripts: Pre-installed on Jessie systems (?), superseded and masked by systemd, but never autoremoved
-		# - chrony: Fround left with strange "deinstall ok installed" mark left on Armbian images
+		# - chrony: Found left with strange "deinstall ok installed" mark left on Armbian images
 		G_AGP dbus dhcpcd5 mountall initscripts chrony '*office*' '*xfce*' '*qt5*' '*xserver*' '*xorg*' glib-networking libgtk-3-0 libsoup2.4-1 libglib2.0-0
 		# Remove any autoremove prevention
 		rm -fv /etc/apt/apt.conf.d/*autoremove*
@@ -1173,7 +1170,7 @@ _EOF_
 		G_DIETPI-NOTIFY 2 'Deleting list of known users and groups, not required by DietPi'
 
 		getent passwd pi > /dev/null && userdel -f pi # Raspberry Pi OS
-		getent passwd test > /dev/null && userdel -f test # @fourdee
+		getent passwd test > /dev/null && userdel -f test # @Fourdee
 		getent passwd odroid > /dev/null && userdel -f odroid
 		getent passwd rock64 > /dev/null && userdel -f rock64
 		getent passwd rock > /dev/null && userdel -f rock # Radxa images
@@ -1208,23 +1205,23 @@ _EOF_
 		[[ -d '/etc/lightdm' ]] && G_EXEC rm -R /etc/lightdm
 
 		# - www
-		[[ -d '/var/www' ]] && rm -vRf /var/www/{,.??,.[^.]}*
+		[[ -d '/var/www' ]] && G_EXEC rm -Rf /var/www/{,.??,.[^.]}*
 
-		# - Sourcecode (linux-headers etc)
-		[[ -d '/usr/src' ]] && rm -vRf /usr/src/{,.??,.[^.]}*
+		# - Source code and Linux headers
+		[[ -d '/usr/src' ]] && G_EXEC rm -Rf /usr/src/{,.??,.[^.]}*
 
 		# - Documentation dirs: https://github.com/MichaIng/DietPi/issues/3259
-		#[[ -d '/usr/share/man' ]] && rm -vR /usr/share/man
-		#[[ -d '/usr/share/doc' ]] && rm -vR /usr/share/doc
-		#[[ -d '/usr/share/doc-base' ]] && rm -vR /usr/share/doc-base
-		[[ -d '/usr/share/calendar' ]] && rm -vR /usr/share/calendar
+		#[[ -d '/usr/share/man' ]] && G_EXEC rm -R /usr/share/man
+		#[[ -d '/usr/share/doc' ]] && G_EXEC rm -R /usr/share/doc
+		#[[ -d '/usr/share/doc-base' ]] && G_EXEC rm -R /usr/share/doc-base
+		[[ -d '/usr/share/calendar' ]] && G_EXEC rm -R /usr/share/calendar
 
 		# - Unused DEB package config files
 		find /etc \( -name '?*\.dpkg-dist' -o -name '?*\.dpkg-old' -o -name '?*\.dpkg-new' -o -name '?*\.dpkg-bak' \) -exec rm -v {} +
 
 		# - Fonts
-		[[ -d '/usr/share/fonts' ]] && rm -vR /usr/share/fonts
-		[[ -d '/usr/share/icons' ]] && rm -vR /usr/share/icons
+		[[ -d '/usr/share/fonts' ]] && G_EXEC rm -R /usr/share/fonts
+		[[ -d '/usr/share/icons' ]] && G_EXEC rm -R /usr/share/icons
 
 		# - Stop, disable and remove not required 3rd party services
 		local aservices=(
@@ -1292,46 +1289,46 @@ _EOF_
 		unset -v aservices
 
 		# - Armbian specific
-		[[ -d '/var/lib/apt-xapian-index' ]] && rm  -Rv /var/lib/apt-xapian-index # ??
+		[[ -d '/var/lib/apt-xapian-index' ]] && G_EXEC rm -R /var/lib/apt-xapian-index # ??
 		umount /var/log.hdd 2> /dev/null
-		[[ -d '/var/log.hdd' ]] && rm -R /var/log.hdd
-		[[ -f '/etc/armbian-image-release' ]] && rm -v /etc/armbian-image-release
-		[[ -f '/boot/armbian_first_run.txt.template' ]] && rm -v /boot/armbian_first_run.txt.template
-		[[ -d '/etc/armbianmonitor' ]] && rm -R /etc/armbianmonitor
-		rm -vf /etc/{default,logrotate.d}/armbian*
-		[[ -f '/lib/firmware/bootsplash.armbian' ]] && rm -v /lib/firmware/bootsplash.armbian
+		[[ -d '/var/log.hdd' ]] && G_EXEC rm -R /var/log.hdd
+		[[ -f '/etc/armbian-image-release' ]] && G_EXEC rm /etc/armbian-image-release
+		[[ -f '/boot/armbian_first_run.txt.template' ]] && G_EXEC rm /boot/armbian_first_run.txt.template
+		[[ -d '/etc/armbianmonitor' ]] && G_EXEC rm -R /etc/armbianmonitor
+		G_EXEC rm -f /etc/{default,logrotate.d}/armbian*
+		[[ -f '/lib/firmware/bootsplash.armbian' ]] && G_EXEC rm /lib/firmware/bootsplash.armbian
 		[[ -L '/etc/systemd/system/sysinit.target.wants/bootsplash-ask-password-console.path' ]] && G_EXEC rm /etc/systemd/system/sysinit.target.wants/bootsplash-ask-password-console.path
 
 		# - OMV: https://github.com/MichaIng/DietPi/issues/2994
-		[[ -d '/etc/openmediavault' ]] && rm -vR /etc/openmediavault
-		rm -vf /etc/cron.*/openmediavault*
-		rm -vf /usr/sbin/omv-*
+		[[ -d '/etc/openmediavault' ]] && G_EXEC rm -R /etc/openmediavault
+		G_EXEC rm -f /etc/cron.*/openmediavault*
+		G_EXEC rm -f /usr/sbin/omv-*
 
 		# - Meveric specific
-		[[ -f '/usr/local/sbin/setup-odroid' ]] && rm -v /usr/local/sbin/setup-odroid
-		rm -fv /installed-packages*.txt
+		[[ -f '/usr/local/sbin/setup-odroid' ]] && G_EXEC rm /usr/local/sbin/setup-odroid
+		G_EXEC rm -f /installed-packages*.txt
 
 		# - RPi specific: https://github.com/MichaIng/DietPi/issues/1631#issuecomment-373965406
-		[[ -f '/etc/profile.d/wifi-country.sh' ]] && rm -v /etc/profile.d/wifi-country.sh
-		[[ -f '/etc/sudoers.d/010_pi-nopasswd' ]] && rm -v /etc/sudoers.d/010_pi-nopasswd
-		[[ -d '/etc/systemd/system/dhcpcd.service.d' ]] && rm -vR /etc/systemd/system/dhcpcd.service.d # https://github.com/RPi-Distro/pi-gen/blob/master/stage3/01-tweaks/00-run.sh
+		[[ -f '/etc/profile.d/wifi-country.sh' ]] && G_EXEC rm /etc/profile.d/wifi-country.sh
+		[[ -f '/etc/sudoers.d/010_pi-nopasswd' ]] && G_EXEC rm /etc/sudoers.d/010_pi-nopasswd
+		[[ -d '/etc/systemd/system/dhcpcd.service.d' ]] && G_EXEC rm -R /etc/systemd/system/dhcpcd.service.d # https://github.com/RPi-Distro/pi-gen/blob/master/stage3/01-tweaks/00-run.sh
 		#	Do not ship rc.local anymore. On DietPi /var/lib/dietpi/postboot.d should be used.
 		#	WIP: Mask rc-local.service and create symlink postboot.d/rc.local => /etc/rc.local for backwards compatibility?
 		[[ -f '/etc/rc.local' ]] && rm -v /etc/rc.local # https://github.com/RPi-Distro/pi-gen/blob/master/stage2/01-sys-tweaks/files/rc.local
-		[[ -d '/etc/systemd/system/rc-local.service.d' ]] && rm -Rv /etc/systemd/system/rc-local.service.d # Raspberry Pi OS
-		[[ -d '/etc/systemd/system/rc.local.service.d' ]] && rm -Rv /etc/systemd/system/rc.local.service.d
+		[[ -d '/etc/systemd/system/rc-local.service.d' ]] && G_EXEC rm -R /etc/systemd/system/rc-local.service.d # Raspberry Pi OS
+		[[ -d '/etc/systemd/system/rc.local.service.d' ]] && G_EXEC rm -R /etc/systemd/system/rc.local.service.d
 		#	Below required if DietPi-PREP is executed from chroot/container, so RPi firstrun scripts are not executed
-		[[ -f '/etc/init.d/resize2fs_once' ]] && rm -v /etc/init.d/resize2fs_once # https://github.com/RPi-Distro/pi-gen/blob/master/stage2/01-sys-tweaks/files/resize2fs_once
+		[[ -f '/etc/init.d/resize2fs_once' ]] && G_EXEC rm /etc/init.d/resize2fs_once # https://github.com/RPi-Distro/pi-gen/blob/master/stage2/01-sys-tweaks/files/resize2fs_once
 		# - Remove all autologin configs for all TTYs: https://github.com/MichaIng/DietPi/issues/3570#issuecomment-648988475, https://github.com/MichaIng/DietPi/issues/3628#issuecomment-653693758
-		rm -fv /etc/systemd/system/*getty@*.service.d/*autologin*.conf
+		G_EXEC rm -f /etc/systemd/system/*getty@*.service.d/*autologin*.conf
 
 		# - make_nas_processes_faster cron job on ROCK64 + NanoPi + PINE A64(?) images
-		[[ -f '/etc/cron.d/make_nas_processes_faster' ]] && rm -v /etc/cron.d/make_nas_processes_faster
+		[[ -f '/etc/cron.d/make_nas_processes_faster' ]] && G_EXEC rm /etc/cron.d/make_nas_processes_faster
 
 		#-----------------------------------------------------------------------------------
 		# https://www.debian.org/doc/debian-policy/ch-opersys.html#site-specific-programs
 		G_DIETPI-NOTIFY 2 'Setting modern /usr/local permissions'
-		[[ -f '/etc/staff-group-for-usr-local' ]] && rm -v /etc/staff-group-for-usr-local
+		[[ -f '/etc/staff-group-for-usr-local' ]] && G_EXEC rm /etc/staff-group-for-usr-local
 		G_EXEC chown -R root:root /usr/local
 		G_EXEC chmod -R 0755 /usr/local
 
