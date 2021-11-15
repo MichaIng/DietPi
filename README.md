@@ -234,7 +234,7 @@ Links to hardware and software manufacturers, sources and build instructions use
 - [MPD](https://github.com/MusicPlayerDaemon/MPD)
 - [YMPD](https://github.com/notandy/ympd)
 - [myMPD](https://github.com/jcorporation/myMPD)
-- [Apache2](https://github.com/apache)
+- [Apache](https://github.com/apache)
 - [Nginx](https://hg.nginx.org/nginx/)
 - [Lighttpd](https://redmine.lighttpd.net/projects/lighttpd/repository)
 - [PHP](https://git.php.net/)
