@@ -1779,6 +1779,13 @@ _EOF_
 				# Disable Docker optimisations, since this has some performance drawbacks, enable on Docker install instead
 				G_CONFIG_INJECT 'docker_optimizations=' 'docker_optimizations=off' /boot/uEnv.txt
 			fi
+
+		# - NanoPi R1
+		elif [[ $G_HW_MODEL == 48 && -f '/boot/armbianEnv.txt' ]]
+		then
+			# Enable second USB port by default
+			local current=$(sed -n '/^[[:blank:]]*overlays=/{s/^[^=]*=//p;q}' /boot/armbianEnv.txt)
+			[[ $current == *'usbhost2'* ]] || G_CONFIG_INJECT 'overlays=' "overlays=$current usbhost2" /boot/armbianEnv.txt
 		fi
 
 		# - Armbian special
