@@ -290,8 +290,7 @@ _EOF_
 		fi
 
 		# - IPv6
-		local enable_ipv6=$(grep -cm1 '^[[:blank:]]*CONFIG_ENABLE_IPV6=1' /boot/dietpi.txt)
-		/boot/dietpi/func/dietpi-set_hardware enableipv6 "$enable_ipv6"
+		/boot/dietpi/func/dietpi-set_hardware enableipv6 "$(( ! $(grep -cm1 '^[[:blank:]]*CONFIG_ENABLE_IPV6=0' /boot/dietpi.txt) ))"
 
 		# - Configure enabled interfaces now, /etc/network/interfaces will be effective from next boot on
 		#	Failsafe: Bring up Ethernet, whenever WiFi is disabled or fails to be configured, e.g. due to wrong credentials
