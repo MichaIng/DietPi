@@ -1258,7 +1258,7 @@ _EOF_
 					G_EXEC systemctl mask "${j##*/}"
 
 				else
-					G_EXEC rm -R "$j"
+					[[ -e $j || -L $j ]] && G_EXEC rm -R "$j"
 
 				fi
 			done
@@ -1749,6 +1749,9 @@ _EOF_
 				/etc/kernel/postinst.d/dietpi-USBridgeSig "$i"
 			done
 			G_EXEC sed -i 's/^#grep/grep/' /etc/kernel/postinst.d/dietpi-USBridgeSig
+
+			# Create RPi Zero 2 W device tree if not existent
+			[[ -f '/boot/bcm2710-rpi-zero-2.dtb' ]] || G_EXEC cp -a /boot/bcm2710-rpi-{3-b,zero-2}.dtb
 
 		# - PINE A64 (and possibly others): Cursor fix for FB
 		elif (( $G_HW_MODEL == 40 )); then
