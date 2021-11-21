@@ -180,12 +180,12 @@ _EOF_
 
 	# Detect the distro version of this operating system
 	distro=$(</etc/debian_version)
-	if [[ $distro == '9.'* ]]; then
+	if [[ $distro == '9.'* || $distro == 'stretch/sid' ]]; then
 
 		G_DISTRO=4
 		G_DISTRO_NAME='stretch'
 
-	elif [[ $distro == '10.'* ]]; then
+	elif [[ $distro == '10.'* || $distro == 'buster/sid' ]]; then
 
 		G_DISTRO=5
 		G_DISTRO_NAME='buster'
@@ -195,7 +195,7 @@ _EOF_
 		G_DISTRO=6
 		G_DISTRO_NAME='bullseye'
 
-	elif [[ $distro == 'bookworm/sid' ]]; then
+	elif [[ $distro == '12.'* || $distro == 'bookworm/sid' ]]; then
 
 		G_DISTRO=7
 		G_DISTRO_NAME='bookworm'
@@ -470,31 +470,13 @@ _EOF_
 
 		)
 
-		# - Enable/list available options based on criteria
-		#	NB: Whiptail uses 2 array indices per entry: value + description
+		# - List supported distro versions up from currently installed one
 		G_WHIP_MENU_ARRAY=()
 		for ((i=0; i<${#DISTRO_LIST_ARRAY[@]}; i+=2))
 		do
-			# Disable downgrades
-			if (( ${DISTRO_LIST_ARRAY[$i]} < $G_DISTRO )); then
-
-				G_DIETPI-NOTIFY 2 "Disabled distro downgrade to${DISTRO_LIST_ARRAY[$i+1]%% (*}"
-
-			# Enable option
-			else
-
-				G_WHIP_MENU_ARRAY+=("${DISTRO_LIST_ARRAY[$i]}" "${DISTRO_LIST_ARRAY[$i+1]}")
-
-			fi
+			(( ${DISTRO_LIST_ARRAY[$i]} < $G_DISTRO )) || G_WHIP_MENU_ARRAY+=("${DISTRO_LIST_ARRAY[$i]}" "${DISTRO_LIST_ARRAY[$i+1]}")
 		done
 		unset -v DISTRO_LIST_ARRAY
-
-		if (( ! ${#G_WHIP_MENU_ARRAY[@]} )); then
-
-			G_DIETPI-NOTIFY 1 'No available distro versions found for this system. Aborting...\n'
-			exit 1
-
-		fi
 
 		while :
 		do
@@ -503,7 +485,7 @@ _EOF_
 				[[ $DISTRO_TARGET == "$i" ]] && break 2
 			done
 
-			G_WHIP_DEFAULT_ITEM=${G_WHIP_MENU_ARRAY[0]} # Downgrades disabled, so first item matches current/lowest supported distro version
+			G_WHIP_DEFAULT_ITEM=${G_WHIP_MENU_ARRAY[0]} # First item matches current distro version
 			G_WHIP_BUTTON_CANCEL_TEXT='Exit'
 			if G_WHIP_MENU "Please select a Debian version to install on this system.\n
 Currently installed: $G_DISTRO_NAME (ID: $G_DISTRO)"; then
@@ -524,15 +506,9 @@ Currently installed: $G_DISTRO_NAME (ID: $G_DISTRO)"; then
 
 			DISTRO_TARGET_NAME='bullseye'
 
-		elif (( $DISTRO_TARGET == 7 )); then
-
-			DISTRO_TARGET_NAME='bookworm'
-
 		else
 
-			# Failsafe: This can actually never happen
-			G_DIETPI-NOTIFY 1 'Invalid choice detected. Aborting...\n'
-			exit 1
+			DISTRO_TARGET_NAME='bookworm'
 
 		fi
 
