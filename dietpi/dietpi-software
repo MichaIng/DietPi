@@ -104,9 +104,6 @@ INDEX_BROWSER_TARGET=$INDEX_BROWSER_TARGET"
 	# Run Install flag to trigger Run_Installations()
 	GOSTARTINSTALL=0
 
-	# Run uninstall flag, used in software installs + removals to trigger Uninstall_Software()
-	UNINSTALL_REQUIRED=0
-
 	# DietPi Choice System
 	# - Logging
 	INDEX_LOGGING=-1
@@ -2954,7 +2951,7 @@ _EOF_
 			aSTART_SERVICES+=('dropbear')
 
 			# Mark OpenSSH for uninstall
-			dpkg-query -s 'openssh-server' &> /dev/null && aSOFTWARE_INSTALL_STATE[105]=-1 && UNINSTALL_REQUIRED=1
+			dpkg-query -s 'openssh-server' &> /dev/null && aSOFTWARE_INSTALL_STATE[105]=-1
 
 		fi
 
@@ -2981,7 +2978,7 @@ _EOF_
 			aSTART_SERVICES+=('ssh')
 
 			# Mark Dropbear for uninstall
-			grep -q '^dropbear[^[:blank:]]*[[:blank:]]' <<< "$(dpkg --get-selections)" && aSOFTWARE_INSTALL_STATE[104]=-1 && UNINSTALL_REQUIRED=1
+			grep -q '^dropbear[^[:blank:]]*[[:blank:]]' <<< "$(dpkg --get-selections)" && aSOFTWARE_INSTALL_STATE[104]=-1
 
 		fi
 
@@ -10543,7 +10540,7 @@ _EOF_
 			G_EXEC chmod +x install.sh
 			export INSTALL_K3S_SKIP_ENABLE=true
 			export INSTALL_K3S_EXEC=$(sed -n '/^[[:blank:]]*SOFTWARE_K3S_EXEC=/{s/^[^=]*=//p;q}' /boot/dietpi.txt)
-			G_EXEC_NOEXIT=1 G_EXEC_OUTPUT=1 G_EXEC ./install.sh || aSOFTWARE_INSTALL_STATE[$software_id]=-1 UNINSTALL_REQUIRED=1
+			G_EXEC_NOEXIT=1 G_EXEC_OUTPUT=1 G_EXEC ./install.sh || aSOFTWARE_INSTALL_STATE[$software_id]=-1
 			G_EXEC_NOHALT=1 G_EXEC rm install.sh
 
 			# Do not enter into a server restart loop on failure
@@ -15834,8 +15831,7 @@ _EOF_
 		G_EXEC systemctl daemon-reload
 
 		#----------------------------------------------------------------------
-		# Done, reset uninstall flag
-		UNINSTALL_REQUIRED=0
+		# Done
 		G_DIETPI-NOTIFY 3 "$G_PROGRAM_NAME" 'Uninstall completed'
 		#----------------------------------------------------------------------
 
@@ -15883,7 +15879,12 @@ _EOF_
 		Install_Software
 
 		# Uninstall software, if required by e.g. DietPi choice system
-		(( $UNINSTALL_REQUIRED )) && Uninstall_Software
+		for i in "${!aSOFTWARE_NAME[@]}"
+		do
+			(( ${aSOFTWARE_INSTALL_STATE[$i]} == -1 )) || continue
+			Uninstall_Software
+			break
+		done
 
 		G_DIETPI-NOTIFY 3 "$G_PROGRAM_NAME" 'Finalising install'
 
@@ -16341,7 +16342,6 @@ This requires an account at: https://remote.it/
 						if (( ${aSOFTWARE_INSTALL_STATE[$i]} == 2 )); then
 
 							aSOFTWARE_INSTALL_STATE[$i]=-1
-							UNINSTALL_REQUIRED=1
 							G_DIETPI-NOTIFY 0 "Uninstalling ${aSOFTWARE_NAME[$i]}: ${aSOFTWARE_DESC[$i]}"
 
 						elif (( ${aSOFTWARE_INSTALL_STATE[$i]} != -1 )); then
@@ -16423,10 +16423,15 @@ This requires an account at: https://remote.it/
 				G_PROMPT_BACKUP
 
 			# Uninstall | Finish up and clear non-required packages
-			elif [[ $command == 'uninstall' && $UNINSTALL_REQUIRED == 1 ]]; then
+			elif [[ $command == 'uninstall' ]]; then
 
-				Uninstall_Software
-				Write_InstallFileList
+				for i in "${!aSOFTWARE_NAME[@]}"
+				do
+					(( ${aSOFTWARE_INSTALL_STATE[$i]} == -1 )) || continue
+					Uninstall_Software
+					Write_InstallFileList
+					break
+				done
 
 			fi
 
@@ -17336,55 +17341,48 @@ List of installed software and their online documentation URLs:
 		G_WHIP_CHECKLIST_ARRAY=()
 
 		# Obtain list of installed software
-		local i software_available_for_uninstall=0
+		local i
 		for i in "${!aSOFTWARE_INSTALL_STATE[@]}"
 		do
 			(( ${aSOFTWARE_INSTALL_STATE[$i]} == 2 )) || continue
-
 			G_WHIP_CHECKLIST_ARRAY+=("$i" "${aSOFTWARE_NAME[$i]}: ${aSOFTWARE_DESC[$i]}" 'off')
-			software_available_for_uninstall=1
 		done
 
 		# No software installed
-		if (( ! $software_available_for_uninstall )); then
+		if (( ! ${#G_WHIP_CHECKLIST_ARRAY[@]} )); then
 
-			G_WHIP_MSG 'No software is currently installed, or, available for removal.'
+			G_WHIP_MSG 'No software is currently installed.'
 
 		# Run menu
 		else
 
 			G_WHIP_BUTTON_CANCEL_TEXT='Back'
-			if G_WHIP_CHECKLIST 'Use the spacebar to select the software you would like to remove:'; then
+			G_WHIP_CHECKLIST 'Use the spacebar to select the software you would like to remove:' && [[ $G_WHIP_RETURNED_VALUE ]] || return 0
 
-				# Create list for user to review before removal
-				local output_string='The following software will be REMOVED from your system:'
-				for i in $G_WHIP_RETURNED_VALUE
-				do
-					output_string+="\n - ${aSOFTWARE_NAME[$i]} (ID=$i): ${aSOFTWARE_DESC[$i]}"
-					UNINSTALL_REQUIRED=1
-				done
+			# Create list for user to review before removal
+			local output_string='The following software will be REMOVED from your system:'
+			for i in $G_WHIP_RETURNED_VALUE
+			do
+				output_string+="\n - ${aSOFTWARE_NAME[$i]} (ID=$i): ${aSOFTWARE_DESC[$i]}"
+			done
 
-				(( $UNINSTALL_REQUIRED )) || return 0
-
-				G_WHIP_YESNO "$output_string
+			G_WHIP_YESNO "$output_string
 \nNB: Uninstalling usually PURGES any related userdata and configs. If you only need to repair or update software, please use \"dietpi-software reinstall <ID>\" instead.
-\nDo you wish to continue?" || { UNINSTALL_REQUIRED=0; return 0; }
+\nDo you wish to continue?" || return 0
 
-				# Mark for uninstall
-				for i in $G_WHIP_RETURNED_VALUE
-				do
-					aSOFTWARE_INSTALL_STATE[$i]=-1
-				done
+			# Mark for uninstall
+			for i in $G_WHIP_RETURNED_VALUE
+			do
+				aSOFTWARE_INSTALL_STATE[$i]=-1
+			done
 
-				# Run uninstall
-				Uninstall_Software
+			# Run uninstall
+			Uninstall_Software
 
-				# Save install states
-				Write_InstallFileList
+			# Save install states
+			Write_InstallFileList
 
-				G_WHIP_MSG 'Uninstall completed'
-
-			fi
+			G_WHIP_MSG 'Uninstall completed'
 
 		fi
 
