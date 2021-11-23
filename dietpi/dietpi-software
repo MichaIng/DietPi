@@ -3042,6 +3042,9 @@ unix_socket_directories = '/run/postgresql'" > "$i/00dietpi.conf"
 			# Enable DietPi-RAMlog service
 			G_EXEC systemctl enable dietpi-ramlog
 
+			# Apply logging choice index
+			[[ $INDEX_LOGGING == -[12] ]] || INDEX_LOGGING=-1
+
 			# Sync logs to disk once
 			local acommand=('/boot/dietpi/func/dietpi-ramlog' '1')
 			systemctl -q is-active dietpi-ramlog && acommand=('systemctl' 'stop' 'dietpi-ramlog')
@@ -3096,9 +3099,12 @@ unix_socket_directories = '/run/postgresql'" > "$i/00dietpi.conf"
 			Banner_Installing
 
 			# Workaround for dpkg failure on 1st install if service is already running but APT not installed: https://github.com/MichaIng/DietPi/pull/2277/#issuecomment-441460925
-			systemctl stop rsyslog 2> /dev/null
+			systemctl -q is-active rsyslog && G_EXEC systemctl stop rsyslog
 			G_AGI rsyslog
 			G_EXEC systemctl enable --now rsyslog
+
+			# Apply logging choice index
+			grep -q '[[:blank:]]/var/log[[:blank:]]' /etc/fstab || findmnt -t tmpfs -M /var/log > /dev/null || INDEX_LOGGING=-3
 
 		fi
 
@@ -15630,6 +15636,29 @@ _EOF_
 			[[ -f '/usr/local/bin/mcrcon' ]] && G_EXEC rm /usr/local/bin/mcrcon
 		fi
 
+		software_id=101 # Logrotate
+		if (( ${aSOFTWARE_INSTALL_STATE[$software_id]} == -1 )); then
+
+			Banner_Uninstalling
+			G_AGP logrotate
+
+		fi
+
+		software_id=102 # Rsyslog
+		if (( ${aSOFTWARE_INSTALL_STATE[$software_id]} == -1 )); then
+
+			Banner_Uninstalling
+			G_DIETPI-NOTIFY 2 'Marking rsyslog for autoremoval, hence it stays installed if any other package depends on it'
+			apt-mark auto rsyslog 2> /dev/null # https://github.com/MichaIng/DietPi/issues/2454
+
+			# Update logging choice index
+			if [[ $INDEX_LOGGING == -3 ]]
+			then
+				grep -q '[[:blank:]]/var/log[[:blank:]]' /etc/fstab || findmnt -t tmpfs -M /var/log > /dev/null && INDEX_LOGGING=-1 || INDEX_LOGGING=0
+			fi
+
+		fi
+
 		software_id=103 # DietPi-RAMlog
 		if (( ${aSOFTWARE_INSTALL_STATE[$software_id]} == -1 )); then
 
@@ -15644,6 +15673,12 @@ _EOF_
 	systemctl disable dietpi-ramlog
 	systemctl stop dietpi-ramlog
 	rm -R /var/tmp/dietpi/logs/dietpi-ramlog_store
+	if systemctl -q is-enabled rsyslog 2> /dev/null
+	then
+		sed -i '/^[[:blank:]]*INDEX_LOGGING=/c\INDEX_LOGGING=-3' /boot/dietpi/.installed
+	else
+		sed -i '/^[[:blank:]]*INDEX_LOGGING=/c\INDEX_LOGGING=0' /boot/dietpi/.installed
+	fi
 	systemctl disable dietpi-ramlog_disable
 	rm /etc/systemd/system/dietpi-ramlog_disable.service
 	rm /var/lib/dietpi/dietpi-ramlog/disable.sh
@@ -15667,23 +15702,6 @@ WantedBy=local-fs.target
 _EOF_
 			G_EXEC systemctl daemon-reload
 			G_EXEC systemctl enable dietpi-ramlog_disable
-
-		fi
-
-		software_id=101 # Logrotate
-		if (( ${aSOFTWARE_INSTALL_STATE[$software_id]} == -1 )); then
-
-			Banner_Uninstalling
-			G_AGP logrotate
-
-		fi
-
-		software_id=102 # Rsyslog
-		if (( ${aSOFTWARE_INSTALL_STATE[$software_id]} == -1 )); then
-
-			Banner_Uninstalling
-			G_DIETPI-NOTIFY 2 'Marking rsyslog for autoremoval, hence it stays installed if any other package depends on it'
-			apt-mark auto rsyslog 2> /dev/null # https://github.com/MichaIng/DietPi/issues/2454
 
 		fi
 
@@ -15824,9 +15842,6 @@ _EOF_
 
 		# apt-get autoremove
 		G_AGA
-
-		# Check if we need to clear DietPi choices
-		grep -q '[[:blank:]]/var/log[[:blank:]]' /etc/fstab || dpkg-query -s 'rsyslog' &> /dev/null || INDEX_LOGGING=0
 
 		G_EXEC systemctl daemon-reload
 
