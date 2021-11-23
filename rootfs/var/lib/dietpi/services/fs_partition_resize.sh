@@ -54,7 +54,7 @@
 		# Maximise root partition size
 		sfdisk --no-reread --no-tell-kernel -fN"$ROOT_PART" "$ROOT_DRIVE" <<< ',+'
 
-		# Inform kernel about changed partition table, be failsafe by using two differet methods and reboot if any fails
+		# Inform kernel about changed partition table, be failsafe by using two different methods and reboot if any fails
 		partprobe "$ROOT_DRIVE" || Reboot_to_load_Partition_table
 		partx -u "$ROOT_DRIVE" || Reboot_to_load_Partition_table
 	else
