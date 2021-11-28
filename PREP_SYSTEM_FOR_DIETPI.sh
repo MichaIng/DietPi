@@ -1729,6 +1729,20 @@ _EOF_
 			# Create RPi Zero 2 W device tree if not existent
 			[[ -f '/boot/bcm2710-rpi-zero-2.dtb' ]] || G_EXEC cp -a /boot/bcm2710-rpi-{3-b,zero-2}.dtb
 
+			# For backwards compatibility with software compiled against older libraspberrypi0, create symlinks from old to new filenames
+			if (( $G_HW_ARCH < 3 ))
+			then
+				G_DIETPI-NOTIFY 2 'Applying workaround for compiled against older libraspberrypi0'
+				G_EXEC cd /usr/lib/arm-linux-gnueabihf
+				while read -r line
+				do
+					[[ ! -f $line || -f ${line%.0} ]] && continue
+					line=${line#/usr/lib/arm-linux-gnueabihf/}
+					G_EXEC ln -sf "$line" "${line%.0}"
+
+				done < <(dpkg -L 'libraspberrypi0' | grep '^/usr/lib/arm-linux-gnueabihf/.*\.so.0$')
+			fi
+
 		# - PINE A64 (and possibly others): Cursor fix for FB
 		elif (( $G_HW_MODEL == 40 )); then
 
