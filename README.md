@@ -214,7 +214,6 @@ Links to hardware and software manufacturers, sources and build instructions use
 - [Radxa](https://github.com/radxa/apt)
 - [Armbian](https://github.com/armbian)
 - [curl](https://github.com/curl/curl)
-- [vmtouch](https://github.com/hoytech/vmtouch)
 - [X.Org-X-Server](https://www.x.org/archive//individual/)
 - [LXDE desktop](https://github.com/LXDE)
 - [LXQt desktop](https://github.com/lxqt)

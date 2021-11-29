@@ -1129,11 +1129,6 @@ _EOF_
 
 		fi
 
-		# Install vmtouch to lock DietPi scripts and config in file system cache
-		G_EXEC curl -sSfLO "https://dietpi.com/downloads/binaries/$G_DISTRO_NAME/vmtouch_$G_HW_ARCH_NAME.deb"
-		G_EXEC dpkg --force-hold,confnew -i "vmtouch_$G_HW_ARCH_NAME.deb"
-		rm -v "vmtouch_$G_HW_ARCH_NAME.deb"
-
 		G_DIETPI-NOTIFY 2 'Restoring default base files:'
 		# shellcheck disable=SC2114
 		rm -Rfv /etc/{motd,profile,update-motd.d,issue{,.net}} /root /home /media /var/mail
