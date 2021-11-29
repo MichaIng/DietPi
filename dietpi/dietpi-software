@@ -3521,26 +3521,31 @@ _EOF_
 			G_WHIP_DEFAULT_ITEM=$version
 			G_WHIP_MENU 'Please choose which version of DietPi-Dashboard should be installed.' && version=$G_WHIP_RETURNED_VALUE
 
+			# Download binary and set config URL
+			local url
 			if [[ $version == 'Stable' ]]
 			then
-				Download_Install "$(curl -sSfL 'https://api.github.com/repos/ravenclaw900/dietpi-dashboard/releases/latest' | mawk -F\" "/\"browser_download_url\": \".*dietpi-dashboard-$G_HW_ARCH_NAME\"/{print \$4}")" /opt/dietpi-dashboard/dietpi-dashboard
+				Download_Install "$(curl -sSfL 'https://api.github.com/repos/ravenclaw900/dietpi-dashboard/releases/latest' | mawk -F\" "/\"browser_download_url\": \".*dietpi-dashboard-$G_HW_ARCH_NAME\"/{print \$4;exit}")" /opt/dietpi-dashboard/dietpi-dashboard
+				url="https://raw.githubusercontent.com/ravenclaw900/DietPi-Dashboard/$(curl -sSfL 'https://api.github.com/repos/ravenclaw900/dietpi-dashboard/releases/latest' | mawk -F\" '/"name": ".*"/{print $4;exit}')/config.toml"
 
 			elif [[ $version == 'Nightly' ]]
 			then
 				no_check_url=1 Download_Install "https://nightly.link/ravenclaw900/DietPi-Dashboard/workflows/push-build/main/dietpi-dashboard-$G_HW_ARCH_NAME.zip" /opt/dietpi-dashboard
+				url='https://raw.githubusercontent.com/ravenclaw900/DietPi-Dashboard/main/config.toml'
 			fi
-
 			G_EXEC chmod +x /opt/dietpi-dashboard/dietpi-dashboard
 
-			[[ -f '/opt/dietpi-dashboard/config.toml' ]] || cat << '_EOF_' > /opt/dietpi-dashboard/config.toml
-# TCP network port
-port = 8088
+			# Config
+			if [[ ! -f '/opt/dietpi-dashboard/config.toml' ]]
+			then
+				G_EXEC curl -sSfL "$url" -o /opt/dietpi-dashboard/config.toml
+				# Enable password protection with global software password by default
+				G_CONFIG_INJECT 'pass[[:blank:]]' 'pass = true' /opt/dietpi-dashboard/config.toml
+				G_CONFIG_INJECT 'hash[[:blank:]]' "hash = \"$(echo -n "$GLOBAL_PW" | sha512sum | mawk '{print $1}')\"" /opt/dietpi-dashboard/config.toml
+				G_CONFIG_INJECT 'secret[[:blank:]]' "secret = \"$(openssl rand -hex 32)\"" /opt/dietpi-dashboard/config.toml
+			fi
 
-# TLS for HTTPS
-tls = false
-cert = "/path/to/cert"
-key = "/path/to/key"
-_EOF_
+			# Service
 			cat << '_EOF_' > /etc/systemd/system/dietpi-dashboard.service
 [Unit]
 Description=Web Dashboard (DietPi)
@@ -3557,7 +3562,7 @@ StandardOutput=journal
 [Install]
 WantedBy=multi-user.target
 _EOF_
-			# Dashboard service needs to be started by systemd, as dietpi-services must not control it to prevent it from stopping during software installs.
+			# Service needs to be started by systemd, as dietpi-services must not control it to prevent it from stopping during software installs done via dashboard itself.
 			G_EXEC systemctl enable dietpi-dashboard
 			aSTART_SERVICES+=('dietpi-dashboard')
 
