@@ -3697,37 +3697,82 @@ _EOF_
 			# Apply preference index
 			INDEX_WEBSERVER=0
 
+			# Pre-create a dummy port 80 vhost if it does not exist yet, so we can avoid overwriting it on reinstalls.
+			if [[ ! -f '/etc/apache2/sites-available/000-default.conf' ]]
+			then
+				[[ -d '/etc/apache2/sites-available' ]] || G_EXEC mkdir -p /etc/apache2/sites-available
+				cat << '_EOF_' > /etc/apache2/sites-available/000-default.conf
+# /etc/apache2/sites-available/000-default.conf
+<VirtualHost *:80>
+	# Define directives here which shall apply for port 80 requests only
+</VirtualHost>
+_EOF_
+			# Otherwise assure that the webroot is changed, as all our install options depend on it.
+			else
+				G_EXEC sed -i 's|/var/www/html|/var/www|g' /etc/apache2/sites-available/000-default.conf
+			fi
+
 			local apackages=('apache2')
 			# Install Certbot module, if Certbot was already installed
 			(( ${aSOFTWARE_INSTALL_STATE[92]} == 2 )) && apackages+=('python3-certbot-apache')
 			G_AGI "${apackages[@]}"
 			G_EXEC systemctl stop apache2
+			apachectl -M | grep -q 'cache_disk' || G_EXEC systemctl disable --now apache-htcacheclean
+
+			# Enable event MPM and headers module
+			G_EXEC a2dismod -fq mpm_prefork
+			G_EXEC a2enmod -q mpm_event headers
+
+			# Disable obsolete default configs
+			for i in 'charset' 'localized-error-pages' 'other-vhosts-access-log' 'security' 'serve-cgi-bin'
+			do
+				[[ -L /etc/apache2/conf-enabled/$i.conf ]] && G_EXEC a2disconf "$i"
+			done
 
 			# Config
-			G_BACKUP_FP /etc/apache2/apache2.conf
-			dps_index=$software_id Download_Install 'apache2.conf' /etc/apache2/apache2.conf
-			cat << '_EOF_' > /etc/apache2/sites-available/000-default.conf
-<VirtualHost *:80>
-	DocumentRoot /var/www
-	ErrorLog ${APACHE_LOG_DIR}/error.log
-	#CustomLog ${APACHE_LOG_DIR}/access.log combined
-</VirtualHost>
-_EOF_
-			cat << _EOF_ > /etc/apache2/mods-available/mpm_prefork.conf
-<IfModule mpm_prefork_module>
-	StartServers		$G_HW_CPU_CORES
-	MinSpareServers		1
-	MaxSpareServers		$G_HW_CPU_CORES
-	MaxRequestWorkers	50
-	MaxConnectionsPerChild	0
-</IfModule>
-_EOF_
-			# Webroot
-			[[ -f '/var/www/html/index.html' ]] && G_EXEC mv /var/www/html/index.html /var/www/
-			[[ -d '/var/www/html' ]] && G_EXEC rmdir --ignore-fail-on-non-empty /var/www/html
+			cat << _EOF_ > /etc/apache2/conf-available/dietpi.conf
+# /etc/apache2/conf-available/dietpi.conf
+# Default server name and webroot
+ServerName $(G_GET_NET ip)
+DocumentRoot /var/www
 
-			# Change error log level
-			G_EXEC sed -i '/LogLevel[[:blank:]]/c\	LogLevel error' /etc/apache2/sites-available/*
+# Logging to: journalctl -u apache2
+ErrorLog syslog:local7
+
+# Allow unlimited Keep-Alive requests
+MaxKeepAliveRequests 0
+
+# MPM event configuration
+# - Run a single process which does not expire
+# - Limit request handler threads to 64
+StartServers 1
+ServerLimit 1
+MaxConnectionsPerChild 0
+ThreadsPerChild 64
+ThreadLimit 64
+MinSpareThreads 1
+MaxSpareThreads 64
+MaxRequestWorkers 64
+
+# Minimize public info
+ServerTokens Prod
+ServerSignature Off
+TraceEnable Off
+
+# Security headers
+Header set X-Content-Type-Options "nosniff"
+Header set X-Frame-Options "sameorigin"
+Header set X-XSS-Protection "1; mode=block"
+Header set X-Robots-Tag "none"
+Header set X-Download-Options "noopen"
+Header set X-Permitted-Cross-Domain-Policies "none"
+Header set Referrer-Policy "no-referrer"
+_EOF_
+			G_EXEC a2enconf dietpi
+
+			# Webroot
+			[[ -f '/var/www/html/index.html' && ! -f '/var/www/index.html' ]] && G_EXEC mv /var/www/html/index.html /var/www/
+			[[ -d '/var/www/html' ]] && G_EXEC rmdir --ignore-fail-on-non-empty /var/www/html
 
 		fi
 
@@ -3931,16 +3976,16 @@ _EOF_
 		fi
 
 		software_id=89 # PHP
-		if (( ${aSOFTWARE_INSTALL_STATE[$software_id]} == 1 )); then
-
+		if (( ${aSOFTWARE_INSTALL_STATE[$software_id]} == 1 ))
+		then
 			Banner_Installing
 
 			# Stretch: Add Ondrej's PHP repository for latest PHP version (currently PHP7.3)
-			if (( $G_DISTRO < 5 )); then
-
+			if (( $G_DISTRO < 5 ))
+			then
 				# Debian (+sury.org) armhf is not ARMv6 compatible: https://github.com/MichaIng/DietPi/issues/2794
-				if (( $G_HW_ARCH < 2 )); then
-
+				if (( $G_HW_ARCH < 2 ))
+				then
 					local url='http://raspbian.raspberrypi.org/raspbian/'
 					# Actually we do not support any non-RPi ARMv6 devices currently, but lets be failsafe here
 					(( $G_HW_MODEL > 9 )) && url='https://deb.debian.org/debian/'
@@ -3954,9 +3999,7 @@ Package: php libapache2-mod-php php-* libssl* libc6* libc-* libgssapi-krb5-2 lib
 Pin: release n=buster\nPin-Priority: 501\n
 # Pin down all other Buster packages to only allow upgrades of already installed ones via: "apt upgrade"
 Package: *\nPin: release n=buster\nPin-Priority: 100' > /etc/apt/preferences.d/dietpi-php
-
 				else
-
 					# APT key
 					G_EXEC curl -sSfL 'https://packages.sury.org/php/apt.gpg' -o /etc/apt/trusted.gpg.d/dietpi-php.gpg
 					# APT source
@@ -3964,30 +4007,21 @@ Package: *\nPin: release n=buster\nPin-Priority: 100' > /etc/apt/preferences.d/d
 					# Pin down libssl1.1 version from this repo on Stretch: https://github.com/MichaIng/DietPi/issues/2734
 					echo -e '# libssl1.1 from sury.org breaks Lighttpd install
 Package: openssl libssl*\nPin: origin packages.sury.org\nPin-Priority: -1' > /etc/apt/preferences.d/dietpi-openssl
-
 				fi
 
 				# APT list update
 				G_AGUP
-
 			fi
 
 			# Base PHP modules
-			# - Apache: mod_php
-			if (( ${aSOFTWARE_INSTALL_STATE[83]} > 0 )); then
-
-				local apackages=("libapache2-mod-$PHP_NAME")
-
-			# - Lighttpd and Nginx: PHP-FPM
-			elif (( ${aSOFTWARE_INSTALL_STATE[84]} > 0 || ${aSOFTWARE_INSTALL_STATE[85]} > 0 )); then
-
+			# - Webserver: PHP-FPM
+			if (( ${aSOFTWARE_INSTALL_STATE[83]} > 0 || ${aSOFTWARE_INSTALL_STATE[84]} > 0 || ${aSOFTWARE_INSTALL_STATE[85]} > 0 ))
+			then
 				local apackages=("$PHP_NAME-fpm")
 
 			# - No webserver: CLI usage only (php binary)
 			else
-
 				local apackages=("$PHP_NAME-cli")
-
 			fi
 
 			# Additional PHP modules, commonly used by most web applications
@@ -4005,22 +4039,18 @@ Package: openssl libssl*\nPin: origin packages.sury.org\nPin-Priority: -1' > /et
 			G_AGI "${apackages[@]}"
 			systemctl -q is-active "$PHP_NAME-fpm" && G_EXEC systemctl stop "$PHP_NAME-fpm"
 
+			# Assure that mod_php is purged in favour of PHP-FPM
+			G_AGP 'libapache2-mod-php*'
+			G_EXEC rm -Rf /{etc/php,var/lib/php/modules}/*/apache2
+
 			# PHP-FPM
-			if (( ${aSOFTWARE_INSTALL_STATE[84]} > 0 || ${aSOFTWARE_INSTALL_STATE[85]} > 0 )); then
-
-				# Base
-				sed -i '/cgi.fix_pathinfo=/c\cgi.fix_pathinfo=1' "$FP_PHP_BASE_DIR/fpm/php.ini"
-
+			if (( ${aSOFTWARE_INSTALL_STATE[83]} > 0 || ${aSOFTWARE_INSTALL_STATE[84]} > 0 || ${aSOFTWARE_INSTALL_STATE[85]} > 0 ))
+			then
 				# Optimisations based on total cores
-				sed -i "/pm.max_children = /c\pm.max_children = $(( $G_HW_CPU_CORES * 3 ))" "$FP_PHP_BASE_DIR/fpm/pool.d/www.conf"
-				sed -i "/pm.start_servers = /c\pm.start_servers = $G_HW_CPU_CORES" "$FP_PHP_BASE_DIR/fpm/pool.d/www.conf"
-				sed -i "/pm.min_spare_servers = /c\pm.min_spare_servers = $G_HW_CPU_CORES" "$FP_PHP_BASE_DIR/fpm/pool.d/www.conf"
-				sed -i "/pm.max_spare_servers = /c\pm.max_spare_servers = $G_HW_CPU_CORES" "$FP_PHP_BASE_DIR/fpm/pool.d/www.conf"
-
-				# Environment settings
-				sed -i "/env\[HOSTNAME\]/c\env\[HOSTNAME\] = \$HOSTNAME" "$FP_PHP_BASE_DIR/fpm/pool.d/www.conf"
-				sed -i "/env\[PATH\]/c\env\[PATH\] = /usr/local/bin:/usr/bin:/bin" "$FP_PHP_BASE_DIR/fpm/pool.d/www.conf"
-
+				G_CONFIG_INJECT 'pm.max_children[[:blank:]=]' "pm.max_children = $(( $G_HW_CPU_CORES * 3 ))" "$FP_PHP_BASE_DIR/fpm/pool.d/www.conf"
+				G_CONFIG_INJECT 'pm.start_servers[[:blank:]=]' "pm.start_servers = $G_HW_CPU_CORES" "$FP_PHP_BASE_DIR/fpm/pool.d/www.conf"
+				G_CONFIG_INJECT 'pm.min_spare_servers[[:blank:]=]' "pm.min_spare_servers = $G_HW_CPU_CORES" "$FP_PHP_BASE_DIR/fpm/pool.d/www.conf"
+				G_CONFIG_INJECT 'pm.max_spare_servers[[:blank:]=]' "pm.max_spare_servers = $G_HW_CPU_CORES" "$FP_PHP_BASE_DIR/fpm/pool.d/www.conf"
 			fi
 
 			# We create our own PHP mod to add DietPi specific configs.
@@ -4028,13 +4058,13 @@ Package: openssl libssl*\nPin: origin packages.sury.org\nPin-Priority: -1' > /et
 			echo -e '; DietPi PHP settings\n; priority=97' > $target_php_ini
 
 			# Set UTF-8
-			G_CONFIG_INJECT 'default_charset[[:blank:]]*=' 'default_charset="UTF-8"' $target_php_ini
+			G_CONFIG_INJECT 'default_charset[[:blank:]=]' 'default_charset="UTF-8"' $target_php_ini
 
 			# Session files need to be outside of /tmp and /var/tmp due to PrivateTmp=true, else phpsessionclean.service cannot clean sessions
 			G_EXEC mkdir -p /run/php_sessions
 			G_EXEC chmod 1733 /run/php_sessions
 			echo -e '# Pre-create PHP sessions dir\nd /run/php_sessions 1733' > /etc/tmpfiles.d/dietpi-php_sessions.conf
-			G_CONFIG_INJECT 'session.save_path[[:blank:]]*=' 'session.save_path="/run/php_sessions"' $target_php_ini
+			G_CONFIG_INJECT 'session.save_path[[:blank:]=]' 'session.save_path="/run/php_sessions"' $target_php_ini
 
 			# File uploads: https://github.com/MichaIng/DietPi/issues/546
 			# - This is especially relevant for cloud software like ownCloud/Nextcloud.
@@ -4043,23 +4073,22 @@ Package: openssl libssl*\nPin: origin packages.sury.org\nPin-Priority: -1' > /et
 			# - ownCloud/Nextcloud do/did override this limit to 512 MiB, a reasonable limit which can usually still be hold in RAM without issues.
 			# - Low RAM devices (RPi1 256 MiB model) require a swap file for this, however, it is still better to cause disk writes through swap file during large file uploads only, then doing this for each and every uploaded file.
 			# - When larger file uploads are required, it depends on the system total RAM, rootfs disk and available external drives if/where to move tmp file uploads, resize or move swap file. This should be then left to user.
-			G_CONFIG_INJECT 'upload_tmp_dir=[[:blank:]]*' 'upload_tmp_dir="/tmp"' $target_php_ini
-			G_CONFIG_INJECT 'upload_max_filesize[[:blank:]]*=' 'upload_max_filesize=512M' $target_php_ini
-			G_CONFIG_INJECT 'post_max_size[[:blank:]]*=' 'post_max_size=512M' $target_php_ini
+			G_CONFIG_INJECT 'upload_tmp_dir[[:blank:]=]' 'upload_tmp_dir="/tmp"' $target_php_ini
+			G_CONFIG_INJECT 'upload_max_filesize[[:blank:]=]' 'upload_max_filesize=512M' $target_php_ini
+			G_CONFIG_INJECT 'post_max_size[[:blank:]=]' 'post_max_size=512M' $target_php_ini
 			# - Nginx: https://github.com/MichaIng/DietPi/issues/546 => https://github.com/MichaIng/DietPi/blob/dev/.conf/dps_85/nginx.conf
 
 			# Cache settings
-			local target_php_cachesize=$(( $RAM_PHYS / 30 ))
-			(( $target_php_cachesize < 10 )) && target_php_cachesize=10
+			local cache_size=$(( $RAM_PHYS / 30 ))
+			(( $cache_size < 10 )) && cache_size=10
 			# - OPcache
-			G_CONFIG_INJECT 'opcache.enable[[:blank:]]*=' 'opcache.enable=1' $target_php_ini
-			G_CONFIG_INJECT 'opcache.memory_consumption[[:blank:]]*=' "opcache.memory_consumption=$target_php_cachesize" $target_php_ini
+			G_CONFIG_INJECT 'opcache.memory_consumption[[:blank:]=]' "opcache.memory_consumption=$cache_size" $target_php_ini
 			#	Assure that interned_strings_buffer is never larger than half of memory_consumption: https://github.com/MichaIng/DietPi/issues/2293
-			(( $($PHP_NAME -i | mawk '/^opcache.interned_strings_buffer/{print $5;exit}') > $target_php_cachesize / 2 )) && G_CONFIG_INJECT 'opcache.interned_strings_buffer[[:blank:]]*=' "opcache.interned_strings_buffer=$(( $target_php_cachesize / 2 ))" $target_php_ini
-			G_CONFIG_INJECT 'opcache.revalidate_freq[[:blank:]]*=' 'opcache.revalidate_freq=60' $target_php_ini # 1 minute
+			(( $($PHP_NAME -i | mawk '/^opcache.interned_strings_buffer/{print $5;exit}') > $cache_size / 2 )) && G_CONFIG_INJECT 'opcache.interned_strings_buffer[[:blank:]=]' "opcache.interned_strings_buffer=$(( $cache_size / 2 ))" $target_php_ini
+			G_CONFIG_INJECT 'opcache.revalidate_freq[[:blank:]=]' 'opcache.revalidate_freq=60' $target_php_ini # 1 minute
 			# - APCu
-			G_CONFIG_INJECT 'apc.shm_size[[:blank:]]*=' "apc.shm_size=${target_php_cachesize}M" $target_php_ini
-			G_CONFIG_INJECT 'apc.ttl[[:blank:]]*=' 'apc.ttl=259200' $target_php_ini # 3 days
+			G_CONFIG_INJECT 'apc.shm_size[[:blank:]=]' "apc.shm_size=${cache_size}M" $target_php_ini
+			G_CONFIG_INJECT 'apc.ttl[[:blank:]=]' 'apc.ttl=259200' $target_php_ini # 3 days
 
 			# Enable all available PHP modules
 			local amodules=()
@@ -4068,8 +4097,8 @@ Package: openssl libssl*\nPin: origin packages.sury.org\nPin-Priority: -1' > /et
 			unset -v amodules
 
 			# Create PHP info pages within webroot if webserver is installed
-			if (( ${aSOFTWARE_INSTALL_STATE[83]} > 0 || ${aSOFTWARE_INSTALL_STATE[84]} > 0 || ${aSOFTWARE_INSTALL_STATE[85]} > 0 )); then
-
+			if (( ${aSOFTWARE_INSTALL_STATE[83]} > 0 || ${aSOFTWARE_INSTALL_STATE[84]} > 0 || ${aSOFTWARE_INSTALL_STATE[85]} > 0 ))
+			then
 				# PHP info page
 				echo '<?php phpinfo(); ?>' > /var/www/phpinfo.php
 				# OPcache info page
@@ -4078,9 +4107,10 @@ Package: openssl libssl*\nPin: origin packages.sury.org\nPin-Priority: -1' > /et
 				G_THREAD_START curl -sSfL 'https://raw.githubusercontent.com/krakjoe/apcu/master/apc.php' -o /var/www/apc.php
 
 				G_THREAD_WAIT
-
 			fi
 
+			# Apache: Enable PHP-FPM
+			command -v a2enconf > /dev/null && { G_EXEC a2enmod proxy_fcgi setenvif; G_EXEC a2enconf "$PHP_NAME-fpm"; }
 		fi
 
 		software_id=90 # phpMyAdmin
@@ -5011,8 +5041,10 @@ The install script will now exit. After applying one of the the above, rerun die
 			G_EXEC phpenmod ctype curl dom gd iconv intl json mbstring pdo_mysql posix simplexml xmlreader xmlwriter zip fileinfo opcache apcu redis exif
 
 			G_DIETPI-NOTIFY 2 'Apply PHP override settings for Nextcloud.' # https://docs.nextcloud.com/server/stable/admin_manual/configuration_server/server_tuning.html#enable-php-opcache
-			echo -e '; Nextcloud PHP settings\n; priority=98\napc.enable_cli=1\nopcache.enable=1\nopcache.interned_strings_buffer=8
-opcache.max_accelerated_files=10000\nopcache.memory_consumption=128\nopcache.save_comments=1\nopcache.revalidate_freq=5\nmemory_limit=512M' > $FP_PHP_BASE_DIR/mods-available/dietpi-nextcloud.ini
+			local interned_strings_buffer='' memory_consumption=''
+			(( $($PHP_NAME -i | mawk '/^opcache.interned_strings_buffer/{print $5;exit}') < 8 )) && interned_strings_buffer='\nopcache.interned_strings_buffer=8'
+			(( $($PHP_NAME -i | mawk '/^opcache.memory_consumption/{print $5;exit}') < 8 )) && memory_consumption='\nopcache.memory_consumption=128'
+			echo -e "; Nextcloud PHP settings\n; priority=98\nmemory_limit=512M$memory_consumption$interned_strings_buffer\nopcache.revalidate_freq=5\napc.enable_cli=1" > $FP_PHP_BASE_DIR/mods-available/dietpi-nextcloud.ini
 			G_EXEC phpenmod dietpi-nextcloud
 
 			if (( ${aSOFTWARE_INSTALL_STATE[83]} > 0 )); then
@@ -13087,7 +13119,8 @@ _EOF_
 		if (( ${aSOFTWARE_INSTALL_STATE[$software_id]} == -1 )); then
 
 			Banner_Uninstalling
-			G_AGP apache2
+			G_AGP apache2 libapache2-mod-php*
+			G_EXEC rm -Rf /{etc,var/{lib,log}}/apache2 /{etc/php,var/lib/php/modules}/*/apache2
 
 			# Adjust webserver preference index
 			(( $INDEX_WEBSERVER == 0 )) && INDEX_WEBSERVER=-2
@@ -13153,20 +13186,12 @@ _EOF_
 
 			Banner_Uninstalling
 			G_AGP 'php*-*' 'libapache2-mod-php*'
-			[[ -d '/etc/php' ]] && rm -R /etc/php
-			[[ -f '/var/www/phpinfo.php' ]] && rm /var/www/phpinfo.php
-			[[ -f '/var/www/apc.php' ]] && rm /var/www/apc.php
-			[[ -f '/var/www/opcache.php' ]] && rm /var/www/opcache.php
-			# temp php uploads, if it was created
-			[[ -d '/var/tmp/php_upload_tmp' ]] && rm -R /var/tmp/php_upload_tmp
-
-			## Leave PHP repo in place to avoid issues with remaining dependency packages that were pulled from this repo
-			# APT repo
-			#[[ -f '/etc/apt/sources.list.d/dietpi-php.list' ]] && rm /etc/apt/sources.list.d/dietpi-php.list
-			#[[ -f '/etc/apt/trusted.gpg.d/dietpi-php.gpg' ]] && rm /etc/apt/trusted.gpg.d/dietpi-php.gpg
-			# APT preferences
-			#[[ -f '/etc/apt/preferences.d/dietpi-openssl' ]] && rm /etc/apt/preferences.d/dietpi-openssl
-			#[[ -f '/etc/apt/preferences.d/dietpi-php' ]] && rm /etc/apt/preferences.d/dietpi-php
+			G_EXEC rm -Rf /{etc,var/lib}/php
+			[[ -f '/etc/tmpfiles.d/dietpi-php_sessions.conf' ]] && G_EXEC rm /etc/tmpfiles.d/dietpi-php_sessions.conf
+			[[ -f '/var/www/phpinfo.php' ]] && G_EXEC rm /var/www/phpinfo.php
+			[[ -f '/var/www/apc.php' ]] && G_EXEC rm /var/www/apc.php
+			[[ -f '/var/www/opcache.php' ]] && G_EXEC rm /var/www/opcache.php
+			[[ -d '/var/tmp/php_upload_tmp' ]] && G_EXEC rm -R /var/tmp/php_upload_tmp # Pre-v6.32
 
 		fi
 
