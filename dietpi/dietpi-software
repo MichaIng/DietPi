@@ -5686,8 +5686,9 @@ _EOF_
 
 			Banner_Installing
 
-			# CEC + NFS support
-			local apackages=() # Fixed package dependencies since Bullseye
+			local apackages=()
+
+			# Stretch/Buster: CEC + NFS support
 			if (( $G_DISTRO < 5 ))
 			then
 				apackages=('libcec4' 'libnfs8')
@@ -5697,43 +5698,77 @@ _EOF_
 				apackages=('libcec4' 'libnfs12')
 			fi
 
+			# RPi
+			if (( $G_HW_MODEL < 10 ))
+			then
+				# Bullseye, RPi 4 and 64-bit userland: Use KMS driver: https://www.raspberrypi.org/forums/viewtopic.php?t=251645
+				if [[ $G_DISTRO -ge 6 || $G_HW_MODEL == 4 || $(dpkg --print-architecture) == 'arm64' ]]
+				then
+					/boot/dietpi/func/dietpi-set_hardware rpi-opengl vc4-kms-v3d
+
+				# Else legacy framebuffer driver
+				else
+					/boot/dietpi/func/dietpi-set_hardware rpi-opengl disable
+				fi
+
+				# 64-bit Stretch/Buster: Debian repo: https://github.com/MichaIng/DietPi/issues/4194
+				if [[ $G_DISTRO -le 5 && $(dpkg --print-architecture) == 'arm64' ]]
+				then
+					echo -e 'Package: kodi*\nPin: origin archive.raspberrypi.org\nPin-Priority: -1' > /etc/apt/preferences.d/dietpi-kodi
+					apackages+=('kodi-repository-kodi')
+
+				# Else: RPi repo
+				else
+					[[ -f '/etc/apt/preferences.d/dietpi-kodi' ]] && G_EXEC rm /etc/apt/preferences.d/dietpi-kodi
+
+					# 32-bit Buster: Apply missing dir workaround: https://github.com/RPi-Distro/repo/issues/153
+					[[ $G_DISTRO == 5 && $(dpkg --print-architecture) == 'armhf' && ! -d '/etc/polkit-1/localauthority/50-local.d' ]] && G_EXEC mkdir -p /etc/polkit-1/localauthority/50-local.d
+
+					# Stretch/Buster: fbset required to recover desktop with custom resolution and fix startup warning: https://dietpi.com/phpbb/viewtopic.php?p=17550#p17550
+					(( $G_DISTRO < 6 )) && apackages+=('fbset')
+				fi
+
+				apackages+=('kodi')
+
 			# Odroids
-			if [[ $G_HW_MODEL == 1[0-9] ]]; then
+			elif [[ $G_HW_MODEL == 1[0-9] ]]
+			then
+				local package_list=$(apt-cache dumpavail | mawk '/^Package: /{print $2}')
 
 				# Odroid C1/C2/N2/C4
-				[[ $G_HW_MODEL == 1[0256] ]] && apt-cache dumpavail | grep -q '^Package: aml-libs-odroid$' && apackages+=('aml-libs-odroid')
+				[[ $G_HW_MODEL == 1[0256] ]] && grep -q '^aml-libs-odroid$' <<< "$package_list" && apackages+=('aml-libs-odroid')
 
 				# Odroid C1
 				if (( $G_HW_MODEL == 10 ))
 				then
-					apt-cache dumpavail | grep -q '^Package: mali400-odroid$' && apackages+=('mali400-odroid') || apackages+=('libgles2')
+					grep -q '^mali400-odroid$' <<< "$package_list" && apackages+=('mali400-odroid') || apackages+=('libgles2')
 
 				# Odroid XU4
 				elif (( $G_HW_MODEL == 11 ))
 				then
-					apt-cache dumpavail | grep -q '^Package: malit628-odroid$' && apackages+=('malit628-odroid') || apackages+=('libgles2')
-					apt-cache dumpavail | grep -q '^Package: firmware-samsung$' && apackages+=('firmware-samsung')
+					grep -q '^malit628-odroid$' <<< "$package_list" && apackages+=('malit628-odroid') || apackages+=('libgles2')
+					grep -q '^firmware-samsung$' <<< "$package_list" && apackages+=('firmware-samsung')
 
 				# Odroid C2
 				elif (( $G_HW_MODEL == 12 ))
 				then
-					apt-cache dumpavail | grep -q '^Package: mali450-odroid$' && apackages+=('mali450-odroid') || apackages+=('libgles2')
+					grep -q '^mali450-odroid$' <<< "$package_list" && apackages+=('mali450-odroid') || apackages+=('libgles2')
 
 				# Odroid N2
 				elif (( $G_HW_MODEL == 15 ))
 				then
-					apt-cache dumpavail | grep -q '^Package: malig52-fbdev-opencl-odroid$' && apackages+=('malig52-fbdev-opencl-odroid') || apackages+=('libgles2')
+					grep -q '^malig52-fbdev-opencl-odroid$' <<< "$package_list" && apackages+=('malig52-fbdev-opencl-odroid') || apackages+=('libgles2')
 
 				# Odroid C4
 				elif (( $G_HW_MODEL == 16 ))
 				then
-					apt-cache dumpavail | grep -q '^Package: malig31-fbdev-opencl-odroid$' && apackages+=('malig31-fbdev-opencl-odroid') || apackages+=('libgles2')
+					grep -q '^malig31-fbdev-opencl-odroid$' <<< "$package_list" && apackages+=('malig31-fbdev-opencl-odroid') || apackages+=('libgles2')
 				fi
 
 				# Odroid N2/C4
 				if [[ $G_HW_MODEL == 1[56] ]]
 				then
-					apt-cache dumpavail | grep -q '^Package: kodi-aml-fbdev-odroid$' && apackages+=('kodi-aml-fbdev-odroid') || apackages=('kodi')
+					grep -q '^kodi-aml-fbdev-odroid$' <<< "$package_list" && apackages+=('kodi-aml-fbdev-odroid') || apackages=('kodi' 'kodi-repository-kodi')
 					echo 'media_clock
 firmware
 decoder_common
@@ -5758,48 +5793,19 @@ amvdec_vp9' > /etc/modules-load.d/dietpi-n2-kodi.conf
 				else
 					# libcurl3-gnutls missing as dependency for kodi-odroid on arm64 Stretch (Odroid C2): https://github.com/MichaIng/DietPi/issues/446
 					(( $G_HW_ARCH == 3 && $G_DISTRO < 5 )) && apackages+=('libcurl3-gnutls')
-					apt-cache dumpavail | grep -q '^Package: kodi-odroid$' && apackages+=('kodi-odroid') || apackages=('kodi')
+					grep -q '^kodi-odroid$' <<< "$package_list" && apackages+=('kodi-odroid') || apackages=('kodi' 'kodi-repository-kodi')
 				fi
 
-			# RPi Raspbian Bullseye
-			elif [[ $G_HW_MODEL -le 9 && $G_DISTRO == 6 && $(dpkg --print-architecture) == 'armhf' ]]
-			then
-				/boot/dietpi/func/dietpi-set_hardware rpi-opengl vc4-kms-v3d
-				Download_Install "https://dietpi.com/downloads/binaries/$G_DISTRO_NAME/kodi_$G_HW_ARCH_NAME.deb"
+				unset -v package_list
 
 			# Everything else
 			else
-				apackages+=('kodi')
-
-				# RPi
-				if (( $G_HW_MODEL < 10 ))
-				then
-					# fbset required to recover desktop with custom resolution and fix startup warning: https://dietpi.com/phpbb/viewtopic.php?p=17550#p17550
-					apackages+=('fbset')
-
-					# RPi 4 and 64-bit userland: Use KMS driver: https://www.raspberrypi.org/forums/viewtopic.php?t=251645
-					if [[ $G_HW_MODEL == 4 || $(dpkg --print-architecture) == 'arm64' ]]
-					then
-						/boot/dietpi/func/dietpi-set_hardware rpi-opengl vc4-kms-v3d
-
-					# Else legacy framebuffer driver
-					else
-						/boot/dietpi/func/dietpi-set_hardware rpi-opengl disable
-					fi
-
-					# 32-bit: Apply missing dir workaround: https://github.com/MichaIng/DietPi/issues/3031#issuecomment-540477241
-					if [[ $(dpkg --print-architecture) == 'armhf' ]]
-					then
-						[[ -d '/etc/polkit-1/localauthority/50-local.d' ]] || G_EXEC mkdir -p /etc/polkit-1/localauthority/50-local.d
-
-					# 64-bit: Assure that APT does not try to install Kodi from RPi repo: https://github.com/MichaIng/DietPi/issues/4194
-					else
-						echo -e 'Package: kodi*\nPin: origin archive.raspberrypi.org\nPin-Priority: -1' > /etc/apt/preferences.d/dietpi-kodi
-					fi
-				fi
+				(( $G_HW_ARCH == 10 )) || apackages+=('libgles2')
+				apackages+=('kodi' 'kodi-repository-kodi')
 			fi
 
 			G_AGI "${apackages[@]}"
+			unset -v apackages
 
 			# Desktop entry
 			[[ -d '/var/lib/dietpi/dietpi-software/installed/desktop/icons' ]] && G_THREAD_START curl -sSfL "https://raw.githubusercontent.com/$G_GITOWNER/DietPi/$G_GITBRANCH/.conf/desktop/icons/kodi-icon.png" -o /var/lib/dietpi/dietpi-software/installed/desktop/icons/kodi-icon.png
