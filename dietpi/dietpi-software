@@ -834,7 +834,8 @@ INDEX_BROWSER=$INDEX_BROWSER"
 		aSOFTWARE_DESC[$software_id]='personal github server with web interface'
 		aSOFTWARE_CATX[$software_id]=4
 		aSOFTWARE_DOCS[$software_id]='https://dietpi.com/docs/software/cloud/#gogs'
-		aSOFTWARE_DEPS[$software_id]='17 88 105'
+		aSOFTWARE_DEPS[$software_id]='17 88 0'
+		aSOFTWARE_CONFLICTS[$software_id]='165'
 		#------------------
 		software_id=50
 
@@ -865,7 +866,8 @@ INDEX_BROWSER=$INDEX_BROWSER"
 		aSOFTWARE_DESC[$software_id]='Git with a cup of tea'
 		aSOFTWARE_CATX[$software_id]=4
 		aSOFTWARE_DOCS[$software_id]='https://dietpi.com/docs/software/cloud/#gitea'
-		aSOFTWARE_DEPS[$software_id]='17 88'
+		aSOFTWARE_DEPS[$software_id]='17 88 0'
+		aSOFTWARE_CONFLICTS[$software_id]='49'
 		#------------------
 		software_id=177
 
@@ -2008,6 +2010,7 @@ INDEX_BROWSER=$INDEX_BROWSER"
 		aSOFTWARE_DESC[$software_id]='Feature-rich SSH server with SFTP and SCP support'
 		aSOFTWARE_CATX[$software_id]=-1
 		aSOFTWARE_DOCS[$software_id]='https://dietpi.com/docs/software/ssh/#openssh'
+		aSOFTWARE_DEPS[$software_id]='0'
 
 		#--------------------------------------------------------------------------------
 		# Init install state for defined software
@@ -2959,9 +2962,7 @@ _EOF_
 			# Stop Dropbear service to unbind port 22
 			systemctl -q is-active dropbear && G_EXEC systemctl stop dropbear
 
-			# SSH server package pulls client as dependency. Mark client hence as installed and mark it explicitly so that it is not autoremoved with the server but must be marked for uninstall instead.
-			G_AGI openssh-server openssh-client
-			aSOFTWARE_INSTALL_STATE[0]=2
+			G_AGI openssh-server
 
 			# Allow root login
 			G_CONFIG_INJECT 'PermitRootLogin[[:blank:]]' 'PermitRootLogin yes' /etc/ssh/sshd_config
@@ -9392,12 +9393,11 @@ _EOF_
 			Download_Install "$url"
 
 			# Remove old install dir, but preserve existing configs
-			if [[ -d '/etc/gogs' ]]; then
-
+			if [[ -d '/etc/gogs' ]]
+			then
 				[[ -d '/etc/gogs/custom' ]] && G_EXEC mv /etc/gogs/custom gogs
 				G_EXEC mv /etc/gogs/.??* gogs # dot files = SSH and Git user configs
 				G_EXEC rm -R /etc/gogs
-
 			fi
 
 			G_EXEC mv gogs /etc/gogs
@@ -9410,13 +9410,7 @@ _EOF_
 			G_EXEC chown -R gogs:gogs /etc/gogs /mnt/dietpi_userdata/gogs-repo /var/log/gogs
 
 			# Database
-			if [[ ! -d '/var/lib/mysql/gogs' ]]; then
-
-				G_EXEC systemctl restart mariadb
-				mysql -f < /etc/gogs/scripts/mysql.sql # -f until: https://github.com/gogs/gogs/pull/6424
-				mysql -e "grant all privileges on gogs.* to gogs@localhost identified by '$GLOBAL_PW'"
-
-			fi
+			/boot/dietpi/func/create_mysql_db gogs gogs "$GLOBAL_PW"
 
 			# Service: https://github.com/gogs/gogs/blob/main/scripts/systemd/gogs.service
 			cat << '_EOF_' > /etc/systemd/system/gogs.service
@@ -11746,32 +11740,31 @@ _EOF_
 
 			Banner_Installing
 
-			# Binary + data dir
-			[[ -d '/mnt/dietpi_userdata/gitea/gitea-repositories' ]] || G_EXEC mkdir -p /mnt/dietpi_userdata/gitea/gitea-repositories
-
 			# ARMv6 + ARMv7 since as of v1.8 there are issues with ARMv7 binaries on Raspbian which are hence not provided anymore: https://github.com/MichaIng/DietPi/issues/2959 (Troubleshooting)
 			local arch='arm-6'
 
 			# ARMv8
-			if (( $G_HW_ARCH == 3 )); then
-
+			if (( $G_HW_ARCH == 3 ))
+			then
 				arch='arm64'
 
 			# x86_64
-			elif (( $G_HW_ARCH == 10 )); then
-
+			elif (( $G_HW_ARCH == 10 ))
+			then
 				arch='amd64'
-
 			fi
 
-			local fallback_url="https://github.com/go-gitea/gitea/releases/download/v1.15.0/gitea-1.15.0-linux-$arch"
+			local fallback_url="https://github.com/go-gitea/gitea/releases/download/v1.15.7/gitea-1.15.7-linux-$arch"
 			Download_Install "$(curl -sSfL 'https://api.github.com/repos/go-gitea/gitea/releases/latest' | mawk -F\" "/\"browser_download_url\": .*\/gitea-[^\"\/]*-linux-$arch\"/{print \$4}")" /mnt/dietpi_userdata/gitea/gitea
 
 			# Logs
 			[[ -d '/var/log/gitea' ]] || G_EXEC mkdir /var/log/gitea
 
+			# User
+			Create_User -d /mnt/dietpi_userdata/gitea gitea
+
 			# Permissions
-			G_EXEC chown -R dietpi:dietpi /var/log/gitea /mnt/dietpi_userdata/gitea
+			G_EXEC chown -R gitea:gitea /mnt/dietpi_userdata/gitea /var/log/gitea
 			G_EXEC chmod +x /mnt/dietpi_userdata/gitea/gitea
 
 			# Database
@@ -11781,12 +11774,19 @@ _EOF_
 			cat << '_EOF_' > /etc/systemd/system/gitea.service
 [Unit]
 Description=Gitea (DietPi)
+Wants=network-online.target
+After=network-online.target mariadb.service
 
 [Service]
-User=dietpi
-WorkingDirectory=/mnt/dietpi_userdata/gitea/gitea-repositories
-Environment=USER=dietpi HOME=/mnt/dietpi_userdata/gitea
+User=gitea
+WorkingDirectory=/mnt/dietpi_userdata/gitea
 ExecStart=/mnt/dietpi_userdata/gitea/gitea web
+
+# Hardening
+ProtectSystem=full
+PrivateDevices=yes
+PrivateTmp=yes
+NoNewPrivileges=true
 
 [Install]
 WantedBy=multi-user.target
@@ -14379,7 +14379,7 @@ _EOF_
 			systemctl unmask vncserver-virtuald 2> /dev/null
 			systemctl disable --now vncserver-virtuald 2> /dev/null
 
-			apt-mark auto dbus-user-session 2> /dev/null
+			dpkg-query -s 'dbus-user-session' &> /dev/null && G_EXEC apt-mark auto dbus-user-session
 
 			G_AGP 'tigervnc-*' x11vnc realvnc-vnc-server
 
@@ -14408,7 +14408,7 @@ _EOF_
 
 			Banner_Uninstalling
 			G_AGP fail2ban
-			dpkg-query -s python3-systemd &> /dev/null && G_EXEC apt-mark auto python3-systemd
+			dpkg-query -s 'python3-systemd' &> /dev/null && G_EXEC apt-mark auto python3-systemd
 			[[ -d '/etc/fail2ban' ]] && G_EXEC rm -R /etc/fail2ban
 
 		fi
@@ -14800,20 +14800,23 @@ _EOF_
 
 			Banner_Uninstalling
 
-			if [[ -f '/etc/systemd/system/gogs.service' ]]; then
-
+			# Service
+			if [[ -f '/etc/systemd/system/gogs.service' ]]
+			then
 				G_EXEC systemctl disable --now gogs
 				G_EXEC rm /etc/systemd/system/gogs.service
-
 			fi
 			[[ -d '/etc/systemd/system/gogs.service.d' ]] && G_EXEC rm -R /etc/systemd/system/gogs.service.d
 
+			# User
 			getent passwd gogs > /dev/null && G_EXEC userdel gogs
 			getent group gogs > /dev/null && G_EXEC groupdel gogs
 
+			# Data
 			[[ -d '/etc/gogs' ]] && G_EXEC rm -R /etc/gogs
 			[[ -d '/var/log/gogs' ]] && G_EXEC rm -R /var/log/gogs
 
+			# Database
 			systemctl start mariadb
 			mysqladmin drop gogs -f
 			mysql -e 'drop user gogs@localhost'
@@ -15018,20 +15021,23 @@ _EOF_
 
 			Banner_Uninstalling
 
-			# Remove service
-			if [[ -f '/etc/systemd/system/gitea.service' ]]; then
-
+			# Service
+			if [[ -f '/etc/systemd/system/gitea.service' ]]
+			then
 				G_EXEC systemctl disable --now gitea
 				G_EXEC rm /etc/systemd/system/gitea.service
-
 			fi
 			[[ -d '/etc/systemd/system/gitea.service.d' ]] && G_EXEC rm -R /etc/systemd/system/gitea.service.d
 
-			# Delete data
+			# User
+			getent passwd gitea > /dev/null && G_EXEC userdel gitea
+			getent group gitea > /dev/null && G_EXEC groupdel gitea
+
+			# Data
 			[[ -d '/mnt/dietpi_userdata/gitea' ]] && G_EXEC rm -R /mnt/dietpi_userdata/gitea
 			[[ -d '/var/log/gitea' ]] && G_EXEC rm -R /var/log/gitea
 
-			# Drop/delete database
+			# Database
 			systemctl start mariadb
 			mysqladmin drop gitea -f
 			mysql -e 'drop user gitea@localhost'
@@ -15508,8 +15514,8 @@ _EOF_
 		if (( ${aSOFTWARE_INSTALL_STATE[$software_id]} == -1 )); then
 
 			Banner_Uninstalling
-			# This also removes OpenSSH server. So lets check OpenSSH server isn't installed before hand.
-			dpkg-query -s 'openssh-server' &> /dev/null || G_AGP openssh-client
+			# The OpenSSH server depends on the OpenSSH client, hence only mark it for autoremoval only.
+			dpkg-query -s 'openssh-client' &> /dev/null && G_EXEC apt-mark auto openssh-client
 
 		fi
 
@@ -15718,8 +15724,7 @@ _EOF_
 		if (( ${aSOFTWARE_INSTALL_STATE[$software_id]} == -1 )); then
 
 			Banner_Uninstalling
-			G_DIETPI-NOTIFY 2 'Marking rsyslog for autoremoval, hence it stays installed if any other package depends on it'
-			apt-mark auto rsyslog 2> /dev/null # https://github.com/MichaIng/DietPi/issues/2454
+			dpkg-query -s 'rsyslog' &> /dev/null && G_EXEC apt-mark auto rsyslog # https://github.com/MichaIng/DietPi/issues/2454
 
 			# Update logging choice index
 			if [[ $INDEX_LOGGING == -3 ]]
@@ -16727,20 +16732,6 @@ We allow it to take up to 30 minutes, it's process can be followed, please be pa
 \n[ INFO ] mjpg-streamer will not be compiled with all available plugins by default.
 \nIf you require other input or output plugins, simply install the required dependencies. Plugins will be compiled automatically if dependencies are met.
 \nFor available plugins and their dependencies, watch the info printed during the build and check out the official GitHub repository: https://github.com/jacksonliam/mjpg-streamer'
-
-		# Gogs: Requires OpenSSH for ssh-keygen binary: https://github.com/MichaIng/DietPi/issues/442
-		if (( ${aSOFTWARE_INSTALL_STATE[49]} == 1 && ${aSOFTWARE_INSTALL_STATE[105]} < 1 )); then
-
-			if G_WHIP_YESNO "[WARNING] Gogs requires the OpenSSH server to function.
-\nIf you continue, OpenSSH will be selected for install on your system and replace the Dropbear SSH server if installed.
-\nWould you like to continue with the Gogs installation?"
-			then
-				aSOFTWARE_INSTALL_STATE[105]=1
-			else
-				aSOFTWARE_INSTALL_STATE[49]=0
-			fi
-
-		fi
 
 		# RPi Cam Interface: Warn user of locking out camera: https://github.com/MichaIng/DietPi/issues/249
 		(( ${aSOFTWARE_INSTALL_STATE[59]} == 1 )) && G_WHIP_MSG 'RPi Cam Control Interface will automatically start and activate the camera during boot. This will prevent other programs (like raspistill) from using the camera.
