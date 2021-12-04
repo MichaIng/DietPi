@@ -1506,9 +1506,9 @@ _EOF_'
 
 				/boot/dietpi/func/dietpi-set_hardware serialconsole disable ttyAMA0
 				# The actual serial console services need to be masked explicitly to ensure they are not autostarted when the image is created within a container or without both serial devices present, since masks are only placed by dietpi-set_hardware for existing devices: : https://github.com/MichaIng/DietPi/issues/5014
-				G_EXEC systemctl mask ttyAMA0
+				G_EXEC systemctl mask serial-getty@ttyAMA0
 				/boot/dietpi/func/dietpi-set_hardware serialconsole disable ttyS0
-				G_EXEC systemctl mask ttyS0
+				G_EXEC systemctl mask serial-getty@ttyS0
 				/boot/dietpi/func/dietpi-set_hardware serialconsole enable serial0
 
 			# ROCK Pi S: Enable on ttyS0 only
