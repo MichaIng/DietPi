@@ -133,80 +133,105 @@ _EOF_
 		# Check valid FS
 		Check_Supported_Directory_Location || return 1
 
-		# Generate target dir
-		G_EXEC_NOHALT=1 G_EXEC mkdir -p "$FP_TARGET/data"
+		# Rotate backups with more than 1 shall be kept
+		if (( $AMOUNT > 1 ))
+		then
+			G_DIETPI-NOTIFY 2 'Rotating backup archive'
+			if [[ -d $FP_TARGET/data_$AMOUNT ]]
+			then
+				[[ -d $FP_TARGET/data_tmp ]] && G_EXEC rm -R "$FP_TARGET/data_tmp" # Failsafe
+				G_EXEC mv "$FP_TARGET/data_$AMOUNT" "$FP_TARGET/data_tmp"
+			fi
+			if [[ -d $FP_TARGET/data ]]
+			then
+				for ((i=$AMOUNT-1;i>1;i--))
+				do
+					[[ -d $FP_TARGET/data_$i ]] && G_EXEC mv "$FP_TARGET/data_$i" "$FP_TARGET/data_$((i+1))"
+				done
+				G_EXEC mv "$FP_TARGET/data" "$FP_TARGET/data_2"
+			fi
+			[[ -d $FP_TARGET/data_tmp ]] && G_EXEC mv "$FP_TARGET/data_tmp" "$FP_TARGET/data"
+		fi
 
-		# Error: Unable to create target folder.
-		if [[ ! -d $FP_TARGET/data ]]; then
+		# Remove backups above selected amount
+		local number
+		for i in "$FP_TARGET/data_"*
+		do
+			number=${i#$FP_TARGET/data_}
+			G_CHECK_VALIDINT "$number" $(($AMOUNT+1)) || continue
+			G_EXEC_DESC "Removing backup number $number which is above the selected amount $AMOUNT" G_EXEC rm -R "$i"
+		done
 
-			G_WHIP_MSG "Backup failed:\n\nUnable to create $FP_TARGET/data"
-
+		# Generate or touch target dir, the letter is used to show the correct last update timestamp when restoring one of multiple backups from the archive.
+		if [[ -d $FP_TARGET/data ]]
+		then
+			G_EXEC touch "$FP_TARGET/data"
 		else
+			G_EXEC mkdir -p "$FP_TARGET/data"
+		fi
 
-			/boot/dietpi/dietpi-services stop
+		/boot/dietpi/dietpi-services stop
 
-			# Check if rsync is already running, while the daemon should have been stopped above
-			pgrep 'rsync' &> /dev/null && { Error_Rsync_Already_Running 'Backup'; return 1; }
+		# Check if rsync is already running, while the daemon should have been stopped above
+		pgrep 'rsync' &> /dev/null && { Error_Rsync_Already_Running 'Backup'; return 1; }
 
-			# Install required rsync if missing
-			G_AG_CHECK_INSTALL_PREREQ rsync
+		# Install required rsync if missing
+		G_AG_CHECK_INSTALL_PREREQ rsync
 
-			# Generate Exclude/Include lists
-			Create_Filter_Include_Exclude
+		# Generate Exclude/Include lists
+		Create_Filter_Include_Exclude
 
-			# Check for sufficient free space
-			local old_backup_size=$(du -sB1 "$FP_TARGET/data" | mawk '{print $1}') # Actual disk usage in bytes
-			# - Dry run to obtain transferred data size
-			rsync --dry-run --stats "${aRSYNC_RUN_OPTIONS_BACKUP[@]}" "$FP_SOURCE" "$FP_TARGET/data/" > .dietpi-backup_result
-			local new_backup_size=$(grep -m1 '^Total file size:' .dietpi-backup_result | sed 's/[^0-9]*//g') # Apparent data size without block size related overhead
-			local total_file_count=$(mawk '/^Number of files:/{print $6;exit}' .dietpi-backup_result | sed 's/[^0-9]*//g')
-			local total_folder_count=$(mawk '/^Number of files:/{print $8;exit}' .dietpi-backup_result | sed 's/[^0-9]*//g')
-			rm .dietpi-backup_result
-			local target_fs_blocksize=$(stat -fc '%s' "$FP_TARGET/data")
-			new_backup_size=$(( $new_backup_size + ( $total_file_count + $total_folder_count ) * $target_fs_blocksize )) # Add one block size for each file + dir as worst case result
-			local end_result=$(( ( $new_backup_size - $old_backup_size ) / 1024**2 + 1 )) # bytes => MiB rounded up
-			# - Perform check
-			if ! G_CHECK_FREESPACE "$FP_TARGET/data" $end_result; then
+		# Check for sufficient free space
+		local old_backup_size=$(du -sB1 "$FP_TARGET/data" | mawk '{print $1}') # Actual disk usage in bytes
+		# - Dry run to obtain transferred data size
+		rsync --dry-run --stats "${aRSYNC_RUN_OPTIONS_BACKUP[@]}" "$FP_SOURCE" "$FP_TARGET/data/" > .dietpi-backup_result
+		local new_backup_size=$(grep -m1 '^Total file size:' .dietpi-backup_result | sed 's/[^0-9]*//g') # Apparent data size without block size related overhead
+		local total_file_count=$(mawk '/^Number of files:/{print $6;exit}' .dietpi-backup_result | sed 's/[^0-9]*//g')
+		local total_folder_count=$(mawk '/^Number of files:/{print $8;exit}' .dietpi-backup_result | sed 's/[^0-9]*//g')
+		rm .dietpi-backup_result
+		local target_fs_blocksize=$(stat -fc '%s' "$FP_TARGET/data")
+		new_backup_size=$(( $new_backup_size + ( $total_file_count + $total_folder_count ) * $target_fs_blocksize )) # Add one block size for each file + dir as worst case result
+		local end_result=$(( ( $new_backup_size - $old_backup_size ) / 1024**2 + 1 )) # bytes => MiB rounded up
+		# - Perform check
+		if ! G_CHECK_FREESPACE "$FP_TARGET/data" $end_result; then
 
-				G_WHIP_BUTTON_OK_TEXT='Ignore'
-				G_WHIP_BUTTON_CANCEL_TEXT='Exit'
-				if ! G_WHIP_YESNO 'The backup target location appears to have insufficient free space to successfully finish the backup.
+			G_WHIP_BUTTON_OK_TEXT='Ignore'
+			G_WHIP_BUTTON_CANCEL_TEXT='Exit'
+			if ! G_WHIP_YESNO 'The backup target location appears to have insufficient free space to successfully finish the backup.
 However, this check is a rough estimation in reasonable time, thus it could be marginally incorrect.
 \nWould you like to override this warning and continue with the backup?'; then
 
-					echo -e "Backup cancelled due to insufficient free space    : $(Print_Date)" >> "$FP_TARGET/$FP_STATS"
-					/boot/dietpi/dietpi-services start
-					return 1
-
-				fi
+				echo -e "Backup cancelled due to insufficient free space    : $(Print_Date)" >> "$FP_TARGET/$FP_STATS"
+				/boot/dietpi/dietpi-services start
+				return 1
 
 			fi
-
-			G_DIETPI-NOTIFY 2 "Backup to $FP_TARGET in progress, please wait..."
-
-			# Init log file
-			echo -e "Backup log from $(Print_Date)\n" > "$FP_TARGET/$FP_LOG"
-
-			rsync "${aRSYNC_RUN_OPTIONS_BACKUP[@]}" -v --log-file="$FP_TARGET/$FP_LOG" "$FP_SOURCE" "$FP_TARGET/data/"
-			EXIT_CODE=$?
-
-			/boot/dietpi/dietpi-services start
-
-			G_DIETPI-NOTIFY -1 $EXIT_CODE "$G_PROGRAM_NAME: Backup"
-			if (( $EXIT_CODE == 0 )); then
-
-				echo -e "Backup completed    : $(Print_Date)" >> "$FP_TARGET/$FP_STATS"
-				G_WHIP_MSG "Backup completed:\n - $FP_TARGET"
-
-			else
-
-				G_WHIP_MSG "Backup failed:\n - $FP_TARGET\n\nYou will see the log file on the next screen. Please check it for information and/or errors."
-
-			fi
-
-			log=1 G_WHIP_VIEWFILE "$FP_TARGET/$FP_LOG"
 
 		fi
+
+		G_DIETPI-NOTIFY 2 "Backup to $FP_TARGET in progress, please wait..."
+
+		# Init log file
+		echo -e "Backup log from $(Print_Date)\n" > "$FP_TARGET/$FP_LOG"
+
+		rsync "${aRSYNC_RUN_OPTIONS_BACKUP[@]}" -v --log-file="$FP_TARGET/$FP_LOG" "$FP_SOURCE" "$FP_TARGET/data/"
+		EXIT_CODE=$?
+
+		/boot/dietpi/dietpi-services start
+
+		G_DIETPI-NOTIFY -1 $EXIT_CODE "$G_PROGRAM_NAME: Backup"
+		if (( $EXIT_CODE == 0 )); then
+
+			echo -e "Backup completed    : $(Print_Date)" >> "$FP_TARGET/$FP_STATS"
+			G_WHIP_MSG "Backup completed:\n - $FP_TARGET"
+
+		else
+
+			G_WHIP_MSG "Backup failed:\n - $FP_TARGET\n\nYou will see the log file on the next screen. Please check it for information and/or errors."
+
+		fi
+
+		log=1 G_WHIP_VIEWFILE "$FP_TARGET/$FP_LOG"
 
 	}
 
@@ -218,7 +243,7 @@ However, this check is a rough estimation in reasonable time, thus it could be m
 		PARTUUID_ROOT=$(findmnt -Ufnro PARTUUID -M /)
 
 		# If the current rootfs' UUID or PARTUUID can be found in the the backups fstab, it can be assumed that it was created from the same drives.
-		grep -q "^UUID=${UUID_ROOT}[[:blank:]]" "$FP_TARGET/data/etc/fstab" || grep -q "^PARTUUID=${PARTUUID_ROOT}[[:blank:]]" "$FP_TARGET/data/etc/fstab" && return 0
+		grep -q "^UUID=${UUID_ROOT}[[:blank:]]" "$FP_TARGET/$DATA/etc/fstab" || grep -q "^PARTUUID=${PARTUUID_ROOT}[[:blank:]]" "$FP_TARGET/$DATA/etc/fstab" && return 0
 
 		UPDATE_UUIDs=1
 
@@ -229,22 +254,22 @@ However, this check is a rough estimation in reasonable time, thus it could be m
 			UPDATE_GRUB=1
 
 		# - RPi
-		elif (( $G_HW_MODEL < 10 )) && [[ -f $FP_TARGET/data/boot/cmdline.txt ]]
+		elif (( $G_HW_MODEL < 10 )) && [[ -f $FP_TARGET/$DATA/boot/cmdline.txt ]]
 		then
 			UPDATE_RPI=1
 
 		# - Armbian
-		elif [[ -f $FP_TARGET/data/boot/armbianEnv.txt ]]
+		elif [[ -f $FP_TARGET/$DATA/boot/armbianEnv.txt ]]
 		then
 			UPDATE_ARMBIAN=1
 
 		# - Odroids / classic U-Boot
-		elif [[ -f $FP_TARGET/data/boot/boot.ini ]]
+		elif [[ -f $FP_TARGET/$DATA/boot/boot.ini ]]
 		then
 			UPDATE_ODROID=1
 
 		# - Modern U-Boot
-		elif [[ -f $FP_TARGET/data/boot/boot.cmd ]] && command -v mkimage > /dev/null
+		elif [[ -f $FP_TARGET/$DATA/boot/boot.cmd ]] && command -v mkimage > /dev/null
 		then
 			UPDATE_UBOOT=1
 
@@ -315,7 +340,11 @@ However, this check is a rough estimation in reasonable time, thus it could be m
 		fi
 	}
 
+	# $1: Optional restore point from the archive
 	Run_Restore(){
+
+		local DATA='data'
+		(( $1 > 1 )) && DATA="data_$1"
 
 		G_DIETPI-NOTIFY 3 "$G_PROGRAM_NAME" 'Restore'
 
@@ -323,54 +352,48 @@ However, this check is a rough estimation in reasonable time, thus it could be m
 		Check_Supported_Directory_Location || return 1
 
 		# Error: Backup not found
-		if [[ ! -f $FP_TARGET/$FP_STATS ]]; then
+		[[ -f $FP_TARGET/$FP_STATS ]] || { G_WHIP_MSG "Restore failed:\n\n$FP_TARGET/$FP_STATS does not exist\n\nHave you created a backup?"; return 1; }
 
-			G_WHIP_MSG "Restore failed:\n\n$FP_TARGET/$FP_STATS does not exist\n\nHave you created a backup?"
+		# Check for matching filesystem UUIDs of backup and running system
+		Check_UUIDs || return 1
 
-		# Restore
+		/boot/dietpi/dietpi-services stop
+
+		# Check if rsync is already running, while the daemon should have been stopped above
+		pgrep 'rsync' &> /dev/null && { Error_Rsync_Already_Running 'Restore'; return 1; }
+
+		# Install required rsync if missing
+		G_AG_CHECK_INSTALL_PREREQ rsync
+
+		# Generate Exclude/Include lists
+		Create_Filter_Include_Exclude
+
+		G_DIETPI-NOTIFY 2 "Restore from $FP_TARGET in progress, please wait..."
+
+		# Init log file
+		echo -e "Restore log from $(Print_Date)\n" > "$FP_TARGET/$FP_LOG"
+
+		rsync "${aRSYNC_RUN_OPTIONS_RESTORE[@]}" -v --log-file="$FP_TARGET/$FP_LOG" "$FP_TARGET/$DATA/" "$FP_SOURCE"
+		EXIT_CODE=$?
+
+		hash -r # Clear PATH cache
+		(( $UPDATE_UUIDs )) && Update_UUIDs
+
+		/boot/dietpi/dietpi-services start
+
+		G_DIETPI-NOTIFY -1 $EXIT_CODE "$G_PROGRAM_NAME: Restore"
+		if (( $EXIT_CODE == 0 )); then
+
+			echo -e "Restore completed    : $(Print_Date)" >> "$FP_TARGET/$FP_STATS"
+			G_WHIP_MSG "Restore completed:\n - $FP_TARGET\n\nNB: A Reboot is highly recommended."
+
 		else
 
-			Check_UUIDs || return 1
-
-			/boot/dietpi/dietpi-services stop
-
-			# Check if rsync is already running, while the daemon should have been stopped above
-			pgrep 'rsync' &> /dev/null && { Error_Rsync_Already_Running 'Restore'; return 1; }
-
-			# Install required rsync if missing
-			G_AG_CHECK_INSTALL_PREREQ rsync
-
-			# Generate Exclude/Include lists
-			Create_Filter_Include_Exclude
-
-			G_DIETPI-NOTIFY 2 "Restore from $FP_TARGET in progress, please wait..."
-
-			# Init log file
-			echo -e "Restore log from $(Print_Date)\n" > "$FP_TARGET/$FP_LOG"
-
-			rsync "${aRSYNC_RUN_OPTIONS_RESTORE[@]}" -v --log-file="$FP_TARGET/$FP_LOG" "$FP_TARGET/data/" "$FP_SOURCE"
-			EXIT_CODE=$?
-
-			hash -r # Clear PATH cache
-			(( $UPDATE_UUIDs )) && Update_UUIDs
-
-			/boot/dietpi/dietpi-services start
-
-			G_DIETPI-NOTIFY -1 $EXIT_CODE "$G_PROGRAM_NAME: Restore"
-			if (( $EXIT_CODE == 0 )); then
-
-				echo -e "Restore completed    : $(Print_Date)" >> "$FP_TARGET/$FP_STATS"
-				G_WHIP_MSG "Restore completed:\n - $FP_TARGET\n\nNB: A Reboot is highly recommended."
-
-			else
-
-				G_WHIP_MSG "Restore failed:\n - $FP_TARGET\n\nYou will see the log file on the next screen. Please check it for information and/or errors."
-
-			fi
-
-			log=1 G_WHIP_VIEWFILE "$FP_TARGET/$FP_LOG"
+			G_WHIP_MSG "Restore failed:\n - $FP_TARGET\n\nYou will see the log file on the next screen. Please check it for information and/or errors."
 
 		fi
+
+		log=1 G_WHIP_VIEWFILE "$FP_TARGET/$FP_LOG"
 
 	}
 
@@ -379,12 +402,14 @@ However, this check is a rough estimation in reasonable time, thus it could be m
 	#/////////////////////////////////////////////////////////////////////////////////////
 	readonly FP_SETTINGS='/boot/dietpi/.dietpi-backup_settings'
 	DAILY_BACKUP=0
+	AMOUNT=1
 
 	Write_Settings_File()
 	{
 		cat << _EOF_ > $FP_SETTINGS
 FP_TARGET=$FP_TARGET
 DAILY_BACKUP=$DAILY_BACKUP
+AMOUNT=$AMOUNT
 _EOF_
 	}
 
@@ -414,6 +439,7 @@ _EOF_
 			'Location' ': Change where your backup will be saved and restored from.'
 			'Filter' ': Modify include/exclude filter for backups.'
 			'Daily Backup' ": [$daily_backup_text] Daily backups via cron job"
+			'Amount' ": [$AMOUNT] The amount of backups to keep"
 		)
 		if [[ -f $FP_TARGET/$FP_STATS ]]
 		then
@@ -444,15 +470,32 @@ _EOF_
 
 				'Location') TARGETMENUID=1;;
 
+				'Filter') nano $FP_FILTER_CUSTOM;;
+
 				'Daily Backup') DAILY_BACKUP=$(( ! $DAILY_BACKUP ));;
 
-				'Filter') nano $FP_FILTER_CUSTOM;;
+				'Amount') G_WHIP_DEFAULT_ITEM=$AMOUNT G_WHIP_INPUTBOX 'Please enter the amount of backups to keep.\n - Needs to be 1 or greater.' && G_CHECK_VALIDINT "$G_WHIP_RETURNED_VALUE" 1 && AMOUNT=$G_WHIP_RETURNED_VALUE
 
 				'Delete') G_WHIP_YESNO "Do you wish to DELETE the following backup?\n - $FP_TARGET" && G_EXEC_NOEXIT=1 G_EXEC rm -R "$FP_TARGET";;
 
 				'Backup') G_WHIP_YESNO "The system will be backed up to:\n - $FP_TARGET\n\nDo you wish to continue and start the backup?" && Run_Backup;;
 
-				'Restore') G_WHIP_YESNO "The system will be restored from:\n - $FP_TARGET\n\nDo you wish to continue and start the restore?" && Run_Restore;;
+				'Restore')
+					if (( $AMOUNT > 1 ))
+					then
+						G_WHIP_MENU_ARRAY=('1' "$(stat -c '%y' "$FP_TARGET/data")")
+						for ((i=2;i>=$AMOUNT;i++))
+						do
+							[[ -d $FP_TARGET/data_$i ]] && G_WHIP_MENU_ARRAY+=("$i" "$(stat -c '%y' "$FP_TARGET/data_$i")")
+						done
+						if (( ${#G_WHIP_MENU_ARRAY[@]} > 2 ))
+						then
+							G_WHIP_MENU 'Please select the backup from the archive you wish to restore:' && Run_Restore "$G_WHIP_RETURNED_VALUE"
+							return
+						fi
+					fi
+					G_WHIP_YESNO "The system will be restored from:\n - $FP_TARGET\n\nDo you wish to continue and start the restore?" && Run_Restore
+				;;
 
 			esac
 
