@@ -180,12 +180,12 @@ _EOF_
 
 	# Detect the distro version of this operating system
 	distro=$(</etc/debian_version)
-	if [[ $distro == '9.'* ]]; then
+	if [[ $distro == '9.'* || $distro == 'stretch/sid' ]]; then
 
 		G_DISTRO=4
 		G_DISTRO_NAME='stretch'
 
-	elif [[ $distro == '10.'* ]]; then
+	elif [[ $distro == '10.'* || $distro == 'buster/sid' ]]; then
 
 		G_DISTRO=5
 		G_DISTRO_NAME='buster'
@@ -195,7 +195,7 @@ _EOF_
 		G_DISTRO=6
 		G_DISTRO_NAME='bullseye'
 
-	elif [[ $distro == 'bookworm/sid' ]]; then
+	elif [[ $distro == '12.'* || $distro == 'bookworm/sid' ]]; then
 
 		G_DISTRO=7
 		G_DISTRO_NAME='bookworm'
@@ -470,31 +470,13 @@ _EOF_
 
 		)
 
-		# - Enable/list available options based on criteria
-		#	NB: Whiptail uses 2 array indices per entry: value + description
+		# - List supported distro versions up from currently installed one
 		G_WHIP_MENU_ARRAY=()
 		for ((i=0; i<${#DISTRO_LIST_ARRAY[@]}; i+=2))
 		do
-			# Disable downgrades
-			if (( ${DISTRO_LIST_ARRAY[$i]} < $G_DISTRO )); then
-
-				G_DIETPI-NOTIFY 2 "Disabled distro downgrade to${DISTRO_LIST_ARRAY[$i+1]%% (*}"
-
-			# Enable option
-			else
-
-				G_WHIP_MENU_ARRAY+=("${DISTRO_LIST_ARRAY[$i]}" "${DISTRO_LIST_ARRAY[$i+1]}")
-
-			fi
+			(( ${DISTRO_LIST_ARRAY[$i]} < $G_DISTRO )) || G_WHIP_MENU_ARRAY+=("${DISTRO_LIST_ARRAY[$i]}" "${DISTRO_LIST_ARRAY[$i+1]}")
 		done
 		unset -v DISTRO_LIST_ARRAY
-
-		if (( ! ${#G_WHIP_MENU_ARRAY[@]} )); then
-
-			G_DIETPI-NOTIFY 1 'No available distro versions found for this system. Aborting...\n'
-			exit 1
-
-		fi
 
 		while :
 		do
@@ -503,7 +485,7 @@ _EOF_
 				[[ $DISTRO_TARGET == "$i" ]] && break 2
 			done
 
-			G_WHIP_DEFAULT_ITEM=${G_WHIP_MENU_ARRAY[0]} # Downgrades disabled, so first item matches current/lowest supported distro version
+			G_WHIP_DEFAULT_ITEM=${G_WHIP_MENU_ARRAY[0]} # First item matches current distro version
 			G_WHIP_BUTTON_CANCEL_TEXT='Exit'
 			if G_WHIP_MENU "Please select a Debian version to install on this system.\n
 Currently installed: $G_DISTRO_NAME (ID: $G_DISTRO)"; then
@@ -524,15 +506,9 @@ Currently installed: $G_DISTRO_NAME (ID: $G_DISTRO)"; then
 
 			DISTRO_TARGET_NAME='bullseye'
 
-		elif (( $DISTRO_TARGET == 7 )); then
-
-			DISTRO_TARGET_NAME='bookworm'
-
 		else
 
-			# Failsafe: This can actually never happen
-			G_DIETPI-NOTIFY 1 'Invalid choice detected. Aborting...\n'
-			exit 1
+			DISTRO_TARGET_NAME='bookworm'
 
 		fi
 
@@ -1153,11 +1129,6 @@ _EOF_
 
 		fi
 
-		# Install vmtouch to lock DietPi scripts and config in file system cache
-		G_EXEC curl -sSfLO "https://dietpi.com/downloads/binaries/$G_DISTRO_NAME/vmtouch_$G_HW_ARCH_NAME.deb"
-		G_EXEC dpkg --force-hold,confnew -i "vmtouch_$G_HW_ARCH_NAME.deb"
-		rm -v "vmtouch_$G_HW_ARCH_NAME.deb"
-
 		G_DIETPI-NOTIFY 2 'Restoring default base files:'
 		# shellcheck disable=SC2114
 		rm -Rfv /etc/{motd,profile,update-motd.d,issue{,.net}} /root /home /media /var/mail
@@ -1258,7 +1229,7 @@ _EOF_
 					G_EXEC systemctl mask "${j##*/}"
 
 				else
-					G_EXEC rm -R "$j"
+					[[ -e $j || -L $j ]] && G_EXEC rm -R "$j"
 
 				fi
 			done
@@ -1534,7 +1505,10 @@ _EOF_'
 			if (( $G_HW_MODEL < 10 )); then
 
 				/boot/dietpi/func/dietpi-set_hardware serialconsole disable ttyAMA0
+				# The actual serial console services need to be masked explicitly to ensure they are not autostarted when the image is created within a container or without both serial devices present, since masks are only placed by dietpi-set_hardware for existing devices: : https://github.com/MichaIng/DietPi/issues/5014
+				G_EXEC systemctl mask serial-getty@ttyAMA0
 				/boot/dietpi/func/dietpi-set_hardware serialconsole disable ttyS0
+				G_EXEC systemctl mask serial-getty@ttyS0
 				/boot/dietpi/func/dietpi-set_hardware serialconsole enable serial0
 
 			# ROCK Pi S: Enable on ttyS0 only
@@ -1750,6 +1724,23 @@ _EOF_
 			done
 			G_EXEC sed -i 's/^#grep/grep/' /etc/kernel/postinst.d/dietpi-USBridgeSig
 
+			# Create RPi Zero 2 W device tree if not existent
+			[[ -f '/boot/bcm2710-rpi-zero-2.dtb' ]] || G_EXEC cp -a /boot/bcm2710-rpi-{3-b,zero-2}.dtb
+
+			# For backwards compatibility with software compiled against older libraspberrypi0, create symlinks from old to new filenames
+			if (( $G_HW_ARCH < 3 ))
+			then
+				G_DIETPI-NOTIFY 2 'Applying workaround for compiled against older libraspberrypi0'
+				G_EXEC cd /usr/lib/arm-linux-gnueabihf
+				while read -r line
+				do
+					[[ ! -f $line || -f ${line%.0} ]] && continue
+					line=${line#/usr/lib/arm-linux-gnueabihf/}
+					G_EXEC ln -sf "$line" "${line%.0}"
+
+				done < <(dpkg -L 'libraspberrypi0' | grep '^/usr/lib/arm-linux-gnueabihf/.*\.so.0$')
+			fi
+
 		# - PINE A64 (and possibly others): Cursor fix for FB
 		elif (( $G_HW_MODEL == 40 )); then
 
@@ -1779,6 +1770,13 @@ _EOF_
 				# Disable Docker optimisations, since this has some performance drawbacks, enable on Docker install instead
 				G_CONFIG_INJECT 'docker_optimizations=' 'docker_optimizations=off' /boot/uEnv.txt
 			fi
+
+		# - NanoPi R1
+		elif [[ $G_HW_MODEL == 48 && -f '/boot/armbianEnv.txt' ]]
+		then
+			# Enable second USB port by default
+			local current=$(sed -n '/^[[:blank:]]*overlays=/{s/^[^=]*=//p;q}' /boot/armbianEnv.txt)
+			[[ $current == *'usbhost2'* ]] || G_CONFIG_INJECT 'overlays=' "overlays=$current usbhost2" /boot/armbianEnv.txt
 		fi
 
 		# - Armbian special

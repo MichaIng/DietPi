@@ -233,8 +233,9 @@ Available services:
 			#aSERVICE_NAME+=('wg-quick@wg0')		# WireGuard: Currently instantiated services are not supported
 
 			# DietPi
-			aSERVICE_NAME+=('dietpi-vpn')			# NordVPN install + client
-			aSERVICE_NAME+=('dietpi-dashboard')		# Web Dashboard
+			aSERVICE_NAME+=('dietpi-vpn')			# VPN client
+			aSERVICE_NAME+=('dietpi-cloudshell')		# Console monitoring
+			aSERVICE_NAME+=('dietpi-dashboard')		# Web dashboard
 			if [[ $INPUT_CMD == 'status' ]]; then
 
 				aSERVICE_NAME+=('dietpi-ramlog')
@@ -269,7 +270,6 @@ Available services:
 #	The service will be in disabled form, and, you can start and stop it manually
 #- cron
 #- transmission-daemon
-
 _EOF_
 		aSERVICE_EXCLUDED=()
 		local i
@@ -281,13 +281,12 @@ _EOF_
 
 				line=${line: +2}
 
-				# - Skip known services
+				# Skip known services
 				for i in "${aSERVICE_NAME[@]}"
 				do
 					[[ $line == "$i" ]] && continue 2
 				done
 
-				[[ $G_DEBUG == 1 ]] && G_DIETPI-NOTIFY 2 "Including custom service: $line"
 				aSERVICE_NAME+=("$line")
 
 			# Exclude
@@ -302,7 +301,6 @@ _EOF_
 					# Show in menu, but mark as excluded
 					if [[ $INPUT_CMD ]]; then
 
-						[[ $G_DEBUG == 1 ]] && G_DIETPI-NOTIFY 2 "Excluding service: $line"
 						unset -v "aSERVICE_NAME[$i]"
 
 					else
@@ -322,8 +320,6 @@ _EOF_
 
 	# Load array of available/chosen services
 	Load_Service_Array(){
-
-		[[ $G_DEBUG == 1 ]] && G_DIETPI-NOTIFY 2 'Generating service list, please wait...'
 
 		# Load all services array, skip in case of single service input
 		# shellcheck disable=SC2015
@@ -364,9 +360,7 @@ _EOF_
 	# $2 = service index (optional)
 	Set_Running_State(){
 
-		local command=${1,,}
-		local index=$2
-		local services i
+		local command=${1,,} index=$2 services i
 
 		# Add and order services to be handled
 		# - Single service input
@@ -389,14 +383,6 @@ _EOF_
 
 		fi
 
-		# Enable ownCloud and Nextcloud maintenance mode before all services being stopped or restarted
-		if [[ $command == 'stop' || $command == 'restart' ]] && [[ ! $index ]]; then
-
-			[[ -f '/var/www/owncloud/config/config.php' ]] && grep -q "'maintenance' => false," /var/www/owncloud/config/config.php && G_EXEC_NOHALT=1 G_EXEC occ maintenance:mode --on
-			[[ -f '/var/www/nextcloud/config/config.php' ]] && grep -q "'maintenance' => false," /var/www/nextcloud/config/config.php && G_EXEC_NOHALT=1 G_EXEC ncc maintenance:mode --on
-
-		fi
-
 		# Apply command
 		for i in $services
 		do
@@ -406,23 +392,13 @@ _EOF_
 			Print_Status "$command" "${aSERVICE_NAME[$i]}" $?
 		done
 
-		# Disable ownCloud and Nextcloud maintenance mode after all services being started or restarted
-		if [[ $command == 'start' || $command == 'restart' ]] && [[ ! $index ]]; then
-
-			[[ -f '/var/www/owncloud/config/config.php' ]] && grep -q "'maintenance' => true," /var/www/owncloud/config/config.php && G_EXEC_NOHALT=1 G_EXEC occ maintenance:mode --off
-			[[ -f '/var/www/nextcloud/config/config.php' ]] && grep -q "'maintenance' => true," /var/www/nextcloud/config/config.php && G_EXEC_NOHALT=1 G_EXEC ncc maintenance:mode --off
-
-		fi
-
 	}
 
 	# $1 = command
 	# $2 = service index (optional)
 	Apply_Service_State(){
 
-		local command=${1,,}
-		local index=$2
-		local services i
+		local command=${1,,} index=$2 services i
 
 		[[ $index ]] && services=$index || services=${!aSERVICE_NAME[*]}
 
@@ -509,12 +485,7 @@ _EOF_
 	readonly FP_PROCESS_TOOL_CONF='dietpi-process_tool.conf'
 	Apply_Process_Tool(){
 
-		local index=$1
-		local setting=$2
-		local value=${3,,}
-		local dp="/etc/systemd/system/${aSERVICE_NAME[$index]}.service.d"
-		local fp="$dp/$FP_PROCESS_TOOL_CONF"
-		local i
+		local index=$1 setting=$2 value=${3,,} dp="/etc/systemd/system/${aSERVICE_NAME[$index]}.service.d" fp="$dp/$FP_PROCESS_TOOL_CONF" i
 
 		# Arrays to translate $2 integer to settings names
 		local asetting=('CPUAffinity' 'CPUSchedulingPolicy' 'Nice' 'CPUSchedulingPriority' 'IOSchedulingClass' 'IOSchedulingPriority')
@@ -563,12 +534,11 @@ _EOF_
 	# $1 = service index
 	Load_Process_Tool(){
 
-		local index=$1
-		local fp="/etc/systemd/system/${aSERVICE_NAME[$index]}.service.d/$FP_PROCESS_TOOL_CONF"
+		local index=$1 fp="/etc/systemd/system/${aSERVICE_NAME[$index]}.service.d/$FP_PROCESS_TOOL_CONF"
 		[[ -f $fp ]] || return
 
 		# Source values from config file
-		# - [Service] line throws an effectless error that we can simply hide.
+		# - [Service] line throws a harmless error that we can simply hidden.
 		# - All values are single word strings, so bash assigns them correctly.
 		local CPUAffinity CPUSchedulingPolicy Nice CPUSchedulingPriority IOSchedulingClass IOSchedulingPriority
 		. "$fp" &> /dev/null
@@ -594,11 +564,11 @@ _EOF_
 		aIO_CLASS=()
 		aIO_PRIORITY=()
 
-		# https://manpages.debian.org/stretch/manpages/sched.7.en.html
+		# https://manpages.debian.org/sched
 		aCPU_POLICY_TYPE=('fifo' 'rr' 'other' 'batch' 'idle')
 		aCPU_POLICY_DESC=('First In, First Out (Real-time, time-critical)' 'Round Robin (Real-time, time-critical)' 'Normal (Default)' 'Batch style execution' 'Background Jobs (Very low priority)')
 
-		# https://manpages.debian.org/stretch/util-linux/ionice.1.en.html
+		# https://manpages.debian.org/ionice
 		aIO_CLASS_TYPE=('realtime' 'best-effort' 'idle')
 		aIO_CLASS_DESC=('Time-critical (Highest priority)' 'Normal (Default)' 'Background Jobs (Very low priority)')
 
@@ -917,8 +887,7 @@ This affects starts/stops/restarts during DietPi-Software installs, DietPi-Updat
 
 				'Edit')
 
-					local dp="/etc/systemd/system/${aSERVICE_NAME[$MENU_SERVICE_INDEX]}.service.d"
-					local fp="$dp/dietpi-services_edit.conf"
+					local dp="/etc/systemd/system/${aSERVICE_NAME[$MENU_SERVICE_INDEX]}.service.d" fp="$dp/dietpi-services_edit.conf"
 
 					if [[ ! -f $fp ]]; then
 
@@ -1020,7 +989,6 @@ Please uncomment and edit only the lines that you need to change.\n\nTo undo cha
 
 						# Note: Whiptail will not work with negative numbers. The string cannot start with "-" as it throws subscript error.
 						G_WHIP_MENU_ARRAY+=("Nice : $i" " $desc")
-
 					done
 
 					G_WHIP_DEFAULT_ITEM="Nice : $cpu_nice"
