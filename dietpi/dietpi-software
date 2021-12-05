@@ -16205,45 +16205,42 @@ This requires an account at: https://remote.it/
 		fi
 
 		# Disable serial console?
-		local keep_serial0=1
-		if grep -q '^[[:blank:]]*CONFIG_SERIAL_CONSOLE_ENABLE=1' /boot/dietpi.txt &&
+		if ! grep -q '^[[:blank:]]*CONFIG_SERIAL_CONSOLE_ENABLE=0' /boot/dietpi.txt &&
 			[[ ! $(readlink -f /proc/$$/fd/1) =~ ^/dev/tty(S|AMA|SAC)[0-9]$ ]] &&
 			G_WHIP_YESNO 'A serial console is currently enabled, would you like to disable it?
- - Disabling serial console will reduce memory consumption slightly.
- - If you are unsure on what a serial console is, it is safe to disable it.
+ - Disabling the serial console will reduce memory consumption slightly.
+ - If you are unsure what a serial console is, it is safe to disable it.
  - But if this is a headless device and it is difficult or impossible to attach a screen and keyboard, we recommend to leave it enabled so that you can debug and fix early boot issues or when the network/SSH server is not coming up. All you need is a serial USB adapter cable and a notebook with e.g. PuTTY.'
 		then
 			/boot/dietpi/func/dietpi-set_hardware serialconsole disable
-			keep_serial0=0
 		fi
 
-		# RPi: Convert "serial0" to its actual symlink target
-		if (( $G_HW_MODEL < 10 && $keep_serial0 )); then
-
-			if [[ -L '/dev/serial0' ]]; then
-
+		# RPi: Convert "serial0" to its actual symlink target without breaking the possibly currently used serial connection or starting a doubled console on the same serial device.
+		if (( $G_HW_MODEL < 10 ))
+		then
+			if [[ -e '/dev/serial0' ]] && ! grep -q '^[[:blank:]]*CONFIG_SERIAL_CONSOLE_ENABLE=0' /boot/dietpi.txt
+			then
 				local tty=$(readlink -f /dev/serial0); tty=${tty#/dev/}
-				if [[ $(</boot/cmdline.txt) == *'serial0'* ]]; then
-
-					# shellcheck disable=2015
-					[[ $(</boot/cmdline.txt) == *"$tty"* ]] && sed -i "s/[[:blank:]]*console=${tty}[^\"[:blank:]]*//" /boot/cmdline.txt || sed -i "s/serial0/$tty/" /boot/cmdline.txt
-
+				if [[ $(</boot/cmdline.txt) == *'console=serial0'* ]]
+				then
+					if [[ $(</boot/cmdline.txt) == *"console=$tty"* ]]
+					then
+						G_EXEC sed -Ei 's/[[:blank:]]*console=serial0[^[:blank:]]*([[:blank:]]*$)?//' /boot/cmdline.txt
+					else
+						G_EXEC sed -i "s/console=serial0/console=$tty/" /boot/cmdline.txt
+					fi
 				fi
-				if [[ -f '/etc/systemd/system/getty.target.wants/serial-getty@serial0.service' ]]; then
-
-					systemctl disable serial-getty@serial0
-					systemctl enable "serial-getty@$tty"
-
+				if systemctl -q is-enabled serial-getty@serial0
+				then
+					G_EXEC systemctl disable serial-getty@serial0
+					G_EXEC systemctl unmask "serial-getty@$tty"
+					G_EXEC systemctl enable "serial-getty@$tty"
 				fi
-
+				unset -v tty
 			else
-
 				/boot/dietpi/func/dietpi-set_hardware serialconsole disable serial0
-
 			fi
-
 		fi
-		unset -v keep_serial0 tty
 
 		# Apply RAMlog size
 		sed -i "\|[[:blank:]]/var/log[[:blank:]]|c\tmpfs /var/log tmpfs size=${AUTOINSTALL_RAMLOG_SIZE}M,noatime,lazytime,nodev,nosuid,mode=1777" /etc/fstab
