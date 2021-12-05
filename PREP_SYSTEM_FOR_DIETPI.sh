@@ -721,7 +721,7 @@ Currently installed: $G_DISTRO_NAME (ID: $G_DISTRO)"; then
 		[[ $(blkid -s PTTYPE -o value -c /dev/null "$(lsblk -npo PKNAME "$(findmnt -Ufnro SOURCE -M /)")") == 'gpt' ]] && aPACKAGES_REQUIRED_INSTALL+=('gdisk')
 
 		# Install file system tools required for file system resizing and fsck
-		local purge_e2fsprogs='e2fsprogs'
+		local purge_e2fsprogs='--allow-remove-essential e2fsprogs'
 		while read -r line
 		do
 			if [[ $line == 'ext'[2-4] ]]
@@ -1062,14 +1062,14 @@ _EOF_
 		unset -v apackages
 
 		# Purging additional packages, that (in some cases) do not get autoremoved:
+		# - Purge the "important" e2fsprogs if no ext[2-4] filesystem is present on the root partition table
 		# - dbus: Not required for headless images, but sometimes marked as "important", thus not autoremoved.
 		#	+ Workaround for "The following packages have unmet dependencies: glib-networking libgtk-3-0" and alike
 		# - dhcpcd5: https://github.com/MichaIng/DietPi/issues/1560#issuecomment-370136642
 		# - mountall: https://github.com/MichaIng/DietPi/issues/2613
 		# - initscripts: Pre-installed on Jessie systems (?), superseded and masked by systemd, but never autoremoved
 		# - chrony: Found left with strange "deinstall ok installed" mark left on Armbian images
-		# - Purge the "important" e2fsprogs if no ext[2-4] filesystem is present on the root partition table
-		G_AGP dbus dhcpcd5 mountall initscripts chrony '*office*' '*xfce*' '*qt5*' '*xserver*' '*xorg*' glib-networking libgtk-3-0 libsoup2.4-1 libglib2.0-0 $purge_e2fsprogs
+		G_AGP $purge_e2fsprogs dbus dhcpcd5 mountall initscripts chrony '*office*' '*xfce*' '*qt5*' '*xserver*' '*xorg*' glib-networking libgtk-3-0 libsoup2.4-1 libglib2.0-0
 		# Remove any autoremove prevention
 		rm -fv /etc/apt/apt.conf.d/*autoremove*
 		G_AGA
@@ -1425,7 +1425,7 @@ _EOF_'
 			G_EXEC systemctl mask $i
 		done
 
-		if (( $G_DISTRO > 5 ))
+		if command -v e2scrub > /dev/null
 		then
 			G_DIETPI-NOTIFY 2 'Disabling e2scrub services which are for LVM and require lvm2/lvcreate being installed'
 			G_EXEC systemctl disable --now e2scrub_{all.timer,reap}
