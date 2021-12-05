@@ -964,8 +964,8 @@ _EOF_
 
 			# Install Radxa APT repo cleanly: No Bullseye repo available yet
 			G_EXEC rm -Rf /etc/apt/{trusted.gpg,sources.list.d/{,.??,.[^.]}*}
-			G_EXEC eval "curl -sSfL https://apt.radxa.com/${DISTRO_TARGET_NAME/bullseye/buster}-stable/public.key | gpg --dearmor -o /etc/apt/trusted.gpg.d/dietpi-radxa.gpg --yes"
-			G_EXEC eval "echo -e 'deb https://apt.radxa.com/${DISTRO_TARGET_NAME/bullseye/buster}-stable/ ${DISTRO_TARGET_NAME/bullseye/buster} main\n#deb https://apt.radxa.com/${DISTRO_TARGET_NAME/bullseye/buster}-testing/ ${DISTRO_TARGET_NAME/bullseye/buster} main' > /etc/apt/sources.list.d/dietpi-radxa.list"
+			G_EXEC eval "curl -sSfL 'https://apt.radxa.com/${DISTRO_TARGET_NAME/bullseye/buster}-stable/public.key' | gpg --dearmor -o /etc/apt/trusted.gpg.d/dietpi-radxa.gpg --yes"
+			G_EXEC eval "echo 'deb https://apt.radxa.com/${DISTRO_TARGET_NAME/bullseye/buster}-stable/ ${DISTRO_TARGET_NAME/bullseye/buster} main' > /etc/apt/sources.list.d/dietpi-radxa.list"
 			G_AGUP
 
 			# Remove obsolete combined keyring
@@ -980,8 +980,8 @@ _EOF_
 
 			# Install Radxa APT repo cleanly: No Bullseye repo available yet
 			G_EXEC rm -Rf /etc/apt/{trusted.gpg,sources.list.d/{,.??,.[^.]}*}
-			G_EXEC eval "curl -sSfL https://apt.radxa.com/${DISTRO_TARGET_NAME/bullseye/buster}-stable/public.key | gpg --dearmor -o /etc/apt/trusted.gpg.d/dietpi-radxa.gpg --yes"
-			G_EXEC eval "echo -e 'deb https://apt.radxa.com/${DISTRO_TARGET_NAME/bullseye/buster}-stable/ ${DISTRO_TARGET_NAME/bullseye/buster} main\n#deb https://apt.radxa.com/${DISTRO_TARGET_NAME/bullseye/buster}-testing/ ${DISTRO_TARGET_NAME/bullseye/buster} main' > /etc/apt/sources.list.d/dietpi-radxa.list"
+			G_EXEC eval "curl -sSfL 'https://apt.radxa.com/${DISTRO_TARGET_NAME/bullseye/buster}-stable/public.key' | gpg --dearmor -o /etc/apt/trusted.gpg.d/dietpi-radxa.gpg --yes"
+			G_EXEC eval "echo 'deb https://apt.radxa.com/${DISTRO_TARGET_NAME/bullseye/buster}-stable/ ${DISTRO_TARGET_NAME/bullseye/buster} main' > /etc/apt/sources.list.d/dietpi-radxa.list"
 			G_AGUP
 
 			# Remove obsolete combined keyring
