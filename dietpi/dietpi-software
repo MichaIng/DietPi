@@ -667,8 +667,6 @@ INDEX_BROWSER=$INDEX_BROWSER"
 		aSOFTWARE_DESC[$software_id]='BitTorrent server with web interface (Python)'
 		aSOFTWARE_CATX[$software_id]=3
 		aSOFTWARE_DOCS[$software_id]='https://dietpi.com/docs/software/bittorrent/#deluge'
-		# - Raspbian Bullseye: https://github.com/MichaIng/DietPi/issues/4944
-		(( $G_HW_MODEL < 10 )) && (( $G_RASPBIAN )) && aSOFTWARE_AVAIL_G_DISTRO[$software_id,6]=0
 		#------------------
 		software_id=46
 
@@ -3483,9 +3481,9 @@ Pin-Priority: 500
 _EOF_
 			G_AGI xrdp xorgxrdp
 
-			# Workaround for failing mouse and keyboard input: https://github.com/MichaIng/DietPi/issues/3022
-			G_CONFIG_INJECT 'Option "CoreKeyboard"' '    Option "CoreKeyboard"' /etc/X11/xrdp/xorg.conf 'Driver "xrdpkeyb"'
-			G_CONFIG_INJECT 'Option "CorePointer"' '    Option "CorePointer"' /etc/X11/xrdp/xorg.conf 'Driver "xrdpmouse"'
+			# Workaround for failing mouse and keyboard input: https://github.com/neutrinolabs/xorgxrdp/issues/164
+			# - Solved on Bookworm, but G_CONFIG_INJECT detects and skips it then, and keeping it covers dist-upgraded systems.
+			GGI_PRESERVE=1 G_CONFIG_INJECT 'Option[[:blank:]]+"DefaultServerLayout"' '    Option "DefaultServerLayout" "X11 Server"' /etc/X11/xrdp/xorg.conf 'Section[[:blank:]]+"ServerFlags"'
 
 			G_EXEC systemctl enable xrdp
 			aSTART_SERVICES+=('xrdp')
@@ -5028,7 +5026,10 @@ The install script will now exit. After applying one of the the above, rerun die
 
 				else
 
-					Download_Install 'https://download.nextcloud.com/server/releases/latest.tar.bz2' /var/www
+					# Nextcloud 24 won't support PHP7.3 anymore: https://github.com/nextcloud/server/pull/29286
+					local version='latest'
+					(( $G_DISTRO > 5 )) || version='latest-23'
+					Download_Install "https://download.nextcloud.com/server/releases/$version.tar.bz2" /var/www
 
 				fi
 
@@ -6144,8 +6145,12 @@ _EOF_
 
 			Banner_Installing
 
+			# Raspbian Bullseye workaround: https://github.com/MichaIng/DietPi/issues/4944
+			local apackages=()
+			(( $G_HW_MODEL < 10 )) && (( $G_RASPBIAN )) && apackages=('libatomic1')
+
 			# Packages
-			G_AGI deluged deluge-web deluge-console
+			G_AGI deluged deluge-web deluge-console "${apackages[@]}"
 			G_EXEC systemctl stop deluged
 
 			# Remove SysV service leftovers, installed by Debian APT package
@@ -6202,6 +6207,9 @@ ExecStart=$(command -v deluged) -d
 [Install]
 WantedBy=multi-user.target
 _EOF_
+			# Raspbian Bullseye workaround: https://github.com/MichaIng/DietPi/issues/4944
+			(( $G_HW_MODEL < 10 )) && (( $G_RASPBIAN )) && G_CONFIG_INJECT 'Environment=' 'Environment=LD_PRELOAD=/usr/lib/arm-linux-gnueabihf/libatomic.so.1' /etc/systemd/system/deluged.service '\[Service\]'
+
 			# https://github.com/deluge-torrent/deluge/blob/develop/packaging/systemd/deluge-web.service
 			# - Bullseye: deluge-web v2 requires the "-d" flag to stay in foreground, but v1 does not understand it yet
 			local flag=
@@ -14548,9 +14556,9 @@ _EOF_
 			Banner_Uninstalling
 			G_AGP tor
 
-			[[ -d '/var/log/tor' ]] && rm -R /var/log/tor # pre-v6.27
+			[[ -d '/var/log/tor' ]] && G_EXEC rm -R /var/log/tor # pre-v6.27
 
-			# Uninstall WIFIHOTSPOT ALSO. Due to IPtables needing reset
+			# Uninstall WiFi Hotspot too, due to IPtables needing reset
 			aSOFTWARE_INSTALL_STATE[60]=-1
 
 		fi
@@ -16205,45 +16213,42 @@ This requires an account at: https://remote.it/
 		fi
 
 		# Disable serial console?
-		local keep_serial0=1
-		if grep -q '^[[:blank:]]*CONFIG_SERIAL_CONSOLE_ENABLE=1' /boot/dietpi.txt &&
+		if ! grep -q '^[[:blank:]]*CONFIG_SERIAL_CONSOLE_ENABLE=0' /boot/dietpi.txt &&
 			[[ ! $(readlink -f /proc/$$/fd/1) =~ ^/dev/tty(S|AMA|SAC)[0-9]$ ]] &&
 			G_WHIP_YESNO 'A serial console is currently enabled, would you like to disable it?
- - Disabling serial console will reduce memory consumption slightly.
- - If you are unsure on what a serial console is, it is safe to disable it.
+ - Disabling the serial console will reduce memory consumption slightly.
+ - If you are unsure what a serial console is, it is safe to disable it.
  - But if this is a headless device and it is difficult or impossible to attach a screen and keyboard, we recommend to leave it enabled so that you can debug and fix early boot issues or when the network/SSH server is not coming up. All you need is a serial USB adapter cable and a notebook with e.g. PuTTY.'
 		then
 			/boot/dietpi/func/dietpi-set_hardware serialconsole disable
-			keep_serial0=0
 		fi
 
-		# RPi: Convert "serial0" to its actual symlink target
-		if (( $G_HW_MODEL < 10 && $keep_serial0 )); then
-
-			if [[ -L '/dev/serial0' ]]; then
-
+		# RPi: Convert "serial0" to its actual symlink target without breaking the possibly currently used serial connection or starting a doubled console on the same serial device.
+		if (( $G_HW_MODEL < 10 ))
+		then
+			if [[ -e '/dev/serial0' ]] && ! grep -q '^[[:blank:]]*CONFIG_SERIAL_CONSOLE_ENABLE=0' /boot/dietpi.txt
+			then
 				local tty=$(readlink -f /dev/serial0); tty=${tty#/dev/}
-				if [[ $(</boot/cmdline.txt) == *'serial0'* ]]; then
-
-					# shellcheck disable=2015
-					[[ $(</boot/cmdline.txt) == *"$tty"* ]] && sed -i "s/[[:blank:]]*console=${tty}[^\"[:blank:]]*//" /boot/cmdline.txt || sed -i "s/serial0/$tty/" /boot/cmdline.txt
-
+				if [[ $(</boot/cmdline.txt) == *'console=serial0'* ]]
+				then
+					if [[ $(</boot/cmdline.txt) == *"console=$tty"* ]]
+					then
+						G_EXEC sed -Ei 's/[[:blank:]]*console=serial0[^[:blank:]]*([[:blank:]]*$)?//' /boot/cmdline.txt
+					else
+						G_EXEC sed -i "s/console=serial0/console=$tty/" /boot/cmdline.txt
+					fi
 				fi
-				if [[ -f '/etc/systemd/system/getty.target.wants/serial-getty@serial0.service' ]]; then
-
-					systemctl disable serial-getty@serial0
-					systemctl enable "serial-getty@$tty"
-
+				if systemctl -q is-enabled serial-getty@serial0
+				then
+					G_EXEC systemctl disable serial-getty@serial0
+					G_EXEC systemctl unmask "serial-getty@$tty"
+					G_EXEC systemctl enable "serial-getty@$tty"
 				fi
-
+				unset -v tty
 			else
-
 				/boot/dietpi/func/dietpi-set_hardware serialconsole disable serial0
-
 			fi
-
 		fi
-		unset -v keep_serial0 tty
 
 		# Apply RAMlog size
 		sed -i "\|[[:blank:]]/var/log[[:blank:]]|c\tmpfs /var/log tmpfs size=${AUTOINSTALL_RAMLOG_SIZE}M,noatime,lazytime,nodev,nosuid,mode=1777" /etc/fstab

@@ -721,9 +721,15 @@ Currently installed: $G_DISTRO_NAME (ID: $G_DISTRO)"; then
 		[[ $(blkid -s PTTYPE -o value -c /dev/null "$(lsblk -npo PKNAME "$(findmnt -Ufnro SOURCE -M /)")") == 'gpt' ]] && aPACKAGES_REQUIRED_INSTALL+=('gdisk')
 
 		# Install file system tools required for file system resizing and fsck
+		local ae2fsprogs=('--allow-remove-essential' 'e2fsprogs')
 		while read -r line
 		do
-			if [[ $line == 'vfat' ]]
+			if [[ $line == 'ext'[2-4] ]]
+			then
+				aPACKAGES_REQUIRED_INSTALL+=('e2fsprogs')
+				ae2fsprogs=()
+
+			elif [[ $line == 'vfat' ]]
 			then
 				aPACKAGES_REQUIRED_INSTALL+=('dosfstools')
 
@@ -958,8 +964,8 @@ _EOF_
 
 			# Install Radxa APT repo cleanly: No Bullseye repo available yet
 			G_EXEC rm -Rf /etc/apt/{trusted.gpg,sources.list.d/{,.??,.[^.]}*}
-			G_EXEC eval "curl -sSfL https://apt.radxa.com/${DISTRO_TARGET_NAME/bullseye/buster}-stable/public.key | gpg --dearmor -o /etc/apt/trusted.gpg.d/dietpi-radxa.gpg --yes"
-			G_EXEC eval "echo -e 'deb https://apt.radxa.com/${DISTRO_TARGET_NAME/bullseye/buster}-stable/ ${DISTRO_TARGET_NAME/bullseye/buster} main\n#deb https://apt.radxa.com/${DISTRO_TARGET_NAME/bullseye/buster}-testing/ ${DISTRO_TARGET_NAME/bullseye/buster} main' > /etc/apt/sources.list.d/dietpi-radxa.list"
+			G_EXEC eval "curl -sSfL 'https://apt.radxa.com/${DISTRO_TARGET_NAME/bullseye/buster}-stable/public.key' | gpg --dearmor -o /etc/apt/trusted.gpg.d/dietpi-radxa.gpg --yes"
+			G_EXEC eval "echo 'deb https://apt.radxa.com/${DISTRO_TARGET_NAME/bullseye/buster}-stable/ ${DISTRO_TARGET_NAME/bullseye/buster} main' > /etc/apt/sources.list.d/dietpi-radxa.list"
 			G_AGUP
 
 			# Remove obsolete combined keyring
@@ -974,8 +980,8 @@ _EOF_
 
 			# Install Radxa APT repo cleanly: No Bullseye repo available yet
 			G_EXEC rm -Rf /etc/apt/{trusted.gpg,sources.list.d/{,.??,.[^.]}*}
-			G_EXEC eval "curl -sSfL https://apt.radxa.com/${DISTRO_TARGET_NAME/bullseye/buster}-stable/public.key | gpg --dearmor -o /etc/apt/trusted.gpg.d/dietpi-radxa.gpg --yes"
-			G_EXEC eval "echo -e 'deb https://apt.radxa.com/${DISTRO_TARGET_NAME/bullseye/buster}-stable/ ${DISTRO_TARGET_NAME/bullseye/buster} main\n#deb https://apt.radxa.com/${DISTRO_TARGET_NAME/bullseye/buster}-testing/ ${DISTRO_TARGET_NAME/bullseye/buster} main' > /etc/apt/sources.list.d/dietpi-radxa.list"
+			G_EXEC eval "curl -sSfL 'https://apt.radxa.com/${DISTRO_TARGET_NAME/bullseye/buster}-stable/public.key' | gpg --dearmor -o /etc/apt/trusted.gpg.d/dietpi-radxa.gpg --yes"
+			G_EXEC eval "echo 'deb https://apt.radxa.com/${DISTRO_TARGET_NAME/bullseye/buster}-stable/ ${DISTRO_TARGET_NAME/bullseye/buster} main' > /etc/apt/sources.list.d/dietpi-radxa.list"
 			G_AGUP
 
 			# Remove obsolete combined keyring
@@ -1056,13 +1062,14 @@ _EOF_
 		unset -v apackages
 
 		# Purging additional packages, that (in some cases) do not get autoremoved:
+		# - Purge the "important" e2fsprogs if no ext[2-4] filesystem is present on the root partition table
 		# - dbus: Not required for headless images, but sometimes marked as "important", thus not autoremoved.
 		#	+ Workaround for "The following packages have unmet dependencies: glib-networking libgtk-3-0" and alike
 		# - dhcpcd5: https://github.com/MichaIng/DietPi/issues/1560#issuecomment-370136642
 		# - mountall: https://github.com/MichaIng/DietPi/issues/2613
 		# - initscripts: Pre-installed on Jessie systems (?), superseded and masked by systemd, but never autoremoved
 		# - chrony: Found left with strange "deinstall ok installed" mark left on Armbian images
-		G_AGP dbus dhcpcd5 mountall initscripts chrony '*office*' '*xfce*' '*qt5*' '*xserver*' '*xorg*' glib-networking libgtk-3-0 libsoup2.4-1 libglib2.0-0
+		G_AGP "${ae2fsprogs[@]}" dbus dhcpcd5 mountall initscripts chrony '*office*' '*xfce*' '*qt5*' '*xserver*' '*xorg*' glib-networking libgtk-3-0 libsoup2.4-1 libglib2.0-0
 		# Remove any autoremove prevention
 		rm -fv /etc/apt/apt.conf.d/*autoremove*
 		G_AGA
@@ -1418,7 +1425,7 @@ _EOF_'
 			G_EXEC systemctl mask $i
 		done
 
-		if (( $G_DISTRO > 5 ))
+		if command -v e2scrub > /dev/null
 		then
 			G_DIETPI-NOTIFY 2 'Disabling e2scrub services which are for LVM and require lvm2/lvcreate being installed'
 			G_EXEC systemctl disable --now e2scrub_{all.timer,reap}
