@@ -728,14 +728,6 @@ _EOF_
 	# Waveshare32
 	Lcd_Panel_Waveshare32_Enable_X11(){
 
-		cat << '_EOF_' > /etc/X11/xorg.conf.d/99-waveshare32_xorg.conf
-Section "Device"
-	Identifier	"Allwinner A10/A13 FBDEV"
-	Driver		"fbdev"
-	Option		"fbdev" "/dev/fb1"
-	Option		"SwapbuffersWait" "true"
-EndSection
-_EOF_
 		cat << '_EOF_' > /etc/X11/xorg.conf.d/99-waveshare32_calibration.conf
 Section "InputClass"
 	Identifier	"calibration"
@@ -751,17 +743,17 @@ _EOF_
 
 		(( $G_HW_MODEL > 19 )) && { Unsupported_Input_Mode; return 1; } # Exit path for non-RPi/non-Odroid
 
-		# Disable 1st to reset any existing installations:
+		# Disable 1st to reset any existing installations
 		Lcd_Panel_Waveshare32_Disable
+
+		# X11
+		Lcd_Panel_Xorg_All_Enable
+		Lcd_Panel_Waveshare32_Enable_X11
 
 		# RPi
 		if (( $G_HW_MODEL < 10 )); then
 
-			# X11
-			Lcd_Panel_Xorg_All_Enable
-			Lcd_Panel_Waveshare32_Enable_X11
-
-			G_EXEC curl -sSfL https://github.com/waveshare/LCD-show/raw/master/waveshare32b-overlay.dtb -o /boot/overlays/waveshare32b.dtbo
+			G_EXEC curl -sSfL 'https://raw.githubusercontent.com/waveshare/LCD-show/master/waveshare32b-overlay.dtb' -o /boot/overlays/waveshare32b.dtbo
 
 			#consoleblank=0 no effect
 			G_EXEC sed -i 's/rootwait/rootwait fbcon=map:10 fbcon=font:ProFont6x11 logo.nologo/' /boot/cmdline.txt
@@ -777,18 +769,20 @@ _EOF_
 
 			G_CONFIG_INJECT 'dtoverlay=waveshare32b' 'dtoverlay=waveshare32b:rotate=270' /boot/config.txt
 
-			# Swap input axis
-			G_EXEC sed -i '/"SwapAxes"/c\	Option		"SwapAxes" "1"' /etc/X11/xorg.conf.d/99-waveshare32_calibration.conf
-
 			# Move fb0 xorg.conf out the way: https://github.com/MichaIng/DietPi/issues/767
 			[[ -f '/usr/share/X11/xorg.conf.d/99-fbturbo.conf' ]] && G_EXEC mv /usr/share/X11/xorg.conf.d/99-fbturbo.conf /usr/share/X11/99-fbturbo.conf
 
+			# X11
+			cat << '_EOF_' > /etc/X11/xorg.conf.d/99-waveshare32_xorg.conf
+Section "Device"
+	Identifier	"Allwinner A10/A13 FBDEV"
+	Driver		"fbdev"
+	Option		"fbdev" "/dev/fb1"
+	Option		"SwapbuffersWait" "true"
+EndSection
+_EOF_
 		# Odroids
 		else
-
-			# X11
-			Lcd_Panel_Xorg_All_Enable
-			Lcd_Panel_Waveshare32_Enable_X11
 
 			# con2fbmap, maps console (1) to panel(2). Run during boot.
 			cat << _EOF_ > /etc/systemd/system/con2fbmap.service
@@ -818,7 +812,6 @@ Section "Device"
 	Identifier	"FBDEV"
 	Driver		"fbdev"
 	Option		"fbdev" "/dev/fb2"
-	#Option		"SwapbuffersWait" "true"
 EndSection
 _EOF_
 		fi
@@ -853,12 +846,12 @@ _EOF_
 		# Odroids
 		elif (( $G_HW_MODEL < 20 )); then
 
-			if [[ -f '/etc/systemd/system/con2fbmap.service' ]]; then
-
+			if [[ -f '/etc/systemd/system/con2fbmap.service' ]]
+			then
 				G_EXEC systemctl disable --now con2fbmap
-				G_EXEC rm -R /etc/systemd/system/con2fbmap.service*
-
+				G_EXEC rm /etc/systemd/system/con2fbmap.service
 			fi
+			[[ -d '/etc/systemd/system/con2fbmap.service.d' ]] && G_EXEC rm -R /etc/systemd/system/con2fbmap.service.d
 			[[ -f '/etc/modprobe.d/waveshare32.conf' ]] && G_EXEC rm /etc/modprobe.d/waveshare32.conf
 			G_EXEC sed -i '/^[[:blank:]]*spicc/d' /etc/modules
 			G_EXEC sed -i '/^[[:blank:]]*fbtft_device/d' /etc/modules
@@ -867,7 +860,7 @@ _EOF_
 
 	}
 
-	# Odroid Cloudshell
+	# Odroid CloudShell
 	Lcd_Panel_Odroidcloudshell_Enable(){
 
 		echo 'options fbtft_device name=hktft9340 busnum=1 rotate=270' > /etc/modprobe.d/odroid-cloudshell.conf
@@ -896,7 +889,11 @@ _EOF_
 
 		Lcd_Panel_Xorg_All_Enable
 
+		# SPI needs to be disabled: https://github.com/MichaIng/DietPi/issues/4154
 		cat << '_EOF_' > /etc/modprobe.d/odroid-lcd35.conf
+blacklist spidev
+blacklist spi_gpio
+blacklist spi_bitbang
 options fbtft_device name=flexpfb rotate=90
 options flexfb chip=ili9488
 _EOF_
@@ -911,6 +908,9 @@ _EOF_
 			G_EXEC modprobe "$i"
 			G_CONFIG_INJECT "$i" "$i" /etc/modules
 		done
+
+		# Rebuild initramfs to exclude SPI modules: https://github.com/MichaIng/DietPi/issues/4154
+		G_EXEC update-initramfs -u
 
 		# Service
 		# - XU4
@@ -990,11 +990,10 @@ _EOF_
 
 		[[ -f '/etc/X11/xorg.conf.d/99-calibration.conf' ]] && G_EXEC rm /etc/X11/xorg.conf.d/99-calibration.conf
 		[[ -f '/etc/modprobe.d/odroid-lcd35.conf' ]] && G_EXEC rm /etc/modprobe.d/odroid-lcd35.conf
-		if [[ -f '/etc/systemd/system/odroid-lcd35.service' ]]; then
-
+		if [[ -f '/etc/systemd/system/odroid-lcd35.service' ]]
+		then
 			G_EXEC systemctl disable --now odroid-lcd35
 			G_EXEC rm /etc/systemd/system/odroid-lcd35.service
-
 		fi
 		[[ -d '/etc/systemd/system/odroid-lcd35.service.d' ]] && G_EXEC rm -R /etc/systemd/system/odroid-lcd35.service.d
 		[[ -f '/etc/X11/xorg.conf.d/99-odroid-lcd35.conf' ]] && G_EXEC rm /etc/X11/xorg.conf.d/99-odroid-lcd35.conf
