@@ -148,7 +148,7 @@
 		# Apply headless mode if set in dietpi.txt (RPi, Odroid C1/C2)
 		(( $G_HW_MODEL < 11 || $G_HW_MODEL == 12 )) && /boot/dietpi/func/dietpi-set_hardware headless "$(grep -cm1 '^[[:blank:]]*AUTO_SETUP_HEADLESS=1' /boot/dietpi.txt)"
 
-		# Apply forced eth speed, if set in dietpi.txt
+		# Apply forced Ethernet link speed if set in dietpi.txt
 		/boot/dietpi/func/dietpi-set_hardware eth-forcespeed "$(sed -n '/^[[:blank:]]*AUTO_SETUP_NET_ETH_FORCE_SPEED=/{s/^[^=]*=//p;q}' /boot/dietpi.txt)"
 
 		# Set hostname
@@ -251,7 +251,7 @@ _EOF_
 		# - Ethernet
 		elif (( $ethernet_enabled )); then
 
-			# Enable Eth, disable WiFi
+			# Enable Ethernet, disable WiFi
 			wifi_enabled=0
 			sed -Ei "/(allow-hotplug|auto)[[:blank:]]+eth/c\allow-hotplug $iface_eth" /etc/network/interfaces
 			sed -Ei "/(allow-hotplug|auto)[[:blank:]]+wlan/c\#allow-hotplug $iface_wlan" /etc/network/interfaces
@@ -284,14 +284,14 @@ _EOF_
 
 				> /etc/resolv.conf
 				for i in $static_dns; do echo "nameserver $i" >> /etc/resolv.conf; done
+				sed -i "/dns-nameservers/c\#dns-nameservers $static_dns" /etc/network/interfaces
 
 			fi
 
 		fi
 
 		# - IPv6
-		local enable_ipv6=$(grep -cm1 '^[[:blank:]]*CONFIG_ENABLE_IPV6=1' /boot/dietpi.txt)
-		/boot/dietpi/func/dietpi-set_hardware enableipv6 "$enable_ipv6"
+		/boot/dietpi/func/dietpi-set_hardware enableipv6 "$(( ! $(grep -cm1 '^[[:blank:]]*CONFIG_ENABLE_IPV6=0' /boot/dietpi.txt) ))"
 
 		# - Configure enabled interfaces now, /etc/network/interfaces will be effective from next boot on
 		#	Failsafe: Bring up Ethernet, whenever WiFi is disabled or fails to be configured, e.g. due to wrong credentials
@@ -324,7 +324,7 @@ _EOF_
 	# Set install stage index to trigger automated DietPi-Update on login
 	echo 0 > /boot/dietpi/.install_stage
 
-	# Disable originating service to prevent any futher launch of this script
+	# Disable originating service to prevent any further launch of this script
 	systemctl disable dietpi-firstboot
 	#-----------------------------------------------------------------------------------
 	exit

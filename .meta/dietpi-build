@@ -37,24 +37,26 @@ done
 
 # Check for valid target hardware model and set variables accordingly
 WIFI_REQUIRED=1
-partition_start=4
+partition_start=1
 efi_size=64
-boot_size=128
-root_size=892
+boot_size=0
+root_size=1023
 CLONING_TOOL='dd'
 case $HW_MODEL in
-	0) iname='RPi';;
-	20) iname='VM' WIFI_REQUIRED=0 boot_size=0;;
-	21) iname='NativePC-BIOS' HW_ARCH=10 root_size=1152;;
+	0) iname='RPi' partition_start=4 boot_size=128 root_size=892;;
+	20) iname='VM' WIFI_REQUIRED=0;;
+	21) iname='NativePC-BIOS' HW_ARCH=10 root_size=1215;;
 	*) G_DIETPI-NOTIFY 1 "Invalid hardware model \"$HW_MODEL\" passed, aborting..."; exit 1;;
 esac
 
 # Check for valid target architecture and set variables accordingly
+repo='https://deb.debian.org/debian/'
+keyring='/usr/share/keyrings/debian-archive-keyring.gpg'
 case $HW_ARCH in
-	1) iarch='ARMv6' parch='armhf' repo='http://raspbian.raspberrypi.org/raspbian/';;
-	2) iarch='ARMv7' parch='armhf' repo='https://deb.debian.org/debian/';;
-	3) iarch='ARMv8' parch='arm64' repo='https://deb.debian.org/debian/';;
-	10) iarch='x86_64' parch='amd64' repo='https://deb.debian.org/debian/' partition_start=1;;
+	1) iarch='ARMv6' parch='armhf' repo='http://raspbian.raspberrypi.org/raspbian/' keyring='/usr/share/keyrings/raspbian-archive-keyring.gpg';;
+	2) iarch='ARMv7' parch='armhf';;
+	3) iarch='ARMv8' parch='arm64';;
+	10) iarch='x86_64' parch='amd64';;
 	*) G_DIETPI-NOTIFY 1 "Invalid architecture \"$HW_ARCH\" passed, aborting..."; exit 1;;
 esac
 
@@ -86,7 +88,7 @@ G_EXEC fallocate -l "$((partition_start+efi_size+boot_size+root_size))M" "$OUTPU
 if [[ $PTTYPE == 'gpt' ]]
 then
 	G_EXEC parted -s "$OUTPUT_IMG_NAME.img" unit MiB mklabel gpt mkpart 'EFI' fat32 $partition_start $((partition_start+efi_size)) set 1 esp on
-	# Create boot partition it set
+	# Create boot partition if set
 	(( $boot_size )) && G_EXEC parted -s "$OUTPUT_IMG_NAME.img" unit MiB mkpart 'boot' fat32 $((partition_start+efi_size)) $((partition_start+efi_size+boot_size))
 	# root partition
 	G_EXEC parted -s "$OUTPUT_IMG_NAME.img" unit MiB mkpart 'root' "$FSTYPE" $((partition_start+efi_size+boot_size)) 100%
@@ -94,7 +96,7 @@ then
 # MBR: Set partition types instead of labels
 else
 	G_EXEC parted -s "$OUTPUT_IMG_NAME.img" unit MiB mklabel msdos
-	# Create boot partition it set
+	# Create boot partition if set
 	(( $boot_size )) && G_EXEC parted -s "$OUTPUT_IMG_NAME.img" unit MiB mkpart primary fat32 $((partition_start)) $((partition_start+boot_size))
 	# root partition
 	G_EXEC parted -s "$OUTPUT_IMG_NAME.img" unit MiB mkpart primary "$FSTYPE" $((partition_start+boot_size)) 100%
@@ -200,7 +202,7 @@ exit 0
 _EOF_
 
 # Bootstrap
-G_EXEC_OUTPUT=1 G_EXEC debootstrap --arch="$parch" --variant=minbase --exclude='gcc-7-base,gcc-8-base,gcc-9-base' --include='bash-completion,bzip2,ca-certificates,console-setup,cron,curl,dropbear,ethtool,fake-hwclock,fdisk,gnupg,htop,ifupdown,isc-dhcp-client,kmod,locales,nano,p7zip,parted,procps,psmisc,rfkill,sudo,systemd-sysv,systemd-timesyncd,tzdata,udev,unzip,usbutils,wget,whiptail' bullseye ./rootfs "$repo"
+G_EXEC_OUTPUT=1 G_EXEC debootstrap --variant=minbase --exclude='gcc-7-base,gcc-8-base,gcc-9-base' --include='bash-completion,bzip2,ca-certificates,console-setup,cron,curl,dropbear,ethtool,fake-hwclock,fdisk,gnupg,htop,ifupdown,isc-dhcp-client,kmod,locales,nano,p7zip,parted,procps,psmisc,rfkill,sudo,systemd-sysv,systemd-timesyncd,tzdata,udev,unzip,usbutils,wget,whiptail' --arch="$parch" --keyring="$keyring" bullseye ./rootfs "$repo"
 
 # Remove cached archives and list files created by debootstrap
 G_EXEC rm -Rf rootfs/var/{cache/apt,lib/apt/lists}/*
@@ -215,11 +217,10 @@ then
 	G_EXEC systemctl start dbus.socket dbus
 fi
 # - Bind mounts required to allow container reading its own drive info, /dev/disk for GRUB and probably other tools to detect UUIDs
-# - CAP_IPC_LOCK required for mlock/mlockall, used by vmtouch
 abind=()
 [[ -b '/dev/loop0p2' ]] && abind=('--bind=/dev/loop0p2')
 [[ -b '/dev/loop0p3' ]] && abind+=('--bind=/dev/loop0p3')
-systemd-nspawn -bD rootfs --bind=/dev/loop0 --bind=/dev/loop0p1 "${abind[@]}" --bind=/dev/disk --capability=CAP_IPC_LOCK || exit 1
+systemd-nspawn -bD rootfs --bind=/dev/loop0 --bind=/dev/loop0p1 "${abind[@]}" --bind=/dev/disk || exit 1
 [[ -f 'rootfs/success' ]] || { G_DIETPI-NOTIFY 1 'The container setup did not finish successfully, aborting...'; exit 1; }
 G_EXEC rm rootfs/success
 G_EXEC sync
@@ -232,9 +233,6 @@ G_EXEC losetup -d /dev/loop0
 # Imager
 export FP_ROOT_DEV CLONING_TOOL OUTPUT_IMG_NAME MOUNT_IT='Off'
 bash -c "$(curl -sSfL "https://raw.githubusercontent.com/$G_GITOWNER/DietPi/$G_GITBRANCH/.meta/dietpi-imager")" 'DietPi-Imager' "$OUTPUT_IMG_NAME.img" || exit 1
-
-# Upload
-[[ -x 'upload.sh' ]] && ./upload.sh "$OUTPUT_IMG_NAME.7z"
 
 exit 0
 }
