@@ -1041,7 +1041,7 @@ _EOF_
 			if (( $WIFI_REQUIRED )); then
 
 				aPACKAGES_REQUIRED_INSTALL+=('firmware-atheros')		# Qualcomm/Atheros WiFi+BT dongle firmware
-				aPACKAGES_REQUIRED_INSTALL+=('firmware-brcm80211')		# Breadcom WiFi dongle firmware
+				aPACKAGES_REQUIRED_INSTALL+=('firmware-brcm80211')		# Broadcom WiFi dongle firmware
 				aPACKAGES_REQUIRED_INSTALL+=('firmware-iwlwifi')		# Intel WiFi dongle+PCIe firmware
 				if (( $G_HW_MODEL == 20 )); then
 
@@ -1383,7 +1383,7 @@ _EOF_'
 		rm -fv /etc/resolv.conf
 		echo 'nameserver 9.9.9.9' > /etc/resolv.conf # Apply generic functional DNS nameserver, updated on next service start
 
-		# ifupdown starts the daemon outside of systemd, the enabled systemd unit just thows an error on boot due to missing dbus and with dbus might interfere with ifupdown
+		# ifupdown starts the daemon outside of systemd, the enabled systemd unit just throws an error on boot due to missing dbus and with dbus might interfere with ifupdown
 		systemctl disable wpa_supplicant 2> /dev/null && G_DIETPI-NOTIFY 2 'Disabled non-required wpa_supplicant systemd unit'
 
 		G_EXEC_DESC='Configuring network interfaces'
