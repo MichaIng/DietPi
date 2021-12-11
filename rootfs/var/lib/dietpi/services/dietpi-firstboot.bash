@@ -284,6 +284,7 @@ _EOF_
 
 				> /etc/resolv.conf
 				for i in $static_dns; do echo "nameserver $i" >> /etc/resolv.conf; done
+				sed -i "/dns-nameservers/c\#dns-nameservers $static_dns" /etc/network/interfaces
 
 			fi
 
