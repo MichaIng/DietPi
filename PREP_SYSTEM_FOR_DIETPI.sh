@@ -1684,8 +1684,9 @@ _EOF_
 			# Apply minimum GPU memory split for server usage: This applies a custom dtoverlay to disable VCSM: https://github.com/MichaIng/DietPi/pull/3900
 			/boot/dietpi/func/dietpi-set_hardware gpumemsplit 16
 
-			# Disable RPi camera to add modules blacklist
+			# Disable RPi camera and codecs to add modules blacklist
 			/boot/dietpi/func/dietpi-set_hardware rpi-camera disable
+			/boot/dietpi/func/dietpi-set_hardware rpi-codec disable
 
 			# Update USBridgeSig Ethernet driver via postinst kernel script, until it has been merged into official RPi kernel: https://github.com/allocom/USBridgeSig/tree/master/ethernet
 			cat << '_EOF_' > /etc/kernel/postinst.d/dietpi-USBridgeSig
