@@ -4,7 +4,7 @@
 	# Optimise current Debian install and prepare for DietPi installation
 	#------------------------------------------------------------------------------------------------
 	# REQUIREMENTS
-	# - Currently running Debian Stretch or above, ideally minimal, eg: Raspbian Lite-ish =))
+	# - Currently running Debian Buster or above, ideally minimal, eg: Raspbian Lite-ish =))
 	# - systemd as system/init/service manager
 	# - Either Ethernet connection or local (non-SSH) terminal access
 	#------------------------------------------------------------------------------------------------
@@ -111,8 +111,6 @@ _EOF_
 		'whiptail' # G_WHIP
 
 	)
-	# - Pre-Buster: Support HTTPS sources for APT
-	grep -q 'stretch' /etc/os-release && aAPT_PREREQS+=('apt-transport-https')
 	for i in "${aAPT_PREREQS[@]}"
 	do
 		dpkg-query -s "$i" &> /dev/null || apt-get -y install "$i" && continue
@@ -180,12 +178,7 @@ _EOF_
 
 	# Detect the distro version of this operating system
 	distro=$(</etc/debian_version)
-	if [[ $distro == '9.'* || $distro == 'stretch/sid' ]]; then
-
-		G_DISTRO=4
-		G_DISTRO_NAME='stretch'
-
-	elif [[ $distro == '10.'* || $distro == 'buster/sid' ]]; then
+	if [[ $distro == '10.'* || $distro == 'buster/sid' ]]; then
 
 		G_DISTRO=5
 		G_DISTRO_NAME='buster'
@@ -674,8 +667,6 @@ Currently installed: $G_DISTRO_NAME (ID: $G_DISTRO)"; then
 		else
 
 			aPACKAGES_REQUIRED_INSTALL+=('dropbear-run')
-			# On Stretch pre-images we need to assure that apt-transport-https stays installed until the distro upgrade is done.
-			(( $G_DISTRO < 5 )) && aPACKAGES_REQUIRED_INSTALL+=('apt-transport-https')
 
 		fi
 		# - systemd-timesyncd: Network time sync daemon
