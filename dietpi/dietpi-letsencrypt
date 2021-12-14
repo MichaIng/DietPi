@@ -31,9 +31,6 @@
 	#/////////////////////////////////////////////////////////////////////////////////////
 	# Globals
 	#/////////////////////////////////////////////////////////////////////////////////////
-	# Add post-renewal tasks via systemd unit drop-in
-	readonly FP_RENEWAL='/etc/systemd/system/certbot.service.d'
-
 	LETSENCRYPT_DOMAINS='mydomain.org'
 	LETSENCRYPT_EMAIL='myemail@email.org'
 	LETSENCRYPT_REDIRECT=0
@@ -95,23 +92,6 @@
 
 			fi
 
-			# Stretch: Create combined key. From Debian Buster (Lighttpd v1.4.53) on, ssl.privkey + ssl.pemfile can be used with key and cert separated.
-			cat "$fp_cert_dir/privkey.pem" "$fp_cert_dir/cert.pem" > "$fp_cert_dir/combined.pem"
-			if [[ ! -f $fp_cert_dir'/combined.pem' ]]; then
-
-				G_DIETPI-NOTIFY 1 "$fp_cert_dir/combined.pem could not be created. Please check existence of privkey.pem and cert.pem within this directory, as result of Certbot execution. Aborting..."
-				return 1
-
-			fi
-
-			# Add Lighttpd renewal to certbot systemd service
-			[[ -d $FP_RENEWAL ]] || G_EXEC mkdir "$FP_RENEWAL"
-			cat << _EOF_ > "$FP_RENEWAL/dietpi-lighttpd.conf"
-[Service]
-ExecStartPost=/bin/dash -c 'cat "$fp_cert_dir/privkey.pem" "$fp_cert_dir/cert.pem" > "$fp_cert_dir/combined.pem"'
-_EOF_
-			G_EXEC systemctl daemon-reload
-
 			# Allow adding environment variables via: setenv.add-environment
 			G_CONFIG_INJECT '"mod_setenv"' '	"mod_setenv",' /etc/lighttpd/lighttpd.conf '"mod_.+",'
 
@@ -122,9 +102,8 @@ server.modules += ( "mod_openssl" )
 \$SERVER["socket"] == ":443" {
 	protocol = "https://"
 	ssl.engine = "enable"
-
-	# pemfile is cert+privkey, ca-file is the intermediate chain in one file
-	ssl.pemfile = "$fp_cert_dir/combined.pem"
+	ssl.pemfile = "$fp_cert_dir/fullchain.pem"
+	ssl.privkey = "$fp_cert_dir/privkey.pem"
 	ssl.ca-file = "$fp_cert_dir/fullchain.pem"
 
 	# For DH/DHE ciphers, dhparam should be >= 2048-bit
@@ -145,9 +124,8 @@ server.modules += ( "mod_openssl" )
 \$SERVER["socket"] == "[::]:443" {
 	protocol = "https://"
 	ssl.engine = "enable"
-
-	# pemfile is cert+privkey, ca-file is the intermediate chain in one file
-	ssl.pemfile = "$fp_cert_dir/combined.pem"
+	ssl.pemfile = "$fp_cert_dir/fullchain.pem"
+	ssl.privkey = "$fp_cert_dir/privkey.pem"
 	ssl.ca-file = "$fp_cert_dir/fullchain.pem"
 
 	# For DH/DHE ciphers, dhparam should be >= 2048-bit
@@ -165,14 +143,8 @@ server.modules += ( "mod_openssl" )
 	ssl.disable-client-renegotiation = "enable"
 }
 _EOF_
-			# Stretch: Remove builtin mod_openssl and use old protocol directives on Stretch
-			if (( $G_DISTRO < 5 ))
-			then
-				G_EXEC sed -i '2d' /etc/lighttpd/conf-available/50-dietpi-https.conf
-				G_EXEC sed -i '/ssl.openssl.ssl-conf-cmd/c\\tssl.use-sslv2 = "disable"\n\tssl.use-sslv3 = "disable"' /etc/lighttpd/conf-available/50-dietpi-https.conf
-
 			# Bullseye: Install dedicated TLS module package and keep session tickets enabled, which is safe since Lighttpd v1.4.56: https://github.com/MichaIng/DietPi/issues/4294#issuecomment-826802056
-			elif (( $G_DISTRO > 5 ))
+			if (( $G_DISTRO > 5 ))
 			then
 				G_AG_CHECK_INSTALL_PREREQ lighttpd-mod-openssl
 				G_EXEC sed -i 's/, "Options" => "-SessionTicket"//' /etc/lighttpd/conf-available/50-dietpi-https.conf
@@ -335,6 +307,7 @@ _EOF_
 			G_EXEC chmod +x /home/minio-user/.minio/dietpi-cert-renewl.sh
 
 			# Add MinIO renewal to certbot system service
+			readonly FP_RENEWAL='/etc/systemd/system/certbot.service.d'
 			[[ -d $FP_RENEWAL ]] || G_EXEC mkdir "$FP_RENEWAL"
 			cat << '_EOF_' > "$FP_RENEWAL/dietpi-minio.conf"
 [Service]
