@@ -31,6 +31,9 @@
 	#/////////////////////////////////////////////////////////////////////////////////////
 	# Globals
 	#/////////////////////////////////////////////////////////////////////////////////////
+	# Pre-v8.0 migration
+	readonly FP_RENEWAL='/etc/systemd/system/certbot.service.d'
+
 	LETSENCRYPT_DOMAINS='mydomain.org'
 	LETSENCRYPT_EMAIL='myemail@email.org'
 	LETSENCRYPT_REDIRECT=0
@@ -91,6 +94,14 @@
 				return 1
 
 			fi
+
+			# Pre-v8.0 migration
+			if [[ -f $FP_RENEWAL/dietpi-lighttpd.conf ]]
+			then
+				G_EXEC rm "$FP_RENEWAL/dietpi-lighttpd.conf"
+				G_EXEC rmdir --ignore-fail-on-non-empty "$FP_RENEWAL"
+			fi
+			[[ -f $fp_cert_dir/combined.pem ]] && G_EXEC rm "$fp_cert_dir/combined.pem"
 
 			# Allow adding environment variables via: setenv.add-environment
 			G_CONFIG_INJECT '"mod_setenv"' '	"mod_setenv",' /etc/lighttpd/lighttpd.conf '"mod_.+",'
@@ -278,15 +289,16 @@ _EOF_
 			G_EXEC umask 022
 
 			# Add SSL to config file
-			G_CONFIG_INJECT 'MINIO_OPTS="' 'MINIO_OPTS="--address :443"' /etc/default/minio
+			G_CONFIG_INJECT 'MINIO_OPTS=' 'MINIO_OPTS="--address :443"' /etc/default/minio
 
 			# Allow SSL binding for non root user
 			# - Install libcap2-bin, which provides setcap command, not installed by default on DietPi
-			G_AGI libcap2-bin
-			G_EXEC setcap CAP_NET_BIND_SERVICE=+eip /usr/local/bin/minio
+			G_AG_CHECK_INSTALL_PREREQ libcap2-bin
+			G_EXEC setcap 'CAP_NET_BIND_SERVICE=+eip' /usr/local/bin/minio
 
-			# Create renewl script
-			cat << _EOF_ > /home/minio-user/.minio/dietpi-cert-renewl.sh
+			# Create renewl hook
+			[[ -d '/etc/letsencrypt/renewal-hooks/deploy' ]] || G_EXEC mkdir -p /etc/letsencrypt/renewal-hooks/deploy
+			cat << _EOF_ > /etc/letsencrypt/renewal-hooks/deploy/dietpi-minio.sh
 #!/bin/dash
 # MinIO only works with copied and owned certs. Upon renewal the new certs needs to be copied and re-owned
 systemctl stop minio
@@ -299,21 +311,19 @@ cp "$fp_cert_dir/fullchain.pem" /home/minio-user/.minio/certs/public.crt
 cp "$fp_cert_dir/privkey.pem" /home/minio-user/.minio/certs/private.key
 
 # Re-Own those certs!
-chown minio-user:minio-user /home/minio-user/.minio/certs/public.crt /home/minio-user/.minio/certs/private.key
+chown minio-user:root /home/minio-user/.minio/certs/public.crt /home/minio-user/.minio/certs/private.key
 
 systemctl start minio
 _EOF_
-			# Add execute permissions for renewal script
-			G_EXEC chmod +x /home/minio-user/.minio/dietpi-cert-renewl.sh
+			G_EXEC chmod +x /etc/letsencrypt/renewal-hooks/deploy/dietpi-minio.sh
 
-			# Add MinIO renewal to certbot system service
-			readonly FP_RENEWAL='/etc/systemd/system/certbot.service.d'
-			[[ -d $FP_RENEWAL ]] || G_EXEC mkdir "$FP_RENEWAL"
-			cat << '_EOF_' > "$FP_RENEWAL/dietpi-minio.conf"
-[Service]
-ExecStartPost=/home/minio-user/.minio/dietpi-cert-renewl.sh
-_EOF_
-			G_EXEC systemctl daemon-reload
+			# Pre-v8.0 migration
+			if [[ -f $FP_RENEWAL/dietpi-minio.conf ]]
+			then
+				G_EXEC rm "$FP_RENEWAL/dietpi-minio.conf"
+				G_EXEC rmdir --ignore-fail-on-non-empty "$FP_RENEWAL"
+			fi
+			[[ -f '/home/minio-user/.minio/dietpi-cert-renewl.sh' ]] && G_EXEC rm /home/minio-user/.minio/dietpi-cert-renewl.sh
 
 			# Apply changes by restarting MinIO
 			G_EXEC systemctl restart minio
