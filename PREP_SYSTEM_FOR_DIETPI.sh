@@ -1925,6 +1925,9 @@ _EOF_
 		G_DIETPI-NOTIFY 2 'Writing PREP information to file'
 		echo -e "$IMAGE_CREATOR\n$PREIMAGE_INFO" > /boot/dietpi/.prep_info
 
+		# Temporary fix for missing .installed errors on v7.9 images
+		> /boot/dietpi/.installed
+
 		G_DIETPI-NOTIFY 2 'Generating GPLv2 license readme'
 		cat << '_EOF_' > /var/lib/dietpi/license.txt
 -----------------------
@@ -1969,25 +1972,16 @@ _EOF_
 
 		sync
 
-		G_DIETPI-NOTIFY 2 "The used kernel version is:\n\t - $(uname -a)"
+		G_DIETPI-NOTIFY 2 "The used kernel version is:\n\t- $(uname -a)"
 		kernel_apt_packages=$(dpkg -l | grep -E '[[:blank:]]linux-(image|dtb)-[0-9]')
-		if [[ $kernel_apt_packages ]]; then
+		[[ $kernel_apt_packages ]] && G_DIETPI-NOTIFY 2 'The following kernel DEB packages have been found:\n\e[0m$kernel_apt_packages'
 
-			G_DIETPI-NOTIFY 2 'The following kernel DEB packages have been found, please purge outdated ones:'
-			echo "$kernel_apt_packages"
-
-		fi
-
-		G_DIETPI-NOTIFY 2 'Please delete outdated non-APT kernel modules:'
-		ls -lAh /lib/modules
+		G_DIETPI-NOTIFY 2 'The following kernel images and modules have been found:'
+		ls -lAh /boot /lib/modules
 
 		G_DIETPI-NOTIFY 0 'Completed, disk can now be saved to .img for later use, or, reboot system to start first run of DietPi.'
 
-		# Power off system
-
-		# Plug SD card/drive into external DietPi system
-
-		# Run: bash -c "$(curl -sSfL https://github.com/MichaIng/DietPi/blob/master/.meta/dietpi-imager)"
+		G_DIETPI-NOTIFY 0 'To create an .img file, you can "poweroff" and run the following command from the host/external DietPi system:\n\t- bash -c "$(curl -sSfL https://github.com/MichaIng/DietPi/blob/master/.meta/dietpi-imager)"'
 
 	}
 
