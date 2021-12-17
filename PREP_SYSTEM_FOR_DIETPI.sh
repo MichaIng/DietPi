@@ -1974,7 +1974,7 @@ _EOF_
 
 		G_DIETPI-NOTIFY 2 "The used kernel version is:\n\t- $(uname -a)"
 		kernel_apt_packages=$(dpkg -l | grep -E '[[:blank:]]linux-(image|dtb)-[0-9]')
-		[[ $kernel_apt_packages ]] && G_DIETPI-NOTIFY 2 'The following kernel DEB packages have been found:\n\e[0m$kernel_apt_packages'
+		[[ $kernel_apt_packages ]] && G_DIETPI-NOTIFY 2 "The following kernel DEB packages have been found:\n\e[0m$kernel_apt_packages"
 
 		G_DIETPI-NOTIFY 2 'The following kernel images and modules have been found:'
 		ls -lAh /boot /lib/modules
