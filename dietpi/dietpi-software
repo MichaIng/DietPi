@@ -845,7 +845,7 @@ INDEX_BROWSER=$INDEX_BROWSER"
 		software_id=161
 
 		aSOFTWARE_NAME[$software_id]='FuguHub'
-		aSOFTWARE_DESC[$software_id]='Lightweight WebDAV cloud (eg: dropbox) with a CMS'
+		aSOFTWARE_DESC[$software_id]='Lightweight WebDAV cloud with a CMS, album and blog integration'
 		aSOFTWARE_CATX[$software_id]=4
 		aSOFTWARE_DOCS[$software_id]='https://dietpi.com/docs/software/cloud/#fuguhub'
 		# - ARMv8
@@ -11389,24 +11389,78 @@ _EOF_
 			Banner_Installing
 
 			# ARM
-			local url='https://fuguhub.com/releases/raspberrypi/install.sh'
+			local url='https://fuguhub.com/FuguHub.RaspberryPi.tar.gz'
 
 			# x86_64
-			(( $G_HW_ARCH == 10 )) && url='https://fuguhub.com/install/FuguHub.linux.install'
+			(( $G_HW_ARCH == 10 )) && url='https://fuguhub.com/FuguHub.linux-x64.tar.gz'
 
-			Download_Install "$url" FuguHubInstall.sh
+			# Download
+			Download_Install "$url" bd
+			# - Remove first run wizard
+			G_EXEC rm bd/applications/Config-Wizard.zip
+			# - SSL addon: https://fuguhub.com/SSL-Certificate-Wizard.lsp
+			G_THREAD_START curl -sSfL 'https://fuguhub.com/unix/sslcert.zip' -o bd/applications/sslcert.zip
+			# - Drop Box addon: https://fuguhub.com/dropbox.lsp
+			G_THREAD_START curl -sSfL 'https://fuguhub.com/box.zip' -o bd/applications/box.zip
+			G_THREAD_WAIT
 
-			G_EXEC chmod +x FuguHubInstall.sh
-			G_EXEC_OUTPUT=1 G_EXEC ./FuguHubInstall.sh
-			G_EXEC_NOHALT=1 G_EXEC rm FuguHubInstall.sh
+			# Reinstall: Do not overwrite config and data
+			if [[ -d '/home/bd' ]]
+			then
+				G_EXEC rm -R bd/{cmsdocs,data,disk}
+				G_EXEC cp -a bd/. /home/bd/
+			else
+				G_EXEC rm -R bd/disk
+				G_EXEC mv bd /home/bd
+			fi
 
-			G_EXEC curl -sSfL 'https://fuguhub.com/box.zip' -o /home/bd/applications/box.zip
+			# File server root directory
+			if [[ ! -d '/mnt/dietpi_userdata/fuguhub-data' ]]
+			then
+				if [[ -d '/home/bd/disk' ]]
+				then
+					G_EXEC mv /home/bd/disk /mnt/dietpi_userdata/fuguhub-data # Pre-v8.0
+				else
+					G_EXEC mkdir /mnt/dietpi_userdata/fuguhub-data
+				fi
+			fi
+			G_EXEC rm -Rf /home/bd/disk # Pre-v8.0
+			[[ -e '/mnt/dietpi_userdata/fuguhub-data/cmsdocs' ]] || G_EXEC ln -s /home/bd/cmsdocs /mnt/dietpi_userdata/fuguhub-data/cmsdocs
+			[[ -e '/mnt/dietpi_userdata/fuguhub-data/applications' ]] || G_EXEC ln -s /home/bd/applications /mnt/dietpi_userdata/fuguhub-data/applications
 
-			# Move file server directory to DietPi userdata
-			[[ -d '/mnt/dietpi_userdata/fuguhub-data' ]] || G_EXEC mv /home/bd/disk /mnt/dietpi_userdata/fuguhub-data
-			[[ -d '/home/bd/disk' ]] && G_EXEC rm -R /home/bd/disk
-			G_EXEC ln -s /mnt/dietpi_userdata/fuguhub-data /home/bd/disk
+			# Create admin account
+			if [[ ! -f '/home/bd/user.dat' ]]
+			then
+				> /home/bd/user.dat
+				G_EXEC chmod 0600 /home/bd/user.dat
+				echo -n "{'v':{'dietpi':{'name':'dietpi','pwd':'$GLOBAL_PW','maxUsers':15,'recycle':true,'inactive':1200,'roles':{}}}}" > /home/bd/user.dat
+			fi
+			[[ -f '/home/bd/drvcnstr.dat' ]] || echo -n '{"v":{"admin":{"roles":["admin"],"urls":["\/*"],"methods":["GET","POST","PUT","PROPFIND","PROPPATCH","MKCOL","DELETE","MOVE","COPY"]}}}' > /home/bd/drvcnstr.dat
+			[[ -d '/home/bd/tuncnstr.dat' ]] || echo -n '{"v":{"TunFullAcc":{"roles":["TunFullAcc"],"urls":["\/*"],"methods":["GET"]}}}' > /home/bd/tuncnstr.dat
 
+			# User
+			Create_User -d /home/bd bd
+
+			# Permissions
+			G_EXEC chown -R bd:bd /home/bd /mnt/dietpi_userdata/fuguhub-data
+
+			# Replace SysV service with systemd unit: https://github.com/MichaIng/DietPi/issues/5058
+			Remove_SysV bdd
+			cat << '_EOF_' > /etc/systemd/system/bdd.service
+[Unit]
+Description=FuguHub (DietPi)
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+User=bd
+AmbientCapabilities=CAP_NET_BIND_SERVICE
+WorkingDirectory=/home/bd
+ExecStart=/home/bd/FuguHub -h/home/bd -r/mnt/dietpi_userdata/fuguhub-data --threads 3 --sessions 100 --connections 80
+
+[Install]
+WantedBy=multi-user.target
+_EOF_
 		fi
 
 		software_id=164 # Nukkit
@@ -14820,14 +14874,21 @@ _EOF_
 			Banner_Uninstalling
 
 			# Service
+			if [[ -f '/etc/systemd/system/minio.service' ]]
+			then
+				G_EXEC systemctl disable --now bdd
+				G_EXEC rm /etc/systemd/system/bdd.service
+			fi
+			[[ -d '/etc/systemd/system/bdd.service.d' ]] && G_EXEC rm -R /etc/systemd/system/bdd.service.d
+			# Pre-v8.0
 			if [[ -f '/etc/init.d/bdd' ]]
 			then
 				G_EXEC systemctl unmask bdd
-				G_EXEC systemctl disable --now bdd
+				G_EXEC systemctl disable bdd
+				G_EXEC systemctl stop bdd
 				G_EXEC rm /etc/init.d/bdd
 				G_EXEC update-rc.d -f bdd remove
 			fi
-			[[ -d '/etc/systemd/system/bdd.service.d' ]] && G_EXEC rm -R /etc/systemd/system/bdd.service.d
 
 			# User
 			getent passwd bd > /dev/null && G_EXEC userdel bd
@@ -14835,6 +14896,8 @@ _EOF_
 
 			# Files
 			[[ -d '/home/bd' ]] && G_EXEC rm -R /home/bd
+
+			G_DIETPI-NOTIFY 2 'FuguHub file server data at /mnt/dietpi_userdata/fuguhub-data are not removed. You may do this manually:\n - rm -R /mnt/dietpi_userdata/fuguhub-data'
 
 		fi
 
