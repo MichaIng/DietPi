@@ -72,8 +72,8 @@ G_GITOWNER='$G_GITOWNER'" > /boot/dietpi/.version
 	}
 
 	# Init function for originating script
-	# - Stuff we can't init in main globals/funcs due to /etc/bashrc.d/ load into login session.
-	# - Optional input variables:
+	# - Stuff we can't init in main globals/funcs due to /etc/bashrc.d/dietpi.bash load into interactive bash sessions.
+	# - Optional environment variables:
 	#	G_INIT_ALLOW_CONCURRENT=1	= Allow concurrent DietPi script execution (default: 0)
 	#	G_INIT_WAIT_CONCURRENT=<int>	= Max time to wait for concurrent execution to exit before user prompt (default: 5)
 	G_INIT(){
@@ -83,23 +83,35 @@ G_GITOWNER='$G_GITOWNER'" > /boot/dietpi/.version
 		export LC_ALL='C.UTF-8' LANG='C.UTF-8' PATH='/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin'
 
 		# Set G_PROGRAM_NAME to originating script file (or shell executable) name if it was not set by originating script
-		[[ $G_PROGRAM_NAME ]] || G_PROGRAM_NAME=${0##*/}
+		[[ $G_PROGRAM_NAME ]] || readonly G_PROGRAM_NAME=${0##*/}
 
 		# HIERARCHY system for G_DIETPI-NOTIFY 3 to reduce highlight or sub script output
 		# shellcheck disable=SC2015
 		[[ $HIERARCHY =~ ^[0-9]+$ ]] && export HIERARCHY=$((HIERARCHY+1)) || export HIERARCHY=0
 
-		# Check for concurrent execution
-		if [[ $G_INIT_ALLOW_CONCURRENT != 1 ]]
+		# Concurrent execution handling
+		local i=0
+		if [[ $G_INIT_ALLOW_CONCURRENT == 1 ]]
 		then
-			local timer=0 limit=${G_INIT_WAIT_CONCURRENT:-5}
+			# Concurrency allowed: Use next free suffix for working directory, avoid race condition by checking via "mkdir" success
+			until mkdir "/tmp/${G_PROGRAM_NAME}_$i" &> /dev/null
+			do
+				# If the directory does not exist, its creation failed, probably due to R/O filesystem, hence break loop!
+				[[ -d /tmp/${G_PROGRAM_NAME}_$i ]] || break
+				((i++))
+			done
+
+			readonly G_WORKING_DIR="/tmp/${G_PROGRAM_NAME}_$i"
+		else
+			# Concurrency not allowed: Use existing working directory as flag
+			local limit=${G_INIT_WAIT_CONCURRENT:-5}
 
 			while [[ -d /tmp/$G_PROGRAM_NAME ]]
 			do
-				if (( $timer < $limit ))
+				if (( $i < $limit ))
 				then
-					((timer++))
-					G_DIETPI-NOTIFY 2 "Concurrent execution of $G_PROGRAM_NAME detected, retrying... ($timer/$limit)"
+					((i++))
+					G_DIETPI-NOTIFY 2 "Concurrent execution of $G_PROGRAM_NAME detected, retrying... ($i/$limit)"
 					sleep 1
 				else
 					G_WHIP_BUTTON_OK_TEXT='Retry'
@@ -117,29 +129,28 @@ $(ps f -eo pid,user,tty,cmd | grep -i '[d]ietpi')" && continue
 					exit 1
 				fi
 			done
+
+			readonly G_WORKING_DIR="/tmp/$G_PROGRAM_NAME"
 		fi
 
-		# Declare exit trap, that runs on EXIT signal, which includes INT (interruption) and TERM (kill)
+		# Declare exit trap which runs on EXIT signals, including SIGINT and SIGTERM but not SIGKILL!
 		G_EXIT(){
 
-			# Navigate to /tmp, if we are inside working dir, which is about to be removed
+			# Navigate to /tmp before removing working directory
 			cd /tmp || G_DIETPI-NOTIFY 1 'Failed to navigate to /tmp'
 
-			# Purge working directory, if existent and no concurrency allowed
-			if [[ $G_INIT_ALLOW_CONCURRENT != 1 && -d /tmp/$G_PROGRAM_NAME ]]
-			then
-				rm -R "/tmp/$G_PROGRAM_NAME" || G_DIETPI-NOTIFY 1 "Failed to remove scripts working directory: /tmp/$G_PROGRAM_NAME"
-			fi
+			# Purge working directory if existent
+			[[ ! -d $G_WORKING_DIR ]] || rm -R "$G_WORKING_DIR" || G_DIETPI-NOTIFY 1 "Failed to remove scripts working directory: $G_WORKING_DIR"
 
-			# Execute custom exit function, if existent
+			# Execute custom exit function if declared
 			declare -F G_EXIT_CUSTOM &> /dev/null && G_EXIT_CUSTOM
 
 		}
 		trap 'G_EXIT' EXIT
 
-		# Ensure we are in script working dir or users home dir, if available: https://github.com/MichaIng/DietPi/issues/905#issuecomment-298223705
-		mkdir -p "/tmp/$G_PROGRAM_NAME" && cd "/tmp/$G_PROGRAM_NAME" && return
-		G_DIETPI-NOTIFY 1 "Failed to create or enter scripts working directory: /tmp/$G_PROGRAM_NAME"
+		# Create and navigate to scripts working directory or users home if available: https://github.com/MichaIng/DietPi/issues/905#issuecomment-298223705
+		mkdir -p "$G_WORKING_DIR" && cd "$G_WORKING_DIR" && return
+		G_DIETPI-NOTIFY 1 "Failed to create or enter scripts working directory: $G_WORKING_DIR"
 		if [[ $HOME && -d $HOME ]]
 		then
 			cd "$HOME" && { G_DIETPI-NOTIFY 2 "Entered users home directory: $HOME"; return; }
