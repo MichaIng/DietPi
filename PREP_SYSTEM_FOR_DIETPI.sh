@@ -902,6 +902,10 @@ _EOF_
 			[[ $G_HW_ARCH == 3 ]] || a32bit=('raspi-copies-and-fills')
 			G_AGI raspberrypi-bootloader raspberrypi-kernel libraspberrypi0 libraspberrypi-bin raspberrypi-sys-mods raspberrypi-archive-keyring "${a32bit[@]}"
 
+			# https://github.com/RPi-Distro/raspberrypi-sys-mods/pull/60
+			[[ -f '/etc/apt/trusted.gpg.d/microsoft.gpg' ]] && G_EXEC rm /etc/apt/trusted.gpg.d/microsoft.gpg
+			[[ -f '/etc/apt/sources.list.d/vscode.list' ]] && G_EXEC rm /etc/apt/sources.list.d/vscode.list
+
 			# Move Raspbian key to active place and remove obsolete combined keyring
 			[[ -f '/usr/share/keyrings/raspbian-archive-keyring.gpg' ]] && G_EXEC ln -sf /usr/share/keyrings/raspbian-archive-keyring.gpg /etc/apt/trusted.gpg.d/raspbian-archive-keyring.gpg
 			[[ -f '/etc/apt/trusted.gpg' ]] && G_EXEC rm /etc/apt/trusted.gpg
