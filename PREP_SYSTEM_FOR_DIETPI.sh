@@ -1976,6 +1976,7 @@ _EOF_
 
 		G_DIETPI-NOTIFY 0 'Completed, disk can now be saved to .img for later use, or, reboot system to start first run of DietPi.'
 
+		# shellcheck disable=SC2016
 		G_DIETPI-NOTIFY 0 'To create an .img file, you can "poweroff" and run the following command from the host/external DietPi system:\n\t- bash -c "$(curl -sSfL https://github.com/MichaIng/DietPi/blob/master/.meta/dietpi-imager)"'
 
 	}
