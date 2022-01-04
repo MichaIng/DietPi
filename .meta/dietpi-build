@@ -19,17 +19,21 @@ G_EXIT_CUSTOM(){
 # Inputs
 HW_MODEL=
 HW_ARCH=
+DISTRO=6 # 6=Bulleye, 7=Bookworm
 PTTYPE='msdos'
 FSTYPE='ext4'
 ITYPE=
+VMTYPE=
 while (( $# ))
 do
 	case $1 in
 		'-m') shift; HW_MODEL=$1;;
 		'-a') shift; HW_ARCH=$1;;
+		'-d') shift; DISTRO=$1;;
 		'-p') shift; PTTYPE=$1;;
 		'-f') shift; FSTYPE=$1;;
 		'-i') ITYPE='Installer';;
+		'-v') shift; VMTYPE=$1;;
 		*) G_DIETPI-NOTIFY 1 "Invalid input \"$1\", aborting..."; exit 1;;
 	esac
 	shift
@@ -44,10 +48,16 @@ root_size=1023
 CLONING_TOOL='dd'
 case $HW_MODEL in
 	0) iname='RPi' partition_start=4 boot_size=128 root_size=892;;
-	20) iname='VM' WIFI_REQUIRED=0;;
+	20) iname='VM' WIFI_REQUIRED=0 VMTYPE=${VMTYPE:-raw};;
 	21) iname='NativePC-BIOS' HW_ARCH=10 root_size=1215;;
 	*) G_DIETPI-NOTIFY 1 "Invalid hardware model \"$HW_MODEL\" passed, aborting..."; exit 1;;
 esac
+
+if [[ $VMTYPE ]]
+then
+	[[ $HW_MODEL == 20 ]] || { G_DIETPI-NOTIFY 1 "Invalid option \"-v\" (virtual machine type) for hardware model \"$HW_MODEL\", aborting..."; exit 1; }
+	[[ $VMTYPE =~ ^(vbox|vmware|hyperv|all)$ ]] || { G_DIETPI-NOTIFY 1 "Invalid virtual machine type \"$VMTYPE\" passed, aborting..."; exit 1; }
+fi
 
 # Check for valid target architecture and set variables accordingly
 repo='https://deb.debian.org/debian/'
@@ -60,26 +70,45 @@ case $HW_ARCH in
 	*) G_DIETPI-NOTIFY 1 "Invalid architecture \"$HW_ARCH\" passed, aborting..."; exit 1;;
 esac
 
+exclude=
+case $DISTRO in
+	6) distro='bullseye';;
+	7) distro='bookworm' exclude=',gcc-10-base';;
+	*) G_DIETPI-NOTIFY 1 "Invalid distro \"$DISTRO\" passed, aborting..."; exit 1;;
+esac
+
 case $PTTYPE in
 	'msdos') efi_size=0;;
 	'gpt') [[ $HW_ARCH == 10 ]] && iname='NativePC-UEFI' ITYPE='Installer';;
 	*) G_DIETPI-NOTIFY 1 "Invalid partition table type \"$PTTYPE\" passed, aborting..."; exit 1;;
 esac
 
+apackages=()
 case $FSTYPE in
-	'ext4'|'f2fs'|'btrfs') :;;
+	'ext4') apackages+=('e2fsprogs');;
+	'f2fs') apackages+=('f2fs-tools');;
+	'btrfs') apackages+=('btrfs-progs');;
 	*) G_DIETPI-NOTIFY 1 "Invalid filesystem type \"$FSTYPE\" passed, aborting..."; exit 1;;
 esac
 
 # Image name
-OUTPUT_IMG_NAME="DietPi_$iname-$iarch-Bullseye"
+OUTPUT_IMG_NAME="DietPi_$iname-$iarch-${distro^}"
 [[ $ITYPE ]] && OUTPUT_IMG_NAME+="_$ITYPE"
 
-# For installer images, disable dedicated boot partition, as it cannot be accessed to edit dietpi.txt anyway
-[[ $ITYPE == 'Installer' ]] && root_size=$((root_size+boot_size)) boot_size=0 CLONING_TOOL='Clonezilla'
+# x86_64 installer images are packaged with Clonezilla
+[[ $ITYPE == 'Installer' ]] && CLONING_TOOL='Clonezilla'
+
+# EFI and boot partitions are FAT
+(( $efi_size || $boot_size )) && apackages+=('dosfstools')
+
+# Emulation support in case of incompatible architecture
+(( ( $G_HW_ARCH < 10 && $G_HW_ARCH < $HW_ARCH ) || ( $G_HW_ARCH == 10 && $G_HW_ARCH != $HW_ARCH ) )) && apackages+=('qemu-user-static' 'binfmt-support')
+
+# Virtual machine disk conversion
+[[ $VMTYPE && $VMTYPE != 'raw' ]] && apackages+=('qemu-utils')
 
 # Dependencies
-G_AG_CHECK_INSTALL_PREREQ parted dosfstools debootstrap dbus systemd-container
+G_AG_CHECK_INSTALL_PREREQ parted debootstrap dbus systemd-container "${apackages[@]}"
 
 # Create image file
 G_EXEC fallocate -l "$((partition_start+efi_size+boot_size+root_size))M" "$OUTPUT_IMG_NAME.img"
@@ -177,19 +206,22 @@ G_EXEC chmod +x rootfs/etc/rc.local
 
 # - RPi: https://github.com/RPi-Distro/repo/issues/253
 [[ $HW_MODEL == 0 ]] && cat << '_EOF_' >> rootfs/etc/rc.local
+echo '[ INFO ] Installing Raspberry Pi repository keyring...'
 curl -sSfLO 'https://archive.raspberrypi.org/debian/pool/main/r/raspberrypi-archive-keyring/raspberrypi-archive-keyring_2016.10.31_all.deb' || exit 1
 dpkg -i raspberrypi-archive-keyring_2016.10.31_all.deb || exit 1
 rm raspberrypi-archive-keyring_2016.10.31_all.deb || exit 1
 _EOF_
 
 cat << _EOF_ >> rootfs/etc/rc.local
-export GITBRANCH='master' HW_MODEL='$HW_MODEL' IMAGE_CREATOR=0 PREIMAGE_INFO='from scratch' WIFI_REQUIRED=$WIFI_REQUIRED DISTRO_TARGET=6
+echo '[ INFO ] Running DietPi-PREP...'
+export GITBRANCH='master' HW_MODEL='$HW_MODEL' IMAGE_CREATOR=0 PREIMAGE_INFO='from scratch' WIFI_REQUIRED=$WIFI_REQUIRED DISTRO_TARGET=$DISTRO
 bash -c "\$(curl -sSfL 'https://raw.githubusercontent.com/$G_GITOWNER/DietPi/$G_GITBRANCH/PREP_SYSTEM_FOR_DIETPI.sh')"
 _EOF_
 
 # - VM: Generate tiny-initramfs with explicit kernel modules, as auto-detection doesn't work correctly within container and loop devices
 [[ $HW_MODEL == 20 ]] && cat << _EOF_ >> rootfs/etc/rc.local
-version=\$(dpkg --get-selections | mawk '/linux-image-*-amd64/{print \$1;exit}') || exit 1
+echo '[ INFO ] Rebuilding virtual machine initramfs to support all virtualizers...'
+version=\$(dpkg --get-selections | mawk '\$1~/^linux-image-.*-$parch\$/{print \$1;exit}') || exit 1
 version=\${version#linux-image-}
 mktirfs -m no -M no --include-modules='ahci,sd_mod,vmw_pvscsi,hv_storvsc,$FSTYPE' -o "/boot/initrd.img-\$version" "\$version" || exit 1
 _EOF_
@@ -202,7 +234,7 @@ exit 0
 _EOF_
 
 # Bootstrap
-G_EXEC_OUTPUT=1 G_EXEC debootstrap --variant=minbase --exclude='gcc-7-base,gcc-8-base,gcc-9-base' --include='bash-completion,bzip2,ca-certificates,console-setup,cron,curl,dropbear,ethtool,fake-hwclock,fdisk,gnupg,htop,ifupdown,isc-dhcp-client,kmod,locales,nano,p7zip,parted,procps,psmisc,rfkill,sudo,systemd-sysv,systemd-timesyncd,tzdata,udev,unzip,usbutils,wget,whiptail' --arch="$parch" --keyring="$keyring" bullseye ./rootfs "$repo"
+G_EXEC_OUTPUT=1 G_EXEC debootstrap --variant=minbase --exclude="gcc-7-base,gcc-8-base,gcc-9-base$exclude" --include='bash-completion,bzip2,ca-certificates,console-setup,cron,curl,dropbear,ethtool,fake-hwclock,fdisk,gnupg,htop,ifupdown,isc-dhcp-client,kmod,locales,nano,p7zip,parted,procps,psmisc,rfkill,sudo,systemd-sysv,systemd-timesyncd,tzdata,udev,unzip,usbutils,wget,whiptail' --arch="$parch" --keyring="$keyring" "$distro" ./rootfs "$repo"
 
 # Remove cached archives and list files created by debootstrap
 G_EXEC rm -Rf rootfs/var/{cache/apt,lib/apt/lists}/*
@@ -233,6 +265,264 @@ G_EXEC losetup -d /dev/loop0
 # Imager
 export FP_ROOT_DEV CLONING_TOOL OUTPUT_IMG_NAME MOUNT_IT='Off'
 bash -c "$(curl -sSfL "https://raw.githubusercontent.com/$G_GITOWNER/DietPi/$G_GITBRANCH/.meta/dietpi-imager")" 'DietPi-Imager' "$OUTPUT_IMG_NAME.img" || exit 1
+
+[[ $VMTYPE ]] || { G_EXEC rm "$OUTPUT_IMG_NAME.img"; exit 0; }
+
+### Virtual machines ###
+G_EXEC_DESC='Downloading current README.md to pack with image...' G_EXEC curl -sSfL "https://raw.githubusercontent.com/$G_GITOWNER/DietPi/$G_GITBRANCH/README.md" -o README.md
+
+# NB: LZMA2 ultra compression requires much memory per thread. 1 GiB is not sufficient for >2 threads, hence use "-mmt2" to limit used CPU threads to "2" on 1 GiB devices with more than two cores.
+limit_threads=
+(( $(free -m | mawk '/Mem:/{print $2}') < 1750 && $(nproc) > 2 )) && limit_threads='-mmt2'
+
+# Since qemu-img does not support VMDK and VHDX resizing, we need to resize the raw .img. It is usually done as sparse file, hence the actual disk usage does not change.
+G_EXEC qemu-img resize "$OUTPUT_IMG_NAME.img" 8G
+
+# VMware
+if [[ $VMTYPE =~ ^(vmware|all)$ ]]
+then
+	G_EXEC qemu-img convert -O vmdk "$OUTPUT_IMG_NAME.img" "${OUTPUT_IMG_NAME/_VM-/_VMware-}.vmdk"
+	cat << _EOF_ > "${OUTPUT_IMG_NAME/_VM-/_VMware-}.vmx"
+.encoding = "windows-1252"
+config.version = "8"
+virtualHW.version = "10"
+pciBridge0.present = "TRUE"
+pciBridge4.present = "TRUE"
+pciBridge4.virtualDev = "pcieRootPort"
+pciBridge4.functions = "8"
+pciBridge5.present = "TRUE"
+pciBridge5.virtualDev = "pcieRootPort"
+pciBridge5.functions = "8"
+pciBridge6.present = "TRUE"
+pciBridge6.virtualDev = "pcieRootPort"
+pciBridge6.functions = "8"
+pciBridge7.present = "TRUE"
+pciBridge7.virtualDev = "pcieRootPort"
+pciBridge7.functions = "8"
+vmci0.present = "TRUE"
+hpet0.present = "TRUE"
+nvram = "DietPi_VMware-x86_64-${distro^}.nvram"
+virtualHW.productCompatibility = "hosted"
+gui.exitOnCLIHLT = "FALSE"
+powerType.powerOff = "soft"
+powerType.powerOn = "soft"
+powerType.suspend = "soft"
+powerType.reset = "soft"
+displayName = "DietPi_VMware-x86_64-${distro^}"
+guestOS = "debian10-64"
+vhv.enable = "TRUE"
+tools.syncTime = "FALSE"
+vcpu.hotadd = "TRUE"
+memsize = "1024"
+scsi0.virtualDev = "pvscsi"
+scsi0.present = "TRUE"
+scsi0:0.fileName = "DietPi_VMware-x86_64-${distro^}.vmdk"
+scsi0:0.present = "TRUE"
+ide1:0.autodetect = "TRUE"
+ide1:0.deviceType = "cdrom-raw"
+ide1:0.fileName = "auto detect"
+ide1:0.present = "TRUE"
+usb.present = "TRUE"
+ehci.present = "TRUE"
+usb_xhci.present = "TRUE"
+ethernet0.addressType = "generated"
+ethernet0.virtualDev = "e1000"
+ethernet0.present = "TRUE"
+extendedConfigFile = "DietPi_VMware-x86_64-${distro^}.vmxf"
+floppy0.present = "FALSE"
+_EOF_
+	G_DIETPI-NOTIFY 2 'Generating hashes to pack with VMware image, please wait...'
+	cat << _EOF_ > hash.txt
+FILE:   ${OUTPUT_IMG_NAME/_VM-/_VMware-}.vmdk
+DATE:   $(date)
+MD5:    $(md5sum "${OUTPUT_IMG_NAME/_VM-/_VMware-}.vmdk" | mawk '{print $1}')
+SHA1:   $(sha1sum "${OUTPUT_IMG_NAME/_VM-/_VMware-}.vmdk" | mawk '{print $1}')
+SHA256: $(sha256sum "${OUTPUT_IMG_NAME/_VM-/_VMware-}.vmdk" | mawk '{print $1}')
+
+FILE:   ${OUTPUT_IMG_NAME/_VM-/_VMware-}.vmx
+DATE:   $(date)
+MD5:    $(md5sum "${OUTPUT_IMG_NAME/_VM-/_VMware-}.vmx" | mawk '{print $1}')
+SHA1:   $(sha1sum "${OUTPUT_IMG_NAME/_VM-/_VMware-}.vmx" | mawk '{print $1}')
+SHA256: $(sha256sum "${OUTPUT_IMG_NAME/_VM-/_VMware-}.vmx" | mawk '{print $1}')
+_EOF_
+	G_EXEC_DESC='Creating VMware 7zip archive' G_EXEC_OUTPUT=1 G_EXEC 7zr a -bsp1 -bso1 -bse2 -m0=lzma2 -mx=9 $limit_threads "${OUTPUT_IMG_NAME/_VM-/_VMware-}.7z" "${OUTPUT_IMG_NAME/_VM-/_VMware-}.vmdk" "${OUTPUT_IMG_NAME/_VM-/_VMware-}.vmx" hash.txt README.md
+	G_EXEC rm "${OUTPUT_IMG_NAME/_VM-/_VMware-}.vmdk" "${OUTPUT_IMG_NAME/_VM-/_VMware-}.vmx"
+	[[ -x 'upload.sh' ]] && G_EXEC_OUTPUT=1 G_EXEC ./upload.sh "${OUTPUT_IMG_NAME/_VM-/_VMware-}.7z" && G_EXEC rm "${OUTPUT_IMG_NAME/_VM-/_VMware-}.7z"
+fi
+
+# VirtualBox
+if [[ $VMTYPE =~ ^(vbox|all)$ ]]
+then
+	G_EXEC qemu-img convert -O vmdk -o 'subformat=streamOptimized' "$OUTPUT_IMG_NAME.img" "${OUTPUT_IMG_NAME/_VM-/_VirtualBox-}.vmdk"
+	vmuuid=$(</proc/sys/kernel/random/uuid)
+	diskuuid=$(</proc/sys/kernel/random/uuid)
+	cat << _EOF_ > "${OUTPUT_IMG_NAME/_VM-/_VirtualBox-}.ovf"
+<?xml version="1.0"?>
+<Envelope ovf:version="1.0" xml:lang="en-US" xmlns="http://schemas.dmtf.org/ovf/envelope/1" xmlns:ovf="http://schemas.dmtf.org/ovf/envelope/1" xmlns:rasd="http://schemas.dmtf.org/wbem/wscim/1/cim-schema/2/CIM_ResourceAllocationSettingData" xmlns:vssd="http://schemas.dmtf.org/wbem/wscim/1/cim-schema/2/CIM_VirtualSystemSettingData" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xmlns:vbox="http://www.virtualbox.org/ovf/machine">
+  <References>
+    <File ovf:id="file1" ovf:href="DietPi_VirtualBox-x86_64-${distro^}.vmdk"/>
+  </References>
+  <DiskSection>
+    <Info>List of the virtual disks used in the package</Info>
+    <Disk ovf:capacity="8589934592" ovf:diskId="vmdisk1" ovf:fileRef="file1" ovf:format="http://www.vmware.com/interfaces/specifications/vmdk.html#streamOptimized" vbox:uuid="$diskuuid"/>
+  </DiskSection>
+  <NetworkSection>
+    <Info>Logical networks used in the package</Info>
+    <Network ovf:name="Bridged">
+      <Description>Logical network used by this appliance.</Description>
+    </Network>
+  </NetworkSection>
+  <VirtualSystem ovf:id="DietPi_VirtualBox-x86_64-${distro^}">
+    <Info>A virtual machine</Info>
+    <OperatingSystemSection ovf:id="96">
+      <Info>The kind of installed guest operating system</Info>
+      <Description>Debian_64</Description>
+      <vbox:OSType ovf:required="false">Debian_64</vbox:OSType>
+    </OperatingSystemSection>
+    <VirtualHardwareSection>
+      <Info>Virtual hardware requirements for a virtual machine</Info>
+      <System>
+        <vssd:ElementName>Virtual Hardware Family</vssd:ElementName>
+        <vssd:InstanceID>0</vssd:InstanceID>
+        <vssd:VirtualSystemIdentifier>DietPi_VirtualBox-x86_64-${distro^}</vssd:VirtualSystemIdentifier>
+        <vssd:VirtualSystemType>virtualbox-2.2</vssd:VirtualSystemType>
+      </System>
+      <Item>
+        <rasd:Caption>1 virtual CPU</rasd:Caption>
+        <rasd:Description>Number of virtual CPUs</rasd:Description>
+        <rasd:ElementName>1 virtual CPU</rasd:ElementName>
+        <rasd:InstanceID>1</rasd:InstanceID>
+        <rasd:ResourceType>3</rasd:ResourceType>
+        <rasd:VirtualQuantity>1</rasd:VirtualQuantity>
+      </Item>
+      <Item>
+        <rasd:AllocationUnits>MegaBytes</rasd:AllocationUnits>
+        <rasd:Caption>1024 MB of memory</rasd:Caption>
+        <rasd:Description>Memory Size</rasd:Description>
+        <rasd:ElementName>1024 MB of memory</rasd:ElementName>
+        <rasd:InstanceID>2</rasd:InstanceID>
+        <rasd:ResourceType>4</rasd:ResourceType>
+        <rasd:VirtualQuantity>1024</rasd:VirtualQuantity>
+      </Item>
+      <Item>
+        <rasd:Address>0</rasd:Address>
+        <rasd:Caption>sataController0</rasd:Caption>
+        <rasd:Description>SATA Controller</rasd:Description>
+        <rasd:ElementName>sataController0</rasd:ElementName>
+        <rasd:InstanceID>3</rasd:InstanceID>
+        <rasd:ResourceSubType>AHCI</rasd:ResourceSubType>
+        <rasd:ResourceType>20</rasd:ResourceType>
+      </Item>
+      <Item>
+        <rasd:AddressOnParent>0</rasd:AddressOnParent>
+        <rasd:Caption>disk1</rasd:Caption>
+        <rasd:Description>Disk Image</rasd:Description>
+        <rasd:ElementName>disk1</rasd:ElementName>
+        <rasd:HostResource>/disk/vmdisk1</rasd:HostResource>
+        <rasd:InstanceID>4</rasd:InstanceID>
+        <rasd:Parent>3</rasd:Parent>
+        <rasd:ResourceType>17</rasd:ResourceType>
+      </Item>
+      <Item>
+        <rasd:AutomaticAllocation>true</rasd:AutomaticAllocation>
+        <rasd:Caption>Ethernet adapter on 'Bridged'</rasd:Caption>
+        <rasd:Connection>Bridged</rasd:Connection>
+        <rasd:ElementName>Ethernet adapter on 'Bridged'</rasd:ElementName>
+        <rasd:InstanceID>5</rasd:InstanceID>
+        <rasd:ResourceType>10</rasd:ResourceType>
+      </Item>
+    </VirtualHardwareSection>
+    <vbox:Machine ovf:required="false" version="1.16-windows" uuid="{$vmuuid}" name="DietPi_VirtualBox-x86_64-${distro^}" OSType="Debian_64" snapshotFolder="Snapshots" lastStateChange="$(date -u '+%Y-%M-%dT%TZ')">
+      <ovf:Info>Complete VirtualBox machine configuration in VirtualBox format</ovf:Info>
+      <Hardware>
+        <CPU>
+          <PAE enabled="false"/>
+          <LongMode enabled="true"/>
+          <X2APIC enabled="true"/>
+          <HardwareVirtExLargePages enabled="true"/>
+        </CPU>
+        <Memory RAMSize="1024"/>
+        <Chipset type="ICH9"/>
+        <Boot>
+          <Order position="1" device="HardDisk"/>
+          <Order position="2" device="DVD"/>
+        </Boot>
+        <Display VRAMSize="16"/>
+        <VideoCapture screens="1" file="." fps="25"/>
+        <BIOS>
+          <IOAPIC enabled="true"/>
+          <SmbiosUuidLittleEndian enabled="true"/>
+        </BIOS>
+        <USB>
+          <Controllers>
+            <Controller name="xHCI" type="XHCI"/>
+          </Controllers>
+        </USB>
+        <Network>
+          <Adapter slot="0" enabled="true" type="virtio">
+            <DisabledModes>
+              <InternalNetwork name="intnet"/>
+              <NATNetwork name="NatNetwork"/>
+            </DisabledModes>
+            <BridgedInterface name="eth0"/>
+          </Adapter>
+        </Network>
+        <AudioAdapter codec="AD1980" driver="DirectSound" enabledIn="false"/>
+        <RTC localOrUTC="UTC"/>
+        <Clipboard/>
+      </Hardware>
+      <StorageControllers>
+        <StorageController name="SATA" type="AHCI" PortCount="2" useHostIOCache="false" Bootable="true" IDE0MasterEmulationPort="0" IDE0SlaveEmulationPort="1" IDE1MasterEmulationPort="2" IDE1SlaveEmulationPort="3">
+          <AttachedDevice type="HardDisk" hotpluggable="false" port="0" device="0">
+            <Image uuid="{$diskuuid}"/>
+          </AttachedDevice>
+          <AttachedDevice passthrough="false" type="DVD" hotpluggable="false" port="1" device="0"/>
+        </StorageController>
+      </StorageControllers>
+    </vbox:Machine>
+  </VirtualSystem>
+</Envelope>
+_EOF_
+	cat << _EOF_ > "${OUTPUT_IMG_NAME/_VM-/_VirtualBox-}.mf"
+SHA1 (${OUTPUT_IMG_NAME/_VM-/_VirtualBox-}.ovf) = $(sha1sum "${OUTPUT_IMG_NAME/_VM-/_VirtualBox-}.ovf" | mawk '{print $1}')
+SHA1 (${OUTPUT_IMG_NAME/_VM-/_VirtualBox-}.vmdk) = $(sha1sum "${OUTPUT_IMG_NAME/_VM-/_VirtualBox-}.vmdk" | mawk '{print $1}')
+_EOF_
+	G_EXEC tar -cf "${OUTPUT_IMG_NAME/_VM-/_VirtualBox-}.ova" "${OUTPUT_IMG_NAME/_VM-/_VirtualBox-}."{vmdk,ovf,mf}
+	G_EXEC rm "${OUTPUT_IMG_NAME/_VM-/_VirtualBox-}."{vmdk,ovf,mf}
+
+	G_DIETPI-NOTIFY 2 'Generating hashes to pack with VMware image, please wait...'
+	cat << _EOF_ > hash.txt
+FILE:   ${OUTPUT_IMG_NAME/_VM-/_VirtualBox-}.ova
+DATE:   $(date)
+MD5:    $(md5sum "${OUTPUT_IMG_NAME/_VM-/_VirtualBox-}.ova" | mawk '{print $1}')
+SHA1:   $(sha1sum "${OUTPUT_IMG_NAME/_VM-/_VirtualBox-}.ova" | mawk '{print $1}')
+SHA256: $(sha256sum "${OUTPUT_IMG_NAME/_VM-/_VirtualBox-}.ova" | mawk '{print $1}')
+_EOF_
+	G_EXEC_DESC='Creating VirtualBox 7zip archive' G_EXEC_OUTPUT=1 G_EXEC 7zr a -bsp1 -bso1 -bse2 -m0=lzma2 -mx=9 $limit_threads "${OUTPUT_IMG_NAME/_VM-/_VirtualBox-}.7z" "${OUTPUT_IMG_NAME/_VM-/_VirtualBox-}.ova" hash.txt README.md
+	G_EXEC rm "${OUTPUT_IMG_NAME/_VM-/_VirtualBox-}.ova"
+	[[ -x 'upload.sh' ]] && G_EXEC_OUTPUT=1 G_EXEC ./upload.sh "${OUTPUT_IMG_NAME/_VM-/_VirtualBox-}.7z" && G_EXEC rm "${OUTPUT_IMG_NAME/_VM-/_VirtualBox-}.7z"
+fi
+
+# Hyper-V
+if [[ $VMTYPE =~ ^(hyperv|all)$ ]]
+then
+	G_EXEC qemu-img convert -O vhdx "$OUTPUT_IMG_NAME.img" "${OUTPUT_IMG_NAME/_VM-/_Hyper-V-}.vhdx"
+
+	G_DIETPI-NOTIFY 2 'Generating hashes to pack with Hyper-V image, please wait...'
+	cat << _EOF_ > hash.txt
+FILE:   ${OUTPUT_IMG_NAME/_VM-/_Hyper-V-}.vhdx
+DATE:   $(date)
+MD5:    $(md5sum "${OUTPUT_IMG_NAME/_VM-/_Hyper-V-}.vhdx" | mawk '{print $1}')
+SHA1:   $(sha1sum "${OUTPUT_IMG_NAME/_VM-/_Hyper-V-}.vhdx" | mawk '{print $1}')
+SHA256: $(sha256sum "${OUTPUT_IMG_NAME/_VM-/_Hyper-V-}.vhdx" | mawk '{print $1}')
+_EOF_
+	G_EXEC_DESC='Creating Hyper-V 7zip archive' G_EXEC_OUTPUT=1 G_EXEC 7zr a -bsp1 -bso1 -bse2 -m0=lzma2 -mx=9 $limit_threads "${OUTPUT_IMG_NAME/_VM-/_Hyper-V-}.7z" "${OUTPUT_IMG_NAME/_VM-/_Hyper-V-}.vhdx" hash.txt README.md
+	G_EXEC rm "${OUTPUT_IMG_NAME/_VM-/_Hyper-V-}.vhdx"
+	[[ -x 'upload.sh' ]] && G_EXEC_OUTPUT=1 G_EXEC ./upload.sh "${OUTPUT_IMG_NAME/_VM-/_Hyper-V-}.7z" && G_EXEC rm "${OUTPUT_IMG_NAME/_VM-/_Hyper-V-}.7z"
+fi
+
+# Cleanup
+G_EXEC rm hash.txt README.md "$OUTPUT_IMG_NAME.img"
 
 exit 0
 }

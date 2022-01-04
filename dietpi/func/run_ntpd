@@ -21,13 +21,13 @@
 	. /boot/dietpi/func/dietpi-globals
 	readonly G_PROGRAM_NAME='DietPi-TimeSync'
 	G_CHECK_ROOT_USER
-	G_INIT
+	#G_INIT
 	# Import DietPi-Globals --------------------------------------------------------------
 
 	[[ $1 == 1 ]] && INPUT=1 || INPUT=0
 
+	readonly FP_FLAG='/run/systemd/timesync/synchronized' MAX_LOOPS_CHECK=${MAX_LOOPS_CHECK:-60} # seconds
 	EXIT_CODE=1
-	MAX_LOOPS_CHECK=${MAX_LOOPS_CHECK:-60} # seconds
 
 	Update_NTPD()
 	{
@@ -38,24 +38,35 @@
 			G_DIETPI-NOTIFY 2 'Manual mode detected, skipping time sync'
 			EXIT_CODE=0
 			return 0
+
+		# Forced mode: Remove flag file and restart service to force a fresh sync
+		elif (( $INPUT == 1 ))
+		then
+			[[ -f $FP_FLAG ]] && G_EXEC rm "$FP_FLAG"
+			G_EXEC systemctl restart systemd-timesyncd
+
+		# Regular mode: Do not restart service to not abort a sync in progress on boot or concurrent execution
+		else
+			G_EXEC systemctl start systemd-timesyncd
 		fi
 
 		# Loop NTP check until success, or, non-G_INTERACTIVE and timeout
 		while (( $EXIT_CODE ))
 		do
-			G_EXEC systemctl start systemd-timesyncd
-
 			for ((i=1; i<=$MAX_LOOPS_CHECK; i++))
 			do
-				# NB: Following will always report "Synced" when completed once
-				if systemctl -n 0 status systemd-timesyncd | grep -qE '^[[:blank:]]*Status: "(Synchronized|Initial)'
+				# Check for systemd-timesyncd flag file
+				if [[ -f $FP_FLAG ]]
 				then
 					G_DIETPI-NOTIFY 2 'Time sync completed'
 					EXIT_CODE=0
 					break 2
 
-				elif [[ $i == "$MAX_LOOPS_CHECK" ]]
+				elif (( $i < $MAX_LOOPS_CHECK ))
 				then
+					G_DIETPI-NOTIFY 2 "Waiting for time sync ($i/$MAX_LOOPS_CHECK)"
+					sleep 1
+				else
 					G_DIETPI-NOTIFY 2 'Time sync timed out'
 
 					G_WHIP_MENU_ARRAY=(
@@ -78,21 +89,21 @@ NB: We highly recommend choosing "Retry" first. Failing that, try to change the 
 					elif [[ $G_WHIP_RETURNED_VALUE == 'Override' ]]
 					then
 						EXIT_CODE=0
+						break 2
 					fi
-				else
-					G_DIETPI-NOTIFY 2 "Waiting for time sync ($i/$MAX_LOOPS_CHECK)"
-					sleep 1
 				fi
 			done
+
+			# Start service again in case it failed: This has no effect when running already.
+			G_EXEC systemctl start systemd-timesyncd
 		done
 
-		# Stop service on oneshot modes
-		(( $NTP_UPDATE_MODE < 4 )) && systemctl stop systemd-timesyncd
-
-		# Create flag file on success: Since Buster this is created by systemd-timesyncd already, but removed on service stop.
-		[[ $EXIT_CODE == 0 && ! -f '/run/systemd/timesync/synchronized' ]] || return $EXIT_CODE
-		[[ -d '/run/systemd/timesync' ]] || G_EXEC mkdir -p /run/systemd/timesync
-		> /run/systemd/timesync/synchronized
+		# Stop service on oneshot modes, but recreate flag file on success which is removed on service stop
+		(( $NTP_UPDATE_MODE < 4 )) || return $EXIT_CODE
+		G_EXEC systemctl stop systemd-timesyncd
+		(( $EXIT_CODE == 0 )) || return $EXIT_CODE
+		G_EXEC mkdir -p /run/systemd/timesync
+		> "$FP_FLAG"
 	}
 
 	#/////////////////////////////////////////////////////////////////////////////////////
@@ -100,11 +111,11 @@ NB: We highly recommend choosing "Retry" first. Failing that, try to change the 
 	#/////////////////////////////////////////////////////////////////////////////////////
 	# Run only once each boot session or when forced via $1 == 1
 	# shellcheck disable=SC2015
-	[[ $INPUT != 1 && -f '/run/systemd/timesync/synchronized' ]] && EXIT_CODE=0 || Update_NTPD
+	[[ $INPUT != 1 && -f $FP_FLAG ]] && EXIT_CODE=0 || Update_NTPD
 
 	# Return status
 	G_DIETPI-NOTIFY -1 $EXIT_CODE 'Network time sync'
-	(( $EXIT_CODE )) && G_DIETPI-NOTIFY 2 'Please check the service status for more information:\n         - systemctl status systemd-timesyncd'
+	(( $EXIT_CODE )) && G_DIETPI-NOTIFY 2 'Please check the service logs for more information:\n - journalctl -u systemd-timesyncd'
 	#-----------------------------------------------------------------------------------
 	exit $EXIT_CODE
 	#-----------------------------------------------------------------------------------

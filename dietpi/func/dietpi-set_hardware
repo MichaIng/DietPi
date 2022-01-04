@@ -614,11 +614,10 @@ _EOF_
 
 		elif [[ $INPUT_DEVICE_VALUE == 'disable' ]]; then # 0 is converted to "disable"
 
-			if [[ -f '/etc/systemd/system/ethtool_force_speed.service' ]]; then
-
+			if [[ -f '/etc/systemd/system/ethtool_force_speed.service' ]]
+			then
 				G_EXEC systemctl disable --now ethtool_force_speed
 				G_EXEC rm /etc/systemd/system/ethtool_force_speed.service
-
 			fi
 			[[ -d '/etc/systemd/system/ethtool_force_speed.service.d' ]] && G_EXEC rm -R /etc/systemd/system/ethtool_force_speed.service.d
 
@@ -646,17 +645,21 @@ _EOF_
 		if [[ $INPUT_DEVICE_VALUE == 'vc4-kms-v3d' || $INPUT_DEVICE_VALUE == 'vc4-fkms-v3d' ]]; then
 
 			# GL packages
-			local libegl1='libegl1'
-			(( $G_DISTRO < 5 )) && libegl1+='-mesa'
-			G_AG_CHECK_INSTALL_PREREQ libgl1-mesa-dri libgles2 $libegl1 mesa-utils
+			G_AG_CHECK_INSTALL_PREREQ libgl1-mesa-dri libgles2 libegl1 mesa-utils
 
-			# Fake KMS supports only CMA params
-			[[ $params && $INPUT_DEVICE_VALUE == 'vc4-fkms-v3d' ]] && params=$(mawk -F, '{for(i=1; i<=NF; i++) {if($i~/^cma-*/){print $i;exit}}}' <<< "$params")
+			if [[ $INPUT_DEVICE_VALUE == 'vc4-fkms-v3d' ]]
+			then
+				# Fake KMS supports CMA params only
+				[[ $params ]] && params=$(mawk -F, '{for(i=1; i<=NF; i++) {if($i~/^cma-*/){print $i;exit}}}' <<< "$params")
+			else
+				# Disable full KMS HDMI audio if onboard HDMI is disabled
+				[[ $params != *',noaudio'* ]] && { ! grep -q '^[[:blank:]]*dtparam=audio=on' /boot/config.txt || grep -q '^[[:blank:]]*dtoverlay=dietpi-disable_hdmi_audio' /boot/config.txt; } && params+=',noaudio'
+			fi
 
 			# Use additional argument for CMA size
 			if [[ $INPUT_ADDITIONAL ]]
 			then
-				if [[ $params =~ ',cma-'[^,]*(,|\$) ]]
+				if [[ $params =~ ',cma-'[^,]*(,|$) ]]
 				then
 					params=$(sed -E "s/,cma-[^,]*(,|$)/,cma-$INPUT_ADDITIONAL\1/" <<< "$params")
 				else
@@ -1754,6 +1757,10 @@ Do you want to continue and DISABLE Bluetooth now?' || return 1
 		# Disable onboard sound
 		G_CONFIG_INJECT 'dtparam=audio=' 'dtparam=audio=off' /boot/config.txt
 
+		# Disable full KMS HDMI audio
+		local kms=$(grep -Em1 '^[[:blank:]]*dtoverlay=vc4-kms-v3d(-pi4)?(,|$)' /boot/config.txt)
+		[[ $kms && ! $kms =~ ',noaudio'(,|$) ]] && G_EXEC sed -Ei '/^[[:blank:]]*dtoverlay=vc4-kms-v3d(-pi4)?(,|$)/s/$/,noaudio/' /boot/config.txt
+
 	}
 
 	Soundcard_Reset_Odroid(){
@@ -1812,15 +1819,15 @@ Do you want to continue and DISABLE Bluetooth now?' || return 1
 		# An input is required
 		[[ $INPUT_DEVICE_VALUE ]] || Unknown_Input_Mode
 		#-----------------------------------------------------------------------------
-		# Failsafe: Assure installed alsa-utils, if soundcard has been selected
+		# Failsafe: Assure installed alsa-utils, if sound card has been selected
 		[[ $INPUT_DEVICE_VALUE == 'none' ]] || G_AG_CHECK_INSTALL_PREREQ alsa-utils
-		# Always reset soundcards and revert back to defaults
+		# Always reset sound cards and revert back to defaults
 		Soundcard_Reset_All
 		# Print info
 		G_DIETPI-NOTIFY 2 'Applying new sound card settings...'
 		# Save selection to dietpi.txt
 		G_CONFIG_INJECT 'CONFIG_SOUNDCARD=' "CONFIG_SOUNDCARD=$INPUT_DEVICE_VALUE" /boot/dietpi.txt
-		# Return now if no soundcard has been selected
+		# Return now if no sound card has been selected
 		[[ $INPUT_DEVICE_VALUE == 'none' ]] && return
 		#-----------------------------------------------------------------------------
 		# Apply specific asound.conf and additional settings
@@ -1952,8 +1959,8 @@ _EOF_
 				G_CONFIG_INJECT 'dtparam=audio=' 'dtparam=audio=on' /boot/config.txt
 
 				# Force 3.5mm out?
-				if [[ $INPUT_DEVICE_VALUE == *'3.5mm' ]]; then
-
+				if [[ $INPUT_DEVICE_VALUE == *'3.5mm' ]]
+				then
 					# Disable HDMI audio via dtoverlay
 					G_EXEC_DESC='Compiling device tree overlay: /boot/overlays/dietpi-disable_hdmi_audio.dtbo'
 					G_EXEC eval 'dtc -I dts -O dtb -o /boot/overlays/dietpi-disable_hdmi_audio.dtbo <<< '\''/dts-v1/;
@@ -1970,8 +1977,8 @@ _EOF_
 					G_CONFIG_INJECT 'dtoverlay=dietpi-disable_hdmi_audio' 'dtoverlay=dietpi-disable_hdmi_audio' /boot/config.txt
 
 				# Force HDMI output?
-				elif [[ $INPUT_DEVICE_VALUE == *'hdmi' ]]; then
-
+				elif [[ $INPUT_DEVICE_VALUE == *'hdmi' ]]
+				then
 					# Disable headphones via dtoverlay
 					G_EXEC_DESC='Compiling device tree overlay: /boot/overlays/dietpi-disable_headphones.dtbo'
 					G_EXEC eval 'dtc -I dts -O dtb -o /boot/overlays/dietpi-disable_headphones.dtbo <<< '\''/dts-v1/;
@@ -1988,7 +1995,13 @@ _EOF_
 					G_CONFIG_INJECT 'dtoverlay=dietpi-disable_headphones' 'dtoverlay=dietpi-disable_headphones' /boot/config.txt
 					G_CONFIG_INJECT 'hdmi_drive=' 'hdmi_drive=2' /boot/config.txt
 					(( $G_HW_MODEL == 4 )) && G_CONFIG_INJECT 'hdmi_drive:1=' 'hdmi_drive:1=2' /boot/config.txt 'hdmi_drive='
+				fi
 
+				# Enable full KMS HDMI audio if onboard HDMI is not disabled
+				if [[ $INPUT_DEVICE_VALUE != *'3.5mm' ]]
+				then
+					local kms=$(grep -Em1 '^[[:blank:]]*dtoverlay=vc4-kms-v3d(-pi4)?,(noaudio|.+,noaudio)(,|$)' /boot/config.txt)
+					[[ $kms ]] && G_EXEC sed -Ei '/^[[:blank:]]*dtoverlay=vc4-kms-v3d(-pi4)?,/s/,noaudio(,|$)/\1/' /boot/config.txt
 				fi
 
 			;;

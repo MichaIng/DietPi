@@ -233,7 +233,7 @@ _EOF_
 	[[ -f '/var/lib/dietpi/license.txt' ]] && grep -Eq '^[[:blank:]]*AUTO_SETUP_A(UTOMATED|CCEPT_LICENSE)=1' /boot/dietpi.txt && G_EXEC rm /var/lib/dietpi/license.txt
 
 	# Update Allo web UI with Squeezelite control fix and Allo Boss2 DAC support
-	[[ -f '/boot/dietpi/.installed' ]] && grep -q '^[[:blank:]]*aSOFTWARE_INSTALL_STATE\[160\]=2' /boot/dietpi/.installed && /boot/dietpi/dietpi-software reinstall 160
+	[[ -f '/boot/dietpi/.installed' ]] && grep -q '^[[:blank:]]*aSOFTWARE_INSTALL_STATE\[160\]=2' /boot/dietpi/.installed && echo 160 >> /var/tmp/dietpi/dietpi-update_reinstalls
 }
 
 Patch_7_4()
@@ -520,7 +520,7 @@ Patch_7_8()
 		do
 			[[ -e $i ]] && G_EXEC mv "$i" "/opt${i#/mnt/dietpi_userdata}"
 		done
-		/boot/dietpi/dietpi-software reinstall 154
+		echo 154 >> /var/tmp/dietpi/dietpi-update_reinstalls
 	fi
 
 	# RPi 400: Inform user about fixed overclocking profiles
@@ -569,12 +569,54 @@ Patch_7_9()
 	then
 		G_WHIP_BUTTON_CANCEL_TEXT='No' G_WHIP_YESNO '[ INFO ] Changed DietPi-Dashboard TCP port
 \nThe default TCP network port for the DietPi-Dashboard has been changed from 8088 to 5252 to resolve a port conflict with InfluxDB. However, if you do not use or plan to use InfluxDB, port 8088 does not cause any issues.
-\nDo you want to apply this change as well to your DietPi-Dashboard installation?' && G_CONFIG_INJECT 'port[[:blank:]]' 'port = 5252' /opt/dietpi-dashboard/config.toml
+\nDo you want to apply this change as well to your DietPi-Dashboard installation?
+\nNB: You need to restart the service once for the port change to take effect:
+ - systemctl restart dietpi-dashboard' && G_CONFIG_INJECT 'port[[:blank:]]' 'port = 5252' /opt/dietpi-dashboard/config.toml && echo 200 >> /var/tmp/dietpi/dietpi-update_reinstalls
 	fi
 
 	# ownCloud/Nextcloud: Disable maintenance mode once manually, since DietPi-Services enabled of before this update but doesn't handle/disable it anymore afterwards.
 	[[ -f '/var/www/owncloud/config/config.php' ]] && grep -Eq "^[[:blank:]]*'maintenance'[[:blank:]]+=>[[:blank:]]+true,\$" /var/www/owncloud/config/config.php && G_EXEC sed -Ei "s/^[[:blank:]]*'maintenance'[[:blank:]]+=>[[:blank:]]+true,\$/  'maintenance' => false,/" /var/www/owncloud/config/config.php
 	[[ -f '/var/www/nextcloud/config/config.php' ]] && grep -Eq "^[[:blank:]]*'maintenance'[[:blank:]]+=>[[:blank:]]+true,\$" /var/www/nextcloud/config/config.php && G_EXEC sed -Ei "s/^[[:blank:]]*'maintenance'[[:blank:]]+=>[[:blank:]]+true,\$/  'maintenance' => false,/" /var/www/nextcloud/config/config.php
+}
+
+Patch_8_0()
+{
+	# RPi: Fix possibly doubled CMA size in KMS overlay setting
+	if (( $G_HW_MODEL < 10 )) && grep -Eq 'dtoverlay=vc4-f?kms-v3d.*,cma-.*,cma-' /boot/config.txt
+	then
+		G_DIETPI-NOTIFY 2 'Fixing doubled CMA size in KMS overlay setting'
+		while grep -Eq 'dtoverlay=vc4-f?kms-v3d.*,cma-.*,cma-' /boot/config.txt
+		do
+			G_EXEC sed -Ei '/dtoverlay=vc4-f?kms-v3d.*,cma-.*,cma-/s/,cma-[^,]*//' /boot/config.txt
+		done
+	fi
+
+	# Reinstall Airsonic to migrate to Airsonic-Advanced and mitigate Log4Shell for it once and for all: https://github.com/MichaIng/DietPi/pull/4948
+	if [[ -f '/boot/dietpi/.installed' ]] && grep -q '^[[:blank:]]*aSOFTWARE_INSTALL_STATE\[33\]=2' /boot/dietpi/.installed && ! grep -q 'Airsonic-Advanced' /etc/systemd/system/airsonic.service
+	then
+		G_WHIP_MSG '[ INFO ] Reinstalling Airsonic to migrate to Airsonic-Advanced
+\nThe classic Airsonic project has been archived by its maintainer and it suffers from the critical Log4Shell security vulnerability:
+- https://dietpi.com/blog/?p=1172
+\nAirsonic-Advanced is an actively developed successor which does not use the related Log4j library and can be used as a direct replacement for classic Airsonic, migrating all data and settings automatically.
+\nAirsonic will be reinstalled as part of this update to migrate to Airsonic-Advanced. Afterwards, we recommend to check out the new "Credentials" settings, create a new safer encrypted password and remove the old one.'
+		# Migrate to "dietpi" as primary group and remove obsolete "airsonic" group
+		getent passwd airsonic > /dev/null && G_EXEC usermod -g dietpi airsonic
+		getent group airsonic > /dev/null && G_EXEC groupdel airsonic
+		echo 33 >> /var/tmp/dietpi/dietpi-update_reinstalls
+	fi
+
+	# RPi: Remove dummy files: https://github.com/RPi-Distro/raspberrypi-sys-mods/pull/60
+	if (( $G_HW_MODEL < 10 ))
+	then
+		[[ -f '/etc/apt/trusted.gpg.d/microsoft.gpg' && ! -s '/etc/apt/trusted.gpg.d/microsoft.gpg' ]] && G_EXEC rm /etc/apt/trusted.gpg.d/microsoft.gpg
+		[[ -f '/etc/apt/sources.list.d/vscode.list' && $(</etc/apt/sources.list.d/vscode.list) == '### Disabled by raspberrypi-sys-mods ###' ]] && G_EXEC rm /etc/apt/sources.list.d/vscode.list
+	fi
+
+	# RPi: Fix forced max frequencies: https://github.com/MichaIng/DietPi/issues/5088
+	(( $G_HW_MODEL < 10 )) && grep -Eq '(.){100}' /boot/config.txt && G_EXEC sed -Ei 's/^((.){99})..*$/\1/' /boot/config.txt
+
+	# Blynk Server: Apply Log4Shell mitigation
+	[[ -f '/etc/systemd/system/blynkserver.service' ]] && ! grep -q '\-Dlog4j2.formatMsgNoLookups=true' /etc/systemd/system/blynkserver.service && G_EXEC sed -i 's/java -jar/java -Dlog4j2.formatMsgNoLookups=true -jar/' /etc/systemd/system/blynkserver.service
 }
 
 # v6.35 => v7 migration
@@ -592,16 +634,35 @@ then
 fi
 
 # Main loop
+G_DIETPI_VERSION_RC=0
 while :
 do
-	((G_DIETPI_VERSION_SUB++))
-	G_DIETPI_VERSION_RC=0
-	declare -F "Patch_${G_DIETPI_VERSION_CORE}_$G_DIETPI_VERSION_SUB" > /dev/null || break
+	if declare -F "Patch_${G_DIETPI_VERSION_CORE}_$(( $G_DIETPI_VERSION_SUB + 1 ))" > /dev/null
+	then
+		((G_DIETPI_VERSION_SUB++))
+
+	elif declare -F "Patch_$(( $G_DIETPI_VERSION_CORE + 1 ))_0" > /dev/null
+	then
+		((G_DIETPI_VERSION_CORE++))
+		G_DIETPI_VERSION_SUB=0
+	else
+		break
+	fi
 	G_DIETPI-NOTIFY 2 "Patching to DietPi v$G_DIETPI_VERSION_CORE.$G_DIETPI_VERSION_SUB..."
 	"Patch_${G_DIETPI_VERSION_CORE}_$G_DIETPI_VERSION_SUB"
 	G_VERSIONDB_SAVE
 	G_DIETPI-NOTIFY 0 "Patched to DietPi v$G_DIETPI_VERSION_CORE.$G_DIETPI_VERSION_SUB"
 done
+
+# Performing reinstalls
+if [[ -f '/var/tmp/dietpi/dietpi-update_reinstalls' ]]
+then
+	G_DIETPI-NOTIFY 2 'Performing DietPi-Software reinstalls...'
+	# Coders NB: Assigning to array is not easily possible here since we need to split at newline AND space.
+	# shellcheck disable=SC2046
+	(( $G_DIETPI_INSTALL_STAGE == 2 )) && /boot/dietpi/dietpi-software reinstall $(</var/tmp/dietpi/dietpi-update_reinstalls)
+	G_EXEC rm /var/tmp/dietpi/dietpi-update_reinstalls
+fi
 
 exit 0
 }
