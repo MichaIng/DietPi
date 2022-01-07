@@ -156,17 +156,26 @@
 
 		if grep -q '^[[:blank:]]*AUTO_SETUP_AUTOMATED=1' /boot/dietpi.txt; then
 
-			# Enable root autologin on local console (/dev/tty1) and container console (/dev/console), reverted during firstrun setup
+			# Enable root autologin on local console (/dev/tty1) and container console (/dev/console), overwritten during 1st run setup
+			# - Defer autologin until network is up to avoid network check timeouts: https://github.com/MichaIng/DietPi/issues/5143
 			mkdir -p /etc/systemd/system/{getty@tty1,console-getty}.service.d
 			cat << '_EOF_' > /etc/systemd/system/getty@tty1.service.d/dietpi-autologin.conf
+[Unit]
+Wants=network-online.target
+After=network-online.target
+
 [Service]
 ExecStart=
-ExecStart=-/sbin/agetty -a root --noclear %I $TERM
+ExecStart=-/sbin/agetty -a root -J %I $TERM
 _EOF_
 			cat << '_EOF_' > /etc/systemd/system/console-getty.service.d/dietpi-autologin.conf
+[Unit]
+Wants=network-online.target
+After=network-online.target
+
 [Service]
 ExecStart=
-ExecStart=-/sbin/agetty -a root --noclear --keep-baud console 115200,38400,9600 $TERM
+ExecStart=-/sbin/agetty -a root -J -s console 115200,38400,9600 $TERM
 _EOF_
 			# Assume accepted license in automated installs: https://github.com/MichaIng/DietPi/pull/4477
 			rm /var/lib/dietpi/license.txt
