@@ -11,7 +11,7 @@
 	# Info:
 	# - Allows to send DietPi usage info via SFTP to DietPi server
 	# - Includes hardware info, DietPi version+branch, installed software, benchmark results and some setup info
-	# - No private data is sent, no one can indentify you.
+	# - No private data is sent, no one can identify you.
 	# - Runs after every dietpi-update and dietpi-software install, if user opted in
 	# - Summary can be visited at: https://dietpi.com/survey/
 	# - Allows the DietPi project to focus development based on popularity
@@ -31,8 +31,6 @@
 	G_INIT
 	# Import DietPi-Globals --------------------------------------------------------------
 
-	EXIT_CODE=1
-
 	# Grab input
 	[[ $1 == 1 ]] && INPUT=1 || INPUT=0
 
@@ -50,13 +48,17 @@
 		local gitbranch="$G_GITOWNER/$G_GITBRANCH"
 
 		# Active network interface
-		local network_interface=$(G_GET_NET iface)
+		local network_interface=$(G_GET_NET -q iface)
 		[[ $network_interface ]] || network_interface='NONE'
 
 		# Autostart index
 		local autostart_index
 		[[ -f '/boot/dietpi/.dietpi-autostart_index' ]] && autostart_index=$(</boot/dietpi/.dietpi-autostart_index)
 		[[ $autostart_index ]] || autostart_index=0
+
+		# rootfs on SD card/eMMC?
+		local mmc=0
+		[[ $G_ROOTFS_DEV == '/dev/mmcblk'* ]] && mmc=1
 
 		cat << _EOF_ > "$FP_UPLOAD"
 #!/bin/bash
@@ -69,14 +71,15 @@
 ((aAUTOSTART_OPTION[\${aAUTOSTART_NAME[$autostart_index]:=$autostart_index}]++))
 ((aAUTO_SETUP_AUTOMATED[$(grep -cm1 '^[[:blank:]]*AUTO_SETUP_AUTOMATED=1' /boot/dietpi.txt)]++))
 ((aNETWORK_INTERFACE[$network_interface]++))
+MMC=$mmc
 _EOF_
 
-		# RPi: Raspbian/Raspberry Pi OS (32-bt) or Debian/Raspberry Pi OS (64-bit)?
+		# RPi: Raspbian/Raspberry Pi OS (32-bit) or Debian/Raspberry Pi OS (64-bit)?
 		(( $G_HW_MODEL < 10 )) && echo "((aRASPBIAN[$G_RASPBIAN]++))" >> "$FP_UPLOAD"
 
 		# DietPi-Software installs
-		if [[ -f '/boot/dietpi/.installed' ]]; then
-
+		if [[ -f '/boot/dietpi/.installed' ]]
+		then
 			echo -e '# -------------------------\n# DietPi-Software installs\n# -------------------------' >> "$FP_UPLOAD"
 
 			while read -r software
@@ -86,7 +89,6 @@ _EOF_
 				disable_error=1 G_CHECK_VALIDINT "$software" && echo "((aSOFTWARE[\${aSOFTWARE_NAME${G_DIETPI_VERSION_CORE}_${G_DIETPI_VERSION_SUB}[$software]:=$software}]++))" >> "$FP_UPLOAD"
 
 			done < <(grep ']=2$' /boot/dietpi/.installed)
-
 		fi
 
 		# DietPi-Benchmark results
@@ -96,23 +98,35 @@ _EOF_
 
 	Send_File(){
 
-		if (( $OPTED_IN )); then
+		# Check if our ssh.dietpi.com SSH host key is present
+		if [[ ! -f '/root/.ssh/known_hosts' ]] || ! grep -q '^ssh.dietpi.com[[:blank:]]' /root/.ssh/known_hosts
+		then
+			# If missing, offer to re-add it
+			if G_WHIP_YESNO '[WARNING] ssh.dietpi.com SSH host key is missing\nOur ssh.dietpi.com SSH host key, required to send or purge survey data and bug reports, is missing in /root/.ssh/known_hosts. Shall we re-create it to proceed with sending/purging the bug report?'
+			then
+				[[ -d '/root/.ssh' ]] || G_EXEC mkdir /root/.ssh
+				[[ -f '/root/.ssh/known_hosts' ]] || > /root/.ssh/known_hosts
+				G_CONFIG_INJECT 'ssh.dietpi.com[[:blank:]]' 'ssh.dietpi.com ssh-rsa AAAAB3NzaC1yc2EAAAADAQABAAABAQDE6aw3r6aOEqendNu376iiCHr9tGBIWPgfrLkzjXjEsHGyVSUFNnZt6pftrDeK7UX+qX4FxOwQlugG4fymOHbimRCFiv6cf7VpYg1Ednquq9TLb7/cIIbX8a6AuRmX4fjdGuqwmBq3OG7ZksFcYEFKt5U4mAJIaL8hXiM2iXjgY02LqiQY/QWATsHI4ie9ZOnwrQE+Rr6mASN1BVFuIgyHIbwX54jsFSnZ/7CdBMkuAd9B8JkxppWVYpYIFHE9oWNfjh/epdK8yv9Oo6r0w5Rb+4qaAc5g+RAaknHeV6Gp75d2lxBdCm5XknKKbGma2+/DfoE8WZTSgzXrYcRlStYN' /root/.ssh/known_hosts
+			else
+				G_DIETPI-NOTIFY 1 'Skipping sending/purging survey data as our ssh.dietpi.com SSH host key is missing in /root/.ssh/known_hosts...'
+				return 1
+			fi
+		fi
 
+		if (( $OPTED_IN ))
+		then
 			[[ -f $FP_UPLOAD ]] || Generate_File
-
 		else
-
-			# Send empty file to overwrite existing data, rm is not possible due to missing file list permissions
+			# Send empty file to overwrite existing data, "rm" is not possible due to missing file list permissions
 			> "$FP_UPLOAD"
-
 		fi
 
 		# Upload to server
 		local timeout=$(sed -n '/^[[:blank:]]*CONFIG_G_CHECK_URL_TIMEOUT=/{s/^[^=]*=//p;q}' /boot/dietpi.txt) G_EXEC_DESC='Sending survey data'
 		(( $OPTED_IN )) || G_EXEC_DESC='Purging survey data'
-		# - Timeout times 2 for DNS resolving + connection, upload itself is done in no time
-		G_EXEC_NOHALT=1 G_EXEC curl --key '' -m $(( ${timeout:-5} * 2 )) -sT "$FP_UPLOAD" sftp://$SFTP_USER:$SFTP_PASS@$SFTP_ADDR/survey/
-		EXIT_CODE=$?
+		# - Timeout x2 for DNS resolving + connection, upload itself is done in no time
+		G_EXEC_NOHALT=1 G_EXEC curl --key '' -m $(( ${timeout:-5} * 2 )) -sT "$FP_UPLOAD" "sftp://$SFTP_USER:$SFTP_PASS@$SFTP_ADDR/survey/"
+		return $?
 
 	}
 
@@ -122,13 +136,12 @@ _EOF_
 	# Read opt in/out choice: 1=yes and send data | 0=no and purge data
 	OPTED_IN=$(sed -n '/^[[:blank:]]*SURVEY_OPTED_IN=[01]$/{s/^[^=]*=//p;q}' /boot/dietpi.txt)
 	# - No (valid) choice done yet
-	if [[ $OPTED_IN != [01] ]]; then
-
+	if [[ $OPTED_IN != [01] ]]
+	then
 		# Do not send data without user interactively opted in!
 		OPTED_IN=0
 		# Ask for choice, if interactive
 		(( $G_INTERACTIVE )) && INPUT=0
-
 	fi
 
 	# Interactive menu
@@ -149,21 +162,17 @@ This allows us to focus development based on popularity.
  - The data is sent via secured SFTP connection, stored unreadable to the public upload user.
  - If you agree, your uploaded data will be updated after each DietPi-Update and DietPi-Software install.
  - Current survey statistics can be reviewed at: https://dietpi.com/survey/
-\nWould you like to join DietPi-Survey?'; then
-
-			if [[ $G_WHIP_RETURNED_VALUE == 'Show' ]]; then
-
+\nWould you like to join DietPi-Survey?'
+		then
+			if [[ $G_WHIP_RETURNED_VALUE == 'Show' ]]
+			then
 				Generate_File
 				G_WHIP_VIEWFILE "$FP_UPLOAD"
 				continue # Stay in loop
-
 			else
-
 				OPTED_IN=$G_WHIP_RETURNED_VALUE
 				G_CONFIG_INJECT 'SURVEY_OPTED_IN=' "SURVEY_OPTED_IN=$OPTED_IN" /boot/dietpi.txt
-
 			fi
-
 		fi
 
 		break
@@ -173,6 +182,6 @@ This allows us to focus development based on popularity.
 	Send_File
 
 	#-----------------------------------------------------------------------------------
-	exit $EXIT_CODE
+	exit $?
 	#-----------------------------------------------------------------------------------
 }

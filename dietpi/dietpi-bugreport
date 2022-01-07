@@ -37,7 +37,7 @@ Available commands:
 	readonly UPLOAD_FILENAME="$G_HW_UUID.7z"
 	readonly UPLOAD_FILESIZE_LIMIT=20000000 # bytes
 
-	# List of commands we want to run and redirect to upload archive
+	# List of commands we want to run to add their outputs to the upload archive
 	readonly aCOMMAND_LIST=(
 
 		'dpkg -l'
@@ -63,16 +63,15 @@ Available commands:
 		'systemctl -l status *.service'
 		'systemctl -l status *.mount'
 		'/boot/dietpi/dietpi-services status'
-
 	)
 
-	# List of files and folders we want to add to upload archive
+	# List of files and directories we want to add to the upload archive
 	readonly aFILE_LIST=(
 
 		# aCOMMAND_LIST output file
 		'CMD_OUT.txt'
 
-		# Git error file
+		# Git error template
 		'G_EXEC_ERROR_REPORT'
 
 		# Logs
@@ -128,25 +127,25 @@ Available commands:
 		'/etc/apt/preferences'
 		'/etc/apt/preferences.d'
 		'/etc/apt/apt.conf.d'
-
 	)
 
-	Generate_Upload_File(){
-
-		# Generate command output file
+	Generate_Upload_File()
+	{
+		G_DIETPI-NOTIFY 2 'Generating informative command outputs, please wait...'
 		for i in "${aCOMMAND_LIST[@]}"
 		do
-			echo -e "\n----------\n$i\n----------" >> CMD_OUT.txt
-			$i &>> CMD_OUT.txt
-		done
+			echo -e "\n----------\n$i\n----------"
+			$i
 
-		# Have the Git error in 1st directory
+		done > CMD_OUT.txt
+
+		# Copy the Git error template to working directory
 		[[ -f '/tmp/G_EXEC_ERROR_REPORT' ]] && G_EXEC cp /tmp/G_EXEC_ERROR_REPORT G_EXEC_ERROR_REPORT
 
-		# Allow warnings (exit code 1), e.g. when files are missing or could not be compressed (but have been added to archive)
+		# Allow warnings (exit code 1), e.g. when files are missing or could not be compressed (but have been added to the archive)
 		G_EXEC_POST_FUNC(){ [[ $exit_code == 1 ]] && exit_code=0; }
 
-		G_EXEC_DESC='Packing upload archive' G_EXEC 7zr a -m0=lzma2 -mx=9 -spf "$UPLOAD_FILENAME" "${aFILE_LIST[@]}"
+		G_EXEC_DESC='Packing upload archive' G_EXEC 7zr a -m0=lzma2 -mx=9 -spf '-x!/var/log/journal/*' "$UPLOAD_FILENAME" "${aFILE_LIST[@]}"
 
 		# Exit if size of upload archive exceeds limit
 		(( $(stat -c '%s' "$UPLOAD_FILENAME") > $UPLOAD_FILESIZE_LIMIT )) || return 0
@@ -154,17 +153,38 @@ Available commands:
 		G_DIETPI-NOTIFY 1 'The bug report upload archive appears to be unexpected large. Please inspect and in case clean up the locations to be uploaded, as their size should never be that large:'
 		printf "%s\n" "${aFILE_LIST[@]}"
 		exit 1
-
 	}
 
-	Upload_Bug_Report(){
+	Upload_Bug_Report()
+	{
+		# Check if our ssh.dietpi.com SSH host key is present
+		if [[ ! -f '/root/.ssh/known_hosts' ]] || ! grep -q '^ssh.dietpi.com[[:blank:]]' /root/.ssh/known_hosts
+		then
+			# If missing, offer to re-add it
+			if G_WHIP_YESNO '[WARNING] ssh.dietpi.com SSH host key is missing\nOur ssh.dietpi.com SSH host key, required to send or purge survey data and bug reports, is missing in /root/.ssh/known_hosts. Shall we re-create it to proceed with sending/purging the bug report?'
+			then
+				[[ -d '/root/.ssh' ]] || G_EXEC mkdir /root/.ssh
+				[[ -f '/root/.ssh/known_hosts' ]] || > /root/.ssh/known_hosts
+				G_CONFIG_INJECT 'ssh.dietpi.com[[:blank:]]' 'ssh.dietpi.com ssh-rsa AAAAB3NzaC1yc2EAAAADAQABAAABAQDE6aw3r6aOEqendNu376iiCHr9tGBIWPgfrLkzjXjEsHGyVSUFNnZt6pftrDeK7UX+qX4FxOwQlugG4fymOHbimRCFiv6cf7VpYg1Ednquq9TLb7/cIIbX8a6AuRmX4fjdGuqwmBq3OG7ZksFcYEFKt5U4mAJIaL8hXiM2iXjgY02LqiQY/QWATsHI4ie9ZOnwrQE+Rr6mASN1BVFuIgyHIbwX54jsFSnZ/7CdBMkuAd9B8JkxppWVYpYIFHE9oWNfjh/epdK8yv9Oo6r0w5Rb+4qaAc5g+RAaknHeV6Gp75d2lxBdCm5XknKKbGma2+/DfoE8WZTSgzXrYcRlStYN' /root/.ssh/known_hosts
+			else
+				G_DIETPI-NOTIFY 1 'Skipping sending/purging the bug report as our ssh.dietpi.com SSH host key is missing in /root/.ssh/known_hosts...'
+				exit 1
+			fi
+		fi
 
 		[[ $INPUT == 1 ]] && G_EXEC_DESC='Sending bug report' || G_EXEC_DESC='Purging bug report'
 
 		G_EXEC curl --key '' --connect-timeout 8 --retry 1 --retry-delay 4 -sSvT "$UPLOAD_FILENAME" "sftp://$SFTP_USER:$SFTP_PASS@$SFTP_ADDR/bugreport/"
 
-		[[ $INPUT == 1 ]] && G_DIETPI-NOTIFY 2 "Reference code: \e[33m$G_HW_UUID"
+		[[ $INPUT == 1 ]] || return 0
 
+		G_DIETPI-NOTIFY 0 "Your bug report has been successfully uploaded.
+- Reference code: \e[33m$G_HW_UUID\e[0m
+\nPlease file a related bug report at GitHub or our forum:
+- https://github.com/MichaIng/DietPi/issues
+- https://dietpi.com/phpbb/viewforum.php?f=11
+\nThe uploaded file will be removed automatically after 48 hours or when your issue has been solved. Additionally you can remove it by running:
+- dietpi-bugreport -1"
 	}
 
 	#/////////////////////////////////////////////////////////////////////////////////////
@@ -178,13 +198,13 @@ Available commands:
 			'1' ': Send bug report archive to help the developers investigate an issue.'
 			'2' ': Remove my previously uploaded bug report.'
 			'3' ': Show me what is included with the upload archive.'
-
 		)
 
-		G_WHIP_MENU 'By sending a bug report file, you can help the developers to investigate your issue, in relation to your report on GitHub or the DietPi forum.
+		G_WHIP_BUTTON_CANCEL_TEXT='Exit' G_WHIP_MENU 'By sending a bug report file, you can help the developers to investigate your issue, in relation to your report on GitHub or the DietPi forum.
 The file is sent via secured connection to our SFTP server and is stored there unreadable to the public upload user.
-The file will be removed after your issue is solved and you can remove it by yourself as well by running "dietpi-bugreport -1" or via this menu.\n
-Would you like to send a bug report archive or remove an already uploaded one?' || exit 0
+It will be removed automatically after 48 hours or when your issue has been solved, and you can remove it manually via this menu or by running:
+- dietpi-bugreport -1
+\nWould you like to send a bug report or remove an already uploaded one?' || exit 0
 
 		if (( $G_WHIP_RETURNED_VALUE == 1 )); then
 
@@ -204,24 +224,19 @@ Would you like to send a bug report archive or remove an already uploaded one?' 
 		fi
 	done
 
-	if [[ $INPUT == 1 ]]; then
-
-		# Generate 7z bug report file
+	if [[ $INPUT == 1 ]]
+	then
 		Generate_Upload_File
 
-	elif [[ $INPUT == -1 ]]; then
-
+	elif [[ $INPUT == -1 ]]
+	then
 		# Send empty file to clear already uploaded bug report
 		> "$UPLOAD_FILENAME"
-
 	else
-
 		G_DIETPI-NOTIFY 1 "Invalid input command ($INPUT). Aborting...\n$USAGE"
 		exit 1
-
 	fi
 
-	# Upload bug report file
 	Upload_Bug_Report
 
 	#-----------------------------------------------------------------------------------

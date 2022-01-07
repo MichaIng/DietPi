@@ -1920,9 +1920,6 @@ _EOF_
 		G_DIETPI-NOTIFY 2 'Writing PREP information to file'
 		echo -e "$IMAGE_CREATOR\n$PREIMAGE_INFO" > /boot/dietpi/.prep_info
 
-		# Temporary fix for missing .installed errors on v7.9 images
-		> /boot/dietpi/.installed
-
 		G_DIETPI-NOTIFY 2 'Generating GPLv2 license readme'
 		cat << '_EOF_' > /var/lib/dietpi/license.txt
 -----------------------
