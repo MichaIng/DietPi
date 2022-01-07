@@ -336,6 +336,6 @@ _EOF_
 	# Disable originating service to prevent any further launch of this script
 	systemctl disable dietpi-firstboot
 	#-----------------------------------------------------------------------------------
-	exit
+	exit 0
 	#-----------------------------------------------------------------------------------
 }
