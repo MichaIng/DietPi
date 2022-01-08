@@ -4,7 +4,7 @@
 	# Optimise current Debian install and prepare for DietPi installation
 	#------------------------------------------------------------------------------------------------
 	# REQUIREMENTS
-	# - Currently running Debian Stretch or above, ideally minimal, eg: Raspbian Lite-ish =))
+	# - Currently running Debian Buster or above, ideally minimal, eg: Raspbian Lite-ish =))
 	# - systemd as system/init/service manager
 	# - Either Ethernet connection or local (non-SSH) terminal access
 	#------------------------------------------------------------------------------------------------
@@ -111,8 +111,6 @@ _EOF_
 		'whiptail' # G_WHIP
 
 	)
-	# - Pre-Buster: Support HTTPS sources for APT
-	grep -q 'stretch' /etc/os-release && aAPT_PREREQS+=('apt-transport-https')
 	for i in "${aAPT_PREREQS[@]}"
 	do
 		dpkg-query -s "$i" &> /dev/null || apt-get -y install "$i" && continue
@@ -180,12 +178,7 @@ _EOF_
 
 	# Detect the distro version of this operating system
 	distro=$(</etc/debian_version)
-	if [[ $distro == '9.'* || $distro == 'stretch/sid' ]]; then
-
-		G_DISTRO=4
-		G_DISTRO_NAME='stretch'
-
-	elif [[ $distro == '10.'* || $distro == 'buster/sid' ]]; then
+	if [[ $distro == '10.'* || $distro == 'buster/sid' ]]; then
 
 		G_DISTRO=5
 		G_DISTRO_NAME='buster'
@@ -674,8 +667,6 @@ Currently installed: $G_DISTRO_NAME (ID: $G_DISTRO)"; then
 		else
 
 			aPACKAGES_REQUIRED_INSTALL+=('dropbear-run')
-			# On Stretch pre-images we need to assure that apt-transport-https stays installed until the distro upgrade is done.
-			(( $G_DISTRO < 5 )) && aPACKAGES_REQUIRED_INSTALL+=('apt-transport-https')
 
 		fi
 		# - systemd-timesyncd: Network time sync daemon
@@ -911,6 +902,10 @@ _EOF_
 			[[ $G_HW_ARCH == 3 ]] || a32bit=('raspi-copies-and-fills')
 			G_AGI raspberrypi-bootloader raspberrypi-kernel libraspberrypi0 libraspberrypi-bin raspberrypi-sys-mods raspberrypi-archive-keyring "${a32bit[@]}"
 
+			# https://github.com/RPi-Distro/raspberrypi-sys-mods/pull/60
+			[[ -f '/etc/apt/trusted.gpg.d/microsoft.gpg' ]] && G_EXEC rm /etc/apt/trusted.gpg.d/microsoft.gpg
+			[[ -f '/etc/apt/sources.list.d/vscode.list' ]] && G_EXEC rm /etc/apt/sources.list.d/vscode.list
+
 			# Move Raspbian key to active place and remove obsolete combined keyring
 			[[ -f '/usr/share/keyrings/raspbian-archive-keyring.gpg' ]] && G_EXEC ln -sf /usr/share/keyrings/raspbian-archive-keyring.gpg /etc/apt/trusted.gpg.d/raspbian-archive-keyring.gpg
 			[[ -f '/etc/apt/trusted.gpg' ]] && G_EXEC rm /etc/apt/trusted.gpg
@@ -1041,7 +1036,7 @@ _EOF_
 			if (( $WIFI_REQUIRED )); then
 
 				aPACKAGES_REQUIRED_INSTALL+=('firmware-atheros')		# Qualcomm/Atheros WiFi+BT dongle firmware
-				aPACKAGES_REQUIRED_INSTALL+=('firmware-brcm80211')		# Breadcom WiFi dongle firmware
+				aPACKAGES_REQUIRED_INSTALL+=('firmware-brcm80211')		# Broadcom WiFi dongle firmware
 				aPACKAGES_REQUIRED_INSTALL+=('firmware-iwlwifi')		# Intel WiFi dongle+PCIe firmware
 				if (( $G_HW_MODEL == 20 )); then
 
@@ -1383,7 +1378,7 @@ _EOF_'
 		rm -fv /etc/resolv.conf
 		echo 'nameserver 9.9.9.9' > /etc/resolv.conf # Apply generic functional DNS nameserver, updated on next service start
 
-		# ifupdown starts the daemon outside of systemd, the enabled systemd unit just thows an error on boot due to missing dbus and with dbus might interfere with ifupdown
+		# ifupdown starts the daemon outside of systemd, the enabled systemd unit just throws an error on boot due to missing dbus and with dbus might interfere with ifupdown
 		systemctl disable wpa_supplicant 2> /dev/null && G_DIETPI-NOTIFY 2 'Disabled non-required wpa_supplicant systemd unit'
 
 		G_EXEC_DESC='Configuring network interfaces'
@@ -1453,10 +1448,6 @@ _EOF_'
 
 		# ASUS TB WiFi: https://github.com/MichaIng/DietPi/issues/1760
 		(( $G_HW_MODEL == 52 )) && G_CONFIG_INJECT '8723bs' '8723bs' /etc/modules
-
-		G_DIETPI-NOTIFY 2 'Tweaking DHCP timeout:' # https://github.com/MichaIng/DietPi/issues/711
-		G_CONFIG_INJECT 'timeout[[:blank:]]' 'timeout 10;' /etc/dhcp/dhclient.conf
-		G_CONFIG_INJECT 'retry[[:blank:]]' 'retry 4;' /etc/dhcp/dhclient.conf
 
 		echo 'DietPi' > /etc/hostname
 		G_EXEC_DESC='Configuring hostname and hosts'
@@ -1969,25 +1960,17 @@ _EOF_
 
 		sync
 
-		G_DIETPI-NOTIFY 2 "The used kernel version is:\n\t - $(uname -a)"
+		G_DIETPI-NOTIFY 2 "The used kernel version is:\n\t- $(uname -a)"
 		kernel_apt_packages=$(dpkg -l | grep -E '[[:blank:]]linux-(image|dtb)-[0-9]')
-		if [[ $kernel_apt_packages ]]; then
+		[[ $kernel_apt_packages ]] && G_DIETPI-NOTIFY 2 "The following kernel DEB packages have been found:\n\e[0m$kernel_apt_packages"
 
-			G_DIETPI-NOTIFY 2 'The following kernel DEB packages have been found, please purge outdated ones:'
-			echo "$kernel_apt_packages"
-
-		fi
-
-		G_DIETPI-NOTIFY 2 'Please delete outdated non-APT kernel modules:'
-		ls -lAh /lib/modules
+		G_DIETPI-NOTIFY 2 'The following kernel images and modules have been found:'
+		ls -lAh /boot /lib/modules
 
 		G_DIETPI-NOTIFY 0 'Completed, disk can now be saved to .img for later use, or, reboot system to start first run of DietPi.'
 
-		# Power off system
-
-		# Plug SD card/drive into external DietPi system
-
-		# Run: bash -c "$(curl -sSfL https://github.com/MichaIng/DietPi/blob/master/.meta/dietpi-imager)"
+		# shellcheck disable=SC2016
+		G_DIETPI-NOTIFY 0 'To create an .img file, you can "poweroff" and run the following command from the host/external DietPi system:\n\t- bash -c "$(curl -sSfL https://github.com/MichaIng/DietPi/blob/master/.meta/dietpi-imager)"'
 
 	}
 

@@ -57,6 +57,9 @@
 		# Inform kernel about changed partition table, be failsafe by using two different methods and reboot if any fails
 		partprobe "$ROOT_DRIVE" || Reboot_to_load_Partition_table
 		partx -u "$ROOT_DRIVE" || Reboot_to_load_Partition_table
+
+		# Give the system some time to have the changes fully applied: https://github.com/MichaIng/DietPi/issues/5006
+		sleep 0.5
 	else
 		rm /dietpi_skip_partition_resize
 	fi
