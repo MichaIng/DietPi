@@ -1449,10 +1449,6 @@ _EOF_'
 		# ASUS TB WiFi: https://github.com/MichaIng/DietPi/issues/1760
 		(( $G_HW_MODEL == 52 )) && G_CONFIG_INJECT '8723bs' '8723bs' /etc/modules
 
-		G_DIETPI-NOTIFY 2 'Tweaking DHCP timeout:' # https://github.com/MichaIng/DietPi/issues/711
-		G_CONFIG_INJECT 'timeout[[:blank:]]' 'timeout 10;' /etc/dhcp/dhclient.conf
-		G_CONFIG_INJECT 'retry[[:blank:]]' 'retry 4;' /etc/dhcp/dhclient.conf
-
 		echo 'DietPi' > /etc/hostname
 		G_EXEC_DESC='Configuring hostname and hosts'
 		G_EXEC eval 'cat << _EOF_ > /etc/hosts
