@@ -1549,26 +1549,21 @@ _EOF_'
 			G_EXEC_DESC='Removing foreign i386 DPKG architecture' G_EXEC dpkg --remove-architecture i386
 
 			# Disable nouveau: https://github.com/MichaIng/DietPi/issues/1244 // https://dietpi.com/phpbb/viewtopic.php?p=9688#p9688
-			rm -f /etc/modprobe.d/*nouveau*
+			G_EXEC rm -f /etc/modprobe.d/*nouveau*
 			cat << '_EOF_' > /etc/modprobe.d/dietpi-disable_nouveau.conf
 blacklist nouveau
-blacklist lbm-nouveau
 options nouveau modeset=0
 alias nouveau off
-alias lbm-nouveau off
 _EOF_
 			# Fix grub install device: https://github.com/MichaIng/DietPi/issues/3700
 			dpkg-query -s grub-pc &> /dev/null && G_EXEC eval "debconf-set-selections <<< 'grub-pc grub-pc/install_devices multiselect /dev/sda'"
 
 			# Update initramfs with above changes
-			if command -v update-tirfs > /dev/null; then
-
+			if command -v update-tirfs > /dev/null
+			then
 				G_EXEC_OUTPUT=1 G_EXEC update-tirfs
-
 			else
-
 				G_EXEC_OUTPUT=1 G_EXEC update-initramfs -u
-
 			fi
 
 		elif (( $G_HW_ARCH == 3 )); then
