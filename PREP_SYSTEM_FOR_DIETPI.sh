@@ -1322,9 +1322,8 @@ _EOF_
 		ln -sfv /etc/profile.d/bash_completion.sh /etc/bashrc.d/dietpi-bash_completion.sh
 
 		#-----------------------------------------------------------------------------------
-		# UID bit for sudo: https://github.com/MichaIng/DietPi/issues/794
-		G_DIETPI-NOTIFY 2 'Setting sudo UID bit'
-		chmod 4755 "$(command -v sudo)"
+		# setuid bit for sudo: https://github.com/MichaIng/DietPi/issues/794
+		G_EXEC_DESC='Setting setuid bit for "sudo" executable' G_EXEC chmod 4755 /usr/bin/sudo
 
 		#-----------------------------------------------------------------------------------
 		# Dirs
