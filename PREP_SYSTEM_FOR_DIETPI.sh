@@ -523,7 +523,7 @@ Currently installed: $G_DISTRO_NAME (ID: $G_DISTRO)"; then
 
 		G_DIETPI-NOTIFY 2 'Moving kernel and boot configuration to /boot'
 
-		# HW specific config.txt, boot.ini uEnv.txt
+		# HW specific config.txt, boot.ini
 		if (( $G_HW_MODEL < 10 )); then
 
 			echo "root=PARTUUID=$(findmnt -Ufnro PARTUUID -M /) rootfstype=ext4 rootwait fsck.repair=yes net.ifnames=0 logo.nologo quiet console=serial0,115200 console=tty1" > /boot/cmdline.txt
@@ -531,16 +531,16 @@ Currently installed: $G_DISTRO_NAME (ID: $G_DISTRO)"; then
 			# Boot in 64-bit mode if this is a 64-bit image
 			[[ $G_HW_ARCH == 3 ]] && G_CONFIG_INJECT 'arm_64bit=' 'arm_64bit=1' /boot/config.txt
 
-		elif (( $G_HW_MODEL == 11 )); then
+		elif [[ $G_HW_MODEL == 11 && -f '/boot/boot.ini' && $(findmnt -t vfat -M /boot) ]]; then
 
 			G_EXEC mv "DietPi-$G_GITBRANCH/boot_xu4.ini" /boot/boot.ini
 			G_EXEC sed -i "s/root=UUID=[^[:blank:]]*/root=UUID=$(findmnt -Ufnro UUID -M /)/" /boot/boot.ini
 
-		elif [[ $G_HW_MODEL == 12 && -f '/boot/boot.ini' ]]; then
+		elif [[ $G_HW_MODEL == 12 && -f '/boot/boot.ini' && $(findmnt -t vfat -M /boot) ]]; then
 
 			G_EXEC mv "DietPi-$G_GITBRANCH/boot_c2.ini" /boot/boot.ini
 
-		elif [[ $G_HW_MODEL == 15 && -f '/boot/boot.ini' ]]; then
+		elif [[ $G_HW_MODEL == 15 && -f '/boot/boot.ini' && $(findmnt -t vfat -M /boot) ]]; then
 
 			G_EXEC mv "DietPi-$G_GITBRANCH/boot_n2.ini" /boot/boot.ini
 			G_EXEC sed -i "s/root=UUID=[^[:blank:]]*/root=UUID=$(findmnt -Ufnro UUID -M /)/" /boot/boot.ini
