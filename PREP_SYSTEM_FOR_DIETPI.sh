@@ -526,7 +526,7 @@ Currently installed: $G_DISTRO_NAME (ID: $G_DISTRO)"; then
 		# HW specific config.txt, boot.ini
 		if (( $G_HW_MODEL < 10 )); then
 
-			echo "root=PARTUUID=$(findmnt -Ufnro PARTUUID -M /) rootfstype=ext4 rootwait fsck.repair=yes net.ifnames=0 logo.nologo quiet console=serial0,115200 console=tty1" > /boot/cmdline.txt
+			echo "root=PARTUUID=$(findmnt -Ufnro PARTUUID -M /) rootfstype=ext4 rootwait fsck.repair=yes net.ifnames=0 logo.nologo console=serial0,115200 console=tty1" > /boot/cmdline.txt
 			G_EXEC mv "DietPi-$G_GITBRANCH/config.txt" /boot/
 			# Boot in 64-bit mode if this is a 64-bit image
 			[[ $G_HW_ARCH == 3 ]] && G_CONFIG_INJECT 'arm_64bit=' 'arm_64bit=1' /boot/config.txt
@@ -1884,7 +1884,7 @@ _EOF_
 			fi
 
 			# Update config
-			G_CONFIG_INJECT 'GRUB_CMDLINE_LINUX_DEFAULT=' 'GRUB_CMDLINE_LINUX_DEFAULT="consoleblank=0 quiet"' /etc/default/grub
+			G_CONFIG_INJECT 'GRUB_CMDLINE_LINUX_DEFAULT=' 'GRUB_CMDLINE_LINUX_DEFAULT="consoleblank=0"' /etc/default/grub
 			G_CONFIG_INJECT 'GRUB_CMDLINE_LINUX=' 'GRUB_CMDLINE_LINUX="net.ifnames=0"' /etc/default/grub
 			G_CONFIG_INJECT 'GRUB_TIMEOUT=' 'GRUB_TIMEOUT=0' /etc/default/grub
 			G_EXEC_DESC='Regenerating GRUB config' G_EXEC_OUTPUT=1 G_EXEC grub-mkconfig -o /boot/grub/grub.cfg
