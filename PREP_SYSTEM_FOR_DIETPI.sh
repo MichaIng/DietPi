@@ -1489,35 +1489,40 @@ left_meter_modes=1 1
 right_meters=Memory Swap Tasks LoadAverage Uptime
 right_meter_modes=1 1 2 2 2
 _EOF_'
-		G_DIETPI-NOTIFY 2 'Configuring serial login consoles:'
-		# On virtual machines, serial consoles are not required
-		if (( $G_HW_MODEL == 20 )); then
+		G_DIETPI-NOTIFY 2 'Configuring serial login consoles'
+		# Disable all serial consoles first, also to remove invalid ones
+		/boot/dietpi/func/dietpi-set_hardware serialconsole disable
+		# On RPi the primary serial console depends on model, use "serial0" which links to the primary console, converts to correct device on first boot
+		if (( $G_HW_MODEL < 10 ))
+		then
+			G_CONFIG_INJECT 'enable_uart=' 'enable_uart=0' /boot/config.txt
+			/boot/dietpi/func/dietpi-set_hardware serialconsole enable serial0
+			# Disable and mask the others explicitly to be independent of currently available serial devices
+			/boot/dietpi/func/dietpi-set_hardware serialconsole disable ttyAMA0
+			G_EXEC systemctl mask serial-getty@ttyAMA0
+			/boot/dietpi/func/dietpi-set_hardware serialconsole disable ttyS0
+			G_EXEC systemctl mask serial-getty@ttyS0
 
-			/boot/dietpi/func/dietpi-set_hardware serialconsole disable
+		# Odroid N2: Enable on serial debug console only
+		elif (( $G_HW_MODEL == 15 ))
+		then
+			local tty='ttyAML0'
+			[[ -e '/dev/ttyAML0' ]] || tty='ttyS0'
+			/boot/dietpi/func/dietpi-set_hardware serialconsole enable "$tty"
 
-		else
+		# ROCK Pi S: Enable on ttyS0 only
+		elif (( $G_HW_MODEL == 73 ))
+		then
+			/boot/dietpi/func/dietpi-set_hardware serialconsole enable ttyS0
 
+		# Else on non-VM: Enable on all present serial consoles
+		elif (( $G_HW_MODEL != 20 ))
+		then
 			/boot/dietpi/func/dietpi-set_hardware serialconsole enable
-			# On RPi the primary serial console depends on model, use "serial0" which links to the primary console, converts to correct device on first boot
-			if (( $G_HW_MODEL < 10 )); then
-
-				/boot/dietpi/func/dietpi-set_hardware serialconsole disable ttyAMA0
-				# The actual serial console services need to be masked explicitly to ensure they are not autostarted when the image is created within a container or without both serial devices present, since masks are only placed by dietpi-set_hardware for existing devices: : https://github.com/MichaIng/DietPi/issues/5014
-				G_EXEC systemctl mask serial-getty@ttyAMA0
-				/boot/dietpi/func/dietpi-set_hardware serialconsole disable ttyS0
-				G_EXEC systemctl mask serial-getty@ttyS0
-				/boot/dietpi/func/dietpi-set_hardware serialconsole enable serial0
-
-			# ROCK Pi S: Enable on ttyS0 only
-			elif (( $G_HW_MODEL == 73 )); then
-
-				/boot/dietpi/func/dietpi-set_hardware serialconsole disable
-				/boot/dietpi/func/dietpi-set_hardware serialconsole enable ttyS0
-				G_CONFIG_INJECT 'CONFIG_SERIAL_CONSOLE_ENABLE=' 'CONFIG_SERIAL_CONSOLE_ENABLE=1' /boot/dietpi.txt
-
-			fi
-
 		fi
+
+		# Re-set dietpi.txt setting on non-VMs to indicated enabled serial console
+		(( $G_HW_MODEL == 20 )) || G_CONFIG_INJECT 'CONFIG_SERIAL_CONSOLE_ENABLE=' 'CONFIG_SERIAL_CONSOLE_ENABLE=1' /boot/dietpi.txt
 
 		G_DIETPI-NOTIFY 2 'Disabling static and automatic login prompts on consoles tty2 to tty6:'
 		G_EXEC systemctl mask --now getty-static
