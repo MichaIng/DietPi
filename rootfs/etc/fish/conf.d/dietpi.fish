@@ -30,5 +30,5 @@ alias 1337='echo "Indeed, you are =)"'
 
 
 function fish_greeting
-        dietpi-login
+        /boot/dietpi/dietpi-login
 end
