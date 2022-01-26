@@ -869,8 +869,8 @@ _EOF_
 			cat << _EOF_ > /etc/initramfs/post-update.d/99-dietpi-uboot
 #!/bin/dash
 echo 'update-initramfs: Converting to U-Boot format' >&2
-mkimage -A $arch -O linux -T ramdisk -C gzip -n uInitrd -d \$2 /boot/uInitrd-\$1 > /dev/null
-ln -sf uInitrd-\$1 /boot/uInitrd > /dev/null 2>&1 || mv /boot/uInitrd-\$1 /boot/uInitrd
+mkimage -A $arch -O linux -T ramdisk -C gzip -n uInitrd -d "\$2" "/boot/uInitrd-\$1" > /dev/null
+ln -sf "uInitrd-\$1" /boot/uInitrd > /dev/null 2>&1 || mv "/boot/uInitrd-\$1" /boot/uInitrd
 exit 0
 _EOF_
 			G_EXEC chmod +x /etc/initramfs/post-update.d/99-dietpi-uboot
