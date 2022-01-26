@@ -608,6 +608,14 @@ Currently installed: $G_DISTRO_NAME (ID: $G_DISTRO)"; then
 		# (Re)create DietPi runtime and logs dir, used by G_AGx
 		G_EXEC mkdir -p /run/dietpi /var/tmp/dietpi/logs
 
+		# RPi: Bootstrap repo when key is missing
+		if [[ $G_HW_MODEL -le 9 && ! $(apt-key list 'CF8A1AF502A2AA2D763BAE7E82B129927FA3303E' 2> /dev/null) ]]
+		then
+			G_EXEC curl -sSfLO 'https://archive.raspberrypi.org/debian/pool/main/r/raspberrypi-archive-keyring/raspberrypi-archive-keyring_2021.1.1+rpt1_all.deb'
+			G_AGI dpkg -i raspberrypi-archive-keyring_2016.10.31_all.deb
+			G_EXEC rm raspberrypi-archive-keyring_2016.10.31_all.deb
+		fi
+
 		G_AGUP
 
 		# @MichaIng https://github.com/MichaIng/DietPi/pull/1266/files
@@ -797,6 +805,36 @@ _EOF_
 			[[ -f '/etc/apt/trusted.gpg~' ]] && G_EXEC rm '/etc/apt/trusted.gpg~'
 
 		# - G_HW_MODEL specific required firmware/kernel/bootloader packages
+		#	Odroid N2: Modern single partition image
+		elif [[ $G_HW_MODEL == 15 && $(findmnt -Ufnro TARGET -T /boot) == '/' ]]
+		then
+			# Bootstrap Armbian repository
+			G_EXEC eval "curl -sSfL 'https://apt.armbian.com/armbian.key' | gpg --dearmor -o /etc/apt/trusted.gpg.d/dietpi-armbian.gpg --yes"
+			# Remove obsolete combined keyring
+			[[ -f '/etc/apt/trusted.gpg' ]] && G_EXEC rm /etc/apt/trusted.gpg
+			[[ -f '/etc/apt/trusted.gpg~' ]] && G_EXEC rm '/etc/apt/trusted.gpg~'
+			# Exclude doubled device tree files, shipped with the kernel package
+			G_EXEC eval "echo 'path-exclude /usr/lib/linux-image-current-*' > /etc/dpkg/dpkg.cfg.d/01-dietpi-exclude_doubled_devicetrees"
+			# Remove obsolete lists and doubled device tree files, shipped with the kernel package
+			G_EXEC rm -Rf /etc/apt/sources.list.d/* /usr/lib/linux-image-current-*
+			# Add Armbian repository
+			G_EXEC eval "echo 'deb http://apt.armbian.com/ ${DISTRO_TARGET_NAME/bookworm/bullseye} main' > /etc/apt/sources.list.d/dietpi-armbian.list"
+			# Update APT lists
+			G_AGUP
+			# Install kernel, device tree, U-Boot and firmware packages
+			G_AGI linux-{image,dtb}-current-meson64 linux-u-boot-odroidn2-current u-boot-tools armbian-firmware
+			# Flash U-Boot
+			. /usr/lib/u-boot/platform_install.sh
+			write_uboot_platform "$DIR" "$(lsblk -npo PKNAME "$(findmnt -Ufnro SOURCE -M /)")"
+			# Install kernel, initramfs and boot config files
+			G_EXEC curl -sSfL "https://raw.githubusercontent.com/$G_GITOWNER/DietPi/$G_GITBRANCH/.build/images/U-Boot/boot.cmd" -o /boot/boot.cmd
+			G_EXEC mkimage -C none -A arm64 -T script -d /boot/boot.cmd /boot/boot.scr
+			G_EXEC curl -sSfL "https://raw.githubusercontent.com/$G_GITOWNER/DietPi/$G_GITBRANCH/.build/images/U-Boot/dietpiEnv.txt" -o /boot/dietpiEnv.txt
+			G_EXEC mkdir -p /etc/kernel/preinst.d /etc/initramfs/post-update.d
+			G_EXEC curl -sSfL "https://raw.githubusercontent.com/$G_GITOWNER/DietPi/$G_GITBRANCH/.build/images/U-Boot/dietpi-initramfs_cleanup" -o /etc/kernel/preinst.d/dietpi-initramfs_cleanup
+			G_EXEC curl -sSfL "https://raw.githubusercontent.com/$G_GITOWNER/DietPi/$G_GITBRANCH/.build/images/U-Boot/99-dietpi-uboot" -o /etc/initramfs/post-update.d/99-dietpi-uboot
+			G_EXEC chmod +x /etc/kernel/preinst.d/dietpi-initramfs_cleanup /etc/initramfs/post-update.d/99-dietpi-uboot
+
 		#	Armbian grab currently installed packages
 		elif [[ $(dpkg-query -Wf '${Package} ') == *'armbian'* ]]; then
 
@@ -886,6 +924,13 @@ exit 0
 _EOF_
 			fi
 			G_EXEC chmod +x /etc/kernel/preinst.d/dietpi-initramfs_cleanup
+
+			# Add Armbian repo key as dedicated file
+			G_EXEC eval "curl -sSfL 'https://apt.armbian.com/armbian.key' | gpg --dearmor -o /etc/apt/trusted.gpg.d/dietpi-armbian.gpg --yes"
+
+			# Remove obsolete combined keyring
+			[[ -f '/etc/apt/trusted.gpg' ]] && G_EXEC rm /etc/apt/trusted.gpg
+			[[ -f '/etc/apt/trusted.gpg~' ]] && G_EXEC rm '/etc/apt/trusted.gpg~'
 
 			# Remove obsolete components from Armbian list and connect via HTTPS
 			G_EXEC eval "echo 'deb http://apt.armbian.com/ ${DISTRO_TARGET_NAME/bookworm/bullseye} main' > /etc/apt/sources.list.d/armbian.list"
@@ -1008,7 +1053,7 @@ _EOF_
 		G_EXEC apt-get clean # Remove downloaded archives
 
 		# - Firmware
-		if dpkg-query -Wf '${Package}\n' | grep -q '^armbian-firmware'; then
+		if dpkg-query -s 'armbian-firmware' &> /dev/null; then
 
 			aPACKAGES_REQUIRED_INSTALL+=('armbian-firmware')
 
@@ -1577,8 +1622,8 @@ _EOF_
 		fi
 
 		G_DIETPI-NOTIFY 2 'Applying board-specific tweaks:'
-		if (( $G_HW_MODEL != 20 )); then
-
+		if (( $G_HW_MODEL != 20 ))
+		then
 			G_EXEC_DESC='Configuring hdparm'
 			# Since Debian Bullseye, spindown_time is not applied if APM is not supported by the drive. force_spindown_time is required to override that.
 			local spindown='spindown_time'
@@ -1588,21 +1633,26 @@ apm = 127
 $spindown = 120
 _EOF_"
 			unset -v spindown
-
 		fi
 
-		# - Sparky SBC
-		if (( $G_HW_MODEL == 70 )); then
+		# - Odroid N2: Modern single partition image
+		if [[ $G_HW_MODEL == 15 && -f '/boot/dietpiEnv.txt' ]]
+		then
+			G_CONFIG_INJECT 'rootdev=' 'rootdev=UUID=$(findmnt -Ufnro UUID -M /)' /boot/dietpiEnv.txt
+			G_CONFIG_INJECT 'rootfstype=' 'rootfstype=$(findmnt -Ufnro FSTYPE -M /)' /boot/dietpiEnv.txt
 
+		# - Sparky SBC
+		if (( $G_HW_MODEL == 70 ))
+		then
 			# Install latest kernel/drivers
-			G_EXEC curl -sSfL https://raw.githubusercontent.com/sparky-sbc/sparky-test/master/dragon_fly_check/uImage -o /boot/uImage
-			G_EXEC curl -sSfLO https://raw.githubusercontent.com/sparky-sbc/sparky-test/master/dragon_fly_check/3.10.38.bz2
+			G_EXEC curl -sSfL 'https://raw.githubusercontent.com/sparky-sbc/sparky-test/master/dragon_fly_check/uImage' -o /boot/uImage
+			G_EXEC curl -sSfLO 'https://raw.githubusercontent.com/sparky-sbc/sparky-test/master/dragon_fly_check/3.10.38.bz2'
 			G_EXEC tar -xf 3.10.38.bz2 -C /lib/modules/
 			G_EXEC rm 3.10.38.bz2
 			# - USB audio update
-			G_EXEC curl -sSfL https://raw.githubusercontent.com/sparky-sbc/sparky-test/master/dsd-marantz/snd-usb-audio.ko -o /lib/modules/3.10.38/kernel/sound/usb/snd-usb-audio.ko
+			G_EXEC curl -sSfL 'https://raw.githubusercontent.com/sparky-sbc/sparky-test/master/dsd-marantz/snd-usb-audio.ko' -o /lib/modules/3.10.38/kernel/sound/usb/snd-usb-audio.ko
 			# - Ethernet update
-			G_EXEC curl -sSfL https://raw.githubusercontent.com/sparky-sbc/sparky-test/master/sparky-eth/ethernet.ko -o /lib/modules/3.10.38/kernel/drivers/net/ethernet/acts/ethernet.ko
+			G_EXEC curl -sSfL 'https://raw.githubusercontent.com/sparky-sbc/sparky-test/master/sparky-eth/ethernet.ko' -o /lib/modules/3.10.38/kernel/drivers/net/ethernet/acts/ethernet.ko
 
 			# Boot args
 			cat << '_EOF_' > /boot/uenv.txt
@@ -1778,8 +1828,8 @@ _EOF_
 		fi
 
 		# - Armbian special
-		if [[ -f '/boot/armbianEnv.txt' ]]; then
-
+		if [[ -f '/boot/armbianEnv.txt' ]]
+		then
 			# Disable bootsplash logo, as we removed the file above: https://github.com/MichaIng/DietPi/issues/3932#issuecomment-852376681
 			G_CONFIG_INJECT 'bootlogo=' 'bootlogo=false' /boot/armbianEnv.txt
 
@@ -1788,7 +1838,6 @@ _EOF_
 
 			# Disable Docker optimisations, since this has some performance drawbacks, enable on Docker install instead
 			G_CONFIG_INJECT 'docker_optimizations=' 'docker_optimizations=off' /boot/armbianEnv.txt
-
 		fi
 
 		# Apply cgroups-v2 workaround on Bullseye if the kernel does not support it: https://github.com/MichaIng/DietPi/issues/4705
