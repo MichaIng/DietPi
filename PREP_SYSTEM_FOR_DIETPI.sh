@@ -562,10 +562,9 @@ Currently installed: $G_DISTRO_NAME (ID: $G_DISTRO)"; then
 		rm "DietPi-$G_GITBRANCH/dietpi/pre-patch_file"
 		rm "DietPi-$G_GITBRANCH/dietpi/patch_file"
 
-		G_EXEC_DESC='Copy DietPi scripts to /boot/dietpi' G_EXEC cp -Rf "DietPi-$G_GITBRANCH/dietpi" /boot/
-		G_EXEC_DESC='Copy DietPi system files in place' G_EXEC cp -Rf "DietPi-$G_GITBRANCH/rootfs"/. /
+		G_EXEC_DESC='Copy DietPi scripts to /boot/dietpi' G_EXEC cp -a "DietPi-$G_GITBRANCH/dietpi" /boot/
+		G_EXEC_DESC='Copy DietPi system files in place' G_EXEC cp -a "DietPi-$G_GITBRANCH/rootfs/." /
 		G_EXEC_DESC='Clean download location' G_EXEC rm -R "DietPi-$G_GITBRANCH"
-		G_EXEC_DESC='Set execute permissions for DietPi scripts' G_EXEC chmod -R +x /boot/dietpi /var/lib/dietpi/services /etc/cron.*/dietpi
 
 		G_DIETPI-NOTIFY 2 'Storing DietPi version info:'
 		G_CONFIG_INJECT 'DEV_GITBRANCH=' "DEV_GITBRANCH=$G_GITBRANCH" /boot/dietpi.txt
