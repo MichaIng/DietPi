@@ -1691,6 +1691,11 @@ Do you want to continue and DISABLE Bluetooth now?' || return 1
 
 			Soundcard_Reset_RPi
 
+		# - Odroid N2: Modern image
+		elif [[ $G_HW_MODEL == 15 && -f '/boot/dietpiEnv.txt' ]]; then
+
+			Soundcard_Reset_OdroidN2
+
 		# - Odroid
 		elif (( $G_HW_MODEL < 20 )); then
 
@@ -1746,6 +1751,9 @@ Do you want to continue and DISABLE Bluetooth now?' || return 1
 		local kms=$(grep -Em1 '^[[:blank:]]*dtoverlay=vc4-kms-v3d(-pi4)?(,|$)' /boot/config.txt)
 		[[ $kms && ! $kms =~ ',noaudio'(,|$) ]] && G_EXEC sed -Ei '/^[[:blank:]]*dtoverlay=vc4-kms-v3d(-pi4)?(,|$)/s/$/,noaudio/' /boot/config.txt
 
+		# Use "auto" as default
+		[[ $INPUT_DEVICE_VALUE == 'default' ]] && INPUT_DEVICE_VALUE='rpi-bcm2835-auto'
+
 	}
 
 	Soundcard_Reset_Odroid(){
@@ -1760,13 +1768,19 @@ Do you want to continue and DISABLE Bluetooth now?' || return 1
 		sed -i '/^[[:blank:]]*snd-soc-pcm512x/d' /etc/modules
 		sed -i '/^[[:blank:]]*snd-soc-pcm512x-i2c/d' /etc/modules
 		sed -i '/^[[:blank:]]*snd-soc-odroid-dac2/d' /etc/modules
-		if [[ -f '/etc/systemd/system/odroid-hifishield2.service' ]]; then
-
+		if [[ -f '/etc/systemd/system/odroid-hifishield2.service' ]]
+		then
 			G_EXEC systemctl disable --now odroid-hifishield2
 			G_EXEC rm /etc/systemd/system/odroid-hifishield2.service
-
 		fi
 		[[ -d '/etc/systemd/system/odroid-hifishield2.service.d' ]] && G_EXEC rm -R /etc/systemd/system/odroid-hifishield2.service.d
+
+	}
+
+	Soundcard_Reset_OdroidN2(){
+
+		# Use HDMI as default
+		[[ $INPUT_DEVICE_VALUE == 'default' ]] && INPUT_DEVICE_VALUE='OdroidN2_HDMI'
 
 	}
 
@@ -1813,7 +1827,7 @@ Do you want to continue and DISABLE Bluetooth now?' || return 1
 		# Save selection to dietpi.txt
 		G_CONFIG_INJECT 'CONFIG_SOUNDCARD=' "CONFIG_SOUNDCARD=$INPUT_DEVICE_VALUE" /boot/dietpi.txt
 		# Return now if no sound card has been selected
-		[[ $INPUT_DEVICE_VALUE == 'none' ]] && return
+		[[ $INPUT_DEVICE_VALUE == 'none' ]] && return 0
 		#-----------------------------------------------------------------------------
 		# Apply specific asound.conf and additional settings
 		# - ALSA equalizer enabled?
@@ -1841,7 +1855,6 @@ Do you want to continue and DISABLE Bluetooth now?' || return 1
 
 				SOUNDCARD_TARGET_CARD=$(mawk -F, '{print $1}' <<< "${INPUT_DEVICE_VALUE#hw:}")
 				SOUNDCARD_TARGET_DEVICE=$(mawk -F, '{print $2}' <<< "${INPUT_DEVICE_VALUE#hw:}")
-
 			;;
 
 			# Auto detect USB DAC
@@ -1880,7 +1893,6 @@ _EOF_
 					return
 
 				fi
-
 			;;
 
 			# Intel SST DSP
@@ -1906,7 +1918,6 @@ _EOF_
 				SOUNDCARD_TARGET_CARD=1
 				SOUNDCARD_TARGET_DEVICE=0
 				G_EXEC amixer -c 0 set 'audio output mode switch' i2s
-
 			;;
 
 			# Allo Cheapo
@@ -1930,7 +1941,6 @@ _EOF_
 					SOUNDCARD_TARGET_DEVICE=2
 
 				fi
-
 			;;
 
 			# --------------- RPi -------------------
@@ -1988,7 +1998,6 @@ _EOF_
 					local kms=$(grep -Em1 '^[[:blank:]]*dtoverlay=vc4-kms-v3d(-pi4)?,(noaudio|.+,noaudio)(,|$)' /boot/config.txt)
 					[[ $kms ]] && G_EXEC sed -Ei '/^[[:blank:]]*dtoverlay=vc4-kms-v3d(-pi4)?,/s/,noaudio(,|$)/\1/' /boot/config.txt
 				fi
-
 			;;
 
 			# Allo Piano DAC (DSP firmware + dtoverlay)
@@ -2009,7 +2018,6 @@ _EOF_
 				fi
 
 				G_CONFIG_INJECT "dtoverlay=$INPUT_DEVICE_VALUE" "dtoverlay=$INPUT_DEVICE_VALUE" /boot/config.txt
-
 			;;
 
 			# dtoverlay
@@ -2028,7 +2036,6 @@ _EOF_
 
 				# Enable dtoverlay
 				G_CONFIG_INJECT "dtoverlay=$INPUT_DEVICE_VALUE" "dtoverlay=$INPUT_DEVICE_VALUE" /boot/config.txt
-
 			;;
 
 			# dtoverlay + I2S
@@ -2038,7 +2045,6 @@ _EOF_
 				# Enable dtoverlay + I2S
 				G_CONFIG_INJECT 'dtparam=i2s=' 'dtparam=i2s=on' /boot/config.txt
 				G_CONFIG_INJECT "dtoverlay=$INPUT_DEVICE_VALUE" "dtoverlay=$INPUT_DEVICE_VALUE" /boot/config.txt
-
 			;;
 
 			# --------------- Odroid ----------------
@@ -2049,7 +2055,6 @@ _EOF_
 				G_EXEC modprobe snd-soc-pcm5102 snd-soc-odroid-dac
 
 				SOUNDCARD_TARGET_CARD=1
-
 			;;
 
 			odroid-hifishield-2)
@@ -2079,30 +2084,59 @@ WantedBy=sound.target
 _EOF_
 				G_EXEC systemctl daemon-reload
 				G_EXEC systemctl enable --now odroid-hifishield2
+			;;
 
+			OdroidN2_HDMI)
+
+				# Enable HDMI output
+				G_EXEC amixer -c 0 set 'TOHDMITX' 'on'
+				# Use I2S B as source for HDMI output, I2C A is somehow not usable
+				G_EXEC amixer -c 0 set 'TOHDMITX I2S SRC' 'I2S B'
+				# Use ALSA device 0 as input for I2S B
+				G_EXEC amixer -c 0 set 'TDMOUT_B SRC SEL' 'IN 0'
+				# Enable I2S B (SRC 2) on device 0 (_A)
+				G_EXEC amixer -c 0 set 'FRDDR_A SRC 2 EN' 'on'
+				# Set output channels for device 0 (_A)
+				G_EXEC amixer -c 0 set 'FRDDR_A SINK 1 SEL' 'OUT 0'
+				G_EXEC amixer -c 0 set 'FRDDR_A SINK 2 SEL' 'OUT 1'
+				G_EXEC amixer -c 0 set 'FRDDR_A SINK 3 SEL' 'OUT 2'
+				# Set master volume to 85%
+				G_EXEC amixer -c 0 set 'ACODEC' '85%'
+				
+			;;
+
+			OdroidN2_3.5mm)
+
+				# Enable 3.5mm output
+				G_EXEC amixer -c 0 set 'TOACODEC OUT EN' 'on'
+				# Use I2S B as source for 3.5mm output, I2C A is somehow not usable
+				G_EXEC amixer -c 0 set 'TOACODEC SRC' 'I2S B'
+				# Use ALSA device 0 as input for I2S B
+				G_EXEC amixer -c 0 set 'TDMOUT_B SRC SEL' 'IN 0'
+				# Enable I2S B (SRC 2) on device 0 (_A)
+				G_EXEC amixer -c 0 set 'FRDDR_A SRC 2 EN' 'on'
+				# Set output channels for device 0 (_A)
+				G_EXEC amixer -c 0 set 'FRDDR_A SINK 1 SEL' 'OUT 0'
+				G_EXEC amixer -c 0 set 'FRDDR_A SINK 2 SEL' 'OUT 1'
+				G_EXEC amixer -c 0 set 'FRDDR_A SINK 3 SEL' 'OUT 2'
+				# Set master volume to 85%
+				G_EXEC amixer -c 0 set 'ACODEC' '85%'
+				
+			;;
+
+			OdroidN2_3.5mm)
+
+				:
 			;;
 
 			# --------------- H3 --------------------
-			h3-analogue)
-
-				SOUNDCARD_TARGET_CARD=0
-
-			;;
+			h3-analogue) SOUNDCARD_TARGET_CARD=0;;
 
 			# --------------- NanoPi M2/M3 ----------
-			s5pxx18-hdmi)
-
-				SOUNDCARD_TARGET_CARD=1
-
-			;;
+			s5pxx18-hdmi) SOUNDCARD_TARGET_CARD=1;;
 
 			# --------------- ASUS TB ---------------
-			asus-tb-analogue)
-
-				SOUNDCARD_TARGET_CARD=0
-				SOUNDCARD_TARGET_DEVICE=2
-
-			;;
+			asus-tb-analogue) SOUNDCARD_TARGET_CARD=0 SOUNDCARD_TARGET_DEVICE=2;;
 
 		esac
 
@@ -2143,7 +2177,7 @@ _EOF_
 
 			G_AG_CHECK_INSTALL_PREREQ libasound2-plugin-equal
 			# Pre-create config dir
-			G_EXEC mkdir -p /var/lib/dietpi/dietpi-config
+			[[ -d '/var/lib/dietpi/dietpi-config' ]] || G_EXEC mkdir -p /var/lib/dietpi/dietpi-config
 			G_EXEC chmod 0775 /var/lib/dietpi/dietpi-config
 			G_EXEC chown dietpi:dietpi /var/lib/dietpi/dietpi-config
 			cat << _EOF_ > /etc/asound.conf
@@ -2212,8 +2246,8 @@ _EOF_
 		G_EXEC alsactl -g store
 
 		# Buster: Avoid alsa-state.service start if its config file does not exist: https://bugs.debian.org/cgi-bin/bugreport.cgi?bug=932209
-		(( $G_DISTRO == 5 )) || return
-		G_EXEC mkdir -p /etc/systemd/system/alsa-state.service.d
+		(( $G_DISTRO == 5 )) || return 0
+		[[ -d '/etc/systemd/system/alsa-state.service.d' ]] || G_EXEC mkdir /etc/systemd/system/alsa-state.service.d
 		echo -e '[Unit]\nConditionPathExists=\nConditionPathExists=/etc/alsa/state-daemon.conf' > /etc/systemd/system/alsa-state.service.d/dietpi.conf
 
 	}
