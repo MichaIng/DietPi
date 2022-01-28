@@ -3985,14 +3985,12 @@ _EOF_
 
 			# Cache settings
 			local cache_size=$(( $RAM_PHYS / 30 ))
-			(( $cache_size < 10 )) && cache_size=10
+			(( $cache_size < 16 )) && cache_size=16
 			# - OPcache
 			G_CONFIG_INJECT 'opcache.memory_consumption[[:blank:]=]' "opcache.memory_consumption=$cache_size" $target_php_ini
-			#	Assure that interned_strings_buffer is never larger than half of memory_consumption: https://github.com/MichaIng/DietPi/issues/2293
-			(( $(php$PHP_VERSION -i | mawk '/^opcache.interned_strings_buffer/{print $5;exit}') > $cache_size / 2 )) && G_CONFIG_INJECT 'opcache.interned_strings_buffer[[:blank:]=]' "opcache.interned_strings_buffer=$(( $cache_size / 2 ))" $target_php_ini
 			G_CONFIG_INJECT 'opcache.revalidate_freq[[:blank:]=]' 'opcache.revalidate_freq=60' $target_php_ini # 1 minute
 			# - APCu
-			G_CONFIG_INJECT 'apc.shm_size[[:blank:]=]' "apc.shm_size=${cache_size}M" $target_php_ini
+			G_CONFIG_INJECT 'apc.shm_size[[:blank:]=]' "apc.shm_size=$(( $cache_size / 2 ))M" $target_php_ini
 			G_CONFIG_INJECT 'apc.ttl[[:blank:]=]' 'apc.ttl=259200' $target_php_ini # 3 days
 
 			# Enable all available PHP modules
@@ -4589,7 +4587,7 @@ _EOF_
 		if (( ${aSOFTWARE_INSTALL_STATE[$software_id]} == 1 )); then
 
 			Banner_Installing
-			DEPS_LIST="php$PHP_VERSION-intl" # https://doc.owncloud.org/server/administration_manual/installation/manual_installation.html#php-extensions
+			DEPS_LIST="php$PHP_VERSION-intl" # https://doc.owncloud.com/server/next/admin_manual/installation/manual_installation/manual_installation_prerequisites.html#php-extensions
 
 			if [[ -f '/var/www/owncloud/occ' ]]; then
 
@@ -4602,7 +4600,7 @@ _EOF_
 				if [[ -f $datadir/dietpi-owncloud-installation-backup/occ ]]; then
 
 					G_DIETPI-NOTIFY 2 'ownCloud installation backup found, starting recovery...'
-					G_EXEC cp -a "$datadir"/dietpi-owncloud-installation-backup/. /var/www/owncloud/
+					G_EXEC cp -a "$datadir/dietpi-owncloud-installation-backup/." /var/www/owncloud/
 					# Correct config.php data directory entry, in case it changed due to server migration:
 					G_CONFIG_INJECT "'datadirectory'" "'datadirectory' => '$datadir'," /var/www/owncloud/config/config.php "'dbtype'"
 
@@ -4616,7 +4614,7 @@ _EOF_
 
 			[[ $DEPS_LIST ]] && { G_DIETPI-NOTIFY 2 'Installing required PHP modules'; G_AGI $DEPS_LIST; DEPS_LIST=''; }
 
-			G_DIETPI-NOTIFY 2 'Enabling required PHP modules.' # https://doc.owncloud.org/server/administration_manual/installation/manual_installation.html#php-extensions
+			G_DIETPI-NOTIFY 2 'Enabling required PHP modules'
 			# - Add JSON module for PHP7, as it does not exist (embedded in core package) on PHP8
 			local json=
 			[[ $PHP_VERSION == 8* ]] || json='json'
@@ -4625,15 +4623,9 @@ _EOF_
 			echo -e '; ownCloud PHP settings\n; priority=98\napc.enable_cli=1' > /etc/php/$PHP_VERSION/mods-available/dietpi-owncloud.ini
 			G_EXEC phpenmod dietpi-owncloud
 
-			# Get version string
-			local oc_version_major=$(sed -n '/OC_VersionString/{s/^[^0-9]*//;s/\..*$//p;q}' /var/www/owncloud/version.php)
-			[[ $oc_version_major ]] || oc_version_major=10
-			local oc_version_minor=$(sed -n '/OC_VersionString/{s/^[^.]*\.//;s/\..*$//p;q}' /var/www/owncloud/version.php)
-			[[ $oc_version_minor ]] || oc_version_minor=8
-
 			if (( ${aSOFTWARE_INSTALL_STATE[83]} > 0 )); then
 
-				G_DIETPI-NOTIFY 2 'Apache webserver found, enabling ownCloud specific configuration.' # https://doc.owncloud.org/server/administration_manual/installation/manual_installation.html#configure-apache-web-server
+				G_DIETPI-NOTIFY 2 'Apache webserver found, enabling ownCloud specific configuration.' # https://doc.owncloud.com/server/next/admin_manual/installation/manual_installation/manual_installation_apache.html
 				a2enmod rewrite headers env dir mime 1> /dev/null
 				local owncloud_conf='/etc/apache2/sites-available/dietpi-owncloud.conf'
 				if [[ -f $owncloud_conf ]]; then
@@ -4689,7 +4681,7 @@ url.redirect += (
 
 			elif (( ${aSOFTWARE_INSTALL_STATE[85]} > 0 )); then
 
-				G_DIETPI-NOTIFY 2 'Nginx webserver found, enabling ownCloud specific configuration.' # https://doc.owncloud.org/server/administration_manual/installation/nginx_configuration.html
+				G_DIETPI-NOTIFY 2 'Nginx webserver found, enabling ownCloud specific configuration.' # https://github.com/owncloud/docs/blob/deda107/modules/admin_manual/examples/installation/nginx/subdirectory-configuration.conf
 				local owncloud_conf='/etc/nginx/sites-dietpi/dietpi-owncloud.conf'
 				if [[ -f $owncloud_conf ]]; then
 
@@ -4699,21 +4691,9 @@ url.redirect += (
 				fi
 				dps_index=$software_id Download_Install 'nginx.owncloud.conf' $owncloud_conf
 
-				# Uncomment HSTS header, if chosen via dietpi-letsencrypt and HTTPS connection test succeeds (incl. self-singed cert => exit code 5)
-				if [[ -f '/boot/dietpi/.dietpi-letsencrypt' && $(mawk 'NR==4' /boot/dietpi/.dietpi-letsencrypt) == 1 ]]; then
-
-					wget -q --spider --timeout=10 --tries=2 https://localhost &> /dev/null
-					[[ $? == [05] ]] && sed -i 's/#add_header Strict-Transport-Security/add_header Strict-Transport-Security/g' $owncloud_conf
-
-				fi
-
-				# Disable pretty URLs (front controller) for ownCloud versions lower than 10:
-				(( $oc_version_major < 10 )) && sed -i 's/^[[:blank:]]*fastcgi_param front_controller_active true;/\t\t#fastcgi_param front_controller_active true;/g' $owncloud_conf
-
 				# Cal/CardDAV redirects to ownCloud DAV endpoint
 				if [[ ! -f '/etc/nginx/sites-dietpi/dietpi-dav_redirect.conf' ]]; then
 
-					# shellcheck disable=SC2016
 					echo '# Redirect Cal/CardDAV requests to ownCloud endpoint:
 location = /.well-known/carddav { return 301 /owncloud/remote.php/dav/; }
 location = /.well-known/caldav  { return 301 /owncloud/remote.php/dav/; }' > /etc/nginx/sites-dietpi/dietpi-dav_redirect.conf
@@ -4838,10 +4818,7 @@ The install script will now exit. After applying one of the the above, rerun die
 			GCI_PRESERVE=1 GCI_NEWLINE=1 G_CONFIG_INJECT "'memcache.locking'" "'memcache.locking' => '\\\\OC\\\\Memcache\\\\Redis',\n'redis' => array ('host' => '$redis_sock', 'port' => 0,)," $config_php "'filelocking.enabled'"
 
 			# Enable ownCloud background cron job:
-			# - v10.3 comes with new occ system:cron command: https://doc.owncloud.org/server/10.3/admin_manual/release_notes.html#changes-to-background-job-execution
-			local occ_command='occ system:cron'
-			(( $oc_version_major < 10 || ( $oc_version_major == 10 && $oc_version_minor < 3 ) )) && occ_command='cron.php'
-			crontab -u www-data -l 2> /dev/null | grep -q '/var/www/owncloud/.*cron' || ( crontab -u www-data -l 2> /dev/null ; echo "*/15 * * * * php /var/www/owncloud/$occ_command" ) | crontab -u www-data -
+			crontab -u www-data -l 2> /dev/null | grep -q '/var/www/owncloud/.*cron' || ( crontab -u www-data -l 2> /dev/null ; echo '*/15 * * * * php /var/www/owncloud/occ system:cron' ) | crontab -u www-data -
 			occ background:cron
 
 			# On <1 GiB devices assure at least 512 MiB swap space are available to stand 512 MiB file uploads + increased PHP cache and session file usage: https://github.com/MichaIng/DietPi/issues/2293
@@ -4866,7 +4843,7 @@ The install script will now exit. After applying one of the the above, rerun die
 				if [[ -f $datadir/dietpi-nextcloud-installation-backup/occ ]]; then
 
 					G_DIETPI-NOTIFY 2 'Nextcloud installation backup found, starting recovery...'
-					G_EXEC cp -a "$datadir"/dietpi-nextcloud-installation-backup/. /var/www/nextcloud/
+					G_EXEC cp -a "$datadir/dietpi-nextcloud-installation-backup/." /var/www/nextcloud/
 					# Correct config.php data directory entry, in case it changed due to server migration:
 					G_CONFIG_INJECT "'datadirectory'" "'datadirectory' => '$datadir'," /var/www/nextcloud/config/config.php "'dbtype'"
 
@@ -4883,17 +4860,16 @@ The install script will now exit. After applying one of the the above, rerun die
 
 			[[ $DEPS_LIST ]] && { G_DIETPI-NOTIFY 2 'Installing required PHP modules'; G_AGI $DEPS_LIST; DEPS_LIST=''; }
 
-			G_DIETPI-NOTIFY 2 'Enabling required PHP modules.' # https://docs.nextcloud.com/server/stable/admin_manual/installation/source_installation.html#prerequisites-for-manual-installation
+			G_DIETPI-NOTIFY 2 'Enabling required PHP modules'
 			# - Add JSON module for PHP7, as it does not exist (embedded in core package) on PHP8
 			local json=
 			[[ $PHP_VERSION == 8* ]] || json='json'
-			G_EXEC phpenmod ctype curl dom gd iconv intl mbstring pdo_mysql posix simplexml xmlreader xmlwriter zip fileinfo opcache apcu redis exif $json
+			G_EXEC phpenmod ctype curl dom gd intl mbstring pdo_mysql posix simplexml xmlreader xmlwriter zip fileinfo opcache apcu redis exif $json
 
-			G_DIETPI-NOTIFY 2 'Apply PHP override settings for Nextcloud.' # https://docs.nextcloud.com/server/stable/admin_manual/configuration_server/server_tuning.html#enable-php-opcache
-			local interned_strings_buffer='' memory_consumption=''
-			(( $(php$PHP_VERSION -i | mawk '/^opcache.interned_strings_buffer/{print $5;exit}') < 8 )) && interned_strings_buffer='\nopcache.interned_strings_buffer=8'
-			(( $(php$PHP_VERSION -i | mawk '/^opcache.memory_consumption/{print $5;exit}') < 128 )) && memory_consumption='\nopcache.memory_consumption=128'
-			echo -e "; Nextcloud PHP settings\n; priority=98\nmemory_limit=512M$memory_consumption$interned_strings_buffer\nopcache.revalidate_freq=5\napc.enable_cli=1" > /etc/php/$PHP_VERSION/mods-available/dietpi-nextcloud.ini
+			G_DIETPI-NOTIFY 2 'Apply PHP override settings for Nextcloud.' # https://docs.nextcloud.com/server/stable/admin_manual/installation/server_tuning.html#enable-php-opcache
+			local memory_consumption=$(sed -n '/^[[:blank:]]*opcache.memory_consumption=/{s/^[^=]*=//p;q}' /etc/php/$PHP_VERSION/mods-available/dietpi.ini)
+			(( $memory_consumption < 64 )) && memory_consumption='\nopcache.memory_consumption=64'
+			echo -e "; Nextcloud PHP settings\n; priority=98\nmemory_limit=512M$memory_consumption\nopcache.revalidate_freq=5\napc.enable_cli=1" > /etc/php/$PHP_VERSION/mods-available/dietpi-nextcloud.ini
 			G_EXEC phpenmod dietpi-nextcloud
 
 			if (( ${aSOFTWARE_INSTALL_STATE[83]} > 0 )); then
@@ -4964,25 +4940,9 @@ url.redirect += (
 				fi
 				dps_index=$software_id Download_Install 'nginx.nextcloud.conf' $nextcloud_conf
 
-				# Uncomment HSTS header, if chosen via dietpi-letsencrypt and HTTPS connection test succeeds (incl. self-singed cert => exit code 5)
-				if [[ -f '/boot/dietpi/.dietpi-letsencrypt' && $(mawk 'NR==4' /boot/dietpi/.dietpi-letsencrypt) == 1 ]]; then
-
-					wget -q --spider --timeout=10 --tries=2 https://localhost &> /dev/null
-					[[ $? == [05] ]] && sed -i 's/#add_header Strict-Transport-Security/add_header Strict-Transport-Security/g' $nextcloud_conf
-
-				fi
-
-				# Disable pretty URLs (front controller), if Nextcloud version is lower than 13
-				if (( $(sed -n '/OC_VersionString/{s/^[^0-9]*//;s/\..*$//p;q}' /var/www/nextcloud/version.php) < 13 )); then
-
-					sed -i 's/^[[:blank:]]*fastcgi_param front_controller_active true;/\t\t#fastcgi_param front_controller_active true;/g' $nextcloud_conf
-
-				fi
-
 				# Cal/CardDAV redirects to Nextcloud DAV endpoint
 				if [[ ! -f '/etc/nginx/sites-dietpi/dietpi-dav_redirect.conf' ]]; then
 
-					# shellcheck disable=SC2016
 					echo '# Redirect Cal/CardDAV requests to Nextcloud endpoint:
 location = /.well-known/carddav { return 301 /nextcloud/remote.php/dav/; }
 location = /.well-known/caldav  { return 301 /nextcloud/remote.php/dav/; }' > /etc/nginx/sites-dietpi/dietpi-dav_redirect.conf
