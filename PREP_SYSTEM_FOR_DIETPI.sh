@@ -406,7 +406,7 @@ _EOF_
 
 		while :
 		do
-			# Check for valid environment variabe
+			# Check for valid environment variable
 			[[ $HW_MODEL =~ ^[0-9]+$ ]] && for i in "${G_WHIP_MENU_ARRAY[@]}"
 			do
 				[[ $HW_MODEL == "$i" ]] && break 2
@@ -1641,7 +1641,7 @@ _EOF_"
 			G_CONFIG_INJECT 'rootfstype=' 'rootfstype=$(findmnt -Ufnro FSTYPE -M /)' /boot/dietpiEnv.txt
 
 		# - Sparky SBC
-		if (( $G_HW_MODEL == 70 ))
+		elif (( $G_HW_MODEL == 70 ))
 		then
 			# Install latest kernel/drivers
 			G_EXEC curl -sSfL 'https://raw.githubusercontent.com/sparky-sbc/sparky-test/master/dragon_fly_check/uImage' -o /boot/uImage
