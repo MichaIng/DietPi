@@ -829,7 +829,7 @@ _EOF_
 			# Update APT lists
 			G_AGUP
 			# Install kernel, device tree, U-Boot, firmware and initramfs packages, initramfs-tools first to have an initramfs generated on kernel install
-			G_AGO initramfs-tools
+			G_AGI initramfs-tools
 			G_AGI linux-{image,dtb}-current-meson64 linux-u-boot-odroidn2-current u-boot-tools armbian-firmware
 			# Cleanup
 			[[ -f '/boot/uImage' ]] && G_EXEC rm /boot/uImage
