@@ -828,8 +828,9 @@ _EOF_
 			G_EXEC eval "echo 'deb http://apt.armbian.com/ ${DISTRO_TARGET_NAME/bookworm/bullseye} main' > /etc/apt/sources.list.d/dietpi-armbian.list"
 			# Update APT lists
 			G_AGUP
-			# Install kernel, device tree, U-Boot, firmware and initramfs packages
-			G_AGI linux-{image,dtb}-current-meson64 linux-u-boot-odroidn2-current u-boot-tools armbian-firmware initramfs-tools
+			# Install kernel, device tree, U-Boot, firmware and initramfs packages, initramfs-tools first to have an initramfs generated on kernel install
+			G_AGO initramfs-tools
+			G_AGI linux-{image,dtb}-current-meson64 linux-u-boot-odroidn2-current u-boot-tools armbian-firmware
 			# Cleanup
 			[[ -f '/boot/uImage' ]] && G_EXEC rm /boot/uImage
 			[[ -f '/boot/.next' ]] && G_EXEC rm /boot/.next
