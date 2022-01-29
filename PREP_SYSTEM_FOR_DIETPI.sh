@@ -830,6 +830,9 @@ _EOF_
 			G_AGUP
 			# Install kernel, device tree, U-Boot, firmware and initramfs packages
 			G_AGI linux-{image,dtb}-current-meson64 linux-u-boot-odroidn2-current u-boot-tools armbian-firmware initramfs-tools
+			# Cleanup
+			[[ -f '/boot/uImage' ]] && G_EXEC rm /boot/uImage
+			[[ -f '/boot/.next' ]] && G_EXEC rm /boot/.next
 			# Compile U-Boot config
 			G_EXEC mkimage -C none -A arm64 -T script -d /boot/boot.cmd /boot/boot.scr
 			# Flash U-Boot
