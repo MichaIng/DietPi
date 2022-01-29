@@ -540,6 +540,14 @@ Currently installed: $G_DISTRO_NAME (ID: $G_DISTRO)"; then
 
 			G_EXEC mv "DietPi-$G_GITBRANCH/boot_c2.ini" /boot/boot.ini
 
+		elif [[ $G_HW_MODEL == 15 && $(findmnt -Ufnro TARGET -T /boot) == '/' ]]; then
+
+			G_EXEC mv "DietPi-$G_GITBRANCH/.build/images/U-Boot/boot.cmd" /boot/boot.cmd
+			G_EXEC mv "DietPi-$G_GITBRANCH/.build/images/U-Boot/dietpiEnv.txt" /boot/dietpiEnv.txt
+			G_EXEC mkdir -p /etc/kernel/preinst.d /etc/initramfs/post-update.d
+			G_EXEC mv "DietPi-$G_GITBRANCH/.build/images/U-Boot/dietpi-initramfs_cleanup" /etc/kernel/preinst.d/dietpi-initramfs_cleanup
+			G_EXEC mv "DietPi-$G_GITBRANCH/.build/images/U-Boot/99-dietpi-uboot" /etc/initramfs/post-update.d/99-dietpi-uboot
+
 		elif [[ $G_HW_MODEL == 15 && -f '/boot/boot.ini' && $(findmnt -t vfat -M /boot) ]]; then
 
 			G_EXEC mv "DietPi-$G_GITBRANCH/boot_n2.ini" /boot/boot.ini
@@ -805,7 +813,7 @@ _EOF_
 
 		# - G_HW_MODEL specific required firmware/kernel/bootloader packages
 		#	Odroid N2: Modern single partition image
-		elif [[ $G_HW_MODEL == 15 && $(findmnt -Ufnro TARGET -T /boot) == '/' ]]
+		elif [[ $G_HW_MODEL == 15 && -f '/boot/dietpiEnv.txt' ]]
 		then
 			# Bootstrap Armbian repository
 			G_EXEC eval "curl -sSfL 'https://apt.armbian.com/armbian.key' | gpg --dearmor -o /etc/apt/trusted.gpg.d/dietpi-armbian.gpg --yes"
@@ -820,19 +828,16 @@ _EOF_
 			G_EXEC eval "echo 'deb http://apt.armbian.com/ ${DISTRO_TARGET_NAME/bookworm/bullseye} main' > /etc/apt/sources.list.d/dietpi-armbian.list"
 			# Update APT lists
 			G_AGUP
-			# Install kernel, device tree, U-Boot and firmware packages
-			G_AGI linux-{image,dtb}-current-meson64 linux-u-boot-odroidn2-current u-boot-tools armbian-firmware
+			# Install kernel, device tree, U-Boot, firmware and initramfs packages
+			G_AGI linux-{image,dtb}-current-meson64 linux-u-boot-odroidn2-current u-boot-tools armbian-firmware initramfs-tools
+			# Cleanup
+			[[ -f '/boot/uImage' ]] && G_EXEC rm /boot/uImage
+			[[ -f '/boot/.next' ]] && G_EXEC rm /boot/.next
+			# Compile U-Boot config
+			G_EXEC mkimage -C none -A arm64 -T script -d /boot/boot.cmd /boot/boot.scr
 			# Flash U-Boot
 			. /usr/lib/u-boot/platform_install.sh
 			write_uboot_platform "$DIR" "$(lsblk -npo PKNAME "$(findmnt -Ufnro SOURCE -M /)")"
-			# Install kernel, initramfs and boot config files
-			G_EXEC curl -sSfL "https://raw.githubusercontent.com/$G_GITOWNER/DietPi/$G_GITBRANCH/.build/images/U-Boot/boot.cmd" -o /boot/boot.cmd
-			G_EXEC mkimage -C none -A arm64 -T script -d /boot/boot.cmd /boot/boot.scr
-			G_EXEC curl -sSfL "https://raw.githubusercontent.com/$G_GITOWNER/DietPi/$G_GITBRANCH/.build/images/U-Boot/dietpiEnv.txt" -o /boot/dietpiEnv.txt
-			G_EXEC mkdir -p /etc/kernel/preinst.d /etc/initramfs/post-update.d
-			G_EXEC curl -sSfL "https://raw.githubusercontent.com/$G_GITOWNER/DietPi/$G_GITBRANCH/.build/images/U-Boot/dietpi-initramfs_cleanup" -o /etc/kernel/preinst.d/dietpi-initramfs_cleanup
-			G_EXEC curl -sSfL "https://raw.githubusercontent.com/$G_GITOWNER/DietPi/$G_GITBRANCH/.build/images/U-Boot/99-dietpi-uboot" -o /etc/initramfs/post-update.d/99-dietpi-uboot
-			G_EXEC chmod +x /etc/kernel/preinst.d/dietpi-initramfs_cleanup /etc/initramfs/post-update.d/99-dietpi-uboot
 
 		#	Armbian grab currently installed packages
 		elif [[ $(dpkg-query -Wf '${Package} ') == *'armbian'* ]]; then
@@ -867,8 +872,8 @@ _EOF_
 			G_EXEC mkdir -p /etc/initramfs/post-update.d
 			cat << _EOF_ > /etc/initramfs/post-update.d/99-dietpi-uboot
 #!/bin/dash
-echo 'update-initramfs: Converting to U-Boot format' >&2
-mkimage -A $arch -O linux -T ramdisk -C gzip -n uInitrd -d "\$2" "/boot/uInitrd-\$1" > /dev/null
+echo 'update-initramfs: Converting to U-Boot format'
+mkimage -A $arch -O linux -T ramdisk -C gzip -n uInitrd -d "\$2" "/boot/uInitrd-\$1"
 ln -sf "uInitrd-\$1" /boot/uInitrd > /dev/null 2>&1 || mv "/boot/uInitrd-\$1" /boot/uInitrd
 exit 0
 _EOF_
@@ -877,22 +882,22 @@ _EOF_
 			cat << '_EOF_' > /etc/kernel/preinst.d/dietpi-initramfs_cleanup
 #!/bin/dash
 
-# skip if initramfs-tools is not installed
-[ -x /usr/sbin/update-initramfs ] || exit 0
+# Skip if initramfs-tools is not installed
+[ -x '/usr/sbin/update-initramfs' ] || exit 0
 
-# passing the kernel version is required
+# Passing the kernel version is required
 version="$1"
-if [ -z "$version" ]; then
+if [ -z "$version" ]
+then
         echo "W: initramfs-tools: ${DPKG_MAINTSCRIPT_PACKAGE:-kernel package} did not pass a version number" >&2
         exit 0
 fi
 
-# avoid running multiple times
-if [ -n "$DEB_MAINT_PARAMS" ]; then
+# Avoid running multiple times
+if [ "$DEB_MAINT_PARAMS" ]
+then
         eval set -- "$DEB_MAINT_PARAMS"
-        if [ "$1" != 'upgrade' ]; then
-                exit 0
-        fi
+        [ "$1" = 'upgrade' ] || exit 0
 fi
 
 _EOF_
@@ -900,21 +905,21 @@ _EOF_
 			if (( $DISTRO_TARGET > 5 ))
 			then
 				cat << '_EOF_' >> /etc/kernel/preinst.d/dietpi-initramfs_cleanup
-# delete unused initrd images
+# Delete unused initrd images
 find /boot -name 'initrd.img-*' -o -name 'uInitrd-*' ! -name "*-$version" -printf 'Removing obsolete file %f\n' -delete
 
 exit 0
 _EOF_
 			else
 				cat << '_EOF_' >> /etc/kernel/preinst.d/dietpi-initramfs_cleanup
-# loop through existing initramfs images
+# Loop through existing initramfs images
 for v in $(ls -1 /var/lib/initramfs-tools | linux-version sort --reverse); do
         if ! linux-version compare $v eq $version; then
-                # try to delete delete old initrd images via update-initramfs
+                # Try to delete delete old initrd images via update-initramfs
                 INITRAMFS_TOOLS_KERNEL_HOOK=y update-initramfs -d -k $v 2>/dev/null
-                # delete unused state files
+                # Delete unused state files
                 find /var/lib/initramfs-tools -type f ! -name "$version" -printf 'Removing obsolete file %f\n' -delete
-                # delete unused initrd images
+                # Delete unused initrd images
                 find /boot -name 'initrd.img-*' -o -name 'uInitrd-*' ! -name "*-$version" -printf 'Removing obsolete file %f\n' -delete
         fi
 done
@@ -1637,8 +1642,8 @@ _EOF_"
 		# - Odroid N2: Modern single partition image
 		if [[ $G_HW_MODEL == 15 && -f '/boot/dietpiEnv.txt' ]]
 		then
-			G_CONFIG_INJECT 'rootdev=' 'rootdev=UUID=$(findmnt -Ufnro UUID -M /)' /boot/dietpiEnv.txt
-			G_CONFIG_INJECT 'rootfstype=' 'rootfstype=$(findmnt -Ufnro FSTYPE -M /)' /boot/dietpiEnv.txt
+			G_CONFIG_INJECT 'rootdev=' "rootdev=UUID=$(findmnt -Ufnro UUID -M /)" /boot/dietpiEnv.txt
+			G_CONFIG_INJECT 'rootfstype=' "rootfstype=$(findmnt -Ufnro FSTYPE -M /)" /boot/dietpiEnv.txt
 
 		# - Sparky SBC
 		elif (( $G_HW_MODEL == 70 ))
