@@ -406,7 +406,7 @@ _EOF_
 
 		while :
 		do
-			# Check for valid environment variabe
+			# Check for valid environment variable
 			[[ $HW_MODEL =~ ^[0-9]+$ ]] && for i in "${G_WHIP_MENU_ARRAY[@]}"
 			do
 				[[ $HW_MODEL == "$i" ]] && break 2
@@ -523,24 +523,32 @@ Currently installed: $G_DISTRO_NAME (ID: $G_DISTRO)"; then
 
 		G_DIETPI-NOTIFY 2 'Moving kernel and boot configuration to /boot'
 
-		# HW specific config.txt, boot.ini uEnv.txt
+		# HW specific config.txt, boot.ini
 		if (( $G_HW_MODEL < 10 )); then
 
-			echo "root=PARTUUID=$(findmnt -Ufnro PARTUUID -M /) rootfstype=ext4 rootwait fsck.repair=yes net.ifnames=0 logo.nologo quiet console=serial0,115200 console=tty1" > /boot/cmdline.txt
+			echo "root=PARTUUID=$(findmnt -Ufnro PARTUUID -M /) rootfstype=ext4 rootwait fsck.repair=yes net.ifnames=0 logo.nologo console=serial0,115200 console=tty1" > /boot/cmdline.txt
 			G_EXEC mv "DietPi-$G_GITBRANCH/config.txt" /boot/
 			# Boot in 64-bit mode if this is a 64-bit image
 			[[ $G_HW_ARCH == 3 ]] && G_CONFIG_INJECT 'arm_64bit=' 'arm_64bit=1' /boot/config.txt
 
-		elif (( $G_HW_MODEL == 11 )); then
+		elif [[ $G_HW_MODEL == 11 && -f '/boot/boot.ini' && $(findmnt -t vfat -M /boot) ]]; then
 
 			G_EXEC mv "DietPi-$G_GITBRANCH/boot_xu4.ini" /boot/boot.ini
 			G_EXEC sed -i "s/root=UUID=[^[:blank:]]*/root=UUID=$(findmnt -Ufnro UUID -M /)/" /boot/boot.ini
 
-		elif [[ $G_HW_MODEL == 12 && -f '/boot/boot.ini' ]]; then
+		elif [[ $G_HW_MODEL == 12 && -f '/boot/boot.ini' && $(findmnt -t vfat -M /boot) ]]; then
 
 			G_EXEC mv "DietPi-$G_GITBRANCH/boot_c2.ini" /boot/boot.ini
 
-		elif [[ $G_HW_MODEL == 15 && -f '/boot/boot.ini' ]]; then
+		elif [[ $G_HW_MODEL == 15 && $(findmnt -Ufnro TARGET -T /boot) == '/' ]]; then
+
+			G_EXEC mv "DietPi-$G_GITBRANCH/.build/images/U-Boot/boot.cmd" /boot/boot.cmd
+			G_EXEC mv "DietPi-$G_GITBRANCH/.build/images/U-Boot/dietpiEnv.txt" /boot/dietpiEnv.txt
+			G_EXEC mkdir -p /etc/kernel/preinst.d /etc/initramfs/post-update.d
+			G_EXEC mv "DietPi-$G_GITBRANCH/.build/images/U-Boot/dietpi-initramfs_cleanup" /etc/kernel/preinst.d/dietpi-initramfs_cleanup
+			G_EXEC mv "DietPi-$G_GITBRANCH/.build/images/U-Boot/99-dietpi-uboot" /etc/initramfs/post-update.d/99-dietpi-uboot
+
+		elif [[ $G_HW_MODEL == 15 && -f '/boot/boot.ini' && $(findmnt -t vfat -M /boot) ]]; then
 
 			G_EXEC mv "DietPi-$G_GITBRANCH/boot_n2.ini" /boot/boot.ini
 			G_EXEC sed -i "s/root=UUID=[^[:blank:]]*/root=UUID=$(findmnt -Ufnro UUID -M /)/" /boot/boot.ini
@@ -562,10 +570,9 @@ Currently installed: $G_DISTRO_NAME (ID: $G_DISTRO)"; then
 		rm "DietPi-$G_GITBRANCH/dietpi/pre-patch_file"
 		rm "DietPi-$G_GITBRANCH/dietpi/patch_file"
 
-		G_EXEC_DESC='Copy DietPi scripts to /boot/dietpi' G_EXEC cp -Rf "DietPi-$G_GITBRANCH/dietpi" /boot/
-		G_EXEC_DESC='Copy DietPi system files in place' G_EXEC cp -Rf "DietPi-$G_GITBRANCH/rootfs"/. /
+		G_EXEC_DESC='Copy DietPi scripts to /boot/dietpi' G_EXEC cp -a "DietPi-$G_GITBRANCH/dietpi" /boot/
+		G_EXEC_DESC='Copy DietPi system files in place' G_EXEC cp -a "DietPi-$G_GITBRANCH/rootfs/." /
 		G_EXEC_DESC='Clean download location' G_EXEC rm -R "DietPi-$G_GITBRANCH"
-		G_EXEC_DESC='Set execute permissions for DietPi scripts' G_EXEC chmod -R +x /boot/dietpi /var/lib/dietpi/services /etc/cron.*/dietpi
 
 		G_DIETPI-NOTIFY 2 'Storing DietPi version info:'
 		G_CONFIG_INJECT 'DEV_GITBRANCH=' "DEV_GITBRANCH=$G_GITBRANCH" /boot/dietpi.txt
@@ -607,6 +614,14 @@ Currently installed: $G_DISTRO_NAME (ID: $G_DISTRO)"; then
 
 		# (Re)create DietPi runtime and logs dir, used by G_AGx
 		G_EXEC mkdir -p /run/dietpi /var/tmp/dietpi/logs
+
+		# RPi: Bootstrap repo when key is missing
+		if [[ $G_HW_MODEL -le 9 && ! $(apt-key list 'CF8A1AF502A2AA2D763BAE7E82B129927FA3303E' 2> /dev/null) ]]
+		then
+			G_EXEC curl -sSfLO 'https://archive.raspberrypi.org/debian/pool/main/r/raspberrypi-archive-keyring/raspberrypi-archive-keyring_2021.1.1+rpt1_all.deb'
+			G_AGI dpkg -i raspberrypi-archive-keyring_2016.10.31_all.deb
+			G_EXEC rm raspberrypi-archive-keyring_2016.10.31_all.deb
+		fi
 
 		G_AGUP
 
@@ -797,6 +812,34 @@ _EOF_
 			[[ -f '/etc/apt/trusted.gpg~' ]] && G_EXEC rm '/etc/apt/trusted.gpg~'
 
 		# - G_HW_MODEL specific required firmware/kernel/bootloader packages
+		#	Odroid N2: Modern single partition image
+		elif [[ $G_HW_MODEL == 15 && -f '/boot/dietpiEnv.txt' ]]
+		then
+			# Bootstrap Armbian repository
+			G_EXEC eval "curl -sSfL 'https://apt.armbian.com/armbian.key' | gpg --dearmor -o /etc/apt/trusted.gpg.d/dietpi-armbian.gpg --yes"
+			# Remove obsolete combined keyring
+			[[ -f '/etc/apt/trusted.gpg' ]] && G_EXEC rm /etc/apt/trusted.gpg
+			[[ -f '/etc/apt/trusted.gpg~' ]] && G_EXEC rm '/etc/apt/trusted.gpg~'
+			# Exclude doubled device tree files, shipped with the kernel package
+			G_EXEC eval "echo 'path-exclude /usr/lib/linux-image-current-*' > /etc/dpkg/dpkg.cfg.d/01-dietpi-exclude_doubled_devicetrees"
+			# Remove obsolete lists and doubled device tree files, shipped with the kernel package
+			G_EXEC rm -Rf /etc/apt/sources.list.d/* /usr/lib/linux-image-current-*
+			# Add Armbian repository
+			G_EXEC eval "echo 'deb http://apt.armbian.com/ ${DISTRO_TARGET_NAME/bookworm/bullseye} main' > /etc/apt/sources.list.d/dietpi-armbian.list"
+			# Update APT lists
+			G_AGUP
+			# Install kernel, device tree, U-Boot, firmware and initramfs packages, initramfs-tools first to have an initramfs generated on kernel install
+			G_AGI initramfs-tools
+			G_AGI linux-{image,dtb}-current-meson64 linux-u-boot-odroidn2-current u-boot-tools armbian-firmware
+			# Cleanup
+			[[ -f '/boot/uImage' ]] && G_EXEC rm /boot/uImage
+			[[ -f '/boot/.next' ]] && G_EXEC rm /boot/.next
+			# Compile U-Boot config
+			G_EXEC mkimage -C none -A arm64 -T script -d /boot/boot.cmd /boot/boot.scr
+			# Flash U-Boot
+			. /usr/lib/u-boot/platform_install.sh
+			write_uboot_platform "$DIR" "$(lsblk -npo PKNAME "$(findmnt -Ufnro SOURCE -M /)")"
+
 		#	Armbian grab currently installed packages
 		elif [[ $(dpkg-query -Wf '${Package} ') == *'armbian'* ]]; then
 
@@ -830,9 +873,9 @@ _EOF_
 			G_EXEC mkdir -p /etc/initramfs/post-update.d
 			cat << _EOF_ > /etc/initramfs/post-update.d/99-dietpi-uboot
 #!/bin/dash
-echo 'update-initramfs: Converting to U-Boot format' >&2
-mkimage -A $arch -O linux -T ramdisk -C gzip -n uInitrd -d \$2 /boot/uInitrd-\$1 > /dev/null
-ln -sf uInitrd-\$1 /boot/uInitrd > /dev/null 2>&1 || mv /boot/uInitrd-\$1 /boot/uInitrd
+echo 'update-initramfs: Converting to U-Boot format'
+mkimage -A $arch -O linux -T ramdisk -C gzip -n uInitrd -d "\$2" "/boot/uInitrd-\$1"
+ln -sf "uInitrd-\$1" /boot/uInitrd > /dev/null 2>&1 || mv "/boot/uInitrd-\$1" /boot/uInitrd
 exit 0
 _EOF_
 			G_EXEC chmod +x /etc/initramfs/post-update.d/99-dietpi-uboot
@@ -840,22 +883,22 @@ _EOF_
 			cat << '_EOF_' > /etc/kernel/preinst.d/dietpi-initramfs_cleanup
 #!/bin/dash
 
-# skip if initramfs-tools is not installed
-[ -x /usr/sbin/update-initramfs ] || exit 0
+# Skip if initramfs-tools is not installed
+[ -x '/usr/sbin/update-initramfs' ] || exit 0
 
-# passing the kernel version is required
+# Passing the kernel version is required
 version="$1"
-if [ -z "$version" ]; then
+if [ -z "$version" ]
+then
         echo "W: initramfs-tools: ${DPKG_MAINTSCRIPT_PACKAGE:-kernel package} did not pass a version number" >&2
         exit 0
 fi
 
-# avoid running multiple times
-if [ -n "$DEB_MAINT_PARAMS" ]; then
+# Avoid running multiple times
+if [ "$DEB_MAINT_PARAMS" ]
+then
         eval set -- "$DEB_MAINT_PARAMS"
-        if [ "$1" != 'upgrade' ]; then
-                exit 0
-        fi
+        [ "$1" = 'upgrade' ] || exit 0
 fi
 
 _EOF_
@@ -863,21 +906,21 @@ _EOF_
 			if (( $DISTRO_TARGET > 5 ))
 			then
 				cat << '_EOF_' >> /etc/kernel/preinst.d/dietpi-initramfs_cleanup
-# delete unused initrd images
+# Delete unused initrd images
 find /boot -name 'initrd.img-*' -o -name 'uInitrd-*' ! -name "*-$version" -printf 'Removing obsolete file %f\n' -delete
 
 exit 0
 _EOF_
 			else
 				cat << '_EOF_' >> /etc/kernel/preinst.d/dietpi-initramfs_cleanup
-# loop through existing initramfs images
+# Loop through existing initramfs images
 for v in $(ls -1 /var/lib/initramfs-tools | linux-version sort --reverse); do
         if ! linux-version compare $v eq $version; then
-                # try to delete delete old initrd images via update-initramfs
+                # Try to delete delete old initrd images via update-initramfs
                 INITRAMFS_TOOLS_KERNEL_HOOK=y update-initramfs -d -k $v 2>/dev/null
-                # delete unused state files
+                # Delete unused state files
                 find /var/lib/initramfs-tools -type f ! -name "$version" -printf 'Removing obsolete file %f\n' -delete
-                # delete unused initrd images
+                # Delete unused initrd images
                 find /boot -name 'initrd.img-*' -o -name 'uInitrd-*' ! -name "*-$version" -printf 'Removing obsolete file %f\n' -delete
         fi
 done
@@ -886,6 +929,13 @@ exit 0
 _EOF_
 			fi
 			G_EXEC chmod +x /etc/kernel/preinst.d/dietpi-initramfs_cleanup
+
+			# Add Armbian repo key as dedicated file
+			G_EXEC eval "curl -sSfL 'https://apt.armbian.com/armbian.key' | gpg --dearmor -o /etc/apt/trusted.gpg.d/dietpi-armbian.gpg --yes"
+
+			# Remove obsolete combined keyring
+			[[ -f '/etc/apt/trusted.gpg' ]] && G_EXEC rm /etc/apt/trusted.gpg
+			[[ -f '/etc/apt/trusted.gpg~' ]] && G_EXEC rm '/etc/apt/trusted.gpg~'
 
 			# Remove obsolete components from Armbian list and connect via HTTPS
 			G_EXEC eval "echo 'deb http://apt.armbian.com/ ${DISTRO_TARGET_NAME/bookworm/bullseye} main' > /etc/apt/sources.list.d/armbian.list"
@@ -1008,7 +1058,7 @@ _EOF_
 		G_EXEC apt-get clean # Remove downloaded archives
 
 		# - Firmware
-		if dpkg-query -Wf '${Package}\n' | grep -q '^armbian-firmware'; then
+		if dpkg-query -s 'armbian-firmware' &> /dev/null; then
 
 			aPACKAGES_REQUIRED_INSTALL+=('armbian-firmware')
 
@@ -1322,9 +1372,8 @@ _EOF_
 		ln -sfv /etc/profile.d/bash_completion.sh /etc/bashrc.d/dietpi-bash_completion.sh
 
 		#-----------------------------------------------------------------------------------
-		# UID bit for sudo: https://github.com/MichaIng/DietPi/issues/794
-		G_DIETPI-NOTIFY 2 'Setting sudo UID bit'
-		chmod 4755 "$(command -v sudo)"
+		# setuid bit for sudo: https://github.com/MichaIng/DietPi/issues/794
+		G_EXEC_DESC='Setting setuid bit for "sudo" executable' G_EXEC chmod 4755 /usr/bin/sudo
 
 		#-----------------------------------------------------------------------------------
 		# Dirs
@@ -1490,35 +1539,40 @@ left_meter_modes=1 1
 right_meters=Memory Swap Tasks LoadAverage Uptime
 right_meter_modes=1 1 2 2 2
 _EOF_'
-		G_DIETPI-NOTIFY 2 'Configuring serial login consoles:'
-		# On virtual machines, serial consoles are not required
-		if (( $G_HW_MODEL == 20 )); then
+		G_DIETPI-NOTIFY 2 'Configuring serial login consoles'
+		# Disable all serial consoles first, also to remove invalid ones
+		/boot/dietpi/func/dietpi-set_hardware serialconsole disable
+		# On RPi the primary serial console depends on model, use "serial0" which links to the primary console, converts to correct device on first boot
+		if (( $G_HW_MODEL < 10 ))
+		then
+			G_CONFIG_INJECT 'enable_uart=' 'enable_uart=0' /boot/config.txt
+			/boot/dietpi/func/dietpi-set_hardware serialconsole enable serial0
+			# Disable and mask the others explicitly to be independent of currently available serial devices
+			/boot/dietpi/func/dietpi-set_hardware serialconsole disable ttyAMA0
+			G_EXEC systemctl mask serial-getty@ttyAMA0
+			/boot/dietpi/func/dietpi-set_hardware serialconsole disable ttyS0
+			G_EXEC systemctl mask serial-getty@ttyS0
 
-			/boot/dietpi/func/dietpi-set_hardware serialconsole disable
+		# Odroid N2: Enable on serial debug console only
+		elif (( $G_HW_MODEL == 15 ))
+		then
+			local tty='ttyAML0'
+			[[ -e '/dev/ttyAML0' ]] || tty='ttyS0'
+			/boot/dietpi/func/dietpi-set_hardware serialconsole enable "$tty"
 
-		else
+		# ROCK Pi S: Enable on ttyS0 only
+		elif (( $G_HW_MODEL == 73 ))
+		then
+			/boot/dietpi/func/dietpi-set_hardware serialconsole enable ttyS0
 
+		# Else on non-VM: Enable on all present serial consoles
+		elif (( $G_HW_MODEL != 20 ))
+		then
 			/boot/dietpi/func/dietpi-set_hardware serialconsole enable
-			# On RPi the primary serial console depends on model, use "serial0" which links to the primary console, converts to correct device on first boot
-			if (( $G_HW_MODEL < 10 )); then
-
-				/boot/dietpi/func/dietpi-set_hardware serialconsole disable ttyAMA0
-				# The actual serial console services need to be masked explicitly to ensure they are not autostarted when the image is created within a container or without both serial devices present, since masks are only placed by dietpi-set_hardware for existing devices: : https://github.com/MichaIng/DietPi/issues/5014
-				G_EXEC systemctl mask serial-getty@ttyAMA0
-				/boot/dietpi/func/dietpi-set_hardware serialconsole disable ttyS0
-				G_EXEC systemctl mask serial-getty@ttyS0
-				/boot/dietpi/func/dietpi-set_hardware serialconsole enable serial0
-
-			# ROCK Pi S: Enable on ttyS0 only
-			elif (( $G_HW_MODEL == 73 )); then
-
-				/boot/dietpi/func/dietpi-set_hardware serialconsole disable
-				/boot/dietpi/func/dietpi-set_hardware serialconsole enable ttyS0
-				G_CONFIG_INJECT 'CONFIG_SERIAL_CONSOLE_ENABLE=' 'CONFIG_SERIAL_CONSOLE_ENABLE=1' /boot/dietpi.txt
-
-			fi
-
 		fi
+
+		# Re-set dietpi.txt setting on non-VMs to indicated enabled serial console
+		(( $G_HW_MODEL == 20 )) || G_CONFIG_INJECT 'CONFIG_SERIAL_CONSOLE_ENABLE=' 'CONFIG_SERIAL_CONSOLE_ENABLE=1' /boot/dietpi.txt
 
 		G_DIETPI-NOTIFY 2 'Disabling static and automatic login prompts on consoles tty2 to tty6:'
 		G_EXEC systemctl mask --now getty-static
@@ -1549,26 +1603,21 @@ _EOF_'
 			G_EXEC_DESC='Removing foreign i386 DPKG architecture' G_EXEC dpkg --remove-architecture i386
 
 			# Disable nouveau: https://github.com/MichaIng/DietPi/issues/1244 // https://dietpi.com/phpbb/viewtopic.php?p=9688#p9688
-			rm -f /etc/modprobe.d/*nouveau*
+			G_EXEC rm -f /etc/modprobe.d/*nouveau*
 			cat << '_EOF_' > /etc/modprobe.d/dietpi-disable_nouveau.conf
 blacklist nouveau
-blacklist lbm-nouveau
 options nouveau modeset=0
 alias nouveau off
-alias lbm-nouveau off
 _EOF_
 			# Fix grub install device: https://github.com/MichaIng/DietPi/issues/3700
 			dpkg-query -s grub-pc &> /dev/null && G_EXEC eval "debconf-set-selections <<< 'grub-pc grub-pc/install_devices multiselect /dev/sda'"
 
 			# Update initramfs with above changes
-			if command -v update-tirfs > /dev/null; then
-
+			if command -v update-tirfs > /dev/null
+			then
 				G_EXEC_OUTPUT=1 G_EXEC update-tirfs
-
 			else
-
 				G_EXEC_OUTPUT=1 G_EXEC update-initramfs -u
-
 			fi
 
 		elif (( $G_HW_ARCH == 3 )); then
@@ -1578,8 +1627,8 @@ _EOF_
 		fi
 
 		G_DIETPI-NOTIFY 2 'Applying board-specific tweaks:'
-		if (( $G_HW_MODEL != 20 )); then
-
+		if (( $G_HW_MODEL != 20 ))
+		then
 			G_EXEC_DESC='Configuring hdparm'
 			# Since Debian Bullseye, spindown_time is not applied if APM is not supported by the drive. force_spindown_time is required to override that.
 			local spindown='spindown_time'
@@ -1589,21 +1638,26 @@ apm = 127
 $spindown = 120
 _EOF_"
 			unset -v spindown
-
 		fi
 
-		# - Sparky SBC
-		if (( $G_HW_MODEL == 70 )); then
+		# - Odroid N2: Modern single partition image
+		if [[ $G_HW_MODEL == 15 && -f '/boot/dietpiEnv.txt' ]]
+		then
+			G_CONFIG_INJECT 'rootdev=' "rootdev=UUID=$(findmnt -Ufnro UUID -M /)" /boot/dietpiEnv.txt
+			G_CONFIG_INJECT 'rootfstype=' "rootfstype=$(findmnt -Ufnro FSTYPE -M /)" /boot/dietpiEnv.txt
 
+		# - Sparky SBC
+		elif (( $G_HW_MODEL == 70 ))
+		then
 			# Install latest kernel/drivers
-			G_EXEC curl -sSfL https://raw.githubusercontent.com/sparky-sbc/sparky-test/master/dragon_fly_check/uImage -o /boot/uImage
-			G_EXEC curl -sSfLO https://raw.githubusercontent.com/sparky-sbc/sparky-test/master/dragon_fly_check/3.10.38.bz2
+			G_EXEC curl -sSfL 'https://raw.githubusercontent.com/sparky-sbc/sparky-test/master/dragon_fly_check/uImage' -o /boot/uImage
+			G_EXEC curl -sSfLO 'https://raw.githubusercontent.com/sparky-sbc/sparky-test/master/dragon_fly_check/3.10.38.bz2'
 			G_EXEC tar -xf 3.10.38.bz2 -C /lib/modules/
 			G_EXEC rm 3.10.38.bz2
 			# - USB audio update
-			G_EXEC curl -sSfL https://raw.githubusercontent.com/sparky-sbc/sparky-test/master/dsd-marantz/snd-usb-audio.ko -o /lib/modules/3.10.38/kernel/sound/usb/snd-usb-audio.ko
+			G_EXEC curl -sSfL 'https://raw.githubusercontent.com/sparky-sbc/sparky-test/master/dsd-marantz/snd-usb-audio.ko' -o /lib/modules/3.10.38/kernel/sound/usb/snd-usb-audio.ko
 			# - Ethernet update
-			G_EXEC curl -sSfL https://raw.githubusercontent.com/sparky-sbc/sparky-test/master/sparky-eth/ethernet.ko -o /lib/modules/3.10.38/kernel/drivers/net/ethernet/acts/ethernet.ko
+			G_EXEC curl -sSfL 'https://raw.githubusercontent.com/sparky-sbc/sparky-test/master/sparky-eth/ethernet.ko' -o /lib/modules/3.10.38/kernel/drivers/net/ethernet/acts/ethernet.ko
 
 			# Boot args
 			cat << '_EOF_' > /boot/uenv.txt
@@ -1779,8 +1833,8 @@ _EOF_
 		fi
 
 		# - Armbian special
-		if [[ -f '/boot/armbianEnv.txt' ]]; then
-
+		if [[ -f '/boot/armbianEnv.txt' ]]
+		then
 			# Disable bootsplash logo, as we removed the file above: https://github.com/MichaIng/DietPi/issues/3932#issuecomment-852376681
 			G_CONFIG_INJECT 'bootlogo=' 'bootlogo=false' /boot/armbianEnv.txt
 
@@ -1789,7 +1843,6 @@ _EOF_
 
 			# Disable Docker optimisations, since this has some performance drawbacks, enable on Docker install instead
 			G_CONFIG_INJECT 'docker_optimizations=' 'docker_optimizations=off' /boot/armbianEnv.txt
-
 		fi
 
 		# Apply cgroups-v2 workaround on Bullseye if the kernel does not support it: https://github.com/MichaIng/DietPi/issues/4705
@@ -1890,7 +1943,7 @@ _EOF_
 			fi
 
 			# Update config
-			G_CONFIG_INJECT 'GRUB_CMDLINE_LINUX_DEFAULT=' 'GRUB_CMDLINE_LINUX_DEFAULT="consoleblank=0 quiet"' /etc/default/grub
+			G_CONFIG_INJECT 'GRUB_CMDLINE_LINUX_DEFAULT=' 'GRUB_CMDLINE_LINUX_DEFAULT="consoleblank=0"' /etc/default/grub
 			G_CONFIG_INJECT 'GRUB_CMDLINE_LINUX=' 'GRUB_CMDLINE_LINUX="net.ifnames=0"' /etc/default/grub
 			G_CONFIG_INJECT 'GRUB_TIMEOUT=' 'GRUB_TIMEOUT=0' /etc/default/grub
 			G_EXEC_DESC='Regenerating GRUB config' G_EXEC_OUTPUT=1 G_EXEC grub-mkconfig -o /boot/grub/grub.cfg
