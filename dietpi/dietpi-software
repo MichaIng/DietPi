@@ -2631,6 +2631,15 @@ _EOF_
 
 		local software_id DEPS_LIST
 
+		# Configure iptables to use nf_tables or legacy API, depending on which is supported by kernel
+		Configure_iptables()
+		{
+			local alt='nft'
+			iptables-nft -L &> /dev/null || alt='legacy'
+			G_EXEC update-alternatives --set iptables /usr/sbin/iptables-$alt
+			G_EXEC update-alternatives --set ip6tables /usr/sbin/ip6tables-$alt
+		}
+
 		software_id=5 # ALSA
 		if (( ${aSOFTWARE_INSTALL_STATE[$software_id]} == 1 )); then
 
@@ -8112,6 +8121,7 @@ _EOF_
 			Banner_Installing
 			G_AGI openvpn iptables
 			Remove_SysV openvpn
+			Configure_iptables
 
 			# Create initial server and client configs, if not yet present
 			# - Wildcard config file detection via for loop
@@ -8228,11 +8238,14 @@ _EOF_
 			done
 
 			# Enable IP forwarding
-			echo -e 'net.ipv4.ip_forward=1\nnet.ipv6.conf.all.forwarding=1\nnet.ipv6.conf.default.forwarding=1' > /etc/sysctl.d/dietpi-openvpn.conf
-			sysctl net.ipv4.ip_forward=1 net.ipv6.conf.all.forwarding=1 net.ipv6.conf.default.forwarding=1
+			echo -e 'net.ipv4.ip_forward=1\nnet.ipv6.conf.default.accept_ra=2\nnet.ipv6.conf.all.accept_ra=2\nnet.ipv6.conf.default.forwarding=1\nnet.ipv6.conf.all.forwarding=1' > /etc/sysctl.d/dietpi-openvpn.conf
+			sysctl net.ipv4.ip_forward=1 net.ipv6.conf.default.accept_ra=2 net.ipv6.conf.all.accept_ra=2 net.ipv6.conf.default.forwarding=1 net.ipv6.conf.all.forwarding=1
 
-			# Web Forwarding (Setup iptables, must also be run during boot)
+			# ToDo: iptables NAT rules: Those need to run via pre-up and post-down rules when the OpenSSH server starts
+			#iptables -A FORWARD -i tun0 -j ACCEPT
 			#iptables -t nat -A POSTROUTING -s 10.8.0.0/24 -o "$(G_GET_NET iface)" -j MASQUERADE
+			#ip6tables -A FORWARD -i tun0 -j ACCEPT
+			#ip6tables -t nat -A POSTROUTING -o "$(G_GET_NET iface)" -j MASQUERADE
 
 			aSTART_SERVICES+=('openvpn')
 
@@ -8252,6 +8265,7 @@ _EOF_
 
 			# APT deps
 			G_AGI dnsutils net-tools bsdmainutils iptables-persistent # https://github.com/pivpn/pivpn/blob/master/auto_install/install.sh#L37
+			Configure_iptables
 
 			G_EXEC_OUTPUT=1 G_EXEC_NOEXIT=1 G_EXEC ./install.bash || aSOFTWARE_INSTALL_STATE[$software_id]=0
 			G_EXEC_NOHALT=1 G_EXEC rm install.bash
@@ -8283,6 +8297,7 @@ Package: wireguard wireguard-dkms wireguard-tools\nPin: release n=bullseye\nPin-
 				dpkg-query -s wireguard-dkms &> /dev/null && G_AGP wireguard-dkms
 				# Install user space tools only
 				G_AGI wireguard-tools iptables qrencode
+				Configure_iptables
 
 			# Else, kernel headers and matching kernel image is required for wireguard-dkms to build the WireGuard kernel module
 			else
@@ -8342,6 +8357,7 @@ Package: wireguard wireguard-dkms wireguard-tools\nPin: release n=bullseye\nPin-
 				# iptables required to forward incoming VPN traffic to local LAN/internet interface
 				# qrencode required to print client config QR code to console
 				G_AGI wireguard-dkms wireguard-tools iptables qrencode
+				Configure_iptables
 
 			fi
 
@@ -8424,9 +8440,9 @@ ListenPort = $port
 PostUp = sysctl net.ipv4.conf.%i.forwarding=1 net.ipv4.conf.\$(ip r l 0/0 | mawk '{print \$5;exit}').forwarding=1
 PostUp = sysctl net.ipv6.conf.\$(ip r l 0/0 | mawk '{print \$5;exit}').accept_ra=2
 PostUp = sysctl net.ipv6.conf.%i.forwarding=1 net.ipv6.conf.\$(ip r l 0/0 | mawk '{print \$5;exit}').forwarding=1
-PostUp = iptables -A FORWARD -i %i -j ACCEPT; iptables -t nat -A POSTROUTING -o \$(ip r l 0/0 | mawk '{print \$5;exit}') -j MASQUERADE
+PostUp = iptables -A FORWARD -i %i -j ACCEPT; iptables -t nat -A POSTROUTING -s 10.9.0.0/24 -o \$(ip r l 0/0 | mawk '{print \$5;exit}') -j MASQUERADE
 PostUp = ip6tables -A FORWARD -i %i -j ACCEPT; ip6tables -t nat -A POSTROUTING -o \$(ip r l 0/0 | mawk '{print \$5;exit}') -j MASQUERADE
-PostDown = iptables -D FORWARD -i %i -j ACCEPT; iptables -t nat -D POSTROUTING -o \$(ip r l 0/0 | mawk '{print \$5;exit}') -j MASQUERADE
+PostDown = iptables -D FORWARD -i %i -j ACCEPT; iptables -t nat -D POSTROUTING -s 10.9.0.0/24 -o \$(ip r l 0/0 | mawk '{print \$5;exit}') -j MASQUERADE
 PostDown = ip6tables -D FORWARD -i %i -j ACCEPT; ip6tables -t nat -D POSTROUTING -o \$(ip r l 0/0 | mawk '{print \$5;exit}') -j MASQUERADE
 
 # Client 1
@@ -8460,8 +8476,8 @@ DNS = $server_dns
 
 # Kill switch: Uncomment the following, if the client should stop any network traffic, when disconnected from the VPN server
 # NB: This requires "iptables" to be installed, thus will not work on most mobile phones.
-#PostUp = iptables -I OUTPUT ! -o %i -m mark ! --mark \$(wg show %i fwmark) -m addrtype ! --dst-type LOCAL -j REJECT && ip6tables -I OUTPUT ! -o %i -m mark ! --mark \$(wg show %i fwmark) -m addrtype ! --dst-type LOCAL -j REJECT
-#PreDown = iptables -D OUTPUT ! -o %i -m mark ! --mark \$(wg show %i fwmark) -m addrtype ! --dst-type LOCAL -j REJECT && ip6tables -D OUTPUT ! -o %i -m mark ! --mark \$(wg show %i fwmark) -m addrtype ! --dst-type LOCAL -j REJECT
+#PostUp = iptables -I OUTPUT ! -o %i -m mark ! --mark \$(wg show %i fwmark) -m addrtype ! --dst-type LOCAL -j REJECT; ip6tables -I OUTPUT ! -o %i -m mark ! --mark \$(wg show %i fwmark) -m addrtype ! --dst-type LOCAL -j REJECT
+#PreDown = iptables -D OUTPUT ! -o %i -m mark ! --mark \$(wg show %i fwmark) -m addrtype ! --dst-type LOCAL -j REJECT; ip6tables -D OUTPUT ! -o %i -m mark ! --mark \$(wg show %i fwmark) -m addrtype ! --dst-type LOCAL -j REJECT
 
 [Peer]
 PublicKey = $(<server_public.key)
@@ -8546,6 +8562,7 @@ If no WireGuard (auto)start is included, but you require it, please do the follo
 
 			G_AGI "${packages[@]}"
 			G_EXEC systemctl stop hostapd isc-dhcp-server
+			Configure_iptables
 
 			# Enable WiFi modules
 			/boot/dietpi/func/dietpi-set_hardware wifimodules enable
@@ -8588,8 +8605,9 @@ netmask 255.255.255.0
 #dns-nameservers 9.9.9.9 149.112.112.112
 wireless-power off
 
-# IP tables
+# iptables NAT rules
 up iptables-restore < /etc/iptables.ipv4.nat
+up ip6tables-restore < /etc/iptables.ipv6.nat
 _EOF_
 			# Assign static IP for wlan now
 			G_EXEC ip a add 192.168.42.1 dev "$wifi_iface"
@@ -8618,16 +8636,20 @@ _EOF_
 			echo 'DAEMON_CONF="/etc/hostapd/hostapd.conf"' > /etc/default/hostapd
 
 			# Enable IP forwarding
-			echo -e 'net.ipv4.ip_forward=1\nnet.ipv6.conf.all.forwarding=1\nnet.ipv6.conf.default.forwarding=1' > /etc/sysctl.d/dietpi-wifihotspot.conf
-			sysctl net.ipv4.ip_forward=1 net.ipv6.conf.all.forwarding=1 net.ipv6.conf.default.forwarding=1
+			echo -e 'net.ipv4.ip_forward=1\nnet.ipv6.conf.default.forwarding=1\nnet.ipv6.conf.all.forwarding=1' > /etc/sysctl.d/dietpi-wifihotspot.conf
+			sysctl net.ipv4.ip_forward=1 net.ipv6.conf.default.forwarding=1 net.ipv6.conf.all.forwarding=1
 
-			# Apply IP tables
-			iptables -t nat -A POSTROUTING -o "$eth_iface" -j MASQUERADE
+			# Enable iptables NAT rules
+			iptables -t nat -A POSTROUTING -s 192.168.42.0/24 -o "$eth_iface" -j MASQUERADE
 			iptables -A FORWARD -i "$eth_iface" -o "$wifi_iface" -m state --state RELATED,ESTABLISHED -j ACCEPT
 			iptables -A FORWARD -i "$wifi_iface" -o "$eth_iface" -j ACCEPT
+			ip6tables -t nat -A POSTROUTING -o "$eth_iface" -j MASQUERADE
+			ip6tables -A FORWARD -i "$eth_iface" -o "$wifi_iface" -m state --state RELATED,ESTABLISHED -j ACCEPT
+			ip6tables -A FORWARD -i "$wifi_iface" -o "$eth_iface" -j ACCEPT
 
-			# Save IP tables, applied during ifup in /etc/network/interfaces
+			# Save iptables rules, applied via /etc/network/interfaces
 			iptables-save > /etc/iptables.ipv4.nat
+			ip6tables-save > /etc/iptables.ipv6.nat
 
 			# RPi3/4 onboard WiFi: Enable N support
 			[[ $G_HW_MODEL == [34] ]] && G_CONFIG_INJECT 'ieee80211n=' 'ieee80211n=1' /etc/hostapd/hostapd.conf
@@ -8653,18 +8675,22 @@ AutomapHostsOnResolve 1
 TransPort 192.168.42.1:9040
 DNSPort 192.168.42.1:53
 _EOF_
-			# Flush IP tables
+			# Flush iptables
 			iptables -F
 			iptables -t nat -F
 
-			# Generate tor prerouting tables
+			# Generate Tor prerouting tables
 			local wifi_iface=$(G_GET_NET -t wlan iface)
 			iptables -t nat -A PREROUTING -i "$wifi_iface" -p tcp --dport 22 -j REDIRECT --to-ports 22
 			iptables -t nat -A PREROUTING -i "$wifi_iface" -p udp --dport 53 -j REDIRECT --to-ports 53
 			iptables -t nat -A PREROUTING -i "$wifi_iface" -p tcp --syn -j REDIRECT --to-ports 9040
+			ip6tables -t nat -A PREROUTING -i "$wifi_iface" -p tcp --dport 22 -j REDIRECT --to-ports 22
+			ip6tables -t nat -A PREROUTING -i "$wifi_iface" -p udp --dport 53 -j REDIRECT --to-ports 53
+			ip6tables -t nat -A PREROUTING -i "$wifi_iface" -p tcp --syn -j REDIRECT --to-ports 9040
 
-			# Save IP tables
+			# Save iptables rules, applied via /etc/network/interfaces
 			iptables-save > /etc/iptables.ipv4.nat
+			ip6tables-save > /etc/iptables.ipv6.nat
 
 			# User: Test tor is functional
 			#https://check.torproject.org
@@ -14313,6 +14339,7 @@ _EOF_
 			[[ -f '/etc/default/isc-dhcp-server' ]] && G_EXEC rm /etc/default/isc-dhcp-server
 			[[ -f '/etc/etc/default/hostapd' ]] && G_EXEC rm /etc/default/hostapd
 			[[ -f '/etc/iptables.ipv4.nat' ]] && G_EXEC rm /etc/iptables.ipv4.nat
+			[[ -f '/etc/iptables.ipv6.nat' ]] && G_EXEC rm /etc/iptables.ipv6.nat
 			# Remove binary (used a -f trigger to detect WiFi hotspot mode in dietpi-config).
 			[[ -f '/usr/sbin/hostapd' ]] && G_EXEC rm /usr/sbin/hostapd
 			[[ -f '/usr/sbin/hostapd_cli' ]] && G_EXEC rm /usr/sbin/hostapd_cli
