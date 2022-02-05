@@ -1371,11 +1371,11 @@ _EOF_
 		#-----------------------------------------------------------------------------------
 		# Dirs
 		G_DIETPI-NOTIFY 2 'Generating DietPi directories'
-		mkdir -pv /var/lib/dietpi/{postboot.d,dietpi-software/installed}
-		mkdir -pv /var/tmp/dietpi/logs/dietpi-ramlog_store
-		mkdir -pv /mnt/{dietpi_userdata,samba,ftp_client,nfs_client}
-		chown -R dietpi:dietpi /var/{lib,tmp}/dietpi /mnt/{dietpi_userdata,samba,ftp_client,nfs_client}
-		find /var/{lib,tmp}/dietpi /mnt/{dietpi_userdata,samba,ftp_client,nfs_client} -type d -exec chmod 0775 {} +
+		G_EXEC mkdir -p /var/lib/dietpi/{postboot.d,dietpi-software/installed}
+		G_EXEC mkdir -p /var/tmp/dietpi/logs/dietpi-ramlog_store
+		G_EXEC mkdir -p /mnt/{dietpi_userdata,samba,ftp_client,nfs_client}
+		G_EXEC chown -R dietpi:dietpi /mnt/{dietpi_userdata,samba,ftp_client,nfs_client}
+		G_EXEC find /mnt/{dietpi_userdata,samba,ftp_client,nfs_client} -type d -exec chmod 0775 {} +
 
 		#-----------------------------------------------------------------------------------
 		# Services
@@ -1406,22 +1406,22 @@ _EOF_'
 		G_DIETPI-NOTIFY 2 'Removing all rfkill soft blocks and the rfkill package'
 		rfkill unblock all
 		G_AGP rfkill
-		[[ -d '/var/lib/systemd/rfkill' ]] && rm -Rv /var/lib/systemd/rfkill
+		[[ -d '/var/lib/systemd/rfkill' ]] && G_EXEC rm -R /var/lib/systemd/rfkill
 
 		G_DIETPI-NOTIFY 2 'Configuring wlan/eth naming to be preferred for networked devices:'
-		ln -sfv /dev/null /etc/systemd/network/99-default.link
-		ln -sfv /dev/null /etc/udev/rules.d/80-net-setup-link.rules
+		G_EXEC ln -sf /dev/null /etc/systemd/network/99-default.link
+		G_EXEC ln -sf /dev/null /etc/udev/rules.d/80-net-setup-link.rules
 		# - Armbian: Add cmdline entry, which was required on my Raspbian Bullseye system since last few APT updates
 		[[ -f '/boot/armbianEnv.txt' ]] && G_CONFIG_INJECT 'extraargs=' 'extraargs="net.ifnames=0"' /boot/armbianEnv.txt
 
 		G_DIETPI-NOTIFY 2 'Configuring DNS nameserver:'
 		# Failsafe: Assure that /etc/resolv.conf is not a symlink and disable systemd-resolved + systemd-networkd
-		systemctl disable --now systemd-{resolve,network}d
-		rm -fv /etc/resolv.conf
+		G_EXEC systemctl disable --now systemd-{resolve,network}d
+		G_EXEC rm -f /etc/resolv.conf
 		echo 'nameserver 9.9.9.9' > /etc/resolv.conf # Apply generic functional DNS nameserver, updated on next service start
 
 		# ifupdown starts the daemon outside of systemd, the enabled systemd unit just throws an error on boot due to missing dbus and with dbus might interfere with ifupdown
-		systemctl disable wpa_supplicant 2> /dev/null && G_DIETPI-NOTIFY 2 'Disabled non-required wpa_supplicant systemd unit'
+		systemctl list-unit-files 'wpa_supplicant.service' &> /dev/null && G_EXEC systemctl disable wpa_supplicant
 
 		G_EXEC_DESC='Configuring network interfaces'
 		G_EXEC eval 'cat << _EOF_ > /etc/network/interfaces
@@ -1500,7 +1500,6 @@ _EOF_'
 ff02::1 ip6-allnodes
 ff02::2 ip6-allrouters
 _EOF_'
-
 		G_EXEC_DESC='Configuring htop'
 		G_EXEC eval 'cat << _EOF_ > /etc/htoprc
 # DietPi default config for htop
@@ -1790,7 +1789,7 @@ _EOF_
 		# - PINE A64 (and possibly others): Cursor fix for FB
 		elif (( $G_HW_MODEL == 40 )); then
 
-			cat << _EOF_ > /etc/bashrc.d/dietpi-pine64-cursorfix.sh
+			cat << '_EOF_' > /etc/bashrc.d/dietpi-pine64-cursorfix.sh
 #!/bin/dash
 # DietPi: Cursor fix for FB
 infocmp > terminfo.txt
@@ -1991,7 +1990,7 @@ _EOF_
 		G_DIETPI-NOTIFY 2 'Clearing items below tmpfs mount points'
 		G_EXEC mkdir -p /mnt/tmp_root
 		G_EXEC mount "$(findmnt -Ufnro SOURCE -M /)" /mnt/tmp_root
-		rm -vRf /mnt/tmp_root/{dev,proc,run,sys,tmp,var/log}/{,.??,.[^.]}*
+		rm -Rfv /mnt/tmp_root/{dev,proc,run,sys,tmp,var/log}/{,.??,.[^.]}*
 		G_EXEC umount /mnt/tmp_root
 		G_EXEC rmdir /mnt/tmp_root
 
@@ -1999,7 +1998,7 @@ _EOF_
 		rm -Rfv /{root,home/*}/.{bash_history,nano_history,wget-hsts,cache,local,config,gnupg,viminfo,dbus,gconf,nano,vim,zshrc,oh-my-zsh} /etc/*- /var/{cache/debconf,lib/dpkg}/*-old /var/lib/dhcp/{,.??,.[^.]}*
 
 		# Remove PREP script
-		[[ -f $FP_PREP_SCRIPT ]] && rm -v "$FP_PREP_SCRIPT"
+		[[ -f $FP_PREP_SCRIPT ]] && G_EXEC rm -v "$FP_PREP_SCRIPT"
 
 		sync
 
