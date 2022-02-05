@@ -1,7 +1,6 @@
 ---
 name: Software request
 about: Suggest a software title to be added to DietPi-Software
-
 ---
 
 ### Creating a software request
@@ -33,8 +32,5 @@ about: Suggest a software title to be added to DietPi-Software
 1. ...
 
 #### Are you willing to help maintaining the software installation, e.g. in case of needed setup changes due to updates etc.? This is not needed, but could speed up our decision to implement it, as man power is always a topic :wink:.
-<!-- EG: Yes, I could help out with this, e.g. if I experience issues. / Sorry, I am totally unexperienced in bash coding. -->
+<!-- EG: Yes, I could help out with this, e.g. if I experience issues. / Sorry, I am totally inexperienced in bash coding. -->
 - ...
-
-#### Vote for this software on FeatHub: https://feathub.com/MichaIng/DietPi/
-<!-- Optional: Add your request to our FeatHub page as well and replace the above link accordinly.-->

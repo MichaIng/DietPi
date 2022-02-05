@@ -1,7 +1,6 @@
 ---
 name: Bug report
 about: Create a report to help us improve
-
 ---
 
 ### Creating a bug report/issue
@@ -12,7 +11,7 @@ about: Create a report to help us improve
 - Kernel version | `uname -a`
 - SBC model | `echo $G_HW_MODEL_NAME` or (EG: RPi3)
 - Power supply used | (EG: 5V 1A RAVpower)
-- SDcard used | (EG: SanDisk ultra)
+- SD card used | (EG: SanDisk ultra)
 
 #### Additional Information (if applicable)
 - Software title | (EG: Nextcloud)
