@@ -511,13 +511,11 @@ Currently installed: $G_DISTRO_NAME (ID: $G_DISTRO)"; then
 		G_DIETPI-NOTIFY 3 "$G_PROGRAM_NAME" "[$SETUP_STEP] Downloading and installing DietPi source code"; ((SETUP_STEP++))
 		#------------------------------------------------------------------------------------------------
 
-		local url="https://github.com/$G_GITOWNER/DietPi/archive/$G_GITBRANCH.tar.gz"
-		G_CHECK_URL_TIMEOUT=10 G_CHECK_URL_ATTEMPTS=2 G_CHECK_URL "$url"
-		G_EXEC_DESC='Downloading DietPi sourcecode' G_EXEC curl -sSfL "$url" -o package.tar.gz
-
-		[[ -d DietPi-$G_GITBRANCH ]] && G_EXEC_DESC='Cleaning previously extracted files' G_EXEC rm -R "DietPi-$G_GITBRANCH"
-		G_EXEC_DESC='Extracting DietPi sourcecode' G_EXEC tar xf package.tar.gz
-		rm package.tar.gz
+		G_EXEC_DESC='Downloading source code' G_EXEC curl -sSfLO "https://github.com/$G_GITOWNER/DietPi/archive/$G_GITBRANCH.tar.gz"
+		[[ -d DietPi-$G_GITBRANCH ]] && G_EXEC_DESC='Removing old source code' G_EXEC rm -R "DietPi-$G_GITBRANCH"
+		G_EXEC_DESC='Unpacking source code' G_EXEC tar xf "$G_GITBRANCH.tar.gz"
+		G_EXEC_DESC='Removing unused files' G_EXEC rm -f "$G_GITBRANCH.tar.gz" "DietPi-$G_GITBRANCH/dietpi/"{pre-patch_file,patch_file,server_version-6}
+		G_EXEC_DESC='Hardening source code mode' G_EXEC chmod -R g-w "DietPi-$G_GITBRANCH"
 
 		[[ -d '/boot' ]] || G_EXEC_DESC='Creating /boot' G_EXEC mkdir /boot
 
@@ -564,11 +562,6 @@ Currently installed: $G_DISTRO_NAME (ID: $G_DISTRO)"; then
 		G_DIETPI_VERSION_CORE=$G_REMOTE_VERSION_CORE
 		G_DIETPI_VERSION_SUB=$G_REMOTE_VERSION_SUB
 		G_DIETPI_VERSION_RC=$G_REMOTE_VERSION_RC
-
-		# Remove server_version-6 / (pre-)patch_file (downloads fresh from dietpi-update)
-		rm "DietPi-$G_GITBRANCH/dietpi/server_version-6"
-		rm "DietPi-$G_GITBRANCH/dietpi/pre-patch_file"
-		rm "DietPi-$G_GITBRANCH/dietpi/patch_file"
 
 		G_EXEC_DESC='Copy DietPi scripts to /boot/dietpi' G_EXEC cp -a "DietPi-$G_GITBRANCH/dietpi" /boot/
 		G_EXEC_DESC='Copy DietPi system files in place' G_EXEC cp -a "DietPi-$G_GITBRANCH/rootfs/." /
