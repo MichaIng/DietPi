@@ -1955,9 +1955,6 @@ _EOF_
 		G_DIETPI-NOTIFY 2 'Disabling soundcards by default'
 		/boot/dietpi/func/dietpi-set_hardware soundcard none
 
-		G_DIETPI-NOTIFY 2 'Setting default CPU gov'
-		/boot/dietpi/func/dietpi-set_cpu
-
 		G_DIETPI-NOTIFY 2 'Resetting DietPi auto-generated settings and flag files'
 		rm -v /boot/dietpi/.??*
 
@@ -1981,7 +1978,7 @@ This program is free software: you can redistribute it and/or modify it under th
 
 This program is distributed in the hope that it will be useful, but WITHOUT ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the GNU General Public License for more details.
 
-You should have received a copy of the GNU General Public License along with this program. If not, please see http://www.gnu.org/licenses/
+You should have received a copy of the GNU General Public License along with this program. If not, please see https://www.gnu.org/licenses/
 _EOF_
 
 		G_DIETPI-NOTIFY 2 'Disabling and clearing APT cache'
@@ -2014,7 +2011,7 @@ _EOF_
 		sync
 
 		G_DIETPI-NOTIFY 2 "The used kernel version is:\n\t- $(uname -a)"
-		kernel_apt_packages=$(dpkg -l | grep -E '[[:blank:]]linux-(image|dtb)-[0-9]')
+		local kernel_apt_packages=$(dpkg -l | grep -E '[[:blank:]]linux-(image|dtb)-')
 		[[ $kernel_apt_packages ]] && G_DIETPI-NOTIFY 2 "The following kernel DEB packages have been found:\n\e[0m$kernel_apt_packages"
 
 		G_DIETPI-NOTIFY 2 'The following kernel images and modules have been found:'
@@ -2023,7 +2020,7 @@ _EOF_
 		G_DIETPI-NOTIFY 0 'Completed, disk can now be saved to .img for later use, or, reboot system to start first run of DietPi.'
 
 		# shellcheck disable=SC2016
-		G_DIETPI-NOTIFY 0 'To create an .img file, you can "poweroff" and run the following command from the host/external DietPi system:\n\t- bash -c "$(curl -sSfL https://github.com/MichaIng/DietPi/blob/master/.meta/dietpi-imager)"'
+		G_DIETPI-NOTIFY 0 'To create an .img file, you can "poweroff" and run the following command from the host/external DietPi system:\n\t- bash -c "$(curl -sSfL https://raw.githubusercontent.com/MichaIng/DietPi/master/.meta/dietpi-imager)"'
 
 	}
 
