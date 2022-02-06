@@ -1412,7 +1412,7 @@ _EOF_'
 		G_EXEC ln -sf /dev/null /etc/systemd/network/99-default.link
 		G_EXEC ln -sf /dev/null /etc/udev/rules.d/80-net-setup-link.rules
 		# - Armbian: Add cmdline entry, which was required on my Raspbian Bullseye system since last few APT updates
-		[[ -f '/boot/armbianEnv.txt' ]] && G_CONFIG_INJECT 'extraargs=' 'extraargs="net.ifnames=0"' /boot/armbianEnv.txt
+		[[ -f '/boot/armbianEnv.txt' ]] && G_CONFIG_INJECT 'extraargs=' 'extraargs=net.ifnames=0' /boot/armbianEnv.txt
 
 		G_DIETPI-NOTIFY 2 'Configuring DNS nameserver:'
 		# Failsafe: Assure that /etc/resolv.conf is not a symlink and disable systemd-resolved + systemd-networkd
