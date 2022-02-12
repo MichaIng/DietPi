@@ -2,7 +2,7 @@
 #
 # Please edit /boot/dietpiEnv.txt to set supported parameters
 #
-# If you must edit this file, recompile with:
+# If you must, edit /boot/boot.cmd and recompile /boot/boot.scr with:
 # mkimage -C none -A arm64 -T script -d /boot/boot.cmd /boot/boot.scr
 
 # Default values
@@ -31,7 +31,7 @@ fi
 if test "${devtype}" = "mmc"; then part uuid mmc ${devnum}:1 partuuid; fi
 
 # Define kernel command-line arguments
-setenv bootargs "root=${rootdev} rootfstype=${rootfstype} rootwait ${consoleargs} loglevel=${verbosity} consoleblank=0 coherent_pool=2M ubootpart=${partuuid} libata.force=noncq usb-storage.quirks=${usbstoragequirks} ${extraargs} ${extraboardargs}"
+setenv bootargs "root=${rootdev} rootfstype=${rootfstype} rootwait ${consoleargs} loglevel=${verbosity} consoleblank=0 coherent_pool=2M ubootpart=${partuuid} libata.force=noncq usb-storage.quirks=${usbstoragequirks} ${extraargs}"
 
 # Add bootargs for Docker
 if test "${docker_optimizations}" = "on"; then setenv bootargs "${bootargs} cgroup_enable=memory swapaccount=1"; fi
