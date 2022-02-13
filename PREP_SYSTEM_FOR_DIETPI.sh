@@ -1549,7 +1549,7 @@ _EOF_'
 		elif (( $G_HW_MODEL == 15 ))
 		then
 			local tty='ttyAML0'
-			[[ -e '/dev/ttyAML0' ]] || tty='ttyS0'
+			[[ -f '/boot/dietpiEnv.txt' || -e '/dev/ttyAML0' ]] || tty='ttyS0'
 			/boot/dietpi/func/dietpi-set_hardware serialconsole enable "$tty"
 
 		# ROCK Pi S: Enable on ttyS0 only
