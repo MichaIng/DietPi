@@ -611,9 +611,9 @@ Currently installed: $G_DISTRO_NAME (ID: $G_DISTRO)"; then
 		# RPi: Bootstrap repo when key is missing
 		if [[ $G_HW_MODEL -le 9 && ! $(apt-key list 'CF8A1AF502A2AA2D763BAE7E82B129927FA3303E' 2> /dev/null) ]]
 		then
-			G_EXEC curl -sSfLO 'https://archive.raspberrypi.org/debian/pool/main/r/raspberrypi-archive-keyring/raspberrypi-archive-keyring_2021.1.1+rpt1_all.deb'
-			G_AGI dpkg -i raspberrypi-archive-keyring_2016.10.31_all.deb
-			G_EXEC rm raspberrypi-archive-keyring_2016.10.31_all.deb
+			G_EXEC curl -sSfL 'https://archive.raspberrypi.org/debian/pool/main/r/raspberrypi-archive-keyring/raspberrypi-archive-keyring_2021.1.1+rpt1_all.deb' -o keyring.deb
+			G_EXEC dpkg -i keyring.deb
+			G_EXEC rm keyring.deb
 		fi
 
 		G_AGUP
