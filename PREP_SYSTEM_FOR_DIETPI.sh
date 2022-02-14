@@ -538,7 +538,7 @@ Currently installed: $G_DISTRO_NAME (ID: $G_DISTRO)"; then
 
 			G_EXEC mv "DietPi-$G_GITBRANCH/boot_c2.ini" /boot/boot.ini
 
-		elif [[ $G_HW_MODEL == 15 && $(findmnt -Ufnro TARGET -T /boot) == '/' ]]; then
+		elif [[ $G_HW_MODEL == 1[56] && $(findmnt -Ufnro TARGET -T /boot) == '/' ]]; then
 
 			G_EXEC mv "DietPi-$G_GITBRANCH/.build/images/U-Boot/boot.cmd" /boot/boot.cmd
 			G_EXEC mv "DietPi-$G_GITBRANCH/.build/images/U-Boot/dietpiEnv.txt" /boot/dietpiEnv.txt
