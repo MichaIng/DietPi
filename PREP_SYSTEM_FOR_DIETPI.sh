@@ -805,8 +805,8 @@ _EOF_
 			[[ -f '/etc/apt/trusted.gpg~' ]] && G_EXEC rm '/etc/apt/trusted.gpg~'
 
 		# - G_HW_MODEL specific required firmware/kernel/bootloader packages
-		#	Odroid N2: Modern single partition image
-		elif [[ $G_HW_MODEL == 15 && -f '/boot/dietpiEnv.txt' ]]
+		#	Odroid N2/C4: Modern single partition image
+		elif [[ $G_HW_MODEL == 1[56] && -f '/boot/dietpiEnv.txt' ]]
 		then
 			# Bootstrap Armbian repository
 			G_EXEC eval "curl -sSfL 'https://apt.armbian.com/armbian.key' | gpg --dearmor -o /etc/apt/trusted.gpg.d/dietpi-armbian.gpg --yes"
@@ -823,7 +823,9 @@ _EOF_
 			G_AGUP
 			# Install kernel, device tree, U-Boot, firmware and initramfs packages, initramfs-tools first to have an initramfs generated on kernel install
 			G_AGI initramfs-tools
-			G_AGI linux-{image,dtb}-current-meson64 linux-u-boot-odroidn2-current u-boot-tools armbian-firmware
+			local model='odroidn2'
+			[[ $G_HW_MODEL == 16 ]] && model='odroidc4'
+			G_AGI linux-{image,dtb}-current-meson64 "linux-u-boot-$model-current" u-boot-tools armbian-firmware
 			# Cleanup
 			[[ -f '/boot/uImage' ]] && G_EXEC rm /boot/uImage
 			[[ -f '/boot/.next' ]] && G_EXEC rm /boot/.next
