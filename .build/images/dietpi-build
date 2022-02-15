@@ -4,7 +4,14 @@
 ##########################################
 # Load DietPi-Globals
 ##########################################
-. /boot/dietpi/func/dietpi-globals
+if [[ -f '/boot/dietpi/func/dietpi-globals' ]]
+then
+	. /boot/dietpi/func/dietpi-globals
+else
+	curl -sSf "https://raw.githubusercontent.com/$G_GITOWNER/DietPi/$G_GITBRANCH/dietpi/func/dietpi-globals" -o /tmp/dietpi-globals || exit 1
+	. /tmp/dietpi-globals
+	G_EXEC_NOHALT=1 G_EXEC rm /tmp/dietpi-globals
+fi
 readonly G_PROGRAM_NAME='DietPi-Build'
 G_CHECK_ROOT_USER
 G_CHECK_ROOTFS_RW
@@ -29,6 +36,7 @@ FSTYPE='ext4'
 ITYPE=
 VMTYPE=
 GITBRANCH='master'
+GITOWNER='MichaIng'
 while (( $# ))
 do
 	case $1 in
@@ -40,6 +48,7 @@ do
 		'-i') ITYPE='Installer';;
 		'-v') shift; VMTYPE=$1;;
 		'-b') shift; GITBRANCH=$1;;
+		'-o') shift; GITOWNER=$1;;
 		*) G_DIETPI-NOTIFY 1 "Invalid input \"$1\", aborting..."; exit 1;;
 	esac
 	shift
@@ -54,8 +63,8 @@ root_size=1023
 CLONING_TOOL='dd'
 case $HW_MODEL in
 	0) iname='RPi' partition_start=4 boot_size=128 root_size=892;;
-	15) iname='OdroidN2' partition_start=4 root_size=768;;
-	16) iname='OdroidC4' partition_start=4 root_size=768;;
+	15) iname='OdroidN2' HW_ARCH=3 partition_start=4 root_size=768;;
+	16) iname='OdroidC4' HW_ARCH=3 partition_start=4 root_size=768;;
 	20) iname='VM' WIFI_REQUIRED=0 VMTYPE=${VMTYPE:-raw};;
 	21) iname='NativePC-BIOS' HW_ARCH=10 root_size=1215;;
 	*) G_DIETPI-NOTIFY 1 "Invalid hardware model \"$HW_MODEL\" passed, aborting..."; exit 1;;
@@ -87,7 +96,7 @@ esac
 
 case $PTTYPE in
 	'msdos') efi_size=0;;
-	'gpt') [[ $HW_MODEL == 21 ]] && iname='NativePC-UEFI' ITYPE='Installer'; boot_size=0;;
+	'gpt') boot_size=0; [[ $HW_MODEL == 21 ]] && iname='NativePC-UEFI' ITYPE='Installer';;
 	*) G_DIETPI-NOTIFY 1 "Invalid partition table type \"$PTTYPE\" passed, aborting..."; exit 1;;
 esac
 
@@ -99,14 +108,14 @@ case $FSTYPE in
 	*) G_DIETPI-NOTIFY 1 "Invalid filesystem type \"$FSTYPE\" passed, aborting..."; exit 1;;
 esac
 
-G_CHECK_URL "https://github.com/MichaIng/DietPi/tree/$GITBRANCH" || { G_DIETPI-NOTIFY 1 "Failed to access Git branch \"$GITBRANCH\", aborting..."; exit 1; }
+G_CHECK_URL "https://github.com/$GITOWNER/DietPi/tree/$GITBRANCH" || { G_DIETPI-NOTIFY 1 "Failed to access Git branch \"$GITBRANCH\", aborting..."; exit 1; }
 
 # Image name
 OUTPUT_IMG_NAME="DietPi_$iname-$iarch-${distro^}"
 [[ $ITYPE ]] && OUTPUT_IMG_NAME+="_$ITYPE"
 
 # x86_64 installer images are packaged with Clonezilla
-[[ $ITYPE == 'Installer' ]] && CLONING_TOOL='Clonezilla'
+[[ $HW_ARCH == 10 && $ITYPE == 'Installer' ]] && CLONING_TOOL='Clonezilla'
 
 ##########################################
 # Dependencies
@@ -121,6 +130,15 @@ OUTPUT_IMG_NAME="DietPi_$iname-$iarch-${distro^}"
 [[ $VMTYPE && $VMTYPE != 'raw' ]] && apackages+=('qemu-utils')
 
 G_AG_CHECK_INSTALL_PREREQ parted debootstrap dbus systemd-container "${apackages[@]}"
+
+# Bootstrap archive keyring if missing
+if [[ ! -f $keyring ]]
+then
+	[[ $keyring == *'debian'* ]] && url='https://deb.debian.org/debian/pool/main/d/debian-archive-keyring/debian-archive-keyring_2021.1.1_all.deb' || url='https://archive.raspbian.org/raspbian/pool/main/r/raspbian-archive-keyring/raspbian-archive-keyring_20120528.2_all.deb'
+	G_EXEC curl -sSf "$url" -o /tmp/keyring.deb
+	G_EXEC_OUTPUT=1 G_EXEC dpkg -i /tmp/keyring.deb
+	G_EXEC_NOHALT=1 G_EXEC rm /tmp/keyring.deb
+fi
 
 ##########################################
 # Partitions and filesystems
@@ -211,8 +229,8 @@ cat << _EOF_ > rootfs/etc/rc.local
 #!/bin/dash
 {
 echo '[ INFO ] Running DietPi-PREP...'
-export GITBRANCH='$GITBRANCH' HW_MODEL='$HW_MODEL' IMAGE_CREATOR=0 PREIMAGE_INFO='from scratch' WIFI_REQUIRED=$WIFI_REQUIRED DISTRO_TARGET=$DISTRO
-bash -c "\$(curl -sSfL 'https://raw.githubusercontent.com/$G_GITOWNER/DietPi/$G_GITBRANCH/PREP_SYSTEM_FOR_DIETPI.sh')" || poweroff
+export GITOWNER='$GITOWNER' GITBRANCH='$GITBRANCH' HW_MODEL='$HW_MODEL' IMAGE_CREATOR=0 PREIMAGE_INFO='from scratch' WIFI_REQUIRED=$WIFI_REQUIRED DISTRO_TARGET=$DISTRO
+bash -c "\$(curl -sSf 'https://raw.githubusercontent.com/$G_GITOWNER/DietPi/$G_GITBRANCH/PREP_SYSTEM_FOR_DIETPI.sh')" || poweroff
 _EOF_
 
 # - VM: Generate tiny-initramfs with explicit kernel modules, as auto-detection doesn't work correctly within container and loop devices
@@ -254,14 +272,14 @@ G_EXEC losetup -d /dev/loop0
 # DietPi-Imager
 ##########################################
 export FP_ROOT_DEV CLONING_TOOL OUTPUT_IMG_NAME MOUNT_IT='Off'
-bash -c "$(curl -sSfL "https://raw.githubusercontent.com/$G_GITOWNER/DietPi/$G_GITBRANCH/.meta/dietpi-imager")" 'DietPi-Imager' "$OUTPUT_IMG_NAME.img" || exit 1
+bash -c "$(curl -sSf "https://raw.githubusercontent.com/$G_GITOWNER/DietPi/$G_GITBRANCH/.meta/dietpi-imager")" 'DietPi-Imager' "$OUTPUT_IMG_NAME.img" || exit 1
 
 [[ $VMTYPE ]] || { G_EXEC rm "$OUTPUT_IMG_NAME.img"; exit 0; }
 
 ##########################################
 # Virtual machines
 ##########################################
-G_EXEC_DESC='Downloading current README.md to pack with image...' G_EXEC curl -sSfL "https://raw.githubusercontent.com/$G_GITOWNER/DietPi/$G_GITBRANCH/README.md" -o README.md
+G_EXEC_DESC='Downloading current README.md to pack with image...' G_EXEC curl -sSf "https://raw.githubusercontent.com/$G_GITOWNER/DietPi/$G_GITBRANCH/README.md" -o README.md
 
 # NB: LZMA2 ultra compression requires much memory per thread. 1 GiB is not sufficient for >2 threads, hence use "-mmt2" to limit used CPU threads to "2" on 1 GiB devices with more than two cores.
 limit_threads=
