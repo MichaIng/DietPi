@@ -1547,8 +1547,8 @@ _EOF_'
 			/boot/dietpi/func/dietpi-set_hardware serialconsole disable ttyS0
 			G_EXEC systemctl mask serial-getty@ttyS0
 
-		# Odroid N2: Enable on serial debug console only
-		elif (( $G_HW_MODEL == 15 ))
+		# Odroid N2/C4: Enable on serial debug console only
+		elif [[ $G_HW_MODEL == 1[56] ]]
 		then
 			local tty='ttyAML0'
 			[[ -f '/boot/dietpiEnv.txt' || -e '/dev/ttyAML0' ]] || tty='ttyS0'
@@ -1634,8 +1634,8 @@ _EOF_"
 			unset -v spindown
 		fi
 
-		# - Odroid N2: Modern single partition image
-		if [[ $G_HW_MODEL == 15 && -f '/boot/dietpiEnv.txt' ]]
+		# - Odroid N2/C4: Modern single partition image
+		if [[ $G_HW_MODEL == 1[56] && -f '/boot/dietpiEnv.txt' ]]
 		then
 			G_CONFIG_INJECT 'rootdev=' "rootdev=UUID=$(findmnt -Ufnro UUID -M /)" /boot/dietpiEnv.txt
 			G_CONFIG_INJECT 'rootfstype=' "rootfstype=$(findmnt -Ufnro FSTYPE -M /)" /boot/dietpiEnv.txt
