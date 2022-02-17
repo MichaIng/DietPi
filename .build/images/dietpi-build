@@ -142,7 +142,7 @@ fi
 G_EXIT_CUSTOM(){
 	findmnt -M "$FP_ORIGIN/rootfs" &> /dev/null && G_EXEC umount -R "$FP_ORIGIN/rootfs"
 	[[ -d $FP_ORIGIN/rootfs ]] && G_EXEC rmdir "$FP_ORIGIN/rootfs"
-	losetup /dev/loop0 &> /dev/null && G_EXEC losetup -d /dev/loop0
+	[[ $FP_LOOP ]] && losetup "$FP_LOOP" &> /dev/null && G_EXEC losetup -d "$FP_LOOP"
 	[[ -f $OUTPUT_IMG_NAME.img ]] && G_EXEC rm "$OUTPUT_IMG_NAME.img"
 	(( $mask_dbus )) && G_EXEC systemctl mask --now dbus dbus.socket
 }
@@ -171,9 +171,10 @@ else
 fi
 
 # Create loop device
-G_EXEC losetup loop0 "$OUTPUT_IMG_NAME.img"
-G_EXEC partprobe /dev/loop0
-G_EXEC partx -u /dev/loop0
+FP_LOOP=$(losetup -f)
+G_EXEC losetup "$FP_LOOP" "$OUTPUT_IMG_NAME.img"
+G_EXEC partprobe "$FP_LOOP"
+G_EXEC partx -u "$FP_LOOP"
 
 # Create and mount filesystems and fstab
 G_EXEC mkdir rootfs
@@ -181,38 +182,38 @@ G_EXEC mkdir rootfs
 if [[ $PTTYPE == 'gpt' ]]
 then
 	FP_ROOT_DEV=2
-	G_EXEC mkfs.fat -F 32 /dev/loop0p1
-	G_EXEC "mkfs.$FSTYPE" /dev/loop0p2
-	G_EXEC mount /dev/loop0p2 rootfs
+	G_EXEC mkfs.fat -F 32 "${FP_LOOP}p1"
+	G_EXEC "mkfs.$FSTYPE" "${FP_LOOP}p2"
+	G_EXEC mount "${FP_LOOP}p2" rootfs
 	G_EXEC mkdir -p rootfs/boot/efi
-	G_EXEC mount /dev/loop0p1 rootfs/boot/efi
+	G_EXEC mount "${FP_LOOP}p1" rootfs/boot/efi
 	G_EXEC mkdir rootfs/etc
 	cat << _EOF_ > rootfs/etc/fstab
-PARTUUID=$(lsblk -no PARTUUID /dev/loop0p2) / $FSTYPE noatime,lazytime 0 1
-PARTUUID=$(lsblk -no PARTUUID /dev/loop0p1) /boot/efi vfat noatime,lazytime 0 2
+PARTUUID=$(lsblk -no PARTUUID "${FP_LOOP}p2") / $FSTYPE noatime,lazytime 0 1
+PARTUUID=$(lsblk -no PARTUUID "${FP_LOOP}p1") /boot/efi vfat noatime,lazytime 0 2
 _EOF_
 # + boot partition
 elif (( $boot_size ))
 then
 	FP_ROOT_DEV=2
-	G_EXEC mkfs.fat -F 32 /dev/loop0p1
-	G_EXEC "mkfs.$FSTYPE" /dev/loop0p2
-	G_EXEC mount /dev/loop0p2 rootfs
+	G_EXEC mkfs.fat -F 32 "${FP_LOOP}p1"
+	G_EXEC "mkfs.$FSTYPE" "${FP_LOOP}p2"
+	G_EXEC mount "${FP_LOOP}p2" rootfs
 	G_EXEC mkdir rootfs/boot
-	G_EXEC mount /dev/loop0p1 rootfs/boot
+	G_EXEC mount "${FP_LOOP}p1" rootfs/boot
 	G_EXEC mkdir rootfs/etc
 	cat << _EOF_ > rootfs/etc/fstab
-PARTUUID=$(lsblk -no PARTUUID /dev/loop0p2) / $FSTYPE noatime,lazytime 0 1
-PARTUUID=$(lsblk -no PARTUUID /dev/loop0p1) /boot vfat noatime,lazytime 0 2
+PARTUUID=$(lsblk -no PARTUUID "${FP_LOOP}p2") / $FSTYPE noatime,lazytime 0 1
+PARTUUID=$(lsblk -no PARTUUID "${FP_LOOP}p1") /boot vfat noatime,lazytime 0 2
 _EOF_
 # - single partition
 else
 	FP_ROOT_DEV=1
-	G_EXEC "mkfs.$FSTYPE" /dev/loop0p1
-	G_EXEC mount /dev/loop0p1 rootfs
+	G_EXEC "mkfs.$FSTYPE" "${FP_LOOP}p1"
+	G_EXEC mount "${FP_LOOP}p1" rootfs
 	G_EXEC mkdir rootfs/etc
 	cat << _EOF_ > rootfs/etc/fstab
-PARTUUID=$(lsblk -no PARTUUID /dev/loop0p1) / $FSTYPE noatime,lazytime 0 1
+PARTUUID=$(lsblk -no PARTUUID "${FP_LOOP}p1") / $FSTYPE noatime,lazytime 0 1
 _EOF_
 fi
 
@@ -261,15 +262,15 @@ G_EXEC systemctl unmask dbus.socket dbus
 G_EXEC systemctl start dbus.socket dbus
 # - Bind mounts required to allow container reading its own drive info, /dev/disk for GRUB and probably other tools to detect UUIDs
 abind=()
-[[ -b '/dev/loop0p2' ]] && abind=('--bind=/dev/loop0p2')
-systemd-nspawn -bD rootfs --bind=/dev/loop0 --bind=/dev/loop0p1 "${abind[@]}" --bind=/dev/disk || exit 1
+[[ -b ${FP_LOOP}p2 ]] && abind=("--bind=${FP_LOOP}p2")
+systemd-nspawn -bD rootfs --bind="$FP_LOOP" --bind="${FP_LOOP}p1" "${abind[@]}" --bind=/dev/disk || exit 1
 [[ -f 'rootfs/success' ]] || { G_DIETPI-NOTIFY 1 'The container setup did not finish successfully, aborting...'; exit 1; }
 G_EXEC rm rootfs/success
 G_EXEC sync
 G_EXEC sleep 1
 G_EXEC umount -R rootfs
 G_EXEC rmdir rootfs
-G_EXEC losetup -d /dev/loop0
+G_EXEC losetup -d "$FP_LOOP"
 (( $mask_dbus )) && { G_EXEC systemctl mask --now dbus dbus.socket && mask_dbus=0; }
 
 ##########################################
