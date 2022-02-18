@@ -1788,20 +1788,6 @@ _EOF_
 				done < <(dpkg -L 'libraspberrypi0' | grep '^/usr/lib/arm-linux-gnueabihf/.*\.so.0$')
 			fi
 
-		# - PINE A64 (and possibly others): Cursor fix for FB
-		elif (( $G_HW_MODEL == 40 )); then
-
-			cat << '_EOF_' > /etc/bashrc.d/dietpi-pine64-cursorfix.sh
-#!/bin/dash
-# DietPi: Cursor fix for FB
-infocmp > terminfo.txt
-sed -i -e 's/?0c/?112c/g' -e 's/?8c/?48;0;64c/g' terminfo.txt
-tic terminfo.txt
-tput cnorm
-_EOF_
-			# Ensure WiFi module pre-exists
-			G_CONFIG_INJECT '8723bs' '8723bs' /etc/modules
-
 		# - Radxa Zero
 		elif (( $G_HW_MODEL == 74 ))
 		then
