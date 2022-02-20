@@ -49,6 +49,9 @@
 	# Set $PATH variable to include all expected default binary locations, since we don't know the current system setup: https://github.com/MichaIng/DietPi/issues/3206
 	export PATH='/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin'
 
+	# Mount all filesystems defined in /etc/fstab without "noauto" option: https://github.com/MichaIng/DietPi/issues/5174
+	mount -a
+
 	# Make /tmp a tmpfs if it is not yet a dedicated mount
 	if findmnt -M /tmp > /dev/null
 	then
