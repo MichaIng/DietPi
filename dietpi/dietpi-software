@@ -2034,23 +2034,6 @@ INDEX_BROWSER=$INDEX_BROWSER"
 		done
 	}
 
-	# Unmark software which requires to load kernel modules on install, but modules are missing e.g. due to a kernel upgrade with outstanding reboot
-	Unmark_On_Missing_Kernel_Modules()
-	{
-		# Docker: https://github.com/MichaIng/DietPi/issues/3126
-		# NB: Without parenthesis, the last "&&" is not followed if any but only the last "||" condition is true.
-		if [[ ( ${aSOFTWARE_INSTALL_STATE[162]} == 1 || ${aSOFTWARE_INSTALL_STATE[134]} == 1 || ${aSOFTWARE_INSTALL_STATE[185]} == 1 || ${aSOFTWARE_INSTALL_STATE[86]} == 1 ) && ! -d /lib/modules/$(uname -r) ]]
-		then
-			G_WHIP_MSG '[WARNING] Docker and its dependants will be deselected
-\nModules for the loaded kernel are missing. This is usually the case when the kernel was recently upgraded but a reboot is outstanding. The Docker install however will fail if it cannot load kernel modules.
-\nPlease do a reboot first and reselect Docker or its dependant for install.'
-			(( ${aSOFTWARE_INSTALL_STATE[162]} == 1 )) && aSOFTWARE_INSTALL_STATE[162]=0
-			(( ${aSOFTWARE_INSTALL_STATE[134]} == 1 )) && aSOFTWARE_INSTALL_STATE[134]=0
-			(( ${aSOFTWARE_INSTALL_STATE[185]} == 1 )) && aSOFTWARE_INSTALL_STATE[185]=0
-			(( ${aSOFTWARE_INSTALL_STATE[86]} == 1 )) && aSOFTWARE_INSTALL_STATE[86]=0
-		fi
-	}
-
 	# Unmark all dependants of a software title
 	# $1: software ID
 	Unmark_Dependants()
@@ -8304,263 +8287,6 @@ _EOF_
 
 		fi
 
-		software_id=172 # WireGuard
-		if (( ${aSOFTWARE_INSTALL_STATE[$software_id]} == 1 )); then
-
-			Banner_Installing
-
-			# Packages available on Buster backports and Bullseye: For Raspbian Buster add Bullseye repo
-			if (( $G_HW_MODEL < 10 && ${G_RASPBIAN:-1} && $G_DISTRO == 5 ))
-			then
-				G_EXEC eval "echo 'deb http://raspbian.raspberrypi.org/raspbian/ bullseye main' > /etc/apt/sources.list.d/dietpi-wireguard.list"
-
-				# Disable repo via priority "-1", to prevent any accidental package upgrades: https://github.com/MichaIng/DietPi/issues/2568
-				# Enable but set WireGuard package priorities low enough to install only if not available in main repo(s)
-				echo -e 'Package: *\nPin: release n=bullseye\nPin-Priority: -1\n
-Package: wireguard wireguard-dkms wireguard-tools\nPin: release n=bullseye\nPin-Priority: 100' > /etc/apt/preferences.d/dietpi-wireguard
-
-				G_AGUP
-			fi
-
-			# If the kernel module is shipped with the kernel (e.g. Armbian 5.X)
-			if [[ $WIREGUARD_BUILTIN == 1 ]]; then
-
-				# Purge DKMS as it is not required and might mess with available kernel module
-				dpkg-query -s wireguard-dkms &> /dev/null && G_AGP wireguard-dkms
-				# Install user space tools only
-				G_AGI wireguard-tools iptables qrencode
-				Configure_iptables
-
-			# Else, kernel headers and matching kernel image is required for wireguard-dkms to build the WireGuard kernel module
-			else
-
-				local apackages=()
-				# x86_64
-				if (( $G_HW_ARCH == 10 )); then
-
-					apackages=('linux-image-amd64' 'linux-headers-amd64')
-
-				# RPi
-				elif (( $G_HW_MODEL < 10 )); then
-
-					# Install bootloader package as well to assure we have a correctly booting system with intended kernel
-					apackages=('raspberrypi-kernel' 'raspberrypi-kernel-headers' 'raspberrypi-bootloader')
-
-				# Odroid XU4
-				elif (( $G_HW_MODEL == 11 )); then
-
-					apackages=('linux-image-4.14-armhf-odroid-xu4' 'linux-headers-4.14-armhf-odroid-xu4')
-
-				# Odroid C2
-				elif (( $G_HW_MODEL == 12 )); then
-
-					apackages=('linux-image-arm64-odroid-c2' 'linux-headers-arm64-odroid-c2')
-
-				# Odroid N2
-				elif (( $G_HW_MODEL == 15 )); then
-
-					apackages=('linux-image-arm64-odroid-n2' 'linux-headers-arm64-odroid-n2')
-
-				# Odroid C4
-				elif (( $G_HW_MODEL == 16 )); then
-
-					apackages=('linux-image-arm64-odroid-c4' 'linux-headers-arm64-odroid-c4')
-
-				fi
-
-				# Odroids need to purge before we install, else, does not update to latest version...
-				(( $G_HW_MODEL > 9 && $G_HW_MODEL < 20 )) && G_AGP "${apackages[@]}"
-
-				# Since G_AGUG does not upgrade packages with changed dependencies, in case of kernel image meta packages, those need to be installed+upgraded via G_AGI.
-				G_AGI "${apackages[@]}" # apt-get install overrides hold state
-				unset -v apackages
-
-				# Workaround for missing /lib/modules/<version>/build symlink: https://github.com/MichaIng/DietPi/issues/3577
-				# - Known as issue currently on Odroid C2/N2, check for new build system if linux-<version>/ holds current headers instead of linux-source-<version>/: https://dietpi.com/meveric/pool/c2/l/
-				for i in /lib/modules/*
-				do
-					[[ -d $i/build ]] && continue
-					[[ -d /usr/src/linux-headers-${i##*/} ]] && ln -sfv "/usr/src/linux-headers-${i##*/}" "$i/build"
-				done
-
-				# If existing install, reconfigure to rebuild WireGuard kernel module against current kernel + headers
-				dpkg-query -s wireguard-dkms &> /dev/null && G_EXEC dpkg-reconfigure -f noninteractive wireguard-dkms
-
-				# iptables required to forward incoming VPN traffic to local LAN/internet interface
-				# qrencode required to print client config QR code to console
-				G_AGI wireguard-dkms wireguard-tools iptables qrencode
-				Configure_iptables
-
-			fi
-
-			# Try to enable module, if it fails, a reboot is required
-			local module_active=0
-			modprobe wireguard 2> /dev/null && module_active=1
-
-			# Server/Client choice
-			local choice_required=
-			while :
-			do
-				G_WHIP_MENU_ARRAY=(
-
-					'Server' ': Use this machine as VPN server and allow clients to connect to it.'
-					'Client' ': Use this machine as VPN client to connect to another VPN server or service provider.'
-
-				)
-
-				G_WHIP_MENU "${choice_required}Please choose, if this machine should be set up as VPN server or client:" && break
-				choice_required='[ERROR] A choice is required to finish the WireGuard install.\n\n'
-			done
-
-			# Server choice
-			if [[ $G_WHIP_RETURNED_VALUE == 'Server' ]]; then
-
-				# Public IP/domain and desired WireGuard server port
-				local invalid_text=
-				local domain=$(hostname -f)
-				while :
-				do
-					G_WHIP_DEFAULT_ITEM=$domain
-					if G_WHIP_INPUTBOX "${invalid_text}Please enter your servers public IP/domain for WireGuard client access:" && [[ $G_WHIP_RETURNED_VALUE ]]; then
-
-						domain=${G_WHIP_RETURNED_VALUE#http*://}
-						break
-
-					else
-
-						invalid_text='[ERROR] No valid entry found. Please retry...\n\n'
-
-					fi
-				done
-				invalid_text=
-				local port=51820
-				while :
-				do
-					G_WHIP_DEFAULT_ITEM=$port
-					if G_WHIP_INPUTBOX "${invalid_text}Please enter the network port that will be used to access your WireGuard server:\n
-NB: This port needs to be forwarded by your router and/or opened in your firewall settings. Default value is: 51820" && disable_error=1 G_CHECK_VALIDINT "$G_WHIP_RETURNED_VALUE" 0; then
-
-						port=$G_WHIP_RETURNED_VALUE
-						break
-
-					else
-
-						invalid_text='[ERROR] No valid entry found, value needs to be a sequence of integers. Please retry...\n\n'
-
-					fi
-				done
-
-				# Create everything inside WireGuard config dir
-				G_EXEC cd /etc/wireguard
-
-				# For security reasons set umask to 077
-				umask 077
-
-				# Create server and client keys
-				[[ -f 'server_private.key' ]] || wg genkey > server_private.key
-				[[ -f 'server_public.key' ]] || wg pubkey < server_private.key > server_public.key
-				[[ -f 'client_private.key' ]] || wg genkey > client_private.key
-				[[ -f 'client_public.key' ]] || wg pubkey < client_private.key > client_public.key
-
-				# Server config
-				[[ -f 'wg0.conf' ]] || cat << _EOF_ > wg0.conf
-[Interface]
-Address = 10.9.0.1/24
-PrivateKey = $(<server_private.key)
-ListenPort = $port
-
-PostUp = sysctl net.ipv4.conf.%i.forwarding=1 net.ipv4.conf.\$(ip r l 0/0 | mawk '{print \$5;exit}').forwarding=1
-PostUp = sysctl net.ipv6.conf.\$(ip r l 0/0 | mawk '{print \$5;exit}').accept_ra=2
-PostUp = sysctl net.ipv6.conf.%i.forwarding=1 net.ipv6.conf.\$(ip r l 0/0 | mawk '{print \$5;exit}').forwarding=1
-PostUp = iptables -A FORWARD -i %i -j ACCEPT; iptables -t nat -A POSTROUTING -s 10.9.0.0/24 -o \$(ip r l 0/0 | mawk '{print \$5;exit}') -j MASQUERADE
-PostUp = ip6tables -A FORWARD -i %i -j ACCEPT; ip6tables -t nat -A POSTROUTING -o \$(ip r l 0/0 | mawk '{print \$5;exit}') -j MASQUERADE
-PostDown = iptables -D FORWARD -i %i -j ACCEPT; iptables -t nat -D POSTROUTING -s 10.9.0.0/24 -o \$(ip r l 0/0 | mawk '{print \$5;exit}') -j MASQUERADE
-PostDown = ip6tables -D FORWARD -i %i -j ACCEPT; ip6tables -t nat -D POSTROUTING -o \$(ip r l 0/0 | mawk '{print \$5;exit}') -j MASQUERADE
-
-# Client 1
-[Peer]
-PublicKey = $(<client_public.key)
-AllowedIPs = 10.9.0.2/32
-
-# Client 2
-#[Peer]
-#PublicKey = XXXX
-#AllowedIPs = 10.9.0.3/32
-_EOF_
-
-				# Server local network IP
-				local server_ip=$(G_GET_NET ip)
-
-				# Server DNS nameserver
-				local server_dns=$(mawk '/nameserver/{print $2;exit}' /etc/resolv.conf)
-				# - Replace "127.0.0.1"/"localhost" loopback entries by server wg0 IP: https://github.com/MichaIng/DietPi/issues/2482
-				server_dns=${server_dns//127.0.0.1/10.9.0.1}
-				server_dns=${server_dns//localhost/10.9.0.1}
-
-				# Client config
-				[[ -f 'wg0-client.conf' ]] || cat << _EOF_ > wg0-client.conf
-[Interface]
-Address = 10.9.0.2/24
-PrivateKey = $(<client_private.key)
-
-# Comment the following to preserve the clients default DNS server, or force a desired one.
-DNS = $server_dns
-
-# Kill switch: Uncomment the following, if the client should stop any network traffic, when disconnected from the VPN server
-# NB: This requires "iptables" to be installed, thus will not work on most mobile phones.
-#PostUp = iptables -I OUTPUT ! -o %i -m mark ! --mark \$(wg show %i fwmark) -m addrtype ! --dst-type LOCAL -j REJECT; ip6tables -I OUTPUT ! -o %i -m mark ! --mark \$(wg show %i fwmark) -m addrtype ! --dst-type LOCAL -j REJECT
-#PreDown = iptables -D OUTPUT ! -o %i -m mark ! --mark \$(wg show %i fwmark) -m addrtype ! --dst-type LOCAL -j REJECT; ip6tables -D OUTPUT ! -o %i -m mark ! --mark \$(wg show %i fwmark) -m addrtype ! --dst-type LOCAL -j REJECT
-
-[Peer]
-PublicKey = $(<server_public.key)
-# Tunnel all network traffic through the VPN:
-#	AllowedIPs = 0.0.0.0/0, ::/0
-# Tunnel access to server-side local network only:
-#	AllowedIPs = ${server_ip%.*}.0/24
-# Tunnel access to VPN server only:
-#	AllowedIPs = $server_ip/32
-AllowedIPs = 0.0.0.0/0, ::/0
-Endpoint = $domain:$port
-
-# Uncomment the following, if you're behind a NAT and want the connection to be kept alive.
-#PersistentKeepalive = 25
-_EOF_
-				# Set umask back to default 022
-				umask 022
-
-				# Navigate back to DietPi-Software working dir
-				G_EXEC cd "$G_WORKING_DIR"
-
-				# Use wg-quick@.service to start VPN on boot
-				G_EXEC systemctl enable wg-quick@wg0
-				# - Start now if module is active already
-				(( $module_active )) && G_EXEC systemctl start wg-quick@wg0
-
-			# Client choice
-			elif [[ $G_WHIP_RETURNED_VALUE == 'Client' ]]; then
-
-				G_AGI resolvconf # Use by wg-quick to apply DNS in client setup
-				G_WHIP_MSG '[ INFO ] WireGuard client setup has been chosen\n
-Please follow the instructions of your VPN provider to configure WireGuard.\n
-If no WireGuard (auto)start is included, but you require it, please do the following:
-1. Check for the created config file/interface name:
-	ls -Al /etc/wireguard/
-   It has a ".conf" file ending, lets assume "wg0-client.conf".
-2. To start the VPN interface, run:
-	systemctl start wg-quick@wg0-client
-3. To autostart the VPN interface on boot, run:
-	systemctl enable wg-quick@wg0-client
-4. To disable autostart again, run:
-	systemctl disable wg-quick@wg0-client'
-
-			fi
-
-			(( $module_active )) || G_WHIP_MSG '[ INFO ] WireGuard install finished\n\nNB: WireGuard has been successfully installed, but a reboot is required, before it can be started.'
-
-			unset -v module_active choice_required domain port invalid_text server_ip
-
-		fi
-
 		software_id=92 # Certbot
 		if (( ${aSOFTWARE_INSTALL_STATE[$software_id]} == 1 )); then
 
@@ -12600,6 +12326,263 @@ _EOF_
 
 		fi
 
+		software_id=172 # WireGuard
+		if (( ${aSOFTWARE_INSTALL_STATE[$software_id]} == 1 )); then
+
+			Banner_Installing
+
+			# Packages available on Buster backports and Bullseye: For Raspbian Buster add Bullseye repo
+			if (( $G_HW_MODEL < 10 && ${G_RASPBIAN:-1} && $G_DISTRO == 5 ))
+			then
+				G_EXEC eval "echo 'deb http://raspbian.raspberrypi.org/raspbian/ bullseye main' > /etc/apt/sources.list.d/dietpi-wireguard.list"
+
+				# Disable repo via priority "-1", to prevent any accidental package upgrades: https://github.com/MichaIng/DietPi/issues/2568
+				# Enable but set WireGuard package priorities low enough to install only if not available in main repo(s)
+				echo -e 'Package: *\nPin: release n=bullseye\nPin-Priority: -1\n
+Package: wireguard wireguard-dkms wireguard-tools\nPin: release n=bullseye\nPin-Priority: 100' > /etc/apt/preferences.d/dietpi-wireguard
+
+				G_AGUP
+			fi
+
+			# If the kernel module is shipped with the kernel (e.g. Armbian 5.X)
+			if [[ $WIREGUARD_BUILTIN == 1 ]]; then
+
+				# Purge DKMS as it is not required and might mess with available kernel module
+				dpkg-query -s wireguard-dkms &> /dev/null && G_AGP wireguard-dkms
+				# Install user space tools only
+				G_AGI wireguard-tools iptables qrencode
+				Configure_iptables
+
+			# Else, kernel headers and matching kernel image is required for wireguard-dkms to build the WireGuard kernel module
+			else
+
+				local apackages=()
+				# x86_64
+				if (( $G_HW_ARCH == 10 )); then
+
+					apackages=('linux-image-amd64' 'linux-headers-amd64')
+
+				# RPi
+				elif (( $G_HW_MODEL < 10 )); then
+
+					# Install bootloader package as well to assure we have a correctly booting system with intended kernel
+					apackages=('raspberrypi-kernel' 'raspberrypi-kernel-headers' 'raspberrypi-bootloader')
+
+				# Odroid XU4
+				elif (( $G_HW_MODEL == 11 )); then
+
+					apackages=('linux-image-4.14-armhf-odroid-xu4' 'linux-headers-4.14-armhf-odroid-xu4')
+
+				# Odroid C2
+				elif (( $G_HW_MODEL == 12 )); then
+
+					apackages=('linux-image-arm64-odroid-c2' 'linux-headers-arm64-odroid-c2')
+
+				# Odroid N2
+				elif (( $G_HW_MODEL == 15 )); then
+
+					apackages=('linux-image-arm64-odroid-n2' 'linux-headers-arm64-odroid-n2')
+
+				# Odroid C4
+				elif (( $G_HW_MODEL == 16 )); then
+
+					apackages=('linux-image-arm64-odroid-c4' 'linux-headers-arm64-odroid-c4')
+
+				fi
+
+				# Odroids need to purge before we install, else, does not update to latest version...
+				(( $G_HW_MODEL > 9 && $G_HW_MODEL < 20 )) && G_AGP "${apackages[@]}"
+
+				# Since G_AGUG does not upgrade packages with changed dependencies, in case of kernel image meta packages, those need to be installed+upgraded via G_AGI.
+				G_AGI "${apackages[@]}" # apt-get install overrides hold state
+				unset -v apackages
+
+				# Workaround for missing /lib/modules/<version>/build symlink: https://github.com/MichaIng/DietPi/issues/3577
+				# - Known as issue currently on Odroid C2/N2, check for new build system if linux-<version>/ holds current headers instead of linux-source-<version>/: https://dietpi.com/meveric/pool/c2/l/
+				for i in /lib/modules/*
+				do
+					[[ -d $i/build ]] && continue
+					[[ -d /usr/src/linux-headers-${i##*/} ]] && ln -sfv "/usr/src/linux-headers-${i##*/}" "$i/build"
+				done
+
+				# If existing install, reconfigure to rebuild WireGuard kernel module against current kernel + headers
+				dpkg-query -s wireguard-dkms &> /dev/null && G_EXEC dpkg-reconfigure -f noninteractive wireguard-dkms
+
+				# iptables required to forward incoming VPN traffic to local LAN/internet interface
+				# qrencode required to print client config QR code to console
+				G_AGI wireguard-dkms wireguard-tools iptables qrencode
+				Configure_iptables
+
+			fi
+
+			# Try to enable module, if it fails, a reboot is required
+			local module_active=0
+			modprobe wireguard 2> /dev/null && module_active=1
+
+			# Server/Client choice
+			local choice_required=
+			while :
+			do
+				G_WHIP_MENU_ARRAY=(
+
+					'Server' ': Use this machine as VPN server and allow clients to connect to it.'
+					'Client' ': Use this machine as VPN client to connect to another VPN server or service provider.'
+
+				)
+
+				G_WHIP_MENU "${choice_required}Please choose, if this machine should be set up as VPN server or client:" && break
+				choice_required='[ERROR] A choice is required to finish the WireGuard install.\n\n'
+			done
+
+			# Server choice
+			if [[ $G_WHIP_RETURNED_VALUE == 'Server' ]]; then
+
+				# Public IP/domain and desired WireGuard server port
+				local invalid_text=
+				local domain=$(hostname -f)
+				while :
+				do
+					G_WHIP_DEFAULT_ITEM=$domain
+					if G_WHIP_INPUTBOX "${invalid_text}Please enter your servers public IP/domain for WireGuard client access:" && [[ $G_WHIP_RETURNED_VALUE ]]; then
+
+						domain=${G_WHIP_RETURNED_VALUE#http*://}
+						break
+
+					else
+
+						invalid_text='[ERROR] No valid entry found. Please retry...\n\n'
+
+					fi
+				done
+				invalid_text=
+				local port=51820
+				while :
+				do
+					G_WHIP_DEFAULT_ITEM=$port
+					if G_WHIP_INPUTBOX "${invalid_text}Please enter the network port that will be used to access your WireGuard server:\n
+NB: This port needs to be forwarded by your router and/or opened in your firewall settings. Default value is: 51820" && disable_error=1 G_CHECK_VALIDINT "$G_WHIP_RETURNED_VALUE" 0; then
+
+						port=$G_WHIP_RETURNED_VALUE
+						break
+
+					else
+
+						invalid_text='[ERROR] No valid entry found, value needs to be a sequence of integers. Please retry...\n\n'
+
+					fi
+				done
+
+				# Create everything inside WireGuard config dir
+				G_EXEC cd /etc/wireguard
+
+				# For security reasons set umask to 077
+				umask 077
+
+				# Create server and client keys
+				[[ -f 'server_private.key' ]] || wg genkey > server_private.key
+				[[ -f 'server_public.key' ]] || wg pubkey < server_private.key > server_public.key
+				[[ -f 'client_private.key' ]] || wg genkey > client_private.key
+				[[ -f 'client_public.key' ]] || wg pubkey < client_private.key > client_public.key
+
+				# Server config
+				[[ -f 'wg0.conf' ]] || cat << _EOF_ > wg0.conf
+[Interface]
+Address = 10.9.0.1/24
+PrivateKey = $(<server_private.key)
+ListenPort = $port
+
+PostUp = sysctl net.ipv4.conf.%i.forwarding=1 net.ipv4.conf.\$(ip r l 0/0 | mawk '{print \$5;exit}').forwarding=1
+PostUp = sysctl net.ipv6.conf.\$(ip r l 0/0 | mawk '{print \$5;exit}').accept_ra=2
+PostUp = sysctl net.ipv6.conf.%i.forwarding=1 net.ipv6.conf.\$(ip r l 0/0 | mawk '{print \$5;exit}').forwarding=1
+PostUp = iptables -A FORWARD -i %i -j ACCEPT; iptables -t nat -A POSTROUTING -s 10.9.0.0/24 -o \$(ip r l 0/0 | mawk '{print \$5;exit}') -j MASQUERADE
+PostUp = ip6tables -A FORWARD -i %i -j ACCEPT; ip6tables -t nat -A POSTROUTING -o \$(ip r l 0/0 | mawk '{print \$5;exit}') -j MASQUERADE
+PostDown = iptables -D FORWARD -i %i -j ACCEPT; iptables -t nat -D POSTROUTING -s 10.9.0.0/24 -o \$(ip r l 0/0 | mawk '{print \$5;exit}') -j MASQUERADE
+PostDown = ip6tables -D FORWARD -i %i -j ACCEPT; ip6tables -t nat -D POSTROUTING -o \$(ip r l 0/0 | mawk '{print \$5;exit}') -j MASQUERADE
+
+# Client 1
+[Peer]
+PublicKey = $(<client_public.key)
+AllowedIPs = 10.9.0.2/32
+
+# Client 2
+#[Peer]
+#PublicKey = XXXX
+#AllowedIPs = 10.9.0.3/32
+_EOF_
+
+				# Server local network IP
+				local server_ip=$(G_GET_NET ip)
+
+				# Server DNS nameserver
+				local server_dns=$(mawk '/nameserver/{print $2;exit}' /etc/resolv.conf)
+				# - Replace "127.0.0.1"/"localhost" loopback entries by server wg0 IP: https://github.com/MichaIng/DietPi/issues/2482
+				server_dns=${server_dns//127.0.0.1/10.9.0.1}
+				server_dns=${server_dns//localhost/10.9.0.1}
+
+				# Client config
+				[[ -f 'wg0-client.conf' ]] || cat << _EOF_ > wg0-client.conf
+[Interface]
+Address = 10.9.0.2/24
+PrivateKey = $(<client_private.key)
+
+# Comment the following to preserve the clients default DNS server, or force a desired one.
+DNS = $server_dns
+
+# Kill switch: Uncomment the following, if the client should stop any network traffic, when disconnected from the VPN server
+# NB: This requires "iptables" to be installed, thus will not work on most mobile phones.
+#PostUp = iptables -I OUTPUT ! -o %i -m mark ! --mark \$(wg show %i fwmark) -m addrtype ! --dst-type LOCAL -j REJECT; ip6tables -I OUTPUT ! -o %i -m mark ! --mark \$(wg show %i fwmark) -m addrtype ! --dst-type LOCAL -j REJECT
+#PreDown = iptables -D OUTPUT ! -o %i -m mark ! --mark \$(wg show %i fwmark) -m addrtype ! --dst-type LOCAL -j REJECT; ip6tables -D OUTPUT ! -o %i -m mark ! --mark \$(wg show %i fwmark) -m addrtype ! --dst-type LOCAL -j REJECT
+
+[Peer]
+PublicKey = $(<server_public.key)
+# Tunnel all network traffic through the VPN:
+#	AllowedIPs = 0.0.0.0/0, ::/0
+# Tunnel access to server-side local network only:
+#	AllowedIPs = ${server_ip%.*}.0/24
+# Tunnel access to VPN server only:
+#	AllowedIPs = $server_ip/32
+AllowedIPs = 0.0.0.0/0, ::/0
+Endpoint = $domain:$port
+
+# Uncomment the following, if you're behind a NAT and want the connection to be kept alive.
+#PersistentKeepalive = 25
+_EOF_
+				# Set umask back to default 022
+				umask 022
+
+				# Navigate back to DietPi-Software working dir
+				G_EXEC cd "$G_WORKING_DIR"
+
+				# Use wg-quick@.service to start VPN on boot
+				G_EXEC systemctl enable wg-quick@wg0
+				# - Start now if module is active already
+				(( $module_active )) && G_EXEC systemctl start wg-quick@wg0
+
+			# Client choice
+			elif [[ $G_WHIP_RETURNED_VALUE == 'Client' ]]; then
+
+				G_AGI resolvconf # Use by wg-quick to apply DNS in client setup
+				G_WHIP_MSG '[ INFO ] WireGuard client setup has been chosen\n
+Please follow the instructions of your VPN provider to configure WireGuard.\n
+If no WireGuard (auto)start is included, but you require it, please do the following:
+1. Check for the created config file/interface name:
+	ls -Al /etc/wireguard/
+   It has a ".conf" file ending, lets assume "wg0-client.conf".
+2. To start the VPN interface, run:
+	systemctl start wg-quick@wg0-client
+3. To autostart the VPN interface on boot, run:
+	systemctl enable wg-quick@wg0-client
+4. To disable autostart again, run:
+	systemctl disable wg-quick@wg0-client'
+
+			fi
+
+			(( $module_active )) || G_WHIP_MSG '[ INFO ] WireGuard install finished\n\nNB: WireGuard has been successfully installed, but a reboot is required, before it can be started.'
+
+			unset -v module_active choice_required domain port invalid_text server_ip
+
+		fi
+
 	}
 
 	# $1: 0=None -1=Dropbear -2=OpenSSH
@@ -15761,9 +15744,6 @@ _EOF_
 		# Unmark software which requires user input during automated installs
 		Unmark_Unattended
 
-		# Unmark software which loads kernel modules on install, if the loaded kernel version is not installed anymore
-		Unmark_On_Missing_Kernel_Modules
-
 		# Unmark conflicting software if not done after interactive software selection already
 		(( $CONFLICTS_RESOLVED )) || Unmark_Conflicts
 
@@ -15789,29 +15769,20 @@ _EOF_
 		# Check for network connectivity, DNS resolving and network time sync: https://github.com/MichaIng/DietPi/issues/786
 		Check_Net_and_Time_sync
 
+		# Pre-create directories which are required for many software installs
+		Create_Required_Dirs
+
+		# Read global software password
+		Update_Global_Pw
+
 		# Unmask all services: https://github.com/MichaIng/DietPi/issues/1320
 		/boot/dietpi/dietpi-services unmask
 
 		# Stop all services
 		[[ $G_SERVICE_CONTROL == 0 ]] || /boot/dietpi/dietpi-services stop
 
-		# Update package cache
-		G_AGUP
-
-		# Full package upgrade on first run installs: https://github.com/MichaIng/DietPi/issues/3098
-		if (( $G_DIETPI_INSTALL_STAGE != 2 ))
-		then
-			G_AGDUG
-
-			# Check again for missing kernel modules after full package upgrade
-			Unmark_On_Missing_Kernel_Modules
-		fi
-
-		# Pre-create directories which are required for many software installs
-		Create_Required_Dirs
-
-		# Read global software password
-		Update_Global_Pw
+		# Update package cache: Skip when flag was set by first run setup
+		[[ -f '.skip_apt_update' ]] || G_AGUP
 
 		# Install software
 		Install_Software
@@ -16005,6 +15976,19 @@ This requires an account at: https://remote.it/
 				reboot
 			fi
 
+		fi
+
+		# Full package upgrade on first run installs: https://github.com/MichaIng/DietPi/issues/3098
+		if [[ ! -f '/boot/dietpi/.skip_distro_upgrade' ]]
+		then
+			G_AGUP
+			# Create flag to not repeat G_AGUP
+			G_EXEC eval '> .skip_apt_update'
+			G_AGDUG
+			# Create a persistent flag to not repeat G_AGDUG and rule out a reboot loop
+			G_EXEC eval '> /boot/dietpi/.skip_distro_upgrade'
+			# Perform a reboot if required as of missing kernel modules
+			G_CHECK_KERNEL || { G_DIETPI-NOTIFY 2 'A reboot is done to finalise the kernel upgrade'; reboot; }
 		fi
 
 		# Global PW
@@ -16233,7 +16217,10 @@ This requires an account at: https://remote.it/
 
 		# Set install stage to finished
 		G_DIETPI_INSTALL_STAGE=2
-		echo $G_DIETPI_INSTALL_STAGE > /boot/dietpi/.install_stage
+		G_EXEC eval 'echo $G_DIETPI_INSTALL_STAGE > /boot/dietpi/.install_stage'
+
+		# Remove now obsolete flag
+		[[ -f '/boot/dietpi/.skip_distro_upgrade' ]] && G_EXEC rm /boot/dietpi/.skip_distro_upgrade
 
 		G_DIETPI-NOTIFY 0 'Applied final first run setup steps'
 
@@ -16525,9 +16512,6 @@ This requires an account at: https://remote.it/
 			# Mark newly selected items for install
 			aSOFTWARE_INSTALL_STATE[$i]=1
 		done
-
-		# Unmark software which loads kernel modules on install, if the loaded kernel version is not installed anymore
-		Unmark_On_Missing_Kernel_Modules
 
 		# Unmark conflicting software
 		Unmark_Conflicts
@@ -17313,6 +17297,15 @@ List of installed software and their online documentation URLs:
 	#/////////////////////////////////////////////////////////////////////////////////////
 	# Main Loop
 	#/////////////////////////////////////////////////////////////////////////////////////
+	# Abort if a reboot is required as of missing kernel modules
+	if ! G_CHECK_KERNEL
+	then
+		G_WHIP_BUTTON_CANCEL_TEXT='Abort' G_WHIP_YESNO "[ INFO ] A reboot is required
+\nKernel modules for the loaded kernel at /lib/modules/$(uname -r) are missing. This is most likely the case as of a recently applied kernel upgrade where a reboot is required to load the new kernel.
+\nTo assure that $G_PROGRAM_NAME can run successfully, especially when performing installs, it is required that you perform a reboot so that kernel modules can be loaded ondemand.
+\nThere may be rare cases where no dedicated kernel modules are used but all require modules are builtin. If this is the case, please create the mentioned directory manually to proceed.
+\nDo you want to reboot now?" && reboot || exit 1
+	fi
 	# Init software arrays
 	Software_Arrays_Init
 	#-------------------------------------------------------------------------------------
