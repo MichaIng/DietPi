@@ -498,36 +498,33 @@
 		# Clonezilla target
 		else
 			G_DIETPI-NOTIFY 2 'Creating final image with Clonezilla'
+
 			# Install required packages
 			local patch=
 			[[ $FP_SOURCE == '/dev/loop'[0-9]* ]] && patch='patch'
 			G_AG_CHECK_INSTALL_PREREQ clonezilla partclone xorriso isolinux syslinux-common unzip curl pigz file $patch
 
-			# Download last version of Clonezilla Live
-			CLONEZILLA_VERSION=$(curl -s "$CLONEZILLA_REPO/" | grep 'class="folder "' | head -n1 | cut -d\" -f2)
-			if [[ -z "$CLONEZILLA_VERSION" ]]
-			then
-				G_DIETPI-NOTIFY 1 'Could not retrieve version number of last Clonezilla Live, aborting...'
-				exit 1
-			fi
-			CLONEZILLA_ZIP="clonezilla-live-${CLONEZILLA_VERSION}-amd64.zip"
-			CLONEZILLA_ZIP_URL="$CLONEZILLA_REPO/$CLONEZILLA_VERSION/$CLONEZILLA_ZIP/download"
-			CLONEZILLA_ZIP_SIZE=$(curl -sIL "$CLONEZILLA_ZIP_URL" | mawk '/^content-length:/{print $2}')
+			# Get latest version of Clonezilla Live alternative (Ubuntu based, for max compatibility with non-free drivers)
+			CLONEZILLA_VERSION=$(curl -sSf "$CLONEZILLA_REPO/" | mawk -F\" '/class="folder "/{print $2}' | head -1)
+			[[ "$CLONEZILLA_VERSION" ]] || { G_DIETPI-NOTIFY 1 'Could not retrieve version number of last Clonezilla Live, aborting...'; exit 1; }
+			CLONEZILLA_URL="$CLONEZILLA_REPO/$CLONEZILLA_VERSION/clonezilla-live-$CLONEZILLA_VERSION-amd64.zip/download"
 
-			# Check if there is enough free disk space to store Clonezilla, the final image and the 7z file
-			NEEDED_FREE_SPACE=$(( ( $CLONEZILLA_ZIP_SIZE + $IMAGE_SIZE * 23/100 ) * 2 / 1024**2 ))
+			# Check if there is sufficient free disk space to store Clonezilla, the final image and the 7z file
+			CLONEZILLA_SIZE=$(curl -sSfIL "$CLONEZILLA_URL" | mawk '/^[Cc]ontent-[Ll]ength:/{print $2}' | tail -1)
+			[[ "$CLONEZILLA_SIZE" ]] || { G_DIETPI-NOTIFY 1 'Could not retrieve download size of last Clonezilla Live, aborting...'; exit 1; }
+			NEEDED_FREE_SPACE=$(( ( $CLONEZILLA_SIZE + $IMAGE_SIZE * 23/100 ) * 2 / 1024**2 ))
 			G_CHECK_FREESPACE . $(( $NEEDED_FREE_SPACE + 100 )) || exit 1 # Assure +100 MiB left partition space
 
-			# Download Clonezilla Live
+			# Download
 			G_DIETPI-NOTIFY 2 "Downloading Clonezilla Live v$CLONEZILLA_VERSION..."
-			G_EXEC curl -sSfL "$CLONEZILLA_ZIP_URL" -o "$CLONEZILLA_ZIP"
+			G_EXEC curl -sSfL "$CLONEZILLA_URL" -o clonezilla.zip
 
-			# Extract Clonezilla Live
+			# Extract
 			[[ -e 'tmpiso' ]] && G_EXEC rm -R tmpiso
-			G_EXEC unzip "$CLONEZILLA_ZIP" -d 'tmpiso'
-			G_EXEC rm "$CLONEZILLA_ZIP"
+			G_EXEC unzip clonezilla.zip -d 'tmpiso'
+			G_EXEC rm clonezilla.zip
 
-			# Patch installed Clonezilla package to enable loop device support when required
+			# Patch installed Clonezilla package to enable loop device support if required
 			[[ $FP_SOURCE == '/dev/loop'[0-9]* ]] && patch /usr/share/drbl/sbin/ocs-functions <(cat << '_EOF_'
 --- a/ocs-functions     2022-02-20 23:03:55.536013907 +0100
 +++ b/ocs-functions     2022-02-20 23:37:05.340056744 +0100
@@ -646,7 +643,7 @@
        # Process /dev/sda1 -> /dev/nvme0n1p1 first
 _EOF_
 )
-			# Clone disk with Clonezilla
+			# Clone disk
 			G_EXEC mkdir -p tmpiso/home/partimag
 			G_EXEC_DESC='Cloning disk with Clonezilla' G_EXEC_OUTPUT=1 G_EXEC ocs-sr -or "$PWD/tmpiso/home/partimag" -nogui -fsck-y -q2 -b -j2 -z1p -i 4096 -senc -sc savedisk "$OUTPUT_IMG_NAME" "${FP_SOURCE##*/}"
 
@@ -658,8 +655,8 @@ _EOF_
 			G_EXEC_OUTPUT=1 G_EXEC ocs-chkimg -or "$PWD/tmpiso/home/partimag" -nogui -b "$OUTPUT_IMG_NAME"
 
 			# Prepare custom files used by the installer when booting in UEFI mode
-			G_EXEC curl -sSfL "$DIETPI_REPO"/.meta/images/dietpi-background_768p.png -o tmpiso/boot/grub/dietpibg.png
-			G_EXEC curl -sSfL "$DIETPI_REPO"/.meta/images/select_bkg_c.png -o tmpiso/boot/grub/select_bkg_c.png
+			G_EXEC curl -sSfL "$DIETPI_REPO/.meta/images/dietpi-background_768p.png" -o tmpiso/boot/grub/dietpibg.png
+			G_EXEC curl -sSfL "$DIETPI_REPO/.meta/images/select_bkg_c.png" -o tmpiso/boot/grub/select_bkg_c.png
 			cat << '_EOF_' > tmpiso/boot/grub/theme.txt
 title-text: ""
 desktop-image: "dietpibg.png"
@@ -694,7 +691,7 @@ submenu "Clonezilla live" {
 menuentry "Power off" { halt }
 _EOF_
 			# Prepare custom files used by the installer when booting in BIOS/CSM mode
-			G_EXEC curl -sSfL "$DIETPI_REPO"/.meta/images/dietpi-background_480p.png -o tmpiso/syslinux/dietpibg.png
+			G_EXEC curl -sSfL "$DIETPI_REPO/.meta/images/dietpi-background_480p.png" -o tmpiso/syslinux/dietpibg.png
 			G_EXEC cp /usr/lib/syslinux/modules/bios/poweroff.c32 tmpiso/syslinux/
 			G_EXEC mv tmpiso/syslinux/{syslinux,clonezilla}.cfg
 			sed -i 's|\(MENU TITLE\) .*|\1 Clonezilla live|' tmpiso/syslinux/clonezilla.cfg
@@ -727,12 +724,12 @@ MENU END
 _EOF_
 			G_EXEC cp tmpiso/syslinux/{syslinux,isolinux}.cfg
 
-			# Generate new ISO file with Clonezilla Live + DietPi image
+			# Generate ISO file with Clonezilla Live + DietPi image
 			G_DIETPI-NOTIFY 2 "Generating $OUTPUT_IMG_NAME.$OUTPUT_IMG_EXT..."
 			xorriso -as mkisofs -R -r -J -joliet-long -l -iso-level 3 \
 				-isohybrid-mbr /usr/lib/ISOLINUX/isohdpfx.bin -partition_offset 16 \
 				-publisher 'DietPi - Lightweight justice for your SBC; https://dietpi.com/;' -volid 'DIETPI_INSTALLER' \
-				-A "clonezilla-live-${CLONEZILLA_VERSION}-amd64" \
+				-A "clonezilla-live-$CLONEZILLA_VERSION-amd64" \
 				-b syslinux/isolinux.bin -c syslinux/boot.cat -no-emul-boot -boot-load-size 4 \
 				-boot-info-table -eltorito-alt-boot --efi-boot boot/grub/efi.img -isohybrid-gpt-basdat \
 				-isohybrid-apm-hfsplus tmpiso > "$OUTPUT_IMG_NAME.$OUTPUT_IMG_EXT" || exit 1
