@@ -52,6 +52,7 @@ do
 		'-v') shift; VMTYPE=$1;;
 		'-b') shift; GITBRANCH=$1;;
 		'-o') shift; GITOWNER=$1;;
+		'-e') shift; EDITION=$1;;
 		*) G_DIETPI-NOTIFY 1 "Invalid input \"$1\", aborting..."; exit 1;;
 	esac
 	shift
@@ -77,6 +78,12 @@ if [[ $VMTYPE ]]
 then
 	[[ $HW_MODEL == 20 ]] || { G_DIETPI-NOTIFY 1 "Invalid option \"-v\" (virtual machine type) for hardware model \"$HW_MODEL\", aborting..."; exit 1; }
 	[[ $VMTYPE =~ ^(raw|vbox|vmware|esxi|hyperv|utm|all)$ ]] || { G_DIETPI-NOTIFY 1 "Invalid virtual machine type \"$VMTYPE\" passed, aborting..."; exit 1; }
+fi
+
+if [[ $EDITION ]]
+then
+	[[ $HW_MODEL == 0 ]] || { G_DIETPI-NOTIFY 1 "Invalid option \"-e\" (edition) for hardware model \"$HW_MODEL\", aborting..."; exit 1; }
+	[[ $EDITION =~ ^(Amiberry|all)$ ]] || { G_DIETPI-NOTIFY 1 "Invalid edition \"$EDITION\" passed, aborting..."; exit 1; }
 fi
 
 # Check for valid target architecture and set variables accordingly
@@ -299,10 +306,49 @@ G_EXEC losetup -d "$FP_LOOP"
 ##########################################
 # DietPi-Imager
 ##########################################
-# Do not pack and upload raw VM image, if not explicitly requested
+# Do not pack and upload raw VM image if not explicitly requested
 [[ $VMTYPE && ! $VMTYPE =~ ^(raw|all)$ ]] && SHRINK_ONLY='On' || SHRINK_ONLY='Off'
 export FP_ROOT_DEV CLONING_TOOL OUTPUT_IMG_NAME MOUNT_IT='Off' SHRINK_ONLY
-bash -c "$(curl -sSf "https://raw.githubusercontent.com/$G_GITOWNER/DietPi/$G_GITBRANCH/.meta/dietpi-imager")" 'DietPi-Imager' "$OUTPUT_IMG_NAME.img" || exit 1
+[[ $EDITION && $EDITION != 'all' ]] || bash -c "$(curl -sSf "https://raw.githubusercontent.com/$G_GITOWNER/DietPi/$G_GITBRANCH/.meta/dietpi-imager")" 'DietPi-Imager' "$OUTPUT_IMG_NAME.img" || exit 1
+
+#  Amiberry edition: Install automatically on first boot, enable autostart option and onboard audio on RPi
+if [[ $EDITION =~ ^(Amiberry|all)$ ]]
+then
+	G_EXEC mv "$OUTPUT_IMG_NAME.img" "${OUTPUT_IMG_NAME}_Amiberry.img"
+	OUTPUT_IMG_NAME="${OUTPUT_IMG_NAME}_Amiberry"
+
+	# Create loop device
+	FP_LOOP=$(losetup -f)
+	G_EXEC losetup "$FP_LOOP" "$OUTPUT_IMG_NAME.img"
+	G_EXEC partprobe "$FP_LOOP"
+	G_EXEC partx -u "$FP_LOOP"
+
+	# Mount filesystems
+	G_EXEC mkdir rootfs
+	if (( $boot_size ))
+	then
+		G_EXEC mount "${FP_LOOP}p2" rootfs
+		G_EXEC mount "${FP_LOOP}p1" rootfs/boot
+	else
+		G_EXEC mount "${FP_LOOP}p1" rootfs
+	fi
+
+	# Install Amiberry via automated first run setup
+	G_EXEC sed -i '/^AUTO_SETUP_AUTOMATED=/c\AUTO_SETUP_AUTOMATED=1' rootfs/boot/dietpi.txt
+	G_EXEC sed -i '/^#AUTO_SETUP_INSTALL_SOFTWARE_ID=/c\AUTO_SETUP_INSTALL_SOFTWARE_ID=108' rootfs/boot/dietpi.txt
+	# Enable Amiberry fast boot autostart option
+	G_EXEC sed -i '/^AUTO_SETUP_AUTOSTART_TARGET_INDEX=/c\AUTO_SETUP_AUTOSTART_TARGET_INDEX=6' rootfs/boot/dietpi.txt
+	# RPi: Enable onboard audio so that it can be detected and configured on first boot
+	[[ -f 'rootfs/boot/config.txt' ]] && G_EXEC sed -i '/^dtparam=audio=/c\dtparam=audio=on' rootfs/boot/config.txt
+
+	G_EXEC sync
+	G_EXEC sleep 1
+	G_EXEC umount -R rootfs
+	G_EXEC rmdir rootfs
+	G_EXEC losetup -d "$FP_LOOP"
+
+	bash -c "$(curl -sSf "https://raw.githubusercontent.com/$G_GITOWNER/DietPi/$G_GITBRANCH/.meta/dietpi-imager")" 'DietPi-Imager' "$OUTPUT_IMG_NAME.img" || exit 1
+fi
 
 [[ $VMTYPE ]] || exit 0
 
