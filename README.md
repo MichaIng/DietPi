@@ -229,9 +229,9 @@ Links to hardware and software manufacturers, sources and build instructions use
 - [Nextcloud](https://github.com/nextcloud/server)
 - [ownCloud](https://github.com/owncloud/core)
 - [Syncthing](https://github.com/syncthing/syncthing)
-- [MiniDLNA](https://sourceforge.net/p/minidlna/git/ci/master/tree/)
+- [ReadyMedia](https://sourceforge.net/p/minidlna/git/ci/master/tree/)
 - [MPD](https://github.com/MusicPlayerDaemon/MPD)
-- [YMPD](https://github.com/notandy/ympd)
+- [ympd](https://github.com/notandy/ympd)
 - [myMPD](https://github.com/jcorporation/myMPD)
 - [Apache](https://github.com/apache)
 - [Nginx](https://hg.nginx.org/nginx/)
@@ -253,7 +253,6 @@ Links to hardware and software manufacturers, sources and build instructions use
 - [PiVPN](https://github.com/pivpn/pivpn)
 - [WireGuard](https://www.wireguard.com/)
 - [Amiberry](https://github.com/midwan/amiberry)
-- [RetroPie Setup Script](https://github.com/petrockblog/RetroPie-Setup)
 - [OpenTyrian](https://bitbucket.org/opentyrian/opentyrian/wiki/Home)
 - [RPi Cam Control](https://github.com/silvanmelchior/RPi_Cam_Web_Interface)
 - [Deluge](https://dev.deluge-torrent.org/wiki/Development#SourceCode)
@@ -271,6 +270,7 @@ Links to hardware and software manufacturers, sources and build instructions use
 - [Grafana](https://github.com/grafana/grafana)
 - [Clonezilla](https://gitlab.com/stevenshiau/clonezilla)
 - [Gitea](https://github.com/go-gitea/gitea)
+- [Gogs](https://github.com/gogs/gogs)
 - [Home Assistant](https://github.com/home-assistant/core)
 - [TasmoAdmin](https://github.com/reloxx13/TasmoAdmin)
 - [Domoticz](https://github.com/domoticz/domoticz)
@@ -309,7 +309,8 @@ Links to hardware and software manufacturers, sources and build instructions use
 - [Blynk Server](https://github.com/Peterkn2001/blynk-server)
 - [File Browser](https://github.com/filebrowser/filebrowser)
 - [Spotifyd](https://github.com/Spotifyd/spotifyd)
-- [DietPi-Dashboard](https://github.com/ravenclaw900/dietpi-dashboard)
+- [DietPi-Dashboard](https://github.com/ravenclaw900/dietpi-dashboard
+- [MicroK8s](https://github.com/canonical/microk8s)
 
 ---
 
