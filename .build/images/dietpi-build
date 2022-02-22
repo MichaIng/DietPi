@@ -13,14 +13,14 @@ else
 	. /tmp/dietpi-globals
 	G_EXEC_NOHALT=1 G_EXEC rm /tmp/dietpi-globals
 	export G_GITOWNER G_GITBRANCH G_HW_ARCH_NAME=$(uname -m)
-	case $G_HW_ARCH_NAME in
-		'armv6l') export G_HW_ARCH=1;;
-		'armv7l') export G_HW_ARCH=2;;
-		'aarch64') export G_HW_ARCH=3;;
-		'x86_64') export G_HW_ARCH=10;;
-		*)  G_DIETPI-NOTIFY 1 "Unsupported host system architecture \"$G_HW_ARCH_NAME\" detected, aborting..."; exit 1;;
-	esac
 fi
+case $G_HW_ARCH_NAME in
+	'armv6l') export G_HW_ARCH=1; DEB_ARCH='armhf';;
+	'armv7l') export G_HW_ARCH=2; DEB_ARCH='armhf';;
+	'aarch64') export G_HW_ARCH=3; DEB_ARCH='arm64';;
+	'x86_64') export G_HW_ARCH=10; DEB_ARCH='amd64';;
+	*) G_DIETPI-NOTIFY 1 "Unsupported host system architecture \"$G_HW_ARCH_NAME\" detected, aborting..."; exit 1;;
+esac
 readonly G_PROGRAM_NAME='DietPi-Build'
 G_CHECK_ROOT_USER
 G_CHECK_ROOTFS_RW
@@ -77,7 +77,7 @@ esac
 if [[ $VMTYPE ]]
 then
 	[[ $HW_MODEL == 20 ]] || { G_DIETPI-NOTIFY 1 "Invalid option \"-v\" (virtual machine type) for hardware model \"$HW_MODEL\", aborting..."; exit 1; }
-	[[ $VMTYPE =~ ^(raw|vbox|vmware|esxi|hyperv|utm|all)$ ]] || { G_DIETPI-NOTIFY 1 "Invalid virtual machine type \"$VMTYPE\" passed, aborting..."; exit 1; }
+	[[ $VMTYPE =~ ^(raw|vbox|vmware|esxi|hyperv|utm|parallels|all)$ ]] || { G_DIETPI-NOTIFY 1 "Invalid virtual machine type \"$VMTYPE\" passed, aborting..."; exit 1; }
 fi
 
 if [[ $EDITION ]]
@@ -139,9 +139,9 @@ then
 	apackages+=('qemu-user-static' 'binfmt-support')
 	# On Ubuntu Focal, install newer QEMU package: https://bugs.debian.org/cgi-bin/bugreport.cgi?bug=964289
 	# Use package from Debian repo, since Ubuntu does not shot ARM packages and has no global HTTPS mirror director
-	if grep -iq 'focal' /etc/os-release
+	if (( ${G_DISTRO:=5} < 6 ))
 	then
-		G_EXEC curl -fL 'https://deb.debian.org/debian/pool/main/q/qemu/qemu-user-static_6.2+dfsg-2_amd64.deb' -o qemu.deb
+		G_EXEC curl -fL "https://deb.debian.org/debian/pool/main/q/qemu/qemu-user-static_6.2+dfsg-2_$DEB_ARCH.deb" -o qemu.deb
 		G_EXEC dpkg -i qemu.deb
 		G_EXEC rm qemu.deb
 	fi
@@ -151,6 +151,19 @@ fi
 [[ $VMTYPE && $VMTYPE != 'raw' ]] && apackages+=('qemu-utils')
 
 G_AG_CHECK_INSTALL_PREREQ parted debootstrap dbus systemd-container "${apackages[@]}"
+
+# Parallels VM: A new qemu-utils build is required which supports PVM virtual disks
+if [[ $VMTYPE == 'parallels' && ${G_DISTRO:=5} -lt 7 ]]
+then
+	if (( $G_DISTRO == 6 ))
+	then
+		G_AGI -t bullseye-backports qemu-utils
+	else
+		G_EXEC curl -fL "https://deb.debian.org/debian/pool/main/q/qemu/qemu-utils_6.2+dfsg-2~bpo11+1_$DEB_ARCH.deb" -o qemu-utils.deb
+		G_EXEC dpkg -i --force-depends qemu-utils.deb
+		G_EXEC rm qemu-utils.deb
+	fi
+fi
 
 # Bootstrap archive keyring if missing
 if [[ ! -f $keyring ]]
@@ -246,11 +259,10 @@ fi
 ##########################################
 # debootstrap
 ##########################################
-# Bootstrap
 G_EXEC_OUTPUT=1 G_EXEC debootstrap --variant=minbase --exclude="gcc-7-base,gcc-8-base,gcc-9-base$exclude" --include='bash-completion,bzip2,ca-certificates,console-setup,cron,curl,dropbear,ethtool,fake-hwclock,fdisk,gnupg,htop,ifupdown,isc-dhcp-client,kmod,locales,nano,p7zip,parted,procps,psmisc,rfkill,sudo,systemd-sysv,systemd-timesyncd,tzdata,udev,unzip,usbutils,wget,whiptail' --arch="$parch" --keyring="$keyring" "$distro" ./rootfs "$repo"
 
 # Remove cached archives and list files created by debootstrap
-G_EXEC rm -Rf rootfs/var/{cache/apt,lib/apt/lists}/*
+G_EXEC rm -R rootfs/var/{cache/apt,lib/apt/lists}/*
 
 ##########################################
 # DietPi-PREP
@@ -420,7 +432,7 @@ ethernet0.present = "TRUE"
 extendedConfigFile = "$image_name.vmxf"
 floppy0.present = "FALSE"
 _EOF_
-	G_DIETPI-NOTIFY 2 'Generating hashes to pack with VMware image, please wait...'
+	G_DIETPI-NOTIFY 2 'Generating hashes to pack with VMware appliance, please wait...'
 	cat << _EOF_ > hash.txt
 FILE:   $image_name.vmdk
 DATE:   $(date)
@@ -576,7 +588,7 @@ _EOF_
 	[[ $VMTYPE == 'all' ]] || G_EXEC rm "$image_name.vmdk"
 	G_EXEC rm "$image_name."{ovf,mf}
 
-	G_DIETPI-NOTIFY 2 'Generating hashes to pack with ESXi image, please wait...'
+	G_DIETPI-NOTIFY 2 'Generating hashes to pack with ESXi appliance, please wait...'
 	cat << _EOF_ > hash.txt
 FILE:   $image_name.ova
 DATE:   $(date)
@@ -736,7 +748,7 @@ _EOF_
 	G_EXEC tar -cf "$image_name.ova" "$image_name."{ovf,vmdk,mf}
 	G_EXEC rm "$image_name."{ovf,vmdk,mf}
 
-	G_DIETPI-NOTIFY 2 'Generating hashes to pack with VMware image, please wait...'
+	G_DIETPI-NOTIFY 2 'Generating hashes to pack with VMware appliance, please wait...'
 	cat << _EOF_ > hash.txt
 FILE:   $image_name.ova
 DATE:   $(date)
@@ -766,6 +778,26 @@ SHA256: $(sha256sum "$image_name.vhdx" | mawk '{print $1}')
 _EOF_
 	G_EXEC_DESC='Creating Hyper-V 7-Zip archive' G_EXEC_OUTPUT=1 G_EXEC 7zr a -bsp1 -bso1 -bse2 -m0=lzma2 -mx=9 $limit_threads "$image_name.7z" "$image_name.vhdx" hash.txt README.md
 	G_EXEC rm "$image_name.vhdx"
+	[[ -x 'upload.sh' ]] && G_EXEC_OUTPUT=1 G_EXEC ./upload.sh "$image_name.7z" && G_EXEC rm "$image_name.7z"
+fi
+
+####### Parallels ##########################
+if [[ $VMTYPE =~ ^(parallels|all)$ ]]
+then
+	image_name=${OUTPUT_IMG_NAME/_VM-/_Parallels-}
+	# Convert raw image to HDS
+	G_EXEC qemu-img convert -O parallels "$OUTPUT_IMG_NAME.img" "$image_name.hds"
+
+	G_DIETPI-NOTIFY 2 'Generating hashes to pack with Parallels image, please wait...'
+	cat << _EOF_ > hash.txt
+FILE:   $image_name.hds
+DATE:   $(date)
+MD5:    $(md5sum "$image_name.hds" | mawk '{print $1}')
+SHA1:   $(sha1sum "$image_name.hds" | mawk '{print $1}')
+SHA256: $(sha256sum "$image_name.hds" | mawk '{print $1}')
+_EOF_
+	G_EXEC_DESC='Creating Parallels 7-Zip archive' G_EXEC_OUTPUT=1 G_EXEC 7zr a -bsp1 -bso1 -bse2 -m0=lzma2 -mx=9 $limit_threads "$image_name.7z" "$image_name.hds" hash.txt README.md
+	G_EXEC rm "$image_name.hds"
 	[[ -x 'upload.sh' ]] && G_EXEC_OUTPUT=1 G_EXEC ./upload.sh "$image_name.7z" && G_EXEC rm "$image_name.7z"
 fi
 
@@ -927,7 +959,7 @@ _EOF_
 </dict>
 </plist>
 _EOF_
-	G_DIETPI-NOTIFY 2 'Generating hashes to pack with UTM image, please wait...'
+	G_DIETPI-NOTIFY 2 'Generating hashes to pack with UTM appliance, please wait...'
 	cat << _EOF_ > hash.txt
 FILE:   $image_name.utm/Images/data.qcow2
 DATE:   $(date)
