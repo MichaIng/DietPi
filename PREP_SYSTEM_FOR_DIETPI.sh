@@ -1056,45 +1056,32 @@ _EOF_
 		G_EXEC apt-get clean # Remove downloaded archives
 
 		# - Firmware
-		if dpkg-query -s 'armbian-firmware' &> /dev/null; then
-
+		if dpkg-query -s 'armbian-firmware' &> /dev/null
+		then
 			aPACKAGES_REQUIRED_INSTALL+=('armbian-firmware')
 
 		# - Do not install additional firmware on Radxa Zero for now
 		elif [[ $G_HW_MODEL != 74 ]]
 		then
-
 			# Usually no firmware should be necessary for VMs. If user manually passes though some USB device, user might need to install the firmware then.
-			if (( $G_HW_MODEL != 20 )); then
-
-				aPACKAGES_REQUIRED_INSTALL+=('firmware-realtek')		# Realtek Eth+WiFi+BT dongle firmware
-				if (( $G_HW_ARCH == 10 )); then
-
-					aPACKAGES_REQUIRED_INSTALL+=('firmware-linux')		# Misc free+nonfree firmware
-
-				else
-
-					aPACKAGES_REQUIRED_INSTALL+=('firmware-linux-free')	# Misc free firmware
-					aPACKAGES_REQUIRED_INSTALL+=('firmware-misc-nonfree')	# Misc nonfree firmware + Ralink WiFi
-
-				fi
-
+			if (( $G_HW_MODEL != 20 ))
+			then
+				aPACKAGES_REQUIRED_INSTALL+=('firmware-realtek')		# Realtek Eth+WiFi/BT firmware
+				aPACKAGES_REQUIRED_INSTALL+=('firmware-linux-free')		# Misc free firmware
+				aPACKAGES_REQUIRED_INSTALL+=('firmware-misc-nonfree')		# Misc non-free firmware incl. Ralink and MediaTek WiFi/BT
 			fi
 
-			if (( $WIFI_REQUIRED )); then
-
-				aPACKAGES_REQUIRED_INSTALL+=('firmware-atheros')		# Qualcomm/Atheros WiFi+BT dongle firmware
-				aPACKAGES_REQUIRED_INSTALL+=('firmware-brcm80211')		# Broadcom WiFi dongle firmware
-				aPACKAGES_REQUIRED_INSTALL+=('firmware-iwlwifi')		# Intel WiFi dongle+PCIe firmware
-				if (( $G_HW_MODEL == 20 )); then
-
-					aPACKAGES_REQUIRED_INSTALL+=('firmware-realtek')	# Realtek Eth+WiFi+BT dongle firmware
-					aPACKAGES_REQUIRED_INSTALL+=('firmware-misc-nonfree')	# Misc nonfree firmware + Ralink WiFi
-
+			if (( $WIFI_REQUIRED ))
+			then
+				aPACKAGES_REQUIRED_INSTALL+=('firmware-atheros')		# Qualcomm/Atheros WiFi/BT firmware
+				aPACKAGES_REQUIRED_INSTALL+=('firmware-brcm80211')		# Broadcom WiFi/BT firmware
+				aPACKAGES_REQUIRED_INSTALL+=('firmware-iwlwifi')		# Intel WiFi/BT firmware
+				if (( $G_HW_MODEL == 20 ))
+				then
+					aPACKAGES_REQUIRED_INSTALL+=('firmware-realtek')	# Realtek Eth+WiFi/BT firmware
+					aPACKAGES_REQUIRED_INSTALL+=('firmware-misc-nonfree')	# Misc non-free firmware incl. Ralink and MediaTek WiFi/BT
 				fi
-
 			fi
-
 		fi
 
 		G_DIETPI-NOTIFY 2 'Generating list of minimal packages, required for DietPi installation'
@@ -1599,13 +1586,6 @@ _EOF_'
 
 			G_EXEC_DESC='Removing foreign i386 DPKG architecture' G_EXEC dpkg --remove-architecture i386
 
-			# Disable nouveau: https://github.com/MichaIng/DietPi/issues/1244 // https://dietpi.com/phpbb/viewtopic.php?p=9688#p9688
-			G_EXEC rm -f /etc/modprobe.d/*nouveau*
-			cat << '_EOF_' > /etc/modprobe.d/dietpi-disable_nouveau.conf
-blacklist nouveau
-options nouveau modeset=0
-alias nouveau off
-_EOF_
 			# Fix grub install device: https://github.com/MichaIng/DietPi/issues/3700
 			dpkg-query -s grub-pc &> /dev/null && G_EXEC eval "debconf-set-selections <<< 'grub-pc grub-pc/install_devices multiselect /dev/sda'"
 
@@ -1773,9 +1753,6 @@ _EOF_
 				/etc/kernel/postinst.d/dietpi-USBridgeSig "$i"
 			done
 			G_EXEC sed -i 's/^#grep/grep/' /etc/kernel/postinst.d/dietpi-USBridgeSig
-
-			# Create RPi Zero 2 W device tree if not existent
-			[[ -f '/boot/bcm2710-rpi-zero-2.dtb' ]] || G_EXEC cp -a /boot/bcm2710-rpi-{3-b,zero-2}.dtb
 
 			# For backwards compatibility with software compiled against older libraspberrypi0, create symlinks from old to new filenames
 			if (( $G_HW_ARCH < 3 ))
