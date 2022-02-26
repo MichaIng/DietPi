@@ -195,6 +195,9 @@ INDEX_BROWSER=$INDEX_BROWSER"
 	# Is the WireGuard kernel module natively shipped by the kernel package?
 	WIREGUARD_BUILTIN=0
 
+	# Whether to restart Deluge web UI once, required on fresh installs for auto-connection to work, more precisely a little delay between daemon and web UI is required
+	RESTART_DELUGE_WEB=0
+
 	# PHP version
 	PHP_VERSION='7.4'
 	if (( $G_DISTRO < 6 ))
@@ -2904,13 +2907,10 @@ _EOF_
 			else
 				G_AGI dropbear-run
 			fi
+			aSTART_SERVICES+=('dropbear')
 
 			# Enable Dropbear daemon
 			G_CONFIG_INJECT 'NO_START=' 'NO_START=0' /etc/default/dropbear
-
-			# Failsafe: Enable Dropbear service
-			G_EXEC systemctl enable dropbear
-			aSTART_SERVICES+=('dropbear')
 
 			# Mark OpenSSH for uninstall
 			dpkg-query -s 'openssh-server' &> /dev/null && aSOFTWARE_INSTALL_STATE[105]=-1
@@ -2926,16 +2926,13 @@ _EOF_
 			systemctl -q is-active dropbear && G_EXEC systemctl stop dropbear
 
 			G_AGI openssh-server
+			aSTART_SERVICES+=('ssh')
 
 			# Allow root login
 			G_CONFIG_INJECT 'PermitRootLogin[[:blank:]]' 'PermitRootLogin yes' /etc/ssh/sshd_config
 
 			# Reload SSH server now so root users can login during setup
 			systemctl reload ssh
-
-			# Failsafe: Enable OpenSSH service
-			G_EXEC systemctl enable ssh
-			aSTART_SERVICES+=('ssh')
 
 			# Mark Dropbear for uninstall
 			grep -q '^dropbear[^[:blank:]]*[[:blank:]]' < <(dpkg --get-selections) && aSOFTWARE_INSTALL_STATE[104]=-1
@@ -3442,13 +3439,11 @@ _EOF_
 			Banner_Installing
 
 			G_AGI xrdp xorgxrdp
+			aSTART_SERVICES+=('xrdp')
 
 			# Workaround for failing mouse and keyboard input: https://github.com/neutrinolabs/xorgxrdp/issues/164
 			# - Solved on Bookworm, but G_CONFIG_INJECT detects and skips it then, and keeping it covers dist-upgraded systems.
 			GGI_PRESERVE=1 G_CONFIG_INJECT 'Option[[:blank:]]+"DefaultServerLayout"' '    Option "DefaultServerLayout" "X11 Server"' /etc/X11/xrdp/xorg.conf 'Section[[:blank:]]+"ServerFlags"'
-
-			G_EXEC systemctl enable xrdp
-			aSTART_SERVICES+=('xrdp')
 
 		fi
 
@@ -3457,7 +3452,6 @@ _EOF_
 
 			Banner_Installing
 			Download_Install "https://dietpi.com/downloads/binaries/all/nomachine_$G_HW_ARCH_NAME.deb"
-			G_EXEC systemctl enable nxserver
 			aSTART_SERVICES+=('nxserver')
 
 		fi
@@ -3529,7 +3523,6 @@ StandardOutput=journal
 WantedBy=multi-user.target
 _EOF_
 			# Service needs to be started by systemd, as dietpi-services must not control it to prevent it from stopping during software installs done via dashboard itself.
-			G_EXEC systemctl enable dietpi-dashboard
 			aSTART_SERVICES+=('dietpi-dashboard')
 
 		fi
@@ -4227,7 +4220,7 @@ _EOF_
 				# Register new user (interactive)
 				G_EXEC systemctl daemon-reload
 				G_EXEC systemctl start synapse
-				G_EXEC_OUTPUT=1 G_EXEC register_new_matrix_user -c homeserver.yaml http://127.0.0.1:8008
+				G_EXEC_OUTPUT=1 G_EXEC register_new_matrix_user -c homeserver.yaml 'http://127.0.0.1:8008'
 
 				G_EXEC cd "$G_WORKING_DIR"
 			else
@@ -5984,6 +5977,7 @@ _EOF_
 				# Default configs
 				dps_index=$software_id Download_Install 'deluge.conf' /mnt/dietpi_userdata/deluge/.config/deluge/core.conf
 				dps_index=$software_id Download_Install 'deluge_web.conf' /mnt/dietpi_userdata/deluge/.config/deluge/web.conf
+				dps_index=$software_id Download_Install 'hostlist.conf' /mnt/dietpi_userdata/deluge/.config/deluge/hostlist.conf
 
 				# Apply optimised settings
 				# - Cache size in 16 KiB units
@@ -5998,11 +5992,19 @@ _EOF_
 				GCI_PASSWORD=1 G_CONFIG_INJECT '"pwd_salt":' "    \"pwd_salt\": \"$salt\"," /mnt/dietpi_userdata/deluge/.config/deluge/web.conf
 				GCI_PASSWORD=1 G_CONFIG_INJECT '"pwd_sha1":' "    \"pwd_sha1\": \"$(echo -n "$salt$GLOBAL_PW" | sha1sum | mawk '{print $1}')\"," /mnt/dietpi_userdata/deluge/.config/deluge/web.conf
 
-				# Remote access
+				# Client access
 				local localpass=$(tr -dc '0-9a-f' < /dev/random | head -c40)
 				> /mnt/dietpi_userdata/deluge/.config/deluge/auth
 				G_EXEC chmod 0600 /mnt/dietpi_userdata/deluge/.config/deluge/auth
 				echo -e "root:$GLOBAL_PW:10\nlocalclient:$localpass:10" > /mnt/dietpi_userdata/deluge/.config/deluge/auth
+
+				# Web UI autoconnect
+				local id=$(tr -dc '0-9a-f' < /dev/random | head -c32)
+				G_EXEC chmod 0600 /mnt/dietpi_userdata/deluge/.config/deluge/hostlist.conf
+				G_CONFIG_INJECT '"[0-9a-f]{32}"' "            \"$id\"," /mnt/dietpi_userdata/deluge/.config/deluge/hostlist.conf
+				sed -i "/\"[0-9a-f]\{40\}\"/c\            \"$localpass\"" /mnt/dietpi_userdata/deluge/.config/deluge/hostlist.conf
+				G_CONFIG_INJECT '"default_daemon":' "    \"default_daemon\": \"$id\"," /mnt/dietpi_userdata/deluge/.config/deluge/web.conf
+				RESTART_DELUGE_WEB=1
 			fi
 
 			# Permissions
@@ -6738,7 +6740,6 @@ RestartSec=5
 WantedBy=multi-user.target
 _EOF_
 			# AdGuard Home service needs to be started by systemd, as dietpi-services must not control it to prevent it from killing the systems own DNS server.
-			G_EXEC systemctl enable adguardhome
 			aSTART_SERVICES+=('adguardhome')
 
 		fi
@@ -7643,8 +7644,6 @@ ExecStop=/usr/local/bin/vncserver stop
 [Install]
 WantedBy=multi-user.target
 _EOF_
-			G_EXEC systemctl daemon-reload
-			G_EXEC systemctl enable vncserver
 			aSTART_SERVICES+=('vncserver')
 
 			# RealVNC: Assure that its services are disabled when ours is enabled
@@ -8136,6 +8135,7 @@ _EOF_
 			G_AGI openvpn iptables
 			Remove_SysV openvpn
 			Configure_iptables
+			aSTART_SERVICES+=('openvpn')
 
 			# Create initial server and client configs, if not yet present
 			# - Wildcard config file detection via for loop
@@ -8260,8 +8260,6 @@ _EOF_
 			#iptables -t nat -A POSTROUTING -s 10.8.0.0/24 -o "$(G_GET_NET iface)" -j MASQUERADE
 			#ip6tables -A FORWARD -i tun0 -j ACCEPT
 			#ip6tables -t nat -A POSTROUTING -o "$(G_GET_NET iface)" -j MASQUERADE
-
-			aSTART_SERVICES+=('openvpn')
 
 		fi
 
@@ -17336,12 +17334,15 @@ List of installed software and their online documentation URLs:
 
 	G_DIETPI-NOTIFY 3 "$G_PROGRAM_NAME" 'Install completed'
 
-	# Upload DietPi-Survey Data, if opted in, prompt user choice, if no settings file exists
-	# - Skip, if G_SERVICE_CONTROL == 0, which is exported by "patches" (DietPi-Update) which sends survey already
-	[[ $G_SERVICE_CONTROL == 0 ]] || /boot/dietpi/dietpi-survey 1
-
-	# Start services (restart to reload configs of possibly running services)
-	[[ $G_SERVICE_CONTROL == 0 ]] || /boot/dietpi/dietpi-services restart
+	# Upload DietPi-Survey data if opted in, prompt user choice if no settings file exists
+	# - Skip if G_SERVICE_CONTROL == 0, exported by "patches" (DietPi-Update) which sends survey already
+	# Start services, restart to reload configs of possibly running services
+	if [[ $G_SERVICE_CONTROL != 0 ]]
+	then
+		/boot/dietpi/dietpi-survey 1
+		/boot/dietpi/dietpi-services restart
+		(( $RESTART_DELUGE_WEB )) && { sleep 1; G_EXEC_NOHALT=1 G_EXEC systemctl restart deluge-web; }
+	fi
 
 	# Start installed services, not controlled by DietPi-Services
 	[[ ${aSTART_SERVICES[0]} ]] || exit 0
@@ -17349,6 +17350,7 @@ List of installed software and their online documentation URLs:
 	G_DIETPI-NOTIFY 2 'Starting installed services, not controlled by DietPi-Services'
 	for i in "${aSTART_SERVICES[@]}"
 	do
+		G_EXEC systemctl enable "$i"
 		G_EXEC_NOHALT=1 G_EXEC systemctl start "$i"
 	done
 	#-------------------------------------------------------------------------------------
