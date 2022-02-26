@@ -72,7 +72,7 @@
 	fi
 
 	# Workaround if SSH client sets an unsupported $TERM string: https://github.com/MichaIng/DietPi/issues/2034
-	if [[ $SSH_TTY ]] && ! infocmp "$TERM" &> /dev/null; then
+	if [[ $SSH_TTY && ! -f /lib/terminfo/${TERM::1}/$TERM ]]; then
 
 		TERM_old=$TERM
 		export TERM='xterm'

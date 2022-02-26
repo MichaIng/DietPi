@@ -422,31 +422,6 @@ _EOF_
 	local time_sync_mode=$(sed -n '/^[[:blank:]]*CONFIG_NTP_MODE=/{s/^[^=]*=//p;q}' /boot/dietpi.txt)
 	[[ $time_sync_mode == [123] ]] && G_EXEC systemctl enable systemd-timesyncd
 
-	# Apply cgroups-v2 workaround on Bullseye if the kernel does not support it: https://github.com/MichaIng/DietPi/issues/4705
-	if (( $G_DISTRO > 5 && ( $(uname -r | mawk -F'.' '{print $1}') < 4 || ( $(uname -r | mawk -F'.' '{print $1}') == 4 && $(uname -r | mawk -F'.' '{print $2}') < 15 ) ) ))
-	then
-		# Odroids
-		if [[ $G_HW_MODEL -gt 9 && $G_HW_MODEL -le 16 && -f '/boot/boot.ini' ]]
-		then
-			G_DIETPI-NOTIFY 2 'Forcing legacy cgroups v1 hierarchy on old kernel device'
-			grep -q 'systemd.unified_cgroup_hierarchy=0' /boot/boot.ini || G_EXEC sed -i '/^setenv bootargs "/s/"$/ systemd.unified_cgroup_hierarchy=0"/' /boot/boot.ini
-
-		# Sparky SBC
-		elif [[ $G_HW_MODEL == 70 && -f '/boot/uenv.txt' ]]
-		then
-			G_DIETPI-NOTIFY 2 'Forcing legacy cgroups v1 hierarchy on old kernel device'
-			grep -q 'systemd.unified_cgroup_hierarchy=0' /boot/uenv.txt || G_EXEC sed -i '/^bootargs=/s/$/ systemd.unified_cgroup_hierarchy=0/' /boot/uenv.txt
-
-		# ROCK Pi S
-		elif [[ $G_HW_MODEL == 73 && -f '/boot/boot.cmd' ]]
-		then
-			G_DIETPI-NOTIFY 2 'Forcing legacy cgroups v1 hierarchy on old kernel device'
-			grep -q 'systemd.unified_cgroup_hierarchy=0' /boot/boot.cmd || G_EXEC sed -i '/^setenv bootargs "/s/"$/ systemd.unified_cgroup_hierarchy=0"/' /boot/boot.cmd
-			G_AGI u-boot-tools
-			G_EXEC mkimage -C none -A arm64 -T script -d /boot/boot.cmd /boot/boot.scr
-		fi
-	fi
-
 	# Inform and offer to re-apply the ssh.dietpi.com host key if missing: https://github.com/MichaIng/DietPi/issues/4844
 	if [[ ! -f '/root/.ssh/known_hosts' ]] || ! grep -q '^ssh.dietpi.com' /root/.ssh/known_hosts && G_WHIP_DEFAULT_ITEM='yes' G_WHIP_YESNO '[WARNING] ssh.dietpi.com SSH/SFTP host key missing
 \nThe host key to connect to our SSH/SFTP server is missing on your system, which means that uploading bug reports and sending or purging survey data fails.
@@ -644,6 +619,67 @@ _EOF_
 
 	# Fix Home Assistant restart: https://dietpi.com/phpbb/viewtopic.php?t=10025
 	[[ -f '/etc/systemd/system/home-assistant.service' ]] && G_CONFIG_INJECT 'RestartForceExitStatus=100' 'RestartForceExitStatus=100' /etc/systemd/system/home-assistant.service '\[Service\]'
+}
+
+Patch_8_2()
+{
+	# Remove obsolete quotation from armbianEnv.txt
+	[[ -f '/boot/armbianEnv.txt' ]] && grep -q '^[[:blank:]]*extraargs="' /boot/armbianEnv.txt && G_EXEC sed -i -e 's/^[[:blank:]]*extraargs="[[:blank:]]*/extraargs=/' -e 's/[[:blank:]]*"[[:blank:]]*$//' /boot/armbianEnv.txt
+
+	# RPi: Remove multiple cgroup_enable=memory entries from cmdline.txt: https://github.com/MichaIng/DietPi/issues/5225#issuecomment-1033056312
+	[[ -f '/boot/cmdline.txt' ]] && while grep -q 'cgroup_enable=memory cgroup_enable=memory' /boot/cmdline.txt; do G_EXEC sed -i 's/cgroup_enable=memory cgroup_enable=memory/cgroup_enable=memory/g' /boot/cmdline.txt; done
+
+	# Apply cgroups-v2 workaround if the kernel does not support it: https://github.com/MichaIng/DietPi/issues/4705
+	# - This is required on Bullseye only, but we'll apply it on Buster as well to cover later distro upgrades, since the logic is too complicated for our upgrade blog article.
+	if (( $(uname -r | mawk -F'.' '{print $1}') < 4 || ( $(uname -r | mawk -F'.' '{print $1}') == 4 && $(uname -r | mawk -F'.' '{print $2}') < 15 ) ))
+	then
+		# Odroids
+		if [[ $G_HW_MODEL -gt 9 && $G_HW_MODEL -le 16 && -f '/boot/boot.ini' ]] && ! grep -q 'systemd.unified_cgroup_hierarchy=0' /boot/boot.ini
+		then
+			G_DIETPI-NOTIFY 2 'Forcing legacy cgroups v1 hierarchy on old kernel device'
+			G_EXEC sed -i '/^setenv bootargs "/s/"$/ systemd.unified_cgroup_hierarchy=0"/' /boot/boot.ini
+
+		# Sparky SBC
+		elif [[ $G_HW_MODEL == 70 && -f '/boot/uenv.txt' ]] && ! grep -q 'systemd.unified_cgroup_hierarchy=0' /boot/uenv.txt
+		then
+			G_DIETPI-NOTIFY 2 'Forcing legacy cgroups v1 hierarchy on old kernel device'
+			G_EXEC sed -i '/^bootargs=/s/$/ systemd.unified_cgroup_hierarchy=0/' /boot/uenv.txt
+
+		# ROCK Pi S
+		elif [[ $G_HW_MODEL == 73 && -f '/boot/boot.cmd' ]] && ! grep -q 'systemd.unified_cgroup_hierarchy=0' /boot/boot.cmd
+		then
+			G_DIETPI-NOTIFY 2 'Forcing legacy cgroups v1 hierarchy on old kernel device'
+			G_EXEC sed -i '/^setenv bootargs "/s/"$/ systemd.unified_cgroup_hierarchy=0"/' /boot/boot.cmd
+			G_AG_CHECK_INSTALL_PREREQ u-boot-tools
+			G_EXEC mkimage -C none -A arm64 -T script -d /boot/boot.cmd /boot/boot.scr
+		fi
+	fi
+
+	# Remove legacy PINE A64 patches from mainline kernel systems
+	if [[ $G_HW_MODEL == 40 && $(uname -r) == '5'* ]]
+	then
+		[[ -f '/etc/bashrc.d/dietpi-pine64-cursorfix.sh' ]] && G_EXEC rm /etc/bashrc.d/dietpi-pine64-cursorfix.sh
+		grep -q '^8723bs$' /etc/modules && G_EXEC sed -i '/^8723bs$/d' /etc/modules
+	fi
+
+	# Remove and migrate Chromium config files
+	[[ $G_HW_MODEL -gt 9 && -f '/root/.chromium-browser.init' ]] && G_EXEC rm /root/.chromium-browser.init
+	if [[ $G_DISTRO == 5 && $G_HW_MODEL -le 9 && -d '/etc/chromium.d' ]]
+	then
+		[[ -f '/etc/chromium.d/custom_flags' ]] && G_EXEC mv /etc/{chromium.d/custom_flags,chromium-browser/customizations/dietpi}
+		G_EXEC rm -R /etc/chromium.d
+	fi
+	[[ -f '/etc/chromium.d/custom_flags' ]] && G_EXEC mv /etc/chromium.d/{custom_flags,dietpi}
+
+	# Remove obsolete Nvidia install state
+	[[ -f '/boot/dietpi/.installed' ]] && grep -q '^[[:blank:]]*aSOFTWARE_INSTALL_STATE\[151\]=' /boot/dietpi/.installed && G_EXEC sed -i '/^[[:blank:]]*aSOFTWARE_INSTALL_STATE\[151\]=/d' /boot/dietpi/.installed
+
+	# Deluge: Apply autoconnect for web interface
+	if [[ -f '/mnt/dietpi_userdata/deluge/.config/deluge/hostlist.conf' && -f '/mnt/dietpi_userdata/deluge/.config/deluge/web.conf' ]] && grep -q '"default_daemon": "",' /mnt/dietpi_userdata/deluge/.config/deluge/web.conf
+	then
+		local id=$(mawk -F\" '/"[0-9a-f]+",/{print $2;exit}' /mnt/dietpi_userdata/deluge/.config/deluge/hostlist.conf)
+		G_CONFIG_INJECT '"default_daemon":' "    \"default_daemon\": \"$id\"," /mnt/dietpi_userdata/deluge/.config/deluge/web.conf
+	fi
 }
 
 # v6.35 => v7 migration

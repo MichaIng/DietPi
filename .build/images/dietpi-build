@@ -1,22 +1,36 @@
 #!/bin/bash
 # Created by MichaIng / micha@dietpi.com / dietpi.com
 {
+##########################################
 # Load DietPi-Globals
-. /boot/dietpi/func/dietpi-globals
+##########################################
+if [[ -f '/boot/dietpi/func/dietpi-globals' ]]
+then
+	. /boot/dietpi/func/dietpi-globals
+else
+	[[ $G_GITOWNER && $G_GITBRANCH ]] || { echo '[FAILED] You must export or pass G_GITOWNER and G_GITBRANCH to the script'; exit 1; }
+	curl -sSf "https://raw.githubusercontent.com/$G_GITOWNER/DietPi/$G_GITBRANCH/dietpi/func/dietpi-globals" -o /tmp/dietpi-globals || exit 1
+	. /tmp/dietpi-globals
+	G_EXEC_NOHALT=1 G_EXEC rm /tmp/dietpi-globals
+	export G_GITOWNER G_GITBRANCH G_HW_ARCH_NAME=$(uname -m)
+fi
+case $G_HW_ARCH_NAME in
+	'armv6l') export G_HW_ARCH=1; DEB_ARCH='armhf';;
+	'armv7l') export G_HW_ARCH=2; DEB_ARCH='armhf';;
+	'aarch64') export G_HW_ARCH=3; DEB_ARCH='arm64';;
+	'x86_64') export G_HW_ARCH=10; DEB_ARCH='amd64';;
+	*) G_DIETPI-NOTIFY 1 "Unsupported host system architecture \"$G_HW_ARCH_NAME\" detected, aborting..."; exit 1;;
+esac
 readonly G_PROGRAM_NAME='DietPi-Build'
 G_CHECK_ROOT_USER
 G_CHECK_ROOTFS_RW
 readonly FP_ORIGIN=$PWD # Store origin dir
 G_INIT
 G_EXEC cd "$FP_ORIGIN" # Process everything in origin dir instead of /tmp/$G_PROGRAM_NAME
-G_EXIT_CUSTOM(){
-	findmnt -M "$FP_ORIGIN/rootfs" &> /dev/null && G_EXEC umount -R "$FP_ORIGIN/rootfs"
-	[[ -d $FP_ORIGIN/rootfs ]] && G_EXEC rmdir "$FP_ORIGIN/rootfs"
-	losetup /dev/loop0 &> /dev/null && G_EXEC losetup -d /dev/loop0
-	(( $mask_dbus )) && G_EXEC systemctl mask --now dbus dbus.socket
-}
 
-# Inputs
+##########################################
+# Process inputs
+##########################################
 HW_MODEL=
 HW_ARCH=
 DISTRO=6 # 6=Bullseye, 7=Bookworm
@@ -25,6 +39,7 @@ FSTYPE='ext4'
 ITYPE=
 VMTYPE=
 GITBRANCH='master'
+GITOWNER='MichaIng'
 while (( $# ))
 do
 	case $1 in
@@ -36,6 +51,8 @@ do
 		'-i') ITYPE='Installer';;
 		'-v') shift; VMTYPE=$1;;
 		'-b') shift; GITBRANCH=$1;;
+		'-o') shift; GITOWNER=$1;;
+		'-e') shift; EDITION=$1;;
 		*) G_DIETPI-NOTIFY 1 "Invalid input \"$1\", aborting..."; exit 1;;
 	esac
 	shift
@@ -50,8 +67,9 @@ root_size=1023
 CLONING_TOOL='dd'
 case $HW_MODEL in
 	0) iname='RPi' partition_start=4 boot_size=128 root_size=892;;
-	15) iname='OdroidN2' partition_start=4 root_size=768;;
-	20) iname='VM' WIFI_REQUIRED=0 VMTYPE=${VMTYPE:-raw};;
+	15) iname='OdroidN2' HW_ARCH=3 partition_start=4 root_size=764;;
+	16) iname='OdroidC4' HW_ARCH=3 partition_start=4 root_size=764;;
+	20) iname='VM' WIFI_REQUIRED=0 HW_ARCH=${HW_ARCH:-10} VMTYPE=${VMTYPE:-raw};;
 	21) iname='NativePC-BIOS' HW_ARCH=10 root_size=1215;;
 	*) G_DIETPI-NOTIFY 1 "Invalid hardware model \"$HW_MODEL\" passed, aborting..."; exit 1;;
 esac
@@ -59,7 +77,13 @@ esac
 if [[ $VMTYPE ]]
 then
 	[[ $HW_MODEL == 20 ]] || { G_DIETPI-NOTIFY 1 "Invalid option \"-v\" (virtual machine type) for hardware model \"$HW_MODEL\", aborting..."; exit 1; }
-	[[ $VMTYPE =~ ^(vbox|vmware|hyperv|all)$ ]] || { G_DIETPI-NOTIFY 1 "Invalid virtual machine type \"$VMTYPE\" passed, aborting..."; exit 1; }
+	[[ $VMTYPE =~ ^(raw|vbox|vmware|esxi|hyperv|utm|parallels|all)$ ]] || { G_DIETPI-NOTIFY 1 "Invalid virtual machine type \"$VMTYPE\" passed, aborting..."; exit 1; }
+fi
+
+if [[ $EDITION ]]
+then
+	[[ $HW_MODEL == 0 ]] || { G_DIETPI-NOTIFY 1 "Invalid option \"-e\" (edition) for hardware model \"$HW_MODEL\", aborting..."; exit 1; }
+	[[ $EDITION =~ ^(Amiberry|all)$ ]] || { G_DIETPI-NOTIFY 1 "Invalid edition \"$EDITION\" passed, aborting..."; exit 1; }
 fi
 
 # Check for valid target architecture and set variables accordingly
@@ -82,7 +106,7 @@ esac
 
 case $PTTYPE in
 	'msdos') efi_size=0;;
-	'gpt') [[ $HW_ARCH == 10 ]] && iname='NativePC-UEFI' ITYPE='Installer';;
+	'gpt') boot_size=0; [[ $HW_MODEL == 21 ]] && iname='NativePC-UEFI' ITYPE='Installer';;
 	*) G_DIETPI-NOTIFY 1 "Invalid partition table type \"$PTTYPE\" passed, aborting..."; exit 1;;
 esac
 
@@ -94,43 +118,92 @@ case $FSTYPE in
 	*) G_DIETPI-NOTIFY 1 "Invalid filesystem type \"$FSTYPE\" passed, aborting..."; exit 1;;
 esac
 
-G_CHECK_URL "https://github.com/MichaIng/DietPi/tree/$GITBRANCH" || { G_DIETPI-NOTIFY 1 "Failed to access Git branch \"$GITBRANCH\", aborting..."; exit 1; }
+G_CHECK_URL "https://github.com/$GITOWNER/DietPi/tree/$GITBRANCH" || { G_DIETPI-NOTIFY 1 "Failed to access Git branch \"$GITBRANCH\", aborting..."; exit 1; }
 
 # Image name
 OUTPUT_IMG_NAME="DietPi_$iname-$iarch-${distro^}"
 [[ $ITYPE ]] && OUTPUT_IMG_NAME+="_$ITYPE"
 
 # x86_64 installer images are packaged with Clonezilla
-[[ $ITYPE == 'Installer' ]] && CLONING_TOOL='Clonezilla'
+[[ $HW_ARCH == 10 && $ITYPE == 'Installer' ]] && CLONING_TOOL='Clonezilla'
 
+##########################################
+# Dependencies
+##########################################
 # EFI and boot partitions are FAT
 (( $efi_size || $boot_size )) && apackages+=('dosfstools')
 
 # Emulation support in case of incompatible architecture
-(( ( $G_HW_ARCH < 10 && $G_HW_ARCH < $HW_ARCH ) || ( $G_HW_ARCH == 10 && $G_HW_ARCH != $HW_ARCH ) )) && apackages+=('qemu-user-static' 'binfmt-support')
+if (( ( $G_HW_ARCH < 10 && $G_HW_ARCH < $HW_ARCH ) || ( $G_HW_ARCH == 10 && $G_HW_ARCH != $HW_ARCH ) ))
+then
+	apackages+=('qemu-user-static' 'binfmt-support')
+	# On Ubuntu Focal, install newer QEMU package: https://bugs.debian.org/cgi-bin/bugreport.cgi?bug=964289
+	# Use package from Debian repo, since Ubuntu does not shot ARM packages and has no global HTTPS mirror director
+	if (( ${G_DISTRO:=5} < 6 ))
+	then
+		G_EXEC curl -fL "https://deb.debian.org/debian/pool/main/q/qemu/qemu-user-static_6.2+dfsg-2_$DEB_ARCH.deb" -o qemu.deb
+		G_EXEC dpkg -i qemu.deb
+		G_EXEC rm qemu.deb
+	fi
+fi
 
 # Virtual machine disk conversion
 [[ $VMTYPE && $VMTYPE != 'raw' ]] && apackages+=('qemu-utils')
 
-# Dependencies
 G_AG_CHECK_INSTALL_PREREQ parted debootstrap dbus systemd-container "${apackages[@]}"
+
+# Parallels VM: A new qemu-utils build is required which supports PVM virtual disks
+if [[ $VMTYPE == 'parallels' && ${G_DISTRO:=5} -lt 7 ]]
+then
+	if (( $G_DISTRO == 6 ))
+	then
+		G_AGI -t bullseye-backports qemu-utils
+	else
+		G_EXEC curl -fL "https://deb.debian.org/debian/pool/main/libu/liburing/liburing1_0.7-3_$DEB_ARCH.deb" -o liburing1.deb
+		G_EXEC curl -fL "https://deb.debian.org/debian/pool/main/n/nettle/libnettle8_3.7.3-1_$DEB_ARCH.deb" -o libnettle8.deb
+		G_EXEC curl -fL "https://deb.debian.org/debian/pool/main/q/qemu/qemu-utils_6.2+dfsg-2~bpo11+1_$DEB_ARCH.deb" -o qemu-utils.deb
+		G_EXEC dpkg -i --force-depends liburing1.deb libnettle8.deb qemu-utils.deb
+		G_EXEC rm liburing1.deb libnettle8.deb qemu-utils.deb
+	fi
+fi
+
+# Bootstrap archive keyring if missing
+if [[ ! -f $keyring ]]
+then
+	[[ $keyring == *'debian'* ]] && url='https://deb.debian.org/debian/pool/main/d/debian-archive-keyring/debian-archive-keyring_2021.1.1_all.deb' || url='https://archive.raspbian.org/raspbian/pool/main/r/raspbian-archive-keyring/raspbian-archive-keyring_20120528.2_all.deb'
+	G_EXEC curl -sSf "$url" -o /tmp/keyring.deb
+	G_EXEC_OUTPUT=1 G_EXEC dpkg -i /tmp/keyring.deb
+	G_EXEC_NOHALT=1 G_EXEC rm /tmp/keyring.deb
+fi
+
+##########################################
+# Partitions and filesystems
+##########################################
+# Exit trap for cleanup
+G_EXIT_CUSTOM(){
+	findmnt -M "$FP_ORIGIN/rootfs" &> /dev/null && G_EXEC umount -R "$FP_ORIGIN/rootfs"
+	[[ -d $FP_ORIGIN/rootfs ]] && G_EXEC rmdir "$FP_ORIGIN/rootfs"
+	[[ $FP_LOOP ]] && losetup "$FP_LOOP" &> /dev/null && G_EXEC losetup -d "$FP_LOOP"
+	[[ -f $OUTPUT_IMG_NAME.img ]] && G_EXEC rm "$OUTPUT_IMG_NAME.img"
+	(( $mask_dbus )) && G_EXEC systemctl mask --now dbus dbus.socket
+}
 
 # Create image file
 G_EXEC fallocate -l "$((partition_start+efi_size+boot_size+root_size))M" "$OUTPUT_IMG_NAME.img"
 
-# GPT: Create EFI partition and set partition labels instead of types
+# GPT: Set partition labels instead of types
 if [[ $PTTYPE == 'gpt' ]]
 then
+	# GPT partition table and EFI partition
 	G_EXEC parted -s "$OUTPUT_IMG_NAME.img" unit MiB mklabel gpt mkpart 'EFI' fat32 $partition_start $((partition_start+efi_size)) set 1 esp on
-	# Create boot partition if set
-	(( $boot_size )) && G_EXEC parted -s "$OUTPUT_IMG_NAME.img" unit MiB mkpart 'boot' fat32 $((partition_start+efi_size)) $((partition_start+efi_size+boot_size))
 	# root partition
-	G_EXEC parted -s "$OUTPUT_IMG_NAME.img" unit MiB mkpart 'root' "$FSTYPE" $((partition_start+efi_size+boot_size)) 100%
+	G_EXEC parted -s "$OUTPUT_IMG_NAME.img" unit MiB mkpart 'root' "$FSTYPE" $((partition_start+efi_size)) 100%
 
 # MBR: Set partition types instead of labels
 else
+	# MBR partition table
 	G_EXEC parted -s "$OUTPUT_IMG_NAME.img" unit MiB mklabel msdos
-	# Create boot partition if set
+	# boot partition
 	(( $boot_size )) && G_EXEC parted -s "$OUTPUT_IMG_NAME.img" unit MiB mkpart primary fat32 $((partition_start)) $((partition_start+boot_size))
 	# root partition
 	G_EXEC parted -s "$OUTPUT_IMG_NAME.img" unit MiB mkpart primary "$FSTYPE" $((partition_start+boot_size)) 100%
@@ -139,85 +212,79 @@ else
 fi
 
 # Create loop device
-G_EXEC losetup loop0 "$OUTPUT_IMG_NAME.img"
-G_EXEC partprobe /dev/loop0
-G_EXEC partx -u /dev/loop0
+FP_LOOP=$(losetup -f)
+G_EXEC losetup "$FP_LOOP" "$OUTPUT_IMG_NAME.img"
+G_EXEC partprobe "$FP_LOOP"
+G_EXEC partx -u "$FP_LOOP"
 
 # Create and mount filesystems and fstab
 G_EXEC mkdir rootfs
-# + EFI + boot partition
-if [[ $PTTYPE == 'gpt' ]] && (( $boot_size ))
-then
-	FP_ROOT_DEV=3
-	G_EXEC mkfs.fat -F 32 /dev/loop0p1
-	G_EXEC mkfs.fat -F 32 /dev/loop0p2
-	G_EXEC "mkfs.$FSTYPE" /dev/loop0p3
-	G_EXEC mount /dev/loop0p3 rootfs
-	G_EXEC mkdir rootfs/boot
-	G_EXEC mount /dev/loop0p2 rootfs/boot
-	G_EXEC mkdir rootfs/boot/efi
-	G_EXEC mount /dev/loop0p1 rootfs/boot/efi
-	G_EXEC mkdir rootfs/etc
-	cat << _EOF_ > rootfs/etc/fstab
-PARTUUID=$(lsblk -no PARTUUID /dev/loop0p3) / $FSTYPE noatime,lazytime 0 1
-PARTUUID=$(lsblk -no PARTUUID /dev/loop0p2) /boot vfat noatime,lazytime 0 2
-PARTUUID=$(lsblk -no PARTUUID /dev/loop0p1) /boot/efi vfat noatime,lazytime 0 3
-_EOF_
 # + EFI partition
-elif [[ $PTTYPE == 'gpt' ]]
+if [[ $PTTYPE == 'gpt' ]]
 then
 	FP_ROOT_DEV=2
-	G_EXEC mkfs.fat -F 32 /dev/loop0p1
-	G_EXEC "mkfs.$FSTYPE" /dev/loop0p2
-	G_EXEC mount /dev/loop0p2 rootfs
+	G_EXEC mkfs.fat -F 32 "${FP_LOOP}p1"
+	G_EXEC "mkfs.$FSTYPE" "${FP_LOOP}p2"
+	G_EXEC mount "${FP_LOOP}p2" rootfs
 	G_EXEC mkdir -p rootfs/boot/efi
-	G_EXEC mount /dev/loop0p1 rootfs/boot/efi
+	G_EXEC mount "${FP_LOOP}p1" rootfs/boot/efi
 	G_EXEC mkdir rootfs/etc
 	cat << _EOF_ > rootfs/etc/fstab
-PARTUUID=$(lsblk -no PARTUUID /dev/loop0p2) / $FSTYPE noatime,lazytime 0 1
-PARTUUID=$(lsblk -no PARTUUID /dev/loop0p1) /boot/efi vfat noatime,lazytime 0 2
+PARTUUID=$(lsblk -no PARTUUID "${FP_LOOP}p2") / $FSTYPE noatime,lazytime 0 1
+PARTUUID=$(lsblk -no PARTUUID "${FP_LOOP}p1") /boot/efi vfat noatime,lazytime 0 2
 _EOF_
 # + boot partition
 elif (( $boot_size ))
 then
 	FP_ROOT_DEV=2
-	G_EXEC mkfs.fat -F 32 /dev/loop0p1
-	G_EXEC "mkfs.$FSTYPE" /dev/loop0p2
-	G_EXEC mount /dev/loop0p2 rootfs
+	G_EXEC mkfs.fat -F 32 "${FP_LOOP}p1"
+	G_EXEC "mkfs.$FSTYPE" "${FP_LOOP}p2"
+	G_EXEC mount "${FP_LOOP}p2" rootfs
 	G_EXEC mkdir rootfs/boot
-	G_EXEC mount /dev/loop0p1 rootfs/boot
+	G_EXEC mount "${FP_LOOP}p1" rootfs/boot
 	G_EXEC mkdir rootfs/etc
 	cat << _EOF_ > rootfs/etc/fstab
-PARTUUID=$(lsblk -no PARTUUID /dev/loop0p2) / $FSTYPE noatime,lazytime 0 1
-PARTUUID=$(lsblk -no PARTUUID /dev/loop0p1) /boot vfat noatime,lazytime 0 2
+PARTUUID=$(lsblk -no PARTUUID "${FP_LOOP}p2") / $FSTYPE noatime,lazytime 0 1
+PARTUUID=$(lsblk -no PARTUUID "${FP_LOOP}p1") /boot vfat noatime,lazytime 0 2
 _EOF_
 # - single partition
 else
 	FP_ROOT_DEV=1
-	G_EXEC "mkfs.$FSTYPE" /dev/loop0p1
-	G_EXEC mount /dev/loop0p1 rootfs
+	G_EXEC "mkfs.$FSTYPE" "${FP_LOOP}p1"
+	G_EXEC mount "${FP_LOOP}p1" rootfs
 	G_EXEC mkdir rootfs/etc
 	cat << _EOF_ > rootfs/etc/fstab
-PARTUUID=$(lsblk -no PARTUUID /dev/loop0p1) / $FSTYPE noatime,lazytime 0 1
+PARTUUID=$(lsblk -no PARTUUID "${FP_LOOP}p1") / $FSTYPE noatime,lazytime 0 1
 _EOF_
 fi
 
+##########################################
+# debootstrap
+##########################################
+G_EXEC_OUTPUT=1 G_EXEC debootstrap --variant=minbase --exclude="gcc-7-base,gcc-8-base,gcc-9-base$exclude" --include='bash-completion,bzip2,ca-certificates,console-setup,cron,curl,dropbear,ethtool,fake-hwclock,fdisk,gnupg,htop,ifupdown,isc-dhcp-client,kmod,locales,nano,p7zip,parted,procps,psmisc,rfkill,sudo,systemd-sysv,systemd-timesyncd,tzdata,udev,unzip,usbutils,wget,whiptail' --arch="$parch" --keyring="$keyring" "$distro" ./rootfs "$repo"
+
+# Remove cached archives and list files created by debootstrap
+G_EXEC rm -R rootfs/var/{cache/apt,lib/apt/lists}/*
+
+##########################################
+# DietPi-PREP
+##########################################
 # Create rc.local to automate DietPi-PREP
 cat << _EOF_ > rootfs/etc/rc.local
 #!/bin/dash
 {
+infocmp "$TERM" > /dev/null 2>&1 || TERM='dumb'
 echo '[ INFO ] Running DietPi-PREP...'
-export GITBRANCH='$GITBRANCH' HW_MODEL='$HW_MODEL' IMAGE_CREATOR=0 PREIMAGE_INFO='from scratch' WIFI_REQUIRED=$WIFI_REQUIRED DISTRO_TARGET=$DISTRO
-bash -c "\$(curl -sSfL 'https://raw.githubusercontent.com/$G_GITOWNER/DietPi/$G_GITBRANCH/PREP_SYSTEM_FOR_DIETPI.sh')"
+export GITOWNER='$GITOWNER' GITBRANCH='$GITBRANCH' HW_MODEL='$HW_MODEL' IMAGE_CREATOR=0 PREIMAGE_INFO='from scratch' WIFI_REQUIRED=$WIFI_REQUIRED DISTRO_TARGET=$DISTRO
+bash -c "\$(curl -sSf 'https://raw.githubusercontent.com/$G_GITOWNER/DietPi/$G_GITBRANCH/PREP_SYSTEM_FOR_DIETPI.sh')" || poweroff
 _EOF_
-G_EXEC chmod +x rootfs/etc/rc.local
 
 # - VM: Generate tiny-initramfs with explicit kernel modules, as auto-detection doesn't work correctly within container and loop devices
 [[ $HW_MODEL == 20 ]] && cat << _EOF_ >> rootfs/etc/rc.local
 echo '[ INFO ] Rebuilding virtual machine initramfs to support all virtualizers...'
-version=\$(dpkg --get-selections | mawk '\$1~/^linux-image-.*-$parch\$/{print \$1;exit}') || exit 1
+version=\$(dpkg --get-selections | mawk '\$1~/^linux-image-.*-$parch\$/{print \$1;exit}') || poweroff
 version=\${version#linux-image-}
-mktirfs -m no -M no --include-modules='ahci,sd_mod,vmw_pvscsi,hv_storvsc,$FSTYPE' -o "/boot/initrd.img-\$version" "\$version" || exit 1
+mktirfs -m no -M no --include-modules='ahci,sd_mod,vmw_pvscsi,hv_storvsc,virtio_scsi,virtio_pci,$FSTYPE' -o "/boot/initrd.img-\$version" "\$version" || poweroff
 _EOF_
 
 cat << '_EOF_' >> rootfs/etc/rc.local
@@ -226,41 +293,83 @@ poweroff
 exit 0
 } > /dev/console 2>&1 < /dev/console
 _EOF_
-
-# Bootstrap
-G_EXEC_OUTPUT=1 G_EXEC debootstrap --variant=minbase --exclude="gcc-7-base,gcc-8-base,gcc-9-base$exclude" --include='bash-completion,bzip2,ca-certificates,console-setup,cron,curl,dropbear,ethtool,fake-hwclock,fdisk,gnupg,htop,ifupdown,isc-dhcp-client,kmod,locales,nano,p7zip,parted,procps,psmisc,rfkill,sudo,systemd-sysv,systemd-timesyncd,tzdata,udev,unzip,usbutils,wget,whiptail' --arch="$parch" --keyring="$keyring" "$distro" ./rootfs "$repo"
-
-# Remove cached archives and list files created by debootstrap
-G_EXEC rm -Rf rootfs/var/{cache/apt,lib/apt/lists}/*
+G_EXEC chmod +x rootfs/etc/rc.local
 
 # Start container
 # - dbus required for container spawn
 mask_dbus=0
-[[ $(readlink /etc/systemd/system/dbus.socket) == '/dev/null' ]] && mask_dbus=1
-G_EXEC systemctl unmask dbus.socket dbus
-G_EXEC systemctl start dbus.socket dbus
+if [[ $(readlink /etc/systemd/system/dbus.socket) == '/dev/null' ]]
+then
+	mask_dbus=1
+	G_EXEC systemctl unmask dbus.socket dbus
+	G_EXEC systemctl start dbus.socket
+fi
 # - Bind mounts required to allow container reading its own drive info, /dev/disk for GRUB and probably other tools to detect UUIDs
 abind=()
-[[ -b '/dev/loop0p2' ]] && abind=('--bind=/dev/loop0p2')
-[[ -b '/dev/loop0p3' ]] && abind+=('--bind=/dev/loop0p3')
-systemd-nspawn -bD rootfs --bind=/dev/loop0 --bind=/dev/loop0p1 "${abind[@]}" --bind=/dev/disk || exit 1
+[[ -b ${FP_LOOP}p2 ]] && abind=("--bind=${FP_LOOP}p2")
+systemd-nspawn -bD rootfs --bind="$FP_LOOP"{,p1} "${abind[@]}" --bind=/dev/disk || exit 1
 [[ -f 'rootfs/success' ]] || { G_DIETPI-NOTIFY 1 'The container setup did not finish successfully, aborting...'; exit 1; }
 G_EXEC rm rootfs/success
 G_EXEC sync
 G_EXEC sleep 1
 G_EXEC umount -R rootfs
 G_EXEC rmdir rootfs
-G_EXEC losetup -d /dev/loop0
+G_EXEC losetup -d "$FP_LOOP"
 (( $mask_dbus )) && { G_EXEC systemctl mask --now dbus dbus.socket && mask_dbus=0; }
 
-# Imager
-export FP_ROOT_DEV CLONING_TOOL OUTPUT_IMG_NAME MOUNT_IT='Off'
-bash -c "$(curl -sSfL "https://raw.githubusercontent.com/$G_GITOWNER/DietPi/$G_GITBRANCH/.meta/dietpi-imager")" 'DietPi-Imager' "$OUTPUT_IMG_NAME.img" || exit 1
+##########################################
+# DietPi-Imager
+##########################################
+# Do not pack and upload raw VM image if not explicitly requested
+[[ $VMTYPE && ! $VMTYPE =~ ^(raw|all)$ ]] && SHRINK_ONLY='On' || SHRINK_ONLY='Off'
+export FP_ROOT_DEV CLONING_TOOL OUTPUT_IMG_NAME MOUNT_IT='Off' SHRINK_ONLY
+[[ $EDITION && $EDITION != 'all' ]] || bash -c "$(curl -sSf "https://raw.githubusercontent.com/$G_GITOWNER/DietPi/$G_GITBRANCH/.meta/dietpi-imager")" 'DietPi-Imager' "$OUTPUT_IMG_NAME.img" || exit 1
 
-[[ $VMTYPE ]] || { G_EXEC rm "$OUTPUT_IMG_NAME.img"; exit 0; }
+#  Amiberry edition: Install automatically on first boot, enable autostart option and onboard audio on RPi
+if [[ $EDITION =~ ^(Amiberry|all)$ ]]
+then
+	G_EXEC mv "$OUTPUT_IMG_NAME.img" "${OUTPUT_IMG_NAME}_Amiberry.img"
+	OUTPUT_IMG_NAME="${OUTPUT_IMG_NAME}_Amiberry"
 
-### Virtual machines ###
-G_EXEC_DESC='Downloading current README.md to pack with image...' G_EXEC curl -sSfL "https://raw.githubusercontent.com/$G_GITOWNER/DietPi/$G_GITBRANCH/README.md" -o README.md
+	# Create loop device
+	FP_LOOP=$(losetup -f)
+	G_EXEC losetup "$FP_LOOP" "$OUTPUT_IMG_NAME.img"
+	G_EXEC partprobe "$FP_LOOP"
+	G_EXEC partx -u "$FP_LOOP"
+
+	# Mount filesystems
+	G_EXEC mkdir rootfs
+	if (( $boot_size ))
+	then
+		G_EXEC mount "${FP_LOOP}p2" rootfs
+		G_EXEC mount "${FP_LOOP}p1" rootfs/boot
+	else
+		G_EXEC mount "${FP_LOOP}p1" rootfs
+	fi
+
+	# Install Amiberry via automated first run setup
+	G_EXEC sed -i '/^AUTO_SETUP_AUTOMATED=/c\AUTO_SETUP_AUTOMATED=1' rootfs/boot/dietpi.txt
+	G_EXEC sed -i '/^#AUTO_SETUP_INSTALL_SOFTWARE_ID=/c\AUTO_SETUP_INSTALL_SOFTWARE_ID=108' rootfs/boot/dietpi.txt
+	# Enable Amiberry fast boot autostart option
+	G_EXEC sed -i '/^AUTO_SETUP_AUTOSTART_TARGET_INDEX=/c\AUTO_SETUP_AUTOSTART_TARGET_INDEX=6' rootfs/boot/dietpi.txt
+	# RPi: Enable onboard audio so that it can be detected and configured on first boot
+	[[ -f 'rootfs/boot/config.txt' ]] && G_EXEC sed -i '/^dtparam=audio=/c\dtparam=audio=on' rootfs/boot/config.txt
+
+	G_EXEC sync
+	G_EXEC sleep 1
+	G_EXEC umount -R rootfs
+	G_EXEC rmdir rootfs
+	G_EXEC losetup -d "$FP_LOOP"
+
+	bash -c "$(curl -sSf "https://raw.githubusercontent.com/$G_GITOWNER/DietPi/$G_GITBRANCH/.meta/dietpi-imager")" 'DietPi-Imager' "$OUTPUT_IMG_NAME.img" || exit 1
+fi
+
+[[ $VMTYPE ]] || exit 0
+
+##########################################
+# Virtual machines
+##########################################
+G_EXEC_DESC='Downloading current README.md to pack with image...' G_EXEC curl -sSf "https://raw.githubusercontent.com/$G_GITOWNER/DietPi/$G_GITBRANCH/README.md" -o README.md
 
 # NB: LZMA2 ultra compression requires much memory per thread. 1 GiB is not sufficient for >2 threads, hence use "-mmt2" to limit used CPU threads to "2" on 1 GiB devices with more than two cores.
 limit_threads=
@@ -269,11 +378,14 @@ limit_threads=
 # Since qemu-img does not support VMDK and VHDX resizing, we need to resize the raw .img. It is usually done as sparse file, hence the actual disk usage does not change.
 G_EXEC qemu-img resize "$OUTPUT_IMG_NAME.img" 8G
 
-# VMware
+####### VMware ###########################
 if [[ $VMTYPE =~ ^(vmware|all)$ ]]
 then
-	G_EXEC qemu-img convert -O vmdk "$OUTPUT_IMG_NAME.img" "${OUTPUT_IMG_NAME/_VM-/_VMware-}.vmdk"
-	cat << _EOF_ > "${OUTPUT_IMG_NAME/_VM-/_VMware-}.vmx"
+	image_name=${OUTPUT_IMG_NAME/_VM-/_VMware-}
+	# Convert raw image to VMDK
+	G_EXEC qemu-img convert -O vmdk "$OUTPUT_IMG_NAME.img" "$image_name.vmdk"
+	# Create VM configuration
+	cat << _EOF_ > "$image_name.vmx"
 .encoding = "windows-1252"
 config.version = "8"
 virtualHW.version = "10"
@@ -292,14 +404,14 @@ pciBridge7.virtualDev = "pcieRootPort"
 pciBridge7.functions = "8"
 vmci0.present = "TRUE"
 hpet0.present = "TRUE"
-nvram = "DietPi_VMware-x86_64-${distro^}.nvram"
+nvram = "$image_name.nvram"
 virtualHW.productCompatibility = "hosted"
 gui.exitOnCLIHLT = "FALSE"
 powerType.powerOff = "soft"
 powerType.powerOn = "soft"
 powerType.suspend = "soft"
 powerType.reset = "soft"
-displayName = "DietPi_VMware-x86_64-${distro^}"
+displayName = "$image_name"
 guestOS = "debian10-64"
 vhv.enable = "TRUE"
 tools.syncTime = "FALSE"
@@ -307,7 +419,7 @@ vcpu.hotadd = "TRUE"
 memsize = "1024"
 scsi0.virtualDev = "pvscsi"
 scsi0.present = "TRUE"
-scsi0:0.fileName = "DietPi_VMware-x86_64-${distro^}.vmdk"
+scsi0:0.fileName = "$image_name.vmdk"
 scsi0:0.present = "TRUE"
 ide1:0.autodetect = "TRUE"
 ide1:0.deviceType = "cdrom-raw"
@@ -319,39 +431,196 @@ usb_xhci.present = "TRUE"
 ethernet0.addressType = "generated"
 ethernet0.virtualDev = "e1000"
 ethernet0.present = "TRUE"
-extendedConfigFile = "DietPi_VMware-x86_64-${distro^}.vmxf"
+extendedConfigFile = "$image_name.vmxf"
 floppy0.present = "FALSE"
 _EOF_
-	G_DIETPI-NOTIFY 2 'Generating hashes to pack with VMware image, please wait...'
+	G_DIETPI-NOTIFY 2 'Generating hashes to pack with VMware appliance, please wait...'
 	cat << _EOF_ > hash.txt
-FILE:   ${OUTPUT_IMG_NAME/_VM-/_VMware-}.vmdk
+FILE:   $image_name.vmdk
 DATE:   $(date)
-MD5:    $(md5sum "${OUTPUT_IMG_NAME/_VM-/_VMware-}.vmdk" | mawk '{print $1}')
-SHA1:   $(sha1sum "${OUTPUT_IMG_NAME/_VM-/_VMware-}.vmdk" | mawk '{print $1}')
-SHA256: $(sha256sum "${OUTPUT_IMG_NAME/_VM-/_VMware-}.vmdk" | mawk '{print $1}')
+MD5:    $(md5sum "$image_name.vmdk" | mawk '{print $1}')
+SHA1:   $(sha1sum "$image_name.vmdk" | mawk '{print $1}')
+SHA256: $(sha256sum "$image_name.vmdk" | mawk '{print $1}')
 
-FILE:   ${OUTPUT_IMG_NAME/_VM-/_VMware-}.vmx
+FILE:   $image_name.vmx
 DATE:   $(date)
-MD5:    $(md5sum "${OUTPUT_IMG_NAME/_VM-/_VMware-}.vmx" | mawk '{print $1}')
-SHA1:   $(sha1sum "${OUTPUT_IMG_NAME/_VM-/_VMware-}.vmx" | mawk '{print $1}')
-SHA256: $(sha256sum "${OUTPUT_IMG_NAME/_VM-/_VMware-}.vmx" | mawk '{print $1}')
+MD5:    $(md5sum "$image_name.vmx" | mawk '{print $1}')
+SHA1:   $(sha1sum "$image_name.vmx" | mawk '{print $1}')
+SHA256: $(sha256sum "$image_name.vmx" | mawk '{print $1}')
 _EOF_
-	G_EXEC_DESC='Creating VMware 7zip archive' G_EXEC_OUTPUT=1 G_EXEC 7zr a -bsp1 -bso1 -bse2 -m0=lzma2 -mx=9 $limit_threads "${OUTPUT_IMG_NAME/_VM-/_VMware-}.7z" "${OUTPUT_IMG_NAME/_VM-/_VMware-}.vmdk" "${OUTPUT_IMG_NAME/_VM-/_VMware-}.vmx" hash.txt README.md
-	G_EXEC rm "${OUTPUT_IMG_NAME/_VM-/_VMware-}.vmdk" "${OUTPUT_IMG_NAME/_VM-/_VMware-}.vmx"
-	[[ -x 'upload.sh' ]] && G_EXEC_OUTPUT=1 G_EXEC ./upload.sh "${OUTPUT_IMG_NAME/_VM-/_VMware-}.7z" && G_EXEC rm "${OUTPUT_IMG_NAME/_VM-/_VMware-}.7z"
+	[[ ( -t 0 || -t 1 ) && $TERM != 'dumb' ]] && G_EXEC_OUTPUT=1
+	G_EXEC_DESC='Creating VMware 7-Zip archive' G_EXEC 7zr a -bsp1 -bso1 -bse2 -m0=lzma2 -mx=9 $limit_threads "$image_name.7z" "$image_name.vmdk" "$image_name.vmx" hash.txt README.md
+	G_EXEC rm "$image_name.vmdk" "$image_name.vmx"
+	[[ -x 'upload.sh' ]] && G_EXEC_OUTPUT=1 G_EXEC ./upload.sh "$image_name.7z" && G_EXEC rm "$image_name.7z"
 fi
 
-# VirtualBox
+####### ESXi #############################
+if [[ $VMTYPE =~ ^(esxi|all)$ ]]
+then
+	image_name=${OUTPUT_IMG_NAME/_VM-/_ESXi-}
+	# Convert raw image to VMDK
+	G_EXEC qemu-img convert -O vmdk -o 'subformat=streamOptimized' "$OUTPUT_IMG_NAME.img" "$image_name.vmdk"
+	# Create VM configuration
+	cat << _EOF_ > "$image_name.ovf"
+<?xml version='1.0' encoding='UTF-8'?>
+<Envelope xmlns="http://schemas.dmtf.org/ovf/envelope/1" xmlns:ovf="http://schemas.dmtf.org/ovf/envelope/1" xmlns:vmw="http://www.vmware.com/schema/ovf" xmlns:rasd="http://schemas.dmtf.org/wbem/wscim/1/cim-schema/2/CIM_ResourceAllocationSettingData" xmlns:vssd="http://schemas.dmtf.org/wbem/wscim/1/cim-schema/2/CIM_VirtualSystemSettingData">
+  <References>
+    <File ovf:id="file1" ovf:href="$image_name.vmdk"/>
+  </References>
+  <DiskSection>
+    <Info>List of the virtual disks</Info>
+    <Disk ovf:capacityAllocationUnits="byte * 2^30" ovf:format="http://www.vmware.com/interfaces/specifications/vmdk.html#streamOptimized" ovf:diskId="vmdisk1" ovf:capacity="8" ovf:fileRef="file1"/>
+  </DiskSection>
+  <NetworkSection>
+    <Info>The list of logical networks</Info>
+    <Network ovf:name="VM Network">
+      <Description>The VM Network network</Description>
+    </Network>
+  </NetworkSection>
+  <VirtualSystem ovf:id="$image_name">
+    <Info>A Virtual system</Info>
+    <Name>$image_name</Name>
+    <OperatingSystemSection ovf:id="96" ovf:version="10" vmw:osType="debian10_64Guest">
+      <Info>The operating system installed</Info>
+      <Description>Debian GNU/Linux 10 (64-bit)</Description>
+    </OperatingSystemSection>
+    <VirtualHardwareSection>
+      <Info>Virtual hardware requirements</Info>
+      <System>
+        <vssd:ElementName>Virtual Hardware Family</vssd:ElementName>
+        <vssd:InstanceID>0</vssd:InstanceID>
+        <vssd:VirtualSystemType>vmx-13</vssd:VirtualSystemType>
+      </System>
+      <Item>
+        <rasd:AllocationUnits>hertz * 10^6</rasd:AllocationUnits>
+        <rasd:Description>Number of Virtual CPUs</rasd:Description>
+        <rasd:ElementName>1 virtual CPU(s)</rasd:ElementName>
+        <rasd:InstanceID>1</rasd:InstanceID>
+        <rasd:ResourceType>3</rasd:ResourceType>
+        <rasd:VirtualQuantity>1</rasd:VirtualQuantity>
+        <vmw:CoresPerSocket ovf:required="false">1</vmw:CoresPerSocket>
+      </Item>
+      <Item>
+        <rasd:AllocationUnits>byte * 2^20</rasd:AllocationUnits>
+        <rasd:Description>Memory Size</rasd:Description>
+        <rasd:ElementName>1024MB of memory</rasd:ElementName>
+        <rasd:InstanceID>2</rasd:InstanceID>
+        <rasd:ResourceType>4</rasd:ResourceType>
+        <rasd:VirtualQuantity>1024</rasd:VirtualQuantity>
+      </Item>
+      <Item>
+        <rasd:Address>0</rasd:Address>
+        <rasd:Description>SCSI Controller</rasd:Description>
+        <rasd:ElementName>SCSI Controller 1</rasd:ElementName>
+        <rasd:InstanceID>3</rasd:InstanceID>
+        <rasd:ResourceSubType>VirtualSCSI</rasd:ResourceSubType>
+        <rasd:ResourceType>6</rasd:ResourceType>
+      </Item>
+      <Item>
+        <rasd:Address>0</rasd:Address>
+        <rasd:Description>IDE Controller</rasd:Description>
+        <rasd:ElementName>IDE Controller 1</rasd:ElementName>
+        <rasd:InstanceID>4</rasd:InstanceID>
+        <rasd:ResourceType>5</rasd:ResourceType>
+      </Item>
+      <Item>
+        <rasd:AddressOnParent>0</rasd:AddressOnParent>
+        <rasd:ElementName>Hard Disk 1</rasd:ElementName>
+        <rasd:HostResource>ovf:/disk/vmdisk1</rasd:HostResource>
+        <rasd:InstanceID>5</rasd:InstanceID>
+        <rasd:Parent>3</rasd:Parent>
+        <rasd:ResourceType>17</rasd:ResourceType>
+      </Item>
+      <Item>
+        <rasd:AddressOnParent>0</rasd:AddressOnParent>
+        <rasd:AutomaticAllocation>false</rasd:AutomaticAllocation>
+        <rasd:ElementName>CD/DVD Drive 1</rasd:ElementName>
+        <rasd:InstanceID>6</rasd:InstanceID>
+        <rasd:Parent>4</rasd:Parent>
+        <rasd:ResourceSubType>vmware.cdrom.remotepassthrough</rasd:ResourceSubType>
+        <rasd:ResourceType>15</rasd:ResourceType>
+      </Item>
+      <Item>
+        <rasd:AddressOnParent>0</rasd:AddressOnParent>
+        <rasd:AutomaticAllocation>true</rasd:AutomaticAllocation>
+        <rasd:Connection>VM Network</rasd:Connection>
+        <rasd:ElementName>Network adapter 1</rasd:ElementName>
+        <rasd:InstanceID>7</rasd:InstanceID>
+        <rasd:ResourceSubType>VmxNet3</rasd:ResourceSubType>
+        <rasd:ResourceType>10</rasd:ResourceType>
+        <vmw:Config ovf:required="false" vmw:key="connectable.allowGuestControl" vmw:value="true"/>
+        <vmw:Config ovf:required="false" vmw:key="wakeOnLanEnabled" vmw:value="true"/>
+        <vmw:Config ovf:required="false" vmw:key="uptCompatibilityEnabled" vmw:value="true"/>
+      </Item>
+      <Item ovf:required="false">
+        <rasd:ElementName>Video card</rasd:ElementName>
+        <rasd:InstanceID>8</rasd:InstanceID>
+        <rasd:ResourceType>24</rasd:ResourceType>
+        <vmw:Config ovf:required="false" vmw:key="enable3DSupport" vmw:value="false"/>
+        <vmw:Config ovf:required="false" vmw:key="numDisplays" vmw:value="1"/>
+        <vmw:Config ovf:required="false" vmw:key="graphicsMemorySizeInKB" vmw:value="262144"/>
+        <vmw:Config ovf:required="false" vmw:key="videoRamSizeInKB" vmw:value="8192"/>
+        <vmw:Config ovf:required="false" vmw:key="useAutoDetect" vmw:value="false"/>
+        <vmw:Config ovf:required="false" vmw:key="use3dRenderer" vmw:value="automatic"/>
+      </Item>
+      <vmw:Config ovf:required="false" vmw:key="cpuHotAddEnabled" vmw:value="false"/>
+      <vmw:Config ovf:required="false" vmw:key="sgxInfo.epcSize" vmw:value="0"/>
+      <vmw:Config ovf:required="false" vmw:key="nestedHVEnabled" vmw:value="false"/>
+      <vmw:Config ovf:required="false" vmw:key="virtualSMCPresent" vmw:value="false"/>
+      <vmw:Config ovf:required="false" vmw:key="flags.vvtdEnabled" vmw:value="false"/>
+      <vmw:Config ovf:required="false" vmw:key="cpuHotRemoveEnabled" vmw:value="false"/>
+      <vmw:Config ovf:required="false" vmw:key="sgxInfo.flcMode" vmw:value="unlocked"/>
+      <vmw:Config ovf:required="false" vmw:key="sevEnabled" vmw:value="false"/>
+      <vmw:Config ovf:required="false" vmw:key="virtualICH7MPresent" vmw:value="false"/>
+      <vmw:Config ovf:required="false" vmw:key="flags.vbsEnabled" vmw:value="false"/>
+      <vmw:Config ovf:required="false" vmw:key="memoryHotAddEnabled" vmw:value="false"/>
+      <vmw:Config ovf:required="false" vmw:key="bootOptions.efiSecureBootEnabled" vmw:value="false"/>
+      <vmw:Config ovf:required="false" vmw:key="firmware" vmw:value="bios"/>
+      <vmw:ExtraConfig ovf:required="false" vmw:key="nvram" vmw:value="$image_name.nvram"/>
+    </VirtualHardwareSection>
+  </VirtualSystem>
+</Envelope>
+_EOF_
+	# Create manifest file for automatic integrity check
+	cat << _EOF_ > "$image_name.mf"
+SHA1($image_name.ovf)= $(sha1sum "$image_name.ovf" | mawk '{print $1}')
+SHA1($image_name.vmdk)= $(sha1sum "$image_name.vmdk" | mawk '{print $1}')
+_EOF_
+	# Pack everything as compressed OVA appliance for ESXi import
+	G_EXEC tar -cf "$image_name.ova" "$image_name."{ovf,vmdk,mf}
+	[[ $VMTYPE == 'all' ]] || G_EXEC rm "$image_name.vmdk"
+	G_EXEC rm "$image_name."{ovf,mf}
+
+	G_DIETPI-NOTIFY 2 'Generating hashes to pack with ESXi appliance, please wait...'
+	cat << _EOF_ > hash.txt
+FILE:   $image_name.ova
+DATE:   $(date)
+MD5:    $(md5sum "$image_name.ova" | mawk '{print $1}')
+SHA1:   $(sha1sum "$image_name.ova" | mawk '{print $1}')
+SHA256: $(sha256sum "$image_name.ova" | mawk '{print $1}')
+_EOF_
+	[[ ( -t 0 || -t 1 ) && $TERM != 'dumb' ]] && G_EXEC_OUTPUT=1
+	G_EXEC_DESC='Creating VirtualBox 7-Zip archive' G_EXEC 7zr a -bsp1 -bso1 -bse2 -m0=lzma2 -mx=9 $limit_threads "$image_name.7z" "$image_name.ova" hash.txt README.md
+	G_EXEC rm "$image_name.ova"
+	[[ -x 'upload.sh' ]] && G_EXEC_OUTPUT=1 G_EXEC ./upload.sh "$image_name.7z" && G_EXEC rm "$image_name.7z"
+fi
+
+####### VirtualBox #######################
 if [[ $VMTYPE =~ ^(vbox|all)$ ]]
 then
-	G_EXEC qemu-img convert -O vmdk -o 'subformat=streamOptimized' "$OUTPUT_IMG_NAME.img" "${OUTPUT_IMG_NAME/_VM-/_VirtualBox-}.vmdk"
+	[[ $VMTYPE == 'all' ]] && G_EXEC mv "$image_name.vmdk" "${image_name/_ESXi-/_VirtualBox-}.vmdk"
+	image_name=${OUTPUT_IMG_NAME/_VM-/_VirtualBox-}
+	# Convert raw image to VMDK
+	[[ $VMTYPE == 'all' ]] || G_EXEC qemu-img convert -O vmdk -o 'subformat=streamOptimized' "$OUTPUT_IMG_NAME.img" "$image_name.vmdk"
+	# Generate random UUIDs for VM and virtual disk
 	vmuuid=$(</proc/sys/kernel/random/uuid)
 	diskuuid=$(</proc/sys/kernel/random/uuid)
-	cat << _EOF_ > "${OUTPUT_IMG_NAME/_VM-/_VirtualBox-}.ovf"
+	# Create VM configuration
+	cat << _EOF_ > "$image_name.ovf"
 <?xml version="1.0"?>
 <Envelope ovf:version="1.0" xml:lang="en-US" xmlns="http://schemas.dmtf.org/ovf/envelope/1" xmlns:ovf="http://schemas.dmtf.org/ovf/envelope/1" xmlns:rasd="http://schemas.dmtf.org/wbem/wscim/1/cim-schema/2/CIM_ResourceAllocationSettingData" xmlns:vssd="http://schemas.dmtf.org/wbem/wscim/1/cim-schema/2/CIM_VirtualSystemSettingData" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xmlns:vbox="http://www.virtualbox.org/ovf/machine">
   <References>
-    <File ovf:id="file1" ovf:href="DietPi_VirtualBox-x86_64-${distro^}.vmdk"/>
+    <File ovf:id="file1" ovf:href="$image_name.vmdk"/>
   </References>
   <DiskSection>
     <Info>List of the virtual disks used in the package</Info>
@@ -375,7 +644,7 @@ then
       <System>
         <vssd:ElementName>Virtual Hardware Family</vssd:ElementName>
         <vssd:InstanceID>0</vssd:InstanceID>
-        <vssd:VirtualSystemIdentifier>DietPi_VirtualBox-x86_64-${distro^}</vssd:VirtualSystemIdentifier>
+        <vssd:VirtualSystemIdentifier>$image_name</vssd:VirtualSystemIdentifier>
         <vssd:VirtualSystemType>virtualbox-2.2</vssd:VirtualSystemType>
       </System>
       <Item>
@@ -423,7 +692,7 @@ then
         <rasd:ResourceType>10</rasd:ResourceType>
       </Item>
     </VirtualHardwareSection>
-    <vbox:Machine ovf:required="false" version="1.16-windows" uuid="{$vmuuid}" name="DietPi_VirtualBox-x86_64-${distro^}" OSType="Debian_64" snapshotFolder="Snapshots" lastStateChange="$(date -u '+%Y-%M-%dT%TZ')">
+    <vbox:Machine ovf:required="false" version="1.16-windows" uuid="{$vmuuid}" name="$image_name" OSType="Debian_64" snapshotFolder="Snapshots" lastStateChange="$(date -u '+%Y-%M-%dT%TZ')">
       <ovf:Info>Complete VirtualBox machine configuration in VirtualBox format</ovf:Info>
       <Hardware>
         <CPU>
@@ -438,7 +707,7 @@ then
           <Order position="1" device="HardDisk"/>
           <Order position="2" device="DVD"/>
         </Boot>
-        <Display VRAMSize="16"/>
+        <Display controller="VMSVGA" VRAMSize="16"/>
         <VideoCapture screens="1" file="." fps="25"/>
         <BIOS>
           <IOAPIC enabled="true"/>
@@ -446,7 +715,7 @@ then
         </BIOS>
         <USB>
           <Controllers>
-            <Controller name="xHCI" type="XHCI"/>
+            <Controller name="OHCI" type="OHCI"/>
           </Controllers>
         </USB>
         <Network>
@@ -474,42 +743,253 @@ then
   </VirtualSystem>
 </Envelope>
 _EOF_
-	cat << _EOF_ > "${OUTPUT_IMG_NAME/_VM-/_VirtualBox-}.mf"
-SHA1 (${OUTPUT_IMG_NAME/_VM-/_VirtualBox-}.ovf) = $(sha1sum "${OUTPUT_IMG_NAME/_VM-/_VirtualBox-}.ovf" | mawk '{print $1}')
-SHA1 (${OUTPUT_IMG_NAME/_VM-/_VirtualBox-}.vmdk) = $(sha1sum "${OUTPUT_IMG_NAME/_VM-/_VirtualBox-}.vmdk" | mawk '{print $1}')
+	# Create manifest file for automatic integrity check
+	cat << _EOF_ > "$image_name.mf"
+SHA1 ($image_name.ovf) = $(sha1sum "$image_name.ovf" | mawk '{print $1}')
+SHA1 ($image_name.vmdk) = $(sha1sum "$image_name.vmdk" | mawk '{print $1}')
 _EOF_
-	G_EXEC tar -cf "${OUTPUT_IMG_NAME/_VM-/_VirtualBox-}.ova" "${OUTPUT_IMG_NAME/_VM-/_VirtualBox-}."{vmdk,ovf,mf}
-	G_EXEC rm "${OUTPUT_IMG_NAME/_VM-/_VirtualBox-}."{vmdk,ovf,mf}
+	# Pack everything as compressed OVA appliance for VirtualBox import
+	G_EXEC tar -cf "$image_name.ova" "$image_name."{ovf,vmdk,mf}
+	G_EXEC rm "$image_name."{ovf,vmdk,mf}
 
-	G_DIETPI-NOTIFY 2 'Generating hashes to pack with VMware image, please wait...'
+	G_DIETPI-NOTIFY 2 'Generating hashes to pack with VMware appliance, please wait...'
 	cat << _EOF_ > hash.txt
-FILE:   ${OUTPUT_IMG_NAME/_VM-/_VirtualBox-}.ova
+FILE:   $image_name.ova
 DATE:   $(date)
-MD5:    $(md5sum "${OUTPUT_IMG_NAME/_VM-/_VirtualBox-}.ova" | mawk '{print $1}')
-SHA1:   $(sha1sum "${OUTPUT_IMG_NAME/_VM-/_VirtualBox-}.ova" | mawk '{print $1}')
-SHA256: $(sha256sum "${OUTPUT_IMG_NAME/_VM-/_VirtualBox-}.ova" | mawk '{print $1}')
+MD5:    $(md5sum "$image_name.ova" | mawk '{print $1}')
+SHA1:   $(sha1sum "$image_name.ova" | mawk '{print $1}')
+SHA256: $(sha256sum "$image_name.ova" | mawk '{print $1}')
 _EOF_
-	G_EXEC_DESC='Creating VirtualBox 7zip archive' G_EXEC_OUTPUT=1 G_EXEC 7zr a -bsp1 -bso1 -bse2 -m0=lzma2 -mx=9 $limit_threads "${OUTPUT_IMG_NAME/_VM-/_VirtualBox-}.7z" "${OUTPUT_IMG_NAME/_VM-/_VirtualBox-}.ova" hash.txt README.md
-	G_EXEC rm "${OUTPUT_IMG_NAME/_VM-/_VirtualBox-}.ova"
-	[[ -x 'upload.sh' ]] && G_EXEC_OUTPUT=1 G_EXEC ./upload.sh "${OUTPUT_IMG_NAME/_VM-/_VirtualBox-}.7z" && G_EXEC rm "${OUTPUT_IMG_NAME/_VM-/_VirtualBox-}.7z"
+	[[ ( -t 0 || -t 1 ) && $TERM != 'dumb' ]] && G_EXEC_OUTPUT=1
+	G_EXEC_DESC='Creating VirtualBox 7-Zip archive' G_EXEC 7zr a -bsp1 -bso1 -bse2 -m0=lzma2 -mx=9 $limit_threads "$image_name.7z" "$image_name.ova" hash.txt README.md
+	G_EXEC rm "$image_name.ova"
+	[[ -x 'upload.sh' ]] && G_EXEC_OUTPUT=1 G_EXEC ./upload.sh "$image_name.7z" && G_EXEC rm "$image_name.7z"
 fi
 
-# Hyper-V
+####### Hyper-V ##########################
 if [[ $VMTYPE =~ ^(hyperv|all)$ ]]
 then
-	G_EXEC qemu-img convert -O vhdx "$OUTPUT_IMG_NAME.img" "${OUTPUT_IMG_NAME/_VM-/_Hyper-V-}.vhdx"
+	image_name=${OUTPUT_IMG_NAME/_VM-/_Hyper-V-}
+	# Convert raw image to VHDX
+	G_EXEC qemu-img convert -O vhdx "$OUTPUT_IMG_NAME.img" "$image_name.vhdx"
 
 	G_DIETPI-NOTIFY 2 'Generating hashes to pack with Hyper-V image, please wait...'
 	cat << _EOF_ > hash.txt
-FILE:   ${OUTPUT_IMG_NAME/_VM-/_Hyper-V-}.vhdx
+FILE:   $image_name.vhdx
 DATE:   $(date)
-MD5:    $(md5sum "${OUTPUT_IMG_NAME/_VM-/_Hyper-V-}.vhdx" | mawk '{print $1}')
-SHA1:   $(sha1sum "${OUTPUT_IMG_NAME/_VM-/_Hyper-V-}.vhdx" | mawk '{print $1}')
-SHA256: $(sha256sum "${OUTPUT_IMG_NAME/_VM-/_Hyper-V-}.vhdx" | mawk '{print $1}')
+MD5:    $(md5sum "$image_name.vhdx" | mawk '{print $1}')
+SHA1:   $(sha1sum "$image_name.vhdx" | mawk '{print $1}')
+SHA256: $(sha256sum "$image_name.vhdx" | mawk '{print $1}')
 _EOF_
-	G_EXEC_DESC='Creating Hyper-V 7zip archive' G_EXEC_OUTPUT=1 G_EXEC 7zr a -bsp1 -bso1 -bse2 -m0=lzma2 -mx=9 $limit_threads "${OUTPUT_IMG_NAME/_VM-/_Hyper-V-}.7z" "${OUTPUT_IMG_NAME/_VM-/_Hyper-V-}.vhdx" hash.txt README.md
-	G_EXEC rm "${OUTPUT_IMG_NAME/_VM-/_Hyper-V-}.vhdx"
-	[[ -x 'upload.sh' ]] && G_EXEC_OUTPUT=1 G_EXEC ./upload.sh "${OUTPUT_IMG_NAME/_VM-/_Hyper-V-}.7z" && G_EXEC rm "${OUTPUT_IMG_NAME/_VM-/_Hyper-V-}.7z"
+	[[ ( -t 0 || -t 1 ) && $TERM != 'dumb' ]] && G_EXEC_OUTPUT=1
+	G_EXEC_DESC='Creating Hyper-V 7-Zip archive' G_EXEC 7zr a -bsp1 -bso1 -bse2 -m0=lzma2 -mx=9 $limit_threads "$image_name.7z" "$image_name.vhdx" hash.txt README.md
+	G_EXEC rm "$image_name.vhdx"
+	[[ -x 'upload.sh' ]] && G_EXEC_OUTPUT=1 G_EXEC ./upload.sh "$image_name.7z" && G_EXEC rm "$image_name.7z"
+fi
+
+####### Parallels ##########################
+if [[ $VMTYPE =~ ^(parallels|all)$ ]]
+then
+	image_name=${OUTPUT_IMG_NAME/_VM-/_Parallels-}
+	# Convert raw image to HDS
+	G_EXEC qemu-img convert -O parallels "$OUTPUT_IMG_NAME.img" "$image_name.hds"
+
+	G_DIETPI-NOTIFY 2 'Generating hashes to pack with Parallels image, please wait...'
+	cat << _EOF_ > hash.txt
+FILE:   $image_name.hds
+DATE:   $(date)
+MD5:    $(md5sum "$image_name.hds" | mawk '{print $1}')
+SHA1:   $(sha1sum "$image_name.hds" | mawk '{print $1}')
+SHA256: $(sha256sum "$image_name.hds" | mawk '{print $1}')
+_EOF_
+	[[ ( -t 0 || -t 1 ) && $TERM != 'dumb' ]] && G_EXEC_OUTPUT=1
+	G_EXEC_DESC='Creating Parallels 7-Zip archive' G_EXEC 7zr a -bsp1 -bso1 -bse2 -m0=lzma2 -mx=9 $limit_threads "$image_name.7z" "$image_name.hds" hash.txt README.md
+	G_EXEC rm "$image_name.hds"
+	[[ -x 'upload.sh' ]] && G_EXEC_OUTPUT=1 G_EXEC ./upload.sh "$image_name.7z" && G_EXEC rm "$image_name.7z"
+fi
+
+####### UTM ##############################
+if [[ $VMTYPE =~ ^(utm|all)$ ]]
+then
+	image_name=${OUTPUT_IMG_NAME/_VM-/_UTM-}
+	# Create directory which is interpreted as VM appliance file on macOS
+	G_EXEC mkdir -p "$image_name.utm/Images"
+	# Convert raw image to QCOW2
+	G_EXEC qemu-img convert -c -O qcow2 "$OUTPUT_IMG_NAME.img" "$image_name.utm/Images/data.qcow2"
+	# Generate random MAC address and UUID for VM
+	mac=$(tr -dc '0-9A-F' < /dev/urandom | head -c10 | sed -E 's/(..)/\1:/g;s/:$//;s/^/02:/') # ToDo: Beginning with "D2:"?
+	vmuuid=$(</proc/sys/kernel/random/uuid)
+	# Create VM configuration
+	cat << _EOF_ > "$image_name.utm/config.plist"
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<key>ConfigurationVersion</key>
+	<integer>2</integer>
+	<key>Debug</key>
+	<dict/>
+	<key>Display</key>
+	<dict>
+		<key>ConsoleFont</key>
+		<string>Menlo</string>
+		<key>ConsoleFontSize</key>
+		<integer>12</integer>
+		<key>ConsoleOnly</key>
+		<false/>
+		<key>ConsoleTheme</key>
+		<string>Default</string>
+		<key>DisplayCard</key>
+		<string>virtio-vga</string>
+		<key>DisplayDownscaler</key>
+		<string>linear</string>
+		<key>DisplayUpscaler</key>
+		<string>nearest</string>
+	</dict>
+	<key>Drives</key>
+	<array>
+		<dict>
+			<key>DriveName</key>
+			<string>cdrom0</string>
+			<key>ImageType</key>
+			<string>cd</string>
+			<key>InterfaceType</key>
+			<string>ide</string>
+			<key>Removable</key>
+			<true/>
+		</dict>
+		<dict>
+			<key>DriveName</key>
+			<string>drive0</string>
+			<key>ImagePath</key>
+			<string>data.qcow2</string>
+			<key>ImageType</key>
+			<string>disk</string>
+			<key>InterfaceType</key>
+			<string>ide</string>
+		</dict>
+	</array>
+	<key>Info</key>
+	<dict>
+		<key>Icon</key>
+		<string>linux</string>
+		<key>IconCustom</key>
+		<false/>
+	</dict>
+	<key>Input</key>
+	<dict/>
+	<key>Networking</key>
+	<dict>
+		<key>NetworkCard</key>
+		<string>e1000</string>
+		<key>NetworkCardMAC</key>
+		<string>$mac</string>
+		<key>NetworkMode</key>
+		<string>bridged</string>
+	</dict>
+	<key>Printing</key>
+	<dict/>
+	<key>Sharing</key>
+	<dict>
+		<key>ClipboardSharing</key>
+		<true/>
+		<key>DirectoryReadOnly</key>
+		<false/>
+		<key>DirectorySharing</key>
+		<true/>
+		<key>Usb3Support</key>
+		<true/>
+		<key>UsbRedirectMax</key>
+		<integer>3</integer>
+	</dict>
+	<key>Sound</key>
+	<dict>
+		<key>SoundCard</key>
+		<string>intel-hda</string>
+		<key>SoundEnabled</key>
+		<false/>
+	</dict>
+	<key>System</key>
+	<dict>
+		<key>Architecture</key>
+		<string>$iarch</string>
+		<key>BootDevice</key>
+		<string></string>
+		<key>BootUefi</key>
+		<false/>
+		<key>CPU</key>
+		<string>default</string>
+		<key>CPUCount</key>
+		<integer>1</integer>
+		<key>MachineProperties</key>
+		<string>vmport=off</string>
+		<key>Memory</key>
+		<integer>1024</integer>
+		<key>RngEnabled</key>
+		<true/>
+		<key>SystemUUID</key>
+		<string>${vmuuid^^}</string>
+		<key>Target</key>
+		<string>q35</string>
+		<key>UseHypervisor</key>
+		<true/>
+	</dict>
+</dict>
+</plist>
+_EOF_
+	# Create VM interface config
+	cat << '_EOF_' > "$image_name.utm/view.plist"
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<key>DisplayOriginX</key>
+	<real>0.0</real>
+	<key>DisplayOriginY</key>
+	<real>0.0</real>
+	<key>DisplayScale</key>
+	<real>1</real>
+	<key>DisplaySizeHeight</key>
+	<real>768</real>
+	<key>DisplaySizeWidth</key>
+	<real>1024</real>
+	<key>RemovableDrives</key>
+	<dict/>
+	<key>RemovableDrivesPath</key>
+	<dict/>
+	<key>ShowKeyboard</key>
+	<false/>
+	<key>ShowToolbar</key>
+	<true/>
+	<key>Suspended</key>
+	<false/>
+</dict>
+</plist>
+_EOF_
+	G_DIETPI-NOTIFY 2 'Generating hashes to pack with UTM appliance, please wait...'
+	cat << _EOF_ > hash.txt
+FILE:   $image_name.utm/Images/data.qcow2
+DATE:   $(date)
+MD5:    $(md5sum "$image_name.utm/Images/data.qcow2" | mawk '{print $1}')
+SHA1:   $(sha1sum "$image_name.utm/Images/data.qcow2" | mawk '{print $1}')
+SHA256: $(sha256sum "$image_name.utm/Images/data.qcow2" | mawk '{print $1}')
+
+FILE:   $image_name.utm/config.plist
+DATE:   $(date)
+MD5:    $(md5sum "$image_name.utm/config.plist" | mawk '{print $1}')
+SHA1:   $(sha1sum "$image_name.utm/config.plist" | mawk '{print $1}')
+SHA256: $(sha256sum "$image_name.utm/config.plist" | mawk '{print $1}')
+
+FILE:   $image_name.utm/view.plist
+DATE:   $(date)
+MD5:    $(md5sum "$image_name.utm/view.plist" | mawk '{print $1}')
+SHA1:   $(sha1sum "$image_name.utm/view.plist" | mawk '{print $1}')
+SHA256: $(sha256sum "$image_name.utm/view.plist" | mawk '{print $1}')
+_EOF_
+	[[ ( -t 0 || -t 1 ) && $TERM != 'dumb' ]] && G_EXEC_OUTPUT=1
+	G_EXEC_DESC='Creating UTM 7-Zip archive' G_EXEC 7zr a -bsp1 -bso1 -bse2 -m0=lzma2 -mx=9 $limit_threads "$image_name.7z" "$image_name.utm" hash.txt README.md
+	G_EXEC rm -R "$image_name.utm"
+	[[ -x 'upload.sh' ]] && G_EXEC_OUTPUT=1 G_EXEC ./upload.sh "$image_name.7z" && G_EXEC rm "$image_name.7z"
 fi
 
 # Cleanup

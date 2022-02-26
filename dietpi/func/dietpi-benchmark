@@ -138,15 +138,12 @@ _EOF_
 		BENCH_CPU_TEMP_END=$(G_OBTAIN_CPU_TEMP)
 		BENCH_CPU=$(mawk '/real/{print $2;exit}' bench_result)
 
-		if (( $SHOW_RESULTS ))
-		then
-			G_WHIP_MSG "CPU benchmark results:\n
+		(( $SHOW_RESULTS )) || return 0
+		G_WHIP_MSG "CPU benchmark results:\n
  - Total time     = $BENCH_CPU seconds
  - Value to reach = $CPUBENCH_INT_MAX
  - CPU temps      = Start: ${BENCH_CPU_TEMP_START} °C | End: ${BENCH_CPU_TEMP_END} °C
 \n\nNB: A lower 'Total time' is faster"
-
-		fi
 
 	}
 
@@ -189,35 +186,32 @@ _EOF_
 		local bench_read_result=$(dd bs=4K count=$(( $BENCH_FILESIZE * 256 )) if="$FP_BENCHFILE" of=/dev/null 2>&1 | mawk '/copied/{printf "%.0f",$1/$8/1024^2;exit}')
 		G_DIETPI-NOTIFY 0 "Result: $bench_read_result MiB/s"
 
-		# - RootFS
+		[[ -f $FP_BENCHFILE ]] && G_EXEC rm "$FP_BENCHFILE"
+
+		# RootFS
 		if [[ $FP_BENCHFILE == "/$benchmark_file_name" ]]
 		then
 			BENCH_ROOTFS_WRITE=$bench_write_result
 			BENCH_ROOTFS_READ=$bench_read_result
 
-		# - RAM
+		# RAM
 		elif [[ $FP_BENCHFILE == "/tmp/$benchmark_file_name" ]]
 		then
 			BENCH_RAM_WRITE=$bench_write_result
 			BENCH_RAM_READ=$bench_read_result
 
-		# - Custom
+		# Custom
 		else
 			BENCH_CUSTOMFS_WRITE=$bench_write_result
 			BENCH_CUSTOMFS_READ=$bench_read_result
 		fi
 
-		if (( $SHOW_RESULTS ))
-		then
-			G_WHIP_MSG "Filesystem benchmark results:\n
+		(( $SHOW_RESULTS )) || return 0
+		G_WHIP_MSG "Filesystem benchmark results:\n
  - File path = $FP_BENCHFILE
  - Test size = $BENCH_FILESIZE MiB
  - WRITE     = $bench_write_result MiB/s
  - READ      = $bench_read_result MiB/s"
-
-		fi
-
-		[[ -f $FP_BENCHFILE ]] && G_EXEC rm "$FP_BENCHFILE"
 
 	}
 
@@ -228,43 +222,46 @@ _EOF_
 
 		if (( $G_INTERACTIVE ))
 		then
-			if G_WHIP_YESNO "$G_PROGRAM_NAME will now run the following benchmarks:\n - CPU performance\n - RootFS read/write performance\n - RAM read/write performance
-\nThe test duration will depend on hardware specs, however, most devices will not exceed 40 seconds.\n\nIf you are opted in to the DietPi-Survey, your scores will uploaded automatically.
-You can compare results against other users and hardware using the following link:\n - https://dietpi.com/survey#benchmark\n\nPlease select 'Ok' to begin the benchmark tests."
-			then
-				# Additional checks
-				(( $G_HW_CPU_CORES > 2 )) || G_WHIP_YESNO "We have detected a low CPU core count ($G_HW_CPU_CORES). The tests may take up to 5 minutes to complete.\n\nDo you wish to continue?" || exit 0
-			else
-				G_DIETPI-NOTIFY 2 'Benchmark aborted'
-				exit 0
-			fi
+			G_WHIP_YESNO "$G_PROGRAM_NAME will now run the following benchmarks:\n - CPU performance\n - RootFS read/write performance\n - RAM read/write performance
+\nThe test duration depends on hardware specs, ranging from a few seconds up to a few minutes on slower hardware like Raspberry Pi 1 and Zero (1) models.
+\nIf you are opted in to the DietPi-Survey, your scores will uploaded automatically.
+You can compare results against other users and hardware using the following link:\n - https://dietpi.com/survey#benchmark
+\nPlease select 'Ok' to begin the benchmark tests." || { G_DIETPI-NOTIFY 2 'Benchmark aborted'; exit 0; }
+
 		fi
 
 		G_DIETPI-NOTIFY 2 'Running benchmark suite tests, please wait...'
 		CPU_Benchmark
 
-		# FS/RAM
-		# - RAM
+		# RAM
 		if df -t tmpfs /tmp &> /dev/null
 		then
 			# Apply performance CPU governor to avoid low frequency affecting RAM I/O results: https://github.com/MichaIng/DietPi/issues/5039#issuecomment-1021459310
-			G_DIETPI-NOTIFY 2 'Temporarily applying performance CPU governor for RAM I/O benchmark...'
-			for i in /sys/devices/system/cpu/cpu[0-9]*/cpufreq/scaling_governor
-			do
-				echo 'performance' > "$i"
-			done
+			local acpufreq
+			mapfile -t acpufreq < <(find /sys/devices/system/cpu/cpu[0-9]*/cpufreq/scaling_governor 2> /dev/null)
+			if [[ ${acpufreq[0]} ]]
+			then
+				G_DIETPI-NOTIFY 2 'Temporarily applying performance CPU governor for RAM I/O benchmark...'
+				for i in "${acpufreq[@]}"
+				do
+					echo 'performance' > "$i"
+				done
+			fi
 
 			FP_BENCHFILE='/tmp'
 			BENCH_FILESIZE=$(mawk '/^MemFree:/{printf "%.0f",$2/2048;exit}' /proc/meminfo) # Assure 50% of physical mem stays free, so swapping can be ruled out: KiB => MiB / 2
 			Filesystem_Benchmark
 
-			G_DIETPI-NOTIFY 2 'Restoring original CPU governor...'
-			/boot/dietpi/func/dietpi-set_cpu
+			if [[ ${acpufreq[0]} ]]
+			then
+				G_DIETPI-NOTIFY 2 'Restoring original CPU governor...'
+				/boot/dietpi/func/dietpi-set_cpu
+			fi
 		else
 			G_DIETPI-NOTIFY 1 '/tmp does not seem to be mounted as tmpfs (RAMdisk). Skipping RAM I/O benchmark...'
 		fi
 
-		# - RootFS
+		# RootFS
 		FP_BENCHFILE='/'
 		BENCH_FILESIZE=100
 		Filesystem_Benchmark

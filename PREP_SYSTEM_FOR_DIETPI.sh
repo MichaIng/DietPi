@@ -49,6 +49,9 @@
 	# Set $PATH variable to include all expected default binary locations, since we don't know the current system setup: https://github.com/MichaIng/DietPi/issues/3206
 	export PATH='/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin'
 
+	# Mount all filesystems defined in /etc/fstab without "noauto" option: https://github.com/MichaIng/DietPi/issues/5174
+	mount -a
+
 	# Make /tmp a tmpfs if it is not yet a dedicated mount
 	if findmnt -M /tmp > /dev/null
 	then
@@ -538,7 +541,7 @@ Currently installed: $G_DISTRO_NAME (ID: $G_DISTRO)"; then
 
 			G_EXEC mv "DietPi-$G_GITBRANCH/boot_c2.ini" /boot/boot.ini
 
-		elif [[ $G_HW_MODEL == 15 && $(findmnt -Ufnro TARGET -T /boot) == '/' ]]; then
+		elif [[ $G_HW_MODEL == 1[56] && $(findmnt -Ufnro TARGET -T /boot) == '/' ]]; then
 
 			G_EXEC mv "DietPi-$G_GITBRANCH/.build/images/U-Boot/boot.cmd" /boot/boot.cmd
 			G_EXEC mv "DietPi-$G_GITBRANCH/.build/images/U-Boot/dietpiEnv.txt" /boot/dietpiEnv.txt
@@ -611,9 +614,9 @@ Currently installed: $G_DISTRO_NAME (ID: $G_DISTRO)"; then
 		# RPi: Bootstrap repo when key is missing
 		if [[ $G_HW_MODEL -le 9 && ! $(apt-key list 'CF8A1AF502A2AA2D763BAE7E82B129927FA3303E' 2> /dev/null) ]]
 		then
-			G_EXEC curl -sSfLO 'https://archive.raspberrypi.org/debian/pool/main/r/raspberrypi-archive-keyring/raspberrypi-archive-keyring_2021.1.1+rpt1_all.deb'
-			G_AGI dpkg -i raspberrypi-archive-keyring_2016.10.31_all.deb
-			G_EXEC rm raspberrypi-archive-keyring_2016.10.31_all.deb
+			G_EXEC curl -sSfL 'https://archive.raspberrypi.org/debian/pool/main/r/raspberrypi-archive-keyring/raspberrypi-archive-keyring_2021.1.1+rpt1_all.deb' -o keyring.deb
+			G_EXEC dpkg -i keyring.deb
+			G_EXEC rm keyring.deb
 		fi
 
 		G_AGUP
@@ -805,8 +808,8 @@ _EOF_
 			[[ -f '/etc/apt/trusted.gpg~' ]] && G_EXEC rm '/etc/apt/trusted.gpg~'
 
 		# - G_HW_MODEL specific required firmware/kernel/bootloader packages
-		#	Odroid N2: Modern single partition image
-		elif [[ $G_HW_MODEL == 15 && -f '/boot/dietpiEnv.txt' ]]
+		#	Odroid N2/C4: Modern single partition image
+		elif [[ $G_HW_MODEL == 1[56] && -f '/boot/dietpiEnv.txt' ]]
 		then
 			# Bootstrap Armbian repository
 			G_EXEC eval "curl -sSfL 'https://apt.armbian.com/armbian.key' | gpg --dearmor -o /etc/apt/trusted.gpg.d/dietpi-armbian.gpg --yes"
@@ -823,7 +826,9 @@ _EOF_
 			G_AGUP
 			# Install kernel, device tree, U-Boot, firmware and initramfs packages, initramfs-tools first to have an initramfs generated on kernel install
 			G_AGI initramfs-tools
-			G_AGI linux-{image,dtb}-current-meson64 linux-u-boot-odroidn2-current u-boot-tools armbian-firmware
+			local model='odroidn2'
+			[[ $G_HW_MODEL == 16 ]] && model='odroidc4'
+			G_AGI linux-{image,dtb}-current-meson64 "linux-u-boot-$model-current" u-boot-tools armbian-firmware
 			# Cleanup
 			[[ -f '/boot/uImage' ]] && G_EXEC rm /boot/uImage
 			[[ -f '/boot/.next' ]] && G_EXEC rm /boot/.next
@@ -1051,45 +1056,32 @@ _EOF_
 		G_EXEC apt-get clean # Remove downloaded archives
 
 		# - Firmware
-		if dpkg-query -s 'armbian-firmware' &> /dev/null; then
-
+		if dpkg-query -s 'armbian-firmware' &> /dev/null
+		then
 			aPACKAGES_REQUIRED_INSTALL+=('armbian-firmware')
 
 		# - Do not install additional firmware on Radxa Zero for now
 		elif [[ $G_HW_MODEL != 74 ]]
 		then
-
 			# Usually no firmware should be necessary for VMs. If user manually passes though some USB device, user might need to install the firmware then.
-			if (( $G_HW_MODEL != 20 )); then
-
-				aPACKAGES_REQUIRED_INSTALL+=('firmware-realtek')		# Realtek Eth+WiFi+BT dongle firmware
-				if (( $G_HW_ARCH == 10 )); then
-
-					aPACKAGES_REQUIRED_INSTALL+=('firmware-linux')		# Misc free+nonfree firmware
-
-				else
-
-					aPACKAGES_REQUIRED_INSTALL+=('firmware-linux-free')	# Misc free firmware
-					aPACKAGES_REQUIRED_INSTALL+=('firmware-misc-nonfree')	# Misc nonfree firmware + Ralink WiFi
-
-				fi
-
+			if (( $G_HW_MODEL != 20 ))
+			then
+				aPACKAGES_REQUIRED_INSTALL+=('firmware-realtek')		# Realtek Eth+WiFi/BT firmware
+				aPACKAGES_REQUIRED_INSTALL+=('firmware-linux-free')		# Misc free firmware
+				aPACKAGES_REQUIRED_INSTALL+=('firmware-misc-nonfree')		# Misc non-free firmware incl. Ralink and MediaTek WiFi/BT
 			fi
 
-			if (( $WIFI_REQUIRED )); then
-
-				aPACKAGES_REQUIRED_INSTALL+=('firmware-atheros')		# Qualcomm/Atheros WiFi+BT dongle firmware
-				aPACKAGES_REQUIRED_INSTALL+=('firmware-brcm80211')		# Broadcom WiFi dongle firmware
-				aPACKAGES_REQUIRED_INSTALL+=('firmware-iwlwifi')		# Intel WiFi dongle+PCIe firmware
-				if (( $G_HW_MODEL == 20 )); then
-
-					aPACKAGES_REQUIRED_INSTALL+=('firmware-realtek')	# Realtek Eth+WiFi+BT dongle firmware
-					aPACKAGES_REQUIRED_INSTALL+=('firmware-misc-nonfree')	# Misc nonfree firmware + Ralink WiFi
-
+			if (( $WIFI_REQUIRED ))
+			then
+				aPACKAGES_REQUIRED_INSTALL+=('firmware-atheros')		# Qualcomm/Atheros WiFi/BT firmware
+				aPACKAGES_REQUIRED_INSTALL+=('firmware-brcm80211')		# Broadcom WiFi/BT firmware
+				aPACKAGES_REQUIRED_INSTALL+=('firmware-iwlwifi')		# Intel WiFi/BT firmware
+				if (( $G_HW_MODEL == 20 ))
+				then
+					aPACKAGES_REQUIRED_INSTALL+=('firmware-realtek')	# Realtek Eth+WiFi/BT firmware
+					aPACKAGES_REQUIRED_INSTALL+=('firmware-misc-nonfree')	# Misc non-free firmware incl. Ralink and MediaTek WiFi/BT
 				fi
-
 			fi
-
 		fi
 
 		G_DIETPI-NOTIFY 2 'Generating list of minimal packages, required for DietPi installation'
@@ -1371,11 +1363,11 @@ _EOF_
 		#-----------------------------------------------------------------------------------
 		# Dirs
 		G_DIETPI-NOTIFY 2 'Generating DietPi directories'
-		mkdir -pv /var/lib/dietpi/{postboot.d,dietpi-software/installed}
-		mkdir -pv /var/tmp/dietpi/logs/dietpi-ramlog_store
-		mkdir -pv /mnt/{dietpi_userdata,samba,ftp_client,nfs_client}
-		chown -R dietpi:dietpi /var/{lib,tmp}/dietpi /mnt/{dietpi_userdata,samba,ftp_client,nfs_client}
-		find /var/{lib,tmp}/dietpi /mnt/{dietpi_userdata,samba,ftp_client,nfs_client} -type d -exec chmod 0775 {} +
+		G_EXEC mkdir -p /var/lib/dietpi/{postboot.d,dietpi-software/installed}
+		G_EXEC mkdir -p /var/tmp/dietpi/logs/dietpi-ramlog_store
+		G_EXEC mkdir -p /mnt/{dietpi_userdata,samba,ftp_client,nfs_client}
+		G_EXEC chown -R dietpi:dietpi /mnt/{dietpi_userdata,samba,ftp_client,nfs_client}
+		G_EXEC find /mnt/{dietpi_userdata,samba,ftp_client,nfs_client} -type d -exec chmod 0775 {} +
 
 		#-----------------------------------------------------------------------------------
 		# Services
@@ -1406,22 +1398,22 @@ _EOF_'
 		G_DIETPI-NOTIFY 2 'Removing all rfkill soft blocks and the rfkill package'
 		rfkill unblock all
 		G_AGP rfkill
-		[[ -d '/var/lib/systemd/rfkill' ]] && rm -Rv /var/lib/systemd/rfkill
+		[[ -d '/var/lib/systemd/rfkill' ]] && G_EXEC rm -R /var/lib/systemd/rfkill
 
 		G_DIETPI-NOTIFY 2 'Configuring wlan/eth naming to be preferred for networked devices:'
-		ln -sfv /dev/null /etc/systemd/network/99-default.link
-		ln -sfv /dev/null /etc/udev/rules.d/80-net-setup-link.rules
+		G_EXEC ln -sf /dev/null /etc/systemd/network/99-default.link
+		G_EXEC ln -sf /dev/null /etc/udev/rules.d/80-net-setup-link.rules
 		# - Armbian: Add cmdline entry, which was required on my Raspbian Bullseye system since last few APT updates
-		[[ -f '/boot/armbianEnv.txt' ]] && G_CONFIG_INJECT 'extraargs=' 'extraargs="net.ifnames=0"' /boot/armbianEnv.txt
+		[[ -f '/boot/armbianEnv.txt' ]] && G_CONFIG_INJECT 'extraargs=' 'extraargs=net.ifnames=0' /boot/armbianEnv.txt
 
 		G_DIETPI-NOTIFY 2 'Configuring DNS nameserver:'
 		# Failsafe: Assure that /etc/resolv.conf is not a symlink and disable systemd-resolved + systemd-networkd
-		systemctl disable --now systemd-{resolve,network}d
-		rm -fv /etc/resolv.conf
+		G_EXEC systemctl disable --now systemd-{resolve,network}d
+		G_EXEC rm -f /etc/resolv.conf
 		echo 'nameserver 9.9.9.9' > /etc/resolv.conf # Apply generic functional DNS nameserver, updated on next service start
 
 		# ifupdown starts the daemon outside of systemd, the enabled systemd unit just throws an error on boot due to missing dbus and with dbus might interfere with ifupdown
-		systemctl disable wpa_supplicant 2> /dev/null && G_DIETPI-NOTIFY 2 'Disabled non-required wpa_supplicant systemd unit'
+		systemctl list-unit-files 'wpa_supplicant.service' &> /dev/null && G_EXEC systemctl disable wpa_supplicant
 
 		G_EXEC_DESC='Configuring network interfaces'
 		G_EXEC eval 'cat << _EOF_ > /etc/network/interfaces
@@ -1500,7 +1492,6 @@ _EOF_'
 ff02::1 ip6-allnodes
 ff02::2 ip6-allrouters
 _EOF_'
-
 		G_EXEC_DESC='Configuring htop'
 		G_EXEC eval 'cat << _EOF_ > /etc/htoprc
 # DietPi default config for htop
@@ -1546,11 +1537,11 @@ _EOF_'
 			/boot/dietpi/func/dietpi-set_hardware serialconsole disable ttyS0
 			G_EXEC systemctl mask serial-getty@ttyS0
 
-		# Odroid N2: Enable on serial debug console only
-		elif (( $G_HW_MODEL == 15 ))
+		# Odroid N2/C4: Enable on serial debug console only
+		elif [[ $G_HW_MODEL == 1[56] ]]
 		then
 			local tty='ttyAML0'
-			[[ -e '/dev/ttyAML0' ]] || tty='ttyS0'
+			[[ -f '/boot/dietpiEnv.txt' || -e '/dev/ttyAML0' ]] || tty='ttyS0'
 			/boot/dietpi/func/dietpi-set_hardware serialconsole enable "$tty"
 
 		# ROCK Pi S: Enable on ttyS0 only
@@ -1595,13 +1586,6 @@ _EOF_'
 
 			G_EXEC_DESC='Removing foreign i386 DPKG architecture' G_EXEC dpkg --remove-architecture i386
 
-			# Disable nouveau: https://github.com/MichaIng/DietPi/issues/1244 // https://dietpi.com/phpbb/viewtopic.php?p=9688#p9688
-			G_EXEC rm -f /etc/modprobe.d/*nouveau*
-			cat << '_EOF_' > /etc/modprobe.d/dietpi-disable_nouveau.conf
-blacklist nouveau
-options nouveau modeset=0
-alias nouveau off
-_EOF_
 			# Fix grub install device: https://github.com/MichaIng/DietPi/issues/3700
 			dpkg-query -s grub-pc &> /dev/null && G_EXEC eval "debconf-set-selections <<< 'grub-pc grub-pc/install_devices multiselect /dev/sda'"
 
@@ -1633,8 +1617,8 @@ _EOF_"
 			unset -v spindown
 		fi
 
-		# - Odroid N2: Modern single partition image
-		if [[ $G_HW_MODEL == 15 && -f '/boot/dietpiEnv.txt' ]]
+		# - Odroid N2/C4: Modern single partition image
+		if [[ $G_HW_MODEL == 1[56] && -f '/boot/dietpiEnv.txt' ]]
 		then
 			G_CONFIG_INJECT 'rootdev=' "rootdev=UUID=$(findmnt -Ufnro UUID -M /)" /boot/dietpiEnv.txt
 			G_CONFIG_INJECT 'rootfstype=' "rootfstype=$(findmnt -Ufnro FSTYPE -M /)" /boot/dietpiEnv.txt
@@ -1770,9 +1754,6 @@ _EOF_
 			done
 			G_EXEC sed -i 's/^#grep/grep/' /etc/kernel/postinst.d/dietpi-USBridgeSig
 
-			# Create RPi Zero 2 W device tree if not existent
-			[[ -f '/boot/bcm2710-rpi-zero-2.dtb' ]] || G_EXEC cp -a /boot/bcm2710-rpi-{3-b,zero-2}.dtb
-
 			# For backwards compatibility with software compiled against older libraspberrypi0, create symlinks from old to new filenames
 			if (( $G_HW_ARCH < 3 ))
 			then
@@ -1786,20 +1767,6 @@ _EOF_
 
 				done < <(dpkg -L 'libraspberrypi0' | grep '^/usr/lib/arm-linux-gnueabihf/.*\.so.0$')
 			fi
-
-		# - PINE A64 (and possibly others): Cursor fix for FB
-		elif (( $G_HW_MODEL == 40 )); then
-
-			cat << _EOF_ > /etc/bashrc.d/dietpi-pine64-cursorfix.sh
-#!/bin/dash
-# DietPi: Cursor fix for FB
-infocmp > terminfo.txt
-sed -i -e 's/?0c/?112c/g' -e 's/?8c/?48;0;64c/g' terminfo.txt
-tic terminfo.txt
-tput cnorm
-_EOF_
-			# Ensure WiFi module pre-exists
-			G_CONFIG_INJECT '8723bs' '8723bs' /etc/modules
 
 		# - Radxa Zero
 		elif (( $G_HW_MODEL == 74 ))
@@ -1838,26 +1805,27 @@ _EOF_
 			G_CONFIG_INJECT 'docker_optimizations=' 'docker_optimizations=off' /boot/armbianEnv.txt
 		fi
 
-		# Apply cgroups-v2 workaround on Bullseye if the kernel does not support it: https://github.com/MichaIng/DietPi/issues/4705
-		if (( $G_DISTRO > 5 )) && ! find /lib/modules -maxdepth 1 -type d -name '5.[0-9]*' > /dev/null
+		# Apply cgroups-v2 workaround if the kernel does not support it: https://github.com/MichaIng/DietPi/issues/4705
+		# - This is required on Bullseye only, but we'll apply it on Buster as well to cover later distro upgrades, since the logic is too complicated for our upgrade blog article.
+		if [[ ! $(find /lib/modules -maxdepth 1 -type d -name '5.[0-9]*') ]]
 		then
 			# Odroids
-			if [[ $G_HW_MODEL -gt 9 && $G_HW_MODEL -le 16 && -f '/boot/boot.ini' ]]
+			if [[ $G_HW_MODEL -gt 9 && $G_HW_MODEL -le 16 && -f '/boot/boot.ini' ]] && ! grep -q 'systemd.unified_cgroup_hierarchy=0' /boot/boot.ini
 			then
 				G_DIETPI-NOTIFY 2 'Forcing legacy cgroups v1 hierarchy on old kernel device'
-				grep -q 'systemd.unified_cgroup_hierarchy=0' /boot/boot.ini || G_EXEC sed -i '/^setenv bootargs "/s/"$/ systemd.unified_cgroup_hierarchy=0"/' /boot/boot.ini
+				G_EXEC sed -i '/^setenv bootargs "/s/"$/ systemd.unified_cgroup_hierarchy=0"/' /boot/boot.ini
 
 			# Sparky SBC
-			elif [[ $G_HW_MODEL == 70 && -f '/boot/uenv.txt' ]]
+			elif [[ $G_HW_MODEL == 70 && -f '/boot/uenv.txt' ]] && ! grep -q 'systemd.unified_cgroup_hierarchy=0' /boot/uenv.txt
 			then
 				G_DIETPI-NOTIFY 2 'Forcing legacy cgroups v1 hierarchy on old kernel device'
-				grep -q 'systemd.unified_cgroup_hierarchy=0' /boot/uenv.txt || G_EXEC sed -i '/^bootargs=/s/$/ systemd.unified_cgroup_hierarchy=0/' /boot/uenv.txt
+				G_EXEC sed -i '/^bootargs=/s/$/ systemd.unified_cgroup_hierarchy=0/' /boot/uenv.txt
 
 			# ROCK Pi S
-			elif [[ $G_HW_MODEL == 73 && -f '/boot/boot.cmd' ]]
+			elif [[ $G_HW_MODEL == 73 && -f '/boot/boot.cmd' ]] && ! grep -q 'systemd.unified_cgroup_hierarchy=0' /boot/boot.cmd
 			then
 				G_DIETPI-NOTIFY 2 'Forcing legacy cgroups v1 hierarchy on old kernel device'
-				grep -q 'systemd.unified_cgroup_hierarchy=0' /boot/boot.cmd || G_EXEC sed -i '/^setenv bootargs "/s/"$/ systemd.unified_cgroup_hierarchy=0"/' /boot/boot.cmd
+				G_EXEC sed -i '/^setenv bootargs "/s/"$/ systemd.unified_cgroup_hierarchy=0"/' /boot/boot.cmd
 				G_EXEC mkimage -C none -A arm64 -T script -d /boot/boot.cmd /boot/boot.scr
 			fi
 		fi
@@ -1991,7 +1959,7 @@ _EOF_
 		G_DIETPI-NOTIFY 2 'Clearing items below tmpfs mount points'
 		G_EXEC mkdir -p /mnt/tmp_root
 		G_EXEC mount "$(findmnt -Ufnro SOURCE -M /)" /mnt/tmp_root
-		rm -vRf /mnt/tmp_root/{dev,proc,run,sys,tmp,var/log}/{,.??,.[^.]}*
+		rm -Rfv /mnt/tmp_root/{dev,proc,run,sys,tmp,var/log}/{,.??,.[^.]}*
 		G_EXEC umount /mnt/tmp_root
 		G_EXEC rmdir /mnt/tmp_root
 
@@ -1999,7 +1967,7 @@ _EOF_
 		rm -Rfv /{root,home/*}/.{bash_history,nano_history,wget-hsts,cache,local,config,gnupg,viminfo,dbus,gconf,nano,vim,zshrc,oh-my-zsh} /etc/*- /var/{cache/debconf,lib/dpkg}/*-old /var/lib/dhcp/{,.??,.[^.]}*
 
 		# Remove PREP script
-		[[ -f $FP_PREP_SCRIPT ]] && rm -v "$FP_PREP_SCRIPT"
+		[[ -f $FP_PREP_SCRIPT ]] && G_EXEC rm -v "$FP_PREP_SCRIPT"
 
 		sync
 

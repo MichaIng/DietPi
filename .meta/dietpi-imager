@@ -17,7 +17,15 @@
 	#////////////////////////////////////
 
 	# Import DietPi-Globals ---------------------------------------------------------------
-	. /boot/dietpi/func/dietpi-globals
+	if [[ -f '/boot/dietpi/func/dietpi-globals' ]]
+	then
+		. /boot/dietpi/func/dietpi-globals
+	else
+		[[ $G_GITOWNER && $G_GITBRANCH ]] || { echo '[FAILED] You must export or pass G_GITOWNER and G_GITBRANCH to the script'; exit 1; }
+		curl -sSf "https://raw.githubusercontent.com/$G_GITOWNER/DietPi/$G_GITBRANCH/dietpi/func/dietpi-globals" -o /tmp/dietpi-globals || exit 1
+		. /tmp/dietpi-globals
+		G_EXEC_NOHALT=1 G_EXEC rm /tmp/dietpi-globals
+	fi
 	readonly G_PROGRAM_NAME='DietPi-Imager'
 	G_CHECK_ROOT_USER
 	G_CHECK_ROOTFS_RW
@@ -27,11 +35,12 @@
 	# Import DietPi-Globals ---------------------------------------------------------------
 
 	readonly FP_MNT_TMP="/tmp/${G_PROGRAM_NAME}_mnt"
-	readonly CLONEZILLA_REPO='https://sourceforge.net/projects/clonezilla/files/clonezilla_live_alternative'
+	readonly CLONEZILLA_REPO='https://sourceforge.net/projects/clonezilla/files/clonezilla_live_stable'
 	readonly DIETPI_REPO="https://raw.githubusercontent.com/$G_GITOWNER/DietPi/$G_GITBRANCH"
 
 	# Inputs
 	SOURCE_TYPE='Drive'
+	FP_SOURCE_IMG=
 	if [[ -b $1 ]]
 	then
 		FP_SOURCE=$1
@@ -53,14 +62,16 @@
 	OUTPUT_IMG_EXT='img'
 	#OUTPUT_IMG_NAME=
 	[[ $MOUNT_IT == 'On' ]] || MOUNT_IT='Off'
+	[[ $SHRINK_ONLY == 'On' ]] || SHRINK_ONLY='Off'
 
-	Delete_Loopback(){ [[ $FP_SOURCE ]] && losetup "$FP_SOURCE" &> /dev/null && G_EXEC losetup -d "$FP_SOURCE"; }
+	Delete_Loopback(){ [[ $FP_SOURCE_IMG ]] && losetup "$FP_SOURCE" &> /dev/null && G_EXEC losetup -d "$FP_SOURCE"; }
 
 	G_EXIT_CUSTOM()
 	{
 		findmnt $FP_MNT_TMP > /dev/null && Unmount_tmp
 		[[ -d $FP_MNT_TMP ]] && G_EXEC rmdir $FP_MNT_TMP
-		[[ $FP_SOURCE_IMG ]] && Delete_Loopback
+		Delete_Loopback
+		[[ -e 'tmpiso' ]] && G_EXEC rm -R tmpiso
 	}
 
 	Menu_Source_Type()
@@ -256,6 +267,9 @@
 
 	Main(){
 
+		# Dependencies
+		G_AG_CHECK_INSTALL_PREREQ parted fdisk zerofree p7zip
+
 		# Skip menu if all inputs are provided via environment variables
 		if [[ ( $SOURCE_TYPE$FP_SOURCE == 'Drive'?* || $SOURCE_TYPE$FP_SOURCE_IMG == 'Image'?* ) && $FP_ROOT_DEV && $CLONING_TOOL =~ ^(dd|Clonezilla)$ && $OUTPUT_IMG_NAME ]]
 		then
@@ -287,12 +301,6 @@
 			done
 			unset -v main_menu_choice
 		fi
-
-		# Install required packages: fdisk is an own package since Debian Buster: https://packages.debian.org/fdisk
-		local fdisk
-		(( $G_DISTRO < 5 )) || fdisk='fdisk'
-		G_AG_CHECK_INSTALL_PREREQ parted zerofree p7zip $fdisk
-		unset -v fdisk
 
 		# Detect partition table type, failsafe detection of MBR to debug possibly other/unknown wording/partition table types
 		PART_TABLE_TYPE=$(lsblk -no PTTYPE "$FP_ROOT_DEV")
@@ -435,7 +443,8 @@
 					G_EXEC sync
 					G_EXEC sleep 1
 				fi
-				G_EXEC_OUTPUT=1 G_EXEC zerofree -v "$path"
+				[[ ( -t 0 || -t 1 ) && $TERM != 'dumb' ]] && G_EXEC_OUTPUT=1
+				G_EXEC zerofree -v "$path"
 			else
 				G_EXEC mount "$path" $FP_MNT_TMP
 				G_EXEC_OUTPUT=1 G_EXEC fstrim -v $FP_MNT_TMP
@@ -461,7 +470,7 @@
 		IMAGE_SIZE=$(( $IMAGE_SIZE + ( 512 * 256 ) )) # 64 byte for secondary GPT + safety net
 
 		# Image file source and dd target
-		if [[ $SOURCE_TYPE == 'Image' && $CLONING_TOOL == 'dd' ]]
+		if [[ $FP_SOURCE_IMG && $CLONING_TOOL == 'dd' ]]
 		then
 			# Clear loop
 			Delete_Loopback
@@ -473,15 +482,15 @@
 			[[ $PWD/$OUTPUT_IMG_NAME.$OUTPUT_IMG_EXT != "$(readlink -f "$FP_SOURCE_IMG")" ]] && G_EXEC mv "$FP_SOURCE_IMG" "$OUTPUT_IMG_NAME.$OUTPUT_IMG_EXT"
 
 			# Check if there is enough free disk space to store the 7z file
-			NEEDED_FREE_SPACE=$(( $IMAGE_SIZE * 15/100  / 1024**2 ))
-			G_CHECK_FREESPACE . $(( $NEEDED_FREE_SPACE + 100 )) || exit 1 # Assure +100 MiB left partition space
+			NEEDED_FREE_SPACE=$(( $IMAGE_SIZE * 15/100  / 1024**2 + 100 )) # Assure +100 MiB left free space
+			G_CHECK_FREESPACE . "$NEEDED_FREE_SPACE" || exit 1 
 
 		# Drive source and dd target
 		elif [[ $CLONING_TOOL == 'dd' ]]
 		then
 			# Check if there is enough free disk space to store the image and the 7z file
-			NEEDED_FREE_SPACE=$(( $IMAGE_SIZE * 115/100 / 1024**2 ))
-			G_CHECK_FREESPACE . $(( $NEEDED_FREE_SPACE + 100 )) || exit 1 # Assure +100 MiB left partition space
+			NEEDED_FREE_SPACE=$(( $IMAGE_SIZE * 115/100 / 1024**2 + 100 )) # Assure +100 MiB left free space
+			G_CHECK_FREESPACE . "$NEEDED_FREE_SPACE" || exit 1 
 
 			G_DIETPI-NOTIFY 2 "Creating final image with actually used size: $(( $IMAGE_SIZE / 1024**2 + 1 )) MiB"
 			G_EXEC dd if="$FP_SOURCE" of="$OUTPUT_IMG_NAME.$OUTPUT_IMG_EXT" bs=1M status=progress count=$(( $IMAGE_SIZE / 1024**2 + 1 ))
@@ -489,47 +498,56 @@
 		# Clonezilla target
 		else
 			G_DIETPI-NOTIFY 2 'Creating final image with Clonezilla'
+
 			# Install required packages
-			G_AG_CHECK_INSTALL_PREREQ clonezilla partclone xorriso isolinux syslinux-common unzip curl pigz file
+			# - We want the latest Clonezilla version for loop device support
+			local clonezilla=
+			[[ $(dpkg-query -Wf '${Version}' clonezilla 2> /dev/null) != '5'* ]] && G_EXEC curl -fL 'https://deb.debian.org/debian/pool/main/c/clonezilla/clonezilla_5.0.3-1_all.deb' -o clonezilla.deb && clonezilla='./clonezilla.deb'
+			G_AG_CHECK_INSTALL_PREREQ unzip $clonezilla partclone xz-utils syslinux-common xorriso isolinux
+			[[ -f 'clonezilla.deb' ]] && G_EXEC rm clonezilla.deb
 
-			# Download last version of Clonezilla Live
-			CLONEZILLA_VERSION=$(curl -s "$CLONEZILLA_REPO/" | grep 'class="folder "' | head -n1 | cut -d\" -f2)
-			if [[ -z "$CLONEZILLA_VERSION" ]]
+			# Get latest version of Clonezilla Live
+			CLONEZILLA_VERSION=$(curl -sSf "$CLONEZILLA_REPO/" | mawk -F\" '/class="folder "/{print $2}' | head -1)
+			[[ $CLONEZILLA_VERSION ]] || { G_DIETPI-NOTIFY 1 'Could not retrieve latest Clonezilla Live version string, aborting...'; exit 1; }
+			CLONEZILLA_URL="$CLONEZILLA_REPO/$CLONEZILLA_VERSION/clonezilla-live-$CLONEZILLA_VERSION-amd64.zip/download"
+
+			# Get Clonezilla Live ISO size: Remove trailing carriage return
+			CLONEZILLA_SIZE=$(curl -sSfIL "${CLONEZILLA_URL/amd64.zip/amd64.iso}" | mawk '/^[Cc]ontent-[Ll]ength:/{print $2}' | tail -1); CLONEZILLA_SIZE=${CLONEZILLA_SIZE%$'\r'}
+			(( $CLONEZILLA_SIZE )) || { G_DIETPI-NOTIFY 1 'Could not retrieve Clonezilla Live ISO size, aborting...'; exit 1; }
+			NEEDED_FREE_SPACE=$(( ( $CLONEZILLA_SIZE + $IMAGE_SIZE * 20/100 ) * 2 / 1024**2 + 100 )) REMOVE_IMG=0 # Assure +100 MiB left free space
+			# If free space is insufficient, source is image and on same filesystem, check whether we can and continue by removing source image before ISO file is generated
+			if ! G_CHECK_FREESPACE . "$NEEDED_FREE_SPACE"
 			then
-				G_DIETPI-NOTIFY 1 'Could not retrieve version number of last Clonezilla Live, aborting...'
-				exit 1
+				[[ $FP_SOURCE_IMG && $(findmnt -Ufnro TARGET -T "$FP_SOURCE_IMG") == $(findmnt -Ufnro TARGET -T .) ]] || exit 1
+				G_DIETPI-NOTIFY 2 'Insufficient free space for ISO directory + file, checking whether it would be sufficient after removing source image file...'
+				G_CHECK_FREESPACE . $(( $NEEDED_FREE_SPACE - $IMAGE_SIZE / 1024**2 )) || exit 1
+				REMOVE_IMG=1
 			fi
-			CLONEZILLA_ZIP="clonezilla-live-${CLONEZILLA_VERSION}-amd64.zip"
-			CLONEZILLA_ZIP_URL="$CLONEZILLA_REPO/$CLONEZILLA_VERSION/$CLONEZILLA_ZIP/download"
-			CLONEZILLA_ZIP_SIZE=$(curl -sIL "$CLONEZILLA_ZIP_URL" | mawk '/^content-length:/{print $2}')
 
-			# Check if there is enough free disk space to store Clonezilla, the final image and the 7z file
-			NEEDED_FREE_SPACE=$(( ( $CLONEZILLA_ZIP_SIZE + $IMAGE_SIZE * 23/100 ) * 2 / 1024**2 ))
-			G_CHECK_FREESPACE . $(( $NEEDED_FREE_SPACE + 100 )) || exit 1 # Assure +100 MiB left partition space
+			# Download
+			G_EXEC_DESC="Downloading Clonezilla Live v$CLONEZILLA_VERSION" G_EXEC_OUTPUT=1 G_EXEC curl -fL "$CLONEZILLA_URL" -o clonezilla.zip
 
-			# Download Clonezilla Live
-			G_DIETPI-NOTIFY 2 "Downloading Clonezilla Live v$CLONEZILLA_VERSION..."
-			G_EXEC curl -sSfL "$CLONEZILLA_ZIP_URL" -o "$CLONEZILLA_ZIP"
-
-			# Extract Clonezilla Live
+			# Extract
 			[[ -e 'tmpiso' ]] && G_EXEC rm -R tmpiso
-			G_EXEC unzip "$CLONEZILLA_ZIP" -d 'tmpiso'
-			G_EXEC rm "$CLONEZILLA_ZIP"
+			G_EXEC unzip clonezilla.zip -d 'tmpiso'
+			G_EXEC rm clonezilla.zip
 
-			# Clone disk with Clonezilla
+			# Clone disk
 			G_EXEC mkdir -p tmpiso/home/partimag
-			G_EXEC_DESC='Cloning disk with Clonezilla' G_EXEC_OUTPUT=1 G_EXEC ocs-sr -or "$PWD/tmpiso/home/partimag" -nogui -fsck -q2 -c -j2 -z1p -i 4096 -senc -sc savedisk "$OUTPUT_IMG_NAME" "${FP_SOURCE##*/}"
+			G_EXEC_DESC='Cloning disk with Clonezilla' G_EXEC_OUTPUT=1 G_EXEC ocs-sr -or "$PWD/tmpiso/home/partimag" -nogui -fsck-y -q2 -b -j2 -z5p -i 4096 -senc -sc savedisk "$OUTPUT_IMG_NAME" "${FP_SOURCE##*/}"
+
+			# Remove loop device
+			Delete_Loopback
 
 			# For the sake of privacy, remove some non vital files that contain SNs and UUIDs
 			G_EXEC rm -f "tmpiso/home/partimag/$OUTPUT_IMG_NAME/"{Info*txt,*list,clonezilla-img}
 
 			# Check image
-			G_DIETPI-NOTIFY 2 'Checking Clonezilla image...'
-			G_EXEC_OUTPUT=1 G_EXEC ocs-chkimg -or "$PWD/tmpiso/home/partimag" -nogui -b "$OUTPUT_IMG_NAME"
+			G_EXEC_DESC='Checking Clonezilla image' G_EXEC_OUTPUT=1 G_EXEC ocs-chkimg -or "$PWD/tmpiso/home/partimag" -nogui -b "$OUTPUT_IMG_NAME"
 
 			# Prepare custom files used by the installer when booting in UEFI mode
-			G_EXEC curl -sSfL "$DIETPI_REPO"/.meta/images/dietpi-background_768p.png -o tmpiso/boot/grub/dietpibg.png
-			G_EXEC curl -sSfL "$DIETPI_REPO"/.meta/images/select_bkg_c.png -o tmpiso/boot/grub/select_bkg_c.png
+			G_EXEC curl -sSf "$DIETPI_REPO/.meta/images/dietpi-background_768p.png" -o tmpiso/boot/grub/dietpibg.png
+			G_EXEC curl -sSf "$DIETPI_REPO/.meta/images/select_bkg_c.png" -o tmpiso/boot/grub/select_bkg_c.png
 			cat << '_EOF_' > tmpiso/boot/grub/theme.txt
 title-text: ""
 desktop-image: "dietpibg.png"
@@ -564,14 +582,14 @@ submenu "Clonezilla live" {
 menuentry "Power off" { halt }
 _EOF_
 			# Prepare custom files used by the installer when booting in BIOS/CSM mode
-			G_EXEC curl -sSfL "$DIETPI_REPO"/.meta/images/dietpi-background_480p.png -o tmpiso/syslinux/dietpibg.png
+			G_EXEC curl -sSf "$DIETPI_REPO/.meta/images/dietpi-background_480p.png" -o tmpiso/syslinux/dietpibg.png
 			G_EXEC cp /usr/lib/syslinux/modules/bios/poweroff.c32 tmpiso/syslinux/
 			G_EXEC mv tmpiso/syslinux/{syslinux,clonezilla}.cfg
 			sed -i 's|\(MENU TITLE\) .*|\1 Clonezilla live|' tmpiso/syslinux/clonezilla.cfg
 			sed '/^label /,/MENU END/d' tmpiso/syslinux/clonezilla.cfg | grep -v '^[ ]*$' > tmpiso/syslinux/syslinux.cfg
 			sed -i 's|^\(label Clonezilla live\)$|\1 800x600|' tmpiso/syslinux/clonezilla.cfg
 			cat << _EOF_ >> tmpiso/syslinux/syslinux.cfg
-$(sed -n -e '/^label .*800x600/,/append initrd/p' tmpiso/syslinux/clonezilla.cfg)
+$(sed -n '/^label .*800x600/,/append initrd/p' tmpiso/syslinux/clonezilla.cfg)
   TEXT HELP
   VGA mode 800x600. OK for most of VGA cards.
   ENDTEXT
@@ -597,19 +615,19 @@ MENU END
 _EOF_
 			G_EXEC cp tmpiso/syslinux/{syslinux,isolinux}.cfg
 
-			# Generate new ISO file with Clonezilla Live + DietPi image
-			G_DIETPI-NOTIFY 2 "Generating $OUTPUT_IMG_NAME.$OUTPUT_IMG_EXT..."
-			xorriso -as mkisofs -R -r -J -joliet-long -l -iso-level 3 \
+			# Removing source image if required
+			(( $REMOVE_IMG )) && G_EXEC rm "$FP_SOURCE_IMG"
+
+			# Generate ISO file with Clonezilla Live + DietPi image
+			G_EXEC_DESC="Generating $OUTPUT_IMG_NAME.$OUTPUT_IMG_EXT" G_EXEC_OUTPUT=1 G_EXEC xorriso \
+				-as mkisofs -R -r -J -joliet-long -l -iso-level 3 \
 				-isohybrid-mbr /usr/lib/ISOLINUX/isohdpfx.bin -partition_offset 16 \
 				-publisher 'DietPi - Lightweight justice for your SBC; https://dietpi.com/;' -volid 'DIETPI_INSTALLER' \
-				-A "clonezilla-live-${CLONEZILLA_VERSION}-amd64" \
+				-A "clonezilla-live-$CLONEZILLA_VERSION-amd64" \
 				-b syslinux/isolinux.bin -c syslinux/boot.cat -no-emul-boot -boot-load-size 4 \
 				-boot-info-table -eltorito-alt-boot --efi-boot boot/grub/efi.img -isohybrid-gpt-basdat \
-				-isohybrid-apm-hfsplus tmpiso > "$OUTPUT_IMG_NAME.$OUTPUT_IMG_EXT" || exit 1
+				-isohybrid-apm-hfsplus -o "$OUTPUT_IMG_NAME.$OUTPUT_IMG_EXT" tmpiso
 			G_EXEC rm -R tmpiso
-
-			# Remove loop device
-			[[ $SOURCE_TYPE == 'Image' ]] && Delete_Loopback
 		fi
 
 		# Move GPT backup partition table to end of drive
@@ -618,6 +636,9 @@ _EOF_
 			G_EXEC_DESC='Moving GPT backup partition table to end of drive' G_EXEC_OUTPUT=1 G_EXEC sgdisk -e "$OUTPUT_IMG_NAME.$OUTPUT_IMG_EXT"
 			G_EXEC sync
 		fi
+
+		# Exit now when image shall be shrunk only
+		[[ $SHRINK_ONLY == 'On' ]] && exit 0
 
 		# Generate hashes: MD5, SHA1, SHA256
 		G_DIETPI-NOTIFY 2 'Generating hashes to pack with image, please wait...'
@@ -629,15 +650,16 @@ SHA1:   $(sha1sum "$OUTPUT_IMG_NAME.$OUTPUT_IMG_EXT" | mawk '{print $1}')
 SHA256: $(sha256sum "$OUTPUT_IMG_NAME.$OUTPUT_IMG_EXT" | mawk '{print $1}')
 _EOF_
 		# Download current README
-		G_EXEC_DESC='Downloading current README.md to pack with image...' G_EXEC curl -sSfL "$DIETPI_REPO"/README.md -o README.md
+		G_EXEC_DESC='Downloading current README.md to pack with image...' G_EXEC curl -sSf "$DIETPI_REPO/README.md" -o README.md
 
 		# Generate 7z archive
 		# NB: LZMA2 ultra compression requires much memory per thread. 1 GiB is not sufficient for >2 threads, hence use "-mmt2" to limit used CPU threads to "2" on 1 GiB devices with more than two cores.
 		local limit_threads
 		(( $(free -m | mawk '/Mem:/{print $2}') < 1750 && $(nproc) > 2 )) && limit_threads='-mmt2'
 		[[ -f $OUTPUT_IMG_NAME.7z ]] && G_EXEC rm "$OUTPUT_IMG_NAME.7z"
+		[[ ( -t 0 || -t 1 ) && $TERM != 'dumb' ]] && G_EXEC_OUTPUT=1
 		# Add "-bsp1 -bso1 -bse2" to print output to regular STDOUT and STDERR, else the pipe to "tee" makes it omit at least the progress output.
-		G_EXEC_DESC='Creating final 7zip archive' G_EXEC_OUTPUT=1 G_EXEC 7zr a -bsp1 -bso1 -bse2 -m0=lzma2 -mx=9 $limit_threads "$OUTPUT_IMG_NAME.7z" "$OUTPUT_IMG_NAME.$OUTPUT_IMG_EXT" hash.txt README.md
+		G_EXEC_DESC='Creating final 7zip archive' G_EXEC 7zr a -bsp1 -bso1 -bse2 -m0=lzma2 -mx=9 $limit_threads "$OUTPUT_IMG_NAME.7z" "$OUTPUT_IMG_NAME.$OUTPUT_IMG_EXT" hash.txt README.md
 
 		G_EXEC_NOHALT=1 G_EXEC rm hash.txt README.md
 		G_DIETPI-NOTIFY 0 "DietPi-Imager has successfully finished.
@@ -654,6 +676,6 @@ Final 7z archive: $PWD/$OUTPUT_IMG_NAME.7z"
 	#/////////////////////////////////////////////////////////////////////////////////////
 	Main
 	#-----------------------------------------------------------------------------------
-	exit
+	exit 0
 	#-----------------------------------------------------------------------------------
 }

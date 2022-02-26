@@ -730,7 +730,7 @@ Do you wish to ignore this warning, and, mount the drive regardless?" || return 
 		if (( $G_HW_MODEL < 10 ))
 		then
 			local rootfs_current=$(mawk '{for(i=1;i<=NF;i++) if($i~/^root=/) {print $i;exit}}' /boot/cmdline.txt)
-			G_EXEC sed -i "s#$rootfs_current#root=PARTUUID=${aDRIVE_PART_UUID[$MENU_DRIVE_INDEX]}#g" /boot/cmdline.txt
+			G_EXEC sed -i "s#$rootfs_current#root=$dev_entry#g" /boot/cmdline.txt
 
 			local rootfstype_current=$(mawk '{for(i=1;i<=NF;i++) if($i~/^rootfstype=/) {print $i;exit}}' /boot/cmdline.txt)
 			[[ $rootfstype_current ]] && G_EXEC sed -i "s#$rootfstype_current#rootfstype=${aDRIVE_FSTYPE[$MENU_DRIVE_INDEX]}#g" /boot/cmdline.txt
@@ -738,7 +738,7 @@ Do you wish to ignore this warning, and, mount the drive regardless?" || return 
 		# - Odroids: /boot/boot.ini
 		else
 			local rootfs_current=$(mawk '-F[" ]' '{for(i=1;i<=NF;i++) if($i~/^root=/) {print $i;exit}}' /boot/boot.ini)
-			G_EXEC sed -i "s#$rootfs_current#root=UUID=${aDRIVE_UUID[$MENU_DRIVE_INDEX]}#g" /boot/boot.ini
+			G_EXEC sed -i "s#$rootfs_current#root=$dev_entry#g" /boot/boot.ini
 
 			local rootfstype_current=$(mawk '-F[" ]' '{for(i=1;i<=NF;i++) if($i~/^rootfstype=/) {print $i;exit}}' /boot/boot.ini)
 			[[ $rootfstype_current ]] && G_EXEC sed -i "s#$rootfstype_current#rootfstype=${aDRIVE_FSTYPE[$MENU_DRIVE_INDEX]}#g" /boot/boot.ini
@@ -1104,10 +1104,10 @@ Do you wish to ignore this warning, and, mount the drive regardless?" || return 
 				# Reserved blocks percentage on ext4 filesystems
 				if [[ ${aDRIVE_FSTYPE[$MENU_DRIVE_INDEX]} == 'ext4' ]]
 				then
-					local block_count reserved_block_count
-					read -r block_count reserved_block_count < <(dumpe2fs -h "${aDRIVE_MOUNT_SOURCE[$MENU_DRIVE_INDEX]}" 2> /dev/null | mawk '$0~/^(Block|Reserved block) count:/ {print $NF}' ORS=' ')
-					reserved_blocks_percent_current=$(printf '%0.2f' "$(($reserved_block_count*100000/$block_count+1))e-3")
-					G_WHIP_MENU_ARRAY+=('Reserved blocks' ": [$reserved_blocks_percent_current%] | Adjust percentage of reserved blocks on this filesystem")
+					local blocks reserved_blocks block_size
+					read -r blocks reserved_blocks block_size < <(dumpe2fs -h "${aDRIVE_MOUNT_SOURCE[$MENU_DRIVE_INDEX]}" 2> /dev/null | mawk '$0~/^(Block count|Reserved block count|Block size):/{print $NF}' ORS=' ')
+					local reserved_blocks_size=$(( $reserved_blocks * $block_size / 1024**2 )) # MiB
+					G_WHIP_MENU_ARRAY+=('Reserved blocks' ": [$reserved_blocks_size MiB] | Space reserved for root user")
 				fi
 
 				# fsck
@@ -1243,22 +1243,20 @@ Please choose another drive or format this one with another filesystem, e.g. ext
 
 			elif [[ $G_WHIP_RETURNED_VALUE == 'Reserved blocks' ]]; then
 
+				local error_text='' reserved_blocks_max=$(( $blocks * $block_size / 1024**2 / 2 )) # MiB
 				while :
 				do
-					G_WHIP_DEFAULT_ITEM=$reserved_blocks_percent_current
-					G_WHIP_INPUTBOX 'Ext4 formatted drives allow the reservation of drive space for the root user to assure system functionality, if filled by other users or processes, and to avoid fragmentation of large files.\n
-However, on modern drives, the default of 5% reserved blocks is often by orders of magnitude larger than necessary. You may want to reduce the percentage to an absolute reserved space of about 500 MiB, which should be enough, to enable root user starting and maintaining the system. Additionally, on non rootfs drives reserved blocks are not necessary at all.\n
-Please enter the desired percentage of reserved blocks, e.g. "0.05" for 0.05% or "10" for 10%.\nNote: Only values between "0" and "50" are allowed.' || break
+					G_WHIP_DEFAULT_ITEM=$reserved_blocks_size
+					G_WHIP_INPUTBOX "${error_text}Ext4 formatted filesystems allow the reservation of space for the root user to maintain system functionality if filled by other users or services, and to avoid fragmentation of large files.
+\nHowever, on modern drives, the default of 5% reserved blocks is often by orders of magnitude larger than necessary. You may want to reduce it to an absolute reserved space of about 500 MiB, which should be sufficient to enable the root user starting and maintaining the system when space got otherwise filled. Additionally, on non system drives reserved blocks are usually not necessary at all.
+\nPlease enter the desired reserved space in MiB. It can be anything between 0 and $reserved_blocks_max (up to half of the overall filesystem size)." || break
 
-					if [[ $G_WHIP_RETURNED_VALUE =~ ^[0-9]*\.?[0-9]*$ && $G_WHIP_RETURNED_VALUE != '.' && $(mawk '$1 <= 50' <<< "$G_WHIP_RETURNED_VALUE") ]]; then
-
-						G_EXEC tune2fs -m "$G_WHIP_RETURNED_VALUE" "${aDRIVE_MOUNT_SOURCE[$MENU_DRIVE_INDEX]}"
+					if disable_error=1 G_CHECK_VALIDINT "$G_WHIP_RETURNED_VALUE" 0 "$reserved_blocks_max"
+					then
+						G_EXEC tune2fs -r "$G_WHIP_RETURNED_VALUE" "${aDRIVE_MOUNT_SOURCE[$MENU_DRIVE_INDEX]}"
 						break
-
 					else
-
-						G_WHIP_MSG 'Error: Allowed are only integers or floats between "0" and "50", e.g. "10" or "0.5".\n\nPlease try again...'
-
+						error_text="[FAILED] The entered value must be between 0 and $reserved_blocks_max.\n\n"
 					fi
 				done
 
@@ -1940,37 +1938,40 @@ _EOF_
 	# Mode 1: Select an active mount and return value, exits from within function
 	(( $INPUT == 1 )) && Menu_Select_Mount_Location
 	#-----------------------------------------------------------------------------------
+	# Offer to do a reboot if required as of missing kernel modules and not called for resetting fstab from PREP
+	if (( $INPUT != 4 )) && ! G_CHECK_KERNEL
+	then
+		G_WHIP_BUTTON_CANCEL_TEXT='Skip' G_WHIP_YESNO "[ INFO ] A reboot is recommended
+\nKernel modules for the loaded kernel at /lib/modules/$(uname -r) are missing. This is most likely the case as of a recently applied kernel upgrade where a reboot is required to load the new kernel.
+\nWe recommend to perform a reboot now for the system to be able to load kernel modules, like filesystem drivers, ondemand. If your kernel does not use dedicated modules, please create the mentioned directory manually to mute this info in the future.
+\nDo you want to reboot now?" && reboot
+	fi
+	#-----------------------------------------------------------------------------------
 	# Init drives, generate /etc/fstab based on current drive mounts
 	Init_Drives_and_Refresh
 	#-----------------------------------------------------------------------------------
-	# Mode 4: Force reset/clean fstab and exit (PREP)
+	# Mode 3: Scan for new drives, re-create fstab and exit
+	# Mode 4: Force fstab reset and exit (PREP)
 	# Else  : Run menus
-	if [[ $INPUT != [34] ]]; then
+	[[ $INPUT == [34] ]] || until (( $TARGETMENUID < 0 ))
+	do
+		G_TERM_CLEAR
 
-		until (( $TARGETMENUID < 0 ))
-		do
-			G_TERM_CLEAR
+		if (( $TARGETMENUID == 1 ))
+		then
+			Menu_Drive
 
-			if (( $TARGETMENUID == 1 )); then
+		elif (( $TARGETMENUID == 2 ))
+		then
+			Menu_Format
 
-				Menu_Drive
-
-			elif (( $TARGETMENUID == 2 )); then
-
-				Menu_Format
-
-			elif (( $TARGETMENUID == 3 )); then
-
-				Menu_Add_Network_Drive
-
-			else
-
-				Menu_Main
-
-			fi
-		done
-
-	fi
+		elif (( $TARGETMENUID == 3 ))
+		then
+			Menu_Add_Network_Drive
+		else
+			Menu_Main
+		fi
+	done
 	#-----------------------------------------------------------------------------------
 	exit $EXIT_CODE
 	#-----------------------------------------------------------------------------------
