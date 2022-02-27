@@ -38,6 +38,12 @@
 	readonly CLONEZILLA_REPO='https://sourceforge.net/projects/clonezilla/files/clonezilla_live_stable'
 	readonly DIETPI_REPO="https://raw.githubusercontent.com/$G_GITOWNER/DietPi/$G_GITBRANCH"
 
+	Error_Exit()
+	{
+		G_DIETPI-NOTIFY 1 "$1"
+		exit 1
+	}
+
 	# Inputs
 	SOURCE_TYPE='Drive'
 	FP_SOURCE_IMG=
@@ -52,8 +58,7 @@
 
 	elif [[ $1 ]]
 	then
-		G_DIETPI-NOTIFY 1 "Input source $1 does not exist, aborting..."
-		exit 1
+		Error_Exit "Input source $1 does not exist, aborting..."
 	fi
 	PART_TABLE_TYPE=
 	#FP_ROOT_DEV=
@@ -63,6 +68,13 @@
 	#OUTPUT_IMG_NAME=
 	[[ $MOUNT_IT == 'On' ]] || MOUNT_IT='Off'
 	[[ $SHRINK_ONLY == 'On' ]] || SHRINK_ONLY='Off'
+
+	Unmount_tmp()
+	{
+		G_EXEC sync
+		G_EXEC sleep 1 # Give the system 1 second to avoid "mount is busy"
+		G_EXEC umount -R $FP_MNT_TMP
+	}
 
 	Delete_Loopback(){ [[ $FP_SOURCE_IMG ]] && losetup "$FP_SOURCE" &> /dev/null && G_EXEC losetup -d "$FP_SOURCE"; }
 
@@ -74,6 +86,24 @@
 		[[ -e 'tmpiso' ]] && G_EXEC rm -R tmpiso
 	}
 
+	Run_fsck()
+	{
+		if [[ $ROOT_FS_TYPE == 'ext4' ]]
+		then
+			G_EXEC_OUTPUT=1 G_EXEC e2fsck -fp "$FP_ROOT_DEV"
+
+		elif [[ $ROOT_FS_TYPE == 'f2fs' ]]
+		then
+			G_EXEC_OUTPUT=1 G_EXEC fsck.f2fs -f "$FP_ROOT_DEV"
+
+		elif [[ $ROOT_FS_TYPE == 'btrfs' ]]
+		then
+			G_EXEC_OUTPUT=1 G_EXEC btrfs check --repair "$FP_ROOT_DEV"
+		else
+			Error_Exit "Unsupported root filesystem type ($ROOT_FS_TYPE), aborting..."
+		fi
+	}
+
 	Menu_Source_Type()
 	{
 		main_menu_choice='Source type' # On cancel, keep this entry selected
@@ -83,9 +113,9 @@
 			'Image' ': The OS is stored as an image file.'
 		)
 		G_WHIP_DEFAULT_ITEM=$SOURCE_TYPE
-		G_WHIP_MENU 'Please select how the input OS is stored:' || return
-		Delete_Loopback
+		G_WHIP_MENU 'Please select how the input OS is stored:' || return 0
 		SOURCE_TYPE=$G_WHIP_RETURNED_VALUE
+		Delete_Loopback
 		FP_SOURCE_IMG=
 		FP_SOURCE=
 		FP_ROOT_DEV=
@@ -108,7 +138,7 @@
 				G_DIETPI-NOTIFY 2 'NB: This is the list of available block devices:'
 				lsblk -npo NAME,SIZE,MAJ:MIN,FSTYPE,MOUNTPOINT,MODEL
 				read -rp 'Press any key to return to menu...'
-				return
+				return 1
 			fi
 
 			# Visually separate dev name and size and add model and serial
@@ -116,7 +146,7 @@
 
 			G_WHIP_DEFAULT_ITEM=$FP_SOURCE
 			G_WHIP_MENU 'Please select the drive you wish to create the image from:
-\nNB: All mounted partitions of the selected drive will be unmounted.' || return
+\nNB: All mounted partitions of the selected drive will be unmounted.' || return 0
 			FP_SOURCE=$G_WHIP_RETURNED_VALUE
 			FP_ROOT_DEV=
 
@@ -129,19 +159,19 @@
 			done
 		else
 			# Open DietPi-Explorer for image file selection
-			/boot/dietpi/dietpi-explorer 1 || { G_DIETPI-NOTIFY 1 'No image file selected, aborting...'; read -rp 'Press any key to return to menu...'; return; }
+			/boot/dietpi/dietpi-explorer 1 || { G_DIETPI-NOTIFY 1 'No image file selected, aborting...'; read -rp 'Press any key to return to menu...'; return 1; }
 			FP_SOURCE_IMG=$(</tmp/.dietpi-explorer_selected_location)
 			FP_ROOT_DEV=
 			rm /tmp/.dietpi-explorer_selected_location
-			[[ -f $FP_SOURCE_IMG ]] || { G_DIETPI-NOTIFY 1 "Selected image file ($FP_SOURCE_IMG) does not exist, aborting..."; read -rp 'Press any key to return to menu...'; return; }
+			[[ -f $FP_SOURCE_IMG ]] || { G_DIETPI-NOTIFY 1 "Selected image file ($FP_SOURCE_IMG) does not exist, aborting..."; read -rp 'Press any key to return to menu...'; return 1; }
 
 			# Create loopback device from .img file
 			G_EXEC modprobe loop
 			Delete_Loopback # Prevent doubled loop device
 			FP_SOURCE=$(losetup -f)
-			G_EXEC_NOEXIT=1 G_EXEC losetup "$FP_SOURCE" "$FP_SOURCE_IMG" || return
-			G_EXEC_NOEXIT=1 G_EXEC partprobe "$FP_SOURCE" || return
-			G_EXEC_NOEXIT=1 G_EXEC partx -u "$FP_SOURCE" || return
+			G_EXEC_NOEXIT=1 G_EXEC losetup "$FP_SOURCE" "$FP_SOURCE_IMG" || return 1
+			G_EXEC_NOEXIT=1 G_EXEC partprobe "$FP_SOURCE" || return 1
+			G_EXEC_NOEXIT=1 G_EXEC partx -u "$FP_SOURCE" || return 1
 			G_DIETPI-NOTIFY 0 "Attached the image ($FP_SOURCE_IMG) as loopback device: $FP_SOURCE"
 			G_EXEC sleep 0.5 # Give the root filesystem a little time to be detected
 		fi
@@ -239,32 +269,6 @@
 		esac
 	}
 
-	Run_fsck()
-	{
-		if [[ $ROOT_FS_TYPE == 'ext4' ]]
-		then
-			G_EXEC_OUTPUT=1 G_EXEC e2fsck -fp "$FP_ROOT_DEV"
-
-		elif [[ $ROOT_FS_TYPE == 'f2fs' ]]
-		then
-			G_EXEC_OUTPUT=1 G_EXEC fsck.f2fs -f "$FP_ROOT_DEV"
-
-		elif [[ $ROOT_FS_TYPE == 'btrfs' ]]
-		then
-			G_EXEC_OUTPUT=1 G_EXEC btrfs check --repair "$FP_ROOT_DEV"
-		else
-			G_DIETPI-NOTIFY 1 "Unsupported root filesystem type ($ROOT_FS_TYPE), aborting..."
-			exit 1
-		fi
-	}
-
-	Unmount_tmp()
-	{
-		G_EXEC sync
-		G_EXEC sleep 1 # Give the system 1 second to avoid "mount is busy"
-		G_EXEC umount -R $FP_MNT_TMP
-	}
-
 	Main(){
 
 		# Dependencies
@@ -279,9 +283,9 @@
 				G_EXEC modprobe loop
 				Delete_Loopback # Prevent doubled loop device
 				FP_SOURCE=$(losetup -f)
-				G_EXEC_NOEXIT=1 G_EXEC losetup "$FP_SOURCE" "$FP_SOURCE_IMG" || return
-				G_EXEC_NOEXIT=1 G_EXEC partprobe "$FP_SOURCE" || return
-				G_EXEC_NOEXIT=1 G_EXEC partx -u "$FP_SOURCE" || return
+				G_EXEC losetup "$FP_SOURCE" "$FP_SOURCE_IMG"
+				G_EXEC partprobe "$FP_SOURCE"
+				G_EXEC partx -u "$FP_SOURCE"
 				G_DIETPI-NOTIFY 0 "Mounted the image ($FP_SOURCE_IMG) as loopback device: $FP_SOURCE"
 				FP_ROOT_DEV="${FP_SOURCE}p${FP_ROOT_DEV: -1}"
 			fi
@@ -316,8 +320,7 @@
 			G_EXEC_OUTPUT=1 G_EXEC sgdisk -e "$FP_SOURCE"
 			G_EXEC sleep 0.5 # Give the root filesystem a little time to be detected
 		else
-			G_DIETPI-NOTIFY 1 "Unknown partition table type ($PART_TABLE_TYPE), aborting..."
-			exit 1
+			Error_Exit "Unknown partition table type ($PART_TABLE_TYPE), aborting..."
 		fi
 
 		# Detect root filesystem type
@@ -374,7 +377,7 @@
 					FS_SIZE=$(mawk '{print $5}' <<< "$out") # blocks
 					BLOCK_SIZE=${out%%k) *} BLOCK_SIZE=${BLOCK_SIZE##*\(} # KiB
 					# Re-add 4 MiB if it would still fit into the partition, which was required on Raspbian Buster for successful boot.
-					if (( $(</sys/class/block/"${FP_ROOT_DEV##*/}"/size) > $FS_SIZE * $BLOCK_SIZE * 2 + 8 )) # 512 byte sectors
+					if (( $(<"/sys/class/block/${FP_ROOT_DEV##*/}/size") > $FS_SIZE * $BLOCK_SIZE * 2 + 8 )) # 512 byte sectors
 					then
 						FS_SIZE=$(( $FS_SIZE + 4096/$BLOCK_SIZE )) # blocks
 						G_EXEC resize2fs "$FP_ROOT_DEV" $FS_SIZE
@@ -385,8 +388,7 @@
 
 				elif out=$(grep -im1 'no such file or directory' resize2fs_out)
 				then
-					G_DIETPI-NOTIFY 1 'Partition not found, aborting...'
-					exit 1
+					Error_Exit 'Partition not found, aborting...'
 				fi
 			done
 
@@ -457,7 +459,7 @@
 		G_EXEC rmdir $FP_MNT_TMP
 
 		# Only resize partition when new size would be less than current size
-		if [[ $ROOT_FS_TYPE != 'f2fs' ]] && (( $(</sys/class/block/"${FP_ROOT_DEV##*/}"/size) > $FS_SIZE ))
+		if [[ $ROOT_FS_TYPE != 'f2fs' ]] && (( $(<"/sys/class/block/${FP_ROOT_DEV##*/}/size") > $FS_SIZE ))
 		then
 			G_DIETPI-NOTIFY 2 "Shrinking root partition to: $(( $FS_SIZE / 2048 + 1 )) MiB"
 			G_EXEC_OUTPUT=1 G_EXEC eval "sfdisk --no-reread --no-tell-kernel -fN${FP_ROOT_DEV: -1} '$FP_SOURCE' <<< ',$FS_SIZE'"
@@ -508,12 +510,12 @@
 
 			# Get latest version of Clonezilla Live
 			CLONEZILLA_VERSION=$(curl -sSf "$CLONEZILLA_REPO/" | mawk -F\" '/class="folder "/{print $2}' | head -1)
-			[[ $CLONEZILLA_VERSION ]] || { G_DIETPI-NOTIFY 1 'Could not retrieve latest Clonezilla Live version string, aborting...'; exit 1; }
+			[[ $CLONEZILLA_VERSION ]] || Error_Exit 'Could not retrieve latest Clonezilla Live version string, aborting...'
 			CLONEZILLA_URL="$CLONEZILLA_REPO/$CLONEZILLA_VERSION/clonezilla-live-$CLONEZILLA_VERSION-amd64.zip/download"
 
-			# Get Clonezilla Live ISO size: Remove trailing carriage return
+			# Get Clonezilla Live ISO size, which matches sufficiently well the unpacked archive: Remove trailing carriage return
 			CLONEZILLA_SIZE=$(curl -sSfIL "${CLONEZILLA_URL/amd64.zip/amd64.iso}" | mawk '/^[Cc]ontent-[Ll]ength:/{print $2}' | tail -1); CLONEZILLA_SIZE=${CLONEZILLA_SIZE%$'\r'}
-			(( $CLONEZILLA_SIZE )) || { G_DIETPI-NOTIFY 1 'Could not retrieve Clonezilla Live ISO size, aborting...'; exit 1; }
+			(( $CLONEZILLA_SIZE )) || Error_Exit 'Could not retrieve Clonezilla Live ISO size, aborting...'
 			NEEDED_FREE_SPACE=$(( ( $CLONEZILLA_SIZE + $IMAGE_SIZE * 20/100 ) * 2 / 1024**2 + 100 )) REMOVE_IMG=0 # Assure +100 MiB left free space
 			# If free space is insufficient, source is image and on same filesystem, check whether we can and continue by removing source image before ISO file is generated
 			if ! G_CHECK_FREESPACE . "$NEEDED_FREE_SPACE"
