@@ -480,18 +480,18 @@
 			G_DIETPI-NOTIFY 2 "Truncating final image file to actually used size: $(( $IMAGE_SIZE / 1024**2 + 1 )) MiB"
 			G_EXEC truncate --size=$IMAGE_SIZE "$FP_SOURCE_IMG"
 
-			# Rename, if source image != output image already
+			# Rename if source image != output image yet
 			[[ $PWD/$OUTPUT_IMG_NAME.$OUTPUT_IMG_EXT != "$(readlink -f "$FP_SOURCE_IMG")" ]] && G_EXEC mv "$FP_SOURCE_IMG" "$OUTPUT_IMG_NAME.$OUTPUT_IMG_EXT"
 
-			# Check if there is enough free disk space to store the 7z file
-			NEEDED_FREE_SPACE=$(( $IMAGE_SIZE * 15/100  / 1024**2 + 100 )) # Assure +100 MiB left free space
+			# Check for sufficient free disk space to store the 7z archive with 100 MiB buffer
+			NEEDED_FREE_SPACE=$(( $IMAGE_SIZE * 15/100  / 1024**2 + 100 ))
 			G_CHECK_FREESPACE . "$NEEDED_FREE_SPACE" || exit 1 
 
 		# Drive source and dd target
 		elif [[ $CLONING_TOOL == 'dd' ]]
 		then
-			# Check if there is enough free disk space to store the image and the 7z file
-			NEEDED_FREE_SPACE=$(( $IMAGE_SIZE * 115/100 / 1024**2 + 100 )) # Assure +100 MiB left free space
+			# Check for sufficient free disk space to store the image and the 7z archive with 100 MiB buffer
+			NEEDED_FREE_SPACE=$(( $IMAGE_SIZE * 115/100 / 1024**2 + 100 ))
 			G_CHECK_FREESPACE . "$NEEDED_FREE_SPACE" || exit 1 
 
 			G_DIETPI-NOTIFY 2 "Creating final image with actually used size: $(( $IMAGE_SIZE / 1024**2 + 1 )) MiB"
@@ -502,7 +502,7 @@
 			G_DIETPI-NOTIFY 2 'Creating final image with Clonezilla'
 
 			# Install required packages
-			# - We want the latest Clonezilla version for loop device support
+			# - We want Clonezilla 5.x for loop device support
 			local clonezilla=
 			[[ $(dpkg-query -Wf '${Version}' clonezilla 2> /dev/null) != '5'* ]] && G_EXEC curl -fL 'https://deb.debian.org/debian/pool/main/c/clonezilla/clonezilla_5.0.3-1_all.deb' -o clonezilla.deb && clonezilla='./clonezilla.deb'
 			G_AG_CHECK_INSTALL_PREREQ unzip $clonezilla partclone xz-utils syslinux-common xorriso isolinux
@@ -513,11 +513,12 @@
 			[[ $CLONEZILLA_VERSION ]] || Error_Exit 'Could not retrieve latest Clonezilla Live version string, aborting...'
 			CLONEZILLA_URL="$CLONEZILLA_REPO/$CLONEZILLA_VERSION/clonezilla-live-$CLONEZILLA_VERSION-amd64.zip/download"
 
-			# Get Clonezilla Live ISO size, which matches sufficiently well the unpacked archive: Remove trailing carriage return
+			# Check for sufficient free disk space to store the bundled Clonezille Live + DietPi directory and ISO with 100 MiB buffer
+			# - Get Clonezilla Live ISO size, which matches sufficiently well the unpacked archive: Remove trailing carriage return
 			CLONEZILLA_SIZE=$(curl -sSfIL "${CLONEZILLA_URL/amd64.zip/amd64.iso}" | mawk '/^[Cc]ontent-[Ll]ength:/{print $2}' | tail -1); CLONEZILLA_SIZE=${CLONEZILLA_SIZE%$'\r'}
-			(( $CLONEZILLA_SIZE )) || Error_Exit 'Could not retrieve Clonezilla Live ISO size, aborting...'
-			NEEDED_FREE_SPACE=$(( ( $CLONEZILLA_SIZE + $IMAGE_SIZE * 20/100 ) * 2 / 1024**2 + 100 )) REMOVE_IMG=0 # Assure +100 MiB left free space
-			# If free space is insufficient, source is image and on same filesystem, check whether we can and continue by removing source image before ISO file is generated
+			(( $CLONEZILLA_SIZE )) || Error_Exit 'Could not retrieve Clonezilla Live size, aborting...'
+			NEEDED_FREE_SPACE=$(( ( $CLONEZILLA_SIZE + $IMAGE_SIZE * 20/100 ) * 2 / 1024**2 + 100 )) REMOVE_IMG=0
+			# If free space is insufficient and the source an image on the same filesystem, check whether it fits when we remove the source image before generating the ISO
 			if ! G_CHECK_FREESPACE . "$NEEDED_FREE_SPACE"
 			then
 				[[ $FP_SOURCE_IMG && $(findmnt -Ufnro TARGET -T "$FP_SOURCE_IMG") == $(findmnt -Ufnro TARGET -T .) ]] || exit 1
@@ -547,12 +548,14 @@
 			# Check image
 			G_EXEC_DESC='Checking Clonezilla image' G_EXEC_OUTPUT=1 G_EXEC ocs-chkimg -or "$PWD/tmpiso/home/partimag" -nogui -b "$OUTPUT_IMG_NAME"
 
-			# Prepare custom files used by the installer when booting in UEFI mode
+			### Prepare custom files used by the installer when booting in UEFI mode ###
+			# Create a GRUB theme for the main menu
 			G_EXEC curl -sSf "$DIETPI_REPO/.meta/images/dietpi-background_768p.png" -o tmpiso/boot/grub/dietpibg.png
 			G_EXEC curl -sSf "$DIETPI_REPO/.meta/images/select_bkg_c.png" -o tmpiso/boot/grub/select_bkg_c.png
 			cat << '_EOF_' > tmpiso/boot/grub/theme.txt
 title-text: ""
 desktop-image: "dietpibg.png"
+desktop-image-scale-method: "crop"
 terminal-font: "Unifont Regular 16"
 terminal-width: "100%"
 terminal-height: "100%"
@@ -566,43 +569,32 @@ message-color: "#ffffff"
     selected_item_pixmap_style = "select_bkg_*.png"
 }
 _EOF_
+			# Make the original Clonezilla Live menu a submenu of a simplified DietPi install main menu
 			G_EXEC mv tmpiso/boot/grub/{grub,clonezilla}.cfg
-			sed '/menuentry /,/}/d' tmpiso/boot/grub/clonezilla.cfg | sed '/submenu /,/}/d' | grep -v '^[ ]*$' > tmpiso/boot/grub/grub.cfg
-			sed -n  -e '/menuentry .*800x600/,/}/p' -e '/menuentry .*KMS/,/}/p' -e '/menuentry .*Safe/,/}/p' \
-				-e '/menuentry .*Failsafe/,/}/p' tmpiso/boot/grub/clonezilla.cfg >> tmpiso/boot/grub/grub.cfg
+			sed '/^menuentry /,$d' tmpiso/boot/grub/clonezilla.cfg > tmpiso/boot/grub/grub.cfg
+			sed -n '/menuentry .*Safe graphic/,/}/s/^  //p' tmpiso/boot/grub/clonezilla.cfg >> tmpiso/boot/grub/grub.cfg
 			# shellcheck disable=SC2016
-			sed -i  -e 's|set timeout=.*|set timeout="-1"|' -e '/set pref=/a set theme=\$pref/theme.txt' \
-				-e 's|"Clonezilla live |"Install DietPi |' -e 's|locales= |locales=C.UTF-8 |' \
-				-e 's|keyboard-layouts= |keyboard-layouts=gb |' -e 's|ocs-live-general|ocs-live-restore|' \
+			sed -i  -e '/^set timeout=/c\set timeout="-1"' -e '/^set pref=/a\set theme=\$pref/theme.txt' -e '/^menuentry /c\menuentry "Install DietPi" {' \
+				-e 's/locales= /locales=C.UTF-8 /' -e 's/keyboard-layouts= /keyboard-layouts=gb /' -e 's/ocs-live-general/ocs-live-restore/' \
 				-e "s|ocs_live_extra_param=\"\"|ocs_live_extra_param=\"-icds -k1 -r -e2 -j2 -b -p poweroff restoredisk $OUTPUT_IMG_NAME ask_user\"|" \
-				-e 's|ocs_live_batch="no"|ocs_live_batch="yes"|' tmpiso/boot/grub/grub.cfg
+				-e 's/ocs_live_batch="no"/ocs_live_batch="yes"/' tmpiso/boot/grub/grub.cfg
 			cat << '_EOF_' >> tmpiso/boot/grub/grub.cfg
-submenu "Clonezilla live" {
-  set pref=/boot/grub
-  configfile $pref/clonezilla.cfg
-}
+submenu "Clonezilla live" { configfile $pref/clonezilla.cfg }
 menuentry "Power off" { halt }
 _EOF_
-			# Prepare custom files used by the installer when booting in BIOS/CSM mode
+
+			### Prepare custom files used by the installer when booting in BIOS/CSM mode ###
+			# Make the original Clonezilla Live menu a submenu of a simplified DietPi install main menu
 			G_EXEC curl -sSf "$DIETPI_REPO/.meta/images/dietpi-background_480p.png" -o tmpiso/syslinux/dietpibg.png
 			G_EXEC cp /usr/lib/syslinux/modules/bios/poweroff.c32 tmpiso/syslinux/
 			G_EXEC mv tmpiso/syslinux/{syslinux,clonezilla}.cfg
-			sed -i 's|\(MENU TITLE\) .*|\1 Clonezilla live|' tmpiso/syslinux/clonezilla.cfg
-			sed '/^label /,/MENU END/d' tmpiso/syslinux/clonezilla.cfg | grep -v '^[ ]*$' > tmpiso/syslinux/syslinux.cfg
-			sed -i 's|^\(label Clonezilla live\)$|\1 800x600|' tmpiso/syslinux/clonezilla.cfg
-			cat << _EOF_ >> tmpiso/syslinux/syslinux.cfg
-$(sed -n '/^label .*800x600/,/append initrd/p' tmpiso/syslinux/clonezilla.cfg)
-  TEXT HELP
-  VGA mode 800x600. OK for most of VGA cards.
-  ENDTEXT
-_EOF_
-			sed -n  -e '/^label .*HiDPI/,/ENDTEXT/p' -e '/^label .*KMS/,/ENDTEXT/p' -e '/^label .*framebuffer/,/ENDTEXT/p' \
-				-e '/^label .*failsafe/,/ENDTEXT/p' tmpiso/syslinux/clonezilla.cfg >> tmpiso/syslinux/syslinux.cfg
-			sed -i  -e 's|^\(timeout\) .*|\1 0|' -e 's|\(MENU BACKGROUND\) .*|\1 dietpibg.png|' -e 's|MENU TITLE .*|MENU TABMSG|' \
-				-e '/menu title/d' -e '/^say /d' -e '/MENU MARGIN/ a MENU HSHIFT 80\n MENU COLOR BORDER 0 #00000000 #00000000 none' -e 's|Clonezilla live |Install DietPi |' \
-				-e 's|locales= |locales=C.UTF-8 |' -e 's|keyboard-layouts= |keyboard-layouts=gb |' -e 's|ocs-live-general|ocs-live-restore|' \
+			sed '/^label /,$d' tmpiso/syslinux/clonezilla.cfg > tmpiso/syslinux/syslinux.cfg
+			sed -n '/^label .*framebuffer/,/ENDTEXT/p' tmpiso/syslinux/clonezilla.cfg >> tmpiso/syslinux/syslinux.cfg
+			sed -i  -e '/^timeout /c\timeout 0' -e 's|\(MENU BACKGROUND\) .*|\1 dietpibg.png|' -e '/^MENU TITLE /c\MENU TABMSG' \
+				-e '/menu title/d' -e '/^say /d' -e '/MENU MARGIN/a\MENU HSHIFT 80\n MENU COLOR BORDER 0 #00000000 #00000000 none' -e '/^label /c\label Install DietPi' \
+				-e 's/locales= /locales=C.UTF-8 /' -e 's/keyboard-layouts= /keyboard-layouts=gb /' -e 's/ocs-live-general/ocs-live-restore/' \
 				-e "s|ocs_live_extra_param=\"\"|ocs_live_extra_param=\"-icds -k1 -r -e2 -j2 -b -p poweroff restoredisk $OUTPUT_IMG_NAME ask_user\"|" \
-				-e 's|ocs_live_batch="no"|ocs_live_batch="yes"|' tmpiso/syslinux/syslinux.cfg
+				-e 's/ocs_live_batch="no"/ocs_live_batch="yes"/' tmpiso/syslinux/syslinux.cfg
 			cat << '_EOF_' >> tmpiso/syslinux/syslinux.cfg
 MENU BEGIN Clonezilla live
   INCLUDE clonezilla.cfg
@@ -622,13 +614,11 @@ _EOF_
 
 			# Generate ISO file with Clonezilla Live + DietPi image
 			G_EXEC_DESC="Generating $OUTPUT_IMG_NAME.$OUTPUT_IMG_EXT" G_EXEC_OUTPUT=1 G_EXEC xorriso \
-				-as mkisofs -R -r -J -joliet-long -l -iso-level 3 \
-				-isohybrid-mbr /usr/lib/ISOLINUX/isohdpfx.bin -partition_offset 16 \
+				-as mkisofs -R -r -J -joliet-long -l -iso-level 3 -isohybrid-mbr /usr/lib/ISOLINUX/isohdpfx.bin -partition_offset 16 \
 				-publisher 'DietPi - Lightweight justice for your SBC; https://dietpi.com/;' -volid 'DIETPI_INSTALLER' \
-				-A "clonezilla-live-$CLONEZILLA_VERSION-amd64" \
-				-b syslinux/isolinux.bin -c syslinux/boot.cat -no-emul-boot -boot-load-size 4 \
-				-boot-info-table -eltorito-alt-boot --efi-boot boot/grub/efi.img -isohybrid-gpt-basdat \
-				-isohybrid-apm-hfsplus -o "$OUTPUT_IMG_NAME.$OUTPUT_IMG_EXT" tmpiso
+				-A "clonezilla-live-$CLONEZILLA_VERSION-amd64" -b syslinux/isolinux.bin -c syslinux/boot.cat -no-emul-boot -boot-load-size 4 \
+				-boot-info-table -eltorito-alt-boot --efi-boot boot/grub/efi.img -isohybrid-gpt-basdat -isohybrid-apm-hfsplus \
+				-o "$OUTPUT_IMG_NAME.$OUTPUT_IMG_EXT" tmpiso
 			G_EXEC rm -R tmpiso
 		fi
 
