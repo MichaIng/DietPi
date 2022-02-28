@@ -27,12 +27,12 @@
 	if [[ $ROOT_DEV == /dev/[sh]d[a-z][1-9] ]]; then
 
 		ROOT_PART=${ROOT_DEV: -1}	# /dev/sda1 => 1
-		ROOT_DRIVE=${ROOT_DEV%[1-9]}	# /dev/sda1 => /dev/sda
+		ROOT_DRIVE=${ROOT_DEV::-1}	# /dev/sda1 => /dev/sda
 
 	elif [[ $ROOT_DEV =~ ^/dev/(mmcblk|nvme[0-9]n|loop)[0-9]p[1-9]$ ]]; then
 
-		ROOT_PART=${ROOT_DEV##*[0-9]p}	# /dev/mmcblk0p1 => 1
-		ROOT_DRIVE=${ROOT_DEV%p[1-9]}	# /dev/mmcblk0p1 => /dev/mmcblk0
+		ROOT_PART=${ROOT_DEV: -1}	# /dev/mmcblk0p1 => 1
+		ROOT_DRIVE=${ROOT_DEV::-2}	# /dev/mmcblk0p1 => /dev/mmcblk0
 
 	else
 
