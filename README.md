@@ -312,6 +312,7 @@ Links to hardware and software manufacturers, sources and build instructions use
 - [Spotifyd](https://github.com/Spotifyd/spotifyd)
 - [DietPi-Dashboard](https://github.com/ravenclaw900/dietpi-dashboard)
 - [MicroK8s](https://github.com/canonical/microk8s)
+- [Allo GUI](https://github.com/MichaIng/DietPi-AlloGUI)
 
 ---
 
