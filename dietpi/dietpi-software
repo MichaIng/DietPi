@@ -557,16 +557,16 @@ INDEX_BROWSER=$INDEX_BROWSER"
 		#------------------
 		software_id=159
 
-		aSOFTWARE_NAME[$software_id]='Allo'
-		aSOFTWARE_DESC[$software_id]='web interface'
+		aSOFTWARE_NAME[$software_id]='Allo GUI full'
+		aSOFTWARE_DESC[$software_id]='Audiophile web interface with all dependencies'
 		aSOFTWARE_CATX[$software_id]=-1
 		aSOFTWARE_DOCS[$software_id]='https://dietpi.com/phpbb/viewtopic.php?t=2317'
-		aSOFTWARE_DEPS[$software_id]='5 36 37 65 88 89 96 121 124 128 129 152 163 webserver'
+		aSOFTWARE_DEPS[$software_id]='5 36 37 65 87 89 96 121 124 128 129 152 160 163 webserver'
 		#------------------
 		software_id=160
 
-		aSOFTWARE_NAME[$software_id]='Allo_update'
-		aSOFTWARE_DESC[$software_id]='quick reinstall/update web only'
+		aSOFTWARE_NAME[$software_id]='Allo GUI'
+		aSOFTWARE_DESC[$software_id]='Audiophile web interface'
 		aSOFTWARE_CATX[$software_id]=-1
 		#------------------
 		software_id=163
@@ -7964,7 +7964,6 @@ _EOF_
 komga:
   libraries-scan-startup: true # Scan libraries at startup
   libraries-scan-cron: "* 2 * * * *" # Scan libraries periodically every hour at :02
-  file-hashing: false # Compute a filehash for your files. This is required for the trash bin functionality to work, but can consume lots of resources on large libraries or slow hardware
   database:
     file: /mnt/dietpi_userdata/komga/database.sqlite
   remember-me:
@@ -11332,50 +11331,6 @@ WantedBy=multi-user.target
 _EOF_
 		fi
 
-		software_id=159 # Allo web UI: 160 for quick reinstall
-		if (( ${aSOFTWARE_INSTALL_STATE[$software_id]} == 1 || ${aSOFTWARE_INSTALL_STATE[160]} == 1 )); then
-
-			Banner_Installing
-
-			# Always perform a clean reinstall
-			[[ -d '/var/www/allo' ]] && G_EXEC rm -R /var/www/allo
-			Download_Install 'https://dietpi.com/downloads/binaries/all/allo_web_interface_v13.3.7z' /var/www
-
-			# Create allo user for GUI
-			Create_User -G www-data -d /home/allo -s /bin/bash -p allo allo
-			# - Create home dir separately to avoid skeleton creation
-			[[ -d '/home/allo' ]] || G_EXEC mkdir -p /home/allo
-			G_EXEC chown -R allo:allo /home/allo
-			# - Grant sudo permissions
-			echo 'allo ALL=NOPASSWD: ALL' > /etc/sudoers.d/allo
-
-			# Always Drop DB, and, recreate it, due to error issue with reinstall over the top.
-			G_EXEC systemctl restart mariadb
-			mysqladmin drop allo_db -f &> /dev/null
-			mysql -e 'drop user allo_db@localhost' &> /dev/null
-
-			/boot/dietpi/func/create_mysql_db allo_db allo_db dietpi
-			mysql allo_db < /var/www/allo_db.sql
-			G_EXEC rm /var/www/allo_db.sql
-
-			# Redirect to web interface by default:
-			rm -f /var/www/index\.*
-			cat << '_EOF_' > /var/www/index.php
-<?php
-/* Redirect to allo web interface */
-$host  = $_SERVER['HTTP_HOST'];
-$uri   = rtrim(dirname($_SERVER['PHP_SELF']), '/\\\\');
-$extra = 'index.php';
-header("Location: http://$host$uri/allo/public/$extra");
-exit;
-?>
-_EOF_
-			# Permissions
-			G_EXEC chown -R www-data:www-data /var/www/allo
-			G_EXEC chmod -R 0770 /var/www/allo
-
-		fi
-
 		software_id=163 # GMediaRender
 		if (( ${aSOFTWARE_INSTALL_STATE[$software_id]} == 1 )); then
 
@@ -11410,6 +11365,54 @@ ExecStart=/usr/local/bin/gmediarender -u '$G_HW_UUID' -f '$(</etc/hostname)' --g
 
 [Install]
 WantedBy=multi-user.target
+_EOF_
+		fi
+
+		software_id=160 # Allo GUI
+		if (( ${aSOFTWARE_INSTALL_STATE[$software_id]} == 1 )); then
+
+			Banner_Installing
+
+			# Download
+			Download_Install 'https://github.com/MichaIng/DietPi-AlloGUI/archive/main.tar.gz'
+			G_EXEC mv DietPi-AlloGUI-main allo
+
+			# Apply new app key
+			GCI_PASSWORD=1 G_CONFIG_INJECT 'APP_KEY=' "APP_KEY=base64:$(base64 < <(tr -dc '[:alnum:]' < /dev/urandom | head -c32))" allo/.env
+
+			# Preserve existing database, else create new one
+			if [[ -f '/mnt/dietpi_userdata/allo/storage/allo.db' ]]
+			then
+				G_EXEC mv {/mnt/dietpi_userdata/,}allo/storage/allo.db
+			else
+				G_EXEC sqlite3 allo/storage/allo.db 'create table users(id INTEGER PRIMARY KEY ASC, name, email, password, remember_token, created_at, updated_at);'
+				sqlite3 allo/storage/allo.db "insert into users(id, name, email, password, created_at, updated_at) values(1, 'admin', 'admin@allo.com', '$(php -r "echo password_hash('$GLOBAL_PW',PASSWORD_BCRYPT);")', '$(date '+%F %T')', '$(date '+%F %T')');"
+			fi
+
+			# Permissions
+			G_EXEC chmod -R 'o=,g-w' allo
+			G_EXEC chgrp -R www-data allo
+			G_EXEC chmod -R 'g=' allo/storage allo/bootstrap/cache
+			G_EXEC chown -R www-data allo/storage
+			G_EXEC chown www-data allo/bootstrap/cache
+
+			# Install cleanly
+			[[ -d '/mnt/dietpi_userdata/allo' ]] && G_EXEC rm -R /mnt/dietpi_userdata/allo
+			G_EXEC mv allo /mnt/dietpi_userdata
+
+			# Grant sudo permissions
+			echo 'www-data ALL=NOPASSWD: ALL' > /etc/sudoers.d/allo
+
+			# Link to webroot
+			[[ -e '/var/www/allo' ]] && G_EXEC rm -R /var/www/allo # Failsafe
+			G_EXEC ln -sf /mnt/dietpi_userdata/allo/public /var/www/allo
+
+			# Redirect to web interface by default
+			G_EXEC rm -f /var/www/index\.*
+			cat << '_EOF_' > /var/www/index.php
+<?php
+header('Location: /allo/index.php');
+exit;
 _EOF_
 		fi
 
@@ -15092,18 +15095,25 @@ _EOF_
 
 		fi
 
-		software_id=159 # Allo web UI
-		if (( ${aSOFTWARE_INSTALL_STATE[$software_id]} == -1 || ${aSOFTWARE_INSTALL_STATE[160]} == -1 )); then
+		software_id=159 # Allo GUI full
+		if (( ${aSOFTWARE_INSTALL_STATE[$software_id]} == -1 )); then
 
 			Banner_Uninstalling
-			[[ -d '/var/www/allo' ]] && G_EXEC rm -R /var/www/allo
-			getent passwd allo > /dev/null && G_EXEC userdel allo
-			getent group allo > /dev/null && G_EXEC groupdel allo
+			# Mark standalone version for uninstall
+			aSOFTWARE_INSTALL_STATE[160]=-1
+
+		fi
+
+		software_id=160 # Allo GUI
+		if (( ${aSOFTWARE_INSTALL_STATE[$software_id]} == -1 )); then
+
+			Banner_Uninstalling
+			[[ -f '/var/www/index.php' ]] && G_EXEC rm /var/www/index.php
+			G_EXEC rm -Rf /var/www/allo
+			[[ -d '/mnt/dietpi_userdata/allo' ]] && G_EXEC rm -R /mnt/dietpi_userdata/allo
 			[[ -f '/etc/sudoers.d/allo' ]] && G_EXEC rm /etc/sudoers.d/allo
-			[[ -d '/home/allo' ]] && G_EXEC rm -R /home/allo
-			systemctl start mariadb
-			mysqladmin drop allo_db -f
-			mysql -e 'drop user allo_db@localhost'
+			# Mark full version as uninstalled
+			aSOFTWARE_INSTALL_STATE[159]=0
 
 		fi
 
@@ -15708,8 +15718,6 @@ _EOF_
 		G_DIETPI-NOTIFY 3 "$G_PROGRAM_NAME" 'Finalising uninstall'
 
 		# Uninstall finished, set all uninstalled software to state 0 (not installed)
-		# - Apply same states to Allo and Allo_update
-		(( ${aSOFTWARE_INSTALL_STATE[159]} == -1 || ${aSOFTWARE_INSTALL_STATE[160]} == -1 )) && { aSOFTWARE_INSTALL_STATE[159]=0; aSOFTWARE_INSTALL_STATE[160]=0; }
 		for i in "${!aSOFTWARE_NAME[@]}"
 		do
 			(( ${aSOFTWARE_INSTALL_STATE[$i]} == -1 )) && aSOFTWARE_INSTALL_STATE[$i]=0
@@ -15840,8 +15848,6 @@ This requires an account at: https://remote.it/
 \nRead more: https://dietpi.com/docs/software/remote_desktop/#remot3it' && connectd_installer
 
 		# Install finished, set all installed software to state 2 (installed)
-		# - Apply same states to Allo and Allo_update
-		(( ${aSOFTWARE_INSTALL_STATE[159]} == 1 || ${aSOFTWARE_INSTALL_STATE[160]} == 1 )) && aSOFTWARE_INSTALL_STATE[159]=2 aSOFTWARE_INSTALL_STATE[160]=2
 		for i in "${!aSOFTWARE_NAME[@]}"
 		do
 			(( ${aSOFTWARE_INSTALL_STATE[$i]} == 1 )) && aSOFTWARE_INSTALL_STATE[$i]=2

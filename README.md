@@ -261,6 +261,7 @@ Links to hardware and software manufacturers, sources and build instructions use
 - [Squeezelite](https://github.com/ralph-irving/squeezelite)
 - [Ampache](https://github.com/ampache/ampache)
 - [Plex Media Server](https://www.plex.tv/)
+- [Tautulli](https://github.com/Tautulli/Tautulli)
 - [FFmpeg](https://github.com/FFmpeg/FFmpeg)
 - [Shairport-Sync](https://github.com/mikebrady/shairport-sync)
 - [FreshRSS](https://github.com/FreshRSS/FreshRSS)
@@ -309,8 +310,9 @@ Links to hardware and software manufacturers, sources and build instructions use
 - [Blynk Server](https://github.com/Peterkn2001/blynk-server)
 - [File Browser](https://github.com/filebrowser/filebrowser)
 - [Spotifyd](https://github.com/Spotifyd/spotifyd)
-- [DietPi-Dashboard](https://github.com/ravenclaw900/dietpi-dashboard
+- [DietPi-Dashboard](https://github.com/ravenclaw900/dietpi-dashboard)
 - [MicroK8s](https://github.com/canonical/microk8s)
+- [Allo GUI](https://github.com/MichaIng/DietPi-AlloGUI)
 
 ---
 
