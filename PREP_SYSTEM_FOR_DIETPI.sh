@@ -4,7 +4,7 @@
 	# Optimise current Debian install and prepare for DietPi installation
 	#------------------------------------------------------------------------------------------------
 	# REQUIREMENTS
-	# - Currently running Debian Buster or above, ideally minimal, eg: Raspbian Lite-ish =))
+	# - Currently running Debian Buster or above, ideally minimal, e.g. Raspberry Pi OS Lite-ish =))
 	# - systemd as system/init/service manager
 	# - Either Ethernet connection or local (non-SSH) terminal access
 	#------------------------------------------------------------------------------------------------
@@ -33,11 +33,10 @@
 	# Critical checks and requirements to run this script
 	#------------------------------------------------------------------------------------------------
 	# Exit path for non-root executions
-	if (( $UID )); then
-
+	if (( $UID ))
+	then
 		echo -e '[FAILED] Root privileges required, please run this script with "sudo"\nIn case install the "sudo" package with root privileges:\n\t# apt install sudo\n'
 		exit 1
-
 	fi
 
 	# Set locale
@@ -112,7 +111,6 @@ _EOF_
 		'curl' # Download DietPi-Globals...
 		'ca-certificates' # ...via HTTPS
 		'whiptail' # G_WHIP
-
 	)
 	for i in "${aAPT_PREREQS[@]}"
 	do
@@ -126,23 +124,20 @@ _EOF_
 	GITOWNER=${GITOWNER:-MichaIng}
 
 	# Select Git branch
-	if ! [[ $GITBRANCH =~ ^(master|beta|dev)$ ]]; then
-
+	if ! [[ $GITBRANCH =~ ^(master|beta|dev)$ ]]
+	then
 		aWHIP_BRANCH=(
 
 			'master' ': Stable release branch (recommended)'
 			'beta' ': Public beta testing branch'
 			'dev' ': Unstable development branch'
-
 		)
-		if ! GITBRANCH=$(whiptail --title "$G_PROGRAM_NAME" --menu 'Please select the Git branch the installer should use:' --default-item 'master' --ok-button 'Ok' --cancel-button 'Exit' --backtitle "$G_PROGRAM_NAME" 12 80 3 "${aWHIP_BRANCH[@]}" 3>&1 1>&2 2>&3-); then
-
+		if ! GITBRANCH=$(whiptail --title "$G_PROGRAM_NAME" --menu 'Please select the Git branch the installer should use:' --default-item 'master' --ok-button 'Ok' --cancel-button 'Exit' --backtitle "$G_PROGRAM_NAME" 12 80 3 "${aWHIP_BRANCH[@]}" 3>&1 1>&2 2>&3-)
+		then
 			echo -e '[ INFO ] Exit selected. Aborting...\n'
 			exit 0
-
 		fi
 		unset -v aWHIP_BRANCH
-
 	fi
 	echo "[ INFO ] Selected Git branch: $GITOWNER/$GITBRANCH"
 
@@ -151,22 +146,20 @@ _EOF_
 	#------------------------------------------------------------------------------------------------
 	# NB: We have to manually handle errors, until DietPi-Globals are successfully loaded.
 	# Download
-	if ! curl -sSfL "https://raw.githubusercontent.com/$GITOWNER/DietPi/$GITBRANCH/dietpi/func/dietpi-globals" -o dietpi-globals; then
-
+	if ! curl -sSfL "https://raw.githubusercontent.com/$GITOWNER/DietPi/$GITBRANCH/dietpi/func/dietpi-globals" -o dietpi-globals
+	then
 		echo -e '[FAILED] Unable to download dietpi-globals. Aborting...\n'
 		exit 1
-
 	fi
 
 	# Assure no obsolete .hw_model is loaded
 	rm -fv /boot/dietpi/.hw_model
 
 	# Load
-	if ! . ./dietpi-globals; then
-
+	if ! . ./dietpi-globals
+	then
 		echo -e '[FAILED] Unable to load dietpi-globals. Aborting...\n'
 		exit 1
-
 	fi
 	rm dietpi-globals
 
@@ -181,60 +174,51 @@ _EOF_
 
 	# Detect the distro version of this operating system
 	distro=$(</etc/debian_version)
-	if [[ $distro == '10.'* || $distro == 'buster/sid' ]]; then
-
+	if [[ $distro == '10.'* || $distro == 'buster/sid' ]]
+	then
 		G_DISTRO=5
 		G_DISTRO_NAME='buster'
 
-	elif [[ $distro == '11.'* || $distro == 'bullseye/sid' ]]; then
-
+	elif [[ $distro == '11.'* || $distro == 'bullseye/sid' ]]
+	then
 		G_DISTRO=6
 		G_DISTRO_NAME='bullseye'
 
-	elif [[ $distro == '12.'* || $distro == 'bookworm/sid' ]]; then
-
+	elif [[ $distro == '12.'* || $distro == 'bookworm/sid' ]]
+	then
 		G_DISTRO=7
 		G_DISTRO_NAME='bookworm'
-
 	else
-
 		G_DIETPI-NOTIFY 1 "Unsupported distribution version: \"$distro\". Aborting...\n"
 		exit 1
-
 	fi
 	unset -v distro
 	G_DIETPI-NOTIFY 2 "Detected distribution version: ${G_DISTRO_NAME^} (ID: $G_DISTRO)"
 
 	# Detect the hardware architecture of this operating system
-	if grep -q '^ID=raspbian' /etc/os-release; then
-
+	if grep -q '^ID=raspbian' /etc/os-release
+	then
 		# Raspbian: Force ARMv6
 		G_RASPBIAN=1 G_HW_ARCH=1 G_HW_ARCH_NAME='armv6l'
-
 	else
-
 		# Debian: ARMv6 is not supported here
 		G_RASPBIAN=0
 		G_HW_ARCH_NAME=$(uname -m)
-		if [[ $G_HW_ARCH_NAME == 'armv7l' ]]; then
-
+		if [[ $G_HW_ARCH_NAME == 'armv7l' ]]
+		then
 			G_HW_ARCH=2
 
-		elif [[ $G_HW_ARCH_NAME == 'aarch64' ]]; then
-
+		elif [[ $G_HW_ARCH_NAME == 'aarch64' ]]
+		then
 			G_HW_ARCH=3
 
-		elif [[ $G_HW_ARCH_NAME == 'x86_64' ]]; then
-
+		elif [[ $G_HW_ARCH_NAME == 'x86_64' ]]
+		then
 			G_HW_ARCH=10
-
 		else
-
 			G_DIETPI-NOTIFY 1 "Unsupported CPU architecture: \"$G_HW_ARCH_NAME\". Aborting...\n"
 			exit 1
-
 		fi
-
 	fi
 	G_DIETPI-NOTIFY 2 "Detected target CPU architecture: $G_HW_ARCH_NAME (ID: $G_HW_ARCH)"
 
@@ -246,8 +230,8 @@ _EOF_
 		readonly G_NOTIFY_3_MODE='Step'
 		G_DIETPI-NOTIFY 3 "$G_PROGRAM_NAME" "[$SETUP_STEP] Detecting existing DietPi system"; ((SETUP_STEP++))
 		#------------------------------------------------------------------------------------------------
-		if [[ -d '/DietPi' || -d '/boot/dietpi' ]]; then
-
+		if [[ -d '/DietPi' || -d '/boot/dietpi' ]]
+		then
 			G_DIETPI-NOTIFY 2 'DietPi system found, uninstalling old instance...'
 
 			# Stop services
@@ -271,11 +255,8 @@ _EOF_
 			rm -fv /etc{,/cron.*,/{bashrc,profile,sysctl,network/if-up,udev/rules}.d}/{,.}*dietpi*
 			rm -fv /etc/apt/apt.conf.d/{99-dietpi-norecommends,98-dietpi-no_translations,99-dietpi-forceconf} # Pre-v6.32
 			[[ -f '/boot/Automation_Format_My_Usb_Drive' ]] && rm -v /boot/Automation_Format_My_Usb_Drive
-
 		else
-
 			G_DIETPI-NOTIFY 2 'No DietPi system found, skipping old instance uninstall...'
-
 		fi
 
 		#------------------------------------------------------------------------------------------------
@@ -285,22 +266,18 @@ _EOF_
 		# Image creator
 		while :
 		do
-			if [[ $IMAGE_CREATOR ]]; then
-
+			if [[ $IMAGE_CREATOR ]]
+			then
 				G_WHIP_RETURNED_VALUE=$IMAGE_CREATOR
 				# unset to force interactive input if disallowed name is detected
 				unset -v IMAGE_CREATOR
-
 			else
-
 				G_WHIP_BUTTON_CANCEL_TEXT='Exit'
-				if ! G_WHIP_INPUTBOX 'Please enter your name. This will be used to identify the image creator within credits banner.\n\nYou can add your contact information as well for end users.\n\nNB: An entry is required.'; then
-
+				if ! G_WHIP_INPUTBOX 'Please enter your name. This will be used to identify the image creator within credits banner.\n\nYou can add your contact information as well for end users.\n\nNB: An entry is required.'
+				then
 					G_DIETPI-NOTIFY 1 'Exit selected. Aborting...\n'
 					exit 0
-
 				fi
-
 			fi
 
 			# Disallowed names
@@ -312,7 +289,6 @@ _EOF_
 				'dan knight'
 				'michaing'
 				'diet'
-
 			)
 
 			for i in "${aDISALLOWED_NAMES[@]}"
@@ -330,17 +306,15 @@ _EOF_
 		G_DIETPI-NOTIFY 2 "Entered image creator: $IMAGE_CREATOR"
 
 		# Pre-image used/name: Respect environment variable
-		if [[ ! $PREIMAGE_INFO ]]; then
-
+		if [[ ! $PREIMAGE_INFO ]]
+		then
 			G_WHIP_BUTTON_CANCEL_TEXT='Exit'
-			if ! G_WHIP_INPUTBOX 'Please enter the name or URL of the pre-image you installed on this system, prior to running this script. This will be used to identify the pre-image credits.\n\nEG: Debian, Raspberry Pi OS Lite, Meveric or "forum.odroid.com/viewtopic.php?t=123456" etc.\n\nNB: An entry is required.'; then
-
+			if ! G_WHIP_INPUTBOX 'Please enter the name or URL of the pre-image you installed on this system, prior to running this script. This will be used to identify the pre-image credits.\n\nEG: Debian, Raspberry Pi OS Lite, Meveric or "forum.odroid.com/viewtopic.php?t=123456" etc.\n\nNB: An entry is required.'
+			then
 				G_DIETPI-NOTIFY 1 'Exit selected. Aborting...\n'
 				exit 0
-
 			fi
 			PREIMAGE_INFO=$G_WHIP_RETURNED_VALUE
-
 		fi
 		G_DIETPI-NOTIFY 2 "Entered pre-image info: $PREIMAGE_INFO"
 
@@ -396,6 +370,7 @@ _EOF_
 			'21' ': x86_64 Native PC'
 			'20' ': x86_64 Virtual Machine'
 			'' '●─ Other '
+			'75' ': Container image'
 			'29' ': Generic Amlogic S922X'
 			'28' ': Generic Amlogic S905'
 			'27' ': Generic Allwinner H6'
@@ -404,7 +379,6 @@ _EOF_
 			'24' ': Generic Rockchip RK3399'
 			'23' ': Generic Rockchip RK3328'
 			'22' ': Generic Device'
-
 		)
 
 		while :
@@ -416,11 +390,10 @@ _EOF_
 			done
 
 			G_WHIP_BUTTON_CANCEL_TEXT='Exit'
-			if ! G_WHIP_MENU 'Please select the current device this is being installed on:\n - NB: Select "Generic device" if not listed.\n - "Core devices": Fully supported by DietPi, offering full GPU acceleration + Kodi support.\n - "Limited support devices": No GPU acceleration guaranteed.'; then
-
+			if ! G_WHIP_MENU 'Please select the current device this is being installed on:\n - NB: Select "Generic device" if not listed.\n - "Core devices": Fully supported by DietPi, offering full GPU acceleration + Kodi support.\n - "Limited support devices": No GPU acceleration guaranteed.'
+			then
 				G_DIETPI-NOTIFY 0 'Exit selected. Aborting...\n'
 				exit 0
-
 			fi
 			HW_MODEL=$G_WHIP_RETURNED_VALUE
 			break
@@ -431,28 +404,23 @@ _EOF_
 		G_DIETPI-NOTIFY 2 "Selected hardware model ID: $G_HW_MODEL"
 
 		# WiFi selection
-		if [[ $WIFI_REQUIRED != [01] ]]; then
-
+		if [[ $WIFI_REQUIRED != [01] ]]
+		then
 			G_WHIP_MENU_ARRAY=(
 
 				'0' ': I do not require WiFi functionality, skip related package install.'
 				'1' ': I require WiFi functionality, install related packages.'
-
 			)
 
 			(( $G_HW_MODEL == 20 )) && G_WHIP_DEFAULT_ITEM=0 || G_WHIP_DEFAULT_ITEM=1
 			G_WHIP_BUTTON_CANCEL_TEXT='Exit'
-			if G_WHIP_MENU 'Please select an option:'; then
-
+			if G_WHIP_MENU 'Please select an option:'
+			then
 				WIFI_REQUIRED=$G_WHIP_RETURNED_VALUE
-
 			else
-
 				G_DIETPI-NOTIFY 0 'Exit selected. Aborting...\n'
 				exit 0
-
 			fi
-
 		fi
 		# shellcheck disable=SC2015
 		(( $WIFI_REQUIRED )) && G_DIETPI-NOTIFY 2 'Marking WiFi as required' || G_DIETPI-NOTIFY 2 'Marking WiFi as NOT required'
@@ -460,10 +428,8 @@ _EOF_
 		# Distro selection
 		DISTRO_LIST_ARRAY=(
 
-			'5' ': Buster (oldstable, if you must stay with an old release)'
 			'6' ': Bullseye (current stable release, recommended)'
 			'7' ': Bookworm (testing, if you want to live on bleeding edge)'
-
 		)
 
 		# - List supported distro versions up from currently installed one
@@ -483,29 +449,20 @@ _EOF_
 
 			G_WHIP_DEFAULT_ITEM=${G_WHIP_MENU_ARRAY[0]} # First item matches current distro version
 			G_WHIP_BUTTON_CANCEL_TEXT='Exit'
-			if G_WHIP_MENU "Please select a Debian version to install on this system.\n
-Currently installed: $G_DISTRO_NAME (ID: $G_DISTRO)"; then
-
+			if G_WHIP_MENU "Please select a Debian version to install on this system.\n\nCurrently installed: $G_DISTRO_NAME (ID: $G_DISTRO)"
+			then
 				DISTRO_TARGET=$G_WHIP_RETURNED_VALUE
 				break
-
 			fi
 			G_DIETPI-NOTIFY 0 'Exit selected. Aborting...\n'
 			exit 0
 		done
 
-		if (( $DISTRO_TARGET == 5 )); then
-
-			DISTRO_TARGET_NAME='buster'
-
-		elif (( $DISTRO_TARGET == 6 )); then
-
+		if (( $DISTRO_TARGET == 6 ))
+		then
 			DISTRO_TARGET_NAME='bullseye'
-
 		else
-
 			DISTRO_TARGET_NAME='bookworm'
-
 		fi
 
 		G_DIETPI-NOTIFY 2 "Selected Debian version: $DISTRO_TARGET_NAME (ID: $DISTRO_TARGET)"
@@ -656,6 +613,7 @@ Currently installed: $G_DISTRO_NAME (ID: $G_DISTRO)"; then
 			'rfkill' 		# Block/unblock WiFi and Bluetooth adapters, only installed once to unblock everything, purged afterwards!
 			'sudo'			# Root permission wrapper for users permitted via /etc/sudoers(.d/)
 			'systemd-sysv'		# Includes systemd and additional commands: "poweroff", "shutdown" etc.
+			'systemd-timesyncd'	# Network time sync daemon
 			'tzdata'		# Time zone data for system clock, auto summer/winter time adjustment
 			'udev'			# /dev/ and hotplug management daemon
 			'unzip'			# .zip unpacker
@@ -663,60 +621,46 @@ Currently installed: $G_DISTRO_NAME (ID: $G_DISTRO)"; then
 			'wget'			# Download tool
 			'whiptail'		# DietPi dialogs
 			#'xz-utils'		# (.tar).xz archiver
-
 		)
 
 		# G_DISTRO specific
-		# - Dropbear: DietPi default SSH-Client
-		#   On Buster-, "dropbear" pulls in "dropbear-initramfs", which we don't need: https://packages.debian.org/dropbear
-		# - apt-transport-https: Allows HTTPS sources for ATP
-		#   On Buster+, it is included in "apt" package: https://packages.debian.org/apt-transport-https
-		if (( $G_DISTRO > 5 )); then
-
+		# - Dropbear: DietPi default SSH server
+		#   On Buster, "dropbear" pulls in "dropbear-initramfs", which we don't need: https://packages.debian.org/dropbear
+		#   This needs to depend on current distro version instead of target version, to assure "dropbear-run" does not get autoremoved before "dropbear" is installed.
+		if (( $G_DISTRO > 5 ))
+		then
 			aPACKAGES_REQUIRED_INSTALL+=('dropbear')
-
 		else
-
 			aPACKAGES_REQUIRED_INSTALL+=('dropbear-run')
-
 		fi
-		# - systemd-timesyncd: Network time sync daemon
-		#   Available as dedicated package since Bullseye: https://packages.debian.org/systemd-timesyncd
-		#   While the above needs to be checked against "current" distro to not break SSH or APT before distro upgrade, this one should be checked against "target" distro version.
-		(( $DISTRO_TARGET > 5 )) && aPACKAGES_REQUIRED_INSTALL+=('systemd-timesyncd')
 
 		# G_HW_MODEL specific
 		# - initramfs: Required for generic bootloader, but not required/used by RPi bootloader, on VM install tiny-initramfs with limited features but sufficient and much smaller + faster
-		if (( $G_HW_MODEL == 20 )); then
-
+		if (( $G_HW_MODEL == 20 ))
+		then
 			aPACKAGES_REQUIRED_INSTALL+=('tiny-initramfs')
 
-		elif (( $G_HW_MODEL > 9 )); then
-
+		elif (( $G_HW_MODEL > 9 ))
+		then
 			aPACKAGES_REQUIRED_INSTALL+=('initramfs-tools')
-
 		fi
 		# - Entropy daemon: Use modern rng-tools5 on all devices where it has been proven to work, else haveged: https://github.com/MichaIng/DietPi/issues/2806
-		if [[ $G_HW_MODEL -lt 10 || $G_HW_MODEL =~ ^(14|15|16|24|29|42|46|58|68|72|74)$ ]]; then # RPi, S922X, Odroid C4, RK3399 - 47 NanoPi R4S, Radxa Zero
-
+		if [[ $G_HW_MODEL -lt 10 || $G_HW_MODEL =~ ^(14|15|16|24|29|42|46|58|68|72|74)$ ]] # RPi, S922X, Odroid C4, RK3399 - 47 NanoPi R4S, Radxa Zero
+		then
 			aPACKAGES_REQUIRED_INSTALL+=('rng-tools5')
-
 		else
-
 			aPACKAGES_REQUIRED_INSTALL+=('haveged')
-
 		fi
 		# - Drive power management control
 		(( $G_HW_MODEL == 20 )) || aPACKAGES_REQUIRED_INSTALL+=('hdparm')
 
 		# WiFi related
-		if (( $WIFI_REQUIRED )); then
-
+		if (( $WIFI_REQUIRED ))
+		then
 			aPACKAGES_REQUIRED_INSTALL+=('iw')			# Tools to configure WiFi adapters
 			aPACKAGES_REQUIRED_INSTALL+=('wireless-tools')		# Same as "iw", deprecated but still required for non-nl80211 adapters
 			aPACKAGES_REQUIRED_INSTALL+=('crda')			# Set WiFi frequencies according to local regulations, based on WiFi country code
 			aPACKAGES_REQUIRED_INSTALL+=('wpasupplicant')		# Support for WPA-protected WiFi network connection
-
 		fi
 
 		# Install gdisk if root file system is on a GPT partition, used by DietPi-FS_partition_resize
@@ -1122,7 +1066,7 @@ _EOF_
 		unset -v aPACKAGES_REQUIRED_INSTALL
 
 		# Adjust Dropbear package marks when Buster was upgraded to Bullseye
-		if (( $G_DISTRO > 5 )) && dpkg-query -s 'dropbear-run' &> /dev/null
+		if dpkg-query -s 'dropbear-run' &> /dev/null
 		then
 			G_EXEC apt-mark manual dropbear
 			G_EXEC apt-mark auto dropbear-run
@@ -1137,33 +1081,15 @@ _EOF_
 		#------------------------------------------------------------------------------------------------
 
 		# Remove old gcc-*-base packages, e.g. accumulated on Raspberry Pi OS images
-		if [[ $G_DISTRO == 5 ]]
-		then
-			mapfile -t apackages < <(dpkg --get-selections 'gcc-*-base' | mawk '$1!~/^gcc-8-/{print $1}')
-			[[ ${apackages[0]} ]] && G_AGP "${apackages[@]}"
-
-		elif [[ $G_DISTRO == 6 ]]
+		if [[ $G_DISTRO == 6 ]]
 		then
 			mapfile -t apackages < <(dpkg --get-selections 'gcc-*-base' | mawk '$1!~/^gcc-10-/{print $1}')
 			[[ ${apackages[0]} ]] && G_AGP "${apackages[@]}"
 
 		elif [[ $G_DISTRO == 7 ]]
 		then
-			mapfile -t apackages < <(dpkg --get-selections 'gcc-*-base' | mawk '$1!~/^gcc-11-/{print $1}')
+			mapfile -t apackages < <(dpkg --get-selections 'gcc-*-base' | mawk '$1!~/^gcc-12-/{print $1}')
 			[[ ${apackages[0]} ]] && G_AGP "${apackages[@]}"
-		fi
-
-		# https://github.com/jirka-h/haveged/pull/7 https://github.com/MichaIng/DietPi/issues/3689#issuecomment-678322767
-		if [[ $G_DISTRO == 5 && $G_HW_ARCH == [23] && $G_HW_MODEL -gt 9 ]] && dpkg-query -s haveged &> /dev/null; then
-
-			G_DIETPI-NOTIFY 2 'Upgrading haveged entropy daemon to fix an issue on ARM:'
-			G_DIETPI-NOTIFY 2 ' - https://github.com/jirka-h/haveged/pull/7'
-			G_EXEC curl -sSfLO "https://dietpi.com/downloads/binaries/buster/libhavege2_$G_HW_ARCH_NAME.deb"
-			G_EXEC curl -sSfLO "https://dietpi.com/downloads/binaries/buster/haveged_$G_HW_ARCH_NAME.deb"
-			G_AGI "./libhavege2_$G_HW_ARCH_NAME.deb" "./haveged_$G_HW_ARCH_NAME.deb"
-			G_EXEC_NOHALT=1 G_EXEC rm "./libhavege2_$G_HW_ARCH_NAME.deb" "./haveged_$G_HW_ARCH_NAME.deb"
-			G_AGA
-
 		fi
 
 		G_DIETPI-NOTIFY 2 'Restoring default base files:'
@@ -1608,13 +1534,7 @@ _EOF_'
 		then
 			G_EXEC_DESC='Configuring hdparm'
 			# Since Debian Bullseye, spindown_time is not applied if APM is not supported by the drive. force_spindown_time is required to override that.
-			local spindown='spindown_time'
-			(( $G_DISTRO > 5 )) && spindown='force_spindown_time'
-			G_EXEC eval "cat << _EOF_ > /etc/hdparm.conf
-apm = 127
-$spindown = 120
-_EOF_"
-			unset -v spindown
+			G_EXEC eval 'echo -e '\''apm = 127\nforce_spindown_time = 120'\'' > /etc/hdparm.conf'
 		fi
 
 		# - Odroid N2/C4: Modern single partition image
