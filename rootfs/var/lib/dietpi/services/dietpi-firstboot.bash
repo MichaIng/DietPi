@@ -143,9 +143,6 @@ _EOF_
 
 		fi
 
-		# Disable serial console if set in dietpi.txt
-		grep -q '^[[:blank:]]*CONFIG_SERIAL_CONSOLE_ENABLE=0' /boot/dietpi.txt && /boot/dietpi/func/dietpi-set_hardware serialconsole disable
-
 		# Apply login password if it has not been encrypted before to avoid applying the informational text
 		if [[ ! -f '/var/lib/dietpi/dietpi-software/.GLOBAL_PW.bin' ]]; then
 
@@ -191,7 +188,7 @@ _EOF_
 
 		fi
 
-		# Skip keyboard, SSH and network setup on container systems
+		# Skip keyboard, SSH, serial console and network setup on container systems
 		(( $G_HW_MODEL == 75 )) && return 0
 
 		# Apply keyboard layout
@@ -213,6 +210,9 @@ _EOF_
 			rm -v "$i"
 			dropbearkey -t "$type" -f "$i"
 		done
+
+		# Disable serial console if set in dietpi.txt
+		grep -q '^[[:blank:]]*CONFIG_SERIAL_CONSOLE_ENABLE=0' /boot/dietpi.txt && /boot/dietpi/func/dietpi-set_hardware serialconsole disable
 
 		# Apply forced Ethernet link speed if set in dietpi.txt
 		/boot/dietpi/func/dietpi-set_hardware eth-forcespeed "$(sed -n '/^[[:blank:]]*AUTO_SETUP_NET_ETH_FORCE_SPEED=/{s/^[^=]*=//p;q}' /boot/dietpi.txt)"
