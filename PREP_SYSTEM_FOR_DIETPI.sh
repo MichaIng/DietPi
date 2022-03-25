@@ -643,9 +643,11 @@ _EOF_
 		done < <(blkid -s TYPE -o value -c /dev/null | sort -u)
 
 		# G_HW_MODEL specific
-		# - All but containers
-		if (( $G_HW_MODEL != 75 ))
+		# - Containers
+		if (( $G_HW_MODEL == 75 ))
 		then
+			aPACKAGES_REQUIRED_INSTALL+=('iproute2')
+		else
 			aPACKAGES_REQUIRED_INSTALL+=(
 				'console-setup'		# DietPi-Config keyboard configuration + console fonts
 				'ethtool'		# Force Ethernet link speed
@@ -1485,14 +1487,11 @@ _EOF_'
 		then
 			/boot/dietpi/func/dietpi-set_hardware serialconsole enable ttyS0
 
-		# Else on non-VM: Enable on all present serial consoles
-		elif (( $G_HW_MODEL != 20 ))
+		# Else for physical systems: Enable on all present serial consoles
+		elif (( $G_HW_MODEL != 20 && $G_HW_MODEL != 75 ))
 		then
 			/boot/dietpi/func/dietpi-set_hardware serialconsole enable
 		fi
-
-		# Re-set dietpi.txt setting on non-VMs to indicated enabled serial console
-		(( $G_HW_MODEL == 20 || $G_HW_MODEL == 75 )) || G_CONFIG_INJECT 'CONFIG_SERIAL_CONSOLE_ENABLE=' 'CONFIG_SERIAL_CONSOLE_ENABLE=1' /boot/dietpi.txt
 
 		G_DIETPI-NOTIFY 2 'Disabling static and automatic login prompts on consoles tty2 to tty6:'
 		G_EXEC systemctl mask --now getty-static
@@ -1552,13 +1551,13 @@ _EOF_'
 			G_EXEC eval 'echo -e '\''apm = 127\nforce_spindown_time = 120'\'' > /etc/hdparm.conf'
 		fi
 
-		# - Odroid N2/C4: Modern single partition image
+		# Odroid N2/C4: Modern single partition image
 		if [[ $G_HW_MODEL == 1[56] && -f '/boot/dietpiEnv.txt' ]]
 		then
 			G_CONFIG_INJECT 'rootdev=' "rootdev=UUID=$(findmnt -Ufnro UUID -M /)" /boot/dietpiEnv.txt
 			G_CONFIG_INJECT 'rootfstype=' "rootfstype=$(findmnt -Ufnro FSTYPE -M /)" /boot/dietpiEnv.txt
 
-		# - Sparky SBC
+		# Sparky SBC
 		elif (( $G_HW_MODEL == 70 ))
 		then
 			# Install latest kernel/drivers
@@ -1630,7 +1629,7 @@ WantedBy=multi-user.target
 _EOF_
 			G_EXEC systemctl enable dietpi-sparkysbc_ethernet
 
-		# - RPi
+		# RPi
 		elif (( $G_HW_MODEL < 10 )); then
 
 			# Creating RPi-specific groups
@@ -1703,7 +1702,7 @@ _EOF_
 				done < <(dpkg -L 'libraspberrypi0' | grep '^/usr/lib/arm-linux-gnueabihf/.*\.so.0$')
 			fi
 
-		# - Radxa Zero
+		# Radxa Zero
 		elif (( $G_HW_MODEL == 74 ))
 		then
 			# Use ondemand CPU governor since schedutil currently causes kernel errors and hangs
@@ -1719,7 +1718,7 @@ _EOF_
 				G_CONFIG_INJECT 'docker_optimizations=' 'docker_optimizations=off' /boot/uEnv.txt
 			fi
 
-		# - NanoPi R1
+		# NanoPi R1
 		elif [[ $G_HW_MODEL == 48 && -f '/boot/armbianEnv.txt' ]]
 		then
 			# Enable second USB port by default
@@ -1727,7 +1726,7 @@ _EOF_
 			[[ $current == *'usbhost2'* ]] || G_CONFIG_INJECT 'overlays=' "overlays=$current usbhost2" /boot/armbianEnv.txt
 		fi
 
-		# - Armbian special
+		# Armbian special
 		if [[ -f '/boot/armbianEnv.txt' ]]
 		then
 			# Disable bootsplash logo, as we removed the file above: https://github.com/MichaIng/DietPi/issues/3932#issuecomment-852376681
@@ -1769,8 +1768,10 @@ _EOF_
 		G_DIETPI-NOTIFY 3 "$G_PROGRAM_NAME" "[$SETUP_STEP] Finalise system for first boot of DietPi"; ((SETUP_STEP++))
 		#------------------------------------------------------------------------------------------------
 
-		if (( $G_HW_MODEL != 75 ))
+		if (( $G_HW_MODEL == 75 ))
 		then
+			G_CONFIG_INJECT 'CONFIG_NTP_MODE=' 'CONFIG_NTP_MODE=0' /boot/dietpi.txt
+		else
 			G_EXEC_DESC='Enable Dropbear autostart' G_EXEC sed -i '/NO_START=1/c\NO_START=0' /etc/default/dropbear
 			G_EXEC systemctl unmask dropbear
 			G_EXEC systemctl enable dropbear
@@ -1786,15 +1787,12 @@ _EOF_
 		G_DIETPI-NOTIFY 2 'Removing swapfile from image'
 		/boot/dietpi/func/dietpi-set_swapfile 0 /var/swap
 		[[ -e '/var/swap' ]] && rm -v /var/swap # still exists on some images...
-		# - Re-enable for next run
+		# Re-enable for next run
 		(( $G_HW_MODEL == 75 )) || G_CONFIG_INJECT 'AUTO_SETUP_SWAPFILE_SIZE=' 'AUTO_SETUP_SWAPFILE_SIZE=1' /boot/dietpi.txt
-		# - Reset /tmp size to default (512 MiB)
+		# Reset /tmp size to default (512 MiB)
 		sed -i '\|/tmp|s|size=[^,]*,||' /etc/fstab
 
-		G_DIETPI-NOTIFY 2 'Disabling Bluetooth by default'
-		/boot/dietpi/func/dietpi-set_hardware bluetooth disable
-
-		# - Set WiFi
+		# Set WiFi
 		local tmp_info='Disabling'
 		local tmp_mode='disable'
 		if (( $WIFI_REQUIRED ))
@@ -1810,6 +1808,9 @@ _EOF_
 
 		if (( $G_HW_MODEL != 75 ))
 		then
+			G_DIETPI-NOTIFY 2 'Disabling Bluetooth by default'
+			/boot/dietpi/func/dietpi-set_hardware bluetooth disable
+
 			G_DIETPI-NOTIFY 2 "$tmp_info onboard WiFi modules by default"
 			/boot/dietpi/func/dietpi-set_hardware wifimodules onboard_$tmp_mode
 
