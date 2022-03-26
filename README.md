@@ -313,6 +313,8 @@ Links to hardware and software manufacturers, sources and build instructions use
 - [DietPi-Dashboard](https://github.com/ravenclaw900/dietpi-dashboard)
 - [MicroK8s](https://github.com/canonical/microk8s)
 - [Allo GUI](https://github.com/MichaIng/DietPi-AlloGUI)
+- [PHP Composer](https://github.com/composer/composer)
+- [motionEye](https://github.com/motioneye-project/motioneye)
 
 ---
 
