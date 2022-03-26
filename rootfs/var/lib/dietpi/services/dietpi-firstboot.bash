@@ -114,42 +114,8 @@
 		# Apply swap settings
 		/boot/dietpi/func/dietpi-set_swapfile
 
-		# Apply time zone
-		local autoinstall_timezone=$(sed -n '/^[[:blank:]]*AUTO_SETUP_TIMEZONE=/{s/^[^=]*=//p;q}' /boot/dietpi.txt)
-		if [[ -f /usr/share/zoneinfo/$autoinstall_timezone && $autoinstall_timezone != $(</etc/timezone) ]]; then
-
-			G_DIETPI-NOTIFY 2 "Setting time zone $autoinstall_timezone. Please wait..."
-			rm -fv /etc/{timezoner,localtime}
-			ln -s "/usr/share/zoneinfo/$autoinstall_timezone" /etc/localtime
-			dpkg-reconfigure -f noninteractive tzdata
-
-		fi
-
-		# Apply language (locale)
-		local autoinstall_language=$(sed -n '/^[[:blank:]]*AUTO_SETUP_LOCALE=/{s/^[^=]*=//p;q}' /boot/dietpi.txt)
-		grep -q "^$autoinstall_language UTF-8$" /usr/share/i18n/SUPPORTED || autoinstall_language='C.UTF-8'
-		if ! locale | grep -qE "(LANG|LC_ALL)=[\'\"]?${autoinstall_language}[\'\"]?" || ! locale -a | grep -qiE 'C\.UTF-?8'; then
-
-			G_DIETPI-NOTIFY 2 "Setting locale $autoinstall_language. Please wait..."
-			/boot/dietpi/func/dietpi-set_software locale "$autoinstall_language"
-
-		fi
-
-		# Apply keyboard layout
-		local autoinstall_keyboard=$(sed -n '/^[[:blank:]]*AUTO_SETUP_KEYBOARD_LAYOUT=/{s/^[^=]*=//p;q}' /boot/dietpi.txt)
-		if [[ $autoinstall_keyboard ]] && ! grep -q "XKBLAYOUT=\"$autoinstall_keyboard\"" /etc/default/keyboard; then
-
-			G_DIETPI-NOTIFY 2 "Setting keyboard layout $autoinstall_keyboard. Please wait..."
-			G_CONFIG_INJECT 'XKBLAYOUT=' "XKBLAYOUT=\"$autoinstall_keyboard\"" /etc/default/keyboard
-			setupcon --save # https://bugs.debian.org/cgi-bin/bugreport.cgi?bug=818065
-
-		fi
-
 		# Apply headless mode if set in dietpi.txt (RPi, Odroid C1/C2)
 		(( $G_HW_MODEL < 11 || $G_HW_MODEL == 12 )) && /boot/dietpi/func/dietpi-set_hardware headless "$(grep -cm1 '^[[:blank:]]*AUTO_SETUP_HEADLESS=1' /boot/dietpi.txt)"
-
-		# Apply forced Ethernet link speed if set in dietpi.txt
-		/boot/dietpi/func/dietpi-set_hardware eth-forcespeed "$(sed -n '/^[[:blank:]]*AUTO_SETUP_NET_ETH_FORCE_SPEED=/{s/^[^=]*=//p;q}' /boot/dietpi.txt)"
 
 		# Set hostname
 		/boot/dietpi/func/change_hostname "$(sed -n '/^[[:blank:]]*AUTO_SETUP_NET_HOSTNAME=/{s/^[^=]*=//p;q}' /boot/dietpi.txt)"
@@ -177,9 +143,6 @@ _EOF_
 
 		fi
 
-		# Disable serial console if set in dietpi.txt
-		grep -q '^[[:blank:]]*CONFIG_SERIAL_CONSOLE_ENABLE=0' /boot/dietpi.txt && /boot/dietpi/func/dietpi-set_hardware serialconsole disable
-
 		# Apply login password if it has not been encrypted before to avoid applying the informational text
 		if [[ ! -f '/var/lib/dietpi/dietpi-software/.GLOBAL_PW.bin' ]]; then
 
@@ -199,6 +162,45 @@ _EOF_
 		(( $G_HW_MODEL < 10 )) && (( $G_RASPBIAN )) && target_repo='CONFIG_APT_RASPBIAN_MIRROR'
 		/boot/dietpi/func/dietpi-set_software apt-mirror "$(sed -n "/^[[:blank:]]*$target_repo=/{s/^[^=]*=//p;q}" /boot/dietpi.txt)"
 
+		# Recreate machine-id: https://github.com/MichaIng/DietPi/issues/2015
+		[[ -f '/etc/machine-id' ]] && rm /etc/machine-id
+		[[ -f '/var/lib/dbus/machine-id' ]] && rm /var/lib/dbus/machine-id
+		systemd-machine-id-setup
+
+		# Apply time zone
+		local autoinstall_timezone=$(sed -n '/^[[:blank:]]*AUTO_SETUP_TIMEZONE=/{s/^[^=]*=//p;q}' /boot/dietpi.txt)
+		if [[ -f /usr/share/zoneinfo/$autoinstall_timezone && $autoinstall_timezone != $(</etc/timezone) ]]; then
+
+			G_DIETPI-NOTIFY 2 "Setting time zone $autoinstall_timezone. Please wait..."
+			rm -fv /etc/{timezoner,localtime}
+			ln -s "/usr/share/zoneinfo/$autoinstall_timezone" /etc/localtime
+			dpkg-reconfigure -f noninteractive tzdata
+
+		fi
+
+		# Apply language (locale)
+		local autoinstall_language=$(sed -n '/^[[:blank:]]*AUTO_SETUP_LOCALE=/{s/^[^=]*=//p;q}' /boot/dietpi.txt)
+		grep -q "^$autoinstall_language UTF-8$" /usr/share/i18n/SUPPORTED || autoinstall_language='C.UTF-8'
+		if ! locale | grep -qE "(LANG|LC_ALL)=[\'\"]?${autoinstall_language}[\'\"]?" || ! locale -a | grep -qiE 'C\.UTF-?8'; then
+
+			G_DIETPI-NOTIFY 2 "Setting locale $autoinstall_language. Please wait..."
+			/boot/dietpi/func/dietpi-set_software locale "$autoinstall_language"
+
+		fi
+
+		# Skip keyboard, SSH, serial console and network setup on container systems
+		(( $G_HW_MODEL == 75 )) && return 0
+
+		# Apply keyboard layout
+		local autoinstall_keyboard=$(sed -n '/^[[:blank:]]*AUTO_SETUP_KEYBOARD_LAYOUT=/{s/^[^=]*=//p;q}' /boot/dietpi.txt)
+		if [[ $autoinstall_keyboard ]] && ! grep -q "XKBLAYOUT=\"$autoinstall_keyboard\"" /etc/default/keyboard; then
+
+			G_DIETPI-NOTIFY 2 "Setting keyboard layout $autoinstall_keyboard. Please wait..."
+			G_CONFIG_INJECT 'XKBLAYOUT=' "XKBLAYOUT=\"$autoinstall_keyboard\"" /etc/default/keyboard
+			setupcon --save # https://bugs.debian.org/cgi-bin/bugreport.cgi?bug=818065
+
+		fi
+
 		# Regenerate unique Dropbear host keys
 		local i type
 		for i in /etc/dropbear/dropbear_*_host_key
@@ -209,10 +211,11 @@ _EOF_
 			dropbearkey -t "$type" -f "$i"
 		done
 
-		# Recreate machine-id: https://github.com/MichaIng/DietPi/issues/2015
-		[[ -f '/etc/machine-id' ]] && rm /etc/machine-id
-		[[ -f '/var/lib/dbus/machine-id' ]] && rm /var/lib/dbus/machine-id
-		systemd-machine-id-setup
+		# Disable serial console if set in dietpi.txt
+		grep -q '^[[:blank:]]*CONFIG_SERIAL_CONSOLE_ENABLE=0' /boot/dietpi.txt && /boot/dietpi/func/dietpi-set_hardware serialconsole disable
+
+		# Apply forced Ethernet link speed if set in dietpi.txt
+		/boot/dietpi/func/dietpi-set_hardware eth-forcespeed "$(sed -n '/^[[:blank:]]*AUTO_SETUP_NET_ETH_FORCE_SPEED=/{s/^[^=]*=//p;q}' /boot/dietpi.txt)"
 
 		# Network setup
 		# - Grab available network interfaces
