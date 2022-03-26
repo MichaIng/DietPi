@@ -1493,6 +1493,9 @@ _EOF_'
 			/boot/dietpi/func/dietpi-set_hardware serialconsole enable
 		fi
 
+		# Re-set dietpi.txt setting physical systems to indicated enabled serial console
+		(( $G_HW_MODEL == 20 || $G_HW_MODEL == 75 )) || G_CONFIG_INJECT 'CONFIG_SERIAL_CONSOLE_ENABLE=' 'CONFIG_SERIAL_CONSOLE_ENABLE=1' /boot/dietpi.txt
+
 		G_DIETPI-NOTIFY 2 'Disabling static and automatic login prompts on consoles tty2 to tty6:'
 		G_EXEC systemctl mask --now getty-static
 		# - logind features are usually not needed and (aside of automatic getty spawn) require the libpam-systemd package.
