@@ -12,29 +12,34 @@
 readonly USAGE='
 Usage: dietpi-ddns [[<options>...] <command> [<provider>]]
 Available commands:
-  <empty>		Interactive menu to setup dynamic DNS updates
-  apply	<provider>	Apply or update DDNS updates for <provider>, using <options> for setup details
-  remove		Remove any DDNS updates from this system
+  <empty>           Interactive menu to setup dynamic DNS updates
+  apply <provider>  Apply or update DDNS updates for <provider>, using <options> for setup details
+  remove            Remove any DDNS updates from this system
 Available options:
-  -d <domains>		Comma-separated list of domains that shall point to this system
-  -u <username>		Username or identifier, depending on provider
-			In combination with a custom provider, this is used for HTTP authentication.
-  -p <password>		Password or token, depending on provider
-			In combination with a custom provider, this is used for HTTP authentication.
-  -t <timespan>		Duration between DDNS updates in minutes (optional, defaults to 10)
+  -d <domains>      Comma-separated list of domains that shall point to this system
+  -u <username>     Username or identifier, depending on provider
+                    In combination with a custom provider, this is used for HTTP authentication.
+  -p <password>     Password or token, depending on provider
+                    In combination with a custom provider, this is used for HTTP authentication.
+  -t <timespan>     Duration between DDNS updates in minutes (optional, defaults to 10)
+  -4                Force IPv4 usage for the DDNS update (optional, the default)
+  -6                Force IPv6 usage for the DDNS update (optional)
+  -6or4             Do not force any IP family for the DDNS update (optional)
+                    IPv6 is then used, if enabled on this server and if the DDNS provider is
+                    reachable via IPv6, else IPv4 is used.
 Available providers:
-  <custom>		Full URL to update against a custom DDNS provider
-          		Use the "-u" and "-p" options if HTTP authentication is required.
-  DuckDNS 		Read more: https://www.duckdns.org/about.jsp
-          		Use the "-d" and "-p" options to set domains and account token.
-  No-IP   		Read more: https://www.noip.com/about
-          		Use the "-d", "-u" and "-p" options to set domains, username and password.
-  Dynu    		Read more: https://www.dynu.com/DynamicDNS
-          		Use the "-d" and "-p" options to set domains and account password.
-  FreeDNS 		Read more: https://freedns.afraid.org/
-          		Use the "-p" option to set the account token.
-  OVH     		Read more: https://docs.ovh.com/gb/en/domains/hosting_dynhost/
-          		Use the "-d", "-u" and "-p" options to set domains, username and password.
+  <custom>          Full URL to update against a custom DDNS provider
+                    Use the "-u" and "-p" options if HTTP authentication is required.
+  DuckDNS           Read more: https://www.duckdns.org/about.jsp
+                    Use the "-d" and "-p" options to set domains and account token.
+  No-IP             Read more: https://www.noip.com/about
+                    Use the "-d", "-u" and "-p" options to set domains, username and password.
+  Dynu              Read more: https://www.dynu.com/DynamicDNS
+                    Use the "-d" and "-p" options to set domains and account password.
+  FreeDNS           Read more: https://freedns.afraid.org/
+                    Use the "-p" option to set the account token.
+  OVH               Read more: https://docs.ovh.com/gb/en/domains/hosting_dynhost/
+                    Use the "-d", "-u" and "-p" options to set domains, username and password.
 '
 
 # Load DietPi-Globals
@@ -51,6 +56,7 @@ DOMAINS=
 USERNAME=
 PASSWORD=
 TIMESPAN=
+IPFAMILY=
 
 # --------------------------------------------
 # Functions
@@ -58,17 +64,19 @@ TIMESPAN=
 # Process input: Requires script input to be passed
 Input()
 {
-	while [[ $1 ]]
+	while (( $# ))
 	do
 		case "$1" in
-			'-d') shift; DOMAINS=$1; shift;;
-			'-u') shift; USERNAME=$1; shift;;
-			'-p') shift; PASSWORD=$1; shift;;
-			'-t') shift; TIMESPAN=$1; shift;;
-			'apply') COMMAND=$1; shift; PROVIDER=$1; shift;;
-			'remove') COMMAND=$1; shift;;
+			'-d') shift; DOMAINS=$1;;
+			'-u') shift; USERNAME=$1;;
+			'-p') shift; PASSWORD=$1;;
+			'-t') shift; TIMESPAN=$1;;
+			'-'[46]|'-6or4') IPFAMILY=$1;;
+			'apply') COMMAND=$1; shift; PROVIDER=$1;;
+			'remove') COMMAND=$1;;
 			*) G_DIETPI-NOTIFY 1 "Invalid input ($1). Aborting...$USAGE"; exit 1;;
 		esac
+		shift
 	done
 }
 
@@ -125,6 +133,10 @@ Read()
 		fi
 	fi
 
+	# IP family
+	[[ $IPFAMILY ]] || IPFAMILY=${command#curl } IPFAMILY=${IPFAMILY%% *}
+	[[ $IPFAMILY == '-'[46] ]] || IPFAMILY='-6or4'
+
 	# Time span
 	[[ ! $TIMESPAN && -f '/var/spool/cron/crontabs/dietpi-ddns' ]] || return
 	TIMESPAN=$(tail -1 /var/spool/cron/crontabs/dietpi-ddns)
@@ -135,7 +147,8 @@ Read()
 Apply()
 {
 	# Generate URL and set HTTP authentication flag based on provider
-	local url http_auth=1
+	local url http_auth=1 ipfamily=${IPFAMILY:--4}
+	[[ $ipfamily == '-4or6' ]] && ipfamily=
 	# - DuckDNS
 	if [[ $PROVIDER == 'DuckDNS' ]]
 	then
@@ -192,7 +205,7 @@ Apply()
 	# Test DDNS update
 	G_DIETPI-NOTIFY 2 'Testing DDNS update...'
 	local result
-	if ! result=$(curl -sSfL ${http_auth:+ -u "$USERNAME:$PASSWORD"} "$url" 2>&1) ||
+	if ! result=$(curl $ipfamily -sSfL ${http_auth:+ -u "$USERNAME:$PASSWORD"} "$url" 2>&1) ||
 		[[ $PROVIDER == 'DuckDNS' && $result == 'KO' ]] ||
 		[[ $PROVIDER == 'Dynu' && $result != 'good'* && $result != 'nochg'* ]]
 	then
@@ -232,7 +245,7 @@ Apply()
 	G_EXEC chown dietpi-ddns:dietpi-ddns /var/lib/dietpi/dietpi-ddns/update.sh
 	# Shellcheck false positive: https://github.com/koalaman/shellcheck/issues/2168
 	# shellcheck disable=SC2016
-	echo "curl -sSfL${http_auth:+ -u '$USERNAME:$PASSWORD'} '$url' 2>&1 > /dev/null | logger -t dietpi-ddns -p 3" >> /var/lib/dietpi/dietpi-ddns/update.sh
+	echo "curl${ipfamily:+ $ipfamily} -sSfL${http_auth:+ -u '$USERNAME:$PASSWORD'} '$url' 2>&1 > /dev/null | logger -t dietpi-ddns -p 3" >> /var/lib/dietpi/dietpi-ddns/update.sh
 
 	# Apply Cron job
 	G_DIETPI-NOTIFY 2 'Applying DietPi-DDNS Cron job...'
@@ -251,7 +264,7 @@ Remove()
 	getent group dietpi-ddns > /dev/null && G_EXEC_DESC='Removing DietPi-DDNS UNIX group' G_EXEC groupdel dietpi-ddns
 
 	# Unset variables
-	unset -v USERNAME PASSWORD TIMESPAN PROVIDER
+	unset -v USERNAME PASSWORD TIMESPAN PROVIDER IPFAMILY
 }
 
 # --------------------------------------------
@@ -332,6 +345,21 @@ Menu_Password()
 	[[ $PROVIDER == 'DuckDNS' || $PROVIDER == 'No-IP' || $PROVIDER == 'Dynu' || $PROVIDER == 'FreeDNS' || $PROVIDER == 'OVH' || $G_WHIP_RETURNED_VALUE != 0 ]] || unset -v PASSWORD
 }
 
+Menu_IPfamily()
+{
+	G_WHIP_MENU_ARRAY=(
+		'IPv4' ': Force IPv4 usage for the DDNS update (best compatibility)'
+		'IPv6or4' ': Do not force any IP family for the DDNS update'
+		'IPv6' ': Force IPv6 usage for the DDNS update (for modern clients)'
+	)
+	G_WHIP_DEFAULT_ITEM=${IPFAMILY:--4} G_WHIP_DEFAULT_ITEM=${G_WHIP_DEFAULT_ITEM/-/IPv}
+	G_WHIP_MENU 'Please select whether you want to force an IP family to associate with your DDNS domain.
+\nFor best compatibility with all clients and networks, we recomment to use IPv4.
+\nIf you do not force any IP family, IPv6 is used, if enabled on this server and if the DDNS provider is reachable via IPv6, else IPv4 is used.
+\nIf IPv6 is used, only clients with IPv6 enabled and connected via networks which support IPv6 can reach your server.' || return 1
+	IPFAMILY=${G_WHIP_RETURNED_VALUE/IPv/-}
+}
+
 Menu_Timespan()
 {
 	G_WHIP_DEFAULT_ITEM=$TIMESPAN
@@ -353,6 +381,7 @@ Menu_Main()
 	[[ $PROVIDER == 'DuckDNS' || $PROVIDER == 'Dynu' || $PROVIDER == 'FreeDNS' ]] || G_WHIP_MENU_ARRAY+=("$username" ": [$USERNAME]")
 	G_WHIP_MENU_ARRAY+=(
 		"$password" ": [${PASSWORD//?/*}]"
+		'IP family' ": [${IPFAMILY:--4}]"
 		'Timespan' ": [${TIMESPAN:-10} minutes]"
 		'' '●─ Apply '
 		'Apply' ': Create or update Cron job with above settings'
@@ -367,6 +396,7 @@ Menu_Main()
 		'Domains') Menu_Domains && Menu_Username && Menu_Password && NEXT_MENU_START='Apply';;
 		"$username") Menu_Username && Menu_Password && NEXT_MENU_START='Apply';;
 		"$password") Menu_Password && NEXT_MENU_START='Apply';;
+		'IP family') Menu_IPfamily;;
 		'Timespan') Menu_Timespan;;
 		'Apply') Apply;;
 		'Remove') Remove;;
@@ -379,14 +409,13 @@ Menu_Main()
 # Main
 # --------------------------------------------
 # CLI
-if [[ $1 ]]
+if (( $# ))
 then
 	Input "$@"
 	if [[ $COMMAND == 'apply' ]]
 	then
 		# Complement settings from existing Cron job
 		Read
-
 		Apply || exit 1
 
 	elif [[ $COMMAND == 'remove' ]]
