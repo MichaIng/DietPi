@@ -1398,7 +1398,7 @@ INDEX_BROWSER=$INDEX_BROWSER"
 		# - Odroid U3
 		aSOFTWARE_AVAIL_G_HW_MODEL[$software_id,13]=0
 		# Re-enable if module is shipped with (kernel) package
-		dpkg-query -S '/lib/modules/*/wireguard.ko' &> /dev/null || modinfo wireguard 2> /dev/null | grep -q '^filename:[[:blank:]]*(builtin)$' && aSOFTWARE_AVAIL_G_HW_MODEL[$software_id,$G_HW_MODEL]=1 WIREGUARD_BUILTIN=1
+		dpkg-query -S '/lib/modules/*/wireguard.ko*' &> /dev/null || modinfo wireguard 2> /dev/null | grep -q '^filename:[[:blank:]]*(builtin)$' && aSOFTWARE_AVAIL_G_HW_MODEL[$software_id,$G_HW_MODEL]=1 WIREGUARD_BUILTIN=1
 		#------------------
 		software_id=117
 		aSOFTWARE_NAME[$software_id]='PiVPN'
@@ -5874,7 +5874,8 @@ _EOF_
 
 			# APT package
 			G_AGI webmin
-			G_EXEC systemctl stop webmin
+			# Workaround: https://github.com/MichaIng/DietPi/issues/5386
+			systemctl -q is-active webmin && G_EXEC systemctl stop webmin
 
 			# Service
 			Remove_SysV webmin
@@ -9409,10 +9410,15 @@ _EOF_
 			if (( $G_HW_MODEL > 9 ))
 			then
 				G_AGI chromium libpam-systemd
+				Create_Desktop_Shortcut chromium
 
 			# RPi: Use RPi repo package including non-free FFmpeg codecs integration
 			else
 				G_AGI chromium-browser chromium-codecs-ffmpeg-extra libpam-systemd
+				Create_Desktop_Shortcut chromium-browser
+
+				# Enable KMS
+				grep -Eq '^[[:blank:]]*dtoverlay=vc4-f?kms-v3d' /boot/config.txt || /boot/dietpi/func/dietpi-set_hardware rpi-opengl vc4-kms-v3d
 
 				# Bullseye: Enable hardware codecs
 				(( $G_DISTRO < 6 )) || /boot/dietpi/func/dietpi-set_hardware rpi-codec 1
@@ -9420,28 +9426,18 @@ _EOF_
 
 			# Flags: Allow root (disable sandbox) and minimise CPU usage: https://peter.sh/experiments/chromium-command-line-switches/
 			local flags="export CHROMIUM_FLAGS=\"\$CHROMIUM_FLAGS --no-sandbox --test-type --disable-smooth-scrolling --disable-low-res-tiling --enable-low-end-device-mode --num-raster-threads=$G_HW_CPU_CORES --disable-composited-antialiasing"
-			# - RPi: Leave OpenGL choice to user, as it also depends on RPi model
-			# - x86_64: OpenGL
-			# - Else: GLES
-			(( $G_HW_MODEL < 10 || $G_HW_ARCH == 10 )) && flags+='"' || flags+=' --use-gl=egl"'
+			# - x86_64: OpenGL, else GLES
+			(( $G_HW_ARCH == 10 )) && flags+='"' || flags+=' --use-gl=egl"'
 			# - RPi Buster: Uses /etc/chromium-browser/customizations, else /etc/chromium.d: https://github.com/RPi-Distro/chromium-browser/commit/f4a599d
 			local path='chromium.d'
 			(( $G_DISTRO > 5 || $G_HW_MODEL > 9 )) || path='chromium-browser/customizations'
 			echo "$flags" > "/etc/$path/dietpi"
 
-			# Desktop shortcut: chromium-browser.desktop on RPi
-			if (( $G_HW_MODEL > 9 ))
-			then
-				Create_Desktop_Shortcut chromium
-			else
-				Create_Desktop_Shortcut chromium-browser
-			fi
-
-			# Autostart run script for kiosk mode, based on @AYapejian: https://github.com/MichaIng/DietPi/issues/1737#issue-318697621
+			# Autostart script for kiosk mode, based on @AYapejian: https://github.com/MichaIng/DietPi/issues/1737#issue-318697621
 			[[ -d '/var/lib/dietpi/dietpi-software/installed' ]] || G_EXEC mkdir -p /var/lib/dietpi/dietpi-software/installed
 			cat << '_EOF_' > /var/lib/dietpi/dietpi-software/installed/chromium-autostart.sh
 #!/bin/dash
-# Autostart run script for kiosk mode, based on @AYapejian: https://github.com/MichaIng/DietPi/issues/1737#issue-318697621
+# Autostart script for kiosk mode, based on @AYapejian: https://github.com/MichaIng/DietPi/issues/1737#issue-318697621
 
 # Resolution to use for kiosk mode, should ideally match current system resolution
 RES_X=$(sed -n '/^[[:blank:]]*SOFTWARE_CHROMIUM_RES_X=/{s/^[^=]*=//p;q}' /boot/dietpi.txt)
@@ -11073,7 +11069,7 @@ Description=nukkit (DietPi)
 [Service]
 SyslogIdentifier=Nukkit
 WorkingDirectory=/usr/local/bin/nukkit
-ExecStart=$(command -v java) -jar /usr/local/bin/nukkit/nukkit.jar'
+ExecStart=$(command -v java) -jar /usr/local/bin/nukkit/nukkit.jar
 
 [Install]
 WantedBy=multi-user.target
@@ -16039,6 +16035,9 @@ This requires an account at: https://remote.it/
 
 			G_DIETPI-NOTIFY 0 'Network changes will become effective with next reboot'
 		fi
+
+		# RPi: Disable onboard WiFi if WiFi modules didn't get enabled until now: https://github.com/MichaIng/DietPi/issues/5391
+		[[ $G_HW_MODEL -gt 9 || ! -f '/etc/modprobe.d/dietpi-disable_wifi.conf' ]] || /boot/dietpi/func/dietpi-set_hardware wifimodules onboard_disable
 
 		# Apply AutoStart choice
 		/boot/dietpi/dietpi-autostart "$AUTOINSTALL_AUTOSTARTTARGET"

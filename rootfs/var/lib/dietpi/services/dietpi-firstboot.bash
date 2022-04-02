@@ -262,6 +262,9 @@ _EOF_
 			# Disable WiFi kernel modules
 			/boot/dietpi/func/dietpi-set_hardware wifimodules disable
 
+			# RPi: Keep onboard WiFi enabled until end of first run installs: https://github.com/MichaIng/DietPi/issues/5391
+			(( $G_HW_MODEL > 9 )) || /boot/dietpi/func/dietpi-set_hardware wifimodules onboard_enable
+
 		fi
 
 		# - Static IP
