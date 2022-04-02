@@ -328,6 +328,7 @@ $swap_mounts
 		done < <(lsblk -nro NAME | sed '/^mtdblock[0-9]/d')
 
 		# Set required global flags and deps for all drives found
+		local need_ext need_ntfs need_hfs need_exfat
 		for i in "${!aDRIVE_MOUNT_SOURCE[@]}"
 		do
 			# Detect and set ROM drives
@@ -336,15 +337,15 @@ $swap_mounts
 			# Collect required APT packages for FS R/W access
 			if [[ ${aDRIVE_FSTYPE[$i]} == 'ext'[2-4] ]]; then
 
-				local need_ext='e2fsprogs'
+				need_ext='e2fsprogs'
 
 			elif [[ ${aDRIVE_FSTYPE[$i]} == 'ntfs' ]]; then
 
-				local need_ntfs='ntfs-3g'
+				need_ntfs='ntfs-3g'
 
 			elif [[ ${aDRIVE_FSTYPE[$i]} =~ 'hfs' ]]; then
 
-				local need_hfs='hfsplus'
+				need_hfs='hfsplus'
 
 			elif [[ ${aDRIVE_FSTYPE[$i]} == 'exfat' ]]; then
 
@@ -352,8 +353,9 @@ $swap_mounts
 				if modprobe -nq exfat
 				then
 					dpkg-query -s 'exfat-fuse' &> /dev/null && G_AGP exfat-fuse
+					[[ -L '/sbin/mount.exfat' && ! -e '/sbin/mount.exfat' ]] && G_EXEC rm /sbin/mount.exfat
 				else
-					local need_exfat='exfat-fuse'
+					need_exfat='exfat-fuse'
 				fi
 
 			fi
@@ -374,6 +376,8 @@ $swap_mounts
 
 		# Install required APT packages for FS R/W access
 		[[ $APT_CHECK == 0 && $need_ext$need_ntfs$need_hfs$need_exfat ]] && G_AG_CHECK_INSTALL_PREREQ $need_ext $need_ntfs $need_hfs $need_exfat && APT_CHECK=1
+		# Workaround for exfat-fuse on Bullseye: https://github.com/MichaIng/DietPi/issues/5166
+		[[ $need_exfat && $G_DISTRO -ge 6 && ! -e '/sbin/mount.exfat' ]] && G_EXEC ln -sf mount.exfat-fuse /sbin/mount.exfat
 
 		G_EXEC sync
 
@@ -434,7 +438,7 @@ NB: The path must start with /mnt/ and be unique. Spaces will be converted autom
 		if [[ $G_WHIP_RETURNED_VALUE == '/mnt/'* ]]
 		then
 			# Replace spaces with underscores
-			target=${G_WHIP_RETURNED_VALUE//[[:space:]]/_}
+			target=${G_WHIP_RETURNED_VALUE//[[:blank:]]/_}
 		else
 			G_WHIP_MSG "Invalid mount target location:\n - $G_WHIP_RETURNED_VALUE\n\nThe drive will now be mounted to:\n - $target"
 		fi
@@ -1710,42 +1714,45 @@ NB: If you are planning to dedicate the drive to this system, it is recommended 
 
 		local fp_tmp='.samba_mount_out'
 		local samba_clientname='192.168.'
-		local samba_clientshare=''
-		local samba_clientuser=''
-		local samba_clientpassword=''
-		local samba_fp_mount_target='samba'
+		local samba_clientshare samba_clientuser samba_clientpassword
+		local error samba_fp_mount_target='/mnt/samba'
 
-		# Remove info file and default mount dir
+		# Remove info file and default mount dir, if not in use
 		[[ -f '/mnt/samba/readme.txt' ]] && G_EXEC rm /mnt/samba/readme.txt
-		[[ -d '/mnt/samba' ]] && G_EXEC rmdir --ignore-fail-on-non-empty /mnt/samba
+		[[ -d '/mnt/samba' ]] && ! findmnt /mnt/samba > /dev/null && G_EXEC rmdir --ignore-fail-on-non-empty /mnt/samba
 
 		# User inputs
 		G_WHIP_DEFAULT_ITEM=$samba_clientname
-		G_WHIP_INPUTBOX 'Please enter the fileservers IP address or hostname.\n - E.g.: 192.168.0.2 or myNAS.local' || return
+		G_WHIP_INPUTBOX 'Please enter the fileservers IP address or hostname.\n - E.g.: 192.168.0.2 or myNAS.local' || return 0
 		samba_clientname=$G_WHIP_RETURNED_VALUE
 
 		G_WHIP_DEFAULT_ITEM=$samba_clientshare
-		G_WHIP_INPUTBOX 'Please enter the fileservers shared folder name or path.\n - E.g.: mySharedFolder or path/to/folder' || return
+		G_WHIP_INPUTBOX 'Please enter the fileservers shared folder name or path.\n - E.g.: mySharedFolder or path/to/folder' || return 0
 		# - Remove leading slash
 		samba_clientshare=${G_WHIP_RETURNED_VALUE#/}
 
 		G_WHIP_DEFAULT_ITEM=$samba_clientuser
-		G_WHIP_INPUTBOX 'Please enter the fileservers username.\n - E.g.: JoeBloggs' || return
+		G_WHIP_INPUTBOX 'Please enter the fileservers username.\n - E.g.: JoeBloggs' || return 0
 		samba_clientuser=$G_WHIP_RETURNED_VALUE
 
-		G_WHIP_PASSWORD 'Please enter the fileservers password.\n - E.g.: LetMeIn' || return
+		G_WHIP_PASSWORD 'Please enter the fileservers password.\n - E.g.: LetMeIn' || return 0
 		samba_clientpassword=$result
 		unset -v result
 
-		G_WHIP_DEFAULT_ITEM=$samba_fp_mount_target
-		G_WHIP_INPUTBOX 'Please enter a unique folder name for the mount location.\n - E.g.: samba\nThis will be placed in /mnt/.
-\nNB: Please avoid white spaces or special characters for compatibility reasons.' || return
-		# - Remove leading "/mnt/" and "/" in case entered by user
-		samba_fp_mount_target=${G_WHIP_RETURNED_VALUE#/mnt/}; samba_fp_mount_target=${samba_fp_mount_target#/}
-		# - Remove trailing slash and (re-)add "/mnt/" for full mount target path
-		samba_fp_mount_target="/mnt/${samba_fp_mount_target%/}"
-		# - Replace all spaces (+ tabs etc) with "_"
-		samba_fp_mount_target=${samba_fp_mount_target//[[:space:]]/_}
+		while :
+		do
+			# Mount point
+			G_WHIP_DEFAULT_ITEM=$samba_fp_mount_target
+			G_WHIP_INPUTBOX "${error}Please enter a unique absolute directory path for the mount location.\n - E.g.: /mnt/samba
+\nNB: Please avoid white spaces or special characters for compatibility reasons." || return 0
+			# - Remove trailing slash
+			samba_fp_mount_target=${G_WHIP_RETURNED_VALUE%/}
+			# - Path must be absolute
+			[[ $G_WHIP_RETURNED_VALUE == '/'* ]] || { error='[FAILED] The path must be absolute with a leading slash "/".\n'; continue; }
+			break
+		done
+		# Replace all spaces and tabs with underscore
+		samba_fp_mount_target=${samba_fp_mount_target//[[:blank:]]/_}
 
 		# Unmount if connected
 		umount "$samba_fp_mount_target" 2> /dev/null
@@ -1777,15 +1784,15 @@ username=$samba_clientuser
 password=$samba_clientpassword
 _EOF_
 				# Apply to fstab
-				sed -i "\#[[:space:]]${samba_fp_mount_target}[[:space:]]#d" /etc/fstab
+				sed -i "\#[[:blank:]]${samba_fp_mount_target}[[:blank:]]#d" /etc/fstab
 				# - NB: Convert spaces to '\040': https://github.com/MichaIng/DietPi/issues/1201#issuecomment-339720271
-				echo "//$samba_clientname/${samba_clientshare//[[:space:]]/\\040} $samba_fp_mount_target cifs cred=$cred,iocharset=utf8,uid=dietpi,gid=dietpi,file_mode=0770,dir_mode=0770,vers=$i,nofail,noauto,x-systemd.automount" >> /etc/fstab
+				echo "//$samba_clientname/${samba_clientshare//[[:blank:]]/\\040} $samba_fp_mount_target cifs cred=$cred,iocharset=utf8,uid=dietpi,gid=dietpi,file_mode=0770,dir_mode=0770,vers=$i,nofail,noauto,x-systemd.automount" >> /etc/fstab
 
 				MENU_DRIVE_TARGET=$samba_fp_mount_target
 				Init_Drives_and_Refresh
 				TARGETMENUID=1 # Drive menu
 
-				G_WHIP_MSG "Mount completed. The new mount can be accessed via:\n - $samba_fp_mount_target\n - CIFS vers=$i"
+				G_WHIP_MSG "Mount completed. The new mount can be accessed at:\n - $samba_fp_mount_target\n - CIFS vers=$i"
 				rm $fp_tmp
 				return 0
 
@@ -1804,78 +1811,103 @@ _EOF_
 
 		local fp_tmp='.nfs_mount_out'
 		local nfs_server_ip='192.168.'
-		local nfs_fp_mount_target='nfs_client'
-		# Server-side path to share, needed for NFSv3 only
+		local nfs_exports nfs_export
 		local nfs_fp_server_share='/'
+		local error nfs_fp_mount_target='/mnt/nfs_client'
 
-		# Remove info file and default mount dir
-		[[ -f '/mnt/nfs_client/readme.txt' ]] && G_EXEC rm /mnt/nfs_client/readme.txt
-		[[ -d '/mnt/nfs_client' ]] && G_EXEC rmdir --ignore-fail-on-non-empty /mnt/nfs_client
-
-		# User inputs
-		G_WHIP_DEFAULT_ITEM=$nfs_server_ip
-		G_WHIP_INPUTBOX 'Please enter the NFS servers IP address or hostname.\n - E.g.: 192.168.0.2 or myNAS.local' || return
-		nfs_server_ip=$G_WHIP_RETURNED_VALUE
-
-		G_WHIP_DEFAULT_ITEM=$nfs_fp_mount_target
-		G_WHIP_INPUTBOX 'Please enter a unique folder name for the mount location.\n - E.g.: nfs_client\nThis will be placed in /mnt/.
-\nNB: Please avoid white spaces or special characters for compatibility reasons.' || return
-		# - Remove leading "/mnt/" and "/" in case entered by user
-		nfs_fp_mount_target=${G_WHIP_RETURNED_VALUE#/mnt/}; nfs_fp_mount_target=${nfs_fp_mount_target#/}
-		# - Remove trailing slash and (re-)add "/mnt/" for full mount target path
-		nfs_fp_mount_target="/mnt/${nfs_fp_mount_target%/}"
-		# - Replace all spaces (+ tabs etc) with "_"
-		nfs_fp_mount_target=${nfs_fp_mount_target//[[:space:]]/_}
-
-		# Unmount if connected
-		umount "$nfs_fp_mount_target" 2> /dev/null
-
+		# "netbase" is required for mounting NFSv3 and showmount to solve "clnt_create: RPC: Unknown host": https://github.com/MichaIng/DietPi/issues/1898#issuecomment-406247814
 		G_AG_CHECK_INSTALL_PREREQ nfs-common netbase
 		G_CONFIG_INJECT 'aSOFTWARE_INSTALL_STATE\[110\]=' 'aSOFTWARE_INSTALL_STATE[110]=2' /boot/dietpi/.installed
 
+		# Remove info file and default mount dir, if not in use
+		[[ -f '/mnt/nfs_client/readme.txt' ]] && G_EXEC rm /mnt/nfs_client/readme.txt
+		[[ -d '/mnt/nfs_client' ]] && ! findmnt /mnt/nfs_client > /dev/null && G_EXEC rmdir --ignore-fail-on-non-empty /mnt/nfs_client
+
+		Input_Share()
+		{
+			G_WHIP_DEFAULT_ITEM=$nfs_fp_server_share
+			G_WHIP_INPUTBOX 'Please enter the absolute path to the share on the NFS server.\n - E.g.: /mnt/nfs_share
+\nNB: Entering only a single slash "/" is valid if it is an NFSv4 server and the export is marked as root via "fsid=0".' || return 1
+			nfs_fp_server_share=$G_WHIP_RETURNED_VALUE
+		}
+
+		# User inputs
+		while :
+		do
+			# Server IP/hostname
+			G_WHIP_DEFAULT_ITEM=$nfs_server_ip
+			G_WHIP_INPUTBOX 'Please enter the NFS servers IP address or hostname.\n - E.g.: 192.168.0.2 or myNAS.local' || return 0
+			nfs_server_ip=$G_WHIP_RETURNED_VALUE
+
+			G_DIETPI-NOTIFY 2 "Scanning for NFS exports by: $nfs_server_ip\n NB: If the server cannot be reached correctly, this may take up to 90 seconds before it times out."
+			nfs_exports=$(showmount --no-headers -e "$nfs_server_ip")
+			G_WHIP_MENU_ARRAY=()
+			if [[ $nfs_exports ]]
+			then
+				# Exports found, add to menu
+				while read -r nfs_export
+				do
+					nfs_export=${nfs_export%%[[:blank:]]*}
+					G_WHIP_MENU_ARRAY+=("$nfs_export" "$(mawk -v "ip=$nfs_server_ip" -v "path=$nfs_export" '$1 == ip":"path {print ": Already mounted at:",$2;exit}' /etc/fstab)")
+
+				done <<< "$nfs_exports"
+				G_WHIP_MENU_ARRAY+=('Custom' ': Enter custom NFS server share path')
+				G_WHIP_MENU "Please select the NFS export of $nfs_server_ip from the list below:" || return 0
+
+				if [[ $G_WHIP_RETURNED_VALUE == 'Custom' ]]
+				then
+					Input_Share || return 0
+				else
+					nfs_fp_server_share=$G_WHIP_RETURNED_VALUE
+				fi
+			else
+				# No exports found, give choice for manual input or re-enter server IP/hostname
+				G_WHIP_MENU_ARRAY=(
+					'Retry' ': Re-enter NFS server IP/hostname'
+					'Manual' ': Manually enter NFS server share path'
+				)
+				G_WHIP_MENU "[FAILED] No NFS shares on $nfs_server_ip have been found.
+\nWould you like to re-enter the server IP/hostname or manually enter the path to the share?" || return 0
+
+				[[ $G_WHIP_RETURNED_VALUE == 'Retry' ]] && continue
+				Input_Share || return 0
+			fi
+			break
+		done
+
+		while :
+		do
+			# Mount point
+			G_WHIP_DEFAULT_ITEM=$nfs_fp_mount_target
+			G_WHIP_INPUTBOX "${error}Please enter a unique absolute directory path for the mount location.\n - E.g.: /mnt/nfs_client
+\nNB: Please avoid white spaces or special characters for compatibility reasons." || return 0
+			# - Remove trailing slash
+			nfs_fp_mount_target=${G_WHIP_RETURNED_VALUE%/}
+			# - Path must be absolute
+			[[ $G_WHIP_RETURNED_VALUE == '/'* ]] || { error='[FAILED] The path must be absolute with a leading slash "/".\n'; continue; }
+			break
+		done
+		# Replace all spaces and tabs with underscore
+		nfs_fp_mount_target=${nfs_fp_mount_target//[[:blank:]]/_}
+
+		# Unmount if connected
+		findmnt "$nfs_fp_mount_target" > /dev/null && G_EXEC umount -Rl "$nfs_fp_mount_target"
+
 		# Mount now
-		G_EXEC mkdir -p "$nfs_fp_mount_target"
-		> $fp_tmp
-
-		if mount -vt nfs -o port=2049 "$nfs_server_ip":/ "$nfs_fp_mount_target" &>> $fp_tmp; then
-
+		[[ -d $nfs_fp_mount_target ]] || G_EXEC mkdir "$nfs_fp_mount_target"
+		if mount -vt nfs -o port=2049 "$nfs_server_ip:$nfs_fp_server_share" "$nfs_fp_mount_target" &> $fp_tmp
+		then
 			# Apply to fstab
-			sed -i "\#[[:space:]]${nfs_fp_mount_target}[[:space:]]#d" /etc/fstab
-			echo "$nfs_server_ip:/ $nfs_fp_mount_target nfs nofail,noauto,x-systemd.automount" >> /etc/fstab
+			sed -i "\#[[:blank:]]${nfs_fp_mount_target}[[:blank:]]#d" /etc/fstab
+			echo "$nfs_server_ip:$nfs_fp_server_share $nfs_fp_mount_target nfs nofail,noauto,x-systemd.automount" >> /etc/fstab
 
 			MENU_DRIVE_TARGET=$nfs_fp_mount_target
 			Init_Drives_and_Refresh
 			TARGETMENUID=1 # Drive menu
 
-			G_WHIP_MSG "Mount completed. The new mount can be accessed via:\n - $nfs_fp_mount_target"
+			G_WHIP_MSG "Mount completed. The new mount can be accessed at:\n - $nfs_fp_mount_target"
 			rm $fp_tmp
 			return 0
-
-		# Detect NFSv3 server, which requires server side path to share directory:
-		elif grep -q '[[:blank:]]vers 3[[:blank:]]' $fp_tmp &&
-			grep -q 'access denied by server while mounting' $fp_tmp; then
-
-			G_WHIP_DEFAULT_ITEM=$nfs_fp_server_share
-			G_WHIP_INPUTBOX 'Your NFS server appears to support NFSv3 only. Mounting NFSv3 shares requires the shares path server side to be entered.
-\nPlease enter the absolute path to the share on the NFS server (eg: /mnt/nfs_share).' || return
-			nfs_fp_server_share=$G_WHIP_RETURNED_VALUE
-
-			if mount -vt nfs -o port=2049 "$nfs_server_ip:$nfs_fp_server_share" "$nfs_fp_mount_target" &>> $fp_tmp; then
-
-				# Apply to fstab
-				sed -i "\#[[:space:]]${nfs_fp_mount_target}[[:space:]]#d" /etc/fstab
-				echo "$nfs_server_ip:$nfs_fp_server_share $nfs_fp_mount_target nfs nofail,noauto,x-systemd.automount" >> /etc/fstab
-
-				MENU_DRIVE_TARGET=$nfs_fp_mount_target
-				Init_Drives_and_Refresh
-				TARGETMENUID=1 # Drive menu
-
-				G_WHIP_MSG "Mount completed. The new mount can be accessed via:\n - $nfs_fp_mount_target"
-				rm $fp_tmp
-				return 0
-
-			fi
-
 		fi
 
 		# Failure
