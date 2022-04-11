@@ -697,10 +697,10 @@ _EOF_
 			# WiFi related
 			if (( $WIFI_REQUIRED ))
 			then
-				aPACKAGES_REQUIRED_INSTALL+=('iw')			# Tools to configure WiFi adapters
-				aPACKAGES_REQUIRED_INSTALL+=('wireless-tools')		# Same as "iw", deprecated but still required for non-nl80211 adapters
-				aPACKAGES_REQUIRED_INSTALL+=('crda')			# Set WiFi frequencies according to local regulations, based on WiFi country code
-				aPACKAGES_REQUIRED_INSTALL+=('wpasupplicant')		# Support for WPA-protected WiFi network connection
+				aPACKAGES_REQUIRED_INSTALL+=('iw')					# Tools to configure WiFi adapters
+				aPACKAGES_REQUIRED_INSTALL+=('wireless-tools')				# Same as "iw", deprecated but still required for non-nl80211 adapters
+				(( $DISTRO_TARGET > 6 )) || aPACKAGES_REQUIRED_INSTALL+=('crda')	# Set WiFi frequencies according to local regulations, based on WiFi country code (removed/obsolete since Bookworm)
+				aPACKAGES_REQUIRED_INSTALL+=('wpasupplicant')				# Support for WPA-protected WiFi network connection
 			fi
 
 			# Kernel/bootloader/firmware
@@ -997,6 +997,13 @@ _EOF_
 			# And install "file" which is used to detect whether the kernel image is compressed and in case uncompress it
 			# shellcheck disable=SC2046
 			G_AGI $(dpkg-query -Wf '${Package}\n' | grep -E '^linux-(image|dtb|u-boot)-|^u-boot') bc file
+
+		# - NanoPi M2/T2
+		elif (( $G_HW_MODELK == 61 ))
+		then
+			G_EXEC curl -sSfLO 'https://dietpi.com/downloads/firmware-nanopi2.deb'
+			G_EXEC_OUTPUT=1 G_EXEC dpkg -i firmware-nanopi2.deb
+			G_EXEC rm firmware-nanopi2.deb
 
 		# - Generic kernel + device tree + U-Boot package auto detect
 		elif (( $G_HW_MODEL != 75 ))
