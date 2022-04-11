@@ -998,8 +998,8 @@ _EOF_
 			# shellcheck disable=SC2046
 			G_AGI $(dpkg-query -Wf '${Package}\n' | grep -E '^linux-(image|dtb|u-boot)-|^u-boot') bc file
 
-		# - NanoPi M2/T2
-		elif (( $G_HW_MODEL == 61 ))
+		# - NanoPi M2/T2 Linux 4.4: Requires dedicated boot partition, starting at 4 MiB for U-Boot, with ext4 filesystem
+		elif (( $G_HW_MODEL == 61 )) && [[ $(findmnt -Ufnro FSTYPE -M /boot) == 'ext4' ]] && (( $(sfdisk -qlo Start "$(lsblk -npo PKNAME "$(findmnt -Ufnro SOURCE -M /boot)")" | mawk 'NR==2') >= 8192 ))
 		then
 			G_EXEC curl -sSfLO 'https://dietpi.com/downloads/firmware-nanopi2.deb'
 			G_EXEC_OUTPUT=1 G_EXEC dpkg -i firmware-nanopi2.deb
