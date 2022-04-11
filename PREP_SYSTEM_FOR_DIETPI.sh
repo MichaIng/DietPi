@@ -667,7 +667,7 @@ _EOF_
 			then
 				aPACKAGES_REQUIRED_INSTALL+=('tiny-initramfs')
 
-			elif (( $G_HW_MODEL > 9 ))
+			elif (( $G_HW_MODEL > 9 && $G_HW_MODEL != 61 ))
 			then
 				aPACKAGES_REQUIRED_INSTALL+=('initramfs-tools')
 			fi
