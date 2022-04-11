@@ -999,7 +999,7 @@ _EOF_
 			G_AGI $(dpkg-query -Wf '${Package}\n' | grep -E '^linux-(image|dtb|u-boot)-|^u-boot') bc file
 
 		# - NanoPi M2/T2
-		elif (( $G_HW_MODELK == 61 ))
+		elif (( $G_HW_MODEL == 61 ))
 		then
 			G_EXEC curl -sSfLO 'https://dietpi.com/downloads/firmware-nanopi2.deb'
 			G_EXEC_OUTPUT=1 G_EXEC dpkg -i firmware-nanopi2.deb
