@@ -1493,6 +1493,11 @@ _EOF_'
 			[[ -f '/boot/dietpiEnv.txt' || -e '/dev/ttyAML0' ]] || tty='ttyS0'
 			/boot/dietpi/func/dietpi-set_hardware serialconsole enable "$tty"
 
+		# NanoPi M2/T2: Enable ttyAMA0 only
+		elif (( $G_HW_MODEL == 61 ))
+		then
+			/boot/dietpi/func/dietpi-set_hardware serialconsole enable ttyAMA0
+
 		# ROCK Pi S: Enable on ttyS0 only
 		elif (( $G_HW_MODEL == 73 ))
 		then
