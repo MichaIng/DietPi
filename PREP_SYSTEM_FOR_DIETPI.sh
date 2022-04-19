@@ -697,10 +697,11 @@ _EOF_
 			# WiFi related
 			if (( $WIFI_REQUIRED ))
 			then
-				aPACKAGES_REQUIRED_INSTALL+=('iw')					# Tools to configure WiFi adapters
-				aPACKAGES_REQUIRED_INSTALL+=('wireless-tools')				# Same as "iw", deprecated but still required for non-nl80211 adapters
-				(( $DISTRO_TARGET > 6 )) || aPACKAGES_REQUIRED_INSTALL+=('crda')	# Set WiFi frequencies according to local regulations, based on WiFi country code (removed/obsolete since Bookworm)
-				aPACKAGES_REQUIRED_INSTALL+=('wpasupplicant')				# Support for WPA-protected WiFi network connection
+				aPACKAGES_REQUIRED_INSTALL+=('iw')		# Tools to configure WiFi adapters
+				aPACKAGES_REQUIRED_INSTALL+=('wireless-tools')	# Same as "iw", deprecated but still required for non-nl80211 adapters
+				# Set WiFi frequencies according to local regulations, based on WiFi country code. CRDA is not available since Bookworm, kernels are supposed to obtain it from wireless-regdb themselves.
+				(( $DISTRO_TARGET > 6 )) && aPACKAGES_REQUIRED_INSTALL+=('wireless-regdb') || aPACKAGES_REQUIRED_INSTALL+=('crda')
+				aPACKAGES_REQUIRED_INSTALL+=('wpasupplicant')	# Support for WPA-protected WiFi network connection
 			fi
 
 			# Kernel/bootloader/firmware
