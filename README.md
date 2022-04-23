@@ -182,7 +182,6 @@ along with this program.  If not, see https://www.gnu.org/licenses/
 
 - Source: https://github.com/MichaIng/DietPi
 - Build: Not applicable, as DietPi uses Bash scripts only, no building or compiling is required.
-- [![CodeFactor](https://www.codefactor.io/repository/github/michaing/dietpi/badge)](https://www.codefactor.io/repository/github/michaing/dietpi)
 
 ### DietPi Files
 

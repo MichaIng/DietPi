@@ -10,6 +10,7 @@ then
 else
 	[[ $G_GITOWNER && $G_GITBRANCH ]] || { echo '[FAILED] You must export or pass G_GITOWNER and G_GITBRANCH to the script'; exit 1; }
 	curl -sSf "https://raw.githubusercontent.com/$G_GITOWNER/DietPi/$G_GITBRANCH/dietpi/func/dietpi-globals" -o /tmp/dietpi-globals || exit 1
+	# shellcheck disable=SC1091
 	. /tmp/dietpi-globals
 	G_EXEC_NOHALT=1 G_EXEC rm /tmp/dietpi-globals
 	export G_GITOWNER G_GITBRANCH G_HW_ARCH_NAME=$(uname -m)
@@ -64,6 +65,7 @@ partition_start=1
 efi_size=64
 boot_size=0
 root_size=1023
+boot_fstype='fat32' # Used for MBR boot partition only => NanoPi M2
 CLONING_TOOL='dd'
 case $HW_MODEL in
 	0) iname='RPi' partition_start=4 boot_size=128 root_size=892;;
@@ -71,6 +73,7 @@ case $HW_MODEL in
 	16) iname='OdroidC4' HW_ARCH=3 partition_start=4 root_size=764;;
 	20) iname='VM' WIFI_REQUIRED=0 HW_ARCH=${HW_ARCH:-10} VMTYPE=${VMTYPE:-raw};;
 	21) iname='NativePC-BIOS' HW_ARCH=10 root_size=1215;;
+	61) iname='NanoPiM2' HW_ARCH=2 partition_start=4 boot_size=64 root_size=572 boot_fstype='ext4';;
 	75) iname='Container' root_size=399;;
 	*) G_DIETPI-NOTIFY 1 "Invalid hardware model \"$HW_MODEL\" passed, aborting..."; exit 1;;
 esac
@@ -196,7 +199,7 @@ G_EXEC fallocate -l "$((partition_start+efi_size+boot_size+root_size))M" "$OUTPU
 if [[ $PTTYPE == 'gpt' ]]
 then
 	# GPT partition table and EFI partition
-	G_EXEC parted -s "$OUTPUT_IMG_NAME.img" unit MiB mklabel gpt mkpart 'EFI' fat32 $partition_start $((partition_start+efi_size)) set 1 esp on
+	G_EXEC parted -s "$OUTPUT_IMG_NAME.img" unit MiB mklabel gpt mkpart 'EFI' fat32 "$partition_start" $((partition_start+efi_size)) set 1 esp on
 	# root partition
 	G_EXEC parted -s "$OUTPUT_IMG_NAME.img" unit MiB mkpart 'root' "$FSTYPE" $((partition_start+efi_size)) 100%
 
@@ -205,7 +208,7 @@ else
 	# MBR partition table
 	G_EXEC parted -s "$OUTPUT_IMG_NAME.img" unit MiB mklabel msdos
 	# boot partition
-	(( $boot_size )) && G_EXEC parted -s "$OUTPUT_IMG_NAME.img" unit MiB mkpart primary fat32 $((partition_start)) $((partition_start+boot_size))
+	(( $boot_size )) && G_EXEC parted -s "$OUTPUT_IMG_NAME.img" unit MiB mkpart primary "$boot_fstype" "$partition_start" $((partition_start+boot_size))
 	# root partition
 	G_EXEC parted -s "$OUTPUT_IMG_NAME.img" unit MiB mkpart primary "$FSTYPE" $((partition_start+boot_size)) 100%
 	# x86_64: Set boot flag
@@ -238,7 +241,13 @@ _EOF_
 elif (( $boot_size ))
 then
 	FP_ROOT_DEV=2
-	G_EXEC mkfs.fat -F 32 "${FP_LOOP}p1"
+	if [[ $boot_fstype == 'fat32' ]]
+	then
+		boot_fstype='vfat'
+		G_EXEC mkfs.fat -F 32 "${FP_LOOP}p1"
+	else
+		G_EXEC "mkfs.$boot_fstype" "${FP_LOOP}p1"
+	fi
 	G_EXEC "mkfs.$FSTYPE" "${FP_LOOP}p2"
 	G_EXEC mount "${FP_LOOP}p2" rootfs
 	G_EXEC mkdir rootfs/boot
@@ -246,7 +255,7 @@ then
 	G_EXEC mkdir rootfs/etc
 	cat << _EOF_ > rootfs/etc/fstab
 PARTUUID=$(lsblk -no PARTUUID "${FP_LOOP}p2") / $FSTYPE noatime,lazytime 0 1
-PARTUUID=$(lsblk -no PARTUUID "${FP_LOOP}p1") /boot vfat noatime,lazytime 0 2
+PARTUUID=$(lsblk -no PARTUUID "${FP_LOOP}p1") /boot $boot_fstype noatime,lazytime 0 2
 _EOF_
 # - single partition
 else
@@ -375,8 +384,8 @@ fi
 G_EXEC_DESC='Downloading current README.md to pack with image...' G_EXEC curl -sSf "https://raw.githubusercontent.com/$G_GITOWNER/DietPi/$G_GITBRANCH/README.md" -o README.md
 
 # NB: LZMA2 ultra compression requires much memory per thread. 1 GiB is not sufficient for >2 threads, hence use "-mmt2" to limit used CPU threads to "2" on 1 GiB devices with more than two cores.
-limit_threads=
-(( $(free -m | mawk '/Mem:/{print $2}') < 1750 && $(nproc) > 2 )) && limit_threads='-mmt2'
+limit_threads=()
+(( $(free -m | mawk '/Mem:/{print $2}') < 1750 && $(nproc) > 2 )) && limit_threads=('-mmt2')
 
 # Since qemu-img does not support VMDK and VHDX resizing, we need to resize the raw .img. It is usually done as sparse file, hence the actual disk usage does not change.
 G_EXEC qemu-img resize "$OUTPUT_IMG_NAME.img" 8G
@@ -452,7 +461,7 @@ SHA1:   $(sha1sum "$image_name.vmx" | mawk '{print $1}')
 SHA256: $(sha256sum "$image_name.vmx" | mawk '{print $1}')
 _EOF_
 	[[ ( -t 0 || -t 1 ) && $TERM != 'dumb' ]] && G_EXEC_OUTPUT=1
-	G_EXEC_DESC='Creating VMware 7-Zip archive' G_EXEC 7zr a -bsp1 -bso1 -bse2 -m0=lzma2 -mx=9 $limit_threads "$image_name.7z" "$image_name.vmdk" "$image_name.vmx" hash.txt README.md
+	G_EXEC_DESC='Creating VMware 7-Zip archive' G_EXEC 7zr a -bsp1 -bso1 -bse2 -m0=lzma2 -mx=9 "${limit_threads[@]}" "$image_name.7z" "$image_name.vmdk" "$image_name.vmx" hash.txt README.md
 	G_EXEC rm "$image_name.vmdk" "$image_name.vmx"
 	[[ -x 'upload.sh' ]] && G_EXEC_OUTPUT=1 G_EXEC ./upload.sh "$image_name.7z" && G_EXEC rm "$image_name.7z"
 fi
@@ -603,7 +612,7 @@ SHA1:   $(sha1sum "$image_name.ova" | mawk '{print $1}')
 SHA256: $(sha256sum "$image_name.ova" | mawk '{print $1}')
 _EOF_
 	[[ ( -t 0 || -t 1 ) && $TERM != 'dumb' ]] && G_EXEC_OUTPUT=1
-	G_EXEC_DESC='Creating VirtualBox 7-Zip archive' G_EXEC 7zr a -bsp1 -bso1 -bse2 -m0=lzma2 -mx=9 $limit_threads "$image_name.7z" "$image_name.ova" hash.txt README.md
+	G_EXEC_DESC='Creating VirtualBox 7-Zip archive' G_EXEC 7zr a -bsp1 -bso1 -bse2 -m0=lzma2 -mx=9 "${limit_threads[@]}" "$image_name.7z" "$image_name.ova" hash.txt README.md
 	G_EXEC rm "$image_name.ova"
 	[[ -x 'upload.sh' ]] && G_EXEC_OUTPUT=1 G_EXEC ./upload.sh "$image_name.7z" && G_EXEC rm "$image_name.7z"
 fi
@@ -768,7 +777,7 @@ SHA1:   $(sha1sum "$image_name.ova" | mawk '{print $1}')
 SHA256: $(sha256sum "$image_name.ova" | mawk '{print $1}')
 _EOF_
 	[[ ( -t 0 || -t 1 ) && $TERM != 'dumb' ]] && G_EXEC_OUTPUT=1
-	G_EXEC_DESC='Creating VirtualBox 7-Zip archive' G_EXEC 7zr a -bsp1 -bso1 -bse2 -m0=lzma2 -mx=9 $limit_threads "$image_name.7z" "$image_name.ova" hash.txt README.md
+	G_EXEC_DESC='Creating VirtualBox 7-Zip archive' G_EXEC 7zr a -bsp1 -bso1 -bse2 -m0=lzma2 -mx=9 "${limit_threads[@]}" "$image_name.7z" "$image_name.ova" hash.txt README.md
 	G_EXEC rm "$image_name.ova"
 	[[ -x 'upload.sh' ]] && G_EXEC_OUTPUT=1 G_EXEC ./upload.sh "$image_name.7z" && G_EXEC rm "$image_name.7z"
 fi
@@ -789,7 +798,7 @@ SHA1:   $(sha1sum "$image_name.vhdx" | mawk '{print $1}')
 SHA256: $(sha256sum "$image_name.vhdx" | mawk '{print $1}')
 _EOF_
 	[[ ( -t 0 || -t 1 ) && $TERM != 'dumb' ]] && G_EXEC_OUTPUT=1
-	G_EXEC_DESC='Creating Hyper-V 7-Zip archive' G_EXEC 7zr a -bsp1 -bso1 -bse2 -m0=lzma2 -mx=9 $limit_threads "$image_name.7z" "$image_name.vhdx" hash.txt README.md
+	G_EXEC_DESC='Creating Hyper-V 7-Zip archive' G_EXEC 7zr a -bsp1 -bso1 -bse2 -m0=lzma2 -mx=9 "${limit_threads[@]}" "$image_name.7z" "$image_name.vhdx" hash.txt README.md
 	G_EXEC rm "$image_name.vhdx"
 	[[ -x 'upload.sh' ]] && G_EXEC_OUTPUT=1 G_EXEC ./upload.sh "$image_name.7z" && G_EXEC rm "$image_name.7z"
 fi
@@ -810,7 +819,7 @@ SHA1:   $(sha1sum "$image_name.hds" | mawk '{print $1}')
 SHA256: $(sha256sum "$image_name.hds" | mawk '{print $1}')
 _EOF_
 	[[ ( -t 0 || -t 1 ) && $TERM != 'dumb' ]] && G_EXEC_OUTPUT=1
-	G_EXEC_DESC='Creating Parallels 7-Zip archive' G_EXEC 7zr a -bsp1 -bso1 -bse2 -m0=lzma2 -mx=9 $limit_threads "$image_name.7z" "$image_name.hds" hash.txt README.md
+	G_EXEC_DESC='Creating Parallels 7-Zip archive' G_EXEC 7zr a -bsp1 -bso1 -bse2 -m0=lzma2 -mx=9 "${limit_threads[@]}" "$image_name.7z" "$image_name.hds" hash.txt README.md
 	G_EXEC rm "$image_name.hds"
 	[[ -x 'upload.sh' ]] && G_EXEC_OUTPUT=1 G_EXEC ./upload.sh "$image_name.7z" && G_EXEC rm "$image_name.7z"
 fi
@@ -831,7 +840,7 @@ SHA1:   $(sha1sum "$image_name.qcow2" | mawk '{print $1}')
 SHA256: $(sha256sum "$image_name.qcow2" | mawk '{print $1}')
 _EOF_
 	[[ ( -t 0 || -t 1 ) && $TERM != 'dumb' ]] && G_EXEC_OUTPUT=1
-	G_EXEC_DESC='Creating Proxmox 7-Zip archive' G_EXEC 7zr a -bsp1 -bso1 -bse2 -m0=lzma2 -mx=9 $limit_threads "$image_name.7z" "$image_name.qcow2" hash.txt README.md
+	G_EXEC_DESC='Creating Proxmox 7-Zip archive' G_EXEC 7zr a -bsp1 -bso1 -bse2 -m0=lzma2 -mx=9 "${limit_threads[@]}" "$image_name.7z" "$image_name.qcow2" hash.txt README.md
 	[[ $VMTYPE == 'all' ]] || G_EXEC rm "$image_name.qcow2"
 	[[ -x 'upload.sh' ]] && G_EXEC_OUTPUT=1 G_EXEC ./upload.sh "$image_name.7z" && G_EXEC rm "$image_name.7z"
 fi
@@ -1020,7 +1029,7 @@ SHA1:   $(sha1sum "$image_name.utm/view.plist" | mawk '{print $1}')
 SHA256: $(sha256sum "$image_name.utm/view.plist" | mawk '{print $1}')
 _EOF_
 	[[ ( -t 0 || -t 1 ) && $TERM != 'dumb' ]] && G_EXEC_OUTPUT=1
-	G_EXEC_DESC='Creating UTM 7-Zip archive' G_EXEC 7zr a -bsp1 -bso1 -bse2 -m0=lzma2 -mx=9 $limit_threads "$image_name.7z" "$image_name.utm" hash.txt README.md
+	G_EXEC_DESC='Creating UTM 7-Zip archive' G_EXEC 7zr a -bsp1 -bso1 -bse2 -m0=lzma2 -mx=9 "${limit_threads[@]}" "$image_name.7z" "$image_name.utm" hash.txt README.md
 	G_EXEC rm -R "$image_name.utm"
 	[[ -x 'upload.sh' ]] && G_EXEC_OUTPUT=1 G_EXEC ./upload.sh "$image_name.7z" && G_EXEC rm "$image_name.7z"
 fi

@@ -156,6 +156,7 @@ _EOF_
 	rm -fv /boot/dietpi/.hw_model
 
 	# Load
+	# shellcheck source-path=dietpi/func source-path=/boot/dietpi/func
 	if ! . ./dietpi-globals
 	then
 		echo -e '[FAILED] Unable to load dietpi-globals. Aborting...\n'
@@ -519,6 +520,7 @@ _EOF_
 		G_EXEC mv "DietPi-$G_GITBRANCH/LICENSE" /boot/dietpi-LICENSE.txt
 
 		# Reading version string for later use
+		# shellcheck source=.update/version source=/boot/dietpi/.version
 		. "DietPi-$G_GITBRANCH/.update/version"
 		G_DIETPI_VERSION_CORE=$G_REMOTE_VERSION_CORE
 		G_DIETPI_VERSION_SUB=$G_REMOTE_VERSION_SUB
@@ -665,7 +667,7 @@ _EOF_
 			then
 				aPACKAGES_REQUIRED_INSTALL+=('tiny-initramfs')
 
-			elif (( $G_HW_MODEL > 9 ))
+			elif (( $G_HW_MODEL > 9 && $G_HW_MODEL != 61 ))
 			then
 				aPACKAGES_REQUIRED_INSTALL+=('initramfs-tools')
 			fi
@@ -695,10 +697,11 @@ _EOF_
 			# WiFi related
 			if (( $WIFI_REQUIRED ))
 			then
-				aPACKAGES_REQUIRED_INSTALL+=('iw')			# Tools to configure WiFi adapters
-				aPACKAGES_REQUIRED_INSTALL+=('wireless-tools')		# Same as "iw", deprecated but still required for non-nl80211 adapters
-				aPACKAGES_REQUIRED_INSTALL+=('crda')			# Set WiFi frequencies according to local regulations, based on WiFi country code
-				aPACKAGES_REQUIRED_INSTALL+=('wpasupplicant')		# Support for WPA-protected WiFi network connection
+				aPACKAGES_REQUIRED_INSTALL+=('iw')		# Tools to configure WiFi adapters
+				aPACKAGES_REQUIRED_INSTALL+=('wireless-tools')	# Same as "iw", deprecated but still required for non-nl80211 adapters
+				# Set WiFi frequencies according to local regulations, based on WiFi country code. CRDA is not available since Bookworm, kernels are supposed to obtain it from wireless-regdb themselves.
+				(( $DISTRO_TARGET > 6 )) && aPACKAGES_REQUIRED_INSTALL+=('wireless-regdb') || aPACKAGES_REQUIRED_INSTALL+=('crda')
+				aPACKAGES_REQUIRED_INSTALL+=('wpasupplicant')	# Support for WPA-protected WiFi network connection
 			fi
 
 			# Kernel/bootloader/firmware
@@ -791,7 +794,9 @@ _EOF_
 			# Compile U-Boot config
 			G_EXEC mkimage -C none -A arm64 -T script -d /boot/boot.cmd /boot/boot.scr
 			# Flash U-Boot
+			# shellcheck disable=SC1091
 			. /usr/lib/u-boot/platform_install.sh
+			# shellcheck disable=SC2154
 			write_uboot_platform "$DIR" "$(lsblk -npo PKNAME "$(findmnt -Ufnro SOURCE -M /)")"
 
 		# - Armbian grab currently installed packages
@@ -993,6 +998,13 @@ _EOF_
 			# And install "file" which is used to detect whether the kernel image is compressed and in case uncompress it
 			# shellcheck disable=SC2046
 			G_AGI $(dpkg-query -Wf '${Package}\n' | grep -E '^linux-(image|dtb|u-boot)-|^u-boot') bc file
+
+		# - NanoPi M2/T2 Linux 4.4: Requires dedicated boot partition, starting at 4 MiB for U-Boot, with ext4 filesystem
+		elif (( $G_HW_MODEL == 61 )) && [[ $(findmnt -Ufnro FSTYPE -M /boot) == 'ext4' ]] && (( $(sfdisk -qlo Start "$(lsblk -npo PKNAME "$(findmnt -Ufnro SOURCE -M /boot)")" | mawk 'NR==2') >= 8192 ))
+		then
+			G_EXEC curl -sSfLO 'https://dietpi.com/downloads/firmware-nanopi2.deb'
+			G_EXEC_OUTPUT=1 G_EXEC dpkg -i firmware-nanopi2.deb
+			G_EXEC rm firmware-nanopi2.deb
 
 		# - Generic kernel + device tree + U-Boot package auto detect
 		elif (( $G_HW_MODEL != 75 ))
@@ -1388,8 +1400,8 @@ _EOF_'
 		G_DIETPI-NOTIFY 2 'Disabling apt-daily services to prevent random APT cache lock'
 		for i in apt-daily{,-upgrade}.{service,timer}
 		do
-			G_EXEC systemctl disable --now $i
-			G_EXEC systemctl mask $i
+			G_EXEC systemctl disable --now "$i"
+			G_EXEC systemctl mask "$i"
 		done
 
 		if command -v e2scrub > /dev/null
@@ -1407,8 +1419,8 @@ _EOF_'
 		G_EXEC_DESC='Generating /etc/fstab' G_EXEC /boot/dietpi/dietpi-drive_manager 4
 
 		# Create and navigate to "/tmp/$G_PROGRAM_NAME" working directory, now assured to be tmpfs
-		G_EXEC mkdir -p /tmp/$G_PROGRAM_NAME
-		G_EXEC cd /tmp/$G_PROGRAM_NAME
+		G_EXEC mkdir -p "/tmp/$G_PROGRAM_NAME"
+		G_EXEC cd "/tmp/$G_PROGRAM_NAME"
 
 		local info_use_drive_manager='Can be installed and setup by DietPi-Drive_Manager.\nSimply run "dietpi-drive_manager" and select "Add network drive".'
 		echo -e "Samba client: $info_use_drive_manager" > /mnt/samba/readme.txt
@@ -1481,6 +1493,11 @@ _EOF_'
 			local tty='ttyAML0'
 			[[ -f '/boot/dietpiEnv.txt' || -e '/dev/ttyAML0' ]] || tty='ttyS0'
 			/boot/dietpi/func/dietpi-set_hardware serialconsole enable "$tty"
+
+		# NanoPi M2/T2: Enable ttyAMA0 only
+		elif (( $G_HW_MODEL == 61 ))
+		then
+			/boot/dietpi/func/dietpi-set_hardware serialconsole enable ttyAMA0
 
 		# ROCK Pi S: Enable on ttyS0 only
 		elif (( $G_HW_MODEL == 73 ))
@@ -1815,10 +1832,10 @@ _EOF_
 			/boot/dietpi/func/dietpi-set_hardware bluetooth disable
 
 			G_DIETPI-NOTIFY 2 "$tmp_info onboard WiFi modules by default"
-			/boot/dietpi/func/dietpi-set_hardware wifimodules onboard_$tmp_mode
+			/boot/dietpi/func/dietpi-set_hardware wifimodules "onboard_$tmp_mode"
 
 			G_DIETPI-NOTIFY 2 "$tmp_info generic WiFi by default"
-			/boot/dietpi/func/dietpi-set_hardware wifimodules $tmp_mode
+			/boot/dietpi/func/dietpi-set_hardware wifimodules "$tmp_mode"
 		fi
 
 		# - x86_64: GRUB install and config
@@ -1831,16 +1848,16 @@ _EOF_
 			then
 				# Force GRUB installation to the EFI removable media path, if no (other) bootloader is installed there yet, which is checked via single case-insensitive glob
 				shopt -s nocaseglob
-				local efi_fallback=
+				local efi_fallback=()
 				# shellcheck disable=SC2043
 				for i in /boot/efi/EFI/boot/bootx64.efi
 				do
-					[[ -d $i ]] && break
-					efi_fallback='--force-extra-removable'
+					[[ -e $i ]] && break
+					efi_fallback=('--force-extra-removable')
 					debconf-set-selections <<< 'grub-efi-amd64 grub2/force_efi_extra_removable boolean true'
 				done
 				shopt -u nocaseglob
-				G_EXEC_DESC='Installing GRUB for UEFI' G_EXEC_OUTPUT=1 G_EXEC grub-install --recheck --target=x86_64-efi --efi-directory=/boot/efi $efi_fallback --uefi-secure-boot
+				G_EXEC_DESC='Installing GRUB for UEFI' G_EXEC_OUTPUT=1 G_EXEC grub-install --recheck --target=x86_64-efi --efi-directory=/boot/efi "${efi_fallback[@]}" --uefi-secure-boot
 
 			# BIOS
 			else

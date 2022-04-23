@@ -704,7 +704,7 @@ A long (or insufficiently manufactured) cable may required a higher boost settin
 				'PC1' ': 1024 x 768'
 				'PC2' ': 800 x 640'
 				'PC3' ': 640 x 480'
-				'DietPi-Cloudshell' ': 320 x 240'
+				'DietPi-CloudShell' ': 320 x 240'
 				'sdtv_mode=0' ': Composite NTSC'
 				'sdtv_mode=1' ': Composite Japanese NTSC'
 				'sdtv_mode=2' ': Composite PAL'
@@ -762,14 +762,14 @@ Re-enabling HDMI requires a reboot. If you need emergency HDMI output, edit the 
 
 						'sdtv_mode'*)
 
-							# Enable SDTV on RPi4, apply to all RPi to allow SDcard switch
+							# Enable SDTV on RPi4, apply to all RPi to allow SD card switch
 							G_CONFIG_INJECT 'enable_tvout=' 'enable_tvout=1' /boot/config.txt
 							G_CONFIG_INJECT 'sdtv_mode=' "$G_WHIP_RETURNED_VALUE" /boot/config.txt
 							framebuffer_x=720
 							framebuffer_y=576
 						;;
 
-						'DietPi-Cloudshell')
+						'DietPi-CloudShell')
 
 							framebuffer_x=320
 							framebuffer_y=240
@@ -817,9 +817,11 @@ Re-enabling HDMI requires a reboot. If you need emergency HDMI output, edit the 
 							framebuffer_y=480
 						;;
 
+						*) G_DIETPI-NOTIFY 1 'An invalid "case" option was used. This is a bug, please report at: https://github.com/MichaIng/DietPi/issues'; exit 1;;
+
 					esac
 
-					# Apply framebuffer size and ondemand Chromium resolution
+					# Apply framebuffer size and Chromium autostart resolution
 					G_CONFIG_INJECT 'framebuffer_width=' "framebuffer_width=$framebuffer_x" /boot/config.txt
 					G_CONFIG_INJECT 'framebuffer_height=' "framebuffer_height=$framebuffer_y" /boot/config.txt
 					G_CONFIG_INJECT 'SOFTWARE_CHROMIUM_RES_X=' "SOFTWARE_CHROMIUM_RES_X=$framebuffer_x" /boot/dietpi.txt
@@ -942,6 +944,8 @@ Re-enabling HDMI requires a reboot. If you need emergency HDMI output, edit the 
 		local cache_enabled=$(grep -cm1 '^Dir::Cache::pkgcache "[^"]' apt_conf)
 		local cache_in_ram=$(grep -cm1 '^Dir::Cache "/tmp' apt_conf)
 		local lists_in_ram=$(grep -cm1 '^Dir::State "/tmp' apt_conf)
+		local list_compression='On'
+		[[ -f '/etc/apt/apt.conf.d/98dietpi-nocompress' ]] && list_compression='Off'
 		local archives_in_ram=0
 		(( $cache_in_ram )) && grep -q '^Dir::Cache::archives "[^/]' apt_conf || grep -q '^Dir::Cache::archives "/tmp' apt_conf && archives_in_ram=1
 
@@ -960,6 +964,7 @@ Re-enabling HDMI requires a reboot. If you need emergency HDMI output, edit the 
 			'Reset' ': Reset to system defaults'
 			'APT cache' ": [$cache_text]"
 			'APT lists' ": [$lists_text]"
+			'List compression' ": [$list_compression]"
 
 		)
 		(( $cache_in_ram )) && G_WHIP_MENU_ARRAY+=('APT archives' ": [$archives_text]")
@@ -969,19 +974,21 @@ Re-enabling HDMI requires a reboot. If you need emergency HDMI output, edit the 
  - 50-100 MiB size, gets fully rewritten on every APT update
 \nAPT lists: Release files, one each distro and component
  - 50-100 MiB size, get individually rewritten if update available
+\nList compression: Whether APT lists are stored xz-compressed
+ - Reduces disk writes (during APT updates) and usage by ~80%
+ - Slows down reading package lists on APT installs
 \nAPT archives: Where APT downloads packages to for install
  - Can temporarily consume much space on large APT installs
- - Resets to disk if cache is moved to disk
-\nPlease select an item to adjust:'; then
+ - Resets to disk if cache is moved to disk'; then
 
-			[[ $G_WHIP_RETURNED_VALUE == 'Reset' ]] && { /boot/dietpi/func/dietpi-set_software apt-cache reset; return; }
+			[[ $G_WHIP_RETURNED_VALUE == 'Reset' ]] && { /boot/dietpi/func/dietpi-set_software apt reset; return 0; }
+			[[ $G_WHIP_RETURNED_VALUE == 'List compression' ]] && { /boot/dietpi/func/dietpi-set_software apt compress $(( ! ${list_compression/On/1} )); return 0; }
 
 			local item=$G_WHIP_RETURNED_VALUE
 			G_WHIP_MENU_ARRAY=(
 
 				'To disk' ": Move $item to disk (default)"
 				'To RAM' ": Move $item to RAM"
-
 			)
 			[[ $item == 'APT cache' ]] && G_WHIP_MENU_ARRAY+=('Disable' ": Disable $item")
 
@@ -997,7 +1004,7 @@ Re-enabling HDMI requires a reboot. If you need emergency HDMI output, edit the 
 			G_WHIP_MENU "Please select an option for $item$note" || return
 
 			local option=${G_WHIP_RETURNED_VALUE#To }
-			/boot/dietpi/func/dietpi-set_software apt-cache "${item#APT }" "${option,,}"
+			/boot/dietpi/func/dietpi-set_software apt "${item#APT }" "${option,,}"
 
 		else
 
@@ -1064,7 +1071,7 @@ Re-enabling HDMI requires a reboot. If you need emergency HDMI output, edit the 
 
 				local toggle='enable'
 				[[ ${aSTATE[${G_WHIP_RETURNED_VALUE%% *}]} == 'On' ]] && toggle='disable'
-				/boot/dietpi/func/dietpi-set_hardware serialconsole $toggle "${G_WHIP_RETURNED_VALUE%% *}"
+				/boot/dietpi/func/dietpi-set_hardware serialconsole "$toggle" "${G_WHIP_RETURNED_VALUE%% *}"
 
 			fi
 
@@ -1088,8 +1095,8 @@ Re-enabling HDMI requires a reboot. If you need emergency HDMI output, edit the 
 		(( $swap_size )) || swap_size_text='Off'
 		G_WHIP_MENU_ARRAY=('Swap file' ": [$swap_size_text | $swap_location]")
 
-		# APT cache
-		G_WHIP_MENU_ARRAY+=('APT cache' ': Manage APT cache/info storage')
+		# APT
+		G_WHIP_MENU_ARRAY+=('APT' ': Manage APT cache and list storage')
 
 		# Time sync
 		local ntpd_mode_current=$(sed -n '/^[[:blank:]]*CONFIG_NTP_MODE=/{s/^[^=]*=//p;q}' /boot/dietpi.txt)
@@ -1134,6 +1141,7 @@ Re-enabling HDMI requires a reboot. If you need emergency HDMI output, edit the 
 			if dpkg -s 'rpi-eeprom' &> /dev/null; then
 
 				rpi-eeprom-update -m version_eeprom
+				# shellcheck disable=SC1091
 				. ./version_eeprom
 				rm version_eeprom
 				G_WHIP_MENU_ARRAY+=('Update RPi4 EEPROM firmware' ": [Bootloader: ${BOOTLOADER_CURRENT:-N/A} | VL805: ${VL805_CURRENT:-N/A}]")
@@ -1196,7 +1204,7 @@ Re-enabling HDMI requires a reboot. If you need emergency HDMI output, edit the 
 			G_WHIP_YESNO 'Swapfile control has been moved to DietPi-Drive_Manager, would you like to run the application now?
 \nOnce finished, exit to resume DietPi-Config' && /boot/dietpi/dietpi-drive_manager
 
-		elif [[ $G_WHIP_RETURNED_VALUE == 'APT cache' ]]; then
+		elif [[ $G_WHIP_RETURNED_VALUE == 'APT' ]]; then
 
 			TARGETMENUID=19
 
@@ -1340,15 +1348,15 @@ Further information: https://www.raspberrypi.org/documentation/hardware/raspberr
 		# All devices
 		local current_cpu_governor='N/A'
 		local fp_current_cpu_governor='/sys/devices/system/cpu/cpu0/cpufreq/scaling_governor'
-		[[ -f $fp_current_cpu_governor ]] && current_cpu_governor=$(<$fp_current_cpu_governor)
+		[[ -f $fp_current_cpu_governor ]] && current_cpu_governor=$(<"$fp_current_cpu_governor")
 
 		local frequency_min_cpu_governor='N/A'
 		local fp_frequency_min_cpu_governor='/sys/devices/system/cpu/cpu0/cpufreq/scaling_min_freq'
-		[[ -f $fp_frequency_min_cpu_governor ]] && frequency_min_cpu_governor=$(( $(<$fp_frequency_min_cpu_governor) / 1000 ))
+		[[ -f $fp_frequency_min_cpu_governor ]] && frequency_min_cpu_governor=$(( $(<"$fp_frequency_min_cpu_governor") / 1000 ))
 
 		local frequency_max_cpu_governor='N/A'
 		local fp_frequency_max_cpu_governor='/sys/devices/system/cpu/cpu0/cpufreq/scaling_max_freq'
-		[[ -f $fp_frequency_max_cpu_governor ]] && frequency_max_cpu_governor=$(( $(<$fp_frequency_max_cpu_governor) / 1000 ))
+		[[ -f $fp_frequency_max_cpu_governor ]] && frequency_max_cpu_governor=$(( $(<"$fp_frequency_max_cpu_governor") / 1000 ))
 
 		local cpu_temp=$(G_OBTAIN_CPU_TEMP)
 		local cpu_temp_f='N/A'
@@ -1464,7 +1472,7 @@ Further information: https://www.raspberrypi.org/documentation/hardware/raspberr
 					MIN_VALUE=1 MAX_VALUE=200
 					G_WHIP_DEFAULT_ITEM=$current_cpu_down_factor
 					if G_WHIP_INPUTBOX "After Ondemand throttles up, how long before the next sample to check if CPU clocks can be reduced.\n\n - This value * 'Ondemand Sample Rate' = total miliseconds\n - Lower values may help reduce power consumption, however, a 500-1000ms value is recommended to prevent excessive sampling.\n - Valid range: $MIN_VALUE - $MAX_VALUE\n
-If unsure, set any value, 'Ondemand Down Factor' option on the next screen will list the calculated miliseconds." && G_CHECK_VALIDINT "$G_WHIP_RETURNED_VALUE" $MIN_VALUE $MAX_VALUE; then
+If unsure, set any value, 'Ondemand Down Factor' option on the next screen will list the calculated miliseconds." && G_CHECK_VALIDINT "$G_WHIP_RETURNED_VALUE" "$MIN_VALUE" "$MAX_VALUE"; then
 
 						G_CONFIG_INJECT 'CONFIG_CPU_ONDEMAND_SAMPLE_DOWNFACTOR=' "CONFIG_CPU_ONDEMAND_SAMPLE_DOWNFACTOR=$G_WHIP_RETURNED_VALUE" /boot/dietpi.txt
 						/boot/dietpi/func/dietpi-set_cpu
@@ -1504,7 +1512,7 @@ If unsure, set any value, 'Ondemand Down Factor' option on the next screen will 
 					MAX_VALUE=300
 					G_WHIP_DEFAULT_ITEM=$current_cpu_sample_rate
 					if G_WHIP_INPUTBOX "Please enter a sample rate in milliseconds, for Ondemand to check if it needs to increase CPU clocks.\nA lower value will make the system more responsive.
- - Valid range: $MIN_VALUE - $MAX_VALUE" && G_CHECK_VALIDINT "$G_WHIP_RETURNED_VALUE" $MIN_VALUE $MAX_VALUE; then
+ - Valid range: $MIN_VALUE - $MAX_VALUE" && G_CHECK_VALIDINT "$G_WHIP_RETURNED_VALUE" "$MIN_VALUE" "$MAX_VALUE"; then
 
 						G_CONFIG_INJECT 'CONFIG_CPU_ONDEMAND_SAMPLE_RATE=' "CONFIG_CPU_ONDEMAND_SAMPLE_RATE=$(( $G_WHIP_RETURNED_VALUE * 1000 ))" /boot/dietpi.txt
 						/boot/dietpi/func/dietpi-set_cpu
@@ -1597,43 +1605,43 @@ Current setting: $user_frequency_min_text" && G_CONFIG_INJECT 'CONFIG_CPU_MIN_FR
 
 						local Description='CPU Governor: https://www.kernel.org/doc/html/latest/admin-guide/pm/cpufreq.html#generic-scaling-governors'
 						G_WHIP_MENU_ARRAY=()
-						if grep -qi 'schedutil' $fp_governor; then
+						if grep -qi 'schedutil' "$fp_governor"; then
 
 							G_WHIP_MENU_ARRAY+=('schedutil' ": Scales CPU frequency between $frequency_min_cpu_governor MHz and $frequency_max_cpu_governor MHz")
 							Description+='\nSchedutil    | Dynamic CPU frequency based on CPU scheduler metrics (recommended on modern kernels)'
 
 						fi
-						if grep -qi 'ondemand' $fp_governor; then
+						if grep -qi 'ondemand' "$fp_governor"; then
 
 							G_WHIP_MENU_ARRAY+=('ondemand' ": Scales CPU frequency between $frequency_min_cpu_governor MHz and $frequency_max_cpu_governor MHz")
 							Description+='\nOndemand     | Dynamic CPU frequency based on usage (recommended on older kernels)'
 
 						fi
-						if grep -qi 'interactive' $fp_governor; then
+						if grep -qi 'interactive' "$fp_governor"; then
 
 							G_WHIP_MENU_ARRAY+=('interactive' ": Scales CPU frequency between $frequency_min_cpu_governor MHz and $frequency_max_cpu_governor MHz")
 							Description+='\nInteractive  | Same as ondemand. Bias towards low latency, faster scaling'
 
 						fi
-						if grep -qi 'conservative' $fp_governor; then
+						if grep -qi 'conservative' "$fp_governor"; then
 
 							G_WHIP_MENU_ARRAY+=('conservative' ": Scales CPU frequency between $frequency_min_cpu_governor MHz and $frequency_max_cpu_governor MHz")
 							Description+='\nConservative | Same as ondemand. Bias towards powersaving, slower scaling'
 
 						fi
-						if grep -qi 'powersave' $fp_governor; then
+						if grep -qi 'powersave' "$fp_governor"; then
 
 							G_WHIP_MENU_ARRAY+=('powersave' ": Limits CPU frequency to $frequency_min_cpu_governor MHz")
 							Description+='\nPowersave    | Static. Reduces energy consumption, heat, performance'
 
 						fi
-						if grep -qi 'performance' $fp_governor; then
+						if grep -qi 'performance' "$fp_governor"; then
 
 							G_WHIP_MENU_ARRAY+=('performance' ": Forces CPU frequency to $frequency_max_cpu_governor MHz")
 							Description+='\nPerformance  | Static. Increases energy consumption, heat, performance'
 
 						fi
-						if grep -qi 'userspace' $fp_governor; then
+						if grep -qi 'userspace' "$fp_governor"; then
 
 							G_WHIP_MENU_ARRAY+=('userspace' ": No-op governor, allows setting frequency manually")
 							Description+='\nUserspace    | No-op. Governor does not touch CPU frequency at all'
@@ -1656,7 +1664,7 @@ Current setting: $user_frequency_min_text" && G_CONFIG_INJECT 'CONFIG_CPU_MIN_FR
 					MIN_VALUE=30 MAX_VALUE=95
 					G_WHIP_DEFAULT_ITEM=$current_cpu_throttle_up
 					if G_WHIP_INPUTBOX "When the CPU usage (%) is greater than this value, the CPU frequency will increase from $frequency_min_cpu_governor MHz to $frequency_max_cpu_governor MHz.
- - Valid range: $MIN_VALUE - $MAX_VALUE\n - Recommended settings: Desktop = 50%, Server = 85%" && G_CHECK_VALIDINT "$G_WHIP_RETURNED_VALUE" $MIN_VALUE $MAX_VALUE; then
+ - Valid range: $MIN_VALUE - $MAX_VALUE\n - Recommended settings: Desktop = 50%, Server = 85%" && G_CHECK_VALIDINT "$G_WHIP_RETURNED_VALUE" "$MIN_VALUE" "$MAX_VALUE"; then
 
 						G_CONFIG_INJECT 'CONFIG_CPU_USAGE_THROTTLE_UP=' "CONFIG_CPU_USAGE_THROTTLE_UP=$G_WHIP_RETURNED_VALUE" /boot/dietpi.txt
 						/boot/dietpi/func/dietpi-set_cpu
@@ -1670,7 +1678,7 @@ Current setting: $user_frequency_min_text" && G_CONFIG_INJECT 'CONFIG_CPU_MIN_FR
 					MIN_VALUE=45 MAX_VALUE=85
 					G_WHIP_DEFAULT_ITEM=$temp_limit
 					if G_WHIP_INPUTBOX "When the ARM temperature ('c) reaches this value, the ARM will underclock to reduce heat.
- - Recommended value: 65\n - Valid range: $MIN_VALUE - $MAX_VALUE" && G_CHECK_VALIDINT "$G_WHIP_RETURNED_VALUE" $MIN_VALUE $MAX_VALUE; then
+ - Recommended value: 65\n - Valid range: $MIN_VALUE - $MAX_VALUE" && G_CHECK_VALIDINT "$G_WHIP_RETURNED_VALUE" "$MIN_VALUE" "$MAX_VALUE"; then
 
 						(( $G_WHIP_RETURNED_VALUE > 75 )) && G_WHIP_MSG "Higher operating temperatures will reduce the life of your ARM SoC. Heat also dissipates through the PCB into other components, decreasing the lifespan of the whole device. Use at your own risk.\n\nDietPi recommends 65'c as a safe value (75'c for RPi 3/4).\n\nMore info: https://github.com/MichaIng/DietPi/issues/356"
 						G_CONFIG_INJECT 'temp_limit=' "temp_limit=$G_WHIP_RETURNED_VALUE" /boot/config.txt && REBOOT_REQUIRED=1
@@ -1687,7 +1695,7 @@ Current setting: $user_frequency_min_text" && G_CONFIG_INJECT 'CONFIG_CPU_MIN_FR
  - Current value: $arm_freq_min\n - Recommended value: 300\n - Minimum value: $MIN_VALUE
  - Default value: $DEF_VALUE\n - Setting a value below the minimum will reset to RPi defaults."; then
 
-						if disable_error=1 G_CHECK_VALIDINT "$G_WHIP_RETURNED_VALUE" $MIN_VALUE; then
+						if disable_error=1 G_CHECK_VALIDINT "$G_WHIP_RETURNED_VALUE" "$MIN_VALUE"; then
 
 							G_CONFIG_INJECT 'arm_freq_min=' "arm_freq_min=$G_WHIP_RETURNED_VALUE" /boot/config.txt
 
@@ -1709,7 +1717,7 @@ Current setting: $user_frequency_min_text" && G_CONFIG_INJECT 'CONFIG_CPU_MIN_FR
 					if G_WHIP_INPUTBOX "Amount of seconds on boot, where the CPU runs at highest clock, before it starts to respect the CPU governor. This reduces boot time quite much since RPi boots with powersave governor until the chosen one is applied at later boot stage.
  - Recommended value: 20\n - Valid range: $MIN_VALUE - $MAX_VALUE\n - Setting a value outside of range will disable this feature."; then
 
-						if disable_error=1 G_CHECK_VALIDINT "$G_WHIP_RETURNED_VALUE" $MIN_VALUE $MAX_VALUE; then
+						if disable_error=1 G_CHECK_VALIDINT "$G_WHIP_RETURNED_VALUE" "$MIN_VALUE" "$MAX_VALUE"; then
 
 							G_CONFIG_INJECT 'initial_turbo=' "initial_turbo=$G_WHIP_RETURNED_VALUE" /boot/config.txt
 
@@ -1723,6 +1731,8 @@ Current setting: $user_frequency_min_text" && G_CONFIG_INJECT 'CONFIG_CPU_MIN_FR
 					fi
 
 				;;
+
+				*) G_DIETPI-NOTIFY 1 'An invalid "case" option was used. This is a bug, please report at: https://github.com/MichaIng/DietPi/issues'; exit 1;;
 
 			esac
 
@@ -1835,6 +1845,7 @@ Current setting: $user_frequency_min_text" && G_CONFIG_INJECT 'CONFIG_CPU_MIN_FR
 
 				'Headless') /boot/dietpi/func/dietpi-set_hardware headless 1 && REBOOT_REQUIRED=1;;
 				'Default') /boot/dietpi/func/dietpi-set_hardware headless 0 && REBOOT_REQUIRED=1;;
+				*) G_DIETPI-NOTIFY 1 'An invalid "case" option was used. This is a bug, please report at: https://github.com/MichaIng/DietPi/issues'; exit 1;;
 
 			esac
 
@@ -1901,6 +1912,8 @@ Current setting: $user_frequency_min_text" && G_CONFIG_INJECT 'CONFIG_CPU_MIN_FR
 					setupcon --save # https://bugs.debian.org/cgi-bin/bugreport.cgi?bug=818065
 
 				;;
+
+				*) G_DIETPI-NOTIFY 1 'An invalid "case" option was used. This is a bug, please report at: https://github.com/MichaIng/DietPi/issues'; exit 1;;
 
 			esac
 
@@ -2006,7 +2019,7 @@ Current setting: $user_frequency_min_text" && G_CONFIG_INJECT 'CONFIG_CPU_MIN_FR
 
 		(( $WIFI_DISABLED )) && G_WHIP_BUTTON_CANCEL_TEXT='Skip' G_WHIP_YESNO 'Would you like to purge all WiFi related APT packages?
  \nThis will free up space, but an internet-capable Ethernet connection is required to re-enable WiFi functionality.
- \nAffected packages: iw wireless-tools crda wpasupplicant' && G_AGP 'iw' 'wireless-tools' 'crda' 'wpasupplicant'
+ \nAffected packages: iw wireless-tools crda wireless-regdb wpasupplicant' && G_AGP 'iw' 'wireless-tools' 'crda' 'wireless-regdb' 'wpasupplicant'
 
 		# Drop Connections
 		G_DIETPI-NOTIFY 0 'Dropping connections, please wait...'
@@ -2249,8 +2262,6 @@ _EOF_
 
 	Change_WifiCountryCode(){
 
-		local wifi_country_code_target=$WIFI_COUNTRYCODE
-
 		G_WHIP_MENU_ARRAY=(
 
 			'GB' ': Great Britain'
@@ -2270,7 +2281,7 @@ _EOF_
 			G_WHIP_INPUTBOX 'Please enter a 2 character country code: https://en.wikipedia.org/wiki/ISO_3166-1_alpha-2' || return 0
 			[[ $G_WHIP_RETURNED_VALUE == [[:upper:]][[:upper:]] ]] || { G_WHIP_MSG "[FAILED] Invalid country code ($G_WHIP_RETURNED_VALUE). Aborting..."; return 1; }
 		fi
-		wifi_country_code_target=$G_WHIP_RETURNED_VALUE
+		local wifi_country_code_target=$G_WHIP_RETURNED_VALUE
 
 		/boot/dietpi/func/dietpi-set_hardware wificountrycode "$wifi_country_code_target"
 
@@ -2347,8 +2358,7 @@ NB: All Ethernet connections will be dropped!' && Network_ApplyChanges
 		WIFI_BITRATE=0
 		WIFI_SIGNALSTRENGTH=0
 		command -v hostapd &> /dev/null && WIFI_HOTSPOT=1 || WIFI_HOTSPOT=0
-		WIFI_COUNTRYCODE='GB'
-		# Prevent "nl80211 not found" message, when running this command with cfg80211 module disabled.
+		WIFI_COUNTRYCODE='Unknown'
 		command -v iw &> /dev/null && WIFI_COUNTRYCODE=$(iw reg get | mawk '/country/{print $2;exit}' | tr -d ':')
 
 		# Convert CIDR integer to net mask, e.g. "192.168.0.100/24" (take "24") to "255.255.255.0"
@@ -2370,7 +2380,7 @@ NB: All Ethernet connections will be dropped!' && Network_ApplyChanges
 				fi
 				(( $i < 3 )) && mask+=.
 			done
-			echo $mask
+			echo "$mask"
 		}
 
 		# Eth
@@ -2512,18 +2522,11 @@ NB: All Ethernet connections will be dropped!' && Network_ApplyChanges
 		G_WHIP_MENU_ARRAY+=('' '●─ Additional Options ')
 
 		# IPv6
-		if [[ -d '/proc/sys/net/ipv6' ]]; then
-
-			local ipv6_enabled=0
-			local ipv6_status_text='Off'
-			if [[ $(ip -6 a) ]]; then
-
-				ipv6_enabled=1
-				ipv6_status_text='On'
-
-			fi
+		if [[ -d '/proc/sys/net/ipv6' ]]
+		then
+			local ipv6_enabled=1 ipv6_status_text='On'
+			grep -q '^[[:blank:]]*CONFIG_ENABLE_IPV6=0' /boot/dietpi.txt && ipv6_enabled=0 ipv6_status_text='Off'
 			G_WHIP_MENU_ARRAY+=('IPv6' ": [$ipv6_status_text]")
-
 		fi
 
 		G_WHIP_MENU_ARRAY+=('Proxy' ": $proxy_state_text")
@@ -2548,11 +2551,7 @@ NB: All Ethernet connections will be dropped!' && Network_ApplyChanges
 
 				;;
 
-				'IPv6')
-
-					/boot/dietpi/func/dietpi-set_hardware enableipv6 $(( ! $ipv6_enabled ))
-
-				;;
+				'IPv6') /boot/dietpi/func/dietpi-set_hardware enableipv6 $(( ! $ipv6_enabled ));;
 
 				'Ethernet')
 
@@ -2636,11 +2635,9 @@ NB: All Ethernet connections will be dropped!' && Network_ApplyChanges
 
 				;;
 
-				'Proxy')
+				'Proxy') TARGETMENUID=17;;
 
-					TARGETMENUID=17
-
-				;;
+				*) :;;
 
 			esac
 
@@ -2650,12 +2647,10 @@ NB: All Ethernet connections will be dropped!' && Network_ApplyChanges
 			TARGETMENUID=0 # Return to main menu
 
 			# Exit DietPi-Config on back to previous menu?
-			if (( $EXITONBACK == 1 )); then
+			(( $EXITONBACK == 1 )) || return 0
 
-				TARGETMENUID=8 # Return to this menu
-				Menu_Exit
-
-			fi
+			TARGETMENUID=8 # Return to this menu
+			Menu_Exit
 
 		fi
 
@@ -2703,12 +2698,7 @@ NB: All Ethernet connections will be dropped!' && Network_ApplyChanges
 
 			case "$G_WHIP_RETURNED_VALUE" in
 
-				'Change Mode')
-
-					((ETH_MODE_TARGET++))
-					(( $ETH_MODE_TARGET >= 2 )) && ETH_MODE_TARGET=0
-
-				;;
+				'Change Mode') ETH_MODE_TARGET=$(( ! $ETH_MODE_TARGET ));;
 
 				'Link Speed')
 
@@ -2738,41 +2728,19 @@ NB: Auto-negotiation is highly recommended as long as you do not have issues wit
 
 				;;
 
-				'Apply')
+				'Apply') Ethernet_Reconnect;;
 
-					Ethernet_Reconnect
+				'Copy') Network_ETH_CopyCurrentToStatic;;
 
-				;;
+				'Static IP') Change_StaticIp 0;;
 
-				'Copy')
+				'Static Gateway') Change_StaticGateway 0;;
 
-					Network_ETH_CopyCurrentToStatic
+				'Static Mask') Change_StaticMask 0;;
 
-				;;
+				'Static DNS') Change_StaticDns 0;;
 
-				'Static IP')
-
-					Change_StaticIp 0
-
-				;;
-
-				'Static Gateway')
-
-					Change_StaticGateway 0
-
-				;;
-
-				'Static Mask')
-
-					Change_StaticMask 0
-
-				;;
-
-				'Static DNS')
-
-					Change_StaticDns 0
-
-				;;
+				*) :;;
 
 			esac
 
@@ -2882,14 +2850,15 @@ NB: Auto-negotiation is highly recommended as long as you do not have issues wit
 		fi
 
 		G_WHIP_MENU_ARRAY+=('' '●─ Additional Options ')
-		# - Unset country code?
-		if [[ $WIFI_COUNTRYCODE == '00' ]]; then
-
-			G_WHIP_MENU_ARRAY+=('Country' ": [$WIFI_COUNTRYCODE] (Not set, please configure)")
-		else
-
-			G_WHIP_MENU_ARRAY+=('Country' ": [$WIFI_COUNTRYCODE]")
-
+		# Country code: Not available from Debian Bookworm on: https://bugs.debian.org/1003903
+		if (( $G_DISTRO < 7 ))
+		then
+			if [[ $WIFI_COUNTRYCODE == '00' ]]
+			then
+				G_WHIP_MENU_ARRAY+=('Country' ": [$WIFI_COUNTRYCODE] (Not set, please configure)")
+			else
+				G_WHIP_MENU_ARRAY+=('Country' ": [$WIFI_COUNTRYCODE]")
+			fi
 		fi
 
 		G_WHIP_MENU_ARRAY+=('' '●─ Toggle State ')
@@ -2926,29 +2895,24 @@ NB: Auto-negotiation is highly recommended as long as you do not have issues wit
 						WiFi_Monitor_Enable
 
 					fi
-
 				;;
 
 				'Key')
 
 					G_WHIP_DEFAULT_ITEM=$HOTSPOT_KEY
 					G_WHIP_INPUTBOX 'Please enter a key/password for the WiFi hotspot\n - NB: Minimum of 8 characters' && HOTSPOT_KEY=$G_WHIP_RETURNED_VALUE
-
 				;;
 
 				'SSID')
 
 					G_WHIP_DEFAULT_ITEM=$HOTSPOT_SSID
 					G_WHIP_INPUTBOX 'Please enter a SSID for the WiFi hotspot' && HOTSPOT_SSID=$G_WHIP_RETURNED_VALUE
-
 				;;
 
 				'Channel')
 
 					# 2.4ghz only atm
-					local channel_mhz=2412
-					local channel_min=1
-					local channel_max=13
+					local channel_mhz=2412 channel_min=1 channel_max=13
 					G_WHIP_MENU_ARRAY=()
 					for ((i=$channel_min; i<=$channel_max; i++))
 					do
@@ -2958,21 +2922,15 @@ NB: Auto-negotiation is highly recommended as long as you do not have issues wit
 
 					G_WHIP_DEFAULT_ITEM=$HOTSPOT_CHANNEL
 					G_WHIP_MENU 'Please select a WiFi channel for the hotspot.' && HOTSPOT_CHANNEL=$G_WHIP_RETURNED_VALUE
-
 				;;
 
 				'802.11 N')
 
 					(( $hotspot_n_enabled )) && hotspot_n_enabled=0 || hotspot_n_enabled=1
 					G_CONFIG_INJECT 'ieee80211n=' "ieee80211n=$hotspot_n_enabled" /etc/hostapd/hostapd.conf
-
 				;;
 
-				'Country')
-
-					Change_WifiCountryCode
-
-				;;
+				'Country') Change_WifiCountryCode;;
 
 				'Disable')
 
@@ -2981,25 +2939,14 @@ NB: Auto-negotiation is highly recommended as long as you do not have issues wit
 					WiFi_Monitor_Disable
 					Network_ApplyChanges
 					TARGETMENUID=8 # Return to main adapters menu
-
 				;;
 
-				'Scan')
-
-					/boot/dietpi/func/dietpi-wifidb
-
-				;;
+				'Scan') /boot/dietpi/func/dietpi-wifidb;;
 
 				'Change Mode')
 
-					((WIFI_MODE_TARGET++))
-					if (( $WIFI_MODE_TARGET >= 2 )); then
-
-						WIFI_MODE_TARGET=0
-						G_WHIP_MSG 'Information for STATIC IP:\n\nWhen using STATIC IP, please ensure only 1 SSID entry exists in the "Scan" menu. Else, WiFi will most likely fail, and, the IP conflict committee will be displeased ;)'
-
-					fi
-
+					WIFI_MODE_TARGET=$(( ! $WIFI_MODE_TARGET ))
+					[[ $WIFI_MODE_TARGET == 0 ]] && G_WHIP_MSG 'Information for STATIC IP:\n\nWhen using STATIC IP, please ensure only 1 SSID entry exists in the "Scan" menu. Else, WiFi will most likely fail, and, the IP conflict committee will be displeased ;)'
 				;;
 
 				'Apply')
@@ -3024,38 +2971,17 @@ NB: Auto-negotiation is highly recommended as long as you do not have issues wit
 						Wifi_Reconnect
 
 					fi
-
 				;;
 
-				'Copy')
+				'Copy') Network_WIFI_CopyCurrentToStatic;;
 
-					Network_WIFI_CopyCurrentToStatic
+				'Static IP') Change_StaticIp 1;;
 
-				;;
+				'Static Gateway') Change_StaticGateway 1;;
 
-				'Static IP')
+				'Static Mask') Change_StaticMask 1;;
 
-					Change_StaticIp 1
-
-				;;
-
-				'Static Gateway')
-
-					Change_StaticGateway 1
-
-				;;
-
-				'Static Mask')
-
-					Change_StaticMask 1
-
-				;;
-
-				'Static DNS')
-
-					Change_StaticDns 1
-
-				;;
+				'Static DNS') Change_StaticDns 1;;
 
 				'State')
 
@@ -3068,8 +2994,9 @@ NB: Auto-negotiation is highly recommended as long as you do not have issues wit
 						G_EXEC systemctl start hostapd
 
 					fi
-
 				;;
+
+				*) :;;
 
 			esac
 
@@ -3093,17 +3020,9 @@ NB: Auto-negotiation is highly recommended as long as you do not have issues wit
 
 			case "$G_WHIP_RETURNED_VALUE" in
 
-				'Benchmarks')
-
-					TARGETMENUID=12
-
-				;;
-
-				'Stress Test')
-
-					TARGETMENUID=15
-
-				;;
+				'Benchmarks') TARGETMENUID=12;;
+				'Stress Test') TARGETMENUID=15;;
+				*) G_DIETPI-NOTIFY 1 'An invalid "case" option was used. This is a bug, please report at: https://github.com/MichaIng/DietPi/issues'; exit 1;;
 
 			esac
 
@@ -3118,6 +3037,7 @@ NB: Auto-negotiation is highly recommended as long as you do not have issues wit
 
 		# Init/load previous bench results
 		[[ -f '/var/lib/dietpi/dietpi-benchmark/results' ]] || /boot/dietpi/func/dietpi-benchmark 0
+		# shellcheck disable=SC1091
 		. /var/lib/dietpi/dietpi-benchmark/results
 
 		# Sanity for beta testing. As this value won't exist until re-save of /var/lib/dietpi/dietpi-benchmark/results
@@ -3134,7 +3054,8 @@ NB: Auto-negotiation is highly recommended as long as you do not have issues wit
 		)
 
 		G_WHIP_DEFAULT_ITEM='DietPi-Benchmark'
-		if G_WHIP_MENU "\
+		# shellcheck disable=SC2154
+		G_WHIP_MENU "\
 DietPi-Benchmark | https://dietpi.com/survey#benchmark :
  - CPU Performance   : Duration = $BENCH_CPU seconds (lower is faster)
  - CPU Temp          : Idle = ${BENCH_CPU_TEMP_START}'c | Full load = ${BENCH_CPU_TEMP_END}'c
@@ -3143,59 +3064,53 @@ DietPi-Benchmark | https://dietpi.com/survey#benchmark :
 
 Additional benchmarks:
  - Custom Filesystem : Write = $BENCH_CUSTOMFS_WRITE MB/s | Read = $BENCH_CUSTOMFS_READ MB/s
- - Network LAN       : Transfer rate = $BENCH_NET_LAN_SPEED MB/s"; then
+ - Network LAN       : Transfer rate = $BENCH_NET_LAN_SPEED MB/s" || return 0
 
-			TARGETMENUID=12 # Return to this menu
+		TARGETMENUID=12 # Return to this menu
 
-			case "$G_WHIP_RETURNED_VALUE" in
+		case "$G_WHIP_RETURNED_VALUE" in
 
-				'DietPi-Benchmark')
+			'DietPi-Benchmark') /boot/dietpi/func/dietpi-benchmark 2;;
 
-					/boot/dietpi/func/dietpi-benchmark 2
+			'Network LAN')
 
-				;;
+				G_WHIP_MENU_ARRAY=(
 
-				'Network LAN')
+					'Server' ': Run this device as the server'
+					'Client' ': Connect to an existing server, to begin the test'
 
-					G_WHIP_MENU_ARRAY=(
+				)
 
-						'Server' ': Run this device as the server'
-						'Client' ': Connect to an existing server, to begin the test'
+				if G_WHIP_MENU 'Please select an option:\n\n - Server: Run a server on the current device. Another system can then use the "Client" option to connect and begin the test.\n\n - Client: Connect to an existing server and begin the test.'; then
 
-					)
+					if [[ $G_WHIP_RETURNED_VALUE == 'Server' ]]; then
 
-					if G_WHIP_MENU 'Please select an option:\n\n - Server: Run a server on the current device. Another system can then use the "Client" option to connect and begin the test.\n\n - Client: Connect to an existing server and begin the test.'; then
+						/boot/dietpi/func/dietpi-benchmark 3
 
-						if [[ $G_WHIP_RETURNED_VALUE == 'Server' ]]; then
+					elif [[ $G_WHIP_RETURNED_VALUE == 'Client' ]]; then
 
-							/boot/dietpi/func/dietpi-benchmark 3
-
-						elif [[ $G_WHIP_RETURNED_VALUE == 'Client' ]]; then
-
-							/boot/dietpi/func/dietpi-benchmark 4
-
-						fi
+						/boot/dietpi/func/dietpi-benchmark 4
 
 					fi
 
-				;;
+				fi
+			;;
 
-				'Custom Filesystem')
+			'Custom Filesystem')
 
-					/boot/dietpi/dietpi-drive_manager 1
-					local fp_fsbench_custom_mount=$(</tmp/dietpi-drive_manager_selmnt)
+				/boot/dietpi/dietpi-drive_manager 1
+				local fp_fsbench_custom_mount=$(</tmp/dietpi-drive_manager_selmnt)
 
-					if [[ $fp_fsbench_custom_mount ]]; then
+				if [[ $fp_fsbench_custom_mount ]]; then
 
-						FP_BENCHFILE=$fp_fsbench_custom_mount /boot/dietpi/func/dietpi-benchmark 1
+					FP_BENCHFILE=$fp_fsbench_custom_mount /boot/dietpi/func/dietpi-benchmark 1
 
-					fi
+				fi
+			;;
 
-				;;
+			*) :;;
 
-			esac
-
-		fi
+		esac
 
 	}
 
@@ -3307,6 +3222,7 @@ Additional benchmarks:
 					G_CONFIG_INJECT 'arm_freq=' 'arm_freq=1100' /boot/config.txt
 					G_CONFIG_INJECT 'core_freq=' 'core_freq=450' /boot/config.txt		
 				;;
+				*) :;;
 			esac
 
 		# RPi 1
@@ -3340,6 +3256,7 @@ Additional benchmarks:
 					G_CONFIG_INJECT 'arm_freq=' 'arm_freq=1000' /boot/config.txt
 					G_CONFIG_INJECT 'core_freq=' 'core_freq=500' /boot/config.txt
 				;;
+				*) :;;
 			esac
 
 		# RPi 2
@@ -3380,6 +3297,7 @@ Additional benchmarks:
 					G_CONFIG_INJECT 'core_freq=' 'core_freq=500' /boot/config.txt
 					G_CONFIG_INJECT 'sdram_freq=' 'sdram_freq=500' /boot/config.txt
 				;;
+				*) :;;
 			esac
 
 		# RPi Zero 2
@@ -3418,6 +3336,7 @@ Additional benchmarks:
 					G_CONFIG_INJECT 'arm_freq=' 'arm_freq=1300' /boot/config.txt
 					G_CONFIG_INJECT 'core_freq=' 'core_freq=500' /boot/config.txt
 				;;
+				*) :;;
 			esac
 
 		# RPi 3/3+
@@ -3467,6 +3386,7 @@ Additional benchmarks:
 					G_CONFIG_INJECT 'arm_freq=' 'arm_freq=1300' /boot/config.txt
 					G_CONFIG_INJECT 'core_freq=' 'core_freq=500' /boot/config.txt
 				;;
+				*) :;;
 			esac
 
 		# RPi 400
@@ -3500,6 +3420,7 @@ Additional benchmarks:
 					G_CONFIG_INJECT 'arm_freq=' 'arm_freq=2000' /boot/config.txt
 					G_CONFIG_INJECT 'core_freq=' 'core_freq=500' /boot/config.txt
 				;;
+				*) :;;
 			esac
 
 		# RPi 4
@@ -3549,6 +3470,7 @@ Additional benchmarks:
 					G_CONFIG_INJECT 'arm_freq=' 'arm_freq=1900' /boot/config.txt
 					G_CONFIG_INJECT 'core_freq=' 'core_freq=600' /boot/config.txt
 				;;
+				*) :;;
 			esac
 
 		fi
@@ -3837,7 +3759,7 @@ Additional benchmarks:
 
 			# Pre-create/clear log file
 			local fp_log='/root/dietpi-config_stress.log' log_text
-			> $fp_log
+			> "$fp_log"
 
 			# Check if system supports temp readouts
 			local cpu_supports_temp=0 cpu_temp=$(G_OBTAIN_CPU_TEMP)
@@ -3884,7 +3806,7 @@ Additional benchmarks:
 				fi
 				log_text+=" | $(( $STRESS_TEST_DURATION + $start_time_epoch - $(date '+%s') )) seconds remaining"
 				echo "$log_text"
-				echo "$log_text" > $fp_log
+				echo "$log_text" > "$fp_log"
 				sleep 1
 			done
 
@@ -3952,7 +3874,7 @@ Additional benchmarks:
 					local min=0 max=60
 					G_WHIP_DEFAULT_ITEM=$check_url_timeout
 					if G_WHIP_INPUTBOX "This setting tells DietPi how long to wait, before DietPi-internal connection and URL checks assume a dead connection attempt (and failure).\nIncrease this value if you have a 'flaky' connection.\n
-Please enter a value in seconds between $min and $max. \"0\" means unlimited, however this is not recommended to avoid unlimited background job hang." && G_CHECK_VALIDINT "$G_WHIP_RETURNED_VALUE" $min $max; then
+Please enter a value in seconds between $min and $max. \"0\" means unlimited, however this is not recommended to avoid unlimited background job hang." && G_CHECK_VALIDINT "$G_WHIP_RETURNED_VALUE" "$min" "$max"; then
 
 						G_CONFIG_INJECT 'CONFIG_G_CHECK_URL_TIMEOUT=' "CONFIG_G_CHECK_URL_TIMEOUT=$G_WHIP_RETURNED_VALUE" /boot/dietpi.txt
 
@@ -3965,7 +3887,7 @@ Please enter a value in seconds between $min and $max. \"0\" means unlimited, ho
 					local min=1 max=10
 					G_WHIP_DEFAULT_ITEM=$check_url_attempts
 					if G_WHIP_INPUTBOX "This setting tells DietPi how many times to test a connection or URL, before assuming a dead connection or URL link (and failure).\nIncrease this value if you have a 'flaky' connection.\n
-Please enter a value between $min and $max." && G_CHECK_VALIDINT "$G_WHIP_RETURNED_VALUE" $min $max; then
+Please enter a value between $min and $max." && G_CHECK_VALIDINT "$G_WHIP_RETURNED_VALUE" "$min" "$max"; then
 
 						G_CONFIG_INJECT 'CONFIG_G_CHECK_URL_ATTEMPTS=' "CONFIG_G_CHECK_URL_ATTEMPTS=$G_WHIP_RETURNED_VALUE" /boot/dietpi.txt
 
@@ -4101,18 +4023,17 @@ NB: If you need to use *.pool.ntp.org servers, enter the base domain only. The s
 
 				'Dynamic DNS') /boot/dietpi/dietpi-ddns;;
 
+				*) :;;
+
 			esac
 
 		# Cancel
 		else
 
 			# Exit DietPi-Config on back to previous menu?
-			if (( $EXITONBACK == 1 )); then
-
-				TARGETMENUID=16 # Return to this menu
-				Menu_Exit
-
-			fi
+			(( $EXITONBACK == 1 )) || return 0
+			TARGETMENUID=16 # Return to this menu
+			Menu_Exit
 
 		fi
 
@@ -4133,6 +4054,7 @@ NB: If you need to use *.pool.ntp.org servers, enter the base domain only. The s
 		if [[ -f '/etc/bashrc.d/dietpi-proxy.sh' ]]; then
 
 			PROXY_ENABLED=1
+			# shellcheck disable=SC1091
 			. /etc/bashrc.d/dietpi-proxy.sh
 
 		else
@@ -4187,18 +4109,13 @@ NB: If you need to use *.pool.ntp.org servers, enter the base domain only. The s
 
 			case "$G_WHIP_RETURNED_VALUE" in
 
-				'State')
-
-					(( $PROXY_ENABLED )) && PROXY_ENABLED=0 || PROXY_ENABLED=1
-
-				;;
+				'State') (( $PROXY_ENABLED )) && PROXY_ENABLED=0 || PROXY_ENABLED=1;;
 
 				'Address')
 
 					G_WHIP_DEFAULT_ITEM=$PROXY_ADDRESS
 					G_WHIP_INPUTBOX 'Please enter the proxy URL or IP address\n - eg: MyProxy.com' && PROXY_ADDRESS=$G_WHIP_RETURNED_VALUE
 					G_CONFIG_INJECT 'CONFIG_PROXY_ADDRESS=' "CONFIG_PROXY_ADDRESS=$PROXY_ADDRESS" /boot/dietpi.txt
-
 				;;
 
 				'Port')
@@ -4206,7 +4123,6 @@ NB: If you need to use *.pool.ntp.org servers, enter the base domain only. The s
 					G_WHIP_DEFAULT_ITEM=$PROXY_PORT
 					G_WHIP_INPUTBOX 'Please enter the proxy port number\n - eg: 1234' && PROXY_PORT=$G_WHIP_RETURNED_VALUE
 					G_CONFIG_INJECT 'CONFIG_PROXY_PORT=' "CONFIG_PROXY_PORT=$PROXY_PORT" /boot/dietpi.txt
-
 				;;
 
 				'Username')
@@ -4214,7 +4130,6 @@ NB: If you need to use *.pool.ntp.org servers, enter the base domain only. The s
 					G_WHIP_DEFAULT_ITEM=$PROXY_USERNAME
 					G_WHIP_INPUTBOX 'Please enter the proxy username\n - eg: JoeBloggs\n - Leave blank if not required' && PROXY_USERNAME=$G_WHIP_RETURNED_VALUE
 					G_CONFIG_INJECT 'CONFIG_PROXY_USERNAME=' "CONFIG_PROXY_USERNAME=$PROXY_USERNAME" /boot/dietpi.txt
-
 				;;
 
 				'Password')
@@ -4222,8 +4137,9 @@ NB: If you need to use *.pool.ntp.org servers, enter the base domain only. The s
 					G_WHIP_DEFAULT_ITEM=$PROXY_PASSWORD
 					G_WHIP_INPUTBOX 'Please enter the proxy password\n - eg: LetMeIn\n - Leave blank if not required' && PROXY_PASSWORD=$G_WHIP_RETURNED_VALUE
 					G_CONFIG_INJECT 'CONFIG_PROXY_PASSWORD=' "CONFIG_PROXY_PASSWORD=$PROXY_PASSWORD" /boot/dietpi.txt
-
 				;;
+
+				*) G_DIETPI-NOTIFY 1 'An invalid "case" option was used. This is a bug, please report at: https://github.com/MichaIng/DietPi/issues'; exit 1;;
 
 			esac
 
