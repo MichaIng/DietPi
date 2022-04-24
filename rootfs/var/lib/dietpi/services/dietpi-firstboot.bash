@@ -120,8 +120,8 @@
 		# Set hostname
 		/boot/dietpi/func/change_hostname "$(sed -n '/^[[:blank:]]*AUTO_SETUP_NET_HOSTNAME=/{s/^[^=]*=//p;q}' /boot/dietpi.txt)"
 
-		if grep -q '^[[:blank:]]*AUTO_SETUP_AUTOMATED=1' /boot/dietpi.txt; then
-
+		if grep -q '^[[:blank:]]*AUTO_SETUP_AUTOMATED=1' /boot/dietpi.txt
+		then
 			# Enable root autologin on local console (/dev/tty1) and container console (/dev/console), overwritten during 1st run setup
 			mkdir -p /etc/systemd/system/{getty@tty1,console-getty}.service.d
 			cat << '_EOF_' > /etc/systemd/system/getty@tty1.service.d/dietpi-autologin.conf
@@ -134,27 +134,18 @@ _EOF_
 ExecStart=
 ExecStart=-/sbin/agetty -a root -J -s console 115200,38400,9600 $TERM
 _EOF_
-			# Assume accepted license in automated installs: https://github.com/MichaIng/DietPi/pull/4477
-			rm /var/lib/dietpi/license.txt
-
-		elif grep -q '^[[:blank:]]*AUTO_SETUP_ACCEPT_LICENSE=1' /boot/dietpi.txt; then
-
-			rm /var/lib/dietpi/license.txt
-
 		fi
 
 		# Apply login password if it has not been encrypted before to avoid applying the informational text
-		if [[ ! -f '/var/lib/dietpi/dietpi-software/.GLOBAL_PW.bin' ]]; then
-
+		if [[ ! -f '/var/lib/dietpi/dietpi-software/.GLOBAL_PW.bin' ]]
+		then
 			local password=$(sed -n '/^[[:blank:]]*AUTO_SETUP_GLOBAL_PASSWORD=/{s/^[^=]*=//p;q}' /boot/dietpi.txt)
-			if [[ $password ]]; then
-
+			if [[ $password ]]
+			then
 				chpasswd <<< "root:$password"
 				chpasswd <<< "dietpi:$password"
-
 			fi
 			unset -v password
-
 		fi
 
 		# Set APT mirror

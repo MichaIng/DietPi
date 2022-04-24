@@ -1888,21 +1888,6 @@ _EOF_
 		G_DIETPI-NOTIFY 2 'Writing PREP information to file'
 		echo -e "$IMAGE_CREATOR\n$PREIMAGE_INFO" > /boot/dietpi/.prep_info
 
-		G_DIETPI-NOTIFY 2 'Generating GPLv2 license readme'
-		cat << '_EOF_' > /var/lib/dietpi/license.txt
------------------------
-DietPi - GPLv2 License:
------------------------
- - Use arrow keys to scroll
- - Press 'TAB' then 'ENTER' to continue
-
-This program is free software: you can redistribute it and/or modify it under the terms of the GNU General Public License as published by the Free Software Foundation, either version 2 of the License, or any later version.
-
-This program is distributed in the hope that it will be useful, but WITHOUT ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the GNU General Public License for more details.
-
-You should have received a copy of the GNU General Public License along with this program. If not, please see https://www.gnu.org/licenses/
-_EOF_
-
 		G_DIETPI-NOTIFY 2 'Disabling and clearing APT cache'
 		G_EXEC rm /etc/apt/apt.conf.d/98dietpi-prep
 		/boot/dietpi/func/dietpi-set_software apt-cache cache disable
