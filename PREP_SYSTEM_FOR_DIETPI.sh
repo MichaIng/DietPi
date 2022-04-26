@@ -688,6 +688,13 @@ _EOF_
 				aPACKAGES_REQUIRED_INSTALL+=('rng-tools5')
 			else
 				aPACKAGES_REQUIRED_INSTALL+=('haveged')
+				# https://github.com/MichaIng/DietPi/issues/4710
+				if (( $G_HW_ARCH == 2 ))
+				then
+					G_DIETPI-NOTIFY 2 'Applying workaround for haveged entropy daemon bug: https://bugs.debian.org/985196'
+					[[ -d '/etc/systemd/system/haveged.service.d' ]] || G_EXEC mkdir /etc/systemd/system/haveged.service.d
+					G_EXEC eval 'echo -e '\''[Service]\nSystemCallFilter=uname'\'' > /etc/systemd/system/haveged.service.d/dietpi.conf'
+				fi
 			fi
 
 			# G_DISTRO specific
