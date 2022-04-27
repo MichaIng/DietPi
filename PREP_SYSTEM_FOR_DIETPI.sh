@@ -333,10 +333,10 @@ _EOF_
 			#'2' ': Raspberry Pi 2'
 			#'3' ': Raspberry Pi 3/3+'
 			#'4' ': Raspberry Pi 4'
-			'13' ': Odroid U3'
 			'10' ': Odroid C1'
 			'11' ': Odroid XU3/XU4/MC1/HC1/HC2'
 			'12' ': Odroid C2'
+			'13' ': Odroid U3'
 			'15' ': Odroid N2'
 			'16' ': Odroid C4/HC4'
 			'70' ': Sparky SBC'
@@ -491,12 +491,33 @@ _EOF_
 			# Boot in 64-bit mode if this is a 64-bit image
 			[[ $G_HW_ARCH == 3 ]] && G_CONFIG_INJECT 'arm_64bit=' 'arm_64bit=1' /boot/config.txt
 
+		elif [[ $G_HW_MODEL == 10 && -f '/boot/boot.ini' && $(findmnt -t vfat -M /boot) ]]; then
+
+			# Temporary until boot U-Boot config got merged into master
+			G_EXEC curl -sSfL 'https://raw.githubusercontent.com/MichaIng/DietPi/dev/.build/images/OdroidC1/boot.ini' -o /boot/boot.ini
+			#G_EXEC mv "DietPi-$G_GITBRANCH/.build/images/OdroidC1/boot.ini" /boot/boot.ini
+			G_EXEC sed -i "s/root=UUID=[^[:blank:]]*/root=UUID=$(findmnt -Ufnro UUID -M /)/" /boot/boot.ini
+			G_EXEC mkdir -p /etc/kernel/postinst.d /etc/initramfs/post-update.d
+			G_EXEC mv "DietPi-$G_GITBRANCH/.build/images/U-Boot/dietpi-initramfs_cleanup" /etc/kernel/postinst.d/dietpi-initramfs_cleanup
+			G_EXEC mv "DietPi-$G_GITBRANCH/.build/images/U-Boot/99-dietpi-uboot" /etc/initramfs/post-update.d/99-dietpi-uboot
+			G_EXEC sed -i 's/arm64/arm/' /etc/initramfs/post-update.d/99-dietpi-uboot
+			G_EXEC sed -i '/^ln -sf/c\mv "/boot/uInitrd-$1" /boot/uInitrd' /etc/initramfs/post-update.d/99-dietpi-uboot # FAT filesystem does not support symlinks
+
 		elif [[ $G_HW_MODEL == 11 && -f '/boot/boot.ini' && $(findmnt -Ufnro TARGET -t ext4 -T /boot) == '/' ]]; then
 
 			# Temporary until boot U-Boot config got merged into master
 			G_EXEC curl -sSfL 'https://raw.githubusercontent.com/MichaIng/DietPi/dev/.build/images/OdroidXU4/boot.ini' -o /boot/boot.ini
 			#G_EXEC mv "DietPi-$G_GITBRANCH/.build/images/OdroidXU4/boot.ini" /boot/boot.ini
 			G_EXEC sed -i "s/root=UUID=[^[:blank:]]*/root=UUID=$(findmnt -Ufnro UUID -M /)/" /boot/boot.ini
+			G_EXEC mkdir -p /etc/kernel/postinst.d /etc/initramfs/post-update.d
+			G_EXEC mv "DietPi-$G_GITBRANCH/.build/images/U-Boot/dietpi-initramfs_cleanup" /etc/kernel/postinst.d/dietpi-initramfs_cleanup
+			G_EXEC mv "DietPi-$G_GITBRANCH/.build/images/U-Boot/99-dietpi-uboot" /etc/initramfs/post-update.d/99-dietpi-uboot
+			G_EXEC sed -i 's/arm64/arm/' /etc/initramfs/post-update.d/99-dietpi-uboot
+
+		elif [[ $G_HW_MODEL == 1[256] && $(findmnt -Ufnro TARGET -T /boot) == '/' ]]; then
+
+			G_EXEC mv "DietPi-$G_GITBRANCH/.build/images/U-Boot/boot.cmd" /boot/boot.cmd
+			G_EXEC mv "DietPi-$G_GITBRANCH/.build/images/U-Boot/dietpiEnv.txt" /boot/dietpiEnv.txt
 			G_EXEC mkdir -p /etc/kernel/postinst.d /etc/initramfs/post-update.d
 			G_EXEC mv "DietPi-$G_GITBRANCH/.build/images/U-Boot/dietpi-initramfs_cleanup" /etc/kernel/postinst.d/dietpi-initramfs_cleanup
 			G_EXEC mv "DietPi-$G_GITBRANCH/.build/images/U-Boot/99-dietpi-uboot" /etc/initramfs/post-update.d/99-dietpi-uboot
@@ -509,14 +530,6 @@ _EOF_
 		elif [[ $G_HW_MODEL == 12 && -f '/boot/boot.ini' && $(findmnt -t vfat -M /boot) ]]; then
 
 			G_EXEC mv "DietPi-$G_GITBRANCH/boot_c2.ini" /boot/boot.ini
-
-		elif [[ $G_HW_MODEL == 1[256] && $(findmnt -Ufnro TARGET -T /boot) == '/' ]]; then
-
-			G_EXEC mv "DietPi-$G_GITBRANCH/.build/images/U-Boot/boot.cmd" /boot/boot.cmd
-			G_EXEC mv "DietPi-$G_GITBRANCH/.build/images/U-Boot/dietpiEnv.txt" /boot/dietpiEnv.txt
-			G_EXEC mkdir -p /etc/kernel/postinst.d /etc/initramfs/post-update.d
-			G_EXEC mv "DietPi-$G_GITBRANCH/.build/images/U-Boot/dietpi-initramfs_cleanup" /etc/kernel/postinst.d/dietpi-initramfs_cleanup
-			G_EXEC mv "DietPi-$G_GITBRANCH/.build/images/U-Boot/99-dietpi-uboot" /etc/initramfs/post-update.d/99-dietpi-uboot
 
 		elif [[ $G_HW_MODEL == 15 && -f '/boot/boot.ini' && $(findmnt -t vfat -M /boot) ]]; then
 
@@ -784,8 +797,8 @@ _EOF_
 			fi
 		fi
 
-		# - Odroid XU4/C2/N2/C4: Modern single partition image
-		if [[ ( $G_HW_MODEL == 1[256] && -f '/boot/dietpiEnv.txt' ) || ( $G_HW_MODEL == 11 && $(findmnt -Ufnro TARGET -t ext4 -T /boot) == '/' ) ]]
+		# - Odroid C1/XU4/C2/N2/C4
+		if [[ ( $G_HW_MODEL == 1[256] && -f '/boot/dietpiEnv.txt' ) || ( $G_HW_MODEL == 11 && $(findmnt -Ufnro TARGET -t ext4 -T /boot) == '/' ) || ( $G_HW_MODEL == 10 && $(findmnt -t vfat -M /boot) ) ]]
 		then
 			# Bootstrap Armbian repository
 			G_EXEC eval "curl -sSfL 'https://apt.armbian.com/armbian.key' | gpg --dearmor -o /etc/apt/trusted.gpg.d/dietpi-armbian.gpg --yes"
@@ -806,9 +819,10 @@ _EOF_
 			(( $G_HW_MODEL == 16 )) && model='odroidc4'
 			(( $G_HW_MODEL == 12 )) && model='odroidc2'
 			(( $G_HW_MODEL == 11 )) && model='odroidxu4' kernel='odroidxu4' arch='arm'
+			(( $G_HW_MODEL == 10 )) && model='odroidc1' kernel='meson' arch='arm'
 			G_AGI linux-{image,dtb}-current-"$kernel" "linux-u-boot-$model-current" u-boot-tools armbian-firmware
 			# Cleanup
-			[[ -f '/boot/uImage' ]] && G_EXEC rm /boot/uImage
+			[[ $G_HW_MODEL != 10 && -f '/boot/uImage' ]] && G_EXEC rm /boot/uImage
 			[[ -f '/boot/.next' ]] && G_EXEC rm /boot/.next
 			# Compile U-Boot config
 			[[ -f '/boot/boot.cmd' ]] && G_EXEC mkimage -C none -A "$arch" -T script -d /boot/boot.cmd /boot/boot.scr
@@ -816,7 +830,7 @@ _EOF_
 			# shellcheck disable=SC1091
 			. /usr/lib/u-boot/platform_install.sh
 			# shellcheck disable=SC2154
-			write_uboot_platform "$DIR" "$(lsblk -npo PKNAME "$(findmnt -Ufnro SOURCE -M /)")"
+			write_uboot_platform "$DIR" "$(lsblk -npo PKNAME "$(findmnt -Ufnro SOURCE -T /boot)")"
 
 		# - Armbian grab currently installed packages
 		elif [[ $G_HW_MODEL != 75 && $(dpkg-query -Wf '${Package} ') == *'armbian'* ]]; then
@@ -1505,6 +1519,11 @@ _EOF_'
 			G_EXEC systemctl mask serial-getty@ttyAMA0
 			/boot/dietpi/func/dietpi-set_hardware serialconsole disable ttyS0
 			G_EXEC systemctl mask serial-getty@ttyS0
+
+		# Odroid C2
+		elif (( $G_HW_MODEL == 10 ))
+		then
+			/boot/dietpi/func/dietpi-set_hardware serialconsole enable ttyAML0
 
 		# Odroid XU4
 		elif (( $G_HW_MODEL == 11 ))
