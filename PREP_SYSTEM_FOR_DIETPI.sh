@@ -326,17 +326,20 @@ _EOF_
 		G_WHIP_DEFAULT_ITEM=0
 		G_WHIP_MENU_ARRAY=(
 
+			'' '●─ x86_64 '
+			'20' ': Virtual machine'
+			'21' ': Native PC'
 			'' '●─ ARM '
 			'0' ': Raspberry Pi (all models)'
 			#'0' ': Raspberry Pi 1 (256 MiB)
 			#'1' ': Raspberry Pi 1/Zero (512 MiB)'
 			#'2' ': Raspberry Pi 2'
-			#'3' ': Raspberry Pi 3/3+'
+			#'3' ': Raspberry Pi 3/3+/Zero 2 W'
 			#'4' ': Raspberry Pi 4'
-			'13' ': Odroid U3'
 			'10' ': Odroid C1'
 			'11' ': Odroid XU3/XU4/MC1/HC1/HC2'
 			'12' ': Odroid C2'
+			'13' ': Odroid U3'
 			'15' ': Odroid N2'
 			'16' ': Odroid C4/HC4'
 			'70' ': Sparky SBC'
@@ -355,7 +358,7 @@ _EOF_
 			'64' ': NanoPi NEO Air'
 			'63' ': NanoPi M1/T1'
 			'66' ': NanoPi M1 Plus'
-			'61' ': NanoPi M2/T2'
+			'61' ': NanoPi M2/T2/Fire2'
 			'62' ': NanoPi M3/T3/Fire3'
 			'68' ': NanoPi M4/T4/NEO4'
 			'58' ': NanoPi M4V2'
@@ -367,19 +370,16 @@ _EOF_
 			'72' ': ROCK Pi 4'
 			'73' ': ROCK Pi S'
 			'74' ': Radxa Zero'
-			'' '●─ x86_64 '
-			'21' ': x86_64 Native PC'
-			'20' ': x86_64 Virtual Machine'
+			'23' ': Generic Rockchip RK3328'
+			'24' ': Generic Rockchip RK3399'
+			'25' ': Generic Allwinner H3'
+			'26' ': Generic Allwinner H5'
+			'27' ': Generic Allwinner H6'
+			'28' ': Generic Amlogic S905'
+			'29' ': Generic Amlogic S922X'
 			'' '●─ Other '
 			'75' ': Container image'
-			'29' ': Generic Amlogic S922X'
-			'28' ': Generic Amlogic S905'
-			'27' ': Generic Allwinner H6'
-			'26' ': Generic Allwinner H5'
-			'25' ': Generic Allwinner H3'
-			'24' ': Generic Rockchip RK3399'
-			'23' ': Generic Rockchip RK3328'
-			'22' ': Generic Device'
+			'22' ': Generic device'
 		)
 
 		while :
@@ -491,6 +491,38 @@ _EOF_
 			# Boot in 64-bit mode if this is a 64-bit image
 			[[ $G_HW_ARCH == 3 ]] && G_CONFIG_INJECT 'arm_64bit=' 'arm_64bit=1' /boot/config.txt
 
+		elif [[ $G_HW_MODEL == 10 && $(findmnt -t vfat -M /boot) ]]; then
+
+			# Temporary until boot U-Boot config got merged into master
+			G_EXEC curl -sSfL 'https://raw.githubusercontent.com/MichaIng/DietPi/dev/.build/images/OdroidC1/boot.ini' -o /boot/boot.ini
+			#G_EXEC mv "DietPi-$G_GITBRANCH/.build/images/OdroidC1/boot.ini" /boot/boot.ini
+			G_EXEC sed -i "s/root=UUID=[^[:blank:]]*/root=UUID=$(findmnt -Ufnro UUID -M /)/" /boot/boot.ini
+			G_EXEC mkdir -p /etc/kernel/postinst.d /etc/initramfs/post-update.d
+			G_EXEC mv "DietPi-$G_GITBRANCH/.build/images/U-Boot/dietpi-initramfs_cleanup" /etc/kernel/postinst.d/dietpi-initramfs_cleanup
+			G_EXEC mv "DietPi-$G_GITBRANCH/.build/images/U-Boot/99-dietpi-uboot" /etc/initramfs/post-update.d/99-dietpi-uboot
+			G_EXEC sed -i 's/arm64/arm/' /etc/initramfs/post-update.d/99-dietpi-uboot
+			# shellcheck disable=SC2016
+			G_EXEC sed -i '/^ln -sf/c\mv "/boot/uInitrd-$1" /boot/uInitrd' /etc/initramfs/post-update.d/99-dietpi-uboot # FAT filesystem does not support symlinks
+
+		elif [[ $G_HW_MODEL == 11 && $(findmnt -Ufnro TARGET -t ext4 -T /boot) == '/' ]]; then
+
+			# Temporary until boot U-Boot config got merged into master
+			G_EXEC curl -sSfL 'https://raw.githubusercontent.com/MichaIng/DietPi/dev/.build/images/OdroidXU4/boot.ini' -o /boot/boot.ini
+			#G_EXEC mv "DietPi-$G_GITBRANCH/.build/images/OdroidXU4/boot.ini" /boot/boot.ini
+			G_EXEC sed -i "s/root=UUID=[^[:blank:]]*/root=UUID=$(findmnt -Ufnro UUID -M /)/" /boot/boot.ini
+			G_EXEC mkdir -p /etc/kernel/postinst.d /etc/initramfs/post-update.d
+			G_EXEC mv "DietPi-$G_GITBRANCH/.build/images/U-Boot/dietpi-initramfs_cleanup" /etc/kernel/postinst.d/dietpi-initramfs_cleanup
+			G_EXEC mv "DietPi-$G_GITBRANCH/.build/images/U-Boot/99-dietpi-uboot" /etc/initramfs/post-update.d/99-dietpi-uboot
+			G_EXEC sed -i 's/arm64/arm/' /etc/initramfs/post-update.d/99-dietpi-uboot
+
+		elif [[ $G_HW_MODEL == 1[256] && $(findmnt -Ufnro TARGET -T /boot) == '/' ]]; then
+
+			G_EXEC mv "DietPi-$G_GITBRANCH/.build/images/U-Boot/boot.cmd" /boot/boot.cmd
+			G_EXEC mv "DietPi-$G_GITBRANCH/.build/images/U-Boot/dietpiEnv.txt" /boot/dietpiEnv.txt
+			G_EXEC mkdir -p /etc/kernel/postinst.d /etc/initramfs/post-update.d
+			G_EXEC mv "DietPi-$G_GITBRANCH/.build/images/U-Boot/dietpi-initramfs_cleanup" /etc/kernel/postinst.d/dietpi-initramfs_cleanup
+			G_EXEC mv "DietPi-$G_GITBRANCH/.build/images/U-Boot/99-dietpi-uboot" /etc/initramfs/post-update.d/99-dietpi-uboot
+
 		elif [[ $G_HW_MODEL == 11 && -f '/boot/boot.ini' && $(findmnt -t vfat -M /boot) ]]; then
 
 			G_EXEC mv "DietPi-$G_GITBRANCH/boot_xu4.ini" /boot/boot.ini
@@ -499,14 +531,6 @@ _EOF_
 		elif [[ $G_HW_MODEL == 12 && -f '/boot/boot.ini' && $(findmnt -t vfat -M /boot) ]]; then
 
 			G_EXEC mv "DietPi-$G_GITBRANCH/boot_c2.ini" /boot/boot.ini
-
-		elif [[ $G_HW_MODEL == 1[56] && $(findmnt -Ufnro TARGET -T /boot) == '/' ]]; then
-
-			G_EXEC mv "DietPi-$G_GITBRANCH/.build/images/U-Boot/boot.cmd" /boot/boot.cmd
-			G_EXEC mv "DietPi-$G_GITBRANCH/.build/images/U-Boot/dietpiEnv.txt" /boot/dietpiEnv.txt
-			G_EXEC mkdir -p /etc/kernel/preinst.d /etc/initramfs/post-update.d
-			G_EXEC mv "DietPi-$G_GITBRANCH/.build/images/U-Boot/dietpi-initramfs_cleanup" /etc/kernel/preinst.d/dietpi-initramfs_cleanup
-			G_EXEC mv "DietPi-$G_GITBRANCH/.build/images/U-Boot/99-dietpi-uboot" /etc/initramfs/post-update.d/99-dietpi-uboot
 
 		elif [[ $G_HW_MODEL == 15 && -f '/boot/boot.ini' && $(findmnt -t vfat -M /boot) ]]; then
 
@@ -678,6 +702,13 @@ _EOF_
 				aPACKAGES_REQUIRED_INSTALL+=('rng-tools5')
 			else
 				aPACKAGES_REQUIRED_INSTALL+=('haveged')
+				# https://github.com/MichaIng/DietPi/issues/4710
+				if (( $G_HW_ARCH == 2 ))
+				then
+					G_DIETPI-NOTIFY 2 'Applying workaround for haveged entropy daemon bug: https://bugs.debian.org/985196'
+					[[ -d '/etc/systemd/system/haveged.service.d' ]] || G_EXEC mkdir /etc/systemd/system/haveged.service.d
+					G_EXEC eval 'echo -e '\''[Service]\nSystemCallFilter=uname'\'' > /etc/systemd/system/haveged.service.d/dietpi.conf'
+				fi
 			fi
 
 			# G_DISTRO specific
@@ -767,8 +798,8 @@ _EOF_
 			fi
 		fi
 
-		# - Odroid N2/C4: Modern single partition image
-		if [[ $G_HW_MODEL == 1[56] && -f '/boot/dietpiEnv.txt' ]]
+		# - Odroid C1/XU4/C2/N2/C4
+		if [[ ( $G_HW_MODEL == 1[256] && -f '/boot/dietpiEnv.txt' ) || ( $G_HW_MODEL == 11 && $(findmnt -Ufnro TARGET -t ext4 -T /boot) == '/' ) || ( $G_HW_MODEL == 10 && $(findmnt -t vfat -M /boot) ) ]]
 		then
 			# Bootstrap Armbian repository
 			G_EXEC eval "curl -sSfL 'https://apt.armbian.com/armbian.key' | gpg --dearmor -o /etc/apt/trusted.gpg.d/dietpi-armbian.gpg --yes"
@@ -785,19 +816,22 @@ _EOF_
 			G_AGUP
 			# Install kernel, device tree, U-Boot, firmware and initramfs packages, initramfs-tools first to have an initramfs generated on kernel install
 			G_AGI initramfs-tools
-			local model='odroidn2'
-			[[ $G_HW_MODEL == 16 ]] && model='odroidc4'
-			G_AGI linux-{image,dtb}-current-meson64 "linux-u-boot-$model-current" u-boot-tools armbian-firmware
+			local model='odroidn2' kernel='meson64' arch='arm64'
+			(( $G_HW_MODEL == 16 )) && model='odroidc4'
+			(( $G_HW_MODEL == 12 )) && model='odroidc2'
+			(( $G_HW_MODEL == 11 )) && model='odroidxu4' kernel='odroidxu4' arch='arm'
+			(( $G_HW_MODEL == 10 )) && model='odroidc1' kernel='meson' arch='arm'
+			G_AGI linux-{image,dtb}-current-"$kernel" "linux-u-boot-$model-current" u-boot-tools armbian-firmware
 			# Cleanup
-			[[ -f '/boot/uImage' ]] && G_EXEC rm /boot/uImage
+			[[ $G_HW_MODEL != 10 && -f '/boot/uImage' ]] && G_EXEC rm /boot/uImage
 			[[ -f '/boot/.next' ]] && G_EXEC rm /boot/.next
 			# Compile U-Boot config
-			G_EXEC mkimage -C none -A arm64 -T script -d /boot/boot.cmd /boot/boot.scr
+			[[ -f '/boot/boot.cmd' ]] && G_EXEC mkimage -C none -A "$arch" -T script -d /boot/boot.cmd /boot/boot.scr
 			# Flash U-Boot
 			# shellcheck disable=SC1091
 			. /usr/lib/u-boot/platform_install.sh
 			# shellcheck disable=SC2154
-			write_uboot_platform "$DIR" "$(lsblk -npo PKNAME "$(findmnt -Ufnro SOURCE -M /)")"
+			write_uboot_platform "$DIR" "$(lsblk -npo PKNAME "$(findmnt -Ufnro SOURCE -T /boot)")"
 
 		# - Armbian grab currently installed packages
 		elif [[ $G_HW_MODEL != 75 && $(dpkg-query -Wf '${Package} ') == *'armbian'* ]]; then
@@ -1487,19 +1521,29 @@ _EOF_'
 			/boot/dietpi/func/dietpi-set_hardware serialconsole disable ttyS0
 			G_EXEC systemctl mask serial-getty@ttyS0
 
-		# Odroid N2/C4: Enable on serial debug console only
-		elif [[ $G_HW_MODEL == 1[56] ]]
+		# Odroid C2
+		elif (( $G_HW_MODEL == 10 ))
+		then
+			/boot/dietpi/func/dietpi-set_hardware serialconsole enable ttyAML0
+
+		# Odroid XU4
+		elif (( $G_HW_MODEL == 11 ))
+		then
+			/boot/dietpi/func/dietpi-set_hardware serialconsole enable ttySAC2
+
+		# Odroid C2/N2/C4: Modern vs legacy kernel
+		elif [[ $G_HW_MODEL == 1[256] ]]
 		then
 			local tty='ttyAML0'
 			[[ -f '/boot/dietpiEnv.txt' || -e '/dev/ttyAML0' ]] || tty='ttyS0'
 			/boot/dietpi/func/dietpi-set_hardware serialconsole enable "$tty"
 
-		# NanoPi M2/T2: Enable ttyAMA0 only
+		# NanoPi M2/T2
 		elif (( $G_HW_MODEL == 61 ))
 		then
 			/boot/dietpi/func/dietpi-set_hardware serialconsole enable ttyAMA0
 
-		# ROCK Pi S: Enable on ttyS0 only
+		# ROCK Pi S
 		elif (( $G_HW_MODEL == 73 ))
 		then
 			/boot/dietpi/func/dietpi-set_hardware serialconsole enable ttyS0
@@ -1571,8 +1615,8 @@ _EOF_'
 			G_EXEC eval 'echo -e '\''apm = 127\nforce_spindown_time = 120'\'' > /etc/hdparm.conf'
 		fi
 
-		# Odroid N2/C4: Modern single partition image
-		if [[ $G_HW_MODEL == 1[56] && -f '/boot/dietpiEnv.txt' ]]
+		# Odroid C2/N2/C4: Modern single partition image
+		if [[ $G_HW_MODEL == 1[256] && -f '/boot/dietpiEnv.txt' ]]
 		then
 			G_CONFIG_INJECT 'rootdev=' "rootdev=UUID=$(findmnt -Ufnro UUID -M /)" /boot/dietpiEnv.txt
 			G_CONFIG_INJECT 'rootfstype=' "rootfstype=$(findmnt -Ufnro FSTYPE -M /)" /boot/dietpiEnv.txt
@@ -1887,21 +1931,6 @@ _EOF_
 
 		G_DIETPI-NOTIFY 2 'Writing PREP information to file'
 		echo -e "$IMAGE_CREATOR\n$PREIMAGE_INFO" > /boot/dietpi/.prep_info
-
-		G_DIETPI-NOTIFY 2 'Generating GPLv2 license readme'
-		cat << '_EOF_' > /var/lib/dietpi/license.txt
------------------------
-DietPi - GPLv2 License:
------------------------
- - Use arrow keys to scroll
- - Press 'TAB' then 'ENTER' to continue
-
-This program is free software: you can redistribute it and/or modify it under the terms of the GNU General Public License as published by the Free Software Foundation, either version 2 of the License, or any later version.
-
-This program is distributed in the hope that it will be useful, but WITHOUT ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the GNU General Public License for more details.
-
-You should have received a copy of the GNU General Public License along with this program. If not, please see https://www.gnu.org/licenses/
-_EOF_
 
 		G_DIETPI-NOTIFY 2 'Disabling and clearing APT cache'
 		G_EXEC rm /etc/apt/apt.conf.d/98dietpi-prep
