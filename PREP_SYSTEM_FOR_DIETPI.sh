@@ -491,7 +491,7 @@ _EOF_
 			# Boot in 64-bit mode if this is a 64-bit image
 			[[ $G_HW_ARCH == 3 ]] && G_CONFIG_INJECT 'arm_64bit=' 'arm_64bit=1' /boot/config.txt
 
-		elif [[ $G_HW_MODEL == 10 && -f '/boot/boot.ini' && $(findmnt -t vfat -M /boot) ]]; then
+		elif [[ $G_HW_MODEL == 10 && $(findmnt -t vfat -M /boot) ]]; then
 
 			# Temporary until boot U-Boot config got merged into master
 			G_EXEC curl -sSfL 'https://raw.githubusercontent.com/MichaIng/DietPi/dev/.build/images/OdroidC1/boot.ini' -o /boot/boot.ini
@@ -504,7 +504,7 @@ _EOF_
 			# shellcheck disable=SC2016
 			G_EXEC sed -i '/^ln -sf/c\mv "/boot/uInitrd-$1" /boot/uInitrd' /etc/initramfs/post-update.d/99-dietpi-uboot # FAT filesystem does not support symlinks
 
-		elif [[ $G_HW_MODEL == 11 && -f '/boot/boot.ini' && $(findmnt -Ufnro TARGET -t ext4 -T /boot) == '/' ]]; then
+		elif [[ $G_HW_MODEL == 11 && $(findmnt -Ufnro TARGET -t ext4 -T /boot) == '/' ]]; then
 
 			# Temporary until boot U-Boot config got merged into master
 			G_EXEC curl -sSfL 'https://raw.githubusercontent.com/MichaIng/DietPi/dev/.build/images/OdroidXU4/boot.ini' -o /boot/boot.ini
