@@ -326,12 +326,15 @@ _EOF_
 		G_WHIP_DEFAULT_ITEM=0
 		G_WHIP_MENU_ARRAY=(
 
+			'' '●─ x86_64 '
+			'20' ': Virtual machine'
+			'21' ': Native PC'
 			'' '●─ ARM '
 			'0' ': Raspberry Pi (all models)'
 			#'0' ': Raspberry Pi 1 (256 MiB)
 			#'1' ': Raspberry Pi 1/Zero (512 MiB)'
 			#'2' ': Raspberry Pi 2'
-			#'3' ': Raspberry Pi 3/3+'
+			#'3' ': Raspberry Pi 3/3+/Zero 2 W'
 			#'4' ': Raspberry Pi 4'
 			'10' ': Odroid C1'
 			'11' ': Odroid XU3/XU4/MC1/HC1/HC2'
@@ -355,7 +358,7 @@ _EOF_
 			'64' ': NanoPi NEO Air'
 			'63' ': NanoPi M1/T1'
 			'66' ': NanoPi M1 Plus'
-			'61' ': NanoPi M2/T2'
+			'61' ': NanoPi M2/T2/Fire2'
 			'62' ': NanoPi M3/T3/Fire3'
 			'68' ': NanoPi M4/T4/NEO4'
 			'58' ': NanoPi M4V2'
@@ -367,19 +370,16 @@ _EOF_
 			'72' ': ROCK Pi 4'
 			'73' ': ROCK Pi S'
 			'74' ': Radxa Zero'
-			'' '●─ x86_64 '
-			'21' ': x86_64 Native PC'
-			'20' ': x86_64 Virtual Machine'
+			'23' ': Generic Rockchip RK3328'
+			'24' ': Generic Rockchip RK3399'
+			'25' ': Generic Allwinner H3'
+			'26' ': Generic Allwinner H5'
+			'27' ': Generic Allwinner H6'
+			'28' ': Generic Amlogic S905'
+			'29' ': Generic Amlogic S922X'
 			'' '●─ Other '
 			'75' ': Container image'
-			'29' ': Generic Amlogic S922X'
-			'28' ': Generic Amlogic S905'
-			'27' ': Generic Allwinner H6'
-			'26' ': Generic Allwinner H5'
-			'25' ': Generic Allwinner H3'
-			'24' ': Generic Rockchip RK3399'
-			'23' ': Generic Rockchip RK3328'
-			'22' ': Generic Device'
+			'22' ': Generic device'
 		)
 
 		while :
