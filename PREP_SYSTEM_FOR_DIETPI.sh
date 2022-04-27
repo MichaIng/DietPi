@@ -501,6 +501,7 @@ _EOF_
 			G_EXEC mv "DietPi-$G_GITBRANCH/.build/images/U-Boot/dietpi-initramfs_cleanup" /etc/kernel/postinst.d/dietpi-initramfs_cleanup
 			G_EXEC mv "DietPi-$G_GITBRANCH/.build/images/U-Boot/99-dietpi-uboot" /etc/initramfs/post-update.d/99-dietpi-uboot
 			G_EXEC sed -i 's/arm64/arm/' /etc/initramfs/post-update.d/99-dietpi-uboot
+			# shellcheck disable=SC2016
 			G_EXEC sed -i '/^ln -sf/c\mv "/boot/uInitrd-$1" /boot/uInitrd' /etc/initramfs/post-update.d/99-dietpi-uboot # FAT filesystem does not support symlinks
 
 		elif [[ $G_HW_MODEL == 11 && -f '/boot/boot.ini' && $(findmnt -Ufnro TARGET -t ext4 -T /boot) == '/' ]]; then
