@@ -265,7 +265,6 @@ Links to hardware and software manufacturers, sources and build instructions use
 - [Shairport-Sync](https://github.com/mikebrady/shairport-sync)
 - [FreshRSS](https://github.com/FreshRSS/FreshRSS)
 - [Folding@Home](https://github.com/FoldingAtHome)
-- [OpenBazaar](https://github.com/OpenBazaar/openbazaar-go)
 - [Medusa](https://github.com/pymedusa/Medusa)
 - [Grafana](https://github.com/grafana/grafana)
 - [Clonezilla](https://gitlab.com/stevenshiau/clonezilla)
