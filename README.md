@@ -182,7 +182,6 @@ along with this program.  If not, see https://www.gnu.org/licenses/
 
 - Source: https://github.com/MichaIng/DietPi
 - Build: Not applicable, as DietPi uses Bash scripts only, no building or compiling is required.
-- [![CodeFactor](https://www.codefactor.io/repository/github/michaing/dietpi/badge)](https://www.codefactor.io/repository/github/michaing/dietpi)
 
 ### DietPi Files
 
@@ -266,7 +265,6 @@ Links to hardware and software manufacturers, sources and build instructions use
 - [Shairport-Sync](https://github.com/mikebrady/shairport-sync)
 - [FreshRSS](https://github.com/FreshRSS/FreshRSS)
 - [Folding@Home](https://github.com/FoldingAtHome)
-- [OpenBazaar](https://github.com/OpenBazaar/openbazaar-go)
 - [Medusa](https://github.com/pymedusa/Medusa)
 - [Grafana](https://github.com/grafana/grafana)
 - [Clonezilla](https://gitlab.com/stevenshiau/clonezilla)

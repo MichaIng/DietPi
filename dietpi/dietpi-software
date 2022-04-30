@@ -88,10 +88,7 @@ Available commands:
 		done
 
 		# Choice and preference indices
-		install_states+="INDEX_LOGGING=$INDEX_LOGGING
-INDEX_WEBSERVER=$INDEX_WEBSERVER
-INDEX_DESKTOP=$INDEX_DESKTOP
-INDEX_BROWSER=$INDEX_BROWSER"
+		install_states+="INDEX_LOGGING=$INDEX_LOGGING"
 
 		echo "$install_states" > /boot/dietpi/.installed
 
@@ -106,9 +103,6 @@ INDEX_BROWSER=$INDEX_BROWSER"
 			# Assure that the file exists to allow choice/preference selections on first run: https://github.com/MichaIng/DietPi/issues/5080
 			>> /boot/dietpi/.installed
 		fi
-
-		# Disable browser preference on ARMv6 Bullseye+ systems: https://github.com/RPi-Distro/chromium-browser/issues/21
-		(( $G_HW_ARCH == 1 && $G_DISTRO > 5 )) && INDEX_BROWSER=0
 
 	}
 
@@ -136,11 +130,8 @@ INDEX_BROWSER=$INDEX_BROWSER"
 	# Flag to skip APT update in Run_Installations(), set by DietPi-Automation_Pre()
 	SKIP_APT_UPDATE=0
 
-	# DietPi choice and preference systems
+	# Logging choice index
 	INDEX_LOGGING=-1
-	INDEX_WEBSERVER=-2
-	INDEX_DESKTOP=0
-	INDEX_BROWSER=-1
 
 	# Since no automated reboot is done anymore after installs, collect services to start manually, when not controlled by DietPi-Services
 	aSTART_SERVICES=()
@@ -180,6 +171,8 @@ INDEX_BROWSER=$INDEX_BROWSER"
 		fi
 
 		# Encrypt
+		# https://github.com/koalaman/shellcheck/issues/1009
+		# shellcheck disable=SC2248
 		[[ $encrypt == 1 ]] && openssl enc -e -a -md sha256 -aes-256-cbc -iter 10000 -salt -pass pass:'DietPiRocks!' -out /var/lib/dietpi/dietpi-software/.GLOBAL_PW.bin <<< $GLOBAL_PW
 
 		# Apply safe permissions
@@ -972,15 +965,6 @@ INDEX_BROWSER=$INDEX_BROWSER"
 		aSOFTWARE_CATX[$software_id]=6
 		aSOFTWARE_DOCS[$software_id]='https://dietpi.com/docs/software/social/#baikal'
 		aSOFTWARE_DEPS[$software_id]='88 89 webserver'
-		#------------------
-		software_id=58
-		aSOFTWARE_NAME[$software_id]='OpenBazaar'
-		aSOFTWARE_DESC[$software_id]='Decentralised peer-to-peer Bitcoin marketplace'
-		aSOFTWARE_CATX[$software_id]=6
-		aSOFTWARE_DOCS[$software_id]='https://dietpi.com/docs/software/social/#openbazaar'
-		# x86_64 uses pre-compiled binaries, ARM requires Go for compiling
-		(( $G_HW_ARCH == 10 )) || aSOFTWARE_DEPS[$software_id]+='188'
-		aSOFTWARE_INTERACTIVE[$software_id]=1
 		#------------------
 		software_id=125
 		aSOFTWARE_NAME[$software_id]='Synapse'
@@ -1886,6 +1870,200 @@ INDEX_BROWSER=$INDEX_BROWSER"
 		G_WHIP_MSG "[WARNING] Conflicting installs have been detected!$unmarked_text$dependants_text"
 	}
 
+	Select_Webserver_Dependency()
+	{
+		# Check for existing webserver (Apache, Nginx, Lighttpd) installation
+		# - Do no reinstalls, as those are currently too intrusive, overriding custom configs
+		(( ${aSOFTWARE_INSTALL_STATE[83]} < 1 && ${aSOFTWARE_INSTALL_STATE[84]} < 1 && ${aSOFTWARE_INSTALL_STATE[85]} < 1 )) || return 1
+
+		# Auto-select webserver if manually installed
+		if dpkg-query -s 'apache2' &> /dev/null
+		then
+			SELECTED_WEBSERVER=83; return 0
+
+		elif dpkg-query -s 'nginx-common' &> /dev/null
+		then
+			SELECTED_WEBSERVER=85; return 0
+
+		elif dpkg-query -s 'lighttpd' &> /dev/null
+		then
+			SELECTED_WEBSERVER=84; return 0
+		fi
+
+		local dependant=$1 preference_index=$(sed -n '/^[[:blank:]]*AUTO_SETUP_WEB_SERVER_INDEX=/{s/^[^=]*=//p;q}' /boot/dietpi.txt) software_id
+		# Preference index to software ID
+		case $preference_index in
+			-2) software_id=84;; # Lighttpd
+			-1) software_id=85;; # Nginx
+			*) software_id=83;; # Apache (default)
+		esac
+
+		G_WHIP_MENU_ARRAY=(
+
+			"${aSOFTWARE_NAME[83]}" ": ${aSOFTWARE_DESC[83]}"
+			"${aSOFTWARE_NAME[85]}" ": ${aSOFTWARE_DESC[85]}"
+			"${aSOFTWARE_NAME[84]}" ": ${aSOFTWARE_DESC[84]}"
+		)
+
+		G_WHIP_DEFAULT_ITEM=${aSOFTWARE_NAME[$software_id]}
+		G_WHIP_BUTTON_OK_TEXT='Confirm' G_WHIP_NOCANCEL=1
+		G_WHIP_MENU "${aSOFTWARE_NAME[$dependant]} requires a webserver. Which one shall be installed?
+\n- Apache: Feature-rich and popular. Recommended for beginners and users who are looking to follow Apache based guides.
+\n- Nginx: Lightweight alternative to Apache. Nginx claims faster webserver performance compared to Apache.
+\n- Lighttpd: Extremely lightweight and is generally considered to offer the \"best\" webserver performance for SBCs. Recommended for users who expect low webserver traffic.
+\n- More info: https://dietpi.com/docs/software/webserver_stack/" || G_WHIP_RETURNED_VALUE=${aSOFTWARE_NAME[$software_id]}
+
+		# Software name to ID and preference index
+		if [[ $G_WHIP_RETURNED_VALUE == "${aSOFTWARE_NAME[83]}" ]]
+		then
+			SELECTED_WEBSERVER=83 preference_index=0
+
+		elif [[ $G_WHIP_RETURNED_VALUE == "${aSOFTWARE_NAME[85]}" ]]
+		then
+			SELECTED_WEBSERVER=85 preference_index=-1
+
+		elif [[ $G_WHIP_RETURNED_VALUE == "${aSOFTWARE_NAME[84]}" ]]
+		then
+			SELECTED_WEBSERVER=84 preference_index=-2
+		fi
+
+		G_CONFIG_INJECT 'AUTO_SETUP_WEB_SERVER_INDEX=' "AUTO_SETUP_WEB_SERVER_INDEX=$preference_index" /boot/dietpi.txt
+		return 0
+	}
+
+	Select_Desktop_Dependency()
+	{
+		# Check for existing desktop (LXDE, MATE, Xfce, GNUstep, LXQt) installation
+		# - Do no reinstalls, as those are loose dependencies
+		(( ${aSOFTWARE_INSTALL_STATE[23]} < 1 && ${aSOFTWARE_INSTALL_STATE[24]} < 1 && ${aSOFTWARE_INSTALL_STATE[25]} < 1 && ${aSOFTWARE_INSTALL_STATE[26]} < 1 && ${aSOFTWARE_INSTALL_STATE[173]} < 1 )) || return 1
+
+		# Auto-select desktop if manually installed
+		if dpkg-query -s 'lxde' &> /dev/null
+		then
+			SELECTED_DESKTOP=23; return 0
+
+		elif dpkg-query -s 'xfce4' &> /dev/null
+		then
+			SELECTED_DESKTOP=25; return 0
+
+		elif dpkg-query -s 'mate-desktop-environment-core' &> /dev/null
+		then
+			SELECTED_DESKTOP=24; return 0
+
+		elif dpkg-query -s 'lxqt' &> /dev/null
+		then
+			SELECTED_DESKTOP=173; return 0
+
+		elif dpkg-query -s 'gnustep' &> /dev/null
+		then
+			SELECTED_DESKTOP=26; return 0
+		fi
+
+		local dependant=$1 preference_index=$(sed -n '/^[[:blank:]]*AUTO_SETUP_DESKTOP_INDEX=/{s/^[^=]*=//p;q}' /boot/dietpi.txt) software_id
+		# Preference index to software ID
+		case $preference_index in
+			-1) software_id=25;; # Xfce
+			-2) software_id=24;; # MATE
+			-3) software_id=173;; # LXQt
+			-4) software_id=26;; # GNUstep
+			*) software_id=23;; # LXDE (default)
+		esac
+
+		G_WHIP_MENU_ARRAY=(
+
+			"${aSOFTWARE_NAME[23]}" ": ${aSOFTWARE_DESC[23]}"
+			"${aSOFTWARE_NAME[25]}" ": ${aSOFTWARE_DESC[25]}"
+			"${aSOFTWARE_NAME[24]}" ": ${aSOFTWARE_DESC[24]}"
+			"${aSOFTWARE_NAME[173]}" ": ${aSOFTWARE_DESC[173]}"
+			"${aSOFTWARE_NAME[26]}" ": ${aSOFTWARE_DESC[26]}"
+		)
+
+		G_WHIP_DEFAULT_ITEM=${aSOFTWARE_NAME[$software_id]}
+		G_WHIP_BUTTON_OK_TEXT='Confirm' G_WHIP_NOCANCEL=1
+		G_WHIP_MENU "${aSOFTWARE_NAME[$dependant]} requires a desktop. Which one shall be installed?" || G_WHIP_RETURNED_VALUE=${aSOFTWARE_NAME[$software_id]}
+
+		# Software name to ID and preference index
+		if [[ $G_WHIP_RETURNED_VALUE == "${aSOFTWARE_NAME[23]}" ]]
+		then
+			SELECTED_DESKTOP=23 preference_index=0
+
+		elif [[ $G_WHIP_RETURNED_VALUE == "${aSOFTWARE_NAME[25]}" ]]
+		then
+			SELECTED_DESKTOP=25 preference_index=-1
+
+		elif [[ $G_WHIP_RETURNED_VALUE == "${aSOFTWARE_NAME[24]}" ]]
+		then
+			SELECTED_DESKTOP=24 preference_index=-2
+
+		elif [[ $G_WHIP_RETURNED_VALUE == "${aSOFTWARE_NAME[173]}" ]]
+		then
+			SELECTED_DESKTOP=173 preference_index=-3
+
+		elif [[ $G_WHIP_RETURNED_VALUE == "${aSOFTWARE_NAME[26]}" ]]
+		then
+			SELECTED_DESKTOP=26 preference_index=-4
+		fi
+
+		G_CONFIG_INJECT 'AUTO_SETUP_DESKTOP_INDEX=' "AUTO_SETUP_DESKTOP_INDEX=$preference_index" /boot/dietpi.txt
+		return 0
+	}
+
+	Select_Browser_Dependency()
+	{
+		# Check for existing browser (Firefox, Chromium) installation
+		# - Do no reinstalls, as those are loose dependencies
+		(( ${aSOFTWARE_INSTALL_STATE[67]} < 1 && ${aSOFTWARE_INSTALL_STATE[113]} < 1 )) || return 1
+
+		# Disable browser preference on ARMv6 Bullseye+ systems: https://github.com/RPi-Distro/chromium-browser/issues/21
+		(( $G_HW_ARCH == 1 && $G_DISTRO > 5 )) && return 1
+
+		# Auto-select browser if manually installed
+		if dpkg-query -s 'firefox-esr' &> /dev/null
+		then
+			SELECTED_BROWSER=67; return 0
+
+		elif dpkg-query -s 'chromium' &> /dev/null || dpkg-query -s 'chromium-browser' &> /dev/null
+		then
+			SELECTED_BROWSER=113; return 0
+		fi
+
+		local dependant=$1 preference_index=$(sed -n '/^[[:blank:]]*AUTO_SETUP_BROWSER_INDEX=/{s/^[^=]*=//p;q}' /boot/dietpi.txt) software_id
+		# Preference index to software ID
+		case $preference_index in
+			0) return 1;; # None: Skip menu if "None" was explicitly selected or set via dietpi.txt before
+			-1) software_id=113;; # Chromium
+			*) software_id=67;; # Firefox (default)
+		esac
+
+		G_WHIP_MENU_ARRAY=(
+
+			'None' ': If you do not require a web browser'
+			"${aSOFTWARE_NAME[67]}" ": ${aSOFTWARE_DESC[67]}"
+			"${aSOFTWARE_NAME[113]}" ": ${aSOFTWARE_DESC[113]}"
+		)
+
+		G_WHIP_DEFAULT_ITEM=${aSOFTWARE_NAME[$software_id]}
+		G_WHIP_BUTTON_OK_TEXT='Confirm' G_WHIP_NOCANCEL=1
+		G_WHIP_MENU "Which web browser shall be installed with the ${aSOFTWARE_NAME[$dependant]} desktop environment?" || G_WHIP_RETURNED_VALUE=${aSOFTWARE_NAME[$software_id]}
+
+		# Software name to ID and preference index
+		if [[ $G_WHIP_RETURNED_VALUE == 'None' ]]
+		then
+			preference_index=0
+
+		elif [[ $G_WHIP_RETURNED_VALUE == "${aSOFTWARE_NAME[67]}" ]]
+		then
+			SELECTED_BROWSER=67 preference_index=-1
+
+		elif [[ $G_WHIP_RETURNED_VALUE == "${aSOFTWARE_NAME[113]}" ]]
+		then
+			SELECTED_BROWSER=113 preference_index=-2
+		fi
+
+		G_CONFIG_INJECT 'AUTO_SETUP_BROWSER_INDEX=' "AUTO_SETUP_BROWSER_INDEX=$preference_index" /boot/dietpi.txt
+		[[ $G_WHIP_RETURNED_VALUE == 'None' ]] && return 1 || return 0
+	}
+
 	# $1: software ID
 	Resolve_Dependencies(){
 
@@ -1896,81 +2074,20 @@ INDEX_BROWSER=$INDEX_BROWSER"
 			# Resolve webserver dependency based on install state and user preference
 			if [[ $i == 'webserver' ]]
 			then
-				# Check for existing webserver (Apache, Nginx, Lighttpd) installation
-				# - Do no reinstalls, as those are currently too intrusive, overriding custom configs
-				(( ${aSOFTWARE_INSTALL_STATE[83]} < 1 && ${aSOFTWARE_INSTALL_STATE[84]} < 1 && ${aSOFTWARE_INSTALL_STATE[85]} < 1 )) || continue
-
-				# No webserver installed, select one based on user preference
-				# - Apache
-				if (( $INDEX_WEBSERVER == 0 ))
-				then
-					i=83
-
-				# - Nginx
-				elif (( $INDEX_WEBSERVER == -1 ))
-				then
-					i=85
-
-				# - Lighttpd
-				else
-					i=84
-				fi
+				Select_Webserver_Dependency "$1" || continue
+				i=$SELECTED_WEBSERVER
 
 			# Resolve desktop dependency based on install state
 			elif [[ $i == 'desktop' ]]
 			then
-				# Check for existing desktop (LXDE, MATE, Xfce, GNUstep, LXQt) installation
-				# - Do no reinstalls, as those are loose dependencies
-				(( ${aSOFTWARE_INSTALL_STATE[23]} < 1 && ${aSOFTWARE_INSTALL_STATE[24]} < 1 && ${aSOFTWARE_INSTALL_STATE[25]} < 1 && ${aSOFTWARE_INSTALL_STATE[26]} < 1 && ${aSOFTWARE_INSTALL_STATE[173]} < 1 )) || continue
-
-				# No desktop installed, select one based on user preference
-				# - GNUstep
-				if (( $INDEX_DESKTOP == -4 ))
-				then
-					i=26
-
-				# - Xfce
-				elif (( $INDEX_DESKTOP == -1 ))
-				then
-					i=25
-
-				# - MATE
-				elif (( $INDEX_DESKTOP == -2 ))
-				then
-					i=24
-
-				# - LXQt
-				elif (( $INDEX_DESKTOP == -3 ))
-				then
-					i=173
-
-				# - LXDE
-				else
-					i=23
-				fi
+				Select_Desktop_Dependency "$1" || continue
+				i=$SELECTED_DESKTOP
 
 			# Resolve browser dependency based on install state
 			elif [[ $i == 'browser' ]]
 			then
-				# Check for existing browser (Firefox, Chromium) installation
-				# - Do no reinstalls, as those are loose dependencies
-				(( ${aSOFTWARE_INSTALL_STATE[67]} < 1 && ${aSOFTWARE_INSTALL_STATE[113]} < 1 )) || continue
-
-				# No browser installed, select one based on user preference
-				# - None
-				if (( $INDEX_BROWSER == 0 ))
-				then
-					continue
-
-				# - Chromium
-				elif (( $INDEX_BROWSER == -2 ))
-				then
-					i=113
-
-				# - Firefox
-				else
-					i=67
-				fi
+				Select_Browser_Dependency "$1" || continue
+				i=$SELECTED_BROWSER
 			fi
 
 			# Skip if dependency is marked for install already
@@ -2207,7 +2324,7 @@ _EOF_
 
 		fi
 
-		echo $output
+		echo "$output"
 
 	}
 
@@ -2215,9 +2332,9 @@ _EOF_
 	#	Download_Install 'https://file.com/file' [/path/to/target]
 	#	dps_index=$software_id Download_Install 'conf_0' /etc/conf.conf
 	# Optional input variables:
-	#	fallback_url='http...'	= URL to use if e.g. grabbing URL from api.github.com fails: https://dietpi.com/phpbb/viewtopic.php?p=17390#p17390
-	#	dps_index=$software_id	= Download from DietPi GitHub repo based on software ID/index
-	#	DEPS_LIST='pkg1 ...'	= Install APT dependency packages
+	#	fallback_url='http...'    = URL to use if e.g. grabbing URL from api.github.com fails: https://dietpi.com/phpbb/viewtopic.php?p=17390#p17390
+	#	dps_index=$software_id    = Download from DietPi GitHub repo based on software ID/index
+	#	aDEPS=('pkg1' 'pkg2' ...) = Install APT dependency packages
 	# NB: This does not support installs that require user input (e.g.: a whiptail prompt for deb installs)
 	Download_Install(){
 
@@ -2249,7 +2366,7 @@ _EOF_
 		G_EXEC cd "$G_WORKING_DIR" # Failsafe
 
 		# Download file
-		if [[ $DEPS_LIST ]]
+		if [[ ${aDEPS[0]} ]]
 		then
 			# Check URL before starting background download, as a failure does not terminate the install
 			# shellcheck disable=SC2154
@@ -2258,8 +2375,8 @@ _EOF_
 			# Download as background thread if dependencies are to be installed
 			G_THREAD_START curl -sSfL "$url" -o "$file"
 			# shellcheck disable=SC2086
-			G_AGI $DEPS_LIST
-			DEPS_LIST=
+			G_AGI "${aDEPS[@]}"
+			aDEPS=()
 			G_THREAD_WAIT
 		else
 			G_EXEC curl -sSfL "$url" -o "$file"
@@ -2351,6 +2468,7 @@ _EOF_
 		local file=$1 service=$2
 		local timeout=${3:-25} # Optional
 		local output=$4 pid # Optional, if timeout is set, hence for startups which may take long so that showing some process becomes reasonable
+		# shellcheck disable=SC2154
 		local content=$CREATE_CONFIG_CONTENT # Optional
 		unset -v CREATE_CONFIG_CONTENT
 
@@ -2376,7 +2494,7 @@ _EOF_
 		done
 
 		# Stop journal prints
-		[[ $output ]] && { kill $pid; wait $pid; } 2> /dev/null
+		[[ $output ]] && { kill "$pid"; wait "$pid"; } 2> /dev/null
 
 		# Stop service
 		sleep 1
@@ -2408,15 +2526,15 @@ _EOF_
 	# Run marked software installs
 	Install_Software(){
 
-		local software_id DEPS_LIST
+		local software_id aDEPS=()
 
 		# Configure iptables to use nf_tables or legacy API, depending on which is supported by kernel
 		Configure_iptables()
 		{
 			local alt='nft'
 			iptables-nft -L &> /dev/null || alt='legacy'
-			G_EXEC update-alternatives --set iptables /usr/sbin/iptables-$alt
-			G_EXEC update-alternatives --set ip6tables /usr/sbin/ip6tables-$alt
+			G_EXEC update-alternatives --set iptables "/usr/sbin/iptables-$alt"
+			G_EXEC update-alternatives --set ip6tables "/usr/sbin/ip6tables-$alt"
 		}
 
 		Enable_memory_cgroup()
@@ -2456,17 +2574,17 @@ _EOF_
 			Banner_Installing
 
 			# Generic X server + Mesa OpenGL libraries and utilities
-			DEPS_LIST='xserver-xorg-core xserver-xorg-input-libinput xinit dbus-x11 xfonts-base x11-xserver-utils x11-utils mesa-utils mesa-utils-extra'
+			aDEPS=('xserver-xorg-core' 'xserver-xorg-input-libinput' 'xinit' 'dbus-x11' 'xfonts-base' 'x11-xserver-utils' 'x11-utils' 'mesa-utils' 'mesa-utils-extra')
 
 			# RPi: Add fbdev display driver for legacy framebuffer graphics support, as modesetting requires KMS driver overlay for /dev/dri/card0 to exists.
-			(( $G_HW_MODEL > 9 )) || DEPS_LIST+=' xserver-xorg-video-fbdev'
+			(( $G_HW_MODEL > 9 )) || aDEPS+=('xserver-xorg-video-fbdev')
 
 			# VM
 			if (( $G_HW_MODEL == 20 ))
 			then
 				# If KMS/DRM is supported, add VMware DDX, which offers slightly better performance compared to modesetting. VirtualBox can emulate it as well, which is even the nowadays recommended default.
 				# Else (e.g. Hyper-V) add classic framebuffer DDX
-				[[ -e '/dev/dri' ]] && DEPS_LIST+=' xserver-xorg-video-vmware' || DEPS_LIST+=' xserver-xorg-video-fbdev'
+				[[ -e '/dev/dri' ]] && aDEPS+=('xserver-xorg-video-vmware') || aDEPS+=('xserver-xorg-video-fbdev')
 			fi
 
 			# Disable DPMS and screen blanking
@@ -2492,14 +2610,14 @@ _EOF_
 			# Odroid C2 legacy
 			elif (( $G_HW_MODEL == 12 )) && [[ $G_DISTRO -le 5 || ! -e '/dev/dri' ]]
 			then
-				apt-cache dumpavail | grep -q '^Package: mali450-odroid$' && DEPS_LIST='mali450-odroid'
+				apt-cache dumpavail | grep -q '^Package: mali450-odroid$' && aDEPS=('mali450-odroid')
 				if apt-cache dumpavail | grep -q '^Package: xf86-video-fbturbo-odroid$'
 				then
-					DEPS_LIST+=' libump-odroid xf86-video-fbturbo-odroid'
+					aDEPS+=('libump-odroid' 'xf86-video-fbturbo-odroid')
 					G_BACKUP_FP /etc/X11/xorg.conf
 					dps_index=$software_id Download_Install 'xorg_c2.conf' /etc/X11/xorg.conf
 				else
-					DEPS_LIST+=' xserver-xorg-video-fbdev'
+					aDEPS+=('xserver-xorg-video-fbdev')
 				fi
 
 			# Odroid N2 legacy: https://dietpi.com/phpbb/viewtopic.php?t=9206
@@ -2844,8 +2962,9 @@ unix_socket_directories = '/run/postgresql'" > "$i/00dietpi.conf"
 			G_EXEC chown -R dietpi:audio /mnt/dietpi_userdata/beets
 			G_EXEC chmod -R g+w /mnt/dietpi_userdata/beets
 
-			# Load central beets config all interactive bash shells
+			# Load global beets config in all interactive bash shells
 			echo 'export BEETSDIR=/mnt/dietpi_userdata/beets' > /etc/bashrc.d/dietpi-beets.sh
+			# shellcheck disable=SC1091
 			. /etc/bashrc.d/dietpi-beets.sh
 
 			# Install
@@ -2902,7 +3021,7 @@ unix_socket_directories = '/run/postgresql'" > "$i/00dietpi.conf"
 				(( $G_HW_MODEL > 9 )) || (( $G_RASPBIAN == 0 )) || version=11
 			fi
 
-			G_AGI openjdk-$version-jre-headless
+			G_AGI "openjdk-$version-jre-headless"
 
 		fi
 
@@ -2928,7 +3047,7 @@ unix_socket_directories = '/run/postgresql'" > "$i/00dietpi.conf"
 				(( $G_HW_MODEL > 9 )) || (( $G_RASPBIAN == 0 )) || version=11
 			fi
 
-			G_AGI openjdk-$version-jdk-headless
+			G_AGI "openjdk-$version-jdk-headless"
 
 		fi
 
@@ -2938,16 +3057,16 @@ unix_socket_directories = '/run/postgresql'" > "$i/00dietpi.conf"
 			Banner_Installing
 
 			# Deps: https://github.com/MichaIng/DietPi/issues/3614
-			DEPS_LIST='libatomic1'
+			aDEPS=('libatomic1')
 
 			# Download installer
 			Download_Install 'https://raw.githubusercontent.com/MichaIng/nodejs-linux-installer/master/node-install.sh'
 			G_EXEC chmod +x node-install.sh
 
 			# ARMv6: Use unofficial builds to get the latest version: https://github.com/MichaIng/nodejs-linux-installer/pull/2
-			local unofficial=
-			(( $G_HW_ARCH == 1 )) && unofficial='-u'
-			G_EXEC_OUTPUT=1 G_EXEC ./node-install.sh $unofficial
+			local unofficial=()
+			(( $G_HW_ARCH == 1 )) && unofficial=('-u')
+			G_EXEC_OUTPUT=1 G_EXEC ./node-install.sh "${unofficial[@]}"
 			G_EXEC_NOHALT=1 G_EXEC rm node-install.sh
 
 		fi
@@ -2960,16 +3079,17 @@ unix_socket_directories = '/run/postgresql'" > "$i/00dietpi.conf"
 			# Create piwheels config file for ARMv6 and ARMv7
 			[[ $G_HW_ARCH != [12] || -f '/etc/pip.conf' ]] || G_EXEC eval "echo -e '[global]\nextra-index-url=https://www.piwheels.org/simple/' > /etc/pip.conf"
 
-			# Workaround for missing and failing numpy v1.21.5 build: https://github.com/piwheels/packages/issues/287#issuecomment-1036500818
-			if (( $G_HW_MODEL < 3 && $G_DISTRO == 5 ))
+			# Workaround for missing and failing numpy >=v1.21.5 build: https://github.com/piwheels/packages/issues/287#issuecomment-1036500818
+			if (( $G_HW_ARCH < 3 && $G_DISTRO == 5 ))
 			then
-				G_EXEC eval 'echo "numpy!=1.21.5; python_version=='\''3.7'\''" > /etc/pip-constraints.txt'
+				G_EXEC eval 'echo "numpy<1.21.5; python_version=='\''3.7'\''" > /etc/pip-constraints.txt'
 				G_CONFIG_INJECT '\[install\]' '[install]' /etc/pip.conf
 				G_CONFIG_INJECT 'constraint=/etc/pip-constraints.txt' 'constraint=/etc/pip-constraints.txt' /etc/pip.conf '\[install\]'
 			fi
 
 			# Perform pip3 install (which includes setuptools and wheel modules)
-			DEPS_LIST='python3-dev' Download_Install 'https://bootstrap.pypa.io/get-pip.py'
+			aDEPS=('python3-dev')
+			Download_Install 'https://bootstrap.pypa.io/get-pip.py'
 			G_EXEC_OUTPUT=1 G_EXEC python3 get-pip.py
 			G_EXEC_NOHALT=1 G_EXEC rm get-pip.py
 
@@ -3033,6 +3153,7 @@ unix_socket_directories = '/run/postgresql'" > "$i/00dietpi.conf"
 export GOPATH=/mnt/dietpi_userdata/go
 export PATH="$PATH:/usr/local/go/bin:$GOPATH/bin"
 _EOF_
+			# shellcheck disable=SC1091
 			. /etc/bashrc.d/go.sh
 
 		fi
@@ -3060,9 +3181,6 @@ _EOF_
 		if (( ${aSOFTWARE_INSTALL_STATE[$software_id]} == 1 )); then
 
 			Banner_Installing
-
-			# Apply preference index
-			INDEX_DESKTOP=0
 
 			# RPi: Block packages from RPi desktop which conflict with a native LXDE desktop:
 			# - https://github.com/MichaIng/DietPi/issues/1558#issuecomment-691206284
@@ -3134,9 +3252,6 @@ _EOF_
 
 			Banner_Installing
 
-			# Apply preference index
-			INDEX_DESKTOP=-3
-
 			G_AGI lxqt qterminal xarchiver lxde-icon-theme upower xscreensaver featherpad speedcrunch
 
 			# Configs
@@ -3154,9 +3269,6 @@ _EOF_
 
 			Banner_Installing
 
-			# Apply preference index
-			INDEX_DESKTOP=-2
-
 			# Add xterm, as the mate-terminal is not compatible with desktop console shortcuts: https://github.com/MichaIng/DietPi/issues/3160#issuecomment-828305136
 			G_AGI mate-desktop-environment-core mate-media upower xterm
 
@@ -3169,9 +3281,6 @@ _EOF_
 
 			Banner_Installing
 
-			# Apply preference index
-			INDEX_DESKTOP=-4
-
 			G_AGI wmaker gnustep gnustep-devel gnustep-games upower policykit-1 xterm
 
 			Create_Desktop_Shared_Items
@@ -3182,9 +3291,6 @@ _EOF_
 		if (( ${aSOFTWARE_INSTALL_STATE[$software_id]} == 1 )); then
 
 			Banner_Installing
-
-			# Apply preference index
-			INDEX_DESKTOP=-1
 
 			G_AGI xfce4 xfce4-terminal gnome-icon-theme tango-icon-theme upower policykit-1
 
@@ -3215,9 +3321,6 @@ _EOF_
 		if (( ${aSOFTWARE_INSTALL_STATE[$software_id]} == 1 )); then
 
 			Banner_Installing
-
-			# Apply preference index
-			INDEX_BROWSER=-1
 
 			# libpci3: https://bugs.debian.org/cgi-bin/bugreport.cgi?bug=993308
 			G_AGI firefox-esr libpci3
@@ -3405,22 +3508,23 @@ _EOF_
 			# - Remove previous disk cache dir or symlink
 			G_EXEC rm -Rf /var/cache/samba
 			# - Pre-create RAM cache dir
-			G_EXEC mkdir -p /run/samba-cache
+			[[ -d '/run/samba-cache' ]] || G_EXEC mkdir /run/samba-cache
 			# - Link disk cache to RAM
 			G_EXEC ln -s /run/samba-cache /var/cache/samba
 			# - Create RAM cache dir automatically on boot
 			echo 'd /run/samba-cache' > /etc/tmpfiles.d/dietpi-samba_cache.conf
 
+			# Config: Preserve on reinstall
+			if [[ ! -f '/etc/samba/smb.conf' ]]
+			then
+				dps_index=$software_id Download_Install 'conf' /etc/samba/smb.conf
+				G_CONFIG_INJECT 'max connections =' "max connections = $(( $G_HW_CPU_CORES * 2 ))" /etc/samba/smb.conf
+			fi				
+
 			G_AGI samba
 			G_EXEC systemctl stop nmbd smbd
 
 			echo -e "$GLOBAL_PW\n$GLOBAL_PW" | smbpasswd -s -a dietpi
-
-			local fp_conf='/etc/samba/smb.conf'
-			G_BACKUP_FP $fp_conf
-			dps_index=$software_id Download_Install 'conf' $fp_conf
-
-			G_CONFIG_INJECT 'max connections =' "max connections = $(( $G_HW_CPU_CORES * 2 ))" $fp_conf
 
 		fi
 
@@ -3457,9 +3561,6 @@ _EOF_
 		if (( ${aSOFTWARE_INSTALL_STATE[$software_id]} == 1 )); then
 
 			Banner_Installing
-
-			# Apply preference index
-			INDEX_WEBSERVER=0
 
 			# Pre-create a dummy port 80 vhost if it does not exist yet, so we can avoid overwriting it on reinstalls.
 			if [[ ! -f '/etc/apache2/sites-available/000-default.conf' ]]
@@ -3545,9 +3646,6 @@ _EOF_
 
 			Banner_Installing
 
-			# Apply preference index
-			INDEX_WEBSERVER=-1
-
 			local apackages=('nginx-light')
 			# Install Certbot module, if Certbot was already installed
 			(( ${aSOFTWARE_INSTALL_STATE[92]} == 2 )) && apackages+=('python3-certbot-nginx')
@@ -3579,8 +3677,7 @@ _EOF_
 
 			Banner_Installing
 
-			local deflate=
-			local openssl=
+			local deflate=() openssl=()
 
 			# Migrate existing configs in case of distro upgrades
 			if [[ -f '/etc/lighttpd/lighttpd.conf' ]]
@@ -3598,29 +3695,26 @@ _EOF_
 					G_DIETPI-NOTIFY 2 'Bullseye upgrade detected: Migrating from mod_compress to mod_deflate'
 					G_EXEC sed -Ei '/^compress\..*=[[:blank:]]*["(].*[")]$/d' /etc/lighttpd/lighttpd.conf
 					G_EXEC sed -i '/^[[:blank:]]*"mod_compress",$/d' /etc/lighttpd/lighttpd.conf
-					deflate='lighttpd-mod-deflate'
+					deflate=('lighttpd-mod-deflate')
 				fi
 
 				# Bullseye: Install OpenSSL module if DietPi-LetsEncrypt was used
 				if [[ $G_DISTRO -gt 5 && -f '/boot/dietpi/.dietpi-letsencrypt' ]]
 				then
 					G_DIETPI-NOTIFY 2 'DietPi-LetsEncrypt usage detected: Installing OpenSSL module'
-					openssl='lighttpd-mod-openssl'
+					openssl=('lighttpd-mod-openssl')
 					[[ -f '/etc/lighttpd/conf-available/50-dietpi-https.conf' ]] && ! grep -q '"mod_openssl"' /etc/lighttpd/conf-available/50-dietpi-https.conf && G_EXEC sed -i '1iserver.modules += ( "mod_openssl" )' /etc/lighttpd/conf-available/50-dietpi-https.conf
 				fi
 			fi
 
-			# Apply preference index
-			INDEX_WEBSERVER=-2
-
 			# perl is required for lighty-enable-mod, it has been degraded to recommends only with Buster.
-			G_AGI lighttpd perl $deflate $openssl
+			G_AGI lighttpd perl "${deflate[@]}" "${openssl[@]}"
 			G_EXEC systemctl stop lighttpd
 
 			Remove_SysV lighttpd
 
 			# Enable mod_deflate, if flagged
-			[[ $deflate && ! -f '/etc/lighttpd/conf-enabled/20-deflate.conf' ]] && G_EXEC lighty-enable-mod deflate
+			[[ ${deflate[0]} && ! -f '/etc/lighttpd/conf-enabled/20-deflate.conf' ]] && G_EXEC lighty-enable-mod deflate
 
 			# Change webroot from /var/www/html to /var/www
 			G_CONFIG_INJECT 'server.document-root' 'server.document-root = "/var/www"' /etc/lighttpd/lighttpd.conf
@@ -3775,13 +3869,13 @@ _EOF_
 
 			# We create our own PHP mod to add DietPi specific configs.
 			target_php_ini="/etc/php/$PHP_VERSION/mods-available/dietpi.ini"
-			echo -e '; DietPi PHP settings\n; priority=97' > $target_php_ini
+			echo -e '; DietPi PHP settings\n; priority=97' > "$target_php_ini"
 
 			# Session files need to be outside of /tmp and /var/tmp due to PrivateTmp=true, else phpsessionclean.service cannot clean sessions
 			G_EXEC mkdir -p /run/php_sessions
 			G_EXEC chmod 1733 /run/php_sessions
 			echo -e '# Pre-create PHP sessions dir\nd /run/php_sessions 1733' > /etc/tmpfiles.d/dietpi-php_sessions.conf
-			G_CONFIG_INJECT 'session.save_path[[:blank:]=]' 'session.save_path="/run/php_sessions"' $target_php_ini
+			G_CONFIG_INJECT 'session.save_path[[:blank:]=]' 'session.save_path="/run/php_sessions"' "$target_php_ini"
 
 			# File uploads: https://github.com/MichaIng/DietPi/issues/546
 			# - This is especially relevant for cloud software like ownCloud/Nextcloud.
@@ -3790,20 +3884,20 @@ _EOF_
 			# - ownCloud/Nextcloud do/did override this limit to 512 MiB, a reasonable limit which can usually still be hold in RAM without issues.
 			# - Low RAM devices (RPi1 256 MiB model) require a swap file for this, however, it is still better to cause disk writes through swap file during large file uploads only, then doing this for each and every uploaded file.
 			# - When larger file uploads are required, it depends on the system total RAM, rootfs disk and available external drives if/where to move tmp file uploads, resize or move swap file. This should be then left to user.
-			G_CONFIG_INJECT 'upload_tmp_dir[[:blank:]=]' 'upload_tmp_dir="/tmp"' $target_php_ini
-			G_CONFIG_INJECT 'upload_max_filesize[[:blank:]=]' 'upload_max_filesize=512M' $target_php_ini
-			G_CONFIG_INJECT 'post_max_size[[:blank:]=]' 'post_max_size=512M' $target_php_ini
+			G_CONFIG_INJECT 'upload_tmp_dir[[:blank:]=]' 'upload_tmp_dir="/tmp"' "$target_php_ini"
+			G_CONFIG_INJECT 'upload_max_filesize[[:blank:]=]' 'upload_max_filesize=512M' "$target_php_ini"
+			G_CONFIG_INJECT 'post_max_size[[:blank:]=]' 'post_max_size=512M' "$target_php_ini"
 			# - Nginx: https://github.com/MichaIng/DietPi/issues/546 => https://github.com/MichaIng/DietPi/blob/dev/.conf/dps_85/nginx.conf
 
 			# Cache settings
 			local cache_size=$(( $RAM_PHYS / 30 ))
 			(( $cache_size < 16 )) && cache_size=16
 			# - OPcache
-			G_CONFIG_INJECT 'opcache.memory_consumption[[:blank:]=]' "opcache.memory_consumption=$cache_size" $target_php_ini
-			G_CONFIG_INJECT 'opcache.revalidate_freq[[:blank:]=]' 'opcache.revalidate_freq=60' $target_php_ini # 1 minute
+			G_CONFIG_INJECT 'opcache.memory_consumption[[:blank:]=]' "opcache.memory_consumption=$cache_size" "$target_php_ini"
+			G_CONFIG_INJECT 'opcache.revalidate_freq[[:blank:]=]' 'opcache.revalidate_freq=60' "$target_php_ini" # 1 minute
 			# - APCu
-			G_CONFIG_INJECT 'apc.shm_size[[:blank:]=]' "apc.shm_size=$(( $cache_size / 2 ))M" $target_php_ini
-			G_CONFIG_INJECT 'apc.ttl[[:blank:]=]' 'apc.ttl=259200' $target_php_ini # 3 days
+			G_CONFIG_INJECT 'apc.shm_size[[:blank:]=]' "apc.shm_size=$(( $cache_size / 2 ))M" "$target_php_ini"
+			G_CONFIG_INJECT 'apc.ttl[[:blank:]=]' 'apc.ttl=259200' "$target_php_ini" # 3 days
 
 			# Enable all available PHP modules
 			local amodules=()
@@ -3843,9 +3937,9 @@ _EOF_
 
 			# Install required PHP modules: https://docs.phpmyadmin.net/en/latest/require.html#php
 			# - Add JSON module for PHP7, as it does not exist (embedded in core package) on PHP8
-			local json=
-			[[ $PHP_VERSION == 8* ]] || json="php$PHP_VERSION-json"
-			G_AGI php$PHP_VERSION-{curl,gd,mbstring,xml,zip} $json
+			local json=()
+			[[ $PHP_VERSION == 8* ]] || json=("php$PHP_VERSION-json")
+			G_AGI "php$PHP_VERSION"-{curl,gd,mbstring,xml,zip} "${json[@]}"
 
 			# Quick install: https://docs.phpmyadmin.net/en/latest/setup.html#quick-install
 			# - Get latest version name
@@ -3861,7 +3955,7 @@ _EOF_
 			G_EXEC mv "phpMyAdmin-$version-english" /var/www/phpmyadmin
 
 			# Enable required PHP modules: https://docs.phpmyadmin.net/en/latest/require.html#php
-			G_EXEC phpenmod ctype curl gd mbstring xml zip ${json##*-}
+			G_EXEC phpenmod ctype curl gd mbstring xml zip "${json[@]##*-}"
 
 			# Install and enable webserver config
 			# - Apache
@@ -4150,96 +4244,6 @@ _EOF_
 
 		fi
 
-		software_id=58 # OpenBazaar
-		if (( ${aSOFTWARE_INSTALL_STATE[$software_id]} == 1 )); then
-
-			Banner_Installing
-
-			# Pre-v7.1 reinstall: Remove old non-module install
-			command -v go > /dev/null && GO111MODULE='off' GOPATH='/mnt/dietpi_userdata/go' G_EXEC_NOEXIT=1 G_EXEC go clean -i github.com/OpenBazaar...
-			[[ -f '/mnt/dietpi_userdata/go/bin/openbazaar-go' ]] && G_EXEC_NOEXIT=1 G_EXEC rm /mnt/dietpi_userdata/go/bin/openbazaar-go
-			[[ -d '/mnt/dietpi_userdata/go/src/github.com/OpenBazaar' ]] && G_EXEC_NOEXIT=1 G_EXEC rm -R /mnt/dietpi_userdata/go/src/github.com/OpenBazaar
-			[[ -d '/mnt/dietpi_userdata/go/src/github.com' ]] && G_EXEC_NOEXIT=1 G_EXEC rmdir --ignore-fail-on-non-empty /mnt/dietpi_userdata/go/src/github.com
-			[[ -d '/etc/openbazaar-server' ]] && G_EXEC_NOEXIT=1 G_EXEC rm -R /etc/openbazaar-server # Pre-v6.15
-
-			# x86_64: Download pre-compiled binary
-			if (( $G_HW_ARCH == 10 ))
-			then
-				local fallback_url='https://github.com/mobazha/openbazaar-desktop/releases/download/v2.4.12/openbazaar-go-linux-amd64'
-				Download_Install "$(curl -sSfL 'https://api.github.com/repos/mobazha/openbazaar-desktop/releases/latest' | mawk -F\" '/"browser_download_url": ".*\/openbazaar-go-linux-amd64"/{print $4}')"
-				command -v strip > /dev/null && G_EXEC strip --remove-section=.comment --remove-section=.note openbazaar-go-linux-amd64
-				G_EXEC mv openbazaar-go-linux-amd64 /usr/local/bin/openbazaar-go
-				G_EXEC chmod +x /usr/local/bin/openbazaar-go
-
-			# ARM: Go build required
-			else
-				# OpenBazaar cannot be installed in module mode yet: https://github.com/OpenBazaar/openbazaar-go/issues/2072
-				G_AGI gcc libc6-dev
-				# Build it in legacy mode in tmpfs and move only binary in place
-				G_EXEC cd "$G_WORKING_DIR" # Failsafe
-				GO111MODULE=off GOPATH=$PWD HOME=$PWD G_EXEC_OUTPUT=1 G_EXEC go get -v github.com/mobazha/openbazaar-go
-				G_EXEC strip --remove-section=.comment --remove-section=.note bin/openbazaar-go
-				G_EXEC mv bin/openbazaar-go /usr/local/bin/openbazaar-go
-				G_EXEC_NOHALT=1 G_EXEC rm -Rf .cache src bin
-			fi
-
-			# Init OpenBazaar to have config file available, if not yet the case, and edit to allow remote client access
-			if [[ ! -f '/mnt/dietpi_userdata/openbazaar/config' ]]
-			then
-				# Data dir
-				[[ -d '/mnt/dietpi_userdata/openbazaar' ]] || G_EXEC mkdir /mnt/dietpi_userdata/openbazaar
-
-				G_EXEC_OUTPUT=1 G_EXEC openbazaar-go init -d /mnt/dietpi_userdata/openbazaar
-
-				# Add current IPv4 address as gateway to allow external client connection
-				G_CONFIG_INJECT '"Gateway": "' "        \"Gateway\": \"/ip4/$(G_GET_NET -4 ip)/tcp/4002\"," /mnt/dietpi_userdata/openbazaar/config
-
-				# Client connection credentials
-				G_DIETPI-NOTIFY 2 "Please enter username and password for your ${aSOFTWARE_NAME[$software_id]} client connection:"
-				G_EXEC_OUTPUT=1 G_EXEC openbazaar-go setapicreds -d /mnt/dietpi_userdata/openbazaar
-
-				# Client IP needs to be added to allowed IP list
-				local ob_client_ip='' invalid_entry=''
-				while :
-				do
-					if G_WHIP_INPUTBOX "${invalid_entry}Please enter the IPv4 address of your ${aSOFTWARE_NAME[$software_id]} client machine.
-\nThis is required, since the ${aSOFTWARE_NAME[$software_id]} server node by default does not allow any remote connection." && [[ $G_WHIP_RETURNED_VALUE =~ ^[0-9]+'.'[0-9]+'.'[0-9]+'.'[0-9]+$ ]]
-					then
-						ob_client_ip=$G_WHIP_RETURNED_VALUE
-						break
-					else
-						invalid_entry='[FAILED] Please enter a valid IPv4 address.\n\n'
-					fi
-				done
-				G_CONFIG_INJECT '"AllowedIPs":' "        \"AllowedIPs\": [\"$ob_client_ip\"]," /mnt/dietpi_userdata/openbazaar/config
-			else
-				G_DIETPI-NOTIFY 2 "Existing ${aSOFTWARE_NAME[$software_id]} config found. Skipping pre-configuration..."
-			fi
-
-			# User
-			Create_User -d /mnt/dietpi_userdata/openbazaar openbazaar
-
-			# Service
-			cat << '_EOF_' > /etc/systemd/system/openbazaar.service
-[Unit]
-Description=OpenBazaar (DietPi)
-Documentation=https://docs.openbazaar.org/
-Wants=network-online.target
-After=network-online.target
-
-[Service]
-User=openbazaar
-WorkingDirectory=/mnt/dietpi_userdata/openbazaar
-ExecStart=/usr/local/bin/openbazaar-go start -d /mnt/dietpi_userdata/openbazaar -f -l notice
-
-[Install]
-WantedBy=multi-user.target
-_EOF_
-			# Permissions
-			G_EXEC chown -R openbazaar:openbazaar /mnt/dietpi_userdata/openbazaar
-
-		fi
-
 		software_id=133 # YaCy
 		if (( ${aSOFTWARE_INSTALL_STATE[$software_id]} == 1 )); then
 
@@ -4400,7 +4404,7 @@ _EOF_
 		if (( ${aSOFTWARE_INSTALL_STATE[$software_id]} == 1 )); then
 
 			Banner_Installing
-			DEPS_LIST="php$PHP_VERSION-intl" # https://doc.owncloud.com/server/next/admin_manual/installation/manual_installation/manual_installation_prerequisites.html#php-extensions
+			aDEPS=("php$PHP_VERSION-intl") # https://doc.owncloud.com/server/next/admin_manual/installation/manual_installation/manual_installation_prerequisites.html#php-extensions
 
 			if [[ -f '/var/www/owncloud/occ' ]]; then
 
@@ -4425,15 +4429,15 @@ _EOF_
 
 			fi
 
-			[[ $DEPS_LIST ]] && { G_DIETPI-NOTIFY 2 'Installing required PHP modules'; G_AGI $DEPS_LIST; DEPS_LIST=''; }
+			[[ ${aDEPS[0]} ]] && { G_DIETPI-NOTIFY 2 'Installing required PHP modules'; G_AGI "${aDEPS[@]}"; aDEPS=(); }
 
 			G_DIETPI-NOTIFY 2 'Enabling required PHP modules'
 			# - Add JSON module for PHP7, as it does not exist (embedded in core package) on PHP8
-			local json=
-			[[ $PHP_VERSION == 8* ]] || json='json'
-			G_EXEC phpenmod ctype curl dom gd iconv intl mbstring pdo_mysql posix simplexml xmlreader xmlwriter zip fileinfo opcache apcu redis exif $json
+			local json=()
+			[[ $PHP_VERSION == 8* ]] || json=('json')
+			G_EXEC phpenmod ctype curl dom gd iconv intl mbstring pdo_mysql posix simplexml xmlreader xmlwriter zip fileinfo opcache apcu redis exif "${json[@]}"
 			G_DIETPI-NOTIFY 2 'Enabling APCu memory cache for PHP command line usage (CLI) as well, including ownCloud occ command and cron jobs.'
-			echo -e '; ownCloud PHP settings\n; priority=98\napc.enable_cli=1' > /etc/php/$PHP_VERSION/mods-available/dietpi-owncloud.ini
+			echo -e '; ownCloud PHP settings\n; priority=98\napc.enable_cli=1' > "/etc/php/$PHP_VERSION/mods-available/dietpi-owncloud.ini"
 			G_EXEC phpenmod dietpi-owncloud
 
 			if (( ${aSOFTWARE_INSTALL_STATE[83]} > 0 )); then
@@ -4447,7 +4451,7 @@ _EOF_
 					G_WHIP_MSG "Existing ownCloud Apache configuration found, will preserve the old one and save the new one for review and comparison to: $owncloud_conf"
 
 				fi
-				dps_index=$software_id Download_Install 'apache.owncloud.conf' $owncloud_conf
+				dps_index=$software_id Download_Install 'apache.owncloud.conf' "$owncloud_conf"
 				a2ensite dietpi-owncloud 1> /dev/null
 				# Cal/CardDAV redirects to ownCloud DAV endpoint
 				if [[ ! -f '/etc/apache2/conf-available/dietpi-dav_redirect.conf' ]]; then
@@ -4475,7 +4479,7 @@ Redirect 301 /.well-known/caldav  /owncloud/remote.php/dav' > /etc/apache2/conf-
 					G_WHIP_MSG "Existing ownCloud Lighttpd configuration found, will preserve the old one and save the new one for review and comparison to: $owncloud_conf"
 
 				fi
-				dps_index=$software_id Download_Install 'lighttpd.owncloud.conf' $owncloud_conf
+				dps_index=$software_id Download_Install 'lighttpd.owncloud.conf' "$owncloud_conf"
 				G_EXEC_POST_FUNC(){ [[ $exit_code == 2 ]] && exit_code=0; } # Do not fail if modules are enabled already
 				G_EXEC lighty-enable-mod rewrite dietpi-owncloud
 
@@ -4502,7 +4506,7 @@ url.redirect += (
 					G_WHIP_MSG "Existing ownCloud Nginx configuration found, will preserve the old one and save the new one for review and comparison to: $owncloud_conf"
 
 				fi
-				dps_index=$software_id Download_Install 'nginx.owncloud.conf' $owncloud_conf
+				dps_index=$software_id Download_Install 'nginx.owncloud.conf' "$owncloud_conf"
 
 				# Cal/CardDAV redirects to ownCloud DAV endpoint
 				if [[ ! -f '/etc/nginx/sites-dietpi/dietpi-dav_redirect.conf' ]]; then
@@ -4557,15 +4561,15 @@ The install script will now exit. After applying one of the the above, rerun die
 			elif [[ -f $datadir/dietpi-owncloud-database-backup.sql ]]; then
 
 				G_DIETPI-NOTIFY 2 'ownCloud database backup found, starting recovery...'
-				local dbuser=$(grep -m1 "^[[:blank:]]*'dbuser'" $config_php | mawk -F\' '{print $4}')
-				local dbpass=$(grep -m1 "^[[:blank:]]*'dbpassword'" $config_php | mawk -F\' '{print $4}')
+				local dbuser=$(grep -m1 "^[[:blank:]]*'dbuser'" "$config_php" | mawk -F\' '{print $4}')
+				local dbpass=$(grep -m1 "^[[:blank:]]*'dbpassword'" "$config_php" | mawk -F\' '{print $4}')
 				/boot/dietpi/func/create_mysql_db owncloud "$dbuser" "$dbpass"
 				mysql owncloud < "$datadir/dietpi-owncloud-database-backup.sql"
 				# Adjust database data directory entry, in case it changed due to server migration
-				local datadir_old=$(grep -m1 "^[[:blank:]]*'datadirectory'" $config_php | mawk -F\' '{print $4}')
+				local datadir_old=$(grep -m1 "^[[:blank:]]*'datadirectory'" "$config_php" | mawk -F\' '{print $4}')
 				G_EXEC mysql -e "update owncloud.oc_storages set id='local::$datadir/' where id rlike 'local::$datadir_old';"
 
-			elif ! grep -q "'installed' => true," $config_php 2>/dev/null; then
+			elif ! grep -q "'installed' => true," "$config_php" 2>/dev/null; then
 
 				local username=$(sed -n '/^[[:blank:]]*SOFTWARE_OWNCLOUD_NEXTCLOUD_USERNAME=/{s/^[^=]*=//p;q}' /boot/dietpi.txt)
 				[[ $username ]] || username='admin'
@@ -4581,7 +4585,7 @@ The install script will now exit. After applying one of the the above, rerun die
 				# - Replace password strings internally to avoid printing it to console
 				G_EXEC_PRE_FUNC(){ acommand[10]=$oc_password acommand[14]=$GLOBAL_PW; }
 				# - Checking output for stack trace to handle internal errors that do not lead to php error exit code
-				G_EXEC_POST_FUNC(){ grep -qi 'Stack trace' $fp_log && exit_code=255; }
+				G_EXEC_POST_FUNC(){ grep -qi 'Stack trace' "$fp_log" && exit_code=255; }
 				G_EXEC occ maintenance:install --no-interaction --database 'mysql' --database-name 'owncloud' --database-user 'tmp_root' --database-pass "${oc_password//?/X}" --admin-user "$username" --admin-pass "${GLOBAL_PW//?/X}" --data-dir "$datadir"
 				G_EXEC mysql -e 'drop user tmp_root@localhost;'
 				unset -v oc_password
@@ -4592,43 +4596,43 @@ The install script will now exit. After applying one of the the above, rerun die
 			fi
 
 			# Enable ownCloud to use 4-byte database
-			G_CONFIG_INJECT "'mysql.utf8mb4'" "'mysql.utf8mb4' => true," $config_php "'dbpassword'"
+			G_CONFIG_INJECT "'mysql.utf8mb4'" "'mysql.utf8mb4' => true," "$config_php" "'dbpassword'"
 
 			# Add local IP and hostname to trusted domains.
 			# If "1 => '" does not exist, the config.php is not copied e.g. from older instance, so we add entries.
-			if ! grep -q "1 => '" $config_php; then
+			if ! grep -q "1 => '" "$config_php"; then
 
-				sed -i "/0 => 'localhost'/a     1 => '$(G_GET_NET ip)'," $config_php
-				sed -i "/1 => '/a     2 => '$(</etc/hostname)'," $config_php
+				sed -i "/0 => 'localhost'/a     1 => '$(G_GET_NET ip)'," "$config_php"
+				sed -i "/1 => '/a     2 => '$(</etc/hostname)'," "$config_php"
 
 			fi
 
 			# Set CLI URL to ownCloud sub directory:
-			G_EXEC sed -i "s|'http://localhost'|'http://localhost/owncloud'|" $config_php
+			G_EXEC sed -i "s|'http://localhost'|'http://localhost/owncloud'|" "$config_php"
 
 			# Set pretty URLs (without /index.php/) on Apache:
 			if (( ${aSOFTWARE_INSTALL_STATE[83]} > 0 )); then
 
-				GCI_PRESERVE=1 G_CONFIG_INJECT "'htaccess.RewriteBase'" "'htaccess.RewriteBase' => '/owncloud'," $config_php "'overwrite.cli.url'"
+				GCI_PRESERVE=1 G_CONFIG_INJECT "'htaccess.RewriteBase'" "'htaccess.RewriteBase' => '/owncloud'," "$config_php" "'overwrite.cli.url'"
 				occ maintenance:update:htaccess
 
 			fi
 
 			# APCu Memcache
-			GCI_PRESERVE=1 G_CONFIG_INJECT "'memcache.local'" "'memcache.local' => '\\\\OC\\\\Memcache\\\\APCu'," $config_php "'version'"
+			GCI_PRESERVE=1 G_CONFIG_INJECT "'memcache.local'" "'memcache.local' => '\\\\OC\\\\Memcache\\\\APCu'," "$config_php" "'version'"
 
 			# Redis for transactional file locking:
 			G_DIETPI-NOTIFY 2 'Enabling Redis for transactional file locking.' # https://doc.owncloud.org/server/administration_manual/configuration/server/caching_configuration.html#configuring-transactional-file-locking
 			local redis_conf='/etc/redis/redis.conf'
 			# - Enable Redis socket and grant www-data access to it
-			GCI_PRESERVE=1 G_CONFIG_INJECT 'unixsocket[[:blank:]]' 'unixsocket /run/redis/redis-server.sock' $redis_conf
-			G_CONFIG_INJECT 'unixsocketperm[[:blank:]]' 'unixsocketperm 770' $redis_conf
+			GCI_PRESERVE=1 G_CONFIG_INJECT 'unixsocket[[:blank:]]' 'unixsocket /run/redis/redis-server.sock' "$redis_conf"
+			G_CONFIG_INJECT 'unixsocketperm[[:blank:]]' 'unixsocketperm 770' "$redis_conf"
 			G_EXEC usermod -aG redis www-data
 			G_EXEC systemctl restart redis-server
 			# - Enable ownCloud to use Redis socket for transactional file locking:
-			G_CONFIG_INJECT "'filelocking.enabled'" "'filelocking.enabled' => true," $config_php "'memcache.local'"
-			local redis_sock=$(grep -m1 '^[[:blank:]]*unixsocket[[:blank:]]' $redis_conf | mawk '{print $2}') # Re-estimate in case of existing custom path
-			GCI_PRESERVE=1 GCI_NEWLINE=1 G_CONFIG_INJECT "'memcache.locking'" "'memcache.locking' => '\\\\OC\\\\Memcache\\\\Redis',\n'redis' => array ('host' => '$redis_sock', 'port' => 0,)," $config_php "'filelocking.enabled'"
+			G_CONFIG_INJECT "'filelocking.enabled'" "'filelocking.enabled' => true," "$config_php" "'memcache.local'"
+			local redis_sock=$(grep -m1 '^[[:blank:]]*unixsocket[[:blank:]]' "$redis_conf" | mawk '{print $2}') # Re-estimate in case of existing custom path
+			GCI_PRESERVE=1 GCI_NEWLINE=1 G_CONFIG_INJECT "'memcache.locking'" "'memcache.locking' => '\\\\OC\\\\Memcache\\\\Redis',\n'redis' => array ('host' => '$redis_sock', 'port' => 0,)," "$config_php" "'filelocking.enabled'"
 
 			# Enable ownCloud background cron job:
 			crontab -u www-data -l 2> /dev/null | grep -q '/var/www/owncloud/.*cron' || ( crontab -u www-data -l 2> /dev/null ; echo '*/15 * * * * php /var/www/owncloud/occ system:cron' ) | crontab -u www-data -
@@ -4643,7 +4647,7 @@ The install script will now exit. After applying one of the the above, rerun die
 		if (( ${aSOFTWARE_INSTALL_STATE[$software_id]} == 1 )); then
 
 			Banner_Installing
-			DEPS_LIST="php$PHP_VERSION-intl" # https://docs.nextcloud.com/server/stable/admin_manual/installation/source_installation.html#prerequisites-for-manual-installation
+			aDEPS=("php$PHP_VERSION-intl") # https://docs.nextcloud.com/server/stable/admin_manual/installation/source_installation.html#prerequisites-for-manual-installation
 
 			if [[ -f '/var/www/nextcloud/occ' ]]; then
 
@@ -4671,18 +4675,18 @@ The install script will now exit. After applying one of the the above, rerun die
 
 			fi
 
-			[[ $DEPS_LIST ]] && { G_DIETPI-NOTIFY 2 'Installing required PHP modules'; G_AGI $DEPS_LIST; DEPS_LIST=''; }
+			[[ ${aDEPS[0]} ]] && { G_DIETPI-NOTIFY 2 'Installing required PHP modules'; G_AGI "${aDEPS[@]}"; aDEPS=(); }
 
 			G_DIETPI-NOTIFY 2 'Enabling required PHP modules'
 			# - Add JSON module for PHP7, as it does not exist (embedded in core package) on PHP8
-			local json=
-			[[ $PHP_VERSION == 8* ]] || json='json'
-			G_EXEC phpenmod ctype curl dom gd intl mbstring pdo_mysql posix simplexml xmlreader xmlwriter zip fileinfo opcache apcu redis exif $json
+			local json=()
+			[[ $PHP_VERSION == 8* ]] || json=('json')
+			G_EXEC phpenmod ctype curl dom gd intl mbstring pdo_mysql posix simplexml xmlreader xmlwriter zip fileinfo opcache apcu redis exif "${json[@]}"
 
 			G_DIETPI-NOTIFY 2 'Apply PHP override settings for Nextcloud.' # https://docs.nextcloud.com/server/stable/admin_manual/installation/server_tuning.html#enable-php-opcache
-			local memory_consumption=$(sed -n '/^[[:blank:]]*opcache.memory_consumption=/{s/^[^=]*=//p;q}' /etc/php/$PHP_VERSION/mods-available/dietpi.ini)
+			local memory_consumption=$(sed -n '/^[[:blank:]]*opcache.memory_consumption=/{s/^[^=]*=//p;q}' "/etc/php/$PHP_VERSION/mods-available/dietpi.ini")
 			(( $memory_consumption < 64 )) && memory_consumption='\nopcache.memory_consumption=64' || memory_consumption=
-			echo -e "; Nextcloud PHP settings\n; priority=98\nmemory_limit=512M$memory_consumption\nopcache.revalidate_freq=5\napc.enable_cli=1" > /etc/php/$PHP_VERSION/mods-available/dietpi-nextcloud.ini
+			echo -e "; Nextcloud PHP settings\n; priority=98\nmemory_limit=512M$memory_consumption\nopcache.revalidate_freq=5\napc.enable_cli=1" > "/etc/php/$PHP_VERSION/mods-available/dietpi-nextcloud.ini"
 			G_EXEC phpenmod dietpi-nextcloud
 
 			if (( ${aSOFTWARE_INSTALL_STATE[83]} > 0 )); then
@@ -4696,7 +4700,7 @@ The install script will now exit. After applying one of the the above, rerun die
 					G_WHIP_MSG "Existing Nextcloud Apache configuration found, will preserve the old one and save the new one for review and comparison to: $nextcloud_conf"
 
 				fi
-				dps_index=$software_id Download_Install 'apache.nextcloud.conf' $nextcloud_conf
+				dps_index=$software_id Download_Install 'apache.nextcloud.conf' "$nextcloud_conf"
 				a2ensite dietpi-nextcloud 1> /dev/null
 				# Cal/CardDAV redirects to Nextcloud DAV endpoint
 				if [[ ! -f '/etc/apache2/conf-available/dietpi-dav_redirect.conf' ]]; then
@@ -4724,7 +4728,7 @@ Redirect 301 /.well-known/caldav  /nextcloud/remote.php/dav' > /etc/apache2/conf
 					G_WHIP_MSG "Existing Nextcloud Lighttpd configuration found, will preserve the old one and save the new one for review and comparison to: $nextcloud_conf"
 
 				fi
-				dps_index=$software_id Download_Install 'lighttpd.nextcloud.conf' $nextcloud_conf
+				dps_index=$software_id Download_Install 'lighttpd.nextcloud.conf' "$nextcloud_conf"
 				G_EXEC_POST_FUNC(){ [[ $exit_code == 2 ]] && exit_code=0; } # Do not fail if modules are enabled already
 				G_EXEC lighty-enable-mod rewrite dietpi-nextcloud
 
@@ -4751,7 +4755,7 @@ url.redirect += (
 					G_WHIP_MSG "Existing Nextcloud Nginx configuration found, will preserve the old one and save the new one for review and comparison to: $nextcloud_conf"
 
 				fi
-				dps_index=$software_id Download_Install 'nginx.nextcloud.conf' $nextcloud_conf
+				dps_index=$software_id Download_Install 'nginx.nextcloud.conf' "$nextcloud_conf"
 
 				# Cal/CardDAV redirects to Nextcloud DAV endpoint
 				if [[ ! -f '/etc/nginx/sites-dietpi/dietpi-dav_redirect.conf' ]]; then
@@ -4806,15 +4810,15 @@ The install script will now exit. After applying one of the the above, rerun die
 			elif [[ -f $datadir/dietpi-nextcloud-database-backup.sql ]]; then
 
 				G_DIETPI-NOTIFY 2 'Nextcloud database backup found, starting recovery...'
-				local dbuser=$(grep -m1 "^[[:blank:]]*'dbuser'" $config_php | mawk -F\' '{print $4}')
-				local dbpass=$(grep -m1 "^[[:blank:]]*'dbpassword'" $config_php | mawk -F\' '{print $4}')
+				local dbuser=$(grep -m1 "^[[:blank:]]*'dbuser'" "$config_php" | mawk -F\' '{print $4}')
+				local dbpass=$(grep -m1 "^[[:blank:]]*'dbpassword'" "$config_php" | mawk -F\' '{print $4}')
 				/boot/dietpi/func/create_mysql_db nextcloud "$dbuser" "$dbpass"
 				mysql nextcloud < "$datadir/dietpi-nextcloud-database-backup.sql"
 				# Adjust database data directory entry, in case it changed due to server migration
-				local datadir_old=$(grep -m1 "^[[:blank:]]*'datadirectory'" $config_php | mawk -F\' '{print $4}')
+				local datadir_old=$(grep -m1 "^[[:blank:]]*'datadirectory'" "$config_php" | mawk -F\' '{print $4}')
 				G_EXEC mysql -e "update nextcloud.oc_storages set id='local::$datadir/' where id rlike 'local::$datadir_old';"
 
-			elif ! grep -q "'installed' => true," $config_php 2>/dev/null; then
+			elif ! grep -q "'installed' => true," "$config_php" 2>/dev/null; then
 
 				local username=$(sed -n '/^[[:blank:]]*SOFTWARE_OWNCLOUD_NEXTCLOUD_USERNAME=/{s/^[^=]*=//p;q}' /boot/dietpi.txt)
 				[[ $username ]] || username='admin'
@@ -4835,11 +4839,11 @@ The install script will now exit. After applying one of the the above, rerun die
 
 					if (( $exit_code )); then
 
-						grep -q 'Following symlinks is not allowed' $fp_log && { cp -a /var/www/nextcloud/core/skeleton/. "$datadir/$username/files/"; exit_code=0; }
+						grep -q 'Following symlinks is not allowed' "$fp_log" && { cp -a /var/www/nextcloud/core/skeleton/. "$datadir/$username/files/"; exit_code=0; }
 
 					else
 
-						grep -qi 'Stack trace' $fp_log && exit_code=255
+						grep -qi 'Stack trace' "$fp_log" && exit_code=255
 
 					fi
 
@@ -4854,41 +4858,41 @@ The install script will now exit. After applying one of the the above, rerun die
 			fi
 
 			# Enable Nextcloud to use 4-byte database
-			G_CONFIG_INJECT "'mysql.utf8mb4'" "'mysql.utf8mb4' => true," $config_php "'dbpassword'"
+			G_CONFIG_INJECT "'mysql.utf8mb4'" "'mysql.utf8mb4' => true," "$config_php" "'dbpassword'"
 
 			# Disable trusted_domains.
-			grep -q "1 => '*'" $config_php || sed -i "/0 => 'localhost'/a     1 => '*'," $config_php
+			grep -q "1 => '*'" "$config_php" || sed -i "/0 => 'localhost'/a     1 => '*'," "$config_php"
 
 			# Set CLI URL to Nextcloud sub directory:
-			G_EXEC sed -i "s|'http://localhost'|'http://localhost/nextcloud'|" $config_php
+			G_EXEC sed -i "s|'http://localhost'|'http://localhost/nextcloud'|" "$config_php"
 
 			# Set pretty URLs (without /index.php/) on Apache:
 			if (( ${aSOFTWARE_INSTALL_STATE[83]} > 0 )); then
 
-				GCI_PRESERVE=1 G_CONFIG_INJECT "'htaccess.RewriteBase'" "'htaccess.RewriteBase' => '/nextcloud'," $config_php "'overwrite.cli.url'"
+				GCI_PRESERVE=1 G_CONFIG_INJECT "'htaccess.RewriteBase'" "'htaccess.RewriteBase' => '/nextcloud'," "$config_php" "'overwrite.cli.url'"
 				ncc maintenance:update:htaccess
 
 			fi
 
 			# APCu Memcache
-			GCI_PRESERVE=1 G_CONFIG_INJECT "'memcache.local'" "'memcache.local' => '\\\\OC\\\\Memcache\\\\APCu'," $config_php "'version'"
+			GCI_PRESERVE=1 G_CONFIG_INJECT "'memcache.local'" "'memcache.local' => '\\\\OC\\\\Memcache\\\\APCu'," "$config_php" "'version'"
 
 			# Redis for transactional file locking:
 			G_DIETPI-NOTIFY 2 'Enabling Redis for transactional file locking.' # https://docs.nextcloud.com/server/stable/admin_manual/configuration_files/files_locking_transactional.html
 			local redis_conf="/etc/redis/redis.conf"
 			# - Enable Redis socket and grant www-data access to it
-			GCI_PRESERVE=1 G_CONFIG_INJECT 'unixsocket[[:blank:]]' 'unixsocket /run/redis/redis-server.sock' $redis_conf
-			G_CONFIG_INJECT 'unixsocketperm[[:blank:]]' 'unixsocketperm 770' $redis_conf
+			GCI_PRESERVE=1 G_CONFIG_INJECT 'unixsocket[[:blank:]]' 'unixsocket /run/redis/redis-server.sock' "$redis_conf"
+			G_CONFIG_INJECT 'unixsocketperm[[:blank:]]' 'unixsocketperm 770' "$redis_conf"
 			G_EXEC usermod -aG redis www-data
 			G_EXEC systemctl restart redis-server
 			# - Enable Nextcloud to use Redis socket:
-			G_CONFIG_INJECT "'filelocking.enabled'" "'filelocking.enabled' => true," $config_php "'memcache.local'"
-			local redis_sock=$(grep -m1 '^[[:blank:]]*unixsocket[[:blank:]]' $redis_conf | mawk '{print $2}') # Re-estimate in case of existing custom path
-			GCI_PRESERVE=1 GCI_NEWLINE=1 G_CONFIG_INJECT "'memcache.locking'" "'memcache.locking' => '\\\\OC\\\\Memcache\\\\Redis',\n'redis' => array ('host' => '$redis_sock', 'port' => 0,)," $config_php "'filelocking.enabled'"
+			G_CONFIG_INJECT "'filelocking.enabled'" "'filelocking.enabled' => true," "$config_php" "'memcache.local'"
+			local redis_sock=$(grep -m1 '^[[:blank:]]*unixsocket[[:blank:]]' "$redis_conf" | mawk '{print $2}') # Re-estimate in case of existing custom path
+			GCI_PRESERVE=1 GCI_NEWLINE=1 G_CONFIG_INJECT "'memcache.locking'" "'memcache.locking' => '\\\\OC\\\\Memcache\\\\Redis',\n'redis' => array ('host' => '$redis_sock', 'port' => 0,)," "$config_php" "'filelocking.enabled'"
 
 			# Tweak Argon2 hashing
 			# - Use all available CPU threads
-			GCI_PRESERVE=1 G_CONFIG_INJECT "'hashingThreads'" "'hashingThreads' => ${G_HW_CPU_CORES}," $config_php "'version'"
+			GCI_PRESERVE=1 G_CONFIG_INJECT "'hashingThreads'" "'hashingThreads' => ${G_HW_CPU_CORES}," "$config_php" "'version'"
 			# - ToDo: Configure the other settings after getting some clarifications: https://github.com/nextcloud/server/pull/19023#issuecomment-660071524
 			#GCI_PRESERVE=1 G_CONFIG_INJECT "'hashingMemoryCost'" "'hashingMemoryCost' => 65536," $config_php "'hashingThreads'"
 			#GCI_PRESERVE=1 G_CONFIG_INJECT "'hashingTimeCost'" "'hashingTimeCost' => 4," $config_php "'hashingMemoryCost'"
@@ -5007,7 +5011,7 @@ NB: This port needs to be forwarded by your router and/or opened in your firewal
 			if [[ ! -d '/var/www/nextcloud/apps/spreed' ]]; then
 
 				# Succeed if app is already installed and on "Cannot declare class" bug: https://github.com/MichaIng/DietPi/issues/3499#issuecomment-622955490
-				G_EXEC_POST_FUNC(){ [[ $exit_code != 0 && $(<$fp_log) =~ (' already installed'$|' Cannot declare class ') ]] && exit_code=0; }
+				G_EXEC_POST_FUNC(){ [[ $exit_code != 0 && $(<"$fp_log") =~ (' already installed'$|' Cannot declare class ') ]] && exit_code=0; }
 				G_EXEC ncc app:install spreed
 
 			fi
@@ -5058,7 +5062,7 @@ NB: This port needs to be forwarded by your router and/or opened in your firewal
 			# We have no Buster binaries yet, so always use Stretch binaries
 			binary_name+='_stretch'
 
-			G_EXEC mv $binary_name /usr/bin/ympd
+			G_EXEC mv "$binary_name" /usr/bin/ympd
 			G_EXEC chmod +x /usr/bin/ympd
 			G_EXEC_NOHALT=1 G_EXEC rm ympd_*
 
@@ -5233,7 +5237,8 @@ _EOF_
 
 			G_THREAD_START curl -sSfL 'https://dietpi.com/downloads/binaries/all/cava.psf' -o /root/cava.psf # Font for nice bars
 
-			DEPS_LIST='libpulse0 libfftw3-3 libncursesw5' Download_Install "$url"
+			aDEPS=('libpulse0' 'libfftw3-3' 'libncursesw5')
+			Download_Install "$url"
 
 			# CAVA conf, preserve existing
 			[[ -f '/root/.config/cava/config' ]] || dps_index=$software_id Download_Install 'cava.conf' /root/.config/cava/config
@@ -5341,9 +5346,9 @@ _EOF_
 				if [[ $G_DISTRO -ge 6 || $G_HW_MODEL == 4 || $(dpkg --print-architecture) == 'arm64' ]]
 				then
 					# Enhance 4k support on RPi 4
-					local cma=
-					(( $G_HW_MODEL == 4 )) && cma=512
-					/boot/dietpi/func/dietpi-set_hardware rpi-opengl vc4-kms-v3d $cma
+					local cma=()
+					(( $G_HW_MODEL == 4 )) && cma=(512)
+					/boot/dietpi/func/dietpi-set_hardware rpi-opengl vc4-kms-v3d "${cma[@]}"
 					(( $G_DISTRO < 6 )) || apackages+=('libgl1-mesa-dri' 'libgles2') # Missing dependencies on Bullseye package
 
 				# Else legacy framebuffer driver
@@ -5520,7 +5525,7 @@ _EOF_
 
 			# Libraries
 			# - wget: Used for WHDLoad database update: https://github.com/midwan/amiberry/commit/d6c103e3310bcf75c2d72a15849fbdf5eb7432b5
-			DEPS_LIST='libxml2 libfreetype6 libflac8 libmpeg2-4 libmpg123-0 wget' # libpng16-16 pulled by libfreetype6
+			aDEPS=('libxml2' 'libfreetype6' 'libflac8' 'libmpeg2-4' 'libmpg123-0' 'wget') # libpng16-16 pulled by libfreetype6
 
 			# Platform and GPU drivers
 			# - RPi
@@ -5529,19 +5534,19 @@ _EOF_
 				local platform='rpi1' # Include ID -1 + 0
 				(( $G_HW_MODEL > 1 )) && platform="rpi$G_HW_MODEL"
 				/boot/dietpi/func/dietpi-set_hardware rpi-opengl vc4-fkms-v3d
-				DEPS_LIST+=' libegl1 libgles2 libgl1-mesa-dri libraspberrypi0'
+				aDEPS+=('libegl1' 'libgles2' 'libgl1-mesa-dri' 'libraspberrypi0')
 
 			# - Odroid XU4: https://dietpi.com/meveric/pool/main/s/setup-odroid/
 			elif (( $G_HW_MODEL == 11 )); then
 
 				local platform='xu4'
-				apt-cache dumpavail | grep -q '^Package: malit628-odroid$' && DEPS_LIST+=' malit628-odroid' || DEPS_LIST+=' libegl1 libgles2 libgl1-mesa-dri'
+				apt-cache dumpavail | grep -q '^Package: malit628-odroid$' && aDEPS+=('malit628-odroid') || aDEPS+=('libegl1' 'libgles2' 'libgl1-mesa-dri')
 
 			# - ASUS Tinker Board
 			elif (( $G_HW_MODEL == 52 )); then
 
 				local platform='RK3288'
-				DEPS_LIST+=' libegl1 libgles2 libgl1-mesa-dri'
+				aDEPS+=('libegl1' 'libgles2' 'libgl1-mesa-dri')
 
 			fi
 
@@ -5585,7 +5590,7 @@ _EOF_
 
 			Banner_Installing
 
-			DEPS_LIST='libsdl-mixer1.2 libsdl1.2debian libphysfs1'
+			aDEPS=('libsdl-mixer1.2' 'libsdl1.2debian' 'libphysfs1')
 			Download_Install 'https://dietpi.com/downloads/binaries/rpi/dxx-rebirth.7z' /mnt/dietpi_userdata
 
 			# Symlink savegames to root
@@ -5659,7 +5664,7 @@ _EOF_
 
 			Banner_Installing
 
-			DEPS_LIST='libsdl1.2debian libsdl-net1.2'
+			aDEPS=('libsdl1.2debian' 'libsdl-net1.2')
 			Download_Install 'https://dietpi.com/downloads/binaries/rpi/opentyrian_armhf.zip' /
 
 			# Move to /usr/games
@@ -5686,7 +5691,7 @@ _EOF_
 
 			Banner_Installing
 
-			DEPS_LIST='gpac motion'
+			aDEPS=('gpac' 'motion')
 			Download_Install 'https://github.com/silvanmelchior/RPi_Cam_Web_Interface/archive/master.tar.gz'
 
 			G_EXEC cd RPi_Cam_Web_Interface-master
@@ -5874,8 +5879,7 @@ _EOF_
 
 			# APT package
 			G_AGI webmin
-			# Workaround: https://github.com/MichaIng/DietPi/issues/5386
-			systemctl -q is-active webmin && G_EXEC systemctl stop webmin
+			G_EXEC systemctl stop webmin
 
 			# Service
 			Remove_SysV webmin
@@ -5902,7 +5906,8 @@ _EOF_
 
 			Banner_Installing
 
-			DEPS_LIST='python3' Download_Install 'https://yt-dl.org/downloads/latest/youtube-dl' /usr/local/bin/youtube-dl
+			aDEPS=('python3')
+			Download_Install 'https://yt-dl.org/downloads/latest/youtube-dl' /usr/local/bin/youtube-dl
 			G_EXEC chmod +x /usr/local/bin/youtube-dl
 
 			# youtube-dl supports Python 2 and Python 3, but its shebang calls Python 2, else fails: https://github.com/ytdl-org/youtube-dl/issues/27649
@@ -6072,7 +6077,7 @@ _EOF_
 			done
 
 			local ipv6=
-			if grep -q '^[[:blank:]]*CONFIG_ENABLE_IPV6=1' /boot/dietpi.txt
+			if G_GET_NET -6 -q gateway > /dev/null
 			then
 				for i in $(hostname -I)
 				do
@@ -6254,12 +6259,12 @@ _EOF_
 			# Download base configuration if it does not exist yet
 			[[ -f '/etc/unbound/unbound.conf.d/dietpi.conf' ]] || dps_index=$software_id Download_Install 'unbound.conf' /etc/unbound/unbound.conf.d/dietpi.conf
 
-			# Toggle IPv6 preference based on dietpi.txt settings
-			if grep -q '^[[:blank:]]*CONFIG_ENABLE_IPV6=0' /boot/dietpi.txt
+			# Toggle IPv6 preference based whether there is an IPv6 default route
+			if G_GET_NET -6 -q gateway > /dev/null
 			then
-				G_CONFIG_INJECT 'do-ip6:[[:blank:]]' '	do-ip6: no' /etc/unbound/unbound.conf.d/dietpi.conf
-			else
 				G_CONFIG_INJECT 'do-ip6:[[:blank:]]' '	do-ip6: yes' /etc/unbound/unbound.conf.d/dietpi.conf
+			else
+				G_CONFIG_INJECT 'do-ip6:[[:blank:]]' '	do-ip6: no' /etc/unbound/unbound.conf.d/dietpi.conf
 			fi
 
 			# Since IP binding might be used, start after network interfaces have been configured, not when they just start to be configured
@@ -6329,7 +6334,7 @@ _EOF_
 			fi
 
 			# Dependencies: https://github.com/pi-hole/pi-hole/blob/development/automated%20install/basic-install.sh#L250
-			G_AGI php$PHP_VERSION-{xml,sqlite3,intl}
+			G_AGI "php$PHP_VERSION-"{xml,sqlite3,intl}
 
 			# Unbound: Switch port to 5335 if it was installed before, else it got just configured within its install step above
 			if (( ${aSOFTWARE_INSTALL_STATE[182]} == 2 )) && grep -q '^[[:blank:]]*port:[[:blank:]][[:blank:]]*53$' /etc/unbound/unbound.conf.d/dietpi.conf
@@ -6457,7 +6462,7 @@ _EOF_
 			Banner_Installing
 
 			# Deps: apache2-utils is required for htpasswd command to create bcrypt password hashes
-			DEPS_LIST='apache2-utils'
+			aDEPS=('apache2-utils')
 
 			if [[ -f '/mnt/dietpi_userdata/adguardhome/AdGuardHome' ]]
 			then
@@ -6465,9 +6470,8 @@ _EOF_
  - If you want to update ${aSOFTWARE_NAME[$software_id]}, please use the internal updater from web UI.
  - If you need to reinstall (e.g. broken instance), please manually remove the executable \"/mnt/dietpi_userdata/adguardhome/AdGuardHome\" and rerun \"dietpi-software (re)install $software_id\"."
 
-				# shellcheck disable=SC2086
-				G_AGI $DEPS_LIST
-				unset -v DEPS_LIST
+				G_AGI "${aDEPS[@]}"
+				aDEPS=()
 			else
 				# ARMv6
 				local url='https://static.adguard.com/adguardhome/release/AdGuardHome_linux_armv6.tar.gz'
@@ -7029,7 +7033,7 @@ _EOF_
 			Banner_Installing
 
 			# RPi: Install build deps for the "onoff" Node module
-			(( $G_HW_MODEL > 9 )) || DEPS_LIST='python3 make g++'
+			(( $G_HW_MODEL > 9 )) || aDEPS=('python3' 'make' 'g++')
 
 			# ARMv6: Install Java 8 build and apply Log4Shell mitigation as the last Java 8 build does not contain it yet: https://github.com/Peterkn2001/blynk-server/releases
 			if (( $G_HW_ARCH == 1 ))
@@ -7143,7 +7147,7 @@ _EOF_
 			local reinstall=0
 			[[ -f '/etc/webiopi/config' ]] && reinstall=1
 
-			DEPS_LIST='python3-dev python3-setuptools patch'
+			aDEPS=('python3-dev' 'python3-setuptools' 'patch')
 			Download_Install 'https://github.com/Freenove/WebIOPi/archive/master.tar.gz'
 
 			G_EXEC cd WebIOPi-master/WebIOPi-*
@@ -7178,7 +7182,7 @@ After=network-online.target
 
 [Service]
 SyslogIdentifier=WebIOPi
-ExecStart=$(which python3) -m webiopi -c /etc/webiopi/config
+ExecStart=$(command -v python3) -m webiopi -c /etc/webiopi/config
 
 # Hardening
 PrivateTmp=true
@@ -7195,11 +7199,11 @@ _EOF_
 			Banner_Installing
 
 			local version='2.5.1' # https://www.haproxy.org/download/
-			DEPS_LIST='libpcre3-dev libssl-dev zlib1g-dev libsystemd-dev'
+			aDEPS=('libpcre3-dev' 'libssl-dev' 'zlib1g-dev' 'libsystemd-dev')
 			Download_Install "https://www.haproxy.org/download/${version%.*}/src/haproxy-$version.tar.gz"
 
 			# Compile
-			G_EXEC cd haproxy-$version
+			G_EXEC cd "haproxy-$version"
 			G_EXEC_OUTPUT=1 G_EXEC make -j "$G_HW_CPU_CORES" TARGET=linux-glibc CPU=generic USE_PCRE=1 USE_OPENSSL=1 USE_ZLIB=1 USE_SYSTEMD=1 ADDLIB='-Wl,--no-as-needed -lgcc_s -Wl,--as-needed' DEBUG_CFLAGS='-g0 -O3' LDFLAGS='-Wl,-z,relro -Wl,-z,now -Wl,--as-needed'
 			# Strip binary size
 			G_EXEC strip --remove-section=.comment --remove-section=.note haproxy
@@ -7212,9 +7216,9 @@ _EOF_
 			# - Error pages
 			G_EXEC cd "$G_WORKING_DIR"
 			G_EXEC mkdir -p /etc/haproxy/errors
-			G_EXEC mv haproxy-$version/examples/errorfiles/*.http /etc/haproxy/errors/
+			G_EXEC mv "haproxy-$version/examples/errorfiles/"*.http /etc/haproxy/errors/
 			# Clean up
-			G_EXEC_NOHALT=1 G_EXEC rm -R haproxy-$version
+			G_EXEC_NOHALT=1 G_EXEC rm -R "haproxy-$version"
 
 			# Jail directory
 			G_EXEC mkdir -p /var/lib/haproxy
@@ -7348,10 +7352,10 @@ _EOF_
 			Banner_Installing
 
 			# Install required PHP modules: https://github.com/FreshRSS/FreshRSS#example-of-full-installation-on-linux-debianubuntu
-			DEPS_LIST="php$PHP_VERSION-curl php$PHP_VERSION-gmp php$PHP_VERSION-intl php$PHP_VERSION-mbstring php$PHP_VERSION-xml php$PHP_VERSION-zip"
+			aDEPS=("php$PHP_VERSION-curl" "php$PHP_VERSION-gmp" "php$PHP_VERSION-intl" "php$PHP_VERSION-mbstring" "php$PHP_VERSION-xml" "php$PHP_VERSION-zip")
 			# - Add JSON module for PHP7, as it does not exist (embedded in core package) on PHP8
-			local json=
-			[[ $PHP_VERSION == 8* ]] || DEPS_LIST+=" php$PHP_VERSION-json" json='json'
+			local json=()
+			[[ $PHP_VERSION == 8* ]] || aDEPS+=("php$PHP_VERSION-json") json=('json')
 
 			# Reinstall: Skip download and install, advice to use internal updater from web UI
 			if [[ -d '/opt/FreshRSS' ]]
@@ -7360,16 +7364,15 @@ _EOF_
  - If you want to update ${aSOFTWARE_NAME[$software_id]}, please use the internal updater from web UI.
  - If you need to reinstall (e.g. broken instance), please manually backup your config files+data, remove the install dir and rerun \"dietpi-software (re)install $software_id\"."
 
-				# shellcheck disable=SC2086
-				G_AGI $DEPS_LIST
-				unset -v DEPS_LIST
+				G_AGI "${aDEPS[@]}"
+				aDEPS=()
 			else
 				Download_Install 'https://github.com/FreshRSS/FreshRSS/archive/master.tar.gz' /opt
 				G_EXEC mv /opt/FreshRSS-master /opt/FreshRSS
 			fi
 
 			# Enable required PHP modules: https://github.com/FreshRSS/FreshRSS#requirements
-			G_EXEC phpenmod curl gmp intl pdo_mysql ctype dom mbstring xml zip $json
+			G_EXEC phpenmod curl gmp intl pdo_mysql ctype dom mbstring xml zip "${json[@]}"
 
 			# Apache configuration
 			if (( ${aSOFTWARE_INSTALL_STATE[83]} > 0 )); then
@@ -7825,9 +7828,13 @@ _EOF_
 
 			Banner_Installing
 
+			G_DIETPI-NOTIFY 2 'Obtaining latest download from: https://sye.dk/sfpg/?latest'
+			local file=$(curl -sSfL 'https://sye.dk/sfpg/?latest')
+			[[ $file ]] || { file='Single_File_PHP_Gallery_4.9.0.zip'; G_DIETPI-NOTIFY 1 "Automatic latest ${aSOFTWARE_NAME[$software_id]} download detection failed. Downloading the last known \"$file\" is attempted as fallback, but may fail if a newer version is available. Please report this at: https://github.com/MichaIng/DietPi/issues"; }
+
 			# Install required PHP modules: https://sye.dk/sfpg/
-			DEPS_LIST="php$PHP_VERSION-gd"
-			Download_Install 'https://sye.dk/sfpg/Single_File_PHP_Gallery_4.8.1.zip' /var/www/gallery
+			aDEPS=("php$PHP_VERSION-gd")
+			Download_Install "https://sye.dk/sfpg/$file" /var/www/gallery
 
 			# Enable required PHP modules
 			G_EXEC phpenmod gd
@@ -7859,10 +7866,10 @@ _EOF_
 			Banner_Installing # https://github.com/ampache/ampache/wiki/Installation
 
 			# Required PHP modules: https://github.com/ampache/ampache/wiki/Installation#prerequisites
-			DEPS_LIST="php$PHP_VERSION-curl php$PHP_VERSION-intl php$PHP_VERSION-xml"
+			aDEPS=("php$PHP_VERSION-curl" "php$PHP_VERSION-intl" "php$PHP_VERSION-xml")
 			# - Add JSON module for PHP7, as it does not exist (embedded in core package) on PHP8
-			local json=
-			[[ $PHP_VERSION == 8* ]] || DEPS_LIST+=" php$PHP_VERSION-json" json='json'
+			local json=()
+			[[ $PHP_VERSION == 8* ]] || aDEPS+=("php$PHP_VERSION-json") json=('json')
 
 			# Bullseye+
 			if (( $G_DISTRO > 5 ))
@@ -7897,7 +7904,7 @@ _EOF_
 			Download_Test_Media
 
 			# Enable required PHP modules: https://github.com/ampache/ampache/wiki/Installation#prerequisites
-			G_EXEC phpenmod curl intl xml $json
+			G_EXEC phpenmod curl intl xml "${json[@]}"
 
 			# Import our pre-made Ampache database, if not existent already
 			if [[ ! -d '/mnt/dietpi_userdata/mysql/ampache' ]]; then
@@ -8140,6 +8147,9 @@ _EOF_
 			# Enable WiFi modules
 			/boot/dietpi/func/dietpi-set_hardware wifimodules enable
 
+			# Set WiFi Country Code
+			(( $G_DISTRO > 6 )) || /boot/dietpi/func/dietpi-set_hardware wificountrycode "$(sed -n '/^[[:blank:]]*AUTO_SETUP_NET_WIFI_COUNTRY_CODE=/{s/^[^=]*=//p;q}' /boot/dietpi.txt)"
+
 			local eth_iface=$(G_GET_NET -t eth iface)
 			local wifi_iface=$(G_GET_NET -t wlan iface)
 
@@ -8310,7 +8320,7 @@ _EOF_
 			Banner_Installing
 
 			# Install required PHP modules
-			DEPS_LIST="php$PHP_VERSION-apcu php$PHP_VERSION-gd php$PHP_VERSION-intl php$PHP_VERSION-mbstring php$PHP_VERSION-opcache php$PHP_VERSION-xml"
+			aDEPS=("php$PHP_VERSION-apcu" "php$PHP_VERSION-gd" "php$PHP_VERSION-intl" "php$PHP_VERSION-mbstring" "php$PHP_VERSION-opcache" "php$PHP_VERSION-xml")
 
 			# Reinstall: Skip download and install, advice to use internal updater from web UI
 			if [[ -d '/var/www/pydio' ]]
@@ -8319,9 +8329,8 @@ _EOF_
  - If you want to update ${aSOFTWARE_NAME[$software_id]}, please use the internal updater from web UI.
  - If you need to reinstall (e.g. broken instance), please manually backup your config files+data, remove the install dir and rerun \"dietpi-software (re)install $software_id\"."
 
-				# shellcheck disable=SC2086
-				G_AGI $DEPS_LIST
-				DEPS_LIST=
+				G_AGI "${aDEPS[@]}"
+				aDEPS=()
 			else
 				Download_Install 'https://download.pydio.com/pub/core/ci/pydio-latest.tar.gz'
 				G_EXEC mv pydio-latest /var/www/pydio
@@ -8372,19 +8381,19 @@ _EOF_
 				[[ -e '/var/www/pydio/data' ]] && G_EXEC rm -R /var/www/pydio/data
 			else
 				# Move data structure
-				[[ -e $data_dir || -L $data_dir ]] && G_EXEC rm -R $data_dir
+				[[ -e $data_dir || -L $data_dir ]] && G_EXEC rm -R "$data_dir"
 				if [[ -d '/var/www/pydio/data' ]]
 				then
-					G_EXEC mv /var/www/pydio/data $data_dir
+					G_EXEC mv /var/www/pydio/data "$data_dir"
 				else
-					G_EXEC mkdir $data_dir
+					G_EXEC mkdir "$data_dir"
 				fi
 			fi
 			# - Create symlink
-			G_EXEC ln -sf $data_dir /var/www/pydio/data
+			G_EXEC ln -sf "$data_dir" /var/www/pydio/data
 
 			# Permissions: Fix some files being 444 mode, breaking internal updater
-			G_EXEC chown -R www-data:www-data /var/www/pydio $data_dir
+			G_EXEC chown -R www-data:www-data /var/www/pydio "$data_dir"
 			G_EXEC chmod -R u+w /var/www/pydio
 
 		fi
@@ -8467,7 +8476,7 @@ _EOF_
 			Banner_Installing
 
 			# APT deps: https://github.com/sabre-io/Baikal/wiki/Baïkal-dependencies
-			DEPS_LIST="php$PHP_VERSION-xml php$PHP_VERSION-mbstring php$PHP_VERSION-mysql"
+			aDEPS=("php$PHP_VERSION-xml" "php$PHP_VERSION-mbstring" "php$PHP_VERSION-mysql")
 
 			local fallback_url='https://github.com/sabre-io/Baikal/releases/download/0.9.1/baikal-0.9.1.zip'
 			Download_Install "$(curl -sSfL 'https://api.github.com/repos/sabre-io/Baikal/releases/latest' | mawk -F\" '/"browser_download_url": .*\/baikal-[^"\/]*\.zip"/{print $4}')"
@@ -8677,11 +8686,11 @@ _EOF_
 			G_CHECK_URL "$url"
 
 			# Python 3 is not pulled by rdiff-backup on Buster, but required to compile Node.js posix.
-			local python=
-			(( $G_DISTRO > 5 )) || python='python3'
+			local python=()
+			(( $G_DISTRO > 5 )) || python=('python3')
 
 			# APT deps
-			G_AGI rdiff-backup rsync screen $python
+			G_AGI rdiff-backup rsync screen "${python[@]}"
 
 			# Download/Update MineOS
 			[[ -d '/mnt/dietpi_userdata/mineos' ]] || G_EXEC mkdir /mnt/dietpi_userdata/mineos
@@ -8934,7 +8943,7 @@ _EOF_
 
 			Banner_Installing
 
-			DEPS_LIST='rtorrent mediainfo'
+			aDEPS=('rtorrent' 'mediainfo')
 
 			# Install ruTorrent: Web UI for rTorrent
 			# - Grab current version
@@ -8942,24 +8951,35 @@ _EOF_
 			[[ $version ]] || { version='v3.10'; G_DIETPI-NOTIFY 1 "Automatic latest ruTorrent version detection failed. Version \"$version\" will be installed as fallback, but a newer version might be available. Please report this at: https://github.com/MichaIng/DietPi/issues"; }
 			Download_Install "https://github.com/Novik/ruTorrent/archive/$version.tar.gz"
 
-			# - Reinstall
-			if [[ -d '/var/www/rutorrent' ]]; then
+			# - Reinstall freshly with preserved configs and 3rd party plugins
+			if [[ -d '/var/www/rutorrent' ]]
+			then
+				# If old configs exist, preserve them and make new config files examples
+				[[ -f '/var/www/rutorrent/conf/config.php' ]] && { G_EXEC mv "ruTorrent-${version#v}/conf/config.php"{,.example}; G_EXEC cp -a {/var/www/rutorrent,"ruTorrent-${version#v}"}/conf/config.php; }
+				[[ -f '/var/www/rutorrent/conf/access.ini' ]] && { G_EXEC mv "ruTorrent-${version#v}/conf/access.ini"{,.example}; G_EXEC cp -a {/var/www/rutorrent,"ruTorrent-${version#v}"}/conf/access.ini; }
+				[[ -f '/var/www/rutorrent/conf/plugins.ini' ]] && { G_EXEC mv "ruTorrent-${version#v}/conf/plugins.ini"{,.example}; G_EXEC cp -a {/var/www/rutorrent,"ruTorrent-${version#v}"}/conf/plugins.ini; }
 
-				# Make new config files examples, if they exist in the old install already
-				[[ -f '/var/www/rutorrent/conf/config.php' ]] && G_EXEC mv "ruTorrent-${version#v}/conf/config.php"{,.example}
-				[[ -f '/var/www/rutorrent/conf/access.ini' ]] && G_EXEC mv "ruTorrent-${version#v}/conf/access.ini"{,.example}
-				[[ -f '/var/www/rutorrent/conf/plugins.ini' ]] && G_EXEC mv "ruTorrent-${version#v}/conf/plugins.ini"{,.example}
+				# Preserve 3rd party plugins
+				for i in /var/www/rutorrent/plugins/{,.??,.[^.]}*
+				do
+					[[ -e $i ]] || continue
+					[[ -e ruTorrent-${version#v}/plugins/${i#/var/www/rutorrent/plugins/} ]] && continue
+					G_EXEC cp -a "$i" "ruTorrent-${version#v}/plugins/"
+				done
 
-				# Merge new install into old to preserve e.g. 3rd party plugins
-				G_EXEC cp -a "ruTorrent-${version#v}/". /var/www/rutorrent/
-				G_EXEC rm -R "ruTorrent-${version#v}"
+				# Preserve 3rd party themes
+				for i in /var/www/rutorrent/plugins/theme/themes/{,.??,.[^.]}*
+				do
+					[[ -e $i ]] || continue
+					[[ -e ruTorrent-${version#v}/plugins/theme/themes/${i#/var/www/rutorrent/plugins/theme/themes/} ]] && continue
+					G_EXEC cp -a "$i" "ruTorrent-${version#v}/plugins/theme/themes/"
+				done				
 
-			# - Fresh install
-			else
-
-				G_EXEC mv "ruTorrent-${version#v}" /var/www/rutorrent
-
+				# Reinstall freshly with preserved configs, 3rd party plugins and themes
+				G_EXEC rm -R /var/www/rutorrent
 			fi
+
+			G_EXEC mv "ruTorrent-${version#v}" /var/www/rutorrent
 
 			# Install DarkBetter theme manually: https://github.com/MichaIng/DietPi/issues/3271
 			if [[ -d '/var/www/rutorrent/plugins/theme/themes/DarkBetter' ]]; then
@@ -9275,7 +9295,7 @@ _EOF_
 
 			Banner_Installing
 
-			DEPS_LIST='mediainfo python3'
+			aDEPS=('mediainfo' 'python3')
 
 			# Reinstall: Skip download and install, advice to use internal updater from web UI
 			if [[ -d '/mnt/dietpi_userdata/medusa' ]]
@@ -9284,9 +9304,8 @@ _EOF_
  - If you want to update ${aSOFTWARE_NAME[$software_id]}, please use the internal updater from web UI.
  - If you need to reinstall (e.g. broken instance), please manually backup your config files+data, remove the install dir and rerun \"dietpi-software (re)install $software_id\"."
 
-				# shellcheck disable=SC2086
-				G_AGI $DEPS_LIST
-				DEPS_LIST=
+				G_AGI "${aDEPS[@]}"
+				aDEPS=()
 			else
 				Download_Install 'https://github.com/pymedusa/Medusa/archive/master.tar.gz' /mnt/dietpi_userdata
 				G_EXEC mv /mnt/dietpi_userdata/{Medusa-master,medusa}
@@ -9403,9 +9422,6 @@ _EOF_
 
 			Banner_Installing
 
-			# Apply preference index
-			INDEX_BROWSER=-2
-
 			# libpam-systemd: Required for non-root users to start Chromium from console via "startx"
 			if (( $G_HW_MODEL > 9 ))
 			then
@@ -9463,7 +9479,7 @@ STARTX='xinit'
 
 exec "$STARTX" "$FP_CHROMIUM" $CHROMIUM_OPTS "${URL:-https://dietpi.com/}"
 _EOF_
-			[[ $path == 'chromium.d' ]] || G_EXEC sed -i 's/chromium\.d/chromium-browser/customizations/' /var/lib/dietpi/dietpi-software/installed/chromium-autostart.sh
+			[[ $path == 'chromium.d' ]] || G_EXEC sed -i 's|chromium\.d|chromium-browser/customizations|' /var/lib/dietpi/dietpi-software/installed/chromium-autostart.sh
 			G_EXEC chmod +x /var/lib/dietpi/dietpi-software/installed/chromium-autostart.sh
 
 		fi
@@ -9498,9 +9514,9 @@ _EOF_
 			Banner_Installing
 
 			# Build dependencies
-			DEPS_LIST='make cmake gcc libc6-dev libjpeg-dev'
+			aDEPS=('make' 'cmake' 'gcc' 'libc6-dev' 'libjpeg-dev')
 			# - On RPi, add RPi Camera support by default
-			(( $G_HW_MODEL > 9 )) || DEPS_LIST+=' libraspberrypi-dev'
+			(( $G_HW_MODEL > 9 )) || aDEPS+=('libraspberrypi-dev')
 
 			# Download sources
 			Download_Install 'https://github.com/jacksonliam/mjpg-streamer/archive/master.tar.gz'
@@ -9571,39 +9587,52 @@ _EOF_
 			local url='https://virtualhere.com/sites/default/files/usbserver/vhusbd'
 
 			# ARMv6/7
-			if [[ $G_HW_ARCH == [12] ]]; then
-
+			if [[ $G_HW_ARCH == [12] ]]
+			then
 				url+='arm'
 
 			# ARMv8
-			elif (( $G_HW_ARCH == 3 )); then
-
+			elif (( $G_HW_ARCH == 3 ))
+			then
 				url+='arm64'
 
 			# x86_64
-			elif (( $G_HW_ARCH == 10 )); then
-
+			elif (( $G_HW_ARCH == 10 ))
+			then
 				url+='x86_64'
-
 			fi
 
-			[[ -d '/etc/vhusbd' ]] || G_EXEC mkdir /etc/vhusbd
-			G_EXEC curl -sSfL "$url" -o /etc/vhusbd/vhusbd
-			G_EXEC chmod +x /etc/vhusbd/vhusbd
+			Download_Install "$url" /opt/virtualhere/vhusbd
+			G_EXEC chmod +x /opt/virtualhere/vhusbd
+
+			# Config
+			if [[ ! -f '/opt/virtualhere/config.ini' ]]
+			then
+				if [[ -f '/etc/vhusbd/config.ini' ]]
+				then
+					G_EXEC mv /etc/vhusbd/config.ini /opt/virtualhere/config.ini
+				else
+					# shellcheck disable=SC2016
+					echo 'ServerName=$HOSTNAME$' > /opt/virtualhere/config.ini
+				fi
+			fi
 
 			# Service
 			cat << '_EOF_' > /etc/systemd/system/virtualhere.service
 [Unit]
 Description=VirtualHere (DietPi)
+Wants=network-online.target
+After=network-online.target
 
 [Service]
-ExecStart=/etc/vhusbd/vhusbd -r /var/log/virtualhere.log
+ExecStart=/opt/virtualhere/vhusbd
 
 [Install]
 WantedBy=multi-user.target
 _EOF_
-			# Config
-			echo "ServerName='DietPi'" > /etc/vhusbd/config.ini
+			# Pre-v8.4
+			[[ -d '/etc/vhusbd' ]] && G_EXEC rm -R /etc/vhusbd
+			[[ -f '/var/log/virtualhere.log' ]] && G_EXEC rm /var/log/virtualhere.log
 
 		fi
 
@@ -9613,9 +9642,9 @@ _EOF_
 			Banner_Installing # https://sabnzbd.org/wiki/installation/install-off-modules
 
 			# APT deps
-			DEPS_LIST='par2 p7zip-full'
+			aDEPS=('par2' 'p7zip-full')
 			# ARMv8: No sabyenc3 wheels available: https://pypi.org/project/sabyenc3/#files
-			(( $G_HW_ARCH == 3 )) && DEPS_LIST+=' gcc'
+			(( $G_HW_ARCH == 3 )) && aDEPS+=('gcc')
 
 			# Download
 			Download_Install 'https://github.com/sabnzbd/sabnzbd/archive/master.tar.gz'
@@ -9700,15 +9729,15 @@ _EOF_
 			Banner_Installing
 
 			# Dependencies: https://github.com/mozilla-services/syncserver#quickstart
-			DEPS_LIST='python-virtualenv python-dev libmariadb-dev'
+			aDEPS=('python-virtualenv' 'python-dev' 'libmariadb-dev')
 			# - Additional module compiling required on ARM
-			(( $G_HW_ARCH < 10 )) && DEPS_LIST+=' libffi-dev libssl-dev'
+			(( $G_HW_ARCH < 10 )) && aDEPS+=('libffi-dev' 'libssl-dev')
 
 			# Download & Install
 			local commit='c116417d653432db9470098236fb117adb349c36' # https://github.com/MichaIng/DietPi/issues/3774#issuecomment-703230290
 			Download_Install "https://github.com/mozilla-services/syncserver/archive/$commit.tar.gz"
 			[[ -d '/opt/firefox-sync' ]] && G_EXEC rm -R /opt/firefox-sync
-			G_EXEC mv syncserver-$commit /opt/firefox-sync
+			G_EXEC mv "syncserver-$commit" /opt/firefox-sync
 
 			# Build
 			G_EXEC cd /opt/firefox-sync
@@ -9728,12 +9757,12 @@ _EOF_
 			local ffsync_conf='/mnt/dietpi_userdata/firefox-sync/syncserver.ini'
 			if [[ ! -f $ffsync_conf ]]; then
 
-				G_EXEC cp -a /opt/firefox-sync/syncserver.ini $ffsync_conf
+				G_EXEC cp -a /opt/firefox-sync/syncserver.ini "$ffsync_conf"
 				local ffsync_ip=$(G_GET_NET ip)
-				G_CONFIG_INJECT 'host =' "host = $ffsync_ip" $ffsync_conf
-				G_CONFIG_INJECT 'port =' 'port = 5002' $ffsync_conf # Avoid port conflict with Shairport Sync
-				G_CONFIG_INJECT 'public_url =' "public_url = http://$ffsync_ip:5002/" $ffsync_conf
-				G_CONFIG_INJECT 'sqluri = sqlite:' 'sqluri = sqlite:////mnt/dietpi_userdata/firefox-sync/FF-Sync-DB.db' $ffsync_conf
+				G_CONFIG_INJECT 'host =' "host = $ffsync_ip" "$ffsync_conf"
+				G_CONFIG_INJECT 'port =' 'port = 5002' "$ffsync_conf" # Avoid port conflict with Shairport Sync
+				G_CONFIG_INJECT 'public_url =' "public_url = http://$ffsync_ip:5002/" "$ffsync_conf"
+				G_CONFIG_INJECT 'sqluri = sqlite:' 'sqluri = sqlite:////mnt/dietpi_userdata/firefox-sync/FF-Sync-DB.db' "$ffsync_conf"
 
 			fi
 
@@ -9774,7 +9803,7 @@ _EOF_
 			Banner_Installing
 
 			# Dependencies: https://github.com/dani-garcia/vaultwarden/wiki/Building-binary#dependencies
-			DEPS_LIST='pkg-config libssl-dev'
+			aDEPS=('pkg-config' 'libssl-dev')
 
 			# Download
 			local version=$(curl -sSfL 'https://api.github.com/repos/dani-garcia/vaultwarden/releases/latest' | mawk -F\" '/"tag_name": /{print $4}')
@@ -9971,10 +10000,10 @@ _EOF_
 
 			# APT dependencies: https://docs.koel.dev/#server > https://laravel.com/docs/master/deployment#server-requirements
 			# - Additionally the PHP SQLite modules are required for the composer install step, despite MariaDB being used.
-			DEPS_LIST="php$PHP_VERSION-bcmath php$PHP_VERSION-curl php$PHP_VERSION-mbstring php$PHP_VERSION-sqlite3 php$PHP_VERSION-xml"
+			aDEPS=("php$PHP_VERSION-bcmath" "php$PHP_VERSION-curl" "php$PHP_VERSION-mbstring" "php$PHP_VERSION-sqlite3" "php$PHP_VERSION-xml")
 			# - Add JSON module for PHP7, as it does not exist (embedded in core package) on PHP8
-			local json=
-			[[ $PHP_VERSION == 8* ]] || DEPS_LIST+=" php$PHP_VERSION-json" json='json'
+			local json=()
+			[[ $PHP_VERSION == 8* ]] || aDEPS+=("php$PHP_VERSION-json") json=('json')
 
 			# Grab latest release
 			local fallback_url='https://github.com/koel/koel/releases/download/v5.1.13/koel-v5.1.13.tar.gz'
@@ -9989,7 +10018,7 @@ _EOF_
 			G_EXEC mv koel /mnt/dietpi_userdata/koel
 
 			# Enable required PHP modules
-			G_EXEC phpenmod bcmath ctype curl fileinfo mbstring pdo_mysql pdo_sqlite sqlite3 tokenizer xml $json
+			G_EXEC phpenmod bcmath ctype curl fileinfo mbstring pdo_mysql pdo_sqlite sqlite3 tokenizer xml "${json[@]}"
 
 			# Install Koel
 			G_EXEC cd /mnt/dietpi_userdata/koel
@@ -10032,8 +10061,8 @@ _EOF_
 			Download_Test_Media
 
 			# Init
-			G_EXEC_OUTPUT=1 G_EXEC sudo -u koel php$PHP_VERSION artisan koel:init -n --no-assets
-			G_EXEC_OUTPUT=1 G_EXEC sudo -u koel php$PHP_VERSION artisan koel:sync
+			G_EXEC_OUTPUT=1 G_EXEC sudo -u koel "php$PHP_VERSION" artisan koel:init -n --no-assets
+			G_EXEC_OUTPUT=1 G_EXEC sudo -u koel "php$PHP_VERSION" artisan koel:sync
 			G_EXEC cd "$G_WORKING_DIR"
 
 			# Service: Run on port 8003 by default to avoid conflict with IceCast
@@ -10048,7 +10077,7 @@ After=network-online.target
 SyslogIdentifier=Koel
 User=koel
 WorkingDirectory=/mnt/dietpi_userdata/koel
-ExecStart=$(command -v php$PHP_VERSION) /mnt/dietpi_userdata/koel/artisan serve --host 0.0.0.0 --port 8003
+ExecStart=$(command -v "php$PHP_VERSION") /mnt/dietpi_userdata/koel/artisan serve --host 0.0.0.0 --port 8003
 
 [Install]
 WantedBy=multi-user.target
@@ -10136,15 +10165,15 @@ _EOF_
 			Banner_Installing
 
 			# APT dependencies
-			DEPS_LIST='mediainfo'
+			aDEPS=('mediainfo')
 			# - .NET: https://packages.microsoft.com/debian/
 			if (( $G_HW_ARCH != 1 ))
 			then
 				if (( $G_DISTRO == 5 ))
 				then
-					DEPS_LIST+=' libicu63'
+					aDEPS+=('libicu63')
 				else
-					DEPS_LIST+=' libicu67'
+					aDEPS+=('libicu67')
 				fi
 			fi
 
@@ -10155,9 +10184,8 @@ _EOF_
  - If you want to update ${aSOFTWARE_NAME[$software_id]}, please use the internal updater from web UI.
  - If you need to reinstall (e.g. broken instance), please manually remove the install dir and rerun \"dietpi-software reinstall $software_id\"."
 
-				# shellcheck disable=SC2086
-				G_AGI $DEPS_LIST
-				DEPS_LIST=
+				G_AGI "${aDEPS[@]}"
+				aDEPS=()
 			else
 				# ARMv6
 				local url=$(curl -sSfL 'https://api.github.com/repos/Radarr/Radarr/releases/latest' | mawk -F\" '/"browser_download_url": .*linux\.tar\.gz"/{print $4}')
@@ -10245,15 +10273,15 @@ _EOF_
 			Banner_Installing
 
 			# APT dependencies
-			DEPS_LIST='mediainfo'
+			aDEPS=('mediainfo')
 			# - .NET: https://packages.microsoft.com/debian/
 			if (( $G_HW_ARCH != 1 ))
 			then
 				if (( $G_DISTRO == 5 ))
 				then
-					DEPS_LIST+=' libicu63'
+					aDEPS+=('libicu63')
 				else
-					DEPS_LIST+=' libicu67'
+					aDEPS+=('libicu67')
 				fi
 			fi
 
@@ -10267,9 +10295,8 @@ _EOF_
  - If you want to update ${aSOFTWARE_NAME[$software_id]}, please use the internal updater from web UI.
  - If you need to reinstall (e.g. broken instance), please manually remove the install dir and rerun \"dietpi-software reinstall $software_id\"."
 
-				# shellcheck disable=SC2086
-				G_AGI $DEPS_LIST
-				DEPS_LIST=
+				G_AGI "${aDEPS[@]}"
+				aDEPS=()
 			else
 				# ARMv6
 				local url=$(curl -sSfL 'https://api.github.com/repos/Lidarr/Lidarr/releases/latest' | mawk -F\" '/"browser_download_url": .*linux\.tar\.gz"/{print $4}')
@@ -10520,12 +10547,12 @@ _EOF_
 			# .NET dependencies: https://packages.microsoft.com/debian/
 			if (( $G_HW_ARCH != 1 ))
 			then
-				DEPS_LIST='liblttng-ust0'
+				aDEPS=('liblttng-ust0')
 				if (( $G_DISTRO == 5 ))
 				then
-					DEPS_LIST+=' libicu63'
+					aDEPS+=('libicu63')
 				else
-					DEPS_LIST+=' libicu67'
+					aDEPS+=('libicu67')
 				fi
 			fi
 
@@ -10761,9 +10788,9 @@ _EOF_
 			# .NET dependency: https://packages.microsoft.com/debian/
 			if (( $G_DISTRO == 5 ))
 			then
-				DEPS_LIST='libicu63'
+				aDEPS=('libicu63')
 			else
-				DEPS_LIST='libicu67'
+				aDEPS=('libicu67')
 			fi
 
 			# Reinstall: Skip download and install, advice to use internal updater
@@ -10773,8 +10800,8 @@ _EOF_
  - If you want to update ${aSOFTWARE_NAME[$software_id]}, please use the internal updater.
  - If you need to reinstall (e.g. broken instance), please manually remove the install dir and rerun \"dietpi-software (re)install $software_id\"."
 
-				G_AGI $DEPS_LIST
-				DEPS_LIST=
+				G_AGI "${aDEPS[@]}"
+				aDEPS=()
 			else
 				Download_Install 'https://download.roonlabs.com/builds/RoonServer_linuxx64.tar.bz2'
 				G_EXEC mv RoonServer /opt/roonserver
@@ -10834,9 +10861,9 @@ _EOF_
 				# Add i386 arch: https://packages.debian.org/bullseye/steam
 				[[ $(dpkg --print-foreign-architectures) == *'i386'* ]] || { G_EXEC dpkg --add-architecture i386; G_AGUP; }
 				# Add Nvidia i386 driver libs if Nvidia driver is detected
-				local nvidia=
-				[[ -e '/sys/module/nvidia/version' ]] && nvidia='nvidia-driver-libs:i386'
-				G_AGI steam $nvidia
+				local nvidia=()
+				[[ -e '/sys/module/nvidia/version' ]] && nvidia=('nvidia-driver-libs:i386')
+				G_AGI steam "${nvidia[@]}"
 
 			# ARM: Install repacked Debian i386 package for armhf
 			elif [[ $G_HW_ARCH == 2 ]]
@@ -11095,7 +11122,7 @@ _EOF_
 				arch='amd64'
 			fi
 
-			local fallback_url="https://github.com/go-gitea/gitea/releases/download/v1.16.5/gitea-1.16.5-linux-$arch"
+			local fallback_url="https://github.com/go-gitea/gitea/releases/download/v1.16.6/gitea-1.16.6-linux-$arch"
 			Download_Install "$(curl -sSfL 'https://api.github.com/repos/go-gitea/gitea/releases/latest' | mawk -F\" "/\"browser_download_url\": \".*\/gitea-[^\"\/]*-linux-$arch\"/{print \$4}")" /mnt/dietpi_userdata/gitea/gitea
 
 			# User
@@ -11138,7 +11165,7 @@ _EOF_
 			Banner_Installing
 
 			# APT dependencies: https://github.com/hzeller/gmrender-resurrect/blob/master/INSTALL.md
-			DEPS_LIST='libupnp13 gstreamer1.0-alsa gstreamer1.0-libav gstreamer1.0-plugins-good gstreamer1.0-plugins-bad gstreamer1.0-plugins-ugly'
+			aDEPS=('libupnp13' 'gstreamer1.0-alsa' 'gstreamer1.0-libav' 'gstreamer1.0-plugins-good' 'gstreamer1.0-plugins-bad' 'gstreamer1.0-plugins-ugly')
 
 			Download_Install "https://dietpi.com/downloads/binaries/$G_DISTRO_NAME/gmediarender_$G_HW_ARCH_NAME.7z" /usr/local/bin
 			G_EXEC chmod +x /usr/local/bin/gmediarender
@@ -11325,6 +11352,7 @@ _EOF_
 			G_EXEC cp systemd/alsa-init.service /etc/systemd/system/
 			#G_EXEC cp systemd/ntpdate.service /etc/systemd/system/
 
+			# shellcheck disable=SC1091
 			source env/bin/activate
 
 			# Enable default app for service start
@@ -11360,7 +11388,7 @@ _EOF_
 			fi
 
 			# APT deps
-			DEPS_LIST='vorbis-tools'
+			aDEPS=('vorbis-tools')
 
 			# Pre-create global config to reflect correct data dir and audio settings within install
 			# - Overwrite existing config, user should use /mnt/dietpi_userdata/mycroft-data/.mycroft/mycroft.conf instead to override.
@@ -11445,7 +11473,8 @@ _EOF_
 			G_EXEC chown -R roon-extension-manager:root /mnt/dietpi_userdata/roon-extension-manager
 
 			# Store installer to data dir, so we can reuse it on uninstall
-			DEPS_LIST='wget' Download_Install 'https://raw.githubusercontent.com/TheAppgineer/roon-extension-manager/v1.x/rem-setup.sh' /mnt/dietpi_userdata/roon-extension-manager/rem-setup.sh
+			aDEPS=('wget')
+			Download_Install 'https://raw.githubusercontent.com/TheAppgineer/roon-extension-manager/v1.x/rem-setup.sh' /mnt/dietpi_userdata/roon-extension-manager/rem-setup.sh
 			G_EXEC cd /mnt/dietpi_userdata/roon-extension-manager
 			G_EXEC chmod +x rem-setup.sh
 
@@ -11511,32 +11540,36 @@ _EOF_
 			Banner_Installing
 
 			# APT deps
-			DEPS_LIST='cmake python3-minimal'
+			aDEPS=('cmake' 'python3-minimal')
 
 			# Download
 			local version=$(curl -sSfL 'https://api.github.com/repos/ptitSeb/box86/tags' | mawk -F\" '/"name": /{print $4;exit}')
-			[[ $version ]] || { version='v0.2.4'; G_DIETPI-NOTIFY 1 "Automatic latest ${aSOFTWARE_NAME[$software_id]} version detection failed. Version \"$version\" will be installed as fallback, but a newer version might be available. Please report this at: https://github.com/MichaIng/DietPi/issues"; }
+			[[ $version ]] || { version='v0.2.6'; G_DIETPI-NOTIFY 1 "Automatic latest ${aSOFTWARE_NAME[$software_id]} version detection failed. Version \"$version\" will be installed as fallback, but a newer version might be available. Please report this at: https://github.com/MichaIng/DietPi/issues"; }
 			Download_Install "https://github.com/ptitSeb/box86/archive/$version.tar.gz"
 
 			# Build
-			G_EXEC mkdir box86-${version#v}/build
-			G_EXEC cd box86-${version#v}/build
+			G_EXEC mkdir "box86-${version#v}/build"
+			G_EXEC cd "box86-${version#v}/build"
 			# - RPi 2
-			if [[ $G_HW_MODEL == 2 ]]
+			if (( $G_HW_MODEL == 2 ))
 			then
 				G_EXEC cmake .. -DRPI2=1 -DNOGIT=1 -DCMAKE_BUILD_TYPE=RelWithDebInfo
 			# - RPi 3
-			elif [[ $G_HW_MODEL == 3 ]]
+			elif (( $G_HW_MODEL == 3 ))
 			then
 				G_EXEC cmake .. -DRPI3=1 -DNOGIT=1 -DCMAKE_BUILD_TYPE=RelWithDebInfo
 			# - RPi 4
-			elif [[ $G_HW_MODEL == 4 ]]
+			elif (( $G_HW_MODEL == 4 ))
 			then
-				G_EXEC cmake .. -DRPI4=1 -DNOGIT=1 -DCMAKE_BUILD_TYPE=RelWithDebInfo
+				G_EXEC cmake .. -DRPI4=1 -DNOGIT=1 -DCMAKE_BUILD_TYPE=RelWithDebInfo		
 			# - Odroids
 			elif (( $G_HW_MODEL < 20 ))
 			then
 				G_EXEC cmake .. -DODROID=1 -DNOGIT=1 -DCMAKE_BUILD_TYPE=RelWithDebInfo
+			# - ASUS Tinker Board
+			elif (( $G_HW_MODEL == 52 ))
+			then
+				G_EXEC cmake .. -DRK3288=1 -DNOGIT=1 -DCMAKE_BUILD_TYPE=RelWithDebInfo
 			# - Others
 			else
 				G_EXEC cmake .. -DARM_DYNAREC=ON -DNOGIT=1 -DCMAKE_BUILD_TYPE=RelWithDebInfo
@@ -11555,22 +11588,26 @@ _EOF_
 			Banner_Installing
 
 			# APT deps
-			DEPS_LIST='cmake python3-minimal'
+			aDEPS=('cmake' 'python3-minimal')
 
 			# Download
 			local version=$(curl -sSfL 'https://api.github.com/repos/ptitSeb/box64/tags' | mawk -F\" '/"name": /{print $4;exit}')
-			[[ $version ]] || { version='v0.1.6'; G_DIETPI-NOTIFY 1 "Automatic latest ${aSOFTWARE_NAME[$software_id]} version detection failed. Version \"$version\" will be installed as fallback, but a newer version might be available. Please report this at: https://github.com/MichaIng/DietPi/issues"; }
+			[[ $version ]] || { version='v0.1.8'; G_DIETPI-NOTIFY 1 "Automatic latest ${aSOFTWARE_NAME[$software_id]} version detection failed. Version \"$version\" will be installed as fallback, but a newer version might be available. Please report this at: https://github.com/MichaIng/DietPi/issues"; }
 			Download_Install "https://github.com/ptitSeb/box64/archive/$version.tar.gz"
 
 			# Build
-			G_EXEC mkdir box64-${version#v}/build
-			G_EXEC cd box64-${version#v}/build
+			G_EXEC mkdir "box64-${version#v}/build"
+			G_EXEC cd "box64-${version#v}/build"
 			# - RPi 4
-			if [[ $G_HW_MODEL == 4 ]]
+			if (( $G_HW_MODEL == 4 ))
 			then
 				G_EXEC cmake .. -DRPI4ARM64=1 -DNOGIT=1 -DCMAKE_BUILD_TYPE=RelWithDebInfo
+			# - Odroid N2
+			elif (( $G_HW_MODEL == 15 ))
+			then
+				G_EXEC cmake .. -DODROIDN2=1 -DNOGIT=1 -DCMAKE_BUILD_TYPE=RelWithDebInfo
 			# - RK3399
-			elif [[ $G_HW_CPUID == 3 ]]
+			elif (( $G_HW_CPUID == 3 ))
 			then
 				G_EXEC cmake .. -DRK3399=1 -DNOGIT=1 -DCMAKE_BUILD_TYPE=RelWithDebInfo
 			# - Others
@@ -11591,7 +11628,7 @@ _EOF_
 			Banner_Installing
 
 			# Install required PHP modules
-			DEPS_LIST="php$PHP_VERSION-curl php$PHP_VERSION-zip" # https://github.com/reloxx13/TasmoAdmin#linux
+			aDEPS=("php$PHP_VERSION-curl" "php$PHP_VERSION-zip") # https://github.com/reloxx13/TasmoAdmin#linux
 
 			# Reinstall: Skip download and install, advice to use internal updater from web UI
 			if [[ -d '/var/www/tasmoadmin' ]]
@@ -11600,9 +11637,8 @@ _EOF_
  - If you want to update ${aSOFTWARE_NAME[$software_id]}, please use the internal updater from web UI.
  - If you need to reinstall (e.g. broken instance), please manually backup your config files+data, remove the install dir and rerun \"dietpi-software (re)install $software_id\"."
 
- 				# shellcheck disable=SC2086
-				G_AGI $DEPS_LIST
-				DEPS_LIST=
+				G_AGI "${aDEPS[@]}"
+				aDEPS=()
 			else
 				local fallback_url="https://github.com/TasmoAdmin/TasmoAdmin/releases/download/v1.8.0/tasmoadmin_v1.8.0.tar.gz"
 				Download_Install "$(curl -sSfL 'https://api.github.com/repos/TasmoAdmin/TasmoAdmin/releases/latest' | mawk -F\" '/"browser_download_url": ".*\/tasmoadmin_v[^"\/]*\.tar\.gz"$/{print $4}')"
@@ -11622,7 +11658,7 @@ _EOF_
 					G_WHIP_MSG "Existing TasmoAdmin Apache configuration found, will preserve the old one and save the new one for review and comparison to: $tasmoadmin_conf"
 
 				fi
-				dps_index=$software_id Download_Install 'apache.tasmoadmin.conf' $tasmoadmin_conf
+				dps_index=$software_id Download_Install 'apache.tasmoadmin.conf' "$tasmoadmin_conf"
 				a2ensite dietpi-tasmoadmin 1> /dev/null
 
 			elif (( ${aSOFTWARE_INSTALL_STATE[84]} > 0 )); then
@@ -11635,7 +11671,7 @@ _EOF_
 					G_WHIP_MSG "Existing TasmoAdmin Lighttpd configuration found, will preserve the old one and save the new one for review and comparison to: $tasmoadmin_conf"
 
 				fi
-				dps_index=$software_id Download_Install 'lighttpd.tasmoadmin.conf' $tasmoadmin_conf
+				dps_index=$software_id Download_Install 'lighttpd.tasmoadmin.conf' "$tasmoadmin_conf"
 				# Enable required modules + our config
 				G_EXEC_POST_FUNC(){ [[ $exit_code == 2 ]] && exit_code=0; } # Do not fail if modules are enabled already
 				G_EXEC lighty-enable-mod rewrite dietpi-tasmoadmin
@@ -11650,7 +11686,7 @@ _EOF_
 					G_WHIP_MSG "Existing TasmoAdmin Nginx configuration found, will preserve the old one and save the new one for review and comparison to: $tasmoadmin_conf"
 
 				fi
-				dps_index=$software_id Download_Install 'nginx.tasmoadmin.conf' $tasmoadmin_conf
+				dps_index=$software_id Download_Install 'nginx.tasmoadmin.conf' "$tasmoadmin_conf"
 
 			fi
 
@@ -11672,10 +11708,10 @@ _EOF_
 			G_DIETPI-NOTIFY 2 "pyenv Python version: $ha_python_version"
 
 			# User
-			Create_User -G dialout,gpio,i2c -d $ha_home $ha_user
+			Create_User -G dialout,gpio,i2c -d "$ha_home" "$ha_user"
 
 			# Start with fresh instance, to allow clean pyenv and Python updates and fix broken instances. All userdata and configs are preserved in: /mnt/dietpi_userdata/homeassistant
-			[[ -d $ha_home/.pyenv ]] && G_EXEC rm -R $ha_home/.pyenv
+			[[ -d $ha_home/.pyenv ]] && G_EXEC rm -R "$ha_home/.pyenv"
 			[[ -d '/srv/homeassistant' ]] && G_EXEC rm -R /srv/homeassistant # pre-v6-27
 
 			# Dependencies
@@ -11685,25 +11721,26 @@ _EOF_
 			local custom_pip_deps=$(sed -n '/^[[:blank:]]*SOFTWARE_HOMEASSISTANT_PIP_DEPS=/{s/^[^=]*=//p;q}' /boot/dietpi.txt)
 			# - All: gcc, libc6-dev, make, libssl-dev, zlib1g-dev for Python build and libbz2-dev, libreadline-dev, libsqlite3-dev to suppress warnings
 			# - All: libffi-dev to solve "ModuleNotFoundError: No module named '_ctypes'", for python-slugify==4.0.1 build on ARMv8/x86_64 and cffi build on ARMv6/7 Buster
-			DEPS_LIST="gcc libc6-dev make libssl-dev zlib1g-dev libbz2-dev libreadline-dev libsqlite3-dev libffi-dev $custom_apt_deps"
+			aDEPS=('gcc' 'libc6-dev' 'make' 'libssl-dev' 'zlib1g-dev' 'libbz2-dev' 'libreadline-dev' 'libsqlite3-dev' 'libffi-dev')
+			mapfile -t -d' ' -O "${#aDEPS[@]}" aDEPS < <(echo -n "$custom_apt_deps")
 			# - ARMv6/7
-			G_EXEC mkdir -p $ha_home
-			G_EXEC chown $ha_user:$ha_user $ha_home
+			G_EXEC mkdir -p "$ha_home"
+			G_EXEC chown "$ha_user:$ha_user" "$ha_home"
 			if [[ $G_HW_ARCH == [12] ]]
 			then
-				G_EXEC mkdir -p $ha_home/.pip
+				G_EXEC mkdir -p "$ha_home/.pip"
 				# Bullseye
 				if (( $G_DISTRO == 6 ))
 				then
 					# Create pip config to pull wheels from piwheels.org
 					G_EXEC eval "echo -e '[global]\nextra-index-url=https://www.piwheels.org/simple/' > $ha_home/.pip/pip.conf"
 					# libopenjp2-7, libtiff5, libxcb1 for runtime
-					DEPS_LIST+=' libopenjp2-7 libtiff5 libxcb1'
+					aDEPS+=('libopenjp2-7' 'libtiff5' 'libxcb1')
 				else
 					# piwheels.org Python 3.9 wheels depend on shared libraries from Bullseye. Unset extra-index-url explicitly, as /etc/pip.conf could set it.
 					G_EXEC eval "echo -e '[global]\nextra-index-url=' > $ha_home/.pip/pip.conf"
 					# libjpeg-dev for Pillow
-					DEPS_LIST+=' libjpeg-dev'
+					aDEPS+=('libjpeg-dev')
 					# Rust for cryptography
 					G_EXEC curl -sSfL 'https://sh.rustup.rs' -o rustup-init.sh
 					G_EXEC chmod +x rustup-init.sh
@@ -11714,8 +11751,8 @@ _EOF_
 
 			# Install pyenv to $ha_home
 			Download_Install 'https://github.com/pyenv/pyenv/archive/master.tar.gz'
-			G_EXEC mv pyenv-master $ha_home/.pyenv
-			G_EXEC chown -R $ha_user:$ha_user $ha_home/.pyenv
+			G_EXEC mv pyenv-master "$ha_home/.pyenv"
+			G_EXEC chown -R "$ha_user:$ha_user" "$ha_home/.pyenv"
 
 			# Generate script to activate pyenv: This must be sourced from the originating shell, hence it does not require execute permissions.
 			echo "#!/bin/dash
@@ -11728,10 +11765,10 @@ export PYENV_ROOT='$ha_home/.pyenv'
 export PATH=\"\$PYENV_ROOT/bin:\$PATH\"
 eval \"\$(pyenv init --path)\"
 eval \"\$(pyenv init -)\"
-[ -f '.cargo/env' ] && . .cargo/env" > $ha_home/pyenv-activate.sh
+[ -f '.cargo/env' ] && . .cargo/env" > "$ha_home/pyenv-activate.sh"
 
 			G_EXEC_DESC='Installing Python with Home Assistant module into pyenv'
-			G_EXEC_OUTPUT=1 G_EXEC sudo -u $ha_user dash -c "
+			G_EXEC_OUTPUT=1 G_EXEC sudo -u "$ha_user" dash -c "
 $ha_pyenv_activation
 pyenv install $ha_python_version
 pyenv local $ha_python_version
@@ -11742,13 +11779,13 @@ exec pip3 install --no-cache-dir homeassistant"
 			# Generate script to launch HA using pyenv
 			echo "#!/bin/dash
 $ha_pyenv_activation
-exec hass -c '/mnt/dietpi_userdata/homeassistant'" > $ha_home/homeassistant-start.sh
-			G_EXEC chmod +x $ha_home/homeassistant-start.sh
+exec hass -c '/mnt/dietpi_userdata/homeassistant'" > "$ha_home/homeassistant-start.sh"
+			G_EXEC chmod +x "$ha_home/homeassistant-start.sh"
 
 			# Generate script to update HA within pyenv
 			echo "#!/bin/dash
-exec sudo -u $ha_user dash -c '$ha_pyenv_activation; exec pip3 install --no-cache-dir -U homeassistant'" > $ha_home/homeassistant-update.sh
-			G_EXEC chmod +x $ha_home/homeassistant-update.sh
+exec sudo -u $ha_user dash -c '$ha_pyenv_activation; exec pip3 install --no-cache-dir -U homeassistant'" > "$ha_home/homeassistant-update.sh"
+			G_EXEC chmod +x "$ha_home/homeassistant-update.sh"
 
 			cat << '_EOF_' > /etc/systemd/system/home-assistant.service
 [Unit]
@@ -11812,7 +11849,7 @@ _EOF_
 			fi
 
 			# Minecraft rcon client for remote administration and server maintenance scripts
-			DEPS_LIST='gcc libc6-dev'
+			aDEPS=('gcc' 'libc6-dev')
 			Download_Install 'https://github.com/Tiiffi/mcrcon/archive/master.tar.gz'
 			G_EXEC gcc -g0 -O3 mcrcon-master/mcrcon.c -o /usr/local/bin/mcrcon
 			G_EXEC rm -R mcrcon-master
@@ -11878,7 +11915,7 @@ _EOF_
 			Banner_Installing
 
 			# APT deps
-			DEPS_LIST='libusb-0.1 libcurl3-gnutls'
+			aDEPS=('libusb-0.1' 'libcurl3-gnutls')
 
 			# Reinstall: Clean old install dir
 			[[ -d '/opt/domoticz' ]] && G_EXEC rm -R /opt/domoticz
@@ -12075,13 +12112,14 @@ _EOF_
 					fallback_url="https://github.com/Spotifyd/spotifyd/releases/download/v0.3.3/spotifyd-linux-full.tar.gz"
 					file='spotifyd-linux-full'
 				;;
+				*) :;;
 			esac
 
 			# Reinstall: Remove old install dir
 			[[ -d '/opt/spotifyd' ]] && G_EXEC rm -R /opt/spotifyd
 
 			# x86_64 only deps: Both ARM binaries are not compiled against these. dbus would be required for MPRIS support, but let's keep it slim for now.
-			(( $G_HW_ARCH == 10 )) && DEPS_LIST='libdbus-1-3 libpulse0'
+			(( $G_HW_ARCH == 10 )) && aDEPS=('libdbus-1-3' 'libpulse0')
 
 			Download_Install "$(curl -sSfL 'https://api.github.com/repos/Spotifyd/spotifyd/releases/latest' | mawk -F\" "/\"browser_download_url\": .*\/$file\.tar\.gz\"/{print \$4}")" /opt/spotifyd
 
@@ -12499,7 +12537,7 @@ If no WireGuard (auto)start is included, but you require it, please do the follo
 		(( $current_gpu_mem < $suggest_gpu_mem )) && G_WHIP_DEFAULT_ITEM='Ok' G_WHIP_YESNO "[ INFO ] DietPi has detected an increased GPU memory is required for your installed software:
  - Current: $current_gpu_mem MiB\n - Recommended: $suggest_gpu_mem MiB\n\nWould you like DietPi to apply the recommended GPU memory split?\n\nIf unsure, select 'Ok'." || return 0
 
-		/boot/dietpi/func/dietpi-set_hardware gpumemsplit $suggest_gpu_mem
+		/boot/dietpi/func/dietpi-set_hardware gpumemsplit "$suggest_gpu_mem"
 
 	}
 
@@ -12518,9 +12556,6 @@ If no WireGuard (auto)start is included, but you require it, please do the follo
 			G_EXEC rm -Rf /{root,home/*}/.{config,cache}/{lxpanel,lxsession,lxterminal,openbox,pcmanfm,dconf}
 			[[ -f '/etc/apt/preferences.d/dietpi-lxde' ]] && G_EXEC rm /etc/apt/preferences.d/dietpi-lxde
 
-			# Update desktop preference index
-			(( $INDEX_DESKTOP == 0 )) && INDEX_DESKTOP=-1
-
 		fi
 
 		software_id=173 # LXQt
@@ -12530,9 +12565,6 @@ If no WireGuard (auto)start is included, but you require it, please do the follo
 			apt-mark auto qterminal xarchiver lxde-icon-theme upower xscreensaver leafpad featherpad speedcrunch 2> /dev/null
 			G_AGP lxqt
 			rm -Rf /{root,home/*}/.config/lxqt
-
-			# Update desktop preference index
-			(( $INDEX_DESKTOP == -3 )) && INDEX_DESKTOP=0
 
 		fi
 
@@ -12559,9 +12591,6 @@ If no WireGuard (auto)start is included, but you require it, please do the follo
 			apt-mark auto upower policykit-1 2> /dev/null
 			G_AGP mate-desktop-environment-core mate-media
 
-			# Update desktop preference index
-			(( $INDEX_DESKTOP == -2 )) && INDEX_DESKTOP=0
-
 		fi
 
 		software_id=26 # GNUstep
@@ -12571,9 +12600,6 @@ If no WireGuard (auto)start is included, but you require it, please do the follo
 			apt-mark auto upower policykit-1 2> /dev/null
 			G_AGP x-window-system-core wmaker gnustep gnustep-devel gnustep-games
 
-			# Update desktop preference index
-			(( $INDEX_DESKTOP == -4 )) && INDEX_DESKTOP=0
-
 		fi
 
 		software_id=25 # Xfce
@@ -12582,9 +12608,6 @@ If no WireGuard (auto)start is included, but you require it, please do the follo
 			Banner_Uninstalling
 			apt-mark auto gnome-icon-theme tango-icon-theme upower policykit-1 2> /dev/null
 			G_AGP xfce4 xfce4-terminal
-
-			# Update desktop preference index
-			(( $INDEX_DESKTOP == -1 )) && INDEX_DESKTOP=0
 
 		fi
 
@@ -12651,10 +12674,10 @@ If no WireGuard (auto)start is included, but you require it, please do the follo
 			mysql -e "drop user $dbuser@$dbhost;"
 			mysql -e "drop user $dbuser;" 2> /dev/null
 			# - Perform database backup if existent, otherwise skip to not overwrite existing one
-			[[ -d '/mnt/dietpi_userdata/mysql/owncloud' ]] && mysqldump owncloud > $datadir/dietpi-owncloud-database-backup.sql
+			[[ -d '/mnt/dietpi_userdata/mysql/owncloud' ]] && mysqldump owncloud > "$datadir/dietpi-owncloud-database-backup.sql"
 			mysqladmin drop owncloud -f
 			# Backup ownCloud installation folder
-			cp -a /var/www/owncloud/. $datadir/dietpi-owncloud-installation-backup/
+			cp -a /var/www/owncloud/. "$datadir/dietpi-owncloud-installation-backup/"
 			# Remove ownCloud installation folder
 			rm -R /var/www/owncloud
 			# Remove redirect configs
@@ -12714,10 +12737,10 @@ If no WireGuard (auto)start is included, but you require it, please do the follo
 			mysql -e "drop user $dbuser@$dbhost;"
 			mysql -e "drop user $dbuser;" 2> /dev/null
 			# - Perform database backup if existent, otherwise skip to not overwrite existing one
-			[[ -d '/mnt/dietpi_userdata/mysql/nextcloud' ]] && mysqldump nextcloud > $datadir/dietpi-nextcloud-database-backup.sql
+			[[ -d '/mnt/dietpi_userdata/mysql/nextcloud' ]] && mysqldump nextcloud > "$datadir/dietpi-nextcloud-database-backup.sql"
 			mysqladmin drop nextcloud -f
 			# Backup Nextcloud installation folder
-			cp -a /var/www/nextcloud/. $datadir/dietpi-nextcloud-installation-backup/
+			cp -a /var/www/nextcloud/. "$datadir/dietpi-nextcloud-installation-backup/"
 			# Remove Nextcloud installation folder
 			rm -R /var/www/nextcloud
 			# Remove redirect configs
@@ -12767,9 +12790,6 @@ If no WireGuard (auto)start is included, but you require it, please do the follo
 			G_AGP apache2 libapache2-mod-php*
 			G_EXEC rm -Rf /{etc,var/{lib,log}}/apache2 /{etc/php,var/lib/php/modules}/*/apache2
 
-			# Adjust webserver preference index
-			(( $INDEX_WEBSERVER == 0 )) && INDEX_WEBSERVER=-2
-
 		fi
 
 		software_id=85 # Nginx
@@ -12777,9 +12797,6 @@ If no WireGuard (auto)start is included, but you require it, please do the follo
 
 			Banner_Uninstalling
 			G_AGP nginx 'nginx-*'
-
-			# Adjust webserver preference index
-			(( $INDEX_WEBSERVER == -1 )) && INDEX_WEBSERVER=-2
 
 		fi
 
@@ -12805,9 +12822,6 @@ If no WireGuard (auto)start is included, but you require it, please do the follo
 			# Pre-v8.0: Certbot renewal hook
 			[[ -f 'etc/systemd/system/certbot.service.d/dietpi-lighttpd.conf' ]] && G_EXEC rm /etc/systemd/system/certbot.service.d/dietpi-lighttpd.conf
 			[[ -d '/etc/systemd/system/certbot.service.d' ]] && G_EXEC rmdir --ignore-fail-on-non-empty /etc/systemd/system/certbot.service.d
-
-			# Adjust webserver preference index
-			(( $INDEX_WEBSERVER == -2 )) && INDEX_WEBSERVER=0
 
 		fi
 
@@ -13197,7 +13211,9 @@ If no WireGuard (auto)start is included, but you require it, please do the follo
 				G_EXEC rm /etc/systemd/system/virtualhere.service
 			fi
 			[[ -d '/etc/systemd/system/virtualhere.service.d' ]] && G_EXEC rm -R /etc/systemd/system/virtualhere.service.d
-			[[ -d '/etc/vhusbd' ]] && G_EXEC rm -R /etc/vhusbd
+			[[ -d '/opt/virtualhere' ]] && G_EXEC rm -R /opt/virtualhere
+			[[ -d '/etc/vhusbd' ]] && G_EXEC rm -R /etc/vhusbd # Pre-v8.4
+			[[ -f '/var/log/virtualhere.log' ]] && G_EXEC rm /var/log/virtualhere.log # Pre-v8.4
 
 		fi
 
@@ -14056,6 +14072,7 @@ If no WireGuard (auto)start is included, but you require it, please do the follo
 			[[ -f '/var/www/gallery/index.php' ]] && G_EXEC rm /var/www/gallery/index.php
 			[[ -f '/var/www/gallery/readme.txt' ]] && G_EXEC rm /var/www/gallery/readme.txt
 			[[ -d '/var/www/gallery/_sfpg_data' ]] && G_EXEC rm -R /var/www/gallery/_sfpg_data
+			G_DIETPI-NOTIFY 2 'The plain gallery image files are not removed. You may do this manually via "rm -R /var/www/gallery".'
 
 		fi
 
@@ -14337,28 +14354,6 @@ _EOF_
 
 		fi
 
-		software_id=58 # OpenBazaar
-		if (( ${aSOFTWARE_INSTALL_STATE[$software_id]} == -1 ))
-		then
-			Banner_Uninstalling
-			if [[ -f '/etc/systemd/system/openbazaar.service' ]]
-			then
-				G_EXEC systemctl disable --now openbazaar
-				G_EXEC rm /etc/systemd/system/openbazaar.service
-			fi
-			[[ -d '/etc/systemd/system/openbazaar.service.d' ]] && G_EXEC rm -R /etc/systemd/system/openbazaar.service.d
-			getent passwd openbazaar > /dev/null && G_EXEC userdel openbazaar
-			getent group openbazaar > /dev/null && G_EXEC groupdel openbazaar
-			[[ -f '/usr/local/bin/openbazaar-go' ]] && G_EXEC rm /usr/local/bin/openbazaar-go
-			[[ -d '/mnt/dietpi_userdata/openbazaar' ]] && G_EXEC rm -R /mnt/dietpi_userdata/openbazaar
-			# Pre-v7.1
-			command -v go > /dev/null && GO111MODULE='off' GOPATH='/mnt/dietpi_userdata/go' G_EXEC_NOEXIT=1 G_EXEC go clean -i github.com/OpenBazaar...
-			[[ -f '/mnt/dietpi_userdata/go/bin/openbazaar-go' ]] && G_EXEC rm /mnt/dietpi_userdata/go/bin/openbazaar-go
-			[[ -d '/mnt/dietpi_userdata/go/src/github.com/OpenBazaar' ]] && G_EXEC rm -R /mnt/dietpi_userdata/go/src/github.com/OpenBazaar
-			[[ -d '/mnt/dietpi_userdata/go/src/github.com' ]] && G_EXEC rmdir --ignore-fail-on-non-empty /mnt/dietpi_userdata/go/src/github.com
-			[[ -d '/etc/openbazaar-server' ]] && G_EXEC rm -R /etc/openbazaar-server # Pre-v6.15
-		fi
-
 		software_id=42 # Plex Media Server
 		if (( ${aSOFTWARE_INSTALL_STATE[$software_id]} == -1 )); then
 
@@ -14574,8 +14569,6 @@ _EOF_
 			[[ -f '/var/lib/dietpi/dietpi-software/installed/chromium-autostart.sh' ]] && G_EXEC rm /var/lib/dietpi/dietpi-software/installed/chromium-autostart.sh
 			# Autostart index: If currently Chromium, revert to console login
 			[[ -f '/boot/dietpi/.dietpi-autostart_index' && $(</boot/dietpi/.dietpi-autostart_index) == 11 ]] && /boot/dietpi/dietpi-autostart 0
-			# Update browser preference index
-			(( $INDEX_BROWSER == -2 )) && INDEX_BROWSER=0
 
 		fi
 
@@ -14912,9 +14905,6 @@ _EOF_
 			Banner_Uninstalling
 			G_AGP firefox-esr
 
-			# Update browser preference index
-			(( $INDEX_BROWSER == -1 )) && INDEX_BROWSER=0
-
 		fi
 
 		software_id=159 # Allo GUI full
@@ -15213,9 +15203,9 @@ _EOF_
 			[[ -d '/var/urbackup' ]] && G_EXEC rm -R /var/urbackup
 			[[ -f '/etc/default/urbackupsrv' ]] && G_EXEC rm /etc/default/urbackupsrv
 			[[ -f '/etc/logrotate.d/urbackupsrv' ]] && G_EXEC rm /etc/logrotate.d/urbackupsrv
-			command -v urbackupsrv > /dev/null && G_EXEC rm "$(which -a urbackupsrv)"
-			command -v urbackup_mount_helper > /dev/null && G_EXEC rm "$(which -a urbackup_mount_helper)"
-			command -v urbackup_snapshot_helper > /dev/null && G_EXEC rm "$(which -a urbackup_snapshot_helper)"
+			command -v urbackupsrv > /dev/null && G_EXEC rm "$(command -v urbackupsrv)"
+			command -v urbackup_mount_helper > /dev/null && G_EXEC rm "$(command -v urbackup_mount_helper)"
+			command -v urbackup_snapshot_helper > /dev/null && G_EXEC rm "$(command -v urbackup_snapshot_helper)"
 
 		fi
 
@@ -15605,6 +15595,7 @@ _EOF_
 		/boot/dietpi/dietpi-services unmask
 
 		# Stop all services
+		# shellcheck disable=SC2154
 		[[ $G_SERVICE_CONTROL == 0 ]] || /boot/dietpi/dietpi-services stop
 
 		# Update package cache: Skip when flag was set by first run setup
@@ -15703,9 +15694,6 @@ This requires an account at: https://remote.it/
 		local AUTOINSTALL_SSHINDEX=$(sed -n '/^[[:blank:]]*AUTO_SETUP_SSH_SERVER_INDEX=/{s/^[^=]*=//p;q}' /boot/dietpi.txt)
 		local AUTOINSTALL_FILESERVERINDEX=$(sed -n '/^[[:blank:]]*AUTO_SETUP_FILE_SERVER_INDEX=/{s/^[^=]*=//p;q}' /boot/dietpi.txt) # pre-v7.9
 		local AUTOINSTALL_LOGGINGINDEX=$(sed -n '/^[[:blank:]]*AUTO_SETUP_LOGGING_INDEX=/{s/^[^=]*=//p;q}' /boot/dietpi.txt)
-		local AUTOINSTALL_WEBSERVERINDEX=$(sed -n '/^[[:blank:]]*AUTO_SETUP_WEB_SERVER_INDEX=/{s/^[^=]*=//p;q}' /boot/dietpi.txt)
-		local AUTOINSTALL_DESKTOPINDEX=$(sed -n '/^[[:blank:]]*AUTO_SETUP_DESKTOP_INDEX=/{s/^[^=]*=//p;q}' /boot/dietpi.txt)
-		local AUTOINSTALL_BROWSERINDEX=$(sed -n '/^[[:blank:]]*AUTO_SETUP_BROWSER_INDEX=/{s/^[^=]*=//p;q}' /boot/dietpi.txt)
 		AUTOINSTALL_CUSTOMSCRIPTURL=$(sed -n '/^[[:blank:]]*AUTO_SETUP_CUSTOM_SCRIPT_EXEC=/{s/^[^=]*=//p;q}' /boot/dietpi.txt)
 		local AUTOINSTALL_TIMESYNCMODE=$(sed -n '/^[[:blank:]]*CONFIG_NTP_MODE=/{s/^[^=]*=//p;q}' /boot/dietpi.txt)
 		local AUTOINSTALL_RESTORE=$(sed -n '/^[[:blank:]]*AUTO_SETUP_BACKUP_RESTORE=/{s/^[^=]*=//p;q}' /boot/dietpi.txt)
@@ -15718,9 +15706,6 @@ This requires an account at: https://remote.it/
 		[[ $AUTOINSTALL_SSHINDEX ]] || AUTOINSTALL_SSHINDEX=-1
 		[[ $AUTOINSTALL_FILESERVERINDEX ]] || AUTOINSTALL_FILESERVERINDEX=0 # pre-v7.9
 		[[ $AUTOINSTALL_LOGGINGINDEX ]] || AUTOINSTALL_LOGGINGINDEX=-1
-		[[ $AUTOINSTALL_WEBSERVERINDEX ]] || AUTOINSTALL_WEBSERVERINDEX=-2
-		[[ $AUTOINSTALL_DESKTOPINDEX ]] || AUTOINSTALL_DESKTOPINDEX=0
-		[[ $AUTOINSTALL_BROWSERINDEX ]] || AUTOINSTALL_BROWSERINDEX=-1
 		[[ $AUTOINSTALL_CUSTOMSCRIPTURL ]] || AUTOINSTALL_CUSTOMSCRIPTURL=0
 		[[ $AUTOINSTALL_TIMESYNCMODE ]] || AUTOINSTALL_TIMESYNCMODE=2
 		[[ $AUTOINSTALL_RESTORE ]] || AUTOINSTALL_RESTORE=0
@@ -15833,10 +15818,11 @@ This requires an account at: https://remote.it/
 		# Disable serial console?
 		if (( $G_HW_MODEL != 75 )) && ! grep -q '^[[:blank:]]*CONFIG_SERIAL_CONSOLE_ENABLE=0' /boot/dietpi.txt &&
 			[[ ! $(readlink -f /proc/$$/fd/1) =~ ^/dev/tty(S|AMA|SAC|AML|SC)[0-9]$ ]] &&
-			G_WHIP_YESNO 'A serial console is currently enabled, would you like to disable it?
- - Disabling the serial console will reduce memory consumption slightly.
- - If you are unsure what a serial console is, it is safe to disable it.
- - But if this is a headless device and it is difficult or impossible to attach a screen and keyboard, we recommend to leave it enabled so that you can debug and fix early boot issues or when the network/SSH server is not coming up. All you need is a serial USB adapter cable and a notebook with e.g. PuTTY.'
+			G_WHIP_BUTTON_OK_TEXT='Yes' G_WHIP_BUTTON_CANCEL_TEXT='No' G_WHIP_YESNO 'A serial/UART console is currently enabled, would you like to disable it?
+\nTL;DR: If you do not know what a UART device or a serial console is, it is safe to select "Yes", which frees some MiB memory by stopping the related process(es).
+\nA serial console is a way to interact with a system without any screen or network (SSH) required, but from another system physically connected. It is accessed with a UART adapter cable (often UART-to-USB), connected to a special UART port or GPIO pins. It can then be accessed via COM port from the attached system with a serial console client, e.g. PuTTY (which supports both, SSH and serial console access).
+\nAnother benefit is that you can view early boot logs, before network or even screen output is up, which makes it a great way to debug issues with the bootloader or kernel. However, to allow as well common user logins via serial console, at least one additional login prompt process is running, which you may want to avoid when not using this feature at all.
+\nSerial consoles can re-enabled at any time via dietpi-config > Advanced Options > Serial/UART'
 		then
 			/boot/dietpi/func/dietpi-set_hardware serialconsole disable
 		fi
@@ -15873,20 +15859,17 @@ This requires an account at: https://remote.it/
 		findmnt /var/log > /dev/null && G_EXEC mount -o remount /var/log
 
 		# Set time sync mode if no container system
-		(( $G_HW_MODEL == 75 )) || /boot/dietpi/func/dietpi-set_software ntpd-mode $AUTOINSTALL_TIMESYNCMODE
+		(( $G_HW_MODEL == 75 )) || /boot/dietpi/func/dietpi-set_software ntpd-mode "$AUTOINSTALL_TIMESYNCMODE"
 
 		# Apply choice and preference system settings
 		Apply_SSHServer_Choices "$AUTOINSTALL_SSHINDEX"
 		Apply_Logging_Choices "$AUTOINSTALL_LOGGINGINDEX"
-		INDEX_WEBSERVER=$AUTOINSTALL_WEBSERVERINDEX
-		INDEX_DESKTOP=$AUTOINSTALL_DESKTOPINDEX
-		# - Disable browser preference on ARMv6 Bullseye+ systems: https://github.com/RPi-Distro/chromium-browser/issues/21
-		(( $G_HW_ARCH == 1 && $G_DISTRO > 5 )) || INDEX_BROWSER=$AUTOINSTALL_BROWSERINDEX
 		# - Pre-v7.9
 		case "$AUTOINSTALL_FILESERVERINDEX" in
 
 			'-1') (( ${aSOFTWARE_INSTALL_STATE[94]} == 2 )) || aSOFTWARE_INSTALL_STATE[94]=1;;
 			'-2') (( ${aSOFTWARE_INSTALL_STATE[96]} == 2 )) || aSOFTWARE_INSTALL_STATE[96]=1;;
+			*) :;;
 
 		esac
 
@@ -15974,7 +15957,7 @@ This requires an account at: https://remote.it/
 					fi
 					(( $i < 3 )) && mask+=.
 				done
-				echo $mask
+				echo "$mask"
 			}
 
 			# Get Ethernet index
@@ -16502,50 +16485,6 @@ We allow it to take up to 30 minutes, it's process can be followed, please be pa
 
 		fi
 
-		# Selected webserver preference
-		local index_webserver_text=${aSOFTWARE_NAME[83]} # Apache
-		if (( $INDEX_WEBSERVER == -1 )); then
-
-			index_webserver_text=${aSOFTWARE_NAME[85]} # Nginx
-
-		elif (( $INDEX_WEBSERVER == -2 )); then
-
-			index_webserver_text=${aSOFTWARE_NAME[84]} # Lighttpd
-
-		fi
-
-		# Selected desktop preference
-		local index_desktop_text=${aSOFTWARE_NAME[23]} # LXDE
-		if (( $INDEX_DESKTOP == -1 )); then
-
-			index_desktop_text=${aSOFTWARE_NAME[25]} # Xfce
-
-		elif (( $INDEX_DESKTOP == -2 )); then
-
-			index_desktop_text=${aSOFTWARE_NAME[24]} # MATE
-
-		elif (( $INDEX_DESKTOP == -3 )); then
-
-			index_desktop_text=${aSOFTWARE_NAME[173]} # LXQt
-
-		elif (( $INDEX_DESKTOP == -4 )); then
-
-			index_desktop_text=${aSOFTWARE_NAME[26]} # GNUstep
-
-		fi
-
-		# Selected browser preference
-		local index_browser_text='None'
-		if (( $INDEX_BROWSER == -1 )); then
-
-			index_browser_text=${aSOFTWARE_NAME[67]} # Firefox
-
-		elif (( $INDEX_BROWSER == -2 )); then
-
-			index_browser_text=${aSOFTWARE_NAME[113]} # Chromium
-
-		fi
-
 		# Get real userdata location
 		local user_data_location_current=$(readlink -f /mnt/dietpi_userdata)
 
@@ -16572,9 +16511,6 @@ We allow it to take up to 30 minutes, it's process can be followed, please be pa
 			'Browse Software' ': Select software from the full list'
 			'SSH Server' ": [$sshserver_text]"
 			'Log System' ": [$index_logging_text]"
-			'Webserver Preference' ": [$index_webserver_text]"
-			'Desktop Preference' ": [$index_desktop_text]"
-			'Browser Preference' ": [$index_browser_text]"
 			'User Data Location' ": [$user_data_location_description]"
 			'' '●─ Install or Remove Software '
 			'Uninstall' ': Select installed software for removal'
@@ -16604,7 +16540,6 @@ We allow it to take up to 30 minutes, it's process can be followed, please be pa
 						'None' ': Not required / manual setup'
 						"${aSOFTWARE_NAME[104]}" ": ${aSOFTWARE_DESC[104]} (recommended)"
 						"${aSOFTWARE_NAME[105]}" ": ${aSOFTWARE_DESC[105]}"
-
 					)
 
 					G_WHIP_DEFAULT_ITEM=$sshserver_text
@@ -16633,7 +16568,6 @@ We allow it to take up to 30 minutes, it's process can be followed, please be pa
 					[[ $toberemoved_text ]] && toberemoved_text="\n\nThe following software will be uninstalled:$toberemoved_text"
 
 					G_WHIP_MSG "$G_WHIP_RETURNED_VALUE has been selected:\n- Your choice will be applied when 'Install Go >> Start installation' is selected.$tobeinstalled_text$toberemoved_text"
-
 				;;
 
 				'Log System')
@@ -16644,7 +16578,6 @@ We allow it to take up to 30 minutes, it's process can be followed, please be pa
 						'DietPi-RAMlog #1' ': Hourly clear (recommended)'
 						'DietPi-RAMlog #2' ': Hourly save, then clear'
 						'Full' ': Logrotate and Rsyslog'
-
 					)
 
 					G_WHIP_DEFAULT_ITEM=$index_logging_text
@@ -16662,7 +16595,6 @@ We allow it to take up to 30 minutes, it's process can be followed, please be pa
 						'DietPi-RAMlog #2') Apply_Logging_Choices -2;;
 						'Full') Apply_Logging_Choices -3;;
 						*) Apply_Logging_Choices -1;;
-
 					esac
 
 					# Check for changes
@@ -16675,8 +16607,7 @@ We allow it to take up to 30 minutes, it's process can be followed, please be pa
 					[[ $tobeinstalled_text ]] && tobeinstalled_text="\n\nThe following software will be installed:$tobeinstalled_text"
 					[[ $toberemoved_text ]] && toberemoved_text="\n\nThe following software will be uninstalled:$toberemoved_text"
 
-					G_WHIP_MSG "$G_WHIP_RETURNED_VALUE has been selected:\n- Your choice will be applied when 'Install Go >> Start installation' is selected.$tobeinstalled_text$toberemoved_text"
-
+					G_WHIP_MSG "$G_WHIP_RETURNED_VALUE has been selected:\n- Your choice will be applied when 'Install : Go >> Start installation' is selected.$tobeinstalled_text$toberemoved_text"
 				;;
 
 				'User Data Location')
@@ -16689,7 +16620,6 @@ We allow it to take up to 30 minutes, it's process can be followed, please be pa
 						'List' ': Select from a list of available drives to move user data.'
 						'Custom' ': Manually enter a location to move user data.'
 						'Drive' ': Launch DietPi-Drive_Manager.'
-
 					)
 
 					G_WHIP_BUTTON_CANCEL_TEXT='Back'
@@ -16740,215 +16670,6 @@ We allow it to take up to 30 minutes, it's process can be followed, please be pa
 						G_WHIP_MSG "User data transfer: Failed\n\n$(</var/log/dietpi-move_userdata.log)\n\nNo changes have been applied."
 
 					fi
-
-				;;
-
-				'Webserver Preference')
-
-					# Do not allow to change preference if a webserver is installed already
-					local webserver_installed=0 preference_index webserver_name
-
-					if (( ${aSOFTWARE_INSTALL_STATE[83]} == 2 )) || dpkg-query -s 'apache2' &> /dev/null; then
-
-						webserver_installed=1 preference_index=0 webserver_name=${aSOFTWARE_NAME[83]}
-
-					elif (( ${aSOFTWARE_INSTALL_STATE[85]} == 2 )) || dpkg-query -s 'nginx-common' &> /dev/null; then
-
-						webserver_installed=1 preference_index=-1 webserver_name=${aSOFTWARE_NAME[85]}
-
-					elif (( ${aSOFTWARE_INSTALL_STATE[84]} == 2 )) || dpkg-query -s 'lighttpd' &> /dev/null; then
-
-						webserver_installed=1 preference_index=-2 webserver_name=${aSOFTWARE_NAME[84]}
-
-					fi
-
-					if (( $webserver_installed == 1 ))
-					then
-						G_WHIP_MSG "[ INFO ] $webserver_name is installed already.
-\nThe webserver preference has no effect and cannot be changed as long as a webserver is installed already.
-\nIf you want to install a different webserver, uninstall $webserver_name first."
-						(( $INDEX_WEBSERVER == $preference_index )) || G_CONFIG_INJECT 'INDEX_WEBSERVER=' "INDEX_WEBSERVER=$preference_index" /boot/dietpi/.installed
-						INDEX_WEBSERVER=$preference_index
-						return 0
-					fi
-
-					G_WHIP_MENU_ARRAY=(
-
-						"${aSOFTWARE_NAME[83]}" ": ${aSOFTWARE_DESC[83]}"
-						"${aSOFTWARE_NAME[85]}" ": ${aSOFTWARE_DESC[85]}"
-						"${aSOFTWARE_NAME[84]}" ": ${aSOFTWARE_DESC[84]} (default)"
-
-					)
-
-					G_WHIP_DEFAULT_ITEM=$index_webserver_text
-					G_WHIP_BUTTON_CANCEL_TEXT='Back'
-					G_WHIP_MENU 'Which webserver shall be installed when you select software that requires a webserver?
-\n- Apache: Feature-rich and popular. Recommended for beginners and users who are looking to follow Apache based guides.
-\n- Nginx: Lightweight alternative to Apache. Nginx claims faster webserver performance compared to Apache.
-\n- Lighttpd: Extremely lightweight and is generally considered to offer the \"best\" webserver performance for SBCs. Recommended for users who expect low webserver traffic.
-\n- More info: https://dietpi.com/docs/software/webserver_stack/' || return 0
-
-					# Apply preference index
-					if [[ $G_WHIP_RETURNED_VALUE == "${aSOFTWARE_NAME[83]}" ]]; then
-
-						preference_index=0
-
-					elif [[ $G_WHIP_RETURNED_VALUE == "${aSOFTWARE_NAME[85]}" ]]; then
-
-						preference_index=-1
-
-					elif [[ $G_WHIP_RETURNED_VALUE == "${aSOFTWARE_NAME[84]}" ]]; then
-
-						preference_index=-2
-
-					fi
-					(( $INDEX_WEBSERVER == $preference_index )) || G_CONFIG_INJECT 'INDEX_WEBSERVER=' "INDEX_WEBSERVER=$preference_index" /boot/dietpi/.installed
-					INDEX_WEBSERVER=$preference_index
-
-				;;
-
-				'Desktop Preference')
-
-					# Do not allow to change preference if a desktop is installed already
-					local desktop_installed=0 preference_index desktop_name
-
-					if (( ${aSOFTWARE_INSTALL_STATE[23]} == 2 )) || dpkg-query -s 'lxde' &> /dev/null; then
-
-						desktop_installed=1 preference_index=0 desktop_name=${aSOFTWARE_NAME[23]}
-
-					elif (( ${aSOFTWARE_INSTALL_STATE[25]} == 2 )) || dpkg-query -s 'xfce4' &> /dev/null; then
-
-						desktop_installed=1 preference_index=-1 desktop_name=${aSOFTWARE_NAME[25]}
-
-					elif (( ${aSOFTWARE_INSTALL_STATE[24]} == 2 )) || dpkg-query -s 'mate-desktop-environment-core' &> /dev/null; then
-
-						desktop_installed=1 preference_index=-2 desktop_name=${aSOFTWARE_NAME[24]}
-
-					elif (( ${aSOFTWARE_INSTALL_STATE[173]} == 2 )) || dpkg-query -s 'lxqt' &> /dev/null; then
-
-						desktop_installed=1 preference_index=-3 desktop_name=${aSOFTWARE_NAME[173]}
-
-					elif (( ${aSOFTWARE_INSTALL_STATE[26]} == 2 )) || dpkg-query -s 'gnustep' &> /dev/null; then
-
-						desktop_installed=1 preference_index=-4 desktop_name=${aSOFTWARE_NAME[26]}
-
-					fi
-
-					if (( $desktop_installed == 1 ))
-					then
-						G_WHIP_MSG "[ INFO ] $desktop_name is installed already.
-\nThe desktop preference has no effect and cannot be changed as long as a desktop is installed already.
-\nYou can however select any additional desktop from 'Browse software' or 'Search software' menus."
-						(( $INDEX_DESKTOP == $preference_index )) || G_CONFIG_INJECT 'INDEX_DESKTOP=' "INDEX_DESKTOP=$preference_index" /boot/dietpi/.installed
-						INDEX_DESKTOP=$preference_index
-						return 0
-					fi
-
-					G_WHIP_MENU_ARRAY=(
-
-						"${aSOFTWARE_NAME[23]}" ": ${aSOFTWARE_DESC[23]} (default)"
-						"${aSOFTWARE_NAME[25]}" ": ${aSOFTWARE_DESC[25]}"
-						"${aSOFTWARE_NAME[24]}" ": ${aSOFTWARE_DESC[24]}"
-						"${aSOFTWARE_NAME[173]}" ": ${aSOFTWARE_DESC[173]}"
-						"${aSOFTWARE_NAME[26]}" ": ${aSOFTWARE_DESC[26]}"
-
-					)
-
-					G_WHIP_DEFAULT_ITEM=$index_desktop_text
-					G_WHIP_BUTTON_CANCEL_TEXT='Back'
-					G_WHIP_MENU 'Which desktop shall be installed when you select software that requires a desktop?' || return 0
-
-					# Apply preference index
-					if [[ $G_WHIP_RETURNED_VALUE == "${aSOFTWARE_NAME[23]}" ]]; then
-
-						preference_index=0
-
-					elif [[ $G_WHIP_RETURNED_VALUE == "${aSOFTWARE_NAME[25]}" ]]; then
-
-						preference_index=-1
-
-					elif [[ $G_WHIP_RETURNED_VALUE == "${aSOFTWARE_NAME[24]}" ]]; then
-
-						preference_index=-2
-
-					elif [[ $G_WHIP_RETURNED_VALUE == "${aSOFTWARE_NAME[173]}" ]]; then
-
-						preference_index=-3
-
-					elif [[ $G_WHIP_RETURNED_VALUE == "${aSOFTWARE_NAME[26]}" ]]; then
-
-						preference_index=-4
-
-					fi
-					(( $INDEX_DESKTOP == $preference_index )) || G_CONFIG_INJECT 'INDEX_DESKTOP=' "INDEX_DESKTOP=$preference_index" /boot/dietpi/.installed
-					INDEX_DESKTOP=$preference_index
-
-				;;
-
-				'Browser Preference')
-
-					# Disable browser preference on ARMv6 Bullseye+ systems: https://github.com/RPi-Distro/chromium-browser/issues/21
-					if (( $G_HW_ARCH == 1 && $G_DISTRO > 5 ))
-					then
-						G_WHIP_MSG '[ INFO ] No browsers are available for your system
-\nSince Bullseye, on ARMv6 RPi models (RPi 1 and Zero (1) variants) the two browsers Chromium and Firefox fail to start and are hence disabled.
-\nWe are looking for an alternative compatible browser for those systems to implement into dietpi-software, but until then the browser preference menu is disabled.
-\nFurther info: https://github.com/RPi-Distro/chromium-browser/issues/21'
-						return 0
-					fi
-
-					# Do not allow to change preference if a browser is installed already
-					local browser_installed=0 preference_index browser_name
-
-					if (( ${aSOFTWARE_INSTALL_STATE[67]} == 2 )) || dpkg-query -s 'firefox-esr' &> /dev/null; then
-
-						browser_installed=1 preference_index=-1 browser_name=${aSOFTWARE_NAME[67]}
-
-					elif (( ${aSOFTWARE_INSTALL_STATE[113]} == 2 )) || dpkg-query -s 'chromium' &> /dev/null || dpkg-query -s 'chromium-browser' &> /dev/null; then
-
-						browser_installed=1 preference_index=-2 browser_name=${aSOFTWARE_NAME[25]}
-
-					fi
-
-					if (( $browser_installed == 1 ))
-					then
-						G_WHIP_MSG "[ INFO ] $browser_name is installed already.
-\nThe browser preference has no effect and cannot be changed as long as a browser is installed already.
-\nYou can however select any additional browser from 'Browse software' or 'Search software' menus."
-						(( $INDEX_BROWSER == $preference_index )) || G_CONFIG_INJECT 'INDEX_BROWSER=' "INDEX_BROWSER=$preference_index" /boot/dietpi/.installed
-						INDEX_BROWSER=$preference_index
-						return 0
-					fi
-
-					G_WHIP_MENU_ARRAY=(
-
-						'None' ': No browser will be installed with desktops'
-						"${aSOFTWARE_NAME[67]}" ": ${aSOFTWARE_DESC[67]} (default)"
-						"${aSOFTWARE_NAME[113]}" ": ${aSOFTWARE_DESC[113]}"
-
-					)
-
-					G_WHIP_DEFAULT_ITEM=$index_browser_text
-					G_WHIP_BUTTON_CANCEL_TEXT='Back'
-					G_WHIP_MENU 'When a desktop is installed, which browser shall it contain?' || return 0
-
-					# Apply preference index
-					if [[ $G_WHIP_RETURNED_VALUE == 'None' ]]; then
-
-						preference_index=0
-
-					elif [[ $G_WHIP_RETURNED_VALUE == "${aSOFTWARE_NAME[67]}" ]]; then
-
-						preference_index=-1
-
-					elif [[ $G_WHIP_RETURNED_VALUE == "${aSOFTWARE_NAME[113]}" ]]; then
-
-						preference_index=-2
-
-					fi
-					(( $INDEX_BROWSER == $preference_index )) || G_CONFIG_INJECT 'INDEX_BROWSER=' "INDEX_BROWSER=$preference_index" /boot/dietpi/.installed
-					INDEX_BROWSER=$preference_index
-
 				;;
 
 				'DietPi-Config') /boot/dietpi/dietpi-config;;
@@ -16977,18 +16698,17 @@ List of installed software and their online documentation URLs:
 
 					G_WHIP_SIZE_X_MAX=70
 					G_WHIP_MSG "$string"
-
 				;;
 
 				'Install') Menu_StartInstall;;
+
+				*) :;;
 
 			esac
 
 		# Exit/Abort Setup
 		else
-
 			Menu_Exit
-
 		fi
 
 	}

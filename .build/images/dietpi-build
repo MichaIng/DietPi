@@ -10,6 +10,7 @@ then
 else
 	[[ $G_GITOWNER && $G_GITBRANCH ]] || { echo '[FAILED] You must export or pass G_GITOWNER and G_GITBRANCH to the script'; exit 1; }
 	curl -sSf "https://raw.githubusercontent.com/$G_GITOWNER/DietPi/$G_GITBRANCH/dietpi/func/dietpi-globals" -o /tmp/dietpi-globals || exit 1
+	# shellcheck disable=SC1091
 	. /tmp/dietpi-globals
 	G_EXEC_NOHALT=1 G_EXEC rm /tmp/dietpi-globals
 	export G_GITOWNER G_GITBRANCH G_HW_ARCH_NAME=$(uname -m)
@@ -40,6 +41,7 @@ ITYPE=
 VMTYPE=
 GITBRANCH='master'
 GITOWNER='MichaIng'
+EDITION=
 while (( $# ))
 do
 	case $1 in
@@ -64,27 +66,33 @@ partition_start=1
 efi_size=64
 boot_size=0
 root_size=1023
+boot_fstype='fat32' # Used for MBR boot partition only => NanoPi M2
 CLONING_TOOL='dd'
 case $HW_MODEL in
 	0) iname='RPi' partition_start=4 boot_size=128 root_size=892;;
+	10) iname='OdroidC1' HW_ARCH=2 partition_start=4 boot_size=128 root_size=764;;
+	11) iname='OdroidXU4' HW_ARCH=2 partition_start=4 root_size=764;;
+	12) iname='OdroidC2' HW_ARCH=3 partition_start=4 root_size=764;;
 	15) iname='OdroidN2' HW_ARCH=3 partition_start=4 root_size=764;;
 	16) iname='OdroidC4' HW_ARCH=3 partition_start=4 root_size=764;;
 	20) iname='VM' WIFI_REQUIRED=0 HW_ARCH=${HW_ARCH:-10} VMTYPE=${VMTYPE:-raw};;
 	21) iname='NativePC-BIOS' HW_ARCH=10 root_size=1215;;
+	61) iname='NanoPiM2' HW_ARCH=2 partition_start=4 boot_size=64 root_size=572 boot_fstype='ext4';;
 	75) iname='Container' root_size=399;;
 	*) G_DIETPI-NOTIFY 1 "Invalid hardware model \"$HW_MODEL\" passed, aborting..."; exit 1;;
 esac
 
 if [[ $VMTYPE ]]
 then
-	[[ $HW_MODEL == 20 ]] || { G_DIETPI-NOTIFY 1 "Invalid option \"-v\" (virtual machine type) for hardware model \"$HW_MODEL\", aborting..."; exit 1; }
+	[[ $HW_MODEL == 20 ]] || { G_DIETPI-NOTIFY 1 "Unsupported option \"-v\" (virtual machine type) for hardware model \"$HW_MODEL\" pased, aborting..."; exit 1; }
 	[[ $VMTYPE =~ ^(raw|vbox|vmware|esxi|hyperv|utm|parallels|proxmox|all)$ ]] || { G_DIETPI-NOTIFY 1 "Invalid virtual machine type \"$VMTYPE\" passed, aborting..."; exit 1; }
 fi
 
 if [[ $EDITION ]]
 then
-	[[ $HW_MODEL == 0 ]] || { G_DIETPI-NOTIFY 1 "Invalid option \"-e\" (edition) for hardware model \"$HW_MODEL\", aborting..."; exit 1; }
-	[[ $EDITION =~ ^(Amiberry|all)$ ]] || { G_DIETPI-NOTIFY 1 "Invalid edition \"$EDITION\" passed, aborting..."; exit 1; }
+	[[ $HW_MODEL == 0 || $HW_MODEL == 70 ]] || { G_DIETPI-NOTIFY 1 "Unsupported option \"-e\" (edition) for hardware model \"$HW_MODEL\" passed, aborting..."; exit 1; }
+	[[ $EDITION =~ ^(Amiberry|AlloGUI|all)$ ]] || { G_DIETPI-NOTIFY 1 "Invalid edition \"$EDITION\" passed, aborting..."; exit 1; }
+	[[ $EDITION == 'AlloGUI' || $HW_MODEL == 0 ]] || { G_DIETPI-NOTIFY 1 "Unsupported edition \"$EDITION\" for hardware model \"$HW_MODEL\" passed, aborting..."; exit 1; }
 fi
 
 # Check for valid target architecture and set variables accordingly
@@ -142,7 +150,7 @@ then
 	# Use package from Debian repo, since Ubuntu does not shot ARM packages and has no global HTTPS mirror director
 	if (( ${G_DISTRO:=5} < 6 ))
 	then
-		G_EXEC curl -fL "https://deb.debian.org/debian/pool/main/q/qemu/qemu-user-static_6.2+dfsg-2_$DEB_ARCH.deb" -o qemu.deb
+		G_EXEC curl -fL "https://deb.debian.org/debian/pool/main/q/qemu/qemu-user-static_6.2+dfsg-2~bpo11+1_$DEB_ARCH.deb" -o qemu.deb
 		G_EXEC dpkg -i qemu.deb
 		G_EXEC rm qemu.deb
 	fi
@@ -196,7 +204,7 @@ G_EXEC fallocate -l "$((partition_start+efi_size+boot_size+root_size))M" "$OUTPU
 if [[ $PTTYPE == 'gpt' ]]
 then
 	# GPT partition table and EFI partition
-	G_EXEC parted -s "$OUTPUT_IMG_NAME.img" unit MiB mklabel gpt mkpart 'EFI' fat32 $partition_start $((partition_start+efi_size)) set 1 esp on
+	G_EXEC parted -s "$OUTPUT_IMG_NAME.img" unit MiB mklabel gpt mkpart 'EFI' fat32 "$partition_start" $((partition_start+efi_size)) set 1 esp on
 	# root partition
 	G_EXEC parted -s "$OUTPUT_IMG_NAME.img" unit MiB mkpart 'root' "$FSTYPE" $((partition_start+efi_size)) 100%
 
@@ -205,7 +213,7 @@ else
 	# MBR partition table
 	G_EXEC parted -s "$OUTPUT_IMG_NAME.img" unit MiB mklabel msdos
 	# boot partition
-	(( $boot_size )) && G_EXEC parted -s "$OUTPUT_IMG_NAME.img" unit MiB mkpart primary fat32 $((partition_start)) $((partition_start+boot_size))
+	(( $boot_size )) && G_EXEC parted -s "$OUTPUT_IMG_NAME.img" unit MiB mkpart primary "$boot_fstype" "$partition_start" $((partition_start+boot_size))
 	# root partition
 	G_EXEC parted -s "$OUTPUT_IMG_NAME.img" unit MiB mkpart primary "$FSTYPE" $((partition_start+boot_size)) 100%
 	# x86_64: Set boot flag
@@ -238,7 +246,13 @@ _EOF_
 elif (( $boot_size ))
 then
 	FP_ROOT_DEV=2
-	G_EXEC mkfs.fat -F 32 "${FP_LOOP}p1"
+	if [[ $boot_fstype == 'fat32' ]]
+	then
+		boot_fstype='vfat'
+		G_EXEC mkfs.fat -F 32 "${FP_LOOP}p1"
+	else
+		G_EXEC "mkfs.$boot_fstype" "${FP_LOOP}p1"
+	fi
 	G_EXEC "mkfs.$FSTYPE" "${FP_LOOP}p2"
 	G_EXEC mount "${FP_LOOP}p2" rootfs
 	G_EXEC mkdir rootfs/boot
@@ -246,7 +260,7 @@ then
 	G_EXEC mkdir rootfs/etc
 	cat << _EOF_ > rootfs/etc/fstab
 PARTUUID=$(lsblk -no PARTUUID "${FP_LOOP}p2") / $FSTYPE noatime,lazytime 0 1
-PARTUUID=$(lsblk -no PARTUUID "${FP_LOOP}p1") /boot vfat noatime,lazytime 0 2
+PARTUUID=$(lsblk -no PARTUUID "${FP_LOOP}p1") /boot $boot_fstype noatime,lazytime 0 2
 _EOF_
 # - single partition
 else
@@ -270,16 +284,16 @@ G_EXEC_OUTPUT=1 G_EXEC debootstrap --variant=minbase --exclude="gcc-7-base,gcc-8
 G_EXEC rm -R rootfs/var/{cache/apt,lib/apt/lists}/*
 
 ##########################################
-# DietPi-PREP
+# DietPi-Installer
 ##########################################
-# Create rc.local to automate DietPi-PREP
+# Create rc.local to automate DietPi-Installer
 cat << _EOF_ > rootfs/etc/rc.local
 #!/bin/dash
 {
 infocmp "$TERM" > /dev/null 2>&1 || TERM='dumb'
-echo '[ INFO ] Running DietPi-PREP...'
+echo '[ INFO ] Running DietPi-Installer...'
 export GITOWNER='$GITOWNER' GITBRANCH='$GITBRANCH' HW_MODEL='$HW_MODEL' IMAGE_CREATOR=0 PREIMAGE_INFO='from scratch' WIFI_REQUIRED=$WIFI_REQUIRED DISTRO_TARGET=$DISTRO
-bash -c "\$(curl -sSf 'https://raw.githubusercontent.com/$G_GITOWNER/DietPi/$G_GITBRANCH/PREP_SYSTEM_FOR_DIETPI.sh')" || poweroff
+bash -c "\$(curl -sSf 'https://raw.githubusercontent.com/$G_GITOWNER/DietPi/$G_GITBRANCH/.build/images/dietpi-installer')" || poweroff
 _EOF_
 
 # - VM: Generate tiny-initramfs with explicit kernel modules, as auto-detection doesn't work correctly within container and loop devices
@@ -311,6 +325,8 @@ fi
 abind=()
 [[ -b ${FP_LOOP}p2 ]] && abind=("--bind=${FP_LOOP}p2")
 systemd-nspawn -bD rootfs --bind="$FP_LOOP"{,p1} "${abind[@]}" --bind=/dev/disk || exit 1
+(( $mask_dbus )) && { G_EXEC systemctl mask --now dbus dbus.socket && mask_dbus=0; }
+
 [[ -f 'rootfs/success' ]] || { G_DIETPI-NOTIFY 1 'The container setup did not finish successfully, aborting...'; exit 1; }
 G_EXEC rm rootfs/success
 G_EXEC sync
@@ -318,7 +334,6 @@ G_EXEC sleep 1
 G_EXEC umount -R rootfs
 G_EXEC rmdir rootfs
 G_EXEC losetup -d "$FP_LOOP"
-(( $mask_dbus )) && { G_EXEC systemctl mask --now dbus dbus.socket && mask_dbus=0; }
 
 ##########################################
 # DietPi-Imager
@@ -326,9 +341,9 @@ G_EXEC losetup -d "$FP_LOOP"
 # Do not pack and upload raw VM image if not explicitly requested
 [[ $VMTYPE && ! $VMTYPE =~ ^(raw|all)$ ]] && SHRINK_ONLY='On' || SHRINK_ONLY='Off'
 export FP_ROOT_DEV CLONING_TOOL OUTPUT_IMG_NAME MOUNT_IT='Off' SHRINK_ONLY
-[[ $EDITION && $EDITION != 'all' ]] || bash -c "$(curl -sSf "https://raw.githubusercontent.com/$G_GITOWNER/DietPi/$G_GITBRANCH/.meta/dietpi-imager")" 'DietPi-Imager' "$OUTPUT_IMG_NAME.img" || exit 1
+[[ $EDITION && $EDITION != 'all' ]] || bash -c "$(curl -sSf "https://raw.githubusercontent.com/$G_GITOWNER/DietPi/$G_GITBRANCH/.build/images/dietpi-imager")" 'DietPi-Imager' "$OUTPUT_IMG_NAME.img" || exit 1
 
-#  Amiberry edition: Install automatically on first boot, enable autostart option and onboard audio on RPi
+# Amiberry edition: Install automatically on first boot, enable autostart option and onboard audio on RPi
 if [[ $EDITION =~ ^(Amiberry|all)$ ]]
 then
 	G_EXEC mv "$OUTPUT_IMG_NAME.img" "${OUTPUT_IMG_NAME}_Amiberry.img"
@@ -351,10 +366,10 @@ then
 	fi
 
 	# Install Amiberry via automated first run setup
-	G_EXEC sed -i '/^AUTO_SETUP_AUTOMATED=/c\AUTO_SETUP_AUTOMATED=1' rootfs/boot/dietpi.txt
-	G_EXEC sed -i '/^#AUTO_SETUP_INSTALL_SOFTWARE_ID=/c\AUTO_SETUP_INSTALL_SOFTWARE_ID=108' rootfs/boot/dietpi.txt
+	G_CONFIG_INJECT 'AUTO_SETUP_AUTOMATED=' 'AUTO_SETUP_AUTOMATED=1' rootfs/boot/dietpi.txt
+	G_CONFIG_INJECT 'AUTO_SETUP_INSTALL_SOFTWARE_ID=' 'AUTO_SETUP_INSTALL_SOFTWARE_ID=108' rootfs/boot/dietpi.txt
 	# Enable Amiberry fast boot autostart option
-	G_EXEC sed -i '/^AUTO_SETUP_AUTOSTART_TARGET_INDEX=/c\AUTO_SETUP_AUTOSTART_TARGET_INDEX=6' rootfs/boot/dietpi.txt
+	G_CONFIG_INJECT 'AUTO_SETUP_AUTOSTART_TARGET_INDEX=' 'AUTO_SETUP_AUTOSTART_TARGET_INDEX=6' rootfs/boot/dietpi.txt
 	# RPi: Enable onboard audio so that it can be detected and configured on first boot
 	[[ -f 'rootfs/boot/config.txt' ]] && G_EXEC sed -i '/^dtparam=audio=/c\dtparam=audio=on' rootfs/boot/config.txt
 
@@ -364,7 +379,126 @@ then
 	G_EXEC rmdir rootfs
 	G_EXEC losetup -d "$FP_LOOP"
 
-	bash -c "$(curl -sSf "https://raw.githubusercontent.com/$G_GITOWNER/DietPi/$G_GITBRANCH/.meta/dietpi-imager")" 'DietPi-Imager' "$OUTPUT_IMG_NAME.img" || exit 1
+	bash -c "$(curl -sSf "https://raw.githubusercontent.com/$G_GITOWNER/DietPi/$G_GITBRANCH/.build/images/dietpi-imager")" 'DietPi-Imager' "$OUTPUT_IMG_NAME.img" || exit 1
+
+# AlloGUI edition: Pre-install Allo GUI with all managed audiophile software
+elif [[ $EDITION =~ ^(AlloGUI|all)$ ]]
+then
+	G_EXEC mv "$OUTPUT_IMG_NAME.img" "${OUTPUT_IMG_NAME%_Amiberry}_AlloGUI.img"
+	OUTPUT_IMG_NAME="${OUTPUT_IMG_NAME%_Amiberry}_AlloGUI"
+
+	# Create and raise size of loop device to 2 GiB
+	G_EXEC truncate -s $((2*1024**3)) "$OUTPUT_IMG_NAME.img"
+	FP_LOOP=$(losetup -f)
+	G_EXEC losetup "$FP_LOOP" "$OUTPUT_IMG_NAME.img"
+	G_EXEC partprobe "$FP_LOOP"
+	G_EXEC partx -u "$FP_LOOP"
+	G_EXEC_OUTPUT=1 G_EXEC eval "sfdisk -fN2 '$FP_LOOP' <<< ',+'"
+	G_EXEC partprobe "$FP_LOOP"
+	G_EXEC partx -u "$FP_LOOP"
+	G_EXEC_OUTPUT=1 G_EXEC resize2fs "${FP_LOOP}p2"
+	G_EXEC_OUTPUT=1 G_EXEC e2fsck -fp "${FP_LOOP}p2"
+
+	# Mount filesystems
+	G_EXEC mkdir rootfs
+	if (( $boot_size ))
+	then
+		G_EXEC mount "${FP_LOOP}p2" rootfs
+		G_EXEC mount "${FP_LOOP}p1" rootfs/boot
+	else
+		G_EXEC mount "${FP_LOOP}p1" rootfs
+	fi
+
+	# Install Allo GUI via automated first run setup right here
+	G_CONFIG_INJECT 'AUTO_SETUP_AUTOMATED=' 'AUTO_SETUP_AUTOMATED=1' rootfs/boot/dietpi.txt
+	G_CONFIG_INJECT 'AUTO_SETUP_INSTALL_SOFTWARE_ID=' 'AUTO_SETUP_INSTALL_SOFTWARE_ID=159' rootfs/boot/dietpi.txt
+	# Revert autostart option, in case Amiberry image was generated before
+	G_CONFIG_INJECT 'AUTO_SETUP_AUTOSTART_TARGET_INDEX=' 'AUTO_SETUP_AUTOSTART_TARGET_INDEX=0' rootfs/boot/dietpi.txt
+
+	# Workaround invalid TERM on login
+	# shellcheck disable=SC2016
+	G_EXEC eval 'echo '\''infocmp "$TERM" > /dev/null 2>&1 || export TERM=dumb'\'' > rootfs/etc/bashrc.d/00-dietpi-build.sh'
+
+	# Workaround for network connection checks
+	G_CONFIG_INJECT 'CONFIG_CHECK_CONNECTION_IP=' 'CONFIG_CHECK_CONNECTION_IP=127.0.0.1' rootfs/boot/dietpi.txt
+	G_CONFIG_INJECT 'CONFIG_CHECK_DNS_DOMAIN=' 'CONFIG_CHECK_DNS_DOMAIN=localhost' rootfs/boot/dietpi.txt
+
+	# Generate automation custom script for first boot and cleanup steps
+	cat << '_EOF_' > rootfs/boot/Automation_Custom_Script.sh
+#!/bin/bash
+{
+. /boot/dietpi/func/dietpi-globals
+/boot/dietpi/dietpi-services stop
+
+# RPi
+if (( $G_HW_MODEL < 10 ))
+then
+	/boot/dietpi/func/dietpi-set_hardware serialconsole 0 ttyAMA0
+	systemctl mask serial-getty@ttyAMA0
+	/boot/dietpi/func/dietpi-set_hardware serialconsole 0 ttyS0
+	systemctl mask serial-getty@ttyS0
+	/boot/dietpi/func/dietpi-set_hardware serialconsole 1 serial0
+
+# Sparky SBC
+else
+	/boot/dietpi/func/dietpi-set_hardware serialconsole 0
+fi
+
+# FirstBoot
+G_CONFIG_INJECT 'SURVEY_OPTED_IN=' 'SURVEY_OPTED_IN=-1' /boot/dietpi.txt
+G_EXEC systemctl enable dietpi-fs_partition_resize
+G_EXEC eval 'echo 10 > /boot/dietpi/.install_stage'
+
+# Cleanup
+/boot/dietpi/func/dietpi-logclear 2
+G_EXEC systemctl stop dietpi-ramlog
+G_EXEC rm -R /var/tmp/dietpi/logs
+/boot/dietpi/func/dietpi-set_software apt-cache clean
+G_EXEC rm /boot/dietpi/.{hw_model,dietpi-services_include_exclude}
+G_EXEC rm /boot/dietpi-wifi.txt
+G_EXEC rm -Rf /{root,home/*}/.{bash_history,nano_history,wget-hsts,cache,local,config,gnupg,viminfo,dbus,gconf,nano,vim,zshrc,oh-my-zsh} /etc/*- /var/{cache/debconf,lib/dpkg}/*-old /var/lib/dhcp/{,.??,.[^.]}*
+# Remove unique Roon IDs: https://community.roonlabs.com/t/roon-core-will-not-recognize-two-dietpi-allo-gui-roon-bridges-simultaneously/32563/18?u=dan_knight
+G_EXEC rm -f /mnt/dietpi_userdata/roon/{RoonBridge,RAATServer}/Settings/unique_id
+
+# Re-create required log dirs
+G_EXEC mkdir -p /var/tmp/dietpi/logs/dietpi-ramlog_store/{netdata,mpd,samba,mysql,roon}
+G_EXEC chown netdata:netdata /var/tmp/dietpi/logs/dietpi-ramlog_store/netdata
+G_EXEC chown mpd:audio /var/tmp/dietpi/logs/dietpi-ramlog_store/mpd
+G_EXEC chown mysql:mysql /var/tmp/dietpi/logs/dietpi-ramlog_store/mysql
+
+# Remove automation scripts
+G_EXEC rm /etc/bashrc.d/00-dietpi-build.sh /boot/Automation_Custom_Script.sh /root/AUTO_CustomScript.sh
+
+> /success
+poweroff
+}
+_EOF_
+	# Start container
+	# - dbus required for container spawn
+	mask_dbus=0
+	if [[ $(readlink /etc/systemd/system/dbus.socket) == '/dev/null' ]]
+	then
+		mask_dbus=1
+		G_EXEC systemctl unmask dbus.socket dbus
+		G_EXEC systemctl start dbus.socket
+	fi
+	# - Bind mounts required to allow container reading its own drive info, /dev/disk for GRUB and probably other tools to detect UUIDs
+	systemd-nspawn -bD rootfs --bind="$FP_LOOP"{,p1,p2} --bind=/dev/disk || exit 1
+	(( $mask_dbus )) && { G_EXEC systemctl mask --now dbus dbus.socket && mask_dbus=0; }
+
+	# Reset network connection check settings
+	G_CONFIG_INJECT 'CONFIG_CHECK_CONNECTION_IP=' 'CONFIG_CHECK_CONNECTION_IP=9.9.9.9' rootfs/boot/dietpi.txt
+	G_CONFIG_INJECT 'CONFIG_CHECK_DNS_DOMAIN=' 'CONFIG_CHECK_DNS_DOMAIN=dns9.quad9.net' rootfs/boot/dietpi.txt
+
+	[[ -f 'rootfs/success' ]] || { G_DIETPI-NOTIFY 1 'The container setup did not finish successfully, aborting...'; exit 1; }
+	G_EXEC rm rootfs/success
+	G_EXEC sync
+	G_EXEC sleep 1
+	G_EXEC umount -R rootfs
+	G_EXEC rmdir rootfs
+	G_EXEC losetup -d "$FP_LOOP"
+
+	bash -c "$(curl -sSf "https://raw.githubusercontent.com/$G_GITOWNER/DietPi/$G_GITBRANCH/.build/images/dietpi-imager")" 'DietPi-Imager' "$OUTPUT_IMG_NAME.img" || exit 1
 fi
 
 [[ $VMTYPE ]] || exit 0
@@ -375,8 +509,8 @@ fi
 G_EXEC_DESC='Downloading current README.md to pack with image...' G_EXEC curl -sSf "https://raw.githubusercontent.com/$G_GITOWNER/DietPi/$G_GITBRANCH/README.md" -o README.md
 
 # NB: LZMA2 ultra compression requires much memory per thread. 1 GiB is not sufficient for >2 threads, hence use "-mmt2" to limit used CPU threads to "2" on 1 GiB devices with more than two cores.
-limit_threads=
-(( $(free -m | mawk '/Mem:/{print $2}') < 1750 && $(nproc) > 2 )) && limit_threads='-mmt2'
+limit_threads=()
+(( $(free -m | mawk '/Mem:/{print $2}') < 1750 && $(nproc) > 2 )) && limit_threads=('-mmt2')
 
 # Since qemu-img does not support VMDK and VHDX resizing, we need to resize the raw .img. It is usually done as sparse file, hence the actual disk usage does not change.
 G_EXEC qemu-img resize "$OUTPUT_IMG_NAME.img" 8G
@@ -452,7 +586,7 @@ SHA1:   $(sha1sum "$image_name.vmx" | mawk '{print $1}')
 SHA256: $(sha256sum "$image_name.vmx" | mawk '{print $1}')
 _EOF_
 	[[ ( -t 0 || -t 1 ) && $TERM != 'dumb' ]] && G_EXEC_OUTPUT=1
-	G_EXEC_DESC='Creating VMware 7-Zip archive' G_EXEC 7zr a -bsp1 -bso1 -bse2 -m0=lzma2 -mx=9 $limit_threads "$image_name.7z" "$image_name.vmdk" "$image_name.vmx" hash.txt README.md
+	G_EXEC_DESC='Creating VMware 7-Zip archive' G_EXEC 7zr a -bsp1 -bso1 -bse2 -m0=lzma2 -mx=9 "${limit_threads[@]}" "$image_name.7z" "$image_name.vmdk" "$image_name.vmx" hash.txt README.md
 	G_EXEC rm "$image_name.vmdk" "$image_name.vmx"
 	[[ -x 'upload.sh' ]] && G_EXEC_OUTPUT=1 G_EXEC ./upload.sh "$image_name.7z" && G_EXEC rm "$image_name.7z"
 fi
@@ -603,7 +737,7 @@ SHA1:   $(sha1sum "$image_name.ova" | mawk '{print $1}')
 SHA256: $(sha256sum "$image_name.ova" | mawk '{print $1}')
 _EOF_
 	[[ ( -t 0 || -t 1 ) && $TERM != 'dumb' ]] && G_EXEC_OUTPUT=1
-	G_EXEC_DESC='Creating VirtualBox 7-Zip archive' G_EXEC 7zr a -bsp1 -bso1 -bse2 -m0=lzma2 -mx=9 $limit_threads "$image_name.7z" "$image_name.ova" hash.txt README.md
+	G_EXEC_DESC='Creating VirtualBox 7-Zip archive' G_EXEC 7zr a -bsp1 -bso1 -bse2 -m0=lzma2 -mx=9 "${limit_threads[@]}" "$image_name.7z" "$image_name.ova" hash.txt README.md
 	G_EXEC rm "$image_name.ova"
 	[[ -x 'upload.sh' ]] && G_EXEC_OUTPUT=1 G_EXEC ./upload.sh "$image_name.7z" && G_EXEC rm "$image_name.7z"
 fi
@@ -768,7 +902,7 @@ SHA1:   $(sha1sum "$image_name.ova" | mawk '{print $1}')
 SHA256: $(sha256sum "$image_name.ova" | mawk '{print $1}')
 _EOF_
 	[[ ( -t 0 || -t 1 ) && $TERM != 'dumb' ]] && G_EXEC_OUTPUT=1
-	G_EXEC_DESC='Creating VirtualBox 7-Zip archive' G_EXEC 7zr a -bsp1 -bso1 -bse2 -m0=lzma2 -mx=9 $limit_threads "$image_name.7z" "$image_name.ova" hash.txt README.md
+	G_EXEC_DESC='Creating VirtualBox 7-Zip archive' G_EXEC 7zr a -bsp1 -bso1 -bse2 -m0=lzma2 -mx=9 "${limit_threads[@]}" "$image_name.7z" "$image_name.ova" hash.txt README.md
 	G_EXEC rm "$image_name.ova"
 	[[ -x 'upload.sh' ]] && G_EXEC_OUTPUT=1 G_EXEC ./upload.sh "$image_name.7z" && G_EXEC rm "$image_name.7z"
 fi
@@ -789,7 +923,7 @@ SHA1:   $(sha1sum "$image_name.vhdx" | mawk '{print $1}')
 SHA256: $(sha256sum "$image_name.vhdx" | mawk '{print $1}')
 _EOF_
 	[[ ( -t 0 || -t 1 ) && $TERM != 'dumb' ]] && G_EXEC_OUTPUT=1
-	G_EXEC_DESC='Creating Hyper-V 7-Zip archive' G_EXEC 7zr a -bsp1 -bso1 -bse2 -m0=lzma2 -mx=9 $limit_threads "$image_name.7z" "$image_name.vhdx" hash.txt README.md
+	G_EXEC_DESC='Creating Hyper-V 7-Zip archive' G_EXEC 7zr a -bsp1 -bso1 -bse2 -m0=lzma2 -mx=9 "${limit_threads[@]}" "$image_name.7z" "$image_name.vhdx" hash.txt README.md
 	G_EXEC rm "$image_name.vhdx"
 	[[ -x 'upload.sh' ]] && G_EXEC_OUTPUT=1 G_EXEC ./upload.sh "$image_name.7z" && G_EXEC rm "$image_name.7z"
 fi
@@ -810,7 +944,7 @@ SHA1:   $(sha1sum "$image_name.hds" | mawk '{print $1}')
 SHA256: $(sha256sum "$image_name.hds" | mawk '{print $1}')
 _EOF_
 	[[ ( -t 0 || -t 1 ) && $TERM != 'dumb' ]] && G_EXEC_OUTPUT=1
-	G_EXEC_DESC='Creating Parallels 7-Zip archive' G_EXEC 7zr a -bsp1 -bso1 -bse2 -m0=lzma2 -mx=9 $limit_threads "$image_name.7z" "$image_name.hds" hash.txt README.md
+	G_EXEC_DESC='Creating Parallels 7-Zip archive' G_EXEC 7zr a -bsp1 -bso1 -bse2 -m0=lzma2 -mx=9 "${limit_threads[@]}" "$image_name.7z" "$image_name.hds" hash.txt README.md
 	G_EXEC rm "$image_name.hds"
 	[[ -x 'upload.sh' ]] && G_EXEC_OUTPUT=1 G_EXEC ./upload.sh "$image_name.7z" && G_EXEC rm "$image_name.7z"
 fi
@@ -831,7 +965,7 @@ SHA1:   $(sha1sum "$image_name.qcow2" | mawk '{print $1}')
 SHA256: $(sha256sum "$image_name.qcow2" | mawk '{print $1}')
 _EOF_
 	[[ ( -t 0 || -t 1 ) && $TERM != 'dumb' ]] && G_EXEC_OUTPUT=1
-	G_EXEC_DESC='Creating Proxmox 7-Zip archive' G_EXEC 7zr a -bsp1 -bso1 -bse2 -m0=lzma2 -mx=9 $limit_threads "$image_name.7z" "$image_name.qcow2" hash.txt README.md
+	G_EXEC_DESC='Creating Proxmox 7-Zip archive' G_EXEC 7zr a -bsp1 -bso1 -bse2 -m0=lzma2 -mx=9 "${limit_threads[@]}" "$image_name.7z" "$image_name.qcow2" hash.txt README.md
 	[[ $VMTYPE == 'all' ]] || G_EXEC rm "$image_name.qcow2"
 	[[ -x 'upload.sh' ]] && G_EXEC_OUTPUT=1 G_EXEC ./upload.sh "$image_name.7z" && G_EXEC rm "$image_name.7z"
 fi
@@ -1020,7 +1154,7 @@ SHA1:   $(sha1sum "$image_name.utm/view.plist" | mawk '{print $1}')
 SHA256: $(sha256sum "$image_name.utm/view.plist" | mawk '{print $1}')
 _EOF_
 	[[ ( -t 0 || -t 1 ) && $TERM != 'dumb' ]] && G_EXEC_OUTPUT=1
-	G_EXEC_DESC='Creating UTM 7-Zip archive' G_EXEC 7zr a -bsp1 -bso1 -bse2 -m0=lzma2 -mx=9 $limit_threads "$image_name.7z" "$image_name.utm" hash.txt README.md
+	G_EXEC_DESC='Creating UTM 7-Zip archive' G_EXEC 7zr a -bsp1 -bso1 -bse2 -m0=lzma2 -mx=9 "${limit_threads[@]}" "$image_name.7z" "$image_name.utm" hash.txt README.md
 	G_EXEC rm -R "$image_name.utm"
 	[[ -x 'upload.sh' ]] && G_EXEC_OUTPUT=1 G_EXEC ./upload.sh "$image_name.7z" && G_EXEC rm "$image_name.7z"
 fi

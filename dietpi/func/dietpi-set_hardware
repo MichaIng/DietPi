@@ -96,13 +96,13 @@ $FP_SCRIPT	rpi-eeprom
 
 	Unsupported_Input_Name(){
 
-		G_DIETPI-NOTIFY 2 "Input name ($INPUT_DEVICE_NAME) is not supported by $G_HW_MODEL_NAME. Nothing has been applied."
+		G_DIETPI-NOTIFY 2 "Input name ($INPUT_DEVICE_NAME) is not supported on your system. Nothing has been applied."
 
 	}
 
 	Unsupported_Input_Mode(){
 
-		G_DIETPI-NOTIFY 2 "Input value ($INPUT_DEVICE_VALUE) is not supported by $G_HW_MODEL_NAME. Nothing has been applied."
+		G_DIETPI-NOTIFY 2 "Input value ($INPUT_DEVICE_VALUE) is not supported on your system. Nothing has been applied."
 
 	}
 
@@ -1190,7 +1190,8 @@ _EOF_
 			# RPi
 			if (( $G_HW_MODEL < 10 )) && (( $G_HW_ONBOARD_WIFI )); then
 
-				systemctl -q is-enabled hciuart 2> /dev/null || systemctl -q is-active hciuart && G_EXEC systemctl disable --now hciuart
+				# Do not stop the service, otherwise it cannot be started anymore until reboot. Also for this reason the service is not stopped on pi-bluetooth package removal, hence disabling it on "is-active" via "disable --now" fails due to missing service file: https://github.com/RPi-Distro/pi-bluetooth/issues/34, https://github.com/MichaIng/DietPi/issues/5435
+				systemctl -q is-enabled hciuart 2> /dev/null && G_EXEC systemctl disable hciuart
 				# Disable onboard Bluetooth via device tree overlay
 				G_CONFIG_INJECT 'dtoverlay=disable-bt' 'dtoverlay=disable-bt' /boot/config.txt
 
@@ -1340,7 +1341,7 @@ Do you want to continue and disable the serial login console?' || return 1
 		local aWIFI_MODULES=('cfg80211')
 
 		# + RPi with onboard WiFi and NanoPi NEO Air
-		if (( $G_HW_ONBOARD_WIFI || $G_HW_MODEL == 64 )); then
+		if (( ${G_HW_ONBOARD_WIFI:-0} || $G_HW_MODEL == 64 )); then
 
 			aWIFI_MODULES+=('brcmfmac' 'brcmutil')
 
@@ -1412,7 +1413,9 @@ _EOF_
 			command -v rfkill > /dev/null && rfkill unblock wifi
 
 			# Install required APT packages
-			G_EXEC_NOEXIT=1 G_AG_CHECK_INSTALL_PREREQ 'iw' 'wireless-tools' 'crda' 'wpasupplicant' || EXIT_CODE=1
+			local crda='wireless-regdb'
+			(( $G_DISTRO > 6 )) || crda='crda'
+			G_EXEC_NOEXIT=1 G_AG_CHECK_INSTALL_PREREQ 'iw' 'wireless-tools' "$crda" 'wpasupplicant' || EXIT_CODE=1
 
 		elif [[ $INPUT_DEVICE_VALUE == 'onboard_enable' ]]; then
 
@@ -1440,8 +1443,12 @@ _EOF_
 
 		# Use country code from command input: https://en.wikipedia.org/wiki/ISO_3166-1_alpha-2
 		INPUT_DEVICE_VALUE=${INPUT_DEVICE_VALUE^^} # Needs to be uppercase while all input is made lowercase (ToDo)
-		if [[ $INPUT_DEVICE_VALUE == [[:upper:]][[:upper:]] ]]; then
+		if (( $G_DISTRO > 6 ))
+		then
+			Unsupported_Input_Name
 
+		elif [[ $INPUT_DEVICE_VALUE == [[:upper:]][[:upper:]] ]]
+		then
 			# Update /etc/default/crda to apply country code via udev rules
 			G_CONFIG_INJECT 'REGDOMAIN=' "REGDOMAIN=$INPUT_DEVICE_VALUE" /etc/default/crda || EXIT_CODE=1
 
@@ -1450,11 +1457,8 @@ _EOF_
 
 			# Update dietpi.txt with new value
 			G_CONFIG_INJECT 'AUTO_SETUP_NET_WIFI_COUNTRY_CODE=' "AUTO_SETUP_NET_WIFI_COUNTRY_CODE=$INPUT_DEVICE_VALUE" /boot/dietpi.txt
-
 		else
-
 			Unknown_Input_Mode
-
 		fi
 
 	}
@@ -1495,14 +1499,15 @@ Do you want to continue and DISABLE Bluetooth now?' || return 1
 
 					grep -q "console=$INPUT_ADDITIONAL" /boot/cmdline.txt || sed -i "/root=/s/[[:blank:]]*$/ console=$INPUT_ADDITIONAL,115200/" /boot/cmdline.txt
 
-				# - Odroid C2 legacy
-				elif [[ $G_HW_MODEL == 12 && -f '/boot/boot.ini' ]]; then
+				# - Odroid C1/C2 legacy
+				elif [[ $G_HW_MODEL == 1[02] && -f '/boot/boot.ini' ]]; then
 
-					local old=
+					local old firstline='ODROIDC2-UBOOT-CONFIG'
+					(( $G_HW_MODEL == 10 )) && firstline='ODROIDC-UBOOT-CONFIG'
 					old=$(grep -Em1 '^[[:blank:]]*setenv[[:blank:]]+condev[[:blank:]]' /boot/boot.ini) || return 0
 					[[ $old == *"console=$INPUT_ADDITIONAL"* ]] && return 0
 					old=$(cut -d \" -f 2 <<< "$old")
-					G_CONFIG_INJECT 'setenv[[:blank:]]+condev[[:blank:]]' "setenv condev \"$old console=$INPUT_ADDITIONAL,115200n8\"" /boot/boot.ini 'ODROIDC2-UBOOT-CONFIG'
+					G_CONFIG_INJECT 'setenv[[:blank:]]+condev[[:blank:]]' "setenv condev \"$old console=$INPUT_ADDITIONAL,115200n8\"" /boot/boot.ini "$firstline"
 
 				# - Odroid XU4 legacy
 				elif [[ $G_HW_MODEL == 11 && -f '/boot/boot.ini' ]]; then
@@ -1865,6 +1870,7 @@ Do you want to continue and DISABLE Bluetooth now?' || return 1
 echo 4 > /proc/irq/63/smp_affinity
 echo 8 > /proc/irq/62/smp_affinity
 _EOF_
+						# shellcheck disable=SC1091
 						. /var/lib/dietpi/postboot.d/c2_smp.sh
 
 					fi
