@@ -84,14 +84,15 @@ esac
 
 if [[ $VMTYPE ]]
 then
-	[[ $HW_MODEL == 20 ]] || { G_DIETPI-NOTIFY 1 "Invalid option \"-v\" (virtual machine type) for hardware model \"$HW_MODEL\", aborting..."; exit 1; }
+	[[ $HW_MODEL == 20 ]] || { G_DIETPI-NOTIFY 1 "Unsupported option \"-v\" (virtual machine type) for hardware model \"$HW_MODEL\" pased, aborting..."; exit 1; }
 	[[ $VMTYPE =~ ^(raw|vbox|vmware|esxi|hyperv|utm|parallels|proxmox|all)$ ]] || { G_DIETPI-NOTIFY 1 "Invalid virtual machine type \"$VMTYPE\" passed, aborting..."; exit 1; }
 fi
 
 if [[ $EDITION ]]
 then
-	[[ $HW_MODEL == 0 ]] || { G_DIETPI-NOTIFY 1 "Invalid option \"-e\" (edition) for hardware model \"$HW_MODEL\", aborting..."; exit 1; }
-	[[ $EDITION =~ ^(Amiberry|all)$ ]] || { G_DIETPI-NOTIFY 1 "Invalid edition \"$EDITION\" passed, aborting..."; exit 1; }
+	[[ $HW_MODEL == 0 || $HW_MODEL == 70 ]] || { G_DIETPI-NOTIFY 1 "Unsupported option \"-e\" (edition) for hardware model \"$HW_MODEL\" passed, aborting..."; exit 1; }
+	[[ $EDITION =~ ^(Amiberry|AlloGUI|all)$ ]] || { G_DIETPI-NOTIFY 1 "Invalid edition \"$EDITION\" passed, aborting..."; exit 1; }
+	[[ $EDITION == 'AlloGUI' || $HW_MODEL == 0 ]] || { G_DIETPI-NOTIFY 1 "Unsupported edition \"$EDITION\" for hardware model \"$HW_MODEL\" passed, aborting..."; exit 1; }
 fi
 
 # Check for valid target architecture and set variables accordingly
@@ -324,6 +325,8 @@ fi
 abind=()
 [[ -b ${FP_LOOP}p2 ]] && abind=("--bind=${FP_LOOP}p2")
 systemd-nspawn -bD rootfs --bind="$FP_LOOP"{,p1} "${abind[@]}" --bind=/dev/disk || exit 1
+(( $mask_dbus )) && { G_EXEC systemctl mask --now dbus dbus.socket && mask_dbus=0; }
+
 [[ -f 'rootfs/success' ]] || { G_DIETPI-NOTIFY 1 'The container setup did not finish successfully, aborting...'; exit 1; }
 G_EXEC rm rootfs/success
 G_EXEC sync
@@ -331,7 +334,6 @@ G_EXEC sleep 1
 G_EXEC umount -R rootfs
 G_EXEC rmdir rootfs
 G_EXEC losetup -d "$FP_LOOP"
-(( $mask_dbus )) && { G_EXEC systemctl mask --now dbus dbus.socket && mask_dbus=0; }
 
 ##########################################
 # DietPi-Imager
@@ -341,7 +343,7 @@ G_EXEC losetup -d "$FP_LOOP"
 export FP_ROOT_DEV CLONING_TOOL OUTPUT_IMG_NAME MOUNT_IT='Off' SHRINK_ONLY
 [[ $EDITION && $EDITION != 'all' ]] || bash -c "$(curl -sSf "https://raw.githubusercontent.com/$G_GITOWNER/DietPi/$G_GITBRANCH/.build/images/dietpi-imager")" 'DietPi-Imager' "$OUTPUT_IMG_NAME.img" || exit 1
 
-#  Amiberry edition: Install automatically on first boot, enable autostart option and onboard audio on RPi
+# Amiberry edition: Install automatically on first boot, enable autostart option and onboard audio on RPi
 if [[ $EDITION =~ ^(Amiberry|all)$ ]]
 then
 	G_EXEC mv "$OUTPUT_IMG_NAME.img" "${OUTPUT_IMG_NAME}_Amiberry.img"
@@ -371,6 +373,108 @@ then
 	# RPi: Enable onboard audio so that it can be detected and configured on first boot
 	[[ -f 'rootfs/boot/config.txt' ]] && G_EXEC sed -i '/^dtparam=audio=/c\dtparam=audio=on' rootfs/boot/config.txt
 
+	G_EXEC sync
+	G_EXEC sleep 1
+	G_EXEC umount -R rootfs
+	G_EXEC rmdir rootfs
+	G_EXEC losetup -d "$FP_LOOP"
+
+	bash -c "$(curl -sSf "https://raw.githubusercontent.com/$G_GITOWNER/DietPi/$G_GITBRANCH/.build/images/dietpi-imager")" 'DietPi-Imager' "$OUTPUT_IMG_NAME.img" || exit 1
+
+# AlloGUI edition: Pre-install Allo GUI with all managed audiophile software
+elif [[ $EDITION =~ ^(AlloGUI|all)$ ]]
+then
+	G_EXEC mv "$OUTPUT_IMG_NAME.img" "${OUTPUT_IMG_NAME%_Amiberry}_AlloGUI.img"
+	OUTPUT_IMG_NAME="${OUTPUT_IMG_NAME%_Amiberry}_AlloGUI"
+
+	# Create loop device
+	FP_LOOP=$(losetup -f)
+	G_EXEC losetup "$FP_LOOP" "$OUTPUT_IMG_NAME.img"
+	G_EXEC partprobe "$FP_LOOP"
+	G_EXEC partx -u "$FP_LOOP"
+
+	# Mount filesystems
+	G_EXEC mkdir rootfs
+	if (( $boot_size ))
+	then
+		G_EXEC mount "${FP_LOOP}p2" rootfs
+		G_EXEC mount "${FP_LOOP}p1" rootfs/boot
+	else
+		G_EXEC mount "${FP_LOOP}p1" rootfs
+	fi
+
+	# Install Allo GUI via automated first run setup right here
+	G_EXEC sed -i '/^AUTO_SETUP_AUTOMATED=/c\AUTO_SETUP_AUTOMATED=1' rootfs/boot/dietpi.txt
+	G_EXEC sed -i '/^#AUTO_SETUP_INSTALL_SOFTWARE_ID=/c\AUTO_SETUP_INSTALL_SOFTWARE_ID=159' rootfs/boot/dietpi.txt
+	# Revert autostart option, in case Amiberry image was generated before
+	G_EXEC sed -i '/^AUTO_SETUP_AUTOSTART_TARGET_INDEX=/c\AUTO_SETUP_AUTOSTART_TARGET_INDEX=0' rootfs/boot/dietpi.txt
+
+	# Generate automation custom script for first boot and cleanup steps
+	cat << '_EOF_' > rootfs/boot/Automation_Custom_Script.sh
+#!/bin/bash
+{
+. /boot/dietpi/func/dietpi-globals
+/boot/dietpi/dietpi-services stop
+
+# RPi
+if (( $G_HW_MODEL < 10 ))
+then
+	/boot/dietpi/func/dietpi-set_hardware serialconsole 0 ttyAMA0
+	systemctl mask serial-getty@ttyAMA0
+	/boot/dietpi/func/dietpi-set_hardware serialconsole 0 ttyS0
+	systemctl mask serial-getty@ttyS0
+	/boot/dietpi/func/dietpi-set_hardware serialconsole 1 serial0
+
+# Sparky SBC
+else
+	/boot/dietpi/func/dietpi-set_hardware serialconsole 0
+fi
+
+# FirstBoot
+G_CONFIG_INJECT 'SURVEY_OPTED_IN=' 'SURVEY_OPTED_IN=-1' /boot/dietpi.txt
+G_EXEC systemctl enable dietpi-fs_partition_resize
+G_EXEC eval 'echo 10 > /boot/dietpi/.install_stage'
+
+# Cleanup
+/boot/dietpi/func/dietpi-logclear 2
+G_EXEC systemctl stop dietpi-ramlog
+G_EXEC rm -R /var/tmp/dietpi/logs
+/boot/dietpi/func/dietpi-set_software apt-cache clean
+G_EXEC rm /boot/dietpi/.{hw_model,dietpi-services_include_exclude}
+G_EXEC rm /boot/dietpi-wifi.txt
+G_EXEC rm -Rf /{root,home/*}/.{bash_history,nano_history,wget-hsts,cache,local,config,gnupg,viminfo,dbus,gconf,nano,vim,zshrc,oh-my-zsh} /etc/*- /var/{cache/debconf,lib/dpkg}/*-old /var/lib/dhcp/{,.??,.[^.]}*
+# Remove unique Roon IDs: https://community.roonlabs.com/t/roon-core-will-not-recognize-two-dietpi-allo-gui-roon-bridges-simultaneously/32563/18?u=dan_knight
+G_EXEC rm -f /mnt/dietpi_userdata/roon/{RoonBridge,RAATServer}/Settings/unique_id
+
+# Re-create required log dirs
+G_EXEC mkdir -p /var/tmp/dietpi/logs/dietpi-ramlog_store/{netdata,mpd,samba,mysql,roon}
+G_EXEC chown netdata:netdata /var/tmp/dietpi/logs/dietpi-ramlog_store/netdata
+G_EXEC chown mpd:audio /var/tmp/dietpi/logs/dietpi-ramlog_store/mpd
+G_EXEC chown mysql:mysql /var/tmp/dietpi/logs/dietpi-ramlog_store/mysql
+
+# Remove automation scripts
+G_EXEC rm /boot/Automation_Custom_Script.sh /root/AUTO_CustomScript.sh
+
+> /success
+poweroff
+}
+_EOF_
+
+	# Start container
+	# - dbus required for container spawn
+	mask_dbus=0
+	if [[ $(readlink /etc/systemd/system/dbus.socket) == '/dev/null' ]]
+	then
+		mask_dbus=1
+		G_EXEC systemctl unmask dbus.socket dbus
+		G_EXEC systemctl start dbus.socket
+	fi
+	# - Bind mounts required to allow container reading its own drive info, /dev/disk for GRUB and probably other tools to detect UUIDs
+	systemd-nspawn -bD rootfs --bind="$FP_LOOP"{,p1,p2} --bind=/dev/disk || exit 1
+	(( $mask_dbus )) && { G_EXEC systemctl mask --now dbus dbus.socket && mask_dbus=0; }
+
+	[[ -f 'rootfs/success' ]] || { G_DIETPI-NOTIFY 1 'The container setup did not finish successfully, aborting...'; exit 1; }
+	G_EXEC rm rootfs/success
 	G_EXEC sync
 	G_EXEC sleep 1
 	G_EXEC umount -R rootfs
