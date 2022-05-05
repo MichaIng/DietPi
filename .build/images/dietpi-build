@@ -61,7 +61,6 @@ do
 done
 
 # Check for valid target hardware model and set variables accordingly
-WIFI_REQUIRED=1
 partition_start=1
 efi_size=64
 boot_size=0
@@ -69,16 +68,16 @@ root_size=1023
 boot_fstype='fat32' # Used for MBR boot partition only => NanoPi M2
 CLONING_TOOL='dd'
 case $HW_MODEL in
-	0) iname='RPi' partition_start=4 boot_size=128 root_size=892;;
+	0) iname='RPi' HW_ARCH=${HW_ARCH:-1} partition_start=4 boot_size=128 root_size=892;;
 	10) iname='OdroidC1' HW_ARCH=2 partition_start=4 boot_size=128 root_size=764;;
 	11) iname='OdroidXU4' HW_ARCH=2 partition_start=4 root_size=764;;
 	12) iname='OdroidC2' HW_ARCH=3 partition_start=4 root_size=764;;
 	15) iname='OdroidN2' HW_ARCH=3 partition_start=4 root_size=764;;
 	16) iname='OdroidC4' HW_ARCH=3 partition_start=4 root_size=764;;
-	20) iname='VM' WIFI_REQUIRED=0 HW_ARCH=${HW_ARCH:-10} VMTYPE=${VMTYPE:-raw};;
+	20) iname='VM' HW_ARCH=${HW_ARCH:-10} VMTYPE=${VMTYPE:-raw};;
 	21) iname='NativePC-BIOS' HW_ARCH=10 root_size=1215;;
 	61) iname='NanoPiM2' HW_ARCH=2 partition_start=4 boot_size=64 root_size=572 boot_fstype='ext4';;
-	75) iname='Container' root_size=399;;
+	75) iname='Container' HW_ARCH=${HW_ARCH:-10} root_size=399;;
 	*) G_DIETPI-NOTIFY 1 "Invalid hardware model \"$HW_MODEL\" passed, aborting..."; exit 1;;
 esac
 
@@ -287,12 +286,13 @@ G_EXEC rm -R rootfs/var/{cache/apt,lib/apt/lists}/*
 # DietPi-Installer
 ##########################################
 # Create rc.local to automate DietPi-Installer
+# - NB: WIFI_REQUIRED=1 is always passed here, but ignored by DietPi-Installer for VMs and containers.
 cat << _EOF_ > rootfs/etc/rc.local
 #!/bin/dash
 {
 infocmp "$TERM" > /dev/null 2>&1 || TERM='dumb'
 echo '[ INFO ] Running DietPi-Installer...'
-export GITOWNER='$GITOWNER' GITBRANCH='$GITBRANCH' HW_MODEL='$HW_MODEL' IMAGE_CREATOR=0 PREIMAGE_INFO='from scratch' WIFI_REQUIRED=$WIFI_REQUIRED DISTRO_TARGET=$DISTRO
+export GITOWNER='$GITOWNER' GITBRANCH='$GITBRANCH' HW_MODEL='$HW_MODEL' IMAGE_CREATOR=0 PREIMAGE_INFO='from scratch' WIFI_REQUIRED=1 DISTRO_TARGET=$DISTRO
 bash -c "\$(curl -sSf 'https://raw.githubusercontent.com/$G_GITOWNER/DietPi/$G_GITBRANCH/.build/images/dietpi-installer')" || poweroff
 _EOF_
 
@@ -357,13 +357,8 @@ then
 
 	# Mount filesystems
 	G_EXEC mkdir rootfs
-	if (( $boot_size ))
-	then
-		G_EXEC mount "${FP_LOOP}p2" rootfs
-		G_EXEC mount "${FP_LOOP}p1" rootfs/boot
-	else
-		G_EXEC mount "${FP_LOOP}p1" rootfs
-	fi
+	G_EXEC mount "${FP_LOOP}p2" rootfs
+	G_EXEC mount "${FP_LOOP}p1" rootfs/boot
 
 	# Install Amiberry via automated first run setup
 	G_CONFIG_INJECT 'AUTO_SETUP_AUTOMATED=' 'AUTO_SETUP_AUTOMATED=1' rootfs/boot/dietpi.txt
@@ -371,7 +366,7 @@ then
 	# Enable Amiberry fast boot autostart option
 	G_CONFIG_INJECT 'AUTO_SETUP_AUTOSTART_TARGET_INDEX=' 'AUTO_SETUP_AUTOSTART_TARGET_INDEX=6' rootfs/boot/dietpi.txt
 	# RPi: Enable onboard audio so that it can be detected and configured on first boot
-	[[ -f 'rootfs/boot/config.txt' ]] && G_EXEC sed -i '/^dtparam=audio=/c\dtparam=audio=on' rootfs/boot/config.txt
+	[[ -f 'rootfs/boot/config.txt' ]] && G_CONFIG_INJECT 'dtparam=audio=' 'dtparam=audio=on' rootfs/boot/config.txt
 
 	G_EXEC sync
 	G_EXEC sleep 1
@@ -387,27 +382,23 @@ then
 	G_EXEC mv "$OUTPUT_IMG_NAME.img" "${OUTPUT_IMG_NAME%_Amiberry}_AlloGUI.img"
 	OUTPUT_IMG_NAME="${OUTPUT_IMG_NAME%_Amiberry}_AlloGUI"
 
-	# Create and raise size of loop device to 2 GiB
-	G_EXEC truncate -s $((2*1024**3)) "$OUTPUT_IMG_NAME.img"
+	# Raise image size to 2.5 GiB and create loop device
+	G_EXEC truncate -s $((2560*1024**2)) "$OUTPUT_IMG_NAME.img"
 	FP_LOOP=$(losetup -f)
 	G_EXEC losetup "$FP_LOOP" "$OUTPUT_IMG_NAME.img"
 	G_EXEC partprobe "$FP_LOOP"
 	G_EXEC partx -u "$FP_LOOP"
+	# Raise partition and filesystem size as well, since resize2fs within the image returns "Nothing to do!"
 	G_EXEC_OUTPUT=1 G_EXEC eval "sfdisk -fN2 '$FP_LOOP' <<< ',+'"
 	G_EXEC partprobe "$FP_LOOP"
 	G_EXEC partx -u "$FP_LOOP"
-	G_EXEC_OUTPUT=1 G_EXEC resize2fs "${FP_LOOP}p2"
 	G_EXEC_OUTPUT=1 G_EXEC e2fsck -fp "${FP_LOOP}p2"
+	G_EXEC_OUTPUT=1 G_EXEC resize2fs "${FP_LOOP}p2"
 
 	# Mount filesystems
 	G_EXEC mkdir rootfs
-	if (( $boot_size ))
-	then
-		G_EXEC mount "${FP_LOOP}p2" rootfs
-		G_EXEC mount "${FP_LOOP}p1" rootfs/boot
-	else
-		G_EXEC mount "${FP_LOOP}p1" rootfs
-	fi
+	G_EXEC mount "${FP_LOOP}p2" rootfs
+	G_EXEC mount "${FP_LOOP}p1" rootfs/boot
 
 	# Install Allo GUI via automated first run setup right here
 	G_CONFIG_INJECT 'AUTO_SETUP_AUTOMATED=' 'AUTO_SETUP_AUTOMATED=1' rootfs/boot/dietpi.txt
@@ -438,6 +429,8 @@ then
 	/boot/dietpi/func/dietpi-set_hardware serialconsole 0 ttyS0
 	systemctl mask serial-getty@ttyS0
 	/boot/dietpi/func/dietpi-set_hardware serialconsole 1 serial0
+	G_CONFIG_INJECT 'temp_limit=' 'temp_limit=75' /boot/config.txt # since most RPi's are now RPi 4 and Allo ships the CM3 with USBridge Sig and Allo GUI image
+	G_EXEC sed -Ei 's/^(arm_freq|over_voltage)=/#\1=/' /boot/config.txt
 
 # Sparky SBC
 else
@@ -454,8 +447,7 @@ G_EXEC eval 'echo 10 > /boot/dietpi/.install_stage'
 G_EXEC systemctl stop dietpi-ramlog
 G_EXEC rm -R /var/tmp/dietpi/logs
 /boot/dietpi/func/dietpi-set_software apt-cache clean
-G_EXEC rm /boot/dietpi/.{hw_model,dietpi-services_include_exclude}
-G_EXEC rm /boot/dietpi-wifi.txt
+G_EXEC rm /boot/dietpi/.{hw_model,dietpi-services_include_exclude} /boot/dietpi-wifi.txt
 G_EXEC rm -Rf /{root,home/*}/.{bash_history,nano_history,wget-hsts,cache,local,config,gnupg,viminfo,dbus,gconf,nano,vim,zshrc,oh-my-zsh} /etc/*- /var/{cache/debconf,lib/dpkg}/*-old /var/lib/dhcp/{,.??,.[^.]}*
 # Remove unique Roon IDs: https://community.roonlabs.com/t/roon-core-will-not-recognize-two-dietpi-allo-gui-roon-bridges-simultaneously/32563/18?u=dan_knight
 G_EXEC rm -f /mnt/dietpi_userdata/roon/{RoonBridge,RAATServer}/Settings/unique_id
@@ -466,7 +458,7 @@ G_EXEC chown netdata:netdata /var/tmp/dietpi/logs/dietpi-ramlog_store/netdata
 G_EXEC chown mpd:audio /var/tmp/dietpi/logs/dietpi-ramlog_store/mpd
 G_EXEC chown mysql:mysql /var/tmp/dietpi/logs/dietpi-ramlog_store/mysql
 
-# Remove automation scripts
+# Remove automation scripts and workarounds
 G_EXEC rm /etc/bashrc.d/00-dietpi-build.sh /boot/Automation_Custom_Script.sh /root/AUTO_CustomScript.sh
 
 > /success
