@@ -704,6 +704,15 @@ Available commands:
 		aSOFTWARE_CATX[$software_id]=3
 		aSOFTWARE_DOCS[$software_id]='https://dietpi.com/docs/software/bittorrent/#nzbget'
 		#------------------
+		software_id=151
+		aSOFTWARE_NAME[$software_id]='Prowlarr'
+		aSOFTWARE_DESC[$software_id]='Indexer Manager & Proxy for PVR'
+		aSOFTWARE_CATX[$software_id]=3
+		aSOFTWARE_DOCS[$software_id]='https://dietpi.com/docs/software/bittorrent/#prowlarr'
+		aSOFTWARE_DEPS[$software_id]='87'
+		# - ARMv6
+		aSOFTWARE_AVAIL_G_HW_ARCH[$software_id,1]=0
+		#------------------
 		software_id=155
 		aSOFTWARE_NAME[$software_id]='HTPC Manager'
 		aSOFTWARE_DESC[$software_id]='Manage your HTPC from anywhere'
@@ -10672,6 +10681,97 @@ ExecStart=/mnt/dietpi_userdata/nzbget/nzbget -D
 WantedBy=multi-user.target
 _EOF_
 		fi
+		
+		software_id=151 # Prowlarr
+		if (( ${aSOFTWARE_INSTALL_STATE[$software_id]} == 1 ))
+		then
+
+			Banner_Installing
+
+			# APT dependencies
+			aDEPS=('mediainfo')
+			# - .NET: https://packages.microsoft.com/debian/
+			if (( $G_HW_ARCH != 1 ))
+			then
+				if (( $G_DISTRO == 5 ))
+				then
+					aDEPS+=('libicu63')
+				else
+					aDEPS+=('libicu67')
+				fi
+			fi
+
+			# Reinstall: Skip download and install, advice to use internal updater from web UI
+			if [[ -d '/opt/prowlarr' ]]
+			then
+				G_DIETPI-NOTIFY 2 "${aSOFTWARE_NAME[$software_id]} install dir \"/opt/prowlarr\" already exists. Download and install steps will be skipped.
+ - If you want to update ${aSOFTWARE_NAME[$software_id]}, please use the internal updater from web UI.
+ - If you need to reinstall (e.g. broken instance), please manually remove the install dir and rerun \"dietpi-software reinstall $software_id\"."
+
+				G_AGI "${aDEPS[@]}"
+				aDEPS=()
+			else
+				# ARMv7
+				#local url=$(curl -sSfL 'https://api.github.com/repos/Prowlarr/Prowlarr/releases/latest' | mawk -F\" '/"browser_download_url": .*linux-core-arm\.tar\.gz"/{print $4}')
+				#local version='0.3.0.1730'
+				local version=$(curl -sSf 'https://api.github.com/repos/Prowlarr/Prowlarr/tags' | mawk -F\" '/"name": "v.*",/{print substr($4,2); }' | head -n1)
+				local url="https://github.com/Prowlarr/Prowlarr/releases/download/v$version/Prowlarr.develop.$version.linux-core-arm.tar.gz"
+
+				# ARMv8
+				if (( $G_HW_ARCH == 3 ))
+				then
+					#url=$(curl -sSfL 'https://api.github.com/repos/Prowlarr/Prowlarr/releases/latest' | mawk -F\" '/"browser_download_url": .*linux-core-arm64\.tar\.gz"/{print $4}')
+					url="https://github.com/Prowlarr/Prowlarr/releases/download/v$version/Prowlarr.develop.$version.linux-core-arm64.tar.gz"
+
+				# x86_64
+				elif (( $G_HW_ARCH == 10 ))
+				then
+					#url=$(curl -sSfL 'https://api.github.com/repos/Prowlarr/Prowlarr/releases/latest' | mawk -F\" '/"browser_download_url": .*linux-core-x64\.tar\.gz"/{print $4}')
+					url="https://github.com/Prowlarr/Prowlarr/releases/download/v$version/Prowlarr.develop.$version.linux-core-x64.tar.gz"
+				fi
+
+				Download_Install "$url"
+				G_EXEC mv Prowlarr /opt/prowlarr
+			fi
+
+			# Data dir
+			[[ -d '/mnt/dietpi_userdata/prowlarr' ]] || G_EXEC mkdir /mnt/dietpi_userdata/prowlarr
+
+			# User
+			Create_User -g dietpi -d /mnt/dietpi_userdata/prowlarr prowlarr
+
+			# Service: https://wiki.servarr.com/prowlarr/installation
+			cat << '_EOF_' > /etc/systemd/system/prowlarr.service
+[Unit]
+Description=prowlarr (DietPi)
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+SyslogIdentifier=Prowlarr
+User=prowlarr
+UMask=002
+LogsDirectory=prowlarr
+ExecStart=/opt/prowlarr/Prowlarr -nobrowser -data=/mnt/dietpi_userdata/prowlarr
+TimeoutStopSec=20
+KillMode=process
+Restart=on-failure
+
+# Hardening
+ProtectSystem=strict
+ProtectHome=true
+PrivateDevices=true
+ProtectKernelTunables=true
+ProtectControlGroups=true
+ReadWritePaths=-/opt/prowlarr -/mnt -/media -/var/log/prowlarr -/tmp
+
+[Install]
+WantedBy=multi-user.target
+_EOF_
+
+			# Permissions
+			G_EXEC chown -R prowlarr:dietpi /mnt/dietpi_userdata/prowlarr /opt/prowlarr
+		fi
 
 		software_id=155 # HTPC Manager
 		if (( ${aSOFTWARE_INSTALL_STATE[$software_id]} == 1 )); then
@@ -13492,6 +13592,21 @@ If no WireGuard (auto)start is included, but you require it, please do the follo
 			getent passwd nzbget > /dev/null && G_EXEC userdel nzbget
 			getent group nzbget > /dev/null && G_EXEC groupdel nzbget # Pre-v6.33
 			[[ -d '/mnt/dietpi_userdata/nzbget' ]] && G_EXEC rm -R /mnt/dietpi_userdata/nzbget
+
+		fi
+		
+		software_id=151 # Prowlarr
+		if (( ${aSOFTWARE_INSTALL_STATE[$software_id]} == -1 )); then
+
+			Banner_Uninstalling
+			if [[ -f '/etc/systemd/system/prowlarr.service' ]]
+			then
+				G_EXEC systemctl disable --now prowlarr
+				G_EXEC rm /etc/systemd/system/prowlarr.service
+			fi
+			[[ -d '/etc/systemd/system/prowlarr.service.d' ]] && G_EXEC rm -R /etc/systemd/system/prowlarr.service.d
+			getent passwd prowlarr > /dev/null && G_EXEC userdel prowlarr
+			G_EXEC rm -Rf /opt/prowlarr /mnt/dietpi_userdata/prowlarr /var/log/prowlarr
 
 		fi
 
