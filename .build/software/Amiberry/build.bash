@@ -182,7 +182,7 @@ do
 done
 DEPS_APT_VERSIONED=${DEPS_APT_VERSIONED%,}
 # shellcheck disable=SC2001
-grep -q 'raspbian' /etc/os-release && DEPS_APT_VERSIONED=$(sed 's/+rp[it][0-9]\+//g' <<< "$DEPS_APT_VERSIONED") || DEPS_APT_VERSIONED=$(sed 's/+b[0-9]\+//g' <<< "$DEPS_APT_VERSIONED")
+grep -q 'raspbian' /etc/os-release && DEPS_APT_VERSIONED=$(sed 's/+rp[it][0-9]\+)/)/g' <<< "$DEPS_APT_VERSIONED") || DEPS_APT_VERSIONED=$(sed 's/+b[0-9]\+)/)/g' <<< "$DEPS_APT_VERSIONED")
 
 # - control
 for i in 1 2; do cat << _EOF_ > "$DIR/DEBIAN/control"
@@ -210,7 +210,8 @@ G_EXEC_OUTPUT=1 G_EXEC dpkg-deb -b "$DIR"
 G_EXEC rm -Rf "$DIR"
 
 # Upload
-[[ -x 'upload.sh' ]] && G_EXEC_OUTPUT=1 G_EXEC ./upload.sh "$DIR.deb"
+(( $G_DISTRO > 6 )) && key=('ed25519') || key=('rsa' '--pubkey' "$HOME/.ssh/id_rsa.pub")
+G_EXEC_OUTPUT=1 G_EXEC curl --key ~/.ssh/id_"${key[@]}" -T "$DIR.deb" "sftp://root@ssh.dietpi.com/var/www/downloads/binaries/$G_DISTRO_NAME/"
 
 exit 0
 }
