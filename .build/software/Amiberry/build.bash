@@ -211,6 +211,7 @@ G_EXEC rm -Rf "$DIR"
 
 # Upload
 (( $G_DISTRO > 6 )) && key=('ed25519') || key=('rsa' '--pubkey' "$HOME/.ssh/id_rsa.pub")
+# shellcheck disable=SC2145
 G_EXEC_OUTPUT=1 G_EXEC curl --key ~/.ssh/id_"${key[@]}" -T "$DIR.deb" "sftp://root@ssh.dietpi.com/var/www/downloads/binaries/$G_DISTRO_NAME/"
 
 exit 0
