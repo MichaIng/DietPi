@@ -313,6 +313,11 @@ Links to hardware and software manufacturers, sources and build instructions use
 - [Allo GUI](https://github.com/MichaIng/DietPi-AlloGUI)
 - [PHP Composer](https://github.com/composer/composer)
 - [motionEye](https://github.com/motioneye-project/motioneye)
+- [Sonarr](https://github.com/Sonarr/Sonarr)
+- [Radarr](https://github.com/Radarr/Radarr)
+- [Lidarr](https://github.com/Lidarr/Lidarr)
+- [Prowlarr](https://github.com/Prowlarr/Prowlarr)
+- [Jackett](https://github.com/Jackett/Jackett)
 
 ---
 
