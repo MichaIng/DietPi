@@ -17,7 +17,7 @@ If so, let us know!
 We are always looking for talented people who believe in the DietPi project, and, wish to contribute in any way you can.
 
 - Send us an email: <micha@dietpi.com>
-- Join our forum: <https://dietpi.com/phpbb/>
+- Join our forum: <https://dietpi.com/forum/>
 - GitHub: <https://github.com/MichaIng/DietPi>
 
 Read more: <https://dietpi.com/contribute.html>
