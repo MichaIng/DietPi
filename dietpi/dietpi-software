@@ -704,6 +704,15 @@ Available commands:
 		aSOFTWARE_CATX[$software_id]=3
 		aSOFTWARE_DOCS[$software_id]='https://dietpi.com/docs/software/bittorrent/#nzbget'
 		#------------------
+		software_id=151
+		aSOFTWARE_NAME[$software_id]='Prowlarr'
+		aSOFTWARE_DESC[$software_id]='Indexer Manager & Proxy for PVR'
+		aSOFTWARE_CATX[$software_id]=3
+		aSOFTWARE_DOCS[$software_id]='https://dietpi.com/docs/software/bittorrent/#prowlarr'
+		aSOFTWARE_DEPS[$software_id]='87'
+		# - ARMv6
+		aSOFTWARE_AVAIL_G_HW_ARCH[$software_id,1]=0
+		#------------------
 		software_id=155
 		aSOFTWARE_NAME[$software_id]='HTPC Manager'
 		aSOFTWARE_DESC[$software_id]='Manage your HTPC from anywhere'
@@ -825,17 +834,6 @@ Available commands:
 		aSOFTWARE_CATX[$software_id]=5
 		aSOFTWARE_DOCS[$software_id]='https://dietpi.com/docs/software/gaming/#amiberry'
 		aSOFTWARE_DEPS[$software_id]='5'
-		# RPi only
-		for ((i=10; i<=$MAX_G_HW_MODEL; i++))
-		do
-			aSOFTWARE_AVAIL_G_HW_MODEL[$software_id,$i]=0
-		done
-		# + Odroid XU4
-		aSOFTWARE_AVAIL_G_HW_MODEL[$software_id,11]=1
-		# + ASUS TB
-		aSOFTWARE_AVAIL_G_HW_MODEL[$software_id,52]=1
-		# - ARMv8
-		aSOFTWARE_AVAIL_G_HW_ARCH[$software_id,3]=0
 		#------------------
 		software_id=51
 		aSOFTWARE_NAME[$software_id]='OpenTyrian'
@@ -1113,7 +1111,6 @@ Available commands:
 		aSOFTWARE_DESC[$software_id]='GPIO interface library (C)'
 		aSOFTWARE_CATX[$software_id]=10
 		aSOFTWARE_DOCS[$software_id]='https://dietpi.com/docs/software/hardware_projects/#wiringpi'
-		aSOFTWARE_DEPS[$software_id]='16'
 		# RPi + Odroids only
 		for ((i=20; i<=$MAX_G_HW_MODEL; i++))
 		do
@@ -2831,8 +2828,11 @@ _EOF_
 			fi
 			aSTART_SERVICES+=('dropbear')
 
-			# Enable Dropbear daemon
-			G_CONFIG_INJECT 'NO_START=' 'NO_START=0' /etc/default/dropbear
+			# Apply password login setting from dietpi.txt or default
+			/boot/dietpi/func/dietpi-set_software disable_ssh_password_logins
+
+			# Enable Dropbear daemon, obsolete since Bookworm
+			(( $G_DISTRO > 6 )) || G_CONFIG_INJECT 'NO_START=' 'NO_START=0' /etc/default/dropbear
 
 			# Mark OpenSSH for uninstall
 			dpkg-query -s 'openssh-server' &> /dev/null && aSOFTWARE_INSTALL_STATE[105]=-1
@@ -2850,8 +2850,8 @@ _EOF_
 			G_AGI openssh-server
 			aSTART_SERVICES+=('ssh')
 
-			# Allow root login
-			G_CONFIG_INJECT 'PermitRootLogin[[:blank:]]' 'PermitRootLogin yes' /etc/ssh/sshd_config
+			# Apply password login setting from dietpi.txt or default
+			/boot/dietpi/func/dietpi-set_software disable_ssh_password_logins
 
 			# Reload SSH server now so root users can login during setup
 			systemctl reload ssh
@@ -5523,65 +5523,74 @@ _EOF_
 
 			Banner_Installing
 
-			# Libraries
-			# - wget: Used for WHDLoad database update: https://github.com/midwan/amiberry/commit/d6c103e3310bcf75c2d72a15849fbdf5eb7432b5
-			aDEPS=('libxml2' 'libfreetype6' 'libflac8' 'libmpeg2-4' 'libmpg123-0' 'wget') # libpng16-16 pulled by libfreetype6
-
-			# Platform and GPU drivers
+			# Obtain platform: https://github.com/midwan/amiberry/blob/master/Makefile
 			# - RPi
-			if (( $G_HW_MODEL < 10 )); then
-
-				local platform='rpi1' # Include ID -1 + 0
+			local platform='rpi1' # Include ID -1 + 0
+			if (( $G_HW_MODEL < 10 ))
+			then
 				(( $G_HW_MODEL > 1 )) && platform="rpi$G_HW_MODEL"
+				# 64-bit: For RPi 2 v1.2 use RPi 3 64-bit build
+				(( $G_HW_ARCH == 3 )) && platform="${platform/[12]/3}-64-dmx"
 				/boot/dietpi/func/dietpi-set_hardware rpi-opengl vc4-fkms-v3d
-				aDEPS+=('libegl1' 'libgles2' 'libgl1-mesa-dri' 'libraspberrypi0')
 
-			# - Odroid XU4: https://dietpi.com/meveric/pool/main/s/setup-odroid/
-			elif (( $G_HW_MODEL == 11 )); then
+			# - Odroid C1
+			elif (( $G_HW_MODEL == 10 ))
+			then
+				platform='c1'
 
-				local platform='xu4'
-				apt-cache dumpavail | grep -q '^Package: malit628-odroid$' && aDEPS+=('malit628-odroid') || aDEPS+=('libegl1' 'libgles2' 'libgl1-mesa-dri')
+			# - Odroid XU4
+			elif (( $G_HW_MODEL == 11 ))
+			then
+				platform='xu4'
 
 			# - ASUS Tinker Board
-			elif (( $G_HW_MODEL == 52 )); then
+			elif (( $G_HW_MODEL == 52 ))
+			then
+				platform='RK3288'
 
-				local platform='RK3288'
-				aDEPS+=('libegl1' 'libgles2' 'libgl1-mesa-dri')
+			# - Odroid C2 (S902) and C4
+			elif (( $G_HW_CPUID == 7 || $G_HW_MODEL == 16 ))
+			then
+				platform='AMLSM1'
 
+			# - Allwinner H3
+			elif (( $G_HW_CPUID == 1 ))
+			then
+				platform='sun8i'
+
+			# - Odroid N2 (S922X) and RK3399
+			elif [[ $G_HW_CPUID == [46] ]]
+			then
+				platform='n2'
+
+			# - Generic ARMv7
+			elif (( $G_HW_ARCH == 2 ))
+			then
+				platform='s812'
+
+			# - Generic ARMv8
+			elif (( $G_HW_ARCH == 3 ))
+			then
+				platform='a64'
+
+			# - x86_64
+			elif (( $G_HW_ARCH == 10 ))
+			then
+				platform='x86-64'
 			fi
 
-			# Download Amiberry
-			Download_Install "https://dietpi.com/downloads/binaries/$G_DISTRO_NAME/amiberry_$platform.tar.bz2"
+			# Install Amiberry DEB package
+			Download_Install "https://dietpi.com/downloads/binaries/$G_DISTRO_NAME/amiberry_$platform.deb"
 
-			# Reinstall: Install new amiberry.conf as amiberry.conf_new, to preserve user settings and remove obsolete config file: https://github.com/midwan/amiberry/releases/tag/v2.25
-			[[ -f '/mnt/dietpi_userdata/amiberry/conf/amiberry.conf' ]] && G_EXEC mv amiberry/conf/amiberry.conf /mnt/dietpi_userdata/amiberry/conf/amiberry.conf_new
-			[[ -f '/mnt/dietpi_userdata/amiberry/conf/adfdir.conf' ]] && G_EXEC rm /mnt/dietpi_userdata/amiberry/conf/adfdir.conf
-
-			# Move/Merge new instance in place
-			G_EXEC cp -a amiberry /mnt/dietpi_userdata/
-
-			# Cleanup
-			G_EXEC_NOHALT=1 G_EXEC rm -R amiberry
-
-			# Service
-			cat << '_EOF_' > /etc/systemd/system/amiberry.service
-[Unit]
-Description=Amiberry Amiga Emulator (DietPi)
-Documentation=https://github.com/midwan/amiberry/wiki
-
-[Service]
-WorkingDirectory=/mnt/dietpi_userdata/amiberry
-Environment=LD_LIBRARY_PATH=/mnt/dietpi_userdata/amiberry/lib
-ExecStartPre=/bin/chvt 3
-ExecStart=/mnt/dietpi_userdata/amiberry/amiberry
-ExecStopPost=/bin/chvt 1
-
-[Install]
-WantedBy=local-fs.target
-_EOF_
 			# Permissions: Enable access for kickstart uploads via file servers
 			G_EXEC chgrp dietpi /mnt/dietpi_userdata/amiberry/kickstarts
 			G_EXEC chmod 0775 /mnt/dietpi_userdata/amiberry/kickstarts
+
+			# Pre-v6.26: Remove obsolete config file: https://github.com/midwan/amiberry/releases/tag/v2.25
+			[[ -f '/mnt/dietpi_userdata/amiberry/conf/adfdir.conf' ]] && G_EXEC rm /mnt/dietpi_userdata/amiberry/conf/adfdir.conf
+			# Pre-v8.5: Remove obsolete library and service files
+			[[ -e '/mnt/dietpi_userdata/amiberry/lib/libSDL2.so' ]] && G_EXEC rm -Rf /mnt/dietpi_userdata/amiberry/lib/libSDL2*.so{,.0.*}
+			[[ -f '/etc/systemd/system/amiberry.service' ]] && G_EXEC rm /etc/systemd/system/amiberry.service
 
 		fi
 
@@ -6653,20 +6662,31 @@ _EOF_
 
 			Banner_Installing
 
+			aDEPS=('make' 'gcc' 'libc6-dev')
+
 			# RPi
 			if (( $G_HW_MODEL < 10 ))
 			then
 				Download_Install 'https://github.com/WiringPi/WiringPi/archive/master.tar.gz'
+				G_EXEC cd WiringPi-master
+				[[ -d '/usr/local/include' ]] || G_EXEC mkdir /usr/local/include
+				G_EXEC_OUTPUT=1 G_EXEC ./build
 
 			# Odroids
 			else
+				aDEPS+=('automake' 'libtool' 'libgpiod-dev' 'libgpiod2') # Add libgpiod2 explicitly so purging *-dev packages, e.g. via dietpi-cleaner, does not break "gpio"
 				Download_Install 'https://github.com/hardkernel/wiringPi/archive/master.tar.gz'
 				G_EXEC mv {w,W}iringPi-master
+				G_EXEC cd WiringPi-master
+				G_EXEC_OUTPUT=1 G_EXEC ./autogen.sh
+				G_EXEC_OUTPUT=1 G_EXEC ./configure CFLAGS='-g0 -O3'
+				G_EXEC_OUTPUT=1 G_EXEC make "-j$(nproc)"
+				G_EXEC_OUTPUT=1 G_EXEC make install
 			fi
 
-			G_EXEC cd WiringPi-master
-			G_EXEC_OUTPUT=1 G_EXEC ./build
-			G_EXEC strip --remove-section=.comment --remove-section=.note /usr/local/bin/gpio
+			G_EXEC strip --remove-section=.comment --remove-section=.note /usr/local/*bin/gpio
+			G_EXEC strip --strip-unneeded --remove-section=.comment --remove-section=.note /usr/local/lib/libwiringPi*.so
+			G_EXEC ldconfig
 			G_EXEC cd "$G_WORKING_DIR"
 
 			# Move source dir to disk, as it contains additional examples to compile
@@ -8780,7 +8800,7 @@ _EOF_
 					arch='amd64'
 				fi
 
-				local fallback_url="https://github.com/gogs/gogs/releases/download/v0.12.6/gogs_0.12.6_linux_$arch.tar.gz"
+				local fallback_url="https://github.com/gogs/gogs/releases/download/v0.12.7/gogs_0.12.7_linux_$arch.tar.gz"
 				url=$(curl -sSfL 'https://api.github.com/repos/gogs/gogs/releases/latest' | mawk -F\" "/\"browser_download_url\": \".*\/gogs_[^\"\/]*_linux_$arch.tar.gz\"/{print \$4}")
 			fi
 
@@ -10166,15 +10186,14 @@ _EOF_
 
 			# APT dependencies
 			aDEPS=('mediainfo')
-			# - .NET: https://packages.microsoft.com/debian/
+			# - .NET: https://github.com/dotnet/core/blob/main/Documentation/linux-prereqs.md
 			if (( $G_HW_ARCH != 1 ))
 			then
-				if (( $G_DISTRO == 5 ))
-				then
-					aDEPS+=('libicu63')
-				else
-					aDEPS+=('libicu67')
-				fi
+				case $G_DISTRO in
+					5) aDEPS+=('libicu63');;
+					6) aDEPS+=('libicu67');;
+					*) aDEPS+=('libicu71');;
+				esac
 			fi
 
 			# Reinstall: Skip download and install, advice to use internal updater from web UI
@@ -10189,26 +10208,25 @@ _EOF_
 			else
 				# ARMv6
 				local url=$(curl -sSfL 'https://api.github.com/repos/Radarr/Radarr/releases/latest' | mawk -F\" '/"browser_download_url": .*linux\.tar\.gz"/{print $4}')
-				local version='4.0.4.5922'
-				local fallback_url="https://github.com/Radarr/Radarr/releases/download/v$version/Radarr.master.$version.linux.tar.gz"
+				local fallback_url='https://github.com/Radarr/Radarr/releases/download/v4.0.4.5922/Radarr.master.4.0.4.5922.linux.tar.gz'
 
 				# ARMv7
 				if (( $G_HW_ARCH == 2 ))
 				then
-					url=$(curl -sSfL 'https://api.github.com/repos/Radarr/Radarr/releases/latest' | mawk -F\" '/"browser_download_url": .*linux-core-arm\.tar\.gz"/{print $4}')
-					fallback_url="https://github.com/Radarr/Radarr/releases/download/v$version/Radarr.master.$version.linux-core-arm.tar.gz"
+					url=${url/linux/linux-core-arm}
+					fallback_url=${fallback_url/linux/linux-core-arm}
 
 				# ARMv8
 				elif (( $G_HW_ARCH == 3 ))
 				then
-					url=$(curl -sSfL 'https://api.github.com/repos/Radarr/Radarr/releases/latest' | mawk -F\" '/"browser_download_url": .*linux-core-arm64\.tar\.gz"/{print $4}')
-					fallback_url="https://github.com/Radarr/Radarr/releases/download/v$version/Radarr.master.$version.linux-core-arm64.tar.gz"
+					url=${url/linux/linux-core-arm64}
+					fallback_url=${fallback_url/linux/linux-core-arm64}
 
 				# x86_64
 				elif (( $G_HW_ARCH == 10 ))
 				then
-					url=$(curl -sSfL 'https://api.github.com/repos/Radarr/Radarr/releases/latest' | mawk -F\" '/"browser_download_url": .*linux-core-x64\.tar\.gz"/{print $4}')
-					fallback_url="https://github.com/Radarr/Radarr/releases/download/v$version/Radarr.master.$version.linux-core-x64.tar.gz"
+					url=${url/linux/linux-core-x64}
+					fallback_url=${fallback_url/linux/linux-core-x64}
 				fi
 
 				Download_Install "$url"
@@ -10274,15 +10292,14 @@ _EOF_
 
 			# APT dependencies
 			aDEPS=('mediainfo')
-			# - .NET: https://packages.microsoft.com/debian/
+			# - .NET: https://github.com/dotnet/core/blob/main/Documentation/linux-prereqs.md
 			if (( $G_HW_ARCH != 1 ))
 			then
-				if (( $G_DISTRO == 5 ))
-				then
-					aDEPS+=('libicu63')
-				else
-					aDEPS+=('libicu67')
-				fi
+				case $G_DISTRO in
+					5) aDEPS+=('libicu63');;
+					6) aDEPS+=('libicu67');;
+					*) aDEPS+=('libicu71');;
+				esac
 			fi
 
 			# Pre-v7.5 ARMv6: Migrate old install dir
@@ -10300,26 +10317,25 @@ _EOF_
 			else
 				# ARMv6
 				local url=$(curl -sSfL 'https://api.github.com/repos/Lidarr/Lidarr/releases/latest' | mawk -F\" '/"browser_download_url": .*linux\.tar\.gz"/{print $4}')
-				local version='0.8.1.2135'
-				local fallback_url="https://github.com/Lidarr/Lidarr/releases/download/v$version/Lidarr.master.$version.linux.tar.gz"
+				local fallback_url='https://github.com/Lidarr/Lidarr/releases/download/v0.8.1.2135/Lidarr.master.0.8.1.2135.linux.tar.gz'
 
 				# ARMv7
 				if (( $G_HW_ARCH == 2 ))
 				then
-					url=$(curl -sSfL 'https://api.github.com/repos/Lidarr/Lidarr/releases/latest' | mawk -F\" '/"browser_download_url": .*linux-core-arm\.tar\.gz"/{print $4}')
-					fallback_url="https://github.com/Lidarr/Lidarr/releases/download/v$version/Lidarr.master.$version.linux-core-arm.tar.gz"
+					url=${url/linux/linux-core-arm}
+					fallback_url=${fallback_url/linux/linux-core-arm}
 
 				# ARMv8
 				elif (( $G_HW_ARCH == 3 ))
 				then
-					url=$(curl -sSfL 'https://api.github.com/repos/Lidarr/Lidarr/releases/latest' | mawk -F\" '/"browser_download_url": .*linux-core-arm64\.tar\.gz"/{print $4}')
-					fallback_url="https://github.com/Lidarr/Lidarr/releases/download/v$version/Lidarr.master.$version.linux-core-arm64.tar.gz"
+					url=${url/linux/linux-core-arm64}
+					fallback_url=${fallback_url/linux/linux-core-arm64}
 
 				# x86_64
 				elif (( $G_HW_ARCH == 10 ))
 				then
-					url=$(curl -sSfL 'https://api.github.com/repos/Lidarr/Lidarr/releases/latest' | mawk -F\" '/"browser_download_url": .*linux-core-x64\.tar\.gz"/{print $4}')
-					fallback_url="https://github.com/Lidarr/Lidarr/releases/download/v$version/Lidarr.master.$version.linux-core-x64.tar.gz"
+					url=${url/linux/linux-core-x64}
+					fallback_url=${fallback_url/linux/linux-core-x64}
 				fi
 
 				Download_Install "$url"
@@ -10544,16 +10560,14 @@ _EOF_
 				fallback_url=${fallback_url/Mono/LinuxAMDx64}
 			fi
 
-			# .NET dependencies: https://packages.microsoft.com/debian/
+			# .NET dependency: https://github.com/dotnet/core/blob/main/Documentation/linux-prereqs.md
 			if (( $G_HW_ARCH != 1 ))
 			then
-				aDEPS=('liblttng-ust0')
-				if (( $G_DISTRO == 5 ))
-				then
-					aDEPS+=('libicu63')
-				else
-					aDEPS+=('libicu67')
-				fi
+				case $G_DISTRO in
+					5) aDEPS=('libicu63');;
+					6) aDEPS=('libicu67');;
+					*) aDEPS=('libicu71');;
+				esac
 			fi
 
 			Download_Install "$url"
@@ -10663,6 +10677,88 @@ ExecStart=/mnt/dietpi_userdata/nzbget/nzbget -D
 [Install]
 WantedBy=multi-user.target
 _EOF_
+		fi
+		
+		software_id=151 # Prowlarr
+		if (( ${aSOFTWARE_INSTALL_STATE[$software_id]} == 1 ))
+		then
+
+			Banner_Installing
+
+			# .NET dependency: https://github.com/dotnet/core/blob/main/Documentation/linux-prereqs.md
+			case $G_DISTRO in
+				5) aDEPS=('libicu63');;
+				6) aDEPS=('libicu67');;
+				*) aDEPS=('libicu71');;
+			esac
+
+			# Reinstall: Skip download and install, advice to use internal updater from web UI
+			if [[ -d '/opt/prowlarr' ]]
+			then
+				G_DIETPI-NOTIFY 2 "${aSOFTWARE_NAME[$software_id]} install dir \"/opt/prowlarr\" already exists. Download and install steps will be skipped.
+ - If you want to update ${aSOFTWARE_NAME[$software_id]}, please use the internal updater from web UI.
+ - If you need to reinstall (e.g. broken instance), please manually remove the install dir and rerun \"dietpi-software reinstall $software_id\"."
+
+				G_AGI "${aDEPS[@]}"
+				aDEPS=()
+			else
+				# ARMv7
+				local url=$(curl -sSfL 'https://api.github.com/repos/Prowlarr/Prowlarr/releases' | mawk -F\" '/"browser_download_url": .*linux-core-arm\.tar\.gz"/{print $4}' | head -1)
+				local fallback_url='https://github.com/Prowlarr/Prowlarr/releases/download/v0.3.0.1730/Prowlarr.develop.0.3.0.1730.linux-core-arm.tar.gz'
+
+				# ARMv8
+				if (( $G_HW_ARCH == 3 ))
+				then
+					url=${url/arm/arm64}
+					fallback_url=${fallback_url/arm/arm64}
+
+				# x86_64
+				elif (( $G_HW_ARCH == 10 ))
+				then
+					url=${url/arm/x64}
+					fallback_url=${fallback_url/arm/x64}
+				fi
+
+				Download_Install "$url"
+				G_EXEC mv Prowlarr /opt/prowlarr
+			fi
+
+			# Data dir
+			[[ -d '/mnt/dietpi_userdata/prowlarr' ]] || G_EXEC mkdir /mnt/dietpi_userdata/prowlarr
+
+			# User
+			Create_User -g dietpi -d /mnt/dietpi_userdata/prowlarr prowlarr
+
+			# Service: https://wiki.servarr.com/prowlarr/installation
+			cat << '_EOF_' > /etc/systemd/system/prowlarr.service
+[Unit]
+Description=prowlarr (DietPi)
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+SyslogIdentifier=Prowlarr
+User=prowlarr
+UMask=002
+LogsDirectory=prowlarr
+ExecStart=/opt/prowlarr/Prowlarr -nobrowser -data=/mnt/dietpi_userdata/prowlarr
+TimeoutStopSec=20
+KillMode=process
+Restart=on-failure
+
+# Hardening
+ProtectSystem=strict
+ProtectHome=true
+PrivateDevices=true
+ProtectKernelTunables=true
+ProtectControlGroups=true
+ReadWritePaths=-/opt/prowlarr -/mnt -/media -/var/log/prowlarr -/tmp
+
+[Install]
+WantedBy=multi-user.target
+_EOF_
+			# Permissions
+			G_EXEC chown -R prowlarr:dietpi /mnt/dietpi_userdata/prowlarr /opt/prowlarr
 		fi
 
 		software_id=155 # HTPC Manager
@@ -10785,13 +10881,12 @@ _EOF_
 
 			Banner_Installing # https://help.roonlabs.com/portal/en/kb/articles/linux-install#Downloads
 
-			# .NET dependency: https://packages.microsoft.com/debian/
-			if (( $G_DISTRO == 5 ))
-			then
-				aDEPS=('libicu63')
-			else
-				aDEPS=('libicu67')
-			fi
+			# .NET dependency: https://github.com/dotnet/core/blob/main/Documentation/linux-prereqs.md
+			case $G_DISTRO in
+				5) aDEPS=('libicu63');;
+				6) aDEPS=('libicu67');;
+				*) aDEPS=('libicu71');;
+			esac
 
 			# Reinstall: Skip download and install, advice to use internal updater
 			if [[ -d '/opt/roonserver' ]]
@@ -11108,7 +11203,7 @@ _EOF_
 
 			Banner_Installing
 
-			# ARMv6 + ARMv7 since as of v1.8 there are issues with ARMv7 binaries on Raspbian which are hence not provided anymore: https://github.com/MichaIng/DietPi/issues/2959 (Troubleshooting)
+			# ARMv6 + ARMv7 since as of v1.8 there were issues with ARMv7 binaries on Raspbian which are hence not provided anymore: https://github.com/MichaIng/DietPi/issues/2959
 			local arch='arm-6'
 
 			# ARMv8
@@ -11122,7 +11217,7 @@ _EOF_
 				arch='amd64'
 			fi
 
-			local fallback_url="https://github.com/go-gitea/gitea/releases/download/v1.16.6/gitea-1.16.6-linux-$arch"
+			local fallback_url="https://github.com/go-gitea/gitea/releases/download/v1.16.8/gitea-1.16.8-linux-$arch"
 			Download_Install "$(curl -sSfL 'https://api.github.com/repos/go-gitea/gitea/releases/latest' | mawk -F\" "/\"browser_download_url\": \".*\/gitea-[^\"\/]*-linux-$arch\"/{print \$4}")" /mnt/dietpi_userdata/gitea/gitea
 
 			# User
@@ -12097,21 +12192,10 @@ _EOF_
 
 			Banner_Installing
 
-			# ARMv6
-			local fallback_url='https://github.com/Spotifyd/spotifyd/releases/download/v0.3.3/spotifyd-linux-armv6-slim.tar.gz'
-			local file='spotifyd-linux-armv6-slim'
-
+			local file='spotifyd-linux-armv6-slim' # ARMv6
 			case $G_HW_ARCH in
-				# ARMv7
-				2)
-					fallback_url="https://github.com/Spotifyd/spotifyd/releases/download/v0.3.3/spotifyd-linux-armhf-full.tar.gz"
-					file='spotifyd-linux-armhf-full'
-				;;
-				# x86_64
-				10)
-					fallback_url="https://github.com/Spotifyd/spotifyd/releases/download/v0.3.3/spotifyd-linux-full.tar.gz"
-					file='spotifyd-linux-full'
-				;;
+				2) file='spotifyd-linux-armhf-full';; # ARMv7
+				10) file='spotifyd-linux-full';; # x86_64
 				*) :;;
 			esac
 
@@ -12121,6 +12205,7 @@ _EOF_
 			# x86_64 only deps: Both ARM binaries are not compiled against these. dbus would be required for MPRIS support, but let's keep it slim for now.
 			(( $G_HW_ARCH == 10 )) && aDEPS=('libdbus-1-3' 'libpulse0')
 
+			local fallback_url="https://github.com/Spotifyd/spotifyd/releases/download/v0.3.3/$file.tar.gz"
 			Download_Install "$(curl -sSfL 'https://api.github.com/repos/Spotifyd/spotifyd/releases/latest' | mawk -F\" "/\"browser_download_url\": .*\/$file\.tar\.gz\"/{print \$4}")" /opt/spotifyd
 
 			# User
@@ -12129,7 +12214,7 @@ _EOF_
 			# Config: Do not touch on reinstall
 			if [[ ! -f '/mnt/dietpi_userdata/spotifyd/spotifyd.conf' ]]
 			then
-				[[ -d '/mnt/dietpi_userdata/spotifyd/cache' ]] || G_EXEC mkdir /mnt/dietpi_userdata/spotifyd/cache
+				[[ -d '/mnt/dietpi_userdata/spotifyd/cache' ]] || G_EXEC mkdir -p /mnt/dietpi_userdata/spotifyd/cache
 				dps_index=$software_id Download_Install 'spotifyd.conf' /mnt/dietpi_userdata/spotifyd/spotifyd.conf
 				G_EXEC chmod 0600 /mnt/dietpi_userdata/spotifyd/spotifyd.conf
 			fi
@@ -13496,6 +13581,21 @@ If no WireGuard (auto)start is included, but you require it, please do the follo
 			[[ -d '/mnt/dietpi_userdata/nzbget' ]] && G_EXEC rm -R /mnt/dietpi_userdata/nzbget
 
 		fi
+		
+		software_id=151 # Prowlarr
+		if (( ${aSOFTWARE_INSTALL_STATE[$software_id]} == -1 )); then
+
+			Banner_Uninstalling
+			if [[ -f '/etc/systemd/system/prowlarr.service' ]]
+			then
+				G_EXEC systemctl disable --now prowlarr
+				G_EXEC rm /etc/systemd/system/prowlarr.service
+			fi
+			[[ -d '/etc/systemd/system/prowlarr.service.d' ]] && G_EXEC rm -R /etc/systemd/system/prowlarr.service.d
+			getent passwd prowlarr > /dev/null && G_EXEC userdel prowlarr
+			G_EXEC rm -Rf /opt/prowlarr /mnt/dietpi_userdata/prowlarr /var/log/prowlarr
+
+		fi
 
 		software_id=155 # HTPC Manager
 		if (( ${aSOFTWARE_INSTALL_STATE[$software_id]} == -1 )); then
@@ -14163,7 +14263,14 @@ If no WireGuard (auto)start is included, but you require it, please do the follo
 			if [[ -d '/mnt/dietpi_userdata/WiringPi' ]]
 			then
 				G_EXEC cd /mnt/dietpi_userdata/WiringPi
-				G_EXEC_NOEXIT=1 G_EXEC ./build uninstall
+				if [[ -f ./build ]]
+				then
+					G_EXEC_NOEXIT=1 G_EXEC_OUTPUT=1 G_EXEC ./build uninstall # RPi and pre-v8.5 Odroids
+
+				elif [[ -f ./Makefile ]]
+				then
+					G_EXEC_NOEXIT=1 G_EXEC_OUTPUT=1 G_EXEC make uninstall # Odroids
+				fi
 				G_EXEC cd "$G_WORKING_DIR"
 				G_EXEC rm -R /mnt/dietpi_userdata/WiringPi
 			fi
@@ -14171,17 +14278,19 @@ If no WireGuard (auto)start is included, but you require it, please do the follo
 			if [[ -d '/root/wiringPi' ]]
 			then
 				G_EXEC cd /root/wiringPi
-				G_EXEC_NOEXIT=1 G_EXEC ./build uninstall
+				G_EXEC_NOEXIT=1 G_EXEC_OUTPUT=1 G_EXEC ./build uninstall
 				G_EXEC cd "$G_WORKING_DIR"
 				G_EXEC rm -R /root/wiringPi
 			fi
 			# GPIO utility
 			[[ -f '/usr/local/bin/gpio' ]] && G_EXEC rm /usr/local/bin/gpio
+			[[ -f '/usr/local/sbin/gpio' ]] && G_EXEC rm /usr/local/sbin/gpio
 			[[ -f '/usr/local/share/man/man1/gpio.1' ]] && G_EXEC rm /usr/local/share/man/man1/gpio.1
+			[[ -d '/usr/local/share/man/man1' ]] && G_EXEC rmdir -p --ignore-fail-on-non-empty /usr/local/share/man/man1
 			# Library
-			G_EXEC rm -f /usr/local/lib/libwiringPi.*
+			G_EXEC rm -f /usr/local/lib/libwiringPi.so*
 			# Device library
-			G_EXEC rm -f /usr/local/lib/libwiringPiDev.*
+			G_EXEC rm -f /usr/local/lib/libwiringPiDev.so*
 			# Headers
 			G_EXEC rm -f /usr/local/include/wiringPi*.h
 
@@ -14527,7 +14636,8 @@ _EOF_
 		if (( ${aSOFTWARE_INSTALL_STATE[$software_id]} == -1 )); then
 
 			Banner_Uninstalling
-			# Service
+			G_AGP amiberry
+			# Pre-v8.5: Service
 			if [[ -f '/etc/systemd/system/amiberry.service' ]]
 			then
 				G_EXEC systemctl disable --now amiberry
