@@ -61,11 +61,9 @@ esac
 ##########################################
 # Dependencies
 ##########################################
-G_AGUP
-G_AGDUG
-apackages=('7zip' 'parted' 'fdisk')
+apackages=('7zip' 'parted' 'fdisk' 'systemd-container')
 [[ $PLATFORM == 'x86-64' ]] || apackages+=('qemu-user-static' 'binfmt-support')
-G_AGI "${apackages[@]}"
+G_AG_CHECK_INSTALL_PREREQ "${apackages[@]}"
 
 ##########################################
 # Prepare container
@@ -88,14 +86,19 @@ G_EXEC_OUTPUT=1 G_EXEC resize2fs "${FP_LOOP}p1"
 G_EXEC_OUTPUT=1 G_EXEC e2fsck -fp "${FP_LOOP}p1"
 G_EXEC mkdir rootfs
 G_EXEC mount "${FP_LOOP}p1" rootfs
-# Automation
-G_CONFIG_INJECT 'AUTO_SETUP_AUTOMATED=' 'AUTO_SETUP_AUTOMATED=1' rootfs/boot/dietpi.txt
-G_EXEC curl -sSf "https://raw.githubusercontent.com/$G_GITOWNER/DietPi/$G_GITBRANCH/.build/software/Amiberry/build.bash" -o rootfs/boot/Automation_Custom_Script.sh
-G_EXEC sed -i "1i\PLATFORM=$PLATFORM" rootfs/boot/Automation_Custom_Script.sh
-G_EXEC eval "echo -e 'G_EXEC mv /{tmp,root}/amiberry_$PLATFORM.deb\npoweroff' >> rootfs/boot/Automation_Custom_Script.sh"
+# Automated build
+cat << _EOF_ > rootfs/etc/rc.local || exit 1
+#!/bin/dash
+infocmp "\$TERM" > /dev/null 2>&1 || TERM='dumb'
+echo '[ INFO ] Running Amiberry build script...'
+bash -c "\$(curl -sSf 'https://raw.githubusercontent.com/$G_GITOWNER/DietPi/$G_GITBRANCH/.build/software/Amiberry/build.bash')" 'DietPi-Amiberry_build' '$PLATFORM'
+mv '/tmp/amiberry_$PLATFORM.deb' '/root/amiberry_$PLATFORM.deb'
+poweroff
+_EOF_
+G_EXEC chmod +x rootfs/etc/rc.local
 
 ##########################################
 # Boot container
 ##########################################
-systemd-nspawn -bD rootfs
+systemd-nspawn -bD rootfs --bind="$FP_LOOP"{,p1} --bind=/dev/disk
 }
