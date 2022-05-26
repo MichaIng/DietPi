@@ -98,7 +98,7 @@ else
 fi
 
 # Build Amiberry
-v_ami='5.1'
+v_ami='5.2'
 G_DIETPI-NOTIFY 2 "Building Amiberry version \e[33m$v_ami\e[90m for platform: \e[33m$PLATFORM"
 [[ -d /tmp/amiberry-$v_ami ]] && G_EXEC rm -R "/tmp/amiberry-$v_ami"
 G_EXEC cd /tmp
@@ -185,7 +185,7 @@ DEPS_APT_VERSIONED=${DEPS_APT_VERSIONED%,}
 grep -q 'raspbian' /etc/os-release && DEPS_APT_VERSIONED=$(sed 's/+rp[it][0-9]\+)/)/g' <<< "$DEPS_APT_VERSIONED") || DEPS_APT_VERSIONED=$(sed 's/+b[0-9]\+)/)/g' <<< "$DEPS_APT_VERSIONED")
 
 # - control
-for i in 1 2; do cat << _EOF_ > "$DIR/DEBIAN/control"
+cat << _EOF_ > "$DIR/DEBIAN/control"
 Package: amiberry
 Version: $v_ami-dietpi1
 Architecture: $arch
@@ -202,17 +202,12 @@ Vcs-Browser: https://github.com/midwan/amiberry
 Description: Optimized Amiga emulator for the Raspberry Pi and other ARM boards
  This package ships with optimized libSDL2 and capsimg builds.
 _EOF_
-done
+G_CONFIG_INJECT 'Installed-Size: ' "Installed-Size: $(du -sk "$DIR" | mawk '{print $1}')" "$DIR/DEBIAN/control"
 
 # Build DEB package
 G_EXEC rm -Rf "$DIR.deb"
 G_EXEC_OUTPUT=1 G_EXEC dpkg-deb -b "$DIR"
 G_EXEC rm -Rf "$DIR"
-
-# Upload
-(( $G_DISTRO > 6 )) && key=('ed25519') || key=('rsa' '--pubkey' "$HOME/.ssh/id_rsa.pub")
-# shellcheck disable=SC2145
-G_EXEC_OUTPUT=1 G_EXEC curl --key ~/.ssh/id_"${key[@]}" -T "$DIR.deb" "sftp://root@ssh.dietpi.com/var/www/downloads/binaries/$G_DISTRO_NAME/"
 
 exit 0
 }
