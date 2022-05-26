@@ -92,7 +92,7 @@ cat << _EOF_ > rootfs/etc/rc.local || exit 1
 infocmp "\$TERM" > /dev/null 2>&1 || TERM='dumb'
 echo '[ INFO ] Running Amiberry build script...'
 bash -c "\$(curl -sSf 'https://raw.githubusercontent.com/$G_GITOWNER/DietPi/$G_GITBRANCH/.build/software/Amiberry/build.bash')" 'DietPi-Amiberry_build' '$PLATFORM'
-mv '/tmp/amiberry_$PLATFORM.deb' '/root/amiberry_$PLATFORM.deb'
+mv -v '/tmp/amiberry_$PLATFORM.deb' '/amiberry_$PLATFORM.deb'
 poweroff
 _EOF_
 G_EXEC chmod +x rootfs/etc/rc.local
