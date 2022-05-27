@@ -87,10 +87,21 @@ G_EXEC_OUTPUT=1 G_EXEC e2fsck -fp "${FP_LOOP}p1"
 G_EXEC mkdir rootfs
 G_EXEC mount "${FP_LOOP}p1" rootfs
 # Automated build
-cat << _EOF_ > rootfs/etc/rc.local || exit 1
+cat << '_EOF_' > rootfs/etc/rc.local || exit 1
 #!/bin/dash
-infocmp "\$TERM" > /dev/null 2>&1 || TERM='dumb'
+infocmp "$TERM" > /dev/null 2>&1 || TERM='dumb'
 echo '[ INFO ] Running Amiberry build script...'
+_EOF_
+
+# RPi 64-bit: Add RPi repo, ARMv6 container images contain it already
+[[ $PLATFORM == 'rpi'[34]'-64-dmx' ]] && cat << _EOF_ >> rootfs/etc/rc.local
+echo 'deb https://archive.raspberrypi.org/debian/ ${distro/bookworm/bullseye} main' > /etc/apt/sources.list.d/raspi.list
+curl -sSf 'https://archive.raspberrypi.org/debian/pool/main/r/raspberrypi-archive-keyring/raspberrypi-archive-keyring_2021.1.1+rpt1_all.deb' -o /tmp/keyring.deb
+dpkg -i /tmp/keyring.deb
+rm -v /tmp/keyring.deb
+_EOF_
+
+cat << _EOF_ >> rootfs/etc/rc.local || exit 1
 bash -c "\$(curl -sSf 'https://raw.githubusercontent.com/$G_GITOWNER/DietPi/$G_GITBRANCH/.build/software/Amiberry/build.bash')" 'DietPi-Amiberry_build' '$PLATFORM'
 mv -v '/tmp/amiberry_$PLATFORM.deb' '/amiberry_$PLATFORM.deb'
 poweroff
