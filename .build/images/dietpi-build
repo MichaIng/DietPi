@@ -8,18 +8,17 @@ if [[ -f '/boot/dietpi/func/dietpi-globals' ]]
 then
 	. /boot/dietpi/func/dietpi-globals
 else
-	[[ $G_GITOWNER && $G_GITBRANCH ]] || { echo '[FAILED] You must export or pass G_GITOWNER and G_GITBRANCH to the script'; exit 1; }
-	curl -sSf "https://raw.githubusercontent.com/$G_GITOWNER/DietPi/$G_GITBRANCH/dietpi/func/dietpi-globals" -o /tmp/dietpi-globals || exit 1
+	curl -sSf "https://raw.githubusercontent.com/${G_GITOWNER:=MichaIng}/DietPi/${G_GITBRANCH:=master}/dietpi/func/dietpi-globals" -o /tmp/dietpi-globals || exit 1
 	# shellcheck disable=SC1091
 	. /tmp/dietpi-globals
 	G_EXEC_NOHALT=1 G_EXEC rm /tmp/dietpi-globals
 	export G_GITOWNER G_GITBRANCH G_HW_ARCH_NAME=$(uname -m)
 fi
 case $G_HW_ARCH_NAME in
-	'armv6l') export G_HW_ARCH=1; DEB_ARCH='armhf';;
-	'armv7l') export G_HW_ARCH=2; DEB_ARCH='armhf';;
-	'aarch64') export G_HW_ARCH=3; DEB_ARCH='arm64';;
-	'x86_64') export G_HW_ARCH=10; DEB_ARCH='amd64';;
+	'armv6l') export G_HW_ARCH=1;;
+	'armv7l') export G_HW_ARCH=2;;
+	'aarch64') export G_HW_ARCH=3;;
+	'x86_64') export G_HW_ARCH=10;;
 	*) G_DIETPI-NOTIFY 1 "Unsupported host system architecture \"$G_HW_ARCH_NAME\" detected, aborting..."; exit 1;;
 esac
 readonly G_PROGRAM_NAME='DietPi-Build'
@@ -61,7 +60,6 @@ do
 done
 
 # Check for valid target hardware model and set variables accordingly
-WIFI_REQUIRED=1
 partition_start=1
 efi_size=64
 boot_size=0
@@ -69,16 +67,19 @@ root_size=1023
 boot_fstype='fat32' # Used for MBR boot partition only => NanoPi M2
 CLONING_TOOL='dd'
 case $HW_MODEL in
-	0) iname='RPi' partition_start=4 boot_size=128 root_size=892;;
+	0) iname='RPi' HW_ARCH=${HW_ARCH:-1} partition_start=4 boot_size=128 root_size=892;;
 	10) iname='OdroidC1' HW_ARCH=2 partition_start=4 boot_size=128 root_size=764;;
 	11) iname='OdroidXU4' HW_ARCH=2 partition_start=4 root_size=764;;
 	12) iname='OdroidC2' HW_ARCH=3 partition_start=4 root_size=764;;
 	15) iname='OdroidN2' HW_ARCH=3 partition_start=4 root_size=764;;
 	16) iname='OdroidC4' HW_ARCH=3 partition_start=4 root_size=764;;
-	20) iname='VM' WIFI_REQUIRED=0 HW_ARCH=${HW_ARCH:-10} VMTYPE=${VMTYPE:-raw};;
+	20) iname='VM' HW_ARCH=${HW_ARCH:-10} VMTYPE=${VMTYPE:-raw};;
 	21) iname='NativePC-BIOS' HW_ARCH=10 root_size=1215;;
 	61) iname='NanoPiM2' HW_ARCH=2 partition_start=4 boot_size=64 root_size=572 boot_fstype='ext4';;
-	75) iname='Container' root_size=399;;
+	72) iname='ROCKPi4' HW_ARCH=3 partition_start=16 root_size=752;;
+	73) iname='ROCKPiS' HW_ARCH=3 partition_start=16 root_size=752;;
+	74) iname='RadxaZero' HW_ARCH=3 partition_start=16 root_size=752;;
+	75) iname='Container' HW_ARCH=${HW_ARCH:-10} root_size=447;;
 	*) G_DIETPI-NOTIFY 1 "Invalid hardware model \"$HW_MODEL\" passed, aborting..."; exit 1;;
 esac
 
@@ -108,8 +109,9 @@ esac
 
 exclude=
 case $DISTRO in
-	6) distro='bullseye';;
-	7) distro='bookworm' exclude=',gcc-10-base,gcc-11-base';;
+	5) distro='buster'; (( $HW_MODEL == 75 )) || { G_DIETPI-NOTIFY 1 "Invalid distro \"$DISTRO\" passed, aborting..."; exit 1; };;
+	6) distro='bullseye' exclude=',gcc-8-base,gcc-9-base';;
+	7) distro='bookworm' exclude=',gcc-8-base,gcc-9-base,gcc-10-base,gcc-11-base';;
 	*) G_DIETPI-NOTIFY 1 "Invalid distro \"$DISTRO\" passed, aborting..."; exit 1;;
 esac
 
@@ -143,18 +145,7 @@ OUTPUT_IMG_NAME="DietPi_$iname-$iarch-${distro^}"
 (( $efi_size || $boot_size )) && apackages+=('dosfstools')
 
 # Emulation support in case of incompatible architecture
-if (( ( $G_HW_ARCH < 10 && $G_HW_ARCH < $HW_ARCH ) || ( $G_HW_ARCH == 10 && $G_HW_ARCH != $HW_ARCH ) ))
-then
-	apackages+=('qemu-user-static' 'binfmt-support')
-	# On Ubuntu Focal, install newer QEMU package: https://bugs.debian.org/cgi-bin/bugreport.cgi?bug=964289
-	# Use package from Debian repo, since Ubuntu does not shot ARM packages and has no global HTTPS mirror director
-	if (( ${G_DISTRO:=5} < 6 ))
-	then
-		G_EXEC curl -fL "https://deb.debian.org/debian/pool/main/q/qemu/qemu-user-static_6.2+dfsg-2~bpo11+1_$DEB_ARCH.deb" -o qemu.deb
-		G_EXEC dpkg -i qemu.deb
-		G_EXEC rm qemu.deb
-	fi
-fi
+(( ( $G_HW_ARCH < 10 && $G_HW_ARCH < $HW_ARCH ) || ( $G_HW_ARCH == 10 && $G_HW_ARCH != $HW_ARCH ) )) && apackages+=('qemu-user-static' 'binfmt-support')
 
 # Virtual machine disk conversion
 [[ $VMTYPE && $VMTYPE != 'raw' ]] && apackages+=('qemu-utils')
@@ -162,19 +153,7 @@ fi
 G_AG_CHECK_INSTALL_PREREQ parted debootstrap dbus systemd-container "${apackages[@]}"
 
 # Parallels VM: A new qemu-utils build is required which supports PVM virtual disks
-if [[ $VMTYPE == 'parallels' && ${G_DISTRO:=5} -lt 7 ]]
-then
-	if (( $G_DISTRO == 6 ))
-	then
-		G_AGI -t bullseye-backports qemu-utils
-	else
-		G_EXEC curl -fL "https://deb.debian.org/debian/pool/main/libu/liburing/liburing1_0.7-3_$DEB_ARCH.deb" -o liburing1.deb
-		G_EXEC curl -fL "https://deb.debian.org/debian/pool/main/n/nettle/libnettle8_3.7.3-1_$DEB_ARCH.deb" -o libnettle8.deb
-		G_EXEC curl -fL "https://deb.debian.org/debian/pool/main/q/qemu/qemu-utils_6.2+dfsg-2~bpo11+1_$DEB_ARCH.deb" -o qemu-utils.deb
-		G_EXEC dpkg -i --force-depends liburing1.deb libnettle8.deb qemu-utils.deb
-		G_EXEC rm liburing1.deb libnettle8.deb qemu-utils.deb
-	fi
-fi
+[[ $VMTYPE == 'parallels' && $G_DISTRO_NAME == 'bullseye' ]] && G_AGI -t bullseye-backports qemu-utils
 
 # Bootstrap archive keyring if missing
 if [[ ! -f $keyring ]]
@@ -278,7 +257,8 @@ fi
 ##########################################
 packages='apt,bash-completion,bzip2,ca-certificates,cron,curl,fdisk,gnupg,htop,iputils-ping,locales,nano,p7zip,parted,procps,psmisc,sudo,systemd-sysv,tzdata,udev,unzip,wget,whiptail,'
 (( $HW_MODEL == 75 )) && packages+='iproute2' || packages+='console-setup,dropbear,ethtool,fake-hwclock,ifupdown,isc-dhcp-client,kmod,rfkill,systemd-timesyncd,usbutils'
-G_EXEC_OUTPUT=1 G_EXEC debootstrap --variant=minbase --exclude="gcc-7-base,gcc-8-base,gcc-9-base$exclude" --include="$packages" --arch="$parch" --keyring="$keyring" "$distro" ./rootfs "$repo"
+G_EXEC_POST_FUNC(){ [[ $exit_code == 0 ]] || cat /dev/shm/rootfs/debootstrap/debootstrap.log; }
+G_EXEC_OUTPUT=1 G_EXEC debootstrap --variant=minbase --exclude="gcc-7-base$exclude" --include="$packages" --arch="$parch" --keyring="$keyring" "$distro" ./rootfs "$repo"
 
 # Remove cached archives and list files created by debootstrap
 G_EXEC rm -R rootfs/var/{cache/apt,lib/apt/lists}/*
@@ -287,12 +267,19 @@ G_EXEC rm -R rootfs/var/{cache/apt,lib/apt/lists}/*
 # DietPi-Installer
 ##########################################
 # Create rc.local to automate DietPi-Installer
-cat << _EOF_ > rootfs/etc/rc.local
+# - NB: WIFI_REQUIRED=1 is always passed here, but ignored by DietPi-Installer for VMs and containers.
+cat << '_EOF_' > rootfs/etc/rc.local
 #!/bin/dash
 {
 infocmp "$TERM" > /dev/null 2>&1 || TERM='dumb'
 echo '[ INFO ] Running DietPi-Installer...'
-export GITOWNER='$GITOWNER' GITBRANCH='$GITBRANCH' HW_MODEL='$HW_MODEL' IMAGE_CREATOR=0 PREIMAGE_INFO='from scratch' WIFI_REQUIRED=$WIFI_REQUIRED DISTRO_TARGET=$DISTRO
+_EOF_
+
+# Workaround for failing HTTPS validation on ARMv6/7 Buster (don't ask me why neither ARMv8 nor x86_64 are affected...)
+(( $DISTRO == 5 && $HW_ARCH < 3 )) && G_EXEC eval 'echo '\''c_rehash'\'' >> rootfs/etc/rc.local'
+
+cat << _EOF_ >> rootfs/etc/rc.local
+export GITOWNER='$GITOWNER' GITBRANCH='$GITBRANCH' HW_MODEL='$HW_MODEL' IMAGE_CREATOR=0 PREIMAGE_INFO='from scratch' WIFI_REQUIRED=1 DISTRO_TARGET=$DISTRO
 bash -c "\$(curl -sSf 'https://raw.githubusercontent.com/$G_GITOWNER/DietPi/$G_GITBRANCH/.build/images/dietpi-installer')" || poweroff
 _EOF_
 
@@ -357,13 +344,8 @@ then
 
 	# Mount filesystems
 	G_EXEC mkdir rootfs
-	if (( $boot_size ))
-	then
-		G_EXEC mount "${FP_LOOP}p2" rootfs
-		G_EXEC mount "${FP_LOOP}p1" rootfs/boot
-	else
-		G_EXEC mount "${FP_LOOP}p1" rootfs
-	fi
+	G_EXEC mount "${FP_LOOP}p2" rootfs
+	G_EXEC mount "${FP_LOOP}p1" rootfs/boot
 
 	# Install Amiberry via automated first run setup
 	G_CONFIG_INJECT 'AUTO_SETUP_AUTOMATED=' 'AUTO_SETUP_AUTOMATED=1' rootfs/boot/dietpi.txt
@@ -371,7 +353,7 @@ then
 	# Enable Amiberry fast boot autostart option
 	G_CONFIG_INJECT 'AUTO_SETUP_AUTOSTART_TARGET_INDEX=' 'AUTO_SETUP_AUTOSTART_TARGET_INDEX=6' rootfs/boot/dietpi.txt
 	# RPi: Enable onboard audio so that it can be detected and configured on first boot
-	[[ -f 'rootfs/boot/config.txt' ]] && G_EXEC sed -i '/^dtparam=audio=/c\dtparam=audio=on' rootfs/boot/config.txt
+	[[ -f 'rootfs/boot/config.txt' ]] && G_CONFIG_INJECT 'dtparam=audio=' 'dtparam=audio=on' rootfs/boot/config.txt
 
 	G_EXEC sync
 	G_EXEC sleep 1
@@ -387,27 +369,23 @@ then
 	G_EXEC mv "$OUTPUT_IMG_NAME.img" "${OUTPUT_IMG_NAME%_Amiberry}_AlloGUI.img"
 	OUTPUT_IMG_NAME="${OUTPUT_IMG_NAME%_Amiberry}_AlloGUI"
 
-	# Create and raise size of loop device to 2 GiB
-	G_EXEC truncate -s $((2*1024**3)) "$OUTPUT_IMG_NAME.img"
+	# Raise image size to 2.5 GiB and create loop device
+	G_EXEC truncate -s $((2560*1024**2)) "$OUTPUT_IMG_NAME.img"
 	FP_LOOP=$(losetup -f)
 	G_EXEC losetup "$FP_LOOP" "$OUTPUT_IMG_NAME.img"
 	G_EXEC partprobe "$FP_LOOP"
 	G_EXEC partx -u "$FP_LOOP"
+	# Raise partition and filesystem size as well, since resize2fs within the image returns "Nothing to do!"
 	G_EXEC_OUTPUT=1 G_EXEC eval "sfdisk -fN2 '$FP_LOOP' <<< ',+'"
 	G_EXEC partprobe "$FP_LOOP"
 	G_EXEC partx -u "$FP_LOOP"
-	G_EXEC_OUTPUT=1 G_EXEC resize2fs "${FP_LOOP}p2"
 	G_EXEC_OUTPUT=1 G_EXEC e2fsck -fp "${FP_LOOP}p2"
+	G_EXEC_OUTPUT=1 G_EXEC resize2fs "${FP_LOOP}p2"
 
 	# Mount filesystems
 	G_EXEC mkdir rootfs
-	if (( $boot_size ))
-	then
-		G_EXEC mount "${FP_LOOP}p2" rootfs
-		G_EXEC mount "${FP_LOOP}p1" rootfs/boot
-	else
-		G_EXEC mount "${FP_LOOP}p1" rootfs
-	fi
+	G_EXEC mount "${FP_LOOP}p2" rootfs
+	G_EXEC mount "${FP_LOOP}p1" rootfs/boot
 
 	# Install Allo GUI via automated first run setup right here
 	G_CONFIG_INJECT 'AUTO_SETUP_AUTOMATED=' 'AUTO_SETUP_AUTOMATED=1' rootfs/boot/dietpi.txt
@@ -438,6 +416,8 @@ then
 	/boot/dietpi/func/dietpi-set_hardware serialconsole 0 ttyS0
 	systemctl mask serial-getty@ttyS0
 	/boot/dietpi/func/dietpi-set_hardware serialconsole 1 serial0
+	G_CONFIG_INJECT 'temp_limit=' 'temp_limit=75' /boot/config.txt # since most RPi's are now RPi 4 and Allo ships the CM3 with USBridge Sig and Allo GUI image
+	G_EXEC sed -Ei 's/^(arm_freq|over_voltage)=/#\1=/' /boot/config.txt
 
 # Sparky SBC
 else
@@ -454,8 +434,7 @@ G_EXEC eval 'echo 10 > /boot/dietpi/.install_stage'
 G_EXEC systemctl stop dietpi-ramlog
 G_EXEC rm -R /var/tmp/dietpi/logs
 /boot/dietpi/func/dietpi-set_software apt-cache clean
-G_EXEC rm /boot/dietpi/.{hw_model,dietpi-services_include_exclude}
-G_EXEC rm /boot/dietpi-wifi.txt
+G_EXEC rm /boot/dietpi/.{hw_model,dietpi-services_include_exclude} /boot/dietpi-wifi.txt
 G_EXEC rm -Rf /{root,home/*}/.{bash_history,nano_history,wget-hsts,cache,local,config,gnupg,viminfo,dbus,gconf,nano,vim,zshrc,oh-my-zsh} /etc/*- /var/{cache/debconf,lib/dpkg}/*-old /var/lib/dhcp/{,.??,.[^.]}*
 # Remove unique Roon IDs: https://community.roonlabs.com/t/roon-core-will-not-recognize-two-dietpi-allo-gui-roon-bridges-simultaneously/32563/18?u=dan_knight
 G_EXEC rm -f /mnt/dietpi_userdata/roon/{RoonBridge,RAATServer}/Settings/unique_id
@@ -466,7 +445,7 @@ G_EXEC chown netdata:netdata /var/tmp/dietpi/logs/dietpi-ramlog_store/netdata
 G_EXEC chown mpd:audio /var/tmp/dietpi/logs/dietpi-ramlog_store/mpd
 G_EXEC chown mysql:mysql /var/tmp/dietpi/logs/dietpi-ramlog_store/mysql
 
-# Remove automation scripts
+# Remove automation scripts and workarounds
 G_EXEC rm /etc/bashrc.d/00-dietpi-build.sh /boot/Automation_Custom_Script.sh /root/AUTO_CustomScript.sh
 
 > /success

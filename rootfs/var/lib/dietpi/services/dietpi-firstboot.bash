@@ -150,7 +150,7 @@ _EOF_
 
 		# Set APT mirror
 		local target_repo='CONFIG_APT_DEBIAN_MIRROR'
-		(( $G_HW_MODEL < 10 )) && (( $G_RASPBIAN )) && target_repo='CONFIG_APT_RASPBIAN_MIRROR'
+		(( $G_RASPBIAN )) && target_repo='CONFIG_APT_RASPBIAN_MIRROR'
 		/boot/dietpi/func/dietpi-set_software apt-mirror "$(sed -n "/^[[:blank:]]*$target_repo=/{s/^[^=]*=//p;q}" /boot/dietpi.txt)"
 
 		# Recreate machine-id: https://github.com/MichaIng/DietPi/issues/2015
@@ -201,6 +201,14 @@ _EOF_
 			rm -v "$i"
 			dropbearkey -t "$type" -f "$i"
 		done
+
+		# Apply SSH pubkey(s) from dietpi.txt
+		/boot/dietpi/func/dietpi-set_software add_ssh_pubkeys
+
+		# Apply SSH password login setting
+		local disable_ssh_password_logins=$(sed -n '/^[[:blank:]]*SOFTWARE_DISABLE_SSH_PASSWORD_LOGINS=/{s/^[^=]*=//p;q}' /boot/dietpi.txt)
+		[[ $disable_ssh_password_logins ]] || disable_ssh_password_logins=0
+		/boot/dietpi/func/dietpi-set_software disable_ssh_password_logins "$disable_ssh_password_logins"
 
 		# Disable serial console if set in dietpi.txt
 		grep -q '^[[:blank:]]*CONFIG_SERIAL_CONSOLE_ENABLE=0' /boot/dietpi.txt && /boot/dietpi/func/dietpi-set_hardware serialconsole disable
