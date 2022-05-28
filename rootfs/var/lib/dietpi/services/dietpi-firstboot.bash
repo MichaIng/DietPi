@@ -206,9 +206,7 @@ _EOF_
 		/boot/dietpi/func/dietpi-set_software add_ssh_pubkeys
 
 		# Apply SSH password login setting
-		local disable_ssh_password_logins=$(sed -n '/^[[:blank:]]*SOFTWARE_DISABLE_SSH_PASSWORD_LOGINS=/{s/^[^=]*=//p;q}' /boot/dietpi.txt)
-		[[ $disable_ssh_password_logins ]] || disable_ssh_password_logins=0
-		/boot/dietpi/func/dietpi-set_software disable_ssh_password_logins "$disable_ssh_password_logins"
+		/boot/dietpi/func/dietpi-set_software disable_ssh_password_logins
 
 		# Disable serial console if set in dietpi.txt
 		grep -q '^[[:blank:]]*CONFIG_SERIAL_CONSOLE_ENABLE=0' /boot/dietpi.txt && /boot/dietpi/func/dietpi-set_hardware serialconsole disable
