@@ -14,10 +14,10 @@
 
 	# Sleep without subprocess
 	# https://blog.dhampir.no/content/sleeping-without-a-subprocess-in-bash-and-how-to-sleep-forever
-	snore() {
-		local IFS
-		[[ -n "${_snore_fd:-}" ]] || { exec {_snore_fd}<> <(:); } 2>/dev/null
-		read -t "${1:-0}" -u $_snore_fd || :
+	snore()
+	{
+		[[ $_snore_fd ]] || exec {_snore_fd}<> <(:)
+		read -t "$1" -u "$_snore_fd" || :
 	}
 
 	#-------------------------------------------------------------------------------------
