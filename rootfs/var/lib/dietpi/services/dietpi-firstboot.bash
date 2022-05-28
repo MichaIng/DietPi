@@ -150,7 +150,7 @@ _EOF_
 
 		# Set APT mirror
 		local target_repo='CONFIG_APT_DEBIAN_MIRROR'
-		(( $G_HW_MODEL < 10 )) && (( $G_RASPBIAN )) && target_repo='CONFIG_APT_RASPBIAN_MIRROR'
+		(( $G_RASPBIAN )) && target_repo='CONFIG_APT_RASPBIAN_MIRROR'
 		/boot/dietpi/func/dietpi-set_software apt-mirror "$(sed -n "/^[[:blank:]]*$target_repo=/{s/^[^=]*=//p;q}" /boot/dietpi.txt)"
 
 		# Recreate machine-id: https://github.com/MichaIng/DietPi/issues/2015

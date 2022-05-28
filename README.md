@@ -4,7 +4,7 @@
 	<br><br>
 	optimised • simplified • for everyone
 	<br><br>
-	<a href="https://dietpi.com/" target="_blank" rel="noopener">Website</a> • <a href="https://dietpi.com/#download" target="_blank" rel="noopener">Downloads</a> • <a href="https://dietpi.com/docs/" target="_blank" rel="noopener">Documentation</a> • <a href="https://dietpi.com/phpbb/" target="_blank" rel="noopener">Forum</a> • <a href="https://dietpi.com/blog/" target="_blank" rel="noopener">Blog</a>
+	<a href="https://dietpi.com/" target="_blank" rel="noopener">Website</a> • <a href="https://dietpi.com/#download" target="_blank" rel="noopener">Downloads</a> • <a href="https://dietpi.com/docs/" target="_blank" rel="noopener">Documentation</a> • <a href="https://dietpi.com/forum/" target="_blank" rel="noopener">Forum</a> • <a href="https://dietpi.com/blog/" target="_blank" rel="noopener">Blog</a>
 </p>
 <hr>
 <p align="center">
@@ -39,7 +39,7 @@ Project lead (20/02/2019 and onwards), source code contributor, bug fixes, softw
 
 Project founder and previous project lead (19/02/2019 and previous), source code contributor and tester.
 
-#### [JohnVick](https://dietpi.com/phpbb/memberlist.php?mode=viewprofile&u=575)
+#### [JohnVick](https://dietpi.com/forum/u/johnvick/summary)
 
 _Joined 2016-06-08_
 
@@ -102,7 +102,7 @@ _Joined 2016-01-01_
 
 Contributions to the DietPi in general, in-depth testing, bug finding and valuable feedback, forum moderator.
 
-#### [ZombieVirus](https://dietpi.com/phpbb/memberlist.php?username=ZombieVirus)
+#### [ZombieVirus](https://dietpi.com/forum/u/zombievirus/summary)
 
 _Joined 2016-03-20_
 
@@ -153,7 +153,7 @@ If so, let us know!
 We are always looking for talented people who believe in the DietPi project, and, wish to contribute in any way you can.
 
 - Send me an Email: micha@dietpi.com
-- Join our forum: https://dietpi.com/phpbb/
+- Join our forum: https://dietpi.com/forum/
 - GitHub: https://github.com/MichaIng/DietPi
 
 Also read our [contribute page](https://dietpi.com/contribute.html) for an overview of way to support DietPi.
