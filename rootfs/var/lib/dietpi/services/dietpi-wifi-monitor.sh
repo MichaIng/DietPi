@@ -12,20 +12,12 @@
 	[[ $TICKRATE =~ ^[1-9][0-9]*$ ]] || readonly TICKRATE=10
 	GATEWAY=
 
-	# Sleep without subprocess
-	# https://blog.dhampir.no/content/sleeping-without-a-subprocess-in-bash-and-how-to-sleep-forever
-	snore()
-	{
-		[[ $_snore_fd ]] || exec {_snore_fd}<> <(:)
-		read -rt "$1" -u "$_snore_fd" || :
-	}
-
 	#-------------------------------------------------------------------------------------
 	# Main
 	#-------------------------------------------------------------------------------------
 	G_DIETPI-NOTIFY 2 "Checking connection for $ADAPTER via ping to default gateway every $TICKRATE seconds"
 
-	while snore "$TICKRATE"
+	while G_SLEEP "$TICKRATE"
 	do
 		if [[ ! -e /sys/class/net/$ADAPTER ]]
 		then
@@ -36,7 +28,7 @@
 		then
 			G_DIETPI-NOTIFY 2 "Detected $ADAPTER connection loss. Reconnecting..."
 			ifdown "$ADAPTER"
-			snore 1
+			G_SLEEP 1
 			ifup "$ADAPTER"
 			G_DIETPI-NOTIFY 0 'Completed'
 		fi
