@@ -17,7 +17,7 @@
 	#-------------------------------------------------------------------------------------
 	G_DIETPI-NOTIFY 2 "Checking connection for $ADAPTER via ping to default gateway every $TICKRATE seconds"
 
-	while sleep "$TICKRATE"
+	while G_SLEEP "$TICKRATE"
 	do
 		if [[ ! -e /sys/class/net/$ADAPTER ]]
 		then
@@ -28,7 +28,7 @@
 		then
 			G_DIETPI-NOTIFY 2 "Detected $ADAPTER connection loss. Reconnecting..."
 			ifdown "$ADAPTER"
-			sleep 1
+			G_SLEEP 1
 			ifup "$ADAPTER"
 			G_DIETPI-NOTIFY 0 'Completed'
 		fi
