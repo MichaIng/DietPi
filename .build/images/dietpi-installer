@@ -350,6 +350,9 @@ _EOF_
 			'42' ': ROCKPro64'
 			'44' ': Pinebook'
 			'46' ': Pinebook Pro'
+			'49.1' ': Quartz64 Model A'
+			'49.2' ': Quartz64 Model B'
+			'49.3' ': SOQuartz'
 			'59' ': ZeroPi'
 			'60' ': NanoPi NEO'
 			'65' ': NanoPi NEO2'
@@ -385,7 +388,7 @@ _EOF_
 		while :
 		do
 			# Check for valid environment variable
-			[[ $HW_MODEL =~ ^[0-9]+$ ]] && for i in "${G_WHIP_MENU_ARRAY[@]}"
+			[[ $HW_MODEL =~ ^[0-9.]+$ ]] && for i in "${G_WHIP_MENU_ARRAY[@]}"
 			do
 				[[ $HW_MODEL == "$i" ]] && break 2
 			done
@@ -399,6 +402,15 @@ _EOF_
 			HW_MODEL=$G_WHIP_RETURNED_VALUE
 			break
 		done
+
+		# Apply variant
+		HW_VARIANT=
+		if [[ $HW_MODEL == *'.'* ]]
+		then
+			HW_VARIANT=${HW_MODEL#*.}
+			HW_MODEL=${HW_MODEL%%.*}
+		fi
+
 		G_HW_MODEL=$HW_MODEL
 		unset -v HW_MODEL
 
@@ -492,7 +504,7 @@ _EOF_
 		# Hardware specific boot configs
 		if (( $G_HW_MODEL < 10 )); then
 
-			echo "root=PARTUUID=$(findmnt -Ufnro PARTUUID -M /) rootfstype=ext4 rootwait fsck.repair=yes net.ifnames=0 logo.nologo console=serial0,115200 console=tty1" > /boot/cmdline.txt
+			echo "root=PARTUUID=$(findmnt -Ufnro PARTUUID -M /) rootfstype=$(findmnt -Ufnro FSTYPE -M /) rootwait fsck.repair=yes net.ifnames=0 logo.nologo console=serial0,115200 console=tty1" > /boot/cmdline.txt
 			G_EXEC mv "DietPi-$G_GITBRANCH/.build/images/RPi/config.txt" /boot/
 			# Boot in 64-bit mode if this is a 64-bit image
 			[[ $G_HW_ARCH == 3 ]] && G_CONFIG_INJECT 'arm_64bit=' 'arm_64bit=1' /boot/config.txt
@@ -682,13 +694,13 @@ _EOF_
 			then
 				aPACKAGES_REQUIRED_INSTALL+=('tiny-initramfs')
 
-			elif (( $G_HW_MODEL > 9 && $G_HW_MODEL != 61 ))
+			elif (( $G_HW_MODEL > 9 && $G_HW_MODEL != 49 && $G_HW_MODEL != 61 ))
 			then
 				aPACKAGES_REQUIRED_INSTALL+=('initramfs-tools')
 			fi
 
 			# Entropy daemon: Use modern rng-tools5 on all devices where it has been proven to work, else haveged: https://github.com/MichaIng/DietPi/issues/2806
-			if [[ $G_HW_MODEL -lt 10 || $G_HW_MODEL =~ ^(11|14|15|16|24|29|42|46|58|68|72|74)$ ]] # RPi, S922X, Odroid XU4, Odroid C4, RK3399 - 47 NanoPi R4S, Radxa Zero
+			if [[ $G_HW_MODEL -lt 10 || $G_HW_MODEL =~ ^(14|15|16|24|29|42|46|58|68|72|74)$ ]] # RPi, S922X, Odroid C4, RK3399 - 47 NanoPi R4S, Radxa Zero
 			then
 				aPACKAGES_REQUIRED_INSTALL+=('rng-tools5')
 			else
@@ -879,41 +891,19 @@ _EOF_
 #!/bin/dash
 echo 'update-initramfs: Converting to U-Boot format'
 mkimage -A $arch -O linux -T ramdisk -C gzip -n uInitrd -d "\$2" "/boot/uInitrd-\$1"
-ln -sf "uInitrd-\$1" /boot/uInitrd > /dev/null 2>&1 || mv "/boot/uInitrd-\$1" /boot/uInitrd
+ln -sfv "uInitrd-\$1" /boot/uInitrd > /dev/null 2>&1 || mv "/boot/uInitrd-\$1" /boot/uInitrd
 exit 0
 _EOF_
 			G_EXEC chmod +x /etc/initramfs/post-update.d/99-dietpi-uboot
 			G_EXEC mkdir -p /etc/kernel/postinst.d
 			cat << '_EOF_' > /etc/kernel/postinst.d/dietpi-initramfs_cleanup
 #!/bin/dash
-
-# Skip if initramfs-tools is not installed
-[ -x '/usr/sbin/update-initramfs' ] || exit 0
-
-# Passing the kernel version is required
-version="$1"
-if [ -z "$version" ]
-then
-	echo "W: initramfs-tools: ${DPKG_MAINTSCRIPT_PACKAGE:-kernel package} did not pass a version number" >&2
-	exit 0
-fi
-
-# Avoid running multiple times
-if [ "$DEB_MAINT_PARAMS" ]
-then
-	eval set -- "$DEB_MAINT_PARAMS"
-	[ "$1" = 'upgrade' ] || exit 0
-fi
-
-# Delete unused initramfs images
-files="$(find /boot -maxdepth 1 -name 'initrd.img-*' -o -name 'uInitrd-*')"
-for f in $files
+echo 'Removing obsolete initramfs images'
+find /boot -maxdepth 1 -name 'initrd.img-*' -o -name 'uInitrd-*' | while read -r f
 do
-	[ -d "/lib/modules/${f#*-}" ] || continue
-	echo "Removing obsolete initramfs image: $f"
-	rm "$f"
+	[ ! -d "/lib/modules/${f#*-}" ] || continue
+	rm -v "$f"
 done
-
 exit 0
 _EOF_
 			G_EXEC chmod +x /etc/kernel/postinst.d/dietpi-initramfs_cleanup
@@ -974,10 +964,22 @@ _EOF_
 			# And install "file" which is used to detect whether the kernel image is compressed and in case uncompress it
 			(( $G_HW_MODEL == 74 )) && G_AGI linux-5.10-radxa-zero-latest bc file
 
-		# - NanoPi M2/T2 Linux 4.4: Requires dedicated boot partition, starting at 4 MiB for U-Boot, with ext4 filesystem
-		elif (( $G_HW_MODEL == 61 )) && [[ $(findmnt -Ufnro FSTYPE -M /boot) == 'ext4' ]] && (( $(sfdisk -qlo Start "$(lsblk -npo PKNAME "$(findmnt -Ufnro SOURCE -M /boot)")" | mawk 'NR==2') >= 8192 ))
+		# - Quartz64
+		elif [[ $G_HW_MODEL == 49 && $(findmnt -Ufnro TARGET -T /boot) == '/' ]]
 		then
-			G_EXEC curl -sSfLO 'https://dietpi.com/downloads/firmware-nanopi2.deb'
+			case $HW_VARIANT in
+				2) variant='quartz64b';;
+				3) variant='soquartz';;
+				*) variant='quartz64a';;
+			esac
+			G_EXEC curl -sSfLO "https://dietpi.com/downloads/binaries/firmware-$variant.deb"
+			G_EXEC_OUTPUT=1 G_EXEC dpkg -i "firmware-$variant.deb"
+			G_EXEC rm "firmware-$variant.deb"
+
+		# - NanoPi M2/T2 Linux 4.4: Requires dedicated boot partition, starting at 4 MiB for U-Boot, with ext4 filesystem
+		elif [[ $G_HW_MODEL == 61 && $(findmnt -Ufnro FSTYPE -M /boot) == 'ext4' ]] && (( $(sfdisk -qlo Start "$(lsblk -npo PKNAME "$(findmnt -Ufnro SOURCE -M /boot)")" | mawk 'NR==2') >= 8192 ))
+		then
+			G_EXEC curl -sSfLO 'https://dietpi.com/downloads/binaries/firmware-nanopi2.deb'
 			G_EXEC_OUTPUT=1 G_EXEC dpkg -i firmware-nanopi2.deb
 			G_EXEC rm firmware-nanopi2.deb
 
@@ -1483,8 +1485,8 @@ _EOF_'
 		then
 			/boot/dietpi/func/dietpi-set_hardware serialconsole enable ttyAMA0
 
-		# ROCK Pi 4
-		elif (( $G_HW_MODEL == 72 ))
+		# ROCK Pi 4 and Quartz64
+		elif (( $G_HW_MODEL == 72 || $G_HW_MODEL == 49 ))
 		then
 			/boot/dietpi/func/dietpi-set_hardware serialconsole enable ttyS2
 
