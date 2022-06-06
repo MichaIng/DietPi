@@ -1077,6 +1077,12 @@ Available commands:
 		aSOFTWARE_DESC[$software_id]='Official lightweight DietPi web interface (Rust)'
 		aSOFTWARE_CATX[$software_id]=8
 		aSOFTWARE_DOCS[$software_id]='https://dietpi.com/docs/software/system_stats/#dietpi-dashboard'
+		#------------------
+		software_id=99
+		aSOFTWARE_NAME[$software_id]='Prometheus Node Exporter'
+		aSOFTWARE_DESC[$software_id]='Prometheus exporter for hardware and OS metrics'
+		aSOFTWARE_CATX[$software_id]=8
+		aSOFTWARE_DOCS[$software_id]='https://dietpi.com/docs/software/system_stats/#prometheus_node_exporter'
 
 		# Remote Access
 		#--------------------------------------------------------------------------------
@@ -3433,6 +3439,86 @@ _EOF_
 			# Service needs to be started by systemd, as dietpi-services must not control it to prevent it from stopping during software installs done via dashboard itself.
 			aSTART_SERVICES+=('dietpi-dashboard')
 
+		fi
+
+		software_id=99 # Prometheus Node Exporter
+		if (( ${aSOFTWARE_INSTALL_STATE[$software_id]} == 1 )); then
+
+			Banner_Installing
+
+			# Use the default port
+			local port="9100"
+
+			local arch=''
+			case $G_HW_ARCH_NAME in
+				'armv6l') arch='armv6';;
+				'armv7l') arch='armv7';;
+				'aarch64') arch='arm64';;
+				'x86_64') arch='amd64';;
+			esac
+
+			# Reinstall: Remove previous instances
+			[[ -e '/usr/local/bin/node_exporter' ]] && G_EXEC rm -R /usr/local/bin/node_exporter
+			[[ -e '/usr/local/bin/raspberrypi_exporter' ]] && G_EXEC rm -R /usr/local/bin/raspberrypi_exporter
+
+			# Download binaries
+			Download_Install $(curl -sSfL 'https://api.github.com/repos/prometheus/node_exporter/releases/latest' | mawk -F\" "/\"browser_download_url\": \".*node_exporter-.*.linux-$arch.tar.gz\"/{print \$4}")
+			G_EXEC mv node_exporter*/node_exporter /usr/local/bin/
+			G_EXEC chmod +x /usr/local/bin/node_exporter
+
+			# User
+			Create_User node_exporter
+
+			# Working directory
+			G_EXEC mkdir -p /var/lib/node_exporter/textfile_collector
+			G_EXEC chown -R node_exporter:node_exporter /var/lib/node_exporter
+
+			# Services
+			cat << _EOF_ > /etc/systemd/system/node_exporter.service
+[Unit]
+Description=Node Exporter
+
+[Service]
+ExecStart=/usr/local/bin/node_exporter --web.listen-address=":$port" --collector.textfile.directory /var/lib/node_exporter/textfile_collector
+
+[Install]
+WantedBy=multi-user.target
+_EOF_
+
+			aSTART_SERVICES+=('node_exporter')
+
+			# If we're on a platform with vcgencmd, we can use raspberrypi_exporter as well
+			if [[ $(command -v vcgencmd) != "" ]]; then
+				Download_Install "https://github.com/fahlke/raspberrypi_exporter/archive/master.zip"
+				G_EXEC mv raspberrypi_exporter-master/raspberrypi_exporter /usr/local/bin/
+				G_EXEC chmod +x /usr/local/bin/raspberrypi_exporter
+
+				cat << '_EOF_' > /etc/systemd/system/raspberrypi_exporter.service
+[Unit]
+Description=Prometheus exporter for Raspberry Pi metrics
+Wants=raspberrypi_exporter.timer
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/bin/raspberrypi_exporter
+_EOF_
+
+				cat << '_EOF_' > /etc/systemd/system/raspberrypi_exporter.timer
+[Unit]
+Description=Timer for the Raspberry Pi Prometheus exporter
+
+[Timer]
+OnCalendar=*:*:0,15,30,45
+
+[Install]
+WantedBy=timers.target
+_EOF_
+
+				aSTART_SERVICES+=('raspberrypi_exporter')
+
+			fi
+
+			G_DIETPI-NOTIFY 2 "Prometheus Node Exporter serving metrics at: http://$HOSTNAME:$port/metrics"
 		fi
 
 		software_id=44 # Transmission
@@ -13532,6 +13618,31 @@ If no WireGuard (auto)start is included, but you require it, please do the follo
 			fi
 			[[ -d '/etc/systemd/system/dietpi-dashboard.service.d' ]] && G_EXEC rm -R /etc/systemd/system/dietpi-dashboard.service.d
 			[[ -d '/opt/dietpi-dashboard' ]] && G_EXEC rm -R /opt/dietpi-dashboard
+
+		fi
+
+		software_id=99 # Prometheus Node Exporter
+		if (( ${aSOFTWARE_INSTALL_STATE[$software_id]} == -1 )); then
+
+			Banner_Uninstalling
+			if [[ -f '/etc/systemd/system/raspberrypi_exporter.service' ]]
+			then
+				G_EXEC systemctl disable --now raspberrypi_exporter.service
+				G_EXEC rm /etc/systemd/system/raspberrypi_exporter.service
+			fi
+			if [[ -f '/etc/systemd/system/raspberrypi_exporter.timer' ]]
+			then
+				G_EXEC systemctl disable --now raspberrypi_exporter.timer
+				G_EXEC rm /etc/systemd/system/raspberrypi_exporter.timer
+			fi
+			if [[ -f '/etc/systemd/system/node_exporter.service' ]]
+			then
+				G_EXEC systemctl disable --now node_exporter.service
+				G_EXEC rm /etc/systemd/system/node_exporter.service
+			fi
+			G_EXEC rm -rf /var/lib/node_exporter /usr/local/bin/node_exporter /usr/local/bin/raspberrypi_exporter
+			getent passwd node_exporter > /dev/null && G_EXEC userdel node_exporter
+			getent group node_exporter > /dev/null && G_EXEC groupdel node_exporter
 
 		fi
 
