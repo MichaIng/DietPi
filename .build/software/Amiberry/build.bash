@@ -171,7 +171,7 @@ _EOF_
 
 G_EXEC chmod +x "$DIR/DEBIAN/"{prerm,postrm}
 
-# - checksum
+# - md5sums
 find "$DIR" ! \( -path "$DIR/DEBIAN" -prune \) -type f -exec md5sum {} + | sed "s|$DIR/||" > "$DIR/DEBIAN/md5sums"
 
 # - Obtain DEB dependency versions
