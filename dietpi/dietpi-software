@@ -1387,7 +1387,8 @@ Available commands:
 		aSOFTWARE_CATX[$software_id]=15
 		aSOFTWARE_DOCS[$software_id]='https://dietpi.com/docs/software/vpn/#pivpn'
 		aSOFTWARE_DEPS[$software_id]='17'
-		aSOFTWARE_INTERACTIVE[$software_id]=1
+		# Require interactive install if no config file containing options for unattended install is present
+		[[ -f '/boot/unattended_pivpn.conf' ]] || aSOFTWARE_INTERACTIVE[$software_id]=1
 
 		# Advanced Networking
 		#--------------------------------------------------------------------------------
@@ -8113,16 +8114,25 @@ _EOF_
 			G_EXEC curl -sSfL 'https://raw.githubusercontent.com/pivpn/pivpn/master/auto_install/install.sh' -o install.bash
 			G_EXEC chmod +x install.bash
 			G_DIETPI-NOTIFY 2 'Preventing reboot from within PiVPN installer'
-			G_EXEC sed -i '/shutdown[[:space:]]/d' install.bash
+			G_EXEC sed -i '/^[[:blank:]]*if (whiptail --title "Reboot"/,/^[[:blank:]]fi$/d' install.bash
 			G_DIETPI-NOTIFY 2 'Preventing install of unattended-upgrades'
-			G_EXEC sed -i 's/^[[:blank:]]*UNATTUPG=[[:digit:]]/UNATTUPG=0/' install.bash
+			G_EXEC sed -i '/^[[:blank:]]*askUnattendedUpgrades$/c\UNATTUPG=0' install.bash
+
+			# Unattended install
+			local options=()
+			if [[ -f '/boot/unattended_pivpn.conf' ]]
+			then
+				G_CONFIG_INJECT 'UNATTUPG=[[:digit:]]' 'UNATTUPG=0' /boot/unattended_pivpn.conf
+				options=('--unattended' '/boot/unattended_pivpn.conf')
+			fi
 
 			# APT deps
-			G_AGI dnsutils net-tools bsdmainutils iptables-persistent # https://github.com/pivpn/pivpn/blob/master/auto_install/install.sh#L37
+			G_AGI dnsutils grepcidr net-tools bsdmainutils iptables-persistent # https://github.com/pivpn/pivpn/blob/master/auto_install/install.sh#L37
 			Configure_iptables
 
-			G_EXEC_OUTPUT=1 G_EXEC_NOEXIT=1 G_EXEC ./install.bash || aSOFTWARE_INSTALL_STATE[$software_id]=0
+			G_EXEC_OUTPUT=1 G_EXEC_NOEXIT=1 G_EXEC ./install.bash "${options[@]}" || aSOFTWARE_INSTALL_STATE[$software_id]=0
 			G_EXEC_NOHALT=1 G_EXEC rm install.bash
+			[[ -f '/boot/unattended_pivpn.conf' ]] && G_EXEC_NOHALT=1 G_EXEC mv /boot/unattended_pivpn.conf{,.applied}
 
 		fi
 
@@ -14200,6 +14210,7 @@ If no WireGuard (auto)start is included, but you require it, please do the follo
 		if (( ${aSOFTWARE_INSTALL_STATE[$software_id]} == -1 )); then
 
 			Banner_Uninstalling
+			[[ -f '/opt/pivpn/uninstall.sh' ]] && G_EXEC sed -i 's/ askreboot;//' /opt/pivpn/uninstall.sh
 			command -v pivpn > /dev/null && G_EXEC_OUTPUT=1 G_EXEC pivpn -u
 			getent passwd pivpn > /dev/null && G_EXEC userdel pivpn
 			getent group pivpn > /dev/null && G_EXEC groupdel pivpn
