@@ -318,6 +318,7 @@ Links to hardware and software manufacturers, sources and build instructions use
 - [Lidarr](https://github.com/Lidarr/Lidarr)
 - [Prowlarr](https://github.com/Prowlarr/Prowlarr)
 - [Jackett](https://github.com/Jackett/Jackett)
+- [HAProxy](https://github.com/haproxy/haproxy)
 
 ---
 
