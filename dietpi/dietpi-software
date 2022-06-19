@@ -1077,6 +1077,12 @@ Available commands:
 		aSOFTWARE_DESC[$software_id]='Official lightweight DietPi web interface (Rust)'
 		aSOFTWARE_CATX[$software_id]=8
 		aSOFTWARE_DOCS[$software_id]='https://dietpi.com/docs/software/system_stats/#dietpi-dashboard'
+		#------------------
+		software_id=99
+		aSOFTWARE_NAME[$software_id]='Prometheus Node Exporter'
+		aSOFTWARE_DESC[$software_id]='Prometheus exporter for hardware and OS metrics'
+		aSOFTWARE_CATX[$software_id]=8
+		aSOFTWARE_DOCS[$software_id]='https://dietpi.com/docs/software/system_stats/#prometheus_node_exporter'
 
 		# Remote Access
 		#--------------------------------------------------------------------------------
@@ -1389,6 +1395,12 @@ Available commands:
 		aSOFTWARE_DEPS[$software_id]='17'
 		# Require interactive install if no config file containing options for unattended install is present
 		[[ -f '/boot/unattended_pivpn.conf' ]] || aSOFTWARE_INTERACTIVE[$software_id]=1
+		#------------------
+		software_id=58
+		aSOFTWARE_NAME[$software_id]='Tailscale'
+		aSOFTWARE_DESC[$software_id]='Zero config VPN'
+		aSOFTWARE_CATX[$software_id]=15
+		aSOFTWARE_DOCS[$software_id]='https://dietpi.com/docs/software/vpn/#tailscale'
 
 		# Advanced Networking
 		#--------------------------------------------------------------------------------
@@ -1411,7 +1423,6 @@ Available commands:
 		aSOFTWARE_DESC[$software_id]='high performance tcp/http load balancer'
 		aSOFTWARE_CATX[$software_id]=16
 		aSOFTWARE_DOCS[$software_id]='https://dietpi.com/docs/software/advanced_networking/#haproxy'
-		aSOFTWARE_DEPS[$software_id]='16'
 		#------------------
 		software_id=171
 		aSOFTWARE_NAME[$software_id]='frp'
@@ -2230,7 +2241,7 @@ _EOF_
 	Create_Required_Dirs(){
 
 		G_EXEC mkdir -p /mnt/dietpi_userdata/{Music,Pictures,Video,downloads} /var/www /opt /usr/local/bin
-		G_EXEC chown dietpi:dietpi /mnt/dietpi_userdata/{Music,Pictures,Video,downloads}
+		getent passwd dietpi > /dev/null && G_EXEC chown dietpi:dietpi /mnt/dietpi_userdata/{Music,Pictures,Video,downloads}
 		G_EXEC chmod 0775 /mnt/dietpi_userdata/{Music,Pictures,Video,downloads}
 
 	}
@@ -2239,7 +2250,7 @@ _EOF_
 
 		[[ -f '/mnt/dietpi_userdata/Music/fourdee_tech.ogg' ]] && return
 		G_EXEC curl -sSfL 'https://dietpi.com/downloads/audio/fourdee_tech.ogg' -o /mnt/dietpi_userdata/Music/fourdee_tech.ogg
-		G_EXEC chown dietpi:dietpi /mnt/dietpi_userdata/Music/fourdee_tech.ogg
+		getent passwd dietpi > /dev/null && G_EXEC chown dietpi:dietpi /mnt/dietpi_userdata/Music/fourdee_tech.ogg
 		G_EXEC chmod 0664 /mnt/dietpi_userdata/Music/fourdee_tech.ogg
 
 	}
@@ -2550,6 +2561,14 @@ _EOF_
 				# Radxa Zero
 				[[ -f '/boot/uEnv.txt' ]] && G_CONFIG_INJECT 'docker_optimizations=' 'docker_optimizations=on' /boot/uEnv.txt
 			fi
+		}
+
+		# $1: Software name, so config can be created and removed per-software
+		Enable_IP_forwarding()
+		{
+			G_DIETPI-NOTIFY 2 'Enabling IP forwarding to allow access across network interfaces'
+			echo -e 'net.ipv4.ip_forward=1\nnet.ipv6.conf.default.accept_ra=2\nnet.ipv6.conf.all.accept_ra=2\nnet.ipv6.conf.default.forwarding=1\nnet.ipv6.conf.all.forwarding=1' > "/etc/sysctl.d/dietpi-$1.conf"
+			sysctl net.ipv4.ip_forward=1 net.ipv6.conf.default.accept_ra=2 net.ipv6.conf.all.accept_ra=2 net.ipv6.conf.default.forwarding=1 net.ipv6.conf.all.forwarding=1
 		}
 
 		software_id=5 # ALSA
@@ -2960,7 +2979,8 @@ unix_socket_directories = '/run/postgresql'" > "$i/00dietpi.conf"
 			# Allow dietpi user and audio group members to manage library
 			[[ -f '/mnt/dietpi_userdata/beets/library.db' ]] || > /mnt/dietpi_userdata/beets/library.db
 			[[ -f '/mnt/dietpi_userdata/beets/state.pickle' ]] || > /mnt/dietpi_userdata/beets/state.pickle
-			G_EXEC chown -R dietpi:audio /mnt/dietpi_userdata/beets
+			# shellcheck disable=SC2015
+			getent passwd dietpi > /dev/null && G_EXEC chown -R dietpi:audio /mnt/dietpi_userdata/beets || G_EXEC chgrp -R audio /mnt/dietpi_userdata/beets
 			G_EXEC chmod -R g+w /mnt/dietpi_userdata/beets
 
 			# Load global beets config in all interactive bash shells
@@ -3433,6 +3453,57 @@ WantedBy=multi-user.target
 _EOF_
 			# Service needs to be started by systemd, as dietpi-services must not control it to prevent it from stopping during software installs done via dashboard itself.
 			aSTART_SERVICES+=('dietpi-dashboard')
+
+		fi
+
+		software_id=99 # Prometheus Node Exporter
+		if (( ${aSOFTWARE_INSTALL_STATE[$software_id]} == 1 )); then
+
+			Banner_Installing
+
+			case $G_HW_ARCH_NAME in
+				'armv6l') local arch='armv6';;
+				'armv7l') local arch='armv7';;
+				'aarch64') local arch='arm64';;
+				*) local arch='amd64';;
+			esac
+
+			# Download binary
+			Download_Install "$(curl -sSfL 'https://api.github.com/repos/prometheus/node_exporter/releases/latest' | mawk -F\" "/\"browser_download_url\": \".*node_exporter-.*.linux-$arch.tar.gz\"/{print \$4}")"
+			[[ -d '/opt/node_exporter' ]] || G_EXEC mkdir /opt/node_exporter
+			G_EXEC cp --preserve=mode node_exporter*/node_exporter /opt/node_exporter/
+			G_EXEC_HOHALT=1 G_EXEC rm -R node_exporter*
+
+			# User
+			Create_User node_exporter
+
+			# Services
+			cat << '_EOF_' > /etc/systemd/system/node_exporter.service
+[Unit]
+Description=Prometheus Node Exporter (DietPi)
+Documentation=https://prometheus.io/docs/guides/node-exporter/
+
+[Service]
+User=node_exporter
+RuntimeDirectory=node_exporter
+ExecStart=/opt/node_exporter/node_exporter --log.level=warn --collector.textfile.directory=/run/node_exporter
+
+[Install]
+WantedBy=multi-user.target
+_EOF_
+			# RPi: Install raspberrypi_exporter
+			if (( $G_HW_MODEL < 10 ))
+			then
+				Download_Install 'https://github.com/fahlke/raspberrypi_exporter/archive/master.tar.gz'
+				G_CONFIG_INJECT 'ConditionPathExists=' 'ConditionPathExists=/run/node_exporter' raspberrypi_exporter-master/raspberrypi_exporter.service '^Wants='
+				G_CONFIG_INJECT 'ExecStart=' 'ExecStart=/opt/node_exporter/raspberrypi_exporter' raspberrypi_exporter-master/raspberrypi_exporter.service
+				G_CONFIG_INJECT 'METRICS_FILE=' 'METRICS_FILE='\''/run/node_exporter/raspberrypi-metrics.prom'\' raspberrypi_exporter-master/raspberrypi_exporter
+
+				G_EXEC mv {raspberrypi_exporter-master,/opt/node_exporter}/raspberrypi_exporter
+				G_EXEC mv {raspberrypi_exporter-master,/etc/systemd/system}/raspberrypi_exporter.service
+				G_EXEC mv {raspberrypi_exporter-master,/etc/systemd/system}/raspberrypi_exporter.timer
+				G_EXEC_HOHALT=1 G_EXEC rm -R raspberrypi_exporter-master
+			fi
 
 		fi
 
@@ -7219,13 +7290,13 @@ _EOF_
 
 			Banner_Installing
 
-			local version='2.5.1' # https://www.haproxy.org/download/
-			aDEPS=('libpcre3-dev' 'libssl-dev' 'zlib1g-dev' 'libsystemd-dev')
+			local version='2.6.0' # https://www.haproxy.org/download/
+			aDEPS=('make' 'gcc' 'libpcre3-dev' 'libssl-dev' 'zlib1g-dev' 'libsystemd-dev')
 			Download_Install "https://www.haproxy.org/download/${version%.*}/src/haproxy-$version.tar.gz"
 
 			# Compile
 			G_EXEC cd "haproxy-$version"
-			G_EXEC_OUTPUT=1 G_EXEC make -j "$G_HW_CPU_CORES" TARGET=linux-glibc CPU=generic USE_PCRE=1 USE_OPENSSL=1 USE_ZLIB=1 USE_SYSTEMD=1 ADDLIB='-Wl,--no-as-needed -lgcc_s -Wl,--as-needed' DEBUG_CFLAGS='-g0 -O3' LDFLAGS='-Wl,-z,relro -Wl,-z,now -Wl,--as-needed'
+			G_EXEC_OUTPUT=1 G_EXEC make -j "$G_HW_CPU_CORES" TARGET=linux-glibc USE_PCRE=1 USE_OPENSSL=1 USE_ZLIB=1 USE_SYSTEMD=1 USE_PROMEX=1 DEBUG_CFLAGS='-g0 -O3' LDFLAGS='-Wl,-z,relro -Wl,-z,now -Wl,--as-needed'
 			# Strip binary size
 			G_EXEC strip --remove-section=.comment --remove-section=.note haproxy
 			# Install
@@ -7236,18 +7307,17 @@ _EOF_
 			G_EXEC mv {,/etc/systemd/system/}haproxy.service
 			# - Error pages
 			G_EXEC cd "$G_WORKING_DIR"
-			G_EXEC mkdir -p /etc/haproxy/errors
+			[[ -d '/etc/haproxy/errors' ]] || G_EXEC mkdir -p /etc/haproxy/errors
 			G_EXEC mv "haproxy-$version/examples/errorfiles/"*.http /etc/haproxy/errors/
 			# Clean up
 			G_EXEC_NOHALT=1 G_EXEC rm -R "haproxy-$version"
 
 			# Jail directory
-			G_EXEC mkdir -p /var/lib/haproxy
+			[[ -d '/var/lib/haproxy' ]] || G_EXEC mkdir /var/lib/haproxy
 
 			# Config
-			[[ -f '/etc/haproxy/haproxy.cfg' ]] || cat << '_EOF_' > /etc/haproxy/haproxy.cfg
+			[[ -f '/etc/haproxy/haproxy.cfg' ]] || cat << _EOF_ > /etc/haproxy/haproxy.cfg
 global
-
 	maxconn 64
 	# Jail directory
 	chroot /var/lib/haproxy
@@ -7262,11 +7332,15 @@ global
 	crt-base /etc/ssl/private
 
 	# Default ciphers to use on SSL-enabled listening sockets.
-	# For more information, see ciphers(1SSL).
-	ssl-default-bind-ciphers kEECDH+aRSA+AES:kRSA+AES:+AES256:RC4-SHA:!kEDH:!LOW:!EXP:!MD5:!aNULL:!eNULL
+	ssl-default-bind-ciphers ECDHE-ECDSA-AES128-GCM-SHA256:ECDHE-RSA-AES128-GCM-SHA256:ECDHE-ECDSA-AES256-GCM-SHA384:ECDHE-RSA-AES256-GCM-SHA384:ECDHE-ECDSA-CHACHA20-POLY1305:ECDHE-RSA-CHACHA20-POLY1305:DHE-RSA-AES128-GCM-SHA256:DHE-RSA-AES256-GCM-SHA384
+	ssl-default-bind-ciphersuites TLS_AES_128_GCM_SHA256:TLS_AES_256_GCM_SHA384:TLS_CHACHA20_POLY1305_SHA256
+	ssl-default-bind-options prefer-client-ciphers no-sslv3 no-tlsv10 no-tlsv11 no-tls-tickets
+
+	ssl-default-server-ciphers ECDHE-ECDSA-AES128-GCM-SHA256:ECDHE-RSA-AES128-GCM-SHA256:ECDHE-ECDSA-AES256-GCM-SHA384:ECDHE-RSA-AES256-GCM-SHA384:ECDHE-ECDSA-CHACHA20-POLY1305:ECDHE-RSA-CHACHA20-POLY1305:DHE-RSA-AES128-GCM-SHA256:DHE-RSA-AES256-GCM-SHA384
+	ssl-default-server-ciphersuites TLS_AES_128_GCM_SHA256:TLS_AES_256_GCM_SHA384:TLS_CHACHA20_POLY1305_SHA256
+	ssl-default-server-options no-sslv3 no-tlsv10 no-tlsv11 no-tls-tickets
 
 defaults
-
 	log     global
 	mode    http
 	option  httplog
@@ -7283,32 +7357,32 @@ defaults
 	errorfile 504 /etc/haproxy/errors/504.http
 
 frontend localnodes
-
 	bind *:80
 	mode http
 	default_backend nodes
 
 backend nodes
-
 	mode http
 	balance roundrobin
 	option forwardfor
 	http-request set-header X-Forwarded-Port %[dst_port]
 	http-request add-header X-Forwarded-Proto https if { ssl_fc }
-	option httpchk HEAD / HTTP/1.1\r\nHost:localhost
+	option httpchk HEAD / HTTP/1.1
+	http-check send meth HEAD uri / ver HTTP/1.1 hdr host localhost
 	server web01 127.0.0.1:9000 check
 	server web02 127.0.0.1:9001 check
 	server web03 127.0.0.1:9002 check
 
 # Admin web page
-
 	listen stats
 	bind *:1338
 	stats enable
 	stats uri /
 	stats hide-version
-	stats auth admin:dietpi
+	stats auth admin:$GLOBAL_PW
 _EOF_
+			G_EXEC chmod 0600 /etc/haproxy/haproxy.cfg
+
 		fi
 
 		software_id=35 # Logitech Media Server
@@ -7971,6 +8045,25 @@ _EOF_
 
 		fi
 
+		software_id=58 # Tailscale
+		if (( ${aSOFTWARE_INSTALL_STATE[$software_id]} == 1 )); then
+
+			Banner_Installing
+
+			# APT key
+			G_EXEC curl -sSLf "https://pkgs.tailscale.com/stable/debian/$G_DISTRO_NAME.noarmor.gpg" -o /etc/apt/trusted.gpg.d/dietpi-tailscale.gpg
+
+			# APT list
+			G_EXEC eval "echo 'deb https://pkgs.tailscale.com/stable/debian $G_DISTRO_NAME main' > /etc/apt/sources.list.d/dietpi-tailscale.list"
+			G_AGUP
+
+			# APT package
+			G_AGI tailscale
+
+			Enable_IP_forwarding tailscale
+
+		fi
+
 		software_id=97 # OpenVPN Server
 		if (( ${aSOFTWARE_INSTALL_STATE[$software_id]} == 1 )); then
 
@@ -8094,9 +8187,7 @@ _EOF_
 
 			done
 
-			# Enable IP forwarding
-			echo -e 'net.ipv4.ip_forward=1\nnet.ipv6.conf.default.accept_ra=2\nnet.ipv6.conf.all.accept_ra=2\nnet.ipv6.conf.default.forwarding=1\nnet.ipv6.conf.all.forwarding=1' > /etc/sysctl.d/dietpi-openvpn.conf
-			sysctl net.ipv4.ip_forward=1 net.ipv6.conf.default.accept_ra=2 net.ipv6.conf.all.accept_ra=2 net.ipv6.conf.default.forwarding=1 net.ipv6.conf.all.forwarding=1
+			Enable_IP_forwarding openvpn
 
 			# ToDo: iptables NAT rules: Those need to run via pre-up and post-down rules when the OpenSSH server starts
 			#iptables -A FORWARD -i tun0 -j ACCEPT
@@ -8253,9 +8344,7 @@ _EOF_
 			# Enable access point config
 			echo 'DAEMON_CONF="/etc/hostapd/hostapd.conf"' > /etc/default/hostapd
 
-			# Enable IP forwarding
-			echo -e 'net.ipv4.ip_forward=1\nnet.ipv6.conf.default.forwarding=1\nnet.ipv6.conf.all.forwarding=1' > /etc/sysctl.d/dietpi-wifihotspot.conf
-			sysctl net.ipv4.ip_forward=1 net.ipv6.conf.default.forwarding=1 net.ipv6.conf.all.forwarding=1
+			Enable_IP_forwarding wifihotspot
 
 			# Enable iptables NAT rules
 			iptables -t nat -A POSTROUTING -s 192.168.42.0/24 -o "$eth_iface" -j MASQUERADE
@@ -11481,7 +11570,7 @@ _EOF_
 			/boot/dietpi/func/dietpi-set_hardware soundcard googlevoicehat-soundcard
 
 			# Permissions
-			G_EXEC chown -R dietpi:dietpi /mnt/dietpi_userdata/voice-recognizer-raspi
+			getent passwd dietpi > /dev/null && G_EXEC chown -R dietpi:dietpi /mnt/dietpi_userdata/voice-recognizer-raspi
 
 		fi
 
@@ -13557,6 +13646,34 @@ If no WireGuard (auto)start is included, but you require it, please do the follo
 
 		fi
 
+		software_id=99 # Prometheus Node Exporter
+		if (( ${aSOFTWARE_INSTALL_STATE[$software_id]} == -1 )); then
+
+			Banner_Uninstalling
+			if [[ -f '/etc/systemd/system/raspberrypi_exporter.timer' ]]
+			then
+				G_EXEC systemctl disable --now raspberrypi_exporter.timer
+				G_EXEC rm /etc/systemd/system/raspberrypi_exporter.timer
+			fi
+			[[ -d '/etc/systemd/system/raspberrypi_exporter.timer.d' ]] && G_EXEC rm -R /etc/systemd/system/raspberrypi_exporter.timer.d
+			if [[ -f '/etc/systemd/system/raspberrypi_exporter.service' ]]
+			then
+				G_EXEC systemctl disable --now raspberrypi_exporter.service
+				G_EXEC rm /etc/systemd/system/raspberrypi_exporter.service
+			fi
+			[[ -d '/etc/systemd/system/raspberrypi_exporter.service.d' ]] && G_EXEC rm -R /etc/systemd/system/raspberrypi_exporter.service.d
+			if [[ -f '/etc/systemd/system/node_exporter.service' ]]
+			then
+				G_EXEC systemctl disable --now node_exporter.service
+				G_EXEC rm /etc/systemd/system/node_exporter.service
+			fi
+			[[ -d '/etc/systemd/system/node_exporter.service.d' ]] && G_EXEC rm -R /etc/systemd/system/node_exporter.service.d
+			[[ -d '/opt/node_exporter' ]] && G_EXEC rm -R /opt/node_exporter
+			getent passwd node_exporter > /dev/null && G_EXEC userdel node_exporter
+			getent group node_exporter > /dev/null && G_EXEC groupdel node_exporter
+
+		fi
+
 		software_id=146 # Tautulli
 		if (( ${aSOFTWARE_INSTALL_STATE[$software_id]} == -1 )); then
 
@@ -14086,7 +14203,8 @@ If no WireGuard (auto)start is included, but you require it, please do the follo
 				G_EXEC rm /etc/systemd/system/haproxy.service
 			fi
 			[[ -d '/etc/systemd/system/haproxy.service.d' ]] && G_EXEC rm -R /etc/systemd/system/haproxy.service.d
-			G_EXEC rm -Rf /{etc,var/lib,/usr/local/{doc,sbin}}/haproxy /usr/local/share/man/man1/haproxy.1 /etc/systemd/system/haproxy.service.d
+			G_EXEC rm -Rf /{etc,var/lib,/usr/local/{doc,sbin}}/haproxy /usr/local/share/man/man1/haproxy.1
+			[[ -d '/usr/local/share/man/man1' ]] && G_EXEC rmdir -p --ignore-fail-on-non-empty /usr/local/share/man/man1
 
 		fi
 
@@ -14233,6 +14351,7 @@ If no WireGuard (auto)start is included, but you require it, please do the follo
 
 			Banner_Uninstalling
 			G_AGP openvpn
+			[[ -d '/etc/systemd/system/openvpn.service.d' ]] && G_EXEC rm -R /etc/systemd/system/openvpn.service.d
 			[[ -d '/etc/openvpn' ]] && G_EXEC rm -R /etc/openvpn
 			[[ -f '/etc/sysctl.d/dietpi-openvpn.conf' ]] && G_EXEC rm /etc/sysctl.d/dietpi-openvpn.conf
 
@@ -14247,6 +14366,19 @@ If no WireGuard (auto)start is included, but you require it, please do the follo
 			[[ -d '/etc/systemd/system/wg-quick@wg0.service.d' ]] && G_EXEC rm -R /etc/systemd/system/wg-quick@wg0.service.d
 			[[ -f '/etc/apt/sources.list.d/dietpi-wireguard.list' ]] && G_EXEC rm /etc/apt/sources.list.d/dietpi-wireguard.list
 			[[ -f '/etc/apt/preferences.d/dietpi-wireguard' ]] && G_EXEC rm /etc/apt/preferences.d/dietpi-wireguard
+
+		fi
+
+		software_id=58 # Tailscale
+		if (( ${aSOFTWARE_INSTALL_STATE[$software_id]} == -1 )); then
+
+			Banner_Uninstalling
+			G_AGP tailscale
+			[[ -d '/etc/systemd/system/tailscale.service.d' ]] && G_EXEC rm -R /etc/systemd/system/tailscale.service.d
+			[[ -d '/var/lib/tailscale' ]] && G_EXEC rm -R /var/lib/tailscale
+			[[ -f '/etc/sysctl.d/dietpi-tailscale.conf' ]] && G_EXEC rm /etc/sysctl.d/dietpi-tailscale.conf
+			[[ -f '/etc/apt/sources.list.d/tailscale.list' ]] && G_EXEC rm /etc/apt/sources.list.d/dietpi-tailscale.list
+			[[ -f '/etc/apt/trusted.gpg.d/dietpi-tailscale.gpg' ]] && G_EXEC rm /etc/apt/trusted.gpg.d/dietpi-tailscale.gpg
 
 		fi
 
