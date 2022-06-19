@@ -321,6 +321,7 @@ Links to hardware and software manufacturers, sources and build instructions use
 - [HAProxy](https://github.com/haproxy/haproxy)
 - [Prometheus Node Exporter](https://github.com/prometheus/node_exporter)
 - [Prometheus RPi Exporter](https://github.com/fahlke/raspberrypi_exporter)
+- [Tailscale](https://github.com/tailscale/tailscale)
 
 ---
 
