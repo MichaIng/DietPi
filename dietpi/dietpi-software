@@ -1077,6 +1077,12 @@ Available commands:
 		aSOFTWARE_DESC[$software_id]='Official lightweight DietPi web interface (Rust)'
 		aSOFTWARE_CATX[$software_id]=8
 		aSOFTWARE_DOCS[$software_id]='https://dietpi.com/docs/software/system_stats/#dietpi-dashboard'
+		#------------------
+		software_id=99
+		aSOFTWARE_NAME[$software_id]='Prometheus Node Exporter'
+		aSOFTWARE_DESC[$software_id]='Prometheus exporter for hardware and OS metrics'
+		aSOFTWARE_CATX[$software_id]=8
+		aSOFTWARE_DOCS[$software_id]='https://dietpi.com/docs/software/system_stats/#prometheus_node_exporter'
 
 		# Remote Access
 		#--------------------------------------------------------------------------------
@@ -2229,7 +2235,7 @@ _EOF_
 	Create_Required_Dirs(){
 
 		G_EXEC mkdir -p /mnt/dietpi_userdata/{Music,Pictures,Video,downloads} /var/www /opt /usr/local/bin
-		G_EXEC chown dietpi:dietpi /mnt/dietpi_userdata/{Music,Pictures,Video,downloads}
+		getent passwd dietpi > /dev/null && G_EXEC chown dietpi:dietpi /mnt/dietpi_userdata/{Music,Pictures,Video,downloads}
 		G_EXEC chmod 0775 /mnt/dietpi_userdata/{Music,Pictures,Video,downloads}
 
 	}
@@ -2238,7 +2244,7 @@ _EOF_
 
 		[[ -f '/mnt/dietpi_userdata/Music/fourdee_tech.ogg' ]] && return
 		G_EXEC curl -sSfL 'https://dietpi.com/downloads/audio/fourdee_tech.ogg' -o /mnt/dietpi_userdata/Music/fourdee_tech.ogg
-		G_EXEC chown dietpi:dietpi /mnt/dietpi_userdata/Music/fourdee_tech.ogg
+		getent passwd dietpi > /dev/null && G_EXEC chown dietpi:dietpi /mnt/dietpi_userdata/Music/fourdee_tech.ogg
 		G_EXEC chmod 0664 /mnt/dietpi_userdata/Music/fourdee_tech.ogg
 
 	}
@@ -2959,7 +2965,8 @@ unix_socket_directories = '/run/postgresql'" > "$i/00dietpi.conf"
 			# Allow dietpi user and audio group members to manage library
 			[[ -f '/mnt/dietpi_userdata/beets/library.db' ]] || > /mnt/dietpi_userdata/beets/library.db
 			[[ -f '/mnt/dietpi_userdata/beets/state.pickle' ]] || > /mnt/dietpi_userdata/beets/state.pickle
-			G_EXEC chown -R dietpi:audio /mnt/dietpi_userdata/beets
+			# shellcheck disable=SC2015
+			getent passwd dietpi > /dev/null && G_EXEC chown -R dietpi:audio /mnt/dietpi_userdata/beets || G_EXEC chgrp -R audio /mnt/dietpi_userdata/beets
 			G_EXEC chmod -R g+w /mnt/dietpi_userdata/beets
 
 			# Load global beets config in all interactive bash shells
@@ -3432,6 +3439,57 @@ WantedBy=multi-user.target
 _EOF_
 			# Service needs to be started by systemd, as dietpi-services must not control it to prevent it from stopping during software installs done via dashboard itself.
 			aSTART_SERVICES+=('dietpi-dashboard')
+
+		fi
+
+		software_id=99 # Prometheus Node Exporter
+		if (( ${aSOFTWARE_INSTALL_STATE[$software_id]} == 1 )); then
+
+			Banner_Installing
+
+			case $G_HW_ARCH_NAME in
+				'armv6l') local arch='armv6';;
+				'armv7l') local arch='armv7';;
+				'aarch64') local arch='arm64';;
+				*) local arch='amd64';;
+			esac
+
+			# Download binary
+			Download_Install "$(curl -sSfL 'https://api.github.com/repos/prometheus/node_exporter/releases/latest' | mawk -F\" "/\"browser_download_url\": \".*node_exporter-.*.linux-$arch.tar.gz\"/{print \$4}")"
+			[[ -d '/opt/node_exporter' ]] || G_EXEC mkdir /opt/node_exporter
+			G_EXEC cp --preserve=mode node_exporter*/node_exporter /opt/node_exporter/
+			G_EXEC_HOHALT=1 G_EXEC rm -R node_exporter*
+
+			# User
+			Create_User node_exporter
+
+			# Services
+			cat << '_EOF_' > /etc/systemd/system/node_exporter.service
+[Unit]
+Description=Prometheus Node Exporter (DietPi)
+Documentation=https://prometheus.io/docs/guides/node-exporter/
+
+[Service]
+User=node_exporter
+RuntimeDirectory=node_exporter
+ExecStart=/opt/node_exporter/node_exporter --log.level=warn --collector.textfile.directory=/run/node_exporter
+
+[Install]
+WantedBy=multi-user.target
+_EOF_
+			# RPi: Install raspberrypi_exporter
+			if (( $G_HW_MODEL < 10 ))
+			then
+				Download_Install 'https://github.com/fahlke/raspberrypi_exporter/archive/master.tar.gz'
+				G_CONFIG_INJECT 'ConditionPathExists=' 'ConditionPathExists=/run/node_exporter' raspberrypi_exporter-master/raspberrypi_exporter.service '^Wants='
+				G_CONFIG_INJECT 'ExecStart=' 'ExecStart=/opt/node_exporter/raspberrypi_exporter' raspberrypi_exporter-master/raspberrypi_exporter.service
+				G_CONFIG_INJECT 'METRICS_FILE=' 'METRICS_FILE='\''/run/node_exporter/raspberrypi-metrics.prom'\' raspberrypi_exporter-master/raspberrypi_exporter
+
+				G_EXEC mv {raspberrypi_exporter-master,/opt/node_exporter}/raspberrypi_exporter
+				G_EXEC mv {raspberrypi_exporter-master,/etc/systemd/system}/raspberrypi_exporter.service
+				G_EXEC mv {raspberrypi_exporter-master,/etc/systemd/system}/raspberrypi_exporter.timer
+				G_EXEC_HOHALT=1 G_EXEC rm -R raspberrypi_exporter-master
+			fi
 
 		fi
 
@@ -11483,7 +11541,7 @@ _EOF_
 			/boot/dietpi/func/dietpi-set_hardware soundcard googlevoicehat-soundcard
 
 			# Permissions
-			G_EXEC chown -R dietpi:dietpi /mnt/dietpi_userdata/voice-recognizer-raspi
+			getent passwd dietpi > /dev/null && G_EXEC chown -R dietpi:dietpi /mnt/dietpi_userdata/voice-recognizer-raspi
 
 		fi
 
@@ -13546,6 +13604,34 @@ If no WireGuard (auto)start is included, but you require it, please do the follo
 			fi
 			[[ -d '/etc/systemd/system/dietpi-dashboard.service.d' ]] && G_EXEC rm -R /etc/systemd/system/dietpi-dashboard.service.d
 			[[ -d '/opt/dietpi-dashboard' ]] && G_EXEC rm -R /opt/dietpi-dashboard
+
+		fi
+
+		software_id=99 # Prometheus Node Exporter
+		if (( ${aSOFTWARE_INSTALL_STATE[$software_id]} == -1 )); then
+
+			Banner_Uninstalling
+			if [[ -f '/etc/systemd/system/raspberrypi_exporter.timer' ]]
+			then
+				G_EXEC systemctl disable --now raspberrypi_exporter.timer
+				G_EXEC rm /etc/systemd/system/raspberrypi_exporter.timer
+			fi
+			[[ -d '/etc/systemd/system/raspberrypi_exporter.timer.d' ]] && G_EXEC rm -R /etc/systemd/system/raspberrypi_exporter.timer.d
+			if [[ -f '/etc/systemd/system/raspberrypi_exporter.service' ]]
+			then
+				G_EXEC systemctl disable --now raspberrypi_exporter.service
+				G_EXEC rm /etc/systemd/system/raspberrypi_exporter.service
+			fi
+			[[ -d '/etc/systemd/system/raspberrypi_exporter.service.d' ]] && G_EXEC rm -R /etc/systemd/system/raspberrypi_exporter.service.d
+			if [[ -f '/etc/systemd/system/node_exporter.service' ]]
+			then
+				G_EXEC systemctl disable --now node_exporter.service
+				G_EXEC rm /etc/systemd/system/node_exporter.service
+			fi
+			[[ -d '/etc/systemd/system/node_exporter.service.d' ]] && G_EXEC rm -R /etc/systemd/system/node_exporter.service.d
+			[[ -d '/opt/node_exporter' ]] && G_EXEC rm -R /opt/node_exporter
+			getent passwd node_exporter > /dev/null && G_EXEC userdel node_exporter
+			getent group node_exporter > /dev/null && G_EXEC groupdel node_exporter
 
 		fi
 
