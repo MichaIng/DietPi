@@ -818,13 +818,19 @@ Available commands:
 		aSOFTWARE_DESC[$software_id]='Unofficial Bitwarden password manager server written in Rust'
 		aSOFTWARE_CATX[$software_id]=4
 		aSOFTWARE_DOCS[$software_id]='https://dietpi.com/docs/software/cloud/#vaultwarden'
-		aSOFTWARE_DEPS[$software_id]='16 87'
+		aSOFTWARE_DEPS[$software_id]='87'
 		#------------------
 		software_id=198
 		aSOFTWARE_NAME[$software_id]='File Browser'
 		aSOFTWARE_DESC[$software_id]='web based file manager'
 		aSOFTWARE_CATX[$software_id]=4
 		aSOFTWARE_DOCS[$software_id]='https://dietpi.com/docs/software/cloud/#filebrowser'
+		#------------------
+		software_id=202
+		aSOFTWARE_NAME[$software_id]='Rclone'
+		aSOFTWARE_DESC[$software_id]='Rclone syncs your files to cloud storage'
+		aSOFTWARE_CATX[$software_id]=4
+		aSOFTWARE_DOCS[$software_id]='https://dietpi.com/docs/software/cloud/#rclone'
 
 		# Gaming & Emulation
 		#--------------------------------------------------------------------------------
@@ -1077,6 +1083,12 @@ Available commands:
 		aSOFTWARE_DESC[$software_id]='Official lightweight DietPi web interface (Rust)'
 		aSOFTWARE_CATX[$software_id]=8
 		aSOFTWARE_DOCS[$software_id]='https://dietpi.com/docs/software/system_stats/#dietpi-dashboard'
+		#------------------
+		software_id=99
+		aSOFTWARE_NAME[$software_id]='Prometheus Node Exporter'
+		aSOFTWARE_DESC[$software_id]='Prometheus exporter for hardware and OS metrics'
+		aSOFTWARE_CATX[$software_id]=8
+		aSOFTWARE_DOCS[$software_id]='https://dietpi.com/docs/software/system_stats/#prometheus_node_exporter'
 
 		# Remote Access
 		#--------------------------------------------------------------------------------
@@ -1387,7 +1399,20 @@ Available commands:
 		aSOFTWARE_CATX[$software_id]=15
 		aSOFTWARE_DOCS[$software_id]='https://dietpi.com/docs/software/vpn/#pivpn'
 		aSOFTWARE_DEPS[$software_id]='17'
-		aSOFTWARE_INTERACTIVE[$software_id]=1
+		# Require interactive install if no config file containing options for unattended install is present
+		[[ -f '/boot/unattended_pivpn.conf' ]] || aSOFTWARE_INTERACTIVE[$software_id]=1
+		#------------------
+		software_id=58
+		aSOFTWARE_NAME[$software_id]='Tailscale'
+		aSOFTWARE_DESC[$software_id]='Zero config VPN'
+		aSOFTWARE_CATX[$software_id]=15
+		aSOFTWARE_DOCS[$software_id]='https://dietpi.com/docs/software/vpn/#tailscale'
+		#-----------------
+		software_id=201
+		aSOFTWARE_NAME[$software_id]='ZeroTier'
+		aSOFTWARE_DESC[$software_id]='Free easy to deploy cloud-hosted VPN service'
+		aSOFTWARE_CATX[$software_id]=15
+		aSOFTWARE_DOCS[$software_id]='https://dietpi.com/docs/software/vpn/#zerotier'
 
 		# Advanced Networking
 		#--------------------------------------------------------------------------------
@@ -1410,7 +1435,6 @@ Available commands:
 		aSOFTWARE_DESC[$software_id]='high performance tcp/http load balancer'
 		aSOFTWARE_CATX[$software_id]=16
 		aSOFTWARE_DOCS[$software_id]='https://dietpi.com/docs/software/advanced_networking/#haproxy'
-		aSOFTWARE_DEPS[$software_id]='16'
 		#------------------
 		software_id=171
 		aSOFTWARE_NAME[$software_id]='frp'
@@ -2229,7 +2253,7 @@ _EOF_
 	Create_Required_Dirs(){
 
 		G_EXEC mkdir -p /mnt/dietpi_userdata/{Music,Pictures,Video,downloads} /var/www /opt /usr/local/bin
-		G_EXEC chown dietpi:dietpi /mnt/dietpi_userdata/{Music,Pictures,Video,downloads}
+		getent passwd dietpi > /dev/null && G_EXEC chown dietpi:dietpi /mnt/dietpi_userdata/{Music,Pictures,Video,downloads}
 		G_EXEC chmod 0775 /mnt/dietpi_userdata/{Music,Pictures,Video,downloads}
 
 	}
@@ -2238,7 +2262,7 @@ _EOF_
 
 		[[ -f '/mnt/dietpi_userdata/Music/fourdee_tech.ogg' ]] && return
 		G_EXEC curl -sSfL 'https://dietpi.com/downloads/audio/fourdee_tech.ogg' -o /mnt/dietpi_userdata/Music/fourdee_tech.ogg
-		G_EXEC chown dietpi:dietpi /mnt/dietpi_userdata/Music/fourdee_tech.ogg
+		getent passwd dietpi > /dev/null && G_EXEC chown dietpi:dietpi /mnt/dietpi_userdata/Music/fourdee_tech.ogg
 		G_EXEC chmod 0664 /mnt/dietpi_userdata/Music/fourdee_tech.ogg
 
 	}
@@ -2462,12 +2486,12 @@ _EOF_
 	# Start a service and wait for a default config file to be created.
 	Create_Config()
 	{
-		local file=$1 service=$2
-		local timeout=${3:-25} # Optional
+		local file=$1 service=$2 # Config file path and service name
+		local timeout=${3:-25} # Optional [s]
 		local output=$4 pid # Optional, if timeout is set, hence for startups which may take long so that showing some process becomes reasonable
 		# shellcheck disable=SC2154
-		local content=$CREATE_CONFIG_CONTENT # Optional
-		unset -v CREATE_CONFIG_CONTENT
+		local content=$CREATE_CONFIG_CONTENT stop=$CC_STOP # Optional required config file content and whether to stop service afterwards (!= 0)
+		unset -v CREATE_CONFIG_CONTENT CC_STOP
 
 		# If file exists already and contains required content, continue install
 		[[ -f $file ]] && { [[ ! $content ]] || grep -q "$content" "$file"; } && return 0
@@ -2494,9 +2518,12 @@ _EOF_
 		[[ $output ]] && { kill "$pid"; wait "$pid"; } 2> /dev/null
 
 		# Stop service
-		G_SLEEP 1
-		G_EXEC_NOHALT=1 G_EXEC systemctl stop "$service"
-		G_SLEEP 1
+		if [[ $stop != 0 ]]
+		then
+			G_SLEEP 1
+			G_EXEC_NOHALT=1 G_EXEC systemctl stop "$service"
+			G_SLEEP 1
+		fi
 
 		# If file exists already and contains required content, continue install
 		if [[ -f $file ]] && { [[ ! $content ]] || grep -q "$content" "$file"; }
@@ -2549,6 +2576,14 @@ _EOF_
 				# Radxa Zero
 				[[ -f '/boot/uEnv.txt' ]] && G_CONFIG_INJECT 'docker_optimizations=' 'docker_optimizations=on' /boot/uEnv.txt
 			fi
+		}
+
+		# $1: Software name, so config can be created and removed per-software
+		Enable_IP_forwarding()
+		{
+			G_DIETPI-NOTIFY 2 'Enabling IP forwarding to allow access across network interfaces'
+			echo -e 'net.ipv4.ip_forward=1\nnet.ipv6.conf.default.accept_ra=2\nnet.ipv6.conf.all.accept_ra=2\nnet.ipv6.conf.default.forwarding=1\nnet.ipv6.conf.all.forwarding=1' > "/etc/sysctl.d/dietpi-$1.conf"
+			sysctl net.ipv4.ip_forward=1 net.ipv6.conf.default.accept_ra=2 net.ipv6.conf.all.accept_ra=2 net.ipv6.conf.default.forwarding=1 net.ipv6.conf.all.forwarding=1
 		}
 
 		software_id=5 # ALSA
@@ -2959,7 +2994,8 @@ unix_socket_directories = '/run/postgresql'" > "$i/00dietpi.conf"
 			# Allow dietpi user and audio group members to manage library
 			[[ -f '/mnt/dietpi_userdata/beets/library.db' ]] || > /mnt/dietpi_userdata/beets/library.db
 			[[ -f '/mnt/dietpi_userdata/beets/state.pickle' ]] || > /mnt/dietpi_userdata/beets/state.pickle
-			G_EXEC chown -R dietpi:audio /mnt/dietpi_userdata/beets
+			# shellcheck disable=SC2015
+			getent passwd dietpi > /dev/null && G_EXEC chown -R dietpi:audio /mnt/dietpi_userdata/beets || G_EXEC chgrp -R audio /mnt/dietpi_userdata/beets
 			G_EXEC chmod -R g+w /mnt/dietpi_userdata/beets
 
 			# Load global beets config in all interactive bash shells
@@ -3435,6 +3471,57 @@ _EOF_
 
 		fi
 
+		software_id=99 # Prometheus Node Exporter
+		if (( ${aSOFTWARE_INSTALL_STATE[$software_id]} == 1 )); then
+
+			Banner_Installing
+
+			case $G_HW_ARCH_NAME in
+				'armv6l') local arch='armv6';;
+				'armv7l') local arch='armv7';;
+				'aarch64') local arch='arm64';;
+				*) local arch='amd64';;
+			esac
+
+			# Download binary
+			Download_Install "$(curl -sSfL 'https://api.github.com/repos/prometheus/node_exporter/releases/latest' | mawk -F\" "/\"browser_download_url\": \".*node_exporter-.*.linux-$arch.tar.gz\"/{print \$4}")"
+			[[ -d '/opt/node_exporter' ]] || G_EXEC mkdir /opt/node_exporter
+			G_EXEC cp --preserve=mode node_exporter*/node_exporter /opt/node_exporter/
+			G_EXEC_HOHALT=1 G_EXEC rm -R node_exporter*
+
+			# User
+			Create_User node_exporter
+
+			# Services
+			cat << '_EOF_' > /etc/systemd/system/node_exporter.service
+[Unit]
+Description=Prometheus Node Exporter (DietPi)
+Documentation=https://prometheus.io/docs/guides/node-exporter/
+
+[Service]
+User=node_exporter
+RuntimeDirectory=node_exporter
+ExecStart=/opt/node_exporter/node_exporter --log.level=warn --collector.textfile.directory=/run/node_exporter
+
+[Install]
+WantedBy=multi-user.target
+_EOF_
+			# RPi: Install raspberrypi_exporter
+			if (( $G_HW_MODEL < 10 ))
+			then
+				Download_Install 'https://github.com/fahlke/raspberrypi_exporter/archive/master.tar.gz'
+				G_CONFIG_INJECT 'ConditionPathExists=' 'ConditionPathExists=/run/node_exporter' raspberrypi_exporter-master/raspberrypi_exporter.service '^Wants='
+				G_CONFIG_INJECT 'ExecStart=' 'ExecStart=/opt/node_exporter/raspberrypi_exporter' raspberrypi_exporter-master/raspberrypi_exporter.service
+				G_CONFIG_INJECT 'METRICS_FILE=' 'METRICS_FILE='\''/run/node_exporter/raspberrypi-metrics.prom'\' raspberrypi_exporter-master/raspberrypi_exporter
+
+				G_EXEC mv {raspberrypi_exporter-master,/opt/node_exporter}/raspberrypi_exporter
+				G_EXEC mv {raspberrypi_exporter-master,/etc/systemd/system}/raspberrypi_exporter.service
+				G_EXEC mv {raspberrypi_exporter-master,/etc/systemd/system}/raspberrypi_exporter.timer
+				G_EXEC_HOHALT=1 G_EXEC rm -R raspberrypi_exporter-master
+			fi
+
+		fi
+
 		software_id=44 # Transmission
 		if (( ${aSOFTWARE_INSTALL_STATE[$software_id]} == 1 )); then
 
@@ -3519,7 +3606,7 @@ _EOF_
 			then
 				dps_index=$software_id Download_Install 'conf' /etc/samba/smb.conf
 				G_CONFIG_INJECT 'max connections =' "max connections = $(( $G_HW_CPU_CORES * 2 ))" /etc/samba/smb.conf
-			fi				
+			fi
 
 			G_AGI samba
 			G_EXEC systemctl stop nmbd smbd
@@ -7218,13 +7305,13 @@ _EOF_
 
 			Banner_Installing
 
-			local version='2.5.1' # https://www.haproxy.org/download/
-			aDEPS=('libpcre3-dev' 'libssl-dev' 'zlib1g-dev' 'libsystemd-dev')
+			local version='2.6.0' # https://www.haproxy.org/download/
+			aDEPS=('make' 'gcc' 'libpcre3-dev' 'libssl-dev' 'zlib1g-dev' 'libsystemd-dev')
 			Download_Install "https://www.haproxy.org/download/${version%.*}/src/haproxy-$version.tar.gz"
 
 			# Compile
 			G_EXEC cd "haproxy-$version"
-			G_EXEC_OUTPUT=1 G_EXEC make -j "$G_HW_CPU_CORES" TARGET=linux-glibc CPU=generic USE_PCRE=1 USE_OPENSSL=1 USE_ZLIB=1 USE_SYSTEMD=1 ADDLIB='-Wl,--no-as-needed -lgcc_s -Wl,--as-needed' DEBUG_CFLAGS='-g0 -O3' LDFLAGS='-Wl,-z,relro -Wl,-z,now -Wl,--as-needed'
+			G_EXEC_OUTPUT=1 G_EXEC make -j "$G_HW_CPU_CORES" TARGET=linux-glibc USE_PCRE=1 USE_OPENSSL=1 USE_ZLIB=1 USE_SYSTEMD=1 USE_PROMEX=1 DEBUG_CFLAGS='-g0 -O3' LDFLAGS='-Wl,-z,relro -Wl,-z,now -Wl,--as-needed'
 			# Strip binary size
 			G_EXEC strip --remove-section=.comment --remove-section=.note haproxy
 			# Install
@@ -7235,18 +7322,17 @@ _EOF_
 			G_EXEC mv {,/etc/systemd/system/}haproxy.service
 			# - Error pages
 			G_EXEC cd "$G_WORKING_DIR"
-			G_EXEC mkdir -p /etc/haproxy/errors
+			[[ -d '/etc/haproxy/errors' ]] || G_EXEC mkdir -p /etc/haproxy/errors
 			G_EXEC mv "haproxy-$version/examples/errorfiles/"*.http /etc/haproxy/errors/
 			# Clean up
 			G_EXEC_NOHALT=1 G_EXEC rm -R "haproxy-$version"
 
 			# Jail directory
-			G_EXEC mkdir -p /var/lib/haproxy
+			[[ -d '/var/lib/haproxy' ]] || G_EXEC mkdir /var/lib/haproxy
 
 			# Config
-			[[ -f '/etc/haproxy/haproxy.cfg' ]] || cat << '_EOF_' > /etc/haproxy/haproxy.cfg
+			[[ -f '/etc/haproxy/haproxy.cfg' ]] || cat << _EOF_ > /etc/haproxy/haproxy.cfg
 global
-
 	maxconn 64
 	# Jail directory
 	chroot /var/lib/haproxy
@@ -7261,11 +7347,15 @@ global
 	crt-base /etc/ssl/private
 
 	# Default ciphers to use on SSL-enabled listening sockets.
-	# For more information, see ciphers(1SSL).
-	ssl-default-bind-ciphers kEECDH+aRSA+AES:kRSA+AES:+AES256:RC4-SHA:!kEDH:!LOW:!EXP:!MD5:!aNULL:!eNULL
+	ssl-default-bind-ciphers ECDHE-ECDSA-AES128-GCM-SHA256:ECDHE-RSA-AES128-GCM-SHA256:ECDHE-ECDSA-AES256-GCM-SHA384:ECDHE-RSA-AES256-GCM-SHA384:ECDHE-ECDSA-CHACHA20-POLY1305:ECDHE-RSA-CHACHA20-POLY1305:DHE-RSA-AES128-GCM-SHA256:DHE-RSA-AES256-GCM-SHA384
+	ssl-default-bind-ciphersuites TLS_AES_128_GCM_SHA256:TLS_AES_256_GCM_SHA384:TLS_CHACHA20_POLY1305_SHA256
+	ssl-default-bind-options prefer-client-ciphers no-sslv3 no-tlsv10 no-tlsv11 no-tls-tickets
+
+	ssl-default-server-ciphers ECDHE-ECDSA-AES128-GCM-SHA256:ECDHE-RSA-AES128-GCM-SHA256:ECDHE-ECDSA-AES256-GCM-SHA384:ECDHE-RSA-AES256-GCM-SHA384:ECDHE-ECDSA-CHACHA20-POLY1305:ECDHE-RSA-CHACHA20-POLY1305:DHE-RSA-AES128-GCM-SHA256:DHE-RSA-AES256-GCM-SHA384
+	ssl-default-server-ciphersuites TLS_AES_128_GCM_SHA256:TLS_AES_256_GCM_SHA384:TLS_CHACHA20_POLY1305_SHA256
+	ssl-default-server-options no-sslv3 no-tlsv10 no-tlsv11 no-tls-tickets
 
 defaults
-
 	log     global
 	mode    http
 	option  httplog
@@ -7282,32 +7372,32 @@ defaults
 	errorfile 504 /etc/haproxy/errors/504.http
 
 frontend localnodes
-
 	bind *:80
 	mode http
 	default_backend nodes
 
 backend nodes
-
 	mode http
 	balance roundrobin
 	option forwardfor
 	http-request set-header X-Forwarded-Port %[dst_port]
 	http-request add-header X-Forwarded-Proto https if { ssl_fc }
-	option httpchk HEAD / HTTP/1.1\r\nHost:localhost
+	option httpchk HEAD / HTTP/1.1
+	http-check send meth HEAD uri / ver HTTP/1.1 hdr host localhost
 	server web01 127.0.0.1:9000 check
 	server web02 127.0.0.1:9001 check
 	server web03 127.0.0.1:9002 check
 
 # Admin web page
-
 	listen stats
 	bind *:1338
 	stats enable
 	stats uri /
 	stats hide-version
-	stats auth admin:dietpi
+	stats auth admin:$GLOBAL_PW
 _EOF_
+			G_EXEC chmod 0600 /etc/haproxy/haproxy.cfg
+
 		fi
 
 		software_id=35 # Logitech Media Server
@@ -7552,10 +7642,10 @@ case "$1" in
 		fi
 	;;
 
-        *)
-                echo "[FAILED] Invalid command ($1), please use \"start\" or \"stop\""
-                exit 1
-        ;;
+	*)
+		echo "[FAILED] Invalid command ($1), please use \"start\" or \"stop\""
+		exit 1
+	;;
 
 esac
 
@@ -7970,6 +8060,25 @@ _EOF_
 
 		fi
 
+		software_id=58 # Tailscale
+		if (( ${aSOFTWARE_INSTALL_STATE[$software_id]} == 1 )); then
+
+			Banner_Installing
+
+			# APT key
+			G_EXEC curl -sSLf "https://pkgs.tailscale.com/stable/debian/$G_DISTRO_NAME.noarmor.gpg" -o /etc/apt/trusted.gpg.d/dietpi-tailscale.gpg
+
+			# APT list
+			G_EXEC eval "echo 'deb https://pkgs.tailscale.com/stable/debian $G_DISTRO_NAME main' > /etc/apt/sources.list.d/dietpi-tailscale.list"
+			G_AGUP
+
+			# APT package
+			G_AGI tailscale
+
+			Enable_IP_forwarding tailscale
+
+		fi
+
 		software_id=97 # OpenVPN Server
 		if (( ${aSOFTWARE_INSTALL_STATE[$software_id]} == 1 )); then
 
@@ -8093,9 +8202,7 @@ _EOF_
 
 			done
 
-			# Enable IP forwarding
-			echo -e 'net.ipv4.ip_forward=1\nnet.ipv6.conf.default.accept_ra=2\nnet.ipv6.conf.all.accept_ra=2\nnet.ipv6.conf.default.forwarding=1\nnet.ipv6.conf.all.forwarding=1' > /etc/sysctl.d/dietpi-openvpn.conf
-			sysctl net.ipv4.ip_forward=1 net.ipv6.conf.default.accept_ra=2 net.ipv6.conf.all.accept_ra=2 net.ipv6.conf.default.forwarding=1 net.ipv6.conf.all.forwarding=1
+			Enable_IP_forwarding openvpn
 
 			# ToDo: iptables NAT rules: Those need to run via pre-up and post-down rules when the OpenSSH server starts
 			#iptables -A FORWARD -i tun0 -j ACCEPT
@@ -8113,16 +8220,47 @@ _EOF_
 			G_EXEC curl -sSfL 'https://raw.githubusercontent.com/pivpn/pivpn/master/auto_install/install.sh' -o install.bash
 			G_EXEC chmod +x install.bash
 			G_DIETPI-NOTIFY 2 'Preventing reboot from within PiVPN installer'
-			G_EXEC sed -i '/shutdown[[:space:]]/d' install.bash
+			G_EXEC sed -i '/^[[:blank:]]*if (whiptail --title "Reboot"/,/^[[:blank:]]fi$/d' install.bash
 			G_DIETPI-NOTIFY 2 'Preventing install of unattended-upgrades'
-			G_EXEC sed -i 's/^[[:blank:]]*UNATTUPG=[[:digit:]]/UNATTUPG=0/' install.bash
+			G_EXEC sed -i '/^[[:blank:]]*askUnattendedUpgrades$/c\UNATTUPG=0' install.bash
+
+			# Unattended install
+			local options=()
+			if [[ -f '/boot/unattended_pivpn.conf' ]]
+			then
+				G_CONFIG_INJECT 'UNATTUPG=[[:digit:]]' 'UNATTUPG=0' /boot/unattended_pivpn.conf
+				options=('--unattended' '/boot/unattended_pivpn.conf')
+			fi
 
 			# APT deps
-			G_AGI dnsutils net-tools bsdmainutils iptables-persistent # https://github.com/pivpn/pivpn/blob/master/auto_install/install.sh#L37
+			G_AGI dnsutils grepcidr net-tools bsdmainutils iptables-persistent # https://github.com/pivpn/pivpn/blob/master/auto_install/install.sh#L37
 			Configure_iptables
 
-			G_EXEC_OUTPUT=1 G_EXEC_NOEXIT=1 G_EXEC ./install.bash || aSOFTWARE_INSTALL_STATE[$software_id]=0
+			G_EXEC_OUTPUT=1 G_EXEC_NOEXIT=1 G_EXEC ./install.bash "${options[@]}" || aSOFTWARE_INSTALL_STATE[$software_id]=0
 			G_EXEC_NOHALT=1 G_EXEC rm install.bash
+			[[ -f '/boot/unattended_pivpn.conf' ]] && G_EXEC_NOHALT=1 G_EXEC mv /boot/unattended_pivpn.conf{,.applied}
+
+		fi
+
+		software_id=201 # ZeroTier
+		if (( ${aSOFTWARE_INSTALL_STATE[$software_id]} == 1 )); then
+
+			Banner_Installing
+
+			# APT key: Download from GitHub instead of https://download.zerotier.com/contact%40zerotier.com.gpg for enhanced protection against corrupted download server
+			G_EXEC eval 'curl -sSLf '\''https://raw.githubusercontent.com/zerotier/ZeroTierOne/master/doc/contact%40zerotier.com.gpg'\'' | gpg --dearmor -o /etc/apt/trusted.gpg.d/dietpi-zerotier.gpg --yes'
+
+			# APT list
+			G_EXEC eval "echo 'deb https://download.zerotier.com/debian/$G_DISTRO_NAME/ $G_DISTRO_NAME main' > /etc/apt/sources.list.d/dietpi-zerotier.list"
+			G_AGUP
+
+			# APT package
+			G_AGI zerotier-one
+
+			Remove_SysV zerotier-one
+
+			# Wait for and print ZeroTier address
+			CC_STOP=0 Create_Config '/var/lib/zerotier-one/identity.secret' 'zerotier-one' && G_DIETPI-NOTIFY 0 "Your ZeroTier address is: $(mawk -F: '{print $1}' /var/lib/zerotier-one/identity.public)"
 
 		fi
 
@@ -8243,9 +8381,7 @@ _EOF_
 			# Enable access point config
 			echo 'DAEMON_CONF="/etc/hostapd/hostapd.conf"' > /etc/default/hostapd
 
-			# Enable IP forwarding
-			echo -e 'net.ipv4.ip_forward=1\nnet.ipv6.conf.default.forwarding=1\nnet.ipv6.conf.all.forwarding=1' > /etc/sysctl.d/dietpi-wifihotspot.conf
-			sysctl net.ipv4.ip_forward=1 net.ipv6.conf.default.forwarding=1 net.ipv6.conf.all.forwarding=1
+			Enable_IP_forwarding wifihotspot
 
 			# Enable iptables NAT rules
 			iptables -t nat -A POSTROUTING -s 192.168.42.0/24 -o "$eth_iface" -j MASQUERADE
@@ -8600,7 +8736,7 @@ location = /.well-known/caldav  { return 301 /baikal/html/dav.php; }' > /etc/ngi
 
 			fi
 
-			local fallback_url="https://github.com/MediaBrowser/Emby.Releases/releases/download/4.6.7.0/emby-server-deb_4.6.7.0_$arch.deb"
+			local fallback_url="https://github.com/MediaBrowser/Emby.Releases/releases/download/4.7.3.0/emby-server-deb_4.7.3.0_$arch.deb"
 			Download_Install "$(curl -sSfL 'https://api.github.com/repos/MediaBrowser/Emby.Releases/releases/latest' | mawk -F\" "/\"browser_download_url\": .*\/emby-server-deb_[^\"\/]*_$arch\.deb\"/{print \$4}")"
 			G_EXEC systemctl stop emby-server
 
@@ -8800,7 +8936,7 @@ _EOF_
 					arch='amd64'
 				fi
 
-				local fallback_url="https://github.com/gogs/gogs/releases/download/v0.12.7/gogs_0.12.7_linux_$arch.tar.gz"
+				local fallback_url="https://github.com/gogs/gogs/releases/download/v0.12.9/gogs_0.12.9_linux_$arch.tar.gz"
 				url=$(curl -sSfL 'https://api.github.com/repos/gogs/gogs/releases/latest' | mawk -F\" "/\"browser_download_url\": \".*\/gogs_[^\"\/]*_linux_$arch.tar.gz\"/{print \$4}")
 			fi
 
@@ -8993,7 +9129,7 @@ _EOF_
 					[[ -e $i ]] || continue
 					[[ -e ruTorrent-${version#v}/plugins/theme/themes/${i#/var/www/rutorrent/plugins/theme/themes/} ]] && continue
 					G_EXEC cp -a "$i" "ruTorrent-${version#v}/plugins/theme/themes/"
-				done				
+				done
 
 				# Reinstall freshly with preserved configs, 3rd party plugins and themes
 				G_EXEC rm -R /var/www/rutorrent
@@ -9823,7 +9959,7 @@ _EOF_
 			Banner_Installing
 
 			# Dependencies: https://github.com/dani-garcia/vaultwarden/wiki/Building-binary#dependencies
-			aDEPS=('pkg-config' 'libssl-dev')
+			aDEPS=('gcc' 'libc6-dev' 'pkg-config' 'libssl-dev')
 
 			# Download
 			local version=$(curl -sSfL 'https://api.github.com/repos/dani-garcia/vaultwarden/releases/latest' | mawk -F\" '/"tag_name": /{print $4}')
@@ -9871,7 +10007,7 @@ _EOF_
 			HOME='/root'
 
 			# Install web vault
-			local fallback_url='https://github.com/dani-garcia/bw_web_builds/releases/download/v2.28.1/bw_web_v2.28.1.tar.gz'
+			local fallback_url='https://github.com/dani-garcia/bw_web_builds/releases/download/v2022.05.0/bw_web_v2022.05.0.tar.gz'
 			Download_Install "$(curl -sSfL 'https://api.github.com/repos/dani-garcia/bw_web_builds/releases/latest' | mawk -F\" '/"browser_download_url": .*\/bw_web_[^"\/]*\.tar\.gz"/{print $4}')" /mnt/dietpi_userdata/vaultwarden
 
 			# User
@@ -10208,27 +10344,28 @@ _EOF_
 				G_AGI "${aDEPS[@]}"
 				aDEPS=()
 			else
-				# ARMv6
-				local url=$(curl -sSfL 'https://api.github.com/repos/Radarr/Radarr/releases/latest' | mawk -F\" '/"browser_download_url": .*linux\.tar\.gz"/{print $4}')
-				local fallback_url='https://github.com/Radarr/Radarr/releases/download/v4.0.4.5922/Radarr.master.4.0.4.5922.linux.tar.gz'
+				# ARMv6: Radarr v4 does not support Mono anymore
+				if (( $G_HW_ARCH == 1 ))
+				then
+					local url='https://github.com/Radarr/Radarr/releases/download/v3.2.2.5080/Radarr.master.3.2.2.5080.linux.tar.gz'
 
 				# ARMv7
-				if (( $G_HW_ARCH == 2 ))
-				then
-					url=${url/linux/linux-core-arm}
-					fallback_url=${fallback_url/linux/linux-core-arm}
+				else
+					local url=$(curl -sSfL 'https://api.github.com/repos/Radarr/Radarr/releases/latest' | mawk -F\" '/"browser_download_url": .*linux-core-arm\.tar\.gz"/{print $4}')
+					local fallback_url='https://github.com/Radarr/Radarr/releases/download/v4.1.0.6175/Radarr.master.4.1.0.6175.linux-core-arm.tar.gz'
+				fi
 
 				# ARMv8
-				elif (( $G_HW_ARCH == 3 ))
+				if (( $G_HW_ARCH == 3 ))
 				then
-					url=${url/linux/linux-core-arm64}
-					fallback_url=${fallback_url/linux/linux-core-arm64}
+					url=${url/arm/arm64}
+					fallback_url=${fallback_url/arm/arm64}
 
 				# x86_64
 				elif (( $G_HW_ARCH == 10 ))
 				then
-					url=${url/linux/linux-core-x64}
-					fallback_url=${fallback_url/linux/linux-core-x64}
+					url=${url/arm/x64}
+					fallback_url=${fallback_url/arm/x64}
 				fi
 
 				Download_Install "$url"
@@ -10317,27 +10454,28 @@ _EOF_
 				G_AGI "${aDEPS[@]}"
 				aDEPS=()
 			else
-				# ARMv6
-				local url=$(curl -sSfL 'https://api.github.com/repos/Lidarr/Lidarr/releases/latest' | mawk -F\" '/"browser_download_url": .*linux\.tar\.gz"/{print $4}')
-				local fallback_url='https://github.com/Lidarr/Lidarr/releases/download/v0.8.1.2135/Lidarr.master.0.8.1.2135.linux.tar.gz'
+				# ARMv6: Lidarr v1 does not support Mono anymore
+				if (( $G_HW_ARCH == 1 ))
+				then
+					local url='https://github.com/Lidarr/Lidarr/releases/download/v0.8.1.2135/Lidarr.master.0.8.1.2135.linux.tar.gz'
 
 				# ARMv7
-				if (( $G_HW_ARCH == 2 ))
-				then
-					url=${url/linux/linux-core-arm}
-					fallback_url=${fallback_url/linux/linux-core-arm}
+				else
+					local url=$(curl -sSfL 'https://api.github.com/repos/Lidarr/Lidarr/releases/latest' | mawk -F\" '/"browser_download_url": .*linux-core-arm\.tar\.gz"/{print $4}')
+					local fallback_url='https://github.com/Lidarr/Lidarr/releases/download/v1.0.2.2592/Lidarr.master.1.0.2.2592.linux-core-arm.tar.gz'
+				fi
 
 				# ARMv8
-				elif (( $G_HW_ARCH == 3 ))
+				if (( $G_HW_ARCH == 3 ))
 				then
-					url=${url/linux/linux-core-arm64}
-					fallback_url=${fallback_url/linux/linux-core-arm64}
+					url=${url/arm/arm64}
+					fallback_url=${fallback_url/arm/arm64}
 
 				# x86_64
 				elif (( $G_HW_ARCH == 10 ))
 				then
-					url=${url/linux/linux-core-x64}
-					fallback_url=${fallback_url/linux/linux-core-x64}
+					url=${url/arm/x64}
+					fallback_url=${fallback_url/arm/x64}
 				fi
 
 				Download_Install "$url"
@@ -10541,7 +10679,7 @@ _EOF_
 			# Grab latest version download link
 			# - ARMv6: Requires Mono: https://github.com/Jackett/Jackett#installation-on-linux-armv6-or-below
 			local url=$(curl -sSfL 'https://api.github.com/repos/Jackett/Jackett/releases/latest' | mawk -F\" '/"browser_download_url": ".*\/Jackett\.Binaries\.Mono\.tar\.gz"/{print $4}')
-			local fallback_url='https://github.com/Jackett/Jackett/releases/download/v0.20.744/Jackett.Binaries.Mono.tar.gz'
+			local fallback_url='https://github.com/Jackett/Jackett/releases/download/v0.20.1127/Jackett.Binaries.Mono.tar.gz'
 
 			# - ARMv7
 			if (( $G_HW_ARCH == 2 ))
@@ -10680,7 +10818,7 @@ ExecStart=/mnt/dietpi_userdata/nzbget/nzbget -D
 WantedBy=multi-user.target
 _EOF_
 		fi
-		
+
 		software_id=151 # Prowlarr
 		if (( ${aSOFTWARE_INSTALL_STATE[$software_id]} == 1 ))
 		then
@@ -10706,7 +10844,7 @@ _EOF_
 			else
 				# ARMv7
 				local url=$(curl -sSfL 'https://api.github.com/repos/Prowlarr/Prowlarr/releases' | mawk -F\" '/"browser_download_url": .*linux-core-arm\.tar\.gz"/{print $4}' | head -1)
-				local fallback_url='https://github.com/Prowlarr/Prowlarr/releases/download/v0.3.0.1730/Prowlarr.develop.0.3.0.1730.linux-core-arm.tar.gz'
+				local fallback_url='https://github.com/Prowlarr/Prowlarr/releases/download/v0.4.0.1832/Prowlarr.develop.0.4.0.1832.linux-core-arm.tar.gz'
 
 				# ARMv8
 				if (( $G_HW_ARCH == 3 ))
@@ -11469,7 +11607,7 @@ _EOF_
 			/boot/dietpi/func/dietpi-set_hardware soundcard googlevoicehat-soundcard
 
 			# Permissions
-			G_EXEC chown -R dietpi:dietpi /mnt/dietpi_userdata/voice-recognizer-raspi
+			getent passwd dietpi > /dev/null && G_EXEC chown -R dietpi:dietpi /mnt/dietpi_userdata/voice-recognizer-raspi
 
 		fi
 
@@ -11603,7 +11741,12 @@ _EOF_
 
 			# APT meta package: Server, web component and FFmpeg implementation
 			G_AGI jellyfin
-			G_EXEC systemctl stop jellyfin
+			if [[ -d '/mnt/dietpi_userdata/jellyfin' || -f '/etc/jellyfin/network.xml' ]]
+			then
+				G_EXEC systemctl stop jellyfin
+			else
+				CREATE_CONFIG_CONTENT='AddPeopleQueryIndex' Create_Config '/etc/jellyfin/migrations.xml' jellyfin 60
+			fi
 
 			# Grant dietpi group permissions and assure video access
 			Create_User -G dietpi,video,render -d /mnt/dietpi_userdata/jellyfin jellyfin
@@ -11612,11 +11755,14 @@ _EOF_
 			if [[ ! -d '/mnt/dietpi_userdata/jellyfin' ]]
 			then
 				# Start service until /etc/jellyfin/network.xml exists
-				Create_Config /etc/jellyfin/network.xml jellyfin
+				Create_Config '/etc/jellyfin/network.xml' jellyfin
 				# Data dir
 				# shellcheck disable=SC2015
 				[[ -d '/var/lib/jellyfin' ]] && G_EXEC mv /var/lib/jellyfin /mnt/dietpi_userdata/jellyfin || G_EXEC mkdir /mnt/dietpi_userdata/jellyfin
 				G_CONFIG_INJECT 'JELLYFIN_DATA_DIR=' 'JELLYFIN_DATA_DIR=/mnt/dietpi_userdata/jellyfin' /etc/default/jellyfin
+				# Change default WorkingDirectory
+				[[ -d '/etc/systemd/system/jellyfin.service.d' ]] || G_EXEC mkdir /etc/systemd/system/jellyfin.service.d
+				G_EXEC eval 'echo -e '\''[Service]\nWorkingDirectory=/mnt/dietpi_userdata/jellyfin'\'' > /etc/systemd/system/jellyfin.service.d/dietpi.conf'
 				# Cache dir
 				# shellcheck disable=SC2015
 				[[ -d '/var/cache/jellyfin' ]] && G_EXEC mv /var/cache/jellyfin /mnt/dietpi_userdata/jellyfin/cache || G_EXEC mkdir /mnt/dietpi_userdata/jellyfin/cache
@@ -11660,7 +11806,7 @@ _EOF_
 			# - RPi 4
 			elif (( $G_HW_MODEL == 4 ))
 			then
-				G_EXEC cmake .. -DRPI4=1 -DNOGIT=1 -DCMAKE_BUILD_TYPE=RelWithDebInfo		
+				G_EXEC cmake .. -DRPI4=1 -DNOGIT=1 -DCMAKE_BUILD_TYPE=RelWithDebInfo
 			# - Odroids
 			elif (( $G_HW_MODEL < 20 ))
 			then
@@ -12123,6 +12269,35 @@ _EOF_
 			done
 
 			G_CONFIG_INJECT 'SNAPCLIENT_OPTS[[:blank:]=]' "SNAPCLIENT_OPTS=\"-h $snapcast_server_ip -p $snapcast_server_port\"" /etc/default/snapclient
+
+		fi
+
+		software_id=202 # Rclone
+		if (( ${aSOFTWARE_INSTALL_STATE[$software_id]} == 1 )); then
+
+
+			Banner_Installing
+
+			# ARMv6
+			local arch='arm'
+
+			# ARMv7
+			if (( $G_HW_ARCH == 2 ))
+			then
+				arch+='-v7'
+
+			# ARMv8
+			elif (( $G_HW_ARCH == 3 ))
+			then
+				arch='arm64'
+
+			# x86_64
+			else
+				arch='amd64'
+			fi
+
+			local fallback_url="https://github.com/rclone/rclone/releases/download/v1.58.1/rclone-v1.58.1-linux-$arch.deb"
+			Download_Install "$(curl -sSfL 'https://api.github.com/repos/rclone/rclone/releases/latest' | mawk -F\" "/\"browser_download_url\": .*\/rclone-v[^\"\/]*linux-$arch.deb\"/{print \$4}")"
 
 		fi
 
@@ -12908,7 +13083,9 @@ If no WireGuard (auto)start is included, but you require it, please do the follo
 			[[ -d '/etc/lighttpd' ]] && G_EXEC rm -R /etc/lighttpd
 			[[ -d '/var/www/index.lighttpd.html' ]] && G_EXEC rm /var/www/index.lighttpd.html
 
-			# Pre-v8.0: Certbot renewal hook
+			# Certbot hook
+			[[ -f '/etc/letsencrypt/renewal-hooks/deploy/dietpi-lighttpd.sh' ]] && G_EXEC rm /etc/letsencrypt/renewal-hooks/deploy/dietpi-lighttpd.sh
+			# - Pre-v8.0
 			[[ -f 'etc/systemd/system/certbot.service.d/dietpi-lighttpd.conf' ]] && G_EXEC rm /etc/systemd/system/certbot.service.d/dietpi-lighttpd.conf
 			[[ -d '/etc/systemd/system/certbot.service.d' ]] && G_EXEC rmdir --ignore-fail-on-non-empty /etc/systemd/system/certbot.service.d
 
@@ -13535,6 +13712,34 @@ If no WireGuard (auto)start is included, but you require it, please do the follo
 
 		fi
 
+		software_id=99 # Prometheus Node Exporter
+		if (( ${aSOFTWARE_INSTALL_STATE[$software_id]} == -1 )); then
+
+			Banner_Uninstalling
+			if [[ -f '/etc/systemd/system/raspberrypi_exporter.timer' ]]
+			then
+				G_EXEC systemctl disable --now raspberrypi_exporter.timer
+				G_EXEC rm /etc/systemd/system/raspberrypi_exporter.timer
+			fi
+			[[ -d '/etc/systemd/system/raspberrypi_exporter.timer.d' ]] && G_EXEC rm -R /etc/systemd/system/raspberrypi_exporter.timer.d
+			if [[ -f '/etc/systemd/system/raspberrypi_exporter.service' ]]
+			then
+				G_EXEC systemctl disable --now raspberrypi_exporter.service
+				G_EXEC rm /etc/systemd/system/raspberrypi_exporter.service
+			fi
+			[[ -d '/etc/systemd/system/raspberrypi_exporter.service.d' ]] && G_EXEC rm -R /etc/systemd/system/raspberrypi_exporter.service.d
+			if [[ -f '/etc/systemd/system/node_exporter.service' ]]
+			then
+				G_EXEC systemctl disable --now node_exporter.service
+				G_EXEC rm /etc/systemd/system/node_exporter.service
+			fi
+			[[ -d '/etc/systemd/system/node_exporter.service.d' ]] && G_EXEC rm -R /etc/systemd/system/node_exporter.service.d
+			[[ -d '/opt/node_exporter' ]] && G_EXEC rm -R /opt/node_exporter
+			getent passwd node_exporter > /dev/null && G_EXEC userdel node_exporter
+			getent group node_exporter > /dev/null && G_EXEC groupdel node_exporter
+
+		fi
+
 		software_id=146 # Tautulli
 		if (( ${aSOFTWARE_INSTALL_STATE[$software_id]} == -1 )); then
 
@@ -13585,7 +13790,7 @@ If no WireGuard (auto)start is included, but you require it, please do the follo
 			[[ -d '/mnt/dietpi_userdata/nzbget' ]] && G_EXEC rm -R /mnt/dietpi_userdata/nzbget
 
 		fi
-		
+
 		software_id=151 # Prowlarr
 		if (( ${aSOFTWARE_INSTALL_STATE[$software_id]} == -1 )); then
 
@@ -14064,7 +14269,8 @@ If no WireGuard (auto)start is included, but you require it, please do the follo
 				G_EXEC rm /etc/systemd/system/haproxy.service
 			fi
 			[[ -d '/etc/systemd/system/haproxy.service.d' ]] && G_EXEC rm -R /etc/systemd/system/haproxy.service.d
-			G_EXEC rm -Rf /{etc,var/lib,/usr/local/{doc,sbin}}/haproxy /usr/local/share/man/man1/haproxy.1 /etc/systemd/system/haproxy.service.d
+			G_EXEC rm -Rf /{etc,var/lib,/usr/local/{doc,sbin}}/haproxy /usr/local/share/man/man1/haproxy.1
+			[[ -d '/usr/local/share/man/man1' ]] && G_EXEC rmdir -p --ignore-fail-on-non-empty /usr/local/share/man/man1
 
 		fi
 
@@ -14198,10 +14404,22 @@ If no WireGuard (auto)start is included, but you require it, please do the follo
 		if (( ${aSOFTWARE_INSTALL_STATE[$software_id]} == -1 )); then
 
 			Banner_Uninstalling
+			[[ -f '/opt/pivpn/uninstall.sh' ]] && G_EXEC sed -i 's/ askreboot;//' /opt/pivpn/uninstall.sh
 			command -v pivpn > /dev/null && G_EXEC_OUTPUT=1 G_EXEC pivpn -u
 			getent passwd pivpn > /dev/null && G_EXEC userdel pivpn
 			getent group pivpn > /dev/null && G_EXEC groupdel pivpn
 			[[ -f '/etc/apt/sources.list.d/swupdate.openvpn.net.list' ]] && G_EXEC rm /etc/apt/sources.list.d/swupdate.openvpn.net.list # Not part of current installer anymore
+
+		fi
+
+		software_id=201 # ZeroTier
+		if (( ${aSOFTWARE_INSTALL_STATE[$software_id]} == -1 )); then
+
+			Banner_Uninstalling
+			G_AGP zerotier-one
+			[[ -f '/etc/apt/sources.list.d/dietpi-zerotier.list' ]] && G_EXEC rm /etc/apt/sources.list.d/dietpi-zerotier.list
+			[[ -f '/etc/apt/trusted.gpg.d/dietpi-zerotier.gpg' ]] && G_EXEC rm /etc/apt/trusted.gpg.d/dietpi-zerotier.gpg
+			[[ -d '/var/lib/zerotier-one' ]] && G_EXEC rm -R /var/lib/zerotier-one
 
 		fi
 
@@ -14210,6 +14428,7 @@ If no WireGuard (auto)start is included, but you require it, please do the follo
 
 			Banner_Uninstalling
 			G_AGP openvpn
+			[[ -d '/etc/systemd/system/openvpn.service.d' ]] && G_EXEC rm -R /etc/systemd/system/openvpn.service.d
 			[[ -d '/etc/openvpn' ]] && G_EXEC rm -R /etc/openvpn
 			[[ -f '/etc/sysctl.d/dietpi-openvpn.conf' ]] && G_EXEC rm /etc/sysctl.d/dietpi-openvpn.conf
 
@@ -14224,6 +14443,19 @@ If no WireGuard (auto)start is included, but you require it, please do the follo
 			[[ -d '/etc/systemd/system/wg-quick@wg0.service.d' ]] && G_EXEC rm -R /etc/systemd/system/wg-quick@wg0.service.d
 			[[ -f '/etc/apt/sources.list.d/dietpi-wireguard.list' ]] && G_EXEC rm /etc/apt/sources.list.d/dietpi-wireguard.list
 			[[ -f '/etc/apt/preferences.d/dietpi-wireguard' ]] && G_EXEC rm /etc/apt/preferences.d/dietpi-wireguard
+
+		fi
+
+		software_id=58 # Tailscale
+		if (( ${aSOFTWARE_INSTALL_STATE[$software_id]} == -1 )); then
+
+			Banner_Uninstalling
+			G_AGP tailscale
+			[[ -d '/etc/systemd/system/tailscale.service.d' ]] && G_EXEC rm -R /etc/systemd/system/tailscale.service.d
+			[[ -d '/var/lib/tailscale' ]] && G_EXEC rm -R /var/lib/tailscale
+			[[ -f '/etc/sysctl.d/dietpi-tailscale.conf' ]] && G_EXEC rm /etc/sysctl.d/dietpi-tailscale.conf
+			[[ -f '/etc/apt/sources.list.d/tailscale.list' ]] && G_EXEC rm /etc/apt/sources.list.d/dietpi-tailscale.list
+			[[ -f '/etc/apt/trusted.gpg.d/dietpi-tailscale.gpg' ]] && G_EXEC rm /etc/apt/trusted.gpg.d/dietpi-tailscale.gpg
 
 		fi
 
@@ -15609,6 +15841,14 @@ _EOF_
 			G_AGP postgresql 'postgresql-*'
 			G_EXEC rm -Rf /etc/postgresql*
 			[[ -d '/mnt/dietpi_userdata/postgresql' ]] && G_EXEC rm -R /mnt/dietpi_userdata/postgresql
+		fi
+
+		software_id=202 # Rclone
+		if (( ${aSOFTWARE_INSTALL_STATE[$software_id]} == -1 ))
+		then
+			Banner_Uninstalling
+			G_AGP rclone
+			G_EXEC rm -Rf /{root,home/*}/.config/rclone
 		fi
 
 		software_id=198 # File Browser
