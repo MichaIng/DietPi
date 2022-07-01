@@ -98,7 +98,7 @@ else
 fi
 
 # Build Amiberry
-v_ami='5.2'
+v_ami='5.3'
 G_DIETPI-NOTIFY 2 "Building Amiberry version \e[33m$v_ami\e[90m for platform: \e[33m$PLATFORM"
 [[ -d /tmp/amiberry-$v_ami ]] && G_EXEC rm -R "/tmp/amiberry-$v_ami"
 G_EXEC cd /tmp
