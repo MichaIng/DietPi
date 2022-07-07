@@ -62,7 +62,7 @@ else
 fi
 
 # Build libSDL2_ttf
-v_ttf='2.0.18'
+v_ttf='2.20.0'
 if [[ ! -d /tmp/SDL2_ttf-$v_ttf ]]
 then
 	G_DIETPI-NOTIFY 2 "Building libSDL2_ttf version \e[33m$v_ttf"
