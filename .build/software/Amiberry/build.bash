@@ -43,7 +43,7 @@ else
 fi
 
 # Build libSDL2_image
-v_img='2.0.5'
+v_img='2.6.0'
 if [[ ! -d /tmp/SDL2_image-$v_img ]]
 then
 	G_DIETPI-NOTIFY 2 "Building libSDL2_image version \e[33m$v_img"
