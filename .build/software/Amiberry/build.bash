@@ -191,7 +191,7 @@ Version: $v_ami-dietpi1
 Architecture: $arch
 Maintainer: MichaIng <micha@dietpi.com>
 Date: $(date -u '+%a, %d %b %Y %T %z')
-Standards-Version: 4.6.0.1
+Standards-Version: 4.6.1.0
 Installed-Size: $(du -sk "$DIR" | mawk '{print $1}')
 Depends:$DEPS_APT_VERSIONED
 Section: games
