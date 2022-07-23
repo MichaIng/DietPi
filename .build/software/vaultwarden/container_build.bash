@@ -74,6 +74,7 @@ G_EXEC curl -sSfO "https://dietpi.com/downloads/images/$image.7z"
 G_EXEC 7zz x "$image.7z"
 G_EXEC rm "$image.7z" hash.txt README.md
 G_EXEC truncate -s $((2*1024**3)) "$image.img"
+
 # Loop device
 FP_LOOP=$(losetup -f)
 G_EXEC losetup "$FP_LOOP" "$image.img"
@@ -87,6 +88,7 @@ G_EXEC_OUTPUT=1 G_EXEC resize2fs "${FP_LOOP}p1"
 G_EXEC_OUTPUT=1 G_EXEC e2fsck -fp "${FP_LOOP}p1"
 G_EXEC mkdir rootfs
 G_EXEC mount "${FP_LOOP}p1" rootfs
+
 # Automated build
 cat << _EOF_ > rootfs/etc/rc.local || exit 1
 #!/bin/dash
@@ -97,6 +99,10 @@ mv -v '/tmp/vaultwarden/vaultwarden_$arch.deb' '/vaultwarden_$arch.deb'
 poweroff
 _EOF_
 G_EXEC chmod +x rootfs/etc/rc.local
+
+# Assure that build starts after DietPi-PostBoot
+[[ -d 'rootfs/etc/systemd/system/rc-local.service.d' ]] || G_EXEC mkdir rootfs/etc/systemd/system/rc-local.service.d
+G_EXEC eval 'echo -e '\''[Service]\nAfter=dietpi-postboot.service'\'' > rootfs/etc/systemd/system/rc-local.service.d/dietpi.conf'
 
 ##########################################
 # Boot container
