@@ -50,12 +50,12 @@ case $DISTRO in
 	*) G_DIETPI-NOTIFY 1 "Invalid distro \"$DISTRO\" passed, aborting..."; exit 1;;
 esac
 image=
-parch=
+arch=
 case $ARCH in
-        1) image="DietPi_Container-ARMv6-${distro^}" parch='armv6hf';;
-	2) image="DietPi_Container-ARMv7-${distro^}" parch='armhf';;
-	3) image="DietPi_Container-ARMv8-${distro^}" parch='arm64';;
-	10) image="DietPi_Container-x86_64-${distro^}" parch='amd64';;
+	1) image="DietPi_Container-ARMv6-${distro^}" arch='armv6l';;
+	2) image="DietPi_Container-ARMv7-${distro^}" arch='armv7l';;
+	3) image="DietPi_Container-ARMv8-${distro^}" arch='aarch64';;
+	10) image="DietPi_Container-x86_64-${distro^}" arch='x86_64';;
 	*) G_DIETPI-NOTIFY 1 "Invalid architecture \"$ARCH\" passed, aborting..."; exit 1;;
 esac
 
@@ -63,7 +63,7 @@ esac
 # Dependencies
 ##########################################
 apackages=('7zip' 'parted' 'fdisk' 'systemd-container')
-[[ $ARCH == 10 ]] || apackages+=('qemu-user-static' 'binfmt-support')
+[[ $G_HW_ARCH == $ARCH || ( $ARCH < 9 && $G_HW_ARCH > $ARCH ) ]] || apackages+=('qemu-user-static' 'binfmt-support')
 G_AG_CHECK_INSTALL_PREREQ "${apackages[@]}"
 
 ##########################################
@@ -93,7 +93,7 @@ cat << _EOF_ > rootfs/etc/rc.local || exit 1
 infocmp "\$TERM" > /dev/null 2>&1 || TERM='dumb'
 echo '[ INFO ] Running vaultwarden build script...'
 bash -c "\$(curl -sSf 'https://raw.githubusercontent.com/$G_GITOWNER/DietPi/$G_GITBRANCH/.build/software/vaultwarden/build.bash')"
-mv -v '/tmp/vaultwarden/vaultwarden_$parch.deb' '/vaultwarden_$parch.deb'
+mv -v '/tmp/vaultwarden/vaultwarden_$arch.deb' '/vaultwarden_$arch.deb'
 poweroff
 _EOF_
 G_EXEC chmod +x rootfs/etc/rc.local
@@ -102,5 +102,5 @@ G_EXEC chmod +x rootfs/etc/rc.local
 # Boot container
 ##########################################
 systemd-nspawn -bD rootfs --bind="$FP_LOOP"{,p1} --bind=/dev/disk
-[[ -f rootfs/vaultwarden_$parch.deb ]] || exit 1
+[[ -f rootfs/vaultwarden_$arch.deb ]] || exit 1
 }

@@ -11,6 +11,7 @@ adeps=('bash' 'libc6' 'openssl')
 G_AG_CHECK_INSTALL_PREREQ "${adeps_build[@]}"
 
 # Install Rust via https://rustup.rs/
+# - Needs to be installed in tmpfs, else builds fail in emulated 32-bit ARM environments: https://github.com/rust-lang/cargo/issues/8719
 export HOME='/tmp/vaultwarden'
 [[ -d $HOME ]] || G_EXEC mkdir "$HOME"
 G_EXEC cd "$HOME"
@@ -31,15 +32,10 @@ G_EXEC_OUTPUT=1 G_EXEC cargo build --features sqlite --release
 G_EXEC rustup self uninstall -y
 G_EXEC strip --remove-section=.comment --remove-section=.note target/release/vaultwarden
 
-# Package architecture
-arch='armhf'
-(( $G_HW_ARCH == 3 )) && arch='arm64'
-(( $G_HW_ARCH == 10 )) && arch='amd64'
-
 # Build DEB package
 G_DIETPI-NOTIFY 2 'Building vaultwarden DEB package'
 G_EXEC cd "$HOME"
-DIR="vaultwarden_$arch"
+grep -q 'raspbian' /etc/os-release && DIR='vaultwarden_armv6l' || DIR="vaultwarden_$G_HW_ARCH_NAME"
 [[ -d $DIR ]] && G_EXEC rm -R "$DIR"
 G_EXEC mkdir -p "$DIR/"{DEBIAN,opt/vaultwarden,mnt/dietpi_userdata/vaultwarden,lib/systemd/system}
 
@@ -198,7 +194,7 @@ grep -q 'raspbian' /etc/os-release && DEPS_APT_VERSIONED=$(sed 's/+rp[it][0-9]\+
 cat << _EOF_ > "$DIR/DEBIAN/control"
 Package: vaultwarden
 Version: $version-dietpi1
-Architecture: $arch
+Architecture: $(dpkg --print-architecture)
 Maintainer: MichaIng <micha@dietpi.com>
 Date: $(date -u '+%a, %d %b %Y %T %z')
 Standards-Version: 4.6.1.0
