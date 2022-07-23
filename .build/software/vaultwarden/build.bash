@@ -6,7 +6,8 @@ G_AGDUG
 
 # APT dependencies: https://github.com/dani-garcia/vaultwarden/wiki/Building-binary#dependencies
 adeps_build=('gcc' 'libc6-dev' 'pkg-config' 'libssl-dev')
-adeps=('bash' 'libc6' 'libssl1.1' 'openssl')
+adeps=('bash' 'libc6' 'openssl')
+(( $G_DISTRO > 6 )) && adeps+=('libssl3') || adeps+=('libssl1.1')
 G_AG_CHECK_INSTALL_PREREQ "${adeps_build[@]}"
 
 # Install Rust via https://rustup.rs/
