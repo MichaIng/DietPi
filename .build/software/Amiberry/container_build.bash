@@ -112,7 +112,7 @@ G_EXEC chmod +x rootfs/etc/rc.local
 
 # Assure that build starts after DietPi-PostBoot
 [[ -d 'rootfs/etc/systemd/system/rc-local.service.d' ]] || G_EXEC mkdir rootfs/etc/systemd/system/rc-local.service.d
-G_EXEC eval 'echo -e '\''[Service]\nAfter=dietpi-postboot.service'\'' > rootfs/etc/systemd/system/rc-local.service.d/dietpi.conf'
+G_EXEC eval 'echo -e '\''[Unit]\nAfter=dietpi-postboot.service'\'' > rootfs/etc/systemd/system/rc-local.service.d/dietpi.conf'
 
 ##########################################
 # Boot container
