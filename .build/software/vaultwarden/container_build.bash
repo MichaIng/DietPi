@@ -102,4 +102,5 @@ G_EXEC chmod +x rootfs/etc/rc.local
 # Boot container
 ##########################################
 systemd-nspawn -bD rootfs --bind="$FP_LOOP"{,p1} --bind=/dev/disk
+[[ -f "/dev/shm/vaultwarden/vaultwarden_$parch.deb" ]] || exit 1
 }

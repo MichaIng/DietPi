@@ -13,6 +13,9 @@ G_AG_CHECK_INSTALL_PREREQ "${adeps_build[@]}"
 export HOME='/dev/shm/vaultwarden'
 [[ -d $HOME ]] || G_EXEC mkdir "$HOME"
 G_EXEC cd "$HOME"
+free -m; df -m
+G_EXEC mount -o remount,size=5G /dev/shm
+free -m; df -m
 G_EXEC curl -sSfL 'https://sh.rustup.rs' -o rustup-init.sh
 G_EXEC chmod +x rustup-init.sh
 G_EXEC_OUTPUT=1 G_EXEC ./rustup-init.sh -y --profile minimal --default-toolchain none
@@ -27,6 +30,8 @@ G_EXEC tar xf "$version.tar.gz"
 G_EXEC rm "$version.tar.gz"
 G_EXEC cd "vaultwarden-$version"
 G_EXEC_OUTPUT=1 G_EXEC cargo build --features sqlite --release
+free -m; df -m
+G_EXEC rustup self uninstall -y
 G_EXEC strip --remove-section=.comment --remove-section=.note target/release/vaultwarden
 
 # Package architecture
