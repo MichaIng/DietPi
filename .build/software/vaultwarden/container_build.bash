@@ -93,7 +93,7 @@ cat << _EOF_ > rootfs/etc/rc.local || exit 1
 infocmp "\$TERM" > /dev/null 2>&1 || TERM='dumb'
 echo '[ INFO ] Running vaultwarden build script...'
 bash -c "\$(curl -sSf 'https://raw.githubusercontent.com/$G_GITOWNER/DietPi/$G_GITBRANCH/.build/software/vaultwarden/build.bash')"
-mv -v '/tmp/vaultwarden_$parch.deb' '/vaultwarden_$parch.deb'
+mv -v '/dev/shm/vaultwarden/vaultwarden_$parch.deb' '/vaultwarden_$parch.deb'
 poweroff
 _EOF_
 G_EXEC chmod +x rootfs/etc/rc.local

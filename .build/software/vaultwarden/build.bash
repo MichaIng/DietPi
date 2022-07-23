@@ -10,16 +10,18 @@ adeps=('bash' 'libc6' 'libssl1.1' 'openssl')
 G_AG_CHECK_INSTALL_PREREQ "${adeps_build[@]}"
 
 # Install Rust via https://rustup.rs/
+export HOME='/dev/shm/vaultwarden'
+[[ -d $HOME ]] || G_EXEC mkdir "$HOME"
+G_EXEC cd "$HOME"
 G_EXEC curl -sSfL 'https://sh.rustup.rs' -o rustup-init.sh
 G_EXEC chmod +x rustup-init.sh
 G_EXEC_OUTPUT=1 G_EXEC ./rustup-init.sh -y --profile minimal --default-toolchain none
 G_EXEC_NOHALT=1 G_EXEC rm rustup-init.sh
-export PATH="/root/.cargo/bin:$PATH"
+export PATH="$HOME/.cargo/bin:$PATH"
 
 version='1.25.1'
 G_DIETPI-NOTIFY 2 "Building vaultwarden version \e[33m$version"
-[[ -d /tmp/vaultwarden-$version ]] && G_EXEC rm -R "/tmp/vaultwarden-$version"
-G_EXEC cd /tmp
+[[ -d vaultwarden-$version ]] && G_EXEC rm -R "vaultwarden-$version"
 G_EXEC curl -sSfLO "https://github.com/dani-garcia/vaultwarden/archive/$version.tar.gz"
 G_EXEC tar xf "$version.tar.gz"
 G_EXEC rm "$version.tar.gz"
@@ -34,7 +36,7 @@ arch='armhf'
 
 # Build DEB package
 G_DIETPI-NOTIFY 2 'Building vaultwarden DEB package'
-G_EXEC cd /tmp
+G_EXEC cd "$HOME"
 DIR="vaultwarden_$arch"
 [[ -d $DIR ]] && G_EXEC rm -R "$DIR"
 G_EXEC mkdir -p "$DIR/"{DEBIAN,opt/vaultwarden,mnt/dietpi_userdata/vaultwarden,lib/systemd/system}
@@ -42,6 +44,7 @@ G_EXEC mkdir -p "$DIR/"{DEBIAN,opt/vaultwarden,mnt/dietpi_userdata/vaultwarden,l
 # - Copy files in place
 G_EXEC mv "vaultwarden-$version/target/release/vaultwarden" "$DIR/opt/vaultwarden/"
 G_EXEC mv "vaultwarden-$version/.env.template" "$DIR/mnt/dietpi_userdata/vaultwarden/vaultwarden.env"
+G_EXEC rm -R "vaultwarden-$version"
 
 # - web vault
 wv_version='2022.6.2'
