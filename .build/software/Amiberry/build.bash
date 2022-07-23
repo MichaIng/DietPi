@@ -6,11 +6,10 @@
 G_DIETPI-NOTIFY 2 "Amiberry will be built for platform: \e[33m$PLATFORM"
 
 # APT dependencies
-arch='armhf' opengl_flags=('--enable-video-opengles2' '--disable-video-opengl')
+opengl_flags=('--enable-video-opengles2' '--disable-video-opengl')
 adeps_build=('autoconf' 'make' 'g++' 'pkg-config' 'libdrm-dev' 'libgbm-dev' 'libudev-dev' 'libxml2-dev' 'libpng-dev' 'libfreetype6-dev' 'libflac-dev' 'libmpg123-dev' 'libmpeg2-4-dev' 'libasound2-dev' 'wget' 'kbd')
 adeps=('libdrm2' 'libgl1-mesa-dri' 'libgbm1' 'libegl1' 'libudev1' 'libxml2' 'libpng16-16' 'libfreetype6' 'libflac8' 'libmpg123-0' 'libmpeg2-4' 'libasound2' 'wget' 'kbd')
-(( $G_HW_ARCH == 3 )) && arch='arm64'
-(( $G_HW_ARCH == 10 )) && arch='amd64' opengl_flags=('--disable-video-opengles2' '--enable-video-opengl') adeps_build+=('libgl1-mesa-dev') adeps+=('libgl1') || adeps_build+=('libgles2-mesa-dev') adeps+=('libgles2')
+(( $G_HW_ARCH == 10 )) && opengl_flags=('--disable-video-opengles2' '--enable-video-opengl') adeps_build+=('libgl1-mesa-dev') adeps+=('libgl1') || adeps_build+=('libgles2-mesa-dev') adeps+=('libgles2')
 # - wget: Used for WHDLoad database update: https://github.com/midwan/amiberry/commit/d6c103e3310bcf75c2d72a15849fbdf5eb7432b5
 # - kbd: For "chvt" used in systemd unit as SDL2 spams the console with every key press
 if [[ $PLATFORM == 'rpi'* ]]
@@ -187,8 +186,8 @@ grep -q 'raspbian' /etc/os-release && DEPS_APT_VERSIONED=$(sed 's/+rp[it][0-9]\+
 # - control
 cat << _EOF_ > "$DIR/DEBIAN/control"
 Package: amiberry
-Version: $v_ami-dietpi1
-Architecture: $arch
+Version: $v_ami-dietpi2
+Architecture: $(dpkg --print-architecture)
 Maintainer: MichaIng <micha@dietpi.com>
 Date: $(date -u '+%a, %d %b %Y %T %z')
 Standards-Version: 4.6.1.0
