@@ -93,7 +93,7 @@ cat << _EOF_ > rootfs/etc/rc.local || exit 1
 infocmp "\$TERM" > /dev/null 2>&1 || TERM='dumb'
 echo '[ INFO ] Running vaultwarden build script...'
 bash -c "\$(curl -sSf 'https://raw.githubusercontent.com/$G_GITOWNER/DietPi/$G_GITBRANCH/.build/software/vaultwarden/build.bash')"
-mv -v '/dev/shm/vaultwarden/vaultwarden_$parch.deb' '/vaultwarden_$parch.deb'
+mv -v '/tmp/vaultwarden/vaultwarden_$parch.deb' '/vaultwarden_$parch.deb'
 poweroff
 _EOF_
 G_EXEC chmod +x rootfs/etc/rc.local
@@ -102,5 +102,5 @@ G_EXEC chmod +x rootfs/etc/rc.local
 # Boot container
 ##########################################
 systemd-nspawn -bD rootfs --bind="$FP_LOOP"{,p1} --bind=/dev/disk
-[[ -f "/dev/shm/vaultwarden/vaultwarden_$parch.deb" ]] || exit 1
+[[ -f rootfs/vaultwarden_$parch.deb ]] || exit 1
 }
