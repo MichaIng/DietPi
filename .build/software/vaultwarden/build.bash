@@ -21,6 +21,9 @@ G_EXEC_OUTPUT=1 G_EXEC ./rustup-init.sh -y --profile minimal --default-toolchain
 G_EXEC_NOHALT=1 G_EXEC rm rustup-init.sh
 export PATH="$HOME/.cargo/bin:$PATH"
 
+# Set ARMv6 target explicitly, otherwise it compiles for ARMv7 in emulated container
+(( $G_HW_ARCH == 1 )) && target=('arm-unknown-linux-gnueabihf') || target=()
+
 version='1.25.1'
 G_DIETPI-NOTIFY 2 "Building vaultwarden version \e[33m$version"
 [[ -d vaultwarden-$version ]] && G_EXEC rm -R "vaultwarden-$version"
@@ -28,7 +31,7 @@ G_EXEC curl -sSfLO "https://github.com/dani-garcia/vaultwarden/archive/$version.
 G_EXEC tar xf "$version.tar.gz"
 G_EXEC rm "$version.tar.gz"
 G_EXEC cd "vaultwarden-$version"
-G_EXEC_OUTPUT=1 G_EXEC cargo build --features sqlite --release
+G_EXEC_OUTPUT=1 G_EXEC cargo build --features sqlite --release "${target[@]}"
 G_EXEC rustup self uninstall -y
 G_EXEC strip --remove-section=.comment --remove-section=.note target/release/vaultwarden
 
