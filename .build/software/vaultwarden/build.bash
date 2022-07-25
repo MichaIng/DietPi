@@ -22,7 +22,7 @@ G_EXEC_NOHALT=1 G_EXEC rm rustup-init.sh
 export PATH="$HOME/.cargo/bin:$PATH"
 
 # Set ARMv6 target explicitly, otherwise it compiles for ARMv7 in emulated container
-grep -q 'raspbian' /etc/os-release && target=('arm-unknown-linux-gnueabihf') || target=()
+grep -q 'raspbian' /etc/os-release && target=('--target' 'arm-unknown-linux-gnueabihf') || target=()
 
 version='1.25.1'
 G_DIETPI-NOTIFY 2 "Building vaultwarden version \e[33m$version"
