@@ -17,7 +17,9 @@ export HOME='/tmp/vaultwarden'
 G_EXEC cd "$HOME"
 G_EXEC curl -sSfL 'https://sh.rustup.rs' -o rustup-init.sh
 G_EXEC chmod +x rustup-init.sh
-G_EXEC_OUTPUT=1 G_EXEC ./rustup-init.sh -y --profile minimal --default-toolchain none
+# Set ARMv6 target explicitly, otherwise it compiles for ARMv7 in emulated container
+grep -q 'raspbian' /etc/os-release && host=('--default-host' 'arm-unknown-linux-gnueabihf') || host=()
+G_EXEC_OUTPUT=1 G_EXEC ./rustup-init.sh -y --profile minimal --default-toolchain none "${host[@]}"
 G_EXEC_NOHALT=1 G_EXEC rm rustup-init.sh
 export PATH="$HOME/.cargo/bin:$PATH"
 
