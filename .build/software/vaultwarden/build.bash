@@ -23,7 +23,7 @@ G_EXEC_OUTPUT=1 G_EXEC ./rustup-init.sh -y --profile minimal --default-toolchain
 G_EXEC_NOHALT=1 G_EXEC rm rustup-init.sh
 export PATH="$HOME/.cargo/bin:$PATH"
 
-version='1.25.1'
+version='1.25.2'
 G_DIETPI-NOTIFY 2 "Building vaultwarden version \e[33m$version"
 [[ -d vaultwarden-$version ]] && G_EXEC rm -R "vaultwarden-$version"
 G_EXEC curl -sSfLO "https://github.com/dani-garcia/vaultwarden/archive/$version.tar.gz"
