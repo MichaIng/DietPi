@@ -830,7 +830,7 @@ $grey─────────────────────────
 	# - $G_EXEC_NOHALT=1		| On error, print short error message only, skip error handler menu and do not exit script, inherits $G_EXEC_NOEXIT=1
 	# - $G_EXEC_NOEXIT=1		| On error, do not exit script, inherited by $G_EXEC_NOHALT=1
 	# - $G_EXEC_ARRAY_TEXT[]	| Add additional entries to error handler menu
-	# - $G_ECEC_ARRAY_ACTION[]	| Associative array, containing uneven $G_EXEC_ARRAY_TEXT[] values as keys and related commands as values
+	# - $G_EXEC_ARRAY_ACTION[]	| Associative array, containing uneven $G_EXEC_ARRAY_TEXT[] values as keys and related commands as values
 	G_EXEC(){
 
 		local exit_code fp_log='/tmp/G_EXEC_LOG' attempt=1 acommand=("$@") ecommand=${*//\\/\\\\}
@@ -998,8 +998,7 @@ Press any key to continue...'
 				# Attempt targeted solution, passed via $G_EXEC_ARRAY_TEXT[] and $G_EXEC_ARRAY_ACTION[${G_EXEC_ARRAY_TEXT[]}]
 				elif [[ $G_WHIP_RETURNED_VALUE ]]; then
 
-					${G_EXEC_ARRAY_ACTION[$G_WHIP_RETURNED_VALUE]}
-					read -rp 'Press any key to return to error handler menu...'
+					eval "${G_EXEC_ARRAY_ACTION[$G_WHIP_RETURNED_VALUE]}"
 
 				fi
 			done
@@ -1108,144 +1107,101 @@ Press any key to continue...'
 	#-----------------------------------------------------------------------------------
 	# Network connection checks
 	#-----------------------------------------------------------------------------------
-	# General network connection check
-	# - Checks general network connectivity by pinging a raw IP that must be publicly reachable at all time.
-	# - Uses the given input argument as IP to test against, else CONFIG_CHECK_CONNECTION_IP from dietpi.txt, else defaults to 9.9.9.9 (Quad9 DNS IP).
-	# - Uses G_CHECK_URL_TIMEOUT and G_CHECK_URL_ATTEMPTS variables, else CONFIG_G_CHECK_URL_TIMEOUT + CONFIG_G_CHECK_URL_ATTEMPTS from dietpi.txt, else defaults to 10 seconds and 2 attempts (1 retry).
-	# - Optional arguments:
-	#	$* = IP + optional ping arguments
-	# - Optional variables:
-	#	G_CHECK_URL_TIMEOUT to override default and dietpi.txt set timeout
-	#	G_CHECK_URL_ATTEMPTS to override default and dietpi.txt set attempts
-	G_CHECK_CON(){
-
-		# Obtain IP
-		local ip
-		if [[ ! $* ]]; then
-
-			ip=$(sed -n '/^[[:blank:]]*CONFIG_CHECK_CONNECTION_IP=/{s/^[^=]*=//p;q}' /boot/dietpi.txt)
-			[[ $ip ]] || ip='9.9.9.9'
-
-		fi
-
+	# Network connection check
+	# - Checks network connectivity by pinging a raw IPv4 address, in case an IPv6 address, and resolving a hostname, which must be publicly reachable at all time.
+	# - For IPv4, uses CONFIG_CHECK_CONNECTION_IP from dietpi.txt, else defaults to 9.9.9.9 (Quad9 DNS IP).
+	# - For IPv6, uses CONFIG_CHECK_CONNECTION_IPV6 from dietpi.txt, else defaults to 2620:fe::fe (Quad9 DNS IP).
+	# - For DNS, uses CONFIG_CHECK_DNS_DOMAIN from dietpi.txt, else defaults to dns9.quad9.net (Quad9 DNS domain).
+	# - Uses CONFIG_G_CHECK_URL_TIMEOUT + CONFIG_G_CHECK_URL_ATTEMPTS from dietpi.txt, else defaults to 10 seconds and 2 attempts (1 retry).
+	G_CHECK_NET()
+	{
 		# Obtain timeout
-		if ! disable_error=1 G_CHECK_VALIDINT "$G_CHECK_URL_TIMEOUT" 0; then
-
-			G_CHECK_URL_TIMEOUT=$(sed -n '/^[[:blank:]]*CONFIG_G_CHECK_URL_TIMEOUT=/{s/^[^=]*=//p;q}' /boot/dietpi.txt)
-			disable_error=1 G_CHECK_VALIDINT "$G_CHECK_URL_TIMEOUT" 0 || G_CHECK_URL_TIMEOUT=10
-
-		fi
+		local timeout=$(sed -n '/^[[:blank:]]*CONFIG_G_CHECK_URL_TIMEOUT=/{s/^[^=]*=//p;q}' /boot/dietpi.txt)
+		disable_error=1 G_CHECK_VALIDINT "$timeout" 0 || timeout=10
 
 		# Obtain attempts
-		if ! disable_error=1 G_CHECK_VALIDINT "$G_CHECK_URL_ATTEMPTS" 1; then
+		local attempts=$(sed -n '/^[[:blank:]]*CONFIG_G_CHECK_URL_ATTEMPTS=/{s/^[^=]*=//p;q}' /boot/dietpi.txt)
+		disable_error=1 G_CHECK_VALIDINT "$attempts" 1 || attempts=2
 
-			G_CHECK_URL_ATTEMPTS=$(sed -n '/^[[:blank:]]*CONFIG_G_CHECK_URL_ATTEMPTS=/{s/^[^=]*=//p;q}' /boot/dietpi.txt)
-			disable_error=1 G_CHECK_VALIDINT "$G_CHECK_URL_ATTEMPTS" 1 || G_CHECK_URL_ATTEMPTS=2
+		# Obtain IPv4 test address
+		local ip=$(sed -n '/^[[:blank:]]*CONFIG_CHECK_CONNECTION_IP=/{s/^[^=]*=//p;q}' /boot/dietpi.txt)
+		[[ $ip ]] || ip='9.9.9.9'
 
-		fi
-		G_EXEC_RETRIES=$(( $G_CHECK_URL_ATTEMPTS - 1 )) # 2 attempts = 1 retry
+		# Check IPv4 connectivity
+		G_EXEC_ARRAY_TEXT=(
 
-		# Re-assign timeout ($5 => acommand[4]) on every retry, in case it is changed as solution attempt
-		declare -F G_EXEC_PRE_FUNC &> /dev/null && eval "G_EXEC_PRE_FUNC_ORIG()$(declare -f G_EXEC_PRE_FUNC | tail -n +2)"
-		G_EXEC_PRE_FUNC(){ acommand[4]=$G_CHECK_URL_TIMEOUT; declare -F G_EXEC_PRE_FUNC_ORIG &> /dev/null && G_EXEC_PRE_FUNC_ORIG; }
+			'Double timeout' ': Retry with doubled timeout for ping to wait for a reply'
+			'Network settings' ': Enter dietpi-config network options'
+		)
+		declare -A G_EXEC_ARRAY_ACTION=(
 
-		G_EXEC_DESC='Checking network connectivity' G_EXEC ping -nc 1 -W "$G_CHECK_URL_TIMEOUT" "${ip:-$@}"
-		local exit_code=$?
+			['Double timeout']='((acommand[4]*=2)); attempt=1; continue 2'
+			['Network settings']='/boot/dietpi/dietpi-config 8 1'
+		)
+		G_EXEC_RETRIES=$(( $attempts - 1 )) # 2 attempts = 1 retry
+		G_EXEC_DESC='Checking IPv4 network connectivity' G_EXEC ping -4nc 1 -W "$timeout" "$ip"
 
-		unset -v G_CHECK_URL_TIMEOUT G_CHECK_URL_ATTEMPTS
-		unset -f G_EXEC_PRE_FUNC_ORIG
-		return "$exit_code"
+		# Do IPv6 connectivity check if an IPv6 default route is assigned
+		if G_GET_NET -6 -q gateway > /dev/null
+		then
+			# Obtain IPv6 test address
+			local ip=$(sed -n '/^[[:blank:]]*CONFIG_CHECK_CONNECTION_IPV6=/{s/^[^=]*=//p;q}' /boot/dietpi.txt)
+			[[ $ip ]] || ip='2620:fe::fe'
 
-	}
+			# Check IPv6 connectivity
+			G_EXEC_ARRAY_TEXT=(
 
-	# General DNS resolver check
-	# - Checks general DNS capabilities by pinging a domain that must be publicly reachable at all time.
-	# - Uses the given input argument as domain to test against, else CONFIG_CHECK_DNS_DOMAIN from dietpi.txt, else defaults to dns9.quad9.net (Quad9 DNS domain).
-	# - Uses G_CHECK_URL_TIMEOUT and G_CHECK_URL_ATTEMPTS variables, else CONFIG_G_CHECK_URL_TIMEOUT + CONFIG_G_CHECK_URL_ATTEMPTS from dietpi.txt, else defaults to 10 seconds and 2 attempts (1 retry).
-	# - Optional arguments:
-	#	$* = domain + optional ping arguments
-	# - Optional variables:
-	#	G_CHECK_URL_TIMEOUT to override default and dietpi.txt set timeout
-	#	G_CHECK_URL_ATTEMPTS to override default and dietpi.txt set attempts
-	G_CHECK_DNS(){
+				'Double timeout' ': Retry with doubled timeout for ping to wait for a reply'
+				'Disable IPv6' ': Disable IPv6 on your system and continue'
+				'Network settings' ': Enter dietpi-config network options'
+			)
+			declare -A G_EXEC_ARRAY_ACTION=(
 
-		# Obtain IP
-		local domain
-		if [[ ! $* ]]; then
-
-			domain=$(sed -n '/^[[:blank:]]*CONFIG_CHECK_DNS_DOMAIN=/{s/^[^=]*=//p;q}' /boot/dietpi.txt)
-			[[ $domain ]] || domain='dns9.quad9.net'
-
-		fi
-
-		# Obtain timeout
-		if ! disable_error=1 G_CHECK_VALIDINT "$G_CHECK_URL_TIMEOUT" 0; then
-
-			G_CHECK_URL_TIMEOUT=$(sed -n '/^[[:blank:]]*CONFIG_G_CHECK_URL_TIMEOUT=/{s/^[^=]*=//p;q}' /boot/dietpi.txt)
-			disable_error=1 G_CHECK_VALIDINT "$G_CHECK_URL_TIMEOUT" 0 || G_CHECK_URL_TIMEOUT=10
-
+				['Double timeout']='((acommand[4]*=2)); attempt=1; continue 2'
+				['Disable IPv6']='/boot/dietpi/func/dietpi-set_hardware enableipv6 0; acommand=(:); attempt=1; continue 2'
+				['Network settings']='/boot/dietpi/dietpi-config 8 1'
+			)
+			G_EXEC_RETRIES=$(( $attempts - 1 )) # 2 attempts = 1 retry
+			G_EXEC_DESC='Checking IPv6 network connectivity' G_EXEC ping -6nc 1 -W "$timeout" "$ip"
 		fi
 
-		# Obtain attempts
-		if ! disable_error=1 G_CHECK_VALIDINT "$G_CHECK_URL_ATTEMPTS" 1; then
+		# Obtain test domain
+		local domain=$(sed -n '/^[[:blank:]]*CONFIG_CHECK_DNS_DOMAIN=/{s/^[^=]*=//p;q}' /boot/dietpi.txt)
+		[[ $domain ]] || domain='dns9.quad9.net'
 
-			G_CHECK_URL_ATTEMPTS=$(sed -n '/^[[:blank:]]*CONFIG_G_CHECK_URL_ATTEMPTS=/{s/^[^=]*=//p;q}' /boot/dietpi.txt)
-			disable_error=1 G_CHECK_VALIDINT "$G_CHECK_URL_ATTEMPTS" 1 || G_CHECK_URL_ATTEMPTS=2
-
-		fi
-		G_EXEC_RETRIES=$(( $G_CHECK_URL_ATTEMPTS - 1 )) # 2 attempts = 1 retry
-
-		# Re-assign timeout ($5 => acommand[4]) on every retry, in case it is changed as solution attempt
-		declare -F G_EXEC_PRE_FUNC &> /dev/null && eval "G_EXEC_PRE_FUNC_ORIG()$(declare -f G_EXEC_PRE_FUNC | tail -n +2)"
-		G_EXEC_PRE_FUNC(){ acommand[4]=$G_CHECK_URL_TIMEOUT; declare -F G_EXEC_PRE_FUNC_ORIG &> /dev/null && G_EXEC_PRE_FUNC_ORIG; }
-
-		G_EXEC_DESC='Checking DNS resolver' G_EXEC getent hosts "${domain:-$@}"
-		local exit_code=$?
-
-		unset -v G_CHECK_URL_TIMEOUT G_CHECK_URL_ATTEMPTS
-		unset -f G_EXEC_PRE_FUNC_ORIG
-		return "$exit_code"
-
+		# Check DNS resolver
+		G_EXEC_ARRAY_TEXT=('Network settings' ': Enter dietpi-config network options')
+		declare -A G_EXEC_ARRAY_ACTION=(['Network settings']='/boot/dietpi/dietpi-config 8 1')
+		G_EXEC_DESC='Checking DNS resolver' G_EXEC getent hosts "$domain"
 	}
 
 	# URL connection test
 	# - Checks a specific HTTP/HTTPS/FTP online resource via its URL
 	# - Required arguments:
 	#	$* = URL + optional curl arguments
-	# - Optional variables:
-	#	G_CHECK_URL_TIMEOUT to override default and dietpi.txt set timeout
-	#	G_CHECK_URL_ATTEMPTS to override default and dietpi.txt set attempts
-	G_CHECK_URL(){
-
+	G_CHECK_URL()
+	{
 		# Obtain timeout
-		if ! disable_error=1 G_CHECK_VALIDINT "$G_CHECK_URL_TIMEOUT" 0; then
-
-			G_CHECK_URL_TIMEOUT=$(sed -n '/^[[:blank:]]*CONFIG_G_CHECK_URL_TIMEOUT=/{s/^[^=]*=//p;q}' /boot/dietpi.txt)
-			disable_error=1 G_CHECK_VALIDINT "$G_CHECK_URL_TIMEOUT" 0 || G_CHECK_URL_TIMEOUT=10
-
-		fi
+		local timeout=$(sed -n '/^[[:blank:]]*CONFIG_G_CHECK_URL_TIMEOUT=/{s/^[^=]*=//p;q}' /boot/dietpi.txt)
+		disable_error=1 G_CHECK_VALIDINT "$timeout" 0 || timeout=10
 
 		# Obtain attempts
-		if ! disable_error=1 G_CHECK_VALIDINT "$G_CHECK_URL_ATTEMPTS" 1; then
+		local attempts=$(sed -n '/^[[:blank:]]*CONFIG_G_CHECK_URL_ATTEMPTS=/{s/^[^=]*=//p;q}' /boot/dietpi.txt)
+		disable_error=1 G_CHECK_VALIDINT "$attempts" 1 || attempts=2
 
-			G_CHECK_URL_ATTEMPTS=$(sed -n '/^[[:blank:]]*CONFIG_G_CHECK_URL_ATTEMPTS=/{s/^[^=]*=//p;q}' /boot/dietpi.txt)
-			disable_error=1 G_CHECK_VALIDINT "$G_CHECK_URL_ATTEMPTS" 1 || G_CHECK_URL_ATTEMPTS=2
+		G_EXEC_ARRAY_TEXT=(
 
-		fi
-		G_EXEC_RETRIES=$(( $G_CHECK_URL_ATTEMPTS - 1 )) # 2 attempts = 1 retry
+			'Double timeout' ': Retry with doubled timeout for ping to wait for a reply'
+			'Network settings' ': Enter dietpi-config network options'
+		)
+		declare -A G_EXEC_ARRAY_ACTION=(
 
-		# Re-assign timeout ($3 => acommand[2]) on every retry, in case it is changed as solution attempt
-		declare -F G_EXEC_PRE_FUNC &> /dev/null && eval "G_EXEC_PRE_FUNC_ORIG()$(declare -f G_EXEC_PRE_FUNC | tail -n +2)"
-		G_EXEC_PRE_FUNC(){ acommand[2]=$G_CHECK_URL_TIMEOUT; declare -F G_EXEC_PRE_FUNC_ORIG &> /dev/null && G_EXEC_PRE_FUNC_ORIG; }
-
+			['Double timeout']='((acommand[2]*=2)); attempt=1; continue 2'
+			['Network settings']='/boot/dietpi/dietpi-config 8 1'
+		)
 		# "--retry" only applies on "a timeout, an FTP 4xx response code or an HTTP 5xx response code", hence we loop ourself.
-		G_EXEC_DESC="Checking URL: $*" G_EXEC curl -ILfvm "$G_CHECK_URL_TIMEOUT" "$@"
-		local exit_code=$?
-
-		unset -v G_CHECK_URL_TIMEOUT G_CHECK_URL_ATTEMPTS
-		unset -f G_EXEC_PRE_FUNC_ORIG
-		return "$exit_code"
-
+		G_EXEC_RETRIES=$(( $attempts - 1 )) # 2 attempts = 1 retry
+		G_EXEC_DESC="Checking URL: $*" G_EXEC curl -ILfvm "$timeout" "$@"
 	}
 
 	#-----------------------------------------------------------------------------------
