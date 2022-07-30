@@ -355,34 +355,36 @@
 		G_EXEC partx -u "$FP_SOURCE"
 		Run_fsck
 
-		# Shrink filesystem to minimum
-		if [[ $ROOT_FS_TYPE == 'ext4' ]]
+		# Shrink last filesystem to minimum
+		local last_part_dev=$(lsblk -rnpo NAME /dev/mmcblk0?* | tail -1)
+		local last_fs_type=$(lsblk -no FSTYPE "$last_part_dev")
+		if [[ $last_fs_type == 'ext4' ]]
 		then
 			# Disable and enable journal to clear it and allow further size reduction
-			G_EXEC tune2fs -O '^has_journal' "$FP_ROOT_DEV"
+			G_EXEC tune2fs -O '^has_journal' "$last_part_dev"
 			G_EXEC sync
 			G_EXEC sleep 1
-			G_EXEC tune2fs -O 'has_journal' "$FP_ROOT_DEV"
+			G_EXEC tune2fs -O 'has_journal' "$last_part_dev"
 			G_EXEC sync
 			G_EXEC sleep 1
 
 			# Run multiple times until no change is done any more
-			G_DIETPI-NOTIFY 2 'Shrinking root filesystem to minimum size...'
+			G_DIETPI-NOTIFY 2 'Shrinking last filesystem to minimum size...'
 			local out
 			FS_SIZE=0
 			while :
 			do
-				resize2fs -M "$FP_ROOT_DEV" 2>&1 | tee resize2fs_out
+				resize2fs -M "$last_part_dev" 2>&1 | tee resize2fs_out
 				if out=$(grep -im1 'nothing to do!' resize2fs_out)
 				then
 					rm resize2fs_out
 					FS_SIZE=$(mawk '{print $5}' <<< "$out") # blocks
 					BLOCK_SIZE=${out%%k) *} BLOCK_SIZE=${BLOCK_SIZE##*\(} # KiB
 					# Re-add 4 MiB if it would still fit into the partition, which was required on Raspbian Buster for successful boot.
-					if (( $(<"/sys/class/block/${FP_ROOT_DEV##*/}/size") > $FS_SIZE * $BLOCK_SIZE * 2 + 8 )) # 512 byte sectors
+					if (( $(<"/sys/class/block/${last_part_dev##*/}/size") > $FS_SIZE * $BLOCK_SIZE * 2 + 8 )) # 512 byte sectors
 					then
 						FS_SIZE=$(( $FS_SIZE + 4096/$BLOCK_SIZE )) # blocks
-						G_EXEC resize2fs "$FP_ROOT_DEV" "$FS_SIZE"
+						G_EXEC resize2fs "$last_part_dev" "$FS_SIZE"
 					fi
 					G_DIETPI-NOTIFY 0 "Reduced RootFS size to $(( $FS_SIZE * $BLOCK_SIZE / 1024 + 1 )) MiB"
 					FS_SIZE=$(( $FS_SIZE * $BLOCK_SIZE * 2 )) # blocks => 512 byte sectors
@@ -394,35 +396,35 @@
 				fi
 			done
 
-		#elif [[ $ROOT_FS_TYPE == 'f2fs' && ! $(lsblk -rno FSUSE% "$FP_ROOT_DEV") =~ ^(9[5-9]|100)%$ ]]
+		#elif [[ $last_fs_type == 'f2fs' && ! $(lsblk -rno FSUSE% "$last_part_dev") =~ ^(9[5-9]|100)%$ ]]
 		#then
 			# F2FS does not support shrinking: https://www.reddit.com/r/archlinux/comments/bpp77f/shrinking_a_f2fs_partition/
 			# Hence copy all data outside, remove and re-create a smaller filesytem, then copy them back in, as long as disk usage is not >=95% already.
 			# The UUID changes and there is currently no way to change it back...
-			#local usage=$(lsblk -rnbo FSUSED "$FP_ROOT_DEV") # bytes
-			#local sector_size=$(lsblk -rnbo LOG-SEC "$FP_ROOT_DEV") # bytes
+			#local usage=$(lsblk -rnbo FSUSED "$last_part_dev") # bytes
+			#local sector_size=$(lsblk -rnbo LOG-SEC "$last_part_dev") # bytes
 			#FS_SIZE=$(( ( $usage + 4*1024**2 ) / $sector_size )) # bytes + 4 MiB buffer => sectors
-			#G_DIETPI-NOTIFY 2 'Copying root filesystem content to temporary directory'
+			#G_DIETPI-NOTIFY 2 'Copying last filesystem content to temporary directory'
 			#G_EXEC mkdir "${FP_MNT_TMP}_backup"
-			#G_EXEC mount -o ro "$FP_ROOT_DEV" "$FP_MNT_TMP"
+			#G_EXEC mount -o ro "$last_part_dev" "$FP_MNT_TMP"
 			#G_EXEC cp -a "$FP_MNT_TMP/." "${FP_MNT_TMP}_backup/"
 			#G_EXEC umount "$FP_MNT_TMP"
-			#G_DIETPI-NOTIFY 2 'Purging root filesystem'
-			#G_EXEC dd if=/dev/zero of="$FP_ROOT_DEV" bs=4K count=10
-			#G_DIETPI-NOTIFY 2 'Re-creating smaller root filesystem' # Probably sload.f2fs can replace this? https://manpages.debian.org/sload.f2fs
-			#G_EXEC_OUTPUT=1 G_EXEC mkfs.f2fs -w "$sector_size" "$FP_ROOT_DEV" "$FS_SIZE"
-			#G_DIETPI-NOTIFY 2 'Moving root filesystem content back'
-			#G_EXEC mount "$FP_ROOT_DEV" "$FP_MNT_TMP"
+			#G_DIETPI-NOTIFY 2 'Purging last filesystem'
+			#G_EXEC dd if=/dev/zero of="$last_part_dev" bs=4K count=10
+			#G_DIETPI-NOTIFY 2 'Re-creating smaller last filesystem' # Probably sload.f2fs can replace this? https://manpages.debian.org/sload.f2fs
+			#G_EXEC_OUTPUT=1 G_EXEC mkfs.f2fs -w "$sector_size" "$last_part_dev" "$FS_SIZE"
+			#G_DIETPI-NOTIFY 2 'Moving last filesystem content back'
+			#G_EXEC mount "$last_part_dev" "$FP_MNT_TMP"
 			#G_EXEC cp -a "${FP_MNT_TMP}_backup/." "$FP_MNT_TMP/"
 			#G_EXEC rm -R "${FP_MNT_TMP}_backup"
 			#Unmount_tmp
-			# Assure root filesystem size is in 512 byte sectors, as this is what sfdisk assmes
+			# Assure last filesystem size is in 512 byte sectors, as this is what sfdisk assmes
 			#FS_SIZE=$(( $FS_SIZE * $sector_size / 512 ))
 
-		elif [[ $ROOT_FS_TYPE == 'btrfs' ]]
+		elif [[ $last_fs_type == 'btrfs' ]]
 		then
-			G_DIETPI-NOTIFY 2 'Shrinking root filesystem to minimum size...'
-			G_EXEC mount "$FP_ROOT_DEV" "$FP_MNT_TMP"
+			G_DIETPI-NOTIFY 2 'Shrinking last filesystem to minimum size...'
+			G_EXEC mount "$last_part_dev" "$FP_MNT_TMP"
 			FS_SIZE=$(( $(btrfs inspect-internal min-dev-size "$FP_MNT_TMP") + 4*1024**2 )) # bytes? + 4 MiB buffer
 			G_EXEC_OUTPUT=1 G_EXEC btrfs filesystem resize "$FS_SIZE" "$FP_MNT_TMP"
 			Unmount_tmp
@@ -437,8 +439,8 @@
 			[[ $type ]] || continue
 			if [[ $type == 'ext'[234] ]]
 			then
-				# Disable and enable journal on ext3 and ext3 to clear it, when not root filesystem (where it was done already)
-				if [[ $type != 'ext2' && $path != "$FP_ROOT_DEV" ]]
+				# Disable and enable journal on ext3 and ext4 to clear it, when not last partition (where it was done already)
+				if [[ $type != 'ext2' && $path != "$last_part_dev" ]]
 				then
 					G_EXEC tune2fs -O '^has_journal' "$path"
 					G_EXEC sync
@@ -461,10 +463,10 @@
 		G_EXEC rmdir "$FP_MNT_TMP"
 
 		# Only resize partition when new size would be less than current size
-		if [[ $ROOT_FS_TYPE != 'f2fs' ]] && (( $(<"/sys/class/block/${FP_ROOT_DEV##*/}/size") > $FS_SIZE ))
+		if [[ $last_fs_type != 'f2fs' ]] && (( $(<"/sys/class/block/${last_part_dev##*/}/size") > $FS_SIZE ))
 		then
-			G_DIETPI-NOTIFY 2 "Shrinking root partition to: $(( $FS_SIZE / 2048 + 1 )) MiB"
-			G_EXEC_OUTPUT=1 G_EXEC eval "sfdisk --no-reread --no-tell-kernel -fN${FP_ROOT_DEV: -1} '$FP_SOURCE' <<< ',$FS_SIZE'"
+			G_DIETPI-NOTIFY 2 "Shrinking last partition to: $(( $FS_SIZE / 2048 + 1 )) MiB"
+			G_EXEC_OUTPUT=1 G_EXEC eval "sfdisk --no-reread --no-tell-kernel -fN${last_part_dev: -1} '$FP_SOURCE' <<< ',$FS_SIZE'"
 			G_EXEC partprobe "$FP_SOURCE"
 			G_EXEC partx -u "$FP_SOURCE"
 		fi
