@@ -93,6 +93,11 @@ G_EXEC mount "${FP_LOOP}p1" rootfs
 cat << _EOF_ > rootfs/etc/rc.local || exit 1
 #!/bin/dash
 infocmp "\$TERM" > /dev/null 2>&1 || TERM='dumb'
+if grep -q 'raspbian' /etc/os-release
+then
+	sed -i '/^G_HW_ARCH=/c\G_HW_ARCH=1' /boot/dietpi/.hw_model
+	sed -i '/^G_HW_ARCH_NAME=/c\G_HW_ARCH_NAME=armv6l' /boot/dietpi/.hw_model
+fi
 echo '[ INFO ] Running vaultwarden build script...'
 bash -c "\$(curl -sSf 'https://raw.githubusercontent.com/$G_GITOWNER/DietPi/$G_GITBRANCH/.build/software/vaultwarden/build.bash')"
 mv -v '/tmp/vaultwarden/vaultwarden_$arch.deb' '/vaultwarden_$arch.deb'

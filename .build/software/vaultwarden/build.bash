@@ -17,11 +17,13 @@ export HOME='/tmp/vaultwarden'
 G_EXEC cd "$HOME"
 G_EXEC curl -sSfL 'https://sh.rustup.rs' -o rustup-init.sh
 G_EXEC chmod +x rustup-init.sh
-G_EXEC_OUTPUT=1 G_EXEC ./rustup-init.sh -y --profile minimal --default-toolchain none
+# - ARMv6: Set default target explicitly, otherwise it compiles for ARMv7 in emulated container
+grep -q 'raspbian' /etc/os-release && host=('--default-host' 'arm-unknown-linux-gnueabihf') || host=()
+G_EXEC_OUTPUT=1 G_EXEC ./rustup-init.sh -y --profile minimal --default-toolchain none "${host[@]}"
 G_EXEC_NOHALT=1 G_EXEC rm rustup-init.sh
 export PATH="$HOME/.cargo/bin:$PATH"
 
-version='1.25.1'
+version='1.25.2'
 G_DIETPI-NOTIFY 2 "Building vaultwarden version \e[33m$version"
 [[ -d vaultwarden-$version ]] && G_EXEC rm -R "vaultwarden-$version"
 G_EXEC curl -sSfLO "https://github.com/dani-garcia/vaultwarden/archive/$version.tar.gz"

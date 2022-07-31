@@ -114,19 +114,11 @@ Available commands:
 
 	}
 
-	Check_Net_and_Time_sync(){
-
-		# Check network connectivity
-		# shellcheck disable=SC2119
-		G_CHECK_CON
-
-		# Check DNS resolver
-		# shellcheck disable=SC2119
-		G_CHECK_DNS
-
-		# Network time sync
+	Check_Net_and_Time_sync()
+	{
+		# Check network connectivity and sync system clock
+		G_CHECK_NET
 		/boot/dietpi/func/run_ntpd
-
 	}
 
 	#/////////////////////////////////////////////////////////////////////////////////////
@@ -6458,11 +6450,24 @@ _EOF_
 			# Install
 			G_EXEC curl -sSfL "$url" -o install.sh
 			G_EXEC chmod +x install.sh
+			# - Skip web interface dialogue (which defaults to "true"), since we install a web server and PHP anyway
+			# - Skip supported OS check. We do not support Debian testing but we are testing it already now.
 			# - Skip web server install, since we allow to choose and install it prior to Pi-hole
-			# - Skip supported OS check. We do not support Debian testing suite but we are testing it already now.
+			G_EXEC sed -i '/^[[:blank:]]*setAdminFlag$/d' install.sh
 			export PIHOLE_SKIP_OS_CHECK=true
-			G_EXEC_NOEXIT=1 G_EXEC_OUTPUT=1 G_EXEC ./install.sh --disable-install-webserver || aSOFTWARE_INSTALL_STATE[$software_id]=0
+			local retry TERM_old=
+			[[ $TERM == 'xterm' ]] && { TERM_old=$TERM; export TERM=linux; }
+			while :
+			do
+				./install.sh --disable-install-webserver && break
+				[[ $G_INTERACTIVE == 0 ]] || read -rp 'The Pi-hole installer failed. Do you want to retry? [yN]: ' retry
+				[[ $retry =~ ^[yY]([eE][sS])?$ ]] || { aSOFTWARE_INSTALL_STATE[$software_id]=0; break; }
+			done
 			G_EXEC_NOHALT=1 G_EXEC rm install.sh
+			[[ $TERM_old ]] && TERM=$TERM_old
+
+			# Skip setup if installer errored out
+			if (( ${aSOFTWARE_INSTALL_STATE[$software_id]} == 1 )); then
 
 			# Apply most resource friendly and officially recommended NULL blocking: https://docs.pi-hole.net/ftldns/blockingmode/
 			G_CONFIG_INJECT 'BLOCKINGMODE=' 'BLOCKINGMODE=NULL' /etc/pihole/pihole-FTL.conf
@@ -6563,6 +6568,7 @@ _EOF_
 - https://dietpi.com/docs/software/dns_servers/#pi-hole'
 			G_CONFIG_INJECT 'MAXDBDAYS=' 'MAXDBDAYS=2' /etc/pihole/pihole-FTL.conf
 
+			fi
 		fi
 
 		software_id=126 # AdGuard Home
@@ -6726,7 +6732,6 @@ _EOF_
 		software_id=204 # Navidrome
 		if (( ${aSOFTWARE_INSTALL_STATE[$software_id]} == 1 ))
 		then
-
 			Banner_Installing
 
 			case $G_HW_ARCH in
@@ -6762,7 +6767,6 @@ Scanner.Extractor = 'taglib'
 CoverJpegQuality = '75'
 CoverArtPriority = 'embedded'
 _EOF_
-
 			# Service: https://www.navidrome.org/docs/installation/linux/#create-a-systemd-unit
 			cat << '_EOF_' > /etc/systemd/system/navidrome.service
 [Unit]
@@ -6812,9 +6816,8 @@ ProtectSystem=full
 [Install]
 WantedBy=multi-user.target
 _EOF_
-
 			# Permissions
-			G_EXEC chown -R navidrome:dietpi /mnt/dietpi_userdata/navidrome
+			G_EXEC chown -R navidrome:root /mnt/dietpi_userdata/navidrome
 
 			Download_Test_Media
 		fi
@@ -10054,6 +10057,7 @@ _EOF_
 			[[ -f '/opt/vaultwarden/target/release/vaultwarden' ]] && G_EXEC rm -R /opt/vaultwarden # Pre-v8.7
 			[[ -f '/etc/systemd/system/vaultwarden.service' ]] && G_EXEC rm /etc/systemd/system/vaultwarden.service # Pre-v8.7
 			Download_Install "https://dietpi.com/downloads/binaries/bullseye/vaultwarden_$G_HW_ARCH_NAME.deb"
+			G_EXEC systemctl stop vaultwarden
 		fi
 
 		software_id=193 # K3s
@@ -10511,8 +10515,8 @@ _EOF_
 		fi
 
 		software_id=180 # Bazarr
-		if (( ${aSOFTWARE_INSTALL_STATE[$software_id]} == 1 )); then
-
+		if (( ${aSOFTWARE_INSTALL_STATE[$software_id]} == 1 ))
+		then
 			Banner_Installing # https://wiki.bazarr.media/Getting-Started/Installation/Linux/linux/
 
 			# Reinstall: Skip download and install, advice to use internal updater from web UI
@@ -10533,6 +10537,15 @@ _EOF_
 			G_EXEC cd /opt/bazarr
 			G_EXEC_OUTPUT=1 G_EXEC pip3 install --no-cache-dir -Ur requirements.txt
 			G_EXEC cd "$G_WORKING_DIR"
+
+			# Workaround for https://github.com/morpheus65535/bazarr/issues/1908 until https://github.com/morpheus65535/bazarr-binaries/pull/1 has been released
+			if (( $G_HW_ARCH == 3 )) && md5sum -c --status <<< '07a6371cc7db8493352739ce26b19ea1  /opt/bazarr/bin/Linux/aarch64/unrar/unrar'
+			then
+				G_EXEC curl -sSfO 'https://raw.githubusercontent.com/morpheus65535/bazarr-binaries/ce98ece/bin/Linux/aarch64/unrar/unrar'
+				G_EXEC sha512sum -c --quiet <<< '645f25992dc99fce597dc3aa65654a74fc31a022951202786e69d61f73c3df33ad85b89df8535735e3b21faeaf4e63ff9c70929a060511125d415fd5308396ee  unrar'
+				G_EXEC mv {,/opt/bazarr/bin/Linux/aarch64/unrar/}unrar
+				G_EXEC sed -i 's/07a6371cc7db8493352739ce26b19ea1/be7a08a75ffb1dcc5f8c6b16a75e822c/' /opt/bazarr/bazarr/utilities/binaries.json
+			fi
 
 			# Data dir
 			[[ -d '/mnt/dietpi_userdata/bazarr' ]] || G_EXEC mkdir /mnt/dietpi_userdata/bazarr
@@ -10599,7 +10612,6 @@ _EOF_
 					G_CONFIG_INJECT 'use_radarr[[:blank:]]*=' 'use_radarr = True' /mnt/dietpi_userdata/bazarr/config/config.ini '\[general\]'
 				fi
 			fi
-
 		fi
 
 		software_id=146 # Tautulli
@@ -10823,7 +10835,7 @@ _EOF_
 			else
 				# ARMv7
 				local url=$(curl -sSfL 'https://api.github.com/repos/Prowlarr/Prowlarr/releases' | mawk -F\" '/"browser_download_url": .*linux-core-arm\.tar\.gz"/{print $4}' | head -1)
-				local fallback_url='https://github.com/Prowlarr/Prowlarr/releases/download/v0.4.2.1879/Prowlarr.develop.0.4.2.1879.linux-core-arm.tar.gz'
+				local fallback_url='https://github.com/Prowlarr/Prowlarr/releases/download/v0.4.3.1921/Prowlarr.develop.0.4.3.1921.linux-core-arm.tar.gz'
 
 				# ARMv8
 				if (( $G_HW_ARCH == 3 ))
@@ -10890,7 +10902,6 @@ _EOF_
 		software_id=203 # Readarr
 		if (( ${aSOFTWARE_INSTALL_STATE[$software_id]} == 1 ))
 		then
-
 			Banner_Installing
 
 			# .NET dependency: https://github.com/dotnet/core/blob/main/Documentation/linux-prereqs.md
@@ -11427,7 +11438,7 @@ _EOF_
 				*) local arch='amd64';;
 			esac
 
-			local fallback_url="https://github.com/go-gitea/gitea/releases/download/v1.16.9/gitea-1.16.9-linux-$arch"
+			local fallback_url="https://github.com/go-gitea/gitea/releases/download/v1.17.0/gitea-1.17.0-linux-$arch"
 			Download_Install "$(curl -sSfL 'https://api.github.com/repos/go-gitea/gitea/releases/latest' | mawk -F\" "/\"browser_download_url\": \".*\/gitea-[^\"\/]*-linux-$arch\"/{print \$4}")" /mnt/dietpi_userdata/gitea/gitea
 
 			# User
@@ -16043,7 +16054,7 @@ _EOF_
 		# Mark dependencies for install
 		Mark_Dependencies
 
-		# Check for network connectivity, DNS resolving and network time sync: https://github.com/MichaIng/DietPi/issues/786
+		# Check network connectivity, DNS resolving and network time sync: https://github.com/MichaIng/DietPi/issues/786
 		Check_Net_and_Time_sync
 
 		# Pre-create directories which are required for many software installs
