@@ -21,7 +21,7 @@ case $G_HW_ARCH_NAME in
 	'x86_64') export G_HW_ARCH=10;;
 	*) G_DIETPI-NOTIFY 1 "Unsupported host system architecture \"$G_HW_ARCH_NAME\" detected, aborting..."; exit 1;;
 esac
-readonly G_PROGRAM_NAME='DietPi-Amiberry_container_setup'
+readonly G_PROGRAM_NAME='DietPi-vaultwarden_container_setup'
 G_CHECK_ROOT_USER
 G_CHECK_ROOTFS_RW
 readonly FP_ORIGIN=$PWD # Store origin dir
@@ -32,12 +32,12 @@ G_EXEC cd "$FP_ORIGIN" # Process everything in origin dir instead of /tmp/$G_PRO
 # Process inputs
 ##########################################
 DISTRO=
-PLATFORM=
+ARCH=
 while (( $# ))
 do
 	case $1 in
 		'-d') shift; DISTRO=$1;;
-		'-p') shift; PLATFORM=$1;;
+		'-a') shift; ARCH=$1;;
 		*) G_DIETPI-NOTIFY 1 "Invalid input \"$1\", aborting..."; exit 1;;
 	esac
 	shift
@@ -50,19 +50,20 @@ case $DISTRO in
 	*) G_DIETPI-NOTIFY 1 "Invalid distro \"$DISTRO\" passed, aborting..."; exit 1;;
 esac
 image=
-case $PLATFORM in
-        'rpi'[1-4]) image="DietPi_Container-ARMv6-${distro^}";;
-	'c1'|'xu4'|'RK3288'|'sun8i'|'s812') image="DietPi_Container-ARMv7-${distro^}";;
-	'rpi'[34]'-64-dmx'|'AMLSM1'|'n2'|'a64') image="DietPi_Container-ARMv8-${distro^}";;
-	'x86-64') image="DietPi_Container-x86_64-${distro^}";;
-	*) G_DIETPI-NOTIFY 1 "Invalid platform \"$PLATFORM\" passed, aborting..."; exit 1;;
+arch=
+case $ARCH in
+	1) image="DietPi_Container-ARMv6-${distro^}" arch='armv6l';;
+	2) image="DietPi_Container-ARMv7-${distro^}" arch='armv7l';;
+	3) image="DietPi_Container-ARMv8-${distro^}" arch='aarch64';;
+	10) image="DietPi_Container-x86_64-${distro^}" arch='x86_64';;
+	*) G_DIETPI-NOTIFY 1 "Invalid architecture \"$ARCH\" passed, aborting..."; exit 1;;
 esac
 
 ##########################################
 # Dependencies
 ##########################################
 apackages=('7zip' 'parted' 'fdisk' 'systemd-container')
-[[ $PLATFORM == 'x86-64' ]] || apackages+=('qemu-user-static' 'binfmt-support')
+(( $G_HW_ARCH == $ARCH || ( $G_HW_ARCH < 10 && $G_HW_ARCH > $ARCH ) )) || apackages+=('qemu-user-static' 'binfmt-support')
 G_AG_CHECK_INSTALL_PREREQ "${apackages[@]}"
 
 ##########################################
@@ -89,23 +90,17 @@ G_EXEC mkdir rootfs
 G_EXEC mount "${FP_LOOP}p1" rootfs
 
 # Automated build
-cat << '_EOF_' > rootfs/etc/rc.local || exit 1
+cat << _EOF_ > rootfs/etc/rc.local || exit 1
 #!/bin/dash
-infocmp "$TERM" > /dev/null 2>&1 || TERM='dumb'
-echo '[ INFO ] Running Amiberry build script...'
-_EOF_
-
-# - RPi 64-bit: Add RPi repo, ARMv6 container images contain it already
-[[ $PLATFORM == 'rpi'[34]'-64-dmx' ]] && cat << _EOF_ >> rootfs/etc/rc.local
-echo 'deb https://archive.raspberrypi.org/debian/ ${distro/bookworm/bullseye} main' > /etc/apt/sources.list.d/raspi.list
-curl -sSf 'https://archive.raspberrypi.org/debian/pool/main/r/raspberrypi-archive-keyring/raspberrypi-archive-keyring_2021.1.1+rpt1_all.deb' -o /tmp/keyring.deb
-dpkg -i /tmp/keyring.deb
-rm -v /tmp/keyring.deb
-_EOF_
-
-cat << _EOF_ >> rootfs/etc/rc.local || exit 1
-bash -c "\$(curl -sSf 'https://raw.githubusercontent.com/$G_GITOWNER/DietPi/$G_GITBRANCH/.build/software/Amiberry/build.bash')" 'DietPi-Amiberry_build' '$PLATFORM'
-mv -v '/tmp/amiberry_$PLATFORM.deb' '/amiberry_$PLATFORM.deb'
+infocmp "\$TERM" > /dev/null 2>&1 || TERM='dumb'
+if grep -q 'raspbian' /etc/os-release
+then
+	sed -i '/^G_HW_ARCH=/c\G_HW_ARCH=1' /boot/dietpi/.hw_model
+	sed -i '/^G_HW_ARCH_NAME=/c\G_HW_ARCH_NAME=armv6l' /boot/dietpi/.hw_model
+fi
+echo '[ INFO ] Running vaultwarden build script...'
+bash -c "\$(curl -sSf 'https://raw.githubusercontent.com/$G_GITOWNER/DietPi/$G_GITBRANCH/.build/software/vaultwarden/build.bash')"
+mv -v '/tmp/vaultwarden/vaultwarden_$arch.deb' '/vaultwarden_$arch.deb'
 poweroff
 _EOF_
 G_EXEC chmod +x rootfs/etc/rc.local
@@ -118,5 +113,5 @@ G_EXEC eval 'echo -e '\''[Unit]\nAfter=dietpi-postboot.service'\'' > rootfs/etc/
 # Boot container
 ##########################################
 systemd-nspawn -bD rootfs --bind="$FP_LOOP"{,p1} --bind=/dev/disk
-[[ -f rootfs/amiberry_$PLATFORM.deb ]] || exit 1
+[[ -f rootfs/vaultwarden_$arch.deb ]] || exit 1
 }

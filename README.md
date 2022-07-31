@@ -317,6 +317,7 @@ Links to hardware and software manufacturers, sources and build instructions use
 - [Radarr](https://github.com/Radarr/Radarr)
 - [Lidarr](https://github.com/Lidarr/Lidarr)
 - [Prowlarr](https://github.com/Prowlarr/Prowlarr)
+- [Readarr](https://github.com/Readarr/Readarr)
 - [Jackett](https://github.com/Jackett/Jackett)
 - [HAProxy](https://github.com/haproxy/haproxy)
 - [Prometheus Node Exporter](https://github.com/prometheus/node_exporter)
@@ -324,6 +325,7 @@ Links to hardware and software manufacturers, sources and build instructions use
 - [Tailscale](https://github.com/tailscale/tailscale)
 - [Rclone](https://github.com/rclone/rclone)
 - [ZeroTier](https://github.com/zerotier/ZeroTierOne)
+- [Navidrome](https://github.com/navidrome/navidrome)
 
 ---
 
