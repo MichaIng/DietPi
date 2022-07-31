@@ -370,8 +370,7 @@
 
 			# Run multiple times until no change is done any more
 			G_DIETPI-NOTIFY 2 'Shrinking last filesystem to minimum size...'
-			local out
-			FS_SIZE=0
+			local out last_fs_size=$(tune2fs -l "$last_part_dev" | mawk '/^Block count/{print $3;exit}') # blocks
 			while :
 			do
 				resize2fs -M "$last_part_dev" 2>&1 | tee resize2fs_out
@@ -380,13 +379,16 @@
 					rm resize2fs_out
 					FS_SIZE=$(mawk '{print $5}' <<< "$out") # blocks
 					BLOCK_SIZE=${out%%k) *} BLOCK_SIZE=${BLOCK_SIZE##*\(} # KiB
-					# Re-add 4 MiB if it would still fit into the partition, which was required on Raspbian Buster for successful boot.
-					if (( $(<"/sys/class/block/${last_part_dev##*/}/size") > $FS_SIZE * $BLOCK_SIZE * 2 + 8 )) # 512 byte sectors
+					# Re-add 4 MiB if it would be still smaller than before, which was required on Raspbian Buster for successful boot, else leave original size
+					if (( $last_fs_size > $FS_SIZE + 4096/$BLOCK_SIZE )) # blocks
 					then
 						FS_SIZE=$(( $FS_SIZE + 4096/$BLOCK_SIZE )) # blocks
-						G_EXEC resize2fs "$last_part_dev" "$FS_SIZE"
+						G_DIETPI-NOTIFY 0 "Reducing last filesystem size to $(( $FS_SIZE * $BLOCK_SIZE / 1024 + 1 )) MiB"
+					else
+						FS_SIZE=$last_fs_size
+						G_DIETPI-NOTIFY 0 "Leaving last filesystem size at $(( $FS_SIZE * $BLOCK_SIZE / 1024 + 1 )) MiB"
 					fi
-					G_DIETPI-NOTIFY 0 "Reduced last filesystem size to $(( $FS_SIZE * $BLOCK_SIZE / 1024 + 1 )) MiB"
+					G_EXEC resize2fs "$last_part_dev" "$FS_SIZE"
 					FS_SIZE=$(( $FS_SIZE * $BLOCK_SIZE * 2 )) # blocks => 512 byte sectors
 					break
 
@@ -396,30 +398,30 @@
 				fi
 			done
 
-		#elif [[ $last_fs_type == 'f2fs' && ! $(lsblk -rno FSUSE% "$last_part_dev") =~ ^(9[5-9]|100)%$ ]]
-		#then
+		elif [[ $last_fs_type == 'f2fs' && ! $(lsblk -rno FSUSE% "$last_part_dev") =~ ^(9[5-9]|100)%$ ]]
+		then
 			# F2FS does not support shrinking: https://www.reddit.com/r/archlinux/comments/bpp77f/shrinking_a_f2fs_partition/
-			# Hence copy all data outside, remove and re-create a smaller filesytem, then copy them back in, as long as disk usage is not >=95% already.
+			# Hence copy all data outside, remove and re-create a smaller filesystem, then copy them back in, as long as disk usage is not >=95% already.
 			# The UUID changes and there is currently no way to change it back...
-			#local usage=$(lsblk -rnbo FSUSED "$last_part_dev") # bytes
-			#local sector_size=$(lsblk -rnbo LOG-SEC "$last_part_dev") # bytes
-			#FS_SIZE=$(( ( $usage + 4*1024**2 ) / $sector_size )) # bytes + 4 MiB buffer => sectors
-			#G_DIETPI-NOTIFY 2 'Copying last filesystem content to temporary directory'
-			#G_EXEC mkdir "${FP_MNT_TMP}_backup"
-			#G_EXEC mount -o ro "$last_part_dev" "$FP_MNT_TMP"
-			#G_EXEC cp -a "$FP_MNT_TMP/." "${FP_MNT_TMP}_backup/"
-			#G_EXEC umount "$FP_MNT_TMP"
-			#G_DIETPI-NOTIFY 2 'Purging last filesystem'
-			#G_EXEC dd if=/dev/zero of="$last_part_dev" bs=4K count=10
-			#G_DIETPI-NOTIFY 2 'Re-creating smaller last filesystem' # Probably sload.f2fs can replace this? https://manpages.debian.org/sload.f2fs
-			#G_EXEC_OUTPUT=1 G_EXEC mkfs.f2fs -w "$sector_size" "$last_part_dev" "$FS_SIZE"
-			#G_DIETPI-NOTIFY 2 'Moving last filesystem content back'
-			#G_EXEC mount "$last_part_dev" "$FP_MNT_TMP"
-			#G_EXEC cp -a "${FP_MNT_TMP}_backup/." "$FP_MNT_TMP/"
-			#G_EXEC rm -R "${FP_MNT_TMP}_backup"
-			#Unmount_tmp
-			# Assure last filesystem size is in 512 byte sectors, as this is what sfdisk assmes
-			#FS_SIZE=$(( $FS_SIZE * $sector_size / 512 ))
+			local usage=$(lsblk -rnbo FSUSED "$last_part_dev") # bytes
+			local sector_size=$(lsblk -rnbo LOG-SEC "$last_part_dev") # bytes
+			FS_SIZE=$(( ( $usage + 4*1024**2 ) / $sector_size )) # bytes + 4 MiB buffer => sectors
+			G_DIETPI-NOTIFY 2 'Copying last filesystem content to temporary directory'
+			G_EXEC mkdir "${FP_MNT_TMP}_backup"
+			G_EXEC mount -o ro "$last_part_dev" "$FP_MNT_TMP"
+			G_EXEC cp -a "$FP_MNT_TMP/." "${FP_MNT_TMP}_backup/"
+			G_EXEC umount "$FP_MNT_TMP"
+			G_DIETPI-NOTIFY 2 'Purging last filesystem'
+			G_EXEC dd if=/dev/zero of="$last_part_dev" bs=4K count=10
+			G_DIETPI-NOTIFY 2 'Re-creating smaller last filesystem' # Probably sload.f2fs can replace this? https://manpages.debian.org/sload.f2fs
+			G_EXEC_OUTPUT=1 G_EXEC mkfs.f2fs -w "$sector_size" "$last_part_dev" "$FS_SIZE"
+			G_DIETPI-NOTIFY 2 'Moving last filesystem content back'
+			G_EXEC mount "$last_part_dev" "$FP_MNT_TMP"
+			G_EXEC cp -a "${FP_MNT_TMP}_backup/." "$FP_MNT_TMP/"
+			G_EXEC rm -R "${FP_MNT_TMP}_backup"
+			Unmount_tmp
+			# Assure last filesystem size is in 512 byte sectors, as this is what sfdisk assumes
+			FS_SIZE=$(( $FS_SIZE * $sector_size / 512 ))
 
 		elif [[ $last_fs_type == 'btrfs' ]]
 		then
