@@ -144,7 +144,7 @@ _EOF_
 # - prerm
 cat << '_EOF_' > "$DIR/DEBIAN/prerm"
 #!/bin/sh
-if [ -d '/run/systemd/system' ] && [ -f '/lib/systemd/system/vaultwarden.service' ]
+if [ "$1" = 'remove' ] && [ -d '/run/systemd/system' ] && [ -f '/lib/systemd/system/vaultwarden.service' ]
 then
 	echo 'Deconfiguring vaultwarden systemd service ...'
 	systemctl unmask vaultwarden
@@ -195,7 +195,7 @@ grep -q 'raspbian' /etc/os-release && DEPS_APT_VERSIONED=$(sed 's/+rp[it][0-9]\+
 # - control
 cat << _EOF_ > "$DIR/DEBIAN/control"
 Package: vaultwarden
-Version: $version-dietpi1
+Version: $version-dietpi2
 Architecture: $(dpkg --print-architecture)
 Maintainer: MichaIng <micha@dietpi.com>
 Date: $(date -u '+%a, %d %b %Y %T %z')

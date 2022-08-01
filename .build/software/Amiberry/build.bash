@@ -42,7 +42,7 @@ else
 fi
 
 # Build libSDL2_image
-v_img='2.6.0'
+v_img='2.6.1'
 if [[ ! -d /tmp/SDL2_image-$v_img ]]
 then
 	G_DIETPI-NOTIFY 2 "Building libSDL2_image version \e[33m$v_img"
@@ -150,7 +150,7 @@ echo '/mnt/dietpi_userdata/amiberry/conf/amiberry.conf' > "$DIR/DEBIAN/conffiles
 # - prerm
 cat << '_EOF_' > "$DIR/DEBIAN/prerm"
 #!/bin/sh
-if [ -d '/run/systemd/system' ] && [ -f '/lib/systemd/system/amiberry.service' ]
+if [ "$1" = 'remove' ] && [ -d '/run/systemd/system' ] && [ -f '/lib/systemd/system/amiberry.service' ]
 then
 	echo 'Deconfiguring Amiberry systemd service ...'
 	systemctl unmask amiberry
@@ -186,7 +186,7 @@ grep -q 'raspbian' /etc/os-release && DEPS_APT_VERSIONED=$(sed 's/+rp[it][0-9]\+
 # - control
 cat << _EOF_ > "$DIR/DEBIAN/control"
 Package: amiberry
-Version: $v_ami-dietpi2
+Version: $v_ami-dietpi3
 Architecture: $(dpkg --print-architecture)
 Maintainer: MichaIng <micha@dietpi.com>
 Date: $(date -u '+%a, %d %b %Y %T %z')
@@ -195,7 +195,7 @@ Installed-Size: $(du -sk "$DIR" | mawk '{print $1}')
 Depends:$DEPS_APT_VERSIONED
 Section: games
 Priority: optional
-Homepage: https://github.com/midwan/amiberry
+Homepage: https://amiberry.com/
 Vcs-Git: https://github.com/midwan/amiberry.git
 Vcs-Browser: https://github.com/midwan/amiberry
 Description: Optimized Amiga emulator for the Raspberry Pi and other ARM boards
