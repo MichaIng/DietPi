@@ -113,6 +113,10 @@ echo '/mnt/dietpi_userdata/vaultwarden/vaultwarden.env' > "$DIR/DEBIAN/conffiles
 # - postinst
 cat << '_EOF_' > "$DIR/DEBIAN/postinst"
 #!/bin/bash
+
+# Enable remote web vault access for fresh package installs onto existing pre-v1.25 vaultwarden installs
+[[ $2 ]] || ! grep -q '^# ROCKET_ADDRESS=0.0.0.0$' /mnt/dietpi_userdata/vaultwarden/vaultwarden.env || sed -i '/^# ROCKET_ADDRESS=0.0.0.0$/c\ROCKET_ADDRESS=0.0.0.0' /mnt/dietpi_userdata/vaultwarden/vaultwarden.env
+
 if [[ -d '/run/systemd/system' ]]
 then
 	if getent passwd vaultwarden > /dev/null
