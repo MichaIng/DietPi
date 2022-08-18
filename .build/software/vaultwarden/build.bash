@@ -114,8 +114,12 @@ echo '/mnt/dietpi_userdata/vaultwarden/vaultwarden.env' > "$DIR/DEBIAN/conffiles
 cat << '_EOF_' > "$DIR/DEBIAN/postinst"
 #!/bin/bash
 
-# Enable remote web vault access for fresh package installs onto existing pre-v1.25 vaultwarden installs
-[[ $2 ]] || ! grep -q '^# ROCKET_ADDRESS=0.0.0.0$' /mnt/dietpi_userdata/vaultwarden/vaultwarden.env || sed -i '/^# ROCKET_ADDRESS=0.0.0.0$/c\ROCKET_ADDRESS=0.0.0.0' /mnt/dietpi_userdata/vaultwarden/vaultwarden.env
+# Enable web vault remote access for fresh package installs onto existing pre-v1.25 vaultwarden installs
+if [[ ! $2 ]] && grep -q '^# ROCKET_ADDRESS=0.0.0.0$' /mnt/dietpi_userdata/vaultwarden/vaultwarden.env
+then
+	echo 'Enabling web vault remote access ...'
+	sed -i '/^# ROCKET_ADDRESS=0.0.0.0$/c\ROCKET_ADDRESS=0.0.0.0' /mnt/dietpi_userdata/vaultwarden/vaultwarden.env
+fi
 
 if [[ -d '/run/systemd/system' ]]
 then
