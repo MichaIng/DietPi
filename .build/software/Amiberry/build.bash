@@ -2,7 +2,7 @@
 . /boot/dietpi/func/dietpi-globals || exit 1
 
 [[ $1 ]] && PLATFORM=$1
-[[ $PLATFORM ]] || { G_WHIP_INPUTBOX 'Build Amiberry? Enter platform: https://github.com/midwan/amiberry/blob/master/Makefile' && PLATFORM=$G_WHIP_RETURNED_VALUE || exit 0; }
+[[ $PLATFORM ]] || { G_WHIP_INPUTBOX 'Build Amiberry? Enter platform: https://github.com/BlitterStudio/amiberry/blob/master/Makefile' && PLATFORM=$G_WHIP_RETURNED_VALUE || exit 0; }
 G_DIETPI-NOTIFY 2 "Amiberry will be built for platform: \e[33m$PLATFORM"
 
 # APT dependencies
@@ -10,7 +10,7 @@ opengl_flags=('--enable-video-opengles2' '--disable-video-opengl')
 adeps_build=('autoconf' 'make' 'g++' 'pkg-config' 'libdrm-dev' 'libgbm-dev' 'libudev-dev' 'libxml2-dev' 'libpng-dev' 'libfreetype6-dev' 'libflac-dev' 'libmpg123-dev' 'libmpeg2-4-dev' 'libasound2-dev' 'wget' 'kbd')
 adeps=('libdrm2' 'libgl1-mesa-dri' 'libgbm1' 'libegl1' 'libudev1' 'libxml2' 'libpng16-16' 'libfreetype6' 'libflac8' 'libmpg123-0' 'libmpeg2-4' 'libasound2' 'wget' 'kbd')
 (( $G_HW_ARCH == 10 )) && opengl_flags=('--disable-video-opengles2' '--enable-video-opengl') adeps_build+=('libgl1-mesa-dev') adeps+=('libgl1') || adeps_build+=('libgles2-mesa-dev') adeps+=('libgles2')
-# - wget: Used for WHDLoad database update: https://github.com/midwan/amiberry/commit/d6c103e3310bcf75c2d72a15849fbdf5eb7432b5
+# - wget: Used for WHDLoad database update: https://github.com/BlitterStudio/amiberry/commit/d6c103e3310bcf75c2d72a15849fbdf5eb7432b5
 # - kbd: For "chvt" used in systemd unit as SDL2 spams the console with every key press
 if [[ $PLATFORM == 'rpi'* ]]
 then
@@ -23,12 +23,12 @@ G_AGDUG
 G_AG_CHECK_INSTALL_PREREQ "${adeps_build[@]}"
 
 # Build libSDL2
-v_sdl='2.0.22'
+v_sdl='2.24.0'
 if [[ ! -d /tmp/SDL2-$v_sdl ]]
 then
 	G_DIETPI-NOTIFY 2 "Building libSDL2 version \e[33m$v_sdl"
 	G_EXEC cd /tmp
-	G_EXEC curl -sSfLO "https://libsdl.org/release/SDL2-$v_sdl.tar.gz"
+	G_EXEC curl -sSfLO "https://github.com/libsdl-org/SDL/releases/download/release-$v_sdl/SDL2-$v_sdl.tar.gz"
 	G_EXEC tar xf "SDL2-$v_sdl.tar.gz"
 	G_EXEC rm "SDL2-$v_sdl.tar.gz"
 	G_EXEC cd "SDL2-$v_sdl"
@@ -47,7 +47,7 @@ if [[ ! -d /tmp/SDL2_image-$v_img ]]
 then
 	G_DIETPI-NOTIFY 2 "Building libSDL2_image version \e[33m$v_img"
 	G_EXEC cd /tmp
-	G_EXEC curl -sSfLO "https://libsdl.org/projects/SDL_image/release/SDL2_image-$v_img.tar.gz"
+	G_EXEC curl -sSfLO "https://github.com/libsdl-org/SDL_image/releases/download/release-$v_img/SDL2_image-$v_img.tar.gz"
 	G_EXEC tar xf "SDL2_image-$v_img.tar.gz"
 	G_EXEC rm "SDL2_image-$v_img.tar.gz"
 	G_EXEC cd "SDL2_image-$v_img"
@@ -66,7 +66,7 @@ if [[ ! -d /tmp/SDL2_ttf-$v_ttf ]]
 then
 	G_DIETPI-NOTIFY 2 "Building libSDL2_ttf version \e[33m$v_ttf"
 	G_EXEC cd /tmp
-	G_EXEC curl -sSfLO "https://libsdl.org/projects/SDL_ttf/release/SDL2_ttf-$v_ttf.tar.gz"
+	G_EXEC curl -sSfLO "https://github.com/libsdl-org/SDL_ttf/releases/download/release-$v_ttf/SDL2_ttf-$v_ttf.tar.gz"
 	G_EXEC tar xf "SDL2_ttf-$v_ttf.tar.gz"
 	G_EXEC rm "SDL2_ttf-$v_ttf.tar.gz"
 	G_EXEC cd "SDL2_ttf-$v_ttf"
@@ -101,7 +101,7 @@ v_ami='5.3'
 G_DIETPI-NOTIFY 2 "Building Amiberry version \e[33m$v_ami\e[90m for platform: \e[33m$PLATFORM"
 [[ -d /tmp/amiberry-$v_ami ]] && G_EXEC rm -R "/tmp/amiberry-$v_ami"
 G_EXEC cd /tmp
-G_EXEC curl -sSfLO "https://github.com/midwan/amiberry/archive/v$v_ami.tar.gz"
+G_EXEC curl -sSfLO "https://github.com/BlitterStudio/amiberry/archive/v$v_ami.tar.gz"
 G_EXEC tar xf "v$v_ami.tar.gz"
 G_EXEC rm "v$v_ami.tar.gz"
 G_EXEC cd "amiberry-$v_ami"
@@ -124,7 +124,7 @@ G_EXEC cp -a /tmp/capsimg-master/capsimg.so "$DIR/mnt/dietpi_userdata/amiberry/l
 cat << '_EOF_' > "$DIR/lib/systemd/system/amiberry.service"
 [Unit]
 Description=Amiberry Amiga Emulator (DietPi)
-Documentation=https://github.com/midwan/amiberry/wiki
+Documentation=https://github.com/BlitterStudio/amiberry/wiki
 
 [Service]
 WorkingDirectory=/mnt/dietpi_userdata/amiberry
@@ -186,7 +186,7 @@ grep -q 'raspbian' /etc/os-release && DEPS_APT_VERSIONED=$(sed 's/+rp[it][0-9]\+
 # - control
 cat << _EOF_ > "$DIR/DEBIAN/control"
 Package: amiberry
-Version: $v_ami-dietpi3
+Version: $v_ami-dietpi4
 Architecture: $(dpkg --print-architecture)
 Maintainer: MichaIng <micha@dietpi.com>
 Date: $(date -u '+%a, %d %b %Y %T %z')
@@ -196,8 +196,8 @@ Depends:$DEPS_APT_VERSIONED
 Section: games
 Priority: optional
 Homepage: https://amiberry.com/
-Vcs-Git: https://github.com/midwan/amiberry.git
-Vcs-Browser: https://github.com/midwan/amiberry
+Vcs-Git: https://github.com/BlitterStudio/amiberry.git
+Vcs-Browser: https://github.com/BlitterStudio/amiberry
 Description: Optimized Amiga emulator for the Raspberry Pi and other ARM boards
  This package ships with optimized libSDL2 and capsimg builds.
 _EOF_
