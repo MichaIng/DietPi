@@ -30,7 +30,9 @@ G_EXEC curl -sSfLO "https://github.com/dani-garcia/vaultwarden/archive/$version.
 G_EXEC tar xf "$version.tar.gz"
 G_EXEC rm "$version.tar.gz"
 G_EXEC cd "vaultwarden-$version"
-G_EXEC_OUTPUT=1 G_EXEC cargo build --features sqlite --release
+free
+df /tmp
+G_EXEC_OUTPUT=1 G_EXEC cargo build -vv --features sqlite --release
 G_EXEC rustup self uninstall -y
 G_EXEC strip --remove-section=.comment --remove-section=.note target/release/vaultwarden
 
