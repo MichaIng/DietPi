@@ -23,6 +23,9 @@ G_EXEC_OUTPUT=1 G_EXEC ./rustup-init.sh -y --profile minimal --default-toolchain
 G_EXEC_NOHALT=1 G_EXEC rm rustup-init.sh
 export PATH="$HOME/.cargo/bin:$PATH"
 
+# ARMv8: Build on disk, else GitHub workflow fails due to insufficient RAM
+(( $G_HW_ARCH == 3 )) && G_EXEC cd /root
+
 version='1.25.2'
 G_DIETPI-NOTIFY 2 "Building vaultwarden version \e[33m$version"
 [[ -d vaultwarden-$version ]] && G_EXEC rm -R "vaultwarden-$version"
@@ -37,6 +40,7 @@ G_EXEC strip --remove-section=.comment --remove-section=.note target/release/vau
 # Build DEB package
 G_DIETPI-NOTIFY 2 'Building vaultwarden DEB package'
 G_EXEC cd "$HOME"
+(( $G_HW_ARCH == 3 )) && G_EXEC mv "/root/vaultwarden-$version" .
 grep -q 'raspbian' /etc/os-release && DIR='vaultwarden_armv6l' || DIR="vaultwarden_$G_HW_ARCH_NAME"
 [[ -d $DIR ]] && G_EXEC rm -R "$DIR"
 G_EXEC mkdir -p "$DIR/"{DEBIAN,opt/vaultwarden,mnt/dietpi_userdata/vaultwarden,lib/systemd/system}
@@ -113,6 +117,14 @@ echo '/mnt/dietpi_userdata/vaultwarden/vaultwarden.env' > "$DIR/DEBIAN/conffiles
 # - postinst
 cat << '_EOF_' > "$DIR/DEBIAN/postinst"
 #!/bin/bash
+
+# Enable web vault remote access for fresh package installs onto existing pre-v1.25 vaultwarden installs
+if [[ ! $2 ]] && grep -q '^# ROCKET_ADDRESS=0.0.0.0$' /mnt/dietpi_userdata/vaultwarden/vaultwarden.env
+then
+	echo 'Enabling web vault remote access ...'
+	sed -i '/^# ROCKET_ADDRESS=0.0.0.0$/c\ROCKET_ADDRESS=0.0.0.0' /mnt/dietpi_userdata/vaultwarden/vaultwarden.env
+fi
+
 if [[ -d '/run/systemd/system' ]]
 then
 	if getent passwd vaultwarden > /dev/null
@@ -144,7 +156,7 @@ _EOF_
 # - prerm
 cat << '_EOF_' > "$DIR/DEBIAN/prerm"
 #!/bin/sh
-if [ -d '/run/systemd/system' ] && [ -f '/lib/systemd/system/vaultwarden.service' ]
+if [ "$1" = 'remove' ] && [ -d '/run/systemd/system' ] && [ -f '/lib/systemd/system/vaultwarden.service' ]
 then
 	echo 'Deconfiguring vaultwarden systemd service ...'
 	systemctl unmask vaultwarden
@@ -195,7 +207,7 @@ grep -q 'raspbian' /etc/os-release && DEPS_APT_VERSIONED=$(sed 's/+rp[it][0-9]\+
 # - control
 cat << _EOF_ > "$DIR/DEBIAN/control"
 Package: vaultwarden
-Version: $version-dietpi1
+Version: $version-dietpi2
 Architecture: $(dpkg --print-architecture)
 Maintainer: MichaIng <micha@dietpi.com>
 Date: $(date -u '+%a, %d %b %Y %T %z')

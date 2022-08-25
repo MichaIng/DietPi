@@ -85,7 +85,7 @@ Creator and maintainer of the [DietPi Hyper-V images](https://github.com/yumiris
 
 ### Collaborations
 
-#### DietPi + [Amiberry](https://github.com/midwan/amiberry)
+#### DietPi + [Amiberry](https://github.com/BlitterStudio/amiberry)
 
 _Since 2016-09-02_
 
@@ -251,7 +251,7 @@ Links to hardware and software manufacturers, sources and build instructions use
 - [OpenVPN](https://github.com/OpenVPN)
 - [PiVPN](https://github.com/pivpn/pivpn)
 - [WireGuard](https://www.wireguard.com/)
-- [Amiberry](https://github.com/midwan/amiberry)
+- [Amiberry](https://github.com/BlitterStudio/amiberry)
 - [OpenTyrian](https://bitbucket.org/opentyrian/opentyrian/wiki/Home)
 - [RPi Cam Control](https://github.com/silvanmelchior/RPi_Cam_Web_Interface)
 - [Deluge](https://dev.deluge-torrent.org/wiki/Development#SourceCode)
