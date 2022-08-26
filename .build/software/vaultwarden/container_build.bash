@@ -71,8 +71,8 @@ G_AG_CHECK_INSTALL_PREREQ "${apackages[@]}"
 ##########################################
 # Download
 G_EXEC curl -sSfO "https://dietpi.com/downloads/images/$image.7z"
-G_EXEC 7zz x "$image.7z"
-G_EXEC rm "$image.7z" hash.txt README.md
+G_EXEC 7zz e "$image.7z" "$image.img"
+G_EXEC rm "$image.7z"
 G_EXEC truncate -s $((2*1024**3)) "$image.img"
 
 # Loop device
