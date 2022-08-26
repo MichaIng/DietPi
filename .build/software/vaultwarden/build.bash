@@ -13,6 +13,7 @@ G_AG_CHECK_INSTALL_PREREQ "${adeps_build[@]}"
 # Install Rust via https://rustup.rs/
 # - ARMv7: Needs to be installed in tmpfs, else builds fail in emulated 32-bit ARM environments: https://github.com/rust-lang/cargo/issues/8719
 # - ARMv8: Install and build on disk, else GitHub workflow fails due to insufficient RAM
+# shellcheck disable=SC2015
 (( $G_HW_ARCH == 3 )) && export HOME='/root' || export HOME='/tmp/vaultwarden'
 [[ -d $HOME ]] || G_EXEC mkdir "$HOME"
 G_EXEC cd "$HOME"
