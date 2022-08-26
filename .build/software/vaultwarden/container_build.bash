@@ -102,7 +102,8 @@ then
 fi
 echo '[ INFO ] Running vaultwarden build script...'
 bash -c "\$(curl -sSf 'https://raw.githubusercontent.com/$G_GITOWNER/DietPi/$G_GITBRANCH/.build/software/vaultwarden/build.bash')"
-mv -v '/tmp/vaultwarden/vaultwarden_$arch.deb' '/vaultwarden_$arch.deb'
+[ -f '/tmp/vaultwarden/vaultwarden_$arch.deb' ] && mv -v '/tmp/vaultwarden/vaultwarden_$arch.deb' '/vaultwarden_$arch.deb'
+[ -f '/root/vaultwarden_$arch.deb' ] && mv -v '/root/vaultwarden_$arch.deb' '/vaultwarden_$arch.deb'
 poweroff
 _EOF_
 G_EXEC chmod +x rootfs/etc/rc.local
