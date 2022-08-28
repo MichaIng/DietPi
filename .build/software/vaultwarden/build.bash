@@ -11,8 +11,10 @@ adeps=('bash' 'libc6' 'openssl')
 G_AG_CHECK_INSTALL_PREREQ "${adeps_build[@]}"
 
 # Install Rust via https://rustup.rs/
-# - Needs to be installed in tmpfs, else builds fail in emulated 32-bit ARM environments: https://github.com/rust-lang/cargo/issues/8719
-export HOME='/tmp/vaultwarden'
+# - ARMv7: Needs to be installed in tmpfs, else builds fail in emulated 32-bit ARM environments: https://github.com/rust-lang/cargo/issues/8719
+# - ARMv8: Install and build on disk, else GitHub workflow fails due to insufficient RAM
+# shellcheck disable=SC2015
+(( $G_HW_ARCH == 3 )) && export HOME='/root' || export HOME='/tmp/vaultwarden'
 [[ -d $HOME ]] || G_EXEC mkdir "$HOME"
 G_EXEC cd "$HOME"
 G_EXEC curl -sSfL 'https://sh.rustup.rs' -o rustup-init.sh
@@ -22,9 +24,6 @@ grep -q 'raspbian' /etc/os-release && host=('--default-host' 'arm-unknown-linux-
 G_EXEC_OUTPUT=1 G_EXEC ./rustup-init.sh -y --profile minimal --default-toolchain none "${host[@]}"
 G_EXEC_NOHALT=1 G_EXEC rm rustup-init.sh
 export PATH="$HOME/.cargo/bin:$PATH"
-
-# ARMv8: Build on disk, else GitHub workflow fails due to insufficient RAM
-(( $G_HW_ARCH == 3 )) && G_EXEC cd /root
 
 version='1.25.2'
 G_DIETPI-NOTIFY 2 "Building vaultwarden version \e[33m$version"
@@ -40,7 +39,6 @@ G_EXEC strip --remove-section=.comment --remove-section=.note target/release/vau
 # Build DEB package
 G_DIETPI-NOTIFY 2 'Building vaultwarden DEB package'
 G_EXEC cd "$HOME"
-(( $G_HW_ARCH == 3 )) && G_EXEC mv "/root/vaultwarden-$version" .
 grep -q 'raspbian' /etc/os-release && DIR='vaultwarden_armv6l' || DIR="vaultwarden_$G_HW_ARCH_NAME"
 [[ -d $DIR ]] && G_EXEC rm -R "$DIR"
 G_EXEC mkdir -p "$DIR/"{DEBIAN,opt/vaultwarden,mnt/dietpi_userdata/vaultwarden,lib/systemd/system}

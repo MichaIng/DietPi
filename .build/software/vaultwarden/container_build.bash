@@ -71,9 +71,11 @@ G_AG_CHECK_INSTALL_PREREQ "${apackages[@]}"
 ##########################################
 # Download
 G_EXEC curl -sSfO "https://dietpi.com/downloads/images/$image.7z"
-G_EXEC 7zz x "$image.7z"
-G_EXEC rm "$image.7z" hash.txt README.md
-G_EXEC truncate -s $((2*1024**3)) "$image.img"
+G_EXEC 7zz e "$image.7z" "$image.img"
+G_EXEC rm "$image.7z"
+size=2
+(( $ARCH == 3 )) && size=3
+G_EXEC truncate -s $(($size*1024**3)) "$image.img"
 
 # Loop device
 FP_LOOP=$(losetup -f)
@@ -100,7 +102,8 @@ then
 fi
 echo '[ INFO ] Running vaultwarden build script...'
 bash -c "\$(curl -sSf 'https://raw.githubusercontent.com/$G_GITOWNER/DietPi/$G_GITBRANCH/.build/software/vaultwarden/build.bash')"
-mv -v '/tmp/vaultwarden/vaultwarden_$arch.deb' '/vaultwarden_$arch.deb'
+[ -f '/tmp/vaultwarden/vaultwarden_$arch.deb' ] && mv -v '/tmp/vaultwarden/vaultwarden_$arch.deb' '/vaultwarden_$arch.deb'
+[ -f '/root/vaultwarden_$arch.deb' ] && mv -v '/root/vaultwarden_$arch.deb' '/vaultwarden_$arch.deb'
 poweroff
 _EOF_
 G_EXEC chmod +x rootfs/etc/rc.local
