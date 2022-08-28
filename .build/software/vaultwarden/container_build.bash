@@ -74,8 +74,8 @@ G_EXEC curl -sSfO "https://dietpi.com/downloads/images/$image.7z"
 G_EXEC 7zz e "$image.7z" "$image.img"
 G_EXEC rm "$image.7z"
 size=3
-(( $ARCH == 3 )) && size=4
-G_EXEC truncate -s $((2*1024**$size)) "$image.img"
+(( $ARCH == 2 )) && size=3
+G_EXEC truncate -s $(($size*1024**3)) "$image.img"
 
 # Loop device
 FP_LOOP=$(losetup -f)
