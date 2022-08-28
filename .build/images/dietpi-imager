@@ -68,7 +68,8 @@
 	OUTPUT_IMG_EXT='img'
 	#OUTPUT_IMG_NAME=
 	[[ $MOUNT_IT == 'On' ]] || MOUNT_IT='Off'
-	[[ $SHRINK_ONLY == 'On' ]] || SHRINK_ONLY='Off'
+	(( $SHRINK_ONLY == 1 )) || SHRINK_ONLY=0
+	(( $SKIP_ARCHIVE == 1 )) || SKIP_ARCHIVE=0
 
 	Unmount_tmp()
 	{
@@ -335,6 +336,8 @@
 		G_EXEC mount "$FP_ROOT_DEV" "$FP_MNT_TMP"
 		# - Remove bash history and DHCP leases, which are stored on shutdown, hence cannot be removed via DietPi-PREP
 		G_EXEC rm -f "$FP_MNT_TMP/"{root,home/*}/.bash_history "$FP_MNT_TMP/var/lib/dhcp/"*.leases
+		# - Enable DietPi-FS_partition_resize to have both, old and new image being resized on next boot automatically
+		[[ -f $FP_MNT_TMP/etc/systemd/system/dietpi-fs_partition_resize.service && ! -L $FP_MNT_TMP/etc/systemd/system/local-fs.target.wants/dietpi-fs_partition_resize.service ]] && G_EXEC ln -s "$FP_MNT_TMP/etc/systemd/system/"{,'local-fs.target.wants/'}'dietpi-fs_partition_resize.service'
 		if [[ $MOUNT_IT == 'On' ]] && G_WHIP_MSG "The ${SOURCE_TYPE,,} has been mounted to allow you reviewing or editing its content:
 - $FP_ROOT_DEV > $FP_MNT_TMP
 \nAn interactive bash subshell will open.
@@ -370,23 +373,25 @@
 
 			# Run multiple times until no change is done any more
 			G_DIETPI-NOTIFY 2 'Shrinking last filesystem to minimum size...'
-			local out
-			FS_SIZE=0
+			local out last_fs_size=$(tune2fs -l "$last_part_dev" | mawk '/^Block count/{print $3;exit}') # blocks
 			while :
 			do
-				resize2fs -M "$last_part_dev" 2>&1 | tee resize2fs_out
+				resize2fs -Mp "$last_part_dev" 2>&1 | tee resize2fs_out
 				if out=$(grep -im1 'nothing to do!' resize2fs_out)
 				then
 					rm resize2fs_out
 					FS_SIZE=$(mawk '{print $5}' <<< "$out") # blocks
 					BLOCK_SIZE=${out%%k) *} BLOCK_SIZE=${BLOCK_SIZE##*\(} # KiB
-					# Re-add 4 MiB if it would still fit into the partition, which was required on Raspbian Buster for successful boot.
-					if (( $(<"/sys/class/block/${last_part_dev##*/}/size") > $FS_SIZE * $BLOCK_SIZE * 2 + 8 )) # 512 byte sectors
+					# Re-add 4 MiB if it would be still smaller than before, which was required on Raspbian Buster for successful boot, else leave original size
+					if (( $last_fs_size > $FS_SIZE + 4096/$BLOCK_SIZE )) # blocks
 					then
 						FS_SIZE=$(( $FS_SIZE + 4096/$BLOCK_SIZE )) # blocks
-						G_EXEC resize2fs "$last_part_dev" "$FS_SIZE"
+						G_DIETPI-NOTIFY 0 "Reducing last filesystem size to $(( $FS_SIZE * $BLOCK_SIZE / 1024 + 1 )) MiB"
+					else
+						FS_SIZE=$last_fs_size
+						G_DIETPI-NOTIFY 0 "Leaving last filesystem size at $(( $FS_SIZE * $BLOCK_SIZE / 1024 + 1 )) MiB"
 					fi
-					G_DIETPI-NOTIFY 0 "Reduced last filesystem size to $(( $FS_SIZE * $BLOCK_SIZE / 1024 + 1 )) MiB"
+					G_EXEC resize2fs "$last_part_dev" "$FS_SIZE"
 					FS_SIZE=$(( $FS_SIZE * $BLOCK_SIZE * 2 )) # blocks => 512 byte sectors
 					break
 
@@ -396,30 +401,30 @@
 				fi
 			done
 
-		#elif [[ $last_fs_type == 'f2fs' && ! $(lsblk -rno FSUSE% "$last_part_dev") =~ ^(9[5-9]|100)%$ ]]
-		#then
+		elif [[ $last_fs_type == 'f2fs' && ! $(lsblk -rno FSUSE% "$last_part_dev") =~ ^(9[5-9]|100)%$ ]]
+		then
 			# F2FS does not support shrinking: https://www.reddit.com/r/archlinux/comments/bpp77f/shrinking_a_f2fs_partition/
-			# Hence copy all data outside, remove and re-create a smaller filesytem, then copy them back in, as long as disk usage is not >=95% already.
+			# Hence copy all data outside, remove and re-create a smaller filesystem, then copy them back in, as long as disk usage is not >=95% already.
 			# The UUID changes and there is currently no way to change it back...
-			#local usage=$(lsblk -rnbo FSUSED "$last_part_dev") # bytes
-			#local sector_size=$(lsblk -rnbo LOG-SEC "$last_part_dev") # bytes
-			#FS_SIZE=$(( ( $usage + 4*1024**2 ) / $sector_size )) # bytes + 4 MiB buffer => sectors
-			#G_DIETPI-NOTIFY 2 'Copying last filesystem content to temporary directory'
-			#G_EXEC mkdir "${FP_MNT_TMP}_backup"
-			#G_EXEC mount -o ro "$last_part_dev" "$FP_MNT_TMP"
-			#G_EXEC cp -a "$FP_MNT_TMP/." "${FP_MNT_TMP}_backup/"
-			#G_EXEC umount "$FP_MNT_TMP"
-			#G_DIETPI-NOTIFY 2 'Purging last filesystem'
-			#G_EXEC dd if=/dev/zero of="$last_part_dev" bs=4K count=10
-			#G_DIETPI-NOTIFY 2 'Re-creating smaller last filesystem' # Probably sload.f2fs can replace this? https://manpages.debian.org/sload.f2fs
-			#G_EXEC_OUTPUT=1 G_EXEC mkfs.f2fs -w "$sector_size" "$last_part_dev" "$FS_SIZE"
-			#G_DIETPI-NOTIFY 2 'Moving last filesystem content back'
-			#G_EXEC mount "$last_part_dev" "$FP_MNT_TMP"
-			#G_EXEC cp -a "${FP_MNT_TMP}_backup/." "$FP_MNT_TMP/"
-			#G_EXEC rm -R "${FP_MNT_TMP}_backup"
-			#Unmount_tmp
-			# Assure last filesystem size is in 512 byte sectors, as this is what sfdisk assmes
-			#FS_SIZE=$(( $FS_SIZE * $sector_size / 512 ))
+			local usage=$(lsblk -rnbo FSUSED "$last_part_dev") # bytes
+			local sector_size=$(lsblk -rnbo LOG-SEC "$last_part_dev") # bytes
+			FS_SIZE=$(( ( $usage + 4*1024**2 ) / $sector_size )) # bytes + 4 MiB buffer => sectors
+			G_DIETPI-NOTIFY 2 'Copying last filesystem content to temporary directory'
+			G_EXEC mkdir "${FP_MNT_TMP}_backup"
+			G_EXEC mount -o ro "$last_part_dev" "$FP_MNT_TMP"
+			G_EXEC cp -a "$FP_MNT_TMP/." "${FP_MNT_TMP}_backup/"
+			G_EXEC umount "$FP_MNT_TMP"
+			G_DIETPI-NOTIFY 2 'Purging last filesystem'
+			G_EXEC dd if=/dev/zero of="$last_part_dev" bs=4K count=10
+			G_DIETPI-NOTIFY 2 'Re-creating smaller last filesystem' # Probably sload.f2fs can replace this? https://manpages.debian.org/sload.f2fs
+			G_EXEC_OUTPUT=1 G_EXEC mkfs.f2fs -w "$sector_size" "$last_part_dev" "$FS_SIZE"
+			G_DIETPI-NOTIFY 2 'Moving last filesystem content back'
+			G_EXEC mount "$last_part_dev" "$FP_MNT_TMP"
+			G_EXEC cp -a "${FP_MNT_TMP}_backup/." "$FP_MNT_TMP/"
+			G_EXEC rm -R "${FP_MNT_TMP}_backup"
+			Unmount_tmp
+			# Assure last filesystem size is in 512 byte sectors, as this is what sfdisk assumes
+			FS_SIZE=$(( $FS_SIZE * $sector_size / 512 ))
 
 		elif [[ $last_fs_type == 'btrfs' ]]
 		then
@@ -471,6 +476,9 @@
 			G_EXEC partx -u "$FP_SOURCE"
 		fi
 
+		# Exit now if source shall be shrunk only
+		(( $SHRINK_ONLY )) && exit 0
+
 		# Finished: Derive final image size from last partition end + failsafe buffer
 		IMAGE_SIZE=$(( ( $(sfdisk -qlo End "$FP_SOURCE" | tail -1) + 1 ) * 512 )) # 512 byte sectors => Byte
 		IMAGE_SIZE=$(( $IMAGE_SIZE + ( 512 * 256 ) )) # 64 byte for secondary GPT + safety net
@@ -488,18 +496,16 @@
 			[[ $PWD/$OUTPUT_IMG_NAME.$OUTPUT_IMG_EXT != "$(readlink -f "$FP_SOURCE_IMG")" ]] && G_EXEC mv "$FP_SOURCE_IMG" "$OUTPUT_IMG_NAME.$OUTPUT_IMG_EXT"
 
 			# Check for sufficient free disk space to store the 7z archive with 100 MiB buffer
-			NEEDED_FREE_SPACE=$(( $IMAGE_SIZE * 15/100  / 1024**2 + 100 ))
-			G_CHECK_FREESPACE . "$NEEDED_FREE_SPACE" || exit 1 
+			G_CHECK_FREESPACE . $(( $IMAGE_SIZE * 15/100 / 1024**2 + 100 )) || exit 1 
 
 		# Drive source and dd target
 		elif [[ $CLONING_TOOL == 'dd' ]]
 		then
 			# Check for sufficient free disk space to store the image and the 7z archive with 100 MiB buffer
-			NEEDED_FREE_SPACE=$(( $IMAGE_SIZE * 115/100 / 1024**2 + 100 ))
-			G_CHECK_FREESPACE . "$NEEDED_FREE_SPACE" || exit 1 
+			G_CHECK_FREESPACE . $(( $IMAGE_SIZE * 115/100 / 1024**2 + 100 )) || exit 1 
 
 			G_DIETPI-NOTIFY 2 "Creating final image with actually used size: $(( $IMAGE_SIZE / 1024**2 + 1 )) MiB"
-			G_EXEC dd if="$FP_SOURCE" of="$OUTPUT_IMG_NAME.$OUTPUT_IMG_EXT" bs=1M status=progress count=$(( $IMAGE_SIZE / 1024**2 + 1 ))
+			G_EXEC_OUTPUT=1 G_EXEC dd if="$FP_SOURCE" of="$OUTPUT_IMG_NAME.$OUTPUT_IMG_EXT" bs=1M status=progress count=$(( $IMAGE_SIZE / 1024**2 + 1 ))
 
 		# Clonezilla target
 		else
@@ -510,7 +516,7 @@
 			# - We need Clonezilla 5.x for loop device support
 			if [[ $(dpkg-query -Wf '${Version}' clonezilla 2> /dev/null) != '5'* ]]
 			then
-				G_EXEC curl -sSf 'https://deb.debian.org/debian/pool/main/c/clonezilla/clonezilla_5.1.10-1_all.deb' -o clonezilla.deb
+				G_EXEC curl -sSf 'https://deb.debian.org/debian/pool/main/c/clonezilla/clonezilla_5.2.2-1_all.deb' -o clonezilla.deb
 				G_EXEC dpkg -i ./clonezilla.deb
 				G_EXEC rm clonezilla.deb
 			fi
@@ -525,7 +531,7 @@
 			CLONEZILLA_SIZE=$(curl -sSfIL "${CLONEZILLA_URL/amd64.zip/amd64.iso}" | mawk '/^[Cc]ontent-[Ll]ength:/{print $2}' | tail -1); CLONEZILLA_SIZE=${CLONEZILLA_SIZE%$'\r'}
 			(( $CLONEZILLA_SIZE )) || Error_Exit 'Could not retrieve Clonezilla Live size, aborting...'
 			NEEDED_FREE_SPACE=$(( ( $CLONEZILLA_SIZE + $IMAGE_SIZE * 20/100 ) * 2 / 1024**2 + 100 )) REMOVE_IMG=0
-			# If free space is insufficient and the source an image on the same filesystem, check whether it fits when we remove the source image before generating the ISO
+			# If free space is insufficient and the source is an image on the same filesystem, check whether it fits when we remove the source image before generating the ISO
 			if ! G_CHECK_FREESPACE . "$NEEDED_FREE_SPACE"
 			then
 				[[ $FP_SOURCE_IMG && $(findmnt -Ufnro TARGET -T "$FP_SOURCE_IMG") == $(findmnt -Ufnro TARGET -T .) ]] || exit 1
@@ -635,8 +641,8 @@ _EOF_
 			G_EXEC sync
 		fi
 
-		# Exit now when image shall be shrunk only
-		[[ $SHRINK_ONLY == 'On' ]] && exit 0
+		# Exit now when archive shall be skipped
+		(( $SKIP_ARCHIVE )) && exit 0
 
 		# Generate hashes: MD5, SHA1, SHA256
 		G_DIETPI-NOTIFY 2 'Generating hashes to pack with image, please wait...'
