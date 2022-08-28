@@ -73,7 +73,7 @@ G_AG_CHECK_INSTALL_PREREQ "${apackages[@]}"
 G_EXEC curl -sSfO "https://dietpi.com/downloads/images/$image.7z"
 G_EXEC 7zz e "$image.7z" "$image.img"
 G_EXEC rm "$image.7z"
-size=3
+size=2
 (( $ARCH == 2 )) && size=3
 G_EXEC truncate -s $(($size*1024**3)) "$image.img"
 
