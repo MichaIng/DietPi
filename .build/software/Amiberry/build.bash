@@ -23,7 +23,7 @@ G_AGDUG
 G_AG_CHECK_INSTALL_PREREQ "${adeps_build[@]}"
 
 # Build libSDL2
-v_sdl='2.24.0'
+v_sdl='2.0.22'
 if [[ ! -d /tmp/SDL2-$v_sdl ]]
 then
 	G_DIETPI-NOTIFY 2 "Building libSDL2 version \e[33m$v_sdl"
