@@ -133,7 +133,7 @@ G_EXEC chmod +x raspberrypi-sys-mods/DEBIAN/preinst
 
 find raspberrypi-sys-mods ! \( -path raspberrypi-sys-mods/DEBIAN -prune \) -type f -exec md5sum {} + | sed 's|raspberrypi-sys-mods/||' > raspberrypi-sys-mods/DEBIAN/md5sums
 
-cat << _EOF_ > "$DIR/DEBIAN/control"
+cat << _EOF_ > raspberrypi-sys-mods/DEBIAN/control
 Package: raspberrypi-sys-mods
 Version: 2:20220915-dietpi1
 Architecture: all
