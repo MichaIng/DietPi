@@ -43,8 +43,8 @@ cat << '_EOF_' > raspberrypi-sys-mods/usr/lib/raspberrypi-sys-mods/i2cprobe
 ALIASES="/lib/modules/$(uname -r)/modules.alias"
 n=0
 while :; do
-    comp="OF_COMPATIBLE_$n"
-    comp=$(echo ${!comp} | sed 's/.*,//')
+    eval "comp=\"\$OF_COMPATIBLE_$n\""
+    comp=$(echo "$comp" | sed 's/.*,//')
     if [ -z "$comp" ]; then
         break
     fi
