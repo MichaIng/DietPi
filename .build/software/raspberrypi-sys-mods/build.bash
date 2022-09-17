@@ -1,9 +1,6 @@
 {
 . /boot/dietpi/func/dietpi-globals || exit 1
 
-G_AGUP
-G_AGDUG
-
 G_EXEC mkdir -p raspberrypi-sys-mods/{DEBIAN,lib/udev/rules.d,usr/{lib,share/doc}/raspberrypi-sys-mods}
 
 cat << '_EOF_' > raspberrypi-sys-mods/usr/share/doc/raspberrypi-sys-mods/copyright
