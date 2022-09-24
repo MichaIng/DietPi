@@ -712,7 +712,7 @@ _EOF_
 				'kmod'			# "modprobe", "lsmod", used by several DietPi scripts
 				'rfkill' 		# Block/unblock WiFi and Bluetooth adapters, only installed once to unblock everything, purged afterwards!
 				'systemd-timesyncd'	# Network time sync daemon
-				'usbutils'		# "lsusb", used by DietPi-Software + DietPi-Bugreport
+				'usbutils'		# "lsusb", used by DietPi-Software + DietPi-BugReport
 			)
 
 			# initramfs: Required for generic bootloader, but not required/used by RPi bootloader, on VM install tiny-initramfs with limited features but sufficient and much smaller + faster
@@ -860,7 +860,7 @@ _EOF_
 			# Workaround for Odroid N2 failing to boot from eMMC: https://forum.armbian.com/topic/20206-odroid-n2-issues-with-recent-firmware-and-emmc-modules/#comment-142409
 			if (( $G_HW_MODEL == 15 ))
 			then
-				G_EXEC curl -sSfLO 'https://dietpi.com/downloads/binaries/u-boot-odroidn2.bin.gz'
+				G_EXEC curl -sSfO 'https://dietpi.com/downloads/binaries/u-boot-odroidn2.bin.gz'
 				G_EXEC gzip -d u-boot-odroidn2.bin.gz
 				G_EXEC dd bs=512 seek=1 conv=notrunc if=u-boot-odroidn2.bin "of=$BOOT_DEVICE"
 			fi
@@ -940,7 +940,10 @@ _EOF_
 			# ARMv6/7: Add raspi-copies-and-fills
 			local a32bit=()
 			[[ $G_HW_ARCH == 3 ]] || a32bit=('raspi-copies-and-fills')
-			G_AGI raspberrypi-bootloader raspberrypi-kernel libraspberrypi0 libraspberrypi-bin raspberrypi-sys-mods raspberrypi-archive-keyring "${a32bit[@]}"
+			# Install our own raspberrypi-sys-mods
+			G_EXEC curl -sSfO 'https://dietpi.com/downloads/binaries/raspberrypi-sys-mods.deb'
+			G_AGI raspberrypi-bootloader raspberrypi-kernel libraspberrypi0 libraspberrypi-bin ./raspberrypi-sys-mods.deb raspberrypi-archive-keyring "${a32bit[@]}"
+			G_EXEC rm raspberrypi-sys-mods.deb
 
 			# https://github.com/RPi-Distro/raspberrypi-sys-mods/pull/60
 			[[ -f '/etc/apt/trusted.gpg.d/microsoft.gpg' ]] && G_EXEC rm /etc/apt/trusted.gpg.d/microsoft.gpg
@@ -980,21 +983,21 @@ _EOF_
 				3) variant='soquartz';;
 				*) variant='quartz64a';;
 			esac
-			G_EXEC curl -sSfLO "https://dietpi.com/downloads/binaries/firmware-$variant.deb"
+			G_EXEC curl -sSfO "https://dietpi.com/downloads/binaries/firmware-$variant.deb"
 			G_EXEC_OUTPUT=1 G_EXEC dpkg -i "firmware-$variant.deb"
 			G_EXEC rm "firmware-$variant.deb"
 
 		# - NanoPi R5S
 		#elif [[ $G_HW_MODEL == 76 && $(findmnt -Ufnro TARGET -T /boot) == '/' ]]
 		#then
-		#	G_EXEC curl -sSfLO 'https://dietpi.com/downloads/binaries/firmware-nanopi5.deb'
+		#	G_EXEC curl -sSfO 'https://dietpi.com/downloads/binaries/firmware-nanopi5.deb'
 		#	G_EXEC_OUTPUT=1 G_EXEC dpkg -i firmware-nanopi5.deb
 		#	G_EXEC rm firmware-nanopi5.deb
 
 		# - NanoPi M2/T2 Linux 4.4: Requires dedicated boot partition, starting at 4 MiB for U-Boot, with ext4 filesystem
 		elif [[ $G_HW_MODEL == 61 && $(findmnt -Ufnro FSTYPE -M /boot) == 'ext4' ]] && (( $(sfdisk -qlo Start "$BOOT_DEVICE)" | mawk 'NR==2') >= 8192 ))
 		then
-			G_EXEC curl -sSfLO 'https://dietpi.com/downloads/binaries/firmware-nanopi2.deb'
+			G_EXEC curl -sSfO 'https://dietpi.com/downloads/binaries/firmware-nanopi2.deb'
 			G_EXEC_OUTPUT=1 G_EXEC dpkg -i firmware-nanopi2.deb
 			G_EXEC rm firmware-nanopi2.deb
 
@@ -1137,11 +1140,15 @@ _EOF_
 		getent group openmediavault-engined > /dev/null && groupdel openmediavault-engined # OMV (NanoPi NEO2)
 		getent group openmediavault-webgui > /dev/null && groupdel openmediavault-webgui # OMV (NanoPi NEO2)
 
+		G_DIETPI-NOTIFY 2 'Resetting root user account'
+		G_EXEC usermod -d /root -s /bin/dash root
+		G_EXEC eval 'chpasswd <<< '\''root:dietpi'\'
+
 		G_EXEC_DESC='Creating DietPi user account' G_EXEC /boot/dietpi/func/dietpi-set_software useradd dietpi
-		chpasswd <<< 'root:dietpi'
 
 		G_DIETPI-NOTIFY 2 'Removing misc files/folders/services, not required by DietPi'
 
+		[[ -f '/boot/boot.bmp' ]] && G_EXEC rm /boot/boot.bmp
 		[[ -d '/selinux' ]] && G_EXEC rm -R /selinux
 		[[ -d '/var/cache/apparmor' ]] && G_EXEC rm -R /var/cache/apparmor
 		[[ -d '/var/lib/udisks2' ]] && G_EXEC rm -R /var/lib/udisks2
@@ -1198,7 +1205,6 @@ _EOF_
 			'async'
 			'leds'
 			'rockchip'
-
 		)
 
 		for i in "${aservices[@]}"
@@ -1209,13 +1215,11 @@ _EOF_
 				[[ -e $j || -L $j ]] || continue
 				[[ -f $j ]] && G_EXEC systemctl disable --now "${j##*/}"
 				# Remove if not attached to any DEB package, else mask
-				if dpkg -S "$j" &> /dev/null; then
-
+				if dpkg -S "$j" &> /dev/null
+				then
 					G_EXEC systemctl mask "${j##*/}"
-
 				else
 					[[ -e $j || -L $j ]] && G_EXEC rm -R "$j"
-
 				fi
 			done
 		done
@@ -1238,7 +1242,6 @@ _EOF_
 			'leds.sh'
 			'rockchip.sh'
 			'S10atomic_commit.sh'
-
 		)
 
 		for i in "${aservices[@]}"
@@ -1298,10 +1301,6 @@ _EOF_
 		[[ -f '/etc/staff-group-for-usr-local' ]] && G_EXEC rm /etc/staff-group-for-usr-local
 		G_EXEC chown -R root:root /usr/local
 		G_EXEC chmod -R 0755 /usr/local
-
-		#-----------------------------------------------------------------------------------
-		# Boot Logo
-		[[ -f '/boot/boot.bmp' ]] && G_EXEC curl -sSfL "https://github.com/$G_GITOWNER/DietPi/raw/$G_GITBRANCH/.meta/images/dietpi-logo_boot.bmp" -o /boot/boot.bmp
 
 		#-----------------------------------------------------------------------------------
 		# Bash Profiles
@@ -1440,7 +1439,12 @@ _EOF_'
 
 		G_DIETPI-NOTIFY 2 'Resetting and adding dietpi.com SSH pub host key for DietPi-Survey/Bugreport uploads:'
 		G_EXEC mkdir -p /root/.ssh
-		echo 'ssh.dietpi.com ssh-rsa AAAAB3NzaC1yc2EAAAADAQABAAABAQDE6aw3r6aOEqendNu376iiCHr9tGBIWPgfrLkzjXjEsHGyVSUFNnZt6pftrDeK7UX+qX4FxOwQlugG4fymOHbimRCFiv6cf7VpYg1Ednquq9TLb7/cIIbX8a6AuRmX4fjdGuqwmBq3OG7ZksFcYEFKt5U4mAJIaL8hXiM2iXjgY02LqiQY/QWATsHI4ie9ZOnwrQE+Rr6mASN1BVFuIgyHIbwX54jsFSnZ/7CdBMkuAd9B8JkxppWVYpYIFHE9oWNfjh/epdK8yv9Oo6r0w5Rb+4qaAc5g+RAaknHeV6Gp75d2lxBdCm5XknKKbGma2+/DfoE8WZTSgzXrYcRlStYN' > /root/.ssh/known_hosts
+		if (( $G_DISTRO < 7 ))
+		then
+			echo '[ssh.dietpi.com]:29248 ssh-rsa AAAAB3NzaC1yc2EAAAADAQABAAABAQDE6aw3r6aOEqendNu376iiCHr9tGBIWPgfrLkzjXjEsHGyVSUFNnZt6pftrDeK7UX+qX4FxOwQlugG4fymOHbimRCFiv6cf7VpYg1Ednquq9TLb7/cIIbX8a6AuRmX4fjdGuqwmBq3OG7ZksFcYEFKt5U4mAJIaL8hXiM2iXjgY02LqiQY/QWATsHI4ie9ZOnwrQE+Rr6mASN1BVFuIgyHIbwX54jsFSnZ/7CdBMkuAd9B8JkxppWVYpYIFHE9oWNfjh/epdK8yv9Oo6r0w5Rb+4qaAc5g+RAaknHeV6Gp75d2lxBdCm5XknKKbGma2+/DfoE8WZTSgzXrYcRlStYN' > /root/.ssh/known_hosts
+		else
+			echo '[ssh.dietpi.com]:29248 ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIJdEPlagpQ+RVHNOX3jkG1Bya7Oza1dAke8h8NszVW84' > /root/.ssh/known_hosts
+		fi
 
 		# ASUS TB WiFi: https://github.com/MichaIng/DietPi/issues/1760
 		(( $G_HW_MODEL == 52 )) && G_CONFIG_INJECT '8723bs' '8723bs' /etc/modules
@@ -1686,11 +1690,6 @@ _EOF_
 		# RPi
 		elif (( $G_HW_MODEL < 10 )); then
 
-			# Creating RPi-specific groups
-			G_EXEC groupadd -rf spi
-			G_EXEC groupadd -rf i2c
-			G_EXEC groupadd -rf gpio
-
 			# Apply minimum GPU memory split for server usage: This applies a custom dtoverlay to disable VCSM: https://github.com/MichaIng/DietPi/pull/3900
 			/boot/dietpi/func/dietpi-set_hardware gpumemsplit 16
 
@@ -1778,6 +1777,16 @@ _EOF_
 			# Enable second USB port by default
 			local current=$(sed -n '/^[[:blank:]]*overlays=/{s/^[^=]*=//p;q}' /boot/armbianEnv.txt)
 			[[ $current == *'usbhost2'* ]] || G_CONFIG_INJECT 'overlays=' "overlays=$current usbhost2" /boot/armbianEnv.txt
+
+		# NanoPi R5S
+		elif (( $G_HW_MODEL == 76 ))
+		then
+			G_DIETPI-NOTIFY 2 'Enabling NanoPi R5S Ethernet LEDs'
+			cat << '_EOF_' > /etc/udev/rules.d/dietpi-nanopi5.rules
+SUBSYSTEM=="leds", KERNEL=="wan_led", ACTION=="add", ATTR{trigger}="netdev", ATTR{device_name}="eth0", ATTR{link}="1"
+SUBSYSTEM=="leds", KERNEL=="lan1_led", ACTION=="add", ATTR{trigger}="netdev", ATTR{device_name}="eth1", ATTR{link}="1"
+SUBSYSTEM=="leds", KERNEL=="lan2_led", ACTION=="add", ATTR{trigger}="netdev", ATTR{device_name}="eth2", ATTR{link}="1"
+_EOF_
 		fi
 
 		# Armbian special
