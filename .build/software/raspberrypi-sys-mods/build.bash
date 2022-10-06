@@ -51,7 +51,7 @@ while :; do
     if grep -q "alias $SUBSYSTEM:$comp " $ALIASES; then
         modprobe "$SUBSYSTEM:$comp" && exit 0
     fi
-    let n="$n + 1"
+    n=$(expr $n + 1)
 done
 modprobe "$MODALIAS" || modprobe "of:N${OF_NAME}T<NULL>C$OF_COMPATIBLE_0"
 _EOF_
@@ -132,7 +132,7 @@ find raspberrypi-sys-mods ! \( -path raspberrypi-sys-mods/DEBIAN -prune \) -type
 
 cat << _EOF_ > raspberrypi-sys-mods/DEBIAN/control
 Package: raspberrypi-sys-mods
-Version: 2:20220915-dietpi1
+Version: 2:20220915-dietpi2
 Architecture: all
 Maintainer: MichaIng <micha@dietpi.com>
 Date: $(date -u '+%a, %d %b %Y %T %z')
