@@ -1,5 +1,14 @@
+#!/bin/bash
 {
-. /boot/dietpi/func/dietpi-globals || exit 1
+if [[ -f '/boot/dietpi/func/dietpi-globals' ]]
+then
+	. /boot/dietpi/func/dietpi-globals || exit 1
+else
+	curl -sSf "https://raw.githubusercontent.com/${G_GITOWNER:-MichaIng}/DietPi/${G_GITBRANCH:-master}/dietpi/func/dietpi-globals" -o /tmp/dietpi-globals || exit 1
+	# shellcheck disable=SC1091
+	. /tmp/dietpi-globals || exit 1
+	G_EXEC_NOHALT=1 G_EXEC rm /tmp/dietpi-globals
+fi
 
 G_EXEC mkdir -p raspberrypi-sys-mods/{DEBIAN,lib/udev/rules.d,usr/{lib,share/doc}/raspberrypi-sys-mods}
 
