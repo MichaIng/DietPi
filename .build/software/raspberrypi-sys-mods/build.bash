@@ -158,6 +158,6 @@ G_CONFIG_INJECT 'Installed-Size: ' "Installed-Size: $(du -sk raspberrypi-sys-mod
 
 # Build DEB package
 G_EXEC rm -Rf raspberrypi-sys-mods.deb
-G_EXEC_OUTPUT=1 G_EXEC dpkg-deb -b raspberrypi-sys-mods
+G_EXEC_OUTPUT=1 G_EXEC dpkg-deb -b -Zxz -z9 raspberrypi-sys-mods
 G_EXEC rm -Rf raspberrypi-sys-mods
 }
