@@ -27,8 +27,8 @@ export PATH="$HOME/.cargo/bin:$PATH"
 
 version='1.26.0'
 G_DIETPI-NOTIFY 2 "Building vaultwarden version \e[33m$version"
-[[ -d vaultwarden-$version ]] && G_EXEC rm -R "vaultwarden-$version"
 G_EXEC curl -sSfLO "https://github.com/dani-garcia/vaultwarden/archive/$version.tar.gz"
+[[ -d vaultwarden-$version ]] && G_EXEC rm -R "vaultwarden-$version"
 G_EXEC tar xf "$version.tar.gz"
 G_EXEC rm "$version.tar.gz"
 G_EXEC cd "vaultwarden-$version"
