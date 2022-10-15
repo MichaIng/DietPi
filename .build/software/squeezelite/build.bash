@@ -8,7 +8,7 @@ G_AG_CHECK_INSTALL_PREREQ make gcc libc6-dev libasound2-dev libflac-dev libmad0-
 G_DIETPI-NOTIFY 2 'Downloading source code...'
 G_EXEC cd /tmp
 G_EXEC curl -sSfLO 'https://github.com/ralph-irving/squeezelite/archive/master.tar.gz'
-G_EXEC rm -Rf squeezelite-master
+[[ -d 'squeezelite-master' ]] && G_EXEC rm -R squeezelite-master
 G_EXEC tar xf master.tar.gz
 G_EXEC rm master.tar.gz
 G_DIETPI-NOTIFY 2 'Compiling binary...'
@@ -153,9 +153,9 @@ Description: lightweight headless Squeezebox emulator - ALSA version
 _EOF_
 G_CONFIG_INJECT 'Installed-Size: ' "Installed-Size: $(du -sk "$DIR" | mawk '{print $1}')" "$DIR/DEBIAN/control"
 # - Build
-G_EXEC rm -Rf "$DIR.deb"
+[[ -f $DIR.deb ]] && G_EXEC rm -R "$DIR.deb"
 G_EXEC_OUTPUT=1 G_EXEC dpkg-deb -b "$DIR"
-G_EXEC rm -Rf "$DIR"
+G_EXEC rm -R "$DIR"
 
 exit 0
 }

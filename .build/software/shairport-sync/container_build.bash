@@ -21,7 +21,7 @@ case $G_HW_ARCH_NAME in
 	'x86_64') export G_HW_ARCH=10;;
 	*) G_DIETPI-NOTIFY 1 "Unsupported host system architecture \"$G_HW_ARCH_NAME\" detected, aborting..."; exit 1;;
 esac
-readonly G_PROGRAM_NAME='DietPi-Squeezelite_container_setup'
+readonly G_PROGRAM_NAME='DietPi-Shairport-Sync_container_setup'
 G_CHECK_ROOT_USER
 G_CHECK_ROOTFS_RW
 readonly FP_ORIGIN=$PWD # Store origin dir
@@ -98,9 +98,9 @@ then
 	sed -i '/^G_HW_ARCH=/c\G_HW_ARCH=1' /boot/dietpi/.hw_model
 	sed -i '/^G_HW_ARCH_NAME=/c\G_HW_ARCH_NAME=armv6l' /boot/dietpi/.hw_model
 fi
-echo '[ INFO ] Running Squeezelite build script...'
-bash -c "\$(curl -sSf 'https://raw.githubusercontent.com/$G_GITOWNER/DietPi/$G_GITBRANCH/.build/software/squeezelite/build.bash')"
-mv -v '/tmp/squeezelite_$arch.deb' '/squeezelite_$arch.deb'
+echo '[ INFO ] Running Shairport Sync build script...'
+bash -c "\$(curl -sSf 'https://raw.githubusercontent.com/$G_GITOWNER/DietPi/$G_GITBRANCH/.build/software/shairport-sync/build.bash')"
+mv -v '/tmp/shairport-sync_$arch.deb' '/shairport-sync_$arch.deb'
 poweroff
 _EOF_
 G_EXEC chmod +x rootfs/etc/rc.local
@@ -113,5 +113,5 @@ G_EXEC eval 'echo -e '\''[Unit]\nAfter=dietpi-postboot.service'\'' > rootfs/etc/
 # Boot container
 ##########################################
 systemd-nspawn -bD rootfs --bind="$FP_LOOP"{,p1} --bind=/dev/disk
-[[ -f rootfs/squeezelite_$arch.deb ]] || exit 1
+[[ -f rootfs/shairport-sync_$arch.deb ]] || exit 1
 }

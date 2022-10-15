@@ -224,9 +224,9 @@ _EOF_
 G_CONFIG_INJECT 'Installed-Size: ' "Installed-Size: $(du -sk "$DIR" | mawk '{print $1}')" "$DIR/DEBIAN/control"
 
 # Build DEB package
-G_EXEC rm -Rf "$DIR.deb"
+[[ -f $DIR.deb ]] && G_EXEC rm -R "$DIR.deb"
 G_EXEC_OUTPUT=1 G_EXEC dpkg-deb -b "$DIR"
-G_EXEC rm -Rf "$DIR"
+G_EXEC rm -R "$DIR"
 
 exit 0
 }
