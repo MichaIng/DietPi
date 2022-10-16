@@ -73,7 +73,7 @@ cat << '_EOF_' > "$DIR/DEBIAN/postinst"
 #!/bin/bash
 if [[ -d '/run/systemd/system' ]]
 then
-	if [[ -f '/etc/default/gmediarender' ]] && grep -q '-u UUID -f HOSTNAME -I eth0' /etc/default/gmediarender
+	if [[ -f '/etc/default/gmediarender' ]] && grep -q '\-u UUID -f HOSTNAME -I eth0' /etc/default/gmediarender
 	then
 		echo 'Setting up environment file /etc/default/gmediarender ...'
 		[[ ! -f '/boot/dietpi/.hw_model' ]] || . /boot/dietpi/.hw_model
