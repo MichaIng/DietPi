@@ -2,8 +2,11 @@
 {
 . /boot/dietpi/func/dietpi-globals
 
+G_AGUP
+G_AGDUG
+
 # Build deps
-G_AG_CHECK_INSTALL_PREREQ make gcc libc6-dev libasound2-dev libflac-dev libmad0-dev libvorbis-dev libmpg123-dev libavformat-dev libsoxr-dev liblirc-dev libfaad-dev libssl-dev libopus-dev
+G_AGI make gcc libc6-dev libasound2-dev libflac-dev libmad0-dev libvorbis-dev libmpg123-dev libavformat-dev libsoxr-dev liblirc-dev libfaad-dev libssl-dev libopus-dev
 
 G_DIETPI-NOTIFY 2 'Downloading source code...'
 G_EXEC cd /tmp
@@ -76,10 +79,10 @@ then
 	if getent passwd squeezelite > /dev/null
 	then
 		echo 'Configuring Squeezelite service user ...'
-		usermod -aG audio -d /run/squeezelite -s /usr/sbin/nologin squeezelite
+		usermod -aG audio -d /nonexistent -s /usr/sbin/nologin squeezelite
 	else
 		echo 'Creating Squeezelite service user ...'
-		useradd -rMU -G audio -d /run/squeezelite -s /usr/sbin/nologin squeezelite
+		useradd -rMU -G audio -d /nonexistent -s /usr/sbin/nologin squeezelite
 	fi
 
 	echo 'Configuring Squeezelite systemd service ...'
@@ -122,6 +125,10 @@ then
 fi
 _EOF_
 G_EXEC chmod +x "$DIR/DEBIAN/"{postinst,prerm,postrm}
+# - conffiles
+echo '/etc/default/squeezelite' > "$DIR/DEBIAN/conffiles"
+# - md5sums
+find "$DIR" ! \( -path "$DIR/DEBIAN" -prune \) -type f -exec md5sum {} + | sed "s|$DIR/||" > "$DIR/DEBIAN/md5sums"
 # - control
 cat << _EOF_ > "$DIR/DEBIAN/control"
 Package: squeezelite
@@ -129,7 +136,7 @@ Version: $(mawk -F\" '/MAJOR_VERSION/{print $2;exit}' squeezelite-master/squeeze
 Architecture: $(dpkg --print-architecture)
 Maintainer: MichaIng <micha@dietpi.com>
 Date: $(date '+%a, %d %b %Y %T %z')
-Standards-Version: 4.6.1.0
+Standards-Version: 4.6.1.1
 Installed-Size: $(du -sk "$DIR" | mawk '{print $1}')
 Depends:$DEPS_APT_VERSIONED
 Conflicts: squeezelite-pa, squeezelite-pulseaudio

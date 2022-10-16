@@ -2,10 +2,13 @@
 {
 . /boot/dietpi/func/dietpi-globals
 
+G_AGUP
+G_AGDUG
+
 # Build deps
 # - Workaround for CI on Buster: Mask Avahi daemon service, since it can fail to start, failing the package install
 (( $G_DISTRO == 5 )) && G_EXEC systemctl mask avahi-daemon
-G_AG_CHECK_INSTALL_PREREQ automake pkg-config make g++ libpopt-dev libconfig-dev libssl-dev libsoxr-dev libavahi-client-dev libasound2-dev libglib2.0-dev libmosquitto-dev avahi-daemon
+G_AGI automake pkg-config make g++ libpopt-dev libconfig-dev libssl-dev libsoxr-dev libavahi-client-dev libasound2-dev libglib2.0-dev libmosquitto-dev avahi-daemon
 (( $G_DISTRO == 5 )) && G_EXEC systemctl unmask avahi-daemon
 
 # Download
@@ -242,10 +245,10 @@ then
 	if getent passwd shairport-sync > /dev/null
 	then
 		echo 'Configuring Shairport Sync service user ...'
-		usermod -aG audio -d /run/shairport-sync -s /usr/sbin/nologin shairport-sync
+		usermod -aG audio -d /nonexistent -s /usr/sbin/nologin shairport-sync
 	else
 		echo 'Creating Shairport Sync service user ...'
-		useradd -rMU -G audio -d /run/shairport-sync -s /usr/sbin/nologin shairport-sync
+		useradd -rMU -G audio -d /nonexistent -s /usr/sbin/nologin shairport-sync
 	fi
 
 	echo 'Configuring Shairport Sync systemd service ...'
@@ -292,6 +295,9 @@ _EOF_
 
 G_EXEC chmod +x "$DIR/DEBIAN/"{postinst,prerm,postrm}
 
+# - md5sums
+find "$DIR" ! \( -path "$DIR/DEBIAN" -prune \) -type f -exec md5sum {} + | sed "s|$DIR/||" > "$DIR/DEBIAN/md5sums"
+
 # - Add dependencies
 adeps=('libc6' 'avahi-daemon' 'libasound2' 'libavahi-client3' 'libsoxr0' 'libconfig9' 'libpopt0' 'libglib2.0-0' 'libmosquitto1')
 (( $G_DISTRO > 6 )) && adeps+=('libssl3') || adeps+=('libssl1.1')
@@ -307,7 +313,7 @@ grep -q 'raspbian' /etc/os-release && DEPS_APT_VERSIONED=$(sed 's/+rp[it][0-9]\+
 # - control
 cat << _EOF_ > "$DIR/DEBIAN/control"
 Package: shairport-sync
-Version: 3.3.9-dietpi2
+Version: $version-dietpi3
 Architecture: $(dpkg --print-architecture)
 Maintainer: MichaIng <micha@dietpi.com>
 Date: $(date -u '+%a, %d %b %Y %T %z')

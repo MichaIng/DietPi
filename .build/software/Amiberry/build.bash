@@ -20,7 +20,7 @@ fi
 
 G_AGUP
 G_AGDUG
-G_AG_CHECK_INSTALL_PREREQ "${adeps_build[@]}"
+G_AGI "${adeps_build[@]}"
 
 # Build libSDL2
 v_sdl='2.24.1'
@@ -186,11 +186,11 @@ grep -q 'raspbian' /etc/os-release && DEPS_APT_VERSIONED=$(sed 's/+rp[it][0-9]\+
 # - control
 cat << _EOF_ > "$DIR/DEBIAN/control"
 Package: amiberry
-Version: $v_ami-dietpi1
+Version: $v_ami-dietpi2
 Architecture: $(dpkg --print-architecture)
 Maintainer: MichaIng <micha@dietpi.com>
 Date: $(date -u '+%a, %d %b %Y %T %z')
-Standards-Version: 4.6.1.0
+Standards-Version: 4.6.1.1
 Installed-Size: $(du -sk "$DIR" | mawk '{print $1}')
 Depends:$DEPS_APT_VERSIONED
 Section: games
