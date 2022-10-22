@@ -13,9 +13,8 @@ G_AGI "${adeps_build[@]}"
 
 # Install Rust via https://rustup.rs/
 # - ARMv7: Needs to be installed in tmpfs, else builds fail in emulated 32-bit ARM environments: https://github.com/rust-lang/cargo/issues/8719
-# - ARMv8: Install and build on disk, else GitHub workflow fails due to insufficient RAM + apply this: https://github.com/rust-lang/cargo/issues/10583
+# - ARMv8: Apply workaround for increased RAM usage: https://github.com/rust-lang/cargo/issues/10583
 # shellcheck disable=SC2015
-#(( $G_HW_ARCH == 3 )) && export HOME='/root' CARGO_NET_GIT_FETCH_WITH_CLI='true' || export HOME='/tmp/vaultwarden'
 export HOME='/tmp/vaultwarden' CARGO_NET_GIT_FETCH_WITH_CLI='true'
 [[ -d $HOME ]] || G_EXEC mkdir "$HOME"
 G_EXEC cd "$HOME"
