@@ -1,5 +1,14 @@
+#!/bin/bash
 {
-. /boot/dietpi/func/dietpi-globals || exit 1
+if [[ -f '/boot/dietpi/func/dietpi-globals' ]]
+then
+	. /boot/dietpi/func/dietpi-globals || exit 1
+else
+	curl -sSf "https://raw.githubusercontent.com/${G_GITOWNER:-MichaIng}/DietPi/${G_GITBRANCH:-master}/dietpi/func/dietpi-globals" -o /tmp/dietpi-globals || exit 1
+	# shellcheck disable=SC1091
+	. /tmp/dietpi-globals || exit 1
+	G_EXEC_NOHALT=1 G_EXEC rm /tmp/dietpi-globals
+fi
 
 G_EXEC mkdir -p raspberrypi-sys-mods/{DEBIAN,lib/udev/rules.d,usr/{lib,share/doc}/raspberrypi-sys-mods}
 
@@ -51,7 +60,7 @@ while :; do
     if grep -q "alias $SUBSYSTEM:$comp " $ALIASES; then
         modprobe "$SUBSYSTEM:$comp" && exit 0
     fi
-    let n="$n + 1"
+    n=$(expr $n + 1)
 done
 modprobe "$MODALIAS" || modprobe "of:N${OF_NAME}T<NULL>C$OF_COMPATIBLE_0"
 _EOF_
@@ -132,7 +141,7 @@ find raspberrypi-sys-mods ! \( -path raspberrypi-sys-mods/DEBIAN -prune \) -type
 
 cat << _EOF_ > raspberrypi-sys-mods/DEBIAN/control
 Package: raspberrypi-sys-mods
-Version: 2:20220915-dietpi1
+Version: 2:20220915-dietpi2
 Architecture: all
 Maintainer: MichaIng <micha@dietpi.com>
 Date: $(date -u '+%a, %d %b %Y %T %z')
@@ -149,6 +158,6 @@ G_CONFIG_INJECT 'Installed-Size: ' "Installed-Size: $(du -sk raspberrypi-sys-mod
 
 # Build DEB package
 G_EXEC rm -Rf raspberrypi-sys-mods.deb
-G_EXEC_OUTPUT=1 G_EXEC dpkg-deb -b raspberrypi-sys-mods
+G_EXEC_OUTPUT=1 G_EXEC dpkg-deb -b -Zxz -z9 raspberrypi-sys-mods
 G_EXEC rm -Rf raspberrypi-sys-mods
 }

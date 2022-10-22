@@ -262,7 +262,7 @@ Links to hardware and software manufacturers, sources and build instructions use
 - [Plex Media Server](https://www.plex.tv/)
 - [Tautulli](https://github.com/Tautulli/Tautulli)
 - [FFmpeg](https://github.com/FFmpeg/FFmpeg)
-- [Shairport-Sync](https://github.com/mikebrady/shairport-sync)
+- [Shairport Sync](https://github.com/mikebrady/shairport-sync)
 - [FreshRSS](https://github.com/FreshRSS/FreshRSS)
 - [Folding@Home](https://github.com/FoldingAtHome)
 - [Medusa](https://github.com/pymedusa/Medusa)
