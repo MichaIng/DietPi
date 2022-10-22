@@ -61,14 +61,14 @@ done
 
 # Check for valid target hardware model and set variables accordingly
 partition_start=1
-efi_size=64
+efi_size=0
 boot_size=0
 root_size=1023
-boot_fstype='fat32' # Used for MBR boot partition only => NanoPi M2
+boot_fstype='fat32'
 CLONING_TOOL='dd'
 case $HW_MODEL in
 	0) iname='RPi' HW_ARCH=${HW_ARCH:-1} partition_start=4 boot_size=128 root_size=892;;
-	10) iname='OdroidC1' HW_ARCH=2 partition_start=4 boot_size=128 root_size=764;;
+	10) iname='OdroidC1' HW_ARCH=2 partition_start=4 boot_size=128 root_size=700;;
 	11) iname='OdroidXU4' HW_ARCH=2 partition_start=4 root_size=764;;
 	12) iname='OdroidC2' HW_ARCH=3 partition_start=4 root_size=764;;
 	15) iname='OdroidN2' HW_ARCH=3 partition_start=4 root_size=764;;
@@ -84,6 +84,7 @@ case $HW_MODEL in
 	74) iname='RadxaZero' HW_ARCH=3 partition_start=16 root_size=752;;
 	75) iname='Container' HW_ARCH=${HW_ARCH:-10} root_size=447;;
 	76) iname='NanoPiR5S' HW_ARCH=3 partition_start=16 root_size=752;;
+	77) iname='ROCK3A' HW_ARCH=3 PTTYPE='gpt' partition_start=16 boot_size=128 root_size=688;;
 	*) G_DIETPI-NOTIFY 1 "Invalid hardware model \"$HW_MODEL\" passed, aborting..."; exit 1;;
 esac
 
@@ -126,8 +127,8 @@ case $DISTRO in
 esac
 
 case $PTTYPE in
-	'msdos') efi_size=0;;
-	'gpt') boot_size=0; [[ $HW_MODEL == 21 ]] && iname='NativePC-UEFI' ITYPE='Installer';;
+	'msdos') :;;
+	'gpt') [[ $HW_MODEL == 21 ]] && efi_size=64 iname='NativePC-UEFI' ITYPE='Installer';;
 	*) G_DIETPI-NOTIFY 1 "Invalid partition table type \"$PTTYPE\" passed, aborting..."; exit 1;;
 esac
 
@@ -143,16 +144,19 @@ G_CHECK_URL "https://github.com/$GITOWNER/DietPi/tree/$GITBRANCH" || { G_DIETPI-
 
 # Image name
 OUTPUT_IMG_NAME="DietPi_$iname-$iarch-${distro^}"
-[[ $ITYPE ]] && OUTPUT_IMG_NAME+="_$ITYPE"
-
-# x86_64 installer images are packaged with Clonezilla
-[[ $HW_ARCH == 10 && $ITYPE == 'Installer' ]] && CLONING_TOOL='Clonezilla'
+# - x86_64 installer images
+if [[ $ITYPE == 'Installer' ]]
+then
+	[[ $HW_ARCH == 10 ]] || { G_DIETPI-NOTIFY 1 "Unsupported option \"-i\" (installer image) for architecture \"$HW_ARCH\" passed, aborting..."; exit 1; }
+	OUTPUT_IMG_NAME+="_$ITYPE"
+	CLONING_TOOL='Clonezilla'
+fi
 
 ##########################################
 # Dependencies
 ##########################################
-# EFI and boot partitions are FAT
-(( $efi_size || $boot_size )) && apackages+=('dosfstools')
+# EFI or FAT boot partition
+(( $efi_size )) || [[ $boot_size -gt 0 && $boot_fstype == 'fat32' ]] && apackages+=('dosfstools')
 
 # Emulation support in case of incompatible architecture
 (( ( $G_HW_ARCH < 10 && $G_HW_ARCH < $HW_ARCH ) || ( $G_HW_ARCH == 10 && $G_HW_ARCH != $HW_ARCH ) )) && apackages+=('qemu-user-static' 'binfmt-support')
@@ -194,10 +198,25 @@ G_EXEC fallocate -l "$((partition_start+efi_size+boot_size+root_size))M" "$OUTPU
 # GPT: Set partition labels instead of types
 if [[ $PTTYPE == 'gpt' ]]
 then
-	# GPT partition table and EFI partition
-	G_EXEC parted -s "$OUTPUT_IMG_NAME.img" unit MiB mklabel gpt mkpart 'EFI' fat32 "$partition_start" $((partition_start+efi_size)) set 1 esp on
-	# root partition
-	G_EXEC parted -s "$OUTPUT_IMG_NAME.img" unit MiB mkpart 'root' "$FSTYPE" $((partition_start+efi_size)) 100%
+	# GPT partition table
+	G_EXEC parted -s "$OUTPUT_IMG_NAME.img" mklabel gpt
+	if (( $efi_size ))
+	then
+		# EFI partition
+		G_EXEC parted -s "$OUTPUT_IMG_NAME.img" unit MiB mkpart 'EFI' fat32 "$partition_start" $((partition_start+efi_size)) set 1 esp on
+		# root partition
+		G_EXEC parted -s "$OUTPUT_IMG_NAME.img" unit MiB mkpart 'root' "$FSTYPE" $((partition_start+efi_size)) 100%
+
+	elif (( $boot_size ))
+	then
+		# boot partition
+		G_EXEC parted -s "$OUTPUT_IMG_NAME.img" unit MiB mkpart 'boot' "$boot_fstype" "$partition_start" $((partition_start+boot_size))
+		# root partition
+		G_EXEC parted -s "$OUTPUT_IMG_NAME.img" unit MiB mkpart 'root' "$FSTYPE" $((partition_start+boot_size)) 100%
+	else
+		# root partition
+		G_EXEC parted -s "$OUTPUT_IMG_NAME.img" unit MiB mkpart 'root' "$FSTYPE" "$partition_start" 100%
+	fi
 
 # MBR: Set partition types instead of labels
 else
@@ -207,7 +226,7 @@ else
 	(( $boot_size )) && G_EXEC parted -s "$OUTPUT_IMG_NAME.img" unit MiB mkpart primary "$boot_fstype" "$partition_start" $((partition_start+boot_size))
 	# root partition
 	G_EXEC parted -s "$OUTPUT_IMG_NAME.img" unit MiB mkpart primary "$FSTYPE" $((partition_start+boot_size)) 100%
-	# x86_64: Set boot flag
+	# Set boot flag
 	G_EXEC parted -s "$OUTPUT_IMG_NAME.img" set 1 boot on
 fi
 
@@ -220,7 +239,7 @@ G_EXEC partx -u "$FP_LOOP"
 # Create and mount filesystems and fstab
 G_EXEC mkdir rootfs
 # + EFI partition
-if [[ $PTTYPE == 'gpt' ]]
+if (( $efi_size ))
 then
 	FP_ROOT_DEV=2
 	G_EXEC mkfs.fat -F 32 "${FP_LOOP}p1"
