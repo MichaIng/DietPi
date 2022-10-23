@@ -5,16 +5,17 @@ G_AGUP
 G_AGDUG
 
 # APT dependencies: https://github.com/dani-garcia/vaultwarden/wiki/Building-binary#dependencies
-adeps_build=('gcc' 'libc6-dev' 'pkg-config' 'libssl-dev')
-adeps=('bash' 'libc6' 'openssl')
+adeps_build=('gcc' 'libc6-dev' 'pkg-config' 'libssl-dev' 'git')
+#(( $G_HW_ARCH == 3 )) && adeps_build+=('git')
+adeps=('libc6' 'openssl')
 (( $G_DISTRO > 6 )) && adeps+=('libssl3') || adeps+=('libssl1.1')
-G_AG_CHECK_INSTALL_PREREQ "${adeps_build[@]}"
+G_AGI "${adeps_build[@]}"
 
 # Install Rust via https://rustup.rs/
 # - ARMv7: Needs to be installed in tmpfs, else builds fail in emulated 32-bit ARM environments: https://github.com/rust-lang/cargo/issues/8719
-# - ARMv8: Install and build on disk, else GitHub workflow fails due to insufficient RAM
+# - ARMv8: Apply workaround for increased RAM usage: https://github.com/rust-lang/cargo/issues/10583
 # shellcheck disable=SC2015
-(( $G_HW_ARCH == 3 )) && export HOME='/root' || export HOME='/tmp/vaultwarden'
+export HOME='/tmp/vaultwarden' CARGO_NET_GIT_FETCH_WITH_CLI='true'
 [[ -d $HOME ]] || G_EXEC mkdir "$HOME"
 G_EXEC cd "$HOME"
 G_EXEC curl -sSfL 'https://sh.rustup.rs' -o rustup-init.sh
@@ -25,10 +26,10 @@ G_EXEC_OUTPUT=1 G_EXEC ./rustup-init.sh -y --profile minimal --default-toolchain
 G_EXEC_NOHALT=1 G_EXEC rm rustup-init.sh
 export PATH="$HOME/.cargo/bin:$PATH"
 
-version='1.25.2'
+version='1.26.0'
 G_DIETPI-NOTIFY 2 "Building vaultwarden version \e[33m$version"
-[[ -d vaultwarden-$version ]] && G_EXEC rm -R "vaultwarden-$version"
 G_EXEC curl -sSfLO "https://github.com/dani-garcia/vaultwarden/archive/$version.tar.gz"
+[[ -d vaultwarden-$version ]] && G_EXEC rm -R "vaultwarden-$version"
 G_EXEC tar xf "$version.tar.gz"
 G_EXEC rm "$version.tar.gz"
 G_EXEC cd "vaultwarden-$version"
@@ -49,7 +50,7 @@ G_EXEC mv "vaultwarden-$version/.env.template" "$DIR/mnt/dietpi_userdata/vaultwa
 G_EXEC rm -R "vaultwarden-$version"
 
 # - web vault
-wv_version='2022.9.0'
+wv_version='2022.10.1'
 G_DIETPI-NOTIFY 2 "Downloading web vault version \e[33m$wv_version"
 G_EXEC curl -sSfLO "https://github.com/dani-garcia/bw_web_builds/releases/download/v$wv_version/bw_web_v$wv_version.tar.gz"
 G_EXEC tar xf "bw_web_v$wv_version.tar.gz" --one-top-level="$DIR/mnt/dietpi_userdata/vaultwarden"
@@ -142,7 +143,7 @@ then
 			-newkey rsa:4096 -nodes -keyout /mnt/dietpi_userdata/vaultwarden/privkey.pem
 	fi
 
-	echo 'Set vaultwarden userdata owner ...'
+	echo 'Setting vaultwarden userdata owner ...'
 	chown -R vaultwarden:vaultwarden /mnt/dietpi_userdata/vaultwarden
 
 	echo 'Configuring vaultwarden systemd service ...'
@@ -209,7 +210,7 @@ Version: $version-dietpi3
 Architecture: $(dpkg --print-architecture)
 Maintainer: MichaIng <micha@dietpi.com>
 Date: $(date -u '+%a, %d %b %Y %T %z')
-Standards-Version: 4.6.1.0
+Standards-Version: 4.6.1.1
 Installed-Size: $(du -sk "$DIR" | mawk '{print $1}')
 Depends:$DEPS_APT_VERSIONED
 Section: misc
@@ -224,9 +225,9 @@ _EOF_
 G_CONFIG_INJECT 'Installed-Size: ' "Installed-Size: $(du -sk "$DIR" | mawk '{print $1}')" "$DIR/DEBIAN/control"
 
 # Build DEB package
-G_EXEC rm -Rf "$DIR.deb"
+[[ -f $DIR.deb ]] && G_EXEC rm -R "$DIR.deb"
 G_EXEC_OUTPUT=1 G_EXEC dpkg-deb -b "$DIR"
-G_EXEC rm -Rf "$DIR"
+G_EXEC rm -R "$DIR"
 
 exit 0
 }
