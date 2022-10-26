@@ -50,7 +50,7 @@ G_EXEC mv "vaultwarden-$version/.env.template" "$DIR/mnt/dietpi_userdata/vaultwa
 G_EXEC rm -R "vaultwarden-$version"
 
 # - web vault
-wv_version='2022.10.1'
+wv_version='2022.10.2'
 G_DIETPI-NOTIFY 2 "Downloading web vault version \e[33m$wv_version"
 G_EXEC curl -sSfLO "https://github.com/dani-garcia/bw_web_builds/releases/download/v$wv_version/bw_web_v$wv_version.tar.gz"
 G_EXEC tar xf "bw_web_v$wv_version.tar.gz" --one-top-level="$DIR/mnt/dietpi_userdata/vaultwarden"
@@ -206,7 +206,7 @@ grep -q 'raspbian' /etc/os-release && DEPS_APT_VERSIONED=$(sed 's/+rp[it][0-9]\+
 # - control
 cat << _EOF_ > "$DIR/DEBIAN/control"
 Package: vaultwarden
-Version: $version-dietpi3
+Version: $version-dietpi4
 Architecture: $(dpkg --print-architecture)
 Maintainer: MichaIng <micha@dietpi.com>
 Date: $(date -u '+%a, %d %b %Y %T %z')
