@@ -14,17 +14,18 @@ G_AGI automake pkg-config make g++ libpopt-dev libconfig-dev libssl-dev libsoxr-
 # Download
 name='shairport-sync'
 name_pretty='Shairport Sync'
+repo='https://github.com/mikebrady/shairport-sync'
 version='4.1'
 G_DIETPI-NOTIFY 2 "Building $name_pretty version \e[33m$version"
 G_EXEC cd /tmp
-G_EXEC curl -sSfLO "https://github.com/mikebrady/$name/archive/$version.tar.gz"
+G_EXEC curl -sSfLO "$repo/archive/$version.tar.gz"
 [[ -d $name-$version ]] && G_EXEC rm -R "$name-$version"
 G_EXEC tar xf "$version.tar.gz"
 G_EXEC rm "$version.tar.gz"
 
 # Compile
 G_EXEC cd "$name-$version"
-G_EXEC_OUTPUT=1 G_EXEC autoreconf -i -f
+G_EXEC_OUTPUT=1 G_EXEC autoreconf -fi
 CFLAGS='-g0 -O3' CXXFLAGS='-g0 -O3' G_EXEC_OUTPUT=1 G_EXEC ./configure --with-alsa --with-avahi --with-ssl=openssl --with-soxr --with-metadata --with-systemd --with-dbus-interface --with-mpris-interface --with-mqtt-client --with-pipe --with-stdout
 G_EXEC_OUTPUT=1 G_EXEC make
 G_EXEC strip --remove-section=.comment --remove-section=.note "$name"
@@ -301,7 +302,7 @@ G_EXEC chmod +x "$DIR/DEBIAN/"{postinst,prerm,postrm}
 find "$DIR" ! \( -path "$DIR/DEBIAN" -prune \) -type f -exec md5sum {} + | sed "s|$DIR/||" > "$DIR/DEBIAN/md5sums"
 
 # - Add dependencies
-adeps=('libc6' 'avahi-daemon' 'libasound2' 'libavahi-client3' 'libsoxr0' 'libconfig9' 'libpopt0' 'libglib2.0-0' 'libmosquitto1')
+adeps=('libc6' 'libasound2' 'libavahi-client3' 'libsoxr0' 'libconfig9' 'libpopt0' 'libglib2.0-0' 'libmosquitto1' 'avahi-daemon')
 (( $G_DISTRO > 6 )) && adeps+=('libssl3') || adeps+=('libssl1.1')
 DEPS_APT_VERSIONED=
 for i in "${adeps[@]}"
@@ -324,9 +325,9 @@ Installed-Size: $(du -sk "$DIR" | mawk '{print $1}')
 Depends:$DEPS_APT_VERSIONED
 Section: sound
 Priority: optional
-Homepage: https://github.com/mikebrady/shairport-sync
-Vcs-Git: https://github.com/mikebrady/shairport-sync.git
-Vcs-Browser: https://github.com/mikebrady/shairport-sync
+Homepage: $repo
+Vcs-Git: $repo.git
+Vcs-Browser: $repo
 Description: AirPlay audio player
  Plays audio streamed from iTunes, iOS devices and third-party AirPlay
  sources such as ForkedDaapd and others. Audio played by a Shairport
