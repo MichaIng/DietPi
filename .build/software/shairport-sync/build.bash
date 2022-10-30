@@ -12,46 +12,48 @@ G_AGI automake pkg-config make g++ libpopt-dev libconfig-dev libssl-dev libsoxr-
 (( $G_DISTRO == 5 )) && G_EXEC systemctl unmask avahi-daemon
 
 # Download
-version='3.3.9'
-G_DIETPI-NOTIFY 2 "Building Shairport Sync version \e[33m$version"
+name='shairport-sync'
+name_pretty='Shairport Sync'
+version='4.1'
+G_DIETPI-NOTIFY 2 "Building $name_pretty version \e[33m$version"
 G_EXEC cd /tmp
-G_EXEC curl -sSfLO "https://github.com/mikebrady/shairport-sync/archive/$version.tar.gz"
-[[ -d shairport-sync-$version ]] && G_EXEC rm -R "shairport-sync-$version"
+G_EXEC curl -sSfLO "https://github.com/mikebrady/$name/archive/$version.tar.gz"
+[[ -d $name-$version ]] && G_EXEC rm -R "$name-$version"
 G_EXEC tar xf "$version.tar.gz"
 G_EXEC rm "$version.tar.gz"
 
 # Compile
-G_EXEC cd "shairport-sync-$version"
+G_EXEC cd "$name-$version"
 G_EXEC_OUTPUT=1 G_EXEC autoreconf -i -f
 CFLAGS='-g0 -O3' CXXFLAGS='-g0 -O3' G_EXEC_OUTPUT=1 G_EXEC ./configure --with-alsa --with-avahi --with-ssl=openssl --with-soxr --with-metadata --with-systemd --with-dbus-interface --with-mpris-interface --with-mqtt-client --with-pipe --with-stdout
 G_EXEC_OUTPUT=1 G_EXEC make
-G_EXEC strip --remove-section=.comment --remove-section=.note shairport-sync
+G_EXEC strip --remove-section=.comment --remove-section=.note "$name"
 
 # Package dir: In case of Raspbian, force ARMv6
 G_EXEC cd /tmp
-grep -q 'raspbian' /etc/os-release && DIR='shairport-sync_armv6l' || DIR="shairport-sync_$G_HW_ARCH_NAME"
+grep -q 'raspbian' /etc/os-release && DIR="${name}_armv6l" || DIR="${name}_$G_HW_ARCH_NAME"
 [[ -d $DIR ]] && G_EXEC rm -R "$DIR"
 # - Control files, systemd service, config file, executable, copyright
-G_EXEC mkdir -p "$DIR/"{DEBIAN,lib/systemd/system,usr/local/{bin,etc,share/doc/shairport-sync},etc/dbus-1/system.d}
+G_EXEC mkdir -p "$DIR/"{DEBIAN,lib/systemd/system,usr/local/{bin,etc,"share/doc/$name"},etc/dbus-1/system.d}
 
 # Binary
-G_EXEC cp -a "shairport-sync-$version/shairport-sync" "$DIR/usr/local/bin/"
+G_EXEC cp -a "$name-$version/$name" "$DIR/usr/local/bin/"
 
 # Copyright
-G_EXEC cp "shairport-sync-$version/LICENSES" "$DIR/usr/local/share/doc/shairport-sync/copyright"
+G_EXEC cp "$name-$version/LICENSES" "$DIR/usr/local/share/doc/$name/copyright"
 
 # systemd service
-G_EXEC cp "shairport-sync-$version/scripts/shairport-sync.service" "$DIR/lib/systemd/system/"
+G_EXEC cp "$name-$version/scripts/$name.service" "$DIR/lib/systemd/system/"
 
 # dbus/mpris permissions
-G_EXEC cp "shairport-sync-$version/scripts/shairport-sync-dbus-policy.conf" "$DIR/etc/dbus-1/system.d/"
-G_EXEC cp "shairport-sync-$version/scripts/shairport-sync-mpris-policy.conf" "$DIR/etc/dbus-1/system.d/"
+G_EXEC cp "$name-$version/scripts/shairport-sync-dbus-policy.conf" "$DIR/etc/dbus-1/system.d/"
+G_EXEC cp "$name-$version/scripts/shairport-sync-mpris-policy.conf" "$DIR/etc/dbus-1/system.d/"
 
 # Cleanup
-G_EXEC rm -R "shairport-sync-$version"
+G_EXEC rm -R "$name-$version"
 
 # Config file: https://github.com/mikebrady/shairport-sync/blob/master/scripts/shairport-sync.conf
-cat << '_EOF_' > "$DIR/usr/local/etc/shairport-sync.conf"
+cat << '_EOF_' > "$DIR/usr/local/etc/$name.conf"
 // Sample Configuration File for Shairport Sync
 // Commented out settings are generally the defaults, except where noted.
 // See the individual sections for details.
@@ -235,60 +237,60 @@ _EOF_
 # Control files
 
 # - conffiles
-echo '/usr/local/etc/shairport-sync.conf' > "$DIR/DEBIAN/conffiles"
+echo "/usr/local/etc/$name.conf" > "$DIR/DEBIAN/conffiles"
 
 # - postinst
-cat << '_EOF_' > "$DIR/DEBIAN/postinst"
+cat << _EOF_ > "$DIR/DEBIAN/postinst"
 #!/bin/sh
 if [ -d '/run/systemd/system' ]
 then
-	if getent passwd shairport-sync > /dev/null
+	if getent passwd $name > /dev/null
 	then
-		echo 'Configuring Shairport Sync service user ...'
-		usermod -aG audio -d /nonexistent -s /usr/sbin/nologin shairport-sync
+		echo 'Configuring $name_pretty service user ...'
+		usermod -aG audio -d /nonexistent -s /usr/sbin/nologin $name
 	else
-		echo 'Creating Shairport Sync service user ...'
-		useradd -rMU -G audio -d /nonexistent -s /usr/sbin/nologin shairport-sync
+		echo 'Creating $name_pretty service user ...'
+		useradd -rMU -G audio -d /nonexistent -s /usr/sbin/nologin $name
 	fi
 
-	echo 'Configuring Shairport Sync systemd service ...'
-	systemctl unmask shairport-sync
-	systemctl enable --now shairport-sync
+	echo 'Configuring $name_pretty systemd service ...'
+	systemctl unmask $name
+	systemctl enable --now $name
 fi
 _EOF_
 
 # - prerm
-cat << '_EOF_' > "$DIR/DEBIAN/prerm"
+cat << _EOF_ > "$DIR/DEBIAN/prerm"
 #!/bin/sh
-if [ "$1" = 'remove' ] && [ -d '/run/systemd/system' ] && [ -f '/lib/systemd/system/shairport-sync.service' ]
+if [ "$1" = 'remove' ] && [ -d '/run/systemd/system' ] && [ -f '/lib/systemd/system/$name.service' ]
 then
-	echo 'Deconfiguring Shairport Sync systemd service ...'
-	systemctl unmask shairport-sync
-	systemctl disable --now shairport-sync
+	echo 'Deconfiguring $name_pretty systemd service ...'
+	systemctl unmask $name
+	systemctl disable --now $name
 fi
 _EOF_
 
 # - postrm
-cat << '_EOF_' > "$DIR/DEBIAN/postrm"
+cat << _EOF_ > "$DIR/DEBIAN/postrm"
 #!/bin/sh
 if [ "$1" = 'purge' ]
 then
-	if [ -d '/etc/systemd/system/shairport-sync.service.d' ]
+	if [ -d '/etc/systemd/system/$name.service.d' ]
 	then
-		echo 'Removing Shairport Sync systemd service overrides ...'
-		rm -Rv /etc/systemd/system/shairport-sync.service.d
+		echo 'Removing $name_pretty systemd service overrides ...'
+		rm -Rv /etc/systemd/system/$name.service.d
 	fi
 
-	if getent passwd shairport-sync > /dev/null
+	if getent passwd $name > /dev/null
 	then
-		echo 'Removing Shairport Sync service user ...'
-		userdel shairport-sync
+		echo 'Removing $name_pretty service user ...'
+		userdel $name
 	fi
 
-	if getent group shairport-sync > /dev/null
+	if getent group $name > /dev/null
 	then
-		echo 'Removing Shairport Sync service group ...'
-		groupdel shairport-sync
+		echo 'Removing $name_pretty service group ...'
+		groupdel $name
 	fi
 fi
 _EOF_
@@ -312,8 +314,8 @@ grep -q 'raspbian' /etc/os-release && DEPS_APT_VERSIONED=$(sed 's/+rp[it][0-9]\+
 
 # - control
 cat << _EOF_ > "$DIR/DEBIAN/control"
-Package: shairport-sync
-Version: $version-dietpi3
+Package: $name
+Version: $version-dietpi1
 Architecture: $(dpkg --print-architecture)
 Maintainer: MichaIng <micha@dietpi.com>
 Date: $(date -u '+%a, %d %b %Y %T %z')
