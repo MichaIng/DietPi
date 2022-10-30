@@ -43,7 +43,7 @@ G_EXEC cp -a "$name-$version/$name" "$DIR/usr/local/bin/"
 G_EXEC cp "$name-$version/LICENSES" "$DIR/usr/local/share/doc/$name/copyright"
 
 # systemd service
-G_EXEC cp "$name-$version/scripts/$name.service" "$DIR/lib/systemd/system/"
+G_EXEC cp "$name-$version/scripts/$name.service-avahi" "$DIR/lib/systemd/system/"
 
 # dbus/mpris permissions
 G_EXEC cp "$name-$version/scripts/shairport-sync-dbus-policy.conf" "$DIR/etc/dbus-1/system.d/"
