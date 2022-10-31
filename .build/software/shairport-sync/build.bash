@@ -29,7 +29,7 @@ G_EXEC rm "$version.tar.gz"
 
 # Compile
 G_EXEC cd "$name-$version"
-G_EXEC_OUTPUT=1 G_EXEC autoreconf -fi
+G_EXEC_OUTPUT=1 G_EXEC autoreconf -fiW all
 CFLAGS='-g0 -O3' CXXFLAGS='-g0 -O3' G_EXEC_OUTPUT=1 G_EXEC ./configure --with-alsa --with-avahi --with-ssl=openssl --with-soxr --with-metadata --with-systemd --with-dbus-interface --with-mpris-interface --with-mqtt-client --with-pipe --with-stdout
 G_EXEC_OUTPUT=1 G_EXEC make
 G_EXEC strip --remove-section=.comment --remove-section=.note "$name"
@@ -48,7 +48,7 @@ G_EXEC cp -a "$name-$version/$name" "$DIR/usr/local/bin/"
 G_EXEC cp "$name-$version/LICENSES" "$DIR/usr/local/share/doc/$name/copyright"
 
 # systemd service
-G_EXEC cp "$name-$version/scripts/$name.service-avahi" "$DIR/lib/systemd/system/"
+G_EXEC cp "$name-$version/scripts/$name.service-avahi" "$DIR/lib/systemd/system/shairport-sync.service"
 
 # dbus/mpris permissions
 G_EXEC cp "$name-$version/scripts/shairport-sync-dbus-policy.conf" "$DIR/etc/dbus-1/system.d/"
@@ -352,7 +352,7 @@ G_EXEC_OUTPUT=1 G_EXEC dpkg-deb -b "$DIR"
 G_EXEC cd /tmp
 G_EXEC_OUTPUT=1 G_EXEC git clone 'https://github.com/mikebrady/nqptp'
 G_EXEC cd nqptp
-G_EXEC_OUTPUT=1 G_EXEC autoreconf -fi
+G_EXEC_OUTPUT=1 G_EXEC autoreconf -fiW all
 CFLAGS='-g0 -O3' CXXFLAGS='-g0 -O3' G_EXEC_OUTPUT=1 G_EXEC ./configure --with-systemd-startup
 G_EXEC_OUTPUT=1 G_EXEC make
 G_EXEC strip --remove-section=.comment --remove-section=.note nqptp
@@ -360,7 +360,7 @@ G_EXEC strip --remove-section=.comment --remove-section=.note nqptp
 # Compile
 G_EXEC cd "../$name-$version"
 G_EXEC_OUTPUT=1 G_EXEC make clean
-G_EXEC_OUTPUT=1 G_EXEC autoreconf -fi
+G_EXEC_OUTPUT=1 G_EXEC autoreconf -fiW all
 CFLAGS='-g0 -O3' CXXFLAGS='-g0 -O3' G_EXEC_OUTPUT=1 G_EXEC ./configure --with-alsa --with-avahi --with-ssl=openssl --with-soxr --with-metadata --with-systemd --with-dbus-interface --with-mpris-interface --with-mqtt-client --with-pipe --with-stdout --with-airplay-2
 G_EXEC_OUTPUT=1 G_EXEC make
 G_EXEC strip --remove-section=.comment --remove-section=.note "$name"
