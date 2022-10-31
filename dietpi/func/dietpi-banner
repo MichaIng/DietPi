@@ -76,58 +76,65 @@
 		'\e[91m'	# Red		| Update notifications
 	)
 
+    ## Parse the above colour strings and use them to generate an expression to match them
+    ## via bash substitution
+    __make_strip_color(){
+        local tmp="${aCOLOUR[@]} $COLOUR_RESET"
+        tmp="+(${tmp// /|})"       ## convert list into OR expression
+        tmp="${tmp//\\e/\\\\\\e}"  ## ensure '\e' exists
+        tmp="${tmp//\[/\\[}"       ## ensure '\[' exists
+        echo "$tmp"
+    }
+    shopt -s extglob               ## globally enable multiple pattern matching
+    COLOUR_STRIP="$(__make_strip_color)"
+
 	# Load settings here, to have chosen ${aCOLOUR[0]} applied to below strings
 	# shellcheck disable=SC1090
 	[[ -f $FP_SAVEFILE ]] && . "$FP_SAVEFILE"
 
 	TERM_WIDTH=$(tput cols)
-	COLOR_STRIP="s/\x1B\[[0-9;]*m//g"
+    MAX_TITLE_LEN=18      ## Hard-coded
+    MAX_DESCP_LEN=$(( -1 + $TERM_WIDTH - MAX_TITLE_LEN ))
 
-	Print_Line(){
-	    ## Colour codes and other text have been expanded already
-	    ## at this point into '\eXYZ' symbols, emojis, and
-	    ## stylized text.
-	    local descrp="$1"
-	    local result="$2"
-
-	    ## We could also replace the emojis with single characters
-	    ##     via: iconv -f UTF-8 -t ASCII//TRANSLIT
-	    ## to better format the weather and CPU, but it's a little overkill.
-	    local stripped_descrp=$(echo -e "${descrp}" | sed -r ${COLOR_STRIP})
-	    local stripped_result=$(echo -e "${result}" | sed -r ${COLOR_STRIP})
-	    ## Lengths:
-	    #  - If description is long, then split description
-	    ## - If result or total length is long, then split result
-	    local descrp_len=$(echo -e "$stripped_descrp" | wc -c)
-	    local result_len=$(echo -e "$stripped_result" | wc -c)
-	    local total_len=$(( $descrp_len + $result_len ))
-	    ## result text is left padded, so we compensate for it when folding
-	    local padded_len=$(( $TERM_WIDTH - $SEPERATOR_OFFSET ))
-
-	    if [ $descrp_len -gt $TERM_WIDTH ]; then
-		descrp=$(echo -e "${stripped_descrp}" \
-			   | fold -s -w $TERM_WIDTH \
-			   | sed "2,\$s|^|${SEPERATOR_FILLER}|")
-		descrp="${aCOLOUR[1]}${descrp}$COLOUR_RESET"
-	    fi
-
-	    if [ $result_len -gt $(( $TERM_WIDTH - $descrp_len )) ] ||
-		   [ $total_len -gt $TERM_WIDTH ]; then
-		result="\n"$(echo "${stripped_result}" \
-				 | fold -s -w $padded_len \
-				 | sed "s|^|${SEPERATOR_FILLER}|")
-	    fi
-	    echo -e "$descrp $result"
-	}
-
-	## Automatically generated spacing
 	GREEN_LINE_FILLER=$(printf -- "─%.0s" $(seq 1 $(( $TERM_WIDTH - 2 ))))
-	SEPERATOR_OFFSET=3 ## Hardcoded '3', until better suggestion.
-	SEPERATOR_FILLER=$(printf -- " %.0s" $(seq 1 $SEPERATOR_OFFSET))
-
 	GREEN_LINE=" ${aCOLOUR[0]}${GREEN_LINE_FILLER}$COLOUR_RESET"
 	GREEN_BULLET=" ${aCOLOUR[0]}-$COLOUR_RESET"
 	GREEN_SEPARATOR="${aCOLOUR[0]}:$COLOUR_RESET"
+
+	Print_Line(){
+	    local title="$1"  ## Bold part before ":"
+	    local descp="$2"  ## Normal part after ":"
+
+        ## Strip invisible colour codes in order to accurately measure the visual length
+        ## of a sentence.
+	    local stripped_title="${title//$COLOUR_STRIP/}"
+	    local stripped_descp="${descp//$COLOUR_STRIP/}"
+
+	    local title_len=${#stripped_title}
+	    local descp_len=${#stripped_descp}
+
+        ## Left-pad the description based on the title length
+        local left_padding=$(printf -- " %.0s" $(seq 0 $MAX_TITLE_LEN))
+
+        ## Sometimes the title is long, so a sanity check is performed to fold the title
+        ## if it exceeds MAX_TITLE_LEN. This takes up the left-side of the message and
+        ## receives no padding.
+	    if (( $title_len >= $MAX_TITLE_LEN )); then
+		    title=$(echo -e "${stripped_title}" \
+			             | fold -s -w $MAX_TITLE_LEN)
+		    title="${aCOLOUR[1]}${title}$COLOUR_RESET"
+	    fi
+
+        ## The description is typically very long, and is folded from the second line
+        ## onwards into the remaining MAX_DESCP_LEN, with left padding.
+	    if (( $descp_len >= $MAX_DESCP_LEN )); then
+		    descp=$(echo "${stripped_descp}" \
+				        | fold -s -w $MAX_DESCP_LEN \
+				        | sed "2,\$s|^|${left_padding}|")
+	    fi
+
+        echo -e "$title $descp"
+	}
 
 	DIETPI_VERSION="$G_DIETPI_VERSION_CORE.$G_DIETPI_VERSION_SUB.$G_DIETPI_VERSION_RC"
 	[[ $G_GITBRANCH == 'master' ]] || DIETPI_VERSION+=" ($G_GITBRANCH)"
