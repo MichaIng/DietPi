@@ -5,10 +5,14 @@
 G_AGUP
 G_AGDUG
 
+# -------------------------
+# ------- AirPlay 1 -------
+# -------------------------
+
 # Build deps
 # - Workaround for CI on Buster: Mask Avahi daemon service, since it can fail to start, failing the package install
 (( $G_DISTRO == 5 )) && G_EXEC systemctl mask avahi-daemon
-G_AGI automake pkg-config make g++ libpopt-dev libconfig-dev libssl-dev libsoxr-dev libavahi-client-dev libasound2-dev libglib2.0-dev libmosquitto-dev avahi-daemon
+G_AGI automake pkg-config make g++ libpopt-dev libconfig-dev libssl-dev libsoxr-dev libavahi-client-dev libasound2-dev libglib2.0-dev libmosquitto-dev avahi-daemon git libplist-dev libsodium-dev libgcrypt20-dev libavformat-dev xxd
 (( $G_DISTRO == 5 )) && G_EXEC systemctl unmask avahi-daemon
 
 # Download
@@ -49,9 +53,6 @@ G_EXEC cp "$name-$version/scripts/$name.service-avahi" "$DIR/lib/systemd/system/
 # dbus/mpris permissions
 G_EXEC cp "$name-$version/scripts/shairport-sync-dbus-policy.conf" "$DIR/etc/dbus-1/system.d/"
 G_EXEC cp "$name-$version/scripts/shairport-sync-mpris-policy.conf" "$DIR/etc/dbus-1/system.d/"
-
-# Cleanup
-G_EXEC rm -R "$name-$version"
 
 # Config file: https://github.com/mikebrady/shairport-sync/blob/master/scripts/shairport-sync.conf
 cat << '_EOF_' > "$DIR/usr/local/etc/$name.conf"
@@ -342,7 +343,169 @@ G_CONFIG_INJECT 'Installed-Size: ' "Installed-Size: $(du -sk "$DIR" | mawk '{pri
 # Build DEB package
 [[ -f $DIR.deb ]] && G_EXEC rm -R "$DIR.deb"
 G_EXEC_OUTPUT=1 G_EXEC dpkg-deb -b "$DIR"
-G_EXEC rm -R "$DIR"
+
+# -------------------------
+# ------- AirPlay 2 -------
+# -------------------------
+
+# NQPTP
+G_EXEC cd /tmp
+G_EXEC_OUTPUT=1 G_EXEC git clone 'https://github.com/mikebrady/nqptp'
+G_EXEC cd nqptp
+G_EXEC_OUTPUT=1 G_EXEC autoreconf -fi
+CFLAGS='-g0 -O3' CXXFLAGS='-g0 -O3' G_EXEC_OUTPUT=1 G_EXEC ./configure --with-systemd-startup
+G_EXEC_OUTPUT=1 G_EXEC make
+G_EXEC strip --remove-section=.comment --remove-section=.note nqptp
+
+# Compile
+G_EXEC cd "../$name-$version"
+G_EXEC_OUTPUT=1 G_EXEC make clean
+G_EXEC_OUTPUT=1 G_EXEC autoreconf -fi
+CFLAGS='-g0 -O3' CXXFLAGS='-g0 -O3' G_EXEC_OUTPUT=1 G_EXEC ./configure --with-alsa --with-avahi --with-ssl=openssl --with-soxr --with-metadata --with-systemd --with-dbus-interface --with-mpris-interface --with-mqtt-client --with-pipe --with-stdout --with-airplay-2
+G_EXEC_OUTPUT=1 G_EXEC make
+G_EXEC strip --remove-section=.comment --remove-section=.note "$name"
+
+# Package dir
+G_EXEC cd /tmp
+G_EXEC mv "$DIR" "${DIR/sync_/sync-airplay2_/}"
+DIR=${DIR/sync_/sync-airplay2_/}
+
+# Binary
+G_EXEC cp -a "$name-$version/$name" "$DIR/usr/local/bin/"
+
+# NQPTP
+G_EXEC cp -a nqptp/nqptp "$DIR/usr/local/bin/"
+G_EXEC cp nqptp/nqptp.service "$DIR/lib/systemd/system/"
+
+# Control files
+# - postinst
+cat << _EOF_ > "$DIR/DEBIAN/postinst"
+#!/bin/sh
+if [ -d '/run/systemd/system' ]
+then
+	if getent passwd $name > /dev/null
+	then
+		echo 'Configuring $name_pretty service user ...'
+		usermod -aG audio -d /nonexistent -s /usr/sbin/nologin $name
+	else
+		echo 'Creating $name_pretty service user ...'
+		useradd -rMU -G audio -d /nonexistent -s /usr/sbin/nologin $name
+	fi
+
+	echo 'Configuring NQPTP systemd service ...'
+	systemctl unmask nqptp
+	systemctl enable --now nqptp
+
+	echo 'Configuring $name_pretty systemd service ...'
+	systemctl unmask $name
+	systemctl enable --now $name
+fi
+_EOF_
+
+# - prerm
+cat << _EOF_ > "$DIR/DEBIAN/prerm"
+#!/bin/sh
+if [ "$1" = 'remove' ] && [ -d '/run/systemd/system' ]
+then
+	if [ -f '/lib/systemd/system/$name.service' ]
+	then
+		echo 'Deconfiguring $name_pretty systemd service ...'
+		systemctl unmask $name
+		systemctl disable --now $name
+	fi
+
+	if [ -f '/lib/systemd/system/nqptp.service' ]
+	then
+		echo 'Deconfiguring NQPTP systemd service ...'
+		systemctl unmask nqptp
+		systemctl disable --now nqptp
+	fi
+fi
+_EOF_
+
+# - postrm
+cat << _EOF_ > "$DIR/DEBIAN/postrm"
+#!/bin/sh
+if [ "$1" = 'purge' ]
+then
+	if [ -d '/etc/systemd/system/$name.service.d' ]
+	then
+		echo 'Removing $name_pretty systemd service overrides ...'
+		rm -Rv /etc/systemd/system/$name.service.d
+	fi
+
+	if [ -d '/etc/systemd/system/nqptp.service.d' ]
+	then
+		echo 'Removing NQPTP systemd service overrides ...'
+		rm -Rv /etc/systemd/system/nqptp.service.d
+	fi
+
+	if getent passwd $name > /dev/null
+	then
+		echo 'Removing $name_pretty service user ...'
+		userdel $name
+	fi
+
+	if getent group $name > /dev/null
+	then
+		echo 'Removing $name_pretty service group ...'
+		groupdel $name
+	fi
+fi
+_EOF_
+
+# - md5sums
+find "$DIR" ! \( -path "$DIR/DEBIAN" -prune \) -type f -exec md5sum {} + | sed "s|$DIR/||" > "$DIR/DEBIAN/md5sums"
+
+# - Add dependencies
+adeps+=('libplist3' 'libsodium23' 'libgcrypt20')
+(( $G_DISTRO > 6 )) && adeps+=('libavcodec59') || adeps+=('libavcodec58')
+DEPS_APT_VERSIONED=
+for i in "${adeps[@]}"
+do
+	DEPS_APT_VERSIONED+=" $i (>= $(dpkg-query -Wf '${VERSION}' "$i")),"
+done
+DEPS_APT_VERSIONED=${DEPS_APT_VERSIONED%,}
+# shellcheck disable=SC2001
+grep -q 'raspbian' /etc/os-release && DEPS_APT_VERSIONED=$(sed 's/+rp[it][0-9]\+)/)/g' <<< "$DEPS_APT_VERSIONED") || DEPS_APT_VERSIONED=$(sed 's/+b[0-9]\+)/)/g' <<< "$DEPS_APT_VERSIONED")
+
+# - control
+cat << _EOF_ > "$DIR/DEBIAN/control"
+Package: $name-airplay2
+Version: $version-dietpi1
+Architecture: $(dpkg --print-architecture)
+Maintainer: MichaIng <micha@dietpi.com>
+Date: $(date -u '+%a, %d %b %Y %T %z')
+Standards-Version: 4.6.1.1
+Installed-Size: $(du -sk "$DIR" | mawk '{print $1}')
+Depends:$DEPS_APT_VERSIONED
+Conflicts: shairport-sync
+Section: sound
+Priority: optional
+Homepage: $repo
+Vcs-Git: $repo.git
+Vcs-Browser: $repo
+Description: AirPlay audio player
+ Plays audio streamed from iTunes, iOS devices and third-party AirPlay
+ sources such as ForkedDaapd and others. Audio played by a Shairport
+ Sync-powered device stays synchronised with the source and hence with
+ similar devices playing the same source. In this way, synchronised
+ multi-room audio is possible without difficulty.
+ .
+ This package was built with AirPlay 2 support and contains the required
+ NQPTP daemon. For details and limitations read the following info:
+ https://github.com/mikebrady/shairport-sync/blob/master/AIRPLAY2.md
+ .
+ Shairport Sync does not support AirPlay video or photo streaming.
+_EOF_
+G_CONFIG_INJECT 'Installed-Size: ' "Installed-Size: $(du -sk "$DIR" | mawk '{print $1}')" "$DIR/DEBIAN/control"
+
+# Build DEB package
+[[ -f $DIR.deb ]] && G_EXEC rm -R "$DIR.deb"
+G_EXEC_OUTPUT=1 G_EXEC dpkg-deb -b "$DIR"
+
+# Cleanup
+G_EXEC rm -R "$name-$version" nqptp "$DIR"
 
 exit
 }

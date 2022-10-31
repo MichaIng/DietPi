@@ -101,9 +101,13 @@ fi
 echo '[ INFO ] Running Shairport Sync build script...'
 bash -c "\$(curl -sSf 'https://raw.githubusercontent.com/$G_GITOWNER/DietPi/$G_GITBRANCH/.build/software/shairport-sync/build.bash')"
 mv -v '/tmp/shairport-sync_$arch.deb' '/shairport-sync_$arch.deb'
+mv -v '/tmp/shairport-sync-airplay2_$arch.deb' '/shairport-sync-airplay2_$arch.deb'
 poweroff
 _EOF_
 G_EXEC chmod +x rootfs/etc/rc.local
+
+# Skip filesystem expansion
+G_EXEC rm rootfs/etc/systemd/system/local-fs.target.wants/dietpi-fs_partition_resize.service
 
 # Assure that build starts after DietPi-PostBoot
 [[ -d 'rootfs/etc/systemd/system/rc-local.service.d' ]] || G_EXEC mkdir rootfs/etc/systemd/system/rc-local.service.d
