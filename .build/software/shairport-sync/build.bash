@@ -367,8 +367,8 @@ G_EXEC strip --remove-section=.comment --remove-section=.note "$name"
 
 # Package dir
 G_EXEC cd /tmp
-G_EXEC mv "$DIR" "${DIR/sync_/sync-airplay2_/}"
-DIR=${DIR/sync_/sync-airplay2_/}
+G_EXEC mv "$DIR" "${DIR/sync_/sync-airplay2_}"
+DIR=${DIR/sync_/sync-airplay2_}
 
 # Binary
 G_EXEC cp -a "$name-$version/$name" "$DIR/usr/local/bin/"
