@@ -89,6 +89,13 @@ G_EXEC_OUTPUT=1 G_EXEC e2fsck -fp "${FP_LOOP}p1"
 G_EXEC mkdir rootfs
 G_EXEC mount "${FP_LOOP}p1" rootfs
 
+# Skip filesystem expansion
+G_EXEC rm rootfs/etc/systemd/system/local-fs.target.wants/dietpi-fs_partition_resize.service
+
+# Assure that build starts after DietPi-PostBoot
+[[ -d 'rootfs/etc/systemd/system/rc-local.service.d' ]] || G_EXEC mkdir rootfs/etc/systemd/system/rc-local.service.d
+G_EXEC eval 'echo -e '\''[Unit]\nAfter=dietpi-postboot.service'\'' > rootfs/etc/systemd/system/rc-local.service.d/dietpi.conf'
+
 # Automated build
 cat << _EOF_ > rootfs/etc/rc.local || exit 1
 #!/bin/dash
@@ -104,10 +111,6 @@ mv -v '/tmp/gmediarender_$arch.deb' '/gmediarender_$arch.deb'
 poweroff
 _EOF_
 G_EXEC chmod +x rootfs/etc/rc.local
-
-# Assure that build starts after DietPi-PostBoot
-[[ -d 'rootfs/etc/systemd/system/rc-local.service.d' ]] || G_EXEC mkdir rootfs/etc/systemd/system/rc-local.service.d
-G_EXEC eval 'echo -e '\''[Unit]\nAfter=dietpi-postboot.service'\'' > rootfs/etc/systemd/system/rc-local.service.d/dietpi.conf'
 
 ##########################################
 # Boot container
