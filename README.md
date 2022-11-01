@@ -326,6 +326,7 @@ Links to hardware and software manufacturers, sources and build instructions use
 - [Rclone](https://github.com/rclone/rclone)
 - [ZeroTier](https://github.com/zerotier/ZeroTierOne)
 - [Navidrome](https://github.com/navidrome/navidrome)
+- [Homer](https://github.com/bastienwirtz/homer)
 
 ---
 
