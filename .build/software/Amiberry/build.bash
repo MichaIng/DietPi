@@ -23,7 +23,7 @@ G_AGDUG
 G_AGI "${adeps_build[@]}"
 
 # Build libSDL2
-v_sdl='2.24.1'
+v_sdl='2.24.2'
 if [[ ! -d /tmp/SDL2-$v_sdl ]]
 then
 	G_DIETPI-NOTIFY 2 "Building libSDL2 version \e[33m$v_sdl"
