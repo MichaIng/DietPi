@@ -51,7 +51,7 @@
 	# Mount all filesystems defined in /etc/fstab without "noauto" option: https://github.com/MichaIng/DietPi/issues/5174
 	mount -a
 
-	# Make /tmp a tmpfs if it is not yet a dedicated mount
+	# Assure that /tmp is a tmpfs of at least 512 MiB
 	if findmnt -M /tmp > /dev/null
 	then
 		(( $(findmnt -Ufnrbo SIZE -M /tmp) < 536870912 )) && mount -o remount,size=536870912 /tmp
@@ -153,7 +153,7 @@ _EOF_
 	fi
 
 	# Assure no obsolete .hw_model is loaded
-	rm -fv /boot/dietpi/.hw_model
+	[[ -f '/boot/dietpi/.hw_model' ]] && rm -f /boot/dietpi/.hw_model
 
 	# Load
 	# shellcheck source-path=dietpi/func source-path=/boot/dietpi/func
@@ -239,7 +239,7 @@ _EOF_
 			[[ -f '/boot/dietpi/dietpi-services' ]] && /boot/dietpi/dietpi-services stop
 			[[ -f '/etc/systemd/system/dietpi-ramlog.service' ]] && systemctl stop dietpi-ramlog
 			[[ -f '/etc/systemd/system/dietpi-ramdisk.service' ]] && systemctl stop dietpi-ramdisk # Includes (Pre|Post)Boot on pre-v6.29 systems
-			[[ -f '/etc/systemd/system/dietpi-preboot.service' ]] && systemctl stop dietpi-preboot # Includes (Pre|Post)Boot on post-v6.28 systems
+			[[ -f '/etc/systemd/system/dietpi-preboot.service' ]] && systemctl stop dietpi-preboot # Includes PostBoot on post-v6.28 systems
 
 			# Disable DietPi services
 			for i in /etc/systemd/system/dietpi-*
@@ -667,6 +667,9 @@ _EOF_
 		# Install gdisk if root filesystem is on a GPT partition, used by DietPi-FS_partition_resize
 		[[ $(blkid -s PTTYPE -o value -c /dev/null "$(lsblk -npo PKNAME "$(findmnt -Ufnro SOURCE -M /)")") == 'gpt' ]] && aPACKAGES_REQUIRED_INSTALL+=('gdisk')
 
+		# Install mdadm if root filesystem is on a RAID
+		[[ $(lsblk -no TYPE "$(findmnt -Ufnro SOURCE -M /)") == 'raid'* ]] && aPACKAGES_REQUIRED_INSTALL+=('mdadm')
+
 		# Install filesystem tools required for filesystem resizing and fsck
 		local ae2fsprogs=('--allow-remove-essential' 'e2fsprogs')
 		while read -r line
@@ -813,7 +816,7 @@ _EOF_
 			# Remove obsolete lists
 			G_EXEC rm -Rf /etc/apt/sources.list.d/*
 			# Add Armbian repository
-			G_EXEC eval "echo 'deb http://apt.armbian.com/ ${DISTRO_TARGET_NAME/bookworm/bullseye} main' > /etc/apt/sources.list.d/dietpi-armbian.list"
+			G_EXEC eval "echo 'deb https://apt.armbian.com/ ${DISTRO_TARGET_NAME/bookworm/bullseye} main' > /etc/apt/sources.list.d/dietpi-armbian.list"
 			# Update APT lists
 			G_AGUP
 			# Install kernel, device tree, U-Boot, firmware and initramfs packages, initramfs-tools first to have an initramfs generated on kernel install
@@ -930,7 +933,7 @@ _EOF_
 
 			# Remove obsolete components from Armbian list and connect via HTTPS
 			G_EXEC rm /etc/apt/sources.list.d/*
-			G_EXEC eval "echo 'deb http://apt.armbian.com/ ${DISTRO_TARGET_NAME/bookworm/bullseye} main' > /etc/apt/sources.list.d/armbian.list"
+			G_EXEC eval "echo 'deb https://apt.armbian.com/ ${DISTRO_TARGET_NAME/bookworm/bullseye} main' > /etc/apt/sources.list.d/armbian.list"
 
 			# Exclude doubled device tree files, shipped with the kernel package
 			echo 'path-exclude /usr/lib/linux-image-current-*' > /etc/dpkg/dpkg.cfg.d/01-dietpi-exclude_doubled_devicetrees
@@ -959,10 +962,10 @@ _EOF_
 		# - ROCK Pi S/Radxa Zero (official Radxa Debian image)
 		elif [[ $G_HW_MODEL == 7[34] ]] && grep -q 'apt\.radxa\.com' /etc/apt/sources.list.d/*.list; then
 
-			# Install Radxa APT repo cleanly: No Bullseye repo available yet
+			# Install Radxa APT repo cleanly: No Bookworm repo available yet
 			G_EXEC rm -Rf /etc/apt/{trusted.gpg,sources.list.d/{,.??,.[^.]}*}
-			G_EXEC eval "curl -sSfL 'https://apt.radxa.com/${DISTRO_TARGET_NAME/bullseye/buster}-stable/public.key' | gpg --dearmor -o /etc/apt/trusted.gpg.d/dietpi-radxa.gpg --yes"
-			G_EXEC eval "echo 'deb https://apt.radxa.com/${DISTRO_TARGET_NAME/bullseye/buster}-stable/ ${DISTRO_TARGET_NAME/bullseye/buster} main' > /etc/apt/sources.list.d/dietpi-radxa.list"
+			G_EXEC eval "curl -sSfL 'https://apt.radxa.com/${DISTRO_TARGET_NAME/bookworm/bullseye}-stable/public.key' | gpg --dearmor -o /etc/apt/trusted.gpg.d/dietpi-radxa.gpg --yes"
+			G_EXEC eval "echo 'deb https://apt.radxa.com/${DISTRO_TARGET_NAME/bookworm/bullseye}-stable/ ${DISTRO_TARGET_NAME/bookworm/bullseye} main' > /etc/apt/sources.list.d/dietpi-radxa.list"
 			G_AGUP
 
 			# Remove obsolete combined keyring
@@ -990,11 +993,11 @@ _EOF_
 			G_EXEC rm "firmware-$variant.deb"
 
 		# - NanoPi R5S
-		#elif [[ $G_HW_MODEL == 76 && $(findmnt -Ufnro TARGET -T /boot) == '/' ]]
-		#then
-		#	G_EXEC curl -sSfO 'https://dietpi.com/downloads/binaries/firmware-nanopi5.deb'
-		#	G_EXEC_OUTPUT=1 G_EXEC dpkg -i firmware-nanopi5.deb
-		#	G_EXEC rm firmware-nanopi5.deb
+		elif (( $G_HW_MODEL == 76 )) && { [[ ! $(find /lib/modules -mindepth 1 -maxdepth 1 -type d) ]] || dpkg-query -s 'firmware-nanopi5' &> /dev/null; }
+		then
+			G_EXEC curl -sSfO 'https://dietpi.com/downloads/binaries/firmware-nanopi5.deb'
+			G_EXEC_OUTPUT=1 G_EXEC dpkg -i firmware-nanopi5.deb
+			G_EXEC rm firmware-nanopi5.deb
 
 		# - NanoPi M2/T2 Linux 4.4: Requires dedicated boot partition, starting at 4 MiB for U-Boot, with ext4 filesystem
 		elif [[ $G_HW_MODEL == 61 && $(findmnt -Ufnro FSTYPE -M /boot) == 'ext4' ]] && (( $(sfdisk -qlo Start "$BOOT_DEVICE)" | mawk 'NR==2') >= 8192 ))
@@ -1053,18 +1056,11 @@ _EOF_
 		[[ ${apackages[0]} ]] && G_EXEC_DESC='Marking required packages as manually installed' G_EXEC apt-mark manual "${apackages[@]}"
 		unset -v apackages
 
-		# Purging additional packages, that (in some cases) do not get autoremoved:
-		# - Purge the "important" e2fsprogs if no ext[2-4] filesystem is present on the root partition table
-		# - dbus: Not required for headless images, but sometimes marked as "important", thus not autoremoved.
-		#	+ Workaround for "The following packages have unmet dependencies: glib-networking libgtk-3-0" and alike
-		# - dhcpcd5: https://github.com/MichaIng/DietPi/issues/1560#issuecomment-370136642
-		# - mountall: https://github.com/MichaIng/DietPi/issues/2613
-		# - initscripts: Pre-installed on Jessie systems (?), superseded and masked by systemd, but never autoremoved
-		# - chrony: Found left with strange "deinstall ok installed" mark left on Armbian images
-		G_AGP "${ae2fsprogs[@]}" dbus dhcpcd5 mountall initscripts chrony '*office*' '*xfce*' '*qt5*' '*xserver*' '*xorg*' glib-networking libgtk-3-0 libsoup2.4-1 libglib2.0-0 lightdm xl2tpd x11-common
 		# Remove any autoremove prevention
 		rm -fv /etc/apt/apt.conf.d/*autoremove*
-		G_AGA
+		# Autoremove all non-manual/essential/required/important/dependency packages and the "important" e2fsprogs if no ext[2-4] filesystem is present on the root partition table
+		G_AGA "${ae2fsprogs[@]}"
+		unset -v ae2fsprogs
 
 		#------------------------------------------------------------------------------------------------
 		G_DIETPI-NOTIFY 3 "$G_PROGRAM_NAME" "[$SETUP_STEP] APT installations"; ((SETUP_STEP++))
@@ -1786,6 +1782,7 @@ _EOF_
 		elif (( $G_HW_MODEL == 76 ))
 		then
 			G_DIETPI-NOTIFY 2 'Enabling NanoPi R5S Ethernet LEDs'
+			G_EXEC eval 'echo '\''ledtrig-netdev'\'' > /etc/modules-load.d/dietpi-nanopi5.conf'
 			cat << '_EOF_' > /etc/udev/rules.d/dietpi-nanopi5.rules
 SUBSYSTEM=="leds", KERNEL=="wan_led", ACTION=="add", ATTR{trigger}="netdev", ATTR{device_name}="eth0", ATTR{link}="1"
 SUBSYSTEM=="leds", KERNEL=="lan1_led", ACTION=="add", ATTR{trigger}="netdev", ATTR{device_name}="eth1", ATTR{link}="1"
@@ -1808,7 +1805,7 @@ _EOF_
 
 		# Apply cgroups-v2 workaround if the kernel does not support it: https://github.com/MichaIng/DietPi/issues/4705
 		# - This is required on Bullseye only, but we'll apply it on Buster as well to cover later distro upgrades, since the logic is too complicated for our upgrade blog article.
-		if [[ $G_HW_MODEL != 75 && ! $(find /lib/modules -maxdepth 1 -type d -name '5.[0-9]*') ]]
+		if [[ $G_HW_MODEL != 75 && ! $(find /lib/modules -mindepth 1 -maxdepth 1 -type d -name '5.[0-9]*') ]]
 		then
 			# Odroids
 			if [[ $G_HW_MODEL -gt 9 && $G_HW_MODEL -le 16 && -f '/boot/boot.ini' ]] && ! grep -q 'systemd.unified_cgroup_hierarchy=0' /boot/boot.ini
