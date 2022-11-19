@@ -88,15 +88,22 @@ G_EXEC_OUTPUT=1 G_EXEC e2fsck -fp "${FP_LOOP}p1"
 G_EXEC mkdir rootfs
 G_EXEC mount "${FP_LOOP}p1" rootfs
 
+# Skip filesystem expansion
+G_EXEC rm rootfs/etc/systemd/system/local-fs.target.wants/dietpi-fs_partition_resize.service
+
+# Assure that build starts after DietPi-PostBoot
+[[ -d 'rootfs/etc/systemd/system/rc-local.service.d' ]] || G_EXEC mkdir rootfs/etc/systemd/system/rc-local.service.d
+G_EXEC eval 'echo -e '\''[Unit]\nAfter=dietpi-postboot.service'\'' > rootfs/etc/systemd/system/rc-local.service.d/dietpi.conf'
+
 # Automated build
 cat << '_EOF_' > rootfs/etc/rc.local || exit 1
 #!/bin/dash
 infocmp "$TERM" > /dev/null 2>&1 || TERM='dumb'
-echo '[ INFO ] Running Amiberry build script...'
 _EOF_
 
 # - RPi 64-bit: Add RPi repo, ARMv6 container images contain it already
 [[ $PLATFORM == 'rpi'[34]'-64-dmx' ]] && cat << _EOF_ >> rootfs/etc/rc.local
+echo '[ INFO ] Setting up RPi APT repository...'
 echo 'deb https://archive.raspberrypi.org/debian/ ${distro/bookworm/bullseye} main' > /etc/apt/sources.list.d/raspi.list
 curl -sSf 'https://archive.raspberrypi.org/debian/pool/main/r/raspberrypi-archive-keyring/raspberrypi-archive-keyring_2021.1.1+rpt1_all.deb' -o /tmp/keyring.deb
 dpkg -i /tmp/keyring.deb
@@ -104,15 +111,12 @@ rm -v /tmp/keyring.deb
 _EOF_
 
 cat << _EOF_ >> rootfs/etc/rc.local || exit 1
+echo '[ INFO ] Running Amiberry build script...'
 bash -c "\$(curl -sSf 'https://raw.githubusercontent.com/$G_GITOWNER/DietPi/$G_GITBRANCH/.build/software/Amiberry/build.bash')" 'DietPi-Amiberry_build' '$PLATFORM'
 mv -v '/tmp/amiberry_$PLATFORM.deb' '/amiberry_$PLATFORM.deb'
 poweroff
 _EOF_
 G_EXEC chmod +x rootfs/etc/rc.local
-
-# Assure that build starts after DietPi-PostBoot
-[[ -d 'rootfs/etc/systemd/system/rc-local.service.d' ]] || G_EXEC mkdir rootfs/etc/systemd/system/rc-local.service.d
-G_EXEC eval 'echo -e '\''[Unit]\nAfter=dietpi-postboot.service'\'' > rootfs/etc/systemd/system/rc-local.service.d/dietpi.conf'
 
 ##########################################
 # Boot container

@@ -15,7 +15,7 @@ G_AGI "${adeps_build[@]}"
 # - ARMv7: Needs to be installed in tmpfs, else builds fail in emulated 32-bit ARM environments: https://github.com/rust-lang/cargo/issues/8719
 # - ARMv8: Apply workaround for increased RAM usage: https://github.com/rust-lang/cargo/issues/10583
 # shellcheck disable=SC2015
-export HOME='/tmp/vaultwarden' CARGO_NET_GIT_FETCH_WITH_CLI='true'
+export HOME='/tmp/rustup' CARGO_NET_GIT_FETCH_WITH_CLI='true'
 [[ -d $HOME ]] || G_EXEC mkdir "$HOME"
 G_EXEC cd "$HOME"
 G_EXEC curl -sSfL 'https://sh.rustup.rs' -o rustup-init.sh
@@ -26,8 +26,10 @@ G_EXEC_OUTPUT=1 G_EXEC ./rustup-init.sh -y --profile minimal --default-toolchain
 G_EXEC_NOHALT=1 G_EXEC rm rustup-init.sh
 export PATH="$HOME/.cargo/bin:$PATH"
 
+# Build
 version='1.26.0'
 G_DIETPI-NOTIFY 2 "Building vaultwarden version \e[33m$version"
+G_EXEC cd /tmp
 G_EXEC curl -sSfLO "https://github.com/dani-garcia/vaultwarden/archive/$version.tar.gz"
 [[ -d vaultwarden-$version ]] && G_EXEC rm -R "vaultwarden-$version"
 G_EXEC tar xf "$version.tar.gz"
@@ -39,7 +41,7 @@ G_EXEC strip --remove-section=.comment --remove-section=.note target/release/vau
 
 # Build DEB package
 G_DIETPI-NOTIFY 2 'Building vaultwarden DEB package'
-G_EXEC cd "$HOME"
+G_EXEC cd /tmp
 grep -q 'raspbian' /etc/os-release && DIR='vaultwarden_armv6l' || DIR="vaultwarden_$G_HW_ARCH_NAME"
 [[ -d $DIR ]] && G_EXEC rm -R "$DIR"
 G_EXEC mkdir -p "$DIR/"{DEBIAN,opt/vaultwarden,mnt/dietpi_userdata/vaultwarden,lib/systemd/system}
@@ -50,7 +52,7 @@ G_EXEC mv "vaultwarden-$version/.env.template" "$DIR/mnt/dietpi_userdata/vaultwa
 G_EXEC rm -R "vaultwarden-$version"
 
 # - web vault
-wv_version='2022.10.1'
+wv_version='2022.10.2'
 G_DIETPI-NOTIFY 2 "Downloading web vault version \e[33m$wv_version"
 G_EXEC curl -sSfLO "https://github.com/dani-garcia/bw_web_builds/releases/download/v$wv_version/bw_web_v$wv_version.tar.gz"
 G_EXEC tar xf "bw_web_v$wv_version.tar.gz" --one-top-level="$DIR/mnt/dietpi_userdata/vaultwarden"
@@ -201,12 +203,12 @@ do
 done
 DEPS_APT_VERSIONED=${DEPS_APT_VERSIONED%,}
 # shellcheck disable=SC2001
-grep -q 'raspbian' /etc/os-release && DEPS_APT_VERSIONED=$(sed 's/+rp[it][0-9]\+)/)/g' <<< "$DEPS_APT_VERSIONED") || DEPS_APT_VERSIONED=$(sed 's/+b[0-9]\+)/)/g' <<< "$DEPS_APT_VERSIONED")
+grep -q 'raspbian' /etc/os-release && DEPS_APT_VERSIONED=$(sed 's/+rp[it][0-9]\+[^)]*)/)/g' <<< "$DEPS_APT_VERSIONED") || DEPS_APT_VERSIONED=$(sed 's/+b[0-9]\+)/)/g' <<< "$DEPS_APT_VERSIONED")
 
 # - control
 cat << _EOF_ > "$DIR/DEBIAN/control"
 Package: vaultwarden
-Version: $version-dietpi3
+Version: $version-dietpi4
 Architecture: $(dpkg --print-architecture)
 Maintainer: MichaIng <micha@dietpi.com>
 Date: $(date -u '+%a, %d %b %Y %T %z')
