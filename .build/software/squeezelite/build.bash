@@ -22,10 +22,10 @@ G_EXEC strip --remove-section=.comment --remove-section=.note squeezelite
 G_DIETPI-NOTIFY 2 'Starting packaging...'
 
 # Dependencies based on distro version
-adeps=('libc6' 'libasound2' 'libflac8' 'libmad0' 'libvorbisfile3' 'libmpg123-0' 'libsoxr0' 'liblirc-client0' 'libfaad2' 'libopus0')
+adeps=('libc6' 'libasound2' 'libmad0' 'libvorbisfile3' 'libmpg123-0' 'libsoxr0' 'liblirc-client0' 'libfaad2' 'libopus0')
 case $G_DISTRO in
-	[56]) adeps+=('libavformat58' 'libssl1.1');;
-	7) adeps+=('libavformat59' 'libssl3');;
+	[56]) adeps+=('libflac8' 'libavformat58' 'libssl1.1');;
+	7) adeps+=('libflac12' 'libavformat59' 'libssl3');;
 	*) G_DIETPI-NOTIFY 1 "Unsupported distro version: $G_DISTRO_NAME (ID=$G_DISTRO)"; exit 1;;
 esac
 
