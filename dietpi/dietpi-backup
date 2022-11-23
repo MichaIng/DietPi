@@ -86,7 +86,7 @@
 
 		elif [[ $fs_type =~ ^nfs4?$ ]]
 		then
-			G_CHECK_FS_PERMISSION_SUPPORT "$FP_TARGET" && return 0
+			G_CHECK_FS_PERMISSION_SUPPORT "$FP_TARGET" && { NFS=1; return 0; }
 			G_DIETPI-NOTIFY 1 "NFS mount $FP_TARGET does not support UNIX permissions"
 			G_WHIP_MSG "Unsupported NFS share:\n\n$FP_TARGET is an NFS share which does not support UNIX permissions.\n\nMake sure that the NFS share at the server is located on a filesystem with native symlink and UNIX permissions support."
 		else
@@ -120,7 +120,6 @@
 # APT cache
 - /var/cache/apt/*
 _EOF_
-
 		# Add users filter list
 		[[ -f $FP_FILTER_CUSTOM ]] && cat "$FP_FILTER_CUSTOM" >> "$FP_FILTER"
 
@@ -131,6 +130,7 @@ _EOF_
 		G_DIETPI-NOTIFY 3 "$G_PROGRAM_NAME" 'Backup'
 
 		# Check valid FS
+		NFS=0
 		Check_Supported_Directory_Location || return 1
 
 		# Rotate backups with more than 1 shall be kept
@@ -176,32 +176,35 @@ _EOF_
 		# Generate Exclude/Include lists
 		Create_Filter_Include_Exclude
 
-		G_DIETPI-NOTIFY 2 'Checking for sufficient disk space via rsync dry-run, please wait...'
-		local old_backup_size=$(du -sB1 "$FP_TARGET/data" | mawk '{print $1}') # Actual disk usage in bytes
-		# - Dry run to obtain transferred data size
-		rsync --dry-run --stats "${aRSYNC_RUN_OPTIONS_BACKUP[@]}" "$FP_SOURCE" "$FP_TARGET/data/" > .dietpi-backup_result
-		local new_backup_size=$(grep -m1 '^Total file size:' .dietpi-backup_result | sed 's/[^0-9]*//g') # Apparent data size without block size related overhead
-		local total_file_count=$(mawk '/^Number of files:/{print $6;exit}' .dietpi-backup_result | sed 's/[^0-9]*//g')
-		local total_folder_count=$(mawk '/^Number of files:/{print $8;exit}' .dietpi-backup_result | sed 's/[^0-9]*//g')
-		rm .dietpi-backup_result
-		local target_fs_blocksize=$(stat -fc '%s' "$FP_TARGET/data")
-		new_backup_size=$(( $new_backup_size + ( $total_file_count + $total_folder_count ) * $target_fs_blocksize )) # Add one block size for each file + dir as worst case result
-		local end_result=$(( ( $new_backup_size - $old_backup_size ) / 1024**2 + 1 )) # bytes => MiB rounded up
-		# - Perform check
-		if ! G_CHECK_FREESPACE "$FP_TARGET/data" "$end_result"; then
-
-			G_WHIP_BUTTON_OK_TEXT='Ignore'
-			G_WHIP_BUTTON_CANCEL_TEXT='Exit'
-			if ! G_WHIP_YESNO 'The backup target location appears to have insufficient free space to successfully finish the backup.
+		# Free space check
+		if (( $SPACE_CHECK ))
+		then
+			G_DIETPI-NOTIFY 2 'Checking for sufficient disk space via rsync dry-run, please wait...'
+			local old_backup_size=$(du -sB1 "$FP_TARGET/data" | mawk '{print $1}') # Actual disk usage in bytes
+			# - Dry run to obtain transferred data size
+			rsync --dry-run --stats "${aRSYNC_RUN_OPTIONS_BACKUP[@]}" "$FP_SOURCE" "$FP_TARGET/data/" > .dietpi-backup_result
+			local new_backup_size=$(grep -m1 '^Total file size:' .dietpi-backup_result | sed 's/[^0-9]*//g') # Apparent data size without block size related overhead
+			local total_file_count=$(mawk '/^Number of files:/{print $6;exit}' .dietpi-backup_result | sed 's/[^0-9]*//g')
+			local total_folder_count=$(mawk '/^Number of files:/{print $8;exit}' .dietpi-backup_result | sed 's/[^0-9]*//g')
+			rm .dietpi-backup_result
+			local target_fs_blocksize=4096 # In case of NFS, apply fixed 4096 bytes block size, as "stat -fc '%s'" reports a very large network/protocol transfer-related size.
+			(( $NFS )) || target_fs_blocksize=$(stat -fc '%s' "$FP_TARGET/data")
+			new_backup_size=$(( $new_backup_size + ( $total_file_count + $total_folder_count ) * $target_fs_blocksize )) # Add one block size for each file + dir as worst case result
+			local end_result=$(( ( $new_backup_size - $old_backup_size ) / 1024**2 + 1 )) # bytes => MiB rounded up
+			# - Perform check
+			if ! G_CHECK_FREESPACE "$FP_TARGET/data" "$end_result"
+			then
+				G_WHIP_BUTTON_OK_TEXT='Ignore'
+				G_WHIP_BUTTON_CANCEL_TEXT='Exit'
+				if ! G_WHIP_YESNO 'The backup target location appears to have insufficient free space to successfully finish the backup.
 However, this check is a rough estimation in reasonable time, thus it could be marginally incorrect.
-\nWould you like to override this warning and continue with the backup?'; then
-
-				echo -e "$(Print_Date)  Backup cancelled: Insufficient free space" >> "$FP_TARGET/$FP_STATS"
-				/boot/dietpi/dietpi-services start
-				return 1
-
+\nWould you like to override this warning and continue with the backup?'
+				then
+					echo -e "$(Print_Date)  Backup cancelled: Insufficient free space" >> "$FP_TARGET/$FP_STATS"
+					/boot/dietpi/dietpi-services start
+					return 1
+				fi
 			fi
-
 		fi
 
 		G_DIETPI-NOTIFY 2 "Backup to $FP_TARGET in progress, please wait..."
@@ -253,7 +256,7 @@ However, this check is a rough estimation in reasonable time, thus it could be m
 			UPDATE_GRUB=1
 
 		# - RPi
-		elif (( $G_HW_MODEL < 10 )) && [[ -f $FP_TARGET/$DATA/boot/cmdline.txt ]]
+		elif [[ $G_HW_MODEL -le 9 && -f $FP_TARGET/$DATA/boot/cmdline.txt ]]
 		then
 			UPDATE_RPI=1
 
@@ -412,6 +415,7 @@ However, this check is a rough estimation in reasonable time, thus it could be m
 	readonly FP_SETTINGS='/boot/dietpi/.dietpi-backup_settings'
 	DAILY_BACKUP=0
 	AMOUNT=1
+	SPACE_CHECK=0
 
 	Write_Settings_File()
 	{
@@ -419,6 +423,7 @@ However, this check is a rough estimation in reasonable time, thus it could be m
 FP_TARGET=$FP_TARGET
 DAILY_BACKUP=$DAILY_BACKUP
 AMOUNT=$AMOUNT
+SPACE_CHECK=$DRY_RUN
 _EOF_
 	}
 
@@ -438,6 +443,8 @@ _EOF_
 		local backup_last_completed='Backup not found. Please create one.'
 		local daily_backup_text='Off'
 		(( $DAILY_BACKUP )) && daily_backup_text='On'
+		local space_check_text='Off'
+		(( $DRY_RUN )) && space_check_text='On'
 
 		G_WHIP_MENU_ARRAY=(
 			'' '●─ Info '
@@ -450,6 +457,7 @@ _EOF_
 			'Filter' ': Modify include/exclude filter for backups.'
 			'Daily Backup' ": [$daily_backup_text] Daily backups via cron job"
 			'Amount' ": [$AMOUNT] The amount of backups to keep"
+			'Space check' ": [$space_check_text] Check free space before backup"
 		)
 		if [[ -f $FP_TARGET/$FP_STATS ]]
 		then
@@ -485,6 +493,8 @@ _EOF_
 				'Daily Backup') DAILY_BACKUP=$(( ! $DAILY_BACKUP ));;
 
 				'Amount') G_WHIP_DEFAULT_ITEM=$AMOUNT G_WHIP_INPUTBOX 'Please enter the amount of backups to keep.\n - Needs to be 1 or greater.' && G_CHECK_VALIDINT "$G_WHIP_RETURNED_VALUE" 1 && AMOUNT=$G_WHIP_RETURNED_VALUE;;
+
+				'Space check') SPACE_CHECK=$(( ! $SPACE_CHECK ));;
 
 				'Delete') G_WHIP_YESNO "Do you wish to DELETE the following backup?\n - $FP_TARGET" && G_EXEC_NOEXIT=1 G_EXEC rm -R "$FP_TARGET";;
 
@@ -529,7 +539,6 @@ _EOF_
 			'Search' ': Find previous backups'
 			'List' ': Select from a list of available mounts/drives'
 			'Manual' ': Manually type a directory to use'
-
 		)
 
 		if G_WHIP_MENU "Please select the location where the backup will be saved, and restored from.\n\nYour current location:\n$FP_TARGET"; then
@@ -617,16 +626,17 @@ _EOF_
 
 # Prefix "-" exclude items, "+" include items which would match a wildcard exclude rule.
 # Suffix "/" match directories only, no files or symlinks.
-# Using wildcard "*" matches any item name or part of it.
-# Since the list is processed from top to bottom and the first match defines the result,
-#   includes need to be defined before their wildcard exclude rule
-#   and in case excludes before their wildcard include rule.
+# Wildcard "*" matches any item name or part of it, but "/dir/*" does not match the dir itself.
+# Since the list is processed from top to bottom and the first match defines the applied rule:
+# - Includes need to be defined before their wildcard exclude rule.
+# - Excludes need to be defined before their wildcard include rule.
 # Symlinks are handled as such and never processed recursively.
 # Excluded directories are not processed recursively, so contained items cannot be included.
+# Included directories are not processed recursively, so contained items cannot be excluded.
 # Hence, to include items within an excluded directory:
 # - Do not exclude the directory itself, but contained items via wildcard.
 # - Define includes first, to override the wildcard exclude rule.
-# - See the below default rules, how we exclude all items below /mnt
+# - See the below default rules, how we exclude all items below /mnt/
 #   but include the dietpi_userdata directory, if it is no symlink.
 # To prevent loops, the backup target dir, log and config are excluded internally.
 
