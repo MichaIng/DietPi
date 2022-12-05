@@ -19,7 +19,7 @@ G_AGI automake pkg-config make g++ libpopt-dev libconfig-dev libssl-dev libsoxr-
 name='shairport-sync'
 name_pretty='Shairport Sync'
 repo='https://github.com/mikebrady/shairport-sync'
-version='4.1'
+version='4.1.1'
 G_DIETPI-NOTIFY 2 "Building $name_pretty version \e[33m$version"
 G_EXEC cd /tmp
 G_EXEC curl -sSfLO "$repo/archive/$version.tar.gz"
