@@ -255,7 +255,7 @@ Links to hardware and software manufacturers, sources and build instructions use
 - [WireGuard](https://www.wireguard.com/)
 - [Amiberry](https://github.com/BlitterStudio/amiberry)
 - [OpenTyrian](https://bitbucket.org/opentyrian/opentyrian/wiki/Home)
-- [RPi Cam Control](https://github.com/silvanmelchior/RPi_Cam_Web_Interface)
+- [RPi Cam Web Interface](https://github.com/silvanmelchior/RPi_Cam_Web_Interface)
 - [Deluge](https://dev.deluge-torrent.org/wiki/Development#SourceCode)
 - [Airsonic-Advanced](https://github.com/airsonic-advanced/airsonic-advanced)
 - [Logitech Media Server](https://github.com/Logitech/slimserver)
