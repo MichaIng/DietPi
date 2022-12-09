@@ -185,9 +185,6 @@ Available commands:
 	# Total RAM + swap space: Used to estimate whether the swap file size needs to be increased.
 	readonly RAM_TOTAL=$(free -tm | mawk '/^Total:/{print $2;exit}')
 
-	# Is the WireGuard kernel module natively shipped by the kernel package?
-	WIREGUARD_BUILTIN=0
-
 	# Whether to restart Deluge web UI once, required on fresh installs for auto-connection to work, more precisely a little delay between daemon and web UI is required
 	RESTART_DELUGE_WEB=0
 
@@ -1401,15 +1398,8 @@ Available commands:
 		aSOFTWARE_DOCS[$software_id]='https://dietpi.com/docs/software/vpn/#wireguard'
 		# Required to ask for public domain/IP and desired VPN server port
 		aSOFTWARE_INTERACTIVE[$software_id]=1
-		# RPi/Odroids/x86_64 only
-		for ((i=22; i<=$MAX_G_HW_MODEL; i++))
-		do
-			aSOFTWARE_AVAIL_G_HW_MODEL[$software_id,$i]=0
-		done
-		# - Odroid U3
-		aSOFTWARE_AVAIL_G_HW_MODEL[$software_id,13]=0
-		# Re-enable if module is shipped with (kernel) package
-		dpkg-query -S '/lib/modules/*/wireguard.ko*' &> /dev/null || modinfo wireguard 2> /dev/null | grep -q '^filename:[[:blank:]]*(builtin)$' && aSOFTWARE_AVAIL_G_HW_MODEL[$software_id,$G_HW_MODEL]=1 WIREGUARD_BUILTIN=1
+		# Requires the WireGuard kernel module: We do not support DKMS builds anymore, which were required only for legacy kernel versions, which are not supported by WireGuard anymore: https://dietpi.com/forum/t/wireguard-install-failed-now-cant-do-anything-else-with-dietpi-software/15173
+		modprobe -nq wireguard && aSOFTWARE_AVAIL_G_HW_MODEL[$software_id,$G_HW_MODEL]=1
 		#------------------
 		software_id=117
 		aSOFTWARE_NAME[$software_id]='PiVPN'
@@ -11632,64 +11622,12 @@ Package: wireguard wireguard-dkms wireguard-tools\nPin: release n=bullseye\nPin-
 				G_AGUP
 			fi
 
-			# If the kernel module is shipped with the kernel (e.g. Armbian 5.X)
-			if [[ $WIREGUARD_BUILTIN == 1 ]]
-			then
-				# Purge DKMS as it is not required and might mess with available kernel module
-				dpkg-query -s wireguard-dkms &> /dev/null && G_AGP wireguard-dkms
-				# Install user space tools only
-				G_AGI wireguard-tools iptables qrencode
-				Configure_iptables
+			# Pre-v8.12: Purge DKMS as it is not required and might mess with available kernel module
+			dpkg-query -s wireguard-dkms &> /dev/null && G_AGP wireguard-dkms
 
-			# Else, kernel headers and matching kernel image is required for wireguard-dkms to build the WireGuard kernel module
-			else
-				# x86_64
-				if (( $G_HW_ARCH == 10 )); then
-
-					G_AGI linux-image-amd64 linux-headers-amd64
-
-				# Odroid XU4 legacy
-				elif (( $G_HW_MODEL == 11 )); then
-
-					G_AGI linux-image-4.14-armhf-odroid-xu4 linux-headers-4.14-armhf-odroid-xu4
-
-				# Odroid C2 legacy
-				elif (( $G_HW_MODEL == 12 )); then
-
-					G_AGI linux-image-arm64-odroid-c2 linux-headers-arm64-odroid-c2
-
-				# Odroid N2 legacy
-				elif (( $G_HW_MODEL == 15 )); then
-
-					G_AGI linux-image-arm64-odroid-n2 linux-headers-arm64-odroid-n2
-
-				# Odroid C4 legacy
-				elif (( $G_HW_MODEL == 16 )); then
-
-					G_AGI linux-image-arm64-odroid-c4 linux-headers-arm64-odroid-c4
-
-				fi
-
-				# Workaround for missing /lib/modules/<version>/build symlink: https://github.com/MichaIng/DietPi/issues/3577
-				# - Known as issue currently on Odroid C2/N2, check for new build system if linux-<version>/ holds current headers instead of linux-source-<version>/: https://dietpi.com/meveric/pool/c2/l/
-				for i in /lib/modules/*
-				do
-					[[ -d $i/build ]] && continue
-					[[ -d /usr/src/linux-headers-${i##*/} ]] && ln -sfv "/usr/src/linux-headers-${i##*/}" "$i/build"
-				done
-
-				# If existing install, reconfigure to rebuild WireGuard kernel module against current kernel + headers
-				dpkg-query -s wireguard-dkms &> /dev/null && G_EXEC dpkg-reconfigure -f noninteractive wireguard-dkms
-
-				# iptables required to forward incoming VPN traffic to local LAN/internet interface
-				# qrencode required to print client config QR code to console
-				G_AGI wireguard-dkms wireguard-tools iptables qrencode
-				Configure_iptables
-			fi
-
-			# Try to enable module, if it fails, a reboot is required
-			local module_active=0
-			modprobe wireguard 2> /dev/null && module_active=1
+			# Install user space tools
+			G_AGI wireguard-tools iptables qrencode
+			Configure_iptables
 
 			# Server/Client choice
 			local choice_required=
@@ -11825,9 +11763,7 @@ _EOF_
 				G_EXEC cd "$G_WORKING_DIR"
 
 				# Use wg-quick@.service to start VPN on boot
-				G_EXEC systemctl enable wg-quick@wg0
-				# - Start now if module is active already
-				(( $module_active )) && G_EXEC systemctl start wg-quick@wg0
+				G_EXEC systemctl enable --now wg-quick@wg0
 
 			# Client choice
 			elif [[ $G_WHIP_RETURNED_VALUE == 'Client' ]]; then
@@ -11848,9 +11784,7 @@ If no WireGuard (auto)start is included, but you require it, please do the follo
 
 			fi
 
-			(( $module_active )) || G_WHIP_MSG '[ INFO ] WireGuard install finished\n\nNB: WireGuard has been successfully installed, but a reboot is required, before it can be started.'
-
-			unset -v module_active choice_required domain port invalid_text server_ip
+			unset -v choice_required domain port invalid_text server_ip
 		fi
 
 	}
