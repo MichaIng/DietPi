@@ -25,7 +25,7 @@
 		sudo -u www-data php /var/www/rpicam/schedule.php &
 	}
 
-	case "$1" in
+	case $1 in
 		'stop') Raspimjeg_Stop;;
 		'start') Raspimjeg_Start;;
 		*) echo "ERROR: Invalid argument: \"$1\""
