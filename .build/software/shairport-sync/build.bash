@@ -19,7 +19,7 @@ G_AGI automake pkg-config make g++ libpopt-dev libconfig-dev libssl-dev libsoxr-
 name='shairport-sync'
 name_pretty='Shairport Sync'
 repo='https://github.com/mikebrady/shairport-sync'
-version='4.1'
+version='4.1.1'
 G_DIETPI-NOTIFY 2 "Building $name_pretty version \e[33m$version"
 G_EXEC cd /tmp
 G_EXEC curl -sSfLO "$repo/archive/$version.tar.gz"
@@ -188,6 +188,9 @@ metadata =
 //	cover_art_cache_directory = "/tmp/shairport-sync/.cache/coverart"; // artwork will be  stored in this directory if the dbus or MPRIS interfaces are enabled or if the MQTT client is in use. Set it to "" to prevent caching, which may be useful on some systems
 //	pipe_name = "/tmp/shairport-sync-metadata";
 //	pipe_timeout = 5000; // wait for this number of milliseconds for a blocked pipe to unblock before giving up
+//	progress_interval = 0.0; // if non-zero, progress 'phbt' messages will be sent at the interval specified in seconds. A 'phb0' message will also be sent when the first audio frame of a play session is about to be played.
+//		Each message consists of the RTPtime of a a frame of audio and the exact system time when it is to be played. The system time, in nanoseconds, is based the CLOCK_MONOTONIC_RAW of the machine -- if available -- or CLOCK_MONOTONIC otherwise.
+//		Messages are sent when the frame is placed in the output device's buffer, thus, they will be _approximately_ 'audio_backend_buffer_desired_length_in_seconds' (default 0.2 seconds) ahead of time.
 //	socket_address = "226.0.0.1"; // if set to a host name or IP address, UDP packets containing metadata will be sent to this address. May be a multicast address. "socket-port" must be non-zero and "enabled" must be set to yes"
 //	socket_port = 5555; // if socket_address is set, the port to send UDP packets to
 //	socket_msglength = 65000; // the maximum packet size for any UDP metadata. This will be clipped to be between 500 or 65000. The default is 500.

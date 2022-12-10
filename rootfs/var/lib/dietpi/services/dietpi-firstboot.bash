@@ -127,12 +127,12 @@
 			cat << '_EOF_' > /etc/systemd/system/getty@tty1.service.d/dietpi-autologin.conf
 [Service]
 ExecStart=
-ExecStart=-/sbin/agetty -a root -J %I $TERM
+ExecStart=-/sbin/agetty -a root -J - $TERM
 _EOF_
 			cat << '_EOF_' > /etc/systemd/system/console-getty.service.d/dietpi-autologin.conf
 [Service]
 ExecStart=
-ExecStart=-/sbin/agetty -a root -J -s console 115200,38400,9600 $TERM
+ExecStart=-/sbin/agetty -a root -J -s - 115200,38400,9600 $TERM
 _EOF_
 		fi
 
@@ -321,7 +321,7 @@ _EOF_
 	chown root:root /
 	chmod 0755 /
 
-	# Apply dietpi.txt settings, device specific workarounds and reset hardware ID + SSH host keys
+	# Apply dietpi.txt settings and reset hardware ID + SSH host keys
 	Apply_DietPi_FirstRun_Settings
 
 	# Set install stage index to trigger automated DietPi-Update on login

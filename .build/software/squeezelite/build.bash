@@ -8,6 +8,14 @@ G_AGDUG
 # Build deps
 G_AGI make gcc libc6-dev libasound2-dev libflac-dev libmad0-dev libvorbis-dev libmpg123-dev libavformat-dev libsoxr-dev liblirc-dev libfaad-dev libssl-dev libopus-dev
 
+# Runtime deps
+adeps=('libc6' 'libasound2' 'libmad0' 'libvorbisfile3' 'libmpg123-0' 'libsoxr0' 'liblirc-client0' 'libfaad2' 'libopus0')
+case $G_DISTRO in
+	[56]) adeps+=('libflac8' 'libavformat58' 'libssl1.1');;
+	7) adeps+=('libflac12' 'libavformat59' 'libssl3');;
+	*) G_DIETPI-NOTIFY 1 "Unsupported distro version: $G_DISTRO_NAME (ID=$G_DISTRO)"; exit 1;;
+esac
+
 G_DIETPI-NOTIFY 2 'Downloading source code...'
 G_EXEC cd /tmp
 G_EXEC curl -sSfLO 'https://github.com/ralph-irving/squeezelite/archive/master.tar.gz'
@@ -20,14 +28,6 @@ G_EXEC_OUTPUT=1 G_EXEC make CFLAGS='-g0 -O3' OPTS='-DDSD -DFFMPEG -DRESAMPLE -DV
 G_EXEC strip --remove-section=.comment --remove-section=.note squeezelite
 
 G_DIETPI-NOTIFY 2 'Starting packaging...'
-
-# Dependencies based on distro version
-adeps=('libc6' 'libasound2' 'libflac8' 'libmad0' 'libvorbisfile3' 'libmpg123-0' 'libsoxr0' 'liblirc-client0' 'libfaad2' 'libopus0')
-case $G_DISTRO in
-	[56]) adeps+=('libavformat58' 'libssl1.1');;
-	7) adeps+=('libavformat59' 'libssl3');;
-	*) G_DIETPI-NOTIFY 1 "Unsupported distro version: $G_DISTRO_NAME (ID=$G_DISTRO)"; exit 1;;
-esac
 
 # - Obtain DEB dependency versions
 DEPS_APT_VERSIONED=
