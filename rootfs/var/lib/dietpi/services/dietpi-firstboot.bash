@@ -321,7 +321,7 @@ _EOF_
 	chown root:root /
 	chmod 0755 /
 
-	# Apply dietpi.txt settings, device specific workarounds and reset hardware ID + SSH host keys
+	# Apply dietpi.txt settings and reset hardware ID + SSH host keys
 	Apply_DietPi_FirstRun_Settings
 
 	# Set install stage index to trigger automated DietPi-Update on login

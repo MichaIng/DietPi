@@ -27,6 +27,8 @@ Use `dietpi-services` to control which installed software has higher or lower pr
 
 ## The DietPi Project Team
 
+The full list of code contributors can be viewed [here](https://github.com/MichaIng/DietPi/graphs/contributors).
+
 ### Contributors
 
 #### [Micha](https://github.com/MichaIng)
@@ -49,7 +51,7 @@ DietPi forum co-administrator, management, support, testing and valuable feedbac
 
 _Joined 2017-07-26_
 
-Creator and maintainer of the Clonezilla based installer images for x86_64 UEFI systems.
+Creator and maintainer of the first Clonezilla based installer images for x86_64 UEFI systems.
 
 #### [Joulinar](https://github.com/Joulinar)
 
@@ -79,7 +81,7 @@ Source code contributor, creator of the [DietPi-Dashboard](https://github.com/ra
 
 _Joined 2018-04-16_
 
-Creator and maintainer of the [DietPi Hyper-V images](https://github.com/yumiris/DietPi.Hyper-V).
+Creator and maintainer of the first [DietPi Hyper-V images](https://github.com/yumiris/DietPi.Hyper-V).
 
 ---
 
@@ -130,7 +132,7 @@ Contributions to the DietPi in general, including source code and VirtualBox ima
 
 _Joined 2016-10-01_
 
-Created the DietPi image for NanoPi M3/T3.
+Created the first DietPi image for NanoPi M3/T3.
 
 ---
 
@@ -152,17 +154,17 @@ Are you able to:
 If so, let us know!  
 We are always looking for talented people who believe in the DietPi project, and, wish to contribute in any way you can.
 
-- Send me an Email: micha@dietpi.com
-- Join our forum: https://dietpi.com/forum/
-- GitHub: https://github.com/MichaIng/DietPi
+- Send us an email: <micha@dietpi.com>
+- Join our forum: <https://dietpi.com/forum/>
+- GitHub: <https://github.com/MichaIng/DietPi>
 
 Also read our [contribute page](https://dietpi.com/contribute.html) for an overview of way to support DietPi.
 
 ## License
 
-DietPi Copyright (C) 2020 MichaIng
-- Email micha@dietpi.com
-- Web https://dietpi.com/
+DietPi Copyright (C) 2022 [Contributors](https://github.com/MichaIng/DietPi/graphs/contributors)
+- Email: <micha@dietpi.com>
+- Website: <https://dietpi.com/>
 
 This program is free software: you can redistribute it and/or modify
 it under the terms of the GNU General Public License as published by
@@ -174,7 +176,7 @@ MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
 GNU General Public License for more details.
 
 You should have received a copy of the GNU General Public License
-along with this program.  If not, see https://www.gnu.org/licenses/
+along with this program.  If not, see <https://www.gnu.org/licenses/>
 
 ## Links
 
@@ -253,7 +255,7 @@ Links to hardware and software manufacturers, sources and build instructions use
 - [WireGuard](https://www.wireguard.com/)
 - [Amiberry](https://github.com/BlitterStudio/amiberry)
 - [OpenTyrian](https://bitbucket.org/opentyrian/opentyrian/wiki/Home)
-- [RPi Cam Control](https://github.com/silvanmelchior/RPi_Cam_Web_Interface)
+- [RPi Cam Web Interface](https://github.com/silvanmelchior/RPi_Cam_Web_Interface)
 - [Deluge](https://dev.deluge-torrent.org/wiki/Development#SourceCode)
 - [Airsonic-Advanced](https://github.com/airsonic-advanced/airsonic-advanced)
 - [Logitech Media Server](https://github.com/Logitech/slimserver)
