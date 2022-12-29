@@ -160,7 +160,7 @@ Version: $version-dietpi1
 Architecture: $(dpkg --print-architecture)
 Maintainer: MichaIng <micha@dietpi.com>
 Date: $(date -u '+%a, %d %b %Y %T %z')
-Standards-Version: 4.6.1.1
+Standards-Version: 4.6.2.0
 Installed-Size: $(du -sk "$DIR" | mawk '{print $1}')
 Depends:$DEPS_APT_VERSIONED
 Section: sound
