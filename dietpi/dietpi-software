@@ -5352,45 +5352,26 @@ _EOF_
 
 		if To_Install 111 # UrBackup Server
 		then
-			# Grab latest version
-			local url='https://hndl.urbackup.org/Server/latest'
-			G_CHECK_URL "$url"
-
-			# Latest known version
-			local latest='2.5.27'
-
-			# ARMv7
-			local fallback_url="https://hndl.urbackup.org/Server/$latest/urbackup-server_${latest}_armhf.deb"
-			local file=$(curl -sSfL "$url" | mawk -F\" '/"urbackup-server_.*_armhf\.deb"/{print $8}')
-
-			# ARMv8
-			if (( $G_HW_ARCH == 3 )); then
-
-				fallback_url="https://hndl.urbackup.org/Server/$latest/urbackup-server_${latest}_arm64.deb"
-				file=$(curl -sSfL "$url" | mawk -F\" '/"urbackup-server_.*_arm64\.deb"/{print $8}')
-
-			# x86_64
-			elif (( $G_HW_ARCH == 10 )); then
-
-				fallback_url="https://hndl.urbackup.org/Server/$latest/urbackup-server_${latest}_amd64.deb"
-				file=$(curl -sSfL "$url" | mawk -F\" '/"urbackup-server_.*_amd64\.deb"/{print $8}')
-
+			# Pre-configure backup path: Read from database on reinstall and align all configs
+			if [[ -f '/var/urbackup/backup_server_settings.db' ]] && command -v sqlite3 > /dev/null
+			then
+				local backuppath=$(sqlite3 /var/urbackup/backup_server_settings.db 'select value from settings where key = "backupfolder"')
+			else
+				local backuppath=$(sed -n '/^[[:blank:]]*SOFTWARE_URBACKUP_BACKUPPATH=/{s/^[^=]*=//p;q}' /boot/dietpi.txt)
 			fi
+			[[ $backuppath ]] || backuppath='/mnt/dietpi_userdata/urbackup'
+			[[ -f '/etc/urbackup/backupfolder' ]] && G_EXEC eval "echo '$backuppath' > /etc/urbackup/backupfolder"
+			[[ -f '/var/urbackup/backupfolder' ]] && G_EXEC eval "echo '$backuppath' > /var/urbackup/backupfolder"
+			G_EXEC eval "debconf-set-selections <<< 'urbackup-server urbackup/backuppath string $backuppath'"
 
-			[[ $file ]] && url="$url/$file" || url=$fallback_url
-			unset -v file fallback_url latest
-
-			G_EXEC eval 'debconf-set-selections <<< '\''urbackup-server urbackup/backuppath string /mnt/dietpi_userdata/urbackup'\'
+			# Install latest version
+			local arch=$(dpkg --print-architecture)
+			local url=$(curl -sSfL 'https://hndl.urbackup.org/Server/latest' | mawk -F\" "/\"urbackup-server_.*_$arch\.deb\"/{print \$8}")
+			[[ $url ]] && url="https://hndl.urbackup.org/Server/latest/$url"
+			local fallback_url="https://hndl.urbackup.org/Server/2.5.27/urbackup-server_2.5.27_$arch.deb"
 			Download_Install "$url"
 			G_EXEC systemctl stop urbackupsrv
-
-			# As we have /tmp mounted to RAM, change tmp location
-			#   [[ -d '/mnt/dietpi_userdata/urbackup/urbackup_tmp_files' ]] || G_EXEC mkdir -p /mnt/dietpi_userdata/urbackup/urbackup_tmp_files
-			G_EXEC chown -R urbackup:urbackup /mnt/dietpi_userdata/urbackup
-			G_CONFIG_INJECT 'DAEMON_TMPDIR=' 'DAEMON_TMPDIR='\''/mnt/dietpi_userdata/urbackup/urbackup_tmp_files'\' /etc/default/urbackupsrv
-
-			# https://github.com/MichaIng/DietPi/issues/545#issuecomment-252419739
-			#sqlite3 /usr/local/var/urbackup/backup_server_settings.db "UPDATE settings SET value = '/mnt/dietpi_userdata/urbackup/' WHERE key = 'backupfolder'"
+			unset -v backuppath arch url
 		fi
 
 		if To_Install 51 # OpenTyrian
@@ -12125,11 +12106,6 @@ If no WireGuard (auto)start is included, but you require it, please do the follo
 			[[ -d '/etc/systemd/system/certbot.service.d' ]] && G_EXEC rmdir --ignore-fail-on-non-empty /etc/systemd/system/certbot.service.d
 		fi
 
-		if To_Uninstall 87 # SQLite
-		then
-			G_AGP sqlite3 'php*-sqlite3'
-		fi
-
 		if To_Uninstall 91 # Redis
 		then
 			G_AGP redis-server redis-tools 'php*-redis'
@@ -14175,24 +14151,35 @@ _EOF_
 
 		if To_Uninstall 111 # UrBackup Server
 		then
-			G_AGP urbackup-server
-
 			# Pre-v6.29: ARMv8 source build
 			if [[ -f '/etc/systemd/system/urbackupsrv.service' ]]
 			then
 				G_EXEC systemctl disable --now urbackupsrv
 				G_EXEC rm /etc/systemd/system/urbackupsrv.service
 			fi
-			[[ -d '/etc/systemd/system/urbackupsrv.service.d' ]] && G_EXEC rm -R /etc/systemd/system/urbackupsrv.service.d
-			[[ -d '/mnt/dietpi_userdata/urbackup' ]] && G_EXEC rm -R /mnt/dietpi_userdata/urbackup
+
+			if [[ -f '/var/urbackup/backup_server_settings.db' ]] && command -v sqlite3 > /dev/null
+			then
+				local backuppath=$(sqlite3 /var/urbackup/backup_server_settings.db 'select value from settings where key = "backupfolder"')
+			else
+				local backuppath=$(sed -n '/^[[:blank:]]*SOFTWARE_URBACKUP_BACKUPPATH=/{s/^[^=]*=//p;q}' /boot/dietpi.txt)
+			fi
+			G_AGP urbackup-server
+			G_EXEC update-rc.d -f urbackupsrv remove # The package attempts to remove the non-existent "urbackup_srv" ...
+			G_EXEC rm -Rf /etc/systemd/system/urbackupsrv.service{.d,} /var/log/urbackup.log "${backuppath:-/mnt/dietpi_userdata/urbackup}"
+			unset -v backuppath
+			getent passwd urbackup > /dev/null && G_EXEC userdel urbackup
+			getent group urbackup > /dev/null && G_EXEC groupdel urbackup
+
+			# Pre-v6.29: ARMv8 source build
+			command -v urbackupsrv > /dev/null && G_EXEC rm "$(command -v urbackupsrv)"
+			command -v urbackup_mount_helper > /dev/null && G_EXEC rm "$(command -v urbackup_mount_helper)"
+			command -v urbackup_snapshot_helper > /dev/null && G_EXEC rm "$(command -v urbackup_snapshot_helper)"
 			[[ -d '/usr/share/urbackup' ]] && G_EXEC rm -R /usr/share/urbackup
 			[[ -d '/usr/local/share/urbackup' ]] && G_EXEC rm -R /usr/local/share/urbackup
 			[[ -d '/var/urbackup' ]] && G_EXEC rm -R /var/urbackup
 			[[ -f '/etc/default/urbackupsrv' ]] && G_EXEC rm /etc/default/urbackupsrv
 			[[ -f '/etc/logrotate.d/urbackupsrv' ]] && G_EXEC rm /etc/logrotate.d/urbackupsrv
-			command -v urbackupsrv > /dev/null && G_EXEC rm "$(command -v urbackupsrv)"
-			command -v urbackup_mount_helper > /dev/null && G_EXEC rm "$(command -v urbackup_mount_helper)"
-			command -v urbackup_snapshot_helper > /dev/null && G_EXEC rm "$(command -v urbackup_snapshot_helper)"
 		fi
 
 		if To_Uninstall 16 # Build-Essential
@@ -14415,6 +14402,11 @@ _EOF_
 			G_AGP postgresql 'postgresql-*'
 			G_EXEC rm -Rf /etc/postgresql*
 			[[ -d '/mnt/dietpi_userdata/postgresql' ]] && G_EXEC rm -R /mnt/dietpi_userdata/postgresql
+		fi
+
+		if To_Uninstall 87 # SQLite
+		then
+			G_AGP sqlite3 'php*-sqlite3'
 		fi
 
 		if To_Uninstall 202 # Rclone
