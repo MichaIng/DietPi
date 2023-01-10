@@ -136,7 +136,7 @@ Version: $(mawk -F\" '/MAJOR_VERSION/{print $2;exit}' squeezelite-master/squeeze
 Architecture: $(dpkg --print-architecture)
 Maintainer: MichaIng <micha@dietpi.com>
 Date: $(date '+%a, %d %b %Y %T %z')
-Standards-Version: 4.6.1.1
+Standards-Version: 4.6.2.0
 Installed-Size: $(du -sk "$DIR" | mawk '{print $1}')
 Depends:$DEPS_APT_VERSIONED
 Conflicts: squeezelite-pa, squeezelite-pulseaudio

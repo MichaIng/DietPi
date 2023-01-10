@@ -145,7 +145,7 @@ Version: 2:20220915-dietpi2
 Architecture: all
 Maintainer: MichaIng <micha@dietpi.com>
 Date: $(date -u '+%a, %d %b %Y %T %z')
-Standards-Version: 4.6.1.0
+Standards-Version: 4.6.2.0
 Installed-Size: $(du -sk raspberrypi-sys-mods | mawk '{print $1}')
 Section: admin
 Priority: optional
