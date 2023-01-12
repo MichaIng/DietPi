@@ -52,7 +52,7 @@ G_EXEC mv "vaultwarden-$version/.env.template" "$DIR/mnt/dietpi_userdata/vaultwa
 G_EXEC rm -R "vaultwarden-$version"
 
 # - web vault
-wv_version='2022.12.0'
+wv_version='2023.1.0'
 G_DIETPI-NOTIFY 2 "Downloading web vault version \e[33m$wv_version"
 G_EXEC curl -sSfLO "https://github.com/dani-garcia/bw_web_builds/releases/download/v$wv_version/bw_web_v$wv_version.tar.gz"
 G_EXEC tar xf "bw_web_v$wv_version.tar.gz" --one-top-level="$DIR/mnt/dietpi_userdata/vaultwarden"
