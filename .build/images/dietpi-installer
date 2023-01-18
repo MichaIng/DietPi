@@ -801,8 +801,7 @@ _EOF_
 
 		done < <(blkid -s TYPE -o value -c /dev/null | sort -u)
 
-		# G_HW_MODEL specific
-		# - Containers
+		# Containers
 		if (( $G_HW_MODEL == 75 ))
 		then
 			aPACKAGES_REQUIRED_INSTALL+=('iproute2')
@@ -825,16 +824,6 @@ _EOF_
 				'usbutils'		# "lsusb", used by DietPi-Software + DietPi-BugReport
 			)
 
-			# initramfs: Required for generic bootloader, but not required/used by RPi bootloader, on VM install tiny-initramfs with limited features but sufficient and much smaller + faster
-			if (( $G_HW_MODEL == 20 ))
-			then
-				aPACKAGES_REQUIRED_INSTALL+=('tiny-initramfs')
-
-			elif (( $G_HW_MODEL > 9 && $G_HW_MODEL != 49 && $G_HW_MODEL != 61 && $G_HW_MODEL != 76 && $G_HW_MODEL != 79 ))
-			then
-				aPACKAGES_REQUIRED_INSTALL+=('initramfs-tools')
-			fi
-
 			# Entropy daemon: Use modern rng-tools5 on all devices where it has been proven to work, else haveged: https://github.com/MichaIng/DietPi/issues/2806
 			if [[ $G_HW_MODEL -lt 10 || $G_HW_MODEL =~ ^(14|15|16|24|29|42|46|49|58|68|72|74|76|79)$ ]] # RPi, S922X, Odroid C4, RK3399 - 47 NanoPi R4S, Quartz64, Radxa Zero, NanoPi R5S, NanoPi R6S
 			then
@@ -850,10 +839,9 @@ _EOF_
 				fi
 			fi
 
-			# G_DISTRO specific
-			# - Dropbear: DietPi default SSH server
-			#   On Buster, "dropbear" pulls in "dropbear-initramfs", which we don't need: https://packages.debian.org/dropbear
-			#   This needs to depend on current distro version instead of target version, to assure "dropbear-run" does not get autoremoved before "dropbear" is installed.
+			# Dropbear: DietPi default SSH server
+			# - On Buster, "dropbear" pulls in "dropbear-initramfs", which we don't need: https://packages.debian.org/dropbear
+			# - This needs to depend on current distro version instead of target version, to assure "dropbear-run" does not get autoremoved before "dropbear" is installed.
 			if (( $G_DISTRO > 5 ))
 			then
 				aPACKAGES_REQUIRED_INSTALL+=('dropbear')
@@ -874,18 +862,22 @@ _EOF_
 				aPACKAGES_REQUIRED_INSTALL+=('wpasupplicant')	# Support for WPA-protected WiFi network connection
 			fi
 
-			# Kernel/bootloader/firmware
+			# x86_64: Kernel/bootloader/initramfs
 			# - We need to install those directly to allow G_AGA() autoremove possible older packages later: https://github.com/MichaIng/DietPi/issues/1285#issuecomment-354602594
-			# - Assure that dir for additional sources is present
-			[[ -d '/etc/apt/sources.list.d' ]] || G_EXEC mkdir /etc/apt/sources.list.d
-			# - G_HW_ARCH specific
-			#	x86_64
-			if (( $G_HW_ARCH == 10 )); then
-
+			if (( $G_HW_ARCH == 10 ))
+			then
 				local apackages=('linux-image-amd64' 'os-prober')
 
 				# As linux-image-amd64 pulls initramfs already, pre-install the intended implementation here already
-				(( $G_HW_MODEL == 20 )) && apackages+=('tiny-initramfs') || apackages+=('initramfs-tools')
+				if (( $G_HW_MODEL == 20 ))
+				then
+					# VM: Install tiny-initramfs with limited features but sufficient and much smaller + faster
+					apackages+=('tiny-initramfs')
+				else
+					apackages+=('initramfs-tools')
+					# Bookworm: Install zstd for better initramfs compression, used by default by initramfs-tools since Bookworm (if installed and supported by kernel) and with support built into the kernel
+					(( $G_DISTRO > 6 )) && apackages+=('zstd')
+				fi
 
 				# Grub EFI with secure boot compatibility
 				if [[ -d '/boot/efi' ]] || dpkg-query -s 'grub-efi-amd64' &> /dev/null; then
@@ -911,6 +903,9 @@ _EOF_
 				[[ -f '/etc/apt/trusted.gpg~' ]] && G_EXEC rm '/etc/apt/trusted.gpg~'
 			fi
 		fi
+
+		# Assure that dir for additional sources is present
+		[[ -d '/etc/apt/sources.list.d' ]] || G_EXEC mkdir /etc/apt/sources.list.d
 
 		# - DietPi-Build with Armbian kernel/bootloader/firmware
 		if [[ ( $G_HW_MODEL =~ ^(12|15|16|40|42|43|44|45|46|47|48|52|54|55|56|57|58|59|60|63|64|65|66|67|68|72|73|74|77|78)$ && -f '/boot/dietpiEnv.txt' ) || ( $G_HW_MODEL == 11 && $(findmnt -Ufnro TARGET -T /boot) == '/' ) || ( $G_HW_MODEL == 10 && $(findmnt -t vfat -M /boot) ) ]]
@@ -1046,8 +1041,8 @@ _EOF_
 			done
 			unset -v apackages
 
-			# Add u-boot-tools, required to convert initramfs images into u-boot format
-			aPACKAGES_REQUIRED_INSTALL+=('u-boot-tools')
+			# Add initramfs-tools and u-boot-tools, required to convert initramfs images into u-boot format
+			aPACKAGES_REQUIRED_INSTALL+=('initramfs-tools' 'u-boot-tools')
 
 			# Generate and cleanup uInitrd
 			local arch='arm'
@@ -1122,12 +1117,12 @@ _EOF_
 			[[ -f '/etc/apt/trusted.gpg~' ]] && G_EXEC rm '/etc/apt/trusted.gpg~'
 
 			# ROCK Pi S: rockpis-dtbo is not required as it doubles the overlays that are already provided (among others) with the kernel package
-			(( $G_HW_MODEL == 73 )) && G_AGI rockpis-rk-ubootimg linux-4.4-rock-pi-s-latest rockchip-overlay u-boot-tools
+			(( $G_HW_MODEL == 73 )) && G_AGI initramfs-tools rockpis-rk-ubootimg linux-4.4-rock-pi-s-latest rockchip-overlay u-boot-tools
 
 			# Install Radxa Zero kernel (U-Boot package is not available yet): https://github.com/radxa/apt
 			# Additionally install bc, required to calculate the initramfs size via custom hook (by Radxa) which updates /boot/uEnv.txt accordingly on initramfs updates
 			# And install "file" which is used to detect whether the kernel image is compressed and in case uncompress it
-			(( $G_HW_MODEL == 74 )) && G_AGI linux-5.10-radxa-zero-latest bc file
+			(( $G_HW_MODEL == 74 )) && G_AGI initramfs-tools linux-5.10-radxa-zero-latest bc file
 
 		# - Quartz64
 		elif [[ $G_HW_MODEL == 49 && $(findmnt -Ufnro TARGET -T /boot) == '/' ]]
@@ -1162,16 +1157,12 @@ _EOF_
 			G_EXEC_OUTPUT=1 G_EXEC dpkg -i firmware-nanopi2.deb
 			G_EXEC rm firmware-nanopi2.deb
 
-		# - Generic kernel + device tree + U-Boot package auto detect
+		# - Generic kernel + device tree + U-Boot package auto detect + initramfs-tools
 		elif (( $G_HW_MODEL != 75 ))
 		then
 			mapfile -t apackages < <(dpkg-query -Wf '${Package}\n' | grep -E '^linux-(image|dtb|u-boot)-|^u-boot')
-			if [[ ${apackages[0]} ]]
-			then
-				G_AGI "${apackages[@]}"
-			else
-				G_DIETPI-NOTIFY 2 'Unable to find kernel packages for installation. Assuming non-APT/.deb kernel installation.'
-			fi
+			[[ ${apackages[0]} ]] || G_DIETPI-NOTIFY 2 'Unable to find kernel packages for installation. Assuming non-APT/.deb kernel installation.'
+			G_AGI initramfs-tools "${apackages[@]}"
 			unset -v apackages
 		fi
 		G_EXEC apt-get clean # Remove downloaded archives
