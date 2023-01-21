@@ -109,6 +109,7 @@ G_CONFIG_INJECT 'CONFIG_CHECK_DNS_DOMAIN=' 'CONFIG_CHECK_DNS_DOMAIN=localhost' r
 
 # Temporary workaround for failing autologin
 G_EXEC sed -i '/^Before=/s/$/ getty-pre.target/' rootfs/etc/systemd/system/dietpi-firstboot.service
+G_EXEC sed -i '/^Before=/i\Wants=getty-pre.target' rootfs/etc/systemd/system/dietpi-firstboot.service
 
 # Automated build
 cat << _EOF_ > rootfs/boot/Automation_Custom_Script.sh || exit 1
