@@ -6,7 +6,7 @@
 deps=() c7zip='7zr'
 (( $G_DISTRO > 6 )) && deps+=('7zip') c7zip='7zz'
 (( $G_HW_ARCH == 1 )) && deps+=('zip')
-G_AGI gcc libc6-dev "${p7zip[@]}"
+G_AGI gcc libc6-dev "${deps[@]}"
 
 # Download & Build
 # shellcheck disable=SC1091
