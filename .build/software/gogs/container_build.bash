@@ -117,6 +117,7 @@ cat << _EOF_ > rootfs/boot/Automation_Custom_Script.sh || exit 1
 echo '[ INFO ] Running Gogs build script...'
 bash -c "\$(curl -sSf 'https://raw.githubusercontent.com/$G_GITOWNER/DietPi/$G_GITBRANCH/.build/software/gogs/build.bash')"
 mv -v '/tmp/gogs_$arch.7z' /
+# Pre-v8.14 ARMv6 zip
 [ -f '/tmp/gogs_armv6.zip' ] && mv -v '/tmp/gogs_armv6.zip' /
 poweroff
 _EOF_
