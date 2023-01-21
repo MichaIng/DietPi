@@ -107,6 +107,9 @@ G_EXEC eval 'echo '\''infocmp "$TERM" > /dev/null 2>&1 || export TERM=dumb'\'' >
 G_CONFIG_INJECT 'CONFIG_CHECK_CONNECTION_IP=' 'CONFIG_CHECK_CONNECTION_IP=127.0.0.1' rootfs/boot/dietpi.txt
 G_CONFIG_INJECT 'CONFIG_CHECK_DNS_DOMAIN=' 'CONFIG_CHECK_DNS_DOMAIN=localhost' rootfs/boot/dietpi.txt
 
+# Temporary workaround for failing autologin
+G_EXEC sed -i '/^Before=/s/$/ getty-pre.target/' rootfs/etc/systemd/system/dietpi-firstboot.service
+
 # Automated build
 cat << _EOF_ > rootfs/boot/Automation_Custom_Script.sh || exit 1
 #!/bin/dash
