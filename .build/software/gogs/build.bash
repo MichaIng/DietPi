@@ -6,6 +6,7 @@
 G_AGI gcc libc6-dev 7zip zip
 
 # Download & Build
+# shellcheck disable=SC1091
 . /etc/bashrc.d/go.sh
 G_EXEC_OUTPUT=1 G_EXEC go install 'gogs.io/gogs@latest'
 
