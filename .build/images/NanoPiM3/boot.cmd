@@ -18,8 +18,8 @@ setenv ramdisk_addr_r "0x49000000"
 setenv kernel_addr_r "0x4a000000"
 
 # Load dietpiEnv.txt
-if test -e ${devtype} ${devnum} ${prefix}dietpiEnv.txt; then
-	ext4load ${devtype} ${devnum} ${kernel_addr_r} ${prefix}dietpiEnv.txt
+if test -e mmc ${devnum} ${prefix}dietpiEnv.txt; then
+	ext4load mmc ${devnum} ${kernel_addr_r} ${prefix}dietpiEnv.txt
 	env import -t ${kernel_addr_r} ${filesize}
 fi
 
@@ -30,9 +30,9 @@ setenv bootargs "root=${rootdev} rootfstype=${rootfstype} rootwait ${consoleargs
 if test "${docker_optimizations}" = "on"; then setenv bootargs "${bootargs} cgroup_enable=memory swapaccount=1"; fi
 
 # Load device tree, initramfs and kernel
-ext4load ${devtype} ${devnum} ${fdt_addr} ${prefix}dtb/nexell/${fdtfile}
-ext4load ${devtype} ${devnum} ${ramdisk_addr_r} ${prefix}uInitrd
-ext4load ${devtype} ${devnum} ${kernel_addr_r} ${prefix}Image
+ext4load mmc ${devnum} ${fdt_addr} ${prefix}dtb/nexell/${fdtfile}
+ext4load mmc ${devnum} ${ramdisk_addr_r} ${prefix}uInitrd
+ext4load mmc ${devnum} ${kernel_addr_r} ${prefix}Image
 
 # Boot
 booti ${kernel_addr_r} ${ramdisk_addr_r} ${fdt_addr_r}
