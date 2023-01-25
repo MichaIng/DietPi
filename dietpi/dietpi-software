@@ -182,7 +182,7 @@ Available commands:
 	case $G_DISTRO in
 		5) PHP_VERSION='7.3';;
 		6) PHP_VERSION='7.4';;
-		*) PHP_VERSION='8.1';;
+		*) PHP_VERSION='8.2';;
 	esac
 
 	# Available for (need to match highest value in dietpi-obtain_hw_model)
@@ -1387,7 +1387,7 @@ Available commands:
 		# Required to ask for public domain/IP and desired VPN server port
 		aSOFTWARE_INTERACTIVE[$software_id]=1
 		# Requires the WireGuard kernel module: We do not support DKMS builds anymore, which were required only for legacy kernel versions, which are not supported by WireGuard anymore: https://dietpi.com/forum/t/wireguard-install-failed-now-cant-do-anything-else-with-dietpi-software/15173
-		modprobe -nq wireguard && aSOFTWARE_AVAIL_G_HW_MODEL[$software_id,$G_HW_MODEL]=1
+		(( $G_HW_MODEL == 75 )) || modprobe -nq wireguard || aSOFTWARE_AVAIL_G_HW_MODEL[$software_id,$G_HW_MODEL]=0
 		#------------------
 		software_id=117
 		aSOFTWARE_NAME[$software_id]='PiVPN'
@@ -1662,12 +1662,14 @@ Available commands:
 		aSOFTWARE_NAME[$software_id]='VSCodium'
 		aSOFTWARE_DESC[$software_id]='FLOSS version of MS VSCode'
 		aSOFTWARE_CATX[$software_id]=26
+		aSOFTWARE_DOCS[$software_id]='https://dietpi.com/docs/software/programming/#vscodium'
 		aSOFTWARE_DEPS[$software_id]='5 6 17'
 		#------------------
 		software_id=188
 		aSOFTWARE_NAME[$software_id]='Go'
 		aSOFTWARE_DESC[$software_id]='Runtime environment and package installer'
 		aSOFTWARE_CATX[$software_id]=26
+		aSOFTWARE_DOCS[$software_id]='https://dietpi.com/docs/software/programming/#go'
 		aSOFTWARE_DEPS[$software_id]='17'
 		#------------------
 		software_id=8
@@ -1685,6 +1687,7 @@ Available commands:
 		aSOFTWARE_NAME[$software_id]='Node.js'
 		aSOFTWARE_DESC[$software_id]='JavaScript runtime environment'
 		aSOFTWARE_CATX[$software_id]=26
+		aSOFTWARE_DOCS[$software_id]='https://dietpi.com/docs/software/webserver_stack/#nodejs'
 		#------------------
 		software_id=150
 		aSOFTWARE_NAME[$software_id]='Mono'
@@ -1695,6 +1698,7 @@ Available commands:
 		aSOFTWARE_NAME[$software_id]='PHP Composer'
 		aSOFTWARE_DESC[$software_id]='Package manager for PHP'
 		aSOFTWARE_CATX[$software_id]=26
+		aSOFTWARE_DOCS[$software_id]='https://dietpi.com/docs/software/webserver_stack/#php-composer'
 		aSOFTWARE_DEPS[$software_id]='89'
 
 		# Text Editors
@@ -2325,13 +2329,16 @@ _EOF_
 
 		local target=$2 # Target path
 		local file=${url##*/} # Grab file name from URL
-		local type=${file##*.} # Grab file type from file name to special handle deb|zip|tar(.gz|.bz2)|tgz|tbz2|7z
+		local type=${file##*.} # Grab file type from file name to special handle deb|zip|tar(.gz|.bz2)|tgz|tbz2|txz|7z|xz
 
 		# DietPi-Software conf/service mode
 		# shellcheck disable=SC2154
 		[[ $dps_index && ${aSOFTWARE_NAME[$dps_index]} ]] && url="https://raw.githubusercontent.com/$G_GITOWNER/DietPi/$G_GITBRANCH/.conf/dps_$dps_index/$url" type=
 
 		G_EXEC cd "$G_WORKING_DIR" # Failsafe
+
+		# Add decompressor to deps list if missing
+		[[ $type == 'xz' || $type == 'txz' ]] && ! command -v xz > /dev/null && aDEPS+=('xz-utils')
 
 		# Download file
 		if [[ ${aDEPS[0]} ]]
@@ -2353,6 +2360,7 @@ _EOF_
 		unset -v fallback_url dps_index
 
 		# Process downloaded file
+		[[ $type == 'xz' ]] && G_EXEC xz -df "$file" && file=${file%.xz}
 		if [[ $type == 'deb' ]]
 		then
 			G_AGI "./$file"
@@ -2361,7 +2369,7 @@ _EOF_
 		then
 			G_EXEC unzip -o "$file" ${target:+"-d$target"}
 
-		elif [[ $type =~ ^(t?gz|t?bz2|tar)$ ]]
+		elif [[ $type =~ ^(t?gz|t?bz2|txz|tar)$ ]]
 		then
 			G_EXEC tar xf "$file" ${target:+"--one-top-level=$target"}
 
@@ -2372,10 +2380,8 @@ _EOF_
 
 		elif [[ $target && $target != "$file" ]]
 		then
-			# Pre-create target dir, if given
+			# Pre-create target dir if given: $target can be a file name only, so assure it is a path containing a dir
 			[[ $target == *'/'* && ! -d ${target%/*} ]] && G_EXEC mkdir -p "${target%/*}"
-
-			[[ -f $target ]] && G_DIETPI-NOTIFY 2 "Updating file: $target"
 			G_EXEC mv "$file" "$target"
 		else
 			return
@@ -2386,28 +2392,25 @@ _EOF_
 
 	Create_User()
 	{
-		# Parse input
+		# Parse input and mark as read-only to throw an error if given doubled
 		local group_primary groups_supplementary home shell password user
 		while (( $# ))
 		do
-			# Mark as read-only to throw an error on doubled input
 			case $1 in
-				-g) shift; readonly group_primary=$1;; # Primary group is always pre-created and defaults to same name as user for new users
-				-G) shift; readonly groups_supplementary=$1;; # User is only added to supplementary groups that do exist
-				-d) shift; readonly home=$1;; # Home is never pre-created and defaults to "/nonexistent" which prevents login
-				-s) shift; readonly shell=$1;; # Shell defaults to "nologin" which prevents shell access on login even if home exists
-				-p) shift; readonly password=$1;; # Password is only set for new users while existing users passwords stay untouched
+				'-g') shift; readonly group_primary=$1;; # Primary group is always pre-created and defaults to same name as user for new users
+				'-G') shift; readonly groups_supplementary=$1;; # User is only added to supplementary groups that do exist
+				'-d') shift; readonly home=$1;; # Home is never pre-created and defaults to "/nonexistent" which prevents login
+				'-s') shift; readonly shell=$1;; # Shell defaults to "nologin" which prevents shell access on login even if home exists
+				'-p') shift; readonly password=$1;; # Password is only set for new users while existing users' passwords stay untouched
 				*) readonly user=$1;;
 			esac
 			shift
 		done
 
-		# Validate input
-		# - User name needs to be given
-		G_EXEC_DESC="Verifying user \"${user:-<missing!>}\" to run ${aSOFTWARE_NAME[$software_id]}" G_EXEC test "$user"
-		# - Pre-create given primary group, as useradd and usermod fail if it does not exist
+		# Pre-create given primary group, as useradd and usermod fail if it does not exist
 		[[ $group_primary ]] && ! getent group "$group_primary" > /dev/null && G_EXEC groupadd -r "$group_primary"
-		# - Only add to supplementary groups that do exist
+
+		# Only add to supplementary groups that do exist
 		local group groups
 		for group in ${groups_supplementary//,/ }
 		do
@@ -2415,6 +2418,7 @@ _EOF_
 		done
 		groups=${groups#,}
 
+		# Create user if missing, else modify it according to input
 		if getent passwd "$user" > /dev/null
 		then
 			G_EXEC usermod ${group_primary:+-g "$group_primary"} ${groups:+-aG "$groups"} -d "${home:-/nonexistent}" -s "${shell:-$(command -v nologin)}" "$user"
@@ -2554,8 +2558,8 @@ _EOF_
 			# RPi: Add fbdev display driver for legacy framebuffer graphics support, as modesetting requires KMS driver overlay for /dev/dri/card0 to exists.
 			(( $G_HW_MODEL > 9 )) || aDEPS+=('xserver-xorg-video-fbdev')
 
-			# VM
-			if (( $G_HW_MODEL == 20 ))
+			# x86_64 VM
+			if (( $G_HW_ARCH == 10 && $G_HW_MODEL == 20 ))
 			then
 				# If KMS/DRM is supported, add VMware DDX, which offers slightly better performance compared to modesetting. VirtualBox can emulate it as well, which is even the nowadays recommended default.
 				# Else (e.g. Hyper-V) add classic framebuffer DDX
@@ -2743,13 +2747,17 @@ _EOF_
 			else
 				G_AGI dropbear-run
 			fi
-			aSTART_SERVICES+=('dropbear')
 
-			# Apply password login setting from dietpi.txt or default
-			/boot/dietpi/func/dietpi-set_software disable_ssh_password_logins
+			# Assure service is enabled and active
+			G_EXEC systemctl unmask dropbear
+			G_EXEC systemctl enable dropbear
+			G_EXEC systemctl start dropbear
 
 			# Enable Dropbear daemon, obsolete since Bookworm
 			(( $G_DISTRO > 6 )) || G_CONFIG_INJECT 'NO_START=' 'NO_START=0' /etc/default/dropbear
+
+			# Apply password login setting from dietpi.txt or default (implies a restart)
+			/boot/dietpi/func/dietpi-set_software disable_ssh_password_logins
 
 			# Mark OpenSSH for uninstall
 			dpkg-query -s 'openssh-server' &> /dev/null && aSOFTWARE_INSTALL_STATE[105]=-1
@@ -2761,13 +2769,14 @@ _EOF_
 			systemctl -q is-active dropbear && G_EXEC systemctl stop dropbear
 
 			G_AGI openssh-server
-			aSTART_SERVICES+=('ssh')
 
-			# Apply password login setting from dietpi.txt or default
+			# Assure service is enabled and active
+			G_EXEC systemctl unmask ssh
+			G_EXEC systemctl enable ssh
+			G_EXEC systemctl start ssh
+
+			# Apply password login setting from dietpi.txt or default (implies a restart)
 			/boot/dietpi/func/dietpi-set_software disable_ssh_password_logins
-
-			# Reload SSH server now so root users can login during setup
-			G_EXEC systemctl reload ssh
 
 			# Mark Dropbear for uninstall
 			grep -q '^dropbear[^[:blank:]]*[[:blank:]]' < <(dpkg --get-selections) && aSOFTWARE_INSTALL_STATE[104]=-1
@@ -2942,7 +2951,7 @@ unix_socket_directories = '/run/postgresql'" > "$i/00dietpi.conf"
 			local unofficial=()
 			(( $G_HW_ARCH == 1 )) && unofficial=('-u')
 			G_EXEC_OUTPUT=1 G_EXEC ./node-install.sh "${unofficial[@]}"
-			G_EXEC_NOHALT=1 G_EXEC rm node-install.sh
+			G_EXEC rm node-install.sh
 		fi
 
 		if To_Install 130 # Python 3
@@ -2962,7 +2971,7 @@ unix_socket_directories = '/run/postgresql'" > "$i/00dietpi.conf"
 			aDEPS=('python3-dev')
 			Download_Install 'https://bootstrap.pypa.io/get-pip.py'
 			G_EXEC_OUTPUT=1 G_EXEC python3 get-pip.py
-			G_EXEC_NOHALT=1 G_EXEC rm get-pip.py
+			G_EXEC rm get-pip.py
 		fi
 
 		if To_Install 150 # Mono
@@ -3729,19 +3738,6 @@ _EOF_
 			G_EXEC phpenmod "${amodules[@]%.ini}"
 			unset -v amodules
 
-			# Create PHP info pages within webroot if webserver is installed
-			if (( ${aSOFTWARE_INSTALL_STATE[83]} > 0 || ${aSOFTWARE_INSTALL_STATE[84]} > 0 || ${aSOFTWARE_INSTALL_STATE[85]} > 0 ))
-			then
-				# PHP info page
-				echo '<?php phpinfo(); ?>' > /var/www/phpinfo.php
-				# OPcache info page
-				G_THREAD_START curl -sSfL 'https://raw.githubusercontent.com/amnuts/opcache-gui/master/index.php' -o /var/www/opcache.php
-				# APCu info page
-				G_THREAD_START curl -sSfL 'https://raw.githubusercontent.com/krakjoe/apcu/master/apc.php' -o /var/www/apc.php
-
-				G_THREAD_WAIT
-			fi
-
 			# Apache: Enable PHP-FPM
 			command -v a2enconf > /dev/null && { G_EXEC a2enmod proxy_fcgi setenvif; G_EXEC a2enconf "php$PHP_VERSION-fpm"; }
 		fi
@@ -3770,7 +3766,7 @@ _EOF_
 			[[ -f '/var/www/phpmyadmin/config.inc.php' ]] && G_EXEC mv /var/www/phpmyadmin/config.inc.php "phpMyAdmin-$version-english/"
 			G_EXEC rm -Rf /var/www/phpmyadmin # Include pre-v6.27 symlink: https://github.com/MichaIng/DietPi/issues/3304
 			# - Remove GUI setup: https://docs.phpmyadmin.net/en/latest/setup.html#securing-your-phpmyadmin-installation
-			G_EXEC_NOHALT=1 G_EXEC rm -R "phpMyAdmin-$version-english/setup"
+			G_EXEC rm -R "phpMyAdmin-$version-english/setup"
 			# - Move new instance in place
 			G_EXEC mv "phpMyAdmin-$version-english" /var/www/phpmyadmin
 
@@ -4291,7 +4287,7 @@ location = /.well-known/caldav  { return 301 /owncloud/remote.php/dav/; }' > /et
 			G_EXEC systemctl restart mariadb
 			G_EXEC systemctl restart redis-server
 
-			# Initially add occ command shortcut, will be done by Dietpi-Globals automatically, if occ file exist:
+			# Initially add occ command shortcut, will be added as alias by /etc/bashrc.d/dietpi.bash if occ file exist:
 			occ(){ sudo -u www-data php /var/www/owncloud/occ "$@"; }
 
 			# Adjusting config file:
@@ -4352,7 +4348,7 @@ The install script will now exit. After applying one of the the above, rerun die
 				G_EXEC_PRE_FUNC(){ acommand[10]=$oc_password acommand[14]=$GLOBAL_PW; }
 				# - Checking output for stack trace to handle internal errors that do not lead to php error exit code
 				G_EXEC_POST_FUNC(){ grep -qi 'Stack trace' "$fp_log" && exit_code=255; }
-				G_EXEC occ maintenance:install --no-interaction --database 'mysql' --database-name 'owncloud' --database-user 'tmp_root' --database-pass "${oc_password//?/X}" --admin-user "$username" --admin-pass "${GLOBAL_PW//?/X}" --data-dir "$datadir"
+				G_EXEC occ maintenance:install --no-interaction --database='mysql' --database-name='owncloud' --database-user='tmp_root' --database-pass="${oc_password//?/X}" --admin-user="$username" --admin-pass="${GLOBAL_PW//?/X}" --data-dir="$datadir"
 				G_EXEC mysql -e 'drop user tmp_root@localhost;'
 				unset -v oc_password
 
@@ -4426,18 +4422,37 @@ The install script will now exit. After applying one of the the above, rerun die
 					G_CONFIG_INJECT "'datadirectory'" "'datadirectory' => '$datadir'," /var/www/nextcloud/config/config.php "'dbtype'"
 				else
 					local version='latest'
-					# Nextcloud 24 won't support PHP7.3 anymore: https://github.com/nextcloud/server/pull/29286
+					# Nextcloud 24 doesn't support PHP7.3 anymore: https://github.com/nextcloud/server/pull/29286
 					if (( $G_DISTRO < 6 ))
 					then
 						G_DIETPI-NOTIFY 2 'Downloading latest Nextcloud 23, since Nextcloud 24 does not support PHP7.3 anymore'
 						version='latest-23'
-					# Nextcloud 26 won't support 32-bit anymore: https://github.com/MichaIng/DietPi/issues/5888
+
+					# Nextcloud 26 doesn't support PHP7.4 anymore: https://github.com/nextcloud/server/pull/34997
+					elif (( $G_DISTRO < 7 ))
+					then
+						G_DIETPI-NOTIFY 2 'Downloading latest Nextcloud 25, since Nextcloud 26 does not support PHP7.4 anymore'
+						version='latest-25'
+
+					# Nextcloud 26 doesn't support 32-bit anymore: https://github.com/MichaIng/DietPi/issues/5888
 					elif [[ $G_HW_ARCH == [12] ]]
 					then
 						G_DIETPI-NOTIFY 2 'Downloading latest Nextcloud 25, since Nextcloud 26 does not support 32-bit anymore'
 						version='latest-25'
 					fi
 					Download_Install "https://download.nextcloud.com/server/releases/$version.tar.bz2" /var/www
+					# Bookworm: Patch for PHP 8.2 support, which works quite well: https://github.com/nextcloud/server/issues/32595#issuecomment-1387559520
+					if (( $G_DISTRO > 6 )) && grep -q '>= 80200' /var/www/nextcloud/lib/versioncheck.php
+					then
+						G_WHIP_MSG '[WARNING] Patching Nextcloud to support PHP 8.2 for Bookworm
+\nOfficially, Nextcloud does not support PHP 8.2, but it does work quite well:
+- https://github.com/nextcloud/server/issues/32595#issuecomment-1387559520
+\nWe are patching the PHP version check, but this has two implications:
+- You will see an integrity check error on Nextcloud admin panel.
+- You will need to redo the patch after Nextcloud updates, until PHP 8.2 support has been added:
+# sed -i '\''s/>= 80200/>= 80300/'\'' /var/www/nextcloud/lib/versioncheck.php'
+						G_EXEC sed -i 's/>= 80200/>= 80300/' /var/www/nextcloud/lib/versioncheck.php
+					fi
 				fi
 			fi
 
@@ -4538,7 +4553,7 @@ location = /.well-known/caldav  { return 301 /nextcloud/remote.php/dav/; }' > /e
 			G_EXEC systemctl restart mariadb
 			G_EXEC systemctl restart redis-server
 
-			# Initially add occ command shortcut, will be done by Dietpi-Globals automatically, if occ file exist:
+			# Initially add occ command shortcut, will be added as alias by /etc/bashrc.d/dietpi.bash if occ file exist:
 			ncc(){ sudo -u www-data php /var/www/nextcloud/occ "$@"; }
 
 			# Adjusting config file:
@@ -4612,7 +4627,7 @@ The install script will now exit. After applying one of the the above, rerun die
 					fi
 
 				}
-				G_EXEC ncc maintenance:install --no-interaction --database 'mysql' --database-name 'nextcloud' --database-user 'tmp_root' --database-pass "${nc_password//?/X}" --admin-user "$username" --admin-pass "${GLOBAL_PW//?/X}" --data-dir "$datadir"
+				G_EXEC ncc maintenance:install --no-interaction --database='mysql' --database-name='nextcloud' --database-user='tmp_root' --database-pass="${nc_password//?/X}" --admin-user="$username" --admin-pass="${GLOBAL_PW//?/X}" --data-dir="$datadir"
 				G_EXEC mysql -e 'drop user tmp_root@localhost;'
 				unset -v nc_password
 
@@ -4770,7 +4785,7 @@ The install script will now exit. After applying one of the the above, rerun die
 			# We have no Buster binaries yet, so always use Stretch binaries
 			G_EXEC mv "ympd_${arch}_stretch" /usr/bin/ympd
 			G_EXEC chmod +x /usr/bin/ympd
-			G_EXEC_NOHALT=1 G_EXEC rm ympd_*
+			G_EXEC rm ympd_*
 
 			# User
 			Create_User -g dietpi ympd
@@ -4823,13 +4838,7 @@ _EOF_
 			# - On reinstall /var/lib/mympd exists, so use its existence as reinstall flag
 			if [[ ! -d '/var/lib/mympd' ]]
 			then
-				G_EXEC export MYMPD_LOGLEVEL=4 MYMPD_MPD_HOST='/run/mpd/socket' MYMPD_HTTP_PORT=0 MYMPD_SSL_PORT=1333
-				G_EXEC_OUTPUT=1 G_EXEC systemd-run -p DynamicUser=yes -p StateDirectory=mympd -p CacheDirectory=mympd mympd -c
-				G_EXEC umask 0077
-				G_EXEC mkdir /var/lib/mympd/state
-				G_EXEC eval 'echo '\''/mnt/dietpi_userdata/Music'\'' > /var/lib/mympd/state/playlist_directory'
-				G_EXEC eval 'echo '\''/mnt/dietpi_userdata/Music'\'' > /var/lib/mympd/state/music_directory'
-				G_EXEC umask 0022
+				G_EXEC_OUTPUT=1 G_EXEC systemd-run -p DynamicUser=yes -p StateDirectory=mympd -p CacheDirectory=mympd -p Environment='MYMPD_LOGLEVEL=4 MYMPD_MPD_HOST=/run/mpd/socket MYMPD_HTTP=false MYMPD_HTTP_PORT=0 MYMPD_SSL_PORT=1333' mympd -c # MYMPD_HTTP_PORT=0 is pre myMPD v10.2.1: 
 
 				# Add myMPD CA to trusted store: https://github.com/jcorporation/myMPD/issues/914
 				G_EXEC mkdir -p /usr/local/share/ca-certificates
@@ -4838,9 +4847,9 @@ _EOF_
 			fi
 
 			# myMPD pre-v8.0.0 cleanup
-			[[ -f '/etc/mympd.conf' ]] && G_EXEC_NOEXIT=1 G_EXEC rm /etc/mympd.conf
-			[[ -f '/etc/mympd.conf.dist' ]] && G_EXEC_NOEXIT=1 G_EXEC rm /etc/mympd.conf.dist
-			command -v mympd-config > /dev/null && G_EXEC_NOEXIT=1 G_EXEC rm "$(command -v mympd-config)"
+			[[ -f '/etc/mympd.conf' ]] && G_EXEC rm /etc/mympd.conf
+			[[ -f '/etc/mympd.conf.dist' ]] && G_EXEC rm /etc/mympd.conf.dist
+			command -v mympd-config > /dev/null && G_EXEC rm "$(command -v mympd-config)"
 		fi
 
 		if To_Install 121 # Roon Bridge
@@ -5369,7 +5378,7 @@ WantedBy=multi-user.target
 _EOF_
 			# Cleanup
 			G_EXEC cd "$G_WORKING_DIR"
-			G_EXEC_NOFAIL=1 G_EXEC rm -R RPi_Cam_Web_Interface-master
+			G_EXEC rm -R RPi_Cam_Web_Interface-master
 
 			# Data directory
 			[[ -d '/mnt/dietpi_userdata/rpicam' ]] || G_EXEC mkdir /mnt/dietpi_userdata/rpicam
@@ -5615,7 +5624,7 @@ _EOF_
 			Download_Install 'https://github.com/afaqurk/linux-dash/archive/master.tar.gz'
 			[[ -d '/var/www/linuxdash' ]] || G_EXEC mkdir /var/www/linuxdash
 			G_EXEC cp -a linux-dash-master/* /var/www/linuxdash/
-			G_EXEC_NOHALT=1 G_EXEC rm -R linux-dash-master
+			G_EXEC rm -R linux-dash-master
 		fi
 
 		if To_Install 184 # Tor Relay
@@ -5930,7 +5939,7 @@ _EOF_
 				(( $G_INTERACTIVE )) && read -rp 'The Pi-hole installer failed. Do you want to retry? [yN]: ' retry
 				[[ $retry =~ ^[yY]([eE][sS])?$ ]] || { aSOFTWARE_INSTALL_STATE[$software_id]=0; break; }
 			done
-			G_EXEC_NOHALT=1 G_EXEC rm install.sh
+			G_EXEC rm install.sh
 			[[ $TERM_old ]] && TERM=$TERM_old
 			unset -v retry TERM_old
 
@@ -6328,7 +6337,7 @@ See the manual below for instructions on how to do this.
 			G_EXEC cd "$G_WORKING_DIR"
 
 			# Move source dir to disk, as it contains additional examples to compile
-			[[ -d '/root/wiringPi' ]] && G_EXEC_NOEXIT=1 G_EXEC rm -R /root/wiringPi # Pre-v7.2
+			[[ -d '/root/wiringPi' ]] && G_EXEC rm -R /root/wiringPi # Pre-v7.2
 			[[ -d '/mnt/dietpi_userdata/WiringPi' ]] && G_EXEC rm -R /mnt/dietpi_userdata/WiringPi
 			G_EXEC mv WiringPi-master /mnt/dietpi_userdata/WiringPi
 		fi
@@ -6551,7 +6560,7 @@ _EOF_
 
 			# Cleanup
 			G_EXEC cd "$G_WORKING_DIR"
-			G_EXEC_NOHALT=1 G_EXEC rm -R frp_*
+			G_EXEC rm -R frp_*
 		fi
 
 		if To_Install 122 # Node-RED
@@ -6775,7 +6784,7 @@ _EOF_
 			G_EXEC cd "$G_WORKING_DIR"
 
 			# Cleanup
-			G_EXEC_NOHALT=1 G_EXEC rm -R WebIOPi-master
+			G_EXEC rm -R WebIOPi-master
 
 			# On fresh installs, change port to 8002 to avoid conflict with IceCast
 			(( $reinstall )) || G_EXEC sed -i 's/^port = 8000$/port = 8002/' /etc/webiopi/config
@@ -6823,7 +6832,7 @@ _EOF_
 			[[ -d '/etc/haproxy/errors' ]] || G_EXEC mkdir -p /etc/haproxy/errors
 			G_EXEC mv "haproxy-$version/examples/errorfiles/"*.http /etc/haproxy/errors/
 			# Clean up
-			G_EXEC_NOHALT=1 G_EXEC rm -R "haproxy-$version"
+			G_EXEC rm -R "haproxy-$version"
 
 			# Jail directory
 			[[ -d '/var/lib/haproxy' ]] || G_EXEC mkdir /var/lib/haproxy
@@ -7289,7 +7298,7 @@ _EOF_
 		then
 			G_EXEC curl -sSfL 'https://vaemendis.net/ubooquity/service/download.php' -o Ubooquity.zip
 			G_EXEC unzip -o Ubooquity.zip
-			G_EXEC_NOHALT=1 G_EXEC rm Ubooquity.zip
+			G_EXEC rm Ubooquity.zip
 			[[ -d '/mnt/dietpi_userdata/ubooquity' ]] || G_EXEC mkdir /mnt/dietpi_userdata/ubooquity
 			G_EXEC mv {,/mnt/dietpi_userdata/ubooquity/}Ubooquity.jar
 
@@ -7334,7 +7343,7 @@ _EOF_
 
 		if To_Install 179 # Komga
 		then
-			local fallback_url='https://github.com/gotson/komga/releases/download/v0.158.0/komga-0.158.0.jar'
+			local fallback_url='https://github.com/gotson/komga/releases/download/v0.160.0/komga-0.160.0.jar'
 			Download_Install "$(curl -sSfL 'https://api.github.com/repos/gotson/komga/releases/latest' | mawk -F\" '/"browser_download_url": .*\/komga-[^"\/]*\.jar"/{print $4}')" /mnt/dietpi_userdata/komga/komga.jar
 
 			# User
@@ -7469,7 +7478,7 @@ _EOF_
 				/boot/dietpi/func/create_mysql_db ampache ampache "$GLOBAL_PW"
 				Download_Install 'https://dietpi.com/downloads/mysql_databases/ampache_mysql_3.8.2-v6.0.zip'
 				G_EXEC mysql ampache < ampache.sql
-				G_EXEC_NOHALT=1 G_EXEC rm ampache.sql
+				G_EXEC rm ampache.sql
 				# Also update password here for rare but possible case that database was lost but config file still exists
 				[[ -f $fp_install/ampache/config/ampache.cfg.php ]] && G_CONFIG_INJECT 'database_password[[:blank:]]+=' "database_password = \"$GLOBAL_PW\"" "$fp_install/ampache/config/ampache.cfg.php"
 
@@ -7545,7 +7554,7 @@ _EOF_
 				fi
 
 				# Pre-v6.26 cleanup
-				[[ -f '/etc/openvpn/dh2048.pem' ]] && G_EXEC_NOEXIT=1 G_EXEC rm /etc/openvpn/dh2048.pem
+				[[ -f '/etc/openvpn/dh2048.pem' ]] && G_EXEC rm /etc/openvpn/dh2048.pem
 				dpkg-query -s easy-rsa &> /dev/null && G_AGP easy-rsa
 
 				# Download latest easy-rsa from GitHub
@@ -7676,8 +7685,8 @@ _EOF_
 			Configure_iptables
 
 			G_EXEC_OUTPUT=1 G_EXEC_NOEXIT=1 G_EXEC ./install.bash "${options[@]}" || aSOFTWARE_INSTALL_STATE[$software_id]=0
-			G_EXEC_NOHALT=1 G_EXEC rm install.bash
-			[[ -f '/boot/unattended_pivpn.conf' ]] && G_EXEC_NOHALT=1 G_EXEC mv /boot/unattended_pivpn.conf{,.applied}
+			G_EXEC rm install.bash
+			[[ -f '/boot/unattended_pivpn.conf' ]] && G_EXEC mv /boot/unattended_pivpn.conf{,.applied}
 		fi
 
 		if To_Install 201 # ZeroTier
@@ -7732,12 +7741,13 @@ _EOF_
 			/boot/dietpi/func/dietpi-set_hardware wifimodules enable
 
 			# Set WiFi Country Code
-			(( $G_DISTRO > 6 )) || /boot/dietpi/func/dietpi-set_hardware wificountrycode "$(sed -n '/^[[:blank:]]*AUTO_SETUP_NET_WIFI_COUNTRY_CODE=/{s/^[^=]*=//p;q}' /boot/dietpi.txt)"
+			local country_code=$(sed -n '/^[[:blank:]]*AUTO_SETUP_NET_WIFI_COUNTRY_CODE=/{s/^[^=]*=//p;q}' /boot/dietpi.txt)
+			[[ -f '/lib/crda/crda' ]] && /boot/dietpi/func/dietpi-set_hardware wificountrycode "${country_code:=00}"
 
 			local eth_iface=$(G_GET_NET -t eth iface)
 			local wifi_iface=$(G_GET_NET -t wlan iface)
 
-			# DHCPD Config
+			# DHCP server config
 			G_BACKUP_FP /etc/dhcp/dhcpd.conf
 			cat << '_EOF_' > /etc/dhcp/dhcpd.conf
 ddns-update-style none;
@@ -7785,6 +7795,7 @@ _EOF_
 interface=$wifi_iface
 driver=nl80211
 ssid=$(sed -n '/^[[:blank:]]*SOFTWARE_WIFI_HOTSPOT_SSID=/{s/^[^=]*=//p;q}' /boot/dietpi.txt)
+country_code=$country_code
 hw_mode=g
 channel=$(sed -n '/^[[:blank:]]*SOFTWARE_WIFI_HOTSPOT_CHANNEL=/{s/^[^=]*=//p;q}' /boot/dietpi.txt)
 macaddr_acl=0
@@ -7802,7 +7813,7 @@ _EOF_
 			[[ $G_HW_MODEL == [34] ]] && G_CONFIG_INJECT 'ieee80211n=' 'ieee80211n=1' /etc/hostapd/hostapd.conf
 
 			# Enable access point config
-			echo 'DAEMON_CONF="/etc/hostapd/hostapd.conf"' > /etc/default/hostapd
+			G_EXEC eval 'echo '\''DAEMON_CONF="/etc/hostapd/hostapd.conf"'\'' > /etc/default/hostapd'
 
 			Enable_IP_forwarding wifihotspot
 
@@ -8290,16 +8301,16 @@ _EOF_
 
 		if To_Install 49 # Gogs
 		then
-			# ARMv6: No pre-compiled binaries available, thus we use our own: https://github.com/gogs/gogs/releases
-			local url='https://dietpi.com/downloads/binaries/all/gogs_armv6.zip'
+			# ARMv6: No pre-compiled binaries available, so we host our own.
+			local url="https://dietpi.com/downloads/binaries/$G_DISTRO_NAME/gogs_armv6l.7z"
 
 			# Else install latest binaries from GitHub
 			if (( $G_HW_ARCH != 1 ))
 			then
 				case $G_HW_ARCH in
-					2) local arch='armv7';;
-					3) local arch='armv8';;
-					*) local arch='amd64';;
+					2) arch='armv7';;
+					3) arch='armv8';;
+					*) arch='amd64';;
 				esac
 
 				local fallback_url="https://github.com/gogs/gogs/releases/download/v0.12.10/gogs_0.12.10_linux_$arch.tar.gz"
@@ -8307,22 +8318,18 @@ _EOF_
 			fi
 
 			Download_Install "$url"
+			G_EXEC mkdir -p /etc/gogs
+			G_EXEC mv gogs/gogs /etc/gogs/gogs
+			G_EXEC rm -R gogs
 
-			# Remove old install dir, but preserve existing configs
-			if [[ -d '/etc/gogs' ]]
-			then
-				[[ -d '/etc/gogs/custom' ]] && G_EXEC mv /etc/gogs/custom gogs
-				G_EXEC mv /etc/gogs/.??* gogs # dot files = SSH and Git user configs
-				G_EXEC rm -R /etc/gogs
-			fi
-
-			G_EXEC mv gogs /etc/gogs
+			# Pre-v8.14: Remove unnecessary init scripts
+			[[ -d '/etc/gogs/scripts' ]] && G_EXEC rm -R /etc/gogs/scripts
 
 			# User
 			Create_User -d /etc/gogs gogs
 
 			# Directories + permissions
-			[[ -d '/mnt/dietpi_userdata/gogs-repo' ]] || G_EXEC mkdir /mnt/dietpi_userdata/gogs-repo
+			G_EXEC mkdir -p /mnt/dietpi_userdata/gogs-repo
 			G_EXEC chown -R gogs:gogs /etc/gogs /mnt/dietpi_userdata/gogs-repo
 
 			# Database
@@ -9284,7 +9291,7 @@ _EOF_
 			export INSTALL_K3S_SKIP_ENABLE=true
 			export INSTALL_K3S_EXEC=$(sed -n '/^[[:blank:]]*SOFTWARE_K3S_EXEC=/{s/^[^=]*=//p;q}' /boot/dietpi.txt)
 			G_EXEC_NOEXIT=1 G_EXEC_OUTPUT=1 G_EXEC ./install.sh || aSOFTWARE_INSTALL_STATE[$software_id]=-1
-			G_EXEC_NOHALT=1 G_EXEC rm install.sh
+			G_EXEC rm install.sh
 
 			# Do not enter into a server restart loop on failure
 			[[ -d '/etc/systemd/system/k3s.service.d' ]] || G_EXEC mkdir /etc/systemd/system/k3s.service.d
@@ -9437,9 +9444,9 @@ _EOF_
 			G_EXEC systemctl stop sonarr
 
 			# Pre-v7.1: Remove Sonarr v2 key, PID file and database backups from DietPi-Arr_to_RAM
-			[[ $(apt-key list 'A236C58F409091A18ACA53CBEBFF6B99D9B78493' 2> /dev/null) ]] && G_EXEC_NOEXIT=1 G_EXEC apt-key del 'A236C58F409091A18ACA53CBEBFF6B99D9B78493'
-			[[ -f '/mnt/dietpi_userdata/sonarr/nzbdrone.pid' ]] && G_EXEC_NOEXIT=1 G_EXEC rm /mnt/dietpi_userdata/sonarr/nzbdrone.pid
-			[[ -f '/mnt/dietpi_userdata/sonarr/nzbdrone.db.bak' ]] && G_EXEC_NOEXIT=1 G_EXEC rm /mnt/dietpi_userdata/sonarr/nzbdrone.db.bak
+			[[ $(apt-key list 'A236C58F409091A18ACA53CBEBFF6B99D9B78493' 2> /dev/null) ]] && G_EXEC apt-key del 'A236C58F409091A18ACA53CBEBFF6B99D9B78493'
+			[[ -f '/mnt/dietpi_userdata/sonarr/nzbdrone.pid' ]] && G_EXEC rm /mnt/dietpi_userdata/sonarr/nzbdrone.pid
+			[[ -f '/mnt/dietpi_userdata/sonarr/nzbdrone.db.bak' ]] && G_EXEC rm /mnt/dietpi_userdata/sonarr/nzbdrone.db.bak
 
 			# Data dir
 			[[ -d '/mnt/dietpi_userdata/sonarr' ]] || G_EXEC mkdir /mnt/dietpi_userdata/sonarr
@@ -9539,8 +9546,8 @@ _EOF_
 			fi
 
 			# Radarr v2: Remove old PID file and database backups from DietPi-Arr_to_RAM
-			[[ -f '/mnt/dietpi_userdata/radarr/nzbdrone.pid' ]] && G_EXEC_NOEXIT=1 G_EXEC rm /mnt/dietpi_userdata/radarr/nzbdrone.pid
-			[[ -f '/mnt/dietpi_userdata/radarr/nzbdrone.db.bak' ]] && G_EXEC_NOEXIT=1 G_EXEC rm /mnt/dietpi_userdata/radarr/nzbdrone.db.bak
+			[[ -f '/mnt/dietpi_userdata/radarr/nzbdrone.pid' ]] && G_EXEC rm /mnt/dietpi_userdata/radarr/nzbdrone.pid
+			[[ -f '/mnt/dietpi_userdata/radarr/nzbdrone.db.bak' ]] && G_EXEC rm /mnt/dietpi_userdata/radarr/nzbdrone.db.bak
 
 			# Data dir
 			[[ -d '/mnt/dietpi_userdata/radarr' ]] || G_EXEC mkdir /mnt/dietpi_userdata/radarr
@@ -9902,7 +9909,7 @@ _EOF_
 			G_EXEC curl -sSfL 'https://nzbget.net/download/nzbget-latest-bin-linux.run' -o package.run
 			[[ -d '/mnt/dietpi_userdata/nzbget' ]] || G_EXEC mkdir /mnt/dietpi_userdata/nzbget
 			G_EXEC_OUTPUT=1 G_EXEC dash package.run --destdir /mnt/dietpi_userdata/nzbget
-			G_EXEC_NOHALT=1 G_EXEC rm package.run
+			G_EXEC rm package.run
 
 			# User
 			Create_User -g dietpi -d /mnt/dietpi_userdata/nzbget nzbget
@@ -10050,7 +10057,7 @@ _EOF_
 					*) local arch='x64';;
 				esac
 
-				local fallback_url="https://github.com/Readarr/Readarr/releases/download/v0.1.1.1526/Readarr.develop.0.1.1.1526.linux-core-$arch.tar.gz"
+				local fallback_url="https://github.com/Readarr/Readarr/releases/download/v0.1.2.1532/Readarr.develop.0.1.2.1532.linux-core-$arch.tar.gz"
 				Download_Install "$(curl -sSfL 'https://api.github.com/repos/Readarr/Readarr/releases' | mawk -F\" "/\"browser_download_url\": .*linux-core-$arch\.tar\.gz\"/{print \$4}" | head -1)"
 				G_EXEC mv Readarr /opt/readarr
 			fi
@@ -10119,7 +10126,7 @@ _EOF_
 				G_EXEC_OUTPUT=1 G_EXEC git clone --depth 1 "$url"
 				[[ -d '/mnt/dietpi_userdata/htpc-manager' ]] || G_EXEC mkdir /mnt/dietpi_userdata/htpc-manager
 				G_EXEC cp -a HTPC-Manager/. /mnt/dietpi_userdata/htpc-manager/
-				G_EXEC_NOHALT=1 G_EXEC rm -R HTPC-Manager
+				G_EXEC rmdir HTPC-Manager
 				G_EXEC cd /mnt/dietpi_userdata/htpc-manager
 				G_EXEC_OUTPUT=1 G_EXEC git reset --hard origin
 				G_EXEC_OUTPUT=1 G_EXEC git clean -dxfe '/userdata'
@@ -10362,6 +10369,7 @@ _EOF_
 			G_EXEC systemctl mask --now docker
 			G_AGI docker-ce
 			G_EXEC systemctl unmask docker
+			G_EXEC systemctl start docker.socket
 
 			# Change Docker service type to "simple": https://github.com/MichaIng/DietPi/issues/2238#issuecomment-439474766
 			[[ -d '/lib/systemd/system/docker.service.d' ]] || G_EXEC mkdir /lib/systemd/system/docker.service.d
@@ -10458,8 +10466,7 @@ _EOF_
 			# Permissions
 			G_EXEC chown -R bd:bd /home/bd /mnt/dietpi_userdata/fuguhub-data
 
-			# Replace SysV service with systemd unit: https://github.com/MichaIng/DietPi/issues/5058
-			Remove_SysV bdd
+			Remove_SysV bdd # Pre-v8.0: https://github.com/MichaIng/DietPi/issues/5058
 			cat << '_EOF_' > /etc/systemd/system/bdd.service
 [Unit]
 Description=FuguHub (DietPi)
@@ -10487,7 +10494,7 @@ _EOF_
 			# Service
 			cat << _EOF_ > /etc/systemd/system/nukkit.service
 [Unit]
-Description=nukkit (DietPi)
+Description=Nukkit (DietPi)
 
 [Service]
 SyslogIdentifier=Nukkit
@@ -10508,9 +10515,8 @@ _EOF_
 				*) local arch='arm-6';;
 			esac
 
-			# ToDo: Implement xz-support: https://github.com/go-gitea/gitea/releases/download/v1.17.3/gitea-1.17.3-linux-amd64.xz
-			local fallback_url="https://github.com/go-gitea/gitea/releases/download/v1.18.0/gitea-1.18.0-linux-$arch"
-			Download_Install "$(curl -sSfL 'https://api.github.com/repos/go-gitea/gitea/releases/latest' | mawk -F\" "/\"browser_download_url\": \".*\/gitea-[^\"\/]*-linux-$arch\"/{print \$4}")" /mnt/dietpi_userdata/gitea/gitea
+			local fallback_url="https://github.com/go-gitea/gitea/releases/download/v1.18.3/gitea-1.18.3-linux-$arch.xz"
+			Download_Install "$(curl -sSfL 'https://api.github.com/repos/go-gitea/gitea/releases/latest' | mawk -F\" "/\"browser_download_url\": \".*\/gitea-[^\"\/]*-linux-$arch\.xz\"/{print \$4}")" /mnt/dietpi_userdata/gitea/gitea
 
 			# User
 			Create_User -d /mnt/dietpi_userdata/gitea gitea
@@ -10988,15 +10994,15 @@ _EOF_
 				G_AGI "${aDEPS[@]}"
 				aDEPS=()
 			else
-				local fallback_url='https://github.com/TasmoAdmin/TasmoAdmin/releases/download/v2.3.2/tasmoadmin_v2.3.2.tar.gz'
+				local fallback_url='https://github.com/TasmoAdmin/TasmoAdmin/releases/download/v2.3.3/tasmoadmin_v2.3.3.tar.gz'
 				Download_Install "$(curl -sSfL 'https://api.github.com/repos/TasmoAdmin/TasmoAdmin/releases/latest' | mawk -F\" '/"browser_download_url": ".*\/tasmoadmin_v[^"\/]*\.tar\.gz"$/{print $4}')"
 				G_EXEC chown -R www-data:www-data tasmoadmin
 				G_EXEC mv {,/var/www/}tasmoadmin
 			fi
 
 			# Configure the webserver
-			if (( ${aSOFTWARE_INSTALL_STATE[83]} > 0 )); then
-
+			if (( ${aSOFTWARE_INSTALL_STATE[83]} > 0 ))
+			then
 				G_DIETPI-NOTIFY 2 'Apache webserver found, enabling TasmoAdmin specific configuration.'
 				a2enmod setenvif rewrite authz_core authn_core authn_file 1> /dev/null
 				local tasmoadmin_conf='/etc/apache2/sites-available/dietpi-tasmoadmin.conf'
@@ -11009,8 +11015,8 @@ _EOF_
 				dps_index=$software_id Download_Install 'apache.tasmoadmin.conf' "$tasmoadmin_conf"
 				a2ensite dietpi-tasmoadmin 1> /dev/null
 
-			elif (( ${aSOFTWARE_INSTALL_STATE[84]} > 0 )); then
-
+			elif (( ${aSOFTWARE_INSTALL_STATE[84]} > 0 ))
+			then
 				G_DIETPI-NOTIFY 2 'Lighttpd webserver found, enabling TasmoAdmin specific configuration.'
 				local tasmoadmin_conf='/etc/lighttpd/conf-available/99-dietpi-tasmoadmin.conf'
 				if [[ -f $tasmoadmin_conf ]]; then
@@ -11024,8 +11030,8 @@ _EOF_
 				G_EXEC_POST_FUNC(){ [[ $exit_code == 2 ]] && exit_code=0; } # Do not fail if modules are enabled already
 				G_EXEC lighty-enable-mod rewrite dietpi-tasmoadmin
 
-			elif (( ${aSOFTWARE_INSTALL_STATE[85]} > 0 )); then
-
+			elif (( ${aSOFTWARE_INSTALL_STATE[85]} > 0 ))
+			then
 				G_DIETPI-NOTIFY 2 'Nginx webserver found, enabling TasmoAdmin specific configuration.'
 				local tasmoadmin_conf='/etc/nginx/sites-dietpi/dietpi-tasmoadmin.conf'
 				if [[ -f $tasmoadmin_conf ]]; then
@@ -11035,7 +11041,6 @@ _EOF_
 
 				fi
 				dps_index=$software_id Download_Install 'nginx.tasmoadmin.conf' "$tasmoadmin_conf"
-
 			fi
 		fi
 
@@ -11075,7 +11080,7 @@ _EOF_
 				G_EXEC curl -sSfL 'https://sh.rustup.rs' -o rustup-init.sh
 				G_EXEC chmod +x rustup-init.sh
 				G_EXEC_OUTPUT=1 G_EXEC sudo -u "$ha_user" ./rustup-init.sh -y --profile minimal
-				G_EXEC_NOHALT=1 G_EXEC rm rustup-init.sh
+				G_EXEC rm rustup-init.sh
 			fi
 
 			# Install pyenv to $ha_home
@@ -11507,7 +11512,7 @@ _EOF_
 				# Disable repo via priority "-1", to prevent any accidental package upgrades: https://github.com/MichaIng/DietPi/issues/2568
 				# Enable but set WireGuard package priorities low enough to install only if not available in main repo(s)
 				echo -e 'Package: *\nPin: release n=bullseye\nPin-Priority: -1\n
-Package: wireguard wireguard-dkms wireguard-tools\nPin: release n=bullseye\nPin-Priority: 100' > /etc/apt/preferences.d/dietpi-wireguard
+Package: wireguard-tools\nPin: release n=bullseye\nPin-Priority: 100' > /etc/apt/preferences.d/dietpi-wireguard
 
 				G_AGUP
 			fi
@@ -11542,15 +11547,12 @@ Package: wireguard wireguard-dkms wireguard-tools\nPin: release n=bullseye\nPin-
 				while :
 				do
 					G_WHIP_DEFAULT_ITEM=$domain
-					if G_WHIP_INPUTBOX "${invalid_text}Please enter your servers public IP/domain for WireGuard client access:" && [[ $G_WHIP_RETURNED_VALUE ]]; then
-
+					if G_WHIP_INPUTBOX "${invalid_text}Please enter your servers public IP/domain for WireGuard client access:" && [[ $G_WHIP_RETURNED_VALUE ]]
+					then
 						domain=${G_WHIP_RETURNED_VALUE#http*://}
 						break
-
 					else
-
 						invalid_text='[ERROR] No valid entry found. Please retry...\n\n'
-
 					fi
 				done
 				invalid_text=
@@ -11559,15 +11561,12 @@ Package: wireguard wireguard-dkms wireguard-tools\nPin: release n=bullseye\nPin-
 				do
 					G_WHIP_DEFAULT_ITEM=$port
 					if G_WHIP_INPUTBOX "${invalid_text}Please enter the network port that will be used to access your WireGuard server:\n
-NB: This port needs to be forwarded by your router and/or opened in your firewall settings. Default value is: 51820" && disable_error=1 G_CHECK_VALIDINT "$G_WHIP_RETURNED_VALUE" 0; then
-
+NB: This port needs to be forwarded by your router and/or opened in your firewall settings. Default value is: 51820" && disable_error=1 G_CHECK_VALIDINT "$G_WHIP_RETURNED_VALUE" 0
+					then
 						port=$G_WHIP_RETURNED_VALUE
 						break
-
 					else
-
 						invalid_text='[ERROR] No valid entry found, value needs to be a sequence of integers. Please retry...\n\n'
-
 					fi
 				done
 
@@ -11608,7 +11607,6 @@ AllowedIPs = 10.9.0.2/32
 #PublicKey = XXXX
 #AllowedIPs = 10.9.0.3/32
 _EOF_
-
 				# Server local network IP
 				local server_ip=$(G_GET_NET ip)
 
@@ -11656,8 +11654,8 @@ _EOF_
 				G_EXEC systemctl enable --now wg-quick@wg0
 
 			# Client choice
-			elif [[ $G_WHIP_RETURNED_VALUE == 'Client' ]]; then
-
+			elif [[ $G_WHIP_RETURNED_VALUE == 'Client' ]]
+			then
 				G_AGI resolvconf # Use by wg-quick to apply DNS in client setup
 				G_WHIP_MSG '[ INFO ] WireGuard client setup has been chosen\n
 Please follow the instructions of your VPN provider to configure WireGuard.\n
@@ -11671,7 +11669,6 @@ If no WireGuard (auto)start is included, but you require it, please do the follo
 	systemctl enable wg-quick@wg0-client
 4. To disable autostart again, run:
 	systemctl disable wg-quick@wg0-client'
-
 			fi
 
 			unset -v choice_required domain port invalid_text server_ip
@@ -11897,17 +11894,15 @@ If no WireGuard (auto)start is included, but you require it, please do the follo
 			# Remove ownCloud installation folder
 			rm -R /var/www/owncloud
 			# Remove redirect configs
-			if grep -q 'owncloud' /etc/lighttpd/conf-available/99-dietpi-dav_redirect.conf &> /dev/null; then
-
+			if grep -q 'owncloud' /etc/lighttpd/conf-available/99-dietpi-dav_redirect.conf &> /dev/null
+			then
 				lighty-disable-mod dietpi-dav_redirect
 				rm /etc/lighttpd/conf-available/99-dietpi-dav_redirect.conf
-
 			fi
-			if grep -q 'owncloud' /etc/apache2/conf-available/dietpi-dav_redirect.conf &> /dev/null; then
-
+			if grep -q 'owncloud' /etc/apache2/conf-available/dietpi-dav_redirect.conf &> /dev/null
+			then
 				a2disconf dietpi-dav_redirect
 				rm /etc/apache2/conf-available/dietpi-dav_redirect.conf
-
 			fi
 			grep -q 'owncloud' /etc/nginx/sites-dietpi/dietpi-dav_redirect.conf &> /dev/null && G_EXEC rm /etc/nginx/sites-dietpi/dietpi-dav_redirect.conf
 		fi
@@ -11919,8 +11914,8 @@ If no WireGuard (auto)start is included, but you require it, please do the follo
 			[[ -d '/etc/systemd/system/coturn.service.d' ]] && G_EXEC rm -R /etc/systemd/system/coturn.service.d
 			systemctl start mariadb
 			systemctl start redis-server
-			ncc maintenance:mode --off
-			ncc app:disable spreed
+			sudo -u www-data php /var/www/nextcloud/occ maintenance:mode --off
+			sudo -u www-data php /var/www/nextcloud/occ app:disable spreed
 			G_DIETPI-NOTIFY 2 'Disabled Nextcloud Talk app, but you need to remove it manually from Nextcloud web UI, if desired.'
 		fi
 
@@ -11954,17 +11949,15 @@ If no WireGuard (auto)start is included, but you require it, please do the follo
 			# Remove Nextcloud installation folder
 			rm -R /var/www/nextcloud
 			# Remove redirect configs
-			if grep -q 'nextcloud' /etc/lighttpd/conf-available/99-dietpi-dav_redirect.conf &> /dev/null; then
-
+			if grep -q 'nextcloud' /etc/lighttpd/conf-available/99-dietpi-dav_redirect.conf &> /dev/null
+			then
 				lighty-disable-mod dietpi-dav_redirect
 				rm /etc/lighttpd/conf-available/99-dietpi-dav_redirect.conf
-
 			fi
-			if grep -q 'nextcloud' /etc/apache2/conf-available/dietpi-dav_redirect.conf &> /dev/null; then
-
+			if grep -q 'nextcloud' /etc/apache2/conf-available/dietpi-dav_redirect.conf &> /dev/null
+			then
 				a2disconf dietpi-dav_redirect
 				rm /etc/apache2/conf-available/dietpi-dav_redirect.conf
-
 			fi
 			grep -q 'nextcloud' /etc/nginx/sites-dietpi/dietpi-dav_redirect.conf &> /dev/null && G_EXEC rm /etc/nginx/sites-dietpi/dietpi-dav_redirect.conf
 		fi
@@ -12035,9 +12028,6 @@ If no WireGuard (auto)start is included, but you require it, please do the follo
 			G_AGP 'php*-*' 'libapache2-mod-php*'
 			G_EXEC rm -Rf /{etc,var/lib}/php /var/log/php*-fpm.log
 			[[ -f '/etc/tmpfiles.d/dietpi-php_sessions.conf' ]] && G_EXEC rm /etc/tmpfiles.d/dietpi-php_sessions.conf
-			[[ -f '/var/www/phpinfo.php' ]] && G_EXEC rm /var/www/phpinfo.php
-			[[ -f '/var/www/apc.php' ]] && G_EXEC rm /var/www/apc.php
-			[[ -f '/var/www/opcache.php' ]] && G_EXEC rm /var/www/opcache.php
 			[[ -d '/var/tmp/php_upload_tmp' ]] && G_EXEC rm -R /var/tmp/php_upload_tmp # Pre-v6.32
 		fi
 
@@ -12573,11 +12563,10 @@ If no WireGuard (auto)start is included, but you require it, please do the follo
 
 		if To_Uninstall 147 # Jackett
 		then
-			if [[ -f '/etc/systemd/system/jackett.service' ]]; then
-
+			if [[ -f '/etc/systemd/system/jackett.service' ]]
+			then
 				G_EXEC systemctl disable --now jackett
 				G_EXEC rm /etc/systemd/system/jackett.service
-
 			fi
 			[[ -d '/etc/systemd/system/jackett.service.d' ]] && G_EXEC rm -R /etc/systemd/system/jackett.service.d
 			getent passwd jackett > /dev/null && G_EXEC userdel jackett
@@ -12587,11 +12576,10 @@ If no WireGuard (auto)start is included, but you require it, please do the follo
 
 		if To_Uninstall 149 # NZBGet
 		then
-			if [[ -f '/etc/systemd/system/nzbget.service' ]]; then
-
+			if [[ -f '/etc/systemd/system/nzbget.service' ]]
+			then
 				G_EXEC systemctl disable --now nzbget
 				G_EXEC rm /etc/systemd/system/nzbget.service
-
 			fi
 			[[ -d '/etc/systemd/system/nzbget.service.d' ]] && G_EXEC rm -R /etc/systemd/system/nzbget.service.d
 			getent passwd nzbget > /dev/null && G_EXEC userdel nzbget
@@ -12625,11 +12613,10 @@ If no WireGuard (auto)start is included, but you require it, please do the follo
 
 		if To_Uninstall 155 # HTPC Manager
 		then
-			if [[ -f '/etc/systemd/system/htpc-manager.service' ]]; then
-
+			if [[ -f '/etc/systemd/system/htpc-manager.service' ]]
+			then
 				G_EXEC systemctl disable --now htpc-manager
 				G_EXEC rm /etc/systemd/system/htpc-manager.service
-
 			fi
 			[[ -d '/etc/systemd/system/htpc-manager.service.d' ]] && G_EXEC rm -R /etc/systemd/system/htpc-manager.service.d
 			[[ -d '/mnt/dietpi_userdata/htpc-manager' ]] && G_EXEC rm -R /mnt/dietpi_userdata/htpc-manager
@@ -13323,28 +13310,26 @@ _EOF_
 		then
 			# Remove webserver configs
 			# - Lighttpd
-			if [[ -f '/etc/lighttpd/conf-available/99-dietpi-dav_redirect.conf' ]]; then
-
+			if [[ -f '/etc/lighttpd/conf-available/99-dietpi-dav_redirect.conf' ]]
+			then
 				command -v lighty-disable-mod > /dev/null && lighty-disable-mod dietpi-dav_redirect
 				rm -v /etc/lighttpd/conf-available/99-dietpi-dav_redirect.conf
 			fi
-			if [[ -f '/etc/lighttpd/conf-available/99-dietpi-baikal.conf' ]]; then
-
+			if [[ -f '/etc/lighttpd/conf-available/99-dietpi-baikal.conf' ]]
+			then
 				command -v lighty-disable-mod > /dev/null && lighty-disable-mod dietpi-baikal
 				rm -v /etc/lighttpd/conf-available/99-dietpi-baikal.conf
 			fi
 			# - Apache
-			if [[ -f '/etc/apache2/conf-available/dietpi-dav_redirect.conf' ]]; then
-
+			if [[ -f '/etc/apache2/conf-available/dietpi-dav_redirect.conf' ]]
+			then
 				command -v a2disconf > /dev/null && a2disconf dietpi-dav_redirect
 				rm -v /etc/apache2/conf-available/dietpi-dav_redirect.conf
-
 			fi
-			if [[ -f '/etc/apache2/sites-available/dietpi-baikal.conf' ]]; then
-
+			if [[ -f '/etc/apache2/sites-available/dietpi-baikal.conf' ]]
+			then
 				command -v a2dissite > /dev/null && a2dissite dietpi-baikal
 				rm -v /etc/apache2/sites-available/dietpi-baikal.conf
-
 			fi
 			# - Nginx
 			[[ -f '/etc/nginx/sites-dietpi/dietpi-dav_redirect.conf' ]] && G_EXEC rm /etc/nginx/sites-dietpi/dietpi-dav_redirect.conf
@@ -13508,11 +13493,10 @@ _EOF_
 			[[ -f '/etc/apache2/sites-available/dietpi-rutorrent.conf' ]] && G_EXEC rm /etc/apache2/sites-available/dietpi-rutorrent.conf
 
 			# rTorrent
-			if [[ -f '/etc/systemd/system/rtorrent.service' ]]; then
-
+			if [[ -f '/etc/systemd/system/rtorrent.service' ]]
+			then
 				G_EXEC systemctl disable --now rtorrent
 				G_EXEC rm /etc/systemd/system/rtorrent.service
-
 			fi
 			[[ -d '/etc/systemd/system/rtorrent.service.d' ]] && G_EXEC rm -R /etc/systemd/system/rtorrent.service.d
 			G_AGP rtorrent
@@ -13960,7 +13944,7 @@ _EOF_
 				installer='./rem-setup.sh' user='root'
 			fi
 			SUDO_USER=$user G_EXEC_OUTPUT=1 G_EXEC "$installer" --uninstall
-			G_EXEC_NOHALT=1 G_EXEC rm "$installer"
+			G_EXEC rm "$installer"
 			getent passwd roon-extension-manager > /dev/null && G_EXEC userdel roon-extension-manager
 			getent group roon-extension-manager > /dev/null && G_EXEC groupdel roon-extension-manager
 			[[ -d '/mnt/dietpi_userdata/roon-extension-manager' ]] && G_EXEC rm -R /mnt/dietpi_userdata/roon-extension-manager
@@ -14843,7 +14827,7 @@ _EOF_
 		/boot/dietpi/dietpi-autostart "$AUTOINSTALL_AUTOSTARTTARGET"
 
 		# Disable console on TTY1 for purely headless SBCs, enabled for automated first run setup
-		[[ $G_HW_MODEL =~ ^(47|48|55|56|57|59|60|64|65)$ ]] && G_EXEC systemctl disable getty@tty1
+		[[ $G_HW_MODEL =~ ^(47|48|55|56|57|59|60|64|65|73)$ ]] && G_EXEC systemctl disable getty@tty1
 
 		# Set install stage to finished
 		G_DIETPI_INSTALL_STAGE=2

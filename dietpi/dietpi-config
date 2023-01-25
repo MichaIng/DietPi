@@ -2144,7 +2144,7 @@ wpa-conf /etc/wpa_supplicant/wpa_supplicant.conf
 _EOF_
 		fi
 
-		# Remove wireless-power setting, if not supported by adapter/firmware
+		# Remove wireless-power setting if not supported by adapter/firmware
 		iwconfig "$WIFI_DEV_IFACE" power off 2> /dev/null || sed -i '/^wireless-power/d' /etc/network/interfaces
 
 		# Update WiFi db/wpa_supplicant
@@ -2272,15 +2272,24 @@ _EOF_
 		fi
 		local wifi_country_code_target=$G_WHIP_RETURNED_VALUE
 
-		/boot/dietpi/func/dietpi-set_hardware wificountrycode "$wifi_country_code_target"
+		# CRDA is not available from Debian Bookworm on and irrelevant from Linux 4.15 on: https://bugs.debian.org/1003903
+		if [[ -f '/lib/crda/crda' ]]
+		then
+			/boot/dietpi/func/dietpi-set_hardware wificountrycode "$wifi_country_code_target"
 
-		Network_Restart
+			Network_Restart
 
-		# Check if country code was successfully applied
-		WIFI_COUNTRYCODE=$(iw reg get | mawk '/country/{print $2;exit}'); WIFI_COUNTRYCODE=${WIFI_COUNTRYCODE%:}
-		[[ $WIFI_COUNTRYCODE == "$wifi_country_code_target" ]] && return 0
-		G_WHIP_MSG "[FAILED] Country code \"$wifi_country_code_target\" could not been applied.\n\nPlease check the country code and try again.\n\nIf problems persist, this may be a limitation with the driver/chipset."
-		return 1
+			# Check if country code was successfully applied
+			WIFI_COUNTRYCODE=$(iw reg get | mawk '/country/{print $2;exit}'); WIFI_COUNTRYCODE=${WIFI_COUNTRYCODE%:}
+			[[ $WIFI_COUNTRYCODE == "$wifi_country_code_target" ]] && return 0
+			G_WHIP_MSG "[FAILED] Country code \"$wifi_country_code_target\" could not be applied.\n\nPlease check the country code and try again.\n\nIf problems persist, this may be a limitation with the driver/chipset."
+			return 1
+		else
+			# Apply for WiFi Hotspot only if CRDA is not available
+			WIFI_COUNTRYCODE=$wifi_country_code_target
+			G_CONFIG_INJECT 'country_code=' "country_code=$WIFI_COUNTRYCODE" /etc/hostapd/hostapd.conf
+			G_CONFIG_INJECT 'AUTO_SETUP_NET_WIFI_COUNTRY_CODE=' "AUTO_SETUP_NET_WIFI_COUNTRY_CODE=$WIFI_COUNTRYCODE" /boot/dietpi.txt
+		fi
 
 	}
 
@@ -2348,7 +2357,14 @@ NB: All Ethernet connections will be temporarily dropped!' && Network_ApplyChang
 		WIFI_SIGNALSTRENGTH=0
 		command -v hostapd &> /dev/null && WIFI_HOTSPOT=1 || WIFI_HOTSPOT=0
 		WIFI_COUNTRYCODE='Unknown'
-		command -v iw &> /dev/null && WIFI_COUNTRYCODE=$(iw reg get | mawk '/country/{print $2;exit}' | tr -d ':')
+		if command -v iw &> /dev/null && [[ -f '/lib/crda/crda' ]]
+		then
+			WIFI_COUNTRYCODE=$(iw reg get | mawk '/country/{print $2;exit}' | tr -d ':')
+
+		elif (( $WIFI_HOTSPOT ))
+		then
+			WIFI_COUNTRYCODE=$(sed -n '/^[[:blank:]]*country_code=/{s/^[^=]*=//p;q}' /etc/hostapd/hostapd.conf)
+		fi
 
 		# Convert CIDR integer to net mask, e.g. "192.168.0.100/24" (take "24") to "255.255.255.0"
 		cidr2mask()
@@ -2839,8 +2855,8 @@ NB: Auto-negotiation is highly recommended as long as you do not have issues wit
 		fi
 
 		G_WHIP_MENU_ARRAY+=('' '●─ Additional Options ')
-		# Country code: Not available from Debian Bookworm on: https://bugs.debian.org/1003903
-		if (( $G_DISTRO < 7 ))
+		# Country code: Not available from Debian Bookworm on and irrelevant from Linux 4.15 on, aside of for hostapd: https://bugs.debian.org/1003903
+		if (( $WIFI_HOTSPOT )) || [[ -f '/lib/crda/crda' ]]
 		then
 			if [[ $WIFI_COUNTRYCODE == '00' ]]
 			then
@@ -2851,14 +2867,11 @@ NB: Auto-negotiation is highly recommended as long as you do not have issues wit
 		fi
 
 		G_WHIP_MENU_ARRAY+=('' '●─ Toggle State ')
-		if (( $WIFI_HOTSPOT )); then
-
+		if (( $WIFI_HOTSPOT ))
+		then
 			G_WHIP_MENU_ARRAY+=('State' ": $hotspot_active_state_text")
-
 		else
-
 			G_WHIP_MENU_ARRAY+=('Disable' ': Disable WiFi adapter')
-
 		fi
 
 		G_WHIP_MENU_ARRAY+=('' '●─ Apply ')
@@ -2940,25 +2953,22 @@ NB: Auto-negotiation is highly recommended as long as you do not have issues wit
 
 				'Apply')
 
-					if (( $WIFI_HOTSPOT == 1 )); then
+					if (( $WIFI_HOTSPOT ))
+					then
+						# Update dietpi.txt
+						G_CONFIG_INJECT 'SOFTWARE_WIFI_HOTSPOT_SSID=' "SOFTWARE_WIFI_HOTSPOT_SSID=$HOTSPOT_SSID" /boot/dietpi.txt
+						G_CONFIG_INJECT 'SOFTWARE_WIFI_HOTSPOT_CHANNEL=' "SOFTWARE_WIFI_HOTSPOT_CHANNEL=$HOTSPOT_CHANNEL" /boot/dietpi.txt
+						G_CONFIG_INJECT 'SOFTWARE_WIFI_HOTSPOT_KEY=' "SOFTWARE_WIFI_HOTSPOT_KEY=$HOTSPOT_KEY" /boot/dietpi.txt
 
-						# - update dietpi.txt
-						sed -i "/SOFTWARE_WIFI_HOTSPOT_SSID=/c\SOFTWARE_WIFI_HOTSPOT_SSID=$HOTSPOT_SSID" /boot/dietpi.txt
-						sed -i "/SOFTWARE_WIFI_HOTSPOT_CHANNEL=/c\SOFTWARE_WIFI_HOTSPOT_CHANNEL=$HOTSPOT_CHANNEL" /boot/dietpi.txt
-						sed -i "/SOFTWARE_WIFI_HOTSPOT_KEY=/c\SOFTWARE_WIFI_HOTSPOT_KEY=$HOTSPOT_KEY" /boot/dietpi.txt
+						# Update hostapd.conf
+						G_CONFIG_INJECT 'ssid=' "ssid=$HOTSPOT_SSID" /etc/hostapd/hostapd.conf
+						G_CONFIG_INJECT 'channel=' "channel=$HOTSPOT_CHANNEL" /etc/hostapd/hostapd.conf
+						G_CONFIG_INJECT 'wpa_passphrase=' "wpa_passphrase=$HOTSPOT_KEY" /etc/hostapd/hostapd.conf
 
-						# - update hostapd conf
-						sed -i "/ssid=/c\ssid=$HOTSPOT_SSID" /etc/hostapd/hostapd.conf
-						sed -i "/channel=/c\channel=$HOTSPOT_CHANNEL" /etc/hostapd/hostapd.conf
-						sed -i "/wpa_passphrase=/c\wpa_passphrase=$HOTSPOT_KEY" /etc/hostapd/hostapd.conf
-
-						# - Apply/Restart network
+						# Apply/Restart network
 						Network_ApplyChanges
-
 					else
-
 						Wifi_Reconnect
-
 					fi
 				;;
 
@@ -2974,14 +2984,11 @@ NB: Auto-negotiation is highly recommended as long as you do not have issues wit
 
 				'State')
 
-					if (( $hotspot_active_state )); then
-
+					if (( $hotspot_active_state ))
+					then
 						G_EXEC systemctl stop hostapd
-
 					else
-
 						G_EXEC systemctl start hostapd
-
 					fi
 				;;
 

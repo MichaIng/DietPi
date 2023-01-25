@@ -1443,7 +1443,8 @@ _EOF_
 
 		# Use country code from command input: https://en.wikipedia.org/wiki/ISO_3166-1_alpha-2
 		INPUT_DEVICE_VALUE=${INPUT_DEVICE_VALUE^^} # Needs to be uppercase while all input is made lowercase (ToDo)
-		if (( $G_DISTRO > 6 ))
+		# - Not available from Debian Bookworm on and irrelevant from Linux 4.15 on: https://bugs.debian.org/1003903
+		if [[ ! -f '/lib/crda/crda' ]]
 		then
 			Unsupported_Input_Name
 
@@ -1451,6 +1452,9 @@ _EOF_
 		then
 			# Update /etc/default/crda to apply country code via udev rules
 			G_CONFIG_INJECT 'REGDOMAIN=' "REGDOMAIN=$INPUT_DEVICE_VALUE" /etc/default/crda || EXIT_CODE=1
+
+			# Apply to hostapd if installed
+			[[ ! -f '/etc/hostapd/hostapd.conf' ]] || G_CONFIG_INJECT 'country_code=' "country_code=$INPUT_DEVICE_VALUE" /etc/hostapd/hostapd.conf || EXIT_CODE=1
 
 			# Apply country code now
 			G_EXEC_NOHALT=1 G_EXEC iw reg set "$INPUT_DEVICE_VALUE" || EXIT_CODE=1
@@ -1466,33 +1470,42 @@ _EOF_
 	#/////////////////////////////////////////////////////////////////////////////////////
 	# serialconsole
 	#/////////////////////////////////////////////////////////////////////////////////////
-	Serial_Main(){
-
+	Serial_Main()
+	{
 		#-------------------------------------------------------------------------------------
 		# Enable
-		if [[ $INPUT_DEVICE_VALUE == 'enable' ]]; then
-
+		if [[ $INPUT_DEVICE_VALUE == 'enable' ]]
+		then
 			# Enable for specific Serial/UART device
-			if [[ $INPUT_ADDITIONAL ]]; then
-
+			if [[ $INPUT_ADDITIONAL ]]
+			then
 				# RPi: Warn if on RPi ttyAMA0 is about to be enabled while Bluetooth is up
-				if [[ $G_HW_MODEL == [0-9] && $INPUT_ADDITIONAL == 'ttyAMA0' ]] && systemctl -q is-active hciuart; then
-
-					G_WHIP_YESNO '[WARNING] ttyAMA0 is currently used by Bluetooth\n
-Do you want to continue and DISABLE Bluetooth now?' || return 1
+				if [[ $G_HW_MODEL == [0-9] && $INPUT_ADDITIONAL == 'ttyAMA0' ]] && systemctl -q is-active hciuart
+				then
+					G_WHIP_YESNO '[WARNING] ttyAMA0 is currently used by Bluetooth\n\nDo you want to continue and DISABLE Bluetooth now?' || return 1
 					INPUT_DEVICE_VALUE='disable' Bluetooth_Main
-
 				fi
 
-				# Enable boot messages depending on device
-				# - RPi
-				if (( $G_HW_MODEL < 10 )); then
+				G_DIETPI-NOTIFY 2 "Enabling serial-getty on: /dev/$INPUT_ADDITIONAL"
+				G_EXEC systemctl unmask "serial-getty@$INPUT_ADDITIONAL"
+				G_EXEC systemctl enable "serial-getty@$INPUT_ADDITIONAL"
+				# Start now if device (already) exists
+				[[ -e /dev/$INPUT_ADDITIONAL ]] && G_EXEC systemctl start "serial-getty@$INPUT_ADDITIONAL"
 
+				# Allow root login on selected TTY if not enabled by default. This file has been removed with Debian Bullseye and is not respected by its default PAM rules.
+				(( $G_DISTRO < 6 )) && G_CONFIG_INJECT "$INPUT_ADDITIONAL" "$INPUT_ADDITIONAL" /etc/securetty
+
+				# Enable boot messages depending on device
+				# - Skip on USB getget serial device, which requires loading a kernel module first and hence cannot be used for boot outputs
+				[[ $INPUT_ADDITIONAL == 'ttyGS'[0-9] ]] && return 0
+				# - RPi
+				if (( $G_HW_MODEL < 10 ))
+				then
 					grep -q "console=$INPUT_ADDITIONAL" /boot/cmdline.txt || sed -i "/root=/s/[[:blank:]]*$/ console=$INPUT_ADDITIONAL,115200/" /boot/cmdline.txt
 
 				# - Odroid C1/C2 legacy
-				elif [[ $G_HW_MODEL == 1[02] && -f '/boot/boot.ini' ]]; then
-
+				elif [[ $G_HW_MODEL == 1[02] && -f '/boot/boot.ini' ]]
+				then
 					local old firstline='ODROIDC2-UBOOT-CONFIG'
 					(( $G_HW_MODEL == 10 )) && firstline='ODROIDC-UBOOT-CONFIG'
 					old=$(grep -Em1 '^[[:blank:]]*setenv[[:blank:]]+condev[[:blank:]]' /boot/boot.ini) || return 0
@@ -1501,8 +1514,8 @@ Do you want to continue and DISABLE Bluetooth now?' || return 1
 					G_CONFIG_INJECT 'setenv[[:blank:]]+condev[[:blank:]]' "setenv condev \"$old console=$INPUT_ADDITIONAL,115200n8\"" /boot/boot.ini "$firstline"
 
 				# - Odroid XU4 legacy
-				elif [[ $G_HW_MODEL == 11 && -f '/boot/boot.ini' ]]; then
-
+				elif [[ $G_HW_MODEL == 11 && -f '/boot/boot.ini' ]]
+				then
 					local old=
 					old=$(grep -Em1 '^[[:blank:]]*setenv[[:blank:]]+bootrootfs[[:blank:]]' /boot/boot.ini) || return 0
 					[[ $old == *"console=$INPUT_ADDITIONAL"* ]] && return 0
@@ -1510,10 +1523,10 @@ Do you want to continue and DISABLE Bluetooth now?' || return 1
 					G_CONFIG_INJECT 'setenv[[:blank:]]+bootrootfs[[:blank:]]' "setenv bootrootfs \"$old console=$INPUT_ADDITIONAL,115200n8\"" /boot/boot.ini 'ODROIDXU-UBOOT-CONFIG'
 
 				# - dietpiEnv.txt, Quartz64, NanoPi R5S, NanoPi R6S
-				elif (( $DIETPIENV || $G_HW_MODEL == 49 || $G_HW_MODEL == 76 || $G_HW_MODEL == 79 )); then
-
+				elif (( $DIETPIENV || $G_HW_MODEL == 49 || $G_HW_MODEL == 76 || $G_HW_MODEL == 79 ))
+				then
 					local baudrate='115200'
-					if [[ $G_HW_MODEL =~ ^(42|43|46|47|49|55|56|58|68|72|73|77|78|80) && $INPUT_ADDITIONAL == 'ttyS2' ]] || [[ $G_HW_MODEL =~ ^(76|79)$ && $INPUT_ADDITIONAL == 'ttyFIQ0' ]]
+					if [[ $G_HW_MODEL =~ ^(42|43|46|47|49|55|56|58|68|72|77|78|80)$ && $INPUT_ADDITIONAL == 'ttyS2' ]] || [[ $G_HW_MODEL == 73 && $INPUT_ADDITIONAL == 'ttyS'[012] ]] || [[ $G_HW_MODEL =~ ^(76|79)$ && $INPUT_ADDITIONAL == 'ttyFIQ0' ]]
 					then
 						baudrate='1500000'
 						[[ -d /etc/systemd/system/serial-getty@$INPUT_ADDITIONAL.service.d ]] || G_EXEC mkdir "/etc/systemd/system/serial-getty@$INPUT_ADDITIONAL.service.d"
@@ -1527,25 +1540,15 @@ _EOF_
 					(( $DIETPIENV )) && ! grep -q "^consoleargs=.*console=$INPUT_ADDITIONAL" "$FP_UENV" && sed -i "/^consoleargs=/s/[[:blank:]]*$/ console=$INPUT_ADDITIONAL,$baudrate/" "$FP_UENV"
 
 				# - Armbian: armbianEnv.txt only allows to toggle a fixed serial console depending on device
-				elif (( $ARMBIAN )) && grep -q "console=$INPUT_ADDITIONAL" /boot/boot.*; then
-
+				elif (( $ARMBIAN )) && grep -q "console=$INPUT_ADDITIONAL" /boot/boot.*
+				then
 					if grep -qE 'console=(display|both)' "$FP_UENV"
 					then
 						G_CONFIG_INJECT 'console=' 'console=both' "$FP_UENV"
 					else
 						G_CONFIG_INJECT 'console=' 'console=serial' "$FP_UENV"
 					fi
-
 				fi
-
-				G_DIETPI-NOTIFY 2 "Enabling serial-getty on: /dev/$INPUT_ADDITIONAL"
-				G_EXEC systemctl unmask "serial-getty@$INPUT_ADDITIONAL"
-				G_EXEC systemctl enable "serial-getty@$INPUT_ADDITIONAL"
-				# Start now if device (already) exists
-				[[ -e /dev/$INPUT_ADDITIONAL ]] && G_EXEC systemctl start "serial-getty@$INPUT_ADDITIONAL"
-
-				# Allow root login on selected TTY if not enabled by default. This file has been removed with Debian Bullseye and is not respected by its default PAM rules.
-				(( $G_DISTRO < 6 )) && G_CONFIG_INJECT "$INPUT_ADDITIONAL" "$INPUT_ADDITIONAL" /etc/securetty
 
 			# Enable for all detected Serial/UART devices
 			else
@@ -1564,11 +1567,11 @@ _EOF_
 
 		#-------------------------------------------------------------------------------------
 		# Disable
-		elif [[ $INPUT_DEVICE_VALUE == 'disable' ]]; then
-
+		elif [[ $INPUT_DEVICE_VALUE == 'disable' ]]
+		then
 			# Disable for specific Serial/UART device
-			if [[ $INPUT_ADDITIONAL ]]; then
-
+			if [[ $INPUT_ADDITIONAL ]]
+			then
 				G_DIETPI-NOTIFY 2 "Disabling serial-getty on: /dev/$INPUT_ADDITIONAL"
 				G_EXEC systemctl unmask "serial-getty@$INPUT_ADDITIONAL"
 				# Stop getty only if not currently attached, failsafe estimation in case of symlinks
@@ -1582,32 +1585,31 @@ _EOF_
 
 				# Disable boot messages depending on device
 				# - RPi
-				if (( $G_HW_MODEL < 10 )); then
-
+				if (( $G_HW_MODEL < 10 ))
+				then
 					sed -Ei "/root=/s/[[:blank:]]*console=${INPUT_ADDITIONAL}[^[:blank:]]*([[:blank:]]*$)?//g" /boot/cmdline.txt
 
 				# - Odroid C1/C2/XU4 legacy
-				elif [[ $G_HW_MODEL -le 12 && -f '/boot/boot.ini' ]]; then
-
+				elif [[ $G_HW_MODEL -le 12 && -f '/boot/boot.ini' ]]
+				then
 					sed -i "s/[[:blank:]]*console=${INPUT_ADDITIONAL}[^\"[:blank:]]*//g" /boot/boot.ini
 
-				# - dietpiEnv.txt and Quartz64
-				elif (( $DIETPIENV || $G_HW_MODEL == 49 )); then
-
+				# - dietpiEnv.txt, Quartz64, NanoPi R5S, NanoPi R6S
+				elif (( $DIETPIENV || $G_HW_MODEL == 49 || $G_HW_MODEL == 76 || $G_HW_MODEL == 79 ))
+				then
 					(( $DIETPIENV )) && grep -q "^consoleargs=.*console=$INPUT_ADDITIONAL" "$FP_UENV" && sed -Ei -e "/^consoleargs=/s/[[:blank:]]*console=${INPUT_ADDITIONAL}[^[:blank:]]*([[:blank:]]*$)?//g" -e 's/^consoleargs=[[:blank:]]+/consoleargs=/' "$FP_UENV"
 					[[ -f /etc/systemd/system/serial-getty@$INPUT_ADDITIONAL.service.d/dietpi-baudrate.conf ]] && G_EXEC rm "/etc/systemd/system/serial-getty@$INPUT_ADDITIONAL.service.d/dietpi-baudrate.conf"
 					[[ -d /etc/systemd/system/serial-getty@$INPUT_ADDITIONAL.service.d ]] && G_EXEC rmdir --ignore-fail-on-non-empty "/etc/systemd/system/serial-getty@$INPUT_ADDITIONAL.service.d"
 
 				# - Armbian: armbianEnv.txt only allows to toggle a fixed serial console depending on device
-				elif (( $ARMBIAN )) && grep -q "console=$INPUT_ADDITIONAL" /boot/boot.*; then
-
+				elif (( $ARMBIAN )) && grep -q "console=$INPUT_ADDITIONAL" /boot/boot.*
+				then
 					if grep -qE 'console=(display|both)' "$FP_UENV"
 					then
 						G_CONFIG_INJECT 'console=' 'console=display' "$FP_UENV"
 					else
 						G_CONFIG_INJECT 'console=' 'console=none' "$FP_UENV"
 					fi
-
 				fi
 
 			# Disable for all detected Serial/UART devices
@@ -1632,13 +1634,9 @@ _EOF_
 				# Update dietpi.txt global var
 				G_CONFIG_INJECT 'CONFIG_SERIAL_CONSOLE_ENABLE=' 'CONFIG_SERIAL_CONSOLE_ENABLE=0' /boot/dietpi.txt
 			fi
-
 		else
-
 			Unknown_Input_Mode
-
 		fi
-
 	}
 
 	#/////////////////////////////////////////////////////////////////////////////////////
