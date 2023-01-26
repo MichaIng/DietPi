@@ -20,7 +20,7 @@ G_INIT
 declare -F G_EXEC > /dev/null || G_EXEC(){ G_RUN_CMD "$@"; }
 
 # v7.0: Update Jellyfin APT repo key: https://dietpi.com/phpbb/viewtopic.php?t=8703
-if [[ -f '/etc/apt/trusted.gpg.d/dietpi-jellyfin.gpg' && $(date -u '+%Y%m%d' -r '/etc/apt/trusted.gpg.d/dietpi-jellyfin.gpg') -lt 20201216 ]]
+if (( $G_DIETPI_VERSION_CORE < 7 || ( $G_DIETPI_VERSION_CORE == 7 && $G_DIETPI_VERSION_SUB < 0 ) )) && [[ -f '/etc/apt/trusted.gpg.d/dietpi-jellyfin.gpg' ]] && (( $(date -u '+%Y%m%d' -r '/etc/apt/trusted.gpg.d/dietpi-jellyfin.gpg') < 20201216 ))
 then
 	G_DIETPI-NOTIFY 2 'Updating Jellyfin APT repo key'
 	G_EXEC curl -sSfLO 'https://repo.jellyfin.org/jellyfin_team.gpg.key'
@@ -28,17 +28,8 @@ then
 	G_EXEC rm jellyfin_team.gpg.key
 fi
 
-# v7.2: Update InfluxDB APT repo key: https://github.com/MichaIng/DietPi/issues/4341
-if [[ -f '/etc/apt/trusted.gpg.d/dietpi-influxdb.gpg' && $(date -u '+%Y%m%d' -r '/etc/apt/trusted.gpg.d/dietpi-influxdb.gpg') -lt 20210504 ]]
-then
-	G_DIETPI-NOTIFY 2 'Updating InfluxDB APT repo key'
-	G_EXEC curl -sSfLO 'https://repos.influxdata.com/influxdb.key'
-	G_EXEC gpg --dearmor -o /etc/apt/trusted.gpg.d/dietpi-influxdb.gpg --yes influxdb.key
-	G_EXEC rm influxdb.key
-fi
-
 # v7.2: Rename Bitwarden_RS into vaultwarden: https://github.com/MichaIng/DietPi/issues/4325
-if [[ -d '/mnt/dietpi_userdata/bitwarden_rs' ]]
+if (( $G_DIETPI_VERSION_CORE < 7 || ( $G_DIETPI_VERSION_CORE == 7 && $G_DIETPI_VERSION_SUB < 2 ) )) && [[ -d '/mnt/dietpi_userdata/bitwarden_rs' ]]
 then
 	G_WHIP_BUTTON_OK_TEXT='Continue'
 	G_WHIP_BUTTON_CANCEL_TEXT='Cancel'
@@ -56,7 +47,7 @@ then
 fi
 
 # v7.4
-if getent passwd debian-transmission > /dev/null && ! getent group debian-transmission > /dev/null
+if (( $G_DIETPI_VERSION_CORE < 7 || ( $G_DIETPI_VERSION_CORE == 7 && $G_DIETPI_VERSION_SUB < 4 ) )) && getent passwd debian-transmission > /dev/null && ! getent group debian-transmission > /dev/null
 then
 	G_DIETPI-NOTIFY 2 'Recreating the "debian-transmission" group for the "debian-transmission" user to prevent Transmission package upgrade issues: https://github.com/MichaIng/DietPi/issues/4244'
 	G_EXEC groupadd -r debian-transmission
@@ -64,19 +55,28 @@ then
 
 fi
 
+# v7.5: Perform Debian suite change once, if the installed APT version does not allow it by default yet
+if (( $G_DIETPI_VERSION_CORE < 7 || ( $G_DIETPI_VERSION_CORE == 7 && $G_DIETPI_VERSION_SUB < 5 ) )) && dpkg --compare-versions "$(dpkg-query -Wf '${VERSION}' apt)" lt 1.8.2.3
+then
+	G_DIETPI-NOTIFY 2 'Debian Bullseye has been released, so we accept the repository suite change once.'
+	G_EXEC apt-get -o 'Acquire::AllowReleaseInfoChange::Suite=true' -q update
+fi
+
 # v7.6
-if [[ $G_HW_MODEL -le 9 && -f '/etc/apt/preferences.d/dietpi-lxde' ]] && ! grep -q ' lx\*$' /etc/apt/preferences.d/dietpi-lxde
+if (( $G_DIETPI_VERSION_CORE < 7 || ( $G_DIETPI_VERSION_CORE == 7 && $G_DIETPI_VERSION_SUB < 6 ) )) && (( $G_HW_MODEL < 10 )) && [[ -f '/etc/apt/preferences.d/dietpi-lxde' ]] && ! grep -q ' lx\*$' /etc/apt/preferences.d/dietpi-lxde
 then
 	G_DIETPI-NOTIFY 2 'Updating the Raspberry Pi desktop package blocks'
 	G_EXEC sed -i '/^Package:/c\Package: openbox* obconf* libob* pcmanfm* libfm* gtk-* libgtk* libgail* gir1.2-gtk-* lx*' /etc/apt/preferences.d/dietpi-lxde
 fi
 
 # v7.7
-if (( $G_DIETPI_VERSION_CORE < 7 || ( $G_DIETPI_VERSION_CORE == 7 && $G_DIETPI_VERSION_SUB < 7 ) )) && [[ $G_HW_ARCH == 10 && $(findmnt -Ufnro FSTYPE -M /boot) == 'vfat' ]]
+if (( $G_DIETPI_VERSION_CORE < 7 || ( $G_DIETPI_VERSION_CORE == 7 && $G_DIETPI_VERSION_SUB < 7 ) ))
 then
-	G_DIETPI-NOTIFY 2 'Creating kernel upgrade hook to remove existing files from /boot FAT partition before installing the new files: https://github.com/MichaIng/DietPi/issues/4788'
-	G_EXEC mkdir -p /etc/kernel/preinst.d
-	cat << '_EOF_' > /etc/kernel/preinst.d/dietpi
+	if [[ $G_HW_ARCH == 10 && $(findmnt -Ufnro FSTYPE -M /boot) == 'vfat' ]]
+	then
+		G_DIETPI-NOTIFY 2 'Creating kernel upgrade hook to remove existing files from /boot FAT partition before installing the new files: https://github.com/MichaIng/DietPi/issues/4788'
+		G_EXEC mkdir -p /etc/kernel/preinst.d
+		cat << '_EOF_' > /etc/kernel/preinst.d/dietpi
 #!/bin/sh -e
 # Remove old kernel files if existing: https://github.com/MichaIng/DietPi/issues/4788
 {
@@ -93,12 +93,9 @@ do
 done
 }
 _EOF_
-	G_EXEC chmod +x /etc/kernel/preinst.d/dietpi
-fi
+		G_EXEC chmod +x /etc/kernel/preinst.d/dietpi
+	fi
 
-# v7.7
-if (( $G_DIETPI_VERSION_CORE < 7 || ( $G_DIETPI_VERSION_CORE == 7 && $G_DIETPI_VERSION_SUB < 7 ) ))
-then
 	G_DIETPI-NOTIFY 2 'Connecting to Mosquitto and Webmin repositories via plain HTTP once until latest OpenSSL has been installed: https://github.com/MichaIng/DietPi/issues/4795'
 	G_EXEC sed -Ei 's#https://(repo.mosquitto.org|download.webmin.com)#http://\1#' /etc/apt/sources.list
 	[[ $(find /etc/apt/sources.list/*.list 2> /dev/null) ]] && G_EXEC sed -Ei 's#https://(repo.mosquitto.org|download.webmin.com)#http://\1#' /etc/apt/sources.list.d/*.list
@@ -108,15 +105,8 @@ then
 	[[ -f '/etc/kernel/preinst.d/dietpi-initramfs_cleanup' && ! -x '/etc/kernel/preinst.d/dietpi-initramfs_cleanup' ]] && G_EXEC chmod +x /etc/kernel/preinst.d/dietpi-initramfs_cleanup
 fi
 
-# v7.5: Perform Debian suite change once, if the installed APT version does not allow it by default yet
-if (( $G_DIETPI_VERSION_CORE < 7 || ( $G_DIETPI_VERSION_CORE == 7 && $G_DIETPI_VERSION_SUB < 5 ) )) && dpkg --compare-versions "$(dpkg-query -Wf '${VERSION}' apt)" lt 1.8.2.3
-then
-	G_DIETPI-NOTIFY 2 'Debian Bullseye has been released, so we accept the repository suite change once.'
-	G_EXEC apt-get -o 'Acquire::AllowReleaseInfoChange::Suite=true' -q update
-fi
-
 # v8.0: ARMv6: Remove Mosquitto repository: https://github.com/MichaIng/DietPi/issues/5140
-if (( $G_HW_ARCH == 1 )) && (( $G_DIETPI_VERSION_CORE < 8 || ( $G_DIETPI_VERSION_CORE == 8 && $G_DIETPI_VERSION_SUB < 0 ) )) && [[ -f '/etc/apt/sources.list.d/dietpi-mosquitto.list' ]]
+if (( $G_DIETPI_VERSION_CORE < 8 || ( $G_DIETPI_VERSION_CORE == 8 && $G_DIETPI_VERSION_SUB < 0 ) )) && (( $G_HW_ARCH == 1 )) && [[ -f '/etc/apt/sources.list.d/dietpi-mosquitto.list' ]]
 then
 	G_DIETPI-NOTIFY 2 'Removing Mosquitto APT repository as the latest builds are not compatible with ARMv6: https://github.com/MichaIng/DietPi/issues/5140'
 	G_EXEC rm /etc/apt/sources.list.d/dietpi-mosquitto.list
@@ -124,21 +114,24 @@ then
 fi
 
 # v8.2: Remove immutable flag from MS VSCode repo and key, when present, else the "raspberrypi-sys-mods" package and our own patch cannot remove them: https://github.com/MichaIng/DietPi/issues/5267
-if (( $G_HW_MODEL < 10 )) && (( $G_DIETPI_VERSION_CORE < 8 || ( $G_DIETPI_VERSION_CORE == 8 && $G_DIETPI_VERSION_SUB < 2 ) ))
+if (( $G_DIETPI_VERSION_CORE < 8 || ( $G_DIETPI_VERSION_CORE == 8 && $G_DIETPI_VERSION_SUB < 2 ) ))
 then
-	[[ -f '/etc/apt/trusted.gpg.d/microsoft.gpg' && $(lsattr /etc/apt/trusted.gpg.d/microsoft.gpg 2> /dev/null) == *'i'* ]] && G_EXEC chattr -i /etc/apt/trusted.gpg.d/microsoft.gpg
-	[[ -f '/etc/apt/sources.list.d/vscode.list' && $(lsattr /etc/apt/sources.list.d/vscode.list 2> /dev/null) == *'i'* ]] && G_EXEC chattr -i /etc/apt/sources.list.d/vscode.list
+	if (( $G_HW_MODEL < 10 ))
+	then
+		[[ -f '/etc/apt/trusted.gpg.d/microsoft.gpg' && $(lsattr /etc/apt/trusted.gpg.d/microsoft.gpg 2> /dev/null) == *'i'* ]] && G_EXEC chattr -i /etc/apt/trusted.gpg.d/microsoft.gpg
+		[[ -f '/etc/apt/sources.list.d/vscode.list' && $(lsattr /etc/apt/sources.list.d/vscode.list 2> /dev/null) == *'i'* ]] && G_EXEC chattr -i /etc/apt/sources.list.d/vscode.list
+	fi
+
+	# https://github.com/MichaIng/DietPi/commit/c52e812
+	# shellcheck disable=SC2016
+	if grep -q 'chmod -R g-w "DietPi-\$G_GITBRANCH"' /boot/dietpi/dietpi-update
+	then
+		GITBRANCH_TARGET=$(sed -n '/^[[:blank:]]*DEV_GITBRANCH=/{s/^[^=]*=//p;q}' /boot/dietpi.txt)
+		[[ $GITBRANCH_TARGET == "$G_GITBRANCH" ]] || G_EXEC ln -s '/tmp/DietPi-Update/DietPi-'{"$GITBRANCH_TARGET","$G_GITBRANCH"}
+	fi
 fi
 
-# v8.2: https://github.com/MichaIng/DietPi/commit/c52e812
-# shellcheck disable=SC2016
-if (( $G_DIETPI_VERSION_CORE < 8 || ( $G_DIETPI_VERSION_CORE == 8 && $G_DIETPI_VERSION_SUB < 2 ) )) && grep -q 'chmod -R g-w "DietPi-\$G_GITBRANCH"' /boot/dietpi/dietpi-update
-then
-	GITBRANCH_TARGET=$(sed -n '/^[[:blank:]]*DEV_GITBRANCH=/{s/^[^=]*=//p;q}' /boot/dietpi.txt)
-	[[ $GITBRANCH_TARGET == "$G_GITBRANCH" ]] || G_EXEC ln -s '/tmp/DietPi-Update/DietPi-'{"$GITBRANCH_TARGET","$G_GITBRANCH"}
-fi
-
-# v8.4/v8.5: https://github.com/MichaIng/DietPi/issues/5467
+# v8.5: https://github.com/MichaIng/DietPi/issues/5467
 if (( $G_DIETPI_VERSION_CORE < 8 || ( $G_DIETPI_VERSION_CORE == 8 && $G_DIETPI_VERSION_SUB < 5 ) )) && (( $G_DISTRO > 5 )) && dpkg-query -s systemd-timesyncd &> /dev/null && [[ $(apt-mark showauto systemd-timesyncd) ]]
 then
 	G_DIETPI-NOTIFY 2 'Marking systemd-timesyncd as manually installed to prevent its autoremoval'
@@ -181,7 +174,7 @@ fi
 # v8.13
 if (( $G_DIETPI_VERSION_CORE < 8 || ( $G_DIETPI_VERSION_CORE == 8 && $G_DIETPI_VERSION_SUB < 13 ) ))
 then
-	if [[ -f '/etc/apt/trusted.gpg.d/dietpi-mympd.gpg' && $(date -u '+%Y%m%d' -r '/etc/apt/trusted.gpg.d/dietpi-mympd.gpg') -lt 20221223 ]]
+	if [[ -f '/etc/apt/trusted.gpg.d/dietpi-mympd.gpg' ]] && (( $(date -u '+%Y%m%d' -r '/etc/apt/trusted.gpg.d/dietpi-mympd.gpg') < 20221223 ))
 	then
 		G_DIETPI-NOTIFY 2 'Updating myMPD APT repo key'
 		# Distro: https://download.opensuse.org/repositories/home:/jcorporation/
@@ -201,12 +194,29 @@ then
 		G_EXEC gpg --dearmor -o /etc/apt/trusted.gpg.d/dietpi-mympd.gpg --yes Release.key
 		G_EXEC rm Release.key
 	fi
-	if [[ -f '/etc/apt/trusted.gpg.d/dietpi-grafana.gpg' && $(date -u '+%Y%m%d' -r '/etc/apt/trusted.gpg.d/dietpi-grafana.gpg') -lt 20230113 ]]
+	if [[ -f '/etc/apt/trusted.gpg.d/dietpi-grafana.gpg' ]] && (( $(date -u '+%Y%m%d' -r '/etc/apt/trusted.gpg.d/dietpi-grafana.gpg') < 20230113 ))
 	then
 		G_DIETPI-NOTIFY 2 'Updating Grafana APT repo key'
 		G_EXEC curl -sSfLO 'https://apt.grafana.com/gpg.key'
 		G_EXEC gpg --dearmor -o /etc/apt/trusted.gpg.d/dietpi-grafana.gpg --yes gpg.key
 		G_EXEC rm gpg.key
+	fi
+fi
+
+# v8.14: Update InfluxDB APT repo key: https://github.com/influxdata/influxdb/pull/24061
+if (( $G_DIETPI_VERSION_CORE < 8 || ( $G_DIETPI_VERSION_CORE == 8 && $G_DIETPI_VERSION_SUB < 14 ) ))
+then
+	if [[ -f '/etc/apt/trusted.gpg.d/dietpi-influxdb.gpg' ]] && (( $(date -u '+%Y%m%d' -r '/etc/apt/trusted.gpg.d/dietpi-influxdb.gpg') < 20230127 ))
+	then
+		G_DIETPI-NOTIFY 2 'Updating InfluxDB APT repo key'
+		G_EXEC curl -sSfLO 'https://repos.influxdata.com/influxdata-archive_compat.key'
+		G_EXEC gpg --dearmor -o /etc/apt/trusted.gpg.d/dietpi-influxdb.gpg --yes influxdata-archive_compat.key
+		G_EXEC rm influxdata-archive_compat.key
+	fi
+	if (( $G_DISTRO > 6 )) && [[ -f '/etc/apt/sources.list.d/dietpi-jellyfin.list' ]] && grep -q 'bullseye' /etc/apt/sources.list.d/dietpi-jellyfin.list
+	then
+		G_DIETPI-NOTIFY 2 'Updating Jellyfin APT repo suite'
+		G_EXEC sed -i 's/bullseye/bookworm/' /etc/apt/sources.list.d/dietpi-jellyfin.list
 	fi
 fi
 
