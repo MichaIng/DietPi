@@ -10,7 +10,8 @@
 # - Workaround for CI on Buster: Mask Avahi daemon service, since it can fail to start, failing the package install
 (( $G_DISTRO == 5 )) && G_EXEC systemctl mask avahi-daemon
 G_AGUP
-G_AGDUG automake pkg-config make g++ libpopt-dev libconfig-dev libssl-dev libsoxr-dev libavahi-client-dev libasound2-dev libglib2.0-dev libmosquitto-dev avahi-daemon git libplist-dev libsodium-dev libgcrypt20-dev libavformat-dev xxd
+G_AGDUG
+G_AGI automake pkg-config make g++ libpopt-dev libconfig-dev libssl-dev libsoxr-dev libavahi-client-dev libasound2-dev libglib2.0-dev libmosquitto-dev avahi-daemon git libplist-dev libsodium-dev libgcrypt20-dev libavformat-dev xxd
 (( $G_DISTRO == 5 )) && G_EXEC systemctl unmask avahi-daemon
 
 # Download

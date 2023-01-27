@@ -17,7 +17,8 @@ adeps=('libdrm2' 'libgl1-mesa-dri' 'libgbm1' 'libegl1' 'libudev1' 'libxml2' 'lib
 (( $G_HW_ARCH == 10 )) && opengl_flags=('--disable-video-opengles2' '--enable-video-opengl') adeps_build+=('libgl1-mesa-dev') adeps+=('libgl1') || opengl_flags=('--enable-video-opengles2' '--disable-video-opengl') adeps_build+=('libgles2-mesa-dev') adeps+=('libgles2')
 
 G_AGUP
-G_AGDUG "${adeps_build[@]}"
+G_AGDUG
+G_AGI "${adeps_build[@]}"
 
 # Build libSDL2
 v_sdl='2.26.2'

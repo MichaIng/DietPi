@@ -7,7 +7,8 @@ adeps_build=('gcc' 'libc6-dev' 'pkg-config' 'libssl-dev' 'git')
 adeps=('libc6' 'openssl')
 (( $G_DISTRO > 6 )) && adeps+=('libssl3') || adeps+=('libssl1.1')
 G_AGUP
-G_AGDUG "${adeps_build[@]}"
+G_AGDUG
+G_AGI "${adeps_build[@]}"
 
 # Install Rust via https://rustup.rs/
 # - ARMv7: Needs to be installed in tmpfs, else builds fail in emulated 32-bit ARM environments: https://github.com/rust-lang/cargo/issues/8719
