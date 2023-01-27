@@ -127,6 +127,8 @@ Documentation=https://github.com/BlitterStudio/amiberry/wiki
 [Service]
 WorkingDirectory=/mnt/dietpi_userdata/amiberry
 Environment=LD_LIBRARY_PATH=/mnt/dietpi_userdata/amiberry/lib
+StandardInput=tty
+TTYPath=/dev/tty3
 ExecStartPre=/bin/chvt 3
 ExecStart=/mnt/dietpi_userdata/amiberry/amiberry
 ExecStopPost=/bin/chvt 1
@@ -184,7 +186,7 @@ grep -q 'raspbian' /etc/os-release && DEPS_APT_VERSIONED=$(sed 's/+rp[it][0-9]\+
 # - control
 cat << _EOF_ > "$DIR/DEBIAN/control"
 Package: amiberry
-Version: $v_ami-dietpi1
+Version: $v_ami-dietpi2
 Architecture: $(dpkg --print-architecture)
 Maintainer: MichaIng <micha@dietpi.com>
 Date: $(date -u '+%a, %d %b %Y %T %z')
