@@ -1,15 +1,13 @@
 {
 . /boot/dietpi/func/dietpi-globals || exit 1
 
-G_AGUP
-G_AGDUG
-
 # APT dependencies: https://github.com/dani-garcia/vaultwarden/wiki/Building-binary#dependencies
 adeps_build=('gcc' 'libc6-dev' 'pkg-config' 'libssl-dev' 'git')
 #(( $G_HW_ARCH == 3 )) && adeps_build+=('git')
 adeps=('libc6' 'openssl')
 (( $G_DISTRO > 6 )) && adeps+=('libssl3') || adeps+=('libssl1.1')
-G_AGI "${adeps_build[@]}"
+G_AGUP
+G_AGDUG "${adeps_build[@]}"
 
 # Install Rust via https://rustup.rs/
 # - ARMv7: Needs to be installed in tmpfs, else builds fail in emulated 32-bit ARM environments: https://github.com/rust-lang/cargo/issues/8719
@@ -227,8 +225,9 @@ _EOF_
 G_CONFIG_INJECT 'Installed-Size: ' "Installed-Size: $(du -sk "$DIR" | mawk '{print $1}')" "$DIR/DEBIAN/control"
 
 # Build DEB package
-[[ -f $DIR.deb ]] && G_EXEC rm -R "$DIR.deb"
 G_EXEC_OUTPUT=1 G_EXEC dpkg-deb -b "$DIR"
+
+# Cleanup
 G_EXEC rm -R "$DIR"
 
 exit 0

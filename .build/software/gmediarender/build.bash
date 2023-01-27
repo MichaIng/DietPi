@@ -2,11 +2,9 @@
 {
 . /boot/dietpi/func/dietpi-globals
 
-G_AGUP
-G_AGDUG
-
 # Build deps
-G_AGI automake pkg-config gcc libc6-dev make libgstreamer1.0-dev libupnp-dev gstreamer1.0-alsa gstreamer1.0-libav gstreamer1.0-plugins-good gstreamer1.0-plugins-bad gstreamer1.0-plugins-ugly
+G_AGUP
+G_AGDUG automake pkg-config gcc libc6-dev make libgstreamer1.0-dev libupnp-dev gstreamer1.0-alsa gstreamer1.0-libav gstreamer1.0-plugins-good gstreamer1.0-plugins-bad gstreamer1.0-plugins-ugly
 
 # Download
 version='0.0.9' # https://github.com/hzeller/gmrender-resurrect/releases
@@ -179,8 +177,9 @@ _EOF_
 G_CONFIG_INJECT 'Installed-Size: ' "Installed-Size: $(du -sk "$DIR" | mawk '{print $1}')" "$DIR/DEBIAN/control"
 
 # Build DEB package
-[[ -f $DIR.deb ]] && G_EXEC rm -R "$DIR.deb"
 G_EXEC_OUTPUT=1 G_EXEC dpkg-deb -b "$DIR"
+
+# Cleanup
 G_EXEC rm -R "$DIR"
 
 exit 0

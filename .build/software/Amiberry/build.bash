@@ -17,8 +17,7 @@ adeps=('libdrm2' 'libgl1-mesa-dri' 'libgbm1' 'libegl1' 'libudev1' 'libxml2' 'lib
 (( $G_HW_ARCH == 10 )) && opengl_flags=('--disable-video-opengles2' '--enable-video-opengl') adeps_build+=('libgl1-mesa-dev') adeps+=('libgl1') || opengl_flags=('--enable-video-opengles2' '--disable-video-opengl') adeps_build+=('libgles2-mesa-dev') adeps+=('libgles2')
 
 G_AGUP
-G_AGDUG
-G_AGI "${adeps_build[@]}"
+G_AGDUG "${adeps_build[@]}"
 
 # Build libSDL2
 v_sdl='2.26.2'
@@ -204,9 +203,10 @@ _EOF_
 G_CONFIG_INJECT 'Installed-Size: ' "Installed-Size: $(du -sk "$DIR" | mawk '{print $1}')" "$DIR/DEBIAN/control"
 
 # Build DEB package
-G_EXEC rm -Rf "$DIR.deb"
 G_EXEC_OUTPUT=1 G_EXEC dpkg-deb -b "$DIR"
-G_EXEC rm -Rf "$DIR"
+
+# Cleanup
+G_EXEC rm -R "$DIR"
 
 exit 0
 }
