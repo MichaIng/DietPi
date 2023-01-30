@@ -245,8 +245,8 @@ _EOF_
 			# Apply global SSID/keys from dietpi.txt to wpa_supplicant
 			/boot/dietpi/func/dietpi-wifidb 1
 
-			# Set WiFi country code: Not available from Debian Bookworm on and irrelevant from Linux 4.15 on: https://bugs.debian.org/1003903
-			[[ -f '/lib/crda/crda' ]] && /boot/dietpi/func/dietpi-set_hardware wificountrycode "$(sed -n '/^[[:blank:]]*AUTO_SETUP_NET_WIFI_COUNTRY_CODE=/{s/^[^=]*=//p;q}' /boot/dietpi.txt)"
+			# Set WiFi country code
+			/boot/dietpi/func/dietpi-set_hardware wificountrycode
 
 		# - Ethernet
 		elif (( $ethernet_enabled )); then
