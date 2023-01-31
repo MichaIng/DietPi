@@ -2011,13 +2011,13 @@ Current setting: $user_frequency_min_text" && G_CONFIG_INJECT 'CONFIG_CPU_MIN_FR
 
 	Network_Restart()
 	{
-		# Stop all services (required for hotspot)
-		/boot/dietpi/dietpi-services stop
+		# Stop WiFi hotspot
+		G_EXEC systemctl stop hostapd isc-dhcp-server
 
 		# Enable/Disable WiFi modules
 		/boot/dietpi/func/dietpi-set_hardware wifimodules $(( ! $WIFI_DISABLED ))
 
-		(( $WIFI_DISABLED )) && G_WHIP_BUTTON_CANCEL_TEXT='Skip' G_WHIP_YESNO 'Would you like to purge all WiFi related APT packages?
+		(( $WIFI_DISABLED )) && [[ $(dpkg-query -s 'iw' 'wireless-tools' 'wpasupplicant' 'wireless-regdb' 'crda' 2> /dev/null) ]] && G_WHIP_BUTTON_CANCEL_TEXT='Skip' G_WHIP_YESNO 'Would you like to purge all WiFi related APT packages?
  \nThis will free up space, but an internet-capable Ethernet connection is required to re-enable WiFi functionality.
  \nAffected packages: iw wireless-tools wpasupplicant wireless-regdb crda' && G_AGP 'iw' 'wireless-tools' 'wpasupplicant' 'wireless-regdb' 'crda'
 
@@ -2037,8 +2037,8 @@ Current setting: $user_frequency_min_text" && G_CONFIG_INJECT 'CONFIG_CPU_MIN_FR
 		(( $ETH_DISABLED == 0 )) && ifup "$ETH_DEV_IFACE" --force
 		(( $WIFI_DISABLED == 0 )) && ifup "$WIFI_DEV_IFACE" --force
 
-		# Restart all services (required for hotspot)
-		/boot/dietpi/dietpi-services start
+		# Start WiFi hotspot
+		G_EXEC systemctl start isc-dhcp-server hostapd
 
 		# Add a little delay to ensure all network device data are updated (eg: SSID current takes a little longer)
 		G_DIETPI-NOTIFY 2 'Reloading networking data, please wait...'
@@ -2126,8 +2126,9 @@ netmask 255.255.255.0
 #dns-nameservers 9.9.9.9 149.112.112.112
 wireless-power off
 
-# IP tables
+# iptables NAT rules
 up iptables-restore < /etc/iptables.ipv4.nat
+up ip6tables-restore < /etc/iptables.ipv6.nat
 _EOF_
 		# WiFi client
 		else
@@ -2276,8 +2277,9 @@ _EOF_
 				error="[FAILED] Invalid country code ($G_WHIP_RETURNED_VALUE)"
 			done
 		fi
+		WIFI_COUNTRYCODE=$G_WHIP_RETURNED_VALUE
 
-		/boot/dietpi/func/dietpi-set_hardware wificountrycode "$G_WHIP_RETURNED_VALUE"
+		/boot/dietpi/func/dietpi-set_hardware wificountrycode "$WIFI_COUNTRYCODE"
 	}
 
 	Wifi_Reconnect(){
@@ -2344,13 +2346,17 @@ NB: All Ethernet connections will be temporarily dropped!' && Network_ApplyChang
 		WIFI_SIGNALSTRENGTH=0
 		command -v hostapd &> /dev/null && WIFI_HOTSPOT=1 || WIFI_HOTSPOT=0
 		WIFI_COUNTRYCODE='Unknown'
-		if command -v iw &> /dev/null && [[ -f '/lib/crda/crda' ]]
-		then
-			WIFI_COUNTRYCODE=$(iw reg get | mawk '/country/{print $2;exit}' | tr -d ':')
-
-		elif (( $WIFI_HOTSPOT ))
+		if (( $WIFI_HOTSPOT ))
 		then
 			WIFI_COUNTRYCODE=$(sed -n '/^[[:blank:]]*country_code=/{s/^[^=]*=//p;q}' /etc/hostapd/hostapd.conf)
+
+		elif [[ -f '/lib/crda/crda' ]]
+		then
+			WIFI_COUNTRYCODE=$(sed -n '/^[[:blank:]]*REGDOMAIN=/{s/^[^=]*=//p;q}' /etc/default/crda)
+
+		elif command -v iw &> /dev/null
+		then
+			WIFI_COUNTRYCODE=$(iw reg get | mawk -F[\ :] '/country/{print $2;exit}')
 		fi
 
 		# Convert CIDR integer to net mask, e.g. "192.168.0.100/24" (take "24") to "255.255.255.0"
