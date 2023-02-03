@@ -38,7 +38,7 @@ load ${devtype} ${devnum} ${fdt_addr_r} ${prefix}dtb/${fdtfile}
 fdt addr ${fdt_addr_r}
 
 # Apply DT overlays
-if test -n "${overlays}" || test -n "${user_overlays}"; then
+if test -n "${overlays}${user_overlays}"; then
 	fdt resize 65536
 	for overlay in ${overlays}; do
 		if load ${devtype} ${devnum} ${scriptaddr} ${prefix}dtb/${overlay_path}/overlay/${overlay_prefix}-${overlay}.dtbo; then
