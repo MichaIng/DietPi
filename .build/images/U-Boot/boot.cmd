@@ -63,9 +63,10 @@ if test -n "${overlays}${user_overlays}"; then
 			source ${scriptaddr}
 		fi
 		if test -e ${devtype} ${devnum} ${prefix}fixup.scr; then
-			load ${devtype} ${devnum} ${scriptaddr} ${prefix}fixup.scr
-			echo "Applying user provided fixup script fixup.scr"
-			source ${scriptaddr}
+			if load ${devtype} ${devnum} ${scriptaddr} ${prefix}fixup.scr; then
+				echo "Applying user provided fixup script fixup.scr"
+				source ${scriptaddr}
+			fi
 		fi
 	fi
 fi
