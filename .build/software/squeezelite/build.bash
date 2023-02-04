@@ -2,10 +2,9 @@
 {
 . /boot/dietpi/func/dietpi-globals
 
+# Build deps
 G_AGUP
 G_AGDUG
-
-# Build deps
 G_AGI make gcc libc6-dev libasound2-dev libflac-dev libmad0-dev libvorbis-dev libmpg123-dev libavformat-dev libsoxr-dev liblirc-dev libfaad-dev libssl-dev libopus-dev
 
 # Runtime deps
@@ -29,33 +28,28 @@ G_EXEC strip --remove-section=.comment --remove-section=.note squeezelite
 
 G_DIETPI-NOTIFY 2 'Starting packaging...'
 
-# - Obtain DEB dependency versions
-DEPS_APT_VERSIONED=
-for i in "${adeps[@]}"
-do
-	DEPS_APT_VERSIONED+=" $i (>= $(dpkg-query -Wf '${VERSION}' "$i")),"
-done
-DEPS_APT_VERSIONED=${DEPS_APT_VERSIONED%,}
-# shellcheck disable=SC2001
-grep -q 'raspbian' /etc/os-release && DEPS_APT_VERSIONED=$(sed 's/+rp[it][0-9]\+[^)]*)/)/g' <<< "$DEPS_APT_VERSIONED") || DEPS_APT_VERSIONED=$(sed 's/+b[0-9]\+)/)/g' <<< "$DEPS_APT_VERSIONED")
-
 # Package dir
 G_EXEC cd /tmp
 grep -q 'raspbian' /etc/os-release && DIR='squeezelite_armv6l' || DIR="squeezelite_$G_HW_ARCH_NAME"
 G_EXEC rm -Rf "$DIR"
 G_EXEC mkdir -p "$DIR/"{DEBIAN,lib/systemd/system,etc/default,usr/{bin,share/doc/squeezelite,share/man/man1}}
+
 # - Binary
 G_EXEC cp squeezelite-master/squeezelite "$DIR/usr/bin/"
+
 # - man page
 # shellcheck disable=SC2016
 G_EXEC eval 'gzip -c squeezelite-master/doc/squeezelite.1 > $DIR/usr/share/man/man1/squeezelite.1.gz'
+
 # - Copyright
 G_EXEC cp squeezelite-master/LICENSE.txt "$DIR/usr/share/doc/squeezelite/copyright"
+
 # - Environment file
 cat << '_EOF_' > "$DIR/etc/default/squeezelite"
 # Squeezelite command-line arguments: https://ralph-irving.github.io/squeezelite.html
 ARGS='-W -C 5 -n DietPi-Squeezelite'
 _EOF_
+
 # - systemd service
 cat << '_EOF_' > "$DIR/lib/systemd/system/squeezelite.service"
 [Unit]
@@ -71,6 +65,7 @@ ExecStart=/usr/bin/squeezelite $ARGS
 [Install]
 WantedBy=multi-user.target
 _EOF_
+
 # - postinst
 cat << '_EOF_' > "$DIR/DEBIAN/postinst"
 #!/bin/sh
@@ -90,6 +85,7 @@ then
 	systemctl enable --now squeezelite
 fi
 _EOF_
+
 # - prerm
 cat << '_EOF_' > "$DIR/DEBIAN/prerm"
 #!/bin/sh
@@ -100,6 +96,7 @@ then
 	systemctl disable --now squeezelite
 fi
 _EOF_
+
 # - postrm
 cat << '_EOF_' > "$DIR/DEBIAN/postrm"
 #!/bin/sh
@@ -125,10 +122,23 @@ then
 fi
 _EOF_
 G_EXEC chmod +x "$DIR/DEBIAN/"{postinst,prerm,postrm}
+
 # - conffiles
 echo '/etc/default/squeezelite' > "$DIR/DEBIAN/conffiles"
+
 # - md5sums
 find "$DIR" ! \( -path "$DIR/DEBIAN" -prune \) -type f -exec md5sum {} + | sed "s|$DIR/||" > "$DIR/DEBIAN/md5sums"
+
+# - Obtain DEB dependency versions
+DEPS_APT_VERSIONED=
+for i in "${adeps[@]}"
+do
+	DEPS_APT_VERSIONED+=" $i (>= $(dpkg-query -Wf '${VERSION}' "$i")),"
+done
+DEPS_APT_VERSIONED=${DEPS_APT_VERSIONED%,}
+# shellcheck disable=SC2001
+grep -q 'raspbian' /etc/os-release && DEPS_APT_VERSIONED=$(sed 's/+rp[it][0-9]\+[^)]*)/)/g' <<< "$DEPS_APT_VERSIONED") || DEPS_APT_VERSIONED=$(sed 's/+b[0-9]\+)/)/g' <<< "$DEPS_APT_VERSIONED")
+
 # - control
 cat << _EOF_ > "$DIR/DEBIAN/control"
 Package: squeezelite
@@ -159,9 +169,11 @@ Description: lightweight headless Squeezebox emulator - ALSA version
  It uses ALSA for audio output.
 _EOF_
 G_CONFIG_INJECT 'Installed-Size: ' "Installed-Size: $(du -sk "$DIR" | mawk '{print $1}')" "$DIR/DEBIAN/control"
-# - Build
-[[ -f $DIR.deb ]] && G_EXEC rm -R "$DIR.deb"
+
+# Build DEB package
 G_EXEC_OUTPUT=1 G_EXEC dpkg-deb -b "$DIR"
+
+# Cleanup
 G_EXEC rm -R "$DIR"
 
 exit 0

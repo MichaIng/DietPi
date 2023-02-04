@@ -1,0 +1,82 @@
+name: gogs
+on:
+  workflow_dispatch:
+    inputs:
+      arch:
+        description: 'Target architecture index: 1, 2, 3, 10 or all'
+        required: true
+      dist:
+        description: 'Target Debian version index: 5, 6, 7 or all'
+        required: true
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.inputs.arch }}-${{ github.event.inputs.dist }}
+  cancel-in-progress: true
+permissions: {}
+jobs:
+  prep:
+    outputs:
+      arch: ${{ steps.arch.outputs.arch }}
+      dist: ${{ steps.dist.outputs.dist }}
+    runs-on: ubuntu-22.04
+    defaults:
+      run:
+        shell: sh
+    steps:
+    - id: arch
+      run: |
+        if [ '${{ github.event.inputs.arch }}' = 'all' ]
+        then
+          echo arch='[1, 2, 3, 10]' >> "$GITHUB_OUTPUT"
+        else
+          echo arch='[${{ github.event.inputs.arch }}]' >> "$GITHUB_OUTPUT"
+        fi
+    - id: dist
+      run: |
+        if [ '${{ github.event.inputs.dist }}' = 'all' ]
+        then
+          echo dist='[5, 6, 7]' >> "$GITHUB_OUTPUT"
+        else
+          echo dist='[${{ github.event.inputs.dist }}]' >> "$GITHUB_OUTPUT"
+        fi
+  build:
+    needs: prep
+    strategy:
+      matrix:
+        arch: ${{ fromJson(needs.prep.outputs.arch) }}
+        dist: ${{ fromJson(needs.prep.outputs.dist) }}
+      fail-fast: false
+    name: "Build: ${{ matrix.arch }} - ${{ matrix.dist }}"
+    # https://github.com/actions/virtual-environments
+    runs-on: ubuntu-22.04
+    defaults:
+      run:
+        working-directory: /dev/shm
+    steps:
+    - name: Build
+      run: sudo bash -c "G_GITOWNER=$GITHUB_REPOSITORY_OWNER G_GITBRANCH=$GITHUB_REF_NAME; $(curl -sSf "https://raw.githubusercontent.com/$GITHUB_REPOSITORY_OWNER/DietPi/$GITHUB_REF_NAME/.build/software/gogs/container_build.bash")" 'DietPi-Build_Gogs' -a ${{ matrix.arch }} -d ${{ matrix.dist }}
+    - name: Upload
+      run: |
+        # Build variables
+        arch=${{ matrix.arch }}
+        dist=${{ matrix.dist }}
+        arch_to_name=([1]='armv6l' [2]='armv7l' [3]='aarch64' [10]='x86_64')
+        dist_to_name=([5]='buster' [6]='bullseye' [7]='bookworm')
+        arch_name=${arch_to_name[$arch]}
+        dist_name=${dist_to_name[$dist]}
+        
+        # SSH server and client keys
+        mkdir ~/.ssh
+        umask 377
+        echo '${{ secrets.KNOWN_HOSTS }}' > ~/.ssh/known_hosts
+        echo '${{ secrets.SSH_KEY }}' > ~/.ssh/id_ed25519
+        
+        # Upload
+        curl -T "rootfs/gogs_$arch_name.7z" --key ~/.ssh/id_ed25519 "sftp://github@ssh.dietpi.com:29248/$dist_name/"
+        curl 'https://api.cloudflare.com/client/v4/zones/${{ secrets.CF_ZONE }}/purge_cache' -H 'Authorization: Bearer ${{ secrets.CF_TOKEN }}' -H 'Content-Type: application/json' \
+        --data "{\"files\":[\"https://dietpi.com/downloads/binaries/$dist_name/testing/\",\"https://dietpi.com/downloads/binaries/$dist_name/testing/gogs_$arch_name.7z\"]}"
+        
+        # Pre-v8.14 ARMv6 zip upload
+        [ "$arch$dist" = '15' ] || exit 0
+        curl -T 'rootfs/gogs_armv6.zip' --key ~/.ssh/id_ed25519 'sftp://github@ssh.dietpi.com:29248/all/'
+        curl 'https://api.cloudflare.com/client/v4/zones/${{ secrets.CF_ZONE }}/purge_cache' -H 'Authorization: Bearer ${{ secrets.CF_TOKEN }}' -H 'Content-Type: application/json' \
+        --data '{"files":["https://dietpi.com/downloads/binaries/all/testing/","https://dietpi.com/downloads/binaries/all/testing/gogs_armv6.zip"]}'

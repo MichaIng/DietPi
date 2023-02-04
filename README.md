@@ -243,6 +243,7 @@ Links to hardware and software manufacturers, sources and build instructions use
 - [phpMyAdmin](https://github.com/phpmyadmin)
 - [Certbot](https://github.com/certbot/certbot)
 - [Pi-hole](https://github.com/pi-hole/pi-hole)
+- [WordPress](https://github.com/wordpress/wordpress)
 - [phpBB](https://github.com/phpbb/phpbb)
 - [ProFTPD](https://github.com/proftpd/proftpd)
 - [vsftpd](https://security.appspot.com/vsftpd.html)

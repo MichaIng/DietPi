@@ -2,9 +2,6 @@
 {
 . /boot/dietpi/func/dietpi-globals
 
-G_AGUP
-G_AGDUG
-
 # -------------------------
 # ------- AirPlay 1 -------
 # -------------------------
@@ -12,6 +9,8 @@ G_AGDUG
 # Build deps
 # - Workaround for CI on Buster: Mask Avahi daemon service, since it can fail to start, failing the package install
 (( $G_DISTRO == 5 )) && G_EXEC systemctl mask avahi-daemon
+G_AGUP
+G_AGDUG
 G_AGI automake pkg-config make g++ libpopt-dev libconfig-dev libssl-dev libsoxr-dev libavahi-client-dev libasound2-dev libglib2.0-dev libmosquitto-dev avahi-daemon git libplist-dev libsodium-dev libgcrypt20-dev libavformat-dev xxd
 (( $G_DISTRO == 5 )) && G_EXEC systemctl unmask avahi-daemon
 
@@ -344,7 +343,6 @@ _EOF_
 G_CONFIG_INJECT 'Installed-Size: ' "Installed-Size: $(du -sk "$DIR" | mawk '{print $1}')" "$DIR/DEBIAN/control"
 
 # Build DEB package
-[[ -f $DIR.deb ]] && G_EXEC rm -R "$DIR.deb"
 G_EXEC_OUTPUT=1 G_EXEC dpkg-deb -b "$DIR"
 
 # -------------------------
@@ -504,7 +502,6 @@ _EOF_
 G_CONFIG_INJECT 'Installed-Size: ' "Installed-Size: $(du -sk "$DIR" | mawk '{print $1}')" "$DIR/DEBIAN/control"
 
 # Build DEB package
-[[ -f $DIR.deb ]] && G_EXEC rm -R "$DIR.deb"
 G_EXEC_OUTPUT=1 G_EXEC dpkg-deb -b "$DIR"
 
 # Cleanup

@@ -1,0 +1,82 @@
+#!/bin/bash
+{
+# Import DietPi-Globals ---------------------------------------------------------------
+. /boot/dietpi/func/dietpi-globals
+readonly G_PROGRAM_NAME='dietpi-bookworm-upgrade'
+(( $G_DISTRO == 6 )) || { G_DIETPI-NOTIFY 1 'You must run a Debian Bullseye system to run this script!'; exit 1; }
+G_CHECK_ROOT_USER
+G_CHECK_ROOTFS_RW
+G_INIT
+# Import DietPi-Globals ---------------------------------------------------------------
+
+# Warn about potential issues with legacy kernel, especially the missing builtin WiFi country code feature
+dpkg --compare-versions "$(uname -r)" ge-nl 4.15 || G_WHIP_BUTTON_OK_TEXT='Continue' G_WHIP_BUTTON_CANCEL_TEXT='Exit' G_WHIP_YESNO "[WARNING] You kernel version $(uname -r) is too old to be fully supported on Debian Bookworm
+\nA known issue is that this kernel is not able to lookup allowed WiFi frequencies based on a given county code without the help of the Central Regulatory Domain Agent (CRDA). But the crda package is now available anymore on Bookworm and the wireless-regdb package on Bookworm does not provide the regulatory database in a format CRDA understands.
+This means that your WiFi adapter will only be able to use the very limited set of \"global\" (00) frequencies, or not connect to your access point at all.
+\nOther issues may involve certain software to not start, when making use of a modern kernel feature. This often applies to container engines like Docker and Kubernetes.
+\nWe generally recommend to stay on Bullseye with this system, unless you can upgrade the kernel. Do you want to continue regardless?\n" || exit 0
+
+G_PROMPT_BACKUP
+
+/boot/dietpi/dietpi-update 1
+
+G_DIETPI-NOTIFY 2 'Updating package lists'
+G_EXEC sed -i 's/bullseye/bookworm/g' /etc/apt/sources.list
+[[ $(find /etc/apt/sources.list/*.list 2> /dev/null) ]] && G_EXEC sed -i 's/bullseye/bookworm/g' /etc/apt/sources.list.d/*.list
+[[ -f '/etc/apt/sources.list.d/dietpi-mympd.list' ]] && G_EXEC sed -i 's/Debian_11/Debian_Testing/' /etc/apt/sources.list.d/dietpi-mympd.list
+
+G_DIETPI-NOTIFY 2 'Reverting some package lists which have no Bookworm suite'
+[[ -f '/etc/apt/sources.list.d/raspi.list' ]] && G_EXEC sed -i 's/bookworm/bullseye/' /etc/apt/sources.list.d/raspi.list
+[[ -f '/etc/apt/sources.list.d/dietpi-mosquitto.list' ]] && G_EXEC sed -i 's/bookworm/bullseye/' /etc/apt/sources.list.d/dietpi-mosquitto.list
+[[ -f '/etc/apt/sources.list.d/influxdb.list' ]] && G_EXEC sed -i 's/bookworm/bullseye/' /etc/apt/sources.list.d/influxdb.list
+
+/boot/dietpi/dietpi-services stop
+G_AGUP
+G_AGUG
+G_AGDUG
+
+/boot/dietpi/func/dietpi-obtain_hw_model
+. /boot/dietpi/.hw_model
+
+G_DIETPI-NOTIFY 0 'Congratulations, you are now on Bookworm:'
+head -4 /etc/os-release
+echo
+read -rp 'Next, some migrations are done for all software to run nicely on Bookworm. This can include dietpi-software reinstalls. Press ENTER to continue or CTRL+C to abort ...'
+
+G_DIETPI-NOTIFY 2 'Running post upgrade migrations'
+/boot/dietpi/dietpi-services stop
+# Switch from RSA to shorter and modern Ed25519 ssh.dietpi.com host key
+G_CONFIG_INJECT '\[?ssh.dietpi.com(]:29248)?[[:blank:]]' '[ssh.dietpi.com]:29248 ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIJdEPlagpQ+RVHNOX3jkG1Bya7Oza1dAke8h8NszVW84' /root/.ssh/known_hosts
+# We do not want G_AGP to purge the old kernel package on x86_64!
+eval "$(declare -f G_AGP | sed 's/autopurge/purge/')"
+# Migrate from CRDA to builtin kernel WiFi country code feature. CRDA is not available and does not work on Bookworm anymore. For non-Debian kernels, it is required to switch to the upstream regulatory database.
+if dpkg-query -s wireless-regdb &> /dev/null
+then
+	G_EXEC update-alternatives --set regulatory.db /lib/firmware/regulatory.db-upstream
+	G_EXEC apt-mark manual wireless-regdb
+	G_AGP crda
+fi
+# Purge obsolete GCC versions
+G_AGP gcc-{8,9,10,11}-base
+# Purge PHP 7.4 packages, obsolete after PHP 8.2 install
+G_AGP '*php7.4*'
+# Remove obsolete PHP 7.4 configs and Python 3.9 modules, obsolete after Python 3.11 install
+G_EXEC rm -Rf /etc/php/7.4 /usr/local/lib/python3.9 /usr/local/bin/pip3*
+# Install (mark as manually installed) root trust anchors for Unbound, which was degraded from dependency to recommendation: https://github.com/MichaIng/DietPi/issues/5612
+dpkg-query -s unbound &> /dev/null && G_AGI dns-root-data
+# Allow IPv6 port binding failure explicitly, not implicit anymore since Bookworm: https://github.com/MichaIng/DietPi/pull/6103#issuecomment-1407749720
+[[ -f '/etc/redis/redis.conf' ]] && G_EXEC sed -i '/^bind 127.0.0.1 ::1$/c\bind 127.0.0.1 -::1' /etc/redis/redis.conf
+# Reinstall all PHP applications which require non-standard PHP modules, webservers which did access a versioned PHP-FPM socket, Python applications installed via pip, ...
+G_PROMPT_BACKUP_DISABLED=1 /boot/dietpi/dietpi-software reinstall 38 40 47 48 84 85 89 93 114 118 125 130 134 136 139 143 153 155 157 180
+
+cat << '_EOF_' > /etc/bashrc.d/zz-dietpi-autopurge.bash
+{
+(( $UID )) && return 0
+G_DIETPI-NOTIFY 2 'Autoremoving leftover packages from Bookworm upgrade...'
+G_EXEC_NOHALT=1 G_EXEC rm /etc/bashrc.d/zz-dietpi-autopurge.bash
+G_AGA
+}
+_EOF_
+
+G_WHIP_YESNO 'All finished!\n\nWe highly recommend to reboot, shall we reboot now?\n\nNB: To have obsolete leftover packages autoremoved, login as root user once after reboot, or run "sudo apt autopurge".' && reboot
+}
