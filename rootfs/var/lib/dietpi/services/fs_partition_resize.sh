@@ -25,26 +25,25 @@
 	# - eMMC:	/dev/mmcblk[0-9]p[1-9]
 	# - NVMe:	/dev/nvme[0-9]n[0-9]p[1-9]
 	# - loop:	/dev/loop[0-9]p[1-9]
-	if [[ $ROOT_DEV == /dev/[shv]d[a-z][1-9] ]]; then
-
+	if [[ $ROOT_DEV == /dev/[shv]d[a-z][1-9] ]]
+	then
 		ROOT_PART=${ROOT_DEV: -1}	# /dev/sda1 => 1
 		ROOT_DRIVE=${ROOT_DEV::-1}	# /dev/sda1 => /dev/sda
 
-	elif [[ $ROOT_DEV =~ ^/dev/(mmcblk|nvme[0-9]n|loop)[0-9]p[1-9]$ ]]; then
-
+	elif [[ $ROOT_DEV =~ ^/dev/(mmcblk|nvme[0-9]n|loop)[0-9]p[1-9]$ ]]
+	then
 		ROOT_PART=${ROOT_DEV: -1}	# /dev/mmcblk0p1 => 1
 		ROOT_DRIVE=${ROOT_DEV::-2}	# /dev/mmcblk0p1 => /dev/mmcblk0
-
 	else
-
 		echo "[FAILED] Unsupported root device naming scheme ($ROOT_DEV). Aborting..."
 		exit 1
-
 	fi
 
 	# Only increase partition size if not yet done on first boot
-	if [[ ! -f '/dietpi_skip_partition_resize' ]]
+	if [[ -f '/dietpi_skip_partition_resize' ]]
 	then
+		rm /dietpi_skip_partition_resize
+	else
 		# Failsafe: Sync changes to disk before touching partitions
 		sync
 
@@ -61,34 +60,25 @@
 
 		# Give the system some time to have the changes fully applied: https://github.com/MichaIng/DietPi/issues/5006
 		sleep 0.5
-	else
-		rm /dietpi_skip_partition_resize
 	fi
 
 	# Detect root filesystem type
 	ROOT_FSTYPE=$(findmnt -Ufnro FSTYPE -M /)
 
 	# Maximise root filesystem if type is supported
-	if [[ $ROOT_FSTYPE == ext[2-4] ]]; then
-
-		resize2fs "$ROOT_DEV"
-
-	elif [[ $ROOT_FSTYPE == 'f2fs' ]]; then
-
-		mount -o remount,ro /
-		resize.f2fs "$ROOT_DEV"
-		mount -o remount,rw /
-
-	elif [[ $ROOT_FSTYPE == 'btrfs' ]]; then
-
-		btrfs filesystem resize max /
-
-	else
-
-		echo "[FAILED] Unsupported root filesystem type ($ROOT_FSTYPE). Aborting..."
-		exit 1
-
-	fi
+	case $ROOT_FSTYPE in
+		'ext'[234]) resize2fs "$ROOT_DEV";;
+		'f2fs')
+			mount -o remount,ro /
+			resize.f2fs "$ROOT_DEV"
+			mount -o remount,rw /
+		;;
+		'btrfs') btrfs filesystem resize max /;;
+		*)
+			echo "[FAILED] Unsupported root filesystem type ($ROOT_FSTYPE). Aborting..."
+			exit 1
+		;;
+	esac
 
 	exit 0
 }
