@@ -383,10 +383,10 @@
 			local out last_fs_size=$(tune2fs -l "$last_part_dev" | mawk '/^Block count/{print $3;exit}') # blocks
 			while :
 			do
-				resize2fs -Mp "$last_part_dev" 2>&1 | tee resize2fs_out
-				if out=$(grep -im1 'nothing to do!' resize2fs_out)
+				resize2fs -Mp "$last_part_dev" 2>&1 | tee /tmp/resize2fs_out
+				if out=$(grep -im1 'nothing to do!' /tmp/resize2fs_out)
 				then
-					rm resize2fs_out
+					rm /tmp/resize2fs_out
 					FS_SIZE=$(mawk '{print $5}' <<< "$out") # blocks
 					BLOCK_SIZE=${out%%k) *} BLOCK_SIZE=${BLOCK_SIZE##*\(} # KiB
 					# Re-add 4 MiB if it would be still smaller than before, which was required on Raspbian Buster for successful boot, else leave original size
@@ -402,7 +402,7 @@
 					FS_SIZE=$(( $FS_SIZE * $BLOCK_SIZE * 2 )) # blocks => 512 byte sectors
 					break
 
-				elif out=$(grep -im1 'no such file or directory' resize2fs_out)
+				elif out=$(grep -im1 'no such file or directory' /tmp/resize2fs_out)
 				then
 					Error_Exit 'Partition not found, aborting...'
 				fi
@@ -438,8 +438,17 @@
 		then
 			G_DIETPI-NOTIFY 2 'Shrinking last filesystem to minimum size...'
 			G_EXEC mount "$last_part_dev" "$FP_MNT_TMP"
-			FS_SIZE=$(( $(btrfs inspect-internal min-dev-size "$FP_MNT_TMP") + 4*1024**2 )) # bytes? + 4 MiB buffer
-			G_EXEC_OUTPUT=1 G_EXEC btrfs filesystem resize "$FS_SIZE" "$FP_MNT_TMP"
+			# Obtain current filesystem size
+			local last_fs_size=$(findmnt -Ufnrbo SIZE -M "$FP_MNT_TMP") # bytes
+			# Obtain minimal filesystem size + 4 MiB buffer
+			FS_SIZE=$(( $(btrfs inspect-internal min-dev-size "$FP_MNT_TMP" | mawk '{print $1}') + 4*1024**2 )) # bytes
+			# Shrink filesystem only if it would actually become smaller
+			if (( $FS_SIZE < $last_fs_size ))
+			then
+				G_EXEC_OUTPUT=1 G_EXEC btrfs filesystem resize "$FS_SIZE" "$FP_MNT_TMP"
+			else
+				FS_SIZE=$last_fs_size
+			fi
 			Unmount_tmp
 			FS_SIZE=$(( $FS_SIZE / 512 )) # bytes => 512 byte sectors
 		fi
@@ -670,7 +679,7 @@ _EOF_
 		[[ -f $OUTPUT_IMG_NAME.7z ]] && G_EXEC rm "$OUTPUT_IMG_NAME.7z"
 		[[ ( -t 0 || -t 1 ) && $TERM != 'dumb' ]] && G_EXEC_OUTPUT=1
 		# Add "-bsp1 -bso1 -bse2" to print output to regular STDOUT and STDERR, else the pipe to "tee" makes it omit at least the progress output.
-		G_EXEC_DESC='Creating final 7zip archive' G_EXEC "$c7zz" a -m0=lzma2 -mx=9 "${limit_threads[@]}" "$OUTPUT_IMG_NAME.7z" "$OUTPUT_IMG_NAME.$OUTPUT_IMG_EXT" hash.txt README.md
+		G_EXEC_DESC='Creating final 7zip archive' G_EXEC "$c7zz" a -mx=9 "${limit_threads[@]}" "$OUTPUT_IMG_NAME.7z" "$OUTPUT_IMG_NAME.$OUTPUT_IMG_EXT" hash.txt README.md
 
 		G_EXEC_NOHALT=1 G_EXEC rm hash.txt README.md
 		G_DIETPI-NOTIFY 0 "DietPi-Imager has successfully finished.

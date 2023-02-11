@@ -5,7 +5,7 @@
 # If you must, edit /boot/boot.cmd and recompile /boot/boot.scr with:
 # mkimage -C none -A arm64 -T script -d /boot/boot.cmd /boot/boot.scr
 
-# Default values
+# Default environment
 setenv rootdev "/dev/mmcblk0p1"
 setenv rootfstype "ext4"
 setenv consoleargs "console=tty1"
@@ -20,9 +20,8 @@ setenv kernel_addr_r "0x34000000"
 setenv fdt_addr_r "0x4080000"
 setenv overlay_error "false"
 
-# Load dietpiEnv.txt
-if test -e ${devtype} ${devnum} ${prefix}dietpiEnv.txt; then
-	load ${devtype} ${devnum} ${scriptaddr} ${prefix}dietpiEnv.txt
+# Load environment file
+if load ${devtype} ${devnum} ${scriptaddr} ${prefix}dietpiEnv.txt; then
 	env import -t ${scriptaddr} ${filesize}
 fi
 
@@ -39,18 +38,18 @@ load ${devtype} ${devnum} ${fdt_addr_r} ${prefix}dtb/${fdtfile}
 fdt addr ${fdt_addr_r}
 
 # Apply DT overlays
-if test -n "${overlays}" || test -n "${user_overlays}"; then
+if test -n "${overlays}${user_overlays}"; then
 	fdt resize 65536
-	for overlay_file in ${overlays}; do
-		if load ${devtype} ${devnum} ${scriptaddr} ${prefix}dtb/${overlay_path}/overlay/${overlay_prefix}-${overlay_file}.dtbo; then
-			echo "Applying kernel provided DT overlay ${overlay_prefix}-${overlay_file}.dtbo"
+	for overlay in ${overlays}; do
+		if load ${devtype} ${devnum} ${scriptaddr} ${prefix}dtb/${overlay_path}/overlay/${overlay_prefix}-${overlay}.dtbo; then
+			echo "Applying kernel provided DT overlay ${overlay_prefix}-${overlay}.dtbo"
 			fdt apply ${scriptaddr} || setenv overlay_error "true"
 		fi
 	done
 
-	for overlay_file in ${user_overlays}; do
-		if load ${devtype} ${devnum} ${scriptaddr} ${prefix}overlay-user/${overlay_file}.dtbo; then
-			echo "Applying user provided DT overlay ${overlay_file}.dtbo"
+	for overlay in ${user_overlays}; do
+		if load ${devtype} ${devnum} ${scriptaddr} ${prefix}overlay-user/${overlay}.dtbo; then
+			echo "Applying user provided DT overlay ${overlay}.dtbo"
 			fdt apply ${scriptaddr} || setenv overlay_error "true"
 		fi
 	done
@@ -60,13 +59,14 @@ if test -n "${overlays}" || test -n "${user_overlays}"; then
 		load ${devtype} ${devnum} ${fdt_addr_r} ${prefix}dtb/${fdtfile}
 	else
 		if load ${devtype} ${devnum} ${scriptaddr} ${prefix}dtb/${overlay_path}/overlay/${overlay_prefix}-fixup.scr; then
-			echo "Applying kernel provided DT fixup script (${overlay_prefix}-fixup.scr)"
+			echo "Applying kernel provided DT fixup script ${overlay_prefix}-fixup.scr"
 			source ${scriptaddr}
 		fi
 		if test -e ${devtype} ${devnum} ${prefix}fixup.scr; then
-			load ${devtype} ${devnum} ${scriptaddr} ${prefix}fixup.scr
-			echo "Applying user provided fixup script (fixup.scr)"
-			source ${scriptaddr}
+			if load ${devtype} ${devnum} ${scriptaddr} ${prefix}fixup.scr; then
+				echo "Applying user provided fixup script fixup.scr"
+				source ${scriptaddr}
+			fi
 		fi
 	fi
 fi

@@ -91,8 +91,8 @@ Acquire::IndexTargets::deb::Packages::KeepCompressedAs "xz";
 Acquire::IndexTargets::deb::Translations::KeepCompressedAs "xz";
 Acquire::IndexTargets::deb-src::Sources::KeepCompressedAs "xz";
 _EOF_
-	# - During PREP only: Force new DEB package config files and tmpfs lists + archives
-	cat << '_EOF_' > /etc/apt/apt.conf.d/98dietpi-prep
+	# - During install only: Force new DEB package config files and tmpfs lists + archives
+	cat << '_EOF_' > /etc/apt/apt.conf.d/98dietpi-installer
 #clear DPkg::options;
 DPkg::options:: "--force-confmiss,confnew";
 Dir::Cache "/tmp/apt";
@@ -146,7 +146,7 @@ _EOF_
 	#------------------------------------------------------------------------------------------------
 	# NB: We have to manually handle errors, until DietPi-Globals are successfully loaded.
 	# Download
-	if ! curl -sSfL "https://raw.githubusercontent.com/$GITOWNER/DietPi/$GITBRANCH/dietpi/func/dietpi-globals" -o dietpi-globals
+	if ! curl -sSf "https://raw.githubusercontent.com/$GITOWNER/DietPi/$GITBRANCH/dietpi/func/dietpi-globals" -o dietpi-globals
 	then
 		echo -e '[FAILED] Unable to download dietpi-globals. Aborting...\n'
 		exit 1
@@ -165,7 +165,7 @@ _EOF_
 	rm dietpi-globals
 
 	# Reset G_PROGRAM_NAME, which was set to empty string by sourcing dietpi-globals
-	readonly G_PROGRAM_NAME='DietPi-PREP'
+	readonly G_PROGRAM_NAME='DietPi-Installer'
 	G_INIT
 
 	# Apply Git info
@@ -216,6 +216,10 @@ _EOF_
 		elif [[ $G_HW_ARCH_NAME == 'x86_64' ]]
 		then
 			G_HW_ARCH=10
+
+		elif [[ $G_HW_ARCH_NAME == 'riscv64' ]]
+		then
+			G_HW_ARCH=11
 		else
 			G_DIETPI-NOTIFY 1 "Unsupported CPU architecture: \"$G_HW_ARCH_NAME\". Aborting...\n"
 			exit 1
@@ -363,7 +367,8 @@ _EOF_
 			'63' ': NanoPi M1'
 			'66' ': NanoPi M1 Plus'
 			'61' ': NanoPi M2/T2/Fire2'
-			'62' ': NanoPi M3/T3/Fire3'
+			'62.1' ': NanoPi M3/T3'
+			'62.2' ': NanoPi Fire3'
 			'68.1' ': NanoPi M4'
 			'68.2' ': NanoPC T4'
 			'68.3' ': NanoPi NEO4'
@@ -380,6 +385,7 @@ _EOF_
 			'74' ': Radxa Zero'
 			'77' ': ROCK 3A'
 			'78' ': ROCK 5B'
+			'80' ': Orange Pi 5'
 			'23' ': Generic Rockchip RK3328'
 			'24' ': Generic Rockchip RK3399'
 			'25' ': Generic Allwinner H3'
@@ -387,6 +393,8 @@ _EOF_
 			'27' ': Generic Allwinner H6'
 			'28' ': Generic Amlogic S905'
 			'29' ': Generic Amlogic S922X'
+			'' '●─ RISC-V '
+			'81' ': StarFive VisionFive 2'
 			'' '●─ Other '
 			'75' ': Container image'
 			'22' ': Generic device'
@@ -533,7 +541,7 @@ _EOF_
 		# Hardware specific boot configs
 		if (( $G_HW_MODEL < 10 ))
 		then
-			echo "root=PARTUUID=$(findmnt -Ufnro PARTUUID -M /) rootfstype=$(findmnt -Ufnro FSTYPE -M /) rootwait fsck.repair=yes net.ifnames=0 logo.nologo console=serial0,115200 console=tty1" > /boot/cmdline.txt
+			echo "root=PARTUUID=$(findmnt -Ufnro PARTUUID -M /) rootfstype=$(findmnt -Ufnro FSTYPE -M /) rootwait net.ifnames=0 logo.nologo console=serial0,115200 console=tty1" > /boot/cmdline.txt
 			G_EXEC mv "DietPi-$G_GITBRANCH/.build/images/RPi/config.txt" /boot/
 			# Boot in 64-bit mode if this is a 64-bit image
 			[[ $G_HW_ARCH == 3 ]] && G_CONFIG_INJECT 'arm_64bit=' 'arm_64bit=1' /boot/config.txt
@@ -558,7 +566,10 @@ _EOF_
 			G_EXEC mv "DietPi-$G_GITBRANCH/.build/images/U-Boot/99-dietpi-uboot" /etc/initramfs/post-update.d/99-dietpi-uboot
 			G_EXEC sed -i 's/arm64/arm/' /etc/initramfs/post-update.d/99-dietpi-uboot
 
-		elif [[ $G_HW_MODEL =~ ^(12|15|16|40|42|43|44|45|46|47|48|52|54|55|56|57|58|59|60|63|64|65|66|67|68|72|73|74)$ && $(findmnt -Ufnro TARGET -T /boot) == '/' || ( $G_HW_MODEL =~ ^(77|78)$ && $(findmnt -t vfat -M /boot) ) ]]
+		elif [[ $G_HW_MODEL =~ ^(12|15|16|40|42|43|44|45|46|47|48|52|54|55|56|57|58|59|60|63|64|65|66|67|68|72|73|74)$ ||
+			( $G_HW_MODEL == 62 && $(findmnt -Ufnro FSTYPE -T /boot) == 'ext4' ) || # NanoPi M3/T3/Fire3 bootloader supports ext4 only
+			( $G_HW_MODEL == 78 && $(findmnt -M /boot) ) || # ROCK 5B requries a dedicated boot partition
+			( $G_HW_MODEL =~ ^(77|80)$ && $(findmnt -t vfat -M /boot) ) ]] # ROCK 3A and Orange Pi 5 required a dedicated boot partition with FAT filesystem
 		then
 			G_EXEC mv "DietPi-$G_GITBRANCH/.build/images/U-Boot/boot.cmd" /boot/boot.cmd
 			G_EXEC mv "DietPi-$G_GITBRANCH/.build/images/U-Boot/dietpiEnv.txt" /boot/dietpiEnv.txt
@@ -573,28 +584,58 @@ _EOF_
 			then
 				G_EXEC sed -i 's/coherent_pool=2M/coherent_pool=2M usbcore.autosuspend=-1/' /boot/boot.cmd
 
+			# Odroid N2/HC4: Enable USB boot via petitboot support:https://github.com/MichaIng/DietPi/issues/5634
+			elif [[ $G_HW_MODEL =~ ^15|16$ ]]
+			then
+				G_EXEC sed -i '1i[main]' /boot/dietpiEnv.txt
+				# shellcheck disable=SC2016
+				(( $G_HW_MODEL == 15 )) && G_EXEC sed -i '/^setenv overlay_error/a\
+\n# petitboot workarounds\
+if test "${petitboot_active}" = "1"; then\
+	if test "${variant}" = "n2"; then\
+		setenv fdtfile "amlogic/meson-g12b-odroid-n2.dtb"\
+	else\
+		setenv fdtfile "amlogic/meson-g12b-odroid-n2-plus.dtb"\
+	fi\
+	setenv rootuuid "true"\
+fi' /boot/boot.cmd
+				# shellcheck disable=SC2016
+				(( $G_HW_MODEL == 16 )) && G_EXEC sed -i '/^setenv overlay_error/a\
+\n# petitboot workarounds\
+if test "${petitboot_active}" = "1"; then\
+	setenv fdtfile "amlogic/meson-sm1-odroid-${variant}.dtb"\
+	setenv rootuuid "true"\
+fi' /boot/boot.cmd
+				# shellcheck disable=SC2016
+				G_EXEC sed -i '/env import/c\	if test "${petitboot_active}" = "1"; then ini main ${scriptaddr}; else env import -t ${scriptaddr} ${filesize}; fi' /boot/boot.cmd
+				# shellcheck disable=SC2016
+				G_EXEC sed -i '/test -e/s/fixup.scr;/fixup.scr || test "${petitboot_active}" = "1";/' /boot/boot.cmd
+
 			# Rockchip 64-bit (configs work with Amlogic OOTB)
-			elif [[ $G_HW_MODEL =~ ^(42|43|46|47|55|56|58|68|72|73|77|78)$ ]]
+			elif [[ $G_HW_MODEL =~ ^42|43|46|47|55|56|58|68|72|73|77|78|80$ ]]
 			then
 				G_EXEC sed -Ei '/^setenv (kernel|fdt)_addr_r/d' /boot/boot.cmd
 				G_CONFIG_INJECT 'setenv scriptaddr ' 'setenv scriptaddr "0x9000000"' /boot/boot.cmd
 				G_CONFIG_INJECT 'overlay_path=' 'overlay_path=rockchip' /boot/dietpiEnv.txt
 				case $G_HW_MODEL in
+					73) G_CONFIG_INJECT 'overlay_prefix=' 'overlay_prefix=rk3308' /boot/dietpiEnv.txt;;
 					77) G_CONFIG_INJECT 'overlay_prefix=' 'overlay_prefix=rk35xx' /boot/dietpiEnv.txt;;
 					78) G_CONFIG_INJECT 'overlay_prefix=' 'overlay_prefix=rk3588' /boot/dietpiEnv.txt;; # ToDo: There are multiple other prefixes used in the kernel package, "rock-5b", "rock-5ab", "rockchip" (for fixup), so the boot.cmd need heavy adjustments (eliminate the prefix entirely) to work with all overlays.
+					80) G_CONFIG_INJECT 'overlay_prefix=' 'overlay_prefix=rockchip-rk3588' /boot/dietpiEnv.txt;;
 					*) G_CONFIG_INJECT 'overlay_prefix=' 'overlay_prefix=rockchip' /boot/dietpiEnv.txt;;
 				esac
 				case $G_HW_MODEL in
 					46) G_CONFIG_INJECT 'fdtfile=' 'fdtfile=rockchip/rk3399-pinebook-pro.dtb' /boot/dietpiEnv.txt;;
-					55) G_CONFIG_INJECT 'fdtfile=' 'fdtfile=rockchip/rk3328-nanopi-r2-rev00.dtb' /boot/dietpiEnv.txt;;
-					56) G_CONFIG_INJECT 'fdtfile=' 'fdtfile=rockchip/rk3328-nanopi-neo3-rev02.dtb' /boot/dietpiEnv.txt;;
-					72) G_CONFIG_INJECT 'fdtfile=' 'fdtfile=rockchip/rk3399-rock-pi-4b.dtb' /boot/dietpiEnv.txt;;
-					73) G_CONFIG_INJECT 'fdtfile=' 'fdtfile=rockchip/rk3308-rock-pi-s.dtb' /boot/dietpiEnv.txt;;
+					55) G_CONFIG_INJECT 'fdtfile=' 'fdtfile=rockchip/rk3328-nanopi-r2-rev00.dtb' /boot/dietpiEnv.txt;; # Not necessarily needed as rk3328-nanopi-r2s.dtb is automatically chosen, but provides more consistent /sys/class/leds/{wan,lan}_led interface and blinking instead of steady lid power LED
+					56) G_CONFIG_INJECT 'fdtfile=' 'fdtfile=rockchip/rk3328-nanopi-neo3-rev02.dtb' /boot/dietpiEnv.txt;; # Loads rk3328-nanopi-r2s.dtb by default
+					73) G_CONFIG_INJECT 'fdtfile=' 'fdtfile=rockchip/rk3308-rock-pi-s.dtb' /boot/dietpiEnv.txt;; # U-Boot does not pass any ${fdtfile}
 					77) G_CONFIG_INJECT 'fdtfile=' 'fdtfile=rockchip/rk3568-rock-3a.dtb' /boot/dietpiEnv.txt;;
 					78) G_CONFIG_INJECT 'fdtfile=' 'fdtfile=rockchip/rk3588-rock-5b.dtb' /boot/dietpiEnv.txt;;
+					80) G_CONFIG_INJECT 'fdtfile=' 'fdtfile=rockchip/rk3588s-orangepi-5.dtb' /boot/dietpiEnv.txt;;
 					*) :;;
 				esac
 				case $G_HW_MODEL in
+					73) G_CONFIG_INJECT 'consoleargs=' 'consoleargs=console=ttyS0,1500000' /boot/dietpiEnv.txt;; # headless
 					47|55|56) G_CONFIG_INJECT 'consoleargs=' 'consoleargs=console=ttyS2,1500000' /boot/dietpiEnv.txt;; # headless
 					*) G_EXEC sed -i 's/ttyAML0,115200/ttyS2,1500000/' /boot/dietpiEnv.txt;;
 				esac
@@ -613,9 +654,9 @@ _EOF_
 				G_CONFIG_INJECT 'overlays=' 'overlays=uart2' /boot/dietpiEnv.txt
 				# ASUS Tinker Board: https://github.com/MichaIng/DietPi/issues/5554
 				G_EXEC sed -i -e 's/ttyAML0/ttyS2/' -e '/^extraargs=/s/$/ systemd.unified_cgroup_hierarchy=0/' /boot/dietpiEnv.txt
-				
+
 			# Allwinner 64-bit
-			elif [[ $G_HW_MODEL =~ ^(40|44|45|57|65|67)$ ]]
+			elif [[ $G_HW_MODEL =~ ^40|44|45|57|65|67$ ]]
 			then
 				G_EXEC sed -Ei '/^setenv (kernel|fdt)_addr_r/d' /boot/boot.cmd
 				G_CONFIG_INJECT 'setenv scriptaddr ' 'setenv scriptaddr "0x45000000"' /boot/boot.cmd
@@ -641,7 +682,7 @@ _EOF_
 				esac
 
 			# Allwinner H3 (32-bit)
-			elif [[ $G_HW_MODEL =~ ^(48|59|60|63|64|66)$ ]]
+			elif [[ $G_HW_MODEL =~ ^48|59|60|63|64|66$ ]]
 			then
 				G_EXEC sed -i 's/arm64/arm/' /etc/initramfs/post-update.d/99-dietpi-uboot /boot/boot.cmd
 				G_EXEC sed -Ei '/^setenv (kernel_addr_r|fdt_addr_r|overlay_path)/d' /boot/boot.cmd
@@ -661,6 +702,13 @@ _EOF_
 					59|60|64) G_CONFIG_INJECT 'consoleargs=' 'consoleargs=console=ttyS0,115200' /boot/dietpiEnv.txt;; # headless
 					*) G_EXEC sed -i 's/ttyAML0/ttyS0/' /boot/dietpiEnv.txt;;
 				esac
+
+			# NanoPi M3/T3/Fire3 (64-bit)
+			elif (( $G_HW_MODEL == 62 ))
+			then
+				G_EXEC curl -sSf 'https://raw.githubusercontent.com/MichaIng/DietPi/dev/.build/images/NanoPiM3/boot.cmd' -o /boot/boot.cmd
+				G_EXEC sed -i '/overlay/d' /boot/dietpiEnv.txt
+				G_EXEC sed -i 's/ttyAML0/ttySAC0/' /boot/dietpiEnv.txt
 			fi
 			[[ -f '/boot/armbianEnv.txt' ]] && G_EXEC rm /boot/armbianEnv.txt
 			[[ -f '/boot/uEnv.txt' ]] && G_EXEC rm /boot/uEnv.txt
@@ -801,8 +849,7 @@ _EOF_
 
 		done < <(blkid -s TYPE -o value -c /dev/null | sort -u)
 
-		# G_HW_MODEL specific
-		# - Containers
+		# Containers
 		if (( $G_HW_MODEL == 75 ))
 		then
 			aPACKAGES_REQUIRED_INSTALL+=('iproute2')
@@ -825,18 +872,8 @@ _EOF_
 				'usbutils'		# "lsusb", used by DietPi-Software + DietPi-BugReport
 			)
 
-			# initramfs: Required for generic bootloader, but not required/used by RPi bootloader, on VM install tiny-initramfs with limited features but sufficient and much smaller + faster
-			if (( $G_HW_MODEL == 20 ))
-			then
-				aPACKAGES_REQUIRED_INSTALL+=('tiny-initramfs')
-
-			elif (( $G_HW_MODEL > 9 && $G_HW_MODEL != 49 && $G_HW_MODEL != 61 && $G_HW_MODEL != 76 && $G_HW_MODEL != 79 ))
-			then
-				aPACKAGES_REQUIRED_INSTALL+=('initramfs-tools')
-			fi
-
 			# Entropy daemon: Use modern rng-tools5 on all devices where it has been proven to work, else haveged: https://github.com/MichaIng/DietPi/issues/2806
-			if [[ $G_HW_MODEL -lt 10 || $G_HW_MODEL =~ ^(14|15|16|24|29|42|46|49|58|68|72|74|76|79)$ ]] # RPi, S922X, Odroid C4, RK3399 - 47 NanoPi R4S, Quartz64, Radxa Zero, NanoPi R5S, NanoPi R6S
+			if [[ $G_HW_MODEL -lt 10 || $G_HW_MODEL =~ ^(14|15|16|24|29|42|46|49|58|72|74|76|79)$ ]] # RPi, S922X, Odroid C4, RK3399 - 47 NanoPi R4S, Radxa Zero, NanoPi R5S, NanoPi R6S
 			then
 				aPACKAGES_REQUIRED_INSTALL+=('rng-tools5')
 			else
@@ -850,10 +887,9 @@ _EOF_
 				fi
 			fi
 
-			# G_DISTRO specific
-			# - Dropbear: DietPi default SSH server
-			#   On Buster, "dropbear" pulls in "dropbear-initramfs", which we don't need: https://packages.debian.org/dropbear
-			#   This needs to depend on current distro version instead of target version, to assure "dropbear-run" does not get autoremoved before "dropbear" is installed.
+			# Dropbear: DietPi default SSH server
+			# - On Buster, "dropbear" pulls in "dropbear-initramfs", which we don't need: https://packages.debian.org/dropbear
+			# - This needs to depend on current distro version instead of target version, to assure "dropbear-run" does not get autoremoved before "dropbear" is installed.
 			if (( $G_DISTRO > 5 ))
 			then
 				aPACKAGES_REQUIRED_INSTALL+=('dropbear')
@@ -864,39 +900,31 @@ _EOF_
 			# All but VMs: Drive power management control
 			(( $G_HW_MODEL == 20 )) || aPACKAGES_REQUIRED_INSTALL+=('hdparm')
 
-			# WiFi related
-			if (( $WIFI_REQUIRED ))
-			then
-				aPACKAGES_REQUIRED_INSTALL+=('iw')		# Tools to configure WiFi adapters
-				aPACKAGES_REQUIRED_INSTALL+=('wireless-tools')	# Same as "iw", deprecated but still required for non-nl80211 adapters
-				# Set WiFi frequencies according to local regulations, based on WiFi country code. CRDA is not available since Bookworm, kernels are supposed to obtain it from wireless-regdb themselves.
-				(( $DISTRO_TARGET > 6 )) && aPACKAGES_REQUIRED_INSTALL+=('wireless-regdb') || aPACKAGES_REQUIRED_INSTALL+=('crda')
-				aPACKAGES_REQUIRED_INSTALL+=('wpasupplicant')	# Support for WPA-protected WiFi network connection
-			fi
-
-			# Kernel/bootloader/firmware
+			# x86_64: Kernel/bootloader/initramfs
 			# - We need to install those directly to allow G_AGA() autoremove possible older packages later: https://github.com/MichaIng/DietPi/issues/1285#issuecomment-354602594
-			# - Assure that dir for additional sources is present
-			[[ -d '/etc/apt/sources.list.d' ]] || G_EXEC mkdir /etc/apt/sources.list.d
-			# - G_HW_ARCH specific
-			#	x86_64
-			if (( $G_HW_ARCH == 10 )); then
-
+			if (( $G_HW_ARCH == 10 ))
+			then
 				local apackages=('linux-image-amd64' 'os-prober')
 
-				# As linux-image-amd64 pulls initramfs already, pre-install the intended implementation here already
-				(( $G_HW_MODEL == 20 )) && apackages+=('tiny-initramfs') || apackages+=('initramfs-tools')
+				# As linux-image-amd64 pulls initramfs, pre-install the intended implementation here already
+				if (( $G_HW_MODEL == 20 ))
+				then
+					# VM: Install tiny-initramfs with limited features but sufficient and much smaller + faster
+					apackages+=('tiny-initramfs')
+				else
+					# Install and use zstd for better initramfs compression
+					apackages+=('initramfs-tools' 'zstd')
+					G_CONFIG_INJECT 'COMPRESS=' 'COMPRESS=zstd' /etc/initramfs-tools/initramfs.conf
+				fi
 
 				# Grub EFI with secure boot compatibility
-				if [[ -d '/boot/efi' ]] || dpkg-query -s 'grub-efi-amd64' &> /dev/null; then
-
+				if [[ -d '/boot/efi' ]] || dpkg-query -s 'grub-efi-amd64' &> /dev/null
+				then
 					apackages+=('grub-efi-amd64' 'grub-efi-amd64-signed' 'shim-signed')
 
 				# Grub BIOS
 				else
-
 					apackages+=('grub-pc')
-
 				fi
 
 				# Skip creating kernel symlinks and remove existing ones
@@ -912,8 +940,11 @@ _EOF_
 			fi
 		fi
 
-		# - DietPi-Build with Armbian kernel/bootloader/firmware
-		if [[ ( $G_HW_MODEL =~ ^(12|15|16|40|42|43|44|45|46|47|48|52|54|55|56|57|58|59|60|63|64|65|66|67|68|72|73|74|77|78)$ && -f '/boot/dietpiEnv.txt' ) || ( $G_HW_MODEL == 11 && $(findmnt -Ufnro TARGET -T /boot) == '/' ) || ( $G_HW_MODEL == 10 && $(findmnt -t vfat -M /boot) ) ]]
+		# Assure that dir for additional sources is present
+		[[ -d '/etc/apt/sources.list.d' ]] || G_EXEC mkdir /etc/apt/sources.list.d
+
+		# DietPi-Build with Armbian kernel/bootloader/firmware
+		if [[ ( $G_HW_MODEL =~ ^(12|15|16|40|42|43|44|45|46|47|48|52|54|55|56|57|58|59|60|62|63|64|65|66|67|68|72|73|74|77|78|80)$ && -f '/boot/dietpiEnv.txt' ) || ( $G_HW_MODEL == 11 && $(findmnt -Ufnro TARGET -T /boot) == '/' ) || ( $G_HW_MODEL == 10 && $(findmnt -t vfat -M /boot) ) ]]
 		then
 			# Bootstrap Armbian repository
 			G_EXEC eval 'curl -sSfL '\''https://apt.armbian.com/armbian.key'\'' | gpg --dearmor -o /etc/apt/trusted.gpg.d/dietpi-armbian.gpg --yes'
@@ -926,9 +957,8 @@ _EOF_
 			G_EXEC eval "echo 'deb https://apt.armbian.com/ ${DISTRO_TARGET_NAME/bookworm/bullseye} main' > /etc/apt/sources.list.d/dietpi-armbian.list"
 			# Update APT lists
 			G_AGUP
-			# Install kernel, device tree, U-Boot, firmware and initramfs packages, initramfs-tools first to have an initramfs generated on kernel install
-			G_AGI initramfs-tools
-			local model='odroidn2' kernel='meson64' arch='arm64' branch='current'
+			# Install kernel, device tree, U-Boot, firmware and initramfs packages
+			local model='odroidn2' kernel='meson64' arch='arm64' branch='current' zstd=()
 			case $G_HW_MODEL in
 				10) model='odroidc1' kernel='meson' arch='arm';;
 				11) model='odroidxu4' kernel='odroidxu4' arch='arm';;
@@ -950,6 +980,14 @@ _EOF_
 				58) model='nanopim4v2' kernel='rockchip64';;
 				59) model='zeropi' kernel='sunxi' arch='arm';;
 				60) model='nanopineo' kernel='sunxi' arch='arm';;
+				62) kernel='s5p6818' branch='legacy'
+					case $HW_VARIANT in
+						2) model='nanopifire3';;
+						*) model='nanopim3';;
+					esac
+					G_EXEC curl -sSfO "https://dietpi.com/downloads/binaries/linux-u-boot-$model-$branch.deb"
+					G_EXEC_OUTPUT=1 G_EXEC dpkg -i "linux-u-boot-$model-$branch.deb"
+					G_EXEC rm "linux-u-boot-$model-$branch.deb";;
 				63) model='nanopim1' kernel='sunxi' arch='arm';;
 				64) model='nanopiair' kernel='sunxi' arch='arm';;
 				65) kernel='sunxi64'
@@ -970,8 +1008,25 @@ _EOF_
 				74) model='radxa-zero';;
 				77) model='rock-3a' kernel='rk35xx' branch='edge';;
 				78) model='rock-5b' kernel='rockchip-rk3588' branch='legacy';;
+				80) model='orangepi5' kernel='rockchip-rk3588' branch='legacy';;
 				*) :;;
 			esac
+			# NanoPi R2S/NEO3
+			if [[ $G_HW_MODEL == 5[56] ]]
+			then
+				G_DIETPI-NOTIFY 2 'Blacklisting video related kernel modules'
+				cat << '_EOF_' > /etc/modprobe.d/dietpi-headless.conf
+blacklist hantro_vpu
+blacklist lima
+blacklist rockchip_iep
+blacklist rockchip_rga
+blacklist rockchip_vdec
+_EOF_
+			fi
+			# - Install initramfs-tools first to have an initramfs generated on kernel install, and configure it to use zstd if supported for better compression and faster decompression
+			[[ $kernel == 'rockchip64' || $kernel == 'rockchip-rk3588' || $kernel == 'meson64' ]] && zstd=('zstd')
+			G_AGI initramfs-tools "${zstd[@]}"
+			[[ ${zstd[0]} ]] && G_CONFIG_INJECT 'COMPRESS=' 'COMPRESS=zstd' /etc/initramfs-tools/initramfs.conf
 			G_AGI linux-{image,dtb}-"$branch-$kernel" "linux-u-boot-$model-$branch" u-boot-tools armbian-firmware
 			# Cleanup
 			[[ $G_HW_MODEL != 10 && -f '/boot/uImage' ]] && G_EXEC rm /boot/uImage
@@ -1004,7 +1059,7 @@ _EOF_
 				G_EXEC dtc -I dts -O dtb -o /boot/overlay-user/dietpi-usb-otg.{dtbo,dts}
 				G_CONFIG_INJECT 'user_overlays=' 'user_overlays=dietpi-usb-otg' /boot/dietpiEnv.txt
 				G_EXEC apt-mark auto device-tree-compiler
-				
+
 			# Workaround for Odroid N2 failing to boot from eMMC: https://forum.armbian.com/topic/20206-odroid-n2-issues-with-recent-firmware-and-emmc-modules/#comment-142409
 			elif (( $G_HW_MODEL == 15 ))
 			then
@@ -1023,7 +1078,7 @@ _EOF_
 				G_EXEC rm u-boot-nanopir1.bin
 			fi
 
-		# - Armbian grab currently installed packages
+		# Armbian grab currently installed packages
 		elif [[ $G_HW_MODEL != 75 && $(dpkg-query -Wf '${Package} ') == *'armbian'* ]]; then
 
 			systemctl stop armbian-*
@@ -1046,8 +1101,8 @@ _EOF_
 			done
 			unset -v apackages
 
-			# Add u-boot-tools, required to convert initramfs images into u-boot format
-			aPACKAGES_REQUIRED_INSTALL+=('u-boot-tools')
+			# Add initramfs-tools and u-boot-tools, required to convert initramfs images into u-boot format
+			aPACKAGES_REQUIRED_INSTALL+=('initramfs-tools' 'u-boot-tools')
 
 			# Generate and cleanup uInitrd
 			local arch='arm'
@@ -1085,10 +1140,10 @@ _EOF_
 			[[ -f '/etc/apt/trusted.gpg~' ]] && G_EXEC rm '/etc/apt/trusted.gpg~'
 
 			# Remove obsolete components from Armbian list and connect via HTTPS
-			G_EXEC rm /etc/apt/sources.list.d/*
-			G_EXEC eval "echo 'deb https://apt.armbian.com/ ${DISTRO_TARGET_NAME/bookworm/bullseye} main' > /etc/apt/sources.list.d/armbian.list"
+			G_EXEC rm -Rf /etc/apt/sources.list.d/{,.??,.[^.]}*
+			G_EXEC eval "echo 'deb https://apt.armbian.com/ ${DISTRO_TARGET_NAME/bookworm/bullseye} main' > /etc/apt/sources.list.d/dietpi-armbian.list"
 
-		# - RPi
+		# RPi
 		elif (( $G_HW_MODEL < 10 )); then
 
 			# ARMv6/7: Add raspi-copies-and-fills
@@ -1108,11 +1163,11 @@ _EOF_
 			[[ -f '/etc/apt/trusted.gpg' ]] && G_EXEC rm /etc/apt/trusted.gpg
 			[[ -f '/etc/apt/trusted.gpg~' ]] && G_EXEC rm '/etc/apt/trusted.gpg~'
 
-		# - ROCK Pi S/Radxa Zero: Official legacy Radxa Debian image
+		# ROCK Pi S/Radxa Zero: Official legacy Radxa Debian image
 		elif [[ $G_HW_MODEL =~ ^(73|74)$ ]] && grep -q 'apt\.radxa\.com' /etc/apt/sources.list.d/*.list; then
 
 			# Install Radxa APT repo cleanly: No Bookworm repo available yet
-			G_EXEC rm -Rf /etc/apt/{trusted.gpg,sources.list.d/{,.??,.[^.]}*}
+			G_EXEC rm -Rf /etc/apt/sources.list.d/{,.??,.[^.]}*
 			G_EXEC eval "curl -sSfL 'https://apt.radxa.com/${DISTRO_TARGET_NAME/bookworm/bullseye}-stable/public.key' | gpg --dearmor -o /etc/apt/trusted.gpg.d/dietpi-radxa.gpg --yes"
 			G_EXEC eval "echo 'deb https://apt.radxa.com/${DISTRO_TARGET_NAME/bookworm/bullseye}-stable/ ${DISTRO_TARGET_NAME/bookworm/bullseye} main' > /etc/apt/sources.list.d/dietpi-radxa.list"
 			G_AGUP
@@ -1122,14 +1177,14 @@ _EOF_
 			[[ -f '/etc/apt/trusted.gpg~' ]] && G_EXEC rm '/etc/apt/trusted.gpg~'
 
 			# ROCK Pi S: rockpis-dtbo is not required as it doubles the overlays that are already provided (among others) with the kernel package
-			(( $G_HW_MODEL == 73 )) && G_AGI rockpis-rk-ubootimg linux-4.4-rock-pi-s-latest rockchip-overlay u-boot-tools
+			(( $G_HW_MODEL == 73 )) && G_AGI initramfs-tools linux-4.4-rock-pi-s-latest rockpis-rk-ubootimg u-boot-tools rockchip-overlay
 
 			# Install Radxa Zero kernel (U-Boot package is not available yet): https://github.com/radxa/apt
 			# Additionally install bc, required to calculate the initramfs size via custom hook (by Radxa) which updates /boot/uEnv.txt accordingly on initramfs updates
 			# And install "file" which is used to detect whether the kernel image is compressed and in case uncompress it
-			(( $G_HW_MODEL == 74 )) && G_AGI linux-5.10-radxa-zero-latest bc file
+			(( $G_HW_MODEL == 74 )) && G_AGI initramfs-tools linux-5.10-radxa-zero-latest bc file
 
-		# - Quartz64
+		# Quartz64
 		elif [[ $G_HW_MODEL == 49 && $(findmnt -Ufnro TARGET -T /boot) == '/' ]]
 		then
 			case $HW_VARIANT in
@@ -1141,66 +1196,66 @@ _EOF_
 			G_EXEC_OUTPUT=1 G_EXEC dpkg -i "firmware-$variant.deb"
 			G_EXEC rm "firmware-$variant.deb"
 
-		# - NanoPi R5S
+		# NanoPi R5S
 		elif (( $G_HW_MODEL == 76 )) && { [[ ! $(find /lib/modules -mindepth 1 -maxdepth 1 -type d) ]] || dpkg-query -s 'firmware-nanopi5' &> /dev/null; }
 		then
 			G_EXEC curl -sSfO 'https://dietpi.com/downloads/binaries/firmware-nanopi5.deb'
 			G_EXEC_OUTPUT=1 G_EXEC dpkg -i firmware-nanopi5.deb
 			G_EXEC rm firmware-nanopi5.deb
 
-		# - NanoPi R6S
+		# NanoPi R6S
 		elif (( $G_HW_MODEL == 79 )) && { [[ ! $(find /lib/modules -mindepth 1 -maxdepth 1 -type d) ]] || dpkg-query -s 'firmware-nanopi6' &> /dev/null; }
 		then
 			G_EXEC curl -sSfO 'https://dietpi.com/downloads/binaries/firmware-nanopi6.deb'
 			G_EXEC_OUTPUT=1 G_EXEC dpkg -i firmware-nanopi6.deb
 			G_EXEC rm firmware-nanopi6.deb
 
-		# - NanoPi M2/T2 Linux 4.4: Requires dedicated boot partition, starting at 4 MiB for U-Boot, with ext4 filesystem
+		# NanoPi M2/T2/Fire2 Linux 4.4: Requires dedicated boot partition, starting at 4 MiB for U-Boot, with ext4 filesystem
 		elif [[ $G_HW_MODEL == 61 && $(findmnt -Ufnro FSTYPE -M /boot) == 'ext4' ]] && (( $(sfdisk -qlo Start "$BOOT_DEVICE" | mawk 'NR==2') >= 8192 ))
 		then
 			G_EXEC curl -sSfO 'https://dietpi.com/downloads/binaries/firmware-nanopi2.deb'
 			G_EXEC_OUTPUT=1 G_EXEC dpkg -i firmware-nanopi2.deb
 			G_EXEC rm firmware-nanopi2.deb
 
-		# - Generic kernel + device tree + U-Boot package auto detect
-		elif (( $G_HW_MODEL != 75 ))
+		# Generic kernel + device tree + U-Boot package auto detect + initramfs-tools (not required on Sparky SBC)
+		elif (( $G_HW_MODEL != 75 && $G_HW_MODEL != 70 ))
 		then
 			mapfile -t apackages < <(dpkg-query -Wf '${Package}\n' | grep -E '^linux-(image|dtb|u-boot)-|^u-boot')
-			if [[ ${apackages[0]} ]]
-			then
-				G_AGI "${apackages[@]}"
-			else
-				G_DIETPI-NOTIFY 2 'Unable to find kernel packages for installation. Assuming non-APT/.deb kernel installation.'
-			fi
+			[[ ${apackages[0]} ]] || G_DIETPI-NOTIFY 2 'Unable to find kernel packages for installation. Assuming non-APT/.deb kernel installation.'
+			G_AGI initramfs-tools "${apackages[@]}"
 			unset -v apackages
 		fi
 		G_EXEC apt-get clean # Remove downloaded archives
 
-		# - Firmware
-		if (( $G_HW_MODEL != 75 )) && dpkg-query -s 'armbian-firmware' &> /dev/null
-		then
-			aPACKAGES_REQUIRED_INSTALL+=('armbian-firmware')
+		# RISC-V: Install Debian ports repository key
+		(( $G_HW_ARCH == 11 )) && aPACKAGES_REQUIRED_INSTALL+=('debian-ports-archive-keyring')
 
-		# - Radxa Zero: Do not install additional firmware on official Debian image for now, as it overwrites required non-packaged firmware files
-		elif [[ $G_HW_MODEL != 7[45] ]]
+		# WiFi and firmware packages: Usually no firmware should be necessary for VMs. If user manually passes though some USB device, user might need to install the firmware then.
+		if (( $G_HW_MODEL != 20 && $G_HW_MODEL != 75 ))
 		then
-			# Usually no firmware should be necessary for VMs. If user manually passes though some USB device, user might need to install the firmware then.
-			if (( $G_HW_MODEL != 20 ))
-			then
-				aPACKAGES_REQUIRED_INSTALL+=('firmware-realtek')		# Realtek Eth+WiFi/BT firmware
-				aPACKAGES_REQUIRED_INSTALL+=('firmware-linux-free')		# Misc free firmware
-				aPACKAGES_REQUIRED_INSTALL+=('firmware-misc-nonfree')		# Misc non-free firmware incl. Ralink and MediaTek WiFi/BT
-			fi
-
 			if (( $WIFI_REQUIRED ))
 			then
-				aPACKAGES_REQUIRED_INSTALL+=('firmware-atheros')		# Qualcomm/Atheros WiFi/BT firmware
-				aPACKAGES_REQUIRED_INSTALL+=('firmware-brcm80211')		# Broadcom WiFi/BT firmware
-				aPACKAGES_REQUIRED_INSTALL+=('firmware-iwlwifi')		# Intel WiFi/BT firmware
-				if (( $G_HW_MODEL == 20 ))
-				then
-					aPACKAGES_REQUIRED_INSTALL+=('firmware-realtek')	# Realtek Eth+WiFi/BT firmware
-					aPACKAGES_REQUIRED_INSTALL+=('firmware-misc-nonfree')	# Misc non-free firmware incl. Ralink and MediaTek WiFi/BT
+				aPACKAGES_REQUIRED_INSTALL+=('iw')		# Tools to configure WiFi adapters
+				aPACKAGES_REQUIRED_INSTALL+=('wireless-tools')	# Same as "iw", deprecated but still required for non-nl80211 adapters
+				aPACKAGES_REQUIRED_INSTALL+=('wpasupplicant')	# Support for WPA-protected WiFi network connections
+				aPACKAGES_REQUIRED_INSTALL+=('wireless-regdb')	# Database with allowed WiFi channels based on country
+				# - CRDA is not available from Debian Bookworm on and irrelevant from Linux 4.15 on, kernels are supposed to obtain it from wireless-regdb themselves: https://bugs.debian.org/1003903
+				(( $DISTRO_TARGET < 7 )) && dpkg --compare-versions "$(find /lib/modules -mindepth 1 -maxdepth 1 -type d -name '[0-9]*' -printf '%f\n' | sort -Vr | head -1)" lt-nl 4.15 && aPACKAGES_REQUIRED_INSTALL+=('crda')
+			fi
+
+			# Firmware: Armbian or Debian
+			if dpkg-query -s 'armbian-firmware' &> /dev/null
+			then
+				aPACKAGES_REQUIRED_INSTALL+=('armbian-firmware')
+			else
+				aPACKAGES_REQUIRED_INSTALL+=('firmware-linux-free')	# Free misc
+				aPACKAGES_REQUIRED_INSTALL+=('firmware-misc-nonfree')	# Non-free misc incl. Ralink and MediaTek WiFi/BT
+				aPACKAGES_REQUIRED_INSTALL+=('firmware-realtek')	# Realtek Eth/WiFi/BT
+				if (( $WIFI_REQUIRED ))
+				then			
+					aPACKAGES_REQUIRED_INSTALL+=('firmware-atheros')	# Qualcomm/Atheros WiFi/BT
+					aPACKAGES_REQUIRED_INSTALL+=('firmware-brcm80211')	# Broadcom WiFi/BT
+					aPACKAGES_REQUIRED_INSTALL+=('firmware-iwlwifi')	# Intel WiFi/BT
 				fi
 			fi
 		fi
@@ -1350,6 +1405,10 @@ _EOF_
 			'rockchip-adbd'
 			'rtl8723ds-btfw-load'
 			'install-module-hci-uart'
+			'display-manager'
+			'NetworkManager-wait-online'
+			'rkisp_3A'
+			'rockchip-init'
 			# Armbian
 			'chrony'
 			'chronyd'
@@ -1434,7 +1493,7 @@ _EOF_
 		[[ -f '/etc/rc.local' ]] && G_EXEC rm /etc/rc.local # https://github.com/RPi-Distro/pi-gen/blob/master/stage2/01-sys-tweaks/files/rc.local
 		[[ -d '/etc/systemd/system/rc-local.service.d' ]] && G_EXEC rm -R /etc/systemd/system/rc-local.service.d # Raspberry Pi OS
 		[[ -d '/etc/systemd/system/rc.local.service.d' ]] && G_EXEC rm -R /etc/systemd/system/rc.local.service.d
-		#	Below required if DietPi-PREP is executed from chroot/container, so RPi firstrun scripts are not executed
+		#	Below required if DietPi-Installer is executed from chroot/container, so RPi firstrun scripts are not executed
 		[[ -f '/etc/init.d/resize2fs_once' ]] && G_EXEC rm /etc/init.d/resize2fs_once # https://github.com/RPi-Distro/pi-gen/blob/master/stage2/01-sys-tweaks/files/resize2fs_once
 		# - Remove all autologin configs for all TTYs: https://github.com/MichaIng/DietPi/issues/3570#issuecomment-648988475, https://github.com/MichaIng/DietPi/issues/3628#issuecomment-653693758
 		G_EXEC rm -f /etc/systemd/system/*getty@*.service.d/*autologin*.conf
@@ -1444,7 +1503,7 @@ _EOF_
 
 		# - FriendlyELEC
 		[[ -f 'usr/bin/lcd2usb_print' ]] && G_EXEC rm /usr/bin/lcd2usb_print
-		(( $G_HW_MODEL == 76 )) && G_EXEC rm -Rf /data /sdcard /udisk /oem /userdata /system /vendor /mnt/{sdcard,external_sd,usb_storage,udisk} /etc/systemd/system/{NetworkManager-wait-online.service,boot-complete.target.requires,ctrl-alt-del.target,rkisp_3A.service,setup-eth-smp.service,wpa_supplicant-nl80211@.service,wpa_supplicant-wired@.service,wpa_supplicant@.service}
+		(( $G_HW_MODEL == 76 )) && G_EXEC rm -Rf /data /sdcard /udisk /oem /userdata /system /vendor /mnt/{sdcard,external_sd,usb_storage,udisk} /etc/systemd/system/{boot-complete.target.requires,ctrl-alt-del.target,wpa_supplicant-nl80211@.service,wpa_supplicant-wired@.service,wpa_supplicant@.service}
 		[[ -f '/usr/local/bin/cputemp.sh' ]] && G_EXEC rm /usr/local/bin/cputemp.sh
 		[[ -f '/usr/local/bin/drm-hotplug.sh' ]] && G_EXEC rm /usr/local/bin/drm-hotplug.sh
 		[[ -f '/usr/local/bin/setup-net-smp.sh' ]] && G_EXEC rm /usr/local/bin/setup-net-smp.sh
@@ -1453,6 +1512,9 @@ _EOF_
 		[[ -f '/etc/init.d/leds.sh' ]] && G_EXEC rm /etc/init.d/leds.sh
 		[[ -f '/etc/init.d/rockchip.sh' ]] && G_EXEC rm /etc/init.d/rockchip.sh
 		[[ -f '/etc/init.d/S10atomic_commit.sh' ]] && G_EXEC rm /etc/init.d/S10atomic_commit.sh
+
+		# - Radxa
+		[[ -e '/etc/systemd/system/systemd-networkd-wait-online.service' || -L '/etc/systemd/system/systemd-networkd-wait-online.service' ]] && G_EXEC rm /etc/systemd/system/systemd-networkd-wait-online.service
 
 		#-----------------------------------------------------------------------------------
 		# https://www.debian.org/doc/debian-policy/ch-opersys.html#site-specific-programs
@@ -1678,7 +1740,7 @@ _EOF_'
 			[[ -f '/boot/dietpiEnv.txt' || -e '/dev/ttyAML0' ]] || tty='ttyS0'
 			/boot/dietpi/func/dietpi-set_hardware serialconsole enable "$tty"
 
-		# NanoPi M2/T2
+		# NanoPi M2/T2/Fire2
 		elif (( $G_HW_MODEL == 61 ))
 		then
 			/boot/dietpi/func/dietpi-set_hardware serialconsole enable ttyAMA0
@@ -1687,14 +1749,15 @@ _EOF_'
 		elif (( $G_HW_MODEL == 62 ))
 		then
 			/boot/dietpi/func/dietpi-set_hardware serialconsole enable ttySAC0
+			/boot/dietpi/func/dietpi-set_hardware serialconsole enable ttyGS0
 
 		# ROCKPro64, ROCK64, Pinebook Pro, NanoPi R4S, Quartz64, ASUS Tinker Board, NanoPi R2S, NanoPi NEO3, NanoPi M4V2, NanoPi M4/T4/NEO4, ROCK Pi 4, ROCK 3A, ROCK 5B
-		elif [[ $G_HW_MODEL =~ ^(42|43|46|47|49|52|55|56|58|68|72|77|78)$ ]]
+		elif [[ $G_HW_MODEL =~ ^(42|43|46|47|49|52|55|56|58|68|72|77|78|80)$ ]]
 		then
 			/boot/dietpi/func/dietpi-set_hardware serialconsole enable ttyS2
 
-		# PINE A64, Pinebook, PINE H64, NenoPi NEO Plus2, ZeroPi, NanoPi NEO, NanoPi M1, NanoPi NEO Air, NenoPi NEO2, NanoPi M1 Plus, NanoPi K1 Plus
-		elif [[ $G_HW_MODEL =~ ^(40|44|45|57|59|60|63|64|65|66|67)$ ]]
+		# PINE A64, Pinebook, PINE H64, NenoPi NEO Plus2, ZeroPi, NanoPi NEO, NanoPi M1, NanoPi NEO Air, NenoPi NEO2, NanoPi M1 Plus, NanoPi K1 Plus, ROCK Pi S
+		elif [[ $G_HW_MODEL =~ ^(40|44|45|57|59|60|63|64|65|66|67|73)$ ]]
 		then
 			/boot/dietpi/func/dietpi-set_hardware serialconsole enable ttyS0
 
@@ -1707,13 +1770,6 @@ _EOF_'
 		elif (( $G_HW_MODEL == 76 || $G_HW_MODEL == 79 ))
 		then
 			/boot/dietpi/func/dietpi-set_hardware serialconsole enable ttyFIQ0
-
-		# ROCK Pi S: Modern vs legacy kernel
-		elif (( $G_HW_MODEL == 73 ))
-		then
-			local tty='ttyS2'
-			[[ -f '/boot/dietpiEnv.txt' || -e '/dev/ttyS2' ]] || tty='ttyS0'
-			/boot/dietpi/func/dietpi-set_hardware serialconsole enable "$tty"
 
 		# Else for physical systems (but Sparky SBC): Enable on all present serial consoles
 		elif (( $G_HW_MODEL != 20 && $G_HW_MODEL != 75 && $G_HW_MODEL != 70 ))
@@ -1794,14 +1850,15 @@ _EOF_'
 		if (( $G_HW_MODEL == 70 ))
 		then
 			# Install latest kernel/drivers
-			G_EXEC curl -sSfL 'https://raw.githubusercontent.com/sparky-sbc/sparky-test/master/dragon_fly_check/uImage' -o /boot/uImage
-			G_EXEC curl -sSfLO 'https://raw.githubusercontent.com/sparky-sbc/sparky-test/master/dragon_fly_check/3.10.38.bz2'
+			G_EXEC curl -sSf 'https://raw.githubusercontent.com/sparky-sbc/sparky-test/master/dragon_fly_check/uImage' -o /boot/uImage
+			G_EXEC curl -sSfO 'https://raw.githubusercontent.com/sparky-sbc/sparky-test/master/dragon_fly_check/3.10.38.bz2'
+			G_EXEC rm -Rf /lib/modules/*
 			G_EXEC tar -xf 3.10.38.bz2 -C /lib/modules/
 			G_EXEC rm 3.10.38.bz2
 			# - USB audio update
-			G_EXEC curl -sSfL 'https://raw.githubusercontent.com/sparky-sbc/sparky-test/master/dsd-marantz/snd-usb-audio.ko' -o /lib/modules/3.10.38/kernel/sound/usb/snd-usb-audio.ko
+			G_EXEC curl -sSf 'https://raw.githubusercontent.com/sparky-sbc/sparky-test/master/dsd-marantz/snd-usb-audio.ko' -o /lib/modules/3.10.38/kernel/sound/usb/snd-usb-audio.ko
 			# - Ethernet update
-			G_EXEC curl -sSfL 'https://raw.githubusercontent.com/sparky-sbc/sparky-test/master/sparky-eth/ethernet.ko' -o /lib/modules/3.10.38/kernel/drivers/net/ethernet/acts/ethernet.ko
+			G_EXEC curl -sSf 'https://raw.githubusercontent.com/sparky-sbc/sparky-test/master/sparky-eth/ethernet.ko' -o /lib/modules/3.10.38/kernel/drivers/net/ethernet/acts/ethernet.ko
 
 			# Boot args
 			cat << '_EOF_' > /boot/uenv.txt
@@ -1861,6 +1918,9 @@ ExecStart=/var/lib/dietpi/services/dietpi-sparkysbc_ethernet.sh
 WantedBy=multi-user.target
 _EOF_
 			G_EXEC systemctl enable dietpi-sparkysbc_ethernet
+
+			# Apply Lighttpd as default webserver, since Apache does not run on Linux 3.10: https://dietpi.com/forum/t/allogui-not-working-apache-service-doesnt-start/15708
+			G_CONFIG_INJECT 'AUTO_SETUP_WEB_SERVER_INDEX=' 'AUTO_SETUP_WEB_SERVER_INDEX=-2' /boot/dietpi.txt
 
 		# RPi
 		elif (( $G_HW_MODEL < 10 )); then
@@ -1942,6 +2002,12 @@ _EOF_
 			# Disable Docker optimisations, since this has some performance drawbacks, enable on Docker install instead
 			G_CONFIG_INJECT 'docker_optimizations=' 'docker_optimizations=off' /boot/uEnv.txt
 
+		# NanoPi M3/T3/Fire3
+		elif (( $G_HW_MODEL == 62 ))
+		then
+			G_DIETPI-NOTIFY 2 'Enabling USB getget serial port'
+			G_EXEC eval 'echo '\''g_serial'\'' > /etc/modules-load.d/dietpi-usb-gadget-serial.conf'
+
 		# NanoPi R4S
 		elif (( $G_HW_MODEL == 47 ))
 		then
@@ -1996,20 +2062,13 @@ _EOF_
 		fi
 
 		# Apply cgroups-v2 workaround if the kernel does not support it: https://github.com/MichaIng/DietPi/issues/4705
-		# - This is required on Bullseye only, but we'll apply it on Buster as well to cover later distro upgrades, since the logic is too complicated for our upgrade blog article.
-		if [[ $G_HW_MODEL != 75 && ! $(find /lib/modules -mindepth 1 -maxdepth 1 -type d -name '5.[0-9]*') ]]
+		if (( $G_HW_MODEL != 75 )) && dpkg --compare-versions "$(find /lib/modules -mindepth 1 -maxdepth 1 -type d -name '[0-9]*' -printf '%f\n' | sort -Vr | head -1)" lt-nl 4.15
 		then
 			# Odroids
 			if [[ $G_HW_MODEL -gt 9 && $G_HW_MODEL -le 16 && -f '/boot/boot.ini' ]] && ! grep -q 'systemd.unified_cgroup_hierarchy=0' /boot/boot.ini
 			then
 				G_DIETPI-NOTIFY 2 'Forcing legacy cgroups v1 hierarchy on old kernel device'
 				G_EXEC sed -i '/^setenv bootargs "/s/"$/ systemd.unified_cgroup_hierarchy=0"/' /boot/boot.ini
-
-			# Sparky SBC
-			elif [[ $G_HW_MODEL == 70 && -f '/boot/uenv.txt' ]] && ! grep -q 'systemd.unified_cgroup_hierarchy=0' /boot/uenv.txt
-			then
-				G_DIETPI-NOTIFY 2 'Forcing legacy cgroups v1 hierarchy on old kernel device'
-				G_EXEC sed -i '/^bootargs=/s/$/ systemd.unified_cgroup_hierarchy=0/' /boot/uenv.txt
 
 			# ROCK Pi S
 			elif [[ $G_HW_MODEL == 73 && -f '/boot/boot.cmd' ]] && ! grep -q 'systemd.unified_cgroup_hierarchy=0' /boot/boot.cmd
@@ -2053,6 +2112,8 @@ _EOF_
 		local tmp_mode='disable'
 		if (( $WIFI_REQUIRED ))
 		then
+			# Switch to upstream regulatory database: https://bugs.debian.org/969897
+			G_EXEC update-alternatives --set regulatory.db /lib/firmware/regulatory.db-upstream
 			G_DIETPI-NOTIFY 2 'Generating default wpa_supplicant.conf'
 			/boot/dietpi/func/dietpi-wifidb 1
 			# Move to /boot so users can modify as needed for automation
@@ -2121,11 +2182,11 @@ _EOF_
 		G_DIETPI-NOTIFY 2 'Set init .install_stage to -1 (first boot)'
 		echo -1 > /boot/dietpi/.install_stage
 
-		G_DIETPI-NOTIFY 2 'Writing PREP information to file'
+		G_DIETPI-NOTIFY 2 'Writing image info to /boot/dietpi/.prep_info'
 		echo -e "$IMAGE_CREATOR\n$PREIMAGE_INFO" > /boot/dietpi/.prep_info
 
 		G_DIETPI-NOTIFY 2 'Disabling and clearing APT cache'
-		G_EXEC rm /etc/apt/apt.conf.d/98dietpi-prep
+		G_EXEC rm /etc/apt/apt.conf.d/98dietpi-installer
 		/boot/dietpi/func/dietpi-set_software apt-cache cache disable
 		/boot/dietpi/func/dietpi-set_software apt-cache clean
 
@@ -2135,7 +2196,7 @@ _EOF_
 		G_DIETPI-NOTIFY 2 'Clearing lost+found'
 		rm -Rfv /lost+found/{,.??,.[^.]}*
 
-		G_DIETPI-NOTIFY 2 'Clearing DietPi logs, written during PREP'
+		G_DIETPI-NOTIFY 2 'Clearing DietPi logs, written during install'
 		rm -Rfv /var/tmp/dietpi/logs/{,.??,.[^.]}*
 
 		G_DIETPI-NOTIFY 2 'Clearing items below tmpfs mount points'
@@ -2148,7 +2209,7 @@ _EOF_
 		G_DIETPI-NOTIFY 2 'Running general cleanup of misc files'
 		rm -Rfv /{root,home/*}/.{bash_history,nano_history,wget-hsts,cache,local,config,gnupg,viminfo,dbus,gconf,nano,vim,zshrc,oh-my-zsh} /etc/*- /var/{cache/debconf,lib/dpkg}/*-old /var/lib/dhcp/{,.??,.[^.]}*
 
-		# Remove PREP script
+		# Remove installer script
 		[[ -f $FP_SCRIPT ]] && G_EXEC rm -v "$FP_SCRIPT"
 
 		sync
@@ -2163,7 +2224,7 @@ _EOF_
 		G_DIETPI-NOTIFY 0 'Completed, disk can now be saved to .img for later use, or, reboot system to start first run of DietPi.'
 
 		# shellcheck disable=SC2016
-		G_DIETPI-NOTIFY 0 'To create an .img file, you can "poweroff" and run the following command from the host/external DietPi system:\n\t- bash -c "$(curl -sSfL https://raw.githubusercontent.com/MichaIng/DietPi/master/.build/images/dietpi-imager)"'
+		G_DIETPI-NOTIFY 0 'To create an .img file, you can "poweroff" and run the following command from the host/external DietPi system:\n\t- bash -c "$(curl -sSf https://raw.githubusercontent.com/MichaIng/DietPi/master/.build/images/dietpi-imager)"'
 
 	}
 

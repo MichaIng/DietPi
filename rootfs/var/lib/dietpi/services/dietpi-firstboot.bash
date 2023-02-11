@@ -246,7 +246,7 @@ _EOF_
 			/boot/dietpi/func/dietpi-wifidb 1
 
 			# Set WiFi country code
-			(( $G_DISTRO > 6 )) || /boot/dietpi/func/dietpi-set_hardware wificountrycode "$(sed -n '/^[[:blank:]]*AUTO_SETUP_NET_WIFI_COUNTRY_CODE=/{s/^[^=]*=//p;q}' /boot/dietpi.txt)"
+			/boot/dietpi/func/dietpi-set_hardware wificountrycode
 
 		# - Ethernet
 		elif (( $ethernet_enabled )); then

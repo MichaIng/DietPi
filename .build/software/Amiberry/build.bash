@@ -21,7 +21,7 @@ G_AGDUG
 G_AGI "${adeps_build[@]}"
 
 # Build libSDL2
-v_sdl='2.26.2'
+v_sdl='2.26.3'
 if [[ ! -d /tmp/SDL2-$v_sdl ]]
 then
 	G_DIETPI-NOTIFY 2 "Building libSDL2 version \e[33m$v_sdl"
@@ -59,7 +59,7 @@ else
 fi
 
 # Build libSDL2_ttf
-v_ttf='2.20.1'
+v_ttf='2.20.2'
 if [[ ! -d /tmp/SDL2_ttf-$v_ttf ]]
 then
 	G_DIETPI-NOTIFY 2 "Building libSDL2_ttf version \e[33m$v_ttf"
@@ -127,6 +127,8 @@ Documentation=https://github.com/BlitterStudio/amiberry/wiki
 [Service]
 WorkingDirectory=/mnt/dietpi_userdata/amiberry
 Environment=LD_LIBRARY_PATH=/mnt/dietpi_userdata/amiberry/lib
+StandardInput=tty
+TTYPath=/dev/tty3
 ExecStartPre=/bin/chvt 3
 ExecStart=/mnt/dietpi_userdata/amiberry/amiberry
 ExecStopPost=/bin/chvt 1
@@ -184,7 +186,7 @@ grep -q 'raspbian' /etc/os-release && DEPS_APT_VERSIONED=$(sed 's/+rp[it][0-9]\+
 # - control
 cat << _EOF_ > "$DIR/DEBIAN/control"
 Package: amiberry
-Version: $v_ami-dietpi1
+Version: $v_ami-dietpi3
 Architecture: $(dpkg --print-architecture)
 Maintainer: MichaIng <micha@dietpi.com>
 Date: $(date -u '+%a, %d %b %Y %T %z')
@@ -202,9 +204,10 @@ _EOF_
 G_CONFIG_INJECT 'Installed-Size: ' "Installed-Size: $(du -sk "$DIR" | mawk '{print $1}')" "$DIR/DEBIAN/control"
 
 # Build DEB package
-G_EXEC rm -Rf "$DIR.deb"
 G_EXEC_OUTPUT=1 G_EXEC dpkg-deb -b "$DIR"
-G_EXEC rm -Rf "$DIR"
+
+# Cleanup
+G_EXEC rm -R "$DIR"
 
 exit 0
 }

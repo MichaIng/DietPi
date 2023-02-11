@@ -56,6 +56,8 @@
 	command -v kodi > /dev/null && alias startkodi='/boot/dietpi/misc/start_kodi'
 	[[ -f '/usr/games/opentyrian/run' ]] && alias opentyrian='/usr/games/opentyrian/run'
 	[[ -f '/mnt/dietpi_userdata/dxx-rebirth/run.sh' ]] && alias dxx-rebirth='/mnt/dietpi_userdata/dxx-rebirth/run.sh'
+	[[ -f '/var/www/owncloud/occ' ]] && alias occ='sudo -u www-data php /var/www/owncloud/occ'
+	[[ -f '/var/www/nextcloud/occ' ]] && alias ncc='sudo -u www-data php /var/www/nextcloud/occ'
 	# - 1337 moments ;)
 	alias 1337='echo "Indeed, you are =)"'
 

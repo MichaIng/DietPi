@@ -58,7 +58,7 @@
 	[[ -f '/boot/dietpi/.version' ]] && . /boot/dietpi/.version
 	# - Assign defaults/code version as fallback
 	[[ $G_DIETPI_VERSION_CORE ]] || G_DIETPI_VERSION_CORE=8
-	[[ $G_DIETPI_VERSION_SUB ]] || G_DIETPI_VERSION_SUB=13
+	[[ $G_DIETPI_VERSION_SUB ]] || G_DIETPI_VERSION_SUB=14
 	[[ $G_DIETPI_VERSION_RC ]] || G_DIETPI_VERSION_RC=2
 	[[ $G_GITBRANCH ]] || G_GITBRANCH='master'
 	[[ $G_GITOWNER ]] || G_GITOWNER='MichaIng'
@@ -433,9 +433,6 @@ $grey─────────────────────────
 	#-----------------------------------------------------------------------------------
 	# sudo wrapper that ensures DietPi-Globals with G_* commands are loaded
 	G_SUDO(){ local input=$*; sudo bash -c ". /boot/dietpi/func/dietpi-globals && $input"; }
-	# ownCloud/Nextcloud CLI: Implemented as functions to make then available in scripts
-	[[ -f '/var/www/owncloud/occ' ]] && occ(){ sudo -u www-data php /var/www/owncloud/occ "$@"; }
-	[[ -f '/var/www/nextcloud/occ' ]] && ncc(){ sudo -u www-data php /var/www/nextcloud/occ "$@"; }
 
 	#-----------------------------------------------------------------------------------
 	# Whiptail (Whippy-da-whip-whip-whip tail!)
@@ -833,14 +830,17 @@ $grey─────────────────────────
 	# - $G_EXEC_ARRAY_ACTION[]	| Associative array, containing uneven $G_EXEC_ARRAY_TEXT[] values as keys and related commands as values
 	G_EXEC(){
 
-		local exit_code fp_log='/tmp/G_EXEC_LOG' attempt=1 acommand=("$@") ecommand=${*//\\/\\\\}
+		local exit_code fp_log='/tmp/G_EXEC_LOG' attempt=1 acommand=("$@") ecommand
 
 		# Enter retry loop
 		while :
 		do
 			declare -F G_EXEC_PRE_FUNC &> /dev/null && G_EXEC_PRE_FUNC
+			# Exit immediately if exit_code=0 was set by G_EXEC_PRE_FUNC
+			[[ $exit_code == 0 ]] && break
 
 			# Execute command, store output to $fp_log file and store exit code to $exit_code variable
+			ecommand=${acommand[*]//\\/\\\\}
 			# - Print full command output if $G_EXEC_OUTPUT=1 is given
 			if [[ $G_EXEC_OUTPUT == 1 ]]; then
 
@@ -904,7 +904,7 @@ $grey─────────────────────────
 - Hardware       | $G_HW_MODEL_NAME (ID=$G_HW_MODEL)
 - Kernel version | \`$(uname -a)\`
 - Distro         | $G_DISTRO_NAME (ID=$G_DISTRO${G_RASPBIAN:+,RASPBIAN=$G_RASPBIAN})
-- Command        | \`$*\`
+- Command        | \`${acommand[*]}\`
 - Exit code      | $exit_code
 - Software title | $G_PROGRAM_NAME
 #### Steps to reproduce:
@@ -943,7 +943,7 @@ $log_content
 				# Show "Ignore" on cancel button if $G_EXEC_NOEXIT=1 is given, else "Exit"
 				[[ $G_EXEC_NOEXIT == 1 ]] && G_WHIP_BUTTON_CANCEL_TEXT='Ignore' || G_WHIP_BUTTON_CANCEL_TEXT='Exit'
 				G_WHIP_DEFAULT_ITEM=${last_whip_menu_item:-Retry}
-				G_WHIP_MENU "${G_EXEC_DESC:+$(mawk '{gsub("\\\e[[0-9][;0-9]*m","");print}' <<< "$G_EXEC_DESC")\n} - Command: $*
+				G_WHIP_MENU "${G_EXEC_DESC:+$(mawk '{gsub("\\\e[[0-9][;0-9]*m","");print}' <<< "$G_EXEC_DESC")\n} - Command: ${acommand[*]}
  - Exit code: $exit_code
  - DietPi version: $dietpi_version | HW_MODEL: $G_HW_MODEL | HW_ARCH: $G_HW_ARCH | DISTRO: $G_DISTRO
 ${image_creator:+ - Image creator: $image_creator\n}${preimage_name:+ - Pre-image: $preimage_name\n} - Error log:
@@ -980,7 +980,7 @@ Press any key to continue...'
 
 				elif [[ $G_WHIP_RETURNED_VALUE == 'Change command' ]]; then
 
-					G_WHIP_DEFAULT_ITEM=$*
+					G_WHIP_DEFAULT_ITEM=${acommand[*]}
 					if G_WHIP_INPUTBOX 'Please enter/alter the command to be executed.
 \nNB: Please only use this solution if you know for sure that it will not cause follow up issues from the originating script. It will e.g. allow you to continue a certain software install, but if you edit the download link, the originating script might expect files which are not present.
 \nUse this work caution!'; then
@@ -1115,6 +1115,9 @@ Press any key to continue...'
 	# - Uses CONFIG_G_CHECK_URL_TIMEOUT + CONFIG_G_CHECK_URL_ATTEMPTS from dietpi.txt, else defaults to 10 seconds and 2 attempts (1 retry).
 	G_CHECK_NET()
 	{
+		# Store original G_EXEC_PRE_FUNC if any was passed
+		declare -F G_EXEC_PRE_FUNC &> /dev/null && eval "G_EXEC_PRE_FUNC_ORIG()$(declare -f G_EXEC_PRE_FUNC | tail +2)"
+
 		# Obtain timeout
 		local timeout=$(sed -n '/^[[:blank:]]*CONFIG_G_CHECK_URL_TIMEOUT=/{s/^[^=]*=//p;q}' /boot/dietpi.txt)
 		disable_error=1 G_CHECK_VALIDINT "$timeout" 0 || timeout=10
@@ -1124,57 +1127,83 @@ Press any key to continue...'
 		disable_error=1 G_CHECK_VALIDINT "$attempts" 1 || attempts=2
 		local retries=$(( $attempts - 1 )) # 2 attempts = 1 retry
 
-		# Obtain IPv4 test address
-		local ip=$(sed -n '/^[[:blank:]]*CONFIG_CHECK_CONNECTION_IP=/{s/^[^=]*=//p;q}' /boot/dietpi.txt)
-		[[ $ip ]] || ip='9.9.9.9'
-
-		# Check IPv4 connectivity
+		### Check IPv4 connectivity ###
+		# Add special options to the error handler menu
 		G_EXEC_ARRAY_TEXT=(
 
 			'Double timeout' ': Retry with doubled timeout for ping to wait for a reply'
+			'Change IPv4 address' ': Change the IPv4 address used for this test'
 			'Network settings' ': Enter dietpi-config network options'
 		)
 		declare -A G_EXEC_ARRAY_ACTION=(
 
 			['Double timeout']='((acommand[4]*=2)); attempt=1; continue 2'
-			['Network settings']='/boot/dietpi/dietpi-config 8 1'
+			['Change IPv4 address']='/boot/dietpi/dietpi-config 20'
+			['Network settings']='/boot/dietpi/dietpi-config 8'
 		)
+		# Obtain IPv4 test address on every retry
+		G_EXEC_PRE_FUNC()
+		{
+			declare -F G_EXEC_PRE_FUNC_ORIG &> /dev/null && G_EXEC_PRE_FUNC_ORIG
+			acommand[5]=$(sed -n '/^[[:blank:]]*CONFIG_CHECK_CONNECTION_IP=/{s/^[^=]*=//p;q}' /boot/dietpi.txt)
+			[[ ${acommand[5]} ]] || acommand[5]='9.9.9.9'
+		}
+		# Run check with given timeout and retries
 		G_EXEC_RETRIES=$retries
-		G_EXEC_DESC='Checking IPv4 network connectivity' G_EXEC ping -4nc 1 -W "$timeout" "$ip"
+		G_EXEC_DESC='Checking IPv4 network connectivity' G_EXEC ping -4nc 1 -W "$timeout" 'IP'
 
-		# Do IPv6 connectivity check if an IPv6 default route is assigned
-		if G_GET_NET -6 -q gateway > /dev/null
-		then
-			# Obtain IPv6 test address
-			local ip=$(sed -n '/^[[:blank:]]*CONFIG_CHECK_CONNECTION_IPV6=/{s/^[^=]*=//p;q}' /boot/dietpi.txt)
-			[[ $ip ]] || ip='2620:fe::fe'
+		### Check IPv6 connectivity ###
+		# Add special options to the error handler menu
+		G_EXEC_ARRAY_TEXT=(
 
-			# Check IPv6 connectivity
-			G_EXEC_ARRAY_TEXT=(
+			'Double timeout' ': Retry with doubled timeout for ping to wait for a reply'
+			'Change IPv6 address' ': Change the IPv6 address used for this test'
+			'Disable IPv6' ': Disable IPv6 on your system and continue'
+			'Network settings' ': Enter dietpi-config network options'
+		)
+		declare -A G_EXEC_ARRAY_ACTION=(
 
-				'Double timeout' ': Retry with doubled timeout for ping to wait for a reply'
-				'Disable IPv6' ': Disable IPv6 on your system and continue'
-				'Network settings' ': Enter dietpi-config network options'
-			)
-			declare -A G_EXEC_ARRAY_ACTION=(
-
-				['Double timeout']='((acommand[4]*=2)); attempt=1; continue 2'
-				['Disable IPv6']='/boot/dietpi/func/dietpi-set_hardware enableipv6 0; acommand=(:); attempt=1; continue 2'
-				['Network settings']='/boot/dietpi/dietpi-config 8 1'
-			)
-			G_EXEC_RETRIES=$retries
-			G_EXEC_DESC='Checking IPv6 network connectivity' G_EXEC ping -6nc 1 -W "$timeout" "$ip"
-		fi
-
-		# Obtain test domain
-		local domain=$(sed -n '/^[[:blank:]]*CONFIG_CHECK_DNS_DOMAIN=/{s/^[^=]*=//p;q}' /boot/dietpi.txt)
-		[[ $domain ]] || domain='dns9.quad9.net'
-
-		# Check DNS resolver
-		G_EXEC_ARRAY_TEXT=('Network settings' ': Enter dietpi-config network options')
-		declare -A G_EXEC_ARRAY_ACTION=(['Network settings']='/boot/dietpi/dietpi-config 8 1')
+			['Double timeout']='((acommand[4]*=2)); attempt=1; continue 2'
+			['Change IPv6 address']='/boot/dietpi/dietpi-config 21'
+			['Disable IPv6']='/boot/dietpi/func/dietpi-set_hardware enableipv6 0; acommand=(:); attempt=1; continue 2'
+			['Network settings']='/boot/dietpi/dietpi-config 8'
+		)
+		# Exit error handler loop if no IPv6 default route is assigned, otherwise obtain IPv6 test address on every retry
+		G_EXEC_PRE_FUNC()
+		{
+			declare -F G_EXEC_PRE_FUNC_ORIG &> /dev/null && G_EXEC_PRE_FUNC_ORIG
+			G_GET_NET -6 -q gateway > /dev/null || { exit_code=0; return 0; }
+			acommand[5]=$(sed -n '/^[[:blank:]]*CONFIG_CHECK_CONNECTION_IPV6=/{s/^[^=]*=//p;q}' /boot/dietpi.txt)
+			[[ ${acommand[5]} ]] || acommand[5]='2620:fe::fe'
+		}
+		# Run check with given timeout and retries
 		G_EXEC_RETRIES=$retries
-		G_EXEC_DESC='Checking DNS resolver' G_EXEC getent hosts "$domain"
+		G_EXEC_DESC='Checking IPv6 network connectivity' G_EXEC ping -6nc 1 -W "$timeout" 'IP'
+
+		### Check DNS resolver ###
+		# Add special options to the error handler menu
+		G_EXEC_ARRAY_TEXT=(
+
+			'Change domain name' ': Change the domain name used for this test'
+			'Network settings' ': Enter dietpi-config network options'
+		)
+		declare -A G_EXEC_ARRAY_ACTION=(
+
+			['Change domain name']='/boot/dietpi/dietpi-config 22'
+			['Network settings']='/boot/dietpi/dietpi-config 8'
+		)
+		# Obtain test domain on every retry
+		G_EXEC_PRE_FUNC()
+		{
+			declare -F G_EXEC_PRE_FUNC_ORIG &> /dev/null && G_EXEC_PRE_FUNC_ORIG
+			acommand[2]=$(sed -n '/^[[:blank:]]*CONFIG_CHECK_DNS_DOMAIN=/{s/^[^=]*=//p;q}' /boot/dietpi.txt)
+			[[ ${acommand[2]} ]] || acommand[2]='dns9.quad9.net'
+		}
+		# Run check with given retries
+		G_EXEC_RETRIES=$retries
+		G_EXEC_DESC='Checking DNS resolver' G_EXEC getent hosts 'DOMAIN'
+
+		unset -f G_EXEC_PRE_FUNC_ORIG
 	}
 
 	# URL connection test
@@ -1199,7 +1228,7 @@ Press any key to continue...'
 		declare -A G_EXEC_ARRAY_ACTION=(
 
 			['Double timeout']='((acommand[2]*=2)); attempt=1; continue 2'
-			['Network settings']='/boot/dietpi/dietpi-config 8 1'
+			['Network settings']='/boot/dietpi/dietpi-config 8'
 		)
 		# "--retry" only applies on "a timeout, an FTP 4xx response code or an HTTP 5xx response code", hence we loop ourself.
 		G_EXEC_RETRIES=$(( $attempts - 1 )) # 2 attempts = 1 retry
@@ -1271,7 +1300,7 @@ Press any key to continue...'
 			[[ $fam != '-6' ]] && read -r gateway if < <(ip r l 0/0 ${iface:+dev "$iface"} | mawk '{print $3,$5;exit}')
 			[[ ! $gateway && $fam != '-4' ]] && read -r gateway if < <(ip -6 r l ::/0 ${iface:+dev "$iface"} | mawk '{print $3,$5;exit}')
 
-			# ip r does not print the interface name if one was given, so used the given one to check for type.
+			# ip r does not print the interface name if one was given, so use the given one to check for type.
 			[[ $iface ]] && if=$iface
 
 			# Print default gateway if requested
@@ -1430,7 +1459,7 @@ Press any key to continue...'
 	#-----------------------------------------------------------------------------------
 	# APT: Non-interactive and error-handled wrappers for apt-get commands
 	#-----------------------------------------------------------------------------------
-	# Check for missing kernel modules, e.g. after a kernel upgrade, and in case create a flag
+	# Check for missing kernel modules, e.g. after a kernel upgrade, but exclude containers
 	G_CHECK_KERNEL()
 	{
 		[[ $G_HW_MODEL == 75 || -d /lib/modules/$(uname -r) ]] || grep -zaq '^container=' /proc/1/environ || return 1
@@ -1438,71 +1467,66 @@ Press any key to continue...'
 	}
 
 	# apt-get install
-	G_AGI(){
-
+	G_AGI()
+	{
 		# Return if no argument given
-		(( $# )) || { G_DIETPI-NOTIFY 2 'No input package given. Aborting...'; return 0; }
+		(( $# )) || { G_DIETPI-NOTIFY 2 'G_AGI | No input package given. Aborting...'; return 0; }
 
 		G_CHECK_ROOT_USER 1
 
-		G_EXEC_DESC="\e[0mAPT install for: \e[33m$*\e[0m"
+		G_EXEC_DESC="\e[0mAPT install \e[33m$*\e[0m"
 		DEBIAN_FRONTEND=noninteractive G_EXEC_OUTPUT=1 G_EXEC_OUTPUT_COL='\e[90m' G_EXEC apt-get -y --allow-change-held-packages install "$@"
 
 		return $?
-
 	}
 
 	# apt-get purge
-	G_AGP(){
-
+	G_AGP()
+	{
 		# Return if no argument given
-		(( $# )) || { G_DIETPI-NOTIFY 2 'No input package given. Aborting...'; return 0; }
+		(( $# )) || { G_DIETPI-NOTIFY 2 'G_AGP | No input package given. Aborting...'; return 0; }
 
 		G_CHECK_ROOT_USER 1
 
-		# Attempt to purge only installed packages, check on every G_EXEC loop, force succeed if none were found, to avoid related apt-get error
-		declare -F G_EXEC_PRE_FUNC &> /dev/null && eval "G_EXEC_PRE_FUNC_ORIG()$(declare -f G_EXEC_PRE_FUNC | tail -n +2)"
-		G_EXEC_PRE_FUNC(){
-
+		# Attempt to purge only installed packages, check on every G_EXEC loop, force succeed if none were found
+		declare -F G_EXEC_PRE_FUNC &> /dev/null && eval "G_EXEC_PRE_FUNC_ORIG()$(declare -f G_EXEC_PRE_FUNC | tail +2)"
+		G_EXEC_PRE_FUNC()
+		{
+			declare -F G_EXEC_PRE_FUNC_ORIG &> /dev/null && G_EXEC_PRE_FUNC_ORIG
 			local apackages=()
 			mapfile -t apackages < <(dpkg --get-selections "${acommand[@]:4}" 2> /dev/null | mawk '{print $1}')
 			# shellcheck disable=SC2015
-			[[ ${apackages[0]} ]] && acommand=("${acommand[@]::4}" "${apackages[@]}") || acommand=(G_DIETPI-NOTIFY 2 'None of the requested packages are currently installed. Aborting...')
-			declare -F G_EXEC_PRE_FUNC_ORIG &> /dev/null && G_EXEC_PRE_FUNC_ORIG
-
+			[[ ${apackages[0]} ]] && acommand=("${acommand[@]::4}" "${apackages[@]}") || acommand=(G_DIETPI-NOTIFY 2 'None of the packages are currently installed. Aborting...')
 		}
 
-		G_EXEC_DESC="\e[0mAPT purge for: \e[33m$*\e[0m"
+		G_EXEC_DESC="\e[0mAPT purge \e[33m$*\e[0m"
 		DEBIAN_FRONTEND=noninteractive G_EXEC_OUTPUT=1 G_EXEC_OUTPUT_COL='\e[90m' G_EXEC apt-get -y --allow-change-held-packages autopurge "$@"
 		local exit_code=$?
 
 		unset -f G_EXEC_PRE_FUNC_ORIG
 		return "$exit_code"
-
 	}
 
 	# apt-get autopurge
-	G_AGA(){
-
+	G_AGA()
+	{
 		G_CHECK_ROOT_USER 1
 
-		G_EXEC_DESC='\e[0mAPT autopurge'
+		G_EXEC_DESC="\e[0mAPT autopurge${*:+ \e[33m$*\e[0m}"
 		DEBIAN_FRONTEND=noninteractive G_EXEC_OUTPUT=1 G_EXEC_OUTPUT_COL='\e[90m' G_EXEC apt-get -y autopurge "$@"
 
 		return $?
-
 	}
 
 	# apt-get -f install
-	G_AGF(){
-
+	G_AGF()
+	{
 		G_CHECK_ROOT_USER 1
 
-		G_EXEC_DESC='\e[0mAPT fix'
-		DEBIAN_FRONTEND=noninteractive G_EXEC_OUTPUT=1 G_EXEC_OUTPUT_COL='\e[90m' G_EXEC apt-get -y --allow-change-held-packages -f install
+		G_EXEC_DESC="\e[0mAPT fix${*:+ \e[33m$*\e[0m}"
+		DEBIAN_FRONTEND=noninteractive G_EXEC_OUTPUT=1 G_EXEC_OUTPUT_COL='\e[90m' G_EXEC apt-get -y --allow-change-held-packages -f install "$@"
 
 		return $?
-
 	}
 
 	# apt-get clean + update
@@ -1511,20 +1535,26 @@ Press any key to continue...'
 	# - $1 = -v: Store number of available APT upgrades to variable, which defaults to: G_AGUP_COUNT
 	#	$2 = Optional variable name to store number of available APT upgrades to
 	# shellcheck disable=SC2120
-	G_AGUP(){
-
+	G_AGUP()
+	{
 		G_CHECK_ROOT_USER 1
 
 		# Clean cache before every update, which can corrupt and gets fully rewritten anyway
-		declare -F G_EXEC_PRE_FUNC &> /dev/null && eval "G_EXEC_PRE_FUNC_ORIG()$(declare -f G_EXEC_PRE_FUNC | tail -n +2)"
-		G_EXEC_PRE_FUNC(){ apt-get clean; declare -F G_EXEC_PRE_FUNC_ORIG &> /dev/null && G_EXEC_PRE_FUNC_ORIG; }
+		declare -F G_EXEC_PRE_FUNC &> /dev/null && eval "G_EXEC_PRE_FUNC_ORIG()$(declare -f G_EXEC_PRE_FUNC | tail +2)"
+		G_EXEC_PRE_FUNC(){ declare -F G_EXEC_PRE_FUNC_ORIG &> /dev/null && G_EXEC_PRE_FUNC_ORIG; apt-get clean; }
 
-		# Fail when some index files couldn't be downloaded, e.g. due to DNS failure. Currently apt-get update prints a warning but does not return an error code.
-		declare -F G_EXEC_POST_FUNC &> /dev/null && eval "G_EXEC_POST_FUNC_ORIG()$(declare -f G_EXEC_POST_FUNC | tail -n +2)"
-		G_EXEC_POST_FUNC(){ [[ $exit_code == 0 && $(<"$fp_log") == *'W: Some index files failed to download.'* ]] && exit_code=255; declare -F G_EXEC_POST_FUNC_ORIG &> /dev/null && G_EXEC_POST_FUNC_ORIG; }
+		# Fail when some index files couldn't be downloaded, e.g. due to DNS failure. By default, apt-get update prints a warning but does not return an error code.
+		local eany=()
+		if (( $G_DISTRO < 6 ))
+		then
+			declare -F G_EXEC_POST_FUNC &> /dev/null && eval "G_EXEC_POST_FUNC_ORIG()$(declare -f G_EXEC_POST_FUNC | tail +2)"
+			G_EXEC_POST_FUNC(){ [[ $exit_code == 0 && $(<"$fp_log") == *'W: Some index files failed to download.'* ]] && exit_code=255; declare -F G_EXEC_POST_FUNC_ORIG &> /dev/null && G_EXEC_POST_FUNC_ORIG; }
+		else
+			eany=('-eany')
+		fi
 
 		G_EXEC_DESC='\e[0mAPT update'
-		G_EXEC_OUTPUT=1 G_EXEC_OUTPUT_COL='\e[90m' G_EXEC apt-get -y update
+		G_EXEC_OUTPUT=1 G_EXEC_OUTPUT_COL='\e[90m' G_EXEC apt-get -y "${eany[@]}" update
 		local exit_code=$?
 
 		unset -f G_EXEC_{PRE,POST}_FUNC_ORIG
@@ -1560,38 +1590,35 @@ Press any key to continue...'
 		fi
 
 		return "$exit_code"
-
 	}
 
 	# apt-get upgrade
-	G_AGUG(){
-
+	G_AGUG()
+	{
 		G_CHECK_ROOT_USER 1
 
-		G_EXEC_DESC='\e[0mAPT upgrade'
-		DEBIAN_FRONTEND=noninteractive G_EXEC_OUTPUT=1 G_EXEC_OUTPUT_COL='\e[90m' G_EXEC apt-get -y upgrade
+		G_EXEC_DESC="\e[0mAPT upgrade${*:+ \e[33m$*\e[0m}"
+		DEBIAN_FRONTEND=noninteractive G_EXEC_OUTPUT=1 G_EXEC_OUTPUT_COL='\e[90m' G_EXEC apt-get -y --with-new-pkgs upgrade "$@"
 
 		return $?
-
 	}
 
 	# apt-get dist-upgrade
-	G_AGDUG(){
-
+	G_AGDUG()
+	{
 		G_CHECK_ROOT_USER 1
 
-		G_EXEC_DESC='\e[0mAPT dist-upgrade'
-		DEBIAN_FRONTEND=noninteractive G_EXEC_OUTPUT=1 G_EXEC_OUTPUT_COL='\e[90m' G_EXEC apt-get -y dist-upgrade
+		G_EXEC_DESC="\e[0mAPT dist-upgrade${*:+ \e[33m$*\e[0m}"
+		DEBIAN_FRONTEND=noninteractive G_EXEC_OUTPUT=1 G_EXEC_OUTPUT_COL='\e[90m' G_EXEC apt-get -y dist-upgrade "$@"
 
 		return $?
-
 	}
 
 	# Checks for required APT packages, installs if needed.
 	# $@ = list of required packages
 	#	NB: automatically error handled (G_EXEC)
-	G_AG_CHECK_INSTALL_PREREQ(){
-
+	G_AG_CHECK_INSTALL_PREREQ()
+	{
 		# Return if no argument given
 		(( $# )) || return 0
 
@@ -1602,17 +1629,14 @@ Press any key to continue...'
 		local i apackages=()
 		for i in "$@"
 		do
-			dpkg-query -s "$i" &> /dev/null && continue
-			apackages+=("$i")
+			dpkg-query -s "$i" &> /dev/null || apackages+=("$i")
 		done
-
 		[[ ${apackages[0]} ]] || return 0
 
 		G_AGUP
 		G_AGI "${apackages[@]}"
-		exit_code=$?
-		return $?
 
+		return $?
 	}
 
 	#-----------------------------------------------------------------------------------
@@ -1656,7 +1680,6 @@ Press any key to continue...'
 				'/sys/class/hwmon/hwmon0/temp2_input'
 				'/sys/class/hwmon/hwmon0/temp1_input' # Odroid C1 Armbian legacy Linux 5.4.40: https://dietpi.com/phpbb/viewtopic.php?p=24860#p24860
 				'/sys/class/thermal/thermal_zone1/temp' # Roseapple Pi, probably OrangePi's: https://dietpi.com/phpbb/viewtopic.php?t=8677
-
 			)
 
 			# Coders NB: Do NOT quote the array to allow coretemp file paths glob expansion!
