@@ -13,7 +13,7 @@ Are you able to:
 - Contribute to DietPi with programming on GitHub?
 - Suggest new software that we can add to the `dietpi-software` install system?
 
-If so, let us know!  
+If so, let us know!
 We are always looking for talented people who believe in the DietPi project, and, wish to contribute in any way you can.
 
 - Send us an email: <micha@dietpi.com>
