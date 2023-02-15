@@ -1,0 +1,74 @@
+name: quartz64
+on: workflow_dispatch
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+permissions: {}
+jobs:
+  build:
+    # https://github.com/actions/virtual-environments
+    runs-on: ubuntu-22.04
+    defaults:
+      run:
+        shell: sh
+        working-directory: /dev/shm
+    env:
+      linux_version: '6.1.12'
+      CROSS_COMPILE: 'aarch64-none-linux-gnu-'
+      ARCH: 'arm64'
+    steps:
+    - name: Setup build
+      run:
+        apt-get -q update
+        apt-get -qq install make gcc libc6-dev bc bison flex libssl-dev libncurses5-dev libelf-dev wget time xz-utils device-tree-compiler kmod swig zip &
+        curl -sSfO 'https://gitlab.com/MichaIng/quartz64_ci/-/archive/DietPi/quartz64_ci-DietPi.tar.bz2' &
+        curl -sSfO "https://git.kernel.org/pub/scm/linux/kernel/git/stable/linux.git/snapshot/linux-$linux_version.tar.gz" &
+        curl -sSfO 'https://gitlab.com/MichaIng/u-boot/-/archive/DietPi/u-boot-DietPi.tar.bz2' &
+        wait
+        tar xf quartz64_ci-DietPi.tar.bz2 &
+        tar xf "linux-$linux_version.tar.gz" &
+        tar xf quartz64_ci-DietPi.tar.bz2 &
+        wait
+        rm quartz64_ci-DietPi.tar.bz2 "linux-$linux_version.tar.gz" quartz64_ci-DietPi.tar.bz2
+        md5sum --check quartz64_ci-DietPi/gcc-arm-10.2-2020.11-x86_64-aarch64-none-linux-gnu.tar.xz.asc
+        mv quartz64_ci-DietPi/quartz64_defconfig "linux-$linux_version/arch/arm64/configs/quartz64_defconfig"
+        mkdir artifacts
+    - name: Build Linux
+      run: |
+        mkdir modules
+        export PATH="$PWD/quartz64_ci-DietPi/gcc-arm-10.2-2020.11-x86_64-aarch64-none-linux-gnu/bin:$PATH" INSTALL_MOD_PATH="$PWD/modules"
+        cd "linux-$linux_version"
+        make quartz64_defconfig
+        make -j$(nproc)
+        mv arch/arm64/boot/Image arch/arm64/boot/dts/rockchip/rk356*.dtb ../artifacts/
+        make modules_install
+        cd ../modules
+        tar -czf kernel-modules.tar.gz lib
+        mv kernel-modules.tar.gz ../artifacts/
+    - name: Build U-Boot
+      run: |
+        mkdir artifacts/mainline-u-boot
+        export PATH="$PWD/quartz64_ci-DietPi/gcc-arm-10.2-2020.11-x86_64-aarch64-none-linux-gnu/bin:$PATH" BL31='rk3568_bl31_v1.28.elf'
+        cd u-boot-DietPi
+        curl -sSfO 'https://raw.githubusercontent.com/JeffyCN/rockchip_mirrors/6186debcac95553f6b311cee10669e12c9c9963d/bin/rk35/rk3568_bl31_v1.28.elf' &
+        curl -sSfo 'rk3568_ddr_1560MHz_v1.12.bin' 'https://raw.githubusercontent.com/JeffyCN/rockchip_mirrors/ddf03c1d80b33dac72a33c4f732fc5849b47ff99/bin/rk35/rk3568_ddr_1560MHz_v1.13.bin' &
+        wait
+        make quartz64-a-rk3566_defconfig
+        make -j$(nproc)
+        mv u-boot-rockchip.bin ../artifacts/mainline-u-boot/quartz64-a-u-boot-rockchip.bin
+        make quartz64-b-rk3566_defconfig
+        make -j$(nproc)
+        mv u-boot-rockchip.bin ../artifacts/mainline-u-boot/quartz64-b-u-boot-rockchip.bin
+        make soquartz-rk3566_defconfig
+        make -j$(nproc)
+        mv u-boot-rockchip.bin ../artifacts/mainline-u-boot/soquartz-u-boot-rockchip.bin
+    - name: Upload
+      run: |
+        [ -d ~/.ssh ] || mkdir ~/.ssh
+        umask 377
+        echo '${{ secrets.KNOWN_HOSTS }}' > ~/.ssh/known_hosts
+        echo '${{ secrets.SSH_KEY }}' > ~/.ssh/id_ed25519
+        zip -9r artefacts.zip artefacts
+        curl -T artefacts.zip --key ~/.ssh/id_ed25519 '${{ secrets.UPLOAD_URL }}all/'
+        curl 'https://api.cloudflare.com/client/v4/zones/${{ secrets.CF_ZONE }}/purge_cache' -H 'Authorization: Bearer ${{ secrets.CF_TOKEN }}' -H 'Content-Type: application/json' \
+        --data '{"files":["https://dietpi.com/downloads/binaries/testing/","https://dietpi.com/downloads/binaries/testing/artefacts.zip"]}'
