@@ -8,8 +8,7 @@ deps=() c7zip='7zr'
 (( $G_HW_ARCH == 1 )) && deps+=('zip')
 
 G_AGUP
-G_AGDUG
-G_AGI gcc libc6-dev "${deps[@]}"
+G_AGDUG gcc libc6-dev "${deps[@]}"
 
 # Download & Build
 # shellcheck disable=SC1091
