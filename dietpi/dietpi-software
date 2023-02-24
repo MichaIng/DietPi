@@ -6146,7 +6146,7 @@ _EOF_
 			else
 				# Since v11 is not yet released, pull latest pre-release
 				local fallback_url='https://github.com/airsonic-advanced/airsonic-advanced/releases/download/11.0.0-SNAPSHOT.20220625052932/airsonic.war'
-				Download_Install "$(curl -sSfL 'https://api.github.com/repos/airsonic-advanced/airsonic-advanced/releases' | mawk -F\" '/"browser_download_url": .*\/airsonic\.war"/{print $4;exit}')" /mnt/dietpi_userdata/airsonic/airsonic.war
+				Download_Install "$(curl -sSfL 'https://api.github.com/repos/airsonic-advanced/airsonic-advanced/releases' | mawk -F\" '/"browser_download_url": .*\/airsonic\.war"/{print $4}' | head -1)" /mnt/dietpi_userdata/airsonic/airsonic.war
 			fi
 
 			# User
@@ -9002,7 +9002,7 @@ _EOF_
 		if To_Install 137 # mjpg-streamer
 		then
 			# Build dependencies
-			aDEPS=('make' 'cmake' 'gcc' 'libc6-dev' 'libjpeg-dev')
+			aDEPS=('make' 'cmake' 'gcc' 'libc6-dev' 'libjpeg62-turbo-dev')
 			# - On RPi, add RPi Camera support by default
 			(( $G_HW_MODEL > 9 )) || aDEPS+=('libraspberrypi-dev')
 
@@ -10110,7 +10110,7 @@ _EOF_
 			G_CHECK_URL "$url"
 
 			# Python build dependencies for ARM
-			(( $G_HW_ARCH < 10 )) && G_AGI libffi-dev libssl-dev zlib1g-dev libjpeg-dev
+			(( $G_HW_ARCH < 10 )) && G_AGI libffi-dev libssl-dev zlib1g-dev libjpeg62-turbo-dev
 
 			if [[ -d '/mnt/dietpi_userdata/htpc-manager/.git' ]]
 			then
@@ -10989,39 +10989,48 @@ _EOF_
 				G_AGI "${aDEPS[@]}"
 				aDEPS=()
 			else
-				local fallback_url='https://github.com/TasmoAdmin/TasmoAdmin/releases/download/v2.4.2/tasmoadmin_v2.4.2.tar.gz'
-				Download_Install "$(curl -sSfL 'https://api.github.com/repos/TasmoAdmin/TasmoAdmin/releases/latest' | mawk -F\" '/"browser_download_url": ".*\/tasmoadmin_v[^"\/]*\.tar\.gz"$/{print $4}')"
+				# v3 drops PHP 7.4 support: https://github.com/TasmoAdmin/TasmoAdmin/blob/master/UPGRADE.md#from-2---3
+				if (( $G_DISTRO > 6 ))
+				then
+					local fallback_url='https://github.com/TasmoAdmin/TasmoAdmin/releases/download/v2.4.2/tasmoadmin_v2.4.2.tar.gz'
+					Download_Install "$(curl -sSfL 'https://api.github.com/repos/TasmoAdmin/TasmoAdmin/releases/latest' | mawk -F\" '/"browser_download_url": ".*\/tasmoadmin_v[^"\/]*\.tar\.gz"$/{print $4}')"
+
+				# v2 drops PHP <7.4 support: https://github.com/TasmoAdmin/TasmoAdmin/releases/tag/v2.0.0
+				elif (( $G_DISTRO > 5 ))
+				else
+					local fallback_url='https://github.com/TasmoAdmin/TasmoAdmin/releases/download/v2.4.2/tasmoadmin_v2.4.2.tar.gz'
+					Download_Install "$(curl -sSfL 'https://api.github.com/repos/TasmoAdmin/TasmoAdmin/releases' | mawk -F\" '/"browser_download_url": ".*\/tasmoadmin_v2\.[^"\/]*\.tar\.gz"$/{print $4}' | head -1)"
+				else
+					Download_Install "$(curl -sSfL 'https://github.com/TasmoAdmin/TasmoAdmin/releases/download/v1.8.0/tasmoadmin_v1.8.0.tar.gz')"
+				fi
 				G_EXEC chown -R www-data:www-data tasmoadmin
-				G_EXEC mv {,/var/www/}tasmoadmin
+				G_EXEC mv tasmoadmin /var/www/
 			fi
 
-			# Configure the webserver
+			# Webserver config
 			if (( ${aSOFTWARE_INSTALL_STATE[83]} > 0 ))
 			then
 				G_DIETPI-NOTIFY 2 'Apache webserver found, enabling TasmoAdmin specific configuration.'
-				a2enmod setenvif rewrite authz_core authn_core authn_file 1> /dev/null
 				local tasmoadmin_conf='/etc/apache2/sites-available/dietpi-tasmoadmin.conf'
-				if [[ -f $tasmoadmin_conf ]]; then
-
+				if [[ -f $tasmoadmin_conf ]]
+				then
 					tasmoadmin_conf+='.dietpi-new'
 					G_WHIP_MSG "Existing TasmoAdmin Apache configuration found, will preserve the old one and save the new one for review and comparison to: $tasmoadmin_conf"
-
 				fi
 				dps_index=$software_id Download_Install 'apache.tasmoadmin.conf' "$tasmoadmin_conf"
+				a2enmod setenvif rewrite authz_core authn_core authn_file 1> /dev/null
 				a2ensite dietpi-tasmoadmin 1> /dev/null
 
 			elif (( ${aSOFTWARE_INSTALL_STATE[84]} > 0 ))
 			then
 				G_DIETPI-NOTIFY 2 'Lighttpd webserver found, enabling TasmoAdmin specific configuration.'
 				local tasmoadmin_conf='/etc/lighttpd/conf-available/99-dietpi-tasmoadmin.conf'
-				if [[ -f $tasmoadmin_conf ]]; then
-
+				if [[ -f $tasmoadmin_conf ]]
+				then
 					tasmoadmin_conf+='.dietpi-new'
 					G_WHIP_MSG "Existing TasmoAdmin Lighttpd configuration found, will preserve the old one and save the new one for review and comparison to: $tasmoadmin_conf"
-
 				fi
 				dps_index=$software_id Download_Install 'lighttpd.tasmoadmin.conf' "$tasmoadmin_conf"
-				# Enable required modules + our config
 				G_EXEC_POST_FUNC(){ [[ $exit_code == 2 ]] && exit_code=0; } # Do not fail if modules are enabled already
 				G_EXEC lighty-enable-mod rewrite dietpi-tasmoadmin
 
@@ -11029,11 +11038,10 @@ _EOF_
 			then
 				G_DIETPI-NOTIFY 2 'Nginx webserver found, enabling TasmoAdmin specific configuration.'
 				local tasmoadmin_conf='/etc/nginx/sites-dietpi/dietpi-tasmoadmin.conf'
-				if [[ -f $tasmoadmin_conf ]]; then
-
+				if [[ -f $tasmoadmin_conf ]]
+				then
 					owncloud_conf+='.dietpi-new'
 					G_WHIP_MSG "Existing TasmoAdmin Nginx configuration found, will preserve the old one and save the new one for review and comparison to: $tasmoadmin_conf"
-
 				fi
 				dps_index=$software_id Download_Install 'nginx.tasmoadmin.conf' "$tasmoadmin_conf"
 			fi
@@ -11068,8 +11076,8 @@ _EOF_
 			G_EXEC chown "$ha_user:$ha_user" "$ha_home"
 			if [[ $G_HW_ARCH == [12] ]]
 			then
-				# libjpeg-dev for Pillow, libatlas-base-dev for numpy
-				aDEPS+=('libjpeg-dev' 'libatlas-base-dev')
+				# libjpeg62-turbo-dev for Pillow, libatlas-base-dev for numpy
+				aDEPS+=('libjpeg62-turbo-dev' 'libatlas-base-dev')
 				# Rust for cryptography
 				G_EXEC curl -sSf 'https://sh.rustup.rs/' -o rustup-init.sh
 				G_EXEC chmod +x rustup-init.sh
