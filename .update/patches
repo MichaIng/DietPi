@@ -660,7 +660,7 @@ Patch_8_2()
 - The database is recreated from scratch, using the global software password (default: "dietpi") for login instead of the hardcoded "allo". You can change the password with the following command:
   - mysql -e "update allo.users set password='\''$(php -r '\''echo password_hash("yourPassword",PASSWORD_BCRYPT);'\'')'\'' where id=1;"
 - The obsolete "allo" user is removed. Its home directory /home/allo remains, just in case you stored files there, but otherwise you can safely remove it.'
- 
+
 		echo 160 >> /var/tmp/dietpi/dietpi-update_reinstalls
 		getent passwd allo > /dev/null && G_EXEC userdel allo
 		if G_EXEC_NOHALT=1 G_EXEC systemctl start mariadb
@@ -854,34 +854,7 @@ Patch_8_11()
 		G_EXEC sed -i 's|http://apt.armbian.com|https://apt.armbian.com|' /etc/apt/sources.list.d/dietpi-armbian.list
 	fi
 
-	if (( $G_HW_MODEL == 49 ))
-	then
-		local text='A new Quartz64 firmware package is available, shipping Linux v6.1.0-rc1 and onboard WiFi firmware. Do you want to upgrade it on your system now?'
-		G_WHIP_BUTTON_CANCEL_TEXT='Skip'
-		if dpkg-query -s firmware-quartz64a &> /dev/null && G_WHIP_YESNO "$text"
-		then
-			G_EXEC_OUTPUT=1 G_EXEC curl -fO 'https://dietpi.com/downloads/binaries/firmware-quartz64a.deb'
-			G_EXEC_OUTPUT=1 G_EXEC dpkg -i firmware-quartz64a.deb
-			G_EXEC_HOHALT=1 G_EXEC rm firmware-quartz64a.deb
-
-		elif dpkg-query -s firmware-quartz64b &> /dev/null && G_WHIP_YESNO "$text"
-		then
-			G_EXEC_OUTPUT=1 G_EXEC curl -fO 'https://dietpi.com/downloads/binaries/firmware-quartz64b.deb'
-			G_EXEC_OUTPUT=1 G_EXEC dpkg -i firmware-quartz64b.deb
-			G_EXEC_HOHALT=1 G_EXEC rm firmware-quartz64b.deb
-
-		elif dpkg-query -s firmware-soquartz &> /dev/null && G_WHIP_YESNO "$text"
-		then
-			G_EXEC_OUTPUT=1 G_EXEC curl -fO 'https://dietpi.com/downloads/binaries/firmware-soquartz.deb'
-			G_EXEC_OUTPUT=1 G_EXEC dpkg -i firmware-soquartz.deb
-			G_EXEC_HOHALT=1 G_EXEC rm firmware-soquartz.deb
-		else
-			unset -v G_WHIP_BUTTON_CANCEL_TEXT
-		fi
-		# https://github.com/MichaIng/DietPi/issues/5890
-		grep -q 'systemd.unified_cgroup_hierarchy=0' /boot/extlinux/extlinux.conf || G_EXEC sed -i '/^append /s/$/ systemd.unified_cgroup_hierarchy=0/' /boot/extlinux/extlinux.conf
-
-	elif (( $G_HW_MODEL == 56 ))
+	if (( $G_HW_MODEL == 56 ))
 	then
 		# Revert https://forum.armbian.com/topic/20133-nanopi-neo3-dtb-gone-since-linux-dtb-current-rockchip64-22021/ since dtb is available again
 		if [[ -f '/boot/dtb/rockchip/rk3328-nanopi-neo3-rev02.dtb' ]] && grep -q 'rk3328-nanopi-r2-rev00.dtb' /boot/armbianEnv.txt
@@ -1105,6 +1078,58 @@ _EOF_
 \nAn update to Amiberry v5.5.1 is available, including LibSDL2 v2.26.2 and a fix for keyboard LEDs not creating to Amiberry settings . Apply it via reinstall:
 # dietpi-software reinstall 108
 \nRelease notes: https://github.com/BlitterStudio/amiberry/releases/tag/v5.5.1'
+	fi
+}
+
+Patch_8_15()
+{
+	if (( $G_HW_MODEL == 49 ))
+	then
+		if ! dpkg-query -s 'haveged' &> /dev/null
+		then
+			G_DIETPI-NOTIFY 2 'Installing correct entropy daemon on Quartz64'
+			G_AGI haveged
+			G_AGP rng-tools5
+		fi
+
+		if dpkg-query -s firmware-quartz64a &> /dev/null
+		then
+			G_EXEC_OUTPUT=1 G_EXEC curl -fO 'https://dietpi.com/downloads/binaries/firmware-quartz64a.deb'
+			G_EXEC_OUTPUT=1 G_EXEC dpkg -i firmware-quartz64a.deb
+			G_EXEC_HOHALT=1 G_EXEC rm firmware-quartz64a.deb
+
+		elif dpkg-query -s firmware-quartz64b &> /dev/null
+		then
+			G_EXEC_OUTPUT=1 G_EXEC curl -fO 'https://dietpi.com/downloads/binaries/firmware-quartz64b.deb'
+			G_EXEC_OUTPUT=1 G_EXEC dpkg -i firmware-quartz64b.deb
+			G_EXEC_HOHALT=1 G_EXEC rm firmware-quartz64b.deb
+
+		elif dpkg-query -s firmware-soquartz &> /dev/null
+		then
+			G_EXEC_OUTPUT=1 G_EXEC curl -fO 'https://dietpi.com/downloads/binaries/firmware-soquartz.deb'
+			G_EXEC_OUTPUT=1 G_EXEC dpkg -i firmware-soquartz.deb
+			G_EXEC_HOHALT=1 G_EXEC rm firmware-soquartz.deb
+		fi
+
+		# Revert with new kernel: https://github.com/MichaIng/DietPi/issues/5890
+		grep -q ' systemd.unified_cgroup_hierarchy=0' /boot/extlinux/extlinux.conf && G_EXEC sed -i '/^append /s/ systemd.unified_cgroup_hierarchy=0//' /boot/extlinux/extlinux.conf
+	fi
+
+	(( $G_DISTRO > 6 )) || for i in '/etc/systemd/system/serial-getty@'*'.service.d/dietpi-baudrate.conf'
+	do
+		[[ -f $i ]] || break
+		G_DIETPI-NOTIFY 2 "Fixing $i"
+		cat << _EOF_ > "$i"
+[Service]
+ExecStart=
+$(sed -n '/^ExecStart=/s/ 115200/ 1500000,115200/p' '/lib/systemd/system/serial-getty@.service')
+_EOF_
+	done
+
+	if [[ -f '/boot/dietpi/.installed' ]]
+	then
+		# WiFi Hotspot: https://github.com/MichaIng/DietPi/issues/6166
+		grep -q '^[[:blank:]]*aSOFTWARE_INSTALL_STATE\[60\]=2' /boot/dietpi/.installed && G_EXEC systemctl enable hostapd isc-dhcp-server
 	fi
 }
 

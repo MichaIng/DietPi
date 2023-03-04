@@ -15,7 +15,7 @@
 
 ## Introduction
 
-DietPi is an extremely lightweight Debian-based OS. It is highly optimised for minimal CPU and RAM resource usage, ensuring your SBC always runs at its maximum potential. 
+DietPi is an extremely lightweight Debian-based OS. It is highly optimised for minimal CPU and RAM resource usage, ensuring your SBC always runs at its maximum potential.
 
 The **dietpi programs** use lightweight whiptail menus. You'll spend more time enjoying DietPi and applications you need and less time staring at the command line.
 
@@ -151,7 +151,7 @@ Are you able to:
 - Contribute to DietPi with programming on GitHub?
 - Suggest new software that we can add to the `dietpi-software` install system?
 
-If so, let us know!  
+If so, let us know!
 We are always looking for talented people who believe in the DietPi project, and, wish to contribute in any way you can.
 
 - Send us an email: <micha@dietpi.com>

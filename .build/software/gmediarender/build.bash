@@ -4,8 +4,7 @@
 
 # Build deps
 G_AGUP
-G_AGDUG
-G_AGI automake pkg-config gcc libc6-dev make libgstreamer1.0-dev libupnp-dev gstreamer1.0-alsa gstreamer1.0-libav gstreamer1.0-plugins-good gstreamer1.0-plugins-bad gstreamer1.0-plugins-ugly
+G_AGDUG automake pkg-config gcc libc6-dev make libgstreamer1.0-dev libupnp-dev gstreamer1.0-alsa gstreamer1.0-libav gstreamer1.0-plugins-good gstreamer1.0-plugins-bad gstreamer1.0-plugins-ugly
 
 # Download
 version='0.0.9' # https://github.com/hzeller/gmrender-resurrect/releases
@@ -168,7 +167,7 @@ Homepage: https://github.com/hzeller/gmrender-resurrect
 Vcs-Git: https://github.com/hzeller/gmrender-resurrect.git
 Vcs-Browser: https://github.com/hzeller/gmrender-resurrect
 Description: Minimalist UPNP AV renderer
- gmrender-resurrect is a minimalist UPNP AV renderer that can be used to 
+ gmrender-resurrect is a minimalist UPNP AV renderer that can be used to
  play music controlled by a UPNP AV control point.  This package contains
  only a renderer and will therefore require these things to be installed
  either on this device or another device on the local network in order to
