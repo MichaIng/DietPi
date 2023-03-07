@@ -19,6 +19,7 @@ case $G_HW_ARCH_NAME in
 	'armv7l') export G_HW_ARCH=2;;
 	'aarch64') export G_HW_ARCH=3;;
 	'x86_64') export G_HW_ARCH=10;;
+	'riscv64') export G_HW_ARCH=11;;
 	*) G_DIETPI-NOTIFY 1 "Unsupported host system architecture \"$G_HW_ARCH_NAME\" detected, aborting..."; exit 1;;
 esac
 readonly G_PROGRAM_NAME='DietPi-Gogs_container_setup'
