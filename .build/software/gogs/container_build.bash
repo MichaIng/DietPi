@@ -56,6 +56,7 @@ case $ARCH in
 	2) image="DietPi_Container-ARMv7-${distro^}" arch='armv7l';;
 	3) image="DietPi_Container-ARMv8-${distro^}" arch='aarch64';;
 	10) image="DietPi_Container-x86_64-${distro^}" arch='x86_64';;
+	11) image='DietPi_Container-RISC-V-Sid' arch='riscv64';;
 	*) G_DIETPI-NOTIFY 1 "Invalid architecture \"$ARCH\" passed, aborting..."; exit 1;;
 esac
 
