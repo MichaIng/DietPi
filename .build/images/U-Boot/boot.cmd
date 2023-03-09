@@ -9,7 +9,6 @@
 setenv rootdev "/dev/mmcblk0p1"
 setenv rootfstype "ext4"
 setenv consoleargs "console=tty1"
-setenv verbosity "4"
 setenv docker_optimizations "off"
 setenv overlay_path "amlogic"
 setenv overlay_prefix "meson"
@@ -26,7 +25,7 @@ if load ${devtype} ${devnum} ${scriptaddr} ${prefix}dietpiEnv.txt; then
 fi
 
 # Define kernel command-line arguments
-setenv bootargs "root=${rootdev} rootfstype=${rootfstype} rootwait ${consoleargs} loglevel=${verbosity} consoleblank=0 coherent_pool=2M usb-storage.quirks=${usbstoragequirks} ${extraargs}"
+setenv bootargs "root=${rootdev} rootfstype=${rootfstype} rootwait ${consoleargs} consoleblank=0 coherent_pool=2M usb-storage.quirks=${usbstoragequirks} ${extraargs}"
 
 # Add bootargs for Docker
 if test "${docker_optimizations}" = "on"; then setenv bootargs "${bootargs} cgroup_enable=memory swapaccount=1"; fi
