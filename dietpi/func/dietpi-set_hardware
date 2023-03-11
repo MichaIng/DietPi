@@ -18,7 +18,7 @@ $FP_SCRIPT	eth-forcespeed		10/100/1000/disable
 $FP_SCRIPT	wifimodules		enable/disable/onboard_enable/onboard_disable
 $FP_SCRIPT	wificountrycode		GB/US/DE/...
 $FP_SCRIPT	bluetooth		enable/disable
-$FP_SCRIPT	serialconsole		enable/disable		[tty(S|AMA|SAC|AML|SC|GS|FIQ|MV)[0-9]] (optional Serial/UART device)
+$FP_SCRIPT	serialconsole		enable/disable		[(tty(S|AMA|SAC|AML|SC|GS|FIQ|MV)|hvc)[0-9]] (optional Serial/UART device)
 $FP_SCRIPT	i2c			enable/disable/khz
 $FP_SCRIPT	spi			enable/disable
 $FP_SCRIPT	soundcard		target_card (non-matching name for reset to default). Add '-eq' to target_card string to enable ALSA equalizer on card. HW:x,x (specify target card and device index eg: HW:9,1)
@@ -223,22 +223,36 @@ _EOF_
 	}
 
 	#/////////////////////////////////////////////////////////////////////////////////////
-	# rpi-eeprom: https://www.raspberrypi.org/documentation/hardware/raspberrypi/booteeprom.md
+	# rpi-eeprom: https://www.raspberrypi.com/documentation/computers/raspberry-pi.html#updating-the-bootloader
 	#/////////////////////////////////////////////////////////////////////////////////////
-	RPi_EEPROM(){
-
+	RPi_EEPROM()
+	{
 		(( $G_HW_MODEL == 4 )) || { Unsupported_Input_Name; return 1; } # Exit path for non-RPi4
 
 		# Install required APT package
-		G_AGUP
-		G_AGI rpi-eeprom
+		G_AG_CHECK_INSTALL_PREREQ rpi-eeprom
 
 		# Update/flash new bootloader and VL805 USB firmware to EEPROM
 		rpi-eeprom-update -a
 
 		# Failsafe
 		G_EXEC systemctl enable rpi-eeprom-update
+	}
 
+	#/////////////////////////////////////////////////////////////////////////////////////
+	# vf2-spi-update: https://doc-en.rvspace.org/VisionFive2/PDF/VisionFive2_QSG.pdf
+	#/////////////////////////////////////////////////////////////////////////////////////
+	VF2_SPI_Update()
+	{
+		(( $G_HW_MODEL == 81 )) || { Unsupported_Input_Name; return 1; } # Exit path for non-VisionFive 2
+
+		G_AG_CHECK_INSTALL_PREREQ mtd-utils
+		local version=$(curl -sSf 'https://api.github.com/repos/starfive-tech/VisionFive2/releases/latest' | mawk -F\" '/"tag_name": /{print $4}')
+		G_EXEC curl -sSfLO "https://github.com/starfive-tech/VisionFive2/releases/download/$version/u-boot-spl.bin.normal.out"
+		G_EXEC curl -sSfLO "https://github.com/starfive-tech/VisionFive2/releases/download/$version/visionfive2_fw_payload.img"
+		G_EXEC_OUTPUT=1 G_EXEC flashcp -v u-boot-spl.bin.normal.out /dev/mtd0
+		G_EXEC_OUTPUT=1 G_EXEC flashcp -v visionfive2_fw_payload.img /dev/mtd1
+		G_EXEC rm u-boot-spl.bin.normal.out visionfive2_fw_payload.img
 	}
 
 	#/////////////////////////////////////////////////////////////////////////////////////
@@ -1484,20 +1498,14 @@ _EOF_
 					INPUT_DEVICE_VALUE='disable' Bluetooth_Main
 				fi
 
-				G_DIETPI-NOTIFY 2 "Enabling serial-getty on: /dev/$INPUT_ADDITIONAL"
-				G_EXEC systemctl unmask "serial-getty@$INPUT_ADDITIONAL"
-				G_EXEC systemctl enable "serial-getty@$INPUT_ADDITIONAL"
-				# Start now if device (already) exists
-				[[ -e /dev/$INPUT_ADDITIONAL ]] && G_EXEC systemctl start "serial-getty@$INPUT_ADDITIONAL"
-
-				# Allow root login on selected TTY if not enabled by default. This file has been removed with Debian Bullseye and is not respected by its default PAM rules.
-				(( $G_DISTRO < 6 )) && G_CONFIG_INJECT "$INPUT_ADDITIONAL" "$INPUT_ADDITIONAL" /etc/securetty
-
 				# Enable boot messages depending on device
 				# - Skip on USB getget serial device, which requires loading a kernel module first and hence cannot be used for boot outputs
-				[[ $INPUT_ADDITIONAL == 'ttyGS'[0-9] ]] && return 0
+				if [[ $INPUT_ADDITIONAL == 'ttyGS'[0-9] ]]
+				then
+					:
+
 				# - RPi
-				if (( $G_HW_MODEL < 10 ))
+				elif (( $G_HW_MODEL < 10 ))
 				then
 					grep -q "console=$INPUT_ADDITIONAL" /boot/cmdline.txt || sed -i "/root=/s/[[:blank:]]*$/ console=$INPUT_ADDITIONAL,115200/" /boot/cmdline.txt
 
@@ -1528,10 +1536,10 @@ _EOF_
 					then
 						baudrate='1500000'
 						[[ -d /etc/systemd/system/serial-getty@$INPUT_ADDITIONAL.service.d ]] || G_EXEC mkdir "/etc/systemd/system/serial-getty@$INPUT_ADDITIONAL.service.d"
-						cat << '_EOF_' > "/etc/systemd/system/serial-getty@$INPUT_ADDITIONAL.service.d/dietpi-baudrate.conf"
+						cat << _EOF_ > "/etc/systemd/system/serial-getty@$INPUT_ADDITIONAL.service.d/dietpi-baudrate.conf"
 [Service]
 ExecStart=
-ExecStart=-/sbin/agetty -o '-p -- \\u' --keep-baud 1500000,115200,57600,38400,9600 - $TERM
+$(sed -n '/^ExecStart=/s/ 115200/ 1500000,115200/p' '/lib/systemd/system/serial-getty@.service')
 _EOF_
 						G_EXEC systemctl daemon-reload
 					fi
@@ -1548,9 +1556,18 @@ _EOF_
 					fi
 				fi
 
+				# Allow root login on selected TTY if not enabled by default. This file has been removed with Debian Bullseye and is not respected by its default PAM rules.
+				(( $G_DISTRO < 6 )) && G_CONFIG_INJECT "$INPUT_ADDITIONAL" "$INPUT_ADDITIONAL" /etc/securetty
+
+				G_DIETPI-NOTIFY 2 "Enabling serial-getty on: /dev/$INPUT_ADDITIONAL"
+				G_EXEC systemctl unmask "serial-getty@$INPUT_ADDITIONAL"
+				G_EXEC systemctl enable "serial-getty@$INPUT_ADDITIONAL"
+				# Start now if device (already) exists
+				[[ -e /dev/$INPUT_ADDITIONAL ]] && G_EXEC systemctl start "serial-getty@$INPUT_ADDITIONAL"
+
 			# Enable for all detected Serial/UART devices
 			else
-				for i in /dev/tty{S,AMA,SAC,AML,SC,GS,FIQ,MV}[0-9]
+				for i in /dev/{tty{S,AMA,SAC,AML,SC,GS,FIQ,MV},hvc}[0-9]
 				do
 					[[ -e $i ]] || continue
 					INPUT_ADDITIONAL=${i/\/dev\/} Serial_Main
@@ -1612,7 +1629,7 @@ _EOF_
 
 			# Disable for all detected Serial/UART devices
 			else
-				for i in /dev/tty{S,AMA,SAC,AML,SC,GS,FIQ,MV}[0-9]
+				for i in /dev/{tty{S,AMA,SAC,AML,SC,GS,FIQ,MV},hvc}[0-9]
 				do
 					[[ -e $i ]] || continue
 					INPUT_ADDITIONAL=${i/\/dev\/} Serial_Main
@@ -1658,7 +1675,13 @@ _EOF_
 		[[ -f '/var/lib/alsa/asound.state' ]] && G_EXEC rm /var/lib/alsa/asound.state
 
 		# - Reset active amixer state ("-g" option has been added upstream: https://github.com/alsa-project/alsa-utils/issues/75)
-		[[ $INPUT_DEVICE_VALUE != 'none' && -f '/proc/asound/cards' && $(</proc/asound/cards) ]] && alsactl init
+		# - Skip UCM if not installed: https://packages.debian.org/alsa-ucm-conf
+		if [[ $INPUT_DEVICE_VALUE != 'none' && -f '/proc/asound/cards' && $(</proc/asound/cards) ]]
+		then
+			local ucm=()
+			(( $G_DISTRO < 6 )) || [[ -f '/usr/share/alsa/ucm2/ucm.conf' ]] || ucm=('-U')
+			alsactl "${ucm[@]}" init
+		fi
 
 		# HW specific
 		# - RPi
@@ -1670,6 +1693,11 @@ _EOF_
 		elif [[ $G_HW_MODEL == 15 && -f '/boot/dietpiEnv.txt' ]]; then
 
 			Soundcard_Reset_OdroidN2
+
+		# - Odroid C4: Modern image
+		elif [[ $G_HW_MODEL == 16 && -f '/boot/dietpiEnv.txt' ]]; then
+
+			Soundcard_Reset_OdroidC4
 
 		# - Odroid
 		elif (( $G_HW_MODEL < 20 )); then
@@ -1757,6 +1785,11 @@ _EOF_
 	Soundcard_Reset_OdroidN2()
 	{
 		[[ $INPUT_DEVICE_VALUE == 'default' ]] && INPUT_DEVICE_VALUE='odroidn2_hdmi'
+	}
+
+	Soundcard_Reset_OdroidC4()
+	{
+		[[ $INPUT_DEVICE_VALUE == 'default' ]] && INPUT_DEVICE_VALUE='odroidc4_hdmi'
 	}
 
 	Soundcard_Reset_Asus()
@@ -2065,7 +2098,7 @@ _EOF_
 
 				# Enable HDMI output
 				G_EXEC amixer -c 0 set 'TOHDMITX' 'on'
-				# Use I2S B as source for HDMI output, I2C A is somehow not usable
+				# Use I2S B as source for HDMI output (I2S A does not work)
 				G_EXEC amixer -c 0 set 'TOHDMITX I2S SRC' 'I2S B'
 				# Use ALSA device 0 as input for I2S B
 				G_EXEC amixer -c 0 set 'TDMOUT_B SRC SEL' 'IN 0'
@@ -2075,7 +2108,7 @@ _EOF_
 				G_EXEC amixer -c 0 set 'FRDDR_A SINK 1 SEL' 'OUT 0'
 				G_EXEC amixer -c 0 set 'FRDDR_A SINK 2 SEL' 'OUT 1'
 				G_EXEC amixer -c 0 set 'FRDDR_A SINK 3 SEL' 'OUT 2'
-				# Set master volume to 85%
+				# Set master volume to 85 %
 				G_EXEC amixer -c 0 set 'ACODEC' '85%'
 			;;
 
@@ -2083,7 +2116,7 @@ _EOF_
 
 				# Enable 3.5mm output
 				G_EXEC amixer -c 0 set 'TOACODEC OUT EN' 'on'
-				# Use I2S B as source for 3.5mm output, I2C A is somehow not usable
+				# Use I2S B as source for 3.5mm output (I2S A does not work)
 				G_EXEC amixer -c 0 set 'TOACODEC SRC' 'I2S B'
 				# Use ALSA device 0 as input for I2S B
 				G_EXEC amixer -c 0 set 'TDMOUT_B SRC SEL' 'IN 0'
@@ -2093,8 +2126,24 @@ _EOF_
 				G_EXEC amixer -c 0 set 'FRDDR_A SINK 1 SEL' 'OUT 0'
 				G_EXEC amixer -c 0 set 'FRDDR_A SINK 2 SEL' 'OUT 1'
 				G_EXEC amixer -c 0 set 'FRDDR_A SINK 3 SEL' 'OUT 2'
-				# Set master volume to 85%
+				# Set master volume to 85 %
 				G_EXEC amixer -c 0 set 'ACODEC' '85%'
+			;;
+
+			'odroidc4_hdmi')
+
+				# Enable HDMI output
+				G_EXEC amixer -c 0 set 'TOHDMITX' 'on'
+				# Use I2S B as source for HDMI output (I2S A does not work)
+				G_EXEC amixer -c 0 set 'TOHDMITX I2S SRC' 'I2S B'
+				# Use ALSA device 0 as input for I2S B
+				G_EXEC amixer -c 0 set 'TDMOUT_B SRC SEL' 'IN 0'
+				# Enable I2S B (SRC 2) on device 0 (_A)
+				G_EXEC amixer -c 0 set 'FRDDR_A SRC 2 EN' 'on'
+				# Set output channels for device 0 (_A)
+				G_EXEC amixer -c 0 set 'FRDDR_A SINK 1 SEL' 'OUT 0'
+				G_EXEC amixer -c 0 set 'FRDDR_A SINK 2 SEL' 'OUT 1'
+				G_EXEC amixer -c 0 set 'FRDDR_A SINK 3 SEL' 'OUT 2'
 			;;
 
 			# --------------- H3 --------------------
@@ -2289,7 +2338,6 @@ _EOF_
 
 		RPi_Codec_Main
 
-
 	elif [[ $INPUT_DEVICE_NAME == 'rpi3_usb_boot' ]]; then
 
 		RPi_USB_Boot_Main
@@ -2297,6 +2345,10 @@ _EOF_
 	elif [[ $INPUT_DEVICE_NAME == 'rpi-eeprom' ]]; then
 
 		RPi_EEPROM
+
+	elif [[ $INPUT_DEVICE_NAME == 'vf2-spi-update' ]]; then
+
+		VF2_SPI_Update
 
 	elif [[ $INPUT_DEVICE_NAME == 'headless' ]]; then
 

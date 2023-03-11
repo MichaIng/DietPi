@@ -53,7 +53,7 @@ image=
 case $PLATFORM in
         'rpi'[1-4]) image="DietPi_Container-ARMv6-${distro^}";;
 	'c1'|'xu4'|'RK3288'|'sun8i'|'s812') image="DietPi_Container-ARMv7-${distro^}";;
-	'rpi'[34]'-64-dmx'|'AMLSM1'|'n2'|'a64') image="DietPi_Container-ARMv8-${distro^}";;
+	'rpi'[34]'-64-dmx'|'AMLSM1'|'n2'|'a64'|'rk3588') image="DietPi_Container-ARMv8-${distro^}";;
 	'x86-64') image="DietPi_Container-x86_64-${distro^}";;
 	*) G_DIETPI-NOTIFY 1 "Invalid platform \"$PLATFORM\" passed, aborting..."; exit 1;;
 esac

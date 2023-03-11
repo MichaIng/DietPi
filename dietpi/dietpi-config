@@ -62,8 +62,8 @@
 			'1' ': Display Options'
 			'2' ': Audio Options'
 		)
-		# Hide performance options on VM
-		(( $G_HW_MODEL == 20 )) || G_WHIP_MENU_ARRAY+=('3' ': Performance Options')
+		# Hide performance options on VM and container
+		(( $G_HW_MODEL == 20 || $G_HW_MODEL == 75 )) || G_WHIP_MENU_ARRAY+=('3' ': Performance Options')
 		 G_WHIP_MENU_ARRAY+=(
 
 			'4' ': Advanced Options'
@@ -642,8 +642,8 @@ A long (or insufficiently manufactured) cable may required a higher boost settin
  - Improve RAM performance by 1-5% (VideoCore shares RAM bandwidth)
    Source: https://www.raspberrypi.org/forums/viewtopic.php?p=105008#p105008\n
 Re-enabling HDMI requires a reboot. If you need emergency HDMI output, edit the following files on first partition of the SDcard from external system:
- - In config.txt, set "hdmi_ignore_hotplug=0" and comment/remove all (max_)framebuffer_(width/height) lines.
- - In dietpi.txt, set "AUTO_SETUP_HEADLESS=1".' || { REBOOT_REQUIRED=0; return; }
+ - In config.txt, set "hdmi_ignore_hotplug=0" and comment/remove the "max_framebuffers=0" line.
+ - In dietpi.txt, set "AUTO_SETUP_HEADLESS=0".' || { REBOOT_REQUIRED=0; return; }
 
 				/boot/dietpi/func/dietpi-set_hardware headless 1
 
@@ -910,7 +910,7 @@ Re-enabling HDMI requires a reboot. If you need emergency HDMI output, edit the 
 		G_WHIP_MENU_ARRAY=()
 
 		(( $G_HW_MODEL < 10 )) && G_WHIP_MENU_ARRAY+=('' '●─ Toggle console ')
-		for i in /dev/tty{S,AMA,SAC,AML,SC,GS,FIQ,MV}[0-9]
+		for i in /dev/{tty{S,AMA,SAC,AML,SC,GS,FIQ,MV},hvc}[0-9]
 		do
 			[[ -e $i ]] || continue
 			i=${i#/dev/}
@@ -1013,22 +1013,23 @@ Re-enabling HDMI requires a reboot. If you need emergency HDMI output, edit the 
 		fi
 
 		# RPi4 EEPROM update: https://www.raspberrypi.org/documentation/hardware/raspberrypi/booteeprom.md
-		if (( $G_HW_MODEL == 4 )); then
-
-			if dpkg -s 'rpi-eeprom' &> /dev/null; then
-
+		if (( $G_HW_MODEL == 4 ))
+		then
+			if dpkg -s 'rpi-eeprom' &> /dev/null
+			then
 				rpi-eeprom-update -m version_eeprom
 				# shellcheck disable=SC1091
 				. ./version_eeprom
 				rm version_eeprom
 				G_WHIP_MENU_ARRAY+=('Update RPi4 EEPROM firmware' ": [Bootloader: ${BOOTLOADER_CURRENT:-N/A} | VL805: ${VL805_CURRENT:-N/A}]")
-
 			else
-
 				G_WHIP_MENU_ARRAY+=('Update RPi4 EEPROM firmware' ': Install rpi-eeprom APT package')
-
 			fi
 
+		# VisionFive 2: https://doc-en.rvspace.org/VisionFive2/PDF/VisionFive2_QSG.pdf
+		elif (( $G_HW_MODEL == 81 ))
+		then
+			G_WHIP_MENU_ARRAY+=('Update bootloader' ': on VisionFive 2 SPI storage')
 		fi
 
 		# Serial/UART devices
@@ -1145,6 +1146,14 @@ Please choose whether your device have an active RTC or requires "fake-hwclock":
 Further information: https://www.raspberrypi.org/documentation/hardware/raspberrypi/booteeprom.md
 \nDo you want to continue?' || return
 			/boot/dietpi/func/dietpi-set_hardware rpi-eeprom
+
+		elif [[ $G_WHIP_RETURNED_VALUE == 'Update bootloader' ]]; then
+
+			G_WHIP_YESNO '[ INFO ] SPI bootloader update
+\nThis will download and flash the latest U-Boot from StarFive to your VisionFive 2 SPI storage.
+Latest release notes: https://github.com/starfive-tech/VisionFive2/releases
+\nDo you want to continue?' || return
+			/boot/dietpi/func/dietpi-set_hardware vf2-spi-update
 
 		elif [[ $G_WHIP_RETURNED_VALUE == 'I2C state' ]]; then
 
@@ -1275,7 +1284,7 @@ Further information: https://www.raspberrypi.org/documentation/hardware/raspberr
 			G_WHIP_MENU_ARRAY+=('ARM Initial Turbo' ": [${initial_turbo:=0} seconds]")
 
 		# Define CPU scaling frequency or percent
-		# - Disabled on RPi since ondemand only jumps between lowest and highest by default. RPi user hence should use "ARM Idle Frequency" option + overclocking to set those two freqs.
+		# - Disabled on RPi where one can use "ARM Idle Frequency" + overclocking to change limits.
 		else
 
 			local type_cpu_freq_info='MHz'
@@ -1360,58 +1369,50 @@ If unsure, set any value, 'Ondemand Down Factor' option on the next screen will 
 
 			'CPU Frequency Limits')
 
-				# Create /tmp/dietpi-available_cpu_freqs containing available scaling frequencies
-				/boot/dietpi/dietpi-cpuinfo 2
-
-				if [[ ! -f '/tmp/dietpi-available_cpu_freqs' ]]; then
-
-					G_WHIP_MSG 'The processor and/or kernel, does not support this feature.\n\n(Info): Scaling_available_frequencies does not exist.'
-
-				else
-
-					# Map to array
-					local available_frequency_array=()
-					mapfile -t available_frequency_array < /tmp/dietpi-available_cpu_freqs
-					rm /tmp/dietpi-available_cpu_freqs
-
-					# Convert to MHz
-					local division_factor=1000
-					# Intel: Skip conversion
-					[[ -f '/sys/devices/system/cpu/intel_pstate/max_perf_pct' ]] && division_factor=1
-
-					local index=0 # 0=max | 1=min
-					while (( $index < 2 ))
+				# Obtain available CPU frequencies
+				local i j available_frequency_array=()
+				# - Intel: 10 - 100 %
+				if [[ -f '/sys/devices/system/cpu/intel_pstate/max_perf_pct' ]]
+				then
+					for i in {10..100..5}
 					do
-						G_WHIP_MENU_ARRAY=()
-						for i in "${available_frequency_array[@]}"
-						do
-							G_WHIP_MENU_ARRAY+=($(( $i / $division_factor )) "$type_cpu_freq_info")
-						done
-						G_WHIP_MENU_ARRAY+=('Disabled' ': Returns clocks to default')
-
-						# MAX
-						if (( $index == 0 )); then
-
-							G_WHIP_DEFAULT_ITEM=$user_frequency_max_current
-							G_WHIP_MENU "Limit the maximum frequency that your processor can reach.\nThis can be useful for lowering temperature and saving power.\n
-Current setting: $user_frequency_max_text" && G_CONFIG_INJECT 'CONFIG_CPU_MAX_FREQ=' "CONFIG_CPU_MAX_FREQ=$G_WHIP_RETURNED_VALUE" /boot/dietpi.txt
-
-						# MIN
-						else
-
-							G_WHIP_DEFAULT_ITEM=$user_frequency_min_current
-							G_WHIP_MENU "Limit the minimum frequency that your processor can reach.\nThis can be useful for some timing critical stuff (eg. 1-wire below 480 Mhz won't work).\n
-Current setting: $user_frequency_min_text" && G_CONFIG_INJECT 'CONFIG_CPU_MIN_FREQ=' "CONFIG_CPU_MIN_FREQ=$G_WHIP_RETURNED_VALUE" /boot/dietpi.txt
-
-						fi
-
-						((index++))
+						available_frequency_array+=("$i")
 					done
-					unset -v available_frequency_array
 
-					/boot/dietpi/func/dietpi-set_cpu
-
+				# - CPUFreq
+				elif [[ -f '/sys/devices/system/cpu/cpu0/cpufreq/scaling_available_frequencies' ]]
+				then
+					mapfile -tO "${#available_frequency_array[@]}" available_frequency_array < <(for i in /sys/devices/system/cpu/cpu*/cpufreq/scaling_available_frequencies
+					do
+						for j in $(<"$i"); do echo $(( $j / 1000 )); done
+					done | sort -un)
+				else
+					G_WHIP_MSG '[FAILED] The CPU and/or kernel, does not support this feature.'
+					return 1
 				fi
+
+				# Max
+				G_WHIP_MENU_ARRAY=('Disabled' ': Returns clocks to default')
+				for i in "${available_frequency_array[@]}"
+				do
+					G_WHIP_MENU_ARRAY+=("$i" "$type_cpu_freq_info")
+				done
+				G_WHIP_DEFAULT_ITEM=$user_frequency_max_current
+				G_WHIP_MENU "Limit the maximum frequency that your CPU can reach.\nThis can be useful for lowering temperature and saving power.\n\nCurrent setting: $user_frequency_max_text" || return 0
+				G_CONFIG_INJECT 'CONFIG_CPU_MAX_FREQ=' "CONFIG_CPU_MAX_FREQ=$G_WHIP_RETURNED_VALUE" /boot/dietpi.txt
+
+				# Min
+				G_WHIP_MENU_ARRAY=('Disabled' ': Returns clocks to default')
+				for i in "${available_frequency_array[@]}"
+				do
+					G_WHIP_MENU_ARRAY+=("$i" "$type_cpu_freq_info")
+				done
+				G_WHIP_DEFAULT_ITEM=$user_frequency_min_current
+				G_WHIP_MENU "Limit the minimum frequency that your CPU can reach.\nThis can be useful for some timing critical stuff, like 1-wire won't work below 480 MHz.\n\nCurrent setting: $user_frequency_min_text" || return 0
+				G_CONFIG_INJECT 'CONFIG_CPU_MIN_FREQ=' "CONFIG_CPU_MIN_FREQ=$G_WHIP_RETURNED_VALUE" /boot/dietpi.txt
+
+				# Apply
+				/boot/dietpi/func/dietpi-set_cpu
 			;;
 
 			'Overclocking')
@@ -1918,7 +1919,7 @@ netmask 255.255.255.0
 #gateway 192.168.0.1
 #dns-nameservers 9.9.9.9 149.112.112.112
 pre-up iw dev $WIFI_DEV_IFACE set power_save off
-post-down iw dev "WIFI_DEV_IFACE set power_save on
+post-down iw dev "$WIFI_DEV_IFACE set power_save on
 
 # iptables NAT rules
 up iptables-restore < /etc/iptables.ipv4.nat
@@ -2589,10 +2590,10 @@ This is mainly aimed at PINE A64 which may have a hardware issue that causes uns
 
 		fi
 
-		G_WHIP_MENU_ARRAY+=('' '●─ Additional Options ')
 		# Country code: On Debian Bookworm and from Linux 4.15 on, this setting is relevant for the WiFi Hotspot (hostapd) installation only: https://bugs.debian.org/1003903
 		if (( $WIFI_HOTSPOT )) || [[ -f '/lib/crda/crda' ]]
 		then
+			G_WHIP_MENU_ARRAY+=('' '●─ Additional Options ')
 			if [[ $WIFI_COUNTRYCODE == '00' ]]
 			then
 				G_WHIP_MENU_ARRAY+=('Country' ": [$WIFI_COUNTRYCODE] (Not set, please configure)")
@@ -3329,6 +3330,11 @@ Additional benchmarks:
 
 				G_WHIP_MENU_ARRAY+=('OdroidN2_HDMI' ': Onboard digital HDMI audio (default)')
 				G_WHIP_MENU_ARRAY+=('OdroidN2_3.5mm' ': Onboard analogue 3.5mm audio')
+
+			# Odroid C4: Modern image
+			elif [[ $G_HW_MODEL == 16 && -f '/boot/dietpiEnv.txt' ]]; then
+
+				G_WHIP_MENU_ARRAY+=('OdroidC4_HDMI' ': Onboard digital HDMI audio (default)')
 
 			fi
 

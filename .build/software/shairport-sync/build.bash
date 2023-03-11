@@ -10,8 +10,7 @@
 # - Workaround for CI on Buster: Mask Avahi daemon service, since it can fail to start, failing the package install
 (( $G_DISTRO == 5 )) && G_EXEC systemctl mask avahi-daemon
 G_AGUP
-G_AGDUG
-G_AGI automake pkg-config make g++ libpopt-dev libconfig-dev libssl-dev libsoxr-dev libavahi-client-dev libasound2-dev libglib2.0-dev libmosquitto-dev avahi-daemon git libplist-dev libsodium-dev libgcrypt20-dev libavformat-dev xxd
+G_AGDUG automake pkg-config make g++ libpopt-dev libconfig-dev libssl-dev libsoxr-dev libavahi-client-dev libasound2-dev libglib2.0-dev libmosquitto-dev avahi-daemon git libplist-dev libsodium-dev libgcrypt20-dev libavformat-dev xxd
 (( $G_DISTRO == 5 )) && G_EXEC systemctl unmask avahi-daemon
 
 # Download
@@ -76,7 +75,7 @@ general =
 //	mdns_backend = "avahi"; // Run "shairport-sync -h" to get a list of all mdns_backends. The default is the first one.
 //	interface = "name"; // Use this advanced setting to specify the interface on which Shairport Sync should provide its service. Leave it commented out to get the default, which is to select the interface(s) automatically.
 //	port = <number>; // Listen for service requests on this port. 5000 for AirPlay 1, 7000 for AirPlay 2
-//	udp_port_base = 6001; // (AirPlay 1 only) start allocating UDP ports from this port number when needed 
+//	udp_port_base = 6001; // (AirPlay 1 only) start allocating UDP ports from this port number when needed
 //	udp_port_range = 10; // (AirPlay 1 only) look for free ports in this number of places, starting at the UDP port base. Allow at least 10, though only three are needed in a steady state.
 //	airplay_device_id_offset = 0; // (AirPlay 2 only) add this to the default airplay_device_id calculated from one of the device's MAC address
 //	airplay_device_id = 0x<six-digit_hexadecimal_number>L; // (AirPlay 2 only) use this as the airplay_device_id e.g. 0xDCA632D4E8F3L -- remember the "L" at the end as it's a 64-bit quantity!

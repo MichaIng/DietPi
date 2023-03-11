@@ -7,8 +7,7 @@ adeps_build=('gcc' 'libc6-dev' 'pkg-config' 'libssl-dev' 'git')
 adeps=('libc6' 'openssl')
 (( $G_DISTRO > 6 )) && adeps+=('libssl3') || adeps+=('libssl1.1')
 G_AGUP
-G_AGDUG
-G_AGI "${adeps_build[@]}"
+G_AGDUG "${adeps_build[@]}"
 
 # Install Rust via https://rustup.rs/
 # - ARMv7: Needs to be installed in tmpfs, else builds fail in emulated 32-bit ARM environments: https://github.com/rust-lang/cargo/issues/8719
@@ -51,7 +50,7 @@ G_EXEC mv "vaultwarden-$version/.env.template" "$DIR/mnt/dietpi_userdata/vaultwa
 G_EXEC rm -R "vaultwarden-$version"
 
 # - web vault
-wv_version='2023.1.1'
+wv_version='2023.2.0'
 G_DIETPI-NOTIFY 2 "Downloading web vault version \e[33m$wv_version"
 G_EXEC curl -sSfLO "https://github.com/dani-garcia/bw_web_builds/releases/download/v$wv_version/bw_web_v$wv_version.tar.gz"
 G_EXEC tar xf "bw_web_v$wv_version.tar.gz" --one-top-level="$DIR/mnt/dietpi_userdata/vaultwarden"
@@ -64,41 +63,33 @@ G_CONFIG_INJECT 'ROCKET_PORT=' 'ROCKET_PORT=8001' "$DIR/mnt/dietpi_userdata/vaul
 G_CONFIG_INJECT 'ROCKET_TLS=' 'ROCKET_TLS={certs="./cert.pem",key="./privkey.pem"}' "$DIR/mnt/dietpi_userdata/vaultwarden/vaultwarden.env"
 G_CONFIG_INJECT 'WEB_VAULT_ENABLED=' 'WEB_VAULT_ENABLED=true' "$DIR/mnt/dietpi_userdata/vaultwarden/vaultwarden.env"
 
-# - systemd service
+# - systemd service: https://github.com/dani-garcia/vaultwarden/wiki/Setup-as-a-systemd-service
 cat << '_EOF_' > "$DIR/lib/systemd/system/vaultwarden.service"
 [Unit]
 Description=vaultwarden (DietPi)
 Documentation=https://github.com/dani-garcia/vaultwarden
 Wants=network-online.target
 After=network-online.target
-
-# Restart attempt only 5 times
 StartLimitIntervalSec=500
 StartLimitBurst=5
 
 [Service]
-# Server sometimes fails to start on startup, this should fix it
-Restart=on-failure
-RestartSec=5s
-# The user vaultwarden is run under. the working directory (see below) should allow write and read access to this user
 User=vaultwarden
-# The location of the .env file for configuration
-EnvironmentFile=/mnt/dietpi_userdata/vaultwarden/vaultwarden.env
-# The location of the compiled binary
-ExecStart=/opt/vaultwarden/vaultwarden
-# Set reasonable connection and process limits
+AmbientCapabilities=CAP_NET_BIND_SERVICE
 LimitNOFILE=1048576
 LimitNPROC=64
-# Isolate vaultwarden from the rest of the system
+WorkingDirectory=/mnt/dietpi_userdata/vaultwarden
+EnvironmentFile=/mnt/dietpi_userdata/vaultwarden/vaultwarden.env
+ExecStart=/opt/vaultwarden/vaultwarden
+Restart=on-failure
+RestartSec=5s
+
+# Hardening
 PrivateTmp=true
 PrivateDevices=true
 ProtectHome=true
 ProtectSystem=strict
-# Only allow writes to the following directory and set it to the working directory (user and password data are stored here)
-WorkingDirectory=/mnt/dietpi_userdata/vaultwarden
 ReadWritePaths=-/mnt/dietpi_userdata/vaultwarden
-# Allow vaultwarden to bind ports in the range of 0-1024
-AmbientCapabilities=CAP_NET_BIND_SERVICE
 
 [Install]
 WantedBy=multi-user.target
@@ -207,7 +198,7 @@ grep -q 'raspbian' /etc/os-release && DEPS_APT_VERSIONED=$(sed 's/+rp[it][0-9]\+
 # - control
 cat << _EOF_ > "$DIR/DEBIAN/control"
 Package: vaultwarden
-Version: $version-dietpi3
+Version: $version-dietpi4
 Architecture: $(dpkg --print-architecture)
 Maintainer: MichaIng <micha@dietpi.com>
 Date: $(date -u '+%a, %d %b %Y %T %z')
