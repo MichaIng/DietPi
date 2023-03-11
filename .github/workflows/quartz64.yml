@@ -13,7 +13,8 @@ jobs:
         shell: sh
         working-directory: /dev/shm
     env:
-      linux_version: '6.1.14'
+      # https://git.kernel.org/pub/scm/linux/kernel/git/stable/linux.git/?h=linux-rolling-stable
+      linux_version: '6.1.16'
       uboot_branch: 'v2022.04-dietpi'
       CROSS_COMPILE: 'aarch64-linux-gnu-'
       ARCH: 'arm64'
@@ -21,26 +22,24 @@ jobs:
     # https://github.com/actions/setup-python/tags
     - uses: actions/setup-python@v4
       with:
-        # https://github.com/actions/python-versions/tags
         python-version: '3.x'
         check-latest: true
     - name: Setup build
       run: |
-        { sudo apt-get -q update; sudo apt-get -qq install make gcc libc6-dev gcc-aarch64-linux-gnu bc bison flex libssl-dev libncurses5-dev libelf-dev time xz-utils device-tree-compiler kmod swig zip; } &
+        { sudo apt-get -q update; sudo DEBIAN_FRONTEND=noninteractive apt-get --no-install-recommends -qq install make gcc libc6-dev flex bison gcc-aarch64-linux-gnu bc libssl-dev; } &
         { python3 -m pip install --no-cache-dir -U pip setuptools wheel; python3 -m pip install --no-cache-dir -U pyelftools; } &
-        { curl -fO "https://git.kernel.org/pub/scm/linux/kernel/git/stable/linux.git/snapshot/linux-$linux_version.tar.gz"; tar xf "linux-$linux_version.tar.gz"; rm "linux-$linux_version.tar.gz"; } &
         { curl -fO "https://gitlab.com/MichaIng/u-boot/-/archive/$uboot_branch/u-boot-$uboot_branch.tar.bz2"; tar xf "u-boot-$uboot_branch.tar.bz2"; rm "u-boot-$uboot_branch.tar.bz2"; } &
-        mkdir artefacts
+        { curl -fO "https://git.kernel.org/pub/scm/linux/kernel/git/stable/linux.git/snapshot/linux-$linux_version.tar.gz"; tar xf "linux-$linux_version.tar.gz"; rm "linux-$linux_version.tar.gz"; } &
         wait
-        curl -sSfo "linux-$linux_version/arch/arm64/configs/quartz64_defconfig" "https://raw.githubusercontent.com/$GITHUB_REPOSITORY_OWNER/DietPi/${GITHUB_REF#refs/heads/}/.build/images/Quartz64/quartz64_defconfig"
+        curl -sSfo "u-boot-$uboot_branch/u-boot-spl-ddr.bin" 'https://raw.githubusercontent.com/JeffyCN/rockchip_mirrors/rkbin/bin/rk35/rk3568_ddr_1560MHz_v1.13.bin' &
+        curl -sSfo "u-boot-$uboot_branch/bl31.elf" 'https://raw.githubusercontent.com/JeffyCN/rockchip_mirrors/6186deb/bin/rk35/rk3568_bl31_v1.28.elf' &
+        curl -sSfo "linux-$linux_version/arch/arm64/configs/quartz64_defconfig" "https://raw.githubusercontent.com/$GITHUB_REPOSITORY_OWNER/DietPi/${GITHUB_REF#refs/heads/}/.build/images/Quartz64/quartz64_defconfig" &
+        mkdir -p artefacts/mainline-u-boot modules
+        wait
     - name: Build U-Boot
       run: |
-        mkdir artefacts/mainline-u-boot
-        cd "u-boot-$uboot_branch"
-        curl -sSfo 'u-boot-spl-ddr.bin' 'https://raw.githubusercontent.com/JeffyCN/rockchip_mirrors/rkbin/bin/rk35/rk3568_ddr_1560MHz_v1.13.bin' &
-        curl -sSfo 'bl31.elf' 'https://raw.githubusercontent.com/JeffyCN/rockchip_mirrors/6186deb/bin/rk35/rk3568_bl31_v1.28.elf' &
         export BL31='bl31.elf'
-        wait
+        cd "u-boot-$uboot_branch"
         make quartz64-a-rk3566_defconfig
         make -j$(nproc)
         mv u-boot-rockchip.bin ../artefacts/mainline-u-boot/quartz64-a-u-boot-rockchip.bin
@@ -54,7 +53,6 @@ jobs:
         rm -R "u-boot-$uboot_branch"
     - name: Build Linux
       run: |
-        mkdir modules
         export INSTALL_MOD_PATH="$PWD/modules"
         cd "linux-$linux_version"
         make quartz64_defconfig
@@ -72,7 +70,7 @@ jobs:
         umask 377
         echo '${{ secrets.KNOWN_HOSTS }}' > ~/.ssh/known_hosts
         echo '${{ secrets.SSH_KEY }}' > ~/.ssh/id_ed25519
-        zip -9r artefacts.zip artefacts
-        curl -T artefacts.zip --key ~/.ssh/id_ed25519 '${{ secrets.UPLOAD_URL }}all/'
+        tar cI 'gzip -9' -f artefacts.tar.gz artefacts
+        curl -T artefacts.tar.gz --key ~/.ssh/id_ed25519 '${{ secrets.UPLOAD_URL }}all/'
         curl 'https://api.cloudflare.com/client/v4/zones/${{ secrets.CF_ZONE }}/purge_cache' -H 'Authorization: Bearer ${{ secrets.CF_TOKEN }}' -H 'Content-Type: application/json' \
-        --data '{"files":["https://dietpi.com/downloads/binaries/testing/","https://dietpi.com/downloads/binaries/testing/artefacts.zip"]}'
+        --data '{"files":["https://dietpi.com/downloads/binaries/testing/","https://dietpi.com/downloads/binaries/testing/artefacts.tar.gz"]}'
