@@ -2551,9 +2551,9 @@ _EOF_
 	Remove_SysV()
 	{
 		G_DIETPI-NOTIFY 2 "Removing obsolete SysV $1 service"
-		[[ -f /etc/init.d/$1 ]] && G_EXEC rm "/etc/init.d/$1"
+		[[ -f '/etc/init.d/'$1 ]] && G_EXEC rm "/etc/init.d/$1"
 		G_EXEC update-rc.d "$1" remove
-		[[ $2 && -f /etc/default/$1 ]] && G_EXEC rm "/etc/default/$1"
+		[[ $2 && -f '/etc/default/'$1 ]] && G_EXEC rm "/etc/default/$1"
 	}
 
 	# Run marked software installs
@@ -2806,7 +2806,7 @@ _EOF_
 			fi
 
 			# Assure service is enabled and active
-			G_EXEC systemctl unmask dropbear
+			G_EXEC systemctl --no-reload unmask dropbear
 			G_EXEC systemctl enable dropbear
 			G_EXEC systemctl start dropbear
 
@@ -2828,7 +2828,7 @@ _EOF_
 			G_AGI openssh-server
 
 			# Assure service is enabled and active
-			G_EXEC systemctl unmask ssh
+			G_EXEC systemctl --no-reload unmask ssh
 			G_EXEC systemctl enable ssh
 			G_EXEC systemctl start ssh
 
@@ -7310,7 +7310,7 @@ _EOF_
 			Remove_SysV fail2ban 1
 
 			# Failsafe
-			G_EXEC systemctl unmask fail2ban
+			G_EXEC systemctl --no-reload unmask fail2ban
 			G_EXEC systemctl enable --now fail2ban
 		fi
 
@@ -7848,7 +7848,7 @@ _EOF_
 			Configure_iptables
 
 			# Unmask hostapd since it is masked via postinst when no config exists yet
-			G_EXEC systemctl unmask hostapd
+			G_EXEC systemctl --no-reload unmask hostapd
 
 			# Enable WiFi modules
 			/boot/dietpi/func/dietpi-set_hardware wifimodules enable
@@ -11954,6 +11954,35 @@ If no WireGuard (auto)start is included, but you require it, please do the follo
 
 	Uninstall_Software()
 	{
+		# $1: Service name
+		# $2: Remove user named $2 or $1 if $2 == 1 (optional)
+		# $3: Remove group named $3 or $1 if $3 == 1 (optional)
+		Remove_Service()
+		{
+			local unmasked disabled
+			if [[ -f '/etc/systemd/system/'$1'.service' ]]
+			then
+				G_EXEC systemctl --no-reload disable --now "$1" && disabled=1
+				G_EXEC rm "/etc/systemd/system/$1.service" && unmasked=1
+
+			elif [[ -f '/lib/systemd/system/'$1'.service' ]]
+			then
+				G_EXEC systemctl --no-reload unmask "$1" && unmasked=1
+				G_EXEC systemctl --no-reload disable --now "$1" && disabled=1
+			fi
+			if [[ -f '/etc/init.d/'$1 ]]
+			then
+				[[ $unmasked ]] || G_EXEC systemctl --no-reload unmask "$1"
+				[[ $disabled ]] || G_EXEC systemctl --no-reload disable "$1"
+				[[ $disabled ]] || G_EXEC systemctl stop "$1" # --now does not work with generated wrapper units
+				G_EXEC rm "/etc/init.d/$1"
+				G_EXEC update-rc.d "$1" remove
+			fi
+			[[ -d '/etc/systemd/system/'$1'.service.d' ]] && G_EXEC rm -R "/etc/systemd/system/$1.service.d"
+			[[ $2 ]] && getent passwd "${2/#1/$1}" > /dev/null && G_EXEC userdel "${2/#1/$1}"
+			[[ $3 ]] && getent group "${3/#1/$1}" > /dev/null && G_EXEC groupdel "${3/#1/$1}"
+		}
+
 		# NB: "systemctl daemon-reload" is executed at the end of this function
 		G_NOTIFY_3_MODE='Step'
 		local software_id
@@ -12025,17 +12054,8 @@ If no WireGuard (auto)start is included, but you require it, please do the follo
 
 		if To_Uninstall 44 # Transmission
 		then
-			# Stop Transmission service, as it may keep running on package removal
-			if [[ -f '/lib/systemd/system/transmission-daemon.service' ]]
-			then
-				G_EXEC systemctl unmask transmission-daemon
-				G_EXEC systemctl disable --now transmission-daemon
-			fi
+			Remove_Service transmission-daemon debian-transmission debian-transmission
 			G_AGP transmission-daemon
-			getent passwd debian-transmission > /dev/null && G_EXEC userdel debian-transmission
-			getent group debian-transmission > /dev/null && G_EXEC groupdel debian-transmission
-			[[ -f '/etc/systemd/system/transmission-daemon.service' ]] && G_EXEC rm /etc/systemd/system/transmission-daemon.service # pre v6.17
-			[[ -d '/etc/systemd/system/transmission-daemon.service.d' ]] && G_EXEC rm -R /etc/systemd/system/transmission-daemon.service.d # post v6.17
 		fi
 
 		if To_Uninstall 47 # ownCloud
@@ -12084,13 +12104,15 @@ If no WireGuard (auto)start is included, but you require it, please do the follo
 
 		if To_Uninstall 168 # Nextcloud Talk + Coturn server
 		then
+			Remove_Service coturn
 			G_AGP coturn
 			[[ -f '/etc/turnserver.conf' ]] && G_EXEC rm /etc/turnserver.conf
-			[[ -d '/etc/systemd/system/coturn.service.d' ]] && G_EXEC rm -R /etc/systemd/system/coturn.service.d
-			systemctl start mariadb
 			systemctl start redis-server
-			sudo -u www-data php /var/www/nextcloud/occ maintenance:mode --off
-			sudo -u www-data php /var/www/nextcloud/occ app:disable spreed
+			if systemctl start mariadb
+			then
+				sudo -u www-data php /var/www/nextcloud/occ maintenance:mode --off
+				sudo -u www-data php /var/www/nextcloud/occ app:disable spreed
+			fi
 			G_DIETPI-NOTIFY 2 'Disabled Nextcloud Talk app, but you need to remove it manually from Nextcloud web UI, if desired.'
 		fi
 
@@ -12156,25 +12178,20 @@ If no WireGuard (auto)start is included, but you require it, please do the follo
 
 		if To_Uninstall 83 # Apache
 		then
+			Remove_Service apache2
 			G_AGP apache2 libapache2-mod-php*
 			G_EXEC rm -Rf /{etc,var/{lib,log}}/apache2 /{etc/php,var/lib/php/modules}/*/apache2
 		fi
 
 		if To_Uninstall 85 # Nginx
 		then
+			Remove_Service nginx
 			G_AGP nginx 'nginx-*'
 		fi
 
 		if To_Uninstall 84 # Lighttpd
 		then
-			# Stop Lighttpd service, as it may keep running on package removal
-			if [[ -f '/lib/systemd/system/lighttpd.service' ]]
-			then
-				G_EXEC systemctl unmask lighttpd
-				G_EXEC systemctl disable --now lighttpd
-			fi
-			[[ -d '/lib/systemd/system/lighttpd.service.d' ]] && G_EXEC rm -R /lib/systemd/system/lighttpd.service.d
-
+			Remove_Service lighttpd
 			G_AGP lighttpd
 
 			# Config
@@ -12190,6 +12207,7 @@ If no WireGuard (auto)start is included, but you require it, please do the follo
 
 		if To_Uninstall 91 # Redis
 		then
+			Remove_Service redis-server
 			G_AGP redis-server redis-tools 'php*-redis'
 		fi
 
@@ -12200,6 +12218,7 @@ If no WireGuard (auto)start is included, but you require it, please do the follo
 
 		if To_Uninstall 89 # PHP
 		then
+			Remove_Service "php$PHP_VERSION-fpm"
 			G_AGP 'php*-*' 'libapache2-mod-php*'
 			G_EXEC rm -Rf /{etc,var/lib}/php /var/log/php*-fpm.log
 			[[ -f '/etc/tmpfiles.d/dietpi-php_sessions.conf' ]] && G_EXEC rm /etc/tmpfiles.d/dietpi-php_sessions.conf
@@ -12208,41 +12227,35 @@ If no WireGuard (auto)start is included, but you require it, please do the follo
 
 		if To_Uninstall 90 # phpMyAdmin
 		then
-			systemctl start mariadb
-			mysqladmin -f drop phpmyadmin
-			mysql -e 'drop user phpmyadmin@localhost;'
+			if systemctl start mariadb
+			then
+				mysqladmin -f drop phpmyadmin
+				mysql -e 'drop user phpmyadmin@localhost;'
+			fi
 		fi
 
 		if To_Uninstall 184 # Tor Relay
 		then
-			if [[ -f '/lib/systemd/system/tor.service' ]]
-			then
-				G_EXEC systemctl unmask tor
-				G_EXEC systemctl disable --now tor
-			fi
-			[[ -d '/etc/systemd/system/tor.service.d' ]] && G_EXEC rm -R /etc/systemd/system/tor.service.d
+			Remove_Service tor
 			G_AGP tor obfs4proxy
 		fi
 
 		if To_Uninstall 54 # phpBB
 		then
-			systemctl start mariadb
-			mysqladmin -f drop phpbb
-			mysqladmin -f drop phpbb3 # Pre-v6.33
-			mysql -e 'drop user phpbb@localhost;'
-			mysql -e 'drop user phpbb3@localhost;' # Pre-v6.33
+			if systemctl start mariadb
+			then
+				mysqladmin -f drop phpbb
+				mysqladmin -f drop phpbb3 # Pre-v6.33
+				mysql -e 'drop user phpbb@localhost;'
+				mysql -e 'drop user phpbb3@localhost;' # Pre-v6.33
+			fi
 			[[ -d '/var/www/phpbb' ]] && G_EXEC rm -R /var/www/phpbb
 			[[ -d '/var/www/phpBB3' ]] && G_EXEC rm -R /var/www/phpBB3 # Pre-v6.33
 		fi
 
 		if To_Uninstall 115 # Webmin
 		then
-			if [[ -f '/lib/systemd/system/webmin.service' ]]
-			then
-				G_EXEC systemctl unmask webmin
-				G_EXEC systemctl disable --now webmin
-			fi
-			[[ -d '/etc/systemd/system/webmin.service.d' ]] && G_EXEC rm -R /etc/systemd/system/webmin.service.d
+			Remove_Service webmin
 			G_AGP webmin
 			[[ -f '/etc/apt/sources.list.d/webmin.list' ]] && G_EXEC rm /etc/apt/sources.list.d/webmin.list
 			[[ -f '/etc/apt/trusted.gpg.d/dietpi-webmin.gpg' ]] && G_EXEC rm /etc/apt/trusted.gpg.d/dietpi-webmin.gpg
@@ -12250,25 +12263,13 @@ If no WireGuard (auto)start is included, but you require it, please do the follo
 
 		if To_Uninstall 32 # ympd
 		then
-			if [[ -f '/etc/systemd/system/ympd.service' ]]
-			then
-				G_EXEC systemctl disable --now ympd
-				G_EXEC rm /etc/systemd/system/ympd.service
-			fi
-			[[ -d '/etc/systemd/system/ympd.service.d' ]] && G_EXEC rm -R /etc/systemd/system/ympd.service.d
-			getent passwd ympd > /dev/null && G_EXEC userdel ympd
-			getent group ympd > /dev/null && G_EXEC groupdel ympd # pre-v6.33
+			Remove_Service ympd 1 1 # group for pre-v6.33
 			[[ -f '/usr/bin/ympd' ]] && G_EXEC rm /usr/bin/ympd
 		fi
 
 		if To_Uninstall 148 # myMPD
 		then
-			if [[ -f '/lib/systemd/system/mympd.service' ]]
-			then
-				G_EXEC systemctl unmask mympd
-				G_EXEC systemctl disable --now mympd
-			fi
-			[[ -d '/etc/systemd/system/mympd.service.d' ]] && G_EXEC rm -R /etc/systemd/system/mympd.service.d
+			Remove_Service mympd 1 1 # user and group for pre-v8.12
 			if [[ -f '/usr/local/share/ca-certificates/DietPi_myMPD_CA.crt' || -L '/usr/local/share/ca-certificates/DietPi_myMPD_CA.crt' ]]
 			then
 				G_EXEC rm /usr/local/share/ca-certificates/DietPi_myMPD_CA.crt
@@ -12281,9 +12282,6 @@ If no WireGuard (auto)start is included, but you require it, please do the follo
 			[[ -d '/var/lib/private/mympd' ]] && G_EXEC rm -R /var/lib/private/mympd
 			[[ -d '/var/cache/mympd' ]] && G_EXEC rm -R /var/cache/mympd
 			[[ -d '/var/cache/private/mympd' ]] && G_EXEC rm -R /var/cache/private/mympd
-			# pre-v8.12
-			getent passwd mympd > /dev/null && G_EXEC userdel mympd # myMPD pre-v10.1.0
-			getent group mympd > /dev/null && G_EXEC groupdel mympd # myMPD pre-v10.1.0
 			# pre-v8.0
 			[[ -f '/lib/systemd/system/mympd.service' ]] && G_EXEC rm /lib/systemd/system/mympd.service
 			command -v mympd > /dev/null && G_EXEC rm "$(command -v mympd)"
@@ -12295,15 +12293,8 @@ If no WireGuard (auto)start is included, but you require it, please do the follo
 
 		if To_Uninstall 128 # MPD
 		then
-			if [[ -f '/lib/systemd/system/mpd.service' ]]
-			then
-				G_EXEC systemctl unmask mpd
-				G_EXEC systemctl disable --now mpd
-			fi
-			[[ -d '/etc/systemd/system/mpd.service.d' ]] && G_EXEC rm -R /etc/systemd/system/mpd.service.d
+			Remove_Service mpd 1 1 # group for pre-v6.29
 			G_AGP mpd libmpdclient2
-			getent passwd mpd > /dev/null && G_EXEC userdel mpd
-			getent group mpd > /dev/null && G_EXEC groupdel mpd # pre-v6.29
 			[[ -d '/var/log/mpd' ]] && G_EXEC rm -R /var/log/mpd
 			[[ -d '/mnt/dietpi_userdata/.mpd_cache' ]] && G_EXEC rm -R /mnt/dietpi_userdata/.mpd_cache
 			[[ -f '/etc/mpd.conf' ]] && G_EXEC rm /etc/mpd.conf
@@ -12313,17 +12304,7 @@ If no WireGuard (auto)start is included, but you require it, please do the follo
 
 		if To_Uninstall 122 # Node-RED
 		then
-			# Service
-			if [[ -f '/etc/systemd/system/node-red.service' ]]
-			then
-				G_EXEC systemctl disable --now node-red
-				G_EXEC rm /etc/systemd/system/node-red.service
-			fi
-			[[ -d '/etc/systemd/system/node-red.service.d' ]] && G_EXEC rm -R /etc/systemd/system/node-red.service.d
-
-			# User
-			getent passwd nodered > /dev/null && G_EXEC userdel nodered
-			getent group nodered > /dev/null && G_EXEC groupdel nodered
+			Remove_Service node-red nodered nodered
 
 			# Configs
 			[[ -f '/etc/sudoers.d/nodered' ]] && G_EXEC rm /etc/sudoers.d/nodered
@@ -12346,12 +12327,7 @@ If no WireGuard (auto)start is included, but you require it, please do the follo
 
 		if To_Uninstall 123 # Mosquitto
 		then
-			if [[ -f '/etc/systemd/system/mosquitto.service' ]]
-			then
-				G_EXEC systemctl disable --now mosquitto
-				G_EXEC rm /etc/systemd/system/mosquitto.service
-			fi
-			[[ -d '/etc/systemd/system/mosquitto.service.d' ]] && G_EXEC rm -R /etc/systemd/system/mosquitto.service.d
+			Remove_Service mosquitto
 			G_AGP mosquitto
 
 			[[ -d '/etc/mosquitto' ]] && G_EXEC rm -R /etc/mosquitto
@@ -12370,23 +12346,18 @@ If no WireGuard (auto)start is included, but you require it, please do the follo
 			[[ -f '/etc/lighttpd/conf-enabled/99-dietpi-ompd.conf' ]] && G_EXEC lighty-disable-mod dietpi-ompd
 			[[ -f '/etc/lighttpd/conf-available/99-dietpi-ompd.conf' ]] && G_EXEC rm /etc/lighttpd/conf-available/99-dietpi-ompd.conf
 
-			systemctl start mariadb
-			mysqladmin drop ompd -f
-			mysql -e 'drop user ompd@localhost;'
+			if systemctl start mariadb
+			then
+				mysqladmin drop ompd -f
+				mysql -e 'drop user ompd@localhost;'
+			fi
 		fi
 
 		if To_Uninstall 131 # Blynk Server
 		then
-			if [[ -f '/etc/systemd/system/blynkserver.service' ]]
-			then
-				G_EXEC systemctl disable --now blynkserver
-				G_EXEC rm /etc/systemd/system/blynkserver.service
-			fi
-			[[ -d '/etc/systemd/system/blynkserver.service.d' ]] && G_EXEC rm -R /etc/systemd/system/blynkserver.service.d
+			Remove_Service blynkserver blynk blynk
 			[[ -d '/mnt/dietpi_userdata/blynk' ]] && G_EXEC rm -R /mnt/dietpi_userdata/blynk
 			[[ -d '/var/log/blynk' ]] && G_EXEC rm -R /var/log/blynk
-			getent passwd blynk > /dev/null && G_EXEC userdel blynk
-			getent group blynk > /dev/null && G_EXEC groupdel blynk
 			command -v npm > /dev/null && npm r -g blynk-library
 			[[ -f '/usr/local/bin/blynk-ctrl' ]] && G_EXEC rm /usr/local/bin/blynk-ctrl
 			[[ -f '/usr/local/bin/blynk-client' ]] && G_EXEC rm /usr/local/bin/blynk-client
@@ -12395,12 +12366,7 @@ If no WireGuard (auto)start is included, but you require it, please do the follo
 
 		if To_Uninstall 125 # Synapse
 		then
-			if [[ -f '/etc/systemd/system/synapse.service' ]]
-			then
-				G_EXEC systemctl disable --now synapse
-				G_EXEC rm /etc/systemd/system/synapse.service
-			fi
-			[[ -d '/etc/systemd/system/synapse.service.d' ]] && G_EXEC rm -R /etc/systemd/system/synapse.service.d
+			Remove_Service synapse 1 1
 			[[ -d '/mnt/dietpi_userdata/synapse' ]] && G_EXEC rm -R /mnt/dietpi_userdata/synapse
 
 			command -v pip3 > /dev/null && G_EXEC_OUTPUT=1 G_EXEC pip3 uninstall -y matrix-synapse
@@ -12411,15 +12377,8 @@ If no WireGuard (auto)start is included, but you require it, please do the follo
 		if To_Uninstall 132 # Aria2
 		then
 			[[ -d '/var/www/aria2' ]] && G_EXEC rm -R /var/www/aria2
-			if [[ -f '/etc/systemd/system/aria2.service' ]]
-			then
-				G_EXEC systemctl disable --now aria2
-				G_EXEC rm /etc/systemd/system/aria2.service
-			fi
-			[[ -d '/etc/systemd/system/aria2.service.d' ]] && G_EXEC rm -R /etc/systemd/system/aria2.service.d
+			Remove_Service aria2 1 1
 			G_AGP aria2
-			getent passwd aria2 > /dev/null && G_EXEC userdel aria2
-			getent group aria2 > /dev/null && G_EXEC groupdel aria2
 			[[ -d '/mnt/dietpi_userdata/aria2' ]] && G_EXEC rm -R /mnt/dietpi_userdata/aria2
 			[[ -f '/mnt/dietpi_userdata/downloads/aria2.session' ]] && G_EXEC rm /mnt/dietpi_userdata/downloads/aria2.session
 			[[ -f '/usr/local/bin/aria2c' ]] && G_EXEC rm /usr/local/bin/aria2c # Previous
@@ -12427,12 +12386,7 @@ If no WireGuard (auto)start is included, but you require it, please do the follo
 
 		if To_Uninstall 133 # YaCy
 		then
-			if [[ -f '/etc/systemd/system/yacy.service' ]]
-			then
-				G_EXEC systemctl disable --now yacy
-				G_EXEC rm /etc/systemd/system/yacy.service
-			fi
-			[[ -d '/etc/systemd/system/yacy.service.d' ]] && G_EXEC rm -R /etc/systemd/system/yacy.service.d
+			Remove_Service yacy
 			[[ -d '/etc/yacy' ]] && G_EXEC rm -R /etc/yacy
 		fi
 
@@ -12441,35 +12395,20 @@ If no WireGuard (auto)start is included, but you require it, please do the follo
 			# Un-check out all work units, so they can be picked up by other donors prior to timeout: https://github.com/FoldingAtHome/fah-issues/issues/1255
 			FAHClient --chdir /mnt/dietpi_userdata/fahclient --dump all
 
-			if [[ -f '/etc/systemd/system/fahclient.service' ]]
-			then
-				G_EXEC systemctl disable --now fahclient
-				G_EXEC rm /etc/systemd/system/fahclient.service
-			fi
-			[[ -d '/etc/systemd/system/fahclient.service.d' ]] && G_EXEC rm -R /etc/systemd/system/fahclient.service.d
+			Remove_Service fahclient
 			G_AGP fahclient
 			[[ -d '/mnt/dietpi_userdata/fahclient' ]] && G_EXEC rm -R /mnt/dietpi_userdata/fahclient
 		fi
 
 		if To_Uninstall 135
 		then
-			if [[ -f '/etc/systemd/system/darkice.service' ]]
-			then
-				G_EXEC systemctl disable --now darkice
-				G_EXEC rm /etc/systemd/system/darkice.service
-			fi
-			[[ -d '/etc/systemd/system/darkice.service.d' ]] && G_EXEC rm -R /etc/systemd/system/darkice.service.d
+			Remove_Service darkice
 			G_AGP darkice icecast2
 		fi
 
 		if To_Uninstall 136 # motionEye
 		then
-			if [[ -f '/etc/systemd/system/motioneye.service' ]]
-			then
-				G_EXEC systemctl disable --now motioneye
-				G_EXEC rm /etc/systemd/system/motioneye.service
-			fi
-			[[ -d '/etc/systemd/system/motioneye.service.d' ]] && G_EXEC rm -R /etc/systemd/system/motioneye.service.d
+			Remove_Service motioneye
 			command -v pip3 > /dev/null && G_EXEC_OUTPUT=1 G_EXEC pip3 uninstall -y motioneye
 			G_AGP motion
 			[[ -d '/etc/motioneye' ]] && G_EXEC rm -R /etc/motioneye
@@ -12480,24 +12419,13 @@ If no WireGuard (auto)start is included, but you require it, please do the follo
 
 		if To_Uninstall 137 # mjpg-streamer
 		then
-			if [[ -f '/etc/systemd/system/mjpg-streamer.service' ]]
-			then
-				G_EXEC systemctl disable --now mjpg-streamer
-				G_EXEC rm /etc/systemd/system/mjpg-streamer.service
-			fi
-			[[ -d '/etc/systemd/system/mjpg-streamer.service.d' ]] && G_EXEC rm -R /etc/systemd/system/mjpg-streamer.service.d
-			getent passwd mjpg-streamer > /dev/null && G_EXEC userdel mjpg-streamer
+			Remove_Service mjpg-streamer 1
 			[[ -d '/opt/mjpg-streamer' ]] && G_EXEC rm -R /opt/mjpg-streamer
 		fi
 
 		if To_Uninstall 138 # VirtualHere
 		then
-			if [[ -f '/etc/systemd/system/virtualhere.service' ]]
-			then
-				G_EXEC systemctl disable --now virtualhere
-				G_EXEC rm /etc/systemd/system/virtualhere.service
-			fi
-			[[ -d '/etc/systemd/system/virtualhere.service.d' ]] && G_EXEC rm -R /etc/systemd/system/virtualhere.service.d
+			Remove_Service virtualhere
 			[[ -d '/opt/virtualhere' ]] && G_EXEC rm -R /opt/virtualhere
 			[[ -d '/etc/vhusbd' ]] && G_EXEC rm -R /etc/vhusbd # Pre-v8.4
 			[[ -f '/var/log/virtualhere.log' ]] && G_EXEC rm /var/log/virtualhere.log # Pre-v8.4
@@ -12505,14 +12433,7 @@ If no WireGuard (auto)start is included, but you require it, please do the follo
 
 		if To_Uninstall 139 # SABnzbd
 		then
-			if [[ -f '/etc/systemd/system/sabnzbd.service' ]]
-			then
-				G_EXEC systemctl disable --now sabnzbd
-				G_EXEC rm /etc/systemd/system/sabnzbd.service
-			fi
-			[[ -d '/etc/systemd/system/sabnzbd.service.d' ]] && G_EXEC rm -R /etc/systemd/system/sabnzbd.service.d
-			getent passwd sabnzbd > /dev/null && G_EXEC userdel sabnzbd
-			getent group sabnzbd > /dev/null && G_EXEC groupdel sabnzbd # Pre-v6.33
+			Remove_Service sabnzbd 1 1 # group for pre-v6.33
 			[[ -d '/etc/sabnzbd' ]] && G_EXEC rm -R /etc/sabnzbd
 			[[ -d '/mnt/dietpi_userdata/downloads/sabnzbd_admin' ]] && G_EXEC rm -R /mnt/dietpi_userdata/downloads/sabnzbd_admin
 			[[ -d '/mnt/dietpi_userdata/downloads/sabnzbd_nzb_backup' ]] && G_EXEC rm -R /mnt/dietpi_userdata/downloads/sabnzbd_nzb_backup
@@ -12521,35 +12442,17 @@ If no WireGuard (auto)start is included, but you require it, please do the follo
 
 		if To_Uninstall 177 # Firefox Sync Server
 		then
-			if [[ -f '/etc/systemd/system/firefox-sync.service' ]]
-			then
-				G_EXEC systemctl disable --now firefox-sync
-				G_EXEC rm /etc/systemd/system/firefox-sync.service
-			fi
-			[[ -d '/etc/systemd/system/firefox-sync.service.d' ]] && G_EXEC rm -R /etc/systemd/system/firefox-sync.service.d
-			getent passwd ffsync > /dev/null && G_EXEC userdel ffsync
-			getent group ffsync > /dev/null && G_EXEC groupdel ffsync
+			Remove_Service firefox-sync ffsync ffsync
 			[[ -d '/opt/firefox-sync' ]] && G_EXEC rm -R /opt/firefox-sync
 			[[ -d '/mnt/dietpi_userdata/firefox-sync' ]] && G_EXEC rm -R /mnt/dietpi_userdata/firefox-sync
 		fi
 
 		if To_Uninstall 183 # vaultwarden
 		then
-			# Pre-v8.7
-			if [[ -f '/etc/systemd/system/vaultwarden.service' ]]
-			then
-				G_EXEC systemctl disable --now vaultwarden
-				G_EXEC rm /etc/systemd/system/vaultwarden.service
-			fi
-
+			Remove_Service vaultwarden 1 1 # Pre-v8.7
 			G_AGP vaultwarden
 			[[ -d '/mnt/dietpi_userdata/vaultwarden' ]] && G_EXEC rm -R /mnt/dietpi_userdata/vaultwarden
-
-			# Pre-v8.7
-			[[ -d '/etc/systemd/system/vaultwarden.service.d' ]] && G_EXEC rm -R /etc/systemd/system/vaultwarden.service.d
-			getent passwd vaultwarden > /dev/null && G_EXEC userdel vaultwarden
-			getent group vaultwarden > /dev/null && G_EXEC groupdel vaultwarden
-			[[ -d '/opt/vaultwarden' ]] && G_EXEC rm -R /opt/vaultwarden
+			[[ -d '/opt/vaultwarden' ]] && G_EXEC rm -R /opt/vaultwarden # Pre-v8.7
 		fi
 
 		if To_Uninstall 193 # K3s
@@ -12568,12 +12471,7 @@ If no WireGuard (auto)start is included, but you require it, please do the follo
 
 		if To_Uninstall 141 # Spotify Connect Web
 		then
-			if [[ -f '/etc/systemd/system/spotify-connect-web.service' ]]
-			then
-				G_EXEC systemctl disable --now spotify-connect-web
-				G_EXEC rm /etc/systemd/system/spotify-connect-web.service
-			fi
-			[[ -d '/etc/systemd/system/spotify-connect-web.service.d' ]] && G_EXEC rm -R /etc/systemd/system/spotify-connect-web.service.d
+			Remove_Service spotify-connect-web
 			[[ -d '/mnt/dietpi_userdata/spotify-connect-web' ]] && G_EXEC rm -R /mnt/dietpi_userdata/spotify-connect-web
 		fi
 
@@ -12610,33 +12508,21 @@ If no WireGuard (auto)start is included, but you require it, please do the follo
 
 		if To_Uninstall 143 # Koel
 		then
-			if [[ -f '/etc/systemd/system/koel.service' ]]
-			then
-				G_EXEC systemctl disable --now koel
-				G_EXEC rm /etc/systemd/system/koel.service
-			fi
-			[[ -d '/etc/systemd/system/koel.service.d' ]] && G_EXEC rm -R /etc/systemd/system/koel.service.d
-			getent passwd koel > /dev/null && G_EXEC userdel koel
-			getent group koel > /dev/null && G_EXEC groupdel koel # Pre-v6.33
+			Remove_Service koel 1 1 # group for pre-v6.33
 
-			systemctl start mariadb
-			mysqladmin drop koel -f
-			mysql -e 'drop user koel@localhost;'
+			if systemctl start mariadb
+			then
+				mysqladmin drop koel -f
+				mysql -e 'drop user koel@localhost;'
+			fi
 
 			[[ -d '/mnt/dietpi_userdata/koel' ]] && G_EXEC rm -R /mnt/dietpi_userdata/koel
 		fi
 
 		if To_Uninstall 144 # Sonarr
 		then
-			if [[ -f '/etc/systemd/system/sonarr.service' ]]
-			then
-				G_EXEC systemctl disable --now sonarr
-				G_EXEC rm /etc/systemd/system/sonarr.service
-			fi
-			[[ -d '/etc/systemd/system/sonarr.service.d' ]] && G_EXEC rm -R /etc/systemd/system/sonarr.service.d
+			Remove_Service sonarr 1 1 # group for pre-v6.29
 			G_AGP sonarr nzbdrone # Pre-v7.1
-			getent passwd sonarr > /dev/null && G_EXEC userdel sonarr
-			getent group sonarr > /dev/null && G_EXEC groupdel sonarr # Pre-v6.29
 			[[ -d '/var/log/sonarr' ]] && G_EXEC rm -R /var/log/sonarr
 			G_EXEC rm -Rf /mnt/dietpi_userdata/sonarr /opt/NzbDrone # Pre-v7.1
 			[[ -f '/etc/apt/sources.list.d/sonarr.list' ]] && G_EXEC rm /etc/apt/sources.list.d/sonarr.list
@@ -12646,50 +12532,25 @@ If no WireGuard (auto)start is included, but you require it, please do the follo
 
 		if To_Uninstall 145 # Radarr
 		then
-			if [[ -f '/etc/systemd/system/radarr.service' ]]
-			then
-				G_EXEC systemctl disable --now radarr
-				G_EXEC rm /etc/systemd/system/radarr.service
-			fi
-			[[ -d '/etc/systemd/system/radarr.service.d' ]] && G_EXEC rm -R /etc/systemd/system/radarr.service.d
-			getent passwd radarr > /dev/null && G_EXEC userdel radarr
-			getent group radarr > /dev/null && G_EXEC groupdel radarr # Pre-v6.29
+			Remove_Service radarr 1 1 # group for pre-v6.29
 			G_EXEC rm -Rf /opt/radarr /mnt/dietpi_userdata/radarr /var/log/radarr
 		fi
 
 		if To_Uninstall 106 # Lidarr
 		then
-			if [[ -f '/etc/systemd/system/lidarr.service' ]]
-			then
-				G_EXEC systemctl disable --now lidarr
-				G_EXEC rm /etc/systemd/system/lidarr.service
-			fi
-			[[ -d '/etc/systemd/system/lidarr.service.d' ]] && G_EXEC rm -R /etc/systemd/system/lidarr.service.d
-			getent passwd lidarr > /dev/null && G_EXEC userdel lidarr
-			getent group lidarr > /dev/null && G_EXEC groupdel lidarr # Pre-v6.29
+			Remove_Service lidarr 1 1 # group for pre-v6.29
 			G_EXEC rm -Rf /opt/{L,l}idarr /mnt/dietpi_userdata/lidarr /var/log/lidarr
 		fi
 
 		if To_Uninstall 180 # Bazarr
 		then
-			if [[ -f '/etc/systemd/system/bazarr.service' ]]
-			then
-				G_EXEC systemctl disable --now bazarr
-				G_EXEC rm /etc/systemd/system/bazarr.service
-			fi
-			[[ -d '/etc/systemd/system/bazarr.service.d' ]] && G_EXEC rm -R /etc/systemd/system/bazarr.service.d
-			getent passwd bazarr > /dev/null && G_EXEC userdel bazarr
+			Remove_Service bazarr 1
 			G_EXEC rm -Rf /opt/bazarr /mnt/dietpi_userdata/bazarr /var/log/bazarr
 		fi
 
 		if To_Uninstall 200 # DietPi-Dashboard
 		then
-			if [[ -f '/etc/systemd/system/dietpi-dashboard.service' ]]
-			then
-				G_EXEC systemctl disable --now dietpi-dashboard
-				G_EXEC rm /etc/systemd/system/dietpi-dashboard.service
-			fi
-			[[ -d '/etc/systemd/system/dietpi-dashboard.service.d' ]] && G_EXEC rm -R /etc/systemd/system/dietpi-dashboard.service.d
+			Remove_Service dietpi-dashboard
 			[[ -d '/opt/dietpi-dashboard' ]] && G_EXEC rm -R /opt/dietpi-dashboard
 		fi
 
@@ -12701,95 +12562,45 @@ If no WireGuard (auto)start is included, but you require it, please do the follo
 				G_EXEC rm /etc/systemd/system/raspberrypi_exporter.timer
 			fi
 			[[ -d '/etc/systemd/system/raspberrypi_exporter.timer.d' ]] && G_EXEC rm -R /etc/systemd/system/raspberrypi_exporter.timer.d
-			if [[ -f '/etc/systemd/system/raspberrypi_exporter.service' ]]
-			then
-				G_EXEC systemctl disable --now raspberrypi_exporter.service
-				G_EXEC rm /etc/systemd/system/raspberrypi_exporter.service
-			fi
-			[[ -d '/etc/systemd/system/raspberrypi_exporter.service.d' ]] && G_EXEC rm -R /etc/systemd/system/raspberrypi_exporter.service.d
-			if [[ -f '/etc/systemd/system/node_exporter.service' ]]
-			then
-				G_EXEC systemctl disable --now node_exporter.service
-				G_EXEC rm /etc/systemd/system/node_exporter.service
-			fi
-			[[ -d '/etc/systemd/system/node_exporter.service.d' ]] && G_EXEC rm -R /etc/systemd/system/node_exporter.service.d
+			Remove_Service raspberrypi_exporter
+			Remove_Service node_exporter 1 1
 			[[ -d '/opt/node_exporter' ]] && G_EXEC rm -R /opt/node_exporter
-			getent passwd node_exporter > /dev/null && G_EXEC userdel node_exporter
-			getent group node_exporter > /dev/null && G_EXEC groupdel node_exporter
 		fi
 
 		if To_Uninstall 146 # Tautulli
 		then
-			if [[ -f '/etc/systemd/system/tautulli.service' ]]
-			then
-				G_EXEC systemctl disable --now tautulli
-				G_EXEC rm /etc/systemd/system/tautulli.service
-			fi
-			[[ -d '/etc/systemd/system/tautulli.service.d' ]] && G_EXEC rm -R /etc/systemd/system/tautulli.service.d
-			getent passwd tautulli > /dev/null && G_EXEC userdel tautulli
-			getent group tautulli > /dev/null && G_EXEC groupdel tautulli
+			Remove_Service tautulli 1 1
 			[[ -d '/opt/tautulli' ]] && G_EXEC rm -R /opt/tautulli
 			[[ -d '/mnt/dietpi_userdata/tautulli' ]] && G_EXEC rm -R /mnt/dietpi_userdata/tautulli
 		fi
 
 		if To_Uninstall 147 # Jackett
 		then
-			if [[ -f '/etc/systemd/system/jackett.service' ]]
-			then
-				G_EXEC systemctl disable --now jackett
-				G_EXEC rm /etc/systemd/system/jackett.service
-			fi
-			[[ -d '/etc/systemd/system/jackett.service.d' ]] && G_EXEC rm -R /etc/systemd/system/jackett.service.d
-			getent passwd jackett > /dev/null && G_EXEC userdel jackett
-			getent group jackett > /dev/null && G_EXEC groupdel jackett
+			Remove_Service jackett 1 1
 			[[ -d '/opt/jackett' ]] && G_EXEC rm -R /opt/jackett
 		fi
 
 		if To_Uninstall 149 # NZBGet
 		then
-			if [[ -f '/etc/systemd/system/nzbget.service' ]]
-			then
-				G_EXEC systemctl disable --now nzbget
-				G_EXEC rm /etc/systemd/system/nzbget.service
-			fi
-			[[ -d '/etc/systemd/system/nzbget.service.d' ]] && G_EXEC rm -R /etc/systemd/system/nzbget.service.d
-			getent passwd nzbget > /dev/null && G_EXEC userdel nzbget
-			getent group nzbget > /dev/null && G_EXEC groupdel nzbget # Pre-v6.33
+			Remove_Service nzbget 1 1 # group for pre-v6.33
 			[[ -d '/mnt/dietpi_userdata/nzbget' ]] && G_EXEC rm -R /mnt/dietpi_userdata/nzbget
 		fi
 
 		if To_Uninstall 151 # Prowlarr
 		then
-			if [[ -f '/etc/systemd/system/prowlarr.service' ]]
-			then
-				G_EXEC systemctl disable --now prowlarr
-				G_EXEC rm /etc/systemd/system/prowlarr.service
-			fi
-			[[ -d '/etc/systemd/system/prowlarr.service.d' ]] && G_EXEC rm -R /etc/systemd/system/prowlarr.service.d
-			getent passwd prowlarr > /dev/null && G_EXEC userdel prowlarr
+			Remove_Service prowlarr 1
 			G_EXEC rm -Rf /opt/prowlarr /mnt/dietpi_userdata/prowlarr /var/log/prowlarr
 		fi
 
 		if To_Uninstall 203 # Readarr
 		then
-			if [[ -f '/etc/systemd/system/readarr.service' ]]
-			then
-				G_EXEC systemctl disable --now readarr
-				G_EXEC rm /etc/systemd/system/readarr.service
-			fi
-			[[ -d '/etc/systemd/system/readarr.service.d' ]] && G_EXEC rm -R /etc/systemd/system/readarr.service.d
-			getent passwd readarr > /dev/null && G_EXEC userdel readarr
+			Remove_Service readarr 1
 			G_EXEC rm -Rf /opt/readarr /mnt/dietpi_userdata/readarr /var/log/readarr
 		fi
 
 		if To_Uninstall 155 # HTPC Manager
 		then
-			if [[ -f '/etc/systemd/system/htpc-manager.service' ]]
-			then
-				G_EXEC systemctl disable --now htpc-manager
-				G_EXEC rm /etc/systemd/system/htpc-manager.service
-			fi
-			[[ -d '/etc/systemd/system/htpc-manager.service.d' ]] && G_EXEC rm -R /etc/systemd/system/htpc-manager.service.d
+			Remove_Service htpc-manager
 			[[ -d '/mnt/dietpi_userdata/htpc-manager' ]] && G_EXEC rm -R /mnt/dietpi_userdata/htpc-manager
 		fi
 
@@ -12805,15 +12616,8 @@ If no WireGuard (auto)start is included, but you require it, please do the follo
 		then
 			G_AGP shairport-sync
 			# Pre-v6.29
-			if [[ -f '/lib/systemd/system/shairport-sync.service' ]]
-			then
-				G_EXEC systemctl unmask shairport-sync
-				G_EXEC systemctl disable --now shairport-sync
-				G_EXEC rm /lib/systemd/system/shairport-sync.service
-			fi
-			[[ -d '/etc/systemd/system/shairport-sync.service.d' ]] && G_EXEC rm -R /etc/systemd/system/shairport-sync.service.d
-			getent passwd shairport-sync > /dev/null && G_EXEC userdel shairport-sync
-			getent group shairport-sync > /dev/null && G_EXEC groupdel shairport-sync
+			Remove_Service shairport-sync
+			[[ -f '/lib/systemd/system/shairport-sync.service' ]] && G_EXEC rm /lib/systemd/system/shairport-sync.service
 			G_EXEC rm -f /usr/local/bin/shairport-sync /usr/local/etc/shairport-sync.conf* /usr/local/share/man/man7/shairport-sync.7.gz
 		fi
 
@@ -12824,22 +12628,13 @@ If no WireGuard (auto)start is included, but you require it, please do the follo
 
 		if To_Uninstall 153 # OctoPrint
 		then
-			# Service
-			if [[ -f '/etc/systemd/system/octoprint.service' ]]
-			then
-				G_EXEC systemctl disable --now octoprint
-				G_EXEC rm /etc/systemd/system/octoprint.service
-			fi
-			[[ -d '/etc/systemd/system/octoprint.service.d' ]] && G_EXEC rm -R /etc/systemd/system/octoprint.service.d
+			Remove_Service octoprint 1 1
 			# CLI alias
 			[[ -f '/etc/bashrc.d/dietpi-octoprint.sh' ]] && G_EXEC rm /etc/bashrc.d/dietpi-octoprint.sh
 			# Data
 			[[ -d '/mnt/dietpi_userdata/octoprint' ]] && G_EXEC rm -R /mnt/dietpi_userdata/octoprint
 			# sudoers
 			[[ -f '/etc/sudoers.d/octoprint' ]] && G_EXEC rm /etc/sudoers.d/octoprint
-			# User
-			getent passwd octoprint > /dev/null && G_EXEC userdel octoprint
-			getent group octoprint > /dev/null && G_EXEC groupdel octoprint
 		fi
 
 		if To_Uninstall 187 # CUPS
@@ -12850,14 +12645,7 @@ If no WireGuard (auto)start is included, but you require it, please do the follo
 
 		if To_Uninstall 121 # Roon Bridge
 		then
-			if [[ -f '/etc/systemd/system/roonbridge.service' ]]
-			then
-				G_EXEC systemctl disable --now roonbridge
-				G_EXEC rm /etc/systemd/system/roonbridge.service
-			fi
-			[[ -d '/etc/systemd/system/roonbridge.service.d' ]] && G_EXEC rm -R /etc/systemd/system/roonbridge.service.d
-			getent passwd roonbridge > /dev/null && G_EXEC userdel roonbridge
-			getent group roonbridge > /dev/null && G_EXEC groupdel roonbridge
+			Remove_Service roonbridge 1 1
 			[[ -d '/opt/roonbridge' ]] && G_EXEC rm -R /opt/roonbridge
 			[[ -d '/var/log/roonbridge' ]] && G_EXEC rm -R /var/log/roonbridge
 			[[ -d '/mnt/dietpi_userdata/roonbridge' ]] && G_EXEC rm -R /mnt/dietpi_userdata/roonbridge
@@ -12869,14 +12657,7 @@ If no WireGuard (auto)start is included, but you require it, please do the follo
 
 		if To_Uninstall 154 # Roon Server
 		then
-			if [[ -f '/etc/systemd/system/roonserver.service' ]]
-			then
-				G_EXEC systemctl disable --now roonserver
-				G_EXEC rm /etc/systemd/system/roonserver.service
-			fi
-			[[ -d '/etc/systemd/system/roonserver.service.d' ]] && G_EXEC rm -R /etc/systemd/system/roonserver.service.d
-			getent passwd roonserver > /dev/null && G_EXEC userdel roonserver
-			getent group roonserver > /dev/null && G_EXEC groupdel roonserver
+			Remove_Service roonserver 1 1
 			[[ -f '/etc/sudoers.d/roonserver' ]] && G_EXEC rm /etc/sudoers.d/roonserver
 			[[ -d '/opt/roonserver' ]] && G_EXEC rm -R /opt/roonserver
 			[[ -d '/var/log/roonserver' ]] && G_EXEC rm -R /var/log/roonserver
@@ -12916,13 +12697,7 @@ If no WireGuard (auto)start is included, but you require it, please do the follo
 
 		if To_Uninstall 118 # Mopidy
 		then
-			# Stop systemd service, which is not done by postinst, failing to remove user then
-			if [[ -f '/lib/systemd/system/mopidy.service' ]]
-			then
-				G_EXEC systemctl unmask mopidy
-				G_EXEC systemctl disable --now mopidy
-			fi
-			[[ -d '/etc/systemd/system/mopidy.service.d' ]] && G_EXEC rm -R /etc/systemd/system/mopidy.service.d
+			Remove_Service mopidy
 			G_AGP 'mopidy*'
 			[[ -f '/etc/apt/sources.list.d/mopidy.list' ]] && G_EXEC rm /etc/apt/sources.list.d/mopidy.list
 			[[ -f '/etc/apt/trusted.gpg.d/dietpi-mopidy.gpg' ]] && G_EXEC rm /etc/apt/trusted.gpg.d/dietpi-mopidy.gpg
@@ -12947,15 +12722,8 @@ If no WireGuard (auto)start is included, but you require it, please do the follo
 
 		if To_Uninstall 39 # ReadyMedia
 		then
-			if [[ -f '/etc/systemd/system/minidlna.service' ]]
-			then
-				G_EXEC systemctl disable --now minidlna
-				G_EXEC rm /etc/systemd/system/minidlna.service
-			fi
-			[[ -d '/etc/systemd/system/minidlna.service.d' ]] && G_EXEC rm -R /etc/systemd/system/minidlna.service.d
+			Remove_Service minidlna 1 1
 			G_AGP minidlna
-			getent passwd minidlna > /dev/null && G_EXEC userdel minidlna
-			getent group minidlna > /dev/null && G_EXEC groupdel minidlna
 			[[ -d '/mnt/dietpi_userdata/.MiniDLNA_Cache' ]] && G_EXEC rm -R /mnt/dietpi_userdata/.MiniDLNA_Cache
 			[[ -d '/var/log/minidlna' ]] && G_EXEC rm -R /var/log/minidlna
 		fi
@@ -12971,12 +12739,7 @@ If no WireGuard (auto)start is included, but you require it, please do the follo
 
 		if To_Uninstall 59 # RPi Cam Web Interface
 		then
-			if [[ -f '/etc/systemd/system/raspimjpeg.service' ]]
-			then
-				G_EXEC systemctl disable --now raspimjpeg
-				G_EXEC rm /etc/systemd/system/raspimjpeg.service
-			fi
-			[[ -d '/etc/systemd/system/raspimjpeg.service.d' ]] && G_EXEC rm -R /etc/systemd/system/raspimjpeg.service.d
+			Remove_Service raspimjpeg
 			[[ -f '/var/lib/dietpi/dietpi-software/installed/raspimjpeg.sh' ]] && G_EXEC rm /var/lib/dietpi/dietpi-software/installed/raspimjpeg.sh
 			[[ -f '/usr/local/bin/raspimjpeg' ]] && G_EXEC rm /usr/local/bin/raspimjpeg
 			[[ -f '/etc/raspimjpeg' ]] && G_EXEC rm /etc/raspimjpeg
@@ -12987,22 +12750,10 @@ If no WireGuard (auto)start is included, but you require it, please do the follo
 
 		if To_Uninstall 45 # Deluge
 		then
-			if [[ -f '/etc/systemd/system/deluge-web.service' ]]
-			then
-				G_EXEC systemctl disable --now deluge-web
-				G_EXEC rm /etc/systemd/system/deluge-web.service
-			fi
-			[[ -d '/etc/systemd/system/deluge-web.service.d' ]] && G_EXEC rm -R /etc/systemd/system/deluge-web.service.d
-			if [[ -f '/etc/systemd/system/deluged.service' ]]
-			then
-				G_EXEC systemctl disable --now deluged
-				G_EXEC rm /etc/systemd/system/deluged.service
-			fi
-			[[ -d '/etc/systemd/system/deluged.service.d' ]] && G_EXEC rm -R /etc/systemd/system/deluged.service.d
+			Remove_Service deluge-web
+			Remove_Service deluged debian-deluged debian-deluged
 			[[ -d '/mnt/dietpi_userdata/deluge' ]] && G_EXEC rm -R /mnt/dietpi_userdata/deluge
 			G_AGP deluged deluge-web deluge-console
-			getent passwd debian-deluged > /dev/null && G_EXEC userdel debian-deluged
-			getent group debian-deluged > /dev/null && G_EXEC groupdel debian-deluged
 		fi
 
 		if To_Uninstall 94 # ProFTPD
@@ -13034,19 +12785,7 @@ If no WireGuard (auto)start is included, but you require it, please do the follo
 			command -v pihole > /dev/null && G_EXEC_OUTPUT=1 G_EXEC pihole uninstall
 
 			# pihole-FTL service+binary
-			if [[ -f '/etc/init.d/pihole-FTL' ]] # older Pi-hole version
-			then
-				G_EXEC systemctl unmask pihole-FTL
-				G_EXEC systemctl disable --now pihole-FTL
-				G_EXEC rm /etc/init.d/pihole-FTL
-				G_EXEC update-rc.d -f pihole-FTL remove
-			fi
-			if [[ -f '/etc/systemd/system/pihole-FTL.service' ]]
-			then
-				G_EXEC systemctl disable --now pihole-FTL
-				G_EXEC rm /etc/systemd/system/pihole-FTL.service
-			fi
-			[[ -d '/etc/systemd/system/pihole-FTL.service.d' ]] && G_EXEC rm -R /etc/systemd/system/pihole-FTL.service.d
+			Remove_Service pihole-FTL
 			[[ -f '/usr/bin/pihole-FTL' ]] && G_EXEC rm /usr/bin/pihole-FTL
 
 			# Dirs
@@ -13092,16 +12831,10 @@ If no WireGuard (auto)start is included, but you require it, please do the follo
 
 		if To_Uninstall 126 # AdGuard Home
 		then
-			if [[ -f '/etc/systemd/system/adguardhome.service' ]]
-			then
-				G_EXEC systemctl disable --now adguardhome
-				G_EXEC rm /etc/systemd/system/adguardhome.service
-			fi
-			[[ -d '/etc/systemd/system/adguardhome.service.d' ]] && G_EXEC rm -R /etc/systemd/system/adguardhome.service.d
+			Remove_Service adguardhome 1
 			[[ -d '/opt/adguardhome' ]] && G_EXEC rm -R /opt/adguardhome # v7.3 beta
 
-			# Remove user and home directory
-			getent passwd adguardhome > /dev/null && G_EXEC userdel adguardhome
+			# Data directory
 			[[ -d '/mnt/dietpi_userdata/adguardhome' ]] && G_EXEC rm -R /mnt/dietpi_userdata/adguardhome
 
 			# Unbound: Switch port to 53 if it is still installed
@@ -13119,43 +12852,19 @@ If no WireGuard (auto)start is included, but you require it, please do the follo
 
 		if To_Uninstall 33 # Airsonic-Advanced
 		then
-			if [[ -f '/etc/systemd/system/airsonic.service' ]]
-			then
-				G_EXEC systemctl disable --now airsonic
-				G_EXEC rm /etc/systemd/system/airsonic.service
-			fi
-			[[ -d '/etc/systemd/system/airsonic.service.d' ]] && G_EXEC rm -R /etc/systemd/system/airsonic.service.d
-			getent passwd airsonic > /dev/null && G_EXEC userdel airsonic
+			Remove_Service airsonic 1
 			[[ -d '/mnt/dietpi_userdata/airsonic' ]] && G_EXEC rm -R /mnt/dietpi_userdata/airsonic
 		fi
 
 		if To_Uninstall 204 # Navidrome
 		then
-			if [[ -f '/etc/systemd/system/navidrome.service' ]]
-			then
-				G_EXEC systemctl disable --now navidrome
-				G_EXEC rm /etc/systemd/system/navidrome.service
-			fi
-			[[ -d '/etc/systemd/system/navidrome.service.d' ]] && G_EXEC rm -R /etc/systemd/system/navidrome.service.d
-			getent passwd navidrome > /dev/null && G_EXEC userdel navidrome
+			Remove_Service navidrome 1
 			G_EXEC rm -Rf /opt/navidrome /mnt/dietpi_userdata/navidrome
 		fi
 
 		if To_Uninstall 71 # WebIOPi
 		then
-			if [[ -f '/etc/init.d/webiopi' ]]
-			then
-				G_EXEC systemctl unmask webiopi
-				G_EXEC systemctl disable --now webiopi
-				G_EXEC rm /etc/init.d/webiopi
-			fi
-			if [[ -f '/etc/systemd/system/webiopi.service' ]]
-			then
-				G_EXEC systemctl disable --now webiopi
-				G_EXEC rm /etc/systemd/system/webiopi.service
-			fi
-			[[ -d '/etc/systemd/system/webiopi.service.d' ]] && G_EXEC rm -R /etc/systemd/system/webiopi.service.d
-			G_EXEC update-rc.d -f webiopi remove
+			Remove_Service webiopi
 			[[ -f '/usr/bin/webiopi' ]] && G_EXEC rm /usr/bin/webiopi # Executable
 			[[ -f '/usr/bin/webiopi-passwd' ]] && G_EXEC rm /usr/bin/webiopi-passwd # Password generator
 			[[ -d '/etc/webiopi' ]] && G_EXEC rm -R /etc/webiopi # Config dir
@@ -13170,42 +12879,21 @@ If no WireGuard (auto)start is included, but you require it, please do the follo
 
 		if To_Uninstall 186 # IPFS Node
 		then
-			if [[ -f '/etc/systemd/system/ipfs.service' ]]
-			then
-				G_EXEC systemctl disable --now ipfs
-				G_EXEC rm /etc/systemd/system/ipfs.service
-			fi
-			[[ -d '/etc/systemd/system/ipfs.service.d' ]] && G_EXEC rm -R /etc/systemd/system/ipfs.service.d
+			Remove_Service ipfs 1 1
 			G_EXEC rm -Rf /usr/local/bin/ipfs /etc/bashrc.d/dietpi-ipfs.sh /etc/sysctl.d/dietpi-ipfs.conf /mnt/dietpi_userdata/ipfs
 		fi
 
 		if To_Uninstall 98 # HAProxy
 		then
-			if [[ -f '/etc/systemd/system/haproxy.service' ]]
-			then
-				G_EXEC systemctl disable --now haproxy
-				G_EXEC rm /etc/systemd/system/haproxy.service
-			fi
-			[[ -d '/etc/systemd/system/haproxy.service.d' ]] && G_EXEC rm -R /etc/systemd/system/haproxy.service.d
+			Remove_Service haproxy
 			G_EXEC rm -Rf /{etc,var/lib,/usr/local/{doc,sbin}}/haproxy /usr/local/share/man/man1/haproxy.1
 			[[ -d '/usr/local/share/man/man1' ]] && G_EXEC rmdir -p --ignore-fail-on-non-empty /usr/local/share/man/man1
 		fi
 
 		if To_Uninstall 35 # Logitech Media Server
 		then
-			# Pre-v8.7
-			if [[ -f '/etc/systemd/system/logitechmediaserver.service' ]]
-			then
-				G_EXEC systemctl disable --now logitechmediaserver
-				G_EXEC rm /etc/systemd/system/logitechmediaserver.service
-
-			elif [[ -f '/lib/systemd/system/logitechmediaserver.service' ]]
-			then
-				# Stop systemd service, which is not done by postinst, failing to remove user then
-				G_EXEC systemctl unmask plexmediaserver
-				G_EXEC systemctl disable --now logitechmediaserver
-			fi
-			[[ -d '/etc/systemd/system/logitechmediaserver.service.d' ]] && G_EXEC rm -R /etc/systemd/system/logitechmediaserver.service.d
+			# Stop systemd service, which is not done by postinst, failing to remove user then
+			Remove_Service logitechmediaserver
 			G_AGP logitechmediaserver
 			[[ -d '/var/lib/squeezeboxserver' ]] && G_EXEC rm -R /var/lib/squeezeboxserver
 		fi
@@ -13213,9 +12901,11 @@ If no WireGuard (auto)start is included, but you require it, please do the follo
 		if To_Uninstall 55 # WordPress
 		then
 			[[ -d '/var/www/wordpress' ]] && G_EXEC rm -R /var/www/wordpress
-			systemctl start mariadb
-			mysqladmin drop wordpress -f
-			mysql -e 'drop user wordpress@localhost;'
+			if systemctl start mariadb
+			then
+				mysqladmin drop wordpress -f
+				mysql -e 'drop user wordpress@localhost;'
+			fi
 		fi
 
 		if To_Uninstall 38 # FreshRSS
@@ -13225,9 +12915,11 @@ If no WireGuard (auto)start is included, but you require it, please do the follo
 			a2disconf dietpi-freshrss 2> /dev/null
 			[[ -f '/etc/apache2/conf-available/dietpi-freshrss.conf' ]] && G_EXEC rm /etc/apache2/conf-available/dietpi-freshrss.conf
 
-			systemctl start mariadb
-			mysqladmin drop freshrss -f
-			mysql -e 'drop user freshrss@localhost;'
+			if systemctl start mariadb
+			then
+				mysqladmin drop freshrss -f
+				mysql -e 'drop user freshrss@localhost;'
+			fi
 
 			G_EXEC rm -Rf /var/www/freshrss # symlink
 			[[ -d '/opt/FreshRSS' ]] && G_EXEC rm -R /opt/FreshRSS
@@ -13237,26 +12929,12 @@ If no WireGuard (auto)start is included, but you require it, please do the follo
 		if To_Uninstall 28 || To_Uninstall 120 # TigerVNC/RealVNC
 		then
 			# RealVNC services
-			systemctl unmask vncserver-x11-serviced 2> /dev/null
-			systemctl disable --now vncserver-x11-serviced 2> /dev/null
-			systemctl unmask vncserver-virtuald 2> /dev/null
-			systemctl disable --now vncserver-virtuald 2> /dev/null
+			Remove_Service vncserver-x11-serviced
+			Remove_Service vncserver-virtuald
 
 			G_AGP 'tigervnc-*' x11vnc realvnc-vnc-server
 
-			if [[ -f '/etc/systemd/system/vncserver.service' ]]
-			then
-				G_EXEC systemctl disable --now vncserver
-				G_EXEC rm /etc/systemd/system/vncserver.service
-			fi
-			[[ -d '/etc/systemd/system/vncserver.service.d' ]] && G_EXEC rm -R /etc/systemd/system/vncserver.service.d
-			if [[ -f '/etc/init.d/vncserver' ]]
-			then
-				G_EXEC systemctl unmask vncserver
-				G_EXEC systemctl disable --now vncserver
-				G_EXEC rm /etc/init.d/vncserver
-				G_EXEC update-rc.d -f vncserver remove
-			fi
+			Remove_Service vncserver
 			[[ -f '/usr/local/bin/vncserver' ]] && G_EXEC rm /usr/local/bin/vncserver
 			G_EXEC rm -Rf /{root,home/*}/.vnc
 		fi
@@ -13287,9 +12965,11 @@ If no WireGuard (auto)start is included, but you require it, please do the follo
 			[[ -d '/mnt/dietpi_userdata/ampache' ]] && G_EXEC rm -R /mnt/dietpi_userdata/ampache
 
 			# Drop database
-			systemctl start mariadb
-			mysqladmin drop ampache -f
-			mysql -e 'drop user ampache@localhost;'
+			if systemctl start mariadb
+			then
+				mysqladmin drop ampache -f
+				mysql -e 'drop user ampache@localhost;'
+			fi
 		fi
 
 		if To_Uninstall 117 # PiVPN
@@ -13340,14 +13020,7 @@ If no WireGuard (auto)start is included, but you require it, please do the follo
 		if To_Uninstall 92 # Certbot
 		then
 			G_AGP python3-certbot-apache python3-certbot-nginx certbot
-			# Pre-v8.0
 			[[ -d '/etc/systemd/system/certbot.service.d' ]] && G_EXEC rm -R /etc/systemd/system/certbot.service.d
-			# Pre-v6.3
-			if [[ -f '/etc/systemd/system/certbot.service' ]]
-			then
-				G_EXEC systemctl disable --now certbot
-				G_EXEC rm /etc/systemd/system/certbot.service
-			fi
 		fi
 
 		if To_Uninstall 69 # Python 3 RPi.GPIO
@@ -13460,20 +13133,17 @@ _EOF_
 			[[ -f '/etc/lighttpd/conf-available/99-dietpi-pydio.conf' ]] && G_EXEC rm /etc/lighttpd/conf-available/99-dietpi-pydio.conf
 
 			# Drop database
-			systemctl start mariadb
-			mysqladmin drop pydio -f
-			mysql -e 'drop user pydio@localhost;'
+			if systemctl start mariadb
+			then
+				mysqladmin drop pydio -f
+				mysql -e 'drop user pydio@localhost;'
+			fi
 		fi
 
 		if To_Uninstall 36 # Squeezelite
 		then
 			G_AGP squeezelite
-			# Pre-v6.31
-			[[ -f '/etc/systemd/system/squeezelite.service' ]] && G_EXEC rm /etc/systemd/system/squeezelite.service
-			# Pre-v7.3
-			[[ -d '/etc/systemd/system/squeezelite.service.d' ]] && G_EXEC rm -R /etc/systemd/system/squeezelite.service.d
-			getent passwd squeezelite > /dev/null && G_EXEC userdel squeezelite
-			getent group squeezelite > /dev/null && G_EXEC groupdel squeezelite
+			Remove_Service squeezelite 1 1 # Pre-v7.3
 		fi
 
 		if To_Uninstall 66 # RPi-Monitor
@@ -13516,9 +13186,11 @@ _EOF_
 			[[ -d '/var/www/baikal' ]] && G_EXEC rm -R /var/www/baikal
 
 			# Drop database
-			systemctl start mariadb
-			mysqladmin drop baikal -f
-			mysql -e 'drop user baikal@localhost;'
+			if systemctl start mariadb
+			then
+				mysqladmin drop baikal -f
+				mysql -e 'drop user baikal@localhost;'
+			fi
 		fi
 
 		if To_Uninstall 65 # Netdata
@@ -13539,97 +13211,57 @@ _EOF_
 
 		if To_Uninstall 42 # Plex Media Server
 		then
-			G_AGP plexmediaserver
-			# Force deletion of plex user group as group plex it not removed automatically because it is not the primary group of user plex
-			getent group plex > /dev/null && G_EXEC groupdel plex
+			# Force deletion of plex group which is not removed automatically because it is not the primary group of user plex
+			Remove_Service plexmediaserver plex plex
 			# Remove systemd unit which currently survives the package purging: https://github.com/MichaIng/DietPi/issues/3551
-			if [[ -f '/lib/systemd/system/plexmediaserver.service' ]]
-			then
-				G_EXEC systemctl unmask plexmediaserver
-				G_EXEC systemctl disable --now plexmediaserver
-				G_EXEC rm /lib/systemd/system/plexmediaserver.service
-			fi
-			[[ -d '/etc/systemd/system/plexmediaserver.service.d' ]] && G_EXEC rm -R /etc/systemd/system/plexmediaserver.service.d
+			[[ -f '/lib/systemd/system/plexmediaserver.service' ]] && G_EXEC rm /lib/systemd/system/plexmediaserver.service
+			G_AGP plexmediaserver
 			[[ -d '/var/lib/plexmediaserver' ]] && G_EXEC rm -R /var/lib/plexmediaserver # Left over from purging package, still...
 			[[ -f '/etc/unbound/unbound.conf.d/dietpi-plex.conf' ]] && G_EXEC rm /etc/unbound/unbound.conf.d/dietpi-plex.conf
 		fi
 
 		if To_Uninstall 52 # Cuberite
 		then
-			if [[ -f '/etc/systemd/system/cuberite.service' ]]
-			then
-				G_EXEC systemctl disable --now cuberite
-				G_EXEC rm /etc/systemd/system/cuberite.service
-			fi
-			[[ -d '/etc/systemd/system/cuberite.service.d' ]] && G_EXEC rm -R /etc/systemd/system/cuberite.service.d
-			getent passwd cuberite > /dev/null && G_EXEC userdel cuberite
-			getent group cuberite > /dev/null && G_EXEC groupdel cuberite
+			Remove_Service cuberite 1 1
 			[[ -d '/mnt/dietpi_userdata/cuberite' ]] && G_EXEC rm -R /mnt/dietpi_userdata/cuberite
 		fi
 
 		if To_Uninstall 53 # MineOS
 		then
-			if [[ -f '/etc/systemd/system/mineos.service' ]]
-			then
-				G_EXEC systemctl disable --now mineos
-				G_EXEC rm /etc/systemd/system/mineos.service
-			fi
-			[[ -d '/etc/systemd/system/mineos.service.d' ]] && G_EXEC rm -R /etc/systemd/system/mineos.service.d
+			Remove_Service mineos 1 1 # user and group for pre-v6.34
 			[[ -d '/mnt/dietpi_userdata/mineos' ]] && G_EXEC rm -R /mnt/dietpi_userdata/mineos
 			[[ -f '/etc/mineos.conf' ]] && G_EXEC rm /etc/mineos.conf
 			G_EXEC rm -Rf /var/games/minecraft /usr/local/bin/mineos # Symlinks
-			getent passwd mineos > /dev/null && G_EXEC userdel mineos # pre-v6.34
-			getent group mineos > /dev/null && G_EXEC groupdel mineos # pre-v6.34
 			[[ -d '/home/mineos' ]] && G_EXEC rm -R /home/mineos # pre-v6.34
 		fi
 
 		if To_Uninstall 49 # Gogs
 		then
-			# Service
-			if [[ -f '/etc/systemd/system/gogs.service' ]]
-			then
-				G_EXEC systemctl disable --now gogs
-				G_EXEC rm /etc/systemd/system/gogs.service
-			fi
-			[[ -d '/etc/systemd/system/gogs.service.d' ]] && G_EXEC rm -R /etc/systemd/system/gogs.service.d
-
-			# User
-			getent passwd gogs > /dev/null && G_EXEC userdel gogs
-			getent group gogs > /dev/null && G_EXEC groupdel gogs
+			Remove_Service gogs 1 1
 
 			# Data
 			[[ -d '/etc/gogs' ]] && G_EXEC rm -R /etc/gogs
 			[[ -d '/var/log/gogs' ]] && G_EXEC rm -R /var/log/gogs
 
 			# Database
-			systemctl start mariadb
-			mysqladmin drop gogs -f
-			mysql -e 'drop user gogs@localhost;'
+			if systemctl start mariadb
+			then
+				mysqladmin drop gogs -f
+				mysql -e 'drop user gogs@localhost;'
+			fi
 		fi
 
 		if To_Uninstall 46 # qBittorrent
 		then
-			if [[ -f '/etc/systemd/system/qbittorrent.service' ]]
-			then
-				G_EXEC systemctl disable --now qbittorrent
-				G_EXEC rm /etc/systemd/system/qbittorrent.service
-			fi
-			[[ -d '/etc/systemd/system/qbittorrent.service.d' ]] && G_EXEC rm -R /etc/systemd/system/qbittorrent.service.d
+			Remove_Service qbittorrent 1 1 # group for pre-v6.29
 			G_AGP qbittorrent-nox
-			getent passwd qbittorrent > /dev/null && G_EXEC userdel qbittorrent
-			getent group qbittorrent > /dev/null && G_EXEC groupdel qbittorrent # pre-v6.29
 			[[ -d '/home/qbittorrent' ]] && G_EXEC rm -R /home/qbittorrent
 			[[ -d '/var/log/qbittorrent' ]] && G_EXEC rm -R /var/log/qbittorrent
 		fi
 
 		if To_Uninstall 50 # Syncthing
 		then
-			if [[ -f '/etc/systemd/system/syncthing.service' ]]
-			then
-				G_EXEC systemctl disable --now syncthing
-				G_EXEC rm -R /etc/systemd/system/syncthing.service*
-			fi
-			[[ -d '/etc/systemd/system/syncthing.service.d' ]] && G_EXEC rm -R /etc/systemd/system/syncthing.service.d
+			Remove_Service syncthing
 
 			[[ -d '/opt/syncthing' ]] && G_EXEC rm -R /opt/syncthing
 			[[ -d '/mnt/dietpi_userdata/syncthing' ]] && G_EXEC rm -R /mnt/dietpi_userdata/syncthing
@@ -13639,15 +13271,8 @@ _EOF_
 
 		if To_Uninstall 116 # Medusa
 		then
-			if [[ -f '/etc/systemd/system/medusa.service' ]]
-			then
-				G_EXEC systemctl disable --now medusa
-				G_EXEC rm /etc/systemd/system/medusa.service
-			fi
-			[[ -d '/etc/systemd/system/medusa.service.d' ]] && G_EXEC rm -R /etc/systemd/system/medusa.service.d
+			Remove_Service medusa 1 1 # group for pre-v6.33
 			[[ -d '/mnt/dietpi_userdata/medusa' ]] && G_EXEC rm -R /mnt/dietpi_userdata/medusa
-			getent passwd medusa > /dev/null && G_EXEC userdel medusa
-			getent group medusa > /dev/null && G_EXEC groupdel medusa # Pre-v6.33
 		fi
 
 		if To_Uninstall 107 # rTorrent
@@ -13671,15 +13296,8 @@ _EOF_
 			[[ -f '/etc/apache2/sites-available/dietpi-rutorrent.conf' ]] && G_EXEC rm /etc/apache2/sites-available/dietpi-rutorrent.conf
 
 			# rTorrent
-			if [[ -f '/etc/systemd/system/rtorrent.service' ]]
-			then
-				G_EXEC systemctl disable --now rtorrent
-				G_EXEC rm /etc/systemd/system/rtorrent.service
-			fi
-			[[ -d '/etc/systemd/system/rtorrent.service.d' ]] && G_EXEC rm -R /etc/systemd/system/rtorrent.service.d
+			Remove_Service rtorrent 1 1 # group for pre-v6.29
 			G_AGP rtorrent
-			getent passwd rtorrent > /dev/null && G_EXEC userdel rtorrent
-			getent group rtorrent > /dev/null && G_EXEC groupdel rtorrent # pre-v6.29
 			[[ -d '/mnt/dietpi_userdata/rtorrent' ]] && G_EXEC rm -R /mnt/dietpi_userdata/rtorrent
 			[[ -d '/mnt/dietpi_userdata/downloads/.session' ]] && G_EXEC rm -R /mnt/dietpi_userdata/downloads/.session
 		fi
@@ -13687,13 +13305,7 @@ _EOF_
 		if To_Uninstall 108 # Amiberry
 		then
 			G_AGP amiberry
-			# Pre-v8.5: Service
-			if [[ -f '/etc/systemd/system/amiberry.service' ]]
-			then
-				G_EXEC systemctl disable --now amiberry
-				G_EXEC rm /etc/systemd/system/amiberry.service
-			fi
-			[[ -d '/etc/systemd/system/amiberry.service.d' ]] && G_EXEC rm -R /etc/systemd/system/amiberry.service.d
+			Remove_Service amiberry # pre-v8.5
 			# Files
 			[[ -d '/mnt/dietpi_userdata/amiberry' ]] && G_EXEC rm -R /mnt/dietpi_userdata/amiberry
 			# Autostart index: If currently Amiberry, revert to console login
@@ -13734,17 +13346,7 @@ _EOF_
 
 		if To_Uninstall 157 # Home Assistant
 		then
-			# Service
-			if [[ -f '/etc/systemd/system/home-assistant.service' ]]
-			then
-				G_EXEC systemctl disable --now home-assistant
-				G_EXEC rm /etc/systemd/system/home-assistant.service
-			fi
-			[[ -d '/etc/systemd/system/home-assistant.service.d' ]] && G_EXEC rm -R /etc/systemd/system/home-assistant.service.d
-
-			# User and pyenv
-			getent passwd homeassistant > /dev/null && G_EXEC userdel homeassistant
-			getent group homeassistant > /dev/null && G_EXEC groupdel homeassistant
+			Remove_Service home-assistant homeassistant homeassistant
 			[[ -d '/home/homeassistant' ]] && G_EXEC rm -R /home/homeassistant
 			[[ -d '/srv/homeassistant' ]] && G_EXEC rm -R /srv/homeassistant # pre-v6-27
 
@@ -13753,50 +13355,30 @@ _EOF_
 
 		if To_Uninstall 140 # Domoticz
 		then
-			if [[ -f '/etc/systemd/system/domoticz.service' ]]
-			then
-				G_EXEC systemctl disable --now domoticz
-				G_EXEC rm /etc/systemd/system/domoticz.service
-			fi
-			[[ -d '/etc/systemd/system/domoticz.service.d' ]] && G_EXEC rm -R /etc/systemd/system/domoticz.service.d
-			getent passwd domoticz > /dev/null && G_EXEC userdel domoticz
-			getent group domoticz > /dev/null && G_EXEC groupdel domoticz
+			Remove_Service domoticz 1 1
 			[[ -d '/opt/domoticz' ]] && G_EXEC rm -R /opt/domoticz
 			[[ -d '/mnt/dietpi_userdata/domoticz' ]] && G_EXEC rm -R /mnt/dietpi_userdata/domoticz
 		fi
 
 		if To_Uninstall 165 # Gitea
 		then
-			# Service
-			if [[ -f '/etc/systemd/system/gitea.service' ]]
-			then
-				G_EXEC systemctl disable --now gitea
-				G_EXEC rm /etc/systemd/system/gitea.service
-			fi
-			[[ -d '/etc/systemd/system/gitea.service.d' ]] && G_EXEC rm -R /etc/systemd/system/gitea.service.d
-
-			# User
-			getent passwd gitea > /dev/null && G_EXEC userdel gitea
-			getent group gitea > /dev/null && G_EXEC groupdel gitea
+			Remove_Service gitea 1 1
 
 			# Data
 			[[ -d '/mnt/dietpi_userdata/gitea' ]] && G_EXEC rm -R /mnt/dietpi_userdata/gitea
 			[[ -d '/var/log/gitea' ]] && G_EXEC rm -R /var/log/gitea
 
 			# Database
-			systemctl start mariadb
-			mysqladmin drop gitea -f
-			mysql -e 'drop user gitea@localhost;'
+			if systemctl start mariadb
+			then
+				mysqladmin drop gitea -f
+				mysql -e 'drop user gitea@localhost;'
+			fi
 		fi
 
 		if To_Uninstall 166 # Audiophonics PI-SPC
 		then
-			if [[ -f '/etc/systemd/system/pi-spc.service' ]]
-			then
-				G_EXEC systemctl disable --now pi-spc
-				G_EXEC rm /etc/systemd/system/pi-spc.service
-			fi
-			[[ -d '/etc/systemd/system/pi-spc.service.d' ]] && G_EXEC rm -R /etc/systemd/system/pi-spc.service.d
+			Remove_Service pi-spc
 			[[ -d '/var/lib/dietpi/dietpi-software/installed/pi-spc' ]] && G_EXEC rm -R /var/lib/dietpi/dietpi-software/installed/pi-spc
 
 			G_EXEC sed -Ei '/^[[:blank:]]*dtoverlay=gpio-(shutdown|poweroff)/d' /boot/config.txt
@@ -13811,19 +13393,8 @@ _EOF_
 
 		if To_Uninstall 169 # Google AIY
 		then
-			if [[ -f '/etc/systemd/system/voice-recognizer.service' ]]
-			then
-				G_EXEC systemctl disable --now voice-recognizer
-				G_EXEC rm /etc/systemd/system/voice-recognizer.service
-			fi
-			[[ -d '/etc/systemd/system/voice-recognizer.service.d' ]] && G_EXEC rm -R /etc/systemd/system/voice-recognizer.service.d
-
-			if [[ -f '/etc/systemd/system/alsa-init.service' ]]
-			then
-				G_EXEC systemctl disable --now alsa-init
-				G_EXEC rm /etc/systemd/system/alsa-init.service
-			fi
-			[[ -d '/etc/systemd/system/alsa-init.service.d' ]] && G_EXEC rm -R /etc/systemd/system/alsa-init.service.d
+			Remove_Service voice-recognizer
+			Remove_Service alsa-init
 
 			[[ -d '/mnt/dietpi_userdata/voice-recognizer-raspi' ]] && G_EXEC rm -R /mnt/dietpi_userdata/voice-recognizer-raspi
 			G_EXEC rm -Rf /home/dietpi/assistant.json
@@ -13831,17 +13402,7 @@ _EOF_
 
 		if To_Uninstall 176 # Mycroft AI
 		then
-			# Service
-			if [[ -f '/etc/systemd/system/mycroft.service' ]]
-			then
-				G_EXEC systemctl disable --now mycroft
-				G_EXEC rm /etc/systemd/system/mycroft.service
-			fi
-			[[ -d '/etc/systemd/system/mycroft.service.d' ]] && G_EXEC rm -R /etc/systemd/system/mycroft.service.d
-
-			# User
-			getent passwd mycroft > /dev/null && G_EXEC userdel mycroft
-			getent group mycroft > /dev/null && G_EXEC groupdel mycroft
+			Remove_Service mycroft 1 1
 
 			# Files
 			[[ -d '/mnt/dietpi_userdata/mycroft-core' ]] && G_EXEC rm -R /mnt/dietpi_userdata/mycroft-core
@@ -13876,21 +13437,11 @@ _EOF_
 
 		if To_Uninstall 158 # MinIO
 		then
-			# Service
-			if [[ -f '/etc/systemd/system/minio.service' ]]
-			then
-				G_EXEC systemctl disable --now minio
-				G_EXEC rm /etc/systemd/system/minio.service
-			fi
-			[[ -d '/etc/systemd/system/minio.service.d' ]] && G_EXEC rm -R /etc/systemd/system/minio.service.d
+			Remove_Service minio minio-user minio-user
 
 			# Files
 			[[ -f '/usr/local/bin/minio' ]] && G_EXEC rm /usr/local/bin/minio
 			[[ -f '/etc/default/minio' ]] && G_EXEC rm /etc/default/minio
-
-			# User
-			getent passwd minio-user > /dev/null && G_EXEC userdel minio-user
-			getent group minio-user > /dev/null && G_EXEC groupdel minio-user
 
 			# Certbot hook
 			[[ -f '/etc/letsencrypt/renewal-hooks/deploy/dietpi-minio.sh' ]] && G_EXEC rm /etc/letsencrypt/renewal-hooks/deploy/dietpi-minio.sh
@@ -13901,26 +13452,7 @@ _EOF_
 
 		if To_Uninstall 161 # FuguHub
 		then
-			# Service
-			if [[ -f '/etc/systemd/system/bdd.service' ]]
-			then
-				G_EXEC systemctl disable --now bdd
-				G_EXEC rm /etc/systemd/system/bdd.service
-			fi
-			[[ -d '/etc/systemd/system/bdd.service.d' ]] && G_EXEC rm -R /etc/systemd/system/bdd.service.d
-			# Pre-v8.0
-			if [[ -f '/etc/init.d/bdd' ]]
-			then
-				G_EXEC systemctl unmask bdd
-				G_EXEC systemctl disable bdd
-				G_EXEC systemctl stop bdd
-				G_EXEC rm /etc/init.d/bdd
-				G_EXEC update-rc.d -f bdd remove
-			fi
-
-			# User
-			getent passwd bd > /dev/null && G_EXEC userdel bd
-			getent group bd > /dev/null && G_EXEC groupdel bd
+			Remove_Service bdd bd bd
 
 			# Files
 			[[ -d '/home/bd' ]] && G_EXEC rm -R /home/bd
@@ -13960,13 +13492,7 @@ _EOF_
 
 		if To_Uninstall 162 # Docker
 		then
-			if [[ -f '/lib/systemd/system/docker.service' ]]
-			then
-				G_EXEC systemctl unmask docker
-				G_EXEC systemctl disable --now docker
-				G_EXEC rm /lib/systemd/system/docker.service
-			fi
-			[[ -d '/etc/systemd/system/docker.service.d' ]] && G_EXEC rm -R /etc/systemd/system/docker.service.d
+			Remove_Service docker
 
 			# Packages, repo and key
 			G_AGP docker-ce docker-ce-cli docker-engine
@@ -13986,12 +13512,7 @@ _EOF_
 
 		if To_Uninstall 164 # Nukkit
 		then
-			if [[ -f '/etc/systemd/system/nukkit.service' ]]
-			then
-				G_EXEC systemctl disable --now nukkit
-				G_EXEC rm /etc/systemd/system/nukkit.service
-			fi
-			[[ -d '/etc/systemd/system/nukkit.service.d' ]] && G_EXEC rm -R /etc/systemd/system/nukkit.service.d
+			Remove_Service nukkit
 			[[ -d '/usr/local/bin/nukkit' ]] && G_EXEC rm -R /usr/local/bin/nukkit
 		fi
 
@@ -13999,14 +13520,7 @@ _EOF_
 		then
 			G_AGP gmediarender
 			# Pre-v8.10
-			if [[ -f '/etc/systemd/system/gmediarender.service' ]]
-			then
-				G_EXEC systemctl disable --now gmediarender
-				G_EXEC rm /etc/systemd/system/gmediarender.service
-			fi
-			[[ -d '/etc/systemd/system/gmediarender.service.d' ]] && G_EXEC rm -R /etc/systemd/system/gmediarender.service.d
-			getent passwd gmrender > /dev/null && G_EXEC userdel gmrender
-			getent group gmrender > /dev/null && G_EXEC groupdel gmrender
+			Remove_Service gmediarender gmrender gmrender
 			[[ -f '/usr/local/bin/gmediarender' ]] && G_EXEC rm /usr/local/bin/gmediarender
 			[[ -d '/usr/local/share/gmediarender' ]] && G_EXEC rm -R /usr/local/share/gmediarender
 		fi
@@ -14056,59 +13570,31 @@ _EOF_
 
 		if To_Uninstall 77 # Grafana
 		then
-			if [[ -f '/lib/systemd/system/grafana-server.service' ]]
-			then
-				G_EXEC systemctl unmask grafana-server
-				G_EXEC systemctl disable --now grafana-server
-			fi
-			[[ -d '/etc/systemd/system/grafana-server.service.d' ]] && G_EXEC rm -R /etc/systemd/system/grafana-server.service.d
+			Remove_Service grafana-server grafana grafana
 			G_AGP grafana
 			[[ -f '/etc/apt/sources.list.d/grafana.list' ]] && G_EXEC rm /etc/apt/sources.list.d/grafana.list
 			[[ -f '/etc/apt/trusted.gpg.d/dietpi-grafana.gpg' ]] && G_EXEC rm /etc/apt/trusted.gpg.d/dietpi-grafana.gpg
-			getent passwd grafana > /dev/null && G_EXEC userdel grafana
-			getent group grafana > /dev/null && G_EXEC groupdel grafana
 			G_EXEC rm -Rf /{mnt/dietpi_userdata,var/{lib,log},etc}/grafana
 		fi
 
 		if To_Uninstall 74 # InfluxDB
 		then
-			if [[ -f '/lib/systemd/system/influxdb.service' ]]
-			then
-				G_EXEC systemctl unmask influxdb
-				G_EXEC systemctl disable --now influxdb
-			fi
-			[[ -d '/etc/systemd/system/influxdb.service.d' ]] && G_EXEC rm -R /etc/systemd/system/influxdb.service.d
+			Remove_Service influxdb 1 1
 			G_AGP influxdb
 			[[ -f '/etc/apt/sources.list.d/influxdb.list' ]] && G_EXEC rm /etc/apt/sources.list.d/influxdb.list
 			[[ -f '/etc/apt/trusted.gpg.d/dietpi-influxdb.gpg' ]] && G_EXEC rm /etc/apt/trusted.gpg.d/dietpi-influxdb.gpg
-			getent passwd influxdb > /dev/null && G_EXEC userdel influxdb
-			getent group influxdb > /dev/null && G_EXEC groupdel influxdb
 			G_EXEC rm -Rf /{mnt/dietpi_userdata,var/{lib,log},etc}/influxdb
 		fi
 
 		if To_Uninstall 80 # Ubooquity
 		then
-			if [[ -f '/etc/systemd/system/ubooquity.service' ]]
-			then
-				G_EXEC systemctl disable --now ubooquity
-				G_EXEC rm /etc/systemd/system/ubooquity.service
-			fi
-			[[ -d '/etc/systemd/system/ubooquity.service.d' ]] && G_EXEC rm -R /etc/systemd/system/ubooquity.service.d
-			getent passwd ubooquity > /dev/null && G_EXEC userdel ubooquity
-			getent group ubooquity > /dev/null && G_EXEC groupdel ubooquity
+			Remove_Service ubooquity 1 1
 			[[ -d '/mnt/dietpi_userdata/ubooquity' ]] && G_EXEC rm -R /mnt/dietpi_userdata/ubooquity
 		fi
 
 		if To_Uninstall 179 # Komga
 		then
-			if [[ -f '/etc/systemd/system/komga.service' ]]
-			then
-				G_EXEC systemctl disable --now komga
-				G_EXEC rm /etc/systemd/system/komga.service
-			fi
-			[[ -d '/etc/systemd/system/komga.service.d' ]] && G_EXEC rm -R /etc/systemd/system/komga.service.d
-			getent passwd komga > /dev/null && G_EXEC userdel komga
-			getent group komga > /dev/null && G_EXEC groupdel komga
+			Remove_Service komga 1 1
 			[[ -d '/mnt/dietpi_userdata/komga' ]] && G_EXEC rm -R /mnt/dietpi_userdata/komga
 		fi
 
@@ -14228,12 +13714,8 @@ _EOF_
 
 		if To_Uninstall 111 # UrBackup Server
 		then
-			# Pre-v6.29: ARMv8 source build
-			if [[ -f '/etc/systemd/system/urbackupsrv.service' ]]
-			then
-				G_EXEC systemctl disable --now urbackupsrv
-				G_EXEC rm /etc/systemd/system/urbackupsrv.service
-			fi
+			# Pre-v6.29: ARMv8 source build and the package attempts to remove the non-existent "/etc/init.d/urbackup_srv" ...
+			Remove_Service urbackupsrv urbackup urbackup
 
 			if [[ -f '/var/urbackup/backup_server_settings.db' ]] && command -v sqlite3 > /dev/null
 			then
@@ -14242,11 +13724,8 @@ _EOF_
 				local backuppath=$(sed -n '/^[[:blank:]]*SOFTWARE_URBACKUP_BACKUPPATH=/{s/^[^=]*=//p;q}' /boot/dietpi.txt)
 			fi
 			G_AGP urbackup-server
-			G_EXEC update-rc.d -f urbackupsrv remove # The package attempts to remove the non-existent "urbackup_srv" ...
-			G_EXEC rm -Rf /etc/systemd/system/urbackupsrv.service{.d,} /var/log/urbackup.log "${backuppath:-/mnt/dietpi_userdata/urbackup}"
+			G_EXEC rm -Rf /var/log/urbackup.log "${backuppath:-/mnt/dietpi_userdata/urbackup}"
 			unset -v backuppath
-			getent passwd urbackup > /dev/null && G_EXEC userdel urbackup
-			getent group urbackup > /dev/null && G_EXEC groupdel urbackup
 
 			# Pre-v6.29: ARMv8 source build
 			command -v urbackupsrv > /dev/null && G_EXEC rm "$(command -v urbackupsrv)"
@@ -14261,28 +13740,13 @@ _EOF_
 
 		if To_Uninstall 171 # frp
 		then
-			# Service
-			if [[ -f '/etc/systemd/system/frpc.service' ]]
-			then
-				G_EXEC systemctl disable --now frpc
-				G_EXEC rm /etc/systemd/system/frpc.service
-			fi
-			if [[ -f '/etc/systemd/system/frps.service' ]]
-			then
-				G_EXEC systemctl disable --now frps
-				G_EXEC rm /etc/systemd/system/frps.service
-			fi
-			[[ -d '/etc/systemd/system/frpc.service.d' ]] && G_EXEC rm -R /etc/systemd/system/frpc.service.d
-			[[ -d '/etc/systemd/system/frps.service.d' ]] && G_EXEC rm -R /etc/systemd/system/frps.service.d
+			Remove_Service frpc
+			Remove_Service frps frp frp
 
 			# Binaries and configs
 			[[ -f '/usr/local/bin/frpc' ]] && G_EXEC rm /usr/local/bin/frpc
 			[[ -f '/usr/local/bin/frps' ]] && G_EXEC rm /usr/local/bin/frps
 			[[ -d '/etc/frp' ]] && G_EXEC rm -R /etc/frp
-
-			# User
-			getent passwd frp > /dev/null && G_EXEC userdel frp
-			getent group frp > /dev/null && G_EXEC groupdel frp
 		fi
 
 		if To_Uninstall 17 # Git
@@ -14334,16 +13798,7 @@ _EOF_
 
 		if To_Uninstall 181 # PaperMC
 		then
-			# Service
-			if [[ -f '/etc/systemd/system/papermc.service' ]]
-			then
-				G_EXEC systemctl disable --now papermc
-				G_EXEC rm /etc/systemd/system/papermc.service
-			fi
-			[[ -d '/etc/systemd/system/papermc.service.d' ]] && G_EXEC rm -R /etc/systemd/system/papermc.service.d
-			# User
-			getent passwd papermc > /dev/null && G_EXEC userdel papermc
-			getent group papermc > /dev/null && G_EXEC groupdel papermc
+			Remove_Service papermc 1 1
 			# Files
 			[[ -d '/opt/papermc' ]] && G_EXEC rm -R /opt/papermc
 			[[ -d '/var/log/papermc' ]] && G_EXEC rm -R /var/log/papermc
@@ -14489,32 +13944,14 @@ _EOF_
 
 		if To_Uninstall 198 # File Browser
 		then
-			if [[ -f '/etc/systemd/system/filebrowser.service' ]]
-			then
-				G_EXEC systemctl disable --now filebrowser
-				G_EXEC rm /etc/systemd/system/filebrowser.service
-			fi
-			[[ -d '/etc/systemd/system/filebrowser.service.d' ]] && G_EXEC rm -R /etc/systemd/system/filebrowser.service.d
+			Remove_Service filebrowser 1
 			[[ -d '/opt/filebrowser' ]] && G_EXEC rm -R /opt/filebrowser
-
-			# Remove user and home directory
-			getent passwd filebrowser > /dev/null && G_EXEC userdel filebrowser
 			[[ -d '/mnt/dietpi_userdata/filebrowser' ]] && G_EXEC rm -R /mnt/dietpi_userdata/filebrowser
 		fi
 
 		if To_Uninstall 199 # Spotifyd
 		then
-			# Service
-			if [[ -f '/etc/systemd/system/spotifyd.service' ]]
-			then
-				G_EXEC systemctl disable --now spotifyd
-				G_EXEC rm /etc/systemd/system/spotifyd.service
-			fi
-			[[ -d '/etc/systemd/system/spotifyd.service.d' ]] && G_EXEC rm -R /etc/systemd/system/spotifyd.service.d
-			# User
-			getent passwd spotifyd > /dev/null && G_EXEC userdel spotifyd
-			getent group spotifyd > /dev/null && G_EXEC groupdel spotifyd
-			# Files
+			Remove_Service spotifyd 1 1
 			[[ -d '/opt/spotifyd' ]] && G_EXEC rm -R /opt/spotifyd
 			[[ -d '/mnt/dietpi_userdata/spotifyd' ]] && G_EXEC rm -R /mnt/dietpi_userdata/spotifyd
 		fi
@@ -14821,8 +14258,8 @@ _EOF_
 				if systemctl -q is-enabled serial-getty@serial0
 				then
 					G_EXEC systemctl disable serial-getty@serial0
-					G_EXEC systemctl unmask "serial-getty@$tty"
-					G_EXEC systemctl enable "serial-getty@$tty"
+					G_EXEC systemctl --no-reload unmask "serial-getty@$tty"
+					G_EXEC systemctl --no-reload enable "serial-getty@$tty"
 				fi
 				unset -v tty
 			else
