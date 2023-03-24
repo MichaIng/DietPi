@@ -29,7 +29,7 @@ export PATH="$HOME/.cargo/bin:$PATH"
 version=$(curl -sSf 'https://api.github.com/repos/dani-garcia/vaultwarden/releases/latest' | mawk -F\" '/^  "tag_name"/{print $4}')
 [[ $version ]] || { G_DIETPI-NOTIFY 1 'No latest vaultwarden version found, aborting ...'; exit 1; }
 # - web vault
-wv_version=$(curl -sSf 'https://api.github.com/repos/dani-garcia/bw_web_builds/releases/latest' | mawk -F\" '/^  "tag_name"/{print $4}')
+wv_url=$(curl -sSf 'https://api.github.com/repos/dani-garcia/bw_web_builds/releases/latest' | mawk -F\" '/^      "browser_download_url".*\.tar\.gz"$/{print $4}')
 [[ $wv_version ]] || { G_DIETPI-NOTIFY 1 'No latest web vault version found, aborting ...'; exit 1; }
 
 # Build
@@ -57,10 +57,10 @@ G_EXEC mv "vaultwarden-$version/.env.template" "$DIR/mnt/dietpi_userdata/vaultwa
 G_EXEC rm -R "vaultwarden-$version"
 
 # - web vault
-G_DIETPI-NOTIFY 2 "Downloading web vault version \e[33m$wv_version"
-G_EXEC curl -sSfLO "https://github.com/dani-garcia/bw_web_builds/releases/download/v$wv_version/bw_web_v$wv_version.tar.gz"
-G_EXEC tar xf "bw_web_v$wv_version.tar.gz" --one-top-level="$DIR/mnt/dietpi_userdata/vaultwarden"
-G_EXEC rm "bw_web_v$wv_version.tar.gz"
+G_DIETPI-NOTIFY 2 "Downloading web vault from \e[33m$wv_url"
+G_EXEC curl -sSfLo archive.tar.gz "$wv_url"
+G_EXEC tar xf archive.tar.gz --one-top-level="$DIR/mnt/dietpi_userdata/vaultwarden"
+G_EXEC rm archive.tar.gz
 
 # - Configuration
 G_CONFIG_INJECT 'DATA_FOLDER=' 'DATA_FOLDER=/mnt/dietpi_userdata/vaultwarden' "$DIR/mnt/dietpi_userdata/vaultwarden/vaultwarden.env"
