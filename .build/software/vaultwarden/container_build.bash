@@ -61,7 +61,7 @@ esac
 ##########################################
 # Dependencies
 ##########################################
-apackages=('parted' 'fdisk' 'systemd-container')
+apackages=('7zip' 'parted' 'fdisk' 'systemd-container')
 (( $G_HW_ARCH == $ARCH || ( $G_HW_ARCH < 10 && $G_HW_ARCH > $ARCH ) )) || apackages+=('qemu-user-static' 'binfmt-support')
 G_AG_CHECK_INSTALL_PREREQ "${apackages[@]}"
 
