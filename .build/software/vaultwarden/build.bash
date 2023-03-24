@@ -1,3 +1,4 @@
+#!/bin/bash
 {
 . /boot/dietpi/func/dietpi-globals || exit 1
 
