@@ -30,7 +30,7 @@ version=$(curl -sSf 'https://api.github.com/repos/dani-garcia/vaultwarden/releas
 [[ $version ]] || { G_DIETPI-NOTIFY 1 'No latest vaultwarden version found, aborting ...'; exit 1; }
 # - web vault
 wv_url=$(curl -sSf 'https://api.github.com/repos/dani-garcia/bw_web_builds/releases/latest' | mawk -F\" '/^      "browser_download_url".*\.tar\.gz"$/{print $4}')
-[[ $wv_version ]] || { G_DIETPI-NOTIFY 1 'No latest web vault version found, aborting ...'; exit 1; }
+[[ $wv_url ]] || { G_DIETPI-NOTIFY 1 'No latest web vault version found, aborting ...'; exit 1; }
 
 # Build
 G_DIETPI-NOTIFY 2 "Building vaultwarden version \e[33m$version"
