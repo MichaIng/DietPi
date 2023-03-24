@@ -43,15 +43,12 @@ do
 	esac
 	shift
 done
-distro=
 case $DISTRO in
-        5) distro='buster';;
+	5) distro='buster';;
 	6) distro='bullseye';;
 	7) distro='bookworm';;
 	*) G_DIETPI-NOTIFY 1 "Invalid distro \"$DISTRO\" passed, aborting..."; exit 1;;
 esac
-image=
-arch=
 case $ARCH in
 	1) image="DietPi_Container-ARMv6-${distro^}" arch='armv6l';;
 	2) image="DietPi_Container-ARMv7-${distro^}" arch='armv7l';;
@@ -64,7 +61,7 @@ esac
 ##########################################
 # Dependencies
 ##########################################
-apackages=('7zip' 'parted' 'fdisk' 'systemd-container')
+apackages=('parted' 'fdisk' 'systemd-container')
 (( $G_HW_ARCH == $ARCH || ( $G_HW_ARCH < 10 && $G_HW_ARCH > $ARCH ) )) || apackages+=('qemu-user-static' 'binfmt-support')
 G_AG_CHECK_INSTALL_PREREQ "${apackages[@]}"
 

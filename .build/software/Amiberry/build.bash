@@ -95,7 +95,7 @@ else
 fi
 
 # Build Amiberry
-v_ami='5.5.1'
+v_ami='5.6.0'
 G_DIETPI-NOTIFY 2 "Building Amiberry version \e[33m$v_ami\e[90m for platform: \e[33m$PLATFORM"
 [[ -d /tmp/amiberry-$v_ami ]] && G_EXEC rm -R "/tmp/amiberry-$v_ami"
 G_EXEC cd /tmp
@@ -114,7 +114,7 @@ DIR="amiberry_$PLATFORM"
 G_EXEC mkdir -p "$DIR/"{DEBIAN,mnt/dietpi_userdata/amiberry/lib,lib/systemd/system}
 
 # - Copy files in place
-G_EXEC cp -a "/tmp/amiberry-$v_ami/"{abr,conf,controllers,data,kickstarts,savestates,screenshots,whdboot,amiberry} "$DIR/mnt/dietpi_userdata/amiberry/"
+G_EXEC mv "/tmp/amiberry-$v_ami/"{abr,conf,controllers,data,kickstarts,savestates,screenshots,whdboot,amiberry} "$DIR/mnt/dietpi_userdata/amiberry/"
 G_EXEC cp -aL /usr/local/lib/libSDL2{,_image,_ttf}-2.0.so.0 "$DIR/mnt/dietpi_userdata/amiberry/lib/"
 G_EXEC cp -a /tmp/capsimg-master/capsimg.so "$DIR/mnt/dietpi_userdata/amiberry/lib/"
 
@@ -186,7 +186,7 @@ grep -q 'raspbian' /etc/os-release && DEPS_APT_VERSIONED=$(sed 's/+rp[it][0-9]\+
 # - control
 cat << _EOF_ > "$DIR/DEBIAN/control"
 Package: amiberry
-Version: $v_ami-dietpi4
+Version: $v_ami-dietpi1
 Architecture: $(dpkg --print-architecture)
 Maintainer: MichaIng <micha@dietpi.com>
 Date: $(date -u '+%a, %d %b %Y %T %z')
