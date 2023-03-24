@@ -9,8 +9,8 @@ G_DIETPI-NOTIFY 2 "Amiberry will be built for platform: \e[33m$PLATFORM"
 # APT dependencies
 # - wget: Used for WHDLoad database update: https://github.com/BlitterStudio/amiberry/commit/d6c103e3310bcf75c2d72a15849fbdf5eb7432b5
 # - kbd: For "chvt" used in systemd unit as SDL2 spams the console with every key press
-adeps_build=('autoconf' 'make' 'g++' 'pkg-config' 'libdrm-dev' 'libgbm-dev' 'libudev-dev' 'libxml2-dev' 'libpng-dev' 'libfreetype6-dev' 'libflac-dev' 'libmpg123-dev' 'libmpeg2-4-dev' 'libasound2-dev' 'wget' 'kbd')
-adeps=('libdrm2' 'libgl1-mesa-dri' 'libgbm1' 'libegl1' 'libudev1' 'libxml2' 'libpng16-16' 'libfreetype6' 'libmpg123-0' 'libmpeg2-4' 'libasound2' 'wget' 'kbd')
+adeps_build=('autoconf' 'make' 'g++' 'pkg-config' 'libdrm-dev' 'libgbm-dev' 'libudev-dev' 'libxml2-dev' 'libpng-dev' 'libfreetype6-dev' 'libflac-dev' 'libmpg123-dev' 'libmpeg2-4-dev' 'libasound2-dev' 'libserialport-dev' 'wget' 'kbd')
+adeps=('libdrm2' 'libgl1-mesa-dri' 'libgbm1' 'libegl1' 'libudev1' 'libxml2' 'libpng16-16' 'libfreetype6' 'libmpg123-0' 'libmpeg2-4' 'libasound2' 'libserialport0' 'wget' 'kbd')
 (( $G_DISTRO > 6 )) && adeps+=('libflac12') || adeps+=('libflac8')
 # - DispmanX deps for RPi
 [[ $PLATFORM == 'rpi'* ]] && adeps_build+=('libraspberrypi-dev') adeps+=('libraspberrypi0')
