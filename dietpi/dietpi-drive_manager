@@ -72,6 +72,7 @@
 		aDRIVE_ISNETWORKED[$index]=0
 		aDRIVE_ISROM[$index]=0
 		aDRIVE_ISPARTITIONTABLE[$index]=0
+		aDRIVE_ISACCESS[$index]=1
 
 	}
 
@@ -84,7 +85,7 @@
 		unset -v aDRIVE_SIZE_PERCENTUSED
 		unset -v aDRIVE_ISFILESYSTEM aDRIVE_ISMOUNTED
 		unset -v aDRIVE_ISREADONLY_CURRENTLY aDRIVE_ISNETWORKED
-		unset -v aDRIVE_ISROM aDRIVE_ISPARTITIONTABLE
+		unset -v aDRIVE_ISROM aDRIVE_ISPARTITIONTABLE aDRIVE_ISACCESS
 
 	}
 
@@ -179,9 +180,10 @@ $swap_mounts
 
 				G_DIETPI-NOTIFY 2 " - Detected mounted physical drive: ${aDRIVE_MOUNT_SOURCE[$index]} > ${aDRIVE_MOUNT_TARGET[$index]}"
 
-				aDRIVE_UUID[$index]=$(findmnt -Ufnro UUID -M "${aDRIVE_MOUNT_TARGET[$index]}")
 				aDRIVE_SOURCE_DEVICE[$index]=$(Return_Drive_Without_Partitions "${aDRIVE_MOUNT_SOURCE[$index]}")
 				[[ ${aDRIVE_MOUNT_SOURCE[$index]} == /dev/${aDRIVE_SOURCE_DEVICE[$index]} ]] || aDRIVE_ISPARTITIONTABLE[$index]=1
+				[[ -b ${aDRIVE_MOUNT_SOURCE[$index]} ]] || aDRIVE_ISACCESS[$index]=0 # continue
+				aDRIVE_UUID[$index]=$(findmnt -Ufnro UUID -M "${aDRIVE_MOUNT_TARGET[$index]}")
 				(( ${aDRIVE_ISPARTITIONTABLE[$index]} )) && aDRIVE_PART_UUID[$index]=$(findmnt -Ufnro PARTUUID -M "${aDRIVE_MOUNT_TARGET[$index]}")
 				# blkid is required here, as findmnt will show "fuseblk" for NTFS filesytems, which is a correct result but cannot be used in fstab or for mounting the drive.
 				aDRIVE_FSTYPE[$index]=$(blkid -s TYPE -o value -c /dev/null "${aDRIVE_MOUNT_SOURCE[$index]}")
@@ -230,8 +232,11 @@ $swap_mounts
 			# Add only physical drives to fstab, network drives are handled outside of this loop
 			if [[ ${aDRIVE_ISNETWORKED[$index]} == 0 ]]; then
 
+				# Skip if block device path does not exist, e.g. rootfs within a container
+				(( ${aDRIVE_ISACCESS[$index]} )) || { G_DIETPI-NOTIFY 2 " - Skipping /etc/fstab entry as system as no access to ${aDRIVE_MOUNT_SOURCE[$index]}"; continue; }
+
 				# Print error when physical drive has not UUID, as we cannot add it to fstab then
-				[[ ${aDRIVE_UUID[$index]} ]] || { G_DIETPI-NOTIFY 1 "The following drive seems to have no UUID, skipping fstab entry:\n$(findmnt -Ufo SOURCE,TARGET,FSTYPE,UUID -M "${aDRIVE_MOUNT_TARGET[$index]}")"; continue; }
+				[[ ${aDRIVE_UUID[$index]} ]] || { G_DIETPI-NOTIFY 1 " - Skipping /etc/fstab entry as ${aDRIVE_MOUNT_SOURCE[$index]} has not UUID"; continue; }
 
 				# R/W or R/O?
 				# - Add rw flag to mount options. This should be default but seems to be not in rare cases: https://github.com/MichaIng/DietPi/issues/3268
@@ -324,6 +329,7 @@ $swap_mounts
 			aDRIVE_MOUNT_SOURCE[$index]="/dev/$line"
 			aDRIVE_MOUNT_TARGET[$index]="/tmp/$line"
 			aDRIVE_SOURCE_DEVICE[$index]=$line
+			[[ -b ${aDRIVE_MOUNT_SOURCE[$index]} ]] || aDRIVE_ISACCESS[$index]=0
 
 		done < <(lsblk -nro NAME | sed '/^mtdblock[0-9]/d')
 
@@ -350,7 +356,8 @@ $swap_mounts
 			elif [[ ${aDRIVE_FSTYPE[$i]} == 'exfat' ]]; then
 
 				# Install exFAT FUSE driver if the kernel does not support it natively yet, else purge it
-				if modprobe -nq exfat
+				# - Container: Assume host supports it
+				if (( $G_HW_MODEL == 75 )) || modprobe -nq exfat
 				then
 					dpkg-query -s 'exfat-fuse' &> /dev/null && G_AGP exfat-fuse
 					[[ -L '/sbin/mount.exfat' && ! -e '/sbin/mount.exfat' ]] && G_EXEC rm /sbin/mount.exfat
@@ -362,7 +369,8 @@ $swap_mounts
 		done
 
 		# Remove x-systemd.automount if not supported by kernel: https://github.com/MichaIng/DietPi/issues/1607#issuecomment-372030565
-		if ! modprobe -nq autofs4
+		# - Container: Assume host supports it (relevant for network drives)
+		if (( $G_HW_MODEL != 75 )) && ! modprobe -nq autofs4
 		then
 			sed -Ei '/x-systemd\.automount/s/,(noauto|x-systemd\.automount)//g' "$fp_fstab_tmp"
 			G_DIETPI-NOTIFY 2 'autofs4 module not available in kernel, x-systemd.automount has been disabled, all drives will be mounted at boot instead'
@@ -968,8 +976,9 @@ Do you wish to ignore this warning, and, mount the drive regardless?" || return 
 	Install_exFAT_Tools()
 	{
 		# Install FUSE driver if kernel does not support exFAT natively and on Bullseye prefer exfat-utils over exfatprogs
+		# - Container: Assume host supports it
 		local apackages=()
-		if modprobe -q exfat
+		if (( $G_HW_MODEL == 75 )) || modprobe -q exfat
 		then
 			(( $G_DISTRO > 5 )) && apackages=('exfatprogs') || apackages=('exfat-utils') # exfatprogs not available until Bullseye
 			dpkg-query -s 'exfat-fuse' &> /dev/null && G_AGP exfat-fuse
@@ -1052,14 +1061,17 @@ Do you wish to ignore this warning, and, mount the drive regardless?" || return 
 								G_WHIP_MENU_ARRAY+=('User data' ': [ ] | Select to transfer DietPi user data to this drive')
 							fi
 
-							# Swap file
-							local swapfile_size=$(sed -n '/^[[:blank:]]*AUTO_SETUP_SWAPFILE_SIZE=/{s/^[^=]*=//p;q}' /boot/dietpi.txt)
-							if (( $swapfile_size > 0 )) && [[ ( $FP_SWAPFILE_CURRENT == ${aDRIVE_MOUNT_TARGET[$MENU_DRIVE_INDEX]}* && ${aDRIVE_MOUNT_TARGET[$MENU_DRIVE_INDEX]} != '/' ) || ( $FP_SWAPFILE_CURRENT == '/var/swap' && ${aDRIVE_MOUNT_TARGET[$MENU_DRIVE_INDEX]} == '/' ) ]]
+							# Swap file: Hide in container
+							if (( $G_HW_MODEL != 75 ))
 							then
-								partition_contains_swapfile=1
-								G_WHIP_MENU_ARRAY+=('Swap file' ": [X] | ${swapfile_size} MiB used on this drive, select to change size")
-							else
-								G_WHIP_MENU_ARRAY+=('Swap file' ': [ ] | Select to transfer swap file to this drive')
+								local swapfile_size=$(sed -n '/^[[:blank:]]*AUTO_SETUP_SWAPFILE_SIZE=/{s/^[^=]*=//p;q}' /boot/dietpi.txt)
+								if (( $swapfile_size > 0 )) && [[ ( $FP_SWAPFILE_CURRENT == ${aDRIVE_MOUNT_TARGET[$MENU_DRIVE_INDEX]}* && ${aDRIVE_MOUNT_TARGET[$MENU_DRIVE_INDEX]} != '/' ) || ( $FP_SWAPFILE_CURRENT == '/var/swap' && ${aDRIVE_MOUNT_TARGET[$MENU_DRIVE_INDEX]} == '/' ) ]]
+								then
+									partition_contains_swapfile=1
+									G_WHIP_MENU_ARRAY+=('Swap file' ": [X] | ${swapfile_size} MiB used on this drive, select to change size")
+								else
+									G_WHIP_MENU_ARRAY+=('Swap file' ': [ ] | Select to transfer swap file to this drive')
+								fi
 							fi
 
 						fi
@@ -1089,7 +1101,7 @@ Do you wish to ignore this warning, and, mount the drive regardless?" || return 
 
 			fi
 
-			if ! (( ${aDRIVE_ISROM[$MENU_DRIVE_INDEX]} || ${aDRIVE_ISNETWORKED[$MENU_DRIVE_INDEX]} )); then
+			if (( ${aDRIVE_ISACCESS[$MENU_DRIVE_INDEX]} && ! ${aDRIVE_ISROM[$MENU_DRIVE_INDEX]} && ! ${aDRIVE_ISNETWORKED[$MENU_DRIVE_INDEX]} )); then
 
 				# Reserved blocks percentage on ext4 filesystems
 				if [[ ${aDRIVE_FSTYPE[$MENU_DRIVE_INDEX]} == 'ext4' ]]
@@ -1121,7 +1133,7 @@ Do you wish to ignore this warning, and, mount the drive regardless?" || return 
 
 		fi
 
-		if ! (( ${aDRIVE_ISROM[$MENU_DRIVE_INDEX]} || ${aDRIVE_ISNETWORKED[$MENU_DRIVE_INDEX]} ))
+		if (( ${aDRIVE_ISACCESS[$MENU_DRIVE_INDEX]} && ! ${aDRIVE_ISROM[$MENU_DRIVE_INDEX]} && ! ${aDRIVE_ISNETWORKED[$MENU_DRIVE_INDEX]} ))
 		then
 			# Transfer RootFS: Supported on RPi and Odroids C2/XU4/N2/C4 if /boot is a dedicated mount
 			if [[ ${aDRIVE_MOUNT_SOURCE[$MENU_DRIVE_INDEX]} != "$G_ROOTFS_DEV" && ( $G_HW_MODEL -le 9 || $G_HW_MODEL == 1[1256] ) ]] && findmnt -M /boot > /dev/null; then
@@ -1147,7 +1159,8 @@ Do you wish to ignore this warning, and, mount the drive regardless?" || return 
 				[[ $i == 'bfq' ]] && bfq=1
 			done
 			# Add BFQ scheduler if module is not enabled but available
-			(( $bfq )) || ! modprobe -nq bfq || aio_schedulers+=('bfq' '')
+			# - Container: Skip it since the container cannot load the host's kernel modules
+			(( $bfq || $G_HW_MODEL == 75 )) || ! modprobe -nq bfq || aio_schedulers+=('bfq' '')
 			[[ ${aio_schedulers[0]} ]] && G_WHIP_MENU_ARRAY+=('I/O Scheduler' ": [${io_scheduler_current:-N/A}]")
 		fi
 
