@@ -1343,7 +1343,7 @@ Available commands:
 		aSOFTWARE_DEPS[$software_id]='17 89 webserver'
 		aSOFTWARE_INTERACTIVE[$software_id]=1
 		aSOFTWARE_CONFLICTS[$software_id]='126'
-		# - RISC-V: Missing binary
+		# - RISC-V: Missing archive: https://github.com/AdguardTeam/AdGuardHome/releases
 		aSOFTWARE_AVAIL_G_HW_ARCH[$software_id,11]=0
 		#------------------
 		software_id=126
@@ -3462,6 +3462,10 @@ Header set Referrer-Policy "no-referrer"
 _EOF_
 			G_EXEC a2enconf dietpi
 
+			# Force service to start after PHP-FPM
+			G_EXEC mkdir -p /etc/systemd/system/apache2.service.d
+			G_EXEC eval "echo -e '[Unit]\nAfter=php$PHP_VERSION-fpm.service' > /etc/systemd/system/apache2.service.d/dietpi.conf"
+
 			# Webroot
 			[[ -f '/var/www/html/index.html' && ! -f '/var/www/index.html' ]] && G_EXEC mv /var/www/html/index.html /var/www/
 			[[ -d '/var/www/html' ]] && G_EXEC rmdir --ignore-fail-on-non-empty /var/www/html
@@ -3488,6 +3492,10 @@ _EOF_
 
 			# Default site
 			dps_index=$software_id Download_Install 'nginx.default' /etc/nginx/sites-available/default
+
+			# Force service to start after PHP-FPM
+			G_EXEC mkdir -p /etc/systemd/system/nginx.service.d
+			G_EXEC eval "echo -e '[Unit]\nAfter=php$PHP_VERSION-fpm.service' > /etc/systemd/system/nginx.service.d/dietpi.conf"
 
 			# Webroot
 			[[ -f '/var/www/html/index.nginx-debian.html' ]] && G_EXEC mv /var/www/html/index.nginx-debian.html /var/www/
@@ -3569,6 +3577,10 @@ _EOF_
 			# - Disable conflicting fastcgi-php module
 			[[ -f '/etc/lighttpd/conf-enabled/15-fastcgi-php.conf' ]] && G_EXEC lighty-disable-mod fastcgi-php
 			[[ -f '/etc/lighttpd/conf-enabled/15-fastcgi-php-fpm.conf' ]] || G_EXEC lighty-enable-mod fastcgi-php-fpm
+
+			# Force service to start after PHP-FPM
+			G_EXEC mkdir -p /etc/systemd/system/nginx.service.d
+			G_EXEC eval "echo -e '[Unit]\nAfter=php$PHP_VERSION-fpm.service' > /etc/systemd/system/nginx.service.d/dietpi.conf"
 		fi
 
 		if To_Install 88 # MariaDB
@@ -3679,6 +3691,10 @@ _EOF_
 				G_CONFIG_INJECT 'pm.max_spare_servers[[:blank:]=]' "pm.max_spare_servers = $G_HW_CPU_CORES" "/etc/php/$PHP_VERSION/fpm/pool.d/www.conf"
 				# Set static PATH, not passed by Lighttpd and Nginx by default but required by some web applications: https://github.com/MichaIng/DietPi/issues/5161#issuecomment-1013381362
 				G_CONFIG_INJECT 'env\[PATH\][[:blank:]=]' 'env[PATH] = /usr/local/bin:/usr/bin:/bin' "/etc/php/$PHP_VERSION/fpm/pool.d/www.conf"
+
+				# Force service to start after database servers
+				G_EXEC mkdir -p "/etc/systemd/system/php$PHP_VERSION-fpm.service.d"
+				G_EXEC eval "echo -e '[Unit]\nAfter=redis-server.service mariadb.service postgresql.service' > '/etc/systemd/system/php$PHP_VERSION-fpm.service.d/dietpi.conf'"
 			fi
 
 			# We create our own PHP mod to add DietPi specific configs.
@@ -3937,7 +3953,7 @@ _EOF_
 			# Service
 			# - Run systemd unit as "mpd" user instead of using config file based user change, to preserve supplementary group permissions (i.e. "dietpi")
 			# - Skip environment file so that usage of our config file is assured
-			[[ -d '/etc/systemd/system/mpd.service.d' ]] || G_EXEC mkdir /etc/systemd/system/mpd.service.d
+			G_EXEC mkdir -p /etc/systemd/system/mpd.service.d
 			cat << '_EOF_' > /etc/systemd/system/mpd.service.d/dietpi.conf
 [Service]
 User=mpd
@@ -5098,7 +5114,7 @@ _EOF_
 Description=ReadyMedia (DietPi)
 Documentation=man:minidlnad(1) man:minidlna.conf(5)
 Wants=network-online.target
-After=network-online.target
+After=network-online.target remote-fs.target
 
 [Service]
 User=minidlna
@@ -5108,14 +5124,14 @@ ExecStart=$(command -v minidlnad) -S -R -f /etc/minidlna.conf -P /dev/null
 WantedBy=multi-user.target
 _EOF_
 			# Bullseye: Debian patched forced file logging inside, overriding "-S": https://github.com/MichaIng/DietPi/issues/4745
-			(( $G_DISTRO < 6 )) || G_CONFIG_INJECT 'LogsDirectory=' 'LogsDirectory=minidlna' /etc/systemd/system/minidlna.service '^User='
+			(( $G_DISTRO < 6 )) || G_CONFIG_INJECT 'LogsDirectory=' 'LogsDirectory=minidlna' /etc/systemd/system/minidlna.service 'User='
 
 			# Config
 			G_BACKUP_FP /etc/minidlna.conf
 			dps_index=$software_id Download_Install 'minidlna.conf' /etc/minidlna.conf
 
 			# Cache
-			[[ -d '/mnt/dietpi_userdata/.MiniDLNA_Cache' ]] || G_EXEC mkdir /mnt/dietpi_userdata/.MiniDLNA_Cache
+			G_EXEC mkdir -p /mnt/dietpi_userdata/.MiniDLNA_Cache
 			G_EXEC chown -R minidlna:root /mnt/dietpi_userdata/.MiniDLNA_Cache
 
 			Download_Test_Media
@@ -5357,6 +5373,7 @@ _EOF_
 				local salt=$(tr -dc '0-9a-f' < /dev/random | head -c40)
 				GCI_PASSWORD=1 G_CONFIG_INJECT '"pwd_salt":' "    \"pwd_salt\": \"$salt\"," /mnt/dietpi_userdata/deluge/.config/deluge/web.conf
 				GCI_PASSWORD=1 G_CONFIG_INJECT '"pwd_sha1":' "    \"pwd_sha1\": \"$(echo -n "$salt$GLOBAL_PW" | sha1sum | mawk '{print $1}')\"," /mnt/dietpi_userdata/deluge/.config/deluge/web.conf
+				unset -v salt
 
 				# Client access
 				local localpass=$(tr -dc '0-9a-f' < /dev/random | head -c40)
@@ -5370,6 +5387,7 @@ _EOF_
 				G_CONFIG_INJECT '"[0-9a-f]{32}"' "            \"$id\"," /mnt/dietpi_userdata/deluge/.config/deluge/hostlist.conf
 				sed -i "/\"[0-9a-f]\{40\}\"/c\            \"$localpass\"" /mnt/dietpi_userdata/deluge/.config/deluge/hostlist.conf
 				G_CONFIG_INJECT '"default_daemon":' "    \"default_daemon\": \"$id\"," /mnt/dietpi_userdata/deluge/.config/deluge/web.conf
+				unset -v localpass id
 				RESTART_DELUGE_WEB=1
 			fi
 
@@ -5381,6 +5399,8 @@ _EOF_
 [Unit]
 Description=Deluge Daemon (DietPi)
 Documentation=man:deluged
+Wants=network-online.target
+After=network-online.target remote-fs.target
 
 [Service]
 User=debian-deluged
@@ -5398,6 +5418,7 @@ _EOF_
 [Unit]
 Description=Deluge Web UI (DietPi)
 Documentation=man:deluge-web
+After=deluged.service
 
 [Service]
 User=debian-deluged
@@ -5447,23 +5468,23 @@ _EOF_
 
 		if To_Install 129 # O!MPD
 		then
-			Download_Install 'https://github.com/ArturSierzant/OMPD/archive/master.tar.gz' /var/www
+			Download_Install 'https://github.com/ArturSierzant/OMPD/archive/master.tar.gz'
 			# Replace existing installs but preserve local config override
 			if [[ -d '/var/www/ompd' ]]
 			then
-				[[ -f '/var/www/ompd/include/config.local.inc.php' ]] && G_EXEC mv /var/www/ompd/include/config.local.inc.php /var/www/OMPD-master/include/
+				[[ -f '/var/www/ompd/include/config.local.inc.php' ]] && G_EXEC mv /var/www/ompd/include/config.local.inc.php OMPD-master/include/
 				G_EXEC rm -R /var/www/ompd
 			fi
-			G_EXEC mv /var/www/OMPD-master /var/www/ompd
+			G_EXEC mv OMPD-master /var/www/ompd
 
 			# Preserve config file, create local override if non-existent
 			# Database will be migrated automatically, so only create new on fresh install, using local override config as flag
 			if [[ ! -f '/var/www/ompd/include/config.local.inc.php' ]]
 			then
 				G_EXEC systemctl start mariadb
-				# - Create database user only, database will be created automatically
+				# Create database user only, database will be created automatically
 				mysql -e "grant all privileges on ompd.* to ompd@localhost identified by '$GLOBAL_PW';"
-				systemctl stop mariadb
+				G_EXEC systemctl stop mariadb
 
 				cat << _EOF_ > /var/www/ompd/include/config.local.inc.php
 <?php
@@ -5544,6 +5565,8 @@ Requires=icecast2.service
 After=icecast2.service
 
 [Service]
+User=nobody
+Group=dietpi
 ExecStart=$(command -v darkice)
 
 [Install]
@@ -5554,7 +5577,7 @@ _EOF_
 		if To_Install 63 # LinuxDash
 		then
 			Download_Install 'https://github.com/afaqurk/linux-dash/archive/master.tar.gz'
-			[[ -d '/var/www/linuxdash' ]] || G_EXEC mkdir /var/www/linuxdash
+			G_EXEC mkdir -p /var/www/linuxdash
 			G_EXEC cp -a linux-dash-master/* /var/www/linuxdash/
 			G_EXEC rm -R linux-dash-master
 		fi
@@ -6003,12 +6026,10 @@ _EOF_
 				Download_Install "https://static.adguard.com/adguardhome/release/AdGuardHome_linux_$arch.tar.gz"
 
 				# Install to userdata until it is possible to split binary and data/config without breaking the updater: https://github.com/AdguardTeam/AdGuardHome/issues/3286
-				[[ -d '/mnt/dietpi_userdata/adguardhome' ]] || G_EXEC mkdir /mnt/dietpi_userdata/adguardhome
+				G_EXEC mkdir -p /mnt/dietpi_userdata/adguardhome
 				G_EXEC cp -a AdGuardHome/. /mnt/dietpi_userdata/adguardhome/
 				G_EXEC rm -R AdGuardHome
 			fi
-
-			[[ -d '/opt/adguardhome' ]] && G_EXEC rm -R /opt/adguardhome # v7.3 beta
 
 			# Unbound: Switch port to 5335 if it was installed before, else it got just configured within its install step above
 			if (( ${aSOFTWARE_INSTALL_STATE[182]} == 2 )) && grep -q '^[[:blank:]]*port:[[:blank:]][[:blank:]]*53$' /etc/unbound/unbound.conf.d/dietpi.conf
@@ -6049,8 +6070,9 @@ _EOF_
 			cat << '_EOF_' > /etc/systemd/system/adguardhome.service
 [Unit]
 Description=AdGuard Home (DietPi)
-Wants=network-online.target
+Wants=network-online.target nss-lookup.target
 After=network-online.target
+Before=nss-lookup.target
 StartLimitIntervalSec=60
 StartLimitBurst=5
 
@@ -6155,7 +6177,7 @@ _EOF_
 [Unit]
 Description=navidrome (DietPi)
 Wants=network-online.target
-After=network-online.target
+After=network-online.target remote-fs.target
 AssertPathExists=/mnt/dietpi_userdata/navidrome
 
 [Service]
@@ -6520,6 +6542,8 @@ _EOF_
 			cat << '_EOF_' > /etc/systemd/system/node-red.service
 [Unit]
 Description=Node-RED (DietPi)
+Wants=network-online.target
+After=network-online.target
 
 [Service]
 User=nodered
@@ -7251,7 +7275,7 @@ _EOF_
 [Unit]
 Description=Ubooquity (DietPi)
 Wants=network-online.target
-After=network-online.target
+After=network-online.target remote-fs.target
 
 [Service]
 SyslogIdentifier=Ubooquity
@@ -7307,7 +7331,7 @@ _EOF_
 [Unit]
 Description=Komga (DietPi)
 Wants=network-online.target
-After=network-online.target
+After=network-online.target remote-fs.target
 
 [Service]
 SyslogIdentifier=Komga
@@ -8118,6 +8142,8 @@ location = /.well-known/caldav  { return 301 /baikal/html/dav.php; }' > /etc/ngi
 			cat << '_EOF_' > /etc/systemd/system/cuberite.service
 [Unit]
 Description=Cuberite (DietPi)
+Wants=network-online.target
+After=network-online.target
 
 [Service]
 Type=forking
@@ -8370,7 +8396,7 @@ _EOF_
 Description=qBittorrent (DietPi)
 Documentation=man:qbittorrent-nox(1)
 Wants=network-online.target
-After=network-online.target
+After=network-online.target remote-fs.target
 
 [Service]
 User=qbittorrent
@@ -8546,7 +8572,7 @@ _EOF_
 [Unit]
 Description=rTorrent (DietPi)
 Wants=network-online.target
-After=network-online.target
+After=network-online.target remote-fs.target
 
 [Service]
 User=rtorrent
@@ -8718,6 +8744,8 @@ _EOF_
 			cat << _EOF_ > /etc/systemd/system/aria2.service
 [Unit]
 Description=Aria2 (DietPi)
+Wants=network-online.target
+After=network-online.target remote-fs.target
 
 [Service]
 User=aria2
@@ -8963,7 +8991,7 @@ _EOF_
 Description=mjpg-streamer (DietPi)
 Documentation=https://github.com/jacksonliam/mjpg-streamer/tree/master/mjpg-streamer-experimental
 Wants=network-online.target
-After=network-online.target
+After=network-online.target remote-fs.target
 
 [Service]
 User=mjpg-streamer
@@ -9074,7 +9102,7 @@ _EOF_
 Description=SABnzbd (DietPi)
 Documentation=https://sabnzbd.org/wiki/
 Wants=network-online.target
-After=network-online.target
+After=network-online.target remote-fs.target
 
 [Service]
 SyslogIdentifier=SABnzbd
@@ -9217,8 +9245,8 @@ _EOF_
 			G_EXEC rm install.sh
 
 			# Do not enter into a server restart loop on failure
-			[[ -d '/etc/systemd/system/k3s.service.d' ]] || G_EXEC mkdir /etc/systemd/system/k3s.service.d
-			echo -e '[Service]\nRestart=on-success' > /etc/systemd/system/k3s.service.d/dietpi.conf
+			G_EXEC mkdir -p /etc/systemd/system/k3s.service.d
+			G_EXEC eval 'echo -e '\''[Service]\nRestart=on-success'\'' > /etc/systemd/system/k3s.service.d/dietpi.conf'
 
 			Enable_memory_cgroup
 		fi
@@ -9337,7 +9365,7 @@ _EOF_
 Description=Koel (DietPi)
 Documentation=https://docs.koel.dev/
 Wants=network-online.target
-After=network-online.target
+After=network-online.target mariadb.service
 
 [Service]
 SyslogIdentifier=Koel
@@ -9387,7 +9415,7 @@ _EOF_
 [Unit]
 Description=Sonarr (DietPi)
 Wants=network-online.target
-After=network-online.target
+After=network-online.target remote-fs.target transmission-daemon.service qbittorrent.service rtorrent.service nzbget.service deluged.service aria2.service sabnzbd.service
 
 [Service]
 SyslogIdentifier=Sonarr
@@ -9488,7 +9516,7 @@ _EOF_
 [Unit]
 Description=Radarr (DietPi)
 Wants=network-online.target
-After=network-online.target
+After=network-online.target remote-fs.target transmission-daemon.service qbittorrent.service rtorrent.service nzbget.service deluged.service aria2.service sabnzbd.service
 
 [Service]
 SyslogIdentifier=Radarr
@@ -9591,7 +9619,7 @@ _EOF_
 [Unit]
 Description=Lidarr (DietPi)
 Wants=network-online.target
-After=network-online.target
+After=network-online.target remote-fs.target transmission-daemon.service qbittorrent.service rtorrent.service nzbget.service deluged.service aria2.service sabnzbd.service
 
 [Service]
 SyslogIdentifier=Lidarr
@@ -9835,7 +9863,7 @@ _EOF_
 		if To_Install 149 # NZBGet
 		then
 			G_EXEC curl -sSfL 'https://nzbget.net/download/nzbget-latest-bin-linux.run' -o package.run
-			[[ -d '/mnt/dietpi_userdata/nzbget' ]] || G_EXEC mkdir /mnt/dietpi_userdata/nzbget
+			G_EXEC mkdir -p /mnt/dietpi_userdata/nzbget
 			G_EXEC_OUTPUT=1 G_EXEC dash package.run --destdir /mnt/dietpi_userdata/nzbget
 			G_EXEC rm package.run
 
@@ -9873,6 +9901,8 @@ _EOF_
 			cat << '_EOF_' > /etc/systemd/system/nzbget.service
 [Unit]
 Description=NZBGet (DietPi)
+Wants=network-online.target
+After=network-online.target remote-fs.targe
 
 [Service]
 Type=forking
@@ -9926,7 +9956,7 @@ _EOF_
 [Unit]
 Description=Prowlarr (DietPi)
 Wants=network-online.target
-After=network-online.target
+After=network-online.target remote-fs.target transmission-daemon.service qbittorrent.service rtorrent.service nzbget.service deluged.service aria2.service sabnzbd.service
 
 [Service]
 SyslogIdentifier=Prowlarr
@@ -10001,7 +10031,7 @@ _EOF_
 [Unit]
 Description=Readarr (DietPi)
 Wants=network-online.target
-After=network-online.target
+After=network-online.target remote-fs.target transmission-daemon.service qbittorrent.service rtorrent.service nzbget.service deluged.service aria2.service sabnzbd.service
 
 [Service]
 SyslogIdentifier=Readarr
@@ -10207,7 +10237,7 @@ _EOF_
 [Unit]
 Description=Roon Server (DietPi)
 Wants=network-online.target
-After=network-online.target
+After=network-online.target remote-fs.target
 
 [Service]
 SyslogIdentifier=Roon Server
@@ -10284,7 +10314,7 @@ _EOF_
 			Create_User -d /mnt/dietpi_userdata/minio-data minio-user
 
 			# Data dir
-			[[ -d '/mnt/dietpi_userdata/minio-data' ]] || G_EXEC mkdir /mnt/dietpi_userdata/minio-data
+			G_EXEC mkdir -p /mnt/dietpi_userdata/minio-data
 			G_EXEC chown -R minio-user:minio-user /mnt/dietpi_userdata/minio-data
 
 			# Config
@@ -10420,7 +10450,7 @@ _EOF_
 [Unit]
 Description=FuguHub (DietPi)
 Wants=network-online.target
-After=network-online.target
+After=network-online.target remote-fs.target
 
 [Service]
 User=bd
@@ -10444,6 +10474,8 @@ _EOF_
 			cat << _EOF_ > /etc/systemd/system/nukkit.service
 [Unit]
 Description=Nukkit (DietPi)
+Wants=network-online.target
+After=network-online.target
 
 [Service]
 SyslogIdentifier=Nukkit
@@ -10681,7 +10713,7 @@ _EOF_
 			G_EXEC ln -sf /mnt/dietpi_userdata/voice-recognizer-raspi/assistant.json /home/dietpi/assistant.json
 
 			# Generate cache dir
-			[[ -d '/home/dietpi/.cache/voice-recognizer' ]] || G_EXEC mkdir -p /home/dietpi/.cache/voice-recognizer
+			G_EXEC mkdir -p /home/dietpi/.cache/voice-recognizer
 
 			# Setup soundcard
 			/boot/dietpi/func/dietpi-set_hardware soundcard googlevoicehat-soundcard
@@ -10736,6 +10768,8 @@ _EOF_
 			cat << '_EOF_' > /etc/systemd/system/mycroft.service
 [Unit]
 Description=Mycroft AI (DietPi)
+Wants=network-online.target
+After=network-online.target
 
 [Service]
 Type=forking
@@ -11191,6 +11225,8 @@ _EOF_
 [Unit]
 Description=PaperMC (DietPi)
 Documentation=https://paper.readthedocs.io/
+Wants=network-online.target
+After=network-online.target
 
 [Service]
 SyslogIdentifier=PaperMC
@@ -11229,7 +11265,7 @@ _EOF_
 			Download_Install "https://releases.domoticz.com/releases/release/domoticz_linux_${G_HW_ARCH_NAME/armv6l/armv7l}.tgz" /opt/domoticz
 
 			# Data dir
-			[[ -d '/mnt/dietpi_userdata/domoticz' ]] || G_EXEC mkdir /mnt/dietpi_userdata/domoticz
+			G_EXEC mkdir -p /mnt/dietpi_userdata/domoticz
 
 			# Config file
 			if [[ ! -f '/mnt/dietpi_userdata/domoticz/domoticz.conf' ]]
@@ -11405,7 +11441,7 @@ _EOF_
 Description=File Browser (DietPi)
 Documentation=https://filebrowser.org/
 Wants=network-online.target
-After=network-online.target
+After=network-online.target remote-fs.target
 
 [Service]
 User=filebrowser
@@ -12641,7 +12677,6 @@ If no WireGuard (auto)start is included, but you require it, please do the follo
 		if To_Uninstall 126 # AdGuard Home
 		then
 			Remove_Service adguardhome 1
-			[[ -d '/opt/adguardhome' ]] && G_EXEC rm -R /opt/adguardhome # v7.3 beta
 
 			# Data directory
 			[[ -d '/mnt/dietpi_userdata/adguardhome' ]] && G_EXEC rm -R /mnt/dietpi_userdata/adguardhome
