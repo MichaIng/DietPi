@@ -123,6 +123,8 @@ Available commands:
 	# Logging choice index
 	INDEX_LOGGING=-1
 
+	# Array to collect all installed services to be enabled after installs have finished
+	aENABLE_SERVICES=()
 	# Since no automated reboot is done anymore after installs, collect services to start manually, when not controlled by DietPi-Services
 	aSTART_SERVICES=()
 
@@ -2558,6 +2560,10 @@ _EOF_
 			(( ${aSOFTWARE_INSTALL_STATE[$1]} == 1 )) || return 1
 			G_DIETPI-NOTIFY 3 "$G_PROGRAM_NAME" "Installing ${aSOFTWARE_NAME[$1]}: ${aSOFTWARE_DESC[$1]}"
 			software_id=$1
+			shift
+			[[ $1 ]] || return 0
+			[[ $(readlink -m "/etc/systemd/system/$1.service") == '/dev/null' ]] && G_EXEC systemctl unmask "$1"
+			aENABLE_SERVICES+=("$@")
 		}
 
 		if To_Install 5 # ALSA
@@ -2615,7 +2621,7 @@ _EOF_
 			dps_index=$software_id Download_Install '98-dietpi-disable_dpms.conf' /etc/X11/xorg.conf.d/98-dietpi-disable_dpms.conf
 		fi
 
-		if To_Install 152 # Avahi-Daemon
+		if To_Install 152 avahi-daemon # Avahi-Daemon
 		then
 			G_AGI avahi-daemon
 			G_EXEC systemctl stop avahi-daemon
@@ -2707,7 +2713,7 @@ _EOF_
 			G_AGI nfs-common netbase
 		fi
 
-		if To_Install 104 # Dropbear
+		if To_Install 104 dropbear # Dropbear
 		then
 			# Stop OpenSSH service to unbind port 22
 			systemctl -q is-active ssh && G_EXEC systemctl stop ssh
@@ -2721,41 +2727,37 @@ _EOF_
 				G_AGI dropbear-run
 			fi
 
-			# Assure service is enabled and active
-			G_EXEC systemctl --no-reload unmask dropbear
-			G_EXEC systemctl enable dropbear
-			G_EXEC systemctl start dropbear
-
 			# Enable Dropbear daemon, obsolete since Bookworm
 			(( $G_DISTRO > 6 )) || G_CONFIG_INJECT 'NO_START=' 'NO_START=0' /etc/default/dropbear
 
 			# Apply password login setting from dietpi.txt or default (implies a restart)
+			# - Assure service is active
+			G_EXEC systemctl unmask dropbear
+			G_EXEC systemctl start dropbear
 			/boot/dietpi/func/dietpi-set_software disable_ssh_password_logins
 
 			# Mark OpenSSH for uninstall
 			dpkg-query -s 'openssh-server' &> /dev/null && aSOFTWARE_INSTALL_STATE[105]=-1
 		fi
 
-		if To_Install 105 # OpenSSH Server
+		if To_Install 105 ssh # OpenSSH Server
 		then
 			# Stop Dropbear service to unbind port 22
 			systemctl -q is-active dropbear && G_EXEC systemctl stop dropbear
 
 			G_AGI openssh-server
 
-			# Assure service is enabled and active
-			G_EXEC systemctl --no-reload unmask ssh
-			G_EXEC systemctl enable ssh
-			G_EXEC systemctl start ssh
-
 			# Apply password login setting from dietpi.txt or default (implies a restart)
+			# - Assure service is active
+			G_EXEC systemctl unmask ssh
+			G_EXEC systemctl start ssh
 			/boot/dietpi/func/dietpi-set_software disable_ssh_password_logins
 
 			# Mark Dropbear for uninstall
-			grep -q '^dropbear[^[:blank:]]*[[:blank:]]' < <(dpkg --get-selections) && aSOFTWARE_INSTALL_STATE[104]=-1
+			dpkg-query -s 'dropbear' &> /dev/null || dpkg-query -s 'dropbear-run' &> /dev/null && aSOFTWARE_INSTALL_STATE[104]=-1
 		fi
 
-		if To_Install 194 # PostgreSQL
+		if To_Install 194 postgresql # PostgreSQL
 		then
 			G_DIETPI-NOTIFY 2 'Preparing database directory at: /mnt/dietpi_userdata/postgresql'
 			if [[ -d '/mnt/dietpi_userdata/postgresql' ]]; then
@@ -2797,15 +2799,12 @@ unix_socket_directories = '/run/postgresql'" > "$i/00dietpi.conf"
 			done
 		fi
 
-		if To_Install 103 # DietPi-RAMlog
+		if To_Install 103 dietpi-ramlog # DietPi-RAMlog
 		then
 			# Install persistent tmpfs
 			local var_log_size=$(sed -n '/^[[:blank:]]*AUTO_SETUP_RAMLOG_MAXSIZE=/{s/^[^=]*=//p;q}' /boot/dietpi.txt)
 			sed -i '/[[:blank:]]\/var\/log[[:blank:]]/d' /etc/fstab
 			echo "tmpfs /var/log tmpfs size=${var_log_size:-50}M,noatime,lazytime,nodev,nosuid" >> /etc/fstab
-
-			# Enable DietPi-RAMlog service
-			G_EXEC systemctl enable dietpi-ramlog
 
 			# Apply logging choice index
 			[[ $INDEX_LOGGING == -[12] ]] || INDEX_LOGGING=-1
@@ -2852,12 +2851,12 @@ unix_socket_directories = '/run/postgresql'" > "$i/00dietpi.conf"
 			G_AGI beets
 		fi
 
-		if To_Install 102 # Rsyslog
+		if To_Install 102 rsyslog # Rsyslog
 		then
 			# Workaround for dpkg failure on 1st install if service is already running but APT not installed: https://github.com/MichaIng/DietPi/pull/2277/#issuecomment-441460925
 			systemctl -q is-active rsyslog && G_EXEC systemctl stop rsyslog
 			G_AGI rsyslog
-			G_EXEC systemctl enable --now rsyslog
+			G_EXEC systemctl start rsyslog
 
 			# Apply logging choice index
 			grep -q '[[:blank:]]/var/log[[:blank:]]' /etc/fstab || findmnt -t tmpfs -M /var/log > /dev/null || INDEX_LOGGING=-3
@@ -3238,11 +3237,11 @@ StandardOutput=journal
 [Install]
 WantedBy=multi-user.target
 _EOF_
-			# Service needs to be started by systemd, as dietpi-services must not control it to prevent it from stopping during software installs done via dashboard itself.
+			# Service needs to be started manually as dietpi-services must not control it to prevent it from stopping during software installs done via dashboard itself.
 			aSTART_SERVICES+=('dietpi-dashboard')
 		fi
 
-		if To_Install 99 # Prometheus Node Exporter
+		if To_Install 99 node_exporter # Prometheus Node Exporter
 		then
 			case $G_HW_ARCH in
 				1) local arch='armv6';;
@@ -3287,10 +3286,11 @@ _EOF_
 				G_EXEC mv {raspberrypi_exporter-master,/etc/systemd/system}/raspberrypi_exporter.service
 				G_EXEC mv {raspberrypi_exporter-master,/etc/systemd/system}/raspberrypi_exporter.timer
 				G_EXEC rm -R raspberrypi_exporter-master
+				aENABLE_SERVICES+=('raspberrypi_exporter')
 			fi
 		fi
 
-		if To_Install 44 # Transmission
+		if To_Install 44 transmission-daemon # Transmission
 		then
 			G_AGI transmission-daemon
 			G_EXEC systemctl stop transmission-daemon
@@ -3325,7 +3325,7 @@ _EOF_
 			G_CONFIG_INJECT '"umask"' '    "umask": 7,' /etc/transmission-daemon/settings.json '^\{$'
 		fi
 
-		if To_Install 94 # ProFTPD
+		if To_Install 94 proftpd # ProFTPD
 		then
 			G_EXEC eval "debconf-set-selections <<< 'proftpd-basic shared/proftpd/inetd_or_standalone select standalone'"
 			G_AGI proftpd-basic
@@ -3342,7 +3342,7 @@ _EOF_
 			(( $G_DISTRO < 6 )) || G_EXEC sed -i '/IdentLookups/c\<IfModule mod_ident.c>\nIdentLookups off\n</IfModule>' /etc/proftpd/proftpd.conf
 		fi
 
-		if To_Install 96 # Samba Server
+		if To_Install 96 nmbd smbd # Samba Server
 		then
 			# Link disk cache to RAM: https://github.com/MichaIng/DietPi/issues/2396
 			# - Remove previous disk cache dir or symlink
@@ -3367,7 +3367,7 @@ _EOF_
 			echo -e "$GLOBAL_PW\n$GLOBAL_PW" | smbpasswd -s -a dietpi
 		fi
 
-		if To_Install 95 # vsftpd
+		if To_Install 95 vsftpd # vsftpd
 		then
 			# Config: Preserve on reinstall
 			[[ -f '/etc/vsftpd.conf' ]] || dps_index=$software_id Download_Install 'conf' /etc/vsftpd.conf
@@ -3379,7 +3379,7 @@ _EOF_
 			G_EXEC sed -i 's/^[[:blank:]]*root/#root/' /etc/ftpusers
 		fi
 
-		if To_Install 109 # NFS Server
+		if To_Install 109 nfs-kernel-server # NFS Server
 		then
 			G_AGI nfs-kernel-server
 			G_EXEC systemctl stop nfs-kernel-server
@@ -3388,7 +3388,7 @@ _EOF_
 			[[ -f '/etc/exports.d/dietpi.exports' ]] || echo '/mnt/dietpi_userdata *(rw,async,no_root_squash,fsid=0,crossmnt,no_subtree_check)' > /etc/exports.d/dietpi.exports
 		fi
 
-		if To_Install 83 # Apache
+		if To_Install 83 apache2 # Apache
 		then
 			# Pre-create a dummy port 80 vhost if it does not exist yet, so we can avoid overwriting it on reinstalls.
 			if [[ ! -f '/etc/apache2/sites-available/000-default.conf' ]]
@@ -3410,7 +3410,7 @@ _EOF_
 			(( ${aSOFTWARE_INSTALL_STATE[92]} == 2 )) && apackages+=('python3-certbot-apache')
 			G_AGI "${apackages[@]}"
 			G_EXEC systemctl stop apache2
-			apachectl -M | grep -q 'cache_disk' || G_EXEC systemctl disable --now apache-htcacheclean
+			apachectl -M | grep -q 'cache_disk' || G_EXEC systemctl --no-reload disable --now apache-htcacheclean
 
 			# Enable event MPM and headers module
 			G_EXEC a2dismod -fq mpm_prefork
@@ -3471,7 +3471,7 @@ _EOF_
 			[[ -d '/var/www/html' ]] && G_EXEC rmdir --ignore-fail-on-non-empty /var/www/html
 		fi
 
-		if To_Install 85 # Nginx
+		if To_Install 85 nginx # Nginx
 		then
 			local apackages=('nginx-light')
 			# Install Certbot module, if Certbot was already installed
@@ -3502,7 +3502,7 @@ _EOF_
 			[[ -d '/var/www/html' ]] && G_EXEC rmdir --ignore-fail-on-non-empty /var/www/html
 		fi
 
-		if To_Install 84 # Lighttpd
+		if To_Install 84 lighttpd # Lighttpd
 		then
 			# Migrate existing configs in case of distro upgrades
 			local deflate=() openssl=()
@@ -3583,7 +3583,7 @@ _EOF_
 			G_EXEC eval "echo -e '[Unit]\nAfter=php$PHP_VERSION-fpm.service' > /etc/systemd/system/nginx.service.d/dietpi.conf"
 		fi
 
-		if To_Install 88 # MariaDB
+		if To_Install 88 mariadb # MariaDB
 		then
 			G_DIETPI-NOTIFY 2 'Preparing database directory at: /mnt/dietpi_userdata/mysql'
 			if [[ -d '/mnt/dietpi_userdata/mysql' ]]; then
@@ -3631,7 +3631,7 @@ _EOF_
 			G_AGI "${apackages[@]}"
 		fi
 
-		if To_Install 91 # Redis
+		if To_Install 91 redis-server # Redis
 		then
 			local apackages=('redis-server')
 			# Install PHP module if PHP was already installed
@@ -3656,6 +3656,7 @@ _EOF_
 			if (( ${aSOFTWARE_INSTALL_STATE[83]} > 0 || ${aSOFTWARE_INSTALL_STATE[84]} > 0 || ${aSOFTWARE_INSTALL_STATE[85]} > 0 ))
 			then
 				local apackages=("php$PHP_VERSION-fpm")
+				aENABLE_SERVICES+=("php$PHP_VERSION-fpm")
 
 			# - No webserver: CLI usage only (php binary)
 			else
@@ -3814,7 +3815,7 @@ _EOF_
 			G_EXEC chmod 700 /var/www/phpmyadmin/tmp
 		fi
 
-		if To_Install 125 # Synapse
+		if To_Install 125 synapse # Synapse
 		then
 			# APT deps for Synapse with PostgreSQL
 			case $G_HW_ARCH in
@@ -3945,7 +3946,7 @@ _EOF_
 			fi
 		fi
 
-		if To_Install 128 # MPD
+		if To_Install 128 mpd # MPD
 		then
 			G_AGI mpd
 			G_EXEC systemctl stop mpd
@@ -4041,7 +4042,7 @@ _EOF_
 			G_EXEC chown www-data "/var/www/$PHPBB_LOC/config.php"
 		fi
 
-		if To_Install 133 # YaCy
+		if To_Install 133 yacy # YaCy
 		then
 			# Get latest download
 			local file=$(curl -sSfL 'https://download.yacy.net/?C=N;O=D' | grep -wo 'yacy_v[0-9._]*\.tar\.gz' | head -1)
@@ -4067,7 +4068,7 @@ WantedBy=multi-user.target
 _EOF_
 		fi
 
-		if To_Install 186 # IPFS Node
+		if To_Install 186 ipfs # IPFS Node
 		then
 			case $G_HW_ARCH in
 				3) local arch='arm64';;
@@ -4125,7 +4126,7 @@ _EOF_
 			G_EXEC sysctl -w net.core.rmem_max=2500000
 		fi
 
-		if To_Install 2 # Folding@Home
+		if To_Install 2 fahclient # Folding@Home
 		then
 			G_DIETPI-NOTIFY 2 'Pre-configuring FAHClient DEB package'
 			debconf-set-selections <<< 'fahclient fahclient/autostart boolean false' # Do not start SysV service after package install
@@ -4698,7 +4699,7 @@ The install script will now exit. After applying one of the the above, rerun die
 			(( $RAM_PHYS < 924 && $(free -m | mawk '/^Swap:/{print $2;exit}') < 512 )) && /boot/dietpi/func/dietpi-set_swapfile 512
 		fi
 
-		if To_Install 168 # Nextcloud Talk
+		if To_Install 168 coturn # Nextcloud Talk
 		then
 			G_DIETPI-NOTIFY 2 'Installing Coturn TURN server'
 
@@ -4777,7 +4778,7 @@ The install script will now exit. After applying one of the the above, rerun die
 			unset -v secret domain port invalid_text
 		fi
 
-		if To_Install 32 # ympd
+		if To_Install 32 ympd # ympd
 		then
 			Download_Install 'https://dietpi.com/downloads/binaries/all/ympd_1.2.3.7z'
 
@@ -4821,7 +4822,7 @@ WantedBy=multi-user.target
 _EOF_
 		fi
 
-		if To_Install 148 # myMPD
+		if To_Install 148 mympd # myMPD
 		then
 			# Distro: https://download.opensuse.org/repositories/home:/jcorporation/
 			local distro='Debian_'
@@ -4869,7 +4870,7 @@ _EOF_
 			command -v mympd-config > /dev/null && G_EXEC rm "$(command -v mympd-config)"
 		fi
 
-		if To_Install 121 # Roon Bridge
+		if To_Install 121 roonbridge # Roon Bridge
 		then
 			case $G_HW_ARCH in
 				2) local url='https://download.roonlabs.net/builds/RoonBridge_linuxarmv7hf.tar.bz2';;
@@ -4965,7 +4966,7 @@ audio_output {
 _EOF_
 		fi
 
-		if To_Install 118 # Mopidy
+		if To_Install 118 mopidy # Mopidy
 		then
 			# Install our config file only, if not yet existent, to preserve manual user config.
 			# - This needs to be done prior to APT install, since this would otherwise install a default config file as well.
@@ -5095,7 +5096,7 @@ _EOF_
 			Create_Desktop_Shortcut kodi
 		fi
 
-		if To_Install 39 # ReadyMedia
+		if To_Install 39 minidlna # ReadyMedia
 		then
 			G_AGI minidlna
 			G_EXEC systemctl stop minidlna
@@ -5226,7 +5227,7 @@ _EOF_
 			Create_Desktop_Shortcut dxx-rebirth
 		fi
 
-		if To_Install 111 # UrBackup Server
+		if To_Install 111 urbackupsrv # UrBackup Server
 		then
 			# Pre-configure backup path: Read from database on reinstall and align all configs
 			if [[ -f '/var/urbackup/backup_server_settings.db' ]] && command -v sqlite3 > /dev/null
@@ -5273,7 +5274,7 @@ _EOF_
 			G_THREAD_WAIT
 		fi
 
-		if To_Install 59 # RPi Cam Web Interface
+		if To_Install 59 raspimjpeg # RPi Cam Web Interface
 		then
 			aDEPS=('gpac')
 			Download_Install 'https://github.com/silvanmelchior/RPi_Cam_Web_Interface/archive/master.tar.gz'
@@ -5337,7 +5338,7 @@ _EOF_
 			G_EXEC chown -R www-data:www-data /var/www/rpicam /mnt/dietpi_userdata/rpicam
 		fi
 
-		if To_Install 45 # Deluge
+		if To_Install 45 deluged deluge-web # Deluge
 		then
 			# Packages
 			G_AGI deluged deluge-web deluge-console
@@ -5354,7 +5355,7 @@ _EOF_
 			# Config
 			if [[ ! -f '/mnt/dietpi_userdata/deluge/.config/deluge/core.conf' ]]
 			then
-				[[ -d '/mnt/dietpi_userdata/deluge/.config/deluge' ]] || G_EXEC mkdir -p /mnt/dietpi_userdata/deluge/.config/deluge
+				G_EXEC mkdir -p /mnt/dietpi_userdata/deluge/.config/deluge
 
 				# Default configs
 				dps_index=$software_id Download_Install 'deluge.conf' /mnt/dietpi_userdata/deluge/.config/deluge/core.conf
@@ -5430,7 +5431,7 @@ WantedBy=multi-user.target
 _EOF_
 		fi
 
-		if To_Install 115 # Webmin
+		if To_Install 115 webmin # Webmin
 		then
 			# RISC-V workaround until arch has been added to repo: https://download.webmin.com/download/repository/dists/sarge/contrib/
 			if (( $G_HW_ARCH == 11 ))
@@ -5514,7 +5515,7 @@ _EOF_
 			G_EXEC chown -R www-data:www-data /var/www/ompd/{tmp,stream,cache}
 		fi
 
-		if To_Install 135 # IceCast + DarkIce
+		if To_Install 135 icecast2 darkice # IceCast + DarkIce
 		then
 			G_AGI darkice icecast2
 			G_EXEC systemctl stop darkice icecast2
@@ -5582,7 +5583,7 @@ _EOF_
 			G_EXEC rm -R linux-dash-master
 		fi
 
-		if To_Install 184 # Tor Relay
+		if To_Install 184 tor # Tor Relay
 		then
 			G_AGI tor
 			G_EXEC systemctl stop tor
@@ -5776,7 +5777,7 @@ _EOF_
 			[[ $ipv6 ]] && echo "ORPort [$ipv6]:$orport" >> /etc/tor/torrc
 		fi
 
-		if To_Install 182 # Unbound
+		if To_Install 182 unbound # Unbound
 		then
 			G_DIETPI-NOTIFY 2 'Pre-configuring Unbound to avoid port binding conflicts'
 
@@ -5814,7 +5815,7 @@ _EOF_
 
 			[[ -f '/lib/systemd/system/unbound.service' ]] && G_EXEC systemctl restart unbound
 			G_AGI unbound
-			G_EXEC systemctl disable --now unbound-resolvconf # https://github.com/MichaIng/DietPi/issues/5133
+			G_EXEC systemctl --no-reload disable --now unbound-resolvconf # https://github.com/MichaIng/DietPi/issues/5133
 			G_EXEC systemctl enable --now unbound # Failsafe
 
 			# Pi-hole part 2
@@ -5850,7 +5851,7 @@ _EOF_
 			(( ${aSOFTWARE_INSTALL_STATE[42]} > 0 )) && echo -e 'server:\n\tprivate-domain: "plex.direct"' > /etc/unbound/unbound.conf.d/dietpi-plex.conf
 		fi
 
-		if To_Install 93 # Pi-hole
+		if To_Install 93 pihole-FTL # Pi-hole
 		then
 			local url='https://raw.githubusercontent.com/pi-hole/pi-hole/master/automated%20install/basic-install.sh'
 			G_CHECK_URL "$url"
@@ -6087,11 +6088,11 @@ RestartSec=5
 [Install]
 WantedBy=multi-user.target
 _EOF_
-			# AdGuard Home service needs to be started by systemd, as dietpi-services must not control it to prevent it from killing the systems own DNS server.
+			# AdGuard Home service needs to be started manually as dietpi-services must not control it to prevent it from killing the systems own DNS server.
 			aSTART_SERVICES+=('adguardhome')
 		fi
 
-		if To_Install 33 # Airsonic-Advanced
+		if To_Install 33 airsonic # Airsonic-Advanced
 		then
 			# ARMv6: Download latest v10 as v11 does not support Java 8
 			if (( $G_HW_ARCH == 1 ))
@@ -6137,7 +6138,7 @@ _EOF_
 			Download_Test_Media
 		fi
 
-		if To_Install 204 # Navidrome
+		if To_Install 204 navidrome # Navidrome
 		then
 			case $G_HW_ARCH in
 				1) local arch='armv6';;
@@ -6300,7 +6301,7 @@ See the manual below for instructions on how to do this.
 			/boot/dietpi/func/dietpi-set_hardware i2c enable
 		fi
 
-		if To_Install 100 # PiJuice
+		if To_Install 100 pijuice # PiJuice
 		then
 			G_AGI pijuice-base
 			G_EXEC systemctl stop pijuice
@@ -6443,6 +6444,7 @@ token = $token
 _EOF_
 				G_EXEC chmod 0640 /etc/frp/frps.ini
 				G_EXEC chown root:frp /etc/frp/frps.ini
+				aENABLE_SERVICES+=('frps')
 			fi
 
 			if [[ $mode == 'Client' || $mode == 'Both' ]]
@@ -6510,6 +6512,7 @@ token=$token
 _EOF_
 				G_EXEC chmod 0660 /etc/frp/frpc.ini
 				G_EXEC chown root:frp /etc/frp/frpc.ini
+				aENABLE_SERVICES+=('frpc')
 			fi
 
 			# Cleanup
@@ -6517,7 +6520,7 @@ _EOF_
 			G_EXEC rm -R frp_*
 		fi
 
-		if To_Install 122 # Node-RED
+		if To_Install 122 node-red # Node-RED
 		then
 			# APT deps
 			G_AGI python3
@@ -6556,7 +6559,7 @@ _EOF_
 			echo 'alias node-red-admin='\''sudo -u nodered /mnt/dietpi_userdata/node-red/node_modules/.bin/node-red-admin'\' > /etc/bashrc.d/dietpi-node-red.sh
 		fi
 
-		if To_Install 123 # Mosquitto
+		if To_Install 123 mosquitto # Mosquitto
 		then
 			# Use official APT repository where available: https://repo.mosquitto.org/debian/pool/main/m/mosquitto/
 			# - Current builds are not ARMv6 compatible: https://github.com/MichaIng/DietPi/issues/5140
@@ -6620,7 +6623,7 @@ WantedBy=multi-user.target
 _EOF_
 		fi
 
-		if To_Install 131 # Blynk Server
+		if To_Install 131 blynkserver # Blynk Server
 		then
 			# RPi: Install build deps for the "onoff" Node module
 			(( $G_HW_MODEL > 9 )) || aDEPS=('python3' 'make' 'g++')
@@ -6687,7 +6690,7 @@ _EOF_
 			G_EXEC chown -R blynk:blynk /mnt/dietpi_userdata/blynk
 		fi
 
-		if To_Install 124 # NAA Daemon
+		if To_Install 124 networkaudiod # NAA Daemon
 		then
 			# Base URL
 			local url="https://www.signalyst.eu/bins/naa/linux/${G_DISTRO_NAME/bookworm/bullseye}/"
@@ -6714,7 +6717,7 @@ _EOF_
 			unset -v url arch package
 		fi
 
-		if To_Install 71 # WebIOPi
+		if To_Install 71 webiopi # WebIOPi
 		then
 			# Check for reinstall
 			local reinstall=0
@@ -6766,7 +6769,7 @@ WantedBy=multi-user.target
 _EOF_
 		fi
 
-		if To_Install 98 # HAProxy
+		if To_Install 98 haproxy # HAProxy
 		then
 			local version='2.7.5' # https://www.haproxy.org/download/
 			aDEPS=('make' 'gcc' 'libpcre3-dev' 'libssl-dev' 'zlib1g-dev' 'libsystemd-dev')
@@ -6863,7 +6866,7 @@ _EOF_
 			G_EXEC chmod 0600 /etc/haproxy/haproxy.cfg
 		fi
 
-		if To_Install 35 # Logitech Media Server
+		if To_Install 35 logitechmediaserver # Logitech Media Server
 		then
 			# https://wiki.slimdevices.com/index.php/DebianPackage#installing_7.9.2
 			# Grab architecture
@@ -7015,7 +7018,7 @@ _EOF_
 			aSTART_SERVICES+=('vncserver')
 
 			# RealVNC: Assure that its services are disabled when ours is enabled
-			(( ${aSOFTWARE_INSTALL_STATE[120]} == 1 )) && G_EXEC systemctl disable vncserver-virtuald vncserver-x11-serviced
+			(( ${aSOFTWARE_INSTALL_STATE[120]} == 1 )) && G_EXEC systemctl --no-reload disable vncserver-virtuald vncserver-x11-serviced
 
 			cat << '_EOF_' > /usr/local/bin/vncserver
 #!/bin/dash
@@ -7118,7 +7121,7 @@ $GLOBAL_PW"
 			fi
 		fi
 
-		if To_Install 73 # Fail2Ban
+		if To_Install 73 fail2ban # Fail2Ban
 		then
 			# Create jail.conf (backend = systemd) first, to prevent APT failure due to missing /var/log/auth.log: https://github.com/MichaIng/DietPi/issues/475#issuecomment-310873879
 			[[ -d '/etc/fail2ban/fail2ban.d' ]] || G_EXEC mkdir -p /etc/fail2ban/fail2ban.d
@@ -7150,11 +7153,11 @@ _EOF_
 			Remove_SysV fail2ban 1
 
 			# Failsafe
-			G_EXEC systemctl --no-reload unmask fail2ban
-			G_EXEC systemctl enable --now fail2ban
+			G_EXEC systemctl unmask fail2ban
+			G_EXEC systemctl start fail2ban
 		fi
 
-		if To_Install 74 # InfluxDB
+		if To_Install 74 influxdb # InfluxDB
 		then
 			# APT key
 			local url='https://repos.influxdata.com/influxdata-archive_compat.key'
@@ -7185,7 +7188,7 @@ _EOF_
 			G_EXEC ln -s /mnt/dietpi_userdata/influxdb /var/lib/influxdb
 		fi
 
-		if To_Install 77 # Grafana
+		if To_Install 77 grafana-server # Grafana
 		then
 			# ARMv6: Install package manually since repo is not compatible: https://grafana.com/grafana/download?platform=arm&edition=oss
 			if (( $G_HW_ARCH == 1 ))
@@ -7247,7 +7250,7 @@ _EOF_
 			[[ -f '/var/www/phpsysinfo/phpsysinfo.ini' ]] || dps_index=$software_id Download_Install 'phpsysinfo.ini' /var/www/phpsysinfo/phpsysinfo.ini
 		fi
 
-		if To_Install 80 # Ubooquity
+		if To_Install 80 ubooquity # Ubooquity
 		then
 			G_EXEC curl -sSfL 'https://vaemendis.net/ubooquity/service/download.php' -o Ubooquity.zip
 			G_EXEC unzip -o Ubooquity.zip
@@ -7294,7 +7297,7 @@ _EOF_
 			G_EXEC chmod 0775 /mnt/dietpi_userdata/{ebooks,comics}
 		fi
 
-		if To_Install 179 # Komga
+		if To_Install 179 komga # Komga
 		then
 			local fallback_url='https://github.com/gotson/komga/releases/download/v0.165.0/komga-0.165.0.jar'
 			Download_Install "$(curl -sSfL 'https://api.github.com/repos/gotson/komga/releases/latest' | mawk -F\" '/"browser_download_url": .*\/komga-[^"\/]*\.jar"/{print $4}')" /mnt/dietpi_userdata/komga/komga.jar
@@ -7465,7 +7468,7 @@ _EOF_
 			G_EXEC chown www-data "$fp_install/ampache/config/ampache.cfg.php"
 		fi
 
-		if To_Install 58 # Tailscale
+		if To_Install 58 tailscale # Tailscale
 		then
 			# APT key
 			G_EXEC curl -sSfL "https://pkgs.tailscale.com/stable/debian/$G_DISTRO_NAME.noarmor.gpg" -o /etc/apt/trusted.gpg.d/dietpi-tailscale.gpg
@@ -7639,7 +7642,7 @@ _EOF_
 			[[ -f '/boot/unattended_pivpn.conf' ]] && G_EXEC mv /boot/unattended_pivpn.conf{,.applied}
 		fi
 
-		if To_Install 201 # ZeroTier
+		if To_Install 201 zerotier-one # ZeroTier
 		then
 			# APT key: Download from GitHub instead of https://download.zerotier.com/contact%40zerotier.com.gpg for enhanced protection against corrupted download server
 			local url='https://raw.githubusercontent.com/zerotier/ZeroTierOne/master/doc/contact%40zerotier.com.gpg'
@@ -7777,7 +7780,7 @@ _EOF_
 			ip6tables-save > /etc/iptables.ipv6.nat
 		fi
 
-		if To_Install 61 # Tor Hotspot
+		if To_Install 61 tor # Tor Hotspot
 		then
 			G_AGI tor
 			G_EXEC systemctl stop tor
@@ -7835,7 +7838,7 @@ _EOF_
 			Create_Desktop_Shortcut codium
 		fi
 
-		if To_Install 37 # Shairport Sync
+		if To_Install 37 shairport-sync # Shairport Sync
 		then
 			# AirPlay 1 vs AirPlay 2 selection
 			local airplay2=$(sed -n '/^[[:blank:]]*SOFTWARE_SHAIRPORT_SYNC_AIRPLAY=/{s/^[^=]*=//p;q}' /boot/dietpi.txt)
@@ -7937,13 +7940,13 @@ _EOF_
 			G_EXEC chmod -R u+w /var/www/pydio
 		fi
 
-		if To_Install 36 # Squeezelite
+		if To_Install 36 squeezelite # Squeezelite
 		then
 			Download_Install "https://dietpi.com/downloads/binaries/$G_DISTRO_NAME/squeezelite_$G_HW_ARCH_NAME.deb"
 			G_EXEC systemctl stop squeezelite
 		fi
 
-		if To_Install 66 # RPi-Monitor
+		if To_Install 66 rpimonitor # RPi-Monitor
 		then
 			Download_Install 'https://raw.githubusercontent.com/XavierBerger/RPi-Monitor-deb/develop/packages/rpimonitor_2.13-beta6_all.deb'
 			G_EXEC systemctl stop rpimonitor
@@ -7993,7 +7996,7 @@ _EOF_
 			fi
 		fi
 
-		if To_Install 65 # Netdata
+		if To_Install 65 netdata # Netdata
 		then
 			G_AGI netdata
 			G_EXEC systemctl stop netdata
@@ -8060,7 +8063,7 @@ location = /.well-known/caldav  { return 301 /baikal/html/dav.php; }' > /etc/ngi
 			G_EXEC find /var/www/baikal/{Specific,config} \( -name '.ht*' -o -name '.git*' \) -exec chown root {} +
 		fi
 
-		if To_Install 43 # Mumble Server
+		if To_Install 43 mumble-server # Mumble Server
 		then
 			G_AGI mumble-server
 			G_EXEC systemctl stop mumble-server
@@ -8079,7 +8082,7 @@ location = /.well-known/caldav  { return 301 /baikal/html/dav.php; }' > /etc/ngi
 			murmurd -ini /etc/mumble-server.ini -supw "$GLOBAL_PW"
 		fi
 
-		if To_Install 41 # Emby Server
+		if To_Install 41 emby-server # Emby Server
 		then
 			case $G_HW_ARCH in
 				2) local arch='armhf';;
@@ -8097,7 +8100,7 @@ location = /.well-known/caldav  { return 301 /baikal/html/dav.php; }' > /etc/ngi
 			Download_Test_Media
 		fi
 
-		if To_Install 42 # Plex Media Server
+		if To_Install 42 plexmediaserver # Plex Media Server
 		then
 			# APT key
 			local url='https://downloads.plex.tv/plex-keys/PlexSign.key'
@@ -8124,7 +8127,7 @@ location = /.well-known/caldav  { return 301 /baikal/html/dav.php; }' > /etc/ngi
 			Download_Test_Media
 		fi
 
-		if To_Install 52 # Cuberite
+		if To_Install 52 cuberite # Cuberite
 		then
 			# https://github.com/cuberite/cuberite/blob/master/easyinstall.sh
 			case $G_HW_ARCH in
@@ -8170,7 +8173,7 @@ _EOF_
 			G_EXEC chmod +x /mnt/dietpi_userdata/cuberite/Cuberite
 		fi
 
-		if To_Install 53 # MineOS
+		if To_Install 53 mineos # MineOS
 		then
 			# https://minecraft.codeemo.com/mineoswiki/index.php?title=MineOS-node_(apt-get)
 			local url='https://github.com/hexparrot/mineos-node.git'
@@ -8245,7 +8248,7 @@ WantedBy=multi-user.target
 _EOF_
 		fi
 
-		if To_Install 49 # Gogs
+		if To_Install 49 gogs # Gogs
 		then
 			# ARMv6/RISC-V: No pre-compiled binaries available, so we host our own.
 			if (( $G_HW_ARCH == 1 || $G_HW_ARCH == 11 ))
@@ -8307,7 +8310,7 @@ WantedBy=multi-user.target
 _EOF_
 		fi
 
-		if To_Install 46 # qBittorrent
+		if To_Install 46 qbittorrent # qBittorrent
 		then
 			G_AGI qbittorrent-nox
 
@@ -8411,7 +8414,7 @@ _EOF_
 			G_EXEC chown -R qbittorrent:root /home/qbittorrent
 		fi
 
-		if To_Install 107 # rTorrent
+		if To_Install 107 rtorrent # rTorrent
 		then
 			aDEPS=('rtorrent' 'mediainfo')
 
@@ -8658,7 +8661,7 @@ _EOF_
 			G_EXEC chown root:root /var/www/rutorrent/share/.htaccess
 		fi
 
-		if To_Install 132 # Aria2
+		if To_Install 132 aria2 # Aria2
 		then
 			G_AGI aria2
 
@@ -8757,7 +8760,7 @@ WantedBy=multi-user.target
 _EOF_
 		fi
 
-		if To_Install 116 # Medusa
+		if To_Install 116 medusa # Medusa
 		then
 			aDEPS=('mediainfo' 'python3')
 
@@ -8792,7 +8795,7 @@ _EOF_
 			G_EXEC chown -R medusa:dietpi /mnt/dietpi_userdata/medusa
 		fi
 
-		if To_Install 50 # Syncthing
+		if To_Install 50 syncthing syncthing-inotify # Syncthing
 		then
 			# Reinstall: Skip download and install, advice to use internal updater from web UI
 			if [[ -d '/opt/syncthing' ]]
@@ -8930,7 +8933,7 @@ _EOF_
 			G_EXEC chmod +x /var/lib/dietpi/dietpi-software/installed/chromium-autostart.sh
 		fi
 
-		if To_Install 136 # motionEye
+		if To_Install 136 motioneye # motionEye
 		then
 			# x86_64/ARMv8 dependencies: libcurl4-openssl-dev gcc libssl-dev for pycurl build
 			[[ $G_HW_MODEL == [12] ]] || G_AGI libcurl4-openssl-dev gcc libssl-dev
@@ -8941,16 +8944,16 @@ _EOF_
 			# motionEye
 			G_EXEC_OUTPUT=1 G_EXEC pip3 install -U 'https://github.com/motioneye-project/motioneye/archive/dev.tar.gz'
 			G_EXEC_OUTPUT=1 G_EXEC motioneye_init --skip-apt-update
-			G_EXEC systemctl disable --now motioneye
-			G_EXEC systemctl disable --now motion # motionEye starts motion directly.
+			G_EXEC systemctl stop motioneye
+			G_EXEC systemctl --no-reload disable --now motion # motionEye starts motion directly.
 
 			# Data directory
-			[[ -d '/mnt/dietpi_userdata/motioneye' ]] || G_EXEC mkdir /mnt/dietpi_userdata/motioneye
+			G_EXEC mkdir -p /mnt/dietpi_userdata/motioneye
 			G_EXEC chown -R motion /mnt/dietpi_userdata/motioneye
 			G_CONFIG_INJECT 'media_path' 'media_path /mnt/dietpi_userdata/motioneye' /etc/motioneye/motioneye.conf
 		fi
 
-		if To_Install 137 # mjpg-streamer
+		if To_Install 137 mjpg-streamer # mjpg-streamer
 		then
 			# Build dependencies
 			aDEPS=('make' 'cmake' 'gcc' 'libc6-dev' 'libjpeg62-turbo-dev')
@@ -9018,7 +9021,7 @@ _EOF_
 			fi
 		fi
 
-		if To_Install 138 # VirtualHere
+		if To_Install 138 virtualhere # VirtualHere
 		then
 			case $G_HW_ARCH in
 				3) local arch='arm64';;
@@ -9059,7 +9062,7 @@ _EOF_
 			[[ -f '/var/log/virtualhere.log' ]] && G_EXEC rm /var/log/virtualhere.log
 		fi
 
-		if To_Install 139 # SABnzbd
+		if To_Install 139 sabnzbd # SABnzbd
 		then
 			# https://sabnzbd.org/wiki/installation/install-off-modules
 			# APT deps
@@ -9143,7 +9146,7 @@ _EOF_
 			G_EXEC cd "$G_WORKING_DIR"
 		fi
 
-		if To_Install 177 # Firefox Sync Server
+		if To_Install 177 firefox-sync # Firefox Sync Server
 		then
 			# Dependencies: https://github.com/mozilla-services/syncserver#quickstart
 			aDEPS=('make' 'python-virtualenv' 'python-dev' 'g++' 'libmariadb-dev')
@@ -9212,7 +9215,7 @@ _EOF_
 			G_EXEC chown -R ffsync:ffsync /mnt/dietpi_userdata/firefox-sync
 		fi
 
-		if To_Install 183 # vaultwarden
+		if To_Install 183 vaultwarden # vaultwarden
 		then
 			[[ -f '/opt/vaultwarden/target/release/vaultwarden' ]] && G_EXEC rm -R /opt/vaultwarden # Pre-v8.7
 			[[ -f '/etc/systemd/system/vaultwarden.service' ]] && G_EXEC rm /etc/systemd/system/vaultwarden.service # Pre-v8.7
@@ -9220,13 +9223,13 @@ _EOF_
 			G_EXEC systemctl stop vaultwarden
 		fi
 
-		if To_Install 193 # K3s
+		if To_Install 193 k3s # K3s
 		then
 			# APT deps
 			local disable_apparmor=1
 			systemctl -q is-active apparmor && disable_apparmor=0
 			G_AGI apparmor iptables
-			(( $disable_apparmor )) && G_EXEC systemctl disable --now apparmor
+			(( $disable_apparmor )) && G_EXEC systemctl --no-reload disable --now apparmor
 			Configure_iptables
 
 			# Fetch config file if it exists
@@ -9267,7 +9270,7 @@ _EOF_
 			Enable_memory_cgroup
 		fi
 
-		if To_Install 141 # Spotify Connect Web
+		if To_Install 141 spotify-connect-web # Spotify Connect Web
 		then
 			# Download and merge into existing directory
 			Download_Install 'https://github.com/Fornoth/spotify-connect-web/releases/download/0.0.4-alpha/spotify-connect-web_0.0.4-alpha.tar.gz' /mnt/dietpi_userdata
@@ -9288,7 +9291,7 @@ WantedBy=multi-user.target
 _EOF_
 		fi
 
-		if To_Install 143 # Koel
+		if To_Install 143 koel # Koel
 		then
 			# APT dependencies: https://docs.koel.dev/#server > https://laravel.com/docs/9.x/deployment#server-requirements / https://laravel.com/docs/8.x/deployment#server-requirements
 			# - Skip JSON module from PHP 8.0 on, where it is embedded into core
@@ -9378,7 +9381,7 @@ WantedBy=multi-user.target
 _EOF_
 		fi
 
-		if To_Install 144 # Sonarr
+		if To_Install 144 sonarr # Sonarr
 		then
 			# https://sonarr.tv/#downloads-v3-linux-debian
 			# APT repo key
@@ -9449,7 +9452,7 @@ _EOF_
 			G_EXEC chown -R sonarr:dietpi /mnt/dietpi_userdata/sonarr /usr/lib/sonarr
 		fi
 
-		if To_Install 145 # Radarr
+		if To_Install 145 radarr # Radarr
 		then
 			# APT dependencies
 			aDEPS=('mediainfo')
@@ -9553,7 +9556,7 @@ _EOF_
 			G_EXEC chown -R radarr:dietpi /mnt/dietpi_userdata/radarr /opt/radarr
 		fi
 
-		if To_Install 106 # Lidarr
+		if To_Install 106 lidarr # Lidarr
 		then
 			# APT dependencies
 			aDEPS=('mediainfo')
@@ -9656,7 +9659,7 @@ _EOF_
 			G_EXEC chown -R lidarr:dietpi /mnt/dietpi_userdata/lidarr /opt/lidarr
 		fi
 
-		if To_Install 180 # Bazarr
+		if To_Install 180 bazarr # Bazarr
 		then
 			# https://wiki.bazarr.media/Getting-Started/Installation/Linux/linux/
 			Download_Install 'https://github.com/morpheus65535/bazarr/releases/latest/download/bazarr.zip' bazarr
@@ -9740,7 +9743,7 @@ _EOF_
 			fi
 		fi
 
-		if To_Install 146 # Tautulli
+		if To_Install 146 tautulli # Tautulli
 		then
 			# Reinstall: Skip download and install, advice to use internal updater from web UI
 			if [[ -d '/opt/tautulli' ]]
@@ -9784,7 +9787,7 @@ _EOF_
 			G_EXEC chown -R tautulli:tautulli /{opt,mnt/dietpi_userdata}/tautulli
 		fi
 
-		if To_Install 147 # Jackett
+		if To_Install 147 jackett # Jackett
 		then
 			# ARMv6 requires Mono: https://github.com/Jackett/Jackett#installation-on-linux-armv6-or-below
 			# .NET dependency: https://github.com/dotnet/core/blob/main/Documentation/linux-prereqs.md
@@ -9860,7 +9863,7 @@ _EOF_
 			(( $G_HW_ARCH == 1 )) && G_CONFIG_INJECT 'ExecStart=' "ExecStart=$(command -v mono) /opt/jackett/JackettConsole.exe --NoRestart" /etc/systemd/system/jackett.service
 		fi
 
-		if To_Install 149 # NZBGet
+		if To_Install 149 nzbget # NZBGet
 		then
 			G_EXEC curl -sSfL 'https://nzbget.net/download/nzbget-latest-bin-linux.run' -o package.run
 			G_EXEC mkdir -p /mnt/dietpi_userdata/nzbget
@@ -9915,7 +9918,7 @@ WantedBy=multi-user.target
 _EOF_
 		fi
 
-		if To_Install 151 # Prowlarr
+		if To_Install 151 prowlarr # Prowlarr
 		then
 			# .NET dependency: https://github.com/dotnet/core/blob/main/Documentation/linux-prereqs.md
 			case $G_DISTRO in
@@ -9990,7 +9993,7 @@ _EOF_
 			G_EXEC chown -R prowlarr:dietpi /mnt/dietpi_userdata/prowlarr /opt/prowlarr
 		fi
 
-		if To_Install 203 # Readarr
+		if To_Install 203 readarr # Readarr
 		then
 			# .NET dependency: https://github.com/dotnet/core/blob/main/Documentation/linux-prereqs.md
 			case $G_DISTRO in
@@ -10065,7 +10068,7 @@ _EOF_
 			G_EXEC chown -R readarr:dietpi /mnt/dietpi_userdata/readarr /opt/readarr
 		fi
 
-		if To_Install 155 # HTPC Manager
+		if To_Install 155 htpc-manager # HTPC Manager
 		then
 			local url='https://github.com/HTPC-Manager/HTPC-Manager.git'
 			G_CHECK_URL "$url"
@@ -10126,7 +10129,7 @@ WantedBy=multi-user.target
 _EOF_
 		fi
 
-		if To_Install 153 # OctoPrint
+		if To_Install 153 octoprint # OctoPrint
 		then
 			# ARMv8 and x86_64 Bookworm: gcc for netifaces, psutil (ARMv8-only)
 			(( $G_HW_ARCH == 3 )) || (( $G_HW_ARCH == 10 && $G_DISTRO > 6 )) && G_AGI gcc
@@ -10183,7 +10186,7 @@ _EOF_
 			fi
 		fi
 
-		if To_Install 187 # CUPS
+		if To_Install 187 cups # CUPS
 		then
 			# Download base configuration if it does not exist yet
 			[[ -f '/etc/cups/cupsd.conf' ]] || dps_index=$software_id Download_Install 'cupsd.conf' /etc/cups/cupsd.conf
@@ -10194,7 +10197,7 @@ _EOF_
 			G_EXEC chown root:lp /etc/cups/ /etc/cups/ppd/ /etc/cups/ssl/
 		fi
 
-		if To_Install 154 # Roon Server
+		if To_Install 154 roonserver # Roon Server
 		then
 			# https://help.roonlabs.com/portal/en/kb/articles/linux-install#Manual_Install
 			# .NET dependency: https://github.com/dotnet/core/blob/main/Documentation/linux-prereqs.md
@@ -10296,7 +10299,7 @@ _EOF_
 			Create_Desktop_Shortcut steam
 		fi
 
-		if To_Install 158 # MinIO
+		if To_Install 158 minio # MinIO
 		then
 			case $G_HW_ARCH in
 				3) local arch='arm64';;
@@ -10330,7 +10333,7 @@ MINIO_VOLUMES="/mnt/dietpi_userdata/minio-data"
 _EOF_
 		fi
 
-		if To_Install 162 # Docker
+		if To_Install 162 docker # Docker
 		then
 			# Detect distro
 			local distro='debian'
@@ -10390,7 +10393,7 @@ _EOF_
 			G_AGI docker-compose-plugin
 		fi
 
-		if To_Install 161 # FuguHub
+		if To_Install 161 bdd # FuguHub
 		then
 			local arch='RaspberryPi'
 			(( $G_HW_ARCH == 10 )) && arch='linux-x64'
@@ -10463,7 +10466,7 @@ WantedBy=multi-user.target
 _EOF_
 		fi
 
-		if To_Install 164 # Nukkit
+		if To_Install 164 nukkit # Nukkit
 		then
 			Download_Install 'https://repo.opencollab.dev/artifactory/maven-snapshots/cn/nukkit/nukkit/1.0-SNAPSHOT/nukkit-1.0-SNAPSHOT.jar' /usr/local/bin/nukkit/nukkit.jar
 
@@ -10487,7 +10490,7 @@ WantedBy=multi-user.target
 _EOF_
 		fi
 
-		if To_Install 165 # Gitea
+		if To_Install 165 gitea # Gitea
 		then
 			# ARMv7: As of v1.8 there were issues with ARMv7 binaries on Raspbian which are hence not provided anymore: https://github.com/go-gitea/gitea/issues/6700
 			case $G_HW_ARCH in
@@ -10535,7 +10538,7 @@ _EOF_
 			[[ -f '/mnt/dietpi_userdata/gitea/custom/conf/app.ini' ]] && G_CONFIG_INJECT 'RUN_USER[[:blank:]]' 'RUN_USER = gitea' /mnt/dietpi_userdata/gitea/custom/conf/app.ini
 		fi
 
-		if To_Install 163 # GMediaRender
+		if To_Install 163 gmediarender # GMediaRender
 		then
 			# Pre-v8.10
 			[[ -f '/etc/systemd/system/gmediarender.service' ]] && G_EXEC rm /etc/systemd/system/gmediarender.service
@@ -10601,7 +10604,7 @@ exit;
 _EOF_
 		fi
 
-		if To_Install 166 # Audiophonics PI-SPC
+		if To_Install 166 pi-spc # Audiophonics PI-SPC
 		then
 			# https://github.com/audiophonics/Raspberry-pwr-management
 			[[ -d '/var/lib/dietpi/dietpi-software/installed/pi-spc' ]] || G_EXEC mkdir -p /var/lib/dietpi/dietpi-software/installed/pi-spc
@@ -10654,7 +10657,7 @@ _EOF_
 			#G_CONFIG_INJECT 'dtoverlay=gpio-poweroff' 'dtoverlay=gpio-poweroff,gpiopin=22,active_low' /boot/config.txt
 		fi
 
-		if To_Install 167 # Raspotify
+		if To_Install 167 raspotify # Raspotify
 		then
 			# https://dtcooper.github.io/raspotify/#hard-installation
 			# ARMv6: 0.31.8.1 is the last version supporting ARMv6: https://github.com/dtcooper/raspotify/wiki/Raspotify-on-Pi-v1's-and-Pi-Zero-v1.x, https://github.com/dtcooper/raspotify/commit/345f15c
@@ -10681,7 +10684,7 @@ _EOF_
 			G_EXEC systemctl stop raspotify
 		fi
 
-		if To_Install 169 # Google AIY
+		if To_Install 169 alsa-init voice-recognizer # Google AIY
 		then
 			G_EXEC_OUTPUT=1 G_EXEC git clone -b voicekit 'https://github.com/google/aiyprojects-raspbian.git' /mnt/dietpi_userdata/voice-recognizer-raspi
 			G_EXEC cd /mnt/dietpi_userdata/voice-recognizer-raspi
@@ -10697,9 +10700,8 @@ _EOF_
 			G_EXEC sed -i 's|/home/pi|/mnt/dietpi_userdata|g' systemd/voice-recognizer.service
 			G_CONFIG_INJECT 'User=' 'User=dietpi' systemd/voice-recognizer.service '\[Service\]'
 
-			G_EXEC cp systemd/voice-recognizer.service /etc/systemd/system/
 			G_EXEC cp systemd/alsa-init.service /etc/systemd/system/
-			#G_EXEC cp systemd/ntpdate.service /etc/systemd/system/
+			G_EXEC cp systemd/voice-recognizer.service /etc/systemd/system/
 
 			# shellcheck disable=SC1091
 			source env/bin/activate
@@ -10722,7 +10724,7 @@ _EOF_
 			getent passwd dietpi > /dev/null && G_EXEC chown -R dietpi:dietpi /mnt/dietpi_userdata/voice-recognizer-raspi
 		fi
 
-		if To_Install 176 # Mycroft AI
+		if To_Install 176 mycroft # Mycroft AI
 		then
 			# Git clone to DietPi userdata
 			G_EXEC cd /mnt/dietpi_userdata
@@ -10795,7 +10797,7 @@ _EOF_
 			/boot/dietpi/func/dietpi-set_hardware soundcard "$soundcard-plug"
 		fi
 
-		if To_Install 86 # Roon Extension Manager
+		if To_Install 86 roon-extension-manager # Roon Extension Manager
 		then
 			# Data dir
 			[[ -d '/mnt/dietpi_userdata/roon-extension-manager' ]] || G_EXEC mkdir /mnt/dietpi_userdata/roon-extension-manager
@@ -10826,7 +10828,7 @@ _EOF_
 			G_EXEC usermod -s "$(command -v nologin)" roon-extension-manager
 		fi
 
-		if To_Install 178 # Jellyfin
+		if To_Install 178 jellyfin # Jellyfin
 		then
 			# Raspberry Pi Bullseye: Enable hardware codecs
 			(( $G_HW_MODEL > 9 )) || (( $G_DISTRO < 6 )) || /boot/dietpi/func/dietpi-set_hardware rpi-codec 1
@@ -11045,7 +11047,7 @@ _EOF_
 			fi
 		fi
 
-		if To_Install 157 # Home Assistant
+		if To_Install 157 home-assistant # Home Assistant
 		then
 			local ha_user='homeassistant'
 			local ha_home="/home/$ha_user"
@@ -11166,7 +11168,7 @@ _EOF_
 			G_DIETPI-NOTIFY 2 "Home Assistant Community Store (HACS) has been installed in addition. To activate it, follow this guide: https://hacs.xyz/docs/configuration/basic/"
 		fi
 
-		if To_Install 181 # PaperMC
+		if To_Install 181 papermc # PaperMC
 		then
 			# Make sure user agrees to the EULA
 			if [[ -f '/mnt/dietpi_userdata/papermc/eula.txt' ]] || G_WHIP_BUTTON_OK_TEXT='Yes' G_WHIP_BUTTON_CANCEL_TEXT='Abort' G_WHIP_YESNO 'Do you agree to the Minecraft EULA found at:\n\nhttps://account.mojang.com/documents/minecraft_eula'
@@ -11255,7 +11257,7 @@ _EOF_
 			fi
 		fi
 
-		if To_Install 140 # Domoticz
+		if To_Install 140 domoticz # Domoticz
 		then
 			# APT deps
 			aDEPS=('libusb-0.1' 'libcurl3-gnutls')
@@ -11308,7 +11310,7 @@ WantedBy=multi-user.target
 _EOF_
 		fi
 
-		if To_Install 191 # Snapcast Server
+		if To_Install 191 snapserver # Snapcast Server
 		then
 			local arch='armhf'
 			(( $G_HW_ARCH == 10 )) && arch='amd64'
@@ -11321,7 +11323,7 @@ _EOF_
 			G_EXEC sed -i '/^\[tcp\]/,/^\[/s/^#enabled = true$/enabled = false/' /etc/snapserver.conf
 		fi
 
-		if To_Install 192 # Snapcast Client
+		if To_Install 192 snapclient # Snapcast Client
 		then
 			local arch='armhf'
 			(( $G_HW_ARCH == 10 )) && arch='amd64'
@@ -11401,7 +11403,7 @@ _EOF_
 			[[ -f '/var/www/homer/assets/config.yml' ]] || G_EXEC cp /var/www/homer/assets/config.yml{.dist,}
 		fi
 
-		if To_Install 198 # File Browser
+		if To_Install 198 filebrowser # File Browser
 		then
 			case $G_HW_ARCH in
 				1) local arch='armv6';;
@@ -11453,7 +11455,7 @@ WantedBy=multi-user.target
 _EOF_
 		fi
 
-		if To_Install 199 # Spotifyd
+		if To_Install 199 spotifyd # Spotifyd
 		then
 			case $G_HW_ARCH in
 				1) local file='spotifyd-linux-armv6-slim';;
@@ -12412,7 +12414,7 @@ If no WireGuard (auto)start is included, but you require it, please do the follo
 		then
 			if [[ -f '/etc/systemd/system/raspberrypi_exporter.timer' ]]
 			then
-				G_EXEC systemctl disable --now raspberrypi_exporter.timer
+				G_EXEC systemctl --no-reload disable --now raspberrypi_exporter.timer
 				G_EXEC rm /etc/systemd/system/raspberrypi_exporter.timer
 			fi
 			[[ -d '/etc/systemd/system/raspberrypi_exporter.timer.d' ]] && G_EXEC rm -R /etc/systemd/system/raspberrypi_exporter.timer.d
@@ -13636,7 +13638,7 @@ _EOF_
 			cat << '_EOF_' > /var/lib/dietpi/dietpi-ramlog/disable.sh
 #!/bin/dash
 {
-	systemctl disable dietpi-ramlog
+	systemctl --no-reload disable dietpi-ramlog
 	systemctl stop dietpi-ramlog
 	rm -R /var/tmp/dietpi/logs/dietpi-ramlog_store
 	if systemctl -q is-enabled rsyslog 2> /dev/null
@@ -13645,7 +13647,7 @@ _EOF_
 	else
 		sed -i '/^[[:blank:]]*INDEX_LOGGING=/c\INDEX_LOGGING=0' /boot/dietpi/.installed
 	fi
-	systemctl disable dietpi-ramlog_disable
+	systemctl --no-reload disable dietpi-ramlog_disable
 	rm /etc/systemd/system/dietpi-ramlog_disable.service
 	rm /var/lib/dietpi/dietpi-ramlog/disable.sh
 }
@@ -13667,7 +13669,7 @@ ExecStart=/bin/dash -c '/var/lib/dietpi/dietpi-ramlog/disable.sh > /var/tmp/diet
 WantedBy=local-fs.target
 _EOF_
 			G_EXEC systemctl daemon-reload
-			G_EXEC systemctl enable dietpi-ramlog_disable
+			G_EXEC systemctl --no-reload enable dietpi-ramlog_disable
 		fi
 
 		if To_Uninstall 9 # Node.js
@@ -13819,9 +13821,6 @@ _EOF_
 		# Read global software password
 		Update_Global_Pw
 
-		# Unmask all services: https://github.com/MichaIng/DietPi/issues/1320
-		/boot/dietpi/dietpi-services unmask
-
 		# Stop all services
 		# shellcheck disable=SC2154
 		[[ $G_SERVICE_CONTROL == 0 ]] || /boot/dietpi/dietpi-services stop
@@ -13860,9 +13859,6 @@ _EOF_
 
 		# Sync DietPi-RAMlog to disk: https://github.com/MichaIng/DietPi/issues/4884
 		systemctl -q is-enabled dietpi-ramlog 2> /dev/null && /boot/dietpi/func/dietpi-ramlog 1
-
-		# Disable services so that dietpi-postboot.service > DietPi-Services starts them in defined order at latest boot stage.
-		/boot/dietpi/dietpi-services dietpi_controlled
 
 		# Apply GPU Memory Splits
 		Install_Apply_GPU_Settings
@@ -14067,7 +14063,7 @@ _EOF_
 				fi
 				if systemctl -q is-enabled serial-getty@serial0
 				then
-					G_EXEC systemctl disable serial-getty@serial0
+					G_EXEC systemctl --no-reload disable serial-getty@serial0
 					G_EXEC systemctl --no-reload unmask "serial-getty@$tty"
 					G_EXEC systemctl --no-reload enable "serial-getty@$tty"
 				fi
@@ -14256,7 +14252,7 @@ _EOF_
 		/boot/dietpi/dietpi-autostart "$AUTOINSTALL_AUTOSTARTTARGET"
 
 		# Disable console on TTY1 for purely headless SBCs, enabled for automated first run setup
-		[[ $G_HW_MODEL =~ ^(47|48|55|56|57|59|60|64|65|73)$ ]] && G_EXEC systemctl disable getty@tty1
+		[[ $G_HW_MODEL =~ ^(47|48|55|56|57|59|60|64|65|73)$ ]] && G_EXEC systemctl --no-reload disable getty@tty1
 
 		# Set install stage to finished
 		G_DIETPI_INSTALL_STAGE=2
@@ -15117,6 +15113,16 @@ List of installed software and their online documentation URLs:
 
 	G_DIETPI-NOTIFY 3 "$G_PROGRAM_NAME" 'Install completed'
 
+	# Enable installed services
+	if [[ ${aENABLE_SERVICES[0]} ]]
+	then
+		G_DIETPI-NOTIFY 2 'Enabling installed services'
+		for i in "${aENABLE_SERVICES[@]}" "${aSTART_SERVICES[@]}"
+		do
+			G_EXEC_NOHALT=1 G_EXEC systemctl --no-reload enable "$i"
+		fi
+	fi
+
 	# Upload DietPi-Survey data if opted in, prompt user choice if no settings file exists
 	# - Skip if G_SERVICE_CONTROL == 0, exported by "patches" (DietPi-Update) which sends survey already
 	# Start services, restart to reload configs of possibly running services
@@ -15130,10 +15136,9 @@ List of installed software and their online documentation URLs:
 	# Start installed services, not controlled by DietPi-Services
 	[[ ${aSTART_SERVICES[0]} ]] || exit 0
 
-	G_DIETPI-NOTIFY 2 'Starting installed services, not controlled by DietPi-Services'
+	G_DIETPI-NOTIFY 2 'Starting installed services not controlled by DietPi-Services'
 	for i in "${aSTART_SERVICES[@]}"
 	do
-		G_EXEC systemctl enable "$i"
 		G_EXEC_NOHALT=1 G_EXEC systemctl start "$i"
 	done
 	#-------------------------------------------------------------------------------------
