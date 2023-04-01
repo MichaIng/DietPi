@@ -43,15 +43,12 @@ do
 	esac
 	shift
 done
-distro=
 case $DISTRO in
         5) distro='buster';;
 	6) distro='bullseye';;
 	7) distro='bookworm';;
 	*) G_DIETPI-NOTIFY 1 "Invalid distro \"$DISTRO\" passed, aborting..."; exit 1;;
 esac
-image=
-arch=
 case $ARCH in
 	1) image="DietPi_Container-ARMv6-${distro^}" arch='armv6l';;
 	2) image="DietPi_Container-ARMv7-${distro^}" arch='armv7l';;
@@ -100,6 +97,9 @@ G_CONFIG_INJECT 'AUTO_SETUP_INSTALL_SOFTWARE_ID=' 'AUTO_SETUP_INSTALL_SOFTWARE_I
 
 # Skip filesystem expansion
 G_EXEC rm rootfs/etc/systemd/system/local-fs.target.wants/dietpi-fs_partition_resize.service
+
+# Avoid DietPi-Survey uploads to not mess with the statistics
+G_EXEC rm rootfs/root/.ssh/known_hosts
 
 # Workaround invalid TERM on login
 # shellcheck disable=SC2016

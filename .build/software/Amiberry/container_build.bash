@@ -93,6 +93,9 @@ G_CONFIG_INJECT 'AUTO_SETUP_AUTOMATED=' 'AUTO_SETUP_AUTOMATED=1' rootfs/boot/die
 # Skip filesystem expansion
 G_EXEC rm rootfs/etc/systemd/system/local-fs.target.wants/dietpi-fs_partition_resize.service
 
+# Avoid DietPi-Survey uploads to not mess with the statistics
+G_EXEC rm rootfs/root/.ssh/known_hosts
+
 # Workaround invalid TERM on login
 # shellcheck disable=SC2016
 G_EXEC eval 'echo '\''infocmp "$TERM" > /dev/null 2>&1 || export TERM=dumb'\'' > rootfs/etc/bashrc.d/00-dietpi-build.sh'
@@ -114,7 +117,7 @@ _EOF_
 cat << _EOF_ >> rootfs/boot/Automation_Custom_Script.sh || exit 1
 echo '[ INFO ] Running Amiberry build script...'
 bash -c "\$(curl -sSf 'https://raw.githubusercontent.com/$G_GITOWNER/DietPi/$G_GITBRANCH/.build/software/Amiberry/build.bash')" -- '$PLATFORM'
-mv -v '/tmp/amiberry_$PLATFORM.deb' '/amiberry_$PLATFORM.deb'
+mv -v '/tmp/amiberry_$PLATFORM.deb' /
 poweroff
 _EOF_
 

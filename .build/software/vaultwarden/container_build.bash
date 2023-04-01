@@ -97,6 +97,9 @@ G_CONFIG_INJECT 'AUTO_SETUP_AUTOMATED=' 'AUTO_SETUP_AUTOMATED=1' rootfs/boot/die
 # Skip filesystem expansion
 G_EXEC rm rootfs/etc/systemd/system/local-fs.target.wants/dietpi-fs_partition_resize.service
 
+# Avoid DietPi-Survey uploads to not mess with the statistics
+G_EXEC rm rootfs/root/.ssh/known_hosts
+
 # Workaround invalid TERM on login
 # shellcheck disable=SC2016
 G_EXEC eval 'echo '\''infocmp "$TERM" > /dev/null 2>&1 || export TERM=dumb'\'' > rootfs/etc/bashrc.d/00-dietpi-build.sh'
