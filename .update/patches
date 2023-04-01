@@ -1113,12 +1113,6 @@ Patch_8_15()
 
 		# Revert with new kernel: https://github.com/MichaIng/DietPi/issues/5890
 		grep -q ' systemd.unified_cgroup_hierarchy=0' /boot/extlinux/extlinux.conf && G_EXEC sed -i '/^append /s/ systemd.unified_cgroup_hierarchy=0//' /boot/extlinux/extlinux.conf
-
-	elif (( $G_HW_MODEL == 81 )) && dpkg-query -s 'linux-image-visionfive2' &> /dev/null
-	then
-		G_EXEC_OUTPUT=1 G_EXEC curl -fO 'https://dietpi.com/downloads/binaries/linux-image-visionfive2.deb'
-		G_EXEC_OUTPUT=1 G_EXEC dpkg -i linux-image-visionfive2.deb
-		G_EXEC_HOHALT=1 G_EXEC rm linux-image-visionfive2.deb
 	fi
 
 	(( $G_DISTRO > 6 )) || for i in '/etc/systemd/system/serial-getty@'*'.service.d/dietpi-baudrate.conf'
@@ -1142,6 +1136,181 @@ _EOF_
 
 		# Remove obsolete CAVA console font
 		grep -q '^[[:blank:]]*aSOFTWARE_INSTALL_STATE\[119\]=' /boot/dietpi/.installed && G_EXEC rm -f /{root,home/*}/cava.psf
+	fi
+}
+
+Patch_8_16()
+{
+	# NanoPi R5S/R6S kernel upgrade
+	case $G_HW_MODEL in
+		76) local series=5;;
+		79) local series=6;;
+		*) local series='';;
+	esac
+
+	if [[ $series ]] && dpkg-query -s "firmware-nanopi$series" &> /dev/null
+	then
+		G_DIETPI-NOTIFY 2 "Updating NanoPi R$series series kernel ..."
+		G_EXEC curl -sSfO "https://dietpi.com/downloads/nanopir${series}s.7z"
+		G_EXEC 7zr x "nanopir${series}s.7z"
+		G_EXEC rm "nanopir${series}s.7z"
+		local loopdev=$(losetup -f) rootdev=$(lsblk -npo PKNAME "$G_ROOTFS_DEV")
+		G_EXEC losetup "$loopdev" "nanopir${series}s.img"
+		G_EXEC partprobe "$loopdev"
+		G_EXEC partx -u "$loopdev"
+		if [[ ! -b ${loopdev}p8 ]]
+		then
+			G_DIETPI-NOTIFY 1 "Image invalid: ${loopdev}p8 does not exist, aborting kernel upgrade ..."
+
+		elif [[ ${rootdev}p8 != "$G_ROOTFS_DEV" ]]
+		then
+			G_DIETPI-NOTIFY 1 "Unsupported system: ${rootdev}p8 != $G_ROOTFS_DEV, aborting kernel upgrade ..."
+		else
+			G_EXEC curl -sSfO "https://dietpi.com/downloads/binaries/firmware-nanopi$series.deb"
+			G_EXEC dpkg -i "firmware-nanopi$series.deb"
+			for i in {1..7}
+			do
+				G_EXEC dd if="${loopdev}p$i" of="${rootdev}p$i" bs=1M
+			done
+			G_EXEC sync
+			G_EXEC rm "firmware-nanopi$series.deb"
+		fi
+		G_EXEC losetup -d "$loopdev"
+		G_EXEC rm "nanopir${series}s.img"
+
+	elif [[ $G_HW_MODEL =~ ^78|80$ && -f '/boot/dietpiEnv.txt' ]]
+	then
+		if systemctl -q is-enabled 'serial-getty@ttyS2'
+		then
+			G_DIETPI-NOTIFY 2 'Fixing UART console on ttyFIQ0 instead of ttyS2'
+			G_EXEC sed -i '/^consoleargs=console=ttyS2,1500000 console=tty1$/c\consoleargs=console=ttyFIQ0,1500000 console=tty1' /boot/dietpiEnv.txt
+			/boot/dietpi/func/dietpi-set_hardware serialconsole disable ttyS2
+			/boot/dietpi/func/dietpi-set_hardware serialconsole enable ttyFIQ0
+		fi
+		if ! dpkg-query -s 'rng-tools5' &> /dev/null
+		then
+			G_DIETPI-NOTIFY 2 'Installing hardware random generator daemon in favour of haveged'
+			G_AGI rng-tools5
+			G_AGP haveged
+		fi
+
+	elif (( $G_HW_MODEL == 81 )) && dpkg-query -s 'linux-image-visionfive2' &> /dev/null
+	then
+		G_DIETPI-NOTIFY 2 'Updating RISC-V StarFive VisionFive 2 kernel ...'
+		G_EXEC_OUTPUT=1 G_EXEC curl -fO 'https://dietpi.com/downloads/binaries/linux-image-visionfive2.deb'
+		G_EXEC_OUTPUT=1 G_EXEC dpkg -i linux-image-visionfive2.deb
+		G_EXEC_HOHALT=1 G_EXEC rm linux-image-visionfive2.deb
+		G_EXEC systemctl unmask serial-getty@hvc0
+	fi
+
+	# Migrate DietPi controlled services to be started by systemd
+	if [[ -f '/boot/dietpi/.installed' ]]
+	then
+		G_WHIP_MSG '[ INFO ] DietPi-Services rework
+\nWe reworked the way how services installed via dietpi-software are started at boot. This is now done by systemd itself instead of dietpi-services to enable parallelism and address some longstanding issues and confusion caused by this DietPi-specific behaviour. The previous "dietpi_controlled" vs "systemd_controlled" differenciation is hence history.
+\nTo stop services from being autostarted at boot, you can now run "systemctl disable servicename", to enable its autostart: "systemctl enable servicename".
+\nTo preserve some of the service ordering benefits from the previous behaviour, some systemd units will now be configured to make use of native systemd unit ordering.'
+		# PHP version
+		case $G_DISTRO in
+			5) local PHP_VERSION='7.3';;
+			6) local PHP_VERSION='7.4';;
+			*) local PHP_VERSION='8.2';;
+		esac
+		if grep -q '^[[:blank:]]*aSOFTWARE_INSTALL_STATE\[83\]=2' /boot/dietpi/.installed
+		then
+			G_EXEC mkdir -p /etc/systemd/system/apache2.service.d
+			G_EXEC eval "echo -e '[Unit]\nAfter=php$PHP_VERSION-fpm.service' > /etc/systemd/system/apache2.service.d/dietpi.conf"
+		fi
+		if grep -q '^[[:blank:]]*aSOFTWARE_INSTALL_STATE\[85\]=2' /boot/dietpi/.installed
+		then
+			G_EXEC mkdir -p /etc/systemd/system/nginx.service.d
+			G_EXEC eval "echo -e '[Unit]\nAfter=php$PHP_VERSION-fpm.service' > /etc/systemd/system/nginx.service.d/dietpi.conf"
+		fi
+		if grep -q '^[[:blank:]]*aSOFTWARE_INSTALL_STATE\[84\]=2' /boot/dietpi/.installed
+		then
+			G_EXEC mkdir -p /etc/systemd/system/lighttpd.service.d
+			G_EXEC eval "echo -e '[Unit]\nAfter=php$PHP_VERSION-fpm.service' > /etc/systemd/system/lighttpd.service.d/dietpi.conf"
+		fi
+		if grep -q '^[[:blank:]]*aSOFTWARE_INSTALL_STATE\[88\]=2' /boot/dietpi/.installed
+		then
+			G_EXEC mkdir -p /etc/systemd/system/mariadb.service.d
+			G_EXEC eval 'echo -e '\''[Unit]\nBefore=cron.service'\'' > /etc/systemd/system/mariadb.service.d/dietpi.conf'
+		fi
+		if grep -q '^[[:blank:]]*aSOFTWARE_INSTALL_STATE\[91\]=2' /boot/dietpi/.installed
+		then
+			G_EXEC mkdir -p /etc/systemd/system/redis-server.service.d
+			G_EXEC eval 'echo -e '\''[Unit]\nBefore=cron.service'\'' > /etc/systemd/system/redis-server.service.d/dietpi.conf'
+		fi
+		if grep -q '^[[:blank:]]*aSOFTWARE_INSTALL_STATE\[89\]=2' /boot/dietpi/.installed
+		then
+			G_EXEC mkdir -p "/etc/systemd/system/php$PHP_VERSION-fpm.service.d"
+			G_EXEC eval "echo -e '[Unit]\nAfter=redis-server.service mariadb.service postgresql.service' > '/etc/systemd/system/php$PHP_VERSION-fpm.service.d/dietpi.conf'"
+		fi
+		if grep -q '^[[:blank:]]*aSOFTWARE_INSTALL_STATE\[45\]=2' /boot/dietpi/.installed
+		then
+			G_CONFIG_INJECT 'Wants=' 'Wants=network-online.target' /etc/systemd/system/deluged.service '\[Unit\]'
+			G_CONFIG_INJECT 'After=' 'After=network-online.target remote-fs.target' /etc/systemd/system/deluged.service 'Wants='
+			G_CONFIG_INJECT 'After=' 'After=deluged.service' /etc/systemd/system/deluge-web.service '\[Unit\]'
+		fi
+		if grep -q '^[[:blank:]]*aSOFTWARE_INSTALL_STATE\[122\]=2' /boot/dietpi/.installed
+		then
+			G_CONFIG_INJECT 'Wants=' 'Wants=network-online.target' /etc/systemd/system/node-red.service '\[Unit\]'
+			G_CONFIG_INJECT 'After=' 'After=network-online.target' /etc/systemd/system/node-red.service 'Wants='
+		fi
+		if grep -q '^[[:blank:]]*aSOFTWARE_INSTALL_STATE\[52\]=2' /boot/dietpi/.installed
+		then
+			G_CONFIG_INJECT 'Wants=' 'Wants=network-online.target' /etc/systemd/system/cuberite.service '\[Unit\]'
+			G_CONFIG_INJECT 'After=' 'After=network-online.target' /etc/systemd/system/cuberite.service 'Wants='
+		fi
+		if grep -q '^[[:blank:]]*aSOFTWARE_INSTALL_STATE\[164\]=2' /boot/dietpi/.installed
+		then
+			G_CONFIG_INJECT 'Wants=' 'Wants=network-online.target' /etc/systemd/system/nukkit.service '\[Unit\]'
+			G_CONFIG_INJECT 'After=' 'After=network-online.target' /etc/systemd/system/nukkit.service 'Wants='
+		fi
+		if grep -q '^[[:blank:]]*aSOFTWARE_INSTALL_STATE\[181\]=2' /boot/dietpi/.installed
+		then
+			G_CONFIG_INJECT 'Wants=' 'Wants=network-online.target' /etc/systemd/system/papermc.service '\[Unit\]'
+			G_CONFIG_INJECT 'After=' 'After=network-online.target' /etc/systemd/system/papermc.service 'Wants='
+		fi
+		if grep -q '^[[:blank:]]*aSOFTWARE_INSTALL_STATE\[132\]=2' /boot/dietpi/.installed
+		then
+			G_CONFIG_INJECT 'Wants=' 'Wants=network-online.target' /etc/systemd/system/aria2.service '\[Unit\]'
+			G_CONFIG_INJECT 'After=' 'After=network-online.target remote-fs.target' /etc/systemd/system/aria2.service 'Wants='
+		fi
+		if grep -q '^[[:blank:]]*aSOFTWARE_INSTALL_STATE\[149\]=2' /boot/dietpi/.installed
+		then
+			G_CONFIG_INJECT 'Wants=' 'Wants=network-online.target' /etc/systemd/system/nzbget.service '\[Unit\]'
+			G_CONFIG_INJECT 'After=' 'After=network-online.target remote-fs.target' /etc/systemd/system/nzbget.service 'Wants='
+		fi
+		if grep -q '^[[:blank:]]*aSOFTWARE_INSTALL_STATE\[143\]=2' /boot/dietpi/.installed
+		then
+			G_CONFIG_INJECT 'After=' 'After=network-online.target mariadb.service' /etc/systemd/system/koel.service '\[Unit\]'
+		fi
+		if grep -q '^[[:blank:]]*aSOFTWARE_INSTALL_STATE\[176\]=2' /boot/dietpi/.installed
+		then
+			G_CONFIG_INJECT 'Wants=' 'Wants=network-online.target' /etc/systemd/system/mycroft.service '\[Unit\]'
+			G_CONFIG_INJECT 'After=' 'After=network-online.target' /etc/systemd/system/mycroft.service 'Wants='
+		fi
+		# v8.16.-1 dev cleanup
+		[[ -f '/etc/systemd/system/cron.service.d/dietpi.conf' ]] && G_EXEC rm /etc/systemd/system/cron.service.d/dietpi.conf
+		[[ -d '/etc/systemd/system/cron.service.d' ]] && G_EXEC rmdir --ignore-fail-on-non-empty /etc/systemd/system/cron.service.d
+		/boot/dietpi/dietpi-services enable
+	fi
+
+	# Remove custom mode from /var/log tmpfs mount. It has common 0755 by default, not sure why we change that.
+	grep -q '^tmpfs /var/log tmpfs .*,mode=1777$' /etc/fstab && G_EXEC sed -i '\|^tmpfs /var/log tmpfs |s|,mode=1777$||' /etc/fstab
+
+	# CONFIG_GPU_DRIVER Change: https://github.com/MichaIng/DietPi/issues/6262
+	if (( $G_HW_MODEL == 21 && $G_DIETPI_INSTALL_STAGE == 2 ))
+	then
+		if dpkg-query -s 'steam' &> /dev/null ||
+			dpkg-query -s 'i965-va-driver' &> /dev/null ||
+			dpkg-query -s 'nvidia-driver' &> /dev/null ||
+			dpkg-query -s 'xserver-xorg-video-amdgpu' &> /dev/null
+		then
+			G_WHIP_MSG '[ INFO ] DietPi GPU driver installations have been reworked for x86 platforms.\n\nThis resolves issues with Vulkan, Steam and improves overall driver package installations.\n\nOn the next page you will be asked to select a GPU driver stack for this device. Once completed, select "Back" to resume the DietPi update.\n\nNB: If you have a custom GPU driver you have manually installed on this system, please select "Custom" from the next page. DietPi will then ignore changing GPU drivers on this system.'
+			/boot/dietpi/dietpi-config 2
+		fi
 	fi
 }
 

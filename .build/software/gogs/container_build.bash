@@ -43,15 +43,12 @@ do
 	esac
 	shift
 done
-distro=
 case $DISTRO in
         5) distro='buster';;
 	6) distro='bullseye';;
 	7) distro='bookworm';;
 	*) G_DIETPI-NOTIFY 1 "Invalid distro \"$DISTRO\" passed, aborting..."; exit 1;;
 esac
-image=
-arch=
 case $ARCH in
 	1) image="DietPi_Container-ARMv6-${distro^}" arch='armv6l';;
 	2) image="DietPi_Container-ARMv7-${distro^}" arch='armv7l';;
@@ -101,6 +98,9 @@ G_CONFIG_INJECT 'AUTO_SETUP_INSTALL_SOFTWARE_ID=' 'AUTO_SETUP_INSTALL_SOFTWARE_I
 # Skip filesystem expansion
 G_EXEC rm rootfs/etc/systemd/system/local-fs.target.wants/dietpi-fs_partition_resize.service
 
+# Avoid DietPi-Survey uploads to not mess with the statistics
+G_EXEC rm rootfs/root/.ssh/known_hosts
+
 # Workaround invalid TERM on login
 # shellcheck disable=SC2016
 G_EXEC eval 'echo '\''infocmp "$TERM" > /dev/null 2>&1 || export TERM=dumb'\'' > rootfs/etc/bashrc.d/00-dietpi-build.sh'
@@ -109,18 +109,12 @@ G_EXEC eval 'echo '\''infocmp "$TERM" > /dev/null 2>&1 || export TERM=dumb'\'' >
 G_CONFIG_INJECT 'CONFIG_CHECK_CONNECTION_IP=' 'CONFIG_CHECK_CONNECTION_IP=127.0.0.1' rootfs/boot/dietpi.txt
 G_CONFIG_INJECT 'CONFIG_CHECK_DNS_DOMAIN=' 'CONFIG_CHECK_DNS_DOMAIN=localhost' rootfs/boot/dietpi.txt
 
-# Temporary workaround for failing autologin
-G_EXEC sed -i '/^Before=/s/$/ getty-pre.target/' rootfs/etc/systemd/system/dietpi-firstboot.service
-G_EXEC sed -i '/^Before=/i\Wants=getty-pre.target' rootfs/etc/systemd/system/dietpi-firstboot.service
-
 # Automated build
 cat << _EOF_ > rootfs/boot/Automation_Custom_Script.sh || exit 1
 #!/bin/dash
 echo '[ INFO ] Running Gogs build script...'
 bash -c "\$(curl -sSf 'https://raw.githubusercontent.com/$G_GITOWNER/DietPi/$G_GITBRANCH/.build/software/gogs/build.bash')"
 mv -v '/tmp/gogs_$arch.7z' /
-# Pre-v8.14 ARMv6 zip
-[ -f '/tmp/gogs_armv6.zip' ] && mv -v '/tmp/gogs_armv6.zip' /
 poweroff
 _EOF_
 

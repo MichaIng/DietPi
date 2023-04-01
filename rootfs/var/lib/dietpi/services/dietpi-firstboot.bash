@@ -188,7 +188,7 @@ _EOF_
 
 			G_DIETPI-NOTIFY 2 "Setting keyboard layout $autoinstall_keyboard. Please wait..."
 			G_CONFIG_INJECT 'XKBLAYOUT=' "XKBLAYOUT=\"$autoinstall_keyboard\"" /etc/default/keyboard
-			setupcon --save # https://bugs.debian.org/cgi-bin/bugreport.cgi?bug=818065
+			setupcon --save # https://bugs.debian.org/818065
 
 		fi
 
