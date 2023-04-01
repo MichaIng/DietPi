@@ -1011,6 +1011,13 @@ Available commands:
 		aSOFTWARE_DOCS[$software_id]='https://dietpi.com/docs/software/social/#synapse'
 		aSOFTWARE_DEPS[$software_id]='130 194'
 		aSOFTWARE_INTERACTIVE[$software_id]=1
+		#-----------------
+		software_id=16
+		aSOFTWARE_NAME[$software_id]='microblog.pub'
+		aSOFTWARE_DESC[$software_id]='A self-hosted, single-user, ActivityPub powered microblog.'
+		aSOFTWARE_CATX[$software_id]=6
+		aSOFTWARE_DEPS[$software_id]='17'
+		aSOFTWARE_DOCS[$software_id]='https://docs.microblog.pub/'
 
 		# Camera & Surveillance
 		#--------------------------------------------------------------------------------
@@ -4134,6 +4141,118 @@ _EOF_
 			# Raise packet receive buffer: https://github.com/lucas-clemente/quic-go/wiki/UDP-Receive-Buffer-Size
 			G_EXEC eval "echo 'net.core.rmem_max=2500000' > /etc/sysctl.d/dietpi-ipfs.conf"
 			G_EXEC sysctl -w net.core.rmem_max=2500000
+		fi
+
+		if To_Install 16 microblog-pub # microblog.pub
+		then
+			local micro_name='microblog-pub'
+			local micro_python_version='3.10.9'
+			local micro_pyenv_dir="/opt/$micro_name"
+			local micro_pyenv_activate_file="$micro_pyenv_dir/pyenv-activate.sh"
+			local micro_virtualenv="$micro_pyenv_dir/.virtual_path"
+			local micro_data_dir="/mnt/dietpi_userdata/$micro_name"
+			local micro_systemd="/etc/systemd/system/$micro_name.service"
+			local micro_functions="/etc/bashrc.d/$micro_name.sh"
+
+			# User
+			Create_User -d "$micro_data_dir" "$micro_name"
+
+			# Dependencies
+			# - gcc, libc6-dev, make, libssl-dev, zlib1g-dev for Python build. libbz2-dev; libreadline-dev, libsqlite3-dev, liblzma-dev to suppress warnings; libffi-dev for ModuleNotFoundError: No module named '_ctypes'
+			aDEPS=('gcc' 'libc6-dev' 'make' 'libssl-dev' 'zlib1g-dev' 'libbz2-dev' 'libreadline-dev' 'libsqlite3-dev' 'liblzma-dev' 'libffi-dev')
+
+			# 1. Create a Python 3.10 environment via pyenv
+			# - https://python-poetry.org/docs/managing-environments/
+			Download_Install 'https://github.com/pyenv/pyenv/archive/master.tar.gz'
+			# - Start with fresh instance to allow clean pyenv and Python updates and fix broken instances.
+			[[ -d $micro_pyenv_dir ]] && G_EXEC rm -R "$micro_pyenv_dir"
+			G_EXEC mv pyenv-master "$micro_pyenv_dir"
+
+			# 2. Clone the repo into data dir
+			if [[ ! -d $micro_data_dir ]]
+			then
+				G_EXEC_OUTPUT=1 G_EXEC git clone 'https://git.sr.ht/~tsileo/microblog.pub' "$micro_data_dir"
+				# Enable remote access on port 8007
+				G_EXEC sed -i 's/uvicorn app/uvicorn --host 0.0.0.0 --port 8007 app/' "$micro_data_dir/misc/supervisord.conf"
+				G_EXEC sed -i 's/8000/8007/' "$micro_data_dir/data/tests.toml"
+			fi
+
+			# 3. Disable pip cache
+			G_EXEC mkdir -p "$micro_data_dir/.pip"
+			G_EXEC eval "echo -e '[global]\nno-cache-dir=true' > '$micro_data_dir/.pip/pip.conf'"
+
+			# 4. Generate script to activate pyenv
+			echo "#!/bin/dash
+cd $micro_pyenv_dir || return 1
+export PYENV_ROOT='$micro_pyenv_dir' || return 1
+export PATH=\"\$PYENV_ROOT/bin:\$PATH\" || return 1
+eval \"\$(pyenv init --path)\" || return 1
+eval \"\$(pyenv init -)\" || return 1
+cd $micro_data_dir
+PS1=\"(microblog.pub) \$PS1\"" > "$micro_pyenv_activate_file"
+
+			# 5. Install Python 3.10 and Poetry
+			G_EXEC chown -R "$micro_name:$micro_name" "$micro_pyenv_dir" "$micro_data_dir"
+			G_EXEC_DESC='Installing Python with Poetry into pyenv'
+			G_EXEC_OUTPUT=1 G_EXEC sudo -u "$micro_name" dash -c "
+. $micro_pyenv_activate_file || exit 1
+pyenv install $micro_python_version || exit 1
+pyenv local $micro_python_version || exit 1
+pip3 install -U pip setuptools wheel || exit 1
+pip3 install poetry || exit 1
+poetry install || exit 1
+# Skip these for now:
+#poetry run inv configuration-wizard
+#poetry run inv migrate-db
+poetry env info | grep -oP '(?<=^Path:\s).*/virtualenvs/.*' > '$micro_virtualenv'"
+
+			read -r VENV_DIR < "$micro_virtualenv"
+			# shellcheck disable=SC2016
+			G_EXEC_DESC='Checking for Poetry virtualenv' G_EXEC eval '[[ $VENV_DIR ]]'
+			G_EXEC rm "$micro_virtualenv"
+
+			# 6. Generate functions for later configuration and install to profile
+			cat << _EOF_ > "$micro_functions"
+#!/bin/dash
+microblog-pub()
+{
+	case \$1 in
+		v*) sudo -u '$micro_name' bash --init-file '$micro_pyenv_activate_file';; # venv
+		c*) sudo -u '$micro_name' dash -c '. $micro_pyenv_activate_file; poetry run inv configuration-wizard && poetry run inv migrate-db';; # configure
+		u*) sudo -u '$micro_name' dash -c '. $micro_pyenv_activate_file; git pull && poetry run inv update';; # update
+		*) echo 'microblog.pub helper script
+
+usage: microblog-pub <venv|configure|update>
+
+where:
+  configure   runs the configuration wizard and updates the microblog environment.
+  update      pulls the latest changes from the microblog repository and reconfigures.
+  venv        starts a virtual environment where the microblog can be configured.' && return 1;;
+	esac
+
+	sudo systemctl restart '$micro_name'
+}
+_EOF_
+			# 7. Generate systemd service
+			cat << _EOF_ > "$micro_systemd"
+[Unit]
+Description=microblog.pub (DietPi)
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+User=$micro_name
+SyslogIdentifier=microblog.pub
+WorkingDirectory=$micro_data_dir
+Environment="VENV_DIR=$VENV_DIR"
+ExecStart=/bin/dash -c '. $micro_pyenv_activate_file; exec poetry run supervisord -c misc/supervisord.conf -n'
+RestartForceExitStatus=100
+
+[Install]
+WantedBy=multi-user.target
+_EOF_
+			G_WHIP_MSG '[ INFO ] microblog.pub installation finished\n\nIn order to complete the setup, please run "microblog-pub configure" in a new bash session.\n\nNB: Append the port ":8007" to the domain when being asked for it if you do not use a reverse proxy.'
+			G_DIETPI-NOTIFY 0 'microblog.pub installation finished. In order to complete the setup, please run "microblog-pub configure" in a new bash session. Append the port ":8007" to the domain when being asked for it if you do not use a reverse proxy.'
 		fi
 
 		if To_Install 2 fahclient # Folding@Home
@@ -11122,6 +11241,10 @@ _EOF_
 			[[ -d '/mnt/dietpi_userdata/homeassistant/deps' ]] && G_EXEC rm -R /mnt/dietpi_userdata/homeassistant/deps
 			G_EXEC ln -sf "$ha_home/.pyenv/versions/$ha_python_version" /mnt/dietpi_userdata/homeassistant/deps
 
+			# Disable pip cache
+			G_EXEC mkdir -p "$ha_home/.pip"
+			G_EXEC eval "echo -e '[global]\nno-cache-dir=true' > '$ha_home/.pip/pip.conf'"
+
 			# Generate script to activate pyenv: This must be sourced from the originating shell, hence it does not require execute permissions.
 			echo "#!/bin/dash
 if [ \$(whoami) != '$ha_user' ]; then
@@ -12750,6 +12873,14 @@ If no WireGuard (auto)start is included, but you require it, please do the follo
 		then
 			Remove_Service ipfs 1 1
 			G_EXEC rm -Rf /usr/local/bin/ipfs /etc/bashrc.d/dietpi-ipfs.sh /etc/sysctl.d/dietpi-ipfs.conf /mnt/dietpi_userdata/ipfs
+		fi
+
+		if To_Uninstall 16 # microblog.pub
+		then
+			Remove_Service microblog-pub 1 1
+			[[ -f '/etc/bashrc.d/microblog-pub.sh' ]] && G_EXEC rm /etc/bashrc.d/microblog-pub.sh
+			[[ -d '/opt/microblog-pub' ]] && G_EXEC rm -R /opt/microblog-pub
+			G_DIETPI-NOTIFY 2 'All microblog.pub data and settings are still retained.\n - You can remove these manually: rm -R /mnt/dietpi_userdata/microblog-pub'
 		fi
 
 		if To_Uninstall 98 # HAProxy
