@@ -21,7 +21,8 @@ G_AGUP
 G_AGDUG "${adeps_build[@]}"
 
 # Build libSDL2
-v_sdl='2.26.4'
+v_sdl=$(curl -sSf 'https://api.github.com/repos/libsdl-org/SDL/releases/latest' | mawk -F\" '/^  "name"/{print $4}')
+[[ $v_sdl ]] || { G_DIETPI-NOTIFY 1 'No latest LibSDL2 version found, aborting ...'; exit 1; }
 if [[ ! -d /tmp/SDL2-$v_sdl ]]
 then
 	G_DIETPI-NOTIFY 2 "Building libSDL2 version \e[33m$v_sdl"
@@ -40,7 +41,8 @@ else
 fi
 
 # Build libSDL2_image
-v_img='2.6.2'
+v_img=$(curl -sSf 'https://api.github.com/repos/libsdl-org/SDL_image/releases/latest' | mawk -F\" '/^  "name"/{print $4}')
+[[ $v_img ]] || { G_DIETPI-NOTIFY 1 'No latest libSDL2_image version found, aborting ...'; exit 1; }
 if [[ ! -d /tmp/SDL2_image-$v_img ]]
 then
 	G_DIETPI-NOTIFY 2 "Building libSDL2_image version \e[33m$v_img"
@@ -59,7 +61,8 @@ else
 fi
 
 # Build libSDL2_ttf
-v_ttf='2.20.2'
+v_ttf=$(curl -sSf 'https://api.github.com/repos/libsdl-org/SDL_ttf/releases/latest' | mawk -F\" '/^  "name"/{print $4}')
+[[ $v_ttf ]] || { G_DIETPI-NOTIFY 1 'No latest libSDL2_ttf version found, aborting ...'; exit 1; }
 if [[ ! -d /tmp/SDL2_ttf-$v_ttf ]]
 then
 	G_DIETPI-NOTIFY 2 "Building libSDL2_ttf version \e[33m$v_ttf"
@@ -95,7 +98,9 @@ else
 fi
 
 # Build Amiberry
-v_ami='5.6.0'
+v_ami=$(curl -sSf 'https://api.github.com/repos/BlitterStudio/amiberry/releases/latest' | mawk -F\" '/^  "tag_name"/{print $4}')
+[[ $v_ami ]] || { G_DIETPI-NOTIFY 1 'No latest Amiberry version found, aborting ...'; exit 1; }
+v_ami=${v_ami#v}
 G_DIETPI-NOTIFY 2 "Building Amiberry version \e[33m$v_ami\e[90m for platform: \e[33m$PLATFORM"
 [[ -d /tmp/amiberry-$v_ami ]] && G_EXEC rm -R "/tmp/amiberry-$v_ami"
 G_EXEC cd /tmp
@@ -183,10 +188,22 @@ DEPS_APT_VERSIONED=${DEPS_APT_VERSIONED%,}
 # shellcheck disable=SC2001
 grep -q 'raspbian' /etc/os-release && DEPS_APT_VERSIONED=$(sed 's/+rp[it][0-9]\+[^)]*)/)/g' <<< "$DEPS_APT_VERSIONED") || DEPS_APT_VERSIONED=$(sed 's/+b[0-9]\+)/)/g' <<< "$DEPS_APT_VERSIONED")
 
+# - Obtain version suffix
+G_EXEC curl -sSfo package.deb "https://dietpi.com/downloads/binaries/$G_DISTRO_NAME/amiberry_$PLATFORM.deb"
+old_version=$(dpkg-deb -f package.deb Version)
+G_EXEC rm package.deb
+suffix=${old_version#*-dietpi}
+if [[ $old_version == "$v_ami-"* ]]
+then
+	v_ami+="-dietpi$((suffix+1))"
+else
+	v_ami+="-dietpi1"
+fi
+
 # - control
 cat << _EOF_ > "$DIR/DEBIAN/control"
 Package: amiberry
-Version: $v_ami-dietpi1
+Version: $v_ami
 Architecture: $(dpkg --print-architecture)
 Maintainer: MichaIng <micha@dietpi.com>
 Date: $(date -u '+%a, %d %b %Y %T %z')
