@@ -8,7 +8,7 @@ G_DIETPI-NOTIFY 2 "Amiberry will be built for platform: \e[33m$PLATFORM"
 
 # APT dependencies
 # - wget: Used for WHDLoad database update: https://github.com/BlitterStudio/amiberry/commit/d6c103e3310bcf75c2d72a15849fbdf5eb7432b5
-# - kbd: For "chvt" used in systemd unit as SDL2 spams the console with every key press
+# - kbd: For "chvt" used in systemd service
 adeps_build=('autoconf' 'make' 'g++' 'pkg-config' 'libdrm-dev' 'libgbm-dev' 'libudev-dev' 'libxml2-dev' 'libpng-dev' 'libfreetype6-dev' 'libflac-dev' 'libmpg123-dev' 'libmpeg2-4-dev' 'libasound2-dev' 'libserialport-dev' 'wget' 'kbd')
 adeps=('libdrm2' 'libgl1-mesa-dri' 'libgbm1' 'libegl1' 'libudev1' 'libxml2' 'libpng16-16' 'libfreetype6' 'libmpg123-0' 'libmpeg2-4' 'libasound2' 'libserialport0' 'wget' 'kbd')
 (( $G_DISTRO > 6 )) && adeps+=('libflac12') || adeps+=('libflac8')
@@ -21,7 +21,8 @@ G_AGUP
 G_AGDUG "${adeps_build[@]}"
 
 # Build libSDL2
-v_sdl='2.26.4'
+v_sdl=$(curl -sSf 'https://api.github.com/repos/libsdl-org/SDL/releases/latest' | mawk -F\" '/^  "name"/{print $4}')
+[[ $v_sdl ]] || { G_DIETPI-NOTIFY 1 'No latest LibSDL2 version found, aborting ...'; exit 1; }
 if [[ ! -d /tmp/SDL2-$v_sdl ]]
 then
 	G_DIETPI-NOTIFY 2 "Building libSDL2 version \e[33m$v_sdl"
@@ -40,7 +41,8 @@ else
 fi
 
 # Build libSDL2_image
-v_img='2.6.2'
+v_img=$(curl -sSf 'https://api.github.com/repos/libsdl-org/SDL_image/releases/latest' | mawk -F\" '/^  "name"/{print $4}')
+[[ $v_img ]] || { G_DIETPI-NOTIFY 1 'No latest libSDL2_image version found, aborting ...'; exit 1; }
 if [[ ! -d /tmp/SDL2_image-$v_img ]]
 then
 	G_DIETPI-NOTIFY 2 "Building libSDL2_image version \e[33m$v_img"
@@ -59,7 +61,8 @@ else
 fi
 
 # Build libSDL2_ttf
-v_ttf='2.20.2'
+v_ttf=$(curl -sSf 'https://api.github.com/repos/libsdl-org/SDL_ttf/releases/latest' | mawk -F\" '/^  "name"/{print $4}')
+[[ $v_ttf ]] || { G_DIETPI-NOTIFY 1 'No latest libSDL2_ttf version found, aborting ...'; exit 1; }
 if [[ ! -d /tmp/SDL2_ttf-$v_ttf ]]
 then
 	G_DIETPI-NOTIFY 2 "Building libSDL2_ttf version \e[33m$v_ttf"
@@ -95,18 +98,20 @@ else
 fi
 
 # Build Amiberry
-v_ami='5.6.0'
+v_ami=$(curl -sSf 'https://api.github.com/repos/BlitterStudio/amiberry/releases/latest' | mawk -F\" '/^  "tag_name"/{print $4}')
+[[ $v_ami ]] || { G_DIETPI-NOTIFY 1 'No latest Amiberry version found, aborting ...'; exit 1; }
+v_ami=${v_ami#v}
 G_DIETPI-NOTIFY 2 "Building Amiberry version \e[33m$v_ami\e[90m for platform: \e[33m$PLATFORM"
-[[ -d /tmp/amiberry-$v_ami ]] && G_EXEC rm -R "/tmp/amiberry-$v_ami"
 G_EXEC cd /tmp
 G_EXEC curl -sSfLO "https://github.com/BlitterStudio/amiberry/archive/v$v_ami.tar.gz"
+[[ -d amiberry-$v_ami ]] && G_EXEC rm -R "amiberry-$v_ami"
 G_EXEC tar xf "v$v_ami.tar.gz"
 G_EXEC rm "v$v_ami.tar.gz"
 G_EXEC cd "amiberry-$v_ami"
 G_EXEC_OUTPUT=1 G_EXEC make "-j$(nproc)" "PLATFORM=$PLATFORM" # Passing flags here overrides some mandatory flags in the Makefile, where -O3 is set as well.
 G_EXEC strip --remove-section=.comment --remove-section=.note amiberry
 
-# Build DEB package
+# Prepare DEB package
 G_DIETPI-NOTIFY 2 'Building Amiberry DEB package'
 G_EXEC cd /tmp
 DIR="amiberry_$PLATFORM"
@@ -137,13 +142,6 @@ ExecStopPost=/bin/chvt 1
 WantedBy=local-fs.target
 _EOF_
 
-# - Permissions
-G_EXEC find "$DIR" -type f -exec chmod 0644 {} +
-G_EXEC find "$DIR" -type d -exec chmod 0755 {} +
-G_EXEC chmod +x "$DIR/mnt/dietpi_userdata/amiberry/amiberry"
-
-# Control files
-
 # - conffiles
 echo '/mnt/dietpi_userdata/amiberry/conf/amiberry.conf' > "$DIR/DEBIAN/conffiles"
 
@@ -168,8 +166,6 @@ then
 fi
 _EOF_
 
-G_EXEC chmod +x "$DIR/DEBIAN/"{prerm,postrm}
-
 # - md5sums
 find "$DIR" ! \( -path "$DIR/DEBIAN" -prune \) -type f -exec md5sum {} + | sed "s|$DIR/||" > "$DIR/DEBIAN/md5sums"
 
@@ -181,12 +177,19 @@ do
 done
 DEPS_APT_VERSIONED=${DEPS_APT_VERSIONED%,}
 # shellcheck disable=SC2001
-grep -q 'raspbian' /etc/os-release && DEPS_APT_VERSIONED=$(sed 's/+rp[it][0-9]\+[^)]*)/)/g' <<< "$DEPS_APT_VERSIONED") || DEPS_APT_VERSIONED=$(sed 's/+b[0-9]\+)/)/g' <<< "$DEPS_APT_VERSIONED")
+grep -q '^ID=raspbian' /etc/os-release && DEPS_APT_VERSIONED=$(sed 's/+rp[it][0-9]\+[^)]*)/)/g' <<< "$DEPS_APT_VERSIONED") || DEPS_APT_VERSIONED=$(sed 's/+b[0-9]\+)/)/g' <<< "$DEPS_APT_VERSIONED")
+
+# - Obtain version suffix
+G_EXEC curl -sSfo package.deb "https://dietpi.com/downloads/binaries/$G_DISTRO_NAME/amiberry_$PLATFORM.deb"
+old_version=$(dpkg-deb -f package.deb Version)
+G_EXEC rm package.deb
+suffix=${old_version#*-dietpi}
+[[ $old_version == "$v_ami-"* ]] && v_ami+="-dietpi$((suffix+1))" || v_ami+="-dietpi1"
 
 # - control
 cat << _EOF_ > "$DIR/DEBIAN/control"
 Package: amiberry
-Version: $v_ami-dietpi1
+Version: $v_ami
 Architecture: $(dpkg --print-architecture)
 Maintainer: MichaIng <micha@dietpi.com>
 Date: $(date -u '+%a, %d %b %Y %T %z')
@@ -202,6 +205,12 @@ Description: Optimized Amiga emulator for the Raspberry Pi and other ARM boards
  This package ships with optimized libSDL2 and capsimg builds.
 _EOF_
 G_CONFIG_INJECT 'Installed-Size: ' "Installed-Size: $(du -sk "$DIR" | mawk '{print $1}')" "$DIR/DEBIAN/control"
+
+# - Permissions
+G_EXEC chown -R 0:0 "$DIR"
+G_EXEC find "$DIR" -type f -exec chmod 0644 {} +
+G_EXEC find "$DIR" -type d -exec chmod 0755 {} +
+G_EXEC chmod +x "$DIR/mnt/dietpi_userdata/amiberry/amiberry" "$DIR/DEBIAN/"{prerm,postrm}
 
 # Build DEB package
 G_EXEC_OUTPUT=1 G_EXEC dpkg-deb -b "$DIR"
