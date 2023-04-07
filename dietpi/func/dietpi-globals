@@ -59,7 +59,7 @@
 	# - Assign defaults/code version as fallback
 	[[ $G_DIETPI_VERSION_CORE ]] || G_DIETPI_VERSION_CORE=8
 	[[ $G_DIETPI_VERSION_SUB ]] || G_DIETPI_VERSION_SUB=16
-	[[ $G_DIETPI_VERSION_RC ]] || G_DIETPI_VERSION_RC=0
+	[[ $G_DIETPI_VERSION_RC ]] || G_DIETPI_VERSION_RC=1
 	[[ $G_GITBRANCH ]] || G_GITBRANCH='master'
 	[[ $G_GITOWNER ]] || G_GITOWNER='MichaIng'
 	# - Save current version and Git branch
@@ -1326,7 +1326,28 @@ Press any key to continue...'
 			fi
 		fi
 
-		local state if_final ip_final
+		# If any Ethernet interface is wanted, multiple are available but none is even "ip link set up", do this for all of them to prefer those with a carrier signal
+		local state mac details aiface=()
+		if [[ $command == 'iface' && $type == 'eth' && $iface$fam == '' ]]
+		then
+			while read -r if state mac details
+			do
+				[[ $if == 'eth'[0-9]* ]] || continue
+				[[ $state == 'UP' || $details == *'UP'* ]] && { aiface=(); break; }
+				aiface+=("$if")
+
+			done < <(ip -br l sh)
+
+			if (( ${#aiface[@]} > 1 ))
+			then
+				G_DIETPI-NOTIFY -2 'Enabling all Ethernet adapters to detect cable connection' >&2
+				for if in "${aiface[@]}"; do ip l s up dev "$if"; done
+				G_SLEEP 5
+				G_DIETPI-NOTIFY 2 'Enabling all Ethernet adapters to detect cable connection' >&2
+			fi
+		fi
+
+		local if_final ip_final if_down
 		# shellcheck disable=SC2086
 		while read -r if state ip
 		do
@@ -1336,40 +1357,55 @@ Press any key to continue...'
 			# Cut off secondary IP addresses and CIDR mask
 			ip=${ip%%/*}
 
-			# Return state UP
+			# State UP which implies a carrier signal but not necessarily an IP address (at least if IPv6 is disabled)
 			if [[ $state == 'UP' ]]
 			then
-				iface=$if
-				echo "${!command}"
-				return 0
+				# Return directly if as well an IP address is assigned
+				if [[ $ip ]]
+				then
+					iface=$if
+					# Set down again interfaces which were set up to check for a carrier signal
+					(( ${#aiface[@]} > 1 )) && for if in "${aiface[@]}"; do ip l s down dev "$if"; done
+					echo "${!command}"
+					return 0
+
+				# If an interface is wanted, prefer those with state UP even over those with an IP (but state DOWN)
+				elif [[ $command == 'iface' && ! $if_final ]]
+				then
+					if_final=$if
+					continue
+				fi
 			fi
 
 			# Store info in separate variables to return if no UP state interface was found
 			if [[ $ip && ! $ip_final ]]
 			then
-				if_final=$if
+				if_down=$if
 				ip_final=$ip
 
-			elif [[ ! $if_final ]]
+			elif [[ ! $if_down ]]
 			then
-				if_final=$if
+				if_down=$if
 			fi
 
 		done < <(ip -br $fam a ${iface:+s dev "$iface"})
 
+		# Set down again interfaces which were set up to check for a carrier signal
+		(( ${#aiface[@]} > 1 )) && for if in "${aiface[@]}"; do ip l s down dev "$if"; done
+
 		# Return final values
-		iface=$if_final
 		ip=$ip_final
 		if [[ $command == 'ip' && ! $ip ]]
 		then
 			(( $quite )) || G_DIETPI-NOTIFY 1 "An interface${iface:+ named \"$iface\"}${type:+ of type \"$type\"} with an IP${fam:+v${fam#-}} address does not exist."
 			return 1
 
-		elif [[ $command == 'iface' && ! $iface ]]
+		elif [[ $command == 'iface' && ! ${if_final:=$if_down} ]]
 		then
 			(( $quite )) || G_DIETPI-NOTIFY 1 "An interface${iface:+ named \"$iface\"}${type:+ of type \"$type\"}${fam:+ with an IPv${fam#-} address} does not exist."
 			return 1
 		fi
+		iface=$if_final
 		echo "${!command}"
 		return 0
 	}
@@ -1629,8 +1665,12 @@ Press any key to continue...'
 		local i apackages=() arch=$(dpkg --print-architecture)
 		for i in "$@"
 		do
-			[[ $i == *':'* ]] || i="$i:$arch"
-			dpkg-query -s "$i" &> /dev/null || apackages+=("$i")
+			if [[ $i == *':'* ]]
+			then
+				dpkg-query -s "$i" &> /dev/null || apackages+=("$i")
+			else
+				[[ $(dpkg-query -s "$i:$arch" "$i:all" 2> /dev/null) ]] || apackages+=("$i")
+			fi
 		done
 		[[ ${apackages[0]} ]] || return 0
 

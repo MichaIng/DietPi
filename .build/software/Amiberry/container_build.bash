@@ -43,17 +43,12 @@ do
 	esac
 	shift
 done
-case $DISTRO in
-	5) distro='buster';;
-	6) distro='bullseye';;
-	7) distro='bookworm';;
-	*) G_DIETPI-NOTIFY 1 "Invalid distro \"$DISTRO\" passed, aborting..."; exit 1;;
-esac
+[[ $DISTRO =~ ^'buster'|'bullseye'|'bookworm'$ ]] || { G_DIETPI-NOTIFY 1 "Invalid distro \"$DISTRO\" passed, aborting..."; exit 1; }
 case $PLATFORM in
-	'rpi'[1-4]) image="DietPi_Container-ARMv6-${distro^}" arch=1;;
-	'c1'|'xu4'|'RK3288'|'sun8i'|'s812') image="DietPi_Container-ARMv7-${distro^}" arch=2;;
-	'rpi'[34]'-64-dmx'|'AMLSM1'|'n2'|'a64'|'rk3588') image="DietPi_Container-ARMv8-${distro^}" arch=3;;
-	'x86-64') image="DietPi_Container-x86_64-${distro^}" arch=10;;
+	'rpi'[1-4]) image="DietPi_Container-ARMv6-${DISTRO^}" arch=1;;
+	'c1'|'xu4'|'RK3288'|'sun8i'|'s812') image="DietPi_Container-ARMv7-${DISTRO^}" arch=2;;
+	'rpi'[34]'-64-dmx'|'AMLSM1'|'n2'|'a64'|'rk3588') image="DietPi_Container-ARMv8-${DISTRO^}" arch=3;;
+	'x86-64') image="DietPi_Container-x86_64-${DISTRO^}" arch=10;;
 	*) G_DIETPI-NOTIFY 1 "Invalid platform \"$PLATFORM\" passed, aborting..."; exit 1;;
 esac
 
@@ -105,7 +100,7 @@ G_CONFIG_INJECT 'CONFIG_CHECK_DNS_DOMAIN=' 'CONFIG_CHECK_DNS_DOMAIN=localhost' r
 [[ $PLATFORM != 'rpi'[34]'-64-dmx' ]] || cat << _EOF_ > rootfs/boot/Automation_Custom_Script.sh || exit 1
 #!/bin/dash
 echo '[ INFO ] Setting up RPi APT repository...'
-echo 'deb https://archive.raspberrypi.org/debian/ ${distro/bookworm/bullseye} main' > /etc/apt/sources.list.d/raspi.list
+echo 'deb https://archive.raspberrypi.org/debian/ ${DISTRO/bookworm/bullseye} main' > /etc/apt/sources.list.d/raspi.list
 curl -sSf 'https://archive.raspberrypi.org/debian/pool/main/r/raspberrypi-archive-keyring/raspberrypi-archive-keyring_2021.1.1+rpt1_all.deb' -o /tmp/keyring.deb
 dpkg -i /tmp/keyring.deb
 rm -v /tmp/keyring.deb
