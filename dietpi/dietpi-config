@@ -439,13 +439,14 @@ A long (or insufficiently manufactured) cable may required a higher boost settin
 			local fp_brightness
 			for fp_brightness in /sys/class/backlight/*
 			do
-				if [[ -f $fp_brightness/brightness && -f $fp_brightness/max_brightness ]] &&
+				if [[ -f $fp_brightness/brightness && -f $fp_brightness/max_brightness && -f $fp_brightness/actual_brightness ]] &&
 					disable_error=1 G_CHECK_VALIDINT "$(<"$fp_brightness/brightness")" &&
-					disable_error=1 G_CHECK_VALIDINT "$(<"$fp_brightness/max_brightness")"
+					disable_error=1 G_CHECK_VALIDINT "$(<"$fp_brightness/max_brightness")" &&
+					disable_error=1 G_CHECK_VALIDINT "$(<"$fp_brightness/actual_brightness")"
 				then
 					aFp_Brightness_Available+=( "$fp_brightness" )
 					aBrightness_Name+=( "${fp_brightness##*/}" )
-					aBrightness_Current+=( "$(<"$fp_brightness/brightness")" )
+					aBrightness_Current+=( "$(<"$fp_brightness/actual_brightness")" )
 					aBrightness_Max+=( "$(<"$fp_brightness/max_brightness")" )
 					(( iTotalAvailable++ ))
 				fi
@@ -454,53 +455,70 @@ A long (or insufficiently manufactured) cable may required a higher boost settin
 			# - Generate Additional Menus
 			if (( iTotalAvailable > 0 ))
 			then
+
 				G_WHIP_MENU_ARRAY=()
 				local aBrightness_Percent=()
-				local i=0
-				# - Work out current brightness %, add to selection menu
+				local i=0				
+				local iIndex=0 # Target index
+				# - Work out current brightness % for future menus
 				for (( i=0; i<$iTotalAvailable; i++ ))
 				do
-
 					aBrightness_Percent+=( "$(echo "${aBrightness_Current[i]} ${aBrightness_Max[i]}" | mawk '{printf "%.0f\n", $1 / $2 * 100}')" )
-					#G_WHIP_MENU_ARRAY+=("$i" " : ${aBrightness_Percent[i]}% [${aBrightness_Name[i]}]" )
-					G_WHIP_MENU_ARRAY+=("${aBrightness_Name[i]}" " : [${aBrightness_Percent[i]}%]" )
 
 				done
 
-				local iIndex=0
-				if G_WHIP_MENU 'Please select a Brightness item to change its value.'
+				# - List selection menu
+				if (( iTotalAvailable > 1 ))
 				then
-	                                i=0 #NB: Declared locally above.
-					# - Match G_WHIP_RETURNED_VALUE to array index
+
+					# - Add all backlights to selection menu
 					for (( i=0; i<$iTotalAvailable; i++ ))
 					do
-						if [[ ${aBrightness_Name[i]} == "$G_WHIP_RETURNED_VALUE" ]]
-						then
-							iIndex=$i
-							break
-						fi
+						G_WHIP_MENU_ARRAY+=("${aBrightness_Name[i]}" " : [${aBrightness_Percent[i]}%]" )
+
 					done
-
-					G_WHIP_DEFAULT_ITEM=${aBrightness_Percent[iIndex]}
-					G_WHIP_MENU_ARRAY=()
-	                                i=0 #NB: Declared locally above.
-					# - Generate % menu
-	                                for i in {1..10}
-        	                        do
-                	                        G_WHIP_MENU_ARRAY+=("$(( $i * 10 ))" '%')
-                        	        done
-
-	                                if G_WHIP_MENU "Please select a new Brightness level for [${aBrightness_Name[iIndex]}]:\n - Current Value = ${aBrightness_Percent[iIndex]}%"
+					# - Match G_WHIP_RETURNED_VALUE to array index
+					i=0 #NB: Declared locally above.
+					if G_WHIP_MENU 'Please select a Brightness item to change its value.'
 					then
-
-	        	                        local iBrightness_Value_New=$(( ( ${aBrightness_Max[iIndex]} / 100 ) * $G_WHIP_RETURNED_VALUE ))
-                	        	        echo "$iBrightness_Value_New" > "${aFp_Brightness_Available[iIndex]}/brightness"
-
-						#Temp/testing OLED support, requires X
-        	        	                #local brightness_new_oled=$(echo $G_WHIP_RETURNED_VALUE | awk '{printf "%.1f\n", $1 / 100}')
-						#G_EXEC xrandr --output eDP-1 --brightness "$brightness_new_oled"
+						for (( i=0; i<$iTotalAvailable; i++ ))
+						do
+							if [[ ${aBrightness_Name[i]} == "$G_WHIP_RETURNED_VALUE" ]]
+							then
+								iIndex=$i
+								break
+							fi
+						done
+					else					
+						# - No selection made, CANCEL below code by setting target index to invalid
+						iIndex=-1
 					fi
+				fi
 
+				if (( $iIndex > -1 ))
+				then
+					G_WHIP_DEFAULT_ITEM=${aBrightness_Percent[iIndex]}
+					G_WHIP_MENU_ARRAY=('Custom' ' : Manually enter a value')
+					# - Generate % menu
+					MIN_VALUE=0 MAX_VALUE=100
+					i=0 #NB: Declared locally above.
+		                        for i in {1..10}
+			                do
+			                        G_WHIP_MENU_ARRAY+=("$(( $i * 10 ))%" '')
+		        	        done
+
+		                        if G_WHIP_MENU "Please select a new Brightness level for [${aBrightness_Name[iIndex]}]:\n - Current Value = ${aBrightness_Percent[iIndex]}%"
+					then
+						# - Handle custom
+						[[ $G_WHIP_RETURNED_VALUE == 'Custom' ]] && G_WHIP_INPUTBOX "Please enter a value between $MIN_VALUE - $MAX_VALUE"
+						G_WHIP_RETURNED_VALUE="$(echo $G_WHIP_RETURNED_VALUE | sed 's/%//')" #Remove % char from custom input and whiptail list
+						if G_CHECK_VALIDINT "$G_WHIP_RETURNED_VALUE" "$MIN_VALUE" "$MAX_VALUE"
+						then
+
+							local iBrightness_Value_New="$(echo "$G_WHIP_RETURNED_VALUE ${aBrightness_Max[iIndex]}" | mawk '{printf "%.0f\n", $2 / 100 * $1}')"
+			        	        	echo "$iBrightness_Value_New" > "${aFp_Brightness_Available[iIndex]}/brightness"
+						fi
+					fi
 				fi
 
 			else
