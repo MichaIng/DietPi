@@ -1,9 +1,10 @@
+#!/bin/bash
 {
 . /boot/dietpi/func/dietpi-globals || exit 1
 
 # APT dependencies: https://github.com/dani-garcia/vaultwarden/wiki/Building-binary#dependencies
+# - Git for ARMv8 workaround below: https://github.com/rust-lang/cargo/issues/10583
 adeps_build=('gcc' 'libc6-dev' 'pkg-config' 'libssl-dev' 'git')
-#(( $G_HW_ARCH == 3 )) && adeps_build+=('git')
 adeps=('libc6' 'openssl')
 (( $G_DISTRO > 6 )) && adeps+=('libssl3') || adeps+=('libssl1.1')
 G_AGUP
@@ -16,16 +17,23 @@ G_AGDUG "${adeps_build[@]}"
 export HOME='/tmp/rustup' CARGO_NET_GIT_FETCH_WITH_CLI='true'
 [[ -d $HOME ]] || G_EXEC mkdir "$HOME"
 G_EXEC cd "$HOME"
-G_EXEC curl -sSfL 'https://sh.rustup.rs' -o rustup-init.sh
+G_EXEC curl -sSfo rustup-init.sh 'https://sh.rustup.rs'
 G_EXEC chmod +x rustup-init.sh
 # - ARMv6: Set default target explicitly, otherwise it compiles for ARMv7 in emulated container
-grep -q 'raspbian' /etc/os-release && host=('--default-host' 'arm-unknown-linux-gnueabihf') || host=()
+grep -q '^ID=raspbian' /etc/os-release && G_HW_ARCH_NAME='armv6l' host=('--default-host' 'arm-unknown-linux-gnueabihf') || host=()
 G_EXEC_OUTPUT=1 G_EXEC ./rustup-init.sh -y --profile minimal --default-toolchain none "${host[@]}"
-G_EXEC_NOHALT=1 G_EXEC rm rustup-init.sh
+G_EXEC rm rustup-init.sh
 export PATH="$HOME/.cargo/bin:$PATH"
 
+# Obtain latest versions
+# - vaultwarden
+version=$(curl -sSf 'https://api.github.com/repos/dani-garcia/vaultwarden/releases/latest' | mawk -F\" '/^  "tag_name"/{print $4}')
+[[ $version ]] || { G_DIETPI-NOTIFY 1 'No latest vaultwarden version found, aborting ...'; exit 1; }
+# - web vault
+wv_url=$(curl -sSf 'https://api.github.com/repos/dani-garcia/bw_web_builds/releases/latest' | mawk -F\" '/^      "browser_download_url".*\.tar\.gz"$/{print $4}')
+[[ $wv_url ]] || { G_DIETPI-NOTIFY 1 'No latest web vault version found, aborting ...'; exit 1; }
+
 # Build
-version='1.27.0'
 G_DIETPI-NOTIFY 2 "Building vaultwarden version \e[33m$version"
 G_EXEC cd /tmp
 G_EXEC curl -sSfLO "https://github.com/dani-garcia/vaultwarden/archive/$version.tar.gz"
@@ -40,7 +48,7 @@ G_EXEC strip --remove-section=.comment --remove-section=.note target/release/vau
 # Build DEB package
 G_DIETPI-NOTIFY 2 'Building vaultwarden DEB package'
 G_EXEC cd /tmp
-grep -q 'raspbian' /etc/os-release && DIR='vaultwarden_armv6l' || DIR="vaultwarden_$G_HW_ARCH_NAME"
+DIR="vaultwarden_$G_HW_ARCH_NAME"
 [[ -d $DIR ]] && G_EXEC rm -R "$DIR"
 G_EXEC mkdir -p "$DIR/"{DEBIAN,opt/vaultwarden,mnt/dietpi_userdata/vaultwarden,lib/systemd/system}
 
@@ -50,11 +58,10 @@ G_EXEC mv "vaultwarden-$version/.env.template" "$DIR/mnt/dietpi_userdata/vaultwa
 G_EXEC rm -R "vaultwarden-$version"
 
 # - web vault
-wv_version='2023.2.0'
-G_DIETPI-NOTIFY 2 "Downloading web vault version \e[33m$wv_version"
-G_EXEC curl -sSfLO "https://github.com/dani-garcia/bw_web_builds/releases/download/v$wv_version/bw_web_v$wv_version.tar.gz"
-G_EXEC tar xf "bw_web_v$wv_version.tar.gz" --one-top-level="$DIR/mnt/dietpi_userdata/vaultwarden"
-G_EXEC rm "bw_web_v$wv_version.tar.gz"
+G_DIETPI-NOTIFY 2 "Downloading web vault from \e[33m$wv_url"
+G_EXEC curl -sSfLo archive.tar.gz "$wv_url"
+G_EXEC tar xf archive.tar.gz --one-top-level="$DIR/mnt/dietpi_userdata/vaultwarden"
+G_EXEC rm archive.tar.gz
 
 # - Configuration
 G_CONFIG_INJECT 'DATA_FOLDER=' 'DATA_FOLDER=/mnt/dietpi_userdata/vaultwarden' "$DIR/mnt/dietpi_userdata/vaultwarden/vaultwarden.env"
@@ -193,12 +200,24 @@ do
 done
 DEPS_APT_VERSIONED=${DEPS_APT_VERSIONED%,}
 # shellcheck disable=SC2001
-grep -q 'raspbian' /etc/os-release && DEPS_APT_VERSIONED=$(sed 's/+rp[it][0-9]\+[^)]*)/)/g' <<< "$DEPS_APT_VERSIONED") || DEPS_APT_VERSIONED=$(sed 's/+b[0-9]\+)/)/g' <<< "$DEPS_APT_VERSIONED")
+[[ $G_HW_ARCH_NAME == 'armv6l' ]] && DEPS_APT_VERSIONED=$(sed 's/+rp[it][0-9]\+[^)]*)/)/g' <<< "$DEPS_APT_VERSIONED") || DEPS_APT_VERSIONED=$(sed 's/+b[0-9]\+)/)/g' <<< "$DEPS_APT_VERSIONED")
+
+# - Obtain version suffix
+G_EXEC curl -sSfo package.deb "https://dietpi.com/downloads/binaries/$G_DISTRO_NAME/vaultwarden_$G_HW_ARCH_NAME.deb"
+old_version=$(dpkg-deb -f package.deb Version)
+G_EXEC rm package.deb
+suffix=${old_version#*-dietpi}
+if [[ $old_version == "$version-"* ]]
+then
+	version+="-dietpi$((suffix+1))"
+else
+	version+="-dietpi1"
+fi
 
 # - control
 cat << _EOF_ > "$DIR/DEBIAN/control"
 Package: vaultwarden
-Version: $version-dietpi4
+Version: $version
 Architecture: $(dpkg --print-architecture)
 Maintainer: MichaIng <micha@dietpi.com>
 Date: $(date -u '+%a, %d %b %Y %T %z')

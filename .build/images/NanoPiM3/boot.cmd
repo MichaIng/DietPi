@@ -9,7 +9,6 @@
 setenv rootdev "/dev/mmcblk2p1"
 setenv rootfstype "ext4"
 setenv consoleargs "console=ttySAC0,115200 console=tty1"
-setenv verbosity "4"
 setenv docker_optimizations "off"
 
 # Load addresses
@@ -18,13 +17,12 @@ setenv ramdisk_addr_r "0x49000000"
 setenv kernel_addr_r "0x4a000000"
 
 # Load dietpiEnv.txt
-if test -e mmc ${devnum} ${prefix}dietpiEnv.txt; then
-	ext4load mmc ${devnum} ${kernel_addr_r} ${prefix}dietpiEnv.txt
+if ext4load mmc ${devnum} ${kernel_addr_r} ${prefix}dietpiEnv.txt; then
 	env import -t ${kernel_addr_r} ${filesize}
 fi
 
 # Define kernel command-line arguments
-setenv bootargs "root=${rootdev} rootfstype=${rootfstype} rootwait ${consoleargs} loglevel=${verbosity} consoleblank=0 systemd.unified_cgroup_hierarchy=0 usb-storage.quirks=${usbstoragequirks} ${extraargs}"
+setenv bootargs "root=${rootdev} rootfstype=${rootfstype} rootwait ${consoleargs} consoleblank=0 systemd.unified_cgroup_hierarchy=0 usb-storage.quirks=${usbstoragequirks} ${extraargs}"
 
 # Add bootargs for Docker
 if test "${docker_optimizations}" = "on"; then setenv bootargs "${bootargs} cgroup_enable=memory swapaccount=1"; fi

@@ -430,33 +430,87 @@ A long (or insufficiently manufactured) cable may required a higher boost settin
 
 		elif (( $G_WHIP_RETURNED_VALUE == 16 )); then
 
-			# Known FP's for setting brightness
-			local afp_current_set_brightness=(
+			local aFp_Brightness_Available=()
+			local aBrightness_Name=()
+			local aBrightness_Current=()
+			local aBrightness_Max=()
 
-				'/sys/class/backlight/intel_backlight'
-				'/sys/class/backlight/rpi_backlight'
-				'/sys/class/backlight/lcd0'
-				'/sys/class/backlight/backlight'
-			)
-
-			MIN_VALUE=0
-			MAX_VALUE=255
-			local fp_brightness current_brightness
-			for fp_brightness in "${afp_current_set_brightness[@]}"
+			local iTotalAvailable=0
+			local fp_brightness
+			for fp_brightness in /sys/class/backlight/*
 			do
-				[[ -f $fp_brightness/brightness ]] || continue
-				current_brightness=$(<"$fp_brightness/brightness")
-				[[ -f $fp_brightness/max_brightness ]] && MAX_VALUE=$(<"$fp_brightness/max_brightness")
-				break
+				aFp_Brightness_Available+=( "$fp_brightness" )
+				aBrightness_Name+=( "${fp_brightness##*/}" )
+				aBrightness_Current+=( "$(<"$fp_brightness/actual_brightness")" )
+				aBrightness_Max+=( "$(<"$fp_brightness/max_brightness")" )
+				(( iTotalAvailable++ ))
 			done
 
-			if disable_error=1 G_CHECK_VALIDINT "$current_brightness"; then
+			# - Generate Additional Menus
+			if (( iTotalAvailable > 0 ))
+			then
 
-				G_WHIP_DEFAULT_ITEM=$current_brightness
-				if G_WHIP_INPUTBOX "Please enter a brightness value:\n - Min = $MIN_VALUE | Max = $MAX_VALUE" && G_CHECK_VALIDINT "$G_WHIP_RETURNED_VALUE" "$MIN_VALUE" "$MAX_VALUE"; then
+				G_WHIP_MENU_ARRAY=()
+				local aBrightness_Percent=()
+				local i=0
+				local iIndex=0 # Target index
+				# - Work out current brightness % for future menus
+				for (( i=0; i<$iTotalAvailable; i++ ))
+				do
+					aBrightness_Percent+=( "$(echo "${aBrightness_Current[i]} ${aBrightness_Max[i]}" | mawk '{printf "%.0f\n", $1 / $2 * 100}')" )
 
-					echo "$G_WHIP_RETURNED_VALUE" > "$fp_brightness/brightness"
+				done
 
+				# - List selection menu
+				if (( iTotalAvailable > 1 ))
+				then
+
+					# - Add all backlights to selection menu
+					for (( i=0; i<$iTotalAvailable; i++ ))
+					do
+						G_WHIP_MENU_ARRAY+=("${aBrightness_Name[i]}" " : [${aBrightness_Percent[i]}%]" )
+
+					done
+					# - Match G_WHIP_RETURNED_VALUE to array index
+					if G_WHIP_MENU 'Please select a Brightness item to change its value.'
+					then
+						for (( i=0; i<$iTotalAvailable; i++ ))
+						do
+							if [[ ${aBrightness_Name[i]} == "$G_WHIP_RETURNED_VALUE" ]]
+							then
+								iIndex=$i
+								break
+							fi
+						done
+					else
+						# - No selection made, CANCEL below code by setting target index to invalid
+						iIndex=-1
+					fi
+				fi
+
+				if (( $iIndex > -1 ))
+				then
+					G_WHIP_DEFAULT_ITEM=${aBrightness_Percent[iIndex]}
+					G_WHIP_MENU_ARRAY=('Custom' ' : Manually enter a value')
+					# - Generate % menu
+					MIN_VALUE=0 MAX_VALUE=100
+		                        for i in {1..10}
+			                do
+			                        G_WHIP_MENU_ARRAY+=("$(( $i * 10 ))%" '')
+		        	        done
+
+		                        if G_WHIP_MENU "Please select a new Brightness level for [${aBrightness_Name[iIndex]}]:\n - Current Value = ${aBrightness_Percent[iIndex]}%"
+					then
+						# - Handle custom
+						[[ $G_WHIP_RETURNED_VALUE == 'Custom' ]] && G_WHIP_INPUTBOX "Please enter a value between $MIN_VALUE - $MAX_VALUE"
+						G_WHIP_RETURNED_VALUE="${G_WHIP_RETURNED_VALUE//%/}" #Remove % char from custom input and whiptail list
+						if G_CHECK_VALIDINT "$G_WHIP_RETURNED_VALUE" "$MIN_VALUE" "$MAX_VALUE"
+						then
+
+							local iBrightness_Value_New="$(echo "$G_WHIP_RETURNED_VALUE ${aBrightness_Max[iIndex]}" | mawk '{printf "%.0f\n", $2 / 100 * $1}')"
+			        	        	echo "$iBrightness_Value_New" > "${aFp_Brightness_Available[iIndex]}/brightness"
+						fi
+					fi
 				fi
 
 			else
@@ -535,60 +589,65 @@ A long (or insufficiently manufactured) cable may required a higher boost settin
 		# Native PC
 		elif (( $G_HW_MODEL == 21 )); then
 
-			local nvidia_installed=0 nvidia_text='Install'
-			dpkg-query -s nvidia-driver &> /dev/null && nvidia_installed=1 nvidia_text='[Installed] Uninstall'
+			local gpu_current=$(sed -n '/^[[:blank:]]*CONFIG_GPU_DRIVER=/{s/^[^=]*=//p;q}' /boot/dietpi.txt)
+			gpu_current=${gpu_current,,}
+			local driver_installed=()
+			for i in {0..3}
+			do
+				driver_installed+=('Install')
+			done
 
-			local intel_installed=0 intel_text='Install'
-			dpkg-query -s xserver-xorg-video-intel &> /dev/null && intel_installed=1 intel_text='[Installed] Uninstall'
+			local installed_index=-1
+			if [[ $gpu_current == 'nvidia' ]]
+			then
+				installed_index=0
 
-			local amd_installed=0 amd_text='Install'
-			dpkg-query -s xserver-xorg-video-amdgpu &> /dev/null && amd_installed=1 amd_text='[Installed] Uninstall'
+			elif [[ $gpu_current == 'intel' ]]
+			then
+				installed_index=1
+
+			elif [[ $gpu_current == 'amd' ]]
+			then
+				installed_index=2
+
+			elif [[ $gpu_current == 'custom' ]]
+			then
+				installed_index=3
+			fi
+
+			if (( $installed_index >= 0 ))
+			then
+				driver_installed[$installed_index]='[Installed]'
+			fi
 
 			G_WHIP_MENU_ARRAY=(
 
-				'Nvidia' ": $nvidia_text non-free GPU driver"
-				'Intel' ": $intel_text free VA-API GPU drivers"
-				'AMD' ": $amd_text non-free GPU driver"
+				'Nvidia' ": ${driver_installed[0]} | Proprietary GPU driver"
+				'Intel' ": ${driver_installed[1]} | Open-Source VA-API GPU drivers"
+				'AMD' ": ${driver_installed[2]} | Proprietary GPU driver"
+				'Custom' ": ${driver_installed[3]} | Manual User Install"
+				'None' ": Uninstall all GPU drivers"
 			)
 
+			G_WHIP_BUTTON_CANCEL_TEXT='Back'
+			G_WHIP_DEFAULT_ITEM=${gpu_current^}
 			G_WHIP_MENU 'Please select an option:' || { Back_or_Exit 1; return 0; } # Display Options
 
-			if [[ $G_WHIP_RETURNED_VALUE == 'Nvidia' ]]
+			local gpu_new=${G_WHIP_RETURNED_VALUE,,}
+			if [[ $gpu_new != "$gpu_current" ||
+				$gpu_new = 'none' ]] # Always run uninstall when selected
 			then
-				if (( $nvidia_installed ))
-				then
-					G_AGP nvidia-driver nvidia-xconfig nvidia-driver-libs-i386 libgl1-nvidia-glx
-				else
-					G_AGI nvidia-driver
-				fi
+				/boot/dietpi/func/dietpi-set_hardware gpudriver "$gpu_new"
 
-			elif [[ $G_WHIP_RETURNED_VALUE == 'Intel' ]]
-			then
-				if (( $intel_installed ))
-				then
-					G_AGP i965-va-driver xserver-xorg-video-intel
-				else
-					G_AG_CHECK_INSTALL_PREREQ i965-va-driver xserver-xorg-video-intel libgl1-mesa-dri
-				fi
-
-			elif [[ $G_WHIP_RETURNED_VALUE == 'AMD' ]]
-			then
-				if (( $amd_installed ))
-				then
-					G_AGP firmware-amd-graphics xserver-xorg-video-amdgpu
-				else
-					G_AG_CHECK_INSTALL_PREREQ firmware-amd-graphics xserver-xorg-video-amdgpu libgl1-mesa-dri
-				fi
-			fi
-
-			G_WHIP_YESNO 'X11 auto-configuration
+				G_WHIP_YESNO 'X11 auto-configuration
 \nThis feature generates a configuration for X11 at /etc/X11/xorg.conf based on available drivers. It is not always required, but helps to assure the right driver is used after one has been installed or uninstalled.
 \nNB: This feature will only work if an X server (desktop) is NOT currently running. If a desktop is running, please set "dietpi-autostart" to "Console", reboot the system, then run the auto-configuration manually:
 - Xorg -configure
 \nWould you like to auto-configure X11 now?' || return 0
 
-			G_EXEC Xorg -configure
-			[[ -f '/root/xorg.conf.new' ]] && G_EXEC mv /root/xorg.conf{.new,}
+				G_EXEC Xorg -configure
+				[[ -f '/root/xorg.conf.new' ]] && G_EXEC mv /root/xorg.conf{.new,}
+			fi
 
 		# RPi
 		elif (( $G_HW_MODEL < 10 )); then
@@ -1012,6 +1071,13 @@ Re-enabling HDMI requires a reboot. If you need emergency HDMI output, edit the 
 
 		fi
 
+		# Armbian U-Boot update
+		if [[ -f '/usr/lib/u-boot/platform_install.sh' ]]
+		then
+			local rootdev=$(lsblk -npo PKNAME "$G_ROOTFS_DEV")
+			G_WHIP_MENU_ARRAY+=('Update MMC bootloader' ": Flash current U-Boot to $rootdev)")
+		fi
+
 		# RPi4 EEPROM update: https://www.raspberrypi.org/documentation/hardware/raspberrypi/booteeprom.md
 		if (( $G_HW_MODEL == 4 ))
 		then
@@ -1025,6 +1091,11 @@ Re-enabling HDMI requires a reboot. If you need emergency HDMI output, edit the 
 			else
 				G_WHIP_MENU_ARRAY+=('Update RPi4 EEPROM firmware' ': Install rpi-eeprom APT package')
 			fi
+
+		# Orange Pi 5: https://dietpi.com/forum/t/orange-pi-5-boot-from-nvme/16457
+		elif (( $G_HW_MODEL == 80 ))
+		then
+			[[ -b '/dev/mtdblock0' && -f '/usr/lib/u-boot/platform_install.sh' ]] && G_WHIP_MENU_ARRAY+=('Update SPI bootloader' ': Flash current U-Boot to /dev/mtdblock0')
 
 		# VisionFive 2: https://doc-en.rvspace.org/VisionFive2/PDF/VisionFive2_QSG.pdf
 		elif (( $G_HW_MODEL == 81 ))
@@ -1144,15 +1215,37 @@ Please choose whether your device have an active RTC or requires "fake-hwclock":
 			G_WHIP_YESNO '[ INFO ] EEPROM firmware update
 \nThis will, if required, install or upgrade the rpi-eeprom APT package and update bootloader and VL805 USB firmware on the RPi4 EEPROM.
 Further information: https://www.raspberrypi.org/documentation/hardware/raspberrypi/booteeprom.md
-\nDo you want to continue?' || return
+\nDo you want to continue?' || return 0
 			/boot/dietpi/func/dietpi-set_hardware rpi-eeprom
+
+		elif [[ $G_WHIP_RETURNED_VALUE == 'Update MMC bootloader' ]]; then
+
+			G_WHIP_YESNO "[ INFO ] MMC bootloader update
+\nThis will flash the U-Boot image of the installed linux-u-boot-* package to the MMC device $rootdev.
+\nDo you want to continue?" || return 0
+			# shellcheck disable=SC1091
+			. /usr/lib/u-boot/platform_install.sh
+			# Do not mute progress and error messages
+			eval "$(declare -f write_uboot_platform | sed -e 's| > /dev/null 2>&1||g' -e 's|status=none|status=progress|g')"
+			# shellcheck disable=SC2154
+			write_uboot_platform "$DIR" "$rootdev"
+
+		elif [[ $G_WHIP_RETURNED_VALUE == 'Update SPI bootloader' ]]; then
+
+			G_WHIP_YESNO '[ INFO ] SPI bootloader update
+\nThis will flash the U-Boot image of the installed linux-u-boot-* package to the SPI device /dev/mtdblock0.
+\nDo you want to continue?' || return 0
+			# shellcheck disable=SC1091
+			. /usr/lib/u-boot/platform_install.sh
+			# shellcheck disable=SC2154
+			G_EXEC_OUTPUT=1 G_EXEC dd if="$DIR/rkspi_loader.img" of=/dev/mtdblock0 oflag=direct conv=notrunc status=progress
 
 		elif [[ $G_WHIP_RETURNED_VALUE == 'Update bootloader' ]]; then
 
 			G_WHIP_YESNO '[ INFO ] SPI bootloader update
 \nThis will download and flash the latest U-Boot from StarFive to your VisionFive 2 SPI storage.
 Latest release notes: https://github.com/starfive-tech/VisionFive2/releases
-\nDo you want to continue?' || return
+\nDo you want to continue?' || return 0
 			/boot/dietpi/func/dietpi-set_hardware vf2-spi-update
 
 		elif [[ $G_WHIP_RETURNED_VALUE == 'I2C state' ]]; then
@@ -1658,7 +1751,7 @@ If unsure, set any value, 'Ondemand Down Factor' option on the next screen will 
 
 			G_WHIP_MENU "Hardware : $G_HW_MODEL_NAME\nCurrent  : HDMI: [$display_output_text] | VPU: [$display_output_text]\nMemory   : $gpu_mem_current MiB GPU | $ram_mem_current MiB RAM\nNB: GPU/RAM figures require a reboot after a change is made." || { Back_or_Exit 1; return 0; } # Display Options
 
-			case "$G_WHIP_RETURNED_VALUE" in
+			case $G_WHIP_RETURNED_VALUE in
 
 				'Headless') /boot/dietpi/func/dietpi-set_hardware headless 1 && REBOOT_REQUIRED=1;;
 				'Default') /boot/dietpi/func/dietpi-set_hardware headless 0 && REBOOT_REQUIRED=1;;
@@ -1685,7 +1778,7 @@ If unsure, set any value, 'Ondemand Down Factor' option on the next screen will 
 
 		G_WHIP_MENU 'Please select an option:' || { Back_or_Exit 0; return 0; } # Main menu
 
-		case "$G_WHIP_RETURNED_VALUE" in
+		case $G_WHIP_RETURNED_VALUE in
 
 			'Locale')
 
@@ -1712,7 +1805,7 @@ If unsure, set any value, 'Ondemand Down Factor' option on the next screen will 
 
 				G_WHIP_MSG 'NB: A keyboard must be physically plugged into the system, before its configuration can be changed.\n\nIf a keyboard is plugged in, please ignore this message. If not, plug one in ;)'
 				dpkg-reconfigure keyboard-configuration
-				setupcon --save # https://bugs.debian.org/cgi-bin/bugreport.cgi?bug=818065
+				setupcon --save # https://bugs.debian.org/818065
 			;;
 
 			*) G_DIETPI-NOTIFY 1 'An invalid "case" option was used. This is a bug, please report at: https://github.com/MichaIng/DietPi/issues'; exit 1;;
@@ -2133,7 +2226,6 @@ NB: All Ethernet connections will be temporarily dropped!' && Network_ApplyChang
 		WIFI_BITRATE=0
 		WIFI_SIGNALSTRENGTH=0
 		command -v hostapd > /dev/null && WIFI_HOTSPOT=1 || WIFI_HOTSPOT=0
-		WIFI_COUNTRYCODE='Unknown'
 		if (( $WIFI_HOTSPOT ))
 		then
 			WIFI_COUNTRYCODE=$(sed -n '/^[[:blank:]]*country_code=/{s/^[^=]*=//p;q}' /etc/hostapd/hostapd.conf)
@@ -2142,10 +2234,12 @@ NB: All Ethernet connections will be temporarily dropped!' && Network_ApplyChang
 		then
 			WIFI_COUNTRYCODE=$(sed -n '/^[[:blank:]]*REGDOMAIN=/{s/^[^=]*=//p;q}' /etc/default/crda)
 
-		elif command -v iw > /dev/null
+		elif [[ -f '/etc/wpa_supplicant/wpa_supplicant.conf' ]]
 		then
-			WIFI_COUNTRYCODE=$(iw reg get | mawk -F[\ :] '/country/{print $2;exit}')
+			WIFI_COUNTRYCODE=$(sed -n '/^[[:blank:]]*country=/{s/^[^=]*=//p;q}' /etc/wpa_supplicant/wpa_supplicant.conf)
 		fi
+		[[ ! $WIFI_COUNTRYCODE ]] && command -v iw > /dev/null && WIFI_COUNTRYCODE=$(iw reg get | mawk -F[\ :] '/country/{print $2;exit}')
+		[[ $WIFI_COUNTRYCODE ]] || WIFI_COUNTRYCODE='00'
 
 		# Convert CIDR integer to net mask, e.g. "192.168.0.100/24" (take "24") to "255.255.255.0"
 		cidr2mask()
@@ -2590,16 +2684,13 @@ This is mainly aimed at PINE A64 which may have a hardware issue that causes uns
 
 		fi
 
-		# Country code: On Debian Bookworm and from Linux 4.15 on, this setting is relevant for the WiFi Hotspot (hostapd) installation only: https://bugs.debian.org/1003903
-		if (( $WIFI_HOTSPOT )) || [[ -f '/lib/crda/crda' ]]
+		# Country code
+		G_WHIP_MENU_ARRAY+=('' '●─ Additional Options ')
+		if [[ $WIFI_COUNTRYCODE == '00' ]]
 		then
-			G_WHIP_MENU_ARRAY+=('' '●─ Additional Options ')
-			if [[ $WIFI_COUNTRYCODE == '00' ]]
-			then
-				G_WHIP_MENU_ARRAY+=('Country' ": [$WIFI_COUNTRYCODE] (Not set, please configure)")
-			else
-				G_WHIP_MENU_ARRAY+=('Country' ": [$WIFI_COUNTRYCODE]")
-			fi
+			G_WHIP_MENU_ARRAY+=('Country' ": [$WIFI_COUNTRYCODE] (Not set, please configure)")
+		else
+			G_WHIP_MENU_ARRAY+=('Country' ": [$WIFI_COUNTRYCODE]")
 		fi
 
 		G_WHIP_MENU_ARRAY+=('' '●─ Toggle State ')

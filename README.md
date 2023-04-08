@@ -330,6 +330,7 @@ Links to hardware and software manufacturers, sources and build instructions use
 - [ZeroTier](https://github.com/zerotier/ZeroTierOne)
 - [Navidrome](https://github.com/navidrome/navidrome)
 - [Homer](https://github.com/bastienwirtz/homer)
+- [microblog.pub](https://git.sr.ht/~tsileo/microblog.pub)
 
 ---
 

@@ -19,6 +19,7 @@ case $G_HW_ARCH_NAME in
 	'armv7l') export G_HW_ARCH=2;;
 	'aarch64') export G_HW_ARCH=3;;
 	'x86_64') export G_HW_ARCH=10;;
+	'riscv64') export G_HW_ARCH=11;;
 	*) G_DIETPI-NOTIFY 1 "Unsupported host system architecture \"$G_HW_ARCH_NAME\" detected, aborting..."; exit 1;;
 esac
 readonly G_PROGRAM_NAME='DietPi-Squeezelite_container_setup'
@@ -42,20 +43,18 @@ do
 	esac
 	shift
 done
-distro=
 case $DISTRO in
         5) distro='buster';;
 	6) distro='bullseye';;
 	7) distro='bookworm';;
 	*) G_DIETPI-NOTIFY 1 "Invalid distro \"$DISTRO\" passed, aborting..."; exit 1;;
 esac
-image=
-arch=
 case $ARCH in
 	1) image="DietPi_Container-ARMv6-${distro^}" arch='armv6l';;
 	2) image="DietPi_Container-ARMv7-${distro^}" arch='armv7l';;
 	3) image="DietPi_Container-ARMv8-${distro^}" arch='aarch64';;
 	10) image="DietPi_Container-x86_64-${distro^}" arch='x86_64';;
+	11) image='DietPi_Container-RISC-V-Sid' arch='riscv64';;
 	*) G_DIETPI-NOTIFY 1 "Invalid architecture \"$ARCH\" passed, aborting..."; exit 1;;
 esac
 
@@ -89,28 +88,31 @@ G_EXEC_OUTPUT=1 G_EXEC e2fsck -fp "${FP_LOOP}p1"
 G_EXEC mkdir rootfs
 G_EXEC mount "${FP_LOOP}p1" rootfs
 
-# Skip filesystem expansion
-G_EXEC rm rootfs/etc/systemd/system/local-fs.target.wants/dietpi-fs_partition_resize.service
+# Enable automated setup
+G_CONFIG_INJECT 'AUTO_SETUP_AUTOMATED=' 'AUTO_SETUP_AUTOMATED=1' rootfs/boot/dietpi.txt
 
-# Assure that build starts after DietPi-PostBoot
-[[ -d 'rootfs/etc/systemd/system/rc-local.service.d' ]] || G_EXEC mkdir rootfs/etc/systemd/system/rc-local.service.d
-G_EXEC eval 'echo -e '\''[Unit]\nAfter=dietpi-postboot.service'\'' > rootfs/etc/systemd/system/rc-local.service.d/dietpi.conf'
+# Force ARMv6 arch on Raspbian
+(( $ARCH == 1 )) && echo 'sed -i -e '\''/^G_HW_ARCH=/c\G_HW_ARCH=1'\'' -e '\''/^G_HW_ARCH_NAME=/c\G_HW_ARCH_NAME=armv6l'\'' /boot/dietpi/.hw_model' > rootfs/boot/Automation_Custom_PreScript.sh
+
+# Avoid DietPi-Survey uploads to not mess with the statistics
+G_EXEC rm rootfs/root/.ssh/known_hosts
+
+# Workaround invalid TERM on login
+# shellcheck disable=SC2016
+G_EXEC eval 'echo '\''infocmp "$TERM" > /dev/null 2>&1 || export TERM=dumb'\'' > rootfs/etc/bashrc.d/00-dietpi-build.sh'
+
+# Workaround for network connection checks
+G_CONFIG_INJECT 'CONFIG_CHECK_CONNECTION_IP=' 'CONFIG_CHECK_CONNECTION_IP=127.0.0.1' rootfs/boot/dietpi.txt
+G_CONFIG_INJECT 'CONFIG_CHECK_DNS_DOMAIN=' 'CONFIG_CHECK_DNS_DOMAIN=localhost' rootfs/boot/dietpi.txt
 
 # Automated build
-cat << _EOF_ > rootfs/etc/rc.local || exit 1
+cat << _EOF_ > rootfs/boot/Automation_Custom_Script.sh || exit 1
 #!/bin/dash
-infocmp "\$TERM" > /dev/null 2>&1 || TERM='dumb'
-if grep -q 'raspbian' /etc/os-release
-then
-	sed -i '/^G_HW_ARCH=/c\G_HW_ARCH=1' /boot/dietpi/.hw_model
-	sed -i '/^G_HW_ARCH_NAME=/c\G_HW_ARCH_NAME=armv6l' /boot/dietpi/.hw_model
-fi
 echo '[ INFO ] Running Squeezelite build script...'
 bash -c "\$(curl -sSf 'https://raw.githubusercontent.com/$G_GITOWNER/DietPi/$G_GITBRANCH/.build/software/squeezelite/build.bash')"
-mv -v '/tmp/squeezelite_$arch.deb' '/squeezelite_$arch.deb'
+mv -v '/tmp/squeezelite_$arch.deb' /
 poweroff
 _EOF_
-G_EXEC chmod +x rootfs/etc/rc.local
 
 ##########################################
 # Boot container
