@@ -54,7 +54,7 @@ case $ARCH in
 	'riscv64') image="DietPi_Container-RISC-V-Sid";;
 	*) G_DIETPI-NOTIFY 1 "Invalid architecture \"$ARCH\" passed, aborting..."; exit 1;;
 esac
-[[ $SOFTWARE =~ ^[0-9 ]+$ ]] || { G_DIETPI-NOTIFY 1 "Invalid software list \"$SOFTWARE\" passed, aborting..."; exit 1; }
+[[ $SOFTWARE =~ ^[0-9\ ]+$ ]] || { G_DIETPI-NOTIFY 1 "Invalid software list \"$SOFTWARE\" passed, aborting..."; exit 1; }
 
 ##########################################
 # Dependencies
