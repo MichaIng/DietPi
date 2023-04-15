@@ -40,7 +40,7 @@ do
 	case $1 in
 		'-d') shift; DISTRO=$1;;
 		'-a') shift; ARCH=$1;;
-		'-s') shift; SOFTWARE=$1
+		'-s') shift; SOFTWARE=$1;;
 		*) G_DIETPI-NOTIFY 1 "Invalid input \"$1\", aborting..."; exit 1;;
 	esac
 	shift
