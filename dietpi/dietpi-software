@@ -955,7 +955,7 @@ Available commands:
 		aSOFTWARE_CATX[$software_id]=5
 		aSOFTWARE_DOCS[$software_id]='https://dietpi.com/docs/software/gaming/#box86'
 		# ARMv7 only
-		(( $G_HW_ARCH == 7 )) || aSOFTWARE_AVAIL_G_HW_ARCH[$software_id,$G_HW_ARCH]=0
+		(( $G_HW_ARCH == 2 )) || aSOFTWARE_AVAIL_G_HW_ARCH[$software_id,$G_HW_ARCH]=0
 		#------------------
 		software_id=197
 		aSOFTWARE_NAME[$software_id]='Box64'
@@ -3872,7 +3872,7 @@ _EOF_
 			Create_User -d /mnt/dietpi_userdata/synapse synapse
 
 			# Service
-			cat << _EOF_ > /etc/systemd/system/synapse.service
+			cat << '_EOF_' > /etc/systemd/system/synapse.service
 [Unit]
 Description=Synapse (DietPi)
 Wants=network-online.target
@@ -3883,7 +3883,7 @@ Type=notify
 SyslogIdentifier=Synapse
 User=synapse
 WorkingDirectory=/mnt/dietpi_userdata/synapse
-ExecStart=$(command -v python3) -m synapse.app.homeserver -c homeserver.yaml -c homeserver.yaml.d/
+ExecStart=/usr/bin/python3 -m synapse.app.homeserver -c homeserver.yaml -c homeserver.yaml.d/
 ExecReload=/bin/kill -HUP \$MAINPID
 
 [Install]
@@ -4158,7 +4158,7 @@ _EOF_
 		if To_Install 16 microblog-pub # microblog.pub
 		then
 			local micro_name='microblog-pub'
-			local micro_python_version='3.10.9'
+			local micro_python_version='3.10.11' # https://github.com/pyenv/pyenv/tree/master/plugins/python-build/share/python-build
 			local micro_pyenv_dir="/opt/$micro_name"
 			local micro_pyenv_activate_file="$micro_pyenv_dir/pyenv-activate.sh"
 			local micro_virtualenv="$micro_pyenv_dir/.virtual_path"
@@ -4166,21 +4166,7 @@ _EOF_
 			local micro_systemd="/etc/systemd/system/$micro_name.service"
 			local micro_functions="/etc/bashrc.d/$micro_name.sh"
 
-			# User
-			Create_User -d "$micro_data_dir" "$micro_name"
-
-			# Dependencies
-			# - gcc, libc6-dev, make, libssl-dev, zlib1g-dev for Python build. libbz2-dev; libreadline-dev, libsqlite3-dev, liblzma-dev to suppress warnings; libffi-dev for ModuleNotFoundError: No module named '_ctypes'
-			aDEPS=('gcc' 'libc6-dev' 'make' 'libssl-dev' 'zlib1g-dev' 'libbz2-dev' 'libreadline-dev' 'libsqlite3-dev' 'liblzma-dev' 'libffi-dev')
-
-			# 1. Create a Python 3.10 environment via pyenv
-			# - https://python-poetry.org/docs/managing-environments/
-			Download_Install 'https://github.com/pyenv/pyenv/archive/master.tar.gz'
-			# - Start with fresh instance to allow clean pyenv and Python updates and fix broken instances.
-			[[ -d $micro_pyenv_dir ]] && G_EXEC rm -R "$micro_pyenv_dir"
-			G_EXEC mv pyenv-master "$micro_pyenv_dir"
-
-			# 2. Clone the repo into data dir
+			# Clone the repo into data dir
 			if [[ ! -d $micro_data_dir ]]
 			then
 				G_EXEC_OUTPUT=1 G_EXEC git clone 'https://git.sr.ht/~tsileo/microblog.pub' "$micro_data_dir"
@@ -4189,11 +4175,39 @@ _EOF_
 				G_EXEC sed -i 's/8000/8007/' "$micro_data_dir/data/tests.toml"
 			fi
 
-			# 3. Disable pip cache
+			# Disable pip cache
 			G_EXEC mkdir -p "$micro_data_dir/.pip"
 			G_EXEC eval "echo -e '[global]\nno-cache-dir=true' > '$micro_data_dir/.pip/pip.conf'"
 
-			# 4. Generate script to activate pyenv
+			# User
+			Create_User -d "$micro_data_dir" "$micro_name"
+			G_EXEC chown -R "$micro_name:$micro_name" "$micro_data_dir"
+
+			# Dependencies
+			# - gcc, libc6-dev, make, libssl-dev, zlib1g-dev for Python build. libbz2-dev; libreadline-dev, libsqlite3-dev, liblzma-dev to suppress warnings; libffi-dev for ModuleNotFoundError: No module named '_ctypes'
+			aDEPS=('gcc' 'libc6-dev' 'make' 'libssl-dev' 'zlib1g-dev' 'libbz2-dev' 'libreadline-dev' 'libsqlite3-dev' 'liblzma-dev' 'libffi-dev')
+			# - All but x86_64: g++ for libsass
+			(( $G_HW_ARCH == 10 )) || aDEPS+=('g++')
+			# - ARMv6/7/RISC-V: Rust and pkg-config required for cryptography
+			if [[ $G_HW_ARCH =~ ^1|2|11$ ]]
+			then
+				# pkg-config for cryptography, libjpeg62-turbo-dev for Pillow and libxslt1-dev for lxml
+				aDEPS+=('pkg-config' 'libjpeg62-turbo-dev' 'libxslt1-dev')
+				# Rust for cryptography
+				G_EXEC curl -sSf 'https://sh.rustup.rs/' -o rustup-init.sh
+				G_EXEC chmod +x rustup-init.sh
+				G_EXEC_OUTPUT=1 G_EXEC sudo -u "$micro_name" ./rustup-init.sh -y --profile minimal
+				G_EXEC rm rustup-init.sh
+			fi
+
+			# Create a Python 3.10 environment via pyenv
+			# - https://python-poetry.org/docs/managing-environments/
+			Download_Install 'https://github.com/pyenv/pyenv/archive/master.tar.gz'
+			# - Start with fresh instance to allow clean pyenv and Python updates and fix broken instances.
+			[[ -d $micro_pyenv_dir ]] && G_EXEC rm -R "$micro_pyenv_dir"
+			G_EXEC mv pyenv-master "$micro_pyenv_dir"
+
+			# Generate script to activate pyenv
 			echo "#!/bin/dash
 cd $micro_pyenv_dir || return 1
 export PYENV_ROOT='$micro_pyenv_dir' || return 1
@@ -4201,10 +4215,11 @@ export PATH=\"\$PYENV_ROOT/bin:\$PATH\" || return 1
 eval \"\$(pyenv init --path)\" || return 1
 eval \"\$(pyenv init -)\" || return 1
 cd $micro_data_dir
+[ -f '.cargo/env' ] && . .cargo/env
 PS1=\"(microblog.pub) \$PS1\"" > "$micro_pyenv_activate_file"
 
-			# 5. Install Python 3.10 and Poetry
-			G_EXEC chown -R "$micro_name:$micro_name" "$micro_pyenv_dir" "$micro_data_dir"
+			# Install Python 3.10 and Poetry
+			G_EXEC chown -R "$micro_name:$micro_name" "$micro_pyenv_dir"
 			G_EXEC_DESC='Installing Python with Poetry into pyenv'
 			G_EXEC_OUTPUT=1 G_EXEC sudo -u "$micro_name" dash -c "
 . $micro_pyenv_activate_file || exit 1
@@ -4223,7 +4238,7 @@ poetry env info | grep -oP '(?<=^Path:\s).*/virtualenvs/.*' > '$micro_virtualenv
 			G_EXEC_DESC='Checking for Poetry virtualenv' G_EXEC eval '[[ $VENV_DIR ]]'
 			G_EXEC rm "$micro_virtualenv"
 
-			# 6. Generate functions for later configuration and install to profile
+			# Generate functions for later configuration and install to profile
 			cat << _EOF_ > "$micro_functions"
 #!/bin/dash
 microblog-pub()
@@ -4245,7 +4260,7 @@ where:
 	sudo systemctl restart '$micro_name'
 }
 _EOF_
-			# 7. Generate systemd service
+			# Generate systemd service
 			cat << _EOF_ > "$micro_systemd"
 [Unit]
 Description=microblog.pub (DietPi)
@@ -6886,7 +6901,7 @@ _EOF_
 
 			# Service
 			Remove_SysV webiopi 1
-			cat << _EOF_ > /etc/systemd/system/webiopi.service
+			cat << '_EOF_' > /etc/systemd/system/webiopi.service
 [Unit]
 Description=WebIOPi (DietPi)
 Wants=network-online.target
@@ -6894,7 +6909,7 @@ After=network-online.target
 
 [Service]
 SyslogIdentifier=WebIOPi
-ExecStart=$(command -v python3) -m webiopi -c /etc/webiopi/config
+ExecStart=/usr/bin/python3 -m webiopi -c /etc/webiopi/config
 
 # Hardening
 PrivateTmp=true
@@ -8925,7 +8940,7 @@ _EOF_
 			# - Remove "Group=medusa" which does not exist, instead fallback to primary group "dietpi"
 			G_EXEC sed -i '/^[[:blank:]]*Group=/d' /etc/systemd/system/medusa.service
 			# - Launch from our install and data directory
-			G_CONFIG_INJECT 'ExecStart=' "ExecStart=$(command -v python3) /mnt/dietpi_userdata/medusa/start.py -q --nolaunch --datadir=/mnt/dietpi_userdata/medusa" /etc/systemd/system/medusa.service
+			G_CONFIG_INJECT 'ExecStart=' 'ExecStart=/usr/bin/python3 /mnt/dietpi_userdata/medusa/start.py -q --nolaunch --datadir=/mnt/dietpi_userdata/medusa' /etc/systemd/system/medusa.service
 
 			# Permissions
 			G_EXEC chown -R medusa:dietpi /mnt/dietpi_userdata/medusa
@@ -9236,7 +9251,7 @@ _EOF_
 			#	"-d":	Run in daemon mode without terminal and browser start (requires "-f </path/to/config.ini>")
 			#		NB: In systemd unit leads to unreliable long taking webserver start. A new process is forked which allows web access, but sometimes after very long time, sometimes never: https://github.com/sabnzbd/sabnzbd/issues/1283
 			#	"-n":	Do no start browser with daemon
-			cat << _EOF_ > /etc/systemd/system/sabnzbd.service
+			cat << '_EOF_' > /etc/systemd/system/sabnzbd.service
 [Unit]
 Description=SABnzbd (DietPi)
 Documentation=https://sabnzbd.org/wiki/
@@ -9246,7 +9261,7 @@ After=network-online.target remote-fs.target
 [Service]
 SyslogIdentifier=SABnzbd
 User=sabnzbd
-ExecStart=$(command -v python3) -OO /etc/sabnzbd/SABnzbd.py -f /etc/sabnzbd/sabnzbd.ini -n --disable-file-log
+ExecStart=/usr/bin/python3 -OO /etc/sabnzbd/SABnzbd.py -f /etc/sabnzbd/sabnzbd.ini -n --disable-file-log
 Restart=on-failure
 
 [Install]
@@ -9620,7 +9635,7 @@ _EOF_
 				# ARMv7
 				else
 					local url=$(curl -sSfL 'https://api.github.com/repos/Radarr/Radarr/releases/latest' | mawk -F\" '/"browser_download_url": .*linux-core-arm\.tar\.gz"/{print $4}')
-					local fallback_url='https://github.com/Radarr/Radarr/releases/download/v4.3.2.6857/Radarr.master.4.3.2.6857.linux-core-arm.tar.gz'
+					local fallback_url='https://github.com/Radarr/Radarr/releases/download/v4.4.4.7068/Radarr.master.4.4.4.7068.linux-core-arm.tar.gz'
 				fi
 
 				# ARMv8
@@ -9727,7 +9742,7 @@ _EOF_
 				# ARMv7
 				else
 					local url=$(curl -sSfL 'https://api.github.com/repos/Lidarr/Lidarr/releases/latest' | mawk -F\" '/"browser_download_url": .*linux-core-arm\.tar\.gz"/{print $4}')
-					local fallback_url='https://github.com/Lidarr/Lidarr/releases/download/v1.0.2.2592/Lidarr.master.1.0.2.2592.linux-core-arm.tar.gz'
+					local fallback_url='https://github.com/Lidarr/Lidarr/releases/download/v1.1.4.3027/Lidarr.master.1.1.4.3027.linux-core-arm.tar.gz'
 				fi
 
 				# ARMv8
@@ -9795,25 +9810,23 @@ _EOF_
 			G_EXEC chown -R lidarr:dietpi /mnt/dietpi_userdata/lidarr /opt/lidarr
 		fi
 
-		if To_Install 180 bazarr # Bazarr
+		if To_Install 180 bazarr # Bazarr: https://wiki.bazarr.media/Getting-Started/Installation/Linux/linux/
 		then
-			# https://wiki.bazarr.media/Getting-Started/Installation/Linux/linux/
+			# APT deps
+			(( $G_HW_ARCH < 3 )) && aDEPS=('libatlas3-base') # numpy from piwheels: https://piwheels.org/project/numpy/
+
+			# Download
 			Download_Install 'https://github.com/morpheus65535/bazarr/releases/latest/download/bazarr.zip' bazarr
 
-			# Dependencies
-			(( $G_HW_ARCH < 3 )) && G_AGI libatlas3-base # numpy from piwheels deps: https://piwheels.org/project/numpy/
-			(( $G_HW_ARCH == 3 || ( $G_HW_ARCH == 10 && $G_DISTRO > 5 ) )) && G_AGI gcc # webrtcvad-wheels build on ARMv8 and x86_64 Bullseye+: https://pypi.org/project/webrtcvad-wheels/#files
+			# Python deps
+			G_EXEC_OUTPUT=1 G_EXEC pip3 install -Ur bazarr/requirements.txt
 
-			G_EXEC cd bazarr
-			G_EXEC_OUTPUT=1 G_EXEC pip3 install -Ur requirements.txt
-			G_EXEC cd ..
-
-			# Always perform a clean full reinstall
+			# Install: Remove previous instance on reinstall
 			[[ -d '/opt/bazarr' ]] && G_EXEC rm -R /opt/bazarr
 			G_EXEC mv bazarr /opt
 
 			# Data dir
-			[[ -d '/mnt/dietpi_userdata/bazarr' ]] || G_EXEC mkdir /mnt/dietpi_userdata/bazarr
+			G_EXEC mkdir -p /mnt/dietpi_userdata/bazarr
 
 			# Log to RAM
 			G_EXEC rm -Rf /mnt/dietpi_userdata/bazarr/log
@@ -9823,10 +9836,10 @@ _EOF_
 			Create_User -g dietpi -d /mnt/dietpi_userdata/bazarr bazarr
 
 			# Permissions
-			G_EXEC chown -R bazarr:dietpi /mnt/dietpi_userdata/bazarr /opt/bazarr
+			G_EXEC chown -R bazarr:0 /mnt/dietpi_userdata/bazarr /opt/bazarr
 
-			# Service: https://github.com/morpheus65535/bazarr/wiki/Autostart-on-Linux-Windows-MacOS-FreeBSD#systemd-service-file-for-debian-ubuntu
-			cat << _EOF_ > /etc/systemd/system/bazarr.service
+			# Service: https://wiki.bazarr.media/Getting-Started/Autostart/Linux/linux/
+			cat << '_EOF_' > /etc/systemd/system/bazarr.service
 [Unit]
 Description=Bazarr (DietPi)
 Wants=network-online.target
@@ -9837,7 +9850,7 @@ SyslogIdentifier=Bazarr
 User=bazarr
 UMask=002
 LogsDirectory=bazarr
-ExecStart=$(command -v python3) /opt/bazarr/bazarr.py -c /mnt/dietpi_userdata/bazarr
+ExecStart=/usr/bin/python3 /opt/bazarr/bazarr.py -c /mnt/dietpi_userdata/bazarr
 
 # Hardening
 ProtectSystem=strict
@@ -9905,7 +9918,7 @@ _EOF_
 			[[ -d '/mnt/dietpi_userdata/tautulli' ]] || G_EXEC mkdir /mnt/dietpi_userdata/tautulli
 
 			# Service: https://github.com/Tautulli/Tautulli/blob/master/init-scripts/init.systemd
-			cat << _EOF_ > /etc/systemd/system/tautulli.service
+			cat << '_EOF_' > /etc/systemd/system/tautulli.service
 [Unit]
 Description=Tautulli (DietPi)
 Wants=network-online.target
@@ -9914,7 +9927,7 @@ After=network-online.target
 [Service]
 SyslogIdentifier=Tautulli
 User=tautulli
-ExecStart=$(command -v python3) /opt/tautulli/Tautulli.py -q --nolaunch --config /mnt/dietpi_userdata//tautulli/config.ini --datadir /mnt/dietpi_userdata/tautulli
+ExecStart=/usr/bin/python3 /opt/tautulli/Tautulli.py -q --nolaunch --config /mnt/dietpi_userdata//tautulli/config.ini --datadir /mnt/dietpi_userdata/tautulli
 
 [Install]
 WantedBy=multi-user.target
@@ -10216,8 +10229,8 @@ _EOF_
 					then
 						G_AGI libtiff5 libopenjp2-7 libxcb1 # ARMv6/7: Runtime libs for Pillow from piwheels (libtiff5 pulls libjpeg62-turbo)
 					else
-						# Bookworm: Most wheels need to be compiled: gcc and libffi-dev for cffi, libssl-dev and Rust for cryptography and bcrypt, make for PyNaCl, libjpeg62-turbo-dev for Pillow
-						G_AGI gcc libffi-dev libssl-dev make libjpeg62-turbo-dev
+						# Bookworm: Most wheels need to be compiled: gcc and libffi-dev for cffi, libssl-dev and Rust for cryptography and bcrypt, make for PyNaCl, libjpeg62-turbo-dev for Pillow, pkg-config for cryptography
+						G_AGI gcc libffi-dev libssl-dev make libjpeg62-turbo-dev pkg-config
 						G_EXEC curl -sSf 'https://sh.rustup.rs/' -o rustup-init.sh
 						G_EXEC chmod +x rustup-init.sh
 						G_EXEC_OUTPUT=1 G_EXEC ./rustup-init.sh -y --profile minimal
@@ -10250,7 +10263,7 @@ _EOF_
 			G_EXEC_OUTPUT=1 G_EXEC pip3 install -Ur requirements.txt
 
 			# Service
-			cat << _EOF_ > /etc/systemd/system/htpc-manager.service
+			cat << '_EOF_' > /etc/systemd/system/htpc-manager.service
 [Unit]
 Description=HTPC Manager (DietPi)
 Wants=network-online.target
@@ -10258,7 +10271,7 @@ After=network-online.target
 
 [Service]
 SyslogIdentifier=HTPC Manager
-ExecStart=$(command -v python3) -OO /mnt/dietpi_userdata/htpc-manager/Htpc.py
+ExecStart=/usr/bin/python3 -OO /mnt/dietpi_userdata/htpc-manager/Htpc.py
 
 [Install]
 WantedBy=multi-user.target
@@ -10637,7 +10650,7 @@ _EOF_
 				*) local arch='arm-6';;
 			esac
 
-			local fallback_url="https://github.com/go-gitea/gitea/releases/download/v1.19.0/gitea-1.19.0-linux-$arch.xz"
+			local fallback_url="https://github.com/go-gitea/gitea/releases/download/v1.19.1/gitea-1.19.1-linux-$arch.xz"
 			Download_Install "$(curl -sSfL 'https://api.github.com/repos/go-gitea/gitea/releases/latest' | mawk -F\" "/\"browser_download_url\": \".*\/gitea-[^\"\/]*-linux-$arch\.xz\"/{print \$4}")" /mnt/dietpi_userdata/gitea/gitea
 
 			# User
@@ -11151,7 +11164,7 @@ _EOF_
 				# v3 drops PHP 7.4 support: https://github.com/TasmoAdmin/TasmoAdmin/releases/tag/v3.0.0
 				if (( $G_DISTRO > 6 ))
 				then
-					local fallback_url='https://github.com/TasmoAdmin/TasmoAdmin/releases/download/v3.0.1/tasmoadmin_v3.0.1.tar.gz'
+					local fallback_url='https://github.com/TasmoAdmin/TasmoAdmin/releases/download/v3.0.2/tasmoadmin_v3.0.2.tar.gz'
 					Download_Install "$(curl -sSfL 'https://api.github.com/repos/TasmoAdmin/TasmoAdmin/releases/latest' | mawk -F\" '/"browser_download_url": ".*\/tasmoadmin_v[^"\/]*\.tar\.gz"$/{print $4}')"
 
 				# v2 drops PHP <7.4 support: https://github.com/TasmoAdmin/TasmoAdmin/releases/tag/v2.0.0
@@ -11229,13 +11242,13 @@ _EOF_
 			# - All: libffi-dev to solve "ModuleNotFoundError: No module named '_ctypes'", for python-slugify==4.0.1 build on ARMv8/x86_64 and cffi build on ARMv6/7 Bookworm
 			aDEPS=('gcc' 'libc6-dev' 'make' 'libssl-dev' 'zlib1g-dev' 'libbz2-dev' 'libreadline-dev' 'libsqlite3-dev' 'liblzma-dev' 'libffi-dev')
 			mapfile -t -d' ' -O "${#aDEPS[@]}" aDEPS < <(echo -n "$custom_apt_deps")
-			# - ARMv6/7
+			# - ARMv6/7/RISC-V
 			G_EXEC mkdir -p "$ha_home"
 			G_EXEC chown "$ha_user:$ha_user" "$ha_home"
-			if [[ $G_HW_ARCH == [12] ]]
+			if [[ $G_HW_ARCH =~ ^1|2|11$ ]]
 			then
-				# libjpeg62-turbo-dev for Pillow, libatlas-base-dev for numpy
-				aDEPS+=('libjpeg62-turbo-dev' 'libatlas-base-dev')
+				# libjpeg62-turbo-dev for Pillow, libatlas-base-dev for numpy, pkg-config for cryptography
+				aDEPS+=('libjpeg62-turbo-dev' 'libatlas-base-dev' 'pkg-config')
 				# Rust for cryptography
 				G_EXEC curl -sSf 'https://sh.rustup.rs/' -o rustup-init.sh
 				G_EXEC chmod +x rustup-init.sh
