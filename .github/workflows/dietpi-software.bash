@@ -114,17 +114,21 @@ for i in $SOFTWARE; do G_CONFIG_INJECT "AUTO_SETUP_INSTALL_SOFTWARE_ID=$i" "AUTO
 G_EXEC mkdir rootfs/etc/systemd/system/redis-server.service.d
 G_EXEC eval 'echo -e '\''[Service]\nPrivateUsers=0'\'' > rootfs/etc/systemd/system/redis-server.service.d/dietpi-container.conf'
 
-# Workaround for failing MariaDB install on Buster where it somehow fails to have write access to the symlinked data directory even that it is correctly owned
-[[ $DISTRO == 'buster' ]] && sed -i '/# Start DietPi-Software/a\sed -i -e '\''s|rm -Rf /var/lib/mysql|rm -Rf /mnd/dietpi_userdata/mysql|'\'' -e '\''s|ln -s /mnt/dietpi_userdata/mysql /var/lib/mysql|ln -s /var/lib/mysql /mnt/dietpi_userdata/mysql|'\'' /boot/dietpi/dietpi-software' rootfs/boot/dietpi/dietpi-login && grep mysql rootfs/boot/dietpi/dietpi-login
+# Workarounds for failing MariaDB install on Buster within GitHub Actions runner (both cannot be replicated on my test systems with and without QEMU):
+# - mysqld does not have write access if our symlink is in place, even that directory permissions are correct.
+# - Type=notify leads to a service start timeout while mysqld has actually fully started.
+if [[ $DISTRO == 'buster' ]]
+then
+	G_EXEC sed -i '/# Start DietPi-Software/a\sed -i -e '\''s|rm -Rf /var/lib/mysql|rm -Rf /mnd/dietpi_userdata/mysql|'\'' -e '\''s|ln -s /mnt/dietpi_userdata/mysql /var/lib/mysql|ln -s /var/lib/mysql /mnt/dietpi_userdata/mysql|'\'' /boot/dietpi/dietpi-software' rootfs/boot/dietpi/dietpi-login
+	G_EXEC mkdir rootfs/etc/systemd/system/mariadb.service.d
+	G_EXEC eval 'echo -e '\''[Service]\nType=exec'\'' > rootfs/etc/systemd/system/mariadb.service.d/dietpi-container.conf'
+fi
 
 # Success flag and shutdown
 G_EXEC eval 'echo -e '\''#!/bin/dash\n/boot/dietpi/dietpi-services start\n> /success\npoweroff'\'' > rootfs/boot/Automation_Custom_Script.sh'
 
 # Shutdown as well on failure
-G_EXEC sed -i 's|Prompt_on_Failure$|{ journalctl -e; cat /var/log/mysql/error.log; ls -al /mnt/dietpi_userdata/mysql; poweroff; }|' rootfs/boot/dietpi/dietpi-login
-
-# Debug
-ss -tulpn
+G_EXEC sed -i 's|Prompt_on_Failure$|{ journalctl -e; ss -tlpn; poweroff; }|' rootfs/boot/dietpi/dietpi-login
 
 ##########################################
 # Boot container
