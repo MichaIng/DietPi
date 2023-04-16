@@ -119,6 +119,6 @@ G_EXEC sed -i 's/Prompt_on_Failure$/poweroff/' rootfs/boot/dietpi/dietpi-login
 ##########################################
 # Boot container
 ##########################################
-systemd-nspawn -bD rootfs
+systemd-nspawn -bD rootfs -n
 [[ -f 'rootfs/success' ]] || exit 1
 }
