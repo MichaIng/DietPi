@@ -86,43 +86,46 @@ G_EXEC_OUTPUT=1 G_EXEC e2fsck -fp "${FP_LOOP}p1"
 G_EXEC mkdir rootfs
 G_EXEC mount "${FP_LOOP}p1" rootfs
 
-# Start systemd-networkd on container host and guest for automatic veth setup
-G_EXEC systemctl start systemd-networkd
-G_EXEC eval 'echo -e '\''#!/bin/dash\nsystemctl --no-block start systemd-networkd'\'' > rootfs/boot/Automation_Custom_PreScript.sh'
-
 # Force ARMv6 arch on Raspbian
-(( $ARCH == 1 )) && echo 'sed -i -e '\''/^G_HW_ARCH=/c\G_HW_ARCH=1'\'' -e '\''/^G_HW_ARCH_NAME=/c\G_HW_ARCH_NAME=armv6l'\'' /boot/dietpi/.hw_model' >> rootfs/boot/Automation_Custom_PreScript.sh
+(( $ARCH == 1 )) && echo 'sed -i -e '\''/^G_HW_ARCH=/c\G_HW_ARCH=1'\'' -e '\''/^G_HW_ARCH_NAME=/c\G_HW_ARCH_NAME=armv6l'\'' /boot/dietpi/.hw_model' > rootfs/boot/Automation_Custom_PreScript.sh
 
 # Workaround invalid TERM on login
 # shellcheck disable=SC2016
 G_EXEC eval 'echo '\''infocmp "$TERM" > /dev/null 2>&1 || export TERM=dumb'\'' > rootfs/etc/bashrc.d/00-dietpi-ci.sh'
 
+# Enable automated setup
+G_CONFIG_INJECT 'AUTO_SETUP_AUTOMATED=' 'AUTO_SETUP_AUTOMATED=1' rootfs/boot/dietpi.txt
+
 # Workaround for network connection checks
 G_CONFIG_INJECT 'CONFIG_CHECK_CONNECTION_IP=' 'CONFIG_CHECK_CONNECTION_IP=127.0.0.1' rootfs/boot/dietpi.txt
 G_CONFIG_INJECT 'CONFIG_CHECK_DNS_DOMAIN=' 'CONFIG_CHECK_DNS_DOMAIN=localhost' rootfs/boot/dietpi.txt
-
-# Enable automated setup
-G_CONFIG_INJECT 'AUTO_SETUP_AUTOMATED=' 'AUTO_SETUP_AUTOMATED=1' rootfs/boot/dietpi.txt
 
 # Apply Git branch
 G_CONFIG_INJECT 'DEV_GITBRANCH=' "DEV_GITBRANCH=$G_GITBRANCH" rootfs/boot/dietpi.txt
 G_CONFIG_INJECT 'DEV_GITOWNER=' "DEV_GITOWNER=$G_GITOWNER" rootfs/boot/dietpi.txt
 
-# Apply software IDs to install
-for i in $SOFTWARE; do G_CONFIG_INJECT "AUTO_SETUP_INSTALL_SOFTWARE_ID=$i" "AUTO_SETUP_INSTALL_SOFTWARE_ID=$i" rootfs/boot/dietpi.txt; done
-
 # Avoid DietPi-Survey uploads to not mess with the statistics
 G_EXEC rm rootfs/root/.ssh/known_hosts
 
+# Apply software IDs to install
+for i in $SOFTWARE; do G_CONFIG_INJECT "AUTO_SETUP_INSTALL_SOFTWARE_ID=$i" "AUTO_SETUP_INSTALL_SOFTWARE_ID=$i" rootfs/boot/dietpi.txt; done
+
+# Workaround for failing Redis as of PrivateUsers=true leading to "Failed to set up user namespacing"
+G_EXEC mkdir rootfs/etc/systemd/system/redis-server.service.d
+G_EXEC eval 'echo -e '\''[Service]\nPrivateUsers=0'\'' > rootfs/etc/systemd/system/redis-server.service.d/dietpi-container.conf'
+
 # Success flag and shutdown
-G_EXEC eval 'echo -e '\''#!/bin/dash\n> /success\npoweroff'\'' > rootfs/boot/Automation_Custom_Script.sh'
+G_EXEC eval 'echo -e '\''#!/bin/dash\n/boot/dietpi/dietpi-services start\n> /success\npoweroff'\'' > rootfs/boot/Automation_Custom_Script.sh'
 
 # Shutdown as well on failure
-G_EXEC sed -i 's/Prompt_on_Failure$/poweroff/' rootfs/boot/dietpi/dietpi-login
+G_EXEC sed -i 's|Prompt_on_Failure$|{ journalctl -e; cat /var/log/mysql/error.log; poweroff; }|' rootfs/boot/dietpi/dietpi-login
+
+# Debug
+ss -tulpn
 
 ##########################################
 # Boot container
 ##########################################
-systemd-nspawn -bD rootfs -n
+systemd-nspawn -bD rootfs
 [[ -f 'rootfs/success' ]] || exit 1
 }
