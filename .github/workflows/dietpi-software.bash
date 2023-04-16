@@ -91,7 +91,7 @@ G_EXEC mount "${FP_LOOP}p1" rootfs
 
 # Workaround invalid TERM on login
 # shellcheck disable=SC2016
-G_EXEC eval 'echo '\''infocmp "$TERM" > /dev/null 2>&1 || export TERM=dumb'\'' > rootfs/etc/bashrc.d/00-dietpi-build.sh'
+G_EXEC eval 'echo '\''infocmp "$TERM" > /dev/null 2>&1 || export TERM=dumb'\'' > rootfs/etc/bashrc.d/00-dietpi-ci.sh'
 
 # Workaround for network connection checks
 G_CONFIG_INJECT 'CONFIG_CHECK_CONNECTION_IP=' 'CONFIG_CHECK_CONNECTION_IP=127.0.0.1' rootfs/boot/dietpi.txt
@@ -114,7 +114,7 @@ G_EXEC rm rootfs/root/.ssh/known_hosts
 G_EXEC eval 'echo -e '\''#!/bin/dash\n> /success\npoweroff'\'' > rootfs/boot/Automation_Custom_Script.sh'
 
 # Shutdown as well on failure
-G_EXEC sed -i 's/Prompt_on_Failure$/reboot/' rootfs/boot/dietpi/dietpi-login
+G_EXEC sed -i 's/Prompt_on_Failure$/poweroff/' rootfs/boot/dietpi/dietpi-login
 
 ##########################################
 # Boot container
