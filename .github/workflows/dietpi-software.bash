@@ -86,8 +86,12 @@ G_EXEC_OUTPUT=1 G_EXEC e2fsck -fp "${FP_LOOP}p1"
 G_EXEC mkdir rootfs
 G_EXEC mount "${FP_LOOP}p1" rootfs
 
+# Start systemd-networkd on container host and guest for automatic veth setup
+G_EXEC systemctl start systemd-networkd
+G_EXEC eval 'echo -e '\''#!/bin/dash\nsystemctl start systemd-networkd'\'' > rootfs/boot/Automation_Custom_PreScript.sh'
+
 # Force ARMv6 arch on Raspbian
-(( $ARCH == 1 )) && echo 'sed -i -e '\''/^G_HW_ARCH=/c\G_HW_ARCH=1'\'' -e '\''/^G_HW_ARCH_NAME=/c\G_HW_ARCH_NAME=armv6l'\'' /boot/dietpi/.hw_model' > rootfs/boot/Automation_Custom_PreScript.sh
+(( $ARCH == 1 )) && echo 'sed -i -e '\''/^G_HW_ARCH=/c\G_HW_ARCH=1'\'' -e '\''/^G_HW_ARCH_NAME=/c\G_HW_ARCH_NAME=armv6l'\'' /boot/dietpi/.hw_model' >> rootfs/boot/Automation_Custom_PreScript.sh
 
 # Workaround invalid TERM on login
 # shellcheck disable=SC2016
