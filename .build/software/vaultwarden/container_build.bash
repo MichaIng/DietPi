@@ -117,6 +117,6 @@ _EOF_
 ##########################################
 # Boot container
 ##########################################
-systemd-nspawn -bD rootfs --bind="$FP_LOOP"{,p1} --bind=/dev/disk
+systemd-nspawn -bD rootfs
 [[ -f rootfs/vaultwarden_$arch.deb ]] || exit 1
 }

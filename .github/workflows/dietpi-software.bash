@@ -22,7 +22,7 @@ case $G_HW_ARCH_NAME in
 	'riscv64') export G_HW_ARCH=11;;
 	*) G_DIETPI-NOTIFY 1 "Unsupported host system architecture \"$G_HW_ARCH_NAME\" detected, aborting..."; exit 1;;
 esac
-readonly G_PROGRAM_NAME='DietPi-Gogs_container_setup'
+readonly G_PROGRAM_NAME='DietPi-Software_test_setup'
 G_CHECK_ROOT_USER
 G_CHECK_ROOTFS_RW
 readonly FP_ORIGIN=$PWD # Store origin dir
@@ -34,29 +34,27 @@ G_EXEC cd "$FP_ORIGIN" # Process everything in origin dir instead of /tmp/$G_PRO
 ##########################################
 DISTRO=
 ARCH=
+SOFTWARE=
 while (( $# ))
 do
 	case $1 in
 		'-d') shift; DISTRO=$1;;
 		'-a') shift; ARCH=$1;;
+		'-s') shift; SOFTWARE=$1;;
 		*) G_DIETPI-NOTIFY 1 "Invalid input \"$1\", aborting..."; exit 1;;
 	esac
 	shift
 done
-case $DISTRO in
-        5) distro='buster';;
-	6) distro='bullseye';;
-	7) distro='bookworm';;
-	*) G_DIETPI-NOTIFY 1 "Invalid distro \"$DISTRO\" passed, aborting..."; exit 1;;
-esac
+[[ $DISTRO =~ ^'buster'|'bullseye'|'bookworm'$ ]] || { G_DIETPI-NOTIFY 1 "Invalid distro \"$DISTRO\" passed, aborting..."; exit 1; }
 case $ARCH in
-	1) image="DietPi_Container-ARMv6-${distro^}" arch='armv6l';;
-	2) image="DietPi_Container-ARMv7-${distro^}" arch='armv7l';;
-	3) image="DietPi_Container-ARMv8-${distro^}" arch='aarch64';;
-	10) image="DietPi_Container-x86_64-${distro^}" arch='x86_64';;
-	11) image='DietPi_Container-RISC-V-Sid' arch='riscv64';;
+	'armv6l') image="DietPi_Container-ARMv6-${DISTRO^}";;
+	'armv7l') image="DietPi_Container-ARMv7-${DISTRO^}";;
+	'aarch64') image="DietPi_Container-ARMv8-${DISTRO^}";;
+	'x86_64') image="DietPi_Container-x86_64-${DISTRO^}";;
+	'riscv64') image="DietPi_Container-RISC-V-Sid";;
 	*) G_DIETPI-NOTIFY 1 "Invalid architecture \"$ARCH\" passed, aborting..."; exit 1;;
 esac
+[[ $SOFTWARE =~ ^[0-9\ ]+$ ]] || { G_DIETPI-NOTIFY 1 "Invalid software list \"$SOFTWARE\" passed, aborting..."; exit 1; }
 
 ##########################################
 # Dependencies
@@ -88,36 +86,39 @@ G_EXEC_OUTPUT=1 G_EXEC e2fsck -fp "${FP_LOOP}p1"
 G_EXEC mkdir rootfs
 G_EXEC mount "${FP_LOOP}p1" rootfs
 
-# Enable automated install with Go
-G_CONFIG_INJECT 'AUTO_SETUP_AUTOMATED=' 'AUTO_SETUP_AUTOMATED=1' rootfs/boot/dietpi.txt
-G_CONFIG_INJECT 'AUTO_SETUP_INSTALL_SOFTWARE_ID=' 'AUTO_SETUP_INSTALL_SOFTWARE_ID=188' rootfs/boot/dietpi.txt
-
 # Force ARMv6 arch on Raspbian
 (( $ARCH == 1 )) && echo 'sed -i -e '\''/^G_HW_ARCH=/c\G_HW_ARCH=1'\'' -e '\''/^G_HW_ARCH_NAME=/c\G_HW_ARCH_NAME=armv6l'\'' /boot/dietpi/.hw_model' > rootfs/boot/Automation_Custom_PreScript.sh
 
-# Avoid DietPi-Survey uploads to not mess with the statistics
-G_EXEC rm rootfs/root/.ssh/known_hosts
-
 # Workaround invalid TERM on login
 # shellcheck disable=SC2016
-G_EXEC eval 'echo '\''infocmp "$TERM" > /dev/null 2>&1 || export TERM=dumb'\'' > rootfs/etc/bashrc.d/00-dietpi-build.sh'
+G_EXEC eval 'echo '\''infocmp "$TERM" > /dev/null 2>&1 || export TERM=dumb'\'' > rootfs/etc/bashrc.d/00-dietpi-ci.sh'
 
 # Workaround for network connection checks
 G_CONFIG_INJECT 'CONFIG_CHECK_CONNECTION_IP=' 'CONFIG_CHECK_CONNECTION_IP=127.0.0.1' rootfs/boot/dietpi.txt
 G_CONFIG_INJECT 'CONFIG_CHECK_DNS_DOMAIN=' 'CONFIG_CHECK_DNS_DOMAIN=localhost' rootfs/boot/dietpi.txt
 
-# Automated build
-cat << _EOF_ > rootfs/boot/Automation_Custom_Script.sh || exit 1
-#!/bin/dash
-echo '[ INFO ] Running Gogs build script...'
-bash -c "\$(curl -sSf 'https://raw.githubusercontent.com/$G_GITOWNER/DietPi/$G_GITBRANCH/.build/software/gogs/build.bash')"
-mv -v '/tmp/gogs_$arch.7z' /
-poweroff
-_EOF_
+# Enable automated setup
+G_CONFIG_INJECT 'AUTO_SETUP_AUTOMATED=' 'AUTO_SETUP_AUTOMATED=1' rootfs/boot/dietpi.txt
+
+# Apply Git branch
+G_CONFIG_INJECT 'DEV_GITBRANCH=' "DEV_GITBRANCH=$G_GITBRANCH" rootfs/boot/dietpi.txt
+G_CONFIG_INJECT 'DEV_GITOWNER=' "DEV_GITOWNER=$G_GITOWNER" rootfs/boot/dietpi.txt
+
+# Apply software IDs to install
+for i in $SOFTWARE; do G_CONFIG_INJECT "AUTO_SETUP_INSTALL_SOFTWARE_ID=$i" "AUTO_SETUP_INSTALL_SOFTWARE_ID=$i" rootfs/boot/dietpi.txt; done
+
+# Avoid DietPi-Survey uploads to not mess with the statistics
+G_EXEC rm rootfs/root/.ssh/known_hosts
+
+# Success flag and shutdown
+G_EXEC eval 'echo -e '\''#!/bin/dash\n> /success\npoweroff'\'' > rootfs/boot/Automation_Custom_Script.sh'
+
+# Shutdown as well on failure
+G_EXEC sed -i 's/Prompt_on_Failure$/poweroff/' rootfs/boot/dietpi/dietpi-login
 
 ##########################################
 # Boot container
 ##########################################
 systemd-nspawn -bD rootfs
-[[ -f rootfs/gogs_$arch.7z ]] || exit 1
+[[ -f 'rootfs/success' ]] || exit 1
 }

@@ -332,6 +332,7 @@ Links to hardware and software manufacturers, sources and build instructions use
 - [Homer](https://github.com/bastienwirtz/homer)
 - [microblog.pub](https://git.sr.ht/~tsileo/microblog.pub)
 - [Moonlight](https://github.com/moonlight-stream/moonlight-embedded)
+- [Nukkit](https://github.com/CloudburstMC/Nukkit)
 
 ---
 
