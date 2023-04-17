@@ -124,6 +124,9 @@ then
 	G_EXEC eval 'echo -e '\''[Service]\nType=exec'\'' > rootfs/etc/systemd/system/mariadb.service.d/dietpi-container.conf'
 fi
 
+# Workaround for failing 32-bit ARM Rust builds on ext4 in QEMU emulated container on 64-bit host: https://github.com/rust-lang/cargo/issues/9545
+(( $ARCH < 3 && $G_HW_ARCH > 9 )) && G_EXEC eval 'echo '\''tmpfs /mnt/dietpi_userdata tmpfs size=3G,noatime,lazytime'\'' >> rootfs/etc/fstab'
+
 # Success flag and shutdown
 G_EXEC eval 'echo -e '\''#!/bin/dash\n/boot/dietpi/dietpi-services start\n> /success\npoweroff'\'' > rootfs/boot/Automation_Custom_Script.sh'
 
