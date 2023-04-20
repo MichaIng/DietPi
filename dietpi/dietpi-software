@@ -3641,7 +3641,8 @@ _EOF_
 			Remove_SysV mysql 1
 
 			# Assure correct owner in case the database dir got migrated from a different system: https://github.com/MichaIng/DietPi/issues/4721#issuecomment-917051930
-			[[ $(stat -c '%U' /mnt/dietpi_userdata/mysql/mysql) == 'mysql' ]] || G_EXEC chown -R mysql:mysql /mnt/dietpi_userdata/mysql
+			# - The group is correctly recursively fixed by the preinst script already.
+			[[ -d '/mnt/dietpi_userdata/mysql/mysql' && $(stat -c '%U' /mnt/dietpi_userdata/mysql/mysql) != 'mysql' ]] && find /mnt/dietpi_userdata/mysql ! -user root ! -user mysql -exec chown mysql {} +
 
 			# Force service to start before cron
 			G_EXEC mkdir -p /etc/systemd/system/mariadb.service.d
@@ -3853,11 +3854,12 @@ _EOF_
 					then
 						G_AGI libtiff5 libopenjp2-7 libxcb1 # ARMv6/7: Runtime libs for Pillow from piwheels (libtiff5 pulls libjpeg62-turbo)
 					else
-						# Bookworm: Most wheels need to be compiled: gcc and libffi-dev for cffi, Rust for matrix-synapse, libpq-dev for psycopg2, make for PyNaCl, libjpeg62-turbo-dev for Pillow
-						G_AGI gcc libffi-dev libpq-dev make libjpeg62-turbo-dev
+						# Bookworm: Most wheels need to be compiled: gcc and libffi-dev for cffi, Rust for cryptography and matrix-synapse, libpq-dev for psycopg2, make for PyNaCl, libjpeg62-turbo-dev for Pillow, libssl-dev and pkg-config for cryptography
+						G_AGI gcc libffi-dev libpq-dev make libjpeg62-turbo-dev libssl-dev pkg-config
 						G_EXEC curl -sSf 'https://sh.rustup.rs/' -o rustup-init.sh
 						G_EXEC chmod +x rustup-init.sh
-						G_EXEC_OUTPUT=1 G_EXEC ./rustup-init.sh -y --profile minimal
+						# RPi with 64-bit kernel on 32-bit image: Enforce 32-bit toolchain: https://github.com/MichaIng/DietPi/issues/6306
+						G_EXEC_OUTPUT=1 G_EXEC ./rustup-init.sh -y --profile minimal ${RPI_64KERNEL_32OS:+'--default-host' 'armv7-unknown-linux-gnueabihf'}
 						G_EXEC rm rustup-init.sh
 						export PATH="/root/.cargo/bin:$PATH"
 					fi
@@ -4196,7 +4198,8 @@ _EOF_
 				# Rust for cryptography
 				G_EXEC curl -sSf 'https://sh.rustup.rs/' -o rustup-init.sh
 				G_EXEC chmod +x rustup-init.sh
-				G_EXEC_OUTPUT=1 G_EXEC sudo -u "$micro_name" ./rustup-init.sh -y --profile minimal
+				# RPi with 64-bit kernel on 32-bit image: Enforce 32-bit toolchain: https://github.com/MichaIng/DietPi/issues/6306
+				G_EXEC_OUTPUT=1 G_EXEC sudo -u "$micro_name" ./rustup-init.sh -y --profile minimal ${RPI_64KERNEL_32OS:+'--default-host' 'armv7-unknown-linux-gnueabihf'}
 				G_EXEC rm rustup-init.sh
 			fi
 
@@ -8233,7 +8236,7 @@ location = /.well-known/caldav  { return 301 /baikal/html/dav.php; }' > /etc/ngi
 			murmurd -ini /etc/mumble-server.ini -supw "$GLOBAL_PW"
 		fi
 
-		if To_Install 41 emby-server # Emby Server
+		if To_Install 41 emby-server # Emby
 		then
 			case $G_HW_ARCH in
 				2) local arch='armhf';;
@@ -8242,7 +8245,7 @@ location = /.well-known/caldav  { return 301 /baikal/html/dav.php; }' > /etc/ngi
 			esac
 
 			local fallback_url="https://github.com/MediaBrowser/Emby.Releases/releases/download/4.7.11.0/emby-server-deb_4.7.11.0_$arch.deb"
-			Download_Install "$(curl -sSfL 'https://api.github.com/repos/MediaBrowser/Emby.Releases/releases/latest' | mawk -F\" "/\"browser_download_url\": .*\/emby-server-deb_[^\"\/]*_$arch\.deb\"/{print \$4}")"
+			Download_Install "$(curl -sSfL 'https://api.github.com/repos/MediaBrowser/Emby.Releases/releases/latest' | mawk -F\" "/^ *\"browser_download_url\": .*\/emby-server-deb_[^\"\/]*_$arch\.deb\"$/{print \$4}")"
 			G_EXEC systemctl stop emby-server
 
 			# User: The DEB package install overrides this, hence the method needs to be changed when using an APT repository!
@@ -8572,7 +8575,7 @@ _EOF_
 			# Install ruTorrent: Web UI for rTorrent
 			# - Grab current version
 			local version=$(curl -sSfL 'https://api.github.com/repos/Novik/ruTorrent/releases/latest' | mawk -F\" '/"tag_name": /{print $4}')
-			[[ $version ]] || { version='v4.0.4'; G_DIETPI-NOTIFY 1 "Automatic latest ruTorrent version detection failed. Version \"$version\" will be installed as fallback, but a newer version might be available. Please report this at: https://github.com/MichaIng/DietPi/issues"; }
+			[[ $version ]] || { version='v4.1'; G_DIETPI-NOTIFY 1 "Automatic latest ruTorrent version detection failed. Version \"$version\" will be installed as fallback, but a newer version might be available. Please report this at: https://github.com/MichaIng/DietPi/issues"; }
 			Download_Install "https://github.com/Novik/ruTorrent/archive/$version.tar.gz"
 
 			# - Reinstall freshly with preserved configs and 3rd party plugins
@@ -8946,7 +8949,7 @@ _EOF_
 			G_EXEC chown -R medusa:dietpi /mnt/dietpi_userdata/medusa
 		fi
 
-		if To_Install 50 syncthing syncthing-inotify # Syncthing
+		if To_Install 50 syncthing # Syncthing
 		then
 			# Reinstall: Skip download and install, advice to use internal updater from web UI
 			if [[ -d '/opt/syncthing' ]]
@@ -9453,7 +9456,7 @@ _EOF_
 			if (( ${PHP_VERSION::1} > 7 ))
 			then
 				aDEPS+=("php$PHP_VERSION-curl")
-				local fallback_url='https://github.com/koel/koel/releases/download/v6.11.0/koel-v6.11.0.tar.gz' aphp_deps=('curl' 'dom')
+				local fallback_url='https://github.com/koel/koel/releases/download/v6.11.2/koel-v6.11.2.tar.gz' aphp_deps=('curl' 'dom')
 				Download_Install "$(curl -sSfL 'https://api.github.com/repos/koel/koel/releases/latest' | mawk -F\" '/^ *"browser_download_url": ".*\/koel-[^"\/]*\.tar\.gz"$/{print $4}')"
 			else
 				aDEPS+=("php$PHP_VERSION-json")
@@ -10233,7 +10236,8 @@ _EOF_
 						G_AGI gcc libffi-dev libssl-dev make libjpeg62-turbo-dev pkg-config
 						G_EXEC curl -sSf 'https://sh.rustup.rs/' -o rustup-init.sh
 						G_EXEC chmod +x rustup-init.sh
-						G_EXEC_OUTPUT=1 G_EXEC ./rustup-init.sh -y --profile minimal
+						# RPi with 64-bit kernel on 32-bit image: Enforce 32-bit toolchain: https://github.com/MichaIng/DietPi/issues/6306
+						G_EXEC_OUTPUT=1 G_EXEC ./rustup-init.sh -y --profile minimal ${RPI_64KERNEL_32OS:+'--default-host' 'armv7-unknown-linux-gnueabihf'}
 						G_EXEC rm rustup-init.sh
 						export PATH="/root/.cargo/bin:$PATH"
 					fi
@@ -11250,7 +11254,8 @@ _EOF_
 				# Rust for cryptography
 				G_EXEC curl -sSf 'https://sh.rustup.rs/' -o rustup-init.sh
 				G_EXEC chmod +x rustup-init.sh
-				G_EXEC_OUTPUT=1 G_EXEC sudo -u "$ha_user" ./rustup-init.sh -y --profile minimal
+				# RPi with 64-bit kernel on 32-bit image: Enforce 32-bit toolchain: https://github.com/MichaIng/DietPi/issues/6306
+				G_EXEC_OUTPUT=1 G_EXEC sudo -u "$ha_user" ./rustup-init.sh -y --profile minimal ${RPI_64KERNEL_32OS:+'--default-host' 'armv7-unknown-linux-gnueabihf'}
 				G_EXEC rm rustup-init.sh
 			fi
 
@@ -13225,10 +13230,9 @@ _EOF_
 			G_AGP mumble-server
 		fi
 
-		if To_Uninstall 41 # Emby Server
+		if To_Uninstall 41 # Emby
 		then
-			G_AGP emby-server embymagick
-			[[ -f '/etc/apt/sources.list.d/emby-server.list' ]] && G_EXEC rm /etc/apt/sources.list.d/emby-server.list # Pre v6.15
+			G_AGP emby-server
 		fi
 
 		if To_Uninstall 42 # Plex Media Server

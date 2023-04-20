@@ -93,28 +93,45 @@ G_EXEC mount "${FP_LOOP}p1" rootfs
 # shellcheck disable=SC2016
 G_EXEC eval 'echo '\''infocmp "$TERM" > /dev/null 2>&1 || export TERM=dumb'\'' > rootfs/etc/bashrc.d/00-dietpi-ci.sh'
 
+# Enable automated setup
+G_CONFIG_INJECT 'AUTO_SETUP_AUTOMATED=' 'AUTO_SETUP_AUTOMATED=1' rootfs/boot/dietpi.txt
+
 # Workaround for network connection checks
 G_CONFIG_INJECT 'CONFIG_CHECK_CONNECTION_IP=' 'CONFIG_CHECK_CONNECTION_IP=127.0.0.1' rootfs/boot/dietpi.txt
 G_CONFIG_INJECT 'CONFIG_CHECK_DNS_DOMAIN=' 'CONFIG_CHECK_DNS_DOMAIN=localhost' rootfs/boot/dietpi.txt
-
-# Enable automated setup
-G_CONFIG_INJECT 'AUTO_SETUP_AUTOMATED=' 'AUTO_SETUP_AUTOMATED=1' rootfs/boot/dietpi.txt
 
 # Apply Git branch
 G_CONFIG_INJECT 'DEV_GITBRANCH=' "DEV_GITBRANCH=$G_GITBRANCH" rootfs/boot/dietpi.txt
 G_CONFIG_INJECT 'DEV_GITOWNER=' "DEV_GITOWNER=$G_GITOWNER" rootfs/boot/dietpi.txt
 
-# Apply software IDs to install
-for i in $SOFTWARE; do G_CONFIG_INJECT "AUTO_SETUP_INSTALL_SOFTWARE_ID=$i" "AUTO_SETUP_INSTALL_SOFTWARE_ID=$i" rootfs/boot/dietpi.txt; done
-
 # Avoid DietPi-Survey uploads to not mess with the statistics
 G_EXEC rm rootfs/root/.ssh/known_hosts
 
+# Apply software IDs to install
+for i in $SOFTWARE; do G_CONFIG_INJECT "AUTO_SETUP_INSTALL_SOFTWARE_ID=$i" "AUTO_SETUP_INSTALL_SOFTWARE_ID=$i" rootfs/boot/dietpi.txt; done
+
+# Workaround for failing Redis as of PrivateUsers=true leading to "Failed to set up user namespacing"
+G_EXEC mkdir rootfs/etc/systemd/system/redis-server.service.d
+G_EXEC eval 'echo -e '\''[Service]\nPrivateUsers=0'\'' > rootfs/etc/systemd/system/redis-server.service.d/dietpi-container.conf'
+
+# Workarounds for failing MariaDB install on Buster within GitHub Actions runner (both cannot be replicated on my test systems with and without QEMU):
+# - mysqld does not have write access if our symlink is in place, even that directory permissions are correct.
+# - Type=notify leads to a service start timeout while mysqld has actually fully started.
+if [[ $DISTRO == 'buster' ]]
+then
+	G_EXEC sed -i '/# Start DietPi-Software/a\sed -i -e '\''s|rm -Rf /var/lib/mysql|rm -Rf /mnd/dietpi_userdata/mysql|'\'' -e '\''s|ln -s /mnt/dietpi_userdata/mysql /var/lib/mysql|ln -s /var/lib/mysql /mnt/dietpi_userdata/mysql|'\'' /boot/dietpi/dietpi-software' rootfs/boot/dietpi/dietpi-login
+	G_EXEC mkdir rootfs/etc/systemd/system/mariadb.service.d
+	G_EXEC eval 'echo -e '\''[Service]\nType=exec'\'' > rootfs/etc/systemd/system/mariadb.service.d/dietpi-container.conf'
+fi
+
+# Workaround for failing 32-bit ARM Rust builds on ext4 in QEMU emulated container on 64-bit host: https://github.com/rust-lang/cargo/issues/9545
+(( $ARCH < 3 && $G_HW_ARCH > 9 )) && G_EXEC eval 'echo '\''tmpfs /mnt/dietpi_userdata tmpfs size=3G,noatime,lazytime'\'' >> rootfs/etc/fstab'
+
 # Success flag and shutdown
-G_EXEC eval 'echo -e '\''#!/bin/dash\n> /success\npoweroff'\'' > rootfs/boot/Automation_Custom_Script.sh'
+G_EXEC eval 'echo -e '\''#!/bin/dash\n/boot/dietpi/dietpi-services start\n> /success\npoweroff'\'' > rootfs/boot/Automation_Custom_Script.sh'
 
 # Shutdown as well on failure
-G_EXEC sed -i 's/Prompt_on_Failure$/poweroff/' rootfs/boot/dietpi/dietpi-login
+G_EXEC sed -i 's|Prompt_on_Failure$|{ journalctl -e; ss -tlpn; poweroff; }|' rootfs/boot/dietpi/dietpi-login
 
 ##########################################
 # Boot container
