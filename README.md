@@ -332,6 +332,7 @@ Links to hardware and software manufacturers, sources and build instructions use
 - [Homer](https://github.com/bastienwirtz/homer)
 - [microblog.pub](https://git.sr.ht/~tsileo/microblog.pub)
 - [Nukkit](https://github.com/CloudburstMC/Nukkit)
+- [openHAB](https://github.com/openhab)
 
 ---
 
