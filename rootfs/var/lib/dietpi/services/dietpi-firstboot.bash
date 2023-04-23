@@ -91,7 +91,24 @@
 	Apply_DietPi_FirstRun_Settings(){
 
 		# RPi: Apply safe overclocking values or update comments to show model-specific defaults
-		(( $G_HW_MODEL < 10 )) && RPi_Set_Clock_Speeds
+		if (( $G_HW_MODEL < 10 ))
+		then
+			RPi_Set_Clock_Speeds
+
+		# NanoPi R5S/R5C/R6S/R6C: Update udev rules for C variants
+		elif (( $G_HW_MODEL == 76 ))
+		then
+			[[ $(</proc/device-tree/model) == *'R5C'* ]] 2> /dev/null && cat << '_EOF_' > /etc/udev/rules.d/dietpi-eth-leds.rules
+SUBSYSTEM=="leds", KERNEL=="wan_led", ACTION=="add", ATTR{trigger}="netdev", ATTR{device_name}="eth0", ATTR{link}="1", ATTR{rx}="1", ATTR{tx}="1", RUN+="/bin/ip l s up dev eth0; /bin/ip l s down dev eth0"
+SUBSYSTEM=="leds", KERNEL=="lan1_led", ACTION=="add", ATTR{trigger}="netdev", ATTR{device_name}="eth1", ATTR{link}="1", ATTR{rx}="1", ATTR{tx}="1", RUN+="/bin/ip l s up dev eth1; /bin/ip l s down dev eth1"
+_EOF_
+		elif (( $G_HW_MODEL == 79 ))
+		then
+			[[ $(</proc/device-tree/model) == *'R6C'* ]] 2> /dev/null && cat << '_EOF_' > /etc/udev/rules.d/dietpi-eth-leds.rules
+SUBSYSTEM=="leds", KERNEL=="wan_led", ACTION=="add", ATTR{trigger}="netdev", ATTR{device_name}="eth0", ATTR{link}="1", ATTR{rx}="1", ATTR{tx}="1", RUN+="/bin/ip l s up dev eth0; /bin/ip l s down dev eth0"
+SUBSYSTEM=="leds", KERNEL=="lan1_led", ACTION=="add", ATTR{trigger}="netdev", ATTR{device_name}="eth1", ATTR{link}="1", ATTR{rx}="1", ATTR{tx}="1", RUN+="/bin/ip l s up dev eth1; /bin/ip l s down dev eth1"
+_EOF_
+		fi
 
 		# End user automated script
 		if [[ -f '/boot/Automation_Custom_PreScript.sh' ]]; then
