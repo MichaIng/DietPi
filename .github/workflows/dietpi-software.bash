@@ -90,19 +90,21 @@ G_EXEC mkdir rootfs
 G_EXEC mount "${FP_LOOP}p1" rootfs
 
 # Force ARMv6 arch on Raspbian
-[[ $ARCH == 'armv6l' ]] && echo 'sed -i -e '\''/^G_HW_ARCH=/c\G_HW_ARCH=1'\'' -e '\''/^G_HW_ARCH_NAME=/c\G_HW_ARCH_NAME=armv6l'\'' /boot/dietpi/.hw_model' > rootfs/boot/Automation_Custom_PreScript.sh
+[[ $ARCH == 'armv6l' ]] && G_EXEC sed -i '/# Start DietPi-Software/iG_EXEC sed -i -e '\''/^G_HW_ARCH=/cG_HW_ARCH=1'\'' -e '\''/^G_HW_ARCH_NAME=/cG_HW_ARCH_NAME=armv6l'\'' /boot/dietpi/.hw_model' rootfs/boot/dietpi/dietpi-login
 
 # Force RPi on ARM systems if requested
 if [[ $RPI == 'true' && $ARCH == 'a'* ]]
 then
 	case $ARCH in
-		'armv6l') local model=1;;
-		'armv7l') local model=2;;
-		'aarch64') local model=4;;
+		'armv6l') model=1;;
+		'armv7l') model=2;;
+		'aarch64') model=4;;
+		*) G_DIETPI-NOTIFY 1 "Invalid architecture $ARCH beginning with \"a\" but not being one of the known/accepted ARM architectures. This should never happen!"; exit 1;;
 	esac
-	# Defining G_HW_MODEL < 10 leads to raspi.list being added automatically during DietPi-FirstBoot.
-	# The DietPi-FirstBoot script itself has .hw_model loaded already to is not affected by this, i.e. the network setup is still skipped, only external script calls like dietpi-set_software will load the new .hw_model.
-	echo "sed -i -e '/^G_HW_MODEL=/c\G_HW_MODEL=$model' -e '/^G_HW_MODEL_NAME=/c\G_HW_MODEL_NAME=\"RPi $model ($ARCH)\"' /boot/dietpi/.hw_model; > /boot/config.txt; > /boot/cmdline.txt" >> rootfs/boot/Automation_Custom_PreScript.sh
+	G_EXEC sed -i "/# Start DietPi-Software/iG_EXEC sed -i -e '/^G_HW_MODEL=/cG_HW_MODEL=$model' -e '/^G_HW_MODEL_NAME=/cG_HW_MODEL_NAME=\"RPi $model ($ARCH)\"' /boot/dietpi/.hw_model; > /boot/config.txt; > /boot/cmdline.txt" rootfs/boot/dietpi/dietpi-login
+	G_EXEC curl -sSf 'https://archive.raspberrypi.org/debian/pool/main/r/raspberrypi-archive-keyring/raspberrypi-archive-keyring_2021.1.1+rpt1_all.deb' -o keyring.deb
+	G_EXEC dpkg --root=rootfs -i keyring.deb
+	G_EXEC rm keyring.deb
 fi
 
 # Workaround invalid TERM on login
