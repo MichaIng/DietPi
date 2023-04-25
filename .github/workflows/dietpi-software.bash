@@ -35,12 +35,14 @@ G_EXEC cd "$FP_ORIGIN" # Process everything in origin dir instead of /tmp/$G_PRO
 DISTRO=
 ARCH=
 SOFTWARE=
+RPI=
 while (( $# ))
 do
 	case $1 in
 		'-d') shift; DISTRO=$1;;
 		'-a') shift; ARCH=$1;;
 		'-s') shift; SOFTWARE=$1;;
+		'-rpi') shift; RPI=$1;;
 		*) G_DIETPI-NOTIFY 1 "Invalid input \"$1\", aborting..."; exit 1;;
 	esac
 	shift
@@ -55,6 +57,7 @@ case $ARCH in
 	*) G_DIETPI-NOTIFY 1 "Invalid architecture \"$ARCH\" passed, aborting..."; exit 1;;
 esac
 [[ $SOFTWARE =~ ^[0-9\ ]+$ ]] || { G_DIETPI-NOTIFY 1 "Invalid software list \"$SOFTWARE\" passed, aborting..."; exit 1; }
+[[ $RPI =~ ^|'false'|'true'$ ]] || { G_DIETPI-NOTIFY 1 "Invalid RPi flag \"$RPI\" passed, aborting..."; exit 1; }
 
 ##########################################
 # Dependencies
@@ -87,7 +90,20 @@ G_EXEC mkdir rootfs
 G_EXEC mount "${FP_LOOP}p1" rootfs
 
 # Force ARMv6 arch on Raspbian
-(( $ARCH == 1 )) && echo 'sed -i -e '\''/^G_HW_ARCH=/c\G_HW_ARCH=1'\'' -e '\''/^G_HW_ARCH_NAME=/c\G_HW_ARCH_NAME=armv6l'\'' /boot/dietpi/.hw_model' > rootfs/boot/Automation_Custom_PreScript.sh
+[[ $ARCH == 'armv6l' ]] && echo 'sed -i -e '\''/^G_HW_ARCH=/c\G_HW_ARCH=1'\'' -e '\''/^G_HW_ARCH_NAME=/c\G_HW_ARCH_NAME=armv6l'\'' /boot/dietpi/.hw_model' > rootfs/boot/Automation_Custom_PreScript.sh
+
+# Force RPi on ARM systems if requested
+if [[ $RPI == 'true' && $ARCH == 'a'* ]]
+then
+	case $ARCH in
+		'armv6l') local model=1;;
+		'armv7l') local model=2;;
+		'aarch64') local model=4;;
+	esac
+	# Defining G_HW_MODEL < 10 leads to raspi.list being added automatically during DietPi-FirstBoot.
+	# The DietPi-FirstBoot script itself has .hw_model loaded already to is not affected by this, i.e. the network setup is still skipped, only external script calls like dietpi-set_software will load the new .hw_model.
+	echo "sed -i -e '/^G_HW_MODEL=/c\G_HW_MODEL=$model' -e '/^G_HW_MODEL_NAME=/c\G_HW_MODEL_NAME=\"RPi $model ($ARCH)\"' /boot/dietpi/.hw_model; > /boot/config.txt; > /boot/cmdline.txt" >> rootfs/boot/Automation_Custom_PreScript.sh
+fi
 
 # Workaround invalid TERM on login
 # shellcheck disable=SC2016
