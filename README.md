@@ -333,6 +333,8 @@ Links to hardware and software manufacturers, sources and build instructions use
 - [microblog.pub](https://git.sr.ht/~tsileo/microblog.pub)
 - [Nukkit](https://github.com/CloudburstMC/Nukkit)
 - [openHAB](https://github.com/openhab)
+- [Moonlight](https://github.com/moonlight-stream/moonlight-embedded)
+- [Moonlight Qt](https://github.com/moonlight-stream/moonlight-qt)
 
 ---
 
