@@ -335,6 +335,7 @@ Links to hardware and software manufacturers, sources and build instructions use
 - [openHAB](https://github.com/openhab)
 - [Moonlight](https://github.com/moonlight-stream/moonlight-embedded)
 - [Moonlight Qt](https://github.com/moonlight-stream/moonlight-qt)
+- [Sunshine](https://github.com/LizardByte/Sunshine)
 
 ---
 
