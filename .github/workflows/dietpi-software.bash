@@ -73,7 +73,7 @@ G_AG_CHECK_INSTALL_PREREQ "${apackages[@]}"
 G_EXEC curl -sSfO "https://dietpi.com/downloads/images/$image.7z"
 G_EXEC 7zz e "$image.7z" "$image.img"
 G_EXEC rm "$image.7z"
-G_EXEC truncate -s $((2*1024**3)) "$image.img"
+G_EXEC truncate -s 3G "$image.img"
 
 # Loop device
 FP_LOOP=$(losetup -f)
@@ -109,14 +109,13 @@ fi
 
 # Workaround invalid TERM on login
 # shellcheck disable=SC2016
-G_EXEC eval 'echo '\''infocmp "$TERM" > /dev/null 2>&1 || export TERM=dumb'\'' > rootfs/etc/bashrc.d/00-dietpi-ci.sh'
+G_EXEC eval 'echo '\''infocmp "$TERM" > /dev/null 2>&1 || { echo "[ INFO ] Unsupported TERM=\"$TERM\", switching to TERM=\"dumb\""; export TERM=dumb; }'\'' > rootfs/etc/bashrc.d/00-dietpi-ci.sh'
 
 # Enable automated setup
 G_CONFIG_INJECT 'AUTO_SETUP_AUTOMATED=' 'AUTO_SETUP_AUTOMATED=1' rootfs/boot/dietpi.txt
 
-# Workaround for network connection checks
+# Workaround for failing IPv4 network connectivity check as GitHub Actions runners do not receive external ICMP echo replies.
 G_CONFIG_INJECT 'CONFIG_CHECK_CONNECTION_IP=' 'CONFIG_CHECK_CONNECTION_IP=127.0.0.1' rootfs/boot/dietpi.txt
-G_CONFIG_INJECT 'CONFIG_CHECK_DNS_DOMAIN=' 'CONFIG_CHECK_DNS_DOMAIN=localhost' rootfs/boot/dietpi.txt
 
 # Apply Git branch
 G_CONFIG_INJECT 'DEV_GITBRANCH=' "DEV_GITBRANCH=$G_GITBRANCH" rootfs/boot/dietpi.txt
@@ -149,11 +148,11 @@ fi
 G_EXEC eval 'echo -e '\''#!/bin/dash\n/boot/dietpi/dietpi-services start\n> /success\npoweroff'\'' > rootfs/boot/Automation_Custom_Script.sh'
 
 # Shutdown as well on failure
-G_EXEC sed -i 's|Prompt_on_Failure$|{ journalctl -e; ss -tlpn; poweroff; }|' rootfs/boot/dietpi/dietpi-login
+G_EXEC sed -i 's|Prompt_on_Failure$|{ journalctl -e; ss -tlpn; df -h; free -h; poweroff; }|' rootfs/boot/dietpi/dietpi-login
 
 ##########################################
 # Boot container
 ##########################################
 systemd-nspawn -bD rootfs
-[[ -f 'rootfs/success' ]] || exit 1
+[[ -f 'rootfs/success' ]] || { journalctl -e; df -h; free -h; exit 1; }
 }
