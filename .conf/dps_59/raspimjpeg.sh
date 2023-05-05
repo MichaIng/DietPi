@@ -13,8 +13,6 @@
 	#
 	#////////////////////////////////////
 
-	Raspimjeg_Stop(){ killall -qw php raspimjpeg; }
-
 	Raspimjeg_Start()
 	{
 		[ -d '/dev/shm/mjpeg' ] || mkdir /dev/shm/mjpeg
@@ -26,9 +24,9 @@
 	}
 
 	case $1 in
-		'stop') Raspimjeg_Stop;;
+		'stop') killall -qw php raspimjpeg;;
 		'start') Raspimjeg_Start;;
-		*) echo "ERROR: Invalid argument: \"$1\""
+		*) echo "ERROR: Invalid argument: \"$1\"" >&2; exit 1;;
 	esac
 
 	exit 0
