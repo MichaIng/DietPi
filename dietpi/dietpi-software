@@ -582,10 +582,6 @@ Available commands:
 		aSOFTWARE_CATX[$software_id]=2
 		aSOFTWARE_DOCS[$software_id]='https://dietpi.com/docs/software/media/#snapcast-server'
 		aSOFTWARE_DEPS[$software_id]='5'
-		# - ARMv8: https://github.com/badaix/snapcast/issues/706
-		aSOFTWARE_AVAIL_G_HW_ARCH[$software_id,3]=0
-		# - RISC-V: https://github.com/badaix/snapcast/releases
-		aSOFTWARE_AVAIL_G_HW_ARCH[$software_id,11]=0
 		#------------------
 		software_id=192
 		aSOFTWARE_NAME[$software_id]='Snapcast Client'
@@ -594,10 +590,6 @@ Available commands:
 		aSOFTWARE_DOCS[$software_id]='https://dietpi.com/docs/software/media/#snapcast-client'
 		aSOFTWARE_DEPS[$software_id]='5'
 		aSOFTWARE_INTERACTIVE[$software_id]=1
-		# - ARMv8: https://github.com/badaix/snapcast/issues/706
-		aSOFTWARE_AVAIL_G_HW_ARCH[$software_id,3]=0
-		# - RISC-V: https://github.com/badaix/snapcast/releases
-		aSOFTWARE_AVAIL_G_HW_ARCH[$software_id,11]=0
 		#------------------
 		software_id=199
 		aSOFTWARE_NAME[$software_id]='Spotifyd'
@@ -11591,24 +11583,41 @@ _EOF_
 
 		if To_Install 191 snapserver # Snapcast Server
 		then
-			local arch='armhf'
-			(( $G_HW_ARCH == 10 )) && arch='amd64'
+			# ARMv6/7/x86_64: Install package from GitHub repo
+			if [[ $G_HW_ARCH == ^1|2|10$ ]]
+			then
+				local arch='armhf'
+				(( $G_HW_ARCH == 10 )) && arch='amd64'
+				local fallback_url="https://github.com/badaix/snapcast/releases/download/v0.27.0/snapserver_0.27.0-1_$arch.deb"
+				Download_Install "$(curl -sSfL 'https://api.github.com/repos/badaix/snapcast/releases/latest' | mawk -F\" "/^ *\"browser_download_url\": \".*\/snapserver_[^\"\/]*_$arch.deb\"/{print \$4}")"
 
-			local fallback_url="https://github.com/badaix/snapcast/releases/download/v0.27.0/snapserver_0.27.0-1_$arch.deb"
-			Download_Install "$(curl -sSfL 'https://api.github.com/repos/badaix/snapcast/releases/latest' | mawk -F\" "/\"browser_download_url\": .*\/snapserver_[^\"\/]*_$arch.deb\"/{print \$4}")"
+			# Else install from Debian repo
+			else
+				G_AGI snapserver
+
+				# Enable web UI to align with upstream package
+				G_CONFIG_INJECT 'doc_root[[:blank:]=]' 'doc_root = /usr/share/snapserver/snapweb' /etc/snapserver.conf '\[http\]'
+			fi
 			G_EXEC systemctl stop snapserver
 
-			# Disable JSON RPC by default, if setting was never touched yet
+			# Disable JSON RPC by default if setting was never touched yet
 			G_EXEC sed -i '/^\[tcp\]/,/^\[/s/^#enabled = true$/enabled = false/' /etc/snapserver.conf
 		fi
 
 		if To_Install 192 snapclient # Snapcast Client
 		then
-			local arch='armhf'
-			(( $G_HW_ARCH == 10 )) && arch='amd64'
+			# ARMv6/7/x86_64: Install package from GitHub repo
+			if [[ $G_HW_ARCH == ^1|2|10$ ]]
+			then
+				local arch='armhf'
+				(( $G_HW_ARCH == 10 )) && arch='amd64'
+				local fallback_url="https://github.com/badaix/snapcast/releases/download/v0.27.0/snapclient_0.27.0-1_without-pulse_$arch.deb"
+				Download_Install "$(curl -sSfL 'https://api.github.com/repos/badaix/snapcast/releases/latest' | mawk -F\" "/^ *\"browser_download_url\": \".*\/snapclient_[^\"\/]*_without-pulse_$arch.deb\"$/{print \$4}")"
 
-			local fallback_url="https://github.com/badaix/snapcast/releases/download/v0.27.0/snapclient_0.27.0-1_without-pulse_$arch.deb"
-			Download_Install "$(curl -sSfL 'https://api.github.com/repos/badaix/snapcast/releases/latest' | mawk -F\" "/\"browser_download_url\": .*\/snapclient_[^\"\/]*_without-pulse_$arch.deb\"/{print \$4}")"
+			# Else install from Debian repo
+			else
+				G_AGI snapclient
+			fi
 			G_EXEC systemctl stop snapclient
 
 			# Client IP needs to be added to allowed IP list
@@ -11616,7 +11625,7 @@ _EOF_
 			local invalid_entry=
 			while :
 			do
-				if G_WHIP_INPUTBOX "${invalid_entry}Please enter the IPv4 address of your Snapcast server machine" && [[ $G_WHIP_RETURNED_VALUE =~ ^[0-9.]+$ ]]
+				if G_WHIP_INPUTBOX "${invalid_entry}Please enter the IPv4 address of your Snapcast server:" && [[ $G_WHIP_RETURNED_VALUE =~ ^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$ ]]
 				then
 					snapcast_server_ip=$G_WHIP_RETURNED_VALUE
 					break
@@ -11630,7 +11639,7 @@ _EOF_
 			while :
 			do
 				G_WHIP_DEFAULT_ITEM=$snapcast_server_port
-				if G_WHIP_INPUTBOX "${invalid_text}Please enter the network port of your Snapcast server machine\n - default: 1704" && disable_error=1 G_CHECK_VALIDINT "$G_WHIP_RETURNED_VALUE" 1
+				if G_WHIP_INPUTBOX "${invalid_text}Please enter the network port of your Snapcast server (default: 1704):" && disable_error=1 G_CHECK_VALIDINT "$G_WHIP_RETURNED_VALUE" 1
 				then
 					snapcast_server_port=$G_WHIP_RETURNED_VALUE
 					break
@@ -11639,7 +11648,7 @@ _EOF_
 				fi
 			done
 
-			G_CONFIG_INJECT 'SNAPCLIENT_OPTS[[:blank:]=]' "SNAPCLIENT_OPTS=\"-h $snapcast_server_ip -p $snapcast_server_port\"" /etc/default/snapclient
+			G_CONFIG_INJECT 'SNAPCLIENT_OPTS=' "SNAPCLIENT_OPTS=\"-h $snapcast_server_ip -p $snapcast_server_port\"" /etc/default/snapclient
 		fi
 
 		if To_Install 202 # Rclone
