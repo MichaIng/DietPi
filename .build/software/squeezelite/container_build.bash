@@ -72,7 +72,7 @@ G_AG_CHECK_INSTALL_PREREQ "${apackages[@]}"
 G_EXEC curl -sSfO "https://dietpi.com/downloads/images/$image.7z"
 G_EXEC 7zz e "$image.7z" "$image.img"
 G_EXEC rm "$image.7z"
-G_EXEC truncate -s $((2*1024**3)) "$image.img"
+G_EXEC truncate -s 2G "$image.img"
 
 # Loop device
 FP_LOOP=$(losetup -f)
@@ -101,9 +101,8 @@ G_EXEC rm rootfs/root/.ssh/known_hosts
 # shellcheck disable=SC2016
 G_EXEC eval 'echo '\''infocmp "$TERM" > /dev/null 2>&1 || export TERM=dumb'\'' > rootfs/etc/bashrc.d/00-dietpi-build.sh'
 
-# Workaround for network connection checks
+# Workaround for failing IPv4 network connectivity check as GitHub Actions runners do not receive external ICMP echo replies.
 G_CONFIG_INJECT 'CONFIG_CHECK_CONNECTION_IP=' 'CONFIG_CHECK_CONNECTION_IP=127.0.0.1' rootfs/boot/dietpi.txt
-G_CONFIG_INJECT 'CONFIG_CHECK_DNS_DOMAIN=' 'CONFIG_CHECK_DNS_DOMAIN=localhost' rootfs/boot/dietpi.txt
 
 # Automated build
 cat << _EOF_ > rootfs/boot/Automation_Custom_Script.sh || exit 1
