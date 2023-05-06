@@ -335,6 +335,7 @@ Links to hardware and software manufacturers, sources and build instructions use
 - [openHAB](https://github.com/openhab)
 - [Moonlight (CLI)](https://github.com/moonlight-stream/moonlight-embedded)
 - [Moonlight (GUI)](https://github.com/moonlight-stream/moonlight-qt)
+- [Restic](https://github.com/restic/restic)
 
 ---
 
