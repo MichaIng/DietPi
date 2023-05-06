@@ -7,7 +7,7 @@
 G_DIETPI-NOTIFY 2 "Amiberry will be built for platform: \e[33m$PLATFORM"
 
 # APT dependencies
-# - wget: Used for WHDLoad database update: https://github.com/BlitterStudio/amiberry/commit/d6c103e3310bcf75c2d72a15849fbdf5eb7432b5
+# - wget: Used for WHDLoad database update: https://github.com/BlitterStudio/amiberry/commit/d6c103e
 # - kbd: For "chvt" used in systemd service
 adeps_build=('autoconf' 'make' 'g++' 'pkg-config' 'libdrm-dev' 'libgbm-dev' 'libudev-dev' 'libxml2-dev' 'libpng-dev' 'libfreetype6-dev' 'libflac-dev' 'libmpg123-dev' 'libmpeg2-4-dev' 'libasound2-dev' 'libserialport-dev' 'wget' 'kbd')
 adeps=('libdrm2' 'libgl1-mesa-dri' 'libgbm1' 'libegl1' 'libudev1' 'libxml2' 'libpng16-16' 'libfreetype6' 'libmpg123-0' 'libmpeg2-4' 'libasound2' 'libserialport0' 'wget' 'kbd')
@@ -31,7 +31,7 @@ then
 	G_EXEC tar xf "SDL2-$v_sdl.tar.gz"
 	G_EXEC rm "SDL2-$v_sdl.tar.gz"
 	G_EXEC cd "SDL2-$v_sdl"
-	G_EXEC_OUTPUT=1 G_EXEC ./configure CFLAGS='-g0 -O3' CXXFLAGS='-g0 -O3' --enable-video-kmsdrm "${opengl_flags[@]}" --disable-video-rpi --disable-video-x11 --disable-video-wayland --disable-video-opengles1 --disable-video-vulkan --disable-video-dummy --disable-diskaudio --disable-sndio --disable-dummyaudio --disable-oss --disable-dbus
+	G_EXEC_OUTPUT=1 G_EXEC ./configure CFLAGS='-g0 -O3' CXXFLAGS='-g0 -O3' --enable-video-kmsdrm "${opengl_flags[@]}" --disable-video-rpi --disable-video-x11 --disable-video-wayland --disable-video-opengles1 --disable-video-vulkan --disable-video-offscreen --disable-video-dummy --disable-diskaudio --disable-sndio --disable-dummyaudio --disable-oss --disable-dbus
 	G_EXEC_OUTPUT=1 G_EXEC make "-j$(nproc)"
 	find . -type f \( -name '*.so' -o -name '*.so.*' \) -exec strip --strip-unneeded --remove-section=.comment --remove-section=.note -v {} +
 	G_EXEC rm -f /usr/local/lib/libSDL2[.-]*

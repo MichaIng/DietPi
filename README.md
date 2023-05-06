@@ -331,6 +331,11 @@ Links to hardware and software manufacturers, sources and build instructions use
 - [Navidrome](https://github.com/navidrome/navidrome)
 - [Homer](https://github.com/bastienwirtz/homer)
 - [microblog.pub](https://git.sr.ht/~tsileo/microblog.pub)
+- [Nukkit](https://github.com/CloudburstMC/Nukkit)
+- [openHAB](https://github.com/openhab)
+- [Moonlight (CLI)](https://github.com/moonlight-stream/moonlight-embedded)
+- [Moonlight (GUI)](https://github.com/moonlight-stream/moonlight-qt)
+- [Restic](https://github.com/restic/restic)
 
 ---
 

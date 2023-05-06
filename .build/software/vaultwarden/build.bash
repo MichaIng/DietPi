@@ -207,12 +207,7 @@ G_EXEC curl -sSfo package.deb "https://dietpi.com/downloads/binaries/$G_DISTRO_N
 old_version=$(dpkg-deb -f package.deb Version)
 G_EXEC rm package.deb
 suffix=${old_version#*-dietpi}
-if [[ $old_version == "$version-"* ]]
-then
-	version+="-dietpi$((suffix+1))"
-else
-	version+="-dietpi1"
-fi
+[[ $old_version == "$version-"* ]] && version+="-dietpi$((suffix+1))" || version+="-dietpi1"
 
 # - control
 cat << _EOF_ > "$DIR/DEBIAN/control"
