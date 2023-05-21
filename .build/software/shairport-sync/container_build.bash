@@ -43,18 +43,13 @@ do
 	esac
 	shift
 done
-case $DISTRO in
-        5) distro='buster';;
-	6) distro='bullseye';;
-	7) distro='bookworm';;
-	*) G_DIETPI-NOTIFY 1 "Invalid distro \"$DISTRO\" passed, aborting..."; exit 1;;
-esac
+[[ $DISTRO =~ ^'buster'|'bullseye'|'bookworm'$ ]] || { G_DIETPI-NOTIFY 1 "Invalid distro \"$DISTRO\" passed, aborting..."; exit 1; }
 case $ARCH in
-	1) image="DietPi_Container-ARMv6-${distro^}" arch='armv6l';;
-	2) image="DietPi_Container-ARMv7-${distro^}" arch='armv7l';;
-	3) image="DietPi_Container-ARMv8-${distro^}" arch='aarch64';;
-	10) image="DietPi_Container-x86_64-${distro^}" arch='x86_64';;
-	11) image='DietPi_Container-RISC-V-Sid' arch='riscv64';;
+	'armv6l') image="DietPi_Container-ARMv6-${DISTRO^}" arch=1;;
+	'armv7l') image="DietPi_Container-ARMv7-${DISTRO^}" arch=2;;
+	'aarch64') image="DietPi_Container-ARMv8-${DISTRO^}" arch=3;;
+	'x86_64') image="DietPi_Container-x86_64-${DISTRO^}" arch=10;;
+	'riscv64') image='DietPi_Container-RISC-V-Sid' arch=11;;
 	*) G_DIETPI-NOTIFY 1 "Invalid architecture \"$ARCH\" passed, aborting..."; exit 1;;
 esac
 
@@ -62,7 +57,7 @@ esac
 # Dependencies
 ##########################################
 apackages=('7zip' 'parted' 'fdisk' 'systemd-container')
-(( $G_HW_ARCH == $ARCH || ( $G_HW_ARCH < 10 && $G_HW_ARCH > $ARCH ) )) || apackages+=('qemu-user-static' 'binfmt-support')
+(( $G_HW_ARCH == $arch || ( $G_HW_ARCH < 10 && $G_HW_ARCH > $arch ) )) || apackages+=('qemu-user-static' 'binfmt-support')
 G_AG_CHECK_INSTALL_PREREQ "${apackages[@]}"
 
 ##########################################
@@ -92,7 +87,7 @@ G_EXEC mount "${FP_LOOP}p1" rootfs
 G_CONFIG_INJECT 'AUTO_SETUP_AUTOMATED=' 'AUTO_SETUP_AUTOMATED=1' rootfs/boot/dietpi.txt
 
 # Force ARMv6 arch on Raspbian
-(( $ARCH == 1 )) && echo 'sed -i -e '\''/^G_HW_ARCH=/c\G_HW_ARCH=1'\'' -e '\''/^G_HW_ARCH_NAME=/c\G_HW_ARCH_NAME=armv6l'\'' /boot/dietpi/.hw_model' > rootfs/boot/Automation_Custom_PreScript.sh
+(( $arch == 1 )) && echo 'sed -i -e '\''/^G_HW_ARCH=/c\G_HW_ARCH=1'\'' -e '\''/^G_HW_ARCH_NAME=/c\G_HW_ARCH_NAME=armv6l'\'' /boot/dietpi/.hw_model' > rootfs/boot/Automation_Custom_PreScript.sh
 
 # Avoid DietPi-Survey uploads to not mess with the statistics
 G_EXEC rm rootfs/root/.ssh/known_hosts
@@ -109,7 +104,7 @@ cat << _EOF_ > rootfs/boot/Automation_Custom_Script.sh || exit 1
 #!/bin/dash
 echo '[ INFO ] Running Shairport Sync build script...'
 bash -c "\$(curl -sSf 'https://raw.githubusercontent.com/$G_GITOWNER/DietPi/$G_GITBRANCH/.build/software/shairport-sync/build.bash')"
-mv -v '/tmp/shairport-sync_$arch.deb' '/tmp/shairport-sync-airplay2_$arch.deb' /
+mv -v '/tmp/shairport-sync_$ARCH.deb' '/tmp/shairport-sync-airplay2_$ARCH.deb' /
 poweroff
 _EOF_
 
@@ -117,5 +112,5 @@ _EOF_
 # Boot container
 ##########################################
 systemd-nspawn -bD rootfs
-[[ -f rootfs/shairport-sync_$arch.deb ]] || exit 1
+[[ -f rootfs/shairport-sync_$ARCH.deb ]] || exit 1
 }
