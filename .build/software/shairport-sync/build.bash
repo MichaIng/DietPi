@@ -13,11 +13,14 @@ G_AGUP
 G_AGDUG automake pkg-config make g++ libpopt-dev libconfig-dev libssl-dev libsoxr-dev libavahi-client-dev libasound2-dev libglib2.0-dev libmosquitto-dev avahi-daemon git libplist-dev libsodium-dev libgcrypt20-dev libavformat-dev xxd
 (( $G_DISTRO == 5 )) && G_EXEC systemctl unmask avahi-daemon
 
-# Download
+# Obtain latest version
 name='shairport-sync'
 name_pretty='Shairport Sync'
 repo='https://github.com/mikebrady/shairport-sync'
-version='4.1.1'
+version=$(curl -sSf 'https://api.github.com/repos/mikebrady/shairport-sync/releases/latest' | mawk -F\" '/^  "tag_name"/{print $4}')
+[[ $version ]] || { G_DIETPI-NOTIFY 1 "No latest $name_pretty version found, aborting ..."; exit 1; }
+
+# Download
 G_DIETPI-NOTIFY 2 "Building $name_pretty version \e[33m$version"
 G_EXEC cd /tmp
 G_EXEC curl -sSfLO "$repo/archive/$version.tar.gz"
@@ -83,7 +86,7 @@ general =
 
 //	drift_tolerance_in_seconds = 0.002; // allow a timing error of this number of seconds of drift away from exact synchronisation before attempting to correct it
 //	resync_threshold_in_seconds = 0.050; // a synchronisation error greater than this number of seconds will cause resynchronisation; 0 disables it
-
+//	resync_recovery_time_in_seconds = 0.100; // allow this extra time to recover after a late resync. Increase the value, possibly to 0.5, in a virtual machine.
 //	playback_mode = "stereo"; // This can be "stereo", "mono", "reverse stereo", "both left" or "both right". Default is "stereo".
 //	alac_decoder = "hammerton"; // This can be "hammerton" or "apple". This advanced setting allows you to choose
 //		the original Shairport decoder by David Hammerton or the Apple Lossless Audio Codec (ALAC) decoder written by Apple.
@@ -98,9 +101,24 @@ general =
 //		"standard" makes the volume change more quickly at lower volumes and slower at higher volumes.
 //		"flat" makes the volume change at the same rate at all volumes.
 //	volume_control_combined_hardware_priority = "no"; // when extending the volume range by combining the built-in software attenuator with the hardware mixer attenuator, set this to "yes" to reduce volume by using the hardware mixer first, then the built-in software attenuator.
+
+//	default_airplay_volume = -24.0; // this is the suggested volume after a reset or after the high_volume_threshold has been exceed and the high_volume_idle_timeout_in_minutes has passed
+
+//	The following settings are for dealing with potentially surprising high ("very loud") volume levels.
+//	When a new play session starts, it usually requests a suggested volume level from Shairport Sync. This is normally the volume level of the last session.
+//	This can cause unpleasant surprises if the last session was (a) very loud and (b) a long time ago.
+//	Thus, the user could be unpleasantly surprised by the volume level of the new session.
+
+//	To deal with this, when the last session volume is "very loud", the following two settings will lower the suggested volume after a period of idleness:
+
+//	high_threshold_airplay_volume = -16.0; // airplay volume greater or equal to this is "very loud"
+//	high_volume_idle_timeout_in_minutes = 0; // if the current volume is "very loud" and the device is not playing for more than this time, suggest the default volume for new connections instead of the current volume.
+//		Note 1: This timeout is set to 0 by default to disable this feature. Set it to some positive number, e.g. 180 to activate the feature.
+//		Note 2: Not all applications use the suggested volume: MacOS Music and Mac OS System Sounds use their own settings.
+
 //	run_this_when_volume_is_set = "/full/path/to/application/and/args"; //	Run the specified application whenever the volume control is set or changed.
 //		The desired AirPlay volume is appended to the end of the command line – leave a space if you want it treated as an extra argument.
-//		AirPlay volume goes from 0 to -30 and -144 means "mute".
+//		AirPlay volume goes from 0.0 to -30.0 and -144.0 means "mute".
 
 //	audio_backend_latency_offset_in_seconds = 0.0; // This is added to the latency requested by the player to delay or advance the output by a fixed amount.
 //		Use it, for example, to compensate for a fixed delay in the audio back end.
@@ -315,16 +333,24 @@ DEPS_APT_VERSIONED=${DEPS_APT_VERSIONED%,}
 # shellcheck disable=SC2001
 grep -q 'raspbian' /etc/os-release && DEPS_APT_VERSIONED=$(sed 's/+rp[it][0-9]\+[^)]*)/)/g' <<< "$DEPS_APT_VERSIONED") || DEPS_APT_VERSIONED=$(sed 's/+b[0-9]\+)/)/g' <<< "$DEPS_APT_VERSIONED")
 
+# - Obtain version suffix
+G_EXEC curl -sSfo package.deb "https://dietpi.com/downloads/binaries/$G_DISTRO_NAME/shairport-sync_$G_HW_ARCH_NAME.deb"
+old_version=$(dpkg-deb -f package.deb Version)
+G_EXEC rm package.deb
+suffix=${old_version#*-dietpi}
+[[ $old_version == "$version-"* ]] && suffix="dietpi$((suffix+1))" || suffix="dietpi1"
+
 # - control
 cat << _EOF_ > "$DIR/DEBIAN/control"
 Package: $name
-Version: $version-dietpi1
+Version: $version-$suffix
 Architecture: $(dpkg --print-architecture)
 Maintainer: MichaIng <micha@dietpi.com>
 Date: $(date -u '+%a, %d %b %Y %T %z')
-Standards-Version: 4.6.1.1
+Standards-Version: 4.6.2.0
 Installed-Size: $(du -sk "$DIR" | mawk '{print $1}')
 Depends:$DEPS_APT_VERSIONED
+Conflicts: $name-airplay2
 Section: sound
 Priority: optional
 Homepage: $repo
@@ -472,14 +498,14 @@ grep -q 'raspbian' /etc/os-release && DEPS_APT_VERSIONED=$(sed 's/+rp[it][0-9]\+
 # - control
 cat << _EOF_ > "$DIR/DEBIAN/control"
 Package: $name-airplay2
-Version: $version-dietpi1
+Version: $version-$suffix
 Architecture: $(dpkg --print-architecture)
 Maintainer: MichaIng <micha@dietpi.com>
 Date: $(date -u '+%a, %d %b %Y %T %z')
 Standards-Version: 4.6.2.0
 Installed-Size: $(du -sk "$DIR" | mawk '{print $1}')
 Depends:$DEPS_APT_VERSIONED
-Conflicts: shairport-sync
+Conflicts: $name
 Section: sound
 Priority: optional
 Homepage: $repo
