@@ -193,7 +193,7 @@ Process_Software()
 			199) aSERVICES[i]='spotifyd';; # aPORTS[4079]='tcp';; ???
 			185) aSERVICES[i]='docker' aPORTS[9002]='tcp';;
 			#172) aSERVICES[i]='wg-quick@wg0' aPORTS[51820]='udp';; # cannot be installed non-interactively
-			196) aCOMMANDS[i]='java -version'
+			196) aCOMMANDS[i]='java -version';;
 			*) :;;
 		esac
 	done
