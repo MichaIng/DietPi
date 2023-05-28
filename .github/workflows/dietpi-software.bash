@@ -193,6 +193,7 @@ Process_Software()
 			199) aSERVICES[i]='spotifyd';; # aPORTS[4079]='tcp';; ???
 			185) aSERVICES[i]='docker' aPORTS[9002]='tcp';;
 			#172) aSERVICES[i]='wg-quick@wg0' aPORTS[51820]='udp';; # cannot be installed non-interactively
+			196) aCOMMANDS[i]='java -version'
 			*) :;;
 		esac
 	done
@@ -209,6 +210,7 @@ do
 		#61) Process_Software 60;; # Cannot be installed in CI
 		49|165) Process_Software 88;;
 		205) Process_Software webserver;;
+		8) Process_Software 196;;
 		*) :;;
 	esac
 	Process_Software "$i"
