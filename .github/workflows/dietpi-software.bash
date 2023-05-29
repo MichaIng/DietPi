@@ -320,7 +320,7 @@ then
 	do
 		cat << _EOF_ >> rootfs/boot/Automation_Custom_Script.sh
 echo -n '\e[33m[ INFO ] Checking $i service status:\e[0m '
-systemctl is-active '$i' || exit_code=1
+systemctl is-active '$i' || { journalctl -u '$i'; exit_code=1; }
 _EOF_
 	done
 	for i in "${!aPORTS[@]}"
@@ -341,7 +341,7 @@ fi
 
 # Success flag and shutdown
 # shellcheck disable=SC2016
-G_EXEC eval 'echo '\''[ $exit_code = 0 ] && > /success; poweroff'\'' >> rootfs/boot/Automation_Custom_Script.sh'
+G_EXEC eval 'echo '\''[ $exit_code = 0 ] && > /success || { journalctl -n 25; ss -tlpn; df -h; free -h; poweroff; }; poweroff'\'' >> rootfs/boot/Automation_Custom_Script.sh'
 
 # Shutdown as well on failure
 G_EXEC sed -i 's|Prompt_on_Failure$|{ journalctl -n 25; ss -tlpn; df -h; free -h; poweroff; }|' rootfs/boot/dietpi/dietpi-login
