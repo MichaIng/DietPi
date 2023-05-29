@@ -308,7 +308,7 @@ fi
 
 # Check for service status, ports and commands
 # shellcheck disable=SC2016
-G_EXEC sed -i '/# Start DietPi-Software/a\sed -i '\''/# Custom 1st run script/a\for i in "${aSTART_SERVICES[@]}"; do G_EXEC_NOHALT=1 G_EXEC systemctl start "$i"; done'\'' /boot/dietpi/dietpi-software' rootfs/boot/dietpi/dietpi-login
+G_EXEC sed -i '/# Start DietPi-Software/a\sed -i '\''/# Custom 1st run script/a\\for i in "${aSTART_SERVICES[@]}"; do G_EXEC_NOHALT=1 G_EXEC systemctl start "$i"; done'\'' /boot/dietpi/dietpi-software' rootfs/boot/dietpi/dietpi-login
 G_EXEC eval 'echo -e '\''#!/bin/dash\nexit_code=0; /boot/dietpi/dietpi-services start || exit_code=1'\'' > rootfs/boot/Automation_Custom_Script.sh'
 if (( ${#aSERVICES[@]} || ${#aPORTS[@]} || ${#aCOMMANDS[@]} ))
 then
