@@ -334,7 +334,7 @@ fi
 G_EXEC eval 'echo '\''[ $exit_code = 0 ] && > /success; poweroff'\'' >> rootfs/boot/Automation_Custom_Script.sh'
 
 # Shutdown as well on failure
-G_EXEC sed -i 's|Prompt_on_Failure$|{ journalctl -e; ss -tlpn; df -h; free -h; poweroff; }|' rootfs/boot/dietpi/dietpi-login
+G_EXEC sed -i 's|Prompt_on_Failure$|{ journalctl -n 25; ss -tlpn; df -h; free -h; poweroff; }|' rootfs/boot/dietpi/dietpi-login
 
 ##########################################
 # Boot container
