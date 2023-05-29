@@ -70,13 +70,13 @@ Process_Software()
 	do
 		case $i in
 			'webserver') [[ $SOFTWARE =~ (^| )8[345]( |$) ]] || aSERVICES[83]='apache2' aPORTS[80]='tcp';;
-			0) aSERVICES[i]='ssh -V';;
-			1) aSERVICES[i]='smbclient -V';;
+			0) aCOMMANDS[i]='ssh -V';;
+			1) aCOMMANDS[i]='smbclient -V';;
 			2) aSERVICES[i]='fahclient' aPORTS[7396]='tcp';;
-			7) aSERVICES[i]='ffmpeg -version';;
-			9) aSERVICES[i]='node -v';;
+			7) aCOMMANDS[i]='ffmpeg -version';;
+			9) aCOMMANDS[i]='node -v';;
 			16) aSERVICES[i]='microblog-pub' aPORTS[8007]='tcp';;
-			17) aSERVICES[i]='git -v';;
+			17) aCOMMANDS[i]='git -v';;
 			28|120) aSERVICES[i]='vncserver' aPORTS[5901]='tcp';;
 			29) aSERVICES[i]='xrdp' aPORTS[3389]='tcp';;
 			30) aSERVICES[i]='nxserver' aPORTS[4000]='tcp';;
