@@ -70,130 +70,130 @@ Process_Software()
 	do
 		case $i in
 			'webserver') [[ $SOFTWARE =~ (^| )8[345]( |$) ]] || aSERVICES[83]='apache2' aPORTS[80]='tcp';;
-			152) aSERVICES[i]='avahi-daemon' aPORTS[5353]='udp';;
-			104) aSERVICES[i]='dropbear' aPORTS[22]='tcp';;
-			105) aSERVICES[i]='ssh' aPORTS[22]='tcp';;
-			194) aSERVICES[i]='postgresql';;
+			2) aSERVICES[i]='fahclient' aPORTS[7396]='tcp';;
+			16) aSERVICES[i]='microblog-pub' aPORTS[8007]='tcp';;
+			28|120) aSERVICES[i]='vncserver' aPORTS[5901]='tcp';;
 			29) aSERVICES[i]='xrdp' aPORTS[3389]='tcp';;
 			30) aSERVICES[i]='nxserver' aPORTS[4000]='tcp';;
-			200) aSERVICES[i]='dietpi-dashboard' aPORTS[5252]='tcp';;
-			99) aSERVICES[i]='node_exporter' aPORTS[9100]='tcp';;
-			44) aSERVICES[i]='transmission-daemon' aPORTS[9091]='tcp';;
-			94) aSERVICES[i]='proftpd' aPORTS[21]='tcp';;
-			96) aSERVICES[i]='smbd' aPORTS[139]='tcp' aPORTS[445]='tcp';;
-			95) aSERVICES[i]='vsftpd' aPORTS[21]='tcp';;
-			109) aSERVICES[i]='nfs-kernel-server' aPORTS[2049]='tcp';;
-			83) aSERVICES[i]='apache2' aPORTS[80]='tcp';;
-			85) aSERVICES[i]='nginx' aPORTS[80]='tcp';;
-			84) aSERVICES[i]='lighttpd' aPORTS[80]='tcp';;
-			88) aSERVICES[i]='mariadb' aPORTS[3306]='tcp';;
-			91) aSERVICES[i]='redis-server' aPORTS[6379]='tcp';;
-			89) case $DISTRO in 'buster') aSERVICES[i]='php7.3-fpm';; 'bullseye') aSERVICES[i]='php7.4-fpm';; *) aSERVICES[i]='php8.2-fpm';; esac;;
-			125) aSERVICES[i]='synapse' aPORTS[8008]='tcp';;
-			128) aSERVICES[i]='mpd' aPORTS[6600]='tcp';;
-			133) aSERVICES[i]='yacy' aPORTS[8090]='tcp';;
-			186) aSERVICES[i]='ipfs' aPORTS[5003]='tcp' aPORTS[8087]='tcp';;
-			16) aSERVICES[i]='microblog-pub' aPORTS[8007]='tcp';;
-			2) aSERVICES[i]='fahclient' aPORTS[7396]='tcp';;
 			32) aSERVICES[i]='ympd' aPORTS[1337]='tcp';;
-			148) aSERVICES[i]='mympd' aPORTS[1333]='tcp';;
-			121) aSERVICES[i]='roonbridge' aPORTS[9003]='udp';;
-			118) aSERVICES[i]='mopidy' aPORTS[6680]='tcp';;
-			39) aSERVICES[i]='minidlna' aPORTS[8200]='tcp';;
-			111) aSERVICES[i]='urbackupsrv' aPORTS[55414]='tcp';;
-			59) aSERVICES[i]='raspimjpeg';;
-			45) aSERVICES[i]='deluged deluge-web' aPORTS[8112]='tcp' aPORTS[58846]='tcp' aPORTS[6882]='tcp';;
-			115) aSERVICES[i]='webmin' aPORTS[10000]='tcp';;
-			135) aSERVICES[i]='icecast2 darkice' aPORTS[8000]='tcp';;
-			#184) aSERVICES[i]='tor' aPORTS[443]='tcp' aPORTS[9051]='tcp';; # Cannot be installed non-interactively, ports can be chosen and depend on chosen relay type
-			182) aSERVICES[i]='unbound' aPORTS[53]='udp'; [[ ${aSERVICES[126]} ]] && aPORTS[5353]='udp';; # Uses port 5353 if Pi-hole or AdGuard Home is installed, but those do listen on port 53 instead
-			#93) aSERVICES[i]='pihole-FTL' aPORTS[53]='udp';; # Cannot be installed non-interactively
-			126) aSERVICES[i]='adguardhome' aPORTS[53]='udp' aPORTS[8083]='tcp'; [[ ${aSERVICES[182]} ]] && aPORTS[5353]='udp';; # Unbound uses port 5353 if AdGuard Home is installed
 			33) aSERVICES[i]='airsonic' aPORTS[8080]='tcp';;
-			204) aSERVICES[i]='navidrome' aPORTS[4533]='tcp';;
-			100) aSERVICES[i]='pijuice';; # aPORTS[????]='tcp';;
-			#171) aSERVICES[i]='frps frpc' aPORTS[7000]='tcp' aPORTS[7500]='tcp' aPORTS[7400]='tcp';; # Cannot be installed non-interactively, ports on chosen type
-			122) aSERVICES[i]='node-red' aPORTS[1880]='tcp';;
-			123) aSERVICES[i]='mosquitto' aPORTS[1883]='tcp';;
-			131) aSERVICES[i]='blynkserver' aPORTS[9443]='tcp';;
-			124) aSERVICES[i]='networkaudiod';; # aPORTS[????]='tcp';;
-			71) aSERVICES[i]='webiopi' aPORTS[8002]='tcp';;
-			98) aSERVICES[i]='haproxy' aPORTS[80]='tcp';;
 			35) aSERVICES[i]='logitechmediaserver' aPORTS[9000]='tcp';;
-			28|120) aSERVICES[i]='vncserver' aPORTS[5901]='tcp';;
+			36) aSERVICES[i]='Squeezelite';; # Random high UDP port
+			37) aSERVICES[i]='shairport-sync' aPORTS[5000]='tcp';; # AirPlay 2 would be TCP port 7000
+			39) aSERVICES[i]='minidlna' aPORTS[8200]='tcp';;
+			41) aSERVICES[i]='emby-server' aPORTS[8096]='tcp';;
+			42) aSERVICES[i]='plexmediaserver' aPORTS[32400]='tcp';;
+			43) aSERVICES[i]='mumble-server' aPORTS[64738]='tcp';;
+			44) aSERVICES[i]='transmission-daemon' aPORTS[9091]='tcp';;
+			45) aSERVICES[i]='deluged deluge-web' aPORTS[8112]='tcp' aPORTS[58846]='tcp' aPORTS[6882]='tcp';;
+			46) aSERVICES[i]='qbittorrent' aPORTS[1340]='tcp' aPORTS[6881]='tcp';;
+			49) aSERVICES[i]='gogs' aPORTS[3000]='tcp';;
+			50) aSERVICES[i]='syncthing' aPORTS[8384]='tcp';;
+			52) aSERVICES[i]='cuberite' aPORTS[1339]='tcp';;
+			53) aSERVICES[i]='mineos' aPORTS[8443]='tcp';;
+			58) aSERVICES[i]='tailscale';; # aPORTS[????]='udp';;
+			59) aSERVICES[i]='raspimjpeg';;
+			#60) aPORTS[53]='udp' aPORTS[68]='udp';; Cannot be installed in CI since a WiFi interface is required
+			#61) aSERVICES[i]='tor' aPORTS[9040]='udp';; Cannot be installed in CI since a WiFi interface is required
+			65) aSERVICES[i]='netdata' aPORTS[19999]='tcp';;
+			66) aSERVICES[i]='rpimonitor' aPORTS[8888]='tcp';;
+			71) aSERVICES[i]='webiopi' aPORTS[8002]='tcp';;
 			73) aSERVICES[i]='fail2ban';;
 			74) aSERVICES[i]='influxdb' aPORTS[8086]='tcp' aPORTS[8088]='tcp';;
 			77) aSERVICES[i]='grafana-server' aPORTS[3001]='tcp';;
 			80) aSERVICES[i]='ubooquity' aPORTS[2038]='tcp' aPORTS[2039]='tcp';;
-			179) aSERVICES[i]='komga' aPORTS[2037]='tcp';;
-			58) aSERVICES[i]='tailscale';; # aPORTS[????]='udp';;
+			83) aSERVICES[i]='apache2' aPORTS[80]='tcp';;
+			84) aSERVICES[i]='lighttpd' aPORTS[80]='tcp';;
+			85) aSERVICES[i]='nginx' aPORTS[80]='tcp';;
+			86) aSERVICES[i]='roon-extension-manager';;
+			88) aSERVICES[i]='mariadb' aPORTS[3306]='tcp';;
+			89) case $DISTRO in 'buster') aSERVICES[i]='php7.3-fpm';; 'bullseye') aSERVICES[i]='php7.4-fpm';; *) aSERVICES[i]='php8.2-fpm';; esac;;
+			91) aSERVICES[i]='redis-server' aPORTS[6379]='tcp';;
+			#93) aSERVICES[i]='pihole-FTL' aPORTS[53]='udp';; # Cannot be installed non-interactively
+			94) aSERVICES[i]='proftpd' aPORTS[21]='tcp';;
+			95) aSERVICES[i]='vsftpd' aPORTS[21]='tcp';;
+			96) aSERVICES[i]='smbd' aPORTS[139]='tcp' aPORTS[445]='tcp';;
 			97) aSERVICES[i]='openvpn' aPORTS[1194]='udp';;
-			#117) :;; # ToDo: Implement automated install via /boot/unattended_pivpn.conf
-			201) aSERVICES[i]='zerotier-one' aPORTS[9993]='tcp';;
-			#60) aPORTS[53]='udp' aPORTS[68]='udp';; Cannot be installed in CI since a WiFi interface is required
-			#61) aSERVICES[i]='tor' aPORTS[9040]='udp';; Cannot be installed in CI since a WiFi interface is required
-			37) aSERVICES[i]='shairport-sync' aPORTS[5000]='tcp';; # AirPlay 2 would be TCP port 7000
-			36) aSERVICES[i]='Squeezelite';; # Random high UDP port
-			66) aSERVICES[i]='rpimonitor' aPORTS[8888]='tcp';;
-			65) aSERVICES[i]='netdata' aPORTS[19999]='tcp';;
-			43) aSERVICES[i]='mumble-server' aPORTS[64738]='tcp';;
-			41) aSERVICES[i]='emby-server' aPORTS[8096]='tcp';;
-			42) aSERVICES[i]='plexmediaserver' aPORTS[32400]='tcp';;
-			52) aSERVICES[i]='cuberite' aPORTS[1339]='tcp';;
-			53) aSERVICES[i]='mineos' aPORTS[8443]='tcp';;
-			49) aSERVICES[i]='gogs' aPORTS[3000]='tcp';;
-			165) aSERVICES[i]='gitea' aPORTS[3000]='tcp';;
-			46) aSERVICES[i]='qbittorrent' aPORTS[1340]='tcp' aPORTS[6881]='tcp';;
+			98) aSERVICES[i]='haproxy' aPORTS[80]='tcp';;
+			99) aSERVICES[i]='node_exporter' aPORTS[9100]='tcp';;
+			100) aSERVICES[i]='pijuice';; # aPORTS[????]='tcp';;
+			104) aSERVICES[i]='dropbear' aPORTS[22]='tcp';;
+			105) aSERVICES[i]='ssh' aPORTS[22]='tcp';;
+			106) aSERVICES[i]='lidarr' aPORTS[8686]='tcp';;
 			107) aSERVICES[i]='rtorrent' aPORTS[49164]='tcp' aPORTS[6881]='udp';;
-			132) aSERVICES[i]='aria2' aPORTS[6800]='tcp';; # aPORTS[6881-6999]='tcp';; # Listens on random port
+			109) aSERVICES[i]='nfs-kernel-server' aPORTS[2049]='tcp';;
+			111) aSERVICES[i]='urbackupsrv' aPORTS[55414]='tcp';;
+			115) aSERVICES[i]='webmin' aPORTS[10000]='tcp';;
 			116) aSERVICES[i]='medusa' aPORTS[8081]='tcp';;
-			50) aSERVICES[i]='syncthing' aPORTS[8384]='tcp';;
+			#117) :;; # ToDo: Implement automated install via /boot/unattended_pivpn.conf
+			118) aSERVICES[i]='mopidy' aPORTS[6680]='tcp';;
+			121) aSERVICES[i]='roonbridge' aPORTS[9003]='udp';;
+			122) aSERVICES[i]='node-red' aPORTS[1880]='tcp';;
+			123) aSERVICES[i]='mosquitto' aPORTS[1883]='tcp';;
+			124) aSERVICES[i]='networkaudiod';; # aPORTS[????]='tcp';;
+			125) aSERVICES[i]='synapse' aPORTS[8008]='tcp';;
+			126) aSERVICES[i]='adguardhome' aPORTS[53]='udp' aPORTS[8083]='tcp'; [[ ${aSERVICES[182]} ]] && aPORTS[5353]='udp';; # Unbound uses port 5353 if AdGuard Home is installed
+			128) aSERVICES[i]='mpd' aPORTS[6600]='tcp';;
+			131) aSERVICES[i]='blynkserver' aPORTS[9443]='tcp';;
+			132) aSERVICES[i]='aria2' aPORTS[6800]='tcp';; # aPORTS[6881-6999]='tcp';; # Listens on random port
+			133) aSERVICES[i]='yacy' aPORTS[8090]='tcp';;
+			135) aSERVICES[i]='icecast2 darkice' aPORTS[8000]='tcp';;
 			136) aSERVICES[i]='motioneye' aPORTS[8765]='tcp';;
 			137) aSERVICES[i]='mjpg-streamer' aPORTS[8082]='tcp';;
 			138) aSERVICES[i]='virtualhere' aPORTS[7575]='tcp';;
 			139) aSERVICES[i]='sabnzbd' aPORTS[8080]='tcp';; # ToDo: Solve conflict with Airsonic
-			177) aSERVICES[i]='firefox-sync' aPORTS[5002]='tcp';;
-			183) aSERVICES[i]='vaultwarden' aPORTS[8001]='tcp';;
-			142) aSERVICES[i]='snapd';;
+			140) aSERVICES[i]='domoticz' aPORTS[8124]='tcp' aPORTS[8424]='tcp';;
 			141) aSERVICES[i]='spotify-connect-web' aPORTS[4000]='tcp';;
+			142) aSERVICES[i]='snapd';;
 			143) aSERVICES[i]='koel' aPORTS[8003]='tcp';;
 			144) aSERVICES[i]='sonarr' aPORTS[8989]='tcp';;
 			145) aSERVICES[i]='radarr' aPORTS[7878]='tcp';;
-			106) aSERVICES[i]='lidarr' aPORTS[8686]='tcp';;
-			180) aSERVICES[i]='bazarr' aPORTS[6767]='tcp';;
 			146) aSERVICES[i]='tautulli' aPORTS[8181]='tcp';;
 			147) aSERVICES[i]='jackett' aPORTS[9117]='tcp';;
+			148) aSERVICES[i]='mympd' aPORTS[1333]='tcp';;
 			149) aSERVICES[i]='nzbget' aPORTS[6789]='tcp';;
 			151) aSERVICES[i]='prowlarr' aPORTS[9696]='tcp';;
-			203) aSERVICES[i]='readarr' aPORTS[8787]='tcp';;
-			155) aSERVICES[i]='htpc-manager' aPORTS[8085]='tcp';;
+			152) aSERVICES[i]='avahi-daemon' aPORTS[5353]='udp';;
 			153) aSERVICES[i]='octoprint' aPORTS[5001]='tcp';;
-			187) aSERVICES[i]='cups' aPORTS[631]='tcp';;
 			154) aSERVICES[i]='roonserver';; # Listens on a variety of different port ranges
+			155) aSERVICES[i]='htpc-manager' aPORTS[8085]='tcp';;
+			157) aSERVICES[i]='home-assistant' aPORTS[8123]='tcp';;
 			158) aSERVICES[i]='minio' aPORTS[9000]='tcp';; # ToDo: Solve port conflict with LMS
-			162) aSERVICES[i]='docker';;
 			161) aSERVICES[i]='bdd' aPORTS[80]='tcp' aPORTS[443]='tcp';;
-			164) aSERVICES[i]='nukkit' aPORTS[19132]='udp';;
+			162) aSERVICES[i]='docker';;
 			163) aSERVICES[i]='gmediarender';; # DLNA => UPnP high range of ports
+			164) aSERVICES[i]='nukkit' aPORTS[19132]='udp';;
+			165) aSERVICES[i]='gitea' aPORTS[3000]='tcp';;
 			166) aSERVICES[i]='pi-spc';;
 			167) aSERVICES[i]='raspotify';;
 			169) aSERVICES[i]='voice-recognizer';;
+			#171) aSERVICES[i]='frps frpc' aPORTS[7000]='tcp' aPORTS[7500]='tcp' aPORTS[7400]='tcp';; # Cannot be installed non-interactively, ports on chosen type
+			#172) aSERVICES[i]='wg-quick@wg0' aPORTS[51820]='udp';; # cannot be installed non-interactively
 			176) aSERVICES[i]='mycroft';;
-			86) aSERVICES[i]='roon-extension-manager';;
+			177) aSERVICES[i]='firefox-sync' aPORTS[5002]='tcp';;
 			178) aSERVICES[i]='jellyfin' aPORTS[8097]='tcp';;
-			206) aSERVICES[i]='openhab' aPORTS[8444]='tcp';;
-			157) aSERVICES[i]='home-assistant' aPORTS[8123]='tcp';;
+			179) aSERVICES[i]='komga' aPORTS[2037]='tcp';;
+			180) aSERVICES[i]='bazarr' aPORTS[6767]='tcp';;
 			181) aSERVICES[i]='papermc' aPORTS[25565]='tcp';;
-			140) aSERVICES[i]='domoticz' aPORTS[8124]='tcp' aPORTS[8424]='tcp';;
+			182) aSERVICES[i]='unbound' aPORTS[53]='udp'; [[ ${aSERVICES[126]} ]] && aPORTS[5353]='udp';; # Uses port 5353 if Pi-hole or AdGuard Home is installed, but those do listen on port 53 instead
+			183) aSERVICES[i]='vaultwarden' aPORTS[8001]='tcp';;
+			#184) aSERVICES[i]='tor' aPORTS[443]='tcp' aPORTS[9051]='tcp';; # Cannot be installed non-interactively, ports can be chosen and depend on chosen relay type
+			185) aSERVICES[i]='docker' aPORTS[9002]='tcp';;
+			186) aSERVICES[i]='ipfs' aPORTS[5003]='tcp' aPORTS[8087]='tcp';;
+			187) aSERVICES[i]='cups' aPORTS[631]='tcp';;
 			191) aSERVICES[i]='snapserver' aPORTS[1780]='tcp';;
 			#192) aSERVICES[i]='snapclient';; # cannot be installed non-interactively
-			202) aCOMMANDS[i]='rclone -h';;
-			209) aCOMMANDS[i]='restic version';;
+			194) aSERVICES[i]='postgresql';;
+			196) aCOMMANDS[i]='java -version';;
 			198) aSERVICES[i]='filebrowser' aPORTS[8084]='tcp';;
 			199) aSERVICES[i]='spotifyd';; # aPORTS[4079]='tcp';; ???
-			185) aSERVICES[i]='docker' aPORTS[9002]='tcp';;
-			#172) aSERVICES[i]='wg-quick@wg0' aPORTS[51820]='udp';; # cannot be installed non-interactively
-			196) aCOMMANDS[i]='java -version';;
+			200) aSERVICES[i]='dietpi-dashboard' aPORTS[5252]='tcp';;
+			201) aSERVICES[i]='zerotier-one' aPORTS[9993]='tcp';;
+			202) aCOMMANDS[i]='rclone -h';;
+			203) aSERVICES[i]='readarr' aPORTS[8787]='tcp';;
+			204) aSERVICES[i]='navidrome' aPORTS[4533]='tcp';;
+			206) aSERVICES[i]='openhab' aPORTS[8444]='tcp';;
+			209) aCOMMANDS[i]='restic version';;
 			*) :;;
 		esac
 	done
@@ -201,16 +201,16 @@ Process_Software()
 for i in $SOFTWARE
 do
 	case $i in
-		47|114|168) Process_Software 88 89 91 webserver;;
-		38|40|48|54|55|57|59|90|160) Process_Software 88 89 webserver;;
+		205) Process_Software webserver;;
 		27|56|63|64|107|132) Process_Software 89 webserver;; # 93 (Pi-hole) cannot be installed non-interactively
-		125) Process_Software 194;;
+		38|40|48|54|55|57|59|90|160) Process_Software 88 89 webserver;;
+		47|114|168) Process_Software 88 89 91 webserver;;
+		8) Process_Software 196;;
 		32|148|119) Process_Software 128;;
 		129) Process_Software 88 89 128 webserver;;
-		#61) Process_Software 60;; # Cannot be installed in CI
 		49|165) Process_Software 88;;
-		205) Process_Software webserver;;
-		8) Process_Software 196;;
+		#61) Process_Software 60;; # Cannot be installed in CI
+		125) Process_Software 194;;
 		*) :;;
 	esac
 	Process_Software "$i"
