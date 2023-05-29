@@ -49,11 +49,11 @@ do
 done
 [[ $DISTRO =~ ^'buster'|'bullseye'|'bookworm'$ ]] || { G_DIETPI-NOTIFY 1 "Invalid distro \"$DISTRO\" passed, aborting..."; exit 1; }
 case $ARCH in
-	'armv6l') image="DietPi_Container-ARMv6-${DISTRO^}";;
-	'armv7l') image="DietPi_Container-ARMv7-${DISTRO^}";;
-	'aarch64') image="DietPi_Container-ARMv8-${DISTRO^}";;
-	'x86_64') image="DietPi_Container-x86_64-${DISTRO^}";;
-	'riscv64') image="DietPi_Container-RISC-V-Sid";;
+	'armv6l') image="DietPi_Container-ARMv6-${DISTRO^}" arch=1;;
+	'armv7l') image="DietPi_Container-ARMv7-${DISTRO^}" arch=2;;
+	'aarch64') image="DietPi_Container-ARMv8-${DISTRO^}" arch=3;;
+	'x86_64') image="DietPi_Container-x86_64-${DISTRO^}" arch=10;;
+	'riscv64') image="DietPi_Container-RISC-V-Sid" arch=11;;
 	*) G_DIETPI-NOTIFY 1 "Invalid architecture \"$ARCH\" passed, aborting..."; exit 1;;
 esac
 [[ $SOFTWARE =~ ^[0-9\ ]+$ ]] || { G_DIETPI-NOTIFY 1 "Invalid software list \"$SOFTWARE\" passed, aborting..."; exit 1; }
@@ -225,7 +225,7 @@ done
 # Dependencies
 ##########################################
 apackages=('7zip' 'parted' 'fdisk' 'systemd-container')
-(( $G_HW_ARCH == $ARCH || ( $G_HW_ARCH < 10 && $G_HW_ARCH > $ARCH ) )) || apackages+=('qemu-user-static' 'binfmt-support')
+(( $G_HW_ARCH == $arch || ( $G_HW_ARCH < 10 && $G_HW_ARCH > $arch ) )) || apackages+=('qemu-user-static' 'binfmt-support')
 G_AG_CHECK_INSTALL_PREREQ "${apackages[@]}"
 
 ##########################################
@@ -252,15 +252,15 @@ G_EXEC mkdir rootfs
 G_EXEC mount "${FP_LOOP}p1" rootfs
 
 # Force ARMv6 arch on Raspbian
-[[ $ARCH == 'armv6l' ]] && G_EXEC sed -i '/# Start DietPi-Software/iG_EXEC sed -i -e '\''/^G_HW_ARCH=/cG_HW_ARCH=1'\'' -e '\''/^G_HW_ARCH_NAME=/cG_HW_ARCH_NAME=armv6l'\'' /boot/dietpi/.hw_model' rootfs/boot/dietpi/dietpi-login
+(( $arch == 1 )) && G_EXEC sed -i '/# Start DietPi-Software/iG_EXEC sed -i -e '\''/^G_HW_ARCH=/cG_HW_ARCH=1'\'' -e '\''/^G_HW_ARCH_NAME=/cG_HW_ARCH_NAME=armv6l'\'' /boot/dietpi/.hw_model' rootfs/boot/dietpi/dietpi-login
 
 # Force RPi on ARM systems if requested
-if [[ $RPI == 'true' && $ARCH == 'a'* ]]
+if [[ $RPI == 'true' ]] && (( $arch < 10 ))
 then
-	case $ARCH in
-		'armv6l') model=1;;
-		'armv7l') model=2;;
-		'aarch64') model=4;;
+	case $arch in
+		1) model=1;;
+		2) model=2;;
+		3) model=4;;
 		*) G_DIETPI-NOTIFY 1 "Invalid architecture $ARCH beginning with \"a\" but not being one of the known/accepted ARM architectures. This should never happen!"; exit 1;;
 	esac
 	G_EXEC sed -i "/# Start DietPi-Software/iG_EXEC sed -i -e '/^G_HW_MODEL=/cG_HW_MODEL=$model' -e '/^G_HW_MODEL_NAME=/cG_HW_MODEL_NAME=\"RPi $model ($ARCH)\"' /boot/dietpi/.hw_model; > /boot/config.txt; > /boot/cmdline.txt" rootfs/boot/dietpi/dietpi-login
@@ -304,10 +304,10 @@ then
 fi
 
 # Workaround for failing 32-bit ARM Rust builds on ext4 in QEMU emulated container on 64-bit host: https://github.com/rust-lang/cargo/issues/9545
-(( $ARCH < 3 && $G_HW_ARCH > 9 )) && G_EXEC eval 'echo -e '\''tmpfs /mnt/dietpi_userdata tmpfs size=3G,noatime,lazytime\ntmpfs /root tmpfs size=3G,noatime,lazytime'\'' >> rootfs/etc/fstab'
+(( $arch < 3 && $G_HW_ARCH > 9 )) && G_EXEC eval 'echo -e '\''tmpfs /mnt/dietpi_userdata tmpfs size=3G,noatime,lazytime\ntmpfs /root tmpfs size=3G,noatime,lazytime'\'' >> rootfs/etc/fstab'
 
 # Workaround for Node.js on ARMv6
-(( $ARCH == 1 )) && G_EXEC sed -i '/# Start DietPi-Software/a\sed -i '\''/G_EXEC chmod +x node-install.sh/a\\sed -i "/^ARCH=/c\\ARCH=armv6l" node-install.sh'\'' /boot/dietpi/dietpi-software' rootfs/boot/dietpi/dietpi-login
+(( $arch == 1 )) && G_EXEC sed -i '/# Start DietPi-Software/a\sed -i '\''/G_EXEC chmod +x node-install.sh/a\\sed -i "/^ARCH=/c\\ARCH=armv6l" node-install.sh'\'' /boot/dietpi/dietpi-software' rootfs/boot/dietpi/dietpi-login
 
 # Check for service status, ports and commands
 # shellcheck disable=SC2016
