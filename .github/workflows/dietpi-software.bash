@@ -210,7 +210,7 @@ do
 		27|56|63|64|107|132) Process_Software 89 webserver;; # 93 (Pi-hole) cannot be installed non-interactively
 		38|40|48|54|55|57|59|90|160) Process_Software 88 89 webserver;;
 		47|114|168) Process_Software 88 89 91 webserver;;
-		8) Process_Software 196;;
+		8|33) Process_Software 196;;
 		32|148|119) Process_Software 128;;
 		129) Process_Software 88 89 128 webserver;;
 		49|165) Process_Software 88;;
