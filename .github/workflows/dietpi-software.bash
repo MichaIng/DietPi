@@ -302,6 +302,8 @@ fi
 (( $ARCH < 3 && $G_HW_ARCH > 9 )) && G_EXEC eval 'echo -e '\''tmpfs /mnt/dietpi_userdata tmpfs size=3G,noatime,lazytime\ntmpfs /root tmpfs size=3G,noatime,lazytime'\'' >> rootfs/etc/fstab'
 
 # Check for service status, ports and commands
+# shellcheck disable=SC2016
+G_EXEC sed -i '/# Start DietPi-Software/a\sed -i '\''/# Custom 1st run script/a\for i in "${aSTART_SERVICES[@]}"; do G_EXEC_NOHALT=1 G_EXEC systemctl start "$i"; done'\'' /boot/dietpi/dietpi-software' rootfs/boot/dietpi/dietpi-login
 G_EXEC eval 'echo -e '\''#!/bin/dash\nexit_code=0; /boot/dietpi/dietpi-services start || exit_code=1'\'' > rootfs/boot/Automation_Custom_Script.sh'
 if (( ${#aSERVICES[@]} || ${#aPORTS[@]} || ${#aCOMMANDS[@]} ))
 then
@@ -340,5 +342,5 @@ G_EXEC sed -i 's|Prompt_on_Failure$|{ journalctl -n 25; ss -tlpn; df -h; free -h
 # Boot container
 ##########################################
 systemd-nspawn -bD rootfs
-[[ -f 'rootfs/success' ]] || { journalctl -e; df -h; free -h; exit 1; }
+[[ -f 'rootfs/success' ]] || { journalctl -n 25; df -h; free -h; exit 1; }
 }
