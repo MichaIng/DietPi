@@ -315,7 +315,7 @@ fi
 G_EXEC sed -i '/# Start DietPi-Software/a\sed -i '\''/# Custom 1st run script/a\\for i in "${aSTART_SERVICES[@]}"; do G_EXEC_NOHALT=1 G_EXEC systemctl start "$i"; done'\'' /boot/dietpi/dietpi-software' rootfs/boot/dietpi/dietpi-login
 G_EXEC eval 'echo -e '\''#!/bin/dash\nexit_code=0; /boot/dietpi/dietpi-services start || exit_code=1; sleep 30'\'' > rootfs/boot/Automation_Custom_Script.sh'
 # - Loop through software IDs to test
-printf '%s\n' "${!aSERVICES[@]}" "$!#aTCP[@]}" "${!aUDP[@]}" "${!aCOMMANDS[@]}" | sort -u | while read -r i
+printf '%s\n' "${!aSERVICES[@]}" "${!aTCP[@]}" "${!aUDP[@]}" "${!aCOMMANDS[@]}" | sort -u | while read -r i
 do
 	# - Check whether ID really got installed, to skip software unsupported on hardware or distro
 	cat << _EOF_ >> rootfs/boot/Automation_Custom_Script.sh
