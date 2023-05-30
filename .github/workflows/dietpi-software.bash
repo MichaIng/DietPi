@@ -47,7 +47,7 @@ do
 	esac
 	shift
 done
-[[ $DISTRO =~ ^'buster'|'bullseye'|'bookworm'$ ]] || { G_DIETPI-NOTIFY 1 "Invalid distro \"$DISTRO\" passed, aborting..."; exit 1; }
+[[ $DISTRO =~ ^('buster'|'bullseye'|'bookworm')$ ]] || { G_DIETPI-NOTIFY 1 "Invalid distro \"$DISTRO\" passed, aborting..."; exit 1; }
 case $ARCH in
 	'armv6l') image="DietPi_Container-ARMv6-${DISTRO^}" arch=1;;
 	'armv7l') image="DietPi_Container-ARMv7-${DISTRO^}" arch=2;;
@@ -57,7 +57,10 @@ case $ARCH in
 	*) G_DIETPI-NOTIFY 1 "Invalid architecture \"$ARCH\" passed, aborting..."; exit 1;;
 esac
 [[ $SOFTWARE =~ ^[0-9\ ]+$ ]] || { G_DIETPI-NOTIFY 1 "Invalid software list \"$SOFTWARE\" passed, aborting..."; exit 1; }
-[[ $RPI =~ ^|'false'|'true'$ ]] || { G_DIETPI-NOTIFY 1 "Invalid RPi flag \"$RPI\" passed, aborting..."; exit 1; }
+[[ $RPI =~ ^(|'false'|'true')$ ]] || { G_DIETPI-NOTIFY 1 "Invalid RPi flag \"$RPI\" passed, aborting..."; exit 1; }
+
+# Workaround for "Could not execute systemctl:  at /usr/bin/deb-systemd-invoke line 145." during Apache2 DEB postinst in 32-bit ARM Bookworm container: https://lists.ubuntu.com/archives/foundations-bugs/2022-January/467253.html
+[[ $SOFTWARE =~ (^| )83( |$) && $DISTRO == 'bookworm' ]] && (( $arch < 3 )) && { echo '[ WARN ] Installing Lighttpd instead of Apache due to a bug in 32-bit ARM containers'; SOFTWARE=$(sed -Ei 's/(^| )83( |$)/\184\2/' <<< "$SOFTWARE"); }
 
 ##########################################
 # Create service and port lists
@@ -69,7 +72,7 @@ Process_Software()
 	for i in "$@"
 	do
 		case $i in
-			'webserver') [[ $SOFTWARE =~ (^| )8[345]( |$) ]] || aSERVICES[83]='apache2' aTCP[i]='80';;
+			'webserver') [[ $SOFTWARE =~ (^| )8[345]( |$) ]] || aSERVICES[84]='lighttpd' aTCP[84]='80';; # Lighttpd as default due to above bug in 32-bit ARM Bookworm containers
 			0) aCOMMANDS[i]='ssh -V';;
 			1) aCOMMANDS[i]='smbclient -V';;
 			2) aSERVICES[i]='fahclient' aTCP[i]='7396';;
@@ -288,6 +291,9 @@ G_EXEC rm rootfs/root/.ssh/known_hosts
 
 # Apply software IDs to install
 for i in $SOFTWARE; do G_CONFIG_INJECT "AUTO_SETUP_INSTALL_SOFTWARE_ID=$i" "AUTO_SETUP_INSTALL_SOFTWARE_ID=$i" rootfs/boot/dietpi.txt; done
+
+# Workaround for "Could not execute systemctl:  at /usr/bin/deb-systemd-invoke line 145." during Apache2 DEB postinst in 32-bit ARM Bookworm container: https://lists.ubuntu.com/archives/foundations-bugs/2022-January/467253.html
+G_CONFIG_INJECT 'AUTO_SETUP_WEB_SERVER_INDEX=' 'AUTO_SETUP_WEB_SERVER_INDEX=-2' rootfs/boot/dietpi.txt
 
 # Workaround for failing Redis as of PrivateUsers=true leading to "Failed to set up user namespacing"
 G_EXEC mkdir rootfs/etc/systemd/system/redis-server.service.d
