@@ -65,7 +65,7 @@ esac
 ##########################################
 # Create service and port lists
 ##########################################
-aSERVICES=() aTCP=() aUDP=() aCOMMANDS=()
+aSERVICES=() aTCP=() aUDP=() aCOMMANDS=() aDELAY=()
 Process_Software()
 {
 	local i
@@ -84,7 +84,7 @@ Process_Software()
 			29) aSERVICES[i]='xrdp' aTCP[i]='3389';;
 			30) aSERVICES[i]='nxserver' aTCP[i]='4000';;
 			32) aSERVICES[i]='ympd' aTCP[i]='1337';;
-			33) aSERVICES[i]='airsonic' aTCP[i]='8080';;
+			33) (( $arch == 10 )) && aSERVICES[i]='airsonic' aTCP[i]='8080' aDELAY[i]=30;; # Fails in QEMU-emulated containers, probably due to missing device access
 			35) aSERVICES[i]='logitechmediaserver' aTCP[i]='9000';;
 			36) aSERVICES[i]='Squeezelite';; # Random high UDP port
 			37) aSERVICES[i]='shairport-sync' aTCP[i]='5000';; # AirPlay 2 would be TCP port 7000
@@ -319,33 +319,35 @@ fi
 # shellcheck disable=SC2016
 # - Start all services
 G_EXEC sed -i '/# Start DietPi-Software/a\sed -i '\''/# Custom 1st run script/a\\for i in "${aSTART_SERVICES[@]}"; do G_EXEC_NOHALT=1 G_EXEC systemctl start "$i"; done'\'' /boot/dietpi/dietpi-software' rootfs/boot/dietpi/dietpi-login
-G_EXEC eval 'echo -e '\''#!/bin/dash\nexit_code=0; /boot/dietpi/dietpi-services start || exit_code=1; sleep 30'\'' > rootfs/boot/Automation_Custom_Script.sh'
+delay=10
+for i in "${aDELAY[@]}"; do (( $i > $delay )) && delay=$i; done
+G_EXEC eval "echo -e '#!/bin/dash\nexit_code=0; /boot/dietpi/dietpi-services start || exit_code=1; sleep $delay' > rootfs/boot/Automation_Custom_Script.sh"
 # - Loop through software IDs to test
 printf '%s\n' "${!aSERVICES[@]}" "${!aTCP[@]}" "${!aUDP[@]}" "${!aCOMMANDS[@]}" | sort -u | while read -r i
 do
-	# - Check whether ID really got installed, to skip software unsupported on hardware or distro
+	# Check whether ID really got installed, to skip software unsupported on hardware or distro
 	cat << _EOF_ >> rootfs/boot/Automation_Custom_Script.sh
 if grep -q '^aSOFTWARE_INSTALL_STATE\[$i\]=2$' /boot/dietpi/.installed
 then
 _EOF_
-	# - Check service status
+	# Check service status
 	[[ ${aSERVICES[i]} ]] && cat << _EOF_ >> rootfs/boot/Automation_Custom_Script.sh
 echo -n '\e[33m[ INFO ] Checking ${aSERVICES[i]} service status:\e[0m '
 systemctl is-active '${aSERVICES[i]}' || { journalctl -u '${aSERVICES[i]}'; exit_code=1; }
 _EOF_
-	# - Check TCP ports
+	# Check TCP ports
 	[[ ${aTCP[i]} ]] && for j in ${aTCP[i]}; do cat << _EOF_ >> rootfs/boot/Automation_Custom_Script.sh
 echo '\e[33m[ INFO ] Checking TCP port $j status:\e[0m'
 ss -tlpn | grep ':${j}[[:blank:]]' || exit_code=1
 _EOF_
 	done
-	# - Check UDP ports
+	# Check UDP ports
 	[[ ${aUDP[i]} ]] && for j in ${aUDP[i]}; do cat << _EOF_ >> rootfs/boot/Automation_Custom_Script.sh
 echo '\e[33m[ INFO ] Checking UDP port $j status:\e[0m'
 ss -ulpn | grep ':${j}[[:blank:]]' || exit_code=1
 _EOF_
 	done
-	# - Check commands
+	# Check commands
 	[[ ${aCOMMANDS[i]} ]] && cat << _EOF_ >> rootfs/boot/Automation_Custom_Script.sh
 echo '\e[33m[ INFO ] Testing command ${aCOMMANDS[i]}:\e[0m'
 ${aCOMMANDS[i]} || exit_code=1
