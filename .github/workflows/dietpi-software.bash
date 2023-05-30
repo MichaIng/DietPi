@@ -97,6 +97,7 @@ Process_Software()
 			46) aSERVICES[i]='qbittorrent' aTCP[i]='1340 6881';;
 			49) aSERVICES[i]='gogs' aTCP[i]='3000';;
 			50) aSERVICES[i]='syncthing' aTCP[i]='8384';;
+			51) aCOMMANDS[i]='/usr/games/opentyrian/opentyrian -h';;
 			52) aSERVICES[i]='cuberite' aTCP[i]='1339';;
 			53) aSERVICES[i]='mineos' aTCP[i]='8443';;
 			58) aSERVICES[i]='tailscale';; # aUDP[i]='????';;
