@@ -331,10 +331,11 @@ if grep -q '^aSOFTWARE_INSTALL_STATE\[$i\]=2$' /boot/dietpi/.installed
 then
 _EOF_
 	# Check service status
-	[[ ${aSERVICES[i]} ]] && cat << _EOF_ >> rootfs/boot/Automation_Custom_Script.sh
-echo -n '\e[33m[ INFO ] Checking ${aSERVICES[i]} service status:\e[0m '
-systemctl is-active '${aSERVICES[i]}' || { journalctl -u '${aSERVICES[i]}'; exit_code=1; }
+	[[ ${aSERVICES[i]} ]] && for j in ${aSERVICES[i]}; do cat << _EOF_ >> rootfs/boot/Automation_Custom_Script.sh
+echo -n '\e[33m[ INFO ] Checking $j service status:\e[0m '
+systemctl is-active '$j' || { journalctl -u '$j'; exit_code=1; }
 _EOF_
+	done
 	# Check TCP ports
 	[[ ${aTCP[i]} ]] && for j in ${aTCP[i]}; do cat << _EOF_ >> rootfs/boot/Automation_Custom_Script.sh
 echo '\e[33m[ INFO ] Checking TCP port $j status:\e[0m'
