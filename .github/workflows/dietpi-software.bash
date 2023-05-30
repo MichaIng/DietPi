@@ -60,7 +60,7 @@ esac
 [[ $RPI =~ ^(|'false'|'true')$ ]] || { G_DIETPI-NOTIFY 1 "Invalid RPi flag \"$RPI\" passed, aborting..."; exit 1; }
 
 # Workaround for "Could not execute systemctl:  at /usr/bin/deb-systemd-invoke line 145." during Apache2 DEB postinst in 32-bit ARM Bookworm container: https://lists.ubuntu.com/archives/foundations-bugs/2022-January/467253.html
-[[ $SOFTWARE =~ (^| )83( |$) && $DISTRO == 'bookworm' ]] && (( $arch < 3 )) && { echo '[ WARN ] Installing Lighttpd instead of Apache due to a bug in 32-bit ARM containers'; SOFTWARE=$(sed -Ei 's/(^| )83( |$)/\184\2/' <<< "$SOFTWARE"); }
+[[ $SOFTWARE =~ (^| )83( |$) && $DISTRO == 'bookworm' ]] && (( $arch < 3 )) && { echo '[ WARN ] Installing Lighttpd instead of Apache due to a bug in 32-bit ARM containers'; SOFTWARE=$(sed -E 's/(^| )83( |$)/\184\2/g' <<< "$SOFTWARE"); }
 
 ##########################################
 # Create service and port lists
@@ -350,7 +350,7 @@ _EOF_
 echo '\e[33m[ INFO ] Testing command ${aCOMMANDS[i]}:\e[0m'
 ${aCOMMANDS[i]} || exit_code=1
 _EOF_
-	echo 'fi' >> rootfs/boot/Automation_Custom_Script.sh
+	G_EXEC eval 'echo fi >> rootfs/boot/Automation_Custom_Script.sh'
 done
 
 # Success flag and shutdown
