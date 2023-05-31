@@ -104,6 +104,7 @@ Process_Software()
 			59) aSERVICES[i]='raspimjpeg';;
 			#60) aUDP[i]='53 68';; Cannot be installed in CI since a WiFi interface is required
 			#61) aSERVICES[i]='tor' aUDP[i]='9040';; Cannot be installed in CI since a WiFi interface is required
+			62) aCOMMANDS[i]='box86 -v';;
 			65) aSERVICES[i]='netdata' aTCP[i]='19999';;
 			66) aSERVICES[i]='rpimonitor' aTCP[i]='8888';;
 			71) aSERVICES[i]='webiopi' aTCP[i]='8002';;
@@ -194,6 +195,7 @@ Process_Software()
 			#192) aSERVICES[i]='snapclient';; # cannot be installed non-interactively
 			194) aSERVICES[i]='postgresql';;
 			196) aCOMMANDS[i]='java -version';;
+			197) aCOMMANDS[i]='box64 -v';;
 			198) aSERVICES[i]='filebrowser' aTCP[i]='8084';;
 			199) aSERVICES[i]='spotifyd';; # aTCP[i]='4079';; ???
 			200) aSERVICES[i]='dietpi-dashboard' aTCP[i]='5252';;
