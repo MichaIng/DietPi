@@ -98,7 +98,7 @@ Process_Software()
 			49) aSERVICES[i]='gogs' aTCP[i]='3000';;
 			50) aSERVICES[i]='syncthing' aTCP[i]='8384';;
 			51) aCOMMANDS[i]='/usr/games/opentyrian/opentyrian -h';;
-			52) aSERVICES[i]='cuberite' aTCP[i]='1339'; (( $arch < 10 )) && aDELAY[i]=30;;
+			52) aSERVICES[i]='cuberite' aTCP[i]='1339'; (( $arch < 10 )) && aDELAY[i]=120;;
 			53) aSERVICES[i]='mineos' aTCP[i]='8443';;
 			58) aSERVICES[i]='tailscaled' aUDP[i]='41641';;
 			59) aSERVICES[i]='raspimjpeg';;
