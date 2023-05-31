@@ -86,7 +86,7 @@ Process_Software()
 			32) aSERVICES[i]='ympd' aTCP[i]='1337';;
 			33) (( $arch == 10 )) && aSERVICES[i]='airsonic' aTCP[i]='8080' aDELAY[i]=30;; # Fails in QEMU-emulated containers, probably due to missing device access
 			35) aSERVICES[i]='logitechmediaserver' aTCP[i]='9000';;
-			36) aSERVICES[i]='Squeezelite';; # Random high UDP port
+			#36) aSERVICES[i]='Squeezelite';; # Random high UDP port # Service exits if no audio device has been found, which does not exist on GitHub Actions runners, respectively within the containers
 			37) aSERVICES[i]='shairport-sync' aTCP[i]='5000';; # AirPlay 2 would be TCP port 7000
 			39) aSERVICES[i]='minidlna' aTCP[i]='8200';;
 			41) aSERVICES[i]='emby-server' aTCP[i]='8096';;
