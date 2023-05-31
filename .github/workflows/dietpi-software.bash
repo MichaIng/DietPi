@@ -100,7 +100,7 @@ Process_Software()
 			51) aCOMMANDS[i]='/usr/games/opentyrian/opentyrian -h';;
 			52) aSERVICES[i]='cuberite' aTCP[i]='1339'; (( $arch < 10 )) && aDELAY[i]=120;;
 			53) aSERVICES[i]='mineos' aTCP[i]='8443';;
-			58) aCOMMANDS[i]='tailscale version' # aSERVICES[i]='tailscaled' aUDP[i]='41641';; GitHub Action runners to not support the TUN module
+			58) aCOMMANDS[i]='tailscale version';; # aSERVICES[i]='tailscaled' aUDP[i]='41641' GitHub Action runners to not support the TUN module
 			59) aSERVICES[i]='raspimjpeg';;
 			#60) aUDP[i]='53 68';; Cannot be installed in CI since a WiFi interface is required
 			#61) aSERVICES[i]='tor' aUDP[i]='9040';; Cannot be installed in CI since a WiFi interface is required
