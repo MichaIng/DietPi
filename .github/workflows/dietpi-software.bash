@@ -61,6 +61,8 @@ esac
 
 # Workaround for "Could not execute systemctl:  at /usr/bin/deb-systemd-invoke line 145." during Apache2 DEB postinst in 32-bit ARM Bookworm container: https://lists.ubuntu.com/archives/foundations-bugs/2022-January/467253.html
 [[ $SOFTWARE =~ (^| )83( |$) && $DISTRO == 'bookworm' ]] && (( $arch < 3 )) && { echo '[ WARN ] Installing Lighttpd instead of Apache due to a bug in 32-bit ARM containers'; SOFTWARE=$(sed -E 's/(^| )83( |$)/\184\2/g' <<< "$SOFTWARE"); }
+# Remove Roon Extension Manager and Portainer from test installs as Docker cannot start in systemd containers
+[[ $SOFTWARE =~ (^| )(86|185)( |$) ]] && { echo '[ WARN ] Removing Roon Extension Manager and Portainer from test installs as Docker cannot start in systemd containers'; SOFTWARE=$(sed -E 's/(^| )(86|186)( |$)/\1\2/g' <<< "$SOFTWARE"); }
 
 ##########################################
 # Create service and port lists
@@ -114,11 +116,11 @@ Process_Software()
 			73) aSERVICES[i]='fail2ban';;
 			74) aSERVICES[i]='influxdb' aTCP[i]='8086 8088';;
 			77) aSERVICES[i]='grafana-server' aTCP[i]='3001'; (( $arch < 10 )) && aDELAY[i]=30;;
-			80) aSERVICES[i]='ubooquity' aTCP[i]='2038 2039';;
+			80) aSERVICES[i]='ubooquity' aTCP[i]='2038 2039'; (( $arch == 10 )) || aDELAY[i]=30;;
 			83) aSERVICES[i]='apache2' aTCP[i]='80';;
 			84) aSERVICES[i]='lighttpd' aTCP[i]='80';;
 			85) aSERVICES[i]='nginx' aTCP[i]='80';;
-			86) aSERVICES[i]='roon-extension-manager';;
+			#86) aSERVICES[i]='roon-extension-manager';; # Docker does not start in systemd containers (without dedicated network)
 			88) aSERVICES[i]='mariadb' aTCP[i]='3306';;
 			89) case $DISTRO in 'buster') aSERVICES[i]='php7.3-fpm';; 'bullseye') aSERVICES[i]='php7.4-fpm';; *) aSERVICES[i]='php8.2-fpm';; esac;;
 			91) aSERVICES[i]='redis-server' aTCP[i]='6379';;
@@ -173,7 +175,7 @@ Process_Software()
 			157) aSERVICES[i]='home-assistant' aTCP[i]='8123';;
 			158) aSERVICES[i]='minio' aTCP[i]='9000';; # ToDo: Solve port conflict with LMS
 			161) aSERVICES[i]='bdd' aTCP[i]='80 443';;
-			162) aSERVICES[i]='docker';;
+			162) aCOMMANDS[i]='docker -v';; # aSERVICES[i]='docker' # Docker does not start in systemd containers (without dedicated network)
 			163) aSERVICES[i]='gmediarender';; # DLNA => UPnP high range of ports
 			164) aSERVICES[i]='nukkit' aUDP[i]='19132';;
 			165) aSERVICES[i]='gitea' aTCP[i]='3000';;
@@ -191,7 +193,7 @@ Process_Software()
 			182) aSERVICES[i]='unbound' aUDP[i]='53'; [[ ${aSERVICES[126]} ]] && aUDP[i]+=' 5353';; # Uses port 5353 if Pi-hole or AdGuard Home is installed, but those do listen on port 53 instead
 			183) aSERVICES[i]='vaultwarden' aTCP[i]='8001';;
 			#184) aSERVICES[i]='tor' aTCP[i]='443 9051';; # Cannot be installed non-interactively, ports can be chosen and depend on chosen relay type
-			185) aSERVICES[i]='docker' aTCP[i]='9002';;
+			#185) aTCP[i]='9002';; # Docker does not start in systemd containers (without dedicated network)
 			186) aSERVICES[i]='ipfs' aTCP[i]='5003 8087';;
 			187) aSERVICES[i]='cups' aTCP[i]='631';;
 			191) aSERVICES[i]='snapserver' aTCP[i]='1780';;
@@ -225,6 +227,7 @@ do
 		49|165) Process_Software 88;;
 		#61) Process_Software 60;; # Cannot be installed in CI
 		125) Process_Software 194;;
+		#86|185) Process_Software 162;; # Docker does not start in systemd containers (without dedicated network)
 		*) :;;
 	esac
 	Process_Software "$i"
@@ -327,7 +330,7 @@ fi
 G_EXEC sed -i '/# Start DietPi-Software/a\sed -i '\''/# Custom 1st run script/a\\for i in "${aSTART_SERVICES[@]}"; do G_EXEC_NOHALT=1 G_EXEC systemctl start "$i"; done'\'' /boot/dietpi/dietpi-software' rootfs/boot/dietpi/dietpi-login
 delay=10
 for i in "${aDELAY[@]}"; do (( $i > $delay )) && delay=$i; done
-G_EXEC eval "echo -e '#!/bin/dash\nexit_code=0; /boot/dietpi/dietpi-services start || exit_code=1; sleep $delay' > rootfs/boot/Automation_Custom_Script.sh"
+G_EXEC eval "echo -e '#!/bin/dash\nexit_code=0; /boot/dietpi/dietpi-services start || exit_code=1; echo Waiting $delay seconds for service starts; sleep $delay' > rootfs/boot/Automation_Custom_Script.sh"
 # - Loop through software IDs to test
 printf '%s\n' "${!aSERVICES[@]}" "${!aTCP[@]}" "${!aUDP[@]}" "${!aCOMMANDS[@]}" | sort -u | while read -r i
 do
