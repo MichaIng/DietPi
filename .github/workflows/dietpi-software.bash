@@ -113,7 +113,7 @@ Process_Software()
 			71) aSERVICES[i]='webiopi' aTCP[i]='8002';;
 			73) aSERVICES[i]='fail2ban';;
 			74) aSERVICES[i]='influxdb' aTCP[i]='8086 8088';;
-			77) aSERVICES[i]='grafana-server' aTCP[i]='3001';;
+			77) aSERVICES[i]='grafana-server' aTCP[i]='3001'; (( $arch < 10 )) && aDELAY[i]=30;;
 			80) aSERVICES[i]='ubooquity' aTCP[i]='2038 2039';;
 			83) aSERVICES[i]='apache2' aTCP[i]='80';;
 			84) aSERVICES[i]='lighttpd' aTCP[i]='80';;
