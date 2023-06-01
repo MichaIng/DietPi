@@ -109,6 +109,7 @@ Process_Software()
 			66) aSERVICES[i]='rpimonitor' aTCP[i]='8888';;
 			67) aCOMMANDS[i]='firefox-esr -v';;
 			68) aSERVICES[i]='schannel' aUDP[i]='5980';; # remoteit@.service service listens on random high UDP port
+			70) aCOMMANDS[i]='gpio -v';;
 			71) aSERVICES[i]='webiopi' aTCP[i]='8002';;
 			73) aSERVICES[i]='fail2ban';;
 			74) aSERVICES[i]='influxdb' aTCP[i]='8086 8088';;
