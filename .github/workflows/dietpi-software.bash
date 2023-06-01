@@ -62,7 +62,7 @@ esac
 # Workaround for "Could not execute systemctl:  at /usr/bin/deb-systemd-invoke line 145." during Apache2 DEB postinst in 32-bit ARM Bookworm container: https://lists.ubuntu.com/archives/foundations-bugs/2022-January/467253.html
 [[ $SOFTWARE =~ (^| )83( |$) && $DISTRO == 'bookworm' ]] && (( $arch < 3 )) && { echo '[ WARN ] Installing Lighttpd instead of Apache due to a bug in 32-bit ARM containers'; SOFTWARE=$(sed -E 's/(^| )83( |$)/\184\2/g' <<< "$SOFTWARE"); }
 # Remove Roon Extension Manager and Portainer from test installs as Docker cannot start in systemd containers
-[[ $SOFTWARE =~ (^| )(86|185)( |$) ]] && { echo '[ WARN ] Removing Roon Extension Manager and Portainer from test installs as Docker cannot start in systemd containers'; SOFTWARE=$(sed -E 's/(^| )(86|186)( |$)/\1\2/g' <<< "$SOFTWARE"); }
+[[ $SOFTWARE =~ (^| )(86|185)( |$) ]] && { echo '[ WARN ] Removing Roon Extension Manager and Portainer from test installs as Docker cannot start in systemd containers'; SOFTWARE=$(sed -E 's/(^| )(86|186)( |$)/\1\3/g' <<< "$SOFTWARE"); }
 
 ##########################################
 # Create service and port lists
