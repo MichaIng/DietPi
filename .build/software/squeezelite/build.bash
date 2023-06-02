@@ -138,13 +138,21 @@ DEPS_APT_VERSIONED=${DEPS_APT_VERSIONED%,}
 # shellcheck disable=SC2001
 grep -q 'raspbian' /etc/os-release && DEPS_APT_VERSIONED=$(sed 's/+rp[it][0-9]\+[^)]*)/)/g' <<< "$DEPS_APT_VERSIONED") || DEPS_APT_VERSIONED=$(sed 's/+b[0-9]\+)/)/g' <<< "$DEPS_APT_VERSIONED")
 
+# - Obtain version
+version="$(mawk -F\" '/MAJOR_VERSION/{print $2;exit}' squeezelite-master/squeezelite.h).$(mawk -F\" '/MINOR_VERSION/{print $2;exit}' squeezelite-master/squeezelite.h)-$(mawk -F\" '/MICRO_VERSION/{print $2;exit}' squeezelite-master/squeezelite.h)"
+G_EXEC curl -sSfo package.deb "https://dietpi.com/downloads/binaries/$G_DISTRO_NAME/squeezelite_$G_HW_ARCH_NAME.deb"
+old_version=$(dpkg-deb -f package.deb Version)
+G_EXEC rm package.deb
+suffix=${old_version#*-dietpi}
+[[ $old_version == "$version-"* ]] && suffix="dietpi$((suffix+1))" || suffix="dietpi1"
+
 # - control
 cat << _EOF_ > "$DIR/DEBIAN/control"
 Package: squeezelite
-Version: $(mawk -F\" '/MAJOR_VERSION/{print $2;exit}' squeezelite-master/squeezelite.h).$(mawk -F\" '/MINOR_VERSION/{print $2;exit}' squeezelite-master/squeezelite.h)-$(mawk -F\" '/MICRO_VERSION/{print $2;exit}' squeezelite-master/squeezelite.h)-dietpi1
+Version: $version-$suffix
 Architecture: $(dpkg --print-architecture)
 Maintainer: MichaIng <micha@dietpi.com>
-Date: $(date '+%a, %d %b %Y %T %z')
+Date: $(date -u '+%a, %d %b %Y %T %z')
 Standards-Version: 4.6.2.0
 Installed-Size: $(du -sk "$DIR" | mawk '{print $1}')
 Depends:$DEPS_APT_VERSIONED
