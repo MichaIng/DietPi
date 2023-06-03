@@ -128,7 +128,7 @@ Process_Software()
 			94) aSERVICES[i]='proftpd' aTCP[i]='21';;
 			95) aSERVICES[i]='vsftpd' aTCP[i]='21';;
 			96) aSERVICES[i]='smbd' aTCP[i]='139 445';;
-			97) aCOMMANDS[i]='openvpn --help';; # aSERVICES[i]='openvpn' aUDP[i]='1194' GitHub Action runners to not support the TUN module
+			97) aCOMMANDS[i]='openvpn --version';; # aSERVICES[i]='openvpn' aUDP[i]='1194' GitHub Action runners to not support the TUN module
 			98) aSERVICES[i]='haproxy' aTCP[i]='80';;
 			99) aSERVICES[i]='node_exporter' aTCP[i]='9100';;
 			100) aSERVICES[i]='pijuice';; # aTCP[i]='????';;
