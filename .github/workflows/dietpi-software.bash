@@ -145,8 +145,8 @@ Process_Software()
 			116) aSERVICES[i]='medusa' aTCP[i]='8081'; (( $arch == 10 )) || aDELAY[i]=30;;
 			#117) :;; # ToDo: Implement automated install via /boot/unattended_pivpn.conf
 			118) aSERVICES[i]='mopidy' aTCP[i]='6680';;
-			121) aSERVICES[i]='roonbridge' aUDP[i]='9003';;
-			122) aSERVICES[i]='node-red' aTCP[i]='1880';;
+			121) aSERVICES[i]='roonbridge' aUDP[i]='9003'; (( $arch < 10 )) && aDELAY[i]=30;;
+			122) aSERVICES[i]='node-red' aTCP[i]='1880'; (( $arch == 10 )) || aDELAY[i]=30;;
 			123) aSERVICES[i]='mosquitto' aTCP[i]='1883';;
 			124) aSERVICES[i]='networkaudiod';; # aUDP[i]='????';;
 			125) aSERVICES[i]='synapse' aTCP[i]='8008';;
