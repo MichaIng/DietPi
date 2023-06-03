@@ -115,7 +115,7 @@ Process_Software()
 			71) aSERVICES[i]='webiopi' aTCP[i]='8002';;
 			73) aSERVICES[i]='fail2ban';;
 			74) aSERVICES[i]='influxdb' aTCP[i]='8086 8088';;
-			77) aSERVICES[i]='grafana-server' aTCP[i]='3001'; (( $arch < 10 )) && aDELAY[i]=30;;
+			77) aSERVICES[i]='grafana-server' aTCP[i]='3001'; (( $arch < 10 )) && aDELAY[i]=60;;
 			80) aSERVICES[i]='ubooquity' aTCP[i]='2038 2039'; (( $arch == 10 )) || aDELAY[i]=30;;
 			83) aSERVICES[i]='apache2' aTCP[i]='80';;
 			84) aSERVICES[i]='lighttpd' aTCP[i]='80';;
@@ -348,19 +348,19 @@ _EOF_
 	# Check TCP ports
 	[[ ${aTCP[i]} ]] && for j in ${aTCP[i]}; do cat << _EOF_ >> rootfs/boot/Automation_Custom_Script.sh
 echo '\e[33m[ INFO ] Checking TCP port $j status:\e[0m'
-ss -tlpn | grep ':${j}[[:blank:]]' || exit_code=1
+ss -tlpn | grep ':${j}[[:blank:]]' 2> /dev/null || { echo '[FAILED] Port not active'; exit_code=1; }
 _EOF_
 	done
 	# Check UDP ports
 	[[ ${aUDP[i]} ]] && for j in ${aUDP[i]}; do cat << _EOF_ >> rootfs/boot/Automation_Custom_Script.sh
 echo '\e[33m[ INFO ] Checking UDP port $j status:\e[0m'
-ss -ulpn | grep ':${j}[[:blank:]]' || exit_code=1
+ss -ulpn | grep ':${j}[[:blank:]]' 2> /dev/null || { echo '[FAILED] Port not active'; exit_code=1; }
 _EOF_
 	done
 	# Check commands
 	[[ ${aCOMMANDS[i]} ]] && cat << _EOF_ >> rootfs/boot/Automation_Custom_Script.sh
 echo '\e[33m[ INFO ] Testing command ${aCOMMANDS[i]}:\e[0m'
-${aCOMMANDS[i]} || exit_code=1
+${aCOMMANDS[i]} || { echo '[FAILED] Command returned error code'; exit_code=1; }
 _EOF_
 	G_EXEC eval 'echo fi >> rootfs/boot/Automation_Custom_Script.sh'
 done
