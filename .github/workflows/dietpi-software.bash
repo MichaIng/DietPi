@@ -155,6 +155,7 @@ Process_Software()
 			131) aSERVICES[i]='blynkserver' aTCP[i]='9443';;
 			132) aSERVICES[i]='aria2' aTCP[i]='6800';; # aTCP[i]+=' 6881-6999';; # Listens on random port
 			133) aSERVICES[i]='yacy' aTCP[i]='8090';;
+			134) aSERVICES[i]='docker compose version';;
 			135) aSERVICES[i]='icecast2 darkice' aTCP[i]='8000';;
 			136) aSERVICES[i]='motioneye' aTCP[i]='8765';;
 			137) aSERVICES[i]='mjpg-streamer' aTCP[i]='8082';;
@@ -230,7 +231,7 @@ do
 		49|165) Process_Software 88;;
 		#61) Process_Software 60;; # Cannot be installed in CI
 		125) Process_Software 194;;
-		#86|185) Process_Software 162;; # Docker does not start in systemd containers (without dedicated network)
+		#86|134|185) Process_Software 162;; # Docker does not start in systemd containers (without dedicated network)
 		*) :;;
 	esac
 	Process_Software "$i"
@@ -375,11 +376,11 @@ done
 G_EXEC eval 'echo '\''[ $exit_code = 0 ] && > /success || { journalctl -n 25; ss -tlpn; df -h; free -h; poweroff; }; poweroff'\'' >> rootfs/boot/Automation_Custom_Script.sh'
 
 # Shutdown as well on failure
-G_EXEC sed -i 's|Prompt_on_Failure$|{ journalctl -n 25; ss -tlpn; df -h; free -h; poweroff; }|' rootfs/boot/dietpi/dietpi-login
+G_EXEC sed -i 's|Prompt_on_Failure$|{ journalctl -n 25; ss -tulpn; df -h; free -h; poweroff; }|' rootfs/boot/dietpi/dietpi-login
 
 ##########################################
 # Boot container
 ##########################################
 systemd-nspawn -bD rootfs
-[[ -f 'rootfs/success' ]] || { journalctl -n 25; df -h; free -h; exit 1; }
+[[ -f 'rootfs/success' ]] || { journalctl -n 25; ss -tulpn; df -h; free -h; exit 1; }
 }
