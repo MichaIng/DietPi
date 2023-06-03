@@ -131,7 +131,7 @@ Process_Software()
 			97) aCOMMANDS[i]='openvpn --version';; # aSERVICES[i]='openvpn' aUDP[i]='1194' GitHub Action runners to not support the TUN module
 			98) aSERVICES[i]='haproxy' aTCP[i]='80';;
 			99) aSERVICES[i]='node_exporter' aTCP[i]='9100';;
-			100) aCOMMANDS[i]='/usr/bin/pijuice_cli32 -V' # aSERVICES[i]='pijuice' aTCP[i]='????' Service does not start without I2C device, not present in container
+			100) aCOMMANDS[i]='/usr/bin/pijuice_cli32 -V';; # aSERVICES[i]='pijuice' aTCP[i]='????' Service does not start without I2C device, not present in container
 			104) aSERVICES[i]='dropbear' aTCP[i]='22';;
 			105) aSERVICES[i]='ssh' aTCP[i]='22';;
 			106) aSERVICES[i]='lidarr' aTCP[i]='8686';;
