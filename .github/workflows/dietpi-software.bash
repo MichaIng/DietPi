@@ -73,6 +73,7 @@ Process_Software()
 	local i
 	for i in "$@"
 	do
+		# shellcheck disable=SC2016
 		case $i in
 			'webserver') [[ $SOFTWARE =~ (^| )8[345]( |$) ]] || aSERVICES[84]='lighttpd' aTCP[84]='80';; # Lighttpd as default due to above bug in 32-bit ARM Bookworm containers
 			0) aCOMMANDS[i]='ssh -V';;
@@ -136,7 +137,6 @@ Process_Software()
 			105) aSERVICES[i]='ssh' aTCP[i]='22';;
 			106) aSERVICES[i]='lidarr' aTCP[i]='8686';;
 			107) aSERVICES[i]='rtorrent' aTCP[i]='49164' aUDP[i]='6881';;
-			# shellcheck disable=SC2016
 			108) aCOMMANDS[i]='LD_LIBRARY_PATH=/mnt/dietpi_userdata/amiberry/lib /mnt/dietpi_userdata/amiberry/amiberry -h | grep '\''^$VER: Amiberry '\';;
 			109) aSERVICES[i]='nfs-kernel-server' aTCP[i]='2049';;
 			110) aCOMMANDS[i]='mount.nfs -V';;
