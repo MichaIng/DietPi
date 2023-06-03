@@ -83,7 +83,7 @@ Process_Software()
 			9) aCOMMANDS[i]='node -v';;
 			16) aSERVICES[i]='microblog-pub' aTCP[i]='8007';;
 			17) aCOMMANDS[i]='git -v';;
-			28|120) aSERVICES[i]='vncserver' aTCP[i]='5901';;
+			28) aSERVICES[i]='vncserver' aTCP[i]='5901';;
 			29) aSERVICES[i]='xrdp' aTCP[i]='3389';;
 			30) aSERVICES[i]='nxserver' aTCP[i]='4000';;
 			32) aSERVICES[i]='ympd' aTCP[i]='1337';;
@@ -155,7 +155,7 @@ Process_Software()
 			131) aSERVICES[i]='blynkserver' aTCP[i]='9443';;
 			132) aSERVICES[i]='aria2' aTCP[i]='6800';; # aTCP[i]+=' 6881-6999';; # Listens on random port
 			133) aSERVICES[i]='yacy' aTCP[i]='8090' aDELAY[i]=30;;
-			134) aSERVICES[i]='docker compose version';;
+			134) aCOMMANDS[i]='docker compose version';;
 			135) aSERVICES[i]='icecast2 darkice' aTCP[i]='8000';;
 			136) aSERVICES[i]='motioneye' aTCP[i]='8765';;
 			137) aSERVICES[i]='mjpg-streamer' aTCP[i]='8082';;
