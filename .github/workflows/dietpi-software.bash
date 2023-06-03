@@ -154,7 +154,7 @@ Process_Software()
 			128) aSERVICES[i]='mpd' aTCP[i]='6600';;
 			131) aSERVICES[i]='blynkserver' aTCP[i]='9443';;
 			132) aSERVICES[i]='aria2' aTCP[i]='6800';; # aTCP[i]+=' 6881-6999';; # Listens on random port
-			133) aSERVICES[i]='yacy' aTCP[i]='8090';;
+			133) aSERVICES[i]='yacy' aTCP[i]='8090' aDELAY[i]=30;;
 			134) aSERVICES[i]='docker compose version';;
 			135) aSERVICES[i]='icecast2 darkice' aTCP[i]='8000';;
 			136) aSERVICES[i]='motioneye' aTCP[i]='8765';;
@@ -225,7 +225,7 @@ do
 		27|56|63|64|107|132) Process_Software 89 webserver;; # 93 (Pi-hole) cannot be installed non-interactively
 		38|40|48|54|55|57|59|90|160) Process_Software 88 89 webserver;;
 		47|114|168) Process_Software 88 89 91 webserver;;
-		8|33) Process_Software 196;;
+		8|33|131) Process_Software 196;;
 		32|148|119) Process_Software 128;;
 		129) Process_Software 88 89 128 webserver;;
 		49|165) Process_Software 88;;
@@ -376,7 +376,7 @@ done
 G_EXEC eval 'echo '\''[ $exit_code = 0 ] && > /success || { journalctl -n 25; ss -tlpn; df -h; free -h; poweroff; }; poweroff'\'' >> rootfs/boot/Automation_Custom_Script.sh'
 
 # Shutdown as well on failure
-G_EXEC sed -i 's|Prompt_on_Failure$|{ journalctl -n 25; ss -tulpn; df -h; free -h; poweroff; }|' rootfs/boot/dietpi/dietpi-login
+G_EXEC sed -i 's|Prompt_on_Failure$|{ journalctl -n 50; ss -tulpn; df -h; free -h; poweroff; }|' rootfs/boot/dietpi/dietpi-login
 
 ##########################################
 # Boot container
