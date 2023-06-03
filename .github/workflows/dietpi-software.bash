@@ -138,6 +138,7 @@ Process_Software()
 			107) aSERVICES[i]='rtorrent' aTCP[i]='49164' aUDP[i]='6881';;
 			108) aCOMMANDS[i]='LD_LIBRARY_PATH=/mnt/dietpi_userdata/amiberry/lib /mnt/dietpi_userdata/amiberry/amiberry -h | grep '\''^$VER: Amiberry '\';;
 			109) aSERVICES[i]='nfs-kernel-server' aTCP[i]='2049';;
+			110) aCOMMANDS[i]='mount.nfs -V';;
 			111) aSERVICES[i]='urbackupsrv' aTCP[i]='55414';;
 			115) aSERVICES[i]='webmin' aTCP[i]='10000';;
 			116) aSERVICES[i]='medusa' aTCP[i]='8081';;
