@@ -136,6 +136,7 @@ Process_Software()
 			105) aSERVICES[i]='ssh' aTCP[i]='22';;
 			106) aSERVICES[i]='lidarr' aTCP[i]='8686';;
 			107) aSERVICES[i]='rtorrent' aTCP[i]='49164' aUDP[i]='6881';;
+			108) aCOMMANDS[i]='LD_LIBRARY_PATH=/mnt/dietpi_userdata/amiberry/lib /mnt/dietpi_userdata/amiberry/amiberry --help'
 			109) aSERVICES[i]='nfs-kernel-server' aTCP[i]='2049';;
 			111) aSERVICES[i]='urbackupsrv' aTCP[i]='55414';;
 			115) aSERVICES[i]='webmin' aTCP[i]='10000';;
