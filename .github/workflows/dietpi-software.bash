@@ -142,7 +142,7 @@ Process_Software()
 			110) aCOMMANDS[i]='mount.nfs -V';;
 			111) aSERVICES[i]='urbackupsrv' aTCP[i]='55414';;
 			115) aSERVICES[i]='webmin' aTCP[i]='10000';;
-			116) aSERVICES[i]='medusa' aTCP[i]='8081';;
+			116) aSERVICES[i]='medusa' aTCP[i]='8081'; (( $arch == 10 )) || aDELAY[i]=30;;
 			#117) :;; # ToDo: Implement automated install via /boot/unattended_pivpn.conf
 			118) aSERVICES[i]='mopidy' aTCP[i]='6680';;
 			121) aSERVICES[i]='roonbridge' aUDP[i]='9003';;
