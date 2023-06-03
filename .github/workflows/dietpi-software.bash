@@ -73,6 +73,7 @@ Process_Software()
 	local i
 	for i in "$@"
 	do
+		# shellcheck disable=SC2016
 		case $i in
 			'webserver') [[ $SOFTWARE =~ (^| )8[345]( |$) ]] || aSERVICES[84]='lighttpd' aTCP[84]='80';; # Lighttpd as default due to above bug in 32-bit ARM Bookworm containers
 			0) aCOMMANDS[i]='ssh -V';;
@@ -115,7 +116,7 @@ Process_Software()
 			71) aSERVICES[i]='webiopi' aTCP[i]='8002';;
 			73) aSERVICES[i]='fail2ban';;
 			74) aSERVICES[i]='influxdb' aTCP[i]='8086 8088';;
-			77) aSERVICES[i]='grafana-server' aTCP[i]='3001'; (( $arch < 10 )) && aDELAY[i]=30;;
+			77) aSERVICES[i]='grafana-server' aTCP[i]='3001'; (( $arch < 10 )) && aDELAY[i]=60;;
 			80) aSERVICES[i]='ubooquity' aTCP[i]='2038 2039'; (( $arch == 10 )) || aDELAY[i]=30;;
 			83) aSERVICES[i]='apache2' aTCP[i]='80';;
 			84) aSERVICES[i]='lighttpd' aTCP[i]='80';;
@@ -128,18 +129,20 @@ Process_Software()
 			94) aSERVICES[i]='proftpd' aTCP[i]='21';;
 			95) aSERVICES[i]='vsftpd' aTCP[i]='21';;
 			96) aSERVICES[i]='smbd' aTCP[i]='139 445';;
-			97) aSERVICES[i]='openvpn' aUDP[i]='1194';;
+			97) aCOMMANDS[i]='openvpn --version';; # aSERVICES[i]='openvpn' aUDP[i]='1194' GitHub Action runners to not support the TUN module
 			98) aSERVICES[i]='haproxy' aTCP[i]='80';;
 			99) aSERVICES[i]='node_exporter' aTCP[i]='9100';;
-			100) aSERVICES[i]='pijuice';; # aTCP[i]='????';;
+			#100) (( $arch < 3 )) && aCOMMANDS[i]='/usr/bin/pijuice_cli32 -V' || aCOMMANDS[i]='/usr/bin/pijuice_cli64 -V' aSERVICES[i]='pijuice' aTCP[i]='????' Service does not start without I2C device, not present in container and CLI command always puts you in interactive console
 			104) aSERVICES[i]='dropbear' aTCP[i]='22';;
 			105) aSERVICES[i]='ssh' aTCP[i]='22';;
-			106) aSERVICES[i]='lidarr' aTCP[i]='8686';;
+			106) aSERVICES[i]='lidarr' aTCP[i]='8686'; (( $arch < 10 )) && aDELAY[i]=60;;
 			107) aSERVICES[i]='rtorrent' aTCP[i]='49164' aUDP[i]='6881';;
+			108) aCOMMANDS[i]='LD_LIBRARY_PATH=/mnt/dietpi_userdata/amiberry/lib /mnt/dietpi_userdata/amiberry/amiberry -h | grep '\''^$VER: Amiberry '\';;
 			109) aSERVICES[i]='nfs-kernel-server' aTCP[i]='2049';;
+			110) aCOMMANDS[i]='mount.nfs -V';;
 			111) aSERVICES[i]='urbackupsrv' aTCP[i]='55414';;
 			115) aSERVICES[i]='webmin' aTCP[i]='10000';;
-			116) aSERVICES[i]='medusa' aTCP[i]='8081';;
+			116) aSERVICES[i]='medusa' aTCP[i]='8081'; (( $arch == 10 )) || aDELAY[i]=30;;
 			#117) :;; # ToDo: Implement automated install via /boot/unattended_pivpn.conf
 			118) aSERVICES[i]='mopidy' aTCP[i]='6680';;
 			121) aSERVICES[i]='roonbridge' aUDP[i]='9003';;
@@ -151,7 +154,8 @@ Process_Software()
 			128) aSERVICES[i]='mpd' aTCP[i]='6600';;
 			131) aSERVICES[i]='blynkserver' aTCP[i]='9443';;
 			132) aSERVICES[i]='aria2' aTCP[i]='6800';; # aTCP[i]+=' 6881-6999';; # Listens on random port
-			133) aSERVICES[i]='yacy' aTCP[i]='8090';;
+			133) aSERVICES[i]='yacy' aTCP[i]='8090' aDELAY[i]=30;;
+			134) aSERVICES[i]='docker compose version';;
 			135) aSERVICES[i]='icecast2 darkice' aTCP[i]='8000';;
 			136) aSERVICES[i]='motioneye' aTCP[i]='8765';;
 			137) aSERVICES[i]='mjpg-streamer' aTCP[i]='8082';;
@@ -221,13 +225,13 @@ do
 		27|56|63|64|107|132) Process_Software 89 webserver;; # 93 (Pi-hole) cannot be installed non-interactively
 		38|40|48|54|55|57|59|90|160) Process_Software 88 89 webserver;;
 		47|114|168) Process_Software 88 89 91 webserver;;
-		8|33) Process_Software 196;;
+		8|33|131) Process_Software 196;;
 		32|148|119) Process_Software 128;;
 		129) Process_Software 88 89 128 webserver;;
 		49|165) Process_Software 88;;
 		#61) Process_Software 60;; # Cannot be installed in CI
 		125) Process_Software 194;;
-		#86|185) Process_Software 162;; # Docker does not start in systemd containers (without dedicated network)
+		#86|134|185) Process_Software 162;; # Docker does not start in systemd containers (without dedicated network)
 		*) :;;
 	esac
 	Process_Software "$i"
@@ -275,7 +279,9 @@ then
 		3) model=4;;
 		*) G_DIETPI-NOTIFY 1 "Invalid architecture $ARCH beginning with \"a\" but not being one of the known/accepted ARM architectures. This should never happen!"; exit 1;;
 	esac
-	G_EXEC sed -i "/# Start DietPi-Software/iG_EXEC sed -i -e '/^G_HW_MODEL=/cG_HW_MODEL=$model' -e '/^G_HW_MODEL_NAME=/cG_HW_MODEL_NAME=\"RPi $model ($ARCH)\"' /boot/dietpi/.hw_model; > /boot/config.txt; > /boot/cmdline.txt" rootfs/boot/dietpi/dietpi-login
+	G_EXEC rm rootfs/etc/.dietpi_hw_model_identifier
+	G_EXEC touch rootfs/boot/{bcm-rpi-dummy.dtb,config.txt,cmdline.txt}
+	G_EXEC sed -i "/# Start DietPi-Software/iG_EXEC sed -i -e '/^G_HW_MODEL=/cG_HW_MODEL=$model' -e '/^G_HW_MODEL_NAME=/cG_HW_MODEL_NAME=\"RPi $model ($ARCH)\"' /boot/dietpi/.hw_model" rootfs/boot/dietpi/dietpi-login
 	G_EXEC curl -sSf 'https://archive.raspberrypi.org/debian/pool/main/r/raspberrypi-archive-keyring/raspberrypi-archive-keyring_2021.1.1+rpt1_all.deb' -o keyring.deb
 	G_EXEC dpkg --root=rootfs -i keyring.deb
 	G_EXEC rm keyring.deb
@@ -348,19 +354,19 @@ _EOF_
 	# Check TCP ports
 	[[ ${aTCP[i]} ]] && for j in ${aTCP[i]}; do cat << _EOF_ >> rootfs/boot/Automation_Custom_Script.sh
 echo '\e[33m[ INFO ] Checking TCP port $j status:\e[0m'
-ss -tlpn | grep ':${j}[[:blank:]]' || exit_code=1
+ss -tlpn | grep ':${j}[[:blank:]]' 2> /dev/null || { echo '[FAILED] Port not active'; exit_code=1; }
 _EOF_
 	done
 	# Check UDP ports
 	[[ ${aUDP[i]} ]] && for j in ${aUDP[i]}; do cat << _EOF_ >> rootfs/boot/Automation_Custom_Script.sh
 echo '\e[33m[ INFO ] Checking UDP port $j status:\e[0m'
-ss -ulpn | grep ':${j}[[:blank:]]' || exit_code=1
+ss -ulpn | grep ':${j}[[:blank:]]' 2> /dev/null || { echo '[FAILED] Port not active'; exit_code=1; }
 _EOF_
 	done
 	# Check commands
 	[[ ${aCOMMANDS[i]} ]] && cat << _EOF_ >> rootfs/boot/Automation_Custom_Script.sh
 echo '\e[33m[ INFO ] Testing command ${aCOMMANDS[i]}:\e[0m'
-${aCOMMANDS[i]} || exit_code=1
+${aCOMMANDS[i]} || { echo '[FAILED] Command returned error code'; exit_code=1; }
 _EOF_
 	G_EXEC eval 'echo fi >> rootfs/boot/Automation_Custom_Script.sh'
 done
@@ -370,11 +376,11 @@ done
 G_EXEC eval 'echo '\''[ $exit_code = 0 ] && > /success || { journalctl -n 25; ss -tlpn; df -h; free -h; poweroff; }; poweroff'\'' >> rootfs/boot/Automation_Custom_Script.sh'
 
 # Shutdown as well on failure
-G_EXEC sed -i 's|Prompt_on_Failure$|{ journalctl -n 25; ss -tlpn; df -h; free -h; poweroff; }|' rootfs/boot/dietpi/dietpi-login
+G_EXEC sed -i 's|Prompt_on_Failure$|{ journalctl -n 50; ss -tulpn; df -h; free -h; poweroff; }|' rootfs/boot/dietpi/dietpi-login
 
 ##########################################
 # Boot container
 ##########################################
 systemd-nspawn -bD rootfs
-[[ -f 'rootfs/success' ]] || { journalctl -n 25; df -h; free -h; exit 1; }
+[[ -f 'rootfs/success' ]] || { journalctl -n 25; ss -tulpn; df -h; free -h; exit 1; }
 }
