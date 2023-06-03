@@ -83,7 +83,7 @@ Process_Software()
 			9) aCOMMANDS[i]='node -v';;
 			16) aSERVICES[i]='microblog-pub' aTCP[i]='8007';;
 			17) aCOMMANDS[i]='git -v';;
-			28|120) aSERVICES[i]='vncserver' aTCP[i]='5901';;
+			28) aSERVICES[i]='vncserver' aTCP[i]='5901';;
 			29) aSERVICES[i]='xrdp' aTCP[i]='3389';;
 			30) aSERVICES[i]='nxserver' aTCP[i]='4000';;
 			32) aSERVICES[i]='ympd' aTCP[i]='1337';;
