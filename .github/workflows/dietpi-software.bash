@@ -152,9 +152,9 @@ Process_Software()
 			125) aSERVICES[i]='synapse' aTCP[i]='8008';;
 			126) aSERVICES[i]='adguardhome' aUDP[i]='53' aTCP[i]='8083'; [[ ${aSERVICES[182]} ]] && aUDP[i]+=' 5353';; # Unbound uses port 5353 if AdGuard Home is installed
 			128) aSERVICES[i]='mpd' aTCP[i]='6600';;
-			131) aSERVICES[i]='blynkserver' aTCP[i]='9443'; (( $arch == 10 )) || aDELAY[i]=60;;
+			131) aSERVICES[i]='blynkserver' aTCP[i]='9443'; (( $arch == 10 )) || aDELAY[i]=120;;
 			132) aSERVICES[i]='aria2' aTCP[i]='6800';; # aTCP[i]+=' 6881-6999';; # Listens on random port
-			133) aSERVICES[i]='yacy' aTCP[i]='8090'; (( $arch == 10 )) && aDELAY[i]=30 || aDELAY[i]=60;;
+			133) aSERVICES[i]='yacy' aTCP[i]='8090'; (( $arch == 10 )) && aDELAY[i]=30 || aDELAY[i]=120;;
 			134) aCOMMANDS[i]='docker compose version';;
 			135) aSERVICES[i]='icecast2 darkice' aTCP[i]='8000';;
 			136) aSERVICES[i]='motioneye' aTCP[i]='8765';;
@@ -354,26 +354,26 @@ _EOF_
 	# Check TCP ports
 	[[ ${aTCP[i]} ]] && for j in ${aTCP[i]}; do cat << _EOF_ >> rootfs/boot/Automation_Custom_Script.sh
 echo '\e[33m[ INFO ] Checking TCP port $j status:\e[0m'
-ss -tlpn | grep ':${j}[[:blank:]]' 2> /dev/null || { echo '[FAILED] Port not active'; exit_code=1; }
+ss -tlpn | grep ':${j}[[:blank:]]' 2> /dev/null || { echo '\e[31m[FAILED] TCP port ${j} not active\e[0m'; exit_code=1; }
 _EOF_
 	done
 	# Check UDP ports
 	[[ ${aUDP[i]} ]] && for j in ${aUDP[i]}; do cat << _EOF_ >> rootfs/boot/Automation_Custom_Script.sh
 echo '\e[33m[ INFO ] Checking UDP port $j status:\e[0m'
-ss -ulpn | grep ':${j}[[:blank:]]' 2> /dev/null || { echo '[FAILED] Port not active'; exit_code=1; }
+ss -ulpn | grep ':${j}[[:blank:]]' 2> /dev/null || { echo '\e[31m[FAILED] UDP port ${j} not active\e[0m'; exit_code=1; }
 _EOF_
 	done
 	# Check commands
 	[[ ${aCOMMANDS[i]} ]] && cat << _EOF_ >> rootfs/boot/Automation_Custom_Script.sh
 echo '\e[33m[ INFO ] Testing command ${aCOMMANDS[i]}:\e[0m'
-${aCOMMANDS[i]} || { echo '[FAILED] Command returned error code'; exit_code=1; }
+${aCOMMANDS[i]} || { echo '\e[31m[FAILED] Command returned error code\e[0m'; exit_code=1; }
 _EOF_
 	G_EXEC eval 'echo fi >> rootfs/boot/Automation_Custom_Script.sh'
 done
 
 # Success flag and shutdown
 # shellcheck disable=SC2016
-G_EXEC eval 'echo '\''[ $exit_code = 0 ] && > /success || { journalctl -n 25; ss -tlpn; df -h; free -h; poweroff; }; poweroff'\'' >> rootfs/boot/Automation_Custom_Script.sh'
+G_EXEC eval 'echo '\''[ $exit_code = 0 ] && > /success || { journalctl -n 50; ss -tlpn; df -h; free -h; poweroff; }; poweroff'\'' >> rootfs/boot/Automation_Custom_Script.sh'
 
 # Shutdown as well on failure
 G_EXEC sed -i 's|Prompt_on_Failure$|{ journalctl -n 50; ss -tulpn; df -h; free -h; poweroff; }|' rootfs/boot/dietpi/dietpi-login
