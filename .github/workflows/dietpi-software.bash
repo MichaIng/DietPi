@@ -158,9 +158,9 @@ Process_Software()
 			134) aCOMMANDS[i]='docker compose version';;
 			135) aSERVICES[i]='icecast2 darkice' aTCP[i]='8000';;
 			136) aSERVICES[i]='motioneye' aTCP[i]='8765';;
-			137) aSERVICES[i]='mjpg-streamer' aTCP[i]='8082';;
+			137) aCOMMANDS[i]='/opt/mjpg-streamer/mjpg_streamer -v';; # aSERVICES[i]='mjpg-streamer' aTCP[i]='8082' Service does not start without an actual video device
 			138) aSERVICES[i]='virtualhere' aTCP[i]='7575';;
-			139) aSERVICES[i]='sabnzbd' aTCP[i]='8080';; # ToDo: Solve conflict with Airsonic
+			139) aSERVICES[i]='sabnzbd' aTCP[i]='8080'; (( $arch == 10 )) || aDELAY[i]=30;; # ToDo: Solve conflict with Airsonic
 			140) aSERVICES[i]='domoticz' aTCP[i]='8124 8424';;
 			141) aSERVICES[i]='spotify-connect-web' aTCP[i]='4000';;
 			142) aSERVICES[i]='snapd';;
