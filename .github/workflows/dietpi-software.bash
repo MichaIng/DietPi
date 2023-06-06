@@ -150,7 +150,7 @@ Process_Software()
 			123) aSERVICES[i]='mosquitto' aTCP[i]='1883';;
 			124) aSERVICES[i]='networkaudiod';; # aUDP[i]='????';;
 			125) aSERVICES[i]='synapse' aTCP[i]='8008';;
-			126) aSERVICES[i]='adguardhome' aUDP[i]='53' aTCP[i]='8083'; [[ ${aSERVICES[182]} ]] && aUDP[i]+=' 5353';; # Unbound uses port 5353 if AdGuard Home is installed
+			126) aSERVICES[i]='adguardhome' aUDP[i]='53' aTCP[i]='8083'; [[ ${aSERVICES[182]} ]] && aUDP[i]+=' 5335';; # Unbound uses port 5335 if AdGuard Home is installed
 			128) aSERVICES[i]='mpd' aTCP[i]='6600';;
 			131) (( $arch == 2 || $arch == 11 )) || aSERVICES[i]='blynkserver' aTCP[i]='9443'; (( $arch == 10 || $arch == 2 || $arch == 11 )) || aDELAY[i]=60;;
 			132) aSERVICES[i]='aria2' aTCP[i]='6800';; # aTCP[i]+=' 6881-6999';; # Listens on random port
@@ -194,7 +194,7 @@ Process_Software()
 			179) aSERVICES[i]='komga' aTCP[i]='2037';;
 			180) aSERVICES[i]='bazarr' aTCP[i]='6767';;
 			181) aSERVICES[i]='papermc' aTCP[i]='25565';;
-			182) aSERVICES[i]='unbound' aUDP[i]='53'; [[ ${aSERVICES[126]} ]] && aUDP[i]+=' 5353';; # Uses port 5353 if Pi-hole or AdGuard Home is installed, but those do listen on port 53 instead
+			182) aSERVICES[i]='unbound' aUDP[i]='53'; [[ ${aSERVICES[126]} ]] && aUDP[i]+=' 5335';; # Uses port 5335 if Pi-hole or AdGuard Home is installed, but those do listen on port 53 instead
 			183) aSERVICES[i]='vaultwarden' aTCP[i]='8001';;
 			#184) aSERVICES[i]='tor' aTCP[i]='443 9051';; # Cannot be installed non-interactively, ports can be chosen and depend on chosen relay type
 			#185) aTCP[i]='9002';; # Docker does not start in systemd containers (without dedicated network)
@@ -206,7 +206,7 @@ Process_Software()
 			196) aCOMMANDS[i]='java -version';;
 			197) aCOMMANDS[i]='box64 -v';;
 			198) aSERVICES[i]='filebrowser' aTCP[i]='8084';;
-			199) aSERVICES[i]='spotifyd';; # aTCP[i]='4079';; ???
+			199) aSERVICES[i]='spotifyd' aUDP[i]='5353';; # + random high TCP port
 			200) aSERVICES[i]='dietpi-dashboard' aTCP[i]='5252';;
 			201) aSERVICES[i]='zerotier-one' aTCP[i]='9993';;
 			202) aCOMMANDS[i]='rclone -h';;
