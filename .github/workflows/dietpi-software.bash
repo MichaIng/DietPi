@@ -162,7 +162,7 @@ Process_Software()
 			138) aSERVICES[i]='virtualhere' aTCP[i]='7575';;
 			139) aSERVICES[i]='sabnzbd' aTCP[i]='8080'; (( $arch == 10 )) || aDELAY[i]=30;; # ToDo: Solve conflict with Airsonic
 			140) aSERVICES[i]='domoticz' aTCP[i]='8124 8424';;
-			141) aSERVICES[i]='spotify-connect-web' aTCP[i]='4000';;
+			#141) aSERVICES[i]='spotify-connect-web' aTCP[i]='4000' # qemu: uncaught target signal 6 (Aborted) - core dumped
 			142) aSERVICES[i]='snapd';;
 			143) aSERVICES[i]='koel' aTCP[i]='8003';;
 			144) aSERVICES[i]='sonarr' aTCP[i]='8989';;
