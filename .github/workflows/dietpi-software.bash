@@ -62,7 +62,7 @@ esac
 # Workaround for "Could not execute systemctl:  at /usr/bin/deb-systemd-invoke line 145." during Apache2 DEB postinst in 32-bit ARM Bookworm container: https://lists.ubuntu.com/archives/foundations-bugs/2022-January/467253.html
 [[ $SOFTWARE =~ (^| )83( |$) && $DISTRO == 'bookworm' ]] && (( $arch < 3 )) && { echo '[ WARN ] Installing Lighttpd instead of Apache due to a bug in 32-bit ARM containers'; SOFTWARE=$(sed -E 's/(^| )83( |$)/\184\2/g' <<< "$SOFTWARE"); }
 # Remove Roon Extension Manager and Portainer from test installs as Docker cannot start in systemd containers
-[[ $SOFTWARE =~ (^| )(86|185)( |$) ]] && { echo '[ WARN ] Removing Roon Extension Manager and Portainer from test installs as Docker cannot start in systemd containers'; SOFTWARE=$(sed -E 's/(^| )(86|186)( |$)/\1\3/g' <<< "$SOFTWARE"); }
+[[ $SOFTWARE =~ (^| )(86|142|185)( |$) ]] && { echo '[ WARN ] Removing Roon Extension Manager, MicroK8s and Portainer from test installs as Docker cannot start in systemd containers'; SOFTWARE=$(sed -E 's/(^| )(86|142|186)( |$)/\1\3/g' <<< "$SOFTWARE"); }
 
 ##########################################
 # Create service and port lists
@@ -163,7 +163,7 @@ Process_Software()
 			139) aSERVICES[i]='sabnzbd' aTCP[i]='8080'; (( $arch == 10 )) || aDELAY[i]=30;; # ToDo: Solve conflict with Airsonic
 			140) aSERVICES[i]='domoticz' aTCP[i]='8124 8424';;
 			#141) aSERVICES[i]='spotify-connect-web' aTCP[i]='4000' # qemu: uncaught target signal 6 (Aborted) - core dumped
-			142) aSERVICES[i]='snapd';;
+			#142) aSERVICES[i]='snapd';; "system does not fully support snapd: cannot mount squashfs image using "squashfs": mount: /tmp/syscheck-mountpoint-2075108377: mount failed: Operation not permitted."
 			143) aSERVICES[i]='koel' aTCP[i]='8003';;
 			144) aSERVICES[i]='sonarr' aTCP[i]='8989';;
 			145) aSERVICES[i]='radarr' aTCP[i]='7878';;
