@@ -165,10 +165,10 @@ Process_Software()
 			#141) aSERVICES[i]='spotify-connect-web' aTCP[i]='4000' # qemu: uncaught target signal 6 (Aborted) - core dumped
 			#142) aSERVICES[i]='snapd';; "system does not fully support snapd: cannot mount squashfs image using "squashfs": mount: /tmp/syscheck-mountpoint-2075108377: mount failed: Operation not permitted."
 			143) aSERVICES[i]='koel' aTCP[i]='8003';;
-			144) aSERVICES[i]='sonarr' aTCP[i]='8989'; (( $arch < 10 )) && aDELAY[i]=30;;
-			145) aSERVICES[i]='radarr' aTCP[i]='7878'; (( $arch < 10 )) && aDELAY[i]=30;;
-			146) aSERVICES[i]='tautulli' aTCP[i]='8181'; (( $arch == 10 )) || aDELAY[i]=30;;
-			147) aSERVICES[i]='jackett' aTCP[i]='9117'; (( $arch < 10 )) && aDELAY[i]=30;;
+			144) aSERVICES[i]='sonarr' aTCP[i]='8989'; (( $arch < 10 )) && aDELAY[i]=60;;
+			145) aSERVICES[i]='radarr' aTCP[i]='7878'; (( $arch < 10 )) && aDELAY[i]=60;;
+			146) aSERVICES[i]='tautulli' aTCP[i]='8181'; (( $arch == 10 )) || aDELAY[i]=60;;
+			147) aSERVICES[i]='jackett' aTCP[i]='9117'; (( $arch < 10 )) && aDELAY[i]=60;;
 			148) aSERVICES[i]='mympd' aTCP[i]='1333';;
 			149) aSERVICES[i]='nzbget' aTCP[i]='6789';;
 			150) aCOMMANDS[i]='mono -V';;
