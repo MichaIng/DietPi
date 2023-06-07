@@ -171,6 +171,7 @@ Process_Software()
 			147) aSERVICES[i]='jackett' aTCP[i]='9117'; (( $arch < 10 )) && aDELAY[i]=30;;
 			148) aSERVICES[i]='mympd' aTCP[i]='1333';;
 			149) aSERVICES[i]='nzbget' aTCP[i]='6789';;
+			150) aSOFTWARE[i]='mono -V';;
 			151) aSERVICES[i]='prowlarr' aTCP[i]='9696';;
 			152) aSERVICES[i]='avahi-daemon' aUDP[i]='5353';;
 			153) aSERVICES[i]='octoprint' aTCP[i]='5001';;
