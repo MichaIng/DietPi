@@ -172,9 +172,9 @@ Process_Software()
 			148) aSERVICES[i]='mympd' aTCP[i]='1333';;
 			149) aSERVICES[i]='nzbget' aTCP[i]='6789';;
 			150) aCOMMANDS[i]='mono -V';;
-			151) aSERVICES[i]='prowlarr' aTCP[i]='9696';;
+			151) aSERVICES[i]='prowlarr' aTCP[i]='9696'; (( $arch < 10 )) && aDELAY[i]=60;;
 			152) aSERVICES[i]='avahi-daemon' aUDP[i]='5353';;
-			153) aSERVICES[i]='octoprint' aTCP[i]='5001';;
+			153) aSERVICES[i]='octoprint' aTCP[i]='5001'; (( $arch == 10 )) || aDELAY[i]=60;;
 			154) aSERVICES[i]='roonserver';; # Listens on a variety of different port ranges
 			155) aSERVICES[i]='htpc-manager' aTCP[i]='8085';;
 			157) aSERVICES[i]='home-assistant' aTCP[i]='8123';;
