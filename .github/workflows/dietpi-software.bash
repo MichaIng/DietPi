@@ -177,7 +177,7 @@ Process_Software()
 			153) aSERVICES[i]='octoprint' aTCP[i]='5001'; (( $arch == 10 )) || aDELAY[i]=60;;
 			154) aSERVICES[i]='roonserver';; # Listens on a variety of different port ranges
 			155) aSERVICES[i]='htpc-manager' aTCP[i]='8085';;
-			157) aSERVICES[i]='home-assistant' aTCP[i]='8123';;
+			157) aSERVICES[i]='home-assistant' aTCP[i]='8123'; (( $arch == 10 )) && aDELAY[i]=60 || aDELAY[i]=120;;
 			158) aSERVICES[i]='minio' aTCP[i]='9000';; # ToDo: Solve port conflict with LMS
 			161) aSERVICES[i]='bdd' aTCP[i]='80 443';;
 			162) aCOMMANDS[i]='docker -v';; # aSERVICES[i]='docker' # Docker does not start in systemd containers (without dedicated network)
