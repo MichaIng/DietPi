@@ -35,8 +35,8 @@ G_DIETPI-NOTIFY 2 "Preparing $name_pretty DEB package directory"
 G_EXEC cd /tmp
 grep -q 'raspbian' /etc/os-release && DIR='gmediarender_armv6l' || DIR="gmediarender_$G_HW_ARCH_NAME"
 [[ -d $DIR ]] && G_EXEC rm -R "$DIR"
-# - Control files, systemd service, executable, configs, icons, copyright
-G_EXEC mkdir -p "$DIR/"{DEBIAN,lib/systemd/system,usr/{bin,etc/default,share/{,doc/}gmediarender}}
+# - Control files, config, systemd service, executable, icons, copyright
+G_EXEC mkdir -p "$DIR/"{DEBIAN,etc/default,lib/systemd/system,usr/{bin,share/{,doc/}gmediarender}}
 
 # Binary
 G_EXEC mv "gmrender-resurrect-$version/src/gmediarender" "$DIR/usr/bin/"
@@ -49,7 +49,7 @@ G_EXEC cp "gmrender-resurrect-$version/COPYING" "$DIR/usr/share/doc/gmediarender
 > "$DIR/usr/share/gmediarender/grender-128x128.png"
 
 # systemd service
-cat << '_EOF_' >  "$DIR/lib/systemd/system/gmediarender.service"
+cat << '_EOF_' >  "$DIR/lib/systemd/system/$name.service"
 [Unit]
 Description=GMediaRender (DietPi)
 Documentation=https://github.com/hzeller/gmrender-resurrect/blob/master/INSTALL.md#commandline-options
@@ -66,7 +66,7 @@ WantedBy=multi-user.target
 _EOF_
 
 # Environment file
-cat << '_EOF_' > "$DIR/etc/default/gmediarender"
+cat << '_EOF_' > "$DIR/etc/default/$name"
 # GMediaRender command-line arguments: https://github.com/hzeller/gmrender-resurrect/blob/master/INSTALL.md#commandline-options
 ARGS='-u UUID -f HOSTNAME -I eth0 --gstout-audiosink=alsasink --gstout-audiodevice=default --logfile=stdout'
 _EOF_
@@ -74,7 +74,7 @@ _EOF_
 # Control files
 
 # - conffiles
-echo '/etc/default/gmediarender' > "$DIR/DEBIAN/conffiles"
+echo "/etc/default/$name" > "$DIR/DEBIAN/conffiles"
 
 # - postinst
 cat << '_EOF_' > "$DIR/DEBIAN/postinst"
