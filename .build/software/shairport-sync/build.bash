@@ -285,7 +285,7 @@ _EOF_
 # - prerm
 cat << _EOF_ > "$DIR/DEBIAN/prerm"
 #!/bin/sh
-if [ "$1" = 'remove' ] && [ -d '/run/systemd/system' ] && [ -f '/lib/systemd/system/$name.service' ]
+if [ "\$1" = 'remove' ] && [ -d '/run/systemd/system' ] && [ -f '/lib/systemd/system/$name.service' ]
 then
 	echo 'Deconfiguring $name_pretty systemd service ...'
 	systemctl unmask $name
@@ -296,7 +296,7 @@ _EOF_
 # - postrm
 cat << _EOF_ > "$DIR/DEBIAN/postrm"
 #!/bin/sh
-if [ "$1" = 'purge' ]
+if [ "\$1" = 'purge' ]
 then
 	if [ -d '/etc/systemd/system/$name.service.d' ]
 	then
