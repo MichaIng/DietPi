@@ -66,7 +66,6 @@ esac
 # Add MariaDB with Allo GUI (non-full/reinstall ID 160), as otherwise the install fails
 [[ $SOFTWARE =~ (^| )160( |$) ]] && SOFTWARE=$(sed -E 's/(^| )160( |$)/\188 160\2/g' <<< "$SOFTWARE")
 
-
 ##########################################
 # Create service and port lists
 ##########################################
@@ -181,7 +180,7 @@ Process_Software()
 			154) aSERVICES[i]='roonserver';; # Listens on a variety of different port ranges
 			155) aSERVICES[i]='htpc-manager' aTCP[i]='8085';;
 			157) aSERVICES[i]='home-assistant' aTCP[i]='8123'; (( $arch == 10 )) && aDELAY[i]=60 || aDELAY[i]=300;;
-			158) aSERVICES[i]='minio' aTCP[i]='9000';; # ToDo: Solve port conflict with LMS
+			158) aSERVICES[i]='minio' aTCP[i]='9001 9004';;
 			161) aSERVICES[i]='bdd' aTCP[i]='80 443';;
 			162) aCOMMANDS[i]='docker -v';; # aSERVICES[i]='docker' Service does not start in systemd containers (without dedicated network)
 			163) aSERVICES[i]='gmediarender';; # DLNA => UPnP high range of ports
