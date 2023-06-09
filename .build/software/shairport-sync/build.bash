@@ -51,7 +51,7 @@ G_EXEC cp -a "$name-$version/$name" "$DIR/usr/local/bin/"
 G_EXEC cp "$name-$version/LICENSES" "$DIR/usr/local/share/doc/$name/copyright"
 
 # systemd service
-G_EXEC cp "$name-$version/scripts/$name.service-avahi" "$DIR/lib/systemd/system/shairport-sync.service"
+G_EXEC cp "$name-$version/scripts/$name.service-avahi" "$DIR/lib/systemd/system/$name.service"
 
 # dbus/mpris permissions
 G_EXEC cp "$name-$version/scripts/shairport-sync-dbus-policy.conf" "$DIR/etc/dbus-1/system.d/"
@@ -336,7 +336,7 @@ DEPS_APT_VERSIONED=${DEPS_APT_VERSIONED%,}
 grep -q 'raspbian' /etc/os-release && DEPS_APT_VERSIONED=$(sed 's/+rp[it][0-9]\+[^)]*)/)/g' <<< "$DEPS_APT_VERSIONED") || DEPS_APT_VERSIONED=$(sed 's/+b[0-9]\+)/)/g' <<< "$DEPS_APT_VERSIONED")
 
 # - Obtain version suffix
-G_EXEC curl -sSfo package.deb "https://dietpi.com/downloads/binaries/$G_DISTRO_NAME/shairport-sync_$G_HW_ARCH_NAME.deb"
+G_EXEC curl -sSfo package.deb "https://dietpi.com/downloads/binaries/$G_DISTRO_NAME/$name_$G_HW_ARCH_NAME.deb"
 old_version=$(dpkg-deb -f package.deb Version)
 G_EXEC rm package.deb
 suffix=${old_version#*-dietpi}
