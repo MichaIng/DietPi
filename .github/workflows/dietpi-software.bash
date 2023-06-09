@@ -127,7 +127,7 @@ Process_Software()
 			88) aSERVICES[i]='mariadb' aTCP[i]='3306';;
 			89) case $DISTRO in 'buster') aSERVICES[i]='php7.3-fpm';; 'bullseye') aSERVICES[i]='php7.4-fpm';; *) aSERVICES[i]='php8.2-fpm';; esac;;
 			91) aSERVICES[i]='redis-server' aTCP[i]='6379';;
-			#93) aSERVICES[i]='pihole-FTL' aUDP[i]='53';; # Cannot be installed non-interactively
+			93) aSERVICES[i]='pihole-FTL' aUDP[i]='53';;
 			94) aSERVICES[i]='proftpd' aTCP[i]='21';;
 			95) aSERVICES[i]='vsftpd' aTCP[i]='21';;
 			96) aSERVICES[i]='smbd' aTCP[i]='139 445';;
@@ -190,23 +190,23 @@ Process_Software()
 			167) aSERVICES[i]='raspotify';;
 			#169) aSERVICES[i]='voice-recognizer';; "RuntimeError: This module can only be run on a Raspberry Pi!"
 			170) aCOMMANDS[i]='unrar -V';;
-			#171) aSERVICES[i]='frps frpc' aTCP[i]='7000 7400 7500';; # Cannot be installed non-interactively, ports on chosen type
-			#172) aSERVICES[i]='wg-quick@wg0' aUDP[i]='51820';; # cannot be installed non-interactively
+			#171) aSERVICES[i]='frps frpc' aTCP[i]='7000 7400 7500';; Interactive install with service and ports depending on server/client/both choice
+			172) aSERVICES[i]='wg-quick@wg0' aUDP[i]='51820';;
 			174) aCOMMANDS[i]='gimp -v';;
 			176) aSERVICES[i]='mycroft';;
 			177) aSERVICES[i]='firefox-sync' aTCP[i]='5002';;
-			178) aSERVICES[i]='jellyfin' aTCP[i]='8097';;
+			178) aSERVICES[i]='jellyfin' aTCP[i]='8097'; (( $arch < 10 )) && aDELAY[i]=30;;
 			179) aSERVICES[i]='komga' aTCP[i]='2037';;
 			180) aSERVICES[i]='bazarr' aTCP[i]='6767';;
 			181) aSERVICES[i]='papermc' aTCP[i]='25565';;
 			182) aSERVICES[i]='unbound' aUDP[i]='53'; [[ ${aSERVICES[126]} ]] && aUDP[i]+=' 5335';; # Uses port 5335 if Pi-hole or AdGuard Home is installed, but those do listen on port 53 instead
 			183) aSERVICES[i]='vaultwarden' aTCP[i]='8001';;
-			#184) aSERVICES[i]='tor' aTCP[i]='443 9051';; # Cannot be installed non-interactively, ports can be chosen and depend on chosen relay type
+			#184) aSERVICES[i]='tor' aTCP[i]='443 9051';; Interactive install with ports depending on choice and relay type
 			#185) aTCP[i]='9002';; # Docker does not start in systemd containers (without dedicated network)
 			186) aSERVICES[i]='ipfs' aTCP[i]='5003 8087';;
 			187) aSERVICES[i]='cups' aTCP[i]='631';;
 			191) aSERVICES[i]='snapserver' aTCP[i]='1780';;
-			#192) aSERVICES[i]='snapclient';; # cannot be installed non-interactively
+			192) aSERVICES[i]='snapclient';;
 			194) aSERVICES[i]='postgresql';;
 			196) aCOMMANDS[i]='java -version';;
 			197) aCOMMANDS[i]='box64 -v';;
