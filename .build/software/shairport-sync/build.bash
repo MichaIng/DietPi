@@ -21,7 +21,7 @@ version=$(curl -sSf 'https://api.github.com/repos/mikebrady/shairport-sync/relea
 [[ $version ]] || { G_DIETPI-NOTIFY 1 "No latest $name_pretty version found, aborting ..."; exit 1; }
 
 # Download
-G_DIETPI-NOTIFY 2 "Building $name_pretty version \e[33m$version"
+G_DIETPI-NOTIFY 2 "Downloading $name_pretty version \e[33m$version"
 G_EXEC cd /tmp
 G_EXEC curl -sSfLO "$repo/archive/$version.tar.gz"
 [[ -d $name-$version ]] && G_EXEC rm -R "$name-$version"
@@ -29,6 +29,7 @@ G_EXEC tar xf "$version.tar.gz"
 G_EXEC rm "$version.tar.gz"
 
 # Compile
+G_DIETPI-NOTIFY 2 "Compiling $name_pretty"
 G_EXEC cd "$name-$version"
 G_EXEC_OUTPUT=1 G_EXEC autoreconf -fiW all
 CFLAGS='-g0 -O3' CXXFLAGS='-g0 -O3' G_EXEC_OUTPUT=1 G_EXEC ./configure --with-alsa --with-avahi --with-ssl=openssl --with-soxr --with-metadata --with-systemd --with-dbus-interface --with-mpris-interface --with-mqtt-client --with-pipe --with-stdout
@@ -36,10 +37,11 @@ G_EXEC_OUTPUT=1 G_EXEC make
 G_EXEC strip --remove-section=.comment --remove-section=.note "$name"
 
 # Package dir: In case of Raspbian, force ARMv6
+G_DIETPI-NOTIFY 2 "Preparing $name_pretty DEB package directory"
 G_EXEC cd /tmp
 grep -q 'raspbian' /etc/os-release && DIR="${name}_armv6l" || DIR="${name}_$G_HW_ARCH_NAME"
 [[ -d $DIR ]] && G_EXEC rm -R "$DIR"
-# - Control files, systemd service, config file, executable, copyright
+# - Control files, systemd service, executable, configs, copyright
 G_EXEC mkdir -p "$DIR/"{DEBIAN,lib/systemd/system,usr/local/{bin,etc,"share/doc/$name"},etc/dbus-1/system.d}
 
 # Binary
@@ -532,5 +534,5 @@ G_EXEC_OUTPUT=1 G_EXEC dpkg-deb -b "$DIR"
 # Cleanup
 G_EXEC rm -R "$name-$version" nqptp "$DIR"
 
-exit
+exit 0
 }
