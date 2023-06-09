@@ -184,7 +184,7 @@ Process_Software()
 			161) aSERVICES[i]='bdd' aTCP[i]='80 443';;
 			162) aCOMMANDS[i]='docker -v';; # aSERVICES[i]='docker' Service does not start in systemd containers (without dedicated network)
 			163) aSERVICES[i]='gmediarender';; # DLNA => UPnP high range of ports
-			164) aSERVICES[i]='nukkit' aUDP[i]='19132'; (( $arch == 10 )) || aDELAY[i]=30;;
+			164) aSERVICES[i]='nukkit' aUDP[i]='19132'; (( $arch == 10 )) || aDELAY[i]=60;;
 			165) aSERVICES[i]='gitea' aTCP[i]='3000'; (( $arch < 10 )) && aDELAY[i]=30;;
 			#166) aSERVICES[i]='pi-spc';; Service cannot reasonably start in container as WirinPi's gpio command fails reading /proc/cpuinfo
 			167) aSERVICES[i]='raspotify';;
