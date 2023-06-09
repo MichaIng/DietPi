@@ -184,8 +184,8 @@ Process_Software()
 			161) aSERVICES[i]='bdd' aTCP[i]='80 443';;
 			162) aCOMMANDS[i]='docker -v';; # aSERVICES[i]='docker' Service does not start in systemd containers (without dedicated network)
 			163) aSERVICES[i]='gmediarender';; # DLNA => UPnP high range of ports
-			164) aSERVICES[i]='nukkit' aUDP[i]='19132';;
-			165) aSERVICES[i]='gitea' aTCP[i]='3000';;
+			164) aSERVICES[i]='nukkit' aUDP[i]='19132'; (( $arch == 10 )) || aDELAY[i]=30;;
+			165) aSERVICES[i]='gitea' aTCP[i]='3000'; (( $arch < 10 )) && aDELAY[i]=30;;
 			166) aSERVICES[i]='pi-spc';;
 			167) aSERVICES[i]='raspotify';;
 			169) aSERVICES[i]='voice-recognizer';;
@@ -236,6 +236,7 @@ do
 		#61) Process_Software 60;; # Cannot be installed in CI
 		125) Process_Software 194;;
 		#86|134|185) Process_Software 162;; # Docker does not start in systemd containers (without dedicated network)
+		166) Process_Software 70;;
 		*) :;;
 	esac
 	Process_Software "$i"
