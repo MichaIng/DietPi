@@ -186,7 +186,7 @@ Process_Software()
 			163) aSERVICES[i]='gmediarender';; # DLNA => UPnP high range of ports
 			164) aSERVICES[i]='nukkit' aUDP[i]='19132'; (( $arch == 10 )) || aDELAY[i]=30;;
 			165) aSERVICES[i]='gitea' aTCP[i]='3000'; (( $arch < 10 )) && aDELAY[i]=30;;
-			166) aSERVICES[i]='pi-spc';;
+			#166) aSERVICES[i]='pi-spc';; Service cannot reasonably start in container as WirinPi's gpio command fails reading /proc/cpuinfo
 			167) aSERVICES[i]='raspotify';;
 			169) aSERVICES[i]='voice-recognizer';;
 			#171) aSERVICES[i]='frps frpc' aTCP[i]='7000 7400 7500';; # Cannot be installed non-interactively, ports on chosen type
