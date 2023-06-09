@@ -180,7 +180,7 @@ Process_Software()
 			157) aSERVICES[i]='home-assistant' aTCP[i]='8123'; (( $arch == 10 )) && aDELAY[i]=60 || aDELAY[i]=300;;
 			158) aSERVICES[i]='minio' aTCP[i]='9000';; # ToDo: Solve port conflict with LMS
 			161) aSERVICES[i]='bdd' aTCP[i]='80 443';;
-			162) aCOMMANDS[i]='docker -v';; # aSERVICES[i]='docker' # Docker does not start in systemd containers (without dedicated network)
+			162) aCOMMANDS[i]='docker -v';; # aSERVICES[i]='docker' Service does not start in systemd containers (without dedicated network)
 			163) aSERVICES[i]='gmediarender';; # DLNA => UPnP high range of ports
 			164) aSERVICES[i]='nukkit' aUDP[i]='19132';;
 			165) aSERVICES[i]='gitea' aTCP[i]='3000';;
@@ -225,6 +225,7 @@ do
 		205) Process_Software webserver;;
 		27|56|63|64|107|132) Process_Software 89 webserver;; # 93 (Pi-hole) cannot be installed non-interactively
 		38|40|48|54|55|57|59|90|160) Process_Software 88 89 webserver;;
+		159) Process_Software 36 37 65 88 89 96 121 124 128 129 152 160 163 webserver;;
 		47|114|168) Process_Software 88 89 91 webserver;;
 		8|33|131) Process_Software 196;;
 		32|148|119) Process_Software 128;;
