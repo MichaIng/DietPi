@@ -196,8 +196,8 @@ Process_Software()
 			176) aSERVICES[i]='mycroft';;
 			177) aSERVICES[i]='firefox-sync' aTCP[i]='5002';;
 			178) aSERVICES[i]='jellyfin' aTCP[i]='8097'; [[ $arch == [23] ]] && aDELAY[i]=300;; # jellyfin[9983]: arm-binfmt-P: ../../target/arm/translate.c:9659: thumb_tr_translate_insn: Assertion `(dc->base.pc_next & 1) == 0' failed.   ###   jellyfin[9983]: qemu: uncaught target signal 6 (Aborted) - core dumped   ###   about 5 times
-			179) aSERVICES[i]='komga' aTCP[i]='2037';;
-			180) aSERVICES[i]='bazarr' aTCP[i]='6767';;
+			179) aSERVICES[i]='komga' aTCP[i]='2037'; (( $arch == 10 )) && aDELAY[i]=30 || aDELAY[i]=60;;
+			180) aSERVICES[i]='bazarr' aTCP[i]='6767'; (( $arch == 10 )) && aDELAY[i]=30 || aDELAY[i]=60;;
 			181) aSERVICES[i]='papermc' aTCP[i]='25565';;
 			182) aSERVICES[i]='unbound' aUDP[i]='53'; [[ ${aSERVICES[126]} ]] && aUDP[i]+=' 5335';; # Uses port 5335 if Pi-hole or AdGuard Home is installed, but those do listen on port 53 instead
 			183) aSERVICES[i]='vaultwarden' aTCP[i]='8001';;
