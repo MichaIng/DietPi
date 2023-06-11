@@ -195,7 +195,7 @@ Process_Software()
 			174) aCOMMANDS[i]='gimp -v';;
 			176) aSERVICES[i]='mycroft';;
 			177) aSERVICES[i]='firefox-sync' aTCP[i]='5002';;
-			178) aSERVICES[i]='jellyfin' aTCP[i]='8097'; [[ $arch [23] ]] && aDELAY[i]=300;; # jellyfin[9983]: arm-binfmt-P: ../../target/arm/translate.c:9659: thumb_tr_translate_insn: Assertion `(dc->base.pc_next & 1) == 0' failed.   ###   jellyfin[9983]: qemu: uncaught target signal 6 (Aborted) - core dumped   ###   about 5 times
+			178) aSERVICES[i]='jellyfin' aTCP[i]='8097'; [[ $arch == [23] ]] && aDELAY[i]=300;; # jellyfin[9983]: arm-binfmt-P: ../../target/arm/translate.c:9659: thumb_tr_translate_insn: Assertion `(dc->base.pc_next & 1) == 0' failed.   ###   jellyfin[9983]: qemu: uncaught target signal 6 (Aborted) - core dumped   ###   about 5 times
 			179) aSERVICES[i]='komga' aTCP[i]='2037';;
 			180) aSERVICES[i]='bazarr' aTCP[i]='6767';;
 			181) aSERVICES[i]='papermc' aTCP[i]='25565';;
