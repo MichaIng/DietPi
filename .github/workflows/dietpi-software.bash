@@ -207,7 +207,7 @@ Process_Software()
 			187) aSERVICES[i]='cups' aTCP[i]='631';;
 			188) aCOMMANDS[i]='go version';;
 			189) aCOMMANDS[i]='codium -v';;
-			190) aCOMMADDS[i]='beet version';;
+			190) aCOMMANDS[i]='beet version';;
 			191) aSERVICES[i]='snapserver' aTCP[i]='1780';;
 			192) aSERVICES[i]='snapclient';;
 			194) aSERVICES[i]='postgresql';;
