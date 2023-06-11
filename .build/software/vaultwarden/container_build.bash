@@ -47,6 +47,7 @@ case $DISTRO in
 	5) distro='buster';;
 	6) distro='bullseye';;
 	7) distro='bookworm';;
+	8) distro='trixie';;
 	*) G_DIETPI-NOTIFY 1 "Invalid distro \"$DISTRO\" passed, aborting..."; exit 1;;
 esac
 case $ARCH in
