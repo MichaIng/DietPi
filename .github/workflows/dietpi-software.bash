@@ -205,6 +205,7 @@ Process_Software()
 			#185) aTCP[i]='9002';; # Docker does not start in systemd containers (without dedicated network)
 			186) aSERVICES[i]='ipfs' aTCP[i]='5003 8087';;
 			187) aSERVICES[i]='cups' aTCP[i]='631';;
+			188) aCOMMANDS[i]='go version';;
 			191) aSERVICES[i]='snapserver' aTCP[i]='1780';;
 			192) aSERVICES[i]='snapclient';;
 			194) aSERVICES[i]='postgresql';;
