@@ -338,6 +338,9 @@ fi
 # Workaround for Node.js on ARMv6
 (( $arch == 1 )) && G_EXEC sed -i '/# Start DietPi-Software/a\sed -i '\''/G_EXEC chmod +x node-install.sh/a\\sed -i "/^ARCH=/c\\ARCH=armv6l" node-install.sh'\'' /boot/dietpi/dietpi-software' rootfs/boot/dietpi/dietpi-login
 
+# Workaround for sysctl: permission denied on key "net.core.rmem_max" in containers
+G_EXEC sed -i '/# Start DietPi-Software/a\sed -i '\''/G_EXEC sysctl -w net\.core\.rmem_max/d'\'' /boot/dietpi/dietpi-software' rootfs/boot/dietpi/dietpi-login
+
 # Check for service status, ports and commands
 # shellcheck disable=SC2016
 # - Start all services
