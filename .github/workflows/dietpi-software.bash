@@ -233,7 +233,7 @@ do
 		38|40|48|54|55|57|59|90|160) Process_Software 88 89 webserver;;
 		159) Process_Software 36 37 65 88 89 96 121 124 128 129 152 160 163 webserver;;
 		47|114|168) Process_Software 88 89 91 webserver;;
-		8|33|131) Process_Software 196;;
+		8|33|131|179) Process_Software 196;;
 		32|148|119) Process_Software 128;;
 		129) Process_Software 88 89 128 webserver;;
 		49|165) Process_Software 88;;
@@ -241,6 +241,7 @@ do
 		125) Process_Software 194;;
 		#86|134|185) Process_Software 162;; # Docker does not start in systemd containers (without dedicated network)
 		166) Process_Software 70;;
+		180) (( $arch == 10 || $arch == 3 )) || Process_Software 170;;
 		*) :;;
 	esac
 	Process_Software "$i"
