@@ -208,7 +208,7 @@ Process_Software()
 			190) aCOMMANDS[i]='beet version';;
 			191) aSERVICES[i]='snapserver' aTCP[i]='1780';;
 			192) aSERVICES[i]='snapclient';;
-			193) aSERVICES[i]='k3s';;
+			#193) aSERVICES[i]='k3s';; fails due to missing memory cgroup access from within the container
 			194) aSERVICES[i]='postgresql';;
 			196) aCOMMANDS[i]='java -version';;
 			197) aCOMMANDS[i]='box64 -v';;
