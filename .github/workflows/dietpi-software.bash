@@ -220,6 +220,8 @@ Process_Software()
 			203) aSERVICES[i]='readarr' aTCP[i]='8787';;
 			204) aSERVICES[i]='navidrome' aTCP[i]='4533';;
 			206) aSERVICES[i]='openhab' aTCP[i]='8444';;
+			#207) Moonlight (CLI), "moonlight" command
+			#208) Moonlight (GUI), "moonlight-qt" command
 			209) aCOMMANDS[i]='restic version';;
 			*) :;;
 		esac
