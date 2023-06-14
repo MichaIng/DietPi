@@ -217,7 +217,7 @@ Process_Software()
 			200) aSERVICES[i]='dietpi-dashboard' aTCP[i]='5252';;
 			201) aSERVICES[i]='zerotier-one' aTCP[i]='9993';;
 			202) aCOMMANDS[i]='rclone -h';;
-			203) aSERVICES[i]='readarr' aTCP[i]='8787';;
+			203) aSERVICES[i]='readarr' aTCP[i]='8787'; (( $arch < 10 )) && aDELAY[i]=20;;
 			204) aSERVICES[i]='navidrome' aTCP[i]='4533';;
 			206) aSERVICES[i]='openhab' aTCP[i]='8444';;
 			#207) Moonlight (CLI), "moonlight" command
