@@ -1042,6 +1042,12 @@ Available commands:
 		aSOFTWARE_CATX[$software_id]=6
 		aSOFTWARE_DEPS[$software_id]='17'
 		aSOFTWARE_DOCS[$software_id]='https://dietpi.com/docs/software/social/#microblogpub'
+		#-----------------
+		software_id=210
+		aSOFTWARE_NAME[$software_id]='lemmy'
+		aSOFTWARE_DESC[$software_id]='A link aggregator for the fediverse'
+		aSOFTWARE_CATX[$software_id]=6
+		aSOFTWARE_DOCS[$software_id]='https://dietpi.com/docs/software/social/#lemmy'
 
 		# Camera & Surveillance
 		#--------------------------------------------------------------------------------
@@ -4332,6 +4338,166 @@ _EOF_
 			G_DIETPI-NOTIFY 0 'microblog.pub installation finished. In order to complete the setup, please run "microblog-pub configure" in a new bash session. Append the port ":8007" to the domain when being asked for it if you do not use a reverse proxy.'
 		fi
 
+		if To_Install 210 # lemmy
+			## Install up-to-date rustup (cargo version in debian is too old)
+			local lemm_user='lemmy'
+			local lemm_home="/home/$lemm_user"
+			local lemm_bin=$lemm_home/bin
+			# User
+			Create_User -G dialout,gpio,i2c -d "$lemm_home" "$lemm_user"
+			sudo su -u $lemm_user mkdir -p $lemm_bin
+
+			## Install Rust, cargo
+			## We assume users will want to upload images, so we enable pictrs
+			G_WHIP_MSG '[ INFO ] lemmy backend installation started'
+			sudo su -u $lemm_user dash -c '\
+curl https://sh.rustup.rs -sSf | sh;\
+source "$lemm_home/.cargo/env"; \
+cargo install lemmy_server --target-dir $lemm_bin --locked --features embed-pictrs;'
+			G_WHIP_MSG '[ INFO ] lemmy backend installation finished'
+
+			## TODO: Install lemmy front-end server
+## Deps
+# https://classic.yarnpkg.com/en/docs/install/#debian-stable
+curl -sS https://dl.yarnpkg.com/debian/pubkey.gpg | sudo apt-key add -
+echo "deb https://dl.yarnpkg.com/debian/ stable main" | sudo tee /etc/apt/sources.list.d/yarn.list
+# https://github.com/nodesource/distributions/blob/master/README.md#installation-instructions
+curl -fsSL https://deb.nodesource.com/setup_12.x | sudo -E bash -
+sudo apt install nodejs yarn
+
+## Installation
+mkdir /var/lib/lemmy-ui
+cd /var/lib/lemmy-ui
+chown lemmy:lemmy .
+# dont compile as admin
+sudo -u lemmy bash
+git clone https://github.com/LemmyNet/lemmy-ui.git --recursive .
+git checkout 0.16.7 # replace with the version you want to install
+yarn install --pure-lockfile
+yarn build:prod
+exit
+
+			## Backend Config
+			cat << _EOF_ > /etc/lemmy/lemmy.hjson
+{
+  database: {
+    # put your db-passwd from above
+    password: "db-passwd"
+    port: 5432
+  }
+  # replace with your domain
+  hostname: "dietpi.lemmy"
+  bind: "127.0.0.1"
+  port: 5433
+  federation: {
+    enabled: true
+  }
+  # remove this block if you don't require image hosting
+  pictrs: {
+    url: "http://localhost:5434/"
+  }
+  ## Disable this if not a federated instance
+  tls_enabled: true
+}
+_EOF_
+			## Backend Service
+			cat << _EOF_ > /etc/systemd/system/lemmy.service
+[Unit]
+Description=Lemmy - A link aggregator for the fediverse
+After=network.target
+
+[Service]
+User=lemmy
+ExecStart=/usr/bin/lemmy_server
+Environment=LEMMY_CONFIG_LOCATION=/etc/lemmy/lemmy.hjson
+# remove these two lines if you don't need pict-rs
+Environment=PICTRS_PATH=/var/lib/pictrs
+Environment=PICTRS_ADDR=127.0.0.1:5434
+Restart=on-failure
+
+# Hardening
+ProtectSystem=yes
+PrivateTmp=true
+MemoryDenyWriteExecute=true
+NoNewPrivileges=true
+
+[Install]
+WantedBy=multi-user.target
+_EOF_
+			## UI Service
+			cat << _EOF_ > /etc/systemd/system/lemmy-ui.service
+[Unit]
+Description=Lemmy UI - Web frontend for Lemmy
+After=lemmy.service
+Before=nginx.service
+
+[Service]
+User=lemmy
+WorkingDirectory=/var/lib/lemmy-ui
+ExecStart=/usr/bin/node dist/js/server.js
+Environment=LEMMY_INTERNAL_HOST=localhost:5433
+Environment=LEMMY_EXTERNAL_HOST="dietpi.lemmy"
+Environment=LEMMY_HTTPS=true
+Restart=on-failure
+
+# Hardening
+ProtectSystem=full
+PrivateTmp=true
+NoNewPrivileges=true
+
+[Install]
+WantedBy=multi-user.target
+_EOF_
+			## Upgrade Scripts
+    		cat << _EOF_ > /etc/bashrc.d/lemmy.sh
+#!/bin/dash
+lemmy-update()
+{
+	case \$1 in
+		l*) ## Lemmy
+            sudo -u '$lemm_user' dash -c 'source "$lemm_home/.cargo/env"; cargo install lemmy_server --target-dir '$lemm_bin' --features embed-pictrs'
+            sudo systemctl restart lemmy
+            ;;
+		ui) ## UI
+            sudo -u '$lemm_user' dash -c '\
+source "$lemm_home/.cargo/env"; \
+cd /var/lib/lemmy-ui; \
+git checkout main && \
+git pull --tags && \
+git checkout 0.12.2 && \
+git submodule update && \
+yarn install --pure-lockfile && \
+yarn build:prod;';
+            sudo systemctl restart lemmy-ui
+            ;;
+		pic*) ## PictRS
+            # check docker-compose.yml for pict-rs version used by lemmy
+            # https://github.com/LemmyNet/lemmy-ansible/blob/main/templates/docker-compose.yml#L40
+            sudo -u '$lemm_user' dash -c '\
+source "$lemm_home/.cargo/env"; \
+rustup update && \
+cd /var/lib/pictrs-source && \
+git checkout main && \
+git pull --tags && \
+git checkout v0.2.6-r2 &&\
+cargo build --release &&
+cp target/release/pict-rs "$lemm_bin" '
+            sudo systemctl restart pictrs
+            ;;
+		*) echo 'lemmy-update helper script
+
+usage: lemmy-update <lemmy|ui|pictrs>
+
+where:
+  lemmy   update and rebuild the backend server (via cargo)
+  ui      update and rebuilt the ui (via yarn)
+  pictrs  update and rebuild the picture service (via cargo)' && \
+           return 1;;
+	esac
+}
+_EOF_
+
+		fi
 		if To_Install 2 fahclient # Folding@Home
 		then
 			G_DIETPI-NOTIFY 2 'Pre-configuring FAHClient DEB package'
@@ -13039,6 +13205,11 @@ If no WireGuard (auto)start is included, but you require it, please do the follo
 			[[ -f '/etc/bashrc.d/microblog-pub.sh' ]] && G_EXEC rm /etc/bashrc.d/microblog-pub.sh
 			[[ -d '/opt/microblog-pub' ]] && G_EXEC rm -R /opt/microblog-pub
 			G_DIETPI-NOTIFY 2 'All microblog.pub data and settings are still retained.\n - You can remove these manually: rm -R /mnt/dietpi_userdata/microblog-pub'
+		fi
+
+		if To_Uninstall 210 # lemmy
+		then
+            ## TODO!
 		fi
 
 		if To_Uninstall 98 # HAProxy
