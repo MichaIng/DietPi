@@ -219,7 +219,7 @@ Process_Software()
 			202) aCOMMANDS[i]='rclone -h';;
 			203) aSERVICES[i]='readarr' aTCP[i]='8787'; [[ $arch == [23] ]] && aDELAY[i]=60;;
 			204) aSERVICES[i]='navidrome' aTCP[i]='4533'; (( $arch > 9 )) || aDELAY[i]=60;;
-			206) aSERVICES[i]='openhab' aTCP[i]='8444'; [[ $arch == [23] || $arch == 11 ]] && aDELAY[i]=900;;
+			206) aSERVICES[i]='openhab' aTCP[i]='8444'; [[ $arch == 3 || $arch == 11 ]] && aDELAY[i]=600; (( $arch == 2 )) && aDELAY[i]=1200;;
 			#207) Moonlight (CLI), "moonlight" command
 			#208) Moonlight (GUI), "moonlight-qt" command
 			209) aCOMMANDS[i]='restic version';;
