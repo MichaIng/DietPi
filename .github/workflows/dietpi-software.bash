@@ -47,7 +47,7 @@ do
 	esac
 	shift
 done
-[[ $DISTRO =~ ^('buster'|'bullseye'|'bookworm')$ ]] || { G_DIETPI-NOTIFY 1 "Invalid distro \"$DISTRO\" passed, aborting..."; exit 1; }
+[[ $DISTRO =~ ^('buster'|'bullseye'|'bookworm'|'trixie')$ ]] || { G_DIETPI-NOTIFY 1 "Invalid distro \"$DISTRO\" passed, aborting..."; exit 1; }
 case $ARCH in
 	'armv6l') image="DietPi_Container-ARMv6-${DISTRO^}" arch=1;;
 	'armv7l') image="DietPi_Container-ARMv7-${DISTRO^}" arch=2;;
