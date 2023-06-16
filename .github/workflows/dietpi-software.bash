@@ -218,8 +218,8 @@ Process_Software()
 			201) aSERVICES[i]='zerotier-one' aTCP[i]='9993';;
 			202) aCOMMANDS[i]='rclone -h';;
 			203) aSERVICES[i]='readarr' aTCP[i]='8787'; [[ $arch == [23] ]] && aDELAY[i]=60;;
-			204) aSERVICES[i]='navidrome' aTCP[i]='4533'; (( $arch > 9 )) || aDELAY[i]=120;;
-			206) aSERVICES[i]='openhab' aTCP[i]='8444'; [[ $arch == [23] || $arch == 11 ]] && aDELAY[i]=120;;
+			204) aSERVICES[i]='navidrome' aTCP[i]='4533'; (( $arch > 9 )) || aDELAY[i]=240;;
+			206) aSERVICES[i]='openhab' aTCP[i]='8444'; [[ $arch == [23] || $arch == 11 ]] && aDELAY[i]=240;;
 			#207) Moonlight (CLI), "moonlight" command
 			#208) Moonlight (GUI), "moonlight-qt" command
 			209) aCOMMANDS[i]='restic version';;
@@ -235,7 +235,7 @@ do
 		38|40|48|54|55|57|59|90|160) Process_Software 88 89 webserver;;
 		159) Process_Software 36 37 65 88 89 96 121 124 128 129 152 160 163 webserver;;
 		47|114|168) Process_Software 88 89 91 webserver;;
-		8|33|131|179) Process_Software 196;;
+		8|33|131|179|206) Process_Software 196;;
 		32|148|119) Process_Software 128;;
 		129) Process_Software 88 89 128 webserver;;
 		49|165) Process_Software 88;;
