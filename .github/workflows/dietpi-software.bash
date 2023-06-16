@@ -218,8 +218,8 @@ Process_Software()
 			201) aSERVICES[i]='zerotier-one' aTCP[i]='9993';;
 			202) aCOMMANDS[i]='rclone -h';;
 			203) aSERVICES[i]='readarr' aTCP[i]='8787'; [[ $arch == [23] ]] && aDELAY[i]=60;;
-			204) aSERVICES[i]='navidrome' aTCP[i]='4533'; (( $arch > 9 )) || aDELAY[i]=300;;
-			206) aSERVICES[i]='openhab' aTCP[i]='8444'; [[ $arch == [23] || $arch == 11 ]] && aDELAY[i]=300;;
+			204) aSERVICES[i]='navidrome' aTCP[i]='4533'; (( $arch > 9 )) || aDELAY[i]=60;;
+			206) aSERVICES[i]='openhab' aTCP[i]='8444'; [[ $arch == [23] || $arch == 11 ]] && aDELAY[i]=600;;
 			#207) Moonlight (CLI), "moonlight" command
 			#208) Moonlight (GUI), "moonlight-qt" command
 			209) aCOMMANDS[i]='restic version';;
@@ -322,10 +322,11 @@ for i in $SOFTWARE; do G_CONFIG_INJECT "AUTO_SETUP_INSTALL_SOFTWARE_ID=$i" "AUTO
 # Workaround for "Could not execute systemctl:  at /usr/bin/deb-systemd-invoke line 145." during Apache2 DEB postinst in 32-bit ARM Bookworm container: https://lists.ubuntu.com/archives/foundations-bugs/2022-January/467253.html
 G_CONFIG_INJECT 'AUTO_SETUP_WEB_SERVER_INDEX=' 'AUTO_SETUP_WEB_SERVER_INDEX=-2' rootfs/boot/dietpi.txt
 
-# Workaround for failing Redis and Raspotify as of PrivateUsers=true leading to "Failed to set up user namespacing"
-G_EXEC mkdir rootfs/etc/systemd/system/{redis-server,raspotify}.service.d
+# Workaround for failing Redis, Raspotify and Navidrome as PrivateUsers=true leads to "Failed to set up user namespacing" on QEMU-emulated 32-bit ARM containers
+G_EXEC mkdir rootfs/etc/systemd/system/{redis-server,raspotify,navidrome}.service.d
 G_EXEC eval 'echo -e '\''[Service]\nPrivateUsers=0'\'' > rootfs/etc/systemd/system/redis-server.service.d/dietpi-container.conf'
 G_EXEC eval 'echo -e '\''[Service]\nPrivateUsers=0'\'' > rootfs/etc/systemd/system/raspotify.service.d/dietpi-container.conf'
+G_EXEC eval 'echo -e '\''[Service]\nPrivateUsers=0'\'' > rootfs/etc/systemd/system/navidrome.service.d/dietpi-container.conf'
 
 # Workarounds for failing MariaDB install on Buster within GitHub Actions runner (both cannot be replicated on my test systems with and without QEMU):
 # - mysqld does not have write access if our symlink is in place, even that directory permissions are correct.
