@@ -1047,7 +1047,7 @@ Available commands:
 		aSOFTWARE_NAME[$software_id]='lemmy'
 		aSOFTWARE_DESC[$software_id]='A link aggregator for the fediverse'
 		aSOFTWARE_CATX[$software_id]=6
-        aSOFTWARE_DEPS[$software_id]='9 17'
+        aSOFTWARE_DEPS[$software_id]='9 17 194'
 		aSOFTWARE_DOCS[$software_id]='https://dietpi.com/docs/software/social/#lemmy'
 
 		# Camera & Surveillance
@@ -4345,6 +4345,7 @@ _EOF_
 			## Install up-to-date rustup (cargo version in debian is too old)
 			local lemm_user='lemmy'
             local lemm_home="/home/$lemm_user"
+            local lemm_server_path=$lemm_home/.cargo/bin
 			# User
             ##Create_User -G dialout,gpio,i2c -d "$lemm_home" "$lemm_user"
             G_EXEC mkdir -p "$lemm_home"
@@ -4356,12 +4357,14 @@ _EOF_
 			## Install Rust, cargo
 			## We assume users will want to upload images, so we enable pictrs
 			G_DIETPI-NOTIFY 0 '[ INFO ] lemmy backend installation started'
-            G_EXEC curl -sSf 'https://sh.rustup.rs/' -o rustup-init.sh
-            G_EXEC chmod +x rustup-init.sh
-            G_EXEC_OUTPUT=1 G_EXEC ./rustup-init.sh -y --profile minimal
-            G_EXEC rm rustup-init.sh
-            export PATH="/root/.cargo/bin:$PATH"
-            G_EXEC_OUTPUT=1 G_EXEC cargo install lemmy_server --locked --features embed-pictrs
+            G_EXEC cd "$lemm_home"
+            G_EXEC sudo -u lemmy dash -c '\
+curl -sSf "https://sh.rustup.rs/" -o rustup-init.sh && \
+chmod +x rustup-init.sh && \
+./rustup-init.sh -y --profile minimal && \
+rm rustup-init.sh; \
+. /home/lemmy/.cargo/env
+cargo install lemmy_server --locked --features embed-pictrs'
 			G_DIETPI-NOTIFY 0 '[ INFO ] lemmy backend installation finished'
 
 			## Install lemmy front-end server
@@ -4373,33 +4376,47 @@ _EOF_
             G_AGUP
             G_AGI yarn nodejs
             # ## Installation
-            G_EXEC mkdir -p /var/lib/lemmy-ui
-            G_EXEC chown "$lemm_user":"$lemm_user" -R /var/lib/lemmy-ui
-            # dont compile as admin
-            G_EXEC cd /var/lib/lemmy-ui
-            G_DIETPI-NOTIFY 0 '[ INFO ] lemmy UI installation started'
-            G_EXEC sudo -u "$lemm_user" dash -c '\
- git clone https://github.com/LemmyNet/lemmy-ui.git --recursive . && \
+            if ! [ -e /var/lib/lemmy-ui ]; then
+                G_EXEC mkdir -p /var/lib/lemmy-ui
+                G_EXEC chown "$lemm_user":"$lemm_user" -R /var/lib/lemmy-ui
+                # dont compile as admin
+                G_EXEC cd /var/lib/lemmy-ui
+                G_DIETPI-NOTIFY 0 '[ INFO ] lemmy UI installation started'
+                G_EXEC sudo -u "$lemm_user" dash -c 'git clone https://github.com/LemmyNet/lemmy-ui.git --recursive .'
+                G_EXEC sudo -u "$lemm_user" dash -c '\
  git checkout 0.17.3 && \
  yarn install --pure-lockfile && \
  yarn build:prod'
+            fi
             G_DIETPI-NOTIFY 0 '[ INFO ] lemmy UI installation finished'
           
 			# Config Section
             local host_bind=127.0.0.1
             local host_broadcast=0.0.0.0
             local host_domain=dietpi.lemmy.com
+            local pass_database="dblemmypassword"
             local port_database=5432
             local port_backend=5433   ## default:8536
             local port_pictrs=5434
             local port_frontend=5435  ## default:1234
 
+            local lemmy_userdata=/mnt/dietpi_userdata/lemmy/
+
             G_DIETPI-NOTIFY 0 "[ INFO ] lemmy will be up and running at https://$host_broadcast:$port_frontend"
+
+			# Prepare our new config + data directory if not yet present
+			if [[ ! -f "$lemmy_userdata/lemmy.hjson" ]]
+			then
+				[[ -d '$lemmy_userdata' ]] || G_EXEC mkdir $lemmy_userdata
+			fi
             
-			cat << _EOF_ > /etc/lemmy/lemmy.hjson
+            
+			cat << _EOF_ > "$lemmy_userdata/lemmy.hjson"
+# https://join-lemmy.org/docs/en/administration/configuration.html#full-config-with-default-values
 {
   database: {
-    password: "db-passwd"
+    host: /var/run/postgresql
+    password: "$pass_database"
     port: $port_database
   }
   # replace with your domain
@@ -4411,13 +4428,21 @@ _EOF_
   }
   # remove this block if you don't require image hosting
   pictrs: {
-    url: "$host_bind:$port_pictrs/"
+    url: "https://$host_bind:$port_pictrs/"
+    api_key: "$pass_database"
+  }
+  setup: {
+    admin_username: "dietpi"
+    # Password for the admin user. It must be at least 10 characters.
+    admin_password: "dietpi-lemmy"
+    site_name: "My DietPi Lemmy Instance"
   }
   ## Disable this if not a federated instance
   tls_enabled: true
 }
 _EOF_
 			## Backend Service
+            # Pictrs options: https://git.asonix.dog/asonix/pict-rs/
 			cat << _EOF_ > /etc/systemd/system/lemmy.service
 [Unit]
 Description=Lemmy - A link aggregator for the fediverse
@@ -4425,9 +4450,11 @@ After=network.target
 
 [Service]
 User=lemmy
-ExecStart=/root/.cargo/bin/lemmy_server
-Environment=LEMMY_CONFIG_LOCATION=/etc/lemmy/lemmy.hjson
-Environment=PICTRS_PATH=/var/lib/pictrs
+ExecStart=$lemm_server_path/lemmy_server
+Environment=LEMMY_CONFIG_LOCATION="$lemmy_userdata/lemmy.hjson"
+Environment=PICTRS_PATH=$lemmy_userdata/picts  # /var/lib/pictrs
+Environment=PICTRS__REPO__PATH=$PICTRS_PATH/sled-repo
+Environment=PICTRS__STORE__PATH=$PICTRS_PATH/store
 Environment=PICTRS_ADDR=$host_bind:$port_pictrs
 Restart=on-failure
 
@@ -4454,6 +4481,7 @@ ExecStart=/usr/bin/node dist/js/server.js
 Environment=LEMMY_UI_HOST=$host_broadcast:$port_frontend
 Environment=LEMMY_UI_LEMMY_INTERNAL_HOST=$host_bind:$port_backend
 Environment=LEMMY_UI_LEMMY_EXTERNAL_HOST="$host_domain"
+Environment=LEMMY_UI_EXTRA_THEMES_FOLDER="$lemmy_userdata/extra-themes"
 Environment=LEMMY_UI_HTTPS=true ## Hey, should this be enforced?
 Restart=on-failure
 
@@ -4516,10 +4544,19 @@ _EOF_
 
             ## Fresh database and upgrade lemmy to sudo
             ## Hey, maybe a reinstallation shouldn't drop the last database?
+            G_EXEC systemctl stop postgresql
             G_EXEC systemctl start postgresql
-            G_EXEC sudo -u postgres psql -c "DROP DATABASE lemmy;"
-            G_EXEC sudo -u postgres psql -c "CREATE DATABASE lemmy WITH OWNER lemmy ENCODING 'UTF8' TEMPLATE template0 LC_COLLATE 'C' LC_CTYPE 'C';"
-            G_EXEC sudo -u postgres psql -c "ALTER USER lemmy WITH SUPERUSER;"            
+            local db_files=$lemmy_userdata/postgres
+            G_EXEC mkdir -p $db_files
+            G_EXEC chown postgres:postgres -R $db_files
+            G_EXEC_OUTPUT=1 G_EXEC sudo -iu postgres psql -c "DROP DATABASE IF EXISTS lemmy;"
+            G_EXEC_OUTPUT=1 G_EXEC sudo -iu postgres psql -c "DROP TABLESPACE IF EXISTS lemmydata;"
+            G_EXEC_OUTPUT=1 G_EXEC sudo -iu postgres psql -c "DROP ROLE IF EXISTS lemmy;"
+            G_EXEC_OUTPUT=1 G_EXEC sudo -iu postgres psql -c "CREATE USER lemmy WITH PASSWORD '""$pass_database""';"
+            G_EXEC_OUTPUT=1 G_EXEC sudo -iu postgres psql -c "CREATE TABLESPACE lemmydata OWNER lemmy LOCATION '""$db_files""';"
+            G_EXEC_OUTPUT=1 G_EXEC sudo -iu postgres psql -c "CREATE DATABASE lemmy WITH OWNER lemmy ENCODING 'UTF8' TEMPLATE template0 LC_COLLATE 'C' LC_CTYPE 'C' TABLESPACE='lemmydata';"
+            G_EXEC_OUTPUT=1 G_EXEC sudo -iu postgres psql -c "GRANT ALL PRIVILEGES ON DATABASE lemmy TO lemmy;"
+            G_EXEC_OUTPUT=1 G_EXEC sudo -iu postgres psql -c "ALTER USER lemmy WITH SUPERUSER;"
 		fi
            
 		if To_Install 2 fahclient # Folding@Home
