@@ -83,7 +83,7 @@ Process_Software()
 			2) aSERVICES[i]='fahclient' aTCP[i]='7396';;
 			7) aCOMMANDS[i]='ffmpeg -version';;
 			9) aCOMMANDS[i]='node -v';;
-			16) aSERVICES[i]='microblog-pub' aTCP[i]='8007';;
+			16) aSERVICES[i]='microblog-pub' aTCP[i]='8007' aDELAY[i]=30;;
 			17) aCOMMANDS[i]='git -v';;
 			28) aSERVICES[i]='vncserver' aTCP[i]='5901';;
 			29) aSERVICES[i]='xrdp' aTCP[i]='3389';;
