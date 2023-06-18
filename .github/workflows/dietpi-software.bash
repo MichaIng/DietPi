@@ -83,7 +83,7 @@ Process_Software()
 			2) aSERVICES[i]='fahclient' aTCP[i]='7396';;
 			7) aCOMMANDS[i]='ffmpeg -version';;
 			9) aCOMMANDS[i]='node -v';;
-			16) aSERVICES[i]='microblog-pub' aTCP[i]='8007' aDELAY[i]=30;;
+			#16) aSERVICES[i]='microblog-pub' aTCP[i]='8007';; Service enters a CPU-intense internal error loop until it has been configured interactively via "microblog-pub configure", hence it is not enabled and started anymore after install but instead as part of "microblog-pub configure"
 			17) aCOMMANDS[i]='git -v';;
 			28) aSERVICES[i]='vncserver' aTCP[i]='5901';;
 			29) aSERVICES[i]='xrdp' aTCP[i]='3389';;
