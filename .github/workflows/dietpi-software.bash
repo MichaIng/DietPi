@@ -357,6 +357,8 @@ G_EXEC eval "echo -e '#!/bin/dash\nexit_code=0; /boot/dietpi/dietpi-services sta
 # - Loop through software IDs to test
 printf '%s\n' "${!aSERVICES[@]}" "${!aTCP[@]}" "${!aUDP[@]}" "${!aCOMMANDS[@]}" | sort -u | while read -r i
 do
+	[[ ${aSERVICES[i]}${aTCP[i]}${aUDP[i]}${aCOMMANDS[i]} ]] || continue
+
 	# Check whether ID really got installed, to skip software unsupported on hardware or distro
 	cat << _EOF_ >> rootfs/boot/Automation_Custom_Script.sh
 if grep -q '^aSOFTWARE_INSTALL_STATE\[$i\]=2$' /boot/dietpi/.installed
