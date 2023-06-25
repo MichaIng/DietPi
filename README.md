@@ -335,6 +335,7 @@ Links to hardware and software manufacturers, sources and build instructions use
 - [Moonlight (CLI)](https://github.com/moonlight-stream/moonlight-embedded)
 - [Moonlight (GUI)](https://github.com/moonlight-stream/moonlight-qt)
 - [Restic](https://github.com/restic/restic)
+- [MediaWiki](https://github.com/wikimedia/mediawiki)
 
 ---
 

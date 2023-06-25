@@ -232,7 +232,7 @@ do
 	case $i in
 		205) Process_Software webserver;;
 		27|56|63|64|107|132) Process_Software 89 webserver;; # 93 (Pi-hole) cannot be installed non-interactively
-		38|40|48|54|55|57|59|90|160) Process_Software 88 89 webserver;;
+		38|40|48|54|55|57|59|90|141|160) Process_Software 88 89 webserver;;
 		159) Process_Software 36 37 65 88 89 96 121 124 128 129 152 160 163 webserver;;
 		47|114|168) Process_Software 88 89 91 webserver;;
 		8|33|131|179|206) Process_Software 196;;

@@ -869,6 +869,15 @@ Available commands:
 		aSOFTWARE_DESC[$software_id]='Fast, efficient and secure command-line backup program'
 		aSOFTWARE_CATX[$software_id]=4
 		aSOFTWARE_DOCS[$software_id]='https://dietpi.com/docs/software/cloud/#restic'
+		#------------------
+		software_id=210
+		aSOFTWARE_NAME[$software_id]='MediaWiki'
+		aSOFTWARE_DESC[$software_id]='A collaboration and documentation platform'
+		aSOFTWARE_CATX[$software_id]=4
+		aSOFTWARE_DOCS[$software_id]='https://dietpi.com/docs/software/cloud/#mediawiki'
+		aSOFTWARE_DEPS[$software_id]='88 89 webserver'
+		# - Buster: For MediaWiki, at least PHP 7.4.3 is required. https://www.mediawiki.org/wiki/Manual:Installation_requirements#PHP
+		aSOFTWARE_AVAIL_G_DISTRO[$software_id,5]=0
 
 		# Gaming & Emulation
 		#--------------------------------------------------------------------------------
@@ -3617,7 +3626,7 @@ _EOF_
 
 			Remove_SysV lighttpd
 
-			# Enable mod_deflate, if flagged
+			# Enable mod_deflate if flagged
 			[[ ${deflate[0]} && ! -f '/etc/lighttpd/conf-enabled/20-deflate.conf' ]] && G_EXEC lighty-enable-mod deflate
 
 			# Change webroot from /var/www/html to /var/www
@@ -4445,7 +4454,12 @@ Redirect 301 /.well-known/caldav  /owncloud/remote.php/dav' > /etc/apache2/conf-
 
 				# Enable required modules
 				G_CONFIG_INJECT '"mod_access",' '	"mod_access",' /etc/lighttpd/lighttpd.conf '"mod_.+",'
-				G_CONFIG_INJECT '"mod_setenv",' '	"mod_setenv",' /etc/lighttpd/lighttpd.conf '"mod_.+",'
+				if (( $G_DISTRO < 6 ))
+				then
+					G_CONFIG_INJECT '"mod_setenv"' '	"mod_setenv",' /etc/lighttpd/lighttpd.conf '"mod_.+",'
+				else
+					[[ -f '/etc/lighttpd/conf-enabled/05-setenv.conf' ]] || G_EXEC lighty-enable-mod dietpi-https
+				fi
 
 				# Move ownCloud configuration file in place and activate it
 				owncloud_conf='/etc/lighttpd/conf-available/99-dietpi-owncloud.conf'
@@ -4707,7 +4721,12 @@ Redirect 301 /.well-known/caldav  /nextcloud/remote.php/dav' > /etc/apache2/conf
 
 				# Enable required modules
 				G_CONFIG_INJECT '"mod_access",' '	"mod_access",' /etc/lighttpd/lighttpd.conf '"mod_.+",'
-				G_CONFIG_INJECT '"mod_setenv",' '	"mod_setenv",' /etc/lighttpd/lighttpd.conf '"mod_.+",'
+				if (( $G_DISTRO < 6 ))
+				then
+					G_CONFIG_INJECT '"mod_setenv"' '	"mod_setenv",' /etc/lighttpd/lighttpd.conf '"mod_.+",'
+				else
+					[[ -f '/etc/lighttpd/conf-enabled/05-setenv.conf' ]] || G_EXEC lighty-enable-mod dietpi-https
+				fi
 
 				# Move Nextcloud configuration file in place and activate it
 				nextcloud_conf='/etc/lighttpd/conf-available/99-dietpi-nextcloud.conf'
@@ -6129,7 +6148,12 @@ _EOF_
 			if (( ${aSOFTWARE_INSTALL_STATE[84]} > 0 ))
 			then
 				# Enable required modules
-				G_CONFIG_INJECT '"mod_setenv",' '	"mod_setenv",' /etc/lighttpd/lighttpd.conf '"mod_.+",'
+				if (( $G_DISTRO < 6 ))
+				then
+					G_CONFIG_INJECT '"mod_setenv"' '	"mod_setenv",' /etc/lighttpd/lighttpd.conf '"mod_.+",'
+				else
+					[[ -f '/etc/lighttpd/conf-enabled/05-setenv.conf' ]] || G_EXEC lighty-enable-mod dietpi-https
+				fi
 
 				# Add and enable Pi-hole config
 				dps_index=$software_id Download_Install 'lighttpd.pihole.conf' /etc/lighttpd/conf-available/99-dietpi-pihole.conf
@@ -8101,7 +8125,12 @@ _EOF_
 			then
 				# Enable Lighttpd setenv, access and rewrite modules
 				G_CONFIG_INJECT '"mod_access",' '	"mod_access",' /etc/lighttpd/lighttpd.conf '"mod_.+",'
-				G_CONFIG_INJECT '"mod_setenv",' '	"mod_setenv",' /etc/lighttpd/lighttpd.conf '"mod_.+",'
+				if (( $G_DISTRO < 6 ))
+				then
+					G_CONFIG_INJECT '"mod_setenv"' '	"mod_setenv",' /etc/lighttpd/lighttpd.conf '"mod_.+",'
+				else
+					[[ -f '/etc/lighttpd/conf-enabled/05-setenv.conf' ]] || G_EXEC lighty-enable-mod dietpi-https
+				fi
 
 				# Move Pydio Lighttpd config in place
 				dps_index=$software_id Download_Install 'lighttpd.pydio.conf' /etc/lighttpd/conf-available/99-dietpi-pydio.conf
@@ -11654,6 +11683,69 @@ _EOF_
 			G_EXEC chmod +x /usr/local/bin/restic
 		fi
 
+		if To_Install 210 # MediaWiki
+		then
+			# Install required PHP modules: https://www.mediawiki.org/wiki/Manual:Installation_requirements#PHP
+			aDEPS=("php$PHP_VERSION-gd" "php$PHP_VERSION-intl")
+			# - Add JSON module for PHP7, as it does not exist (embedded in core package) on PHP8
+			[[ $PHP_VERSION == 8* ]] || aDEPS+=("php$PHP_VERSION-json")
+			local php_modules=("${aDEPS[@]##*-}")
+
+			# Create MariaDB database and user
+			if [[ -d '/mnt/dietpi_userdata/mysql/mediawiki' ]]
+			then
+				G_DIETPI-NOTIFY 2 'MediaWiki MariaDB database found, will NOT overwrite.'
+			else
+				/boot/dietpi/func/create_mysql_db mediawiki mediawiki "$GLOBAL_PW"
+			fi
+
+			# Get latest version
+			local fallback_url='https://releases.wikimedia.org/mediawiki/1.39/mediawiki-1.39.3.tar.gz'
+			Download_Install "$(curl -sSfL 'https://www.mediawiki.org/wiki/Download' | grep -o 'https://releases\.wikimedia\.org/mediawiki/[^/"]*/mediawiki-[^"]*\.tar\.gz' | head -1)"
+
+			# Enable required PHP modules
+			G_EXEC phpenmod "${php_modules[@]}"
+
+			# Webserver configs
+			# - Lighttpd
+			if (( ${aSOFTWARE_INSTALL_STATE[84]} > 0 ))
+			then
+				if (( $G_DISTRO < 6 ))
+				then
+					G_CONFIG_INJECT '"mod_setenv"' '	"mod_setenv",' /etc/lighttpd/lighttpd.conf '"mod_.+",'
+				else
+					[[ -f '/etc/lighttpd/conf-enabled/05-setenv.conf' ]] || G_EXEC lighty-enable-mod dietpi-https
+				fi
+				cat << '_EOF_' > /etc/lighttpd/conf-available/98-dietpi-mediawiki.conf
+$HTTP["url"] =~ "^/wiki/images($|/)" {
+	setenv.set-response-header = ("X-Content-Type-Options" => "nosniff")
+}
+_EOF_
+				[[ -f '/etc/lighttpd/conf-enabled/98-dietpi-mediawiki.conf' ]] || lighty-enable-mod dietpi-mediawiki
+
+			# - Nginx
+			elif (( ${aSOFTWARE_INSTALL_STATE[85]} > 0 ))
+			then
+				cat << '_EOF_' > /etc/nginx/sites-dietpi/dietpi-mediawiki.conf
+location ^~ /wiki/images {
+	add_header X-Content-Type-Options "nosniff" always;
+}
+_EOF_
+			fi
+
+			# Reinstall: Clean install but preserve existing config file
+			if [[ -f '/var/www/wiki/LocalSettings.php' ]]
+			then
+				G_EXEC mv /var/www/wiki/LocalSettings.php mediawiki-*/
+				G_EXEC chmod 600 mediawiki-*/LocalSettings.php
+			fi
+			G_EXEC chown -R www-data:www-data mediawiki-*
+			[[ -d '/var/www/wiki' ]] && G_EXEC rm -R /var/www/wiki
+
+			# Move new instance in place
+			G_EXEC mv mediawiki-* /var/www/wiki
+		fi
+
 		if To_Install 205 # Homer
 		then
 			# Download the latest release
@@ -14063,6 +14155,12 @@ _EOF_
 		if To_Uninstall 209 # Restic
 		then
 			[[ -f '/usr/local/bin/restic' ]] && G_EXEC rm /usr/local/bin/restic
+		fi
+
+		if To_Uninstall 210 # MediaWiki
+		then
+			[[ -d '/var/www/wiki' ]] && G_EXEC rm -R /var/www/wiki
+			Remove_Database mediawiki
 		fi
 
 		if To_Uninstall 198 # File Browser
