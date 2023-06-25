@@ -3,242 +3,72 @@ on:
   workflow_dispatch:
     inputs:
       arch:
-        description: 'Target architecture index: 1, 2, 3, 10 or all'
+        description: 'Target architecture'
+        type: choice
+        options: [armv6l, armv7l, aarch64, x86_64, riscv64, all]
+        default: all
         required: true
-      distro:
-        description: 'Target Debian version index: 5, 6, 7 or all'
+      dist:
+        description: 'Target Debian version'
+        type: choice
+        options: [buster, bullseye, bookworm, trixie, all]
+        default: all
         required: true
 concurrency:
   group: ${{ github.workflow }}-${{ github.event.inputs.arch }}-${{ github.event.inputs.distro }}
   cancel-in-progress: true
 permissions: {}
+defaults:
+  run:
+    shell: sh
+    working-directory: /dev/shm
 jobs:
-  armv6_buster:
-    if: ( github.event.inputs.arch == 1 || github.event.inputs.arch == 'all' ) && ( github.event.inputs.distro == 5 || github.event.inputs.distro == 'all' )
-    # https://github.com/actions/virtual-environments
+  prep:
+    outputs:
+      arch: ${{ steps.arch.outputs.arch }}
+      dist: ${{ steps.dist.outputs.dist }}
     runs-on: ubuntu-22.04
-    defaults:
-      run:
-        shell: sh
-        working-directory: /dev/shm
     steps:
-    - name: Start build container
-      run: sudo bash -c "G_GITOWNER=$GITHUB_REPOSITORY_OWNER G_GITBRANCH=${GITHUB_REF#refs/heads/}; $(curl -sSf "https://raw.githubusercontent.com/$GITHUB_REPOSITORY_OWNER/DietPi/${GITHUB_REF#refs/heads/}/.build/software/gmediarender/container_build.bash")" 'DietPi-Build_GMediaRender' -a 1 -d 5
-    - name: Upload package
+    - id: arch
       run: |
-        [ -d ~/.ssh ] || mkdir ~/.ssh
+        if [ '${{ github.event.inputs.arch }}' = 'all' ]
+        then
+          echo 'arch=["armv6l", "armv7l", "aarch64", "x86_64", "riscv64"]' >> "$GITHUB_OUTPUT"
+        else
+          echo 'arch=["${{ github.event.inputs.arch }}"]' >> "$GITHUB_OUTPUT"
+        fi
+    - id: dist
+      run: |
+        if [ '${{ github.event.inputs.dist }}' = 'all' ]
+        then
+          echo 'dist=["buster", "bullseye", "bookworm", "trixie"]' >> "$GITHUB_OUTPUT"
+        else
+          echo 'dist=["${{ github.event.inputs.dist }}"]' >> "$GITHUB_OUTPUT"
+        fi
+  build:
+    needs: prep
+    strategy:
+      matrix:
+        arch: ${{ fromJson(needs.prep.outputs.arch) }}
+        dist: ${{ fromJson(needs.prep.outputs.dist) }}
+        exclude:
+        - { arch: riscv64, dist: buster }
+        - { arch: riscv64, dist: bullseye }
+      fail-fast: false
+    name: "Build: ${{ matrix.arch }} - ${{ matrix.dist }}"
+    runs-on: ubuntu-22.04
+    steps:
+    - name: Build
+      run: sudo bash -c "G_GITOWNER=$GITHUB_REPOSITORY_OWNER G_GITBRANCH=$GITHUB_REF_NAME; $(curl -sSf "https://raw.githubusercontent.com/$GITHUB_REPOSITORY_OWNER/DietPi/$GITHUB_REF_NAME/.build/software/gmediarender/container_build.bash")" -- -a '${{ matrix.arch }}' -d '${{ matrix.dist }}'
+    - name: Upload
+      run: |
+        # SSH server and client keys
+        mkdir ~/.ssh
         umask 377
         echo '${{ secrets.KNOWN_HOSTS }}' > ~/.ssh/known_hosts
         echo '${{ secrets.SSH_KEY }}' > ~/.ssh/id_ed25519
-        curl -T rootfs/gmediarender_armv6l.deb --key ~/.ssh/id_ed25519 '${{ secrets.UPLOAD_URL }}buster/'
-        curl 'https://api.cloudflare.com/client/v4/zones/${{ secrets.CF_ZONE }}/purge_cache' -H 'Authorization: Bearer ${{ secrets.CF_TOKEN }}' -H 'Content-Type: application/json' \
-        --data '{"files":["https://dietpi.com/downloads/binaries/buster/testing/","https://dietpi.com/downloads/binaries/buster/testing/gmediarender_armv6l.deb"]}'
-  armv6_bullseye:
-    if: ( github.event.inputs.arch == 1 || github.event.inputs.arch == 'all' ) && ( github.event.inputs.distro == 6 || github.event.inputs.distro == 'all' )
-    runs-on: ubuntu-22.04
-    defaults:
-      run:
-        shell: sh
-        working-directory: /dev/shm
-    steps:
-    - name: Start build container
-      run: sudo bash -c "G_GITOWNER=$GITHUB_REPOSITORY_OWNER G_GITBRANCH=${GITHUB_REF#refs/heads/}; $(curl -sSf "https://raw.githubusercontent.com/$GITHUB_REPOSITORY_OWNER/DietPi/${GITHUB_REF#refs/heads/}/.build/software/gmediarender/container_build.bash")" 'DietPi-Build_GMediaRender' -a 1 -d 6
-    - name: Upload package
-      run: |
-        [ -d ~/.ssh ] || mkdir ~/.ssh
-        umask 377
-        echo '${{ secrets.KNOWN_HOSTS }}' > ~/.ssh/known_hosts
-        echo '${{ secrets.SSH_KEY }}' > ~/.ssh/id_ed25519
-        curl -T rootfs/gmediarender_armv6l.deb --key ~/.ssh/id_ed25519 '${{ secrets.UPLOAD_URL }}bullseye/'
-        curl 'https://api.cloudflare.com/client/v4/zones/${{ secrets.CF_ZONE }}/purge_cache' -H 'Authorization: Bearer ${{ secrets.CF_TOKEN }}' -H 'Content-Type: application/json' \
-        --data '{"files":["https://dietpi.com/downloads/binaries/bullseye/testing/","https://dietpi.com/downloads/binaries/bullseye/testing/gmediarender_armv6l.deb"]}'
-  armv6_bookworm:
-    if: ( github.event.inputs.arch == 1 || github.event.inputs.arch == 'all' ) && ( github.event.inputs.distro == 7 || github.event.inputs.distro == 'all' )
-    runs-on: ubuntu-22.04
-    defaults:
-      run:
-        shell: sh
-        working-directory: /dev/shm
-    steps:
-    - name: Start build container
-      run: sudo bash -c "G_GITOWNER=$GITHUB_REPOSITORY_OWNER G_GITBRANCH=${GITHUB_REF#refs/heads/}; $(curl -sSf "https://raw.githubusercontent.com/$GITHUB_REPOSITORY_OWNER/DietPi/${GITHUB_REF#refs/heads/}/.build/software/gmediarender/container_build.bash")" 'DietPi-Build_GMediaRender' -a 1 -d 7
-    - name: Upload package
-      run: |
-        [ -d ~/.ssh ] || mkdir ~/.ssh
-        umask 377
-        echo '${{ secrets.KNOWN_HOSTS }}' > ~/.ssh/known_hosts
-        echo '${{ secrets.SSH_KEY }}' > ~/.ssh/id_ed25519
-        curl -T rootfs/gmediarender_armv6l.deb --key ~/.ssh/id_ed25519 '${{ secrets.UPLOAD_URL }}bookworm/'
-        curl 'https://api.cloudflare.com/client/v4/zones/${{ secrets.CF_ZONE }}/purge_cache' -H 'Authorization: Bearer ${{ secrets.CF_TOKEN }}' -H 'Content-Type: application/json' \
-        --data '{"files":["https://dietpi.com/downloads/binaries/bookworm/testing/","https://dietpi.com/downloads/binaries/bookworm/testing/gmediarender_armv6l.deb"]}'
 
-  armv7_buster:
-    if: ( github.event.inputs.arch == 2 || github.event.inputs.arch == 'all' ) && ( github.event.inputs.distro == 5 || github.event.inputs.distro == 'all' )
-    runs-on: ubuntu-22.04
-    defaults:
-      run:
-        shell: sh
-        working-directory: /dev/shm
-    steps:
-    - name: Start build container
-      run: sudo bash -c "G_GITOWNER=$GITHUB_REPOSITORY_OWNER G_GITBRANCH=${GITHUB_REF#refs/heads/}; $(curl -sSf "https://raw.githubusercontent.com/$GITHUB_REPOSITORY_OWNER/DietPi/${GITHUB_REF#refs/heads/}/.build/software/gmediarender/container_build.bash")" 'DietPi-Build_GMediaRender' -a 2 -d 5
-    - name: Upload package
-      run: |
-        [ -d ~/.ssh ] || mkdir ~/.ssh
-        umask 377
-        echo '${{ secrets.KNOWN_HOSTS }}' > ~/.ssh/known_hosts
-        echo '${{ secrets.SSH_KEY }}' > ~/.ssh/id_ed25519
-        curl -T rootfs/gmediarender_armv7l.deb --key ~/.ssh/id_ed25519 '${{ secrets.UPLOAD_URL }}buster/'
+        # Upload
+        curl -T 'rootfs/gmediarender_${{ matrix.arch }}.deb' --key ~/.ssh/id_ed25519 '${{ secrets.UPLOAD_URL }}${{ matrix.dist }}/'
         curl 'https://api.cloudflare.com/client/v4/zones/${{ secrets.CF_ZONE }}/purge_cache' -H 'Authorization: Bearer ${{ secrets.CF_TOKEN }}' -H 'Content-Type: application/json' \
-        --data '{"files":["https://dietpi.com/downloads/binaries/buster/testing/","https://dietpi.com/downloads/binaries/buster/testing/gmediarender_armv7l.deb"]}'
-  armv7_bullseye:
-    if: ( github.event.inputs.arch == 2 || github.event.inputs.arch == 'all' ) && ( github.event.inputs.distro == 6 || github.event.inputs.distro == 'all' )
-    runs-on: ubuntu-22.04
-    defaults:
-      run:
-        shell: sh
-        working-directory: /dev/shm
-    steps:
-    - name: Start build container
-      run: sudo bash -c "G_GITOWNER=$GITHUB_REPOSITORY_OWNER G_GITBRANCH=${GITHUB_REF#refs/heads/}; $(curl -sSf "https://raw.githubusercontent.com/$GITHUB_REPOSITORY_OWNER/DietPi/${GITHUB_REF#refs/heads/}/.build/software/gmediarender/container_build.bash")" 'DietPi-Build_GMediaRender' -a 2 -d 6
-    - name: Upload package
-      run: |
-        [ -d ~/.ssh ] || mkdir ~/.ssh
-        umask 377
-        echo '${{ secrets.KNOWN_HOSTS }}' > ~/.ssh/known_hosts
-        echo '${{ secrets.SSH_KEY }}' > ~/.ssh/id_ed25519
-        curl -T rootfs/gmediarender_armv7l.deb --key ~/.ssh/id_ed25519 '${{ secrets.UPLOAD_URL }}bullseye/'
-        curl 'https://api.cloudflare.com/client/v4/zones/${{ secrets.CF_ZONE }}/purge_cache' -H 'Authorization: Bearer ${{ secrets.CF_TOKEN }}' -H 'Content-Type: application/json' \
-        --data '{"files":["https://dietpi.com/downloads/binaries/bullseye/testing/","https://dietpi.com/downloads/binaries/bullseye/testing/gmediarender_armv7l.deb"]}'
-  armv7_bookworm:
-    if: ( github.event.inputs.arch == 2 || github.event.inputs.arch == 'all' ) && ( github.event.inputs.distro == 7 || github.event.inputs.distro == 'all' )
-    runs-on: ubuntu-22.04
-    defaults:
-      run:
-        shell: sh
-        working-directory: /dev/shm
-    steps:
-    - name: Start build container
-      run: sudo bash -c "G_GITOWNER=$GITHUB_REPOSITORY_OWNER G_GITBRANCH=${GITHUB_REF#refs/heads/}; $(curl -sSf "https://raw.githubusercontent.com/$GITHUB_REPOSITORY_OWNER/DietPi/${GITHUB_REF#refs/heads/}/.build/software/gmediarender/container_build.bash")" 'DietPi-Build_GMediaRender' -a 2 -d 7
-    - name: Upload package
-      run: |
-        [ -d ~/.ssh ] || mkdir ~/.ssh
-        umask 377
-        echo '${{ secrets.KNOWN_HOSTS }}' > ~/.ssh/known_hosts
-        echo '${{ secrets.SSH_KEY }}' > ~/.ssh/id_ed25519
-        curl -T rootfs/gmediarender_armv7l.deb --key ~/.ssh/id_ed25519 '${{ secrets.UPLOAD_URL }}bookworm/'
-        curl 'https://api.cloudflare.com/client/v4/zones/${{ secrets.CF_ZONE }}/purge_cache' -H 'Authorization: Bearer ${{ secrets.CF_TOKEN }}' -H 'Content-Type: application/json' \
-        --data '{"files":["https://dietpi.com/downloads/binaries/bookworm/testing/","https://dietpi.com/downloads/binaries/bookworm/testing/gmediarender_armv7l.deb"]}'
-
-  armv8_buster:
-    if: ( github.event.inputs.arch == 3 || github.event.inputs.arch == 'all' ) && ( github.event.inputs.distro == 5 || github.event.inputs.distro == 'all' )
-    runs-on: ubuntu-22.04
-    defaults:
-      run:
-        shell: sh
-    steps:
-    - name: Start build container
-      run: sudo bash -c "G_GITOWNER=$GITHUB_REPOSITORY_OWNER G_GITBRANCH=${GITHUB_REF#refs/heads/}; $(curl -sSf "https://raw.githubusercontent.com/$GITHUB_REPOSITORY_OWNER/DietPi/${GITHUB_REF#refs/heads/}/.build/software/gmediarender/container_build.bash")" 'DietPi-Build_GMediaRender' -a 3 -d 5
-    - name: Upload package
-      run: |
-        [ -d ~/.ssh ] || mkdir ~/.ssh
-        umask 377
-        echo '${{ secrets.KNOWN_HOSTS }}' > ~/.ssh/known_hosts
-        echo '${{ secrets.SSH_KEY }}' > ~/.ssh/id_ed25519
-        curl -T rootfs/gmediarender_aarch64.deb --key ~/.ssh/id_ed25519 '${{ secrets.UPLOAD_URL }}buster/'
-        curl 'https://api.cloudflare.com/client/v4/zones/${{ secrets.CF_ZONE }}/purge_cache' -H 'Authorization: Bearer ${{ secrets.CF_TOKEN }}' -H 'Content-Type: application/json' \
-        --data '{"files":["https://dietpi.com/downloads/binaries/buster/testing/","https://dietpi.com/downloads/binaries/buster/testing/gmediarender_aarch64.deb"]}'
-  armv8_bullseye:
-    if: ( github.event.inputs.arch == 3 || github.event.inputs.arch == 'all' ) && ( github.event.inputs.distro == 6 || github.event.inputs.distro == 'all' )
-    runs-on: ubuntu-22.04
-    defaults:
-      run:
-        shell: sh
-    steps:
-    - name: Start build container
-      run: sudo bash -c "G_GITOWNER=$GITHUB_REPOSITORY_OWNER G_GITBRANCH=${GITHUB_REF#refs/heads/}; $(curl -sSf "https://raw.githubusercontent.com/$GITHUB_REPOSITORY_OWNER/DietPi/${GITHUB_REF#refs/heads/}/.build/software/gmediarender/container_build.bash")" 'DietPi-Build_GMediaRender' -a 3 -d 6
-    - name: Upload package
-      run: |
-        [ -d ~/.ssh ] || mkdir ~/.ssh
-        umask 377
-        echo '${{ secrets.KNOWN_HOSTS }}' > ~/.ssh/known_hosts
-        echo '${{ secrets.SSH_KEY }}' > ~/.ssh/id_ed25519
-        curl -T rootfs/gmediarender_aarch64.deb --key ~/.ssh/id_ed25519 '${{ secrets.UPLOAD_URL }}bullseye/'
-        curl 'https://api.cloudflare.com/client/v4/zones/${{ secrets.CF_ZONE }}/purge_cache' -H 'Authorization: Bearer ${{ secrets.CF_TOKEN }}' -H 'Content-Type: application/json' \
-        --data '{"files":["https://dietpi.com/downloads/binaries/bullseye/testing/","https://dietpi.com/downloads/binaries/bullseye/testing/gmediarender_aarch64.deb"]}'
-  armv8_bookworm:
-    if: ( github.event.inputs.arch == 3 || github.event.inputs.arch == 'all' ) && ( github.event.inputs.distro == 7 || github.event.inputs.distro == 'all' )
-    runs-on: ubuntu-22.04
-    defaults:
-      run:
-        shell: sh
-    steps:
-    - name: Start build container
-      run: sudo bash -c "G_GITOWNER=$GITHUB_REPOSITORY_OWNER G_GITBRANCH=${GITHUB_REF#refs/heads/}; $(curl -sSf "https://raw.githubusercontent.com/$GITHUB_REPOSITORY_OWNER/DietPi/${GITHUB_REF#refs/heads/}/.build/software/gmediarender/container_build.bash")" 'DietPi-Build_GMediaRender' -a 3 -d 7
-    - name: Upload package
-      run: |
-        [ -d ~/.ssh ] || mkdir ~/.ssh
-        umask 377
-        echo '${{ secrets.KNOWN_HOSTS }}' > ~/.ssh/known_hosts
-        echo '${{ secrets.SSH_KEY }}' > ~/.ssh/id_ed25519
-        curl -T rootfs/gmediarender_aarch64.deb --key ~/.ssh/id_ed25519 '${{ secrets.UPLOAD_URL }}bookworm/'
-        curl 'https://api.cloudflare.com/client/v4/zones/${{ secrets.CF_ZONE }}/purge_cache' -H 'Authorization: Bearer ${{ secrets.CF_TOKEN }}' -H 'Content-Type: application/json' \
-        --data '{"files":["https://dietpi.com/downloads/binaries/bookworm/testing/","https://dietpi.com/downloads/binaries/bookworm/testing/gmediarender_aarch64.deb"]}'
-
-  x86_64_buster:
-    if: ( github.event.inputs.arch == 10 || github.event.inputs.arch == 'all' ) && ( github.event.inputs.distro == 5 || github.event.inputs.distro == 'all' )
-    runs-on: ubuntu-22.04
-    defaults:
-      run:
-        shell: sh
-        working-directory: /dev/shm
-    steps:
-    - name: Start build container
-      run: sudo bash -c "G_GITOWNER=$GITHUB_REPOSITORY_OWNER G_GITBRANCH=${GITHUB_REF#refs/heads/}; $(curl -sSf "https://raw.githubusercontent.com/$GITHUB_REPOSITORY_OWNER/DietPi/${GITHUB_REF#refs/heads/}/.build/software/gmediarender/container_build.bash")" 'DietPi-Build_GMediaRender' -a 10 -d 5
-    - name: Upload package
-      run: |
-        [ -d ~/.ssh ] || mkdir ~/.ssh
-        umask 377
-        echo '${{ secrets.KNOWN_HOSTS }}' > ~/.ssh/known_hosts
-        echo '${{ secrets.SSH_KEY }}' > ~/.ssh/id_ed25519
-        curl -T rootfs/gmediarender_x86_64.deb --key ~/.ssh/id_ed25519 '${{ secrets.UPLOAD_URL }}buster/'
-        curl 'https://api.cloudflare.com/client/v4/zones/${{ secrets.CF_ZONE }}/purge_cache' -H 'Authorization: Bearer ${{ secrets.CF_TOKEN }}' -H 'Content-Type: application/json' \
-        --data '{"files":["https://dietpi.com/downloads/binaries/buster/testing/","https://dietpi.com/downloads/binaries/buster/testing/gmediarender_x86_64.deb"]}'
-  x86_64_bullseye:
-    if: ( github.event.inputs.arch == 10 || github.event.inputs.arch == 'all' ) && ( github.event.inputs.distro == 6 || github.event.inputs.distro == 'all' )
-    runs-on: ubuntu-22.04
-    defaults:
-      run:
-        shell: sh
-        working-directory: /dev/shm
-    steps:
-    - name: Start build container
-      run: sudo bash -c "G_GITOWNER=$GITHUB_REPOSITORY_OWNER G_GITBRANCH=${GITHUB_REF#refs/heads/}; $(curl -sSf "https://raw.githubusercontent.com/$GITHUB_REPOSITORY_OWNER/DietPi/${GITHUB_REF#refs/heads/}/.build/software/gmediarender/container_build.bash")" 'DietPi-Build_GMediaRender' -a 10 -d 6
-    - name: Upload package
-      run: |
-        [ -d ~/.ssh ] || mkdir ~/.ssh
-        umask 377
-        echo '${{ secrets.KNOWN_HOSTS }}' > ~/.ssh/known_hosts
-        echo '${{ secrets.SSH_KEY }}' > ~/.ssh/id_ed25519
-        curl -T rootfs/gmediarender_x86_64.deb --key ~/.ssh/id_ed25519 '${{ secrets.UPLOAD_URL }}bullseye/'
-        curl 'https://api.cloudflare.com/client/v4/zones/${{ secrets.CF_ZONE }}/purge_cache' -H 'Authorization: Bearer ${{ secrets.CF_TOKEN }}' -H 'Content-Type: application/json' \
-        --data '{"files":["https://dietpi.com/downloads/binaries/bullseye/testing/","https://dietpi.com/downloads/binaries/bullseye/testing/gmediarender_x86_64.deb"]}'
-  x86_64_bookworm:
-    if: ( github.event.inputs.arch == 10 || github.event.inputs.arch == 'all' ) && ( github.event.inputs.distro == 7 || github.event.inputs.distro == 'all' )
-    runs-on: ubuntu-22.04
-    defaults:
-      run:
-        shell: sh
-        working-directory: /dev/shm
-    steps:
-    - name: Start build container
-      run: sudo bash -c "G_GITOWNER=$GITHUB_REPOSITORY_OWNER G_GITBRANCH=${GITHUB_REF#refs/heads/}; $(curl -sSf "https://raw.githubusercontent.com/$GITHUB_REPOSITORY_OWNER/DietPi/${GITHUB_REF#refs/heads/}/.build/software/gmediarender/container_build.bash")" 'DietPi-Build_GMediaRender' -a 10 -d 7
-    - name: Upload package
-      run: |
-        [ -d ~/.ssh ] || mkdir ~/.ssh
-        umask 377
-        echo '${{ secrets.KNOWN_HOSTS }}' > ~/.ssh/known_hosts
-        echo '${{ secrets.SSH_KEY }}' > ~/.ssh/id_ed25519
-        curl -T rootfs/gmediarender_x86_64.deb --key ~/.ssh/id_ed25519 '${{ secrets.UPLOAD_URL }}bookworm/'
-        curl 'https://api.cloudflare.com/client/v4/zones/${{ secrets.CF_ZONE }}/purge_cache' -H 'Authorization: Bearer ${{ secrets.CF_TOKEN }}' -H 'Content-Type: application/json' \
-        --data '{"files":["https://dietpi.com/downloads/binaries/bookworm/testing/","https://dietpi.com/downloads/binaries/bookworm/testing/gmediarender_x86_64.deb"]}'
+        --data '{"files":["https://dietpi.com/downloads/binaries/${{ matrix.dist }}/testing/","https://dietpi.com/downloads/binaries/${{ matrix.dist }}/testing/gmediarender_${{ matrix.arch }}.deb"]}'

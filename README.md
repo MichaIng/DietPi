@@ -276,7 +276,6 @@ Links to hardware and software manufacturers, sources and build instructions use
 - [Home Assistant](https://github.com/home-assistant/core)
 - [TasmoAdmin](https://github.com/reloxx13/TasmoAdmin)
 - [Domoticz](https://github.com/domoticz/domoticz)
-- [Firefox Sync Server](https://github.com/mozilla-services/syncserver)
 - [Jellyfin](https://github.com/jellyfin/jellyfin)
 - [Komga](https://github.com/gotson/komga)
 - [HTPC Manager](https://github.com/HTPC-Manager/HTPC-Manager)
@@ -336,6 +335,7 @@ Links to hardware and software manufacturers, sources and build instructions use
 - [Moonlight (CLI)](https://github.com/moonlight-stream/moonlight-embedded)
 - [Moonlight (GUI)](https://github.com/moonlight-stream/moonlight-qt)
 - [Restic](https://github.com/restic/restic)
+- [MediaWiki](https://github.com/wikimedia/mediawiki)
 
 ---
 
