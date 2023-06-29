@@ -4,7 +4,7 @@
 
 # Build deps
 G_AGUP
-G_AGDUG cmake make gcc libc6-dev pkg-config libmpdclient-dev
+G_AGDUG cmake make gcc libc6-dev pkg-config libmpdclient-dev libssl-dev
 
 # Runtime deps
 adeps=('libc6' 'libmpdclient2')
