@@ -138,9 +138,9 @@ grep -q 'raspbian' /etc/os-release && DEPS_APT_VERSIONED=$(sed 's/+rp[it][0-9]\+
 
 # - Obtain version
 version="$(mawk -F\" '/CPACK_PACKAGE_VERSION_MAJOR/{print $2;exit}' ympd-master/CMakeLists.txt).$(mawk -F\" '/CPACK_PACKAGE_VERSION_MINOR/{print $2;exit}' ympd-master/CMakeLists.txt).$(mawk -F\" '/CPACK_PACKAGE_VERSION_PATCH/{print $2;exit}' ympd-master/CMakeLists.txt)"
-#G_EXEC curl -sSfo package.deb "https://dietpi.com/downloads/binaries/$G_DISTRO_NAME/ympd_$G_HW_ARCH_NAME.deb"
-#old_version=$(dpkg-deb -f package.deb Version)
-#G_EXEC rm package.deb
+G_EXEC curl -sSfo package.deb "https://dietpi.com/downloads/binaries/$G_DISTRO_NAME/ympd_$G_HW_ARCH_NAME.deb"
+old_version=$(dpkg-deb -f package.deb Version)
+G_EXEC rm package.deb
 suffix=${old_version#*-dietpi}
 [[ $old_version == "$version-"* ]] && suffix="dietpi$((suffix+1))" || suffix="dietpi1"
 
