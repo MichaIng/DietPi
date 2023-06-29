@@ -77,7 +77,7 @@ then
 		usermod -g dietpi -d /nonexistent -s /usr/sbin/nologin ympd
 	else
 		echo 'Creating ympd service user ...'
-		useradd -rMU -g dietpi -d /nonexistent -s /usr/sbin/nologin ympd
+		useradd -rMN -g dietpi -d /nonexistent -s /usr/sbin/nologin ympd
 	fi
 
 	echo 'Configuring ympd systemd service ...'
