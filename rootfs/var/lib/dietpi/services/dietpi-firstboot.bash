@@ -95,19 +95,25 @@
 		then
 			RPi_Set_Clock_Speeds
 
-		# NanoPi R5S/R5C/R6S/R6C: Update udev rules for C variants
-		elif (( $G_HW_MODEL == 76 ))
+		# NanoPi R5S/R5C/R6S/R6C/T6: Update udev rules for variants
+		elif [[ $G_HW_MODEL == 7[69] && -f '/proc/device-tree/model' ]]
 		then
-			[[ $(</proc/device-tree/model) == *'R5C'* ]] 2> /dev/null && cat << '_EOF_' > /etc/udev/rules.d/dietpi-eth-leds.rules
+			local variant
+			read -r variant < /proc/device-tree/model
+			case $variant in
+				*'R5C'*) cat << '_EOF_' > /etc/udev/rules.d/dietpi-eth-leds.rules
 SUBSYSTEM=="leds", KERNEL=="wan_led", ACTION=="add", ATTR{trigger}="netdev", ATTR{device_name}="eth0", ATTR{link}="1", ATTR{rx}="1", ATTR{tx}="1", RUN+="/bin/ip l s up dev eth0; /bin/ip l s down dev eth0"
 SUBSYSTEM=="leds", KERNEL=="lan1_led", ACTION=="add", ATTR{trigger}="netdev", ATTR{device_name}="eth1", ATTR{link}="1", ATTR{rx}="1", ATTR{tx}="1", RUN+="/bin/ip l s up dev eth1; /bin/ip l s down dev eth1"
 _EOF_
-		elif (( $G_HW_MODEL == 79 ))
-		then
-			[[ $(</proc/device-tree/model) == *'R6C'* ]] 2> /dev/null && cat << '_EOF_' > /etc/udev/rules.d/dietpi-eth-leds.rules
+				;;
+				*'R6C'*) cat << '_EOF_' > /etc/udev/rules.d/dietpi-eth-leds.rules
 SUBSYSTEM=="leds", KERNEL=="wan_led", ACTION=="add", ATTR{trigger}="netdev", ATTR{device_name}="eth0", ATTR{link}="1", ATTR{rx}="1", ATTR{tx}="1", RUN+="/bin/ip l s up dev eth0; /bin/ip l s down dev eth0"
 SUBSYSTEM=="leds", KERNEL=="lan1_led", ACTION=="add", ATTR{trigger}="netdev", ATTR{device_name}="eth1", ATTR{link}="1", ATTR{rx}="1", ATTR{tx}="1", RUN+="/bin/ip l s up dev eth1; /bin/ip l s down dev eth1"
 _EOF_
+				;;
+				*'T6'*) [[ -f '/etc/udev/rules.d/dietpi-eth-leds.rules' ]] && rm /etc/udev/rules.d/dietpi-eth-leds.rules;;
+				*) :;;
+			esac
 		fi
 
 		# End user automated script
