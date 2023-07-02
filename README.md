@@ -162,7 +162,7 @@ Also read our [contribute page](https://dietpi.com/contribute.html) for an overv
 
 ## License
 
-DietPi Copyright (C) 2022 [Contributors](https://github.com/MichaIng/DietPi/graphs/contributors)
+DietPi Copyright (C) 2023 [Contributors](https://github.com/MichaIng/DietPi/graphs/contributors)
 - Email: <micha@dietpi.com>
 - Website: <https://dietpi.com/>
 
