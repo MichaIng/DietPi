@@ -52,15 +52,15 @@ cat << '_EOF_' > raspberrypi-sys-mods/usr/lib/raspberrypi-sys-mods/i2cprobe
 ALIASES="/lib/modules/$(uname -r)/modules.alias"
 n=0
 while :; do
-    eval "comp=\"\$OF_COMPATIBLE_$n\""
-    comp=$(echo "$comp" | sed 's/.*,//')
-    if [ -z "$comp" ]; then
-        break
-    fi
-    if grep -q "alias $SUBSYSTEM:$comp " $ALIASES; then
-        modprobe "$SUBSYSTEM:$comp" && exit 0
-    fi
-    n=$(expr $n + 1)
+	eval "comp=\"\$OF_COMPATIBLE_$n\""
+	comp=$(echo "$comp" | sed 's/.*,//')
+	if [ -z "$comp" ]; then
+		break
+	fi
+	if grep -q "alias $SUBSYSTEM:$comp " $ALIASES; then
+		modprobe "$SUBSYSTEM:$comp" && exit 0
+	fi
+	n=$(expr $n + 1)
 done
 modprobe "$MODALIAS" || modprobe "of:N${OF_NAME}T<NULL>C$OF_COMPATIBLE_0"
 _EOF_
@@ -87,35 +87,20 @@ SUBSYSTEM=="gpio", ACTION=="add", PROGRAM="/bin/sh -c 'chgrp -R gpio /sys%p && c
 # PWM export results in a "change" action on the pwmchip device (not "add" of a new device), so match actions other than "remove".
 SUBSYSTEM=="pwm", ACTION!="remove", PROGRAM="/bin/sh -c 'chgrp -R gpio /sys%p && chmod -R g=u /sys%p'"
 
-KERNEL=="ttyAMA0", PROGRAM="/bin/sh -c '\
+KERNEL=="ttyAMA[0-9]*|ttyS[0-9]*", PROGRAM="/bin/sh -c '\
 	ALIASES=/proc/device-tree/aliases; \
-	if cmp -s $$ALIASES/uart0 $$ALIASES/serial0; then \
-		echo 0;\
-	elif cmp -s $$ALIASES/uart0 $$ALIASES/serial1; then \
+	TTYNODE=$$(readlink /sys/class/tty/%k/device/of_node | sed 's/base/:/' | cut -d: -f2); \
+	if [ -e $$ALIASES/bluetooth ] && [ $$TTYNODE/bluetooth = $$(strings $$ALIASES/bluetooth) ]; then \
 		echo 1; \
-	else \
-		exit 1; \
-	fi\
-'", SYMLINK+="serial%c"
-
-KERNEL=="ttyAMA1", PROGRAM="/bin/sh -c '\
-	ALIASES=/proc/device-tree/aliases; \
-	if [ -e /dev/ttyAMA0 ]; then \
-		exit 1; \
-	elif cmp -s $$ALIASES/uart0 $$ALIASES/serial0; then \
-		echo 0;\
-	elif cmp -s $$ALIASES/uart0 $$ALIASES/serial1; then \
-		echo 1; \
-	else \
-		exit 1; \
-	fi\
-'", SYMLINK+="serial%c"
-
-KERNEL=="ttyS0", PROGRAM="/bin/sh -c '\
-	ALIASES=/proc/device-tree/aliases; \
-	if cmp -s $$ALIASES/uart1 $$ALIASES/serial0; then \
+	elif [ -e $$ALIASES/console ]; then \
+		if [ $$TTYNODE = $$(strings $$ALIASES/console) ]; then \
+			echo 0;\
+		else \
+			exit 1; \
+		fi \
+	elif [ $$TTYNODE = $$(strings $$ALIASES/serial0) ]; then \
 		echo 0; \
-	elif cmp -s $$ALIASES/uart1 $$ALIASES/serial1; then \
+	elif [ $$TTYNODE = $$(strings $$ALIASES/serial1) ]; then \
 		echo 1; \
 	else \
 		exit 1; \

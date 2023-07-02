@@ -430,93 +430,69 @@ A long (or insufficiently manufactured) cable may required a higher boost settin
 
 		elif (( $G_WHIP_RETURNED_VALUE == 16 )); then
 
-			local aFp_Brightness_Available=()
-			local aBrightness_Name=()
-			local aBrightness_Current=()
-			local aBrightness_Max=()
-
-			local iTotalAvailable=0
-			local fp_brightness
+			# Find and obtain values for all backlight devices
+			local fp_brightness iTotalAvailable=0 aFp_Brightness_Available=() aBrightness_Name=() aBrightness_Current=() aBrightness_Max=()
 			for fp_brightness in /sys/class/backlight/*
 			do
-				aFp_Brightness_Available+=( "$fp_brightness" )
-				aBrightness_Name+=( "${fp_brightness##*/}" )
-				aBrightness_Current+=( "$(<"$fp_brightness/actual_brightness")" )
-				aBrightness_Max+=( "$(<"$fp_brightness/max_brightness")" )
 				(( iTotalAvailable++ ))
+				aFp_Brightness_Available+=("$fp_brightness")
+				aBrightness_Name+=("${fp_brightness##*/}")
+				aBrightness_Current+=("$(<"$fp_brightness/actual_brightness")")
+				aBrightness_Max+=("$(<"$fp_brightness/max_brightness")")
 			done
 
-			# - Generate Additional Menus
-			if (( iTotalAvailable > 0 ))
+			# Return if no backlist device has been found
+			if (( iTotalAvailable ))
 			then
-
-				G_WHIP_MENU_ARRAY=()
-				local aBrightness_Percent=()
-				local i=0
-				local iIndex=0 # Target index
-				# - Work out current brightness % for future menus
+				# Convert current brightness to %
+				local i aBrightness_Percent=()
 				for (( i=0; i<$iTotalAvailable; i++ ))
 				do
-					aBrightness_Percent+=( "$(echo "${aBrightness_Current[i]} ${aBrightness_Max[i]}" | mawk '{printf "%.0f\n", $1 / $2 * 100}')" )
-
+					aBrightness_Percent+=("$(echo "${aBrightness_Current[i]} ${aBrightness_Max[i]}" | mawk '{printf "%.0f\n", $1*100/$2}')")
 				done
 
-				# - List selection menu
+				# List backlight devices to selection if multiple were found, else select 1st/only one
+				local iIndex=0
 				if (( iTotalAvailable > 1 ))
 				then
-
-					# - Add all backlights to selection menu
+					G_WHIP_MENU_ARRAY=()
 					for (( i=0; i<$iTotalAvailable; i++ ))
 					do
-						G_WHIP_MENU_ARRAY+=("${aBrightness_Name[i]}" " : [${aBrightness_Percent[i]}%]" )
-
+						G_WHIP_MENU_ARRAY+=("${aBrightness_Name[i]}" ": [${aBrightness_Percent[i]}%]")
 					done
-					# - Match G_WHIP_RETURNED_VALUE to array index
-					if G_WHIP_MENU 'Please select a Brightness item to change its value.'
-					then
-						for (( i=0; i<$iTotalAvailable; i++ ))
-						do
-							if [[ ${aBrightness_Name[i]} == "$G_WHIP_RETURNED_VALUE" ]]
-							then
-								iIndex=$i
-								break
-							fi
-						done
-					else
-						# - No selection made, CANCEL below code by setting target index to invalid
-						iIndex=-1
-					fi
+					G_WHIP_MENU 'Please select a Brightness item to change its value:' || return 0
+
+					# Obtain array index
+					for (( i=0; i<$iTotalAvailable; i++ ))
+					do
+						[[ ${aBrightness_Name[i]} == "$G_WHIP_RETURNED_VALUE" ]] || continue
+						iIndex=$i
+						break
+					done
 				fi
 
-				if (( $iIndex > -1 ))
+				# Generate % menu
+				G_WHIP_MENU_ARRAY=('Custom' ': Manually enter a value')
+				for i in {0..100..10}
+				do
+					G_WHIP_MENU_ARRAY+=("$i" '%')
+				done
+
+				G_WHIP_DEFAULT_ITEM=${aBrightness_Percent[iIndex]}
+				G_WHIP_MENU "Please select a new Brightness level for [${aBrightness_Name[iIndex]}]:\n - Current Value = ${aBrightness_Percent[iIndex]}%" || return 0
+
+				# Handle custom
+				if [[ $G_WHIP_RETURNED_VALUE == 'Custom' ]]
 				then
-					G_WHIP_DEFAULT_ITEM=${aBrightness_Percent[iIndex]}
-					G_WHIP_MENU_ARRAY=('Custom' ' : Manually enter a value')
-					# - Generate % menu
-					MIN_VALUE=0 MAX_VALUE=100
-		                        for i in {1..10}
-			                do
-			                        G_WHIP_MENU_ARRAY+=("$(( $i * 10 ))%" '')
-		        	        done
-
-		                        if G_WHIP_MENU "Please select a new Brightness level for [${aBrightness_Name[iIndex]}]:\n - Current Value = ${aBrightness_Percent[iIndex]}%"
-					then
-						# - Handle custom
-						[[ $G_WHIP_RETURNED_VALUE == 'Custom' ]] && G_WHIP_INPUTBOX "Please enter a value between $MIN_VALUE - $MAX_VALUE"
-						G_WHIP_RETURNED_VALUE="${G_WHIP_RETURNED_VALUE//%/}" #Remove % char from custom input and whiptail list
-						if G_CHECK_VALIDINT "$G_WHIP_RETURNED_VALUE" "$MIN_VALUE" "$MAX_VALUE"
-						then
-
-							local iBrightness_Value_New="$(echo "$G_WHIP_RETURNED_VALUE ${aBrightness_Max[iIndex]}" | mawk '{printf "%.0f\n", $2 / 100 * $1}')"
-			        	        	echo "$iBrightness_Value_New" > "${aFp_Brightness_Available[iIndex]}/brightness"
-						fi
-					fi
+					local MIN_VALUE=0 MAX_VALUE=100
+					G_WHIP_INPUTBOX "Please enter a value between $MIN_VALUE and $MAX_VALUE:" || return 0
+					G_CHECK_VALIDINT "$G_WHIP_RETURNED_VALUE" "$MIN_VALUE" "$MAX_VALUE" || return 1
 				fi
 
+				# Convert % back and apply
+				echo "$G_WHIP_RETURNED_VALUE ${aBrightness_Max[iIndex]}" | mawk '{printf "%.0f\n", $1*$2/100}' > "${aFp_Brightness_Available[iIndex]}/brightness"
 			else
-
 				Info_HW_OptionNotSupported
-
 			fi
 
 		elif (( $G_WHIP_RETURNED_VALUE == 17 )); then
@@ -3455,6 +3431,9 @@ Additional benchmarks:
 
 			# RPi: Reboot required to apply device tree changes, which applies to all but auto-detected selections
 			(( $G_HW_MODEL > 9 )) || [[ $G_WHIP_RETURNED_VALUE == 'hw:'[0-9]','[0-9] || $G_WHIP_RETURNED_VALUE == 'usb-dac' ]] || REBOOT_REQUIRED=1
+
+			# H3 Armbian kernel requires reboot when switching to or from analogue 3.5mm jack, which is a device tree overlays/README#L115-L116
+			(( $G_HW_CPUID == 1 )) && [[ ( $G_WHIP_RETURNED_VALUE == 'h3-analogue' || $soundcard_current == 'h3-analogue'* ) && $soundcard_current != $G_WHIP_RETURNED_VALUE* && ( -f '/boot/dietpiEnv.txt' || -f '/boot/armbianEnv.txt' ) ]] && REBOOT_REQUIRED=1
 
 			# RPi: When Allo Boss2 DAC was selected, offer to enable OLED display right now
 			if [[ $G_WHIP_RETURNED_VALUE == 'allo-boss2-dac-audio' ]]
