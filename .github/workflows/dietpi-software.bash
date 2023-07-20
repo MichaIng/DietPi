@@ -223,6 +223,7 @@ Process_Software()
 			#207) Moonlight (CLI), "moonlight" command
 			#208) Moonlight (GUI), "moonlight-qt" command
 			209) aCOMMANDS[i]='restic version';;
+			211) aCOMMANDS[i]='hb-service status > /dev/null' aSERVICES[i]='homebridge' aTCP[i]='8581';;
 			*) :;;
 		esac
 	done
