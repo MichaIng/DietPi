@@ -223,6 +223,7 @@ Process_Software()
 			#207) Moonlight (CLI), "moonlight" command
 			#208) Moonlight (GUI), "moonlight-qt" command
 			209) aCOMMANDS[i]='restic version';;
+			211) aCOMMANDS[i]='hb-service status' aSERVICES[i]='homebridge' aTCP[i]='8581'; (( $arch < 10 )) && aDELAY[i]=30; (( $arch == 3 )) && aDELAY[i]=120;;
 			*) :;;
 		esac
 	done
@@ -322,11 +323,12 @@ for i in $SOFTWARE; do G_CONFIG_INJECT "AUTO_SETUP_INSTALL_SOFTWARE_ID=$i" "AUTO
 # Workaround for "Could not execute systemctl:  at /usr/bin/deb-systemd-invoke line 145." during Apache2 DEB postinst in 32-bit ARM Bookworm container: https://lists.ubuntu.com/archives/foundations-bugs/2022-January/467253.html
 G_CONFIG_INJECT 'AUTO_SETUP_WEB_SERVER_INDEX=' 'AUTO_SETUP_WEB_SERVER_INDEX=-2' rootfs/boot/dietpi.txt
 
-# Workaround for failing Redis, Raspotify and Navidrome as PrivateUsers=true leads to "Failed to set up user namespacing" on QEMU-emulated 32-bit ARM containers
-G_EXEC mkdir rootfs/etc/systemd/system/{redis-server,raspotify,navidrome}.service.d
+# Workaround for failing servkces as PrivateUsers=true leads to "Failed to set up user namespacing" on QEMU-emulated 32-bit ARM containers, and AmbientCapabilities to "Failed to apply ambient capabilities (before UID change): Operation not permitted"
+G_EXEC mkdir rootfs/etc/systemd/system/{redis-server,raspotify,navidrome,homebridge}.service.d
 G_EXEC eval 'echo -e '\''[Service]\nPrivateUsers=0'\'' > rootfs/etc/systemd/system/redis-server.service.d/dietpi-container.conf'
 G_EXEC eval 'echo -e '\''[Service]\nPrivateUsers=0'\'' > rootfs/etc/systemd/system/raspotify.service.d/dietpi-container.conf'
 G_EXEC eval 'echo -e '\''[Service]\nPrivateUsers=0'\'' > rootfs/etc/systemd/system/navidrome.service.d/dietpi-container.conf'
+G_EXEC eval 'echo -e '\''[Service]\nAmbientCapabilities='\'' > rootfs/etc/systemd/system/homebridge.service.d/dietpi-container.conf'
 
 # Workarounds for failing MariaDB install on Buster within GitHub Actions runner (both cannot be replicated on my test systems with and without QEMU):
 # - mysqld does not have write access if our symlink is in place, even that directory permissions are correct.
@@ -384,7 +386,7 @@ _EOF_
 	done
 	# Check commands
 	[[ ${aCOMMANDS[i]} ]] && cat << _EOF_ >> rootfs/boot/Automation_Custom_Script.sh
-echo '\e[33m[ INFO ] Testing command ${aCOMMANDS[i]}:\e[0m'
+echo '\e[33m[ INFO ] Testing command "${aCOMMANDS[i]}":\e[0m'
 ${aCOMMANDS[i]} || { echo '\e[31m[FAILED] Command returned error code\e[0m'; exit_code=1; }
 _EOF_
 	G_EXEC eval 'echo fi >> rootfs/boot/Automation_Custom_Script.sh'
