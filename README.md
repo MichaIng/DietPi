@@ -336,6 +336,7 @@ Links to hardware and software manufacturers, sources and build instructions use
 - [Moonlight (GUI)](https://github.com/moonlight-stream/moonlight-qt)
 - [Restic](https://github.com/restic/restic)
 - [MediaWiki](https://github.com/wikimedia/mediawiki)
+- [Homebridge](https://github.com/homebridge/homebridge)
 
 ---
 
