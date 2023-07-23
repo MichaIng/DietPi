@@ -223,7 +223,7 @@ Process_Software()
 			#207) Moonlight (CLI), "moonlight" command
 			#208) Moonlight (GUI), "moonlight-qt" command
 			209) aCOMMANDS[i]='restic version';;
-			211) aCOMMANDS[i]='hb-service status' aSERVICES[i]='homebridge' aTCP[i]='8581';;
+			211) aCOMMANDS[i]='hb-service status' aSERVICES[i]='homebridge' aTCP[i]='8581'; (( $arch < 10 )) && aDELAY[i]=30; (( $arch == 3 )) && aDELAY[i]=120;;
 			*) :;;
 		esac
 	done
@@ -386,7 +386,7 @@ _EOF_
 	done
 	# Check commands
 	[[ ${aCOMMANDS[i]} ]] && cat << _EOF_ >> rootfs/boot/Automation_Custom_Script.sh
-echo '\e[33m[ INFO ] Testing command ${aCOMMANDS[i]}:\e[0m'
+echo '\e[33m[ INFO ] Testing command "${aCOMMANDS[i]}":\e[0m'
 ${aCOMMANDS[i]} || { echo '\e[31m[FAILED] Command returned error code\e[0m'; exit_code=1; }
 _EOF_
 	G_EXEC eval 'echo fi >> rootfs/boot/Automation_Custom_Script.sh'
