@@ -323,7 +323,7 @@ for i in $SOFTWARE; do G_CONFIG_INJECT "AUTO_SETUP_INSTALL_SOFTWARE_ID=$i" "AUTO
 # Workaround for "Could not execute systemctl:  at /usr/bin/deb-systemd-invoke line 145." during Apache2 DEB postinst in 32-bit ARM Bookworm container: https://lists.ubuntu.com/archives/foundations-bugs/2022-January/467253.html
 G_CONFIG_INJECT 'AUTO_SETUP_WEB_SERVER_INDEX=' 'AUTO_SETUP_WEB_SERVER_INDEX=-2' rootfs/boot/dietpi.txt
 
-# Workaround for failing servkces as PrivateUsers=true leads to "Failed to set up user namespacing" on QEMU-emulated 32-bit ARM containers, and AmbientCapabilities to "Failed to apply ambient capabilities (before UID change): Operation not permitted"
+# Workaround for failing services as PrivateUsers=true leads to "Failed to set up user namespacing" on QEMU-emulated 32-bit ARM containers, and AmbientCapabilities to "Failed to apply ambient capabilities (before UID change): Operation not permitted"
 G_EXEC mkdir rootfs/etc/systemd/system/{redis-server,raspotify,navidrome,homebridge}.service.d
 G_EXEC eval 'echo -e '\''[Service]\nPrivateUsers=0'\'' > rootfs/etc/systemd/system/redis-server.service.d/dietpi-container.conf'
 G_EXEC eval 'echo -e '\''[Service]\nPrivateUsers=0'\'' > rootfs/etc/systemd/system/raspotify.service.d/dietpi-container.conf'
