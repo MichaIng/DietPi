@@ -138,8 +138,9 @@ then
 
 	if [[ ! -f '/mnt/dietpi_userdata/vaultwarden/cert.pem' || ! -f '/mnt/dietpi_userdata/vaultwarden/privkey.pem' ]]
 	then
+		echo 'Generating self-signed HTTPS certificate for vaultwarden ...'
 		ip=$(ip -br a s dev "$(ip r l 0/0 | mawk '{print $5;exit}')" | mawk '{print $3;exit}') ip=${ip%/*}
-		openssl req -reqexts SAN -subj '/CN=DietPi Vaultwarden' -config <(cat /etc/ssl/openssl.cnf <(echo -ne "[SAN]\nsubjectAltName=DNS:$(</etc/hostname),IP:$ip\nbasicConstraints=CA:TRUE,pathlen:0"))\
+		openssl req -reqexts SAN -subj '/CN=DietPi vaultwarden' -config <(cat /etc/ssl/openssl.cnf <(echo -ne "[SAN]\nsubjectAltName=DNS:$(</etc/hostname),IP:$ip\nbasicConstraints=CA:TRUE,pathlen:0"))\
 			-x509 -days 7200 -sha256 -extensions SAN -out /mnt/dietpi_userdata/vaultwarden/cert.pem\
 			-newkey rsa:4096 -nodes -keyout /mnt/dietpi_userdata/vaultwarden/privkey.pem
 	fi
