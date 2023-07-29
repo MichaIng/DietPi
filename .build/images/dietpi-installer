@@ -580,9 +580,10 @@ _EOF_
 			then
 				G_EXEC sed -i 's/coherent_pool=2M/coherent_pool=2M usbcore.autosuspend=-1/' /boot/boot.cmd
 
-			# Odroid N2/HC4: Enable USB boot via petitboot support: https://github.com/MichaIng/DietPi/issues/5634
+			# Odroid N2/HC4
 			elif [[ $G_HW_MODEL =~ ^(15|16)$ ]]
 			then
+				# Enable USB boot via petitboot support: https://github.com/MichaIng/DietPi/issues/5634
 				G_EXEC sed -i '1i[main]' /boot/dietpiEnv.txt
 				# shellcheck disable=SC2016
 				(( $G_HW_MODEL == 15 )) && G_EXEC sed -i '/^setenv overlay_error/a\
@@ -599,6 +600,9 @@ setenv rootuuid "true"' /boot/boot.cmd
 				G_EXEC sed -i '/env import/c\	ini main ${scriptaddr} || env import -t ${scriptaddr} ${filesize}' /boot/boot.cmd
 				# shellcheck disable=SC2016
 				G_EXEC sed -i '/test -e/s/fixup.scr;/fixup.scr || test "${petitboot_active}" = "1";/' /boot/boot.cmd
+
+				# Odroid N2: Assure that hardware random generator driver is loaded as early as possible to prevent rngd failures: https://github.com/MichaIng/DietPi/issues/6483
+				(( $G_HW_MODEL == 15 )) && G_EXEC eval 'echo '\''meson_rng'\'' > /etc/modules-load.d/dietpi-hwrng.conf'
 
 			# Rockchip 64-bit (configs work with Amlogic OOTB)
 			elif [[ $G_HW_MODEL =~ ^(42|43|46|47|55|56|58|68|72|73|77|78|80)$ ]]
@@ -758,12 +762,27 @@ setenv rootuuid "true"' /boot/boot.cmd
 		# (Re)create DietPi runtime and logs dir, used by G_AGx
 		G_EXEC mkdir -p /run/dietpi /var/tmp/dietpi/logs
 
-		# RPi/ARMv6 container: Bootstrap RPi repo when key is missing
-		if [[ ( $G_HW_MODEL -le 9 || ( $G_HW_MODEL == 75 && $G_RASPBIAN == 1 ) ) && ! $(apt-key list 'CF8A1AF502A2AA2D763BAE7E82B129927FA3303E' 2> /dev/null) ]]
+		# RPi/ARMv6 container
+		if [[ -f '/etc/apt/sources.list.d/raspi.list' ]]
 		then
-			G_EXEC curl -sSf 'https://archive.raspberrypi.org/debian/pool/main/r/raspberrypi-archive-keyring/raspberrypi-archive-keyring_2021.1.1+rpt1_all.deb' -o keyring.deb
-			G_EXEC dpkg -i keyring.deb
-			G_EXEC rm keyring.deb
+			# Bootstrap RPi repo if key is missing
+			if [[ ! $(apt-key list 'CF8A1AF502A2AA2D763BAE7E82B129927FA3303E' 2> /dev/null) ]]
+			then
+				G_EXEC curl -sSf 'https://archive.raspberrypi.org/debian/pool/main/r/raspberrypi-archive-keyring/raspberrypi-archive-keyring_2021.1.1+rpt1_all.deb' -o keyring.deb
+				G_EXEC dpkg -i keyring.deb
+				G_EXEC rm keyring.deb
+			fi
+
+			# Bookworm: Avoid conflict between RPi repo and Bookworm FFmpeg packages: https://github.com/MichaIng/DietPi/issues/6461
+			if (( $DISTRO_TARGET > 6 ))
+			then
+				G_DIETPI-NOTIFY 2 'Enforcing Debian Bookworm FFmpeg packages over RPi repo ones'
+				cat << '_EOF_' > /etc/apt/preferences.d/dietpi-ffmpeg
+Package: src:ffmpeg
+Pin: version 7:5*
+Pin-Priority: 1000
+_EOF_
+			fi
 		fi
 
 		G_AGUP
@@ -1981,6 +2000,7 @@ _EOF_
 		/boot/dietpi/dietpi-services unmask
 		/boot/dietpi/dietpi-services stop
 		/boot/dietpi/dietpi-services enable
+		G_EXEC systemctl disable cron
 
 		G_DIETPI-NOTIFY 2 'Removing swapfile from image'
 		/boot/dietpi/func/dietpi-set_swapfile 0 /var/swap

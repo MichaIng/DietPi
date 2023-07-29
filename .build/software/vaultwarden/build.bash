@@ -86,7 +86,9 @@ AmbientCapabilities=CAP_NET_BIND_SERVICE
 LimitNOFILE=1048576
 LimitNPROC=64
 WorkingDirectory=/mnt/dietpi_userdata/vaultwarden
-EnvironmentFile=/mnt/dietpi_userdata/vaultwarden/vaultwarden.env
+# Workaround for failing systemd.automount since Bookworm: https://dietpi.com/forum/t/automount-option-in-fstab-prevents-automatically-mounting-a-partition-in-due-time-on-bookworm/17463/22
+EnvironmentFile=-/mnt/dietpi_userdata/vaultwarden/vaultwarden.env
+ExecStartPre=/bin/touch /mnt/dietpi_userdata/vaultwarden/vaultwarden.env
 ExecStart=/opt/vaultwarden/vaultwarden
 Restart=on-failure
 RestartSec=5s
@@ -136,8 +138,9 @@ then
 
 	if [[ ! -f '/mnt/dietpi_userdata/vaultwarden/cert.pem' || ! -f '/mnt/dietpi_userdata/vaultwarden/privkey.pem' ]]
 	then
+		echo 'Generating self-signed HTTPS certificate for vaultwarden ...'
 		ip=$(ip -br a s dev "$(ip r l 0/0 | mawk '{print $5;exit}')" | mawk '{print $3;exit}') ip=${ip%/*}
-		openssl req -reqexts SAN -subj '/CN=DietPi Vaultwarden' -config <(cat /etc/ssl/openssl.cnf <(echo -ne "[SAN]\nsubjectAltName=DNS:$(</etc/hostname),IP:$ip\nbasicConstraints=CA:TRUE,pathlen:0"))\
+		openssl req -reqexts SAN -subj '/CN=DietPi vaultwarden' -config <(cat /etc/ssl/openssl.cnf <(echo -ne "[SAN]\nsubjectAltName=DNS:$(</etc/hostname),IP:$ip\nbasicConstraints=CA:TRUE,pathlen:0"))\
 			-x509 -days 7200 -sha256 -extensions SAN -out /mnt/dietpi_userdata/vaultwarden/cert.pem\
 			-newkey rsa:4096 -nodes -keyout /mnt/dietpi_userdata/vaultwarden/privkey.pem
 	fi

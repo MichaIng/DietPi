@@ -162,7 +162,7 @@ Also read our [contribute page](https://dietpi.com/contribute.html) for an overv
 
 ## License
 
-DietPi Copyright (C) 2022 [Contributors](https://github.com/MichaIng/DietPi/graphs/contributors)
+DietPi Copyright (C) 2023 [Contributors](https://github.com/MichaIng/DietPi/graphs/contributors)
 - Email: <micha@dietpi.com>
 - Website: <https://dietpi.com/>
 
@@ -336,6 +336,7 @@ Links to hardware and software manufacturers, sources and build instructions use
 - [Moonlight (GUI)](https://github.com/moonlight-stream/moonlight-qt)
 - [Restic](https://github.com/restic/restic)
 - [MediaWiki](https://github.com/wikimedia/mediawiki)
+- [Homebridge](https://github.com/homebridge/homebridge)
 
 ---
 
