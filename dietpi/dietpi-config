@@ -1805,9 +1805,9 @@ If unsure, set any value, 'Ondemand Down Factor' option on the next screen will 
 
 		[[ -f /sys/class/net/$input/statistics/rx_bytes && -f /sys/class/net/$input/statistics/tx_bytes ]] || return
 
-		NET_RX_BYTE=$(<"/sys/class/net/$input/statistics/rx_bytes")
+		read -r NET_RX_BYTE < "/sys/class/net/$input/statistics/rx_bytes"
 		disable_error=1 G_CHECK_VALIDINT "$NET_RX_BYTE" 1 && NET_RX_MB="$(( $NET_RX_BYTE / 1024 / 1024 )) MiB"
-		NET_TX_BYTE=$(<"/sys/class/net/$input/statistics/tx_bytes")
+		read -r NET_TX_BYTE < "/sys/class/net/$input/statistics/tx_bytes"
 		disable_error=1 G_CHECK_VALIDINT "$NET_TX_BYTE" 1 && NET_TX_MB="$(( $NET_TX_BYTE / 1024 / 1024 )) MiB"
 	}
 
@@ -2573,12 +2573,9 @@ This is mainly aimed at PINE A64 which may have a hardware issue that causes uns
 	}
 
 	HOTSPOT_SSID=
-	HOTSPOT_CHANNEL=
 	HOTSPOT_KEY=
-
-	WiFi_Monitor_Disable(){ G_EXEC systemctl disable --now dietpi-wifi-monitor; }
-
-	WiFi_Monitor_Enable(){ G_EXEC systemctl enable --now dietpi-wifi-monitor; }
+	HOTSPOT_CHANNEL=
+	HOTSPOT_WIFI4=0
 
 	# TARGETMENUID=10
 	Menu_NetworkAdapters_Wifi()
@@ -2589,86 +2586,60 @@ This is mainly aimed at PINE A64 which may have a hardware issue that causes uns
 
 		G_WHIP_MENU_ARRAY=('' '●─ Basic Options ')
 
-		# WiFi Hotspot Menu
-		if (( $WIFI_HOTSPOT )); then
+		# WiFi Hotspot menu
+		if (( $WIFI_HOTSPOT ))
+		then
+			# Status and toggle
+			local hotspot_active_state=0 hotspot_active_state_text='[Off] | Select to turn on hotspot'
+			systemctl -q is-active hostapd && hotspot_active_state=1 hotspot_active_state_text='[On] | Select to turn off hotspot' description_text+='Status  : Online' || description_text+='Status  : Offline'
 
-			# Load current details into global vars, once.
-			if [[ ! $HOTSPOT_SSID ]]; then
-
+			# Load details into global vars, once
+			if [[ ! $HOTSPOT_SSID ]]
+			then
 				HOTSPOT_SSID=$(sed -n '/^[[:blank:]]*ssid=/{s/^[^=]*=//p;q}' /etc/hostapd/hostapd.conf)
-				HOTSPOT_CHANNEL=$(sed -n '/^[[:blank:]]*channel=/{s/^[^=]*=//p;q}' /etc/hostapd/hostapd.conf)
 				HOTSPOT_KEY=$(sed -n '/^[[:blank:]]*wpa_passphrase=/{s/^[^=]*=//p;q}' /etc/hostapd/hostapd.conf)
-
+				HOTSPOT_CHANNEL=$(sed -n '/^[[:blank:]]*channel=/{s/^[^=]*=//p;q}' /etc/hostapd/hostapd.conf)
+				HOTSPOT_WIFI4=$(grep -cm1 '^ieee80211n=1' /etc/hostapd/hostapd.conf)
 			fi
 
-			# N enabled?
-			local hotspot_n_enabled=0
-			local hotspot_n_text='Disabled'
-			if grep -q '^ieee80211n=1' /etc/hostapd/hostapd.conf; then
+			# WiFi 4 support status text
+			local hotspot_n_text='Off'
+			(( $HOTSPOT_WIFI4 )) && hotspot_n_text='On'
 
-				hotspot_n_enabled=1
-				hotspot_n_text='Enabled'
+			G_WHIP_MENU_ARRAY+=(
+				'SSID' ": [$HOTSPOT_SSID]"
+				'Key' ": [$HOTSPOT_KEY]"
+				'Channel' ": [$HOTSPOT_CHANNEL]"
+				'802.11n' ": [$hotspot_n_text] WiFi 4 support"
+			)
 
-			fi
-
-			# Toggle
-			local hotspot_active_state=$(systemctl is-active hostapd | grep -cim1 '^active' )
-			local hotspot_status_text='Status  : Offline'
-			local hotspot_active_state_text='[Disabled] | Select to turn on hotspot'
-			if (( $hotspot_active_state )); then
-
-				hotspot_status_text+='Status  : Online'
-				hotspot_active_state_text='[Enabled] | Select to turn off hotspot'
-
-			fi
-
-			G_WHIP_MENU_ARRAY+=('SSID' ": [$HOTSPOT_SSID]")
-			G_WHIP_MENU_ARRAY+=('Channel' ": [$HOTSPOT_CHANNEL]")
-			G_WHIP_MENU_ARRAY+=('Key' ": [$HOTSPOT_KEY]")
-			G_WHIP_MENU_ARRAY+=('802.11 N' ": [$hotspot_n_text]")
-
-			description_text+=$hotspot_status_text
-
-		# WiFi Menu
+		# WiFi menu
 		else
+			description_text+="SSID    : $WIFI_SSID_CURRENT | $WIFI_BITRATE Mbit | Strength: $WIFI_SIGNALSTRENGTH\nAddress : IP = $WIFI_IP | Mask = $WIFI_MASK | Gateway = $WIFI_GATEWAY | DNS = $DNS_CURRENT"
+
+			G_WHIP_MENU_ARRAY+=('Scan' ': Scan and configure SSID')
+
+			# Auto Reconnect / WiFi monitor
+			local wifi_auto_reconnect_text='Off'
+			systemctl -q is-active dietpi-wifi-monitor && WIFI_AUTO_RECONNECT_ACTIVE=1 wifi_auto_reconnect_text='On' || WIFI_AUTO_RECONNECT_ACTIVE=0
+			(( $WIFI_CONNECTED || $WIFI_AUTO_RECONNECT_ACTIVE )) && G_WHIP_MENU_ARRAY+=('Auto Reconnect' ": [$wifi_auto_reconnect_text]")
 
 			# Mode
 			local mode_text='DHCP'
 			(( $WIFI_MODE_TARGET )) || mode_text='STATIC'
-
-			G_WHIP_MENU_ARRAY+=('Scan' ': Scan and configure SSID')
-
-			if (( $WIFI_CONNECTED )) || systemctl -q is-active dietpi-wifi-monitor; then
-
-				local wifi_auto_reconnect_text='Off'
-				WIFI_AUTO_RECONNECT_ACTIVE=0
-				if systemctl -q is-active dietpi-wifi-monitor; then
-
-					WIFI_AUTO_RECONNECT_ACTIVE=1
-					wifi_auto_reconnect_text='On'
-
-				fi
-
-				G_WHIP_MENU_ARRAY+=('Auto Reconnect' ": [$wifi_auto_reconnect_text]")
-
-			fi
-
-			G_WHIP_MENU_ARRAY+=('' '●─ DHCP/STATIC IP ')
-			G_WHIP_MENU_ARRAY+=('Change Mode' ": [$mode_text]")
+			G_WHIP_MENU_ARRAY+=(
+				'' '●─ DHCP/STATIC IP '
+				'Change Mode' ": [$mode_text]"
+			)
 
 			# Show static options
-			if (( $WIFI_MODE_TARGET == 0 )); then
-
-				G_WHIP_MENU_ARRAY+=('Copy' ': Copy current address to "Static"')
-				G_WHIP_MENU_ARRAY+=('Static IP' ": [$WIFI_IP_STATIC]")
-				G_WHIP_MENU_ARRAY+=('Static Mask' ": [$WIFI_MASK_STATIC]")
-				G_WHIP_MENU_ARRAY+=('Static Gateway' ": [$WIFI_GATEWAY_STATIC]")
-				G_WHIP_MENU_ARRAY+=('Static DNS' ": [$WIFI_DNS_STATIC]")
-
-			fi
-
-			description_text+="SSID    : $WIFI_SSID_CURRENT | $WIFI_BITRATE Mbit | Strength: $WIFI_SIGNALSTRENGTH\nAddress : IP = $WIFI_IP | Mask = $WIFI_MASK | Gateway = $WIFI_GATEWAY | DNS = $DNS_CURRENT"
-
+			(( $WIFI_MODE_TARGET == 0 )) && G_WHIP_MENU_ARRAY+=(
+				'Copy' ': Copy current address to "Static"'
+				'Static IP' ": [$WIFI_IP_STATIC]"
+				'Static Mask' ": [$WIFI_MASK_STATIC]"
+				'Static Gateway' ": [$WIFI_GATEWAY_STATIC]"
+				'Static DNS' ": [$WIFI_DNS_STATIC]"
+			)
 		fi
 
 		# Country code
@@ -2688,8 +2659,10 @@ This is mainly aimed at PINE A64 which may have a hardware issue that causes uns
 			G_WHIP_MENU_ARRAY+=('Disable' ': Disable WiFi adapter')
 		fi
 
-		G_WHIP_MENU_ARRAY+=('' '●─ Apply ')
-		G_WHIP_MENU_ARRAY+=('Apply' ': Save all changes and restart networking')
+		G_WHIP_MENU_ARRAY+=(
+			'' '●─ Apply '
+			'Apply' ': Save all changes and restart networking'
+		)
 
 		G_WHIP_DEFAULT_ITEM=$WHIP_SELECTION_PREVIOUS
 		G_WHIP_MENU "$description_text" || { Back_or_Exit 8; return 0; } # Network Options: Adapters
@@ -2700,14 +2673,11 @@ This is mainly aimed at PINE A64 which may have a hardware issue that causes uns
 
 			'Auto Reconnect')
 
-				if (( $WIFI_AUTO_RECONNECT_ACTIVE )); then
-
-					WiFi_Monitor_Disable
-
+				if (( $WIFI_AUTO_RECONNECT_ACTIVE ))
+				then
+					G_EXEC systemctl disable --now dietpi-wifi-monitor
 				else
-
-					WiFi_Monitor_Enable
-
+					G_EXEC systemctl enable --now dietpi-wifi-monitor
 				fi
 			;;
 
@@ -2720,12 +2690,12 @@ This is mainly aimed at PINE A64 which may have a hardware issue that causes uns
 			'SSID')
 
 				G_WHIP_DEFAULT_ITEM=$HOTSPOT_SSID
-				G_WHIP_INPUTBOX 'Please enter a SSID for the WiFi hotspot' && HOTSPOT_SSID=$G_WHIP_RETURNED_VALUE
+				G_WHIP_INPUTBOX 'Please enter an SSID for the WiFi hotspot' && HOTSPOT_SSID=$G_WHIP_RETURNED_VALUE
 			;;
 
 			'Channel')
 
-				# 2.4ghz only atm
+				# 2.4 GHz only atm
 				local channel_mhz=2412 channel_min=1 channel_max=13
 				G_WHIP_MENU_ARRAY=()
 				for ((i=$channel_min; i<=$channel_max; i++))
@@ -2738,11 +2708,7 @@ This is mainly aimed at PINE A64 which may have a hardware issue that causes uns
 				G_WHIP_MENU 'Please select a WiFi channel for the hotspot.' && HOTSPOT_CHANNEL=$G_WHIP_RETURNED_VALUE
 			;;
 
-			'802.11 N')
-
-				(( $hotspot_n_enabled )) && hotspot_n_enabled=0 || hotspot_n_enabled=1
-				G_CONFIG_INJECT 'ieee80211n=' "ieee80211n=$hotspot_n_enabled" /etc/hostapd/hostapd.conf
-			;;
+			'802.11n') HOTSPOT_WIFI4=$(( ! $HOTSPOT_WIFI4 ));;
 
 			'Country') Change_WifiCountryCode;;
 
@@ -2750,7 +2716,7 @@ This is mainly aimed at PINE A64 which may have a hardware issue that causes uns
 
 				G_WHIP_YESNO 'Would you like to disable the WiFi adapter?\n - (NOTICE) All WiFi connections will be dropped.' || return
 				WIFI_DISABLED=1
-				WiFi_Monitor_Disable
+				G_EXEC systemctl disable --now dietpi-wifi-monitor
 				Network_ApplyChanges
 				Back_or_Exit 8 # Network Options: Adapters
 			;;
@@ -2769,13 +2735,16 @@ This is mainly aimed at PINE A64 which may have a hardware issue that causes uns
 				then
 					# Update dietpi.txt
 					G_CONFIG_INJECT 'SOFTWARE_WIFI_HOTSPOT_SSID=' "SOFTWARE_WIFI_HOTSPOT_SSID=$HOTSPOT_SSID" /boot/dietpi.txt
-					G_CONFIG_INJECT 'SOFTWARE_WIFI_HOTSPOT_CHANNEL=' "SOFTWARE_WIFI_HOTSPOT_CHANNEL=$HOTSPOT_CHANNEL" /boot/dietpi.txt
 					G_CONFIG_INJECT 'SOFTWARE_WIFI_HOTSPOT_KEY=' "SOFTWARE_WIFI_HOTSPOT_KEY=$HOTSPOT_KEY" /boot/dietpi.txt
+					G_CONFIG_INJECT 'SOFTWARE_WIFI_HOTSPOT_CHANNEL=' "SOFTWARE_WIFI_HOTSPOT_CHANNEL=$HOTSPOT_CHANNEL" /boot/dietpi.txt
+					G_CONFIG_INJECT 'SOFTWARE_WIFI_HOTSPOT_WIFI4=' "SOFTWARE_WIFI_HOTSPOT_WIFI4=$HOTSPOT_WIFI4" /boot/dietpi.txt
 
 					# Update hostapd.conf
 					G_CONFIG_INJECT 'ssid=' "ssid=$HOTSPOT_SSID" /etc/hostapd/hostapd.conf
-					G_CONFIG_INJECT 'channel=' "channel=$HOTSPOT_CHANNEL" /etc/hostapd/hostapd.conf
 					G_CONFIG_INJECT 'wpa_passphrase=' "wpa_passphrase=$HOTSPOT_KEY" /etc/hostapd/hostapd.conf
+					G_CONFIG_INJECT 'channel=' "channel=$HOTSPOT_CHANNEL" /etc/hostapd/hostapd.conf
+					G_CONFIG_INJECT 'ieee80211n=' "ieee80211n=$HOTSPOT_WIFI4" /etc/hostapd/hostapd.conf
+					G_CONFIG_INJECT 'wmm_enabled=' "wmm_enabled=$HOTSPOT_WIFI4" /etc/hostapd/hostapd.conf
 
 					# Apply/Restart network
 					Network_ApplyChanges
