@@ -7938,21 +7938,46 @@ _EOF_
 			# shellcheck disable=SC2015
 			iw dev "$wifi_iface" set power_save on 2> /dev/null && iw dev "$wifi_iface" set power_save off 2> /dev/null || G_EXEC sed -i '/ iw dev .* set power_save /d' /etc/network/interfaces
 
-			# Create access point config
+			# Access point config
+			# - Parse dietpi.txt
 			local ssid=$(sed -n '/^[[:blank:]]*SOFTWARE_WIFI_HOTSPOT_SSID=/{s/^[^=]*=//p;q}' /boot/dietpi.txt)
 			local key=$(sed -n '/^[[:blank:]]*SOFTWARE_WIFI_HOTSPOT_KEY=/{s/^[^=]*=//p;q}' /boot/dietpi.txt)
-			local channel=$(sed -n '/^[[:blank:]]*SOFTWARE_WIFI_HOTSPOT_CHANNEL=/{s/^[^=]*=//p;q}' /boot/dietpi.txt)
 			local wifi4=$(sed -n '/^[[:blank:]]*SOFTWARE_WIFI_HOTSPOT_WIFI4=/{s/^[^=]*=//p;q}' /boot/dietpi.txt)
+			local wifi5=$(sed -n '/^[[:blank:]]*SOFTWARE_WIFI_HOTSPOT_WIFI5=/{s/^[^=]*=//p;q}' /boot/dietpi.txt)
+			local freq5=$(sed -n '/^[[:blank:]]*SOFTWARE_WIFI_HOTSPOT_5G=/{s/^[^=]*=//p;q}' /boot/dietpi.txt)
+			# - Sanity checks
+			[[ $wifi4 == [01] ]] || wifi4=0
+			[[ $wifi5 == [01] ]] || wifi5=0
+			[[ $freq5 == [01] ]] || freq5=0
+			# - WiFi 5 implies 5 GHz and 5 GHz requires at least WiFi 4
+			(( $wifi5 )) && freq5=1
+			(( $freq5 && ! $wifi5 )) && wifi4=1
+			# - Enable WMM with QoS if WiFi 4 or 5 is enabled
+			local wmm_enabled=0
+			(( $wifi4 || $wifi5 )) && wmm_enabled=1
+			# - Apply mode channel based on frequency
+			local mode='g'
+			if (( $freq5 ))
+			then
+				mode='a'
+				local channel=$(sed -n '/^[[:blank:]]*SOFTWARE_WIFI_HOTSPOT_5G_CHANNEL=/{s/^[^=]*=//p;q}' /boot/dietpi.txt)
+				disable_error=1 G_CHECK_VALIDINT "$channel" 32 177 || channel=36
+			else
+				local channel=$(sed -n '/^[[:blank:]]*SOFTWARE_WIFI_HOTSPOT_CHANNEL=/{s/^[^=]*=//p;q}' /boot/dietpi.txt)
+				disable_error=1 G_CHECK_VALIDINT "$channel" 1 13 || channel=3
+			fi
+			# - Create config
 			G_BACKUP_FP /etc/hostapd/hostapd.conf
 			cat << _EOF_ > /etc/hostapd/hostapd.conf
 interface=$wifi_iface
 driver=nl80211
 ssid=${ssid:-DietPi-HotSpot}
 country_code=00
-hw_mode=g
-channel=${channel:-3}
-ieee80211n=${wifi4:-0}
-wmm_enabled=${wifi4:-0}
+hw_mode=$mode
+channel=$channel
+ieee80211n=$wifi4
+ieee80211ac=$wifi5
+wmm_enabled=$wmm_enabled
 macaddr_acl=0
 auth_algs=1
 ignore_broadcast_ssid=0
@@ -7966,9 +7991,6 @@ _EOF_
 
 			# Set WiFi country code
 			/boot/dietpi/func/dietpi-set_hardware wificountrycode
-
-			# RPi3/4 onboard WiFi: Enable Wi-Fi 4 support
-			[[ $G_HW_MODEL == [34] ]] && G_CONFIG_INJECT 'ieee80211n=' 'ieee80211n=1' /etc/hostapd/hostapd.conf
 
 			# Enable access point config
 			G_EXEC eval 'echo '\''DAEMON_CONF="/etc/hostapd/hostapd.conf"'\'' > /etc/default/hostapd'

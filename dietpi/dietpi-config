@@ -1872,10 +1872,7 @@ If unsure, set any value, 'Ondemand Down Factor' option on the next screen will 
 	Network_Restart()
 	{
 		# Stop WiFi hotspot
-		local aservices=()
-		systemctl -q is-active hostapd && aservices+=('hostapd')
-		systemctl -q is-active isc-dhcp-server && aservices+=('isc-dhcp-server')
-		[[ ${aservices[0]} ]] && G_EXEC systemctl stop "${aservices[@]}"
+		(( $WIFI_HOTSPOT )) && G_EXEC systemctl stop isc-dhcp-server hostapd
 
 		# Enable/Disable WiFi modules
 		/boot/dietpi/func/dietpi-set_hardware wifimodules $(( ! $WIFI_DISABLED ))
@@ -1904,7 +1901,7 @@ If unsure, set any value, 'Ondemand Down Factor' option on the next screen will 
 		fi
 
 		# Start WiFi hotspot
-		[[ ${aservices[0]} ]] && G_EXEC systemctl start "${aservices[@]}"
+		(( $WIFI_HOTSPOT )) && G_EXEC systemctl start hostapd isc-dhcp-server
 
 		# Add a little delay to ensure all network device data are updated (eg: SSID current takes a little longer)
 		G_DIETPI-NOTIFY 2 'Reloading networking data, please wait...'
@@ -2576,6 +2573,9 @@ This is mainly aimed at PINE A64 which may have a hardware issue that causes uns
 	HOTSPOT_KEY=
 	HOTSPOT_CHANNEL=
 	HOTSPOT_WIFI4=0
+	HOTSPOT_WIFI5=0
+	HOTSPOT_5G=0
+	HOTSPOT_5G_CHANNEL=
 
 	# TARGETMENUID=10
 	Menu_NetworkAdapters_Wifi()
@@ -2598,19 +2598,40 @@ This is mainly aimed at PINE A64 which may have a hardware issue that causes uns
 			then
 				HOTSPOT_SSID=$(sed -n '/^[[:blank:]]*ssid=/{s/^[^=]*=//p;q}' /etc/hostapd/hostapd.conf)
 				HOTSPOT_KEY=$(sed -n '/^[[:blank:]]*wpa_passphrase=/{s/^[^=]*=//p;q}' /etc/hostapd/hostapd.conf)
-				HOTSPOT_CHANNEL=$(sed -n '/^[[:blank:]]*channel=/{s/^[^=]*=//p;q}' /etc/hostapd/hostapd.conf)
-				HOTSPOT_WIFI4=$(grep -cm1 '^ieee80211n=1' /etc/hostapd/hostapd.conf)
+				HOTSPOT_WIFI4=$(grep -cm1 '^[[:blank:]]*ieee80211n=1$' /etc/hostapd/hostapd.conf)
+				HOTSPOT_WIFI5=$(grep -cm1 '^[[:blank:]]*ieee80211ac=1$' /etc/hostapd/hostapd.conf)
+				HOTSPOT_5G=$(grep -cm1 '^[[:blank:]]*hw_mode=a$' /etc/hostapd/hostapd.conf)
+				if (( $HOTSPOT_5G ))
+				then
+					HOTSPOT_5G_CHANNEL=$(sed -n '/^[[:blank:]]*channel=/{s/^[^=]*=//p;q}' /etc/hostapd/hostapd.conf)
+				else
+					HOTSPOT_CHANNEL=$(sed -n '/^[[:blank:]]*channel=/{s/^[^=]*=//p;q}' /etc/hostapd/hostapd.conf)
+				fi
 			fi
 
-			# WiFi 4 support status text
-			local hotspot_n_text='Off'
+			# WiFi 4 and WiFi 5 support status text
+			local hotspot_n_text='Off' hotspot_ac_text='Off' hotspot_freq_text='2.4' hotspot_channel_text
 			(( $HOTSPOT_WIFI4 )) && hotspot_n_text='On'
+			(( $HOTSPOT_WIFI5 )) && hotspot_ac_text='On'
+			if (( $HOTSPOT_5G ))
+			then
+				hotspot_freq_text='5'
+				[[ $HOTSPOT_5G_CHANNEL ]] || HOTSPOT_5G_CHANNEL=$(sed -n '/^[[:blank:]]*SOFTWARE_WIFI_HOTSPOT_5G_CHANNEL=/{s/^[^=]*=//p;q}' /boot/dietpi.txt)
+				[[ $HOTSPOT_5G_CHANNEL ]] || HOTSPOT_5G_CHANNEL=36
+				hotspot_channel_text=$HOTSPOT_5G_CHANNEL
+			else
+				[[ $HOTSPOT_CHANNEL ]] || HOTSPOT_CHANNEL=$(sed -n '/^[[:blank:]]*SOFTWARE_WIFI_HOTSPOT_CHANNEL=/{s/^[^=]*=//p;q}' /boot/dietpi.txt)
+				[[ $HOTSPOT_CHANNEL ]] || HOTSPOT_CHANNEL=3
+				hotspot_channel_text=$HOTSPOT_CHANNEL
+			fi
 
 			G_WHIP_MENU_ARRAY+=(
 				'SSID' ": [$HOTSPOT_SSID]"
 				'Key' ": [$HOTSPOT_KEY]"
-				'Channel' ": [$HOTSPOT_CHANNEL]"
+				'Channel' ": [$hotspot_channel_text]"
 				'802.11n' ": [$hotspot_n_text] WiFi 4 support"
+				'802.11ac' ": [$hotspot_ac_text] WiFi 5 support"
+				'Frequency' ": [$hotspot_freq_text GHz]"
 			)
 
 		# WiFi menu
@@ -2684,31 +2705,58 @@ This is mainly aimed at PINE A64 which may have a hardware issue that causes uns
 			'Key')
 
 				G_WHIP_DEFAULT_ITEM=$HOTSPOT_KEY
-				G_WHIP_INPUTBOX 'Please enter a key/password for the WiFi hotspot\n - NB: Minimum of 8 characters' && HOTSPOT_KEY=$G_WHIP_RETURNED_VALUE
+				G_WHIP_INPUTBOX 'Please enter a key/password with a minimum of 8 characters for your WiFi hotspot:' && HOTSPOT_KEY=$G_WHIP_RETURNED_VALUE
 			;;
 
 			'SSID')
 
 				G_WHIP_DEFAULT_ITEM=$HOTSPOT_SSID
-				G_WHIP_INPUTBOX 'Please enter an SSID for the WiFi hotspot' && HOTSPOT_SSID=$G_WHIP_RETURNED_VALUE
+				G_WHIP_INPUTBOX 'Please enter an SSID for your WiFi hotspot:' && HOTSPOT_SSID=$G_WHIP_RETURNED_VALUE
 			;;
 
 			'Channel')
 
-				# 2.4 GHz only atm
-				local channel_mhz=2412 channel_min=1 channel_max=13
-				G_WHIP_MENU_ARRAY=()
-				for ((i=$channel_min; i<=$channel_max; i++))
-				do
-					G_WHIP_MENU_ARRAY+=("$i" ": $channel_mhz MHz")
-					((channel_mhz+=5))
-				done
+				if (( $HOTSPOT_5G ))
+				then
+					G_WHIP_DEFAULT_ITEM=$HOTSPOT_5G_CHANNEL
+					G_WHIP_MENU 'Please enter a 5 GHz WiFi channel for your hotspot.
+\nA full list of supported 5 GHz WiFi channels per region can be found e.g. on Wikipedia: https://en.wikipedia.org/wiki/List_of_WLAN_channels#5_GHz_(802.11a/h/n/ac/ax)' && HOTSPOT_5G_CHANNEL=$G_WHIP_RETURNED_VALUE
+				else
+					local channel_mhz=2412 channel_min=1 channel_max=13
+					G_WHIP_MENU_ARRAY=()
+					for ((i=$channel_min; i<=$channel_max; i++))
+					do
+						G_WHIP_MENU_ARRAY+=("$i" ": $channel_mhz MHz")
+						((channel_mhz+=5))
+					done
 
-				G_WHIP_DEFAULT_ITEM=$HOTSPOT_CHANNEL
-				G_WHIP_MENU 'Please select a WiFi channel for the hotspot.' && HOTSPOT_CHANNEL=$G_WHIP_RETURNED_VALUE
+					G_WHIP_DEFAULT_ITEM=$HOTSPOT_CHANNEL
+					G_WHIP_MENU 'Please select a 2.4 GHz WiFi channel for your hotspot:' && HOTSPOT_CHANNEL=$G_WHIP_RETURNED_VALUE
+				fi
 			;;
 
-			'802.11n') HOTSPOT_WIFI4=$(( ! $HOTSPOT_WIFI4 ));;
+			'802.11n')
+
+				HOTSPOT_WIFI4=$(( ! $HOTSPOT_WIFI4 ))
+				# 5 GHz requires at least WiFi 4
+				(( $HOTSPOT_WIFI4 || $HOTSPOT_WIFI5 )) || HOTSPOT_5G=0
+			;;
+
+			'802.11ac')
+
+				HOTSPOT_WIFI5=$(( ! $HOTSPOT_WIFI5 ))
+				# WiFi 5 implies 5 GHz
+				(( $HOTSPOT_WIFI5 )) && HOTSPOT_5G=1
+				# 5 GHz requires at least WiFi 4
+				(( $HOTSPOT_WIFI4 || $HOTSPOT_WIFI5 )) || HOTSPOT_5G=0
+			;;
+
+			'Frequency')
+
+				HOTSPOT_5G=$(( ! $HOTSPOT_5G ))
+				# 5 GHz requires at least WiFi 4
+				(( $HOTSPOT_5G && ! $HOTSPOT_WIFI5 )) && HOTSPOT_WIFI4=1
+			;;
 
 			'Country') Change_WifiCountryCode;;
 
@@ -2735,16 +2783,32 @@ This is mainly aimed at PINE A64 which may have a hardware issue that causes uns
 				then
 					# Update dietpi.txt
 					G_CONFIG_INJECT 'SOFTWARE_WIFI_HOTSPOT_SSID=' "SOFTWARE_WIFI_HOTSPOT_SSID=$HOTSPOT_SSID" /boot/dietpi.txt
-					G_CONFIG_INJECT 'SOFTWARE_WIFI_HOTSPOT_KEY=' "SOFTWARE_WIFI_HOTSPOT_KEY=$HOTSPOT_KEY" /boot/dietpi.txt
+					GCI_PASSWORD=1 G_CONFIG_INJECT 'SOFTWARE_WIFI_HOTSPOT_KEY=' "SOFTWARE_WIFI_HOTSPOT_KEY=$HOTSPOT_KEY" /boot/dietpi.txt
 					G_CONFIG_INJECT 'SOFTWARE_WIFI_HOTSPOT_CHANNEL=' "SOFTWARE_WIFI_HOTSPOT_CHANNEL=$HOTSPOT_CHANNEL" /boot/dietpi.txt
 					G_CONFIG_INJECT 'SOFTWARE_WIFI_HOTSPOT_WIFI4=' "SOFTWARE_WIFI_HOTSPOT_WIFI4=$HOTSPOT_WIFI4" /boot/dietpi.txt
+					G_CONFIG_INJECT 'SOFTWARE_WIFI_HOTSPOT_WIFI5=' "SOFTWARE_WIFI_HOTSPOT_WIFI5=$HOTSPOT_WIFI5" /boot/dietpi.txt
+					G_CONFIG_INJECT 'SOFTWARE_WIFI_HOTSPOT_5G=' "SOFTWARE_WIFI_HOTSPOT_5G=$HOTSPOT_5G" /boot/dietpi.txt
+					G_CONFIG_INJECT 'SOFTWARE_WIFI_HOTSPOT_5G_CHANNEL=' "SOFTWARE_WIFI_HOTSPOT_5G_CHANNEL=$HOTSPOT_5G_CHANNEL" /boot/dietpi.txt
 
 					# Update hostapd.conf
 					G_CONFIG_INJECT 'ssid=' "ssid=$HOTSPOT_SSID" /etc/hostapd/hostapd.conf
 					G_CONFIG_INJECT 'wpa_passphrase=' "wpa_passphrase=$HOTSPOT_KEY" /etc/hostapd/hostapd.conf
-					G_CONFIG_INJECT 'channel=' "channel=$HOTSPOT_CHANNEL" /etc/hostapd/hostapd.conf
 					G_CONFIG_INJECT 'ieee80211n=' "ieee80211n=$HOTSPOT_WIFI4" /etc/hostapd/hostapd.conf
-					G_CONFIG_INJECT 'wmm_enabled=' "wmm_enabled=$HOTSPOT_WIFI4" /etc/hostapd/hostapd.conf
+					G_CONFIG_INJECT 'ieee80211ac=' "ieee80211ac=$HOTSPOT_WIFI5" /etc/hostapd/hostapd.conf
+					if (( $HOTSPOT_WIFI4 || $HOTSPOT_WIFI5 ))
+					then
+						G_CONFIG_INJECT 'wmm_enabled=' 'wmm_enabled=1' /etc/hostapd/hostapd.conf
+					else
+						G_CONFIG_INJECT 'wmm_enabled=' 'wmm_enabled=0' /etc/hostapd/hostapd.conf
+					fi
+					if (( $HOTSPOT_5G ))
+					then
+						G_CONFIG_INJECT 'hw_mode=' 'hw_mode=a' /etc/hostapd/hostapd.conf
+						G_CONFIG_INJECT 'channel=' "channel=$HOTSPOT_5G_CHANNEL" /etc/hostapd/hostapd.conf
+					else
+						G_CONFIG_INJECT 'hw_mode=' 'hw_mode=g' /etc/hostapd/hostapd.conf
+						G_CONFIG_INJECT 'channel=' "channel=$HOTSPOT_CHANNEL" /etc/hostapd/hostapd.conf
+					fi
 
 					# Apply/Restart network
 					Network_ApplyChanges
@@ -2774,7 +2838,6 @@ This is mainly aimed at PINE A64 which may have a hardware issue that causes uns
 			;;
 
 			*) :;;
-
 		esac
 	}
 
