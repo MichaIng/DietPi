@@ -1994,6 +1994,10 @@ post-down iw dev "$WIFI_DEV_IFACE set power_save on
 up iptables-restore < /etc/iptables.ipv4.nat
 up ip6tables-restore < /etc/iptables.ipv6.nat
 _EOF_
+		# - Alter hostapd and DHCP server configs
+		G_CONFIG_INJECT 'interface=' "interface=$WIFI_DEV_IFACE" /etc/hostapd/hostapd.conf
+		[[ -f '/etc/default/isc-dhcp-server' ]] && G_CONFIG_INJECT 'INTERFACESv4=' "INTERFACESv4=\"$WIFI_DEV_IFACE\"" /etc/default/isc-dhcp-server
+
 		# WiFi client
 		else
 			gateway="gateway $WIFI_GATEWAY_STATIC"
@@ -2134,7 +2138,8 @@ _EOF_
 			until [[ $G_WHIP_RETURNED_VALUE == [[:upper:]][[:upper:]] ]]
 			do
 				G_WHIP_INPUTBOX "${error}Please enter a 2 capital letter country code: https://en.wikipedia.org/wiki/ISO_3166-1_alpha-2" || return 0
-				error="[FAILED] Invalid country code ($G_WHIP_RETURNED_VALUE)"
+				error="[FAILED] Invalid country code ($G_WHIP_RETURNED_VALUE)\n\n"
+				G_WHIP_DEFAULT_ITEM=$G_WHIP_RETURNED_VALUE
 			done
 		fi
 		WIFI_COUNTRYCODE=$G_WHIP_RETURNED_VALUE
@@ -2574,6 +2579,7 @@ This is mainly aimed at PINE A64 which may have a hardware issue that causes uns
 	HOTSPOT_CHANNEL=
 	HOTSPOT_WIFI4=0
 	HOTSPOT_WIFI5=0
+	HOTSPOT_WIFI6=0
 	HOTSPOT_5G=0
 	HOTSPOT_5G_CHANNEL=
 
@@ -2600,6 +2606,7 @@ This is mainly aimed at PINE A64 which may have a hardware issue that causes uns
 				HOTSPOT_KEY=$(sed -n '/^[[:blank:]]*wpa_passphrase=/{s/^[^=]*=//p;q}' /etc/hostapd/hostapd.conf)
 				HOTSPOT_WIFI4=$(grep -cm1 '^[[:blank:]]*ieee80211n=1$' /etc/hostapd/hostapd.conf)
 				HOTSPOT_WIFI5=$(grep -cm1 '^[[:blank:]]*ieee80211ac=1$' /etc/hostapd/hostapd.conf)
+				(( $G_DISTRO > 6 )) && HOTSPOT_WIFI6=$(grep -cm1 '^[[:blank:]]*ieee80211ax=1$' /etc/hostapd/hostapd.conf)
 				HOTSPOT_5G=$(grep -cm1 '^[[:blank:]]*hw_mode=a$' /etc/hostapd/hostapd.conf)
 				if (( $HOTSPOT_5G ))
 				then
@@ -2610,9 +2617,10 @@ This is mainly aimed at PINE A64 which may have a hardware issue that causes uns
 			fi
 
 			# WiFi 4 and WiFi 5 support status text
-			local hotspot_n_text='Off' hotspot_ac_text='Off' hotspot_freq_text='2.4' hotspot_channel_text
+			local hotspot_n_text='Off' hotspot_ac_text='Off' hotspot_ax_text='Off' hotspot_freq_text='2.4' hotspot_channel_text
 			(( $HOTSPOT_WIFI4 )) && hotspot_n_text='On'
 			(( $HOTSPOT_WIFI5 )) && hotspot_ac_text='On'
+			(( $HOTSPOT_WIFI6 )) && hotspot_ax_text='On'
 			if (( $HOTSPOT_5G ))
 			then
 				hotspot_freq_text='5'
@@ -2628,11 +2636,12 @@ This is mainly aimed at PINE A64 which may have a hardware issue that causes uns
 			G_WHIP_MENU_ARRAY+=(
 				'SSID' ": [$HOTSPOT_SSID]"
 				'Key' ": [$HOTSPOT_KEY]"
+				'Frequency' ": [$hotspot_freq_text GHz]"
 				'Channel' ": [$hotspot_channel_text]"
 				'802.11n' ": [$hotspot_n_text] WiFi 4 support"
 				'802.11ac' ": [$hotspot_ac_text] WiFi 5 support"
-				'Frequency' ": [$hotspot_freq_text GHz]"
 			)
+			(( $G_DISTRO > 6 )) && G_WHIP_MENU_ARRAY+=('802.11ax' ": [$hotspot_ax_text] WiFi 6 support")
 
 		# WiFi menu
 		else
@@ -2704,8 +2713,15 @@ This is mainly aimed at PINE A64 which may have a hardware issue that causes uns
 
 			'Key')
 
+				local error
 				G_WHIP_DEFAULT_ITEM=$HOTSPOT_KEY
-				G_WHIP_INPUTBOX 'Please enter a key/password with a minimum of 8 characters for your WiFi hotspot:' && HOTSPOT_KEY=$G_WHIP_RETURNED_VALUE
+				until (( ${#G_WHIP_RETURNED_VALUE} > 7 ))
+				do
+					G_WHIP_INPUTBOX "${error}Please enter a key/password with a minimum of 8 characters for your WiFi hotspot:" || return 0
+					error='[FAILED] The entered key is too short.\n\n'
+					G_WHIP_DEFAULT_ITEM=$G_WHIP_RETURNED_VALUE
+				done
+				HOTSPOT_KEY=$G_WHIP_RETURNED_VALUE
 			;;
 
 			'SSID')
@@ -2739,7 +2755,7 @@ This is mainly aimed at PINE A64 which may have a hardware issue that causes uns
 
 				HOTSPOT_WIFI4=$(( ! $HOTSPOT_WIFI4 ))
 				# 5 GHz requires at least WiFi 4
-				(( $HOTSPOT_WIFI4 || $HOTSPOT_WIFI5 )) || HOTSPOT_5G=0
+				(( $HOTSPOT_WIFI4 || $HOTSPOT_WIFI5 || $HOTSPOT_WIFI6 )) || HOTSPOT_5G=0
 			;;
 
 			'802.11ac')
@@ -2748,21 +2764,28 @@ This is mainly aimed at PINE A64 which may have a hardware issue that causes uns
 				# WiFi 5 implies 5 GHz
 				(( $HOTSPOT_WIFI5 )) && HOTSPOT_5G=1
 				# 5 GHz requires at least WiFi 4
-				(( $HOTSPOT_WIFI4 || $HOTSPOT_WIFI5 )) || HOTSPOT_5G=0
+				(( $HOTSPOT_WIFI4 || $HOTSPOT_WIFI5 || $HOTSPOT_WIFI6 )) || HOTSPOT_5G=0
+			;;
+
+			'802.11ax')
+
+				HOTSPOT_WIFI6=$(( ! $HOTSPOT_WIFI6 ))
+				# 5 GHz requires at least WiFi 4
+				(( $HOTSPOT_WIFI4 || $HOTSPOT_WIFI5 || $HOTSPOT_WIFI6 )) || HOTSPOT_5G=0
 			;;
 
 			'Frequency')
 
 				HOTSPOT_5G=$(( ! $HOTSPOT_5G ))
 				# 5 GHz requires at least WiFi 4
-				(( $HOTSPOT_5G && ! $HOTSPOT_WIFI5 )) && HOTSPOT_WIFI4=1
+				(( $HOTSPOT_5G && ! $HOTSPOT_WIFI5 && ! $HOTSPOT_WIFI6 )) && HOTSPOT_WIFI4=1
 			;;
 
 			'Country') Change_WifiCountryCode;;
 
 			'Disable')
 
-				G_WHIP_YESNO 'Would you like to disable the WiFi adapter?\n - (NOTICE) All WiFi connections will be dropped.' || return
+				G_WHIP_YESNO 'Would you like to disable the WiFi adapter?\n - (NOTICE) All WiFi connections will be dropped.' || return 0
 				WIFI_DISABLED=1
 				G_EXEC systemctl disable --now dietpi-wifi-monitor
 				Network_ApplyChanges
@@ -2787,6 +2810,7 @@ This is mainly aimed at PINE A64 which may have a hardware issue that causes uns
 					G_CONFIG_INJECT 'SOFTWARE_WIFI_HOTSPOT_CHANNEL=' "SOFTWARE_WIFI_HOTSPOT_CHANNEL=$HOTSPOT_CHANNEL" /boot/dietpi.txt
 					G_CONFIG_INJECT 'SOFTWARE_WIFI_HOTSPOT_WIFI4=' "SOFTWARE_WIFI_HOTSPOT_WIFI4=$HOTSPOT_WIFI4" /boot/dietpi.txt
 					G_CONFIG_INJECT 'SOFTWARE_WIFI_HOTSPOT_WIFI5=' "SOFTWARE_WIFI_HOTSPOT_WIFI5=$HOTSPOT_WIFI5" /boot/dietpi.txt
+					(( $G_DISTRO > 6 )) && G_CONFIG_INJECT 'SOFTWARE_WIFI_HOTSPOT_WIFI6=' "SOFTWARE_WIFI_HOTSPOT_WIFI6=$HOTSPOT_WIFI6" /boot/dietpi.txt
 					G_CONFIG_INJECT 'SOFTWARE_WIFI_HOTSPOT_5G=' "SOFTWARE_WIFI_HOTSPOT_5G=$HOTSPOT_5G" /boot/dietpi.txt
 					G_CONFIG_INJECT 'SOFTWARE_WIFI_HOTSPOT_5G_CHANNEL=' "SOFTWARE_WIFI_HOTSPOT_5G_CHANNEL=$HOTSPOT_5G_CHANNEL" /boot/dietpi.txt
 
@@ -2795,7 +2819,8 @@ This is mainly aimed at PINE A64 which may have a hardware issue that causes uns
 					G_CONFIG_INJECT 'wpa_passphrase=' "wpa_passphrase=$HOTSPOT_KEY" /etc/hostapd/hostapd.conf
 					G_CONFIG_INJECT 'ieee80211n=' "ieee80211n=$HOTSPOT_WIFI4" /etc/hostapd/hostapd.conf
 					G_CONFIG_INJECT 'ieee80211ac=' "ieee80211ac=$HOTSPOT_WIFI5" /etc/hostapd/hostapd.conf
-					if (( $HOTSPOT_WIFI4 || $HOTSPOT_WIFI5 ))
+					(( $G_DISTRO > 6 )) && G_CONFIG_INJECT 'ieee80211ax=' "ieee80211ax=$HOTSPOT_WIFI6" /etc/hostapd/hostapd.conf '^ieee80211ac'
+					if (( $HOTSPOT_WIFI4 || $HOTSPOT_WIFI5 || $HOTSPOT_WIFI6 ))
 					then
 						G_CONFIG_INJECT 'wmm_enabled=' 'wmm_enabled=1' /etc/hostapd/hostapd.conf
 					else
