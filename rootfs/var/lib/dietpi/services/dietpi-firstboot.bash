@@ -88,6 +88,54 @@
 		fi
 	}
 
+	Apply_DietPiSetup(){
+		# Detect root device
+		# this code is a verbatim copy from the fs_resize code - I didn't quite know
+		# where to put common code for these scripts
+		ROOT_DEV=$(findmnt -Ufnro SOURCE -M /)
+
+		# Detect root partition and parent drive for supported naming schemes:
+		# - SCSI/SATA:	/dev/sd[a-z][1-9]
+		# - IDE:	/dev/hd[a-z][1-9]
+		# - VirtIO:	/dev/vd[a-z][1-9]
+		# - eMMC:	/dev/mmcblk[0-9]p[1-9]
+		# - NVMe:	/dev/nvme[0-9]n[0-9]p[1-9]
+		# - loop:	/dev/loop[0-9]p[1-9]
+		if [[ $ROOT_DEV == /dev/[shv]d[a-z][1-9] ]]
+		then
+			ROOT_DRIVE=${ROOT_DEV::-1}	# /dev/sda1 => /dev/sda
+
+		elif [[ $ROOT_DEV =~ ^/dev/(mmcblk|nvme[0-9]n|loop)[0-9]p[1-9]$ ]]
+		then
+			ROOT_DRIVE=${ROOT_DEV::-2}	# /dev/mmcblk0p1 => /dev/mmcblk0
+		else
+			echo "[FAILED] Unsupported root device naming scheme ($ROOT_DEV). Aborting..."
+			exit 1
+		fi
+
+		# check if the last partition is a 4MB partition with the Windows/FAT type
+		if sfdisk -l "$ROOT_DRIVE" | tail -1 | grep -E "\s4M\s+c\s" > /dev/null 2>&1
+		then
+			# the last partition is a 4M FAT filesystem - let's check if it is ours
+			local setup_part=$(sfdisk -l "$ROOT_DRIVE" | tail -1 | mawk '{print $1}')
+			if blkid "$setup_part" | grep 'LABEL="DIETPISETUP"'
+			then
+				# mount it and copy files
+				local temp_mount=$(mktemp -d)
+				mount "$setup_part" "$temp_mount"
+				[[ -f "$temp_mount"/dietpi.txt ]] && cp "$temp_mount"/dietpi.txt /boot/dietpi.txt
+				[[ -f "$temp_mount"/dietpi-wifi.txt ]] && cp "$temp_mount"/dietpi-wifi.txt /boot/dietpi-wifi.txt
+				umount "$setup_part"
+				rmdir "$temp_mount"
+				# finally delete the partition so the resizing works
+				sfdisk --no-tell --no-reread --delete "$ROOT_DRIVE" "${setup_part: -1}"
+				# Try to inform kernel about changed partition table
+				partprobe "$ROOT_DRIVE" || echo "partprobe failed" # I don't think we should bail here
+				partx -u "$ROOT_DRIVE" || echo "partx -u failed"   # I don't think we should bail here
+			fi
+		fi
+	}
+
 	Apply_DietPi_FirstRun_Settings(){
 
 		# RPi: Apply safe overclocking values or update comments to show model-specific defaults
@@ -343,6 +391,9 @@ _EOF_
 	# Failsafe: https://github.com/MichaIng/DietPi/issues/3646#issuecomment-653739919
 	chown root:root /
 	chmod 0755 /
+
+	# Check if there is a DIETPISETUP partition and extract the data from it
+	Apply_DietPiSetup
 
 	# Apply dietpi.txt settings and reset hardware ID + SSH host keys
 	Apply_DietPi_FirstRun_Settings
