@@ -338,15 +338,7 @@
 		# Remount image for any required edits
 		G_EXEC mkdir "$FP_MNT_TMP"
 		G_EXEC mount "$FP_ROOT_DEV" "$FP_MNT_TMP"
-		[[ -z ${ADD_DOS_PART+x} ]] && ADD_DOS_PART="0"
-		if [[ "$ADD_DOS_PART" == "1" ]]
-		then
-			# let's copy the two config files we want to add to the setup partition
-			TMP_DIETPI_CONF_DIR=$(mktemp -d)
-			cp "$FP_MNT_TMP"/boot/dietpi.txt "$TMP_DIETPI_CONF_DIR"/
-			cp "$FP_MNT_TMP"/boot/dietpi-wifi.txt "$TMP_DIETPI_CONF_DIR"/
-			G_EXEC_OUTPUT=1 G_EXEC ls -l "$TMP_DIETPI_CONF_DIR"/
-		fi
+
 		# - Remove bash history and DHCP leases, which are stored on shutdown, hence cannot be removed via DietPi-PREP
 		G_EXEC rm -f "$FP_MNT_TMP/"{root,home/*}/.bash_history "$FP_MNT_TMP/var/lib/dhcp/"*.leases
 		# - Enable DietPi-FS_partition_resize to have both, old and new image being resized on next boot automatically
@@ -502,33 +494,37 @@
 			G_EXEC partprobe "$FP_SOURCE"
 			G_EXEC partx -u "$FP_SOURCE"
 		fi
-		if [[ "$ADD_DOS_PART" == "1" &&  "$PART_TABLE_TYPE" == 'dos' ]]
+		[[ -z ${ADD_DOS_PART+x} ]] && ADD_DOS_PART="0"
+		if [[ $ADD_DOS_PART == 1 ]]
 		then
 			G_DIETPI-NOTIFY 2 'Adding a 4MB FAT partition to the DOS partition table'
-			G_EXEC_OUTPUT=1 G_EXEC dd if=/dev/zero bs=4M count=1 >> "$FP_SOURCE_IMG"
-			# first, methodically extract the starting point for that next partition
-			local old_table=$(sfdisk --json "$FP_SOURCE_IMG")
-			export lp_start=$(echo "$old_table" | jq ".partitiontable.partitions[].start" | sort -n | tail -1)
-			# jq syntax is a bit werid: pick the partition with the given start, and extract its size
-			local lp_size=$(echo "$old_table" | jq '.partitiontable.partitions|map(select(.start==(env.lp_start|tonumber)))[].size')
-			local np_start=$(( $lp_start + $lp_size ))
+			# figure out where the new partition starts
+			# WARNING: this assumes that the partitions in the table are in order (which we do in other places as well)
+			if [[ $SOURCE_TYPE == 'Image' ]]
+			then
+				G_DIETPI-NOTIFY 2 "working on a filesystem image, so adding 4MB to $FP_SOURCE_IMG"
+				G_EXEC_OUTPUT=1 G_EXEC dd if=/dev/zero bs=4M count=1 >> "$FP_SOURCE_IMG"
+			fi
+			local root_part=$(sfdisk -qlo DEVICE "$FP_SOURCE" | tail -1)
+			local np_start=$(($(sfdisk -qlo END "$FP_SOURCE" | tail -1) + 1))
+			local type='EBD0A0A2-B9E5-4433-87C0-68B6B72699C7'
+			[[ $PART_TABLE_TYPE == 'dos' ]] && type='c'
 			# now we know where the new partition needs to start... so let's add it to the partition table
-			echo "start=$np_start,size=8192,type=c" | sfdisk -a "$FP_SOURCE_IMG"
-			# we had to export a variable we really wanted to be local in order to make jq happy; undo that
-			export -n lp_start
+			G_DIETPI-NOTIFY 2 "/:${root_part}, np_start:${np_start}, FP_SOURCE:${FP_SOURCE}"
+			echo "start=$np_start,size=8192,type=$type" | sfdisk -a "$FP_SOURCE"
+			G_EXEC partprobe "$FP_SOURCE"
+			G_EXEC losetup -c "$FP_SOURCE"
 			# create a fat filesystem and add the two config files to it
-			Delete_Loopback # Prevent doubled loop device
-			FP_SOURCE=$(losetup -f)
-			G_EXEC losetup -P "$FP_SOURCE" "$FP_SOURCE_IMG"
 			local new_dos_part=$(sfdisk -l "$FP_SOURCE" | grep "$np_start" | mawk '{print $1}')
-			G_DIETPI-NOTIFY 2 "device is $new_dos_part: mkfs.vfat -v -n DIETPISETUP $new_dos_part"
 			G_EXE_OUTPUT=1 G_EXEC mkfs.vfat -v -n DIETPISETUP "$new_dos_part"
-			local mountpoint=$(mktemp -d)
-			G_EXEC mount "$new_dos_part" "$mountpoint"
-			G_EXEC cp "$TMP_DIETPI_CONF_DIR"/* "$mountpoint"/
-			G_EXE_OUTPUT=1 G_EXEC ls -l "$mountpoint"
-			G_EXEC umount "$mountpoint"
-			G_EXEC rmdir "$mountpoint"
+			local fat_mountpoint=$(mktemp -d)
+			local root_mountpoint=$(mktemp -d)
+			G_EXEC mount "$new_dos_part" "$fat_mountpoint"
+			G_EXEC mount "$root_part" "$root_mountpoint"
+			G_EXEC cp "${root_mountpoint}/boot/dietpi{,-wifi}.txt" "$fat_mountpoint"/
+			G_DIETPI_NOTIFY 2 "copied dietpi.txt and dietpi-wifi.txt to the FAT partition"
+			G_EXEC umount "$root_mountpoint" "$fat_mountpoint"
+			G_EXEC rmdir "$root_mountpoint" "$fat_mountpoint"
 		fi
 		# Exit now if source shall be shrunk only
 		(( $SHRINK_ONLY )) && exit 0
