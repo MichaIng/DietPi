@@ -39,6 +39,25 @@
 		exit 1
 	fi
 
+	# check if the last partition is a 4MB partition with the Windows/FAT type
+	if sfdisk -l "$ROOT_DRIVE" | tail -1 | grep -E "\s4M\s+c\s" > /dev/null 2>&1
+	then
+		# the last partition is a 4M FAT filesystem - let's check if it is ours
+		SETUP_PART=$(sfdisk -l "$ROOT_DRIVE" | tail -1 | mawk '{print $1}')
+		if blkid "$SETUP_PART" | grep 'LABEL="DIETPISETUP"'
+		then
+			# mount it and copy files
+			TEMP_MOUNT=$(mktemp -d)
+			mount "$SETUP_PART" "$TEMP_MOUNT"
+			[[ -f "$TEMP_MOUNT"/dietpi.txt ]] && cp "$TEMP_MOUNT"/dietpi.txt /boot/dietpi.txt
+			[[ -f "$TEMP_MOUNT"/dietpi-wifi.txt ]] && cp "$TEMP_MOUNT"/dietpi-wifi.txt /boot/dietpi-wifi.txt
+			umount "$SETUP_PART"
+			rmdir "$TEMP_MOUNT"
+			# finally delete the partition so the resizing works
+			sfdisk --no-tell --no-reread --delete "$ROOT_DRIVE" "${SETUP_PART: -1}"
+		fi
+	fi
+
 	# Only increase partition size if not yet done on first boot
 	if [[ -f '/dietpi_skip_partition_resize' ]]
 	then
