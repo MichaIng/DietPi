@@ -39,24 +39,21 @@
 		exit 1
 	fi
 
-	# check if the last partition is a 4MB partition with a vfat filesystem
-	LAST_FS_TYPE=$(lsblk -no FSTYPE "$ROOT_DRIVE" | tail -1)
-	if sfdisk -l "$ROOT_DRIVE" | tail -1 | grep -E "\s4M\s" > /dev/null 2>&1 && [[ $LAST_FS_TYPE = 'vfat' ]]
+	# check if the last partition is a 1MB partition with a vfat filesystem
+	if [[ $(lsblk -nrbo FSTYPE,SIZE,LABEL "$ROOT_DRIVE" | tail -1) == 'vfat 1048576 DIETPISETUP' ]]
 	then
-		# the last partition is a 4M FAT filesystem - let's check if it is ours
-		SETUP_PART=$(sfdisk -l "$ROOT_DRIVE" | tail -1 | mawk '{print $1}')
-		if blkid "$SETUP_PART" | grep 'LABEL="DIETPISETUP"'
-		then
-			# mount it and copy files
-			TEMP_MOUNT=$(mktemp -d)
-			mount "$SETUP_PART" "$TEMP_MOUNT"
-			[[ -f "$TEMP_MOUNT"/dietpi.txt ]] && cp "$TEMP_MOUNT"/dietpi.txt /boot/dietpi.txt
-			[[ -f "$TEMP_MOUNT"/dietpi-wifi.txt ]] && cp "$TEMP_MOUNT"/dietpi-wifi.txt /boot/dietpi-wifi.txt
-			umount "$SETUP_PART"
-			rmdir "$TEMP_MOUNT"
-			# finally delete the partition so the resizing works
-			sfdisk --no-tell --no-reread --delete "$ROOT_DRIVE" "${SETUP_PART: -1}"
-		fi
+		# mount it and copy files
+		SETUP_PART=$(sfdisk -lqo DEVICE "$ROOT_DRIVE" | tail -1 )
+		TEMP_MOUNT=$(mktemp -d)
+		mount "$SETUP_PART" "$TEMP_MOUNT"
+		for f in dietpi.txt dietpi-wifi.txt dietpiEnv.txt unattended_pivpn.conf Automation_Custom_PreScript.sh Automation_Custom_Script.sh
+		do
+			[[ -f "${TEMP_MOUNT}/$f" ]] && cp "${TEMP_MOUNT}/$f" /boot/
+		done
+		umount "$SETUP_PART"
+		rmdir "$TEMP_MOUNT"
+		# finally delete the partition so the resizing works
+		sfdisk --no-tell --no-reread --delete "$ROOT_DRIVE" "${SETUP_PART: -1}"
 	fi
 
 	# Only increase partition size if not yet done on first boot
