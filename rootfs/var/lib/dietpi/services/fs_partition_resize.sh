@@ -39,8 +39,9 @@
 		exit 1
 	fi
 
-	# check if the last partition is a 4MB partition with the Windows/FAT type
-	if sfdisk -l "$ROOT_DRIVE" | tail -1 | grep -E "\s4M\s+c\s" > /dev/null 2>&1
+	# check if the last partition is a 4MB partition with a vfat filesystem
+	LAST_FS_TYPE=$(lsblk -no FSTYPE "$ROOT_DRIVE" | tail -1)
+	if sfdisk -l "$ROOT_DRIVE" | tail -1 | grep -E "\s4M\s" > /dev/null 2>&1 && [[ $LAST_FS_TYPE = 'vfat' ]]
 	then
 		# the last partition is a 4M FAT filesystem - let's check if it is ours
 		SETUP_PART=$(sfdisk -l "$ROOT_DRIVE" | tail -1 | mawk '{print $1}')
