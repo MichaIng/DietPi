@@ -39,21 +39,21 @@
 		exit 1
 	fi
 
-	# check if the last partition is a 1MB partition with a vfat filesystem
-	if [[ $(lsblk -nrbo FSTYPE,SIZE,LABEL "$ROOT_DRIVE" | tail -1) == 'vfat 1048576 DIETPISETUP' ]]
+	# Check if the last partition contains a FAT filesystem with DIETPISETUP label
+	if [[ $(lsblk -nrbo FSTYPE,LABEL "$ROOT_DRIVE" | tail -1) == 'vfat DIETPISETUP' ]]
 	then
-		# mount it and copy files
-		SETUP_PART=$(sfdisk -lqo DEVICE "$ROOT_DRIVE" | tail -1 )
-		TEMP_MOUNT=$(mktemp -d)
-		mount "$SETUP_PART" "$TEMP_MOUNT"
-		for f in dietpi.txt dietpi-wifi.txt dietpiEnv.txt unattended_pivpn.conf Automation_Custom_PreScript.sh Automation_Custom_Script.sh
+		# Mount it and copy files if present and newer
+		SETUP_PART=$(sfdisk -lqo DEVICE "$ROOT_DRIVE" | tail -1)
+		TMP_MOUNT=$(mktemp -d)
+		mount "$SETUP_PART" "$TMP_MOUNT"
+		for f in 'dietpi.txt' 'dietpi-wifi.txt' 'dietpiEnv.txt' 'unattended_pivpn.conf' 'Automation_Custom_PreScript.sh' 'Automation_Custom_Script.sh'
 		do
-			[[ -f "${TEMP_MOUNT}/$f" ]] && cp "${TEMP_MOUNT}/$f" /boot/
+			[[ -f $TMP_MOUNT/$f ]] && cp -u "$TMP_MOUNT/$f" /boot/
 		done
 		umount "$SETUP_PART"
-		rmdir "$TEMP_MOUNT"
-		# finally delete the partition so the resizing works
-		sfdisk --no-tell --no-reread --delete "$ROOT_DRIVE" "${SETUP_PART: -1}"
+		rmdir "$TMP_MOUNT"
+		# Finally delete the partition so the resizing works
+		sfdisk --no-reread --no-tell-kernel --delete "$ROOT_DRIVE" "${SETUP_PART: -1}"
 	fi
 
 	# Only increase partition size if not yet done on first boot

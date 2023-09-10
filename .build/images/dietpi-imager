@@ -46,22 +46,11 @@
 		exit 1
 	}
 
-	# Inputs
+	##########################################
+	# Process inputs
+	##########################################
 	SOURCE_TYPE='Drive'
 	FP_SOURCE_IMG=
-	if [[ -b $1 ]]
-	then
-		FP_SOURCE=$1
-
-	elif [[ -f $1 ]]
-	then
-		SOURCE_TYPE='Image'
-		FP_SOURCE_IMG=$1
-
-	elif [[ $1 ]]
-	then
-		Error_Exit "Input source $1 does not exist, aborting..."
-	fi
 	PART_TABLE_TYPE=
 	#FP_ROOT_DEV=
 	ROOT_FS_TYPE=
@@ -69,9 +58,32 @@
 	OUTPUT_IMG_EXT='img'
 	#OUTPUT_IMG_NAME=
 	[[ $MOUNT_IT == 'On' ]] || MOUNT_IT='Off'
+	[[ $SKIP_FIRSTBOOT_RESIZE == 1 ]] || SKIP_FIRSTBOOT_RESIZE=0
 	[[ $SHRINK_ONLY == 1 ]] || SHRINK_ONLY=0
 	[[ $SKIP_ARCHIVE == 1 ]] || SKIP_ARCHIVE=0
-	[[ $SKIP_FIRSTBOOT_RESIZE == 1 ]] || SKIP_FIRSTBOOT_RESIZE=0
+	ADD_DOS_PART=0
+	while (( $# ))
+	do
+		case $1 in
+			'--add-dos-part') ADD_DOS_PART=1;;
+			*)
+				if [[ -b $1 ]]
+				then
+					FP_SOURCE=$1
+
+				elif [[ -f $1 ]]
+				then
+					SOURCE_TYPE='Image'
+					FP_SOURCE_IMG=$1
+
+				elif [[ $1 ]]
+				then
+					Error_Exit "Input source $1 does not exist, aborting..."
+				fi
+			;;
+		esac
+		shift
+	done
 
 	Unmount_tmp()
 	{
@@ -493,53 +505,58 @@
 			G_EXEC partprobe "$FP_SOURCE"
 			G_EXEC partx -u "$FP_SOURCE"
 		fi
-		[[ -z ${ADD_DOS_PART+x} ]] && ADD_DOS_PART="0"
-		if [[ $ADD_DOS_PART == 1 ]]
+
+		# Derive target image size from last partition end + 1 sector
+		IMAGE_SIZE=$(( ( $(sfdisk -qlo End "$FP_SOURCE" | tail -1) + 1 ) * 512 )) # 512 byte sectors => bytes
+
+		# Add trailing FAT partition to simplify first run setup if requested
+		# - WARNING: this assumes that the partitions in the table are in order (which we do in other places as well)
+		if (( $ADD_DOS_PART ))
 		then
-			G_DIETPI-NOTIFY 2 'Adding a 1MB FAT partition to the partition table'
-			# figure out where the new partition starts
-			# WARNING: this assumes that the partitions in the table are in order (which we do in other places as well)
-			[[ $SOURCE_TYPE == 'Image' ]] && G_EXEC_OUTPUT=1 G_EXEC dd if=/dev/zero bs=1M count=1 >> "$FP_SOURCE_IMG"
-			local root_part=$(sfdisk -qlo DEVICE "$FP_SOURCE" | tail -1)
-			local np_start=$(($(sfdisk -qlo END "$FP_SOURCE" | tail -1) + 1))
-			local type='EBD0A0A2-B9E5-4433-87C0-68B6B72699C7'
+			G_DIETPI-NOTIFY 2 'Adding a 1 MiB FAT partition to simplify first run setup'
+			# Increase source image size if required
+			[[ $SOURCE_TYPE == 'Image' ]] && (( $(stat -c '%s' "$FP_SOURCE_IMG") < $IMAGE_SIZE + 1048576 )) && G_EXEC truncate -s "$(( $IMAGE_SIZE + 1048576 ))" "$FP_SOURCE_IMG" && G_EXEC losetup -c "$FP_SOURCE"
+			# Add new DOS partition
+			local type='EBD0A0A2-B9E5-4433-87C0-68B6B72699C7' # https://en.wikipedia.org/wiki/GUID_Partition_Table#Partition_type_GUIDs
 			[[ $PART_TABLE_TYPE == 'dos' ]] && type='c'
-			# now we know where the new partition needs to start... so let's add it to the partition table
-			G_EXEC losetup -c "$FP_SOURCE"
-			sfdisk -a "$FP_SOURCE" <<< "start=$np_start,size=2048,type=$type"
+			G_EXEC eval "sfdisk -a '$FP_SOURCE' <<< 'start=$IMAGE_SIZE,size=2048,type=$type'" # size in sectors
 			G_EXEC partprobe "$FP_SOURCE"
-			G_EXEC losetup -c "$FP_SOURCE"
-			# create a fat filesystem and add the two config files to it
-			local new_dos_part=$(sfdisk -l "$FP_SOURCE" | grep "$np_start" | mawk '{print $1}')
-			G_EXE_OUTPUT=1 G_EXEC mkfs.vfat -v -n DIETPISETUP "$new_dos_part"
+			G_EXEC partx -u "$FP_SOURCE"
+			# create a FAT filesystem and add config files to it
+			local new_dos_part=$(sfdisk -l "$FP_SOURCE" | mawk "/ $IMAGE_SIZE /{print \$1;exit}")
+			G_EXE_OUTPUT=1 G_EXEC mkfs.fat -F 16 -n DIETPISETUP "$new_dos_part"
 			local fat_mountpoint=$(mktemp -d)
 			local root_mountpoint=$(mktemp -d)
 			G_EXEC mount "$new_dos_part" "$fat_mountpoint"
-			G_EXEC mount "$root_part" "$root_mountpoint"
-			G_EXEC cp "${root_mountpoint}"/boot/dietpi{,-wifi,Env}.txt "$fat_mountpoint"/
-			cat << '_EOF_' > "$fat_mountpoint"/Readme-DietPi-Config.txt
+			G_EXEC mount "$FP_ROOT_DEV" "$root_mountpoint"
+			G_DIETPI-NOTIFY 2 'Copying dietpi.txt and other config files to the DIETPISETUP partition'
+			for f in 'dietpi.txt' 'dietpi-wifi.txt' 'dietpiEnv.txt' 'unattended_pivpn.conf' 'Automation_Custom_PreScript.sh' 'Automation_Custom_Script.sh'
+			do
+				[[ -f $root_mountpoint/boot/$f ]] && G_EXEC cp "$root_mountpoint/boot/$f" "$fat_mountpoint/"
+			done
+			cat << '_EOF_' > "$fat_mountpoint/Readme-DietPi-Config.txt"
 DietPi pre-boot configuration
 
 You can edit the files in this folder to setup some configuration options
-or even a completely automated install. Please check the documentation for
-details. https://dietpi.com/docs/install/
+or even a completely automated install. Please check the documentation and
+dietpi.txt for details: https://dietpi.com/docs/install/
 
 This folder also supports the following additional files. Please ensure that
-they have Unix style line endings:
+they have UNIX style LF line endings:
 - unattended_pivpn.conf
 - Automation_Custom_PreScript.sh
 - Automation_Custom_Script.sh
 _EOF_
-			G_DIETPI-NOTIFY 2 "copied dietpi.txt and dietpi-wifi.txt to the DIETPISETUP partition"
 			G_EXEC umount "$root_mountpoint" "$fat_mountpoint"
 			G_EXEC rmdir "$root_mountpoint" "$fat_mountpoint"
+			((IMAGE_SIZE+=1048576))
 		fi
+
 		# Exit now if source shall be shrunk only
 		(( $SHRINK_ONLY )) && exit 0
 
-		# Finished: Derive final image size from last partition end + 1 sector
-		IMAGE_SIZE=$(( ( $(sfdisk -qlo End "$FP_SOURCE" | tail -1) + 1 ) * 512 )) # 512 byte sectors => bytes
-		[[ $PART_TABLE_TYPE == 'gpt' ]] && IMAGE_SIZE=$(( $IMAGE_SIZE + 33*512 )) # Add 33 (34 overall) sectors for GPT backup partition table
+		# Add 33 (34 overall) sectors for GPT backup partition table
+		[[ $PART_TABLE_TYPE == 'gpt' ]] && IMAGE_SIZE=$(( $IMAGE_SIZE + 33*512 ))
 
 		# Image file source and dd target
 		if [[ $FP_SOURCE_IMG && $CLONING_TOOL == 'dd' ]]
