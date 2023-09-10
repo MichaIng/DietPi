@@ -337,7 +337,7 @@ Links to hardware and software manufacturers, sources and build instructions use
 - [Restic](https://github.com/restic/restic)
 - [MediaWiki](https://github.com/wikimedia/mediawiki)
 - [Homebridge](https://github.com/homebridge/homebridge)
-- [ADSB Feeder](https://github.com/dirkhh/adsb-feeder-image)
+- [ADS-B Feeder](https://github.com/dirkhh/adsb-feeder-image)
 
 ---
 
