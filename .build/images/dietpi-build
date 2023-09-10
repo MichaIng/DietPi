@@ -45,6 +45,7 @@ GITBRANCH='master'
 GITOWNER='MichaIng'
 EDITION=
 SUFFIX=
+ADD_DOS_PART=1
 while (( $# ))
 do
 	case $1 in
@@ -59,6 +60,7 @@ do
 		'-o') shift; GITOWNER=$1;;
 		'-e') shift; EDITION=$1;;
 		'-s') shift; SUFFIX=$1;;
+		'--no-dos-part') ADD_DOS_PART=0;;
 		*) G_DIETPI-NOTIFY 1 "Invalid input \"$1\", aborting..."; exit 1;;
 	esac
 	shift
@@ -169,6 +171,10 @@ case $PTTYPE in
 	'gpt') [[ $HW_MODEL == 21 ]] && efi_size=64 iname='NativePC-UEFI' ITYPE='Installer';;
 	*) G_DIETPI-NOTIFY 1 "Invalid partition table type \"$PTTYPE\" passed, aborting..."; exit 1;;
 esac
+
+# Do not add trailing FAT partitions for VM, container and (Clonezilla) installer images, and if there is a boot FAT partition already
+[[ $HW_MODEL == 20 || $HW_MODEL == 75 || $ITYPE == 'Installer' ]] && ADD_DOS_PART=0
+[[ $boot_size -gt 0 && $boot_fstype == 'fat'* ]] && ADD_DOS_PART=0
 
 fsname='' apackages=() afs_opts=() afsck=() aresize=()
 case $FSTYPE in
@@ -419,6 +425,7 @@ _EOF_
 
 cat << _EOF_ >> rootfs/etc/rc.local
 export GITOWNER='$GITOWNER' GITBRANCH='$GITBRANCH' HW_MODEL='$HW_MODEL' IMAGE_CREATOR=0 PREIMAGE_INFO=0 WIFI_REQUIRED=1 DISTRO_TARGET=$DISTRO
+echo '[ INFO ] Running DietPi-Installer for $G_GITOWNER/$G_GITBRANCH'
 bash -c "\$(curl -sSf 'https://raw.githubusercontent.com/$G_GITOWNER/DietPi/$G_GITBRANCH/.build/images/dietpi-installer')" || poweroff
 _EOF_
 
@@ -464,7 +471,13 @@ G_EXEC losetup -d "$FP_LOOP"
 # Do not pack and upload raw VM image if not explicitly requested
 [[ $VMTYPE && ! $VMTYPE =~ ^(raw|all)$ ]] && SKIP_ARCHIVE=1 || SKIP_ARCHIVE=0
 export FP_ROOT_DEV CLONING_TOOL OUTPUT_IMG_NAME MOUNT_IT='Off' SKIP_ARCHIVE SKIP_FIRSTBOOT_RESIZE=1
-[[ $EDITION && $EDITION != 'all' ]] || bash -c "$(curl -sSf "https://raw.githubusercontent.com/$G_GITOWNER/DietPi/$G_GITBRANCH/.build/images/dietpi-imager")" 'DietPi-Imager' "$OUTPUT_IMG_NAME.img" || exit 1
+IMAGER_ARGS=("$OUTPUT_IMG_NAME.img")
+(( $ADD_DOS_PART )) && IMAGER_ARGS+=('--add-dos-part')
+if [[ ! $EDITION || $EDITION == 'all' ]]
+then
+	G_DIETPI-NOTIFY 2 "Running DietPi-Imager for $G_GITOWNER/$G_GITBRANCH"
+	bash -c "$(curl -sSf "https://raw.githubusercontent.com/$G_GITOWNER/DietPi/$G_GITBRANCH/.build/images/dietpi-imager")" 'DietPi-Imager' "${IMAGER_ARGS[@]}" || exit 1
+fi
 
 # Amiberry edition: Install automatically on first boot, enable autostart option and onboard audio on RPi
 if [[ $EDITION == 'Amiberry' || ( $EDITION == 'all' && $HW_MODEL == 0 ) ]]
@@ -477,6 +490,15 @@ then
 	G_EXEC losetup "$FP_LOOP" "$OUTPUT_IMG_NAME.img"
 	G_EXEC partprobe "$FP_LOOP"
 	G_EXEC partx -u "$FP_LOOP"
+
+	# Remove added DOS partition, it will be re-added by DietPi-Imager
+	if (( $ADD_DOS_PART )) && [[ $(lsblk -nrbo FSTYPE,LABEL "$FP_LOOP" | tail -1) == 'vfat DIETPISETUP' ]]
+	then
+		SETUP_PART=$(sfdisk -lqo DEVICE "$FP_LOOP" | tail -1)
+		G_EXEC_OUTPUT=1 G_EXEC sfdisk --no-reread --no-tell-kernel --delete "$FP_LOOP" "${SETUP_PART: -1}"
+		G_EXEC partprobe "$FP_LOOP"
+		G_EXEC partx -u "$FP_LOOP"
+	fi
 
 	# Mount filesystems
 	G_EXEC mkdir rootfs
@@ -502,7 +524,8 @@ then
 	G_EXEC rmdir rootfs
 	G_EXEC losetup -d "$FP_LOOP"
 
-	bash -c "$(curl -sSf "https://raw.githubusercontent.com/$G_GITOWNER/DietPi/$G_GITBRANCH/.build/images/dietpi-imager")" 'DietPi-Imager' "$OUTPUT_IMG_NAME.img" || exit 1
+	G_DIETPI-NOTIFY 2 "Running DietPi-Imager for $G_GITOWNER/$G_GITBRANCH"
+	bash -c "$(curl -sSf "https://raw.githubusercontent.com/$G_GITOWNER/DietPi/$G_GITBRANCH/.build/images/dietpi-imager")" 'DietPi-Imager' "${IMAGER_ARGS[@]}" || exit 1
 fi
 
 # AlloGUI edition: Pre-install Allo GUI with all managed audiophile software
@@ -517,7 +540,17 @@ then
 	G_EXEC losetup "$FP_LOOP" "$OUTPUT_IMG_NAME.img"
 	G_EXEC partprobe "$FP_LOOP"
 	G_EXEC partx -u "$FP_LOOP"
-	# Raise partition and filesystem size as well, since resize2fs within the image returns "Nothing to do!"
+
+	# Remove added DOS partition, it will be re-added by DietPi-Imager
+	if (( $ADD_DOS_PART )) && [[ $(lsblk -nrbo FSTYPE,LABEL "$FP_LOOP" | tail -1) == 'vfat DIETPISETUP' ]]
+	then
+		SETUP_PART=$(sfdisk -lqo DEVICE "$FP_LOOP" | tail -1)
+		G_EXEC_OUTPUT=1 G_EXEC sfdisk --no-reread --no-tell-kernel --delete "$FP_LOOP" "${SETUP_PART: -1}"
+		G_EXEC partprobe "$FP_LOOP"
+		G_EXEC partx -u "$FP_LOOP"
+	fi
+
+	# Raise partition and filesystem sizes as well, since partprobe cannot inform the host kernel about the changed size from within the container
 	G_EXEC_OUTPUT=1 G_EXEC eval "sfdisk -fN2 '$FP_LOOP' <<< ',+'"
 	G_EXEC partprobe "$FP_LOOP"
 	G_EXEC partx -u "$FP_LOOP"
@@ -625,7 +658,8 @@ _EOF_
 	G_EXEC rmdir rootfs
 	G_EXEC losetup -d "$FP_LOOP"
 
-	bash -c "$(curl -sSf "https://raw.githubusercontent.com/$G_GITOWNER/DietPi/$G_GITBRANCH/.build/images/dietpi-imager")" 'DietPi-Imager' "$OUTPUT_IMG_NAME.img" || exit 1
+	G_DIETPI-NOTIFY 2 "Running DietPi-Imager for $G_GITOWNER/$G_GITBRANCH"
+	bash -c "$(curl -sSf "https://raw.githubusercontent.com/$G_GITOWNER/DietPi/$G_GITBRANCH/.build/images/dietpi-imager")" 'DietPi-Imager' "${IMAGER_ARGS[@]}" || exit 1
 fi
 
 [[ $VMTYPE && $VMTYPE != 'raw' ]] || exit 0
