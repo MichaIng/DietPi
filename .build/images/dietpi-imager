@@ -506,24 +506,30 @@
 			G_EXEC partx -u "$FP_SOURCE"
 		fi
 
-		# Derive target image size from last partition end + 1 sector
-		IMAGE_SIZE=$(( $(sfdisk -qlo End "$FP_SOURCE" | tail -1) + 1 )) # 512 byte sectors
+		# Derive target image size from last partition end
+		# - WARNING: this assumes that the partitions in the table are in order (which we do in other places as well)
+		local last_part_end=$(sfdisk -qlo End "$FP_SOURCE" | tail -1) # 512 byte sectors
+		IMAGE_SIZE=$last_part_end
+		# Add 34 sectors for GPT backup partition table and 1 sector for MBR
+		[[ $PART_TABLE_TYPE == 'gpt' ]] && ((IMAGE_SIZE+=33)) || ((IMAGE_SIZE++))
+		((IMAGE_SIZE*=512)) # 512 byte sectors => bytes
 
 		# Add trailing FAT partition to simplify first run setup if requested
-		# - WARNING: this assumes that the partitions in the table are in order (which we do in other places as well)
 		if (( $ADD_DOS_PART ))
 		then
 			G_DIETPI-NOTIFY 2 'Adding a 1 MiB FAT partition to simplify first run setup'
+			((IMAGE_SIZE+=1048576))
 			# Increase source image size if required
-			[[ $SOURCE_TYPE == 'Image' ]] && (( $(stat -c '%s' "$FP_SOURCE_IMG") < $IMAGE_SIZE * 512 + 1048576 )) && G_EXEC truncate -s "$(( $IMAGE_SIZE * 512 + 1048576 ))" "$FP_SOURCE_IMG" && G_EXEC losetup -c "$FP_SOURCE"
+			[[ $SOURCE_TYPE == 'Image' ]] && (( $(stat -c '%s' "$FP_SOURCE_IMG") < $IMAGE_SIZE )) && G_EXEC truncate -s "$IMAGE_SIZE" "$FP_SOURCE_IMG" && G_EXEC losetup -c "$FP_SOURCE"
 			# Add new DOS partition
+			local start=$(( $last_part_end + 1 ))
 			local type='EBD0A0A2-B9E5-4433-87C0-68B6B72699C7' # https://en.wikipedia.org/wiki/GUID_Partition_Table#Partition_type_GUIDs
 			[[ $PART_TABLE_TYPE == 'dos' ]] && type='c'
-			G_EXEC eval "sfdisk -a '$FP_SOURCE' <<< 'start=$IMAGE_SIZE,size=2048,type=$type'" # size in sectors
+			G_EXEC eval "sfdisk -a '$FP_SOURCE' <<< 'start=$start,size=2048,type=$type'" # size in sectors
 			G_EXEC partprobe "$FP_SOURCE"
 			G_EXEC partx -u "$FP_SOURCE"
 			# create a FAT filesystem and add config files to it
-			local new_dos_part=$(sfdisk -l "$FP_SOURCE" | mawk "/ $IMAGE_SIZE /{print \$1;exit}")
+			local new_dos_part=$(sfdisk -l "$FP_SOURCE" | mawk "/ $start /{print \$1;exit}")
 			G_EXE_OUTPUT=1 G_EXEC mkfs.fat -F 16 -n DIETPISETUP "$new_dos_part"
 			local fat_mountpoint=$(mktemp -d)
 			local root_mountpoint=$(mktemp -d)
@@ -549,15 +555,10 @@ they have UNIX style LF line endings:
 _EOF_
 			G_EXEC umount "$root_mountpoint" "$fat_mountpoint"
 			G_EXEC rmdir "$root_mountpoint" "$fat_mountpoint"
-			((IMAGE_SIZE+=2048))
 		fi
 
 		# Exit now if source shall be shrunk only
 		(( $SHRINK_ONLY )) && exit 0
-
-		# Add 33 (34 overall) sectors for GPT backup partition table
-		[[ $PART_TABLE_TYPE == 'gpt' ]] && ((IMAGE_SIZE+=33))
-		IMAGE_SIZE=$(( $IMAGE_SIZE * 512 )) # 512 byte sectors => bytes
 
 		# Image file source and dd target
 		if [[ $FP_SOURCE_IMG && $CLONING_TOOL == 'dd' ]]
