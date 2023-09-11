@@ -507,7 +507,7 @@
 		fi
 
 		# Derive target image size from last partition end + 1 sector
-		IMAGE_SIZE=$(( ( $(sfdisk -qlo End "$FP_SOURCE" | tail -1) + 1 ) * 512 )) # 512 byte sectors => bytes
+		IMAGE_SIZE=$(( $(sfdisk -qlo End "$FP_SOURCE" | tail -1) + 1 )) # 512 byte sectors
 
 		# Add trailing FAT partition to simplify first run setup if requested
 		# - WARNING: this assumes that the partitions in the table are in order (which we do in other places as well)
@@ -515,7 +515,7 @@
 		then
 			G_DIETPI-NOTIFY 2 'Adding a 1 MiB FAT partition to simplify first run setup'
 			# Increase source image size if required
-			[[ $SOURCE_TYPE == 'Image' ]] && (( $(stat -c '%s' "$FP_SOURCE_IMG") < $IMAGE_SIZE + 1048576 )) && G_EXEC truncate -s "$(( $IMAGE_SIZE + 1048576 ))" "$FP_SOURCE_IMG" && G_EXEC losetup -c "$FP_SOURCE"
+			[[ $SOURCE_TYPE == 'Image' ]] && (( $(stat -c '%s' "$FP_SOURCE_IMG") < $IMAGE_SIZE * 512 + 1048576 )) && G_EXEC truncate -s "$(( $IMAGE_SIZE * 512 + 1048576 ))" "$FP_SOURCE_IMG" && G_EXEC losetup -c "$FP_SOURCE"
 			# Add new DOS partition
 			local type='EBD0A0A2-B9E5-4433-87C0-68B6B72699C7' # https://en.wikipedia.org/wiki/GUID_Partition_Table#Partition_type_GUIDs
 			[[ $PART_TABLE_TYPE == 'dos' ]] && type='c'
@@ -549,14 +549,15 @@ they have UNIX style LF line endings:
 _EOF_
 			G_EXEC umount "$root_mountpoint" "$fat_mountpoint"
 			G_EXEC rmdir "$root_mountpoint" "$fat_mountpoint"
-			((IMAGE_SIZE+=1048576))
+			((IMAGE_SIZE+=2048))
 		fi
 
 		# Exit now if source shall be shrunk only
 		(( $SHRINK_ONLY )) && exit 0
 
 		# Add 33 (34 overall) sectors for GPT backup partition table
-		[[ $PART_TABLE_TYPE == 'gpt' ]] && IMAGE_SIZE=$(( $IMAGE_SIZE + 33*512 ))
+		[[ $PART_TABLE_TYPE == 'gpt' ]] && ((IMAGE_SIZE+=33))
+		IMAGE_SIZE=$(( $IMAGE_SIZE * 512 )) # 512 byte sectors => bytes
 
 		# Image file source and dd target
 		if [[ $FP_SOURCE_IMG && $CLONING_TOOL == 'dd' ]]
@@ -571,13 +572,15 @@ _EOF_
 			[[ $(readlink -f "$PWD/$OUTPUT_IMG_NAME.$OUTPUT_IMG_EXT") != "$(readlink -f "$FP_SOURCE_IMG")" ]] && G_EXEC mv "$FP_SOURCE_IMG" "$OUTPUT_IMG_NAME.$OUTPUT_IMG_EXT"
 
 			# Check for sufficient free disk space to store the 7z archive with 100 MiB buffer
-			G_CHECK_FREESPACE . $(( $IMAGE_SIZE * 15/100 / 1024**2 + 100 )) || exit 1
+			(( $SKIP_ARCHIVE )) || G_CHECK_FREESPACE . $(( $IMAGE_SIZE * 15/100 / 1024**2 + 100 )) || exit 1
 
 		# Drive source and dd target
 		elif [[ $CLONING_TOOL == 'dd' ]]
 		then
-			# Check for sufficient free disk space to store the image and the 7z archive with 100 MiB buffer
-			G_CHECK_FREESPACE . $(( $IMAGE_SIZE * 115/100 / 1024**2 + 100 )) || exit 1
+			# Check for sufficient free disk space to store the image and in case the 7z archive with 100 MiB buffer
+			local free_space_percent=100
+			(( $SKIP_ARCHIVE )) || free_space_percent=115 # 15% image size for 7z archive
+			G_CHECK_FREESPACE . $(( $IMAGE_SIZE * $free_space_percent/100 / 1024**2 + 100 )) || exit 1
 
 			G_DIETPI-NOTIFY 2 "Creating final image with actually used size: $(( $IMAGE_SIZE / 1024**2 + 1 )) MiB"
 			G_EXEC_OUTPUT=1 G_EXEC dd if="$FP_SOURCE" of="$OUTPUT_IMG_NAME.$OUTPUT_IMG_EXT" bs=1M status=progress count=$(( $IMAGE_SIZE / 1024**2 + 1 ))
@@ -736,7 +739,6 @@ _EOF_
 		(( $(free -m | mawk '/Mem:/{print $2}') < 1750 && $(nproc) > 2 )) && limit_threads=('-mmt2')
 		[[ -f $OUTPUT_IMG_NAME.7z ]] && G_EXEC rm "$OUTPUT_IMG_NAME.7z"
 		[[ ( -t 0 || -t 1 ) && $TERM != 'dumb' ]] && G_EXEC_OUTPUT=1
-		# Add "-bsp1 -bso1 -bse2" to print output to regular STDOUT and STDERR, else the pipe to "tee" makes it omit at least the progress output.
 		G_EXEC_DESC='Creating final 7zip archive' G_EXEC "$c7zz" a -mx=9 "${limit_threads[@]}" "$OUTPUT_IMG_NAME.7z" "$OUTPUT_IMG_NAME.$OUTPUT_IMG_EXT" hash.txt README.md
 
 		G_EXEC_NOHALT=1 G_EXEC rm hash.txt README.md
