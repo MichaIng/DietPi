@@ -487,7 +487,11 @@ find "$DIR" ! \( -path "$DIR/DEBIAN" -prune \) -type f -exec md5sum {} + | sed "
 
 # - Add dependencies
 adeps+=('libplist3' 'libsodium23' 'libgcrypt20')
-(( $G_DISTRO > 6 )) && adeps+=('libavcodec59') || adeps+=('libavcodec58')
+case $G_DISTRO in
+	5|6) adeps+=('libavcodec58');;
+	7) adeps+=('libavcodec59');;
+	*) adeps+=('libavcodec60');;
+esac
 DEPS_APT_VERSIONED=
 for i in "${adeps[@]}"
 do
