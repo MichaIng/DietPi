@@ -74,7 +74,7 @@ cat << '_EOF_' > raspberrypi-sys-mods/lib/udev/rules.d/99-com.rules
 SUBSYSTEM=="input", GROUP="input", MODE="0660"
 SUBSYSTEM=="i2c-dev", GROUP="i2c", MODE="0660"
 SUBSYSTEM=="spidev", GROUP="spi", MODE="0660"
-SUBSYSTEM=="bcm2835-gpiomem", GROUP="gpio", MODE="0660"
+SUBSYSTEM=="*gpiomem*", GROUP="gpio", MODE="0660"
 SUBSYSTEM=="rpivid-*", GROUP="video", MODE="0660"
 
 KERNEL=="vcsm-cma", GROUP="video", MODE="0660"
@@ -126,7 +126,7 @@ find raspberrypi-sys-mods ! \( -path raspberrypi-sys-mods/DEBIAN -prune \) -type
 
 cat << _EOF_ > raspberrypi-sys-mods/DEBIAN/control
 Package: raspberrypi-sys-mods
-Version: 2:20220915-dietpi2
+Version: 2:20230510-dietpi1
 Architecture: all
 Maintainer: MichaIng <micha@dietpi.com>
 Date: $(date -u '+%a, %d %b %Y %T %z')
