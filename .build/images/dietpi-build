@@ -45,6 +45,8 @@ GITBRANCH='master'
 GITOWNER='MichaIng'
 EDITION=
 SUFFIX=
+ADD_DOS_PART=1
+SIGN_PASS=
 while (( $# ))
 do
 	case $1 in
@@ -59,6 +61,8 @@ do
 		'-o') shift; GITOWNER=$1;;
 		'-e') shift; EDITION=$1;;
 		'-s') shift; SUFFIX=$1;;
+		'--no-dos-part') ADD_DOS_PART=0;;
+		'--sign') shift; SIGN_PASS=$1;;
 		*) G_DIETPI-NOTIFY 1 "Invalid input \"$1\", aborting..."; exit 1;;
 	esac
 	shift
@@ -170,6 +174,10 @@ case $PTTYPE in
 	*) G_DIETPI-NOTIFY 1 "Invalid partition table type \"$PTTYPE\" passed, aborting..."; exit 1;;
 esac
 
+# Do not add trailing FAT partitions for VM, container and (Clonezilla) installer images, and if there is a boot FAT partition already
+[[ $HW_MODEL == 20 || $HW_MODEL == 75 || $ITYPE == 'Installer' ]] && ADD_DOS_PART=0
+[[ $boot_size -gt 0 && $boot_fstype == 'fat'* ]] && ADD_DOS_PART=0
+
 fsname='' apackages=() afs_opts=() afsck=() aresize=()
 case $FSTYPE in
 	'ext4') apackages+=('e2fsprogs') afs_opts=('-e' 'remount-ro') afsck=('e2fsck' '-fyD') aresize=('resize2fs');;
@@ -199,16 +207,13 @@ fi
 (( $efi_size )) || [[ $boot_size -gt 0 && $boot_fstype == 'fat'* ]] && apackages+=('dosfstools')
 
 # Emulation support in case of incompatible architecture
-(( ( $G_HW_ARCH < 10 && $G_HW_ARCH < $HW_ARCH ) || ( ( $G_HW_ARCH == 10 || $G_HW_ARCH == 11 ) && $G_HW_ARCH != $HW_ARCH ) )) && apackages+=('qemu-user-static' 'binfmt-support')
+# - TEMPORARY: Early exit for Trixie/Sid until systemd + QEMU incompatibility fix has been released: https://github.com/systemd/systemd/pull/28954
+(( ( $G_HW_ARCH < 10 && $G_HW_ARCH < $HW_ARCH ) || ( ( $G_HW_ARCH == 10 || $G_HW_ARCH == 11 ) && $G_HW_ARCH != $HW_ARCH ) )) && { apackages+=('qemu-user-static' 'binfmt-support'); (( $DISTRO == 8 )) && { G_DIETPI-NOTIFY 1 'systemd on Trixie/Sid does currently not support QEMU emulation, aborting ...'; exit 0; } }
 
 # Virtual machine disk conversion
 [[ $VMTYPE && $VMTYPE != 'raw' ]] && apackages+=('qemu-utils')
 
-# p7zip vs 7zip package
-# shellcheck disable=SC2015
-(( $G_DISTRO < 7 )) && apackages+=('p7zip') c7zz='7zr' || apackages+=('7zip') c7zz='7zz'
-
-G_AG_CHECK_INSTALL_PREREQ parted debootstrap dbus systemd-container "${apackages[@]}"
+G_AG_CHECK_INSTALL_PREREQ parted debootstrap dbus systemd-container xz-utils "${apackages[@]}"
 
 # Bootstrap archive keyring if missing
 if [[ ! -f $keyring ]]
@@ -242,9 +247,8 @@ then
 		79) series=6;;
 		*) :;;
 	esac
-	G_EXEC curl -sSfO "https://dietpi.com/downloads/nanopi$series.7z"
-	G_EXEC "$c7zz" x "nanopi$series.7z"
-	G_EXEC rm "nanopi$series.7z"
+	G_EXEC curl -sSfO "https://dietpi.com/downloads/nanopi$series.img.xz"
+	G_EXEC xz -d "nanopi$series.img.xz"
 	G_EXEC truncate -s "$(( 140 + $root_size ))M" "nanopi$series.img"
 	G_EXEC_OUTPUT=1 G_EXEC sgdisk -e "nanopi$series.img"
 	G_EXEC_OUTPUT=1 G_EXEC eval "sfdisk -fN8 'nanopi$series.img' <<< ',+'"
@@ -419,6 +423,7 @@ _EOF_
 
 cat << _EOF_ >> rootfs/etc/rc.local
 export GITOWNER='$GITOWNER' GITBRANCH='$GITBRANCH' HW_MODEL='$HW_MODEL' IMAGE_CREATOR=0 PREIMAGE_INFO=0 WIFI_REQUIRED=1 DISTRO_TARGET=$DISTRO
+echo '[ INFO ] Running DietPi-Installer for $G_GITOWNER/$G_GITBRANCH'
 bash -c "\$(curl -sSf 'https://raw.githubusercontent.com/$G_GITOWNER/DietPi/$G_GITBRANCH/.build/images/dietpi-installer')" || poweroff
 _EOF_
 
@@ -464,19 +469,36 @@ G_EXEC losetup -d "$FP_LOOP"
 # Do not pack and upload raw VM image if not explicitly requested
 [[ $VMTYPE && ! $VMTYPE =~ ^(raw|all)$ ]] && SKIP_ARCHIVE=1 || SKIP_ARCHIVE=0
 export FP_ROOT_DEV CLONING_TOOL OUTPUT_IMG_NAME MOUNT_IT='Off' SKIP_ARCHIVE SKIP_FIRSTBOOT_RESIZE=1
-[[ $EDITION && $EDITION != 'all' ]] || bash -c "$(curl -sSf "https://raw.githubusercontent.com/$G_GITOWNER/DietPi/$G_GITBRANCH/.build/images/dietpi-imager")" 'DietPi-Imager' "$OUTPUT_IMG_NAME.img" || exit 1
+IMAGER_ARGS=("$OUTPUT_IMG_NAME.img")
+(( $ADD_DOS_PART )) && IMAGER_ARGS+=('--add-dos-part')
+[[ $SIGN_PASS ]] && IMAGER_ARGS+=('--sign' "$SIGN_PASS")
+if [[ ! $EDITION || $EDITION == 'all' ]]
+then
+	G_DIETPI-NOTIFY 2 "Running DietPi-Imager for $G_GITOWNER/$G_GITBRANCH"
+	bash -c "$(curl -sSf "https://raw.githubusercontent.com/$G_GITOWNER/DietPi/$G_GITBRANCH/.build/images/dietpi-imager")" 'DietPi-Imager' "${IMAGER_ARGS[@]}" || exit 1
+fi
 
 # Amiberry edition: Install automatically on first boot, enable autostart option and onboard audio on RPi
 if [[ $EDITION == 'Amiberry' || ( $EDITION == 'all' && $HW_MODEL == 0 ) ]]
 then
 	G_EXEC mv "$OUTPUT_IMG_NAME.img" "${OUTPUT_IMG_NAME}_Amiberry.img"
 	OUTPUT_IMG_NAME="${OUTPUT_IMG_NAME}_Amiberry"
+	IMAGER_ARGS[0]="$OUTPUT_IMG_NAME.img"
 
 	# Create loop device
 	FP_LOOP=$(losetup -f)
 	G_EXEC losetup "$FP_LOOP" "$OUTPUT_IMG_NAME.img"
 	G_EXEC partprobe "$FP_LOOP"
 	G_EXEC partx -u "$FP_LOOP"
+
+	# Remove added DOS partition, it will be re-added by DietPi-Imager
+	if (( $ADD_DOS_PART )) && [[ $(lsblk -nrbo FSTYPE,LABEL "$FP_LOOP" | tail -1) == 'vfat DIETPISETUP' ]]
+	then
+		SETUP_PART=$(sfdisk -lqo DEVICE "$FP_LOOP" | tail -1)
+		G_EXEC_OUTPUT=1 G_EXEC sfdisk --no-reread --no-tell-kernel --delete "$FP_LOOP" "${SETUP_PART: -1}"
+		G_EXEC partprobe "$FP_LOOP"
+		G_EXEC partx -u "$FP_LOOP"
+	fi
 
 	# Mount filesystems
 	G_EXEC mkdir rootfs
@@ -502,7 +524,8 @@ then
 	G_EXEC rmdir rootfs
 	G_EXEC losetup -d "$FP_LOOP"
 
-	bash -c "$(curl -sSf "https://raw.githubusercontent.com/$G_GITOWNER/DietPi/$G_GITBRANCH/.build/images/dietpi-imager")" 'DietPi-Imager' "$OUTPUT_IMG_NAME.img" || exit 1
+	G_DIETPI-NOTIFY 2 "Running DietPi-Imager for $G_GITOWNER/$G_GITBRANCH"
+	bash -c "$(curl -sSf "https://raw.githubusercontent.com/$G_GITOWNER/DietPi/$G_GITBRANCH/.build/images/dietpi-imager")" 'DietPi-Imager' "${IMAGER_ARGS[@]}" || exit 1
 fi
 
 # AlloGUI edition: Pre-install Allo GUI with all managed audiophile software
@@ -510,6 +533,7 @@ if [[ $EDITION == 'AlloGUI' || ( $EDITION == 'all' && $HW_MODEL =~ ^(0|70)$ ) ]]
 then
 	G_EXEC mv "$OUTPUT_IMG_NAME.img" "${OUTPUT_IMG_NAME%_Amiberry}_AlloGUI.img"
 	OUTPUT_IMG_NAME="${OUTPUT_IMG_NAME%_Amiberry}_AlloGUI"
+	IMAGER_ARGS[0]="$OUTPUT_IMG_NAME.img"
 
 	# Raise image size to 2.5 GiB and create loop device
 	G_EXEC truncate -s '2560M' "$OUTPUT_IMG_NAME.img"
@@ -517,7 +541,17 @@ then
 	G_EXEC losetup "$FP_LOOP" "$OUTPUT_IMG_NAME.img"
 	G_EXEC partprobe "$FP_LOOP"
 	G_EXEC partx -u "$FP_LOOP"
-	# Raise partition and filesystem size as well, since resize2fs within the image returns "Nothing to do!"
+
+	# Remove added DOS partition, it will be re-added by DietPi-Imager
+	if (( $ADD_DOS_PART )) && [[ $(lsblk -nrbo FSTYPE,LABEL "$FP_LOOP" | tail -1) == 'vfat DIETPISETUP' ]]
+	then
+		SETUP_PART=$(sfdisk -lqo DEVICE "$FP_LOOP" | tail -1)
+		G_EXEC_OUTPUT=1 G_EXEC sfdisk --no-reread --no-tell-kernel --delete "$FP_LOOP" "${SETUP_PART: -1}"
+		G_EXEC partprobe "$FP_LOOP"
+		G_EXEC partx -u "$FP_LOOP"
+	fi
+
+	# Raise partition and filesystem sizes as well, since partprobe cannot inform the host kernel about the changed size from within the container
 	G_EXEC_OUTPUT=1 G_EXEC eval "sfdisk -fN2 '$FP_LOOP' <<< ',+'"
 	G_EXEC partprobe "$FP_LOOP"
 	G_EXEC partx -u "$FP_LOOP"
@@ -625,7 +659,8 @@ _EOF_
 	G_EXEC rmdir rootfs
 	G_EXEC losetup -d "$FP_LOOP"
 
-	bash -c "$(curl -sSf "https://raw.githubusercontent.com/$G_GITOWNER/DietPi/$G_GITBRANCH/.build/images/dietpi-imager")" 'DietPi-Imager' "$OUTPUT_IMG_NAME.img" || exit 1
+	G_DIETPI-NOTIFY 2 "Running DietPi-Imager for $G_GITOWNER/$G_GITBRANCH"
+	bash -c "$(curl -sSf "https://raw.githubusercontent.com/$G_GITOWNER/DietPi/$G_GITBRANCH/.build/images/dietpi-imager")" 'DietPi-Imager' "${IMAGER_ARGS[@]}" || exit 1
 fi
 
 [[ $VMTYPE && $VMTYPE != 'raw' ]] || exit 0
@@ -633,11 +668,9 @@ fi
 ##########################################
 # Virtual machines
 ##########################################
-G_EXEC_DESC='Downloading current README.md to pack with image...' G_EXEC curl -sSf "https://raw.githubusercontent.com/$G_GITOWNER/DietPi/$G_GITBRANCH/README.md" -o README.md
-
 # NB: LZMA2 ultra compression requires much memory per thread. 1 GiB is not sufficient for >2 threads, hence use "-mmt2" to limit used CPU threads to "2" on 1 GiB devices with more than two cores.
 limit_threads=()
-(( $(free -m | mawk '/Mem:/{print $2}') < 1750 && $(nproc) > 2 )) && limit_threads=('-mmt2')
+(( $(free -m | mawk '/Mem:/{print $2}') < 1750 && $(nproc) > 2 )) && limit_threads=('-T2')
 
 # Since qemu-img does not support VMDK and VHDX resizing, we need to resize the raw .img. It is usually done as sparse file, hence the actual disk usage does not change.
 G_EXEC qemu-img resize "$OUTPUT_IMG_NAME.img" 8G
@@ -693,24 +726,12 @@ ethernet0.present = "TRUE"
 extendedConfigFile = "$image_name.vmxf"
 floppy0.present = "FALSE"
 _EOF_
-	G_DIETPI-NOTIFY 2 'Generating hashes to pack with VMware appliance, please wait...'
-	cat << _EOF_ > hash.txt
-FILE:   $image_name.vmdk
-DATE:   $(date)
-MD5:    $(md5sum "$image_name.vmdk" | mawk '{print $1}')
-SHA1:   $(sha1sum "$image_name.vmdk" | mawk '{print $1}')
-SHA256: $(sha256sum "$image_name.vmdk" | mawk '{print $1}')
-
-FILE:   $image_name.vmx
-DATE:   $(date)
-MD5:    $(md5sum "$image_name.vmx" | mawk '{print $1}')
-SHA1:   $(sha1sum "$image_name.vmx" | mawk '{print $1}')
-SHA256: $(sha256sum "$image_name.vmx" | mawk '{print $1}')
-_EOF_
-	[[ ( -t 0 || -t 1 ) && $TERM != 'dumb' ]] && G_EXEC_OUTPUT=1
-	G_EXEC_DESC='Creating VMware 7-Zip archive' G_EXEC "$c7zz" a -mx=9 "${limit_threads[@]}" "$image_name.7z" "$image_name.vmdk" "$image_name.vmx" hash.txt README.md
+	G_EXEC_DESC='Creating VMware tar.xz archive' XZ_OPT="-9e ${limit_threads[*]}" G_EXEC tar -cJf "$image_name.tar.xz" "$image_name.vmdk" "$image_name.vmx"
 	G_EXEC rm "$image_name.vmdk" "$image_name.vmx"
-	[[ -x 'upload.sh' ]] && G_EXEC_OUTPUT=1 G_EXEC ./upload.sh "$image_name.7z" && G_EXEC rm "$image_name.7z"
+	G_EXEC_DESC='Generating SHA256 hash' G_EXEC eval "sha256sum '$image_name.tar.xz' > '$image_name.tar.xz.sha256'"
+	signature=()
+	[[ $SIGN_PASS ]] && { G_DIETPI-NOTIFY 2 'Signing archive ...'; gpg --batch --pinentry-mode loopback --passphrase "$SIGN_PASS" -b --armor "$image_name.tar.xz" || exit 1; signature=("$image_name.tar.xz.asc"); }
+	[[ -x 'upload.sh' ]] && G_EXEC_OUTPUT=1 G_EXEC ./upload.sh "$image_name.tar.xz"{,.sha256} "${signature[@]}" && G_EXEC rm "$image_name.tar.xz"{,.sha256} "${signature[@]}"
 fi
 
 ####### ESXi #############################
@@ -834,18 +855,11 @@ _EOF_
 	[[ $VMTYPE == 'all' ]] || G_EXEC rm "$image_name.vmdk"
 	G_EXEC rm "$image_name."{ovf,mf}
 
-	G_DIETPI-NOTIFY 2 'Generating hashes to pack with ESXi appliance, please wait...'
-	cat << _EOF_ > hash.txt
-FILE:   $image_name.ova
-DATE:   $(date)
-MD5:    $(md5sum "$image_name.ova" | mawk '{print $1}')
-SHA1:   $(sha1sum "$image_name.ova" | mawk '{print $1}')
-SHA256: $(sha256sum "$image_name.ova" | mawk '{print $1}')
-_EOF_
-	[[ ( -t 0 || -t 1 ) && $TERM != 'dumb' ]] && G_EXEC_OUTPUT=1
-	G_EXEC_DESC='Creating VirtualBox 7-Zip archive' G_EXEC "$c7zz" a -mx=9 "${limit_threads[@]}" "$image_name.7z" "$image_name.ova" hash.txt README.md
-	G_EXEC rm "$image_name.ova"
-	[[ -x 'upload.sh' ]] && G_EXEC_OUTPUT=1 G_EXEC ./upload.sh "$image_name.7z" && G_EXEC rm "$image_name.7z"
+	G_EXEC_DESC='Creating ESXi xz archive' G_EXEC xz -9e "${limit_threads[@]}" "$image_name.ova"
+	G_EXEC_DESC='Generating SHA256 hash' G_EXEC eval "sha256sum '$image_name.ova.xz' > '$image_name.ova.xz.sha256'"
+	signature=()
+	[[ $SIGN_PASS ]] && { G_DIETPI-NOTIFY 2 'Signing archive ...'; gpg --batch --pinentry-mode loopback --passphrase "$SIGN_PASS" -b --armor "$image_name.ova.xz" || exit 1; signature=("$image_name.ova.xz.asc"); }
+	[[ -x 'upload.sh' ]] && G_EXEC_OUTPUT=1 G_EXEC ./upload.sh "$image_name.ova.xz"{,.sha256} "${signature[@]}" && G_EXEC rm "$image_name.ova.xz"{,.sha256} "${signature[@]}"
 fi
 
 ####### VirtualBox #######################
@@ -992,18 +1006,11 @@ _EOF_
 	G_EXEC tar -cf "$image_name.ova" "$image_name."{ovf,vmdk,mf}
 	G_EXEC rm "$image_name."{ovf,vmdk,mf}
 
-	G_DIETPI-NOTIFY 2 'Generating hashes to pack with VMware appliance, please wait...'
-	cat << _EOF_ > hash.txt
-FILE:   $image_name.ova
-DATE:   $(date)
-MD5:    $(md5sum "$image_name.ova" | mawk '{print $1}')
-SHA1:   $(sha1sum "$image_name.ova" | mawk '{print $1}')
-SHA256: $(sha256sum "$image_name.ova" | mawk '{print $1}')
-_EOF_
-	[[ ( -t 0 || -t 1 ) && $TERM != 'dumb' ]] && G_EXEC_OUTPUT=1
-	G_EXEC_DESC='Creating VirtualBox 7-Zip archive' G_EXEC "$c7zz" a -mx=9 "${limit_threads[@]}" "$image_name.7z" "$image_name.ova" hash.txt README.md
-	G_EXEC rm "$image_name.ova"
-	[[ -x 'upload.sh' ]] && G_EXEC_OUTPUT=1 G_EXEC ./upload.sh "$image_name.7z" && G_EXEC rm "$image_name.7z"
+	G_EXEC_DESC='Creating VirtualBox xz archive' G_EXEC xz -9e "${limit_threads[@]}" "$image_name.ova"
+	G_EXEC_DESC='Generating SHA256 hash' G_EXEC eval "sha256sum '$image_name.ova.xz' > '$image_name.ova.xz.sha256'"
+	signature=()
+	[[ $SIGN_PASS ]] && { G_DIETPI-NOTIFY 2 'Signing archive ...'; gpg --batch --pinentry-mode loopback --passphrase "$SIGN_PASS" -b --armor "$image_name.ova.xz" || exit 1; signature=("$image_name.ova.xz.asc"); }
+	[[ -x 'upload.sh' ]] && G_EXEC_OUTPUT=1 G_EXEC ./upload.sh "$image_name.ova.xz"{,.sha256} "${signature[@]}" && G_EXEC rm "$image_name.ova.xz"{,.sha256} "${signature[@]}"
 fi
 
 ####### Hyper-V ##########################
@@ -1013,18 +1020,11 @@ then
 	# Convert raw image to VHDX
 	G_EXEC qemu-img convert -O vhdx "$OUTPUT_IMG_NAME.img" "$image_name.vhdx"
 
-	G_DIETPI-NOTIFY 2 'Generating hashes to pack with Hyper-V image, please wait...'
-	cat << _EOF_ > hash.txt
-FILE:   $image_name.vhdx
-DATE:   $(date)
-MD5:    $(md5sum "$image_name.vhdx" | mawk '{print $1}')
-SHA1:   $(sha1sum "$image_name.vhdx" | mawk '{print $1}')
-SHA256: $(sha256sum "$image_name.vhdx" | mawk '{print $1}')
-_EOF_
-	[[ ( -t 0 || -t 1 ) && $TERM != 'dumb' ]] && G_EXEC_OUTPUT=1
-	G_EXEC_DESC='Creating Hyper-V 7-Zip archive' G_EXEC "$c7zz" a -mx=9 "${limit_threads[@]}" "$image_name.7z" "$image_name.vhdx" hash.txt README.md
-	G_EXEC rm "$image_name.vhdx"
-	[[ -x 'upload.sh' ]] && G_EXEC_OUTPUT=1 G_EXEC ./upload.sh "$image_name.7z" && G_EXEC rm "$image_name.7z"
+	G_EXEC_DESC='Creating Hyper-V xz archive' G_EXEC xz -9e "${limit_threads[@]}" "$image_name.vhdx"
+	G_EXEC_DESC='Generating SHA256 hash' G_EXEC eval "sha256sum '$image_name.vhdx.xz' > '$image_name.vhdx.xz.sha256'"
+	signature=()
+	[[ $SIGN_PASS ]] && { G_DIETPI-NOTIFY 2 'Signing archive ...'; gpg --batch --pinentry-mode loopback --passphrase "$SIGN_PASS" -b --armor "$image_name.vhdx.xz" || exit 1; signature=("$image_name.vhdx.xz.asc"); }
+	[[ -x 'upload.sh' ]] && G_EXEC_OUTPUT=1 G_EXEC ./upload.sh "$image_name.vhdx.xz"{,.sha256} "${signature[@]}" && G_EXEC rm "$image_name.vhdx.xz"{,.sha256} "${signature[@]}"
 fi
 
 ####### Proxmox ############################
@@ -1034,18 +1034,15 @@ then
 	# Convert raw image to QCOW2
 	G_EXEC qemu-img convert -c -O qcow2 "$OUTPUT_IMG_NAME.img" "$image_name.qcow2"
 
-	G_DIETPI-NOTIFY 2 'Generating hashes to pack with Proxmox image, please wait...'
-	cat << _EOF_ > hash.txt
-FILE:   $image_name.qcow2
-DATE:   $(date)
-MD5:    $(md5sum "$image_name.qcow2" | mawk '{print $1}')
-SHA1:   $(sha1sum "$image_name.qcow2" | mawk '{print $1}')
-SHA256: $(sha256sum "$image_name.qcow2" | mawk '{print $1}')
-_EOF_
-	[[ ( -t 0 || -t 1 ) && $TERM != 'dumb' ]] && G_EXEC_OUTPUT=1
-	G_EXEC_DESC='Creating Proxmox 7-Zip archive' G_EXEC "$c7zz" a -mx=9 "${limit_threads[@]}" "$image_name.7z" "$image_name.qcow2" hash.txt README.md
-	[[ $VMTYPE == 'all' ]] || G_EXEC rm "$image_name.qcow2"
-	[[ -x 'upload.sh' ]] && G_EXEC_OUTPUT=1 G_EXEC ./upload.sh "$image_name.7z" && G_EXEC rm "$image_name.7z"
+	# Keep QCOW2 in compression when UTM appliance shall be generated from it as well.
+	keep=()
+	[[ $VMTYPE == 'all' ]] && keep=('-k')
+
+	G_EXEC_DESC='Creating Proxmox xz archive' G_EXEC xz -9e "${limit_threads[@]}" "${keep[@]}" "$image_name.qcow2"
+	G_EXEC_DESC='Generating SHA256 hash' G_EXEC eval "sha256sum '$image_name.qcow2.xz' > '$image_name.qcow2.xz.sha256'"
+	signature=()
+	[[ $SIGN_PASS ]] && { G_DIETPI-NOTIFY 2 'Signing archive ...'; gpg --batch --pinentry-mode loopback --passphrase "$SIGN_PASS" -b --armor "$image_name.qcow2.xz" || exit 1; signature=("$image_name.qcow2.xz.asc"); }
+	[[ -x 'upload.sh' ]] && G_EXEC_OUTPUT=1 G_EXEC ./upload.sh "$image_name.qcow2.xz"{,.sha256} "${signature[@]}" && G_EXEC rm "$image_name.qcow2.xz"{,.sha256} "${signature[@]}"
 fi
 
 ####### UTM ##############################
@@ -1211,34 +1208,16 @@ _EOF_
 </dict>
 </plist>
 _EOF_
-	G_DIETPI-NOTIFY 2 'Generating hashes to pack with UTM appliance, please wait...'
-	cat << _EOF_ > hash.txt
-FILE:   $image_name.utm/Images/data.qcow2
-DATE:   $(date)
-MD5:    $(md5sum "$image_name.utm/Images/data.qcow2" | mawk '{print $1}')
-SHA1:   $(sha1sum "$image_name.utm/Images/data.qcow2" | mawk '{print $1}')
-SHA256: $(sha256sum "$image_name.utm/Images/data.qcow2" | mawk '{print $1}')
-
-FILE:   $image_name.utm/config.plist
-DATE:   $(date)
-MD5:    $(md5sum "$image_name.utm/config.plist" | mawk '{print $1}')
-SHA1:   $(sha1sum "$image_name.utm/config.plist" | mawk '{print $1}')
-SHA256: $(sha256sum "$image_name.utm/config.plist" | mawk '{print $1}')
-
-FILE:   $image_name.utm/view.plist
-DATE:   $(date)
-MD5:    $(md5sum "$image_name.utm/view.plist" | mawk '{print $1}')
-SHA1:   $(sha1sum "$image_name.utm/view.plist" | mawk '{print $1}')
-SHA256: $(sha256sum "$image_name.utm/view.plist" | mawk '{print $1}')
-_EOF_
-	[[ ( -t 0 || -t 1 ) && $TERM != 'dumb' ]] && G_EXEC_OUTPUT=1
-	G_EXEC_DESC='Creating UTM 7-Zip archive' G_EXEC "$c7zz" a -mx=9 "${limit_threads[@]}" "$image_name.7z" "$image_name.utm" hash.txt README.md
+	G_EXEC_DESC='Creating UTM tar.xz archive' XZ_OPT="-9e ${limit_threads[*]}" G_EXEC tar -cJf "$image_name.tar.xz" "$image_name.utm"
 	G_EXEC rm -R "$image_name.utm"
-	[[ -x 'upload.sh' ]] && G_EXEC_OUTPUT=1 G_EXEC ./upload.sh "$image_name.7z" && G_EXEC rm "$image_name.7z"
+	G_EXEC_DESC='Generating SHA256 hash' G_EXEC eval "sha256sum '$image_name.tar.xz' > '$image_name.tar.xz.sha256'"
+	signature=()
+	[[ $SIGN_PASS ]] && { G_DIETPI-NOTIFY 2 'Signing archive ...'; gpg --batch --pinentry-mode loopback --passphrase "$SIGN_PASS" -b --armor "$image_name.tar.xz" || exit 1; signature=("$image_name.tar.xz.asc"); }
+	[[ -x 'upload.sh' ]] && G_EXEC_OUTPUT=1 G_EXEC ./upload.sh "$image_name.tar.xz"{,.sha256} "${signature[@]}" && G_EXEC rm "$image_name.tar.xz"{,.sha256} "${signature[@]}"
 fi
 
 # Cleanup
-G_EXEC rm hash.txt README.md "$OUTPUT_IMG_NAME.img"
+G_EXEC rm "$OUTPUT_IMG_NAME.img"
 
 exit 0
 }

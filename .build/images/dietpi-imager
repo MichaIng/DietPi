@@ -13,7 +13,7 @@
 	#   or use an existing .img file
 	#   or use Clonezilla to generate a bootable installer ISO from drive for x86_64 systems
 	# - Minimises root partition and filesystem
-	# - Hashes and 7z's the final image ready for release
+	# - Compresses the final image ready for release
 	#////////////////////////////////////
 
 	# Import DietPi-Globals ---------------------------------------------------------------
@@ -46,22 +46,11 @@
 		exit 1
 	}
 
-	# Inputs
+	##########################################
+	# Process inputs
+	##########################################
 	SOURCE_TYPE='Drive'
 	FP_SOURCE_IMG=
-	if [[ -b $1 ]]
-	then
-		FP_SOURCE=$1
-
-	elif [[ -f $1 ]]
-	then
-		SOURCE_TYPE='Image'
-		FP_SOURCE_IMG=$1
-
-	elif [[ $1 ]]
-	then
-		Error_Exit "Input source $1 does not exist, aborting..."
-	fi
 	PART_TABLE_TYPE=
 	#FP_ROOT_DEV=
 	ROOT_FS_TYPE=
@@ -69,9 +58,34 @@
 	OUTPUT_IMG_EXT='img'
 	#OUTPUT_IMG_NAME=
 	[[ $MOUNT_IT == 'On' ]] || MOUNT_IT='Off'
+	[[ $SKIP_FIRSTBOOT_RESIZE == 1 ]] || SKIP_FIRSTBOOT_RESIZE=0
 	[[ $SHRINK_ONLY == 1 ]] || SHRINK_ONLY=0
 	[[ $SKIP_ARCHIVE == 1 ]] || SKIP_ARCHIVE=0
-	[[ $SKIP_FIRSTBOOT_RESIZE == 1 ]] || SKIP_FIRSTBOOT_RESIZE=0
+	ADD_DOS_PART=0
+	SIGN_PASS=
+	while (( $# ))
+	do
+		case $1 in
+			'--add-dos-part') ADD_DOS_PART=1;;
+			'--sign') shift; SIGN_PASS=$1;;
+			*)
+				if [[ -b $1 ]]
+				then
+					FP_SOURCE=$1
+
+				elif [[ -f $1 ]]
+				then
+					SOURCE_TYPE='Image'
+					FP_SOURCE_IMG=$1
+
+				elif [[ $1 ]]
+				then
+					Error_Exit "Input source $1 does not exist, aborting..."
+				fi
+			;;
+		esac
+		shift
+	done
 
 	Unmount_tmp()
 	{
@@ -277,9 +291,7 @@
 	Main(){
 
 		# Dependencies
-		local p7zip='7zip' c7zz='7zz'
-		(( $G_DISTRO < 7 )) && p7zip='p7zip' c7zz='7zr'
-		G_AG_CHECK_INSTALL_PREREQ parted fdisk zerofree "$p7zip"
+		G_AG_CHECK_INSTALL_PREREQ parted fdisk zerofree xz-utils
 
 		# Skip menu if all inputs are provided via environment variables
 		if [[ ( $SOURCE_TYPE$FP_SOURCE == 'Drive'?* || $SOURCE_TYPE$FP_SOURCE_IMG == 'Image'?* ) && $FP_ROOT_DEV && $CLONING_TOOL =~ ^(dd|Clonezilla)$ && $OUTPUT_IMG_NAME ]]
@@ -494,12 +506,60 @@
 			G_EXEC partx -u "$FP_SOURCE"
 		fi
 
+		# Derive target image size from last partition end
+		# - WARNING: this assumes that the partitions in the table are in order (which we do in other places as well)
+		local last_part_end=$(sfdisk -qlo End "$FP_SOURCE" | tail -1) # 512 byte sectors
+		IMAGE_SIZE=$last_part_end
+		# Add 34 sectors for GPT backup partition table and 1 sector for MBR
+		# shellcheck disable=SC2015
+		[[ $PART_TABLE_TYPE == 'gpt' ]] && ((IMAGE_SIZE+=34)) || ((IMAGE_SIZE++))
+		((IMAGE_SIZE*=512)) # 512 byte sectors => bytes
+
+		# Add trailing FAT partition to simplify first run setup if requested
+		if (( $ADD_DOS_PART ))
+		then
+			G_DIETPI-NOTIFY 2 'Adding a 1 MiB FAT partition to simplify first run setup'
+			((IMAGE_SIZE+=1048576))
+			# Increase source image size if required
+			[[ $SOURCE_TYPE == 'Image' ]] && (( $(stat -c '%s' "$FP_SOURCE_IMG") < $IMAGE_SIZE )) && G_EXEC truncate -s "$IMAGE_SIZE" "$FP_SOURCE_IMG" && G_EXEC losetup -c "$FP_SOURCE"
+			# Add new DOS partition
+			local start=$(( $last_part_end + 1 ))
+			local type='EBD0A0A2-B9E5-4433-87C0-68B6B72699C7' # https://en.wikipedia.org/wiki/GUID_Partition_Table#Partition_type_GUIDs
+			[[ $PART_TABLE_TYPE == 'dos' ]] && type='c'
+			G_EXEC eval "sfdisk -a '$FP_SOURCE' <<< 'start=$start,size=2048,type=$type'" # size in sectors
+			G_EXEC partprobe "$FP_SOURCE"
+			G_EXEC partx -u "$FP_SOURCE"
+			# create a FAT filesystem and add config files to it
+			local new_dos_part=$(sfdisk -l "$FP_SOURCE" | mawk "/ $start /{print \$1;exit}")
+			G_EXE_OUTPUT=1 G_EXEC mkfs.fat -n DIETPISETUP "$new_dos_part"
+			local fat_mountpoint=$(mktemp -d)
+			local root_mountpoint=$(mktemp -d)
+			G_EXEC mount "$new_dos_part" "$fat_mountpoint"
+			G_EXEC mount "$FP_ROOT_DEV" "$root_mountpoint"
+			G_DIETPI-NOTIFY 2 'Copying dietpi.txt and other config files to the DIETPISETUP partition'
+			for f in 'dietpi.txt' 'dietpi-wifi.txt' 'dietpiEnv.txt' 'unattended_pivpn.conf' 'Automation_Custom_PreScript.sh' 'Automation_Custom_Script.sh'
+			do
+				[[ -f $root_mountpoint/boot/$f ]] && G_EXEC cp "$root_mountpoint/boot/$f" "$fat_mountpoint/"
+			done
+			cat << '_EOF_' > "$fat_mountpoint/Readme-DietPi-Config.txt"
+DietPi pre-boot configuration
+
+You can edit the files in this folder to setup some configuration options
+or even a completely automated install. Please check the documentation and
+dietpi.txt for details: https://dietpi.com/docs/install/
+
+This folder also supports the following additional files. Please ensure that
+they have UNIX style LF line endings:
+- unattended_pivpn.conf
+- Automation_Custom_PreScript.sh
+- Automation_Custom_Script.sh
+_EOF_
+			G_EXEC umount "$root_mountpoint" "$fat_mountpoint"
+			G_EXEC rmdir "$root_mountpoint" "$fat_mountpoint"
+		fi
+
 		# Exit now if source shall be shrunk only
 		(( $SHRINK_ONLY )) && exit 0
-
-		# Finished: Derive final image size from last partition end + 1 sector
-		IMAGE_SIZE=$(( ( $(sfdisk -qlo End "$FP_SOURCE" | tail -1) + 1 ) * 512 )) # 512 byte sectors => bytes
-		[[ $PART_TABLE_TYPE == 'gpt' ]] && IMAGE_SIZE=$(( $IMAGE_SIZE + 33*512 )) # Add 33 (34 overall) sectors for GPT backup partition table
 
 		# Image file source and dd target
 		if [[ $FP_SOURCE_IMG && $CLONING_TOOL == 'dd' ]]
@@ -514,13 +574,15 @@
 			[[ $(readlink -f "$PWD/$OUTPUT_IMG_NAME.$OUTPUT_IMG_EXT") != "$(readlink -f "$FP_SOURCE_IMG")" ]] && G_EXEC mv "$FP_SOURCE_IMG" "$OUTPUT_IMG_NAME.$OUTPUT_IMG_EXT"
 
 			# Check for sufficient free disk space to store the 7z archive with 100 MiB buffer
-			G_CHECK_FREESPACE . $(( $IMAGE_SIZE * 15/100 / 1024**2 + 100 )) || exit 1
+			(( $SKIP_ARCHIVE )) || G_CHECK_FREESPACE . $(( $IMAGE_SIZE * 15/100 / 1024**2 + 100 )) || exit 1
 
 		# Drive source and dd target
 		elif [[ $CLONING_TOOL == 'dd' ]]
 		then
-			# Check for sufficient free disk space to store the image and the 7z archive with 100 MiB buffer
-			G_CHECK_FREESPACE . $(( $IMAGE_SIZE * 115/100 / 1024**2 + 100 )) || exit 1
+			# Check for sufficient free disk space to store the image and in case the 7z archive with 100 MiB buffer
+			local free_space_percent=100
+			(( $SKIP_ARCHIVE )) || free_space_percent=115 # 15% image size for 7z archive
+			G_CHECK_FREESPACE . $(( $IMAGE_SIZE * $free_space_percent/100 / 1024**2 + 100 )) || exit 1
 
 			G_DIETPI-NOTIFY 2 "Creating final image with actually used size: $(( $IMAGE_SIZE / 1024**2 + 1 )) MiB"
 			G_EXEC_OUTPUT=1 G_EXEC dd if="$FP_SOURCE" of="$OUTPUT_IMG_NAME.$OUTPUT_IMG_EXT" bs=1M status=progress count=$(( $IMAGE_SIZE / 1024**2 + 1 ))
@@ -661,34 +723,23 @@ _EOF_
 		# Exit now when archive shall be skipped
 		(( $SKIP_ARCHIVE )) && exit 0
 
-		# Generate hashes: MD5, SHA1, SHA256
-		G_DIETPI-NOTIFY 2 'Generating hashes to pack with image, please wait...'
-		cat << _EOF_ > hash.txt
-FILE:   $OUTPUT_IMG_NAME.$OUTPUT_IMG_EXT
-DATE:   $(date)
-MD5:    $(md5sum "$OUTPUT_IMG_NAME.$OUTPUT_IMG_EXT" | mawk '{print $1}')
-SHA1:   $(sha1sum "$OUTPUT_IMG_NAME.$OUTPUT_IMG_EXT" | mawk '{print $1}')
-SHA256: $(sha256sum "$OUTPUT_IMG_NAME.$OUTPUT_IMG_EXT" | mawk '{print $1}')
-_EOF_
-		# Download current README
-		G_EXEC_DESC='Downloading current README.md to pack with image...' G_EXEC curl -sSf "$DIETPI_REPO/README.md" -o README.md
-
-		# Generate 7z archive
-		# NB: LZMA2 ultra compression requires much memory per thread. 1 GiB is not sufficient for >2 threads, hence use "-mmt2" to limit used CPU threads to "2" on 1 GiB devices with more than two cores.
+		# Generate xz archive
+		# NB: LZMA2 ultra compression requires much memory per thread. 1 GiB is not sufficient for >2 threads, hence use "-T2" to limit used CPU threads to "2" on 1 GiB devices with more than two cores.
 		local limit_threads=()
-		(( $(free -m | mawk '/Mem:/{print $2}') < 1750 && $(nproc) > 2 )) && limit_threads=('-mmt2')
-		[[ -f $OUTPUT_IMG_NAME.7z ]] && G_EXEC rm "$OUTPUT_IMG_NAME.7z"
-		[[ ( -t 0 || -t 1 ) && $TERM != 'dumb' ]] && G_EXEC_OUTPUT=1
-		# Add "-bsp1 -bso1 -bse2" to print output to regular STDOUT and STDERR, else the pipe to "tee" makes it omit at least the progress output.
-		G_EXEC_DESC='Creating final 7zip archive' G_EXEC "$c7zz" a -mx=9 "${limit_threads[@]}" "$OUTPUT_IMG_NAME.7z" "$OUTPUT_IMG_NAME.$OUTPUT_IMG_EXT" hash.txt README.md
+		(( $(free -m | mawk '/Mem:/{print $2}') < 1750 && $(nproc) > 2 )) && limit_threads=('-T2')
+		[[ -f $OUTPUT_IMG_NAME.$OUTPUT_IMG_EXT.xz ]] && G_EXEC rm "$OUTPUT_IMG_NAME.$OUTPUT_IMG_EXT.xz"
+		G_EXEC_DESC='Creating final xz archive' G_EXEC xz -9e -k "${limit_threads[@]}" "$OUTPUT_IMG_NAME.$OUTPUT_IMG_EXT"
+		G_EXEC_DESC='Generating SHA256 hash' G_EXEC eval "sha256sum '$OUTPUT_IMG_NAME.$OUTPUT_IMG_EXT.xz' > '$OUTPUT_IMG_NAME.$OUTPUT_IMG_EXT.xz.sha256'"
+		local signature=() sig_text=''
+		[[ $SIGN_PASS ]] && { G_DIETPI-NOTIFY 2 'Signing archive ...'; gpg --batch --pinentry-mode loopback --passphrase "$SIGN_PASS" -b --armor "$OUTPUT_IMG_NAME.$OUTPUT_IMG_EXT.xz" || exit 1; signature=("$OUTPUT_IMG_NAME.$OUTPUT_IMG_EXT.xz.asc") sig_text="\nSignature:   $PWD/${signature[*]}"; }
 
-		G_EXEC_NOHALT=1 G_EXEC rm hash.txt README.md
 		G_DIETPI-NOTIFY 0 "DietPi-Imager has successfully finished.
-Final image file: $PWD/$OUTPUT_IMG_NAME.$OUTPUT_IMG_EXT
-Final 7z archive: $PWD/$OUTPUT_IMG_NAME.7z"
+Image file:  $PWD/$OUTPUT_IMG_NAME.$OUTPUT_IMG_EXT
+xz archive:  $PWD/$OUTPUT_IMG_NAME.$OUTPUT_IMG_EXT.xz
+SHA256 hash: $PWD/$OUTPUT_IMG_NAME.$OUTPUT_IMG_EXT.xz.sha256$sig_text"
 
 		# Upload archive automatically if there is an upload.sh in the same directory
-		[[ -x 'upload.sh' ]] && G_EXEC_OUTPUT=1 G_EXEC ./upload.sh "$OUTPUT_IMG_NAME.7z" && G_EXEC rm -R "$OUTPUT_IMG_NAME.7z"
+		[[ -x 'upload.sh' ]] && G_EXEC_OUTPUT=1 G_EXEC ./upload.sh "$OUTPUT_IMG_NAME.$OUTPUT_IMG_EXT.xz"{,.sha256} "${signature[@]}" && G_EXEC rm -R "$OUTPUT_IMG_NAME.$OUTPUT_IMG_EXT.xz"{,.sha256} "${signature[@]}"
 
 	}
 
