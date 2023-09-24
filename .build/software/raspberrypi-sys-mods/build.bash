@@ -142,7 +142,7 @@ _EOF_
 G_CONFIG_INJECT 'Installed-Size: ' "Installed-Size: $(du -sk raspberrypi-sys-mods | mawk '{print $1}')" raspberrypi-sys-mods/DEBIAN/control
 
 # Build DEB package
-G_EXEC_OUTPUT=1 G_EXEC dpkg-deb -b raspberrypi-sys-mods
+G_EXEC_OUTPUT=1 G_EXEC dpkg-deb -b -Zxz -z9 raspberrypi-sys-mods
 
 # Cleanup
 G_EXEC rm -R raspberrypi-sys-mods
