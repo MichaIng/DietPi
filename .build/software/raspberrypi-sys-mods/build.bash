@@ -37,7 +37,7 @@ G_EXEC curl -sSfo raspberrypi-sys-mods/lib/udev/rules.d/15-i2c-modprobe.rules 'h
 
 G_EXEC curl -sSfo raspberrypi-sys-mods/lib/udev/rules.d/99-com.rules 'https://raw.githubusercontent.com/RPi-Distro/raspberrypi-sys-mods/master/etc.armhf/udev/rules.d/99-com.rules'
 # The original rule uses the "strings" command from binutils, which we do not want to have pre-installed (it is huge!). So we use cat, which is safe for the node values read here.
-G_EXEC sed -i 's/(strings/(cat/g' raspberrypi-sys-mods/usr/lib/udev/rules.d/99-com.rules
+G_EXEC sed -i 's/(strings/(cat/g' raspberrypi-sys-mods/lib/udev/rules.d/99-com.rules
 
 cat << '_EOF_' > raspberrypi-sys-mods/DEBIAN/preinst
 #!/bin/dash
