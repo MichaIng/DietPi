@@ -12,40 +12,7 @@ fi
 
 G_EXEC mkdir -p raspberrypi-sys-mods/{DEBIAN,lib/udev/rules.d,usr/{lib,share/doc}/raspberrypi-sys-mods}
 
-cat << '_EOF_' > raspberrypi-sys-mods/usr/share/doc/raspberrypi-sys-mods/copyright
-Format: http://www.debian.org/doc/packaging-manuals/copyright-format/1.0/
-Upstream-Name: raspberrypi-sys-mods
-Source: https://github.com/RPi-Distro/raspberrypi-sys-mods
-
-Files: *
-Copyright: 2015 Raspberry Pi Foundation
-License: BSD-3-Clause
-
-License: BSD-3-Clause
- Redistribution and use in source and binary forms, with or without
- modification, are permitted provided that the following conditions
- are met:
- 1. Redistributions of source code must retain the above copyright
-    notice, this list of conditions and the following disclaimer.
- 2. Redistributions in binary form must reproduce the above copyright
-    notice, this list of conditions and the following disclaimer in the
-    documentation and/or other materials provided with the distribution.
- 3. Neither the name of the University nor the names of its contributors
-    may be used to endorse or promote products derived from this software
-    without specific prior written permission.
- .
- THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
- ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
- LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR
- A PARTICULAR PURPOSE ARE DISCLAIMED.  IN NO EVENT SHALL THE HOLDERS OR
- CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL,
- EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO,
- PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR
- PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF
- LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING
- NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS
- SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
-_EOF_
+G_EXEC curl -sSfo raspberrypi-sys-mods/usr/share/doc/raspberrypi-sys-mods/copyright 'https://raw.githubusercontent.com/RPi-Distro/raspberrypi-sys-mods/master/debian/copyright'
 
 cat << '_EOF_' > raspberrypi-sys-mods/usr/lib/raspberrypi-sys-mods/i2cprobe
 #!/bin/dash
@@ -66,53 +33,11 @@ modprobe "$MODALIAS" || modprobe "of:N${OF_NAME}T<NULL>C$OF_COMPATIBLE_0"
 _EOF_
 G_EXEC chmod +x raspberrypi-sys-mods/usr/lib/raspberrypi-sys-mods/i2cprobe
 
-cat << '_EOF_' > raspberrypi-sys-mods/lib/udev/rules.d/15-i2c-modprobe.rules
-SUBSYSTEM=="i2c|spi", ENV{MODALIAS}=="?*", ENV{OF_NAME}=="?*", ENV{OF_COMPATIBLE_0}=="?*", RUN+="/usr/lib/raspberrypi-sys-mods/i2cprobe"
-_EOF_
+G_EXEC curl -sSfo raspberrypi-sys-mods/lib/udev/rules.d/15-i2c-modprobe.rules 'https://raw.githubusercontent.com/RPi-Distro/raspberrypi-sys-mods/master/lib/udev/rules.d/15-i2c-modprobe.rules'
 
-cat << '_EOF_' > raspberrypi-sys-mods/lib/udev/rules.d/99-com.rules
-SUBSYSTEM=="input", GROUP="input", MODE="0660"
-SUBSYSTEM=="i2c-dev", GROUP="i2c", MODE="0660"
-SUBSYSTEM=="spidev", GROUP="spi", MODE="0660"
-SUBSYSTEM=="*gpiomem*", GROUP="gpio", MODE="0660"
-SUBSYSTEM=="rpivid-*", GROUP="video", MODE="0660"
-
-KERNEL=="vcsm-cma", GROUP="video", MODE="0660"
-SUBSYSTEM=="dma_heap", GROUP="video", MODE="0660"
-
-SUBSYSTEM=="gpio", GROUP="gpio", MODE="0660"
-SUBSYSTEM=="gpio", KERNEL=="gpiochip*", ACTION=="add", PROGRAM="/bin/sh -c 'chgrp -R gpio /sys/class/gpio && chmod -R g=u /sys/class/gpio'"
-SUBSYSTEM=="gpio", ACTION=="add", PROGRAM="/bin/sh -c 'chgrp -R gpio /sys%p && chmod -R g=u /sys%p'"
-
-# PWM export results in a "change" action on the pwmchip device (not "add" of a new device), so match actions other than "remove".
-SUBSYSTEM=="pwm", ACTION!="remove", PROGRAM="/bin/sh -c 'chgrp -R gpio /sys%p && chmod -R g=u /sys%p'"
-
-KERNEL=="ttyAMA[0-9]*|ttyS[0-9]*", PROGRAM="/bin/sh -c '\
-	ALIASES=/proc/device-tree/aliases; \
-	TTYNODE=$$(readlink /sys/class/tty/%k/device/of_node | sed 's/base/:/' | cut -d: -f2); \
-	if [ -e $$ALIASES/bluetooth ] && [ $$TTYNODE/bluetooth = $$(strings $$ALIASES/bluetooth) ]; then \
-		echo 1; \
-	elif [ -e $$ALIASES/console ]; then \
-		if [ $$TTYNODE = $$(strings $$ALIASES/console) ]; then \
-			echo 0;\
-		else \
-			exit 1; \
-		fi \
-	elif [ $$TTYNODE = $$(strings $$ALIASES/serial0) ]; then \
-		echo 0; \
-	elif [ $$TTYNODE = $$(strings $$ALIASES/serial1) ]; then \
-		echo 1; \
-	else \
-		exit 1; \
-	fi \
-'", SYMLINK+="serial%c"
-
-ACTION=="add", SUBSYSTEM=="vtconsole", KERNEL=="vtcon1", RUN+="/bin/sh -c '\
-	if echo RPi-Sense FB | cmp -s /sys/class/graphics/fb0/name; then \
-		echo 0 > /sys$devpath/bind; \
-	fi; \
-'"
-_EOF_
+G_EXEC curl -sSfo raspberrypi-sys-mods/lib/udev/rules.d/99-com.rules 'https://raw.githubusercontent.com/RPi-Distro/raspberrypi-sys-mods/master/etc.armhf/udev/rules.d/99-com.rules'
+# The original rule uses the "strings" command from binutils, which we do not want to have pre-installed (it is huge!). So we use cat, which is safe for the node values read here.
+G_EXEC sed -i 's/(strings/(cat/g' /usr/lib/udev/rules.d/99-com.rules
 
 cat << '_EOF_' > raspberrypi-sys-mods/DEBIAN/preinst
 #!/bin/dash
@@ -126,7 +51,7 @@ find raspberrypi-sys-mods ! \( -path raspberrypi-sys-mods/DEBIAN -prune \) -type
 
 cat << _EOF_ > raspberrypi-sys-mods/DEBIAN/control
 Package: raspberrypi-sys-mods
-Version: 2:20230510-dietpi1
+Version: 2:20230510-dietpi2
 Architecture: all
 Maintainer: MichaIng <micha@dietpi.com>
 Date: $(date -u '+%a, %d %b %Y %T %z')
