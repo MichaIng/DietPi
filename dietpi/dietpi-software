@@ -6073,7 +6073,7 @@ _EOF_
 			fi
 
 			# Install
-			G_EXEC curl -sSfL "$url" -o install.sh
+			G_EXEC curl -sSfLo install.sh "$url"
 			G_EXEC chmod +x install.sh
 			# - Skip web interface dialogue (which defaults to "true"), since we install a web server and PHP anyway
 			# - Skip query logging dialogue (which affects file logging only, not database>web UI) and set to "false"
@@ -6127,7 +6127,8 @@ _EOF_
 				then
 					G_CONFIG_INJECT '"mod_setenv"' '	"mod_setenv",' /etc/lighttpd/lighttpd.conf '"mod_.+",'
 				else
-					[[ -f '/etc/lighttpd/conf-enabled/05-setenv.conf' ]] || G_EXEC lighty-enable-mod setenv
+					G_EXEC_POST_FUNC(){ [[ $exit_code == 2 ]] && exit_code=0; } # Do not fail if modules are enabled already
+					G_EXEC lighty-enable-mod setenv
 				fi
 
 				# Add and enable Pi-hole config
@@ -6177,8 +6178,9 @@ _EOF_
  - 10.*
  - 172.16.* - 172.31.*
  - ::1
- - fe80:* - febf:*
- - fc00:* - fdff:*
+ - fe80:* - febf:* (LLAs)
+ - fc00:* - fdff:* (ULAs)
+\nNote that if you use IPv6 and hostnames within your LAN, but no ULAs (Unique Local Addresses), this might also block accesses from within your LAN, as then GUAs (Global Unicast Addresses) are used, which cannot be distinguished from public accesses.
 \nYou can always enable/disable this later using the commands:
  - $enable_cmd
  - $disable_cmd
@@ -6186,11 +6188,11 @@ _EOF_
 
 			# Create symlinks to align Pi-hole admin and 404 page relative to webroot
 			[[ -e '/var/www/admin' && ! -L '/var/www/admin' ]] && G_EXEC mv /var/www/admin{,.bak}
-			G_EXEC ln -sf /var/www/{html/admin,admin}
+			G_EXEC ln -sf /var/www/{html/,}admin
 			[[ -e '/var/www/pihole' && ! -L '/var/www/pihole' ]] && G_EXEC mv /var/www/pihole{,.bak}
-			G_EXEC ln -sf /var/www/{html/pihole,pihole}
+			G_EXEC ln -sf /var/www/{html/,}pihole
 
-			# Pi-hole v5: Add webserver user to pihole group to allow gravity.db access from web UI: https://github.com/MichaIng/DietPi/issues/3391
+			# Add webserver user to pihole group to allow gravity.db access from web UI: https://github.com/MichaIng/DietPi/issues/3391
 			G_EXEC usermod -aG pihole www-data
 
 			# Set web interface PW: https://github.com/MichaIng/DietPi/issues/662
@@ -6652,7 +6654,7 @@ _EOF_
 			esac
 
 			# Download
-			local fallback_url="https://github.com/fatedier/frp/releases/download/v0.51.3/frp_0.51.3_linux_$arch.tar.gz"
+			local fallback_url="https://github.com/fatedier/frp/releases/download/v0.52.1/frp_0.52.1_linux_$arch.tar.gz"
 			Download_Install "$(curl -sSfL 'https://api.github.com/repos/fatedier/frp/releases/latest' | mawk -F\" "/\"browser_download_url\": .*\/frp_[0-9.]*_linux_$arch\.tar\.gz\"/{print \$4}")"
 
 			G_EXEC cd frp_*
@@ -12015,11 +12017,13 @@ _EOF_
 			# remove the service that isn't needed for an app install on DietPi and install the rest
 			G_EXEC cd /tmp/adsb-feeder/src/modules/adsb-feeder/filesystem/root
 			G_EXEC rm ./usr/lib/systemd/system/adsb-bootstrap.service
+			G_EXEC rm ./usr/lib/systemd/system/adsb-update.service
+			G_EXEC rm ./usr/lib/systemd/system/adsb-update.timer
 			G_EXEC mv ./usr/lib/systemd/system/* /etc/systemd/system/
 
 			# determine the version
 			local ADSB_FEEDER_DATE_COMPONENT=$(git log -20 --date='format:%y%m%d' --format='%ad' | uniq -c | mawk '{print $2"."$1;exit}')
-			local ADSB_FEEDER_TAG_COMPONENT=$(git describe --match 'v[0-9]*' | cut -d- -f1)
+			local ADSB_FEEDER_TAG_COMPONENT=$(git describe --match 'v[0-9]*' --long | sed 's/-[0-9]*-g[0-9a-f]*//')
 			local ADSB_FEEDER_VERSION="$ADSB_FEEDER_TAG_COMPONENT(dietpi)-$ADSB_FEEDER_DATE_COMPONENT"
 
 			# create the target directory for the app and populated with the code from the git checkout
@@ -12814,11 +12818,10 @@ If no WireGuard (auto)start is included, but you require it, please do the follo
 		if To_Uninstall 141 # ADS-B Feeder
 		then
 			G_EXEC_NOHALT=1 G_EXEC_OUTPUT=1 G_EXEC /opt/adsb/docker-compose-adsb down
-			Remove_Service adsb-bootstrap
+			Remove_Service adsb-docker
 			Remove_Service adsb-feeder-update
 			Remove_Service adsb-setup
-			Remove_Service adsb-update
-			command -v docker &> /dev/null && G_EXEC docker image prune -a -f
+			[[ -f /opt/adsb/pre-uninstall-cleanup ]] && G_EXEC /opt/adsb/pre-uninstall-cleanup
 			G_EXEC rm -Rf /opt/adsb /mnt/dietpi_userdata/adsb-feeder /opt/adsb-feeder-update
 		fi
 
@@ -15176,7 +15179,7 @@ _EOF_
 					G_WHIP_CHECKLIST_ARRAY+=("$j" "${aSOFTWARE_NAME[$j]}: ${aSOFTWARE_DESC[$j]}" "$selected")
 
 					# Add previously selected items to array to be unmarked if deselected when selection is confirmed.
-					(( ${aSOFTWARE_INSTALL_STATE[$j]} == 1 )) && reset+=("$i")
+					(( ${aSOFTWARE_INSTALL_STATE[$j]} == 1 )) && reset+=("$j")
 				done
 			done
 		fi
@@ -15188,7 +15191,7 @@ _EOF_
  - Software and usage details: https://dietpi.com/docs/software/' || return 0
 
 		# Unmark all listed pending state items, so deselected items are not installed.
-		for i in "${!reset[@]}"
+		for i in "${reset[@]}"
 		do
 			aSOFTWARE_INSTALL_STATE[$i]=0
 		done
