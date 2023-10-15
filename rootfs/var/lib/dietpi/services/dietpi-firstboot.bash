@@ -134,7 +134,7 @@ _EOF_
 				if (( $add ))
 				then
 					overlays+=('/usr/lib/linux-image-visionfive2/starfive/vf2-overlay/ethernet-A12.dtbo')
-					G_CONFIG_INJECT 'fdtoverlays[[:blank:]]' "fdtoverlays ${overlays[@]}" /boot/extlinux/extlinux.conf
+					G_CONFIG_INJECT 'fdtoverlays[[:blank:]]' "fdtoverlays ${overlays[*]}" /boot/extlinux/extlinux.conf
 				fi
 			fi
 			if [[ $serial == *'-D008E000-'* ]]
@@ -151,7 +151,7 @@ _EOF_
 				if (( $add ))
 				then
 					overlays+=('/usr/lib/linux-image-visionfive2/starfive/vf2-overlay/8GB.dtbo')
-					G_CONFIG_INJECT 'fdtoverlays[[:blank:]]' "fdtoverlays ${overlays[@]}" /boot/extlinux/extlinux.conf
+					G_CONFIG_INJECT 'fdtoverlays[[:blank:]]' "fdtoverlays ${overlays[*]}" /boot/extlinux/extlinux.conf
 				fi
 			fi
 		fi
