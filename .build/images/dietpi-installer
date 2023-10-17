@@ -985,6 +985,16 @@ Package: armbian-firmware* linux-*
 Pin: origin apt.armbian.com
 Pin-Priority: 500
 _EOF_
+			if dpkg --compare-versions "$(dpkg-query -Wf '${Version}' base-files)" gt 20
+			then
+				G_DIETPI-NOTIFY 2 'Enforcing downgrade of Armbian'\''s base-files package to Debian'\''s'
+				cat << '_EOF_' > /etc/apt/preferences.d/dietpi-armbian-tmp
+Package: base-files
+Pin: release o=Debian
+Pin-Priority: 1000
+_EOF_
+				G_EXEC eval 'echo '\''APT::Get::Allow-Downgrades "1";'\'' > /etc/apt/apt.conf.d/dietpi-armbian'
+			fi
 			# Bootstrap Armbian repository
 			G_EXEC_RETRIES=2 G_EXEC eval 'curl -sSfL '\''https://apt.armbian.com/armbian.key'\'' | gpg --dearmor -o /etc/apt/trusted.gpg.d/dietpi-armbian.gpg --yes'
 			# Remove obsolete combined keyring
@@ -1056,8 +1066,19 @@ _EOF_
 				G_EXEC rm package.deb
 			fi
 
+			# Odroid C1: https://dietpi.com/forum/t/odroid-c1-not-booting-after-kernel-upgrade/17818
+			if (( $G_HW_MODEL == 10 ))
+			then
+				G_DIETPI-NOTIFY 2 'Pinning Odroid C1 "current" and "edge" kernel packages to latest known functional version and in case enforcing automated downgrade'
+				cat << '_EOF_' > /etc/apt/preferences.d/00-dietpi-odroidc1
+Package: linux-image-current-meson linux-dtb-current-meson linux-headers-current-meson linux-image-edge-meson linux-dtb-edge-meson linux-headers-edge-meson
+Pin: version 23.02.2
+Pin-Priority: 1000
+_EOF_
+				G_EXEC eval 'echo '\''APT::Get::Allow-Downgrades "1";'\'' > /etc/apt/apt.conf.d/dietpi-armbian'
+
 			# NanoPi R2S/NEO3
-			if [[ $G_HW_MODEL =~ ^(55|56)$ ]]
+			elif [[ $G_HW_MODEL =~ ^(55|56)$ ]]
 			then
 				G_DIETPI-NOTIFY 2 'Blacklisting video related kernel modules'
 				cat << '_EOF_' > /etc/modprobe.d/dietpi-headless.conf
@@ -1069,7 +1090,7 @@ blacklist rockchip_vdec
 _EOF_
 			fi
 			# Install initramfs-tools first to have an initramfs generated on kernel install, and configure it to use zstd if supported for better compression and faster decompression
-			[[ $kernel == 'rockchip64' || $kernel == 'rk35xx' || $kernel == 'meson64' || $kernel == 'sunxi64' || $kernel == 'sunxi' ]] && zstd=('zstd')
+			[[ $kernel == 'rockchip64' || $kernel == 'rk35xx' || $kernel == 'meson64' || $kernel == 'sunxi64' || $kernel == 'sunxi' || $kernel == 'rockchip' ]] && zstd=('zstd')
 			# - Download and pre-install a more recent armbian-firmware package from our server
 			#G_EXEC_OUTPUT=1 G_EXEC curl -fo package.deb 'https://dietpi.com/downloads/binaries/armbian-firmware.deb'
 			#G_EXEC_OUTPUT=1 G_EXEC dpkg -i package.deb
@@ -1097,8 +1118,15 @@ _EOF_
 			. /usr/lib/u-boot/platform_install.sh
 			# shellcheck disable=SC2154
 			write_uboot_platform "$DIR" "$BOOT_DEVICE"
+
+			# Odroid C1 cleanup: https://dietpi.com/forum/t/odroid-c1-not-booting-after-kernel-upgrade/17818
+			if (( $G_HW_MODEL == 10 ))
+			then
+				G_DIETPI-NOTIFY 2 'Setting Odroid C1 "current" and "edge" kernel packages on hold'
+				G_EXEC apt-mark hold linux-image-current-meson linux-dtb-current-meson linux-headers-current-meson linux-image-edge-meson linux-dtb-edge-meson linux-headers-edge-meson
+
 			# Radxa Zero: Enable USB OTG OOTB: https://github.com/MichaIng/DietPi/issues/5931
-			if (( $G_HW_MODEL == 74 ))
+			elif (( $G_HW_MODEL == 74 ))
 			then
 				G_AGI device-tree-compiler
 				[[ -d '/boot/overlay-user' ]] || G_EXEC mkdir /boot/overlay-user
@@ -1202,11 +1230,15 @@ _EOF_
 		elif (( $G_HW_MODEL == 81 ))
 		then
 			G_EXEC curl -sSfo package.deb 'https://dietpi.com/downloads/binaries/linux-image-visionfive2.deb'
-			[[ -f '/boot/extlinux/extlinux.conf' ]] && G_EXEC rm /boot/extlinux/extlinux.conf
+			dpkg-deb -I linux-image-visionfive2.deb conffiles | while read -r line
+			do
+				[[ -f $line ]] && G_EXEC rm "$line"
+			done
 			G_EXEC_OUTPUT=1 G_EXEC dpkg -i package.deb
 			G_EXEC rm package.deb
 			G_EXEC sed -i "s/root=[^[:blank:]]*/root=PARTUUID=$(findmnt -Ufnro PARTUUID -M /)/" /boot/extlinux/extlinux.conf
 			G_EXEC sed -i "s/rootfstype=[^[:blank:]]*/rootfstype=$(findmnt -Ufnro FSTYPE -M /)/" /boot/extlinux/extlinux.conf
+			aPACKAGES_REQUIRED_INSTALL+=('libubootenv-tool')
 
 		# Sparky SBC
 		elif (( $G_HW_MODEL == 70 ))
@@ -1228,11 +1260,33 @@ _EOF_
 			# Apply Lighttpd as default webserver, since Apache does not run on Linux 3.10: https://dietpi.com/forum/t/allogui-not-working-apache-service-doesnt-start/15708
 			G_CONFIG_INJECT 'AUTO_SETUP_WEB_SERVER_INDEX=' 'AUTO_SETUP_WEB_SERVER_INDEX=-2' /boot/dietpi.txt
 
-		# Armbian grab currently installed packages
+		# Armbian
 		elif [[ $G_HW_MODEL != 75 && $(dpkg-query -Wf '${Package} ') == *'armbian'* ]]
 		then
+			# Prevent any unintended packages from being installed from Armbian's APT repository, like base-files: https://github.com/MichaIng/DietPi/issues/6227#issuecomment-1713688577
+			cat << '_EOF_' > /etc/apt/preferences.d/dietpi-armbian
+Package: *
+Pin: origin apt.armbian.com
+Pin-Priority: -1
+
+Package: armbian-firmware* linux-*
+Pin: origin apt.armbian.com
+Pin-Priority: 500
+_EOF_
+			if dpkg --compare-versions "$(dpkg-query -Wf '${Version}' base-files)" gt 20
+			then
+				G_DIETPI-NOTIFY 2 'Enforcing downgrade of Armbian'\''s base-files package to Debian'\''s'
+				cat << '_EOF_' > /etc/apt/preferences.d/dietpi-armbian-tmp
+Package: base-files
+Pin: release o=Debian
+Pin-Priority: 1000
+_EOF_
+				G_EXEC eval 'echo '\''APT::Get::Allow-Downgrades "1";'\'' > /etc/apt/apt.conf.d/dietpi-armbian'
+			fi
+
 			systemctl stop armbian-*
 
+			# Keep currently installed kernel and bootloader packages
 			local apackages=(
 
 				'linux-image-'
@@ -1310,9 +1364,6 @@ _EOF_
 			unset -v apackages
 		fi
 
-		# RISC-V: Install Debian ports repository key
-		(( $G_HW_ARCH == 11 )) && aPACKAGES_REQUIRED_INSTALL+=('debian-ports-archive-keyring')
-
 		# WiFi and firmware packages: Usually no firmware should be necessary for VMs. If user manually passes though some USB device, user might need to install the firmware then.
 		if (( $G_HW_MODEL != 20 && $G_HW_MODEL != 75 ))
 		then
@@ -1383,6 +1434,10 @@ _EOF_
 
 		G_AGA
 
+		# Remove temporary APT configs
+		[[ -f '/etc/apt/preferences.d/dietpi-armbian-tmp' ]] && G_EXEC rm /etc/apt/preferences.d/dietpi-armbian-tmp
+		[[ -f '/etc/apt/apt.conf.d/dietpi-armbian' ]] && G_EXEC rm /etc/apt/apt.conf.d/dietpi-armbian
+
 		#------------------------------------------------------------------------------------------------
 		G_DIETPI-NOTIFY 3 "$G_PROGRAM_NAME" "[$SETUP_STEP] Applying DietPi tweaks and cleanup"; ((SETUP_STEP++))
 		#------------------------------------------------------------------------------------------------
@@ -1403,12 +1458,8 @@ _EOF_
 		G_DIETPI-NOTIFY 2 'Restoring default base files:'
 		# shellcheck disable=SC2114
 		rm -Rfv /etc/{motd,profile,update-motd.d,issue{,.net}} /root /home /media /var/mail
-		# Replace Armbian's base-files package with Debian's: https://github.com/MichaIng/DietPi/issues/6407
-		G_EXEC eval 'echo -e '\''Package: base-files\nPin: origin *\nPin-Priority: 1000'\'' > /etc/apt/preferences.d/99dietpi-base-files'
-		G_AGI --reinstall --allow-downgrades base-files # Restore /etc/{update-motd.d,issue{,.net}} /root /home, allow downgrades to replace Armbian's base-files package
-		G_EXEC rm /etc/apt/preferences.d/99dietpi-base-files
-		G_AGA
-		[[ -L '/var/lock' ]] || G_EXEC rm -R /var/lock # Armbian images currently ship with this as directory (bug), and postinst fails migrating it to symlink => /run/lock if that directory has content: https://github.com/MichaIng/DietPi/issues/6407
+		G_AGI --reinstall base-files # Restore /etc/{update-motd.d,issue{,.net}} /root /home
+		[[ -L '/var/lock' ]] || { [[ -d '/var/lock' ]] && G_EXEC rm -R /var/lock; G_EXEC ln -s /run/lock /var/lock; } # Armbian images currently ship with this as directory (bug), and postinst fails migrating it to symlink => /run/lock if that directory has content: https://github.com/MichaIng/DietPi/issues/6407
 		G_EXEC /var/lib/dpkg/info/base-files.postinst configure # Restore /root/.{profile,bashrc} /etc/{motd,profile} /media /var/mail
 
 		G_DIETPI-NOTIFY 2 'Deleting list of known users and groups, not required by DietPi'
@@ -1553,6 +1604,8 @@ _EOF_
 		G_EXEC rm -f /etc/{default,logrotate.d}/armbian*
 		[[ -f '/lib/firmware/bootsplash.armbian' ]] && G_EXEC rm /lib/firmware/bootsplash.armbian
 		[[ -L '/etc/systemd/system/sysinit.target.wants/bootsplash-ask-password-console.path' ]] && G_EXEC rm /etc/systemd/system/sysinit.target.wants/bootsplash-ask-password-console.path
+		[[ -f '/etc/udev/rules.d/70-rename-lan.rules' ]] && G_EXEC rm /etc/udev/rules.d/70-rename-lan.rules # NanoPi R2S/R2C: https://github.com/armbian/build/blob/main/config/boards/nanopi-r2s.csc, https://github.com/armbian/build/blob/main/config/boards/nanopi-r2c.csc
+		[[ -f '/etc/udev/rules.d/70-persistent-net.rules' ]] && G_EXEC rm /etc/udev/rules.d/70-persistent-net.rules # NanoPi R5S/R6S: https://github.com/armbian/build/blob/main/config/boards/nanopi-r5s.csc, https://github.com/armbian/build/blob/main/config/boards/nanopi-r6s.conf
 
 		# - OMV: https://github.com/MichaIng/DietPi/issues/2994
 		[[ -d '/etc/openmediavault' ]] && G_EXEC rm -R /etc/openmediavault

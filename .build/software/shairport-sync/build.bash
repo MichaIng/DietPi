@@ -17,7 +17,7 @@ G_AGDUG automake pkg-config make g++ libpopt-dev libconfig-dev libssl-dev libsox
 name='shairport-sync'
 name_pretty='Shairport Sync'
 repo='https://github.com/mikebrady/shairport-sync'
-version=$(curl -sSf 'https://api.github.com/repos/mikebrady/shairport-sync/releases/latest' | mawk -F\" '/^  "tag_name"/{print $4}')
+version=$(curl -sSf 'https://api.github.com/repos/mikebrady/shairport-sync/releases/latest' | mawk -F\" '/^  "tag_name"/{print $4;exit}')
 [[ $version ]] || { G_DIETPI-NOTIFY 1 "No latest $name_pretty version found, aborting ..."; exit 1; }
 
 # Download
@@ -102,6 +102,12 @@ general =
 //	volume_control_profile = "standard" ; // use this advanced setting to specify how the airplay volume is transferred to the mixer volume.
 //		"standard" makes the volume change more quickly at lower volumes and slower at higher volumes.
 //		"flat" makes the volume change at the same rate at all volumes.
+//		"dasl_tapered" is similar to "standard" - it makes the volume change more quickly at lower volumes and slower at higher volumes.
+//			The intention behind dasl_tapered is that a given percentage change in volume should result in the same percentage change in
+//			perceived loudness. For instance, doubling the volume level should result in doubling the perceived loudness.
+//			With the range of AirPlay volume being from -30 to 0, doubling the volume from -22.5 to -15 results in an increase of 10 dB.
+//			Similarly, doubling the volume from -15 to 0 results in an increase of 10 dB.
+//			For compatibility with mixers having a restricted attenuation range (e.g. 30 dB), "dasl_tapered" will switch to a flat profile at low AirPlay volumes.
 //	volume_control_combined_hardware_priority = "no"; // when extending the volume range by combining the built-in software attenuator with the hardware mixer attenuator, set this to "yes" to reduce volume by using the hardware mixer first, then the built-in software attenuator.
 
 //	default_airplay_volume = -24.0; // this is the suggested volume after a reset or after the high_volume_threshold has been exceed and the high_volume_idle_timeout_in_minutes has passed
@@ -190,7 +196,7 @@ alsa =
 //	disable_standby_mode_silence_scan_interval = 0.004; // Use this optional advanced setting to control how often the amount of audio remaining in the output buffer should be checked.
 };
 
-// Parameters for the "pipe" audio back end, a back end that directs raw CD-style audio output to a pipe. No interpolation is done.
+// Parameters for the "pipe" audio back end, a back end that directs raw CD-format audio output to a pipe. No interpolation is done.
 pipe =
 {
 //	name = "/tmp/shairport-sync-audio"; // this is the default
