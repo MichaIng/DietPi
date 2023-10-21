@@ -1068,10 +1068,11 @@ Re-enabling HDMI requires a reboot. If you need emergency HDMI output, edit the 
 				G_WHIP_MENU_ARRAY+=('Update RPi4 EEPROM firmware' ': Install rpi-eeprom APT package')
 			fi
 
-		# Orange Pi 5 (Plus): https://dietpi.com/forum/t/orange-pi-5-boot-from-nvme/16457
-		elif [[ $G_HW_MODEL == 8[02] ]]
+		# ROCK 4, ROCK 5B and Orange Pi 5 (Plus): https://dietpi.com/forum/t/orange-pi-5-boot-from-nvme/16457
+		elif [[ $G_HW_MODEL =~ ^(72|78|80|82)$ ]]
 		then
-			[[ -b '/dev/mtdblock0' && -f '/usr/lib/u-boot/platform_install.sh' ]] && G_WHIP_MENU_ARRAY+=('Update SPI bootloader' ': Flash current U-Boot to /dev/mtdblock0')
+			# ROCK 4: Device tree overlay required
+			(( $G_HW_MODEL == 72 )) || [[ -b '/dev/mtdblock0' && -f '/usr/lib/u-boot/platform_install.sh' ]] && G_WHIP_MENU_ARRAY+=('Update SPI bootloader' ': Flash current U-Boot to /dev/mtdblock0')
 
 		# VisionFive 2: https://doc-en.rvspace.org/VisionFive2/PDF/VisionFive2_QSG.pdf
 		elif (( $G_HW_MODEL == 81 ))
@@ -1208,11 +1209,34 @@ Further information: https://www.raspberrypi.org/documentation/hardware/raspberr
 
 		elif [[ $G_WHIP_RETURNED_VALUE == 'Update SPI bootloader' ]]; then
 
+			if [[ $G_HW_MODEL == 72 && ! -b '/dev/mtdblock0' ]]
+			then
+				local overlays=() i=
+				read -ra overlays < <(mawk -F= '$1=="overlays"{$1="";print}' /boot/dietpiEnv.txt)
+				for i in "${overlays[@]}"; do [[ $i == 'spi-jedec-nor' ]] && break; done
+				if [[ $i == 'spi-jedec-nor' ]]
+				then
+					G_WHIP_MSG '[FAILED] No MTD device found
+\nThe expected MTD device /dev/mtdblock0 was not found on your ROCK 4 system, despite the fact that the related device tree overlay has been applied already. You may either have a model which has no onboard SPI storage, or you did not reboot yet for the change to take effect.
+\nIn case reboot the system before selecting this menu option again, otherwise check back whether your ROCK 4 variant is really supposed to have an SPI storge.'
+					return 1
+				else
+					G_WHIP_YESNO '[ INFO ] No MTD device found
+\nThe expected MTD device /dev/mtdblock0 was not found on your ROCK 4 system. You may either have a model which has no onboard SPI storage, or a device tree overlay may be required to make the MTD device available.
+\nShall we add the overlay for you? A reboot will be required for the change to take effect, after which you can reselect this menu option.' || return 0
+					overlays+=('spi-jedec-nor')
+					G_CONFIG_INJECT 'overlays=' "overlays=${overlays[*]}" /boot/dietpiEnv.txt
+					G_CONFIG_INJECT 'param_spinor_spi_bus=' 'param_spinor_spi_bus=1' /boot/dietpiEnv.txt
+					REBOOT_REQUIRED=1
+					return 0
+				fi
+			fi
 			G_WHIP_YESNO '[ INFO ] SPI bootloader update
 \nThis will flash the U-Boot image of the installed linux-u-boot-* package to the SPI device /dev/mtdblock0.
 \nDo you want to continue?' || return 0
 			# shellcheck disable=SC1091
 			. /usr/lib/u-boot/platform_install.sh
+			[[ -f $DIR/rkspi_loader.img ]] || { G_WHIP_MSG "[FAILED] SPI U-Boot image missing\n\nThe expected U-Boot image at $DIR/rkspi_loader.img could not be found. Please report this to our GitHub or forum, so we can check back and in case update this dietpi-config option."; return 1; }
 			# shellcheck disable=SC2154
 			G_EXEC_OUTPUT=1 G_EXEC dd if="$DIR/rkspi_loader.img" of=/dev/mtdblock0 oflag=direct conv=notrunc status=progress
 
@@ -1222,6 +1246,17 @@ Further information: https://www.raspberrypi.org/documentation/hardware/raspberr
 \nThis will download and flash the latest U-Boot from StarFive to your VisionFive 2 SPI storage.
 Latest release notes: https://github.com/starfive-tech/VisionFive2/releases
 \nDo you want to continue?' || return 0
+			G_AG_CHECK_INSTALL_PREREQ libubootenv-tool
+			if fw_printenv 2>&1 | head -1 | grep -q '^Cannot read environment, using default'
+			then
+				G_WHIP_YESNO '[ INFO ] No U-Boot environment found
+\nThere is currently no dedicated U-Boot environment on your SPI flash. U-Boot hence uses the embedded default and the latest StarFive U-Boot default environment does not support the DietPi OS partitioning anymore.
+\nWith our latest kernel upgrade, we shipped the tools and configs to flash a reasonable generic U-Boot environment which supports boot from all filesystems of all partitions of all boot media, including NVMe, USB, eMMC, SD cards and DHCP/TFTP. Flashing assures that our image continues to boot after updating to the latest U-Boot release from StarFive.
+\nOur U-Boot environment should support the official StarFive images, including all features. If you are missing anything or face issues with them, please report back: https://github.com/MichaIng/DietPi/issues/6212
+\nYou can use the commands "fw_printenv" and "fw_setenv" to read and write to the U-Boot environment, especially set boot priorities via "boot_targets" variable.
+\nDo you want to flash our new U-Boot environment to continue?' || return 0
+				G_EXEC fw_setenv
+			fi
 			/boot/dietpi/func/dietpi-set_hardware vf2-spi-update
 
 		elif [[ $G_WHIP_RETURNED_VALUE == 'I2C state' ]]; then
@@ -2735,7 +2770,7 @@ This is mainly aimed at PINE A64 which may have a hardware issue that causes uns
 				if (( $HOTSPOT_5G ))
 				then
 					G_WHIP_DEFAULT_ITEM=$HOTSPOT_5G_CHANNEL
-					G_WHIP_MENU 'Please enter a 5 GHz WiFi channel for your hotspot.
+					G_WHIP_INPUTBOX 'Please enter a 5 GHz WiFi channel for your hotspot.
 \nA full list of supported 5 GHz WiFi channels per region can be found e.g. on Wikipedia: https://en.wikipedia.org/wiki/List_of_WLAN_channels#5_GHz_(802.11a/h/n/ac/ax)' && HOTSPOT_5G_CHANNEL=$G_WHIP_RETURNED_VALUE
 				else
 					local channel_mhz=2412 channel_min=1 channel_max=13

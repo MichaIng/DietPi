@@ -49,11 +49,11 @@ do
 done
 [[ $DISTRO =~ ^('buster'|'bullseye'|'bookworm'|'trixie')$ ]] || { G_DIETPI-NOTIFY 1 "Invalid distro \"$DISTRO\" passed, aborting..."; exit 1; }
 case $ARCH in
-	'armv6l') image="DietPi_Container-ARMv6-${DISTRO^}" arch=1;;
-	'armv7l') image="DietPi_Container-ARMv7-${DISTRO^}" arch=2;;
-	'aarch64') image="DietPi_Container-ARMv8-${DISTRO^}" arch=3;;
-	'x86_64') image="DietPi_Container-x86_64-${DISTRO^}" arch=10;;
-	'riscv64') image="DietPi_Container-RISC-V-Sid" arch=11;;
+	'armv6l') image="DietPi_Container-ARMv6-${DISTRO^}.img" arch=1;;
+	'armv7l') image="DietPi_Container-ARMv7-${DISTRO^}.img" arch=2;;
+	'aarch64') image="DietPi_Container-ARMv8-${DISTRO^}.img" arch=3;;
+	'x86_64') image="DietPi_Container-x86_64-${DISTRO^}.img" arch=10;;
+	'riscv64') image="DietPi_Container-RISC-V-Sid.img" arch=11;;
 	*) G_DIETPI-NOTIFY 1 "Invalid architecture \"$ARCH\" passed, aborting..."; exit 1;;
 esac
 [[ $SOFTWARE =~ ^[0-9\ ]+$ ]] || { G_DIETPI-NOTIFY 1 "Invalid software list \"$SOFTWARE\" passed, aborting..."; exit 1; }
@@ -97,7 +97,7 @@ Process_Software()
 			41) aSERVICES[i]='emby-server' aTCP[i]='8096';;
 			42) aSERVICES[i]='plexmediaserver' aTCP[i]='32400';;
 			43) aSERVICES[i]='mumble-server' aTCP[i]='64738';;
-			44) aSERVICES[i]='transmission-daemon' aTCP[i]='9091';;
+			44) aSERVICES[i]='transmission-daemon' aTCP[i]='9091 51413' aUDP[i]='51413';;
 			45) aSERVICES[i]='deluged deluge-web' aTCP[i]='8112 58846 6882';;
 			46) aSERVICES[i]='qbittorrent' aTCP[i]='1340 6881';;
 			49) aSERVICES[i]='gogs' aTCP[i]='3000';;
@@ -131,8 +131,8 @@ Process_Software()
 			94) aSERVICES[i]='proftpd' aTCP[i]='21';;
 			95) aSERVICES[i]='vsftpd' aTCP[i]='21';;
 			96) aSERVICES[i]='smbd' aTCP[i]='139 445';;
-			97) aCOMMANDS[i]='openvpn --version';; # aSERVICES[i]='openvpn' aUDP[i]='1194' GitHub Action runners to not support the TUN module
-			98) aSERVICES[i]='haproxy' aTCP[i]='80';;
+			97) aCOMMANDS[i]='openvpn --version';; # aSERVICES[i]='openvpn' aUDP[i]='1194' GitHub Action runners do not support the TUN module
+			98) aSERVICES[i]='haproxy' aTCP[i]='80 1338';;
 			99) aSERVICES[i]='node_exporter' aTCP[i]='9100';;
 			#100) (( $arch < 3 )) && aCOMMANDS[i]='/usr/bin/pijuice_cli32 -V' || aCOMMANDS[i]='/usr/bin/pijuice_cli64 -V' aSERVICES[i]='pijuice' aTCP[i]='????' Service does not start without I2C device, not present in container and CLI command always puts you in interactive console
 			104) aSERVICES[i]='dropbear' aTCP[i]='22';;
@@ -196,7 +196,7 @@ Process_Software()
 			178) aSERVICES[i]='jellyfin' aTCP[i]='8097'; [[ $arch == [23] ]] && aDELAY[i]=300;; # jellyfin[9983]: arm-binfmt-P: ../../target/arm/translate.c:9659: thumb_tr_translate_insn: Assertion `(dc->base.pc_next & 1) == 0' failed.   ###   jellyfin[9983]: qemu: uncaught target signal 6 (Aborted) - core dumped   ###   about 5 times
 			179) aSERVICES[i]='komga' aTCP[i]='2037'; (( $arch == 10 )) && aDELAY[i]=30; (( $arch < 10 )) && aDELAY[i]=300;;
 			180) aSERVICES[i]='bazarr' aTCP[i]='6767'; (( $arch == 10 )) && aDELAY[i]=30; (( $arch < 10 )) && aDELAY[i]=90;;
-			181) aSERVICES[i]='papermc' aTCP[i]='25565';;
+			181) aSERVICES[i]='papermc' aTCP[i]='25565 25575';;
 			182) aSERVICES[i]='unbound' aUDP[i]='53'; [[ ${aSERVICES[126]} ]] && aUDP[i]+=' 5335';; # Uses port 5335 if Pi-hole or AdGuard Home is installed, but those do listen on port 53 instead
 			183) aSERVICES[i]='vaultwarden' aTCP[i]='8001'; (( $arch < 10 )) && aDELAY[i]=20;;
 			184) aSERVICES[i]='tor';; # aTCP[i]='443 9051' Interactive install with ports depending on choice and relay type
@@ -254,7 +254,7 @@ done
 ##########################################
 # Dependencies
 ##########################################
-apackages=('7zip' 'parted' 'fdisk' 'systemd-container')
+apackages=('xz-utils' 'parted' 'fdisk' 'systemd-container')
 (( $G_HW_ARCH == $arch || ( $G_HW_ARCH < 10 && $G_HW_ARCH > $arch ) )) || apackages+=('qemu-user-static' 'binfmt-support')
 G_AG_CHECK_INSTALL_PREREQ "${apackages[@]}"
 
@@ -262,14 +262,13 @@ G_AG_CHECK_INSTALL_PREREQ "${apackages[@]}"
 # Prepare container
 ##########################################
 # Download
-G_EXEC curl -sSfO "https://dietpi.com/downloads/images/$image.7z"
-G_EXEC 7zz e "$image.7z" "$image.img"
-G_EXEC rm "$image.7z"
-G_EXEC truncate -s 8G "$image.img"
+G_EXEC curl -sSfO "https://dietpi.com/downloads/images/$image.xz"
+G_EXEC xz -d "$image.xz"
+G_EXEC truncate -s 8G "$image"
 
 # Loop device
 FP_LOOP=$(losetup -f)
-G_EXEC losetup "$FP_LOOP" "$image.img"
+G_EXEC losetup "$FP_LOOP" "$image"
 G_EXEC partprobe "$FP_LOOP"
 G_EXEC partx -u "$FP_LOOP"
 G_EXEC_OUTPUT=1 G_EXEC e2fsck -fp "${FP_LOOP}p1"

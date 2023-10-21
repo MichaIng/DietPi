@@ -114,24 +114,55 @@ _EOF_
 				*'T6'*) [[ -f '/etc/udev/rules.d/dietpi-eth-leds.rules' ]] && rm /etc/udev/rules.d/dietpi-eth-leds.rules;;
 				*) :;;
 			esac
+
+		# VisionFive 2
+		elif [[ $G_HW_MODEL == 81 && -f '/proc/device-tree/serial-number' && -f '/boot/extlinux/extlinux.conf' ]] && ! grep -q '^[[:blank:]]*fdtoverlays[[:blank:]]' /boot/extlinux/extlinux.conf
+		then
+			local serial overlays=()
+			read -r serial < /proc/device-tree/serial-number
+			if [[ $serial == 'VF7110A1-'* ]]
+			then
+				G_DIETPI-NOTIFY 2 'A revision detected, applying device tree overlay to fix Ethernet ...'
+				read -ra overlays < <(mawk '$1=="fdtoverlays"{$1="";print}' /boot/extlinux/extlinux.conf)
+				local i=
+				for i in "${overlays[@]}"; do [[ $i == *'/ethernet-A12.dtbo' ]] && break; done
+				if [[ $i == *'/ethernet-A12.dtbo' ]]
+				then
+					G_DIETPI-NOTIFY 2 'A revision Ethernet overlay was applied already ...'
+				else
+					overlays+=('/usr/lib/linux-image-visionfive2/starfive/vf2-overlay/ethernet-A12.dtbo')
+					G_CONFIG_INJECT 'fdtoverlays[[:blank:]]' "fdtoverlays ${overlays[*]}" /boot/extlinux/extlinux.conf
+				fi
+			fi
+			if [[ $serial == *'-D008E000-'* ]]
+			then
+				G_DIETPI-NOTIFY 2 '8 GB RAM model detected, applying device tree overlay to make all 8 GB available to the system ...'
+				read -ra overlays < <(mawk '$1=="fdtoverlays"{$1="";print}' /boot/extlinux/extlinux.conf)
+				local i=
+				for i in "${overlays[@]}"; do [[ $i == *'/8GB.dtbo' ]] && break; done
+				if [[ $i == *'/8GB.dtbo' ]]
+				then
+					G_DIETPI-NOTIFY 2 '8 GB RAM overlay was applied already ...'
+				else
+					overlays+=('/usr/lib/linux-image-visionfive2/starfive/vf2-overlay/8GB.dtbo')
+					G_CONFIG_INJECT 'fdtoverlays[[:blank:]]' "fdtoverlays ${overlays[*]}" /boot/extlinux/extlinux.conf
+				fi
+			fi
+			grep -q '^[[:blank:]]*fdtoverlays[[:blank:]]' /boot/extlinux/extlinux.conf && { reboot; exit 0; }
 		fi
 
 		# End user automated script
-		if [[ -f '/boot/Automation_Custom_PreScript.sh' ]]; then
-
-			G_DIETPI-NOTIFY 2 'Running custom script, please wait...'
+		if [[ -f '/boot/Automation_Custom_PreScript.sh' ]]
+		then
+			G_DIETPI-NOTIFY 2 'Running custom script, please wait ...'
 			chmod +x /boot/Automation_Custom_PreScript.sh
-			if /boot/Automation_Custom_PreScript.sh 2>&1 | tee /var/tmp/dietpi/logs/dietpi-automation_custom_prescript.log; then
-
+			if /boot/Automation_Custom_PreScript.sh 2>&1 | tee /var/tmp/dietpi/logs/dietpi-automation_custom_prescript.log
+			then
 				G_DIETPI-NOTIFY 0 'Custom script'
-
 			else
-
 				G_DIETPI-NOTIFY 1 'Custom script: Please see the log file for more information:
          - /var/tmp/dietpi/logs/dietpi-automation_custom_prescript.log'
-
 			fi
-
 		fi
 
 		# Apply swap settings
