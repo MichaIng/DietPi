@@ -116,7 +116,7 @@ _EOF_
 			esac
 
 		# VisionFive 2
-		elif [[ $G_HW_MODEL == 81 && -f '/proc/device-tree/serial-number' ]]
+		elif [[ $G_HW_MODEL == 81 && -f '/proc/device-tree/serial-number' && -f '/boot/extlinux/extlinux.conf' ]] && ! grep -q '^[[:blank:]]*fdtoverlays[[:blank:]]' /boot/extlinux/extlinux.conf
 		then
 			local serial overlays=()
 			read -r serial < /proc/device-tree/serial-number
@@ -148,6 +148,7 @@ _EOF_
 					G_CONFIG_INJECT 'fdtoverlays[[:blank:]]' "fdtoverlays ${overlays[*]}" /boot/extlinux/extlinux.conf
 				fi
 			fi
+			grep -q '^[[:blank:]]*fdtoverlays[[:blank:]]' /boot/extlinux/extlinux.conf && { reboot; exit 0; }
 		fi
 
 		# End user automated script
