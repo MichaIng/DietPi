@@ -306,11 +306,14 @@ G_EXEC eval 'echo '\''infocmp "$TERM" > /dev/null 2>&1 || { echo "[ INFO ] Unsup
 
 # Enable automated setup
 G_CONFIG_INJECT 'AUTO_SETUP_AUTOMATED=' 'AUTO_SETUP_AUTOMATED=1' rootfs/boot/dietpi.txt
-# - Workaround for skipped autologin in emulated containers
-G_EXEC sed -i 's/console 115200/- 115200/' rootfs/var/lib/dietpi/services/dietpi-firstboot.bash
-G_EXEC sed -i 's/%I \$TERM/- $TERM/' rootfs/var/lib/dietpi/services/dietpi-firstboot.bash
-G_EXEC eval 'echo -e '\''#!/bin/bash\necho "$TERM"\ntty'\'' > rootfs/etc/rc.local'
-G_EXEC chmod +x rootfs/etc/rc.local
+# - Workaround for skipped autologin in emulated Trixie/Sid containers: https://gitlab.com/qemu-project/qemu/-/issues/1962
+if [[ $DISTRO == 'trixie' ]]
+then
+	G_EXEC mkdir rootfs/etc/systemd/system/rc-local.service.d
+	G_EXEC eval 'echo -e '\''[Unit]\nAfter=dietpi-postboot.service'\'' > rootfs/etc/systemd/system/rc-local.service.d/dietpi.conf'
+	G_EXEC eval 'echo -e '\''#!/bin/dash\nexec /boot/dietpi/dietpi-login'\'' > rootfs/etc/rc.local'
+	G_EXEC chmod +x rootfs/etc/rc.local
+fi
 
 # Workaround for failing IPv4 network connectivity check as GitHub Actions runners do not receive external ICMP echo replies.
 G_CONFIG_INJECT 'CONFIG_CHECK_CONNECTION_IP=' 'CONFIG_CHECK_CONNECTION_IP=127.0.0.1' rootfs/boot/dietpi.txt
