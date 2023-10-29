@@ -96,6 +96,7 @@ After=dietpi-postboot.service
 Type=idle
 StandardOutput=tty
 ExecStart=/bin/dash -c 'infocmp "$TERM" > /dev/null 2>&1 || export TERM=dumb; exec /boot/dietpi/dietpi-login'
+ExecStop=/sbin/poweroff
 
 [Install]
 WantedBy=multi-user.target
