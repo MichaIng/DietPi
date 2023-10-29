@@ -124,8 +124,8 @@ curl -sSf 'https://archive.raspberrypi.org/debian/pool/main/r/raspberrypi-archiv
 dpkg -i /tmp/keyring.deb
 rm -v /tmp/keyring.deb
 _EOF_
-	# Enforcing Debian Trixie FFmpeg packages over RPi repo ones
-	[[ $DISTRO != 'trixie' ]] || cat << '_EOF_' > /etc/apt/preferences.d/dietpi-ffmpeg || exit 1
+	# Enforce Debian Trixie FFmpeg packages over RPi repo ones
+	[[ $DISTRO != 'trixie' ]] || cat << '_EOF_' > rootfs/etc/apt/preferences.d/dietpi-ffmpeg || exit 1
 Package: src:ffmpeg
 Pin: origin archive.raspberrypi.org
 Pin-Priority: -1
