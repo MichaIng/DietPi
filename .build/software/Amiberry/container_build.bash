@@ -114,7 +114,9 @@ G_EXEC eval 'echo '\''infocmp "$TERM" > /dev/null 2>&1 || export TERM=dumb'\'' >
 G_CONFIG_INJECT 'CONFIG_CHECK_CONNECTION_IP=' 'CONFIG_CHECK_CONNECTION_IP=127.0.0.1' rootfs/boot/dietpi.txt
 
 # - RPi 64-bit: Add RPi repo, ARMv6 container images contain it already
-[[ $PLATFORM != 'rpi'[34]'-64-dmx' ]] || cat << _EOF_ > rootfs/boot/Automation_Custom_Script.sh || exit 1
+if [[ $PLATFORM == 'rpi'[34]'-64-dmx' ]]
+then
+	cat << _EOF_ > rootfs/boot/Automation_Custom_Script.sh || exit 1
 #!/bin/dash
 echo '[ INFO ] Setting up RPi APT repository...'
 echo 'deb https://archive.raspberrypi.org/debian/ ${DISTRO/trixie/bookworm} main' > /etc/apt/sources.list.d/raspi.list
@@ -122,6 +124,13 @@ curl -sSf 'https://archive.raspberrypi.org/debian/pool/main/r/raspberrypi-archiv
 dpkg -i /tmp/keyring.deb
 rm -v /tmp/keyring.deb
 _EOF_
+	# Enforcing Debian Trixie FFmpeg packages over RPi repo ones
+	[[ $DISTRO != 'trixie' ]] || cat << '_EOF_' > /etc/apt/preferences.d/dietpi-ffmpeg || exit 1
+Package: src:ffmpeg
+Pin: origin archive.raspberrypi.org
+Pin-Priority: -1
+_EOF_
+fi
 
 cat << _EOF_ >> rootfs/boot/Automation_Custom_Script.sh || exit 1
 echo '[ INFO ] Running Amiberry build script...'
