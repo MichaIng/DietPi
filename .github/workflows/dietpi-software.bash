@@ -322,7 +322,7 @@ ExecStart=/boot/dietpi/dietpi-login
 [Install]
 WantedBy=multi-user.target
 _EOF_
-	G_EXEC ln -s /etc/systemd/system/dietpi-automation.service /etc/systemd/system/multi-user.target.wants/
+	G_EXEC ln -s /etc/systemd/system/dietpi-automation.service rootfs/etc/systemd/system/multi-user.target.wants/
 fi
 
 # Workaround for failing IPv4 network connectivity check as GitHub Actions runners do not receive external ICMP echo replies.
