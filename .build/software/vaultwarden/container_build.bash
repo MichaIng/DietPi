@@ -44,6 +44,7 @@ do
 	shift
 done
 [[ $DISTRO =~ ^('buster'|'bullseye'|'bookworm'|'trixie')$ ]] || { G_DIETPI-NOTIFY 1 "Invalid distro \"$DISTRO\" passed, aborting..."; exit 1; }
+[[ $ARCH == 'riscv64' && $DISTRO != 'trixie' ]] && { G_DIETPI-NOTIFY 1 "Invalid distro \"$DISTRO\" for arch \"$ARCH\" passed, only \"trixie\" is supported, aborting..."; exit 1; }
 case $ARCH in
 	'armv6l') image="ARMv6-${DISTRO^}" arch=1;;
 	'armv7l') image="ARMv7-${DISTRO^}" arch=2;;
@@ -83,8 +84,29 @@ G_EXEC_OUTPUT=1 G_EXEC e2fsck -fp "${FP_LOOP}p1"
 G_EXEC mkdir rootfs
 G_EXEC mount "${FP_LOOP}p1" rootfs
 
+# Test
+export PY_COLORS=1
+
 # Enable automated setup
 G_CONFIG_INJECT 'AUTO_SETUP_AUTOMATED=' 'AUTO_SETUP_AUTOMATED=1' rootfs/boot/dietpi.txt
+# - Workaround for skipped autologin in emulated Trixie/Sid containers: https://gitlab.com/qemu-project/qemu/-/issues/1962
+if [[ $DISTRO == 'trixie' ]]
+then
+	cat << '_EOF_' > rootfs/etc/systemd/system/dietpi-automation.service
+[Unit]
+Description=DietPi-Automation
+After=dietpi-postboot.service
+
+[Service]
+Type=idle
+StandardOutput=tty
+ExecStart=/boot/dietpi/dietpi-login
+
+[Install]
+WantedBy=multi-user.target
+_EOF_
+	G_EXEC ln -s /etc/systemd/system/dietpi-automation.service /etc/systemd/system/multi-user.target.wants/
+fi
 
 # Force ARMv6 arch on Raspbian
 (( $arch == 1 )) && echo 'sed -i -e '\''/^G_HW_ARCH=/c\G_HW_ARCH=1'\'' -e '\''/^G_HW_ARCH_NAME=/c\G_HW_ARCH_NAME=armv6l'\'' /boot/dietpi/.hw_model' > rootfs/boot/Automation_Custom_PreScript.sh
