@@ -117,7 +117,7 @@ G_CONFIG_INJECT 'CONFIG_CHECK_CONNECTION_IP=' 'CONFIG_CHECK_CONNECTION_IP=127.0.
 [[ $PLATFORM != 'rpi'[34]'-64-dmx' ]] || cat << _EOF_ > rootfs/boot/Automation_Custom_Script.sh || exit 1
 #!/bin/dash
 echo '[ INFO ] Setting up RPi APT repository...'
-echo 'deb https://archive.raspberrypi.org/debian/ ${DISTRO/bookworm/bullseye} main' > /etc/apt/sources.list.d/raspi.list
+echo 'deb https://archive.raspberrypi.org/debian/ ${DISTRO/trixie/bookworm} main' > /etc/apt/sources.list.d/raspi.list
 curl -sSf 'https://archive.raspberrypi.org/debian/pool/main/r/raspberrypi-archive-keyring/raspberrypi-archive-keyring_2021.1.1+rpt1_all.deb' -o /tmp/keyring.deb
 dpkg -i /tmp/keyring.deb
 rm -v /tmp/keyring.deb
