@@ -33,6 +33,9 @@ version=$(curl -sSf 'https://api.github.com/repos/dani-garcia/vaultwarden/releas
 wv_url=$(curl -sSf 'https://api.github.com/repos/dani-garcia/bw_web_builds/releases/latest' | mawk -F\" '/^      "browser_download_url".*\.tar\.gz"$/{print $4}')
 [[ $wv_url ]] || { G_DIETPI-NOTIFY 1 'No latest web vault version found, aborting ...'; exit 1; }
 
+# RISC-V workaround until ring dependency has been raised to v0.17+
+[[ $G_HW_ARCH == 11 && $version == '1.29.2' ]] && version_pkg=$version version='master'
+
 # Build
 G_DIETPI-NOTIFY 2 "Building vaultwarden version \e[33m$version"
 G_EXEC cd /tmp
@@ -56,6 +59,9 @@ G_EXEC mkdir -p "$DIR/"{DEBIAN,opt/vaultwarden,mnt/dietpi_userdata/vaultwarden,l
 G_EXEC mv "vaultwarden-$version/target/release/vaultwarden" "$DIR/opt/vaultwarden/"
 G_EXEC mv "vaultwarden-$version/.env.template" "$DIR/mnt/dietpi_userdata/vaultwarden/vaultwarden.env"
 G_EXEC rm -R "vaultwarden-$version"
+
+# Revert RISC-V workaround until ring dependency has been raised to v0.17+
+[[ $G_HW_ARCH == 11 && $version_pkg ]] && version=$version_pkg
 
 # - web vault
 G_DIETPI-NOTIFY 2 "Downloading web vault from \e[33m$wv_url"
