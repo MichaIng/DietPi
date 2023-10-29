@@ -34,7 +34,7 @@ wv_url=$(curl -sSf 'https://api.github.com/repos/dani-garcia/bw_web_builds/relea
 [[ $wv_url ]] || { G_DIETPI-NOTIFY 1 'No latest web vault version found, aborting ...'; exit 1; }
 
 # RISC-V workaround until ring dependency has been raised to v0.17+
-[[ $G_HW_ARCH == 11 && $version == '1.29.2' ]] && version_pkg=$version version='master'
+[[ $G_HW_ARCH == 11 && $version == '1.29.2' ]] && version_pkg=$version version='main'
 
 # Build
 G_DIETPI-NOTIFY 2 "Building vaultwarden version \e[33m$version"
