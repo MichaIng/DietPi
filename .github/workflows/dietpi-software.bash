@@ -307,7 +307,7 @@ G_EXEC eval 'echo '\''infocmp "$TERM" > /dev/null 2>&1 || { echo "[ INFO ] Unsup
 # Enable automated setup
 G_CONFIG_INJECT 'AUTO_SETUP_AUTOMATED=' 'AUTO_SETUP_AUTOMATED=1' rootfs/boot/dietpi.txt
 # - Workaround for skipped autologin in emulated Trixie/Sid containers: https://gitlab.com/qemu-project/qemu/-/issues/1962
-if [[ $DISTRO == 'trixie' ]]
+if [[ $DISTRO == 'trixie' ]] && (( $G_HW_ARCH != $arch && ( $G_HW_ARCH > 9 || $G_HW_ARCH < $arch ) ))
 then
 	cat << '_EOF_' > rootfs/etc/systemd/system/dietpi-automation.service
 [Unit]
