@@ -45,17 +45,18 @@ do
 done
 [[ $DISTRO =~ ^('buster'|'bullseye'|'bookworm'|'trixie')$ ]] || { G_DIETPI-NOTIFY 1 "Invalid distro \"$DISTRO\" passed, aborting..."; exit 1; }
 case $PLATFORM in
-	'rpi'[1-4]) image="DietPi_Container-ARMv6-${DISTRO^}" arch=1;;
-	'c1'|'xu4'|'RK3288'|'sun8i'|'s812') image="DietPi_Container-ARMv7-${DISTRO^}" arch=2;;
-	'rpi'[34]'-64-dmx'|'AMLSM1'|'n2'|'a64'|'rk3588') image="DietPi_Container-ARMv8-${DISTRO^}" arch=3;;
-	'x86-64') image="DietPi_Container-x86_64-${DISTRO^}" arch=10;;
+	'rpi'[1-4]) image="ARMv6-${DISTRO^}" arch=1;;
+	'c1'|'xu4'|'RK3288'|'sun8i'|'s812') image="ARMv7-${DISTRO^}" arch=2;;
+	'rpi'[34]'-64-dmx'|'AMLSM1'|'n2'|'a64'|'rk3588') image="ARMv8-${DISTRO^}" arch=3;;
+	'x86-64') image="x86_64-${DISTRO^}" arch=10;;
 	*) G_DIETPI-NOTIFY 1 "Invalid platform \"$PLATFORM\" passed, aborting..."; exit 1;;
 esac
+image="DietPi_Container-$image.img"
 
 ##########################################
 # Dependencies
 ##########################################
-apackages=('7zip' 'parted' 'fdisk' 'systemd-container')
+apackages=('xz-utils' 'parted' 'fdisk' 'systemd-container')
 (( $G_HW_ARCH == $arch || ( $G_HW_ARCH < 10 && $G_HW_ARCH > $arch ) )) || apackages+=('qemu-user-static' 'binfmt-support')
 G_AG_CHECK_INSTALL_PREREQ "${apackages[@]}"
 
@@ -63,14 +64,13 @@ G_AG_CHECK_INSTALL_PREREQ "${apackages[@]}"
 # Prepare container
 ##########################################
 # Download
-G_EXEC curl -sSfO "https://dietpi.com/downloads/images/$image.7z"
-G_EXEC 7zz x "$image.7z"
-G_EXEC rm "$image.7z" hash.txt README.md
-G_EXEC truncate -s 2G "$image.img"
+G_EXEC curl -sSfO "https://dietpi.com/downloads/images/$image.xz"
+G_EXEC xz -d "$image.xz"
+G_EXEC truncate -s 2G "$image"
 
 # Loop device
 FP_LOOP=$(losetup -f)
-G_EXEC losetup "$FP_LOOP" "$image.img"
+G_EXEC losetup "$FP_LOOP" "$image"
 G_EXEC partprobe "$FP_LOOP"
 G_EXEC partx -u "$FP_LOOP"
 G_EXEC_OUTPUT=1 G_EXEC e2fsck -fp "${FP_LOOP}p1"
