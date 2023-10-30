@@ -298,6 +298,12 @@ then
 	G_EXEC curl -sSf 'https://archive.raspberrypi.org/debian/pool/main/r/raspberrypi-archive-keyring/raspberrypi-archive-keyring_2021.1.1+rpt1_all.deb' -o keyring.deb
 	G_EXEC dpkg --root=rootfs -i keyring.deb
 	G_EXEC rm keyring.deb
+	# Enforce Debian Trixie FFmpeg packages over RPi repo ones
+	[[ $DISTRO != 'trixie' ]] || cat << '_EOF_' > rootfs/etc/apt/preferences.d/dietpi-ffmpeg || exit 1
+Package: src:ffmpeg
+Pin: origin archive.raspberrypi.org
+Pin-Priority: -1
+_EOF_
 fi
 
 # Workaround invalid TERM on login
