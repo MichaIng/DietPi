@@ -4,15 +4,15 @@
 ##########################################
 # Load DietPi-Globals
 ##########################################
-Error_Exit(){ G_DIETPI-NOTIFY 1 "$1"; exit 1; }
+Error_Exit(){ G_DIETPI-NOTIFY 1 "$1, aborting ..."; exit 1; }
 if [[ -f '/boot/dietpi/func/dietpi-globals' ]]
 then
 	. /boot/dietpi/func/dietpi-globals
 else
-	curl -sSf "https://raw.githubusercontent.com/${G_GITOWNER:=MichaIng}/DietPi/${G_GITBRANCH:=master}/dietpi/func/dietpi-globals" -o /tmp/dietpi-globals || exit 1
+	curl -sSf "https://raw.githubusercontent.com/${G_GITOWNER:=MichaIng}/DietPi/${G_GITBRANCH:=master}/dietpi/func/dietpi-globals" -o /tmp/dietpi-globals || Error_Exit 'Failed to download DietPi-Globals'
 	# shellcheck disable=SC1091
 	. /tmp/dietpi-globals
-	G_EXEC_NOHALT=1 G_EXEC rm /tmp/dietpi-globals
+	G_EXEC rm /tmp/dietpi-globals
 	export G_GITOWNER G_GITBRANCH G_HW_ARCH_NAME=$(uname -m)
 fi
 case $G_HW_ARCH_NAME in
@@ -21,7 +21,7 @@ case $G_HW_ARCH_NAME in
 	'aarch64') export G_HW_ARCH=3;;
 	'x86_64') export G_HW_ARCH=10;;
 	'riscv64') export G_HW_ARCH=11;;
-	*) Error_Exit "Unsupported host system architecture \"$G_HW_ARCH_NAME\" detected, aborting ...";;
+	*) Error_Exit "Unsupported host system architecture \"$G_HW_ARCH_NAME\" detected";;
 esac
 readonly G_PROGRAM_NAME='DietPi-Software build'
 G_CHECK_ROOT_USER
@@ -42,19 +42,20 @@ do
 		'-n') shift; NAME=$1;;
 		'-d') shift; DISTRO=$1;;
 		'-a') shift; ARCH=$1;;
-		*) Error_Exit "Invalid input \"$1\", aborting ...";;
+		*) Error_Exit "Invalid input \"$1\"";;
 	esac
 	shift
 done
-[[ $NAME =~ ^('gmediarender'|'gogs'|'shairport-sync'|'squeezelite'|'vaultwarden'|'ympd')$ ]] || Error_Exit "Invalid software title \"$NAME\" passed, aborting ..."
-[[ $DISTRO =~ ^('buster'|'bullseye'|'bookworm'|'trixie')$ ]] || Error_Exit "Invalid distro \"$DISTRO\" passed, aborting ..."
+[[ $NAME =~ ^('gmediarender'|'gogs'|'shairport-sync'|'squeezelite'|'vaultwarden'|'ympd')$ ]] || Error_Exit "Invalid software title \"$NAME\" passed"
+[[ $NAME == 'gogs' ]] && EXT='7z' || EXT='deb'
+[[ $DISTRO =~ ^('buster'|'bullseye'|'bookworm'|'trixie')$ ]] || Error_Exit "Invalid distro \"$DISTRO\" passed"
 case $ARCH in
 	'armv6l') image="ARMv6-${DISTRO^}" arch=1;;
 	'armv7l') image="ARMv7-${DISTRO^}" arch=2;;
 	'aarch64') image="ARMv8-${DISTRO^}" arch=3;;
 	'x86_64') image="x86_64-${DISTRO^}" arch=10;;
-	'riscv64') image='RISC-V-Sid' arch=11; [[ $DISTRO == 'trixie' ]] || Error_Exit "Invalid distro \"$DISTRO\" for arch \"$ARCH\" passed, only \"trixie\" is supported, aborting ...";;
-	*) Error_Exit "Invalid architecture \"$ARCH\" passed, aborting ...";;
+	'riscv64') image='RISC-V-Sid' arch=11; [[ $DISTRO == 'trixie' ]] || Error_Exit "Invalid distro \"$DISTRO\" for arch \"$ARCH\" passed, only \"trixie\" is supported";;
+	*) Error_Exit "Invalid architecture \"$ARCH\" passed";;
 esac
 image="DietPi_Container-$image.img"
 
@@ -108,7 +109,7 @@ cat << _EOF_ > rootfs/boot/Automation_Custom_Script.sh || Error_Exit 'Failed to 
 #!/bin/dash
 echo '[ INFO ] Running $NAME build script ...'
 bash -c "\$(curl -sSf 'https://raw.githubusercontent.com/$G_GITOWNER/DietPi/$G_GITBRANCH/.build/software/$NAME/build.bash')"
-mv -v /tmp/*.deb /
+mkdir -v /output && mv -v /tmp/*.$EXT /output
 poweroff
 _EOF_
 
@@ -116,5 +117,5 @@ _EOF_
 # Boot container
 ##########################################
 systemd-nspawn -bD rootfs
-[[ -f rootfs/${NAME}_$ARCH.deb ]] || Error_Exit "Failed to build package: ${NAME}_$ARCH.deb"
+[[ -f rootfs/output/${NAME}_$ARCH.$EXT ]] || Error_Exit "Failed to build package: ${NAME}_$ARCH.$EXT"
 }
