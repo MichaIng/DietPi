@@ -13,6 +13,12 @@ case $G_DISTRO in
 	7|8) adeps+=('libssl3');;
 	*) G_DIETPI-NOTIFY 1 "Unsupported distro version: $G_DISTRO_NAME (ID=$G_DISTRO)"; exit 1;;
 esac
+for i in "${adeps[@]}"
+do
+	dpkg-query -s "$i" &> /dev/null && continue
+	G_DIETPI-NOTIFY 1 "Expected dependency package was not installed: $i"
+	exit 1
+done
 
 G_DIETPI-NOTIFY 2 'Downloading source code...'
 G_EXEC cd /tmp
@@ -134,7 +140,7 @@ do
 done
 DEPS_APT_VERSIONED=${DEPS_APT_VERSIONED%,}
 # shellcheck disable=SC2001
-grep -q 'raspbian' /etc/os-release && DEPS_APT_VERSIONED=$(sed 's/+rp[it][0-9]\+[^)]*)/)/g' <<< "$DEPS_APT_VERSIONED") || DEPS_APT_VERSIONED=$(sed 's/+b[0-9]\+)/)/g' <<< "$DEPS_APT_VERSIONED")
+[[ $G_HW_ARCH_NAME == 'armv6l' ]] && DEPS_APT_VERSIONED=$(sed 's/+rp[it][0-9]\+[^)]*)/)/g' <<< "$DEPS_APT_VERSIONED") || DEPS_APT_VERSIONED=$(sed 's/+b[0-9]\+)/)/g' <<< "$DEPS_APT_VERSIONED")
 
 # - Obtain version
 version="$(mawk -F\" '/CPACK_PACKAGE_VERSION_MAJOR/{print $2;exit}' ympd-master/CMakeLists.txt).$(mawk -F\" '/CPACK_PACKAGE_VERSION_MINOR/{print $2;exit}' ympd-master/CMakeLists.txt).$(mawk -F\" '/CPACK_PACKAGE_VERSION_PATCH/{print $2;exit}' ympd-master/CMakeLists.txt)"
