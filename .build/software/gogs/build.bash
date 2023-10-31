@@ -11,6 +11,8 @@ G_AGDUG gcc libc6-dev "${deps[@]}"
 # Download & Build
 # shellcheck disable=SC1091
 . /etc/bashrc.d/go.sh
+# - Trixie: Workaround for missing HOME, as we run dietpi-login from a systemd service instead of after an actual autologin, so that GOPATH is not defined either: go: go: module cache not found: neither GOMODCACHE nor GOPATH is set
+[[ $HOME ]] || HOME='/root'
 G_EXEC_OUTPUT=1 G_EXEC go install 'gogs.io/gogs@latest'
 
 # Archive
