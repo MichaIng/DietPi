@@ -3,8 +3,7 @@
 . /boot/dietpi/func/dietpi-globals
 
 # Build deps
-deps=() c7zip='7zr'
-(( $G_DISTRO > 6 )) && deps+=('7zip') c7zip='7zz'
+(( $G_DISTRO < 7 )) && deps=('p7zip') c7zip='7zr' || deps=('7zip') c7zip='7zz'
 
 G_AGUP
 G_AGDUG gcc libc6-dev "${deps[@]}"
