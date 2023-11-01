@@ -21,7 +21,7 @@ done
 # - ARMv8: Apply workaround for increased RAM usage: https://github.com/rust-lang/cargo/issues/10583
 # shellcheck disable=SC2015
 export HOME='/tmp/rustup' CARGO_NET_GIT_FETCH_WITH_CLI='true'
-[[ -d $HOME ]] || G_EXEC mkdir "$HOME"
+G_EXEC mkdir -p "$HOME"
 G_EXEC cd "$HOME"
 G_EXEC curl -sSfo rustup-init.sh 'https://sh.rustup.rs'
 G_EXEC chmod +x rustup-init.sh
