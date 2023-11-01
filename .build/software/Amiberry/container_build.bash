@@ -145,5 +145,5 @@ _EOF_
 # Boot container
 ##########################################
 systemd-nspawn -bD rootfs
-[[ -f rootfs/amiberry_$PLATFORM.deb ]] || Error_Exit "Failed to build package: ${NAME}_$ARCH.$EXT"
+[[ -f rootfs/amiberry_$PLATFORM.deb ]] || Error_Exit "Failed to build package: amiberry_$PLATFORM.deb"
 }
