@@ -5,7 +5,7 @@
 # Build deps
 G_AGUP
 # - ARMv6 Buster: Prevent install of 3.16.3-3~bpo10+1 from RPi repo, which breaks build: "list sub-command REMOVE_ITEM requires two or more arguments."
-(( $G_HW_ARCH == 1 && $G_DISTRO == 5 )) && G_EXEC eval 'echo -e '\''Package: cmake\nPin: origin archive.raspberrypi.org\nPin-Priority: -1'\'' > /etc/apt/preferences.d/dietpi-cmake'
+(( $G_HW_ARCH == 1 && $G_DISTRO == 5 )) && G_EXEC eval 'echo -e '\''Package: cmake cmake-data\nPin: origin archive.raspberrypi.org\nPin-Priority: -1'\'' > /etc/apt/preferences.d/dietpi-cmake'
 G_AGDUG cmake make gcc libc6-dev pkg-config libmpdclient-dev libssl-dev
 
 # Runtime deps
