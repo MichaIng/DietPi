@@ -35,7 +35,8 @@ G_EXEC cd "$FP_ORIGIN" # Process everything in origin dir instead of /tmp/$G_PRO
 DISTRO=
 ARCH=
 SOFTWARE=
-RPI=
+RPI=false
+TEST=false
 while (( $# ))
 do
 	case $1 in
@@ -43,6 +44,7 @@ do
 		'-a') shift; ARCH=$1;;
 		'-s') shift; SOFTWARE=$1;;
 		'-rpi') shift; RPI=$1;;
+		'-t') shift; TEST=$1;;
 		*) G_DIETPI-NOTIFY 1 "Invalid input \"$1\", aborting..."; exit 1;;
 	esac
 	shift
@@ -57,7 +59,8 @@ case $ARCH in
 	*) G_DIETPI-NOTIFY 1 "Invalid architecture \"$ARCH\" passed, aborting..."; exit 1;;
 esac
 [[ $SOFTWARE =~ ^[0-9\ ]+$ ]] || { G_DIETPI-NOTIFY 1 "Invalid software list \"$SOFTWARE\" passed, aborting..."; exit 1; }
-[[ $RPI =~ ^(|'false'|'true')$ ]] || { G_DIETPI-NOTIFY 1 "Invalid RPi flag \"$RPI\" passed, aborting..."; exit 1; }
+[[ $RPI =~ ^('false'|'true')$ ]] || { G_DIETPI-NOTIFY 1 "Invalid RPi flag \"$RPI\" passed, aborting..."; exit 1; }
+[[ $TEST =~ ^('false'|'true')$ ]] || { G_DIETPI-NOTIFY 1 "Invalid test flag \"$TEST\" passed, aborting..."; exit 1; }
 
 # Workaround for "Could not execute systemctl:  at /usr/bin/deb-systemd-invoke line 145." during Apache2 DEB postinst in 32-bit ARM Bookworm container: https://lists.ubuntu.com/archives/foundations-bugs/2022-January/467253.html
 [[ $SOFTWARE =~ (^| )83( |$) && $DISTRO == 'bookworm' ]] && (( $arch < 3 )) && { echo '[ WARN ] Installing Lighttpd instead of Apache due to a bug in 32-bit ARM containers'; SOFTWARE=$(sed -E 's/(^| )83( |$)/\184\2/g' <<< "$SOFTWARE"); }
@@ -305,6 +308,9 @@ Pin: origin archive.raspberrypi.org
 Pin-Priority: -1
 _EOF_
 fi
+
+# Install test builds from dietpi.com if requested
+[[ $TEST == 'true' ]] && G_EXEC sed -i '/# Start DietPi-Software/a\sed -i '\''s|dietpi.com/downloads/binaries/$G_DISTRO_NAME/|dietpi.com/downloads/binaries/$G_DISTRO_NAME/testing/|'\'' /boot/dietpi/dietpi-software' rootfs/boot/dietpi/dietpi-login
 
 # Workaround invalid TERM on login
 # shellcheck disable=SC2016
