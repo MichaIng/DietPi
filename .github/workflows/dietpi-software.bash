@@ -310,6 +310,7 @@ _EOF_
 fi
 
 # Install test builds from dietpi.com if requested
+# shellcheck disable=SC2016
 [[ $TEST == 'true' ]] && G_EXEC sed -i '/# Start DietPi-Software/a\sed -i '\''s|dietpi.com/downloads/binaries/$G_DISTRO_NAME/|dietpi.com/downloads/binaries/$G_DISTRO_NAME/testing/|'\'' /boot/dietpi/dietpi-software' rootfs/boot/dietpi/dietpi-login
 
 # Workaround invalid TERM on login
