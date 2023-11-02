@@ -116,5 +116,5 @@ _EOF_
 # Boot container
 ##########################################
 systemd-nspawn -bD rootfs
-[[ -f rootfs/$NAME_$ARCH.deb ]] || Error_Exit "Failed to build package: $NAME_$ARCH.deb"
+[[ -f rootfs/${NAME}_$ARCH.deb ]] || Error_Exit "Failed to build package: ${NAME}_$ARCH.deb"
 }
