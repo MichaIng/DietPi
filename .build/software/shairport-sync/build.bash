@@ -438,6 +438,15 @@ then
 		useradd -rMU -G audio -d /nonexistent -s /usr/sbin/nologin $name
 	fi
 
+	if getent passwd nqptp > /dev/null
+	then
+		echo 'Configuring NQPTP service user ...'
+		usermod -d /nonexistent -s /usr/sbin/nologin nqptp
+	else
+		echo 'Creating NQPTP service user ...'
+		useradd -rMU -d /nonexistent -s /usr/sbin/nologin nqptp
+	fi
+
 	echo 'Configuring NQPTP systemd service ...'
 	systemctl unmask nqptp
 	systemctl enable --now nqptp
@@ -496,6 +505,18 @@ then
 	then
 		echo 'Removing $name_pretty service group ...'
 		groupdel $name
+	fi
+
+	if getent passwd nqptp > /dev/null
+	then
+		echo 'Removing NQPTP service user ...'
+		userdel nqptp
+	fi
+
+	if getent group nqptp > /dev/null
+	then
+		echo 'Removing NQPTP service group ...'
+		groupdel nqptp
 	fi
 fi
 _EOF_
