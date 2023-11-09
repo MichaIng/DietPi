@@ -1165,8 +1165,8 @@ _EOF_
 			'btbcm' # RPi3 Broadcom onboard
 			'rfcomm' # BPi Pro/M2+ and others
 			'hidp' # BPi Pro/M2+ and others
+			'sprdbt_tty' # Orange Pi Zero 3
 			'hci_uart'
-
 		)
 
 		if [[ $INPUT_DEVICE_VALUE == 'disable' ]]; then
@@ -1194,10 +1194,11 @@ _EOF_
 			systemctl -q is-enabled bluetooth 2> /dev/null || systemctl -q is-active bluetooth && G_EXEC systemctl disable --now bluetooth
 
 			# Unload and blacklist kernel modules, bluetooth last
+			[[ -d '/etc/modprobe.d' ]] || G_EXEC mkdir /etc/modprobe.d
 			> /etc/modprobe.d/dietpi-disable_bluetooth.conf
 			for ((i=$(( ${#aBLUETOOTH_MODULES[@]} - 1 )); i>=0; i--))
 			do
-				modprobe -r "${aBLUETOOTH_MODULES[$i]}" 2> /dev/null
+				modprobe -rf "${aBLUETOOTH_MODULES[$i]}" 2> /dev/null
 				echo "blacklist ${aBLUETOOTH_MODULES[$i]}" >> /etc/modprobe.d/dietpi-disable_bluetooth.conf
 			done
 
@@ -1235,7 +1236,7 @@ Do you want to continue and disable the serial login console?' || return 1
 
 				# bluez-firmware: BCM203x dongles: https://packages.debian.org/bluez-firmware
 				# - Conflicts with armbian-firmware: https://dietpi.com/forum/t/upgrading-dietpi-from-bullseye-to-bookworm/15963/16
-				dpkg-query -s armbian-firmware &> /dev/null || firmware+=('bluez-firmware')
+				dpkg-query -s armbian-firmware &> /dev/null || dpkg-query -s orangepi-firmware &> /dev/null || firmware+=('bluez-firmware')
 
 				G_AG_CHECK_INSTALL_PREREQ bluez "${firmware[@]}"
 			fi
@@ -1328,25 +1329,29 @@ Do you want to continue and disable the serial login console?' || return 1
 		local aWIFI_MODULES=('cfg80211')
 
 		# + RPi with onboard WiFi and NanoPi NEO Air
-		if (( ${G_HW_ONBOARD_WIFI:-0} || $G_HW_MODEL == 64 )); then
-
+		if (( ${G_HW_ONBOARD_WIFI:-0} || $G_HW_MODEL == 64 ))
+		then
 			aWIFI_MODULES+=('brcmfmac' 'brcmutil')
 
 		# + NanoPi K1 Plus
-		elif (( $G_HW_MODEL == 67 )); then
-
+		elif (( $G_HW_MODEL == 67 ))
+		then
 			aWIFI_MODULES+=('8189es')
 
 		# + PINE A64 / Pinebook / ASUS Tinker Board (onboard)
-		elif (( $G_HW_MODEL == 40 || $G_HW_MODEL == 44 || $G_HW_MODEL == 52 )); then
-
+		elif (( $G_HW_MODEL == 40 || $G_HW_MODEL == 44 || $G_HW_MODEL == 52 ))
+		then
 			aWIFI_MODULES+=('8723bs')
 
 		# + NanoPi M3/T3/Fire3
-		elif (( $G_HW_MODEL == 62 )); then
-
+		elif (( $G_HW_MODEL == 62 ))
+		then
 			aWIFI_MODULES+=('bcmdhd')
 
+		# + Orange Pi Zero 3
+		elif (( $G_HW_MODEL == 83 ))
+		then
+			aWIFI_MODULES+=('sprdwl_ng')
 		fi
 
 		if [[ $INPUT_DEVICE_VALUE == 'disable' ]]; then
@@ -1354,8 +1359,11 @@ Do you want to continue and disable the serial login console?' || return 1
 			# Disable onboard WiFi as well
 			(( $G_HW_ONBOARD_WIFI )) && INPUT_DEVICE_VALUE='onboard_disable' Wifi_Modules_Main
 
+			# Remove explicit WiFi module loads
+			[[ -f '/etc/modules-load.d/dietpi-enable_wifi.conf' ]] && G_EXEC rm /etc/modules-load.d/dietpi-enable_wifi.conf
+
 			# Remove powersaving setting
-			[[ -f '/etc/modprobe.d/dietpi-disable_wifi_powersaving.conf' ]] && rm /etc/modprobe.d/dietpi-disable_wifi_powersaving.conf
+			[[ -f '/etc/modprobe.d/dietpi-disable_wifi_powersaving.conf' ]] && G_EXEC rm /etc/modprobe.d/dietpi-disable_wifi_powersaving.conf
 
 			# Reset blacklists
 			[[ -d '/etc/modprobe.d' ]] || G_EXEC mkdir /etc/modprobe.d
@@ -1364,37 +1372,48 @@ Do you want to continue and disable the serial login console?' || return 1
 			# cfg80211 last
 			for ((i=$(( ${#aWIFI_MODULES[@]} - 1 )); i>=0; i--))
 			do
-				echo "blacklist ${aWIFI_MODULES[$i]}" >> /etc/modprobe.d/dietpi-disable_wifi.conf
-				modprobe -rf "${aWIFI_MODULES[$i]}" 2> /dev/null
+				G_EXEC eval "echo 'blacklist ${aWIFI_MODULES[$i]}' >> /etc/modprobe.d/dietpi-disable_wifi.conf"
+				G_EXEC_NOFAIL=1 G_EXEC modprobe -rf "${aWIFI_MODULES[$i]}"
 			done
 
 		elif [[ $INPUT_DEVICE_VALUE == 'enable' ]]; then
 
 			# Disable known powersaving options for specific chipsets
 			[[ -d '/etc/modprobe.d' ]] || G_EXEC mkdir /etc/modprobe.d
-			cat << _EOF_ > /etc/modprobe.d/dietpi-disable_wifi_powersaving.conf
-# NanoPi K1 Plus
-options 8189es rtw_power_mgnt=0
-# PINE A64
-options 8723bs rtw_power_mgnt=0
-# Sparky SBC
-options wlan_8192eu rtw_power_mgnt=0
-# - https://github.com/sparky-sbc/sparky-test/tree/master/rtl8812au
-options wlan_8812au rtw_power_mgnt=0
-_EOF_
+			# - NanoPi K1 Plus
+			if (( $G_HW_MODEL == 67 ))
+			then
+				G_EXEC eval 'echo '\''options 8189es rtw_power_mgnt=0'\'' > /etc/modprobe.d/dietpi-disable_wifi_powersaving.conf'
+
+			# - PINE A64 / Pinebook / ASUS Tinker Board (onboard)
+			elif (( $G_HW_MODEL == 40 || $G_HW_MODEL == 44 || $G_HW_MODEL == 52 ))
+			then
+				G_EXEC eval 'echo '\''options 8723bs rtw_power_mgnt=0'\'' > /etc/modprobe.d/dietpi-disable_wifi_powersaving.conf'
+
+			# - Sparky SBC
+			elif (( $G_HW_MODEL == 70 ))
+			then
+				G_EXEC eval 'echo -e '\''options wlan_8192eu rtw_power_mgnt=0\noptions wlan_8812au rtw_power_mgnt=0'\'' > /etc/modprobe.d/dietpi-disable_wifi_powersaving.conf'
+
+			# - Orange Pi Zero 3: Module does not load automatically
+			elif (( $G_HW_MODEL == 83 ))
+			then
+				G_EXEC eval 'echo '\''sprdwl_ng'\'' > /etc/modules-load.d/dietpi-enable_wifi.conf'
+			fi
+
 			# Remove blacklists
-			[[ -f '/etc/modprobe.d/dietpi-disable_wifi.conf' ]] && rm /etc/modprobe.d/dietpi-disable_wifi.conf
+			[[ -f '/etc/modprobe.d/dietpi-disable_wifi.conf' ]] && G_EXEC rm /etc/modprobe.d/dietpi-disable_wifi.conf
 
 			G_DIETPI-NOTIFY 2 'Please wait, enabling WiFi modules...'
 
 			# cfg80211 first
 			for i in "${aWIFI_MODULES[@]}"
 			do
-				modprobe "$i" 2> /dev/null
+				G_EXEC_NOFAIL=1 G_EXEC modprobe "$i"
 			done
 
 			# Delay to allow modules + WPA2-Enterprise being fully loaded and avoid device not found error
-			G_SLEEP 8
+			G_SLEEP 5
 
 			# Failsafe, unblock all WiFi adapters: https://github.com/MichaIng/DietPi/issues/1627
 			command -v rfkill > /dev/null && rfkill unblock wifi
