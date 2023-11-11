@@ -12,6 +12,20 @@
 G_AGUP
 G_AGDUG automake pkg-config make g++ libpopt-dev libconfig-dev libssl-dev libsoxr-dev libavahi-client-dev libasound2-dev libglib2.0-dev libmosquitto-dev avahi-daemon git libplist-dev libsodium-dev libgcrypt20-dev libavformat-dev xxd
 (( $G_DISTRO == 5 )) && G_EXEC systemctl unmask avahi-daemon
+adeps=('libc6' 'libasound2' 'libavahi-client3' 'libsoxr0' 'libconfig9' 'libpopt0' 'libglib2.0-0' 'libmosquitto1' 'avahi-daemon')
+adeps2=('libplist3' 'libsodium23' 'libgcrypt20')
+case $G_DISTRO in
+	5|6) adeps+=('libssl1.1'); adeps2+=('libavcodec58');;
+	7) adeps+=('libssl3'); adeps2+=('libavcodec59');;
+	8) adeps+=('libssl3'); adeps2+=('libavcodec60');;
+	*) G_DIETPI-NOTIFY 1 "Unsupported distro version: $G_DISTRO_NAME (ID=$G_DISTRO)"; exit 1;;
+esac
+for i in "${adeps[@]}" "${adeps2[@]}"
+do
+	dpkg-query -s "$i" &> /dev/null && continue
+	G_DIETPI-NOTIFY 1 "Expected dependency package was not installed: $i"
+	exit 1
+done
 
 # Obtain latest version
 name='shairport-sync'
@@ -329,9 +343,7 @@ G_EXEC chmod +x "$DIR/DEBIAN/"{postinst,prerm,postrm}
 # - md5sums
 find "$DIR" ! \( -path "$DIR/DEBIAN" -prune \) -type f -exec md5sum {} + | sed "s|$DIR/||" > "$DIR/DEBIAN/md5sums"
 
-# - Add dependencies
-adeps=('libc6' 'libasound2' 'libavahi-client3' 'libsoxr0' 'libconfig9' 'libpopt0' 'libglib2.0-0' 'libmosquitto1' 'avahi-daemon')
-(( $G_DISTRO > 6 )) && adeps+=('libssl3') || adeps+=('libssl1.1')
+# - Obtain DEB dependency versions
 DEPS_APT_VERSIONED=
 for i in "${adeps[@]}"
 do
@@ -339,7 +351,7 @@ do
 done
 DEPS_APT_VERSIONED=${DEPS_APT_VERSIONED%,}
 # shellcheck disable=SC2001
-grep -q 'raspbian' /etc/os-release && DEPS_APT_VERSIONED=$(sed 's/+rp[it][0-9]\+[^)]*)/)/g' <<< "$DEPS_APT_VERSIONED") || DEPS_APT_VERSIONED=$(sed 's/+b[0-9]\+)/)/g' <<< "$DEPS_APT_VERSIONED")
+[[ $G_HW_ARCH_NAME == 'armv6l' ]] && DEPS_APT_VERSIONED=$(sed 's/+rp[it][0-9]\+[^)]*)/)/g' <<< "$DEPS_APT_VERSIONED") || DEPS_APT_VERSIONED=$(sed 's/+b[0-9]\+)/)/g' <<< "$DEPS_APT_VERSIONED")
 
 # - Obtain version suffix
 G_EXEC curl -sSfo package.deb "https://dietpi.com/downloads/binaries/$G_DISTRO_NAME/${name}_$G_HW_ARCH_NAME.deb"
@@ -426,6 +438,15 @@ then
 		useradd -rMU -G audio -d /nonexistent -s /usr/sbin/nologin $name
 	fi
 
+	if getent passwd nqptp > /dev/null
+	then
+		echo 'Configuring NQPTP service user ...'
+		usermod -d /nonexistent -s /usr/sbin/nologin nqptp
+	else
+		echo 'Creating NQPTP service user ...'
+		useradd -rMU -d /nonexistent -s /usr/sbin/nologin nqptp
+	fi
+
 	echo 'Configuring NQPTP systemd service ...'
 	systemctl unmask nqptp
 	systemctl enable --now nqptp
@@ -485,27 +506,31 @@ then
 		echo 'Removing $name_pretty service group ...'
 		groupdel $name
 	fi
+
+	if getent passwd nqptp > /dev/null
+	then
+		echo 'Removing NQPTP service user ...'
+		userdel nqptp
+	fi
+
+	if getent group nqptp > /dev/null
+	then
+		echo 'Removing NQPTP service group ...'
+		groupdel nqptp
+	fi
 fi
 _EOF_
 
 # - md5sums
 find "$DIR" ! \( -path "$DIR/DEBIAN" -prune \) -type f -exec md5sum {} + | sed "s|$DIR/||" > "$DIR/DEBIAN/md5sums"
 
-# - Add dependencies
-adeps+=('libplist3' 'libsodium23' 'libgcrypt20')
-case $G_DISTRO in
-	5|6) adeps+=('libavcodec58');;
-	7) adeps+=('libavcodec59');;
-	*) adeps+=('libavcodec60');;
-esac
-DEPS_APT_VERSIONED=
-for i in "${adeps[@]}"
+# - Obtain DEB dependency versions
+for i in "${adeps2[@]}"
 do
-	DEPS_APT_VERSIONED+=" $i (>= $(dpkg-query -Wf '${VERSION}' "$i")),"
+	DEPS_APT_VERSIONED+=", $i (>= $(dpkg-query -Wf '${VERSION}' "$i"))"
 done
-DEPS_APT_VERSIONED=${DEPS_APT_VERSIONED%,}
 # shellcheck disable=SC2001
-grep -q 'raspbian' /etc/os-release && DEPS_APT_VERSIONED=$(sed 's/+rp[it][0-9]\+)/)/g' <<< "$DEPS_APT_VERSIONED") || DEPS_APT_VERSIONED=$(sed 's/+b[0-9]\+)/)/g' <<< "$DEPS_APT_VERSIONED")
+[[ $G_HW_ARCH_NAME == 'armv6l' ]] && DEPS_APT_VERSIONED=$(sed 's/+rp[it][0-9]\+[^)]*)/)/g' <<< "$DEPS_APT_VERSIONED") || DEPS_APT_VERSIONED=$(sed 's/+b[0-9]\+)/)/g' <<< "$DEPS_APT_VERSIONED")
 
 # - control
 cat << _EOF_ > "$DIR/DEBIAN/control"

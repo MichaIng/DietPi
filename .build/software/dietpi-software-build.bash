@@ -12,7 +12,7 @@ else
 	curl -sSf "https://raw.githubusercontent.com/${G_GITOWNER:=MichaIng}/DietPi/${G_GITBRANCH:=master}/dietpi/func/dietpi-globals" -o /tmp/dietpi-globals || Error_Exit 'Failed to download DietPi-Globals'
 	# shellcheck disable=SC1091
 	. /tmp/dietpi-globals
-	G_EXEC_NOHALT=1 G_EXEC rm /tmp/dietpi-globals
+	G_EXEC rm /tmp/dietpi-globals
 	export G_GITOWNER G_GITBRANCH G_HW_ARCH_NAME=$(uname -m)
 fi
 case $G_HW_ARCH_NAME in
@@ -23,7 +23,7 @@ case $G_HW_ARCH_NAME in
 	'riscv64') export G_HW_ARCH=11;;
 	*) Error_Exit "Unsupported host system architecture \"$G_HW_ARCH_NAME\" detected";;
 esac
-readonly G_PROGRAM_NAME='DietPi-Amiberry_container_setup'
+readonly G_PROGRAM_NAME='DietPi-Software build'
 G_CHECK_ROOT_USER
 G_CHECK_ROOTFS_RW
 readonly FP_ORIGIN=$PWD # Store origin dir
@@ -33,24 +33,29 @@ G_EXEC cd "$FP_ORIGIN" # Process everything in origin dir instead of /tmp/$G_PRO
 ##########################################
 # Process inputs
 ##########################################
+NAME=
 DISTRO=
-PLATFORM=
+ARCH=
 while (( $# ))
 do
 	case $1 in
+		'-n') shift; NAME=$1;;
 		'-d') shift; DISTRO=$1;;
-		'-p') shift; PLATFORM=$1;;
+		'-a') shift; ARCH=$1;;
 		*) Error_Exit "Invalid input \"$1\"";;
 	esac
 	shift
 done
+[[ $NAME =~ ^('gmediarender'|'gogs'|'shairport-sync'|'squeezelite'|'vaultwarden'|'ympd')$ ]] || Error_Exit "Invalid software title \"$NAME\" passed"
+[[ $NAME == 'gogs' ]] && EXT='7z' || EXT='deb'
 [[ $DISTRO =~ ^('buster'|'bullseye'|'bookworm'|'trixie')$ ]] || Error_Exit "Invalid distro \"$DISTRO\" passed"
-case $PLATFORM in
-	'rpi1') image="ARMv6-${DISTRO^}" arch=1;;
-	'rpi'[234]|'c1'|'xu4'|'RK3288'|'sun8i'|'s812') image="ARMv7-${DISTRO^}" arch=2;;
-	'rpi'[34]'-64-dmx'|'AMLSM1'|'n2'|'a64'|'rk3588') image="ARMv8-${DISTRO^}" arch=3;;
-	'x86-64') image="x86_64-${DISTRO^}" arch=10;;
-	*) Error_Exit "Invalid platform \"$PLATFORM\" passed";;
+case $ARCH in
+	'armv6l') image="ARMv6-${DISTRO^}" arch=1;;
+	'armv7l') image="ARMv7-${DISTRO^}" arch=2;;
+	'aarch64') image="ARMv8-${DISTRO^}" arch=3;;
+	'x86_64') image="x86_64-${DISTRO^}" arch=10;;
+	'riscv64') image='RISC-V-Sid' arch=11; [[ $DISTRO == 'trixie' ]] || Error_Exit "Invalid distro \"$DISTRO\" for arch \"$ARCH\" passed, only \"trixie\" is supported";;
+	*) Error_Exit "Invalid architecture \"$ARCH\" passed";;
 esac
 image="DietPi_Container-$image.img"
 
@@ -67,7 +72,7 @@ G_AG_CHECK_INSTALL_PREREQ "${apackages[@]}"
 # Download
 G_EXEC curl -sSfO "https://dietpi.com/downloads/images/$image.xz"
 G_EXEC xz -d "$image.xz"
-G_EXEC truncate -s 2G "$image"
+G_EXEC truncate -s 8G "$image"
 
 # Mount as loop device
 FP_LOOP=$(losetup -f)
@@ -108,6 +113,12 @@ _EOF_
 	G_EXEC ln -s /etc/systemd/system/dietpi-automation.service rootfs/etc/systemd/system/multi-user.target.wants/
 fi
 
+# Install Go for Gogs
+[[ $NAME == 'gogs' ]] && G_CONFIG_INJECT 'AUTO_SETUP_INSTALL_SOFTWARE_ID=' 'AUTO_SETUP_INSTALL_SOFTWARE_ID=188' rootfs/boot/dietpi.txt
+
+# Gogs on RISC-V: Temporarily switch to dev branch until DietPi v8.24 has been released, installing Go from go.dev instead of APT
+[[ $NAME == 'gogs' && $ARCH == 'riscv64' ]] && G_CONFIG_INJECT 'DEV_GITBRANCH=' 'DEV_GITBRANCH=dev' rootfs/boot/dietpi.txt
+
 # Workaround invalid TERM on login
 # shellcheck disable=SC2016
 G_EXEC eval 'echo '\''infocmp "$TERM" > /dev/null 2>&1 || { echo "[ WARN ] Unsupported TERM=\"$TERM\", switching to TERM=\"dumb\""; export TERM=dumb; }'\'' > rootfs/etc/bashrc.d/00-dietpi-build.sh'
@@ -118,26 +129,12 @@ G_CONFIG_INJECT 'CONFIG_CHECK_CONNECTION_IP=' 'CONFIG_CHECK_CONNECTION_IP=127.0.
 # Avoid DietPi-Survey uploads to not mess with the statistics
 G_EXEC rm rootfs/root/.ssh/known_hosts
 
-# RPi 64-bit: Add RPi repo, ARMv6 container images contain it already
-if [[ $PLATFORM == 'rpi'[234]* ]]
-then
-	G_EXEC eval "echo 'deb https://archive.raspberrypi.org/debian/ ${DISTRO/trixie/bookworm} main' > rootfs/etc/apt/sources.list.d/raspi.list"
-	G_EXEC curl -sSf 'https://archive.raspberrypi.org/debian/pool/main/r/raspberrypi-archive-keyring/raspberrypi-archive-keyring_2021.1.1+rpt1_all.deb' -o keyring.deb
-	G_EXEC dpkg --root=rootfs -i keyring.deb
-	G_EXEC rm keyring.deb
-	# Enforce Debian Trixie FFmpeg packages over RPi repo ones
-	[[ $DISTRO != 'trixie' ]] || cat << '_EOF_' > rootfs/etc/apt/preferences.d/dietpi-ffmpeg || exit 1
-Package: src:ffmpeg
-Pin: origin archive.raspberrypi.org
-Pin-Priority: -1
-_EOF_
-fi
-
 # Automated build
-cat << _EOF_ >> rootfs/boot/Automation_Custom_Script.sh || Error_Exit 'Failed to generate Automation_Custom_Script.sh'
-echo '[ INFO ] Running Amiberry build script ...'
-bash -c "\$(curl -sSf 'https://raw.githubusercontent.com/$G_GITOWNER/DietPi/$G_GITBRANCH/.build/software/Amiberry/build.bash')" -- '$PLATFORM'
-mv -v '/tmp/amiberry_$PLATFORM.deb' /
+cat << _EOF_ > rootfs/boot/Automation_Custom_Script.sh || Error_Exit 'Failed to generate Automation_Custom_Script.sh'
+#!/bin/dash
+echo '[ INFO ] Running $NAME build script ...'
+bash -c "\$(curl -sSf 'https://raw.githubusercontent.com/$G_GITOWNER/DietPi/$G_GITBRANCH/.build/software/$NAME/build.bash')"
+mkdir -v /output && mv -v /tmp/*.$EXT /output
 poweroff
 _EOF_
 
@@ -145,5 +142,5 @@ _EOF_
 # Boot container
 ##########################################
 systemd-nspawn -bD rootfs
-[[ -f rootfs/amiberry_$PLATFORM.deb ]] || Error_Exit "Failed to build package: amiberry_$PLATFORM.deb"
+[[ -f rootfs/output/${NAME}_$ARCH.$EXT ]] || Error_Exit "Failed to build package: ${NAME}_$ARCH.$EXT"
 }
