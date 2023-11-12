@@ -20,8 +20,8 @@ setenv fdt_addr_r "0x4080000"
 setenv overlay_error "false"
 
 # Load environment file
-if load ${devtype} ${devnum} ${scriptaddr} ${prefix}dietpiEnv.txt; then
-	env import -t ${scriptaddr} ${filesize}
+if load "${devtype}" "${devnum}" "${scriptaddr}" "${prefix}dietpiEnv.txt"; then
+	env import -t "${scriptaddr}" "${filesize}"
 fi
 
 # Define kernel command-line arguments
@@ -31,44 +31,44 @@ setenv bootargs "root=${rootdev} rootfstype=${rootfstype} rootwait ${consoleargs
 if test "${docker_optimizations}" = "on"; then setenv bootargs "${bootargs} cgroup_enable=memory swapaccount=1"; fi
 
 # Load kernel, initramfs and device tree
-load ${devtype} ${devnum} ${kernel_addr_r} ${prefix}Image
-load ${devtype} ${devnum} ${ramdisk_addr_r} ${prefix}uInitrd
-load ${devtype} ${devnum} ${fdt_addr_r} ${prefix}dtb/${fdtfile}
-fdt addr ${fdt_addr_r}
+load "${devtype}" "${devnum}" "${kernel_addr_r}" "${prefix}Image"
+load "${devtype}" "${devnum}" "${ramdisk_addr_r}" "${prefix}uInitrd"
+load "${devtype}" "${devnum}" "${fdt_addr_r}" "${prefix}dtb/${fdtfile}"
+fdt addr "${fdt_addr_r}"
 
 # Apply DT overlays
 if test -n "${overlays}${user_overlays}"; then
 	fdt resize 65536
 	for overlay in ${overlays}; do
-		if load ${devtype} ${devnum} ${scriptaddr} ${prefix}dtb/${overlay_path}/overlay/${overlay_prefix}-${overlay}.dtbo; then
+		if load "${devtype}" "${devnum}" "${scriptaddr}" "${prefix}dtb/${overlay_path}/overlay/${overlay_prefix}-${overlay}.dtbo"; then
 			echo "Applying kernel provided DT overlay ${overlay_prefix}-${overlay}.dtbo"
-			fdt apply ${scriptaddr} || setenv overlay_error "true"
+			fdt apply "${scriptaddr}" || setenv overlay_error "true"
 		fi
 	done
 
 	for overlay in ${user_overlays}; do
-		if load ${devtype} ${devnum} ${scriptaddr} ${prefix}overlay-user/${overlay}.dtbo; then
+		if load "${devtype}" "${devnum}" "${scriptaddr}" "${prefix}overlay-user/${overlay}.dtbo"; then
 			echo "Applying user provided DT overlay ${overlay}.dtbo"
-			fdt apply ${scriptaddr} || setenv overlay_error "true"
+			fdt apply "${scriptaddr}" || setenv overlay_error "true"
 		fi
 	done
 
 	if test "${overlay_error}" = "true"; then
 		echo "Error applying DT overlays, restoring original DT"
-		load ${devtype} ${devnum} ${fdt_addr_r} ${prefix}dtb/${fdtfile}
+		load "${devtype}" "${devnum}" "${fdt_addr_r}" "${prefix}dtb/${fdtfile}"
 	else
-		if load ${devtype} ${devnum} ${scriptaddr} ${prefix}dtb/${overlay_path}/overlay/${overlay_prefix}-fixup.scr; then
+		if load "${devtype}" "${devnum}" "${scriptaddr}" "${prefix}dtb/${overlay_path}/overlay/${overlay_prefix}-fixup.scr"; then
 			echo "Applying kernel provided DT fixup script ${overlay_prefix}-fixup.scr"
-			source ${scriptaddr}
+			source "${scriptaddr}"
 		fi
-		if test -e ${devtype} ${devnum} ${prefix}fixup.scr; then
-			if load ${devtype} ${devnum} ${scriptaddr} ${prefix}fixup.scr; then
+		if test -e "${devtype}" "${devnum}" "${prefix}fixup.scr"; then
+			if load "${devtype}" "${devnum}" "${scriptaddr}" "${prefix}fixup.scr"; then
 				echo "Applying user provided DT fixup script fixup.scr"
-				source ${scriptaddr}
+				source "${scriptaddr}"
 			fi
 		fi
 	fi
 fi
 
 # Boot
-booti ${kernel_addr_r} ${ramdisk_addr_r} ${fdt_addr_r}
+booti "${kernel_addr_r}" "${ramdisk_addr_r}" "${fdt_addr_r}"
