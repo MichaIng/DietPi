@@ -33,6 +33,7 @@ $FP_SCRIPT	rpi3_usb_boot		enable
 $FP_SCRIPT	rpi-eeprom		Update RPi 4 EEPROM bootloader and USB firmware
 $FP_SCRIPT	vf2-spi-update		Update StarFive VisionFive 2 SPI bootloader
 $FP_SCRIPT	gpudriver		none|intel|nvidia|amd|custom
+$FP_SCRIPT	qemu-guest-agent|qga	enable/disable
 "	#////////////////////////////////////
 
 	# Grab Inputs
@@ -81,14 +82,14 @@ $FP_SCRIPT	gpudriver		none|intel|nvidia|amd|custom
 
 	Unknown_Input_Name()
 	{
-		G_DIETPI-NOTIFY 2 "Unknown input name ($INPUT_DEVICE_NAME). Nothing has been applied."
+		G_DIETPI-NOTIFY 1 "Unknown input name ($INPUT_DEVICE_NAME). Nothing has been applied."
 		echo "$AVAIABLE_COMMANDS"
 		EXIT_CODE=1
 	}
 
 	Unknown_Input_Mode()
 	{
-		G_DIETPI-NOTIFY 2 "Unknown input value ($INPUT_DEVICE_VALUE). Nothing has been applied."
+		G_DIETPI-NOTIFY 1 "Unknown input value ($INPUT_DEVICE_VALUE). Nothing has been applied."
 		echo "$AVAIABLE_COMMANDS"
 		EXIT_CODE=1
 	}
@@ -216,14 +217,25 @@ _EOF_
 	}
 
 	#/////////////////////////////////////////////////////////////////////////////////////
-	# rpi-eeprom: https://www.raspberrypi.com/documentation/computers/raspberry-pi.html#updating-the-bootloader
+	# rpi-eeprom: https://www.raspberrypi.com/documentation/computers/raspberry-pi.html#automaticupdates
 	#/////////////////////////////////////////////////////////////////////////////////////
 	RPi_EEPROM()
 	{
 		(( $G_HW_MODEL == 4 )) || { Unsupported_Input_Name; return 1; } # Exit path for non-RPi4
 
 		# Install required APT package
-		G_AG_CHECK_INSTALL_PREREQ rpi-eeprom
+		if (( $G_DISTRO > 6 ))
+		then
+			if ! dpkg-query -s rpi-eeprom &> /dev/null
+			then
+				G_EXEC_OUTPUT=1 G_EXEC curl -fO 'https://dietpi.com/downloads/binaries/rpi/rpi-eeprom.deb'
+				G_AGI ./rpi-eeprom.deb
+				G_EXEC rm rpi-eeprom.deb
+				G_EXEC apt-mark hold rpi-eeprom
+			fi
+		else
+			G_AG_CHECK_INSTALL_PREREQ rpi-eeprom
+		fi
 
 		# Update/flash new bootloader and VL805 USB firmware to EEPROM
 		rpi-eeprom-update -a
@@ -1124,33 +1136,50 @@ _EOF_
 	#/////////////////////////////////////////////////////////////////////////////////////
 	# SPI: https://github.com/raspberrypi/documentation/tree/master/hardware/raspberrypi/spi
 	#/////////////////////////////////////////////////////////////////////////////////////
-	SPI_Main(){
+	SPI_Main()
+	{
+		# RPi
+		if (( $G_HW_MODEL < 10 ))
+		then
+			if [[ $INPUT_DEVICE_VALUE == 'enable' ]]
+			then
+				# config.txt
+				G_CONFIG_INJECT 'dtparam=spi=' 'dtparam=spi=on' /boot/config.txt
 
-		(( $G_HW_MODEL > 9 )) && { Unsupported_Input_Name; return 1; } # Exit path for non-RPi
+				# Enable in runtime seems to be possible?
+				#dtparam spi=on
 
-		if [[ $INPUT_DEVICE_VALUE == 'enable' ]]; then
+			elif [[ $INPUT_DEVICE_VALUE == 'disable' ]]
+			then
+				# config.txt
+				G_CONFIG_INJECT 'dtparam=spi=' 'dtparam=spi=off' /boot/config.txt
+				G_EXEC sed -i '/^[[:blank:]]*dtoverlay=spi[0-9]-[0-9]cs/d' /boot/config.txt # Alternative SPI interfaces and chip select lines
 
-			# config.txt
-			G_CONFIG_INJECT 'dtparam=spi=' 'dtparam=spi=on' /boot/config.txt
+				# Disable in runtime seems to be possible?
+				#dtparam spi=off
+			else
+				Unknown_Input_Mode
+			fi
 
-			# Enable in runtime seems to be possible?
-			#dtparam spi=on
+		# Orange Pi Zero 3
+		elif (( $G_HW_MODEL == 83 ))
+		then
+			if [[ $INPUT_DEVICE_VALUE == 'enable' ]]
+			then
+				# Add overlay to dietpiEnv.txt
+				grep -Eq '^[[:blank:]]*overlays=(.*[[:blank:]])?spi1-cs1-spidev([[:blank:]]|$)' "$FP_UENV" || G_EXEC sed -i '/^[[:blank:]]*overlays=/s/[[:blank:]]*$/ spi1-cs1-spidev/' "$FP_UENV"
 
-		elif [[ $INPUT_DEVICE_VALUE == 'disable' ]]; then
-
-			# config.txt
-			G_CONFIG_INJECT 'dtparam=spi=' 'dtparam=spi=off' /boot/config.txt
-			G_EXEC sed -i '/^[[:blank:]]*dtoverlay=spi[0-9]-[0-9]cs/d' /boot/config.txt # Alternative SPI interfaces and chip select lines
-
-			# Disable in runtime seems to be possible?
-			#dtparam spi=off
-
+			elif [[ $INPUT_DEVICE_VALUE == 'disable' ]]
+			then
+				# Remove overlay from dietpiEnv.txt
+				grep -Eq '^[[:blank:]]*overlays=(.*[[:blank:]])?spi1-cs1-spidev([[:blank:]]|$)' "$FP_UENV" && G_EXEC sed -Ei '/^[[:blank:]]*overlays=/s/[[:blank:]]*spi1-cs1-spidev([[:blank:]]*$)?//g' "$FP_UENV"
+			else
+				Unknown_Input_Mode
+			fi
 		else
-
-			Unknown_Input_Mode
-
+			Unsupported_Input_Name
+			return 1
 		fi
-
 	}
 
 	#/////////////////////////////////////////////////////////////////////////////////////
@@ -2143,7 +2172,7 @@ _EOF_
 				if (( $ARMBIAN || $DIETPIENV ))
 				then
 					# Add analogue 3.5mm jack device tree overlay
-					G_EXEC sed -i '/^[[:blank:]]*overlays=/s/$/ analog-codec/' "$FP_UENV"
+					G_EXEC sed -i '/^[[:blank:]]*overlays=/s/[[:blank:]]*$/ analog-codec/' "$FP_UENV"
 
 				# Legacy
 				else
@@ -2344,6 +2373,26 @@ _EOF_
 		G_CONFIG_INJECT 'CONFIG_GPU_DRIVER=' "CONFIG_GPU_DRIVER=$INPUT_DEVICE_VALUE" /boot/dietpi.txt
 	}
 
+	QEMU_Guest_Agent_Main()
+	{
+		(( $G_HW_MODEL == 20 )) || { Unsupported_Input_Name; return 1; } # VM only
+
+		[[ $INPUT_DEVICE_VALUE == 'disable' ]] &&  { G_AGP qemu-guest-agent; return 0; }
+
+		[[ $INPUT_DEVICE_VALUE == 'enable' ]] || { Unknown_Input_Mode; return 1; }
+
+		[[ -e '/dev/virtio-ports/org.qemu.guest_agent.0' ]] || { G_DIETPI-NOTIFY 2 'No QEMU Guest Agent node detected, skipping daemon installation ...'; return 1; } # Exit if node is missing
+
+		# Bullseye: logind and hence dbus required
+		if (( $G_DISTRO == 6 ))
+		then
+			G_AG_CHECK_INSTALL_PREREQ dbus
+			G_EXEC systemctl unmask systemd-logind
+			G_EXEC systemctl start systemd-logind
+		fi
+		G_AG_CHECK_INSTALL_PREREQ qemu-guest-agent
+	}
+
 	#/////////////////////////////////////////////////////////////////////////////////////
 	# Main Loop
 	#/////////////////////////////////////////////////////////////////////////////////////
@@ -2371,6 +2420,7 @@ _EOF_
 		'vf2-spi-update') VF2_SPI_Update;;
 		'headless') Headless_Main;;
 		'gpudriver') GPUDriver_Main;;
+		'qemu-guest-agent'|'qga') QEMU_Guest_Agent_Main;;
 		*) Unknown_Input_Name;;
 	esac
 	#-----------------------------------------------------------------------------------

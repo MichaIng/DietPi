@@ -1,0 +1,71 @@
+name: Armbian
+on:
+  workflow_dispatch:
+    inputs:
+      asset:
+        description: 'Asset'
+        type: choice
+        options: [kernel, uboot, firmware]
+        default: kernel
+        required: true
+      branch:
+        description: 'Branch'
+        type: choice
+        options: [legacy, current, edge]
+        default: current
+        required: true
+      board:
+        description: 'Board'
+        required: true
+      gitowner:
+        description: 'Override Git owner of Armbian repo'
+      gitbranch:
+        description: 'Override Git branch of Armbian repo'
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.inputs.asset }}-${{ github.event.inputs.branch }}-${{ github.event.inputs.board }}
+  cancel-in-progress: true
+permissions: {}
+defaults:
+  run:
+    shell: sh
+jobs:
+  build:
+    name: "${{ github.event.inputs.asset }} - ${{ github.event.inputs.branch }} - ${{ github.event.inputs.board }}"
+    runs-on: ubuntu-22.04
+    steps:
+    - name: Clone Armbian repo
+      run: |
+        owner='${{ github.event.inputs.gitowner }}'
+        [ "$owner" ] || owner='armbian'
+        branch='${{ github.event.inputs.gitbranch }}'
+        [ "$branch" ] || branch='main'
+        git clone -b "$branch" --depth=1 "https://github.com/$owner/build"
+    - name: Build asset
+      run: |
+        cd build
+        ./compile.sh '${{ github.event.inputs.asset }}' BRANCH='${{ github.event.inputs.branch }}' BOARD='${{ github.event.inputs.board }}'
+    - name: Upload
+      run: |
+        # SSH server and client keys
+        mkdir ~/.ssh
+        umask 377
+        echo '${{ secrets.KNOWN_HOSTS }}' > ~/.ssh/known_hosts
+        echo '${{ secrets.SSH_KEY }}' > ~/.ssh/id_ed25519
+
+        # Generate file lists
+        files=
+        urls='"https://dietpi.com/downloads/binaries/testing/"'
+        cd build/output/debs
+        for i in *
+        do
+          mv -v "$i" "${i%%_*}.deb"
+          i="${i%%_*}.deb"
+          files="$files,$i"
+          urls="$urls,\"https://dietpi.com/downloads/binaries/testing/$i\""
+        done
+        files=${files#,}
+        echo "Uploading file(s) $files to URL(s) $urls ..."
+
+        # Upload
+        curl -T "{$files}" --key ~/.ssh/id_ed25519 '${{ secrets.UPLOAD_URL }}all/'
+        curl 'https://api.cloudflare.com/client/v4/zones/${{ secrets.CF_ZONE }}/purge_cache' -H 'Authorization: Bearer ${{ secrets.CF_TOKEN }}' -H 'Content-Type: application/json' --data "{\"files\":[$urls]}"
