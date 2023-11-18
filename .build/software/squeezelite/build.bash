@@ -9,10 +9,17 @@ G_AGDUG make gcc libc6-dev libasound2-dev libflac-dev libmad0-dev libvorbis-dev 
 # Runtime deps
 adeps=('libc6' 'libasound2' 'libmad0' 'libvorbisfile3' 'libmpg123-0' 'libsoxr0' 'liblirc-client0' 'libfaad2' 'libopus0')
 case $G_DISTRO in
-	[56]) adeps+=('libflac8' 'libavformat58' 'libssl1.1');;
+	5|6) adeps+=('libflac8' 'libavformat58' 'libssl1.1');;
 	7) adeps+=('libflac12' 'libavformat59' 'libssl3');;
+	8) adeps+=('libflac12' 'libavformat60' 'libssl3');;
 	*) G_DIETPI-NOTIFY 1 "Unsupported distro version: $G_DISTRO_NAME (ID=$G_DISTRO)"; exit 1;;
 esac
+for i in "${adeps[@]}"
+do
+	dpkg-query -s "$i" &> /dev/null && continue
+	G_DIETPI-NOTIFY 1 "Expected dependency package was not installed: $i"
+	exit 1
+done
 
 G_DIETPI-NOTIFY 2 'Downloading source code...'
 G_EXEC cd /tmp
@@ -136,7 +143,7 @@ do
 done
 DEPS_APT_VERSIONED=${DEPS_APT_VERSIONED%,}
 # shellcheck disable=SC2001
-grep -q 'raspbian' /etc/os-release && DEPS_APT_VERSIONED=$(sed 's/+rp[it][0-9]\+[^)]*)/)/g' <<< "$DEPS_APT_VERSIONED") || DEPS_APT_VERSIONED=$(sed 's/+b[0-9]\+)/)/g' <<< "$DEPS_APT_VERSIONED")
+[[ $G_HW_ARCH_NAME == 'armv6l' ]] && DEPS_APT_VERSIONED=$(sed 's/+rp[it][0-9]\+[^)]*)/)/g' <<< "$DEPS_APT_VERSIONED") || DEPS_APT_VERSIONED=$(sed 's/+b[0-9]\+)/)/g' <<< "$DEPS_APT_VERSIONED")
 
 # - Obtain version
 version="$(mawk -F\" '/MAJOR_VERSION/{print $2;exit}' squeezelite-master/squeezelite.h).$(mawk -F\" '/MINOR_VERSION/{print $2;exit}' squeezelite-master/squeezelite.h)-$(mawk -F\" '/MICRO_VERSION/{print $2;exit}' squeezelite-master/squeezelite.h)"

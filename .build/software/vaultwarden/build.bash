@@ -9,13 +9,19 @@ adeps=('libc6' 'openssl')
 (( $G_DISTRO > 6 )) && adeps+=('libssl3') || adeps+=('libssl1.1')
 G_AGUP
 G_AGDUG "${adeps_build[@]}"
+for i in "${adeps[@]}"
+do
+	dpkg-query -s "$i" &> /dev/null && continue
+	G_DIETPI-NOTIFY 1 "Expected dependency package was not installed: $i"
+	exit 1
+done
 
 # Install Rust via https://rustup.rs/
 # - ARMv7: Needs to be installed in tmpfs, else builds fail in emulated 32-bit ARM environments: https://github.com/rust-lang/cargo/issues/8719
 # - ARMv8: Apply workaround for increased RAM usage: https://github.com/rust-lang/cargo/issues/10583
 # shellcheck disable=SC2015
 export HOME='/tmp/rustup' CARGO_NET_GIT_FETCH_WITH_CLI='true'
-[[ -d $HOME ]] || G_EXEC mkdir "$HOME"
+G_EXEC mkdir -p "$HOME"
 G_EXEC cd "$HOME"
 G_EXEC curl -sSfo rustup-init.sh 'https://sh.rustup.rs'
 G_EXEC chmod +x rustup-init.sh
@@ -32,6 +38,9 @@ version=$(curl -sSf 'https://api.github.com/repos/dani-garcia/vaultwarden/releas
 # - web vault
 wv_url=$(curl -sSf 'https://api.github.com/repos/dani-garcia/bw_web_builds/releases/latest' | mawk -F\" '/^      "browser_download_url".*\.tar\.gz"$/{print $4}')
 [[ $wv_url ]] || { G_DIETPI-NOTIFY 1 'No latest web vault version found, aborting ...'; exit 1; }
+
+# RISC-V workaround until ring dependency has been raised to v0.17+
+[[ $G_HW_ARCH == 11 && $version == '1.29.2' ]] && version_pkg=$version version='main'
 
 # Build
 G_DIETPI-NOTIFY 2 "Building vaultwarden version \e[33m$version"
@@ -56,6 +65,9 @@ G_EXEC mkdir -p "$DIR/"{DEBIAN,opt/vaultwarden,mnt/dietpi_userdata/vaultwarden,l
 G_EXEC mv "vaultwarden-$version/target/release/vaultwarden" "$DIR/opt/vaultwarden/"
 G_EXEC mv "vaultwarden-$version/.env.template" "$DIR/mnt/dietpi_userdata/vaultwarden/vaultwarden.env"
 G_EXEC rm -R "vaultwarden-$version"
+
+# Revert RISC-V workaround until ring dependency has been raised to v0.17+
+[[ $G_HW_ARCH == 11 && $version_pkg ]] && version=$version_pkg
 
 # - web vault
 G_DIETPI-NOTIFY 2 "Downloading web vault from \e[33m$wv_url"

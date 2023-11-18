@@ -11,7 +11,7 @@ else
 	curl -sSf "https://raw.githubusercontent.com/${G_GITOWNER:=MichaIng}/DietPi/${G_GITBRANCH:=master}/dietpi/func/dietpi-globals" -o /tmp/dietpi-globals || exit 1
 	# shellcheck disable=SC1091
 	. /tmp/dietpi-globals
-	G_EXEC_NOHALT=1 G_EXEC rm /tmp/dietpi-globals
+	G_EXEC rm /tmp/dietpi-globals
 	export G_GITOWNER G_GITBRANCH G_HW_ARCH_NAME=$(uname -m)
 fi
 case $G_HW_ARCH_NAME in
@@ -35,7 +35,8 @@ G_EXEC cd "$FP_ORIGIN" # Process everything in origin dir instead of /tmp/$G_PRO
 DISTRO=
 ARCH=
 SOFTWARE=
-RPI=
+RPI=false
+TEST=false
 while (( $# ))
 do
 	case $1 in
@@ -43,25 +44,28 @@ do
 		'-a') shift; ARCH=$1;;
 		'-s') shift; SOFTWARE=$1;;
 		'-rpi') shift; RPI=$1;;
+		'-t') shift; TEST=$1;;
 		*) G_DIETPI-NOTIFY 1 "Invalid input \"$1\", aborting..."; exit 1;;
 	esac
 	shift
 done
 [[ $DISTRO =~ ^('buster'|'bullseye'|'bookworm'|'trixie')$ ]] || { G_DIETPI-NOTIFY 1 "Invalid distro \"$DISTRO\" passed, aborting..."; exit 1; }
 case $ARCH in
-	'armv6l') image="DietPi_Container-ARMv6-${DISTRO^}.img" arch=1;;
-	'armv7l') image="DietPi_Container-ARMv7-${DISTRO^}.img" arch=2;;
-	'aarch64') image="DietPi_Container-ARMv8-${DISTRO^}.img" arch=3;;
-	'x86_64') image="DietPi_Container-x86_64-${DISTRO^}.img" arch=10;;
-	'riscv64') image="DietPi_Container-RISC-V-Sid.img" arch=11;;
+	'armv6l') image="ARMv6-${DISTRO^}" arch=1;;
+	'armv7l') image="ARMv7-${DISTRO^}" arch=2;;
+	'aarch64') image="ARMv8-${DISTRO^}" arch=3;;
+	'x86_64') image="x86_64-${DISTRO^}" arch=10;;
+	'riscv64') image='RISC-V-Sid' arch=11;;
 	*) G_DIETPI-NOTIFY 1 "Invalid architecture \"$ARCH\" passed, aborting..."; exit 1;;
 esac
+image="DietPi_Container-$image.img"
 [[ $SOFTWARE =~ ^[0-9\ ]+$ ]] || { G_DIETPI-NOTIFY 1 "Invalid software list \"$SOFTWARE\" passed, aborting..."; exit 1; }
-[[ $RPI =~ ^(|'false'|'true')$ ]] || { G_DIETPI-NOTIFY 1 "Invalid RPi flag \"$RPI\" passed, aborting..."; exit 1; }
+[[ $RPI =~ ^('false'|'true')$ ]] || { G_DIETPI-NOTIFY 1 "Invalid RPi flag \"$RPI\" passed, aborting..."; exit 1; }
+[[ $TEST =~ ^('false'|'true')$ ]] || { G_DIETPI-NOTIFY 1 "Invalid test flag \"$TEST\" passed, aborting..."; exit 1; }
 
 # Workaround for "Could not execute systemctl:  at /usr/bin/deb-systemd-invoke line 145." during Apache2 DEB postinst in 32-bit ARM Bookworm container: https://lists.ubuntu.com/archives/foundations-bugs/2022-January/467253.html
 [[ $SOFTWARE =~ (^| )83( |$) && $DISTRO == 'bookworm' ]] && (( $arch < 3 )) && { echo '[ WARN ] Installing Lighttpd instead of Apache due to a bug in 32-bit ARM containers'; SOFTWARE=$(sed -E 's/(^| )83( |$)/\184\2/g' <<< "$SOFTWARE"); }
-# Remove Roon Extension Manager and Portainer from test installs as Docker cannot start in systemd containers
+# Remove Docker containers from test installs as Docker cannot start in systemd containers
 [[ $SOFTWARE =~ (^| )(86|142|185)( |$) ]] && { echo '[ WARN ] Removing Roon Extension Manager, MicroK8s and Portainer from test installs as Docker cannot start in systemd containers'; SOFTWARE=$(sed -E 's/(^| )(86|142|186)( |$)/\1\3/g' <<< "$SOFTWARE"); }
 # Add MariaDB with Allo GUI (non-full/reinstall ID 160), as otherwise the install fails
 [[ $SOFTWARE =~ (^| )160( |$) ]] && SOFTWARE=$(sed -E 's/(^| )160( |$)/\188 160\2/g' <<< "$SOFTWARE")
@@ -295,10 +299,20 @@ then
 	G_EXEC rm rootfs/etc/.dietpi_hw_model_identifier
 	G_EXEC touch rootfs/boot/{bcm-rpi-dummy.dtb,config.txt,cmdline.txt}
 	G_EXEC sed -i "/# Start DietPi-Software/iG_EXEC sed -i -e '/^G_HW_MODEL=/cG_HW_MODEL=$model' -e '/^G_HW_MODEL_NAME=/cG_HW_MODEL_NAME=\"RPi $model ($ARCH)\"' /boot/dietpi/.hw_model" rootfs/boot/dietpi/dietpi-login
-	G_EXEC curl -sSf 'https://archive.raspberrypi.org/debian/pool/main/r/raspberrypi-archive-keyring/raspberrypi-archive-keyring_2021.1.1+rpt1_all.deb' -o keyring.deb
+	G_EXEC curl -sSfo keyring.deb 'https://archive.raspberrypi.org/debian/pool/main/r/raspberrypi-archive-keyring/raspberrypi-archive-keyring_2021.1.1+rpt1_all.deb'
 	G_EXEC dpkg --root=rootfs -i keyring.deb
 	G_EXEC rm keyring.deb
+	# Enforce Debian Trixie FFmpeg packages over RPi repo ones
+	[[ $DISTRO != 'trixie' ]] || cat << '_EOF_' > rootfs/etc/apt/preferences.d/dietpi-ffmpeg || exit 1
+Package: src:ffmpeg
+Pin: origin archive.raspberrypi.org
+Pin-Priority: -1
+_EOF_
 fi
+
+# Install test builds from dietpi.com if requested
+# shellcheck disable=SC2016
+[[ $TEST == 'true' ]] && G_EXEC sed -i '/# Start DietPi-Software/a\sed -i '\''s|dietpi.com/downloads/binaries/$G_DISTRO_NAME/|dietpi.com/downloads/binaries/$G_DISTRO_NAME/testing/|'\'' /boot/dietpi/dietpi-software' rootfs/boot/dietpi/dietpi-login
 
 # Workaround invalid TERM on login
 # shellcheck disable=SC2016
@@ -306,6 +320,25 @@ G_EXEC eval 'echo '\''infocmp "$TERM" > /dev/null 2>&1 || { echo "[ INFO ] Unsup
 
 # Enable automated setup
 G_CONFIG_INJECT 'AUTO_SETUP_AUTOMATED=' 'AUTO_SETUP_AUTOMATED=1' rootfs/boot/dietpi.txt
+# - Workaround for skipped autologin in emulated Trixie/Sid containers: https://gitlab.com/qemu-project/qemu/-/issues/1962
+if [[ $DISTRO == 'trixie' ]] && (( $G_HW_ARCH != $arch && ( $G_HW_ARCH > 9 || $G_HW_ARCH < $arch ) ))
+then
+	cat << '_EOF_' > rootfs/etc/systemd/system/dietpi-automation.service
+[Unit]
+Description=DietPi-Automation
+After=dietpi-postboot.service
+
+[Service]
+Type=idle
+StandardOutput=tty
+ExecStart=/bin/dash -c 'infocmp "$TERM" > /dev/null 2>&1 || export TERM=dumb; exec /boot/dietpi/dietpi-login'
+ExecStop=/sbin/poweroff
+
+[Install]
+WantedBy=multi-user.target
+_EOF_
+	G_EXEC ln -s /etc/systemd/system/dietpi-automation.service rootfs/etc/systemd/system/multi-user.target.wants/
+fi
 
 # Workaround for failing IPv4 network connectivity check as GitHub Actions runners do not receive external ICMP echo replies.
 G_CONFIG_INJECT 'CONFIG_CHECK_CONNECTION_IP=' 'CONFIG_CHECK_CONNECTION_IP=127.0.0.1' rootfs/boot/dietpi.txt

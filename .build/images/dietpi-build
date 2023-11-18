@@ -127,7 +127,7 @@ case $HW_MODEL in
 	80) iname='OrangePi5' HW_ARCH=3 PTTYPE='gpt' partition_start=16 root_size=752;;
 	81) iname='VisionFive2' HW_ARCH=11 root_size=639;;
 	82) iname='OrangePi5Plus' HW_ARCH=3 PTTYPE='gpt' partition_start=16 root_size=752;;
-	83) iname='OrangePiZero3' HW_ARCH=3 PTTYPE='gpt' partition_start=16 root_size=752;;
+	83) iname='OrangePiZero3' HW_ARCH=3 partition_start=4 root_size=752;;
 	84) iname='Star64' HW_ARCH=11 root_size=639;;
 	85) iname='ROCK5A' HW_ARCH=3 PTTYPE='gpt' partition_start=16 root_size=752;;
 	86) iname='ASUSTB2' HW_ARCH=3 partition_start=16 root_size=752;;
@@ -415,7 +415,7 @@ G_EXEC umount rootfs/dev rootfs/run rootfs/var/cache/apt rootfs/var/lib/apt/list
 cat << '_EOF_' > rootfs/etc/rc.local
 #!/bin/dash
 {
-infocmp "$TERM" > /dev/null 2>&1 || TERM='dumb'
+infocmp "$TERM" > /dev/null 2>&1 || { echo "[ WARN ] Unsupported TERM=\"$TERM\", switching to TERM=\"dumb\""; export TERM=dumb; }
 echo '[ INFO ] Running DietPi-Installer...'
 _EOF_
 
@@ -571,6 +571,25 @@ then
 
 	# Install Allo GUI via automated first run setup right here
 	G_CONFIG_INJECT 'AUTO_SETUP_AUTOMATED=' 'AUTO_SETUP_AUTOMATED=1' rootfs/boot/dietpi.txt
+	# - Workaround for skipped autologin in emulated Trixie/Sid containers: https://gitlab.com/qemu-project/qemu/-/issues/1962
+	if (( $DISTRO == 8 && $G_HW_ARCH != $HW_ARCH && ( $G_HW_ARCH > 9 || $G_HW_ARCH < $HW_ARCH ) ))
+	then
+		cat << '_EOF_' > rootfs/etc/systemd/system/dietpi-automation.service
+[Unit]
+Description=DietPi-Automation
+After=dietpi-postboot.service
+
+[Service]
+Type=idle
+StandardOutput=tty
+ExecStart=/bin/dash -c 'infocmp "$TERM" > /dev/null 2>&1 || export TERM=dumb; exec /boot/dietpi/dietpi-login'
+ExecStop=/sbin/poweroff
+
+[Install]
+WantedBy=multi-user.target
+_EOF_
+		G_EXEC ln -s /etc/systemd/system/dietpi-automation.service rootfs/etc/systemd/system/multi-user.target.wants/
+	fi
 	G_CONFIG_INJECT 'AUTO_SETUP_INSTALL_SOFTWARE_ID=' 'AUTO_SETUP_INSTALL_SOFTWARE_ID=159' rootfs/boot/dietpi.txt
 	# Revert autostart option, in case Amiberry image was generated before
 	G_CONFIG_INJECT 'AUTO_SETUP_AUTOSTART_TARGET_INDEX=' 'AUTO_SETUP_AUTOSTART_TARGET_INDEX=0' rootfs/boot/dietpi.txt
@@ -578,12 +597,15 @@ then
 	# Force ARMv6 arch on Raspbian
 	(( $HW_ARCH == 1 )) && echo 'sed -i -e '\''/^G_HW_ARCH=/c\G_HW_ARCH=1'\'' -e '\''/^G_HW_ARCH_NAME=/c\G_HW_ARCH_NAME=armv6l'\'' /boot/dietpi/.hw_model' > rootfs/boot/Automation_Custom_PreScript.sh
 
+	# Temporary fix for failing NAA Daemon install on Trixie
+	(( $DISTRO == 8 )) && G_EXEC sed -i '\|www.signalyst.eu|s|bookworm/bullseye|trixie/bullseye|' rootfs/boot/dietpi/dietpi-software
+
 	# Skip filesystem expansion
 	G_EXEC rm rootfs/etc/systemd/system/local-fs.target.wants/dietpi-fs_partition_resize.service
 
 	# Workaround invalid TERM on login
 	# shellcheck disable=SC2016
-	G_EXEC eval 'echo '\''infocmp "$TERM" > /dev/null 2>&1 || { echo "[ INFO ] Unsupported TERM=\"$TERM\", switching to TERM=\"dumb\""; export TERM=dumb; }'\'' > rootfs/etc/bashrc.d/00-dietpi-build.sh'
+	G_EXEC eval 'echo '\''infocmp "$TERM" > /dev/null 2>&1 || { echo "[ WARN ] Unsupported TERM=\"$TERM\", switching to TERM=\"dumb\""; export TERM=dumb; }'\'' > rootfs/etc/bashrc.d/00-dietpi-build.sh'
 
 	# Workaround for failing IPv4 network connectivity check as GitHub Actions runners do not receive external ICMP echo replies.
 	G_CONFIG_INJECT 'CONFIG_CHECK_CONNECTION_IP=' 'CONFIG_CHECK_CONNECTION_IP=127.0.0.1' rootfs/boot/dietpi.txt
@@ -651,6 +673,9 @@ _EOF_
 
 	# Reset IPv4 network connectivity check setting
 	G_CONFIG_INJECT 'CONFIG_CHECK_CONNECTION_IP=' 'CONFIG_CHECK_CONNECTION_IP=9.9.9.9' rootfs/boot/dietpi.txt
+
+	# Revert workaround for skipped autologin in emulated Trixie/Sid containers: https://gitlab.com/qemu-project/qemu/-/issues/1962
+	(( $DISTRO == 8 )) && G_EXEC rm rootfs/etc/systemd/system/{multi-user.target.wants/,}dietpi-automation.service
 
 	[[ -f 'rootfs/success' ]] || { G_DIETPI-NOTIFY 1 'The container setup did not finish successfully, aborting...'; exit 1; }
 	G_EXEC rm rootfs/success

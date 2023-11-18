@@ -33,6 +33,7 @@ $FP_SCRIPT	rpi3_usb_boot		enable
 $FP_SCRIPT	rpi-eeprom		Update RPi 4 EEPROM bootloader and USB firmware
 $FP_SCRIPT	vf2-spi-update		Update StarFive VisionFive 2 SPI bootloader
 $FP_SCRIPT	gpudriver		none|intel|nvidia|amd|custom
+$FP_SCRIPT	qemu-guest-agent|qga	enable/disable
 "	#////////////////////////////////////
 
 	# Grab Inputs
@@ -81,14 +82,14 @@ $FP_SCRIPT	gpudriver		none|intel|nvidia|amd|custom
 
 	Unknown_Input_Name()
 	{
-		G_DIETPI-NOTIFY 2 "Unknown input name ($INPUT_DEVICE_NAME). Nothing has been applied."
+		G_DIETPI-NOTIFY 1 "Unknown input name ($INPUT_DEVICE_NAME). Nothing has been applied."
 		echo "$AVAIABLE_COMMANDS"
 		EXIT_CODE=1
 	}
 
 	Unknown_Input_Mode()
 	{
-		G_DIETPI-NOTIFY 2 "Unknown input value ($INPUT_DEVICE_VALUE). Nothing has been applied."
+		G_DIETPI-NOTIFY 1 "Unknown input value ($INPUT_DEVICE_VALUE). Nothing has been applied."
 		echo "$AVAIABLE_COMMANDS"
 		EXIT_CODE=1
 	}
@@ -216,14 +217,25 @@ _EOF_
 	}
 
 	#/////////////////////////////////////////////////////////////////////////////////////
-	# rpi-eeprom: https://www.raspberrypi.com/documentation/computers/raspberry-pi.html#updating-the-bootloader
+	# rpi-eeprom: https://www.raspberrypi.com/documentation/computers/raspberry-pi.html#automaticupdates
 	#/////////////////////////////////////////////////////////////////////////////////////
 	RPi_EEPROM()
 	{
 		(( $G_HW_MODEL == 4 )) || { Unsupported_Input_Name; return 1; } # Exit path for non-RPi4
 
 		# Install required APT package
-		G_AG_CHECK_INSTALL_PREREQ rpi-eeprom
+		if (( $G_DISTRO > 6 ))
+		then
+			if ! dpkg-query -s rpi-eeprom &> /dev/null
+			then
+				G_EXEC_OUTPUT=1 G_EXEC curl -fO 'https://dietpi.com/downloads/binaries/rpi/rpi-eeprom.deb'
+				G_AGI ./rpi-eeprom.deb
+				G_EXEC rm rpi-eeprom.deb
+				G_EXEC apt-mark hold rpi-eeprom
+			fi
+		else
+			G_AG_CHECK_INSTALL_PREREQ rpi-eeprom
+		fi
 
 		# Update/flash new bootloader and VL805 USB firmware to EEPROM
 		rpi-eeprom-update -a
@@ -1124,33 +1136,50 @@ _EOF_
 	#/////////////////////////////////////////////////////////////////////////////////////
 	# SPI: https://github.com/raspberrypi/documentation/tree/master/hardware/raspberrypi/spi
 	#/////////////////////////////////////////////////////////////////////////////////////
-	SPI_Main(){
+	SPI_Main()
+	{
+		# RPi
+		if (( $G_HW_MODEL < 10 ))
+		then
+			if [[ $INPUT_DEVICE_VALUE == 'enable' ]]
+			then
+				# config.txt
+				G_CONFIG_INJECT 'dtparam=spi=' 'dtparam=spi=on' /boot/config.txt
 
-		(( $G_HW_MODEL > 9 )) && { Unsupported_Input_Name; return 1; } # Exit path for non-RPi
+				# Enable in runtime seems to be possible?
+				#dtparam spi=on
 
-		if [[ $INPUT_DEVICE_VALUE == 'enable' ]]; then
+			elif [[ $INPUT_DEVICE_VALUE == 'disable' ]]
+			then
+				# config.txt
+				G_CONFIG_INJECT 'dtparam=spi=' 'dtparam=spi=off' /boot/config.txt
+				G_EXEC sed -i '/^[[:blank:]]*dtoverlay=spi[0-9]-[0-9]cs/d' /boot/config.txt # Alternative SPI interfaces and chip select lines
 
-			# config.txt
-			G_CONFIG_INJECT 'dtparam=spi=' 'dtparam=spi=on' /boot/config.txt
+				# Disable in runtime seems to be possible?
+				#dtparam spi=off
+			else
+				Unknown_Input_Mode
+			fi
 
-			# Enable in runtime seems to be possible?
-			#dtparam spi=on
+		# Orange Pi Zero 3
+		elif (( $G_HW_MODEL == 83 ))
+		then
+			if [[ $INPUT_DEVICE_VALUE == 'enable' ]]
+			then
+				# Add overlay to dietpiEnv.txt
+				grep -Eq '^[[:blank:]]*overlays=(.*[[:blank:]])?spi1-cs1-spidev([[:blank:]]|$)' "$FP_UENV" || G_EXEC sed -i '/^[[:blank:]]*overlays=/s/[[:blank:]]*$/ spi1-cs1-spidev/' "$FP_UENV"
 
-		elif [[ $INPUT_DEVICE_VALUE == 'disable' ]]; then
-
-			# config.txt
-			G_CONFIG_INJECT 'dtparam=spi=' 'dtparam=spi=off' /boot/config.txt
-			G_EXEC sed -i '/^[[:blank:]]*dtoverlay=spi[0-9]-[0-9]cs/d' /boot/config.txt # Alternative SPI interfaces and chip select lines
-
-			# Disable in runtime seems to be possible?
-			#dtparam spi=off
-
+			elif [[ $INPUT_DEVICE_VALUE == 'disable' ]]
+			then
+				# Remove overlay from dietpiEnv.txt
+				grep -Eq '^[[:blank:]]*overlays=(.*[[:blank:]])?spi1-cs1-spidev([[:blank:]]|$)' "$FP_UENV" && G_EXEC sed -Ei '/^[[:blank:]]*overlays=/s/[[:blank:]]*spi1-cs1-spidev([[:blank:]]*$)?//g' "$FP_UENV"
+			else
+				Unknown_Input_Mode
+			fi
 		else
-
-			Unknown_Input_Mode
-
+			Unsupported_Input_Name
+			return 1
 		fi
-
 	}
 
 	#/////////////////////////////////////////////////////////////////////////////////////
@@ -1165,8 +1194,8 @@ _EOF_
 			'btbcm' # RPi3 Broadcom onboard
 			'rfcomm' # BPi Pro/M2+ and others
 			'hidp' # BPi Pro/M2+ and others
+			'sprdbt_tty' # Orange Pi Zero 3
 			'hci_uart'
-
 		)
 
 		if [[ $INPUT_DEVICE_VALUE == 'disable' ]]; then
@@ -1193,11 +1222,15 @@ _EOF_
 
 			systemctl -q is-enabled bluetooth 2> /dev/null || systemctl -q is-active bluetooth && G_EXEC systemctl disable --now bluetooth
 
+			# Remove explicit Bluetooth module loads
+			[[ -f '/etc/modules-load.d/dietpi-enable_bluetooth.conf' ]] && G_EXEC rm /etc/modules-load.d/dietpi-enable_bluetooth.conf
+
 			# Unload and blacklist kernel modules, bluetooth last
+			[[ -d '/etc/modprobe.d' ]] || G_EXEC mkdir /etc/modprobe.d
 			> /etc/modprobe.d/dietpi-disable_bluetooth.conf
 			for ((i=$(( ${#aBLUETOOTH_MODULES[@]} - 1 )); i>=0; i--))
 			do
-				modprobe -r "${aBLUETOOTH_MODULES[$i]}" 2> /dev/null
+				modprobe -rf "${aBLUETOOTH_MODULES[$i]}" 2> /dev/null
 				echo "blacklist ${aBLUETOOTH_MODULES[$i]}" >> /etc/modprobe.d/dietpi-disable_bluetooth.conf
 			done
 
@@ -1235,7 +1268,7 @@ Do you want to continue and disable the serial login console?' || return 1
 
 				# bluez-firmware: BCM203x dongles: https://packages.debian.org/bluez-firmware
 				# - Conflicts with armbian-firmware: https://dietpi.com/forum/t/upgrading-dietpi-from-bullseye-to-bookworm/15963/16
-				dpkg-query -s armbian-firmware &> /dev/null || firmware+=('bluez-firmware')
+				dpkg-query -s armbian-firmware &> /dev/null || dpkg-query -s orangepi-firmware &> /dev/null || firmware+=('bluez-firmware')
 
 				G_AG_CHECK_INSTALL_PREREQ bluez "${firmware[@]}"
 			fi
@@ -1255,7 +1288,15 @@ Do you want to continue and disable the serial login console?' || return 1
 			G_EXEC systemctl enable --now bluetooth
 
 			# RPi
-			(( $G_HW_MODEL > 9 )) || (( ! $G_HW_ONBOARD_WIFI )) || G_EXEC systemctl enable hciuart
+			if (( $G_HW_MODEL > 9 ))
+			then
+				(( $G_HW_ONBOARD_WIFI )) && G_EXEC systemctl enable hciuart
+
+			# Orange Pi Zero 3
+			elif (( $G_HW_MODEL == 83 ))
+			then
+				G_EXEC eval 'echo '\''sprdbt_tty'\'' > /etc/modules-load.d/dietpi-enable_bluetooth.conf'
+			fi
 
 		else
 
@@ -1328,25 +1369,29 @@ Do you want to continue and disable the serial login console?' || return 1
 		local aWIFI_MODULES=('cfg80211')
 
 		# + RPi with onboard WiFi and NanoPi NEO Air
-		if (( ${G_HW_ONBOARD_WIFI:-0} || $G_HW_MODEL == 64 )); then
-
+		if (( ${G_HW_ONBOARD_WIFI:-0} || $G_HW_MODEL == 64 ))
+		then
 			aWIFI_MODULES+=('brcmfmac' 'brcmutil')
 
 		# + NanoPi K1 Plus
-		elif (( $G_HW_MODEL == 67 )); then
-
+		elif (( $G_HW_MODEL == 67 ))
+		then
 			aWIFI_MODULES+=('8189es')
 
 		# + PINE A64 / Pinebook / ASUS Tinker Board (onboard)
-		elif (( $G_HW_MODEL == 40 || $G_HW_MODEL == 44 || $G_HW_MODEL == 52 )); then
-
+		elif (( $G_HW_MODEL == 40 || $G_HW_MODEL == 44 || $G_HW_MODEL == 52 ))
+		then
 			aWIFI_MODULES+=('8723bs')
 
 		# + NanoPi M3/T3/Fire3
-		elif (( $G_HW_MODEL == 62 )); then
-
+		elif (( $G_HW_MODEL == 62 ))
+		then
 			aWIFI_MODULES+=('bcmdhd')
 
+		# + Orange Pi Zero 3
+		elif (( $G_HW_MODEL == 83 ))
+		then
+			aWIFI_MODULES+=('sprdwl_ng')
 		fi
 
 		if [[ $INPUT_DEVICE_VALUE == 'disable' ]]; then
@@ -1354,8 +1399,11 @@ Do you want to continue and disable the serial login console?' || return 1
 			# Disable onboard WiFi as well
 			(( $G_HW_ONBOARD_WIFI )) && INPUT_DEVICE_VALUE='onboard_disable' Wifi_Modules_Main
 
+			# Remove explicit WiFi module loads
+			[[ -f '/etc/modules-load.d/dietpi-enable_wifi.conf' ]] && G_EXEC rm /etc/modules-load.d/dietpi-enable_wifi.conf
+
 			# Remove powersaving setting
-			[[ -f '/etc/modprobe.d/dietpi-disable_wifi_powersaving.conf' ]] && rm /etc/modprobe.d/dietpi-disable_wifi_powersaving.conf
+			[[ -f '/etc/modprobe.d/dietpi-disable_wifi_powersaving.conf' ]] && G_EXEC rm /etc/modprobe.d/dietpi-disable_wifi_powersaving.conf
 
 			# Reset blacklists
 			[[ -d '/etc/modprobe.d' ]] || G_EXEC mkdir /etc/modprobe.d
@@ -1364,37 +1412,48 @@ Do you want to continue and disable the serial login console?' || return 1
 			# cfg80211 last
 			for ((i=$(( ${#aWIFI_MODULES[@]} - 1 )); i>=0; i--))
 			do
-				echo "blacklist ${aWIFI_MODULES[$i]}" >> /etc/modprobe.d/dietpi-disable_wifi.conf
-				modprobe -rf "${aWIFI_MODULES[$i]}" 2> /dev/null
+				G_EXEC eval "echo 'blacklist ${aWIFI_MODULES[$i]}' >> /etc/modprobe.d/dietpi-disable_wifi.conf"
+				G_EXEC_NOFAIL=1 G_EXEC modprobe -rf "${aWIFI_MODULES[$i]}"
 			done
 
 		elif [[ $INPUT_DEVICE_VALUE == 'enable' ]]; then
 
 			# Disable known powersaving options for specific chipsets
 			[[ -d '/etc/modprobe.d' ]] || G_EXEC mkdir /etc/modprobe.d
-			cat << _EOF_ > /etc/modprobe.d/dietpi-disable_wifi_powersaving.conf
-# NanoPi K1 Plus
-options 8189es rtw_power_mgnt=0
-# PINE A64
-options 8723bs rtw_power_mgnt=0
-# Sparky SBC
-options wlan_8192eu rtw_power_mgnt=0
-# - https://github.com/sparky-sbc/sparky-test/tree/master/rtl8812au
-options wlan_8812au rtw_power_mgnt=0
-_EOF_
+			# - NanoPi K1 Plus
+			if (( $G_HW_MODEL == 67 ))
+			then
+				G_EXEC eval 'echo '\''options 8189es rtw_power_mgnt=0'\'' > /etc/modprobe.d/dietpi-disable_wifi_powersaving.conf'
+
+			# - PINE A64 / Pinebook / ASUS Tinker Board (onboard)
+			elif (( $G_HW_MODEL == 40 || $G_HW_MODEL == 44 || $G_HW_MODEL == 52 ))
+			then
+				G_EXEC eval 'echo '\''options 8723bs rtw_power_mgnt=0'\'' > /etc/modprobe.d/dietpi-disable_wifi_powersaving.conf'
+
+			# - Sparky SBC
+			elif (( $G_HW_MODEL == 70 ))
+			then
+				G_EXEC eval 'echo -e '\''options wlan_8192eu rtw_power_mgnt=0\noptions wlan_8812au rtw_power_mgnt=0'\'' > /etc/modprobe.d/dietpi-disable_wifi_powersaving.conf'
+
+			# - Orange Pi Zero 3: Module does not load automatically
+			elif (( $G_HW_MODEL == 83 ))
+			then
+				G_EXEC eval 'echo '\''sprdwl_ng'\'' > /etc/modules-load.d/dietpi-enable_wifi.conf'
+			fi
+
 			# Remove blacklists
-			[[ -f '/etc/modprobe.d/dietpi-disable_wifi.conf' ]] && rm /etc/modprobe.d/dietpi-disable_wifi.conf
+			[[ -f '/etc/modprobe.d/dietpi-disable_wifi.conf' ]] && G_EXEC rm /etc/modprobe.d/dietpi-disable_wifi.conf
 
 			G_DIETPI-NOTIFY 2 'Please wait, enabling WiFi modules...'
 
 			# cfg80211 first
 			for i in "${aWIFI_MODULES[@]}"
 			do
-				modprobe "$i" 2> /dev/null
+				G_EXEC_NOFAIL=1 G_EXEC modprobe "$i"
 			done
 
 			# Delay to allow modules + WPA2-Enterprise being fully loaded and avoid device not found error
-			G_SLEEP 8
+			G_SLEEP 5
 
 			# Failsafe, unblock all WiFi adapters: https://github.com/MichaIng/DietPi/issues/1627
 			command -v rfkill > /dev/null && rfkill unblock wifi
@@ -2113,7 +2172,7 @@ _EOF_
 				if (( $ARMBIAN || $DIETPIENV ))
 				then
 					# Add analogue 3.5mm jack device tree overlay
-					G_EXEC sed -i '/^[[:blank:]]*overlays=/s/$/ analog-codec/' "$FP_UENV"
+					G_EXEC sed -i '/^[[:blank:]]*overlays=/s/[[:blank:]]*$/ analog-codec/' "$FP_UENV"
 
 				# Legacy
 				else
@@ -2314,6 +2373,26 @@ _EOF_
 		G_CONFIG_INJECT 'CONFIG_GPU_DRIVER=' "CONFIG_GPU_DRIVER=$INPUT_DEVICE_VALUE" /boot/dietpi.txt
 	}
 
+	QEMU_Guest_Agent_Main()
+	{
+		(( $G_HW_MODEL == 20 )) || { Unsupported_Input_Name; return 1; } # VM only
+
+		[[ $INPUT_DEVICE_VALUE == 'disable' ]] &&  { G_AGP qemu-guest-agent; return 0; }
+
+		[[ $INPUT_DEVICE_VALUE == 'enable' ]] || { Unknown_Input_Mode; return 1; }
+
+		[[ -e '/dev/virtio-ports/org.qemu.guest_agent.0' ]] || { G_DIETPI-NOTIFY 2 'No QEMU Guest Agent node detected, skipping daemon installation ...'; return 1; } # Exit if node is missing
+
+		# Bullseye: logind and hence dbus required
+		if (( $G_DISTRO == 6 ))
+		then
+			G_AG_CHECK_INSTALL_PREREQ dbus
+			G_EXEC systemctl unmask systemd-logind
+			G_EXEC systemctl start systemd-logind
+		fi
+		G_AG_CHECK_INSTALL_PREREQ qemu-guest-agent
+	}
+
 	#/////////////////////////////////////////////////////////////////////////////////////
 	# Main Loop
 	#/////////////////////////////////////////////////////////////////////////////////////
@@ -2341,6 +2420,7 @@ _EOF_
 		'vf2-spi-update') VF2_SPI_Update;;
 		'headless') Headless_Main;;
 		'gpudriver') GPUDriver_Main;;
+		'qemu-guest-agent'|'qga') QEMU_Guest_Agent_Main;;
 		*) Unknown_Input_Name;;
 	esac
 	#-----------------------------------------------------------------------------------

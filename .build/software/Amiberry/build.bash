@@ -19,6 +19,12 @@ adeps=('libdrm2' 'libgl1-mesa-dri' 'libgbm1' 'libegl1' 'libudev1' 'libxml2' 'lib
 
 G_AGUP
 G_AGDUG "${adeps_build[@]}"
+for i in "${adeps[@]}"
+do
+	dpkg-query -s "$i" &> /dev/null && continue
+	G_DIETPI-NOTIFY 1 "Expected dependency package was not installed: $i"
+	exit 1
+done
 
 # Build libSDL2
 v_sdl=$(curl -sSf 'https://api.github.com/repos/libsdl-org/SDL/releases/latest' | mawk -F\" '/^  "name"/{print $4}')
@@ -177,7 +183,7 @@ do
 done
 DEPS_APT_VERSIONED=${DEPS_APT_VERSIONED%,}
 # shellcheck disable=SC2001
-grep -q '^ID=raspbian' /etc/os-release && DEPS_APT_VERSIONED=$(sed 's/+rp[it][0-9]\+[^)]*)/)/g' <<< "$DEPS_APT_VERSIONED") || DEPS_APT_VERSIONED=$(sed 's/+b[0-9]\+)/)/g' <<< "$DEPS_APT_VERSIONED")
+[[ $G_HW_ARCH_NAME == 'armv6l' ]] && DEPS_APT_VERSIONED=$(sed 's/+rp[it][0-9]\+[^)]*)/)/g' <<< "$DEPS_APT_VERSIONED") || DEPS_APT_VERSIONED=$(sed 's/+b[0-9]\+)/)/g' <<< "$DEPS_APT_VERSIONED")
 
 # - Obtain version suffix
 G_EXEC curl -sSfo package.deb "https://dietpi.com/downloads/binaries/$G_DISTRO_NAME/amiberry_$PLATFORM.deb"
