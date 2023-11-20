@@ -41,7 +41,8 @@ G_EXEC strip --remove-section=.comment --remove-section=.note "src/$name"
 # Package dir: In case of Raspbian, force ARMv6
 G_DIETPI-NOTIFY 2 "Preparing $name_pretty DEB package directory"
 G_EXEC cd /tmp
-grep -q 'raspbian' /etc/os-release && DIR='gmediarender_armv6l' || DIR="gmediarender_$G_HW_ARCH_NAME"
+grep -q '^ID=raspbian' /etc/os-release && G_HW_ARCH_NAME='armv6l'
+DIR="gmediarender_$G_HW_ARCH_NAME"
 [[ -d $DIR ]] && G_EXEC rm -R "$DIR"
 # - Control files, config, systemd service, executable, icons, copyright
 G_EXEC mkdir -p "$DIR/"{DEBIAN,etc/default,lib/systemd/system,usr/{bin,share/{,doc/}gmediarender}}

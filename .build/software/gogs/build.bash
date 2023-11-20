@@ -20,6 +20,7 @@ G_EXEC_OUTPUT=1 G_EXEC go install 'gogs.io/gogs@latest'
 G_EXEC mkdir gogs
 G_EXEC mv /root/go/bin/gogs gogs/
 G_EXEC strip gogs/gogs
+grep -q '^ID=raspbian' /etc/os-release && G_HW_ARCH_NAME='armv6l'
 G_EXEC "$c7zip" a -mx=9 "/tmp/gogs_$G_HW_ARCH_NAME.7z" gogs
 
 # Cleanup
