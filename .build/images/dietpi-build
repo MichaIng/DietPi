@@ -1212,8 +1212,6 @@ _EOF_
 </plist>
 _EOF_
 	G_EXEC_DESC='Creating UTM tar.xz archive' XZ_OPT="-9e ${limit_threads[*]}" G_EXEC tar -cJf "$image_name.tar.xz" "$image_name.utm"
-	# Keep QCOW2 in compression when Proxmox image shall be generated from it as well.
-	[[ $VMTYPE == 'all' ]] && G_EXEC mv "$image_name.utm/Images/data.qcow2" "$OUTPUT_IMG_NAME.img"
 	G_EXEC rm -R "$image_name.utm"
 	G_EXEC_DESC='Generating SHA256 hash' G_EXEC eval "sha256sum '$image_name.tar.xz' > '$image_name.tar.xz.sha256'"
 	signature=()
@@ -1224,19 +1222,26 @@ fi
 ####### Proxmox ############################
 if [[ $VMTYPE =~ ^(proxmox|all)$ ]]
 then
-	image_name=${OUTPUT_IMG_NAME/_VM-/_Proxmox-}
-	# Reuse or convert raw image to QCOW2
-	if [[ $VMTYPE == 'all' ]]
-	then
-		G_EXEC mv "$OUTPUT_IMG_NAME.qcow2" "$image_name.qcow2"
-	else
-		G_EXEC qemu-img convert -c -O qcow2 "$OUTPUT_IMG_NAME.img" "$image_name.qcow2"
-	fi
-
 	# Enable systemd-logind for APCI functionality
+	# - Create loop device
+	FP_LOOP=$(losetup -f)
+	G_EXEC losetup "$FP_LOOP" "$OUTPUT_IMG_NAME.img"
+	G_EXEC partprobe "$FP_LOOP"
+	G_EXEC partx -u "$FP_LOOP"
+	# - Mount and edit dietpi.txt
 	G_EXEC mkdir rootfs
 	G_EXEC mount "${FP_LOOP}p1" rootfs
 	G_CONFIG_INJECT 'AUTO_UNMASK_LOGIND=' 'AUTO_UNMASK_LOGIND=1' rootfs/boot/dietpi.txt
+	# - Remove loop device
+	G_EXEC sync
+	G_EXEC sleep 1
+	G_EXEC umount -R rootfs
+	G_EXEC rmdir rootfs
+	G_EXEC losetup -d "$FP_LOOP"
+
+	image_name=${OUTPUT_IMG_NAME/_VM-/_Proxmox-}
+	# Convert raw image to QCOW2
+	G_EXEC qemu-img convert -c -O qcow2 "$OUTPUT_IMG_NAME.img" "$image_name.qcow2"
 	
 	G_EXEC_DESC='Creating Proxmox xz archive' G_EXEC xz -9e "${limit_threads[@]}" "$image_name.qcow2"
 	G_EXEC_DESC='Generating SHA256 hash' G_EXEC eval "sha256sum '$image_name.qcow2.xz' > '$image_name.qcow2.xz.sha256'"
