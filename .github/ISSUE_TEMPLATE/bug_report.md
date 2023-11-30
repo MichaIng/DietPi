@@ -4,6 +4,7 @@ about: Create a report to help us improve
 ---
 
 ### Creating a bug report/issue
+- [ ] I have searched the existing open and closed issues
 
 #### Required Information
 - DietPi version | `cat /boot/dietpi/.version`
