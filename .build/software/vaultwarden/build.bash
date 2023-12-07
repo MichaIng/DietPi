@@ -134,7 +134,7 @@ cat << '_EOF_' > "$DIR/DEBIAN/postinst"
 if [[ ! $2 ]] && grep -q '^# ROCKET_ADDRESS=0.0.0.0$' /mnt/dietpi_userdata/vaultwarden/vaultwarden.env
 then
 	echo 'Enabling web vault remote access ...'
-	sed -i '/^# ROCKET_ADDRESS=0.0.0.0$/c\ROCKET_ADDRESS=0.0.0.0' /mnt/dietpi_userdata/vaultwarden/vaultwarden.env
+	sed --follow-symlinks -i '/^# ROCKET_ADDRESS=0.0.0.0$/c\ROCKET_ADDRESS=0.0.0.0' /mnt/dietpi_userdata/vaultwarden/vaultwarden.env
 fi
 
 if [[ -d '/run/systemd/system' ]]

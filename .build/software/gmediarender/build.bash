@@ -98,7 +98,7 @@ then
 		INTERFACE=$(ip r l 0/0 | awk '{print $5;exit}')
 		[ "$INTERFACE" ] || INTERFACE=$(ip -br a | awk '$2=="UP"{print $1;exit}')
 		[ "$INTERFACE" ] || exit 1
-		sed -i "s/-u UUID -f HOSTNAME -I eth0/-u $G_HW_UUID -f $HOSTNAME -I $INTERFACE/" /etc/default/gmediarender
+		sed --follow-symlinks -i "s/-u UUID -f HOSTNAME -I eth0/-u $G_HW_UUID -f $HOSTNAME -I $INTERFACE/" /etc/default/gmediarender
 	fi
 
 	if getent passwd gmediarender > /dev/null
