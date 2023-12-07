@@ -285,7 +285,7 @@ G_EXEC mkdir rootfs
 G_EXEC mount "${FP_LOOP}p1" rootfs
 
 # Force ARMv6 arch on Raspbian
-(( $arch == 1 )) && G_EXEC sed -i '/# Start DietPi-Software/iG_EXEC sed -i -e '\''/^G_HW_ARCH=/cG_HW_ARCH=1'\'' -e '\''/^G_HW_ARCH_NAME=/cG_HW_ARCH_NAME=armv6l'\'' /boot/dietpi/.hw_model' rootfs/boot/dietpi/dietpi-login
+(( $arch == 1 )) && G_EXEC sed --follow-symlinks -i '/# Start DietPi-Software/iG_EXEC sed -i -e '\''/^G_HW_ARCH=/cG_HW_ARCH=1'\'' -e '\''/^G_HW_ARCH_NAME=/cG_HW_ARCH_NAME=armv6l'\'' /boot/dietpi/.hw_model' rootfs/boot/dietpi/dietpi-login
 
 # Force RPi on ARM systems if requested
 if [[ $RPI == 'true' ]] && (( $arch < 10 ))
@@ -298,7 +298,7 @@ then
 	esac
 	G_EXEC rm rootfs/etc/.dietpi_hw_model_identifier
 	G_EXEC touch rootfs/boot/{bcm-rpi-dummy.dtb,config.txt,cmdline.txt}
-	G_EXEC sed -i "/# Start DietPi-Software/iG_EXEC sed -i -e '/^G_HW_MODEL=/cG_HW_MODEL=$model' -e '/^G_HW_MODEL_NAME=/cG_HW_MODEL_NAME=\"RPi $model ($ARCH)\"' /boot/dietpi/.hw_model" rootfs/boot/dietpi/dietpi-login
+	G_EXEC sed --follow-symlinks -i "/# Start DietPi-Software/iG_EXEC sed -i -e '/^G_HW_MODEL=/cG_HW_MODEL=$model' -e '/^G_HW_MODEL_NAME=/cG_HW_MODEL_NAME=\"RPi $model ($ARCH)\"' /boot/dietpi/.hw_model" rootfs/boot/dietpi/dietpi-login
 	G_EXEC curl -sSfo keyring.deb 'https://archive.raspberrypi.org/debian/pool/main/r/raspberrypi-archive-keyring/raspberrypi-archive-keyring_2021.1.1+rpt1_all.deb'
 	G_EXEC dpkg --root=rootfs -i keyring.deb
 	G_EXEC rm keyring.deb
@@ -312,7 +312,7 @@ fi
 
 # Install test builds from dietpi.com if requested
 # shellcheck disable=SC2016
-[[ $TEST == 'true' ]] && G_EXEC sed -i '/# Start DietPi-Software/a\sed -i '\''s|dietpi.com/downloads/binaries/$G_DISTRO_NAME/|dietpi.com/downloads/binaries/$G_DISTRO_NAME/testing/|'\'' /boot/dietpi/dietpi-software' rootfs/boot/dietpi/dietpi-login
+[[ $TEST == 'true' ]] && G_EXEC sed --follow-symlinks -i '/# Start DietPi-Software/a\sed -i '\''s|dietpi.com/downloads/binaries/$G_DISTRO_NAME/|dietpi.com/downloads/binaries/$G_DISTRO_NAME/testing/|'\'' /boot/dietpi/dietpi-software' rootfs/boot/dietpi/dietpi-login
 
 # Workaround invalid TERM on login
 # shellcheck disable=SC2016
@@ -368,7 +368,7 @@ G_EXEC eval 'echo -e '\''[Service]\nAmbientCapabilities='\'' > rootfs/etc/system
 # - Type=notify leads to a service start timeout while mysqld has actually fully started. However, with Type=exec, /etc/mysql/debian-start starts too soon after mysqld, so that the UNIX socket is not yet ready to listen. Hence add a second to wait for it.
 if [[ $DISTRO == 'buster' ]]
 then
-	G_EXEC sed -i '/# Start DietPi-Software/a\sed -i -e '\''s|rm -Rf /var/lib/mysql|rm -Rf /mnd/dietpi_userdata/mysql|'\'' -e '\''s|ln -s /mnt/dietpi_userdata/mysql /var/lib/mysql|ln -s /var/lib/mysql /mnt/dietpi_userdata/mysql|'\'' /boot/dietpi/dietpi-software' rootfs/boot/dietpi/dietpi-login
+	G_EXEC sed --follow-symlinks -i '/# Start DietPi-Software/a\sed -i -e '\''s|rm -Rf /var/lib/mysql|rm -Rf /mnd/dietpi_userdata/mysql|'\'' -e '\''s|ln -s /mnt/dietpi_userdata/mysql /var/lib/mysql|ln -s /var/lib/mysql /mnt/dietpi_userdata/mysql|'\'' /boot/dietpi/dietpi-software' rootfs/boot/dietpi/dietpi-login
 	G_EXEC mkdir rootfs/etc/systemd/system/mariadb.service.d
 	cat << '_EOF_' > rootfs/etc/systemd/system/mariadb.service.d/dietpi-container.conf || exit 1
 [Service]
@@ -384,15 +384,15 @@ fi
 (( $arch < 3 && $G_HW_ARCH > 9 )) && G_EXEC eval 'echo -e '\''tmpfs /mnt/dietpi_userdata tmpfs size=3G,noatime,lazytime\ntmpfs /root tmpfs size=3G,noatime,lazytime'\'' >> rootfs/etc/fstab'
 
 # Workaround for Node.js on ARMv6
-(( $arch == 1 )) && G_EXEC sed -i '/# Start DietPi-Software/a\sed -i '\''/G_EXEC chmod +x node-install.sh/a\\sed -i "/^ARCH=/c\\ARCH=armv6l" node-install.sh'\'' /boot/dietpi/dietpi-software' rootfs/boot/dietpi/dietpi-login
+(( $arch == 1 )) && G_EXEC sed --follow-symlinks -i '/# Start DietPi-Software/a\sed -i '\''/G_EXEC chmod +x node-install.sh/a\\sed -i "/^ARCH=/c\\ARCH=armv6l" node-install.sh'\'' /boot/dietpi/dietpi-software' rootfs/boot/dietpi/dietpi-login
 
 # Workaround for sysctl: permission denied on key "net.core.rmem_max" in containers
-G_EXEC sed -i '/# Start DietPi-Software/a\sed -i '\''/G_EXEC sysctl -w net\.core\.rmem_max/d'\'' /boot/dietpi/dietpi-software' rootfs/boot/dietpi/dietpi-login
+G_EXEC sed --follow-symlinks -i '/# Start DietPi-Software/a\sed -i '\''/G_EXEC sysctl -w net\.core\.rmem_max/d'\'' /boot/dietpi/dietpi-software' rootfs/boot/dietpi/dietpi-login
 
 # Check for service status, ports and commands
 # shellcheck disable=SC2016
 # - Start all services
-G_EXEC sed -i '/# Start DietPi-Software/a\sed -i '\''/# Custom 1st run script/a\\for i in "${aSTART_SERVICES[@]}"; do G_EXEC_NOHALT=1 G_EXEC systemctl start "$i"; done'\'' /boot/dietpi/dietpi-software' rootfs/boot/dietpi/dietpi-login
+G_EXEC sed --follow-symlinks -i '/# Start DietPi-Software/a\sed -i '\''/# Custom 1st run script/a\\for i in "${aSTART_SERVICES[@]}"; do G_EXEC_NOHALT=1 G_EXEC systemctl start "$i"; done'\'' /boot/dietpi/dietpi-software' rootfs/boot/dietpi/dietpi-login
 delay=10
 for i in "${aDELAY[@]}"; do (( $i > $delay )) && delay=$i; done
 G_EXEC eval "echo -e '#!/bin/dash\nexit_code=0; /boot/dietpi/dietpi-services start || exit_code=1; echo Waiting $delay seconds for service starts; sleep $delay' > rootfs/boot/Automation_Custom_Script.sh"
@@ -437,7 +437,7 @@ done
 G_EXEC eval 'echo '\''[ $exit_code = 0 ] && > /success || { journalctl -n 50; ss -tlpn; df -h; free -h; poweroff; }; poweroff'\'' >> rootfs/boot/Automation_Custom_Script.sh'
 
 # Shutdown as well on failure
-G_EXEC sed -i 's|Prompt_on_Failure$|{ journalctl -n 50; ss -tulpn; df -h; free -h; poweroff; }|' rootfs/boot/dietpi/dietpi-login
+G_EXEC sed --follow-symlinks -i 's|Prompt_on_Failure$|{ journalctl -n 50; ss -tulpn; df -h; free -h; poweroff; }|' rootfs/boot/dietpi/dietpi-login
 
 ##########################################
 # Boot container
