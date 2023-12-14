@@ -36,7 +36,8 @@ G_DIETPI-NOTIFY 2 'Starting packaging...'
 
 # Package dir
 G_EXEC cd /tmp
-grep -q 'raspbian' /etc/os-release && DIR='squeezelite_armv6l' || DIR="squeezelite_$G_HW_ARCH_NAME"
+grep -q '^ID=raspbian' /etc/os-release && G_HW_ARCH_NAME='armv6l'
+DIR="squeezelite_$G_HW_ARCH_NAME"
 G_EXEC rm -Rf "$DIR"
 G_EXEC mkdir -p "$DIR/"{DEBIAN,lib/systemd/system,etc/default,usr/{bin,share/doc/squeezelite,share/man/man1}}
 

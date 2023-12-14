@@ -32,58 +32,58 @@
 		# RPi Zero/Zero 2 W
 		if [[ $G_HW_MODEL_NAME == *'Zero'* ]]
 		then
-			sed -i '/^#over_voltage=/c\#over_voltage=0' /boot/config.txt
-			sed -i '/^#arm_freq=/c\#arm_freq=1000' /boot/config.txt
-			sed -i '/^#core_freq=/c\#core_freq=400' /boot/config.txt
-			sed -i '/^#sdram_freq=/c\#sdram_freq=450' /boot/config.txt
+			sed --follow-symlinks -i '/^#over_voltage=/c\#over_voltage=0' /boot/config.txt
+			sed --follow-symlinks -i '/^#arm_freq=/c\#arm_freq=1000' /boot/config.txt
+			sed --follow-symlinks -i '/^#core_freq=/c\#core_freq=400' /boot/config.txt
+			sed --follow-symlinks -i '/^#sdram_freq=/c\#sdram_freq=450' /boot/config.txt
 
 		# RPi 1: Apply safe overclock mode
 		elif (( $G_HW_MODEL < 2 ))
 		then
 			GCI_PRESERVE=1 G_CONFIG_INJECT 'arm_freq=' 'arm_freq=900' /boot/config.txt
 			grep -q '^arm_freq=900$' /boot/config.txt && G_CONFIG_INJECT 'over_voltage=' 'over_voltage=2' /boot/config.txt
-			sed -i '/^#core_freq=/c\#core_freq=250' /boot/config.txt
-			sed -i '/^#sdram_freq=/c\#sdram_freq=400' /boot/config.txt
+			sed --follow-symlinks -i '/^#core_freq=/c\#core_freq=250' /boot/config.txt
+			sed --follow-symlinks -i '/^#sdram_freq=/c\#sdram_freq=400' /boot/config.txt
 
 		# RPi 2
 		elif (( $G_HW_MODEL == 2 ))
 		then
-			sed -i '/^#over_voltage=/c\#over_voltage=0' /boot/config.txt
-			sed -i '/^#arm_freq=/c\#arm_freq=900' /boot/config.txt
-			sed -i '/^#core_freq=/c\#core_freq=250' /boot/config.txt
-			sed -i '/^#sdram_freq=/c\#sdram_freq=450' /boot/config.txt
+			sed --follow-symlinks -i '/^#over_voltage=/c\#over_voltage=0' /boot/config.txt
+			sed --follow-symlinks -i '/^#arm_freq=/c\#arm_freq=900' /boot/config.txt
+			sed --follow-symlinks -i '/^#core_freq=/c\#core_freq=250' /boot/config.txt
+			sed --follow-symlinks -i '/^#sdram_freq=/c\#sdram_freq=450' /boot/config.txt
 
 		# RPi 3
 		elif (( $G_HW_MODEL == 3 ))
 		then
-			sed -i '/^#over_voltage=/c\#over_voltage=0' /boot/config.txt
-			sed -i '/^#core_freq=/c\#core_freq=400' /boot/config.txt
+			sed --follow-symlinks -i '/^#over_voltage=/c\#over_voltage=0' /boot/config.txt
+			sed --follow-symlinks -i '/^#core_freq=/c\#core_freq=400' /boot/config.txt
 			grep -q '^temp_limit=65$' /boot/config.txt && G_CONFIG_INJECT 'temp_limit=' 'temp_limit=75' /boot/config.txt # https://github.com/MichaIng/DietPi/issues/356
 
 			# A+/B+
 			if [[ $G_HW_MODEL_NAME == *'+'* ]]
 			then
-				sed -i '/^#arm_freq=/c\#arm_freq=1400' /boot/config.txt
-				sed -i '/^#sdram_freq=/c\#sdram_freq=500' /boot/config.txt
+				sed --follow-symlinks -i '/^#arm_freq=/c\#arm_freq=1400' /boot/config.txt
+				sed --follow-symlinks -i '/^#sdram_freq=/c\#sdram_freq=500' /boot/config.txt
 			else
-				sed -i '/^#arm_freq=/c\#arm_freq=1200' /boot/config.txt
-				sed -i '/^#sdram_freq=/c\#sdram_freq=450' /boot/config.txt
+				sed --follow-symlinks -i '/^#arm_freq=/c\#arm_freq=1200' /boot/config.txt
+				sed --follow-symlinks -i '/^#sdram_freq=/c\#sdram_freq=450' /boot/config.txt
 			fi
 
 		# RPi 4
 		elif (( $G_HW_MODEL == 4 ))
 		then
-			sed -i '/^#over_voltage=/c\#over_voltage=0' /boot/config.txt
-			sed -i '/^#core_freq=/c\#core_freq=500' /boot/config.txt
-			sed -i '/^#sdram_freq=/d' /boot/config.txt # Not supported on RPi4, defaults to 3200 MHz
+			sed --follow-symlinks -i '/^#over_voltage=/c\#over_voltage=0' /boot/config.txt
+			sed --follow-symlinks -i '/^#core_freq=/c\#core_freq=500' /boot/config.txt
+			sed --follow-symlinks -i '/^#sdram_freq=/d' /boot/config.txt # Not supported on RPi4, defaults to 3200 MHz
 			grep -q '^temp_limit=65$' /boot/config.txt && G_CONFIG_INJECT 'temp_limit=' 'temp_limit=75' /boot/config.txt # https://github.com/MichaIng/DietPi/issues/3019
 
 			# 400
 			if [[ $G_HW_MODEL_NAME == *'400'* ]]
 			then
-				sed -i '/^#arm_freq=/c\#arm_freq=1800' /boot/config.txt
+				sed --follow-symlinks -i '/^#arm_freq=/c\#arm_freq=1800' /boot/config.txt
 			else
-				sed -i '/^#arm_freq=/c\#arm_freq=1500' /boot/config.txt
+				sed --follow-symlinks -i '/^#arm_freq=/c\#arm_freq=1500' /boot/config.txt
 			fi
 		fi
 	}
@@ -276,8 +276,8 @@ _EOF_
 		[[ $iface_wlan ]] || iface_wlan='wlan0'
 
 		# - Replace interface names with the ones obtained above
-		sed -i "s/eth[0-9]/$iface_eth/g" /etc/network/interfaces
-		sed -i "s/wlan[0-9]/$iface_wlan/g" /etc/network/interfaces
+		sed --follow-symlinks -i "s/eth[0-9]/$iface_eth/g" /etc/network/interfaces
+		sed --follow-symlinks -i "s/wlan[0-9]/$iface_wlan/g" /etc/network/interfaces
 
 		# - Grab user requested settings from dietpi.txt
 		local ethernet_enabled=$(grep -cm1 '^[[:blank:]]*AUTO_SETUP_NET_ETHERNET_ENABLED=1' /boot/dietpi.txt)
@@ -293,8 +293,8 @@ _EOF_
 
 			# Enable WiFi, disable Ethernet
 			ethernet_enabled=0
-			sed -Ei "/(allow-hotplug|auto)[[:blank:]]+wlan/c\allow-hotplug $iface_wlan" /etc/network/interfaces
-			sed -Ei "/(allow-hotplug|auto)[[:blank:]]+eth/c\#allow-hotplug $iface_eth" /etc/network/interfaces
+			sed --follow-symlinks -Ei "/(allow-hotplug|auto)[[:blank:]]+wlan/c\allow-hotplug $iface_wlan" /etc/network/interfaces
+			sed --follow-symlinks -Ei "/(allow-hotplug|auto)[[:blank:]]+eth/c\#allow-hotplug $iface_eth" /etc/network/interfaces
 
 			# Apply global SSID/keys from dietpi.txt to wpa_supplicant
 			/boot/dietpi/func/dietpi-wifidb 1
@@ -307,8 +307,8 @@ _EOF_
 
 			# Enable Ethernet, disable WiFi
 			wifi_enabled=0
-			sed -Ei "/(allow-hotplug|auto)[[:blank:]]+eth/c\allow-hotplug $iface_eth" /etc/network/interfaces
-			sed -Ei "/(allow-hotplug|auto)[[:blank:]]+wlan/c\#allow-hotplug $iface_wlan" /etc/network/interfaces
+			sed --follow-symlinks -Ei "/(allow-hotplug|auto)[[:blank:]]+eth/c\allow-hotplug $iface_eth" /etc/network/interfaces
+			sed --follow-symlinks -Ei "/(allow-hotplug|auto)[[:blank:]]+wlan/c\#allow-hotplug $iface_wlan" /etc/network/interfaces
 
 			# Disable WiFi kernel modules
 			/boot/dietpi/func/dietpi-set_hardware wifimodules disable
@@ -323,25 +323,25 @@ _EOF_
 
 			if (( $wifi_enabled )); then
 
-				sed -i "/iface wlan/c\iface $iface_wlan inet static" /etc/network/interfaces
+				sed --follow-symlinks -i "/iface wlan/c\iface $iface_wlan inet static" /etc/network/interfaces
 
 			elif (( $ethernet_enabled )); then
 
-				sed -i "/iface eth/c\iface $iface_eth inet static" /etc/network/interfaces
+				sed --follow-symlinks -i "/iface eth/c\iface $iface_eth inet static" /etc/network/interfaces
 
 			fi
-			sed -i "/address/c\address $static_ip" /etc/network/interfaces
-			sed -i "/netmask/c\netmask $static_mask" /etc/network/interfaces
-			sed -i "/gateway/c\gateway $static_gateway" /etc/network/interfaces
+			sed --follow-symlinks -i "/address/c\address $static_ip" /etc/network/interfaces
+			sed --follow-symlinks -i "/netmask/c\netmask $static_mask" /etc/network/interfaces
+			sed --follow-symlinks -i "/gateway/c\gateway $static_gateway" /etc/network/interfaces
 			if command -v resolvconf > /dev/null; then
 
-				sed -i "/dns-nameservers/c\dns-nameservers $static_dns" /etc/network/interfaces
+				sed --follow-symlinks -i "/dns-nameservers/c\dns-nameservers $static_dns" /etc/network/interfaces
 
 			else
 
 				> /etc/resolv.conf
 				for i in $static_dns; do echo "nameserver $i" >> /etc/resolv.conf; done
-				sed -i "/dns-nameservers/c\#dns-nameservers $static_dns" /etc/network/interfaces
+				sed --follow-symlinks -i "/dns-nameservers/c\#dns-nameservers $static_dns" /etc/network/interfaces
 
 			fi
 
