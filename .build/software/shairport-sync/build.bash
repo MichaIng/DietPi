@@ -53,7 +53,8 @@ G_EXEC strip --remove-section=.comment --remove-section=.note "$name"
 # Package dir: In case of Raspbian, force ARMv6
 G_DIETPI-NOTIFY 2 "Preparing $name_pretty DEB package directory"
 G_EXEC cd /tmp
-grep -q 'raspbian' /etc/os-release && DIR="${name}_armv6l" || DIR="${name}_$G_HW_ARCH_NAME"
+grep -q '^ID=raspbian' /etc/os-release && G_HW_ARCH_NAME='armv6l'
+DIR="${name}_$G_HW_ARCH_NAME"
 [[ -d $DIR ]] && G_EXEC rm -R "$DIR"
 # - Control files, systemd service, executable, configs, copyright
 G_EXEC mkdir -p "$DIR/"{DEBIAN,lib/systemd/system,usr/local/{bin,etc,"share/doc/$name"},etc/dbus-1/system.d}
