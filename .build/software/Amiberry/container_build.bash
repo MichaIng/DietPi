@@ -46,10 +46,11 @@ do
 done
 [[ $DISTRO =~ ^('buster'|'bullseye'|'bookworm'|'trixie')$ ]] || Error_Exit "Invalid distro \"$DISTRO\" passed"
 case $PLATFORM in
-	'rpi1') image="ARMv6-${DISTRO^}" arch=1;;
-	'rpi'[234]|'c1'|'xu4'|'RK3288'|'sun8i'|'s812') image="ARMv7-${DISTRO^}" arch=2;;
-	'rpi'[34]'-64-dmx'|'AMLSM1'|'n2'|'a64'|'rk3588') image="ARMv8-${DISTRO^}" arch=3;;
+	'rpi1'*) image="ARMv6-${DISTRO^}" arch=1;;
+	'rpi'[345]'-64-'*|'AMLSM1'|'n2'|'a64'|'rk3588') image="ARMv8-${DISTRO^}" arch=3;;
+	'rpi'[2-5]*|'c1'|'xu4'|'RK3288'|'sun8i'|'s812') image="ARMv7-${DISTRO^}" arch=2;;
 	'x86-64') image="x86_64-${DISTRO^}" arch=10;;
+	'riscv64') image='RISC-V-Sid' arch=11;;
 	*) Error_Exit "Invalid platform \"$PLATFORM\" passed";;
 esac
 image="DietPi_Container-$image.img"
@@ -118,11 +119,11 @@ G_CONFIG_INJECT 'CONFIG_CHECK_CONNECTION_IP=' 'CONFIG_CHECK_CONNECTION_IP=127.0.
 # Avoid DietPi-Survey uploads to not mess with the statistics
 G_EXEC rm rootfs/root/.ssh/known_hosts
 
-# RPi 64-bit: Add RPi repo, ARMv6 container images contain it already
-if [[ $PLATFORM == 'rpi'[234]* ]]
+# RPi: Add RPi repo, ARMv6 container images contain it already
+if [[ $PLATFORM == 'rpi'[2-5]* ]]
 then
-	G_EXEC eval "echo 'deb https://archive.raspberrypi.org/debian/ ${DISTRO/trixie/bookworm} main' > rootfs/etc/apt/sources.list.d/raspi.list"
-	G_EXEC curl -sSf 'https://archive.raspberrypi.org/debian/pool/main/r/raspberrypi-archive-keyring/raspberrypi-archive-keyring_2021.1.1+rpt1_all.deb' -o keyring.deb
+	G_EXEC eval "echo 'deb https://archive.raspberrypi.com/debian/ ${DISTRO/trixie/bookworm} main' > rootfs/etc/apt/sources.list.d/raspi.list"
+	G_EXEC curl -sSf 'https://archive.raspberrypi.com/debian/pool/main/r/raspberrypi-archive-keyring/raspberrypi-archive-keyring_2021.1.1+rpt1_all.deb' -o keyring.deb
 	G_EXEC dpkg --root=rootfs -i keyring.deb
 	G_EXEC rm keyring.deb
 	# Enforce Debian Trixie FFmpeg packages over RPi repo ones
