@@ -49,7 +49,7 @@ do
 	esac
 	shift
 done
-[[ $DISTRO =~ ^('buster'|'bullseye'|'bookworm'|'trixie')$ ]] || { G_DIETPI-NOTIFY 1 "Invalid distro \"$DISTRO\" passed, aborting..."; exit 1; }
+[[ $DISTRO =~ ^('bullseye'|'bookworm'|'trixie')$ ]] || { G_DIETPI-NOTIFY 1 "Invalid distro \"$DISTRO\" passed, aborting..."; exit 1; }
 case $ARCH in
 	'armv6l') image="ARMv6-${DISTRO^}" arch=1;;
 	'armv7l') image="ARMv7-${DISTRO^}" arch=2;;
@@ -129,7 +129,7 @@ Process_Software()
 			85) aSERVICES[i]='nginx' aTCP[i]='80';;
 			#86) aSERVICES[i]='roon-extension-manager';; # Docker does not start in systemd containers (without dedicated network)
 			88) aSERVICES[i]='mariadb' aTCP[i]='3306';;
-			89) case $DISTRO in 'buster') aSERVICES[i]='php7.3-fpm';; 'bullseye') aSERVICES[i]='php7.4-fpm';; *) aSERVICES[i]='php8.2-fpm';; esac;;
+			89) case $DISTRO in 'bullseye') aSERVICES[i]='php7.4-fpm';; *) aSERVICES[i]='php8.2-fpm';; esac;;
 			91) aSERVICES[i]='redis-server' aTCP[i]='6379';;
 			93) aSERVICES[i]='pihole-FTL' aUDP[i]='53';;
 			94) aSERVICES[i]='proftpd' aTCP[i]='21';;
@@ -362,23 +362,6 @@ G_EXEC eval 'echo -e '\''[Service]\nPrivateUsers=0'\'' > rootfs/etc/systemd/syst
 G_EXEC eval 'echo -e '\''[Service]\nPrivateUsers=0'\'' > rootfs/etc/systemd/system/raspotify.service.d/dietpi-container.conf'
 G_EXEC eval 'echo -e '\''[Service]\nPrivateUsers=0'\'' > rootfs/etc/systemd/system/navidrome.service.d/dietpi-container.conf'
 G_EXEC eval 'echo -e '\''[Service]\nAmbientCapabilities='\'' > rootfs/etc/systemd/system/homebridge.service.d/dietpi-container.conf'
-
-# Workarounds for failing MariaDB install on Buster within GitHub Actions runner (both cannot be replicated on my test systems with and without QEMU):
-# - mysqld does not have write access if our symlink is in place, even that directory permissions are correct.
-# - Type=notify leads to a service start timeout while mysqld has actually fully started. However, with Type=exec, /etc/mysql/debian-start starts too soon after mysqld, so that the UNIX socket is not yet ready to listen. Hence add a second to wait for it.
-if [[ $DISTRO == 'buster' ]]
-then
-	G_EXEC sed --follow-symlinks -i '/# Start DietPi-Software/a\sed -i -e '\''s|rm -Rf /var/lib/mysql|rm -Rf /mnd/dietpi_userdata/mysql|'\'' -e '\''s|ln -s /mnt/dietpi_userdata/mysql /var/lib/mysql|ln -s /var/lib/mysql /mnt/dietpi_userdata/mysql|'\'' /boot/dietpi/dietpi-software' rootfs/boot/dietpi/dietpi-login
-	G_EXEC mkdir rootfs/etc/systemd/system/mariadb.service.d
-	cat << '_EOF_' > rootfs/etc/systemd/system/mariadb.service.d/dietpi-container.conf || exit 1
-[Service]
-Type=exec
-ExecStartPost=
-ExecStartPost=/bin/sleep 1
-ExecStartPost=/bin/sh -c "systemctl unset-environment _WSREP_START_POSITION"
-ExecStartPost=/etc/mysql/debian-start
-_EOF_
-fi
 
 # Workaround for failing 32-bit ARM Rust builds on ext4 in QEMU emulated container on 64-bit host: https://github.com/rust-lang/cargo/issues/9545
 (( $arch < 3 && $G_HW_ARCH > 9 )) && G_EXEC eval 'echo -e '\''tmpfs /mnt/dietpi_userdata tmpfs size=3G,noatime,lazytime\ntmpfs /root tmpfs size=3G,noatime,lazytime'\'' >> rootfs/etc/fstab'
