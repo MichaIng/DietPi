@@ -9,7 +9,7 @@ G_AGDUG make gcc libc6-dev libasound2-dev libflac-dev libmad0-dev libvorbis-dev 
 # Runtime deps
 adeps=('libc6' 'libasound2' 'libmad0' 'libvorbisfile3' 'libmpg123-0' 'libsoxr0' 'liblirc-client0' 'libfaad2' 'libopus0')
 case $G_DISTRO in
-	5|6) adeps+=('libflac8' 'libavformat58' 'libssl1.1');;
+	6) adeps+=('libflac8' 'libavformat58' 'libssl1.1');;
 	7) adeps+=('libflac12' 'libavformat59' 'libssl3');;
 	8) adeps+=('libflac12' 'libavformat60' 'libssl3');;
 	*) G_DIETPI-NOTIFY 1 "Unsupported distro version: $G_DISTRO_NAME (ID=$G_DISTRO)"; exit 1;;

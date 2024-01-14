@@ -4,14 +4,12 @@
 
 # Build deps
 G_AGUP
-# - ARMv6 Buster: Prevent install of 3.16.3-3~bpo10+1 from RPi repo, which breaks build: "list sub-command REMOVE_ITEM requires two or more arguments."
-(( $G_HW_ARCH == 1 && $G_DISTRO == 5 )) && G_EXEC eval 'echo -e '\''Package: cmake cmake-data\nPin: origin archive.raspberrypi.org\nPin-Priority: -1'\'' > /etc/apt/preferences.d/dietpi-cmake'
 G_AGDUG cmake make gcc libc6-dev pkg-config libmpdclient-dev libssl-dev
 
 # Runtime deps
 adeps=('libc6' 'libmpdclient2')
 case $G_DISTRO in
-	5|6) adeps+=('libssl1.1');;
+	6) adeps+=('libssl1.1');;
 	7|8) adeps+=('libssl3');;
 	*) G_DIETPI-NOTIFY 1 "Unsupported distro version: $G_DISTRO_NAME (ID=$G_DISTRO)"; exit 1;;
 esac

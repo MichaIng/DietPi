@@ -38,28 +38,34 @@
 		echo "[FAILED] Unsupported root device naming scheme ($ROOT_DEV). Aborting..."
 		exit 1
 	fi
+	echo "[ INFO ] Detected root drive $ROOT_DRIVE with root partition $ROOT_PART"
 
 	# Check if the last partition contains a FAT filesystem with DIETPISETUP label
-	if [[ $(lsblk -nrbo FSTYPE,LABEL "$ROOT_DRIVE" | tail -1) == 'vfat DIETPISETUP' ]]
+	LAST_PART=$(lsblk -nrbo FSTYPE,LABEL "$ROOT_DRIVE" | tail -1)
+	if [[ $LAST_PART == 'vfat DIETPISETUP' ]]
 	then
-		# Mount it and copy files if present and newer
 		SETUP_PART=$(sfdisk -lqo DEVICE "$ROOT_DRIVE" | tail -1)
+		echo "[ INFO ] Detected trailing DietPi setup partition $SETUP_PART"
+		# Mount it and copy files if present and newer
 		TMP_MOUNT=$(mktemp -d)
-		mount "$SETUP_PART" "$TMP_MOUNT"
+		mount -v "$SETUP_PART" "$TMP_MOUNT"
 		for f in 'dietpi.txt' 'dietpi-wifi.txt' 'dietpiEnv.txt' 'unattended_pivpn.conf' 'Automation_Custom_PreScript.sh' 'Automation_Custom_Script.sh'
 		do
-			[[ -f $TMP_MOUNT/$f ]] && cp -u "$TMP_MOUNT/$f" /boot/
+			[[ -f $TMP_MOUNT/$f ]] && cp -uv "$TMP_MOUNT/$f" /boot/
 		done
-		umount "$SETUP_PART"
-		rmdir "$TMP_MOUNT"
+		umount -v "$SETUP_PART"
+		rmdir -v "$TMP_MOUNT"
 		# Finally delete the partition so the resizing works
 		sfdisk --no-reread --no-tell-kernel --delete "$ROOT_DRIVE" "${SETUP_PART: -1}"
+	else
+		echo "[ INFO ] No DietPi setup partition found, last partition is: \"$LAST_PART\""
+		lsblk -po NAME,LABEL,SIZE,TYPE,FSTYPE,MOUNTPOINTS "$ROOT_DRIVE"
 	fi
 
 	# Only increase partition size if not yet done on first boot
 	if [[ -f '/dietpi_skip_partition_resize' ]]
 	then
-		rm /dietpi_skip_partition_resize
+		rm -v /dietpi_skip_partition_resize
 	else
 		# Failsafe: Sync changes to disk before touching partitions
 		sync
