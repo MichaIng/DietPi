@@ -9,7 +9,7 @@
 	#
 	#////////////////////////////////////
 	#
-	# Usage:
+	# Usage
 	readonly FP_SCRIPT='/boot/dietpi/func/dietpi-set_software'
 	readonly AVAIABLE_COMMANDS="
 Available commands:
@@ -24,12 +24,12 @@ $FP_SCRIPT	passwords			NULL=Prompt user to change DietPi related passwords | X=o
 $FP_SCRIPT	boot_wait_for_network		[01] Enable or disable waiting for network interface configuration before DietPi-PostBoot is started, including postboot.d custom scripts and service startups
 $FP_SCRIPT	add_ssh_pubkeys			<empty>
 $FP_SCRIPT	disable_ssh_password_logins	[01]|root|<empty> Whether to disable SSH password logins for all users or root only; Leave empty to apply setting from /boot/dietpi.txt
+$FP_SCRIPT	rpi_kernel_choice		<empty> Supported on Debian Bookworm or newer on Raspberry Pi only
 "	#////////////////////////////////////
 
-	# Grab inputs
+	# Inputs
 	INPUT_MODE_NAME=$1
 	INPUT_MODE_VALUE=$2
-
 	INPUT_ADDITIONAL_1=$3
 	INPUT_ADDITIONAL_2=$4
 	INPUT_ADDITIONAL_3=$5
@@ -45,28 +45,44 @@ $FP_SCRIPT	disable_ssh_password_logins	[01]|root|<empty> Whether to disable SSH 
 
 	EXIT_CODE=0
 
-	Unknown_Input_Name(){
-
+	Unknown_Input_Name()
+	{
 		EXIT_CODE=1
-		G_DIETPI-NOTIFY 2 "Unknown input name ($INPUT_MODE_NAME). Nothing has been applied."
+		G_DIETPI-NOTIFY 2 "Unknown input command ($INPUT_MODE_NAME). Nothing has been applied."
 		echo "$AVAIABLE_COMMANDS"
 	}
 
-	Unknown_Input_Mode(){
-
+	Unknown_Input_Mode()
+	{
 		EXIT_CODE=1
-		G_DIETPI-NOTIFY 2 "Unknown input value ($INPUT_MODE_VALUE). Nothing has been applied."
+		G_DIETPI-NOTIFY 2 "Unknown input value ($INPUT_MODE_VALUE) for command \"$INPUT_MODE_NAME\". Nothing has been applied."
+		echo "$AVAIABLE_COMMANDS"
+	}
+
+	# $1: INPUT_ADDITIONAL_$1
+	Unknown_Input_Additional()
+	{
+		local argument="INPUT_ADDITIONAL_$1"
+		argument=${!argument}
+		EXIT_CODE=1
+		G_DIETPI-NOTIFY 2 "Unknown input argument ($argument) for command \"$INPUT_MODE_NAME $INPUT_MODE_NAME\". Nothing has been applied."
+		echo "$AVAIABLE_COMMANDS"
+	}
+
+	Unsupported_Input_Name()
+	{
+		EXIT_CODE=1
+		G_DIETPI-NOTIFY 2 "Unsupported input command ($INPUT_MODE_NAME) for Debian ${G_DISTRO_NAME^} on $G_HW_MODEL_NAME. Nothing has been applied."
 		echo "$AVAIABLE_COMMANDS"
 	}
 
 	#/////////////////////////////////////////////////////////////////////////////////////
 	# locale
-	# NB: Adds C.UTF-8 alongside any input option
 	#/////////////////////////////////////////////////////////////////////////////////////
-	Locale_Main(){
-
-		if [[ $INPUT_MODE_VALUE == 'C.UTF-8' ]] || grep -q "^$INPUT_MODE_VALUE UTF-8$" /usr/share/i18n/SUPPORTED; then
-
+	Locale_Main()
+	{
+		if [[ $INPUT_MODE_VALUE == 'C.UTF-8' ]] || grep -q "^$INPUT_MODE_VALUE UTF-8$" /usr/share/i18n/SUPPORTED
+		then
 			# Create list of locales to generate
 			echo "$INPUT_MODE_VALUE UTF-8" > /etc/locale.gen
 			# - Add C.UTF-8 back in, if not chosen, required by DietPi scripts. It's statically pre-compiled, but adding it here adds it to the faster (?) locale cache.
@@ -85,20 +101,16 @@ $FP_SCRIPT	disable_ssh_password_logins	[01]|root|<empty> Whether to disable SSH 
 
 			# Update dietpi.txt entry
 			G_CONFIG_INJECT 'AUTO_SETUP_LOCALE=' "AUTO_SETUP_LOCALE=$INPUT_MODE_VALUE" /boot/dietpi.txt
-
 		else
-
 			Unknown_Input_Mode
-
 		fi
-
 	}
 
 	#/////////////////////////////////////////////////////////////////////////////////////
-	# Set APT Mirror
+	# apt-mirror
 	#/////////////////////////////////////////////////////////////////////////////////////
-	AptMirror_Main(){
-
+	AptMirror_Main()
+	{
 		[[ $INPUT_MODE_VALUE ]] || { Unknown_Input_Mode; return 1; }
 
 		# RPi Trixie: Suite does not exist yet: https://archive.raspberrypi.com/debian/dists/
@@ -128,133 +140,113 @@ deb $INPUT_MODE_VALUE $G_DISTRO_NAME-updates main contrib non-free
 deb https://deb.debian.org/debian-security/ $G_DISTRO_NAME-security main contrib non-free
 deb $INPUT_MODE_VALUE $G_DISTRO_NAME-backports main contrib non-free' > /etc/apt/sources.list"
 
-			# Since Bookworm, non-free firmware has been moved to new component: https://deb.debian.org/debian/pool/
+			# Bookworm: non-free firmware has been moved to new component: https://deb.debian.org/debian/pool/
 			(( $G_DISTRO > 6 )) && G_EXEC sed --follow-symlinks -i 's/$/ non-free-firmware/' /etc/apt/sources.list
 
 			# Update dietpi.txt entry
 			G_CONFIG_INJECT 'CONFIG_APT_DEBIAN_MIRROR=' "CONFIG_APT_DEBIAN_MIRROR=$INPUT_MODE_VALUE" /boot/dietpi.txt
 		fi
-
 	}
 
 	#/////////////////////////////////////////////////////////////////////////////////////
-	# Set APT Cache
+	# apt
 	#/////////////////////////////////////////////////////////////////////////////////////
-	Apt_Main(){
-
+	Apt_Main()
+	{
 		local fp='/etc/apt/apt.conf.d/99-dietpi-cache' fp_compress='/etc/apt/apt.conf.d/98dietpi-nocompress'
 
 		# Clean current cache before changing it, failsafe cleanup if custom dir was chosen before
-		apt-get clean
+		G_EXEC apt-get clean
 
-		if [[ $INPUT_MODE_VALUE == 'reset' ]]; then
-
-			G_EXEC rm -Rf /tmp/apt "$fp" "$fp_compress"
-			return 0
-
-		fi
+		[[ $INPUT_MODE_VALUE == 'reset' ]] && { G_EXEC rm -Rf /tmp/apt "$fp" "$fp_compress"; return 0; }
 
 		[[ -f $fp ]] || echo '# Please use "dietpi-config" > "Advanded Options" > "APT" to edit these settings.' > "$fp"
 
-		if [[ $INPUT_MODE_VALUE == 'clean' ]]; then
+		case $INPUT_MODE_VALUE in
+			'clean') G_EXEC rm -Rf /tmp/apt /var/cache/apt /var/lib/apt/{lists,mirrors,periodic,cdroms.list};;
+			'cache')
+				case $INPUT_ADDITIONAL_1 in
+					'disable')
+						G_CONFIG_INJECT 'Dir::Cache[[:blank:]]' 'Dir::Cache "/tmp/apt";' "$fp"
+						GCI_PRESERVE=1 G_CONFIG_INJECT 'Dir::Cache::archives[[:blank:]]' 'Dir::Cache::archives "/var/cache/apt/archives";' "$fp" # Leave archives on disk by default
+						G_CONFIG_INJECT 'Dir::Cache::pkgcache[[:blank:]]' 'Dir::Cache::pkgcache "";' "$fp"
+						G_CONFIG_INJECT 'Dir::Cache::srcpkgcache[[:blank:]]' 'Dir::Cache::srcpkgcache "";' "$fp"
+						G_EXEC rm -Rf /var/cache/apt
+						;;
+					'ram')
+						G_CONFIG_INJECT 'Dir::Cache[[:blank:]]' 'Dir::Cache "/tmp/apt";' "$fp"
+						GCI_PRESERVE=1 G_CONFIG_INJECT 'Dir::Cache::archives[[:blank:]]' 'Dir::Cache::archives "/var/cache/apt/archives";' "$fp"
+						G_EXEC sed --follow-symlinks -i '/pkgcache[[:blank:]]/d' "$fp"
+						G_EXEC rm -Rf /var/cache/apt
+						;;
+					'disk')
+						G_EXEC sed --follow-symlinks -i '/^Dir::Cache/d' "$fp"
+						G_EXEC rm -Rf /tmp/apt
+						;;
+					*) Unknown_Input_Additional 1;;
+				esac;;
+			'lists')
+				case $INPUT_ADDITIONAL_1 in
+					'ram')
+						G_CONFIG_INJECT 'Dir::State[[:blank:]]' 'Dir::State "/tmp/apt";' "$fp"
+						G_CONFIG_INJECT 'Dir::State::extended_states[[:blank:]]' 'Dir::State::extended_states "/var/lib/apt/extended_states";' "$fp"
+						G_CONFIG_INJECT 'Dir::State::status[[:blank:]]' 'Dir::State::status "/var/lib/dpkg/status";' "$fp"
+						G_EXEC rm -Rf /var/lib/apt/{lists,mirrors,periodic,cdroms.list}
+						;;
+					'disk')
+						G_EXEC sed --follow-symlinks -i '/^Dir::State/d' "$fp"
+						G_EXEC rm -Rf /tmp/apt
+						;;
+					*) Unknown_Input_Additional 1;;
+				esac;;
+			'archives')
+				case $INPUT_ADDITIONAL_1 in
+					'ram')
+						G_CONFIG_INJECT 'Dir::Cache[[:blank:]]' 'Dir::Cache "/tmp/apt";' "$fp" # Cache needs to be in RAM as well for this to work reliable
+						G_CONFIG_INJECT 'Dir::Cache::archives[[:blank:]]' 'Dir::Cache::archives "/tmp/apt/archives";' "$fp"
+						[[ -d '/var/cache/apt' ]] && G_EXEC rm -R /var/cache/apt
+						;;
+					'disk')
+						G_CONFIG_INJECT 'Dir::Cache::archives[[:blank:]]' 'Dir::Cache::archives "/var/cache/apt/archives";' "$fp"
+						[[ -d '/tmp/apt/archives' ]] && G_EXEC rm -R /tmp/apt/archives
+						;;
 
-			G_EXEC rm -Rf /tmp/apt /var/cache/apt /var/lib/apt/{lists,mirrors,periodic,cdroms.list}
-
-		elif [[ $INPUT_MODE_VALUE == 'cache' ]]; then
-
-			if [[ $INPUT_ADDITIONAL_1 == 'disable' ]]; then
-
-				G_CONFIG_INJECT 'Dir::Cache[[:blank:]]' 'Dir::Cache "/tmp/apt";' "$fp"
-				# Leave archives on disk by default
-				GCI_PRESERVE=1 G_CONFIG_INJECT 'Dir::Cache::archives[[:blank:]]' 'Dir::Cache::archives "/var/cache/apt/archives";' "$fp"
-				G_CONFIG_INJECT 'Dir::Cache::pkgcache[[:blank:]]' 'Dir::Cache::pkgcache "";' "$fp"
-				G_CONFIG_INJECT 'Dir::Cache::srcpkgcache[[:blank:]]' 'Dir::Cache::srcpkgcache "";' "$fp"
-				[[ -d '/var/cache/apt' ]] && G_EXEC rm -R /var/cache/apt
-
-			elif [[ $INPUT_ADDITIONAL_1 == 'ram' ]]; then
-
-				G_CONFIG_INJECT 'Dir::Cache[[:blank:]]' 'Dir::Cache "/tmp/apt";' "$fp"
-				GCI_PRESERVE=1 G_CONFIG_INJECT 'Dir::Cache::archives[[:blank:]]' 'Dir::Cache::archives "/var/cache/apt/archives";' "$fp"
-				sed --follow-symlinks -i '/pkgcache[[:blank:]]/d' "$fp"
-				[[ -d '/var/cache/apt' ]] && G_EXEC rm -R /var/cache/apt
-
-			elif [[ $INPUT_ADDITIONAL_1 == 'disk' ]]; then
-
-				sed --follow-symlinks -i '/^Dir::Cache/d' "$fp"
-				[[ -d '/tmp/apt' ]] && G_EXEC rm -R /tmp/apt
-
-			fi
-
-		elif [[ $INPUT_MODE_VALUE == 'lists' ]]; then
-
-			if [[ $INPUT_ADDITIONAL_1 == 'ram' ]]; then
-
-				G_CONFIG_INJECT 'Dir::State[[:blank:]]' 'Dir::State "/tmp/apt";' "$fp"
-				G_CONFIG_INJECT 'Dir::State::extended_states[[:blank:]]' 'Dir::State::extended_states "/var/lib/apt/extended_states";' "$fp"
-				G_CONFIG_INJECT 'Dir::State::status[[:blank:]]' 'Dir::State::status "/var/lib/dpkg/status";' "$fp"
-				G_EXEC rm -Rf /var/lib/apt/{lists,mirrors,periodic,cdroms.list}
-
-			elif [[ $INPUT_ADDITIONAL_1 == 'disk' ]]; then
-
-				sed --follow-symlinks -i '/^Dir::State/d' "$fp"
-				[[ -d '/tmp/apt' ]] && G_EXEC rm -R /tmp/apt
-
-			fi
-
-		elif [[ $INPUT_MODE_VALUE == 'archives' ]]; then
-
-			if [[ $INPUT_ADDITIONAL_1 == 'ram' ]]; then
-
-				# Cache needs to be in RAM as well for this to work reliable
-				G_CONFIG_INJECT 'Dir::Cache[[:blank:]]' 'Dir::Cache "/tmp/apt";' "$fp"
-				G_CONFIG_INJECT 'Dir::Cache::archives[[:blank:]]' 'Dir::Cache::archives "/tmp/apt/archives";' "$fp"
-				[[ -d '/var/cache/apt' ]] && G_EXEC rm -R /var/cache/apt
-
-			elif [[ $INPUT_ADDITIONAL_1 == 'disk' ]]; then
-
-				G_CONFIG_INJECT 'Dir::Cache::archives[[:blank:]]' 'Dir::Cache::archives "/var/cache/apt/archives";' "$fp"
-				[[ -d '/tmp/apt/archives' ]] && G_EXEC rm -R /tmp/apt/archives
-
-			fi
-
-		elif [[ $INPUT_MODE_VALUE == 'compress' ]]; then
-
-			if [[ $INPUT_ADDITIONAL_1 == 1 || $INPUT_ADDITIONAL_1 == 'enable' ]]; then
-
-				[[ -f '/etc/apt/apt.conf.d/98dietpi-nocompress' ]] && G_EXEC rm "$fp_compress"
-
-			elif [[ $INPUT_ADDITIONAL_1 == 0 || $INPUT_ADDITIONAL_1 == 'disable' ]]; then
-
-				echo -e '# Please use "dietpi-config" > "Advanded Options" > "APT" to edit this setting.\nAcquire::GzipIndexes "false";' > "$fp_compress"
-
-			fi
-
-		fi
+					*) Unknown_Input_Additional 1;;
+				esac;;
+			'compress')
+				case $INPUT_ADDITIONAL_1 in
+					1|'enable') G_EXEC rm -f "$fp_compress";;
+					0|'disable')
+						echo '# Please use "dietpi-config" > "Advanded Options" > "APT" to edit this setting.' > "$fp_compress"
+						G_CONFIG_INJECT 'Acquire::GzipIndexes[[:blank:]]' 'Acquire::GzipIndexes "false";' "$fp_compress"
+						;;
+					*) Unknown_Input_Additional 1;;
+				esac;;
+			'reset') :;;
+			*) Unknown_Input_Mode;;
+		esac
 
 		[[ -f $fp ]] || return 0
 
 		# Remove drop-in config if it does not contain any setting
-		if ! grep -q '^Dir' "$fp"; then
-
+		if ! grep -q '^Dir' "$fp"
+		then
 			G_EXEC rm "$fp"
 
 		# Re-create default cache dir if archives on disk while cache in RAM, since parent dirs are not auto-created
-		elif grep -q '/var/cache/apt/archives' "$fp"; then
-
+		elif grep -q '/var/cache/apt/archives' "$fp"
+		then
 			G_EXEC mkdir -p /var/cache/apt/archives
-
 		fi
-
 	}
 
 	#/////////////////////////////////////////////////////////////////////////////////////
-	# Set time sync mode
-	# NB: Also sets mirror as defined in dietpi.txt CONFIG_NTP_MIRROR
+	# ntpd-mode: Also sets mirror as defined in dietpi.txt CONFIG_NTP_MIRROR
 	#/////////////////////////////////////////////////////////////////////////////////////
-	TimeSync_Main(){
-
-		if [[ ! $INPUT_MODE_VALUE || $INPUT_MODE_VALUE == [01234] ]]; then
-
+	TimeSync_Main()
+	{
+		if [[ ! $INPUT_MODE_VALUE || $INPUT_MODE_VALUE == [01234] ]]
+		then
 			# If no input given, re-apply current dietpi.txt setting, else revert to default mode 2
 			[[ $INPUT_MODE_VALUE ]] || INPUT_MODE_VALUE=$(sed -n '/^[[:blank:]]*CONFIG_NTP_MODE=/{s/^[^=]*=//p;q}' /boot/dietpi.txt)
 			[[ $INPUT_MODE_VALUE ]] || INPUT_MODE_VALUE=2
@@ -263,49 +255,39 @@ deb $INPUT_MODE_VALUE $G_DISTRO_NAME-backports main contrib non-free' > /etc/apt
 			[[ $ntp_mirror ]] || ntp_mirror='default'
 
 			# Gateway, auto detect local gateway(s)/router(s) to use as NTP server(s).
-			if [[ ${ntp_mirror,,} == 'gateway' ]]; then
-
+			if [[ ${ntp_mirror,,} == 'gateway' ]]
+			then
 				# Convert mawk output to single line via ORS, remove trailing space afterwards
 				local gateway=$(ip r l 0/0 | mawk '{print $3}' ORS=' '); gateway=${gateway% }
-				if [[ $gateway ]]; then
-
+				if [[ $gateway ]]
+				then
 					G_DIETPI-NOTIFY 0 "Gateway(s) detected: $gateway, adding as NTP server(s)."
 					ntp_mirror=$gateway
-
 				else
-
 					G_DIETPI-NOTIFY 1 'No local gateway detected. Reverting NTP mirror back to system defaults.'
 					EXIT_CODE=1
 					ntp_mirror='default'
-
 				fi
-
 			fi
 
 			# Default, lets timesyncd use DHCP server or fallback to debian.pool.ntp.org.
-			if [[ ${ntp_mirror,,} == 'default' ]]; then
-
+			if [[ ${ntp_mirror,,} == 'default' ]]
+			then
 				[[ -f '/etc/systemd/timesyncd.conf' ]] && G_EXEC rm /etc/systemd/timesyncd.conf
-
 			else
-
 				local i ntp_mirror_entry
 				for i in $ntp_mirror
 				do
-					if [[ $i == *'pool.ntp.org' ]]; then
-
+					if [[ $i == *'pool.ntp.org' ]]
+					then
 						ntp_mirror_entry+="0.$i 1.$i 2.$i 3.$i "
-
 					else
-
 						ntp_mirror_entry+="$i "
-
 					fi
 				done
 
 				# Set mirror
 				echo -e "[Time]\nNTP=${ntp_mirror_entry% }" > /etc/systemd/timesyncd.conf
-
 			fi
 
 			# Daemon mode: dbus required for timedatectl which users may expect
@@ -330,27 +312,23 @@ deb $INPUT_MODE_VALUE $G_DISTRO_NAME-backports main contrib non-free' > /etc/apt
 
 			# Update dietpi.txt
 			G_CONFIG_INJECT 'CONFIG_NTP_MODE=' "CONFIG_NTP_MODE=$INPUT_MODE_VALUE" /boot/dietpi.txt
-
 		else
-
 			Unknown_Input_Mode
-
 		fi
-
 	}
 
 	#/////////////////////////////////////////////////////////////////////////////////////
-	# Allo
+	# allo
 	#/////////////////////////////////////////////////////////////////////////////////////
-	Allo_Main(){
-
-		if [[ $INPUT_MODE_VALUE == 'eth_dhcp' ]]; then
-
+	Allo_Main()
+	{
+		if [[ $INPUT_MODE_VALUE == 'eth_dhcp' ]]
+		then
 			G_CONFIG_INJECT 'iface eth' 'iface eth0 inet dhcp' /etc/network/interfaces
 			sed --follow-symlinks -i '0,/^.*dns-nameservers[[:blank:]].*$/s//#dns-nameservers 9.9.9.9 149.112.112.112/' /etc/network/interfaces
 
-		elif [[ $INPUT_MODE_VALUE == 'eth_static' ]]; then
-
+		elif [[ $INPUT_MODE_VALUE == 'eth_static' ]]
+		then
 			G_CONFIG_INJECT 'iface eth' 'iface eth0 inet static' /etc/network/interfaces
 			[[ $INPUT_ADDITIONAL_1 ]] && sed --follow-symlinks -i "0,\|^.*address[[:blank:]].*\$|s||address $INPUT_ADDITIONAL_1|" /etc/network/interfaces
 			[[ $INPUT_ADDITIONAL_2 ]] && sed --follow-symlinks -i "0,\|^.*gateway[[:blank:]].*\$|s||gateway $INPUT_ADDITIONAL_2|" /etc/network/interfaces
@@ -365,42 +343,36 @@ deb $INPUT_MODE_VALUE $G_DISTRO_NAME-backports main contrib non-free' > /etc/apt
 				local i
 				for i in $INPUT_ADDITIONAL_4; do echo "nameserver $i" >> /etc/resolv.conf; done
 			fi
-
 		else
-
 			Unknown_Input_Mode
-
 		fi
-
 	}
 
 	#/////////////////////////////////////////////////////////////////////////////////////
-	# Users
+	# useradd
 	#/////////////////////////////////////////////////////////////////////////////////////
-	Useradd_Main(){
-
-		if [[ $INPUT_MODE_VALUE ]]; then
-
+	Useradd_Main()
+	{
+		if [[ $INPUT_MODE_VALUE ]]
+		then
 			[[ -d '/home' ]] || G_EXEC mkdir /home # Failsafe
 
 			# Get global password
 			# - Encrypted
-			if [[ -f '/var/lib/dietpi/dietpi-software/.GLOBAL_PW.bin' ]]; then
-
+			if [[ -f '/var/lib/dietpi/dietpi-software/.GLOBAL_PW.bin' ]]
+			then
 				GLOBAL_PW=$(openssl enc -d -a -md sha256 -aes-256-cbc -iter 10000 -salt -pass pass:'DietPiRocks!' -in /var/lib/dietpi/dietpi-software/.GLOBAL_PW.bin)
 
 			# - DietPi-Installer, 1st run setup or user cancelled manual password choice
 			else
-
 				GLOBAL_PW=$(sed -n '/^[[:blank:]]*AUTO_SETUP_GLOBAL_PASSWORD=/{s/^[^=]*=//p;q}' /boot/dietpi.txt)
-
 			fi
 			# - Fallback
 			[[ $GLOBAL_PW ]] || GLOBAL_PW='dietpi'
 
-			local usercmd='useradd -m'
-			getent passwd "$INPUT_MODE_VALUE" > /dev/null && usercmd='usermod'
-			$usercmd "$INPUT_MODE_VALUE" -p "$GLOBAL_PW" -s /bin/bash
+			local usercmd=('useradd' '-m')
+			getent passwd "$INPUT_MODE_VALUE" > /dev/null && usercmd=('usermod')
+			"${usercmd[@]}" "$INPUT_MODE_VALUE" -p "$GLOBAL_PW" -s /bin/bash
 
 			# Copy root profile/bashrc
 			[[ -f '/root/.profile' ]] && G_EXEC cp /root/.profile "/home/$INPUT_MODE_VALUE/"
@@ -413,28 +385,18 @@ deb $INPUT_MODE_VALUE $G_DISTRO_NAME-backports main contrib non-free' > /etc/apt
 			[[ -f /etc/sudoers.d/$INPUT_MODE_VALUE ]] && G_EXEC chmod 0440 "/etc/sudoers.d/$INPUT_MODE_VALUE"
 			echo "$INPUT_MODE_VALUE ALL=(ALL:ALL) NOPASSWD: ALL" > "/etc/sudoers.d/$INPUT_MODE_VALUE"
 			umask 0022
-
 		else
-
 			Unknown_Input_Mode
-
 		fi
-
 	}
 
-	Verify_DietPi_Txt(){
-
-		# Pre-v6.29 workaround:
-		# - This command is called between DietPi scripts update and incremental patches.
-		# - In case of DietPi-Update pre-v6.29, new code is stored to deprecated /DietPi mount point, hence this script loads old DietPi-Globals from /boot/dietpi/.
-		# - In older versions, G_GITBRANCH/G_GITOWNER variables are not yet available and further incompatibilities may arise, hence this command is doomed fail.
-		# - Additionally in case of Jessie systems, post-v6.25 dietpi.txt entries would be added before the update restarts with v6.25 jessie-support target branch.
-		# - Since all pre-v6.29 systems will have DietPi-Update restarted, this command will be called a second time with updated code, so we can skip the faulty first attempt.
-		# - Lets use the same check that DietPi-Patch does, to be sure the update restart is done.
-		[[ -d '/DietPi' && $(readlink -f '/DietPi') != '/boot' ]] && return 0
-
+	#/////////////////////////////////////////////////////////////////////////////////////
+	# verify_dietpi.txt
+	#/////////////////////////////////////////////////////////////////////////////////////
+	Verify_DietPi_Txt()
+	{
 		# Add missing entries with dietpi.txt from Git
-		G_EXEC_DESC='Downloading current dietpi.txt' G_EXEC curl -sSfL "https://raw.githubusercontent.com/$G_GITOWNER/DietPi/$G_GITBRANCH/dietpi.txt" -o dietpi.txt_patch
+		G_EXEC_DESC='Downloading current dietpi.txt' G_EXEC curl -sSfLo dietpi.txt_patch "https://raw.githubusercontent.com/$G_GITOWNER/DietPi/$G_GITBRANCH/dietpi.txt"
 
 		# Remove empty and commented lines, and do not re-add the password setting, which is intended to stay commented after first boot
 		sed --follow-symlinks -Ei '/^[[:blank:]]*(#|$|AUTO_SETUP_GLOBAL_PASSWORD=)/d' dietpi.txt_patch
@@ -453,9 +415,11 @@ deb $INPUT_MODE_VALUE $G_DISTRO_NAME-backports main contrib non-free' > /etc/apt
 
 		done < dietpi.txt_patch
 		rm dietpi.txt_patch
-
 	}
 
+	#/////////////////////////////////////////////////////////////////////////////////////
+	# passwords
+	#/////////////////////////////////////////////////////////////////////////////////////
 	Passwords_Main()
 	{
 		local pw_dietpi_software pw_root_dietpi_users
@@ -516,6 +480,9 @@ deb $INPUT_MODE_VALUE $G_DISTRO_NAME-backports main contrib non-free' > /etc/apt
 		G_DIETPI-NOTIFY 2 '"root" and "dietpi" login password successfully changed'
 	}
 
+	#/////////////////////////////////////////////////////////////////////////////////////
+	# boot_wait_for_network
+	#/////////////////////////////////////////////////////////////////////////////////////
 	Boot_Wait_For_Network()
 	{
 		if [[ $INPUT_MODE_VALUE == 1 ]]
@@ -534,6 +501,9 @@ deb $INPUT_MODE_VALUE $G_DISTRO_NAME-backports main contrib non-free' > /etc/apt
 		G_CONFIG_INJECT 'AUTO_SETUP_BOOT_WAIT_FOR_NETWORK=' "AUTO_SETUP_BOOT_WAIT_FOR_NETWORK=$INPUT_MODE_VALUE" /boot/dietpi.txt
 	}
 
+	#/////////////////////////////////////////////////////////////////////////////////////
+	# add_ssh_pubkeys
+	#/////////////////////////////////////////////////////////////////////////////////////
 	Add_SSH_Pubkeys()
 	{
 		[[ $INPUT_MODE_VALUE ]] && { Unknown_Input_Mode; return 1; }
@@ -558,6 +528,9 @@ deb $INPUT_MODE_VALUE $G_DISTRO_NAME-backports main contrib non-free' > /etc/apt
 		done < <(sed -n '/^[[:blank:]]*AUTO_SETUP_SSH_PUBKEY=/s/^[^=]*=//p' /boot/dietpi.txt)
 	}
 
+	#/////////////////////////////////////////////////////////////////////////////////////
+	# disable_ssh_password_logins
+	#/////////////////////////////////////////////////////////////////////////////////////
 	Disable_SSH_Password_Logins()
 	{
 		# If no input given, apply dietpi.txt setting, default to "0"
@@ -626,63 +599,104 @@ deb $INPUT_MODE_VALUE $G_DISTRO_NAME-backports main contrib non-free' > /etc/apt
 	}
 
 	#/////////////////////////////////////////////////////////////////////////////////////
+	# rpi_kernel_choice
+	#/////////////////////////////////////////////////////////////////////////////////////
+	# $1='dietpi-rpi-firmware-migration': Passed by our firmware migration script to allow kernel selection prior to raspi-firmware install
+	RPi_Kernel_Choice()
+	{
+		# Raspberry Pi Bookworm only
+		(( $G_HW_MODEL > 9 || $G_DISTRO < 7 )) && { Unsupported_Input_Name; return 1; }
+
+		# Requires firmware migration to be completed, or dietpi-rpi-firmware-migration flag
+		[[ $INPUT_MODE_VALUE == 'dietpi-rpi-firmware-migration' ]] || dpkg-query -s 'raspi-firmware' &> /dev/null || { G_WHIP_MSG '[FAILED] Raspberry Pi firmware migration not completed
+\nThe Raspberry Pi kernel choice requires a migration to the new firmware packages to be completed. Details about how to apply the migration can be found here:
+- https://github.com/MichaIng/DietPi/issues/6676'; return 1; }
+
+		# Obtain required kernel packages
+		local image_arch=$(dpkg --print-architecture)
+		local kernel_version=$(uname -r)
+		local kernel_variant=${kernel_version##*-}
+		[[ $kernel_variant == "$kernel_version" ]] && kernel_variant='v6' # Old ARMv6 kernel has no dash-separated suffix
+		local kernel_package=
+		case $kernel_variant in
+			'v6') kernel_package='linux-image-rpi-v6';;
+			'v7'|'v7+') kernel_package='linux-image-rpi-v7';;
+			'v7l'|'v7l+') kernel_package='linux-image-rpi-v7l';;
+			'v8'|'v8+') kernel_package='linux-image-rpi-v8';;
+			'2712'|'16k+') kernel_package='linux-image-rpi-2712';; # rpi-update suffixes differ: https://github.com/raspberrypi/rpi-firmware/tree/master/modules
+			*) { G_WHIP_MSG "[FAILED] No supported kernel variant detected
+\nYou do not seem to use a kernel which we match without doubt with a certain new kernel package:
+- $(uname -a)
+\nYou may report this at our GitHub page or community forum:
+- https://github.com/MichaIng/DietPi
+- https://dietpi.com/forum/"; return 1; };;
+		esac
+
+		G_WHIP_CHECKLIST_ARRAY=()
+		local status=
+		if [[ $image_arch == 'armhf' ]]
+		then
+			dpkg-query -s 'linux-image-rpi-v6' &> /dev/null && status='on' || status='off'
+			[[ $kernel_package == 'linux-image-rpi-v6' ]] || G_WHIP_CHECKLIST_ARRAY+=('linux-image-rpi-v6' 'Raspberry Pi 1/Zero (1)' "$status")
+			dpkg-query -s 'linux-image-rpi-v7' &> /dev/null && status='on' || status='off'
+			[[ $kernel_package == 'linux-image-rpi-v7' ]] || G_WHIP_CHECKLIST_ARRAY+=('linux-image-rpi-v7' 'Raspberry Pi 2/3/Zero 2 32-bit' "$status")
+			dpkg-query -s 'linux-image-rpi-v7l' &> /dev/null && status='on' || status='off'
+			[[ $kernel_package == 'linux-image-rpi-v7l' ]] || G_WHIP_CHECKLIST_ARRAY+=('linux-image-rpi-v7l' 'Raspberry Pi 4/5 32-bit' "$status")
+		fi
+		dpkg-query -s 'linux-image-rpi-v8' &> /dev/null && status='on' || status='off'
+		[[ $kernel_package == 'linux-image-rpi-v8' ]] || G_WHIP_CHECKLIST_ARRAY+=('linux-image-rpi-v8' 'Raspberry Pi 2-5 64-bit' "$status")
+		dpkg-query -s 'linux-image-rpi-2712' &> /dev/null && status='on' || status='off'
+		[[ $kernel_package == 'linux-image-rpi-2712' || $image_arch == 'armhf' ]] || G_WHIP_CHECKLIST_ARRAY+=('linux-image-rpi-2712' 'Raspberry Pi 5 64-bit' "$status")
+
+		G_WHIP_CHECKLIST "Based on your currently used kernel variant, the $kernel_package package will be kept/installed.
+\nOptionally, you can select/deselect additional kernel packages below, in case you want to boot this image from another Raspberry Pi model as well.
+\nNote the following:
+- The Raspberry Pi 4 and 5 models use the 64-bit kernel by default, even when using a 32-bit image, unless you explicitly define arm_64bit=0 in /boot/config.txt.
+- All other Raspberry Pi models use the 32-bit kernel on 32-bit images, and the 64-bit kernel on 64-bit images, or when you explicitly define arm_64bit=1 in /boot/config.txt." || exit 1
+
+		local i j to_install=() to_remove=()
+		for i in 'linux-image-rpi-v6' 'linux-image-rpi-v7' 'linux-image-rpi-v7l' 'linux-image-rpi-v8' 'linux-image-rpi-2712'
+		do
+			[[ $i == "$kernel_package" ]] && continue
+			for j in $G_WHIP_RETURNED_VALUE
+			do
+				[[ $j == "$i" ]] || continue
+				# Add foreign arm64 arch for 64-bit kernel until it has been added to the armhf repo: https://github.com/RPi-Distro/repo/issues/356
+				[[ $j == 'linux-image-rpi-v8' && $image_arch == 'armhf' ]] && G_EXEC dpkg --add-architecture arm64
+				to_install+=("$i")
+				continue 2
+			done
+			to_remove+=("$i")
+		done
+
+		# Add foreign arm64 arch for 64-bit kernel until it has been added to the armhf repo: https://github.com/RPi-Distro/repo/issues/356
+		[[ $kernel_package == 'linux-image-rpi-v8' && $image_arch == 'armhf' ]] && G_EXEC dpkg --add-architecture arm64
+
+		G_AGI "$kernel_package" "${to_install[@]}" raspi-firmware raspi-utils
+		G_AGP "${to_remove[@]}" raspberrypi-kernel raspberrypi-headers-kernel raspberrypi-bootloader libraspberrypi-bin libraspberrypi0
+	}
+
+	#/////////////////////////////////////////////////////////////////////////////////////
 	# Main Loop
 	#/////////////////////////////////////////////////////////////////////////////////////
 	#-----------------------------------------------------------------------------------
-	# Info
 	G_DIETPI-NOTIFY 3 "$G_PROGRAM_NAME" "$INPUT_MODE_NAME${INPUT_MODE_VALUE:+ ($INPUT_MODE_VALUE)}"
 	#-----------------------------------------------------------------------------------
-	if [[ $INPUT_MODE_NAME == 'apt-mirror' ]]; then
-
-		AptMirror_Main
-
-	# Pre-v8.4: Backwards compatibility for "apt-cache" => "apt"
-	elif [[ $INPUT_MODE_NAME == 'apt' || $INPUT_MODE_NAME == 'apt-cache' ]]; then
-
-		Apt_Main
-
-	elif [[ $INPUT_MODE_NAME == 'useradd' ]]; then
-
-		Useradd_Main
-
-	elif [[ $INPUT_MODE_NAME == 'ntpd-mode' ]]; then
-
-		TimeSync_Main
-
-	elif [[ $INPUT_MODE_NAME == 'allo' ]]; then
-
-		Allo_Main
-
-	elif [[ $INPUT_MODE_NAME == 'verify_dietpi.txt' ]]; then
-
-		Verify_DietPi_Txt
-
-	elif [[ $INPUT_MODE_NAME == 'locale' ]]; then
-
-		Locale_Main
-
-	elif [[ $INPUT_MODE_NAME == 'passwords' ]]; then
-
-		Passwords_Main
-
-	elif [[ $INPUT_MODE_NAME == 'boot_wait_for_network' ]]; then
-
-		Boot_Wait_For_Network
-
-	elif [[ $INPUT_MODE_NAME == 'add_ssh_pubkeys' ]]; then
-
-		Add_SSH_Pubkeys
-
-	elif [[ $INPUT_MODE_NAME == 'disable_ssh_password_logins' ]]; then
-
-		Disable_SSH_Password_Logins
-
-	else
-
-		Unknown_Input_Name
-
-	fi
-
+	case $INPUT_MODE_NAME in
+		'apt-mirror') AptMirror_Main;;
+		'apt'|'apt-cache') Apt_Main;; # Pre-v8.4: Backwards compatibility for "apt-cache" => "apt cache"
+		'useradd') Useradd_Main;;
+		'ntpd-mode') TimeSync_Main;;
+		'allo') Allo_Main;;
+		'verify_dietpi.txt') Verify_DietPi_Txt;;
+		'locale') Locale_Main;;
+		'passwords') Passwords_Main;;
+		'boot_wait_for_network') Boot_Wait_For_Network;;
+		'add_ssh_pubkeys') Add_SSH_Pubkeys;;
+		'disable_ssh_password_logins') Disable_SSH_Password_Logins;;
+		'rpi_kernel_choice') RPi_Kernel_Choice;;
+		*) Unknown_Input_Name;;
+	esac
 	#-----------------------------------------------------------------------------------
 	G_DIETPI-NOTIFY -1 "$EXIT_CODE" "$INPUT_MODE_NAME $INPUT_MODE_VALUE"
 	exit "$EXIT_CODE"
