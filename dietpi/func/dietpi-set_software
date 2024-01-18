@@ -24,6 +24,7 @@ $FP_SCRIPT	passwords			NULL=Prompt user to change DietPi related passwords | X=o
 $FP_SCRIPT	boot_wait_for_network		[01] Enable or disable waiting for network interface configuration before DietPi-PostBoot is started, including postboot.d custom scripts and service startups
 $FP_SCRIPT	add_ssh_pubkeys			<empty>
 $FP_SCRIPT	disable_ssh_password_logins	[01]|root|<empty> Whether to disable SSH password logins for all users or root only; Leave empty to apply setting from /boot/dietpi.txt
+$FP_SCRIPT	rpi_kernel_choice		<empty> Supported on Debian Bookworm or newer on Raspberry Pi only
 "	#////////////////////////////////////
 
 	# Inputs
@@ -65,6 +66,13 @@ $FP_SCRIPT	disable_ssh_password_logins	[01]|root|<empty> Whether to disable SSH 
 		argument=${!argument}
 		EXIT_CODE=1
 		G_DIETPI-NOTIFY 2 "Unknown input argument ($argument) for command \"$INPUT_MODE_NAME $INPUT_MODE_NAME\". Nothing has been applied."
+		echo "$AVAIABLE_COMMANDS"
+	}
+
+	Unsupported_Input_Name()
+	{
+		EXIT_CODE=1
+		G_DIETPI-NOTIFY 2 "Unsupported input command ($INPUT_MODE_NAME) for Debian ${G_DISTRO_NAME^} on $G_HW_MODEL_NAME. Nothing has been applied."
 		echo "$AVAIABLE_COMMANDS"
 	}
 
@@ -591,6 +599,78 @@ deb $INPUT_MODE_VALUE $G_DISTRO_NAME-backports main contrib non-free' > /etc/apt
 	}
 
 	#/////////////////////////////////////////////////////////////////////////////////////
+	# rpi_kernel_choice
+	#/////////////////////////////////////////////////////////////////////////////////////
+	# $1='dietpi-rpi-firmware-migration': Passed by our firmware migration script to allow kernel selection prior to raspi-firmware install
+	RPi_Kernel_Choice()
+	{
+		# Raspberry Pi Bookworm only
+		(( $G_HW_MODEL > 9 || $G_DISTRO < 7 )) && { Unsupported_Input_Name; return 1; }
+
+		# Requires firmware migration to be completed, or dietpi-rpi-firmware-migration flag
+		[[ $INPUT_MODE_VALUE == 'dietpi-rpi-firmware-migration' ]] || dpkg-query -s 'raspi-firmware' || { G_WHIP_MSG '[FAILED] Raspberry Pi firmware migration not completed
+\nThe Raspberry Pi kernel choice requires a migration to the new firmware packages to be completed. Details about how to apply the migration can be found here:
+- https://github.com/MichaIng/DietPi/issues/6676'; return 1; }
+
+		# Obtain required kernel packages
+		local image_arch=$(dpkg --print-architecture)
+		local kernel_version=$(uname -r)
+		local kernel_variant=${kernel_version##*-}
+		[[ $kernel_variant == "$kernel_version" ]] && kernel_variant='v6' # Old ARMv6 kernel has no dash-separated suffix
+		local kernel_package=
+		case $kernel_variant in
+			'v6') kernel_package='linux-image-rpi-v6';;
+			'v7'|'v7+') kernel_package='linux-image-rpi-v7';;
+			'v7l'|'v7l+') kernel_package='linux-image-rpi-v7l';;
+			'v8'|'v8+') kernel_package='linux-image-rpi-v8';;
+			'2712'|'16k+') kernel_package='linux-image-rpi-2712';; # rpi-update suffixes differ: https://github.com/raspberrypi/rpi-firmware/tree/master/modules
+			*) { G_WHIP_MSG "[FAILED] No supported kernel variant detected
+\nYou do not seem to use a kernel which we match without doubt with a certain new kernel package:
+- $(uname -a)
+\nYou may report this at our GitHub page or community forum:
+- https://github.com/MichaIng/DietPi
+- https://dietpi.com/forum/"; return 1; };;
+		esac
+
+		G_WHIP_CHECKLIST_ARRAY=()
+		local status=
+		dpkg-query -s 'linux-image-rpi-v6' && status='on' || status='off'
+		[[ $kernel_package == 'linux-image-rpi-v6' ]] || G_WHIP_CHECKLIST_ARRAY+=("$kernel_package" 'Raspberry Pi 1/Zero (1)' "$status")
+		dpkg-query -s 'linux-image-rpi-v7' && status='on' || status='off'
+		[[ $kernel_package == 'linux-image-rpi-v7' ]] || G_WHIP_CHECKLIST_ARRAY+=("$kernel_package" 'Raspberry Pi 2/3/Zero 2 32-bit' "$status")
+		dpkg-query -s 'linux-image-rpi-v7l' && status='on' || status='off'
+		[[ $kernel_package == 'linux-image-rpi-v7l' ]] || G_WHIP_CHECKLIST_ARRAY+=("$kernel_package" 'Raspberry Pi 4/5 32-bit' "$status")
+		dpkg-query -s 'linux-image-rpi-v8' && status='on' || status='off'
+		[[ $kernel_package == 'linux-image-rpi-v8' ]] || G_WHIP_CHECKLIST_ARRAY+=("$kernel_package" 'Raspberry Pi 2-5 64-bit' "$status")
+		dpkg-query -s 'linux-image-rpi-2712' && status='on' || status='off'
+		[[ $kernel_package == 'linux-image-rpi-2712' || $image_arch == 'armhf' ]] || G_WHIP_CHECKLIST_ARRAY+=("$kernel_package" 'Raspberry Pi 5 64-bit' "$status")
+
+		G_WHIP_CHECKLIST "Based on your currently used kernel variant, the $kernel_package package will be installed.
+\nOptionally, you can select/deselect additional kernel packages below, in case you want to boot this image from another Raspberry Pi model as well.
+\nNote the following:
+- The Raspberry Pi 4 and 5 models use the 64-bit kernel by default, even when using a 32-bit image, unless you explicitly define arm_64bit=0 in /boot/config.txt.
+- All other Raspberry Pi models use the 32-bit kernel on 32-bit images, and the 64-bit kernel on 64-bit images, or when you explicitly define arm_64bit=1 in /boot/config.txt." || { EXIT_CODE=1; return 1; }
+
+		local i j to_install=() to_remove=()
+		for i in 'linux-image-rpi-v6' 'linux-image-rpi-v7' 'linux-image-rpi-v7l' 'linux-image-rpi-v8' 'linux-image-rpi-2712'
+		do
+			[[ $i == "$kernel_package" ]] && continue
+			for j in $G_WHIP_RETURNED_VALUE
+			do
+				# Add foreign arm64 arch for 64-bit kernel until it has been added to the armhf repo: https://github.com/RPi-Distro/repo/issues/356
+				[[ $j == 'linux-image-rpi-v8' && $image_arch == 'armhf' ]] && G_EXEC dpkg --add-architecture arm64
+				[[ $j == $i ]] && to_install+=("$j") || to_remove+=("j")
+			done
+		done
+
+		# Add foreign arm64 arch for 64-bit kernel until it has been added to the armhf repo: https://github.com/RPi-Distro/repo/issues/356
+		[[ $kernel_package == 'linux-image-rpi-v8' && $image_arch == 'armhf' ]] && G_EXEC dpkg --add-architecture arm64
+
+		G_AGI "$kernel_package" "${to_install[@]}" raspi-firmware raspi-utils
+		G_AGP "${to_remove[@]}"
+	}
+
+	#/////////////////////////////////////////////////////////////////////////////////////
 	# Main Loop
 	#/////////////////////////////////////////////////////////////////////////////////////
 	#-----------------------------------------------------------------------------------
@@ -608,6 +688,7 @@ deb $INPUT_MODE_VALUE $G_DISTRO_NAME-backports main contrib non-free' > /etc/apt
 		'boot_wait_for_network') Boot_Wait_For_Network;;
 		'add_ssh_pubkeys') Add_SSH_Pubkeys;;
 		'disable_ssh_password_logins') Disable_SSH_Password_Logins;;
+		'rpi_kernel_choice') RPi_Kernel_Choice;;
 		*) Unknown_Input_Name;;
 	esac
 	#-----------------------------------------------------------------------------------
