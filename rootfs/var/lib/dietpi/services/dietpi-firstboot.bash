@@ -75,7 +75,7 @@
 		then
 			sed --follow-symlinks -i '/^#over_voltage=/c\#over_voltage=0' /boot/config.txt
 			sed --follow-symlinks -i '/^#core_freq=/c\#core_freq=500' /boot/config.txt
-			sed --follow-symlinks -i '/^#sdram_freq=/d' /boot/config.txt # Not supported on RPi4, defaults to 3200 MHz
+			sed --follow-symlinks -i '/^#sdram_freq=/d' /boot/config.txt # Not supported on RPi 4, defaults to 3200 MHz
 			grep -q '^temp_limit=65$' /boot/config.txt && G_CONFIG_INJECT 'temp_limit=' 'temp_limit=75' /boot/config.txt # https://github.com/MichaIng/DietPi/issues/3019
 
 			# 400
@@ -85,6 +85,15 @@
 			else
 				sed --follow-symlinks -i '/^#arm_freq=/c\#arm_freq=1500' /boot/config.txt
 			fi
+
+		# RPi 5
+		elif (( $G_HW_MODEL == 5 ))
+		then
+			sed --follow-symlinks -i '/^#over_voltage=/c\#over_voltage=0' /boot/config.txt
+			sed --follow-symlinks -i '/^#arm_freq=/c\#arm_freq=2400' /boot/config.txt
+			sed --follow-symlinks -i '/^#core_freq=/c\#core_freq=910' /boot/config.txt
+			sed --follow-symlinks -i '/^#sdram_freq=/d' /boot/config.txt # Not supported on RPi 5, defaults to 4267 MHz
+			grep -q '^temp_limit=65$' /boot/config.txt && G_CONFIG_INJECT 'temp_limit=' 'temp_limit=75' /boot/config.txt # https://github.com/MichaIng/DietPi/issues/3019
 		fi
 	}
 

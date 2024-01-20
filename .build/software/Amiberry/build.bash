@@ -9,11 +9,11 @@ G_DIETPI-NOTIFY 2 "Amiberry will be built for platform: \e[33m$PLATFORM"
 # APT dependencies
 # - wget: Used for WHDLoad database update: https://github.com/BlitterStudio/amiberry/commit/d6c103e
 # - kbd: For "chvt" used in systemd service
-adeps_build=('autoconf' 'make' 'g++' 'pkg-config' 'libdrm-dev' 'libgbm-dev' 'libudev-dev' 'libxml2-dev' 'libpng-dev' 'libfreetype6-dev' 'libflac-dev' 'libmpg123-dev' 'libmpeg2-4-dev' 'libasound2-dev' 'libserialport-dev' 'wget' 'kbd')
-adeps=('libdrm2' 'libgl1-mesa-dri' 'libgbm1' 'libegl1' 'libudev1' 'libxml2' 'libpng16-16' 'libfreetype6' 'libmpg123-0' 'libmpeg2-4' 'libasound2' 'libserialport0' 'wget' 'kbd')
+adeps_build=('autoconf' 'make' 'cmake' 'g++' 'pkg-config' 'libdrm-dev' 'libgbm-dev' 'libudev-dev' 'libxml2-dev' 'libpng-dev' 'libfreetype6-dev' 'libflac-dev' 'libmpg123-dev' 'libmpeg2-4-dev' 'libasound2-dev' 'libserialport-dev' 'libportmidi-dev' 'wget' 'kbd')
+adeps=('libdrm2' 'libgl1-mesa-dri' 'libgbm1' 'libegl1' 'libudev1' 'libxml2' 'libpng16-16' 'libfreetype6' 'libmpg123-0' 'libmpeg2-4' 'libasound2' 'libserialport0' 'libportmidi0' 'wget' 'kbd')
 (( $G_DISTRO > 6 )) && adeps+=('libflac12') || adeps+=('libflac8')
-# - DispmanX deps for RPi
-[[ $PLATFORM == 'rpi'* ]] && adeps_build+=('libraspberrypi-dev') adeps+=('libraspberrypi0')
+# - Deps for RPi DispmanX builds
+[[ $PLATFORM == 'rpi'[1-5] || $PLATFORM == 'rpi'[345]'-64-dmx' ]] && adeps_build+=('libraspberrypi-dev') adeps+=('libraspberrypi0')
 # - Graphics rendering flags and deps
 (( $G_HW_ARCH == 10 )) && opengl_flags=('--disable-video-opengles2' '--enable-video-opengl') adeps_build+=('libgl1-mesa-dev') adeps+=('libgl1') || opengl_flags=('--enable-video-opengles2' '--disable-video-opengl') adeps_build+=('libgles2-mesa-dev') adeps+=('libgles2')
 
@@ -95,6 +95,9 @@ then
 	G_EXEC tar xf master.tar.gz
 	G_EXEC rm master.tar.gz
 	G_EXEC cd capsimg-master
+	# RISC-V: "checking build system type... ./config.guess: unable to guess system type"
+	G_EXEC curl -sSfo CAPSImg/config.guess 'https://git.savannah.gnu.org/gitweb/?p=config.git;a=blob_plain;f=config.guess;hb=HEAD'
+	G_EXEC curl -sSfo CAPSImg/config.sub 'https://git.savannah.gnu.org/gitweb/?p=config.git;a=blob_plain;f=config.sub;hb=HEAD'
 	G_EXEC_OUTPUT=1 G_EXEC ./bootstrap
 	G_EXEC_OUTPUT=1 G_EXEC ./configure CFLAGS='-g0 -O3' CXXFLAGS='-g0 -O3'
 	G_EXEC_OUTPUT=1 G_EXEC make "-j$(nproc)"
@@ -114,7 +117,10 @@ G_EXEC curl -sSfLO "https://github.com/BlitterStudio/amiberry/archive/v$v_ami.ta
 G_EXEC tar xf "v$v_ami.tar.gz"
 G_EXEC rm "v$v_ami.tar.gz"
 G_EXEC cd "amiberry-$v_ami"
-G_EXEC_OUTPUT=1 G_EXEC make "-j$(nproc)" "PLATFORM=$PLATFORM" # Passing flags here overrides some mandatory flags in the Makefile, where -O3 is set as well.
+# - RISC-V: Workaround for missing ld.gold: https://github.com/BlitterStudio/amiberry/issues/1213
+RISCV_LD=()
+(( $G_HW_ARCH == 11 )) && RISCV_LD=('USE_LD=bfd')
+G_EXEC_OUTPUT=1 G_EXEC make "-j$(nproc)" "PLATFORM=$PLATFORM" "${RISCV_LD[@]}" # Passing flags here overrides some mandatory flags in the Makefile, where -O3 is set as well.
 G_EXEC strip --remove-section=.comment --remove-section=.note amiberry
 
 # Prepare DEB package

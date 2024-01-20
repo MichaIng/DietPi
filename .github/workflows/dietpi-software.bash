@@ -49,7 +49,7 @@ do
 	esac
 	shift
 done
-[[ $DISTRO =~ ^('buster'|'bullseye'|'bookworm'|'trixie')$ ]] || { G_DIETPI-NOTIFY 1 "Invalid distro \"$DISTRO\" passed, aborting..."; exit 1; }
+[[ $DISTRO =~ ^('bullseye'|'bookworm'|'trixie')$ ]] || { G_DIETPI-NOTIFY 1 "Invalid distro \"$DISTRO\" passed, aborting..."; exit 1; }
 case $ARCH in
 	'armv6l') image="ARMv6-${DISTRO^}" arch=1;;
 	'armv7l') image="ARMv7-${DISTRO^}" arch=2;;
@@ -94,7 +94,7 @@ Process_Software()
 			30) aSERVICES[i]='nxserver' aTCP[i]='4000';;
 			32) aSERVICES[i]='ympd' aTCP[i]='1337';;
 			33) (( $arch == 10 )) && aSERVICES[i]='airsonic' aTCP[i]='8080' aDELAY[i]=30;; # Fails in QEMU-emulated containers, probably due to missing device access
-			35) aSERVICES[i]='logitechmediaserver' aTCP[i]='9000';;
+			35) aSERVICES[i]='logitechmediaserver' aTCP[i]='9000'; (( $arch < 10 )) && aDELAY[i]=60;;
 			36) aCOMMANDS[i]='squeezelite -t';; # Service listens on random high UDP port and exits if no audio device has been found, which does not exist on GitHub Actions runners, respectively within the containers
 			37) aSERVICES[i]='shairport-sync' aTCP[i]='5000';; # AirPlay 2 would be TCP port 7000
 			39) aSERVICES[i]='minidlna' aTCP[i]='8200';;
@@ -129,7 +129,7 @@ Process_Software()
 			85) aSERVICES[i]='nginx' aTCP[i]='80';;
 			#86) aSERVICES[i]='roon-extension-manager';; # Docker does not start in systemd containers (without dedicated network)
 			88) aSERVICES[i]='mariadb' aTCP[i]='3306';;
-			89) case $DISTRO in 'buster') aSERVICES[i]='php7.3-fpm';; 'bullseye') aSERVICES[i]='php7.4-fpm';; *) aSERVICES[i]='php8.2-fpm';; esac;;
+			89) case $DISTRO in 'bullseye') aSERVICES[i]='php7.4-fpm';; *) aSERVICES[i]='php8.2-fpm';; esac;;
 			91) aSERVICES[i]='redis-server' aTCP[i]='6379';;
 			93) aSERVICES[i]='pihole-FTL' aUDP[i]='53';;
 			94) aSERVICES[i]='proftpd' aTCP[i]='21';;
@@ -299,13 +299,13 @@ then
 	G_EXEC rm rootfs/etc/.dietpi_hw_model_identifier
 	G_EXEC touch rootfs/boot/{bcm-rpi-dummy.dtb,config.txt,cmdline.txt}
 	G_EXEC sed --follow-symlinks -i "/# Start DietPi-Software/iG_EXEC sed -i -e '/^G_HW_MODEL=/cG_HW_MODEL=$model' -e '/^G_HW_MODEL_NAME=/cG_HW_MODEL_NAME=\"RPi $model ($ARCH)\"' /boot/dietpi/.hw_model" rootfs/boot/dietpi/dietpi-login
-	G_EXEC curl -sSfo keyring.deb 'https://archive.raspberrypi.org/debian/pool/main/r/raspberrypi-archive-keyring/raspberrypi-archive-keyring_2021.1.1+rpt1_all.deb'
+	G_EXEC curl -sSfo keyring.deb 'https://archive.raspberrypi.com/debian/pool/main/r/raspberrypi-archive-keyring/raspberrypi-archive-keyring_2021.1.1+rpt1_all.deb'
 	G_EXEC dpkg --root=rootfs -i keyring.deb
 	G_EXEC rm keyring.deb
 	# Enforce Debian Trixie FFmpeg packages over RPi repo ones
 	[[ $DISTRO != 'trixie' ]] || cat << '_EOF_' > rootfs/etc/apt/preferences.d/dietpi-ffmpeg || exit 1
 Package: src:ffmpeg
-Pin: origin archive.raspberrypi.org
+Pin: origin archive.raspberrypi.com
 Pin-Priority: -1
 _EOF_
 fi
@@ -362,23 +362,6 @@ G_EXEC eval 'echo -e '\''[Service]\nPrivateUsers=0'\'' > rootfs/etc/systemd/syst
 G_EXEC eval 'echo -e '\''[Service]\nPrivateUsers=0'\'' > rootfs/etc/systemd/system/raspotify.service.d/dietpi-container.conf'
 G_EXEC eval 'echo -e '\''[Service]\nPrivateUsers=0'\'' > rootfs/etc/systemd/system/navidrome.service.d/dietpi-container.conf'
 G_EXEC eval 'echo -e '\''[Service]\nAmbientCapabilities='\'' > rootfs/etc/systemd/system/homebridge.service.d/dietpi-container.conf'
-
-# Workarounds for failing MariaDB install on Buster within GitHub Actions runner (both cannot be replicated on my test systems with and without QEMU):
-# - mysqld does not have write access if our symlink is in place, even that directory permissions are correct.
-# - Type=notify leads to a service start timeout while mysqld has actually fully started. However, with Type=exec, /etc/mysql/debian-start starts too soon after mysqld, so that the UNIX socket is not yet ready to listen. Hence add a second to wait for it.
-if [[ $DISTRO == 'buster' ]]
-then
-	G_EXEC sed --follow-symlinks -i '/# Start DietPi-Software/a\sed -i -e '\''s|rm -Rf /var/lib/mysql|rm -Rf /mnd/dietpi_userdata/mysql|'\'' -e '\''s|ln -s /mnt/dietpi_userdata/mysql /var/lib/mysql|ln -s /var/lib/mysql /mnt/dietpi_userdata/mysql|'\'' /boot/dietpi/dietpi-software' rootfs/boot/dietpi/dietpi-login
-	G_EXEC mkdir rootfs/etc/systemd/system/mariadb.service.d
-	cat << '_EOF_' > rootfs/etc/systemd/system/mariadb.service.d/dietpi-container.conf || exit 1
-[Service]
-Type=exec
-ExecStartPost=
-ExecStartPost=/bin/sleep 1
-ExecStartPost=/bin/sh -c "systemctl unset-environment _WSREP_START_POSITION"
-ExecStartPost=/etc/mysql/debian-start
-_EOF_
-fi
 
 # Workaround for failing 32-bit ARM Rust builds on ext4 in QEMU emulated container on 64-bit host: https://github.com/rust-lang/cargo/issues/9545
 (( $arch < 3 && $G_HW_ARCH > 9 )) && G_EXEC eval 'echo -e '\''tmpfs /mnt/dietpi_userdata tmpfs size=3G,noatime,lazytime\ntmpfs /root tmpfs size=3G,noatime,lazytime'\'' >> rootfs/etc/fstab'

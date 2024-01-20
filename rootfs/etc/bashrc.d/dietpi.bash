@@ -53,7 +53,7 @@
 	alias cpu='/boot/dietpi/dietpi-cpuinfo'
 	# - Optional DietPi software aliases
 	[[ -d '/mnt/dietpi_userdata/sonarr' || -d '/mnt/dietpi_userdata/radarr' || -d '/mnt/dietpi_userdata/lidarr' ]] && alias dietpi-arr_to_RAM='/boot/dietpi/misc/dietpi-arr_to_RAM'
-	command -v kodi > /dev/null && alias startkodi='/boot/dietpi/misc/start_kodi'
+	command -v kodi > /dev/null && alias startkodi='kodi --standalone'
 	[[ -f '/usr/games/opentyrian/run' ]] && alias opentyrian='/usr/games/opentyrian/run'
 	[[ -f '/mnt/dietpi_userdata/dxx-rebirth/run.sh' ]] && alias dxx-rebirth='/mnt/dietpi_userdata/dxx-rebirth/run.sh'
 	[[ -f '/var/www/owncloud/occ' ]] && alias occ='sudo -u www-data php /var/www/owncloud/occ'
