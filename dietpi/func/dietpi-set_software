@@ -613,11 +613,10 @@ deb $INPUT_MODE_VALUE $G_DISTRO_NAME-backports main contrib non-free' > /etc/apt
 - https://github.com/MichaIng/DietPi/issues/6676'; return 1; }
 
 		# Obtain required kernel packages
-		local image_arch=$(dpkg --print-architecture)
 		local kernel_version=$(uname -r)
 		local kernel_variant=${kernel_version##*-}
 		[[ $kernel_variant == "$kernel_version" ]] && kernel_variant='v6' # Old ARMv6 kernel has no dash-separated suffix
-		local kernel_package=
+		local kernel_package
 		case $kernel_variant in
 			'v6') kernel_package='linux-image-rpi-v6';;
 			'v7'|'v7+') kernel_package='linux-image-rpi-v7';;
@@ -633,44 +632,67 @@ deb $INPUT_MODE_VALUE $G_DISTRO_NAME-backports main contrib non-free' > /etc/apt
 		esac
 
 		G_WHIP_CHECKLIST_ARRAY=()
-		local status=
+		local image_arch=$(dpkg --print-architecture) to_install=() to_remove=()
 		if [[ $image_arch == 'armhf' ]]
 		then
-			dpkg-query -s 'linux-image-rpi-v6' &> /dev/null && status='on' || status='off'
-			[[ $kernel_package == 'linux-image-rpi-v6' ]] || G_WHIP_CHECKLIST_ARRAY+=('linux-image-rpi-v6' 'Raspberry Pi 1/Zero (1)' "$status")
-			dpkg-query -s 'linux-image-rpi-v7' &> /dev/null && status='on' || status='off'
-			[[ $kernel_package == 'linux-image-rpi-v7' ]] || G_WHIP_CHECKLIST_ARRAY+=('linux-image-rpi-v7' 'Raspberry Pi 2/3/Zero 2 32-bit' "$status")
-			dpkg-query -s 'linux-image-rpi-v7l' &> /dev/null && status='on' || status='off'
-			[[ $kernel_package == 'linux-image-rpi-v7l' ]] || G_WHIP_CHECKLIST_ARRAY+=('linux-image-rpi-v7l' 'Raspberry Pi 4/5 32-bit' "$status")
-		fi
-		dpkg-query -s 'linux-image-rpi-v8' &> /dev/null && status='on' || status='off'
-		[[ $kernel_package == 'linux-image-rpi-v8' ]] || G_WHIP_CHECKLIST_ARRAY+=('linux-image-rpi-v8' 'Raspberry Pi 2-5 64-bit' "$status")
-		dpkg-query -s 'linux-image-rpi-2712' &> /dev/null && status='on' || status='off'
-		[[ $kernel_package == 'linux-image-rpi-2712' || $image_arch == 'armhf' ]] || G_WHIP_CHECKLIST_ARRAY+=('linux-image-rpi-2712' 'Raspberry Pi 5 64-bit' "$status")
+			declare -A models=(
+				['linux-image-rpi-v6']='Raspberry Pi 1/Zero (1)'
+				['linux-image-rpi-v7']='Raspberry Pi 2/3/Zero 2'
+				['linux-image-rpi-v8']='Raspberry Pi 4/5'
+			)
+			if grep -q '^arm_64bit=1' /boot/config.txt
+			then
+				models['linux-image-rpi-v7']='Raspberry Pi 2 PCB v1.1'
+				models['linux-image-rpi-v8']='Raspberry Pi 2 PCB v1.2 and Raspberry Pi 3-5'
 
-		G_WHIP_CHECKLIST "Based on your currently used kernel variant, the $kernel_package package will be kept/installed.
-\nOptionally, you can select/deselect additional kernel packages below, in case you want to boot this image from another Raspberry Pi model as well.
-\nNote the following:
-- The Raspberry Pi 4 and 5 models use the 64-bit kernel by default, even when using a 32-bit image, unless you explicitly define arm_64bit=0 in /boot/config.txt.
-- All other Raspberry Pi models use the 32-bit kernel on 32-bit images, and the 64-bit kernel on 64-bit images, or when you explicitly define arm_64bit=1 in /boot/config.txt." || exit 1
+			elif grep -q '^arm_64bit=0' /boot/config.txt
+			then
+				unset -v 'models[linux-image-rpi-v8]'
+				models['linux-image-rpi-v7l']='Raspberry Pi 4/5'
+			fi
 
-		local i j to_install=() to_remove=()
-		for i in 'linux-image-rpi-v6' 'linux-image-rpi-v7' 'linux-image-rpi-v7l' 'linux-image-rpi-v8' 'linux-image-rpi-2712'
-		do
-			[[ $i == "$kernel_package" ]] && continue
-			for j in $G_WHIP_RETURNED_VALUE
+			local i status
+			for i in "${!models[@]}"
 			do
-				[[ $j == "$i" ]] || continue
-				# Add foreign arm64 arch for 64-bit kernel until it has been added to the armhf repo: https://github.com/RPi-Distro/repo/issues/356
-				[[ $j == 'linux-image-rpi-v8' && $image_arch == 'armhf' ]] && G_EXEC dpkg --add-architecture arm64
-				to_install+=("$i")
-				continue 2
+				[[ $i == "$kernel_package" ]] && continue
+				dpkg-query -s "$i" &> /dev/null && status='on' || status='off'
+				G_WHIP_CHECKLIST_ARRAY+=("$i" "${models[$i]}" "$status")
 			done
-			to_remove+=("$i")
-		done
 
-		# Add foreign arm64 arch for 64-bit kernel until it has been added to the armhf repo: https://github.com/RPi-Distro/repo/issues/356
-		[[ $kernel_package == 'linux-image-rpi-v8' && $image_arch == 'armhf' ]] && G_EXEC dpkg --add-architecture arm64
+			G_WHIP_CHECKLIST "Based on your currently used kernel variant, the following package will be kept/installed:
+\n- $kernel_package for ${models[$kernel_package]}
+\nOptionally, you can select/deselect additional kernel packages below, in case you want to boot this image from other Raspberry Pi models:" || exit 1
+
+			local j
+			for i in "${!models[@]}"
+			do
+				[[ $i == "$kernel_package" ]] && continue
+				for j in $G_WHIP_RETURNED_VALUE
+				do
+					[[ $j == "$i" ]] || continue
+					# Add foreign arm64 arch for 64-bit kernel until it has been added to the armhf repo: https://github.com/RPi-Distro/repo/issues/356
+					[[ $j == 'linux-image-rpi-v8' ]] && G_EXEC dpkg --add-architecture arm64
+					to_install+=("$i")
+					continue 2
+				done
+				to_remove+=("$i")
+			done
+
+			# Add foreign arm64 arch for 64-bit kernel until it has been added to the armhf repo: https://github.com/RPi-Distro/repo/issues/356
+			[[ $kernel_package == 'linux-image-rpi-v8' ]] && G_EXEC dpkg --add-architecture arm64
+		else
+			declare -A models=(
+				['linux-image-rpi-v8']='Raspberry Pi 2-5'
+				['linux-image-rpi-2712']='Raspberry Pi 5 only'
+			)
+			local optional='linux-image-rpi-v8'
+			[[ $kernel_package == 'linux-image-rpi-v8' ]] && local optional='linux-image-rpi-2712'
+
+			G_WHIP_BUTTON_OK_TEXT='Yes' G_WHIP_BUTTON_CANCEL_TEXT='No' G_WHIP_YESNO "Based on your currently used kernel variant, the following package will be kept/installed:
+\n- $kernel_package for ${models[$kernel_package]}
+\nDo you want to keep/install the following additional kernel package, to boot this image from other Raspberry Pi models?
+\n- $optional for ${models[$optional]}" && to_install=("$optional") || to_remove=("$optional")
+		fi
 
 		G_AGI "$kernel_package" "${to_install[@]}" raspi-firmware raspi-utils
 		G_AGP "${to_remove[@]}" raspberrypi-kernel raspberrypi-headers-kernel raspberrypi-bootloader libraspberrypi-bin libraspberrypi0
