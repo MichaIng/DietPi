@@ -51,7 +51,6 @@
 	alias dietpi-vpn='/boot/dietpi/dietpi-vpn'
 	alias dietpi-ddns='/boot/dietpi/dietpi-ddns'
 	alias cpu='/boot/dietpi/dietpi-cpuinfo'
- 	alias dietpi-troubleshoot="/boot/dietpi/func/dietpi-troubleshoot"
 	# - Optional DietPi software aliases
 	[[ -d '/mnt/dietpi_userdata/sonarr' || -d '/mnt/dietpi_userdata/radarr' || -d '/mnt/dietpi_userdata/lidarr' ]] && alias dietpi-arr_to_RAM='/boot/dietpi/misc/dietpi-arr_to_RAM'
 	command -v kodi > /dev/null && alias startkodi='kodi --standalone'
