@@ -292,7 +292,6 @@ Available commands:
 		aSOFTWARE_CATX[$software_id]=1
 		aSOFTWARE_DOCS[$software_id]='https://dietpi.com/docs/software/remote_desktop/#tigervnc-server'
 		aSOFTWARE_DEPS[$software_id]='desktop'
-		aSOFTWARE_CONFLICTS[$software_id]='120'
 		#------------------
 		software_id=29
 		aSOFTWARE_NAME[$software_id]='XRDP'
@@ -309,16 +308,6 @@ Available commands:
 		aSOFTWARE_DEPS[$software_id]='desktop'
 		# - RISC-V: No package: https://downloads.nomachine.com/
 		aSOFTWARE_AVAIL_G_HW_ARCH[$software_id,11]=0
-		#------------------
-		software_id=120
-		aSOFTWARE_NAME[$software_id]='RealVNC Server'
-		aSOFTWARE_DESC[$software_id]='desktop for remote connection'
-		aSOFTWARE_CATX[$software_id]=1
-		aSOFTWARE_DOCS[$software_id]='https://dietpi.com/docs/software/remote_desktop/#realvnc-server'
-		aSOFTWARE_DEPS[$software_id]='desktop'
-		aSOFTWARE_CONFLICTS[$software_id]='28'
-		# RPi only (archive.raspberrypi.com repo, libraspberrypi0 dependency, license)
-		(( $G_HW_MODEL > 9 )) && aSOFTWARE_AVAIL_G_HW_MODEL[$software_id,$G_HW_MODEL]=0
 
 		# Media Systems
 		#--------------------------------------------------------------------------------
@@ -7100,20 +7089,11 @@ _EOF_
 			local apackages=()
 			(( $G_DISTRO > 6 )) && apackages=('tigervnc-tools')
 			G_AGI tigervnc-standalone-server tigervnc-scraping-server "${apackages[@]}"
-		fi
 
-		if To_Install 120 # RealVNC Server
-		then
-			G_AGI realvnc-vnc-server libraspberrypi0 # Depends on libbcm_host.so but does not pull libraspberrypi0 as dependency
-		fi
-
-		# TigerVNC/RealVNC Server - Shared setup
-		if (( ${aSOFTWARE_INSTALL_STATE[28]} == 1 || ${aSOFTWARE_INSTALL_STATE[120]} == 1 ))
-		then
 			# Service
 			cat << '_EOF_' > /etc/systemd/system/vncserver.service
 [Unit]
-Description=VNC Server (DietPi)
+Description=TigerVNC Server (DietPi)
 Before=xrdp.service xrdp-sesman.service
 Wants=network-online.target
 After=network-online.target
@@ -7131,28 +7111,9 @@ WantedBy=multi-user.target
 _EOF_
 			aSTART_SERVICES+=('vncserver')
 
-			# RealVNC: Assure that its services are disabled when ours is enabled
-			(( ${aSOFTWARE_INSTALL_STATE[120]} == 1 )) && G_EXEC systemctl --no-reload disable vncserver-virtuald vncserver-x11-serviced
-
+			# Startup script
 			cat << '_EOF_' > /usr/local/bin/vncserver
 #!/bin/dash
-
-if [ -f '/usr/bin/vncserver-virtual' ]
-then
-	echo '[  OK  ] RealVNC detected'
-	FP_BINARY='/usr/bin/vncserver-virtual -Authentication VncAuth'
-	FP_SHARED='exec /usr/bin/vncserver-x11 -service -Authentication VncAuth'
-
-elif [ -f '/usr/bin/tigervncserver' ]
-then
-	echo '[  OK  ] TigerVNC detected'
-	FP_BINARY='/usr/bin/tigervncserver'
-	[ -f '/usr/bin/X0tigervnc' ] && FP_SHARED='/usr/bin/X0tigervnc' || FP_SHARED='/usr/bin/x0tigervncserver'
-	FP_SHARED="$FP_SHARED -display :0  -rfbauth $HOME/.vnc/passwd"
-else
-	echo '[FAILED] No supported VNC server installed'
-	exit 1
-fi
 
 case "$1" in
 
@@ -7165,7 +7126,7 @@ case "$1" in
 			do
 				until pgrep '^X' > /dev/null 2>&1; do sleep 1; done
 				echo '[ INFO ] Connecting to shared desktop'
-				$FP_SHARED
+				/usr/bin/X0tigervnc -display :0  -rfbauth "$HOME/.vnc/passwd"
 				sleep 2
 				pgrep '^X' > /dev/null 2>&1 && exit 1
 				echo '[ INFO ] X server stopped, waiting for next session...'
@@ -7177,9 +7138,9 @@ case "$1" in
 			WIDTH=$(sed -n '/^[[:blank:]]*SOFTWARE_VNCSERVER_WIDTH=/{s/^[^=]*=//p;q}' /boot/dietpi.txt)
 			HEIGHT=$(sed -n '/^[[:blank:]]*SOFTWARE_VNCSERVER_HEIGHT=/{s/^[^=]*=//p;q}' /boot/dietpi.txt)
 			DEPTH=$(sed -n '/^[[:blank:]]*SOFTWARE_VNCSERVER_DEPTH=/{s/^[^=]*=//p;q}' /boot/dietpi.txt)
-			echo "[ INFO ] Starting virtual desktop at display :${DISPLAY:-1} in ${WIDTH:-1280}x${HEIGHT:-720}x${DEPTH:-16}"
+			echo "[ INFO ] Starting virtual desktop at display :${DISPLAY:=1} in ${WIDTH:=1280}x${HEIGHT:=720}x${DEPTH:=16}"
 			export SHELL='/bin/bash'
-			exec $FP_BINARY ":${DISPLAY:-1}" -geometry "${WIDTH:-1280}x${HEIGHT:-720}" -depth "${DEPTH:-16}"
+			exec /usr/bin/tigervncserver ":$DISPLAY" -geometry "${WIDTH}x$HEIGHT" -depth "$DEPTH"
 		fi
 	;;
 
@@ -7188,13 +7149,13 @@ case "$1" in
 		if grep -q '^[[:blank:]]*SOFTWARE_VNCSERVER_SHARE_DESKTOP=1' /boot/dietpi.txt
 		then
 			echo '[ INFO ] Disconnecting from shared desktop'
-			killall -qw vncserver-x11-core x0tigervncserver X0tigervnc
+			killall -qw X0tigervnc
 
 		# Virtual desktop mode
 		else
 			DISPLAY=$(sed -n '/^[[:blank:]]*SOFTWARE_VNCSERVER_DISPLAY_INDEX=/{s/^[^=]*=//p;q}' /boot/dietpi.txt)
-			echo "[ INFO ] Stopping virtual desktop at display :${DISPLAY:-1}"
-			$FP_BINARY -kill ":${DISPLAY:-1}"
+			echo "[ INFO ] Stopping virtual desktop at display :${DISPLAY:=1}"
+			/usr/bin/tigervncserver -kill ":$DISPLAY"
 		fi
 	;;
 
@@ -7209,27 +7170,17 @@ exit 0
 _EOF_
 			G_EXEC chmod +x /usr/local/bin/vncserver
 
-			# TigerVNC: Permit remote connections which implies TLSVnc authentications being enabled additionally
+			# Permit remote connections which implies TLSVnc authentications being enabled additionally
 			# shellcheck disable=SC2016
 			(( ${aSOFTWARE_INSTALL_STATE[28]} == 1 )) && GCI_PRESERVE=1 G_CONFIG_INJECT '\$localhost[[:blank:]]*=' '$localhost = "no";' /etc/tigervnc/vncserver-config-defaults
 
-			# TigerVNC: Set control + read-only passwords
-			if [[ ${aSOFTWARE_INSTALL_STATE[28]} == 1 && ! -f '/root/.vnc/passwd' ]]
+			# Set control + read-only passwords
+			if [[ ! -f '/root/.vnc/passwd' ]]
 			then
 				G_EXEC mkdir -p /root/.vnc
 				tigervncpasswd -f <<< "$GLOBAL_PW
 $GLOBAL_PW" > /root/.vnc/passwd
 				G_EXEC chmod 600 /root/.vnc/passwd
-			fi
-
-			# RealVNC: Set virtual + shared desktop passwords, repeat virtual password command two times: https://github.com/MichaIng/DietPi/pull/4679#issuecomment-908196511
-			if [[ ${aSOFTWARE_INSTALL_STATE[120]} == 1 && ! -s '/root/.vnc/config.d/Xvnc' ]]
-			then
-				vncpasswd -virtual <<< "$GLOBAL_PW
-$GLOBAL_PW"
-				vncpasswd -service <<< "$GLOBAL_PW
-$GLOBAL_PW"
-				[[ -f '/root/.vnc/config.d/.Xvnc-v5-marker' ]] || > /root/.vnc/config.d/.Xvnc-v5-marker
 			fi
 		fi
 
@@ -13128,13 +13079,9 @@ If no WireGuard (auto)start is included, but you require it, please do the follo
 			Remove_Database freshrss
 		fi
 
-		if To_Uninstall 28 || To_Uninstall 120 # TigerVNC/RealVNC
+		if To_Uninstall 28 # TigerVNC
 		then
-			# RealVNC services
-			Remove_Service vncserver-x11-serviced
-			Remove_Service vncserver-virtuald
-
-			G_AGP 'tigervnc-*' x11vnc realvnc-vnc-server
+			G_AGP 'tigervnc-*' x11vnc
 
 			Remove_Service vncserver
 			[[ -f '/usr/local/bin/vncserver' ]] && G_EXEC rm /usr/local/bin/vncserver
