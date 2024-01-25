@@ -675,7 +675,10 @@ setenv rootuuid "true"' /boot/boot.cmd
 					40|44) G_CONFIG_INJECT 'overlay_prefix=' 'overlay_prefix=sun50i-a64' /boot/dietpiEnv.txt;;
 					45) G_CONFIG_INJECT 'overlay_prefix=' 'overlay_prefix=sun50i-h6' /boot/dietpiEnv.txt;;
 					57|65|67) G_CONFIG_INJECT 'overlay_prefix=' 'overlay_prefix=sun50i-h5' /boot/dietpiEnv.txt;;
-					83) G_CONFIG_INJECT 'overlay_prefix=' 'overlay_prefix=sun50i-h616' /boot/dietpiEnv.txt; armbian_repo=0;;
+					83)
+						G_CONFIG_INJECT 'overlay_prefix=' 'overlay_prefix=sun50i-h616' /boot/dietpiEnv.txt
+						(( $HW_VARIANT == 2 )) && G_CONFIG_INJECT 'fdtfile=' 'fdtfile=allwinner/sun50i-h618-orangepi-zero3.dtb' /boot/dietpiEnv.txt
+					;;
 					*) :;;
 				esac
 				case $G_HW_MODEL in
@@ -904,16 +907,9 @@ _EOF_
 				'usbutils'		# "lsusb", used by DietPi-Software + DietPi-BugReport
 			)
 
-			# Skip entropy daemon on all devices but those with old kernel
-			if [[ ! $G_HW_MODEL =~ ^(61|62|70)$ ]] # NanoPi M2/T2/Fire2, NanoPi M3/T3/Fire3, Sparky SBC
+			# Install entropy daemon on SBCs with ancient kernel: NanoPi M2/T2/Fire2, NanoPi M3/T3/Fire3, Sparky SBC
+			if [[ ! $G_HW_MODEL =~ ^(61|62|70)$ ]] # 
 			then
-				:
-
-			# Entropy daemon: Use modern rng-tools5 on all devices where it has been proven to work, else haveged: https://github.com/MichaIng/DietPi/issues/2806
-			elif [[ $G_HW_MODEL -lt 10 || $G_HW_MODEL =~ ^(14|15|16|24|29|42|46|58|68|72|74|76|78|79|80|81|82|83|84|85|86)$ ]] # RPi, S922X, Odroid C4, RK3399 - 47 NanoPi R4S, Radxa Zero, NanoPi R5S/R5C, ROCK 5B, NanoPi 6, Orange Pi 5, VisionFive 2, Orange Pi 5 Plus
-			then
-				aPACKAGES_REQUIRED_INSTALL+=('rng-tools5')
-			else
 				aPACKAGES_REQUIRED_INSTALL+=('haveged')
 				# https://github.com/MichaIng/DietPi/issues/4710
 				if (( $G_HW_ARCH == 2 ))
@@ -1055,6 +1051,7 @@ _EOF_
 				78) model='rock-5b' kernel='rk35xx' branch='legacy';;
 				80) model='orangepi5' kernel='rk35xx' branch='legacy';;
 				82) model='orangepi5-plus' kernel='rk35xx' branch='legacy';;
+				83) model='orangepizero3' kernel='sunxi64';;
 				85) model='rock-5a' kernel='rk35xx' branch='legacy';;
 				86) model='tinkerboard-2' kernel='rockchip64';;
 				87) model='orangepi3b' kernel='rockchip64'; branch='edge';;
@@ -1108,11 +1105,21 @@ _EOF_
 			#	G_EXEC_OUTPUT=1 G_EXEC dpkg -i package1.deb package2.deb
 			#	G_EXEC rm package1.deb package2.deb
 			#fi
-			G_AGI linux-{image,dtb}-"$branch-$kernel" "linux-u-boot-$model-$branch"
+			# Orange Pi Zero 3 1.5G RAM variant: Install original Orange Pi bootloader
+			if (( $G_HW_MODEL == 83 )) && (( $HW_VARIANT == 2 ))
+			then
+				G_EXEC_OUTPUT=1 G_EXEC curl -fo package.deb 'https://dietpi.com/downloads/binaries/linux-u-boot-orangepizero3-next_1.5G.deb'
+				G_EXEC_OUTPUT=1 G_EXEC dpkg -i package.deb
+				G_AGI linux-{image,dtb}-"$branch-$kernel" ./package.deb
+				G_EXEC rm package.deb
+			else
+				G_AGI linux-{image,dtb}-"$branch-$kernel" "linux-u-boot-$model-$branch"
+			fi
 			# Cleanup
 			[[ $G_HW_MODEL != 10 && -f '/boot/uImage' ]] && G_EXEC rm /boot/uImage
 			[[ -f '/boot/.next' ]] && G_EXEC rm /boot/.next
 			[[ -f '/boot/armbianEnv.txt' ]] && G_EXEC rm /boot/armbianEnv.txt
+			[[ -f '/boot/orangepiEnv.txt' ]] && G_EXEC rm /boot/orangepiEnv.txt
 			[[ -f '/boot/uEnv.txt' ]] && G_EXEC rm /boot/uEnv.txt
 			# Compile U-Boot script
 			[[ -f '/boot/boot.cmd' ]] && G_EXEC mkimage -C none -A "$arch" -T script -d /boot/boot.cmd /boot/boot.scr
@@ -1166,6 +1173,24 @@ _EOF_
 				G_EXEC dd if=/dev/zero "of=$BOOT_DEVICE" bs=1K count=1023 seek=1 conv=notrunc,fdatasync
 				G_EXEC dd if=u-boot "of=$BOOT_DEVICE" bs=1K seek=8 conv=notrunc,fdatasync
 				G_EXEC rm u-boot
+
+			# Orange Pi Zero 3: Apply device tree adjustment for Ethernet adapter
+			elif (( $G_HW_MODEL == 83 ))
+			then		
+				# shellcheck disable=SC2016
+				sed --follow-symlinks -i -e '/^setenv bootargs /s/"$/ ethernet_phy=${ethernet_phy}"/' -e '/^# Boot/i\
+if test "${ethernet_phy}" = "rtl8211f"; then\
+	echo "Ethernet adapter: ${ethernet_phy}, adjusting device tree ..."\
+	fdt set "/soc/ethernet@5020000" "allwinner,rx-delay-ps" "<3100>"\
+	fdt set "/soc/ethernet@5020000" "allwinner,tx-delay-ps" "<700>"\
+elif test "${ethernet_phy}" = "yt8531c"; then\
+	echo "Ethernet adapter: ${ethernet_phy}, adjusting device tree ..."\
+	fdt set "/soc/ethernet@5020000" "allwinner,rx-delay-ps" "<0>"\
+	fdt set "/soc/ethernet@5020000" "allwinner,tx-delay-ps" "<600>"\
+else\
+	echo "Ethernet adapter: \\"${ethernet_phy}\\""\
+fi\
+' /boot/boot.cmd
 			fi
 
 			# Skip creating kernel symlinks and remove existing ones
@@ -1260,58 +1285,6 @@ _EOF_
 			G_EXEC sed --follow-symlinks -i "s/root=[^[:blank:]]*/root=PARTUUID=$(findmnt -Ufnro PARTUUID -M /)/" /boot/extlinux/extlinux.conf
 			G_EXEC sed --follow-symlinks -i "s/rootfstype=[^[:blank:]]*/rootfstype=$(findmnt -Ufnro FSTYPE -M /)/" /boot/extlinux/extlinux.conf
 			aPACKAGES_REQUIRED_INSTALL+=('linux-image-star64' 'libubootenv-tool')
-
-		# Orange Pi Zero 3
-		elif (( $G_HW_MODEL == 83 ))
-		then
-			# Install firmware and initramfs
-			G_EXEC curl -fo package1.deb 'https://dietpi.com/downloads/binaries/orangepi-firmware.deb'
-			G_AGI initramfs-tools u-boot-tools ./package1.deb zstd
-			[[ ${zstd[0]} ]] && G_CONFIG_INJECT 'COMPRESS=' 'COMPRESS=zstd' /etc/initramfs-tools/initramfs.conf
-
-			# Install kernel and U-Boot packages
-			G_EXEC_OUTPUT=1 G_EXEC curl -fo package1.deb 'https://dietpi.com/downloads/binaries/linux-image-next-sun50iw9.deb'
-			G_EXEC_OUTPUT=1 G_EXEC curl -fo package2.deb 'https://dietpi.com/downloads/binaries/linux-dtb-next-sun50iw9.deb'
-			local variant=
-			(( $HW_VARIANT == 2 )) && variant='_1.5G'
-			G_EXEC_OUTPUT=1 G_EXEC curl -fo package3.deb "https://dietpi.com/downloads/binaries/linux-u-boot-orangepizero3-next$variant.deb"
-			G_EXEC_OUTPUT=1 G_EXEC dpkg -i package1.deb package2.deb package3.deb
-			G_EXEC rm package1.deb package2.deb package3.deb
-			aPACKAGES_REQUIRED_INSTALL+=('linux-image-next-sun50iw9' 'linux-dtb-next-sun50iw9' 'linux-u-boot-orangepizero3-next')
-
-			# Flash U-Boot
-			# shellcheck disable=SC1091
-			. /usr/lib/u-boot/platform_install.sh
-			# shellcheck disable=SC2154
-			write_uboot_platform "$DIR" "$BOOT_DEVICE"
-
-			# Apply device tree adjustment for Ethernet adapter
-			# shellcheck disable=SC2016
-			sed --follow-symlinks -i -e '/^setenv bootargs /s/"$/ ethernet_phy=${ethernet_phy}"/' -e '/^# Boot/i\
-if test "${ethernet_phy}" = "rtl8211f"; then\
-	echo "Ethernet adapter: ${ethernet_phy}, adjusting device tree ..."\
-	fdt set "/soc/ethernet@5020000" "allwinner,rx-delay-ps" "<3100>"\
-	fdt set "/soc/ethernet@5020000" "allwinner,tx-delay-ps" "<700>"\
-elif test "${ethernet_phy}" = "yt8531c"; then\
-	echo "Ethernet adapter: ${ethernet_phy}, adjusting device tree ..."\
-	fdt set "/soc/ethernet@5020000" "allwinner,rx-delay-ps" "<0>"\
-	fdt set "/soc/ethernet@5020000" "allwinner,tx-delay-ps" "<600>"\
-else\
-	echo "Ethernet adapter: \\"${ethernet_phy}\\""\
-fi\
-' /boot/boot.cmd
-			# Compile U-Boot script
-			G_EXEC mkimage -C none -A arm64 -T script -d /boot/boot.cmd /boot/boot.scr
-
-			# Remove obsolete combined keyring
-			[[ -f '/etc/apt/trusted.gpg' ]] && G_EXEC rm /etc/apt/trusted.gpg
-			[[ -f '/etc/apt/trusted.gpg~' ]] && G_EXEC rm '/etc/apt/trusted.gpg~'
-
-			# Remove obsolete components from Armbian list and connect via HTTPS
-			G_EXEC rm -Rf /etc/apt/sources.list.d/{,.??,.[^.]}*
-
-			# Cleanup
-			[[ -f '/boot/orangepiEnv.txt' ]] && G_EXEC rm /boot/orangepiEnv.txt
 
 		# Sparky SBC
 		elif (( $G_HW_MODEL == 70 ))
