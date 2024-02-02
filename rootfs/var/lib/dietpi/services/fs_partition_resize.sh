@@ -59,7 +59,7 @@
 		sfdisk --no-reread --no-tell-kernel --delete "$ROOT_DRIVE" "${SETUP_PART: -1}"
 	else
 		echo "[ INFO ] No DietPi setup partition found, last partition is: \"$LAST_PART\""
-		lsblk -po NAME,LABEL,SIZE,TYPE,FSTYPE,MOUNTPOINTS "$ROOT_DRIVE"
+		lsblk -po NAME,LABEL,SIZE,TYPE,FSTYPE,MOUNTPOINT "$ROOT_DRIVE"
 	fi
 
 	# Only increase partition size if not yet done on first boot
