@@ -322,14 +322,35 @@ _EOF_
 		G_WHIP_BUTTON_CANCEL_TEXT='Exit'
 		G_WHIP_DEFAULT_ITEM=0
 		case $G_HW_ARCH in
-			1) G_WHIP_MENU_ARRAY=('0' ': Raspberry Pi (all models)');;
+			1)
+				if findmnt -M /boot/firmware &> /dev/null
+				then
+					G_WHIP_MENU_ARRAY=(
+						'0' ': Raspberry Pi (all models)'
+						'1' ': Raspberry Pi 1+Zero (1)'
+						'2' ': Raspberry Pi 2+3'
+						'4' ': Raspberry Pi 4+5'
+					)
+				else
+					G_WHIP_MENU_ARRAY=('0' ': Raspberry Pi 1-4')
+				fi
+			;;
 			2|3)
 				userland_arch=$(dpkg --print-architecture)
 				G_DIETPI-NOTIFY 2 "Detected target userland/OS architecture: $userland_arch"
 				if [[ $userland_arch == 'armhf' ]]
 				then
-					G_WHIP_MENU_ARRAY=(
-						'0' ': Raspberry Pi 2 - 4'
+					if findmnt -M /boot/firmware &> /dev/null
+					then
+						G_WHIP_MENU_ARRAY=(
+							'0' ': Raspberry Pi 2-5'
+							'2' ': Raspberry Pi 2+3'
+							'4' ': Raspberry Pi 4+5'
+						)
+					else
+						G_WHIP_MENU_ARRAY=('0' ': Raspberry Pi 2-4')
+					fi
+					G_WHIP_MENU_ARRAY+=(
 						'10' ': Odroid C1'
 						'11' ': Odroid XU3/XU4/MC1/HC1/HC2'
 						'13' ': Odroid U3'
@@ -347,8 +368,17 @@ _EOF_
 
 				elif [[ $userland_arch == 'arm64' ]]
 				then
-					G_WHIP_MENU_ARRAY=(
-						'0' ': Raspberry Pi 2 (v1.2) - 4'
+					if findmnt -M /boot/firmware &> /dev/null
+					then
+						G_WHIP_MENU_ARRAY=(
+							'0' ': Raspberry Pi 2-5 (page size: 4k and 16k)'
+							'4' ': Raspberry Pi 2-5 (page size: 4k only)'
+							'5' ': Raspberry Pi 5 (page size: 16k only)'
+						)
+					else
+						G_WHIP_MENU_ARRAY=('0' ': Raspberry Pi 2-4')
+					fi
+					G_WHIP_MENU_ARRAY+=(
 						'12' ': Odroid C2'
 						'15' ': Odroid N2'
 						'16' ': Odroid C4/HC4'
@@ -558,10 +588,17 @@ _EOF_
 		local armbian_repo=0
 		if (( $G_HW_MODEL < 10 ))
 		then
+			if findmnt -M /boot/firmware &> /dev/null
+			then
+				G_EXEC ln -sf firmware/cmdline.txt /boot/cmdline.txt
+				G_EXEC ln -sf firmware/config.txt /boot/config.txt
+				G_EXEC mv "DietPi-$G_GITBRANCH/.build/images/RPi/config.txt" /boot/firmware/
+			else
+				G_EXEC mv "DietPi-$G_GITBRANCH/.build/images/RPi/config.txt" /boot/
+			fi
 			echo "root=PARTUUID=$(findmnt -Ufnro PARTUUID -M /) rootfstype=$(findmnt -Ufnro FSTYPE -M /) rootwait net.ifnames=0 logo.nologo console=serial0,115200 console=tty1" > /boot/cmdline.txt
-			G_EXEC mv "DietPi-$G_GITBRANCH/.build/images/RPi/config.txt" /boot/
 			# Boot in 64-bit mode if this is a 64-bit image
-			[[ $G_HW_ARCH == 3 ]] && G_CONFIG_INJECT 'arm_64bit=' 'arm_64bit=1' /boot/config.txt
+			[[ $userland_arch == 'arm64' ]] && G_CONFIG_INJECT 'arm_64bit=' 'arm_64bit=1' /boot/config.txt
 
 		elif [[ $G_HW_MODEL =~ ^(10|11)$ ]]
 		then
@@ -1192,7 +1229,34 @@ _EOF_
 			(( $G_HW_ARCH == 3 )) || a32bit=('raspi-copies-and-fills')
 			# Install our own raspberrypi-sys-mods
 			G_EXEC curl -sSfO 'https://dietpi.com/downloads/binaries/raspberrypi-sys-mods.deb'
-			G_AGI raspberrypi-bootloader raspberrypi-kernel libraspberrypi0 libraspberrypi-bin ./raspberrypi-sys-mods.deb raspberrypi-archive-keyring "${a32bit[@]}"
+			if findmnt -M /boot/firmware &> /dev/null
+			then
+				local kernel=()
+				case $G_HW_MODEL in
+					0)
+						[[ $userland_arch == 'arm64' ]] || G_EXEC dpkg --add-architecture arm64
+						case $G_HW_ARCH in
+							1) kernel=('linux-image-rpi-v6' 'linux-image-rpi-v7' 'linux-image-rpi-v8');;
+							*)
+								if [[ $userland_arch == 'armhf' ]]
+								then
+									kernel=('linux-image-rpi-v7' 'linux-image-rpi-v8')
+								else
+									kernel=('linux-image-rpi-v8' 'linux-image-rpi-2712')
+								fi
+							;;
+						esac
+					;;
+					1) kernel=('linux-image-rpi-v6');;
+					2) kernel=('linux-image-rpi-v7');;
+					4) kernel=('linux-image-rpi-v8');;
+					5) kernel=('linux-image-rpi-2712');;
+					*) { G_DIETPI-NOTIFY 1 "Unexpected hardware model passed: \"$G_HW_MODEL\". Aborting ..."; exit 1; };;
+				esac
+				G_AGI raspi-firmware "${kernel[@]}" raspi-utils ./raspberrypi-sys-mods.deb raspberrypi-archive-keyring "${a32bit[@]}"
+			else
+				G_AGI raspberrypi-bootloader raspberrypi-kernel libraspberrypi0 libraspberrypi-bin ./raspberrypi-sys-mods.deb raspberrypi-archive-keyring "${a32bit[@]}"
+			fi
 			G_EXEC rm raspberrypi-sys-mods.deb
 
 			# https://github.com/RPi-Distro/raspberrypi-sys-mods/pull/60
@@ -2008,49 +2072,49 @@ _EOF_'
 			/boot/dietpi/func/dietpi-set_hardware rpi-camera disable
 			/boot/dietpi/func/dietpi-set_hardware rpi-codec disable
 
-			# Update USBridgeSig Ethernet driver via postinst kernel script, until it has been merged into official RPi kernel: https://github.com/allocom/USBridgeSig/tree/master/ethernet
-			cat << '_EOF_' > /etc/kernel/postinst.d/dietpi-USBridgeSig
-#!/bin/bash
-# Only available for v7+
-[[ $1 == *'-v7+' ]] || exit 0
-# Only reasonable for USBridgeSig = CM 3+
-grep -q '^Revision.*10.$' /proc/cpuinfo || exit 0
-echo "[ INFO ] Updating ASIX AX88179 driver for kernel $1 with ARM-optimised build"
-echo '[ INFO ] - by Allo: https://github.com/allocom/USBridgeSig/tree/master/ethernet'
-echo '[ INFO ] Estimating required module layout...'
-module_layout=$(modprobe --dump-modversions /lib/modules/$1/kernel/drivers/net/usb/asix.ko | mawk '/module_layout/{print $1;exit}') || exit 0
-echo '[ INFO ] Downloading stable branch driver...'
-if ! curl -#fL "http://3.230.113.73:9011/Allocom/USBridgeSig/stable_rel/rpi-usbs-$1/ax88179_178a.ko" -o /tmp/ax88179_178a.ko ||
-	[[ $module_layout != $(modprobe --dump-modversions /tmp/ax88179_178a.ko | mawk '/module_layout/{print $1;exit}') ]]
-then
-	echo '[ INFO ] No matching stable branch driver found, trying master branch driver...'
-	if ! curl -#fL "http://3.230.113.73:9011/Allocom/USBridgeSig/rpi-usbs-$1/ax88179_178a.ko" -o /tmp/ax88179_178a.ko ||
-		[[ $module_layout != $(modprobe --dump-modversions /tmp/ax88179_178a.ko | mawk '/module_layout/{print $1;exit}') ]]
-	then
-		echo '[ INFO ] No matching driver found, cleaning up and aborting...'
-		rm -fv /tmp/ax88179_178a.ko || :
-		echo '[ INFO ] The default RPi kernel driver will be used instead, which might result in pops and ticks in your audio stream. If so, please try to rerun this script later:'
-		echo " - /etc/kernel/postinst.d/dietpi-USBridgeSig $1"
-		exit 0
-	fi
-fi
-echo '[ INFO ] Installing driver...'
-install -vpm 644 /tmp/ax88179_178a.ko /lib/modules/$1/kernel/drivers/net/usb || exit 0
-echo '[ INFO ] Running depmod...'
-depmod $1 || exit 0
-echo '[ INFO ] All succeeded, cleaning up...'
-rm -v /tmp/ax88179_178a.ko || exit 0
-_EOF_
-			G_EXEC chmod +x /etc/kernel/postinst.d/dietpi-USBridgeSig
-			# Force upgrade now, regardless of current host machine
-			G_EXEC sed --follow-symlinks -i 's/^grep/#grep/' /etc/kernel/postinst.d/dietpi-USBridgeSig
-			for i in /lib/modules/*-v7+
-			do
-				[[ -d $i ]] || continue
-				i=${i##*/}
-				/etc/kernel/postinst.d/dietpi-USBridgeSig "$i"
-			done
-			G_EXEC sed --follow-symlinks -i 's/^#grep/grep/' /etc/kernel/postinst.d/dietpi-USBridgeSig
+			# # Update USBridgeSig Ethernet driver via postinst kernel script, until it has been merged into official RPi kernel: https://github.com/allocom/USBridgeSig/tree/master/ethernet
+			# cat << '_EOF_' > /etc/kernel/postinst.d/dietpi-USBridgeSig
+# #!/bin/bash
+# # Only available for v7+
+# [[ $1 == *'-v7+' ]] || exit 0
+# # Only reasonable for USBridgeSig = CM 3+
+# grep -q '^Revision.*10.$' /proc/cpuinfo || exit 0
+# echo "[ INFO ] Updating ASIX AX88179 driver for kernel $1 with ARM-optimised build"
+# echo '[ INFO ] - by Allo: https://github.com/allocom/USBridgeSig/tree/master/ethernet'
+# echo '[ INFO ] Estimating required module layout...'
+# module_layout=$(modprobe --dump-modversions /lib/modules/$1/kernel/drivers/net/usb/asix.ko | mawk '/module_layout/{print $1;exit}') || exit 0
+# echo '[ INFO ] Downloading stable branch driver...'
+# if ! curl -#fL "http://3.230.113.73:9011/Allocom/USBridgeSig/stable_rel/rpi-usbs-$1/ax88179_178a.ko" -o /tmp/ax88179_178a.ko ||
+	# [[ $module_layout != $(modprobe --dump-modversions /tmp/ax88179_178a.ko | mawk '/module_layout/{print $1;exit}') ]]
+# then
+	# echo '[ INFO ] No matching stable branch driver found, trying master branch driver...'
+	# if ! curl -#fL "http://3.230.113.73:9011/Allocom/USBridgeSig/rpi-usbs-$1/ax88179_178a.ko" -o /tmp/ax88179_178a.ko ||
+		# [[ $module_layout != $(modprobe --dump-modversions /tmp/ax88179_178a.ko | mawk '/module_layout/{print $1;exit}') ]]
+	# then
+		# echo '[ INFO ] No matching driver found, cleaning up and aborting...'
+		# rm -fv /tmp/ax88179_178a.ko || :
+		# echo '[ INFO ] The default RPi kernel driver will be used instead, which might result in pops and ticks in your audio stream. If so, please try to rerun this script later:'
+		# echo " - /etc/kernel/postinst.d/dietpi-USBridgeSig $1"
+		# exit 0
+	# fi
+# fi
+# echo '[ INFO ] Installing driver...'
+# install -vpm 644 /tmp/ax88179_178a.ko /lib/modules/$1/kernel/drivers/net/usb || exit 0
+# echo '[ INFO ] Running depmod...'
+# depmod $1 || exit 0
+# echo '[ INFO ] All succeeded, cleaning up...'
+# rm -v /tmp/ax88179_178a.ko || exit 0
+# _EOF_
+			# G_EXEC chmod +x /etc/kernel/postinst.d/dietpi-USBridgeSig
+			# # Force upgrade now, regardless of current host machine
+			# G_EXEC sed --follow-symlinks -i 's/^grep/#grep/' /etc/kernel/postinst.d/dietpi-USBridgeSig
+			# for i in /lib/modules/*-v7+
+			# do
+				# [[ -d $i ]] || continue
+				# i=${i##*/}
+				# /etc/kernel/postinst.d/dietpi-USBridgeSig "$i"
+			# done
+			# G_EXEC sed --follow-symlinks -i 's/^#grep/grep/' /etc/kernel/postinst.d/dietpi-USBridgeSig
 
 			# For backwards compatibility with software compiled against older libraspberrypi0, create symlinks from old to new filenames
 			if (( $G_HW_ARCH < 3 ))

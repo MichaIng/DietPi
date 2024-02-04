@@ -57,6 +57,20 @@
 		rmdir -v "$TMP_MOUNT"
 		# Finally delete the partition so the resizing works
 		sfdisk --no-reread --no-tell-kernel --delete "$ROOT_DRIVE" "${SETUP_PART: -1}"
+
+	elif grep -q '[[:blank:]]/boot/firmware[[:blank:]][[:blank:]]*vfat[[:blank:]]' /etc/fstab
+	then
+		BOOT_PART=$(mawk '/[[:blank:]]\/boot\/firmware[[:blank:]][[:blank:]]*vfat[[:blank:]]/{print $1}' /etc/fstab)
+		echo "[ INFO ] Detected RPi boot/firmware partition $BOOT_PART"
+		# Mount it and copy files if present and newer
+		TMP_MOUNT=$(mktemp -d)
+		mount -v "$BOOT_PART" "$TMP_MOUNT"
+		for f in 'dietpi.txt' 'dietpi-wifi.txt' 'dietpiEnv.txt' 'unattended_pivpn.conf' 'Automation_Custom_PreScript.sh' 'Automation_Custom_Script.sh'
+		do
+			[[ -f $TMP_MOUNT/$f ]] && cp -uv "$TMP_MOUNT/$f" /boot/
+		done
+		umount -v "$BOOT_PART"
+		rmdir -v "$TMP_MOUNT"
 	else
 		echo "[ INFO ] No DietPi setup partition found, last partition is: \"$LAST_PART\""
 		lsblk -po NAME,LABEL,SIZE,TYPE,FSTYPE,MOUNTPOINT "$ROOT_DRIVE"
