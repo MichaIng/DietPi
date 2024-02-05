@@ -47,6 +47,7 @@ EDITION=
 SUFFIX=
 ADD_DOS_PART=1
 SIGN_PASS=
+RPI_NEW=0
 while (( $# ))
 do
 	case $1 in
@@ -63,6 +64,7 @@ do
 		'-s') shift; SUFFIX=$1;;
 		'--no-dos-part') ADD_DOS_PART=0;;
 		'--sign') shift; SIGN_PASS=$1;;
+		'--rpi-new') RPI_NEW=1;;
 		*) G_DIETPI-NOTIFY 1 "Invalid input \"$1\", aborting..."; exit 1;;
 	esac
 	shift
@@ -77,6 +79,10 @@ boot_fstype='fat32'
 CLONING_TOOL='dd'
 case $HW_MODEL in
 	0) iname='RPi' HW_ARCH=${HW_ARCH:-1} boot_size=128 root_size=895;;
+	1) iname='RPi1' HW_ARCH=1 boot_size=128 root_size=895;;
+	2) iname='RPi2' HW_ARCH=2 boot_size=128 root_size=895;;
+	4) iname='RPi234' HW_ARCH=3 boot_size=128 root_size=895;;
+	5) iname='RPi5' HW_ARCH=3 boot_size=128 root_size=895;;
 	10) iname='OdroidC1' HW_ARCH=2 partition_start=4 boot_size=128 root_size=700 boot_fstype='fat16';;
 	11) iname='OdroidXU4' HW_ARCH=2 partition_start=4 root_size=764;;
 	12) iname='OdroidC2' HW_ARCH=3 partition_start=4 root_size=892;;
@@ -178,6 +184,16 @@ case $PTTYPE in
 	'gpt') [[ $HW_MODEL == 21 ]] && efi_size=64 iname='NativePC-UEFI' ITYPE='Installer';;
 	*) G_DIETPI-NOTIFY 1 "Invalid partition table type \"$PTTYPE\" passed, aborting..."; exit 1;;
 esac
+
+if (( $RPI_NEW ))
+then
+	(( $HW_MODEL < 10 && $DISTRO > 6 )) || { G_DIETPI-NOTIFY 1 "Invalid flag \"--rpi-new\" passed for hardware model \"$HW_MODEL\" or distro \"$DISTRO\" (${distro^}), aborting..."; exit 1; }
+
+elif (( $HW_MODEL && $HW_MODEL < 10 ))
+then
+	G_DIETPI-NOTIFY 1 "Invalid hardware model \"$HW_MODEL\" passed without flag \"--rpi-new\", aborting..."
+	exit 1
+fi
 
 # Do not add trailing FAT partitions for VM, container and (Clonezilla) installer images, and if there is a boot FAT partition already
 [[ $HW_MODEL == 20 || $HW_MODEL == 75 || $ITYPE == 'Installer' ]] && ADD_DOS_PART=0
@@ -367,12 +383,14 @@ then
 	fi
 	G_EXEC "mkfs.$FSTYPE" "${afs_opts[@]}" "${FP_LOOP}p2"
 	G_EXEC mount "${FP_LOOP}p2" rootfs
-	G_EXEC mkdir rootfs/boot
-	G_EXEC mount "${FP_LOOP}p1" rootfs/boot
+	fp_boot='boot'
+	(( $RPI_NEW )) && fp_boot+='/firmware'
+	G_EXEC mkdir -p "rootfs/$fp_boot"
+	G_EXEC mount "${FP_LOOP}p1" "rootfs/$fp_boot"
 	G_EXEC mkdir rootfs/etc
 	cat << _EOF_ > rootfs/etc/fstab
 PARTUUID=$(lsblk -no PARTUUID "${FP_LOOP}p2") / $FSTYPE noatime,lazytime 0 1
-PARTUUID=$(lsblk -no PARTUUID "${FP_LOOP}p1") /boot $boot_fstype noatime,lazytime 0 2
+PARTUUID=$(lsblk -no PARTUUID "${FP_LOOP}p1") /$fp_boot $boot_fstype noatime,lazytime 0 2
 _EOF_
 # - single partition
 else
@@ -470,6 +488,7 @@ G_EXEC losetup -d "$FP_LOOP"
 export FP_ROOT_DEV CLONING_TOOL OUTPUT_IMG_NAME MOUNT_IT='Off' SKIP_ARCHIVE SKIP_FIRSTBOOT_RESIZE=1
 IMAGER_ARGS=("$OUTPUT_IMG_NAME.img")
 (( $ADD_DOS_PART )) && IMAGER_ARGS+=('--add-dos-part')
+(( $RPI_NEW )) && IMAGER_ARGS+=('--configs-to-boot')
 [[ $SIGN_PASS ]] && IMAGER_ARGS+=('--sign' "$SIGN_PASS")
 if [[ ! $EDITION || $EDITION == 'all' ]]
 then
@@ -501,7 +520,11 @@ then
 
 	# Mount filesystems
 	G_EXEC mkdir rootfs
-	if (( $boot_size ))
+	if (( $RPI_NEW ))
+	then
+		G_EXEC mount "${FP_LOOP}p2" rootfs
+
+	elif (( $boot_size ))
 	then
 		G_EXEC mount "${FP_LOOP}p2" rootfs
 		G_EXEC mount "${FP_LOOP}p1" rootfs/boot
@@ -559,7 +582,11 @@ then
 
 	# Mount filesystems
 	G_EXEC mkdir rootfs
-	if (( $boot_size ))
+	if (( $RPI_NEW ))
+	then
+		G_EXEC mount "${FP_LOOP}p2" rootfs
+
+	elif (( $boot_size ))
 	then
 		G_EXEC mount "${FP_LOOP}p2" rootfs
 		G_EXEC mount "${FP_LOOP}p1" rootfs/boot
