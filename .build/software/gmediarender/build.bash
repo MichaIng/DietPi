@@ -95,6 +95,8 @@ then
 		echo 'Setting up environment file /etc/default/gmediarender ...'
 		[ ! -f '/boot/dietpi/.hw_model' ] || . /boot/dietpi/.hw_model
 		[ "$G_HW_UUID" ] || read -r G_HW_UUID < /proc/sys/kernel/random/uuid
+		read -r HOSTNAME < /etc/hostname
+		[ "$HOSTNAME" ] || HOSTNAME='DietPi'
 		INTERFACE=$(ip r l 0/0 | awk '{print $5;exit}')
 		[ "$INTERFACE" ] || INTERFACE=$(ip -br a | awk '$2=="UP"{print $1;exit}')
 		[ "$INTERFACE" ] || exit 1
