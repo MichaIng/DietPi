@@ -303,11 +303,7 @@ then
 	G_EXEC dpkg --root=rootfs -i keyring.deb
 	G_EXEC rm keyring.deb
 	# Enforce Debian Trixie FFmpeg packages over RPi repo ones
-	[[ $DISTRO != 'trixie' ]] || cat << '_EOF_' > rootfs/etc/apt/preferences.d/dietpi-ffmpeg || exit 1
-Package: src:ffmpeg
-Pin: origin archive.raspberrypi.com
-Pin-Priority: -1
-_EOF_
+	[[ $DISTRO == 'trixie' ]] && G_EXEC eval 'echo -e '\''Package: src:ffmpeg\nPin: origin archive.raspberrypi.com\nPin-Priority: -1'\'' > /etc/apt/preferences.d/dietpi-ffmpeg'
 fi
 
 # Install test builds from dietpi.com if requested

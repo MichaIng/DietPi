@@ -16,58 +16,52 @@ do
 	exit 1
 done
 
-# Install Rust via https://rustup.rs/
-# - ARMv7: Needs to be installed in tmpfs, else builds fail in emulated 32-bit ARM environments: https://github.com/rust-lang/cargo/issues/8719
-# - ARMv8: Apply workaround for increased RAM usage: https://github.com/rust-lang/cargo/issues/10583
-# shellcheck disable=SC2015
-export HOME='/tmp/rustup' CARGO_NET_GIT_FETCH_WITH_CLI='true'
-G_EXEC mkdir -p "$HOME"
+G_DIETPI-NOTIFY 2 'Installing Rust via rustup'
+# - ARMv6: Set default target explicitly, otherwise it compiles for ARMv7 in emulated container
+grep -q '^ID=raspbian' /etc/os-release && G_HW_ARCH_NAME='armv6l' host=('--default-host' 'arm-unknown-linux-gnueabihf') || host=()
+# - ARMv7: Apply workaround for failing crates index update in in emulated 32-bit ARM environments: https://github.com/rust-lang/cargo/issues/8719. CARGO_REGISTRIES_CRATES_IO_PROTOCOL='sparse' does not solve everything: https://github.com/rust-lang/cargo/issues/8719#issuecomment-1928540617
+# - ARMv8: Apply workaround for increased cargo fetch RAM usage: https://github.com/rust-lang/cargo/issues/10583
+# - Trixie: Set missing HOME, since the script runs from a systemd unit without login shell and hence no HOME set.
+export HOME=$(mktemp -d) CARGO_NET_GIT_FETCH_WITH_CLI='true'
 G_EXEC cd "$HOME"
 G_EXEC curl -sSfo rustup-init.sh 'https://sh.rustup.rs'
 G_EXEC chmod +x rustup-init.sh
-# - ARMv6: Set default target explicitly, otherwise it compiles for ARMv7 in emulated container
-grep -q '^ID=raspbian' /etc/os-release && G_HW_ARCH_NAME='armv6l' host=('--default-host' 'arm-unknown-linux-gnueabihf') || host=()
 G_EXEC_OUTPUT=1 G_EXEC ./rustup-init.sh -y --profile minimal --default-toolchain none "${host[@]}"
 G_EXEC rm rustup-init.sh
 export PATH="$HOME/.cargo/bin:$PATH"
 
 # Obtain latest versions
 # - vaultwarden
-version=$(curl -sSf 'https://api.github.com/repos/dani-garcia/vaultwarden/releases/latest' | mawk -F\" '/^  "tag_name"/{print $4}')
+version=$(curl -sSf 'https://api.github.com/repos/dani-garcia/vaultwarden/releases/latest' | mawk -F\" '/^ *"tag_name": "[^"]*",$/{print $4}')
 [[ $version ]] || { G_DIETPI-NOTIFY 1 'No latest vaultwarden version found, aborting ...'; exit 1; }
 # - web vault
-wv_url=$(curl -sSf 'https://api.github.com/repos/dani-garcia/bw_web_builds/releases/latest' | mawk -F\" '/^      "browser_download_url".*\.tar\.gz"$/{print $4}')
+wv_url=$(curl -sSf 'https://api.github.com/repos/dani-garcia/bw_web_builds/releases/latest' | mawk -F\" '/^ *"browser_download_url": ".*\.tar\.gz"$/{print $4}')
 [[ $wv_url ]] || { G_DIETPI-NOTIFY 1 'No latest web vault version found, aborting ...'; exit 1; }
-
-# RISC-V workaround until ring dependency has been raised to v0.17+
-[[ $G_HW_ARCH == 11 && $version == '1.29.2' ]] && version_pkg=$version version='main'
 
 # Build
 G_DIETPI-NOTIFY 2 "Building vaultwarden version \e[33m$version"
-G_EXEC cd /tmp
 G_EXEC curl -sSfLO "https://github.com/dani-garcia/vaultwarden/archive/$version.tar.gz"
 [[ -d vaultwarden-$version ]] && G_EXEC rm -R "vaultwarden-$version"
 G_EXEC tar xf "$version.tar.gz"
 G_EXEC rm "$version.tar.gz"
 G_EXEC cd "vaultwarden-$version"
-G_EXEC_OUTPUT=1 G_EXEC cargo build --features sqlite --release
-G_EXEC rustup self uninstall -y
-G_EXEC strip --remove-section=.comment --remove-section=.note target/release/vaultwarden
+# - Use new "release-micro" profile, which fixes 32-bit ARM builds and produces smaller binaries: https://github.com/dani-garcia/vaultwarden/issues/4320
+PROFILE='release-micro'
+G_EXEC_OUTPUT=1 G_EXEC cargo build --features sqlite --profile "$PROFILE"
+G_EXEC_OUTPUT=1 G_EXEC rustup self uninstall -y
+G_EXEC strip --remove-section=.comment --remove-section=.note "target/$PROFILE/vaultwarden"
+G_EXEC cd ..
 
 # Build DEB package
 G_DIETPI-NOTIFY 2 'Building vaultwarden DEB package'
-G_EXEC cd /tmp
 DIR="vaultwarden_$G_HW_ARCH_NAME"
 [[ -d $DIR ]] && G_EXEC rm -R "$DIR"
 G_EXEC mkdir -p "$DIR/"{DEBIAN,opt/vaultwarden,mnt/dietpi_userdata/vaultwarden,lib/systemd/system}
 
 # - Copy files in place
-G_EXEC mv "vaultwarden-$version/target/release/vaultwarden" "$DIR/opt/vaultwarden/"
+G_EXEC mv "vaultwarden-$version/target/$PROFILE/vaultwarden" "$DIR/opt/vaultwarden/"
 G_EXEC mv "vaultwarden-$version/.env.template" "$DIR/mnt/dietpi_userdata/vaultwarden/vaultwarden.env"
 G_EXEC rm -R "vaultwarden-$version"
-
-# Revert RISC-V workaround until ring dependency has been raised to v0.17+
-[[ $G_HW_ARCH == 11 && $version_pkg ]] && version=$version_pkg
 
 # - web vault
 G_DIETPI-NOTIFY 2 "Downloading web vault from \e[33m$wv_url"
@@ -247,9 +241,11 @@ G_CONFIG_INJECT 'Installed-Size: ' "Installed-Size: $(du -sk "$DIR" | mawk '{pri
 
 # Build DEB package
 G_EXEC_OUTPUT=1 G_EXEC dpkg-deb -b "$DIR"
+G_EXEC mv "$DIR.deb" /tmp/
 
 # Cleanup
-G_EXEC rm -R "$DIR"
+G_EXEC cd ..
+G_EXEC rm -R "$HOME"
 
 exit 0
 }
