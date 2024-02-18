@@ -62,7 +62,8 @@ cat << '_EOF_' > "$DIR/lib/systemd/system/squeezelite.service"
 [Unit]
 Description=Squeezelite (DietPi)
 Documentation=man:squeezelite(1) https://ralph-irving.github.io/squeezelite.html
-After=sound.target
+Wants=network-online.target
+After=network-online.target sound.target
 
 [Service]
 User=squeezelite
