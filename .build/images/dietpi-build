@@ -47,7 +47,6 @@ EDITION=
 SUFFIX=
 ADD_DOS_PART=1
 SIGN_PASS=
-RPI_NEW=0
 while (( $# ))
 do
 	case $1 in
@@ -64,7 +63,6 @@ do
 		'-s') shift; SUFFIX=$1;;
 		'--no-dos-part') ADD_DOS_PART=0;;
 		'--sign') shift; SIGN_PASS=$1;;
-		'--rpi-new') RPI_NEW=1;;
 		*) G_DIETPI-NOTIFY 1 "Invalid input \"$1\", aborting..."; exit 1;;
 	esac
 	shift
@@ -166,11 +164,10 @@ case $HW_ARCH in
 	*) G_DIETPI-NOTIFY 1 "Invalid architecture \"$HW_ARCH\" passed, aborting..."; exit 1;;
 esac
 
-exclude=
 case $DISTRO in
-	6) distro='bullseye' exclude=',gcc-9-base';;
-	7) distro='bookworm' exclude=',gcc-11-base';;
-	8) distro='trixie' exclude+=',gcc-11-base,gcc-12-base,gcc-13-base';;
+	6) distro='bullseye';;
+	7) distro='bookworm';;
+	8) distro='trixie';;
 	*) G_DIETPI-NOTIFY 1 "Invalid distro \"$DISTRO\" passed, aborting..."; exit 1;;
 esac
 [[ $HW_ARCH == 11 ]] && distro='sid' # RISC-V architecture is available on Sid only
@@ -180,16 +177,6 @@ case $PTTYPE in
 	'gpt') [[ $HW_MODEL == 21 ]] && efi_size=64 iname='NativePC-UEFI' ITYPE='Installer';;
 	*) G_DIETPI-NOTIFY 1 "Invalid partition table type \"$PTTYPE\" passed, aborting..."; exit 1;;
 esac
-
-if (( $RPI_NEW ))
-then
-	(( $HW_MODEL < 10 && $DISTRO > 6 )) || { G_DIETPI-NOTIFY 1 "Invalid flag \"--rpi-new\" passed for hardware model \"$HW_MODEL\" or distro \"$DISTRO\" (${distro^}), aborting..."; exit 1; }
-
-elif (( $HW_MODEL && $HW_MODEL < 10 ))
-then
-	G_DIETPI-NOTIFY 1 "Invalid hardware model \"$HW_MODEL\" passed without flag \"--rpi-new\", aborting..."
-	exit 1
-fi
 
 # Do not add trailing FAT partitions for VM, container and (Clonezilla) installer images, and if there is a boot FAT partition already
 [[ $HW_MODEL == 20 || $HW_MODEL == 75 || $ITYPE == 'Installer' ]] && ADD_DOS_PART=0
@@ -353,7 +340,7 @@ then
 	G_EXEC "mkfs.$FSTYPE" "${afs_opts[@]}" "${FP_LOOP}p2"
 	G_EXEC mount "${FP_LOOP}p2" rootfs
 	fp_boot='boot'
-	(( $RPI_NEW )) && fp_boot+='/firmware'
+	[[ $HW_MODEL == [1245] ]] && fp_boot+='/firmware'
 	G_EXEC mkdir -p "rootfs/$fp_boot"
 	G_EXEC mount "${FP_LOOP}p1" "rootfs/$fp_boot"
 	G_EXEC mkdir rootfs/etc
@@ -392,7 +379,7 @@ G_EXEC mount -o X-mount.mkdir -t tmpfs tmpfs rootfs/var/log
 packages='apt,bash-completion,bzip2,ca-certificates,cron,curl,fdisk,gnupg,htop,iputils-ping,locales,nano,p7zip,parted,procps,psmisc,sudo,systemd-sysv,tzdata,udev,unzip,wget,whiptail,'
 [[ $HW_MODEL == 75 ]] && packages+='iproute2' || packages+='console-setup,dropbear,ethtool,fake-hwclock,ifupdown,isc-dhcp-client,kmod,rfkill,systemd-timesyncd,usbutils'
 G_EXEC_POST_FUNC(){ [[ $exit_code == 0 ]] || cat /dev/shm/rootfs/debootstrap/debootstrap.log; }
-G_EXEC_OUTPUT=1 G_EXEC debootstrap --variant=minbase --exclude="gcc-7-base$exclude" --include="$packages" --arch="$parch" --keyring="$keyring" "$distro" ./rootfs "$repo"
+G_EXEC_OUTPUT=1 G_EXEC debootstrap --variant=minbase --include="$packages" --arch="$parch" --keyring="$keyring" "$distro" ./rootfs "$repo"
 G_EXEC umount rootfs/dev rootfs/run rootfs/var/cache/apt rootfs/var/lib/apt/lists rootfs/var/log
 
 ##########################################
@@ -457,7 +444,7 @@ G_EXEC losetup -d "$FP_LOOP"
 export FP_ROOT_DEV CLONING_TOOL OUTPUT_IMG_NAME MOUNT_IT='Off' SKIP_ARCHIVE SKIP_FIRSTBOOT_RESIZE=1
 IMAGER_ARGS=("$OUTPUT_IMG_NAME.img")
 (( $ADD_DOS_PART )) && IMAGER_ARGS+=('--add-dos-part')
-(( $RPI_NEW )) && IMAGER_ARGS+=('--configs-to-boot')
+[[ $HW_MODEL == [1245] ]] && IMAGER_ARGS+=('--configs-to-boot')
 [[ $SIGN_PASS ]] && IMAGER_ARGS+=('--sign' "$SIGN_PASS")
 if [[ ! $EDITION || $EDITION == 'all' ]]
 then
@@ -489,7 +476,7 @@ then
 
 	# Mount filesystems
 	G_EXEC mkdir rootfs
-	if (( $RPI_NEW ))
+	if [[ $HW_MODEL == [1245] ]]
 	then
 		G_EXEC mount "${FP_LOOP}p2" rootfs
 
@@ -551,9 +538,10 @@ then
 
 	# Mount filesystems
 	G_EXEC mkdir rootfs
-	if (( $RPI_NEW ))
+	if [[ $HW_MODEL == [1245] ]]
 	then
 		G_EXEC mount "${FP_LOOP}p2" rootfs
+		G_EXEC mount "${FP_LOOP}p1" rootfs/boot/firmware
 
 	elif (( $boot_size ))
 	then
@@ -590,9 +578,6 @@ _EOF_
 
 	# Force ARMv6 arch on Raspbian
 	(( $HW_ARCH == 1 )) && echo 'sed --follow-symlinks -i -e '\''/^G_HW_ARCH=/c\G_HW_ARCH=1'\'' -e '\''/^G_HW_ARCH_NAME=/c\G_HW_ARCH_NAME=armv6l'\'' /boot/dietpi/.hw_model' > rootfs/boot/Automation_Custom_PreScript.sh
-
-	# Temporary fix for failing NAA Daemon install on Trixie
-	(( $DISTRO == 8 )) && G_EXEC sed --follow-symlinks -i '\|www.signalyst.eu|s|bookworm/bullseye|trixie/bullseye|' rootfs/boot/dietpi/dietpi-software
 
 	# Skip filesystem expansion
 	G_EXEC rm rootfs/etc/systemd/system/local-fs.target.wants/dietpi-fs_partition_resize.service
