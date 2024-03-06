@@ -21,7 +21,8 @@ G_AGUP
 G_AGDUG "${adeps_build[@]}"
 for i in "${adeps[@]}"
 do
-	dpkg-query -s "$i" &> /dev/null && continue
+	# Temporarily allow lib*t64 packages, while the 64-bit time_t transition is ongoing on Sid: https://bugs.debian.org/1065394
+	dpkg-query -s "$i" &> /dev/null || dpkg-query -s "${i}t64" &> /dev/null && continue
 	G_DIETPI-NOTIFY 1 "Expected dependency package was not installed: $i"
 	exit 1
 done
