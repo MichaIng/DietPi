@@ -7107,7 +7107,7 @@ _EOF_
 			G_AGI realvnc-vnc-server libraspberrypi0 # Depends on libbcm_host.so but does not pull libraspberrypi0 as dependency
 		fi
 
-		# TigerVNC/RealVNC Server - Shared setup
+		# TigerVNC/RealVNC Server: Shared setup
 		if (( ${aSOFTWARE_INSTALL_STATE[28]} == 1 || ${aSOFTWARE_INSTALL_STATE[120]} == 1 ))
 		then
 			# Service
@@ -7131,9 +7131,6 @@ WantedBy=multi-user.target
 _EOF_
 			aSTART_SERVICES+=('vncserver')
 
-			# RealVNC: Assure that its services are disabled when ours is enabled
-			(( ${aSOFTWARE_INSTALL_STATE[120]} == 1 )) && G_EXEC systemctl --no-reload disable vncserver-virtuald vncserver-x11-serviced
-
 			cat << '_EOF_' > /usr/local/bin/vncserver
 #!/bin/dash
 
@@ -7147,8 +7144,7 @@ elif [ -f '/usr/bin/tigervncserver' ]
 then
 	echo '[  OK  ] TigerVNC detected'
 	FP_BINARY='/usr/bin/tigervncserver'
-	[ -f '/usr/bin/X0tigervnc' ] && FP_SHARED='/usr/bin/X0tigervnc' || FP_SHARED='/usr/bin/x0tigervncserver'
-	FP_SHARED="$FP_SHARED -display :0  -rfbauth $HOME/.vnc/passwd"
+	FP_SHARED="/usr/bin/X0tigervnc  -display :0  -rfbauth $HOME/.vnc/passwd"
 else
 	echo '[FAILED] No supported VNC server installed'
 	exit 1
@@ -7177,9 +7173,9 @@ case "$1" in
 			WIDTH=$(sed -n '/^[[:blank:]]*SOFTWARE_VNCSERVER_WIDTH=/{s/^[^=]*=//p;q}' /boot/dietpi.txt)
 			HEIGHT=$(sed -n '/^[[:blank:]]*SOFTWARE_VNCSERVER_HEIGHT=/{s/^[^=]*=//p;q}' /boot/dietpi.txt)
 			DEPTH=$(sed -n '/^[[:blank:]]*SOFTWARE_VNCSERVER_DEPTH=/{s/^[^=]*=//p;q}' /boot/dietpi.txt)
-			echo "[ INFO ] Starting virtual desktop at display :${DISPLAY:-1} in ${WIDTH:-1280}x${HEIGHT:-720}x${DEPTH:-16}"
+			echo "[ INFO ] Starting virtual desktop at display :${DISPLAY:=1} in ${WIDTH:=1280}x${HEIGHT:=720}x${DEPTH:=16}"
 			export SHELL='/bin/bash'
-			exec $FP_BINARY ":${DISPLAY:-1}" -geometry "${WIDTH:-1280}x${HEIGHT:-720}" -depth "${DEPTH:-16}"
+			exec $FP_BINARY ":$DISPLAY" -geometry "${WIDTH}x$HEIGHT" -depth "$DEPTH"
 		fi
 	;;
 
@@ -7188,13 +7184,13 @@ case "$1" in
 		if grep -q '^[[:blank:]]*SOFTWARE_VNCSERVER_SHARE_DESKTOP=1' /boot/dietpi.txt
 		then
 			echo '[ INFO ] Disconnecting from shared desktop'
-			killall -qw vncserver-x11-core x0tigervncserver X0tigervnc
+			killall -qw vncserver-x11-core X0tigervnc
 
 		# Virtual desktop mode
 		else
 			DISPLAY=$(sed -n '/^[[:blank:]]*SOFTWARE_VNCSERVER_DISPLAY_INDEX=/{s/^[^=]*=//p;q}' /boot/dietpi.txt)
-			echo "[ INFO ] Stopping virtual desktop at display :${DISPLAY:-1}"
-			$FP_BINARY -kill ":${DISPLAY:-1}"
+			echo "[ INFO ] Stopping virtual desktop at display :${DISPLAY:=1}"
+			$FP_BINARY -kill ":$DISPLAY"
 		fi
 	;;
 
@@ -7209,26 +7205,38 @@ exit 0
 _EOF_
 			G_EXEC chmod +x /usr/local/bin/vncserver
 
-			# TigerVNC: Permit remote connections which implies TLSVnc authentications being enabled additionally
-			# shellcheck disable=SC2016
-			(( ${aSOFTWARE_INSTALL_STATE[28]} == 1 )) && GCI_PRESERVE=1 G_CONFIG_INJECT '\$localhost[[:blank:]]*=' '$localhost = "no";' /etc/tigervnc/vncserver-config-defaults
-
-			# TigerVNC: Set control + read-only passwords
-			if [[ ${aSOFTWARE_INSTALL_STATE[28]} == 1 && ! -f '/root/.vnc/passwd' ]]
+			# TigerVNC
+			if (( ${aSOFTWARE_INSTALL_STATE[28]} == 1 ))
 			then
-				G_EXEC mkdir -p /root/.vnc
-				tigervncpasswd -f <<< "$GLOBAL_PW
+				# TigerVNC: Permit remote connections which implies TLSVnc authentications being enabled additionally
+				# shellcheck disable=SC2016
+				GCI_PRESERVE=1 G_CONFIG_INJECT '\$localhost[[:blank:]]*=' '$localhost = "no";' /etc/tigervnc/vncserver-config-defaults
+
+				# Set control + read-only passwords
+				if [[ ! -f '/root/.vnc/passwd' ]]
+				then
+					G_EXEC mkdir -p /root/.vnc
+					tigervncpasswd -f <<< "$GLOBAL_PW
 $GLOBAL_PW" > /root/.vnc/passwd
-				G_EXEC chmod 600 /root/.vnc/passwd
+					G_EXEC chmod 600 /root/.vnc/passwd
+				fi
 			fi
 
-			# RealVNC: Set virtual + shared desktop passwords, repeat virtual password command two times: https://github.com/MichaIng/DietPi/pull/4679#issuecomment-908196511
-			if [[ ${aSOFTWARE_INSTALL_STATE[120]} == 1 && ! -s '/root/.vnc/config.d/Xvnc' ]]
+			# RealVNC
+			if (( ${aSOFTWARE_INSTALL_STATE[120]} == 1 ))
 			then
-				vncpasswd -virtual <<< "$GLOBAL_PW
+				# Assure that its services are disabled when ours is enabled
+				G_EXEC systemctl --no-reload disable vncserver-virtuald vncserver-x11-serviced
+
+				# Set (+verify) virtual + shared desktop passwords: https://github.com/MichaIng/DietPi/pull/4679#issuecomment-908196511
+				if [[ ! -s '/root/.vnc/config.d/Xvnc' ]]
+				then
+					vncpasswd -virtual <<< "$GLOBAL_PW
 $GLOBAL_PW"
-				vncpasswd -service <<< "$GLOBAL_PW
+					vncpasswd -service <<< "$GLOBAL_PW
 $GLOBAL_PW"
+				fi
+
 				[[ -f '/root/.vnc/config.d/.Xvnc-v5-marker' ]] || > /root/.vnc/config.d/.Xvnc-v5-marker
 			fi
 		fi
