@@ -26,9 +26,12 @@ Available commands:
 	# Import DietPi-Globals ---------------------------------------------------------------
 	. /boot/dietpi/func/dietpi-globals
 	readonly G_PROGRAM_NAME='DietPi-Software'
-	G_CHECK_ROOT_USER
-	G_CHECK_ROOTFS_RW
-	G_INIT
+	if [[ $1 != 'list' ]]
+	then
+		G_CHECK_ROOT_USER
+		G_CHECK_ROOTFS_RW
+		G_INIT
+	fi
 	# Import DietPi-Globals ---------------------------------------------------------------
 
 	[[ $1 == 'list' && $2 == '--machine-readable' ]] && MACHINE_READABLE=1 || MACHINE_READABLE=
@@ -460,7 +463,7 @@ Available commands:
 		aSOFTWARE_DEPS[$software_id]='88 89 128 195 webserver'
 		#------------------
 		software_id=135
-		aSOFTWARE_NAME[$software_id]='IceCast'
+		aSOFTWARE_NAME[$software_id]='Icecast'
 		aSOFTWARE_DESC[$software_id]='Shoutcast streaming server (+DarkIce)'
 		aSOFTWARE_CATX[$software_id]=2
 		aSOFTWARE_DOCS[$software_id]='https://dietpi.com/docs/software/media/#icecast'
@@ -3146,7 +3149,11 @@ _EOF_
 
 		if To_Install 173 # LXQt
 		then
-			G_AGI lxqt qterminal xarchiver lxde-icon-theme upower xscreensaver featherpad speedcrunch
+			# SpeedCrunch is currently not present on Trixie: https://tracker.debian.org/pkg/speedcrunch
+			local speedcrunch=('speedcrunch')
+			(( $G_DISTRO == 8 )) && speedcrunch=()
+			# lxqt-archiver is the default dependency from Trixie on, but our config uses Archiver=xarchiver.
+			G_AGI lxqt xarchiver xscreensaver "${speedcrunch[@]}"
 
 			# Configs
 			Download_Install "https://github.com/$G_GITOWNER/DietPi/raw/$G_GITBRANCH/.conf/desktop/lxqt/lxqt-$G_DISTRO_NAME.7z" /etc/xdg/
@@ -3224,12 +3231,12 @@ _EOF_
 
 		if To_Install 30 # NoMachine
 		then
-			local version='8.10.1_1' # https://downloads.nomachine.com/
+			local version='8.11.3_3' # https://downloads.nomachine.com/
 			case $G_HW_ARCH in
 				1) local url="Raspberry/nomachine_${version}_armv6hf";;
 				2) local url="Arm/nomachine_${version}_armhf";;
 				3) local url="Arm/nomachine_${version}_arm64";;
-				*) local url="Linux/nomachine_${version}_amd64";;
+				*) version='8.11.3_4'; local url="Linux/nomachine_${version}_amd64";;
 			esac
 			Download_Install "https://download.nomachine.com/download/${version%.*}/$url.deb"
 			aSTART_SERVICES+=('nxserver')
@@ -5538,20 +5545,38 @@ _EOF_
 			G_EXEC chown -R www-data:www-data /var/www/ompd/{tmp,stream,cache}
 		fi
 
-		if To_Install 135 icecast2 darkice # IceCast + DarkIce
+		if To_Install 135 icecast2 darkice # Icecast + DarkIce
 		then
 			G_AGI darkice icecast2
 			G_EXEC systemctl stop darkice icecast2
 
-			# IceCast: Set passwords if not yet done (default found)
+			# Icecast
+			# - Config: Set passwords if not yet done (default found)
 			sed --follow-symlinks -i "/<source-password>hackme/c\        <source-password>$GLOBAL_PW</source-password>" /etc/icecast2/icecast.xml
 			sed --follow-symlinks -i "/<relay-password>hackme/c\        <relay-password>$GLOBAL_PW</relay-password>" /etc/icecast2/icecast.xml
 			sed --follow-symlinks -i "/<admin-password>hackme/c\        <admin-password>$GLOBAL_PW</admin-password>" /etc/icecast2/icecast.xml
-			# - Remove default service config
-			[[ -f '/etc/default/icecast2' ]] && G_EXEC rm /etc/default/icecast2
+			# - Service: Replace init.d service with native systemd service
+			Remove_SysV icecast2 1
+			cat << _EOF_ > /etc/systemd/system/icecast2.service
+[Unit]
+Description=Icecast (DietPi)
+Wants=network-online.target
+After=network-online.target
 
+[Service]
+User=icecast2
+Group=icecast
+ExecStart=/usr/bin/icecast2 -c /etc/icecast2/icecast.xml
+
+[Install]
+WantedBy=multi-user.target
+_EOF_
 			# DarkIce
+			# - User
+			Create_User -g audio -G dietpi darkice
+			# - Config
 			[[ -f '/etc/darkice.cfg' ]] || > /etc/darkice.cfg
+			G_EXEC chown darkice:root /etc/darkice.cfg
 			G_EXEC chmod 0600 /etc/darkice.cfg
 			local input_device_index=$(arecord -l | mawk -F'[ :]' '/card/{print $2;exit}')
 			cat << _EOF_ > /etc/darkice.cfg
@@ -5561,7 +5586,7 @@ bufferSecs    = 3
 reconnect     = yes
 
 [input]
-device        = hw:$input_device_index,0
+device        = hw:${input_device_index:-0},0
 sampleRate    = 44100
 bitsPerSample = 16
 channel       = 1
@@ -5581,17 +5606,17 @@ genre         = none
 public        = no
 #localDumpFile = /mnt/dietpi_userdata/darkice_recording.ogg
 _EOF_
+			# - Service: Replace init.d service with native systemd service
 			Remove_SysV darkice 1
 			cat << _EOF_ > /etc/systemd/system/darkice.service
 [Unit]
 Description=DarkIce (DietPi)
-Requires=icecast2.service
 After=icecast2.service
 
 [Service]
-User=nobody
-Group=dietpi
-ExecStart=$(command -v darkice)
+User=darkice
+AmbientCapabilities=CAP_SYS_NICE
+ExecStart=/usr/bin/darkice
 
 [Install]
 WantedBy=multi-user.target
@@ -6147,6 +6172,7 @@ SyslogIdentifier=Airsonic
 User=airsonic
 WorkingDirectory=/mnt/dietpi_userdata/airsonic
 ExecStart=/usr/bin/java -Xmx${memory_limit}m -Dairsonic.home=/mnt/dietpi_userdata/airsonic -Dserver.servlet.context-path=/airsonic -Dserver.port=8080 -jar /mnt/dietpi_userdata/airsonic/airsonic.war
+SuccessExitStatus=143
 
 [Install]
 WantedBy=multi-user.target
@@ -6769,6 +6795,7 @@ User=blynk
 LogsDirectory=blynk
 WorkingDirectory=/mnt/dietpi_userdata/blynk
 ExecStart=/usr/bin/java$log4shell -jar /mnt/dietpi_userdata/blynk/blynkserver.jar
+SuccessExitStatus=143
 
 # Hardening
 PrivateTmp=true
@@ -6835,7 +6862,7 @@ _EOF_
 			# Cleanup
 			G_EXEC rm -R WebIOPi-master
 
-			# On fresh installs, change port to 8002 to avoid conflict with IceCast
+			# On fresh installs, change port to 8002 to avoid conflict with Icecast
 			(( $reinstall )) || G_EXEC sed --follow-symlinks -i 's/^port = 8000$/port = 8002/' /etc/webiopi/config
 
 			# Service
@@ -7080,7 +7107,7 @@ _EOF_
 			G_AGI realvnc-vnc-server libraspberrypi0 # Depends on libbcm_host.so but does not pull libraspberrypi0 as dependency
 		fi
 
-		# TigerVNC/RealVNC Server - Shared setup
+		# TigerVNC/RealVNC Server: Shared setup
 		if (( ${aSOFTWARE_INSTALL_STATE[28]} == 1 || ${aSOFTWARE_INSTALL_STATE[120]} == 1 ))
 		then
 			# Service
@@ -7104,9 +7131,6 @@ WantedBy=multi-user.target
 _EOF_
 			aSTART_SERVICES+=('vncserver')
 
-			# RealVNC: Assure that its services are disabled when ours is enabled
-			(( ${aSOFTWARE_INSTALL_STATE[120]} == 1 )) && G_EXEC systemctl --no-reload disable vncserver-virtuald vncserver-x11-serviced
-
 			cat << '_EOF_' > /usr/local/bin/vncserver
 #!/bin/dash
 
@@ -7120,8 +7144,7 @@ elif [ -f '/usr/bin/tigervncserver' ]
 then
 	echo '[  OK  ] TigerVNC detected'
 	FP_BINARY='/usr/bin/tigervncserver'
-	[ -f '/usr/bin/X0tigervnc' ] && FP_SHARED='/usr/bin/X0tigervnc' || FP_SHARED='/usr/bin/x0tigervncserver'
-	FP_SHARED="$FP_SHARED -display :0  -rfbauth $HOME/.vnc/passwd"
+	FP_SHARED="/usr/bin/X0tigervnc  -display :0  -rfbauth $HOME/.vnc/passwd"
 else
 	echo '[FAILED] No supported VNC server installed'
 	exit 1
@@ -7150,9 +7173,9 @@ case "$1" in
 			WIDTH=$(sed -n '/^[[:blank:]]*SOFTWARE_VNCSERVER_WIDTH=/{s/^[^=]*=//p;q}' /boot/dietpi.txt)
 			HEIGHT=$(sed -n '/^[[:blank:]]*SOFTWARE_VNCSERVER_HEIGHT=/{s/^[^=]*=//p;q}' /boot/dietpi.txt)
 			DEPTH=$(sed -n '/^[[:blank:]]*SOFTWARE_VNCSERVER_DEPTH=/{s/^[^=]*=//p;q}' /boot/dietpi.txt)
-			echo "[ INFO ] Starting virtual desktop at display :${DISPLAY:-1} in ${WIDTH:-1280}x${HEIGHT:-720}x${DEPTH:-16}"
+			echo "[ INFO ] Starting virtual desktop at display :${DISPLAY:=1} in ${WIDTH:=1280}x${HEIGHT:=720}x${DEPTH:=16}"
 			export SHELL='/bin/bash'
-			exec $FP_BINARY ":${DISPLAY:-1}" -geometry "${WIDTH:-1280}x${HEIGHT:-720}" -depth "${DEPTH:-16}"
+			exec $FP_BINARY ":$DISPLAY" -geometry "${WIDTH}x$HEIGHT" -depth "$DEPTH"
 		fi
 	;;
 
@@ -7161,13 +7184,13 @@ case "$1" in
 		if grep -q '^[[:blank:]]*SOFTWARE_VNCSERVER_SHARE_DESKTOP=1' /boot/dietpi.txt
 		then
 			echo '[ INFO ] Disconnecting from shared desktop'
-			killall -qw vncserver-x11-core x0tigervncserver X0tigervnc
+			killall -qw vncserver-x11-core X0tigervnc
 
 		# Virtual desktop mode
 		else
 			DISPLAY=$(sed -n '/^[[:blank:]]*SOFTWARE_VNCSERVER_DISPLAY_INDEX=/{s/^[^=]*=//p;q}' /boot/dietpi.txt)
-			echo "[ INFO ] Stopping virtual desktop at display :${DISPLAY:-1}"
-			$FP_BINARY -kill ":${DISPLAY:-1}"
+			echo "[ INFO ] Stopping virtual desktop at display :${DISPLAY:=1}"
+			$FP_BINARY -kill ":$DISPLAY"
 		fi
 	;;
 
@@ -7182,26 +7205,38 @@ exit 0
 _EOF_
 			G_EXEC chmod +x /usr/local/bin/vncserver
 
-			# TigerVNC: Permit remote connections which implies TLSVnc authentications being enabled additionally
-			# shellcheck disable=SC2016
-			(( ${aSOFTWARE_INSTALL_STATE[28]} == 1 )) && GCI_PRESERVE=1 G_CONFIG_INJECT '\$localhost[[:blank:]]*=' '$localhost = "no";' /etc/tigervnc/vncserver-config-defaults
-
-			# TigerVNC: Set control + read-only passwords
-			if [[ ${aSOFTWARE_INSTALL_STATE[28]} == 1 && ! -f '/root/.vnc/passwd' ]]
+			# TigerVNC
+			if (( ${aSOFTWARE_INSTALL_STATE[28]} == 1 ))
 			then
-				G_EXEC mkdir -p /root/.vnc
-				tigervncpasswd -f <<< "$GLOBAL_PW
+				# TigerVNC: Permit remote connections which implies TLSVnc authentications being enabled additionally
+				# shellcheck disable=SC2016
+				GCI_PRESERVE=1 G_CONFIG_INJECT '\$localhost[[:blank:]]*=' '$localhost = "no";' /etc/tigervnc/vncserver-config-defaults
+
+				# Set control + read-only passwords
+				if [[ ! -f '/root/.vnc/passwd' ]]
+				then
+					G_EXEC mkdir -p /root/.vnc
+					tigervncpasswd -f <<< "$GLOBAL_PW
 $GLOBAL_PW" > /root/.vnc/passwd
-				G_EXEC chmod 600 /root/.vnc/passwd
+					G_EXEC chmod 600 /root/.vnc/passwd
+				fi
 			fi
 
-			# RealVNC: Set virtual + shared desktop passwords, repeat virtual password command two times: https://github.com/MichaIng/DietPi/pull/4679#issuecomment-908196511
-			if [[ ${aSOFTWARE_INSTALL_STATE[120]} == 1 && ! -s '/root/.vnc/config.d/Xvnc' ]]
+			# RealVNC
+			if (( ${aSOFTWARE_INSTALL_STATE[120]} == 1 ))
 			then
-				vncpasswd -virtual <<< "$GLOBAL_PW
+				# Assure that its services are disabled when ours is enabled
+				G_EXEC systemctl --no-reload disable vncserver-virtuald vncserver-x11-serviced
+
+				# Set (+verify) virtual + shared desktop passwords: https://github.com/MichaIng/DietPi/pull/4679#issuecomment-908196511
+				if [[ ! -s '/root/.vnc/config.d/Xvnc' ]]
+				then
+					vncpasswd -virtual <<< "$GLOBAL_PW
 $GLOBAL_PW"
-				vncpasswd -service <<< "$GLOBAL_PW
+					vncpasswd -service <<< "$GLOBAL_PW
 $GLOBAL_PW"
+				fi
+
 				[[ -f '/root/.vnc/config.d/.Xvnc-v5-marker' ]] || > /root/.vnc/config.d/.Xvnc-v5-marker
 			fi
 		fi
@@ -7371,6 +7406,7 @@ User=ubooquity
 LogsDirectory=ubooquity
 WorkingDirectory=/mnt/dietpi_userdata/ubooquity
 ExecStart=/usr/bin/java -Xmx${memory_limit}m -jar /mnt/dietpi_userdata/ubooquity/Ubooquity.jar --headless --remoteadmin --adminport 2038 --libraryport 2039
+SuccessExitStatus=143
 
 [Install]
 WantedBy=multi-user.target
@@ -7432,6 +7468,7 @@ SyslogIdentifier=Komga
 User=komga
 WorkingDirectory=/mnt/dietpi_userdata/komga
 ExecStart=/usr/bin/java -Xmx${memory_limit}m -jar komga.jar
+SuccessExitStatus=143
 
 [Install]
 WantedBy=multi-user.target
@@ -8930,7 +8967,7 @@ _EOF_
 					*) local arch='arm';;
 				esac
 
-				local fallback_url="https://github.com/syncthing/syncthing/releases/download/v1.27.3/syncthing-linux-$arch-v1.27.3.tar.gz"
+				local fallback_url="https://github.com/syncthing/syncthing/releases/download/v1.27.4/syncthing-linux-$arch-v1.27.4.tar.gz"
 				Download_Install "$(curl -sSfL 'https://api.github.com/repos/syncthing/syncthing/releases/latest' | mawk -F\" "/\"browser_download_url\": .*\/syncthing-linux-$arch-[^\"\/]*\.tar\.gz\"/{print \$4}")"
 				G_EXEC mv syncthing-* /opt/syncthing
 			fi
@@ -9404,7 +9441,7 @@ _EOF_
 			G_EXEC_OUTPUT=1 G_EXEC sudo -u koel "php$PHP_VERSION" artisan koel:sync
 			G_EXEC cd "$G_WORKING_DIR"
 
-			# Service: Run on port 8003 by default to avoid conflict with IceCast
+			# Service: Run on port 8003 by default to avoid conflict with Icecast
 			cat << _EOF_ > /etc/systemd/system/koel.service
 [Unit]
 Description=Koel (DietPi)
@@ -10537,6 +10574,7 @@ After=network-online.target
 SyslogIdentifier=Nukkit
 WorkingDirectory=/usr/local/bin/nukkit
 ExecStart=/usr/bin/java -jar /usr/local/bin/nukkit/nukkit.jar
+SuccessExitStatus=143
 
 [Install]
 WantedBy=multi-user.target
@@ -10552,7 +10590,7 @@ _EOF_
 				*) local arch='arm-6';;
 			esac
 
-			local fallback_url="https://github.com/go-gitea/gitea/releases/download/v1.21.5/gitea-1.21.5-linux-$arch.xz"
+			local fallback_url="https://github.com/go-gitea/gitea/releases/download/v1.21.7/gitea-1.21.7-linux-$arch.xz"
 			Download_Install "$(curl -sSfL 'https://api.github.com/repos/go-gitea/gitea/releases/latest' | mawk -F\" "/\"browser_download_url\": \".*\/gitea-[^\"\/]*-linux-$arch\.xz\"/{print \$4}")" /mnt/dietpi_userdata/gitea/gitea
 
 			# User
@@ -11205,8 +11243,8 @@ _EOF_
 			local custom_apt_deps=$(sed -n '/^[[:blank:]]*SOFTWARE_HOMEASSISTANT_APT_DEPS=/{s/^[^=]*=//p;q}' /boot/dietpi.txt)
 			local custom_pip_deps=$(sed -n '/^[[:blank:]]*SOFTWARE_HOMEASSISTANT_PIP_DEPS=/{s/^[^=]*=//p;q}' /boot/dietpi.txt)
 			# - All: gcc, libc6-dev, make, libssl-dev, zlib1g-dev for Python build and libbz2-dev, libreadline-dev, libsqlite3-dev, liblzma-dev to suppress warnings
-			# - All: libffi-dev to solve "ModuleNotFoundError: No module named '_ctypes'", for python-slugify==4.0.1 build on ARMv8/x86_64 and cffi build on ARMv6/7/RISC-V
-			aDEPS=('gcc' 'libc6-dev' 'make' 'libssl-dev' 'zlib1g-dev' 'libbz2-dev' 'libreadline-dev' 'libsqlite3-dev' 'liblzma-dev' 'libffi-dev')
+			# - All: libffi-dev to solve "ModuleNotFoundError: No module named '_ctypes'", for python-slugify==4.0.1 build on ARMv8/x86_64 and cffi build on ARMv6/7/RISC-V, g++ for webrtc-noise-gain
+			aDEPS=('gcc' 'g++' 'libc6-dev' 'make' 'libssl-dev' 'zlib1g-dev' 'libbz2-dev' 'libreadline-dev' 'libsqlite3-dev' 'liblzma-dev' 'libffi-dev')
 			mapfile -t -d' ' -O "${#aDEPS[@]}" aDEPS < <(echo -n "$custom_apt_deps")
 			# - ARMv6/7/RISC-V
 			G_EXEC mkdir -p "$ha_home"
@@ -11214,7 +11252,7 @@ _EOF_
 			if [[ $G_HW_ARCH =~ ^(1|2|11)$ ]]
 			then
 				# libjpeg62-turbo-dev for Pillow, libopenblas-dev and pkg-config for numpy, pkg-config for cryptography, g++ for PyTurboJPEG, SQLAlchemy and ninja > PyTurboJPEG, libavdevice-dev for ha-av, cmake for ninja > PyTurboJPEG, automake for patchelf > PyTurboJPEG
-				aDEPS+=('libjpeg62-turbo-dev' 'libopenblas-dev' 'pkg-config' 'g++' 'libavdevice-dev' 'cmake' 'automake')
+				aDEPS+=('libjpeg62-turbo-dev' 'libopenblas-dev' 'pkg-config' 'libavdevice-dev' 'cmake' 'automake')
 				# Rust for cryptography and bcrypt
 				G_EXEC curl -sSf 'https://sh.rustup.rs/' -o rustup-init.sh
 				G_EXEC chmod +x rustup-init.sh
@@ -11333,8 +11371,8 @@ _EOF_
 			G_WHIP_BUTTON_CANCEL_TEXT='Skip'
 			if G_WHIP_YESNO 'Would you like to install the Geyser and Floodgate plugins for compatibility with Bedrock Edition?\n\nNote that this may be buggy.'
 			then
-				Download_Install 'https://ci.opencollab.dev/job/GeyserMC/job/Geyser/job/master/lastStableBuild/artifact/bootstrap/spigot/build/libs/Geyser-Spigot.jar' /mnt/dietpi_userdata/papermc/plugins/Geyser-Spigot.jar
-				Download_Install 'https://ci.opencollab.dev/job/GeyserMC/job/Floodgate/job/master/lastStableBuild/artifact/spigot/build/libs/floodgate-spigot.jar' /mnt/dietpi_userdata/papermc/plugins/floodgate-bukkit.jar
+				Download_Install 'https://download.geysermc.org/v2/projects/geyser/versions/latest/builds/latest/downloads/spigot' /mnt/dietpi_userdata/papermc/plugins/Geyser-Spigot.jar
+				Download_Install 'https://download.geysermc.org/v2/projects/floodgate/versions/latest/builds/latest/downloads/spigot' /mnt/dietpi_userdata/papermc/plugins/floodgate-spigot.jar
 			fi
 
 			# Minecraft rcon client for remote administration and server maintenance scripts
@@ -11378,15 +11416,16 @@ User=papermc
 LogsDirectory=papermc
 WorkingDirectory=/mnt/dietpi_userdata/papermc
 ExecStart=/usr/bin/java -Xmx${heap_size}m -jar /opt/papermc/paperclip.jar --nogui --noconsole
+SuccessExitStatus=143
 
 [Install]
 WantedBy=multi-user.target
 _EOF_
 			# Config
-			if [[ -f '/mnt/dietpi_userdata/papermc/plugins/Geyser-Spigot.jar' && -f '/mnt/dietpi_userdata/papermc/plugins/floodgate-bukkit.jar' ]]
+			if [[ -f '/mnt/dietpi_userdata/papermc/plugins/Geyser-Spigot.jar' ]]
 			then
 				Create_Config /mnt/dietpi_userdata/papermc/plugins/Geyser-Spigot/config.yml papermc 1800 1 &&
-				G_CONFIG_INJECT 'auth-type:[[:blank:]]' 'auth-type: floodgate' /mnt/dietpi_userdata/papermc/plugins/Geyser-Spigot/config.yml
+				G_CONFIG_INJECT 'auth-type:[[:blank:]]' '  auth-type: floodgate' /mnt/dietpi_userdata/papermc/plugins/Geyser-Spigot/config.yml
 			else
 				Create_Config /mnt/dietpi_userdata/papermc/permissions.yml papermc 1800 1
 			fi
@@ -11395,7 +11434,7 @@ _EOF_
 
 			else
 				aSOFTWARE_INSTALL_STATE[$software_id]=0
-				G_DIETPI-NOTIFY 2 "${aSOFTWARE_NAME[$software_id]} install aborted due to outstanding EULA agreement"
+				G_DIETPI-NOTIFY 2 "${aSOFTWARE_NAME[$software_id]} install skipped due to outstanding EULA agreement"
 			fi
 		fi
 
@@ -12153,7 +12192,7 @@ If no WireGuard (auto)start is included, but you require it, please do the follo
 		then
 			apt-mark auto qterminal xarchiver lxde-icon-theme upower xscreensaver leafpad featherpad speedcrunch 2> /dev/null
 			G_AGP lxqt
-			rm -Rf /{root,home/*}/.config/lxqt
+			G_EXEC rm -Rf /{root,home/*}/.config/lxqt
 		fi
 
 		if To_Uninstall 174 # GIMP
@@ -12192,6 +12231,7 @@ If no WireGuard (auto)start is included, but you require it, please do the follo
 		if To_Uninstall 30 # NoMachine
 		then
 			G_AGP nomachine
+			G_EXEC rm -Rf /{root,home/*}/NoMachine
 		fi
 
 		if To_Uninstall 29 # XRDP
@@ -14540,13 +14580,13 @@ _EOF_
 				do
 					if (( $i < $full_octets ))
 					then
-						mask+=255
+						mask+='255'
 
 					elif (( $i == $full_octets ))
 					then
 						mask+=$(( 256 - 2 ** ( 8 - $partial_octet ) ))
 					else
-						mask+=0
+						mask+='0'
 					fi
 					(( $i < 3 )) && mask+=.
 				done
@@ -15436,7 +15476,7 @@ List of installed software and their online documentation URLs:
 	# Main Loop
 	#/////////////////////////////////////////////////////////////////////////////////////
 	# Abort if a reboot is required as of missing kernel modules
-	if (( $G_DIETPI_INSTALL_STAGE == 2 )) && ! G_CHECK_KERNEL
+	if [[ $1 != 'list' && $G_DIETPI_INSTALL_STAGE == 2 ]] && ! G_CHECK_KERNEL
 	then
 		G_WHIP_BUTTON_CANCEL_TEXT='Abort' G_WHIP_YESNO "[ INFO ] A reboot is required
 \nKernel modules for the loaded kernel at /lib/modules/$(uname -r) are missing. This is most likely the case as of a recently applied kernel upgrade where a reboot is required to load the new kernel.

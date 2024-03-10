@@ -16,20 +16,19 @@ case $G_DISTRO in
 esac
 for i in "${adeps[@]}"
 do
-	dpkg-query -s "$i" &> /dev/null && continue
+	# Temporarily allow lib*t64 packages, while the 64-bit time_t transition is ongoing on Sid: https://bugs.debian.org/1065394
+	dpkg-query -s "$i" &> /dev/null || dpkg-query -s "${i}t64" &> /dev/null && continue
 	G_DIETPI-NOTIFY 1 "Expected dependency package was not installed: $i"
 	exit 1
 done
 
 G_DIETPI-NOTIFY 2 'Downloading source code...'
 G_EXEC cd /tmp
-# Freeze commit: https://github.com/ralph-irving/squeezelite/issues/206
-G_EXEC curl -sSfLO 'https://github.com/ralph-irving/squeezelite/archive/6de9e229aa4cc7c3131ff855f3ead39581127090.tar.gz'
+G_EXEC curl -sSfLO 'https://github.com/ralph-irving/squeezelite/archive/master.tar.gz'
 [[ -d 'squeezelite-master' ]] && G_EXEC rm -R squeezelite-master
-G_EXEC tar xf 6de9e229aa4cc7c3131ff855f3ead39581127090.tar.gz
-G_EXEC rm 6de9e229aa4cc7c3131ff855f3ead39581127090.tar.gz
+G_EXEC tar xf master.tar.gz
+G_EXEC rm master.tar.gz
 G_DIETPI-NOTIFY 2 'Compiling binary...'
-G_EXEC mv squeezelite-{6de9e229aa4cc7c3131ff855f3ead39581127090,master}
 G_EXEC cd squeezelite-master
 G_EXEC_OUTPUT=1 G_EXEC make CFLAGS='-g0 -O3' OPTS='-DDSD -DFFMPEG -DRESAMPLE -DVISEXPORT -DLINKALL -DIR -DUSE_SSL'
 G_EXEC strip --remove-section=.comment --remove-section=.note squeezelite
@@ -143,6 +142,8 @@ find "$DIR" ! \( -path "$DIR/DEBIAN" -prune \) -type f -exec md5sum {} + | sed "
 DEPS_APT_VERSIONED=
 for i in "${adeps[@]}"
 do
+	# Temporarily allow lib*t64 packages, while the 64-bit time_t transition is ongoing on Sid: https://bugs.debian.org/1065394
+	dpkg-query -s "$i" &> /dev/null || i+='t64'
 	DEPS_APT_VERSIONED+=" $i (>= $(dpkg-query -Wf '${VERSION}' "$i")),"
 done
 DEPS_APT_VERSIONED=${DEPS_APT_VERSIONED%,}
