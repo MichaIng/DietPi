@@ -1238,44 +1238,6 @@ Release notes: https://github.com/hzeller/gmrender-resurrect/releases
 
 Patch_8_20()
 {
-	# NanoPi R5S/6 kernel upgrade
-	case $G_HW_MODEL in
-		76) local series=5 version='5.10.160-dietpi1';;
-		79) local series=6 version='5.10.160-dietpi1';;
-		*) local series='';;
-	esac
-
-	if [[ $series ]] && dpkg --compare-versions "$(dpkg-query -Wf '${Version}' "firmware-nanopi$series" 2> /dev/null)" lt-nl "$version"
-	then
-		G_DIETPI-NOTIFY 2 "Updating NanoPi $series series kernel ..."
-		G_EXEC curl -sSfO "https://dietpi.com/downloads/nanopi$series.7z"
-		G_EXEC 7zr x "nanopi$series.7z"
-		G_EXEC rm "nanopi$series.7z"
-		local loopdev=$(losetup -f) rootdev=$(lsblk -npo PKNAME "$G_ROOTFS_DEV")
-		G_EXEC losetup "$loopdev" "nanopi$series.img"
-		G_EXEC partprobe "$loopdev"
-		G_EXEC partx -u "$loopdev"
-		if [[ ! -b ${loopdev}p8 ]]
-		then
-			G_DIETPI-NOTIFY 1 "Image invalid: ${loopdev}p8 does not exist, aborting kernel upgrade ..."
-
-		elif [[ ${rootdev}p8 != "$G_ROOTFS_DEV" ]]
-		then
-			G_DIETPI-NOTIFY 1 "Unsupported system: ${rootdev}p8 != $G_ROOTFS_DEV, aborting kernel upgrade ..."
-		else
-			G_EXEC curl -sSfO "https://dietpi.com/downloads/binaries/firmware-nanopi$series.deb"
-			G_EXEC_OUTPUT=1 G_EXEC dpkg -i --force-confdef,confold "firmware-nanopi$series.deb"
-			for i in {1..7}
-			do
-				G_EXEC dd if="${loopdev}p$i" of="${rootdev}p$i" bs=1M
-			done
-			G_EXEC sync
-			G_EXEC rm "firmware-nanopi$series.deb"
-		fi
-		G_EXEC losetup -d "$loopdev"
-		G_EXEC rm "nanopi$series.img"
-	fi
-
 	# Software updates and migrations
 	if [[ -f '/boot/dietpi/.installed' ]]
 	then
@@ -1510,36 +1472,6 @@ Patch_9_1()
 		G_EXEC rm /etc/kernel/postinst.d/dietpi-USBridgeSig
 	fi
 
-	# Quartz64
-	if (( $G_HW_MODEL == 49 ))
-	then
-		for i in quartz64{a,b} soquartz
-		do
-			dpkg --compare-versions "$(dpkg-query -Wf '${Version}' "firmware-$i" 2> /dev/null)" lt-nl 6.7.4-dietpi1 || continue
-			G_DIETPI-NOTIFY 2 "Updating $i kernel and bootloader ..."
-			G_EXEC_OUTPUT=1 G_EXEC curl -fo package.deb "https://dietpi.com/downloads/binaries/firmware-$i.deb"
-			G_EXEC_OUTPUT=1 G_EXEC dpkg -i --force-confdef,confold package.deb
-			G_EXEC rm package.deb
-			break
-		done
-
-	# VisionFive 2
-	elif (( $G_HW_MODEL == 81 )) && dpkg --compare-versions "$(dpkg-query -Wf '${Version}' linux-image-visionfive2 2> /dev/null)" lt-nl 6.1.78-dietpi1
-	then
-		G_DIETPI-NOTIFY 2 'Updating RISC-V StarFive VisionFive 2 kernel ...'
-		G_EXEC_OUTPUT=1 G_EXEC curl -fo package.deb 'https://dietpi.com/downloads/binaries/linux-image-visionfive2.deb'
-		G_EXEC_OUTPUT=1 G_EXEC dpkg -i --force-confdef,confold package.deb
-		G_EXEC rm package.deb
-
-	# Star64
-	elif (( $G_HW_MODEL == 84 )) && dpkg --compare-versions "$(dpkg-query -Wf '${Version}' linux-image-star64 2> /dev/null)" lt-nl 6.1.78-dietpi1
-	then
-		G_DIETPI-NOTIFY 2 'Updating RISC-V PINE64 Star64 kernel ...'
-		G_EXEC_OUTPUT=1 G_EXEC curl -fo package.deb 'https://dietpi.com/downloads/binaries/linux-image-star64.deb'
-		G_EXEC_OUTPUT=1 G_EXEC dpkg -i --force-confdef,confold package.deb
-		G_EXEC rm package.deb
-	fi
-
 	# Software updates and migrations
 	if [[ -f '/boot/dietpi/.installed' ]]
 	then
@@ -1572,9 +1504,81 @@ map $arg_v $asset_immutable {
 			# shellcheck disable=SC2230
 			G_EXEC sed -i "s|, reboot, poweroff|, $(which reboot), $(which poweroff)|" /etc/sudoers.d/octoprint
 		fi
+	fi
+}
+
+Patch_9_2()
+{
+	# NanoPi R4S: Solve Ethernet adapter disappearing on soft reboot: https://github.com/MichaIng/DietPi/issues/6342
+	if (( $G_HW_MODEL == 47 )) && dpkg --compare-versions "$(dpkg-query -Wf '${Version}' linux-image-current-rockchip64 2> /dev/null)" lt-nl 24.2.0
+	then
+		G_DIETPI-NOTIFY 2 'Updating NanoPi R4S kernel ...'
+		G_EXEC_OUTPUT=1 G_EXEC curl -fo package1.deb 'https://dietpi.com/downloads/binaries/linux-image-current-rockchip64.deb'
+		G_EXEC_OUTPUT=1 G_EXEC curl -fo package2.deb 'https://dietpi.com/downloads/binaries/linux-dtb-current-rockchip64.deb'
+		G_EXEC_OUTPUT=1 G_EXEC curl -fo package3.deb 'https://dietpi.com/downloads/binaries/armbian-firmware.deb'
+		local headers=()
+		dpkg-query -s 'linux-headers-current-rockchip64' &> /dev/null && { G_EXEC_OUTPUT=1 G_EXEC curl -fo package4.deb 'https://dietpi.com/downloads/binaries/linux-headers-current-rockchip64.deb'; headers=('package4.deb'); }
+		G_EXEC_OUTPUT=1 G_EXEC dpkg -i --force-confdef,confold package1.deb package2.deb package3.deb "${headers[@]}"
+		G_EXEC rm package1.deb package2.deb package3.deb "${headers[@]}"
+
+	# Quartz64
+	elif (( $G_HW_MODEL == 49 ))
+	then
+		for i in quartz64{a,b} soquartz
+		do
+			dpkg --compare-versions "$(dpkg-query -Wf '${Version}' "firmware-$i" 2> /dev/null)" lt-nl 6.7.4-dietpi1 || continue
+			G_DIETPI-NOTIFY 2 "Updating $i kernel and bootloader ..."
+			G_EXEC_OUTPUT=1 G_EXEC curl -fo package.deb "https://dietpi.com/downloads/binaries/firmware-$i.deb"
+			G_EXEC_OUTPUT=1 G_EXEC dpkg -i --force-confdef,confold package.deb
+			G_EXEC rm package.deb
+			break
+		done
+
+	# VisionFive 2
+	elif (( $G_HW_MODEL == 81 )) && dpkg --compare-versions "$(dpkg-query -Wf '${Version}' linux-image-visionfive2 2> /dev/null)" lt-nl 6.1.81-dietpi1
+	then
+		G_DIETPI-NOTIFY 2 'Updating RISC-V StarFive VisionFive 2 kernel ...'
+		G_EXEC_OUTPUT=1 G_EXEC curl -fo package.deb 'https://dietpi.com/downloads/binaries/linux-image-visionfive2.deb'
+		G_EXEC_OUTPUT=1 G_EXEC dpkg -i --force-confdef,confold package.deb
+		G_EXEC rm package.deb
+
+	# Star64
+	elif (( $G_HW_MODEL == 84 )) && dpkg --compare-versions "$(dpkg-query -Wf '${Version}' linux-image-star64 2> /dev/null)" lt-nl 6.1.81-dietpi1
+	then
+		G_DIETPI-NOTIFY 2 'Updating RISC-V PINE64 Star64 kernel ...'
+		G_EXEC_OUTPUT=1 G_EXEC curl -fo package.deb 'https://dietpi.com/downloads/binaries/linux-image-star64.deb'
+		G_EXEC_OUTPUT=1 G_EXEC dpkg -i --force-confdef,confold package.deb
+		G_EXEC rm package.deb
+	fi
+
+	# Software updates and migrations
+	if [[ -f '/boot/dietpi/.installed' ]]
+	then
+		# Nextcloud
+		# - Nginx
+		if [[ -f '/etc/nginx/sites-dietpi/dietpi-nextcloud.conf' ]] && ! grep -q 'include mime.types;' /etc/nginx/sites-dietpi/dietpi-nextcloud.conf
+		then
+			G_DIETPI-NOTIFY 2 'Fixing Nextclound Nginx config ...'
+			G_EXEC sed -i '/types {/i\\tinclude mime.types;' /etc/nginx/sites-dietpi/dietpi-nextcloud.conf
+		fi
+
+		# PaperMC
+		if grep -q '^[[:blank:]]*aSOFTWARE_INSTALL_STATE\[36\]=2' /boot/dietpi/.installed
+		then
+			if [[ -f '/mnt/dietpi_userdata/papermc/plugins/floodgate-bukkit.jar' ]]
+			then
+				G_DIETPI-NOTIFY 2 'Renaming Floodgate plugin file to correct Spigot edition name ...'
+				G_EXEC mv /mnt/dietpi_userdata/papermc/plugins/floodgate-{bukkit,spigot}.jar
+			fi
+			if [[ -f '/mnt/dietpi_userdata/papermc/plugins/Geyser-Spigot/config.yml' ]] && grep -q '^auth-type: floodgate' /mnt/dietpi_userdata/papermc/plugins/Geyser-Spigot/config.yml
+			then
+				G_DIETPI-NOTIFY 2 'Fixing Geyser plugin config ...'
+				G_EXEC sed -i 's/^auth-type: floodgate/  auth-type: floodgate/' /mnt/dietpi_userdata/papermc/plugins/Geyser-Spigot/config.yml
+			fi
+		fi
 
 		# Squeezelite
-		if grep -q '^[[:blank:]]*aSOFTWARE_INSTALL_STATE\[36\]=2' /boot/dietpi/.installed && dpkg --compare-versions "$(dpkg-query -Wf '${Version}' squeezelite 2> /dev/null)" lt 2.0.0-1465-dietpi1
+		if grep -q '^[[:blank:]]*aSOFTWARE_INSTALL_STATE\[36\]=2' /boot/dietpi/.installed && dpkg --compare-versions "$(dpkg-query -Wf '${Version}' squeezelite 2> /dev/null)" lt 2.0.0-1468-dietpi1
 		then
 			G_DIETPI-NOTIFY 2 'Updating Squeezelite package ...'
 			G_EXEC_OUTPUT=1 G_EXEC curl -fo package.deb "https://dietpi.com/downloads/binaries/$G_DISTRO_NAME/squeezelite_$G_HW_ARCH_NAME.deb"
@@ -1582,15 +1586,8 @@ map $arg_v $asset_immutable {
 			G_EXEC rm package.deb
 		fi
 
-		# Amiberry
-		if grep -q '^[[:blank:]]*aSOFTWARE_INSTALL_STATE\[108\]=2' /boot/dietpi/.installed && dpkg --compare-versions "$(dpkg-query -Wf '${Version}' amiberry 2> /dev/null)" lt 5.6.6-dietpi1
-		then
-			G_DIETPI-NOTIFY 2 'Preparing Amiberry upgrade to v5.6.6, including migration for RPi systems from fake KMS DispmanX to full KMS SDL2 graphics backend'
-			echo 108 >> /var/tmp/dietpi/dietpi-update_reinstalls
-		fi
-
 		# vaultwarden
-		if grep -q '^[[:blank:]]*aSOFTWARE_INSTALL_STATE\[183\]=2' /boot/dietpi/.installed && dpkg --compare-versions "$(dpkg-query -Wf '${Version}' vaultwarden 2> /dev/null)" lt 1.30.3-dietpi2
+		if grep -q '^[[:blank:]]*aSOFTWARE_INSTALL_STATE\[183\]=2' /boot/dietpi/.installed && dpkg --compare-versions "$(dpkg-query -Wf '${Version}' vaultwarden 2> /dev/null)" lt 1.30.5-dietpi1
 		then
 			# Pre-v8.7 cleanup
 			if [[ -f '/opt/vaultwarden/target/release/vaultwarden' ]]
@@ -1602,6 +1599,13 @@ map $arg_v $asset_immutable {
 			G_EXEC_OUTPUT=1 G_EXEC curl -fo package.deb "https://dietpi.com/downloads/binaries/$G_DISTRO_NAME/vaultwarden_$G_HW_ARCH_NAME.deb"
 			G_AGI ./package.deb
 			G_EXEC rm package.deb
+		fi
+
+		# Amiberry
+		if grep -q '^[[:blank:]]*aSOFTWARE_INSTALL_STATE\[108\]=2' /boot/dietpi/.installed && dpkg --compare-versions "$(dpkg-query -Wf '${Version}' amiberry 2> /dev/null)" lt 5.6.8-dietpi1
+		then
+			G_DIETPI-NOTIFY 2 'Preparing Amiberry upgrade to v5.6.8'
+			echo 108 >> /var/tmp/dietpi/dietpi-update_reinstalls
 		fi
 	fi
 }
