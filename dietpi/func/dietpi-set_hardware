@@ -609,7 +609,7 @@ _EOF_
 				# Fake KMS supports CMA params only
 				[[ $params ]] && params=$(mawk -F, '{for(i=1; i<=NF; i++) {if($i~/^cma-*/){print $i;exit}}}' <<< "$params")
 			else
-				# Disable full KMS HDMI audio if onboard HDMI is disabled
+				# Disable VC4 HDMI audio if onboard HDMI is disabled
 				[[ $params != *',noaudio'* ]] && { ! grep -q '^[[:blank:]]*dtparam=audio=on' /boot/config.txt || grep -Eq '(^|[[:blank:]])snd_bcm2835.enable_hdmi=0([[:blank:]]|$)' /boot/cmdline.txt; } && params+=',noaudio'
 			fi
 
@@ -1725,7 +1725,7 @@ _EOF_
 		# Remove kernel module options
 		G_EXEC sed --follow-symlinks -Ei '/root=/s/[[:blank:]]*snd_bcm2835.enable_[^[:blank:]]*([[:blank:]]*$)?//g' /boot/cmdline.txt
 
-		# Disable full KMS HDMI audio
+		# Disable VC4 HDMI audio
 		local kms=$(grep -Em1 '^[[:blank:]]*dtoverlay=vc4-kms-v3d(-pi4)?(,|$)' /boot/config.txt)
 		[[ $kms && ! $kms =~ ',noaudio'(,|$) ]] && G_EXEC sed --follow-symlinks -Ei '/^[[:blank:]]*dtoverlay=vc4-kms-v3d(-pi4)?(,|$)/s/$/,noaudio/' /boot/config.txt
 
@@ -1943,33 +1943,42 @@ _EOF_
 			#	rpi-bcm2835-hdmi
 			'rpi-bcm2835-'*)
 
-				# Remove blacklist for onboard audio kernel module
-				G_EXEC rm /etc/modprobe.d/dietpi-disable_rpi_audio.conf
-
-				# Enable onboard audio
-				G_CONFIG_INJECT 'dtparam=audio=' 'dtparam=audio=on' /boot/config.txt
-
-				# Force 3.5mm output?
-				if [[ $INPUT_DEVICE_VALUE == *'3.5mm' ]]
+				# Enable VC4 HDMI audio if onboard HDMI is enabled and KMS used, as the bcm2835 HDMI audio driver and KMS conflict: https://dietpi.com/forum/t/19568, https://github.com/raspberrypi/linux/issues/4651
+				if [[ $INPUT_DEVICE_VALUE != *'3.5mm' ]] && grep -Eq '^[[:blank:]]*dtoverlay=vc4-kms-v3d(-pi4)?,(noaudio|.+,noaudio)(,|$)' /boot/config.txt
 				then
-					# Disable HDMI audio via kernel module option
-					G_EXEC sed --follow-symlinks -i '/root=/s/$/ snd_bcm2835.enable_hdmi=0/' /boot/cmdline.txt
-
-				# Force HDMI output?
-				elif [[ $INPUT_DEVICE_VALUE == *'hdmi' ]]
-				then
-					# Disable headphones via kernel module option
-					G_EXEC sed --follow-symlinks -i '/root=/s/$/ snd_bcm2835.enable_headphones=0/' /boot/cmdline.txt
-					# Force HDMI audio via config.txt option
-					G_CONFIG_INJECT 'hdmi_drive=' 'hdmi_drive=2' /boot/config.txt
-					(( $G_HW_MODEL > 3 )) && G_CONFIG_INJECT 'hdmi_drive:1=' 'hdmi_drive:1=2' /boot/config.txt 'hdmi_drive='
+					G_EXEC sed --follow-symlinks -Ei '/^[[:blank:]]*dtoverlay=vc4-kms-v3d(-pi4)?,/s/,noaudio(,|$)/\1/' /boot/config.txt
 				fi
 
-				# Enable full KMS HDMI audio if onboard HDMI is not disabled
-				if [[ $INPUT_DEVICE_VALUE != *'3.5mm' ]]
+				# Enable bcm2835 audio driver if 3.5mm is enabled or no VC4 used
+				if [[ $INPUT_DEVICE_VALUE != *'hdmi' ]] || ! grep -Eq '^[[:blank:]]*dtoverlay=vc4-kms-v3d(-pi4)?(,|$)' /boot/config.txt
 				then
-					local kms=$(grep -Em1 '^[[:blank:]]*dtoverlay=vc4-kms-v3d(-pi4)?,(noaudio|.+,noaudio)(,|$)' /boot/config.txt)
-					[[ $kms ]] && G_EXEC sed --follow-symlinks -Ei '/^[[:blank:]]*dtoverlay=vc4-kms-v3d(-pi4)?,/s/,noaudio(,|$)/\1/' /boot/config.txt
+					# Remove blacklist for bcm2835 audio kernel module
+					G_EXEC rm /etc/modprobe.d/dietpi-disable_rpi_audio.conf
+
+					# Enable bcm2835 audio via device tree parameter
+					G_CONFIG_INJECT 'dtparam=audio=' 'dtparam=audio=on' /boot/config.txt
+
+					# Force 3.5mm output?
+					if [[ $INPUT_DEVICE_VALUE == *'3.5mm' ]]
+					then
+						# Disable HDMI audio via kernel module option
+						G_EXEC sed --follow-symlinks -i '/root=/s/$/ snd_bcm2835.enable_hdmi=0/' /boot/cmdline.txt
+
+					# Force HDMI output?
+					elif [[ $INPUT_DEVICE_VALUE == *'hdmi' ]]
+					then
+						# Disable headphones via kernel module option
+						G_EXEC sed --follow-symlinks -i '/root=/s/$/ snd_bcm2835.enable_headphones=0/' /boot/cmdline.txt
+
+						# Force HDMI audio via config.txt option
+						G_CONFIG_INJECT 'hdmi_drive=' 'hdmi_drive=2' /boot/config.txt
+						(( $G_HW_MODEL > 3 )) && G_CONFIG_INJECT 'hdmi_drive:1=' 'hdmi_drive:1=2' /boot/config.txt 'hdmi_drive='
+					fi
+
+				# If only VC4 HDMI audio is used, return here to skip /etc/asound.conf generation and remove potential root user config: https://dietpi.com/forum/t/19568
+				else
+					[[ -f '/root/.asoundrc' ]] && G_EXEC rm /root/.asoundrc
+					return 0
 				fi
 			;;
 
