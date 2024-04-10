@@ -157,15 +157,12 @@ Package: ympd
 Version: $version-$suffix
 Architecture: $(dpkg --print-architecture)
 Maintainer: MichaIng <micha@dietpi.com>
-Date: $(date -u '+%a, %d %b %Y %T %z')
-Standards-Version: 4.6.2.0
+Date: $(date -uR)
 Installed-Size: $(du -sk "$DIR" | mawk '{print $1}')
 Depends:$DEPS_APT_VERSIONED
 Section: sound
 Priority: optional
 Homepage: https://github.com/SuperBFG7/ympd
-Vcs-Git: https://github.com/SuperBFG7/ympd.git
-Vcs-Browser: https://github.com/SuperBFG7/ympd
 Description: Standalone MPD Web GUI written in C, utilizing Websockets and Bootstrap/JS
 _EOF_
 G_CONFIG_INJECT 'Installed-Size: ' "Installed-Size: $(du -sk "$DIR" | mawk '{print $1}')" "$DIR/DEBIAN/control"

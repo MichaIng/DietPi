@@ -539,16 +539,13 @@ Package: $name-airplay2
 Version: $version-$suffix
 Architecture: $(dpkg --print-architecture)
 Maintainer: MichaIng <micha@dietpi.com>
-Date: $(date -u '+%a, %d %b %Y %T %z')
-Standards-Version: 4.6.2.0
+Date: $(date -uR)
 Installed-Size: $(du -sk "$DIR" | mawk '{print $1}')
 Depends:$DEPS_APT_VERSIONED
 Conflicts: $name
 Section: sound
 Priority: optional
 Homepage: $repo
-Vcs-Git: $repo.git
-Vcs-Browser: $repo
 Description: AirPlay audio player
  Plays audio streamed from iTunes, iOS devices and third-party AirPlay
  sources such as ForkedDaapd and others. Audio played by a Shairport

@@ -182,15 +182,12 @@ Package: $name
 Version: $version-$suffix
 Architecture: $(dpkg --print-architecture)
 Maintainer: MichaIng <micha@dietpi.com>
-Date: $(date -u '+%a, %d %b %Y %T %z')
-Standards-Version: 4.6.2.0
+Date: $(date -uR)
 Installed-Size: $(du -sk "$DIR" | mawk '{print $1}')
 Depends:$DEPS_APT_VERSIONED
 Section: sound
 Priority: optional
 Homepage: $repo
-Vcs-Git: $repo.git
-Vcs-Browser: $repo
 Description: Minimalist UPNP AV renderer
  gmrender-resurrect is a minimalist UPNP AV renderer that can be used to
  play music controlled by a UPNP AV control point.  This package contains
