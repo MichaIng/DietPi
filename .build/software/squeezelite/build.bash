@@ -164,16 +164,13 @@ Package: squeezelite
 Version: $version-$suffix
 Architecture: $(dpkg --print-architecture)
 Maintainer: MichaIng <micha@dietpi.com>
-Date: $(date -u '+%a, %d %b %Y %T %z')
-Standards-Version: 4.6.2.0
+Date: $(date -uR)
 Installed-Size: $(du -sk "$DIR" | mawk '{print $1}')
 Depends:$DEPS_APT_VERSIONED
 Conflicts: squeezelite-pa, squeezelite-pulseaudio
 Section: sound
 Priority: optional
 Homepage: https://github.com/ralph-irving/squeezelite
-Vcs-Git: https://github.com/ralph-irving/squeezelite.git
-Vcs-Browser: https://github.com/ralph-irving/squeezelite
 Description: lightweight headless Squeezebox emulator - ALSA version
  Squeezelite is a small headless Squeezebox emulator. It is aimed at
  supporting high quality audio including USB DAC based output at multiple
