@@ -96,7 +96,7 @@ $FP_SCRIPT	rpi_kernel_choice		<empty> Supported on Debian Bookworm or newer on R
 
 			# Generate locales and set new default
 			# - 1. this calls "locale-gen" to regenerate a fresh locale cache based on /etc/locale.gen to /usr/lib/locale/locale-archive.
-			# - 2. this calls "update-locale LANG=<default>" to apply the new default locale form the debconf default assigned above.
+			# - 2. this calls "update-locale LANG=<default>" to apply the new default locale from the debconf default assigned above.
 			G_CHECK_OUTPUT=1 G_EXEC dpkg-reconfigure -f noninteractive locales
 
 			# Update dietpi.txt entry
@@ -113,18 +113,77 @@ $FP_SCRIPT	rpi_kernel_choice		<empty> Supported on Debian Bookworm or newer on R
 	{
 		[[ $INPUT_MODE_VALUE ]] || { Unknown_Input_Mode; return 1; }
 
+		# DietPi repo
+		[[ -f '/etc/apt/trusted.gpg.d/dietpi.asc' ]] || G_EXEC curl -sSf 'https://dietpi.com/apt/key.asc' -o /etc/apt/trusted.gpg.d/dietpi.asc
+		# - ARMv6: Since Debian cannot distinguish between ARMv6hf and ARMv7, both armhf, we use a dedicated main component for those.
+		local components='main' all_components=''
+		(( $G_HW_ARCH == 1 )) && components='main-armv6'
+		# - Additional components for SBC-specific packages and builds, some per distro version, some for all distro versions
+		[[ $G_HW_MODEL == [2-5] ]] && components+=" rpi$G_HW_MODEL"
+		case $G_HW_MODEL in
+			[0-9]) all_components='rpi';;
+			10) all_components='odroidc1';;
+			49)
+				# Detect variant either based on $HW_VARIANT environment variable, existing "all" components or installed kernel/firmware package
+				# shellcheck disable=SC2154
+				case $HW_VARIANT in
+					1) all_components='quartz64a';;
+					2) all_components='quartz64b';;
+					3) all_components='soquartz';;
+					*)
+						[[ -f '/etc/apt/sources.list.d/dietpi.list' ]] && all_components=$(sed -n '/ all /{s/^.* all //p;q}' /etc/apt/sources.list.d/dietpi.list)
+						[[ $all_components ]] || for i in quartz64{a,b} soquartz
+						do
+							dpkg-query -s "firmware-$i" &> /dev/null || continue
+							all_components=$i
+							break
+						done
+					;;
+				esac
+			;;
+			61) all_components='nanopi2';;
+			62)
+				# Detect variant either based on $HW_VARIANT environment variable, existing "all" components or installed U-Boot package
+				# shellcheck disable=SC2154
+				case $HW_VARIANT in
+					1) all_components='nanopim3';;
+					2) all_components='nanopifire3';;
+					*)
+						[[ -f '/etc/apt/sources.list.d/dietpi.list' ]] && all_components=$(sed -n '/ all /{s/^.* all //p;q}' /etc/apt/sources.list.d/dietpi.list)
+						[[ $all_components ]] || for i in nanopi{m,fire}3
+						do
+							dpkg-query -s "linux-u-boot-$i-legacy" &> /dev/null || continue
+							all_components=$i
+							break
+						done
+					;;
+				esac
+			;;
+			63) all_components='nanopim1';;
+			66) all_components='nanopim1plus';;
+			70) all_components='sparkysbc';;
+			81) all_components='visionfive2';;
+			84) all_components='star64';;
+			*) :;;
+		esac
+		G_EXEC eval "echo 'deb https://dietpi.com/apt $G_DISTRO_NAME $components' > /etc/apt/sources.list.d/dietpi.list"
+		[[ $all_components ]] && G_EXEC eval "echo 'deb https://dietpi.com/apt all $all_components' >> /etc/apt/sources.list.d/dietpi.list"
+
+		# Exit path for quick DietPi-only repo updates
+		[[ $INPUT_MODE_VALUE == 'dietpi' ]] && return 0
+
 		# RPi Trixie: Suite does not exist yet: https://archive.raspberrypi.com/debian/dists/
-		(( $G_HW_MODEL < 10 || ( $G_HW_MODEL == 75 && ${G_RASPBIAN:-0} == 1 ) )) && G_EXEC eval "echo 'deb https://archive.raspberrypi.com/debian/ ${G_DISTRO_NAME/trixie/bookworm} main' > /etc/apt/sources.list.d/raspi.list"
+		(( $G_HW_MODEL < 10 || ( $G_HW_MODEL == 75 && ${G_RASPBIAN:-0} == 1 ) )) && G_EXEC eval "echo 'deb https://archive.raspberrypi.com/debian ${G_DISTRO_NAME/trixie/bookworm} main' > /etc/apt/sources.list.d/raspi.list"
 
 		# RISC-V: Provided via Sid only
 		if (( $G_HW_ARCH == 11 ))
 		then
-			G_EXEC eval 'echo '\''deb https://deb.debian.org/debian/ sid main contrib non-free non-free-firmware'\'' > /etc/apt/sources.list'
+			G_EXEC eval 'echo '\''deb https://deb.debian.org/debian sid main contrib non-free non-free-firmware'\'' > /etc/apt/sources.list'
 
 		# Raspbian
 		elif (( $G_RASPBIAN ))
 		then
-			[[ $INPUT_MODE_VALUE == 'default' ]] && INPUT_MODE_VALUE='http://raspbian.raspberrypi.com/raspbian/'
+			[[ $INPUT_MODE_VALUE == 'default' ]] && INPUT_MODE_VALUE='http://raspbian.raspberrypi.com/raspbian'
 
 			G_EXEC eval "echo 'deb $INPUT_MODE_VALUE $G_DISTRO_NAME main contrib non-free' > /etc/apt/sources.list"
 
@@ -137,7 +196,7 @@ $FP_SCRIPT	rpi_kernel_choice		<empty> Supported on Debian Bookworm or newer on R
 
 			G_EXEC eval "echo 'deb $INPUT_MODE_VALUE $G_DISTRO_NAME main contrib non-free
 deb $INPUT_MODE_VALUE $G_DISTRO_NAME-updates main contrib non-free
-deb https://deb.debian.org/debian-security/ $G_DISTRO_NAME-security main contrib non-free
+deb https://deb.debian.org/debian-security $G_DISTRO_NAME-security main contrib non-free
 deb $INPUT_MODE_VALUE $G_DISTRO_NAME-backports main contrib non-free' > /etc/apt/sources.list"
 
 			# Bookworm: non-free firmware has been moved to new component: https://deb.debian.org/debian/pool/
@@ -245,7 +304,7 @@ deb $INPUT_MODE_VALUE $G_DISTRO_NAME-backports main contrib non-free' > /etc/apt
 	#/////////////////////////////////////////////////////////////////////////////////////
 	TimeSync_Main()
 	{
-		if [[ ! $INPUT_MODE_VALUE || $INPUT_MODE_VALUE == [01234] ]]
+		if [[ ! $INPUT_MODE_VALUE || $INPUT_MODE_VALUE == [0-4] ]]
 		then
 			# If no input given, re-apply current dietpi.txt setting, else revert to default mode 2
 			[[ $INPUT_MODE_VALUE ]] || INPUT_MODE_VALUE=$(sed -n '/^[[:blank:]]*CONFIG_NTP_MODE=/{s/^[^=]*=//p;q}' /boot/dietpi.txt)
@@ -300,7 +359,7 @@ deb $INPUT_MODE_VALUE $G_DISTRO_NAME-backports main contrib non-free' > /etc/apt
 			# Oneshot modes: Enable systemd-timesyncd to start early at boot, but stop it now
 			elif [[ $INPUT_MODE_VALUE == [123] ]]
 			then
-				[[ ${timesyncd[0]} ]] && G_AG_CHECK_INSTALL_PREREQ systemd-timesyncd
+				G_AG_CHECK_INSTALL_PREREQ systemd-timesyncd
 				G_EXEC systemctl unmask systemd-timesyncd # Failsafe
 				G_EXEC systemctl enable systemd-timesyncd
 				G_EXEC systemctl stop systemd-timesyncd

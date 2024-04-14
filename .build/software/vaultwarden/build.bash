@@ -227,15 +227,12 @@ Package: vaultwarden
 Version: $version
 Architecture: $(dpkg --print-architecture)
 Maintainer: MichaIng <micha@dietpi.com>
-Date: $(date -u '+%a, %d %b %Y %T %z')
-Standards-Version: 4.6.2.0
+Date: $(date -uR)
 Installed-Size: $(du -sk "$DIR" | mawk '{print $1}')
 Depends:$DEPS_APT_VERSIONED
 Section: misc
 Priority: optional
 Homepage: https://github.com/dani-garcia/vaultwarden
-Vcs-Git: https://github.com/dani-garcia/vaultwarden.git
-Vcs-Browser: https://github.com/dani-garcia/vaultwarden
 Description: Alternative implementation of the Bitwarden server API written in
  Rust and compatible with upstream Bitwarden clients, perfect for self-hosted
  deployment where running the official resource-heavy service might not be ideal.

@@ -816,7 +816,7 @@ setenv rootuuid "true"' /boot/boot.cmd
 		G_DIETPI-NOTIFY 2 "Setting APT sources.list: $DISTRO_TARGET_NAME $DISTRO_TARGET"
 
 		# We need to forward $DISTRO_TARGET* to dietpi-set_software, as well as $G_HW_MODEL + $G_RASPBIAN for Debian vs Raspbian decision.
-		G_DISTRO=$DISTRO_TARGET G_DISTRO_NAME=$DISTRO_TARGET_NAME G_HW_ARCH=$G_HW_ARCH G_HW_MODEL=$G_HW_MODEL G_RASPBIAN=$G_RASPBIAN G_EXEC /boot/dietpi/func/dietpi-set_software apt-mirror default
+		G_DISTRO=$DISTRO_TARGET G_DISTRO_NAME=$DISTRO_TARGET_NAME G_HW_ARCH=$G_HW_ARCH G_HW_MODEL=$G_HW_MODEL G_RASPBIAN=$G_RASPBIAN HW_VARIANT=$HW_VARIANT G_EXEC /boot/dietpi/func/dietpi-set_software apt-mirror default
 
 		# (Re)create DietPi runtime and logs dir, used by G_AGx
 		G_EXEC mkdir -p /run/dietpi /var/tmp/dietpi/logs
@@ -964,7 +964,7 @@ setenv rootuuid "true"' /boot/boot.cmd
 		fi
 
 		# Assure that dir for additional sources is present
-		[[ -d '/etc/apt/sources.list.d' ]] || G_EXEC mkdir /etc/apt/sources.list.d
+		G_EXEC mkdir -p /etc/apt/sources.list.d
 
 		### Kernel/bootloader/initramfs packages: We need to install those directly to allow G_AGA() autoremove possible older packages later: https://github.com/MichaIng/DietPi/issues/1285#issuecomment-354602594
 
@@ -1037,7 +1037,7 @@ _EOF_
 			# Remove obsolete lists
 			G_EXEC rm -Rf /etc/apt/sources.list.d/*
 			# Add Armbian repository
-			G_EXEC eval "echo 'deb https://apt.armbian.com/ $DISTRO_TARGET_NAME main' > /etc/apt/sources.list.d/dietpi-armbian.list"
+			G_EXEC eval "echo 'deb https://apt.armbian.com ${DISTRO_TARGET_NAME/bullseye/bookworm} main' > /etc/apt/sources.list.d/dietpi-armbian.list"
 			# Update APT lists
 			G_AGUP
 			# Install kernel, device tree, U-Boot, firmware and initramfs packages
@@ -1151,14 +1151,13 @@ _EOF_
 			G_AGI initramfs-tools u-boot-tools armbian-firmware "${zstd[@]}"
 			[[ ${zstd[0]} ]] && G_CONFIG_INJECT 'COMPRESS=' 'COMPRESS=zstd' /etc/initramfs-tools/initramfs.conf
 			# Download and pre-install kernel hosted on dietpi.com where the Armbian APT repo provides a too old version
-			# - NanoPi R4S: Solve Ethernet adapter disappearing on soft reboot: https://github.com/MichaIng/DietPi/issues/6342
-			if [[ ( $G_HW_MODEL == 72 && $HW_VARIANT == 2 ) || $G_HW_MODEL =~ ^(47|76|83)$ ]]
+			if (( $G_HW_MODEL == 83 ))
 			then
 				G_EXEC_OUTPUT=1 G_EXEC curl -fo package1.deb "https://dietpi.com/downloads/binaries/linux-image-$branch-$kernel.deb"
 				G_EXEC_OUTPUT=1 G_EXEC curl -fo package2.deb "https://dietpi.com/downloads/binaries/linux-dtb-$branch-$kernel.deb"
 				G_EXEC_OUTPUT=1 G_EXEC curl -fo package3.deb 'https://dietpi.com/downloads/binaries/armbian-firmware.deb'
 				local uboot=()
-				[[ $G_HW_MODEL == 76 || ( $G_HW_MODEL == 83 && $HW_VARIANT == 1 ) ]] && { G_EXEC_OUTPUT=1 G_EXEC curl -fo package4.deb "https://dietpi.com/downloads/binaries/linux-u-boot-$model-$branch.deb"; uboot=('package4.deb'); }
+				#(( $G_HW_MODEL == 83 )) && (( $HW_VARIANT == 1 )) && { G_EXEC_OUTPUT=1 G_EXEC curl -fo package4.deb "https://dietpi.com/downloads/binaries/linux-u-boot-$model-$branch.deb"; uboot=('package4.deb'); }
 				G_EXEC_OUTPUT=1 G_EXEC dpkg -i package1.deb package2.deb package3.deb "${uboot[@]}"
 				G_EXEC rm package1.deb package2.deb package3.deb "${uboot[@]}"
 			fi
@@ -1195,7 +1194,7 @@ _EOF_
 			elif (( $G_HW_MODEL == 74 ))
 			then
 				G_AGI device-tree-compiler
-				[[ -d '/boot/overlay-user' ]] || G_EXEC mkdir /boot/overlay-user
+				G_EXEC mkdir -p /boot/overlay-user
 				cat << '_EOF_' > /boot/overlay-user/dietpi-usb-otg.dts
 /dts-v1/;
 /plugin/;
@@ -1285,6 +1284,14 @@ _EOF_
 			[[ -f '/usr/share/keyrings/raspbian-archive-keyring.gpg' ]] && G_EXEC ln -sf /usr/share/keyrings/raspbian-archive-keyring.gpg /etc/apt/trusted.gpg.d/raspbian-archive-keyring.gpg
 			[[ -f '/etc/apt/trusted.gpg' ]] && G_EXEC rm /etc/apt/trusted.gpg
 			[[ -f '/etc/apt/trusted.gpg~' ]] && G_EXEC rm '/etc/apt/trusted.gpg~'
+
+			# Skip creating kernel symlinks and remove existing ones
+			if [[ -L '/vmlinuz' ]]
+			then
+				G_DIETPI-NOTIFY 2 'Preventing obsolete kernel and initramfs symlink generation'
+				G_EXEC eval 'echo '\''do_symlinks=0'\'' > /etc/kernel-img.conf'
+				G_EXEC rm -f /{initrd.img,vmlinuz}{,.old}
+			fi
 
 		# Quartz64
 		elif [[ $G_HW_MODEL == 49 && $(findmnt -Ufnro TARGET -T /boot) == '/' ]]
@@ -1441,7 +1448,7 @@ _EOF_
 
 			# Remove obsolete components from Armbian list and connect via HTTPS
 			G_EXEC rm -Rf /etc/apt/sources.list.d/{,.??,.[^.]}*
-			G_EXEC eval "echo 'deb https://apt.armbian.com/ $DISTRO_TARGET_NAME main' > /etc/apt/sources.list.d/dietpi-armbian.list"
+			G_EXEC eval "echo 'deb https://apt.armbian.com $DISTRO_TARGET_NAME main' > /etc/apt/sources.list.d/dietpi-armbian.list"
 
 			# Skip creating kernel symlinks and remove existing ones
 			if [[ -L '/vmlinuz' ]]
@@ -1477,10 +1484,6 @@ _EOF_
 			if dpkg-query -s 'armbian-firmware' &> /dev/null
 			then
 				aPACKAGES_REQUIRED_INSTALL+=('armbian-firmware')
-
-			elif dpkg-query -s 'orangepi-firmware' &> /dev/null
-			then
-				aPACKAGES_REQUIRED_INSTALL+=('orangepi-firmware')
 			else
 				aPACKAGES_REQUIRED_INSTALL+=('firmware-linux-free')	# Free misc
 				aPACKAGES_REQUIRED_INSTALL+=('firmware-misc-nonfree')	# Non-free misc incl. Ralink and MediaTek WiFi/BT
