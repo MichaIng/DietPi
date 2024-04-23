@@ -139,8 +139,39 @@ poweroff
 _EOF_
 
 ##########################################
+# bash-script for building unbound-package
+##########################################
+	
+UNBOUND_VERSION="1.19.2-1"
+DEBIAN_VERSION=$DISTRO
+ARCHITECTURE=$ARCH
+
+if [ -z "$DEBIAN_VERSION" ] || [ -z "$ARCHITECTURE" ]; then
+	echo "Usage: $0 <debian-version> <architecture>"
+	exit 1
+fi
+
+# install dependencies
+G_EXEC sudo apt-get update
+G_EXEC sudo apt-get install -y debhelper devscripts
+
+# clone Unbound source
+G_EXEC git clone --branch debian/$UNBOUND_VERSION --depth=1 https://salsa.debian.org/dns-team/unbound.git
+G_EXEC cd unbound
+
+# add new changelog-entry
+G_EXEC dch -l "+dietpi" "Neuer DietPi Build für $DEBIAN_VERSION und $ARCHITECTURE."
+
+# build package for specific architecture
+G_EXEC dpkg-buildpackage -us -uc -b -a$ARCHITECTURE
+
+# move package
+G_EXEC mv ../*.deb ~/dietpi-packages/
+
+##########################################
 # Boot container
 ##########################################
 systemd-nspawn -bD rootfs
 [[ -f rootfs/output/${NAME}_$ARCH.$EXT ]] || Error_Exit "Failed to build package: ${NAME}_$ARCH.$EXT"
 }
+
