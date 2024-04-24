@@ -260,8 +260,6 @@ done
 ##########################################
 apackages=('xz-utils' 'parted' 'fdisk' 'systemd-container')
 (( $G_HW_ARCH == $arch || ( $G_HW_ARCH < 10 && $G_HW_ARCH > $arch ) )) || apackages+=('qemu-user-static' 'binfmt-support')
-# Temporary workaround for failing Microsoft repo fetch: https://github.com/microsoft/linux-package-repositories/issues/130
-G_EXEC rm /etc/apt/sources.list.d/microsoft-prod.list
 G_AG_CHECK_INSTALL_PREREQ "${apackages[@]}"
 
 ##########################################
