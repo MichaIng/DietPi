@@ -181,7 +181,7 @@ Process_Software()
 			152) aSERVICES[i]='avahi-daemon' aUDP[i]='5353';;
 			153) aSERVICES[i]='octoprint' aTCP[i]='5001'; (( $arch == 10 )) || aDELAY[i]=60;;
 			154) aSERVICES[i]='roonserver';; # Listens on a variety of different port ranges
-			155) aSERVICES[i]='htpc-manager' aTCP[i]='8085';;
+			155) aSERVICES[i]='htpc-manager' aTCP[i]='8085'; (( $arch == 10 )) || aDELAY[i]=30; [[ $arch == 3 && $DISTRO == 'trixie' ]] && aDELAY[i]=60;;
 			157) aSERVICES[i]='home-assistant' aTCP[i]='8123'; (( $arch == 10 )) && aDELAY[i]=60 || aDELAY[i]=900;;
 			158) aSERVICES[i]='minio' aTCP[i]='9001 9004';;
 			161) aSERVICES[i]='bdd' aTCP[i]='80 443';;
