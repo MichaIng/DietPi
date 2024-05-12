@@ -2,6 +2,7 @@
 {
 	# Error out on command failures
 	set -e
+	EXIT_CODE=0
 
 	Reboot_to_load_Partition_table()
 	{
@@ -41,6 +42,7 @@
 	echo "[ INFO ] Detected root drive $ROOT_DRIVE with root partition $ROOT_PART"
 
 	# Check if the last partition contains a FAT filesystem with DIETPISETUP label
+	REBOOT=0
 	LAST_PART=$(lsblk -nrbo FSTYPE,LABEL "$ROOT_DRIVE" | tail -1)
 	if [[ $LAST_PART == 'vfat DIETPISETUP' ]]
 	then
@@ -49,9 +51,20 @@
 		# Mount it and copy files if present and newer
 		TMP_MOUNT=$(mktemp -d)
 		mount -v "$SETUP_PART" "$TMP_MOUNT"
-		for f in 'dietpi.txt' 'dietpi-wifi.txt' 'dietpiEnv.txt' 'unattended_pivpn.conf' 'Automation_Custom_PreScript.sh' 'Automation_Custom_Script.sh'
+		for f in 'dietpi.txt' 'dietpi-wifi.txt' 'dietpiEnv.txt' 'boot.ini' 'extlinux.conf' 'Automation_Custom_PreScript.sh' 'Automation_Custom_Script.sh' 'unattended_pivpn.conf'
 		do
-			[[ -f $TMP_MOUNT/$f ]] && cp -uv "$TMP_MOUNT/$f" /boot/
+			[[ -f $TMP_MOUNT/$f ]] || continue
+			if [[ $f == 'extlinux.conf' ]]
+			then
+				mkdir -pv /boot/extlinux
+				[[ -f '/boot/extlinux/extlinux.conf' ]] && mtime=$(date -r '/boot/extlinux/extlinux.conf' '+%s') || mtime=0
+				cp -uv "$TMP_MOUNT/$f" /boot/extlinux/
+				(( $(date -r '/boot/extlinux/extlinux.conf' '+%s') > $mtime )) && REBOOT=1
+			else
+				[[ ( $f == 'dietpiEnv.txt' || $f == 'boot.ini' ) && -f /boot/$f ]] && mtime=$(date -r "/boot/$f" '+%s') || mtime=0
+				cp -uv "$TMP_MOUNT/$f" /boot/
+				[[ $f == 'dietpiEnv.txt' || $f == 'boot.ini' ]] && (( $(date -r "/boot/$f" '+%s') '+%s') > $mtime )) && REBOOT=1
+			fi
 		done
 		umount -v "$SETUP_PART"
 		rmdir -v "$TMP_MOUNT"
@@ -65,7 +78,7 @@
 		# Mount it and copy files if present and newer
 		TMP_MOUNT=$(mktemp -d)
 		mount -v "$BOOT_PART" "$TMP_MOUNT"
-		for f in 'dietpi.txt' 'dietpi-wifi.txt' 'dietpiEnv.txt' 'unattended_pivpn.conf' 'Automation_Custom_PreScript.sh' 'Automation_Custom_Script.sh'
+		for f in 'dietpi.txt' 'dietpi-wifi.txt' 'Automation_Custom_PreScript.sh' 'Automation_Custom_Script.sh' 'unattended_pivpn.conf'
 		do
 			[[ -f $TMP_MOUNT/$f ]] && cp -uv "$TMP_MOUNT/$f" /boot/
 		done
@@ -113,9 +126,12 @@
 		'btrfs') btrfs filesystem resize max /;;
 		*)
 			echo "[FAILED] Unsupported root filesystem type ($ROOT_FSTYPE). Aborting..."
-			exit 1
+			EXIT_CODE=1
 		;;
 	esac
 
-	exit 0
+	# Reboot if needed
+	(( $REBOOT )) && reboot
+
+	exit "$EXIT_CODE"
 }
