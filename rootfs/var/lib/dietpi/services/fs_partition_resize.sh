@@ -63,7 +63,7 @@
 			else
 				[[ ( $f == 'dietpiEnv.txt' || $f == 'boot.ini' ) && -f /boot/$f ]] && mtime=$(date -r "/boot/$f" '+%s') || mtime=0
 				cp -uv "$TMP_MOUNT/$f" /boot/
-				[[ $f == 'dietpiEnv.txt' || $f == 'boot.ini' ]] && (( $(date -r "/boot/$f" '+%s') '+%s') > $mtime )) && REBOOT=1
+				[[ $f == 'dietpiEnv.txt' || $f == 'boot.ini' ]] && (( $(date -r "/boot/$f" '+%s') > $mtime )) && REBOOT=1
 			fi
 		done
 		umount -v "$SETUP_PART"
