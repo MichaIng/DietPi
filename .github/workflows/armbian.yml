@@ -11,7 +11,7 @@ on:
       branch:
         description: 'Branch'
         type: choice
-        options: [legacy, current, edge]
+        options: [legacy, current, edge, vendor, vendor-boogie-panthor, collabora]
         default: current
         required: true
       board:
@@ -21,6 +21,10 @@ on:
         description: 'Override Git owner of Armbian repo'
       gitbranch:
         description: 'Override Git branch of Armbian repo'
+      rebase:
+        description: 'Rebase onto latest armbian/main'
+        type: boolean
+        default: true
 concurrency:
   group: ${{ github.workflow }}-${{ github.event.inputs.asset }}-${{ github.event.inputs.branch }}-${{ github.event.inputs.board }}
   cancel-in-progress: true
@@ -33,10 +37,61 @@ jobs:
     - name: Clone Armbian repo
       run: |
         owner='${{ github.event.inputs.gitowner }}'
-        [ "$owner" ] || owner='armbian'
+        [ "$owner" ] || owner='MichaIng'
         branch='${{ github.event.inputs.gitbranch }}'
-        [ "$branch" ] || branch='main'
-        git clone -b "$branch" --depth=1 "https://github.com/$owner/build"
+        [ "$branch" ] || branch='dietpi'
+        git clone -b "$branch" "https://github.com/$owner/build"
+        [ '${{ github.event.inputs.rebase }}' == 'false' ] && exit 0 || :
+        cd build
+        git config user.name "$GITHUB_REPOSITORY_OWNER"
+        git config user.email '${{ github.repository.owner.email }}'
+        if [ "$owner" != 'MichaIng' ]
+        then
+            git remote add dietpi https://github.com/MichaIng/build
+            git fetch dietpi dietpi
+            git rebase dietpi/dietpi
+        elif [ "$branch" != 'dietpi' ]
+        then
+            git fetch origin dietpi
+            git rebase origin/dietpi
+        fi
+        if [ "$owner" != 'armbian' ]
+        then
+            git remote add upstream https://github.com/armbian/build
+            git fetch upstream main
+            git rebase upstream/main
+        elif [ "$branch" != 'main' ]
+        then
+            git fetch origin main
+            git rebase origin/main
+        fi
+    - name: Obtain version suffix
+      run: |
+        cd build
+        read -r version < VERSION
+        case '${{ github.event.inputs.asset }}' in
+            firmware) package='armbian-firmware';;
+            uboot) package='linux-uboot-${{ github.event.inputs.board }}-${{ github.event.inputs.board }}';;
+            kernel)
+                family=$(. 'config/boards/${{ github.event.inputs.board }}.'* &> /dev/null; echo "$BOARDFAMILY")
+                echo "Board family is:             $family"
+                family=$(BRANCH='${{ github.event.inputs.branch }}'; . "config/sources/families/$family.conf" &> /dev/null; echo "$LINUXFAMILY")
+                echo "Linux family is:             $family"
+                package="linux-image-${{ github.event.inputs.branch }}-$family"
+            ;;
+            *) echo 'ERROR: Invalid asset "${{ github.event.inputs.asset }}"'; exit 1;;
+        esac
+        if curl -fO "https://dietpi.com/downloads/binaries/$package.deb"
+        then
+            cur_version=$(dpkg-deb -f "$package.deb" Version)
+            rm "$package.deb"
+            cur_suffix=${cur_version#*-dietpi}
+            echo "Current package version is:  $cur_version"
+        fi
+        echo "New Armbian version is:      $version"
+        [ "$version-dietpi$cur_suffix" = "$cur_version" ] && version="$version-dietpi$((cur_suffix+1))" || version="$version-dietpi1"
+        echo "New package version will be: $version"
+        echo "$version" > VERSION
     - name: Build asset
       run: |
         cd build

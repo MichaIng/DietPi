@@ -61,8 +61,8 @@
 	[[ $SKIP_FIRSTBOOT_RESIZE == 1 ]] || SKIP_FIRSTBOOT_RESIZE=0
 	[[ $SHRINK_ONLY == 1 ]] || SHRINK_ONLY=0
 	[[ $SKIP_ARCHIVE == 1 ]] || SKIP_ARCHIVE=0
-	ADD_DOS_PART=0
-	CONFIGS_TO_BOOT=0
+	ADD_DOS_PART=0 # trailing FAT partition for first boot config files, automatically imported and partition removed on first boot
+	CONFIGS_TO_BOOT=0 # for new RPi kernel/firmware stack where a boot FAT partition exists, but is mounted to /boot/firmware instead of /boot
 	SIGN_PASS=
 	while (( $# ))
 	do
@@ -336,10 +336,7 @@
 		# Move GPT backup partition table to end of drive
 		elif [[ $PART_TABLE_TYPE == 'gpt' ]]
 		then
-			G_DIETPI-NOTIFY 2 'GPT partition table detected, moving GPT backup partition table to end of drive...'
-			G_AG_CHECK_INSTALL_PREREQ gdisk
-			G_EXEC_OUTPUT=1 G_EXEC sgdisk -e "$FP_SOURCE"
-			G_SLEEP 0.5 # Give the root filesystem a little time to be detected
+			G_DIETPI-NOTIFY 2 'GPT partition table detected'
 		else
 			Error_Exit "Unknown partition table type ($PART_TABLE_TYPE), aborting..."
 		fi
@@ -512,9 +509,16 @@
 		# - WARNING: this assumes that the partitions in the table are in order (which we do in other places as well)
 		local last_part_end=$(sfdisk -qlo End "$FP_SOURCE" | tail -1) # 512 byte sectors
 		IMAGE_SIZE=$last_part_end
-		# Add 34 sectors for GPT backup partition table and 1 sector for MBR
-		# shellcheck disable=SC2015
-		[[ $PART_TABLE_TYPE == 'gpt' ]] && ((IMAGE_SIZE+=34)) || ((IMAGE_SIZE++))
+		# Add space for GPT backup partition table, or 1 sector for MBR
+		if [[ $PART_TABLE_TYPE == 'gpt' ]]
+		then
+			# Obtain first usable LBA, which defines the size of the GPT backup, else use 34 sectors as default: https://github.com/MichaIng/DietPi/issues/7024
+			local gpt_size=$(sgdisk -p "$FP_SOURCE" 2>&1 | mawk -F[\ ,] '/^First usable sector/{print $5}')
+			# shellcheck disable=SC2015
+			(( $gpt_size )) && ((IMAGE_SIZE+=$gpt_size)) || ((IMAGE_SIZE+=34))
+		else
+			((IMAGE_SIZE++))
+		fi
 		((IMAGE_SIZE*=512)) # 512 byte sectors => bytes
 
 		# RPi: Move configs to boot FAT partition to allow easier edit from Windows/macOS
@@ -525,9 +529,12 @@
 			G_EXEC mount "${FP_ROOT_DEV::-1}1" "$fat_mountpoint"
 			G_EXEC mount "$FP_ROOT_DEV" "$root_mountpoint"
 			G_DIETPI-NOTIFY 2 'Copying dietpi.txt and other config files to the DIETPISETUP partition'
-			for f in 'dietpi.txt' 'dietpi-wifi.txt' 'dietpiEnv.txt' 'unattended_pivpn.conf' 'Automation_Custom_PreScript.sh' 'Automation_Custom_Script.sh'
+			for f in 'dietpi.txt' 'dietpi-wifi.txt' 'Automation_Custom_PreScript.sh' 'Automation_Custom_Script.sh' 'unattended_pivpn.conf'
 			do
-				[[ -f $root_mountpoint/boot/$f ]] && G_EXEC cp "$root_mountpoint/boot/$f" "$fat_mountpoint/"
+				[[ -f $root_mountpoint/boot/$f ]] || continue
+				G_EXEC cp "$root_mountpoint/boot/$f" "$fat_mountpoint/"
+				TZ=UTC G_EXEC touch -t '197001010000' "$fat_mountpoint/$f"
+				TZ=UTC G_EXEC touch -t '197001010001' "$root_mountpoint/boot/$f"
 			done
 			G_EXEC umount "$root_mountpoint" "$fat_mountpoint"
 			G_EXEC rmdir "$root_mountpoint" "$fat_mountpoint"
@@ -554,22 +561,26 @@
 			G_EXEC mount "$new_dos_part" "$fat_mountpoint"
 			G_EXEC mount "$FP_ROOT_DEV" "$root_mountpoint"
 			G_DIETPI-NOTIFY 2 'Copying dietpi.txt and other config files to the DIETPISETUP partition'
-			for f in 'dietpi.txt' 'dietpi-wifi.txt' 'dietpiEnv.txt' 'unattended_pivpn.conf' 'Automation_Custom_PreScript.sh' 'Automation_Custom_Script.sh'
+			for f in 'dietpi.txt' 'dietpi-wifi.txt' 'dietpiEnv.txt' 'boot.ini' 'extlinux/extlinux.conf' 'Automation_Custom_PreScript.sh' 'Automation_Custom_Script.sh' 'unattended_pivpn.conf'
 			do
-				[[ -f $root_mountpoint/boot/$f ]] && G_EXEC cp "$root_mountpoint/boot/$f" "$fat_mountpoint/"
+				[[ -f $root_mountpoint/boot/$f ]] || continue
+				G_EXEC cp "$root_mountpoint/boot/$f" "$fat_mountpoint/"
+				TZ=UTC G_EXEC touch -t '202101010001' "$fat_mountpoint/${f#extlinux/}"
+				TZ=UTC G_EXEC touch -t '202101010002' "$root_mountpoint/boot/$f"
 			done
-			cat << '_EOF_' > "$fat_mountpoint/Readme-DietPi-Config.txt"
-DietPi pre-boot configuration
+			cat << '_EOF_' > "$fat_mountpoint/README.txt"
+DietPi config partition
 
-You can edit the files in this folder to setup some configuration options
-or even a completely automated install. Please check the documentation and
-dietpi.txt for details: https://dietpi.com/docs/install/
+This FAT partition is a place for relevant configuration files to pre-configure and automate your DietPi setup.
+Those files will be copied into the root filesystem on first boot, if modified, to become effective, and the partition will be removed.
 
-This folder also supports the following additional files. Please ensure that
-they have UNIX style LF line endings:
-- unattended_pivpn.conf
+Apart of editing the existing files, you can also create the following for further automation:
 - Automation_Custom_PreScript.sh
 - Automation_Custom_Script.sh
+- unattended_pivpn.conf
+
+For details, please check our documentation and dietpi.txt itself:
+https://dietpi.com/docs/usage/#how-to-do-an-automatic-base-installation-at-first-boot-dietpi-automation
 _EOF_
 			G_EXEC umount "$root_mountpoint" "$fat_mountpoint"
 			G_EXEC rmdir "$root_mountpoint" "$fat_mountpoint"
@@ -742,10 +753,10 @@ _EOF_
 
 		# Generate xz archive
 		# NB: LZMA2 ultra compression requires much memory per thread. 1 GiB is not sufficient for >2 threads, hence use "-T2" to limit used CPU threads to "2" on 1 GiB devices with more than two cores.
-		local limit_threads=()
-		(( $(free -m | mawk '/Mem:/{print $2}') < 1750 && $(nproc) > 2 )) && limit_threads=('-T2')
+		local threads=0
+		(( $(free -m | mawk '/Mem:/{print $2}') < 1750 && $(nproc) > 2 )) && threads=2
 		[[ -f $OUTPUT_IMG_NAME.$OUTPUT_IMG_EXT.xz ]] && G_EXEC rm "$OUTPUT_IMG_NAME.$OUTPUT_IMG_EXT.xz"
-		G_EXEC_DESC='Creating final xz archive' G_EXEC xz -9e -k "${limit_threads[@]}" "$OUTPUT_IMG_NAME.$OUTPUT_IMG_EXT"
+		G_EXEC_DESC='Creating final xz archive' G_EXEC xz -9e -k "-T$threads" "$OUTPUT_IMG_NAME.$OUTPUT_IMG_EXT"
 		G_EXEC_DESC='Generating SHA256 hash' G_EXEC eval "sha256sum '$OUTPUT_IMG_NAME.$OUTPUT_IMG_EXT.xz' > '$OUTPUT_IMG_NAME.$OUTPUT_IMG_EXT.xz.sha256'"
 		local signature=() sig_text=''
 		[[ $SIGN_PASS ]] && { G_DIETPI-NOTIFY 2 'Signing archive ...'; gpg --batch --pinentry-mode loopback --passphrase "$SIGN_PASS" -b --armor "$OUTPUT_IMG_NAME.$OUTPUT_IMG_EXT.xz" || exit 1; signature=("$OUTPUT_IMG_NAME.$OUTPUT_IMG_EXT.xz.asc") sig_text="\nSignature:   $PWD/${signature[*]}"; }

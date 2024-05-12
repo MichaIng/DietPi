@@ -181,7 +181,7 @@ Process_Software()
 			152) aSERVICES[i]='avahi-daemon' aUDP[i]='5353';;
 			153) aSERVICES[i]='octoprint' aTCP[i]='5001'; (( $arch == 10 )) || aDELAY[i]=60;;
 			154) aSERVICES[i]='roonserver';; # Listens on a variety of different port ranges
-			155) aSERVICES[i]='htpc-manager' aTCP[i]='8085';;
+			155) aSERVICES[i]='htpc-manager' aTCP[i]='8085'; (( $arch == 10 )) || aDELAY[i]=30; [[ $arch == 3 && $DISTRO == 'trixie' ]] && aDELAY[i]=60;;
 			157) aSERVICES[i]='home-assistant' aTCP[i]='8123'; (( $arch == 10 )) && aDELAY[i]=60 || aDELAY[i]=900;;
 			158) aSERVICES[i]='minio' aTCP[i]='9001 9004';;
 			161) aSERVICES[i]='bdd' aTCP[i]='80 443';;
@@ -367,6 +367,9 @@ G_EXEC eval 'echo -e '\''[Service]\nAmbientCapabilities='\'' > rootfs/etc/system
 
 # Workaround for sysctl: permission denied on key "net.core.rmem_max" in containers
 G_EXEC sed --follow-symlinks -i '/# Start DietPi-Software/a\sed -i '\''/G_EXEC sysctl -w net\.core\.rmem_max/d'\'' /boot/dietpi/dietpi-software' rootfs/boot/dietpi/dietpi-login
+
+# ARMv6/7 Trixie: Temporarily prevent dist-upgrade on Trixie, as it fails due to 64-bit time_t transition causing dependency conflicts across the repo.
+(( $arch < 3 )) && [[ $DISTRO == 'trixie' ]] && G_EXEC touch rootfs/boot/dietpi/.skip_distro_upgrade
 
 # Check for service status, ports and commands
 # shellcheck disable=SC2016

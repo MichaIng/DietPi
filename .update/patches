@@ -1231,14 +1231,6 @@ Patch_8_19()
 		# Mopidy: Bullseye suite now available in official APT repo
 		[[ -f '/etc/apt/sources.list.d/mopidy.list' ]] && grep -q buster /etc/apt/sources.list.d/mopidy.list && G_EXEC sed --follow-symlinks -i 's/buster/bullseye/' /etc/apt/sources.list.d/mopidy.list
 
-		# GMediaRender
-		grep -q '^[[:blank:]]*aSOFTWARE_INSTALL_STATE\[163\]=2' /boot/dietpi/.installed && dpkg --compare-versions "$(dpkg-query -Wf '${Version}' gmediarender 2> /dev/null)" lt 0.1-dietpi1 && G_WHIP_MSG '[ INFO ] GMediaRender update available
-\nAn update to GMediaRender 0.1 is available.
-Release notes: https://github.com/hzeller/gmrender-resurrect/releases
-\nDo you want to apply the update now?
-\nYou can manually apply it any time via:
-# dietpi-software reinstall 163' && echo 163 >> /var/tmp/dietpi/dietpi-update_reinstalls
-
 		# ympd
 		if grep -q '^[[:blank:]]*aSOFTWARE_INSTALL_STATE\[32\]=2' /boot/dietpi/.installed
 		then
@@ -1554,6 +1546,7 @@ Patch_9_2()
 	fi
 }
 
+PATCH_9_3_RAN=0
 Patch_9_3()
 {
 	# Purge ancient vmtouch which prevents /boot from being unmounted e.g. for RPi firmware migration: https://github.com/MichaIng/DietPi/issues/6819, https://github.com/MichaIng/DietPi/issues/6976
@@ -1561,9 +1554,79 @@ Patch_9_3()
 
 	# Add DietPi APT repo
 	/boot/dietpi/func/dietpi-set_software apt-mirror dietpi
-	G_AGUP -v
-	# shellcheck disable=SC2154
-	(( $G_AGUP_COUNT )) && G_AGUG
+	G_AGUP
+	G_AGUG
+	PATCH_9_3_RAN=1
+}
+
+Patch_9_4()
+{
+	# Update DietPi APT list for several SBCs we added components to our repo for
+	if [[ $PATCH_9_3_RAN == 0 && $G_HW_MODEL =~ ^(11|40|44|45|48|56|57|59|60|64|65|67|76|78|79|80|82|83|85|88|89|90)$ ]]
+	then
+		/boot/dietpi/func/dietpi-set_software apt-mirror dietpi
+		G_AGUP
+		G_AGUG
+	fi
+
+	# Odroid XU4
+	if (( $G_HW_MODEL == 11 ))
+	then
+		G_DIETPI-NOTIFY 2 'Migrating boot.ini to support new Linux 6.6 device tree overlay locations'
+		/boot/dietpi/func/dietpi-set_hardware flash-u-boot-mmc
+		# shellcheck disable=SC2016
+		G_EXEC sed --follow-symlinks -i '\|/boot/dtb/overlays/${overlay}.dtbo|c\        load mmc 0:1 0x60000000 /boot/dtb/${overlay}.dtbo || load mmc 0:1 0x60000000 /boot/dtb/overlays/${overlay}.dtbo || load mmc 0:1 0x60000000 dtb/${overlay}.dtbo || load mmc 0:1 0x60000000 dtb/overlays/${overlay}.dtbo' /boot/boot.ini
+		G_DIETPI-NOTIFY 2 'Fixing CEC toggle in boot.ini'
+		G_EXEC sed --follow-symlinks -i 's|rm /cec@101B0000;|rm /soc/cec@101b0000;|' /boot/boot.ini
+		G_DIETPI-NOTIFY 2 'Cleaning up obsolete configs'
+		[[ -f '/etc/modprobe.d/odroid-cloudshell.conf' ]] && G_EXEC rm /etc/modprobe.d/odroid-cloudshell.conf
+		G_EXEC sed --follow-symlinks -Ei '/^[[:blank:]]*(gpioplug-ir-recv|fbtft_device)[[:blank:]]*$/d' /etc/modules
+
+	# Orange Pi 5 Plus
+	elif (( $G_HW_MODEL == 82 ))
+	then
+		G_DIETPI-NOTIFY 2 'Assuring persistent classic Ethernet interface names: /etc/udev/rules.d/99-dietpi-orangepi5plus.rules'
+		G_WHIP_MSG '[ WARN ] Persistent eth0/eth1 interface names will be applied
+\nSince classic interface names are randomly applied among the two onboard Ethernet adapters, we install a udev rule, which assures they remain the same on each (re)boot:
+- /etc/udev/rules.d/99-dietpi-orangepi5plus.rules
+\nIf you applied an own workaround via /etc/network/interfaces or similar, this will not be affected. But if you created own udev rules to mitigate the issue, please check whether those conflict with ours. Of course you can remove or rename above file to maintain status quo.'
+		cat << '_EOF_' > /etc/udev/rules.d/99-dietpi-orangepi5plus.rules
+SUBSYSTEM=="net", KERNEL=="eth0", KERNELS=="0004:41:00.0", RUN:="/bin/true"
+SUBSYSTEM=="net", KERNEL=="eth1", KERNELS=="0003:31:00.0", NAME="to_eth0", RUN:="/bin/true"
+SUBSYSTEM=="net", KERNEL=="to_eth0", RUN="/bin/ip l s dev eth0 name eth1", RUN+="/bin/ip l s dev to_eth0 name eth0", RUN+="/bin/udevadm trigger -c add /sys/class/net/eth0 /sys/class/net/eth1"
+_EOF_
+	# Orange Pi Zero 3 1.5 GiB RAM: Fix lost Ethernet adapter on reboot: https://github.com/MichaIng/DietPi/issues/6938
+	elif (( $G_HW_MODEL == 83 )) && dpkg-query -s 'linux-u-boot-orangepizero3-next' &> /dev/null
+	then
+		G_DIETPI-NOTIFY 2 'Switching to new U-Boot build which fixes lost Ethernet adapter on reboot ...'
+		G_AGP linux-u-boot-orangepizero3-next
+		G_AGI linux-u-boot-orangepizero3-current
+		/boot/dietpi/func/dietpi-set_hardware flash-u-boot-mmc
+	fi
+
+	if [[ -f '/boot/dietpi/.installed' ]]
+	then
+		# GMediaRender
+		if grep -q '^[[:blank:]]*aSOFTWARE_INSTALL_STATE\[163\]=2' /boot/dietpi/.installed && ! dpkg-query -s 'gmediarender' &> /dev/null
+		then
+			# Pre-v8.10
+			G_DIETPI-NOTIFY 2 'Updateing GMediaRender ...'
+			[[ -f '/etc/systemd/system/gmediarender.service' ]] && G_EXEC rm /etc/systemd/system/gmediarender.service
+			[[ -d '/etc/systemd/system/gmediarender.service.d' ]] && grep -Rq '/usr/local/bin/gmediarender' /etc/systemd/system/gmediarender.service.d && G_EXEC rm -R /etc/systemd/system/gmediarender.service.d
+			getent passwd gmrender > /dev/null && G_EXEC userdel gmrender
+			getent group gmrender > /dev/null && G_EXEC groupdel gmrender
+			[[ -f '/usr/local/bin/gmediarender' ]] && G_EXEC rm /usr/local/bin/gmediarender
+			[[ -d '/usr/local/share/gmediarender' ]] && G_EXEC rm -R /usr/local/share/gmediarender
+			G_AGI gmediarender
+		fi
+
+		# Shairport Sync
+		if grep -q '^[[:blank:]]*aSOFTWARE_INSTALL_STATE\[37\]=2' /boot/dietpi/.installed
+		then
+			[[ -f '/usr/local/share/man/man7/shairport-sync.7.gz' ]] && G_EXEC rm /usr/local/share/man/man7/shairport-sync.7.gz
+			[[ -d '/usr/local/share/man/man7' ]] && G_EXEC rmdir -p --ignore-fail-on-non-empty /usr/local/share/man/man7
+		fi
+	fi
 }
 
 # v6.35 => v7 migration

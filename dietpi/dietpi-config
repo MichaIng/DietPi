@@ -216,11 +216,10 @@
 			# Remote
 			local odroid_remote_text='Off'
 			local odroid_remote_enabled=0
-			if [[ -f '/etc/systemd/system/odroid-remote.service' ]]; then
-
+			if grep -Eq '^[[:blank:]]*(gpio-ir-recv|meson_ir)[[:blank:]]*$' /etc/modules || systemctl -q is-enabled lircd 2> /dev/null
+			then
 				odroid_remote_text='On'
 				odroid_remote_enabled=1
-
 			fi
 			G_WHIP_MENU_ARRAY+=('10' ": Odroid remote : [$odroid_remote_text]")
 
@@ -260,7 +259,7 @@
 			else
 
 				G_WHIP_MENU_ARRAY+=('odroid-lcd35' ': 480x320 panel with touch input')
-				(( $G_HW_MODEL == 11 )) && G_WHIP_MENU_ARRAY+=('odroid-cloudshell' ': 320x240 panel')
+				(( $G_HW_MODEL == 11 )) && G_WHIP_MENU_ARRAY+=('odroid-cloudshell' ': 320x240 panel' 'odroid-cloudshell2' ': Odroid XU4 CloudShell 2 LCD')
 
 			fi
 
@@ -330,7 +329,7 @@ A long (or insufficiently manufactured) cable may required a higher boost settin
 
 				/boot/dietpi/func/dietpi-set_hardware remoteir none && REBOOT_REQUIRED=1
 
-			elif G_WHIP_YESNO 'This will enable the IR modules, setup Lirc and the Odroid Remote for Odroid C1, C2 and XU4 Cloudshell.
+			elif G_WHIP_YESNO 'This will enable the IR modules, setup Lirc and the Odroid Remote for Odroid C1, C2 and XU4 CloudShell.
 \nNB: Other remotes can be configured by running "irrecord" and applying the codes to "/etc/lirc/lircd.conf"\n\nDo you wish to continue?'; then
 
 				/boot/dietpi/func/dietpi-set_hardware remoteir odroid_remote && REBOOT_REQUIRED=1
@@ -1050,8 +1049,8 @@ Re-enabling HDMI requires a reboot. If you need emergency HDMI output, edit the 
 		# Armbian U-Boot update
 		if [[ -f '/usr/lib/u-boot/platform_install.sh' ]]
 		then
-			local rootdev=$(lsblk -npo PKNAME "$G_ROOTFS_DEV")
-			G_WHIP_MENU_ARRAY+=('Update MMC bootloader' ": Flash current U-Boot to $rootdev")
+			local bootdev=$(lsblk -npo PKNAME "$(findmnt -Ufnro SOURCE -T /boot)")
+			G_WHIP_MENU_ARRAY+=('Update MMC bootloader' ": Flash current U-Boot to $bootdev")
 		fi
 
 		# RPi 4/5 EEPROM update: https://www.raspberrypi.org/documentation/hardware/raspberrypi/booteeprom.md
@@ -1068,11 +1067,17 @@ Re-enabling HDMI requires a reboot. If you need emergency HDMI output, edit the 
 				G_WHIP_MENU_ARRAY+=('Update RPi EEPROM firmware' ': Install rpi-eeprom APT package')
 			fi
 
-		# ROCK 4, ROCK 5B and Orange Pi 5 (Plus): https://dietpi.com/forum/t/orange-pi-5-boot-from-nvme/16457
-		elif [[ $G_HW_MODEL =~ ^(72|78|80|82)$ ]]
+		# ROCK 4, ROCK 5B, Orange Pi 5 (Plus) and Orange Pi 3B: https://dietpi.com/forum/t/orange-pi-5-boot-from-nvme/16457
+		elif [[ $G_HW_MODEL =~ ^(72|78|80|82|87)$ ]]
 		then
 			# ROCK 4: Device tree overlay required
-			(( $G_HW_MODEL == 72 )) || [[ -b '/dev/mtdblock0' && -f '/usr/lib/u-boot/platform_install.sh' ]] && G_WHIP_MENU_ARRAY+=('Update SPI bootloader' ': Flash current U-Boot to /dev/mtdblock0')
+			local spidev='/dev/mtdblock0'
+			(( $G_HW_MODEL == 72 )) || {
+				[[ -f '/usr/lib/u-boot/platform_install.sh' ]] && {
+					{ [[ -e '/dev/mtd0' ]] && grep -q '/dev/mtd0' /usr/lib/u-boot/platform_install.sh && spidev='/dev/mtd0'; } ||
+					{ [[ -b '/dev/mtdblock0' ]] && grep -q 'rksd_loader.img' /usr/lib/u-boot/platform_install.sh; }
+				}
+			} && G_WHIP_MENU_ARRAY+=("Update SPI bootloader' ': Flash current U-Boot to $spidev")
 
 		# VisionFive 2/Star64: https://doc-en.rvspace.org/VisionFive2/PDF/VisionFive2_QSG.pdf
 		elif (( $G_HW_MODEL == 81 || $G_HW_MODEL == 84 ))
@@ -1088,8 +1093,8 @@ Re-enabling HDMI requires a reboot. If you need emergency HDMI output, edit the 
 		[[ -f '/etc/modprobe.d/dietpi-disable_bluetooth.conf' ]] && bluetooth_state=0 bluetooth_state_text='Off'
 		G_WHIP_MENU_ARRAY+=('Bluetooth' ": [$bluetooth_state_text]")
 
-		# Orange Pi Zero 3 specific
-		if (( $G_HW_MODEL == 83 ))
+		# Orange Pi Zero 3/Zero 2W specific
+		if (( $G_HW_MODEL == 83 || $G_HW_MODEL == 88 ))
 		then
 			# SPI state
 			local spi_enabled=$(grep -Ecm1 '^[[:blank:]]*overlays=(.*[[:blank:]])?spi1-cs1-spidev([[:blank:]]|$)' /boot/dietpiEnv.txt)
@@ -1208,14 +1213,9 @@ Further information: https://www.raspberrypi.org/documentation/hardware/raspberr
 		elif [[ $G_WHIP_RETURNED_VALUE == 'Update MMC bootloader' ]]; then
 
 			G_WHIP_YESNO "[ INFO ] MMC bootloader update
-\nThis will flash the U-Boot image of the installed linux-u-boot-* package to the MMC device $rootdev.
+\nThis will flash the U-Boot image of the installed linux-u-boot-* package to the MMC device $bootdev.
 \nDo you want to continue?" || return 0
-			# shellcheck disable=SC1091
-			. /usr/lib/u-boot/platform_install.sh
-			# Do not mute progress and error messages
-			eval "$(declare -f write_uboot_platform | sed -e 's| > /dev/null 2>&1||g' -e 's|status=none|status=progress|g')"
-			# shellcheck disable=SC2154
-			write_uboot_platform "$DIR" "$rootdev"
+			/boot/dietpi/func/dietpi-set_hardware flash-u-boot-mmc "$bootdev"
 
 		elif [[ $G_WHIP_RETURNED_VALUE == 'Update SPI bootloader' ]]; then
 
@@ -1238,17 +1238,28 @@ Further information: https://www.raspberrypi.org/documentation/hardware/raspberr
 					G_CONFIG_INJECT 'overlays=' "overlays=${overlays[*]}" /boot/dietpiEnv.txt
 					G_CONFIG_INJECT 'param_spinor_spi_bus=' 'param_spinor_spi_bus=1' /boot/dietpiEnv.txt
 					REBOOT_REQUIRED=1
-					return 0
 				fi
-			fi
-			G_WHIP_YESNO '[ INFO ] SPI bootloader update
+
+			elif [[ $spidev == '/dev/mtd0' ]]
+			then
+				G_WHIP_YESNO '[ INFO ] SPI bootloader update
+\nThis will flash the U-Boot image of the installed linux-u-boot-* package to the SPI device /dev/mtd0.
+\nDo you want to continue?' || return 0
+				G_AG_CHECK_INSTALL_PREREQ mtd-utils
+				# shellcheck disable=SC1091
+				. /usr/lib/u-boot/platform_install.sh
+				write_uboot_platform_mtd
+			else
+				G_WHIP_YESNO '[ INFO ] SPI bootloader update
 \nThis will flash the U-Boot image of the installed linux-u-boot-* package to the SPI device /dev/mtdblock0.
 \nDo you want to continue?' || return 0
-			# shellcheck disable=SC1091
-			. /usr/lib/u-boot/platform_install.sh
-			[[ -f $DIR/rkspi_loader.img ]] || { G_WHIP_MSG "[FAILED] SPI U-Boot image missing\n\nThe expected U-Boot image at $DIR/rkspi_loader.img could not be found. Please report this to our GitHub or forum, so we can check back and in case update this dietpi-config option."; return 1; }
-			# shellcheck disable=SC2154
-			G_EXEC_OUTPUT=1 G_EXEC dd if="$DIR/rkspi_loader.img" of=/dev/mtdblock0 oflag=direct conv=notrunc status=progress
+				# shellcheck disable=SC1091
+				. /usr/lib/u-boot/platform_install.sh
+				# shellcheck disable=SC2154
+				[[ -f $DIR/rkspi_loader.img ]] || { G_WHIP_MSG "[FAILED] SPI U-Boot image missing\n\nThe expected U-Boot image at $DIR/rkspi_loader.img could not be found. Please report this to our GitHub or forum, so we can check back and in case update this dietpi-config option."; return 1; }
+				# shellcheck disable=SC2154
+				G_EXEC_OUTPUT=1 G_EXEC dd if="$DIR/rkspi_loader.img" of=/dev/mtdblock0 oflag=direct conv=notrunc status=progress
+			fi
 
 		elif [[ $G_WHIP_RETURNED_VALUE == 'Update bootloader' ]]; then
 

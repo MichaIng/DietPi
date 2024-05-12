@@ -30,8 +30,9 @@ $FP_SCRIPT	rpi-camera		enable/disable
 $FP_SCRIPT	rpi-codec		enable/disable
 $FP_SCRIPT	rpi-opengl		vc4-kms-v3d/vc4-fkms-v3d/disable
 $FP_SCRIPT	rpi3_usb_boot		enable
-$FP_SCRIPT	rpi-eeprom		Update RPi 4 EEPROM bootloader and USB firmware
+$FP_SCRIPT	rpi-eeprom		Update RPi 4/5 EEPROM bootloader and USB firmware
 $FP_SCRIPT	vf2-spi-update		Update StarFive VisionFive 2 SPI bootloader
+$FP_SCRIPT	flash-u-boot-mmc	[<device_path>] Flash U-Boot binary to eMMC/SD card, taking device path as optional argument, else flashes to /boot drive
 $FP_SCRIPT	gpudriver		none|intel|nvidia|amd|custom
 $FP_SCRIPT	qemu-guest-agent|qga	enable/disable
 "	#////////////////////////////////////
@@ -215,7 +216,7 @@ _EOF_
 	#/////////////////////////////////////////////////////////////////////////////////////
 	RPi_EEPROM()
 	{
-		(( $G_HW_MODEL > 3 )) || { Unsupported_Input_Name; return 1; } # Exit path for non-RPi 4/5
+		(( $G_HW_MODEL > 3 && $G_HW_MODEL < 10 )) || { Unsupported_Input_Name; return 1; } # Exit path for non-RPi 4/5
 
 		# Install required APT package
 		G_AG_CHECK_INSTALL_PREREQ rpi-eeprom
@@ -241,6 +242,22 @@ _EOF_
 		G_EXEC_OUTPUT=1 G_EXEC flashcp -v u-boot-spl.bin.normal.out /dev/mtd0
 		G_EXEC_OUTPUT=1 G_EXEC flashcp -v visionfive2_fw_payload.img /dev/mtd2
 		G_EXEC rm u-boot-spl.bin.normal.out visionfive2_fw_payload.img
+	}
+
+	#/////////////////////////////////////////////////////////////////////////////////////
+	# flash-u-boot-mmc
+	#/////////////////////////////////////////////////////////////////////////////////////
+	Flash_U-Boot_MMC()
+	{
+		[[ -f '/usr/lib/u-boot/platform_install.sh' ]] || { G_DIETPI-NOTIFY 1 'Flash script /usr/lib/u-boot/platform_install.sh not found. Aborting ...'; return 1; }
+		[[ $INPUT_DEVICE_VALUE ]] || INPUT_DEVICE_VALUE=$(lsblk -npo PKNAME "$(findmnt -Ufnro SOURCE -T /boot)")
+		[[ -b $INPUT_DEVICE_VALUE ]] || { G_DIETPI-NOTIFY 1 "Block device \"$INPUT_DEVICE_VALUE\" not found. Aborting ..."; return 1; }
+		# shellcheck disable=SC1091
+		. /usr/lib/u-boot/platform_install.sh || return 1
+		# Do not mute progress and error messages
+		eval "$(declare -f write_uboot_platform | sed -e 's| > /dev/null 2>&1||g' -e 's|status=none|status=progress|g')"
+		# shellcheck disable=SC2154
+		write_uboot_platform "$DIR" "$INPUT_DEVICE_VALUE"
 	}
 
 	#/////////////////////////////////////////////////////////////////////////////////////
@@ -315,65 +332,52 @@ _EOF_
 	#/////////////////////////////////////////////////////////////////////////////////////
 	# remoteir
 	#/////////////////////////////////////////////////////////////////////////////////////
-	RemoteIR_Prereqs(){ G_AG_CHECK_INSTALL_PREREQ lirc; }
-
-	RemoteIR_Reset(){
-
+	RemoteIR_Reset()
+	{
 		# Disable JustBoom
-		if (( $G_HW_MODEL < 10 )); then
-
-			if [[ -f '/etc/systemd/system/justboom-ir-mpd.service' ]]; then
-
+		if (( $G_HW_MODEL < 10 ))
+		then
+			if [[ -f '/etc/systemd/system/justboom-ir-mpd.service' ]]
+			then
 				G_EXEC systemctl disable --now justboom-ir-mpd
 				G_EXEC rm /etc/systemd/system/justboom-ir-mpd.service
-
 			fi
 			[[ -d '/etc/systemd/system/justboom-ir-mpd.service.d' ]] && G_EXEC rm -R /etc/systemd/system/justboom-ir-mpd.service.d
-
 			G_EXEC sed --follow-symlinks -i '/^[[:blank:]]*dtoverlay=gpio-ir/d' /boot/config.txt
 
 		# Disable Odroids
-		elif (( $G_HW_MODEL < 20 )); then
-
-			if [[ -f '/etc/systemd/system/odroid-remote.service' ]]; then
-
-				G_EXEC systemctl disable --now odroid-remote
-				G_EXEC rm /etc/systemd/system/odroid-remote.service
-
+		elif (( $G_HW_MODEL < 20 ))
+		then
+			if systemctl -q is-active lircd || systemctl -q is-enabled lircd 2> /dev/null
+			then
+				G_EXEC systemctl disable --now lircd
 			fi
-			[[ -d '/etc/systemd/system/odroid-remote.service.d' ]] && G_EXEC rm -R /etc/systemd/system/odroid-remote.service.d
-
+			G_EXEC sed --follow-symlinks -Ei '/^[[:blank:]]*(gpio-ir-recv|meson_ir)[[:blank:]]*$/d' /etc/modules
 		fi
-
 	}
 
-	RemoteIR_Main(){
-
+	RemoteIR_Main()
+	{
 		(( $G_HW_MODEL > 19 )) && { Unsupported_Input_Name; return 1; } # Exit path for non-Odroid/non-RPi
 
 		RemoteIR_Reset
 
-		if [[ $INPUT_DEVICE_VALUE == 'odroid_remote' ]]; then
-
+		if [[ $INPUT_DEVICE_VALUE == 'odroid_remote' ]]
+		then
 			(( $G_HW_MODEL > 9 )) || { Unsupported_Input_Mode; return 1; } # Exit path for non-Odroid
 
-			RemoteIR_Prereqs
+			G_AG_CHECK_INSTALL_PREREQ lirc
 
-			# XU4 Cloudshell
-			if (( $G_HW_MODEL == 11 )); then
-
-				# Modules
-				local string='options gpioplug_ir_recv gpio_nr=24 active_low=1'
-				G_CONFIG_INJECT "$string" "$string" /etc/modprobe.d/odroid-cloudshell.conf
+			# Kernel modules
+			# - XU4 CloudShell
+			if (( $G_HW_MODEL == 11 ))
+			then
 				G_CONFIG_INJECT 'gpio-ir-recv' 'gpio-ir-recv' /etc/modules
-				G_CONFIG_INJECT 'gpioplug-ir-recv' 'gpioplug-ir-recv' /etc/modules
 
-			# C2
-			elif (( $G_HW_MODEL == 12 )); then
-
-				# Module
+			# - C2
+			elif (( $G_HW_MODEL == 12 ))
+			then
 				G_CONFIG_INJECT 'meson_ir' 'meson_ir' /etc/modules
-
 			fi
 
 			# Config
@@ -416,12 +420,13 @@ _EOF_
 			# Service
 			G_EXEC systemctl enable --now lircd
 
-		elif [[ $INPUT_DEVICE_VALUE == 'justboom_ir_remote' ]]; then
-
+		elif [[ $INPUT_DEVICE_VALUE == 'justboom_ir_remote' ]]
+		then
 			(( $G_HW_MODEL > 9 )) && { Unsupported_Input_Mode; return 1; } # Exit path for non-RPi
 
-			RemoteIR_Prereqs
+			G_AG_CHECK_INSTALL_PREREQ lirc mpc
 
+			# Device tree overlay
 			G_CONFIG_INJECT 'dtoverlay=gpio-ir' 'dtoverlay=gpio-ir,gpio_pin=25' /boot/config.txt
 
 			# Config
@@ -473,9 +478,6 @@ begin remote
 
 end remote
 _EOF_
-			# MPD control
-			G_AG_CHECK_INSTALL_PREREQ mpc
-
 			cat << '_EOF_' > /root/.lircrc
 begin
 prog = irexec
@@ -538,12 +540,10 @@ _EOF_
 			G_EXEC systemctl daemon-reload
 			G_EXEC systemctl enable --now justboom-ir-mpd
 
-		elif [[ $INPUT_DEVICE_VALUE != 'none' ]]; then
-
+		elif [[ $INPUT_DEVICE_VALUE != 'none' ]]
+		then
 			Unknown_Input_Mode
-
 		fi
-
 	}
 
 	#/////////////////////////////////////////////////////////////////////////////////////
@@ -639,23 +639,25 @@ _EOF_
 	#/////////////////////////////////////////////////////////////////////////////////////
 	Lcd_Panel_Main()
 	{
+		(( $G_HW_MODEL > 19 )) && { Unsupported_Input_Name; return 1; } # Exit path for non-RPi/non-Odroid
+
+		# Reset all LCDs
+		Lcd_Panel_Waveshare32_Disable
+		Lcd_Panel_Odroidcloudshell_Disable
+		Lcd_Panel_Odroidcloudshell2_Disable
+		Lcd_Panel_OdroidLCD35_Disable
+		Lcd_Panel_ESP01215E_Disable
+		OLED_Allo_Boss2_Disable
+
 		case $INPUT_DEVICE_VALUE in
-			'odroid-lcd35') Lcd_Panel_OdroidLCD35_Enable;;
-			'waveshare32') Lcd_Panel_Waveshare32_Enable;;
-			'odroid-cloudshell') Lcd_Panel_Odroidcloudshell_Enable;;
-			'esp01215e') Lcd_Panel_ESP01215E_Enable;;
-			'allo-boss2-oled') OLED_Allo_Boss2_Enable;;
-			'none')
-				Lcd_Panel_Waveshare32_Disable
-				Lcd_Panel_Odroidcloudshell_Disable
-				Lcd_Panel_OdroidLCD35_Disable
-				Lcd_Panel_ESP01215E_Disable
-				OLED_Allo_Boss2_Disable
-			;;
-			*)
-				Unknown_Input_Mode
-				return 1
-			;;
+			'odroid-lcd35') Lcd_Panel_OdroidLCD35_Enable || return 1;;
+			'waveshare32') Lcd_Panel_Waveshare32_Enable || return 1;;
+			'odroid-cloudshell') Lcd_Panel_Odroidcloudshell_Enable || return 1;;
+			'odroid-cloudshell2') Lcd_Panel_Odroidcloudshell2_Enable || return 1;;
+			'esp01215e') Lcd_Panel_ESP01215E_Enable || return 1;;
+			'allo-boss2-oled') OLED_Allo_Boss2_Enable || return 1;;
+			'none') :;;
+			*) Unknown_Input_Mode; return 1;;
 		esac
 
 		# Update dietpi.txt entry
@@ -663,6 +665,8 @@ _EOF_
 	}
 
 	Lcd_Panel_ESP01215E_Enable(){
+
+		(( $G_HW_MODEL > 9 )) && { Unsupported_Input_Mode; return 1; } # Exit path for non-RPi
 
 		G_CONFIG_INJECT 'framebuffer_width=' 'framebuffer_width=1024' /boot/config.txt
 		G_CONFIG_INJECT 'framebuffer_height=' 'framebuffer_height=600' /boot/config.txt
@@ -712,8 +716,6 @@ _EOF_
 	}
 
 	Lcd_Panel_Waveshare32_Enable(){
-
-		(( $G_HW_MODEL > 19 )) && { Unsupported_Input_Mode; return 1; } # Exit path for non-RPi/non-Odroid
 
 		# Disable 1st to reset any existing installations
 		Lcd_Panel_Waveshare32_Disable
@@ -803,7 +805,6 @@ _EOF_
 			[[ -f '/boot/overlays/waveshare32b.dtbo' ]] && G_EXEC rm /boot/overlays/waveshare32b.dtbo
 			G_EXEC sed --follow-symlinks -i 's/ fbcon=map:10 fbcon=font:ProFont6x11 logo.nologo//' /boot/cmdline.txt
 
-			G_EXEC sed --follow-symlinks -i '/Waveshare 32 LCD/d' /boot/config.txt
 			G_EXEC sed --follow-symlinks -i '/^[[:blank:]]*dtoverlay=waveshare32b/d' /boot/config.txt
 			G_EXEC sed --follow-symlinks -i '/^[[:blank:]]*dtoverlay=ads7846,cs=1,penirq=17/d' /boot/config.txt
 			G_EXEC sed --follow-symlinks -i '/^[[:blank:]]*dtoverlay=w1-gpio-pullup,gpiopin=4,extpullup=1/d' /boot/config.txt
@@ -832,29 +833,42 @@ _EOF_
 
 	}
 
-	# Odroid CloudShell
-	Lcd_Panel_Odroidcloudshell_Enable(){
-
-		echo 'options fbtft_device name=hktft9340 busnum=1 rotate=270' > /etc/modprobe.d/odroid-cloudshell.conf
-
+	# Odroid CloudShell: ToDo: Broken after fbtft_device kernel module does not exist anymore with Linux 5.4/6.1/6.6...
+	Lcd_Panel_Odroidcloudshell_Enable()
+	{
+		(( $G_HW_MODEL == 11 )) || { Unsupported_Input_Mode; return 1; } # Odroid XU4 only
 		G_CONFIG_INJECT 'spi_s3c64xx' 'spi_s3c64xx' /etc/modules
-		G_CONFIG_INJECT 'fbtft_device' 'fbtft_device' /etc/modules
-		echo 'fbtft_device' >> /etc/modules # XU4 4.9 workaround: https://github.com/MichaIng/DietPi/issues/926#issuecomment-299480918
-
 	}
 
-	Lcd_Panel_Odroidcloudshell_Disable(){
+	Lcd_Panel_Odroidcloudshell_Disable()
+	{
+		(( $G_HW_MODEL == 11 )) || return 0
+		G_EXEC sed --follow-symlinks -i '/^[[:blank:]]*spi_s3c64xx[[:blank:]]*/d' /etc/modules
+	}
 
-		[[ -f '/etc/modprobe.d/odroid-cloudshell.conf' ]] && G_EXEC rm /etc/modprobe.d/odroid-cloudshell.conf
-		G_EXEC sed --follow-symlinks -i '/^[[:blank:]]*spi_s3c64xx/d' /etc/modules
-		G_EXEC sed --follow-symlinks -i '/^[[:blank:]]*fbtft_device/d' /etc/modules
+	# Odroid CloudShell 2
+	Lcd_Panel_Odroidcloudshell2_Enable()
+	{
+		(( $G_HW_MODEL == 11 )) || { Unsupported_Input_Mode; return 1; } # Odroid XU4 only
+		# Device tree overlay
+		G_CONFIG_INJECT 'setenv[[:blank:]]+cs2enable[[:blank:]]' 'setenv cs2enable "true"' /boot/boot.ini 'ODROIDXU-UBOOT-CONFIG'
+		# udev rule to enable backlight power
+		G_EXEC eval 'echo '\''SUBSYSTEM=="backlight", KERNEL=="fb_hktft32", ACTION=="add", ATTR{bl_power}="1"'\'' > /etc/udev/rules.d/dietpi-odroid-cloudshell2.rules'
+	}
 
+	Lcd_Panel_Odroidcloudshell2_Disable()
+	{
+		(( $G_HW_MODEL == 11 )) || return 0
+		# udev rule to enable backlight power
+		[[ -f '/etc/udev/rules.d/dietpi-odroid-cloudshell2.rules' ]] && G_EXEC rm /etc/udev/rules.d/dietpi-odroid-cloudshell2.rules
+		# Device tree overlay
+		G_CONFIG_INJECT 'setenv[[:blank:]]+cs2enable[[:blank:]]' '#setenv cs2enable "false"' /boot/boot.ini 'ODROIDXU-UBOOT-CONFIG'
 	}
 
 	# Odroid LCD 3.5
 	Lcd_Panel_OdroidLCD35_Enable(){
 
-		(( $G_HW_MODEL > 9 && $G_HW_MODEL < 20 )) || { Unsupported_Input_Mode; return 1; } # Exit path for non-Odroid
+		(( $G_HW_MODEL > 9 )) || { Unsupported_Input_Mode; return 1; } # Exit path for non-Odroid
 
 		# Reset to disabled
 		Lcd_Panel_OdroidLCD35_Disable
@@ -958,7 +972,9 @@ EndSection
 _EOF_
 	}
 
-	Lcd_Panel_OdroidLCD35_Disable(){
+	Lcd_Panel_OdroidLCD35_Disable()
+	{
+		(( $G_HW_MODEL > 9 )) || return 0 # Skip on non-Odroid
 
 		[[ -f '/etc/X11/xorg.conf.d/99-calibration.conf' ]] && G_EXEC rm /etc/X11/xorg.conf.d/99-calibration.conf
 		[[ -f '/etc/modprobe.d/odroid-lcd35.conf' ]] && G_EXEC rm /etc/modprobe.d/odroid-lcd35.conf
@@ -969,7 +985,6 @@ _EOF_
 		fi
 		[[ -d '/etc/systemd/system/odroid-lcd35.service.d' ]] && G_EXEC rm -R /etc/systemd/system/odroid-lcd35.service.d
 		[[ -f '/etc/X11/xorg.conf.d/99-odroid-lcd35.conf' ]] && G_EXEC rm /etc/X11/xorg.conf.d/99-odroid-lcd35.conf
-
 	}
 
 	OLED_Allo_Boss2_Enable(){
@@ -1113,8 +1128,8 @@ _EOF_
 				Unknown_Input_Mode
 			fi
 
-		# Orange Pi Zero 3
-		elif (( $G_HW_MODEL == 83 ))
+		# Orange Pi Zero 3/Zero 2W
+		elif (( $G_HW_MODEL == 83 || $G_HW_MODEL == 88 ))
 		then
 			if [[ $INPUT_DEVICE_VALUE == 'enable' ]]
 			then
@@ -1149,7 +1164,7 @@ _EOF_
 			'hci_uart'
 		)
 
-		[[ $G_HW_MODEL =~ ^(83|87)$ ]] && aBLUETOOTH_MODULES+=('sprdbt_tty') # Orange Pi 3B/Zero 3
+		[[ $G_HW_MODEL =~ ^(83|87|88)$ ]] && aBLUETOOTH_MODULES+=('sprdbt_tty') # Orange Pi 3B/Zero 3/Zero 2W
 
 		if [[ $INPUT_DEVICE_VALUE == 'disable' ]]; then
 
@@ -1241,12 +1256,12 @@ Do you want to continue and disable the serial login console?' || return 1
 			G_EXEC systemctl enable --now bluetooth
 
 			# RPi
-			if (( $G_HW_MODEL > 9 ))
+			if (( $G_HW_MODEL < 10 )) && (( $G_HW_ONBOARD_WIFI ))
 			then
-				(( $G_HW_ONBOARD_WIFI )) && G_EXEC systemctl enable hciuart
+				G_EXEC systemctl enable hciuart
 
-			# Orange Pi 3B/Zero 3: Module does not load automatically
-			elif [[ $G_HW_MODEL =~ ^(83|87)$ ]]
+			# Orange Pi 3B/Zero 3/Zero 2W: Module does not load automatically
+			elif [[ $G_HW_MODEL =~ ^(83|87|88)$ ]]
 			then
 				modprobe -n sprdbt_tty 2> /dev/null && G_EXEC eval 'echo '\''sprdbt_tty'\'' > /etc/modules-load.d/dietpi-enable_bluetooth.conf'
 			fi
@@ -1341,8 +1356,8 @@ Do you want to continue and disable the serial login console?' || return 1
 		then
 			aWIFI_MODULES+=('bcmdhd')
 
-		# + Orange Pi 3B/Zero 3
-		elif [[ $G_HW_MODEL =~ ^(83|87)$ ]]
+		# + Orange Pi 3B/Zero 3/Zero 2W
+		elif [[ $G_HW_MODEL =~ ^(83|87|88)$ ]]
 		then
 			aWIFI_MODULES+=('sprdwl_ng')
 		fi
@@ -1388,8 +1403,8 @@ Do you want to continue and disable the serial login console?' || return 1
 			then
 				G_EXEC eval 'echo -e '\''options wlan_8192eu rtw_power_mgnt=0\noptions wlan_8812au rtw_power_mgnt=0'\'' > /etc/modprobe.d/dietpi-disable_wifi_powersaving.conf'
 
-			# - Orange Pi 3B/Zero 3: Module does not load automatically
-			elif [[ $G_HW_MODEL =~ ^(83|87)$ ]]
+			# - Orange Pi 3B/Zero 3/Zero 2W: Module does not load automatically
+			elif [[ $G_HW_MODEL =~ ^(83|87|88)$ ]]
 			then
 				modprobe -n sprdwl_ng 2> /dev/null && G_EXEC eval 'echo '\''sprdwl_ng'\'' > /etc/modules-load.d/dietpi-enable_wifi.conf'
 			fi
@@ -1520,7 +1535,7 @@ Do you want to continue and disable the serial login console?' || return 1
 				elif (( $DIETPIENV || $G_HW_MODEL == 49 || $G_HW_MODEL == 76 || $G_HW_MODEL == 79 ))
 				then
 					local baudrate='115200'
-					if [[ $G_HW_MODEL =~ ^(42|43|46|47|49|55|56|58|68|72|76|77|87)$ && $INPUT_ADDITIONAL == 'ttyS2' ]] || [[ $G_HW_MODEL == 73 && $INPUT_ADDITIONAL == 'ttyS'[012] ]] || [[ $G_HW_MODEL =~ ^(76|78|79|80|82|85)$ && $INPUT_ADDITIONAL == 'ttyFIQ0' ]]
+					if [[ $G_HW_MODEL =~ ^(42|43|46|47|49|55|56|58|68|72|76|77|78|79|80|82|85|87|90)$ && $INPUT_ADDITIONAL =~ ^('ttyS2'|'ttyFIQ0')$ ]] || [[ $G_HW_MODEL == 73 && $INPUT_ADDITIONAL == 'ttyS'[012] ]]
 					then
 						baudrate='1500000'
 						[[ -d /etc/systemd/system/serial-getty@$INPUT_ADDITIONAL.service.d ]] || G_EXEC mkdir "/etc/systemd/system/serial-getty@$INPUT_ADDITIONAL.service.d"
@@ -2372,7 +2387,7 @@ _EOF_
 		'wificountrycode') Wifi_Countrycode_Main;;
 		'i2c') I2c_Main;;
 		'spi') SPI_Main;;
-		'lcdpanel') Lcd_Panel_Main;;
+		'lcdpanel') Lcd_Panel_Main || EXIT_CODE=1;;
 		'rpi-opengl') RPi_OpenGL_Main;;
 		'eth-forcespeed') Eth_Force_Speed_Main;;
 		'remoteir') RemoteIR_Main;;
@@ -2382,6 +2397,7 @@ _EOF_
 		'rpi3_usb_boot') RPi_USB_Boot_Main;;
 		'rpi-eeprom') RPi_EEPROM;;
 		'vf2-spi-update') VF2_SPI_Update;;
+		'flash-u-boot-mmc') Flash_U-Boot_MMC || EXIT_CODE=1;;
 		'headless') Headless_Main;;
 		'gpudriver') GPUDriver_Main;;
 		'qemu-guest-agent'|'qga') QEMU_Guest_Agent_Main;;
