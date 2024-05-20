@@ -137,7 +137,7 @@ Pin-Priority: -1
 _EOF_
 fi
 
-# ARMv6/7 Trixie: Temporarily prevent dist-upgrade on Trixie, as it fails due to 64-bit time_t transition causing dependency conflicts across the repo.
+# ARMv6/7 Trixie: Temporarily prevent dist-upgrade, as it fails due to 64-bit time_t transition causing dependency conflicts across the repo.
 (( $arch < 3 )) && [[ $DISTRO == 'trixie' ]] && G_EXEC touch rootfs/boot/dietpi/.skip_distro_upgrade
 
 # Automated build
