@@ -18,13 +18,9 @@ adeps=('libdrm2' 'libgl1-mesa-dri' 'libgbm1' 'libegl1' 'libudev1' 'libxml2' 'lib
 (( $G_HW_ARCH == 10 )) && opengl_flags=('--disable-video-opengles2' '--enable-video-opengl') adeps_build+=('libgl1-mesa-dev') adeps+=('libgl1') || opengl_flags=('--enable-video-opengles2' '--disable-video-opengl') adeps_build+=('libgles2-mesa-dev') adeps+=('libgles2')
 
 G_AGUP
-# ARMv6/7 Trixie: Temporarily prevent dist-upgrade, as it fails due to 64-bit time_t transition causing dependency conflicts across the repo.
-if (( $G_HW_ARCH < 3 && $G_DISTRO == 8 ))
-then
-	G_AGI "${adeps_build[@]}"
-else
-	G_AGDUG "${adeps_build[@]}"
-fi
+# ARMv6/7 Trixie: Temporarily purge kmod, since libkmod2 causes a dependency conflict due to 64-bit time_t transition.
+(( $G_HW_ARCH < 3 && $G_DISTRO == 8 )) && G_AGP kmod
+G_AGDUG "${adeps_build[@]}"
 for i in "${adeps[@]}"
 do
 	# Temporarily allow lib*t64 packages, while the 64-bit time_t transition is ongoing on Sid: https://bugs.debian.org/1065394
