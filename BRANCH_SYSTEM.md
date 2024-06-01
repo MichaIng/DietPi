@@ -14,12 +14,11 @@ By joining the Beta and reporting issues, you will be assisting DietPi (and all 
 1. Recommended: Backup your system with `dietpi-backup` (or backup quickly with `dietpi-backup 1`).
 2. Run the following command to switch to "beta" branch:
     ```sh
-    G_CONFIG_INJECT 'DEV_GITBRANCH=' 'DEV_GITBRANCH=beta' /boot/dietpi.txt
+    G_DEV_BRANCH beta
     ```
-3. Run `dietpi-update` to update the system, then reboot (or update quickly with `dietpi-update 1`).
-4. Test away, please report any issues on our GitHub page. Also ensure you mention "beta branch" in your post: https://github.com/MichaIng/DietPi/issues
-5. If you want to return the system to the previous restore state, run `dietpi-backup` to restore (or restore quickly with `dietpi-backup -1`).
+3. Test away, please report any issues on our GitHub page. Also ensure you mention "beta branch" in your post: https://github.com/MichaIng/DietPi/issues
+4. If you want to return the system to the previous restore state, run `dietpi-backup` to restore (or restore quickly with `dietpi-backup -1`).
 
 ## Steps to use the DietPi "dev" branch
 #### This is the active development branch. It is potentially unstable, unsupported and should not be used by end users.
-1. Same as above, however, use `DEV_GITBRANCH=dev` instead.
+1. Same as above, however, use `G_DEV_BRANCH dev` instead.

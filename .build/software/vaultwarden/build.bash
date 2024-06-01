@@ -11,7 +11,8 @@ G_AGUP
 G_AGDUG "${adeps_build[@]}"
 for i in "${adeps[@]}"
 do
-	dpkg-query -s "$i" &> /dev/null && continue
+	# Temporarily allow lib*t64 packages, while the 64-bit time_t transition is ongoing on Sid: https://bugs.debian.org/1065394
+	dpkg-query -s "$i" &> /dev/null || dpkg-query -s "${i}t64" &> /dev/null && continue
 	G_DIETPI-NOTIFY 1 "Expected dependency package was not installed: $i"
 	exit 1
 done
@@ -205,6 +206,8 @@ find "$DIR" ! \( -path "$DIR/DEBIAN" -prune \) -type f -exec md5sum {} + | sed "
 DEPS_APT_VERSIONED=
 for i in "${adeps[@]}"
 do
+	# Temporarily allow lib*t64 packages, while the 64-bit time_t transition is ongoing on Sid: https://bugs.debian.org/1065394
+	dpkg-query -s "$i" &> /dev/null || i+='t64'
 	DEPS_APT_VERSIONED+=" $i (>= $(dpkg-query -Wf '${VERSION}' "$i")),"
 done
 DEPS_APT_VERSIONED=${DEPS_APT_VERSIONED%,}
@@ -224,15 +227,12 @@ Package: vaultwarden
 Version: $version
 Architecture: $(dpkg --print-architecture)
 Maintainer: MichaIng <micha@dietpi.com>
-Date: $(date -u '+%a, %d %b %Y %T %z')
-Standards-Version: 4.6.2.0
+Date: $(date -uR)
 Installed-Size: $(du -sk "$DIR" | mawk '{print $1}')
 Depends:$DEPS_APT_VERSIONED
 Section: misc
 Priority: optional
 Homepage: https://github.com/dani-garcia/vaultwarden
-Vcs-Git: https://github.com/dani-garcia/vaultwarden.git
-Vcs-Browser: https://github.com/dani-garcia/vaultwarden
 Description: Alternative implementation of the Bitwarden server API written in
  Rust and compatible with upstream Bitwarden clients, perfect for self-hosted
  deployment where running the official resource-heavy service might not be ideal.

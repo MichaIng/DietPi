@@ -54,14 +54,11 @@ Package: raspberrypi-sys-mods
 Version: 2:20230510-dietpi2
 Architecture: all
 Maintainer: MichaIng <micha@dietpi.com>
-Date: $(date -u '+%a, %d %b %Y %T %z')
-Standards-Version: 4.6.2.0
+Date: $(date -uR)
 Installed-Size: $(du -sk raspberrypi-sys-mods | mawk '{print $1}')
 Section: admin
 Priority: optional
 Homepage: https://github.com/RPi-Distro/raspberrypi-sys-mods
-Vcs-Git: https://github.com/RPi-Distro/raspberrypi-sys-mods.git
-Vcs-Browser: https://github.com/RPi-Distro/raspberrypi-sys-mods
 Description: System tweaks for the Raspberry Pi, DietPi edition
 _EOF_
 G_CONFIG_INJECT 'Installed-Size: ' "Installed-Size: $(du -sk raspberrypi-sys-mods | mawk '{print $1}')" raspberrypi-sys-mods/DEBIAN/control

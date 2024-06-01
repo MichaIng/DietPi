@@ -16,7 +16,8 @@ case $G_DISTRO in
 esac
 for i in "${adeps[@]}"
 do
-	dpkg-query -s "$i" &> /dev/null && continue
+	# Temporarily allow lib*t64 packages, while the 64-bit time_t transition is ongoing on Sid: https://bugs.debian.org/1065394
+	dpkg-query -s "$i" &> /dev/null || dpkg-query -s "${i}t64" &> /dev/null && continue
 	G_DIETPI-NOTIFY 1 "Expected dependency package was not installed: $i"
 	exit 1
 done
@@ -62,7 +63,8 @@ cat << '_EOF_' > "$DIR/lib/systemd/system/squeezelite.service"
 [Unit]
 Description=Squeezelite (DietPi)
 Documentation=man:squeezelite(1) https://ralph-irving.github.io/squeezelite.html
-After=sound.target
+Wants=network-online.target
+After=network-online.target sound.target
 
 [Service]
 User=squeezelite
@@ -140,6 +142,8 @@ find "$DIR" ! \( -path "$DIR/DEBIAN" -prune \) -type f -exec md5sum {} + | sed "
 DEPS_APT_VERSIONED=
 for i in "${adeps[@]}"
 do
+	# Temporarily allow lib*t64 packages, while the 64-bit time_t transition is ongoing on Sid: https://bugs.debian.org/1065394
+	dpkg-query -s "$i" &> /dev/null || i+='t64'
 	DEPS_APT_VERSIONED+=" $i (>= $(dpkg-query -Wf '${VERSION}' "$i")),"
 done
 DEPS_APT_VERSIONED=${DEPS_APT_VERSIONED%,}
@@ -160,16 +164,13 @@ Package: squeezelite
 Version: $version-$suffix
 Architecture: $(dpkg --print-architecture)
 Maintainer: MichaIng <micha@dietpi.com>
-Date: $(date -u '+%a, %d %b %Y %T %z')
-Standards-Version: 4.6.2.0
+Date: $(date -uR)
 Installed-Size: $(du -sk "$DIR" | mawk '{print $1}')
 Depends:$DEPS_APT_VERSIONED
 Conflicts: squeezelite-pa, squeezelite-pulseaudio
 Section: sound
 Priority: optional
 Homepage: https://github.com/ralph-irving/squeezelite
-Vcs-Git: https://github.com/ralph-irving/squeezelite.git
-Vcs-Browser: https://github.com/ralph-irving/squeezelite
 Description: lightweight headless Squeezebox emulator - ALSA version
  Squeezelite is a small headless Squeezebox emulator. It is aimed at
  supporting high quality audio including USB DAC based output at multiple

@@ -162,7 +162,7 @@ Process_Software()
 			132) aSERVICES[i]='aria2' aTCP[i]='6800';; # aTCP[i]+=' 6881-6999';; # Listens on random port
 			133) (( $arch == 2 || $arch == 11 )) || aSERVICES[i]='yacy' aTCP[i]='8090'; (( $arch == 10 )) && aDELAY[i]=30; (( $arch == 10 || $arch == 2 || $arch == 11)) || aDELAY[i]=60;;
 			134) aCOMMANDS[i]='docker compose version';;
-			135) aSERVICES[i]='icecast2 darkice' aTCP[i]='8000';;
+			135) aSERVICES[i]='icecast2' aTCP[i]='8000' aCOMMANDS[i]='darkice -h | grep '\''^DarkIce'\';; # darkice service cannot start in container as is requires audio recording device access
 			136) aSERVICES[i]='motioneye' aTCP[i]='8765';;
 			137) aCOMMANDS[i]='/opt/mjpg-streamer/mjpg_streamer -v';; # aSERVICES[i]='mjpg-streamer' aTCP[i]='8082' Service does not start without an actual video device
 			138) aSERVICES[i]='virtualhere' aTCP[i]='7575';;
@@ -181,7 +181,7 @@ Process_Software()
 			152) aSERVICES[i]='avahi-daemon' aUDP[i]='5353';;
 			153) aSERVICES[i]='octoprint' aTCP[i]='5001'; (( $arch == 10 )) || aDELAY[i]=60;;
 			154) aSERVICES[i]='roonserver';; # Listens on a variety of different port ranges
-			155) aSERVICES[i]='htpc-manager' aTCP[i]='8085';;
+			155) aSERVICES[i]='htpc-manager' aTCP[i]='8085'; (( $arch == 10 )) || aDELAY[i]=30; [[ $arch == 3 && $DISTRO == 'trixie' ]] && aDELAY[i]=60;;
 			157) aSERVICES[i]='home-assistant' aTCP[i]='8123'; (( $arch == 10 )) && aDELAY[i]=60 || aDELAY[i]=900;;
 			158) aSERVICES[i]='minio' aTCP[i]='9001 9004';;
 			161) aSERVICES[i]='bdd' aTCP[i]='80 443';;
@@ -413,9 +413,9 @@ done
 
 # Success flag and shutdown
 # shellcheck disable=SC2016
-G_EXEC eval 'echo '\''[ $exit_code = 0 ] && > /success || { journalctl -n 50; ss -tlpn; df -h; free -h; poweroff; }; poweroff'\'' >> rootfs/boot/Automation_Custom_Script.sh'
+G_EXEC eval 'echo '\''[ $exit_code = 0 ] && > /success || { journalctl -n 50; ss -tulpn; df -h; free -h; }; poweroff'\'' >> rootfs/boot/Automation_Custom_Script.sh'
 
-# Shutdown as well on failure
+# Shutdown as well on failures before the custom script is executed
 G_EXEC sed --follow-symlinks -i 's|Prompt_on_Failure$|{ journalctl -n 50; ss -tulpn; df -h; free -h; poweroff; }|' rootfs/boot/dietpi/dietpi-login
 
 ##########################################

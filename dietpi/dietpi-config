@@ -216,11 +216,10 @@
 			# Remote
 			local odroid_remote_text='Off'
 			local odroid_remote_enabled=0
-			if [[ -f '/etc/systemd/system/odroid-remote.service' ]]; then
-
+			if grep -Eq '^[[:blank:]]*(gpio-ir-recv|meson_ir)[[:blank:]]*$' /etc/modules || systemctl -q is-enabled lircd 2> /dev/null
+			then
 				odroid_remote_text='On'
 				odroid_remote_enabled=1
-
 			fi
 			G_WHIP_MENU_ARRAY+=('10' ": Odroid remote : [$odroid_remote_text]")
 
@@ -260,7 +259,7 @@
 			else
 
 				G_WHIP_MENU_ARRAY+=('odroid-lcd35' ': 480x320 panel with touch input')
-				(( $G_HW_MODEL == 11 )) && G_WHIP_MENU_ARRAY+=('odroid-cloudshell' ': 320x240 panel')
+				(( $G_HW_MODEL == 11 )) && G_WHIP_MENU_ARRAY+=('odroid-cloudshell' ': 320x240 panel' 'odroid-cloudshell2' ': Odroid XU4 CloudShell 2 LCD')
 
 			fi
 
@@ -330,7 +329,7 @@ A long (or insufficiently manufactured) cable may required a higher boost settin
 
 				/boot/dietpi/func/dietpi-set_hardware remoteir none && REBOOT_REQUIRED=1
 
-			elif G_WHIP_YESNO 'This will enable the IR modules, setup Lirc and the Odroid Remote for Odroid C1, C2 and XU4 Cloudshell.
+			elif G_WHIP_YESNO 'This will enable the IR modules, setup Lirc and the Odroid Remote for Odroid C1, C2 and XU4 CloudShell.
 \nNB: Other remotes can be configured by running "irrecord" and applying the codes to "/etc/lirc/lircd.conf"\n\nDo you wish to continue?'; then
 
 				/boot/dietpi/func/dietpi-set_hardware remoteir odroid_remote && REBOOT_REQUIRED=1
@@ -945,7 +944,7 @@ Re-enabling HDMI requires a reboot. If you need emergency HDMI output, edit the 
 		G_WHIP_MENU_ARRAY=()
 
 		(( $G_HW_MODEL < 10 )) && G_WHIP_MENU_ARRAY+=('' '●─ Toggle console ')
-		for i in /dev/{tty{S,AMA,SAC,AML,SC,GS,FIQ,MV},hvc}[0-9]
+		for i in /dev/{tty{S,AMA,SAC,AML,SC,GS,FIQ,MV},hvc}[0-9]*
 		do
 			[[ -e $i ]] || continue
 			i=${i#/dev/}
@@ -1050,8 +1049,8 @@ Re-enabling HDMI requires a reboot. If you need emergency HDMI output, edit the 
 		# Armbian U-Boot update
 		if [[ -f '/usr/lib/u-boot/platform_install.sh' ]]
 		then
-			local rootdev=$(lsblk -npo PKNAME "$G_ROOTFS_DEV")
-			G_WHIP_MENU_ARRAY+=('Update MMC bootloader' ": Flash current U-Boot to $rootdev")
+			local bootdev=$(lsblk -npo PKNAME "$(findmnt -Ufnro SOURCE -T /boot)")
+			G_WHIP_MENU_ARRAY+=('Update MMC bootloader' ": Flash current U-Boot to $bootdev")
 		fi
 
 		# RPi 4/5 EEPROM update: https://www.raspberrypi.org/documentation/hardware/raspberrypi/booteeprom.md
@@ -1068,11 +1067,17 @@ Re-enabling HDMI requires a reboot. If you need emergency HDMI output, edit the 
 				G_WHIP_MENU_ARRAY+=('Update RPi EEPROM firmware' ': Install rpi-eeprom APT package')
 			fi
 
-		# ROCK 4, ROCK 5B and Orange Pi 5 (Plus): https://dietpi.com/forum/t/orange-pi-5-boot-from-nvme/16457
-		elif [[ $G_HW_MODEL =~ ^(72|78|80|82)$ ]]
+		# ROCK 4, ROCK 5B, Orange Pi 5 (Plus) and Orange Pi 3B: https://dietpi.com/forum/t/orange-pi-5-boot-from-nvme/16457
+		elif [[ $G_HW_MODEL =~ ^(72|78|80|82|87)$ ]]
 		then
 			# ROCK 4: Device tree overlay required
-			(( $G_HW_MODEL == 72 )) || [[ -b '/dev/mtdblock0' && -f '/usr/lib/u-boot/platform_install.sh' ]] && G_WHIP_MENU_ARRAY+=('Update SPI bootloader' ': Flash current U-Boot to /dev/mtdblock0')
+			local spidev='/dev/mtdblock0'
+			(( $G_HW_MODEL == 72 )) || {
+				[[ -f '/usr/lib/u-boot/platform_install.sh' ]] && {
+					{ [[ -e '/dev/mtd0' ]] && grep -q '/dev/mtd0' /usr/lib/u-boot/platform_install.sh && spidev='/dev/mtd0'; } ||
+					{ [[ -b '/dev/mtdblock0' ]] && grep -q 'rksd_loader.img' /usr/lib/u-boot/platform_install.sh; }
+				}
+			} && G_WHIP_MENU_ARRAY+=('Update SPI bootloader' ": Flash current U-Boot to $spidev")
 
 		# VisionFive 2/Star64: https://doc-en.rvspace.org/VisionFive2/PDF/VisionFive2_QSG.pdf
 		elif (( $G_HW_MODEL == 81 || $G_HW_MODEL == 84 ))
@@ -1088,8 +1093,8 @@ Re-enabling HDMI requires a reboot. If you need emergency HDMI output, edit the 
 		[[ -f '/etc/modprobe.d/dietpi-disable_bluetooth.conf' ]] && bluetooth_state=0 bluetooth_state_text='Off'
 		G_WHIP_MENU_ARRAY+=('Bluetooth' ": [$bluetooth_state_text]")
 
-		# Orange Pi Zero 3 specific
-		if (( $G_HW_MODEL == 83 ))
+		# Orange Pi Zero 3/Zero 2W specific
+		if (( $G_HW_MODEL == 83 || $G_HW_MODEL == 88 ))
 		then
 			# SPI state
 			local spi_enabled=$(grep -Ecm1 '^[[:blank:]]*overlays=(.*[[:blank:]])?spi1-cs1-spidev([[:blank:]]|$)' /boot/dietpiEnv.txt)
@@ -1208,14 +1213,9 @@ Further information: https://www.raspberrypi.org/documentation/hardware/raspberr
 		elif [[ $G_WHIP_RETURNED_VALUE == 'Update MMC bootloader' ]]; then
 
 			G_WHIP_YESNO "[ INFO ] MMC bootloader update
-\nThis will flash the U-Boot image of the installed linux-u-boot-* package to the MMC device $rootdev.
+\nThis will flash the U-Boot image of the installed linux-u-boot-* package to the MMC device $bootdev.
 \nDo you want to continue?" || return 0
-			# shellcheck disable=SC1091
-			. /usr/lib/u-boot/platform_install.sh
-			# Do not mute progress and error messages
-			eval "$(declare -f write_uboot_platform | sed -e 's| > /dev/null 2>&1||g' -e 's|status=none|status=progress|g')"
-			# shellcheck disable=SC2154
-			write_uboot_platform "$DIR" "$rootdev"
+			/boot/dietpi/func/dietpi-set_hardware flash-u-boot-mmc "$bootdev"
 
 		elif [[ $G_WHIP_RETURNED_VALUE == 'Update SPI bootloader' ]]; then
 
@@ -1238,17 +1238,28 @@ Further information: https://www.raspberrypi.org/documentation/hardware/raspberr
 					G_CONFIG_INJECT 'overlays=' "overlays=${overlays[*]}" /boot/dietpiEnv.txt
 					G_CONFIG_INJECT 'param_spinor_spi_bus=' 'param_spinor_spi_bus=1' /boot/dietpiEnv.txt
 					REBOOT_REQUIRED=1
-					return 0
 				fi
-			fi
-			G_WHIP_YESNO '[ INFO ] SPI bootloader update
+
+			elif [[ $spidev == '/dev/mtd0' ]]
+			then
+				G_WHIP_YESNO '[ INFO ] SPI bootloader update
+\nThis will flash the U-Boot image of the installed linux-u-boot-* package to the SPI device /dev/mtd0.
+\nDo you want to continue?' || return 0
+				G_AG_CHECK_INSTALL_PREREQ mtd-utils
+				# shellcheck disable=SC1091
+				. /usr/lib/u-boot/platform_install.sh
+				write_uboot_platform_mtd
+			else
+				G_WHIP_YESNO '[ INFO ] SPI bootloader update
 \nThis will flash the U-Boot image of the installed linux-u-boot-* package to the SPI device /dev/mtdblock0.
 \nDo you want to continue?' || return 0
-			# shellcheck disable=SC1091
-			. /usr/lib/u-boot/platform_install.sh
-			[[ -f $DIR/rkspi_loader.img ]] || { G_WHIP_MSG "[FAILED] SPI U-Boot image missing\n\nThe expected U-Boot image at $DIR/rkspi_loader.img could not be found. Please report this to our GitHub or forum, so we can check back and in case update this dietpi-config option."; return 1; }
-			# shellcheck disable=SC2154
-			G_EXEC_OUTPUT=1 G_EXEC dd if="$DIR/rkspi_loader.img" of=/dev/mtdblock0 oflag=direct conv=notrunc status=progress
+				# shellcheck disable=SC1091
+				. /usr/lib/u-boot/platform_install.sh
+				# shellcheck disable=SC2154
+				[[ -f $DIR/rkspi_loader.img ]] || { G_WHIP_MSG "[FAILED] SPI U-Boot image missing\n\nThe expected U-Boot image at $DIR/rkspi_loader.img could not be found. Please report this to our GitHub or forum, so we can check back and in case update this dietpi-config option."; return 1; }
+				# shellcheck disable=SC2154
+				G_EXEC_OUTPUT=1 G_EXEC dd if="$DIR/rkspi_loader.img" of=/dev/mtdblock0 oflag=direct conv=notrunc status=progress
+			fi
 
 		elif [[ $G_WHIP_RETURNED_VALUE == 'Update bootloader' ]]; then
 
@@ -1930,23 +1941,26 @@ If unsure, set any value, 'Ondemand Down Factor' option on the next screen will 
  \nThis will free up space, but an internet-capable Ethernet connection is required to re-enable WiFi functionality.
  \nAffected packages: iw wireless-tools wpasupplicant wireless-regdb crda' && G_AGP 'iw' 'wireless-tools' 'wpasupplicant' 'wireless-regdb' 'crda'
 
-		# Drop connections
-		G_DIETPI-NOTIFY 2 'Dropping network connections, please wait...'
-		ifdown --force "$ETH_DEV_IFACE" 2> /dev/null
-		ifdown --force "$WIFI_DEV_IFACE" 2> /dev/null
-
-		# Kill DHCP client
-		killall dhclient 2> /dev/null
-
 		# Restart network
 		G_DIETPI-NOTIFY 2 'Restarting network connections, please wait...'
 		G_EXEC systemctl daemon-reload
-
-		# Manually bring up adapters
-		(( $ETH_DISABLED )) || ifup --force "$ETH_DEV_IFACE"
-		if (( ! $WIFI_DISABLED ))
+		# - Ethernet
+		if (( ! $ETH_DISABLED ))
 		then
-			(( $WIFI_HOTSPOT )) || grep -q '^network=' /etc/wpa_supplicant/wpa_supplicant.conf && ifup --force "$WIFI_DEV_IFACE"
+			journalctl -fn 0 -u "ifup@$ETH_DEV_IFACE" &
+			G_EXEC_NOHALT=1 G_EXEC_OUTPUT=1 G_EXEC systemctl restart "ifup@$ETH_DEV_IFACE"
+			kill -15 %%
+		else
+			ifdown --force "$ETH_DEV_IFACE" 2> /dev/null
+		fi
+		# - WiFi: Only try to configure if this is either a hotspot or an SSID has been configured
+		if (( ! $WIFI_DISABLED )) && { (( $WIFI_HOTSPOT )) || grep -q '^network=' /etc/wpa_supplicant/wpa_supplicant.conf; }
+		then
+			journalctl -fn 0 -u "ifup@$WIFI_DEV_IFACE" &
+			G_EXEC_NOHALT=1 G_EXEC_OUTPUT=1 G_EXEC systemctl restart "ifup@$WIFI_DEV_IFACE"
+			kill -15 %%
+		else
+			ifdown --force "$WIFI_DEV_IFACE" 2> /dev/null
 		fi
 
 		# Start WiFi hotspot
@@ -2287,14 +2301,14 @@ NB: All Ethernet connections will be temporarily dropped!' && Network_ApplyChang
 			do
 				if (( $i < $full_octets ))
 				then
-					mask+=255
+					mask+='255'
 
 				elif (( $i == $full_octets ))
 				then
 					mask+=$(( 256 - 2 ** ( 8 - $partial_octet ) ))
 
 				else
-					mask+=0
+					mask+='0'
 				fi
 				(( $i < 3 )) && mask+=.
 			done
@@ -2464,12 +2478,22 @@ NB: All Ethernet connections will be temporarily dropped!' && Network_ApplyChang
 
 			'Ethernet')
 
-				# No adapter detected
+				# No adapter detected: Offer to disable if enabled
 				if (( ! $ETH_HARDWARE ))
 				then
+					if (( ! $ETH_DISABLED ))
+					then
+						if G_WHIP_YESNO 'No Ethernet adapter was detected on your device.
+\nWould you like to disable Ethernet?\n - NB: Connections may drop!'
+						then
+							ETH_DISABLED=1
+							Network_ApplyChanges
+						fi
+						return 0
+					fi
 					G_WHIP_MSG 'No Ethernet adapter was detected on your device.'
 
-				# Disabled: Offer chance to enable
+				# Disabled: Offer to enable
 				elif (( $ETH_DISABLED ))
 				then
 					if G_WHIP_YESNO 'Ethernet must be enabled before settings can be changed.
@@ -2486,7 +2510,7 @@ NB: All Ethernet connections will be temporarily dropped!' && Network_ApplyChang
 
 			'WiFi')
 
-				# Disabled: Offer chance to enable (also enables WiFi modules)
+				# Disabled: Offer to enable, including WiFi modules for adapter to be detected
 				if (( $WIFI_DISABLED ))
 				then
 					if G_WHIP_YESNO 'WiFi must be enabled before settings can be changed.
@@ -2494,11 +2518,11 @@ NB: All Ethernet connections will be temporarily dropped!' && Network_ApplyChang
 					then
 						WIFI_DISABLED=0
 						Network_ApplyChanges
-						# Enter submenu if a WiFi adapters has been detected, else only preselect the menu entry
+						# Enter submenu if WiFi adapter has been detected, else only preselect the menu entry
 						(( $WIFI_HARDWARE )) && TARGETMENUID=10 || G_WHIP_DEFAULT_ITEM='WiFi' # WiFi adapter menu
 					fi
 
-				# No adapter detected
+				# No adapter detected: Offer to disable
 				elif (( ! $WIFI_HARDWARE ))
 				then
 					if G_WHIP_YESNO 'No WiFi adapter was detected on your device.
@@ -3439,39 +3463,41 @@ Additional benchmarks:
 			# RPi
 			if (( $G_HW_MODEL < 10 )); then
 
-				G_WHIP_MENU_ARRAY+=('rpi-bcm2835-auto' ': Onboard HDMI if plugged, else 3.5mm')
-				G_WHIP_MENU_ARRAY+=('rpi-bcm2835-3.5mm' ': Onboard 3.5mm output')
-				G_WHIP_MENU_ARRAY+=('rpi-bcm2835-hdmi' ': Onboard HDMI output')
-				G_WHIP_MENU_ARRAY+=('allo-boss-dac-pcm512x-audio' ': Allo Boss DAC')
-				G_WHIP_MENU_ARRAY+=('allo-boss2-dac-audio' ': Allo Boss2 DAC')
-				G_WHIP_MENU_ARRAY+=('allo-digione' ': Allo DigiOne')
-				G_WHIP_MENU_ARRAY+=('allo-katana-dac-audio' ': Allo Katana DAC')
-				G_WHIP_MENU_ARRAY+=('allo-piano-dac-pcm512x-audio' ': Allo Piano DAC')
-				G_WHIP_MENU_ARRAY+=('allo-piano-dac-plus-pcm512x-audio' ': Allo Piano DAC 2.1')
-				G_WHIP_MENU_ARRAY+=('applepi-dac' ': ApplePi DAC (Orchard Audio)')
-				G_WHIP_MENU_ARRAY+=('dionaudio-loco' ': Dion Audio LOCO')
-				G_WHIP_MENU_ARRAY+=('dionaudio-loco-v2' ': Dion Audio LOCO V2')
-				G_WHIP_MENU_ARRAY+=('googlevoicehat-soundcard' ': Google AIY voice kit')
-				G_WHIP_MENU_ARRAY+=('hifiberry-amp' ': HifiBerry AMP / AMP+')
-				G_WHIP_MENU_ARRAY+=('hifiberry-dac' ': HifiBerry DAC / MiniAMP')
-				G_WHIP_MENU_ARRAY+=('hifiberry-dacplus' ': HifiBerry DAC+ / DAC+ Pro / AMP2')
-				G_WHIP_MENU_ARRAY+=('hifiberry-dacplusadc' ': HifiBerry DAC+ADC')
-				G_WHIP_MENU_ARRAY+=('hifiberry-dacplusadcpro' ': HifiBerry DAC+ADC Pro')
-				G_WHIP_MENU_ARRAY+=('hifiberry-dacplusdsp' ': HifiBerry DAC+DSP')
-				G_WHIP_MENU_ARRAY+=('hifiberry-dacplushd' ': HifiBerry DAC+ HD')
-				G_WHIP_MENU_ARRAY+=('hifiberry-digi' ': HifiBerry Digi / Digi+')
-				G_WHIP_MENU_ARRAY+=('hifiberry-digi-pro' ': HifiBerry Digi+ Pro')
-				G_WHIP_MENU_ARRAY+=('i-sabre-q2m' ': AudioPhonics I-Sabre ES9028Q2M / ES9038Q2M')
-				G_WHIP_MENU_ARRAY+=('iqaudio-codec' ': IQaudIO Pi-Codec HAT')
-				G_WHIP_MENU_ARRAY+=('iqaudio-dac' ': IQaudIO DAC audio card')
-				G_WHIP_MENU_ARRAY+=('iqaudio-dacplus' ': Pi-DAC+, Pi-DACZero, Pi-DAC+ Pro, Pi-DigiAMP+')
-				G_WHIP_MENU_ARRAY+=('iqaudio-digi-wm8804-audio' ': Pi-Digi+')
-				G_WHIP_MENU_ARRAY+=('iqaudio-dacplus,auto_mute_amp' ': Pi-DigiAMP+')
-				G_WHIP_MENU_ARRAY+=('iqaudio-dacplus,unmute_amp' ': Pi-DigiAMP+')
-				G_WHIP_MENU_ARRAY+=('justboom-dac' ': JustBoom: DAC HAT, Amp HAT, DAC Zero and Amp Zero')
-				G_WHIP_MENU_ARRAY+=('justboom-digi' ': JustBoom: Digi HAT and Digi Zero')
-				G_WHIP_MENU_ARRAY+=('justboom-both' ': JustBoom: Simultaneous DAC and Digi usage')
-				G_WHIP_MENU_ARRAY+=('rpi-dac' ': Soekris DAM1021 (pcm1794a)')
+				# RPi 5 has no 3.5mm jack: https://dietpi.com/forum/t/19760
+				(( $G_HW_MODEL == 5 )) || G_WHIP_MENU_ARRAY+=('rpi-bcm2835-auto' ': Onboard HDMI if plugged, else 3.5mm' 'rpi-bcm2835-3.5mm' ': Onboard 3.5mm output')
+				G_WHIP_MENU_ARRAY+=(
+					'rpi-bcm2835-hdmi' ': Onboard HDMI output'
+					'allo-boss-dac-pcm512x-audio' ': Allo Boss DAC'
+					'allo-boss2-dac-audio' ': Allo Boss2 DAC'
+					'allo-digione' ': Allo DigiOne'
+					'allo-katana-dac-audio' ': Allo Katana DAC'
+					'allo-piano-dac-pcm512x-audio' ': Allo Piano DAC'
+					'allo-piano-dac-plus-pcm512x-audio' ': Allo Piano DAC 2.1'
+					'applepi-dac' ': ApplePi DAC (Orchard Audio)'
+					'dionaudio-loco' ': Dion Audio LOCO'
+					'dionaudio-loco-v2' ': Dion Audio LOCO V2'
+					'googlevoicehat-soundcard' ': Google AIY voice kit'
+					'hifiberry-amp' ': HifiBerry AMP / AMP+'
+					'hifiberry-dac' ': HifiBerry DAC / MiniAMP'
+					'hifiberry-dacplus' ': HifiBerry DAC+ / DAC+ Pro / AMP2'
+					'hifiberry-dacplusadc' ': HifiBerry DAC+ADC'
+					'hifiberry-dacplusadcpro' ': HifiBerry DAC+ADC Pro'
+					'hifiberry-dacplusdsp' ': HifiBerry DAC+DSP'
+					'hifiberry-dacplushd' ': HifiBerry DAC+ HD'
+					'hifiberry-digi' ': HifiBerry Digi / Digi+'
+					'hifiberry-digi-pro' ': HifiBerry Digi+ Pro'
+					'i-sabre-q2m' ': AudioPhonics I-Sabre ES9028Q2M / ES9038Q2M'
+					'iqaudio-codec' ': IQaudIO Pi-Codec HAT'
+					'iqaudio-dac' ': IQaudIO DAC audio card'
+					'iqaudio-dacplus' ': Pi-DAC+, Pi-DACZero, Pi-DAC+ Pro, Pi-DigiAMP+'
+					'iqaudio-digi-wm8804-audio' ': Pi-Digi+'
+					'iqaudio-dacplus,auto_mute_amp' ': Pi-DigiAMP+'
+					'iqaudio-dacplus,unmute_amp' ': Pi-DigiAMP+'
+					'justboom-dac' ': JustBoom: DAC HAT, Amp HAT, DAC Zero and Amp Zero'
+					'justboom-digi' ': JustBoom: Digi HAT and Digi Zero'
+					'justboom-both' ': JustBoom: Simultaneous DAC and Digi usage'
+					'rpi-dac' ': Soekris DAM1021 (pcm1794a)'
+				)
 
 			# Odroid C1/C2 legacy image
 			elif [[ $G_HW_MODEL == 1[12] ]]; then
@@ -3483,42 +3509,39 @@ Additional benchmarks:
 			# NanoPi M2/M3
 			elif [[ $G_HW_MODEL == 6[12] ]]; then
 
-				G_WHIP_MENU_ARRAY+=('default' ': 3.5mm Analogue')
-				G_WHIP_MENU_ARRAY+=('s5pxx18-hdmi' ': HDMI')
+				G_WHIP_MENU_ARRAY+=('default' ': 3.5mm Analogue' 's5pxx18-hdmi' ': HDMI')
 
 			# H3
 			elif (( $G_HW_CPUID == 1 )); then
 
-				G_WHIP_MENU_ARRAY+=('default' ': HDMI')
-				G_WHIP_MENU_ARRAY+=('h3-analogue' ': 3.5mm Analogue')
+				G_WHIP_MENU_ARRAY+=('default' ': HDMI' 'h3-analogue' ': 3.5mm Analogue')
 
 			# Sparky SBC
 			elif (( $G_HW_MODEL == 70 )); then
 
-				G_WHIP_MENU_ARRAY+=('default' ': HDMI')
-				G_WHIP_MENU_ARRAY+=('snd-soc-allo-piano-dac' ': Allo Piano DAC')
-				G_WHIP_MENU_ARRAY+=('snd-soc-allo-piano-dac-plus' ': Allo Piano DAC 2.1')
-				G_WHIP_MENU_ARRAY+=('allo-cheapo-analogue' ': Allo Cheapo (3.5mm / RCA output)')
-				G_WHIP_MENU_ARRAY+=('allo-cheapo-optical' ': Allo Cheapo (Optical output)')
-				G_WHIP_MENU_ARRAY+=('usb-dac-1.1' ': USB 1.1 Audio DAC (any)')
+				G_WHIP_MENU_ARRAY+=(
+					'default' ': HDMI'
+					'snd-soc-allo-piano-dac' ': Allo Piano DAC'
+					'snd-soc-allo-piano-dac-plus' ': Allo Piano DAC 2.1'
+					'allo-cheapo-analogue' ': Allo Cheapo (3.5mm / RCA output)'
+					'allo-cheapo-optical' ': Allo Cheapo (Optical output)'
+					'usb-dac-1.1' ': USB 1.1 Audio DAC (any)'
+				)
 
 			# ASUS TB
 			elif (( $G_HW_MODEL == 52 )); then
 
-				G_WHIP_MENU_ARRAY+=('default' ': HDMI')
-				G_WHIP_MENU_ARRAY+=('asus-tb-analogue' ': 3.5mm Analogue')
+				G_WHIP_MENU_ARRAY+=('default' ': HDMI' 'asus-tb-analogue' ': 3.5mm Analogue')
 
 			# Odroid N2: Modern image
 			elif [[ $G_HW_MODEL == 15 && -f '/boot/dietpiEnv.txt' ]]; then
 
-				G_WHIP_MENU_ARRAY+=('OdroidN2_HDMI' ': Onboard digital HDMI audio (default)')
-				G_WHIP_MENU_ARRAY+=('OdroidN2_3.5mm' ': Onboard analogue 3.5mm audio')
+				G_WHIP_MENU_ARRAY+=('OdroidN2_HDMI' ': Onboard digital HDMI audio (default)' 'OdroidN2_3.5mm' ': Onboard analogue 3.5mm audio')
 
 			# Odroid C4: Modern image
 			elif [[ $G_HW_MODEL == 16 && -f '/boot/dietpiEnv.txt' ]]; then
 
 				G_WHIP_MENU_ARRAY+=('OdroidC4_HDMI' ': Onboard digital HDMI audio (default)')
-
 			fi
 
 			# Intel SST DSP
@@ -3862,23 +3885,23 @@ Additional benchmarks:
 					if (( $G_RASPBIAN ))
 					then
 						local mirror_list='https://www.raspbian.org/RaspbianMirrors/'
-						G_WHIP_MENU_ARRAY+=('http://raspbian.raspberrypi.org/raspbian/' ': Global mirror director (default)')
-						G_WHIP_MENU_ARRAY+=('https://mirror.ox.ac.uk/sites/archive.raspbian.org/archive/raspbian/' ': UK')
-						G_WHIP_MENU_ARRAY+=('https://mirror.netcologne.de/raspbian/raspbian/' ': Germany')
-						G_WHIP_MENU_ARRAY+=('https://mirror.umd.edu/raspbian/raspbian/' ': USA')
-						G_WHIP_MENU_ARRAY+=('https://mirrors.ustc.edu.cn/raspbian/raspbian/' ': China')
-						G_WHIP_MENU_ARRAY+=('http://raspbian.mirror.digitalpacific.com.au/raspbian/' ': Australia')
+						G_WHIP_MENU_ARRAY+=('http://raspbian.raspberrypi.org/raspbian' ': Global mirror director (default)')
+						G_WHIP_MENU_ARRAY+=('https://mirror.ox.ac.uk/sites/archive.raspbian.org/archive/raspbian' ': UK')
+						G_WHIP_MENU_ARRAY+=('https://mirror.netcologne.de/raspbian/raspbian' ': Germany')
+						G_WHIP_MENU_ARRAY+=('https://mirror.umd.edu/raspbian/raspbian' ': USA')
+						G_WHIP_MENU_ARRAY+=('https://mirrors.ustc.edu.cn/raspbian/raspbian' ': China')
+						G_WHIP_MENU_ARRAY+=('http://raspbian.mirror.digitalpacific.com.au/raspbian' ': Australia')
 
 					# Debian
 					else
 						local mirror_list='https://www.debian.org/mirror/list'
-						G_WHIP_MENU_ARRAY+=('https://deb.debian.org/debian/' ': Global mirror director (default)')
-						G_WHIP_MENU_ARRAY+=('https://ftp.debian.org/debian/' ': Global')
-						G_WHIP_MENU_ARRAY+=('http://ftp.uk.debian.org/debian/' ': UK')
-						G_WHIP_MENU_ARRAY+=('http://ftp.de.debian.org/debian/' ': Germany')
-						G_WHIP_MENU_ARRAY+=('http://ftp.us.debian.org/debian/' ': USA')
-						G_WHIP_MENU_ARRAY+=('http://ftp.cn.debian.org/debian/' ': China')
-						G_WHIP_MENU_ARRAY+=('http://ftp.au.debian.org/debian/' ': Australia')
+						G_WHIP_MENU_ARRAY+=('https://deb.debian.org/debian' ': Global mirror director (default)')
+						G_WHIP_MENU_ARRAY+=('https://ftp.debian.org/debian' ': Global')
+						G_WHIP_MENU_ARRAY+=('http://ftp.uk.debian.org/debian' ': UK')
+						G_WHIP_MENU_ARRAY+=('http://ftp.de.debian.org/debian' ': Germany')
+						G_WHIP_MENU_ARRAY+=('http://ftp.us.debian.org/debian' ': USA')
+						G_WHIP_MENU_ARRAY+=('http://ftp.cn.debian.org/debian' ': China')
+						G_WHIP_MENU_ARRAY+=('http://ftp.au.debian.org/debian' ': Australia')
 					fi
 
 					G_WHIP_DEFAULT_ITEM=$apt_mirror_current
@@ -3887,7 +3910,7 @@ Additional benchmarks:
 					if [[ $G_WHIP_RETURNED_VALUE == 'Custom' ]]
 					then
 						G_WHIP_DEFAULT_ITEM=$apt_mirror_current
-						G_WHIP_INPUTBOX 'Please enter a new APT mirror, e.g. https://ftp.debian.org/debian/' || continue
+						G_WHIP_INPUTBOX 'Please enter a new APT mirror, e.g. https://ftp.debian.org/debian' || continue
 					fi
 
 					/boot/dietpi/func/dietpi-set_software apt-mirror "$G_WHIP_RETURNED_VALUE" || { failure='[FAILED] An internal error occurred, please report this issue to:\n - https://github.com/MichaIng/DietPi/issues\n\n'; continue; }
