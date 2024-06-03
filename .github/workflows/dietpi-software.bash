@@ -245,7 +245,7 @@ do
 		8|33|131|179|206) Process_Software 196;;
 		32|148|119) Process_Software 128;;
 		129) Process_Software 88 89 128 webserver;;
-		49|165) Process_Software 88;;
+		49|165|177) Process_Software 0 17 88;;
 		#61) Process_Software 60;; # Cannot be installed in CI
 		125) Process_Software 194;;
 		#86|134|185) Process_Software 162;; # Docker does not start in systemd containers (without dedicated network)
