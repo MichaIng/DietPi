@@ -339,6 +339,7 @@ Links to hardware and software manufacturers, sources and build instructions use
 - [Homebridge](https://github.com/homebridge/homebridge)
 - [ADS-B Feeder](https://github.com/dirkhh/adsb-feeder-image)
 - [Kavita](https://github.com/Kareadita/Kavita)
+- [Forgejo](https://codeberg.org/forgejo/forgejo)
 
 ---
 
