@@ -88,7 +88,7 @@ Process_Software()
 			7) aCOMMANDS[i]='ffmpeg -version';;
 			9) aCOMMANDS[i]='node -v';;
 			#16) aSERVICES[i]='microblog-pub' aTCP[i]='8007';; Service enters a CPU-intense internal error loop until it has been configured interactively via "microblog-pub configure", hence it is not enabled and started anymore after install but instead as part of "microblog-pub configure"
-			17) aCOMMANDS[i]='git -v';;
+			17) aCOMMANDS[i]='git --version';; # from Bookworm on, the shorthand "-v" is supported
 			28) aSERVICES[i]='vncserver' aTCP[i]='5901';;
 			29) aSERVICES[i]='xrdp' aTCP[i]='3389';;
 			30) aSERVICES[i]='nxserver' aTCP[i]='4000';;
@@ -197,6 +197,7 @@ Process_Software()
 			172) aSERVICES[i]='wg-quick@wg0' aUDP[i]='51820';;
 			174) aCOMMANDS[i]='gimp -v';;
 			176) aSERVICES[i]='mycroft';;
+			177) aSERVICES[i]='forgejo' aTCP[i]='3000'; (( $arch < 10 )) && aDELAY[i]=30;;
 			178) aSERVICES[i]='jellyfin' aTCP[i]='8097'; [[ $arch == [23] ]] && aDELAY[i]=300;; # jellyfin[9983]: arm-binfmt-P: ../../target/arm/translate.c:9659: thumb_tr_translate_insn: Assertion `(dc->base.pc_next & 1) == 0' failed.   ###   jellyfin[9983]: qemu: uncaught target signal 6 (Aborted) - core dumped   ###   about 5 times
 			179) aSERVICES[i]='komga' aTCP[i]='2037'; (( $arch == 10 )) && aDELAY[i]=30; (( $arch < 10 )) && aDELAY[i]=300;;
 			180) aSERVICES[i]='bazarr' aTCP[i]='6767'; (( $arch == 10 )) && aDELAY[i]=30; (( $arch < 10 )) && aDELAY[i]=90;;
@@ -244,7 +245,7 @@ do
 		8|33|131|179|206) Process_Software 196;;
 		32|148|119) Process_Software 128;;
 		129) Process_Software 88 89 128 webserver;;
-		49|165) Process_Software 88;;
+		49|165|177) Process_Software 0 17 88;;
 		#61) Process_Software 60;; # Cannot be installed in CI
 		125) Process_Software 194;;
 		#86|134|185) Process_Software 162;; # Docker does not start in systemd containers (without dedicated network)
