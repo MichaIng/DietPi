@@ -260,8 +260,11 @@ done
 # Dependencies
 ##########################################
 apackages=('xz-utils' 'parted' 'fdisk' 'systemd-container')
-(( $G_HW_ARCH == $arch || ( $G_HW_ARCH < 10 && $G_HW_ARCH > $arch ) )) || apackages+=('qemu-user-static' 'binfmt-support')
+(( $G_HW_ARCH == $arch || ( $G_HW_ARCH < 10 && $G_HW_ARCH > $arch ) )) || apackages+=('qemu-user-static')
 G_AG_CHECK_INSTALL_PREREQ "${apackages[@]}"
+
+# Register QEMU binfmt configs
+dpkg-query -s 'qemu-user-static' &> /dev/null && G_EXEC systemctl restart systemd-binfmt
 
 ##########################################
 # Prepare container
