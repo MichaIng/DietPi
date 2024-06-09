@@ -24,10 +24,16 @@
 	# - HW_MODEL=0				(must match one of the supported IDs below)
 	# - WIFI_REQUIRED=0			[01]
 	# - DISTRO_TARGET=7			[678] (Bullseye: 6, Bookworm: 7, Trixie: 8)
+	# - TEST_KERNEL=1			Install test kernel from https://dietpi.com/downloads/binaries/testing/
+	# - TEST_UBOOT=1			Install test U-Boot from https://dietpi.com/downloads/binaries/testing/
 	#------------------------------------------------------------------------------------------------
 
 	# Core globals
 	G_PROGRAM_NAME='DietPi-Installer'
+
+	# Input variables
+	[[ $TEST_KERNEL == 1 ]] || TEST_KERNEL=0
+	[[ $TEST_UBOOT == 1 ]] || TEST_UBOOT=0
 
 	#------------------------------------------------------------------------------------------------
 	# Critical checks and requirements to run this script
@@ -689,7 +695,6 @@ setenv rootuuid "true"' /boot/boot.cmd
 					79) (( $HW_VARIANT == 2 )) && G_CONFIG_INJECT 'fdtfile=' 'fdtfile=rockchip/rk3588s-nanopi-r6c.dtb' /boot/dietpiEnv.txt;;
 					85) G_CONFIG_INJECT 'fdtfile=' 'fdtfile=rockchip/rk3588s-rock-5a.dtb' /boot/dietpiEnv.txt;;
 					87) G_CONFIG_INJECT 'fdtfile=' 'fdtfile=rockchip/rk3566-orangepi-3b.dtb' /boot/dietpiEnv.txt;;
-					90) G_CONFIG_INJECT 'fdtfile=' 'fdtfile=rockchip/rk3566-radxa-zero3.dtb' /boot/dietpiEnv.txt;;
 					*) :;;
 				esac
 				case $G_HW_MODEL in
@@ -876,7 +881,7 @@ setenv rootuuid "true"' /boot/boot.cmd
 			'cron'			# Background job scheduler
 			'curl'			# Web address testing, downloading, uploading etc.
 			'fdisk'			# Partitioning tool used by DietPi-FS_partition_resize and DietPi-Imager
-			'gnupg'			# apt-key add / gpg
+			'gpg'			# apt-key list / gpg
 			'htop'			# System monitor
 			'iputils-ping'		# "ping" command
 			'locales'		# Support locales, used by dietpi-config > Language/Regional Options > Locale
@@ -1053,7 +1058,7 @@ _EOF_
 			# Update APT lists
 			G_AGUP
 			# Install kernel, device tree, U-Boot, firmware and initramfs packages
-			local model='odroidn2' kernel='meson64' arch='arm64' branch='current' zstd=() dietpi_uboot=0 dietpi_kernel=0
+			local model='odroidn2' kernel='meson64' arch='arm64' branch='current' zstd=()
 			case $G_HW_MODEL in
 				10) model='odroidc1' kernel='meson' arch='arm';;
 				11) model='odroidxu4' kernel='odroidxu4' arch='arm';;
@@ -1151,27 +1156,21 @@ blacklist rockchip_vdec
 _EOF_
 			fi
 			# Install initramfs-tools first to have an initramfs generated on kernel install, and configure it to use zstd if supported for better compression and faster decompression
-			if (( $dietpi_kernel ))
-			then
-				G_EXEC_OUTPUT=1 G_EXEC curl -fo package.deb 'https://dietpi.com/downloads/binaries/armbian-firmware.deb'
-				G_EXEC_OUTPUT=1 G_EXEC dpkg -i package.deb
-				G_EXEC rm package.deb
-			fi
 			[[ $kernel == 'rockchip64' || $kernel == 'rk35xx' || $kernel == 'meson64' || $kernel == 'sunxi64' || $kernel == 'sunxi' || $kernel == 'rockchip' ]] && zstd=('zstd')
 			G_AGI initramfs-tools u-boot-tools armbian-firmware "${zstd[@]}"
 			[[ ${zstd[0]} ]] && G_CONFIG_INJECT 'COMPRESS=' 'COMPRESS=zstd' /etc/initramfs-tools/initramfs.conf
 			# Download and pre-install kernel hosted on dietpi.com where the Armbian APT repo provides a too old version or is not available
-			if (( $dietpi_kernel ))
+			if (( $TEST_KERNEL ))
 			then
-				G_EXEC_OUTPUT=1 G_EXEC curl -fo package1.deb "https://dietpi.com/downloads/binaries/linux-image-$branch-$kernel.deb"
-				G_EXEC_OUTPUT=1 G_EXEC curl -fo package2.deb "https://dietpi.com/downloads/binaries/linux-dtb-$branch-$kernel.deb"
+				G_EXEC_OUTPUT=1 G_EXEC curl -fo package1.deb "https://dietpi.com/downloads/binaries/testing/linux-image-$branch-$kernel.deb"
+				G_EXEC_OUTPUT=1 G_EXEC curl -fo package2.deb "https://dietpi.com/downloads/binaries/testing/linux-dtb-$branch-$kernel.deb"
 				G_EXEC_OUTPUT=1 G_EXEC dpkg -i package[12].deb
 				G_EXEC rm package[12].deb
 			fi
 			# Download and pre-install U-Boot hosted on dietpi.com where the Armbian APT repo provides a too old version or is not available
-			if (( $dietpi_uboot ))
+			if (( $TEST_UBOOT ))
 			then
-				G_EXEC_OUTPUT=1 G_EXEC curl -fo package.deb "https://dietpi.com/downloads/binaries/linux-u-boot-$model-$branch.deb"
+				G_EXEC_OUTPUT=1 G_EXEC curl -fo package.deb "https://dietpi.com/downloads/binaries/testing/linux-u-boot-$model-$branch.deb"
 				G_EXEC_OUTPUT=1 G_EXEC dpkg -i package.deb
 				G_EXEC rm package.deb
 			fi
@@ -1215,14 +1214,6 @@ _EOF_
 				G_EXEC dtc -I dts -O dtb -o /boot/overlay-user/dietpi-usb-otg.{dtbo,dts}
 				G_CONFIG_INJECT 'user_overlays=' 'user_overlays=dietpi-usb-otg' /boot/dietpiEnv.txt
 				G_EXEC apt-mark auto device-tree-compiler
-
-			# Workaround for Odroid N2 failing to boot from eMMC: https://forum.armbian.com/topic/20206-odroid-n2-issues-with-recent-firmware-and-emmc-modules/#comment-142409
-			elif (( $G_HW_MODEL == 15 ))
-			then
-				G_EXEC curl -sSfo u-boot.gz 'https://dietpi.com/downloads/binaries/u-boot-odroidn2.bin.gz'
-				G_EXEC gzip -d u-boot.gz
-				G_EXEC dd if=u-boot "of=$BOOT_DEVICE" bs=512 seek=1 conv=notrunc,fdatasync
-				G_EXEC rm u-boot
 
 			# Workaround for NanoPi R1 failing boot: https://github.com/MichaIng/DietPi/issues/5927
 			elif (( $G_HW_MODEL == 48 ))
@@ -1435,10 +1426,10 @@ _EOF_
 				G_EXEC rm -f /{initrd.img,vmlinuz}{,.old}
 			fi
 
-		# Generic kernel + device tree + U-Boot package auto detect + initramfs-tools
+		# Generic kernel, device tree, bootloader and firmware package auto detect + initramfs-tools
 		elif (( $G_HW_MODEL != 75 ))
 		then
-			mapfile -t apackages < <(dpkg-query -Wf '${Package}\n' | grep -E '^linux-(image|dtb|u-boot)-|^u-boot')
+			mapfile -t apackages < <({ dpkg-query -Wf '${Package}\n' | grep -E '^linux-(image|dtb)|u-boot|bootloader|firmware'; dpkg-query -S /{lib/modules,boot}/* 2> /dev/null | sed 's/:.*//;s/, /\n/g'; } | sort -u)
 			[[ ${apackages[0]} ]] || G_DIETPI-NOTIFY 2 'Unable to find kernel packages for installation. Assuming non-APT/.deb kernel installation.'
 			G_AGI initramfs-tools "${apackages[@]}"
 			unset -v apackages
@@ -1574,26 +1565,26 @@ _EOF_
 		[[ -d '/etc/chromium.d' ]] && G_EXEC rm -R /etc/chromium.d
 		[[ -d '/etc/lightdm' ]] && G_EXEC rm -R /etc/lightdm
 
-		# - www
+		# www
 		[[ -d '/var/www' ]] && G_EXEC rm -Rf /var/www/{,.??,.[^.]}*
 
-		# - Source code and Linux headers
+		# Source code and Linux headers
 		[[ -d '/usr/src' ]] && G_EXEC rm -Rf /usr/src/{,.??,.[^.]}*
 
-		# - Documentation dirs: https://github.com/MichaIng/DietPi/issues/3259
+		# Documentation dirs: https://github.com/MichaIng/DietPi/issues/3259
 		#[[ -d '/usr/share/man' ]] && G_EXEC rm -R /usr/share/man
 		#[[ -d '/usr/share/doc' ]] && G_EXEC rm -R /usr/share/doc
 		#[[ -d '/usr/share/doc-base' ]] && G_EXEC rm -R /usr/share/doc-base
 		[[ -d '/usr/share/calendar' ]] && G_EXEC rm -R /usr/share/calendar
 
-		# - Unused DEB package config files
+		# Unused DEB package config files
 		find / \( -name '*?.dpkg-dist' -o -name '*?.dpkg-old' -o -name '*?.dpkg-new' -o -name '*?.dpkg-bak' -o -name '*?.dpkg-del' -o -name '*?.ucf-dist' -o -name '*?.ucf-old' -o -name '*?.ucf-new' \) -exec rm -v {} +
 
-		# - Fonts
+		# Fonts
 		[[ -d '/usr/share/fonts' ]] && G_EXEC rm -R /usr/share/fonts
 		[[ -d '/usr/share/icons' ]] && G_EXEC rm -R /usr/share/icons
 
-		# - Stop, disable and remove not required 3rd party services
+		# Stop, disable and remove not required 3rd party services
 		local aservices=(
 
 			# RPi
@@ -1639,7 +1630,7 @@ _EOF_
 			done
 		done
 
-		# - Remove obsolete SysV service entries
+		# Remove obsolete SysV service entries
 		aservices=(
 
 			'fake-hwclock'
@@ -2035,8 +2026,8 @@ _EOF_'
 		if (( $G_HW_MODEL != 20 && $G_HW_MODEL != 75 ))
 		then
 			G_EXEC_DESC='Configuring hdparm'
-			# Since Debian Bullseye, spindown_time is not applied if APM is not supported by the drive. force_spindown_time is required to override that.
-			G_EXEC eval 'echo -e '\''apm = 127\nforce_spindown_time = 120'\'' > /etc/hdparm.conf'
+			# Spin down disks after 10 minutes by default, regardless whether they support APM (spindown_time vs force_spindown_time): https://manpages.debian.org/hdparm#S
+			G_CONFIG_INJECT 'force_spindown_time[[:blank:]=]' 'force_spindown_time = 120' /etc/hdparm.conf
 		fi
 
 		# RPi
@@ -2283,7 +2274,7 @@ _EOF_
 			fi
 
 			# Update config
-			G_CONFIG_INJECT 'GRUB_CMDLINE_LINUX_DEFAULT=' 'GRUB_CMDLINE_LINUX_DEFAULT="consoleblank=0"' /etc/default/grub
+			G_CONFIG_INJECT 'GRUB_CMDLINE_LINUX_DEFAULT=' 'GRUB_CMDLINE_LINUX_DEFAULT="consoleblank=0"' /etc/default/grub # NB: Removing "quiet" adds ~0.5s to boot time on my 6.5s - 7.5s boot time laptop.
 			G_CONFIG_INJECT 'GRUB_CMDLINE_LINUX=' 'GRUB_CMDLINE_LINUX="net.ifnames=0"' /etc/default/grub
 			G_CONFIG_INJECT 'GRUB_TIMEOUT=' 'GRUB_TIMEOUT=0' /etc/default/grub
 			G_EXEC_DESC='Regenerating GRUB config' G_EXEC_OUTPUT=1 G_EXEC grub-mkconfig -o /boot/grub/grub.cfg

@@ -89,9 +89,17 @@
 			G_WHIP_DEFAULT_ITEM=1
 		fi
 
-		G_PROGRAM_NAME='Unsupported SSH client terminal' G_WHIP_MENU "[WARNING] Your SSH client passed an unsupported terminal: TERM=$TERM_old
+		if G_PROGRAM_NAME='Unsupported SSH client terminal' G_WHIP_MENU "[WARNING] Your SSH client passed an unsupported terminal: TERM=$TERM_old
 \nAs a workaround, we fooled the server by setting TERM=$TERM. This is not the cleanest solution as commands may use control sequences which are not supported by the current terminal.
-\nPlease change your SSH clients terminal, respectively the passed \$TERM string$ncurses_term." && (( $G_WHIP_RETURNED_VALUE )) && G_AGI ncurses-term
+\nPlease change your SSH clients terminal, respectively the passed \$TERM string$ncurses_term." && (( $G_WHIP_RETURNED_VALUE ))
+		then
+			if (( $UID ))
+			then
+				G_SUDO G_AGI ncurses-term
+			else
+				G_AGI ncurses-term
+			fi
+		fi
 		unset -v TERM_old ncurses_term
 	fi
 	unset -v term

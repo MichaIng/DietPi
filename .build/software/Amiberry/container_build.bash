@@ -59,8 +59,11 @@ image="DietPi_Container-$image.img"
 # Dependencies
 ##########################################
 apackages=('xz-utils' 'parted' 'fdisk' 'systemd-container')
-(( $G_HW_ARCH == $arch || ( $G_HW_ARCH < 10 && $G_HW_ARCH > $arch ) )) || apackages+=('qemu-user-static' 'binfmt-support')
+(( $G_HW_ARCH == $arch || ( $G_HW_ARCH < 10 && $G_HW_ARCH > $arch ) )) || apackages+=('qemu-user-static')
 G_AG_CHECK_INSTALL_PREREQ "${apackages[@]}"
+
+# Register QEMU binfmt configs
+dpkg-query -s 'qemu-user-static' &> /dev/null && G_EXEC systemctl restart systemd-binfmt
 
 ##########################################
 # Prepare container
@@ -136,9 +139,6 @@ Pin: origin archive.raspberrypi.org
 Pin-Priority: -1
 _EOF_
 fi
-
-# ARMv6/7 Trixie: Temporarily prevent dist-upgrade on Trixie, as it fails due to 64-bit time_t transition causing dependency conflicts across the repo.
-(( $arch < 3 )) && [[ $DISTRO == 'trixie' ]] && G_EXEC touch rootfs/boot/dietpi/.skip_distro_upgrade
 
 # Automated build
 cat << _EOF_ >> rootfs/boot/Automation_Custom_Script.sh || Error_Exit 'Failed to generate Automation_Custom_Script.sh'

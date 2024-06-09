@@ -9,6 +9,7 @@
 		> /dietpi_skip_partition_resize
 		systemctl enable dietpi-fs_partition_resize
 		echo '[ INFO ] Rebooting to load the new partition table'
+		sync
 		reboot
 		exit 0
 	}
@@ -117,7 +118,7 @@
 
 	# Maximise root filesystem if type is supported
 	case $ROOT_FSTYPE in
-		'ext'[234]) resize2fs "$ROOT_DEV" || reboot;; # Reboot if resizing fails: https://github.com/MichaIng/DietPi/issues/6149
+		'ext'[234]) resize2fs "$ROOT_DEV" || REBOOT=1;; # Reboot if resizing fails: https://github.com/MichaIng/DietPi/issues/6149
 		'f2fs')
 			mount -o remount,ro /
 			resize.f2fs "$ROOT_DEV"
@@ -131,7 +132,7 @@
 	esac
 
 	# Reboot if needed
-	(( $REBOOT )) && reboot
+	(( $REBOOT )) && { sync; reboot; }
 
 	exit "$EXIT_CODE"
 }

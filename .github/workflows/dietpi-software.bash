@@ -88,7 +88,7 @@ Process_Software()
 			7) aCOMMANDS[i]='ffmpeg -version';;
 			9) aCOMMANDS[i]='node -v';;
 			#16) aSERVICES[i]='microblog-pub' aTCP[i]='8007';; Service enters a CPU-intense internal error loop until it has been configured interactively via "microblog-pub configure", hence it is not enabled and started anymore after install but instead as part of "microblog-pub configure"
-			17) aCOMMANDS[i]='git -v';;
+			17) aCOMMANDS[i]='git --version';; # from Bookworm on, the shorthand "-v" is supported
 			28) aSERVICES[i]='vncserver' aTCP[i]='5901';;
 			29) aSERVICES[i]='xrdp' aTCP[i]='3389';;
 			30) aSERVICES[i]='nxserver' aTCP[i]='4000';;
@@ -197,6 +197,7 @@ Process_Software()
 			172) aSERVICES[i]='wg-quick@wg0' aUDP[i]='51820';;
 			174) aCOMMANDS[i]='gimp -v';;
 			176) aSERVICES[i]='mycroft';;
+			177) aSERVICES[i]='forgejo' aTCP[i]='3000'; (( $arch < 10 )) && aDELAY[i]=30;;
 			178) aSERVICES[i]='jellyfin' aTCP[i]='8097'; [[ $arch == [23] ]] && aDELAY[i]=300;; # jellyfin[9983]: arm-binfmt-P: ../../target/arm/translate.c:9659: thumb_tr_translate_insn: Assertion `(dc->base.pc_next & 1) == 0' failed.   ###   jellyfin[9983]: qemu: uncaught target signal 6 (Aborted) - core dumped   ###   about 5 times
 			179) aSERVICES[i]='komga' aTCP[i]='2037'; (( $arch == 10 )) && aDELAY[i]=30; (( $arch < 10 )) && aDELAY[i]=300;;
 			180) aSERVICES[i]='bazarr' aTCP[i]='6767'; (( $arch == 10 )) && aDELAY[i]=30; (( $arch < 10 )) && aDELAY[i]=90;;
@@ -244,7 +245,7 @@ do
 		8|33|131|179|206) Process_Software 196;;
 		32|148|119) Process_Software 128;;
 		129) Process_Software 88 89 128 webserver;;
-		49|165) Process_Software 88;;
+		49|165|177) Process_Software 0 17 88;;
 		#61) Process_Software 60;; # Cannot be installed in CI
 		125) Process_Software 194;;
 		#86|134|185) Process_Software 162;; # Docker does not start in systemd containers (without dedicated network)
@@ -259,8 +260,11 @@ done
 # Dependencies
 ##########################################
 apackages=('xz-utils' 'parted' 'fdisk' 'systemd-container')
-(( $G_HW_ARCH == $arch || ( $G_HW_ARCH < 10 && $G_HW_ARCH > $arch ) )) || apackages+=('qemu-user-static' 'binfmt-support')
+(( $G_HW_ARCH == $arch || ( $G_HW_ARCH < 10 && $G_HW_ARCH > $arch ) )) || apackages+=('qemu-user-static')
 G_AG_CHECK_INSTALL_PREREQ "${apackages[@]}"
+
+# Register QEMU binfmt configs
+dpkg-query -s 'qemu-user-static' &> /dev/null && G_EXEC systemctl restart systemd-binfmt
 
 ##########################################
 # Prepare container
@@ -367,9 +371,6 @@ G_EXEC eval 'echo -e '\''[Service]\nAmbientCapabilities='\'' > rootfs/etc/system
 
 # Workaround for sysctl: permission denied on key "net.core.rmem_max" in containers
 G_EXEC sed --follow-symlinks -i '/# Start DietPi-Software/a\sed -i '\''/G_EXEC sysctl -w net\.core\.rmem_max/d'\'' /boot/dietpi/dietpi-software' rootfs/boot/dietpi/dietpi-login
-
-# ARMv6/7 Trixie: Temporarily prevent dist-upgrade on Trixie, as it fails due to 64-bit time_t transition causing dependency conflicts across the repo.
-(( $arch < 3 )) && [[ $DISTRO == 'trixie' ]] && G_EXEC touch rootfs/boot/dietpi/.skip_distro_upgrade
 
 # Check for service status, ports and commands
 # shellcheck disable=SC2016
