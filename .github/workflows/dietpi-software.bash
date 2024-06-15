@@ -426,5 +426,5 @@ G_EXEC sed --follow-symlinks -i 's|Prompt_on_Failure$|{ journalctl -n 50; ss -tu
 # Boot container
 ##########################################
 systemd-nspawn -bD rootfs
-[[ -f 'rootfs/success' ]] || { journalctl -n 25; ss -tulpn; df -h; free -h; exit 1; }
+[[ -f 'rootfs/success' ]] || { journalctl -n 25; ss -tlpn; df -h; free -h; exit 1; }
 }
