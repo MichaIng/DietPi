@@ -311,8 +311,12 @@ then
 fi
 
 # Install test builds from dietpi.com if requested
-# shellcheck disable=SC2016
-[[ $TEST == 'true' ]] && G_EXEC sed --follow-symlinks -i '/# Start DietPi-Software/a\sed -i '\''s|dietpi.com/downloads/binaries/$G_DISTRO_NAME/|dietpi.com/downloads/binaries/$G_DISTRO_NAME/testing/|'\'' /boot/dietpi/dietpi-software' rootfs/boot/dietpi/dietpi-login
+if [[ $TEST == 'true' ]]
+then
+	# shellcheck disable=SC2016
+	G_EXEC sed --follow-symlinks -i '/# Start DietPi-Software/a\sed -i '\''s|dietpi.com/downloads/binaries/$G_DISTRO_NAME/|dietpi.com/downloads/binaries/$G_DISTRO_NAME/testing/|'\'' /boot/dietpi/dietpi-software' rootfs/boot/dietpi/dietpi-login
+	G_CONFIG_INJECT 'SOFTWARE_DIETPI_DASHBOARD_VERSION=' 'SOFTWARE_DIETPI_DASHBOARD_VERSION=Nightly' rootfs/boot/dietpi.txt
+fi
 
 # Workaround invalid TERM on login
 # shellcheck disable=SC2016
