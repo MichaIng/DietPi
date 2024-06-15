@@ -260,11 +260,27 @@ done
 # Dependencies
 ##########################################
 apackages=('xz-utils' 'parted' 'fdisk' 'systemd-container')
-(( $G_HW_ARCH == $arch || ( $G_HW_ARCH < 10 && $G_HW_ARCH > $arch ) )) || apackages+=('qemu-user-static')
+
+# Emulation support in case of incompatible architecture
+emulation=0
+(( $G_HW_ARCH == $arch || ( $G_HW_ARCH < 10 && $G_HW_ARCH > $arch ) )) || emulation=1
+
+# Bullseye/Jammy: binfmt-support still required for emulation. With systemd-binfmt only, mmdebstrap throws "E: <arch> can neither be executed natively nor via qemu user emulation with binfmt_misc"
+(( $emulation )) && { apackages+=('qemu-user-static'); [[ $DISTRO == 'bullseye' ]] && apackages+=('binfmt-support'); }
+
 G_AG_CHECK_INSTALL_PREREQ "${apackages[@]}"
 
 # Register QEMU binfmt configs
-dpkg-query -s 'qemu-user-static' &> /dev/null && G_EXEC systemctl restart systemd-binfmt
+if (( $emulation ))
+then
+	if [[ $DISTRO == 'bullseye' ]]
+	then
+		G_EXEC systemctl disable --now systemd-binfmt
+		G_EXEC systemctl restart binfmt-support
+	else
+		G_EXEC systemctl restart systemd-binfmt
+	fi
+fi
 
 ##########################################
 # Prepare container
