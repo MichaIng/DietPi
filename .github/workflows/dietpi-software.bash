@@ -13,6 +13,16 @@ else
 	. /tmp/dietpi-globals
 	G_EXEC rm /tmp/dietpi-globals
 	export G_GITOWNER G_GITBRANCH G_HW_ARCH_NAME=$(uname -m)
+	read -r debian_version < /etc/debian_version
+	case $debian_version in
+		'11.'*|'bullseye/sid') G_DISTRO=6;;
+		'12.'*|'bookworm/sid') G_DISTRO=7;;
+		'13.'*|'trixie/sid') G_DISTRO=8;;
+		*) G_DIETPI-NOTIFY 1 "Unsupported distro version \"$debian_version\". Aborting ..."; exit 1;;
+	esac
+	# Ubuntu ships with /etc/debian_version from Debian testing, hence we assume one version lower.
+	grep -q '^ID=ubuntu' /etc/os-release && ((G_DISTRO--))
+	(( $G_DISTRO < 6 )) && { G_DIETPI-NOTIFY 1 'Unsupported Ubuntu version. Aborting ...'; exit 1; }
 fi
 case $G_HW_ARCH_NAME in
 	'armv6l') export G_HW_ARCH=1;;
@@ -266,14 +276,14 @@ emulation=0
 (( $G_HW_ARCH == $arch || ( $G_HW_ARCH < 10 && $G_HW_ARCH > $arch ) )) || emulation=1
 
 # Bullseye/Jammy: binfmt-support still required for emulation. With systemd-binfmt only, mmdebstrap throws "E: <arch> can neither be executed natively nor via qemu user emulation with binfmt_misc"
-(( $emulation )) && { apackages+=('qemu-user-static'); [[ $DISTRO == 'bullseye' ]] && apackages+=('binfmt-support'); }
+(( $emulation )) && { apackages+=('qemu-user-static'); (( $G_DISTRO < 7 )) && apackages+=('binfmt-support'); }
 
 G_AG_CHECK_INSTALL_PREREQ "${apackages[@]}"
 
 # Register QEMU binfmt configs
 if (( $emulation ))
 then
-	if [[ $DISTRO == 'bullseye' ]]
+	if (( $G_DISTRO < 7 ))
 	then
 		G_EXEC systemctl disable --now systemd-binfmt
 		G_EXEC systemctl restart binfmt-support
