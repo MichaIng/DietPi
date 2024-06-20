@@ -412,8 +412,8 @@ packages='apt,bash-completion,bzip2,ca-certificates,cron,curl,fdisk,gpg,htop,ipu
 [[ $HW_MODEL == 75 ]] && packages+='iproute2' || packages+='console-setup,dropbear,ethtool,fake-hwclock,ifupdown,isc-dhcp-client,kmod,rfkill,systemd-timesyncd,usbutils'
 # - "--skip=check/empty" to ignore /etc/fstab, boot and tmpfs mounts we added above
 # - "--skip=check/qemu" to skip arch test, which requires the "arch-test" package. We however assure emulation support out end.
-# - Bullseye/Jammy host mmdebstrap seems to not support "--skip=check/empty,check/qemu".
-G_EXEC_OUTPUT=1 G_EXEC mmdebstrap --debug --mode=root --format=dir --skip=check/empty --skip=check/qemu --variant=minbase --include="$packages" --arch="$parch" --keyring="$keyring" "$distro" ./rootfs "$repo"
+# - Bullseye/Jammy host mmdebstrap does not support "--skip=check/empty,check/qemu".
+G_EXEC_OUTPUT=1 G_EXEC mmdebstrap --mode=root --format=dir --skip=check/empty --skip=check/qemu --variant=minbase --include="$packages" --arch="$parch" --keyring="$keyring" "$distro" ./rootfs "$repo"
 G_EXEC umount rootfs/dev rootfs/run rootfs/var/cache/apt rootfs/var/lib/apt/lists rootfs/var/log
 
 ##########################################
@@ -431,15 +431,15 @@ _EOF_
 cat << _EOF_ >> rootfs/etc/rc.local
 export GITOWNER='$GITOWNER' GITBRANCH='$GITBRANCH' HW_MODEL='$HW_MODEL' IMAGE_CREATOR=0 PREIMAGE_INFO=0 WIFI_REQUIRED=1 DISTRO_TARGET=$DISTRO TEST_KERNEL=$TEST_KERNEL TEST_UBOOT=$TEST_UBOOT
 echo '[ INFO ] Running DietPi-Installer for $G_GITOWNER/$G_GITBRANCH'
-bash -c "\$(curl -sSf 'https://raw.githubusercontent.com/$G_GITOWNER/DietPi/$G_GITBRANCH/.build/images/dietpi-installer')" || poweroff
+bash -c "\$(curl -sSf 'https://raw.githubusercontent.com/$G_GITOWNER/DietPi/$G_GITBRANCH/.build/images/dietpi-installer')" || { echo '[FAILED] DietPi-Installer failed, shutting down ...'; journalctl -n 25; df -h; free -h; poweroff; exit 1; }
 _EOF_
 
 # - VM: Generate tiny-initramfs with explicit kernel modules, as auto-detection doesn't work correctly within container and loop devices
 [[ $HW_MODEL == 20 ]] && cat << _EOF_ >> rootfs/etc/rc.local
 echo '[ INFO ] Rebuilding virtual machine initramfs to support all virtualizers...'
-version=\$(dpkg --get-selections | mawk '\$1~/^linux-image-.*-$parch\$/{print \$1;exit}') || poweroff
+version=\$(dpkg --get-selections | mawk '\$1~/^linux-image-.*-$parch\$/{print \$1;exit}') || { echo '[FAILED] Obtaining kernel version failed, shutting down ...'; journalctl -n 25; df -h; free -h; poweroff; exit 1; }
 version=\${version#linux-image-}
-mktirfs -m no -M no --include-modules='ahci,sd_mod,vmw_pvscsi,hv_storvsc,virtio_scsi,virtio_pci,BusLogic,$FSTYPE' -o "/boot/initrd.img-\$version" "\$version" || poweroff
+mktirfs -m no -M no --include-modules='ahci,sd_mod,vmw_pvscsi,hv_storvsc,virtio_scsi,virtio_pci,BusLogic,$FSTYPE' -o "/boot/initrd.img-\$version" "\$version" || { echo '[FAILED] Generating initramfs failed, shutting down ...'; journalctl -n 25; df -h; free -h; poweroff; exit 1; }
 _EOF_
 
 cat << '_EOF_' >> rootfs/etc/rc.local
@@ -459,9 +459,9 @@ then
 	abind=("--bind=$FP_LOOP" '--bind=/dev/disk')
 	for i in "${FP_LOOP}p"*; do abind+=("--bind=$i"); done
 fi
-systemd-nspawn -bD rootfs "${abind[@]}" || { G_DIETPI-NOTIFY 1 'systemd-nspawn failed, aborting...'; journalctl -n 25; ss -tlpn; df -h; free -h; exit 1; }
+systemd-nspawn -bD rootfs "${abind[@]}" || { G_DIETPI-NOTIFY 1 'systemd-nspawn failed, aborting ...'; journalctl -n 25; ss -tlpn; df -h; free -h; exit 1; }
 
-[[ -f 'rootfs/success' ]] || { G_DIETPI-NOTIFY 1 'The container setup did not finish successfully, aborting...'; journalctl -n 25; ss -tlpn; df -h; free -h; exit 1; }
+[[ -f 'rootfs/success' ]] || { G_DIETPI-NOTIFY 1 'The container setup did not finish successfully, aborting ...'; journalctl -n 25; ss -tlpn; df -h; free -h; exit 1; }
 G_EXEC rm rootfs/success
 G_EXEC rm -Rf rootfs/{dev,proc,run,sys,tmp,var/log}/{,.??,.[^.]}* # Failsafe: /var/log/journal was found despite tmpfs mount!
 G_EXEC sync
