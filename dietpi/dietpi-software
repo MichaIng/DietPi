@@ -3932,15 +3932,15 @@ _EOF_
 			# Database
 			G_EXEC systemctl start postgresql
 			local synapse_pass=$(tr -dc '[:alnum:]' < /dev/random | head -c30)
-			if [[ $(sudo -u postgres psql -tAc "SELECT 1 FROM pg_roles WHERE rolname='synapse'") != 1 ]]
+			if [[ $(runuser -u postgres -- psql -tAc "SELECT 1 FROM pg_roles WHERE rolname='synapse'") != 1 ]]
 			then
-				G_EXEC sudo -u postgres psql -c "CREATE ROLE synapse WITH LOGIN PASSWORD '$synapse_pass';"
+				G_EXEC runuser -u postgres -- psql -c "CREATE ROLE synapse WITH LOGIN PASSWORD '$synapse_pass';"
 			else
-				G_EXEC sudo -u postgres psql -c "ALTER ROLE synapse WITH PASSWORD '$synapse_pass';"
+				G_EXEC runuser -u postgres -- psql -c "ALTER ROLE synapse WITH PASSWORD '$synapse_pass';"
 			fi
-			if [[ $(sudo -u postgres psql -tAc "SELECT 1 FROM pg_database WHERE datname='synapse'") != 1 ]]
+			if [[ $(runuser -u postgres -- psql -tAc "SELECT 1 FROM pg_database WHERE datname='synapse'") != 1 ]]
 			then
-				G_EXEC sudo -u postgres createdb --encoding=UTF8 --locale=C --template=template0 --owner=synapse synapse
+				G_EXEC runuser -u postgres -- createdb --encoding=UTF8 --locale=C --template=template0 --owner=synapse synapse
 			fi
 
 			# Pre-create drop-in config for database access details
@@ -4236,7 +4236,7 @@ _EOF_
 				G_EXEC curl -sSf 'https://sh.rustup.rs/' -o rustup-init.sh
 				G_EXEC chmod +x rustup-init.sh
 				# RPi with 64-bit kernel on 32-bit image: Enforce 32-bit toolchain: https://github.com/MichaIng/DietPi/issues/6306
-				G_EXEC_OUTPUT=1 G_EXEC sudo -u "$micro_name" ./rustup-init.sh -y --profile minimal ${RPI_64KERNEL_32OS:+'--default-host' 'armv7-unknown-linux-gnueabihf'}
+				G_EXEC_OUTPUT=1 G_EXEC runuser -u "$micro_name" -- ./rustup-init.sh -y --profile minimal ${RPI_64KERNEL_32OS:+'--default-host' 'armv7-unknown-linux-gnueabihf'}
 				G_EXEC rm rustup-init.sh
 			fi
 
@@ -4261,7 +4261,7 @@ PS1=\"(microblog.pub) \$PS1\"" > "$micro_pyenv_activate_file"
 			# Install Python 3.10 and Poetry
 			G_EXEC chown -R "$micro_name:$micro_name" "$micro_pyenv_dir"
 			G_EXEC_DESC='Installing Python with Poetry into pyenv'
-			G_EXEC_OUTPUT=1 G_EXEC sudo -u "$micro_name" dash -c "
+			G_EXEC_OUTPUT=1 G_EXEC runuser -u "$micro_name" -- dash -c "
 . $micro_pyenv_activate_file || exit 1
 pyenv install $micro_python_version || exit 1
 pyenv local $micro_python_version || exit 1
@@ -4454,7 +4454,7 @@ location = /.well-known/caldav  { return 301 /owncloud/remote.php/dav/; }' > /et
 			G_EXEC systemctl restart redis-server
 
 			# Initially add occ command shortcut, will be added as alias by /etc/bashrc.d/dietpi.bash if occ file exist:
-			occ(){ sudo -u www-data php /var/www/owncloud/occ "$@"; }
+			occ(){ runuser -u www-data -- php /var/www/owncloud/occ "$@"; }
 
 			# Adjusting config file:
 			local config_php='/var/www/owncloud/config/config.php'
@@ -4685,7 +4685,7 @@ location = /.well-known/caldav  { return 301 /nextcloud/remote.php/dav/; }' > /e
 			G_EXEC systemctl restart redis-server
 
 			# Initially add occ command shortcut, will be added as alias by /etc/bashrc.d/dietpi.bash if occ file exist:
-			ncc(){ sudo -u www-data php /var/www/nextcloud/occ "$@"; }
+			ncc(){ runuser -u www-data -- php /var/www/nextcloud/occ "$@"; }
 
 			# Adjusting config file:
 			local config_php='/var/www/nextcloud/config/config.php'
@@ -6668,7 +6668,17 @@ _EOF_
 
 			# Install as local instance for "nodered" user
 			G_EXEC cd /mnt/dietpi_userdata/node-red
-			G_EXEC_OUTPUT=1 G_EXEC sudo -u nodered npm i --no-audit node-red
+			# - Disable cache
+			local cache=$(runuser -u nodered -- mktemp -d)
+			# - Reinstall: Remove all locally installed modules, to work around update issues, but preserve installed plugins from package.json: https://github.com/MichaIng/DietPi/issues/7128
+			if [[ -f 'package.json' ]]
+			then
+				G_EXEC rm -Rf node_modules .npm/_cacache
+				G_EXEC_OUTPUT=1 G_EXEC runuser -u nodered -- npm up --cache "$cache" --no-audit
+			else
+				G_EXEC_OUTPUT=1 G_EXEC runuser -u nodered -- npm i --cache "$cache" --no-audit node-red
+			fi
+			G_EXEC rm -R "$cache"
 			G_EXEC cd "$G_WORKING_DIR"
 
 			# Service
@@ -6769,10 +6779,10 @@ _EOF_
 			fi
 
 			# RPi: Install "onoff" for GPIO access
-			(( $G_HW_MODEL > 9 )) || G_EXEC_OUTPUT=1 G_EXEC npm i -g --no-audit onoff
+			(( $G_HW_MODEL > 9 )) || G_EXEC_OUTPUT=1 G_EXEC npm i -g --no-audit onoff@latest
 
 			# Install Blynk JS library
-			G_EXEC_OUTPUT=1 G_EXEC npm i -g --no-audit blynk-library
+			G_EXEC_OUTPUT=1 G_EXEC npm i -g --no-audit blynk-library@latest
 
 			# Preserve existing config
 			if [[ ! -f '/mnt/dietpi_userdata/blynk/server.properties' ]]
@@ -7092,12 +7102,12 @@ _EOF_
 
 			# CLI install: https://github.com/FreshRSS/FreshRSS/blob/master/cli/README.md#commands
 			G_EXEC cd /opt/FreshRSS
-			sudo -u www-data php ./cli/prepare.php
-			sudo -u www-data php ./cli/do-install.php --default_user dietpi --auth_type form --environment production --title FreshRSS --db-type mysql --db-host localhost --db-user freshrss --db-password "$password" --db-base freshrss --db-prefix freshrss
+			runuser -u www-data -- php ./cli/prepare.php
+			runuser -u www-data -- php ./cli/do-install.php --default_user dietpi --auth_type form --environment production --title FreshRSS --db-type mysql --db-host localhost --db-user freshrss --db-password "$password" --db-base freshrss --db-prefix freshrss
 			unset -v password
-			sudo -u www-data php ./cli/create-user.php --user dietpi --password "$GLOBAL_PW" --api_password "$GLOBAL_PW"
-			sudo -u www-data php ./cli/actualize-user.php --user dietpi
-			sudo -u www-data php ./cli/db-optimize.php --user dietpi
+			runuser -u www-data -- php ./cli/create-user.php --user dietpi --password "$GLOBAL_PW" --api_password "$GLOBAL_PW"
+			runuser -u www-data -- php ./cli/actualize-user.php --user dietpi
+			runuser -u www-data -- php ./cli/db-optimize.php --user dietpi
 			G_EXEC cd "$G_WORKING_DIR"
 
 			# Link web interface to webroot
@@ -8383,7 +8393,7 @@ _EOF_
 			G_EXEC chmod +x mineos_console.js webui.js update_webui.sh reset_webui.sh generate-sslcert.sh
 
 			# Workaround: Node.js posix needs to be installed alone first: https://github.com/MichaIng/DietPi/issues/5181
-			G_EXEC_OUTPUT=1 G_EXEC npm i --no-audit --no-package-lock posix
+			G_EXEC_OUTPUT=1 G_EXEC npm i --no-audit --no-package-lock posix@latest
 
 			# Install MineOS
 			G_EXEC_OUTPUT=1 G_EXEC npm i --no-audit
@@ -8934,7 +8944,7 @@ _EOF_
 				G_EXEC chown dietpi /mnt/dietpi_userdata
 
 				# Run Syncthing to pre-create config dir and exit
-				G_EXEC_OUTPUT=1 G_EXEC sudo -u dietpi /opt/syncthing/syncthing -generate=/mnt/dietpi_userdata/syncthing
+				G_EXEC_OUTPUT=1 G_EXEC runuser -u dietpi -- /opt/syncthing/syncthing -generate=/mnt/dietpi_userdata/syncthing
 
 				# Allow remote access: https://docs.syncthing.net/users/faq.html#how-do-i-access-the-web-gui-from-another-computer
 				G_EXEC sed --follow-symlinks -i '\|:8384</address>|c\        <address>0.0.0.0:8384</address>' /mnt/dietpi_userdata/syncthing/config.xml
@@ -9127,9 +9137,9 @@ _EOF_
 			if [[ ${aSOFTWARE_INSTALL_STATE[153]} == 2 && -f '/mnt/dietpi_userdata/octoprint/.octoprint/config.yaml' ]]
 			then
 				G_DIETPI-NOTIFY 2 'Configuring OctoPrint to use mjpg-streamer for webcam support'
-				G_EXEC sudo -u octoprint /mnt/dietpi_userdata/octoprint/.local/bin/octoprint config set webcam.stream "http://$(G_GET_NET ip):8082/?action=stream"
-				G_EXEC sudo -u octoprint /mnt/dietpi_userdata/octoprint/.local/bin/octoprint config set webcam.snapshot 'http://127.0.0.1:8082/?action=snapshot'
-				G_EXEC sudo -u octoprint /mnt/dietpi_userdata/octoprint/.local/bin/octoprint config set webcam.ffmpeg "$(command -v ffmpeg)"
+				G_EXEC runuser -u octoprint -- /mnt/dietpi_userdata/octoprint/.local/bin/octoprint config set webcam.stream "http://$(G_GET_NET ip):8082/?action=stream"
+				G_EXEC runuser -u octoprint -- /mnt/dietpi_userdata/octoprint/.local/bin/octoprint config set webcam.snapshot 'http://127.0.0.1:8082/?action=snapshot'
+				G_EXEC runuser -u octoprint -- /mnt/dietpi_userdata/octoprint/.local/bin/octoprint config set webcam.ffmpeg "$(command -v ffmpeg)"
 			fi
 		fi
 
@@ -9382,8 +9392,8 @@ _EOF_
 			Download_Test_Media
 
 			# Init
-			G_EXEC_OUTPUT=1 G_EXEC sudo -u koel "php$PHP_VERSION" artisan koel:init -n --no-assets
-			G_EXEC_OUTPUT=1 G_EXEC sudo -u koel "php$PHP_VERSION" artisan koel:sync
+			G_EXEC_OUTPUT=1 G_EXEC runuser -u koel -- "php$PHP_VERSION" artisan koel:init -n --no-assets
+			G_EXEC_OUTPUT=1 G_EXEC runuser -u koel -- "php$PHP_VERSION" artisan koel:sync
 			G_EXEC cd "$G_WORKING_DIR"
 
 			# Service: Run on port 8003 by default to avoid conflict with Icecast
@@ -10154,7 +10164,7 @@ _EOF_
 				aDEPS=('gcc' 'libffi-dev')
 				G_EXEC curl -sSf 'https://sh.rustup.rs/' -o rustup-init.sh
 				G_EXEC chmod +x rustup-init.sh
-				G_EXEC_OUTPUT=1 G_EXEC sudo -u octoprint ./rustup-init.sh -y --profile minimal
+				G_EXEC_OUTPUT=1 G_EXEC runuser -u octoprint -- ./rustup-init.sh -y --profile minimal
 				G_EXEC rm rustup-init.sh
 				aPATH=("PATH='/mnt/dietpi_userdata/octoprint/.cargo/bin:$PATH'")
 
@@ -10168,7 +10178,7 @@ _EOF_
 			[[ -d '/mnt/dietpi_userdata/octoprint/.cache' ]] && G_EXEC rm -R /mnt/dietpi_userdata/octoprint/.cache
 
 			# Install OctoPrint
-			G_EXEC_OUTPUT=1 G_EXEC sudo -u octoprint "${aPATH[@]}" pip3 install -U --user --no-warn-script-location octoprint
+			G_EXEC_OUTPUT=1 G_EXEC runuser -u octoprint -- "${aPATH[@]}" pip3 install -U --user --no-warn-script-location octoprint
 
 			# Service: https://github.com/OctoPrint/OctoPrint/blob/master/scripts/octoprint.service
 			cat << '_EOF_' > /etc/systemd/system/octoprint.service
@@ -10190,22 +10200,22 @@ _EOF_
 			echo "alias octoprint='sudo -u octoprint /mnt/dietpi_userdata/octoprint/.local/bin/octoprint'" > /etc/bashrc.d/dietpi-octoprint.sh
 
 			# On fresh installs, change listening port to 5001 to avoid conflict with Shairport Sync.
-			[[ -f '/mnt/dietpi_userdata/octoprint/.octoprint/config.yaml' ]] || G_EXEC sudo -u octoprint /mnt/dietpi_userdata/octoprint/.local/bin/octoprint config set server.port '5001'
+			[[ -f '/mnt/dietpi_userdata/octoprint/.octoprint/config.yaml' ]] || G_EXEC runuser -u octoprint -- /mnt/dietpi_userdata/octoprint/.local/bin/octoprint config set server.port '5001'
 
 			# Apply service and system commands: Allow execution via specific sudoers config, use "which" for "reboot" and "poweroff", since we create shell functions in dietpi-globals to bypass logind calls, if logind is not running.
 			# shellcheck disable=SC2230
 			echo "octoprint ALL=NOPASSWD: $(command -v systemctl) restart octoprint, $(which reboot), $(which poweroff)" > /etc/sudoers.d/octoprint
-			G_EXEC sudo -u octoprint /mnt/dietpi_userdata/octoprint/.local/bin/octoprint config set server.commands.serverRestartCommand 'sudo systemctl restart octoprint'
-			G_EXEC sudo -u octoprint /mnt/dietpi_userdata/octoprint/.local/bin/octoprint config set server.commands.systemRestartCommand 'sudo reboot'
-			G_EXEC sudo -u octoprint /mnt/dietpi_userdata/octoprint/.local/bin/octoprint config set server.commands.systemShutdownCommand 'sudo poweroff'
+			G_EXEC runuser -u octoprint -- /mnt/dietpi_userdata/octoprint/.local/bin/octoprint config set server.commands.serverRestartCommand 'sudo systemctl restart octoprint'
+			G_EXEC runuser -u octoprint -- /mnt/dietpi_userdata/octoprint/.local/bin/octoprint config set server.commands.systemRestartCommand 'sudo reboot'
+			G_EXEC runuser -u octoprint -- /mnt/dietpi_userdata/octoprint/.local/bin/octoprint config set server.commands.systemShutdownCommand 'sudo poweroff'
 
 			# mjpg-streamer: Configure OctoPrint to use it, if installed
 			if (( ${aSOFTWARE_INSTALL_STATE[137]} > 0 ))
 			then
 				G_DIETPI-NOTIFY 2 'Configuring OctoPrint to use mjpg-streamer for webcam support'
-				G_EXEC sudo -u octoprint /mnt/dietpi_userdata/octoprint/.local/bin/octoprint config set webcam.stream "http://$(G_GET_NET ip):8082/?action=stream"
-				G_EXEC sudo -u octoprint /mnt/dietpi_userdata/octoprint/.local/bin/octoprint config set webcam.snapshot 'http://127.0.0.1:8082/?action=snapshot'
-				G_EXEC sudo -u octoprint /mnt/dietpi_userdata/octoprint/.local/bin/octoprint config set webcam.ffmpeg "$(command -v ffmpeg)"
+				G_EXEC runuser -u octoprint -- /mnt/dietpi_userdata/octoprint/.local/bin/octoprint config set webcam.stream "http://$(G_GET_NET ip):8082/?action=stream"
+				G_EXEC runuser -u octoprint -- /mnt/dietpi_userdata/octoprint/.local/bin/octoprint config set webcam.snapshot 'http://127.0.0.1:8082/?action=snapshot'
+				G_EXEC runuser -u octoprint -- /mnt/dietpi_userdata/octoprint/.local/bin/octoprint config set webcam.ffmpeg "$(command -v ffmpeg)"
 			fi
 		fi
 
@@ -10892,7 +10902,7 @@ _EOF_
 			# -sm: Skip mimic build which is time intense and can be manually done any time later.
 			# - Remove PulseAudio from dependencies, we use ALSA
 			G_EXEC sed --follow-symlinks -Ei 's/[^[:blank:]"'\'']*pulseaudio[^[:blank:]"'\'']*//g' ./dev_setup.sh
-			G_EXEC_OUTPUT=1 G_EXEC sudo -u mycroft ./dev_setup.sh -sm
+			G_EXEC_OUTPUT=1 G_EXEC runuser -u mycroft -- ./dev_setup.sh -sm
 			G_EXEC cd "$G_WORKING_DIR"
 
 			# Service
@@ -11306,7 +11316,7 @@ _EOF_
 				G_EXEC curl -sSf 'https://sh.rustup.rs/' -o rustup-init.sh
 				G_EXEC chmod +x rustup-init.sh
 				# RPi with 64-bit kernel on 32-bit image: Enforce 32-bit toolchain: https://github.com/MichaIng/DietPi/issues/6306
-				G_EXEC_OUTPUT=1 G_EXEC sudo -u "$ha_user" ./rustup-init.sh -y --profile minimal ${RPI_64KERNEL_32OS:+'--default-host' 'armv7-unknown-linux-gnueabihf'}
+				G_EXEC_OUTPUT=1 G_EXEC runuser -u "$ha_user" -- ./rustup-init.sh -y --profile minimal ${RPI_64KERNEL_32OS:+'--default-host' 'armv7-unknown-linux-gnueabihf'}
 				G_EXEC rm rustup-init.sh
 			fi
 
@@ -11353,7 +11363,7 @@ eval \"\$(pyenv init -)\"
 [ -f '.cargo/env' ] && . .cargo/env" > "$ha_home/pyenv-activate.sh"
 
 			G_EXEC_DESC='Installing Python with Home Assistant module into pyenv'
-			G_EXEC_OUTPUT=1 G_EXEC sudo -u "$ha_user" dash -c "
+			G_EXEC_OUTPUT=1 G_EXEC runuser -u "$ha_user" -- dash -c "
 $ha_pyenv_activation
 pyenv install $ha_python_version
 pyenv local $ha_python_version
@@ -12359,8 +12369,8 @@ If no WireGuard (auto)start is included, but you require it, please do the follo
 			systemctl start redis-server
 			if systemctl start mariadb
 			then
-				sudo -u www-data php /var/www/nextcloud/occ maintenance:mode --off
-				sudo -u www-data php /var/www/nextcloud/occ app:disable spreed
+				runuser -u www-data -- php /var/www/nextcloud/occ maintenance:mode --off
+				runuser -u www-data -- php /var/www/nextcloud/occ app:disable spreed
 			fi
 			G_DIETPI-NOTIFY 2 'Disabled Nextcloud Talk app, but you need to remove it manually from Nextcloud web UI, if desired.'
 		fi
@@ -12630,8 +12640,8 @@ If no WireGuard (auto)start is included, but you require it, please do the follo
 			[[ -d '/mnt/dietpi_userdata/synapse' ]] && G_EXEC rm -R /mnt/dietpi_userdata/synapse
 
 			command -v pip3 > /dev/null && G_EXEC_OUTPUT=1 G_EXEC pip3 uninstall -y matrix-synapse
-			command -v dropdb > /dev/null && sudo -u postgres dropdb synapse
-			command -v dropuser > /dev/null && sudo -u postgres dropuser synapse
+			command -v dropdb > /dev/null && runuser -u postgres -- dropdb synapse
+			command -v dropuser > /dev/null && runuser -u postgres -- dropuser synapse
 		fi
 
 		if To_Uninstall 132 # Aria2
