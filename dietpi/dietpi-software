@@ -1047,6 +1047,13 @@ Available commands:
 		aSOFTWARE_CATX[$software_id]=6
 		aSOFTWARE_DOCS[$software_id]='https://dietpi.com/docs/software/social/#mediawiki'
 		aSOFTWARE_DEPS[$software_id]='88 89 webserver'
+		#------------------
+		software_id=213
+		aSOFTWARE_NAME[$software_id]='Soju'
+		aSOFTWARE_DESC[$software_id]='A user-friendly IRC bouncer'
+		aSOFTWARE_CATX[$software_id]=6
+		aSOFTWARE_DOCS[$software_id]='https://dietpi.com/docs/software/social/#soju'
+		aSOFTWARE_DEPS[$software_id]='188'
 
 		# Camera & Surveillance
 		#--------------------------------------------------------------------------------
@@ -12097,6 +12104,73 @@ If no WireGuard (auto)start is included, but you require it, please do the follo
 
 			unset -v choice_required domain port invalid_text server_ip
 		fi
+
+		if To_Install 213 # soju
+		then
+			local ver=0.8.0
+			aDEPS=('gcc' 'make' 'pkg-config' 'scdoc' 'libpam-dev' 'libsqlite3-dev')
+			Download_Install "https://git.sr.ht/~emersion/soju/archive/v${ver}.tar.gz"
+			G_EXEC cd "soju-v${ver}"
+
+			# Build
+			G_EXEC_OUTPUT=1 G_EXEC make all "-j$(nproc)" \
+				config_path=/mnt/dietpi_userdata/soju/config
+				GOFLAGS=-tags=pam,libsqlite3 \
+
+			# Install
+			local commands=('soju' 'sojuctl' 'sojudb')
+			local manpages=('doc/soju.1' 'doc/sojuctl.1')
+			G_EXEC mkdir -p /usr/local/bin
+			G_EXEC mkdir -p /usr/local/share/man/man1
+			G_EXEC mkdir -p /mnt/dietpi_userdata/soju
+			G_EXEC cp "${commands[@]}" /usr/local/bin
+			G_EXEC cp "${manpages[@]}" /usr/local/share/man/man1
+			if [[ ! -f '/mnt/dietpi_userdata/soju/config' ]]; then
+				# We shall default to on-disk chat logs
+				# It's a lossy format, as stated under `message-store` subsection in https://soju.im/doc/soju.1.html#CONFIG_FILE
+				# But it's the recommended setting as per https://git.sr.ht/~emersion/soju/tree/master/doc/getting-started.md
+				G_EXEC touch /mnt/dietpi_userdata/soju/config
+				cat <<- _EOF_ > /mnt/dietpi_userdata/soju/config
+				db sqlite3 /mnt/dietpi_userdata/soju/data.db
+				message-store fs /mnt/dietpi_userdata/soju/logs
+				listen irc+insecure://
+				listen unix+admin://
+				_EOF_
+			fi
+
+			# User
+			Create_User soju
+			G_EXEC chown soju:soju -R /mnt/dietpi_userdata/soju
+			G_EXEC chmod 0660 -R /mnt/dietpi_userdata/soju
+			G_EXEC chmod 0770 /mnt/dietpi_userdata/soju
+
+			# Service
+			# Modified version of ./contrib/soju.service
+			cat << _EOF_ > /etc/systemd/system/soju.service
+[Unit]
+Description=soju IRC bouncer service
+Documentation=https://soju.im/
+Documentation=man:soju(1) man:sojuctl(1)
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Type=simple
+User=soju
+Group=soju
+RuntimeDirectory=soju
+RuntimeDirectoryMode=0770
+RuntimeDirectoryPreserve=restart
+WorkingDirectory=/mnt/dietpi_userdata/soju
+AmbientCapabilities=CAP_NET_BIND_SERVICE
+ExecStart=/usr/local/bin/soju
+ExecReload=/bin/kill -HUP \$MAINPID
+Restart=on-failure
+
+[Install]
+WantedBy=multi-user.target
+_EOF_
+		fi
 	}
 
 	# $1: 0=None -1=Dropbear -2=OpenSSH
@@ -14227,6 +14301,25 @@ _EOF_
 			Remove_Service spotifyd 1 1
 			[[ -d '/opt/spotifyd' ]] && G_EXEC rm -R /opt/spotifyd
 			[[ -d '/mnt/dietpi_userdata/spotifyd' ]] && G_EXEC rm -R /mnt/dietpi_userdata/spotifyd
+		fi
+
+		if To_Uninstall 213 # Soju
+		then
+			Remove_Service soju 1 1
+
+			local x
+			local commands=('soju' 'sojuctl' 'sojudb')
+			local manpages=('soju.1' 'sojuctl.1')
+			for x in "${commands[@]}"; do
+				[[ -f "/usr/local/bin/$x" ]] &&
+					G_EXEC rm "/usr/local/bin/$x"
+			done
+			for x in "${manpages[@]}"; do
+				[[ -f "/usr/local/share/man/man${x##*.}/$x" ]] &&
+					G_EXEC rm "/usr/local/share/man/man${x##*.}/$x"
+			done
+			[[ -d '/mnt/dietpi_userdata/soju' ]] &&
+				G_EXEC rm -Rf /mnt/dietpi_userdata/soju
 		fi
 
 		G_DIETPI-NOTIFY 3 "$G_PROGRAM_NAME" 'Finalising uninstall'
