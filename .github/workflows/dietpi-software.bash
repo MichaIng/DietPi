@@ -13,6 +13,16 @@ else
 	. /tmp/dietpi-globals
 	G_EXEC rm /tmp/dietpi-globals
 	export G_GITOWNER G_GITBRANCH G_HW_ARCH_NAME=$(uname -m)
+	read -r debian_version < /etc/debian_version
+	case $debian_version in
+		'11.'*|'bullseye/sid') G_DISTRO=6;;
+		'12.'*|'bookworm/sid') G_DISTRO=7;;
+		'13.'*|'trixie/sid') G_DISTRO=8;;
+		*) G_DIETPI-NOTIFY 1 "Unsupported distro version \"$debian_version\". Aborting ..."; exit 1;;
+	esac
+	# Ubuntu ships with /etc/debian_version from Debian testing, hence we assume one version lower.
+	grep -q '^ID=ubuntu' /etc/os-release && ((G_DISTRO--))
+	(( $G_DISTRO < 6 )) && { G_DIETPI-NOTIFY 1 'Unsupported Ubuntu version. Aborting ...'; exit 1; }
 fi
 case $G_HW_ARCH_NAME in
 	'armv6l') export G_HW_ARCH=1;;
@@ -230,6 +240,7 @@ Process_Software()
 			209) aCOMMANDS[i]='restic version';;
 			211) aCOMMANDS[i]='hb-service status' aSERVICES[i]='homebridge' aTCP[i]='8581'; (( $arch < 10 )) && aDELAY[i]=30; (( $arch == 3 )) && aDELAY[i]=120;;
 			212) aSERVICES[i]='kavita' aTCP[i]='2036'; (( $arch < 10 )) && aDELAY[i]=180; (( $arch == 10 )) && aDELAY[i]=30;;
+			213) aSERVICES[i]='soju' aTCP[i]='6667';;
 			*) :;;
 		esac
 	done
@@ -251,6 +262,8 @@ do
 		#86|134|185) Process_Software 162;; # Docker does not start in systemd containers (without dedicated network)
 		166) Process_Software 70;;
 		180) (( $arch == 10 || $arch == 3 )) || Process_Software 170;;
+		188) Process_Software 17;;
+		213) Process_Software 17 188;;
 		*) :;;
 	esac
 	Process_Software "$i"
@@ -260,11 +273,27 @@ done
 # Dependencies
 ##########################################
 apackages=('xz-utils' 'parted' 'fdisk' 'systemd-container')
-(( $G_HW_ARCH == $arch || ( $G_HW_ARCH < 10 && $G_HW_ARCH > $arch ) )) || apackages+=('qemu-user-static')
+
+# Emulation support in case of incompatible architecture
+emulation=0
+(( $G_HW_ARCH == $arch || ( $G_HW_ARCH < 10 && $G_HW_ARCH > $arch ) )) || emulation=1
+
+# Bullseye/Jammy: binfmt-support still required for emulation. With systemd-binfmt only, mmdebstrap throws "E: <arch> can neither be executed natively nor via qemu user emulation with binfmt_misc"
+(( $emulation )) && { apackages+=('qemu-user-static'); (( $G_DISTRO < 7 )) && apackages+=('binfmt-support'); }
+
 G_AG_CHECK_INSTALL_PREREQ "${apackages[@]}"
 
 # Register QEMU binfmt configs
-dpkg-query -s 'qemu-user-static' &> /dev/null && G_EXEC systemctl restart systemd-binfmt
+if (( $emulation ))
+then
+	if (( $G_DISTRO < 7 ))
+	then
+		G_EXEC systemctl disable --now systemd-binfmt
+		G_EXEC systemctl restart binfmt-support
+	else
+		G_EXEC systemctl restart systemd-binfmt
+	fi
+fi
 
 ##########################################
 # Prepare container
@@ -311,8 +340,12 @@ then
 fi
 
 # Install test builds from dietpi.com if requested
-# shellcheck disable=SC2016
-[[ $TEST == 'true' ]] && G_EXEC sed --follow-symlinks -i '/# Start DietPi-Software/a\sed -i '\''s|dietpi.com/downloads/binaries/$G_DISTRO_NAME/|dietpi.com/downloads/binaries/$G_DISTRO_NAME/testing/|'\'' /boot/dietpi/dietpi-software' rootfs/boot/dietpi/dietpi-login
+if [[ $TEST == 'true' ]]
+then
+	# shellcheck disable=SC2016
+	G_EXEC sed --follow-symlinks -i '/# Start DietPi-Software/a\sed -i '\''s|dietpi.com/downloads/binaries/$G_DISTRO_NAME/|dietpi.com/downloads/binaries/$G_DISTRO_NAME/testing/|'\'' /boot/dietpi/dietpi-software' rootfs/boot/dietpi/dietpi-login
+	G_CONFIG_INJECT 'SOFTWARE_DIETPI_DASHBOARD_VERSION=' 'SOFTWARE_DIETPI_DASHBOARD_VERSION=Nightly' rootfs/boot/dietpi.txt
+fi
 
 # Workaround invalid TERM on login
 # shellcheck disable=SC2016
@@ -321,6 +354,7 @@ G_EXEC eval 'echo '\''infocmp "$TERM" > /dev/null 2>&1 || { echo "[ INFO ] Unsup
 # Enable automated setup
 G_CONFIG_INJECT 'AUTO_SETUP_AUTOMATED=' 'AUTO_SETUP_AUTOMATED=1' rootfs/boot/dietpi.txt
 # - Workaround for skipped autologin in emulated Trixie/Sid containers: https://gitlab.com/qemu-project/qemu/-/issues/1962
+# - Set HOME path, required e.g. go builds, which is otherwise missing when started from a systemd unit.
 if [[ $DISTRO == 'trixie' ]] && (( $G_HW_ARCH != $arch && ( $G_HW_ARCH > 9 || $G_HW_ARCH < $arch ) ))
 then
 	cat << '_EOF_' > rootfs/etc/systemd/system/dietpi-automation.service
@@ -331,6 +365,7 @@ After=dietpi-postboot.service
 [Service]
 Type=idle
 StandardOutput=tty
+Environment=HOME=/root
 ExecStart=/bin/dash -c 'infocmp "$TERM" > /dev/null 2>&1 || export TERM=dumb; exec /boot/dietpi/dietpi-login'
 ExecStop=/sbin/poweroff
 
@@ -426,5 +461,5 @@ G_EXEC sed --follow-symlinks -i 's|Prompt_on_Failure$|{ journalctl -n 50; ss -tu
 # Boot container
 ##########################################
 systemd-nspawn -bD rootfs
-[[ -f 'rootfs/success' ]] || { journalctl -n 25; ss -tulpn; df -h; free -h; exit 1; }
+[[ -f 'rootfs/success' ]] || { journalctl -n 25; ss -tlpn; df -h; free -h; exit 1; }
 }

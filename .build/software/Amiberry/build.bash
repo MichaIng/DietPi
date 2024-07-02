@@ -111,6 +111,8 @@ fi
 v_ami=$(curl -sSf 'https://api.github.com/repos/BlitterStudio/amiberry/releases/latest' | mawk -F\" '/^  "tag_name"/{print $4}')
 [[ $v_ami ]] || { G_DIETPI-NOTIFY 1 'No latest Amiberry version found, aborting ...'; exit 1; }
 v_ami=${v_ami#v}
+# - ARMv6: v5.7.2 dropped support for Raspberry Pi 1, hence use v5.7.1
+[[ $PLATFORM == 'rpi1'* ]] && v_ami='5.7.1'
 G_DIETPI-NOTIFY 2 "Building Amiberry version \e[33m$v_ami\e[90m for platform: \e[33m$PLATFORM"
 G_EXEC cd /tmp
 G_EXEC curl -sSfLO "https://github.com/BlitterStudio/amiberry/archive/v$v_ami.tar.gz"

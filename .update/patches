@@ -1291,16 +1291,8 @@ Patch_8_22()
 	[[ -f '/etc/apt/preferences.d/dietpi-armbian-tmp' ]] && G_EXEC rm /etc/apt/preferences.d/dietpi-armbian-tmp
 	[[ -f '/etc/apt/apt.conf.d/dietpi-armbian' ]] && G_EXEC rm /etc/apt/apt.conf.d/dietpi-armbian
 
-	# Odroid C1: Set kernel packages on hold. We pin them in pre-patches and enforce an automated downgrade, in case, but since v23.02.2 might not be available forever, we should also set them on hold, until we know there is a compatble newer version available:
-	# - https://dietpi.com/forum/t/odroid-c1-not-booting-after-kernel-upgrade/17818
-	# - https://github.com/MichaIng/DietPi/issues/6616#issuecomment-1730900296
-	if (( $G_HW_MODEL == 10 ))
-	then
-		G_DIETPI-NOTIFY 2 'Setting Odroid C1 "current" and "edge" kernel packages on hold'
-		G_EXEC apt-mark hold linux-image-current-meson linux-dtb-current-meson linux-headers-current-meson linux-image-edge-meson linux-dtb-edge-meson linux-headers-edge-meson
-
 	# NanoPi R4S: Fix Ethernet LEDs: https://github.com/MichaIng/DietPi/issues/6342#issuecomment-1697669420
-	elif (( $G_HW_MODEL == 47 ))
+	if (( $G_HW_MODEL == 47 ))
 	then
 		G_DIETPI-NOTIFY 2 'Updating udev rule for NanoPi R4S Ethernet LEDs'
 		G_EXEC eval 'echo '\''ledtrig-netdev'\'' > /etc/modules-load.d/dietpi-eth-leds.conf'
@@ -1655,6 +1647,69 @@ Patch_9_5()
 		G_AGI jellyfin
 		G_AGP jellyfin-ffmpeg5 # conffiles
 	fi
+}
+
+Patch_9_6()
+{
+	# Update DietPi APT list for several SBCs we added components to our repo for
+	if [[ $PATCH_9_3_RAN == 0 && $G_HW_MODEL =~ ^(42|43|46|47|52|55|58|68|72|73|76|77|86|87)$ ]]
+	then
+		/boot/dietpi/func/dietpi-set_software apt-mirror dietpi
+		G_AGUP
+		G_AGUG
+
+	# Orange Pi 5: Offer to flash new U-Boot image to solve random Ethernet MAC address: https://github.com/MichaIng/DietPi/issues/6663
+	elif (( $G_HW_MODEL == 80 ))
+	then
+		if G_WHIP_YESNO '[ INFO ] U-Boot update available to solve random Ethernet MAC address
+\nIn case you are affected by a random Ethernet MAC address, which changes every boot, flashing the latest U-Boot image has shown to solve it: https://github.com/MichaIng/DietPi/issues/6663
+\nDo you want to flash the latest U-Boot image now?
+\nNB: This can be done any time later via dietpi-config > Advanced Options.'
+		then
+			if [[ $G_ROOTFS_DEV == '/dev/mmcblk'* || $G_ROOTFS_DEV == '/dev/loop'* ]]
+			then
+				/boot/dietpi/func/dietpi-set_hardware flash-u-boot-mmc
+
+			elif [[ -b '/dev/mtdblock0' ]]
+			then
+				# shellcheck disable=SC1091
+				. /usr/lib/u-boot/platform_install.sh
+				# shellcheck disable=SC2154
+				G_EXEC_OUTPUT=1 G_EXEC dd if="$DIR/rkspi_loader.img" of=/dev/mtdblock0 oflag=direct conv=notrunc status=progress
+			else
+				G_WHIP_MSG '[FAILED] SPI block device /dev/mtdblock0 not found
+\nWe expect the SPI block device /dev/mtdblock0 to be the target for the U-Boot image. It however does not exist.
+\nPlease report this to our forum or GitHub site, so we can check back:
+- https://dietpi.com/forum/c/troubleshooting/10
+- https://github.com/MichaIng/DietPi/issues'
+			fi
+		fi
+
+	# NanoPi R6C: Migrate to dedicated APT component and U-Boot package: https://github.com/MichaIng/DietPi/issues/7109
+	elif (( $G_HW_MODEL == 79 )) && grep -q '^[[:blank:]]*fdtfile=rockchip/rk3588s-nanopi-r6c.dtb$' /boot/dietpiEnv.txt
+	then
+		HW_VARIANT=2 /boot/dietpi/func/dietpi-set_software apt-mirror dietpi
+		G_AGUP
+		G_AGI linux-u-boot-nanopi-r6c-legacy
+
+	# Odroid XU4/Meson: Install zstd for better compressed initramfs images
+	elif dpkg-query -s 'linux-image-current-odroidxu4' &> /dev/null || dpkg-query -s 'linux-image-edge-odroidxu4' &> /dev/null ||  dpkg-query -s 'linux-image-current-meson' &> /dev/null || dpkg-query -s 'linux-image-edge-meson' &> /dev/null
+	then
+		G_AGI zstd
+	fi
+
+	# Remove Armbian APT repository from all systems which have an "all" component for kernel/bootloader/firmware packages form our APT repository
+	if [[ -f '/etc/apt/sources.list.d/dietpi-armbian.list' && -f '/etc/apt/sources.list.d/dietpi.list' ]] && grep -q 'dietpi.com/apt all' /etc/apt/sources.list.d/dietpi.list
+	then
+		G_DIETPI-NOTIFY 2 'Removing obsolete Armbian APT repository'
+		G_EXEC rm /etc/apt/sources.list.d/dietpi-armbian.list
+		[[ -f '/etc/apt/preferences.d/dietpi-armbian' ]] && G_EXEC rm /etc/apt/preferences.d/dietpi-armbian
+		[[ -f '/etc/apt/trusted.gpg.d/dietpi-armbian.gpg' ]] && G_EXEC rm /etc/apt/trusted.gpg.d/dietpi-armbian.gpg
+	fi
+
+	# Remove obsolete drop-in config: https://github.com/MichaIng/DietPi/issues/7104
+	[[ -f '/etc/systemd/system/ifup@.service.d/dietpi.conf' ]] && G_EXEC rm -R /etc/systemd/system/ifup@.service.d/dietpi.conf
+	[[ -d '/etc/systemd/system/ifup@.service.d' ]] && G_EXEC rmdir --ignore-fail-on-non-empty /etc/systemd/system/ifup@.service.d
 }
 
 # v6.35 => v7 migration
