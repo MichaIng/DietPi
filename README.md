@@ -340,6 +340,7 @@ Links to hardware and software manufacturers, sources and build instructions use
 - [ADS-B Feeder](https://github.com/dirkhh/adsb-feeder-image)
 - [Kavita](https://github.com/Kareadita/Kavita)
 - [Forgejo](https://codeberg.org/forgejo/forgejo)
+- [soju](https://github.com/emersion/soju)
 
 ---
 

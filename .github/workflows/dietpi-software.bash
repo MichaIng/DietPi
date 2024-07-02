@@ -240,6 +240,7 @@ Process_Software()
 			209) aCOMMANDS[i]='restic version';;
 			211) aCOMMANDS[i]='hb-service status' aSERVICES[i]='homebridge' aTCP[i]='8581'; (( $arch < 10 )) && aDELAY[i]=30; (( $arch == 3 )) && aDELAY[i]=120;;
 			212) aSERVICES[i]='kavita' aTCP[i]='2036'; (( $arch < 10 )) && aDELAY[i]=180; (( $arch == 10 )) && aDELAY[i]=30;;
+			213) aSERVICES[i]='soju' aTCP[i]='6667';;
 			*) :;;
 		esac
 	done
