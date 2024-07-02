@@ -240,6 +240,7 @@ Process_Software()
 			209) aCOMMANDS[i]='restic version';;
 			211) aCOMMANDS[i]='hb-service status' aSERVICES[i]='homebridge' aTCP[i]='8581'; (( $arch < 10 )) && aDELAY[i]=30; (( $arch == 3 )) && aDELAY[i]=120;;
 			212) aSERVICES[i]='kavita' aTCP[i]='2036'; (( $arch < 10 )) && aDELAY[i]=180; (( $arch == 10 )) && aDELAY[i]=30;;
+			213) aSERVICES[i]='soju' aTCP[i]='6667';;
 			*) :;;
 		esac
 	done
@@ -261,6 +262,8 @@ do
 		#86|134|185) Process_Software 162;; # Docker does not start in systemd containers (without dedicated network)
 		166) Process_Software 70;;
 		180) (( $arch == 10 || $arch == 3 )) || Process_Software 170;;
+		188) Process_Software 17;;
+		213) Process_Software 17 188;;
 		*) :;;
 	esac
 	Process_Software "$i"
@@ -351,6 +354,7 @@ G_EXEC eval 'echo '\''infocmp "$TERM" > /dev/null 2>&1 || { echo "[ INFO ] Unsup
 # Enable automated setup
 G_CONFIG_INJECT 'AUTO_SETUP_AUTOMATED=' 'AUTO_SETUP_AUTOMATED=1' rootfs/boot/dietpi.txt
 # - Workaround for skipped autologin in emulated Trixie/Sid containers: https://gitlab.com/qemu-project/qemu/-/issues/1962
+# - Set HOME path, required e.g. go builds, which is otherwise missing when started from a systemd unit.
 if [[ $DISTRO == 'trixie' ]] && (( $G_HW_ARCH != $arch && ( $G_HW_ARCH > 9 || $G_HW_ARCH < $arch ) ))
 then
 	cat << '_EOF_' > rootfs/etc/systemd/system/dietpi-automation.service
@@ -361,6 +365,7 @@ After=dietpi-postboot.service
 [Service]
 Type=idle
 StandardOutput=tty
+Environment=HOME=/root
 ExecStart=/bin/dash -c 'infocmp "$TERM" > /dev/null 2>&1 || export TERM=dumb; exec /boot/dietpi/dietpi-login'
 ExecStop=/sbin/poweroff
 
