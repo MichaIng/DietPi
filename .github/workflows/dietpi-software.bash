@@ -179,7 +179,7 @@ Process_Software()
 			139) aSERVICES[i]='sabnzbd' aTCP[i]='8080'; (( $arch == 10 )) || aDELAY[i]=30;; # ToDo: Solve conflict with Airsonic
 			140) aSERVICES[i]='domoticz' aTCP[i]='8124 8424';;
 			#142) aSERVICES[i]='snapd';; "system does not fully support snapd: cannot mount squashfs image using "squashfs": mount: /tmp/syscheck-mountpoint-2075108377: mount failed: Operation not permitted."
-			143) aSERVICES[i]='koel' aTCP[i]='8003';;
+			143) aSERVICES[i]='koel' aTCP[i]='8003'; (( $arch == 10 )) || aDELAY[i]=30;;
 			144) aSERVICES[i]='sonarr' aTCP[i]='8989'; (( $arch < 10 )) && aDELAY[i]=90;;
 			145) aSERVICES[i]='radarr' aTCP[i]='7878'; (( $arch < 10 )) && aDELAY[i]=90;;
 			146) aSERVICES[i]='tautulli' aTCP[i]='8181'; (( $arch == 10 )) || aDELAY[i]=60;;
