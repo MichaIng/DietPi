@@ -932,15 +932,15 @@ Re-enabling HDMI requires a reboot. If you need emergency HDMI output, edit the 
 				G_WHIP_MENU_ARRAY+=('Update RPi EEPROM firmware' ': Install rpi-eeprom APT package')
 			fi
 
-		# ROCK 4, ROCK 5B, Orange Pi 5 (Plus) and Orange Pi 3B: https://dietpi.com/forum/t/orange-pi-5-boot-from-nvme/16457
-		elif [[ $G_HW_MODEL =~ ^(72|78|80|82|87)$ ]]
+		# Odroid N2, ROCK 4, ROCK 5B, Orange Pi 5 (Plus) and Orange Pi 3B: https://dietpi.com/forum/t/orange-pi-5-boot-from-nvme/16457
+		elif [[ $G_HW_MODEL =~ ^(15|72|78|80|82|87)$ ]]
 		then
-			# ROCK 4: Device tree overlay required
+			# Odroid N2/ROCK 4: Device tree overlay required
 			local spidev='/dev/mtdblock0'
-			(( $G_HW_MODEL == 72 )) || {
+			(( $G_HW_MODEL == 15 || $G_HW_MODEL == 72 )) || {
 				[[ -f '/usr/lib/u-boot/platform_install.sh' ]] && {
 					{ [[ -e '/dev/mtd0' ]] && grep -q '/dev/mtd0' /usr/lib/u-boot/platform_install.sh && spidev='/dev/mtd0'; } ||
-					{ [[ -b '/dev/mtdblock0' ]] && grep -q 'rksd_loader.img' /usr/lib/u-boot/platform_install.sh; }
+					{ [[ -b '/dev/mtdblock0' ]] && grep -q '/dev/mtdblock0' /usr/lib/u-boot/platform_install.sh; }
 				}
 			} && G_WHIP_MENU_ARRAY+=('Update SPI bootloader' ": Flash current U-Boot to $spidev")
 
@@ -1084,25 +1084,47 @@ Further information: https://www.raspberrypi.org/documentation/hardware/raspberr
 
 		elif [[ $G_WHIP_RETURNED_VALUE == 'Update SPI bootloader' ]]; then
 
-			if [[ $G_HW_MODEL == 72 && ! -b '/dev/mtdblock0' ]]
+			if [[ $G_HW_MODEL == 15 && ! -b '/dev/mtdblock0' ]]
+			then
+				local overlays=() i=
+				read -ra overlays < <(mawk -F= '$1=="overlays"{$1="";print}' /boot/dietpiEnv.txt)
+				for i in "${overlays[@]}"; do [[ $i == 'g12b-odroid-n2-spi' ]] && break; done
+				if [[ $i == 'g12b-odroid-n2-spi' ]]
+				then
+					G_WHIP_MSG '[FAILED] No SPI device found
+\nThe expected SPI device /dev/mtdblock0 was not found on your Odroid N2 system, despite the fact that the related device tree overlay has been applied already. You may need to reboot for the change to take effect.
+\nIn case, reboot the system before selecting this menu option again. If you did so, please report this issue on our forum or GitHub page.'
+					return 1
+				else
+					G_WHIP_YESNO '[ INFO ] Device tree overlay required
+\nA kernel device tree overlay is required to access the SPI device on the Odroid N2.
+\nShall we add the overlay for you? A reboot will be required for the change to take effect, after which you can reselect this menu option.' || return 0
+					overlays+=('g12b-odroid-n2-spi')
+					G_CONFIG_INJECT 'overlays=' "overlays=${overlays[*]}" /boot/dietpiEnv.txt
+					REBOOT_REQUIRED=1
+					return 0
+				fi
+
+			elif [[ $G_HW_MODEL == 72 && ! -b '/dev/mtdblock0' ]]
 			then
 				local overlays=() i=
 				read -ra overlays < <(mawk -F= '$1=="overlays"{$1="";print}' /boot/dietpiEnv.txt)
 				for i in "${overlays[@]}"; do [[ $i == 'spi-jedec-nor' ]] && break; done
 				if [[ $i == 'spi-jedec-nor' ]]
 				then
-					G_WHIP_MSG '[FAILED] No MTD device found
-\nThe expected MTD device /dev/mtdblock0 was not found on your ROCK 4 system, despite the fact that the related device tree overlay has been applied already. You may either have a model which has no onboard SPI storage, or you did not reboot yet for the change to take effect.
-\nIn case reboot the system before selecting this menu option again, otherwise check back whether your ROCK 4 variant is really supposed to have an SPI storge.'
+					G_WHIP_MSG '[FAILED] No SPI device found
+\nThe expected SPI device /dev/mtdblock0 was not found on your ROCK 4 system, despite the fact that the related device tree overlay has been applied already. You may either have a model which has no onboard SPI storage, or you did not reboot yet for the change to take effect.
+\nIn case, reboot the system before selecting this menu option again, otherwise check back whether your ROCK 4 variant is really supposed to have an SPI storge.'
 					return 1
 				else
-					G_WHIP_YESNO '[ INFO ] No MTD device found
-\nThe expected MTD device /dev/mtdblock0 was not found on your ROCK 4 system. You may either have a model which has no onboard SPI storage, or a device tree overlay may be required to make the MTD device available.
+					G_WHIP_YESNO '[ INFO ] No SPI device found
+\nThe expected SPI device /dev/mtdblock0 was not found on your ROCK 4 system. You may either have a model which has no onboard SPI storage, or a device tree overlay may be required to make the SPI device available.
 \nShall we add the overlay for you? A reboot will be required for the change to take effect, after which you can reselect this menu option.' || return 0
 					overlays+=('spi-jedec-nor')
 					G_CONFIG_INJECT 'overlays=' "overlays=${overlays[*]}" /boot/dietpiEnv.txt
 					G_CONFIG_INJECT 'param_spinor_spi_bus=' 'param_spinor_spi_bus=1' /boot/dietpiEnv.txt
 					REBOOT_REQUIRED=1
+					return 0
 				fi
 
 			elif [[ $spidev == '/dev/mtd0' ]]
@@ -1111,20 +1133,16 @@ Further information: https://www.raspberrypi.org/documentation/hardware/raspberr
 \nThis will flash the U-Boot image of the installed linux-u-boot-* package to the SPI device /dev/mtd0.
 \nDo you want to continue?' || return 0
 				G_AG_CHECK_INSTALL_PREREQ mtd-utils
-				# shellcheck disable=SC1091
-				. /usr/lib/u-boot/platform_install.sh
-				write_uboot_platform_mtd
 			else
 				G_WHIP_YESNO '[ INFO ] SPI bootloader update
 \nThis will flash the U-Boot image of the installed linux-u-boot-* package to the SPI device /dev/mtdblock0.
 \nDo you want to continue?' || return 0
-				# shellcheck disable=SC1091
-				. /usr/lib/u-boot/platform_install.sh
-				# shellcheck disable=SC2154
-				[[ -f $DIR/rkspi_loader.img ]] || { G_WHIP_MSG "[FAILED] SPI U-Boot image missing\n\nThe expected U-Boot image at $DIR/rkspi_loader.img could not be found. Please report this to our GitHub or forum, so we can check back and in case update this dietpi-config option."; return 1; }
-				# shellcheck disable=SC2154
-				G_EXEC_OUTPUT=1 G_EXEC dd if="$DIR/rkspi_loader.img" of=/dev/mtdblock0 oflag=direct conv=notrunc status=progress
 			fi
+
+			# shellcheck disable=SC1091
+			. /usr/lib/u-boot/platform_install.sh
+			eval "$(declare -f write_uboot_platform_mtd | sed -e 's| > /dev/null 2>&1||g' -e 's|status=none|status=progress|g' -e 's/^[[:blank:]]*dd /dd oflag=direct conv=notrunc status=progress/')"
+			write_uboot_platform_mtd "$DIR"
 
 		elif [[ $G_WHIP_RETURNED_VALUE == 'Update bootloader' ]]; then
 
