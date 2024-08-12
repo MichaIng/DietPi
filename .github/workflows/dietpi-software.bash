@@ -9,7 +9,7 @@ if [[ -f '/boot/dietpi/func/dietpi-globals' ]]
 then
 	. /boot/dietpi/func/dietpi-globals
 else
-	curl -sSf "https://raw.githubusercontent.com/${G_GITOWNER:=MichaIng}/DietPi/${G_GITBRANCH:=master}/dietpi/func/dietpi-globals" -o /tmp/dietpi-globals || exit 1
+	curl -sSf "https://raw.githubusercontent.com/${G_GITOWNER:=MichaIng}/DietPi/${G_GITBRANCH:=master}/dietpi/func/dietpi-globals" -o /tmp/dietpi-globals || Error_Exit 'Failed to download DietPi-Globals'
 	# shellcheck disable=SC1091
 	. /tmp/dietpi-globals
 	G_EXEC rm /tmp/dietpi-globals
@@ -319,7 +319,7 @@ G_EXEC mkdir rootfs
 G_EXEC mount "${FP_LOOP}p1" rootfs
 
 # Force ARMv6 arch on Raspbian
-(( $arch > 1 )) || echo -e '#/bin/dash\n[ "$*" == -m ] && echo armv6l || /usr/bin/uname "$@"' > rootfs/usr/local/bin/uname || Error_Exit 'Failed to download DietPi-Globals'
+(( $arch > 1 )) || echo -e '#/bin/dash\n[ "$*" = -m ] && echo armv6l || /usr/bin/uname "$@"' > rootfs/usr/local/bin/uname && G_EXEC chmod +x rootfs/usr/local/bin/uname || Error_Exit 'Failed to generate /usr/local/bin/uname for ARMv6'
 
 # Force RPi on ARM systems if requested
 if [[ $RPI == 'true' ]] && (( $arch < 10 ))
