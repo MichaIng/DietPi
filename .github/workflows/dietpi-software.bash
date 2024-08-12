@@ -4,6 +4,7 @@
 ##########################################
 # Load DietPi-Globals
 ##########################################
+Error_Exit(){ G_DIETPI-NOTIFY 1 "$1, aborting ..."; exit 1; }
 if [[ -f '/boot/dietpi/func/dietpi-globals' ]]
 then
 	. /boot/dietpi/func/dietpi-globals
@@ -318,7 +319,7 @@ G_EXEC mkdir rootfs
 G_EXEC mount "${FP_LOOP}p1" rootfs
 
 # Force ARMv6 arch on Raspbian
-(( $arch == 1 )) && G_EXEC sed --follow-symlinks -i '/# Start DietPi-Software/iG_EXEC sed -i -e '\''/^G_HW_ARCH=/cG_HW_ARCH=1'\'' -e '\''/^G_HW_ARCH_NAME=/cG_HW_ARCH_NAME=armv6l'\'' /boot/dietpi/.hw_model' rootfs/boot/dietpi/dietpi-login
+(( $HW_ARCH > 1 )) || echo -e '#/bin/dash\n[ "$*" == -m ] && echo armv6l || /usr/bin/uname "$@"' > rootfs/usr/local/bin/uname || Error_Exit 'Failed to download DietPi-Globals'
 
 # Force RPi on ARM systems if requested
 if [[ $RPI == 'true' ]] && (( $arch < 10 ))
