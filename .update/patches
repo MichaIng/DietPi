@@ -1741,8 +1741,19 @@ _EOF_
 
 Patch_9_7()
 {
+	# Odroid C1: Migrate to edge kernel, which fixes USB: https://github.com/MichaIng/DietPi/issues/7089
+	if (( $G_HW_MODEL == 10 )) && dpkg-query -s 'linux-image-current-meson' &> /dev/null && ! dpkg-query -s 'linux-image-edge-meson' &> /dev/null && ! dpkg-query -s 'linux-image-legacy-meson' &> /dev/null
+	then
+		G_DIETPI-NOTIFY 2 'Migrating to edge kernel to fix USB support'
+		G_AGI linux-{image,dtb}-edge-meson linux-u-boot-odroidc1-edge
+		dpkg-query -s 'linux-headers-edge-meson' &> /dev/null && G_AGI linux-headers-edge-meson
+		dpkg-query -s 'linux-libc-dev-edge-meson' &> /dev/null && G_AGI linux-libc-dev-edge-meson
+		G_AGP linux-{image,dtb,headers,libc-dev}-edge-meson
+		# The /boot/dtb symlink has been found to be missing after kernel removed, despite a newer kernel being installed already. Assure it is present and correct.
+		[[ $(realpath '/boot/dtb') == '/boot/dtb-6.'* ]] || G_EXEC ln -sf /boot/dtb-6.* /boot/dtb
+
 	# RK3588 migration to vendor kernel
-	if (( $G_HW_CPUID == 11 )) && dpkg-query -s 'linux-image-legacy-rk35xx' &> /dev/null && ! dpkg-query -s 'linux-image-vendor-rk35xx' &> /dev/null
+	elif (( $G_HW_CPUID == 11 )) && dpkg-query -s 'linux-image-legacy-rk35xx' &> /dev/null && ! dpkg-query -s 'linux-image-vendor-rk35xx' &> /dev/null
 	then
 		if G_WHIP_DEFAULT_ITEM='yes' G_WHIP_YESNO '[ INFO ] Major kernel upgrade to Linux 6.1 available
 \nFor RK3588 SoC SBCs, we offer a major kernel upgrade to Linux 6.1, base on a new Rockchip kernel source which should provide not only new kernel features, but higher quality as well, compared to the old Rockchip Linux 5.10 legacy kernel.
@@ -1825,6 +1836,7 @@ Patch_9_7()
 			G_EXEC sed --follow-symlinks -i 's/ttyAML0,115200/ttyS2,1500000/' /boot/dietpiEnv.txt
 			# Packages
 			G_EXEC eval 'echo '\''do_symlinks=0'\'' > /etc/kernel-img.conf'
+			G_AGP firmware-atheros firmware-iwlwifi # missing conflict in armbian-firmware package
 			G_AGI armbian-firmware initramfs-tools u-boot-tools zstd
 			G_AGI linux-{image,dtb}-current-rockchip64 "linux-u-boot-$model-current"
 			# Build boot script
@@ -1837,7 +1849,20 @@ Patch_9_7()
 			local rootdrive=$(lsblk -npo PKNAME "$G_ROOTFS_DEV")
 			G_EXEC_OUTPUT=1 G_EXEC sfdisk --no-reread --delete "$rootdrive" 1 2 3 4 5 6 7 8
 			G_EXEC_OUTPUT=1 G_EXEC sfdisk --no-reread -N1 "$rootdrive" <<< '286720'
-			G_EXEC_OUTPUT=1 G_EXEC sfdisk --no-reread -N1 "$rootdrive" <<< ',+' # somehow needed, since above command and '286720,+' somehow create the partition 2015 sectors smaller, resulting in too large filesystem size. Only a subsequent ',+' expands it to the true end of the drive.
+			G_EXEC_OUTPUT=1 G_EXEC sfdisk --no-reread -N1 "$rootdrive" <<< ',+' # Needed, since above command and '286720,+' somehow create the partition 2015 sectors smaller, resulting in too large filesystem size. Only a subsequent ',+' expands it to the true end of the drive.
+			# LAN interface migration
+			G_DIETPI-NOTIFY 2 'Migrating LAN interface configs'
+			case $(</proc/device-tree/model) in
+				*R5S*) local eth0='eth2' eth1='eth0' eth2='eth1';;
+				*R5C*) local eth0='eth1' eth1='eth0' eth2='';;
+				*) :;;
+			esac
+			for i in /etc/network/interfaces{,.d/*}
+			do
+				G_EXEC sed -i -e "s/eth0/to$eth0/g" -e "s/eth1/to$eth1/g" "$i"
+				[[ $eth2 ]] && G_EXEC sed -i "s/eth2/to$eth2/g" "$i"
+				G_EXEC sed -i -e "s/to$eth0/$eth0/g" -e "s/to$eth1/$eth1/g" -e "s/to$eth1/$eth1/g" "$i"
+			done
 		fi
 
 	elif [[ $G_HW_MODEL == 79 ]] && dpkg-query -s 'firmware-nanopi6' &> /dev/null
@@ -1892,6 +1917,7 @@ Patch_9_7()
 			G_EXEC sed --follow-symlinks -i 's/ttyAML0,115200/ttyFIQ0,1500000/' /boot/dietpiEnv.txt
 			# Packages
 			G_EXEC eval 'echo '\''do_symlinks=0'\'' > /etc/kernel-img.conf'
+			G_AGP firmware-atheros firmware-iwlwifi # missing conflict in armbian-firmware package
 			G_AGI armbian-firmware initramfs-tools u-boot-tools zstd
 			G_AGI linux-{image,dtb}-vendor-rk35xx "linux-u-boot-$model-vendor"
 			# Build boot script
@@ -1904,7 +1930,7 @@ Patch_9_7()
 			local rootdrive=$(lsblk -npo PKNAME "$G_ROOTFS_DEV")
 			G_EXEC_OUTPUT=1 G_EXEC sfdisk --no-reread --delete "$rootdrive" 1 2 3 4 5 6 7 8
 			G_EXEC_OUTPUT=1 G_EXEC sfdisk --no-reread -N1 "$rootdrive" <<< '286720'
-			G_EXEC_OUTPUT=1 G_EXEC sfdisk --no-reread -N1 "$rootdrive" <<< ',+' # somehow needed, since above command and '286720,+' somehow create the partition 2015 sectors smaller, resulting in too large filesystem size. Only a subsequent ',+' expands it to the true end of the drive.
+			G_EXEC_OUTPUT=1 G_EXEC sfdisk --no-reread -N1 "$rootdrive" <<< ',+' # Needed, since above command and '286720,+' somehow create the partition 2015 sectors smaller, resulting in too large filesystem size. Only a subsequent ',+' expands it to the true end of the drive.
 		fi
 	fi
 
