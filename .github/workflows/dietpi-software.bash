@@ -4,11 +4,12 @@
 ##########################################
 # Load DietPi-Globals
 ##########################################
+Error_Exit(){ G_DIETPI-NOTIFY 1 "$1, aborting ..."; exit 1; }
 if [[ -f '/boot/dietpi/func/dietpi-globals' ]]
 then
 	. /boot/dietpi/func/dietpi-globals
 else
-	curl -sSf "https://raw.githubusercontent.com/${G_GITOWNER:=MichaIng}/DietPi/${G_GITBRANCH:=master}/dietpi/func/dietpi-globals" -o /tmp/dietpi-globals || exit 1
+	curl -sSf "https://raw.githubusercontent.com/${G_GITOWNER:=MichaIng}/DietPi/${G_GITBRANCH:=master}/dietpi/func/dietpi-globals" -o /tmp/dietpi-globals || Error_Exit 'Failed to download DietPi-Globals'
 	# shellcheck disable=SC1091
 	. /tmp/dietpi-globals
 	G_EXEC rm /tmp/dietpi-globals
@@ -179,7 +180,7 @@ Process_Software()
 			139) aSERVICES[i]='sabnzbd' aTCP[i]='8080'; (( $arch == 10 )) || aDELAY[i]=30;; # ToDo: Solve conflict with Airsonic
 			140) aSERVICES[i]='domoticz' aTCP[i]='8124 8424';;
 			#142) aSERVICES[i]='snapd';; "system does not fully support snapd: cannot mount squashfs image using "squashfs": mount: /tmp/syscheck-mountpoint-2075108377: mount failed: Operation not permitted."
-			143) aSERVICES[i]='koel' aTCP[i]='8003';;
+			143) aSERVICES[i]='koel' aTCP[i]='8003'; (( $arch == 10 )) || aDELAY[i]=30;;
 			144) aSERVICES[i]='sonarr' aTCP[i]='8989'; (( $arch < 10 )) && aDELAY[i]=90;;
 			145) aSERVICES[i]='radarr' aTCP[i]='7878'; (( $arch < 10 )) && aDELAY[i]=90;;
 			146) aSERVICES[i]='tautulli' aTCP[i]='8181'; (( $arch == 10 )) || aDELAY[i]=60;;
@@ -318,7 +319,8 @@ G_EXEC mkdir rootfs
 G_EXEC mount "${FP_LOOP}p1" rootfs
 
 # Force ARMv6 arch on Raspbian
-(( $arch == 1 )) && G_EXEC sed --follow-symlinks -i '/# Start DietPi-Software/iG_EXEC sed -i -e '\''/^G_HW_ARCH=/cG_HW_ARCH=1'\'' -e '\''/^G_HW_ARCH_NAME=/cG_HW_ARCH_NAME=armv6l'\'' /boot/dietpi/.hw_model' rootfs/boot/dietpi/dietpi-login
+# shellcheck disable=SC2015
+(( $arch > 1 )) || echo -e '#/bin/dash\n[ "$*" = -m ] && echo armv6l || /usr/bin/uname "$@"' > rootfs/usr/local/bin/uname && G_EXEC chmod +x rootfs/usr/local/bin/uname || Error_Exit 'Failed to generate /usr/local/bin/uname for ARMv6'
 
 # Force RPi on ARM systems if requested
 if [[ $RPI == 'true' ]] && (( $arch < 10 ))
