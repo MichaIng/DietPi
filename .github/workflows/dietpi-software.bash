@@ -320,7 +320,7 @@ G_EXEC mount "${FP_LOOP}p1" rootfs
 
 # Force ARMv6 arch on Raspbian
 # shellcheck disable=SC2015
-(( $arch > 1 )) || echo -e '#/bin/dash\n[ "$*" = -m ] && echo armv6l || /usr/bin/uname "$@"' > rootfs/usr/local/bin/uname && G_EXEC chmod +x rootfs/usr/local/bin/uname || Error_Exit 'Failed to generate /usr/local/bin/uname for ARMv6'
+(( $arch > 1 )) || { echo -e '#/bin/dash\n[ "$*" = -m ] && echo armv6l || /usr/bin/uname "$@"' > rootfs/usr/local/bin/uname && G_EXEC chmod +x rootfs/usr/local/bin/uname; } || Error_Exit 'Failed to generate /usr/local/bin/uname for ARMv6'
 
 # Force RPi on ARM systems if requested
 if [[ $RPI == 'true' ]] && (( $arch < 10 ))
