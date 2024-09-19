@@ -201,7 +201,7 @@ Process_Software()
 			164) aSERVICES[i]='nukkit' aUDP[i]='19132'; (( $arch == 10 )) || aDELAY[i]=60;;
 			165) aSERVICES[i]='gitea' aTCP[i]='3000'; (( $arch < 10 )) && aDELAY[i]=30;;
 			#166) aSERVICES[i]='pi-spc';; Service cannot reasonably start in container as WirinPi's gpio command fails reading /proc/cpuinfo
-			167) aSERVICES[i]='raspotify';;
+			167) (( $arch < 3 )) || aSERVICES[i]='raspotify';; # 32-bit ARM fails with: "arm-binfmt-P: /usr/bin/librespot: Unable to find a guest_base to satisfy all guest address mapping requirements"
 			#169) aSERVICES[i]='voice-recognizer';; "RuntimeError: This module can only be run on a Raspberry Pi!"
 			170) aCOMMANDS[i]='unrar -V';;
 			#171) aSERVICES[i]='frps frpc' aTCP[i]='7000 7400 7500';; Interactive install with service and ports depending on server/client/both choice
