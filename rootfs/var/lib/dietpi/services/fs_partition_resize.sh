@@ -44,8 +44,7 @@
 
 	# Check if the last partition contains a FAT filesystem with DIETPISETUP label
 	REBOOT=0
-	LAST_PART=$(lsblk -nrbo FSTYPE,LABEL "$ROOT_DRIVE" | tail -1)
-	if [[ $LAST_PART == 'vfat DIETPISETUP' ]]
+	if [[ $(lsblk -no LABEL "$ROOT_DRIVE" | tail -1) == 'DIETPISETUP' ]]
 	then
 		SETUP_PART=$(sfdisk -lqo DEVICE "$ROOT_DRIVE" | tail -1)
 		echo "[ INFO ] Detected trailing DietPi setup partition $SETUP_PART"
@@ -86,7 +85,7 @@
 		umount -v "$BOOT_PART"
 		rmdir -v "$TMP_MOUNT"
 	else
-		echo "[ INFO ] No DietPi setup partition found, last partition is: \"$LAST_PART\""
+		echo '[ INFO ] No DietPi setup partition found:'
 		lsblk -po NAME,LABEL,SIZE,TYPE,FSTYPE,MOUNTPOINT "$ROOT_DRIVE"
 	fi
 
