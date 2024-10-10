@@ -254,9 +254,6 @@ _EOF_
 		# Apply SSH password login setting
 		/boot/dietpi/func/dietpi-set_software disable_ssh_password_logins
 
-		# Apply network time sync mirror
-		/boot/dietpi/func/dietpi-set_software timesync-mirror
-
 		# Apply forced Ethernet link speed if set in dietpi.txt
 		/boot/dietpi/func/dietpi-set_hardware eth-forcespeed "$(sed -n '/^[[:blank:]]*AUTO_SETUP_NET_ETH_FORCE_SPEED=/{s/^[^=]*=//p;q}' /boot/dietpi.txt)"
 
@@ -349,6 +346,10 @@ _EOF_
 
 		# - Boot wait for network
 		/boot/dietpi/func/dietpi-set_software boot_wait_for_network "$(( ! $(grep -cm1 '^[[:blank:]]*AUTO_SETUP_BOOT_WAIT_FOR_NETWORK=0' /boot/dietpi.txt) ))"
+
+		# Apply network time sync mirror and force sync now to speed up first run setup
+		/boot/dietpi/func/dietpi-set_software timesync-mirror
+		systemctl restart systemd-timesyncd
 
 		# x86_64 BIOS: Set GRUB install device: https://github.com/MichaIng/DietPi/issues/4542
 		if (( $G_HW_MODEL == 10 )) && dpkg-query -s grub-pc &> /dev/null
