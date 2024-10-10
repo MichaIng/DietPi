@@ -119,7 +119,7 @@ G_EXEC mount "${FP_LOOP}p1" rootfs
 
 # Enforce ARMv6 arch on Raspbian
 # shellcheck disable=SC2015
-(( $arch > 1 )) || { echo -e '#/bin/dash\n[ "$*" = -m ] && echo armv6l || /usr/bin/uname "$@"' > rootfs/usr/local/bin/uname && G_EXEC chmod +x rootfs/usr/local/bin/uname; } || Error_Exit 'Failed to generate /usr/local/bin/uname for ARMv6'
+(( $arch > 1 )) || { echo -e '#/bin/dash\n[ "$*" = -m ] && echo armv6l || /bin/uname "$@"' > rootfs/usr/local/bin/uname && G_EXEC chmod +x rootfs/usr/local/bin/uname; } || Error_Exit 'Failed to generate /usr/local/bin/uname for ARMv6'
 
 # Enable automated setup
 G_CONFIG_INJECT 'AUTO_SETUP_AUTOMATED=' 'AUTO_SETUP_AUTOMATED=1' rootfs/boot/dietpi.txt

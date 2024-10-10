@@ -235,6 +235,9 @@ _EOF_
 
 		fi
 
+		# Disable serial console if set in dietpi.txt
+		grep -q '^[[:blank:]]*CONFIG_SERIAL_CONSOLE_ENABLE=0' /boot/dietpi.txt && /boot/dietpi/func/dietpi-set_hardware serialconsole disable
+
 		# Regenerate unique Dropbear host keys
 		local i type
 		for i in /etc/dropbear/dropbear_*_host_key
@@ -251,8 +254,8 @@ _EOF_
 		# Apply SSH password login setting
 		/boot/dietpi/func/dietpi-set_software disable_ssh_password_logins
 
-		# Disable serial console if set in dietpi.txt
-		grep -q '^[[:blank:]]*CONFIG_SERIAL_CONSOLE_ENABLE=0' /boot/dietpi.txt && /boot/dietpi/func/dietpi-set_hardware serialconsole disable
+		# Apply network time sync mirror
+		/boot/dietpi/func/dietpi-set_software timesync-mirror
 
 		# Apply forced Ethernet link speed if set in dietpi.txt
 		/boot/dietpi/func/dietpi-set_hardware eth-forcespeed "$(sed -n '/^[[:blank:]]*AUTO_SETUP_NET_ETH_FORCE_SPEED=/{s/^[^=]*=//p;q}' /boot/dietpi.txt)"
