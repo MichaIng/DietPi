@@ -19,6 +19,7 @@ $FP_SCRIPT	useradd				X=create user with name X and default permissions, using g
 $FP_SCRIPT	apt-mirror			<url>|default
 $FP_SCRIPT	apt				clean|reset|cache|lists|archives|compress [enable|disable|ram|disk]
 $FP_SCRIPT	ntpd-mode			[0-4] Time sync modes: 0=custom|1=boot|2=boot+daily|3=boot+hourly|4=daemon+drift
+$FP_SCRIPT	timesync-mirror			Apply network time sync mirror from dietpi.txt
 $FP_SCRIPT	verify_dietpi.txt		Verifies dietpi.txt entries, adds missing entries if required
 $FP_SCRIPT	passwords			NULL=Prompt user to change DietPi related passwords | X=optional set X as global password for future dietpi-software installations and \"root\" + \"dietpi\" login passwords.
 $FP_SCRIPT	boot_wait_for_network		[01] Enable or disable waiting for network interface configuration before DietPi-PostBoot is started, including postboot.d custom scripts and service startups
@@ -228,12 +229,18 @@ $FP_SCRIPT	rpi_kernel_choice		<empty> Supported on Debian Bookworm or newer on R
 					3) all_components='rock4cplus';;
 					*)
 						[[ -f '/etc/apt/sources.list.d/dietpi.list' ]] && all_components=$(sed -n '/ all /{s/^.* all //p;q}' /etc/apt/sources.list.d/dietpi.list)
-						[[ $all_components ]] || for i in rock{pi-4b,-4se,pi-4cplus}
-						do
-							dpkg-query -s "linux-u-boot-$i-current" &> /dev/null || continue
-							all_components=${i/-//}
-							break
-						done
+						[[ $all_components ]] || if dpkg-query -s 'linux-u-boot-rockpi-4b-current' &> /dev/null
+						then
+							all_components='rock4'
+
+						elif dpkg-query -s 'linux-u-boot-rock-4se-current' &> /dev/null
+						then
+							all_components='rock4se'
+
+						elif dpkg-query -s 'linux-u-boot-rockpi-4cplus-current' &> /dev/null
+						then
+							all_components='rock4cplus'
+						fi
 					;;
 				esac
 			;;
@@ -425,52 +432,58 @@ deb $INPUT_MODE_VALUE $G_DISTRO_NAME-backports main contrib non-free' > /etc/apt
 	#/////////////////////////////////////////////////////////////////////////////////////
 	# ntpd-mode: Also sets mirror as defined in dietpi.txt CONFIG_NTP_MIRROR
 	#/////////////////////////////////////////////////////////////////////////////////////
+	TimeSync_Mirror()
+	{
+		local ntp_mirror=$(sed -n '/^[[:blank:]]*CONFIG_NTP_MIRROR=/{s/^[^=]*=//p;q}' /boot/dietpi.txt)
+		[[ $ntp_mirror ]] || ntp_mirror='default'
+
+		# Gateway, auto detect local gateway(s)/router(s) to use as NTP server(s).
+		if [[ ${ntp_mirror,,} == 'gateway' ]]
+		then
+			# Convert mawk output to single line via ORS, remove trailing space afterwards
+			local gateway=$(ip r l 0/0 | mawk '{print $3}' ORS=' '); gateway=${gateway% }
+			if [[ $gateway ]]
+			then
+				G_DIETPI-NOTIFY 0 "Gateway(s) detected: $gateway, adding as NTP server(s)."
+				ntp_mirror=$gateway
+			else
+				G_DIETPI-NOTIFY 1 'No local gateway detected. Reverting NTP mirror back to system defaults.'
+				EXIT_CODE=1
+				ntp_mirror='default'
+			fi
+		fi
+
+		# Default, lets timesyncd use DHCP server or fallback to debian.pool.ntp.org.
+		if [[ ${ntp_mirror,,} == 'default' ]]
+		then
+			[[ -f '/etc/systemd/timesyncd.conf' ]] && G_EXEC rm /etc/systemd/timesyncd.conf
+		else
+			local i ntp_mirror_entry
+			for i in $ntp_mirror
+			do
+				if [[ $i == *'pool.ntp.org' ]]
+				then
+					ntp_mirror_entry+="0.$i 1.$i 2.$i 3.$i "
+				else
+					ntp_mirror_entry+="$i "
+				fi
+			done
+
+			# Set mirror
+			echo -e "[Time]\nNTP=${ntp_mirror_entry% }" > /etc/systemd/timesyncd.conf
+		fi
+	}
+
 	TimeSync_Main()
 	{
 		if [[ ! $INPUT_MODE_VALUE || $INPUT_MODE_VALUE == [0-4] ]]
 		then
+			# Apply mirror as well
+			TimeSync_Mirror
+
 			# If no input given, re-apply current dietpi.txt setting, else revert to default mode 2
 			[[ $INPUT_MODE_VALUE ]] || INPUT_MODE_VALUE=$(sed -n '/^[[:blank:]]*CONFIG_NTP_MODE=/{s/^[^=]*=//p;q}' /boot/dietpi.txt)
-			[[ $INPUT_MODE_VALUE ]] || INPUT_MODE_VALUE=2
-
-			local ntp_mirror=$(sed -n '/^[[:blank:]]*CONFIG_NTP_MIRROR=/{s/^[^=]*=//p;q}' /boot/dietpi.txt)
-			[[ $ntp_mirror ]] || ntp_mirror='default'
-
-			# Gateway, auto detect local gateway(s)/router(s) to use as NTP server(s).
-			if [[ ${ntp_mirror,,} == 'gateway' ]]
-			then
-				# Convert mawk output to single line via ORS, remove trailing space afterwards
-				local gateway=$(ip r l 0/0 | mawk '{print $3}' ORS=' '); gateway=${gateway% }
-				if [[ $gateway ]]
-				then
-					G_DIETPI-NOTIFY 0 "Gateway(s) detected: $gateway, adding as NTP server(s)."
-					ntp_mirror=$gateway
-				else
-					G_DIETPI-NOTIFY 1 'No local gateway detected. Reverting NTP mirror back to system defaults.'
-					EXIT_CODE=1
-					ntp_mirror='default'
-				fi
-			fi
-
-			# Default, lets timesyncd use DHCP server or fallback to debian.pool.ntp.org.
-			if [[ ${ntp_mirror,,} == 'default' ]]
-			then
-				[[ -f '/etc/systemd/timesyncd.conf' ]] && G_EXEC rm /etc/systemd/timesyncd.conf
-			else
-				local i ntp_mirror_entry
-				for i in $ntp_mirror
-				do
-					if [[ $i == *'pool.ntp.org' ]]
-					then
-						ntp_mirror_entry+="0.$i 1.$i 2.$i 3.$i "
-					else
-						ntp_mirror_entry+="$i "
-					fi
-				done
-
-				# Set mirror
-				echo -e "[Time]\nNTP=${ntp_mirror_entry% }" > /etc/systemd/timesyncd.conf
-			fi
+			[[ $INPUT_MODE_VALUE == [0-4] ]] || INPUT_MODE_VALUE=2
 
 			# Daemon mode: dbus required for timedatectl which users may expect
 			if [[ $INPUT_MODE_VALUE == 4 ]]
@@ -876,7 +889,7 @@ deb $INPUT_MODE_VALUE $G_DISTRO_NAME-backports main contrib non-free' > /etc/apt
 \n- $optional for ${models[$optional]}" && to_install=("$optional") || to_remove=("$optional")
 		fi
 
-		G_AGI "$kernel_package" "${to_install[@]}" raspi-firmware raspi-utils tiny-initramfs
+		G_AGI "$kernel_package" "${to_install[@]}" raspi-firmware raspi-utils-core tiny-initramfs
 		G_AGP "${to_remove[@]}" raspberrypi-kernel raspberrypi-headers-kernel raspberrypi-bootloader libraspberrypi-bin libraspberrypi0
 	}
 
@@ -891,6 +904,7 @@ deb $INPUT_MODE_VALUE $G_DISTRO_NAME-backports main contrib non-free' > /etc/apt
 		'apt'|'apt-cache') Apt_Main;; # Pre-v8.4: Backwards compatibility for "apt-cache" => "apt cache"
 		'useradd') Useradd_Main;;
 		'ntpd-mode') TimeSync_Main;;
+		'timesync-mirror') TimeSync_Mirror;;
 		'allo') Allo_Main;;
 		'verify_dietpi.txt') Verify_DietPi_Txt;;
 		'locale') Locale_Main;;

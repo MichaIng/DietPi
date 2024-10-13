@@ -933,15 +933,13 @@ Re-enabling HDMI requires a reboot. If you need emergency HDMI output, edit the 
 			fi
 
 		# Odroid N2, ROCK 4, ROCK 5B, Orange Pi 5 (Plus) and Orange Pi 3B: https://dietpi.com/forum/t/orange-pi-5-boot-from-nvme/16457
-		elif [[ $G_HW_MODEL =~ ^(15|72|78|80|82|87)$ ]]
+		elif [[ $G_HW_MODEL =~ ^(15|72|78|80|82|87)$ && -f '/usr/lib/u-boot/platform_install.sh' ]]
 		then
 			# Odroid N2/ROCK 4: Device tree overlay required
 			local spidev='/dev/mtdblock0'
 			(( $G_HW_MODEL == 15 || $G_HW_MODEL == 72 )) || {
-				[[ -f '/usr/lib/u-boot/platform_install.sh' ]] && {
-					{ [[ -e '/dev/mtd0' ]] && grep -q '/dev/mtd0' /usr/lib/u-boot/platform_install.sh && spidev='/dev/mtd0'; } ||
-					{ [[ -b '/dev/mtdblock0' ]] && grep -q '/dev/mtdblock0' /usr/lib/u-boot/platform_install.sh; }
-				}
+				{ [[ -e '/dev/mtd0' ]] && grep -q 'flashcp' /usr/lib/u-boot/platform_install.sh && spidev='/dev/mtd0'; } ||
+				{ [[ -b '/dev/mtdblock0' ]] && ! grep -q 'flashcp' /usr/lib/u-boot/platform_install.sh; }
 			} && G_WHIP_MENU_ARRAY+=('Update SPI bootloader' ": Flash current U-Boot to $spidev")
 
 		# VisionFive 2/Star64: https://doc-en.rvspace.org/VisionFive2/PDF/VisionFive2_QSG.pdf
@@ -1143,7 +1141,7 @@ Further information: https://www.raspberrypi.org/documentation/hardware/raspberr
 			. /usr/lib/u-boot/platform_install.sh
 			eval "$(declare -f write_uboot_platform_mtd | sed -e 's| > /dev/null 2>&1||g' -e 's|status=none|status=progress|g' -e 's/^[[:blank:]]*dd /dd oflag=direct conv=notrunc status=progress /')"
 			# shellcheck disable=SC2154
-			write_uboot_platform_mtd "$DIR"
+			write_uboot_platform_mtd "$DIR" "$spidev"
 
 		elif [[ $G_WHIP_RETURNED_VALUE == 'Update bootloader' ]]; then
 
@@ -1559,8 +1557,8 @@ If unsure, set any value, 'Ondemand Down Factor' option on the next screen will 
 
 				MIN_VALUE=1 MAX_VALUE=60
 				G_WHIP_DEFAULT_ITEM=$initial_turbo
-				if G_WHIP_INPUTBOX "Amount of seconds on boot, where the CPU runs at highest clock, before it starts to respect the CPU governor. This reduces boot time quite much since RPi boots with powersave governor until the chosen one is applied at later boot stage.
-- Recommended value: 20\n - Valid range: $MIN_VALUE - $MAX_VALUE\n - Setting a value outside of range will disable this feature."; then
+				if G_WHIP_INPUTBOX "Amount of seconds on boot, where the CPU runs at the highest clock speed, before it starts to respect the CPU governor. This reduces boot time quite significantly since the RPi boots using the powersave governor until the chosen one is applied at a later boot stage.
+- Recommended value: 20\n - Valid range: $MIN_VALUE - $MAX_VALUE\n - Setting a value outside of this range will disable this feature."; then
 
 					if disable_error=1 G_CHECK_VALIDINT "$G_WHIP_RETURNED_VALUE" "$MIN_VALUE" "$MAX_VALUE"; then
 
@@ -3790,8 +3788,7 @@ NB: If you need to use *.pool.ntp.org servers, enter the base domain only. The s
 				fi
 				G_CONFIG_INJECT 'CONFIG_NTP_MIRROR=' "CONFIG_NTP_MIRROR=$G_WHIP_RETURNED_VALUE" /boot/dietpi.txt
 
-				local mode=$(sed -n '/^[[:blank:]]*CONFIG_NTP_MODE=/{s/^[^=]*=//p;q}' /boot/dietpi.txt)
-				/boot/dietpi/func/dietpi-set_software ntpd-mode "${mode:=2}"
+				/boot/dietpi/func/dietpi-set_software timesync-mirror
 
 				# Run time sync only if not currently running, to avoid concurrent execution if dietpi-config was called from DietPi-Run_NTPD error handler
 				# - Run non-interactively to avoid its internal error handler allowing to open a concurrent dietpi-config instance
@@ -3800,7 +3797,7 @@ NB: If you need to use *.pool.ntp.org servers, enter the base domain only. The s
 
 				G_WHIP_MSG "Time sync failed with mirror: $G_WHIP_RETURNED_VALUE\n\nReverting to previous mirror: $ntp_mirror_current"
 				G_CONFIG_INJECT 'CONFIG_NTP_MIRROR=' "CONFIG_NTP_MIRROR=$ntp_mirror_current" /boot/dietpi.txt
-				/boot/dietpi/func/dietpi-set_software ntpd-mode "$mode"
+				/boot/dietpi/func/dietpi-set_software timesync-mirror
 			;;
 
 			'Dynamic DNS') /boot/dietpi/dietpi-ddns;;
@@ -3867,7 +3864,7 @@ NB: If you need to use *.pool.ntp.org servers, enter the base domain only. The s
 			'Password' ": [$PROXY_PASSWORD]"
 		)
 
-		G_WHIP_MENU 'Please select an option to adjust. Logout and login for changes to take effect.' || { Back_or_Exit 8; return 0; } # Network Options: Adapters
+		G_WHIP_BUTTON_OK_TEXT='Select' G_WHIP_MENU 'Please select an option to adjust. Logout and login for changes to take effect.' || { Back_or_Exit 8; return 0; } # Network Options: Adapters
 
 		case "$G_WHIP_RETURNED_VALUE" in
 
@@ -3890,14 +3887,14 @@ NB: If you need to use *.pool.ntp.org servers, enter the base domain only. The s
 			'Username')
 
 				G_WHIP_DEFAULT_ITEM=$PROXY_USERNAME
-				G_WHIP_INPUTBOX 'Please enter the proxy username\n - eg: JoeBloggs\n - Leave blank if not required' && PROXY_USERNAME=$G_WHIP_RETURNED_VALUE || return 0
+				G_WHIP_INPUTBOX_REGEX='.*' G_WHIP_INPUTBOX 'Please enter the proxy username\n - eg: JoeBloggs\n - Leave blank if not required' && PROXY_USERNAME=$G_WHIP_RETURNED_VALUE || return 0
 				G_CONFIG_INJECT 'CONFIG_PROXY_USERNAME=' "CONFIG_PROXY_USERNAME=$PROXY_USERNAME" /boot/dietpi.txt
 			;;
 
 			'Password')
 
 				G_WHIP_DEFAULT_ITEM=$PROXY_PASSWORD
-				G_WHIP_INPUTBOX 'Please enter the proxy password\n - eg: LetMeIn\n - Leave blank if not required' && PROXY_PASSWORD=$G_WHIP_RETURNED_VALUE || return 0
+				G_WHIP_INPUTBOX_REGEX='.*' G_WHIP_INPUTBOX 'Please enter the proxy password\n - eg: LetMeIn\n - Leave blank if not required' && PROXY_PASSWORD=$G_WHIP_RETURNED_VALUE || return 0
 				G_CONFIG_INJECT 'CONFIG_PROXY_PASSWORD=' "CONFIG_PROXY_PASSWORD=$PROXY_PASSWORD" /boot/dietpi.txt
 			;;
 
