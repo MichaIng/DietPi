@@ -66,6 +66,8 @@ then
 fi
 _EOF_
 
+G_EXEC chmod +x sprd-bluetooth/DEBIAN/{postinst,prerm,postrm}
+
 # - md5sums
 find sprd-bluetooth ! \( -path sprd-bluetooth/DEBIAN -prune \) -type f -exec md5sum {} + | sed 's|sprd-bluetooth/||' > sprd-bluetooth/DEBIAN/md5sums
 
@@ -79,8 +81,8 @@ Date: $(date -uR)
 Installed-Size: $(du -sk sprd-bluetooth | mawk '{print $1}')
 Section: admin
 Priority: optional
-Homepage: https://github.com/RPi-Distro/sprd-bluetooth
-Description: System tweaks for the Raspberry Pi, DietPi edition
+Homepage: https://github.com/orangepi-xunlong/orangepi-build/tree/next/external/packages/blobs/bt/hciattach
+Description: Spreadtrum (sprd) Bluetooth support
 _EOF_
 G_CONFIG_INJECT 'Installed-Size: ' "Installed-Size: $(du -sk sprd-bluetooth | mawk '{print $1}')" sprd-bluetooth/DEBIAN/control
 
