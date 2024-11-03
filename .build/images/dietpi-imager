@@ -70,12 +70,15 @@
 	[[ $SKIP_FIRSTBOOT_RESIZE == 1 ]] || SKIP_FIRSTBOOT_RESIZE=0
 	[[ $SHRINK_ONLY == 1 ]] || SHRINK_ONLY=0
 	[[ $SKIP_ARCHIVE == 1 ]] || SKIP_ARCHIVE=0
+	UPLOAD_SCRIPT=
 	ADD_DOS_PART=0 # trailing FAT partition for first boot config files, automatically imported and partition removed on first boot
 	CONFIGS_TO_BOOT=0 # for new RPi kernel/firmware stack where a boot FAT partition exists, but is mounted to /boot/firmware instead of /boot
 	SIGN_PASS=
 	while (( $# ))
 	do
 		case $1 in
+			'--skip-archive') SKIP_ARCHIVE=1;;
+			'--upload-script') shift; UPLOAD_SCRIPT=$1;;
 			'--add-dos-part') ADD_DOS_PART=1;;
 			'--configs-to-boot') CONFIGS_TO_BOOT=1;;
 			'--sign') shift; SIGN_PASS=$1;;
@@ -335,6 +338,8 @@
 			done
 			unset -v main_menu_choice
 		fi
+
+		FP_FINAL="$FP_ORIGIN/$OUTPUT_IMG_NAME.$OUTPUT_IMG_EXT"
 
 		# Detect partition table type, failsafe detection of MBR to debug possibly other/unknown wording/partition table types
 		PART_TABLE_TYPE=$(lsblk -no PTTYPE "$FP_ROOT_DEV")
@@ -608,7 +613,7 @@ _EOF_
 			G_EXEC truncate -s "$IMAGE_SIZE" "$FP_SOURCE_IMG"
 
 			# Rename if source image != output image yet
-			[[ $(readlink -f "$PWD/$OUTPUT_IMG_NAME.$OUTPUT_IMG_EXT") != "$(readlink -f "$FP_SOURCE_IMG")" ]] && G_EXEC mv "$FP_SOURCE_IMG" "$OUTPUT_IMG_NAME.$OUTPUT_IMG_EXT"
+			[[ $(readlink -f "$FP_FINAL") != "$(readlink -f "$FP_SOURCE_IMG")" ]] && G_EXEC mv "$FP_SOURCE_IMG" "$FP_FINAL"
 
 			# Check for sufficient free disk space to store the xz archive with 100 MiB buffer
 			(( $SKIP_ARCHIVE )) || G_CHECK_FREESPACE . $(( $IMAGE_SIZE * 15/100 / 1024**2 + 100 )) || exit 1
@@ -622,7 +627,7 @@ _EOF_
 			G_CHECK_FREESPACE . $(( $IMAGE_SIZE * $free_space_percent/100 / 1024**2 + 100 )) || exit 1
 
 			G_DIETPI-NOTIFY 2 "Creating final image with actually used size: $(( $IMAGE_SIZE / 1024**2 + 1 )) MiB"
-			G_EXEC_OUTPUT=1 G_EXEC dd if="$FP_SOURCE" of="$OUTPUT_IMG_NAME.$OUTPUT_IMG_EXT" bs=1M status=progress count=$(( $IMAGE_SIZE / 1024**2 + 1 ))
+			G_EXEC_OUTPUT=1 G_EXEC dd if="$FP_SOURCE" of="$FP_FINAL" bs=1M status=progress count=$(( $IMAGE_SIZE / 1024**2 + 1 ))
 
 		# Clonezilla target
 		else
@@ -741,40 +746,54 @@ _EOF_
 			(( $REMOVE_IMG )) && G_EXEC rm "$FP_SOURCE_IMG"
 
 			# Generate ISO file with Clonezilla Live + DietPi image
-			G_EXEC_DESC="Generating $OUTPUT_IMG_NAME.$OUTPUT_IMG_EXT" G_EXEC_OUTPUT=1 G_EXEC xorriso \
+			G_EXEC_DESC="Generating $FP_FINAL" G_EXEC_OUTPUT=1 G_EXEC xorriso \
 				-as mkisofs -R -r -J -joliet-long -l -iso-level 3 -isohybrid-mbr /usr/lib/ISOLINUX/isohdpfx.bin -partition_offset 16 \
 				-publisher 'DietPi - Lightweight justice for your SBC; https://dietpi.com/;' -volid 'DIETPI_INSTALLER' \
 				-A "clonezilla-live-$CLONEZILLA_VERSION-amd64" -b syslinux/isolinux.bin -c syslinux/boot.cat -no-emul-boot -boot-load-size 4 \
 				-boot-info-table -eltorito-alt-boot --efi-boot boot/grub/efi.img -isohybrid-gpt-basdat -isohybrid-apm-hfsplus \
-				-o "$OUTPUT_IMG_NAME.$OUTPUT_IMG_EXT" tmpiso
+				-o "$FP_FINAL" tmpiso
 			G_EXEC rm -R tmpiso
 		fi
 
 		# Move GPT backup partition table to end of drive
 		if [[ $CLONING_TOOL != 'Clonezilla' && $PART_TABLE_TYPE == 'gpt' ]]
 		then
-			G_EXEC_DESC='Re-creating GPT backup partition table and header at end of image' G_EXEC_OUTPUT=1 G_EXEC sgdisk -e "$OUTPUT_IMG_NAME.$OUTPUT_IMG_EXT"
+			G_EXEC_DESC='Re-creating GPT backup partition table and header at end of image' G_EXEC_OUTPUT=1 G_EXEC sgdisk -e "$FP_FINAL"
 			G_EXEC sync
 		fi
 
-		# Exit now when archive shall be skipped
-		(( $SKIP_ARCHIVE )) && exit 0
+		# Generate xz archive if requested
+		local archive_text=''
+		if (( ! $SKIP_ARCHIVE ))
+		then
+			[[ -f $FP_FINAL.xz ]] && G_EXEC rm "$FP_FINAL.xz"
+			G_EXEC_DESC='Creating final xz archive' G_EXEC xz -9e -T0 -M75% -k "$FP_FINAL"
+			FP_FINAL+='.xz'
+			archive_text="\nxz archive:  $FP_FINAL"
+		fi
 
-		# Generate xz archive
-		[[ -f $OUTPUT_IMG_NAME.$OUTPUT_IMG_EXT.xz ]] && G_EXEC rm "$OUTPUT_IMG_NAME.$OUTPUT_IMG_EXT.xz"
-		G_EXEC_DESC='Creating final xz archive' G_EXEC xz -9e -T0 -M75% -k "$OUTPUT_IMG_NAME.$OUTPUT_IMG_EXT"
-		G_EXEC_DESC='Generating SHA256 hash' G_EXEC eval "sha256sum '$OUTPUT_IMG_NAME.$OUTPUT_IMG_EXT.xz' > '$OUTPUT_IMG_NAME.$OUTPUT_IMG_EXT.xz.sha256'"
-		local signature=() sig_text=''
-		[[ $SIGN_PASS ]] && { G_DIETPI-NOTIFY 2 'Signing archive ...'; gpg --batch --pinentry-mode loopback --passphrase "$SIGN_PASS" -b --armor "$OUTPUT_IMG_NAME.$OUTPUT_IMG_EXT.xz" || exit 1; signature=("$OUTPUT_IMG_NAME.$OUTPUT_IMG_EXT.xz.asc") sig_text="\nSignature:   $PWD/${signature[*]}"; }
+		# Generate SHA256 hash
+		G_EXEC_DESC='Generating SHA256 hash' G_EXEC eval "sha256sum '$FP_FINAL' > '$FP_FINAL.sha256'"
+
+		# Generate GPG signature if requested
+		local sig_text='' signature=()
+		if [[ $SIGN_PASS ]]
+		then
+			G_DIETPI-NOTIFY 2 "Signing $FP_FINAL ..."
+			gpg --batch --pinentry-mode loopback --passphrase "$SIGN_PASS" -b --armor "$FP_FINAL" || exit 1
+			sig_text="\nSignature:   $FP_FINAL.asc" signature=("$FP_FINAL.asc")
+		fi
 
 		G_DIETPI-NOTIFY 0 "DietPi-Imager has successfully finished.
-Image file:  $PWD/$OUTPUT_IMG_NAME.$OUTPUT_IMG_EXT
-xz archive:  $PWD/$OUTPUT_IMG_NAME.$OUTPUT_IMG_EXT.xz
-SHA256 hash: $PWD/$OUTPUT_IMG_NAME.$OUTPUT_IMG_EXT.xz.sha256$sig_text"
+Image file:  ${FP_FINAL%.xz}$archive_text
+SHA256 hash: $FP_FINAL.sha256$sig_text"
 
-		# Upload archive automatically if there is an upload.sh in the same directory
-		[[ -x 'upload.sh' ]] && G_EXEC_OUTPUT=1 G_EXEC ./upload.sh "$OUTPUT_IMG_NAME.$OUTPUT_IMG_EXT.xz"{,.sha256} "${signature[@]}" && G_EXEC rm -R "$OUTPUT_IMG_NAME.$OUTPUT_IMG_EXT.xz"{,.sha256} "${signature[@]}"
-
+		# Upload if requested
+		if [[ $UPLOAD_SCRIPT ]]
+		then
+			[[ -x "$UPLOAD_SCRIPT" ]] || { G_DIETPI-NOTIFY 1 "Upload script $UPLOAD_SCRIPT does not exist or is not executable. Aborting ..."; exit 1; }
+			G_EXEC_OUTPUT=1 G_EXEC ./upload.sh "$FP_FINAL"{,.sha256} "${signature[@]}" && (( ! $SKIP_ARCHIVE )) && G_EXEC rm -R "$FP_FINAL"{,.sha256} "${signature[@]}"
+		fi
 	}
 
 	#/////////////////////////////////////////////////////////////////////////////////////
