@@ -3017,9 +3017,11 @@ unix_socket_directories = '/run/postgresql'" > "$i/00dietpi.conf"
 			G_EXEC chmod +x node-install.sh
 
 			# ARMv6/RISC-V: Use unofficial builds to get the latest version: https://github.com/MichaIng/nodejs-linux-installer/pull/2, https://github.com/MichaIng/nodejs-linux-installer/commit/cd952fe
-			local unofficial=()
-			(( $G_HW_ARCH == 1 || $G_HW_ARCH == 11 )) && unofficial=('-u')
-			G_EXEC_OUTPUT=1 G_EXEC ./node-install.sh "${unofficial[@]}"
+			local options=()
+			(( $G_HW_ARCH == 1 || $G_HW_ARCH == 11 )) && options=('-u')
+			# ARMv7 Bullseye: node: /usr/lib/arm-linux-gnueabihf/libstdc++.so.6: version `GLIBCXX_3.4.30'/'0/GLIBCXX_3.4.39' not found (required by node)
+			(( $G_HW_ARCH == 2 && $G_DISTRO < 7 )) && options=('-v' 'v22.11.0')
+			G_EXEC_OUTPUT=1 G_EXEC ./node-install.sh "${options[@]}"
 			G_EXEC rm node-install.sh
 		fi
 
@@ -8433,6 +8435,9 @@ _EOF_
 			G_EXEC git config core.filemode false
 			G_EXEC chmod +x mineos_console.js webui.js update_webui.sh reset_webui.sh generate-sslcert.sh
 
+			# Bookworm: Workaround for failing userid 1.0.0-beta.9 build on weirdly Bookworm only. Latest stable 1.2.5 seems to work well: https://github.com/MichaIng/DietPi/issues/7265
+			G_CONFIG_INJECT '"userid"' '    "userid": "1.2.5",' package.json
+
 			# Workaround: Node.js posix needs to be installed alone first: https://github.com/MichaIng/DietPi/issues/5181
 			G_EXEC_OUTPUT=1 G_EXEC npm i --no-audit --no-package-lock posix@latest
 
@@ -8453,7 +8458,7 @@ _EOF_
 			G_EXEC cd "$G_WORKING_DIR"
 
 			# Service
-			cat << _EOF_ > /etc/systemd/system/mineos.service
+			cat << '_EOF_' > /etc/systemd/system/mineos.service
 [Unit]
 Description=MineOS (DietPi)
 Wants=network-online.target
@@ -8463,12 +8468,19 @@ After=network-online.target
 SyslogIdentifier=MineOS
 WorkingDirectory=/mnt/dietpi_userdata/mineos/minecraft
 Environment="SHELL=/bin/bash" "HOME=/root"
-ExecStart=$(command -v node) webui.js
+ExecStart=/usr/local/bin/node webui.js
 KillMode=process
 
 [Install]
 WantedBy=multi-user.target
 _EOF_
+			# User and permissions
+			local new_user=0
+			getent passwd mineos &> /dev/null || new_user=1
+			Create_User -d /mnt/dietpi_userdata/mineos/serverdata -p "$GLOBAL_PW" mineos
+			G_EXEC chown -R mineos /mnt/dietpi_userdata/mineos/serverdata
+			# - Assure SHA512 password hash algorithm, as MineOS does not support yescrypt, default since Bullseye: https://github.com/hexparrot/mineos-node/issues/441
+			(( $new_user )) && G_EXEC eval "chpasswd --crypt-method SHA512 <<< 'mineos:$GLOBAL_PW'"
 		fi
 
 		if To_Install 46 qbittorrent # qBittorrent
@@ -13598,10 +13610,10 @@ _EOF_
 
 		if To_Uninstall 53 # MineOS
 		then
-			Remove_Service mineos 1 1 # User and group for pre-v6.34
+			Remove_Service mineos 1 1
 			[[ -d '/mnt/dietpi_userdata/mineos' ]] && G_EXEC rm -R /mnt/dietpi_userdata/mineos
 			[[ -f '/etc/mineos.conf' ]] && G_EXEC rm /etc/mineos.conf
-			G_EXEC rm -Rf /var/games/minecraft /usr/local/bin/mineos # Symlinks
+			G_EXEC rm -Rf /var/games/minecraft /usr/local/bin/mineos /etc/ssl/certs/mineos.* # Symlinks and SSL cert
 			[[ -d '/home/mineos' ]] && G_EXEC rm -R /home/mineos # pre-v6.34
 		fi
 
