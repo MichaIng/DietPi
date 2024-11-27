@@ -3017,9 +3017,11 @@ unix_socket_directories = '/run/postgresql'" > "$i/00dietpi.conf"
 			G_EXEC chmod +x node-install.sh
 
 			# ARMv6/RISC-V: Use unofficial builds to get the latest version: https://github.com/MichaIng/nodejs-linux-installer/pull/2, https://github.com/MichaIng/nodejs-linux-installer/commit/cd952fe
-			local unofficial=()
-			(( $G_HW_ARCH == 1 || $G_HW_ARCH == 11 )) && unofficial=('-u')
-			G_EXEC_OUTPUT=1 G_EXEC ./node-install.sh "${unofficial[@]}"
+			local options=()
+			(( $G_HW_ARCH == 1 || $G_HW_ARCH == 11 )) && options=('-u')
+			# ARMv7 Bullseye: node: /usr/lib/arm-linux-gnueabihf/libstdc++.so.6: version `GLIBCXX_3.4.30'/'0/GLIBCXX_3.4.39' not found (required by node)
+			(( $G_HW_ARCH == 2 && $G_DISTRO < 7 )) && options=('-v' 'v22.11.0')
+			G_EXEC_OUTPUT=1 G_EXEC ./node-install.sh "${options[@]}"
 			G_EXEC rm node-install.sh
 		fi
 
@@ -3472,7 +3474,7 @@ _EOF_
 			G_EXEC systemctl stop nfs-server
 
 			G_EXEC mkdir -p /etc/exports.d
-			[[ -f '/etc/exports.d/dietpi.exports' ]] || G_EXEC eval 'echo '\''/mnt/dietpi_userdata *(rw,async,no_root_squash,fsid=0,crossmnt,no_subtree_check)'\'' > /etc/exports.d/dietpi.exports'
+			[[ -f '/etc/exports.d/dietpi.exports' ]] || G_EXEC eval 'echo '\''/mnt/dietpi_userdata *(rw,async,no_root_squash,crossmnt,no_subtree_check)'\'' > /etc/exports.d/dietpi.exports'
 		fi
 
 		if To_Install 83 apache2 # Apache
@@ -4121,8 +4123,13 @@ _EOF_
 		if To_Install 133 yacy # YaCy
 		then
 			# Get latest download
-			local file=$(curl -sSfL 'https://download.yacy.net/?C=N;O=D' | grep -wo 'yacy_v[0-9._]*\.tar\.gz' | head -1)
-			[[ $file ]] || { file='yacy_v1.924_20210209_10069.tar.gz'; G_DIETPI-NOTIFY 1 "Automatic latest ${aSOFTWARE_NAME[$software_id]} version detection failed. \"$file\" will be installed as fallback, but a newer version might be available. Please report this at: https://github.com/MichaIng/DietPi/issues"; }
+			if (( $G_HW_ARCH == 1 ))
+			then
+				local file='yacy_v1.926_202308282208_376bcfd54_last_java_8.tar.gz'
+			else
+				local file=$(curl -sSfL 'https://download.yacy.net/?C=N;O=D' | grep -wo 'yacy_v[0-9._a-f]*\.tar\.gz' | head -1)
+				[[ $file ]] || { file='yacy_v1.940_202405270005_70454654f.tar.gz'; G_DIETPI-NOTIFY 1 "Automatic latest ${aSOFTWARE_NAME[$software_id]} version detection failed. \"$file\" will be installed as fallback, but a newer version might be available. Please report this at: https://github.com/MichaIng/DietPi/issues"; }
+			fi
 
 			Download_Install "https://download.yacy.net/$file" /etc
 
@@ -4142,6 +4149,12 @@ ExecStop=/etc/yacy/stopYACY.sh
 [Install]
 WantedBy=multi-user.target
 _EOF_
+			# Set admin interface passwd:
+			if [[ ! -f '/etc/yacy/DATA/SETTINGS/yacy.conf' ]]
+			then
+				Create_Config /etc/yacy/DATA/SETTINGS/yacy.conf yacy
+				/etc/yacy/bin/passwd.sh "$GLOBAL_PW"
+			fi
 		fi
 
 		if To_Install 186 ipfs # IPFS Node
@@ -5053,7 +5066,7 @@ _EOF_
 				G_EXEC eval "curl -sSfL '$url' | gpg --dearmor -o /etc/apt/trusted.gpg.d/dietpi-mopidy.gpg --yes"
 
 				# APT list
-				G_EXEC eval "echo 'deb https://apt.mopidy.com ${G_DISTRO_NAME/bookworm/bullseye} main contrib non-free' > /etc/apt/sources.list.d/mopidy.list"
+				G_EXEC eval "echo 'deb https://apt.mopidy.com ${G_DISTRO_NAME/trixie/bookworm} main contrib non-free' > /etc/apt/sources.list.d/dietpi-mopidy.list"
 				G_AGUP
 			fi
 
@@ -6311,7 +6324,7 @@ _EOF_
 				*) local arch='x64';;
 			esac
 
-			local fallback_url="https://github.com/Kareadita/Kavita/releases/download/v0.8.3.2/kavita-linux-$arch.tar.gz"
+			local fallback_url="https://github.com/Kareadita/Kavita/releases/download/v0.8.4/kavita-linux-$arch.tar.gz"
 			Download_Install "$(curl -sSfL 'https://api.github.com/repos/Kareadita/Kavita/releases/latest' | mawk -F\" "/^ *\"browser_download_url\": \".*\/kavita-linux-$arch\.tar\.gz\"$/{print \$4}")"
 			G_EXEC chmod +x Kavita/Kavita
 
@@ -6676,7 +6689,10 @@ _EOF_
 			local cache=$(runuser -u nodered -- mktemp -d)
 			# - Reinstall: Remove all locally installed modules, to work around update issues, but preserve installed plugins from package.json: https://github.com/MichaIng/DietPi/issues/7128
 			[[ -f 'package.json' ]] && G_EXEC rm -Rf node_modules .npm/_cacache
-			G_EXEC_OUTPUT=1 G_EXEC runuser -u nodered -- npm i --cache "$cache" --no-audit node-red@latest
+			# - Install v3 on ARMv6, since the @node-rs/bcrypt dependency does not support it: https://github.com/MichaIng/DietPi/issues/7252
+			local version='latest'
+			(( $G_HW_ARCH == 1 )) && version=3
+			G_EXEC_OUTPUT=1 G_EXEC runuser -u nodered -- npm i --cache "$cache" --no-audit "node-red@$version"
 			G_EXEC rm -R "$cache"
 			G_EXEC cd "$G_WORKING_DIR"
 
@@ -7329,7 +7345,7 @@ _EOF_
 			G_EXEC eval "curl -sSfL '$url' | gpg --dearmor -o /etc/apt/trusted.gpg.d/dietpi-influxdb.gpg --yes"
 
 			# APT list
-			G_EXEC eval "echo 'deb https://repos.influxdata.com/debian ${G_DISTRO_NAME/bookworm/bullseye} stable' > /etc/apt/sources.list.d/influxdb.list"
+			G_EXEC eval "echo 'deb https://repos.influxdata.com/debian ${G_DISTRO_NAME/trixie/bookworm} stable' > /etc/apt/sources.list.d/dietpi-influxdb.list"
 			G_AGUP
 
 			# APT package
@@ -8227,7 +8243,7 @@ _EOF_
 			# APT deps: https://github.com/sabre-io/Baikal/wiki/Baïkal-dependencies
 			aDEPS=("php$PHP_VERSION-xml" "php$PHP_VERSION-mbstring" "php$PHP_VERSION-mysql")
 
-			local fallback_url='https://github.com/sabre-io/Baikal/releases/download/0.10.0/baikal-0.10.0.zip'
+			local fallback_url='https://github.com/sabre-io/Baikal/releases/download/0.10.1/baikal-0.10.1.zip'
 			Download_Install "$(curl -sSfL 'https://api.github.com/repos/sabre-io/Baikal/releases/latest' | mawk -F\" '/^ *"browser_download_url": ".*\/baikal-[^"\/]*\.zip"$/{print $4}')"
 
 			# Reinstall: https://sabre.io/baikal/upgrade/
@@ -8419,6 +8435,9 @@ _EOF_
 			G_EXEC git config core.filemode false
 			G_EXEC chmod +x mineos_console.js webui.js update_webui.sh reset_webui.sh generate-sslcert.sh
 
+			# Bookworm: Workaround for failing userid 1.0.0-beta.9 build on weirdly Bookworm only. Latest stable 1.2.5 seems to work well: https://github.com/MichaIng/DietPi/issues/7265
+			G_CONFIG_INJECT '"userid"' '    "userid": "1.2.5",' package.json
+
 			# Workaround: Node.js posix needs to be installed alone first: https://github.com/MichaIng/DietPi/issues/5181
 			G_EXEC_OUTPUT=1 G_EXEC npm i --no-audit --no-package-lock posix@latest
 
@@ -8439,7 +8458,7 @@ _EOF_
 			G_EXEC cd "$G_WORKING_DIR"
 
 			# Service
-			cat << _EOF_ > /etc/systemd/system/mineos.service
+			cat << '_EOF_' > /etc/systemd/system/mineos.service
 [Unit]
 Description=MineOS (DietPi)
 Wants=network-online.target
@@ -8449,12 +8468,19 @@ After=network-online.target
 SyslogIdentifier=MineOS
 WorkingDirectory=/mnt/dietpi_userdata/mineos/minecraft
 Environment="SHELL=/bin/bash" "HOME=/root"
-ExecStart=$(command -v node) webui.js
+ExecStart=/usr/local/bin/node webui.js
 KillMode=process
 
 [Install]
 WantedBy=multi-user.target
 _EOF_
+			# User and permissions
+			local new_user=0
+			getent passwd mineos &> /dev/null || new_user=1
+			Create_User -d /mnt/dietpi_userdata/mineos/serverdata -p "$GLOBAL_PW" mineos
+			G_EXEC chown -R mineos /mnt/dietpi_userdata/mineos/serverdata
+			# - Assure SHA512 password hash algorithm, as MineOS does not support yescrypt, default since Bullseye: https://github.com/hexparrot/mineos-node/issues/441
+			(( $new_user )) && G_EXEC eval "chpasswd --crypt-method SHA512 <<< 'mineos:$GLOBAL_PW'"
 		fi
 
 		if To_Install 46 qbittorrent # qBittorrent
@@ -8565,8 +8591,8 @@ _EOF_
 			# Install ruTorrent: Web UI for rTorrent
 			# - Grab current version
 			local version=$(curl -sSfL 'https://api.github.com/repos/Novik/ruTorrent/releases/latest' | mawk -F\" '/^ *"tag_name": "[^"]*",$/{print $4}')
-			[[ $version ]] || { version='v5.0.0'; G_DIETPI-NOTIFY 1 "Automatic latest ruTorrent version detection failed. Version \"$version\" will be installed as fallback, but a newer version might be available. Please report this at: https://github.com/MichaIng/DietPi/issues"; }
-			[[ $version == 'v5.'* ]] || version='v5.0.0'
+			[[ $version ]] || { version='v5.1.0'; G_DIETPI-NOTIFY 1 "Automatic latest ruTorrent version detection failed. Version \"$version\" will be installed as fallback, but a newer version might be available. Please report this at: https://github.com/MichaIng/DietPi/issues"; }
+			[[ $version == 'v5.'* ]] || version='v5.1.0'
 			Download_Install "https://github.com/Novik/ruTorrent/archive/$version.tar.gz"
 
 			# - Reinstall freshly with preserved configs and 3rd party plugins
@@ -9056,7 +9082,7 @@ RES_Y=$(sed -n '/^[[:blank:]]*SOFTWARE_CHROMIUM_RES_Y=/{s/^[^=]*=//p;q}' /boot/d
 CHROMIUM_OPTS="--kiosk --window-size=${RES_X:-1280},${RES_Y:-720} --window-position=0,0"
 
 # If you want tablet mode, uncomment the next line.
-#CHROMIUM_OPTS+=' --force-tablet-mode --tablet-ui'
+#CHROMIUM_OPTS="$CHROMIUM_OPTS --force-tablet-mode --tablet-ui"
 
 # Home page
 URL=$(sed -n '/^[[:blank:]]*SOFTWARE_CHROMIUM_AUTOSTART_URL=/{s/^[^=]*=//p;q}' /boot/dietpi.txt)
@@ -9555,7 +9581,7 @@ _EOF_
 					esac
 
 					url=$(curl -sSfL 'https://api.github.com/repos/Radarr/Radarr/releases/latest' | mawk -F\" "/^ *\"browser_download_url\": \".*linux-core-$arch\.tar\.gz\"$/{print \$4}")
-					local fallback_url="https://github.com/Radarr/Radarr/releases/download/v5.14.0.9383/Radarr.master.5.14.0.9383.linux-core-$arch.tar.gz"
+					local fallback_url="https://github.com/Radarr/Radarr/releases/download/v5.15.1.9463/Radarr.master.5.15.1.9463.linux-core-$arch.tar.gz"
 				fi
 
 				Download_Install "$url"
@@ -9922,7 +9948,7 @@ _EOF_
 			local reinstall=0
 			[[ -f '/mnt/dietpi_userdata/nzbget/nzbget.conf' ]] && reinstall=1
 
-			local fallback_url='https://github.com/nzbgetcom/nzbget/releases/download/v24.3/nzbget-24.3-bin-linux.run'
+			local fallback_url='https://github.com/nzbgetcom/nzbget/releases/download/v24.4/nzbget-24.4-bin-linux.run'
 			Download_Install "$(curl -sSfL 'https://api.github.com/repos/nzbgetcom/nzbget/releases/latest' | mawk -F\" '/^ *"browser_download_url": ".*\/nzbget-[^"/]*-bin-linux.run"$/{print $4}')" nzbget.run
 			G_EXEC mkdir -p /mnt/dietpi_userdata/nzbget
 			G_EXEC_OUTPUT=1 G_EXEC dash nzbget.run --destdir /mnt/dietpi_userdata/nzbget
@@ -10001,7 +10027,7 @@ _EOF_
 					*) local arch='x64';;
 				esac
 
-				local fallback_url="https://github.com/Prowlarr/Prowlarr/releases/download/v1.25.4.4818/Prowlarr.master.1.25.4.4818.linux-core-$arch.tar.gz"
+				local fallback_url="https://github.com/Prowlarr/Prowlarr/releases/download/v1.26.1.4844/Prowlarr.master.1.26.1.4844.linux-core-$arch.tar.gz"
 				Download_Install "$(curl -sSfL 'https://api.github.com/repos/Prowlarr/Prowlarr/releases/latest' | mawk -F\" "/^ *\"browser_download_url\": \".*linux-core-$arch\.tar\.gz\"$/{print \$4}")"
 				G_EXEC mv Prowlarr /opt/prowlarr
 			fi
@@ -10077,7 +10103,7 @@ _EOF_
 					*) local arch='x64';;
 				esac
 
-				local fallback_url="https://github.com/Readarr/Readarr/releases/download/v0.4.3.2665/Readarr.develop.0.4.3.2665.linux-core-$arch.tar.gz"
+				local fallback_url="https://github.com/Readarr/Readarr/releases/download/v0.4.4.2686/Readarr.develop.0.4.4.2686.linux-core-$arch.tar.gz"
 				Download_Install "$(curl -sSfL 'https://api.github.com/repos/Readarr/Readarr/releases' | mawk -F\" "/^ *\"browser_download_url\": \".*linux-core-$arch\.tar\.gz\"$/{print \$4}" | head -1)"
 				G_EXEC mv Readarr /opt/readarr
 			fi
@@ -10342,7 +10368,7 @@ _EOF_
 			# x86_64: Install Debian i386 package
 			if [[ $G_HW_ARCH == 10 ]]
 			then
-				# Add i386 arch: https://packages.debian.org/bullseye/steam
+				# Add i386 arch: https://packages.debian.org/steam
 				[[ $(dpkg --print-foreign-architectures) == *'i386'* ]] || { G_EXEC dpkg --add-architecture i386; G_AGUP; }
 
 				G_AGI steam
@@ -11231,7 +11257,7 @@ _EOF_
 				# v3 drops PHP 7.4 support: https://github.com/TasmoAdmin/TasmoAdmin/releases/tag/v3.0.0
 				if (( $G_DISTRO > 6 ))
 				then
-					local fallback_url='https://github.com/TasmoAdmin/TasmoAdmin/releases/download/v4.1.3/tasmoadmin_v4.1.3.tar.gz'
+					local fallback_url='https://github.com/TasmoAdmin/TasmoAdmin/releases/download/v4.2.0/tasmoadmin_v4.2.0.tar.gz'
 					Download_Install "$(curl -sSfL 'https://api.github.com/repos/TasmoAdmin/TasmoAdmin/releases/latest' | mawk -F\" '/^ *"browser_download_url": ".*\/tasmoadmin_v[^"\/]*\.tar\.gz"$/{print $4}')"
 				else
 					Download_Install 'https://github.com/TasmoAdmin/TasmoAdmin/releases/download/v2.4.2/tasmoadmin_v2.4.2.tar.gz'
@@ -11688,7 +11714,7 @@ _EOF_
 					*) local arch='amd64';;
 				esac
 
-				local fallback_url="https://github.com/rclone/rclone/releases/download/v1.68.1/rclone-v1.68.1-linux-$arch.deb"
+				local fallback_url="https://github.com/rclone/rclone/releases/download/v1.68.2/rclone-v1.68.2-linux-$arch.deb"
 				Download_Install "$(curl -sSfL 'https://api.github.com/repos/rclone/rclone/releases/latest' | mawk -F\" "/^ *\"browser_download_url\": \".*\/rclone-v[^\"\/]*-linux-$arch.deb\"$/{print \$4}")"
 			fi
 		fi
@@ -11702,7 +11728,7 @@ _EOF_
 				*) local arch='arm';;
 			esac
 
-			local fallback_url="https://github.com/restic/restic/releases/download/v0.17.2/restic_0.17.2_linux_$arch.bz2"
+			local fallback_url="https://github.com/restic/restic/releases/download/v0.17.3/restic_0.17.3_linux_$arch.bz2"
 			Download_Install "$(curl -sSfL 'https://api.github.com/repos/restic/restic/releases/latest' | mawk -F\" "/^ *\"browser_download_url\": \".*\/restic_[^\"\/]*_linux_$arch\.bz2\"$/{print \$4}")" /usr/local/bin/restic
 			G_EXEC chmod +x /usr/local/bin/restic
 		fi
@@ -13078,7 +13104,7 @@ _EOF_
 		then
 			Remove_Service mopidy
 			G_AGP 'mopidy*'
-			[[ -f '/etc/apt/sources.list.d/mopidy.list' ]] && G_EXEC rm /etc/apt/sources.list.d/mopidy.list
+			[[ -f '/etc/apt/sources.list.d/dietpi-mopidy.list' ]] && G_EXEC rm /etc/apt/sources.list.d/dietpi-mopidy.list
 			[[ -f '/etc/apt/trusted.gpg.d/dietpi-mopidy.gpg' ]] && G_EXEC rm /etc/apt/trusted.gpg.d/dietpi-mopidy.gpg
 
 			command -v pip3 > /dev/null && G_EXEC_OUTPUT=1 G_EXEC pip3 uninstall -y Mopidy-MusicBox-Webclient
@@ -13584,10 +13610,10 @@ _EOF_
 
 		if To_Uninstall 53 # MineOS
 		then
-			Remove_Service mineos 1 1 # User and group for pre-v6.34
+			Remove_Service mineos 1 1
 			[[ -d '/mnt/dietpi_userdata/mineos' ]] && G_EXEC rm -R /mnt/dietpi_userdata/mineos
 			[[ -f '/etc/mineos.conf' ]] && G_EXEC rm /etc/mineos.conf
-			G_EXEC rm -Rf /var/games/minecraft /usr/local/bin/mineos # Symlinks
+			G_EXEC rm -Rf /var/games/minecraft /usr/local/bin/mineos /etc/ssl/certs/mineos.* # Symlinks and SSL cert
 			[[ -d '/home/mineos' ]] && G_EXEC rm -R /home/mineos # pre-v6.34
 		fi
 
@@ -13932,7 +13958,7 @@ _EOF_
 		then
 			Remove_Service influxdb 1 1
 			G_AGP influxdb
-			[[ -f '/etc/apt/sources.list.d/influxdb.list' ]] && G_EXEC rm /etc/apt/sources.list.d/influxdb.list
+			[[ -f '/etc/apt/sources.list.d/dietpi-influxdb.list' ]] && G_EXEC rm /etc/apt/sources.list.d/dietpi-influxdb.list
 			[[ -f '/etc/apt/trusted.gpg.d/dietpi-influxdb.gpg' ]] && G_EXEC rm /etc/apt/trusted.gpg.d/dietpi-influxdb.gpg
 			G_EXEC rm -Rf /{mnt/dietpi_userdata,var/{lib,log},etc}/influxdb
 		fi
