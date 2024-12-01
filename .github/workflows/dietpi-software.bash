@@ -204,7 +204,7 @@ Process_Software()
 			167) (( $arch < 3 )) || aSERVICES[i]='raspotify';; # 32-bit ARM fails with: "arm-binfmt-P: /usr/bin/librespot: Unable to find a guest_base to satisfy all guest address mapping requirements"
 			#169) aSERVICES[i]='voice-recognizer';; "RuntimeError: This module can only be run on a Raspberry Pi!"
 			170) aCOMMANDS[i]='unrar -V';;
-			#171) aSERVICES[i]='frps frpc' aTCP[i]='7000 7400 7500';; Interactive install with service and ports depending on server/client/both choice
+			171) aSERVICES[i]='frps frpc' aTCP[i]='7000 7400 7500';;
 			172) aSERVICES[i]='wg-quick@wg0' aUDP[i]='51820';;
 			174) aCOMMANDS[i]='gimp -v';;
 			176) aSERVICES[i]='mycroft';;
