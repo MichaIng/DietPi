@@ -1509,7 +1509,6 @@ Available commands:
 		aSOFTWARE_DESC[$software_id]='reverse proxy'
 		aSOFTWARE_CATX[$software_id]=16
 		aSOFTWARE_DOCS[$software_id]='https://dietpi.com/docs/software/advanced_networking/#frp'
-		aSOFTWARE_INTERACTIVE[$software_id]=1
 
 		# Home Automation
 		#--------------------------------------------------------------------------------
@@ -6525,10 +6524,11 @@ _EOF_
 		if To_Install 171 # frp
 		then
 			case $G_HW_ARCH in
+				1) local arch='arm';;
+				2) local arch='arm_hf';;
 				3) local arch='arm64';;
 				10) local arch='amd64';;
-				11) local arch='riscv64';;
-				*) local arch='arm_hf';;
+				*) local arch='riscv64';;
 			esac
 
 			# Download
@@ -6537,19 +6537,17 @@ _EOF_
 
 			G_EXEC cd frp_*
 
-			local choice_required=
-			while :
-			do
-				G_WHIP_MENU_ARRAY=(
-					'Server' ': Use this machine as a server, with a public IP'
-					'Client' ': Use this machine as a client, without a public IP'
-					'Both' ': Run the reverse proxy only on this machine'
-				)
+			# Mode choice
+			G_WHIP_MENU_ARRAY=(
+				'Server' ': Use this machine as a server, with a public IP'
+				'Client' ': Use this machine as a client, without a public IP'
+				'Both' ': Run the reverse proxy only on this machine'
+			)
 
-				G_WHIP_MENU "${choice_required}Please choose how you are going to run frp." && break
-				choice_required='[ERROR] A choice is required to finish the frp install.\n\n'
-			done
-			local mode=$G_WHIP_RETURNED_VALUE
+			G_WHIP_NOCANCEL=1
+			G_WHIP_DEFAULT_ITEM='Both'
+			G_WHIP_MENU 'Please choose how you are going to run frp:'
+			local mode=${G_WHIP_RETURNED_VALUE:-Both}
 
 			G_EXEC mkdir -p /etc/frp
 			Create_User frp -d /etc/frp
@@ -6569,28 +6567,41 @@ StartLimitBurst=3
 [Service]
 User=frp
 AmbientCapabilities=CAP_NET_BIND_SERVICE
-ExecStart=/usr/local/bin/frps -c /etc/frp/frps.ini
+ExecStart=/usr/local/bin/frps -c /etc/frp/frps.toml
 Restart=on-failure
 RestartSec=5s
 
 [Install]
 WantedBy=multi-user.target
 _EOF_
+				# Pre-v9.9: Inform about config file migration
+				if [[ -f '/etc/frp/frps.ini' ]]
+				then
+					G_WHIP_MSG '[WARNING] New toml config file will be generated
+\nfrp deprecated the ini format for its config files, hence /etc/frp/frps.toml will be generated and used from now on.
+\nAn automated conversion is not possible and hence need to be done manually, if you did changes. A backup of the ini config it kept in place:
+- /etc/frp/frps.ini.bak
+\nA full overview of all config keys can be found here:
+- https://github.com/fatedier/frp/blob/dev/conf/frps_full_example.toml'
+					G_EXEC mv /etc/frp/frps.ini{,.bak}
+				fi
+
 				# Pre-create config file to turn on dashboard
 				token=$(openssl rand -hex 15)
-				[[ -f '/etc/frp/frps.ini' ]] || cat << _EOF_ > /etc/frp/frps.ini
-[common]
-bind_port = 7000
+				[[ -f '/etc/frp/frps.toml' ]] || cat << _EOF_ > /etc/frp/frps.toml
+bindAddr = "0.0.0.0"
+bindPort = 7000
 
-dashboard_port = 7500
-dashboard_user = admin
-dashboard_pwd = $GLOBAL_PW
+webServer.addr = "0.0.0.0"
+webServer.port = 7500
+webServer.user = "admin"
+webServer.password = "$GLOBAL_PW"
 
-authentication_method = token
-token = $token
+auth.method = "token"
+auth.token = "$token"
 _EOF_
-				G_EXEC chmod 0640 /etc/frp/frps.ini
-				G_EXEC chown root:frp /etc/frp/frps.ini
+				G_EXEC chmod 0640 /etc/frp/frps.toml
+				G_EXEC chown root:frp /etc/frp/frps.toml
 				aENABLE_SERVICES+=('frps')
 			fi
 
@@ -6607,58 +6618,62 @@ StartLimitBurst=3
 
 [Service]
 User=frp
-ExecStart=/usr/local/bin/frpc -c /etc/frp/frpc.ini
-ExecReload=/usr/local/bin/frpc reload -c /etc/frp/frpc.ini
+ExecStart=/usr/local/bin/frpc -c /etc/frp/frpc.toml
+ExecReload=/usr/local/bin/frpc reload -c /etc/frp/frpc.toml
 Restart=on-failure
 RestartSec=5s
 
 [Install]
 WantedBy=multi-user.target
 _EOF_
-				local server_addr=127.0.0.1 server_port=7000
-				if [[ $G_WHIP_RETURNED_VALUE == 'Client' ]]
+				# Pre-v9.9: Inform about config file migration
+				if [[ -f '/etc/frp/frpc.ini' ]]
 				then
-					local invalid_entry=
-					while :
-					do
-						if G_WHIP_INPUTBOX "${invalid_entry}Please enter the IP address of your frp server, including port (default 7000)" && [[ $G_WHIP_RETURNED_VALUE =~ ^[0-9.:]+$ ]]
-						then
-							server_addr=${G_WHIP_RETURNED_VALUE#*:}
-							[[ $G_WHIP_RETURNED_VALUE =~ : ]] && server_port=${G_WHIP_RETURNED_VALUE%:*}
-							invalid_entry=
-							break
-						else
-							invalid_entry='[FAILED] Please enter a valid IP address\n\n'
-						fi
-					done
-
-					while :
-					do
-						if G_WHIP_INPUTBOX "${invalid_entry}Please enter the authentication token of your frp server" && [[ $G_WHIP_RETURNED_VALUE =~ ^[0-9.]+$ ]]
-						then
-							token=$G_WHIP_RETURNED_VALUE
-							break
-						else
-							invalid_entry='[FAILED] Please enter a token\n\n'
-						fi
-					done
+					G_WHIP_MSG '[WARNING] New toml config file will be generated
+\nfrp deprecated the ini format for its config files, hence /etc/frp/frpc.toml will be generated and used from now on.
+\nAn automated conversion is not possible and hence need to be done manually, if you did changes. A backup of the ini config it kept in place:
+- /etc/frp/frpc.ini.bak
+\nA full overview of all config keys can be found here:
+- https://github.com/fatedier/frp/blob/dev/conf/frpc_full_example.toml'
+					G_EXEC mv /etc/frp/frpc.ini{,.bak}
 				fi
 
 				# Pre-create config file to turn on admin UI
-				[[ -f '/etc/frp/frpc.ini' ]] || cat << _EOF_ > /etc/frp/frpc.ini
-[common]
-server_addr = $server_addr
-server_port = $server_port
+				if [[ ! -f '/etc/frp/frpc.toml' ]]
+				then
+					local server_addr='127.0.0.1' server_port=7000
+					if [[ $G_WHIP_RETURNED_VALUE == 'Client' ]]
+					then
+						G_WHIP_NOCANCEL=1
+						G_WHIP_DEFAULT_ITEM="$server_addr:$server_port"
+						G_WHIP_INPUTBOX_REGEX='^[0-9.:]+$'
+						G_WHIP_INPUTBOX_REGEX_TEXT='be a valid IP address, optionally with appended network port number, like "192.168.1.100:7000"'
+						G_WHIP_INPUTBOX 'Please enter the IP address of your frp server, optionally including port (default 7000):'
+						[[ $G_WHIP_RETURNED_VALUE ]] && server_addr=${G_WHIP_RETURNED_VALUE%:*}
+						[[ $G_WHIP_RETURNED_VALUE =~ : ]] && server_port=${G_WHIP_RETURNED_VALUE##*:}
 
-admin_addr = 0.0.0.0
-admin_port = 7400
-admin_user = admin
-admin_pwd = $GLOBAL_PW
+						G_WHIP_NOCANCEL=1
+						G_WHIP_INPUTBOX_REGEX='*'
+						G_WHIP_INPUTBOX 'Please enter the authentication token of your frp server:'
+						token=$G_WHIP_RETURNED_VALUE
+					fi
 
-token = $token
+					cat << _EOF_ > /etc/frp/frpc.toml
+serverAddr = "$server_addr"
+serverPort = $server_port
+
+webServer.addr = "0.0.0.0"
+webServer.port = 7400
+webServer.user = "admin"
+webServer.password = "$GLOBAL_PW"
+
+auth.method = "token"
+auth.token = "$token"
 _EOF_
-				G_EXEC chmod 0660 /etc/frp/frpc.ini
-				G_EXEC chown root:frp /etc/frp/frpc.ini
+				fi
+
+				G_EXEC chmod 0660 /etc/frp/frpc.toml
+				G_EXEC chown root:frp /etc/frp/frpc.toml
 				aENABLE_SERVICES+=('frpc')
 			fi
 
