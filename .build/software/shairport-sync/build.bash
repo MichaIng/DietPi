@@ -17,7 +17,7 @@ adeps2=('libsodium23' 'libgcrypt20')
 case $G_DISTRO in
 	5|6) adeps+=('libssl1.1'); adeps2+=('libavcodec58' 'libplist3');;
 	7) adeps+=('libssl3'); adeps2+=('libavcodec59' 'libplist3');;
-	8) adeps+=('libssl3'); adeps2+=('libavcodec60' 'libplist-2.0-4');;
+	8) adeps+=('libssl3'); adeps2+=('libavcodec61' 'libplist-2.0-4');;
 	*) G_DIETPI-NOTIFY 1 "Unsupported distro version: $G_DISTRO_NAME (ID=$G_DISTRO)"; exit 1;;
 esac
 for i in "${adeps[@]}" "${adeps2[@]}"
