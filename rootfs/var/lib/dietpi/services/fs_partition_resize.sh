@@ -7,7 +7,7 @@
 	Reboot_to_load_Partition_table()
 	{
 		> /dietpi_skip_partition_resize
-		systemctl enable dietpi-fs_partition_resize
+		systemctl --no-reload enable dietpi-fs_partition_resize
 		echo '[ INFO ] Rebooting to load the new partition table'
 		sync
 		reboot
@@ -15,7 +15,7 @@
 	}
 
 	# Disable this service
-	! systemctl is-enabled dietpi-fs_partition_resize > /dev/null || systemctl disable dietpi-fs_partition_resize
+	! systemctl is-enabled dietpi-fs_partition_resize > /dev/null || systemctl --no-reload disable dietpi-fs_partition_resize
 
 	# Detect root device
 	ROOT_DEV=$(findmnt -Ufnro SOURCE -M /)

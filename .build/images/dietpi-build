@@ -54,6 +54,8 @@ GITBRANCH='master'
 GITOWNER='MichaIng'
 EDITION=
 SUFFIX=
+SKIP_ARCHIVE=0
+UPLOAD_SCRIPT=
 ADD_DOS_PART=1
 SIGN_PASS=
 TEST_KERNEL=0
@@ -72,6 +74,8 @@ do
 		'-o') shift; GITOWNER=$1;;
 		'-e') shift; EDITION=$1;;
 		'-s') shift; SUFFIX=$1;;
+		'--skip-archive') SKIP_ARCHIVE=1;;
+		'--upload-script') shift; UPLOAD_SCRIPT=$1;;
 		'--no-dos-part') ADD_DOS_PART=0;;
 		'--sign') shift; SIGN_PASS=$1;;
 		'--test-kernel') TEST_KERNEL=1;;
@@ -159,6 +163,7 @@ case $HW_MODEL in
 	90) iname='RadxaZERO3' HW_ARCH=3 PTTYPE='gpt' partition_start=16 root_size=1100;;
 	91) iname='OrangePi5Max' HW_ARCH=3 PTTYPE='gpt' partition_start=16 root_size=1100;;
 	92) iname='NanoPiM6' HW_ARCH=3 PTTYPE='gpt' partition_start=16 root_size=1100;;
+	93) iname='OrangePi5Pro' HW_ARCH=3 PTTYPE='gpt' partition_start=16 root_size=1200;;
 	*) G_DIETPI-NOTIFY 1 "Invalid hardware model \"$HW_MODEL\" passed, aborting..."; exit 1;;
 esac
 
@@ -477,9 +482,11 @@ G_EXEC losetup -d "$FP_LOOP"
 # DietPi-Imager
 ##########################################
 # Do not pack and upload raw VM image if not explicitly requested
-[[ $VMTYPE && ! $VMTYPE =~ ^(raw|all)$ ]] && SKIP_ARCHIVE=1 || SKIP_ARCHIVE=0
-export FP_ROOT_DEV CLONING_TOOL OUTPUT_IMG_NAME MOUNT_IT='Off' SKIP_ARCHIVE SKIP_FIRSTBOOT_RESIZE=1
+[[ $VMTYPE && ! $VMTYPE =~ ^(raw|all)$ ]] && SKIP_ARCHIVE=1 UPLOAD_SCRIPT=''
+export FP_ROOT_DEV CLONING_TOOL OUTPUT_IMG_NAME MOUNT_IT='Off' SKIP_FIRSTBOOT_RESIZE=1
 IMAGER_ARGS=("$OUTPUT_IMG_NAME.img")
+(( $SKIP_ARCHIVE )) && IMAGER_ARGS+=('--skip-archive')
+[[ $UPLOAD_SCRIPT ]] && IMAGER_ARGS+=('--upload-script' "$UPLOAD_SCRIPT")
 (( $ADD_DOS_PART )) && IMAGER_ARGS+=('--add-dos-part')
 [[ $HW_MODEL == [1245] ]] && IMAGER_ARGS+=('--configs-to-boot')
 [[ $SIGN_PASS ]] && IMAGER_ARGS+=('--sign' "$SIGN_PASS")
@@ -713,12 +720,17 @@ fi
 ##########################################
 # Virtual machines
 ##########################################
-# NB: LZMA2 ultra compression requires much memory per thread. 1 GiB is not sufficient for >2 threads, hence use "-mmt2" to limit used CPU threads to "2" on 1 GiB devices with more than two cores.
-limit_threads=()
-(( $(free -m | mawk '/Mem:/{print $2}') < 1750 && $(nproc) > 2 )) && limit_threads=('-T2')
-
 # Since qemu-img does not support VMDK and VHDX resizing, we need to resize the raw .img. It is usually done as sparse file, hence the actual disk usage does not change.
 G_EXEC qemu-img resize "$OUTPUT_IMG_NAME.img" 8G
+
+####### ISO ##############################
+if [[ $VMTYPE == all ]]
+then
+	CLONING_TOOL='Clonezilla' OUTPUT_IMG_NAME="${OUTPUT_IMG_NAME}_Installer"
+	G_DIETPI-NOTIFY 2 "Running DietPi-Imager for $G_GITOWNER/$G_GITBRANCH"
+	bash -c "$(curl -sSf "https://raw.githubusercontent.com/$G_GITOWNER/DietPi/$G_GITBRANCH/.build/images/dietpi-imager")" 'DietPi-Imager' "${IMAGER_ARGS[@]}" || exit 1
+	CLONING_TOOL='dd' OUTPUT_IMG_NAME=${OUTPUT_IMG_NAME%_Installer}
+fi
 
 ####### VMX/VMware/Parallels #############
 if [[ $VMTYPE =~ ^(vmx|all)$ ]]
@@ -771,7 +783,7 @@ ethernet0.present = "TRUE"
 extendedConfigFile = "$image_name.vmxf"
 floppy0.present = "FALSE"
 _EOF_
-	G_EXEC_DESC='Creating VMware tar.xz archive' XZ_OPT="-9e ${limit_threads[*]}" G_EXEC tar -cJf "$image_name.tar.xz" "$image_name.vmdk" "$image_name.vmx"
+	G_EXEC_DESC='Creating VMware tar.xz archive' XZ_OPT='-9e -T0 -M75%' G_EXEC tar -cJf "$image_name.tar.xz" "$image_name.vmdk" "$image_name.vmx"
 	G_EXEC rm "$image_name.vmdk" "$image_name.vmx"
 	G_EXEC_DESC='Generating SHA256 hash' G_EXEC eval "sha256sum '$image_name.tar.xz' > '$image_name.tar.xz.sha256'"
 	signature=()
@@ -900,7 +912,7 @@ _EOF_
 	[[ $VMTYPE == 'all' ]] || G_EXEC rm "$image_name.vmdk"
 	G_EXEC rm "$image_name."{ovf,mf}
 
-	G_EXEC_DESC='Creating ESXi xz archive' G_EXEC xz -9e "${limit_threads[@]}" "$image_name.ova"
+	G_EXEC_DESC='Creating ESXi xz archive' G_EXEC xz -9e -T0 -M75% "$image_name.ova"
 	G_EXEC_DESC='Generating SHA256 hash' G_EXEC eval "sha256sum '$image_name.ova.xz' > '$image_name.ova.xz.sha256'"
 	signature=()
 	[[ $SIGN_PASS ]] && { G_DIETPI-NOTIFY 2 'Signing archive ...'; gpg --batch --pinentry-mode loopback --passphrase "$SIGN_PASS" -b --armor "$image_name.ova.xz" || exit 1; signature=("$image_name.ova.xz.asc"); }
@@ -1051,7 +1063,7 @@ _EOF_
 	G_EXEC tar -cf "$image_name.ova" "$image_name."{ovf,vmdk,mf}
 	G_EXEC rm "$image_name."{ovf,vmdk,mf}
 
-	G_EXEC_DESC='Creating VirtualBox xz archive' G_EXEC xz -9e "${limit_threads[@]}" "$image_name.ova"
+	G_EXEC_DESC='Creating VirtualBox xz archive' G_EXEC xz -9e -T0 -M75% "$image_name.ova"
 	G_EXEC_DESC='Generating SHA256 hash' G_EXEC eval "sha256sum '$image_name.ova.xz' > '$image_name.ova.xz.sha256'"
 	signature=()
 	[[ $SIGN_PASS ]] && { G_DIETPI-NOTIFY 2 'Signing archive ...'; gpg --batch --pinentry-mode loopback --passphrase "$SIGN_PASS" -b --armor "$image_name.ova.xz" || exit 1; signature=("$image_name.ova.xz.asc"); }
@@ -1065,7 +1077,7 @@ then
 	# Convert raw image to VHDX
 	G_EXEC qemu-img convert -O vhdx "$OUTPUT_IMG_NAME.img" "$image_name.vhdx"
 
-	G_EXEC_DESC='Creating Hyper-V xz archive' G_EXEC xz -9e "${limit_threads[@]}" "$image_name.vhdx"
+	G_EXEC_DESC='Creating Hyper-V xz archive' G_EXEC xz -9e -T0 -M75% "$image_name.vhdx"
 	G_EXEC_DESC='Generating SHA256 hash' G_EXEC eval "sha256sum '$image_name.vhdx.xz' > '$image_name.vhdx.xz.sha256'"
 	signature=()
 	[[ $SIGN_PASS ]] && { G_DIETPI-NOTIFY 2 'Signing archive ...'; gpg --batch --pinentry-mode loopback --passphrase "$SIGN_PASS" -b --armor "$image_name.vhdx.xz" || exit 1; signature=("$image_name.vhdx.xz.asc"); }
@@ -1230,7 +1242,7 @@ _EOF_
 </dict>
 </plist>
 _EOF_
-	G_EXEC_DESC='Creating UTM tar.xz archive' XZ_OPT="-9e ${limit_threads[*]}" G_EXEC tar -cJf "$image_name.tar.xz" "$image_name.utm"
+	G_EXEC_DESC='Creating UTM tar.xz archive' XZ_OPT='-9e -T0 -M75%' G_EXEC tar -cJf "$image_name.tar.xz" "$image_name.utm"
 	G_EXEC rm -R "$image_name.utm"
 	G_EXEC_DESC='Generating SHA256 hash' G_EXEC eval "sha256sum '$image_name.tar.xz' > '$image_name.tar.xz.sha256'"
 	signature=()
@@ -1262,7 +1274,7 @@ then
 	image_name=${OUTPUT_IMG_NAME/_VM-/_Proxmox-}
 	G_EXEC qemu-img convert -c -O qcow2 "$OUTPUT_IMG_NAME.img" "$image_name.qcow2"
 
-	G_EXEC_DESC='Creating Proxmox xz archive' G_EXEC xz -9e "${limit_threads[@]}" "$image_name.qcow2"
+	G_EXEC_DESC='Creating Proxmox xz archive' G_EXEC xz -9e -T0 -M75% "$image_name.qcow2"
 	G_EXEC_DESC='Generating SHA256 hash' G_EXEC eval "sha256sum '$image_name.qcow2.xz' > '$image_name.qcow2.xz.sha256'"
 	signature=()
 	[[ $SIGN_PASS ]] && { G_DIETPI-NOTIFY 2 'Signing archive ...'; gpg --batch --pinentry-mode loopback --passphrase "$SIGN_PASS" -b --armor "$image_name.qcow2.xz" || exit 1; signature=("$image_name.qcow2.xz.asc"); }

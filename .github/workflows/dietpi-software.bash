@@ -171,7 +171,7 @@ Process_Software()
 			128) aSERVICES[i]='mpd' aTCP[i]='6600';;
 			131) (( $arch == 2 || $arch == 11 )) || aSERVICES[i]='blynkserver' aTCP[i]='9443'; (( $arch == 10 || $arch == 2 || $arch == 11 )) || aDELAY[i]=60;;
 			132) aSERVICES[i]='aria2' aTCP[i]='6800';; # aTCP[i]+=' 6881-6999';; # Listens on random port
-			133) (( $arch == 2 || $arch == 11 )) || aSERVICES[i]='yacy' aTCP[i]='8090'; (( $arch == 10 )) && aDELAY[i]=30; (( $arch == 10 || $arch == 2 || $arch == 11)) || aDELAY[i]=60;;
+			133) (( $arch == 2 || $arch == 11 )) || aSERVICES[i]='yacy' aTCP[i]='8090'; (( $arch == 10 )) && aDELAY[i]=30; (( $arch == 10 || $arch == 2 || $arch == 11)) || aDELAY[i]=90;;
 			134) aCOMMANDS[i]='docker compose version';;
 			135) aSERVICES[i]='icecast2' aTCP[i]='8000' aCOMMANDS[i]='darkice -h | grep '\''^DarkIce'\';; # darkice service cannot start in container as is requires audio recording device access
 			136) aSERVICES[i]='motioneye' aTCP[i]='8765';;
@@ -204,7 +204,7 @@ Process_Software()
 			167) (( $arch < 3 )) || aSERVICES[i]='raspotify';; # 32-bit ARM fails with: "arm-binfmt-P: /usr/bin/librespot: Unable to find a guest_base to satisfy all guest address mapping requirements"
 			#169) aSERVICES[i]='voice-recognizer';; "RuntimeError: This module can only be run on a Raspberry Pi!"
 			170) aCOMMANDS[i]='unrar -V';;
-			#171) aSERVICES[i]='frps frpc' aTCP[i]='7000 7400 7500';; Interactive install with service and ports depending on server/client/both choice
+			171) aSERVICES[i]='frps frpc' aTCP[i]='7000 7400 7500';;
 			172) aSERVICES[i]='wg-quick@wg0' aUDP[i]='51820';;
 			174) aCOMMANDS[i]='gimp -v';;
 			176) aSERVICES[i]='mycroft';;
