@@ -663,7 +663,8 @@ Available commands:
 		aSOFTWARE_DESC[$software_id]='Automatically download TV shows'
 		aSOFTWARE_CATX[$software_id]=3
 		aSOFTWARE_DOCS[$software_id]='https://dietpi.com/docs/software/bittorrent/#sonarr'
-		aSOFTWARE_DEPS[$software_id]='87 150'
+		aSOFTWARE_DEPS[$software_id]='87'
+		(( $G_HW_ARCH == 1 )) && aSOFTWARE_DEPS[$software_id]+=' 150'
 		# - RISC-V: Missing package
 		aSOFTWARE_AVAIL_G_HW_ARCH[$software_id,11]=0
 		#------------------
@@ -9488,23 +9489,71 @@ _EOF_
 
 		if To_Install 144 sonarr # Sonarr
 		then
-			# https://sonarr.tv/#downloads-v3-linux-debian
-			# APT key
-			G_EXEC eval 'curl -sSf '\''https://keyserver.ubuntu.com/pks/lookup?search=0x2009837CBFFD68F45BC180471F4F90DE2A9B4BF8&op=get'\'' | gpg --dearmor -o /etc/apt/trusted.gpg.d/dietpi-sonarr.gpg --yes'
+			# Sonarr v4 does not support ARMv6
+			if (( $G_HW_ARCH == 1 ))
+			then
+				# https://sonarr.tv/#downloads-v3-linux-debian
+				# APT key
+				G_EXEC eval 'curl -sSf '\''https://keyserver.ubuntu.com/pks/lookup?search=0x2009837CBFFD68F45BC180471F4F90DE2A9B4BF8&op=get'\'' | gpg --dearmor -o /etc/apt/trusted.gpg.d/dietpi-sonarr.gpg --yes'
 
-			# APT list: Buster is the latest available suite: https://apt.sonarr.tv/debian/dists/
-			G_EXEC eval 'echo '\''deb https://apt.sonarr.tv/debian buster main'\'' > /etc/apt/sources.list.d/sonarr.list'
+				# APT list: Buster is the latest available suite: https://apt.sonarr.tv/debian/dists/
+				G_EXEC eval 'echo '\''deb https://apt.sonarr.tv/debian buster main'\'' > /etc/apt/sources.list.d/sonarr.list'
 
-			# Update package lists
-			G_AGUP
+				# Update package lists
+				G_AGUP
 
-			# Pre-configure DEB package
-			G_EXEC eval "debconf-set-selections <<< 'sonarr sonarr/owning_group string dietpi'"
-			G_EXEC eval "debconf-set-selections <<< 'sonarr sonarr/config_directory string /mnt/dietpi_userdata/sonarr'"
+				# Pre-configure DEB package
+				G_EXEC eval "debconf-set-selections <<< 'sonarr sonarr/owning_group string dietpi'"
+				G_EXEC eval "debconf-set-selections <<< 'sonarr sonarr/config_directory string /mnt/dietpi_userdata/sonarr'"
 
-			# Install Sonarr and mediainfo
-			G_AGI sonarr mediainfo
-			G_EXEC systemctl stop sonarr
+				# Install Sonarr and mediainfo
+				G_AGI sonarr mediainfo
+				G_EXEC systemctl stop sonarr
+
+				local install_dir='/usr/lib/sonarr'
+				local exe="$(command -v mono) $install_dir/bin/Sonarr.exe"
+			else
+				# Pre-v9.9 cleanup
+				[[ -f '/etc/apt/sources.list.d/sonarr.list' ]] && G_EXEC rm /etc/apt/sources.list.d/sonarr.list
+				[[ -f '/etc/apt/trusted.gpg.d/dietpi-sonarr.gpg' ]] && G_EXEC rm /etc/apt/trusted.gpg.d/dietpi-sonarr.gpg
+				if dpkg-query -s 'sonarr' &> /dev/null
+				then
+					G_AGP sonarr
+					# Offer to uninstall Mono
+					if (( ${aSOFTWARE_INSTALL_STATE[150]} == 2 ))
+					then
+						G_WHIP_BUTTON_OK_TEXT='Yes' G_WHIP_BUTTON_CANCEL_TEXT='No' G_WHIP_DEFAULT_ITEM='Yes'
+						G_WHIP_YESNO '[ INFO ] Mono is no dependency of Sonarr v4 anymore
+\nA migration from Sonarr v3 to Sonarr v4 is done, which does not require Mono anymore. If you do not need Mono for something else, it can hence be uninstalled to free up some space.
+\nDo you want to uninstall Mono now? It can be done any time later via "dietpi-software".' && aSOFTWARE_INSTALL_STATE[150]=-1
+					fi
+				fi
+
+				# APT dependencies
+				aDEPS=('mediainfo')
+				# - .NET: https://github.com/dotnet/docs/blob/main/docs/core/install/linux-debian.md#dependencies
+				case $G_DISTRO in
+					6) aDEPS+=('libicu67');;
+					*) aDEPS+=('libicu72');;
+				esac
+
+				# Download
+				case $G_HW_ARCH in
+					2) local arch='arm';;
+					3) local arch='arm64';;
+					*) local arch='x64';;
+				esac
+
+				local fallback_url="https://github.com/Sonarr/Sonarr/releases/download/v4.0.11.2680/Sonarr.main.4.0.11.2680.linux-$arch.tar.gz"
+				Download_Install "$(curl -sSfL 'https://api.github.com/repos/Sonarr/Sonarr/releases/latest' | mawk -F\" "/^ *\"browser_download_url\": \".*linux-$arch\.tar\.gz\"$/{print \$4}")"
+
+				# Install: Remove previous instance on reinstall
+				[[ -d '/opt/sonarr' ]] && G_EXEC rm -R /opt/sonarr
+				G_EXEC mv Sonarr /opt/sonarr
+
+				local install_dir='/opt/sonarr'
+				local exe="$install_dir/Sonarr"
+			fi
 
 			# Pre-v7.1: Remove Sonarr v2 key, PID file and database backups from DietPi-Arr_to_RAM
 			if [[ -f '/etc/apt/trusted.gpg' && $(apt-key --keyring /etc/apt/trusted.gpg list 'A236C58F409091A18ACA53CBEBFF6B99D9B78493' 2> /dev/null) ]]
@@ -9535,7 +9584,7 @@ SyslogIdentifier=Sonarr
 User=sonarr
 UMask=002
 LogsDirectory=sonarr
-ExecStart=$(command -v mono) /usr/lib/sonarr/bin/Sonarr.exe -nobrowser -data=/mnt/dietpi_userdata/sonarr
+ExecStart=$exe -nobrowser -data=/mnt/dietpi_userdata/sonarr
 TimeoutStopSec=20
 KillMode=process
 Restart=on-failure
@@ -9559,7 +9608,7 @@ _EOF_
 			G_EXEC ln -s /var/log/sonarr/logs.db-wal /mnt/dietpi_userdata/sonarr/logs.db-wal
 
 			# Permissions
-			G_EXEC chown -R sonarr:dietpi /mnt/dietpi_userdata/sonarr /usr/lib/sonarr
+			G_EXEC chown -R sonarr:dietpi /mnt/dietpi_userdata/sonarr "$install_dir"
 		fi
 
 		if To_Install 145 radarr # Radarr
@@ -12883,7 +12932,7 @@ _EOF_
 			Remove_Service sonarr 1 1 # group for pre-v6.29
 			G_AGP sonarr nzbdrone # Pre-v7.1
 			[[ -d '/var/log/sonarr' ]] && G_EXEC rm -R /var/log/sonarr
-			G_EXEC rm -Rf /mnt/dietpi_userdata/sonarr /opt/NzbDrone # Pre-v7.1
+			G_EXEC rm -Rf /opt/sonarr /mnt/dietpi_userdata/sonarr /opt/NzbDrone # Pre-v7.1
 			[[ -f '/etc/apt/sources.list.d/sonarr.list' ]] && G_EXEC rm /etc/apt/sources.list.d/sonarr.list
 			[[ -f '/etc/apt/trusted.gpg.d/dietpi-sonarr.gpg' ]] && G_EXEC rm /etc/apt/trusted.gpg.d/dietpi-sonarr.gpg
 			# Pre-v7.1: Remove Sonarr v2 key
