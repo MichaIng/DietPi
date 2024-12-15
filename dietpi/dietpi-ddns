@@ -22,11 +22,9 @@ Available options:
   -p <password>     Password or token, depending on provider
                     In combination with a custom provider, this is used for HTTP authentication.
   -t <timespan>     Duration between DDNS updates in minutes (optional, defaults to 10)
-  -4                Force IPv4 usage for the DDNS update (optional, the default)
-  -6                Force IPv6 usage for the DDNS update (optional)
-  -6or4             Do not force any IP family for the DDNS update (optional)
-                    IPv6 is then used, if enabled on this server and if the DDNS provider is
-                    reachable via IPv6, else IPv4 is used.
+  -4and6            Update IPv4 and IPv6 addresses for your DDNS (optional, the default)
+  -4                Update only the IPv4 address for your DDNS (optional)
+  -6                Update only the IPv6 address for your DDNS (optional)
 Available providers:
   <custom>          Full URL to update against a custom DDNS provider
                     Use the "-u" and "-p" options if HTTP authentication is required.
@@ -58,7 +56,7 @@ DOMAINS=
 USERNAME=
 PASSWORD=
 TIMESPAN=
-IPFAMILY=
+IPFAMILY='-4and6'
 
 # --------------------------------------------
 # Functions
@@ -73,10 +71,10 @@ Input()
 			'-u') shift; USERNAME=$1;;
 			'-p') shift; PASSWORD=$1;;
 			'-t') shift; TIMESPAN=$1;;
-			'-'[46]|'-6or4') IPFAMILY=$1;;
+			'-'[46]|'-4and6') IPFAMILY=$1;;
 			'apply') COMMAND=$1; shift; PROVIDER=$1;;
 			'remove') COMMAND=$1;;
-			*) G_DIETPI-NOTIFY 1 "Invalid input ($1). Aborting...$USAGE"; exit 1;;
+			*) G_DIETPI-NOTIFY 1 "Invalid input ($1). Aborting ...$USAGE"; exit 1;;
 		esac
 		shift
 	done
@@ -144,8 +142,21 @@ Read()
 	fi
 
 	# IP family
-	[[ $IPFAMILY ]] || IPFAMILY=${command#curl } IPFAMILY=${IPFAMILY%% *}
-	[[ $IPFAMILY == '-'[46] ]] || IPFAMILY='-6or4'
+	if grep -q '^curl -4' /var/lib/dietpi/dietpi-ddns/update.sh
+	then
+		if grep -q '^curl -6' /var/lib/dietpi/dietpi-ddns/update.sh
+		then
+			IPFAMILY='-4and6'
+		else
+			IPFAMILY='-4'
+		fi
+
+	elif grep -q '^curl -6' /var/lib/dietpi/dietpi-ddns/update.sh
+	then
+		IPFAMILY='-6'
+	else
+		IPFAMILY='-4and6' # Pre-v9.9
+	fi
 
 	# Time span
 	[[ ! $TIMESPAN && -f '/var/spool/cron/crontabs/dietpi-ddns' ]] || return
@@ -157,8 +168,7 @@ Read()
 Apply()
 {
 	# Generate URL and set HTTP authentication flag based on provider
-	local url http_auth=1 ipfamily=${IPFAMILY:--4}
-	[[ $ipfamily == '-6or4' ]] && ipfamily=
+	local url http_auth=1
 	# - DuckDNS
 	if [[ $PROVIDER == 'DuckDNS' ]]
 	then
@@ -200,7 +210,7 @@ Apply()
 	fi
 
 	# Create DietPi-DDNS group
-	G_DIETPI-NOTIFY 2 'Preparing unprivileged DietPi-DDNS UNIX group...'
+	G_DIETPI-NOTIFY 2 'Preparing unprivileged DietPi-DDNS UNIX group ...'
 	if getent group dietpi-ddns > /dev/null
 	then
 		G_EXEC groupmod -p '!' dietpi-ddns
@@ -209,7 +219,7 @@ Apply()
 	fi
 
 	# Create DietPi-DDNS user
-	G_DIETPI-NOTIFY 2 'Preparing unprivileged DietPi-DDNS UNIX user...'
+	G_DIETPI-NOTIFY 2 'Preparing unprivileged DietPi-DDNS UNIX user ...'
 	if getent passwd dietpi-ddns > /dev/null
 	then
 		G_EXEC usermod -g 'dietpi-ddns' -G '' -d '/nonexistent' -s '/usr/sbin/nologin' -p '!' dietpi-ddns
@@ -218,10 +228,10 @@ Apply()
 	fi
 
 	# Test DDNS update
-	G_DIETPI-NOTIFY 2 'Testing DDNS update...'
+	G_DIETPI-NOTIFY 2 'Testing DDNS update ...'
 	local result
 	# shellcheck disable=SC2086
-	if ! result=$(curl $ipfamily -sSfL ${http_auth:+ -u "$USERNAME:$PASSWORD"} "$url" 2>&1) ||
+	if ! result=$(curl "${IPFAMILY%and6}" -sSfL ${http_auth:+ -u "$USERNAME:$PASSWORD"} "$url" 2>&1) ||
 		[[ $PROVIDER == 'DuckDNS' && $result == 'KO' ]] ||
 		[[ $PROVIDER == 'YDNS' && $result != 'good'* && $result != 'nochg'* ]] ||
 		[[ $PROVIDER == 'Dynu' && $result != 'good'* && $result != 'nochg'* ]]
@@ -231,13 +241,32 @@ Apply()
 		return 1
 	else
 		STATUS="DDNS update test succeeded${result:+:\n$result}"
-		G_DIETPI-NOTIFY 2 "$STATUS"
+		G_DIETPI-NOTIFY 0 "$STATUS"
+
+		# Test IPv6 as well if both are enabled
+		if [[ $IPFAMILY == '-4and6' ]]
+		then
+			G_DIETPI-NOTIFY 2 'Testing IPv6 DDNS update ...'
+			local status6
+			if ! result=$(curl "${IPFAMILY/4and}" -sSfL ${http_auth:+ -u "$USERNAME:$PASSWORD"} "$url" 2>&1) ||
+				[[ $PROVIDER == 'DuckDNS' && $result == 'KO' ]] ||
+				[[ $PROVIDER == 'YDNS' && $result != 'good'* && $result != 'nochg'* ]] ||
+				[[ $PROVIDER == 'Dynu' && $result != 'good'* && $result != 'nochg'* ]]
+			then
+				status6="IPv6 DDNS update test failed. Your server, network or DDNS provider might not support IPv6${result:+:\n$result}"
+				G_DIETPI-NOTIFY 1 "$status6"
+			else
+				status6="IPv6 DDNS update test succeeded${result:+:\n$result}"
+				G_DIETPI-NOTIFY 0 "$status6"
+			fi
+			STATUS+="\n\n$status6"
+		fi
 	fi
 
 	# Check and in case remove obsolete No-IP client
 	if command -v noip2 > /dev/null
 	then
-		G_DIETPI-NOTIFY 2 'Removing obsolete No-IP client from your system...'
+		G_DIETPI-NOTIFY 2 'Removing obsolete No-IP client from your system ...'
 		if [[ -f '/etc/systemd/system/noip2.service' ]]
 		then
 			G_EXEC systemctl disable --now noip2
@@ -262,10 +291,12 @@ Apply()
 	G_EXEC chown dietpi-ddns:dietpi-ddns /var/lib/dietpi/dietpi-ddns/update.sh
 	# Shellcheck false positive: https://github.com/koalaman/shellcheck/issues/2168
 	# shellcheck disable=SC2016
-	echo "curl${ipfamily:+ $ipfamily} -sSfL${http_auth:+ -u '$USERNAME:$PASSWORD'} '$url' 2>&1 > /dev/null | logger -t dietpi-ddns -p 3" >> /var/lib/dietpi/dietpi-ddns/update.sh
+	echo "curl ${IPFAMILY%and6} -sSfL${http_auth:+ -u '$USERNAME:$PASSWORD'} '$url' 2>&1 > /dev/null | logger -t dietpi-ddns -p 3" >> /var/lib/dietpi/dietpi-ddns/update.sh
+	# shellcheck disable=SC2016
+	[[ $IPFAMILY == '-4and6' ]] && echo "curl ${IPFAMILY/4and} -sSfL${http_auth:+ -u '$USERNAME:$PASSWORD'} '$url' 2>&1 > /dev/null | logger -t dietpi-ddns -p 4" >> /var/lib/dietpi/dietpi-ddns/update.sh
 
 	# Apply Cron job
-	G_DIETPI-NOTIFY 2 'Applying DietPi-DDNS Cron job...'
+	G_DIETPI-NOTIFY 2 'Applying DietPi-DDNS Cron job ...'
 	crontab -u dietpi-ddns - <<< "*/${TIMESPAN:-10} * * * * /var/lib/dietpi/dietpi-ddns/update.sh"
 }
 
@@ -280,8 +311,9 @@ Remove()
 	getent passwd dietpi-ddns > /dev/null && G_EXEC_DESC='Removing DietPi-DDNS UNIX user' G_EXEC userdel dietpi-ddns
 	getent group dietpi-ddns > /dev/null && G_EXEC_DESC='Removing DietPi-DDNS UNIX group' G_EXEC groupdel dietpi-ddns
 
-	# Unset variables
-	unset -v USERNAME PASSWORD TIMESPAN PROVIDER IPFAMILY
+	# Reset variables
+	unset -v USERNAME PASSWORD TIMESPAN PROVIDER
+	IPFAMILY='-4and6'
 }
 
 # --------------------------------------------
@@ -372,15 +404,16 @@ Menu_Password()
 Menu_IPfamily()
 {
 	G_WHIP_MENU_ARRAY=(
-		'IPv4' ': Force IPv4 usage for the DDNS update (best compatibility)'
-		'IPv6or4' ': Do not force any IP family for the DDNS update'
-		'IPv6' ': Force IPv6 usage for the DDNS update (for modern clients)'
+		'IPv4and6' ': Update IPv4 and IPv6 addresses for your DDNS'
+		'IPv4' ': Update only the IPv4 address for your DDNS'
+		'IPv6' ': Update only the IPv6 address for your DDNS'
 	)
-	G_WHIP_DEFAULT_ITEM=${IPFAMILY:--4} G_WHIP_DEFAULT_ITEM=${G_WHIP_DEFAULT_ITEM/-/IPv}
-	G_WHIP_MENU 'Please select whether you want to force an IP family to associate with your DDNS domain.
-\nFor best compatibility with all clients and networks, we recommend to use IPv4.
-\nIf you do not force any IP family, IPv6 is used, if enabled on this server and if the DDNS provider is reachable via IPv6, else IPv4 is used.
-\nIf IPv6 is used, only clients with IPv6 enabled and connected via networks which support IPv6 can reach your server.' || return 1
+	G_WHIP_DEFAULT_ITEM=${IPFAMILY/-/IPv}
+	G_WHIP_MENU 'Please select which IP family address to associate with your DDNS domain.
+\nUsually one would want to update both, the IPv4 and IPv6 address, if your server has one.
+\nIf you do not have a public IPv6 address, or want to keep the amount of DDNS requests low, update the IPv4 address only.
+\nIf you have a public IPv6 address, want to support only clients with IPv6 enabled, and connected via networks which support IPv6, then you could update the IPv6 address only.
+Choosing this could lower requests and attacks from random bots, which almost always try to connect via IPv4. But it can prevent your own/intended clients from being able to connect.' || return 1
 	IPFAMILY=${G_WHIP_RETURNED_VALUE/IPv/-}
 }
 
@@ -405,7 +438,7 @@ Menu_Main()
 	[[ $PROVIDER == 'DuckDNS' || $PROVIDER == 'Dynu' || $PROVIDER == 'FreeDNS' || $PROVIDER == 'YDNS' ]] || G_WHIP_MENU_ARRAY+=("$username" ": [$USERNAME]")
 	G_WHIP_MENU_ARRAY+=(
 		"$password" ": [${PASSWORD//?/*}]"
-		'IP family' ": [${IPFAMILY:--4}]"
+		'IP family' ": [${IPFAMILY/-/IPv}]"
 		'Timespan' ": [${TIMESPAN:-10} minutes]"
 		'' '●─ Apply '
 		'Apply' ': Create or update Cron job with above settings'
@@ -447,7 +480,7 @@ then
 	then
 		Remove || exit 1
 	else
-		G_DIETPI-NOTIFY 1 "Input found but no command. Aborting...$USAGE"
+		G_DIETPI-NOTIFY 1 "Input found but no command. Aborting ...$USAGE"
 		exit 1
 	fi
 
