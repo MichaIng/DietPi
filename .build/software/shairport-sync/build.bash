@@ -13,11 +13,11 @@ G_AGUP
 G_AGDUG automake pkg-config make g++ libpopt-dev libconfig-dev libssl-dev libsoxr-dev libavahi-client-dev libasound2-dev libglib2.0-dev libmosquitto-dev avahi-daemon git libplist-dev libsodium-dev libgcrypt20-dev libavformat-dev xxd
 (( $G_DISTRO == 5 )) && G_EXEC systemctl unmask avahi-daemon
 adeps=('libc6' 'libasound2' 'libavahi-client3' 'libsoxr0' 'libconfig9' 'libpopt0' 'libglib2.0-0' 'libmosquitto1' 'avahi-daemon')
-adeps2=('libplist3' 'libsodium23' 'libgcrypt20')
+adeps2=('libsodium23' 'libgcrypt20')
 case $G_DISTRO in
-	5|6) adeps+=('libssl1.1'); adeps2+=('libavcodec58');;
-	7) adeps+=('libssl3'); adeps2+=('libavcodec59');;
-	8) adeps+=('libssl3'); adeps2+=('libavcodec60');;
+	5|6) adeps+=('libssl1.1'); adeps2+=('libavcodec58' 'libplist3');;
+	7) adeps+=('libssl3'); adeps2+=('libavcodec59' 'libplist3');;
+	8) adeps+=('libssl3'); adeps2+=('libavcodec61' 'libplist-2.0-4');;
 	*) G_DIETPI-NOTIFY 1 "Unsupported distro version: $G_DISTRO_NAME (ID=$G_DISTRO)"; exit 1;;
 esac
 for i in "${adeps[@]}" "${adeps2[@]}"
@@ -124,6 +124,7 @@ general =
 //			With the range of AirPlay volume being from -30 to 0, doubling the volume from -22.5 to -15 results in an increase of 10 dB.
 //			Similarly, doubling the volume from -15 to 0 results in an increase of 10 dB.
 //			For compatibility with mixers having a restricted attenuation range (e.g. 30 dB), "dasl_tapered" will switch to a flat profile at low AirPlay volumes.
+
 //	volume_control_combined_hardware_priority = "no"; // when extending the volume range by combining the built-in software attenuator with the hardware mixer attenuator, set this to "yes" to reduce volume by using the hardware mixer first, then the built-in software attenuator.
 
 //	default_airplay_volume = -24.0; // this is the suggested volume after a reset or after the high_volume_threshold has been exceed and the high_volume_idle_timeout_in_minutes has passed
@@ -178,7 +179,8 @@ sessioncontrol =
 //	run_this_before_play_begins = "/full/path/to/application and args"; // make sure the application has executable permission. If it's a script, include the shebang (#!/bin/...) on the first line
 //	run_this_after_play_ends = "/full/path/to/application and args"; // make sure the application has executable permission. If it's a script, include the shebang (#!/bin/...) on the first line
 
-//	run_this_if_an_unfixable_error_is_detected = "/full/path/to/application and args"; // if a problem occurs that can't be cleared by Shairport Sync itself, hook a program on here to deal with it. An error code-string is passed as the last argument.
+//	run_this_if_an_unfixable_error_is_detected = "/full/path/to/application and args"; // if a problem occurs that can't be cleared by Shairport Sync itself, hook a program on here to deal with it.
+//	  An error code-string is passed as the last argument.
 //	  Many of these "unfixable" problems are caused by malfunctioning output devices, and sometimes it is necessary to restart the whole device to clear the problem.
 //	  You could hook on a program to do this automatically, but beware -- the device may then power off and restart without warning!
 //	wait_for_completion = "no"; // set to "yes" to get Shairport Sync to wait until the "run_this..." applications have terminated before continuing
@@ -186,6 +188,8 @@ sessioncontrol =
 //	allow_session_interruption = "no"; // set to "yes" to allow another device to interrupt Shairport Sync while it's playing from an existing audio source
 //	session_timeout = 120; // wait for this number of seconds after a source disappears before terminating the session and becoming available again.
 };
+
+// Back End Settings
 
 // These are parameters for the "alsa" audio back end.
 alsa =
@@ -221,6 +225,7 @@ pipe =
 // There are no configuration file parameters for the "stdout" audio back end. No interpolation is done.
 
 // How to deal with metadata, including artwork
+// "enabled" and "include_cover_art" are both "yes" by default
 metadata =
 {
 //	enabled = "yes"; // set this to yes to get Shairport Sync to solicit metadata from the source and to pass it on via a pipe
@@ -237,10 +242,12 @@ metadata =
 };
 
 // How to enable the MQTT-metadata/remote-service
+
 // Note that, for compatability with many MQTT brokers and applications,
 // every message that has no extra data is given a
 // payload consisting of the string "--".
 // You can change this or you can enable empty payloads -- see below.
+
 mqtt =
 {
 //	enabled = "no"; // set this to yes to enable the mqtt-metadata-service
@@ -256,10 +263,12 @@ mqtt =
 //	publish_raw = "no"; //whether to publish all available metadata under the codes given in the 'metadata' docs.
 //	publish_parsed = "no"; //whether to publish a small (but useful) subset of metadata under human-understandable topics
 //	empty_payload_substitute = "--"; // MQTT messages with empty payloads often are invisible or have special significance to MQTT brokers and readers.
-//    To avoid empty payload problems, the string here is used instead of any empty payload. Set it to the empty string -- "" -- to leave the payload empty.
+//		To avoid empty payload problems, the string here is used instead of any empty payload. Set it to the empty string -- "" -- to leave the payload empty.
 //	Currently published topics:artist,album,title,genre,format,songalbum,volume,client_ip,
 //	Additionally, messages at the topics play_start,play_end,play_flush,play_resume are published
 //	publish_cover = "no"; //whether to publish the cover over mqtt in binary form. This may lead to a bit of load on the broker
+//	enable_autodiscovery = "no"; //whether to publish an autodiscovery message to automatically appear in Home Assistant
+//	autodiscovery_prefix = "homeassistant"; //string to prepend to autodiscovery topic
 //	enable_remote = "no"; //whether to remote control via MQTT. RC is available under `topic`/remote.
 //	Available commands are "command", "beginff", "beginrew", "mutetoggle", "nextitem", "previtem", "pause", "playpause", "play", "stop", "playresume", "shuffle_songs", "volumedown", "volumeup"
 };
