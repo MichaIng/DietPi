@@ -369,7 +369,7 @@ Type=idle
 StandardOutput=tty
 Environment=HOME=/root
 ExecStart=/bin/dash -c 'infocmp "$TERM" > /dev/null 2>&1 || export TERM=dumb; exec /boot/dietpi/dietpi-login'
-ExecStop=/sbin/poweroff
+ExecStop=/usr/sbin/systemctl start poweroff.target
 
 [Install]
 WantedBy=multi-user.target
@@ -454,10 +454,10 @@ done
 
 # Success flag and shutdown
 # shellcheck disable=SC2016
-G_EXEC eval 'echo '\''[ $exit_code = 0 ] && > /success || { journalctl -n 50; ss -tulpn; df -h; free -h; }; poweroff'\'' >> rootfs/boot/Automation_Custom_Script.sh'
+G_EXEC eval 'echo '\''[ $exit_code = 0 ] && > /success || { journalctl -n 50; ss -tulpn; df -h; free -h; }; systemctl start poweroff.target'\'' >> rootfs/boot/Automation_Custom_Script.sh'
 
 # Shutdown as well on failures before the custom script is executed
-G_EXEC sed --follow-symlinks -i 's|Prompt_on_Failure$|{ journalctl -n 50; ss -tulpn; df -h; free -h; poweroff; }|' rootfs/boot/dietpi/dietpi-login
+G_EXEC sed --follow-symlinks -i 's|Prompt_on_Failure$|{ journalctl -n 50; ss -tulpn; df -h; free -h; systemctl start poweroff.target; }|' rootfs/boot/dietpi/dietpi-login
 
 ##########################################
 # Boot container

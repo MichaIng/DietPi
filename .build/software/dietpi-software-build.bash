@@ -135,7 +135,7 @@ After=dietpi-postboot.service
 Type=idle
 StandardOutput=tty
 ExecStart=/bin/dash -c 'infocmp "$TERM" > /dev/null 2>&1 || { echo "[ WARN ] Unsupported TERM=\"$TERM\", switching to TERM=\"dumb\""; export TERM=dumb; }; exec /boot/dietpi/dietpi-login'
-ExecStop=/sbin/poweroff
+ExecStop=/usr/sbin/systemctl start poweroff.target
 
 [Install]
 WantedBy=multi-user.target
@@ -154,7 +154,7 @@ G_EXEC eval 'echo '\''infocmp "$TERM" > /dev/null 2>&1 || { echo "[ WARN ] Unsup
 G_CONFIG_INJECT 'CONFIG_CHECK_CONNECTION_IP=' 'CONFIG_CHECK_CONNECTION_IP=127.0.0.1' rootfs/boot/dietpi.txt
 
 # Shutdown on failures before the custom script is executed
-G_EXEC sed --follow-symlinks -i 's|Prompt_on_Failure$|{ journalctl -n 50; ss -tulpn; df -h; free -h; poweroff; }|' rootfs/boot/dietpi/dietpi-login
+G_EXEC sed --follow-symlinks -i 's|Prompt_on_Failure$|{ journalctl -n 50; ss -tulpn; df -h; free -h; systemctl start poweroff.target; }|' rootfs/boot/dietpi/dietpi-login
 
 # Avoid DietPi-Survey uploads to not mess with the statistics
 G_EXEC rm rootfs/root/.ssh/known_hosts
@@ -168,7 +168,7 @@ cat << _EOF_ > rootfs/boot/Automation_Custom_Script.sh || Error_Exit 'Failed to 
 echo '[ INFO ] Running $NAME build script ...'
 bash -c "\$(curl -sSf 'https://raw.githubusercontent.com/$G_GITOWNER/DietPi/$G_GITBRANCH/.build/software/$NAME/build.bash')"
 mkdir -v /output && mv -v /tmp/*.$EXT /output
-poweroff
+systemctl start poweroff.target
 _EOF_
 
 ##########################################
