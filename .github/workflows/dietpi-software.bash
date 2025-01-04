@@ -118,7 +118,7 @@ Process_Software()
 			49) aSERVICES[i]='gogs' aTCP[i]='3000';;
 			50) aSERVICES[i]='syncthing' aTCP[i]='8384';;
 			51) aCOMMANDS[i]='/usr/games/opentyrian/opentyrian -h';;
-			52) aSERVICES[i]='cuberite' aTCP[i]='1339'; (( $arch < 10 )) && aDELAY[i]=120;;
+			52) aSERVICES[i]='cuberite' aTCP[i]='1339'; (( $arch < 10 )) && aDELAY[i]=120; (( $arch == 10 )) && aDELAY[i]=30;;
 			53) aSERVICES[i]='mineos' aTCP[i]='8443';;
 			58) aCOMMANDS[i]='tailscale version';; # aSERVICES[i]='tailscaled' aUDP[i]='41641' GitHub Action runners to not support the TUN module
 			59) aSERVICES[i]='raspimjpeg';;
