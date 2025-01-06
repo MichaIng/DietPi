@@ -390,6 +390,10 @@ G_EXEC rm rootfs/root/.ssh/known_hosts
 # Apply software IDs to install
 for i in $SOFTWARE; do G_CONFIG_INJECT "AUTO_SETUP_INSTALL_SOFTWARE_ID=$i" "AUTO_SETUP_INSTALL_SOFTWARE_ID=$i" rootfs/boot/dietpi.txt; done
 
+# Enable unattended PaperMC install
+G_EXEC mkdir -p /mnt/dietpi_userdata/papermc
+G_EXEC eval 'echo '\''eula=true'\'' > /mnt/dietpi_userdata/papermc/eula.txt'
+
 # Workaround for "Could not execute systemctl:  at /usr/bin/deb-systemd-invoke line 145." during Apache2 DEB postinst in 32-bit ARM Bookworm container: https://lists.ubuntu.com/archives/foundations-bugs/2022-January/467253.html
 G_CONFIG_INJECT 'AUTO_SETUP_WEB_SERVER_INDEX=' 'AUTO_SETUP_WEB_SERVER_INDEX=-2' rootfs/boot/dietpi.txt
 
