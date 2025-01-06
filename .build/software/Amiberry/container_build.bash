@@ -60,7 +60,7 @@ case $PLATFORM in
 	'rpi'[345]'-64-'*|'AMLSM1'|'n2'|'a64'|'rk3588') image="ARMv8-${DISTRO^}" arch=3;;
 	'rpi'[2-5]*|'c1'|'xu4'|'RK3288'|'sun8i'|'s812') image="ARMv7-${DISTRO^}" arch=2;;
 	'x86-64') image="x86_64-${DISTRO^}" arch=10;;
-	'riscv64') image='RISC-V-Sid' arch=11;;
+	'riscv64') image="RISC-V-${DISTRO^}" arch=11;;
 	*) Error_Exit "Invalid platform \"$PLATFORM\" passed";;
 esac
 image="DietPi_Container-$image.img"
@@ -119,7 +119,7 @@ G_EXEC mount "${FP_LOOP}p1" rootfs
 
 # Enable automated setup
 G_CONFIG_INJECT 'AUTO_SETUP_AUTOMATED=' 'AUTO_SETUP_AUTOMATED=1' rootfs/boot/dietpi.txt
-# - Workaround for skipped autologin in emulated Trixie/Sid containers: https://gitlab.com/qemu-project/qemu/-/issues/1962
+# - Workaround for skipped autologin in emulated Trixie containers: https://gitlab.com/qemu-project/qemu/-/issues/1962
 if [[ $DISTRO == 'trixie' ]] && (( $G_HW_ARCH != $arch && ( $G_HW_ARCH > 9 || $G_HW_ARCH < $arch ) ))
 then
 	cat << '_EOF_' > rootfs/etc/systemd/system/dietpi-automation.service

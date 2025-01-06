@@ -64,7 +64,7 @@ case $ARCH in
 	'armv7l') image="ARMv7-${DISTRO^}" arch=2;;
 	'aarch64') image="ARMv8-${DISTRO^}" arch=3;;
 	'x86_64') image="x86_64-${DISTRO^}" arch=10;;
-	'riscv64') image='RISC-V-Sid' arch=11; [[ $DISTRO == 'trixie' ]] || Error_Exit "Invalid distro \"$DISTRO\" for arch \"$ARCH\" passed, only \"trixie\" is supported";;
+	'riscv64') image="RISC-V-${DISTRO^}" arch=11; [[ $DISTRO == 'trixie' ]] || Error_Exit "Invalid distro \"$DISTRO\" for arch \"$ARCH\" passed, only \"trixie\" is supported";;
 	*) Error_Exit "Invalid architecture \"$ARCH\" passed";;
 esac
 image="DietPi_Container-$image.img"
@@ -123,7 +123,7 @@ G_EXEC mount "${FP_LOOP}p1" rootfs
 
 # Enable automated setup
 G_CONFIG_INJECT 'AUTO_SETUP_AUTOMATED=' 'AUTO_SETUP_AUTOMATED=1' rootfs/boot/dietpi.txt
-# - Workaround for skipped autologin in emulated Trixie/Sid containers: https://gitlab.com/qemu-project/qemu/-/issues/1962
+# - Workaround for skipped autologin in emulated Trixie containers: https://gitlab.com/qemu-project/qemu/-/issues/1962
 if [[ $DISTRO == 'trixie' ]] && (( $G_HW_ARCH != $arch && ( $G_HW_ARCH > 9 || $G_HW_ARCH < $arch ) ))
 then
 	cat << '_EOF_' > rootfs/etc/systemd/system/dietpi-automation.service
