@@ -412,6 +412,7 @@ then
 	cat << '_EOF_' > rootfs/boot/Automation_Custom_PreScript.sh
 #!/bin/dash -e
 findmnt /mnt/dietpi_userdata > /dev/null 2>&1 || exit 0
+umount /mnt/dietpi_userdata
 mkdir /mnt/dietpi_userdata_bak
 mv /mnt/dietpi_userdata/* /mnt/dietpi_userdata_bak/
 mount /mnt/dietpi_userdata
