@@ -131,7 +131,7 @@ After=dietpi-postboot.service
 Type=idle
 StandardOutput=tty
 ExecStart=/bin/dash -c 'infocmp "$TERM" > /dev/null 2>&1 || { echo "[ WARN ] Unsupported TERM=\"$TERM\", switching to TERM=\"dumb\""; export TERM=dumb; }; exec /boot/dietpi/dietpi-login'
-ExecStop=/usr/sbin/systemctl start poweroff.target
+ExecStop=/usr/bin/systemctl start poweroff.target
 
 [Install]
 WantedBy=multi-user.target

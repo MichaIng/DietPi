@@ -212,7 +212,7 @@ Process_Software()
 			178) aSERVICES[i]='jellyfin' aTCP[i]='8097'; [[ $arch == [23] ]] && aDELAY[i]=300;; # jellyfin[9983]: arm-binfmt-P: ../../target/arm/translate.c:9659: thumb_tr_translate_insn: Assertion `(dc->base.pc_next & 1) == 0' failed.   ###   jellyfin[9983]: qemu: uncaught target signal 6 (Aborted) - core dumped   ###   about 5 times
 			179) aSERVICES[i]='komga' aTCP[i]='2037'; (( $arch == 10 )) && aDELAY[i]=30; (( $arch != 10 )) && aDELAY[i]=300;;
 			180) aSERVICES[i]='bazarr' aTCP[i]='6767'; (( $arch == 10 )) && aDELAY[i]=30; (( $arch < 10 )) && aDELAY[i]=90;;
-			181) aSERVICES[i]='papermc' aTCP[i]='25565 25575';;
+			181) aSERVICES[i]='papermc' aTCP[i]='25565 25575'; (( $arch == 10 )) && aDELAY[i]=60 || aDELAY[i]=600;;
 			182) aSERVICES[i]='unbound' aUDP[i]='53'; [[ ${aSERVICES[126]} ]] && aUDP[i]+=' 5335';; # Uses port 5335 if Pi-hole or AdGuard Home is installed, but those do listen on port 53 instead
 			183) aSERVICES[i]='vaultwarden' aTCP[i]='8001'; (( $arch < 10 )) && aDELAY[i]=20;;
 			184) aSERVICES[i]='tor';; # aTCP[i]='443 9051' Interactive install with ports depending on choice and relay type
@@ -254,7 +254,7 @@ do
 		38|40|48|54|55|57|59|76|79|82|90|160|210) Process_Software 88 89 webserver;;
 		159) Process_Software 36 37 65 88 89 96 121 124 128 129 152 160 163 webserver;;
 		47|114|168) Process_Software 88 89 91 webserver;;
-		8|33|131|179|181|206) Process_Software 196;;
+		8|33|53|80|131|133|164|179|181|206) Process_Software 196;;
 		32|148|119) Process_Software 128;;
 		129) Process_Software 88 89 128 webserver;;
 		49|165|177) Process_Software 0 17 88;;
@@ -369,7 +369,7 @@ Type=idle
 StandardOutput=tty
 Environment=HOME=/root
 ExecStart=/bin/dash -c 'infocmp "$TERM" > /dev/null 2>&1 || export TERM=dumb; exec /boot/dietpi/dietpi-login'
-ExecStop=/usr/sbin/systemctl start poweroff.target
+ExecStop=/usr/bin/systemctl start poweroff.target
 
 [Install]
 WantedBy=multi-user.target
@@ -406,9 +406,23 @@ G_EXEC eval 'echo -e '\''[Service]\nPrivateUsers=0'\'' > rootfs/etc/systemd/syst
 G_EXEC eval 'echo -e '\''[Service]\nAmbientCapabilities='\'' > rootfs/etc/systemd/system/homebridge.service.d/dietpi-container.conf'
 
 # Workaround for failing 32-bit ARM Rust builds on ext4 in QEMU emulated container on 64-bit host: https://github.com/rust-lang/cargo/issues/9545
-(( $arch < 3 && $G_HW_ARCH > 9 )) && G_EXEC eval 'echo -e '\''tmpfs /mnt/dietpi_userdata tmpfs size=3G,noatime,lazytime\ntmpfs /root tmpfs size=3G,noatime,lazytime'\'' >> rootfs/etc/fstab'
+if (( $arch < 3 && $G_HW_ARCH > 9 ))
+then
+	G_EXEC eval 'echo -e '\''tmpfs /mnt/dietpi_userdata tmpfs size=3G,noatime,lazytime\ntmpfs /root tmpfs size=3G,noatime,lazytime'\'' >> rootfs/etc/fstab'
+	cat << '_EOF_' > rootfs/boot/Automation_Custom_PreScript.sh
+#!/bin/dash -e
+findmnt /mnt/dietpi_userdata > /dev/null 2>&1 || exit 0
+umount /mnt/dietpi_userdata
+mkdir /mnt/dietpi_userdata_bak
+mv /mnt/dietpi_userdata/* /mnt/dietpi_userdata_bak/
+mount /mnt/dietpi_userdata
+mv /mnt/dietpi_userdata_bak/* /mnt/dietpi_userdata/
+rm -R /mnt/dietpi_userdata_bak
+_EOF_
+fi
 
 # Workaround failing Java apps if 64-bit host memory leads to too large heap size in emulated 32-bit containers: https://stackoverflow.com/questions/4401396
+# shellcheck disable=SC2016
 (( $arch < 3 && $G_HW_ARCH > 2)) && G_EXEC sed --follow-symlinks -i '/# Start DietPi-Software/a\sed -i '\''s|-mx${memory_limit}m|-mx1024m|'\'' /boot/dietpi/dietpi-software' rootfs/boot/dietpi/dietpi-login
 
 # Workaround for Node.js on ARMv6
