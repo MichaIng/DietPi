@@ -422,6 +422,7 @@ _EOF_
 fi
 
 # Workaround failing Java apps if 64-bit host memory leads to too large heap size in emulated 32-bit containers: https://stackoverflow.com/questions/4401396
+# shellcheck disable=SC2016
 (( $arch < 3 && $G_HW_ARCH > 2)) && G_EXEC sed --follow-symlinks -i '/# Start DietPi-Software/a\sed -i '\''s|-mx${memory_limit}m|-mx1024m|'\'' /boot/dietpi/dietpi-software' rootfs/boot/dietpi/dietpi-login
 
 # Workaround for Node.js on ARMv6
