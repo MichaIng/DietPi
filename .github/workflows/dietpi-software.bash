@@ -408,6 +408,9 @@ G_EXEC eval 'echo -e '\''[Service]\nAmbientCapabilities='\'' > rootfs/etc/system
 # Workaround for failing 32-bit ARM Rust builds on ext4 in QEMU emulated container on 64-bit host: https://github.com/rust-lang/cargo/issues/9545
 (( $arch < 3 && $G_HW_ARCH > 9 )) && G_EXEC eval 'echo -e '\''tmpfs /mnt/dietpi_userdata tmpfs size=3G,noatime,lazytime\ntmpfs /root tmpfs size=3G,noatime,lazytime'\'' >> rootfs/etc/fstab'
 
+# Workaround failing Java apps if 64-bit host memory leads to too large heap size in emulated 32-bit containers: https://stackoverflow.com/questions/4401396
+(( $arch < 3 && $G_HW_ARCH > 2)) && G_EXEC sed --follow-symlinks -i '/# Start DietPi-Software/a\sed -i '\''s|-mx${memory_limit}m|-mx1024m|'\'' /boot/dietpi/dietpi-software' rootfs/boot/dietpi/dietpi-login
+
 # Workaround for Node.js on ARMv6
 (( $arch == 1 )) && G_EXEC sed --follow-symlinks -i '/# Start DietPi-Software/a\sed -i '\''/G_EXEC chmod +x node-install.sh/a\\sed -i "/^ARCH=/c\\ARCH=armv6l" node-install.sh'\'' /boot/dietpi/dietpi-software' rootfs/boot/dietpi/dietpi-login
 
