@@ -22,7 +22,6 @@ G_DIETPI-NOTIFY 2 'Installing Rust via rustup'
 grep -q '^ID=raspbian' /etc/os-release && G_HW_ARCH_NAME='armv6l' host=('--default-host' 'arm-unknown-linux-gnueabihf') || host=()
 # - ARMv7: Apply workaround for failing crates index update in in emulated 32-bit ARM environments: https://github.com/rust-lang/cargo/issues/8719. CARGO_REGISTRIES_CRATES_IO_PROTOCOL='sparse' does not solve everything: https://github.com/rust-lang/cargo/issues/8719#issuecomment-1928540617
 # - ARMv8: Apply workaround for increased cargo fetch RAM usage: https://github.com/rust-lang/cargo/issues/10583
-# - Trixie: Set missing HOME, since the script runs from a systemd unit without login shell and hence no HOME set.
 export HOME=$(mktemp -d) CARGO_NET_GIT_FETCH_WITH_CLI='true'
 G_EXEC cd "$HOME"
 G_EXEC curl -sSfo rustup-init.sh 'https://sh.rustup.rs'
