@@ -355,26 +355,15 @@ G_EXEC eval 'echo '\''infocmp "$TERM" > /dev/null 2>&1 || { echo "[ INFO ] Unsup
 
 # Enable automated setup
 G_CONFIG_INJECT 'AUTO_SETUP_AUTOMATED=' 'AUTO_SETUP_AUTOMATED=1' rootfs/boot/dietpi.txt
-# - Workaround for skipped autologin in emulated Trixie containers: https://gitlab.com/qemu-project/qemu/-/issues/1962
-# - Set HOME path, required e.g. go builds, which is otherwise missing when started from a systemd unit.
+# - Workaround for failing systemd services and hence missing autologin in emulated Trixie containers: https://gitlab.com/qemu-project/qemu/-/issues/1962, https://github.com/systemd/systemd/issues/31219
 if [[ $DISTRO == 'trixie' ]] && (( $G_HW_ARCH != $arch && ( $G_HW_ARCH > 9 || $G_HW_ARCH < $arch ) ))
 then
-	cat << '_EOF_' > rootfs/etc/systemd/system/dietpi-automation.service
-[Unit]
-Description=DietPi-Automation
-After=dietpi-postboot.service
-
-[Service]
-Type=idle
-StandardOutput=tty
-Environment=HOME=/root
-ExecStart=/bin/dash -c 'infocmp "$TERM" > /dev/null 2>&1 || export TERM=dumb; exec /boot/dietpi/dietpi-login'
-ExecStop=/usr/bin/systemctl start poweroff.target
-
-[Install]
-WantedBy=multi-user.target
-_EOF_
-	G_EXEC ln -s /etc/systemd/system/dietpi-automation.service rootfs/etc/systemd/system/multi-user.target.wants/
+	for i in rootfs/usr/lib/systemd/system/*.service
+	do
+		grep -q '^ImportCredential=' "$i" || continue
+		G_EXEC mkdir "${i/usr\/lib/etc}.d"
+		G_EXEC eval "echo -e '[Service]\nImportCredential=' > ${i/usr\/lib/etc}.d/dietpi-no-ImportCredential.conf"
+	done
 fi
 
 # Workaround for failing IPv4 network connectivity check as GitHub Actions runners do not receive external ICMP echo replies.
