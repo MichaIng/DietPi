@@ -1,19 +1,17 @@
 #!/bin/bash
 {
 . /boot/dietpi/func/dietpi-globals || exit 1
-
-[[ $1 ]] && PLATFORM=$1
-[[ $PLATFORM ]] || { G_WHIP_INPUTBOX 'Build Amiberry? Enter platform: https://github.com/BlitterStudio/amiberry/blob/master/Makefile' && PLATFORM=$G_WHIP_RETURNED_VALUE || exit 0; }
-G_DIETPI-NOTIFY 2 "Amiberry will be built for platform: \e[33m$PLATFORM"
+grep -q '^ID=raspbian' /etc/os-release && G_HW_ARCH=1 G_HW_ARCH_NAME='armv6l'
 
 # APT dependencies
 # - wget: Used for WHDLoad database update: https://github.com/BlitterStudio/amiberry/commit/d6c103e
 # - kbd: For "chvt" used in systemd service
+# - ARMv6: Building Amiberry v5.7.1, the last version which supports this architecture
 adeps_build=('autoconf' 'make' 'cmake' 'g++' 'pkg-config' 'libdrm-dev' 'libgbm-dev' 'libudev-dev' 'libxml2-dev' 'libpng-dev' 'libfreetype6-dev' 'libflac-dev' 'libmpg123-dev' 'libmpeg2-4-dev' 'libasound2-dev' 'libserialport-dev' 'libportmidi-dev' 'wget' 'kbd')
+(( $G_HW_ARCH == 1 )) || adeps_build+=('libenet-dev')
 adeps=('libdrm2' 'libgl1-mesa-dri' 'libgbm1' 'libegl1' 'libudev1' 'libxml2' 'libpng16-16' 'libfreetype6' 'libmpg123-0' 'libmpeg2-4' 'libasound2' 'libserialport0' 'libportmidi0' 'wget' 'kbd')
 (( $G_DISTRO > 6 )) && adeps+=('libflac12') || adeps+=('libflac8')
-# - Deps for RPi DispmanX builds
-[[ $PLATFORM == 'rpi'[1-5] || $PLATFORM == 'rpi'[345]'-64-dmx' ]] && adeps_build+=('libraspberrypi-dev') adeps+=('libraspberrypi0')
+(( $G_HW_ARCH == 1 )) || adeps_build+=('libenet7')
 # - Graphics rendering flags and deps
 (( $G_HW_ARCH == 10 )) && opengl_flags=('--disable-video-opengles2' '--enable-video-opengl') adeps_build+=('libgl1-mesa-dev') adeps+=('libgl1') || opengl_flags=('--enable-video-opengles2' '--disable-video-opengl') adeps_build+=('libgles2-mesa-dev') adeps+=('libgles2')
 
@@ -112,9 +110,8 @@ v_ami=$(curl -sSf 'https://api.github.com/repos/BlitterStudio/amiberry/releases/
 [[ $v_ami ]] || { G_DIETPI-NOTIFY 1 'No latest Amiberry version found, aborting ...'; exit 1; }
 v_ami=${v_ami#v}
 # - ARMv6: v5.7.2 dropped support for Raspberry Pi 1, hence use v5.7.1
-# - Build v5.7.4 until v7.0.0 stable has been released. It requires a major rework, using cmake and no device-specific targets anymore.
-[[ $PLATFORM == 'rpi1'* ]] && v_ami='5.7.1' || v_ami='5.7.4'
-G_DIETPI-NOTIFY 2 "Building Amiberry version \e[33m$v_ami\e[90m for platform: \e[33m$PLATFORM"
+(( $G_HW_ARCH == 1 )) && v_ami='5.7.1'
+G_DIETPI-NOTIFY 2 "Building Amiberry version \e[33m$v_ami"
 G_EXEC cd /tmp
 G_EXEC curl -sSfLO "https://github.com/BlitterStudio/amiberry/archive/v$v_ami.tar.gz"
 [[ -d amiberry-$v_ami ]] && G_EXEC rm -R "amiberry-$v_ami"
@@ -124,13 +121,13 @@ G_EXEC cd "amiberry-$v_ami"
 # - RISC-V: Workaround for missing ld.gold: https://github.com/BlitterStudio/amiberry/issues/1213
 RISCV_LD=()
 (( $G_HW_ARCH == 11 )) && RISCV_LD=('USE_LD=bfd')
-G_EXEC_OUTPUT=1 G_EXEC make "-j$(nproc)" "PLATFORM=$PLATFORM" "${RISCV_LD[@]}" # Passing flags here overrides some mandatory flags in the Makefile, where -O3 is set as well.
-G_EXEC strip --remove-section=.comment --remove-section=.note amiberry
+G_EXEC_OUTPUT=1 G_EXEC cmake -B build -DCMAKE_INSTALL_PREFIX=/usr && cmake --build build
+G_EXEC strip --remove-section=.comment --remove-section=.note build/amiberry
 
 # Prepare DEB package
 G_DIETPI-NOTIFY 2 'Building Amiberry DEB package'
 G_EXEC cd /tmp
-DIR="amiberry_$PLATFORM"
+DIR="amiberry_$G_HW_ARCH_NAME"
 [[ -d $DIR ]] && G_EXEC rm -R "$DIR"
 G_EXEC mkdir -p "$DIR/"{DEBIAN,mnt/dietpi_userdata/amiberry/lib,lib/systemd/system}
 
@@ -198,7 +195,7 @@ DEPS_APT_VERSIONED=${DEPS_APT_VERSIONED%,}
 grep -q '^ID=raspbian' /etc/os-release && DEPS_APT_VERSIONED=$(sed 's/+rp[it][0-9]\+[^)]*)/)/g' <<< "$DEPS_APT_VERSIONED") || DEPS_APT_VERSIONED=$(sed 's/+b[0-9]\+)/)/g' <<< "$DEPS_APT_VERSIONED")
 
 # - Obtain version suffix
-G_EXEC curl -sSfo package.deb "https://dietpi.com/downloads/binaries/$G_DISTRO_NAME/amiberry_$PLATFORM.deb"
+G_EXEC curl -sSfo package.deb "https://dietpi.com/downloads/binaries/$G_DISTRO_NAME/amiberry_$G_HW_ARCH_NAME.deb"
 old_version=$(dpkg-deb -f package.deb Version)
 G_EXEC rm package.deb
 suffix=${old_version#*-dietpi}

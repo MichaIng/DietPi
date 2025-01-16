@@ -56,7 +56,7 @@ do
 	esac
 	shift
 done
-[[ $NAME =~ ^('gmediarender'|'gogs'|'shairport-sync'|'squeezelite'|'vaultwarden'|'ympd')$ ]] || Error_Exit "Invalid software title \"$NAME\" passed"
+[[ $NAME =~ ^('amiberry'|'gmediarender'|'gogs'|'shairport-sync'|'squeezelite'|'vaultwarden'|'ympd')$ ]] || Error_Exit "Invalid software title \"$NAME\" passed"
 [[ $NAME == 'gogs' ]] && EXT='7z' || EXT='deb'
 [[ $DISTRO =~ ^('bullseye'|'bookworm'|'trixie')$ ]] || Error_Exit "Invalid distro \"$DISTRO\" passed"
 case $ARCH in
