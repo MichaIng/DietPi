@@ -28,7 +28,7 @@ fi
 setenv bootargs "root=${rootdev} rootfstype=${rootfstype} rootwait ${consoleargs} consoleblank=0 coherent_pool=2M usb-storage.quirks=${usbstoragequirks} ${extraargs}"
 
 # Add bootargs for Docker
-if test "${docker_optimizations}" = "on"; then setenv bootargs "${bootargs} cgroup_enable=memory swapaccount=1"; fi
+if test "${docker_optimizations}" = "on"; then setenv bootargs "${bootargs} cgroup_enable=memory"; fi
 
 # Load kernel, initramfs and device tree
 load "${devtype}" "${devnum}" "${kernel_addr_r}" "${prefix}Image"

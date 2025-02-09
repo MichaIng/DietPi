@@ -1635,10 +1635,10 @@ Patch_9_5()
 	(( $G_HW_MODEL == 10 || $G_HW_MODEL == 90 )) && /boot/dietpi/func/dietpi-set_hardware flash-u-boot-mmc
 
 	# Do not hardcode device tree on Radxa ZERO 3, after flashing our new U-Boot, since it does now select the correct device tree with onboard WiFi support, based on hardware details.
-	(( $G_HW_MODEL == 90 )) && sed -i '/^fdtfile=rockchip/rk3566-radxa-zero3.dtb$/d' /boot/dietpiEnv.txt
+	(( $G_HW_MODEL == 90 )) && sed --follow-symlinks -i '/^fdtfile=rockchip/rk3566-radxa-zero3.dtb$/d' /boot/dietpiEnv.txt
 
 	# Update MPD flag on Bookworm and above: https://github.com/MusicPlayerDaemon/MPD/commit/ce77b14
-	(( $G_DISTRO > 6 )) && [[ -f '/etc/systemd/system/mpd.service.d/dietpi.conf' ]] && G_EXEC sed -i 's/no-daemon/systemd/' /etc/systemd/system/mpd.service.d/dietpi.conf
+	(( $G_DISTRO > 6 )) && [[ -f '/etc/systemd/system/mpd.service.d/dietpi.conf' ]] && G_EXEC sed --follow-symlinks -i 's/no-daemon/systemd/' /etc/systemd/system/mpd.service.d/dietpi.conf
 
 	# Migrate jellyfin-ffmpeg5 => jellyfin-ffmpeg6
 	if dpkg-query -s jellyfin &> /dev/null && dpkg-query -s jellyfin-ffmpeg5 &> /dev/null
@@ -2026,7 +2026,7 @@ _EOF_
 				write_uboot_platform_mtd "$DIR" /dev/mtdblock0
 			fi
 		fi
-		G_EXEC sed -i '/^fdtfile=/d' /boot/dietpiEnv.txt
+		G_EXEC sed --follow-symlinks -i '/^fdtfile=/d' /boot/dietpiEnv.txt
 	fi
 }
 
@@ -2043,14 +2043,14 @@ Patch_9_9()
 			# Migrate to now existing Bookworm suite
 			if [[ -f '/etc/apt/sources.list.d/influxdb.list' ]]
 			then
-				(( $G_DISTRO < 7 )) || G_EXEC sed -i 's/bullseye/bookworm/g' /etc/apt/sources.list.d/influxdb.list
+				(( $G_DISTRO < 7 )) || G_EXEC sed --follow-symlinks -i 's/bullseye/bookworm/g' /etc/apt/sources.list.d/influxdb.list
 				G_EXEC mv /etc/apt/sources.list.d/{,dietpi-}influxdb.list
 			fi
 		fi
 		# Mopidy: Migrate to now existing Bookworm suite
 		if grep -q '^[[:blank:]]*aSOFTWARE_INSTALL_STATE\[118\]=2' /boot/dietpi/.installed && [[ -f '/etc/apt/sources.list.d/mopidy.list' ]]
 		then
-			(( $G_DISTRO < 7 )) || G_EXEC sed -i 's/bullseye/bookworm/g' /etc/apt/sources.list.d/mopidy.list
+			(( $G_DISTRO < 7 )) || G_EXEC sed --follow-symlinks -i 's/bullseye/bookworm/g' /etc/apt/sources.list.d/mopidy.list
 			G_EXEC mv /etc/apt/sources.list.d/{,dietpi-}mopidy.list
 		fi
 		# Logitech Media Server => Lyrion Music Server: https://github.com/MichaIng/DietPi/issues/7306
@@ -2061,9 +2061,54 @@ Patch_9_9()
 			G_EXEC systemctl --no-reload disable --now logitechmediaserver
 			# Avoid that purging the old package removes user, log and data dir which are still in use by the new package
 			# shellcheck disable=SC2016
-			G_EXEC sed -i '/^if \[ "$1" = purge \]; then/,/^fi/d' /var/lib/dpkg/info/logitechmediaserver.postrm
+			G_EXEC sed --follow-symlinks -i '/^if \[ "$1" = purge \]; then/,/^fi/d' /var/lib/dpkg/info/logitechmediaserver.postrm
 			G_EXEC eval 'echo 35 >> /var/tmp/dietpi/dietpi-update_reinstalls'
 		fi
+	fi
+}
+
+Patch_9_10()
+{
+	# RISC-V
+	if (( $G_HW_ARCH == 11 ))
+	then
+		G_DIETPI-NOTIFY 2 'Migrating RISC-V systems from Debian Sid/unstable to Trixie/testing ...'
+		local apt_mirror=$(mawk '$1=="deb"{print $2;exit}' /etc/apt/sources.list)
+		/boot/dietpi/func/dietpi-set_software apt-mirror "${apt_mirror:-default}"
+	fi
+
+	# Software updates, migrations and patches
+	if [[ -f '/boot/dietpi/.installed' ]]
+	then
+		# Raspotify
+		if grep -q '^[[:blank:]]*aSOFTWARE_INSTALL_STATE\[167\]=2' /boot/dietpi/.installed
+		then
+			G_DIETPI-NOTIFY 2 'Migrating to new Raspotify APT list name and key format ...'
+			[[ -f '/etc/apt/sources.list.d/raspotify.list' ]] && G_EXEC mv /etc/apt/sources.list.d/{,dietpi-}raspotify.list
+			if [[ -f '/etc/apt/trusted.gpg.d/dietpi-raspotify.gpg' ]]
+			then
+				G_EXEC curl -sSfo /etc/apt/trusted.gpg.d/dietpi-raspotify.asc 'https://dtcooper.github.io/raspotify/key.asc'
+				G_EXEC rm /etc/apt/trusted.gpg.d/dietpi-raspotify.gpg
+			fi
+		fi
+
+		# Remove obsolete install states: https://github.com/MichaIng/DietPi/pull/7351
+		for i in 4 {10..15} {18..21} 127
+		do
+			grep -q "^[[:blank:]]*aSOFTWARE_INSTALL_STATE\[$i\]=" /boot/dietpi/.installed && G_EXEC sed --follow-symlinks -i "/^[[:blank:]]*aSOFTWARE_INSTALL_STATE\[$i\]=/d" /boot/dietpi/.installed
+		done
+	fi
+
+	# RPi firmware migration: Do after all other patches
+	if (( $G_HW_MODEL < 10 && $G_DISTRO > 6 )) && ! dpkg-query -s 'raspi-firmware' &> /dev/null
+	then
+		G_WHIP_BUTTON_CANCEL_TEXT='Later'
+		G_WHIP_YESNO '[ INFO ] Raspberry Pi kernel/firmware migration available
+\nWith Raspberry Pi OS Bookworm, a new Linux 6.6+ kernel and firmware stack is available for Raspberry Pi systems, which as well enables support for the Raspberry Pi 5.
+\nWe created a migration script which has been tested for over a year to move from the old Linux 6.1 stack to the new one, and are not certain it is stable to be rolled out for all Raspberry Pi users.
+\nThere are some minor limitations, like the removal of display settings for the legacy RPi display driver. We created a new tool "dietpi-display" to change disaply mode and rotation with the KMS/DRM display driver, to address this limitation, and make the same options available to all other hardware models at the same time.
+\nDo you want to perform the RPi kernel/firmware migration now?
+\nThis can be done any time later via dietpi-config > Advanced Options > RPi firmware migration.' && /boot/dietpi/func/dietpi-set_software rpi_firmware_migration
 	fi
 }
 

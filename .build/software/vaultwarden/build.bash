@@ -22,7 +22,6 @@ G_DIETPI-NOTIFY 2 'Installing Rust via rustup'
 grep -q '^ID=raspbian' /etc/os-release && G_HW_ARCH_NAME='armv6l' host=('--default-host' 'arm-unknown-linux-gnueabihf') || host=()
 # - ARMv7: Apply workaround for failing crates index update in in emulated 32-bit ARM environments: https://github.com/rust-lang/cargo/issues/8719. CARGO_REGISTRIES_CRATES_IO_PROTOCOL='sparse' does not solve everything: https://github.com/rust-lang/cargo/issues/8719#issuecomment-1928540617
 # - ARMv8: Apply workaround for increased cargo fetch RAM usage: https://github.com/rust-lang/cargo/issues/10583
-# - Trixie: Set missing HOME, since the script runs from a systemd unit without login shell and hence no HOME set.
 export HOME=$(mktemp -d) CARGO_NET_GIT_FETCH_WITH_CLI='true'
 G_EXEC cd "$HOME"
 G_EXEC curl -sSfo rustup-init.sh 'https://sh.rustup.rs'
@@ -35,6 +34,14 @@ export PATH="$HOME/.cargo/bin:$PATH"
 # - vaultwarden
 version=$(curl -sSf 'https://api.github.com/repos/dani-garcia/vaultwarden/releases/latest' | mawk -F\" '/^ *"tag_name": "[^"]*",$/{print $4}')
 [[ $version ]] || { G_DIETPI-NOTIFY 1 'No latest vaultwarden version found, aborting ...'; exit 1; }
+# - Obtain version suffix
+G_EXEC curl -sSfo package.deb "https://dietpi.com/downloads/binaries/$G_DISTRO_NAME/vaultwarden_$G_HW_ARCH_NAME.deb"
+old_version=$(dpkg-deb -f package.deb Version) || exit 1
+G_EXEC rm package.deb
+suffix=${old_version#*-dietpi}
+[[ $old_version == "$version-"* ]] && pkg_version="$version-dietpi$((suffix+1))" || pkg_version+="$version-dietpi1"
+# - Env var to show version in web UI: https://github.com/MichaIng/DietPi/issues/7364
+export VW_VERSION=$pkg_version
 # - web vault
 wv_url=$(curl -sSf 'https://api.github.com/repos/dani-garcia/bw_web_builds/releases/latest' | mawk -F\" '/^ *"browser_download_url": ".*\.tar\.gz"$/{print $4}')
 [[ $wv_url ]] || { G_DIETPI-NOTIFY 1 'No latest web vault version found, aborting ...'; exit 1; }
@@ -214,17 +221,10 @@ DEPS_APT_VERSIONED=${DEPS_APT_VERSIONED%,}
 # shellcheck disable=SC2001
 [[ $G_HW_ARCH_NAME == 'armv6l' ]] && DEPS_APT_VERSIONED=$(sed 's/+rp[it][0-9]\+[^)]*)/)/g' <<< "$DEPS_APT_VERSIONED") || DEPS_APT_VERSIONED=$(sed 's/+b[0-9]\+)/)/g' <<< "$DEPS_APT_VERSIONED")
 
-# - Obtain version suffix
-G_EXEC curl -sSfo package.deb "https://dietpi.com/downloads/binaries/$G_DISTRO_NAME/vaultwarden_$G_HW_ARCH_NAME.deb"
-old_version=$(dpkg-deb -f package.deb Version)
-G_EXEC rm package.deb
-suffix=${old_version#*-dietpi}
-[[ $old_version == "$version-"* ]] && version+="-dietpi$((suffix+1))" || version+="-dietpi1"
-
 # - control
 cat << _EOF_ > "$DIR/DEBIAN/control"
 Package: vaultwarden
-Version: $version
+Version: $pkg_version
 Architecture: $(dpkg --print-architecture)
 Maintainer: MichaIng <micha@dietpi.com>
 Date: $(date -uR)

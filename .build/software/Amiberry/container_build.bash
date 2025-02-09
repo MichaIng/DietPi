@@ -60,7 +60,7 @@ case $PLATFORM in
 	'rpi'[345]'-64-'*|'AMLSM1'|'n2'|'a64'|'rk3588') image="ARMv8-${DISTRO^}" arch=3;;
 	'rpi'[2-5]*|'c1'|'xu4'|'RK3288'|'sun8i'|'s812') image="ARMv7-${DISTRO^}" arch=2;;
 	'x86-64') image="x86_64-${DISTRO^}" arch=10;;
-	'riscv64') image='RISC-V-Sid' arch=11;;
+	'riscv64') image="RISC-V-${DISTRO^}" arch=11;;
 	*) Error_Exit "Invalid platform \"$PLATFORM\" passed";;
 esac
 image="DietPi_Container-$image.img"
@@ -119,24 +119,15 @@ G_EXEC mount "${FP_LOOP}p1" rootfs
 
 # Enable automated setup
 G_CONFIG_INJECT 'AUTO_SETUP_AUTOMATED=' 'AUTO_SETUP_AUTOMATED=1' rootfs/boot/dietpi.txt
-# - Workaround for skipped autologin in emulated Trixie/Sid containers: https://gitlab.com/qemu-project/qemu/-/issues/1962
+# - Workaround for failing systemd services and hence missing autologin in emulated Trixie containers: https://gitlab.com/qemu-project/qemu/-/issues/1962, https://github.com/systemd/systemd/issues/31219
 if [[ $DISTRO == 'trixie' ]] && (( $G_HW_ARCH != $arch && ( $G_HW_ARCH > 9 || $G_HW_ARCH < $arch ) ))
 then
-	cat << '_EOF_' > rootfs/etc/systemd/system/dietpi-automation.service
-[Unit]
-Description=DietPi-Automation
-After=dietpi-postboot.service
-
-[Service]
-Type=idle
-StandardOutput=tty
-ExecStart=/bin/dash -c 'infocmp "$TERM" > /dev/null 2>&1 || { echo "[ WARN ] Unsupported TERM=\"$TERM\", switching to TERM=\"dumb\""; export TERM=dumb; }; exec /boot/dietpi/dietpi-login'
-ExecStop=/sbin/poweroff
-
-[Install]
-WantedBy=multi-user.target
-_EOF_
-	G_EXEC ln -s /etc/systemd/system/dietpi-automation.service rootfs/etc/systemd/system/multi-user.target.wants/
+	for i in rootfs/usr/lib/systemd/system/*.service
+	do
+		grep -q '^ImportCredential=' "$i" || continue
+		G_EXEC mkdir "${i/usr\/lib/etc}.d"
+		G_EXEC eval "echo -e '[Service]\nImportCredential=' > ${i/usr\/lib/etc}.d/dietpi-no-ImportCredential.conf"
+	done
 fi
 
 # Workaround invalid TERM on login
@@ -147,7 +138,7 @@ G_EXEC eval 'echo '\''infocmp "$TERM" > /dev/null 2>&1 || { echo "[ WARN ] Unsup
 G_CONFIG_INJECT 'CONFIG_CHECK_CONNECTION_IP=' 'CONFIG_CHECK_CONNECTION_IP=127.0.0.1' rootfs/boot/dietpi.txt
 
 # Shutdown on failures before the custom script is executed
-G_EXEC sed --follow-symlinks -i 's|Prompt_on_Failure$|{ journalctl -n 50; ss -tulpn; df -h; free -h; poweroff; }|' rootfs/boot/dietpi/dietpi-login
+G_EXEC sed --follow-symlinks -i 's|Prompt_on_Failure$|{ journalctl -n 50; ss -tulpn; df -h; free -h; systemctl start poweroff.target; }|' rootfs/boot/dietpi/dietpi-login
 
 # Avoid DietPi-Survey uploads to not mess with the statistics
 G_EXEC rm rootfs/root/.ssh/known_hosts
@@ -172,7 +163,7 @@ cat << _EOF_ >> rootfs/boot/Automation_Custom_Script.sh || Error_Exit 'Failed to
 echo '[ INFO ] Running Amiberry build script ...'
 bash -c "\$(curl -sSf 'https://raw.githubusercontent.com/$G_GITOWNER/DietPi/$G_GITBRANCH/.build/software/Amiberry/build.bash')" -- '$PLATFORM'
 mv -v '/tmp/amiberry_$PLATFORM.deb' /
-poweroff
+systemctl start poweroff.target
 _EOF_
 
 ##########################################
