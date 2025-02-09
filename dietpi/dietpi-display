@@ -1,0 +1,348 @@
+#!/bin/bash
+{
+# DietPi-Globals
+. /boot/dietpi/func/dietpi-globals
+G_PROGRAM_NAME='DietPi-Display'
+G_INIT
+
+Error_Exit()
+{
+	G_DIETPI-NOTIFY 1 "$1"
+	exit 1
+}
+
+# Detect displays and settings
+DISPLAY=
+declare -A aMODE=() aROTATION=() aENABLED=()
+Detect_Displays()
+{
+	local i connected display cmdline=() arg params=() param
+	for i in /sys/class/drm/*/modes
+	do
+		[[ $i == '/sys/class/drm/*/modes' ]] && break
+		# Load only connected displays
+		read -r connected < "${i%modes}status"
+		[[ $connected == 'connected' ]] || continue
+		display=${i##/sys/class/drm/card?-}
+		display=${display%/modes}
+		[[ $DISPLAY ]] || DISPLAY=$display
+		read -r aENABLED["$display"] < "${i%modes}enabled"
+		# First line contains the current mode
+		read -r aMODE["$display"] < "$i"
+		aROTATION["$display"]=0
+		# Read current rotation from cmdline
+		read -ra cmdline < /proc/cmdline
+		for arg in "${cmdline[@]}"
+		do
+			[[ $arg == "video=$display:"* ]] || continue
+			IFS=',' read -ra params <<< "$arg"
+			for param in "${params[@]}"
+			do
+				[[ $param == 'rotate='* ]] || continue
+				aROTATION["$display"]=${param#rotate=}
+			done
+		done
+	done
+}
+Detect_Displays
+
+# Inputs
+COMMAND=
+while (( $# ))
+do
+	case $1 in
+		'--display'|'-d') shift; DISPLAY=$1;;
+		'--mode'|'-m') shift; aMODE[$DISPLAY]=$1;;
+		'--rotation'|'-r') shift; aROTATION[$DISPLAY]=$1;;
+		'--disable'|'-D') aENABLED[$DISPLAY]='disabled';;
+		'--enable'|'-e') aENABLED[$DISPLAY]='enabled';;
+		'apply'|'a') COMMAND='apply';;
+		*) Error_Exit "Invalid argument $1. Exiting ...";;
+	esac
+	shift
+done
+
+# Toggle LCD drivers
+REBOOT=0
+Menu_LCDs()
+{
+	# NanoPi M6 DSI overlays
+	if (( $G_HW_MODEL == 92 ))
+	then
+		G_WHIP_CHECKLIST_ARRAY=(
+			'display-dsi0-yx35' 'DSI0 display' 'off'
+			'display-dsi1-yx35' 'DSI1 display (default metal case)' 'off'
+		)
+		local overlays=() i
+		read -ra overlays < <(sed -n '/^[[:blank:]]*overlays=/{s/^[^=]*=//p;q}' /boot/dietpiEnv.txt)
+		for i in "${!overlays[@]}"
+		do
+			case ${overlays[i]} in
+				'display-dsi0-yx35') G_WHIP_CHECKLIST_ARRAY[2]='on'; unset overlays[i];;
+				'display-dsi1-yx35') G_WHIP_CHECKLIST_ARRAY[5]='on'; unset overlays[i];;
+				*) :;;
+			esac
+		done
+
+		G_WHIP_BUTTON_CANCEL_TEXT='Back'
+		G_WHIP_CHECKLIST 'Toggle selected DSI display ports via spacebar, and confirm via ENTER/RETURN key or <Confirm> button:' || return 1
+		[[ $G_WHIP_RETURNED_VALUE ]] && overlays+=("$G_WHIP_RETURNED_VALUE")
+		G_CONFIG_INJECT 'overlays=' "overlays=${overlays[*]}" /boot/dietpiEnv.txt
+	fi
+}
+
+# Apply settings for selected display
+Apply_Settings()
+{
+	# Create kernel command-line argument for current display
+	local arg="video=$DISPLAY:${aMODE[$DISPLAY]}"
+	[[ ${aENABLED[$DISPLAY]} == 'disabled' ]] && arg+='d'
+	[[ ${aROTATION[$DISPLAY]} == 0 ]] || arg+=",rotate=${aROTATION[$DISPLAY]}"
+
+	# U-Boot environment file
+	local i uenv
+	for i in /boot/{dietpi,armbian}Env.txt
+	do
+		[[ -f $i ]] || continue
+		uenv=$i
+		break
+	done
+
+	# RPi
+	if (( $G_HW_MODEL < 10 ))
+	then
+		local cmdline=()
+		read -ra cmdline < /boot/cmdline.txt
+		for i in "${!cmdline[@]}"
+		do
+			[[ ${cmdline[i]} == "video=$DISPLAY:"* ]] || continue
+			cmdline[i]=$arg
+			break
+		done
+		[[ ${cmdline[i]} == "video=$DISPLAY:"* ]] || cmdline+=("$arg")
+		G_EXEC eval "echo '${cmdline[*]}' > /boot/cmdline.txt"
+
+	# x86_64
+	elif (( $G_HW_ARCH == 10 ))
+	then
+		G_EXEC eval "echo 'GRUB_CMDLINE_LINUX_DEFAULT=\"\$GRUB_CMDLINE_LINUX_DEFAULT $arg\"' > /etc/default/grub.d/dietpi-display_$DISPLAY.cfg"
+		G_EXEC update-grub
+
+	# U-Boot environment file
+	elif [[ $uenv ]]
+	then
+		local cmdline=()
+		read -ra cmdline < <(sed -n '/^[[:blank:]]*extraargs=/{s/^[^=]*=//p;q}' "$uenv")
+		for i in "${!cmdline[@]}"
+		do
+			[[ ${cmdline[i]} == "video=$DISPLAY:"* ]] || continue
+			cmdline[i]=$arg
+			break
+		done
+		[[ ${cmdline[i]} == "video=$DISPLAY:"* ]] || cmdline+=("$arg")
+		G_CONFIG_INJECT 'extraargs=' "extraargs=${cmdline[*]}" "$uenv"
+
+	# extlinux
+	elif [[ -f '/boot/extlinux/extlinux.conf' ]]
+	then
+		local cmdline=()
+		read -ra cmdline < <(sed -n '/^[[:blank:]]*append[[:blank:]]/{s/^[^=]*=//p;q}' /boot/extlinux/extlinux.conf)
+		for i in "${!cmdline[@]}"
+		do
+			[[ ${cmdline[i]} == "video=$DISPLAY:"* ]] || continue
+			cmdline[i]=$arg
+			break
+		done
+		[[ ${cmdline[i]} == "video=$DISPLAY:"* ]] || cmdline+=("$arg")
+		G_CONFIG_INJECT 'append[[:blank:]]' "append ${cmdline[*]}" /boot/extlinux/extlinux.conf
+	else
+		G_WHIP_MSG '[FAILED] Boot configuration not found
+\nWe could not find a boot configuration to apply kernel command-line arguments. So far, this script supports /boot/dietpiEnv.txt, /boot/armbianEnv.txt, and /boot/extlinux/extlinux.conf.
+\nPlease open an issue at our GitHub page or forum:
+- https://github.com/MichaIng/DietPi/issues
+- https://dietpi.com/forum/'
+	fi
+	REBOOT=1
+}
+
+# Reset settings for selected display
+Reset_Settings()
+{
+	# U-Boot environment file
+	local i uenv
+	for i in /boot/{dietpi,armbian}Env.txt
+	do
+		[[ -f $i ]] || continue
+		uenv=$i
+		break
+	done
+
+	# RPi
+	if (( $G_HW_MODEL < 10 ))
+	then
+		local cmdline=()
+		read -ra cmdline < /boot/cmdline.txt
+		for i in "${!cmdline[@]}"
+		do
+			[[ ${cmdline[i]} == "video=$DISPLAY:"* ]] || continue
+			unset cmdline[i]
+			break
+		done
+		G_EXEC eval "echo '${cmdline[*]}' > /boot/cmdline.txt"
+
+	# x86_64
+	elif (( $G_HW_ARCH == 10 ))
+	then
+		[[ -f "/etc/default/grub.d/dietpi-display_$DISPLAY.cfg" ]] || return 0
+		G_EXEC rm "/etc/default/grub.d/dietpi-display_$DISPLAY.cfg"
+		G_EXEC update-grub
+
+	# U-Boot environment file
+	elif [[ $uenv ]]
+	then
+		local cmdline=()
+		read -ra cmdline < <(sed -n '/^[[:blank:]]*extraargs=/{s/^[^=]*=//p;q}' "$uenv")
+		for i in "${!cmdline[@]}"
+		do
+			[[ ${cmdline[i]} == "video=$DISPLAY:"* ]] || continue
+			unset cmdline[i]
+			break
+		done
+		G_CONFIG_INJECT 'extraargs=' "extraargs=${cmdline[*]}" "$uenv"
+
+	# extlinux
+	elif [[ -f '/boot/extlinux/extlinux.conf' ]]
+	then
+		local cmdline=()
+		read -ra cmdline < <(sed -n '/^[[:blank:]]*append[[:blank:]]/{s/^[^=]*=//p;q}' /boot/extlinux/extlinux.conf)
+		for i in "${!cmdline[@]}"
+		do
+			[[ ${cmdline[i]} == "video=$DISPLAY:"* ]] || continue
+			unset cmdline[i]
+			break
+		done
+		G_CONFIG_INJECT 'append[[:blank:]]' "append ${cmdline[*]}" /boot/extlinux/extlinux.conf
+	else
+		G_WHIP_MSG '[FAILED] Boot configuration not found
+\nWe could not find a boot configuration to apply kernel command-line arguments. So far, this script supports /boot/dietpiEnv.txt, /boot/armbianEnv.txt, and /boot/extlinux/extlinux.conf.
+\nPlease open an issue at our GitHub page or forum:
+- https://github.com/MichaIng/DietPi/issues
+- https://dietpi.com/forum/'
+	fi
+	REBOOT=1
+}
+
+# Select display
+Menu_Display()
+{
+	G_WHIP_MENU_ARRAY=()
+	for i in "${!aMODE[@]}"
+	do
+		G_WHIP_MENU_ARRAY+=("$i" '')
+	done
+	G_WHIP_DEFAULT_ITEM=$DISPLAY
+	G_WHIP_MENU 'Select a display from the list below' || return 0
+	DISPLAY=$G_WHIP_RETURNED_VALUE
+}
+
+# Choose mode for selected display
+Menu_Mode()
+{
+	local modes=() mode i
+	mapfile -t modes < '/sys/class/drm/'*"$DISPLAY/modes"
+	G_WHIP_MENU_ARRAY=('Custom' '')
+	for mode in "${modes[@]}"
+	do
+		# Deduplicate
+		for i in "${!G_WHIP_MENU_ARRAY[@]}"
+		do
+			[[ ${G_WHIP_MENU_ARRAY[i]} == "$mode" ]] && continue 2
+		done
+		G_WHIP_MENU_ARRAY+=("$mode" '')
+	done
+	G_WHIP_DEFAULT_ITEM=${aMODE[$DISPLAY]}
+	G_WHIP_MENU "Select a mode for the display $DISPLAY" || return 0
+	if [[ $G_WHIP_RETURNED_VALUE == 'Custom' ]]
+	then
+		G_WHIP_DEFAULT_ITEM=${aMODE[$DISPLAY]}
+		G_WHIP_INPUTBOX 'Enter a custom display mode, e.g. "1920x1080@60".
+\nMore info: https://docs.kernel.org/fb/modedb.html' || { Menu_Mode; return 0; }
+	fi
+	aMODE["$DISPLAY"]=$G_WHIP_RETURNED_VALUE
+	Apply_Settings
+}
+
+# Choose rotation for selected display
+Menu_Rotation()
+{
+	G_WHIP_MENU_ARRAY=(
+		0 ''
+		90 ''
+		180 ''
+		270 ''
+	)
+	G_WHIP_DEFAULT_ITEM=${aROTATION[$DISPLAY]}
+	G_WHIP_MENU "Select a rotation for the display $DISPLAY" || return 0
+	aROTATION["$DISPLAY"]=$G_WHIP_RETURNED_VALUE
+	Apply_Settings
+}
+
+# Main menu
+G_WHIP_DEFAULT_ITEM_NEXT=
+Main_Menu()
+{
+	# Toggle LCD drivers on supported boards
+	G_WHIP_MENU_ARRAY=()
+	(( $G_HW_MODEL == 92 )) && G_WHIP_MENU_ARRAY+=('LCDs' 'Toggle LCD drivers')
+
+	# Configure detected displays
+	if [[ $DISPLAY ]]
+	then
+		(( ${#G_WHIP_MENU_ARRAY[@]} )) && G_WHIP_MENU_ARRAY+=('' '●─ Configure detected displays ')
+		G_WHIP_MENU_ARRAY+=(
+			'Display' "[$DISPLAY] Select display"
+			'Mode' "[${aMODE[$DISPLAY]}] Change screen resolution mode"
+			'Rotation' "[${aROTATION[$DISPLAY]}] Change screen rotation"
+			'Reset' 'Reset settings for selected display'
+			'Toggle' "[${aENABLED[$DISPLAY]}] Enable or disable this display"
+		)
+		G_WHIP_BUTTON_CANCEL_TEXT='Exit'
+		G_WHIP_DEFAULT_ITEM=${G_WHIP_DEFAULT_ITEM_NEXT:-Display}
+		G_WHIP_MENU 'DietPi-Display is currently in beta status. Please report issues/suggestions:
+- https://github.com/MichaIng/DietPi/issues/7390
+\nSelect a display to change its mode and rotation' || return 1
+		case $G_WHIP_RETURNED_VALUE in
+			'LCDs') while :; do Menu_LCDs || break; done;;
+			'Display') Menu_Display;;
+			'Mode') Menu_Mode;;
+			'Rotation') Menu_Rotation;;
+			'Reset') Reset_Settings;;
+			'Toggle') [[ ${aENABLED[$DISPLAY]} == 'enabled' ]] && aENABLED[$DISPLAY]='disabled' || aENABLED[$DISPLAY]='enabled'; Apply_Settings;;
+			*) :;;
+		esac
+		G_WHIP_DEFAULT_ITEM_NEXT=$G_WHIP_RETURNED_VALUE
+	else
+		# Raspberry Pi KMS/DRM driver
+		if (( $G_HW_MODEL < 10 )) && ! grep -q '^[[:blank:]]*dtoverlay=vc4-kms-v3d' /boot/config.txt
+		then
+			G_WHIP_YESNO '[FAILED] KMS/DRM driver is not enabled
+\nOn Raspberry Pi, you need to enable the KMS/DRM drive to use this tool. Do you want to enable it now?' && /boot/dietpi/func/dietpi-set_hardware rpi-opengl vc4-kms-v3d && REBOOT=1
+		else
+			G_WHIP_MSG '[FAILED] No DRM device has been found
+\nA DRM device could not be found on your system. Please assure the display is properly attached and working, and your kernel supports DRM.'
+		fi
+		return 1
+	fi
+}
+
+# Handle command
+case $COMMAND in
+	apply) Apply_Settings;;
+	*) while :; do Main_Menu || break; done;;
+esac
+
+(( $REBOOT )) && G_WHIP_BUTTON_CANCEL_TEXT='Later' G_WHIP_YESNO 'A reboot is required for display settings to take effect.
+\nDo you want to reboot now?' && reboot
+
+exit 0
+}
