@@ -401,11 +401,12 @@ _EOF_
 ##########################################
 # Add temporary tmpfs mounts to prevent certain files created by debootstrap being written to disk
 # - "-o X-mount.mkdir" has a shortcut "-m" in recent "mount", but not available on Ubuntu Jammy yet!
-G_EXEC mount -o X-mount.mkdir -t tmpfs tmpfs rootfs/dev
-G_EXEC mount -o X-mount.mkdir -t tmpfs tmpfs rootfs/run
-G_EXEC mount -o X-mount.mkdir -t tmpfs tmpfs rootfs/var/cache/apt
-G_EXEC mount -o X-mount.mkdir -t tmpfs tmpfs rootfs/var/lib/apt/lists
-G_EXEC mount -o X-mount.mkdir -t tmpfs tmpfs rootfs/var/log
+# - tmpfs mounts have 1777 mode by default.
+G_EXEC mount -o X-mount.mkdir,mode=0755 -t tmpfs tmpfs rootfs/dev
+G_EXEC mount -o X-mount.mkdir,mode=0755 -t tmpfs tmpfs rootfs/run
+G_EXEC mount -o X-mount.mkdir,mode=0755 -t tmpfs tmpfs rootfs/var/cache/apt
+G_EXEC mount -o X-mount.mkdir,mode=0755 -t tmpfs tmpfs rootfs/var/lib/apt/lists
+G_EXEC mount -o X-mount.mkdir,mode=0755 -t tmpfs tmpfs rootfs/var/log
 # Workaround for missing apt-key on Trixie, used by raspbian-archive-keyring
 if (( $HW_ARCH == 1 && $DISTRO == 8 ))
 then
@@ -426,19 +427,37 @@ if (( $HW_ARCH == 1 && $DISTRO == 8 ))
 then
 	G_EXEC rm rootfs/usr/bin/apt-key
 fi
+
+##########################################
+# Workarounds
+##########################################
+# Trixie emulated: Workaround for failing systemd services: https://gitlab.com/qemu-project/qemu/-/issues/1962, https://github.com/systemd/systemd/issues/31219
+if (( $DISTRO == 8 && $emulation ))
+then
+	for i in rootfs/usr/lib/systemd/system/*.service
+	do
+		grep -q '^ImportCredential=' "$i" || continue
+		G_EXEC mkdir "${i/usr\/lib/etc}.d"
+		G_EXEC eval "echo -e '[Service]\nImportCredential=' > ${i/usr\/lib/etc}.d/dietpi-no-ImportCredential.conf"
+	done
+fi
+# ARMv6/7 Trixie: Workaround failing chpasswd, which tries to access /proc/sys/vm/mmap_min_addr, but fails as of AppArmor on the host
+if (( $HW_ARCH < 3 && $DISTRO == 8 ))
+then
+	G_EXEC eval 'echo '\''/proc/sys/vm/mmap_min_addr r,'\'' > /etc/apparmor.d/local/unix-chkpwd'
+	G_EXEC_NOHALT=1 G_EXEC_OUTPUT=1 systemctl restart apparmor || { journalctl -n 25; exit 1; }
+fi
+
 ##########################################
 # DietPi-Installer
 ##########################################
 # Create rc.local to automate DietPi-Installer
 # - NB: WIFI_REQUIRED=1 is always passed here, but ignored by DietPi-Installer for VMs and containers.
-cat << '_EOF_' > rootfs/etc/rc.local
+cat << _EOF_ > rootfs/etc/rc.local
 #!/bin/dash
 {
-infocmp "$TERM" > /dev/null 2>&1 || { echo "[ WARN ] Unsupported TERM=\"$TERM\", switching to TERM=\"dumb\""; export TERM=dumb; }
+infocmp "\$TERM" > /dev/null 2>&1 || { echo "[ WARN ] Unsupported TERM=\"\$TERM\", switching to TERM=\"dumb\""; export TERM=dumb; }
 echo '[ INFO ] Running DietPi-Installer...'
-_EOF_
-
-cat << _EOF_ >> rootfs/etc/rc.local
 export GITOWNER='$GITOWNER' GITBRANCH='$GITBRANCH' HW_MODEL='$HW_MODEL' IMAGE_CREATOR=0 PREIMAGE_INFO=0 WIFI_REQUIRED=1 DISTRO_TARGET=$DISTRO TEST_KERNEL=$TEST_KERNEL TEST_UBOOT=$TEST_UBOOT
 echo '[ INFO ] Running DietPi-Installer for $G_GITOWNER/$G_GITBRANCH'
 bash -c "\$(curl -sSf 'https://raw.githubusercontent.com/$G_GITOWNER/DietPi/$G_GITBRANCH/.build/images/dietpi-installer')" || { echo '[FAILED] DietPi-Installer failed, shutting down ...'; journalctl -n 25; df -h; free -h; systemctl start poweroff.target; exit 1; }
@@ -470,6 +489,14 @@ then
 	for i in "${FP_LOOP}p"*; do abind+=("--bind=$i"); done
 fi
 systemd-nspawn -bD rootfs "${abind[@]}" || { G_DIETPI-NOTIFY 1 'systemd-nspawn failed, aborting ...'; journalctl -n 25; ss -tlpn; df -h; free -h; exit 1; }
+
+# Undo workarounds
+for i in rootfs/etc/systemd/system/*.service.d/dietpi-no-ImportCredential.conf
+do
+	[[ $i == 'rootfs/etc/systemd/system/*.service.d/dietpi-no-ImportCredential.conf' ]] && break
+	G_EXEC rm "$i"
+	G_EXEC rmdir --ignore-fail-on-non-empty "${i%/dietpi-no-ImportCredential.conf}"
+done
 
 [[ -f 'rootfs/success' ]] || { G_DIETPI-NOTIFY 1 'The container setup did not finish successfully, aborting ...'; journalctl -n 25; ss -tlpn; df -h; free -h; exit 1; }
 G_EXEC rm rootfs/success
