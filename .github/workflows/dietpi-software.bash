@@ -66,7 +66,7 @@ case $ARCH in
 	'armv7l') image="ARMv7-${DISTRO^}" arch=2;;
 	'aarch64') image="ARMv8-${DISTRO^}" arch=3;;
 	'x86_64') image="x86_64-${DISTRO^}" arch=10;;
-	'riscv64') image='RISC-V-Sid' arch=11;;
+	'riscv64') image="RISC-V-${DISTRO^}" arch=11;;
 	*) G_DIETPI-NOTIFY 1 "Invalid architecture \"$ARCH\" passed, aborting..."; exit 1;;
 esac
 image="DietPi_Container-$image.img"
@@ -118,7 +118,7 @@ Process_Software()
 			49) aSERVICES[i]='gogs' aTCP[i]='3000';;
 			50) aSERVICES[i]='syncthing' aTCP[i]='8384';;
 			51) aCOMMANDS[i]='/usr/games/opentyrian/opentyrian -h';;
-			52) aSERVICES[i]='cuberite' aTCP[i]='1339'; (( $arch < 10 )) && aDELAY[i]=120;;
+			52) aSERVICES[i]='cuberite' aTCP[i]='1339'; (( $arch < 10 )) && aDELAY[i]=120; (( $arch == 10 )) && aDELAY[i]=30;;
 			53) aSERVICES[i]='mineos' aTCP[i]='8443';;
 			58) aCOMMANDS[i]='tailscale version';; # aSERVICES[i]='tailscaled' aUDP[i]='41641' GitHub Action runners to not support the TUN module
 			59) aSERVICES[i]='raspimjpeg';;
@@ -210,9 +210,9 @@ Process_Software()
 			176) aSERVICES[i]='mycroft';;
 			177) aSERVICES[i]='forgejo' aTCP[i]='3000'; (( $arch < 10 )) && aDELAY[i]=30;;
 			178) aSERVICES[i]='jellyfin' aTCP[i]='8097'; [[ $arch == [23] ]] && aDELAY[i]=300;; # jellyfin[9983]: arm-binfmt-P: ../../target/arm/translate.c:9659: thumb_tr_translate_insn: Assertion `(dc->base.pc_next & 1) == 0' failed.   ###   jellyfin[9983]: qemu: uncaught target signal 6 (Aborted) - core dumped   ###   about 5 times
-			179) aSERVICES[i]='komga' aTCP[i]='2037'; (( $arch == 10 )) && aDELAY[i]=30; (( $arch < 10 )) && aDELAY[i]=300;;
+			179) aSERVICES[i]='komga' aTCP[i]='2037'; (( $arch == 10 )) && aDELAY[i]=30; (( $arch != 10 )) && aDELAY[i]=300;;
 			180) aSERVICES[i]='bazarr' aTCP[i]='6767'; (( $arch == 10 )) && aDELAY[i]=30; (( $arch < 10 )) && aDELAY[i]=90;;
-			181) aSERVICES[i]='papermc' aTCP[i]='25565 25575';;
+			181) aSERVICES[i]='papermc' aTCP[i]='25565 25575'; (( $arch == 10 )) && aDELAY[i]=60 || aDELAY[i]=600;;
 			182) aSERVICES[i]='unbound' aUDP[i]='53'; [[ ${aSERVICES[126]} ]] && aUDP[i]+=' 5335';; # Uses port 5335 if Pi-hole or AdGuard Home is installed, but those do listen on port 53 instead
 			183) aSERVICES[i]='vaultwarden' aTCP[i]='8001'; (( $arch < 10 )) && aDELAY[i]=20;;
 			184) aSERVICES[i]='tor';; # aTCP[i]='443 9051' Interactive install with ports depending on choice and relay type
@@ -254,7 +254,7 @@ do
 		38|40|48|54|55|57|59|76|79|82|90|160|210) Process_Software 88 89 webserver;;
 		159) Process_Software 36 37 65 88 89 96 121 124 128 129 152 160 163 webserver;;
 		47|114|168) Process_Software 88 89 91 webserver;;
-		8|33|131|179|206) Process_Software 196;;
+		8|33|53|80|131|133|164|179|181|206) Process_Software 196;;
 		32|148|119) Process_Software 128;;
 		129) Process_Software 88 89 128 webserver;;
 		49|165|177) Process_Software 0 17 88;;
@@ -333,7 +333,7 @@ then
 	esac
 	G_EXEC rm rootfs/etc/.dietpi_hw_model_identifier
 	G_EXEC touch rootfs/boot/{bcm-rpi-dummy.dtb,config.txt,cmdline.txt}
-	G_EXEC sed --follow-symlinks -i "/# Start DietPi-Software/iG_EXEC sed -i -e '/^G_HW_MODEL=/cG_HW_MODEL=$model' -e '/^G_HW_MODEL_NAME=/cG_HW_MODEL_NAME=\"RPi $model ($ARCH)\"' /boot/dietpi/.hw_model" rootfs/boot/dietpi/dietpi-login
+	G_EXEC sed --follow-symlinks -i "/# Start DietPi-Software/iG_EXEC sed --follow-symlinks -i -e '/^G_HW_MODEL=/cG_HW_MODEL=$model' -e '/^G_HW_MODEL_NAME=/cG_HW_MODEL_NAME=\"RPi $model ($ARCH)\"' /boot/dietpi/.hw_model" rootfs/boot/dietpi/dietpi-login
 	G_EXEC curl -sSfo keyring.deb 'https://archive.raspberrypi.com/debian/pool/main/r/raspberrypi-archive-keyring/raspberrypi-archive-keyring_2021.1.1+rpt1_all.deb'
 	G_EXEC dpkg --root=rootfs -i keyring.deb
 	G_EXEC rm keyring.deb
@@ -345,7 +345,9 @@ fi
 if [[ $TEST == 'true' ]]
 then
 	# shellcheck disable=SC2016
-	G_EXEC sed --follow-symlinks -i '/# Start DietPi-Software/a\sed -i '\''s|dietpi.com/downloads/binaries/$G_DISTRO_NAME/|dietpi.com/downloads/binaries/$G_DISTRO_NAME/testing/|'\'' /boot/dietpi/dietpi-software' rootfs/boot/dietpi/dietpi-login
+	G_EXEC sed --follow-symlinks -i '/# Start DietPi-Software/a\G_EXEC sed --follow-symlinks -i '\''s|dietpi.com/downloads/binaries/$G_DISTRO_NAME/|dietpi.com/downloads/binaries/$G_DISTRO_NAME/testing/|'\'' /boot/dietpi/dietpi-software' rootfs/boot/dietpi/dietpi-login
+	# shellcheck disable=SC2016
+	G_EXEC sed --follow-symlinks -i '/# Start DietPi-Software/a\G_EXEC sed --follow-symlinks -Ei '\''s@G_AGI "?(gmediarender|shairport-sync\\$airplay2|squeezelite|vaultwarden|ympd)"?@Download_Install "https://dietpi.com/downloads/binaries/$G_DISTRO_NAME/\\1""_$G_HW_ARCH_NAME.deb"@'\'' /boot/dietpi/dietpi-software' rootfs/boot/dietpi/dietpi-login
 	G_CONFIG_INJECT 'SOFTWARE_DIETPI_DASHBOARD_VERSION=' 'SOFTWARE_DIETPI_DASHBOARD_VERSION=Nightly' rootfs/boot/dietpi.txt
 fi
 
@@ -355,26 +357,15 @@ G_EXEC eval 'echo '\''infocmp "$TERM" > /dev/null 2>&1 || { echo "[ INFO ] Unsup
 
 # Enable automated setup
 G_CONFIG_INJECT 'AUTO_SETUP_AUTOMATED=' 'AUTO_SETUP_AUTOMATED=1' rootfs/boot/dietpi.txt
-# - Workaround for skipped autologin in emulated Trixie/Sid containers: https://gitlab.com/qemu-project/qemu/-/issues/1962
-# - Set HOME path, required e.g. go builds, which is otherwise missing when started from a systemd unit.
+# - Workaround for failing systemd services and hence missing autologin in emulated Trixie containers: https://gitlab.com/qemu-project/qemu/-/issues/1962, https://github.com/systemd/systemd/issues/31219
 if [[ $DISTRO == 'trixie' ]] && (( $G_HW_ARCH != $arch && ( $G_HW_ARCH > 9 || $G_HW_ARCH < $arch ) ))
 then
-	cat << '_EOF_' > rootfs/etc/systemd/system/dietpi-automation.service
-[Unit]
-Description=DietPi-Automation
-After=dietpi-postboot.service
-
-[Service]
-Type=idle
-StandardOutput=tty
-Environment=HOME=/root
-ExecStart=/bin/dash -c 'infocmp "$TERM" > /dev/null 2>&1 || export TERM=dumb; exec /boot/dietpi/dietpi-login'
-ExecStop=/sbin/poweroff
-
-[Install]
-WantedBy=multi-user.target
-_EOF_
-	G_EXEC ln -s /etc/systemd/system/dietpi-automation.service rootfs/etc/systemd/system/multi-user.target.wants/
+	for i in rootfs/usr/lib/systemd/system/*.service
+	do
+		grep -q '^ImportCredential=' "$i" || continue
+		G_EXEC mkdir "${i/usr\/lib/etc}.d"
+		G_EXEC eval "echo -e '[Service]\nImportCredential=' > ${i/usr\/lib/etc}.d/dietpi-no-ImportCredential.conf"
+	done
 fi
 
 # Workaround for failing IPv4 network connectivity check as GitHub Actions runners do not receive external ICMP echo replies.
@@ -390,6 +381,11 @@ G_EXEC rm rootfs/root/.ssh/known_hosts
 # Apply software IDs to install
 for i in $SOFTWARE; do G_CONFIG_INJECT "AUTO_SETUP_INSTALL_SOFTWARE_ID=$i" "AUTO_SETUP_INSTALL_SOFTWARE_ID=$i" rootfs/boot/dietpi.txt; done
 
+# Enable unattended PaperMC install
+G_EXEC mkdir -p rootfs/mnt/dietpi_userdata/papermc/plugins
+G_EXEC eval 'echo '\''eula=true'\'' > rootfs/mnt/dietpi_userdata/papermc/eula.txt'
+G_EXEC touch rootfs/mnt/dietpi_userdata/papermc/plugins/Geyser-Spigot.jar
+
 # Workaround for "Could not execute systemctl:  at /usr/bin/deb-systemd-invoke line 145." during Apache2 DEB postinst in 32-bit ARM Bookworm container: https://lists.ubuntu.com/archives/foundations-bugs/2022-January/467253.html
 G_CONFIG_INJECT 'AUTO_SETUP_WEB_SERVER_INDEX=' 'AUTO_SETUP_WEB_SERVER_INDEX=-2' rootfs/boot/dietpi.txt
 
@@ -401,7 +397,24 @@ G_EXEC eval 'echo -e '\''[Service]\nPrivateUsers=0'\'' > rootfs/etc/systemd/syst
 G_EXEC eval 'echo -e '\''[Service]\nAmbientCapabilities='\'' > rootfs/etc/systemd/system/homebridge.service.d/dietpi-container.conf'
 
 # Workaround for failing 32-bit ARM Rust builds on ext4 in QEMU emulated container on 64-bit host: https://github.com/rust-lang/cargo/issues/9545
-(( $arch < 3 && $G_HW_ARCH > 9 )) && G_EXEC eval 'echo -e '\''tmpfs /mnt/dietpi_userdata tmpfs size=3G,noatime,lazytime\ntmpfs /root tmpfs size=3G,noatime,lazytime'\'' >> rootfs/etc/fstab'
+if (( $arch < 3 && $G_HW_ARCH > 9 ))
+then
+	G_EXEC eval 'echo -e '\''tmpfs /mnt/dietpi_userdata tmpfs size=3G,noatime,lazytime\ntmpfs /root tmpfs size=3G,noatime,lazytime'\'' >> rootfs/etc/fstab'
+	cat << '_EOF_' > rootfs/boot/Automation_Custom_PreScript.sh
+#!/bin/dash -e
+findmnt /mnt/dietpi_userdata > /dev/null 2>&1 || exit 0
+umount /mnt/dietpi_userdata
+mkdir /mnt/dietpi_userdata_bak
+mv /mnt/dietpi_userdata/* /mnt/dietpi_userdata_bak/
+mount /mnt/dietpi_userdata
+mv /mnt/dietpi_userdata_bak/* /mnt/dietpi_userdata/
+rm -R /mnt/dietpi_userdata_bak
+_EOF_
+fi
+
+# Workaround failing Java apps if 64-bit host memory leads to too large heap size in emulated 32-bit containers: https://stackoverflow.com/questions/4401396
+# shellcheck disable=SC2016
+(( $arch < 3 && $G_HW_ARCH > 2)) && G_EXEC sed --follow-symlinks -i '/# Start DietPi-Software/a\sed -i '\''s|-mx${memory_limit}m|-mx1024m|'\'' /boot/dietpi/dietpi-software' rootfs/boot/dietpi/dietpi-login
 
 # Workaround for Node.js on ARMv6
 (( $arch == 1 )) && G_EXEC sed --follow-symlinks -i '/# Start DietPi-Software/a\sed -i '\''/G_EXEC chmod +x node-install.sh/a\\sed -i "/^ARCH=/c\\ARCH=armv6l" node-install.sh'\'' /boot/dietpi/dietpi-software' rootfs/boot/dietpi/dietpi-login
@@ -454,10 +467,10 @@ done
 
 # Success flag and shutdown
 # shellcheck disable=SC2016
-G_EXEC eval 'echo '\''[ $exit_code = 0 ] && > /success || { journalctl -n 50; ss -tulpn; df -h; free -h; }; poweroff'\'' >> rootfs/boot/Automation_Custom_Script.sh'
+G_EXEC eval 'echo '\''[ $exit_code = 0 ] && > /success || { journalctl -n 50; ss -tulpn; df -h; free -h; }; systemctl start poweroff.target'\'' >> rootfs/boot/Automation_Custom_Script.sh'
 
 # Shutdown as well on failures before the custom script is executed
-G_EXEC sed --follow-symlinks -i 's|Prompt_on_Failure$|{ journalctl -n 50; ss -tulpn; df -h; free -h; poweroff; }|' rootfs/boot/dietpi/dietpi-login
+G_EXEC sed --follow-symlinks -i 's|Prompt_on_Failure$|{ journalctl -n 50; ss -tulpn; df -h; free -h; systemctl start poweroff.target; }|' rootfs/boot/dietpi/dietpi-login
 
 ##########################################
 # Boot container

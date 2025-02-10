@@ -7,15 +7,12 @@
 # -------------------------
 
 # Build deps
-# - Workaround for CI on Buster: Mask Avahi daemon service, since it can fail to start, failing the package install
-(( $G_DISTRO == 5 )) && G_EXEC systemctl mask avahi-daemon
 G_AGUP
 G_AGDUG automake pkg-config make g++ libpopt-dev libconfig-dev libssl-dev libsoxr-dev libavahi-client-dev libasound2-dev libglib2.0-dev libmosquitto-dev avahi-daemon git libplist-dev libsodium-dev libgcrypt20-dev libavformat-dev xxd
-(( $G_DISTRO == 5 )) && G_EXEC systemctl unmask avahi-daemon
 adeps=('libc6' 'libasound2' 'libavahi-client3' 'libsoxr0' 'libconfig9' 'libpopt0' 'libglib2.0-0' 'libmosquitto1' 'avahi-daemon')
 adeps2=('libsodium23' 'libgcrypt20')
 case $G_DISTRO in
-	5|6) adeps+=('libssl1.1'); adeps2+=('libavcodec58' 'libplist3');;
+	6) adeps+=('libssl1.1'); adeps2+=('libavcodec58' 'libplist3');;
 	7) adeps+=('libssl3'); adeps2+=('libavcodec59' 'libplist3');;
 	8) adeps+=('libssl3'); adeps2+=('libavcodec61' 'libplist-2.0-4');;
 	*) G_DIETPI-NOTIFY 1 "Unsupported distro version: $G_DISTRO_NAME (ID=$G_DISTRO)"; exit 1;;
@@ -202,7 +199,7 @@ alsa =
 //	output_rate = "auto"; // can be "auto", 44100, 88200, 176400 or 352800, but the device must have the capability.
 //	output_format = "auto"; // can be "auto", "U8", "S8", "S16", "S16_LE", "S16_BE", "S24", "S24_LE", "S24_BE", "S24_3LE", "S24_3BE", "S32", "S32_LE" or "S32_BE" but the device must have the capability. Except where stated using (*LE or *BE), endianness matches that of the processor.
 
-//	disable_synchronization = "no"; // Set to "yes" to disable synchronization. Default is "no" This is really meant for troubleshootingG.
+//	disable_synchronization = "no"; // Set to "yes" to disable synchronization. Default is "no" This is really meant for troubleshooting.
 
 //	period_size = <number>; // Use this optional advanced setting to set the alsa period size near to this value
 //	buffer_size = <number>; // Use this optional advanced setting to set the alsa buffer size near to this value

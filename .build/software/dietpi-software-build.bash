@@ -64,7 +64,7 @@ case $ARCH in
 	'armv7l') image="ARMv7-${DISTRO^}" arch=2;;
 	'aarch64') image="ARMv8-${DISTRO^}" arch=3;;
 	'x86_64') image="x86_64-${DISTRO^}" arch=10;;
-	'riscv64') image='RISC-V-Sid' arch=11; [[ $DISTRO == 'trixie' ]] || Error_Exit "Invalid distro \"$DISTRO\" for arch \"$ARCH\" passed, only \"trixie\" is supported";;
+	'riscv64') image="RISC-V-${DISTRO^}" arch=11; [[ $DISTRO == 'trixie' ]] || Error_Exit "Invalid distro \"$DISTRO\" for arch \"$ARCH\" passed, only \"trixie\" is supported";;
 	*) Error_Exit "Invalid architecture \"$ARCH\" passed";;
 esac
 image="DietPi_Container-$image.img"
@@ -123,24 +123,15 @@ G_EXEC mount "${FP_LOOP}p1" rootfs
 
 # Enable automated setup
 G_CONFIG_INJECT 'AUTO_SETUP_AUTOMATED=' 'AUTO_SETUP_AUTOMATED=1' rootfs/boot/dietpi.txt
-# - Workaround for skipped autologin in emulated Trixie/Sid containers: https://gitlab.com/qemu-project/qemu/-/issues/1962
+# - Workaround for failing systemd services and hence missing autologin in emulated Trixie containers: https://gitlab.com/qemu-project/qemu/-/issues/1962, https://github.com/systemd/systemd/issues/31219
 if [[ $DISTRO == 'trixie' ]] && (( $G_HW_ARCH != $arch && ( $G_HW_ARCH > 9 || $G_HW_ARCH < $arch ) ))
 then
-	cat << '_EOF_' > rootfs/etc/systemd/system/dietpi-automation.service
-[Unit]
-Description=DietPi-Automation
-After=dietpi-postboot.service
-
-[Service]
-Type=idle
-StandardOutput=tty
-ExecStart=/bin/dash -c 'infocmp "$TERM" > /dev/null 2>&1 || { echo "[ WARN ] Unsupported TERM=\"$TERM\", switching to TERM=\"dumb\""; export TERM=dumb; }; exec /boot/dietpi/dietpi-login'
-ExecStop=/sbin/poweroff
-
-[Install]
-WantedBy=multi-user.target
-_EOF_
-	G_EXEC ln -s /etc/systemd/system/dietpi-automation.service rootfs/etc/systemd/system/multi-user.target.wants/
+	for i in rootfs/usr/lib/systemd/system/*.service
+	do
+		grep -q '^ImportCredential=' "$i" || continue
+		G_EXEC mkdir "${i/usr\/lib/etc}.d"
+		G_EXEC eval "echo -e '[Service]\nImportCredential=' > ${i/usr\/lib/etc}.d/dietpi-no-ImportCredential.conf"
+	done
 fi
 
 # Install Go for Gogs
@@ -154,13 +145,10 @@ G_EXEC eval 'echo '\''infocmp "$TERM" > /dev/null 2>&1 || { echo "[ WARN ] Unsup
 G_CONFIG_INJECT 'CONFIG_CHECK_CONNECTION_IP=' 'CONFIG_CHECK_CONNECTION_IP=127.0.0.1' rootfs/boot/dietpi.txt
 
 # Shutdown on failures before the custom script is executed
-G_EXEC sed --follow-symlinks -i 's|Prompt_on_Failure$|{ journalctl -n 50; ss -tulpn; df -h; free -h; poweroff; }|' rootfs/boot/dietpi/dietpi-login
+G_EXEC sed --follow-symlinks -i 's|Prompt_on_Failure$|{ journalctl -n 50; ss -tulpn; df -h; free -h; systemctl start poweroff.target; }|' rootfs/boot/dietpi/dietpi-login
 
 # Avoid DietPi-Survey uploads to not mess with the statistics
 G_EXEC rm rootfs/root/.ssh/known_hosts
-
-# ARMv6/7 Trixie: Temporarily prevent dist-upgrade on Trixie, as it fails due to 64-bit time_t transition causing dependency conflicts across the repo.
-(( $arch < 3 )) && [[ $DISTRO == 'trixie' ]] && G_EXEC touch rootfs/boot/dietpi/.skip_distro_upgrade
 
 # Automated build
 cat << _EOF_ > rootfs/boot/Automation_Custom_Script.sh || Error_Exit 'Failed to generate Automation_Custom_Script.sh'
@@ -168,7 +156,7 @@ cat << _EOF_ > rootfs/boot/Automation_Custom_Script.sh || Error_Exit 'Failed to 
 echo '[ INFO ] Running $NAME build script ...'
 bash -c "\$(curl -sSf 'https://raw.githubusercontent.com/$G_GITOWNER/DietPi/$G_GITBRANCH/.build/software/$NAME/build.bash')"
 mkdir -v /output && mv -v /tmp/*.$EXT /output
-poweroff
+systemctl start poweroff.target
 _EOF_
 
 ##########################################
