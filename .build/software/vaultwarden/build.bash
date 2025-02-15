@@ -41,7 +41,8 @@ G_EXEC rm package.deb
 suffix=${old_version#*-dietpi}
 [[ $old_version == "$version-"* ]] && pkg_version="$version-dietpi$((suffix+1))" || pkg_version+="$version-dietpi1"
 # - Env var to show version in web UI: https://github.com/MichaIng/DietPi/issues/7364
-export VW_VERSION=$pkg_version
+# - Replace dash with plus symbol, to avoid latest main commit to be shown as latest server version in web UI: https://github.com/dani-garcia/vaultwarden/discussions/4936#discussioncomment-12211305
+export VW_VERSION=${pkg_version/-dietpi/+dietpi}
 # - web vault
 wv_url=$(curl -sSf 'https://api.github.com/repos/dani-garcia/bw_web_builds/releases/latest' | mawk -F\" '/^ *"browser_download_url": ".*\.tar\.gz"$/{print $4}')
 [[ $wv_url ]] || { G_DIETPI-NOTIFY 1 'No latest web vault version found, aborting ...'; exit 1; }
