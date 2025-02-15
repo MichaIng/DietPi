@@ -2,6 +2,7 @@
 {
 	# Error out on command failures
 	set -e
+	REBOOT=0
 	EXIT_CODE=0
 
 	Reboot_to_load_Partition_table()
@@ -42,9 +43,17 @@
 	fi
 	echo "[ INFO ] Detected root drive $ROOT_DRIVE with root partition $ROOT_PART"
 
-	# Check if the last partition contains a FAT filesystem with DIETPISETUP label
-	REBOOT=0
-	if [[ $(lsblk -no LABEL "$ROOT_DRIVE" | tail -1) == 'DIETPISETUP' ]]
+	# Check if the last partition contains a filesystem with DIETPISETUP label
+	# - Give up to 1.5 seconds time for filesystem and label to be detected: https://github.com/MichaIng/DietPi/issues/6838
+	SETUP_PART=
+	for i in 1 2 3
+	do
+		echo "[ INFO ] Detecting tailing DietPi setup partition $i/3"
+		SETUP_PART=$(lsblk -no FSTYPE,LABEL "$ROOT_DRIVE" | tail -1)
+		[[ $SETUP_PART ]] && break
+		sleep 0.5
+	done		
+	if [[ $SETUP_PART == *' DIETPISETUP' ]]
 	then
 		SETUP_PART=$(sfdisk -lqo DEVICE "$ROOT_DRIVE" | tail -1)
 		echo "[ INFO ] Detected trailing DietPi setup partition $SETUP_PART"
@@ -74,7 +83,7 @@
 	elif grep -q '[[:blank:]]/boot/firmware[[:blank:]][[:blank:]]*vfat[[:blank:]]' /etc/fstab
 	then
 		BOOT_PART=$(mawk '/[[:blank:]]\/boot\/firmware[[:blank:]][[:blank:]]*vfat[[:blank:]]/{print $1}' /etc/fstab)
-		echo "[ INFO ] Detected RPi boot/firmware partition $BOOT_PART"
+		echo "[ INFO ] Detected RPi /boot/firmware partition $BOOT_PART"
 		# Mount it and copy files if present and newer
 		TMP_MOUNT=$(mktemp -d)
 		mount -v "$BOOT_PART" "$TMP_MOUNT"
