@@ -50,7 +50,7 @@
 	do
 		echo "[ INFO ] Detecting tailing DietPi setup partition $i/3"
 		SETUP_PART=$(lsblk -no FSTYPE,LABEL "$ROOT_DRIVE" | tail -1)
-		[[ $SETUP_PART ]] && break
+		[[ $SETUP_PART == *[[:alpha:]]* ]] && break
 		sleep 0.5
 	done
 	if [[ $SETUP_PART == *' DIETPISETUP' ]]
