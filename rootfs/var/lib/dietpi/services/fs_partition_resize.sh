@@ -45,15 +45,15 @@
 
 	# Check if the last partition contains a filesystem with DIETPISETUP label
 	# - Give up to 1.5 seconds time for filesystem and label to be detected: https://github.com/MichaIng/DietPi/issues/6838
-	SETUP_PART=
+	SETUP_PART=$(lsblk -no FSTYPE,LABEL "$ROOT_DRIVE" | tail -1)
 	for i in 1 2 3
 	do
-		echo "[ INFO ] Detecting tailing DietPi setup partition $i/3"
-		SETUP_PART=$(lsblk -no FSTYPE,LABEL "$ROOT_DRIVE" | tail -1)
 		[[ $SETUP_PART == *[[:alpha:]]* ]] && break
+		echo "[ INFO ] Detecting tailing DietPi setup partition $i/3"
 		sleep 0.5
+		SETUP_PART=$(lsblk -no FSTYPE,LABEL "$ROOT_DRIVE" | tail -1)
 	done
-	if [[ $SETUP_PART == *' DIETPISETUP' ]]
+	if [[ $SETUP_PART == *'DIETPISETUP' ]]
 	then
 		SETUP_PART=$(sfdisk -lqo DEVICE "$ROOT_DRIVE" | tail -1)
 		echo "[ INFO ] Detected trailing DietPi setup partition $SETUP_PART"
