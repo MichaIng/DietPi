@@ -123,15 +123,23 @@ G_EXEC mount "${FP_LOOP}p1" rootfs
 
 # Enable automated setup
 G_CONFIG_INJECT 'AUTO_SETUP_AUTOMATED=' 'AUTO_SETUP_AUTOMATED=1' rootfs/boot/dietpi.txt
-# - Workaround for failing systemd services and hence missing autologin in emulated Trixie containers: https://gitlab.com/qemu-project/qemu/-/issues/1962, https://github.com/systemd/systemd/issues/31219
-if [[ $DISTRO == 'trixie' ]] && (( $G_HW_ARCH != $arch && ( $G_HW_ARCH > 9 || $G_HW_ARCH < $arch ) ))
+
+# Workaround for failing systemd services in emulated container: https://gitlab.com/qemu-project/qemu/-/issues/1962, https://github.com/systemd/systemd/issues/31219
+if (( $emulation ))
 then
 	for i in rootfs/usr/lib/systemd/system/*.service
 	do
-		grep -q '^ImportCredential=' "$i" || continue
+		grep -Eq '^(Load|Import)Credential=' "$i" || continue
 		G_EXEC mkdir "${i/usr\/lib/etc}.d"
-		G_EXEC eval "echo -e '[Service]\nImportCredential=' > ${i/usr\/lib/etc}.d/dietpi-no-ImportCredential.conf"
+		G_EXEC eval "echo -e '[Service]\nLoadCredential=\nImportCredential=' > ${i/usr\/lib/etc}.d/dietpi-no-credentials.conf"
 	done
+fi
+
+# ARMv6/7 Trixie: Workaround failing chpasswd, which tries to access /proc/sys/vm/mmap_min_addr, but fails as of AppArmor on the host
+if (( $arch < 3 && $DISTRO == 'trixie' ))
+then
+	G_EXEC eval 'echo '\''/proc/sys/vm/mmap_min_addr r,'\'' > /etc/apparmor.d/local/unix-chkpwd'
+	G_EXEC_NOHALT=1 G_EXEC_OUTPUT=1 systemctl restart apparmor || { journalctl -n 25; exit 1; }
 fi
 
 # Install Go for Gogs
