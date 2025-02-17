@@ -78,22 +78,12 @@ apackages=('xz-utils' 'parted' 'fdisk' 'systemd-container')
 emulation=0
 (( $G_HW_ARCH == $arch || ( $G_HW_ARCH < 10 && $G_HW_ARCH > $arch ) )) || emulation=1
 
-# Bullseye/Jammy: binfmt-support still required for emulation. With systemd-binfmt only, mmdebstrap throws "E: <arch> can neither be executed natively nor via qemu user emulation with binfmt_misc"
-(( $emulation )) && { apackages+=('qemu-user-static'); (( $G_DISTRO < 7 )) && apackages+=('binfmt-support'); }
+(( $emulation )) && apackages+=('qemu-user-static')
 
 G_AG_CHECK_INSTALL_PREREQ "${apackages[@]}"
 
 # Register QEMU binfmt configs
-if (( $emulation ))
-then
-	if (( $G_DISTRO < 7 ))
-	then
-		G_EXEC systemctl disable --now systemd-binfmt
-		G_EXEC systemctl restart binfmt-support
-	else
-		G_EXEC systemctl restart systemd-binfmt
-	fi
-fi
+(( $emulation )) && G_EXEC systemctl restart systemd-binfmt
 
 ##########################################
 # Prepare container
@@ -117,9 +107,12 @@ G_EXEC_OUTPUT=1 G_EXEC e2fsck -fp "${FP_LOOP}p1"
 G_EXEC mkdir rootfs
 G_EXEC mount "${FP_LOOP}p1" rootfs
 
-# Enforce ARMv6 arch on Raspbian
-# shellcheck disable=SC2015
-(( $arch > 1 )) || { echo -e '#/bin/dash\n[ "$*" = -m ] && echo armv6l || /bin/uname "$@"' > rootfs/usr/local/bin/uname && G_EXEC chmod +x rootfs/usr/local/bin/uname; } || Error_Exit 'Failed to generate /usr/local/bin/uname for ARMv6'
+# Enforce target ARM arch in containers with newer host/emulated ARM version
+if (( $arch < 3 && $G_HW_ARCH != $arch ))
+then
+	# shellcheck disable=SC2015
+	echo -e "#/bin/dash\n[ \"\$*\" = -m ] && echo $ARCH || /bin/uname \"\$@\"" > rootfs/usr/local/bin/uname && G_EXEC chmod +x rootfs/usr/local/bin/uname || Error_Exit "Failed to generate /usr/local/bin/uname for $ARCH"
+fi
 
 # Enable automated setup
 G_CONFIG_INJECT 'AUTO_SETUP_AUTOMATED=' 'AUTO_SETUP_AUTOMATED=1' rootfs/boot/dietpi.txt
