@@ -3,27 +3,28 @@
 . /boot/dietpi/func/dietpi-globals || exit 1
 
 # APT dependencies: https://github.com/dani-garcia/vaultwarden/wiki/Building-binary#dependencies
-# - Git for ARMv8 workaround below: https://github.com/rust-lang/cargo/issues/10583
-adeps_build=('gcc' 'libc6-dev' 'pkg-config' 'libssl-dev' 'git')
+adeps_build=('gcc' 'libc6-dev' 'pkg-config' 'libssl-dev')
 adeps=('libc6' 'openssl')
 (( $G_DISTRO > 6 )) && adeps+=('libssl3') || adeps+=('libssl1.1')
 G_AGUP
 G_AGDUG "${adeps_build[@]}"
 for i in "${adeps[@]}"
 do
-	# Temporarily allow lib*t64 packages, while the 64-bit time_t transition is ongoing on Sid: https://bugs.debian.org/1065394
+	# Temporarily allow lib*t64 packages, while the 64-bit time_t transition is ongoing on Trixie: https://bugs.debian.org/1065394
 	dpkg-query -s "$i" &> /dev/null || dpkg-query -s "${i}t64" &> /dev/null && continue
 	G_DIETPI-NOTIFY 1 "Expected dependency package was not installed: $i"
 	exit 1
 done
 
 G_DIETPI-NOTIFY 2 'Installing Rust via rustup'
-# - ARMv6: Set default target explicitly, otherwise it compiles for ARMv7 in emulated container
+# - ARMv6: Set default target explicitly, otherwise it compiles for ARMv7 on ARMv7 and ARMv8 hosts
 grep -q '^ID=raspbian' /etc/os-release && G_HW_ARCH_NAME='armv6l' host=('--default-host' 'arm-unknown-linux-gnueabihf') || host=()
-# - ARMv7: Apply workaround for failing crates index update in in emulated 32-bit ARM environments: https://github.com/rust-lang/cargo/issues/8719. CARGO_REGISTRIES_CRATES_IO_PROTOCOL='sparse' does not solve everything: https://github.com/rust-lang/cargo/issues/8719#issuecomment-1928540617
-# - ARMv8: Apply workaround for increased cargo fetch RAM usage: https://github.com/rust-lang/cargo/issues/10583
-export HOME=$(mktemp -d) CARGO_NET_GIT_FETCH_WITH_CLI='true'
-G_EXEC cd "$HOME"
+# - ARMv6/ARMv7: Apply workaround for failing crates index update in in emulated 32-bit ARM environments: https://github.com/rust-lang/cargo/issues/8719. CARGO_REGISTRIES_CRATES_IO_PROTOCOL='sparse' does not solve everything: https://github.com/rust-lang/cargo/issues/8719#issuecomment-1928540617
+if (( $G_HW_ARCH < 3 )) && pmap 1 | grep -q 'qemu'
+then
+	export HOME=$(mktemp -d)
+	G_EXEC cd "$HOME"
+fi
 G_EXEC curl -sSfo rustup-init.sh 'https://sh.rustup.rs'
 G_EXEC chmod +x rustup-init.sh
 G_EXEC_OUTPUT=1 G_EXEC ./rustup-init.sh -y --profile minimal --default-toolchain none "${host[@]}"
@@ -214,7 +215,7 @@ find "$DIR" ! \( -path "$DIR/DEBIAN" -prune \) -type f -exec md5sum {} + | sed "
 DEPS_APT_VERSIONED=
 for i in "${adeps[@]}"
 do
-	# Temporarily allow lib*t64 packages, while the 64-bit time_t transition is ongoing on Sid: https://bugs.debian.org/1065394
+	# Temporarily allow lib*t64 packages, while the 64-bit time_t transition is ongoing on Trixie: https://bugs.debian.org/1065394
 	dpkg-query -s "$i" &> /dev/null || i+='t64'
 	DEPS_APT_VERSIONED+=" $i (>= $(dpkg-query -Wf '${VERSION}' "$i")),"
 done
