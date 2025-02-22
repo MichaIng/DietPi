@@ -78,22 +78,12 @@ apackages=('xz-utils' 'parted' 'fdisk' 'systemd-container')
 emulation=0
 (( $G_HW_ARCH == $arch || ( $G_HW_ARCH < 10 && $G_HW_ARCH > $arch ) )) || emulation=1
 
-# Bullseye/Jammy: binfmt-support still required for emulation. With systemd-binfmt only, mmdebstrap throws "E: <arch> can neither be executed natively nor via qemu user emulation with binfmt_misc"
-(( $emulation )) && { apackages+=('qemu-user-static'); (( $G_DISTRO < 7 )) && apackages+=('binfmt-support'); }
+(( $emulation )) && apackages+=('qemu-user-static')
 
 G_AG_CHECK_INSTALL_PREREQ "${apackages[@]}"
 
 # Register QEMU binfmt configs
-if (( $emulation ))
-then
-	if (( $G_DISTRO < 7 ))
-	then
-		G_EXEC systemctl disable --now systemd-binfmt
-		G_EXEC systemctl restart binfmt-support
-	else
-		G_EXEC systemctl restart systemd-binfmt
-	fi
-fi
+(( $emulation )) && G_EXEC systemctl restart systemd-binfmt
 
 ##########################################
 # Prepare container
@@ -117,21 +107,32 @@ G_EXEC_OUTPUT=1 G_EXEC e2fsck -fp "${FP_LOOP}p1"
 G_EXEC mkdir rootfs
 G_EXEC mount "${FP_LOOP}p1" rootfs
 
-# Enforce ARMv6 arch on Raspbian
-# shellcheck disable=SC2015
-(( $arch > 1 )) || { echo -e '#/bin/dash\n[ "$*" = -m ] && echo armv6l || /bin/uname "$@"' > rootfs/usr/local/bin/uname && G_EXEC chmod +x rootfs/usr/local/bin/uname; } || Error_Exit 'Failed to generate /usr/local/bin/uname for ARMv6'
+# Enforce target ARM arch in containers with newer host/emulated ARM version
+if (( $arch < 3 && $G_HW_ARCH != $arch ))
+then
+	# shellcheck disable=SC2015
+	echo -e "#/bin/dash\n[ \"\$*\" = -m ] && echo $ARCH || /bin/uname \"\$@\"" > rootfs/usr/local/bin/uname && G_EXEC chmod +x rootfs/usr/local/bin/uname || Error_Exit "Failed to generate /usr/local/bin/uname for $ARCH"
+fi
 
 # Enable automated setup
 G_CONFIG_INJECT 'AUTO_SETUP_AUTOMATED=' 'AUTO_SETUP_AUTOMATED=1' rootfs/boot/dietpi.txt
-# - Workaround for failing systemd services and hence missing autologin in emulated Trixie containers: https://gitlab.com/qemu-project/qemu/-/issues/1962, https://github.com/systemd/systemd/issues/31219
-if [[ $DISTRO == 'trixie' ]] && (( $G_HW_ARCH != $arch && ( $G_HW_ARCH > 9 || $G_HW_ARCH < $arch ) ))
+
+# Workaround for failing systemd services in emulated container: https://gitlab.com/qemu-project/qemu/-/issues/1962, https://github.com/systemd/systemd/issues/31219
+if (( $emulation ))
 then
 	for i in rootfs/usr/lib/systemd/system/*.service
 	do
-		grep -q '^ImportCredential=' "$i" || continue
+		grep -Eq '^(Load|Import)Credential=' "$i" || continue
 		G_EXEC mkdir "${i/usr\/lib/etc}.d"
-		G_EXEC eval "echo -e '[Service]\nImportCredential=' > ${i/usr\/lib/etc}.d/dietpi-no-ImportCredential.conf"
+		G_EXEC eval "echo -e '[Service]\nLoadCredential=\nImportCredential=' > ${i/usr\/lib/etc}.d/dietpi-no-credentials.conf"
 	done
+fi
+
+# ARMv6/7 Trixie: Workaround failing chpasswd, which tries to access /proc/sys/vm/mmap_min_addr, but fails as of AppArmor on the host
+if (( $arch < 3 )) && [[ $DISTRO == 'trixie' ]]
+then
+	G_EXEC eval 'echo '\''/proc/sys/vm/mmap_min_addr r,'\'' > /etc/apparmor.d/local/unix-chkpwd'
+	G_EXEC_NOHALT=1 G_EXEC_OUTPUT=1 systemctl restart apparmor || { journalctl -n 25; exit 1; }
 fi
 
 # Install Go for Gogs
