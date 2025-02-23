@@ -89,7 +89,6 @@ efi_size=0
 boot_size=0
 root_size=1023
 boot_fstype='fat32'
-CLONING_TOOL='dd'
 case $HW_MODEL in
 	0) iname='RPi' HW_ARCH=${HW_ARCH:-1} boot_size=128 root_size=895;;
 	1) iname='RPi1' HW_ARCH=1 boot_size=128 root_size=895;;
@@ -111,9 +110,9 @@ case $HW_MODEL in
 	46) iname='PinebookPro' HW_ARCH=3 partition_start=16 root_size=1100;;
 	47) iname='NanoPiR4S' HW_ARCH=3 partition_start=16 root_size=1100;;
 	48) iname='NanoPiR1' HW_ARCH=2 partition_start=4 root_size=800;;
-	'49.1') iname='Quartz64A' HW_ARCH=3 partition_start=16 root_size=752;;
-	'49.2') iname='Quartz64B' HW_ARCH=3 partition_start=16 root_size=752;;
-	'49.3') iname='SOQuartz' HW_ARCH=3 partition_start=16 root_size=752;;
+	'49.1') iname='Quartz64A' HW_ARCH=3 partition_start=16 root_size=1000;;
+	'49.2') iname='Quartz64B' HW_ARCH=3 partition_start=16 root_size=1000;;
+	'49.3') iname='SOQuartz' HW_ARCH=3 partition_start=16 root_size=1000;;
 	52) iname='ASUSTB' HW_ARCH=2 partition_start=4 root_size=764;;
 	54) iname='NanoPiK2' HW_ARCH=3 partition_start=4 root_size=1148;;
 	55) iname='NanoPiR2S' HW_ARCH=3 partition_start=16 root_size=1100;;
@@ -140,7 +139,7 @@ case $HW_MODEL in
 	'72.3') iname='ROCK4CPlus' HW_ARCH=3 partition_start=16 root_size=1100;;
 	73) iname='ROCKPiS' HW_ARCH=3 partition_start=16 root_size=1100;;
 	74) iname='RadxaZero' HW_ARCH=3 partition_start=4 root_size=1148;;
-	75) iname='Container' HW_ARCH=${HW_ARCH:-10} root_size=575;;
+	75) iname='Container' HW_ARCH=${HW_ARCH:-10} root_size=700;;
 	'76.1') iname='NanoPiR5S' HW_ARCH=3 PTTYPE='gpt' partition_start=16 root_size=1100;;
 	'76.2') iname='NanoPiR5C' HW_ARCH=3 PTTYPE='gpt' partition_start=16 root_size=1100;;
 	77) iname='ROCK3A' HW_ARCH=3 PTTYPE='gpt' partition_start=16 root_size=1100;;
@@ -181,6 +180,7 @@ case $HW_ARCH in
 	*) Error_Exit "Invalid architecture \"$HW_ARCH\" passed. Aborting ...";;
 esac
 
+# Check for valid target distro version
 case $DISTRO in
 	6) distro='bullseye';;
 	7) distro='bookworm';;
@@ -188,28 +188,29 @@ case $DISTRO in
 	*) Error_Exit "Invalid distro \"$DISTRO\" passed. Aborting ...";;
 esac
 
+# Check for valid partition table type and set variables accordingly
 case $PTTYPE in
 	'msdos') [[ $HW_MODEL == 21 ]] && iname+='-BIOS';;
 	'gpt') [[ $HW_ARCH == 10 ]] && efi_size=64 iname+='-UEFI';;
 	*) Error_Exit "Invalid partition table type \"$PTTYPE\" passed. Aborting ...";;
 esac
 
-# Do not add trailing FAT partition for VM, container and ISO installer images, and if there is a boot FAT partition already
-[[ $HW_MODEL == 20 || $HW_MODEL == 75 || $VARIANT == 'iso' || ( $boot_size -gt 0 && $boot_fstype == 'fat'* ) ]] && ADD_DOS_PART=0
-
+# Check for valid root filesystem type and set variables accordingly
 fsname='' apackages=() afs_opts=() afsck=() aresize=()
 case $FSTYPE in
 	'ext4') apackages+=('e2fsprogs') afs_opts=('-e' 'remount-ro') afsck=('e2fsck' '-fyD') aresize=('resize2fs');;
 	'f2fs') fsname='F2FS' apackages+=('f2fs-tools') afsck=('fsck.f2fs' '-f') aresize=('resize.f2fs'); uname -r | grep -q '-azure$' && apackages+=('linux-modules-extra-azure');;
 	'btrfs') fsname='Btrfs' apackages+=('btrfs-progs') afsck=('btrfs' 'check' '--repair') aresize=('btrfs' 'filesystem' 'resize' 'max'); ((root_size+=128));;
-	*) Error_Exit "Invalid filesystem type \"$FSTYPE\" passed. Aborting ...";;
+	*) Error_Exit "Invalid root filesystem type \"$FSTYPE\" passed. Aborting ...";;
 esac
 
+# Validate target Git owner and branch
 G_CHECK_URL "https://github.com/$GITOWNER/DietPi/tree/$GITBRANCH" || Error_Exit "Failed to access Git branch \"$GITBRANCH\". Aborting ..."
 
-# Image name
+# Generate image name and define CLONING_TOOL for dietpi-installer
 OUTPUT_IMG_NAME="DietPi_$iname-$iarch-${distro^}"
 [[ $fsname ]] && OUTPUT_IMG_NAME+="_$fsname"
+CLONING_TOOL='dd'
 if [[ $VARIANT == 'iso' ]]
 then
 	[[ $HW_ARCH == 10 ]] || Error_Exit "Unsupported variant \"$VARIANT\" (installer image) for architecture \"$HW_ARCH\" passed. Aborting ..."
@@ -401,11 +402,12 @@ _EOF_
 ##########################################
 # Add temporary tmpfs mounts to prevent certain files created by debootstrap being written to disk
 # - "-o X-mount.mkdir" has a shortcut "-m" in recent "mount", but not available on Ubuntu Jammy yet!
-G_EXEC mount -o X-mount.mkdir -t tmpfs tmpfs rootfs/dev
-G_EXEC mount -o X-mount.mkdir -t tmpfs tmpfs rootfs/run
-G_EXEC mount -o X-mount.mkdir -t tmpfs tmpfs rootfs/var/cache/apt
-G_EXEC mount -o X-mount.mkdir -t tmpfs tmpfs rootfs/var/lib/apt/lists
-G_EXEC mount -o X-mount.mkdir -t tmpfs tmpfs rootfs/var/log
+# - tmpfs mounts have 1777 mode by default.
+G_EXEC mount -o X-mount.mkdir,mode=0755 -t tmpfs tmpfs rootfs/dev
+G_EXEC mount -o X-mount.mkdir,mode=0755 -t tmpfs tmpfs rootfs/run
+G_EXEC mount -o X-mount.mkdir,mode=0755 -t tmpfs tmpfs rootfs/var/cache/apt
+G_EXEC mount -o X-mount.mkdir,mode=0755 -t tmpfs tmpfs rootfs/var/lib/apt/lists
+G_EXEC mount -o X-mount.mkdir,mode=0755 -t tmpfs tmpfs rootfs/var/log
 # Workaround for missing apt-key on Trixie, used by raspbian-archive-keyring
 if (( $HW_ARCH == 1 && $DISTRO == 8 ))
 then
@@ -426,19 +428,37 @@ if (( $HW_ARCH == 1 && $DISTRO == 8 ))
 then
 	G_EXEC rm rootfs/usr/bin/apt-key
 fi
+
+##########################################
+# Workarounds
+##########################################
+# Workaround for failing systemd services in emulated container: https://gitlab.com/qemu-project/qemu/-/issues/1962, https://github.com/systemd/systemd/issues/31219
+if (( $emulation ))
+then
+	for i in rootfs/usr/lib/systemd/system/*.service
+	do
+		grep -Eq '^(Load|Import)Credential=' "$i" || continue
+		G_EXEC mkdir "${i/usr\/lib/etc}.d"
+		G_EXEC eval "echo -e '[Service]\nLoadCredential=\nImportCredential=' > ${i/usr\/lib/etc}.d/dietpi-no-credentials.conf"
+	done
+fi
+# ARMv6/7 Trixie: Workaround failing chpasswd, which tries to access /proc/sys/vm/mmap_min_addr, but fails as of AppArmor on the host
+if (( $HW_ARCH < 3 && $DISTRO == 8 )) && systemctl -q is-active apparmor
+then
+	G_EXEC eval 'echo '\''/proc/sys/vm/mmap_min_addr r,'\'' > /etc/apparmor.d/local/unix-chkpwd'
+	G_EXEC_NOHALT=1 G_EXEC_OUTPUT=1 systemctl restart apparmor || { journalctl -n 25; exit 1; }
+fi
+
 ##########################################
 # DietPi-Installer
 ##########################################
 # Create rc.local to automate DietPi-Installer
 # - NB: WIFI_REQUIRED=1 is always passed here, but ignored by DietPi-Installer for VMs and containers.
-cat << '_EOF_' > rootfs/etc/rc.local
+cat << _EOF_ > rootfs/etc/rc.local
 #!/bin/dash
 {
-infocmp "$TERM" > /dev/null 2>&1 || { echo "[ WARN ] Unsupported TERM=\"$TERM\", switching to TERM=\"dumb\""; export TERM=dumb; }
+infocmp "\$TERM" > /dev/null 2>&1 || { echo "[ WARN ] Unsupported TERM=\"\$TERM\", switching to TERM=\"dumb\""; export TERM=dumb; }
 echo '[ INFO ] Running DietPi-Installer...'
-_EOF_
-
-cat << _EOF_ >> rootfs/etc/rc.local
 export GITOWNER='$GITOWNER' GITBRANCH='$GITBRANCH' HW_MODEL='$HW_MODEL' IMAGE_CREATOR=0 PREIMAGE_INFO=0 WIFI_REQUIRED=1 DISTRO_TARGET=$DISTRO TEST_KERNEL=$TEST_KERNEL TEST_UBOOT=$TEST_UBOOT
 echo '[ INFO ] Running DietPi-Installer for $G_GITOWNER/$G_GITBRANCH'
 bash -c "\$(curl -sSf 'https://raw.githubusercontent.com/$G_GITOWNER/DietPi/$G_GITBRANCH/.build/images/dietpi-installer')" || { echo '[FAILED] DietPi-Installer failed, shutting down ...'; journalctl -n 25; df -h; free -h; systemctl start poweroff.target; exit 1; }
@@ -471,6 +491,14 @@ then
 fi
 systemd-nspawn -bD rootfs "${abind[@]}" || { G_DIETPI-NOTIFY 1 'systemd-nspawn failed, aborting ...'; journalctl -n 25; ss -tlpn; df -h; free -h; exit 1; }
 
+# Undo workarounds
+for i in rootfs/etc/systemd/system/*.service.d/dietpi-no-credentials.conf
+do
+	[[ $i == 'rootfs/etc/systemd/system/*.service.d/dietpi-no-credentials.conf' ]] && break
+	G_EXEC rm "$i"
+	G_EXEC rmdir --ignore-fail-on-non-empty "${i%/dietpi-no-credentials.conf}"
+done
+
 [[ -f 'rootfs/success' ]] || { G_DIETPI-NOTIFY 1 'The container setup did not finish successfully, aborting ...'; journalctl -n 25; ss -tlpn; df -h; free -h; exit 1; }
 G_EXEC rm rootfs/success
 G_EXEC rm -Rf rootfs/{dev,proc,run,sys,tmp,var/log}/{,.??,.[^.]}* # Failsafe: /var/log/journal was found despite tmpfs mount!
@@ -485,6 +513,8 @@ G_EXEC losetup -d "$FP_LOOP"
 ##########################################
 # Do not pack and upload raw VM image if not explicitly requested
 [[ $VARIANT =~ ^(|iso|all)$ ]] || SKIP_ARCHIVE=1 UPLOAD_SCRIPT=''
+# Do not add trailing FAT partition for VM, container and ISO installer images, and if there is a boot FAT partition already
+[[ $HW_MODEL == 20 || $HW_MODEL == 75 || $VARIANT == 'iso' || ( $boot_size -gt 0 && $boot_fstype == 'fat'* ) ]] && ADD_DOS_PART=0
 export FP_ROOT_DEV CLONING_TOOL OUTPUT_IMG_NAME MOUNT_IT='Off' SKIP_FIRSTBOOT_RESIZE=1
 IMAGER_ARGS=("$OUTPUT_IMG_NAME.img")
 (( $SKIP_ARCHIVE )) && IMAGER_ARGS+=('--skip-archive')
