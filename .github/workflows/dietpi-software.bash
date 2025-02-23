@@ -361,7 +361,7 @@ then
 fi
 
 # ARMv6/7 Trixie: Workaround failing chpasswd, which tries to access /proc/sys/vm/mmap_min_addr, but fails as of AppArmor on the host
-if (( $arch < 3 )) && [[ $DISTRO == 'trixie' ]]
+if (( $arch < 3 )) && [[ $DISTRO == 'trixie' ]] && systemctl -q is-active apparmor
 then
 	G_EXEC eval 'echo '\''/proc/sys/vm/mmap_min_addr r,'\'' > /etc/apparmor.d/local/unix-chkpwd'
 	G_EXEC_NOHALT=1 G_EXEC_OUTPUT=1 systemctl restart apparmor || { journalctl -n 25; exit 1; }
