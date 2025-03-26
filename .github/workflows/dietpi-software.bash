@@ -142,7 +142,11 @@ Process_Software()
 			85) aSERVICES[i]='nginx' aTCP[i]='80';;
 			#86) aSERVICES[i]='roon-extension-manager';; # Docker does not start in systemd containers (without dedicated network)
 			88) aSERVICES[i]='mariadb' aTCP[i]='3306';;
-			89) case $DISTRO in 'bullseye') aSERVICES[i]='php7.4-fpm';; *) aSERVICES[i]='php8.2-fpm';; esac;;
+			89) case $DISTRO in
+				'bullseye') aSERVICES[i]='php7.4-fpm';;
+				'bookworm') aSERVICES[i]='php8.2-fpm';;
+				*) aSERVICES[i]='php8.4-fpm';;
+			esac;;
 			91) aSERVICES[i]='redis-server' aTCP[i]='6379';;
 			93) aSERVICES[i]='pihole-FTL' aUDP[i]='53';;
 			94) aSERVICES[i]='proftpd' aTCP[i]='21';;
