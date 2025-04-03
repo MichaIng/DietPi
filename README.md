@@ -341,6 +341,7 @@ Links to hardware and software manufacturers, sources and build instructions use
 - [Kavita](https://github.com/Kareadita/Kavita)
 - [Forgejo](https://codeberg.org/forgejo/forgejo)
 - [soju](https://github.com/emersion/soju)
+- [fish](https://github.com/fish-shell/fish-shell)
 
 ---
 
