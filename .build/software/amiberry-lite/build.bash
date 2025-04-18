@@ -96,9 +96,6 @@ G_EXEC curl -sSfLO "https://github.com/BlitterStudio/amiberry-lite/archive/v$v_a
 G_EXEC tar xf "v$v_ami.tar.gz"
 G_EXEC rm "v$v_ami.tar.gz"
 G_EXEC cd "amiberry-lite-$v_ami"
-# - RISC-V: Workaround for missing ld.gold: https://github.com/BlitterStudio/amiberry/issues/1213
-#RISCV_LD=()
-#(( $G_HW_ARCH == 11 )) && RISCV_LD=('USE_LD=bfd')
 G_EXEC_OUTPUT=1 G_EXEC cmake -B build -DCMAKE_INSTALL_PREFIX=/usr
 G_EXEC_OUTPUT=1 G_EXEC cmake --build build
 G_EXEC strip --remove-section=.comment --remove-section=.note build/amiberry-lite
