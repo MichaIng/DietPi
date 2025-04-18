@@ -11,7 +11,7 @@ adeps=('libc6' 'libasound2' 'libmad0' 'libvorbisfile3' 'libmpg123-0' 'libsoxr0' 
 case $G_DISTRO in
 	6) adeps+=('libflac8' 'libavformat58' 'libssl1.1');;
 	7) adeps+=('libflac12' 'libavformat59' 'libssl3');;
-	8) adeps+=('libflac12' 'libavformat61' 'libssl3');;
+	8) adeps+=('libflac14' 'libavformat61' 'libssl3');;
 	*) G_DIETPI-NOTIFY 1 "Unsupported distro version: $G_DISTRO_NAME (ID=$G_DISTRO)"; exit 1;;
 esac
 for i in "${adeps[@]}"
@@ -22,18 +22,18 @@ do
 	exit 1
 done
 
-G_DIETPI-NOTIFY 2 'Downloading source code...'
+G_DIETPI-NOTIFY 2 'Downloading source code ...'
 G_EXEC cd /tmp
 G_EXEC curl -sSfLO 'https://github.com/ralph-irving/squeezelite/archive/master.tar.gz'
 [[ -d 'squeezelite-master' ]] && G_EXEC rm -R squeezelite-master
 G_EXEC tar xf master.tar.gz
 G_EXEC rm master.tar.gz
-G_DIETPI-NOTIFY 2 'Compiling binary...'
+G_DIETPI-NOTIFY 2 'Compiling binary ...'
 G_EXEC cd squeezelite-master
 G_EXEC_OUTPUT=1 G_EXEC make CFLAGS='-g0 -O3' OPTS='-DDSD -DFFMPEG -DRESAMPLE -DVISEXPORT -DLINKALL -DIR -DUSE_SSL'
 G_EXEC strip --remove-section=.comment --remove-section=.note squeezelite
 
-G_DIETPI-NOTIFY 2 'Starting packaging...'
+G_DIETPI-NOTIFY 2 'Starting packaging ...'
 
 # Package dir
 G_EXEC cd /tmp
@@ -157,6 +157,7 @@ old_version=$(dpkg-deb -f package.deb Version)
 G_EXEC rm package.deb
 suffix=${old_version#*-dietpi}
 [[ $old_version == "$version-"* ]] && suffix="dietpi$((suffix+1))" || suffix="dietpi1"
+G_DIETPI-NOTIFY 2 "Building package version $version-$suffix ..."
 
 # - control
 cat << _EOF_ > "$DIR/DEBIAN/control"
@@ -190,7 +191,7 @@ G_CONFIG_INJECT 'Installed-Size: ' "Installed-Size: $(du -sk "$DIR" | mawk '{pri
 G_EXEC_OUTPUT=1 G_EXEC dpkg-deb -b "$DIR"
 
 # Cleanup
-G_EXEC rm -R "$DIR"
+G_EXEC rm -R "$DIR" squeezelite-master
 
 exit 0
 }

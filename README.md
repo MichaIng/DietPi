@@ -255,6 +255,7 @@ Links to hardware and software manufacturers, sources and build instructions use
 - [PiVPN](https://github.com/pivpn/pivpn)
 - [WireGuard](https://www.wireguard.com/)
 - [Amiberry](https://github.com/BlitterStudio/amiberry)
+- [Amiberry-Lite](https://github.com/BlitterStudio/amiberry-lite)
 - [OpenTyrian](https://bitbucket.org/opentyrian/opentyrian/wiki/Home)
 - [RPi Cam Web Interface](https://github.com/silvanmelchior/RPi_Cam_Web_Interface)
 - [Deluge](https://dev.deluge-torrent.org/wiki/Development#SourceCode)
@@ -341,6 +342,7 @@ Links to hardware and software manufacturers, sources and build instructions use
 - [Kavita](https://github.com/Kareadita/Kavita)
 - [Forgejo](https://codeberg.org/forgejo/forgejo)
 - [soju](https://github.com/emersion/soju)
+- [fish](https://github.com/fish-shell/fish-shell)
 
 ---
 

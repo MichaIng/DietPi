@@ -100,6 +100,7 @@ Process_Software()
 			2) aSERVICES[i]='fahclient' aTCP[i]='7396';;
 			7) aCOMMANDS[i]='ffmpeg -version';;
 			9) aCOMMANDS[i]='node -v';;
+			10) aCOMMANDS[i]='LD_LIBRARY_PATH=$(find /usr/lib/*/amiberry-lite -maxdepth 0) amiberry-lite -h | grep '\''^$VER: Amiberry-Lite '\';;
 			#16) aSERVICES[i]='microblog-pub' aTCP[i]='8007';; Service enters a CPU-intense internal error loop until it has been configured interactively via "microblog-pub configure", hence it is not enabled and started anymore after install but instead as part of "microblog-pub configure"
 			17) aCOMMANDS[i]='git --version';; # from Bookworm on, the shorthand "-v" is supported
 			28) aSERVICES[i]='vncserver' aTCP[i]='5901';;
@@ -142,7 +143,11 @@ Process_Software()
 			85) aSERVICES[i]='nginx' aTCP[i]='80';;
 			#86) aSERVICES[i]='roon-extension-manager';; # Docker does not start in systemd containers (without dedicated network)
 			88) aSERVICES[i]='mariadb' aTCP[i]='3306';;
-			89) case $DISTRO in 'bullseye') aSERVICES[i]='php7.4-fpm';; *) aSERVICES[i]='php8.2-fpm';; esac;;
+			89) case $DISTRO in
+				'bullseye') aSERVICES[i]='php7.4-fpm';;
+				'bookworm') aSERVICES[i]='php8.2-fpm';;
+				*) aSERVICES[i]='php8.4-fpm';;
+			esac;;
 			91) aSERVICES[i]='redis-server' aTCP[i]='6379';;
 			93) aSERVICES[i]='pihole-FTL' aUDP[i]='53';;
 			94) aSERVICES[i]='proftpd' aTCP[i]='21';;
@@ -156,7 +161,7 @@ Process_Software()
 			105) aSERVICES[i]='ssh' aTCP[i]='22';;
 			106) aSERVICES[i]='lidarr' aTCP[i]='8686';;
 			107) aSERVICES[i]='rtorrent' aTCP[i]='49164' aUDP[i]='6881';;
-			108) aCOMMANDS[i]='LD_LIBRARY_PATH=/mnt/dietpi_userdata/amiberry/lib /mnt/dietpi_userdata/amiberry/amiberry -h | grep '\''^$VER: Amiberry '\';;
+			108) (( $arch == 1 )) && aCOMMANDS[i]='LD_LIBRARY_PATH=/mnt/dietpi_userdata/amiberry/lib /mnt/dietpi_userdata/amiberry/amiberry -h | grep '\''^$VER: Amiberry '\' || aCOMMANDS[i]='LD_LIBRARY_PATH=$(find /usr/lib/*/amiberry -maxdepth 0) amiberry -h | grep '\''^$VER: Amiberry '\';;
 			109) aSERVICES[i]='nfs-kernel-server' aTCP[i]='2049';;
 			110) aCOMMANDS[i]='mount.nfs -V';;
 			111) aSERVICES[i]='urbackupsrv' aTCP[i]='55414';;
