@@ -16,6 +16,8 @@ adeps=('libdrm2' 'libgl1-mesa-dri' 'libgbm1' 'libegl1' 'libudev1' 'libxml2' 'lib
 [[ $PLATFORM == 'rpi'[1-5] || $PLATFORM == 'rpi'[345]'-64-dmx' ]] && adeps_build+=('libraspberrypi-dev') adeps+=('libraspberrypi0')
 # - Graphics rendering flags and deps
 (( $G_HW_ARCH == 10 )) && opengl_flags=('--disable-video-opengles2' '--enable-video-opengl') adeps_build+=('libgl1-mesa-dev') adeps+=('libgl1') || opengl_flags=('--enable-video-opengles2' '--disable-video-opengl') adeps_build+=('libgles2-mesa-dev') adeps+=('libgles2')
+# - RPi Trixie: Update RPi repo
+[[ $PLATFORM == 'rpi'[1-5]* ]] && (( $G_DISTRO > 7 )) && G_EXEC sed --follow-symlinks -i 's/bookworm/trixie/' /etc/apt/sources.list.d/raspi.list
 
 G_AGUP
 G_AGDUG "${adeps_build[@]}"
