@@ -28,7 +28,7 @@ do
 done
 
 # Build libSDL2
-v_sdl=$(curl -sSf 'https://api.github.com/repos/libsdl-org/SDL/releases/latest' | mawk -F\" '/^  "name"/{print $4}')
+v_sdl=$(curl -sSf 'https://api.github.com/repos/libsdl-org/SDL/releases/latest' | mawk -F\" '/^ *"name": "2./{print $4}' | head -1)
 [[ $v_sdl ]] || { G_DIETPI-NOTIFY 1 'No latest LibSDL2 version found, aborting ...'; exit 1; }
 if [[ ! -d /tmp/SDL2-$v_sdl ]]
 then
@@ -48,7 +48,7 @@ else
 fi
 
 # Build libSDL2_image
-v_img=$(curl -sSf 'https://api.github.com/repos/libsdl-org/SDL_image/releases/latest' | mawk -F\" '/^  "name"/{print $4}')
+v_img=$(curl -sSf 'https://api.github.com/repos/libsdl-org/SDL_image/releases/latest' | mawk -F\" '/^ *"name": "2./{print $4}' | head -1)
 [[ $v_img ]] || { G_DIETPI-NOTIFY 1 'No latest libSDL2_image version found, aborting ...'; exit 1; }
 if [[ ! -d /tmp/SDL2_image-$v_img ]]
 then
@@ -68,7 +68,7 @@ else
 fi
 
 # Build libSDL2_ttf
-v_ttf=$(curl -sSf 'https://api.github.com/repos/libsdl-org/SDL_ttf/releases/latest' | mawk -F\" '/^  "name"/{print $4}')
+v_ttf=$(curl -sSf 'https://api.github.com/repos/libsdl-org/SDL_ttf/releases/latest' | mawk -F\" '/^ *"name": "2./{print $4}' | head -1)
 [[ $v_ttf ]] || { G_DIETPI-NOTIFY 1 'No latest libSDL2_ttf version found, aborting ...'; exit 1; }
 if [[ ! -d /tmp/SDL2_ttf-$v_ttf ]]
 then
