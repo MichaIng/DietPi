@@ -438,13 +438,21 @@ fi
 # Workaround for failing systemd services in emulated container: https://gitlab.com/qemu-project/qemu/-/issues/1962, https://github.com/systemd/systemd/issues/31219
 if (( $emulation ))
 then
-	for i in rootfs/usr/lib/systemd/system/*.service
+	for i in rootfs/{usr/,}lib/systemd/system/*.service
 	do
 		grep -Eq '^(Load|Import)Credential=' "$i" || continue
-		G_EXEC mkdir "${i/usr\/lib/etc}.d"
-		G_EXEC eval "echo -e '[Service]\nLoadCredential=\nImportCredential=' > ${i/usr\/lib/etc}.d/dietpi-no-credentials.conf"
+		G_EXEC mkdir "${i/*\/lib/\/etc}.d"
+		if (( $DISTRO < 8 ))
+		then
+			G_EXEC eval "echo -e '[Service]\nLoadCredential=' > \"${i/*\/lib/\/etc}.d/dietpi-no-credentials.conf\""
+		else
+			G_EXEC eval "echo -e '[Service]\nImportCredential=' > \"${i/*\/lib/\/etc}.d/dietpi-no-credentials.conf\""
+		fi
 	done
 fi
+# Force ARMv6 arch on Raspbian
+# shellcheck disable=SC2015
+(( $HW_ARCH > 1 )) || { echo -e '#/bin/dash\n[ "$*" = -m ] && echo armv6l || /bin/uname "$@"' > rootfs/usr/local/bin/uname && G_EXEC chmod +x rootfs/usr/local/bin/uname; } || Error_Exit 'Failed to generate /usr/local/bin/uname for ARMv6'
 # ARMv6/7 Trixie: Workaround failing chpasswd, which tries to access /proc/sys/vm/mmap_min_addr, but fails as of AppArmor on the host
 if (( $HW_ARCH < 3 && $DISTRO == 8 )) && systemctl -q is-active apparmor
 then
@@ -495,6 +503,7 @@ fi
 systemd-nspawn -bD rootfs "${abind[@]}" || { G_DIETPI-NOTIFY 1 'systemd-nspawn failed, aborting ...'; journalctl -n 25; ss -tlpn; df -h; free -h; exit 1; }
 
 # Undo workarounds
+(( $HW_ARCH == 1 )) && G_EXEC rm rootfs/usr/local/bin/uname
 for i in rootfs/etc/systemd/system/*.service.d/dietpi-no-credentials.conf
 do
 	[[ $i == 'rootfs/etc/systemd/system/*.service.d/dietpi-no-credentials.conf' ]] && break
@@ -647,14 +656,19 @@ then
 
 	# Install Allo GUI via automated first run setup right here
 	G_CONFIG_INJECT 'AUTO_SETUP_AUTOMATED=' 'AUTO_SETUP_AUTOMATED=1' rootfs/boot/dietpi.txt
-	# - Workaround for failing systemd services and hence missing autologin in emulated Trixie containers: https://gitlab.com/qemu-project/qemu/-/issues/1962, https://github.com/systemd/systemd/issues/31219
-	if (( $DISTRO == 8 && $G_HW_ARCH != $HW_ARCH && ( $G_HW_ARCH > 9 || $G_HW_ARCH < $HW_ARCH ) ))
+	# Workaround for failing systemd services in emulated container: https://gitlab.com/qemu-project/qemu/-/issues/1962, https://github.com/systemd/systemd/issues/31219
+	if (( $emulation ))
 	then
-		for i in rootfs/usr/lib/systemd/system/*.service
+		for i in rootfs/{usr/,}lib/systemd/system/*.service
 		do
-			grep -q '^ImportCredential=' "$i" || continue
-			G_EXEC mkdir "${i/usr\/lib/etc}.d"
-			G_EXEC eval "echo -e '[Service]\nImportCredential=' > ${i/usr\/lib/etc}.d/dietpi-no-ImportCredential.conf"
+			grep -Eq '^(Load|Import)Credential=' "$i" || continue
+			G_EXEC mkdir "${i/*\/lib/\/etc}.d"
+			if (( $DISTRO < 8 ))
+			then
+				G_EXEC eval "echo -e '[Service]\nLoadCredential=' > \"${i/*\/lib/\/etc}.d/dietpi-no-credentials.conf\""
+			else
+				G_EXEC eval "echo -e '[Service]\nImportCredential=' > \"${i/*\/lib/\/etc}.d/dietpi-no-credentials.conf\""
+			fi
 		done
 	fi
 	G_CONFIG_INJECT 'AUTO_SETUP_INSTALL_SOFTWARE_ID=' 'AUTO_SETUP_INSTALL_SOFTWARE_ID=159' rootfs/boot/dietpi.txt
@@ -740,8 +754,14 @@ _EOF_
 	# Reset IPv4 network connectivity check setting
 	G_CONFIG_INJECT 'CONFIG_CHECK_CONNECTION_IP=' 'CONFIG_CHECK_CONNECTION_IP=9.9.9.9' rootfs/boot/dietpi.txt
 
-	# Revert ARMv6 Workaround
+	# Undo workarounds
 	(( $HW_ARCH == 1 )) && G_EXEC rm rootfs/usr/local/bin/uname
+	for i in rootfs/etc/systemd/system/*.service.d/dietpi-no-credentials.conf
+	do
+		[[ $i == 'rootfs/etc/systemd/system/*.service.d/dietpi-no-credentials.conf' ]] && break
+		G_EXEC rm "$i"
+		G_EXEC rmdir --ignore-fail-on-non-empty "${i%/dietpi-no-credentials.conf}"
+	done
 
 	[[ -f 'rootfs/success' ]] || { G_DIETPI-NOTIFY 1 'The container setup did not finish successfully, aborting ...'; journalctl -n 25; ss -tlpn; df -h; free -h; exit 1; }
 	G_EXEC rm rootfs/success

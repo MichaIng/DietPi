@@ -357,11 +357,16 @@ G_CONFIG_INJECT 'AUTO_SETUP_AUTOMATED=' 'AUTO_SETUP_AUTOMATED=1' rootfs/boot/die
 # Workaround for failing systemd services in emulated container: https://gitlab.com/qemu-project/qemu/-/issues/1962, https://github.com/systemd/systemd/issues/31219
 if (( $emulation ))
 then
-	for i in rootfs/usr/lib/systemd/system/*.service
+	for i in rootfs/{usr/,}lib/systemd/system/*.service
 	do
 		grep -Eq '^(Load|Import)Credential=' "$i" || continue
-		G_EXEC mkdir "${i/usr\/lib/etc}.d"
-		G_EXEC eval "echo -e '[Service]\nLoadCredential=\nImportCredential=' > ${i/usr\/lib/etc}.d/dietpi-no-credentials.conf"
+		G_EXEC mkdir "${i/*\/lib/\/etc}.d"
+		if [[ $DISTRO == 'bullseye' || $DISTRO == 'bookworm' ]]
+		then
+			G_EXEC eval "echo -e '[Service]\nLoadCredential=' > \"${i/*\/lib/\/etc}.d/dietpi-no-credentials.conf\""
+		else
+			G_EXEC eval "echo -e '[Service]\nImportCredential=' > \"${i/*\/lib/\/etc}.d/dietpi-no-credentials.conf\""
+		fi
 	done
 fi
 
