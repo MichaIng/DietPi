@@ -359,7 +359,9 @@ if (( $emulation ))
 then
 	for i in rootfs/{usr/,}lib/systemd/system/*.service
 	do
+		[[ -f $i ]] || continue
 		grep -Eq '^(Load|Import)Credential=' "$i" || continue
+		[[ -f ${i/*\/lib/\/etc}.d/dietpi-no-credentials.conf ]] && continue
 		G_EXEC mkdir "${i/*\/lib/\/etc}.d"
 		if [[ $DISTRO == 'bullseye' || $DISTRO == 'bookworm' ]]
 		then
