@@ -175,11 +175,11 @@ esac
 repo='https://deb.debian.org/debian/'
 keyring='/usr/share/keyrings/debian-archive-keyring.gpg'
 case $HW_ARCH in
-	1) iarch='ARMv6' parch='armhf' repo='http://raspbian.raspberrypi.com/raspbian/' keyring='/usr/share/keyrings/raspbian-archive-keyring.gpg';;
-	2) iarch='ARMv7' parch='armhf';;
-	3) iarch='ARMv8' parch='arm64';;
-	10) iarch='x86_64' parch='amd64';;
-	11) iarch='RISC-V' parch='riscv64' DISTRO=8;; # RISC-V architecture is available on Trixie only.
+	1) arch='armv6l' iarch='ARMv6' parch='armhf' repo='http://raspbian.raspberrypi.com/raspbian/' keyring='/usr/share/keyrings/raspbian-archive-keyring.gpg';;
+	2) arch='armv7l' iarch='ARMv7' parch='armhf';;
+	3) arch='aarch64' iarch='ARMv8' parch='arm64';;
+	10) arch='x86_64' iarch='x86_64' parch='amd64';;
+	11) arch='riscv64' iarch='RISC-V' parch='riscv64' DISTRO=8;; # RISC-V architecture is available on Trixie only.
 	*) Error_Exit "Invalid architecture \"$HW_ARCH\" passed. Aborting ...";;
 esac
 
@@ -451,9 +451,14 @@ then
 		fi
 	done
 fi
-# Force ARMv6 arch on Raspbian
-# shellcheck disable=SC2015
-(( $HW_ARCH > 1 )) || { echo -e '#/bin/dash\n[ "$*" = -m ] && echo armv6l || /bin/uname "$@"' > rootfs/usr/local/bin/uname && G_EXEC chmod +x rootfs/usr/local/bin/uname; } || Error_Exit 'Failed to generate /usr/local/bin/uname for ARMv6'
+
+# Enforce target ARM arch in containers with newer host/emulated ARM version
+if (( $HW_ARCH < 3 && $G_HW_ARCH != $HW_ARCH ))
+then
+	# shellcheck disable=SC2015
+	echo -e "#/bin/dash\n[ \"\$*\" = -m ] && echo $arch || /bin/uname \"\$@\"" > rootfs/usr/local/bin/uname && G_EXEC chmod +x rootfs/usr/local/bin/uname || Error_Exit "Failed to generate /usr/local/bin/uname for $arch"
+fi
+
 # ARMv6/7 Trixie: Workaround failing chpasswd, which tries to access /proc/sys/vm/mmap_min_addr, but fails as of AppArmor on the host
 if (( $HW_ARCH < 3 && $DISTRO == 8 )) && systemctl -q is-active apparmor
 then
@@ -504,7 +509,7 @@ fi
 systemd-nspawn -bD rootfs "${abind[@]}" || { G_DIETPI-NOTIFY 1 'systemd-nspawn failed, aborting ...'; journalctl -n 25; ss -tlpn; df -h; free -h; exit 1; }
 
 # Undo workarounds
-(( $HW_ARCH == 1 )) && G_EXEC rm rootfs/usr/local/bin/uname
+[[ -f 'rootfs/usr/local/bin/uname' ]] && G_EXEC rm rootfs/usr/local/bin/uname
 for i in rootfs/etc/systemd/system/*.service.d/dietpi-no-credentials.conf
 do
 	[[ $i == 'rootfs/etc/systemd/system/*.service.d/dietpi-no-credentials.conf' ]] && break
@@ -677,9 +682,12 @@ then
 	# Revert autostart option, in case Amiberry image was generated before
 	G_CONFIG_INJECT 'AUTO_SETUP_AUTOSTART_TARGET_INDEX=' 'AUTO_SETUP_AUTOSTART_TARGET_INDEX=0' rootfs/boot/dietpi.txt
 
-	# Force ARMv6 arch on Raspbian
-	# shellcheck disable=SC2015
-	(( $HW_ARCH > 1 )) || { echo -e '#/bin/dash\n[ "$*" = -m ] && echo armv6l || /bin/uname "$@"' > rootfs/usr/local/bin/uname && G_EXEC chmod +x rootfs/usr/local/bin/uname; } || Error_Exit 'Failed to generate /usr/local/bin/uname for ARMv6'
+	# Enforce target ARM arch in containers with newer host/emulated ARM version
+	if (( $HW_ARCH < 3 && $G_HW_ARCH != $HW_ARCH ))
+	then
+		# shellcheck disable=SC2015
+		echo -e "#/bin/dash\n[ \"\$*\" = -m ] && echo $arch || /bin/uname \"\$@\"" > rootfs/usr/local/bin/uname && G_EXEC chmod +x rootfs/usr/local/bin/uname || Error_Exit "Failed to generate /usr/local/bin/uname for $arch"
+	fi
 
 	# Skip filesystem expansion
 	G_EXEC rm rootfs/etc/systemd/system/local-fs.target.wants/dietpi-fs_partition_resize.service
@@ -757,7 +765,7 @@ _EOF_
 	G_CONFIG_INJECT 'CONFIG_CHECK_CONNECTION_IP=' 'CONFIG_CHECK_CONNECTION_IP=9.9.9.9' rootfs/boot/dietpi.txt
 
 	# Undo workarounds
-	(( $HW_ARCH == 1 )) && G_EXEC rm rootfs/usr/local/bin/uname
+	[[ -f 'rootfs/usr/local/bin/uname' ]] && G_EXEC rm rootfs/usr/local/bin/uname
 	for i in rootfs/etc/systemd/system/*.service.d/dietpi-no-credentials.conf
 	do
 		[[ $i == 'rootfs/etc/systemd/system/*.service.d/dietpi-no-credentials.conf' ]] && break
