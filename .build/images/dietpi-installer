@@ -328,6 +328,7 @@ _EOF_
 		# - NBB: DO NOT REORDER INDICES. These are now fixed and will never change (due to survey results etc)
 		G_WHIP_BUTTON_CANCEL_TEXT='Exit'
 		G_WHIP_DEFAULT_ITEM=0
+		local userland_arch=$(dpkg --print-architecture)
 		case $G_HW_ARCH in
 			1)
 				if findmnt -M /boot/firmware &> /dev/null
@@ -343,7 +344,6 @@ _EOF_
 				fi
 			;;
 			2|3)
-				userland_arch=$(dpkg --print-architecture)
 				G_DIETPI-NOTIFY 2 "Detected target userland/OS architecture: $userland_arch"
 				if [[ $userland_arch == 'armhf' ]]
 				then
@@ -1025,30 +1025,22 @@ setenv rootuuid "true"' /boot/boot.cmd
 
 		### Kernel/bootloader/initramfs packages: We need to install those directly to allow G_AGA() autoremove possible older packages later: https://github.com/MichaIng/DietPi/issues/1285#issuecomment-354602594
 
-		# x86_64 PCs and VMs
-		if [[ $G_HW_ARCH == 10 && $G_HW_MODEL =~ ^(20|21)$ ]]
+		# PCs and VMs
+		if [[ $G_HW_MODEL =~ ^(20|21)$ ]]
 		then
-			local apackages=('linux-image-amd64' 'os-prober')
+			# Install and use zstd for better initramfs compression
+			local apackages=("linux-image-$userland_arch" 'initramfs-tools' 'zstd')
+			G_CONFIG_INJECT 'COMPRESS=' 'COMPRESS=zstd' /etc/initramfs-tools/initramfs.conf
 
-			# As linux-image-amd64 pulls initramfs, pre-install the intended implementation here already
-			if (( $G_HW_MODEL == 20 ))
+			# VM: Enable systemd-logind by default for ACPI functionality, required for shutdown/reboot via virtualiser
+			(( $G_HW_MODEL == 20 )) && G_CONFIG_INJECT 'AUTO_UNMASK_LOGIND=' 'AUTO_UNMASK_LOGIND=1' /boot/dietpi.txt
+
+			# GRUB EFI with secure boot compatibility
+			if (( $G_HW_ARCH != 10 )) || [[ -d '/boot/efi' ]] || dpkg-query -s "grub-efi-$userland_arch" &> /dev/null
 			then
-				# VM: Install tiny-initramfs with limited features but sufficient and much smaller + faster
-				apackages+=('tiny-initramfs')
-				# Enable systemd-logind by default for ACPI functionality, required for shutdown/reboot via virtualiser
-				G_CONFIG_INJECT 'AUTO_UNMASK_LOGIND=' 'AUTO_UNMASK_LOGIND=1' /boot/dietpi.txt
-			else
-				# Install and use zstd for better initramfs compression
-				apackages+=('initramfs-tools' 'zstd')
-				G_CONFIG_INJECT 'COMPRESS=' 'COMPRESS=zstd' /etc/initramfs-tools/initramfs.conf
-			fi
+				apackages+=("grub-efi-$userland_arch" "grub-efi-$userland_arch-signed" 'shim-signed')
 
-			# Grub EFI with secure boot compatibility
-			if [[ -d '/boot/efi' ]] || dpkg-query -s 'grub-efi-amd64' &> /dev/null
-			then
-				apackages+=('grub-efi-amd64' 'grub-efi-amd64-signed' 'shim-signed')
-
-			# Grub BIOS
+			# GRUB BIOS
 			else
 				apackages+=('grub-pc')
 			fi
@@ -2087,18 +2079,8 @@ _EOF_'
 		then
 			G_EXEC_DESC='Removing foreign i386 DPKG architecture' G_EXEC dpkg --remove-architecture i386
 
-			# Fix grub install device: https://github.com/MichaIng/DietPi/issues/3700
+			# Fix GRUB install device: https://github.com/MichaIng/DietPi/issues/3700
 			dpkg-query -s grub-pc &> /dev/null && G_EXEC eval 'debconf-set-selections <<< '\''grub-pc grub-pc/install_devices multiselect /dev/sda'\'
-
-			# Update initramfs with above changes
-			if command -v update-tirfs > /dev/null
-			then
-				G_EXEC_OUTPUT=1 G_EXEC update-tirfs
-
-			elif command -v update-initramfs > /dev/null
-			then
-				G_EXEC_OUTPUT=1 G_EXEC update-initramfs -u
-			fi
 
 		elif (( $G_HW_ARCH == 3 ))
 		then
@@ -2316,24 +2298,32 @@ _EOF_
 			/boot/dietpi/func/dietpi-set_hardware wifimodules "$tmp_mode"
 		fi
 
-		# - x86_64: GRUB install and config
-		if (( $G_HW_ARCH == 10 && $G_HW_MODEL != 75 ))
+		# Update initramfs
+		command -v 'update-initramfs' &> /dev/null && G_EXEC_OUTPUT=1 G_EXEC update-initramfs -u
+
+		# GRUB install and config
+		if dpkg-query -s 'grub2-common' &> /dev/null
 		then
 			# UEFI
-			if [[ -d '/boot/efi' ]] && dpkg-query -s 'grub-efi-amd64' &> /dev/null
+			if [[ -d '/boot/efi' ]] && dpkg-query -s "grub-efi-$userland_arch" &> /dev/null
 			then
 				# Force GRUB installation to the EFI removable media path, if no (other) bootloader is installed there yet, which is checked via single case-insensitive glob
+				case $G_HW_ARCH in
+					3) local grub_arch='aa64';;
+					11) local grub_arch='riscv64';;
+					*) local grub_arch='x64';;
+				esac
 				shopt -s nocaseglob
 				local efi_fallback=()
 				# shellcheck disable=SC2043
-				for i in /boot/efi/EFI/boot/bootx64.efi
+				for i in /boot/efi/EFI/boot/boot$grub_arch.efi*
 				do
 					[[ -e $i ]] && break
 					efi_fallback=('--force-extra-removable')
-					G_EXEC eval 'debconf-set-selections <<< '\''grub-efi-amd64 grub2/force_efi_extra_removable boolean true'\'
+					G_EXEC eval "debconf-set-selections <<< 'grub-efi-$userland_arch grub2/force_efi_extra_removable boolean true'"
 				done
 				shopt -u nocaseglob
-				G_EXEC_DESC='Installing GRUB for UEFI' G_EXEC_OUTPUT=1 G_EXEC grub-install --recheck --target=x86_64-efi --efi-directory=/boot/efi "${efi_fallback[@]}" --uefi-secure-boot
+				G_EXEC_DESC='Installing GRUB for UEFI' G_EXEC_OUTPUT=1 G_EXEC grub-install --recheck --target="${userland_arch/amd64/x86_64}-efi" --efi-directory=/boot/efi "${efi_fallback[@]}" --uefi-secure-boot
 
 			# BIOS
 			else
