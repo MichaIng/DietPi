@@ -95,9 +95,7 @@ G_EXEC truncate -s 8G "$image"
 
 # Mount as loop device
 FP_LOOP=$(losetup -f)
-G_EXEC losetup "$FP_LOOP" "$image"
-G_EXEC partprobe "$FP_LOOP"
-G_EXEC partx -u "$FP_LOOP"
+G_EXEC losetup -P "$FP_LOOP" "$image"
 G_EXEC_OUTPUT=1 G_EXEC e2fsck -fp "${FP_LOOP}p1"
 G_EXEC_OUTPUT=1 G_EXEC eval "sfdisk -fN1 '$FP_LOOP' <<< ',+'"
 G_EXEC partprobe "$FP_LOOP"
