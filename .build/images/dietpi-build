@@ -16,14 +16,13 @@ else
 	export G_GITOWNER G_GITBRANCH G_HW_ARCH_NAME=$(uname -m)
 	read -r debian_version < /etc/debian_version
 	case $debian_version in
-		'11.'*|'bullseye/sid') G_DISTRO=6;;
 		'12.'*|'bookworm/sid') G_DISTRO=7;;
 		'13.'*|'trixie/sid') G_DISTRO=8;;
 		*) Error_Exit "Unsupported distro version \"$debian_version\". Aborting ...";;
 	esac
 	# Ubuntu ships with /etc/debian_version from Debian testing, hence we assume one version lower.
 	grep -q '^ID=ubuntu' /etc/os-release && ((G_DISTRO--))
-	(( $G_DISTRO < 6 )) && Error_Exit 'Unsupported Ubuntu version. Aborting ...'
+	(( $G_DISTRO < 7 )) && Error_Exit 'Unsupported Ubuntu version. Aborting ...'
 fi
 case $G_HW_ARCH_NAME in
 	'armv6l') export G_HW_ARCH=1;;
@@ -230,10 +229,7 @@ fi
 
 # Emulation support in case of incompatible architecture
 emulation=0
-(( $G_HW_ARCH == $HW_ARCH || ( $G_HW_ARCH < 10 && $G_HW_ARCH > $HW_ARCH ) )) || emulation=1
-
-# Bullseye/Jammy: binfmt-support still required for emulation. With systemd-binfmt only, mmdebstrap throws "E: <arch> can neither be executed natively nor via qemu user emulation with binfmt_misc"
-(( $emulation )) && { apackages+=('qemu-user-static'); (( $G_DISTRO < 7 )) && apackages+=('binfmt-support'); }
+(( $G_HW_ARCH == $HW_ARCH || ( $G_HW_ARCH < 10 && $G_HW_ARCH > $HW_ARCH ) )) || emulation=1 apackages+=('qemu-user-static')
 
 # Virtual machine disk conversion
 [[ $HW_MODEL == 20 && ! $VARIANT =~ ^(|iso)$ ]] && apackages+=('qemu-utils')
@@ -241,16 +237,7 @@ emulation=0
 G_AG_CHECK_INSTALL_PREREQ --no-install-recommends parted mmdebstrap systemd-container xz-utils "${apackages[@]}"
 
 # Register QEMU binfmt configs
-if (( $emulation ))
-then
-	if (( $G_DISTRO < 7 ))
-	then
-		G_EXEC systemctl disable --now systemd-binfmt
-		G_EXEC systemctl restart binfmt-support
-	else
-		G_EXEC systemctl restart systemd-binfmt
-	fi
-fi
+(( $emulation )) && G_EXEC systemctl restart systemd-binfmt
 
 # Bootstrap archive keyring if missing
 if [[ ! -f $keyring ]]
@@ -402,13 +389,12 @@ _EOF_
 # debootstrap
 ##########################################
 # Add temporary tmpfs mounts to prevent certain files created by debootstrap being written to disk
-# - "-o X-mount.mkdir" has a shortcut "-m" in recent "mount", but not available on Ubuntu Jammy yet!
 # - tmpfs mounts have 1777 mode by default.
-G_EXEC mount -o X-mount.mkdir,mode=0755 -t tmpfs tmpfs rootfs/dev
-G_EXEC mount -o X-mount.mkdir,mode=0755 -t tmpfs tmpfs rootfs/run
-G_EXEC mount -o X-mount.mkdir,mode=0755 -t tmpfs tmpfs rootfs/var/cache/apt
-G_EXEC mount -o X-mount.mkdir,mode=0755 -t tmpfs tmpfs rootfs/var/lib/apt/lists
-G_EXEC mount -o X-mount.mkdir,mode=0755 -t tmpfs tmpfs rootfs/var/log
+G_EXEC mount -m -t tmpfs tmpfs rootfs/dev
+G_EXEC mount -m -t tmpfs tmpfs rootfs/run
+G_EXEC mount -m -t tmpfs tmpfs rootfs/var/cache/apt
+G_EXEC mount -m -t tmpfs tmpfs rootfs/var/lib/apt/lists
+G_EXEC mount -m -t tmpfs tmpfs rootfs/var/log
 # Workaround for missing apt-key on Trixie, used by raspbian-archive-keyring
 if (( $HW_ARCH == 1 && $DISTRO == 8 ))
 then
@@ -421,8 +407,7 @@ packages='apt,bash-completion,bzip2,ca-certificates,cron,curl,fdisk,gpg,htop,ipu
 [[ $HW_MODEL == 75 ]] && packages+='iproute2' || packages+='console-setup,dropbear,ethtool,fake-hwclock,ifupdown,isc-dhcp-client,kmod,rfkill,systemd-timesyncd,usbutils'
 # - "--skip=check/empty" to ignore /etc/fstab, boot and tmpfs mounts we added above
 # - "--skip=check/qemu" to skip arch test, which requires the "arch-test" package. We however assure emulation support our end.
-# - Bullseye/Jammy host mmdebstrap does not support "--skip=check/empty,check/qemu".
-G_EXEC_OUTPUT=1 G_EXEC mmdebstrap --mode=root --format=dir --skip=check/empty --skip=check/qemu --variant=minbase --include="$packages" --arch="$parch" --keyring="$keyring" "$distro" ./rootfs "$repo"
+G_EXEC_OUTPUT=1 G_EXEC mmdebstrap --mode=root --format=dir --skip=check/empty,check/qemu --variant=minbase --include="$packages" --arch="$parch" --keyring="$keyring" "$distro" ./rootfs "$repo"
 G_EXEC umount rootfs/dev rootfs/run rootfs/var/cache/apt rootfs/var/lib/apt/lists rootfs/var/log
 # Undo workaround for missing apt-key on Trixie, used by raspbian-archive-keyring
 if (( $HW_ARCH == 1 && $DISTRO == 8 ))
