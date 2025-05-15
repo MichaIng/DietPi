@@ -348,5 +348,5 @@ Links to hardware and software manufacturers, sources and build instructions use
 
 <p align="center">
 	<img src="https://www.login-online.com/assets/images/logo-systemhaus-236x121.jpg" alt="LOGIN SystemHaus GmbH logo" width="236" height="121" loading="lazy">
-	<br>DietPi's web hosting is powered by <a href="https://www.login-online.com/" target="_blank" rel="noopener">LOGIN SystemHaus GmbH</a>.
+	<br>DietPi's web hosting is powered by <a href="https://login-online.com/" target="_blank" rel="noopener">LOGIN SystemHaus GmbH</a>.
 </p>
