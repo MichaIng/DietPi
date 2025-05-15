@@ -35,6 +35,7 @@ $FP_SCRIPT	vf2-spi-update		Update StarFive VisionFive 2 SPI bootloader
 $FP_SCRIPT	flash-u-boot-mmc	[<device_path>] Flash U-Boot binary to eMMC/SD card, taking device path as optional argument, else flashes to /boot drive
 $FP_SCRIPT	gpudriver		none|intel|nvidia|amd|custom
 $FP_SCRIPT	qemu-guest-agent|qga	enable/disable
+$FP_SCRIPT	keyboard		[<layout>|autosetup] Apply input layout, dietpi.txt setting, or show menu to select one
 "	#////////////////////////////////////
 
 	# Grab Inputs
@@ -2369,6 +2370,56 @@ _EOF_
 		G_EXEC systemctl start qemu-guest-agent
 	}
 
+	Keyboard_Main()
+	{
+		until [[ -f '/usr/share/X11/xkb/rules/base.lst' ]]
+		do
+			G_WHIP_YESNO '[FAILED] No keyboard data found
+\nShall we try to fix this by (re)installing the related APT packages?' || return 1 && G_AGI --reinstall xkb-data keyboard-configuration
+		done
+
+		[[ $INPUT_DEVICE_VALUE == 'autosetup' ]] && INPUT_DEVICE_VALUE=$(sed -n '/^[[:blank:]]*AUTO_SETUP_KEYBOARD_LAYOUT=/{s/^[^=]*=//p;q}' /boot/dietpi.txt)
+
+		G_WHIP_MENU_ARRAY=('Advanced' ': Open extended keyboard config dalogue')
+		mapfile -tO 2 G_WHIP_MENU_ARRAY < <(mawk '/^! layout$/,/^$/{if ($1~/^[a-z]/) {print $1; sub(/^ *[^ ]* */,""); print ": "$0}}' /usr/share/X11/xkb/rules/base.lst)
+
+		local i G_WHIP_RETURNED_VALUE current error
+		[[ $INPUT_DEVICE_VALUE ]] && for ((i=2;i<"${#G_WHIP_MENU_ARRAY[@]}";i+=2))
+		do
+			[[ $INPUT_DEVICE_VALUE == "${G_WHIP_MENU_ARRAY[i]}" ]] && { G_WHIP_RETURNED_VALUE=${G_WHIP_MENU_ARRAY[i]}; break; }
+		done
+
+		if [[ ! $G_WHIP_RETURNED_VALUE ]]
+		then
+			[[ $INPUT_DEVICE_VALUE ]] && error="[FAILED] Invalid keyboard layout
+\nThe keyboard layout \"$INPUT_DEVICE_VALUE\" is not supported by this system. "
+
+			current=$(mawk -F\" '/^XKBLAYOUT=/{print $2}' /etc/default/keyboard)
+			G_WHIP_MENU "${error}Please select a keyboard layout from the list below.
+ - Current: \"$current\"
+\nIf you want to set keyboard model, layout variants, or further options, select \"Advanced\" for an extended dialogue. Else a generic 105-key keyboard, default layout variant and options are set." || return 0
+
+			[[ $G_WHIP_RETURNED_VALUE == 'Advanced' ]] && { dpkg-reconfigure keyboard-configuration || return 0; }
+		fi
+
+		if [[ $G_WHIP_RETURNED_VALUE == 'Advanced' ]]
+		then
+			G_WHIP_RETURNED_VALUE=$(mawk -F\" '/^XKBLAYOUT=/{print $2}' /etc/default/keyboard)
+		else
+			cat << _EOF_ > /etc/default/keyboard
+XKBMODEL="pc105"
+XKBLAYOUT="$G_WHIP_RETURNED_VALUE"
+XKBVARIANT=""
+XKBOPTIONS=""
+BACKSPACE="guess"
+_EOF_
+			G_EXEC_OUTPUT=1 G_EXEC_NOHALT=1 G_EXEC dpkg-reconfigure -f noninteractive keyboard-configuration || return $?
+		fi
+
+		G_EXEC_OUTPUT=1 G_EXEC_NOHALT=1 G_EXEC setupcon --save # https://bugs.debian.org/818065
+		G_CONFIG_INJECT 'AUTO_SETUP_KEYBOARD_LAYOUT=' "AUTO_SETUP_KEYBOARD_LAYOUT=$G_WHIP_RETURNED_VALUE" /boot/dietpi.txt
+	}
+
 	#/////////////////////////////////////////////////////////////////////////////////////
 	# Main Loop
 	#/////////////////////////////////////////////////////////////////////////////////////
@@ -2398,6 +2449,7 @@ _EOF_
 		'headless') Headless_Main;;
 		'gpudriver') GPUDriver_Main;;
 		'qemu-guest-agent'|'qga') QEMU_Guest_Agent_Main;;
+		'keyboard') Keyboard_Main || EXIT_CODE=$?;;
 		*) Unknown_Input_Name;;
 	esac
 	#-----------------------------------------------------------------------------------
