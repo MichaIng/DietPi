@@ -204,8 +204,8 @@ _EOF_
 		# Apply time zone
 		local autoinstall_timezone=$(sed -n '/^[[:blank:]]*AUTO_SETUP_TIMEZONE=/{s/^[^=]*=//p;q}' /boot/dietpi.txt)
 		local current_timezone=$(readlink /etc/localtime)
-		[[ $current_timezone ]] && current_timezone=${timezone#/usr/share/zoneinfo/} || current_timezone='UTC'
-		if [[ -f /usr/share/zoneinfo/$autoinstall_timezone && $autoinstall_timezone != $current_timezone ]]; then
+		[[ $current_timezone ]] && current_timezone=${current_timezone#/usr/share/zoneinfo/} || current_timezone='UTC'
+		if [[ -f /usr/share/zoneinfo/$autoinstall_timezone && $autoinstall_timezone != "$current_timezone" ]]; then
 
 			G_DIETPI-NOTIFY 2 "Setting time zone $autoinstall_timezone. Please wait..."
 			rm -fv /etc/{localtime,timezone}
