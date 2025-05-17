@@ -433,7 +433,7 @@ G_EXEC sed --follow-symlinks -i '/# Start DietPi-Software/a\sed -i '\''/G_EXEC s
 case $arch in
 	1)
 		G_EXEC sed --follow-symlinks -i '/# Start DietPi-Software/a\sed -i '\''s/--profile minimal .*$/--profile minimal --default-host arm-unknown-linux-gnueabihf/'\'' /boot/dietpi/dietpi-software' rootfs/boot/dietpi/dietpi-login
-		(( $G_HW_ARCH == 3 )) && G_EXEC 'echo '\''abi.cp15_barrier=2'\'' > rootfs/etc/sysctl.d/98-dietpi-cp15_barrier.conf'
+		(( $G_HW_ARCH == 3 )) && G_EXEC eval 'echo '\''abi.cp15_barrier=2'\'' > rootfs/etc/sysctl.d/98-dietpi-cp15_barrier.conf'
 	;;
 	2) G_EXEC sed --follow-symlinks -i '/# Start DietPi-Software/a\sed -i '\''s/maturin==1.7.8/maturin==1.7.8\nnumpy==2.2.6/'\'' /boot/dietpi/dietpi-software' rootfs/boot/dietpi/dietpi-login;;
 	*) :;;
