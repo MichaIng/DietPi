@@ -428,12 +428,16 @@ G_EXEC sed --follow-symlinks -i '/# Start DietPi-Software/a\sed -i '\''/G_EXEC s
 
 # ARMv6:
 # - Workaround for ARMv7 Rust toolchain selected in containers with newer host/emulated ARM version
-# - Workaround for failing numpy build due to: https://github.com/numpy/meson/pull/18
-if (( $arch == 1 ))
-then
-	G_EXEC sed --follow-symlinks -i '/# Start DietPi-Software/a\sed -i '\''s/--profile minimal .*$/--profile minimal --default-host arm-unknown-linux-gnueabihf/'\'' /boot/dietpi/dietpi-software' rootfs/boot/dietpi/dietpi-login
-	G_EXEC sed --follow-symlinks -i '/# Start DietPi-Software/a\sed -i '\''s/maturin==1.7.8/maturin==1.7.8\nnumpy==2.2.6/'\'' /boot/dietpi/dietpi-software' rootfs/boot/dietpi/dietpi-login
-fi
+# - Apply workaround for failing crates index update on ARMv8 host: https://github.com/rust-lang/cargo/issues/8719
+# ARMv7: Workaround for hanging Rust tools chain on ARMv8 host: https://github.com/MichaIng/DietPi/issues/6306#issuecomment-1515303702
+case $arch in
+	1)
+		G_EXEC sed --follow-symlinks -i '/# Start DietPi-Software/a\sed -i '\''s/--profile minimal .*$/--profile minimal --default-host arm-unknown-linux-gnueabihf/'\'' /boot/dietpi/dietpi-software' rootfs/boot/dietpi/dietpi-login
+		(( $G_HW_ARCH == 3 )) && G_EXEC 'echo '\''abi.cp15_barrier=2'\'' > rootfs/etc/sysctl.d/98-dietpi-cp15_barrier.conf'
+	;;
+	2) G_EXEC sed --follow-symlinks -i '/# Start DietPi-Software/a\sed -i '\''s/maturin==1.7.8/maturin==1.7.8\nnumpy==2.2.6/'\'' /boot/dietpi/dietpi-software' rootfs/boot/dietpi/dietpi-login;;
+	*) :;;
+esac
 
 # Check for service status, ports and commands
 # shellcheck disable=SC2016
