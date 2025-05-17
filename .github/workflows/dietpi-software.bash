@@ -209,12 +209,10 @@ Process_Software()
 			165) aSERVICES[i]='gitea' aTCP[i]='3000';;
 			#166) aSERVICES[i]='pi-spc';; Service cannot reasonably start in container as WirinPi's gpio command fails reading /proc/cpuinfo
 			167) aSERVICES[i]='raspotify';;
-			#169) aSERVICES[i]='voice-recognizer';; "RuntimeError: This module can only be run on a Raspberry Pi!"
 			170) aCOMMANDS[i]='unrar -V';;
 			171) aSERVICES[i]='frps frpc' aTCP[i]='7000 7400 7500';;
 			172) aSERVICES[i]='wg-quick@wg0' aUDP[i]='51820';;
 			174) aCOMMANDS[i]='gimp -v';;
-			176) aSERVICES[i]='mycroft';;
 			177) aSERVICES[i]='forgejo' aTCP[i]='3000';;
 			178) aSERVICES[i]='jellyfin' aTCP[i]='8097';;
 			179) aSERVICES[i]='komga' aTCP[i]='2037'; (( $emulation )) && aDELAY[i]=300 || aDELAY[i]=30;;
