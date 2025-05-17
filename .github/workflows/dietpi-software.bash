@@ -209,12 +209,10 @@ Process_Software()
 			165) aSERVICES[i]='gitea' aTCP[i]='3000';;
 			#166) aSERVICES[i]='pi-spc';; Service cannot reasonably start in container as WirinPi's gpio command fails reading /proc/cpuinfo
 			167) aSERVICES[i]='raspotify';;
-			#169) aSERVICES[i]='voice-recognizer';; "RuntimeError: This module can only be run on a Raspberry Pi!"
 			170) aCOMMANDS[i]='unrar -V';;
 			171) aSERVICES[i]='frps frpc' aTCP[i]='7000 7400 7500';;
 			172) aSERVICES[i]='wg-quick@wg0' aUDP[i]='51820';;
 			174) aCOMMANDS[i]='gimp -v';;
-			176) aSERVICES[i]='mycroft';;
 			177) aSERVICES[i]='forgejo' aTCP[i]='3000';;
 			178) aSERVICES[i]='jellyfin' aTCP[i]='8097';;
 			179) aSERVICES[i]='komga' aTCP[i]='2037'; (( $emulation )) && aDELAY[i]=300 || aDELAY[i]=30;;
@@ -299,9 +297,7 @@ G_EXEC truncate -s 8G "$image"
 
 # Loop device
 FP_LOOP=$(losetup -f)
-G_EXEC losetup "$FP_LOOP" "$image"
-G_EXEC partprobe "$FP_LOOP"
-G_EXEC partx -u "$FP_LOOP"
+G_EXEC losetup -P "$FP_LOOP" "$image"
 G_EXEC_OUTPUT=1 G_EXEC e2fsck -fp "${FP_LOOP}p1"
 G_EXEC_OUTPUT=1 G_EXEC eval "sfdisk -fN1 '$FP_LOOP' <<< ',+'"
 G_EXEC partprobe "$FP_LOOP"
@@ -357,11 +353,17 @@ G_CONFIG_INJECT 'AUTO_SETUP_AUTOMATED=' 'AUTO_SETUP_AUTOMATED=1' rootfs/boot/die
 # Workaround for failing systemd services in emulated container: https://gitlab.com/qemu-project/qemu/-/issues/1962, https://github.com/systemd/systemd/issues/31219
 if (( $emulation ))
 then
-	for i in rootfs/usr/lib/systemd/system/*.service
+	for i in rootfs/lib/systemd/system/*.service
 	do
+		[[ -f $i ]] || continue
 		grep -Eq '^(Load|Import)Credential=' "$i" || continue
-		G_EXEC mkdir "${i/usr\/lib/etc}.d"
-		G_EXEC eval "echo -e '[Service]\nLoadCredential=\nImportCredential=' > ${i/usr\/lib/etc}.d/dietpi-no-credentials.conf"
+		G_EXEC mkdir "${i/lib/etc}.d"
+		if [[ $DISTRO == 'bullseye' || $DISTRO == 'bookworm' ]]
+		then
+			G_EXEC eval "echo -e '[Service]\nLoadCredential=' > \"${i/lib/etc}.d/dietpi-no-credentials.conf\""
+		else
+			G_EXEC eval "echo -e '[Service]\nImportCredential=' > \"${i/lib/etc}.d/dietpi-no-credentials.conf\""
+		fi
 	done
 fi
 

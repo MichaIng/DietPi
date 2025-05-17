@@ -203,10 +203,12 @@ _EOF_
 
 		# Apply time zone
 		local autoinstall_timezone=$(sed -n '/^[[:blank:]]*AUTO_SETUP_TIMEZONE=/{s/^[^=]*=//p;q}' /boot/dietpi.txt)
-		if [[ -f /usr/share/zoneinfo/$autoinstall_timezone && $autoinstall_timezone != $(</etc/timezone) ]]; then
+		local current_timezone=$(readlink /etc/localtime)
+		[[ $current_timezone ]] && current_timezone=${current_timezone#/usr/share/zoneinfo/} || current_timezone='UTC'
+		if [[ -f /usr/share/zoneinfo/$autoinstall_timezone && $autoinstall_timezone != "$current_timezone" ]]; then
 
 			G_DIETPI-NOTIFY 2 "Setting time zone $autoinstall_timezone. Please wait..."
-			rm -fv /etc/{timezoner,localtime}
+			rm -fv /etc/{localtime,timezone}
 			ln -s "/usr/share/zoneinfo/$autoinstall_timezone" /etc/localtime
 			dpkg-reconfigure -f noninteractive tzdata
 
@@ -226,14 +228,7 @@ _EOF_
 		(( $G_HW_MODEL == 75 )) && return 0
 
 		# Apply keyboard layout
-		local autoinstall_keyboard=$(sed -n '/^[[:blank:]]*AUTO_SETUP_KEYBOARD_LAYOUT=/{s/^[^=]*=//p;q}' /boot/dietpi.txt)
-		if [[ $autoinstall_keyboard ]] && ! grep -q "XKBLAYOUT=\"$autoinstall_keyboard\"" /etc/default/keyboard; then
-
-			G_DIETPI-NOTIFY 2 "Setting keyboard layout $autoinstall_keyboard. Please wait..."
-			G_CONFIG_INJECT 'XKBLAYOUT=' "XKBLAYOUT=\"$autoinstall_keyboard\"" /etc/default/keyboard
-			setupcon --save # https://bugs.debian.org/818065
-
-		fi
+		/boot/dietpi/func/dietpi-set_hardware keyboard autosetup
 
 		# Disable serial console if set in dietpi.txt
 		grep -q '^[[:blank:]]*CONFIG_SERIAL_CONSOLE_ENABLE=0' /boot/dietpi.txt && /boot/dietpi/func/dietpi-set_hardware serialconsole disable
