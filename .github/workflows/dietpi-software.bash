@@ -426,8 +426,14 @@ fi
 # Workaround for sysctl: permission denied on key "net.core.rmem_max" in containers
 G_EXEC sed --follow-symlinks -i '/# Start DietPi-Software/a\sed -i '\''/G_EXEC sysctl -w net\.core\.rmem_max/d'\'' /boot/dietpi/dietpi-software' rootfs/boot/dietpi/dietpi-login
 
-# ARMv6: Workaround for ARMv7 Rust toolchain selected in containers with newer host/emulated ARM version
-(( $arch == 1 )) && G_EXEC sed --follow-symlinks -i '/# Start DietPi-Software/a\sed -i '\''s/--profile minimal .*$/--profile minimal --default-host arm-unknown-linux-gnueabihf/'\'' /boot/dietpi/dietpi-software' rootfs/boot/dietpi/dietpi-login
+# ARMv6:
+# - Workaround for ARMv7 Rust toolchain selected in containers with newer host/emulated ARM version
+# - Workaround for failing numpy build due to: https://github.com/numpy/meson/pull/18
+if (( $arch == 1 ))
+then
+	G_EXEC sed --follow-symlinks -i '/# Start DietPi-Software/a\sed -i '\''s/--profile minimal .*$/--profile minimal --default-host arm-unknown-linux-gnueabihf/'\'' /boot/dietpi/dietpi-software' rootfs/boot/dietpi/dietpi-login
+	G_EXEC sed --follow-symlinks -i '/# Start DietPi-Software/a\sed -i '\''s/maturin==1.7.8/maturin==1.7.8\nnumpy==2.2.6/'\'' /boot/dietpi/dietpi-software' rootfs/boot/dietpi/dietpi-login
+fi
 
 # Check for service status, ports and commands
 # shellcheck disable=SC2016
