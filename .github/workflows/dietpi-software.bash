@@ -321,7 +321,7 @@ then
 		1) model=1;;
 		2) model=2;;
 		3) model=4;;
-		*) G_DIETPI-NOTIFY 1 "Invalid architecture $ARCH beginning with \"a\" but not being one of the known/accepted ARM architectures. This should never happen!"; exit 1;;
+		*) G_DIETPI-NOTIFY 1 "Invalid architecture $ARCH ($arch). This should never happen!"; exit 1;;
 	esac
 	G_EXEC rm rootfs/etc/.dietpi_hw_model_identifier
 	G_EXEC touch rootfs/boot/{bcm-rpi-dummy.dtb,config.txt,cmdline.txt}
@@ -425,6 +425,9 @@ fi
 
 # Workaround for sysctl: permission denied on key "net.core.rmem_max" in containers
 G_EXEC sed --follow-symlinks -i '/# Start DietPi-Software/a\sed -i '\''/G_EXEC sysctl -w net\.core\.rmem_max/d'\'' /boot/dietpi/dietpi-software' rootfs/boot/dietpi/dietpi-login
+
+# ARMv6: Workaround for ARMv7 Rust toolchain selected in containers with newer host/emulated ARM version
+(( $arch == 1 )) && G_EXEC sed --follow-symlinks -i '/# Start DietPi-Software/a\sed -i '\''s/--profile minimal .*$/--profile minimal --default-host arm-unknown-linux-gnueabihf/'\'' /boot/dietpi/dietpi-software' rootfs/boot/dietpi/dietpi-login
 
 # Check for service status, ports and commands
 # shellcheck disable=SC2016
