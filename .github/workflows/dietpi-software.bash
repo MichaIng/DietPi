@@ -433,10 +433,11 @@ G_EXEC sed --follow-symlinks -i '/# Start DietPi-Software/a\sed -i '\''/G_EXEC s
 case $arch in
 	1)
 		G_EXEC sed --follow-symlinks -i '/# Start DietPi-Software/a\sed -i '\''s/--profile minimal .*$/--profile minimal --default-host arm-unknown-linux-gnueabihf/'\'' /boot/dietpi/dietpi-software' rootfs/boot/dietpi/dietpi-login
-		(( $G_HW_ARCH == 3 )) && G_EXEC eval 'echo '\''abi.cp15_barrier=2'\'' > rootfs/etc/sysctl.d/98-dietpi-cp15_barrier.conf'
+		(( $G_HW_ARCH == 3 )) && G_EXEC sysctl -w 'abi.cp15_barrier=2'
 	;;
 	2)
-		G_EXEC sed --follow-symlinks -i '/# Start DietPi-Software/a\sed -i -e '\''/pip3 install homeassistant/a\echo constraint=\$ha_home/.pip/constraints.txt >> \$ha_home/.pip/pip.conf'\'' -e \''/pip3 install homeassistant/a\echo numpy==2.2.6 > \$ha_home/.pip/constraints.txt'\'' /boot/dietpi/dietpi-software' rootfs/boot/dietpi/dietpi-login
+		# shellcheck disable=SC2016
+		G_EXEC sed --follow-symlinks -i '/# Start DietPi-Software/a\sed -i -e '\''/pip3 install homeassistant/a\echo constraint=$ha_home/.pip/constraints.txt >> $ha_home/.pip/pip.conf'\'' -e '\''/pip3 install homeassistant/a\echo numpy==2.2.6 > $ha_home/.pip/constraints.txt'\'' /boot/dietpi/dietpi-software' rootfs/boot/dietpi/dietpi-login
 	;;
 	*) :;;
 esac
