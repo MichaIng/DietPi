@@ -426,21 +426,15 @@ fi
 # Workaround for sysctl: permission denied on key "net.core.rmem_max" in containers
 G_EXEC sed --follow-symlinks -i '/# Start DietPi-Software/a\sed -i '\''/G_EXEC sysctl -w net\.core\.rmem_max/d'\'' /boot/dietpi/dietpi-software' rootfs/boot/dietpi/dietpi-login
 
-# ARMv6:
-# - Workaround for ARMv7 Rust toolchain selected in containers with newer host/emulated ARM version
-# - Workaround for hanging Rust tools chain on ARMv8 host: https://github.com/MichaIng/DietPi/issues/6306#issuecomment-1515303702
-# ARMv7: Workaround for failing numpy build due to: https://github.com/numpy/meson/pull/18
-case $arch in
-	1)
-		G_EXEC sed --follow-symlinks -i '/# Start DietPi-Software/a\sed -i '\''s/--profile minimal .*$/--profile minimal --default-host arm-unknown-linux-gnueabihf/'\'' /boot/dietpi/dietpi-software' rootfs/boot/dietpi/dietpi-login
-		(( $G_HW_ARCH == 3 )) && G_EXEC sysctl -w 'abi.cp15_barrier=2'
-	;;
-	2)
-		# shellcheck disable=SC2016
-		G_EXEC sed --follow-symlinks -i '/# Start DietPi-Software/a\sed -i -e '\''/pip3 install homeassistant/a\echo constraint=$ha_home/.pip/constraints.txt >> $ha_home/.pip/pip.conf'\'' -e '\''/pip3 install homeassistant/a\echo numpy==2.2.6 > $ha_home/.pip/constraints.txt'\'' /boot/dietpi/dietpi-software' rootfs/boot/dietpi/dietpi-login
-	;;
-	*) :;;
-esac
+# ARMv6: Workaround for ARMv7 Rust toolchain selected in containers with newer host/emulated ARM version
+(( $arch == 1 )) && G_EXEC sed --follow-symlinks -i '/# Start DietPi-Software/a\sed -i '\''s/--profile minimal .*$/--profile minimal --default-host arm-unknown-linux-gnueabihf/'\'' /boot/dietpi/dietpi-software' rootfs/boot/dietpi/dietpi-login
+
+# ARMv6: Workaround for hanging Rust tools chain on ARMv8 host: https://github.com/MichaIng/DietPi/issues/6306#issuecomment-1515303702
+(( $arch == 1 && $G_HW_ARCH == 3 )) && G_EXEC sysctl -w 'abi.cp15_barrier=2'
+
+# ARMv6/ARMv7: Workaround for failing numpy build due to: https://github.com/numpy/meson/pull/18
+# shellcheck disable=SC2016
+(( $arch < 3 )) && G_EXEC sed --follow-symlinks -i '/# Start DietPi-Software/a\sed -i -e '\''/pip3 install homeassistant/i\echo constraint=$ha_home/.pip/constraints.txt >> $ha_home/.pip/pip.conf'\'' -e '\''/pip3 install homeassistant/i\echo numpy==2.2.6 > $ha_home/.pip/constraints.txt'\'' /boot/dietpi/dietpi-software' rootfs/boot/dietpi/dietpi-login
 
 # Check for service status, ports and commands
 # shellcheck disable=SC2016

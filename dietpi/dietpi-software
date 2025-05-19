@@ -1518,8 +1518,6 @@ Available commands:
 		aSOFTWARE_DESC[$software_id]='Open source home automation platform'
 		aSOFTWARE_CATX[$software_id]=17
 		aSOFTWARE_DOCS[$software_id]='https://dietpi.com/docs/software/home_automation/#home-assistant'
-		# ARMv6/7/RISC-V: Bookworm only as compiling ha-av requires FFmpeg headers >=4.4: https://community.home-assistant.io/t/unable-to-install-package-ha-av/466286/39
-		(( $G_HW_ARCH == 3 || $G_HW_ARCH == 10 || $G_DISTRO > 6 )) || aSOFTWARE_AVAIL_G_DISTRO[$software_id,$G_DISTRO]=0
 		#------------------
 		software_id=140
 		aSOFTWARE_NAME[$software_id]='Domoticz'
@@ -4146,7 +4144,7 @@ _EOF_
 				# Rust for cryptography
 				G_EXEC curl -sSf 'https://sh.rustup.rs/' -o rustup-init.sh
 				G_EXEC chmod +x rustup-init.sh
-				# RPi with 64-bit kernel on 32-bit image: Enforce 32-bit toolchain: https://github.com/MichaIng/DietPi/issues/6306
+				# - RPi with 64-bit kernel on 32-bit image: Enforce 32-bit toolchain: https://github.com/MichaIng/DietPi/issues/6306
 				G_EXEC_OUTPUT=1 G_EXEC runuser -u "$micro_name" -- ./rustup-init.sh -y --profile minimal ${RPI_64KERNEL_32OS:+'--default-host' 'armv7-unknown-linux-gnueabihf'}
 				G_EXEC rm rustup-init.sh
 			fi
@@ -7252,6 +7250,7 @@ _EOF_
 		if To_Install 80 ubooquity # Ubooquity
 		then
 			G_EXEC curl -sSfL 'https://vaemendis.net/ubooquity/service/download.php' -o Ubooquity.zip
+			command -v unzip > /dev/null || G_AGI unzip
 			G_EXEC unzip -o Ubooquity.zip
 			G_EXEC rm Ubooquity.zip
 			G_EXEC mkdir -p /mnt/dietpi_userdata/ubooquity
@@ -9215,7 +9214,7 @@ _EOF_
 			if (( ${PHP_VERSION::1} > 7 ))
 			then
 				aDEPS+=("php$PHP_VERSION-curl")
-				local fallback_url='https://github.com/koel/koel/releases/download/v7.4.0/koel-v7.4.0.tar.gz' aphp_deps=('curl' 'dom')
+				local fallback_url='https://github.com/koel/koel/releases/download/v7.4.2/koel-v7.4.2.tar.gz' aphp_deps=('curl' 'dom')
 				Download_Install "$(curl -sSfL 'https://api.github.com/repos/koel/koel/releases/latest' | mawk -F\" '/^ *"browser_download_url": ".*\/koel-[^"\/]*\.tar\.gz"$/{print $4}')"
 			else
 				aDEPS+=("php$PHP_VERSION-json")
@@ -11085,28 +11084,32 @@ _EOF_
 			Create_User -G dialout,gpio,i2c -d "$ha_home" "$ha_user"
 
 			# Dependencies
-			# - MariaDB support: G_AGI libmariadb-dev; pip3 install mysqlclient|PyMySQL
-			# - Read custom dependencies
-			local custom_apt_deps=$(sed -n '/^[[:blank:]]*SOFTWARE_HOMEASSISTANT_APT_DEPS=/{s/^[^=]*=//p;q}' /boot/dietpi.txt)
-			local custom_pip_deps=$(sed -n '/^[[:blank:]]*SOFTWARE_HOMEASSISTANT_PIP_DEPS=/{s/^[^=]*=//p;q}' /boot/dietpi.txt)
 			# - All: gcc, libc6-dev, make, libssl-dev, zlib1g-dev for Python build and libbz2-dev, libreadline-dev, libsqlite3-dev, liblzma-dev to suppress warnings
-			# - All: libffi-dev to solve "ModuleNotFoundError: No module named '_ctypes'", for python-slugify==4.0.1 build on ARMv8/x86_64 and cffi build on ARMv6/7/RISC-V, g++ for pymicro-vad
-			aDEPS=('gcc' 'g++' 'libc6-dev' 'make' 'libssl-dev' 'zlib1g-dev' 'libbz2-dev' 'libreadline-dev' 'libsqlite3-dev' 'liblzma-dev' 'libffi-dev')
-			mapfile -t -d' ' -O "${#aDEPS[@]}" aDEPS < <(echo -n "$custom_apt_deps")
+			# - All: libffi-dev to solve "ModuleNotFoundError: No module named '_ctypes'" and cffi build on ARMv6/7/RISC-V, g++ for pymicro-vad
+			aDEPS=('g++' 'make' 'libssl-dev' 'zlib1g-dev' 'libbz2-dev' 'libreadline-dev' 'libsqlite3-dev' 'liblzma-dev' 'libffi-dev')
 			# - ARMv6/7/RISC-V
 			G_EXEC mkdir -p "$ha_home"
 			G_EXEC chown "$ha_user:$ha_user" "$ha_home"
 			if [[ $G_HW_ARCH =~ ^(1|2|11)$ ]]
 			then
-				# libjpeg62-turbo-dev for Pillow, libopenblas-dev and pkg-config for numpy, pkg-config for cryptography, g++ for PyTurboJPEG, SQLAlchemy and ninja > PyTurboJPEG, libavdevice-dev for ha-av, cmake for ninja > PyTurboJPEG, automake for patchelf > PyTurboJPEG
-				aDEPS+=('libjpeg62-turbo-dev' 'libopenblas-dev' 'pkg-config' 'libavdevice-dev' 'cmake' 'automake')
+				# libjpeg62-turbo-dev for Pillow, libopenblas-dev and pkg-config for numpy, pkg-config for cryptography and av, g++ for numpy, automake for patchelf > meson-python > numpy, libavdevice-dev for av
+				# - While av is (tried to be) installed dynamically on HA start and not really needed for core functionality, we could ignore it. But the install and hence download is attempted on each HA start, also throwing a large error in service logs. Hence mute that one.
+				aDEPS+=('libjpeg62-turbo-dev' 'libopenblas-dev' 'pkg-config' 'automake' 'libavdevice-dev')
 				# Rust for cryptography and bcrypt
 				G_EXEC curl -sSf 'https://sh.rustup.rs/' -o rustup-init.sh
 				G_EXEC chmod +x rustup-init.sh
-				# RPi with 64-bit kernel on 32-bit image: Enforce 32-bit toolchain: https://github.com/MichaIng/DietPi/issues/6306
+				# - ARMv6 Bullseye: rustup-init depends on libatomic1, not assured to be pre-installed on Bullseye
+				(( $G_HW_ARCH == 1 && $G_DISTRO == 6 )) && G_AGI libatomic1
+				# - RPi with 64-bit kernel on 32-bit image: Enforce 32-bit toolchain: https://github.com/MichaIng/DietPi/issues/6306
 				G_EXEC_OUTPUT=1 G_EXEC runuser -u "$ha_user" -- ./rustup-init.sh -y --profile minimal ${RPI_64KERNEL_32OS:+'--default-host' 'armv7-unknown-linux-gnueabihf'}
 				G_EXEC rm rustup-init.sh
+				# ARMv6/RISC-V: cmake for ninja > numpy
+				(( $G_HW_ARCH == 1 || $G_HW_ARCH == 11 )) && aDEPS+=('cmake')
 			fi
+			# - Custom dependencies, e.g. MariaDB support: G_AGI libmariadb-dev; pip3 install mysqlclient|PyMySQL
+			local custom_apt_deps=$(sed -n '/^[[:blank:]]*SOFTWARE_HOMEASSISTANT_APT_DEPS=/{s/^[^=]*=//p;q}' /boot/dietpi.txt)
+			mapfile -t -d' ' -O "${#aDEPS[@]}" aDEPS < <(echo -n "$custom_apt_deps")
+			local custom_pip_deps=$(sed -n '/^[[:blank:]]*SOFTWARE_HOMEASSISTANT_PIP_DEPS=/{s/^[^=]*=//p;q}' /boot/dietpi.txt)
 
 			# Install pyenv to $ha_home
 			Download_Install 'https://github.com/pyenv/pyenv/archive/master.tar.gz'
@@ -11137,13 +11140,6 @@ _EOF_
 			G_EXEC mkdir -p "$ha_home/.pip"
 			G_EXEC eval "echo -e '[global]\nno-cache-dir=true' > '$ha_home/.pip/pip.conf'"
 
-			# ARMv6/RISC-V: Work around incompatible latest maturin version with currently declared orjson v3.10.12 dependency: https://github.com/MichaIng/DietPi/issues/7329
-			if (( $G_HW_ARCH == 1 || $G_HW_ARCH == 11 ))
-			then
-				G_EXEC eval "echo 'constraint=$ha_home/.pip/constraints.txt' >> '$ha_home/.pip/pip.conf'"
-				G_EXEC eval "echo 'maturin==1.7.8' > '$ha_home/.pip/constraints.txt'"
-			fi
-
 			# Generate script to activate pyenv: This must be sourced from the originating shell, hence it does not require execute permissions.
 			echo "#!/bin/dash
 if [ \$(whoami) != '$ha_user' ]; then
@@ -11157,6 +11153,7 @@ eval \"\$(pyenv init -)\"
 [ -f '.cargo/env' ] && . .cargo/env" > "$ha_home/pyenv-activate.sh"
 
 			local version=
+			# Bullseye: v2025.1.4 is the last which supports old SQLite: https://github.com/MichaIng/DietPi/issues/7374
 			(( $G_DISTRO < 7 )) && version='==2025.1.4'
 			G_EXEC_DESC="Compiling and installing Python $ha_python_version into pyenv, which will take a while ..."
 			G_EXEC_OUTPUT=1 G_EXEC runuser -u "$ha_user" -- dash -c "$ha_pyenv_activation; exec pyenv install $ha_python_version"
