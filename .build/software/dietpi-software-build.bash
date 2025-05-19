@@ -95,9 +95,7 @@ G_EXEC truncate -s 8G "$image"
 
 # Mount as loop device
 FP_LOOP=$(losetup -f)
-G_EXEC losetup "$FP_LOOP" "$image"
-G_EXEC partprobe "$FP_LOOP"
-G_EXEC partx -u "$FP_LOOP"
+G_EXEC losetup -P "$FP_LOOP" "$image"
 G_EXEC_OUTPUT=1 G_EXEC e2fsck -fp "${FP_LOOP}p1"
 G_EXEC_OUTPUT=1 G_EXEC eval "sfdisk -fN1 '$FP_LOOP' <<< ',+'"
 G_EXEC partprobe "$FP_LOOP"
@@ -120,11 +118,17 @@ G_CONFIG_INJECT 'AUTO_SETUP_AUTOMATED=' 'AUTO_SETUP_AUTOMATED=1' rootfs/boot/die
 # Workaround for failing systemd services in emulated container: https://gitlab.com/qemu-project/qemu/-/issues/1962, https://github.com/systemd/systemd/issues/31219
 if (( $emulation ))
 then
-	for i in rootfs/usr/lib/systemd/system/*.service
+	for i in rootfs/lib/systemd/system/*.service
 	do
+		[[ -f $i ]] || continue
 		grep -Eq '^(Load|Import)Credential=' "$i" || continue
-		G_EXEC mkdir "${i/usr\/lib/etc}.d"
-		G_EXEC eval "echo -e '[Service]\nLoadCredential=\nImportCredential=' > ${i/usr\/lib/etc}.d/dietpi-no-credentials.conf"
+		G_EXEC mkdir "${i/lib/etc}.d"
+		if [[ $DISTRO == 'bullseye' || $DISTRO == 'bookworm' ]]
+		then
+			G_EXEC eval "echo -e '[Service]\nLoadCredential=' > \"${i/lib/etc}.d/dietpi-no-credentials.conf\""
+		else
+			G_EXEC eval "echo -e '[Service]\nImportCredential=' > \"${i/lib/etc}.d/dietpi-no-credentials.conf\""
+		fi
 	done
 fi
 
@@ -144,6 +148,9 @@ G_EXEC eval 'echo '\''infocmp "$TERM" > /dev/null 2>&1 || { echo "[ WARN ] Unsup
 
 # Workaround for failing IPv4 network connectivity check as GitHub Actions runners do not receive external ICMP echo replies
 G_CONFIG_INJECT 'CONFIG_CHECK_CONNECTION_IP=' 'CONFIG_CHECK_CONNECTION_IP=127.0.0.1' rootfs/boot/dietpi.txt
+
+# vaultwarden for ARMv6 on ARMv8 host: https://github.com/rust-lang/rust/issues/60605
+[[ $NAME == 'vaultwarden' ]] && (( $arch == 1 && $G_HW_ARCH == 3 )) && G_EXEC sysctl -w 'abi.cp15_barrier=2'
 
 # Shutdown on failures before the custom script is executed
 G_EXEC sed --follow-symlinks -i 's|Prompt_on_Failure$|{ journalctl -n 50; ss -tulpn; df -h; free -h; systemctl start poweroff.target; }|' rootfs/boot/dietpi/dietpi-login
