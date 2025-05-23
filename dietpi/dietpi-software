@@ -135,39 +135,27 @@ Available commands:
 	GLOBAL_PW=
 	Update_Global_Pw()
 	{
-		local encrypt=0
+		# Loop until password is valid or dietpi-set_software fails
+		while :
+		do
+			# Read encrypted password
+			if [[ -f '/var/lib/dietpi/dietpi-software/.GLOBAL_PW.bin' ]]
+			then
+				# In case of error, assure empty password to fallback to default
+				GLOBAL_PW=$(openssl enc -d -a -md sha256 -aes-256-cbc -iter 10000 -salt -pass pass:'DietPiRocks!' -in /var/lib/dietpi/dietpi-software/.GLOBAL_PW.bin) || GLOBAL_PW=
 
-		# Read encrypted password
-		if [[ -f '/var/lib/dietpi/dietpi-software/.GLOBAL_PW.bin' ]]
-		then
-			# In case of error, assure empty password to fallback to default and re-encrypt it
-			GLOBAL_PW=$(openssl enc -d -a -md sha256 -aes-256-cbc -iter 10000 -salt -pass pass:'DietPiRocks!' -in /var/lib/dietpi/dietpi-software/.GLOBAL_PW.bin) || encrypt=1 GLOBAL_PW=
+				# Return on valid password
+				[[ $GLOBAL_PW && $GLOBAL_PW != 'dietpi' ]] && return 0
 
-		# If encryption has not yet been done, do it now!
-		else
-			encrypt=1
-			GLOBAL_PW=$(sed -n '/^[[:blank:]]*AUTO_SETUP_GLOBAL_PASSWORD=/{s/^[^=]*=//p;q}' /boot/dietpi.txt)
-			grep -q '^[[:blank:]]*AUTO_SETUP_GLOBAL_PASSWORD=' /boot/dietpi.txt && G_EXEC sed --follow-symlinks -i '/^[[:blank:]]*AUTO_SETUP_GLOBAL_PASSWORD=/c\#AUTO_SETUP_GLOBAL_PASSWORD= # Password has been encrypted and saved to rootfs' /boot/dietpi.txt
-		fi
+				G_DIETPI-NOTIFY 1 'Global software password failed to be read, is empty, or still the default. Asking to set a new one ...'
+			fi
 
-		# Fallback
-		if [[ ! $GLOBAL_PW ]]
-		then
-			encrypt=1
-			GLOBAL_PW='dietpi'
-			G_WHIP_MSG "[FAILED] Unable to obtain your global software password
-\nThe following fallback password will be used:\n - $GLOBAL_PW
-\nYou can change it via:\n - dietpi-config > Security Options > Change Passwords"
-		fi
+			# Apply default password as fallback if empty
+			[[ $GLOBAL_PW ]] || GLOBAL_PW='dietpi'
 
-		# Encrypt
-		# https://github.com/koalaman/shellcheck/issues/1009
-		# shellcheck disable=SC2086
-		[[ $encrypt == 1 ]] && openssl enc -e -a -md sha256 -aes-256-cbc -iter 10000 -salt -pass pass:'DietPiRocks!' -out /var/lib/dietpi/dietpi-software/.GLOBAL_PW.bin <<< $GLOBAL_PW
-
-		# Apply safe permissions
-		chown 0:0 /var/lib/dietpi/dietpi-software/.GLOBAL_PW.bin
-		chmod 0600 /var/lib/dietpi/dietpi-software/.GLOBAL_PW.bin
+			# In case ask for and apply new valid password
+			/boot/dietpi/func/dietpi-set_software password software check || return 1
+		done
 	}
 
 	# Total physical system RAM: Used to calculate percentage based value for software cache limits, e.g.: OPcache/APCu
@@ -14359,19 +14347,20 @@ _EOF_
 			SKIP_APT_UPDATE=1
 		fi
 
-		# Global PW
-		# - Automation: Apply from dietpi.txt
-		if (( $AUTOINSTALL_ENABLED ))
+		# Change password if default has not been changed via dietpi.txt
+		# - Non-automated interactive first run setup: Show password prompts
+		if (( ! $AUTOINSTALL_ENABLED && $G_INTERACTIVE ))
 		then
-			Update_Global_Pw
-			# Set again to apply for UNIX users as well
-			/boot/dietpi/func/dietpi-set_software passwords "$GLOBAL_PW"
-
-		# - Prompt to change global software password and login passwords for root and dietpi users
-		else
 			# Local console: Prompt to select keyboard layout first if default is still set: https://github.com/MichaIng/DietPi/issues/5925
 			[[ $(tty) == '/dev/tty1' ]] && grep -q '^XKBLAYOUT="gb"' /etc/default/keyboard && /boot/dietpi/func/dietpi-set_hardware keyboard
-			/boot/dietpi/func/dietpi-set_software passwords
+			/boot/dietpi/func/dietpi-set_software password users check
+			Update_Global_Pw
+
+		# - Automated or non-interactive first run setup
+		else
+			# Update_Global_Pw is always executed right before installs start and in case forces users to change the default on any next interactive execution.
+			# Set flag for dietpi-login to check user passwords to in case enforce a change on next interactive login.
+			G_EXEC touch /var/lib/dietpi/.check_user_passwords
 		fi
 
 		# Disable serial console?

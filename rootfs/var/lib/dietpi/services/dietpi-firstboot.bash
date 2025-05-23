@@ -179,17 +179,14 @@ ExecStart=-/sbin/agetty -a root -J -s console 115200,38400,9600 $TERM
 _EOF_
 		fi
 
-		# Apply login password if it has not been encrypted before to avoid applying the informational text
-		if [[ ! -f '/var/lib/dietpi/dietpi-software/.GLOBAL_PW.bin' ]]
+		# Apply login password
+		local password=$(sed -n '/^[[:blank:]]*AUTO_SETUP_GLOBAL_PASSWORD=/{s/^[^=]*=//p;q}' /boot/dietpi.txt)
+		if [[ $password ]]
 		then
-			local password=$(sed -n '/^[[:blank:]]*AUTO_SETUP_GLOBAL_PASSWORD=/{s/^[^=]*=//p;q}' /boot/dietpi.txt)
-			if [[ $password ]]
-			then
-				chpasswd <<< "root:$password"
-				chpasswd <<< "dietpi:$password"
-			fi
-			unset -v password
+			chpasswd <<< "root:$password"
+			chpasswd <<< "dietpi:$password"
 		fi
+		unset -v password
 
 		# Set APT mirror
 		local target_repo='CONFIG_APT_DEBIAN_MIRROR'
