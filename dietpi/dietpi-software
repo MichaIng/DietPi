@@ -135,39 +135,27 @@ Available commands:
 	GLOBAL_PW=
 	Update_Global_Pw()
 	{
-		local encrypt=0
+		# Loop until password is valid or dietpi-set_software fails
+		while :
+		do
+			# Read encrypted password
+			if [[ -f '/var/lib/dietpi/dietpi-software/.GLOBAL_PW.bin' ]]
+			then
+				# In case of error, assure empty password to fallback to default
+				GLOBAL_PW=$(openssl enc -d -a -md sha256 -aes-256-cbc -iter 10000 -salt -pass pass:'DietPiRocks!' -in /var/lib/dietpi/dietpi-software/.GLOBAL_PW.bin) || GLOBAL_PW=
 
-		# Read encrypted password
-		if [[ -f '/var/lib/dietpi/dietpi-software/.GLOBAL_PW.bin' ]]
-		then
-			# In case of error, assure empty password to fallback to default and re-encrypt it
-			GLOBAL_PW=$(openssl enc -d -a -md sha256 -aes-256-cbc -iter 10000 -salt -pass pass:'DietPiRocks!' -in /var/lib/dietpi/dietpi-software/.GLOBAL_PW.bin) || encrypt=1 GLOBAL_PW=
+				# Return on valid password
+				[[ $GLOBAL_PW && $GLOBAL_PW != 'dietpi' ]] && return 0
 
-		# If encryption has not yet been done, do it now!
-		else
-			encrypt=1
-			GLOBAL_PW=$(sed -n '/^[[:blank:]]*AUTO_SETUP_GLOBAL_PASSWORD=/{s/^[^=]*=//p;q}' /boot/dietpi.txt)
-			grep -q '^[[:blank:]]*AUTO_SETUP_GLOBAL_PASSWORD=' /boot/dietpi.txt && G_EXEC sed --follow-symlinks -i '/^[[:blank:]]*AUTO_SETUP_GLOBAL_PASSWORD=/c\#AUTO_SETUP_GLOBAL_PASSWORD= # Password has been encrypted and saved to rootfs' /boot/dietpi.txt
-		fi
+				G_DIETPI-NOTIFY 1 'Global software password failed to be read, is empty, or still the default. Asking to set a new one ...'
+			fi
 
-		# Fallback
-		if [[ ! $GLOBAL_PW ]]
-		then
-			encrypt=1
-			GLOBAL_PW='dietpi'
-			G_WHIP_MSG "[FAILED] Unable to obtain your global software password
-\nThe following fallback password will be used:\n - $GLOBAL_PW
-\nYou can change it via:\n - dietpi-config > Security Options > Change Passwords"
-		fi
+			# Apply default password as fallback if empty
+			[[ $GLOBAL_PW ]] || GLOBAL_PW='dietpi'
 
-		# Encrypt
-		# https://github.com/koalaman/shellcheck/issues/1009
-		# shellcheck disable=SC2086
-		[[ $encrypt == 1 ]] && openssl enc -e -a -md sha256 -aes-256-cbc -iter 10000 -salt -pass pass:'DietPiRocks!' -out /var/lib/dietpi/dietpi-software/.GLOBAL_PW.bin <<< $GLOBAL_PW
-
-		# Apply safe permissions
-		chown 0:0 /var/lib/dietpi/dietpi-software/.GLOBAL_PW.bin
-		chmod 0600 /var/lib/dietpi/dietpi-software/.GLOBAL_PW.bin
+			# In case ask for and apply new valid password
+			/boot/dietpi/func/dietpi-set_software password software check || return 1
+		done
 	}
 
 	# Total physical system RAM: Used to calculate percentage based value for software cache limits, e.g.: OPcache/APCu
@@ -2578,7 +2566,7 @@ _EOF_
 		{
 			G_DIETPI-NOTIFY 2 'Enabling IP forwarding to allow access across network interfaces'
 			echo -e 'net.ipv4.ip_forward=1\nnet.ipv6.conf.default.accept_ra=2\nnet.ipv6.conf.all.accept_ra=2\nnet.ipv6.conf.default.forwarding=1\nnet.ipv6.conf.all.forwarding=1' > "/etc/sysctl.d/dietpi-$1.conf"
-			sysctl net.ipv4.ip_forward=1 net.ipv6.conf.default.accept_ra=2 net.ipv6.conf.all.accept_ra=2 net.ipv6.conf.default.forwarding=1 net.ipv6.conf.all.forwarding=1
+			sysctl -p "/etc/sysctl.d/dietpi-$1.conf"
 		}
 
 		To_Install()
@@ -2677,7 +2665,14 @@ _EOF_
 			fi
 
 			# Disable DPMS and screen blanking
-			dps_index=$software_id Download_Install '98-dietpi-disable_dpms.conf' /etc/X11/xorg.conf.d/98-dietpi-disable_dpms.conf
+			cat << '_EOF_' > /etc/X11/xorg.conf.d/98-dietpi-disable_dpms.conf
+Section "Extensions"
+	Option "DPMS" "Disable"
+EndSection
+Section "ServerFlags"
+	Option "BlankTime" "0"
+EndSection
+_EOF_
 		fi
 
 		if To_Install 152 avahi-daemon # Avahi-Daemon
@@ -3624,6 +3619,10 @@ _EOF_
 			# Force service to start before cron
 			G_EXEC mkdir -p /etc/systemd/system/redis-server.service.d
 			G_EXEC eval 'echo -e '\''[Unit]\nBefore=cron.service'\'' > /etc/systemd/system/redis-server.service.d/dietpi.conf'
+
+			# Enable memory overcomit: https://github.com/jemalloc/jemalloc/issues/1328
+			G_EXEC eval 'echo '\''vm.overcommit_memory=1'\'' > /etc/sysctl.d/98-dietpi-redis.conf'
+			G_EXEC sysctl -p /etc/sysctl.d/98-dietpi-redis.conf
 		fi
 
 		if To_Install 89 # PHP
@@ -4105,8 +4104,8 @@ _EOF_
 			echo 'alias ipfs='\''sudo -u ipfs IPFS_PATH=/mnt/dietpi_userdata/ipfs ipfs'\' > /etc/bashrc.d/dietpi-ipfs.sh
 
 			# Raise packet receive buffer: https://github.com/lucas-clemente/quic-go/wiki/UDP-Receive-Buffer-Size
-			G_EXEC eval "echo 'net.core.rmem_max=2500000' > /etc/sysctl.d/dietpi-ipfs.conf"
-			G_EXEC sysctl -w net.core.rmem_max=2500000
+			G_EXEC eval 'echo '\''net.core.rmem_max=2500000'\'' > /etc/sysctl.d/dietpi-ipfs.conf'
+			G_EXEC sysctl -p /etc/sysctl.d/dietpi-ipfs.conf
 		fi
 
 		if To_Install 16 # microblog.pub
@@ -6966,7 +6965,7 @@ _EOF_
 			G_EXEC ln -s /opt/FreshRSS/p /var/www/freshrss
 
 			# Create cron job for feed update every 30 minutes if it does not yet exist
-			crontab -u www-data -l 2>/dev/null | grep -q '/opt/FreshRSS/app/actualize_script.php' || ( crontab -u www-data -l 2>/dev/null ; echo '*/30 * * * * php /opt/FreshRSS/app/actualize_script.php' ) | crontab -u www-data -
+			crontab -u www-data -l 2>/dev/null | grep -q '/opt/FreshRSS/app/actualize_script.php' || { crontab -u www-data -l 2>/dev/null ; echo '*/30 * * * * php /opt/FreshRSS/app/actualize_script.php'; } | crontab -u www-data -
 		fi
 
 		if To_Install 28 # TigerVNC Server
@@ -8865,7 +8864,8 @@ NoNewPrivileges=true
 WantedBy=multi-user.target
 _EOF_
 			# Increase fs watcher limit: https://docs.syncthing.net/users/faq.html#how-do-i-increase-the-inotify-limit-to-get-my-filesystem-watcher-to-work
-			G_EXEC eval "echo 'fs.inotify.max_user_watches=204800' > /etc/sysctl.d/dietpi-syncthing.conf"
+			G_EXEC eval 'echo '\''fs.inotify.max_user_watches=204800'\'' > /etc/sysctl.d/dietpi-syncthing.conf'
+			G_EXEC sysctl -p /etc/sysctl.d/dietpi-syncthing.conf
 		fi
 
 		if To_Install 113 # Chromium
@@ -9068,7 +9068,8 @@ _EOF_
 		if To_Install 139 sabnzbd # SABnzbd: https://sabnzbd.org/wiki/installation/install-off-modules
 		then
 			# APT deps
-			aDEPS=('par2' 'p7zip-full')
+			aDEPS=('par2')
+			(( $G_DISTRO > 7 )) && aDEPS+=('7zip') || aDEPS+=('p7zip-full')
 			# - RISC-V: gcc and libffi-dev for cffi; pkg-config, libssl-dev and Rust for cryptography, g++ for sabctools and ujson
 			if (( $G_HW_ARCH == 11 ))
 			then
@@ -11452,7 +11453,7 @@ _EOF_
 					*) local arch='amd64';;
 				esac
 
-				local fallback_url="https://github.com/rclone/rclone/releases/download/v1.69.2/rclone-v1.69.2-linux-$arch.deb"
+				local fallback_url="https://github.com/rclone/rclone/releases/download/v1.69.3/rclone-v1.69.3-linux-$arch.deb"
 				Download_Install "$(curl -sSfL 'https://api.github.com/repos/rclone/rclone/releases/latest' | mawk -F\" "/^ *\"browser_download_url\": \".*\/rclone-v[^\"\/]*-linux-$arch.deb\"$/{print \$4}")"
 			fi
 		fi
@@ -12336,6 +12337,7 @@ _EOF_
 		then
 			Remove_Service redis-server
 			G_AGP redis-server redis-tools 'php*-redis'
+			G_EXEC rm -f /etc/sysctl.d/98-dietpi-redis.conf
 		fi
 
 		if To_Uninstall 34 # PHP Composer
@@ -14345,19 +14347,20 @@ _EOF_
 			SKIP_APT_UPDATE=1
 		fi
 
-		# Global PW
-		# - Automation: Apply from dietpi.txt
-		if (( $AUTOINSTALL_ENABLED ))
+		# Change password if default has not been changed via dietpi.txt
+		# - Non-automated interactive first run setup: Show password prompts
+		if (( ! $AUTOINSTALL_ENABLED && $G_INTERACTIVE ))
 		then
-			Update_Global_Pw
-			# Set again to apply for UNIX users as well
-			/boot/dietpi/func/dietpi-set_software passwords "$GLOBAL_PW"
-
-		# - Prompt to change global software password and login passwords for root and dietpi users
-		else
 			# Local console: Prompt to select keyboard layout first if default is still set: https://github.com/MichaIng/DietPi/issues/5925
 			[[ $(tty) == '/dev/tty1' ]] && grep -q '^XKBLAYOUT="gb"' /etc/default/keyboard && /boot/dietpi/func/dietpi-set_hardware keyboard
-			/boot/dietpi/func/dietpi-set_software passwords
+			/boot/dietpi/func/dietpi-set_software password users check
+			Update_Global_Pw
+
+		# - Automated or non-interactive first run setup
+		else
+			# Update_Global_Pw is always executed right before installs start and in case forces users to change the default on any next interactive execution.
+			# Set flag for dietpi-login to check user passwords to in case enforce a change on next interactive login.
+			G_EXEC touch /var/lib/dietpi/.check_user_passwords
 		fi
 
 		# Disable serial console?
