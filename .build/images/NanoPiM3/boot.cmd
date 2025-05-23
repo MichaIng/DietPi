@@ -22,7 +22,7 @@ if ext4load mmc ${devnum} ${kernel_addr_r} ${prefix}dietpiEnv.txt; then
 fi
 
 # Define kernel command-line arguments
-setenv bootargs "root=${rootdev} rootfstype=${rootfstype} rootwait ${consoleargs} consoleblank=0 systemd.unified_cgroup_hierarchy=0 usb-storage.quirks=${usbstoragequirks} ${extraargs}"
+setenv bootargs "root=${rootdev} rootfstype=${rootfstype} rootwait ${consoleargs} consoleblank=0 systemd.unified_cgroup_hierarchy=0 ${extraargs}"
 
 # Add bootargs for Docker
 if test "${docker_optimizations}" = "on"; then setenv bootargs "${bootargs} cgroup_enable=memory swapaccount=1"; fi

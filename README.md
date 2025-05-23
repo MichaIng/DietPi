@@ -207,15 +207,15 @@ Links to hardware and software manufacturers, sources and build instructions use
 - [Bash](https://git.savannah.gnu.org/cgit/bash.git)
 - [Debian distribution](https://salsa.debian.org/)
 - [Raspberry](https://github.com/raspberrypi) [Pi](https://github.com/RPi-Distro)
-- [Hardkernel](https://github.com/hardkernel?tab=repositories)
-- [Meveric's Odroid repository](https://forum.odroid.com/viewtopic.php?t=5908)
+- [Hardkernel/Odroid](https://github.com/hardkernel?tab=repositories)
+- [Xunlong/Orange Pi](https://github.com/orangepi-xunlong?tab=repositories)
 - [Sparky](https://github.com/sparkysbc?tab=repositories) [SBC](https://github.com/sparky-sbc/sparky-test)
 - [PINE64](https://www.pine64.org/)
-- [FriendlyARM](https://github.com/friendlyarm?tab=repositories)
+- [FriendlyARM/NanoPi](https://github.com/friendlyarm?tab=repositories)
 - [Radxa](https://github.com/radxa/apt)
 - [Armbian](https://github.com/armbian)
 - [curl](https://github.com/curl/curl)
-- [X.Org-X-Server](https://www.x.org/archive//individual/)
+- [X11](https://www.x.org/archive//individual/)
 - [LXDE desktop](https://github.com/LXDE)
 - [LXQt desktop](https://github.com/lxqt)
 - [Xfce desktop](https://git.xfce.org/)
@@ -347,6 +347,6 @@ Links to hardware and software manufacturers, sources and build instructions use
 ---
 
 <p align="center">
-	<img src="https://www.myvirtualserver.com/images/myvirtualserver_logo.png" alt="myVirtualserver logo" width="200" height="44" loading="lazy">
-	<br>DietPi's web hosting is powered by <a href="https://www.myvirtualserver.com" target="_blank" rel="noopener">myVirtualserver</a>.
+	<img src="https://raw.githubusercontent.com/MichaIng/DietPi-Website/master/images/login-systemhaus-logo.jpg" alt="LOGIN SystemHaus GmbH logo" width="236" height="121" loading="lazy">
+	<br>DietPi's web hosting is powered by <a href="https://login-online.com/" target="_blank" rel="noopener">LOGIN SystemHaus GmbH</a>.
 </p>

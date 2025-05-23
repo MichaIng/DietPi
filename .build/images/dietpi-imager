@@ -74,6 +74,7 @@
 	ADD_DOS_PART=0 # trailing FAT partition for first boot config files, automatically imported and partition removed on first boot
 	CONFIGS_TO_BOOT=0 # for new RPi kernel/firmware stack where a boot FAT partition exists, but is mounted to /boot/firmware instead of /boot
 	SIGN_PASS=
+	RAW_HASH_SIZE=0 # store SHA256 and size for the uncompressed image, mainly used for Raspberry Pi Imager JSON
 	while (( $# ))
 	do
 		case $1 in
@@ -82,6 +83,7 @@
 			'--add-dos-part') ADD_DOS_PART=1;;
 			'--configs-to-boot') CONFIGS_TO_BOOT=1;;
 			'--sign') shift; SIGN_PASS=$1;;
+			'--raw-hash-size') RAW_HASH_SIZE=1;;
 			*)
 				if [[ -b $1 ]]
 				then
@@ -201,9 +203,7 @@
 			G_EXEC modprobe loop
 			Delete_Loopback # Prevent doubled loop device
 			FP_SOURCE=$(losetup -f)
-			G_EXEC_NOEXIT=1 G_EXEC losetup "$FP_SOURCE" "$FP_SOURCE_IMG" || return 1
-			G_EXEC_NOEXIT=1 G_EXEC partprobe "$FP_SOURCE" || return 1
-			G_EXEC_NOEXIT=1 G_EXEC partx -u "$FP_SOURCE" || return 1
+			G_EXEC_NOEXIT=1 G_EXEC losetup -P "$FP_SOURCE" "$FP_SOURCE_IMG" || return 1
 			G_DIETPI-NOTIFY 0 "Attached the image ($FP_SOURCE_IMG) as loopback device: $FP_SOURCE"
 			G_SLEEP 0.5 # Give the root filesystem a little time to be detected
 		fi
@@ -316,13 +316,11 @@
 				G_EXEC modprobe loop
 				Delete_Loopback # Prevent doubled loop device
 				FP_SOURCE=$(losetup -f)
-				G_EXEC losetup "$FP_SOURCE" "$FP_SOURCE_IMG"
-				G_EXEC partprobe "$FP_SOURCE"
-				G_EXEC partx -u "$FP_SOURCE"
+				G_EXEC losetup -P "$FP_SOURCE" "$FP_SOURCE_IMG"
 				G_DIETPI-NOTIFY 0 "Mounted the image ($FP_SOURCE_IMG) as loopback device: $FP_SOURCE"
 				FP_ROOT_DEV="${FP_SOURCE}p${FP_ROOT_DEV: -1}"
 			fi
-			[[ $CLONING_TOOL == 'dd' ]] && OUTPUT_IMG_EXT='img' || OUTPUT_IMG_EXT='iso' SKIP_ARCHIVE=1 # Flashing tools do not support xz-compressed ISOs
+			[[ $CLONING_TOOL == 'dd' ]] && OUTPUT_IMG_EXT='img' || OUTPUT_IMG_EXT='iso'
 			G_DIETPI-NOTIFY 0 "\e[0mCreating minified image from:
 - $SOURCE_TYPE: ${FP_SOURCE_IMG:-$FP_SOURCE}
 - Root device: $FP_ROOT_DEV
@@ -340,6 +338,9 @@
 		fi
 
 		FP_FINAL="$FP_ORIGIN/$OUTPUT_IMG_NAME.$OUTPUT_IMG_EXT"
+
+		# Flashing tools do not support xz-compressed ISOs
+		[[ $OUTPUT_IMG_EXT == 'iso' ]] && SKIP_ARCHIVE=1
 
 		# Detect partition table type, failsafe detection of MBR to debug possibly other/unknown wording/partition table types
 		PART_TABLE_TYPE=$(lsblk -no PTTYPE "$FP_ROOT_DEV")
@@ -389,10 +390,12 @@
 		# Failsafe
 		G_EXEC partprobe "$FP_SOURCE"
 		G_EXEC partx -u "$FP_SOURCE"
-		Run_fsck
 
 		# Shrink last filesystem to minimum
-		local last_part_dev=$(lsblk -rnpo NAME "$FP_SOURCE" | tail -1)
+		# - resize2fs: "Please run 'e2fsck -f /dev/loop0p1' first."
+		Run_fsck
+		# - Use sfdisk to detect last partition, as lsblk with "-r" option on Bullseye does not sort partitions well: https://github.com/MichaIng/DietPi/issues/7527
+		local last_part_dev=$(sfdisk -qlo Device "$FP_SOURCE" | tail -1)
 		local last_fs_type=$(lsblk -no FSTYPE "$last_part_dev")
 		if [[ $last_fs_type == 'ext4' ]]
 		then
@@ -478,8 +481,6 @@
 			Unmount_tmp
 			FS_SIZE=$(( $FS_SIZE / 512 )) # bytes => 512 byte sectors
 		fi
-
-		Run_fsck
 
 		G_DIETPI-NOTIFY 2 'Overriding filesystems free space with zeros to purge removed data and allow better compression...'
 		while read -r path type
@@ -762,37 +763,54 @@ _EOF_
 			G_EXEC sync
 		fi
 
-		# Generate xz archive if requested
-		local archive_text=''
-		if (( ! $SKIP_ARCHIVE ))
+		# Generate hashes, size info and compress image if requested
+		local result_test="\nImage file:  $FP_FINAL"
+		local upload_list=()
+		if (( $RAW_HASH_SIZE ))
 		then
+			G_EXEC_DESC='Generating image size file' G_EXEC eval "stat -c '%s' '$FP_FINAL' > '$FP_FINAL.size'"
+			result_test+="\nImage size:  $FP_FINAL.size"
+			upload_list+=("$FP_FINAL.size")
+		fi
+		if (( $SKIP_ARCHIVE ))
+		then
+			G_EXEC_DESC='Generating image hash' G_EXEC eval "sha256sum '$OUTPUT_IMG_NAME.$OUTPUT_IMG_EXT' > '$FP_FINAL.sha256'"
+			result_test+="\nImage hash:  $FP_FINAL.sha256"
+			upload_list+=("$FP_FINAL" "$FP_FINAL.sha256")
+		else
+			if (( $RAW_HASH_SIZE ))
+			then
+				G_EXEC_DESC='Generating image hash' G_EXEC eval "sha256sum '$OUTPUT_IMG_NAME.$OUTPUT_IMG_EXT' > '$FP_FINAL.sha256'"
+				result_test+="\nImage hash:  $FP_FINAL.sha256"
+				upload_list+=("$FP_FINAL.sha256")
+			fi
 			[[ -f $FP_FINAL.xz ]] && G_EXEC rm "$FP_FINAL.xz"
-			G_EXEC_DESC='Creating final xz archive' G_EXEC xz -9e -T0 -M75% -k "$FP_FINAL"
+			G_EXEC_DESC='Generating xz-compressed image' G_EXEC xz -9e -T0 -M75% -k "$FP_FINAL"
+			result_test+="\nxz file:     $FP_FINAL.xz"
+			upload_list+=("$FP_FINAL.xz")
+
+			G_EXEC_DESC='Generating xz hash' G_EXEC eval "sha256sum '$OUTPUT_IMG_NAME.$OUTPUT_IMG_EXT.xz' > '$FP_FINAL.xz.sha256'"
+			result_test+="\nxz hash:     $FP_FINAL.xz.sha256"
+			upload_list+=("$FP_FINAL.xz.sha256")
 			FP_FINAL+='.xz'
-			archive_text="\nxz archive:  $FP_FINAL"
 		fi
 
-		# Generate SHA256 hash
-		G_EXEC_DESC='Generating SHA256 hash' G_EXEC eval "sha256sum '$OUTPUT_IMG_NAME.$OUTPUT_IMG_EXT' > '$FP_FINAL.sha256'"
-
 		# Generate GPG signature if requested
-		local sig_text='' signature=()
 		if [[ $SIGN_PASS ]]
 		then
 			G_DIETPI-NOTIFY 2 "Signing $FP_FINAL ..."
 			gpg --batch --pinentry-mode loopback --passphrase "$SIGN_PASS" -b --armor "$FP_FINAL" || exit 1
-			sig_text="\nSignature:   $FP_FINAL.asc" signature=("$FP_FINAL.asc")
+			result_test+="\nSignature:   $FP_FINAL.asc"
+			upload_list+=("$FP_FINAL.asc")
 		fi
 
-		G_DIETPI-NOTIFY 0 "DietPi-Imager has successfully finished.
-Image file:  ${FP_FINAL%.xz}$archive_text
-SHA256 hash: $FP_FINAL.sha256$sig_text"
+		G_DIETPI-NOTIFY 0 "DietPi-Imager has successfully finished.$result_test"
 
 		# Upload if requested
 		if [[ $UPLOAD_SCRIPT ]]
 		then
 			[[ -x "$UPLOAD_SCRIPT" ]] || { G_DIETPI-NOTIFY 1 "Upload script $UPLOAD_SCRIPT does not exist or is not executable. Aborting ..."; exit 1; }
-			G_EXEC_OUTPUT=1 G_EXEC ./upload.sh "$FP_FINAL"{,.sha256} "${signature[@]}" && (( ! $SKIP_ARCHIVE )) && G_EXEC rm -R "$FP_FINAL"{,.sha256} "${signature[@]}"
+			G_EXEC_OUTPUT=1 G_EXEC ./upload.sh "${upload_list[@]}"
 		fi
 	}
 

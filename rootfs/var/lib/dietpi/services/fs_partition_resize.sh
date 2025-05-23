@@ -45,6 +45,7 @@
 
 	# Check if the last partition contains a filesystem with DIETPISETUP label
 	# - Give up to 1.5 seconds time for filesystem and label to be detected: https://github.com/MichaIng/DietPi/issues/6838
+	# - Do not use lsblk "-r" option here, as it does not sort partitions well on Bulleye systems: https://github.com/MichaIng/DietPi/issues/2630#issuecomment-2323534747
 	SETUP_PART=$(lsblk -no FSTYPE,LABEL "$ROOT_DRIVE" | tail -1)
 	for i in 1 2 3
 	do

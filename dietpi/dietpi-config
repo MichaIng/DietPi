@@ -1354,30 +1354,14 @@ If unsure, set any value, 'Ondemand Down Factor' option on the next screen will 
 
 			'Ondemand Sample Rate')
 
-				local file=
-				local afile=(
-
-					'/sys/devices/system/cpu/cpufreq/ondemand/sampling_rate_min'
-					'/sys/devices/system/cpu/cpufreq/ondemand/min_sampling_rate'
-					'/sys/devices/system/cpu/cpu0/cpufreq/ondemand/sampling_rate_min'
-					'/sys/devices/system/cpu/cpu0/cpufreq/ondemand/min_sampling_rate'
-				)
-
-				for i in "${afile[@]}"
+				# Min value: Hard code to 20ms (RPi) if true minimum cannot be detected. This API has been renamed and finally dropped from recent kernel, hence remove this once we drop support for last legacy kernel SBCs with Bullseye end of 2025:
+				# - https://git.kernel.org/pub/scm/linux/kernel/git/stable/linux.git/commit/?id=d0684d3b
+				# - https://git.kernel.org/pub/scm/linux/kernel/git/stable/linux.git/commit/?id=2d045036
+				MIN_VALUE=20
+				for i in /sys/devices/system/cpu/cpufreq/ondemand/{min_sampling_rate,sampling_rate_min}
 				do
-					[[ -f $i ]] && file=$i && break
+					[[ -f $i ]] && MIN_VALUE=$(( $(<"$file") / 1000 )) && break
 				done
-
-				if [[ $file ]]; then
-
-					MIN_VALUE=$(( $(<"$file") / 1000 ))
-
-				# Unable to find min value, hard set it
-				else
-
-					MIN_VALUE=20 # RPi is min 20ms, however, no way to currently detect min available values...
-
-				fi
 
 				MAX_VALUE=300
 				G_WHIP_DEFAULT_ITEM=$current_cpu_sample_rate
@@ -1405,7 +1389,7 @@ If unsure, set any value, 'Ondemand Down Factor' option on the next screen will 
 				# - CPUFreq
 				elif [[ -f '/sys/devices/system/cpu/cpu0/cpufreq/scaling_available_frequencies' ]]
 				then
-					mapfile -tO "${#available_frequency_array[@]}" available_frequency_array < <(for i in /sys/devices/system/cpu/cpu*/cpufreq/scaling_available_frequencies
+					mapfile -tO "${#available_frequency_array[@]}" available_frequency_array < <(for i in /sys/devices/system/cpu/cpufreq/policy[0-9]*scaling_available_frequencies
 					do
 						for j in $(<"$i"); do echo $(( $j / 1000 )); done
 					done | sort -un)
@@ -1598,15 +1582,20 @@ If unsure, set any value, 'Ondemand Down Factor' option on the next screen will 
 
 		G_WHIP_MENU_ARRAY=(
 
-			'Passwords' ': Change software and user passwords'
+			'User passwords' ': Change password for "root" and "dietpi" users'
+			'Software password' ': Change default software installation password'
 			'Hostname' ": [$hostname_current] Change the system hostname"
 		)
 
 		G_WHIP_MENU 'Please select an option:' || { Back_or_Exit 0; return 0; } # Main menu
 
-		if [[ $G_WHIP_RETURNED_VALUE == 'Passwords' ]]
+		if [[ $G_WHIP_RETURNED_VALUE == 'User passwords' ]]
 		then
-			/boot/dietpi/func/dietpi-set_software passwords
+			/boot/dietpi/func/dietpi-set_software password users
+
+		elif [[ $G_WHIP_RETURNED_VALUE == 'Software password' ]]
+		then
+			/boot/dietpi/func/dietpi-set_software password software
 
 		elif [[ $G_WHIP_RETURNED_VALUE == 'Hostname' ]]
 		then
@@ -1649,13 +1638,15 @@ If unsure, set any value, 'Ondemand Down Factor' option on the next screen will 
 	# TARGETMENUID=7
 	Menu_LanguageOptions()
 	{
-		local locale_current=$(sed -n '/^[[:blank:]]*AUTO_SETUP_LOCALE=/{s/^[^=]*=//p;q}' /boot/dietpi.txt)
+		local locale=$(sed -n '/^[[:blank:]]*AUTO_SETUP_LOCALE=/{s/^[^=]*=//p;q}' /boot/dietpi.txt)
+		local timezone=$(readlink /etc/localtime)
+		[[ $timezone ]] && timezone=${timezone#/usr/share/zoneinfo/} || timezone='UTC'
 
 		G_WHIP_MENU_ARRAY=(
 
-			'Locale' ": [$locale_current]"
-			'Timezone' ": [$(</etc/timezone)]"
-			'Keyboard' ": [$(sed -n '/^[[:blank:]]*XKBLAYOUT=/{s/^[^=]*=//;s/"//gp;q}' /etc/default/keyboard)]"
+			'Locale' ": [$locale]"
+			'Timezone' ": [$timezone]"
+			'Keyboard' ": [$(mawk -F\" '/^XKBLAYOUT=/{print $2}' /etc/default/keyboard)]"
 		)
 
 		G_WHIP_MENU 'Please select an option:' || { Back_or_Exit 0; return 0; } # Main menu
@@ -1675,20 +1666,21 @@ If unsure, set any value, 'Ondemand Down Factor' option on the next screen will 
 				do
 					G_WHIP_MENU_ARRAY+=("$line" '')
 
-				done <<< "$(mawk '/UTF-8/{print $1}' /usr/share/i18n/SUPPORTED)"
+				done < <(mawk '/UTF-8/{print $1}' /usr/share/i18n/SUPPORTED)
 
-				G_WHIP_DEFAULT_ITEM=$locale_current
+				G_WHIP_DEFAULT_ITEM=$locale
 				G_WHIP_MENU 'Please select a new default system locale. Logout and login for this change to take effect.' && /boot/dietpi/func/dietpi-set_software locale "$G_WHIP_RETURNED_VALUE"
 			;;
 
-			'Timezone') dpkg-reconfigure tzdata;;
+			'Timezone')
 
-			'Keyboard')
-
-				G_WHIP_MSG 'NB: A keyboard must be physically plugged into the system, before its configuration can be changed.\n\nIf a keyboard is plugged in, please ignore this message. If not, plug one in ;)'
-				dpkg-reconfigure keyboard-configuration
-				setupcon --save # https://bugs.debian.org/818065
+				dpkg-reconfigure tzdata
+				timezone=$(readlink /etc/localtime)
+				[[ $timezone ]] && timezone=${timezone#/usr/share/zoneinfo/} || timezone='UTC'
+				G_CONFIG_INJECT 'AUTO_SETUP_TIMEZONE=' "AUTO_SETUP_TIMEZONE=$timezone" /boot/dietpi.txt
 			;;
+
+			'Keyboard') /boot/dietpi/func/dietpi-set_hardware keyboard;;
 
 			*) G_DIETPI-NOTIFY 1 'An invalid "case" option was used. This is a bug, please report at: https://github.com/MichaIng/DietPi/issues'; exit 1;;
 		esac
@@ -3322,7 +3314,6 @@ Additional benchmarks:
 					'applepi-dac' ': ApplePi DAC (Orchard Audio)'
 					'dionaudio-loco' ': Dion Audio LOCO'
 					'dionaudio-loco-v2' ': Dion Audio LOCO V2'
-					'googlevoicehat-soundcard' ': Google AIY voice kit'
 					'hifiberry-amp' ': HifiBerry AMP / AMP+'
 					'hifiberry-dac' ': HifiBerry DAC / MiniAMP'
 					'hifiberry-dacplus' ': HifiBerry DAC+ / DAC+ Pro / AMP2'
