@@ -11,11 +11,74 @@ Error_Exit()
 	exit 1
 }
 
+# Read settings from cmdline
+declare -A aMODE=() aROTATION=() aENABLED=()
+Read_Settings()
+{
+	# U-Boot environment file
+	local i uenv cmdline=()
+	for i in /boot/{dietpi,armbian}Env.txt
+	do
+		[[ -f $i ]] || continue
+		uenv=$i
+		break
+	done
+
+	# RPi
+	if (( $G_HW_MODEL < 10 ))
+	then
+		read -ra cmdline < /boot/cmdline.txt
+
+	# x86_64
+	elif (( $G_HW_ARCH == 10 ))
+	then
+		for i in /etc/default/grub.d/dietpi-display_*.cfg
+		do
+			[[ $i == '/etc/default/grub.d/dietpi-display_*.cfg' ]] && break
+			cmdline+=("$(grep -o 'video=[^ "]*' "$i")")
+		done
+
+	# U-Boot environment file
+	elif [[ $uenv ]]
+	then
+		read -ra cmdline < <(sed -n '/^[[:blank:]]*extraargs=/{s/^[^=]*=//p;q}' "$uenv")
+
+	# extlinux
+	elif [[ -f '/boot/extlinux/extlinux.conf' ]]
+	then
+		read -ra cmdline < <(sed -n '/^[[:blank:]]*append[[:blank:]]/{s/^[[:blank:]]*append[[:blank:]]*//p;q}' /boot/extlinux/extlinux.conf)
+	fi
+
+	local arg display params=() param
+	for arg in "${cmdline[@]}"
+	do
+		[[ $arg == 'video='* ]] || continue
+		arg=${arg#video=}
+		display=${arg%%:*}
+		arg=${arg#*:}
+		aROTATION["$display"]=0
+		IFS=',' read -ra params <<< "$arg"
+		for param in "${params[@]}"
+		do
+			[[ $param == 'rotate='* ]] || continue
+			aROTATION["$display"]=${param#rotate=}
+		done
+		arg=${arg%%,*}
+		[[ $arg == *'d' ]] && aENABLED["$display"]='disabled' || aENABLED["$display"]='disabled'
+		arg=${arg%d}
+		aMODE["$display"]=$arg
+	done
+}
+
 # Detect displays and settings
 DISPLAY=
-declare -A aMODE=() aROTATION=() aENABLED=()
 Detect_Displays()
 {
+	# Read info from cmdline config files first
+	Read_Settings
+
+	# Complement/override from info from sysfs and currently loaded cmdline
+	# - Info for disabled/disconnected displays cannot be detected via sysfs
 	local i connected display cmdline=() arg params=() param
 	for i in /sys/class/drm/*/modes
 	do
@@ -43,6 +106,9 @@ Detect_Displays()
 			done
 		done
 	done
+
+	# Select first disabled/disconnected display if no connected one has been found
+	[[ $DISPLAY ]] || for i in "${!aMODE[@]}"; do DISPLAY=$i; break; done
 }
 Detect_Displays
 
@@ -147,7 +213,7 @@ Apply_Settings()
 	elif [[ -f '/boot/extlinux/extlinux.conf' ]]
 	then
 		local cmdline=()
-		read -ra cmdline < <(sed -n '/^[[:blank:]]*append[[:blank:]]/{s/^[^=]*=//p;q}' /boot/extlinux/extlinux.conf)
+		read -ra cmdline < <(sed -n '/^[[:blank:]]*append[[:blank:]]/{s/^[[:blank:]]*append[[:blank:]]*//p;q}' /boot/extlinux/extlinux.conf)
 		for i in "${!cmdline[@]}"
 		do
 			[[ ${cmdline[i]} == "video=$DISPLAY:"* ]] || continue
@@ -215,7 +281,7 @@ Reset_Settings()
 	elif [[ -f '/boot/extlinux/extlinux.conf' ]]
 	then
 		local cmdline=()
-		read -ra cmdline < <(sed -n '/^[[:blank:]]*append[[:blank:]]/{s/^[^=]*=//p;q}' /boot/extlinux/extlinux.conf)
+		read -ra cmdline < <(sed -n '/^[[:blank:]]*append[[:blank:]]/{s/^[[:blank:]]*append[[:blank:]]*//p;q}' /boot/extlinux/extlinux.conf)
 		for i in "${!cmdline[@]}"
 		do
 			[[ ${cmdline[i]} == "video=$DISPLAY:"* ]] || continue

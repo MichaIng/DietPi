@@ -19,7 +19,7 @@ done
 G_DIETPI-NOTIFY 2 'Installing Rust via rustup'
 # - ARMv6: Set default target explicitly, otherwise it compiles for ARMv7 on ARMv7 and ARMv8 hosts
 grep -q '^ID=raspbian' /etc/os-release && G_HW_ARCH_NAME='armv6l' host=('--default-host' 'arm-unknown-linux-gnueabihf') || host=()
-# - ARMv6/ARMv7: Apply workaround for failing crates index update in in emulated 32-bit ARM environments: https://github.com/rust-lang/cargo/issues/8719. CARGO_REGISTRIES_CRATES_IO_PROTOCOL='sparse' does not solve everything: https://github.com/rust-lang/cargo/issues/8719#issuecomment-1928540617
+# - ARMv6/ARMv7: Apply workaround for failing crates index update in emulated 32-bit ARM environments: https://github.com/rust-lang/cargo/issues/8719. CARGO_REGISTRIES_CRATES_IO_PROTOCOL='sparse' does not solve everything: https://github.com/rust-lang/cargo/issues/8719#issuecomment-1928540617
 if (( $G_HW_ARCH < 3 )) && pmap 1 | grep -q 'qemu'
 then
 	export HOME=$(mktemp -d)

@@ -179,7 +179,7 @@ _EOF_
 	unset -v GITOWNER GITBRANCH
 
 	# Detect the distro version of this operating system
-	distro=$(</etc/debian_version)
+	read -r distro < /etc/debian_version
 	if [[ $distro == '11.'* || $distro == 'bullseye/sid' ]]
 	then
 		G_DISTRO=6
@@ -328,6 +328,7 @@ _EOF_
 		# - NBB: DO NOT REORDER INDICES. These are now fixed and will never change (due to survey results etc)
 		G_WHIP_BUTTON_CANCEL_TEXT='Exit'
 		G_WHIP_DEFAULT_ITEM=0
+		local userland_arch=$(dpkg --print-architecture)
 		case $G_HW_ARCH in
 			1)
 				if findmnt -M /boot/firmware &> /dev/null
@@ -343,7 +344,6 @@ _EOF_
 				fi
 			;;
 			2|3)
-				userland_arch=$(dpkg --print-architecture)
 				G_DIETPI-NOTIFY 2 "Detected target userland/OS architecture: $userland_arch"
 				if [[ $userland_arch == 'armhf' ]]
 				then
@@ -548,11 +548,13 @@ _EOF_
 			'8' ': Trixie (testing, if you want to live on bleeding edge)'
 		)
 
-		# - List supported distro versions up from currently installed one
+		# - Prevent downgrades and allow Bullseye for container images only (used for our automated tests)
 		G_WHIP_MENU_ARRAY=()
 		for ((i=0; i<${#DISTRO_LIST_ARRAY[@]}; i+=2))
 		do
-			(( ${DISTRO_LIST_ARRAY[$i]} < $G_DISTRO )) || G_WHIP_MENU_ARRAY+=("${DISTRO_LIST_ARRAY[$i]}" "${DISTRO_LIST_ARRAY[$i+1]}")
+			(( ${DISTRO_LIST_ARRAY[$i]} < $G_DISTRO )) && continue
+			(( ${DISTRO_LIST_ARRAY[$i]} < 7 && $G_HW_MODEL != 75 )) && continue
+			G_WHIP_MENU_ARRAY+=("${DISTRO_LIST_ARRAY[$i]}" "${DISTRO_LIST_ARRAY[$i+1]}")
 		done
 		unset -v DISTRO_LIST_ARRAY
 
@@ -863,8 +865,13 @@ setenv rootuuid "true"' /boot/boot.cmd
 			G_EXEC systemctl mask "$i"
 		done
 
-		G_DIETPI-NOTIFY 2 "Setting APT sources.list: $DISTRO_TARGET_NAME $DISTRO_TARGET"
+		G_DIETPI-NOTIFY 2 'Purging configs/data of removed packages'
+		local apackages=()
+		mapfile -t apackages < <(dpkg -l | grep -v '^ii ' | tail +6)
+		[[ ${apackages[0]} ]] && G_AGP "${apackages[@]}"
+		unset -v apackages
 
+		G_DIETPI-NOTIFY 2 "Setting APT sources.list: $DISTRO_TARGET_NAME $DISTRO_TARGET"
 		# We need to forward $DISTRO_TARGET* to dietpi-set_software, as well as $G_HW_MODEL + $G_RASPBIAN for Debian vs Raspbian decision.
 		G_DISTRO=$DISTRO_TARGET G_DISTRO_NAME=$DISTRO_TARGET_NAME G_HW_ARCH=$G_HW_ARCH G_HW_MODEL=$G_HW_MODEL G_RASPBIAN=$G_RASPBIAN HW_VARIANT=$HW_VARIANT G_EXEC /boot/dietpi/func/dietpi-set_software apt-mirror default
 
@@ -879,7 +886,7 @@ setenv rootuuid "true"' /boot/boot.cmd
 			# Bootstrap RPi repo if key is missing
 			if [[ ! $(apt-key list 'CF8A1AF502A2AA2D763BAE7E82B129927FA3303E' 2> /dev/null) ]]
 			then
-				G_EXEC curl -sSf 'https://archive.raspberrypi.com/debian/pool/main/r/raspberrypi-archive-keyring/raspberrypi-archive-keyring_2021.1.1+rpt1_all.deb' -o keyring.deb
+				G_EXEC curl -sSf 'https://archive.raspberrypi.com/debian/pool/main/r/raspberrypi-archive-keyring/raspberrypi-archive-keyring_2023.4+rpt1_all.deb' -o keyring.deb
 				G_EXEC dpkg -i keyring.deb
 				G_EXEC rm keyring.deb
 				aPACKAGES_REQUIRED_INSTALL+=('raspberrypi-archive-keyring')
@@ -899,7 +906,7 @@ setenv rootuuid "true"' /boot/boot.cmd
 
 		# @MichaIng https://github.com/MichaIng/DietPi/pull/1266/files
 		G_DIETPI-NOTIFY 2 'Marking all packages as auto-installed first, to allow effective autoremove afterwards'
-		local apackages
+		local apackages=()
 		mapfile -t apackages < <(apt-mark showmanual)
 		[[ ${apackages[0]} ]] && G_EXEC apt-mark auto "${apackages[@]}"
 		unset -v apackages
@@ -908,8 +915,7 @@ setenv rootuuid "true"' /boot/boot.cmd
 		aPACKAGES_REQUIRED_INSTALL+=(
 
 			'apt'			# Debian package manager
-			'bash-completion'	# Auto completes a wide list of bash commands and options via <tab>
-			'bzip2'			# (.tar).bz2 archiver
+			'bash-completion'	# Auto-completes a wide list of bash commands and options via <tab>
 			'ca-certificates'	# Adds known ca-certificates, necessary to practically access HTTPS sources
 			'cron'			# Background job scheduler
 			'curl'			# Web address testing, downloading, uploading etc.
@@ -927,19 +933,9 @@ setenv rootuuid "true"' /boot/boot.cmd
 			'systemd-sysv'		# Includes systemd and additional commands: "poweroff", "shutdown" etc.
 			'tzdata'		# Time zone data for system clock, auto summer/winter time adjustment
 			'udev'			# /dev/ and hotplug management daemon
-			'unzip'			# .zip unpacker
 			'wget'			# Download tool
 			'whiptail'		# DietPi dialogs
-			#'xz-utils'		# (.tar).xz archiver
 		)
-
-		# - Trixie: 7zip now provides the same commands p7zip does, so we can do a smooth migration without adjusting commands across our scripts.
-		if (( $DISTRO_TARGET > 7 ))
-		then
-			aPACKAGES_REQUIRED_INSTALL+=('7zip')
-		else
-			aPACKAGES_REQUIRED_INSTALL+=('p7zip')
-		fi
 
 		# Install gdisk if root filesystem is on a GPT partition, used by DietPi-FS_partition_resize
 		local ROOT_DEVICE=$(findmnt -Ufnro SOURCE -M /)
@@ -1018,30 +1014,26 @@ setenv rootuuid "true"' /boot/boot.cmd
 
 		### Kernel/bootloader/initramfs packages: We need to install those directly to allow G_AGA() autoremove possible older packages later: https://github.com/MichaIng/DietPi/issues/1285#issuecomment-354602594
 
-		# x86_64 PCs and VMs
-		if [[ $G_HW_ARCH == 10 && $G_HW_MODEL =~ ^(20|21)$ ]]
+		# PCs and VMs
+		if [[ $G_HW_MODEL =~ ^(20|21)$ ]]
 		then
-			local apackages=('linux-image-amd64' 'os-prober')
+			# Install and use zstd for better initramfs compression
+			local apackages=("linux-image-$userland_arch" 'initramfs-tools' 'zstd')
+			G_CONFIG_INJECT 'COMPRESS=' 'COMPRESS=zstd' /etc/initramfs-tools/initramfs.conf
 
-			# As linux-image-amd64 pulls initramfs, pre-install the intended implementation here already
+			# VM: Enable systemd-logind by default for ACPI functionality, required for shutdown/reboot via virtualiser
 			if (( $G_HW_MODEL == 20 ))
 			then
-				# VM: Install tiny-initramfs with limited features but sufficient and much smaller + faster
-				apackages+=('tiny-initramfs')
-				# Enable systemd-logind by default for ACPI functionality, required for shutdown/reboot via virtualiser
+				apackages+=('dbus')
 				G_CONFIG_INJECT 'AUTO_UNMASK_LOGIND=' 'AUTO_UNMASK_LOGIND=1' /boot/dietpi.txt
-			else
-				# Install and use zstd for better initramfs compression
-				apackages+=('initramfs-tools' 'zstd')
-				G_CONFIG_INJECT 'COMPRESS=' 'COMPRESS=zstd' /etc/initramfs-tools/initramfs.conf
 			fi
 
-			# Grub EFI with secure boot compatibility
-			if [[ -d '/boot/efi' ]] || dpkg-query -s 'grub-efi-amd64' &> /dev/null
+			# GRUB EFI with secure boot compatibility
+			if (( $G_HW_ARCH != 10 )) || [[ -d '/boot/efi' ]] || dpkg-query -s "grub-efi-$userland_arch" &> /dev/null
 			then
-				apackages+=('grub-efi-amd64' 'grub-efi-amd64-signed' 'shim-signed')
+				apackages+=("grub-efi-$userland_arch" "grub-efi-$userland_arch-signed" 'shim-signed')
 
-			# Grub BIOS
+			# GRUB BIOS
 			else
 				apackages+=('grub-pc')
 			fi
@@ -1151,7 +1143,7 @@ _EOF_
 				87) model='orangepi3b' kernel='rockchip64';;
 				88) model='orangepizero2w' kernel='sunxi64';;
 				89) model='orangepi3-lts' kernel='sunxi64';;
-				90) model='radxa-zero3' kernel='rk35xx' branch='legacy';;
+				90) model='radxa-zero3' kernel='rk35xx' branch='vendor';;
 				91) model='orangepi5-max' kernel='rk35xx' branch='vendor';;
 				92) model='nanopi-m6' kernel='rk35xx' branch='vendor';;
 				93) model='orangepi5pro' kernel='rk35xx' branch='vendor';;
@@ -1165,10 +1157,15 @@ _EOF_
 				cat << '_EOF_' > /etc/modprobe.d/dietpi-headless.conf
 blacklist hantro_vpu
 blacklist lima
-blacklist rockchip_iep
 blacklist rockchip_rga
 blacklist rockchip_vdec
+blacklist rockchipdrm
 _EOF_
+			# ROCK Pi S
+			elif (( $G_HW_MODEL == 73 ))
+			then
+				G_DIETPI-NOTIFY 2 'Limiting CMA size to 16 MiB to free more system memory'
+				G_EXEC sed --follow-symlinks -i '/^extraargs=/s/$/ cma=16M/' /boot/dietpiEnv.txt
 			fi
 
 			# Update APT lists cleanly
@@ -1502,6 +1499,7 @@ _EOF_
 		# Generic kernel, device tree, bootloader and firmware package auto detect + initramfs-tools
 		elif (( $G_HW_MODEL != 75 ))
 		then
+			local apackages=()
 			mapfile -t apackages < <({ dpkg-query -Wf '${Package}\n' | grep -E '^linux-(image|dtb)|u-boot|bootloader|firmware'; dpkg-query -S /{lib/modules,boot}/* 2> /dev/null | sed 's/:.*//;s/, /\n/g'; } | sort -u)
 			[[ ${apackages[0]} ]] || G_DIETPI-NOTIFY 2 'Unable to find kernel packages for installation. Assuming non-APT/.deb kernel installation.'
 			G_AGI initramfs-tools "${apackages[@]}"
@@ -1527,7 +1525,6 @@ _EOF_
 				aPACKAGES_REQUIRED_INSTALL+=('armbian-firmware')
 			else
 				aPACKAGES_REQUIRED_INSTALL+=('firmware-linux-free')	# Free misc
-				aPACKAGES_REQUIRED_INSTALL+=('firmware-misc-nonfree')	# Non-free misc incl. Ralink and MediaTek WiFi/BT
 				aPACKAGES_REQUIRED_INSTALL+=('firmware-realtek')	# Realtek Eth/WiFi/BT
 				if (( $WIFI_REQUIRED ))
 				then
@@ -1535,12 +1532,19 @@ _EOF_
 					aPACKAGES_REQUIRED_INSTALL+=('firmware-brcm80211')	# Broadcom WiFi/BT
 					aPACKAGES_REQUIRED_INSTALL+=('firmware-iwlwifi')	# Intel WiFi/BT
 				fi
+				# Trixie splits the misc package: https://packages.debian.org/trixie/firmware-misc-nonfree
+				if (( $G_DISTRO < 8 ))
+				then
+					aPACKAGES_REQUIRED_INSTALL+=('firmware-misc-nonfree')	# Non-free misc incl. Ralink and MediaTek WiFi/BT
+				else
+					aPACKAGES_REQUIRED_INSTALL+=('firmware-mediatek')	# MediaTek/Ralink WiFi/BT
+				fi
 			fi
 		fi
 
 		G_DIETPI-NOTIFY 2 'Generating list of minimal packages, required for DietPi installation'
 
-		local apackages
+		local apackages=()
 		mapfile -t apackages < <(dpkg --get-selections "${aPACKAGES_REQUIRED_INSTALL[@]}" 2> /dev/null | mawk '{print $1}')
 		[[ ${apackages[0]} ]] && G_EXEC_DESC='Marking required packages as manually installed' G_EXEC apt-mark manual "${apackages[@]}"
 		mapfile -t apackages < <(apt-mark showhold)
@@ -1591,6 +1595,7 @@ _EOF_
 
 		# Bullseye: Remove old gcc-*-base packages, e.g. accumulated on Raspberry Pi OS images and installed by debootstrap, which are not autoremoved due to "Priority: required"
 		# shellcheck disable=SC2015
+		local apackages=()
 		(( $G_DISTRO == 6 )) && mapfile -t apackages < <(dpkg --get-selections 'gcc-*-base' | mawk '$1!~/^gcc-10-/{print $1}')
 		[[ ${apackages[0]} ]] && G_AGP "${apackages[@]}"
 		unset -v apackages
@@ -1816,7 +1821,7 @@ _EOF_
 		G_EXEC mkdir -p /var/lib/dietpi/{postboot.d,dietpi-software/installed}
 		G_EXEC mkdir -p /var/tmp/dietpi/logs/dietpi-ramlog_store
 		G_EXEC mkdir -p /mnt/{dietpi_userdata,samba,ftp_client,nfs_client}
-		G_EXEC chown -R dietpi:dietpi /mnt/{dietpi_userdata,samba,ftp_client,nfs_client}
+		G_EXEC chgrp -R dietpi /mnt/{dietpi_userdata,samba,ftp_client,nfs_client}
 		G_EXEC find /mnt/{dietpi_userdata,samba,ftp_client,nfs_client} -type d -exec chmod 0775 {} +
 
 		#-----------------------------------------------------------------------------------
@@ -1991,11 +1996,6 @@ _EOF_'
 			/boot/dietpi/func/dietpi-set_hardware serialconsole disable ttyS0
 			G_EXEC systemctl mask serial-getty@ttyS0
 
-		# Odroid C1/C2/N2/C4, NanoPi K2, Radxa Zero
-		elif [[ $G_HW_MODEL =~ ^(10|12|15|16|54|74)$ ]]
-		then
-			/boot/dietpi/func/dietpi-set_hardware serialconsole enable ttyAML0
-
 		# Odroid XU4
 		elif (( $G_HW_MODEL == 11 ))
 		then
@@ -2012,22 +2012,27 @@ _EOF_'
 			/boot/dietpi/func/dietpi-set_hardware serialconsole enable ttySAC0
 			/boot/dietpi/func/dietpi-set_hardware serialconsole enable ttyGS0
 
-		# ROCKPro64, ROCK64, Pinebook Pro, NanoPi R4S, Quartz64, ASUS Tinker Board, NanoPi R2S, NanoPi NEO3, NanoPi M4V2, NanoPi M4/T4/NEO4, ROCK 4, NanoPi R5S/R5C, ROCK 3A, ASUS Tinker Board 2, Orange Pi 3B
-		elif [[ $G_HW_MODEL =~ ^(42|43|46|47|49|52|55|56|58|68|72|76|77|86|87)$ ]]
-		then
-			/boot/dietpi/func/dietpi-set_hardware serialconsole enable ttyS2
-
-		# PINE A64, Pinebook, PINE H64, NenoPi NEO Plus2, ZeroPi, NanoPi NEO, NanoPi M1, NanoPi NEO Air, NenoPi NEO2, NanoPi M1 Plus, NanoPi K1 Plus, ROCK Pi S, VisionFive 2, Orange Pi Zero 3, Star64, Orange Pi Zero 2W, Orange Pi 3 LTS
-		elif [[ $G_HW_MODEL =~ ^(40|44|45|57|59|60|63|64|65|66|67|73|81|83|84|88|89)$ ]]
-		then
-			/boot/dietpi/func/dietpi-set_hardware serialconsole enable ttyS0
-
 		# NanoPi R1
 		elif (( $G_HW_MODEL == 48 ))
 		then
 			/boot/dietpi/func/dietpi-set_hardware serialconsole enable ttyS1
 
-		# Rockchip vendor/legacy
+		# Amlogic
+		elif [[ $G_HW_MODEL =~ ^(10|12|15|16|54|74)$ ]]
+		then
+			/boot/dietpi/func/dietpi-set_hardware serialconsole enable ttyAML0
+
+		# Allwinner, StarFive, ROCK Pi S
+		elif [[ $G_HW_MODEL =~ ^(40|44|45|57|59|60|63|64|65|66|67|73|81|83|84|88|89)$ ]]
+		then
+			/boot/dietpi/func/dietpi-set_hardware serialconsole enable ttyS0
+
+		# Rockchip mainline
+		elif [[ $G_HW_MODEL =~ ^(42|43|46|47|49|52|55|56|58|68|72|76|77|86|87)$ ]]
+		then
+			/boot/dietpi/func/dietpi-set_hardware serialconsole enable ttyS2
+
+		# Rockchip vendor
 		elif [[ $G_HW_MODEL =~ ^(78|79|80|82|85|90|91|92|93|94|95)$ ]]
 		then
 			/boot/dietpi/func/dietpi-set_hardware serialconsole enable ttyFIQ0
@@ -2041,11 +2046,19 @@ _EOF_'
 		# Re-set dietpi.txt setting physical systems (but Sparky SBC) to indicated enabled serial console
 		(( $G_HW_MODEL == 20 || $G_HW_MODEL == 75 || $G_HW_MODEL == 70 )) || G_CONFIG_INJECT 'CONFIG_SERIAL_CONSOLE_ENABLE=' 'CONFIG_SERIAL_CONSOLE_ENABLE=1' /boot/dietpi.txt
 
-		G_DIETPI-NOTIFY 2 'Disabling static and automatic login prompts on consoles tty2 to tty6:'
+		G_DIETPI-NOTIFY 2 'Disabling static login prompts on consoles tty2 to tty6:'
 		G_EXEC systemctl mask --now getty-static
-		# - logind features are usually not needed and (aside of automatic getty spawn) require the libpam-systemd package.
-		# - It will be unmasked automatically if libpam-systemd got installed during dietpi-software install, e.g. with desktops.
-		G_EXEC systemctl mask --now systemd-logind
+
+		if (( $G_HW_MODEL == 20 ))
+		then
+			G_DIETPI-NOTIFY 2 'Assuring that logind is enabled on VM image for ACPI functionality'
+			G_EXEC systemctl unmask systemd-logind
+		else
+			# - logind features are usually not needed and (aside of automatic getty spawn and ACPI) require the libpam-systemd package.
+			# - It will be unmasked automatically if libpam-systemd got installed during dietpi-software install, e.g. with desktops.
+			G_DIETPI-NOTIFY 2 'Disabling logind by default, usually not needed on physical server systems'
+			G_EXEC systemctl mask --now systemd-logind
+		fi
 
 		# Assure that console on TTY1 is enabled for automated first run setup, as well on headless SBCs. Disable it for container images, which usually have no virtual consoles but boot on /dev/console, triggering console-getty.service where autologin is enabled as well.
 		if (( $G_HW_MODEL == 75 ))
@@ -2080,18 +2093,8 @@ _EOF_'
 		then
 			G_EXEC_DESC='Removing foreign i386 DPKG architecture' G_EXEC dpkg --remove-architecture i386
 
-			# Fix grub install device: https://github.com/MichaIng/DietPi/issues/3700
+			# Fix GRUB install device: https://github.com/MichaIng/DietPi/issues/3700
 			dpkg-query -s grub-pc &> /dev/null && G_EXEC eval 'debconf-set-selections <<< '\''grub-pc grub-pc/install_devices multiselect /dev/sda'\'
-
-			# Update initramfs with above changes
-			if command -v update-tirfs > /dev/null
-			then
-				G_EXEC_OUTPUT=1 G_EXEC update-tirfs
-
-			elif command -v update-initramfs > /dev/null
-			then
-				G_EXEC_OUTPUT=1 G_EXEC update-initramfs -u
-			fi
 
 		elif (( $G_HW_ARCH == 3 ))
 		then
@@ -2226,8 +2229,8 @@ _EOF_
 			G_EXEC eval 'echo '\''ledtrig-netdev'\'' > /etc/modules-load.d/dietpi-eth-leds.conf'
 			cat << '_EOF_' > /etc/udev/rules.d/dietpi-eth-leds.rules
 SUBSYSTEM=="leds", KERNEL=="lan2_led", ACTION=="add", ATTR{trigger}="netdev", ATTR{device_name}="eth0", ATTR{link}="1", ATTR{rx}="1", ATTR{tx}="1", RUN+="/bin/ip l s up dev eth0", RUN+="/bin/ip l s down dev eth0"
-SUBSYSTEM=="leds", KERNEL=="wan_led", ACTION=="add", ATTR{trigger}="netdev", ATTR{device_name}="eth1", ATTR{link}="1", ATTR{rx}="1", ATTR{tx}="1"
-SUBSYSTEM=="leds", KERNEL=="lan1_led", ACTION=="add", ATTR{trigger}="netdev", ATTR{device_name}="eth2", ATTR{link}="1", ATTR{rx}="1", ATTR{tx}="1"
+SUBSYSTEM=="leds", KERNEL=="wan_led", ACTION=="add", ATTR{trigger}="netdev", ATTR{device_name}="eth1", ATTR{link}="1", ATTR{rx}="1", ATTR{tx}="1", RUN+="/bin/ip l s up dev eth1", RUN+="/bin/ip l s down dev eth1"
+SUBSYSTEM=="leds", KERNEL=="lan1_led", ACTION=="add", ATTR{trigger}="netdev", ATTR{device_name}="eth2", ATTR{link}="1", ATTR{rx}="1", ATTR{tx}="1", RUN+="/bin/ip l s up dev eth2", RUN+="/bin/ip l s down dev eth2"
 _EOF_
 		# NanoPi R6C
 		elif [[ $G_HW_MODEL == 79 && $HW_VARIANT == 2 ]]
@@ -2309,24 +2312,32 @@ _EOF_
 			/boot/dietpi/func/dietpi-set_hardware wifimodules "$tmp_mode"
 		fi
 
-		# - x86_64: GRUB install and config
-		if (( $G_HW_ARCH == 10 && $G_HW_MODEL != 75 ))
+		# Update initramfs
+		command -v 'update-initramfs' &> /dev/null && G_EXEC_OUTPUT=1 G_EXEC update-initramfs -u
+
+		# GRUB install and config
+		if dpkg-query -s 'grub2-common' &> /dev/null
 		then
 			# UEFI
-			if [[ -d '/boot/efi' ]] && dpkg-query -s 'grub-efi-amd64' &> /dev/null
+			if [[ -d '/boot/efi' ]] && dpkg-query -s "grub-efi-$userland_arch" &> /dev/null
 			then
 				# Force GRUB installation to the EFI removable media path, if no (other) bootloader is installed there yet, which is checked via single case-insensitive glob
+				case $G_HW_ARCH in
+					3) local grub_arch='aa64';;
+					11) local grub_arch='riscv64';;
+					*) local grub_arch='x64';;
+				esac
 				shopt -s nocaseglob
 				local efi_fallback=()
-				# shellcheck disable=SC2043
-				for i in /boot/efi/EFI/boot/bootx64.efi
+				# shellcheck disable=SC2043,SC2231
+				for i in /boot/efi/EFI/boot/boot$grub_arch.efi*
 				do
 					[[ -e $i ]] && break
 					efi_fallback=('--force-extra-removable')
-					G_EXEC eval 'debconf-set-selections <<< '\''grub-efi-amd64 grub2/force_efi_extra_removable boolean true'\'
+					G_EXEC eval "debconf-set-selections <<< 'grub-efi-$userland_arch grub2/force_efi_extra_removable boolean true'"
 				done
 				shopt -u nocaseglob
-				G_EXEC_DESC='Installing GRUB for UEFI' G_EXEC_OUTPUT=1 G_EXEC grub-install --recheck --target=x86_64-efi --efi-directory=/boot/efi "${efi_fallback[@]}" --uefi-secure-boot
+				G_EXEC_DESC='Installing GRUB for UEFI' G_EXEC_OUTPUT=1 G_EXEC grub-install --recheck --target="${userland_arch/amd64/x86_64}-efi" --efi-directory=/boot/efi "${efi_fallback[@]}" --uefi-secure-boot
 
 			# BIOS
 			else

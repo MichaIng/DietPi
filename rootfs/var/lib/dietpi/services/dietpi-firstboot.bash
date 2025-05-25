@@ -179,17 +179,14 @@ ExecStart=-/sbin/agetty -a root -J -s console 115200,38400,9600 $TERM
 _EOF_
 		fi
 
-		# Apply login password if it has not been encrypted before to avoid applying the informational text
-		if [[ ! -f '/var/lib/dietpi/dietpi-software/.GLOBAL_PW.bin' ]]
+		# Apply login password
+		local password=$(sed -n '/^[[:blank:]]*AUTO_SETUP_GLOBAL_PASSWORD=/{s/^[^=]*=//p;q}' /boot/dietpi.txt)
+		if [[ $password ]]
 		then
-			local password=$(sed -n '/^[[:blank:]]*AUTO_SETUP_GLOBAL_PASSWORD=/{s/^[^=]*=//p;q}' /boot/dietpi.txt)
-			if [[ $password ]]
-			then
-				chpasswd <<< "root:$password"
-				chpasswd <<< "dietpi:$password"
-			fi
-			unset -v password
+			chpasswd <<< "root:$password"
+			chpasswd <<< "dietpi:$password"
 		fi
+		unset -v password
 
 		# Set APT mirror
 		local target_repo='CONFIG_APT_DEBIAN_MIRROR'
@@ -203,10 +200,12 @@ _EOF_
 
 		# Apply time zone
 		local autoinstall_timezone=$(sed -n '/^[[:blank:]]*AUTO_SETUP_TIMEZONE=/{s/^[^=]*=//p;q}' /boot/dietpi.txt)
-		if [[ -f /usr/share/zoneinfo/$autoinstall_timezone && $autoinstall_timezone != $(</etc/timezone) ]]; then
+		local current_timezone=$(readlink /etc/localtime)
+		[[ $current_timezone ]] && current_timezone=${current_timezone#/usr/share/zoneinfo/} || current_timezone='UTC'
+		if [[ -f /usr/share/zoneinfo/$autoinstall_timezone && $autoinstall_timezone != "$current_timezone" ]]; then
 
 			G_DIETPI-NOTIFY 2 "Setting time zone $autoinstall_timezone. Please wait..."
-			rm -fv /etc/{timezoner,localtime}
+			rm -fv /etc/{localtime,timezone}
 			ln -s "/usr/share/zoneinfo/$autoinstall_timezone" /etc/localtime
 			dpkg-reconfigure -f noninteractive tzdata
 
@@ -226,14 +225,7 @@ _EOF_
 		(( $G_HW_MODEL == 75 )) && return 0
 
 		# Apply keyboard layout
-		local autoinstall_keyboard=$(sed -n '/^[[:blank:]]*AUTO_SETUP_KEYBOARD_LAYOUT=/{s/^[^=]*=//p;q}' /boot/dietpi.txt)
-		if [[ $autoinstall_keyboard ]] && ! grep -q "XKBLAYOUT=\"$autoinstall_keyboard\"" /etc/default/keyboard; then
-
-			G_DIETPI-NOTIFY 2 "Setting keyboard layout $autoinstall_keyboard. Please wait..."
-			G_CONFIG_INJECT 'XKBLAYOUT=' "XKBLAYOUT=\"$autoinstall_keyboard\"" /etc/default/keyboard
-			setupcon --save # https://bugs.debian.org/818065
-
-		fi
+		/boot/dietpi/func/dietpi-set_hardware keyboard autosetup
 
 		# Disable serial console if set in dietpi.txt
 		grep -q '^[[:blank:]]*CONFIG_SERIAL_CONSOLE_ENABLE=0' /boot/dietpi.txt && /boot/dietpi/func/dietpi-set_hardware serialconsole disable
