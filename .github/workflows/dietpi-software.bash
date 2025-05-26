@@ -331,6 +331,8 @@ then
 	G_EXEC rm keyring.deb
 	# Enforce Debian Trixie FFmpeg packages over RPi repo ones
 	[[ $DISTRO == 'trixie' ]] && G_EXEC eval 'echo -e '\''Package: src:ffmpeg\nPin: origin archive.raspberrypi.com\nPin-Priority: -1'\'' > /etc/apt/preferences.d/dietpi-ffmpeg'
+	# sysctl cannot succeed in containers. It is skipped with G_HW_MODEL=75, but here we changed that ID. Run the command, so we see it in logs, but do not abort as it fails.
+	G_EXEC sed --follow-symlinks -i '/# Start DietPi-Software/a\sed -i '\''/^[[:blank:]]*G_EXEC sysctl /s/G_EXEC sysctl /G_EXEC_NOHALT=1 G_EXEC sysctl /'\'' /boot/dietpi/dietpi-software' rootfs/boot/dietpi/dietpi-login
 fi
 
 # Install test builds from dietpi.com if requested
@@ -422,9 +424,6 @@ fi
 # Workaround failing Java apps if 64-bit host memory leads to too large heap size in 32-bit containers: https://stackoverflow.com/questions/4401396
 # shellcheck disable=SC2016
 (( $arch < 3 && $G_HW_ARCH > 2)) && G_EXEC sed --follow-symlinks -i '/# Start DietPi-Software/a\sed -i '\''s|-mx${memory_limit}m|-mx1024m|'\'' /boot/dietpi/dietpi-software' rootfs/boot/dietpi/dietpi-login
-
-# Workaround for sysctl: permission denied on key "net.core.rmem_max" in containers
-G_EXEC sed --follow-symlinks -i '/# Start DietPi-Software/a\sed -i '\''/G_EXEC sysctl -w net\.core\.rmem_max/d'\'' /boot/dietpi/dietpi-software' rootfs/boot/dietpi/dietpi-login
 
 # ARMv6: Workaround for ARMv7 Rust toolchain selected in containers with newer host/emulated ARM version
 (( $arch == 1 )) && G_EXEC sed --follow-symlinks -i '/# Start DietPi-Software/a\sed -i '\''s/--profile minimal .*$/--profile minimal --default-host arm-unknown-linux-gnueabihf/'\'' /boot/dietpi/dietpi-software' rootfs/boot/dietpi/dietpi-login
