@@ -397,10 +397,10 @@ G_EXEC touch rootfs/mnt/dietpi_userdata/papermc/plugins/Geyser-Spigot.jar
 # Workaround for "Could not execute systemctl:  at /usr/bin/deb-systemd-invoke line 145." during Apache2 DEB postinst in 32-bit ARM Bookworm container: https://lists.ubuntu.com/archives/foundations-bugs/2022-January/467253.html
 G_CONFIG_INJECT 'AUTO_SETUP_WEB_SERVER_INDEX=' 'AUTO_SETUP_WEB_SERVER_INDEX=-2' rootfs/boot/dietpi.txt
 
-# Workarounds for QEMU-emulated 32-bit ARM containers
-if (( $arch < 3 && $emulation ))
+# Workarounds for QEMU-emulated RISC-V and 32-bit ARM containers
+if (( ( $arch < 3 || $arch == 11 ) && $emulation ))
 then
-	# Failing services as PrivateUsers=true leads to "Failed to set up user namespacing" on QEMU-emulated 32-bit ARM containers, and AmbientCapabilities to "Failed to apply ambient capabilities (before UID change): Operation not permitted"
+	# Failing services as PrivateUsers=true leads to "Failed to set up user namespacing", and AmbientCapabilities to "Failed to apply ambient capabilities (before UID change): Operation not permitted"
 	G_EXEC mkdir rootfs/etc/systemd/system/{redis-server,raspotify,navidrome,homebridge}.service.d
 	G_EXEC eval 'echo -e '\''[Service]\nPrivateUsers=0'\'' > rootfs/etc/systemd/system/redis-server.service.d/dietpi-container.conf'
 	G_EXEC eval 'echo -e '\''[Service]\nPrivateUsers=0'\'' > rootfs/etc/systemd/system/raspotify.service.d/dietpi-container.conf'
@@ -408,8 +408,10 @@ then
 	G_EXEC eval 'echo -e '\''[Service]\nAmbientCapabilities='\'' > rootfs/etc/systemd/system/homebridge.service.d/dietpi-container.conf'
 
 	# Failing 32-bit ARM Rust builds on ext4 in QEMU emulated container on 64-bit host: https://github.com/rust-lang/cargo/issues/9545
-	G_EXEC eval 'echo -e '\''tmpfs /mnt/dietpi_userdata tmpfs size=3G,noatime,lazytime\ntmpfs /root tmpfs size=3G,noatime,lazytime'\'' >> rootfs/etc/fstab'
-	cat << '_EOF_' > rootfs/boot/Automation_Custom_PreScript.sh
+	if (( $arch < 3 ))
+	then
+		G_EXEC eval 'echo -e '\''tmpfs /mnt/dietpi_userdata tmpfs size=3G,noatime,lazytime\ntmpfs /root tmpfs size=3G,noatime,lazytime'\'' >> rootfs/etc/fstab'
+		cat << '_EOF_' > rootfs/boot/Automation_Custom_PreScript.sh
 #!/bin/dash -e
 findmnt /mnt/dietpi_userdata > /dev/null 2>&1 || exit 0
 umount /mnt/dietpi_userdata
@@ -419,6 +421,7 @@ mount /mnt/dietpi_userdata
 mv /mnt/dietpi_userdata_bak/* /mnt/dietpi_userdata/
 rm -R /mnt/dietpi_userdata_bak
 _EOF_
+	fi
 fi
 
 # Workaround failing Java apps if 64-bit host memory leads to too large heap size in 32-bit containers: https://stackoverflow.com/questions/4401396
