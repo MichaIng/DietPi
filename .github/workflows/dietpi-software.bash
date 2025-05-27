@@ -9,21 +9,20 @@ if [[ -f '/boot/dietpi/func/dietpi-globals' ]]
 then
 	. /boot/dietpi/func/dietpi-globals
 else
-	curl -sSf "https://raw.githubusercontent.com/${G_GITOWNER:=MichaIng}/DietPi/${G_GITBRANCH:=master}/dietpi/func/dietpi-globals" -o /tmp/dietpi-globals || Error_Exit 'Failed to download DietPi-Globals'
+	curl -sSf "https://raw.githubusercontent.com/${G_GITOWNER:=MichaIng}/DietPi/${G_GITBRANCH:=master}/dietpi/func/dietpi-globals" -o /tmp/dietpi-globals || { echo 'Failed to download DietPi-Globals, aborting ...'; exit 1; }
 	# shellcheck disable=SC1091
 	. /tmp/dietpi-globals
 	G_EXEC rm /tmp/dietpi-globals
 	export G_GITOWNER G_GITBRANCH G_HW_ARCH_NAME=$(uname -m)
 	read -r debian_version < /etc/debian_version
 	case $debian_version in
-		'11.'*|'bullseye/sid') G_DISTRO=6;;
 		'12.'*|'bookworm/sid') G_DISTRO=7;;
 		'13.'*|'trixie/sid') G_DISTRO=8;;
-		*) G_DIETPI-NOTIFY 1 "Unsupported distro version \"$debian_version\". Aborting ..."; exit 1;;
+		*) Error_Exit "Unsupported distro version \"$debian_version\"";;
 	esac
 	# Ubuntu ships with /etc/debian_version from Debian testing, hence we assume one version lower.
 	grep -q '^ID=ubuntu' /etc/os-release && ((G_DISTRO--))
-	(( $G_DISTRO < 6 )) && { G_DIETPI-NOTIFY 1 'Unsupported Ubuntu version. Aborting ...'; exit 1; }
+	(( $G_DISTRO < 7 )) && Error_Exit 'Unsupported Ubuntu version'
 fi
 case $G_HW_ARCH_NAME in
 	'armv6l') export G_HW_ARCH=1;;
@@ -31,9 +30,9 @@ case $G_HW_ARCH_NAME in
 	'aarch64') export G_HW_ARCH=3;;
 	'x86_64') export G_HW_ARCH=10;;
 	'riscv64') export G_HW_ARCH=11;;
-	*) G_DIETPI-NOTIFY 1 "Unsupported host system architecture \"$G_HW_ARCH_NAME\" detected, aborting..."; exit 1;;
+	*) Error_Exit "Unsupported host system architecture \"$G_HW_ARCH_NAME\" detected";;
 esac
-readonly G_PROGRAM_NAME='DietPi-Software_test_setup'
+readonly G_PROGRAM_NAME='DietPi-Software test'
 G_CHECK_ROOT_USER
 G_CHECK_ROOTFS_RW
 readonly FP_ORIGIN=$PWD # Store origin dir
@@ -56,23 +55,23 @@ do
 		'-s') shift; SOFTWARE=$1;;
 		'-rpi') shift; RPI=$1;;
 		'-t') shift; TEST=$1;;
-		*) G_DIETPI-NOTIFY 1 "Invalid input \"$1\", aborting..."; exit 1;;
+		*) Error_Exit "Invalid input \"$1\"";;
 	esac
 	shift
 done
-[[ $DISTRO =~ ^('bullseye'|'bookworm'|'trixie')$ ]] || { G_DIETPI-NOTIFY 1 "Invalid distro \"$DISTRO\" passed, aborting..."; exit 1; }
+[[ $DISTRO =~ ^('bullseye'|'bookworm'|'trixie')$ ]] || Error_Exit "Invalid distro \"$DISTRO\" passed"
 case $ARCH in
 	'armv6l') image="ARMv6-${DISTRO^}" arch=1;;
 	'armv7l') image="ARMv7-${DISTRO^}" arch=2;;
 	'aarch64') image="ARMv8-${DISTRO^}" arch=3;;
 	'x86_64') image="x86_64-${DISTRO^}" arch=10;;
 	'riscv64') image="RISC-V-${DISTRO^}" arch=11;;
-	*) G_DIETPI-NOTIFY 1 "Invalid architecture \"$ARCH\" passed, aborting..."; exit 1;;
+	*) Error_Exit "Invalid architecture \"$ARCH\" passed";;
 esac
 image="DietPi_Container-$image.img"
-[[ $SOFTWARE =~ ^[0-9\ ]+$ ]] || { G_DIETPI-NOTIFY 1 "Invalid software list \"$SOFTWARE\" passed, aborting..."; exit 1; }
-[[ $RPI =~ ^('false'|'true')$ ]] || { G_DIETPI-NOTIFY 1 "Invalid RPi flag \"$RPI\" passed, aborting..."; exit 1; }
-[[ $TEST =~ ^('false'|'true')$ ]] || { G_DIETPI-NOTIFY 1 "Invalid test flag \"$TEST\" passed, aborting..."; exit 1; }
+[[ $SOFTWARE =~ ^[0-9\ ]+$ ]] || Error_Exit "Invalid software list \"$SOFTWARE\" passed"
+[[ $RPI =~ ^('false'|'true')$ ]] || Error_Exit "Invalid RPi flag \"$RPI\" passed"
+[[ $TEST =~ ^('false'|'true')$ ]] || Error_Exit "Invalid test flag \"$TEST\" passed"
 
 # Emulation support in case of incompatible architecture
 emulation=0
@@ -321,7 +320,7 @@ then
 		1) model=1;;
 		2) model=2;;
 		3) model=4;;
-		*) G_DIETPI-NOTIFY 1 "Invalid architecture $ARCH ($arch). This should never happen!"; exit 1;;
+		*) Error_Exit "Invalid architecture $ARCH ($arch). This is a bug in this script!";;
 	esac
 	G_EXEC rm rootfs/etc/.dietpi_hw_model_identifier
 	G_EXEC touch rootfs/boot/{bcm-rpi-dummy.dtb,config.txt,cmdline.txt}
