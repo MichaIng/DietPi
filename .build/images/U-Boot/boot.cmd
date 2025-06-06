@@ -17,7 +17,7 @@ setenv kernel_addr_r "0x34000000"
 setenv fdt_addr_r "0x4080000"
 
 # Get PARTUUID of first partition on SD/eMMC it was loaded from
-if test "${devtype}" = "mmc"; then part uuid mmc ${devnum}:1 partuuid; fi
+if test "${devtype}" = "mmc"; then part uuid mmc "${devnum}:1" partuuid; fi
 
 # Load environment file
 if load "${devtype}" "${devnum}" "${scriptaddr}" "${prefix}dietpiEnv.txt"; then
