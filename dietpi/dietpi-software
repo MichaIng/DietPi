@@ -2564,9 +2564,23 @@ _EOF_
 		# $1: Software name, so config can be created and removed per-software
 		Enable_IP_forwarding()
 		{
-			G_DIETPI-NOTIFY 2 'Enabling IP forwarding to allow access across network interfaces'
-			echo -e 'net.ipv4.ip_forward=1\nnet.ipv6.conf.default.accept_ra=2\nnet.ipv6.conf.all.accept_ra=2\nnet.ipv6.conf.default.forwarding=1\nnet.ipv6.conf.all.forwarding=1' > "/etc/sysctl.d/dietpi-$1.conf"
-			sysctl -p "/etc/sysctl.d/dietpi-$1.conf"
+			if (( $G_HW_MODEL == 75 ))
+			then
+				[[ $(sysctl -n net.ipv4.ip_forward net.ipv6.conf.default.accept_ra net.ipv6.conf.all.accept_ra net.ipv6.conf.default.forwarding net.ipv6.conf.all.forwarding) == $'1\n2\n2\n1\n1' ]] || G_WHIP_MSG "[WARNING] IP forwarding needs to be enabled on container host
+\nIP forwarding is not enabled for all interfaces, hence ${aSOFTWARE_NAME[$software_id]} clients cannot access the LAN or Internet behind this DietPi system vice versa.
+\nIP forwarding can only be enabled on the host of this container. E.g. add the following lines to a new sysctl config file like /etc/sysctl.d/dietpi-$1.conf:
+net.ipv4.ip_forward=1
+net.ipv6.conf.default.accept_ra=2
+net.ipv6.conf.all.accept_ra=2
+net.ipv6.conf.default.forwarding=1
+net.ipv6.conf.all.forwarding=1
+\nApply them without reboot like this:
+sudo sysctl -p /etc/sysctl.d/dietpi-$1.conf"
+			else
+				G_DIETPI-NOTIFY 2 'Enabling IP forwarding to allow access across network interfaces'
+				G_EXEC eval "echo -e 'net.ipv4.ip_forward=1\nnet.ipv6.conf.default.accept_ra=2\nnet.ipv6.conf.all.accept_ra=2\nnet.ipv6.conf.default.forwarding=1\nnet.ipv6.conf.all.forwarding=1' > '/etc/sysctl.d/dietpi-$1.conf'"
+				G_EXEC sysctl -p "/etc/sysctl.d/dietpi-$1.conf"
+			fi
 		}
 
 		To_Install()
@@ -2673,6 +2687,8 @@ Section "ServerFlags"
 	Option "BlankTime" "0"
 EndSection
 _EOF_
+			# Install packages
+			G_AGI "${aDEPS[@]}"
 		fi
 
 		if To_Install 152 avahi-daemon # Avahi-Daemon
@@ -3568,8 +3584,6 @@ _EOF_
 
 			G_EXEC rm -Rf /var/lib/mysql
 			G_EXEC ln -s /mnt/dietpi_userdata/mysql /var/lib/mysql
-			# Failsafe, in case database was imported from a different system with different mysql UID
-			G_EXEC chown -R mysql /mnt/dietpi_userdata/mysql
 
 			local apackages=('mariadb-server')
 			# Install PHP module if PHP was already installed
@@ -3618,8 +3632,16 @@ _EOF_
 			G_EXEC eval 'echo -e '\''[Unit]\nBefore=cron.service'\'' > /etc/systemd/system/redis-server.service.d/dietpi.conf'
 
 			# Enable memory overcomit: https://github.com/jemalloc/jemalloc/issues/1328
-			G_EXEC eval 'echo '\''vm.overcommit_memory=1'\'' > /etc/sysctl.d/98-dietpi-redis.conf'
-			G_EXEC sysctl -p /etc/sysctl.d/98-dietpi-redis.conf
+			if (( $G_HW_MODEL == 75 ))
+			then
+				[[ $(sysctl -n vm.overcommit_memory) == 1 ]] || G_WHIP_MSG '[WARNING] Memory overcomit is disabled
+\nFor Redis to run reliably, memory overcomit should be enabled. This can only be done on the host system of this container. E.g. run the following two commands on the host:
+echo vm.overcommit_memory=1 | sudo tee /etc/sysctl.d/98-dietpi-redis.conf
+sudo sysctl -p /etc/sysctl.d/98-dietpi-redis.conf'
+			else
+				G_EXEC eval 'echo '\''vm.overcommit_memory=1'\'' > /etc/sysctl.d/98-dietpi-redis.conf'
+				G_EXEC sysctl -p /etc/sysctl.d/98-dietpi-redis.conf
+			fi
 		fi
 
 		if To_Install 89 # PHP
@@ -3699,6 +3721,12 @@ _EOF_
 			# - OPcache
 			G_CONFIG_INJECT 'opcache.memory_consumption[[:blank:]=]' "opcache.memory_consumption=$cache_size" "$target_php_ini"
 			G_CONFIG_INJECT 'opcache.revalidate_freq[[:blank:]=]' 'opcache.revalidate_freq=60' "$target_php_ini" # 1 minute
+			# - JIT is available since PHP 8.0 for x86_64 and since PHP 8.2 for ARMv8. Enable it with 2 MiB size, since we never saw usage far above 1 MiB for whatever reason.
+			if (( $G_DISTRO > 6 && ( $G_HW_ARCH == 10 || $G_HW_ARCH == 3 ) ))
+			then
+				G_CONFIG_INJECT 'opcache.jit[[:blank:]=]' 'opcache.jit=1' "$target_php_ini" # 1/on = "tracing", follow default for now: https://www.php.net/manual/en/opcache.configuration.php#ini.opcache.jit
+				G_CONFIG_INJECT 'opcache.jit_buffer_size[[:blank:]=]' 'opcache.jit_buffer_size=2M' "$target_php_ini"
+			fi
 			# - APCu
 			G_CONFIG_INJECT 'apc.shm_size[[:blank:]=]' "apc.shm_size=$(( $cache_size / 2 ))M" "$target_php_ini"
 			G_CONFIG_INJECT 'apc.ttl[[:blank:]=]' 'apc.ttl=259200' "$target_php_ini" # 3 days
@@ -4100,9 +4128,20 @@ _EOF_
 			# CLI alias
 			echo 'alias ipfs='\''sudo -u ipfs IPFS_PATH=/mnt/dietpi_userdata/ipfs ipfs'\' > /etc/bashrc.d/dietpi-ipfs.sh
 
-			# Raise packet receive buffer: https://github.com/lucas-clemente/quic-go/wiki/UDP-Receive-Buffer-Size
-			G_EXEC eval 'echo '\''net.core.rmem_max=2500000'\'' > /etc/sysctl.d/dietpi-ipfs.conf'
-			G_EXEC sysctl -p /etc/sysctl.d/dietpi-ipfs.conf
+			# Raise UDP buffer sizes: https://github.com/quic-go/quic-go/wiki/UDP-Buffer-Sizes
+			if (( $G_HW_MODEL == 75 ))
+			then
+				(( $(sysctl -n net.core.rmem_max) >= 7500000 || $(sysctl -n net.core.wmem_max) >= 7500000 )) || G_WHIP_MSG '[WARNING] UDP buffer size limits might be too small
+\nFor QUIC, used by the IPFS Node, the bandwidth can be limited by the UDP buffer sizes. Hence it is recommended to raise their limit. This can only be done on the host of this container. E.g. add the following lines to a new sysctl config file like /etc/sysctl.d/dietpi-ipfs.conf:
+net.core.rmem_max=7500000
+net.core.wmem_max=7500000
+\nApply them without reboot like this:
+sudo sysctl -p /etc/sysctl.d/dietpi-ipfs.conf
+\nMore info: https://github.com/quic-go/quic-go/wiki/UDP-Buffer-Sizes'
+			else
+				G_EXEC eval 'echo -e '\''net.core.rmem_max=7500000\nnet.core.wmem_max=7500000'\'' > /etc/sysctl.d/dietpi-ipfs.conf'
+				G_EXEC sysctl -p /etc/sysctl.d/dietpi-ipfs.conf
+			fi
 		fi
 
 		if To_Install 16 # microblog.pub
@@ -6012,7 +6051,7 @@ _EOF_
 				*) local arch='amd64';;
 			esac
 
-			local fallback_url="https://github.com/navidrome/navidrome/releases/download/v0.55.2/navidrome_0.55.2_linux_$arch.tar.gz"
+			local fallback_url="https://github.com/navidrome/navidrome/releases/download/v0.56.1/navidrome_0.56.1_linux_$arch.tar.gz"
 			Download_Install "$(curl -sSfL 'https://api.github.com/repos/navidrome/navidrome/releases/latest' | mawk -F\" "/^ *\"browser_download_url\": \".*\/navidrome_[0-9.]*_linux_$arch\.tar\.gz\"$/{print \$4}")" /opt/navidrome
 
 			# Data dir
@@ -6901,7 +6940,7 @@ _EOF_
 				if (( $G_DISTRO > 6 ))
 				then
 					version=$(curl -sSfL 'https://api.github.com/repos/FreshRSS/FreshRSS/releases/latest' | mawk -F\" '/^ *"tag_name": "[^"]*",$/{print $4}')
-					[[ $version ]] || { version='1.26.2'; G_DIETPI-NOTIFY 1 "Automatic latest FreshRSS version detection failed. Version \"$version\" will be installed as fallback, but a newer version might be available. Please report this at: https://github.com/MichaIng/DietPi/issues"; }
+					[[ $version ]] || { version='1.26.3'; G_DIETPI-NOTIFY 1 "Automatic latest FreshRSS version detection failed. Version \"$version\" will be installed as fallback, but a newer version might be available. Please report this at: https://github.com/MichaIng/DietPi/issues"; }
 				fi
 				Download_Install "https://github.com/FreshRSS/FreshRSS/archive/$version.tar.gz"
 				G_EXEC mv "FreshRSS-$version" /opt/FreshRSS
@@ -7396,7 +7435,7 @@ _EOF_
 			# Download: Ampache v7 requires PHP 8.2
 			if (( $G_DISTRO > 6 ))
 			then
-				local fallback_url="https://github.com/ampache/ampache/releases/download/7.4.2/ampache-7.4.2_all_php$PHP_VERSION.zip"
+				local fallback_url="https://github.com/ampache/ampache/releases/download/7.5.2/ampache-7.5.2_all_php$PHP_VERSION.zip"
 				Download_Install "$(curl -sSfL 'https://api.github.com/repos/ampache/ampache/releases/latest' | mawk -F\" "/^ *\"browser_download_url\": \".*\/ampache-[0-9\.]*_all_php$PHP_VERSION.zip\"$/{print \$4}")" ampache
 			else
 				local fallback_url="https://github.com/ampache/ampache/releases/download/6.6.7/ampache-6.6.7_all_php$PHP_VERSION.zip"
@@ -8408,8 +8447,8 @@ _EOF_
 			# Install ruTorrent: Web UI for rTorrent
 			# - Grab current version
 			local version=$(curl -sSfL 'https://api.github.com/repos/Novik/ruTorrent/releases/latest' | mawk -F\" '/^ *"tag_name": "[^"]*",$/{print $4}')
-			[[ $version ]] || { version='v5.2.6'; G_DIETPI-NOTIFY 1 "Automatic latest ruTorrent version detection failed. Version \"$version\" will be installed as fallback, but a newer version might be available. Please report this at: https://github.com/MichaIng/DietPi/issues"; }
-			[[ $version == 'v5.'* ]] || version='v5.2.6'
+			[[ $version ]] || { version='v5.2.8'; G_DIETPI-NOTIFY 1 "Automatic latest ruTorrent version detection failed. Version \"$version\" will be installed as fallback, but a newer version might be available. Please report this at: https://github.com/MichaIng/DietPi/issues"; }
+			[[ $version == 'v5.'* ]] || version='v5.2.8'
 			Download_Install "https://github.com/Novik/ruTorrent/archive/$version.tar.gz"
 
 			# - Reinstall freshly with preserved configs and 3rd party plugins
@@ -8800,7 +8839,7 @@ _EOF_
 					*) local arch='arm';;
 				esac
 
-				local fallback_url="https://github.com/syncthing/syncthing/releases/download/v1.29.6/syncthing-linux-$arch-v1.29.6.tar.gz"
+				local fallback_url="https://github.com/syncthing/syncthing/releases/download/v1.29.7/syncthing-linux-$arch-v1.29.6.tar.gz"
 				Download_Install "$(curl -sSfL 'https://api.github.com/repos/syncthing/syncthing/releases/latest' | mawk -F\" "/\"browser_download_url\": .*\/syncthing-linux-$arch-[^\"\/]*\.tar\.gz\"/{print \$4}")"
 				G_EXEC mv syncthing-* /opt/syncthing
 			fi
@@ -8860,9 +8899,18 @@ NoNewPrivileges=true
 [Install]
 WantedBy=multi-user.target
 _EOF_
-			# Increase fs watcher limit: https://docs.syncthing.net/users/faq.html#how-do-i-increase-the-inotify-limit-to-get-my-filesystem-watcher-to-work
-			G_EXEC eval 'echo '\''fs.inotify.max_user_watches=204800'\'' > /etc/sysctl.d/dietpi-syncthing.conf'
-			G_EXEC sysctl -p /etc/sysctl.d/dietpi-syncthing.conf
+			# Increase fs watcher limit: https://docs.syncthing.net/users/faq.html#inotify-limits
+			# - 8192 until Linux 5.11, 7x RAM size in MiB since Linux 5.11, up to 1048576
+			if (( $G_HW_MODEL == 75 ))
+			then
+				(( $(sysctl -n fs.inotify.max_user_watches) >= 204800 )) || G_WHIP_MSG '[WARNING] Raised filesystem watcher limit might be needed
+\nSyncthing uses filesystem/inotify watchers to detect changes among your files, if they were not done via Syncthing itself. Depending on the amount of files in the Syncthing data directory, the kernel version and physical RAM size of the host system, the current limit might be too low for Syncthing to start all watchers.
+\nLimits can be raised on the host system of this container only. Read more about it here:
+- https://docs.syncthing.net/users/faq.html#inotify-limits'
+			else
+				G_EXEC eval 'echo '\''fs.inotify.max_user_watches=204800'\'' > /etc/sysctl.d/dietpi-syncthing.conf'
+				G_EXEC sysctl -p /etc/sysctl.d/dietpi-syncthing.conf
+			fi
 		fi
 
 		if To_Install 113 # Chromium
@@ -8875,6 +8923,7 @@ _EOF_
 
 			# RPi: Use RPi repo package including non-free FFmpeg codecs integration
 			else
+				# From Bookworm on, "chromium-browser" is a dummy package only. Hence once we drop Bullseye support, just install and run "chromium" package and binary on RPi.
 				G_AGI chromium-browser chromium-codecs-ffmpeg-extra libpam-systemd
 				Create_Desktop_Shortcut chromium-browser
 
@@ -8886,10 +8935,7 @@ _EOF_
 			fi
 
 			# Flags: Allow root (disable sandbox) and minimise CPU usage: https://peter.sh/experiments/chromium-command-line-switches/
-			local flags="export CHROMIUM_FLAGS=\"\$CHROMIUM_FLAGS --no-sandbox --test-type --disable-smooth-scrolling --disable-low-res-tiling --enable-low-end-device-mode --num-raster-threads=$G_HW_CPU_CORES --disable-composited-antialiasing"
-			# - x86_64: OpenGL, else GLES
-			(( $G_HW_ARCH == 10 )) && flags+='"' || flags+=' --use-gl=egl"'
-			echo "$flags" > /etc/chromium.d/dietpi
+			G_EXEC eval "echo 'export CHROMIUM_FLAGS=\"\$CHROMIUM_FLAGS --no-sandbox --test-type --disable-smooth-scrolling --disable-low-res-tiling --enable-low-end-device-mode --num-raster-threads=$G_HW_CPU_CORES --disable-composited-antialiasing\"' > /etc/chromium.d/dietpi"
 
 			# Autostart script for kiosk mode, based on @AYapejian: https://github.com/MichaIng/DietPi/issues/1737#issue-318697621
 			G_EXEC mkdir -p /var/lib/dietpi/dietpi-software/installed
@@ -9222,7 +9268,7 @@ _EOF_
 			if (( ${PHP_VERSION::1} > 7 ))
 			then
 				aDEPS+=("php$PHP_VERSION-curl")
-				local fallback_url='https://github.com/koel/koel/releases/download/v7.4.2/koel-v7.4.2.tar.gz' aphp_deps=('curl' 'dom')
+				local fallback_url='https://github.com/koel/koel/releases/download/v7.5.2/koel-v7.5.2.tar.gz' aphp_deps=('curl' 'dom')
 				Download_Install "$(curl -sSfL 'https://api.github.com/repos/koel/koel/releases/latest' | mawk -F\" '/^ *"browser_download_url": ".*\/koel-[^"\/]*\.tar\.gz"$/{print $4}')"
 			else
 				aDEPS+=("php$PHP_VERSION-json")
@@ -9447,7 +9493,7 @@ _EOF_
 				esac
 
 				url=$(curl -sSfL 'https://api.github.com/repos/Radarr/Radarr/releases/latest' | mawk -F\" "/^ *\"browser_download_url\": \".*linux-core-$arch\.tar\.gz\"$/{print \$4}")
-				local fallback_url="https://github.com/Radarr/Radarr/releases/download/v5.23.3.9987/Radarr.master.5.23.3.9987.linux-core-$arch.tar.gz"
+				local fallback_url="https://github.com/Radarr/Radarr/releases/download/v5.25.0.10024/Radarr.master.5.25.0.10024.linux-core-$arch.tar.gz"
 			fi
 			Download_Install "$url"
 
@@ -9871,7 +9917,7 @@ _EOF_
 				3) local arch='arm64';;
 				*) local arch='x64';;
 			esac
-			local fallback_url="https://github.com/Prowlarr/Prowlarr/releases/download/v1.36.3.5071/Prowlarr.master.1.36.3.5071.linux-core-$arch.tar.gz"
+			local fallback_url="https://github.com/Prowlarr/Prowlarr/releases/download/v1.37.0.5076/Prowlarr.master.1.37.0.5076.linux-core-$arch.tar.gz"
 			Download_Install "$(curl -sSfL 'https://api.github.com/repos/Prowlarr/Prowlarr/releases/latest' | mawk -F\" "/^ *\"browser_download_url\": \".*linux-core-$arch\.tar\.gz\"$/{print \$4}")"
 
 			# Install: Remove previous instance on reinstall
@@ -10280,8 +10326,8 @@ _EOF_
 			if (( $G_HW_ARCH != 11 ))
 			then
 				# Detect distro
-				local distro="debian $G_DISTRO_NAME"
-				(( $G_RASPBIAN )) && distro="raspbian ${G_DISTRO_NAME/trixie/bookworm}"
+				local distro='debian' suite=$G_DISTRO_NAME
+				(( $G_RASPBIAN )) && distro='raspbian' suite=${G_DISTRO_NAME/trixie/bookworm}
 
 				# APT key
 				local url="https://download.docker.com/linux/$distro/gpg"
@@ -10289,7 +10335,7 @@ _EOF_
 				G_EXEC eval "curl -sSfL '$url' | gpg --dearmor -o /etc/apt/trusted.gpg.d/dietpi-docker.gpg --yes"
 
 				# APT list
-				G_EXEC eval "echo 'deb https://download.docker.com/linux/$distro stable' > /etc/apt/sources.list.d/docker.list"
+				G_EXEC eval "echo 'deb https://download.docker.com/linux/$distro $suite stable' > /etc/apt/sources.list.d/docker.list"
 				G_AGUP
 
 				# APT package name
@@ -10713,8 +10759,6 @@ _EOF_
 			if (( $G_HW_ARCH == 1 ))
 			then
 				Download_Install 'https://github.com/dtcooper/raspotify/releases/download/0.31.8.1/raspotify_0.31.8.1.librespot.v0.3.1-54-gf4be9bb_armhf.deb'
-
-			# ARMv7/ARMv8/x86_64
 			else
 				# APT key
 				Download_Install 'https://dtcooper.github.io/raspotify/key.asc' /etc/apt/trusted.gpg.d/dietpi-raspotify.asc
@@ -10870,7 +10914,7 @@ _EOF_
 
 			# Download
 			local version=$(curl -sSfL 'https://api.github.com/repos/ptitSeb/box64/releases/latest' | mawk -F\" '/^ *"tag_name": "[^"]*",$/{print $4}')
-			[[ $version ]] || { version='v0.3.4'; G_DIETPI-NOTIFY 1 "Automatic latest ${aSOFTWARE_NAME[$software_id]} version detection failed. Version \"$version\" will be installed as fallback, but a newer version might be available. Please report this at: https://github.com/MichaIng/DietPi/issues"; }
+			[[ $version ]] || { version='v0.3.6'; G_DIETPI-NOTIFY 1 "Automatic latest ${aSOFTWARE_NAME[$software_id]} version detection failed. Version \"$version\" will be installed as fallback, but a newer version might be available. Please report this at: https://github.com/MichaIng/DietPi/issues"; }
 			Download_Install "https://github.com/ptitSeb/box64/archive/$version.tar.gz"
 
 			# Build for targets: https://github.com/ptitSeb/box64/blob/main/CMakeLists.txt
@@ -11124,6 +11168,7 @@ _EOF_
 			G_EXEC chown -R "$ha_user:$ha_user" pyenv-master
 			# - Start with fresh instance, to allow clean pyenv and Python updates and fix broken instances. All userdata and configs are preserved in: /mnt/dietpi_userdata/homeassistant
 			[[ -d $ha_home/.pyenv ]] && G_EXEC rm -R "$ha_home/.pyenv"
+			[[ -f $ha_home/.python-version ]] && G_EXEC rm "$ha_home/.python-version" # pre-v9.13: remove "pyenv local" info as we use "pyenv global" now, stored to $ha_home/.python/version instead
 			[[ -d '/srv/homeassistant' ]] && G_EXEC rm -R /srv/homeassistant # pre-v6-27
 			G_EXEC mv pyenv-master "$ha_home/.pyenv"
 
