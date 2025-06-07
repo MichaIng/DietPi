@@ -30,13 +30,9 @@ setenv bootargs "root=${rootdev} rootfstype=${rootfstype} rootwait ${consoleargs
 # Add bootargs for Docker
 if test "${docker_optimizations}" = "on"; then setenv bootargs "${bootargs} cgroup_enable=memory"; fi
 
-# Load kernel, initramfs and device tree
-load "${devtype}" "${devnum}" "${kernel_addr_r}" "${prefix}Image"
-load "${devtype}" "${devnum}" "${ramdisk_addr_r}" "${prefix}uInitrd"
+# Load device tree and apply overlays
 load "${devtype}" "${devnum}" "${fdt_addr_r}" "${prefix}dtb/${fdtfile}"
 fdt addr "${fdt_addr_r}"
-
-# Apply DT overlays
 if test -n "${overlays}${user_overlays}"; then
 	setenv overlay_error "false"
 	fdt resize 65536
@@ -79,5 +75,9 @@ if test -n "${overlays}${user_overlays}"; then
 	fi
 fi
 
+# Load kernel and initramfs last, for U-Boot to set ${filesize}, needed to load raw initrd
+load "${devtype}" "${devnum}" "${kernel_addr_r}" "${prefix}Image"
+load "${devtype}" "${devnum}" "${ramdisk_addr_r}" "${prefix}initrd.img"
+
 # Boot
-booti "${kernel_addr_r}" "${ramdisk_addr_r}" "${fdt_addr_r}"
+booti "${kernel_addr_r}" "${ramdisk_addr_r}:${filesize}" "${fdt_addr_r}"
