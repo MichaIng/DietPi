@@ -104,8 +104,8 @@ aREGEX[$software_id]='https://downloads.lms-community.org/nightly/lyrionmusicser
 # FreshRSS
 software_id=38
 aCHECK[$software_id]='curl -sSfL '\''https://api.github.com/repos/FreshRSS/FreshRSS/releases/latest'\'' | mawk -F\" '\''/^ *"tag_name": "[^"]*",$/{print $4}'\'
-aREGEX[$software_id]='version='\''[^'\'']*'\'\;
-aREPLACE[$software_id]='version='\''$release'\'\;
+aREGEX[$software_id]='version='\''[^'\'']*'\''\;'
+aREPLACE[$software_id]='version='\''$release'\''\;'
 
 # Komga
 software_id=179
@@ -120,9 +120,9 @@ aREPLACE[$software_id]='file='\''$release'\'
 
 # Ampache (only latest/v7 for now)
 software_id=40
-aCHECK[$software_id]='curl -sSfL '\''https://api.github.com/repos/ampache/ampache/releases/latest'\'' | mawk -F\" "/^ *\"browser_download_url\": \".*\/ampache-[0-9\.]*_all_php7.2.zip\"$/{print \$4}"'
+aCHECK[$software_id]='curl -sSfL '\''https://api.github.com/repos/ampache/ampache/releases/latest'\'' | mawk -F\" "/^ *\"browser_download_url\": \".*\/ampache-[0-9\.]*_all_php8.2.zip\"$/{print \$4}"'
 aREGEX[$software_id]='https://github.com/ampache/ampache/releases/download/.*/ampache-.*_all_php\$PHP_VERSION.zip'
-aREPLACE[$software_id]='${release/7.2/\$PHP_VERSION}'
+aREPLACE[$software_id]='${release/8.2/\$PHP_VERSION}'
 
 # Baïkal (only latest/v0.10 for now)
 software_id=57
@@ -149,7 +149,7 @@ aARCH[$software_id]='arm arm64 amd64 riscv64'
 aREGEX[$software_id]='https://github.com/syncthing/syncthing/releases/download/.*/syncthing-linux-\$arch-.*\.tar\.gz'
 
 # Koel (only latest/v7 for now)
-software_id=40
+software_id=143
 aCHECK[$software_id]='curl -sSfL '\''https://api.github.com/repos/koel/koel/releases/latest'\'' | mawk -F\" '\''/^ *"browser_download_url": ".*\/koel-[^"\/]*\.tar\.gz"$/{print $4}'\'
 aREGEX[$software_id]='https://github.com/koel/koel/releases/download/.*/koel-v[^5].*\.tar\.gz'
 
@@ -179,7 +179,7 @@ software_id=147
 aCHECK[$software_id]='curl -sSfL '\''https://api.github.com/repos/Jackett/Jackett/releases/latest'\'' | mawk -F\" "/^ *\"browser_download_url\": \".*\/Jackett\.Binaries\.$arch\.tar\.gz\"$/{print \$4}"'
 aARCH[$software_id]='Mono LinuxARM32 LinuxARM64 LinuxAMDx64'
 aARCH_CHECK[$software_id]='LinuxRISCV64'
-aREGEX[$software_id]='hhttps://github.com/Jackett/Jackett/releases/download/.*/Jackett.Binaries.$arch.tar.gz'
+aREGEX[$software_id]='https://github.com/Jackett/Jackett/releases/download/.*/Jackett.Binaries.$arch.tar.gz'
 
 # NZBGet
 software_id=149
