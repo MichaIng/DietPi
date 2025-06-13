@@ -243,15 +243,17 @@ software_id=157
 
 # Snapcast Server (no snapweb for now): Implement distro loop?
 software_id=191
-aCHECK[$software_id]='curl -sSfL '\''https://api.github.com/repos/badaix/snapcast/releases/latest'\'' | mawk -F\" "/^ *\"browser_download_url\": \".*\/snapserver_[^\"\/]*_${arch}_$G_DISTRO_NAME.deb\"/{print \$4}"'
+aCHECK[$software_id]='curl -sSfL '\''https://api.github.com/repos/badaix/snapcast/releases/latest'\'' | mawk -F\" "/^ *\"browser_download_url\": \".*\/snapserver_[^\"\/]*_${arch}_bookworm.deb\"$/{print \$4}"'
 aARCH[$software_id]='armhf arm64 amd64 riscv64'
 aREGEX[$software_id]='https://github.com/badaix/snapcast/releases/download/.*/snapserver_.*_\${arch}_\$G_DISTRO_NAME.deb'
+aREPLACE[$software_id]='${release/bookworm/\$G_DISTRO_NAME}'
 
 # Snapcast Client: Implement distro loop?
 software_id=192
-aCHECK[$software_id]='curl -sSfL '\''https://api.github.com/repos/badaix/snapcast/releases/latest'\'' | mawk -F\" "/^ *\"browser_download_url\": \".*\/snapclient_0[^\"\/]*_${arch}_$G_DISTRO_NAME.deb\"/{print \$4}"'
+aCHECK[$software_id]='curl -sSfL '\''https://api.github.com/repos/badaix/snapcast/releases/latest'\'' | mawk -F\" "/^ *\"browser_download_url\": \".*\/snapclient_0[^\"\/]*_${arch}_bookworm.deb\"$/{print \$4}"'
 aARCH[$software_id]='armhf arm64 amd64 riscv64'
 aREGEX[$software_id]='https://github.com/badaix/snapcast/releases/download/.*/snapclient_0.*_\${arch}_\$G_DISTRO_NAME.deb'
+aREPLACE[$software_id]='${release/bookworm/\$G_DISTRO_NAME}'
 
 # Rclone
 software_id=202
