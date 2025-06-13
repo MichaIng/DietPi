@@ -287,7 +287,7 @@ aREPLACE[$software_id]='${release/full/\$variant}'
 
 # soju
 software_id=213
-aCHECK[$software_id]='curl -sSfL '\''https://api.github.com/repos/emersion/soju/releases/latest'\'' | mawk -F\" '\''/^ *"browser_download_url": ".*\/soju-[^"\/]*\.tar\.gz"$/{print $4}\'
+aCHECK[$software_id]='curl -sSfL '\''https://api.github.com/repos/emersion/soju/releases/latest'\'' | mawk -F\" '\''/^ *"browser_download_url": ".*\/soju-[^"\/]*\.tar\.gz"$/{print $4}'\'
 aREGEX[$software_id]='https://github.com/emersion/soju/releases/download/.*/soju-.*\.tar\.gz'
 
 ### URL check loop ###
