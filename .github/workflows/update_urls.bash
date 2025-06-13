@@ -53,7 +53,7 @@ software_id=16
 
 # UrBackup Server
 software_id=111
-aCHECK[$software_id]='version=$(curl -sSfL '\''https://hndl.urbackup.org/Server/'\'' | grep -Po '\''(?<=href=")[0-9.]+(?=/")'\'' | sort -Vr | head -1); echo "https://hndl.urbackup.org/Server/$version/$(curl -sSfL "https://hndl.urbackup.org/Server/$version/" | grep -Pom1 "(?<=href=\")urbackup-server_${version}_$arch\.deb(?=\")")"'
+aCHECK[$software_id]='version=$(curl -sSfL '\''https://hndl.urbackup.org/Server/'\'' | grep -Po '\''(?<=href=")[0-9.]+(?=/")'\'' | sort -Vr | head -1); file=$(curl -sSfL "https://hndl.urbackup.org/Server/$version/" | grep -Pom1 "(?<=href=\")urbackup-server_${version}_$arch\.deb(?=\")"); echo "${file:+https://hndl.urbackup.org/Server/$version/$file}"'
 aARCH[$software_id]='armhf arm64 amd64'
 aARCH_CHECK[$software_id]='riscv64'
 aREGEX[$software_id]='https://hndl.urbackup.org/Server/.*/urbackup-server_.*_$arch.deb'
