@@ -1,5 +1,6 @@
 #!/bin/bash
 # Created by MichaIng / micha@dietpi.com / dietpi.com
+# shellcheck disable=SC2016
 {
 set -e
 
@@ -89,7 +90,11 @@ do
 		[[ $output ]] || Exit_Error 'No release found'
 	fi
 	echo "Found release \"$output\""
-	[[ ${aREPLACE[i]} ]] && eval "output=\"${aREPLACE[i]}\"" && echo "Replacing \"${aREGEX[i]}\" with \"$output\"" || :
+	if [[ ${aREPLACE[i]} ]]
+	then
+		eval "output=\"${aREPLACE[i]}\""
+		echo "Replacing \"${aREGEX[i]}\" with \"$output\""
+	fi
 	sed -i "/^\t\tif To_Install $i /,/^\t\tfi$/s|${aREGEX[i]}|$output|" dietpi/dietpi-software
 
 	# Check for possibly newly supported architectures
@@ -99,7 +104,7 @@ do
 		do
 			echo "Checking for possibly newly supported architecture $arch ..."
 			output=$(eval "${aCHECK[i]}") || :
-			[[ $output ]] && Exit_Error "New architecture $arch is now supported" || :
+			[[ ! $output ]] || Exit_Error "New architecture $arch is now supported"
 		done
 	fi
 done
