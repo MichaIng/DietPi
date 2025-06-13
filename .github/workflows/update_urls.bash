@@ -121,7 +121,7 @@ aREPLACE[$software_id]='file='\''$release'\'
 # Ampache (only latest/v7 for now)
 software_id=40
 aCHECK[$software_id]='curl -sSfL '\''https://api.github.com/repos/ampache/ampache/releases/latest'\'' | mawk -F\" "/^ *\"browser_download_url\": \".*\/ampache-[0-9\.]*_all_php8.2.zip\"$/{print \$4}"'
-aREGEX[$software_id]='https://github.com/ampache/ampache/releases/download/.*/ampache-.*_all_php\$PHP_VERSION.zip'
+aREGEX[$software_id]='https://github.com/ampache/ampache/releases/download/[^6].*/ampache-.*_all_php\$PHP_VERSION.zip'
 aREPLACE[$software_id]='${release/8.2/\$PHP_VERSION}'
 
 # Baïkal (only latest/v0.10 for now)
@@ -195,7 +195,7 @@ aREGEX[$software_id]='https://github.com/Prowlarr/Prowlarr/releases/download/.*/
 
 # Readarr
 software_id=203
-aCHECK[$software_id]='curl -sSfL '\''https://api.github.com/repos/Readarr/Readarr/releases/latest'\'' | mawk -F\" "/^ *\"browser_download_url\": \".*linux-core-$arch\.tar\.gz\"$/{print \$4}"'
+aCHECK[$software_id]='curl -sSfL '\''https://api.github.com/repos/Readarr/Readarr/releases'\'' | mawk -F\" "/^ *\"browser_download_url\": \".*linux-core-$arch\.tar\.gz\"$/{print \$4}" | head -1'
 aARCH[$software_id]='arm arm64 x64'
 aARCH_CHECK[$software_id]='riscv64'
 aREGEX[$software_id]='https://github.com/Readarr/Readarr/releases/download/.*/Readarr.develop\..*\.linux-core-\$arch\.tar\.gz'
@@ -260,7 +260,7 @@ aREPLACE[$software_id]='${release/bookworm/\$G_DISTRO_NAME}'
 # Rclone
 software_id=202
 aCHECK[$software_id]='curl -sSfL '\''https://api.github.com/repos/rclone/rclone/releases/latest'\'' | mawk -F\" "/^ *\"browser_download_url\": \".*\/rclone-v[^\"\/]*-linux-$arch.deb\"$/{print \$4}"'
-aARCH[$software_id]='arm-6 arm-7 arm64 amd64'
+aARCH[$software_id]='arm-v6 arm-v7 arm64 amd64'
 aARCH_CHECK[$software_id]='riscv64'
 aREGEX[$software_id]='https://github.com/rclone/rclone/releases/download/.*/rclone-.*-linux-\$arch.deb'
 
@@ -284,7 +284,7 @@ aREGEX[$software_id]='https://github.com/filebrowser/filebrowser/releases/downlo
 # Spotifyd: only full variants for now
 software_id=199
 aCHECK[$software_id]='curl -sSfL '\''https://api.github.com/repos/Spotifyd/spotifyd/releases/latest'\'' | mawk -F\" "/^ *\"browser_download_url\": \".*\/spotifyd-linux-$arch-full\.tar\.gz\"$/{print \$4}"'
-aARCH[$software_id]='armv6 armv7 aarch64 x86_64'
+aARCH[$software_id]='armv7 aarch64 x86_64'
 aARCH_CHECK[$software_id]='riscv64'
 aREGEX[$software_id]='https://github.com/Spotifyd/spotifyd/releases/download/v[^$].*/spotifyd-linux-\$arch-\$variant.tar.gz'
 aREPLACE[$software_id]='${release/full/\$variant}'
@@ -295,12 +295,13 @@ aCHECK[$software_id]='curl -sSfL '\''https://api.github.com/repos/emersion/soju/
 aREGEX[$software_id]='https://github.com/emersion/soju/releases/download/.*/soju-.*\.tar\.gz'
 
 ### URL check loop ###
-
+echo "GH_TOKEN=$GH_TOKEN"
 for i in "${!aCHECK[@]}"
 do
 	echo '------------------------------------------'
 	# Add GitHub token if set
 	[[ $GH_TOKEN ]] && aCHECK[i]=${aCHECK[i]//curl -sSfL \'https:\/\/api.github.com/curl -H \'Authorization: token $GH_TOKEN\' -sSfL \'https://api.github.com}
+	echo "aCHECK[$i]=${aCHECK[i]}"
 	echo "Checking software ID $i ..."
 	# Loop through architectures
 	for arch in ${aARCH[i]:-dummy}
@@ -310,7 +311,7 @@ do
 		release=$(eval "${aCHECK[i]}")
 		[[ $release ]] || Exit_Error "No release found${arch:+ for architecture $arch}"
 	done
-	[[ $arch ]] && release=${release/$arch/\$arch}
+	[[ $arch ]] && release=${release/${arch}_/\$\{arch\}_} release=${release/$arch/\$arch}
 	echo "Found release \"$release\""
 
 	# Apply replacement string if given, else unmodified release string is used
