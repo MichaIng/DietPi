@@ -295,13 +295,13 @@ aCHECK[$software_id]='curl -sSfL '\''https://api.github.com/repos/emersion/soju/
 aREGEX[$software_id]='https://github.com/emersion/soju/releases/download/.*/soju-.*\.tar\.gz'
 
 ### URL check loop ###
-echo "GH_TOKEN=$GH_TOKEN"
+
 for i in "${!aCHECK[@]}"
 do
 	echo '------------------------------------------'
 	# Add GitHub token if set
 	[[ $GH_TOKEN ]] && aCHECK[i]=${aCHECK[i]//curl -sSfL \'https:\/\/api.github.com/curl -H \'Authorization: token $GH_TOKEN\' -sSfL \'https://api.github.com}
-	echo "aCHECK[$i]=${aCHECK[i]}"
+
 	echo "Checking software ID $i ..."
 	# Loop through architectures
 	for arch in ${aARCH[i]:-dummy}
