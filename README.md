@@ -292,7 +292,7 @@ Links to hardware and software manufacturers, sources and build instructions use
 - [Box64](https://github.com/ptitSeb/box64)
 - [Steam](https://steamcommunity.com/)
 - [mjpg-streamer](https://github.com/jacksonliam/mjpg-streamer)
-- [IPFS](https://github.com/ipfs/ipfs)
+- [IPFS Node](https://github.com/ipfs/kubo)
 - [CUPS](https://github.com/OpenPrinting/cups)
 - [Go](https://github.com/golang/go)
 - [VSCodium](https://github.com/VSCodium/vscodium)
