@@ -55,12 +55,12 @@ do
 	esac
 	shift
 done
-[[ $NAME =~ ^('amiberry'|'amiberry-lite'|'gmediarender'|'gogs'|'shairport-sync'|'squeezelite'|'vaultwarden'|'ympd')$ ]] || Error_Exit "Invalid software title \"$NAME\" passed"
+[[ $NAME =~ ^('amiberry'|'amiberry-lite'|'gzdoom'|'gmediarender'|'gogs'|'shairport-sync'|'squeezelite'|'vaultwarden'|'ympd')$ ]] || Error_Exit "Invalid software title \"$NAME\" passed"
 [[ $NAME == 'gogs' ]] && EXT='7z' || EXT='deb'
 [[ $DISTRO =~ ^('bullseye'|'bookworm'|'trixie')$ ]] || Error_Exit "Invalid distro \"$DISTRO\" passed"
 case $ARCH in
-	'armv6l') image="ARMv6-${DISTRO^}" arch=1; [[ $NAME == 'amiberry'* ]] && Error_Exit "Invalid software title \"$NAME\" for arch \"$ARCH\" passed";;
-	'armv7l') image="ARMv7-${DISTRO^}" arch=2;;
+	'armv6l') image="ARMv6-${DISTRO^}" arch=1; [[ $NAME == 'amiberry'* || $NAME == 'gzdoom' ]] && Error_Exit "Invalid software title \"$NAME\" for arch \"$ARCH\" passed";;
+	'armv7l') image="ARMv7-${DISTRO^}" arch=2; [[ $NAME == 'gzdoom' ]] && Error_Exit "Invalid software title \"$NAME\" for arch \"$ARCH\" passed";;
 	'aarch64') image="ARMv8-${DISTRO^}" arch=3;;
 	'x86_64') image="x86_64-${DISTRO^}" arch=10;;
 	'riscv64') image="RISC-V-${DISTRO^}" arch=11; [[ $DISTRO == 'trixie' ]] || Error_Exit "Invalid distro \"$DISTRO\" for arch \"$ARCH\" passed, only \"trixie\" is supported";;
