@@ -9,21 +9,20 @@ if [[ -f '/boot/dietpi/func/dietpi-globals' ]]
 then
 	. /boot/dietpi/func/dietpi-globals
 else
-	curl -sSf "https://raw.githubusercontent.com/${G_GITOWNER:=MichaIng}/DietPi/${G_GITBRANCH:=master}/dietpi/func/dietpi-globals" -o /tmp/dietpi-globals || Error_Exit 'Failed to download DietPi-Globals'
+	curl -sSf "https://raw.githubusercontent.com/${G_GITOWNER:=MichaIng}/DietPi/${G_GITBRANCH:=master}/dietpi/func/dietpi-globals" -o /tmp/dietpi-globals || { echo 'Failed to download DietPi-Globals, aborting ...'; exit 1; }
 	# shellcheck disable=SC1091
 	. /tmp/dietpi-globals
 	G_EXEC rm /tmp/dietpi-globals
 	export G_GITOWNER G_GITBRANCH G_HW_ARCH_NAME=$(uname -m)
 	read -r debian_version < /etc/debian_version
 	case $debian_version in
-		'11.'*|'bullseye/sid') G_DISTRO=6;;
 		'12.'*|'bookworm/sid') G_DISTRO=7;;
 		'13.'*|'trixie/sid') G_DISTRO=8;;
-		*) G_DIETPI-NOTIFY 1 "Unsupported distro version \"$debian_version\". Aborting ..."; exit 1;;
+		*) Error_Exit "Unsupported distro version \"$debian_version\"";;
 	esac
 	# Ubuntu ships with /etc/debian_version from Debian testing, hence we assume one version lower.
 	grep -q '^ID=ubuntu' /etc/os-release && ((G_DISTRO--))
-	(( $G_DISTRO < 6 )) && { G_DIETPI-NOTIFY 1 'Unsupported Ubuntu version. Aborting ...'; exit 1; }
+	(( $G_DISTRO < 7 )) && Error_Exit 'Unsupported Ubuntu version'
 fi
 case $G_HW_ARCH_NAME in
 	'armv6l') export G_HW_ARCH=1;;
@@ -31,9 +30,9 @@ case $G_HW_ARCH_NAME in
 	'aarch64') export G_HW_ARCH=3;;
 	'x86_64') export G_HW_ARCH=10;;
 	'riscv64') export G_HW_ARCH=11;;
-	*) G_DIETPI-NOTIFY 1 "Unsupported host system architecture \"$G_HW_ARCH_NAME\" detected, aborting..."; exit 1;;
+	*) Error_Exit "Unsupported host system architecture \"$G_HW_ARCH_NAME\" detected";;
 esac
-readonly G_PROGRAM_NAME='DietPi-Software_test_setup'
+readonly G_PROGRAM_NAME='DietPi-Software test'
 G_CHECK_ROOT_USER
 G_CHECK_ROOTFS_RW
 readonly FP_ORIGIN=$PWD # Store origin dir
@@ -56,23 +55,23 @@ do
 		'-s') shift; SOFTWARE=$1;;
 		'-rpi') shift; RPI=$1;;
 		'-t') shift; TEST=$1;;
-		*) G_DIETPI-NOTIFY 1 "Invalid input \"$1\", aborting..."; exit 1;;
+		*) Error_Exit "Invalid input \"$1\"";;
 	esac
 	shift
 done
-[[ $DISTRO =~ ^('bullseye'|'bookworm'|'trixie')$ ]] || { G_DIETPI-NOTIFY 1 "Invalid distro \"$DISTRO\" passed, aborting..."; exit 1; }
+[[ $DISTRO =~ ^('bullseye'|'bookworm'|'trixie')$ ]] || Error_Exit "Invalid distro \"$DISTRO\" passed"
 case $ARCH in
 	'armv6l') image="ARMv6-${DISTRO^}" arch=1;;
 	'armv7l') image="ARMv7-${DISTRO^}" arch=2;;
 	'aarch64') image="ARMv8-${DISTRO^}" arch=3;;
 	'x86_64') image="x86_64-${DISTRO^}" arch=10;;
 	'riscv64') image="RISC-V-${DISTRO^}" arch=11;;
-	*) G_DIETPI-NOTIFY 1 "Invalid architecture \"$ARCH\" passed, aborting..."; exit 1;;
+	*) Error_Exit "Invalid architecture \"$ARCH\" passed";;
 esac
 image="DietPi_Container-$image.img"
-[[ $SOFTWARE =~ ^[0-9\ ]+$ ]] || { G_DIETPI-NOTIFY 1 "Invalid software list \"$SOFTWARE\" passed, aborting..."; exit 1; }
-[[ $RPI =~ ^('false'|'true')$ ]] || { G_DIETPI-NOTIFY 1 "Invalid RPi flag \"$RPI\" passed, aborting..."; exit 1; }
-[[ $TEST =~ ^('false'|'true')$ ]] || { G_DIETPI-NOTIFY 1 "Invalid test flag \"$TEST\" passed, aborting..."; exit 1; }
+[[ $SOFTWARE =~ ^[0-9\ ]+$ ]] || Error_Exit "Invalid software list \"$SOFTWARE\" passed"
+[[ $RPI =~ ^('false'|'true')$ ]] || Error_Exit "Invalid RPi flag \"$RPI\" passed"
+[[ $TEST =~ ^('false'|'true')$ ]] || Error_Exit "Invalid test flag \"$TEST\" passed"
 
 # Emulation support in case of incompatible architecture
 emulation=0
@@ -321,7 +320,7 @@ then
 		1) model=1;;
 		2) model=2;;
 		3) model=4;;
-		*) G_DIETPI-NOTIFY 1 "Invalid architecture $ARCH ($arch). This should never happen!"; exit 1;;
+		*) Error_Exit "Invalid architecture $ARCH ($arch). This is a bug in this script!";;
 	esac
 	G_EXEC rm rootfs/etc/.dietpi_hw_model_identifier
 	G_EXEC touch rootfs/boot/{bcm-rpi-dummy.dtb,config.txt,cmdline.txt}
@@ -331,6 +330,8 @@ then
 	G_EXEC rm keyring.deb
 	# Enforce Debian Trixie FFmpeg packages over RPi repo ones
 	[[ $DISTRO == 'trixie' ]] && G_EXEC eval 'echo -e '\''Package: src:ffmpeg\nPin: origin archive.raspberrypi.com\nPin-Priority: -1'\'' > /etc/apt/preferences.d/dietpi-ffmpeg'
+	# sysctl cannot succeed in containers. It is skipped with G_HW_MODEL=75, but here we changed that ID. Run the command, so we see it in logs, but do not abort as it fails.
+	G_EXEC sed --follow-symlinks -i '/# Start DietPi-Software/a\sed -i '\''/^[[:blank:]]*G_EXEC sysctl /s/G_EXEC sysctl /G_EXEC_NOHALT=1 G_EXEC sysctl /'\'' /boot/dietpi/dietpi-software' rootfs/boot/dietpi/dietpi-login
 fi
 
 # Install test builds from dietpi.com if requested
@@ -395,10 +396,10 @@ G_EXEC touch rootfs/mnt/dietpi_userdata/papermc/plugins/Geyser-Spigot.jar
 # Workaround for "Could not execute systemctl:  at /usr/bin/deb-systemd-invoke line 145." during Apache2 DEB postinst in 32-bit ARM Bookworm container: https://lists.ubuntu.com/archives/foundations-bugs/2022-January/467253.html
 G_CONFIG_INJECT 'AUTO_SETUP_WEB_SERVER_INDEX=' 'AUTO_SETUP_WEB_SERVER_INDEX=-2' rootfs/boot/dietpi.txt
 
-# Workarounds for QEMU-emulated 32-bit ARM containers
-if (( $arch < 3 && $emulation ))
+# Workarounds for QEMU-emulated RISC-V and 32-bit ARM containers
+if (( ( $arch < 3 || $arch == 11 ) && $emulation ))
 then
-	# Failing services as PrivateUsers=true leads to "Failed to set up user namespacing" on QEMU-emulated 32-bit ARM containers, and AmbientCapabilities to "Failed to apply ambient capabilities (before UID change): Operation not permitted"
+	# Failing services as PrivateUsers=true leads to "Failed to set up user namespacing", and AmbientCapabilities to "Failed to apply ambient capabilities (before UID change): Operation not permitted"
 	G_EXEC mkdir rootfs/etc/systemd/system/{redis-server,raspotify,navidrome,homebridge}.service.d
 	G_EXEC eval 'echo -e '\''[Service]\nPrivateUsers=0'\'' > rootfs/etc/systemd/system/redis-server.service.d/dietpi-container.conf'
 	G_EXEC eval 'echo -e '\''[Service]\nPrivateUsers=0'\'' > rootfs/etc/systemd/system/raspotify.service.d/dietpi-container.conf'
@@ -406,8 +407,10 @@ then
 	G_EXEC eval 'echo -e '\''[Service]\nAmbientCapabilities='\'' > rootfs/etc/systemd/system/homebridge.service.d/dietpi-container.conf'
 
 	# Failing 32-bit ARM Rust builds on ext4 in QEMU emulated container on 64-bit host: https://github.com/rust-lang/cargo/issues/9545
-	G_EXEC eval 'echo -e '\''tmpfs /mnt/dietpi_userdata tmpfs size=3G,noatime,lazytime\ntmpfs /root tmpfs size=3G,noatime,lazytime'\'' >> rootfs/etc/fstab'
-	cat << '_EOF_' > rootfs/boot/Automation_Custom_PreScript.sh
+	if (( $arch < 3 ))
+	then
+		G_EXEC eval 'echo -e '\''tmpfs /mnt/dietpi_userdata tmpfs size=3G,noatime,lazytime\ntmpfs /root tmpfs size=3G,noatime,lazytime'\'' >> rootfs/etc/fstab'
+		cat << '_EOF_' > rootfs/boot/Automation_Custom_PreScript.sh
 #!/bin/dash -e
 findmnt /mnt/dietpi_userdata > /dev/null 2>&1 || exit 0
 umount /mnt/dietpi_userdata
@@ -417,14 +420,12 @@ mount /mnt/dietpi_userdata
 mv /mnt/dietpi_userdata_bak/* /mnt/dietpi_userdata/
 rm -R /mnt/dietpi_userdata_bak
 _EOF_
+	fi
 fi
 
 # Workaround failing Java apps if 64-bit host memory leads to too large heap size in 32-bit containers: https://stackoverflow.com/questions/4401396
 # shellcheck disable=SC2016
 (( $arch < 3 && $G_HW_ARCH > 2)) && G_EXEC sed --follow-symlinks -i '/# Start DietPi-Software/a\sed -i '\''s|-mx${memory_limit}m|-mx1024m|'\'' /boot/dietpi/dietpi-software' rootfs/boot/dietpi/dietpi-login
-
-# Workaround for sysctl: permission denied on key "net.core.rmem_max" in containers
-G_EXEC sed --follow-symlinks -i '/# Start DietPi-Software/a\sed -i '\''/G_EXEC sysctl -w net\.core\.rmem_max/d'\'' /boot/dietpi/dietpi-software' rootfs/boot/dietpi/dietpi-login
 
 # ARMv6: Workaround for ARMv7 Rust toolchain selected in containers with newer host/emulated ARM version
 (( $arch == 1 )) && G_EXEC sed --follow-symlinks -i '/# Start DietPi-Software/a\sed -i '\''s/--profile minimal .*$/--profile minimal --default-host arm-unknown-linux-gnueabihf/'\'' /boot/dietpi/dietpi-software' rootfs/boot/dietpi/dietpi-login

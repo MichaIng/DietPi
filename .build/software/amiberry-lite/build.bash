@@ -13,7 +13,7 @@ case $G_DISTRO in
 	*) G_DIETPI-NOTIFY 1 "Unsupported distro version: $G_DISTRO_NAME (ID=$G_DISTRO)"; exit 1;;
 esac
 # - Graphics rendering flags and deps
-(( $G_HW_ARCH == 10 )) && opengl_flags=('--disable-video-opengles2' '--enable-video-opengl') adeps_build+=('libgl1-mesa-dev') adeps+=('libgl1') || opengl_flags=('--enable-video-opengles2' '--disable-video-opengl') adeps_build+=('libgles2-mesa-dev') adeps+=('libgles2')
+(( $G_HW_ARCH == 10 )) && opengl_flags=('--disable-video-opengles2' '--enable-video-opengl') adeps_build+=('libgl-dev') adeps+=('libgl1') || opengl_flags=('--enable-video-opengles2' '--disable-video-opengl') adeps_build+=('libgles-dev') adeps+=('libgles2')
 
 G_AGUP
 G_AGDUG "${adeps_build[@]}"
@@ -26,76 +26,63 @@ do
 done
 
 # Build libSDL2
-v_sdl=$(curl -sSf 'https://api.github.com/repos/libsdl-org/SDL/releases' | mawk -F\" '/^ *"name": "2./{print $4}' | head -1)
-[[ $v_sdl ]] || { G_DIETPI-NOTIFY 1 'No latest LibSDL2 version found, aborting ...'; exit 1; }
-if [[ ! -d /tmp/SDL2-$v_sdl ]]
-then
-	G_DIETPI-NOTIFY 2 "Building libSDL2 version \e[33m$v_sdl"
-	G_EXEC cd /tmp
-	G_EXEC curl -sSfLO "https://github.com/libsdl-org/SDL/releases/download/release-$v_sdl/SDL2-$v_sdl.tar.gz"
-	G_EXEC tar xf "SDL2-$v_sdl.tar.gz"
-	G_EXEC rm "SDL2-$v_sdl.tar.gz"
-	G_EXEC cd "SDL2-$v_sdl"
-	G_EXEC_OUTPUT=1 G_EXEC ./configure CFLAGS='-g0 -O3' CXXFLAGS='-g0 -O3' --enable-video-kmsdrm "${opengl_flags[@]}" --disable-video-rpi --disable-video-x11 --disable-video-wayland --disable-video-opengles1 --disable-video-vulkan --disable-video-offscreen --disable-video-dummy --disable-diskaudio --disable-sndio --disable-dummyaudio --disable-oss --disable-dbus
-	G_EXEC_OUTPUT=1 G_EXEC make "-j$(nproc)"
-	find . -type f \( -name '*.so' -o -name '*.so.*' \) -exec strip --strip-unneeded --remove-section=.comment --remove-section=.note -v {} +
-	G_EXEC rm -f /usr/local/lib/libSDL2[.-]*
-	G_EXEC_OUTPUT=1 G_EXEC make install
-else
-	G_DIETPI-NOTIFY 2 'Skipping libSDL2 which has been built already'
-fi
+version=$(curl -sSf 'https://api.github.com/repos/libsdl-org/SDL/releases' | mawk -F\" '/^ *"name": "2./{print $4}' | head -1)
+[[ $version ]] || { G_DIETPI-NOTIFY 1 'No latest LibSDL2 version found, aborting ...'; exit 1; }
+G_DIETPI-NOTIFY 2 "Building libSDL2 version \e[33m$version"
+G_EXEC cd /tmp
+G_EXEC curl -sSfLO "https://github.com/libsdl-org/SDL/releases/download/release-$version/SDL2-$version.tar.gz"
+[[ -d /tmp/SDL2-$version ]] || G_EXEC rm -R "/tmp/SDL2-$version"
+G_EXEC tar xf "SDL2-$version.tar.gz"
+G_EXEC rm "SDL2-$version.tar.gz"
+G_EXEC cd "SDL2-$version"
+G_EXEC_OUTPUT=1 G_EXEC ./configure CFLAGS='-g0 -O3' CXXFLAGS='-g0 -O3' --enable-video-kmsdrm "${opengl_flags[@]}" --disable-video-rpi --disable-video-x11 --disable-video-wayland --disable-video-opengles1 --disable-video-vulkan --disable-video-offscreen --disable-video-dummy --disable-diskaudio --disable-sndio --disable-dummyaudio --disable-oss --disable-dbus
+G_EXEC_OUTPUT=1 G_EXEC make "-j$(nproc)"
+find . -type f \( -name '*.so' -o -name '*.so.*' \) -exec strip --strip-unneeded --remove-section=.comment --remove-section=.note -v {} +
+G_EXEC rm -f /usr/local/lib/libSDL2[.-]*
+G_EXEC_OUTPUT=1 G_EXEC make install
 
 # Build libSDL2_image
-v_img=$(curl -sSf 'https://api.github.com/repos/libsdl-org/SDL_image/releases' | mawk -F\" '/^ *"name": "2./{print $4}' | head -1)
-[[ $v_img ]] || { G_DIETPI-NOTIFY 1 'No latest libSDL2_image version found, aborting ...'; exit 1; }
-if [[ ! -d /tmp/SDL2_image-$v_img ]]
-then
-	G_DIETPI-NOTIFY 2 "Building libSDL2_image version \e[33m$v_img"
-	G_EXEC cd /tmp
-	G_EXEC curl -sSfLO "https://github.com/libsdl-org/SDL_image/releases/download/release-$v_img/SDL2_image-$v_img.tar.gz"
-	G_EXEC tar xf "SDL2_image-$v_img.tar.gz"
-	G_EXEC rm "SDL2_image-$v_img.tar.gz"
-	G_EXEC cd "SDL2_image-$v_img"
-	G_EXEC_OUTPUT=1 G_EXEC ./configure CFLAGS='-g0 -O3' CXXFLAGS='-g0 -O3'
-	G_EXEC_OUTPUT=1 G_EXEC make "-j$(nproc)"
-	find . -type f \( -name '*.so' -o -name '*.so.*' \) -exec strip --strip-unneeded --remove-section=.comment --remove-section=.note -v {} +
-	G_EXEC rm -f /usr/local/lib/libSDL2_image[.-]*
-	G_EXEC_OUTPUT=1 G_EXEC make install
-else
-	G_DIETPI-NOTIFY 2 'Skipping libSDL2_image which has been built already'
-fi
+version=$(curl -sSf 'https://api.github.com/repos/libsdl-org/SDL_image/releases' | mawk -F\" '/^ *"name": "2./{print $4}' | head -1)
+[[ $version ]] || { G_DIETPI-NOTIFY 1 'No latest libSDL2_image version found, aborting ...'; exit 1; }
+G_DIETPI-NOTIFY 2 "Building libSDL2_image version \e[33m$version"
+G_EXEC cd /tmp
+G_EXEC curl -sSfLO "https://github.com/libsdl-org/SDL_image/releases/download/release-$version/SDL2_image-$version.tar.gz"
+[[ -d /tmp/SDL2_image-$version ]] || G_EXEC rm -R "/tmp/SDL2_image-$version"
+G_EXEC tar xf "SDL2_image-$version.tar.gz"
+G_EXEC rm "SDL2_image-$version.tar.gz"
+G_EXEC cd "SDL2_image-$version"
+G_EXEC_OUTPUT=1 G_EXEC ./configure CFLAGS='-g0 -O3' CXXFLAGS='-g0 -O3'
+G_EXEC_OUTPUT=1 G_EXEC make "-j$(nproc)"
+find . -type f \( -name '*.so' -o -name '*.so.*' \) -exec strip --strip-unneeded --remove-section=.comment --remove-section=.note -v {} +
+G_EXEC rm -f /usr/local/lib/libSDL2_image[.-]*
+G_EXEC_OUTPUT=1 G_EXEC make install
 
 # Build libSDL2_ttf
-v_ttf=$(curl -sSf 'https://api.github.com/repos/libsdl-org/SDL_ttf/releases' | mawk -F\" '/^ *"name": "2./{print $4}' | head -1)
-[[ $v_ttf ]] || { G_DIETPI-NOTIFY 1 'No latest libSDL2_ttf version found, aborting ...'; exit 1; }
-if [[ ! -d /tmp/SDL2_ttf-$v_ttf ]]
-then
-	G_DIETPI-NOTIFY 2 "Building libSDL2_ttf version \e[33m$v_ttf"
-	G_EXEC cd /tmp
-	G_EXEC curl -sSfLO "https://github.com/libsdl-org/SDL_ttf/releases/download/release-$v_ttf/SDL2_ttf-$v_ttf.tar.gz"
-	G_EXEC tar xf "SDL2_ttf-$v_ttf.tar.gz"
-	G_EXEC rm "SDL2_ttf-$v_ttf.tar.gz"
-	G_EXEC cd "SDL2_ttf-$v_ttf"
-	G_EXEC_OUTPUT=1 G_EXEC ./configure CFLAGS='-g0 -O3' CXXFLAGS='-g0 -O3'
-	G_EXEC_OUTPUT=1 G_EXEC make "-j$(nproc)"
-	find . -type f \( -name '*.so' -o -name '*.so.*' \) -exec strip --strip-unneeded --remove-section=.comment --remove-section=.note -v {} +
-	G_EXEC rm -f /usr/local/lib/libSDL2_ttf[.-]*
-	G_EXEC_OUTPUT=1 G_EXEC make install
-else
-	G_DIETPI-NOTIFY 2 'Skipping libSDL2_ttf which has been built already'
-fi
+version=$(curl -sSf 'https://api.github.com/repos/libsdl-org/SDL_ttf/releases' | mawk -F\" '/^ *"name": "2./{print $4}' | head -1)
+G_DIETPI-NOTIFY 2 "Building libSDL2_ttf version \e[33m$version"
+G_EXEC cd /tmp
+G_EXEC curl -sSfLO "https://github.com/libsdl-org/SDL_ttf/releases/download/release-$version/SDL2_ttf-$version.tar.gz"
+[[ -d /tmp/SDL2_ttf-$version ]] || G_EXEC rm -R "/tmp/SDL2_ttf-$version"
+G_EXEC tar xf "SDL2_ttf-$version.tar.gz"
+G_EXEC rm "SDL2_ttf-$version.tar.gz"
+G_EXEC cd "SDL2_ttf-$version"
+G_EXEC_OUTPUT=1 G_EXEC ./configure CFLAGS='-g0 -O3' CXXFLAGS='-g0 -O3'
+G_EXEC_OUTPUT=1 G_EXEC make "-j$(nproc)"
+find . -type f \( -name '*.so' -o -name '*.so.*' \) -exec strip --strip-unneeded --remove-section=.comment --remove-section=.note -v {} +
+G_EXEC rm -f /usr/local/lib/libSDL2_ttf[.-]*
+G_EXEC_OUTPUT=1 G_EXEC make install
 
 # Build Amiberry-Lite
-v_ami=$(curl -sSf 'https://api.github.com/repos/BlitterStudio/amiberry-lite/releases/latest' | mawk -F\" '/^  "tag_name"/{print $4}')
-[[ $v_ami ]] || { G_DIETPI-NOTIFY 1 'No latest Amiberry-Lite version found, aborting ...'; exit 1; }
-v_ami=${v_ami#v}
-G_DIETPI-NOTIFY 2 "Building Amiberry-Lite version \e[33m$v_ami"
+version=$(curl -sSf 'https://api.github.com/repos/BlitterStudio/amiberry-lite/releases/latest' | mawk -F\" '/^  "tag_name"/{print $4}')
+[[ $version ]] || { G_DIETPI-NOTIFY 1 'No latest Amiberry-Lite version found, aborting ...'; exit 1; }
+version=${version#v}
+G_DIETPI-NOTIFY 2 "Building Amiberry-Lite version \e[33m$version"
 G_EXEC cd /tmp
-G_EXEC curl -sSfLO "https://github.com/BlitterStudio/amiberry-lite/archive/v$v_ami.tar.gz"
-[[ -d amiberry-lite-$v_ami ]] && G_EXEC rm -R "amiberry-lite-$v_ami"
-G_EXEC tar xf "v$v_ami.tar.gz"
-G_EXEC rm "v$v_ami.tar.gz"
-G_EXEC cd "amiberry-lite-$v_ami"
+G_EXEC curl -sSfLO "https://github.com/BlitterStudio/amiberry-lite/archive/v$version.tar.gz"
+[[ -d amiberry-lite-$version ]] && G_EXEC rm -R "amiberry-lite-$version"
+G_EXEC tar xf "v$version.tar.gz"
+G_EXEC rm "v$version.tar.gz"
+G_EXEC cd "amiberry-lite-$version"
 G_EXEC_OUTPUT=1 G_EXEC cmake -B build -DCMAKE_INSTALL_PREFIX=/usr
 G_EXEC_OUTPUT=1 G_EXEC cmake --build build
 G_EXEC strip --remove-section=.comment --remove-section=.note build/amiberry-lite
@@ -108,7 +95,7 @@ DIR="amiberry-lite_$G_HW_ARCH_NAME"
 G_EXEC mkdir -p "$DIR/"{DEBIAN,mnt/dietpi_userdata/amiberry-lite,lib/systemd/system}
 
 # - Copy files in place
-G_EXEC_OUTPUT=1 G_EXEC cmake --install "amiberry-lite-$v_ami/build" --prefix "$DIR/usr"
+G_EXEC_OUTPUT=1 G_EXEC cmake --install "amiberry-lite-$version/build" --prefix "$DIR/usr"
 # - Obtain library dir
 LIB_DIR=$(find "$DIR/usr/lib/"*'/amiberry-lite' -maxdepth 0)
 G_EXEC cp -aL /usr/local/lib/libSDL2{,_image,_ttf}-2.0.so.0 "$LIB_DIR/"
@@ -192,12 +179,12 @@ G_EXEC_NOHALT=1 G_EXEC curl -sSfo package.deb "https://dietpi.com/downloads/bina
 old_version=$(dpkg-deb -f package.deb Version)
 G_EXEC_NOHALT=1 G_EXEC rm package.deb
 suffix=${old_version#*-dietpi}
-[[ $old_version == "$v_ami-"* ]] && v_ami+="-dietpi$((suffix+1))" || v_ami+="-dietpi1"
+[[ $old_version == "$version-"* ]] && version+="-dietpi$((suffix+1))" || version+="-dietpi1"
 
 # - control
 cat << _EOF_ > "$DIR/DEBIAN/control"
 Package: amiberry-lite
-Version: $v_ami
+Version: $version
 Architecture: $(dpkg --print-architecture)
 Maintainer: MichaIng <micha@dietpi.com>
 Date: $(date -uR)
@@ -219,9 +206,6 @@ G_EXEC chmod +x "$DIR/usr/bin/amiberry-lite" "$DIR/DEBIAN/"{preinst,prerm,postrm
 
 # Build DEB package
 G_EXEC_OUTPUT=1 G_EXEC dpkg-deb -b "$DIR"
-
-# Cleanup
-G_EXEC rm -R "$DIR"
 
 exit 0
 }

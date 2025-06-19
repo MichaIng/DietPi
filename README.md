@@ -162,7 +162,7 @@ Also read our [contribute page](https://dietpi.com/contribute.html) for an overv
 
 ## License
 
-DietPi Copyright (C) 2023 [Contributors](https://github.com/MichaIng/DietPi/graphs/contributors)
+DietPi Copyright (C) 2025 [Contributors](https://github.com/MichaIng/DietPi/graphs/contributors)
 - Email: <micha@dietpi.com>
 - Website: <https://dietpi.com/>
 
@@ -292,7 +292,7 @@ Links to hardware and software manufacturers, sources and build instructions use
 - [Box64](https://github.com/ptitSeb/box64)
 - [Steam](https://steamcommunity.com/)
 - [mjpg-streamer](https://github.com/jacksonliam/mjpg-streamer)
-- [IPFS](https://github.com/ipfs/ipfs)
+- [IPFS Node](https://github.com/ipfs/kubo)
 - [CUPS](https://github.com/OpenPrinting/cups)
 - [Go](https://github.com/golang/go)
 - [VSCodium](https://github.com/VSCodium/vscodium)
@@ -343,6 +343,7 @@ Links to hardware and software manufacturers, sources and build instructions use
 - [Forgejo](https://codeberg.org/forgejo/forgejo)
 - [soju](https://github.com/emersion/soju)
 - [fish](https://github.com/fish-shell/fish-shell)
+- [GZDoom](https://github.com/ZDoom/gzdoom)
 
 ---
 
