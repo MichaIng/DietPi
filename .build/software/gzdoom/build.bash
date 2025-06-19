@@ -9,24 +9,26 @@ adeps=('libc6' 'libdrm2' 'libgbm1' 'libvulkan1' 'libegl1' 'libgl1-mesa-dri' 'lib
 if (( $G_HW_ARCH == 10 ))
 then
 	# OpenGL for x86_64
+	sdl_flags=('--disable-video-opengles2' '--enable-video-opengl')
+	doom_flags=('-DHAVE_GLES2=0')
 	adeps_build+=('libgl-dev' 'libegl1')
 	adeps+=('libgl1')
-	sdl_flags=('--disable-video-opengles2' '--enable-video-opengl')
-	doom_flags=('-DHAVE_GLES2=OFF')
 else
 	# OpenGLES2 for ARM/RISC-V
+	sdl_flags=('--enable-video-opengles2' '--disable-video-opengl')
+	doom_flags=('-DHAVE_GLES2=1')
 	adeps_build+=('libgles-dev')
 	adeps+=('libgles2')
-	sdl_flags=('--enable-video-opengles2' '--disable-video-opengl')
-	doom_flags=('-DHAVE_GLES2=ON')
 fi
-# - ZMusic
-adeps_build+=('cmake' 'g++' 'libglib2.0-dev' 'libopenal1')
-adeps+=('libglib2.0-0' 'libopenal1') # OpenAL needed for MIDI synthesizer to work
+# - ZMusic: OpenAL needed for MIDI synthesizer to work. With DYN_OPENAL=1 (default), the library is not linked, so the GZDoom starts without it, and no headers needed. It is detected and in case loaded "dynamically" (opposed to linking a dynamic/shared library).
+doom_flags+=('-DDYN_OPENAL=0')
+adeps_build+=('cmake' 'g++' 'libglib2.0-dev' 'libopenal-dev')
+adeps+=('libglib2.0-0' 'libopenal1')
 # - Freedoom
 adeps_build+=('unzip')
 # - GZDoom
-adeps_build+=('git' 'libvpx-dev')
+adeps_build+=('git' 'libvpx-dev' 'libbz2-dev')
+adeps+=('libbz2-1.0')
 case $G_DISTRO in
 	6) adeps+=('libvpx6');;
 	7) adeps+=('libvpx7');;
@@ -111,7 +113,7 @@ G_EXEC sed --follow-symlinks -i -e '1a\include_directories(/tmp/deps/include)' -
 # Prevent src/CMakeLists.txt from overwriting rpath if INSTALL_RPATH is not set, which is however expected at this point. ToDo: open PR to check for CMAKE_INSTALL_RPATH instead.
 G_EXEC sed --follow-symlinks -i '1a\set(INSTALL_RPATH "/usr/lib/gzdoom")' src/CMakeLists.txt
 DIR="/tmp/${NAME}_$G_HW_ARCH_NAME"
-G_EXEC_OUTPUT=1 G_EXEC cmake -B build -DCMAKE_BUILD_TYPE=Release -DCMAKE_PREFIX_PATH='/tmp/deps' -DCMAKE_INSTALL_PREFIX="$DIR/usr" -DHAVE_VULKAN=ON "${doom_flags[@]}"
+G_EXEC_OUTPUT=1 G_EXEC cmake -B build -DCMAKE_BUILD_TYPE=Release -DCMAKE_PREFIX_PATH='/tmp/deps' -DCMAKE_INSTALL_PREFIX="$DIR/usr" -DPK3_QUIET_ZIPDIR=1 -DHAVE_VULKAN=1 "${doom_flags[@]}"
 G_EXEC_OUTPUT=1 G_EXEC make -C build "-j$(nproc)"
 G_EXEC strip --remove-section=.comment --remove-section=.note "build/$NAME"
 [[ -d $DIR ]] && G_EXEC rm -R "$DIR"
