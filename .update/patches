@@ -1171,8 +1171,8 @@ _EOF_
 		then
 			cat << '_EOF_' > /etc/udev/rules.d/dietpi-eth-leds.rules
 SUBSYSTEM=="leds", KERNEL=="lan2_led", ACTION=="add", ATTR{trigger}="netdev", ATTR{device_name}="eth0", ATTR{link}="1", ATTR{rx}="1", ATTR{tx}="1", RUN+="/bin/ip l s eth0 up", RUN+="/bin/ip l s eth0 down"
-SUBSYSTEM=="leds", KERNEL=="lan1_led", ACTION=="add", ATTR{trigger}="netdev", ATTR{device_name}="eth1", ATTR{link}="1", ATTR{rx}="1", ATTR{tx}="1"
-SUBSYSTEM=="leds", KERNEL=="wan_led", ACTION=="add", ATTR{trigger}="netdev", ATTR{device_name}="eth2", ATTR{link}="1", ATTR{rx}="1", ATTR{tx}="1"
+SUBSYSTEM=="leds", KERNEL=="lan1_led", ACTION=="add", ATTR{trigger}="netdev", ATTR{device_name}="eth1", ATTR{link}="1", ATTR{rx}="1", ATTR{tx}="1", RUN+="/bin/ip l s eth1 up", RUN+="/bin/ip l s eth1 down"
+SUBSYSTEM=="leds", KERNEL=="wan_led", ACTION=="add", ATTR{trigger}="netdev", ATTR{device_name}="eth2", ATTR{link}="1", ATTR{rx}="1", ATTR{tx}="1", RUN+="/bin/ip l s eth2 up", RUN+="/bin/ip l s eth2 down"
 _EOF_
 		else
 			cat << '_EOF_' > /etc/udev/rules.d/dietpi-eth-leds.rules
@@ -1785,16 +1785,7 @@ _EOF_
 	elif (( $G_HW_MODEL == 79 )) && ! dpkg-query -s 'firmware-nanopi6' &> /dev/null
 	then
 		read -r model < /proc/device-tree/model
-		if [[ $model == *'R6S'* ]]
-		then
-			G_DIETPI-NOTIFY 2 'Updating udev rule for NanoPi R6S Ethernet LEDs'
-			G_EXEC eval 'echo '\''ledtrig-netdev'\'' > /etc/modules-load.d/dietpi-eth-leds.conf'
-			cat << '_EOF_' > /etc/udev/rules.d/dietpi-eth-leds.rules
-SUBSYSTEM=="leds", KERNEL=="lan2_led", ACTION=="add", ATTR{trigger}="netdev", ATTR{device_name}="eth0", ATTR{link}="1", ATTR{rx}="1", ATTR{tx}="1", RUN+="/bin/ip l s eth0 up", RUN+="/bin/ip l s eth0 down"
-SUBSYSTEM=="leds", KERNEL=="wan_led", ACTION=="add", ATTR{trigger}="netdev", ATTR{device_name}="eth1", ATTR{link}="1", ATTR{rx}="1", ATTR{tx}="1", RUN+="/bin/ip l s eth1 up", RUN+="/bin/ip l s eth1 down"
-SUBSYSTEM=="leds", KERNEL=="lan1_led", ACTION=="add", ATTR{trigger}="netdev", ATTR{device_name}="eth2", ATTR{link}="1", ATTR{rx}="1", ATTR{tx}="1", RUN+="/bin/ip l s eth2 up", RUN+="/bin/ip l s eth2 down"
-_EOF_
-		elif [[ $model == *'R6C'* ]]
+		if [[ $model == *'R6C'* ]]
 		then
 			G_DIETPI-NOTIFY 2 'Updating udev rule for NanoPi R6C Ethernet LEDs'
 			G_EXEC eval 'echo '\''ledtrig-netdev'\'' > /etc/modules-load.d/dietpi-eth-leds.conf'
@@ -2070,10 +2061,29 @@ Patch_9_14()
 		G_EXEC rm -f /etc/sysctl.d/*dietpi*.conf
 
 	# NanoPi R5S/R6S
-	elif { [[ $G_HW_MODEL == 76 ]] && grep -q 'R5S' /proc/device-tree/model && ! dpkg-query -s 'firmware-nanopi5' &> /dev/null; } || { [[ $G_HW_MODEL == 79 ]] && grep -q 'R6S' /proc/device-tree/model && ! dpkg-query -s 'firmware-nanopi6' &> /dev/null; }
+	elif
+		{ (( $G_HW_MODEL == 76 )) && grep -q 'R5S' /proc/device-tree/model && ! dpkg-query -s 'firmware-nanopi5' &> /dev/null; } ||
+		{ (( $G_HW_MODEL == 79 )) && grep -q 'R6S' /proc/device-tree/model && ! dpkg-query -s 'firmware-nanopi6' &> /dev/null; }
 	then
 		G_DIETPI-NOTIFY 2 'Flashing latest U-Boot, which assigns a static MAC address to the 3rd Ethernet adapter as well'
 		/boot/dietpi/func/dietpi-set_hardware flash-u-boot-mmc
+
+		# NanoPi R5S: Swap eth1 and eth2 on kernel upgrade
+		if (( $G_HW_MODEL == 76 )) &&
+			dpkg --compare-versions "$(uname -r)" lt-nl '6.12' &&
+			dpkg --compare-versions "$(dpkg-query -Wf '${Version}' linux-image-current-rockchip64 2> /dev/null)" gt '25.08.0' &&
+			G_WHIP_BUTTON_OK_TEXT='Yes' G_WHIP_BUTTON_CANCEL_TEXT='Skip' G_WHIP_YESNO "[ INFO ] Latest kernel reverses eth1 and eth2 network interfaces
+\nSadly, compared to Linux 6.6, Linux 6.12 initiates the 1 Gbit WAN adapter before the second 2.5 Gbit LAN2 adapter. As a result, the native related network interface names eth1 and eth2 are inverted.
+\nShall we swap the interface names in the following known config file(s) automatically now if found?
+\n$(find -L /etc/network/interfaces{,.d/*} /etc/default/isc-dhcp-server /etc/iptables.ipv[46].nat /etc/wireguard/wg0.conf -type f 2> /dev/null)"
+		then
+			for i in /etc/network/interfaces{,.d/*} /etc/default/isc-dhcp-server /etc/iptables.ipv[46].nat /etc/wireguard/wg0.conf
+			do
+				[[ -f $i ]] || continue
+				G_EXEC sed --follow-symlinks -i -e 's/eth1/ethto2/g' -e 's/eth2/ethto1/g' "$i"
+				G_EXEC sed --follow-symlinks -i -e 's/ethto2/eth2/g' -e 's/ethto1/eth1/g' "$i"
+			done
+		fi	
 
 	# Orange Pi Zero 2W: Expansion board Ethernet LEDs: https://github.com/MichaIng/DietPi/issues/7575
 	elif (( $G_HW_MODEL == 88 ))
@@ -2294,18 +2304,11 @@ _EOF_
 			G_EXEC_OUTPUT=1 G_EXEC sfdisk --no-reread -N1 "$rootdrive" <<< '286720'
 			G_EXEC_OUTPUT=1 G_EXEC sfdisk --no-reread -N1 "$rootdrive" <<< ',+' # Needed, since above command and '286720,+' somehow create the partition 2015 sectors smaller, resulting in too large filesystem size. Only a subsequent ',+' expands it to the true end of the drive.
 			# LAN interface migration
-			G_DIETPI-NOTIFY 2 'Migrating LAN interface configs'
-			case $model in
-				'nanopi-r5s') local eth0='ethto2' eth1='ethto0' eth2='ethto1';;
-				'nanopi-r5c') local eth0='ethto1' eth1='ethto0' eth2='';;
-				*) G_DIETPI-NOTIFY 1 'Unknown SBC model detected'; exit 1;;
-			esac
-			for i in /etc/network/interfaces{,.d/*}
+			for i in /etc/network/interfaces{,.d/*} /etc/default/isc-dhcp-server /etc/iptables.ipv[46].nat /etc/wireguard/wg0.conf
 			do
 				[[ -f $i ]] || continue
-				G_EXEC sed --follow-symlinks -i -e "s/eth0/$eth0/g" -e "s/eth1/$eth1/g" "$i"
-				[[ $eth2 ]] && G_EXEC sed --follow-symlinks -i "s/eth2/$eth2/g" "$i"
-				G_EXEC sed --follow-symlinks -i 's/ethto/eth/g' "$i"
+				G_EXEC sed --follow-symlinks -i -e 's/eth0/ethto1/g' -e 's/eth1/ethto0/g' "$i"
+				G_EXEC sed --follow-symlinks -i -e 's/ethto1/eth1/g' -e 's/ethto0/eth0/g' "$i"
 			done
 			# Adjust Ethernet port LEDs
 			if [[ $model == 'nanopi-r5s' ]]
@@ -2314,8 +2317,8 @@ _EOF_
 				G_EXEC eval 'echo '\''ledtrig-netdev'\'' > /etc/modules-load.d/dietpi-eth-leds.conf'
 				cat << '_EOF_' > /etc/udev/rules.d/dietpi-eth-leds.rules
 SUBSYSTEM=="leds", KERNEL=="green:lan-1", ACTION=="add", ATTR{trigger}="netdev", ATTR{device_name}="eth0", ATTR{link}="1", ATTR{rx}="1", ATTR{tx}="1", RUN+="/bin/ip l s eth0 up", RUN+="/bin/ip l s eth0 down"
-SUBSYSTEM=="leds", KERNEL=="green:lan-2", ACTION=="add", ATTR{trigger}="netdev", ATTR{device_name}="eth1", ATTR{link}="1", ATTR{rx}="1", ATTR{tx}="1", RUN+="/bin/ip l s eth1 up", RUN+="/bin/ip l s eth1 down"
 SUBSYSTEM=="leds", KERNEL=="green:wan", ACTION=="add", ATTR{trigger}="netdev", ATTR{device_name}="eth2", ATTR{link}="1", ATTR{rx}="1", ATTR{tx}="1", RUN+="/bin/ip l s eth2 up", RUN+="/bin/ip l s eth2 down"
+SUBSYSTEM=="leds", KERNEL=="green:lan-2", ACTION=="add", ATTR{trigger}="netdev", ATTR{device_name}="eth1", ATTR{link}="1", ATTR{rx}="1", ATTR{tx}="1", RUN+="/bin/ip l s eth1 up", RUN+="/bin/ip l s eth1 down"
 _EOF_
 			else
 				G_DIETPI-NOTIFY 2 'Updating udev rule for NanoPi R5C Ethernet LEDs'
@@ -2397,17 +2400,16 @@ _EOF_
 			G_EXEC_OUTPUT=1 G_EXEC sfdisk --no-reread -N1 "$rootdrive" <<< '286720'
 			G_EXEC_OUTPUT=1 G_EXEC sfdisk --no-reread -N1 "$rootdrive" <<< ',+' # Needed, since above command and '286720,+' somehow create the partition 2015 sectors smaller, resulting in too large filesystem size. Only a subsequent ',+' expands it to the true end of the drive.
 			# LAN interface migration
-			G_DIETPI-NOTIFY 2 'Migrating LAN interface configs'
-			case $model in
-				'nanopi-r6s') local eth1='ethto2' eth2='ethto1';;
-				*) local eth0='skip';;
-			esac
-			[[ $eth0 == 'skip' ]] || for i in /etc/network/interfaces{,.d/*}
-			do
-				[[ -f $i ]] || continue
-				G_EXEC sed --follow-symlinks -i -e "s/eth1/$eth1/g" -e "s/eth2/$eth2/g" "$i"
-				G_EXEC sed --follow-symlinks -i 's/ethto/eth/g' "$i"
-			done
+			if [[ $model == 'nanopi-r6s' ]]
+			then
+				G_DIETPI-NOTIFY 2 'Migrating LAN interface configs'
+				for i in /etc/network/interfaces{,.d/*} /etc/default/isc-dhcp-server /etc/iptables.ipv[46].nat /etc/wireguard/wg0.conf
+				do
+					[[ -f $i ]] || continue
+					G_EXEC sed --follow-symlinks -i -e 's/eth1/ethto2/g' -e 's/eth2/ethto1/g' "$i"
+					G_EXEC sed --follow-symlinks -i -e 's/ethto2/eth2/g' -e 's/ethto1/eth1/g' "$i"
+				done
+			fi
 			# Adjust Ethernet port LEDs
 			if [[ $model == 'nanopi-r6s' ]]
 			then
