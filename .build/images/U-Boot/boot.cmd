@@ -16,7 +16,7 @@ setenv scriptaddr "0x32000000"
 setenv kernel_addr_r "0x34000000"
 setenv fdt_addr_r "0x4080000"
 
-# Get PARTUUID of first partition on SD/eMMC it was loaded from
+# If this script was loaded from SD/eMMC, get PARTUUID of its first partition for later detection from userland
 if test "${devtype}" = "mmc"; then part uuid mmc "${devnum}:1" partuuid; fi
 
 # Load environment file
