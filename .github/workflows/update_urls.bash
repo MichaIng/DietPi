@@ -209,7 +209,7 @@ aREGEX[$software_id]='https://github.com/gogs/gogs/releases/download/.*/gogs_.*_
 
 # Gitea
 software_id=165
-aCHECK[$software_id]='curl -sSfL '\''https://api.github.com/repos/go-gitea/gitea/releases/latest'\'' | mawk -F\" "/\"browser_download_url\": \".*\/gitea-[^\"\/]*-linux-$arch\.xz\"/{print \$4}"'
+aCHECK[$software_id]='curl -sSfL '\''https://api.github.com/repos/go-gitea/gitea/releases/latest'\'' | mawk -F\" "/^ *\"browser_download_url\": \".*\/gitea-[^\"\/]*-linux-$arch\.xz\"$/{print \$4}"'
 aARCH[$software_id]='arm-6 arm64 amd64 riscv64'
 aARCH_CHECK[$software_id]='arm-7'
 aREGEX[$software_id]='https://github.com/go-gitea/gitea/releases/download/.*/gitea-.*-linux-\$arch.xz'
