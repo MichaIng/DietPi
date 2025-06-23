@@ -294,6 +294,12 @@ software_id=213
 aCHECK[$software_id]='curl -sSfL '\''https://api.github.com/repos/emersion/soju/releases/latest'\'' | mawk -F\" '\''/^ *"browser_download_url": ".*\/soju-[^"\/]*\.tar\.gz"$/{print $4}'\'
 aREGEX[$software_id]='https://github.com/emersion/soju/releases/download/.*/soju-.*\.tar\.gz'
 
+# Grafana ARMv6
+software_id=77
+aCHECK[$software_id]='curl -sSfL '\''https://api.github.com/repos/grafana/grafana/releases/latest'\'' | mawk -F\" '\''/^ *"name": "[^"]*",$/{print $4}'\'
+aREGEX[$software_id]='version='\''[^'\'']*'\'
+aREPLACE[$software_id]='version='\''$release'\'
+
 ### URL check loop ###
 
 for i in "${!aCHECK[@]}"
