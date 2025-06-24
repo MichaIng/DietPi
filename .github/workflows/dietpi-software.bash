@@ -100,7 +100,7 @@ Process_Software()
 			7) aCOMMANDS[i]='ffmpeg -version';;
 			9) aCOMMANDS[i]='node -v';;
 			10) aCOMMANDS[i]='LD_LIBRARY_PATH=$(find /usr/lib/*/amiberry-lite -maxdepth 0) amiberry-lite -h | grep '\''^$VER: Amiberry-Lite '\';;
-			11) aCOMMANDS[i]='gzdoom -norun';;
+			11) aCOMMANDS[i]='gzdoom -norun | grep '\''^GZDoom version '\';;
 			#16) aSERVICES[i]='microblog-pub' aTCP[i]='8007';; Service enters a CPU-intense internal error loop until it has been configured interactively via "microblog-pub configure", hence it is not enabled and started anymore after install but instead as part of "microblog-pub configure"
 			17) aCOMMANDS[i]='git --version';; # from Bookworm on, the shorthand "-v" is supported
 			28) aSERVICES[i]='vncserver' aTCP[i]='5901';;
