@@ -51,8 +51,11 @@ aCHECK[$software_id]='curl -sSfL '\''https://dist.ipfs.io/go-ipfs/versions'\'' |
 aREGEX[$software_id]='version='\''[^'\'']*'\'
 aREPLACE[$software_id]='version='\''$release'\'
 
-# microblog.pub: Update Python version?
+# microblog.pub: Update Python version
 software_id=16
+aCHECK[$software_id]='curl -sSf '\''https://api.github.com/repos/pyenv/pyenv/contents/plugins/python-build/share/python-build?ref=master'\'' | mawk -F\" '\''/^ *"name": "3\.11\.[0-9]*",$/{print $4}'\'' | sort -Vr | head -1'
+aREGEX[$software_id]='micro_python_version='\''[^'\'']*'\'
+aREPLACE[$software_id]='micro_python_version='\''$release'\'
 
 # UrBackup Server
 software_id=111
@@ -238,8 +241,11 @@ software_id=27
 aCHECK[$software_id]='curl -sSfL '\''https://api.github.com/repos/TasmoAdmin/TasmoAdmin/releases/latest'\'' | mawk -F\" '\''/^ *"browser_download_url": ".*\/tasmoadmin_v[^"\/]*\.tar\.gz"$/{print $4}'\'
 aREGEX[$software_id]='https://github.com/TasmoAdmin/TasmoAdmin/releases/download/v[^2].*/tasmoadmin_.*\.tar\.gz'
 
-# Home Assistant: Update Python version?
+# Home Assistant: Update Python version
 software_id=157
+aCHECK[$software_id]='curl -sSf '\''https://api.github.com/repos/pyenv/pyenv/contents/plugins/python-build/share/python-build?ref=master'\'' | mawk -F\" '\''/^ *"name": "3\.13\.[0-9]*",$/{print $4}'\'' | sort -Vr | head -1'
+aREGEX[$software_id]='ha_python_version='\''[^'\'']*'\'
+aREPLACE[$software_id]='ha_python_version='\''$release'\'
 
 # Snapcast Server (no snapweb for now): Implement distro loop?
 software_id=191
