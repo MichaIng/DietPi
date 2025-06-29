@@ -15,10 +15,10 @@ Exit_Error()
 # NoMachine: Check for riscv64?
 software_id=30
 
-# phpBB
+# phpBB: temporarily disabled since Cloudflare blocks all non-browser requests
 software_id=54
-aCHECK[$software_id]='curl -sSfL '\''https://www.phpbb.com/downloads/'\'' | grep -o '\''https://download\.phpbb\.com/pub/release/.*/.*/phpBB-.*\.tar\.bz2'\'
-aREGEX[$software_id]='https://download\.phpbb\.com/pub/release/.*/.*/phpBB-.*\.tar\.bz2'
+#aCHECK[$software_id]='curl -sSfL '\''https://www.phpbb.com/downloads/'\'' | grep -o '\''https://download\.phpbb\.com/pub/release/.*/.*/phpBB-.*\.tar\.bz2'\'
+#aREGEX[$software_id]='https://download\.phpbb\.com/pub/release/.*/.*/phpBB-.*\.tar\.bz2'
 
 # phpMyAdmin
 software_id=90
