@@ -980,16 +980,20 @@ Available commands:
 		(( $G_HW_MODEL > 9 )) && aSOFTWARE_AVAIL_G_HW_MODEL[$software_id,$G_HW_MODEL]=0
 		# - ARMv6: https://github.com/moonlight-stream/moonlight-embedded/issues/832
 		aSOFTWARE_AVAIL_G_HW_ARCH[$software_id,1]=0
+		# - Trixie on ARMv7: There is no Trixie suite yet, and the Bookworm packages depend on libssl3. On Trixie, libssl3t64 is provided instead, but it "provides" libssl3 for 64-bit only. The 64-bit time_t transition to prevent year 2038 problems is relevant for 32-bit systems only. So for 64-bit systems, libssl3t64 equals libssl3, and the package name has been changed only to align with the 32-bit one.
+		(( $G_HW_ARCH < 3 )) && aSOFTWARE_AVAIL_G_DISTRO[$software_id,8]=0
 		#------------------
 		software_id=208
 		aSOFTWARE_NAME[$software_id]='Moonlight (GUI)'
 		aSOFTWARE_DESC[$software_id]='GUI game streaming client for Sunshine and NVIDIA GameStream'
 		aSOFTWARE_CATX[$software_id]=5
 		aSOFTWARE_DOCS[$software_id]='https://dietpi.com/docs/software/gaming/#moonlight-gui'
-		# RPi only
-		(( $G_HW_MODEL > 9 )) && aSOFTWARE_AVAIL_G_HW_MODEL[$software_id,$G_HW_MODEL]=0
 		# - ARMv6: https://github.com/moonlight-stream/moonlight-embedded/issues/832
 		aSOFTWARE_AVAIL_G_HW_ARCH[$software_id,1]=0
+		# - x86_64
+		aSOFTWARE_AVAIL_G_HW_ARCH[$software_id,10]=0
+		# - Trixie on ARMv7: There is no Trixie suite yet, and the Bookworm packages depend on libssl3. On Trixie, libssl3t64 is provided instead, but it "provides" libssl3 for 64-bit only. The 64-bit time_t transition to prevent year 2038 problems is relevant for 32-bit systems only. So for 64-bit systems, libssl3t64 equals libssl3, and the package name has been changed only to align with the 32-bit one.
+		(( $G_HW_ARCH < 3 )) && aSOFTWARE_AVAIL_G_DISTRO[$software_id,8]=0
 		#------------------
 		software_id=11
 		aSOFTWARE_NAME[$software_id]='GZDoom'
@@ -2572,6 +2576,10 @@ _EOF_
 				[[ -f '/boot/armbianEnv.txt' ]] && G_CONFIG_INJECT 'docker_optimizations=' 'docker_optimizations=on' /boot/armbianEnv.txt
 				# Radxa Zero
 				[[ -f '/boot/uEnv.txt' ]] && G_CONFIG_INJECT 'docker_optimizations=' 'docker_optimizations=on' /boot/uEnv.txt
+
+			elif [[ -f '/boot/extlinux/extlinux.conf' ]]
+			then
+				grep -Eq '^[[:blank:]]*append[[:blank:]].*cgroup_enable=memory([[:blank:]]|$)' /boot/extlinux/extlinux.conf || G_EXEC sed --follow-symlinks -i '/^[[:blank:]]*append[[:blank:]]/s/[[:blank:]]*$/ cgroup_enable=memory/' /boot/extlinux/extlinux.conf
 			fi
 		}
 
@@ -2601,6 +2609,7 @@ sudo sysctl -p /etc/sysctl.d/dietpi-$1.conf"
 		{
 			(( ${aSOFTWARE_INSTALL_STATE[$1]} == 1 )) || return 1
 			G_DIETPI-NOTIFY 3 "$G_PROGRAM_NAME" "Installing ${aSOFTWARE_NAME[$1]}: ${aSOFTWARE_DESC[$1]}"
+			aDEPS=() # failsafe
 			software_id=$1
 			shift
 			[[ $1 ]] || return 0
@@ -2703,6 +2712,7 @@ EndSection
 _EOF_
 			# Install packages
 			G_AGI "${aDEPS[@]}"
+			aDEPS=()
 		fi
 
 		if To_Install 152 avahi-daemon # Avahi-Daemon
@@ -3205,18 +3215,17 @@ _EOF_
 				G_WHIP_MENU 'Please choose which version of DietPi-Dashboard should be installed.' && version=$G_WHIP_RETURNED_VALUE
 			fi
 
-			# Backend only?
-			local backend=$(sed -n '/^[[:blank:]]*SOFTWARE_DIETPI_DASHBOARD_BACKEND=/{s/^[^=]*=//p;q}' /boot/dietpi.txt)
-			[[ $backend == 1 ]] && G_WHIP_DEFAULT_ITEM='Yes' || G_WHIP_DEFAULT_ITEM='No'
-			G_WHIP_BUTTON_OK_TEXT='Yes'
-			G_WHIP_BUTTON_CANCEL_TEXT='No'
-			G_WHIP_YESNO 'Would you like to install only the backend, for viewing on another dashboard page?' && backend='Yes' || backend='No'
-			[[ $backend == 'Yes' ]] && backend='-backend' || backend=
+			# Backend only? Currently not functional!
+			local backend= #$(sed -n '/^[[:blank:]]*SOFTWARE_DIETPI_DASHBOARD_BACKEND=/{s/^[^=]*=//p;q}' /boot/dietpi.txt)
+			#[[ $backend == 1 ]] && G_WHIP_DEFAULT_ITEM='Yes' || G_WHIP_DEFAULT_ITEM='No'
+			#G_WHIP_BUTTON_OK_TEXT='Yes' G_WHIP_BUTTON_CANCEL_TEXT='No'
+			#G_WHIP_YESNO 'Would you like to install the backend only, to view on another DietPi-Dashboard instance?' && backend='-backend' || backend=
 
 			# Download binary and set config URL
 			local config_url
 			if [[ $version == 'Nightly' ]]
 			then
+				command -v unzip > /dev/null || G_AGI unzip # G_CHECK_URL => HEAD request on nightly.link always returns 404, hence prevent Download_Install() from doing concurrent unzip install, which forks the download into background and runs G_CHECK_URL first.
 				Download_Install "https://nightly.link/ravenclaw900/DietPi-Dashboard/workflows/push-build/main/dietpi-dashboard-$G_HW_ARCH_NAME$backend.zip" /opt/dietpi-dashboard
 				config_url='https://raw.githubusercontent.com/ravenclaw900/DietPi-Dashboard/main/config.toml'
 			else
@@ -4163,7 +4172,9 @@ sudo sysctl -p /etc/sysctl.d/dietpi-ipfs.conf
 		if To_Install 16 # microblog.pub
 		then
 			local micro_name='microblog-pub'
-			local micro_python_version='3.11.13' # https://github.com/pyenv/pyenv/tree/master/plugins/python-build/share/python-build
+			# Obtain latest Python 3.11.y version supported by pyenv
+			local micro_python_version=$(curl -sSf 'https://api.github.com/repos/pyenv/pyenv/contents/plugins/python-build/share/python-build?ref=master' | mawk -F\" '/^ *"name": "3\.11\.[0-9]*",$/{print $4}' | sort -Vr | head -1)
+			[[ $micro_python_version ]] || { micro_python_version='3.11.13'; G_DIETPI-NOTIFY 1 "Automatic latest Python version detection failed. Version \"$micro_python_version\" will be installed as fallback, but a newer version might be available. Please report this at: https://github.com/MichaIng/DietPi/issues"; }
 			local micro_pyenv_dir="/opt/$micro_name"
 			local micro_pyenv_activate_file="$micro_pyenv_dir/pyenv-activate.sh"
 			local micro_virtualenv="$micro_pyenv_dir/.virtual_path"
@@ -4178,6 +4189,8 @@ sudo sysctl -p /etc/sysctl.d/dietpi-ipfs.conf
 				# Enable remote access on port 8007
 				G_EXEC sed --follow-symlinks -i 's/uvicorn app/uvicorn --host 0.0.0.0 --port 8007 app/' "$micro_data_dir/misc/supervisord.conf"
 				G_EXEC sed --follow-symlinks -i 's/8000/8007/' "$micro_data_dir/data/tests.toml"
+				# Disable package mode to prevent: "Error: The current project could not be installed: No file/folder found for package microblogpub"
+				G_CONFIG_INJECT 'package-mode[[:blank:]]' 'package-mode = false' "$micro_data_dir/pyproject.toml" '\[tool.poetry\]'
 			fi
 
 			# Disable pip cache
@@ -4191,22 +4204,27 @@ sudo sysctl -p /etc/sysctl.d/dietpi-ipfs.conf
 			# Dependencies
 			# - gcc, libc6-dev, make, libssl-dev, zlib1g-dev for Python build. libbz2-dev; libreadline-dev, libsqlite3-dev, liblzma-dev to suppress warnings; libffi-dev for ModuleNotFoundError: No module named '_ctypes'; g++ for libsass on all but x86_64 and for poetry brotli install on all architectures
 			aDEPS=('g++' 'libc6-dev' 'make' 'libssl-dev' 'zlib1g-dev' 'libbz2-dev' 'libreadline-dev' 'libsqlite3-dev' 'liblzma-dev' 'libffi-dev')
-			# - ARMv6/7/RISC-V: Rust and pkg-config required for cryptography
+			# - ARMv6/7/RISC-V
 			if [[ $G_HW_ARCH =~ ^(1|2|11)$ ]]
 			then
-				# pkg-config for cryptography, libjpeg62-turbo-dev for Pillow and libxslt1-dev for lxml
-				aDEPS+=('pkg-config' 'libjpeg62-turbo-dev' 'libxslt1-dev')
+				# pkg-config for cryptography, libjpeg62-turbo-dev for Pillow
+				aDEPS+=('pkg-config' 'libjpeg62-turbo-dev')
 				# Rust for cryptography
 				G_EXEC curl -sSf 'https://sh.rustup.rs/' -o rustup-init.sh
 				G_EXEC chmod +x rustup-init.sh
+				# - ARMv6 Bullseye: rustup-init depends on libatomic1, not assured to be pre-installed on Bullseye
+				(( $G_HW_ARCH == 1 && $G_DISTRO == 6 )) && G_AGI libatomic1
 				# - RPi with 64-bit kernel on 32-bit image: Enforce 32-bit toolchain: https://github.com/MichaIng/DietPi/issues/6306
 				G_EXEC_OUTPUT=1 G_EXEC runuser -u "$micro_name" -- ./rustup-init.sh -y --profile minimal ${RPI_64KERNEL_32OS:+'--default-host' 'armv7-unknown-linux-gnueabihf'}
 				G_EXEC rm rustup-init.sh
+				# ARMv6/RISC-V: libxslt1-dev for lxml
+				(( $G_HW_ARCH == 1 || $G_HW_ARCH == 11 )) && aDEPS+=('libxslt1-dev')
 			fi
 
-			# Create a Python 3.10 environment via pyenv
+			# Create a Python environment via pyenv
 			# - https://python-poetry.org/docs/managing-environments/
 			Download_Install 'https://github.com/pyenv/pyenv/archive/master.tar.gz'
+			G_EXEC chown -R "$micro_name:$micro_name" pyenv-master
 			# - Start with fresh instance to allow clean pyenv and Python updates and fix broken instances.
 			[[ -d $micro_pyenv_dir ]] && G_EXEC rm -R "$micro_pyenv_dir"
 			G_EXEC mv pyenv-master "$micro_pyenv_dir"
@@ -4222,24 +4240,23 @@ cd $micro_data_dir
 [ -f '.cargo/env' ] && . .cargo/env
 PS1=\"(microblog.pub) \$PS1\"" > "$micro_pyenv_activate_file"
 
-			# Install Python 3.10 and Poetry
-			G_EXEC chown -R "$micro_name:$micro_name" "$micro_pyenv_dir"
-			G_EXEC_DESC='Installing Python with Poetry into pyenv'
-			G_EXEC_OUTPUT=1 G_EXEC runuser -u "$micro_name" -- dash -c "
-. $micro_pyenv_activate_file || exit 1
-pyenv install $micro_python_version || exit 1
-pyenv local $micro_python_version || exit 1
-pip3 install -U pip setuptools wheel || exit 1
-pip3 install poetry || exit 1
-poetry install || exit 1
-# Skip these for now:
-#poetry run inv configuration-wizard
-#poetry run inv migrate-db
-poetry env info | grep -oP '(?<=^Path:\s).*/virtualenvs/.*' > '$micro_virtualenv'"
-
+			G_EXEC_DESC="Compiling and installing Python $micro_python_version into pyenv, which will take a while ..."
+			G_EXEC_OUTPUT=1 G_EXEC runuser -u "$micro_name" -- dash -c ". $micro_pyenv_activate_file; exec pyenv install $micro_python_version"
+			G_EXEC_DESC="Setting Python $micro_python_version as global version for this pyenv instance"
+			G_EXEC_OUTPUT=1 G_EXEC runuser -u "$micro_name" -- dash -c ". $micro_pyenv_activate_file; exec pyenv global $micro_python_version"
+			G_EXEC_DESC='Upgrading base modules: pip setuptools wheel'
+			G_EXEC_OUTPUT=1 G_EXEC runuser -u "$micro_name" -- dash -c ". $micro_pyenv_activate_file; exec pip3 install -U pip setuptools wheel"
+			G_EXEC_DESC='Installing Poetry'
+			G_EXEC_OUTPUT=1 G_EXEC runuser -u "$micro_name" -- dash -c ". $micro_pyenv_activate_file; exec pip3 install poetry"
+			G_EXEC_DESC='Updating dependency locks'
+			G_EXEC_OUTPUT=1 G_EXEC runuser -u "$micro_name" -- dash -c ". $micro_pyenv_activate_file; exec poetry update --lock"
+			G_EXEC_DESC='Installing microblog.pub'
+			G_EXEC_OUTPUT=1 G_EXEC runuser -u "$micro_name" -- dash -c ". $micro_pyenv_activate_file; exec poetry install"
+			G_EXEC_DESC='Storing Poetry virtualenv path'
+			G_EXEC_OUTPUT=1 G_EXEC runuser -u "$micro_name" -- dash -c ". $micro_pyenv_activate_file; poetry env info | grep -Po '(?<=^Path:\s).*/virtualenvs/.*' > '$micro_virtualenv'"
 			read -r VENV_DIR < "$micro_virtualenv"
 			# shellcheck disable=SC2016
-			G_EXEC_DESC='Checking for Poetry virtualenv' G_EXEC eval '[[ $VENV_DIR ]]'
+			G_EXEC_DESC='Checking Poetry virtualenv path' G_EXEC eval '[[ $VENV_DIR ]]'
 			G_EXEC rm "$micro_virtualenv"
 
 			# Generate functions for later configuration and install to profile
@@ -5061,7 +5078,7 @@ _EOF_
 
 		if To_Install 31 # Kodi
 		then
-			local aDEPS=('kodi')
+			aDEPS=('kodi')
 
 			# RPi
 			if (( $G_HW_MODEL < 10 ))
@@ -7244,7 +7261,10 @@ _EOF_
 			# ARMv6: Install package manually since repo is not compatible: https://grafana.com/grafana/download?platform=arm&edition=oss
 			if (( $G_HW_ARCH == 1 ))
 			then
-				Download_Install 'https://dl.grafana.com/oss/release/grafana-rpi_9.5.1_armhf.deb'
+				# Grab current version
+				local version=$(curl -sSfL 'https://api.github.com/repos/grafana/grafana/releases/latest' | mawk -F\" '/^ *"name": "[^"]*",$/{print $4}')
+				[[ $version ]] || { version='12.0.2'; G_DIETPI-NOTIFY 1 "Automatic latest ruTorrent version detection failed. Version \"$version\" will be installed as fallback, but a newer version might be available. Please report this at: https://github.com/MichaIng/DietPi/issues"; }
+				Download_Install "https://dl.grafana.com/oss/release/grafana-rpi_${version}_armhf.deb"
 
 			# Else use official APT repo: https://grafana.com/docs/grafana/latest/setup-grafana/installation/debian/#install-from-apt-repository
 			else
@@ -9018,8 +9038,8 @@ _EOF_
 		then
 			# Build dependencies
 			aDEPS=('make' 'cmake' 'gcc' 'libc6-dev' 'libjpeg62-turbo-dev')
-			# - On RPi, add RPi Camera support by default
-			(( $G_HW_MODEL > 9 )) || aDEPS+=('libraspberrypi-dev')
+			# - RPi Bullseye: Add RPi Camera support by default
+			(( $G_HW_MODEL > 9 || $G_DISTRO > 6 )) || aDEPS+=('libraspberrypi-dev')
 
 			# Download sources
 			Download_Install 'https://github.com/jacksonliam/mjpg-streamer/archive/master.tar.gz'
@@ -9047,9 +9067,9 @@ _EOF_
 			Create_User -g video -d /opt/mjpg-streamer mjpg-streamer
 
 			# Service
-			# - On RPi, if the RPi camera module is enabled already, use it by default.
+			# - RPi Bullseye: If the RPi legacy camera stack is enabled already, use it by default.
 			local input='input_uvc.so -d /dev/video0'
-			[[ $G_HW_MODEL -gt 9 || -f '/etc/modprobe.d/dietpi-disable_rpi_camera.conf' ]] || input='input_raspicam.so'
+			[[ $G_HW_MODEL -gt 9 || $G_DISTRO -gt 6 || -f '/etc/modprobe.d/dietpi-disable_rpi_camera.conf' ]] || input='input_raspicam.so'
 			cat << _EOF_ > /etc/systemd/system/mjpg-streamer.service
 [Unit]
 Description=mjpg-streamer (DietPi)
@@ -9660,12 +9680,17 @@ _EOF_
 		then
 			# APT deps
 			aDEPS=('unzip')
+			(( $G_DISTRO > 7 )) && aDEPS+=('7zip') || aDEPS+=('p7zip')
 			# - ARMv6 does not support unrar-nonfree and Bazarr does not support unrar-free, so we need to use "unar": https://github.com/morpheus65535/bazarr/issues/2172
 			(( $G_HW_ARCH == 1 )) && aDEPS+=('unar')
 			# - ARMv6/7 with piwheels: libopenblas0-pthread for numpy from piwheels: https://piwheels.org/project/numpy/
 			(( $G_DISTRO < 8 && $G_HW_ARCH < 3 )) && aDEPS+=('libopenblas0-pthread')
-			# - ARMv6/7/RISC-V without piwheels: libxslt1-dev for lxml; g++, pkg-config and libopenblas-dev for numpy
-			(( $G_DISTRO > 7 && ( $G_HW_ARCH < 3 || $G_HW_ARCH == 11 ) )) && aDEPS+=('libxslt1-dev' 'g++' 'pkg-config' 'libopenblas-dev')
+			# - ARMv6/7/RISC-V without piwheels:
+			# -- numpy: g++ pkg-config libopenblas-dev
+			# -- Pillow: gcc libjpeg62-turbo-dev
+			(( $G_DISTRO > 7 && ( $G_HW_ARCH < 3 || $G_HW_ARCH == 11 ) )) && aDEPS+=('g++' 'pkg-config' 'libopenblas-dev' 'libjpeg62-turbo-dev')
+			# - ARMv6/RISC-V without piwheels: libxslt1-dev for lxml
+			(( $G_DISTRO > 7 && ( $G_HW_ARCH == 1 || $G_HW_ARCH == 11 ) )) && aDEPS+=('libxslt1-dev')
 			# - RISC-V: cmake for ninja; make and automake for patchelf
 			(( $G_HW_ARCH == 11 )) && aDEPS+=('cmake' 'make' 'automake')
 
@@ -9673,6 +9698,8 @@ _EOF_
 			Download_Install 'https://github.com/morpheus65535/bazarr/releases/latest/download/bazarr.zip' bazarr
 
 			# Python deps
+			# - Allow Pillow to be compiled
+			G_EXEC sed --follow-symlinks -i 's/ --only-binary=Pillow$//' bazarr/requirements.txt
 			G_EXEC_OUTPUT=1 G_EXEC pip3 install -Ur bazarr/requirements.txt
 
 			# Install: Remove previous instance on reinstall
@@ -9704,6 +9731,7 @@ SyslogIdentifier=Bazarr
 User=bazarr
 UMask=002
 LogsDirectory=bazarr
+WorkingDirectory=/mnt/dietpi_userdata/bazarr
 ExecStart=/usr/bin/python3 /opt/bazarr/bazarr.py -c /mnt/dietpi_userdata/bazarr
 KillSignal=SIGINT
 
@@ -10572,7 +10600,7 @@ _EOF_
 			esac
 
 			local fallback_url="https://github.com/go-gitea/gitea/releases/download/v1.24.2/gitea-1.24.2-linux-$arch.xz"
-			Download_Install "$(curl -sSfL 'https://api.github.com/repos/go-gitea/gitea/releases/latest' | mawk -F\" "/\"browser_download_url\": \".*\/gitea-[^\"\/]*-linux-$arch\.xz\"/{print \$4}")" /mnt/dietpi_userdata/gitea/gitea
+			Download_Install "$(curl -sSfL 'https://api.github.com/repos/go-gitea/gitea/releases/latest' | mawk -F\" "/^ *\"browser_download_url\": \".*\/gitea-[^\"\/]*-linux-$arch\.xz\"$/{print \$4}")" /mnt/dietpi_userdata/gitea/gitea
 
 			# User
 			Create_User -d /mnt/dietpi_userdata/gitea -s /bin/dash gitea
@@ -10992,10 +11020,11 @@ _EOF_
 
 			# APT deps
 			aDEPS=('libcec6')
+			(( $G_DISTRO > 7 )) && aDEPS=('libcec7')
 
-			# Install the client
+			# APT package
 			G_AGI moonlight-embedded "${aDEPS[@]}"
-			unset -v aDEPS
+			aDEPS=()
 
 			# Enable required fake KMS driver: https://github.com/moonlight-stream/moonlight-embedded/wiki/Packages
 			/boot/dietpi/func/dietpi-set_hardware rpi-opengl vc4-fkms-v3d
@@ -11009,19 +11038,26 @@ _EOF_
 			G_EXEC eval "curl -sSfL '$url' | gpg --dearmor -o /etc/apt/trusted.gpg.d/dietpi-moonlight-qt.gpg --yes"
 
 			# APT list
-			G_EXEC eval "echo 'deb https://dl.cloudsmith.io/public/moonlight-game-streaming/moonlight-qt/deb/raspbian ${G_DISTRO_NAME/trixie/bookworm} main' > /etc/apt/sources.list.d/dietpi-moonlight-qt.list"
+			local distro='debian' suite=${G_DISTRO_NAME/trixie/bookworm}
+			(( $G_HW_MODEL < 10 )) && distro='raspbian'
+			# - RISC-V: Supported via Sid suite
+			(( $G_HW_ARCH == 11 )) && suite='sid'
+			G_EXEC eval "echo 'deb https://dl.cloudsmith.io/public/moonlight-game-streaming/moonlight-qt/deb/$distro $suite main' > /etc/apt/sources.list.d/dietpi-moonlight-qt.list"
 			G_AGUP
 
-			# Install: libgl1 required, else start from console prints "SDL Error: Can't load EGL/GL library on window creation.", the GUI says it cannot find a video decoder and streaming does not start.
-			G_AGI moonlight-qt libgl1
+			# APT package
+			G_AGI moonlight-qt
 
-			# Video setup: https://github.com/moonlight-stream/moonlight-docs/wiki/Installing-Moonlight-Qt-on-Raspberry-Pi-4#hevc-and-hdr-support
+			# Raspberry Pi video setup: https://github.com/moonlight-stream/moonlight-docs/wiki/Installing-Moonlight-Qt-on-Raspberry-Pi-4#hevc-and-hdr-support
 			# - Usually requires vc4-fkms-v3d which also serves best performance
 			# - HEVC requires rpivid-v4l2, but it is deprecated and enabled OOTB since Bullseye
 			# - HDR requires vc4-kms-v3d, works on RPi 4 only (?) and breaks starting Moonlight from desktop
 			# => Compatible arrangement with HEVC but no HDR
-			/boot/dietpi/func/dietpi-set_hardware rpi-opengl vc4-fkms-v3d
-			/boot/dietpi/func/dietpi-set_hardware rpi-codec 1
+			if (( $G_HW_MODEL < 10 ))
+			then
+				/boot/dietpi/func/dietpi-set_hardware rpi-opengl vc4-fkms-v3d
+				/boot/dietpi/func/dietpi-set_hardware rpi-codec 1
+			fi
 		fi
 
 		if To_Install 11 # GZDoom
@@ -11148,7 +11184,9 @@ _EOF_
 			local ha_user='homeassistant'
 			local ha_home="/home/$ha_user"
 			local ha_pyenv_activation=". $ha_home/pyenv-activate.sh"
-			local ha_python_version='3.13.5' # https://github.com/pyenv/pyenv/tree/master/plugins/python-build/share/python-build
+			# Obtain latest Python 3.13.y version supported by pyenv
+			local ha_python_version=$(curl -sSf 'https://api.github.com/repos/pyenv/pyenv/contents/plugins/python-build/share/python-build?ref=master' | mawk -F\" '/^ *"name": "3\.13\.[0-9]*",$/{print $4}' | sort -Vr | head -1)
+			[[ $ha_python_version ]] || { ha_python_version='3.13.5'; G_DIETPI-NOTIFY 1 "Automatic latest Python version detection failed. Version \"$ha_python_version\" will be installed as fallback, but a newer version might be available. Please report this at: https://github.com/MichaIng/DietPi/issues"; }
 
 			G_DIETPI-NOTIFY 2 "Home Assistant user:  $ha_user"
 			G_DIETPI-NOTIFY 2 "Home Assistant home:  $ha_home"

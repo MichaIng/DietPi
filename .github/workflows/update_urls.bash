@@ -15,10 +15,10 @@ Exit_Error()
 # NoMachine: Check for riscv64?
 software_id=30
 
-# phpBB
+# phpBB: temporarily disabled since Cloudflare blocks all non-browser requests
 software_id=54
-aCHECK[$software_id]='curl -sSfL '\''https://www.phpbb.com/downloads/'\'' | grep -o '\''https://download\.phpbb\.com/pub/release/.*/.*/phpBB-.*\.tar\.bz2'\'
-aREGEX[$software_id]='https://download\.phpbb\.com/pub/release/.*/.*/phpBB-.*\.tar\.bz2'
+#aCHECK[$software_id]='curl -sSfL '\''https://www.phpbb.com/downloads/'\'' | grep -o '\''https://download\.phpbb\.com/pub/release/.*/.*/phpBB-.*\.tar\.bz2'\'
+#aREGEX[$software_id]='https://download\.phpbb\.com/pub/release/.*/.*/phpBB-.*\.tar\.bz2'
 
 # phpMyAdmin
 software_id=90
@@ -51,8 +51,11 @@ aCHECK[$software_id]='curl -sSfL '\''https://dist.ipfs.io/go-ipfs/versions'\'' |
 aREGEX[$software_id]='version='\''[^'\'']*'\'
 aREPLACE[$software_id]='version='\''$release'\'
 
-# microblog.pub: Update Python version?
+# microblog.pub: Update Python version
 software_id=16
+aCHECK[$software_id]='curl -sSf '\''https://api.github.com/repos/pyenv/pyenv/contents/plugins/python-build/share/python-build?ref=master'\'' | mawk -F\" '\''/^ *"name": "3\.11\.[0-9]*",$/{print $4}'\'' | sort -Vr | head -1'
+aREGEX[$software_id]='micro_python_version='\''[^'\'']*'\'
+aREPLACE[$software_id]='micro_python_version='\''$release'\'
 
 # UrBackup Server
 software_id=111
@@ -209,7 +212,7 @@ aREGEX[$software_id]='https://github.com/gogs/gogs/releases/download/.*/gogs_.*_
 
 # Gitea
 software_id=165
-aCHECK[$software_id]='curl -sSfL '\''https://api.github.com/repos/go-gitea/gitea/releases/latest'\'' | mawk -F\" "/\"browser_download_url\": \".*\/gitea-[^\"\/]*-linux-$arch\.xz\"/{print \$4}"'
+aCHECK[$software_id]='curl -sSfL '\''https://api.github.com/repos/go-gitea/gitea/releases/latest'\'' | mawk -F\" "/^ *\"browser_download_url\": \".*\/gitea-[^\"\/]*-linux-$arch\.xz\"$/{print \$4}"'
 aARCH[$software_id]='arm-6 arm64 amd64 riscv64'
 aARCH_CHECK[$software_id]='arm-7'
 aREGEX[$software_id]='https://github.com/go-gitea/gitea/releases/download/.*/gitea-.*-linux-\$arch.xz'
@@ -238,8 +241,11 @@ software_id=27
 aCHECK[$software_id]='curl -sSfL '\''https://api.github.com/repos/TasmoAdmin/TasmoAdmin/releases/latest'\'' | mawk -F\" '\''/^ *"browser_download_url": ".*\/tasmoadmin_v[^"\/]*\.tar\.gz"$/{print $4}'\'
 aREGEX[$software_id]='https://github.com/TasmoAdmin/TasmoAdmin/releases/download/v[^2].*/tasmoadmin_.*\.tar\.gz'
 
-# Home Assistant: Update Python version?
+# Home Assistant: Update Python version
 software_id=157
+aCHECK[$software_id]='curl -sSf '\''https://api.github.com/repos/pyenv/pyenv/contents/plugins/python-build/share/python-build?ref=master'\'' | mawk -F\" '\''/^ *"name": "3\.13\.[0-9]*",$/{print $4}'\'' | sort -Vr | head -1'
+aREGEX[$software_id]='ha_python_version='\''[^'\'']*'\'
+aREPLACE[$software_id]='ha_python_version='\''$release'\'
 
 # Snapcast Server (no snapweb for now): Implement distro loop?
 software_id=191
@@ -293,6 +299,12 @@ aREPLACE[$software_id]='${release/full/\$variant}'
 software_id=213
 aCHECK[$software_id]='curl -sSfL '\''https://api.github.com/repos/emersion/soju/releases/latest'\'' | mawk -F\" '\''/^ *"browser_download_url": ".*\/soju-[^"\/]*\.tar\.gz"$/{print $4}'\'
 aREGEX[$software_id]='https://github.com/emersion/soju/releases/download/.*/soju-.*\.tar\.gz'
+
+# Grafana ARMv6
+software_id=77
+aCHECK[$software_id]='curl -sSfL '\''https://api.github.com/repos/grafana/grafana/releases/latest'\'' | mawk -F\" '\''/^ *"name": "[^"]*",$/{print $4}'\'
+aREGEX[$software_id]='version='\''[^'\'']*'\'
+aREPLACE[$software_id]='version='\''$release'\'
 
 ### URL check loop ###
 
