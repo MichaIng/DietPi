@@ -129,7 +129,7 @@ aREPLACE[$software_id]='${release/8.2/\$PHP_VERSION}'
 
 # Ampache v6
 software_id=40
-aCHECK[$software_id]='curl -sSfL '\''https://api.github.com/repos/ampache/ampache/releases'\'' | mawk -F\" "/^ *\"browser_download_url\": \".*\/ampache-[0-9\.]*_all_php7.4.zip\"$/{print \$4}"'
+aCHECK[$software_id]='curl -sSfL '\''https://api.github.com/repos/ampache/ampache/releases'\'' | mawk -F\" "/^ *\"browser_download_url\": \".*\/ampache-[0-9\.]*_all_php7.4.zip\"$/{print \$4}" | head -1'
 aREGEX[$software_id]='https://github.com/ampache/ampache/releases/download/6\..*/ampache-.*_all_php\$PHP_VERSION.zip'
 aREPLACE[$software_id]='${release/7.4/\$PHP_VERSION}'
 
