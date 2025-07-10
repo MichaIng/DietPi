@@ -31,7 +31,7 @@ version=$(curl -sSf 'https://api.github.com/repos/libsdl-org/SDL/releases' | maw
 G_DIETPI-NOTIFY 2 "Building libSDL2 version \e[33m$version"
 G_EXEC cd /tmp
 G_EXEC curl -sSfLO "https://github.com/libsdl-org/SDL/releases/download/release-$version/SDL2-$version.tar.gz"
-[[ -d /tmp/SDL2-$version ]] || G_EXEC rm -R "/tmp/SDL2-$version"
+[[ -d /tmp/SDL2-$version ]] && G_EXEC rm -R "/tmp/SDL2-$version"
 G_EXEC tar xf "SDL2-$version.tar.gz"
 G_EXEC rm "SDL2-$version.tar.gz"
 G_EXEC cd "SDL2-$version"
@@ -47,7 +47,7 @@ version=$(curl -sSf 'https://api.github.com/repos/libsdl-org/SDL_image/releases'
 G_DIETPI-NOTIFY 2 "Building libSDL2_image version \e[33m$version"
 G_EXEC cd /tmp
 G_EXEC curl -sSfLO "https://github.com/libsdl-org/SDL_image/releases/download/release-$version/SDL2_image-$version.tar.gz"
-[[ -d /tmp/SDL2_image-$version ]] || G_EXEC rm -R "/tmp/SDL2_image-$version"
+[[ -d /tmp/SDL2_image-$version ]] && G_EXEC rm -R "/tmp/SDL2_image-$version"
 G_EXEC tar xf "SDL2_image-$version.tar.gz"
 G_EXEC rm "SDL2_image-$version.tar.gz"
 G_EXEC cd "SDL2_image-$version"
@@ -62,7 +62,7 @@ version=$(curl -sSf 'https://api.github.com/repos/libsdl-org/SDL_ttf/releases' |
 G_DIETPI-NOTIFY 2 "Building libSDL2_ttf version \e[33m$version"
 G_EXEC cd /tmp
 G_EXEC curl -sSfLO "https://github.com/libsdl-org/SDL_ttf/releases/download/release-$version/SDL2_ttf-$version.tar.gz"
-[[ -d /tmp/SDL2_ttf-$version ]] || G_EXEC rm -R "/tmp/SDL2_ttf-$version"
+[[ -d /tmp/SDL2_ttf-$version ]] && G_EXEC rm -R "/tmp/SDL2_ttf-$version"
 G_EXEC tar xf "SDL2_ttf-$version.tar.gz"
 G_EXEC rm "SDL2_ttf-$version.tar.gz"
 G_EXEC cd "SDL2_ttf-$version"
