@@ -4,8 +4,8 @@
 
 # APT dependencies
 # - kbd: For "chvt" used in systemd service
-adeps_build=('autoconf' 'make' 'cmake' 'g++' 'pkg-config' 'libdrm-dev' 'libgbm-dev' 'libudev-dev' 'libxml2-dev' 'libpng-dev' 'libfreetype6-dev' 'libflac-dev' 'libmpg123-dev' 'libmpeg2-4-dev' 'libasound2-dev' 'libserialport-dev' 'libportmidi-dev' 'libenet-dev' 'kbd')
-adeps=('libdrm2' 'libgl1-mesa-dri' 'libgbm1' 'libegl1' 'libudev1' 'libxml2' 'libpng16-16' 'libfreetype6' 'libmpg123-0' 'libmpeg2-4' 'libasound2' 'libserialport0' 'libportmidi0' 'libenet7' 'kbd')
+adeps_build=('autoconf' 'make' 'cmake' 'g++' 'pkg-config' 'libdrm-dev' 'libgbm-dev' 'libudev-dev' 'libxml2-dev' 'libpng-dev' 'libfreetype6-dev' 'libflac-dev' 'libmpg123-dev' 'libmpeg2-4-dev' 'libasound2-dev' 'libserialport-dev' 'libportmidi-dev' 'libenet-dev' 'libpcap0.8-dev' 'kbd')
+adeps=('libdrm2' 'libgl1-mesa-dri' 'libgbm1' 'libegl1' 'libudev1' 'libxml2' 'libpng16-16' 'libfreetype6' 'libmpg123-0' 'libmpeg2-4' 'libasound2' 'libserialport0' 'libportmidi0' 'libenet7' 'libpcap0.8' 'kbd')
 case $G_DISTRO in
 	6) adeps+=('libflac8');;
 	7) adeps+=('libflac12');;
