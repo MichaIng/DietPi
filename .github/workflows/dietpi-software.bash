@@ -341,7 +341,7 @@ then
 	# shellcheck disable=SC2016
 	G_EXEC sed --follow-symlinks -i '/# Start DietPi-Software/a\G_EXEC sed --follow-symlinks -i '\''s|dietpi.com/downloads/binaries/$G_DISTRO_NAME/|dietpi.com/downloads/binaries/$G_DISTRO_NAME/testing/|'\'' /boot/dietpi/dietpi-software' rootfs/boot/dietpi/dietpi-login
 	# shellcheck disable=SC2016
-	G_EXEC sed --follow-symlinks -i '/# Start DietPi-Software/a\G_EXEC sed --follow-symlinks -Ei '\''s@G_AGI "?(amiberry|amiberry-lite|gmediarender|shairport-sync\\$airplay2|squeezelite|vaultwarden|ympd)"?@Download_Install "https://dietpi.com/downloads/binaries/$G_DISTRO_NAME/\\1""_$G_HW_ARCH_NAME.deb"@'\'' /boot/dietpi/dietpi-software' rootfs/boot/dietpi/dietpi-login
+	G_EXEC sed --follow-symlinks -i '/# Start DietPi-Software/a\G_EXEC sed --follow-symlinks -Ei '\''s@G_AGI "?(amiberry|amiberry-lite|gmediarender|gzdoom|shairport-sync\\$airplay2|squeezelite|vaultwarden|ympd)"?@Download_Install "https://dietpi.com/downloads/binaries/$G_DISTRO_NAME/\\1""_$G_HW_ARCH_NAME.deb"@'\'' /boot/dietpi/dietpi-software' rootfs/boot/dietpi/dietpi-login
 	G_CONFIG_INJECT 'SOFTWARE_DIETPI_DASHBOARD_VERSION=' 'SOFTWARE_DIETPI_DASHBOARD_VERSION=Nightly' rootfs/boot/dietpi.txt
 fi
 
