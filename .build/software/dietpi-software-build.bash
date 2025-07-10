@@ -161,6 +161,7 @@ G_EXEC rm rootfs/root/.ssh/known_hosts
 cat << _EOF_ > rootfs/boot/Automation_Custom_Script.sh || Error_Exit 'Failed to generate Automation_Custom_Script.sh'
 #!/bin/dash
 echo '[ INFO ] Running $NAME build script ...'
+[ '$GH_TOKEN' ] && export GH_TOKEN='$GH_TOKEN'
 bash -c "\$(curl -sSf 'https://raw.githubusercontent.com/$G_GITOWNER/DietPi/$G_GITBRANCH/.build/software/$NAME/build.bash')"
 mkdir -v /output && mv -v /tmp/*.$EXT /output
 systemctl start poweroff.target
