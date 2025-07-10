@@ -13,7 +13,7 @@ case $G_DISTRO in
 	*) G_DIETPI-NOTIFY 1 "Unsupported distro version: $G_DISTRO_NAME (ID=$G_DISTRO)"; exit 1;;
 esac
 # - Graphics rendering flags and deps
-(( $G_HW_ARCH == 10 )) && opengl_flags=('--disable-video-opengles2' '--enable-video-opengl') adeps_build+=('libgl-dev') adeps+=('libgl1') || opengl_flags=('--enable-video-opengles2' '--disable-video-opengl') adeps_build+=('libgles-dev') adeps+=('libgles2')
+(( $G_HW_ARCH == 10 )) && opengl_flags=('--disable-video-opengles2' '--enable-video-opengl') adeps_build+=('libgl-dev' 'libegl1') adeps+=('libgl1') || opengl_flags=('--enable-video-opengles2' '--disable-video-opengl') adeps_build+=('libgles-dev') adeps+=('libgles2')
 
 G_AGUP
 G_AGDUG "${adeps_build[@]}"
