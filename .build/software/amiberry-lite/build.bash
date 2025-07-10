@@ -3,7 +3,7 @@
 . /boot/dietpi/func/dietpi-globals || exit 1
 
 # Apply GitHub token if set
-local header=()
+header=()
 [[ $GH_TOKEN ]] && header=('-H' "Authorization: token $GH_TOKEN")
 
 # APT dependencies

@@ -158,6 +158,7 @@ G_EXEC sed --follow-symlinks -i 's|Prompt_on_Failure$|{ journalctl -n 50; ss -tu
 G_EXEC rm rootfs/root/.ssh/known_hosts
 
 # Automated build
+# shellcheck disable=SC2154
 cat << _EOF_ > rootfs/boot/Automation_Custom_Script.sh || Error_Exit 'Failed to generate Automation_Custom_Script.sh'
 #!/bin/dash
 echo '[ INFO ] Running $NAME build script ...'
