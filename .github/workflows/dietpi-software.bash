@@ -329,8 +329,6 @@ then
 	G_EXEC curl -sSfo keyring.deb 'https://archive.raspberrypi.com/debian/pool/main/r/raspberrypi-archive-keyring/raspberrypi-archive-keyring_2021.1.1+rpt1_all.deb'
 	G_EXEC dpkg --root=rootfs -i keyring.deb
 	G_EXEC rm keyring.deb
-	# Enforce Debian Trixie FFmpeg packages over RPi repo ones
-	[[ $DISTRO == 'trixie' ]] && G_EXEC eval 'echo -e '\''Package: src:ffmpeg\nPin: origin archive.raspberrypi.com\nPin-Priority: -1'\'' > /etc/apt/preferences.d/dietpi-ffmpeg'
 	# sysctl cannot succeed in containers. It is skipped with G_HW_MODEL=75, but here we changed that ID. Run the command, so we see it in logs, but do not abort as it fails.
 	G_EXEC sed --follow-symlinks -i '/# Start DietPi-Software/a\sed -i '\''/^[[:blank:]]*G_EXEC sysctl /s/G_EXEC sysctl /G_EXEC_NOHALT=1 G_EXEC sysctl /'\'' /boot/dietpi/dietpi-software' rootfs/boot/dietpi/dietpi-login
 fi
