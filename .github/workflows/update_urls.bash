@@ -53,7 +53,7 @@ aREPLACE[$software_id]='version='\''$release'\'
 
 # microblog.pub: Update Python version
 software_id=16
-aCHECK[$software_id]='curl -sSf '\''https://api.github.com/repos/pyenv/pyenv/contents/plugins/python-build/share/python-build?ref=master'\'' | mawk -F\" '\''/^ *"name": "3\.11\.[0-9]*",$/{print $4}'\'' | sort -Vr | head -1'
+aCHECK[$software_id]='curl -sSfL '\''https://api.github.com/repos/pyenv/pyenv/contents/plugins/python-build/share/python-build?ref=master'\'' | mawk -F\" '\''/^ *"name": "3\.11\.[0-9]*",$/{print $4}'\'' | sort -Vr | head -1'
 aREGEX[$software_id]='micro_python_version='\''[^'\'']*'\'
 aREPLACE[$software_id]='micro_python_version='\''$release'\'
 
@@ -99,7 +99,7 @@ aREGEX[$software_id]='https://www.haproxy.org/download/.*/src/haproxy-.*.tar.gz'
 
 # Lyrion Music Server
 software_id=35
-aCHECK[$software_id]='curl -sSf '\''https://raw.githubusercontent.com/LMS-Community/lms-server-repository/master/stable.xml'\'' | grep -om1 "https://[^\"]*_$arch.deb"'
+aCHECK[$software_id]='curl -sSfL '\''https://raw.githubusercontent.com/LMS-Community/lms-server-repository/master/stable.xml'\'' | grep -om1 "https://[^\"]*_$arch.deb"'
 aARCH[$software_id]='arm amd64'
 aARCH_CHECK[$software_id]='riscv riscv64'
 aREGEX[$software_id]='https://downloads.lms-community.org/nightly/lyrionmusicserver_.*_\$arch.deb'
@@ -249,7 +249,7 @@ aREGEX[$software_id]='https://github.com/TasmoAdmin/TasmoAdmin/releases/download
 
 # Home Assistant: Update Python version
 software_id=157
-aCHECK[$software_id]='curl -sSf '\''https://api.github.com/repos/pyenv/pyenv/contents/plugins/python-build/share/python-build?ref=master'\'' | mawk -F\" '\''/^ *"name": "3\.13\.[0-9]*",$/{print $4}'\'' | sort -Vr | head -1'
+aCHECK[$software_id]='curl -sSfL '\''https://api.github.com/repos/pyenv/pyenv/contents/plugins/python-build/share/python-build?ref=master'\'' | mawk -F\" '\''/^ *"name": "3\.13\.[0-9]*",$/{print $4}'\'' | sort -Vr | head -1'
 aREGEX[$software_id]='ha_python_version='\''[^'\'']*'\'
 aREPLACE[$software_id]='ha_python_version='\''$release'\'
 
