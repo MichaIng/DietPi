@@ -2542,7 +2542,7 @@ _EOF_
 	# $2: If set, remove defaults file as well (optional)
 	Remove_SysV()
 	{
-		G_DIETPI-NOTIFY 2 "Removing obsolete SysV $1 service"
+		G_DIETPI-NOTIFY 2 "Removing obsolete $1 SysV service"
 		[[ -f '/etc/init.d/'$1 ]] && G_EXEC rm "/etc/init.d/$1"
 		G_EXEC update-rc.d "$1" remove
 		[[ $2 && -f '/etc/default/'$1 ]] && G_EXEC rm "/etc/default/$1"
@@ -5853,23 +5853,15 @@ _EOF_
 		then
 			G_DIETPI-NOTIFY 2 'Pre-configuring Unbound to avoid port binding conflicts'
 
-			# Install/update root trust anchors and hints
-			(( $G_DISTRO > 6 )) && aDEPS=('dns-root-data') # https://github.com/MichaIng/DietPi/issues/5612
-			Download_Install 'https://www.internic.net/domain/named.root' /var/lib/unbound/root.hints
-
-			# Create monthly cron job to keep root hints updated
-			echo -e '#!/bin/dash\n# Update Unbound root hints\ncurl -sSfL '\''https://www.internic.net/domain/named.root'\'' -o /var/lib/unbound/root.hints' > /etc/cron.monthly/dietpi-unbound
-			G_EXEC chmod +x /etc/cron.monthly/dietpi-unbound
-
 			# Download base configuration if it does not exist yet
 			[[ -f '/etc/unbound/unbound.conf.d/dietpi.conf' ]] || dps_index=$software_id Download_Install 'unbound.conf' /etc/unbound/unbound.conf.d/dietpi.conf
 
 			# Toggle IPv6 preference based whether there is an IPv6 default route
 			if G_GET_NET -6 -q gateway > /dev/null
 			then
-				G_CONFIG_INJECT 'do-ip6:[[:blank:]]' '	do-ip6: yes' /etc/unbound/unbound.conf.d/dietpi.conf
+				G_CONFIG_INJECT 'do-ip6:[[:blank:]]' '	do-ip6: yes' /etc/unbound/unbound.conf.d/dietpi.conf 'server:'
 			else
-				G_CONFIG_INJECT 'do-ip6:[[:blank:]]' '	do-ip6: no' /etc/unbound/unbound.conf.d/dietpi.conf
+				G_CONFIG_INJECT 'do-ip6:[[:blank:]]' '	do-ip6: no' /etc/unbound/unbound.conf.d/dietpi.conf 'server:'
 			fi
 
 			# Since IP binding might be used, start after network interfaces have been configured, not when they just start to be configured
@@ -5881,13 +5873,19 @@ _EOF_
 			then
 				G_DIETPI-NOTIFY 2 'Configuring Unbound to work for your selected AdBlocker'
 				grep '^[[:blank:]]*nameserver[[:blank:]]' /etc/resolv.conf | grep -qvE '[[:blank:]]127.0.0.1(:53)?$' || echo 'nameserver 9.9.9.9' >> /etc/resolv.conf # Failsafe
-				G_CONFIG_INJECT 'port:[[:blank:]]' '	port: 5335' /etc/unbound/unbound.conf.d/dietpi.conf
-				G_CONFIG_INJECT 'interface:[[:blank:]]' '	interface: 127.0.0.1' /etc/unbound/unbound.conf.d/dietpi.conf
+				G_CONFIG_INJECT 'port:[[:blank:]]' '	port: 5335' /etc/unbound/unbound.conf.d/dietpi.conf 'server:'
+				G_CONFIG_INJECT 'interface:[[:blank:]]' '	interface: 127.0.0.1' /etc/unbound/unbound.conf.d/dietpi.conf 'server:'
 			fi
 
+			# Reinstall: Restart to apply possible config changes
 			[[ -f '/lib/systemd/system/unbound.service' ]] && G_EXEC systemctl restart unbound
-			G_AGI unbound
-			G_EXEC systemctl --no-reload disable --now unbound-resolvconf # https://github.com/MichaIng/DietPi/issues/5133
+
+			# Disable and mask unbound-resolvconf.service: https://github.com/MichaIng/DietPi/issues/5133
+			[[ -f '/lib/systemd/system/unbound-resolvconf.service' ]] && G_EXEC systemctl --no-reload disable --now unbound-resolvconf
+			G_EXEC systemctl --no-reload mask unbound-resolvconf
+
+			G_AGI unbound dns-root-data
+			Remove_SysV unbound
 			G_EXEC systemctl enable --now unbound # Failsafe
 
 			# Pi-hole part 2
@@ -12744,6 +12742,7 @@ _EOF_
 			fi
 
 			G_AGP unbound
+			dpkg-query -s 'dns-root-data' &> /dev/null && G_EXEC apt-mark auto dns-root-data
 			[[ -d '/etc/unbound' ]] && G_EXEC rm -R /etc/unbound
 			[[ -d '/var/cache/unbound' ]] && G_EXEC rm -R /var/cache/unbound
 		fi
