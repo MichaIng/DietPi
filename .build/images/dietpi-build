@@ -58,6 +58,9 @@ ADD_DOS_PART=1
 SIGN_PASS=
 TEST_KERNEL=0
 TEST_UBOOT=0
+# initial rootfs size override. dietpi-imager will shrink it as much as possible, but the larger the initial rootfs size, the larger the resulting image.
+# See "root_size" below for per-SBC defaults, which may not work with all combinations of options, and are updated regularly.
+ROOT_SIZE=
 while (( $# ))
 do
 	case $1 in
@@ -77,6 +80,7 @@ do
 		'--sign') shift; SIGN_PASS=$1;;
 		'--test-kernel') TEST_KERNEL=1;;
 		'--test-uboot') TEST_UBOOT=1;;
+		'--root-size') shift; ROOT_SIZE=$1;;
 		*) Error_Exit "Invalid input \"$1\"";;
 	esac
 	shift
@@ -166,6 +170,7 @@ case $HW_MODEL in
 	96) iname='OrangePi4A' HW_ARCH=3 partition_start=4 root_size=1000;;
 	97) iname='OrangePiRV' HW_ARCH=11 partition_start=4 root_size=1000;;
 	98) iname='OrangePiRV2' HW_ARCH=11 partition_start=4 root_size=1000;;
+	99) iname='OrangePi3' HW_ARCH=3 partition_start=4 root_size=1000;;
 	*) Error_Exit "Invalid hardware model \"$HW_MODEL\" passed";;
 esac
 
@@ -201,13 +206,17 @@ case $PTTYPE in
 esac
 
 # Check for valid root filesystem type and set variables accordingly
-fsname='' apackages=() afs_opts=() afsck=() aresize=()
+fsname='' afspackages=() afs_opts=() afsck=() aresize=()
 case $FSTYPE in
-	'ext4') apackages+=('e2fsprogs') afs_opts=('-e' 'remount-ro') afsck=('e2fsck' '-fyD') aresize=('resize2fs');;
-	'f2fs') fsname='F2FS' apackages+=('f2fs-tools') afsck=('fsck.f2fs' '-f') aresize=('resize.f2fs'); uname -r | grep -q '-azure$' && apackages+=('linux-modules-extra-azure');;
-	'btrfs') fsname='Btrfs' apackages+=('btrfs-progs') afsck=('btrfs' 'check' '--repair') aresize=('btrfs' 'filesystem' 'resize' 'max'); ((root_size+=128));;
+	'ext4') afspackages+=('e2fsprogs') afs_opts=('-e' 'remount-ro') afsck=('e2fsck' '-fyD') aresize=('resize2fs');;
+	'f2fs') fsname='F2FS' afspackages+=('f2fs-tools') afsck=('fsck.f2fs' '-f') aresize=('resize.f2fs'); uname -r | grep -q '-azure$' && apackages+=('linux-modules-extra-azure');;
+	'btrfs') fsname='Btrfs' afspackages+=('btrfs-progs') afsck=('btrfs' 'check' '--repair') aresize=('btrfs' 'filesystem' 'resize' 'max'); ((root_size+=128));;
 	*) Error_Exit "Invalid root filesystem type \"$FSTYPE\" passed";;
 esac
+
+# Initial rootfs override
+# shellcheck disable=SC2015
+[[ $ROOT_SIZE ]] && { disable_error=1 G_CHECK_VALIDINT "$ROOT_SIZE" 1 && root_size=$ROOT_SIZE || Error_Exit "Invalid initial root size \"$ROOT_SIZE\" passed"; }
 
 # Validate target Git owner and branch
 G_CHECK_URL "https://github.com/$GITOWNER/DietPi/tree/$GITBRANCH" || Error_Exit "Failed to access Git branch \"$GITBRANCH\""
@@ -228,10 +237,10 @@ fi
 # Dependencies
 ##########################################
 # EFI or FAT boot partition
-(( $efi_size )) || [[ $boot_size -gt 0 && $boot_fstype == 'fat'* ]] && apackages+=('dosfstools')
+(( $efi_size )) || [[ $boot_size -gt 0 && $boot_fstype == 'fat'* ]] && afspackages+=('dosfstools')
 
 # Emulation support in case of incompatible architecture
-emulation=0
+emulation=0 apackages=("${afspackages[@]}")
 (( $G_HW_ARCH == $HW_ARCH || ( $G_HW_ARCH < 10 && $G_HW_ARCH > $HW_ARCH ) )) || emulation=1 apackages+=('qemu-user-static')
 
 # Virtual machine disk conversion
@@ -246,7 +255,7 @@ G_AG_CHECK_INSTALL_PREREQ --no-install-recommends parted mmdebstrap systemd-cont
 if [[ ! -f $keyring ]]
 then
 	case $keyring in
-		*'raspbian'*) url='https://archive.raspbian.org/raspbian/pool/main/r/raspbian-archive-keyring/raspbian-archive-keyring_20120528.3_all.deb';;
+		*'raspbian'*) url='https://archive.raspbian.org/raspbian/pool/main/r/raspbian-archive-keyring/raspbian-archive-keyring_20120528.4_all.deb';;
 		*) url='https://deb.debian.org/debian/pool/main/d/debian-archive-keyring/debian-archive-keyring_2025.1_all.deb';;
 	esac
 	G_EXEC curl -sSf "$url" -o /tmp/keyring.deb
@@ -362,7 +371,8 @@ then
 	G_EXEC "mkfs.$FSTYPE" "${afs_opts[@]}" "${FP_LOOP}p2"
 	G_EXEC mount "${FP_LOOP}p2" rootfs
 	fp_boot='boot'
-	[[ $HW_MODEL == [1245] ]] && fp_boot+='/firmware'
+	# RPi Bookworm: Expects /boot/firmware as mount point
+	(( $HW_MODEL < 10 && $G_DISTRO > 6 )) && fp_boot+='/firmware'
 	G_EXEC mkdir -p "rootfs/$fp_boot"
 	G_EXEC mount "${FP_LOOP}p1" "rootfs/$fp_boot"
 	G_EXEC mkdir rootfs/etc
@@ -391,8 +401,10 @@ _EOF_
 ##########################################
 # debootstrap
 ##########################################
-packages='apt,bash-completion,ca-certificates,cron,curl,fdisk,gpg,htop,iputils-ping,locales,mawk,nano,parted,procps,psmisc,sudo,systemd-sysv,tzdata,udev,wget,whiptail,'
-[[ $HW_MODEL == 75 ]] && packages+='iproute2' || packages+='console-setup,dropbear,ethtool,fake-hwclock,ifupdown,isc-dhcp-client,kmod,rfkill,systemd-timesyncd,usbutils'
+# login is not "essential" anymore since Trixie, hence "mmdebstrap --variant apt" (essential + apt) does not install it. It is still "required", hence cannot be commonly removed, but we need to install it actively once.
+packages='apt,bash-completion,ca-certificates,cron,curl,fdisk,gpg,htop,iputils-ping,locales,login,mawk,nano,parted,procps,psmisc,sudo,systemd-sysv,tzdata,udev,wget,whiptail,'
+IFS=, packages+=${afspackages[*]}; unset -v IFS
+[[ $HW_MODEL == 75 ]] && packages+=',iproute2' || packages+=',console-setup,dropbear,ethtool,fake-hwclock,ifupdown,isc-dhcp-client,kmod,rfkill,systemd-timesyncd,usbutils'
 [[ $HW_MODEL =~ ^(20|75)$ ]] || packages+=',iw,wireless-tools,wpasupplicant,wireless-regdb'
 # Add temporary tmpfs mounts to prevent certain files created by debootstrap being written to disk
 # - tmpfs mounts have 1777 mode by default.
@@ -449,8 +461,7 @@ cat << _EOF_ > rootfs/etc/rc.local
 #!/bin/dash
 {
 infocmp "\$TERM" > /dev/null 2>&1 || { echo "[ WARN ] Unsupported TERM=\"\$TERM\", switching to TERM=\"dumb\""; export TERM=dumb; }
-echo '[ INFO ] Running DietPi-Installer...'
-export GITOWNER='$GITOWNER' GITBRANCH='$GITBRANCH' HW_MODEL='$HW_MODEL' IMAGE_CREATOR=0 PREIMAGE_INFO=0 WIFI_REQUIRED=1 DISTRO_TARGET=$DISTRO TEST_KERNEL=$TEST_KERNEL TEST_UBOOT=$TEST_UBOOT
+export GITOWNER='$GITOWNER' GITBRANCH='$GITBRANCH' HW_MODEL='$HW_MODEL' IMAGE_CREATOR=0 PREIMAGE_INFO=0 WIFI_REQUIRED=1 DISTRO_TARGET=$DISTRO TEST_KERNEL=$TEST_KERNEL TEST_UBOOT=$TEST_UBOOT TMPDIR='/tmp'
 echo '[ INFO ] Running DietPi-Installer for $G_GITOWNER/$G_GITBRANCH'
 bash -c "\$(curl -sSf 'https://raw.githubusercontent.com/$G_GITOWNER/DietPi/$G_GITBRANCH/.build/images/dietpi-installer')" || { echo '[FAILED] DietPi-Installer failed, shutting down ...'; journalctl -n 25; df -h; free -h; systemctl start poweroff.target; exit 1; }
 > /success

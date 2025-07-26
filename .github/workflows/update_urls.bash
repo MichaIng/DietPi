@@ -15,10 +15,10 @@ Exit_Error()
 # NoMachine: Check for riscv64?
 software_id=30
 
-# phpBB
+# phpBB: temporarily disabled since Cloudflare blocks all non-browser requests
 software_id=54
-aCHECK[$software_id]='curl -sSfL '\''https://www.phpbb.com/downloads/'\'' | grep -o '\''https://download\.phpbb\.com/pub/release/.*/.*/phpBB-.*\.tar\.bz2'\'
-aREGEX[$software_id]='https://download\.phpbb\.com/pub/release/.*/.*/phpBB-.*\.tar\.bz2'
+#aCHECK[$software_id]='curl -sSfL '\''https://www.phpbb.com/downloads/'\'' | grep -o '\''https://download\.phpbb\.com/pub/release/.*/.*/phpBB-.*\.tar\.bz2'\'
+#aREGEX[$software_id]='https://download\.phpbb\.com/pub/release/.*/.*/phpBB-.*\.tar\.bz2'
 
 # phpMyAdmin
 software_id=90
@@ -51,8 +51,11 @@ aCHECK[$software_id]='curl -sSfL '\''https://dist.ipfs.io/go-ipfs/versions'\'' |
 aREGEX[$software_id]='version='\''[^'\'']*'\'
 aREPLACE[$software_id]='version='\''$release'\'
 
-# microblog.pub: Update Python version?
+# microblog.pub: Update Python version
 software_id=16
+aCHECK[$software_id]='curl -sSfL '\''https://api.github.com/repos/pyenv/pyenv/contents/plugins/python-build/share/python-build?ref=master'\'' | mawk -F\" '\''/^ *"name": "3\.11\.[0-9]*",$/{print $4}'\'' | sort -Vr | head -1'
+aREGEX[$software_id]='micro_python_version='\''[^'\'']*'\'
+aREPLACE[$software_id]='micro_python_version='\''$release'\'
 
 # UrBackup Server
 software_id=111
@@ -96,7 +99,7 @@ aREGEX[$software_id]='https://www.haproxy.org/download/.*/src/haproxy-.*.tar.gz'
 
 # Lyrion Music Server
 software_id=35
-aCHECK[$software_id]='curl -sSf '\''https://raw.githubusercontent.com/LMS-Community/lms-server-repository/master/stable.xml'\'' | grep -om1 "https://[^\"]*_$arch.deb"'
+aCHECK[$software_id]='curl -sSfL '\''https://raw.githubusercontent.com/LMS-Community/lms-server-repository/master/stable.xml'\'' | grep -om1 "https://[^\"]*_$arch.deb"'
 aARCH[$software_id]='arm amd64'
 aARCH_CHECK[$software_id]='riscv riscv64'
 aREGEX[$software_id]='https://downloads.lms-community.org/nightly/lyrionmusicserver_.*_\$arch.deb'
@@ -118,11 +121,17 @@ aCHECK[$software_id]='curl -sSfL '\''https://sye.dk/sfpg/?latest'\'
 aREGEX[$software_id]='file='\''[^'\'']*'\'
 aREPLACE[$software_id]='file='\''$release'\'
 
-# Ampache (only latest/v7 for now)
+# Ampache v7+
 software_id=40
 aCHECK[$software_id]='curl -sSfL '\''https://api.github.com/repos/ampache/ampache/releases/latest'\'' | mawk -F\" "/^ *\"browser_download_url\": \".*\/ampache-[0-9\.]*_all_php8.2.zip\"$/{print \$4}"'
 aREGEX[$software_id]='https://github.com/ampache/ampache/releases/download/[^6].*/ampache-.*_all_php\$PHP_VERSION.zip'
 aREPLACE[$software_id]='${release/8.2/\$PHP_VERSION}'
+
+# Ampache v6
+software_id=40
+aCHECK[$software_id]='curl -sSfL '\''https://api.github.com/repos/ampache/ampache/releases'\'' | mawk -F\" "/^ *\"browser_download_url\": \".*\/ampache-[0-9\.]*_all_php7.4.zip\"$/{print \$4}" | head -1'
+aREGEX[$software_id]='https://github.com/ampache/ampache/releases/download/6\..*/ampache-.*_all_php\$PHP_VERSION.zip'
+aREPLACE[$software_id]='${release/7.4/\$PHP_VERSION}'
 
 # Baïkal (only latest/v0.10 for now)
 software_id=57
@@ -209,7 +218,7 @@ aREGEX[$software_id]='https://github.com/gogs/gogs/releases/download/.*/gogs_.*_
 
 # Gitea
 software_id=165
-aCHECK[$software_id]='curl -sSfL '\''https://api.github.com/repos/go-gitea/gitea/releases/latest'\'' | mawk -F\" "/\"browser_download_url\": \".*\/gitea-[^\"\/]*-linux-$arch\.xz\"/{print \$4}"'
+aCHECK[$software_id]='curl -sSfL '\''https://api.github.com/repos/go-gitea/gitea/releases/latest'\'' | mawk -F\" "/^ *\"browser_download_url\": \".*\/gitea-[^\"\/]*-linux-$arch\.xz\"$/{print \$4}"'
 aARCH[$software_id]='arm-6 arm64 amd64 riscv64'
 aARCH_CHECK[$software_id]='arm-7'
 aREGEX[$software_id]='https://github.com/go-gitea/gitea/releases/download/.*/gitea-.*-linux-\$arch.xz'
@@ -238,8 +247,11 @@ software_id=27
 aCHECK[$software_id]='curl -sSfL '\''https://api.github.com/repos/TasmoAdmin/TasmoAdmin/releases/latest'\'' | mawk -F\" '\''/^ *"browser_download_url": ".*\/tasmoadmin_v[^"\/]*\.tar\.gz"$/{print $4}'\'
 aREGEX[$software_id]='https://github.com/TasmoAdmin/TasmoAdmin/releases/download/v[^2].*/tasmoadmin_.*\.tar\.gz'
 
-# Home Assistant: Update Python version?
+# Home Assistant: Update Python version
 software_id=157
+aCHECK[$software_id]='curl -sSfL '\''https://api.github.com/repos/pyenv/pyenv/contents/plugins/python-build/share/python-build?ref=master'\'' | mawk -F\" '\''/^ *"name": "3\.13\.[0-9]*",$/{print $4}'\'' | sort -Vr | head -1'
+aREGEX[$software_id]='ha_python_version='\''[^'\'']*'\'
+aREPLACE[$software_id]='ha_python_version='\''$release'\'
 
 # Snapcast Server (no snapweb for now): Implement distro loop?
 software_id=191
@@ -293,6 +305,12 @@ aREPLACE[$software_id]='${release/full/\$variant}'
 software_id=213
 aCHECK[$software_id]='curl -sSfL '\''https://api.github.com/repos/emersion/soju/releases/latest'\'' | mawk -F\" '\''/^ *"browser_download_url": ".*\/soju-[^"\/]*\.tar\.gz"$/{print $4}'\'
 aREGEX[$software_id]='https://github.com/emersion/soju/releases/download/.*/soju-.*\.tar\.gz'
+
+# Grafana ARMv6
+software_id=77
+aCHECK[$software_id]='curl -sSfL '\''https://api.github.com/repos/grafana/grafana/releases/latest'\'' | mawk -F\" '\''/^ *"name": "[^"]*",$/{print $4}'\'
+aREGEX[$software_id]='version='\''[^'\'']*'\'
+aREPLACE[$software_id]='version='\''$release'\'
 
 ### URL check loop ###
 
