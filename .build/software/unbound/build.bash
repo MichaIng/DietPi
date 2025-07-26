@@ -64,6 +64,14 @@ cat << '_EOF_' > "$DIR/etc/unbound/unbound.conf" || exit 1
 include-toplevel: "/etc/unbound/unbound.conf.d/*.conf"
 _EOF_
 
+cat << '_EOF_' > "$DIR/etc/unbound/unbound.conf.d/remote-control.conf" || exit 1
+remote-control:
+  control-enable: yes
+  # by default the control interface is is 127.0.0.1 and ::1 and port 8953
+  # it is possible to use a unix socket too
+  control-interface: /run/unbound.ctl
+_EOF_
+
 cat << '_EOF_' > "$DIR/etc/unbound/unbound.conf.d/root-auto-trust-anchor-file.conf" || exit 1
 server:
     # The following line will configure unbound to perform cryptographic
