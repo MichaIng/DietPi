@@ -2459,9 +2459,6 @@ _EOF_
 			# Change web UI port to 8089 and 8489 (HTTPS) to avoid conflict with webservers and other web applications
 			G_EXEC pihole-FTL --config webserver.port 8089,8489s
 
-			# Migrate QUERY_LOGGING=false: https://github.com/pi-hole/FTL/pull/2264
-			grep -q '^QUERY_LOGGING=false$' /etc/pihole/migration_backup_v6/setupVars.conf && G_EXEC pihole-FTL --config dns.queryLogging 'false'
-
 			# Inform user about differences to stock Pi-hole installation
 			G_WHIP_MSG "[ INFO ] Pi-hole network ports changed to 8089 and 8489
 \nTo align migrated Pi-hole v6 instances with fresh installs, and avoid possible conflicts with dedicated webservers, the network ports have been changed to 8089 and 8489 (HTTPS). Your Pi-hole instance will hence be available at:
@@ -2470,7 +2467,7 @@ _EOF_
 \nThis can be changed via web UI or following console command, e.g. for ports 80 and 443 (HTTPS):
 - pihole-FTL --config webserver.port 80,443s"
 
-			# Offer to uninstall websever and PHP if no dependant is installed
+			# Offer to uninstall webserver and PHP if no dependant is installed
 			# - If only PHP or only a webserver is installed, one has been uninstalled already, and the other is assumed to be still needed for something else.
 			if grep -q '^[[:blank:]]*aSOFTWARE_INSTALL_STATE\[89\]=2' /boot/dietpi/.installed && grep -Eq '^[[:blank:]]*aSOFTWARE_INSTALL_STATE\[(83|84|85)\]=2' /boot/dietpi/.installed
 			then
@@ -2497,7 +2494,7 @@ _EOF_
 		fi
 
 		# Nextcloud
-		[[ -f '/etc/apache2/sites-available/dietpi-nextcloud.conf' ]] && G_EXEC mv "../DietPi-Update/DietPi-${G_GITBRANCH//\//-}/.conf/dps_114/apache.nexcloud.conf" /etc/apache2/sites-available/dietpi-nextcloud.conf
+		[[ -f '/etc/apache2/sites-available/dietpi-nextcloud.conf' ]] && G_EXEC mv "../DietPi-Update/DietPi-${G_GITBRANCH//\//-}/.conf/dps_114/apache.nextcloud.conf" /etc/apache2/sites-available/dietpi-nextcloud.conf
 
 		# Unbound
 		if [[ -f '/etc/unbound/unbound.conf.d/dietpi.conf' ]]
@@ -2513,6 +2510,55 @@ _EOF_
 			fi
 		fi
 		[[ -f '/etc/cron.monthly/dietpi-unbound' ]] && G_EXEC rm /etc/cron.monthly/dietpi-unbound
+
+		# Lighttpd: Buster => Bullseye migrations
+		if [[ -f '/etc/lighttpd/lighttpd.conf' ]]
+		then
+			# mod_compress has been superseded by mod_deflate
+			if grep -q '^[[:blank:]]*"mod_compress",$' /etc/lighttpd/lighttpd.conf
+			then
+				G_DIETPI-NOTIFY 2 'Bullseye upgrade detected: Migrating from mod_compress to mod_deflate'
+				G_EXEC sed --follow-symlinks -Ei '/^compress\..*=[[:blank:]]*["(].*[")]$/d' /etc/lighttpd/lighttpd.conf
+				G_EXEC sed --follow-symlinks -i '/^[[:blank:]]*"mod_compress",$/d' /etc/lighttpd/lighttpd.conf
+				G_AGI lighttpd-mod-deflate
+			fi
+
+			# Install OpenSSL module if DietPi-LetsEncrypt was used
+			if [[ -f '/etc/lighttpd/conf-available/50-dietpi-https.conf' ]] && ! dpkg-query -s 'lighttpd-mod-openssl' &> /dev/null
+			then
+				G_DIETPI-NOTIFY 2 'Bullseye upgrade detected: Installing dedicatged Lighttpd OpenSSL module'
+				G_AGI lighttpd-mod-openssl
+				grep -q '"mod_openssl"' /etc/lighttpd/conf-available/50-dietpi-https.conf || G_EXEC sed --follow-symlinks -i '1iserver.modules += ( "mod_openssl" )' /etc/lighttpd/conf-available/50-dietpi-https.conf
+			fi
+
+			# Remove obsolete socket version string from FPM module
+			if [[ -f '/etc/lighttpd/conf-available/15-fastcgi-php-fpm.conf' ]] && grep -q 'php.\..-fpm\.sock' /etc/lighttpd/conf-available/15-fastcgi-php-fpm.conf
+			then
+				G_DIETPI-NOTIFY 2 'Removing obsolete PHP FPM socket version string from Lighttpd config'
+				G_EXEC sed --follow-symlinks -i 's/php.\..-fpm\.sock/php-fpm.sock/' /etc/lighttpd/conf-available/15-fastcgi-php-fpm.conf
+			fi
+		fi
+
+		# Nginx
+		if [[ -f '/etc/nginx/nginx.conf' ]] && grep -q 'php.\..-fpm\.sock' /etc/nginx/nginx.conf
+		then
+			G_DIETPI-NOTIFY 2 'Removing obsolete PHP FPM socket version string from Nginx config'
+			G_EXEC sed --follow-symlinks -i 's/php.\..-fpm\.sock/php-fpm.sock/' /etc/nginx/nginx.conf
+		fi
+
+		# Docker Compose
+		if grep -q '^[[:blank:]]*aSOFTWARE_INSTALL_STATE\[134\]=2' /boot/dietpi/.installed
+		then
+			if command -v docker-compose > /dev/null && ! dpkg-query -s 'docker-compose-plugin' &> /dev/null
+			then
+				G_WHIP_MSG '[ INFO ] Migrating from obsolete "docker-compose" to "docker compose" plugin
+\nThe dedicated "docker-compose" application and executable is deprecated, in favor of Docker'\''s native compose plugin. We are migrating you instance to the new plugin now.
+\nNote that the command to call Docker Compose in turn changed from "docker-compose" to "docker compose", hence without the dash, but as an argument of the "docker" command.'
+				G_AGI docker-compose-plugin
+				command -v docker-compose > /dev/null && command -v pip3 > /dev/null && G_EXEC_OUTPUT=1 G_EXEC pip3 uninstall -y docker-compose # Pre-v8.2
+				[[ -f '/usr/local/bin/docker-compose' ]] && G_EXEC rm /usr/local/bin/docker-compose # Pre-v8.14
+			fi
+		fi
 	fi
 }
 
