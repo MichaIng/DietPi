@@ -3002,10 +3002,12 @@ unix_socket_directories = '/run/postgresql'" > "$i/00dietpi.conf"
 
 		if To_Install 196 # Java JRE
 		then
-			# Trixie without openHAB
-			if (( $G_DISTRO > 7 && ${aSOFTWARE_INSTALL_STATE[206]} < 1 ))
+			# Trixie
+			if (( $G_DISTRO > 7 ))
 			then
 				local version=25
+				# openHAB does not support Java 25 yet
+				(( ${aSOFTWARE_INSTALL_STATE[206]} < 1 )) && version=21
 
 			# Bullseye/Bookworm
 			else
@@ -3018,10 +3020,12 @@ unix_socket_directories = '/run/postgresql'" > "$i/00dietpi.conf"
 
 		if To_Install 8 # Java JDK
 		then
-			# Trixie without openHAB
-			if (( $G_DISTRO > 7 && ${aSOFTWARE_INSTALL_STATE[206]} < 1 ))
+			# Trixie
+			if (( $G_DISTRO > 7 ))
 			then
 				local version=25
+				# openHAB does not support Java 25 yet
+				(( ${aSOFTWARE_INSTALL_STATE[206]} < 1 )) && version=21
 
 			# Bullseye/Bookworm
 			else
@@ -3612,8 +3616,6 @@ _EOF_
 
 			G_BACKUP_FP /etc/nginx/nginx.conf
 			dps_index=$software_id Download_Install 'nginx.conf' /etc/nginx/nginx.conf
-			# Adjust socket name to PHP version
-			G_EXEC sed --follow-symlinks -i "s#/run/php/php.*-fpm.sock#/run/php/php$PHP_VERSION-fpm.sock#g" /etc/nginx/nginx.conf
 
 			# CPU core count
 			G_EXEC sed --follow-symlinks -i "/worker_processes/c\worker_processes $G_HW_CPU_CORES;" /etc/nginx/nginx.conf
@@ -3632,43 +3634,11 @@ _EOF_
 
 		if To_Install 84 lighttpd # Lighttpd
 		then
-			# Migrate existing configs in case of distro upgrades
-			local deflate=() openssl=()
-			if [[ -f '/etc/lighttpd/lighttpd.conf' ]]
-			then
-				# mod_compress has been superseded by mod_deflate
-				if grep -q '^[[:blank:]]*"mod_compress",$' /etc/lighttpd/lighttpd.conf
-				then
-					G_DIETPI-NOTIFY 2 'Bullseye upgrade detected: Migrating from mod_compress to mod_deflate'
-					G_EXEC sed --follow-symlinks -Ei '/^compress\..*=[[:blank:]]*["(].*[")]$/d' /etc/lighttpd/lighttpd.conf
-					G_EXEC sed --follow-symlinks -i '/^[[:blank:]]*"mod_compress",$/d' /etc/lighttpd/lighttpd.conf
-					deflate=('lighttpd-mod-deflate')
-				fi
-
-				# Install OpenSSL module if DietPi-LetsEncrypt was used
-				if [[ -f '/boot/dietpi/.dietpi-letsencrypt' ]]
-				then
-					G_DIETPI-NOTIFY 2 'DietPi-LetsEncrypt usage detected: Installing OpenSSL module'
-					openssl=('lighttpd-mod-openssl')
-					[[ -f '/etc/lighttpd/conf-available/50-dietpi-https.conf' ]] && ! grep -q '"mod_openssl"' /etc/lighttpd/conf-available/50-dietpi-https.conf && G_EXEC sed --follow-symlinks -i '1iserver.modules += ( "mod_openssl" )' /etc/lighttpd/conf-available/50-dietpi-https.conf
-				fi
-
-				# Remove obsolete socket version string from FPM module
-				if [[ -f '/etc/lighttpd/conf-available/15-fastcgi-php-fpm.conf' ]] && grep -q 'php.\..-fpm\.sock' /etc/lighttpd/conf-available/15-fastcgi-php-fpm.conf
-				then
-					G_DIETPI-NOTIFY 2 'Bullseye upgrade detected: Removing obsolete socket version string from FPM module'
-					G_EXEC sed --follow-symlinks -i 's/php.\..-fpm\.sock/php-fpm.sock/' /etc/lighttpd/conf-available/15-fastcgi-php-fpm.conf
-				fi
-			fi
-
 			# perl is required for lighty-enable-mod, but is a recommendation only
-			G_AGI lighttpd perl "${deflate[@]}" "${openssl[@]}"
+			G_AGI lighttpd perl
 			G_EXEC systemctl stop lighttpd
 
 			Remove_SysV lighttpd
-
-			# Enable mod_deflate if flagged
-			[[ ${deflate[0]} && ! -f '/etc/lighttpd/conf-enabled/20-deflate.conf' ]] && G_EXEC lighty-enable-mod deflate
 
 			# Change webroot from /var/www/html to /var/www
 			G_CONFIG_INJECT 'server.document-root' 'server.document-root = "/var/www"' /etc/lighttpd/lighttpd.conf
@@ -3858,12 +3828,6 @@ sudo sysctl -p /etc/sysctl.d/98-dietpi-redis.conf'
 			# - APCu
 			G_CONFIG_INJECT 'apc.shm_size[[:blank:]=]' "apc.shm_size=$(( $cache_size / 2 ))M" "$target_php_ini"
 			G_CONFIG_INJECT 'apc.ttl[[:blank:]=]' 'apc.ttl=259200' "$target_php_ini" # 3 days
-
-			# Enable all available PHP modules
-			local amodules=()
-			mapfile -t amodules < <(find "/etc/php/$PHP_VERSION/mods-available" -type f -name '*.ini' -printf '%f\n')
-			G_EXEC phpenmod "${amodules[@]%.ini}"
-			unset -v amodules
 
 			# Apache: Enable PHP-FPM
 			command -v a2enconf > /dev/null && { G_EXEC a2enmod proxy_fcgi setenvif; G_EXEC a2enconf "php$PHP_VERSION-fpm"; }
@@ -5888,6 +5852,9 @@ _EOF_
 			Remove_SysV unbound
 			G_EXEC systemctl enable --now unbound # Failsafe
 
+			# Prevent resolvconf from disabling Unbound's exclusive recursive resolving or DoT by adding upstream resolvers of the host to Unbound's forward zone: https://salsa.debian.org/dns-team/unbound/-/blob/master/debian/resolvconf-forwards
+			[[ -f '/etc/resolvconf/update.d/unbound' ]] && G_EXEC chmod -x /etc/resolvconf/update.d/unbound
+
 			# Pi-hole part 2
 			if (( ${aSOFTWARE_INSTALL_STATE[93]} == 2 ))
 			then
@@ -6235,7 +6202,8 @@ _EOF_
 			# .NET dependency: https://github.com/dotnet/docs/blob/main/docs/core/install/linux-debian.md#dependencies
 			case $G_DISTRO in
 				6) aDEPS=('libicu67');;
-				*) aDEPS=('libicu72');;
+				7) aDEPS=('libicu72');;
+				*) aDEPS=('libicu76');;
 			esac
 
 			case $G_HW_ARCH in
@@ -7282,9 +7250,9 @@ _EOF_
 			# Fix Dropbear filter for STDOUT logging since Bookworm: https://github.com/fail2ban/fail2ban/pull/3597
 			[[ -f '/etc/fail2ban/filter.d/dropbear.local' ]] || G_EXEC curl -sSf 'https://raw.githubusercontent.com/fail2ban/fail2ban/master/config/filter.d/dropbear.conf' -o /etc/fail2ban/filter.d/dropbear.local
 
-			# Trixie: Temporarily install python3-setuptools explicitly, until post-v1.1.0 release removes the need: https://packages.debian.org/trixie/fail2ban. python3-systemd on the other hand has become hard package dependency since Trixie.
+			# Trixie: python3-systemd has become hard package dependency
 			local deps=()
-			(( $G_DISTRO > 7 )) && deps=('python3-setuptools') || deps=('python3-systemd')
+			(( $G_DISTRO > 7 )) || deps=('python3-systemd')
 			G_AGI "${deps[@]}" fail2ban
 			Remove_SysV fail2ban 1
 
@@ -9479,7 +9447,8 @@ _EOF_
 				# - .NET: https://github.com/dotnet/docs/blob/main/docs/core/install/linux-debian.md#dependencies
 				case $G_DISTRO in
 					6) aDEPS+=('libicu67');;
-					*) aDEPS+=('libicu72');;
+					7) aDEPS+=('libicu72');;
+					*) aDEPS+=('libicu76');;
 				esac
 
 				# Download
@@ -9565,7 +9534,8 @@ _EOF_
 			then
 				case $G_DISTRO in
 					6) aDEPS+=('libicu67');;
-					*) aDEPS+=('libicu72');;
+					7) aDEPS+=('libicu72');;
+					*) aDEPS+=('libicu76');;
 				esac
 			fi
 
@@ -9652,7 +9622,8 @@ _EOF_
 			then
 				case $G_DISTRO in
 					6) aDEPS+=('libicu67');;
-					*) aDEPS+=('libicu72');;
+					7) aDEPS+=('libicu72');;
+					*) aDEPS+=('libicu76');;
 				esac
 			fi
 
@@ -9865,7 +9836,8 @@ _EOF_
 			then
 				case $G_DISTRO in
 					6) aDEPS=('libicu67');;
-					*) aDEPS=('libicu72');;
+					7) aDEPS=('libicu72');;
+					*) aDEPS=('libicu76');;
 				esac
 			fi
 
@@ -9995,7 +9967,8 @@ _EOF_
 			# .NET dependency: https://github.com/dotnet/docs/blob/main/docs/core/install/linux-debian.md#dependencies
 			case $G_DISTRO in
 				6) aDEPS=('libicu67');;
-				*) aDEPS=('libicu72');;
+				7) aDEPS=('libicu72');;
+				*) aDEPS=('libicu76');;
 			esac
 
 			# Download
@@ -10063,7 +10036,8 @@ _EOF_
 			# .NET dependency: https://github.com/dotnet/docs/blob/main/docs/core/install/linux-debian.md#dependencies
 			case $G_DISTRO in
 				6) aDEPS=('libicu67');;
-				*) aDEPS=('libicu72');;
+				7) aDEPS=('libicu72');;
+				*) aDEPS=('libicu76');;
 			esac
 
 			# Download
@@ -10243,7 +10217,8 @@ _EOF_
 			# .NET dependency: https://github.com/dotnet/docs/blob/main/docs/core/install/linux-debian.md#dependencies
 			case $G_DISTRO in
 				6) aDEPS=('libicu67');;
-				*) aDEPS=('libicu72');;
+				7) aDEPS=('libicu72');;
+				*) aDEPS=('libicu76');;
 			esac
 
 			# Reinstall: Skip download and install, advice to use internal updater
@@ -10312,7 +10287,7 @@ _EOF_
 
 				G_AGI steam
 
-				#Reapply GPU drivers to install required i386 items
+				# Reapply GPU drivers to install required i386 items
 				local gpu_current=$(sed -n '/^[[:blank:]]*CONFIG_GPU_DRIVER=/{s/^[^=]*=//p;q}' /boot/dietpi.txt)
 				/boot/dietpi/func/dietpi-set_hardware gpudriver "$gpu_current"
 
@@ -10438,8 +10413,6 @@ _EOF_
 
 		if To_Install 134 # Docker Compose
 		then
-			[[ -f '/usr/local/bin/docker-compose' ]] && G_EXEC rm /usr/local/bin/docker-compose # Pre-v8.14
-			command -v docker-compose > /dev/null && command -v pip3 > /dev/null && G_EXEC_OUTPUT=1 G_EXEC pip3 uninstall -y docker-compose # Pre-v8.2
 			G_AGI docker-compose-plugin
 		fi
 

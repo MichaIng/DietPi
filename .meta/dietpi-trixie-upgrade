@@ -1,0 +1,174 @@
+#!/bin/bash
+{
+# Import DietPi-Globals ---------------------------------------------------------------
+. /boot/dietpi/func/dietpi-globals
+readonly G_PROGRAM_NAME='dietpi-trixie-upgrade'
+[[ $G_DISTRO == [78] ]] || { G_DIETPI-NOTIFY 1 'You must run a Debian Bookworm system to run this script!'; exit 1; }
+(( $G_HW_ARCH < 3 )) && dpkg --compare-versions "$(uname -r)" lt-nl 5.6 && { G_DIETPI-NOTIFY 1 '32-bit systems with Linux older than 5.6 cannot run Debian Trixie, due to missing time64 syscall support. Please upgrade your kernel to run this scritp!'; exit 1; }
+G_CHECK_ROOT_USER
+G_CHECK_ROOTFS_RW
+G_INIT
+# Import DietPi-Globals ---------------------------------------------------------------
+
+# Warn about incompatible installed software titles
+alist=()
+while read -r id
+do
+	case $id in
+		148) (( $G_HW_ARCH == 1 )) && alist+=('myMPD');;
+		207) (( $G_HW_ARCH < 3 )) && alist+=('Moonlight (CLI)');;
+		208) (( $G_HW_ARCH < 3 )) && alist+=('Moonlight (GUI)');;
+		*) :;;
+	esac
+done < <(sed -nE 's/^aSOFTWARE_INSTALL_STATE\[([0-9]+)\]=2$/\1/p' /boot/dietpi/.installed)
+(( ! ${#alist[@]} )) || G_WHIP_BUTTON_OK_TEXT='Continue' G_WHIP_BUTTON_CANCEL_TEXT='Exit' G_WHIP_YESNO "[WARNING] Incompatible software titles found
+\nThe following installed software titles are not yet compatible with Debian Trixie on your system:
+${alist[*]}
+\nDo you want to continue regardless?\n" || exit 0
+
+# Offer a backup before doing any changes to the system
+G_PROMPT_BACKUP
+
+G_DIETPI-NOTIFY 2 'Upgrading APT packages to latest versions provided by Debian Bookworm'
+/boot/dietpi/dietpi-services stop
+G_AGUP
+G_AGDUG
+G_AGA
+
+G_CHECK_KERNEL || { G_WHIP_YESNO '[ INFO ] Reboot required
+\nYour system needs to be rebootet to apply a recent kernel upgrade. Please do this first and then rerun this script to proceed with the Trixie upgrade.
+\nShall we reboot your system now?' && reboot; exit 0; }
+
+G_DIETPI-NOTIFY 2 'Updating DietPi to latest version'
+/boot/dietpi/dietpi-update 1
+
+mapfile -t apackages < <(apt-mark showhold)
+[[ ${apackages[0]} ]] && G_EXEC_DESC='Unholding all packages' G_EXEC apt-mark unhold "${apackages[@]}"
+unset -v apackages
+
+G_DIETPI-NOTIFY 2 'Migrating package lists to Trixie suite'
+G_EXEC sed --follow-symlinks -i 's/bookworm/trixie/g' /etc/apt/sources.list
+# Remove obsolete lists, including those obsoleted with Bookworm
+G_EXEC rm -f /etc/apt/sources.list.d/dietpi-{mono,mosquitto,wsdd}.list /etc/apt/trusted.gpg.d/dietpi-{mono,mosquitto,wsdd}.gpg
+for i in /etc/apt/sources.list.d/*.list
+do
+	[[ $i == '/etc/apt/sources.list.d/*.list' ]] && break
+	G_EXEC sed --follow-symlinks -i 's/bookworm/trixie/g' "$i"
+	G_EXEC sed --follow-symlinks -i '/download\.opensuse\.org/s/Debian_12/Debian_Testing/' "$i"
+	G_EXEC sed --follow-symlinks -i '/download\.opensuse\.org/s/Raspbian_12/Raspbian_Testing/' "$i"
+done
+
+G_DIETPI-NOTIFY 2 'Reverting some package lists to Bookworm which have no Trixie suite (yet)'
+[[ -f '/etc/apt/sources.list.d/dietpi-mympd.list' ]] && G_EXEC sed --follow-symlinks -i 's/Raspbian_Testing/Raspbian_12/g' /etc/apt/sources.list.d/dietpi-mympd.list
+[[ -f '/etc/apt/sources.list.d/dietpi-mopidy.list' ]] && G_EXEC sed --follow-symlinks -i 's/trixie/bookworm/g' /etc/apt/sources.list.d/dietpi-mopidy.list
+[[ -f '/etc/apt/sources.list.d/dietpi-influxdb.list' ]] && G_EXEC sed --follow-symlinks -i 's/trixie/bookworm/g' /etc/apt/sources.list.d/dietpi-influxdb.list
+[[ -f '/etc/apt/sources.list.d/dietpi-zerotier.list' ]] && G_EXEC sed --follow-symlinks -i 's/trixie/bookworm/g' /etc/apt/sources.list.d/dietpi-zerotier.list
+[[ $G_RASPBIAN == 1 && -f '/etc/apt/sources.list.d/dietpi-docker.list' ]] && G_EXEC sed --follow-symlinks -i 's/trixie/bookworm/g' /etc/apt/sources.list.d/dietpi-docker.list
+[[ -f '/etc/apt/sources.list.d/dietpi-moonlight.list' ]] && G_EXEC sed --follow-symlinks -i 's/trixie/bookworm/g' /etc/apt/sources.list.d/dietpi-moonlight.list
+[[ -f '/etc/apt/sources.list.d/dietpi-moonlight-qt.list' ]] && G_EXEC sed --follow-symlinks -i 's/trixie/bookworm/g' /etc/apt/sources.list.d/dietpi-moonlight-qt.list
+
+G_DIETPI-NOTIFY 2 'Removing obsolete APT pinnings' # including those obsoleted with Bullseye and Bookworm
+G_EXEC rm -f /etc/apt/preferences.d/dietpi-{php,openssl,xrdp,wireguard,kodi,openhab}
+
+G_DIETPI-NOTIFY 2 'Applying the actual upgrade to Debian Trixie'
+/boot/dietpi/dietpi-services stop
+G_AGUP
+G_AGUG
+G_AGDUG
+
+/boot/dietpi/func/dietpi-obtain_hw_model
+. /boot/dietpi/.hw_model
+
+G_DIETPI-NOTIFY 0 'Congratulations, you are now on Trixie:'
+head -4 /etc/os-release
+echo
+read -rp 'Next, some migrations are done for all software to run nicely on Trixie. This can include dietpi-software reinstalls. Press ENTER to continue or CTRL+C to abort ...'
+
+G_DIETPI-NOTIFY 2 'Running post upgrade migrations'
+/boot/dietpi/dietpi-services stop
+
+# We do not want G_AGP to purge the old kernel package yet!
+eval "$(declare -f G_AGP | sed 's/autopurge/purge/')"
+
+if dpkg-query -s 'p7zip' &> /dev/null || dpkg-query -s 'p7zip-full' &> /dev/null
+then
+	G_DIETPI-NOTIFY 2 'Migrating from obsolete p7zip to modern 7zip'
+	G_AGI 7zip
+	G_AGP p7zip p7zip-full
+fi
+
+if apt-mark showmanual | grep -q 'libicu72'
+then
+	G_DIETPI-NOTIFY 2 'Migrating from libicu72 to libicu76'
+	G_AGI libicu76
+	G_EXEC apt-mark auto libicu72
+fi
+
+# Java migration: openHAB does not support Java 25 yet
+version=25
+dpkg-query -s 'openhab' &> /dev/null && version=21
+if dpkg-query -s 'openjdk-17-jdk-headless' &> /dev/null
+then
+	G_DIETPI-NOTIFY 2 "Migrating from Java JDK from 17 to $version"
+	G_AGI "openjdk-$version-jdk-headless"
+	G_AGP openjdk-17-jdk-headless
+fi
+if dpkg-query -s 'openjdk-17-jre-headless' &> /dev/null
+then
+	G_DIETPI-NOTIFY 2 "Migrating from Java JRE from 17 to $version"
+	G_AGI "openjdk-$version-jre-headless"
+	G_AGP openjdk-17-jre-headless
+fi
+
+# Purge PHP 8.2 packages, obsolete after PHP 8.2 install
+G_AGP '*php8.2*'
+
+# Remove obsolete PHP 8.2 configs and Python 3.11 modules, obsolete after Python 3.13 install
+G_EXEC rm -Rf /etc/php/8.2 /usr/local/lib/python3.11 /usr/local/bin/pip3*
+
+# PostgreSQL migration
+if dpkg-query -s 'postgresql' &> /dev/null
+then
+	G_DIETPI-NOTIFY 2 'Migrating PostgreSQL 15 clusters to v17'
+	mapfile -t clusters < <(pg_lsclusters | mawk '$1 == "15" {print $2}')
+	skipped=0
+	G_EXEC systemctl start postgresql
+	for cluster in "${clusters[@]}"
+	do
+		[[ -d /var/lib/postgresql/17/$cluster ]] && { G_DIETPI-NOTIFY 2 "PostgreSQL 17 cluster \"$cluster\" exists already, skipping migration"; skipped=1; continue; }
+		G_DIETPI-NOTIFY 2 "Found PostgreSQL 15 cluster \"$cluster\", starting migration ...";
+		G_EXEC pg_upgradecluster 15 "$cluster"
+		G_EXEC pg_dropcluster 15 "$cluster"
+	done
+	if (( $skipped ))
+	then
+		G_WHIP_MSG '[ INFO ] PostgreSQL 15 to v17 migration incomplete
+\nFor some PostgreSQL 15 cluster(s), the respective v17 cluster existed already, and the migration has hence been skipped.
+\nPlease review those left clusters and in case remove or migrate them to v17 manually. PostgreSQL 15 is kept installed for that. Once all needed clusters have been migrated, purge PostgreSQL 15 with the following commands:
+\nsudo rm /etc/apt/apt.conf.d/02autoremove-postgresql
+sudo apt autopurge'
+	else
+		G_EXEC rm /etc/apt/apt.conf.d/02autoremove-postgresql
+	fi
+fi
+
+# Reinstalls:
+# - PHP and all PHP applications which require additional PHP modules: 38 40 89 114 143 210
+# - Python and all Python applications which require pip installs: 118 125 130 136 139 141 153 155 180
+# - UnRAR on non-ARMv6 Raspbian systems, for which we host the respective Debian packages on our server
+extra=()
+(( $G_HW_MODEL != 1 )) && (( $G_RASPBIAN )) && extra+=(170)
+# - PaperMC for latest version: 181
+G_PROMPT_BACKUP_DISABLED=1 /boot/dietpi/dietpi-software reinstall 38 40 89 114 118 125 130 136 139 141 143 153 155 180 181 210 "${extra[@]}"
+
+cat << '_EOF_' > /etc/bashrc.d/zz-dietpi-autopurge.bash
+{
+(( $UID )) && return 0
+G_DIETPI-NOTIFY 2 'Autoremoving leftover packages from Trixie upgrade...'
+G_EXEC_NOHALT=1 G_EXEC rm /etc/bashrc.d/zz-dietpi-autopurge.bash
+G_AGA
+}
+_EOF_
+
+G_WHIP_YESNO 'All finished!\n\nWe highly recommend to reboot, shall we reboot now?\n\nNB: To have obsolete leftover packages autoremoved, login as root user once after reboot, or run "sudo apt autopurge".' && reboot
+}
