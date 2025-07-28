@@ -3405,44 +3405,62 @@ Signed-By: /etc/apt/keyrings/dietpi-adoptium.asc"
 				G_WHIP_MENU 'Please choose which version of DietPi-Dashboard should be installed.' && version=$G_WHIP_RETURNED_VALUE
 			fi
 
-			# Backend only? Currently not functional!
-			local backend= #$(sed -n '/^[[:blank:]]*SOFTWARE_DIETPI_DASHBOARD_BACKEND=/{s/^[^=]*=//p;q}' /boot/dietpi.txt)
-			#[[ $backend == 1 ]] && G_WHIP_DEFAULT_ITEM='Yes' || G_WHIP_DEFAULT_ITEM='No'
-			#G_WHIP_BUTTON_OK_TEXT='Yes' G_WHIP_BUTTON_CANCEL_TEXT='No'
-			#G_WHIP_YESNO 'Would you like to install the backend only, to view on another DietPi-Dashboard instance?' && backend='-backend' || backend=
+			# Determine which components to install
+			local components=('backend')
+			local backend=$(sed -n '/^[[:blank:]]*SOFTWARE_DIETPI_DASHBOARD_BACKEND=/{s/^[^=]*=//p;q}' /boot/dietpi.txt)
 
-			# Download binary and set config URL
-			local config_url
+			[[ $backend == 1 ]] && G_WHIP_DEFAULT_ITEM='Backend' || G_WHIP_DEFAULT_ITEM='Frontend'
+			G_WHIP_MENU_ARRAY=(
+				'Backend' ': Install the DietPi-Dashboard backend only.'
+				'Frontend' ': Install both the DietPi-Dashboard backend and webserver.'
+			)
+			G_WHIP_MENU 'DietPi-Dashboard has two components, a frontend and a backend.
+The frontend is required to be installed on at least one node to view the webpage. The backend must be installed on all nodes.
+Which components would you like to install?'
+
+			[[ $G_WHIP_RETURNED_VALUE == 'Frontend' ]] && components+=('frontend')
+
+			# Download binary/binaries
 			if [[ $version == 'Nightly' ]]
 			then
 				command -v unzip > /dev/null || G_AGI unzip # G_CHECK_URL => HEAD request on nightly.link always returns 404, hence prevent Download_Install() from doing concurrent unzip install, which forks the download into background and runs G_CHECK_URL first.
-				Download_Install "https://nightly.link/ravenclaw900/DietPi-Dashboard/workflows/push-build/main/dietpi-dashboard-$G_HW_ARCH_NAME$backend.zip" /opt/dietpi-dashboard
-				config_url='https://raw.githubusercontent.com/ravenclaw900/DietPi-Dashboard/main/config.toml'
+
+				for component in "${components[@]}"; do
+					Download_Install "https://nightly.link/ravenclaw900/DietPi-Dashboard/workflows/push-build/rework-2/dietpi-dashboard-$G_HW_ARCH_NAME-$component.zip" "/opt/dietpi-dashboard/$component"
+				done
 			else
-				Download_Install "$(curl -sSfL 'https://api.github.com/repos/ravenclaw900/dietpi-dashboard/releases/latest' | mawk -F\" "/^ *\"browser_download_url\": \".*dietpi-dashboard-$G_HW_ARCH_NAME$backend\"$/{print \$4}")" /opt/dietpi-dashboard/dietpi-dashboard
-				config_url="https://raw.githubusercontent.com/ravenclaw900/DietPi-Dashboard/$(curl -sSfL 'https://api.github.com/repos/ravenclaw900/dietpi-dashboard/releases/latest' | mawk -F\" '/^ *"tag_name": "[^"]*",$/{print $4}')/config.toml"
+				# NB: Will not work until 0.7.0 is released
+				local manifest = "$(curl -sSfL 'https://api.github.com/repos/ravenclaw900/dietpi-dashboard/releases/latest')"
+				for component in "${components[@]}"; do
+					Download_Install "$(echo $manifest | mawk -F\" "/^ *\"browser_download_url\": \".*dietpi-dashboard-$G_HW_ARCH_NAME-$component\"$/{print \$4}")" "/opt/dietpi-dashboard/$component"
+				done
 			fi
-			G_EXEC chmod +x /opt/dietpi-dashboard/dietpi-dashboard
 
-			# Config
-			if [[ ! -f '/opt/dietpi-dashboard/config.toml' ]]
+			# Services
+			if [[ $G_WHIP_RETURNED_VALUE == 'Frontend' ]]
 			then
-				G_EXEC curl -sSfL "$config_url" -o /opt/dietpi-dashboard/config.toml
-				# Enable password protection with global software password by default
-				G_CONFIG_INJECT 'pass[[:blank:]]' 'pass = true' /opt/dietpi-dashboard/config.toml
-				G_CONFIG_INJECT 'hash[[:blank:]]' "hash = \"$(echo -n "$GLOBAL_PW" | sha512sum | mawk '{print $1}')\"" /opt/dietpi-dashboard/config.toml
-				G_CONFIG_INJECT 'secret[[:blank:]]' "secret = \"$(openssl rand -hex 32)\"" /opt/dietpi-dashboard/config.toml
-			fi
-
-			# Service
-			cat << '_EOF_' > /etc/systemd/system/dietpi-dashboard.service
+				cat << '_EOF_' > /etc/systemd/system/dietpi-dashboard-server.service
 [Unit]
-Description=Web Dashboard (DietPi)
+Description=Dashboard Web Server (DietPi)
 Wants=network-online.target
 After=network-online.target
 
 [Service]
-ExecStart=/opt/dietpi-dashboard/dietpi-dashboard
+ExecStart=/opt/dietpi-dashboard/frontend
+
+[Install]
+WantedBy=multi-user.target
+_EOF_
+			fi
+
+			cat << '_EOF_' > /etc/systemd/system/dietpi-dashboard-backend.service
+[Unit]
+Description=Dashboard Backend (DietPi)
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+ExecStart=/opt/dietpi-dashboard/backend
 # TTY input is required for web terminal input
 StandardInput=tty
 TTYPath=/dev/tty42
@@ -3451,8 +3469,22 @@ StandardOutput=journal
 [Install]
 WantedBy=multi-user.target
 _EOF_
-			# Service needs to be started manually as dietpi-services must not control it to prevent it from stopping during software installs done via dashboard itself.
-			aSTART_SERVICES+=('dietpi-dashboard')
+
+			for component in "${components[@]}"; do
+				G_EXEC chmod +x "/opt/dietpi-dashboard/$component"
+				Create_Config "/opt/dietpi-dashboard/config-$component.toml" "dietpi-dashboard-$component"
+				aSTART_SERVICES+=("dietpi-dashboard-$component")
+			done
+
+			# Config
+			# if [[ ! -f '/opt/dietpi-dashboard/config.toml' ]]
+			# then
+			# 	G_EXEC curl -sSfL "$config_url" -o /opt/dietpi-dashboard/config.toml
+			# 	# Enable password protection with global software password by default
+			# 	G_CONFIG_INJECT 'pass[[:blank:]]' 'pass = true' /opt/dietpi-dashboard/config.toml
+			# 	G_CONFIG_INJECT 'hash[[:blank:]]' "hash = \"$(echo -n "$GLOBAL_PW" | sha512sum | mawk '{print $1}')\"" /opt/dietpi-dashboard/config.toml
+			# 	G_CONFIG_INJECT 'secret[[:blank:]]' "secret = \"$(openssl rand -hex 32)\"" /opt/dietpi-dashboard/config.toml
+			# fi
 		fi
 
 		if To_Install 99 node_exporter # Prometheus Node Exporter
@@ -12836,7 +12868,8 @@ _EOF_
 
 		if To_Uninstall 200 # DietPi-Dashboard
 		then
-			Remove_Service dietpi-dashboard
+			Remove_Service dietpi-dashboard-backend
+			Remove_Service dietpi-dashboard-frontend
 			[[ -d '/opt/dietpi-dashboard' ]] && G_EXEC rm -R /opt/dietpi-dashboard
 		fi
 
