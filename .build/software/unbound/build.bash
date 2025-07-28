@@ -7,8 +7,8 @@ header=()
 [[ $GH_TOKEN ]] && header=('-H' "Authorization: token $GH_TOKEN")
 
 # APT dependencies
-adeps_build=('make' 'gcc' 'bison' 'flex' 'file' 'pkg-config' 'libc6-dev' 'libsystemd-dev' 'libssl-dev' 'libevent-dev' 'libexpat1-dev' 'libhiredis-dev' 'libnghttp2-dev' 'protobuf-c-compiler' 'libprotobuf-c-dev')
-adeps=('libc6' 'libsystemd0' 'libevent-2.1-7' 'libnghttp2-14' 'libprotobuf-c1')
+adeps_build=('make' 'gcc' 'bison' 'flex' 'file' 'pkg-config' 'libc6-dev' 'libsystemd-dev' 'libssl-dev' 'libevent-dev' 'libexpat1-dev' 'libhiredis-dev' 'libnghttp2-dev' 'protobuf-c-compiler' 'libprotobuf-c-dev' 'dns-root-data')
+adeps=('libc6' 'libsystemd0' 'libevent-2.1-7' 'libnghttp2-14' 'libprotobuf-c1' 'dns-root-data')
 (( $G_DISTRO > 6 )) && adeps+=('libssl3') || adeps+=('libssl1.1')
 (( $G_DISTRO > 7 )) && adeps+=('libhiredis1.1.0') || adeps+=('libhiredis0.14')
 
@@ -225,13 +225,20 @@ then
 	mkdir -pm 0755 /var/lib/$NAME
 	chown -R '$NAME:$NAME' /var/lib/$NAME
 
-	echo 'Configuring $PRETTY systemd service ...'
+	if [ ! -f '/var/lib/$NAME/root.key' ]
+	then
+		echo 'Bootstrapping root trust anchors /var/lib/$NAME/root.key from /usr/share/dns/root.key ...'
+		setpriv --reuid=$NAME --regid=$NAME --clear-groups cp -v /usr/share/dns/root.key /var/lib/$NAME/
+	fi
+
 	if [ -f '/etc/init.d/$NAME' ]
 	then
 		echo 'Removing obsolete $PRETTY SysV service'
 		rm /etc/init.d/$NAME
 		update-rc.d $NAME remove
 	fi
+
+	echo 'Configuring $PRETTY systemd service ...'
 	systemctl unmask $NAME
 	systemctl --no-reload enable $NAME
 	systemctl restart $NAME
