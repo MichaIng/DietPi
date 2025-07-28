@@ -44,9 +44,6 @@ suffix=${old_version#*-dietpi}
 # - Env var to show version in web UI: https://github.com/MichaIng/DietPi/issues/7364
 # - Skip suffix to avoid latest main commit to be shown as latest server version in web UI: https://github.com/dani-garcia/vaultwarden/discussions/4936#discussioncomment-12211305
 export VW_VERSION=$version
-# - web vault
-wv_url=$(curl -sSf 'https://api.github.com/repos/dani-garcia/bw_web_builds/releases/latest' | mawk -F\" '/^ *"browser_download_url": ".*\.tar\.gz"$/{print $4}')
-[[ $wv_url ]] || { G_DIETPI-NOTIFY 1 'No latest web vault version found, aborting ...'; exit 1; }
 
 # Build
 G_DIETPI-NOTIFY 2 "Building vaultwarden version \e[33m$version"
@@ -55,6 +52,9 @@ G_EXEC curl -sSfLO "https://github.com/dani-garcia/vaultwarden/archive/$version.
 G_EXEC tar xf "$version.tar.gz"
 G_EXEC rm "$version.tar.gz"
 G_EXEC cd "vaultwarden-$version"
+# - obtain web vault version
+wv_version=$(mawk -F\" '/^vault_version:/{print $2}' docker/DockerSettings.yaml)
+[[ $wv_version ]] || { G_DIETPI-NOTIFY 1 'No web vault version found, aborting ...'; exit 1; }
 # - Use new "release-micro" profile, which fixes 32-bit ARM builds and produces smaller binaries: https://github.com/dani-garcia/vaultwarden/issues/4320
 PROFILE='release-micro'
 G_EXEC_OUTPUT=1 G_EXEC cargo build --features sqlite --profile "$PROFILE"
@@ -74,8 +74,8 @@ G_EXEC mv "vaultwarden-$version/.env.template" "$DIR/mnt/dietpi_userdata/vaultwa
 G_EXEC rm -R "vaultwarden-$version"
 
 # - web vault
-G_DIETPI-NOTIFY 2 "Downloading web vault from \e[33m$wv_url"
-G_EXEC curl -sSfLo archive.tar.gz "$wv_url"
+G_DIETPI-NOTIFY 2 "Downloading web vault version \e[33m$wv_version"
+G_EXEC curl -sSfLo archive.tar.gz "https://github.com/dani-garcia/bw_web_builds/releases/download/$wv_version/bw_web_$wv_version.tar.gz"
 G_EXEC tar xf archive.tar.gz --one-top-level="$DIR/mnt/dietpi_userdata/vaultwarden"
 G_EXEC rm archive.tar.gz
 

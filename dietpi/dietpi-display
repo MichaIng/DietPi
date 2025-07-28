@@ -29,15 +29,6 @@ Read_Settings()
 	then
 		read -ra cmdline < /boot/cmdline.txt
 
-	# x86_64
-	elif (( $G_HW_ARCH == 10 ))
-	then
-		for i in /etc/default/grub.d/dietpi-display_*.cfg
-		do
-			[[ $i == '/etc/default/grub.d/dietpi-display_*.cfg' ]] && break
-			cmdline+=("$(grep -o 'video=[^ "]*' "$i")")
-		done
-
 	# U-Boot environment file
 	elif [[ $uenv ]]
 	then
@@ -47,6 +38,14 @@ Read_Settings()
 	elif [[ -f '/boot/extlinux/extlinux.conf' ]]
 	then
 		read -ra cmdline < <(sed -n '/^[[:blank:]]*append[[:blank:]]/{s/^[[:blank:]]*append[[:blank:]]*//p;q}' /boot/extlinux/extlinux.conf)
+
+	# GRUB
+	else
+		for i in /etc/default/grub.d/dietpi-display_*.cfg
+		do
+			[[ $i == '/etc/default/grub.d/dietpi-display_*.cfg' ]] && break
+			cmdline+=("$(grep -o 'video=[^ "]*' "$i")")
+		done
 	fi
 
 	local arg display params=() param
@@ -88,10 +87,12 @@ Detect_Displays()
 		[[ $connected == 'connected' ]] || continue
 		display=${i##/sys/class/drm/card?-}
 		display=${display%/modes}
+		# Complement current settings only if not read or set before
 		[[ $DISPLAY ]] || DISPLAY=$display
-		read -r aENABLED["$display"] < "${i%modes}enabled"
-		# First line contains the current mode
-		read -r aMODE["$display"] < "$i"
+		[[ ${aENABLED["$display"]} ]] || read -r aENABLED["$display"] < "${i%modes}enabled"
+		# First line contains the current mode in most cases (inconsistent)
+		[[ ${aMODE["$display"]} ]] || read -r aMODE["$display"] < "$i"
+		[[ ${aROTATION["$display"]} ]] && continue
 		aROTATION["$display"]=0
 		# Read current rotation from cmdline
 		read -ra cmdline < /proc/cmdline
@@ -166,19 +167,10 @@ Apply_Settings()
 	[[ ${aENABLED[$DISPLAY]} == 'disabled' ]] && arg+='d'
 	[[ ${aROTATION[$DISPLAY]} == 0 ]] || arg+=",rotate=${aROTATION[$DISPLAY]}"
 
-	# U-Boot environment file
-	local i uenv
-	for i in /boot/{dietpi,armbian}Env.txt
-	do
-		[[ -f $i ]] || continue
-		uenv=$i
-		break
-	done
-
 	# RPi
 	if (( $G_HW_MODEL < 10 ))
 	then
-		local cmdline=()
+		local cmdline=() i
 		read -ra cmdline < /boot/cmdline.txt
 		for i in "${!cmdline[@]}"
 		do
@@ -188,17 +180,14 @@ Apply_Settings()
 		done
 		[[ ${cmdline[i]} == "video=$DISPLAY:"* ]] || cmdline+=("$arg")
 		G_EXEC eval "echo '${cmdline[*]}' > /boot/cmdline.txt"
-
-	# x86_64
-	elif (( $G_HW_ARCH == 10 ))
-	then
-		G_EXEC eval "echo 'GRUB_CMDLINE_LINUX_DEFAULT=\"\$GRUB_CMDLINE_LINUX_DEFAULT $arg\"' > /etc/default/grub.d/dietpi-display_$DISPLAY.cfg"
-		G_EXEC update-grub
+	fi
 
 	# U-Boot environment file
-	elif [[ $uenv ]]
-	then
-		local cmdline=()
+	local uenv
+	for uenv in /boot/{dietpi,armbian}Env.txt
+	do
+		[[ -f $uenv ]] || continue
+		local cmdline=() i
 		read -ra cmdline < <(sed -n '/^[[:blank:]]*extraargs=/{s/^[^=]*=//p;q}' "$uenv")
 		for i in "${!cmdline[@]}"
 		do
@@ -208,11 +197,12 @@ Apply_Settings()
 		done
 		[[ ${cmdline[i]} == "video=$DISPLAY:"* ]] || cmdline+=("$arg")
 		G_CONFIG_INJECT 'extraargs=' "extraargs=${cmdline[*]}" "$uenv"
+	done
 
 	# extlinux
-	elif [[ -f '/boot/extlinux/extlinux.conf' ]]
+	if [[ -f '/boot/extlinux/extlinux.conf' ]]
 	then
-		local cmdline=()
+		local cmdline=() i
 		read -ra cmdline < <(sed -n '/^[[:blank:]]*append[[:blank:]]/{s/^[[:blank:]]*append[[:blank:]]*//p;q}' /boot/extlinux/extlinux.conf)
 		for i in "${!cmdline[@]}"
 		do
@@ -222,9 +212,21 @@ Apply_Settings()
 		done
 		[[ ${cmdline[i]} == "video=$DISPLAY:"* ]] || cmdline+=("$arg")
 		G_CONFIG_INJECT 'append[[:blank:]]' "append ${cmdline[*]}" /boot/extlinux/extlinux.conf
-	else
+	fi
+
+	# GRUB
+	if command -v update-grub > /dev/null
+	then
+		G_EXEC eval "echo 'GRUB_CMDLINE_LINUX_DEFAULT=\"\$GRUB_CMDLINE_LINUX_DEFAULT $arg\"' > /etc/default/grub.d/dietpi-display_$DISPLAY.cfg"
+		G_EXEC update-grub
+
+	elif [[ ! ${cmdline[*]} ]]
+	then
 		G_WHIP_MSG '[FAILED] Boot configuration not found
-\nWe could not find a boot configuration to apply kernel command-line arguments. So far, this script supports /boot/dietpiEnv.txt, /boot/armbianEnv.txt, and /boot/extlinux/extlinux.conf.
+\nWe could not find a boot configuration to apply kernel command-line arguments. So far, this script supports:
+- /boot/cmdline.txt on Raspberry Pi
+- /boot/dietpiEnv.txt, /boot/armbianEnv.txt, and /boot/extlinux/extlinux.conf
+- GRUB
 \nPlease open an issue at our GitHub page or forum:
 - https://github.com/MichaIng/DietPi/issues
 - https://dietpi.com/forum/'
@@ -235,19 +237,10 @@ Apply_Settings()
 # Reset settings for selected display
 Reset_Settings()
 {
-	# U-Boot environment file
-	local i uenv
-	for i in /boot/{dietpi,armbian}Env.txt
-	do
-		[[ -f $i ]] || continue
-		uenv=$i
-		break
-	done
-
 	# RPi
 	if (( $G_HW_MODEL < 10 ))
 	then
-		local cmdline=()
+		local cmdline=() i
 		read -ra cmdline < /boot/cmdline.txt
 		for i in "${!cmdline[@]}"
 		do
@@ -256,18 +249,14 @@ Reset_Settings()
 			break
 		done
 		G_EXEC eval "echo '${cmdline[*]}' > /boot/cmdline.txt"
-
-	# x86_64
-	elif (( $G_HW_ARCH == 10 ))
-	then
-		[[ -f "/etc/default/grub.d/dietpi-display_$DISPLAY.cfg" ]] || return 0
-		G_EXEC rm "/etc/default/grub.d/dietpi-display_$DISPLAY.cfg"
-		G_EXEC update-grub
+	fi
 
 	# U-Boot environment file
-	elif [[ $uenv ]]
-	then
-		local cmdline=()
+	local uenv
+	for uenv in /boot/{dietpi,armbian}Env.txt
+	do
+		[[ -f $uenv ]] || continue
+		local cmdline=() i
 		read -ra cmdline < <(sed -n '/^[[:blank:]]*extraargs=/{s/^[^=]*=//p;q}' "$uenv")
 		for i in "${!cmdline[@]}"
 		do
@@ -276,11 +265,12 @@ Reset_Settings()
 			break
 		done
 		G_CONFIG_INJECT 'extraargs=' "extraargs=${cmdline[*]}" "$uenv"
+	done
 
 	# extlinux
-	elif [[ -f '/boot/extlinux/extlinux.conf' ]]
+	if [[ -f '/boot/extlinux/extlinux.conf' ]]
 	then
-		local cmdline=()
+		local cmdline=() i
 		read -ra cmdline < <(sed -n '/^[[:blank:]]*append[[:blank:]]/{s/^[[:blank:]]*append[[:blank:]]*//p;q}' /boot/extlinux/extlinux.conf)
 		for i in "${!cmdline[@]}"
 		do
@@ -289,9 +279,22 @@ Reset_Settings()
 			break
 		done
 		G_CONFIG_INJECT 'append[[:blank:]]' "append ${cmdline[*]}" /boot/extlinux/extlinux.conf
-	else
+	fi
+
+	# GRUB
+	if command -v update-grub > /dev/null
+	then
+		[[ -f "/etc/default/grub.d/dietpi-display_$DISPLAY.cfg" ]] || return 0
+		G_EXEC rm "/etc/default/grub.d/dietpi-display_$DISPLAY.cfg"
+		G_EXEC update-grub
+
+	elif [[ ! ${cmdline[*]} ]]
+	then
 		G_WHIP_MSG '[FAILED] Boot configuration not found
-\nWe could not find a boot configuration to apply kernel command-line arguments. So far, this script supports /boot/dietpiEnv.txt, /boot/armbianEnv.txt, and /boot/extlinux/extlinux.conf.
+\nWe could not find a boot configuration to apply kernel command-line arguments. So far, this script supports:
+- /boot/cmdline.txt on Raspberry Pi
+- /boot/dietpiEnv.txt, /boot/armbianEnv.txt, and /boot/extlinux/extlinux.conf
+- GRUB
 \nPlease open an issue at our GitHub page or forum:
 - https://github.com/MichaIng/DietPi/issues
 - https://dietpi.com/forum/'

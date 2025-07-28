@@ -2,10 +2,14 @@
 {
 . /boot/dietpi/func/dietpi-globals || exit 1
 
+# Apply GitHub token if set
+header=()
+[[ $GH_TOKEN ]] && header=('-H' "Authorization: token $GH_TOKEN")
+
 # APT dependencies
 # - kbd: For "chvt" used in systemd service
-adeps_build=('autoconf' 'make' 'cmake' 'g++' 'pkg-config' 'libdrm-dev' 'libgbm-dev' 'libudev-dev' 'libxml2-dev' 'libpng-dev' 'libfreetype6-dev' 'libflac-dev' 'libmpg123-dev' 'libmpeg2-4-dev' 'libasound2-dev' 'libserialport-dev' 'libportmidi-dev' 'libenet-dev' 'kbd')
-adeps=('libdrm2' 'libgl1-mesa-dri' 'libgbm1' 'libegl1' 'libudev1' 'libxml2' 'libpng16-16' 'libfreetype6' 'libmpg123-0' 'libmpeg2-4' 'libasound2' 'libserialport0' 'libportmidi0' 'libenet7' 'kbd')
+adeps_build=('autoconf' 'make' 'cmake' 'g++' 'pkg-config' 'libdrm-dev' 'libgbm-dev' 'libudev-dev' 'libxml2-dev' 'libpng-dev' 'libfreetype6-dev' 'libflac-dev' 'libmpg123-dev' 'libmpeg2-4-dev' 'libasound2-dev' 'libserialport-dev' 'libportmidi-dev' 'libenet-dev' 'libpcap0.8-dev' 'libzstd-dev' 'kbd')
+adeps=('libdrm2' 'libgl1-mesa-dri' 'libgbm1' 'libegl1' 'libudev1' 'libxml2' 'libpng16-16' 'libfreetype6' 'libmpg123-0' 'libmpeg2-4' 'libasound2' 'libserialport0' 'libportmidi0' 'libenet7' 'libpcap0.8' 'libzstd1' 'kbd')
 case $G_DISTRO in
 	6) adeps+=('libflac8');;
 	7) adeps+=('libflac12');;
@@ -13,7 +17,7 @@ case $G_DISTRO in
 	*) G_DIETPI-NOTIFY 1 "Unsupported distro version: $G_DISTRO_NAME (ID=$G_DISTRO)"; exit 1;;
 esac
 # - Graphics rendering flags and deps
-(( $G_HW_ARCH == 10 )) && opengl_flags=('--disable-video-opengles2' '--enable-video-opengl') adeps_build+=('libgl-dev') adeps+=('libgl1') || opengl_flags=('--enable-video-opengles2' '--disable-video-opengl') adeps_build+=('libgles-dev') adeps+=('libgles2')
+(( $G_HW_ARCH == 10 )) && opengl_flags=('--disable-video-opengles2' '--enable-video-opengl') adeps_build+=('libgl-dev' 'libegl1') adeps+=('libgl1') || opengl_flags=('--enable-video-opengles2' '--disable-video-opengl') adeps_build+=('libgles-dev') adeps+=('libgles2')
 
 G_AGUP
 G_AGDUG "${adeps_build[@]}"
@@ -26,12 +30,12 @@ do
 done
 
 # Build libSDL2
-version=$(curl -sSf 'https://api.github.com/repos/libsdl-org/SDL/releases' | mawk -F\" '/^ *"name": "2./{print $4}' | head -1)
+version=$(curl -sSf "${header[@]}" 'https://api.github.com/repos/libsdl-org/SDL/releases' | mawk -F\" '/^ *"name": "2./{print $4}' | head -1)
 [[ $version ]] || { G_DIETPI-NOTIFY 1 'No latest LibSDL2 version found, aborting ...'; exit 1; }
 G_DIETPI-NOTIFY 2 "Building libSDL2 version \e[33m$version"
 G_EXEC cd /tmp
 G_EXEC curl -sSfLO "https://github.com/libsdl-org/SDL/releases/download/release-$version/SDL2-$version.tar.gz"
-[[ -d /tmp/SDL2-$version ]] || G_EXEC rm -R "/tmp/SDL2-$version"
+[[ -d /tmp/SDL2-$version ]] && G_EXEC rm -R "/tmp/SDL2-$version"
 G_EXEC tar xf "SDL2-$version.tar.gz"
 G_EXEC rm "SDL2-$version.tar.gz"
 G_EXEC cd "SDL2-$version"
@@ -42,12 +46,12 @@ G_EXEC rm -f /usr/local/lib/libSDL2[.-]*
 G_EXEC_OUTPUT=1 G_EXEC make install
 
 # Build libSDL2_image
-version=$(curl -sSf 'https://api.github.com/repos/libsdl-org/SDL_image/releases' | mawk -F\" '/^ *"name": "2./{print $4}' | head -1)
+version=$(curl -sSf "${header[@]}" 'https://api.github.com/repos/libsdl-org/SDL_image/releases' | mawk -F\" '/^ *"name": "2./{print $4}' | head -1)
 [[ $version ]] || { G_DIETPI-NOTIFY 1 'No latest libSDL2_image version found, aborting ...'; exit 1; }
 G_DIETPI-NOTIFY 2 "Building libSDL2_image version \e[33m$version"
 G_EXEC cd /tmp
 G_EXEC curl -sSfLO "https://github.com/libsdl-org/SDL_image/releases/download/release-$version/SDL2_image-$version.tar.gz"
-[[ -d /tmp/SDL2_image-$version ]] || G_EXEC rm -R "/tmp/SDL2_image-$version"
+[[ -d /tmp/SDL2_image-$version ]] && G_EXEC rm -R "/tmp/SDL2_image-$version"
 G_EXEC tar xf "SDL2_image-$version.tar.gz"
 G_EXEC rm "SDL2_image-$version.tar.gz"
 G_EXEC cd "SDL2_image-$version"
@@ -58,11 +62,11 @@ G_EXEC rm -f /usr/local/lib/libSDL2_image[.-]*
 G_EXEC_OUTPUT=1 G_EXEC make install
 
 # Build libSDL2_ttf
-version=$(curl -sSf 'https://api.github.com/repos/libsdl-org/SDL_ttf/releases' | mawk -F\" '/^ *"name": "2./{print $4}' | head -1)
+version=$(curl -sSf "${header[@]}" 'https://api.github.com/repos/libsdl-org/SDL_ttf/releases' | mawk -F\" '/^ *"name": "2./{print $4}' | head -1)
 G_DIETPI-NOTIFY 2 "Building libSDL2_ttf version \e[33m$version"
 G_EXEC cd /tmp
 G_EXEC curl -sSfLO "https://github.com/libsdl-org/SDL_ttf/releases/download/release-$version/SDL2_ttf-$version.tar.gz"
-[[ -d /tmp/SDL2_ttf-$version ]] || G_EXEC rm -R "/tmp/SDL2_ttf-$version"
+[[ -d /tmp/SDL2_ttf-$version ]] && G_EXEC rm -R "/tmp/SDL2_ttf-$version"
 G_EXEC tar xf "SDL2_ttf-$version.tar.gz"
 G_EXEC rm "SDL2_ttf-$version.tar.gz"
 G_EXEC cd "SDL2_ttf-$version"
@@ -73,7 +77,7 @@ G_EXEC rm -f /usr/local/lib/libSDL2_ttf[.-]*
 G_EXEC_OUTPUT=1 G_EXEC make install
 
 # Build Amiberry
-version=$(curl -sSf 'https://api.github.com/repos/BlitterStudio/amiberry/releases/latest' | mawk -F\" '/^  "tag_name"/{print $4}')
+version=$(curl -sSf "${header[@]}" 'https://api.github.com/repos/BlitterStudio/amiberry/releases/latest' | mawk -F\" '/^  "tag_name"/{print $4}')
 [[ $version ]] || { G_DIETPI-NOTIFY 1 'No latest Amiberry version found, aborting ...'; exit 1; }
 version=${version#v}
 G_DIETPI-NOTIFY 2 "Building Amiberry version \e[33m$version"

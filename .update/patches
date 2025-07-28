@@ -1736,16 +1736,6 @@ _EOF_
 
 Patch_9_7()
 {
-	# Odroid C1: Migrate to edge kernel, which fixes USB: https://github.com/MichaIng/DietPi/issues/7089
-	if (( $G_HW_MODEL == 10 )) && dpkg-query -s 'linux-image-current-meson' &> /dev/null && ! dpkg-query -s 'linux-image-edge-meson' &> /dev/null && ! dpkg-query -s 'linux-image-legacy-meson' &> /dev/null
-	then
-		G_DIETPI-NOTIFY 2 'Migrating to edge kernel to fix USB support'
-		G_AGI linux-{image,dtb}-edge-meson linux-u-boot-odroidc1-edge
-		dpkg-query -s 'linux-headers-edge-meson' &> /dev/null && G_AGI linux-headers-edge-meson
-		dpkg-query -s 'linux-libc-dev-edge-meson' &> /dev/null && G_AGI linux-libc-dev-edge-meson
-		G_AGP linux-{image,dtb,headers,libc-dev}-current-meson
-	fi
-
 	# Software updates, migrations and patches
 	if [[ -f '/boot/dietpi/.installed' ]]
 	then
@@ -2161,6 +2151,59 @@ _EOF_
 	# Software updates, migrations and patches
 	if [[ -f '/boot/dietpi/.installed' ]]
 	then
+		# Chromium: https://dietpi.com/forum/t/22518
+		if (( $G_DISTRO > 6 )) && [[ -f '/etc/chromium.d/dietpi' ]] && grep -q ' --use-gl=egl"' /etc/chromium.d/dietpi
+		then
+			G_DIETPI-NOTIFY 2 'Fixing Chromium hardware acceleration'
+			G_EXEC sed --follow-symlinks -i 's/ --use-gl=egl"/"/' /etc/chromium.d/dietpi
+		fi
+	fi
+}
+
+Patch_9_15()
+{
+	# Odroid C1
+	if (( $G_HW_MODEL == 10 )) && dpkg-query -s 'linux-image-edge-meson' &> /dev/null
+	then
+		G_DIETPI-NOTIFY 2 'Migrating to "current" kernel branch with Linux 6.12'
+		local packages=()
+		dpkg-query -s 'linux-headers-edge-meson' &> /dev/null && packages+=('linux-headers-current-meson')
+		dpkg-query -s 'linux-libc-dev-edge-meson' &> /dev/null && packages+=('linux-libc-dev-current-meson')
+		G_AGI linux-{image,dtb}-current-meson "${packages[@]}" linux-u-boot-odroidc1-current
+		G_AGP linux-{image,dtb,headers,libc-dev}-edge-meson linux-u-boot-odroidc1-edge
+
+	# NanoPi R5C/R6C
+	elif
+		{ (( $G_HW_MODEL == 76 )) && grep -q 'R5C' /proc/device-tree/model; } ||
+		{ (( $G_HW_MODEL == 79 )) && grep -q 'R6C' /proc/device-tree/model; }
+	then
+		# In case restore LED triggers which have been accidentally removed, which was intended for R5S/R6S only
+		if [[ ! -f '/etc/udev/rules.d/dietpi-eth-leds.rules' ]]
+		then
+			if grep -q 'R5C' /proc/device-tree/model
+			then
+				G_DIETPI-NOTIFY 2 'Restoring udev rule for NanoPi R5C Ethernet LEDs'
+				G_EXEC eval 'echo '\''ledtrig-netdev'\'' > /etc/modules-load.d/dietpi-eth-leds.conf'
+				cat << '_EOF_' > /etc/udev/rules.d/dietpi-eth-leds.rules
+SUBSYSTEM=="leds", KERNEL=="green:lan", ACTION=="add", ATTR{trigger}="netdev", ATTR{device_name}="eth0", ATTR{link}="1", ATTR{rx}="1", ATTR{tx}="1", RUN+="/bin/ip l s eth0 up", RUN+="/bin/ip l s eth0 down"
+SUBSYSTEM=="leds", KERNEL=="green:wan", ACTION=="add", ATTR{trigger}="netdev", ATTR{device_name}="eth1", ATTR{link}="1", ATTR{rx}="1", ATTR{tx}="1", RUN+="/bin/ip l s eth1 up", RUN+="/bin/ip l s eth1 down"
+SUBSYSTEM=="leds", KERNEL=="green:wlan", ACTION=="add", ATTR{trigger}="netdev", ATTR{device_name}="wlan0", ATTR{link}="1", ATTR{rx}="1", ATTR{tx}="1", RUN+="/bin/ip l s wlan0 up", RUN+="/bin/ip l s wlan0 down"
+_EOF_
+			else
+				G_DIETPI-NOTIFY 2 'Restoring udev rule for NanoPi R6C Ethernet LEDs'
+				G_EXEC eval 'echo '\''ledtrig-netdev'\'' > /etc/modules-load.d/dietpi-eth-leds.conf'
+				cat << '_EOF_' > /etc/udev/rules.d/dietpi-eth-leds.rules
+SUBSYSTEM=="leds", KERNEL=="wan_led", ACTION=="add", ATTR{trigger}="netdev", ATTR{device_name}="eth0", ATTR{link}="1", ATTR{rx}="1", ATTR{tx}="1", RUN+="/bin/ip l s eth0 up", RUN+="/bin/ip l s eth0 down"
+SUBSYSTEM=="leds", KERNEL=="lan1_led", ACTION=="add", ATTR{trigger}="netdev", ATTR{device_name}="eth1", ATTR{link}="1", ATTR{rx}="1", ATTR{tx}="1", RUN+="/bin/ip l s eth1 up", RUN+="/bin/ip l s eth1 down"
+SUBSYSTEM=="leds", KERNEL=="user_led", ACTION=="add", ATTR{trigger}="netdev", ATTR{device_name}="wlan0", ATTR{link}="1", ATTR{rx}="1", ATTR{tx}="1", RUN+="/bin/ip l s wlan0 up", RUN+="/bin/ip l s wlan0 down"
+_EOF_
+			fi
+		fi
+	fi
+
+	# Software updates, migrations and patches
+	if [[ -f '/boot/dietpi/.installed' ]]
+	then
 		# Pi-hole v6 migration
 		# - /etc/pihole/pihole.toml indicates that Pi-hole has been upgraded to v6 already.
 		# - The /var/www/pihole symlink indicates that an instance installed via dietpi-software has not been migrated yet.
@@ -2181,9 +2224,6 @@ _EOF_
 			# Change web UI port to 8089 and 8489 (HTTPS) to avoid conflict with webservers and other web applications
 			G_EXEC pihole-FTL --config webserver.port 8089,8489s
 
-			# Migrate QUERY_LOGGING=false: https://github.com/pi-hole/FTL/pull/2264
-			grep -q '^QUERY_LOGGING=false$' /etc/pihole/migration_backup_v6/setupVars.conf && G_EXEC pihole-FTL --config dns.queryLogging 'false'
-
 			# Inform user about differences to stock Pi-hole installation
 			G_WHIP_MSG "[ INFO ] Pi-hole network ports changed to 8089 and 8489
 \nTo align migrated Pi-hole v6 instances with fresh installs, and avoid possible conflicts with dedicated webservers, the network ports have been changed to 8089 and 8489 (HTTPS). Your Pi-hole instance will hence be available at:
@@ -2192,7 +2232,7 @@ _EOF_
 \nThis can be changed via web UI or following console command, e.g. for ports 80 and 443 (HTTPS):
 - pihole-FTL --config webserver.port 80,443s"
 
-			# Offer to uninstall websever and PHP if no dependant is installed
+			# Offer to uninstall webserver and PHP if no dependant is installed
 			# - If only PHP or only a webserver is installed, one has been uninstalled already, and the other is assumed to be still needed for something else.
 			if grep -q '^[[:blank:]]*aSOFTWARE_INSTALL_STATE\[89\]=2' /boot/dietpi/.installed && grep -Eq '^[[:blank:]]*aSOFTWARE_INSTALL_STATE\[(83|84|85)\]=2' /boot/dietpi/.installed
 			then
@@ -2218,11 +2258,71 @@ _EOF_
 			fi
 		fi
 
-		# Chromium: https://dietpi.com/forum/t/22518
-		if (( $G_DISTRO > 6 )) && [[ -f '/etc/chromium.d/dietpi' ]] && grep -q ' --use-gl=egl"' /etc/chromium.d/dietpi
+		# Nextcloud
+		[[ -f '/etc/apache2/sites-available/dietpi-nextcloud.conf' ]] && G_EXEC mv "../DietPi-Update/DietPi-${G_GITBRANCH//\//-}/.conf/dps_114/apache.nextcloud.conf" /etc/apache2/sites-available/dietpi-nextcloud.conf
+
+		# Unbound
+		if [[ -f '/etc/unbound/unbound.conf.d/dietpi.conf' ]]
 		then
-			G_DIETPI-NOTIFY 2 'Fixing Chromium hardware acceleration'
-			G_EXEC sed --follow-symlinks -i 's/ --use-gl=egl"/"/' /etc/chromium.d/dietpi
+			G_DIETPI-NOTIFY 2 'Removing cron job for root hints update, relying on Unbound builtin data instead'
+			G_EXEC sed --follow-symlinks -i '\|^[[:blank:]]*root-hints:[[:blank:]]|d' /etc/unbound/unbound.conf.d/dietpi.conf
+			G_EXEC sed --follow-symlinks -i '/^[[:blank:]]*# DNS root server information file/d' /etc/unbound/unbound.conf.d/dietpi.conf
+			G_EXEC sed --follow-symlinks -i '/^$/{:a;N;s/\n$//;ta}' /etc/unbound/unbound.conf.d/dietpi.conf
+			if [[ -f '/etc/resolvconf/update.d/unbound' ]]
+			then
+				G_DIETPI-NOTIFY 2 'Assuring that external nameserver entries in /etc/resolv.conf are not added to the Unbound forward zone'
+				G_EXEC chmod -x /etc/resolvconf/update.d/unbound
+			fi
+		fi
+		[[ -f '/etc/cron.monthly/dietpi-unbound' ]] && G_EXEC rm /etc/cron.monthly/dietpi-unbound
+
+		# Lighttpd: Buster => Bullseye migrations
+		if [[ -f '/etc/lighttpd/lighttpd.conf' ]]
+		then
+			# mod_compress has been superseded by mod_deflate
+			if grep -q '^[[:blank:]]*"mod_compress",$' /etc/lighttpd/lighttpd.conf
+			then
+				G_DIETPI-NOTIFY 2 'Bullseye upgrade detected: Migrating from mod_compress to mod_deflate'
+				G_EXEC sed --follow-symlinks -Ei '/^compress\..*=[[:blank:]]*["(].*[")]$/d' /etc/lighttpd/lighttpd.conf
+				G_EXEC sed --follow-symlinks -i '/^[[:blank:]]*"mod_compress",$/d' /etc/lighttpd/lighttpd.conf
+				G_AGI lighttpd-mod-deflate
+			fi
+
+			# Install OpenSSL module if DietPi-LetsEncrypt was used
+			if [[ -f '/etc/lighttpd/conf-available/50-dietpi-https.conf' ]] && ! dpkg-query -s 'lighttpd-mod-openssl' &> /dev/null
+			then
+				G_DIETPI-NOTIFY 2 'Bullseye upgrade detected: Installing dedicatged Lighttpd OpenSSL module'
+				G_AGI lighttpd-mod-openssl
+				grep -q '"mod_openssl"' /etc/lighttpd/conf-available/50-dietpi-https.conf || G_EXEC sed --follow-symlinks -i '1iserver.modules += ( "mod_openssl" )' /etc/lighttpd/conf-available/50-dietpi-https.conf
+			fi
+
+			# Remove obsolete socket version string from FPM module
+			if [[ -f '/etc/lighttpd/conf-available/15-fastcgi-php-fpm.conf' ]] && grep -q 'php.\..-fpm\.sock' /etc/lighttpd/conf-available/15-fastcgi-php-fpm.conf
+			then
+				G_DIETPI-NOTIFY 2 'Removing obsolete PHP FPM socket version string from Lighttpd config'
+				G_EXEC sed --follow-symlinks -i 's/php.\..-fpm\.sock/php-fpm.sock/' /etc/lighttpd/conf-available/15-fastcgi-php-fpm.conf
+			fi
+		fi
+
+		# Nginx
+		if [[ -f '/etc/nginx/nginx.conf' ]] && grep -q 'php.\..-fpm\.sock' /etc/nginx/nginx.conf
+		then
+			G_DIETPI-NOTIFY 2 'Removing obsolete PHP FPM socket version string from Nginx config'
+			G_EXEC sed --follow-symlinks -i 's/php.\..-fpm\.sock/php-fpm.sock/' /etc/nginx/nginx.conf
+		fi
+
+		# Docker Compose
+		if grep -q '^[[:blank:]]*aSOFTWARE_INSTALL_STATE\[134\]=2' /boot/dietpi/.installed
+		then
+			if command -v docker-compose > /dev/null && ! dpkg-query -s 'docker-compose-plugin' &> /dev/null
+			then
+				G_WHIP_MSG '[ INFO ] Migrating from obsolete "docker-compose" to "docker compose" plugin
+\nThe dedicated "docker-compose" application and executable is deprecated, in favor of Docker'\''s native compose plugin. We are migrating you instance to the new plugin now.
+\nNote that the command to call Docker Compose in turn changed from "docker-compose" to "docker compose", hence without the dash, but as an argument of the "docker" command.'
+				G_AGI docker-compose-plugin
+				command -v docker-compose > /dev/null && command -v pip3 > /dev/null && G_EXEC_OUTPUT=1 G_EXEC pip3 uninstall -y docker-compose # Pre-v8.2
+				[[ -f '/usr/local/bin/docker-compose' ]] && G_EXEC rm /usr/local/bin/docker-compose # Pre-v8.14
+			fi
 		fi
 	fi
 
@@ -2287,21 +2387,21 @@ _EOF_
 		esac
 		G_AGUP
 		if G_WHIP_DEFAULT_ITEM='yes' G_WHIP_YESNO '[ INFO ] Major kernel and bootloader upgrade available
-\nFor the NanoPi R5S/R5C, we offer a major kernel upgrade to Linux 6.6, based on a new Rockchip kernel source which should provide not only new kernel features, but higher quality as well, compared to the old Rockchip Linux 5.10 legacy kernel.
+\nFor the NanoPi R5S/R5C, we offer a major kernel upgrade to Linux 6.12, based on mainline kernel sources which should provide not only new kernel features, but higher quality as well, compared to the old Rockchip Linux 5.10 legacy kernel.
 \nAdditionally, compared to the previously hidden kernel image and boot config on the first 7 partitions, the new image and configs will stored and available within the /boot partition, so that kernel command-line parameters can be adjusted. Also kernel headers are available to compile new kernel modules.
 \nThis implies flashing a new bootloader image, which reads boot scripts from the root partition.
 \nHowever, while we are not aware of any left issues, it is still good to have a backup in place, and we do not enforce the upgrade. You can do it any time later.
-\nDo you want to migrate to the new Linux 6.6 kernel now?'
+\nDo you want to migrate to the new Linux 6.12 kernel now?'
 		then
 			# Safety checks
 			if [[ $G_ROOTFS_DEV != *'8' ]]
 			then
-				G_DIETPI-NOTIFY 1 "Root filesystem is not located on partition 8 as intended, but \"$G_ROOTFS_DEV\" instead. Aborting, please report at: https://github.com/MichaIng/DietPi/issues"
+				G_DIETPI-NOTIFY 1 "Root filesystem is not located on partition 8 as expected, but \"$G_ROOTFS_DEV\" instead. Aborting, please report at: https://github.com/MichaIng/DietPi/issues"
 				exit 1
 
 			elif [[ $(partx -rgo START "$G_ROOTFS_DEV") != 286720 ]]
 			then
-				G_DIETPI-NOTIFY 1 "Root partition does not start at sector 286720 as intended, but \"$(lsblk -no START "$G_ROOTFS_DEV")\" instead. Aborting, please report at: https://github.com/MichaIng/DietPi/issues"
+				G_DIETPI-NOTIFY 1 "Root partition does not start at sector 286720 as expected, but \"$(lsblk -no START "$G_ROOTFS_DEV")\" instead. Aborting, please report at: https://github.com/MichaIng/DietPi/issues"
 				exit 1
 			fi
 			# Install boot scripts and configs
@@ -2381,12 +2481,12 @@ _EOF_
 			# Safety checks
 			if [[ $G_ROOTFS_DEV != *'8' ]]
 			then
-				G_DIETPI-NOTIFY 1 "Root filesystem is not located on partition 8 as intended, but \"$G_ROOTFS_DEV\" instead. Aborting, please report at: https://github.com/MichaIng/DietPi/issues"
+				G_DIETPI-NOTIFY 1 "Root filesystem is not located on partition 8 as expected, but \"$G_ROOTFS_DEV\" instead. Aborting, please report at: https://github.com/MichaIng/DietPi/issues"
 				exit 1
 
 			elif [[ $(partx -rgo START "$G_ROOTFS_DEV") != 286720 ]]
 			then
-				G_DIETPI-NOTIFY 1 "Root partition does not start at sector 286720 as intended, but \"$(lsblk -no START "$G_ROOTFS_DEV")\" instead. Aborting, please report at: https://github.com/MichaIng/DietPi/issues"
+				G_DIETPI-NOTIFY 1 "Root partition does not start at sector 286720 as expected, but \"$(lsblk -no START "$G_ROOTFS_DEV")\" instead. Aborting, please report at: https://github.com/MichaIng/DietPi/issues"
 				exit 1
 			fi
 			# Install boot scripts and configs
@@ -2462,16 +2562,10 @@ _EOF_
 	fi
 }
 
-# v6.35 => v7 migration
-if (( $G_DIETPI_VERSION_CORE == 6 && $G_DIETPI_VERSION_SUB > 34 ))
-then
-	G_DIETPI_VERSION_CORE=7
-	G_DIETPI_VERSION_SUB=-1
-
 # Failsafe: Error out on invalid version
-elif ! (( $G_DIETPI_VERSION_CORE > 6 ))
+if ! (( $G_DIETPI_VERSION_CORE > 6 ))
 then
-	G_DIETPI-NOTIFY 1 "Unsupported DietPi version $G_DIETPI_VERSION_CORE.$G_DIETPI_VERSION_SUB.$G_DIETPI_VERSION_RC. Aborting..."
+	G_DIETPI-NOTIFY 1 "Unsupported DietPi version $G_DIETPI_VERSION_CORE.$G_DIETPI_VERSION_SUB.$G_DIETPI_VERSION_RC. Aborting ..."
 	G_DIETPI-NOTIFY 2 'Please run "dietpi-update" to repeat the regular update path.'
 	exit 1
 fi
@@ -2491,7 +2585,7 @@ do
 	else
 		break
 	fi
-	G_DIETPI-NOTIFY 2 "Patching to DietPi v$G_DIETPI_VERSION_CORE.$G_DIETPI_VERSION_SUB..."
+	G_DIETPI-NOTIFY 2 "Patching to DietPi v$G_DIETPI_VERSION_CORE.$G_DIETPI_VERSION_SUB ..."
 	"Patch_${G_DIETPI_VERSION_CORE}_$G_DIETPI_VERSION_SUB"
 	G_VERSIONDB_SAVE
 	G_DIETPI-NOTIFY 0 "Patched to DietPi v$G_DIETPI_VERSION_CORE.$G_DIETPI_VERSION_SUB"

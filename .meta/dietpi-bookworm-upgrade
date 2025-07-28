@@ -22,8 +22,10 @@ while read -r id
 do
 	case $id in
 		47) alist+=('ownCloud');;
+		48) alist+=('Pydio');;
 		59) alist+=('RPi Cam Web Interface');;
 		140) alist+=('Domoticz');;
+		167) (( $G_HW_ARCH == 1 )) && alist+=('Raspotify');;
 		*) :;;
 	esac
 done < <(sed -nE 's/^aSOFTWARE_INSTALL_STATE\[([0-9]+)\]=2$/\1/p' /boot/dietpi/.installed)
@@ -54,7 +56,7 @@ unset -v apackages
 
 G_DIETPI-NOTIFY 2 'Migrating package lists to Bookworm suite'
 G_EXEC sed --follow-symlinks -i 's/bullseye/bookworm/g' /etc/apt/sources.list
-(( $G_RASPBIAN )) || G_EXEC sed --follow-symlinks -i 's/ non-free$/ non-free non-free-firmware/' /etc/apt/sources.list
+(( $G_RASPBIAN )) || G_EXEC sed --follow-symlinks -i -e 's/ non-free$/ non-free non-free-firmware/' -e 's/archive.debian.org/deb.debian.org/' /etc/apt/sources.list
 # Remove obsolete WSDD repo
 [[ -f '/etc/apt/sources.list.d/dietpi-wsdd.list' ]] && G_EXEC rm /etc/apt/sources.list.d/dietpi-wsdd.list
 [[ -f '/etc/apt/trusted.gpg.d/dietpi-wsdd.gpg' ]] && G_EXEC rm /etc/apt/trusted.gpg.d/dietpi-wsdd.gpg
@@ -73,6 +75,12 @@ G_DIETPI-NOTIFY 2 'Reverting some package lists to Bullseye which have no Bookwo
 G_DIETPI-NOTIFY 2 'Removing obsolete APT pinnings'
 G_EXEC rm -f /etc/apt/preferences.d/dietpi-{php,openssl,xrdp,wireguard,kodi,openhab}
 
+if dpkg-query -s 'postgresql' &> /dev/null
+then
+	G_DIETPI-NOTIFY 2 'Preventing automatic v15 main cluster generation'
+	G_CONFIG_INJECT 'create_main_cluster[[:blank:]]' 'create_main_cluster = false' /etc/postgresql-common/createcluster.conf
+fi
+
 G_DIETPI-NOTIFY 2 'Applying the actual upgrade to Debian Bookworm'
 /boot/dietpi/dietpi-services stop
 G_AGUP
@@ -89,10 +97,13 @@ read -rp 'Next, some migrations are done for all software to run nicely on Bookw
 
 G_DIETPI-NOTIFY 2 'Running post upgrade migrations'
 /boot/dietpi/dietpi-services stop
+
 # Switch from RSA to shorter and modern Ed25519 ssh.dietpi.com host key
 G_CONFIG_INJECT '\[?ssh.dietpi.com(]:29248)?[[:blank:]]' '[ssh.dietpi.com]:29248 ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIJdEPlagpQ+RVHNOX3jkG1Bya7Oza1dAke8h8NszVW84' /root/.ssh/known_hosts
+
 # We do not want G_AGP to purge the old kernel package on x86_64!
 eval "$(declare -f G_AGP | sed 's/autopurge/purge/')"
+
 # Migrate from CRDA to builtin kernel WiFi country code feature. CRDA is not available and does not work on Bookworm anymore. For non-Debian kernels, it is required to switch to the upstream regulatory database.
 if dpkg-query -s wireless-regdb &> /dev/null
 then
@@ -100,28 +111,66 @@ then
 	G_EXEC apt-mark manual wireless-regdb
 	G_AGP crda
 fi
+
+# Migrate OpenSSH server setting: https://manpages.debian.org/bookworm/sshd_config#KbdInteractiveAuthentication~2
+[[ -f '/etc/ssh/sshd_config' ]] && grep -q '^[[:blank:]]*ChallengeResponseAuthentication[[:blank:]]' /etc/ssh/sshd_config && ! grep -q '^[[:blank:]]*KbdInteractiveAuthentication[[:blank:]]' /etc/ssh/sshd_config && G_EXEC sed --follow-symlinks -Ei 's/^([[:blank:]]*)ChallengeResponseAuthentication([[:blank:]])/\1KbdInteractiveAuthentication\2/' /etc/ssh/sshd_config
+
+# Remove deprecated OpenVPN setting: https://manpages.debian.org/bullseye/openvpn#keysize
+for i in /etc/openvpn/*.{conf,ovpn}
+do
+	[[ -f $i ]] && grep -q '^[[:blank:]]*keysize[[:blank:]]' && G_EXEC sed --follow-symlinks -i '/^[[:blank:]]*keysize[[:blank:]]/d' "$i"
+done
+
 # Purge obsolete GCC versions
 G_AGP gcc-{8,9,10,11}-base
+
 # Purge PHP 7.4 packages, obsolete after PHP 8.2 install
 G_AGP '*php7.4*'
+
 # Remove obsolete PHP 7.4 configs and Python 3.9 modules, obsolete after Python 3.11 install
 G_EXEC rm -Rf /etc/php/7.4 /usr/local/lib/python3.9 /usr/local/bin/pip3*
+
 # Install (mark as manually installed) root trust anchors for Unbound, which was degraded from dependency to recommendation: https://github.com/MichaIng/DietPi/issues/5612
 dpkg-query -s unbound &> /dev/null && G_AGI dns-root-data
+
 # Allow IPv6 port binding failure explicitly, not implicit anymore since Bookworm: https://github.com/MichaIng/DietPi/pull/6103#issuecomment-1407749720
 [[ -f '/etc/redis/redis.conf' ]] && G_EXEC sed --follow-symlinks -i '/^bind 127.0.0.1 ::1$/c\bind 127.0.0.1 -::1' /etc/redis/redis.conf
-# Reinstall all PHP applications which require non-standard PHP modules, webservers which did access a versioned PHP-FPM socket, Python applications installed via pip, ...
-G_PROMPT_BACKUP_DISABLED=1 /boot/dietpi/dietpi-software reinstall 38 40 47 48 83 84 85 89 93 114 118 125 130 134 136 139 143 153 155 157 180
 
-# PostgreSQL upgrade
-if grep -q '^aSOFTWARE_INSTALL_STATE\[194\]=2$' /boot/dietpi/.installed
+if apt-mark showmanual | grep -q 'libicu67'
 then
-	G_DIETPI-NOTIFY 2 'Migrating PostgreSQL databases from v13 to v15'
-	G_EXEC systemctl stop postgresql
-	G_EXEC pg_dropcluster 15 main
-	G_EXEC pg_upgradecluster 13 main
-	G_EXEC pg_dropcluster 13 main
+	G_DIETPI-NOTIFY 2 'Migrating from libicu67 to libicu72'
+	G_AGI libicu72
+	G_EXEC apt-mark auto libicu67
 fi
+
+# PostgreSQL migration
+if dpkg-query -s 'postgresql' &> /dev/null
+then
+	G_DIETPI-NOTIFY 2 'Migrating PostgreSQL 13 clusters to v15'
+	mapfile -t clusters < <(pg_lsclusters | mawk '$1 == "13" {print $2}')
+	skipped=0
+	G_EXEC systemctl start postgresql
+	for cluster in "${clusters[@]}"
+	do
+		[[ -d /var/lib/postgresql/15/$cluster ]] && { G_DIETPI-NOTIFY 2 "PostgreSQL 15 cluster \"$cluster\" exists already, skipping migration"; skipped=1; continue; }
+		G_DIETPI-NOTIFY 2 "Found PostgreSQL 13 cluster \"$cluster\", starting migration ...";
+		G_EXEC pg_upgradecluster 13 "$cluster"
+		G_EXEC pg_dropcluster 13 "$cluster"
+	done
+	if (( $skipped ))
+	then
+		G_WHIP_MSG '[ INFO ] PostgreSQL 13 to v15 migration incomplete
+\nFor some PostgreSQL 13 cluster(s), the respective v15 cluster existed already, and the migration has hence been skipped.
+\nPlease review those left clusters and in case remove or migrate them to v15 manually. PostgreSQL 13 is kept installed for that. Once all needed clusters have been migrated, purge PostgreSQL 13 with the following commands:
+\nsudo rm /etc/apt/apt.conf.d/02autoremove-postgresql
+sudo apt autopurge'
+	else
+		G_EXEC rm /etc/apt/apt.conf.d/02autoremove-postgresql
+	fi
+fi
+
+# Reinstall all PHP applications which require non-standard PHP modules, Python applications installed via pip, Home Assistant to get latest version, ...
+G_PROMPT_BACKUP_DISABLED=1 /boot/dietpi/dietpi-software reinstall 38 40 89 114 118 125 130 136 139 141 143 153 155 157 180 210
 
 cat << '_EOF_' > /etc/bashrc.d/zz-dietpi-autopurge.bash
 {
