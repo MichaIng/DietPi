@@ -185,7 +185,7 @@ Process_Software()
 			137) aCOMMANDS[i]='/opt/mjpg-streamer/mjpg_streamer -v';; # aSERVICES[i]='mjpg-streamer' aTCP[i]='8082' Service does not start without an actual video device
 			138) aSERVICES[i]='virtualhere' aTCP[i]='7575';;
 			139) aSERVICES[i]='sabnzbd' aTCP[i]='8080'; (( $arch == 10 )) || aDELAY[i]=30;; # ToDo: Solve conflict with Airsonic
-			140) aSERVICES[i]='domoticz' aTCP[i]='8124 8424';;
+			140) aSERVICES[i]='domoticz' aTCP[i]='8424';;
 			#142) aSERVICES[i]='snapd';; "system does not fully support snapd: cannot mount squashfs image using "squashfs": mount: /tmp/syscheck-mountpoint-2075108377: mount failed: Operation not permitted."
 			143) aSERVICES[i]='koel' aTCP[i]='8003'; (( $emulation )) && aDELAY[i]=30;;
 			144) aSERVICES[i]='sonarr' aTCP[i]='8989';;
@@ -339,7 +339,7 @@ then
 	# shellcheck disable=SC2016
 	G_EXEC sed --follow-symlinks -i '/# Start DietPi-Software/a\G_EXEC sed --follow-symlinks -i '\''s|dietpi.com/downloads/binaries/$G_DISTRO_NAME/|dietpi.com/downloads/binaries/$G_DISTRO_NAME/testing/|'\'' /boot/dietpi/dietpi-software' rootfs/boot/dietpi/dietpi-login
 	# shellcheck disable=SC2016
-	G_EXEC sed --follow-symlinks -i '/# Start DietPi-Software/a\G_EXEC sed --follow-symlinks -Ei '\''s@G_AGI "?(amiberry|amiberry-lite|gmediarender|gzdoom|shairport-sync\\$airplay2|squeezelite|unbound|vaultwarden|ympd)"?@Download_Install "https://dietpi.com/downloads/binaries/$G_DISTRO_NAME/\\1""_$G_HW_ARCH_NAME.deb"@'\'' /boot/dietpi/dietpi-software' rootfs/boot/dietpi/dietpi-login
+	G_EXEC sed --follow-symlinks -i '/# Start DietPi-Software/a\G_EXEC sed --follow-symlinks -Ei '\''s@G_AGI "?(amiberry|amiberry-lite|domoticz|gmediarender|gzdoom|shairport-sync\\$airplay2|squeezelite|unbound|vaultwarden|ympd)"?@Download_Install "https://dietpi.com/downloads/binaries/$G_DISTRO_NAME/\\1""_$G_HW_ARCH_NAME.deb"@'\'' /boot/dietpi/dietpi-software' rootfs/boot/dietpi/dietpi-login
 	G_CONFIG_INJECT 'SOFTWARE_DIETPI_DASHBOARD_VERSION=' 'SOFTWARE_DIETPI_DASHBOARD_VERSION=Nightly' rootfs/boot/dietpi.txt
 fi
 
