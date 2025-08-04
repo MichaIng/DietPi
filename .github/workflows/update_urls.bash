@@ -232,13 +232,18 @@ aARCH[$software_id]='armv6l arm64 amd64 riscv64'
 aARCH_CHECK[$software_id]='armv7l'
 aREGEX[$software_id]='go[0-9.]*\.linux-\$arch\.tar\.gz'
 
-# Snapcast Server (no snapweb for now): Implement distro loop?
+# Snapcast Server: Implement distro loop?
 software_id=191
 aCHECK[$software_id]='curl -sSfL '\''https://api.github.com/repos/badaix/snapcast/releases/latest'\'' | mawk -F\" "/^ *\"browser_download_url\": \".*\/snapserver_[^\"\/]*_${arch}_bookworm.deb\"$/{print \$4}"'
 aARCH[$software_id]='armhf arm64 amd64'
 aARCH_CHECK[$software_id]='riscv64'
 aREGEX[$software_id]='https://github.com/badaix/snapcast/releases/download/.*/snapserver_.*_\${arch}_\$G_DISTRO_NAME.deb'
 aREPLACE[$software_id]='${release/bookworm/\$G_DISTRO_NAME}'
+
+# Snapcast Server: snapweb
+software_id=191000
+aCHECK[$software_id]='(curl -sSfL '\''https://api.github.com/repos/badaix/snapweb/releases/latest'\'' | mawk -F\" '\''/^ *"browser_download_url": ".*\/snapweb_[^"\/]*_all.deb"$/{print $4}'\'
+aREGEX[$software_id]='https://github.com/badaix/snapweb/releases/download/.*/snapweb_.*_all\.deb'
 
 # Snapcast Client: Implement distro loop?
 software_id=192
