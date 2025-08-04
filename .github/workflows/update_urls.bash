@@ -242,7 +242,7 @@ aREPLACE[$software_id]='${release/bookworm/\$G_DISTRO_NAME}'
 
 # Snapcast Server: snapweb
 software_id=191000
-aCHECK[$software_id]='(curl -sSfL '\''https://api.github.com/repos/badaix/snapweb/releases/latest'\'' | mawk -F\" '\''/^ *"browser_download_url": ".*\/snapweb_[^"\/]*_all.deb"$/{print $4}'\'
+aCHECK[$software_id]='curl -sSfL '\''https://api.github.com/repos/badaix/snapweb/releases/latest'\'' | mawk -F\" '\''/^ *"browser_download_url": ".*\/snapweb_[^"\/]*_all.deb"$/{print $4}'\'
 aREGEX[$software_id]='https://github.com/badaix/snapweb/releases/download/.*/snapweb_.*_all\.deb'
 
 # Snapcast Client: Implement distro loop?
