@@ -370,6 +370,8 @@ old_version=$(dpkg-deb -f package.deb Version)
 G_EXEC rm package.deb
 suffix=${old_version#*-dietpi}
 [[ $old_version == "$version-"* ]] && suffix="dietpi$((suffix+1))" || suffix="dietpi1"
+G_DIETPI-NOTIFY 2 "Old package version is:       \e[33m${old_version:-N/A}"
+G_DIETPI-NOTIFY 2 "Building new package version: \e[33m$version-$suffix"
 
 # - control
 cat << _EOF_ > "$DIR/DEBIAN/control"
@@ -378,15 +380,12 @@ Version: $version-$suffix
 Architecture: $(dpkg --print-architecture)
 Maintainer: MichaIng <micha@dietpi.com>
 Date: $(date -u '+%a, %d %b %Y %T %z')
-Standards-Version: 4.6.2.0
 Installed-Size: $(du -sk "$DIR" | mawk '{print $1}')
 Depends:$DEPS_APT_VERSIONED
 Conflicts: $NAME-airplay2
 Section: sound
 Priority: optional
 Homepage: $repo
-Vcs-Git: $repo.git
-Vcs-Browser: $repo
 Description: AirPlay audio player
  Plays audio streamed from iTunes, iOS devices and third-party AirPlay
  sources such as ForkedDaapd and others. Audio played by a Shairport
