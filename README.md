@@ -344,6 +344,7 @@ Links to hardware and software manufacturers, sources and build instructions use
 - [soju](https://github.com/emersion/soju)
 - [fish](https://github.com/fish-shell/fish-shell)
 - [GZDoom](https://github.com/ZDoom/gzdoom)
+- [Mumble Server](https://github.com/mumble-voip/mumble)
 
 ---
 
