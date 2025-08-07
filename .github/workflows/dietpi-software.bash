@@ -371,14 +371,14 @@ fi
 if (( $arch < 3 )) && [[ $DISTRO == 'trixie' ]] && systemctl -q is-active apparmor
 then
 	G_EXEC eval 'echo '\''/proc/sys/vm/mmap_min_addr r,'\'' > /etc/apparmor.d/local/unix-chkpwd'
-	G_EXEC_NOHALT=1 G_EXEC_OUTPUT=1 apparmor_parser -r /etc/apparmor.d/local/unix-chkpwd || { journalctl -n 25; exit 1; }
+	G_EXEC_OUTPUT=1 apparmor_parser -r /etc/apparmor.d/unix-chkpwd
 fi
 
 # Workaround for transmission-daemon timing out with container host AppArmor throwing: apparmor="ALLOWED" operation="sendmsg" class="file" info="Failed name lookup - disconnected path" error=-13 profile="transmission-daemon" name="run/systemd/notify"
 if [[ $DISTRO == 'trixie' ]] && systemctl -q is-active apparmor
 then
-	G_EXEC eval 'echo '\''/run/systemd/notify w,'\'' > /etc/apparmor.d/local/usr.bin.transmission-daemon'
-	G_EXEC_NOHALT=1 G_EXEC_OUTPUT=1 apparmor_parser -r /etc/apparmor.d/local/usr.bin.transmission-daemon || { journalctl -n 25; exit 1; }
+	G_EXEC eval 'echo '\''/run/systemd/notify w,'\'' > /etc/apparmor.d/local/transmission-daemon'
+	G_EXEC_OUTPUT=1 apparmor_parser -r /etc/apparmor.d/transmission
 fi
 
 # Workaround for failing IPv4 network connectivity check as GitHub Actions runners do not receive external ICMP echo replies.
