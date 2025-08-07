@@ -455,7 +455,7 @@ then
 	# Replace dedicated hotspot interface with default route interface, for the DHCP server and in case Tor have a valid interface and IP to listen on
 	G_EXEC sed --follow-symlinks -i "/# Start DietPi-Software/i\sed -i '/INTERFACESv4/s/\$wifi_iface/$(G_GET_NET iface)/' /boot/dietpi/dietpi-software" rootfs/boot/dietpi/dietpi-login
 	G_EXEC sed --follow-symlinks -i "/# Start DietPi-Software/i\sed -i '/192\.168\.42\.10/! s/192\.168\.42\.1/$(G_GET_NET ip)/' /boot/dietpi/dietpi-software" rootfs/boot/dietpi/dietpi-login
-	G_EXEC sed --follow-symlinks -i "/# Start DietPi-Software/i\sed -i 's/192\.168\.42\./$(G_GET_NET ip | sed 's/[0-9]*$//')/' /boot/dietpi/dietpi-software" rootfs/boot/dietpi/dietpi-login
+	G_EXEC sed --follow-symlinks -i "/# Start DietPi-Software/i\sed -i 's/192\.168\.42\./$(G_GET_NET ip | sed 's/[0-9]*$//')/g' /boot/dietpi/dietpi-software" rootfs/boot/dietpi/dietpi-login
 fi
 
 # Workaround for Apache2 on emulated RISC-V system
