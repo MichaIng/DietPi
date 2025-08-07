@@ -85,7 +85,7 @@ emulation=0
 ##########################################
 # Create service and port lists
 ##########################################
-aSERVICES=() aTCP=() aUDP=() aCOMMANDS=() aDELAY=()
+aINSTALL=() aSERVICES=() aTCP=() aUDP=() aCOMMANDS=() aDELAY=()
 Process_Software()
 {
 	local i
@@ -125,8 +125,8 @@ Process_Software()
 			53) aSERVICES[i]='mineos' aTCP[i]='8443';;
 			58) aCOMMANDS[i]='tailscale version';; # aSERVICES[i]='tailscaled' aUDP[i]='41641' GitHub Actions runners do not support the TUN module
 			59) aSERVICES[i]='raspimjpeg';;
-			60) aCOMMANDS[i]='iptables -V';; # aSERVICES[i]='hostapd isc-dhcp-server' aUDP[i]='53 68' DHCP server and hostapd fail without actual WiFi interface
-			61) aSERVICES[i]='tor' aUDP[i]='9040';;
+			60) aCOMMANDS[i]='iptables -V' aSERVICES[i]='isc-dhcp-server' aUDP[i]='67' # aSERVICES[i]='hostapd' fails without actual WiFi interface
+			61) aSERVICES[i]='tor' aUDP[i]='53 9040';;
 			62) aCOMMANDS[i]='box86 -v';;
 			65) aSERVICES[i]='netdata' aTCP[i]='19999';;
 			66) aSERVICES[i]='rpimonitor' aTCP[i]='8888';;
@@ -249,6 +249,7 @@ Process_Software()
 			213) aSERVICES[i]='soju' aTCP[i]='6667';;
 			*) :;;
 		esac
+		aINSTALL[i]=1
 	done
 }
 for i in $SOFTWARE
@@ -374,8 +375,8 @@ then
 	G_EXEC_OUTPUT=1 G_EXEC apparmor_parser -r /etc/apparmor.d/unix-chkpwd
 fi
 
-# Workaround for transmission-daemon timing out with container host AppArmor throwing: apparmor="ALLOWED" operation="sendmsg" class="file" info="Failed name lookup - disconnected path" error=-13 profile="transmission-daemon" name="run/systemd/notify"
-if [[ $DISTRO == 'trixie' ]] && systemctl -q is-active apparmor
+# Transmission: Workaround for transmission-daemon timing out with container host AppArmor throwing: apparmor="ALLOWED" operation="sendmsg" class="file" info="Failed name lookup - disconnected path" error=-13 profile="transmission-daemon" name="run/systemd/notify"
+if [[ ${aINSTALL[44]} == 1 && $DISTRO == 'trixie' ]] && systemctl -q is-active apparmor
 then
 	G_EXEC sed --follow-symlinks -i '/profile transmission-daemon/s/flags=(complain)/flags=(complain,attach_disconnected)/' /etc/apparmor.d/transmission
 	G_EXEC_OUTPUT=1 G_EXEC apparmor_parser -r /etc/apparmor.d/transmission
@@ -394,13 +395,13 @@ G_EXEC rm rootfs/root/.ssh/known_hosts
 # Apply software IDs to install
 for i in $SOFTWARE; do G_CONFIG_INJECT "AUTO_SETUP_INSTALL_SOFTWARE_ID=$i" "AUTO_SETUP_INSTALL_SOFTWARE_ID=$i" rootfs/boot/dietpi.txt; done
 
-# Enable unattended PaperMC install
-G_EXEC mkdir -p rootfs/mnt/dietpi_userdata/papermc/plugins
-G_EXEC eval 'echo '\''eula=true'\'' > rootfs/mnt/dietpi_userdata/papermc/eula.txt'
-G_EXEC touch rootfs/mnt/dietpi_userdata/papermc/plugins/Geyser-Spigot.jar
-
-# Workaround for "Could not execute systemctl:  at /usr/bin/deb-systemd-invoke line 145." during Apache2 DEB postinst in 32-bit ARM Bookworm container: https://lists.ubuntu.com/archives/foundations-bugs/2022-January/467253.html
-G_CONFIG_INJECT 'AUTO_SETUP_WEB_SERVER_INDEX=' 'AUTO_SETUP_WEB_SERVER_INDEX=-2' rootfs/boot/dietpi.txt
+# PaperMC: Enable unattended install
+if (( ${aINSTALL[181]} ))
+then
+	G_EXEC mkdir -p rootfs/mnt/dietpi_userdata/papermc/plugins
+	G_EXEC eval 'echo '\''eula=true'\'' > rootfs/mnt/dietpi_userdata/papermc/eula.txt'
+	G_EXEC touch rootfs/mnt/dietpi_userdata/papermc/plugins/Geyser-Spigot.jar
+fi
 
 # Workarounds for QEMU-emulated RISC-V and 32-bit ARM containers
 if (( ( $arch < 3 || $arch == 11 ) && $emulation ))
@@ -439,13 +440,17 @@ fi
 # ARMv6: Workaround for hanging Rust tools chain on ARMv8 host: https://github.com/MichaIng/DietPi/issues/6306#issuecomment-1515303702
 (( $arch == 1 && $G_HW_ARCH == 3 )) && G_EXEC sysctl -w 'abi.cp15_barrier=2'
 
-# ARMv6/ARMv7: Workaround for failing numpy build due to: https://github.com/numpy/meson/pull/18
-# shellcheck disable=SC2016
-(( $arch < 3 )) && G_EXEC sed --follow-symlinks -i '/# Start DietPi-Software/a\sed -i -e '\''/pip3 install homeassistant/i\echo constraint=$ha_home/.pip/constraints.txt >> $ha_home/.pip/pip.conf'\'' -e '\''/pip3 install homeassistant/i\echo numpy==2.2.6 > $ha_home/.pip/constraints.txt'\'' /boot/dietpi/dietpi-software' rootfs/boot/dietpi/dietpi-login
-
-# Create dummy network config to allow WiFi Hotspot installation
-G_EXEC mkdir -p rootfs/etc/network
-G_EXEC eval '>> rootfs/etc/network/interfaces'
+# WiFi Hotspot
+if (( ${aINSTALL[60]} ))
+then
+	# Create dummy network config for sed to succeed
+	G_EXEC mkdir -p rootfs/etc/network
+	G_EXEC eval '>> rootfs/etc/network/interfaces'
+	# Replace dedicated hotspot interface with default route interface, for the DHCP server and in case Tor have a valid interface and IP to listen on
+	G_EXEC sed --follow-symlinks -i "/# Start DietPi-Software/i\sed -i '/INTERFACESv4/s/\$wifi_iface/$(G_GET_NET iface)/' /boot/dietpi/dietpi-software" rootfs/boot/dietpi/dietpi-login
+	G_EXEC sed --follow-symlinks -i "/# Start DietPi-Software/i\sed -i '/192\.168\.42\.10/! s/192\.168\.42\.1/$(G_GET_NET ip)/' /boot/dietpi/dietpi-software" rootfs/boot/dietpi/dietpi-login
+	G_EXEC sed --follow-symlinks -i "/# Start DietPi-Software/i\sed -i 's/192\.168\.42\./$(G_GET_NET ip | sed 's/[0-9]*$//')/' /boot/dietpi/dietpi-software" rootfs/boot/dietpi/dietpi-login
+fi
 
 # Check for service status, ports and commands
 # shellcheck disable=SC2016
