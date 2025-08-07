@@ -125,7 +125,7 @@ Process_Software()
 			53) aSERVICES[i]='mineos' aTCP[i]='8443';;
 			58) aCOMMANDS[i]='tailscale version';; # aSERVICES[i]='tailscaled' aUDP[i]='41641' GitHub Actions runners do not support the TUN module
 			59) aSERVICES[i]='raspimjpeg';;
-			60) aCOMMANDS[i]='iptables -V' aSERVICES[i]='isc-dhcp-server' aUDP[i]='67' # aSERVICES[i]='hostapd' fails without actual WiFi interface
+			60) aCOMMANDS[i]='iptables -V' aSERVICES[i]='isc-dhcp-server' aUDP[i]='67';; # aSERVICES[i]='hostapd' fails without actual WiFi interface
 			61) aSERVICES[i]='tor' aUDP[i]='53 9040';;
 			62) aCOMMANDS[i]='box86 -v';;
 			65) aSERVICES[i]='netdata' aTCP[i]='19999';;
