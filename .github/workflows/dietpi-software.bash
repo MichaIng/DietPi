@@ -93,7 +93,7 @@ Process_Software()
 	do
 		# shellcheck disable=SC2016
 		case $i in
-			'webserver') [[ $SOFTWARE =~ (^| )8[345]( |$) ]] || aSERVICES[83]='apache2' aTCP[83]='80';;
+			'webserver') [[ $SOFTWARE =~ (^| )8[345]( |$) ]] || Process_Software 83;;
 			0) aCOMMANDS[i]='ssh -V';;
 			1) aCOMMANDS[i]='smbclient -V';;
 			2) aSERVICES[i]='fahclient' aTCP[i]='7396';;
@@ -136,7 +136,7 @@ Process_Software()
 			71) aSERVICES[i]='webiopi' aTCP[i]='8002';;
 			73) aSERVICES[i]='fail2ban';;
 			74) aSERVICES[i]='influxdb' aTCP[i]='8086 8088';;
-			77) aSERVICES[i]='grafana-server' aTCP[i]='3001';;
+			77) aSERVICES[i]='grafana-server' aTCP[i]='3001' aDELAY[i]=30;;
 			80) aSERVICES[i]='ubooquity' aTCP[i]='2038 2039'; (( $emulation )) && aDELAY[i]=30;;
 			83) aSERVICES[i]='apache2' aTCP[i]='80';;
 			84) aSERVICES[i]='lighttpd' aTCP[i]='80';;
@@ -256,8 +256,8 @@ for i in $SOFTWARE
 do
 	case $i in
 		205) Process_Software webserver;;
-		27|56|63|64|75|78|81|107|132) Process_Software 89 webserver;; # 93 (Pi-hole) cannot be installed non-interactively
-		38|40|48|54|55|57|59|76|79|82|90|160|210) Process_Software 88 89 webserver;;
+		27|56|63|64|107|132) Process_Software 89 webserver;;
+		38|40|48|54|55|57|59|90|160|210) Process_Software 88 89 webserver;;
 		159) Process_Software 36 37 65 88 89 96 121 124 128 129 152 160 163 webserver;;
 		47|114|168) Process_Software 88 89 91 webserver;;
 		8|33|53|80|131|133|164|179|181|206) Process_Software 196;;
@@ -269,8 +269,14 @@ do
 		#86|134|185) Process_Software 162;; # Docker does not start in systemd containers (without dedicated network)
 		166) Process_Software 70;;
 		180) (( $arch == 10 || $arch == 3 )) || Process_Software 170;;
-		188) Process_Software 17;;
+		188) Process_Software 17;; # 93 (Pi-hole) cannot be installed non-interactively
 		213) Process_Software 17 188;;
+		75) Process_Software 83 87 89;;
+		76) Process_Software 83 88 89;;
+		78) Process_Software 85 87 89;;
+		79) Process_Software 85 88 89;;
+		81) Process_Software 84 87 89;;
+		82) Process_Software 84 88 89;;
 		*) :;;
 	esac
 	Process_Software "$i"
@@ -450,6 +456,12 @@ then
 	G_EXEC sed --follow-symlinks -i "/# Start DietPi-Software/i\sed -i '/INTERFACESv4/s/\$wifi_iface/$(G_GET_NET iface)/' /boot/dietpi/dietpi-software" rootfs/boot/dietpi/dietpi-login
 	G_EXEC sed --follow-symlinks -i "/# Start DietPi-Software/i\sed -i '/192\.168\.42\.10/! s/192\.168\.42\.1/$(G_GET_NET ip)/' /boot/dietpi/dietpi-software" rootfs/boot/dietpi/dietpi-login
 	G_EXEC sed --follow-symlinks -i "/# Start DietPi-Software/i\sed -i 's/192\.168\.42\./$(G_GET_NET ip | sed 's/[0-9]*$//')/' /boot/dietpi/dietpi-software" rootfs/boot/dietpi/dietpi-login
+fi
+
+# Workaround for Apache2 on emulated RISC-V system
+if (( ${aINSTALL[83]} )) && (( $emulated && $arch == 11 ))
+then
+	G_EXEC sed --follow-symlinks -i "/# Start DietPi-Software/i\sed -i '/^DocumentRoot/a\Mutex posixsem' /boot/dietpi/dietpi-software" rootfs/boot/dietpi/dietpi-login
 fi
 
 # Check for service status, ports and commands
