@@ -378,7 +378,7 @@ fi
 if [[ $DISTRO == 'trixie' ]] && systemctl -q is-active apparmor
 then
 	G_EXEC eval 'echo '\''/run/systemd/notify w,'\'' > /etc/apparmor.d/local/usr.bin.transmission-daemon'
-	G_EXEC_NOHALT=1 G_EXEC_OUTPUT=1 apparmor_parser -r /etc/apparmor.d/usr.bin.transmission-daemon || { journalctl -n 25; exit 1; }
+	G_EXEC_NOHALT=1 G_EXEC_OUTPUT=1 apparmor_parser -r /etc/apparmor.d/local/usr.bin.transmission-daemon || { journalctl -n 25; exit 1; }
 fi
 
 # Workaround for failing IPv4 network connectivity check as GitHub Actions runners do not receive external ICMP echo replies.
