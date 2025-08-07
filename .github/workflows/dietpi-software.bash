@@ -444,6 +444,7 @@ fi
 (( $arch < 3 )) && G_EXEC sed --follow-symlinks -i '/# Start DietPi-Software/a\sed -i -e '\''/pip3 install homeassistant/i\echo constraint=$ha_home/.pip/constraints.txt >> $ha_home/.pip/pip.conf'\'' -e '\''/pip3 install homeassistant/i\echo numpy==2.2.6 > $ha_home/.pip/constraints.txt'\'' /boot/dietpi/dietpi-software' rootfs/boot/dietpi/dietpi-login
 
 # Create dummy network config to allow WiFi Hotspot installation
+G_EXEC mkdir -p rootfs/etc/network
 G_EXEC eval '>> rootfs/etc/network/interfaces'
 
 # Check for service status, ports and commands
