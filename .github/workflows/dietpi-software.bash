@@ -459,7 +459,7 @@ then
 fi
 
 # Workaround for Apache2 on emulated RISC-V system
-if (( ${aINSTALL[83]} )) && (( $emulated && $arch == 11 ))
+if (( ${aINSTALL[83]} )) && (( $emulation && $arch == 11 ))
 then
 	G_EXEC sed --follow-symlinks -i "/# Start DietPi-Software/i\sed -i '/^DocumentRoot/a\Mutex posixsem' /boot/dietpi/dietpi-software" rootfs/boot/dietpi/dietpi-login
 fi
