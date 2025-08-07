@@ -125,8 +125,8 @@ Process_Software()
 			53) aSERVICES[i]='mineos' aTCP[i]='8443';;
 			58) aCOMMANDS[i]='tailscale version';; # aSERVICES[i]='tailscaled' aUDP[i]='41641' GitHub Actions runners do not support the TUN module
 			59) aSERVICES[i]='raspimjpeg';;
-			#60) aUDP[i]='53 68';; Cannot be installed in CI since a WiFi interface is required
-			#61) aSERVICES[i]='tor' aUDP[i]='9040';; Cannot be installed in CI since a WiFi interface is required
+			60) aCOMMANDS[i]='iptables -V';; # aSERVICES[i]='hostapd isc-dhcp-server' aUDP[i]='53 68' DHCP server and hostapd fail without actual WiFi interface
+			61) aSERVICES[i]='tor' aUDP[i]='9040';;
 			62) aCOMMANDS[i]='box86 -v';;
 			65) aSERVICES[i]='netdata' aTCP[i]='19999';;
 			66) aSERVICES[i]='rpimonitor' aTCP[i]='8888';;
@@ -263,7 +263,7 @@ do
 		32|148|119) Process_Software 128;;
 		129) Process_Software 88 89 128 webserver;;
 		49|165|177) Process_Software 0 17 88;;
-		#61) Process_Software 60;; # Cannot be installed in CI
+		61) Process_Software 60;;
 		125) Process_Software 194;;
 		#86|134|185) Process_Software 162;; # Docker does not start in systemd containers (without dedicated network)
 		166) Process_Software 70;;
@@ -442,6 +442,9 @@ fi
 # ARMv6/ARMv7: Workaround for failing numpy build due to: https://github.com/numpy/meson/pull/18
 # shellcheck disable=SC2016
 (( $arch < 3 )) && G_EXEC sed --follow-symlinks -i '/# Start DietPi-Software/a\sed -i -e '\''/pip3 install homeassistant/i\echo constraint=$ha_home/.pip/constraints.txt >> $ha_home/.pip/pip.conf'\'' -e '\''/pip3 install homeassistant/i\echo numpy==2.2.6 > $ha_home/.pip/constraints.txt'\'' /boot/dietpi/dietpi-software' rootfs/boot/dietpi/dietpi-login
+
+# Create dummy network config to allow WiFi Hotspot installation
+G_EXEC eval '>> rootfs/etc/network/interfaces'
 
 # Check for service status, ports and commands
 # shellcheck disable=SC2016
