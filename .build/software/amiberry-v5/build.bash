@@ -114,7 +114,7 @@ G_EXEC cd "amiberry-$v_ami"
 RISCV_LD=()
 (( $G_HW_ARCH == 11 )) && RISCV_LD=('USE_LD=bfd')
 # - Add lib to rpath
-G_EXEC sed --follow-symlinks -i '/^LDFLAGS = /$/ -Wl,-rpath,/mnt/dietpi_userdata/amiberry/lib' Makefile
+G_EXEC sed --follow-symlinks -i '/^LDFLAGS = /s|$| -Wl,-rpath,/mnt/dietpi_userdata/amiberry/lib|' Makefile
 G_EXEC_OUTPUT=1 G_EXEC make "-j$(nproc)" "PLATFORM=$PLATFORM" "${RISCV_LD[@]}" # Passing flags here overrides some mandatory flags in the Makefile, where -O3 is set as well.
 G_EXEC strip --remove-section=.comment --remove-section=.note amiberry
 
