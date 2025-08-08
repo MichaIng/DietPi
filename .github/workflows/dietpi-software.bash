@@ -393,7 +393,7 @@ fi
 # rsyslog: Workaround for rsyslogd timing out with container host AppArmor throwing: apparmor="DENIED" operation="sendmsg" class="file" info="Failed name lookup - disconnected path" error=-13 profile="rsyslogd" name="run/systemd/journal/dev-log"
 if [[ ${aINSTALL[102]} == 1 && $DISTRO == 'trixie' ]] && systemctl -q is-active apparmor
 then
-	G_EXEC sed --follow-symlinks -i '/^profile usr.sbin.rsyslogd/s/{$/flags=(attach_disconnected) {/' /etc/apparmor.d/usr.sbin.rsyslogd
+	G_EXEC sed --follow-symlinks -i '/^profile rsyslogd/s/{$/flags=(attach_disconnected) {/' /etc/apparmor.d/usr.sbin.rsyslogd
 	G_EXEC_OUTPUT=1 G_EXEC apparmor_parser -r /etc/apparmor.d/usr.sbin.rsyslogd
 fi
 
