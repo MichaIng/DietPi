@@ -113,6 +113,8 @@ G_EXEC cd "amiberry-$v_ami"
 # - RISC-V: Workaround for missing ld.gold: https://github.com/BlitterStudio/amiberry/issues/1213
 RISCV_LD=()
 (( $G_HW_ARCH == 11 )) && RISCV_LD=('USE_LD=bfd')
+# - Add lib to rpath
+G_EXEC sed --follow-symlinks -i '/^LDFLAGS = /$/ -Wl,-rpath,/mnt/dietpi_userdata/amiberry/lib' Makefile
 G_EXEC_OUTPUT=1 G_EXEC make "-j$(nproc)" "PLATFORM=$PLATFORM" "${RISCV_LD[@]}" # Passing flags here overrides some mandatory flags in the Makefile, where -O3 is set as well.
 G_EXEC strip --remove-section=.comment --remove-section=.note amiberry
 
@@ -137,7 +139,6 @@ Documentation=https://github.com/BlitterStudio/amiberry/wiki
 
 [Service]
 WorkingDirectory=/mnt/dietpi_userdata/amiberry
-Environment=LD_LIBRARY_PATH=/mnt/dietpi_userdata/amiberry/lib
 StandardInput=tty
 TTYPath=/dev/tty3
 ExecStartPre=/bin/chvt 3
