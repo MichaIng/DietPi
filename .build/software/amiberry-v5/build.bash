@@ -83,6 +83,22 @@ find . -type f \( -name '*.so' -o -name '*.so.*' \) -exec strip --strip-unneeded
 G_EXEC rm -f /usr/local/lib/libSDL2_ttf[.-]*
 G_EXEC_OUTPUT=1 G_EXEC make install
 
+# Build capsimg: IPF support
+G_DIETPI-NOTIFY 2 'Building capsimg'
+G_EXEC cd /tmp
+G_EXEC curl -sSfLO 'https://github.com/FrodeSolheim/capsimg/archive/master.tar.gz'
+[[ -d '/tmp/capsimg-master' ]] && G_EXEC rm -R /tmp/capsimg-master
+G_EXEC tar xf master.tar.gz
+G_EXEC rm master.tar.gz
+G_EXEC cd capsimg-master
+# RISC-V: "checking build system type... ./config.guess: unable to guess system type"
+G_EXEC curl -sSfo CAPSImg/config.guess 'https://gitweb.git.savannah.gnu.org/gitweb/?p=config.git;a=blob_plain;f=config.guess;hb=HEAD'
+G_EXEC curl -sSfo CAPSImg/config.sub 'https://gitweb.git.savannah.gnu.org/gitweb/?p=config.git;a=blob_plain;f=config.sub;hb=HEAD'
+G_EXEC_OUTPUT=1 G_EXEC ./bootstrap
+G_EXEC_OUTPUT=1 G_EXEC ./configure CFLAGS='-g0 -O3' CXXFLAGS='-g0 -O3'
+G_EXEC_OUTPUT=1 G_EXEC make "-j$(nproc)"
+G_EXEC strip --strip-unneeded --remove-section=.comment --remove-section=.note capsimg.so
+
 # Build Amiberry
 # - ARMv6: v5.7.2 dropped support for Raspberry Pi 1, hence use v5.7.1
 # - Build v5.7.4 until v7.0.0 stable has been released. It requires a major rework, using cmake and no device-specific targets anymore.
@@ -111,6 +127,7 @@ G_EXEC mkdir -p "$DIR/"{DEBIAN,mnt/dietpi_userdata/amiberry/lib,lib/systemd/syst
 # - Copy files in place
 G_EXEC mv "/tmp/amiberry-$v_ami/"{abr,conf,controllers,data,kickstarts,plugins,savestates,screenshots,whdboot,amiberry} "$DIR/mnt/dietpi_userdata/amiberry/"
 G_EXEC cp -aL /usr/local/lib/libSDL2{,_image,_ttf}-2.0.so.0 "$DIR/mnt/dietpi_userdata/amiberry/lib/"
+G_EXEC cp -a /tmp/capsimg-master/capsimg.so "$DIR/mnt/dietpi_userdata/amiberry/lib/"
 
 # - systemd service
 cat << '_EOF_' > "$DIR/lib/systemd/system/amiberry.service"
