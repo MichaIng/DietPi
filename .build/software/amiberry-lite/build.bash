@@ -38,7 +38,7 @@ G_EXEC curl -sSfLO "https://github.com/libsdl-org/SDL/releases/download/release-
 G_EXEC tar xf "SDL2-$version.tar.gz"
 G_EXEC rm "SDL2-$version.tar.gz"
 G_EXEC cd "SDL2-$version"
-G_EXEC_OUTPUT=1 G_EXEC ./configure C{,XX}FLAGS='-g0 -O3' --enable-{alsa,video-kmsdrm,libudev} "${opengl_flags[@]}" --disable-{video-{rpi,x11,wayland,opengles1,vulkan,offscreen,dummy},pipewire,jack,diskaudio,sndio,dummyaudio,oss,dbus,ime,sdl2-config} # joystick,hidapi,hidapi-joystick
+G_EXEC_OUTPUT=1 G_EXEC ./configure C{,XX}FLAGS='-g0 -O3' --enable-{alsa,video-kmsdrm,libudev,sdl2-config,joystick,hidapi,hidapi-joystick} "${opengl_flags[@]}" --disable-{video-{rpi,x11,wayland,opengles1,vulkan,offscreen,dummy},pipewire,jack,diskaudio,sndio,dummyaudio,oss,dbus,ime}
 G_EXEC_OUTPUT=1 G_EXEC make "-j$(nproc)"
 find . -type f \( -name '*.so' -o -name '*.so.*' \) -exec strip --strip-unneeded --remove-section=.comment --remove-section=.note -v {} +
 G_EXEC rm -f /usr/local/lib/libSDL2[.-]*
