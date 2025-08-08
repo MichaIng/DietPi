@@ -23,8 +23,7 @@ G_AGUP
 G_AGDUG "${adeps_build[@]}"
 for i in "${adeps[@]}"
 do
-	# Temporarily allow lib*t64 packages, while the 64-bit time_t transition is ongoing on Trixie: https://bugs.debian.org/1065394
-	dpkg-query -s "$i" &> /dev/null || dpkg-query -s "${i}t64" &> /dev/null && continue
+	dpkg-query -s "$i" &> /dev/null && continue
 	G_DIETPI-NOTIFY 1 "Expected dependency package was not installed: $i"
 	exit 1
 done
@@ -39,7 +38,7 @@ G_EXEC curl -sSfLO "https://github.com/libsdl-org/SDL/releases/download/release-
 G_EXEC tar xf "SDL2-$version.tar.gz"
 G_EXEC rm "SDL2-$version.tar.gz"
 G_EXEC cd "SDL2-$version"
-G_EXEC_OUTPUT=1 G_EXEC ./configure CFLAGS='-g0 -O3' CXXFLAGS='-g0 -O3' --enable-video-kmsdrm "${opengl_flags[@]}" --disable-video-rpi --disable-video-x11 --disable-video-wayland --disable-video-opengles1 --disable-video-vulkan --disable-video-offscreen --disable-video-dummy --disable-diskaudio --disable-sndio --disable-dummyaudio --disable-oss --disable-dbus
+G_EXEC_OUTPUT=1 G_EXEC ./configure C{,XX}FLAGS='-g0 -O3' --enable-{alsa,video-kmsdrm,libudev} "${opengl_flags[@]}" --disable-{video-{rpi,x11,wayland,opengles1,vulkan,offscreen,dummy},pipewire,jack,diskaudio,sndio,dummyaudio,oss,dbus,ime,sdl2-config} # joystick,hidapi,hidapi-joystick
 G_EXEC_OUTPUT=1 G_EXEC make "-j$(nproc)"
 find . -type f \( -name '*.so' -o -name '*.so.*' \) -exec strip --strip-unneeded --remove-section=.comment --remove-section=.note -v {} +
 G_EXEC rm -f /usr/local/lib/libSDL2[.-]*
@@ -150,8 +149,8 @@ cat << '_EOF_' > "$DIR/DEBIAN/prerm"
 if [ "$1" = 'remove' ] && [ -d '/run/systemd/system' ] && [ -f '/lib/systemd/system/amiberry.service' ]
 then
 	echo 'Deconfiguring Amiberry systemd service ...'
-	systemctl unmask amiberry
-	systemctl disable --now amiberry
+	systemctl --no-reload unmask amiberry
+	systemctl --no-reload disable --now amiberry
 fi
 _EOF_
 
@@ -172,18 +171,18 @@ find "$DIR" ! \( -path "$DIR/DEBIAN" -prune \) -type f -exec md5sum {} + | sed "
 DEPS_APT_VERSIONED=
 for i in "${adeps[@]}"
 do
-	# Temporarily allow lib*t64 packages, while the 64-bit time_t transition is ongoing on Trixie: https://bugs.debian.org/1065394
-	dpkg-query -s "$i" &> /dev/null || i+='t64'
 	DEPS_APT_VERSIONED+=" $i (>= $(dpkg-query -Wf '${VERSION}' "$i")),"
 done
 DEPS_APT_VERSIONED=${DEPS_APT_VERSIONED%,}
 
 # - Obtain version suffix
-G_EXEC_NOHALT=1 G_EXEC curl -sSfo package.deb "https://dietpi.com/downloads/binaries/$G_DISTRO_NAME/amiberry_$G_HW_ARCH_NAME.deb"
+G_EXEC curl -sSfo package.deb "https://dietpi.com/downloads/binaries/$G_DISTRO_NAME/amiberry_$G_HW_ARCH_NAME.deb"
 old_version=$(dpkg-deb -f package.deb Version)
-G_EXEC_NOHALT=1 G_EXEC rm package.deb
+G_EXEC rm package.deb
 suffix=${old_version#*-dietpi}
 [[ $old_version == "$version-"* ]] && version+="-dietpi$((suffix+1))" || version+="-dietpi1"
+G_DIETPI-NOTIFY 2 "Old package version is:       \e[33m${old_version:-N/A}"
+G_DIETPI-NOTIFY 2 "Building new package version: \e[33m$version"
 
 # - control
 cat << _EOF_ > "$DIR/DEBIAN/control"
