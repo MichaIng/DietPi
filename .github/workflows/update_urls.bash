@@ -241,7 +241,7 @@ aREGEX[$software_id]='https://github.com/badaix/snapcast/releases/download/.*/sn
 aREPLACE[$software_id]='${release/bookworm/\$G_DISTRO_NAME}'
 
 # Snapcast Server: snapweb
-software_id=191000
+software_id=191000 # 000 appended as little hack to support multiple updates for the same software ID
 aCHECK[$software_id]='curl -sSf '\''https://api.github.com/repos/badaix/snapweb/releases/latest'\'' | mawk -F\" '\''/^ *"browser_download_url": ".*\/snapweb_[^"\/]*_all.deb"$/{print $4}'\'
 aREGEX[$software_id]='https://github.com/badaix/snapweb/releases/download/.*/snapweb_.*_all\.deb'
 

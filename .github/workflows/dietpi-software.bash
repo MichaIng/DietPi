@@ -157,6 +157,8 @@ Process_Software()
 			98) aSERVICES[i]='haproxy' aTCP[i]='80 1338';;
 			99) aSERVICES[i]='node_exporter' aTCP[i]='9100';;
 			#100) (( $arch < 3 )) && aCOMMANDS[i]='/usr/bin/pijuice_cli32 -V' || aCOMMANDS[i]='/usr/bin/pijuice_cli64 -V' aSERVICES[i]='pijuice' aTCP[i]='????' Service does not start without I2C device, not present in container and CLI command always puts you in interactive console
+			101) aSERVICES[i]='logrotate';;
+			102) aSERVICES[i]='rsyslog';;
 			104) aSERVICES[i]='dropbear' aTCP[i]='22';;
 			105) aSERVICES[i]='ssh' aTCP[i]='22';;
 			106) aSERVICES[i]='lidarr' aTCP[i]='8686';;
@@ -384,8 +386,15 @@ fi
 # Transmission: Workaround for transmission-daemon timing out with container host AppArmor throwing: apparmor="ALLOWED" operation="sendmsg" class="file" info="Failed name lookup - disconnected path" error=-13 profile="transmission-daemon" name="run/systemd/notify"
 if [[ ${aINSTALL[44]} == 1 && $DISTRO == 'trixie' ]] && systemctl -q is-active apparmor
 then
-	G_EXEC sed --follow-symlinks -i '/profile transmission-daemon/s/flags=(complain)/flags=(complain,attach_disconnected)/' /etc/apparmor.d/transmission
+	G_EXEC sed --follow-symlinks -i '/^profile transmission-daemon/s/flags=(complain)/flags=(complain,attach_disconnected)/' /etc/apparmor.d/transmission
 	G_EXEC_OUTPUT=1 G_EXEC apparmor_parser -r /etc/apparmor.d/transmission
+fi
+
+# rsyslog: Workaround for rsyslogd timing out with container host AppArmor throwing: apparmor="DENIED" operation="sendmsg" class="file" info="Failed name lookup - disconnected path" error=-13 profile="rsyslogd" name="run/systemd/journal/dev-log"
+if [[ ${aINSTALL[102]} == 1 && $DISTRO == 'trixie' ]] && systemctl -q is-active apparmor
+then
+	G_EXEC sed --follow-symlinks -i '/^profile usr.sbin.rsyslogd/s/{$/flags=(attach_disconnected) {/' /etc/apparmor.d/usr.sbin.rsyslogd
+	G_EXEC_OUTPUT=1 G_EXEC apparmor_parser -r /etc/apparmor.d/usr.sbin.rsyslogd
 fi
 
 # Workaround for failing IPv4 network connectivity check as GitHub Actions runners do not receive external ICMP echo replies.
