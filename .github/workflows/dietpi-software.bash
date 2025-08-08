@@ -157,7 +157,7 @@ Process_Software()
 			98) aSERVICES[i]='haproxy' aTCP[i]='80 1338';;
 			99) aSERVICES[i]='node_exporter' aTCP[i]='9100';;
 			#100) (( $arch < 3 )) && aCOMMANDS[i]='/usr/bin/pijuice_cli32 -V' || aCOMMANDS[i]='/usr/bin/pijuice_cli64 -V' aSERVICES[i]='pijuice' aTCP[i]='????' Service does not start without I2C device, not present in container and CLI command always puts you in interactive console
-			101) aSERVICES[i]='logrotate';;
+			101) aCOMMANDS[i]='logrotate -v /etc/logrotate.conf';;
 			102) aSERVICES[i]='rsyslog';;
 			104) aSERVICES[i]='dropbear' aTCP[i]='22';;
 			105) aSERVICES[i]='ssh' aTCP[i]='22';;
