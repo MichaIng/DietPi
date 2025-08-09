@@ -190,7 +190,7 @@ Process_Software()
 			140) aSERVICES[i]='domoticz' aTCP[i]='8424';;
 			#142) aSERVICES[i]='snapd';; "system does not fully support snapd: cannot mount squashfs image using "squashfs": mount: /tmp/syscheck-mountpoint-2075108377: mount failed: Operation not permitted."
 			143) aSERVICES[i]='koel' aTCP[i]='8003'; (( $emulation )) && aDELAY[i]=30;;
-			144) aSERVICES[i]='sonarr' aTCP[i]='8989';;
+			144) (( $arch == 1 )) || aSERVICES[i]='sonarr' aTCP[i]='8989';; # Skip on ARMv6 failing in container with "If you're reading this, the MonoMod.RuntimeDetour selftest failed."
 			145) aSERVICES[i]='radarr' aTCP[i]='7878';;
 			146) aSERVICES[i]='tautulli' aTCP[i]='8181'; (( $emulation )) && aDELAY[i]=60;;
 			147) aSERVICES[i]='jackett' aTCP[i]='9117';;
