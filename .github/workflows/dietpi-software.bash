@@ -222,7 +222,7 @@ Process_Software()
 			181) aSERVICES[i]='papermc' aTCP[i]='25565 25575'; (( $emulation )) && aDELAY[i]=600 || aDELAY[i]=60;;
 			182) aSERVICES[i]='unbound' aUDP[i]='53'; [[ ${aSERVICES[126]} ]] && aUDP[i]+=' 5335';; # Uses port 5335 if Pi-hole or AdGuard Home is installed, but those do listen on port 53 instead
 			183) aSERVICES[i]='vaultwarden' aTCP[i]='8001';;
-			184) aSERVICES[i]='tor';; # aTCP[i]='443 9051' Interactive install with ports depending on choice and relay type
+			184) aSERVICES[i]='tor' aTCP[i]='80 443 9051';;
 			#185) aTCP[i]='9002';; # Docker does not start in systemd containers (without dedicated network)
 			186) aSERVICES[i]='ipfs' aTCP[i]='5003 8087';;
 			187) aSERVICES[i]='cups' aTCP[i]='631';;
