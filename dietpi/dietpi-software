@@ -4154,15 +4154,21 @@ _EOF_
 
 		if To_Install 186 ipfs # IPFS Node
 		then
+			local version=
 			case $G_HW_ARCH in
 				3) local arch='arm64';;
 				10) local arch='amd64';;
-				*) local arch='arm';;
+				*) local arch='arm' version='v0.33.2';; # latest version with 32-bit builds
 			esac
 
-			# Download latest version
-			local version=$(curl -sSfL 'https://dist.ipfs.tech/go-ipfs/versions' | sed '/-rc[0-9]*$/d' | tail -1)
-			[[ $version ]] || { version='v0.36.0'; G_DIETPI-NOTIFY 1 "Automatic latest ${aSOFTWARE_NAME[$software_id]} version detection failed. Version \"$version\" will be installed as fallback, but a newer version might be available. Please report this at: https://github.com/MichaIng/DietPi/issues"; }
+			if [[ $version ]]
+			then
+				G_DIETPI-NOTIFY 2 "For your architecture, the latest available ${aSOFTWARE_NAME[$software_id]} builds are $version."
+			else
+				# Find latest version
+				version=$(curl -sSfL 'https://dist.ipfs.tech/go-ipfs/versions' | sed '/-rc[0-9]*$/d' | tail -1)
+				[[ $version ]] || { version='v0.36.0'; G_DIETPI-NOTIFY 1 "Automatic latest ${aSOFTWARE_NAME[$software_id]} version detection failed. Version \"$version\" will be installed as fallback, but a newer version might be available. Please report this at: https://github.com/MichaIng/DietPi/issues"; }
+			fi
 			Download_Install "https://dist.ipfs.tech/go-ipfs/$version/go-ipfs_${version}_linux-$arch.tar.gz"
 
 			# Install
@@ -4200,7 +4206,7 @@ _EOF_
 			fi
 
 			# Permissions
-			G_EXEC chown -R ipfs:ipfs /mnt/dietpi_userdata/ipfs
+			G_EXEC chown -R 'ipfs:ipfs' /mnt/dietpi_userdata/ipfs
 
 			# CLI alias
 			echo 'alias ipfs='\''sudo -u ipfs IPFS_PATH=/mnt/dietpi_userdata/ipfs ipfs'\' > /etc/bashrc.d/dietpi-ipfs.sh
@@ -10385,11 +10391,14 @@ _EOF_
 
 		if To_Install 162 docker # Docker
 		then
-			# APT package name
-			# - RISC-V: Use "docker.io" from Debian repo as the official Docker repo does not support RISC-V yet: https://download.docker.com/linux/debian/dists/
-			local package='docker.io'
-			if (( $G_HW_ARCH != 11 ))
+			# APT packages
+			if (( $G_HW_ARCH == 11 ))
 			then
+				# RISC-V: Use "docker.io" from Debian repo as the official Docker repo does not support RISC-V yet: https://download.docker.com/linux/debian/dists/
+				local packages=('docker.io')
+				# Trisie: Add split "docker-cli" package: https://packages.debian.org/trixie/docker-cli
+				(( $G_DISTRO > 7 )) && packages+=('docker-cli')
+			else
 				# Detect distro
 				local distro='debian' suite=$G_DISTRO_NAME
 				(( $G_RASPBIAN )) && distro='raspbian' suite=${G_DISTRO_NAME/trixie/bookworm}
@@ -10404,13 +10413,13 @@ _EOF_
 				G_AGUP
 
 				# APT package name
-				package='docker-ce'
+				packages=('docker-ce')
 			fi
 
 			# APT package
 			# - Mask service to prevent iptables related startup failure: https://github.com/MichaIng/DietPi/issues/6013
 			G_EXEC systemctl mask --now docker
-			G_AGI "$package"
+			G_AGI "${packages[@]}"
 			G_EXEC systemctl unmask docker
 			G_EXEC systemctl start docker.socket
 
@@ -10447,7 +10456,15 @@ _EOF_
 
 		if To_Install 134 # Docker Compose
 		then
-			G_AGI docker-compose-plugin
+			# RISC-V: Official APT repo does not support RISC-V yet and the Debian package is the old "docker-compose" non-plugin version
+			if (( $G_HW_ARCH == 11 ))
+			then
+				local fallback_url='https://github.com/docker/compose/releases/download/v2.39.2/docker-compose-linux-riscv64'
+				Download_Install "$(curl -sSfL 'https://api.github.com/repos/docker/compose/releases/latest' | mawk -F\" '/^ *"browser_download_url": ".*\/docker-compose-linux-riscv64"$/{print $4}')" /usr/local/lib/docker/cli-plugins/docker-compose
+				G_EXEC chmod +x /usr/local/lib/docker/cli-plugins/docker-compose
+			else
+				G_AGI docker-compose-plugin
+			fi
 		fi
 
 		if To_Install 161 bdd # FuguHub
@@ -13662,6 +13679,8 @@ _EOF_
 		if To_Uninstall 134 # Docker Compose
 		then
 			G_AGP docker-compose-plugin
+			[[ -f '/usr/local/lib/docker/cli-plugins/docker-compose' ]] && G_EXEC rm /usr/local/lib/docker/cli-plugins/docker-compose
+			[[ -d '/usr/local/lib/docker/cli-plugins' ]] && G_EXEC rmdir -p --ignore-fail-on-non-empty /usr/local/lib/docker/cli-plugins
 			[[ -f '/usr/local/bin/docker-compose' ]] && G_EXEC rm /usr/local/bin/docker-compose # Pre-v8.14
 			command -v docker-compose > /dev/null && command -v pip3 > /dev/null && G_EXEC_OUTPUT=1 G_EXEC pip3 uninstall -y docker-compose # Pre-v8.2
 		fi
