@@ -346,6 +346,7 @@ Links to hardware and software manufacturers, sources and build instructions use
 - [GZDoom](https://github.com/ZDoom/gzdoom)
 - [Mumble Server](https://github.com/mumble-voip/mumble)
 - [UrBackup](https://github.com/uroni/urbackup_backend)
+- [PiJuice](https://github.com/PiSupply/PiJuice)
 
 ---
 
