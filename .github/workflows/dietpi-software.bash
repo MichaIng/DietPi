@@ -233,6 +233,7 @@ Process_Software()
 			192) aSERVICES[i]='snapclient';;
 			#193) aSERVICES[i]='k3s';; fails due to missing memory cgroup access from within the container
 			194) aSERVICES[i]='postgresql';;
+			195) aCOMMANDS[i]='yt-dlp --version';;
 			196) aCOMMANDS[i]='java -version';;
 			197) aCOMMANDS[i]='box64 -v';;
 			198) aSERVICES[i]='filebrowser' aTCP[i]='8084';;
