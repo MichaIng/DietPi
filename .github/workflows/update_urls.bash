@@ -226,7 +226,7 @@ aREGEX[$software_id]='https://github.com/gotson/komga/releases/download/.*/komga
 
 # IPFS Node
 software_id=186
-aCHECK[$software_id]='curl -sSf '\''https://dist.ipfs.tech/go-ipfs/versions'\'' | sed '\''/-rc[0-9]*$/d'\'' | tail -1'
+aCHECK[$software_id]='curl -sSf '\''https://dist.ipfs.tech/kubo/versions'\'' | sed '\''/-rc[0-9]*$/d'\'' | tail -1'
 aREGEX[$software_id]='version='\''[^'\'']*'\'
 aREPLACE[$software_id]='version='\''$release'\'
 
