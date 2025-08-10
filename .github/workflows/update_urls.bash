@@ -150,11 +150,6 @@ aCHECK[$software_id]='curl -sSf '\''https://download.yacy.net/?C=N;O=D'\'' | gre
 aREGEX[$software_id]='file='\''[^'\'']*'\'
 aREPLACE[$software_id]='file='\''$release'\'
 
-# Docker Compose (RISC-V)
-software_id=134
-aCHECK[$software_id]='curl -sSfL '\''https://api.github.com/repos/docker/compose/releases/latest'\'' | mawk -F\" '\''/^ *"browser_download_url": ".*\/docker-compose-linux-riscv64"$/{print $4}'\'
-aREGEX[$software_id]='https://github.com/docker/compose/releases/download/.*/docker-compose-linux-riscv64'
-
 # Koel (only latest/v7 for now)
 software_id=143
 aCHECK[$software_id]='curl -sSf '\''https://api.github.com/repos/koel/koel/releases/latest'\'' | mawk -F\" '\''/^ *"browser_download_url": ".*\/koel-[^"\/]*\.tar\.gz"$/{print $4}'\'
