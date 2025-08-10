@@ -474,8 +474,8 @@ then
 	G_EXEC sed --follow-symlinks -i '/# Start DietPi-Software/i\sed -i '\''/^DocumentRoot/a\Mutex posixsem'\'' /boot/dietpi/dietpi-software' rootfs/boot/dietpi/dietpi-login
 fi
 
-# Workaround for Readarr explicitly calling uname without shell, breaking our ARM workaround
-if (( ${aINSTALL[203]} )) && [[ -f 'rootfs/usr/local/bin/uname' ]]
+# Workaround for Readarr/Kavita explicitly calling uname without shell, breaking our ARM workaround
+if (( ${aINSTALL[203]} )) || (( ${aINSTALL[212]} )) && [[ -f 'rootfs/usr/local/bin/uname' ]]
 then
 	G_EXEC sed --follow-symlinks -i '/# Start DietPi-Software/i\sed -i '\''/# Custom 1st run script/i\\rm /usr/local/bin/uname'\'' /boot/dietpi/dietpi-software' rootfs/boot/dietpi/dietpi-login
 fi
