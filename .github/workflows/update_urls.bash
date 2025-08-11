@@ -219,11 +219,11 @@ software_id=179
 aCHECK[$software_id]='curl -sSf '\''https://api.github.com/repos/gotson/komga/releases/latest'\'' | mawk -F\" '\''/^ *"browser_download_url": ".*\/komga-[^"\/]*\.jar"$/{print $4}'\'
 aREGEX[$software_id]='https://github.com/gotson/komga/releases/download/.*/komga-.*\.jar'
 
-# IPFS Node
+# Kubo
 software_id=186
 aCHECK[$software_id]='curl -sSf '\''https://dist.ipfs.tech/kubo/versions'\'' | sed '\''/-rc[0-9]*$/d'\'' | tail -1'
-aREGEX[$software_id]='version='\''[^'\'']*'\'
-aREPLACE[$software_id]='version='\''$release'\'
+aREGEX[$software_id]='version='\''[^'\'']*'\''; '
+aREPLACE[$software_id]='version='\''$release'\''; '
 
 # Go
 software_id=188
