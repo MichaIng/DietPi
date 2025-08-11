@@ -81,6 +81,8 @@ emulation=0
 [[ $SOFTWARE =~ (^| )(86|142|185)( |$) ]] && { echo '[ WARN ] Removing Roon Extension Manager, MicroK8s and Portainer from test installs as Docker cannot start in systemd containers'; SOFTWARE=$(sed -E 's/(^| )(86|142|185)( |$)/\1\3/g' <<< "$SOFTWARE"); }
 # Add MariaDB with Allo GUI (non-full/reinstall ID 160), as otherwise the install fails
 [[ $SOFTWARE =~ (^| )160( |$) ]] && SOFTWARE=$(sed -E 's/(^| )160( |$)/\188 160\2/g' <<< "$SOFTWARE")
+# Remove PostgreSQL and dependants (Synapse) on RISC-V with emulation: https://gitlab.com/qemu-project/qemu/-/issues/3068
+(( $arch == 11 && $emulation )) && [[ $SOFTWARE =~ (^| )(125|194)( |$) ]] && { echo '[ WARN ] Removing PostgreSQL and Synapse from test installs as PostgreSQL cannot start in emulated RISC-V containers'; SOFTWARE=$(sed -E 's/(^| )(125|194)( |$)/\1\3/g' <<< "$SOFTWARE"); }
 
 ##########################################
 # Create service and port lists
@@ -232,7 +234,7 @@ Process_Software()
 			191) aSERVICES[i]='snapserver' aTCP[i]='1780';;
 			192) aSERVICES[i]='snapclient';;
 			#193) aSERVICES[i]='k3s';; fails due to missing memory cgroup access from within the container
-			194) (( $arch == 11 && $emulation )) || aSERVICES[i]='postgresql';; # RISC-V emulation: https://gitlab.com/qemu-project/qemu/-/issues/3068
+			194) aSERVICES[i]='postgresql';;
 			195) aCOMMANDS[i]='yt-dlp --version';;
 			196) aCOMMANDS[i]='java -version';;
 			197) aCOMMANDS[i]='box64 -v';;
