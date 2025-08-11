@@ -232,7 +232,7 @@ Process_Software()
 			191) aSERVICES[i]='snapserver' aTCP[i]='1780';;
 			192) aSERVICES[i]='snapclient';;
 			#193) aSERVICES[i]='k3s';; fails due to missing memory cgroup access from within the container
-			194) aSERVICES[i]='postgresql';;
+			194) (( $arch == 11 && $emulation )) || aSERVICES[i]='postgresql';; # RISC-V emulation: https://gitlab.com/qemu-project/qemu/-/issues/3068
 			195) aCOMMANDS[i]='yt-dlp --version';;
 			196) aCOMMANDS[i]='java -version';;
 			197) aCOMMANDS[i]='box64 -v';;
