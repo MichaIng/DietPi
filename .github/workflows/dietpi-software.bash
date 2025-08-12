@@ -100,6 +100,7 @@ Process_Software()
 			1) aCOMMANDS[i]='smbclient -V';;
 			2) aSERVICES[i]='fahclient' aTCP[i]='7396';;
 			7) aCOMMANDS[i]='ffmpeg -version';;
+			8) aCOMMANDS[i]='javac -version';;
 			9) aCOMMANDS[i]='node -v';;
 			10) aCOMMANDS[i]='LD_LIBRARY_PATH=$(find /usr/lib/*/amiberry-lite -maxdepth 0) amiberry-lite -h | grep '\''^$VER: Amiberry-Lite '\';;
 			11) aCOMMANDS[i]='gzdoom -norun | grep '\''^GZDoom version '\';;
@@ -447,10 +448,6 @@ rm -R /mnt/dietpi_userdata_bak
 _EOF_
 	fi
 fi
-
-# Workaround failing Java apps if 64-bit host memory leads to too large heap size in 32-bit containers: https://stackoverflow.com/questions/4401396
-# shellcheck disable=SC2016
-(( $arch < 3 && $G_HW_ARCH > 2)) && G_EXEC sed --follow-symlinks -i '/# Start DietPi-Software/a\sed -i '\''s|-mx${memory_limit}m|-mx1024m|'\'' /boot/dietpi/dietpi-software' rootfs/boot/dietpi/dietpi-login
 
 # ARMv6: Workaround for ARMv7 Rust toolchain selected in containers with newer host/emulated ARM version
 (( $arch == 1 )) && G_EXEC sed --follow-symlinks -i '/# Start DietPi-Software/a\sed -i '\''s/--profile minimal .*$/--profile minimal --default-host arm-unknown-linux-gnueabihf/'\'' /boot/dietpi/dietpi-software' rootfs/boot/dietpi/dietpi-login
