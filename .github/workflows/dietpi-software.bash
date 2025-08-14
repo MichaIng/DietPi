@@ -181,9 +181,9 @@ Process_Software()
 			125) aSERVICES[i]='synapse' aTCP[i]='8008';;
 			126) aSERVICES[i]='adguardhome' aUDP[i]='53' aTCP[i]='8083'; [[ ${aSERVICES[182]} ]] && aUDP[i]+=' 5335';; # Unbound uses port 5335 if AdGuard Home is installed
 			128) aSERVICES[i]='mpd' aTCP[i]='6600';;
-			131) (( $arch == 2 || $arch == 11 )) || aSERVICES[i]='blynkserver' aTCP[i]='9443'; (( $arch == 10 || $arch == 2 || $arch == 11 )) || aDELAY[i]=60;;
+			131) (( $arch < 3 || $arch == 11 )) || aSERVICES[i]='blynkserver' aTCP[i]='9443'; (( $arch == 10 || $arch == 2 || $arch == 11 )) || aDELAY[i]=60;;
 			132) aSERVICES[i]='aria2' aTCP[i]='6800';; # aTCP[i]+=' 6881-6999';; # Listens on random port
-			133) (( $arch == 2 || $arch == 11 )) || aSERVICES[i]='yacy' aTCP[i]='8090'; (( $arch == 10 )) && aDELAY[i]=30; (( $arch == 10 || $arch == 2 || $arch == 11)) || aDELAY[i]=90;;
+			133) (( $arch < 3 || $arch == 11 )) || aSERVICES[i]='yacy' aTCP[i]='8090'; (( $arch == 10 )) && aDELAY[i]=30; (( $arch == 10 || $arch == 2 || $arch == 11)) || aDELAY[i]=90;;
 			134) aCOMMANDS[i]='docker compose version';;
 			135) aSERVICES[i]='icecast2' aTCP[i]='8000' aCOMMANDS[i]='darkice -h | grep '\''^DarkIce'\';; # darkice service cannot start in container as is requires audio recording device access
 			136) aSERVICES[i]='motioneye' aTCP[i]='8765';;
