@@ -562,8 +562,6 @@ Available commands:
 		aSOFTWARE_CATX[$software_id]=2
 		aSOFTWARE_DOCS[$software_id]='https://dietpi.com/docs/software/media/#snapcast-server'
 		aSOFTWARE_DEPS[$software_id]='5'
-		# - RISC-V: https://github.com/badaix/snapcast/releases
-		aSOFTWARE_AVAIL_G_HW_ARCH[$software_id,11]=0
 		#------------------
 		software_id=192
 		aSOFTWARE_NAME[$software_id]='Snapcast Client'
@@ -571,9 +569,6 @@ Available commands:
 		aSOFTWARE_CATX[$software_id]=2
 		aSOFTWARE_DOCS[$software_id]='https://dietpi.com/docs/software/media/#snapcast-client'
 		aSOFTWARE_DEPS[$software_id]='5'
-		aSOFTWARE_INTERACTIVE[$software_id]=1
-		# - RISC-V: https://github.com/badaix/snapcast/releases
-		aSOFTWARE_AVAIL_G_HW_ARCH[$software_id,11]=0
 		#------------------
 		software_id=199
 		aSOFTWARE_NAME[$software_id]='Spotifyd'
@@ -2805,6 +2800,78 @@ _EOF_
 			# Install packages
 			G_AGI "${aDEPS[@]}"
 			aDEPS=()
+		fi
+
+		if To_Install 191 snapserver # Snapcast Server
+		then
+			# RISC-V/Trixie: Install from Debian repo: https://github.com/badaix/snapcast/releases
+			if (( $G_DISTRO > 7 ))
+			then
+				G_AGI snapserver
+
+				# Install and enable snapweb web UI, not included in Debian's snapserver package: https://github.com/MichaIng/DietPi/issues/7073
+				local fallback_url='https://github.com/badaix/snapweb/releases/download/v0.9.0/snapweb_0.9.0-1_all.deb'
+				Download_Install "$(curl -sSfL 'https://api.github.com/repos/badaix/snapweb/releases/latest' | mawk -F\" '/^ *"browser_download_url": ".*\/snapweb_[^"\/]*_all.deb"$/{print $4}')"
+				G_CONFIG_INJECT 'doc_root[[:blank:]=]' 'doc_root = /usr/share/snapweb' /etc/snapserver.conf '\[http\]'
+
+				# Fix /var/lib/snapserver permissions, just in case badaix's package was previously used, which uses the "snapserver" user, instead of "_snapserver"
+				[[ -d '/var/lib/snapserver' ]] && G_EXEC chown -R '_snapserver:_snapserver' /var/lib/snapserver
+				getent passwd snapserver > /dev/null && G_EXEC userdel snapserver
+			else
+				local arch=$(dpkg --print-architecture)
+				local fallback_url="https://github.com/badaix/snapcast/releases/download/v0.31.0/snapserver_0.31.0-1_${arch}_$G_DISTRO_NAME.deb"
+				Download_Install "$(curl -sSfL 'https://api.github.com/repos/badaix/snapcast/releases/latest' | mawk -F\" "/^ *\"browser_download_url\": \".*\/snapserver_[^\"\/]*_${arch}_$G_DISTRO_NAME.deb\"$/{print \$4}")"
+
+				# Fix /var/lib/snapserver permissions, just in case Debian's package was previously used, which uses the "_snapserver" user, instead of "snapserver"
+				[[ -d '/var/lib/snapserver' ]] && G_EXEC chown -R 'snapserver:snapserver' /var/lib/snapserver
+				getent passwd _snapserver > /dev/null && G_EXEC userdel _snapserver
+			fi
+			G_EXEC systemctl stop snapserver
+
+			# Disable JSON RPC by default if setting was never touched yet
+			G_EXEC sed --follow-symlinks -i '/^\[tcp\]/,/^\[/s/^#enabled = true$/enabled = false/' /etc/snapserver.conf
+		fi
+
+		if To_Install 192 snapclient # Snapcast Client
+		then
+			# RISC-V/Trixie: Install from Debian repo: https://github.com/badaix/snapcast/releases
+			if (( $G_DISTRO > 7 ))
+			then
+				G_AGI snapclient
+			else
+				local arch=$(dpkg --print-architecture)
+				local fallback_url="https://github.com/badaix/snapcast/releases/download/v0.31.0/snapclient_0.31.0-1_${arch}_$G_DISTRO_NAME.deb"
+				Download_Install "$(curl -sSfL 'https://api.github.com/repos/badaix/snapcast/releases/latest' | mawk -F\" "/^ *\"browser_download_url\": \".*\/snapclient_[^\"\/]*_${arch}_$G_DISTRO_NAME.deb\"$/{print \$4}")"
+			fi
+			G_EXEC systemctl stop snapclient
+
+			# Config: Skip it host has been applied before. ToDo: v0.32.0 deprecated "--host"/"--port" in favour of "host:port" URI argument. But v0.31.0 from Debian does not support this yet.
+			if ! grep -q '^[[:blank:]]*SNAPCLIENT_OPTS=.*["[:blank:]]-h[[:blank:]]' /etc/default/snapclient
+			then
+				# Ask for server, use local one by default if installed
+				dpkg-query -s 'snapserver' &> /dev/null && G_WHIP_DEFAULT_ITEM='127.0.0.1'
+				G_WHIP_NOCANCEL=1
+				G_WHIP_INPUTBOX 'Please enter the IP address or hostname of your Snapcast server to connect this client to:'
+				if [[ $G_WHIP_RETURNED_VALUE ]]
+				then
+					local snapcast_server_host=$G_WHIP_RETURNED_VALUE
+
+					G_WHIP_DEFAULT_ITEM=1704 G_WHIP_NOCANCEL=1 G_WHIP_INPUTBOX_REGEX='^[1-9][0-9]*$' G_WHIP_INPUTBOX_REGEX_TEXT='a valid port number'
+					G_WHIP_INPUTBOX 'Please enter the network port of your Snapcast server (default: 1704):'
+					local snapcast_server_port=$G_WHIP_RETURNED_VALUE
+
+					G_CONFIG_INJECT 'SNAPCLIENT_OPTS=' "SNAPCLIENT_OPTS=\"-h $snapcast_server_host -p $snapcast_server_port\"" /etc/default/snapclient
+				fi
+			fi
+
+			# If no Snapcast server was defined explicitly, e.g. on unattended install without having the server installed first, server and client use Avahi to find each other.
+			# The client throws endless errors if Avahi is not running, and endless messages until the server announced itself: https://github.com/badaix/snapcast/issues/647
+			# Hence Avahi-Daemon is added as fixed dependency for the server, and added for the client hereby if no server was explicitly defined. But is this as fallback only for unattended installs.
+			if ! grep -q '^[[:blank:]]*SNAPCLIENT_OPTS=.*["[:blank:]]-h[[:blank:]]' /etc/default/snapclient
+			then
+				G_DIETPI-NOTIFY 2 'Adding Avahi-Daemon as dependency for the Snapcast client to be able to auto-detect a server'
+				aSOFTWARE_INSTALL_STATE[152]=1
+			fi
 		fi
 
 		if To_Install 152 avahi-daemon # Avahi-Daemon
@@ -11467,80 +11534,6 @@ _EOF_
 		if To_Install 140 domoticz # Domoticz
 		then
 			G_AGI domoticz
-		fi
-
-		if To_Install 191 snapserver # Snapcast Server
-		then
-			# RISC-V/Trixie: Install from Debian repo: https://github.com/badaix/snapcast/releases
-			if (( $G_DISTRO > 7 ))
-			then
-				G_AGI snapserver
-
-				# Install and enable snapweb web UI, not included in Debian's snapserver package: https://github.com/MichaIng/DietPi/issues/7073
-				local fallback_url='https://github.com/badaix/snapweb/releases/download/v0.9.0/snapweb_0.9.0-1_all.deb'
-				Download_Install "$(curl -sSfL 'https://api.github.com/repos/badaix/snapweb/releases/latest' | mawk -F\" '/^ *"browser_download_url": ".*\/snapweb_[^"\/]*_all.deb"$/{print $4}')"
-				G_CONFIG_INJECT 'doc_root[[:blank:]=]' 'doc_root = /usr/share/snapweb' /etc/snapserver.conf '\[http\]'
-
-				# Fix /var/lib/snapserver permissions, just in case badaix's package was previously used, which uses the "snapserver" user, instead of "_snapserver"
-				[[ -d '/var/lib/snapserver' ]] && G_EXEC chown -R '_snapserver:_snapserver' /var/lib/snapserver
-				getent passwd snapserver > /dev/null && G_EXEC userdel snapserver
-			else
-				local arch=$(dpkg --print-architecture)
-				local fallback_url="https://github.com/badaix/snapcast/releases/download/v0.31.0/snapserver_0.31.0-1_${arch}_$G_DISTRO_NAME.deb"
-				Download_Install "$(curl -sSfL 'https://api.github.com/repos/badaix/snapcast/releases/latest' | mawk -F\" "/^ *\"browser_download_url\": \".*\/snapserver_[^\"\/]*_${arch}_$G_DISTRO_NAME.deb\"$/{print \$4}")"
-
-				# Fix /var/lib/snapserver permissions, just in case Debian's package was previously used, which uses the "_snapserver" user, instead of "snapserver"
-				[[ -d '/var/lib/snapserver' ]] && G_EXEC chown -R 'snapserver:snapserver' /var/lib/snapserver
-				getent passwd _snapserver > /dev/null && G_EXEC userdel _snapserver
-			fi
-			G_EXEC systemctl stop snapserver
-
-			# Disable JSON RPC by default if setting was never touched yet
-			G_EXEC sed --follow-symlinks -i '/^\[tcp\]/,/^\[/s/^#enabled = true$/enabled = false/' /etc/snapserver.conf
-		fi
-
-		if To_Install 192 snapclient # Snapcast Client
-		then
-			# RISC-V/Trixie: Install from Debian repo: https://github.com/badaix/snapcast/releases
-			if (( $G_DISTRO > 7 ))
-			then
-				G_AGI snapclient
-			else
-				local arch=$(dpkg --print-architecture)
-				local fallback_url="https://github.com/badaix/snapcast/releases/download/v0.31.0/snapclient_0.31.0-1_${arch}_$G_DISTRO_NAME.deb"
-				Download_Install "$(curl -sSfL 'https://api.github.com/repos/badaix/snapcast/releases/latest' | mawk -F\" "/^ *\"browser_download_url\": \".*\/snapclient_[^\"\/]*_${arch}_$G_DISTRO_NAME.deb\"$/{print \$4}")"
-			fi
-			G_EXEC systemctl stop snapclient
-
-			# Client IP needs to be added to allowed IP list
-			local snapcast_server_ip
-			local invalid_entry=
-			while :
-			do
-				if G_WHIP_INPUTBOX "${invalid_entry}Please enter the IPv4 address of your Snapcast server:" && [[ $G_WHIP_RETURNED_VALUE =~ ^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$ ]]
-				then
-					snapcast_server_ip=$G_WHIP_RETURNED_VALUE
-					break
-				else
-					invalid_entry='[ERROR] Please enter a valid IP address. Please retry...\n\n'
-				fi
-			done
-
-			local snapcast_server_port=1704
-			invalid_entry=
-			while :
-			do
-				G_WHIP_DEFAULT_ITEM=$snapcast_server_port
-				if G_WHIP_INPUTBOX "${invalid_text}Please enter the network port of your Snapcast server (default: 1704):" && disable_error=1 G_CHECK_VALIDINT "$G_WHIP_RETURNED_VALUE" 1
-				then
-					snapcast_server_port=$G_WHIP_RETURNED_VALUE
-					break
-				else
-					invalid_text='[ERROR] Please enter a valid port number. Please retry...\n\n'
-				fi
-			done
-
-			G_CONFIG_INJECT 'SNAPCLIENT_OPTS=' "SNAPCLIENT_OPTS=\"-h $snapcast_server_ip -p $snapcast_server_port\"" /etc/default/snapclient
 		fi
 
 		if To_Install 202 # Rclone

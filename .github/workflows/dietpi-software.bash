@@ -232,7 +232,7 @@ Process_Software()
 			188) aCOMMANDS[i]='go version';;
 			189) aCOMMANDS[i]='sudo -u dietpi codium -v';;
 			190) aCOMMANDS[i]='beet version';;
-			191) aSERVICES[i]='snapserver' aTCP[i]='1780';;
+			191) aSERVICES[i]='snapserver' aTCP[i]='1704 1780';;
 			192) aSERVICES[i]='snapclient';;
 			#193) aSERVICES[i]='k3s';; fails due to missing memory cgroup access from within the container
 			194) aSERVICES[i]='postgresql';;
@@ -478,6 +478,10 @@ if (( ${aINSTALL[203]} )) || (( ${aINSTALL[212]} )) && [[ -f 'rootfs/usr/local/b
 then
 	G_EXEC sed --follow-symlinks -i '/# Start DietPi-Software/i\sed -i '\''/# Custom 1st run script/i\\rm /usr/local/bin/uname'\'' /boot/dietpi/dietpi-software' rootfs/boot/dietpi/dietpi-login
 fi
+
+# Workaround for Snapcast Client, using file output where no ALSA device is available
+# shellcheck disable=SC2016
+(( ${aINSTALL[192]} )) && G_EXEC sed --follow-symlinks -i '/# Start DietPi-Software/i\sed -i '\''s/-p \$snapcast_server_port/-p \$snapcast_server_port --player file/'\'' /boot/dietpi/dietpi-software' rootfs/boot/dietpi/dietpi-login
 
 # Check for service status, ports and commands
 # shellcheck disable=SC2016
