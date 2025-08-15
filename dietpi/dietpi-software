@@ -764,9 +764,6 @@ Available commands:
 		aSOFTWARE_CATX[$software_id]=4
 		aSOFTWARE_DOCS[$software_id]='https://dietpi.com/docs/software/cloud/#nextcloud-talk'
 		aSOFTWARE_DEPS[$software_id]='114'
-		# Currently requires manual domain and Coturn server port input.
-		# - To resolve: Default port 5349 could be used, but reliable method to get external domain/static IP is required.
-		aSOFTWARE_INTERACTIVE[$software_id]=1
 		#------------------
 		software_id=48
 		aSOFTWARE_NAME[$software_id]='Pydio'
@@ -4927,33 +4924,18 @@ The install script will now exit. After applying one of the the above, rerun die
 			Remove_SysV coturn 1
 
 			# Ask user for server domain and desired TURN server port
-			local invalid_text=
-			local domain=$(hostname -f)
-			while :
-			do
-				G_WHIP_DEFAULT_ITEM=$domain
-				if G_WHIP_INPUTBOX "${invalid_text}Please enter your server's external domain to allow Nextcloud Talk access your TURN server:"
-				then
-					domain=${G_WHIP_RETURNED_VALUE#http*://}
-					break
-				else
-					invalid_text='[ERROR] This input is required!\n\n'
-				fi
-			done
-			invalid_text=
-			local port=3478
-			while :
-			do
-				G_WHIP_DEFAULT_ITEM=$port
-				if G_WHIP_INPUTBOX "${invalid_text}Please enter the network port, that should be used for your TURN server:
-\nNB: This port (UDP + TCP) needs to be forwarded by your router and/or opened in your firewall settings. Default value is: 3478" && disable_error=1 G_CHECK_VALIDINT "$G_WHIP_RETURNED_VALUE" 0
-				then
-					port=$G_WHIP_RETURNED_VALUE
-					break
-				else
-					invalid_text='[ERROR] No valid entry found, value needs to be a sequence of integers. Please retry...\n\n'
-				fi
-			done
+			G_WHIP_DEFAULT_ITEM=$(sed -n '/^[[:blank:]]*SOFTWARE_PUBLIC_DOMAIN_NAME=/{s/^[^=]*=//p;q}' /boot/dietpi.txt)
+			[[ $G_WHIP_DEFAULT_ITEM ]] || G_WHIP_DEFAULT_ITEM=$(find /etc/letsencrypt/live -mindepth 1 -maxdepth 1 -type d -print -quit 2> /dev/null)
+			[[ $G_WHIP_DEFAULT_ITEM ]] || G_WHIP_DEFAULT_ITEM=$(hostname -f)
+			G_WHIP_NOCANCEL=1
+			G_WHIP_INPUTBOX 'Please enter your server'\''s public domain name to allow Nextcloud Talk access your TURN server:'
+			local domain=$G_WHIP_RETURNED_VALUE
+			GCI_PRESERVE=1 G_CONFIG_INJECT 'SOFTWARE_PUBLIC_DOMAIN_NAME=' "SOFTWARE_PUBLIC_DOMAIN_NAME=$domain" /boot/dietpi.txt
+
+			G_WHIP_DEFAULT_ITEM=3478 G_WHIP_NOCANCEL=1 G_WHIP_INPUTBOX_REGEX='^[1-9][0-9]*$' G_WHIP_INPUTBOX_REGEX_TEXT='a valid port number'
+			G_WHIP_INPUTBOX 'Please enter the network port, that should be used for your TURN server:
+\nNB: This port (UDP + TCP) needs to be forwarded by your router and/or opened in your firewall settings. Default value is: 3478'
+			local port=$G_WHIP_RETURNED_VALUE
 
 			# Adjust Coturn settings
 			# - If /etc/turnserver.conf is not present, use default or create empty file
@@ -4986,14 +4968,14 @@ The install script will now exit. After applying one of the the above, rerun die
 			ncc app:enable spreed
 
 			# Adjust Nextcloud Talk settings to use Coturn
-			ncc config:app:set spreed stun_servers --value="[\"$domain:$port\"]"
+			ncc talk:stun:add "$domain:$port"
 			# - Generate random secret to secure TURN server access
 			local secret=$(openssl rand -hex 32)
 			GCI_PASSWORD=1 GCI_PRESERVE=1 G_CONFIG_INJECT 'static-auth-secret=' "static-auth-secret=$secret" /etc/turnserver.conf
 			# - Scrape existing secret, in case user manually chose/edited it
 			secret=$(sed -n '/^[[:blank:]]*static-auth-secret=/{s/^[^=]*=//p;q}' /etc/turnserver.conf)
-			ncc config:app:set spreed turn_servers --value="[{\"server\":\"$domain:$port\",\"secret\":\"$secret\",\"protocols\":\"udp,tcp\"}]" | sed 's/"secret":".*","protocols"/"secret":"<OMITTED>","protocols"/'
-			unset -v secret domain port invalid_text
+			ncc talk:turn:add --secret "$secret" -- 'turn' "$domain:$port" 'udp,tcp'
+			unset -v secret domain port
 		fi
 
 		if To_Install 32 ympd # ympd
