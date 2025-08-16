@@ -82,12 +82,13 @@ emulation=0
 # Add MariaDB with Allo GUI (non-full/reinstall ID 160), as otherwise the install fails
 [[ $SOFTWARE =~ (^| )160( |$) ]] && SOFTWARE=$(sed -E 's/(^| )160( |$)/\188 160\2/g' <<< "$SOFTWARE")
 # Remove PostgreSQL and dependants (Synapse) on RISC-V with emulation: https://gitlab.com/qemu-project/qemu/-/issues/3068
-(( $arch == 11 && $emulation )) && [[ $SOFTWARE =~ (^| )(125|194)( |$) ]] && { echo '[ WARN ] Removing PostgreSQL and Synapse from test installs as PostgreSQL cannot start in emulated RISC-V containers'; SOFTWARE=$(sed -E 's/(^| )(125|194)( |$)/\1\3/g' <<< "$SOFTWARE"); }
+# WireGuard: "Unable to modify/access interface: Protocol not supported" probably a syscall unsupported in QEMU user mode emulation
+(( $arch == 11 && $emulation )) && [[ $SOFTWARE =~ (^| )(125|172|194)( |$) ]] && { echo '[ WARN ] Removing PostgreSQL, WireGuard, and Synapse from test installs, not able to work in emulated RISC-V containers'; SOFTWARE=$(sed -E 's/(^| )(125|172|194)( |$)/\1\3/g' <<< "$SOFTWARE"); }
 
 ##########################################
 # Create service and port lists
 ##########################################
-aINSTALL=() aSERVICES=() aTCP=() aUDP=() aCOMMANDS=() aDELAY=()
+aINSTALL=() aSERVICES=() aTCP=() aUDP=() aCOMMANDS=() aDELAY=() CAPABILITIES=''
 Process_Software()
 {
 	local i
@@ -217,7 +218,7 @@ Process_Software()
 			168) aSERVICES[i]='coturn' aTCP[i]=3478 aUDP[i]=3478;;
 			170) aCOMMANDS[i]='unrar -V';;
 			171) aSERVICES[i]='frps frpc' aTCP[i]='7000 7400 7500';;
-			172) aSERVICES[i]='wg-quick@wg0' aUDP[i]='51820';;
+			172) aCOMMANDS[i]='wg' aSERVICES[i]='wg-quick@wg0' aUDP[i]='51820' CAPABILITIES+=',CAP_NET_ADMIN';;
 			174) aCOMMANDS[i]='gimp -v';;
 			177) aSERVICES[i]='forgejo' aTCP[i]='3000';;
 			178) aSERVICES[i]='jellyfin' aTCP[i]='8097';;
@@ -343,8 +344,6 @@ then
 	G_EXEC curl -sSfo keyring.deb 'https://archive.raspberrypi.com/debian/pool/main/r/raspberrypi-archive-keyring/raspberrypi-archive-keyring_2025.1+rpt1_all.deb'
 	G_EXEC dpkg --root=rootfs -i keyring.deb
 	G_EXEC rm keyring.deb
-	# sysctl cannot succeed in containers. It is skipped with G_HW_MODEL=75, but here we changed that ID. Run the command, so we see it in logs, but do not abort as it fails.
-	G_EXEC sed --follow-symlinks -i '/# Start DietPi-Software/a\sed -i '\''/^[[:blank:]]*G_EXEC sysctl /s/G_EXEC sysctl /G_EXEC_NOHALT=1 G_EXEC sysctl /'\'' /boot/dietpi/dietpi-software' rootfs/boot/dietpi/dietpi-login
 fi
 
 # Install test builds from dietpi.com if requested
@@ -380,6 +379,10 @@ then
 		fi
 	done
 fi
+
+# Do not attempt to change kernel parameters via sysctl, but do dry runs. Those fail in case of invalid syntax or settings which do not exist, but do not fail on missing container capabilities.
+G_EXEC eval 'echo -e '\''#!/bin/dash\n/sbin/sysctl --dry-run "$@"'\'' > rootfs/usr/local/bin/sysctl'
+G_EXEC chmod +x rootfs/usr/local/bin/sysctl
 
 # ARMv6/7 Trixie: Workaround failing chpasswd, which tries to access /proc/sys/vm/mmap_min_addr, but fails as of AppArmor on the host
 if (( $arch < 3 )) && [[ $DISTRO == 'trixie' ]] && systemctl -q is-active apparmor
@@ -537,7 +540,9 @@ G_EXEC sed --follow-symlinks -i 's|Prompt_on_Failure$|{ journalctl -n 50; ss -tu
 ##########################################
 # Boot container
 ##########################################
-systemd-nspawn -bD rootfs
+caps=()
+[[ $CAPABILITIES ]] && caps=("--capability=${CAPABILITIES#,}")
+systemd-nspawn "${caps[@]}" -bD rootfs
 # shellcheck disable=SC2015
 [[ -f 'rootfs/success' ]] && exit 0 || { journalctl -n 25; ss -tlpn; df -h; free -h; exit 1; }
 }
