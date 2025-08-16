@@ -1040,7 +1040,6 @@ Available commands:
 		aSOFTWARE_CATX[$software_id]=6
 		aSOFTWARE_DOCS[$software_id]='https://dietpi.com/docs/software/social/#synapse'
 		aSOFTWARE_DEPS[$software_id]='130 194'
-		aSOFTWARE_INTERACTIVE[$software_id]=1
 		#-----------------
 		software_id=16
 		aSOFTWARE_NAME[$software_id]='microblog.pub'
@@ -2590,6 +2589,7 @@ sudo sysctl -p /etc/sysctl.d/dietpi-$1.conf"
 		# Arguments:
 		#   --install, -i   Install APT packages directly
 		#   --user, -u      User to install Rust with
+		#   --rust, -r      Install Rust in any case
 		#   pyenv           Add APT dependencies needed to compile Python for pyenv
 		#   <module>        Add APT dependencies needed to compile and in case run the named module
 		# Environment variables:
@@ -2616,6 +2616,7 @@ sudo sysctl -p /etc/sysctl.d/dietpi-$1.conf"
 				case $1 in
 					'--install'|'-i') install=1;;
 					'--user'|'-u') shift; user=$1;;
+					'--rust'|'-r') rust=1;;
 					'av') (( $G_HW_ARCH < 3 || $G_HW_ARCH == 11 )) && aDEPS+=('libavdevice-dev');;
 					'bcrypt') (( $G_HW_ARCH == 11 )) && rust=1;;
 					'brotli'|'sabctools'|'ujson') (( $G_HW_ARCH == 11 || ( $G_HW_ARCH < 3 && ! $piwheels ) )) && aDEPS+=('g++');;
@@ -2630,6 +2631,7 @@ sudo sysctl -p /etc/sysctl.d/dietpi-$1.conf"
 					;;
 					'libsass') (( $G_HW_ARCH == 10 || $piwheels )) || aDEPS+=('g++');;
 					'lxml') (( $G_HW_ARCH == 1 || $G_HW_ARCH == 11 )) && aDEPS+=('libxslt1-dev');;
+					'matrix-synapse') (( $G_DISTRO > 7 || $G_HW_ARCH < 3 || $G_HW_ARCH == 11 )) && rust=1;;
 					'netifaces') (( $piwheels || ( $G_HW_ARCH == 10 && $G_DISTRO == 6 ) )) || aDEPS+=('gcc');;
 					'numpy')
 						(( $G_HW_ARCH < 3 || $G_HW_ARCH == 11 )) && { aDEPS+=('g++' 'pkg-config'); (( $G_HW_ARCH == 1 && $G_DISTRO > 7 )) && aDEPS+=('libblas-dev') || aDEPS+=('libopenblas-dev'); } # ARMv6 Trixie: https://bugs.launchpad.net/raspbian/+bug/2120259
@@ -3980,7 +3982,7 @@ sudo sysctl -p /etc/sysctl.d/98-dietpi-redis.conf'
 		if To_Install 125 synapse # Synapse: https://element-hq.github.io/synapse/latest/setup/installation.html#installing-as-a-python-module-from-pypi
 		then
 			# Dependencies
-			Python_Deps -i bcrypt cryptography pillow psycopg2
+			Python_Deps -i bcrypt cryptography pillow psycopg2 pynacl matrix-synapse
 
 			# Install
 			G_EXEC_OUTPUT=1 G_EXEC pip3 install -U matrix-synapse psycopg2
@@ -4000,8 +4002,8 @@ Type=notify
 SyslogIdentifier=Synapse
 User=synapse
 WorkingDirectory=/mnt/dietpi_userdata/synapse
-ExecStart=/usr/bin/python3 -m synapse.app.homeserver -c homeserver.yaml -c homeserver.yaml.d/
-ExecReload=/bin/kill -HUP \$MAINPID
+ExecStart=/usr/bin/python3 -m synapse.app.homeserver -c homeserver.yaml -c homeserver.yaml.d
+ExecReload=/bin/kill -HUP $MAINPID
 
 [Install]
 WantedBy=multi-user.target
@@ -4039,29 +4041,24 @@ _EOF_
 			# Config
 			if [[ ! -f '/mnt/dietpi_userdata/synapse/homeserver.yaml' ]]
 			then
-				local invalid_text=
-				while :
-				do
-					if G_WHIP_INPUTBOX "${invalid_text}Please enter the name for this homeserver.\nIt is recommended that this be the domain that this server will be hosted on."
-					then
-						local servername=$G_WHIP_RETURNED_VALUE
-						break
-					else
-						invalid_text='[ERROR] Please enter a name for your Matrix homserver.\n\n'
-					fi
-				done
+				G_WHIP_DEFAULT_ITEM=$(sed -n '/^[[:blank:]]*SOFTWARE_PUBLIC_DOMAIN_NAME=/{s/^[^=]*=//p;q}' /boot/dietpi.txt)
+				[[ $G_WHIP_DEFAULT_ITEM ]] || G_WHIP_DEFAULT_ITEM=$(find /etc/letsencrypt/live -mindepth 1 -maxdepth 1 -type d -print -quit 2> /dev/null)
+				[[ $G_WHIP_DEFAULT_ITEM ]] || G_WHIP_DEFAULT_ITEM=$(hostname -f)
+				G_WHIP_NOCANCEL=1
+				G_WHIP_INPUTBOX 'Please enter the name for this homeserver.\nIt is recommended that this be the public domain name that this server will be hosted on.'
+				local servername=$G_WHIP_RETURNED_VALUE
+				GCI_PRESERVE=1 G_CONFIG_INJECT 'SOFTWARE_PUBLIC_DOMAIN_NAME=' "SOFTWARE_PUBLIC_DOMAIN_NAME=$servername" /boot/dietpi.txt
 
-				if G_WHIP_BUTTON_OK_TEXT='Yes' G_WHIP_BUTTON_CANCEL_TEXT='No' G_WHIP_YESNO 'Would you like to report basic anonymous analytics, like number of users, to the Matrix foundation?'
-				then
-					local analytics='yes'
-				else
-					local analytics='no'
-				fi
+				G_WHIP_DEFAULT_ITEM=$(sed -n '/^[[:blank:]]*SOFTWARE_SYNAPSE_USERNAME=/{s/^[^=]*=//p;q}' /boot/dietpi.txt)
+				[[ $G_WHIP_DEFAULT_ITEM ]] || G_WHIP_DEFAULT_ITEM='dietpi'
+				G_WHIP_NOCANCEL=1
+				G_WHIP_INPUTBOX 'Please enter the admin username for this homeserver. It will use the default software password.'
+				local username=$G_WHIP_RETURNED_VALUE
 
 				G_EXEC cd /mnt/dietpi_userdata/synapse
 
 				# Create initial config
-				G_EXEC python3 -m synapse.app.homeserver -H "$servername" -c homeserver.yaml --generate-config --report-stats "$analytics"
+				G_EXEC python3 -m synapse.app.homeserver -H "$servername" -c homeserver.yaml --generate-config --report-stats 'no'
 
 				# Enable registrations via random shared secret
 				GCI_PASSWORD=1 G_CONFIG_INJECT 'registration_shared_secret:[[:blank:]]' "registration_shared_secret: $(openssl rand -hex 16)" homeserver.yaml
@@ -4075,19 +4072,21 @@ _EOF_
 
 				# Permissions
 				G_EXEC chown -R synapse:synapse .
-				G_EXEC chmod -R 0660 homeserver.yaml{,.d/*.yaml}
+				G_EXEC chmod 0660 homeserver.yaml{,.d/*.yaml}
 				G_EXEC chmod 0770 homeserver.yaml.d
 
-				# Register new user (interactive)
+				# Register admin user
 				G_EXEC systemctl daemon-reload
 				G_EXEC systemctl start synapse
-				G_EXEC_OUTPUT=1 G_EXEC register_new_matrix_user -c homeserver.yaml 'http://127.0.0.1:8008'
+				G_EXEC_PRE_FUNC(){ acommand[4]="$GLOBAL_PW"; } # Mask password in console output
+				G_EXEC_OUTPUT=1 G_EXEC register_new_matrix_user -u "$username" -p "${GLOBAL_PW//?/X}" -a -c homeserver.yaml 'http://127.0.0.1:8008'
 
 				G_EXEC cd "$G_WORKING_DIR"
+				unset -v servername username
 			else
 				# Permissions
 				G_EXEC chown -R synapse:synapse /mnt/dietpi_userdata/synapse
-				G_EXEC chmod -R 0660 /mnt/dietpi_userdata/synapse/homeserver.yaml{,.d/*.yaml}
+				G_EXEC chmod 0660 /mnt/dietpi_userdata/synapse/homeserver.yaml{,.d/*.yaml}
 				G_EXEC chmod 0770 /mnt/dietpi_userdata/synapse/homeserver.yaml.d
 			fi
 		fi
