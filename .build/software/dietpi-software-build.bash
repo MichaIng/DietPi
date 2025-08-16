@@ -55,11 +55,11 @@ do
 	esac
 	shift
 done
-[[ $NAME =~ ^('amiberry'|'amiberry-lite'|'gzdoom'|'gmediarender'|'gogs'|'shairport-sync'|'squeezelite'|'unbound'|'vaultwarden'|'ympd')$ ]] || Error_Exit "Invalid software title \"$NAME\" passed"
+[[ $NAME =~ ^('amiberry'|'amiberry-lite'|'domoticz'|'gzdoom'|'gmediarender'|'gogs'|'shairport-sync'|'squeezelite'|'unbound'|'vaultwarden'|'ympd')$ ]] || Error_Exit "Invalid software title \"$NAME\" passed"
 [[ $NAME == 'gogs' ]] && EXT='7z' || EXT='deb'
 [[ $DISTRO =~ ^('bullseye'|'bookworm'|'trixie')$ ]] || Error_Exit "Invalid distro \"$DISTRO\" passed"
 case $ARCH in
-	'armv6l') image="ARMv6-${DISTRO^}" arch=1; [[ $NAME == 'amiberry'* || $NAME == 'gzdoom' ]] && Error_Exit "Invalid software title \"$NAME\" for arch \"$ARCH\" passed";;
+	'armv6l') image="ARMv6-${DISTRO^}" arch=1; [[ $NAME == 'amiberry-lite' || $NAME == 'gzdoom' ]] && Error_Exit "Invalid software title \"$NAME\" for arch \"$ARCH\" passed";;
 	'armv7l') image="ARMv7-${DISTRO^}" arch=2; [[ $NAME == 'gzdoom' ]] && Error_Exit "Invalid software title \"$NAME\" for arch \"$ARCH\" passed";;
 	'aarch64') image="ARMv8-${DISTRO^}" arch=3;;
 	'x86_64') image="x86_64-${DISTRO^}" arch=10;;
@@ -151,15 +151,14 @@ G_CONFIG_INJECT 'CONFIG_CHECK_CONNECTION_IP=' 'CONFIG_CHECK_CONNECTION_IP=127.0.
 # vaultwarden for ARMv6 on ARMv8 host: https://github.com/rust-lang/rust/issues/60605
 [[ $NAME == 'vaultwarden' ]] && (( $arch == 1 && $G_HW_ARCH == 3 )) && G_EXEC sysctl -w 'abi.cp15_barrier=2'
 
-# Temporary workaround for Bullseye builds
-# shellcheck disable=SC2016
-[[ $DISTRO == 'bullseye' ]] && G_EXEC sed --follow-symlinks -i '\|sed --follow-symlinks -i .* /etc/apt/sources.list$|a\sed --follow-symlinks -i '\''$c\deb https://archive.debian.org/debian bullseye-backports main contrib non-free'\'' /etc/apt/sources.list' rootfs/boot/dietpi/func/dietpi-set_software
-
 # Shutdown on failures before the custom script is executed
 G_EXEC sed --follow-symlinks -i 's|Prompt_on_Failure$|{ journalctl -n 50; ss -tulpn; df -h; free -h; systemctl start poweroff.target; }|' rootfs/boot/dietpi/dietpi-login
 
 # Avoid DietPi-Survey uploads to not mess with the statistics
 G_EXEC rm rootfs/root/.ssh/known_hosts
+
+# Amiberry ARMv6: Use dedicated build script for ARMv6 builds which support Amiberry v5.7.1 only
+[[ $NAME == 'amiberry' && $arch == 1 ]] && NAME='amiberry-v5'
 
 # Automated build
 # shellcheck disable=SC2154
@@ -176,5 +175,9 @@ _EOF_
 # Boot container
 ##########################################
 systemd-nspawn -bD rootfs
+
+# Amiberry ARMv6: Upload as "amiberry_armv6l.deb"
+[[ $NAME == 'amiberry-v5' && $arch == 1 ]] && NAME='amiberry'
+
 [[ -f rootfs/output/${NAME}_$ARCH.$EXT ]] || Error_Exit "Failed to build package: ${NAME}_$ARCH.$EXT"
 }

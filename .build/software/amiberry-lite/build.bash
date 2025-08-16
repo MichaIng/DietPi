@@ -9,11 +9,11 @@ header=()
 # APT dependencies
 # - kbd: For "chvt" used in systemd service
 adeps_build=('autoconf' 'make' 'cmake' 'g++' 'pkg-config' 'libdrm-dev' 'libgbm-dev' 'libudev-dev' 'libxml2-dev' 'libpng-dev' 'libfreetype6-dev' 'libflac-dev' 'libmpg123-dev' 'libmpeg2-4-dev' 'libasound2-dev' 'libserialport-dev' 'libportmidi-dev' 'libenet-dev' 'libpcap0.8-dev' 'libzstd-dev' 'kbd')
-adeps=('libdrm2' 'libgl1-mesa-dri' 'libgbm1' 'libegl1' 'libudev1' 'libxml2' 'libpng16-16' 'libfreetype6' 'libmpg123-0' 'libmpeg2-4' 'libasound2' 'libserialport0' 'libportmidi0' 'libenet7' 'libpcap0.8' 'libzstd1' 'kbd')
+adeps=('libdrm2' 'libgl1-mesa-dri' 'libgbm1' 'libegl1' 'libudev1' 'libxml2' 'libfreetype6' 'libmpeg2-4' 'libserialport0' 'libportmidi0' 'libenet7' 'libpcap0.8' 'libzstd1' 'kbd')
 case $G_DISTRO in
-	6) adeps+=('libflac8');;
-	7) adeps+=('libflac12');;
-	8) adeps+=('libflac14');;
+	6) adeps+=('libflac8' 'libpng16-16' 'libmpg123-0' 'libasound2');;
+	7) adeps+=('libflac12' 'libpng16-16' 'libmpg123-0' 'libasound2');;
+	8) adeps+=('libflac14' 'libpng16-16t64' 'libmpg123-0t64' 'libasound2t64');;
 	*) G_DIETPI-NOTIFY 1 "Unsupported distro version: $G_DISTRO_NAME (ID=$G_DISTRO)"; exit 1;;
 esac
 # - Graphics rendering flags and deps
@@ -23,8 +23,7 @@ G_AGUP
 G_AGDUG "${adeps_build[@]}"
 for i in "${adeps[@]}"
 do
-	# Temporarily allow lib*t64 packages, while the 64-bit time_t transition is ongoing on Trixie: https://bugs.debian.org/1065394
-	dpkg-query -s "$i" &> /dev/null || dpkg-query -s "${i}t64" &> /dev/null && continue
+	dpkg-query -s "$i" &> /dev/null && continue
 	G_DIETPI-NOTIFY 1 "Expected dependency package was not installed: $i"
 	exit 1
 done
@@ -39,7 +38,7 @@ G_EXEC curl -sSfLO "https://github.com/libsdl-org/SDL/releases/download/release-
 G_EXEC tar xf "SDL2-$version.tar.gz"
 G_EXEC rm "SDL2-$version.tar.gz"
 G_EXEC cd "SDL2-$version"
-G_EXEC_OUTPUT=1 G_EXEC ./configure CFLAGS='-g0 -O3' CXXFLAGS='-g0 -O3' --enable-video-kmsdrm "${opengl_flags[@]}" --disable-video-rpi --disable-video-x11 --disable-video-wayland --disable-video-opengles1 --disable-video-vulkan --disable-video-offscreen --disable-video-dummy --disable-diskaudio --disable-sndio --disable-dummyaudio --disable-oss --disable-dbus
+G_EXEC_OUTPUT=1 G_EXEC ./configure C{,XX}FLAGS='-g0 -O3' --enable-{alsa,video-kmsdrm,libudev,sdl2-config,joystick,hidapi,hidapi-joystick} "${opengl_flags[@]}" --disable-{video-{rpi,x11,wayland,opengles1,vulkan,offscreen,dummy},pipewire,jack,diskaudio,sndio,dummyaudio,oss,dbus,ime}
 G_EXEC_OUTPUT=1 G_EXEC make "-j$(nproc)"
 find . -type f \( -name '*.so' -o -name '*.so.*' \) -exec strip --strip-unneeded --remove-section=.comment --remove-section=.note -v {} +
 G_EXEC rm -f /usr/local/lib/libSDL2[.-]*
@@ -150,8 +149,8 @@ cat << '_EOF_' > "$DIR/DEBIAN/prerm"
 if [ "$1" = 'remove' ] && [ -d '/run/systemd/system' ] && [ -f '/lib/systemd/system/amiberry-lite.service' ]
 then
 	echo 'Deconfiguring Amiberry-Lite systemd service ...'
-	systemctl unmask amiberry-lite
-	systemctl disable --now amiberry-lite
+	systemctl --no-reload unmask amiberry-lite
+	systemctl --no-reload disable --now amiberry-lite
 fi
 _EOF_
 
@@ -172,18 +171,18 @@ find "$DIR" ! \( -path "$DIR/DEBIAN" -prune \) -type f -exec md5sum {} + | sed "
 DEPS_APT_VERSIONED=
 for i in "${adeps[@]}"
 do
-	# Temporarily allow lib*t64 packages, while the 64-bit time_t transition is ongoing on Trixie: https://bugs.debian.org/1065394
-	dpkg-query -s "$i" &> /dev/null || i+='t64'
 	DEPS_APT_VERSIONED+=" $i (>= $(dpkg-query -Wf '${VERSION}' "$i")),"
 done
 DEPS_APT_VERSIONED=${DEPS_APT_VERSIONED%,}
 
 # - Obtain version suffix
-G_EXEC_NOHALT=1 G_EXEC curl -sSfo package.deb "https://dietpi.com/downloads/binaries/$G_DISTRO_NAME/amiberry-lite_$G_HW_ARCH_NAME.deb"
+G_EXEC curl -sSfo package.deb "https://dietpi.com/downloads/binaries/$G_DISTRO_NAME/amiberry-lite_$G_HW_ARCH_NAME.deb"
 old_version=$(dpkg-deb -f package.deb Version)
-G_EXEC_NOHALT=1 G_EXEC rm package.deb
+G_EXEC rm package.deb
 suffix=${old_version#*-dietpi}
 [[ $old_version == "$version-"* ]] && version+="-dietpi$((suffix+1))" || version+="-dietpi1"
+G_DIETPI-NOTIFY 2 "Old package version is:       \e[33m${old_version:-N/A}"
+G_DIETPI-NOTIFY 2 "Building new package version: \e[33m$version"
 
 # - control
 cat << _EOF_ > "$DIR/DEBIAN/control"

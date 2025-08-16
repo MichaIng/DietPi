@@ -9,12 +9,12 @@
 # Build deps
 G_AGUP
 G_AGDUG automake pkg-config make g++ libpopt-dev libconfig-dev libssl-dev libsoxr-dev libavahi-client-dev libasound2-dev libglib2.0-dev libmosquitto-dev avahi-daemon git libplist-dev libsodium-dev libgcrypt20-dev libavformat-dev xxd
-adeps=('libc6' 'libasound2' 'libavahi-client3' 'libsoxr0' 'libconfig9' 'libpopt0' 'libglib2.0-0' 'libmosquitto1' 'avahi-daemon')
+adeps=('libc6' 'libasound2' 'libavahi-client3' 'libsoxr0' 'libpopt0' 'libglib2.0-0' 'libmosquitto1' 'avahi-daemon')
 adeps2=('libsodium23' 'libgcrypt20')
 case $G_DISTRO in
-	6) adeps+=('libssl1.1'); adeps2+=('libavcodec58' 'libplist3');;
-	7) adeps+=('libssl3'); adeps2+=('libavcodec59' 'libplist3');;
-	8) adeps+=('libssl3'); adeps2+=('libavcodec61' 'libplist-2.0-4');;
+	6) adeps+=('libssl1.1' 'libconfig9'); adeps2+=('libavcodec58' 'libplist3');;
+	7) adeps+=('libssl3' 'libconfig9'); adeps2+=('libavcodec59' 'libplist3');;
+	8) adeps+=('libssl3' 'libconfig11'); adeps2+=('libavcodec61' 'libplist-2.0-4');;
 	*) G_DIETPI-NOTIFY 1 "Unsupported distro version: $G_DISTRO_NAME (ID=$G_DISTRO)"; exit 1;;
 esac
 for i in "${adeps[@]}" "${adeps2[@]}"
@@ -26,52 +26,52 @@ do
 done
 
 # Obtain latest version
-name='shairport-sync'
-name_pretty='Shairport Sync'
+NAME='shairport-sync'
+PRETTY='Shairport Sync'
 repo='https://github.com/mikebrady/shairport-sync'
 version=$(curl -sSf 'https://api.github.com/repos/mikebrady/shairport-sync/releases/latest' | mawk -F\" '/^  "tag_name"/{print $4;exit}')
-[[ $version ]] || { G_DIETPI-NOTIFY 1 "No latest $name_pretty version found, aborting ..."; exit 1; }
+[[ $version ]] || { G_DIETPI-NOTIFY 1 "No latest $PRETTY version found, aborting ..."; exit 1; }
 
 # Download
-G_DIETPI-NOTIFY 2 "Downloading $name_pretty version \e[33m$version"
+G_DIETPI-NOTIFY 2 "Downloading $PRETTY version \e[33m$version"
 G_EXEC cd /tmp
 G_EXEC curl -sSfLO "$repo/archive/$version.tar.gz"
-[[ -d $name-$version ]] && G_EXEC rm -R "$name-$version"
+[[ -d $NAME-$version ]] && G_EXEC rm -R "$NAME-$version"
 G_EXEC tar xf "$version.tar.gz"
 G_EXEC rm "$version.tar.gz"
 
 # Compile
-G_DIETPI-NOTIFY 2 "Compiling $name_pretty"
-G_EXEC cd "$name-$version"
+G_DIETPI-NOTIFY 2 "Compiling $PRETTY"
+G_EXEC cd "$NAME-$version"
 G_EXEC_OUTPUT=1 G_EXEC autoreconf -fiW all
 CFLAGS='-g0 -O3' CXXFLAGS='-g0 -O3' G_EXEC_OUTPUT=1 G_EXEC ./configure --with-alsa --with-avahi --with-ssl=openssl --with-soxr --with-metadata --with-systemd --with-dbus-interface --with-mpris-interface --with-mqtt-client --with-pipe --with-stdout
 G_EXEC_OUTPUT=1 G_EXEC make
-G_EXEC strip --remove-section=.comment --remove-section=.note "$name"
+G_EXEC strip --remove-section=.comment --remove-section=.note "$NAME"
 
 # Package dir: In case of Raspbian, force ARMv6
-G_DIETPI-NOTIFY 2 "Preparing $name_pretty DEB package directory"
+G_DIETPI-NOTIFY 2 "Preparing $PRETTY DEB package directory"
 G_EXEC cd /tmp
 grep -q '^ID=raspbian' /etc/os-release && G_HW_ARCH_NAME='armv6l'
-DIR="${name}_$G_HW_ARCH_NAME"
+DIR="${NAME}_$G_HW_ARCH_NAME"
 [[ -d $DIR ]] && G_EXEC rm -R "$DIR"
 # - Control files, systemd service, executable, configs, copyright
-G_EXEC mkdir -p "$DIR/"{DEBIAN,lib/systemd/system,usr/local/{bin,etc,"share/doc/$name"},etc/dbus-1/system.d}
+G_EXEC mkdir -p "$DIR/"{DEBIAN,lib/systemd/system,usr/local/{bin,etc,"share/doc/$NAME"},etc/dbus-1/system.d}
 
 # Binary
-G_EXEC cp -a "$name-$version/$name" "$DIR/usr/local/bin/"
+G_EXEC cp -a "$NAME-$version/$NAME" "$DIR/usr/local/bin/"
 
 # Copyright
-G_EXEC cp "$name-$version/LICENSES" "$DIR/usr/local/share/doc/$name/copyright"
+G_EXEC cp "$NAME-$version/LICENSES" "$DIR/usr/local/share/doc/$NAME/copyright"
 
 # systemd service
-G_EXEC cp "$name-$version/scripts/$name.service-avahi" "$DIR/lib/systemd/system/$name.service"
+G_EXEC cp "$NAME-$version/scripts/$NAME.service-avahi" "$DIR/lib/systemd/system/$NAME.service"
 
 # dbus/mpris permissions
-G_EXEC cp "$name-$version/scripts/shairport-sync-dbus-policy.conf" "$DIR/etc/dbus-1/system.d/"
-G_EXEC cp "$name-$version/scripts/shairport-sync-mpris-policy.conf" "$DIR/etc/dbus-1/system.d/"
+G_EXEC cp "$NAME-$version/scripts/shairport-sync-dbus-policy.conf" "$DIR/etc/dbus-1/system.d/"
+G_EXEC cp "$NAME-$version/scripts/shairport-sync-mpris-policy.conf" "$DIR/etc/dbus-1/system.d/"
 
 # Config file: https://github.com/mikebrady/shairport-sync/blob/master/scripts/shairport-sync.conf
-cat << '_EOF_' > "$DIR/usr/local/etc/$name.conf"
+cat << '_EOF_' > "$DIR/usr/local/etc/$NAME.conf"
 // Sample Configuration File for Shairport Sync
 // Commented out settings are generally the defaults, except where noted.
 // See the individual sections for details.
@@ -288,60 +288,61 @@ _EOF_
 # Control files
 
 # - conffiles
-echo "/usr/local/etc/$name.conf" > "$DIR/DEBIAN/conffiles"
+echo "/usr/local/etc/$NAME.conf" > "$DIR/DEBIAN/conffiles"
 
 # - postinst
 cat << _EOF_ > "$DIR/DEBIAN/postinst"
 #!/bin/sh
 if [ -d '/run/systemd/system' ]
 then
-	if getent passwd $name > /dev/null
+	if getent passwd $NAME > /dev/null
 	then
-		echo 'Configuring $name_pretty service user ...'
-		usermod -aG audio -d /nonexistent -s /usr/sbin/nologin $name
+		echo 'Configuring $PRETTY service user "$NAME" ...'
+		usermod -aG audio -d /nonexistent -s /usr/sbin/nologin $NAME
 	else
-		echo 'Creating $name_pretty service user ...'
-		useradd -rMU -G audio -d /nonexistent -s /usr/sbin/nologin $name
+		echo 'Creating $PRETTY service user "$NAME" ...'
+		useradd -rMU -G audio -d /nonexistent -s /usr/sbin/nologin $NAME
 	fi
 
-	echo 'Configuring $name_pretty systemd service ...'
-	systemctl unmask $name
-	systemctl enable --now $name
+	echo 'Configuring $PRETTY systemd service ...'
+	systemctl --no-reload unmask $NAME
+	systemctl enable $NAME
+	pgrep -x 'dietpi-software' || systemctl restart $NAME
 fi
 _EOF_
 
 # - prerm
-cat << _EOF_ > "$DIR/DEBIAN/prerm"
-#!/bin/sh
-if [ "\$1" = 'remove' ] && [ -d '/run/systemd/system' ] && [ -f '/lib/systemd/system/$name.service' ]
+cat << _EOF_ > "$DIR/DEBIAN/prerm" || exit 1
+#!/bin/dash -e
+if [ "\$1" = 'remove' ] && [ -d '/run/systemd/system' ] && [ -f '/lib/systemd/system/$NAME.service' ]
 then
-	echo 'Deconfiguring $name_pretty systemd service ...'
-	systemctl unmask $name
-	systemctl disable --now $name
+	echo 'Deconfiguring $PRETTY systemd service ...'
+	systemctl --no-reload unmask $NAME
+	systemctl --no-reload disable --now $NAME
 fi
 _EOF_
 
 # - postrm
-cat << _EOF_ > "$DIR/DEBIAN/postrm"
-#!/bin/sh
+cat << _EOF_ > "$DIR/DEBIAN/postrm" || exit 1
+#!/bin/dash -e
 if [ "\$1" = 'purge' ]
 then
-	if [ -d '/etc/systemd/system/$name.service.d' ]
+	if [ -d '/etc/systemd/system/$NAME.service.d' ]
 	then
-		echo 'Removing $name_pretty systemd service overrides ...'
-		rm -Rv /etc/systemd/system/$name.service.d
+		echo 'Removing $PRETTY systemd service overrides ...'
+		rm -rv /etc/systemd/system/$NAME.service.d
 	fi
 
-	if getent passwd $name > /dev/null
+	if getent passwd $NAME > /dev/null
 	then
-		echo 'Removing $name_pretty service user ...'
-		userdel $name
+		echo 'Removing $PRETTY service user "$NAME" ...'
+		userdel $NAME
 	fi
 
-	if getent group $name > /dev/null
+	if getent group $NAME > /dev/null
 	then
-		echo 'Removing $name_pretty service group ...'
-		groupdel $name
+		echo 'Removing $PRETTY service group "$NAME" ...'
+		groupdel $NAME
 	fi
 fi
 _EOF_
@@ -364,28 +365,27 @@ DEPS_APT_VERSIONED=${DEPS_APT_VERSIONED%,}
 [[ $G_HW_ARCH_NAME == 'armv6l' ]] && DEPS_APT_VERSIONED=$(sed 's/+rp[it][0-9]\+[^)]*)/)/g' <<< "$DEPS_APT_VERSIONED") || DEPS_APT_VERSIONED=$(sed 's/+b[0-9]\+)/)/g' <<< "$DEPS_APT_VERSIONED")
 
 # - Obtain version suffix
-G_EXEC curl -sSfo package.deb "https://dietpi.com/downloads/binaries/$G_DISTRO_NAME/${name}_$G_HW_ARCH_NAME.deb"
+G_EXEC curl -sSfo package.deb "https://dietpi.com/downloads/binaries/$G_DISTRO_NAME/${NAME}_$G_HW_ARCH_NAME.deb"
 old_version=$(dpkg-deb -f package.deb Version)
 G_EXEC rm package.deb
 suffix=${old_version#*-dietpi}
 [[ $old_version == "$version-"* ]] && suffix="dietpi$((suffix+1))" || suffix="dietpi1"
+G_DIETPI-NOTIFY 2 "Old package version is:       \e[33m${old_version:-N/A}"
+G_DIETPI-NOTIFY 2 "Building new package version: \e[33m$version-$suffix"
 
 # - control
 cat << _EOF_ > "$DIR/DEBIAN/control"
-Package: $name
+Package: $NAME
 Version: $version-$suffix
 Architecture: $(dpkg --print-architecture)
 Maintainer: MichaIng <micha@dietpi.com>
 Date: $(date -u '+%a, %d %b %Y %T %z')
-Standards-Version: 4.6.2.0
 Installed-Size: $(du -sk "$DIR" | mawk '{print $1}')
 Depends:$DEPS_APT_VERSIONED
-Conflicts: $name-airplay2
+Conflicts: $NAME-airplay2
 Section: sound
 Priority: optional
 Homepage: $repo
-Vcs-Git: $repo.git
-Vcs-Browser: $repo
 Description: AirPlay audio player
  Plays audio streamed from iTunes, iOS devices and third-party AirPlay
  sources such as ForkedDaapd and others. Audio played by a Shairport
@@ -414,12 +414,12 @@ G_EXEC_OUTPUT=1 G_EXEC make
 G_EXEC strip --remove-section=.comment --remove-section=.note nqptp
 
 # Compile
-G_EXEC cd "../$name-$version"
+G_EXEC cd "../$NAME-$version"
 G_EXEC_OUTPUT=1 G_EXEC make clean
 G_EXEC_OUTPUT=1 G_EXEC autoreconf -fiW all
 CFLAGS='-g0 -O3' CXXFLAGS='-g0 -O3' G_EXEC_OUTPUT=1 G_EXEC ./configure --with-alsa --with-avahi --with-ssl=openssl --with-soxr --with-metadata --with-systemd --with-dbus-interface --with-mpris-interface --with-mqtt-client --with-pipe --with-stdout --with-airplay-2
 G_EXEC_OUTPUT=1 G_EXEC make
-G_EXEC strip --remove-section=.comment --remove-section=.note "$name"
+G_EXEC strip --remove-section=.comment --remove-section=.note "$NAME"
 
 # Package dir
 G_EXEC cd /tmp
@@ -427,7 +427,7 @@ G_EXEC mv "$DIR" "${DIR/sync_/sync-airplay2_}"
 DIR=${DIR/sync_/sync-airplay2_}
 
 # Binary
-G_EXEC cp -a "$name-$version/$name" "$DIR/usr/local/bin/"
+G_EXEC cp -a "$NAME-$version/$NAME" "$DIR/usr/local/bin/"
 
 # NQPTP
 G_EXEC cp -a nqptp/nqptp "$DIR/usr/local/bin/"
@@ -439,31 +439,33 @@ cat << _EOF_ > "$DIR/DEBIAN/postinst"
 #!/bin/sh
 if [ -d '/run/systemd/system' ]
 then
-	if getent passwd $name > /dev/null
+	if getent passwd $NAME > /dev/null
 	then
-		echo 'Configuring $name_pretty service user ...'
-		usermod -aG audio -d /nonexistent -s /usr/sbin/nologin $name
+		echo 'Configuring $PRETTY service user "$NAME" ...'
+		usermod -aG audio -d /nonexistent -s /usr/sbin/nologin $NAME
 	else
-		echo 'Creating $name_pretty service user ...'
-		useradd -rMU -G audio -d /nonexistent -s /usr/sbin/nologin $name
+		echo 'Creating $PRETTY service user "$NAME" ...'
+		useradd -rMU -G audio -d /nonexistent -s /usr/sbin/nologin $NAME
 	fi
 
 	if getent passwd nqptp > /dev/null
 	then
-		echo 'Configuring NQPTP service user ...'
+		echo 'Configuring NQPTP service user "nqptp" ...'
 		usermod -d /nonexistent -s /usr/sbin/nologin nqptp
 	else
-		echo 'Creating NQPTP service user ...'
+		echo 'Creating NQPTP service user "nqptp" ...'
 		useradd -rMU -d /nonexistent -s /usr/sbin/nologin nqptp
 	fi
 
 	echo 'Configuring NQPTP systemd service ...'
-	systemctl unmask nqptp
-	systemctl enable --now nqptp
+	systemctl --no-reload unmask nqptp
+	systemctl enable nqptp
+	pgrep -x 'dietpi-software' || systemctl restart nqptp
 
-	echo 'Configuring $name_pretty systemd service ...'
-	systemctl unmask $name
-	systemctl enable --now $name
+	echo 'Configuring $PRETTY systemd service ...'
+	systemctl --no-reload unmask $NAME
+	systemctl enable $NAME
+	pgrep -x 'dietpi-software' || systemctl restart $NAME
 fi
 _EOF_
 
@@ -472,18 +474,18 @@ cat << _EOF_ > "$DIR/DEBIAN/prerm"
 #!/bin/sh
 if [ "$1" = 'remove' ] && [ -d '/run/systemd/system' ]
 then
-	if [ -f '/lib/systemd/system/$name.service' ]
+	if [ -f '/lib/systemd/system/$NAME.service' ]
 	then
-		echo 'Deconfiguring $name_pretty systemd service ...'
-		systemctl unmask $name
-		systemctl disable --now $name
+		echo 'Deconfiguring $PRETTY systemd service ...'
+		systemctl --no-reload unmask $NAME
+		systemctl --no-reload disable --now $NAME
 	fi
 
 	if [ -f '/lib/systemd/system/nqptp.service' ]
 	then
 		echo 'Deconfiguring NQPTP systemd service ...'
-		systemctl unmask nqptp
-		systemctl disable --now nqptp
+		systemctl --no-reload unmask nqptp
+		systemctl --no-reload disable --now nqptp
 	fi
 fi
 _EOF_
@@ -493,39 +495,39 @@ cat << _EOF_ > "$DIR/DEBIAN/postrm"
 #!/bin/sh
 if [ "$1" = 'purge' ]
 then
-	if [ -d '/etc/systemd/system/$name.service.d' ]
+	if [ -d '/etc/systemd/system/$NAME.service.d' ]
 	then
-		echo 'Removing $name_pretty systemd service overrides ...'
-		rm -Rv /etc/systemd/system/$name.service.d
+		echo 'Removing $PRETTY systemd service overrides ...'
+		rm -rv /etc/systemd/system/$NAME.service.d
 	fi
 
 	if [ -d '/etc/systemd/system/nqptp.service.d' ]
 	then
 		echo 'Removing NQPTP systemd service overrides ...'
-		rm -Rv /etc/systemd/system/nqptp.service.d
+		rm -rv /etc/systemd/system/nqptp.service.d
 	fi
 
-	if getent passwd $name > /dev/null
+	if getent passwd $NAME > /dev/null
 	then
-		echo 'Removing $name_pretty service user ...'
-		userdel $name
+		echo 'Removing $PRETTY service user "$NAME" ...'
+		userdel $NAME
 	fi
 
-	if getent group $name > /dev/null
+	if getent group $NAME > /dev/null
 	then
-		echo 'Removing $name_pretty service group ...'
-		groupdel $name
+		echo 'Removing $PRETTY service group "$NAME" ...'
+		groupdel $NAME
 	fi
 
 	if getent passwd nqptp > /dev/null
 	then
-		echo 'Removing NQPTP service user ...'
+		echo 'Removing NQPTP service user "nqptp" ...'
 		userdel nqptp
 	fi
 
 	if getent group nqptp > /dev/null
 	then
-		echo 'Removing NQPTP service group ...'
+		echo 'Removing NQPTP service group "nqptp" ...'
 		groupdel nqptp
 	fi
 fi
@@ -546,14 +548,14 @@ done
 
 # - control
 cat << _EOF_ > "$DIR/DEBIAN/control"
-Package: $name-airplay2
+Package: $NAME-airplay2
 Version: $version-$suffix
 Architecture: $(dpkg --print-architecture)
 Maintainer: MichaIng <micha@dietpi.com>
 Date: $(date -uR)
 Installed-Size: $(du -sk "$DIR" | mawk '{print $1}')
 Depends:$DEPS_APT_VERSIONED
-Conflicts: $name
+Conflicts: $NAME
 Section: sound
 Priority: optional
 Homepage: $repo
@@ -574,9 +576,6 @@ G_CONFIG_INJECT 'Installed-Size: ' "Installed-Size: $(du -sk "$DIR" | mawk '{pri
 
 # Build DEB package
 G_EXEC_OUTPUT=1 G_EXEC dpkg-deb -b "$DIR"
-
-# Cleanup
-G_EXEC rm -R "$name-$version" nqptp "$DIR"
 
 exit 0
 }

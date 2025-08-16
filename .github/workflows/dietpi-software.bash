@@ -78,14 +78,17 @@ emulation=0
 (( $G_HW_ARCH == $arch || ( $G_HW_ARCH < 10 && $G_HW_ARCH > $arch ) )) || emulation=1
 
 # Remove Docker containers from test installs as Docker cannot start in systemd containers
-[[ $SOFTWARE =~ (^| )(86|142|185)( |$) ]] && { echo '[ WARN ] Removing Roon Extension Manager, MicroK8s and Portainer from test installs as Docker cannot start in systemd containers'; SOFTWARE=$(sed -E 's/(^| )(86|142|186)( |$)/\1\3/g' <<< "$SOFTWARE"); }
+[[ $SOFTWARE =~ (^| )(86|142|185)( |$) ]] && { echo '[ WARN ] Removing Roon Extension Manager, MicroK8s and Portainer from test installs as Docker cannot start in systemd containers'; SOFTWARE=$(sed -E 's/(^| )(86|142|185)( |$)/\1\3/g' <<< "$SOFTWARE"); }
 # Add MariaDB with Allo GUI (non-full/reinstall ID 160), as otherwise the install fails
 [[ $SOFTWARE =~ (^| )160( |$) ]] && SOFTWARE=$(sed -E 's/(^| )160( |$)/\188 160\2/g' <<< "$SOFTWARE")
+# Remove PostgreSQL and dependants (Synapse) on RISC-V with emulation: https://gitlab.com/qemu-project/qemu/-/issues/3068
+# WireGuard: "Unable to modify/access interface: Protocol not supported" probably a syscall unsupported in QEMU user mode emulation
+(( $arch == 11 && $emulation )) && [[ $SOFTWARE =~ (^| )(125|172|194)( |$) ]] && { echo '[ WARN ] Removing PostgreSQL, WireGuard, and Synapse from test installs, not able to work in emulated RISC-V containers'; SOFTWARE=$(sed -E 's/(^| )(125|172|194)( |$)/\1\3/g' <<< "$SOFTWARE"); }
 
 ##########################################
 # Create service and port lists
 ##########################################
-aSERVICES=() aTCP=() aUDP=() aCOMMANDS=() aDELAY=()
+aINSTALL=() aSERVICES=() aTCP=() aUDP=() aCOMMANDS=() aDELAY=() CAPABILITIES=''
 Process_Software()
 {
 	local i
@@ -93,11 +96,12 @@ Process_Software()
 	do
 		# shellcheck disable=SC2016
 		case $i in
-			'webserver') [[ $SOFTWARE =~ (^| )8[345]( |$) ]] || aSERVICES[83]='apache2' aTCP[83]='80';;
+			'webserver') [[ $SOFTWARE =~ (^| )8[345]( |$) ]] || Process_Software 83;;
 			0) aCOMMANDS[i]='ssh -V';;
 			1) aCOMMANDS[i]='smbclient -V';;
 			2) aSERVICES[i]='fahclient' aTCP[i]='7396';;
 			7) aCOMMANDS[i]='ffmpeg -version';;
+			8) aCOMMANDS[i]='javac -version';;
 			9) aCOMMANDS[i]='node -v';;
 			10) aCOMMANDS[i]='LD_LIBRARY_PATH=$(find /usr/lib/*/amiberry-lite -maxdepth 0) amiberry-lite -h | grep '\''^$VER: Amiberry-Lite '\';;
 			11) aCOMMANDS[i]='gzdoom -norun | grep '\''^GZDoom version '\';;
@@ -108,7 +112,7 @@ Process_Software()
 			30) aSERVICES[i]='nxserver' aTCP[i]='4000';;
 			32) aSERVICES[i]='ympd' aTCP[i]='1337';;
 			33) (( $emulation )) || aSERVICES[i]='airsonic' aTCP[i]='8080' aDELAY[i]=60;; # Fails in QEMU-emulated containers, probably due to missing device access
-			35) aSERVICES[i]='lyrionmusicserver' aTCP[i]='9000';;
+			35) [[ $DISTRO != 'trixie' ]] || (( $arch > 2 )) && aSERVICES[i]='lyrionmusicserver' aTCP[i]='9000';; # disable check on 32-bit ARM Trixie for now: https://github.com/LMS-Community/slimserver/tree/public/9.1/CPAN/arch/5.40
 			36) aCOMMANDS[i]='squeezelite -t';; # Service listens on random high UDP port and exits if no audio device has been found, which does not exist on GitHub Actions runners, respectively within the containers
 			37) aSERVICES[i]='shairport-sync' aTCP[i]='5000';; # AirPlay 2 would be TCP port 7000
 			39) aSERVICES[i]='minidlna' aTCP[i]='8200';;
@@ -125,8 +129,8 @@ Process_Software()
 			53) aSERVICES[i]='mineos' aTCP[i]='8443';;
 			58) aCOMMANDS[i]='tailscale version';; # aSERVICES[i]='tailscaled' aUDP[i]='41641' GitHub Actions runners do not support the TUN module
 			59) aSERVICES[i]='raspimjpeg';;
-			#60) aUDP[i]='53 68';; Cannot be installed in CI since a WiFi interface is required
-			#61) aSERVICES[i]='tor' aUDP[i]='9040';; Cannot be installed in CI since a WiFi interface is required
+			60) aCOMMANDS[i]='iptables -V' aSERVICES[i]='isc-dhcp-server' aUDP[i]='67';; # aSERVICES[i]='hostapd' fails without actual WiFi interface
+			61) aSERVICES[i]='tor' aTCP[i]='9040' aUDP[i]='53';;
 			62) aCOMMANDS[i]='box86 -v';;
 			65) aSERVICES[i]='netdata' aTCP[i]='19999';;
 			66) aSERVICES[i]='rpimonitor' aTCP[i]='8888';;
@@ -136,7 +140,7 @@ Process_Software()
 			71) aSERVICES[i]='webiopi' aTCP[i]='8002';;
 			73) aSERVICES[i]='fail2ban';;
 			74) aSERVICES[i]='influxdb' aTCP[i]='8086 8088';;
-			77) aSERVICES[i]='grafana-server' aTCP[i]='3001';;
+			77) aSERVICES[i]='grafana-server' aTCP[i]='3001' aDELAY[i]=30;;
 			80) aSERVICES[i]='ubooquity' aTCP[i]='2038 2039'; (( $emulation )) && aDELAY[i]=30;;
 			83) aSERVICES[i]='apache2' aTCP[i]='80';;
 			84) aSERVICES[i]='lighttpd' aTCP[i]='80';;
@@ -157,6 +161,8 @@ Process_Software()
 			98) aSERVICES[i]='haproxy' aTCP[i]='80 1338';;
 			99) aSERVICES[i]='node_exporter' aTCP[i]='9100';;
 			#100) (( $arch < 3 )) && aCOMMANDS[i]='/usr/bin/pijuice_cli32 -V' || aCOMMANDS[i]='/usr/bin/pijuice_cli64 -V' aSERVICES[i]='pijuice' aTCP[i]='????' Service does not start without I2C device, not present in container and CLI command always puts you in interactive console
+			101) aCOMMANDS[i]='logrotate -v /etc/logrotate.conf';;
+			102) aSERVICES[i]='rsyslog';;
 			104) aSERVICES[i]='dropbear' aTCP[i]='22';;
 			105) aSERVICES[i]='ssh' aTCP[i]='22';;
 			106) aSERVICES[i]='lidarr' aTCP[i]='8686';;
@@ -176,19 +182,19 @@ Process_Software()
 			125) aSERVICES[i]='synapse' aTCP[i]='8008';;
 			126) aSERVICES[i]='adguardhome' aUDP[i]='53' aTCP[i]='8083'; [[ ${aSERVICES[182]} ]] && aUDP[i]+=' 5335';; # Unbound uses port 5335 if AdGuard Home is installed
 			128) aSERVICES[i]='mpd' aTCP[i]='6600';;
-			131) (( $arch == 2 || $arch == 11 )) || aSERVICES[i]='blynkserver' aTCP[i]='9443'; (( $arch == 10 || $arch == 2 || $arch == 11 )) || aDELAY[i]=60;;
+			131) (( $arch < 3 || $arch == 11 )) || aSERVICES[i]='blynkserver' aTCP[i]='9443'; (( $arch == 10 || $arch == 2 || $arch == 11 )) || aDELAY[i]=60;;
 			132) aSERVICES[i]='aria2' aTCP[i]='6800';; # aTCP[i]+=' 6881-6999';; # Listens on random port
-			133) (( $arch == 2 || $arch == 11 )) || aSERVICES[i]='yacy' aTCP[i]='8090'; (( $arch == 10 )) && aDELAY[i]=30; (( $arch == 10 || $arch == 2 || $arch == 11)) || aDELAY[i]=90;;
+			133) (( $arch < 3 || $arch == 11 )) || aSERVICES[i]='yacy' aTCP[i]='8090'; (( $arch == 10 )) && aDELAY[i]=30; (( $arch == 10 || $arch == 2 || $arch == 11)) || aDELAY[i]=90;;
 			134) aCOMMANDS[i]='docker compose version';;
 			135) aSERVICES[i]='icecast2' aTCP[i]='8000' aCOMMANDS[i]='darkice -h | grep '\''^DarkIce'\';; # darkice service cannot start in container as is requires audio recording device access
 			136) aSERVICES[i]='motioneye' aTCP[i]='8765';;
 			137) aCOMMANDS[i]='/opt/mjpg-streamer/mjpg_streamer -v';; # aSERVICES[i]='mjpg-streamer' aTCP[i]='8082' Service does not start without an actual video device
 			138) aSERVICES[i]='virtualhere' aTCP[i]='7575';;
 			139) aSERVICES[i]='sabnzbd' aTCP[i]='8080'; (( $arch == 10 )) || aDELAY[i]=30;; # ToDo: Solve conflict with Airsonic
-			140) aSERVICES[i]='domoticz' aTCP[i]='8124 8424';;
+			140) aSERVICES[i]='domoticz' aTCP[i]='8424';;
 			#142) aSERVICES[i]='snapd';; "system does not fully support snapd: cannot mount squashfs image using "squashfs": mount: /tmp/syscheck-mountpoint-2075108377: mount failed: Operation not permitted."
 			143) aSERVICES[i]='koel' aTCP[i]='8003'; (( $emulation )) && aDELAY[i]=30;;
-			144) aSERVICES[i]='sonarr' aTCP[i]='8989';;
+			144) (( $arch == 1 )) || aSERVICES[i]='sonarr' aTCP[i]='8989';; # Skip on ARMv6 failing in container with "If you're reading this, the MonoMod.RuntimeDetour selftest failed."
 			145) aSERVICES[i]='radarr' aTCP[i]='7878';;
 			146) aSERVICES[i]='tautulli' aTCP[i]='8181'; (( $emulation )) && aDELAY[i]=60;;
 			147) aSERVICES[i]='jackett' aTCP[i]='9117';;
@@ -209,35 +215,37 @@ Process_Software()
 			165) aSERVICES[i]='gitea' aTCP[i]='3000';;
 			#166) aSERVICES[i]='pi-spc';; Service cannot reasonably start in container as WirinPi's gpio command fails reading /proc/cpuinfo
 			167) aSERVICES[i]='raspotify';;
+			168) aSERVICES[i]='coturn' aTCP[i]=3478 aUDP[i]=3478;;
 			170) aCOMMANDS[i]='unrar -V';;
 			171) aSERVICES[i]='frps frpc' aTCP[i]='7000 7400 7500';;
-			172) aSERVICES[i]='wg-quick@wg0' aUDP[i]='51820';;
+			172) aCOMMANDS[i]='wg' aSERVICES[i]='wg-quick@wg0' aUDP[i]='51820' CAPABILITIES+=',CAP_NET_ADMIN';;
 			174) aCOMMANDS[i]='gimp -v';;
 			177) aSERVICES[i]='forgejo' aTCP[i]='3000';;
 			178) aSERVICES[i]='jellyfin' aTCP[i]='8097';;
 			179) aSERVICES[i]='komga' aTCP[i]='2037'; (( $emulation )) && aDELAY[i]=300 || aDELAY[i]=30;;
 			180) aSERVICES[i]='bazarr' aTCP[i]='6767'; (( $emulation )) && aDELAY[i]=120 || aDELAY[i]=30;;
-			181) aSERVICES[i]='papermc' aTCP[i]='25565 25575'; (( $emulation )) && aDELAY[i]=600 || aDELAY[i]=60;;
+			181) aSERVICES[i]='papermc' aTCP[i]='25565 25575'; (( $emulation )) && aDELAY[i]=900 || aDELAY[i]=60;;
 			182) aSERVICES[i]='unbound' aUDP[i]='53'; [[ ${aSERVICES[126]} ]] && aUDP[i]+=' 5335';; # Uses port 5335 if Pi-hole or AdGuard Home is installed, but those do listen on port 53 instead
 			183) aSERVICES[i]='vaultwarden' aTCP[i]='8001';;
-			184) aSERVICES[i]='tor';; # aTCP[i]='443 9051' Interactive install with ports depending on choice and relay type
+			184) aSERVICES[i]='tor' aTCP[i]='80 443 9051';;
 			#185) aTCP[i]='9002';; # Docker does not start in systemd containers (without dedicated network)
 			186) aSERVICES[i]='ipfs' aTCP[i]='5003 8087';;
 			187) aSERVICES[i]='cups' aTCP[i]='631';;
 			188) aCOMMANDS[i]='go version';;
 			189) aCOMMANDS[i]='sudo -u dietpi codium -v';;
 			190) aCOMMANDS[i]='beet version';;
-			191) aSERVICES[i]='snapserver' aTCP[i]='1780';;
+			191) aSERVICES[i]='snapserver' aTCP[i]='1704 1780';;
 			192) aSERVICES[i]='snapclient';;
 			#193) aSERVICES[i]='k3s';; fails due to missing memory cgroup access from within the container
 			194) aSERVICES[i]='postgresql';;
+			195) aCOMMANDS[i]='yt-dlp --version';;
 			196) aCOMMANDS[i]='java -version';;
 			197) aCOMMANDS[i]='box64 -v';;
 			198) aSERVICES[i]='filebrowser' aTCP[i]='8084';;
 			199) aSERVICES[i]='spotifyd' aUDP[i]='5353';; # + random high TCP port
 			#200) aSERVICES[i]='dietpi-dashboard' aTCP[i]='5252';; "dietpi-dashboard.service: Failed to set up standard input: No such file or directory"; "dietpi-dashboard.service: Failed at step STDIN spawning /opt/dietpi-dashboard/dietpi-dashboard: No such file or directory"
 			201) aSERVICES[i]='zerotier-one' aTCP[i]='9993';;
-			202) aCOMMANDS[i]='rclone -h';;
+			202) aCOMMANDS[i]='rclone version';;
 			203) aSERVICES[i]='readarr' aTCP[i]='8787';;
 			204) aSERVICES[i]='navidrome' aTCP[i]='4533';;
 			206) aSERVICES[i]='openhab' aTCP[i]='8444'; (( $emulation )) && aDELAY[i]=600;;
@@ -249,27 +257,34 @@ Process_Software()
 			213) aSERVICES[i]='soju' aTCP[i]='6667';;
 			*) :;;
 		esac
+		aINSTALL[i]=1
 	done
 }
 for i in $SOFTWARE
 do
 	case $i in
 		205) Process_Software webserver;;
-		27|56|63|64|75|78|81|107|132) Process_Software 89 webserver;; # 93 (Pi-hole) cannot be installed non-interactively
-		38|40|48|54|55|57|59|76|79|82|90|160|210) Process_Software 88 89 webserver;;
+		27|56|63|64|107|132) Process_Software 89 webserver;;
+		38|40|48|54|55|57|59|90|160|210) Process_Software 88 89 webserver;;
 		159) Process_Software 36 37 65 88 89 96 121 124 128 129 152 160 163 webserver;;
 		47|114|168) Process_Software 88 89 91 webserver;;
 		8|33|53|80|131|133|164|179|181|206) Process_Software 196;;
 		32|148|119) Process_Software 128;;
 		129) Process_Software 88 89 128 webserver;;
 		49|165|177) Process_Software 0 17 88;;
-		#61) Process_Software 60;; # Cannot be installed in CI
+		61) Process_Software 60;;
 		125) Process_Software 194;;
 		#86|134|185) Process_Software 162;; # Docker does not start in systemd containers (without dedicated network)
 		166) Process_Software 70;;
 		180) (( $arch == 10 || $arch == 3 )) || Process_Software 170;;
-		188) Process_Software 17;;
+		188) Process_Software 17;; # 93 (Pi-hole) cannot be installed non-interactively
 		213) Process_Software 17 188;;
+		75) Process_Software 83 87 89;;
+		76) Process_Software 83 88 89;;
+		78) Process_Software 85 87 89;;
+		79) Process_Software 85 88 89;;
+		81) Process_Software 84 87 89;;
+		82) Process_Software 84 88 89;;
 		*) :;;
 	esac
 	Process_Software "$i"
@@ -329,8 +344,6 @@ then
 	G_EXEC curl -sSfo keyring.deb 'https://archive.raspberrypi.com/debian/pool/main/r/raspberrypi-archive-keyring/raspberrypi-archive-keyring_2025.1+rpt1_all.deb'
 	G_EXEC dpkg --root=rootfs -i keyring.deb
 	G_EXEC rm keyring.deb
-	# sysctl cannot succeed in containers. It is skipped with G_HW_MODEL=75, but here we changed that ID. Run the command, so we see it in logs, but do not abort as it fails.
-	G_EXEC sed --follow-symlinks -i '/# Start DietPi-Software/a\sed -i '\''/^[[:blank:]]*G_EXEC sysctl /s/G_EXEC sysctl /G_EXEC_NOHALT=1 G_EXEC sysctl /'\'' /boot/dietpi/dietpi-software' rootfs/boot/dietpi/dietpi-login
 fi
 
 # Install test builds from dietpi.com if requested
@@ -339,7 +352,7 @@ then
 	# shellcheck disable=SC2016
 	G_EXEC sed --follow-symlinks -i '/# Start DietPi-Software/a\G_EXEC sed --follow-symlinks -i '\''s|dietpi.com/downloads/binaries/$G_DISTRO_NAME/|dietpi.com/downloads/binaries/$G_DISTRO_NAME/testing/|'\'' /boot/dietpi/dietpi-software' rootfs/boot/dietpi/dietpi-login
 	# shellcheck disable=SC2016
-	G_EXEC sed --follow-symlinks -i '/# Start DietPi-Software/a\G_EXEC sed --follow-symlinks -Ei '\''s@G_AGI "?(amiberry|amiberry-lite|gmediarender|gzdoom|shairport-sync\\$airplay2|squeezelite|unbound|vaultwarden|ympd)"?@Download_Install "https://dietpi.com/downloads/binaries/$G_DISTRO_NAME/\\1""_$G_HW_ARCH_NAME.deb"@'\'' /boot/dietpi/dietpi-software' rootfs/boot/dietpi/dietpi-login
+	G_EXEC sed --follow-symlinks -i '/# Start DietPi-Software/a\G_EXEC sed --follow-symlinks -Ei '\''s@G_AGI "?(amiberry|amiberry-lite|domoticz|gmediarender|gzdoom|shairport-sync\\$airplay2|squeezelite|unbound|vaultwarden|ympd)"?@Download_Install "https://dietpi.com/downloads/binaries/$G_DISTRO_NAME/\\1""_$G_HW_ARCH_NAME.deb"@'\'' /boot/dietpi/dietpi-software' rootfs/boot/dietpi/dietpi-login
 	G_CONFIG_INJECT 'SOFTWARE_DIETPI_DASHBOARD_VERSION=' 'SOFTWARE_DIETPI_DASHBOARD_VERSION=Nightly' rootfs/boot/dietpi.txt
 fi
 
@@ -367,11 +380,29 @@ then
 	done
 fi
 
+# Do not attempt to change kernel parameters via sysctl, but do dry runs. Those fail in case of invalid syntax or settings which do not exist, but do not fail on missing container capabilities.
+G_EXEC eval 'echo -e '\''#!/bin/dash\n/sbin/sysctl --dry-run "$@"'\'' > rootfs/usr/local/bin/sysctl'
+G_EXEC chmod +x rootfs/usr/local/bin/sysctl
+
 # ARMv6/7 Trixie: Workaround failing chpasswd, which tries to access /proc/sys/vm/mmap_min_addr, but fails as of AppArmor on the host
 if (( $arch < 3 )) && [[ $DISTRO == 'trixie' ]] && systemctl -q is-active apparmor
 then
 	G_EXEC eval 'echo '\''/proc/sys/vm/mmap_min_addr r,'\'' > /etc/apparmor.d/local/unix-chkpwd'
-	G_EXEC_NOHALT=1 G_EXEC_OUTPUT=1 systemctl restart apparmor || { journalctl -n 25; exit 1; }
+	G_EXEC_OUTPUT=1 G_EXEC apparmor_parser -r /etc/apparmor.d/unix-chkpwd
+fi
+
+# Transmission: Workaround for transmission-daemon timing out with container host AppArmor throwing: apparmor="ALLOWED" operation="sendmsg" class="file" info="Failed name lookup - disconnected path" error=-13 profile="transmission-daemon" name="run/systemd/notify"
+if [[ ${aINSTALL[44]} == 1 && $DISTRO == 'trixie' ]] && systemctl -q is-active apparmor
+then
+	G_EXEC sed --follow-symlinks -i '/^profile transmission-daemon/s/flags=(complain)/flags=(complain,attach_disconnected)/' /etc/apparmor.d/transmission
+	G_EXEC_OUTPUT=1 G_EXEC apparmor_parser -r /etc/apparmor.d/transmission
+fi
+
+# rsyslog: Workaround for rsyslogd timing out with container host AppArmor throwing: apparmor="DENIED" operation="sendmsg" class="file" info="Failed name lookup - disconnected path" error=-13 profile="rsyslogd" name="run/systemd/journal/dev-log"
+if [[ ${aINSTALL[102]} == 1 && $DISTRO == 'trixie' ]] && systemctl -q is-active apparmor
+then
+	G_EXEC sed --follow-symlinks -i '/^profile rsyslogd/s/{$/flags=(attach_disconnected) {/' /etc/apparmor.d/usr.sbin.rsyslogd
+	G_EXEC_OUTPUT=1 G_EXEC apparmor_parser -r /etc/apparmor.d/usr.sbin.rsyslogd
 fi
 
 # Workaround for failing IPv4 network connectivity check as GitHub Actions runners do not receive external ICMP echo replies.
@@ -387,13 +418,13 @@ G_EXEC rm rootfs/root/.ssh/known_hosts
 # Apply software IDs to install
 for i in $SOFTWARE; do G_CONFIG_INJECT "AUTO_SETUP_INSTALL_SOFTWARE_ID=$i" "AUTO_SETUP_INSTALL_SOFTWARE_ID=$i" rootfs/boot/dietpi.txt; done
 
-# Enable unattended PaperMC install
-G_EXEC mkdir -p rootfs/mnt/dietpi_userdata/papermc/plugins
-G_EXEC eval 'echo '\''eula=true'\'' > rootfs/mnt/dietpi_userdata/papermc/eula.txt'
-G_EXEC touch rootfs/mnt/dietpi_userdata/papermc/plugins/Geyser-Spigot.jar
-
-# Workaround for "Could not execute systemctl:  at /usr/bin/deb-systemd-invoke line 145." during Apache2 DEB postinst in 32-bit ARM Bookworm container: https://lists.ubuntu.com/archives/foundations-bugs/2022-January/467253.html
-G_CONFIG_INJECT 'AUTO_SETUP_WEB_SERVER_INDEX=' 'AUTO_SETUP_WEB_SERVER_INDEX=-2' rootfs/boot/dietpi.txt
+# PaperMC: Enable unattended install
+if (( ${aINSTALL[181]} ))
+then
+	G_EXEC mkdir -p rootfs/mnt/dietpi_userdata/papermc/plugins
+	G_EXEC eval 'echo '\''eula=true'\'' > rootfs/mnt/dietpi_userdata/papermc/eula.txt'
+	G_EXEC touch rootfs/mnt/dietpi_userdata/papermc/plugins/Geyser-Spigot.jar
+fi
 
 # Workarounds for QEMU-emulated RISC-V and 32-bit ARM containers
 if (( ( $arch < 3 || $arch == 11 ) && $emulation ))
@@ -422,19 +453,39 @@ _EOF_
 	fi
 fi
 
-# Workaround failing Java apps if 64-bit host memory leads to too large heap size in 32-bit containers: https://stackoverflow.com/questions/4401396
-# shellcheck disable=SC2016
-(( $arch < 3 && $G_HW_ARCH > 2)) && G_EXEC sed --follow-symlinks -i '/# Start DietPi-Software/a\sed -i '\''s|-mx${memory_limit}m|-mx1024m|'\'' /boot/dietpi/dietpi-software' rootfs/boot/dietpi/dietpi-login
-
 # ARMv6: Workaround for ARMv7 Rust toolchain selected in containers with newer host/emulated ARM version
 (( $arch == 1 )) && G_EXEC sed --follow-symlinks -i '/# Start DietPi-Software/a\sed -i '\''s/--profile minimal .*$/--profile minimal --default-host arm-unknown-linux-gnueabihf/'\'' /boot/dietpi/dietpi-software' rootfs/boot/dietpi/dietpi-login
 
 # ARMv6: Workaround for hanging Rust tools chain on ARMv8 host: https://github.com/MichaIng/DietPi/issues/6306#issuecomment-1515303702
 (( $arch == 1 && $G_HW_ARCH == 3 )) && G_EXEC sysctl -w 'abi.cp15_barrier=2'
 
-# ARMv6/ARMv7: Workaround for failing numpy build due to: https://github.com/numpy/meson/pull/18
+# WiFi Hotspot
+if (( ${aINSTALL[60]} ))
+then
+	# Create dummy network config for sed to succeed
+	G_EXEC mkdir -p rootfs/etc/network
+	G_EXEC eval '>> rootfs/etc/network/interfaces'
+	# Replace dedicated hotspot interface with default route interface, for the DHCP server and in case Tor have a valid interface and IP to listen on
+	G_EXEC sed --follow-symlinks -i "/# Start DietPi-Software/i\sed -i '/INTERFACESv4/s/\$wifi_iface/$(G_GET_NET iface)/' /boot/dietpi/dietpi-software" rootfs/boot/dietpi/dietpi-login
+	G_EXEC sed --follow-symlinks -i "/# Start DietPi-Software/i\sed -i '/192\.168\.42\.10/! s/192\.168\.42\.1/$(G_GET_NET ip)/' /boot/dietpi/dietpi-software" rootfs/boot/dietpi/dietpi-login
+	G_EXEC sed --follow-symlinks -i "/# Start DietPi-Software/i\sed -i 's/192\.168\.42\./$(G_GET_NET ip | sed 's/[0-9]*$//')/g' /boot/dietpi/dietpi-software" rootfs/boot/dietpi/dietpi-login
+fi
+
+# Workaround for Apache2 on emulated RISC-V system
+if (( ${aINSTALL[83]} )) && (( $emulation && $arch == 11 ))
+then
+	G_EXEC sed --follow-symlinks -i '/# Start DietPi-Software/i\sed -i '\''/^DocumentRoot/a\Mutex posixsem'\'' /boot/dietpi/dietpi-software' rootfs/boot/dietpi/dietpi-login
+fi
+
+# Workaround for Readarr/Kavita explicitly calling uname without shell, breaking our ARM workaround
+if (( ${aINSTALL[203]} )) || (( ${aINSTALL[212]} )) && [[ -f 'rootfs/usr/local/bin/uname' ]]
+then
+	G_EXEC sed --follow-symlinks -i '/# Start DietPi-Software/i\sed -i '\''/# Custom 1st run script/i\\rm /usr/local/bin/uname'\'' /boot/dietpi/dietpi-software' rootfs/boot/dietpi/dietpi-login
+fi
+
+# Workaround for Snapcast Client, using file output where no ALSA device is available
 # shellcheck disable=SC2016
-(( $arch < 3 )) && G_EXEC sed --follow-symlinks -i '/# Start DietPi-Software/a\sed -i -e '\''/pip3 install homeassistant/i\echo constraint=$ha_home/.pip/constraints.txt >> $ha_home/.pip/pip.conf'\'' -e '\''/pip3 install homeassistant/i\echo numpy==2.2.6 > $ha_home/.pip/constraints.txt'\'' /boot/dietpi/dietpi-software' rootfs/boot/dietpi/dietpi-login
+(( ${aINSTALL[192]} )) && G_EXEC sed --follow-symlinks -i '/# Start DietPi-Software/i\sed -i '\''s/-p \$snapcast_server_port/-p \$snapcast_server_port --player file/'\'' /boot/dietpi/dietpi-software' rootfs/boot/dietpi/dietpi-login
 
 # Check for service status, ports and commands
 # shellcheck disable=SC2016
@@ -481,14 +532,17 @@ done
 
 # Success flag and shutdown
 # shellcheck disable=SC2016
-G_EXEC eval 'echo '\''[ $exit_code = 0 ] && > /success || { journalctl -n 50; ss -tulpn; df -h; free -h; }; systemctl start poweroff.target'\'' >> rootfs/boot/Automation_Custom_Script.sh'
+G_EXEC eval 'echo '\''[ $exit_code = 0 ] && > /success || { journalctl -n 50; ss -tulpn; df -h; free -h; }; systemctl start poweroff.target; exit $?'\'' >> rootfs/boot/Automation_Custom_Script.sh'
 
 # Shutdown as well on failures before the custom script is executed
-G_EXEC sed --follow-symlinks -i 's|Prompt_on_Failure$|{ journalctl -n 50; ss -tulpn; df -h; free -h; systemctl start poweroff.target; }|' rootfs/boot/dietpi/dietpi-login
+G_EXEC sed --follow-symlinks -i 's|Prompt_on_Failure$|{ journalctl -n 50; ss -tulpn; df -h; free -h; systemctl start poweroff.target; exit 1; }|' rootfs/boot/dietpi/dietpi-login
 
 ##########################################
 # Boot container
 ##########################################
-systemd-nspawn -bD rootfs
-[[ -f 'rootfs/success' ]] || { journalctl -n 25; ss -tlpn; df -h; free -h; exit 1; }
+caps=()
+[[ $CAPABILITIES ]] && caps=("--capability=${CAPABILITIES#,}")
+systemd-nspawn "${caps[@]}" -bD rootfs
+# shellcheck disable=SC2015
+[[ -f 'rootfs/success' ]] && exit 0 || { journalctl -n 25; ss -tlpn; df -h; free -h; exit 1; }
 }

@@ -176,6 +176,7 @@ _EOF_
 # - conffiles
 cat << '_EOF_' > "$DIR/DEBIAN/conffiles" || exit 1
 /etc/unbound/unbound.conf
+/etc/unbound/unbound.conf.d/remote-control.conf
 /etc/unbound/unbound.conf.d/root-auto-trust-anchor-file.conf
 /etc/unbound/unbound.conf.d/dietpi.conf
 _EOF_
