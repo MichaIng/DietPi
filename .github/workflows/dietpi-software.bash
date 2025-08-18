@@ -77,18 +77,18 @@ image="DietPi_Container-$image.img"
 emulation=0
 (( $G_HW_ARCH == $arch || ( $G_HW_ARCH < 10 && $G_HW_ARCH > $arch ) )) || emulation=1
 
-# Remove Docker containers from test installs as Docker cannot start in systemd containers
-[[ $SOFTWARE =~ (^| )(86|142|185)( |$) ]] && { echo '[ WARN ] Removing Roon Extension Manager, MicroK8s and Portainer from test installs as Docker cannot start in systemd containers'; SOFTWARE=$(sed -E 's/(^| )(86|142|185)( |$)/\1\3/g' <<< "$SOFTWARE"); }
-# Add MariaDB with Allo GUI (non-full/reinstall ID 160), as otherwise the install fails
+# Allo GUI (non-full/reinstall ID 160): Add MariaDB for needed database generation
 [[ $SOFTWARE =~ (^| )160( |$) ]] && SOFTWARE=$(sed -E 's/(^| )160( |$)/\188 160\2/g' <<< "$SOFTWARE")
-# Remove PostgreSQL and dependants (Synapse) on RISC-V with emulation: https://gitlab.com/qemu-project/qemu/-/issues/3068
-# WireGuard: "Unable to modify/access interface: Protocol not supported" probably a syscall unsupported in QEMU user mode emulation
-(( $arch == 11 && $emulation )) && [[ $SOFTWARE =~ (^| )(125|172|194)( |$) ]] && { echo '[ WARN ] Removing PostgreSQL, WireGuard, and Synapse from test installs, not able to work in emulated RISC-V containers'; SOFTWARE=$(sed -E 's/(^| )(125|172|194)( |$)/\1\3/g' <<< "$SOFTWARE"); }
+# Removals for QEMU-emulated tests:
+# - PostgreSQL and dependants (Synapse): https://gitlab.com/qemu-project/qemu/-/issues/3068
+# - WireGuard: "Unable to modify/access interface: Protocol not supported"
+# - Docker containers (Roon Extension Manager and Synapse): Docker daemon fails with "iptables: Failed to initialize nft: Protocol not supported" and similar error with iptables-legacy
+[[ $arch == 11 && $emulation == 1 && $SOFTWARE =~ (^| )(86|125|172|185|194)( |$) ]] && { echo '[ WARN ] Removing Roon Extension Manager, PostgreSQL, WireGuard, Portainer, and Synapse from test installs as they fail in emulated RISC-V containers'; SOFTWARE=$(sed -E 's/(^| )(86|125|172|185|194)( |$)/\1\3/g' <<< "$SOFTWARE"); }
 
 ##########################################
 # Create service and port lists
 ##########################################
-aINSTALL=() aSERVICES=() aTCP=() aUDP=() aCOMMANDS=() aDELAY=() CAPABILITIES=''
+aINSTALL=() aSERVICES=() aTCP=() aUDP=() aCOMMANDS=() aDELAY=() CAPABILITIES='' SYSCALLS='' aOPTIONS=()
 Process_Software()
 {
 	local i
@@ -145,7 +145,7 @@ Process_Software()
 			83) aSERVICES[i]='apache2' aTCP[i]='80';;
 			84) aSERVICES[i]='lighttpd' aTCP[i]='80';;
 			85) aSERVICES[i]='nginx' aTCP[i]='80';;
-			#86) aSERVICES[i]='roon-extension-manager';; # Docker does not start in systemd containers (without dedicated network)
+			86) aSERVICES[i]='roon-extension-manager' SYSCALLS+=' add_key keyctl bpf';;
 			88) aSERVICES[i]='mariadb' aTCP[i]='3306';;
 			89) case $DISTRO in
 				'bullseye') aSERVICES[i]='php7.4-fpm';;
@@ -192,7 +192,8 @@ Process_Software()
 			138) aSERVICES[i]='virtualhere' aTCP[i]='7575';;
 			139) aSERVICES[i]='sabnzbd' aTCP[i]='8080'; (( $arch == 10 )) || aDELAY[i]=30;; # ToDo: Solve conflict with Airsonic
 			140) aSERVICES[i]='domoticz' aTCP[i]='8424';;
-			#142) aSERVICES[i]='snapd';; "system does not fully support snapd: cannot mount squashfs image using "squashfs": mount: /tmp/syscheck-mountpoint-2075108377: mount failed: Operation not permitted."
+			# MicroK8s: /run/udev and on Bullseye /sys/devices required for snapd update to succeed on first attempt doing a udev trigger; ~@mount + loop devices for snapd snaps=squashfs mounts; /dev/kmsg mount + CAP_SYSLOG: "Error: failed to run Kubelet: failed to create kubelet: open /dev/kmsg: no such file or directory"
+			142) aCOMMANDS[i]='/snap/bin/microk8s status' aSERVICES[i]='snapd snap.microk8s.daemon-containerd' aDELAY[i]=30 CAPABILITIES+=',CAP_NET_ADMIN,CAP_MAC_ADMIN,CAP_SYSLOG' SYSCALLS+=' add_key keyctl bpf ~@mount' aOPTIONS+=('--bind-ro=/run/udev' '--bind=/dev/loop-control' '--bind=/dev/loop'{1,2,3,4,5,6,7} '--bind=/dev/kmsg'); [[ $DISTRO == 'bullseye' ]] && aOPTIONS+=('--bind=/sys/devices') ;;
 			143) aSERVICES[i]='koel' aTCP[i]='8003'; (( $emulation )) && aDELAY[i]=30;;
 			144) (( $arch == 1 )) || aSERVICES[i]='sonarr' aTCP[i]='8989';; # Skip on ARMv6 failing in container with "If you're reading this, the MonoMod.RuntimeDetour selftest failed."
 			145) aSERVICES[i]='radarr' aTCP[i]='7878';;
@@ -209,7 +210,7 @@ Process_Software()
 			157) aSERVICES[i]='home-assistant' aTCP[i]='8123'; (( $emulation )) && aDELAY[i]=900 || aDELAY[i]=60;;
 			158) aSERVICES[i]='minio' aTCP[i]='9001 9004';;
 			161) aSERVICES[i]='bdd' aTCP[i]='80 443';;
-			162) aCOMMANDS[i]='docker -v';; # aSERVICES[i]='docker' Service does not start in systemd containers (without dedicated network)
+			162) aCOMMANDS[i]='docker -v' aSERVICES[i]='containerd' CAPABILITIES+=',CAP_NET_ADMIN'; (( $emulation )) || aSERVICES[i]+=' docker';; # QEMU: Docker daemon fails with "iptables: Failed to initialize nft: Protocol not supported" and similar error with iptables-legacy
 			163) aSERVICES[i]='gmediarender';; # DLNA => UPnP high range of ports
 			164) aSERVICES[i]='nukkit' aUDP[i]='19132'; (( $emulation )) && aDELAY[i]=60;;
 			165) aSERVICES[i]='gitea' aTCP[i]='3000';;
@@ -228,7 +229,7 @@ Process_Software()
 			182) aSERVICES[i]='unbound' aUDP[i]='53'; [[ ${aSERVICES[126]} ]] && aUDP[i]+=' 5335';; # Uses port 5335 if Pi-hole or AdGuard Home is installed, but those do listen on port 53 instead
 			183) aSERVICES[i]='vaultwarden' aTCP[i]='8001';;
 			184) aSERVICES[i]='tor' aTCP[i]='80 443 9051';;
-			#185) aTCP[i]='9002';; # Docker does not start in systemd containers (without dedicated network)
+			185) aTCP[i]='9002 9442' SYSCALLS+=' add_key keyctl bpf';;
 			186) aSERVICES[i]='ipfs' aTCP[i]='5003 8087';;
 			187) aSERVICES[i]='cups' aTCP[i]='631';;
 			188) aCOMMANDS[i]='go version';;
@@ -236,7 +237,7 @@ Process_Software()
 			190) aCOMMANDS[i]='beet version';;
 			191) aSERVICES[i]='snapserver' aTCP[i]='1704 1780';;
 			192) aSERVICES[i]='snapclient';;
-			#193) aSERVICES[i]='k3s';; fails due to missing memory cgroup access from within the container
+			193) aCOMMANDS[i]='k3s -v' aSERVICES[i]='k3s' aOPTIONS+=('--bind=/dev/kmsg') CAPABILITIES+=',CAP_NET_ADMIN,CAP_SYSLOG' SYSCALLS+=' add_key keyctl bpf';; # /dev/kmsg mount + CAP_SYSLOG: "Error: failed to run Kubelet: failed to create kubelet: open /dev/kmsg: no such file or directory" resp. "...: operation not permitted"
 			194) aSERVICES[i]='postgresql';;
 			195) aCOMMANDS[i]='yt-dlp --version';;
 			196) aCOMMANDS[i]='java -version';;
@@ -274,7 +275,7 @@ do
 		49|165|177) Process_Software 0 17 88;;
 		61) Process_Software 60;;
 		125) Process_Software 194;;
-		#86|134|185) Process_Software 162;; # Docker does not start in systemd containers (without dedicated network)
+		86|134|185) Process_Software 162;;
 		166) Process_Software 70;;
 		180) (( $arch == 10 || $arch == 3 )) || Process_Software 170;;
 		188) Process_Software 17;; # 93 (Pi-hole) cannot be installed non-interactively
@@ -487,6 +488,35 @@ fi
 # shellcheck disable=SC2016
 (( ${aINSTALL[192]} )) && G_EXEC sed --follow-symlinks -i '/# Start DietPi-Software/i\sed -i '\''s/-p \$snapcast_server_port/-p \$snapcast_server_port --player file/'\'' /boot/dietpi/dietpi-software' rootfs/boot/dietpi/dietpi-login
 
+# Portainer/K3s
+if (( ${aINSTALL[185]} )) || (( ${aINSTALL[193]} ))
+then
+	# Unmount R/O /proc/sys created by systemd-nspawn: "failed to disable IPv6 on container's interface eth0" resp. "open /proc/sys/foo/bar: read-only file system"
+	# - systemd-journald restart fixes missing "journalctl -e/-u" outputs
+	G_EXEC eval 'cat << '\''_EOF_'\'' > rootfs/var/lib/dietpi/postboot.d/container.sh
+#!/bin/dash
+umount -l /proc/sys
+systemctl restart systemd-journald
+_EOF_'
+fi
+
+# MicroK8s
+if (( ${aINSTALL[142]} ))
+then
+	# Unmount R/O /proc/sys created by systemd-nspawn: "open /proc/sys/...: read-only file system"
+	# - systemd-journald restart fixes missing "journalctl -e/-u" outputs
+	# Mount securityfs to enable AppArmor access, which also requires CAP_MAC_ADMIN
+	G_EXEC eval 'cat << '\''_EOF_'\'' > rootfs/var/lib/dietpi/postboot.d/container.sh
+#!/bin/dash
+umount -l /proc/sys
+systemctl restart systemd-journald
+mount -t securityfs securityfs /sys/kernel/security
+_EOF_'
+	# apparmor="DENIED" operation="sendmsg" class="net" profile="/snap/snapd/24792/usr/lib/snapd/snap-confine" pid=218663 comm="snap-confine" family="unix" sock_type="stream" protocol=0 requested_mask="send" denied_mask="send"
+	G_EXEC mkdir -p /var/lib/snapd/apparmor/snap-confine.internal
+	G_EXEC eval 'echo '\''include <abstractions/base>'\'' > /var/lib/snapd/apparmor/snap-confine.internal/net'
+fi
+
 # Check for service status, ports and commands
 # shellcheck disable=SC2016
 # - Start all services
@@ -540,9 +570,10 @@ G_EXEC sed --follow-symlinks -i 's|Prompt_on_Failure$|{ journalctl -n 50; ss -tu
 ##########################################
 # Boot container
 ##########################################
-caps=()
-[[ $CAPABILITIES ]] && caps=("--capability=${CAPABILITIES#,}")
-systemd-nspawn "${caps[@]}" -bD rootfs
+[[ $CAPABILITIES ]] && aOPTIONS+=("--capability=${CAPABILITIES#,}")
+[[ $SYSCALLS ]] && aOPTIONS+=("--system-call-filter=${SYSCALLS# }")
+G_DIETPI-NOTIFY 2 "Running container with: systemd-nspawn ${aOPTIONS[*]} -bD rootfs"
+systemd-nspawn "${aOPTIONS[@]}" -bD rootfs
 # shellcheck disable=SC2015
 [[ -f 'rootfs/success' ]] && exit 0 || { journalctl -n 25; ss -tlpn; df -h; free -h; exit 1; }
 }
