@@ -77,18 +77,18 @@ image="DietPi_Container-$image.img"
 emulation=0
 (( $G_HW_ARCH == $arch || ( $G_HW_ARCH < 10 && $G_HW_ARCH > $arch ) )) || emulation=1
 
-# Remove Docker containers from test installs as Docker cannot start in systemd containers
-[[ $SOFTWARE =~ (^| )(86|142|185)( |$) ]] && { echo '[ WARN ] Removing Roon Extension Manager, MicroK8s and Portainer from test installs as Docker cannot start in systemd containers'; SOFTWARE=$(sed -E 's/(^| )(86|142|185)( |$)/\1\3/g' <<< "$SOFTWARE"); }
-# Add MariaDB with Allo GUI (non-full/reinstall ID 160), as otherwise the install fails
+# Allo GUI (non-full/reinstall ID 160): Add MariaDB for needed database generation
 [[ $SOFTWARE =~ (^| )160( |$) ]] && SOFTWARE=$(sed -E 's/(^| )160( |$)/\188 160\2/g' <<< "$SOFTWARE")
-# Remove PostgreSQL and dependants (Synapse) on RISC-V with emulation: https://gitlab.com/qemu-project/qemu/-/issues/3068
-# WireGuard: "Unable to modify/access interface: Protocol not supported" probably a syscall unsupported in QEMU user mode emulation
-(( $arch == 11 && $emulation )) && [[ $SOFTWARE =~ (^| )(125|172|194)( |$) ]] && { echo '[ WARN ] Removing PostgreSQL, WireGuard, and Synapse from test installs, not able to work in emulated RISC-V containers'; SOFTWARE=$(sed -E 's/(^| )(125|172|194)( |$)/\1\3/g' <<< "$SOFTWARE"); }
+# Removals for QEMU-emulated tests:
+# - PostgreSQL and dependants (Synapse): https://gitlab.com/qemu-project/qemu/-/issues/3068
+# - WireGuard: "Unable to modify/access interface: Protocol not supported"
+# - Docker containers (Roon Extension Manager and Synapse): Docker daemon fails with "iptables: Failed to initialize nft: Protocol not supported" and similar error with iptables-legacy
+[[ $arch == 11 && $emulation == 1 && $SOFTWARE =~ (^| )(86|125|172|185|194)( |$) ]] && { echo '[ WARN ] Removing Roon Extension Manager, PostgreSQL, WireGuard, Portainer, and Synapse from test installs as they fail in emulated RISC-V containers'; SOFTWARE=$(sed -E 's/(^| )(86|125|172|185|194)( |$)/\1\3/g' <<< "$SOFTWARE"); }
 
 ##########################################
 # Create service and port lists
 ##########################################
-aINSTALL=() aSERVICES=() aTCP=() aUDP=() aCOMMANDS=() aDELAY=() CAPABILITIES=''
+aINSTALL=() aSERVICES=() aTCP=() aUDP=() aCOMMANDS=() aDELAY=() CAPABILITIES='' SYSCALLS='' aOPTIONS=()
 Process_Software()
 {
 	local i
@@ -100,6 +100,10 @@ Process_Software()
 			0) aCOMMANDS[i]='ssh -V';;
 			1) aCOMMANDS[i]='smbclient -V';;
 			2) aSERVICES[i]='fahclient' aTCP[i]='7396';;
+			3) aCOMMANDS[i]='mc -V';;
+			4) aCOMMANDS[i]='fish -v';;
+			5) aCOMMANDS[i]='aplay -l';;
+			6) aCOMMANDS[i]='X -version';;
 			7) aCOMMANDS[i]='ffmpeg -version';;
 			8) aCOMMANDS[i]='javac -version';;
 			9) aCOMMANDS[i]='node -v';;
@@ -107,52 +111,81 @@ Process_Software()
 			11) aCOMMANDS[i]='gzdoom -norun | grep '\''^GZDoom version '\';;
 			#16) aSERVICES[i]='microblog-pub' aTCP[i]='8007';; Service enters a CPU-intense internal error loop until it has been configured interactively via "microblog-pub configure", hence it is not enabled and started anymore after install but instead as part of "microblog-pub configure"
 			17) aCOMMANDS[i]='git --version';; # from Bookworm on, the shorthand "-v" is supported
+			#22) QuiteRSS: has no CLI
+			23) aCOMMANDS[i]='lxsession -h';;
+			24) aCOMMANDS[i]='mate-session -h';;
+			25) aCOMMANDS[i]='xfce4-session -h';;
+			26) aCOMMANDS[i]='gnustep-tests';;
+			#27) TasmoAdmin
 			28) aSERVICES[i]='vncserver' aTCP[i]='5901';;
 			29) aSERVICES[i]='xrdp' aTCP[i]='3389';;
 			30) aSERVICES[i]='nxserver' aTCP[i]='4000';;
+			31) [[ $arch == 1 && $DISTRO == 'bookworm' ]] || aCOMMANDS[i]='kodi -v';; # Bookworm RPi repo "kodi" calls fgconsole and chvt which both fails in non-interactive container: "Couldn't get a file descriptor referring to the console."
 			32) aSERVICES[i]='ympd' aTCP[i]='1337';;
 			33) (( $emulation )) || aSERVICES[i]='airsonic' aTCP[i]='8080' aDELAY[i]=60;; # Fails in QEMU-emulated containers, probably due to missing device access
+			34) aCOMMANDS[i]='COMPOSER_ALLOW_SUPERUSER=1 composer -n -V';;
 			35) [[ $DISTRO != 'trixie' ]] || (( $arch > 2 )) && aSERVICES[i]='lyrionmusicserver' aTCP[i]='9000';; # disable check on 32-bit ARM Trixie for now: https://github.com/LMS-Community/slimserver/tree/public/9.1/CPAN/arch/5.40
 			36) aCOMMANDS[i]='squeezelite -t';; # Service listens on random high UDP port and exits if no audio device has been found, which does not exist on GitHub Actions runners, respectively within the containers
 			37) aSERVICES[i]='shairport-sync' aTCP[i]='5000';; # AirPlay 2 would be TCP port 7000
+			38) aCOMMANDS[i]='/opt/FreshRSS/cli/user-info.php';;
 			39) aSERVICES[i]='minidlna' aTCP[i]='8200';;
+			#40) Ampache
 			41) aSERVICES[i]='emby-server' aTCP[i]='8096';;
 			42) aSERVICES[i]='plexmediaserver' aTCP[i]='32400';;
 			43) aSERVICES[i]='mumble-server' aTCP[i]='64738';;
 			44) aSERVICES[i]='transmission-daemon' aTCP[i]='9091 51413' aUDP[i]='51413';;
 			45) aSERVICES[i]='deluged deluge-web' aTCP[i]='8112 58846 6882';;
 			46) aSERVICES[i]='qbittorrent' aTCP[i]='1340 6881';;
+			47) aCOMMANDS[i]='sudo -u www-data php /var/www/owncloud/occ status';;
+			#48) Pydio
 			49) aSERVICES[i]='gogs' aTCP[i]='3000';;
 			50) aSERVICES[i]='syncthing' aTCP[i]='8384';;
 			51) aCOMMANDS[i]='/usr/games/opentyrian/opentyrian -h';;
 			52) aSERVICES[i]='cuberite' aTCP[i]='1339' aDELAY[i]=60;;
 			53) aSERVICES[i]='mineos' aTCP[i]='8443';;
+			#54) phpBB
+			#55) WordPress
+			#56) Single File PHP Gallery
+			#57) Baïkal
 			58) aCOMMANDS[i]='tailscale version';; # aSERVICES[i]='tailscaled' aUDP[i]='41641' GitHub Actions runners do not support the TUN module
 			59) aSERVICES[i]='raspimjpeg';;
 			60) aCOMMANDS[i]='iptables -V' aSERVICES[i]='isc-dhcp-server' aUDP[i]='67';; # aSERVICES[i]='hostapd' fails without actual WiFi interface
 			61) aSERVICES[i]='tor' aTCP[i]='9040' aUDP[i]='53';;
 			62) aCOMMANDS[i]='box86 -v';;
+			#63 LinuxDash
+			#64 phpSysInfo
 			65) aSERVICES[i]='netdata' aTCP[i]='19999';;
 			66) aSERVICES[i]='rpimonitor' aTCP[i]='8888';;
 			67) aCOMMANDS[i]='firefox-esr -v';;
 			68) aSERVICES[i]='schannel' aUDP[i]='5980';; # remoteit@.service service listens on random high UDP port
+			#69) RPi.GPIO
 			70) aCOMMANDS[i]='gpio -v | grep '\''gpio version'\';;
 			71) aSERVICES[i]='webiopi' aTCP[i]='8002';;
+			#72) I2C
 			73) aSERVICES[i]='fail2ban';;
 			74) aSERVICES[i]='influxdb' aTCP[i]='8086 8088';;
+			#75) LASP
+			#76) LAMP
 			77) aSERVICES[i]='grafana-server' aTCP[i]='3001' aDELAY[i]=30;;
+			#78) LESP
+			#79) LEMP
 			80) aSERVICES[i]='ubooquity' aTCP[i]='2038 2039'; (( $emulation )) && aDELAY[i]=30;;
+			#81) LLSP
+			#82) LLMP
 			83) aSERVICES[i]='apache2' aTCP[i]='80';;
 			84) aSERVICES[i]='lighttpd' aTCP[i]='80';;
 			85) aSERVICES[i]='nginx' aTCP[i]='80';;
-			#86) aSERVICES[i]='roon-extension-manager';; # Docker does not start in systemd containers (without dedicated network)
+			86) aSERVICES[i]='roon-extension-manager' SYSCALLS+=' add_key keyctl bpf';;
+			87) aCOMMANDS[i]='sqlite3 -version';;
 			88) aSERVICES[i]='mariadb' aTCP[i]='3306';;
 			89) case $DISTRO in
 				'bullseye') aSERVICES[i]='php7.4-fpm';;
 				'bookworm') aSERVICES[i]='php8.2-fpm';;
 				*) aSERVICES[i]='php8.4-fpm';;
 			esac;;
+			#90 phpMyAdmin
 			91) aSERVICES[i]='redis-server' aTCP[i]='6379';;
+			92) aCOMMANDS[i]='certbot --version';;
 			93) aSERVICES[i]='pihole-FTL' aUDP[i]='53';;
 			94) aSERVICES[i]='proftpd' aTCP[i]='21';;
 			95) aSERVICES[i]='vsftpd' aTCP[i]='21';;
@@ -160,9 +193,10 @@ Process_Software()
 			97) aCOMMANDS[i]='openvpn --version';; # aSERVICES[i]='openvpn' aUDP[i]='1194' GitHub Actions runners do not support the TUN module
 			98) aSERVICES[i]='haproxy' aTCP[i]='80 1338';;
 			99) aSERVICES[i]='node_exporter' aTCP[i]='9100';;
-			#100) (( $arch < 3 )) && aCOMMANDS[i]='/usr/bin/pijuice_cli32 -V' || aCOMMANDS[i]='/usr/bin/pijuice_cli64 -V' aSERVICES[i]='pijuice' aTCP[i]='????' Service does not start without I2C device, not present in container and CLI command always puts you in interactive console
+			#100) (( $arch < 3 )) && aCOMMANDS[i]='/usr/bin/pijuice_cli32 -V' || aCOMMANDS[i]='/usr/bin/pijuice_cli64 -V'; aSERVICES[i]='pijuice' aTCP[i]='????';; Service does not start without I2C device, not present in container and CLI command always puts you in interactive console
 			101) aCOMMANDS[i]='logrotate -v /etc/logrotate.conf';;
 			102) aSERVICES[i]='rsyslog';;
+			103) aSERVICES[i]='dietpi-ramlog' aCOMMANDS[i]='/boot/dietpi/func/dietpi-ramlog 1 && /boot/dietpi/func/dietpi-ramlog 0 && findmnt -t tmpfs /var/log';;
 			104) aSERVICES[i]='dropbear' aTCP[i]='22';;
 			105) aSERVICES[i]='ssh' aTCP[i]='22';;
 			106) aSERVICES[i]='lidarr' aTCP[i]='8686';;
@@ -171,10 +205,15 @@ Process_Software()
 			109) aSERVICES[i]='nfs-kernel-server' aTCP[i]='2049';;
 			110) aCOMMANDS[i]='mount.nfs -V';;
 			111) aSERVICES[i]='urbackupsrv' aTCP[i]='55414';;
+			112) aCOMMANDS[i]='/mnt/dietpi_userdata/dxx-rebirth/d1x-rebirth_rpigl -h';;
+			113) aCOMMANDS[i]='chromium --version'; [[ $DISTRO == 'bullseye' && $RPI == 'true' ]] && (( $arch < 10 )) && aCOMMANDS[i]='chromium-browser --version';;
+			114) aCOMMANDS[i]='sudo -u www-data php /var/www/nextcloud/occ status';;
 			115) aSERVICES[i]='webmin' aTCP[i]='10000';;
 			116) aSERVICES[i]='medusa' aTCP[i]='8081'; (( $emulation )) && aDELAY[i]=30;;
 			#117) :;; # ToDo: Implement automated install via /boot/unattended_pivpn.conf
 			118) aSERVICES[i]='mopidy' aTCP[i]='6680';;
+			119) aCOMMANDS[i]='cava -v';;
+			#120) RealVNC
 			121) aSERVICES[i]='roonbridge' aUDP[i]='9003';;
 			122) aSERVICES[i]='node-red' aTCP[i]='1880'; (( $emulation )) && aDELAY[i]=30;;
 			123) aSERVICES[i]='mosquitto' aTCP[i]='1883';;
@@ -182,6 +221,8 @@ Process_Software()
 			125) aSERVICES[i]='synapse' aTCP[i]='8008';;
 			126) aSERVICES[i]='adguardhome' aUDP[i]='53' aTCP[i]='8083'; [[ ${aSERVICES[182]} ]] && aUDP[i]+=' 5335';; # Unbound uses port 5335 if AdGuard Home is installed
 			128) aSERVICES[i]='mpd' aTCP[i]='6600';;
+			#129) O!MPD
+			130) aCOMMANDS[i]='python3 -V';;
 			131) (( $arch < 3 || $arch == 11 )) || aSERVICES[i]='blynkserver' aTCP[i]='9443'; (( $arch == 10 || $arch == 2 || $arch == 11 )) || aDELAY[i]=60;;
 			132) aSERVICES[i]='aria2' aTCP[i]='6800';; # aTCP[i]+=' 6881-6999';; # Listens on random port
 			133) (( $arch < 3 || $arch == 11 )) || aSERVICES[i]='yacy' aTCP[i]='8090'; (( $arch == 10 )) && aDELAY[i]=30; (( $arch == 10 || $arch == 2 || $arch == 11)) || aDELAY[i]=90;;
@@ -192,7 +233,9 @@ Process_Software()
 			138) aSERVICES[i]='virtualhere' aTCP[i]='7575';;
 			139) aSERVICES[i]='sabnzbd' aTCP[i]='8080'; (( $arch == 10 )) || aDELAY[i]=30;; # ToDo: Solve conflict with Airsonic
 			140) aSERVICES[i]='domoticz' aTCP[i]='8424';;
-			#142) aSERVICES[i]='snapd';; "system does not fully support snapd: cannot mount squashfs image using "squashfs": mount: /tmp/syscheck-mountpoint-2075108377: mount failed: Operation not permitted."
+			141) aSERVICES[i]='adsb-setup' aTCP[i]='1099' SYSCALLS+=' add_key keyctl bpf'; (( $emulation )) || aSERVICES[i]+=' adsb-docker';; # Container cannot start in QEMU-emulated container. Else, depending on container startup race condition, the Dozzle port can be 9999 (default) or 1094 (changed by internal setup step). I remains 1094 on subsequent restarts, and other ports join depending on manual init setup selections.
+			# MicroK8s: /run/udev and on Bullseye /sys/devices required for snapd update to succeed on first attempt doing a udev trigger; ~@mount + loop devices for snapd snaps=squashfs mounts; /dev/kmsg mount + CAP_SYSLOG: "Error: failed to run Kubelet: failed to create kubelet: open /dev/kmsg: no such file or directory"
+			142) aCOMMANDS[i]='/snap/bin/microk8s status' aSERVICES[i]='snapd snap.microk8s.daemon-containerd' aDELAY[i]=30 CAPABILITIES+=',CAP_NET_ADMIN,CAP_MAC_ADMIN,CAP_SYSLOG' SYSCALLS+=' add_key keyctl bpf ~@mount' aOPTIONS+=('--bind-ro=/run/udev' '--bind=/dev/loop-control' '--bind=/dev/loop'{1,2,3,4,5,6,7} '--bind=/dev/kmsg'); [[ $DISTRO == 'bullseye' ]] && aOPTIONS+=('--bind=/sys/devices') ;;
 			143) aSERVICES[i]='koel' aTCP[i]='8003'; (( $emulation )) && aDELAY[i]=30;;
 			144) (( $arch == 1 )) || aSERVICES[i]='sonarr' aTCP[i]='8989';; # Skip on ARMv6 failing in container with "If you're reading this, the MonoMod.RuntimeDetour selftest failed."
 			145) aSERVICES[i]='radarr' aTCP[i]='7878';;
@@ -206,10 +249,13 @@ Process_Software()
 			153) aSERVICES[i]='octoprint' aTCP[i]='5001'; (( $emulation )) && aDELAY[i]=60;;
 			154) aSERVICES[i]='roonserver';; # Listens on a variety of different port ranges
 			155) aSERVICES[i]='htpc-manager' aTCP[i]='8085'; (( $emulation )) && aDELAY[i]=30;;
+			#156) Steam
 			157) aSERVICES[i]='home-assistant' aTCP[i]='8123'; (( $emulation )) && aDELAY[i]=900 || aDELAY[i]=60;;
 			158) aSERVICES[i]='minio' aTCP[i]='9001 9004';;
+			#159) Allo GUI full
+			#160) Allo GUI without dependencies
 			161) aSERVICES[i]='bdd' aTCP[i]='80 443';;
-			162) aCOMMANDS[i]='docker -v';; # aSERVICES[i]='docker' Service does not start in systemd containers (without dedicated network)
+			162) aCOMMANDS[i]='docker -v' aSERVICES[i]='containerd' CAPABILITIES+=',CAP_NET_ADMIN'; (( $emulation )) || aSERVICES[i]+=' docker';; # QEMU: Docker daemon fails with "iptables: Failed to initialize nft: Protocol not supported" and similar error with iptables-legacy
 			163) aSERVICES[i]='gmediarender';; # DLNA => UPnP high range of ports
 			164) aSERVICES[i]='nukkit' aUDP[i]='19132'; (( $emulation )) && aDELAY[i]=60;;
 			165) aSERVICES[i]='gitea' aTCP[i]='3000';;
@@ -219,7 +265,9 @@ Process_Software()
 			170) aCOMMANDS[i]='unrar -V';;
 			171) aSERVICES[i]='frps frpc' aTCP[i]='7000 7400 7500';;
 			172) aCOMMANDS[i]='wg' aSERVICES[i]='wg-quick@wg0' aUDP[i]='51820' CAPABILITIES+=',CAP_NET_ADMIN';;
+			#173 LXQt: all executables strictly require a Qt session, no help or version output possible
 			174) aCOMMANDS[i]='gimp -v';;
+			175) aCOMMANDS[i]='xfce4-power-manager -V';;
 			177) aSERVICES[i]='forgejo' aTCP[i]='3000';;
 			178) aSERVICES[i]='jellyfin' aTCP[i]='8097';;
 			179) aSERVICES[i]='komga' aTCP[i]='2037'; (( $emulation )) && aDELAY[i]=300 || aDELAY[i]=30;;
@@ -228,7 +276,7 @@ Process_Software()
 			182) aSERVICES[i]='unbound' aUDP[i]='53'; [[ ${aSERVICES[126]} ]] && aUDP[i]+=' 5335';; # Uses port 5335 if Pi-hole or AdGuard Home is installed, but those do listen on port 53 instead
 			183) aSERVICES[i]='vaultwarden' aTCP[i]='8001';;
 			184) aSERVICES[i]='tor' aTCP[i]='80 443 9051';;
-			#185) aTCP[i]='9002';; # Docker does not start in systemd containers (without dedicated network)
+			185) aTCP[i]='9002 9442' SYSCALLS+=' add_key keyctl bpf';;
 			186) aSERVICES[i]='ipfs' aTCP[i]='5003 8087';;
 			187) aSERVICES[i]='cups' aTCP[i]='631';;
 			188) aCOMMANDS[i]='go version';;
@@ -236,7 +284,7 @@ Process_Software()
 			190) aCOMMANDS[i]='beet version';;
 			191) aSERVICES[i]='snapserver' aTCP[i]='1704 1780';;
 			192) aSERVICES[i]='snapclient';;
-			#193) aSERVICES[i]='k3s';; fails due to missing memory cgroup access from within the container
+			193) aCOMMANDS[i]='k3s -v' aSERVICES[i]='k3s' aOPTIONS+=('--bind=/dev/kmsg') CAPABILITIES+=',CAP_NET_ADMIN,CAP_SYSLOG' SYSCALLS+=' add_key keyctl bpf';; # /dev/kmsg mount + CAP_SYSLOG: "Error: failed to run Kubelet: failed to create kubelet: open /dev/kmsg: no such file or directory" resp. "...: operation not permitted"
 			194) aSERVICES[i]='postgresql';;
 			195) aCOMMANDS[i]='yt-dlp --version';;
 			196) aCOMMANDS[i]='java -version';;
@@ -248,10 +296,12 @@ Process_Software()
 			202) aCOMMANDS[i]='rclone version';;
 			203) aSERVICES[i]='readarr' aTCP[i]='8787';;
 			204) aSERVICES[i]='navidrome' aTCP[i]='4533';;
+			#205 Homer
 			206) aSERVICES[i]='openhab' aTCP[i]='8444'; (( $emulation )) && aDELAY[i]=600;;
 			#207) Moonlight (CLI), "moonlight" command
 			#208) Moonlight (GUI), "moonlight-qt" command
 			209) aCOMMANDS[i]='restic version';;
+			#210) MediaWiki
 			211) aCOMMANDS[i]='hb-service status' aSERVICES[i]='homebridge' aTCP[i]='8581';;
 			212) aSERVICES[i]='kavita' aTCP[i]='2036' aDELAY[i]=30;;
 			213) aSERVICES[i]='soju' aTCP[i]='6667';;
@@ -274,11 +324,14 @@ do
 		49|165|177) Process_Software 0 17 88;;
 		61) Process_Software 60;;
 		125) Process_Software 194;;
-		#86|134|185) Process_Software 162;; # Docker does not start in systemd containers (without dedicated network)
+		86|134|185) Process_Software 162;;
+		141) Process_Software 17 130 134 162;;
 		166) Process_Software 70;;
 		180) (( $arch == 10 || $arch == 3 )) || Process_Software 170;;
-		188) Process_Software 17;; # 93 (Pi-hole) cannot be installed non-interactively
+		188) Process_Software 17;;
 		213) Process_Software 17 188;;
+		106|144|145|151|183|203) Process_Software 87;;
+		31|37|128|138|163|167|187) Process_Software 152;;
 		75) Process_Software 83 87 89;;
 		76) Process_Software 83 88 89;;
 		78) Process_Software 85 87 89;;
@@ -487,6 +540,35 @@ fi
 # shellcheck disable=SC2016
 (( ${aINSTALL[192]} )) && G_EXEC sed --follow-symlinks -i '/# Start DietPi-Software/i\sed -i '\''s/-p \$snapcast_server_port/-p \$snapcast_server_port --player file/'\'' /boot/dietpi/dietpi-software' rootfs/boot/dietpi/dietpi-login
 
+# ADS-B Feeder/Portainer/K3s
+if (( ${aINSTALL[141]} )) || (( ${aINSTALL[185]} )) || (( ${aINSTALL[193]} ))
+then
+	# Unmount R/O /proc/sys created by systemd-nspawn: "failed to disable IPv6 on container's interface eth0" resp. "open /proc/sys/foo/bar: read-only file system"
+	# - systemd-journald restart fixes missing "journalctl -e/-u" outputs
+	G_EXEC eval 'cat << '\''_EOF_'\'' > rootfs/var/lib/dietpi/postboot.d/container.sh
+#!/bin/dash
+umount -l /proc/sys
+systemctl restart systemd-journald
+_EOF_'
+fi
+
+# MicroK8s
+if (( ${aINSTALL[142]} ))
+then
+	# Unmount R/O /proc/sys created by systemd-nspawn: "open /proc/sys/...: read-only file system"
+	# - systemd-journald restart fixes missing "journalctl -e/-u" outputs
+	# Mount securityfs to enable AppArmor access, which also requires CAP_MAC_ADMIN
+	G_EXEC eval 'cat << '\''_EOF_'\'' > rootfs/var/lib/dietpi/postboot.d/container.sh
+#!/bin/dash
+umount -l /proc/sys
+systemctl restart systemd-journald
+mount -t securityfs securityfs /sys/kernel/security
+_EOF_'
+	# apparmor="DENIED" operation="sendmsg" class="net" profile="/snap/snapd/24792/usr/lib/snapd/snap-confine" pid=218663 comm="snap-confine" family="unix" sock_type="stream" protocol=0 requested_mask="send" denied_mask="send"
+	G_EXEC mkdir -p /var/lib/snapd/apparmor/snap-confine.internal
+	G_EXEC eval 'echo '\''include <abstractions/base>'\'' > /var/lib/snapd/apparmor/snap-confine.internal/net'
+fi
+
 # Check for service status, ports and commands
 # shellcheck disable=SC2016
 # - Start all services
@@ -540,9 +622,10 @@ G_EXEC sed --follow-symlinks -i 's|Prompt_on_Failure$|{ journalctl -n 50; ss -tu
 ##########################################
 # Boot container
 ##########################################
-caps=()
-[[ $CAPABILITIES ]] && caps=("--capability=${CAPABILITIES#,}")
-systemd-nspawn "${caps[@]}" -bD rootfs
+[[ $CAPABILITIES ]] && aOPTIONS+=("--capability=${CAPABILITIES#,}")
+[[ $SYSCALLS ]] && aOPTIONS+=("--system-call-filter=${SYSCALLS# }")
+G_DIETPI-NOTIFY 2 "Running container with: systemd-nspawn ${aOPTIONS[*]} -bD rootfs"
+systemd-nspawn "${aOPTIONS[@]}" -bD rootfs
 # shellcheck disable=SC2015
 [[ -f 'rootfs/success' ]] && exit 0 || { journalctl -n 25; ss -tlpn; df -h; free -h; exit 1; }
 }

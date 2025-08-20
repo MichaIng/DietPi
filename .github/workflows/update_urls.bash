@@ -83,7 +83,7 @@ software_id=54
 
 # Single File PHP Gallery
 software_id=56
-aCHECK[$software_id]='curl -sSf '\''https://sye.dk/sfpg/?latest'\'
+aCHECK[$software_id]='curl -sSf '\''https://sye.dk/sfpg/?latest'\'' || { sleep 5; curl -sSf '\''https://sye.dk/sfpg/?latest'\''; }'
 aREGEX[$software_id]='file='\''[^'\'']*'\'
 aREPLACE[$software_id]='file='\''$release'\'
 

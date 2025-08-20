@@ -47,7 +47,6 @@
 	alias dietpi-wifidb='/boot/dietpi/func/dietpi-wifidb'
 	alias dietpi-optimal_mtu='/boot/dietpi/func/dietpi-optimal_mtu'
 	alias dietpi-cloudshell='/boot/dietpi/dietpi-cloudshell'
-	alias dietpi-nordvpn='G_DIETPI-NOTIFY 1 "DietPi-NordVPN has been renamed to DietPi-VPN. Please use the \"dietpi-vpn\" command."'
 	alias dietpi-vpn='/boot/dietpi/dietpi-vpn'
 	alias dietpi-ddns='/boot/dietpi/dietpi-ddns'
 	alias dietpi-display='/boot/dietpi/dietpi-display'
@@ -62,7 +61,7 @@
 	# - 1337 moments ;)
 	alias 1337='echo "Indeed, you are =)"'
 
-	# "G_DIETPI-NOFITY -2 message" starts a process animation. If scripts fail to kill the animation, e.g. cancelled by user, terminal bash prompt has to do it as last resort.
+	# "G_DIETPI-NOFITY -2 message" starts a process animation. If scripts fail to kill the animation, e.g. SIGKILL, terminal bash prompt has to do it as last resort.
 	[[ $PROMPT_COMMAND == *'dietpi-process.pid'* ]] || PROMPT_COMMAND="[[ -w '/tmp/dietpi-process.pid' ]] && rm -f /tmp/dietpi-process.pid &> /dev/null && echo -ne '\r\e[J'; $PROMPT_COMMAND"
 
 	# Workaround if SSH client overrides locale with "POSIX" fallback: https://github.com/MichaIng/DietPi/issues/1540#issuecomment-367066178
