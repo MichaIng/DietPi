@@ -33,7 +33,7 @@ case $G_HW_ARCH_NAME in
 	*) Error_Exit "Unsupported host system architecture \"$G_HW_ARCH_NAME\" detected";;
 esac
 readonly G_PROGRAM_NAME='DietPi-Software build'
-G_CHECK_ROOT_USER
+G_CHECK_ROOT_USER "$@"
 G_CHECK_ROOTFS_RW
 readonly FP_ORIGIN=$PWD # Store origin dir
 G_INIT
