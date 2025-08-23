@@ -33,6 +33,7 @@ case $G_DISTRO in
 	6) adeps+=('libvpx6');;
 	7) adeps+=('libvpx7');;
 	8) adeps+=('libvpx9');;
+	9) adeps+=('libvpx11');;
 	*) G_DIETPI-NOTIFY 1 "Unsupported distro version: $G_DISTRO_NAME (ID=$G_DISTRO)"; exit 1;;
 esac
 
