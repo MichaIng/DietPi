@@ -13,7 +13,7 @@ adeps=('libc6' 'libsqlite3-0' 'libusb-0.1-4')
 case $G_DISTRO in
 	6) adeps+=('libssl1.1' 'libcurl4');;
 	7) adeps+=('libssl3' 'libcurl4');;
-	8) adeps+=('libssl3t64' 'libcurl4t64');;
+	8|9) adeps+=('libssl3t64' 'libcurl4t64');;
 	*) Error_Exit "Unsupported distro version: $G_DISTRO_NAME (ID=$G_DISTRO)";;
 esac
 
