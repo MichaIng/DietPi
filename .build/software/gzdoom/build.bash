@@ -33,6 +33,7 @@ case $G_DISTRO in
 	6) adeps+=('libvpx6');;
 	7) adeps+=('libvpx7');;
 	8) adeps+=('libvpx9');;
+	9) adeps+=('libvpx11');;
 	*) G_DIETPI-NOTIFY 1 "Unsupported distro version: $G_DISTRO_NAME (ID=$G_DISTRO)"; exit 1;;
 esac
 
@@ -144,11 +145,13 @@ done
 DEPS_APT_VERSIONED=${DEPS_APT_VERSIONED%,}
 
 # - Obtain version suffix
-G_EXEC_NOHALT=1 G_EXEC curl -sSfo package.deb "https://dietpi.com/downloads/binaries/$G_DISTRO_NAME/${NAME}_$G_HW_ARCH_NAME.deb"
+G_EXEC curl -sSfo package.deb "https://dietpi.com/downloads/binaries/$G_DISTRO_NAME/${NAME}_$G_HW_ARCH_NAME.deb"
 old_version=$(dpkg-deb -f package.deb Version)
-G_EXEC_NOHALT=1 G_EXEC rm package.deb
+G_EXEC rm package.deb
 suffix=${old_version#*-dietpi}
 [[ $old_version == "$version-"* ]] && version+="-dietpi$((suffix+1))" || version+="-dietpi1"
+G_DIETPI-NOTIFY 2 "Old package version is:       \e[33m${old_version:-N/A}"
+G_DIETPI-NOTIFY 2 "Building new package version: \e[33m$version"
 
 # - control
 cat << _EOF_ > "$DIR/DEBIAN/control"

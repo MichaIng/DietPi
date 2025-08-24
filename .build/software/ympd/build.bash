@@ -7,16 +7,16 @@ G_AGUP
 G_AGDUG cmake make gcc libc6-dev pkg-config libmpdclient-dev libssl-dev
 
 # Runtime deps
-adeps=('libc6' 'libmpdclient2')
+adeps=('libc6')
 case $G_DISTRO in
-	6) adeps+=('libssl1.1');;
-	7|8) adeps+=('libssl3');;
+	6) adeps+=('libssl1.1' 'libmpdclient2');;
+	7) adeps+=('libssl3' 'libmpdclient2');;
+	8|9) adeps+=('libssl3t64' 'libmpdclient2t64');;
 	*) G_DIETPI-NOTIFY 1 "Unsupported distro version: $G_DISTRO_NAME (ID=$G_DISTRO)"; exit 1;;
 esac
 for i in "${adeps[@]}"
 do
-	# Temporarily allow lib*t64 packages, while the 64-bit time_t transition is ongoing on Trixie: https://bugs.debian.org/1065394
-	dpkg-query -s "$i" &> /dev/null || dpkg-query -s "${i}t64" &> /dev/null && continue
+	dpkg-query -s "$i" &> /dev/null && continue
 	G_DIETPI-NOTIFY 1 "Expected dependency package was not installed: $i"
 	exit 1
 done
@@ -81,16 +81,17 @@ if [ -d '/run/systemd/system' ]
 then
 	if getent passwd ympd > /dev/null
 	then
-		echo 'Configuring ympd service user ...'
+		echo 'Configuring ympd service user "ympd" ...'
 		usermod -g dietpi -d /nonexistent -s /usr/sbin/nologin ympd
 	else
-		echo 'Creating ympd service user ...'
+		echo 'Creating ympd service user "ympd" ...'
 		useradd -rMN -g dietpi -d /nonexistent -s /usr/sbin/nologin ympd
 	fi
 
 	echo 'Configuring ympd systemd service ...'
-	systemctl unmask ympd
-	systemctl enable --now ympd
+	systemctl --no-reload unmask ympd
+	systemctl enable ympd
+	pgrep -x 'dietpi-software' || systemctl restart ympd
 fi
 _EOF_
 
@@ -100,8 +101,8 @@ cat << '_EOF_' > "$DIR/DEBIAN/prerm"
 if [ "$1" = 'remove' ] && [ -d '/run/systemd/system' ] && [ -f '/lib/systemd/system/ympd.service' ]
 then
 	echo 'Deconfiguring ympd systemd service ...'
-	systemctl unmask ympd
-	systemctl disable --now ympd
+	systemctl --no-reload unmask ympd
+	systemctl --no-reload disable --now ympd
 fi
 _EOF_
 
@@ -113,18 +114,18 @@ then
 	if [ -d '/etc/systemd/system/ympd.service.d' ]
 	then
 		echo 'Removing ympd systemd service overrides ...'
-		rm -Rv /etc/systemd/system/ympd.service.d
+		rm -rv /etc/systemd/system/ympd.service.d
 	fi
 
 	if getent passwd ympd > /dev/null
 	then
-		echo 'Removing ympd service user ...'
+		echo 'Removing ympd service user "ympd" ...'
 		userdel ympd
 	fi
 
 	if getent group ympd > /dev/null
 	then
-		echo 'Removing ympd service group ...'
+		echo 'Removing ympd service group "ympd" ...'
 		groupdel ympd
 	fi
 fi
@@ -138,8 +139,6 @@ find "$DIR" ! \( -path "$DIR/DEBIAN" -prune \) -type f -exec md5sum {} + | sed "
 DEPS_APT_VERSIONED=
 for i in "${adeps[@]}"
 do
-	# Temporarily allow lib*t64 packages, while the 64-bit time_t transition is ongoing on Trixie: https://bugs.debian.org/1065394
-	dpkg-query -s "$i" &> /dev/null || i+='t64'
 	DEPS_APT_VERSIONED+=" $i (>= $(dpkg-query -Wf '${VERSION}' "$i")),"
 done
 DEPS_APT_VERSIONED=${DEPS_APT_VERSIONED%,}
@@ -153,6 +152,8 @@ old_version=$(dpkg-deb -f package.deb Version)
 G_EXEC rm package.deb
 suffix=${old_version#*-dietpi}
 [[ $old_version == "$version-"* ]] && suffix="dietpi$((suffix+1))" || suffix="dietpi1"
+G_DIETPI-NOTIFY 2 "Old package version is:       \e[33m${old_version:-N/A}"
+G_DIETPI-NOTIFY 2 "Building new package version: \e[33m$version-$suffix"
 
 # - control
 cat << _EOF_ > "$DIR/DEBIAN/control"

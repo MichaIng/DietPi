@@ -11,7 +11,7 @@ adeps=('libc6' 'libasound2' 'libmad0' 'libvorbisfile3' 'libmpg123-0' 'libsoxr0' 
 case $G_DISTRO in
 	6) adeps+=('libflac8' 'libavformat58' 'libssl1.1');;
 	7) adeps+=('libflac12' 'libavformat59' 'libssl3');;
-	8) adeps+=('libflac14' 'libavformat61' 'libssl3');;
+	8|9) adeps+=('libflac14' 'libavformat61' 'libssl3');;
 	*) G_DIETPI-NOTIFY 1 "Unsupported distro version: $G_DISTRO_NAME (ID=$G_DISTRO)"; exit 1;;
 esac
 for i in "${adeps[@]}"
