@@ -18,6 +18,7 @@ else
 	case $debian_version in
 		'12.'*|'bookworm/sid') G_DISTRO=7;;
 		'13.'*|'trixie/sid') G_DISTRO=8;;
+		'14.'*|'forky/sid') G_DISTRO=9;;
 		*) Error_Exit "Unsupported distro version \"$debian_version\"";;
 	esac
 	# Ubuntu ships with /etc/debian_version from Debian testing, hence we assume one version lower.
@@ -33,7 +34,7 @@ case $G_HW_ARCH_NAME in
 	*) Error_Exit "Unsupported host system architecture \"$G_HW_ARCH_NAME\" detected";;
 esac
 readonly G_PROGRAM_NAME='DietPi-Software build'
-G_CHECK_ROOT_USER
+G_CHECK_ROOT_USER "$@"
 G_CHECK_ROOTFS_RW
 readonly FP_ORIGIN=$PWD # Store origin dir
 G_INIT
@@ -57,13 +58,19 @@ do
 done
 [[ $NAME =~ ^('amiberry'|'amiberry-lite'|'domoticz'|'gzdoom'|'gmediarender'|'gogs'|'shairport-sync'|'squeezelite'|'unbound'|'vaultwarden'|'ympd')$ ]] || Error_Exit "Invalid software title \"$NAME\" passed"
 [[ $NAME == 'gogs' ]] && EXT='7z' || EXT='deb'
-[[ $DISTRO =~ ^('bullseye'|'bookworm'|'trixie')$ ]] || Error_Exit "Invalid distro \"$DISTRO\" passed"
+case $DISTRO in
+	'bullseye') dist=6;;
+	'bookworm') dist=7;;
+	'trixie') dist=8;;
+	'forky') dist=9;;
+	*) Error_Exit "Invalid distro \"$DISTRO\" passed";;
+esac
 case $ARCH in
 	'armv6l') image="ARMv6-${DISTRO^}" arch=1; [[ $NAME == 'amiberry-lite' || $NAME == 'gzdoom' ]] && Error_Exit "Invalid software title \"$NAME\" for arch \"$ARCH\" passed";;
 	'armv7l') image="ARMv7-${DISTRO^}" arch=2; [[ $NAME == 'gzdoom' ]] && Error_Exit "Invalid software title \"$NAME\" for arch \"$ARCH\" passed";;
 	'aarch64') image="ARMv8-${DISTRO^}" arch=3;;
 	'x86_64') image="x86_64-${DISTRO^}" arch=10;;
-	'riscv64') image="RISC-V-${DISTRO^}" arch=11; [[ $DISTRO == 'trixie' ]] || Error_Exit "Invalid distro \"$DISTRO\" for arch \"$ARCH\" passed, only \"trixie\" is supported";;
+	'riscv64') image="RISC-V-${DISTRO^}" arch=11; (( $dist < 8 )) && Error_Exit "Invalid distro \"$DISTRO\" for arch \"$ARCH\" passed, only \"trixie\" or newer is supported";;
 	*) Error_Exit "Invalid architecture \"$ARCH\" passed";;
 esac
 image="DietPi_Container-$image.img"
@@ -132,7 +139,7 @@ then
 fi
 
 # ARMv6/7 Trixie: Workaround failing chpasswd, which tries to access /proc/sys/vm/mmap_min_addr, but fails as of AppArmor on the host
-if (( $arch < 3 )) && [[ $DISTRO == 'trixie' ]] && systemctl -q is-active apparmor
+if (( $arch < 3 && $dist > 7 )) && systemctl -q is-active apparmor
 then
 	G_EXEC eval 'echo '\''/proc/sys/vm/mmap_min_addr r,'\'' > /etc/apparmor.d/local/unix-chkpwd'
 	G_EXEC_NOHALT=1 G_EXEC_OUTPUT=1 systemctl restart apparmor || { journalctl -n 25; exit 1; }

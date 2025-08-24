@@ -55,7 +55,7 @@
 	# - Assign defaults/code version as fallback
 	[[ $G_DIETPI_VERSION_CORE ]] || G_DIETPI_VERSION_CORE=9
 	[[ $G_DIETPI_VERSION_SUB ]] || G_DIETPI_VERSION_SUB=16
-	[[ $G_DIETPI_VERSION_RC ]] || G_DIETPI_VERSION_RC=2
+	[[ $G_DIETPI_VERSION_RC ]] || G_DIETPI_VERSION_RC=3
 	[[ $G_GITBRANCH ]] || G_GITBRANCH='master'
 	[[ $G_GITOWNER ]] || G_GITOWNER='MichaIng'
 	# - Save current version and Git branch
@@ -386,47 +386,62 @@ $grey─────────────────────────
 
 	}
 
-	# $1 = mode
-	#	2	= Silent check, only returning error code if non-root
-	#	1	= Kill current script only, excluding the shell.
-	#	else	= Exit all linked scripts (kill all)
-	G_CHECK_ROOT_USER(){
+	# $@ = Pass positional arguments for automatic sudo/G_SUDO attempt
+	G_CHECK_ROOT_USER()
+	{
+		(( $EUID )) || return 0
 
-		(( $UID )) || return 0
-
-		[[ $1 == 2 ]] && return 1
-
-		G_DIETPI-NOTIFY 1 'Root privileges required. Please run the command with "sudo" or "G_SUDO".'
-
-		if [[ $1 == 1 ]]
+		# Invoking shell is not a script
+		if [[ $0 == 'bash' || $0 == *'/bash' ]]
 		then
+			# Invoking function is a G_* function, try to run with G_SUDO
+			if [[ ${FUNCNAME[1]} == 'G_'* ]]
+			then
+				G_DIETPI-NOTIFY 2 "Root privileges required. Retrying with sudo wrapper: G_SUDO ${FUNCNAME[1]} $*"
+				# Return error as well on success, so parent functions know they do not need to run anymore, but to not interrupt invoking shell
+				G_SUDO "${FUNCNAME[1]}" "$@" && return 1
+				G_DIETPI-NOTIFY 1 "\"G_SUDO ${FUNCNAME[1]} $*\" failed. Please try to run the command from a root shell. Aborting ..."
+			else
+				G_DIETPI-NOTIFY 1 'Root privileges required. Please try to run the command from a root shell. Aborting ...'
+			fi
+			# If retry with G_SUDO wrapper did not succeed, interrupt invoking shell if it is not interactive, else the current command group.
+			# - In interactive shells, "kill -INT $$" is treated like a hitting CTRL+C, hence it won't kill the shell, but will abort the command group. E.g. "command1; kill -INT $$; command2" from an interactive shell skips command2, reverting to command prompt.
 			kill -INT $$
 		else
-			exit 1
+			G_DIETPI-NOTIFY 2 "Root privileges required. Retrying with sudo: sudo $0 $*"
+			local interactive=()
+			(( $G_INTERACTIVE )) || interactive=('-n')
+			exec sudo "${interactive[@]}" "$0" "$@"
 		fi
-
+		return 1
 	}
 
-	G_CHECK_ROOTFS_RW(){
-
+	G_CHECK_ROOTFS_RW()
+	{
 		[[ $G_CHECK_ROOTFS_RW_VERIFIED == 1 ]] && return 0
 
 		if grep -q '[[:blank:]]/[[:blank:]].*[[:blank:]]ro,' /proc/mounts
 		then
-			G_DIETPI-NOTIFY 1 'RootFS is currently Read Only (R/O) mounted. Aborting...'
+			G_DIETPI-NOTIFY 1 'RootFS is currently Read Only (R/O) mounted. Aborting ...'
 			G_DIETPI-NOTIFY 2 'DietPi requires RootFS to be Read/Write (R/W) mounted. Please run "dietpi-drive_manager" to re-enable.'
-			exit 1
-		else
-			export G_CHECK_ROOTFS_RW_VERIFIED=1
+			[[ $0 == 'bash' || $0 == *'/bash' ]] && kill -INT $$ || exit 1
+			return 1
 		fi
 
+		export G_CHECK_ROOTFS_RW_VERIFIED=1
+		return 0
 	}
 
 	#-----------------------------------------------------------------------------------
 	# Shortcut functions
 	#-----------------------------------------------------------------------------------
 	# sudo wrapper that ensures DietPi-Globals with G_* commands are loaded
-	G_SUDO(){ local input=$*; sudo bash -c ". /boot/dietpi/func/dietpi-globals && $input"; }
+	G_SUDO()
+	{
+		local input=$* interactive=()
+		(( $G_INTERACTIVE )) || interactive=('-n')
+		sudo "${interactive[@]}" bash -c ". /boot/dietpi/func/dietpi-globals && $input"
+	}
 
 	#-----------------------------------------------------------------------------------
 	# Whiptail (Whippy-da-whip-whip-whip tail!)
@@ -1542,7 +1557,7 @@ Press any key to continue...'
 		# Return if no argument given
 		(( $# )) || { G_DIETPI-NOTIFY 2 'G_AGI | No input package given. Aborting...'; return 0; }
 
-		G_CHECK_ROOT_USER 1
+		G_CHECK_ROOT_USER "$@" || return 0
 
 		G_EXEC_DESC="\e[0mAPT install \e[33m$*\e[0m"
 		DEBIAN_FRONTEND=noninteractive G_EXEC_OUTPUT=1 G_EXEC_OUTPUT_COL='\e[90m' G_EXEC apt-get -y --allow-change-held-packages install "$@"
@@ -1561,7 +1576,7 @@ Press any key to continue...'
 		# Return if no argument given
 		(( $# )) || { G_DIETPI-NOTIFY 2 'G_AGP | No input package given. Aborting...'; return 0; }
 
-		G_CHECK_ROOT_USER 1
+		G_CHECK_ROOT_USER "$@" || return 0
 
 		# Attempt to purge only installed packages, check on every G_EXEC loop, force succeed if none were found
 		G_EXEC_PRE_FUNC()
@@ -1579,7 +1594,7 @@ Press any key to continue...'
 	# apt-get autopurge
 	G_AGA()
 	{
-		G_CHECK_ROOT_USER 1
+		G_CHECK_ROOT_USER "$@" || return 0
 
 		G_EXEC_DESC="\e[0mAPT autopurge${*:+ \e[33m$*\e[0m}"
 		DEBIAN_FRONTEND=noninteractive G_EXEC_OUTPUT=1 G_EXEC_OUTPUT_COL='\e[90m' G_EXEC apt-get -y autopurge "$@"
@@ -1588,7 +1603,7 @@ Press any key to continue...'
 	# apt-get -f install
 	G_AGF()
 	{
-		G_CHECK_ROOT_USER 1
+		G_CHECK_ROOT_USER "$@" || return 0
 
 		G_EXEC_DESC="\e[0mAPT fix${*:+ \e[33m$*\e[0m}"
 		DEBIAN_FRONTEND=noninteractive G_EXEC_OUTPUT=1 G_EXEC_OUTPUT_COL='\e[90m' G_EXEC apt-get -y --allow-change-held-packages -f install "$@"
@@ -1621,7 +1636,7 @@ Press any key to continue...'
 			[[ -d $dir/partial && $(find "$dir/partial" -mmin -60 ${files[@]/#/-newer } -print -quit) ]] && { G_DIETPI-NOTIFY 2 'Skipping APT update, as last call was less than an hour ago and neither sources lists nor architectures changed since.'; return 0; }
 		fi
 
-		G_CHECK_ROOT_USER 1
+		G_CHECK_ROOT_USER "$@" || return 0
 
 		# Clean cache before every update, which can corrupt and gets fully rewritten anyway
 		G_EXEC_PRE_FUNC(){ apt-get clean; }
@@ -1666,7 +1681,7 @@ Press any key to continue...'
 	# apt-get upgrade
 	G_AGUG()
 	{
-		G_CHECK_ROOT_USER 1
+		G_CHECK_ROOT_USER "$@" || return 0
 
 		G_EXEC_DESC="\e[0mAPT upgrade${*:+ \e[33m$*\e[0m}"
 		DEBIAN_FRONTEND=noninteractive G_EXEC_OUTPUT=1 G_EXEC_OUTPUT_COL='\e[90m' G_EXEC apt-get -y --with-new-pkgs upgrade "$@"
@@ -1682,7 +1697,7 @@ Press any key to continue...'
 	# apt-get dist-upgrade
 	G_AGDUG()
 	{
-		G_CHECK_ROOT_USER 1
+		G_CHECK_ROOT_USER "$@" || return 0
 
 		G_EXEC_DESC="\e[0mAPT dist-upgrade${*:+ \e[33m$*\e[0m}"
 		DEBIAN_FRONTEND=noninteractive G_EXEC_OUTPUT=1 G_EXEC_OUTPUT_COL='\e[90m' G_EXEC apt-get -y dist-upgrade "$@"
@@ -1705,7 +1720,7 @@ Press any key to continue...'
 
 		G_DIETPI-NOTIFY 2 "Checking for required APT packages: \e[33m$*"
 
-		G_CHECK_ROOT_USER 1
+		G_CHECK_ROOT_USER "$@" || return 0
 
 		local i apackages=() arch=$(dpkg --print-architecture)
 		for i in "$@"
@@ -2013,7 +2028,7 @@ Press any key to continue...'
 	# Apply and update to different branch
 	G_DEV_BRANCH(){
 
-		G_CHECK_ROOT_USER 1
+		G_CHECK_ROOT_USER "$@" || return 0
 		G_CONFIG_INJECT 'DEV_GITBRANCH=' "DEV_GITBRANCH=$1" /boot/dietpi.txt
 		/boot/dietpi/dietpi-update -1
 

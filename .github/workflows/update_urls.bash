@@ -98,11 +98,11 @@ aCHECK[$software_id]='curl -sSf '\''https://api.github.com/repos/ptitSeb/box86/r
 aREGEX[$software_id]='version='\''[^'\'']*'\'
 aREPLACE[$software_id]='version='\''$release'\'
 
-# Grafana ARMv6
+# Grafana ARMv6: Currently distributed from our APT repository
 software_id=77
-aCHECK[$software_id]='curl -sSf '\''https://api.github.com/repos/grafana/grafana/releases/latest'\'' | mawk -F\" '\''/^ *"name": "[^"]*",$/{print $4}'\'
-aREGEX[$software_id]='version='\''[^'\'']*'\'
-aREPLACE[$software_id]='version='\''$release'\'
+#aCHECK[$software_id]='curl -sSf '\''https://api.github.com/repos/grafana/grafana/releases/latest'\'' | mawk -F\" '\''/^ *"name": "[^"]*",$/{print $4}'\'
+#aREGEX[$software_id]='version='\''[^'\'']*'\'
+#aREPLACE[$software_id]='version='\''$release'\'
 
 # phpMyAdmin
 software_id=90

@@ -11,7 +11,7 @@ adeps=('libc6')
 case $G_DISTRO in
 	6) adeps+=('libssl1.1' 'libmpdclient2');;
 	7) adeps+=('libssl3' 'libmpdclient2');;
-	8) adeps+=('libssl3t64' 'libmpdclient2t64');;
+	8|9) adeps+=('libssl3t64' 'libmpdclient2t64');;
 	*) G_DIETPI-NOTIFY 1 "Unsupported distro version: $G_DISTRO_NAME (ID=$G_DISTRO)"; exit 1;;
 esac
 for i in "${adeps[@]}"
