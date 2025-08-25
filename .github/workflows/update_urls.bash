@@ -302,7 +302,7 @@ aREGEX[$software_id]='https://github.com/restic/restic/releases/download/.*/rest
 
 # MediaWiki
 software_id=210
-aCHECK[$software_id]='curl -sSf '\''https://www.mediawiki.org/wiki/Download'\'' | grep -o '\''https://releases\.wikimedia\.org/mediawiki/[^/"]*/mediawiki-[^"]*\.tar\.gz'\'' | head -1'
+aCHECK[$software_id]='curl -sSfA '\''-'\'' '\''https://www.mediawiki.org/wiki/Download'\'' | grep -o '\''https://releases\.wikimedia\.org/mediawiki/[^/"]*/mediawiki-[^"]*\.tar\.gz'\'' | head -1'
 aREGEX[$software_id]='https://releases.wikimedia.org/mediawiki/.*/mediawiki-.*\.tar\.gz'
 
 # Kavita
