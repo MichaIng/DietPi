@@ -76,10 +76,11 @@ aCHECK[$software_id]='curl -sSf '\''https://api.github.com/repos/syncthing/synct
 aARCH[$software_id]='arm arm64 amd64 riscv64'
 aREGEX[$software_id]='https://github.com/syncthing/syncthing/releases/download/.*/syncthing-linux-\$arch-.*\.tar\.gz'
 
-# phpBB: temporarily disabled since Cloudflare blocks all non-browser requests
+# phpBB
 software_id=54
-#aCHECK[$software_id]='curl -sSf '\''https://www.phpbb.com/downloads/'\'' | grep -o '\''https://download\.phpbb\.com/pub/release/.*/.*/phpBB-.*\.tar\.bz2'\'
-#aREGEX[$software_id]='https://download\.phpbb\.com/pub/release/.*/.*/phpBB-.*\.tar\.bz2'
+aCHECK[$software_id]='curl -sSf '\''https://version.phpbb.com/phpbb/versions.json'\'' | sed -En '\''/"stable":/,/"unstable":/s/.*"current": "(.+)",.*/\1/p'\'' | sort -Vr | head -1'
+aREGEX[$software_id]='https://download\.phpbb\.com/pub/release/.*/.*/phpBB-.*\.tar\.bz2'
+aREPLACE[$software_id]='https://download\.phpbb\.com/pub/release/${release%.*}/$release/phpBB-$release\.tar\.bz2'
 
 # Single File PHP Gallery
 software_id=56
