@@ -2355,60 +2355,6 @@ sudo sysctl -p /etc/sysctl.d/dietpi-syncthing.confs
 			G_DIETPI-NOTIFY 2 'Enable "dietpi" PHP module, which might have been missed on installs with DietPi v9.15'
 			G_EXEC_NOFAIL=1 G_EXEC phpenmod dietpi
 		fi
-
-		# Pi-hole v6 migration
-		# - /etc/pihole/pihole.toml indicates that Pi-hole has been upgraded to v6 already.
-		# - The /var/www/pihole symlink indicates that an instance installed via dietpi-software has not been migrated yet.
-		if [[ -f '/etc/pihole/pihole.toml' && -L '/var/www/pihole' ]] && grep -q '^[[:blank:]]*aSOFTWARE_INSTALL_STATE\[93\]=2' /boot/dietpi/.installed
-		then
-			# Remove DietPi specific v5 files
-			# - Symlinks
-			G_EXEC rm /var/www/pihole
-			[[ -L '/var/www/admin' ]] && G_EXEC rm /var/www/admin
-			# - Webserver configs
-			[[ -d '/etc/apache2/sites-available' ]] && G_EXEC rm -f /etc/apache2/sites-{available,enabled}/dietpi-pihole*
-			[[ -d '/etc/lighttpd/conf-available' ]] && G_EXEC rm -f /etc/lighttpd/conf-{available,enabled}/99-dietpi-pihole*
-			[[ -d '/etc/nginx/sites-dietpi' ]] && G_EXEC rm -f /etc/nginx/sites-dietpi/dietpi-pihole*
-
-			# Remove www-data user from pihole group
-			getent group pihole | grep -Eq '(:|,)www-data(,|$)' && G_EXEC gpasswd -d www-data pihole
-
-			# Change web UI port to 8089 and 8489 (HTTPS) to avoid conflict with webservers and other web applications
-			G_EXEC pihole-FTL --config webserver.port 8089,8489s
-
-			# Inform user about differences to stock Pi-hole installation
-			G_WHIP_MSG "[ INFO ] Pi-hole network ports changed to 8089 and 8489
-\nTo align migrated Pi-hole v6 instances with fresh installs, and avoid possible conflicts with dedicated webservers, the network ports have been changed to 8089 and 8489 (HTTPS). Your Pi-hole instance will hence be available at:
-- http://$(G_GET_NET ip):8089/admin/
-- https://$(G_GET_NET ip):8489/admin/
-\nThis can be changed via web UI or following console command, e.g. for ports 80 and 443 (HTTPS):
-- pihole-FTL --config webserver.port 80,443s"
-
-			# Offer to uninstall webserver and PHP if no dependant is installed
-			# - If only PHP or only a webserver is installed, one has been uninstalled already, and the other is assumed to be still needed for something else.
-			if grep -q '^[[:blank:]]*aSOFTWARE_INSTALL_STATE\[89\]=2' /boot/dietpi/.installed && grep -Eq '^[[:blank:]]*aSOFTWARE_INSTALL_STATE\[(83|84|85)\]=2' /boot/dietpi/.installed
-			then
-				G_WHIP_CHECKLIST_ARRAY=()
-				# - webserver
-				if ! /boot/dietpi/dietpi-software list | grep -q '| =2 |.*+webserver'
-				then
-					grep -q '^[[:blank:]]*aSOFTWARE_INSTALL_STATE\[83\]=2' /boot/dietpi/.installed && G_WHIP_CHECKLIST_ARRAY+=(83 'Apache webserver' off)
-					grep -q '^[[:blank:]]*aSOFTWARE_INSTALL_STATE\[84\]=2' /boot/dietpi/.installed && G_WHIP_CHECKLIST_ARRAY+=(84 'Lighttpd webserver' off)
-					grep -q '^[[:blank:]]*aSOFTWARE_INSTALL_STATE\[85\]=2' /boot/dietpi/.installed && G_WHIP_CHECKLIST_ARRAY+=(85 'Nginx webserver' off)
-				fi
-				# - PHP: Exclude webserver stacks which are meta selections only
-				/boot/dietpi/dietpi-software list | grep '| =2 |.*+PHP' | grep -vEq '^.\[32mID (75|76|78|79|81|82)' || G_WHIP_CHECKLIST_ARRAY+=(89 'PHP server' off)
-				if (( ${#G_WHIP_CHECKLIST_ARRAY[@]} ))
-				then
-					G_WHIP_BUTTON_CANCEL_TEXT='Skip'
-					# shellcheck disable=SC2086
-					G_WHIP_CHECKLIST '[ INFO ] Possibly obsolete webserver and/or PHP installation detected
-\nYou recently updated Pi-hole to v6, which now does not require any webserver or PHP anymore.
-\nWe detected a webserver and/or PHP installation on your system, but no dependant among installed dietpi-software options.
-\nIf you are sure that you do not require the webserver and/or PHP anymore, you can select them for uninstall below. Use the space bar to (de)select the ones which shall be uninstalled:' && /boot/dietpi/dietpi-software uninstall $G_WHIP_RETURNED_VALUE
-				fi
-			fi
-		fi
 	fi
 
 	# RPi firmware migration: Do after all other patches
@@ -2642,6 +2588,73 @@ SUBSYSTEM=="leds", KERNEL=="wan_led", ACTION=="add", ATTR{trigger}="netdev", ATT
 SUBSYSTEM=="leds", KERNEL=="lan1_led", ACTION=="add", ATTR{trigger}="netdev", ATTR{device_name}="eth1", ATTR{link}="1", ATTR{rx}="1", ATTR{tx}="1", RUN+="/bin/ip l s eth1 up", RUN+="/bin/ip l s eth1 down"
 SUBSYSTEM=="leds", KERNEL=="user_led", ACTION=="add", ATTR{trigger}="netdev", ATTR{device_name}="wlan0", ATTR{link}="1", ATTR{rx}="1", ATTR{tx}="1", RUN+="/bin/ip l s wlan0 up", RUN+="/bin/ip l s wlan0 down"
 _EOF_
+			fi
+		fi
+	fi
+}
+
+Patch_9_17()
+{
+	# Software updates, migrations and patches
+	if [[ -f '/boot/dietpi/.installed' ]]
+	then
+		# Raspotify: Remove obsolete systemd unit fixes to prevent an endless failure loop on shutdown: https://github.com/dtcooper/raspotify/pull/735
+		[[ -f '/etc/systemd/system/raspotify-crash-report-generator.service.d/dietpi.conf' ]] && G_EXEC rm /etc/systemd/system/raspotify-crash-report-generator.service.d/dietpi.conf
+		[[ -d '/etc/systemd/system/raspotify-crash-report-generator.service.d' ]] && G_EXEC rmdir --ignore-fail-on-non-empty /etc/systemd/system/raspotify-crash-report-generator.service.d
+		[[ -f '/etc/systemd/system/raspotify.service.d/dietpi.conf' ]] && G_EXEC rm /etc/systemd/system/raspotify.service.d/dietpi.conf
+		[[ -d '/etc/systemd/system/raspotify.service.d' ]] && G_EXEC rmdir --ignore-fail-on-non-empty /etc/systemd/system/raspotify.service.d
+
+		# Pi-hole v6 migration
+		# - /etc/pihole/pihole.toml indicates that Pi-hole has been upgraded to v6 already.
+		# - The /var/www/pihole symlink indicates that an instance installed via dietpi-software has not been migrated yet.
+		if [[ -f '/etc/pihole/pihole.toml' && -L '/var/www/pihole' ]] && grep -q '^[[:blank:]]*aSOFTWARE_INSTALL_STATE\[93\]=2' /boot/dietpi/.installed
+		then
+			# Remove DietPi specific v5 files
+			# - Symlinks
+			G_EXEC rm /var/www/pihole
+			[[ -L '/var/www/admin' ]] && G_EXEC rm /var/www/admin
+			# - Webserver configs
+			[[ -d '/etc/apache2/sites-available' ]] && G_EXEC rm -f /etc/apache2/sites-{available,enabled}/dietpi-pihole*
+			[[ -d '/etc/lighttpd/conf-available' ]] && G_EXEC rm -f /etc/lighttpd/conf-{available,enabled}/99-dietpi-pihole*
+			[[ -d '/etc/nginx/sites-dietpi' ]] && G_EXEC rm -f /etc/nginx/sites-dietpi/dietpi-pihole*
+
+			# Remove www-data user from pihole group
+			getent group pihole | grep -Eq '(:|,)www-data(,|$)' && G_EXEC gpasswd -d www-data pihole
+
+			# Change web UI port to 8089 and 8489 (HTTPS) to avoid conflict with webservers and other web applications
+			G_EXEC pihole-FTL --config webserver.port 8089,8489s
+
+			# Inform user about differences to stock Pi-hole installation
+			G_WHIP_MSG "[ INFO ] Pi-hole network ports changed to 8089 and 8489
+\nTo align migrated Pi-hole v6 instances with fresh installs, and avoid possible conflicts with dedicated webservers, the network ports have been changed to 8089 and 8489 (HTTPS). Your Pi-hole instance will hence be available at:
+- http://$(G_GET_NET ip):8089/admin/
+- https://$(G_GET_NET ip):8489/admin/
+\nThis can be changed via web UI or following console command, e.g. for ports 80 and 443 (HTTPS):
+- pihole-FTL --config webserver.port 80,443s"
+
+			# Offer to uninstall webserver and PHP if no dependant is installed
+			# - If only PHP or only a webserver is installed, one has been uninstalled already, and the other is assumed to be still needed for something else.
+			if grep -q '^[[:blank:]]*aSOFTWARE_INSTALL_STATE\[89\]=2' /boot/dietpi/.installed && grep -Eq '^[[:blank:]]*aSOFTWARE_INSTALL_STATE\[(83|84|85)\]=2' /boot/dietpi/.installed
+			then
+				G_WHIP_CHECKLIST_ARRAY=()
+				# - webserver
+				if ! /boot/dietpi/dietpi-software list | grep -q '| =2 |.*+webserver'
+				then
+					grep -q '^[[:blank:]]*aSOFTWARE_INSTALL_STATE\[83\]=2' /boot/dietpi/.installed && G_WHIP_CHECKLIST_ARRAY+=(83 'Apache webserver' off)
+					grep -q '^[[:blank:]]*aSOFTWARE_INSTALL_STATE\[84\]=2' /boot/dietpi/.installed && G_WHIP_CHECKLIST_ARRAY+=(84 'Lighttpd webserver' off)
+					grep -q '^[[:blank:]]*aSOFTWARE_INSTALL_STATE\[85\]=2' /boot/dietpi/.installed && G_WHIP_CHECKLIST_ARRAY+=(85 'Nginx webserver' off)
+				fi
+				# - PHP: Exclude webserver stacks which are meta selections only
+				/boot/dietpi/dietpi-software list | grep '| =2 |.*+PHP' | grep -vEq '^.\[32mID (75|76|78|79|81|82)' || G_WHIP_CHECKLIST_ARRAY+=(89 'PHP server' off)
+				if (( ${#G_WHIP_CHECKLIST_ARRAY[@]} ))
+				then
+					G_WHIP_BUTTON_CANCEL_TEXT='Skip'
+					# shellcheck disable=SC2086
+					G_WHIP_CHECKLIST '[ INFO ] Possibly obsolete webserver and/or PHP installation detected
+\nYou recently updated Pi-hole to v6, which now does not require any webserver or PHP anymore.
+\nWe detected a webserver and/or PHP installation on your system, but no dependant among installed dietpi-software options.
+\nIf you are sure that you do not require the webserver and/or PHP anymore, you can select them for uninstall below. Use the space bar to (de)select the ones which shall be uninstalled:' && /boot/dietpi/dietpi-software uninstall $G_WHIP_RETURNED_VALUE
+				fi
 			fi
 		fi
 	fi
