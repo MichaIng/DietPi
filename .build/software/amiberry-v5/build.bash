@@ -1,6 +1,7 @@
 #!/bin/bash
 {
 . /boot/dietpi/func/dietpi-globals || exit 1
+Error_Exit(){ G_DIETPI-NOTIFY 1 "$1, aborting ..."; exit 1; }
 
 [[ $1 ]] && PLATFORM=$1
 [[ $PLATFORM ]] || { G_WHIP_DEFAULT_ITEM='rpi1-sdl2' G_WHIP_INPUTBOX 'Enter platform (default: "rpi1-sdl2"): https://github.com/BlitterStudio/amiberry/blob/master/Makefile'; PLATFORM=$G_WHIP_RETURNED_VALUE; }
@@ -20,7 +21,7 @@ case $G_DISTRO in
 	7) adeps+=('libxml2' 'libflac12' 'libpng16-16' 'libmpg123-0' 'libasound2');;
 	8) adeps+=('libxml2' 'libflac14' 'libpng16-16t64' 'libmpg123-0t64' 'libasound2t64');;
 	9) adeps+=('libxml2-16' 'libflac14' 'libpng16-16t64' 'libmpg123-0t64' 'libasound2t64');;
-	*) G_DIETPI-NOTIFY 1 "Unsupported distro version: $G_DISTRO_NAME (ID=$G_DISTRO)"; exit 1;;
+	*) Error_Exit "Unsupported distro version: $G_DISTRO_NAME (ID=$G_DISTRO)";;
 esac
 # - Deps for RPi DispmanX builds
 [[ $PLATFORM == 'rpi'[1-5] || $PLATFORM == 'rpi'[345]'-64-dmx' ]] && adeps_build+=('libraspberrypi-dev') adeps+=('libraspberrypi0')
@@ -32,13 +33,12 @@ G_AGDUG "${adeps_build[@]}"
 for i in "${adeps[@]}"
 do
 	dpkg-query -s "$i" &> /dev/null && continue
-	G_DIETPI-NOTIFY 1 "Expected dependency package was not installed: $i"
-	exit 1
+	Error_Exit "Expected dependency package was not installed: $i"
 done
 
 # Build libSDL2
 v_sdl=$(curl -sSf "${header[@]}" 'https://api.github.com/repos/libsdl-org/SDL/releases' | mawk -F\" '/^ *"name": "2./{print $4}' | head -1)
-[[ $v_sdl ]] || { G_DIETPI-NOTIFY 1 'No latest LibSDL2 version found, aborting ...'; exit 1; }
+[[ $v_sdl ]] || Error_Exit 'No latest LibSDL2 version found'
 G_DIETPI-NOTIFY 2 "Building libSDL2 version \e[33m$v_sdl"
 G_EXEC cd /tmp
 G_EXEC curl -sSfLO "https://github.com/libsdl-org/SDL/releases/download/release-$v_sdl/SDL2-$v_sdl.tar.gz"
@@ -54,7 +54,7 @@ G_EXEC_OUTPUT=1 G_EXEC make install
 
 # Build libSDL2_image
 v_img=$(curl -sSf "${header[@]}" 'https://api.github.com/repos/libsdl-org/SDL_image/releases' | mawk -F\" '/^ *"name": "2./{print $4}' | head -1)
-[[ $v_img ]] || { G_DIETPI-NOTIFY 1 'No latest libSDL2_image version found, aborting ...'; exit 1; }
+[[ $v_img ]] || Error_Exit 'No latest libSDL2_image version found'
 G_DIETPI-NOTIFY 2 "Building libSDL2_image version \e[33m$v_img"
 G_EXEC cd /tmp
 G_EXEC curl -sSfLO "https://github.com/libsdl-org/SDL_image/releases/download/release-$v_img/SDL2_image-$v_img.tar.gz"
@@ -62,7 +62,7 @@ G_EXEC curl -sSfLO "https://github.com/libsdl-org/SDL_image/releases/download/re
 G_EXEC tar xf "SDL2_image-$v_img.tar.gz"
 G_EXEC rm "SDL2_image-$v_img.tar.gz"
 G_EXEC cd "SDL2_image-$v_img"
-G_EXEC_OUTPUT=1 G_EXEC ./configure CFLAGS='-g0 -O3' CXXFLAGS='-g0 -O3'
+G_EXEC_OUTPUT=1 G_EXEC ./configure C{,XX}FLAGS='-g0 -O3'
 G_EXEC_OUTPUT=1 G_EXEC make "-j$(nproc)"
 find . -type f \( -name '*.so' -o -name '*.so.*' \) -exec strip --strip-unneeded --remove-section=.comment --remove-section=.note -v {} +
 G_EXEC rm -f /usr/local/lib/libSDL2_image[.-]*
@@ -70,7 +70,7 @@ G_EXEC_OUTPUT=1 G_EXEC make install
 
 # Build libSDL2_ttf
 v_ttf=$(curl -sSf "${header[@]}" 'https://api.github.com/repos/libsdl-org/SDL_ttf/releases' | mawk -F\" '/^ *"name": "2./{print $4}' | head -1)
-[[ $v_ttf ]] || { G_DIETPI-NOTIFY 1 'No latest libSDL2_ttf version found, aborting ...'; exit 1; }
+[[ $v_ttf ]] || Error_Exit 'No latest libSDL2_ttf version found'
 G_DIETPI-NOTIFY 2 "Building libSDL2_ttf version \e[33m$v_ttf"
 G_EXEC cd /tmp
 G_EXEC curl -sSfLO "https://github.com/libsdl-org/SDL_ttf/releases/download/release-$v_ttf/SDL2_ttf-$v_ttf.tar.gz"
@@ -78,7 +78,7 @@ G_EXEC curl -sSfLO "https://github.com/libsdl-org/SDL_ttf/releases/download/rele
 G_EXEC tar xf "SDL2_ttf-$v_ttf.tar.gz"
 G_EXEC rm "SDL2_ttf-$v_ttf.tar.gz"
 G_EXEC cd "SDL2_ttf-$v_ttf"
-G_EXEC_OUTPUT=1 G_EXEC ./configure CFLAGS='-g0 -O3' CXXFLAGS='-g0 -O3'
+G_EXEC_OUTPUT=1 G_EXEC ./configure C{,XX}FLAGS='-g0 -O3'
 G_EXEC_OUTPUT=1 G_EXEC make "-j$(nproc)"
 find . -type f \( -name '*.so' -o -name '*.so.*' \) -exec strip --strip-unneeded --remove-section=.comment --remove-section=.note -v {} +
 G_EXEC rm -f /usr/local/lib/libSDL2_ttf[.-]*
@@ -96,7 +96,7 @@ G_EXEC cd capsimg-master
 G_EXEC curl -sSfo CAPSImg/config.guess 'https://gitweb.git.savannah.gnu.org/gitweb/?p=config.git;a=blob_plain;f=config.guess;hb=HEAD'
 G_EXEC curl -sSfo CAPSImg/config.sub 'https://gitweb.git.savannah.gnu.org/gitweb/?p=config.git;a=blob_plain;f=config.sub;hb=HEAD'
 G_EXEC_OUTPUT=1 G_EXEC ./bootstrap
-G_EXEC_OUTPUT=1 G_EXEC ./configure CFLAGS='-g0 -O3' CXXFLAGS='-g0 -O3'
+G_EXEC_OUTPUT=1 G_EXEC ./configure C{,XX}FLAGS='-g0 -O3'
 G_EXEC_OUTPUT=1 G_EXEC make "-j$(nproc)"
 G_EXEC strip --strip-unneeded --remove-section=.comment --remove-section=.note capsimg.so
 
@@ -185,7 +185,7 @@ DEPS_APT_VERSIONED=${DEPS_APT_VERSIONED%,}
 grep -q '^ID=raspbian' /etc/os-release && DEPS_APT_VERSIONED=$(sed 's/+rp[it][0-9]\+[^)]*)/)/g' <<< "$DEPS_APT_VERSIONED") || DEPS_APT_VERSIONED=$(sed 's/+b[0-9]\+)/)/g' <<< "$DEPS_APT_VERSIONED")
 
 # - Obtain version suffix
-G_EXEC curl -sSfo package.deb "https://dietpi.com/downloads/binaries/$G_DISTRO_NAME/amiberry_$PLATFORM.deb"
+G_EXEC curl -sSfo package.deb "https://dietpi.com/downloads/binaries/$G_DISTRO_NAME/amiberry_armv6l.deb"
 old_version=$(dpkg-deb -f package.deb Version)
 G_EXEC rm package.deb
 suffix=${old_version#*-dietpi}
