@@ -114,7 +114,7 @@ Process_Software()
 			7) aCOMMANDS[i]='ffmpeg -version';;
 			8) aCOMMANDS[i]='javac -version';;
 			9) aCOMMANDS[i]='node -v';;
-			10) aCOMMANDS[i]='LD_LIBRARY_PATH=$(find /usr/lib/*/amiberry-lite -maxdepth 0) amiberry-lite -h | grep '\''^$VER: Amiberry-Lite '\';;
+			10) aCOMMANDS[i]='amiberry-lite -h | grep '\''^\$VER: Amiberry-Lite '\';;
 			11) aCOMMANDS[i]='gzdoom -norun | grep '\''^GZDoom version '\';;
 			#16) aSERVICES[i]='microblog-pub' aTCP[i]='8007';; Service enters a CPU-intense internal error loop until it has been configured interactively via "microblog-pub configure", hence it is not enabled and started anymore after install but instead as part of "microblog-pub configure"
 			17) aCOMMANDS[i]='git --version';; # from Bookworm on, the shorthand "-v" is supported
@@ -208,7 +208,7 @@ Process_Software()
 			105) aSERVICES[i]='ssh' aTCP[i]='22';;
 			106) aSERVICES[i]='lidarr' aTCP[i]='8686';;
 			107) aSERVICES[i]='rtorrent' aTCP[i]='49164' aUDP[i]='6881';;
-			108) (( $arch == 1 )) && aCOMMANDS[i]='LD_LIBRARY_PATH=/mnt/dietpi_userdata/amiberry/lib /mnt/dietpi_userdata/amiberry/amiberry -h | grep '\''^$VER: Amiberry '\' || aCOMMANDS[i]='LD_LIBRARY_PATH=$(find /usr/lib/*/amiberry -maxdepth 0) amiberry -h | grep '\''^$VER: Amiberry '\';;
+			108) (( $arch == 1 )) && aCOMMANDS[i]='/mnt/dietpi_userdata/amiberry/amiberry -h | grep '\''^\$VER: Amiberry '\' || aCOMMANDS[i]='amiberry -h | grep '\''^\$VER: Amiberry '\';;
 			109) aSERVICES[i]='nfs-kernel-server' aTCP[i]='2049';;
 			110) aCOMMANDS[i]='mount.nfs -V';;
 			111) aSERVICES[i]='urbackupsrv' aTCP[i]='55414';;
@@ -452,14 +452,14 @@ then
 fi
 
 # Transmission: Workaround for transmission-daemon timing out with container host AppArmor throwing: apparmor="ALLOWED" operation="sendmsg" class="file" info="Failed name lookup - disconnected path" error=-13 profile="transmission-daemon" name="run/systemd/notify"
-if (( ${aINSTALL[44]} && $dist > 7 )) && systemctl -q is-active apparmor
+if (( ${aINSTALL[44]} )) && (( $dist > 7 )) && systemctl -q is-active apparmor
 then
 	G_EXEC sed --follow-symlinks -i '/^profile transmission-daemon/s/flags=(complain)/flags=(complain,attach_disconnected)/' /etc/apparmor.d/transmission
 	G_EXEC_OUTPUT=1 G_EXEC apparmor_parser -r /etc/apparmor.d/transmission
 fi
 
 # rsyslog: Workaround for rsyslogd timing out with container host AppArmor throwing: apparmor="DENIED" operation="sendmsg" class="file" info="Failed name lookup - disconnected path" error=-13 profile="rsyslogd" name="run/systemd/journal/dev-log"
-if (( ${aINSTALL[102]} && $dist > 7 )) && systemctl -q is-active apparmor
+if (( ${aINSTALL[102]} )) && (( $dist > 7 )) && systemctl -q is-active apparmor
 then
 	G_EXEC sed --follow-symlinks -i '/^profile rsyslogd/s/{$/flags=(attach_disconnected) {/' /etc/apparmor.d/usr.sbin.rsyslogd
 	G_EXEC_OUTPUT=1 G_EXEC apparmor_parser -r /etc/apparmor.d/usr.sbin.rsyslogd
