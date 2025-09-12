@@ -19,7 +19,7 @@
 	! systemctl is-enabled dietpi-fs_partition_resize > /dev/null || systemctl --no-reload disable dietpi-fs_partition_resize
 
 	# Detect root device
-	ROOT_DEV=$(findmnt -Ufnro SOURCE -M /)
+	ROOT_DEV=$(findmnt -Ufvnro SOURCE -M /)
 
 	# Detect root partition and parent drive for supported naming schemes:
 	# - SCSI/SATA:	/dev/sd[a-z][1-9]
