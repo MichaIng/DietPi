@@ -56,7 +56,7 @@ do
 	esac
 	shift
 done
-[[ $NAME =~ ^('amiberry'|'amiberry-lite'|'domoticz'|'gzdoom'|'gmediarender'|'gogs'|'shairport-sync'|'squeezelite'|'unbound'|'vaultwarden'|'ympd')$ ]] || Error_Exit "Invalid software title \"$NAME\" passed"
+[[ $NAME =~ ^('amiberry'|'amiberry'[-+]'lite'|'domoticz'|'gzdoom'|'gmediarender'|'gogs'|'shairport-sync'|'squeezelite'|'unbound'|'vaultwarden'|'ympd')$ ]] || Error_Exit "Invalid software title \"$NAME\" passed"
 [[ $NAME == 'gogs' ]] && EXT='7z' || EXT='deb'
 case $DISTRO in
 	'bullseye') dist=6;;
@@ -74,6 +74,24 @@ case $ARCH in
 	*) Error_Exit "Invalid architecture \"$ARCH\" passed";;
 esac
 image="DietPi_Container-$image.img"
+
+SCRIPT=$NAME
+ARGS=()
+if [[ $NAME == 'amiberry'* ]]
+then
+	# ARMv6: Use dedicated Amiberry v5.7.1 build script
+	if (( $arch == 1 ))
+	then
+		SCRIPT='amiberry-v5'
+		NAME='amiberry'
+
+	# Else: Use merged build script and pass variant as argument
+	else
+		SCRIPT='amiberry'
+		ARGS+=("$NAME")
+		NAME=${NAME%+lite} # Check for amiberry_*.deb if both were built
+	fi
+fi
 
 ##########################################
 # Dependencies
@@ -164,16 +182,13 @@ G_EXEC sed --follow-symlinks -i 's|Prompt_on_Failure$|{ journalctl -n 50; ss -tu
 # Avoid DietPi-Survey uploads to not mess with the statistics
 G_EXEC rm rootfs/root/.ssh/known_hosts
 
-# Amiberry ARMv6: Use dedicated build script for ARMv6 builds which support Amiberry v5.7.1 only
-[[ $NAME == 'amiberry' && $arch == 1 ]] && NAME='amiberry-v5'
-
 # Automated build
 # shellcheck disable=SC2154
 cat << _EOF_ > rootfs/boot/Automation_Custom_Script.sh || Error_Exit 'Failed to generate Automation_Custom_Script.sh'
 #!/bin/dash
-echo '[ INFO ] Running $NAME build script ...'
+echo '[ INFO ] Running $SCRIPT build script ...'
 [ '$GH_TOKEN' ] && export GH_TOKEN='$GH_TOKEN'
-bash -c "\$(curl -sSf 'https://raw.githubusercontent.com/$G_GITOWNER/DietPi/$G_GITBRANCH/.build/software/$NAME/build.bash')"
+bash -c "\$(curl -sSf 'https://raw.githubusercontent.com/$G_GITOWNER/DietPi/$G_GITBRANCH/.build/software/$SCRIPT/build.bash')"${ARGS[0]:+ -- "${ARGS[@]}"}
 mkdir -v /output && mv -v /tmp/*.$EXT /output
 systemctl start poweroff.target
 _EOF_
@@ -182,9 +197,5 @@ _EOF_
 # Boot container
 ##########################################
 systemd-nspawn -bD rootfs
-
-# Amiberry ARMv6: Upload as "amiberry_armv6l.deb"
-[[ $NAME == 'amiberry-v5' && $arch == 1 ]] && NAME='amiberry'
-
 [[ -f rootfs/output/${NAME}_$ARCH.$EXT ]] || Error_Exit "Failed to build package: ${NAME}_$ARCH.$EXT"
 }
