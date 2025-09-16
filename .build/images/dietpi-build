@@ -45,7 +45,7 @@ G_EXEC cd "$FP_ORIGIN" # Process everything in origin dir instead of /tmp/$G_PRO
 ##########################################
 HW_MODEL=
 HW_ARCH=
-DISTRO=7 # 6=Bullseye, 7=Bookworm, 8=Trixie, 9=Forky
+DISTRO=8 # 6=Bullseye, 7=Bookworm, 8=Trixie, 9=Forky
 PTTYPE='msdos'
 FSTYPE='ext4'
 VARIANT=
@@ -59,6 +59,7 @@ ADD_DOS_PART=1
 SIGN_PASS=
 TEST_KERNEL=0
 TEST_UBOOT=0
+RK35XX_MAINLINE=0
 # initial rootfs size override. dietpi-imager will shrink it as much as possible, but the larger the initial rootfs size, the larger the resulting image.
 # See "root_size" below for per-SBC defaults, which may not work with all combinations of options, and are updated regularly.
 ROOT_SIZE=
@@ -82,6 +83,7 @@ do
 		'--test-kernel') TEST_KERNEL=1;;
 		'--test-uboot') TEST_UBOOT=1;;
 		'--root-size') shift; ROOT_SIZE=$1;;
+		'--rk35xx-mainline') RK35XX_MAINLINE=1;;
 		*) Error_Exit "Invalid input \"$1\"";;
 	esac
 	shift
@@ -208,11 +210,11 @@ case $PTTYPE in
 esac
 
 # Check for valid root filesystem type and set variables accordingly
-fsname='' afspackages=() afs_opts=() afsck=() aresize=()
+fsname='' afspackages=() afs_opts=() afsck=() aresize=() apackages=()
 case $FSTYPE in
-	'ext4') afspackages+=('e2fsprogs') afs_opts=('-e' 'remount-ro') afsck=('e2fsck' '-fyD') aresize=('resize2fs');;
-	'f2fs') fsname='F2FS' afspackages+=('f2fs-tools') afsck=('fsck.f2fs' '-f') aresize=('resize.f2fs'); uname -r | grep -q '-azure$' && apackages+=('linux-modules-extra-azure');;
-	'btrfs') fsname='Btrfs' afspackages+=('btrfs-progs') afsck=('btrfs' 'check' '--repair') aresize=('btrfs' 'filesystem' 'resize' 'max'); ((root_size+=128));;
+	'ext4') afspackages+=('e2fsprogs') afs_opts=('-e' 'remount-ro' '-O' '^has_journal') afsck=('e2fsck' '-fyD') aresize=('resize2fs');;
+	'f2fs') fsname='F2FS' afspackages+=('f2fs-tools') afsck=('fsck.f2fs' '-f') aresize=('resize.f2fs'); uname -r | grep -q '-azure$' && apackages+=("linux-modules-extra-$(uname -r)");;
+	'btrfs') fsname='Btrfs' afspackages+=('btrfs-progs') afsck=('btrfs' 'check' '--repair') aresize=('btrfs' 'filesystem' 'resize' 'max'); ((root_size*=5,root_size/=4));;
 	*) Error_Exit "Invalid root filesystem type \"$FSTYPE\" passed";;
 esac
 
@@ -225,6 +227,7 @@ G_CHECK_URL "https://github.com/$GITOWNER/DietPi/tree/$GITBRANCH" || Error_Exit 
 
 # Generate image name and define CLONING_TOOL for dietpi-installer
 OUTPUT_IMG_NAME="DietPi_$iname-$iarch-${distro^}"
+[[ $RK35XX_MAINLINE == 1 && $HW_MODEL =~ ^(78|79'.'[1-3]|80|82|85|90|91|92|93|94|95)$ ]] && OUTPUT_IMG_NAME+='_mainline'
 [[ $fsname ]] && OUTPUT_IMG_NAME+="_$fsname"
 CLONING_TOOL='dd'
 if [[ $VARIANT == 'iso' ]]
@@ -242,7 +245,7 @@ fi
 (( $efi_size )) || [[ $boot_size -gt 0 && $boot_fstype == 'fat'* ]] && afspackages+=('dosfstools')
 
 # Emulation support in case of incompatible architecture
-emulation=0 apackages=("${afspackages[@]}")
+emulation=0 apackages+=("${afspackages[@]}")
 (( $G_HW_ARCH == $HW_ARCH || ( $G_HW_ARCH < 10 && $G_HW_ARCH > $HW_ARCH ) )) || emulation=1 apackages+=('qemu-user-static')
 
 # Virtual machine disk conversion
@@ -464,7 +467,7 @@ cat << _EOF_ > rootfs/etc/rc.local
 #!/bin/dash
 {
 infocmp "\$TERM" > /dev/null 2>&1 || { echo "[ WARN ] Unsupported TERM=\"\$TERM\", switching to TERM=\"dumb\""; export TERM=dumb; }
-export GITOWNER='$GITOWNER' GITBRANCH='$GITBRANCH' HW_MODEL='$HW_MODEL' IMAGE_CREATOR=0 PREIMAGE_INFO=0 WIFI_REQUIRED=1 DISTRO_TARGET=$DISTRO TEST_KERNEL=$TEST_KERNEL TEST_UBOOT=$TEST_UBOOT TMPDIR='/tmp'
+export GITOWNER='$GITOWNER' GITBRANCH='$GITBRANCH' HW_MODEL='$HW_MODEL' IMAGE_CREATOR=0 PREIMAGE_INFO=0 WIFI_REQUIRED=1 DISTRO_TARGET=$DISTRO TEST_KERNEL=$TEST_KERNEL TEST_UBOOT=$TEST_UBOOT RK35XX_MAINLINE=$RK35XX_MAINLINE TMPDIR='/tmp'
 echo '[ INFO ] Running DietPi-Installer for $G_GITOWNER/$G_GITBRANCH'
 bash -c "\$(curl -sSf 'https://raw.githubusercontent.com/$G_GITOWNER/DietPi/$G_GITBRANCH/.build/images/dietpi-installer')" || { echo '[FAILED] DietPi-Installer failed, shutting down ...'; journalctl -n 25; df -h; free -h; systemctl start poweroff.target; exit 1; }
 > /success
@@ -515,19 +518,19 @@ IMAGER_ARGS=("$OUTPUT_IMG_NAME.img")
 (( $SKIP_ARCHIVE )) && IMAGER_ARGS+=('--skip-archive')
 [[ $UPLOAD_SCRIPT ]] && IMAGER_ARGS+=('--upload-script' "$UPLOAD_SCRIPT")
 (( $ADD_DOS_PART )) && IMAGER_ARGS+=('--add-dos-part')
-[[ $HW_MODEL == [1245] ]] && IMAGER_ARGS+=('--configs-to-boot')
+(( $HW_MODEL < 10 && $G_DISTRO > 6 )) && IMAGER_ARGS+=('--configs-to-boot')
 [[ $SIGN_PASS ]] && IMAGER_ARGS+=('--sign' "$SIGN_PASS")
-# Raspberry Pi Imager info
-[[ $HW_MODEL == [1-5] && $DISTRO == 7 || $DISTRO == 8 ]] && IMAGER_ARGS+=('--raw-hash-size')
 
 ####### IMG/ISO ##########################
 if [[ ! $EDITION || $EDITION == 'all' ]]
 then
 	[[ $VARIANT == 'iso' ]] && ext='iso' || ext='img'
+	# Raspberry Pi Imager info
+	[[ $HW_MODEL == [1-5] && ( $DISTRO == 7 || $DISTRO == 8 ) ]] && IMAGER_ARGS+=('--raw-hash-size')
 	G_DIETPI-NOTIFY 2 "Running DietPi-Imager from $G_GITOWNER/$G_GITBRANCH to generate $OUTPUT_IMG_NAME.$ext"
 	bash -c "$(curl -sSf "https://raw.githubusercontent.com/$G_GITOWNER/DietPi/$G_GITBRANCH/.build/images/dietpi-imager")" 'DietPi-Imager' "${IMAGER_ARGS[@]}" || exit 1
 	# Raspberry Pi Imager info: add for standard image only
-	[[ $HW_MODEL == [1-5] && $DISTRO == 8 ]] && unset 'IMAGER_ARGS[-1]'
+	[[ $HW_MODEL == [1-5] && ( $DISTRO == 7 || $DISTRO == 8 ) ]] && unset 'IMAGER_ARGS[-1]'
 fi
 
 ####### ALL/ISO ##########################
@@ -541,7 +544,7 @@ fi
 
 ####### Amiberry #########################
 # - Install automatically on first boot, enable autostart option and onboard audio on RPi
-if [[ $EDITION == 'Amiberry' || ( $EDITION == 'all' && $HW_MODEL =~ ^(1|2|4|5)$ ) ]]
+if [[ $EDITION == 'Amiberry' || ( $EDITION == 'all' && $HW_MODEL == [1-5] ) ]]
 then
 	G_EXEC mv "$OUTPUT_IMG_NAME.img" "${OUTPUT_IMG_NAME}_Amiberry.img"
 	OUTPUT_IMG_NAME="${OUTPUT_IMG_NAME}_Amiberry"
@@ -562,9 +565,10 @@ then
 
 	# Mount filesystems
 	G_EXEC mkdir rootfs
-	if [[ $HW_MODEL == [1245] ]]
+	if (( $HW_MODEL < 10 && $G_DISTRO > 6 ))
 	then
 		G_EXEC mount "${FP_LOOP}p2" rootfs
+		G_EXEC mount "${FP_LOOP}p1" rootfs/boot/firmware
 
 	elif (( $boot_size ))
 	then
@@ -594,8 +598,7 @@ fi
 
 ####### AlloGUI ##########################
 # - Pre-install Allo GUI with all managed audiophile software
-# - Temporarily skip Trixie AlloGUI builds: The netdata package is currently not available (only on Raspbian, not Debian) and systemd-logind fails to start within the container as of a new change/bug, to investigate.
-if [[ $EDITION == 'AlloGUI' || ( $EDITION == 'all' && $HW_MODEL =~ ^(1|2|4|5|70)$ && $DISTRO != 8 ) ]]
+if [[ $EDITION == 'AlloGUI' || ( $EDITION == 'all' && $HW_MODEL =~ ^([1-5]|70)$ ) ]]
 then
 	G_EXEC mv "$OUTPUT_IMG_NAME.img" "${OUTPUT_IMG_NAME%_Amiberry}_AlloGUI.img"
 	OUTPUT_IMG_NAME="${OUTPUT_IMG_NAME%_Amiberry}_AlloGUI"
@@ -624,7 +627,7 @@ then
 
 	# Mount filesystems
 	G_EXEC mkdir rootfs
-	if [[ $HW_MODEL == [1245] ]]
+	if (( $HW_MODEL < 10 && $G_DISTRO > 6 ))
 	then
 		G_EXEC mount "${FP_LOOP}p2" rootfs
 		G_EXEC mount "${FP_LOOP}p1" rootfs/boot/firmware
@@ -712,10 +715,10 @@ G_EXEC rm -Rf /{root,home/*}/.{bash_history,nano_history,wget-hsts,cache,local,c
 G_EXEC rm -f /mnt/dietpi_userdata/roon/{RoonBridge,RAATServer}/Settings/unique_id
 
 # Re-create required log dirs
-G_EXEC mkdir -pm 2750 /var/tmp/dietpi/logs/dietpi-ramlog_store/{mysql,netdata,samba}
+G_EXEC mkdir -pm 2750 /var/tmp/dietpi/logs/dietpi-ramlog_store/{mysql,samba}
 G_EXEC chown mysql /var/tmp/dietpi/logs/dietpi-ramlog_store/mysql
-G_EXEC chown netdata /var/tmp/dietpi/logs/dietpi-ramlog_store/netdata
 G_EXEC chmod 0750 /var/tmp/dietpi/logs/dietpi-ramlog_store/samba
+(( $G_DISTRO < 8 )) && G_EXEC mkdir -m 2750 /var/tmp/dietpi/logs/dietpi-ramlog_store/netdata && G_EXEC chown netdata /var/tmp/dietpi/logs/dietpi-ramlog_store/netdata
 
 # Remove automation scripts and workarounds
 G_EXEC rm /etc/bashrc.d/00-dietpi-build.sh /boot/Automation_Custom_Script.sh

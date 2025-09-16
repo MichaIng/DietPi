@@ -544,62 +544,40 @@ A long (or insufficiently manufactured) cable may required a higher boost settin
 		then
 			local gpu_current=$(sed -n '/^[[:blank:]]*CONFIG_GPU_DRIVER=/{s/^[^=]*=//p;q}' /boot/dietpi.txt)
 			gpu_current=${gpu_current,,}
-			local driver_installed=()
-			for i in {0..3}
-			do
-				driver_installed+=('Install')
-			done
 
-			local installed_index=-1
-			if [[ $gpu_current == 'nvidia' ]]
-			then
-				installed_index=0
-
-			elif [[ $gpu_current == 'intel' ]]
-			then
-				installed_index=1
-
-			elif [[ $gpu_current == 'amd' ]]
-			then
-				installed_index=2
-
-			elif [[ $gpu_current == 'custom' ]]
-			then
-				installed_index=3
-			fi
-
-			if (( $installed_index >= 0 ))
-			then
-				driver_installed[$installed_index]='[Installed]'
-			fi
+			local menu_index=0
+			case $gpu_current in
+				'nvidia') menu_index=1;;
+				'intel') menu_index=3;;
+				'amd') menu_index=5;;
+				'custom') menu_index=7;;
+				*) :;;
+			esac
 
 			G_WHIP_MENU_ARRAY=(
-				'Nvidia' ": ${driver_installed[0]} | Proprietary GPU driver"
-				'Intel' ": ${driver_installed[1]} | Open-Source VA-API GPU drivers"
-				'AMD' ": ${driver_installed[2]} | Proprietary GPU driver"
-				'Custom' ": ${driver_installed[3]} | Manual User Install"
-				'None' ": Uninstall all GPU drivers"
+				'Nvidia' ': [ ] | Proprietary GPU driver'
+				'Intel' ': [ ] | Open-Source VA-API GPU drivers'
+				'AMD' ': [ ] | Open-Source GPU driver'
+				'Custom' ': [ ] | Manual User Install'
+				'None' ': Uninstall all GPU drivers'
 			)
+			(( $menu_index )) && G_WHIP_MENU_ARRAY[$menu_index]=${G_WHIP_MENU_ARRAY[$menu_index]/\[ \]/[X]}
 
 			G_WHIP_BUTTON_CANCEL_TEXT='Back'
 			G_WHIP_DEFAULT_ITEM=${gpu_current^}
 			G_WHIP_MENU 'Please select an option:' || { Back_or_Exit 1; return 0; } # Display Options
 
 			local gpu_new=${G_WHIP_RETURNED_VALUE,,}
-			if [[ $gpu_new != "$gpu_current" ||
-				$gpu_new = 'none' ]] # Always run uninstall when selected
-			then
-				/boot/dietpi/func/dietpi-set_hardware gpudriver "$gpu_new"
+			boot/dietpi/func/dietpi-set_hardware gpudriver "$gpu_new"
 
-				G_WHIP_YESNO 'X11 auto-configuration
+			G_WHIP_YESNO 'X11 auto-configuration
 \nThis feature generates a configuration for X11 at /etc/X11/xorg.conf based on available drivers. It is not always required, but helps to assure the right driver is used after one has been installed or uninstalled.
 \nNB: This feature will only work if an X server (desktop) is NOT currently running. If a desktop is running, please set "dietpi-autostart" to "Console", reboot the system, then run the auto-configuration manually:
 - Xorg -configure
 \nWould you like to auto-configure X11 now?' || return 0
 
-				G_EXEC Xorg -configure
-				[[ -f '/root/xorg.conf.new' ]] && G_EXEC mv /root/xorg.conf{.new,}
-			fi
+			G_EXEC Xorg -configure
+			[[ -f '/root/xorg.conf.new' ]] && G_EXEC mv /root/xorg.conf{.new,}
 
 		# RPi
 		elif (( $G_HW_MODEL < 10 ))
@@ -914,19 +892,15 @@ Re-enabling HDMI requires a reboot. If you need emergency HDMI output, edit the 
 		fi
 		G_WHIP_MENU_ARRAY+=('Time sync mode' ": [$ntpd_mode_text]")
 
-		# RTC clock: Only show option if a hwclock (connector) is available, otherwise fake-hwclock (default) is required anyway!
-		if hwclock &> /dev/null; then
-
-			local rtc_text='Hardware'
-			command -v fake-hwclock > /dev/null && rtc_text='Emulated'
-			G_WHIP_MENU_ARRAY+=('RTC mode' ": [$rtc_text]")
-
-		fi
+		# RTC clock
+		local rtc_text='Hardware'
+		command -v fake-hwclock > /dev/null && rtc_text='Emulated'
+		G_WHIP_MENU_ARRAY+=('RTC mode' ": [$rtc_text]")
 
 		# Armbian U-Boot update
 		if [[ -f '/usr/lib/u-boot/platform_install.sh' ]]
 		then
-			local bootdev=$(lsblk -npo PKNAME "$(findmnt -Ufnro SOURCE -T /boot)")
+			local bootdev=$(lsblk -npo PKNAME "$(findmnt -Ufvnro SOURCE -T /boot)")
 			G_WHIP_MENU_ARRAY+=('Update MMC bootloader' ": Flash current U-Boot to $bootdev")
 		fi
 
@@ -1034,26 +1008,28 @@ Re-enabling HDMI requires a reboot. If you need emergency HDMI output, edit the 
 			)
 
 			G_WHIP_DEFAULT_ITEM=$rtc_text
-			if G_WHIP_MENU 'Before network is available and network time sync can update the system clock, some implementation is required to do this on early boot stage.\n
+			G_WHIP_MENU 'Before network is available and network time sync can update the system clock, some implementation is required to do this on early boot stage.\n
 RTC hardware clock:
  - Most x86 PCs and some SBCs have a hardware clock with battery attached, or, have a socket where it can optionally be attached to.
  - If active, this hardware clock will apply the correct system time during kernel boot stage.\n
 fake-hwclock:
  - If no hardware RTC is available, the "fake-hwclock" package provides a service that saves the current system time on shutdown to a file, and, re-applies this stored time on early boot.
  - This means that the time is outdated if the system was shut down for a while, but without this implementation the system time would be 01/01/1970 until network time sync corrects it.\n
-Please choose whether your device have an active RTC or requires "fake-hwclock":'; then
+Please choose whether your device have an active RTC or requires "fake-hwclock":' || return 0
 
-				if [[ $G_WHIP_RETURNED_VALUE == 'Emulated' ]]; then
-
-					G_AGI fake-hwclock
-					G_EXEC systemctl enable --now fake-hwclock
-
-				else
-
-					G_AGP fake-hwclock
-
+			if [[ $G_WHIP_RETURNED_VALUE == 'Emulated' ]]
+			then
+				G_AGI fake-hwclock
+			else
+				(( $G_DISTRO > 6 )) && G_AGI util-linux-extra # ships hwclock since Bookworm
+				if ! hwclock > /dev/null
+				then
+					G_WHIP_MSG '[FAILED] hwclock fails
+\nThe hwclock command does not succeed. Either your system does not have a hwclock attached, or there is some issue with it. As long as this is the case, fake-hwclock will not be uninstalled.
+\nPlease debug hwclock and redo this switch once the issue has been solved.'
+					return 1
 				fi
-
+				G_AGP fake-hwclock
 			fi
 
 		elif [[ $G_WHIP_RETURNED_VALUE == 'Time sync mode' ]]; then
@@ -1154,7 +1130,9 @@ Further information: https://www.raspberrypi.org/documentation/hardware/raspberr
 
 			# shellcheck disable=SC1091
 			. /usr/lib/u-boot/platform_install.sh
-			eval "$(declare -f write_uboot_platform_mtd | sed -e 's| > /dev/null 2>&1||g' -e 's|status=none|status=progress|g' -e 's/^[[:blank:]]*dd /dd oflag=direct conv=notrunc status=progress /')"
+			eval "$(declare -f write_uboot_platform_mtd | sed -e 's| > /dev/null 2>&1||g' -e 's|status=none|status=progress|g' -e 's/dd /dd oflag=direct conv=notrunc status=progress /' -e 's/exit/return/' -e 's/dialog --no-collapse/whiptail/')"
+			# Bullseye: Remove flashcp "-p" flag
+			(( $G_DISTRO < 7 )) && eval "$(declare -f write_uboot_platform_mtd | sed 's/flashcp -v -p/flashcp -v/')"
 			# shellcheck disable=SC2154
 			write_uboot_platform_mtd "$DIR" "$spidev"
 
@@ -1215,6 +1193,7 @@ Latest release notes: https://github.com/starfive-tech/VisionFive2/releases
 		elif [[ $G_WHIP_RETURNED_VALUE == 'RPi firmware migration' ]]
 		then
 			/boot/dietpi/func/dietpi-set_software rpi_firmware_migration && REBOOT_REQUIRED=1
+			(( $? == 14 )) && REBOOT_REQUIRED=1 TARGETMENUID=14
 
 		elif [[ $G_WHIP_RETURNED_VALUE == 'RPi kernel choice' ]]
 		then
@@ -1395,7 +1374,7 @@ If unsure, set any value, 'Ondemand Down Factor' option on the next screen will 
 				# - CPUFreq
 				elif [[ -f '/sys/devices/system/cpu/cpu0/cpufreq/scaling_available_frequencies' ]]
 				then
-					mapfile -tO "${#available_frequency_array[@]}" available_frequency_array < <(for i in /sys/devices/system/cpu/cpufreq/policy[0-9]*scaling_available_frequencies
+					mapfile -tO "${#available_frequency_array[@]}" available_frequency_array < <(for i in /sys/devices/system/cpu/cpufreq/policy[0-9]*/scaling_available_frequencies
 					do
 						for j in $(<"$i"); do echo $(( $j / 1000 )); done
 					done | sort -un)
@@ -3320,15 +3299,21 @@ Additional benchmarks:
 					'applepi-dac' ': ApplePi DAC (Orchard Audio)'
 					'dionaudio-loco' ': Dion Audio LOCO'
 					'dionaudio-loco-v2' ': Dion Audio LOCO V2'
-					'hifiberry-amp' ': HifiBerry AMP / AMP+'
-					'hifiberry-dac' ': HifiBerry DAC / MiniAMP'
-					'hifiberry-dacplus' ': HifiBerry DAC+ / DAC+ Pro / AMP2'
-					'hifiberry-dacplusadc' ': HifiBerry DAC+ADC'
-					'hifiberry-dacplusadcpro' ': HifiBerry DAC+ADC Pro'
-					'hifiberry-dacplusdsp' ': HifiBerry DAC+DSP'
-					'hifiberry-dacplushd' ': HifiBerry DAC+ HD'
-					'hifiberry-digi' ': HifiBerry Digi / Digi+'
-					'hifiberry-digi-pro' ': HifiBerry Digi+ Pro'
+					'hifiberry-amp' ': HiFiBerry AMP / AMP+'
+					'hifiberry-amp100' ': HiFiBerry AMP100'
+					'hifiberry-amp3' ': HiFiBerry AMP3'
+					'hifiberry-amp4pro' ': HiFiBerry AMP4 Pro'
+					'hifiberry-dac' ': HiFiBerry DAC / MiniAMP'
+				)
+				findmnt /boot/firmware &> /dev/null && G_WHIP_MENU_ARRAY+=('hifiberry-dacplus-std' ': HiFiBerry DAC+ / AMP2 / AMP4' 'hifiberry-dacplus-pro' ': HiFiBerry DAC+ Pro / DAC2') || G_WHIP_MENU_ARRAY+=('hifiberry-dacplus' ': HiFiBerry DAC+ / DAC+ Pro / AMP2')
+				(( $G_HW_MODEL == 5 )) && G_WHIP_MENU_ARRAY+=('hifiberry-dac8x' ': HiFiBerry DAC8X')
+				G_WHIP_MENU_ARRAY+=(
+					'hifiberry-dacplusadc' ': HiFiBerry DAC+ADC'
+					'hifiberry-dacplusadcpro' ': HiFiBerry DAC+ADC Pro / DAC2+ADC Pro'
+					'hifiberry-dacplusdsp' ': HiFiBerry DAC+DSP'
+					'hifiberry-dacplushd' ': HiFiBerry DAC+ HD / DAC2 HD'
+					'hifiberry-digi' ': HiFiBerry Digi / Digi+ / Digi2'
+					'hifiberry-digi-pro' ': HiFiBerry Digi+ Pro / Digi2 Pro'
 					'i-sabre-q2m' ': AudioPhonics I-Sabre ES9028Q2M / ES9038Q2M'
 					'iqaudio-codec' ': IQaudIO Pi-Codec HAT'
 					'iqaudio-dac' ': IQaudIO DAC audio card'

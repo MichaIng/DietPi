@@ -23,9 +23,10 @@
 	# - PREIMAGE_INFO='Some GNU/Linux'
 	# - HW_MODEL=0				(must match one of the supported IDs below)
 	# - WIFI_REQUIRED=0			[01]
-	# - DISTRO_TARGET=7			[6789] (Bullseye: 6, Bookworm: 7, Trixie: 8, Forky: 9)
+	# - DISTRO_TARGET=8			[6789] (Bullseye: 6, Bookworm: 7, Trixie: 8, Forky: 9)
 	# - TEST_KERNEL=1			Install test kernel from https://dietpi.com/downloads/binaries/testing/
 	# - TEST_UBOOT=1			Install test U-Boot from https://dietpi.com/downloads/binaries/testing/
+	# - RK35XX_MAINLINE=1			Install mainline kernel on RK35xx based SBCs we would otherwise install the vendor kernel
 	#------------------------------------------------------------------------------------------------
 
 	# Core globals
@@ -34,6 +35,7 @@
 	# Input variables
 	[[ $TEST_KERNEL == 1 ]] || TEST_KERNEL=0
 	[[ $TEST_UBOOT == 1 ]] || TEST_UBOOT=0
+	[[ $RK35XX_MAINLINE == 1 ]] || RK35XX_MAINLINE=0
 
 	#------------------------------------------------------------------------------------------------
 	# Critical checks and requirements to run this script
@@ -521,7 +523,7 @@ _EOF_
 		G_DIETPI-NOTIFY 2 "Selected hardware model ID: $G_HW_MODEL"
 
 		# Check for partition table: https://github.com/MichaIng/DietPi/issues/5691
-		local BOOT_DEVICE=$(lsblk -npo PKNAME "$(findmnt -Ufnro SOURCE -T /boot)")
+		local BOOT_DEVICE=$(lsblk -npo PKNAME "$(findmnt -Ufvnro SOURCE -T /boot)")
 		# - Ignore for containers
 		if [[ ! $BOOT_DEVICE && $G_HW_MODEL != 75 ]]
 		then
@@ -777,10 +779,11 @@ setenv rootuuid "true"' /boot/boot.cmd
 					*) :;;
 				esac
 				# Console args
+				# shellcheck disable=SC2015
 				case $G_HW_MODEL in
 					73) G_CONFIG_INJECT 'consoleargs=' 'consoleargs=console=ttyS0,1500000' /boot/dietpiEnv.txt;; # headless
 					47|55|56) G_CONFIG_INJECT 'consoleargs=' 'consoleargs=console=ttyS2,1500000' /boot/dietpiEnv.txt;; # headless
-					78|79|80|82|85|90|91|92|93|94|95) G_EXEC sed --follow-symlinks -i 's/ttyAML0,115200/ttyFIQ0,1500000/' /boot/dietpiEnv.txt;; # vendor
+					78|79|80|82|85|90|91|92|93|94|95) [[ $RK35XX_MAINLINE == 1 ]] && G_EXEC sed --follow-symlinks -i 's/ttyAML0,115200/ttyS2,1500000/' /boot/dietpiEnv.txt || G_EXEC sed --follow-symlinks -i 's/ttyAML0,115200/ttyFIQ0,1500000/' /boot/dietpiEnv.txt;; # mainline or vendor
 					*) G_EXEC sed --follow-symlinks -i 's/ttyAML0,115200/ttyS2,1500000/' /boot/dietpiEnv.txt;; # mainline
 				esac
 
@@ -850,7 +853,7 @@ setenv rootuuid "true"' /boot/boot.cmd
 				# Overlays
 				case $G_HW_MODEL in
 					48) G_CONFIG_INJECT 'overlays=' 'overlays=usbhost1 usbhost2 uart1' /boot/dietpiEnv.txt;;
-					59|60) G_CONFIG_INJECT 'overlays=' 'overlays=usbhost1 usbhost2' /boot/dietpiEnv.txt;;
+					60) G_CONFIG_INJECT 'overlays=' 'overlays=usbhost1 usbhost2' /boot/dietpiEnv.txt;;
 					64) G_CONFIG_INJECT 'overlays=' 'overlays=usbhost2 usbhost3' /boot/dietpiEnv.txt;;
 					*) :;;
 				esac
@@ -1007,8 +1010,8 @@ _EOF_'
 		)
 
 		# Install gdisk if root filesystem is on a GPT partition, used by DietPi-FS_partition_resize
-		local ROOT_DEVICE=$(findmnt -Ufnro SOURCE -M /)
-		[[ $(blkid -s PTTYPE -o value -c /dev/null "$(lsblk -npo PKNAME "$ROOT_DEVICE")") == 'gpt' ]] && aPACKAGES_REQUIRED_INSTALL+=('gdisk')
+		local ROOT_DEVICE=$(findmnt -Ufvnro SOURCE -M /)
+		[[ $(blkid -s PTTYPE -o value "$(lsblk -npo PKNAME "$ROOT_DEVICE")") == 'gpt' ]] && aPACKAGES_REQUIRED_INSTALL+=('gdisk')
 
 		# Install mdadm if root filesystem is on a RAID
 		[[ $(lsblk -no TYPE "$ROOT_DEVICE") == 'raid'* ]] && aPACKAGES_REQUIRED_INSTALL+=('mdadm')
@@ -1035,7 +1038,7 @@ _EOF_'
 				aPACKAGES_REQUIRED_INSTALL+=('btrfs-progs')
 			fi
 
-		done < <(blkid -s TYPE -o value -c /dev/null | sort -u)
+		done < <(blkid -s TYPE -o value | sort -u)
 
 		# Containers
 		if (( $G_HW_MODEL == 75 ))
@@ -1043,8 +1046,8 @@ _EOF_'
 			aPACKAGES_REQUIRED_INSTALL+=('iproute2')
 			(( $G_RASPBIAN == 1 )) && aPACKAGES_REQUIRED_INSTALL+=('raspberrypi-archive-keyring')
 
-			# Move Raspbian key to active place and remove obsolete combined keyring
-			[[ -f '/usr/share/keyrings/raspbian-archive-keyring.gpg' ]] && G_EXEC ln -sf /usr/share/keyrings/raspbian-archive-keyring.gpg /etc/apt/trusted.gpg.d/raspbian-archive-keyring.gpg
+			# Move Raspbian key to active place (until Trixie) and remove obsolete combined keyring
+			(( $G_DISTRO < 8 )) && [[ -f '/usr/share/keyrings/raspbian-archive-keyring.gpg' ]] && G_EXEC ln -sf /usr/share/keyrings/raspbian-archive-keyring.gpg /etc/apt/trusted.gpg.d/raspbian-archive-keyring.gpg
 			[[ -f '/etc/apt/trusted.gpg' ]] && G_EXEC rm /etc/apt/trusted.gpg
 			[[ -f '/etc/apt/trusted.gpg~' ]] && G_EXEC rm '/etc/apt/trusted.gpg~'
 		else
@@ -1223,6 +1226,9 @@ _EOF_
 				99) model='orangepi3' kernel='sunxi64';;
 				*) :;;
 			esac
+
+			# Override with mainline kernel if wanted
+			[[ $RK35XX_MAINLINE == 1 && $kernel == 'rk35xx' ]] && kernel='rockchip64' branch='edge'
 
 			# NanoPi R2S/NEO3
 			if [[ $G_HW_MODEL =~ ^(55|56)$ ]]
@@ -1412,8 +1418,8 @@ _EOF_
 			[[ -f '/etc/apt/trusted.gpg.d/microsoft.gpg' ]] && G_EXEC rm /etc/apt/trusted.gpg.d/microsoft.gpg
 			[[ -f '/etc/apt/sources.list.d/vscode.list' ]] && G_EXEC rm /etc/apt/sources.list.d/vscode.list
 
-			# Move Raspbian key to active place and remove obsolete combined keyring
-			[[ -f '/usr/share/keyrings/raspbian-archive-keyring.gpg' ]] && G_EXEC ln -sf /usr/share/keyrings/raspbian-archive-keyring.gpg /etc/apt/trusted.gpg.d/raspbian-archive-keyring.gpg
+			# Move Raspbian key to active place (until Trixie) and remove obsolete combined keyring
+			(( $G_DISTRO < 8 )) && [[ -f '/usr/share/keyrings/raspbian-archive-keyring.gpg' ]] && G_EXEC ln -sf /usr/share/keyrings/raspbian-archive-keyring.gpg /etc/apt/trusted.gpg.d/raspbian-archive-keyring.gpg
 			[[ -f '/etc/apt/trusted.gpg' ]] && G_EXEC rm /etc/apt/trusted.gpg
 			[[ -f '/etc/apt/trusted.gpg~' ]] && G_EXEC rm '/etc/apt/trusted.gpg~'
 
@@ -2110,8 +2116,8 @@ _EOF_'
 		then
 			/boot/dietpi/func/dietpi-set_hardware serialconsole enable ttyS0
 
-		# Rockchip mainline
-		elif [[ $kernel == 'rockchip' || $kernel == 'rockchip64' ]]
+		# Rockchip mainline, Quartz64
+		elif [[ $kernel == 'rockchip' || $kernel == 'rockchip64' || $G_HW_MODEL == 49 ]]
 		then
 			/boot/dietpi/func/dietpi-set_hardware serialconsole enable ttyS2
 

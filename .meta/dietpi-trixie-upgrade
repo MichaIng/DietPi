@@ -49,13 +49,27 @@ then
 	apt-mark auto $(dpkg --get-selections python3-{pip,setuptools,wheel} 2> /dev/null | mawk '{print $1}') 2> /dev/null
 fi
 
+# Temporary block until DietPi v9.17 has been released, where this is done via pre-patches
+if (( $G_HW_MODEL < 10 || ( $G_HW_MODEL == 75 && ${G_RASPBIAN:-0} == 1 ) )) || [[ -f '/etc/apt/sources.list.d/raspi.list' ]]
+then
+	G_DIETPI-NOTIFY 2 'Assuring that Raspberry Pi and Raspbian repo keys are in /etc/apt/trusted.gpg.d'
+	G_AG_CHECK_INSTALL_PREREQ raspberrypi-archive-keyring
+	[[ -f '/usr/share/keyrings/raspbian-archive-keyring.gpg' && ! -f '/etc/apt/trusted.gpg.d/raspbian-archive-keyring.gpg' ]] && G_EXEC ln -sf /usr/share/keyrings/raspbian-archive-keyring.gpg /etc/apt/trusted.gpg.d/raspbian-archive-keyring.gpg
+fi
+
+if [[ -f '/etc/apt/trusted.gpg' ]]
+then
+	G_DIETPI-NOTIFY 2 'Removing /etc/apt/trusted.gpg, deprecated since Bookworm and obsolete since Trixie'
+	G_EXEC rm /etc/apt/trusted.gpg
+fi
+
 G_DIETPI-NOTIFY 2 'Upgrading APT packages to latest versions provided by Debian Bookworm'
 /boot/dietpi/dietpi-services stop
 G_AGUP
 G_AGDUG
 G_AGA
 
-G_CHECK_KERNEL || { G_WHIP_YESNO '[ INFO ] Reboot required
+G_CHECK_KERNEL || { G_WHIP_YESNO '[ INFO ] Reboot required, then rerun this script
 \nYour system needs to be rebootet to apply a recent kernel upgrade. Please do this first and then rerun this script to proceed with the Trixie upgrade.
 \nShall we reboot your system now?' && reboot; exit 0; }
 
@@ -83,7 +97,7 @@ G_DIETPI-NOTIFY 2 'Reverting some package lists to Bookworm which have no Trixie
 [[ -f '/etc/apt/sources.list.d/dietpi-mopidy.list' ]] && G_EXEC sed --follow-symlinks -i 's/trixie/bookworm/g' /etc/apt/sources.list.d/dietpi-mopidy.list
 [[ -f '/etc/apt/sources.list.d/dietpi-influxdb.list' ]] && G_EXEC sed --follow-symlinks -i 's/trixie/bookworm/g' /etc/apt/sources.list.d/dietpi-influxdb.list
 [[ -f '/etc/apt/sources.list.d/dietpi-zerotier.list' ]] && G_EXEC sed --follow-symlinks -i 's/trixie/bookworm/g' /etc/apt/sources.list.d/dietpi-zerotier.list
-[[ $G_RASPBIAN == 1 && -f '/etc/apt/sources.list.d/dietpi-docker.list' ]] && G_EXEC sed --follow-symlinks -i 's/trixie/bookworm/g' /etc/apt/sources.list.d/dietpi-docker.list
+[[ $G_RASPBIAN == 1 && -f '/etc/apt/sources.list.d/docker.list' ]] && G_EXEC sed --follow-symlinks -i 's/trixie/bookworm/g' /etc/apt/sources.list.d/docker.list
 [[ -f '/etc/apt/sources.list.d/dietpi-moonlight.list' ]] && G_EXEC sed --follow-symlinks -i 's/trixie/bookworm/g' /etc/apt/sources.list.d/dietpi-moonlight.list
 [[ -f '/etc/apt/sources.list.d/dietpi-moonlight-qt.list' ]] && G_EXEC sed --follow-symlinks -i 's/trixie/bookworm/g' /etc/apt/sources.list.d/dietpi-moonlight-qt.list
 
@@ -129,6 +143,13 @@ G_DIETPI-NOTIFY 2 'Running post upgrade migrations'
 
 # We do not want G_AGP to purge the old kernel package yet!
 eval "$(declare -f G_AGP | sed 's/autopurge/purge/')"
+
+if [[ -f '/etc/apt/trusted.gpg.d/raspbian-archive-keyring.gpg.dpkg-new' ]]
+then
+	G_DIETPI-NOTIFY 2 'Replace obsolete Raspbian key symlink with real key shipped since Trixie'
+	G_EXEC rm /etc/apt/trusted.gpg.d/raspbian-archive-keyring.gpg
+	G_EXEC mv /etc/apt/trusted.gpg.d/raspbian-archive-keyring.gpg{.dpkg-new,}
+fi
 
 if dpkg-query -s 'p7zip' &> /dev/null || dpkg-query -s 'p7zip-full' &> /dev/null
 then
@@ -188,6 +209,17 @@ G_AGP '*php8.2*'
 # Remove obsolete PHP 8.2 configs and Python 3.11 modules, obsolete after Python 3.13 install
 G_EXEC rm -Rf /etc/php/8.2 /usr/local/lib/python3.11 /usr/local/bin/pip3*
 
+# x86_64: Install new Intel/Nvidia GPU firmware package if Intel driver was selected
+if (( $G_HW_MODEL == 21 ))
+then
+	gpu_current=$(sed -n '/^[[:blank:]]*CONFIG_GPU_DRIVER=/{s/^[^=]*=//p;q}' /boot/dietpi.txt)
+	case $gpu_current in
+		'intel') G_AGI firmware-intel-graphics;;
+		'nvidia') G_AGI firmware-nvidia-graphics;;
+		*) :;;
+	esac
+fi
+
 # PostgreSQL migration
 if dpkg-query -s 'postgresql' &> /dev/null
 then
@@ -222,6 +254,8 @@ fi
 extra=()
 # - Kodi on RPi to migrate from "kodi21" to "kodi" package
 (( $G_HW_MODEL < 10 )) && extra+=(31)
+# - LMS on ARM
+(( $G_HW_ARCH < 10 )) && extra+=(35)
 # - UnRAR on non-ARMv6 Raspbian systems, for which we host the respective Debian packages on our server
 (( $G_HW_MODEL != 1 )) && (( $G_RASPBIAN )) && extra+=(170)
 G_PROMPT_BACKUP_DISABLED=1 /boot/dietpi/dietpi-software reinstall 8 38 40 89 114 118 125 130 136 139 141 143 153 155 180 181 196 210 "${extra[@]}"
