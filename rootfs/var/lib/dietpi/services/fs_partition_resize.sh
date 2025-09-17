@@ -182,8 +182,19 @@
 		echo '[ INFO ] Remounting root filesystem R/O for F2FS expansion'
 		mount -vo remount,ro /
 
+		echo '[ INFO ] Creating loop device'
+		LOOP_DEV=$(losetup -f)
+		losetup -Pv "$LOOP_DEV" "$ROOT_DRIVE"
+
 		echo "[ INFO ] Maximising $ROOT_FSTYPE root filesystem size"
-		resize.f2fs "$ROOT_DEV"
+		REBOOT=1
+		resize.f2fs "${LOOP_DEV}p$ROOT_PART"
+
+		echo '[ INFO ] Checking filesystem integrity'
+		fsck.f2fs -a "${LOOP_DEV}p$ROOT_PART"
+
+		echo '[ INFO ] Removing loop device'
+		losetup -vd "$LOOP_DEV"
 	fi
 
 	exit "$EXIT_CODE"
