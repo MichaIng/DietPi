@@ -15,7 +15,6 @@
 		if (( $REBOOT ))
 		then
 			echo '[ INFO ] Performing a reboot to apply either new boot configs imported from the setup partition or a failed ext filesystem expansion'
-			sync
 			systemctl start reboot.target
 		fi
 	}
@@ -28,7 +27,6 @@
 		> /dietpi_skip_partition_resize
 		mkdir -pv /etc/systemd/system/local-fs.target.wants
 		ln -sfv /etc/systemd/system/dietpi-fs_partition_resize.service /etc/systemd/system/local-fs.target.wants/dietpi-fs_partition_resize.service
-		sync
 		systemctl start reboot.target
 		exit 0
 	}
@@ -126,9 +124,6 @@
 			lsblk -po NAME,LABEL,SIZE,TYPE,FSTYPE,MOUNTPOINT "$ROOT_DRIVE"
 		fi
 
-		# Failsafe: Sync changes to disk before touching partitions
-		sync
-
 		# GPT partition table: Move GPT backup partition table to end of drive
 		# - lsblk -ndo PTTYPE "$ROOT_DRIVE" does not work inside systemd-nspawn containers.
 		if [[ $(blkid -s PTTYPE -o value "$ROOT_DRIVE") == 'gpt' ]]
@@ -164,7 +159,7 @@
 				tune2fs -O 'has_journal' "$ROOT_DEV"
 			fi
 		;;
-		'f2fs') echo '[ INFO ] F2FS expansion requires the filesystem to not be R/W mounted, hence logging to /var/tmp/dietpi/logs/fs_partition_resize.log needs to be stopped first';;
+		'f2fs') echo '[ INFO ] F2FS online expansion is not possible. Please do that from another Linux system if needed.';;
 		'btrfs')
 			echo "[ INFO ] Maximising $ROOT_FSTYPE root filesystem size"
 			btrfs filesystem resize max /
@@ -176,26 +171,6 @@
 	esac
 	# ---------------------------------------------------------
 	} &> >(tee -a /var/tmp/dietpi/logs/fs_partition_resize.log); wait $! # Method from dietpi-update to avoid commands running in a subshell, breaking script exits and implying variable changes remaining local
-
-	if [[ $ROOT_FSTYPE == 'f2fs' ]]
-	then
-		echo '[ INFO ] Remounting root filesystem R/O for F2FS expansion'
-		mount -vo remount,ro /
-
-		echo '[ INFO ] Creating loop device'
-		LOOP_DEV=$(losetup -f)
-		losetup -Pv "$LOOP_DEV" "$ROOT_DRIVE"
-
-		echo "[ INFO ] Maximising $ROOT_FSTYPE root filesystem size"
-		REBOOT=1
-		resize.f2fs "${LOOP_DEV}p$ROOT_PART"
-
-		echo '[ INFO ] Checking filesystem integrity'
-		fsck.f2fs -a "${LOOP_DEV}p$ROOT_PART"
-
-		echo '[ INFO ] Removing loop device'
-		losetup -vd "$LOOP_DEV"
-	fi
 
 	exit "$EXIT_CODE"
 }
