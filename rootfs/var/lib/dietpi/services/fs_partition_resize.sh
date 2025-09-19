@@ -15,7 +15,6 @@
 		if (( $REBOOT ))
 		then
 			echo '[ INFO ] Performing a reboot to apply either new boot configs imported from the setup partition or a failed ext filesystem expansion'
-			sync
 			systemctl start reboot.target
 		fi
 	}
@@ -28,7 +27,6 @@
 		> /dietpi_skip_partition_resize
 		mkdir -pv /etc/systemd/system/local-fs.target.wants
 		ln -sfv /etc/systemd/system/dietpi-fs_partition_resize.service /etc/systemd/system/local-fs.target.wants/dietpi-fs_partition_resize.service
-		sync
 		systemctl start reboot.target
 		exit 0
 	}
@@ -71,63 +69,60 @@
 	echo '[ INFO ] Mounting /tmp for temporary mount points'
 	mount -v /tmp || :
 
-	echo '[ INFO ] Checking if the last partition contains a filesystem with DIETPISETUP label'
-	# - Use sfdisk to detect last partition, as lsblk with "-r" option on Bullseye does not sort partitions well: https://github.com/MichaIng/DietPi/issues/7527
-	SETUP_PART=$(sfdisk -lqo Device "$ROOT_DRIVE" | tail -1)
-	# - Probe via blkid instead of lsblk=udev, since systemd-udevd does not run yet at this boot stage. From Trixie on, "lsblk --properties-by blkid" can be used.
-	if [[ $(blkid -s LABEL -o value "$SETUP_PART") == 'DIETPISETUP' ]]
-	then
-		echo "[ INFO ] Detected trailing DietPi setup partition $SETUP_PART"
-		echo '[ INFO ] Mounting it and importing files if present and newer'
-		TMP_MOUNT=$(mktemp -d)
-		mount -v "$SETUP_PART" "$TMP_MOUNT"
-		for f in 'dietpi.txt' 'dietpi-wifi.txt' 'dietpiEnv.txt' 'boot.ini' 'extlinux.conf' 'Automation_Custom_PreScript.sh' 'Automation_Custom_Script.sh' 'unattended_pivpn.conf'
-		do
-			[[ -f $TMP_MOUNT/$f ]] || continue
-			if [[ $f == 'extlinux.conf' ]]
-			then
-				mkdir -pv /boot/extlinux
-				[[ -f '/boot/extlinux/extlinux.conf' ]] && mtime=$(date -r '/boot/extlinux/extlinux.conf' '+%s') || mtime=0
-				cp -uv "$TMP_MOUNT/$f" /boot/extlinux/
-				(( $(date -r '/boot/extlinux/extlinux.conf' '+%s') > $mtime )) && REBOOT=1
-			else
-				[[ ( $f == 'dietpiEnv.txt' || $f == 'boot.ini' ) && -f /boot/$f ]] && mtime=$(date -r "/boot/$f" '+%s') || mtime=0
-				cp -uv "$TMP_MOUNT/$f" /boot/
-				[[ $f == 'dietpiEnv.txt' || $f == 'boot.ini' ]] && (( $(date -r "/boot/$f" '+%s') > $mtime )) && REBOOT=1
-			fi
-		done
-		umount -v "$SETUP_PART"
-		rmdir -v "$TMP_MOUNT"
-		unset -v TMP_MOUNT
-		echo '[ INFO ] Deleting trailing DietPi setup partition to allow root filesystem expansion'
-		sfdisk --no-reread --no-tell-kernel --delete "$ROOT_DRIVE" "${SETUP_PART: -1}"
-
-	elif grep -q '[[:blank:]]/boot/firmware[[:blank:]][[:blank:]]*vfat[[:blank:]]' /etc/fstab
-	then
-		BOOT_PART=$(mawk '/[[:blank:]]\/boot\/firmware[[:blank:]][[:blank:]]*vfat[[:blank:]]/{print $1}' /etc/fstab)
-		echo "[ INFO ] Detected RPi /boot/firmware partition $BOOT_PART"
-		echo '[ INFO ] Mounting it and importing files if present and newer'
-		TMP_MOUNT=$(mktemp -d)
-		mount -v "$BOOT_PART" "$TMP_MOUNT"
-		for f in 'dietpi.txt' 'dietpi-wifi.txt' 'Automation_Custom_PreScript.sh' 'Automation_Custom_Script.sh' 'unattended_pivpn.conf'
-		do
-			[[ -f $TMP_MOUNT/$f ]] && cp -uv "$TMP_MOUNT/$f" /boot/
-		done
-		umount -v "$BOOT_PART"
-		rmdir -v "$TMP_MOUNT"
-		unset -v TMP_MOUNT
-	else
-		echo '[ INFO ] No DietPi setup partition found:'
-		lsblk --properties-by blkid -po NAME,LABEL,SIZE,TYPE,FSTYPE,MOUNTPOINT "$ROOT_DRIVE"
-	fi
-
-	# Only increase partition size if not yet done on first boot
+	# Skip partition handling if done on first boot already
 	if [[ -f '/dietpi_skip_partition_resize' ]]
 	then
 		rm -v /dietpi_skip_partition_resize
 	else
-		# Failsafe: Sync changes to disk before touching partitions
-		sync
+		echo '[ INFO ] Checking if the last partition contains a filesystem with DIETPISETUP label'
+		# - Use sfdisk to detect last partition, as lsblk with "-r" option on Bullseye does not sort partitions well: https://github.com/MichaIng/DietPi/issues/7527
+		SETUP_PART=$(sfdisk -lqo Device "$ROOT_DRIVE" | tail -1)
+		# - Probe via blkid instead of lsblk=udev, since systemd-udevd does not run yet at this boot stage. From Trixie on, "lsblk --properties-by blkid" can be used.
+		if [[ $(blkid -s LABEL -o value "$SETUP_PART") == 'DIETPISETUP' ]]
+		then
+			echo "[ INFO ] Detected trailing DietPi setup partition $SETUP_PART"
+			echo '[ INFO ] Mounting it and importing files if present and newer'
+			TMP_MOUNT=$(mktemp -d)
+			mount -v "$SETUP_PART" "$TMP_MOUNT"
+			for f in 'dietpi.txt' 'dietpi-wifi.txt' 'dietpiEnv.txt' 'boot.ini' 'extlinux.conf' 'Automation_Custom_PreScript.sh' 'Automation_Custom_Script.sh' 'unattended_pivpn.conf'
+			do
+				[[ -f $TMP_MOUNT/$f ]] || continue
+				if [[ $f == 'extlinux.conf' ]]
+				then
+					mkdir -pv /boot/extlinux
+					[[ -f '/boot/extlinux/extlinux.conf' ]] && mtime=$(date -r '/boot/extlinux/extlinux.conf' '+%s') || mtime=0
+					cp -uv "$TMP_MOUNT/$f" /boot/extlinux/
+					(( $(date -r '/boot/extlinux/extlinux.conf' '+%s') > $mtime )) && REBOOT=1
+				else
+					[[ ( $f == 'dietpiEnv.txt' || $f == 'boot.ini' ) && -f /boot/$f ]] && mtime=$(date -r "/boot/$f" '+%s') || mtime=0
+					cp -uv "$TMP_MOUNT/$f" /boot/
+					[[ $f == 'dietpiEnv.txt' || $f == 'boot.ini' ]] && (( $(date -r "/boot/$f" '+%s') > $mtime )) && REBOOT=1
+				fi
+			done
+			umount -v "$SETUP_PART"
+			rmdir -v "$TMP_MOUNT"
+			unset -v TMP_MOUNT
+			echo '[ INFO ] Deleting trailing DietPi setup partition to allow root filesystem expansion'
+			sfdisk --no-reread --no-tell-kernel --delete "$ROOT_DRIVE" "${SETUP_PART: -1}"
+
+		elif grep -q '[[:blank:]]/boot/firmware[[:blank:]][[:blank:]]*vfat[[:blank:]]' /etc/fstab
+		then
+			BOOT_PART=$(mawk '/[[:blank:]]\/boot\/firmware[[:blank:]][[:blank:]]*vfat[[:blank:]]/{print $1}' /etc/fstab)
+			echo "[ INFO ] Detected RPi /boot/firmware partition $BOOT_PART"
+			echo '[ INFO ] Mounting it and importing files if present and newer'
+			TMP_MOUNT=$(mktemp -d)
+			mount -v "$BOOT_PART" "$TMP_MOUNT"
+			for f in 'dietpi.txt' 'dietpi-wifi.txt' 'Automation_Custom_PreScript.sh' 'Automation_Custom_Script.sh' 'unattended_pivpn.conf'
+			do
+				[[ -f $TMP_MOUNT/$f ]] && cp -uv "$TMP_MOUNT/$f" /boot/
+			done
+			umount -v "$BOOT_PART"
+			rmdir -v "$TMP_MOUNT"
+			unset -v TMP_MOUNT
+		else
+			echo '[ INFO ] No DietPi setup partition found:'
+			lsblk -po NAME,LABEL,SIZE,TYPE,FSTYPE,MOUNTPOINT "$ROOT_DRIVE"
+		fi
 
 		# GPT partition table: Move GPT backup partition table to end of drive
 		# - lsblk -ndo PTTYPE "$ROOT_DRIVE" does not work inside systemd-nspawn containers.
@@ -164,7 +159,7 @@
 				tune2fs -O 'has_journal' "$ROOT_DEV"
 			fi
 		;;
-		'f2fs') echo '[ INFO ] F2FS expansion requires the filesystem to not be R/W mounted, hence logging to /var/tmp/dietpi/logs/fs_partition_resize.log needs to be stopped first';;
+		'f2fs') echo '[ INFO ] F2FS online expansion is not possible. Please do that from another Linux system if needed.';;
 		'btrfs')
 			echo "[ INFO ] Maximising $ROOT_FSTYPE root filesystem size"
 			btrfs filesystem resize max /
@@ -176,15 +171,6 @@
 	esac
 	# ---------------------------------------------------------
 	} &> >(tee -a /var/tmp/dietpi/logs/fs_partition_resize.log); wait $! # Method from dietpi-update to avoid commands running in a subshell, breaking script exits and implying variable changes remaining local
-
-	if [[ $ROOT_FSTYPE == 'f2fs' ]]
-	then
-		echo '[ INFO ] Remounting root filesystem R/O for F2FS expansion'
-		mount -vo remount,ro /
-
-		echo "[ INFO ] Maximising $ROOT_FSTYPE root filesystem size"
-		resize.f2fs "$ROOT_DEV"
-	fi
 
 	exit "$EXIT_CODE"
 }
