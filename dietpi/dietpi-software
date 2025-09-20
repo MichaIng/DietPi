@@ -2655,6 +2655,7 @@ sudo sysctl -p /etc/sysctl.d/dietpi-$1.conf"
 						# libffi-dev for the optional _ctypes module, needed at least for Home Assistant => include it in all pyenv builds to avoid surprises
 						aDEPS+=('gcc' 'libc6-dev' 'make' 'libssl-dev' 'zlib1g-dev' 'libbz2-dev' 'libreadline-dev' 'libsqlite3-dev' 'liblzma-dev' 'libffi-dev')
 					;;
+					'pymicro-vad') aDEPS+=('g++');;
 					'pynacl')
 						(( $G_HW_ARCH == 11 || ( $G_HW_ARCH < 3 && ! $piwheels ) )) && aDEPS+=('make')
 						set -- "$@" cffi
@@ -2697,7 +2698,7 @@ sudo sysctl -p /etc/sysctl.d/dietpi-$1.conf"
 			software_id=$1
 			shift
 			[[ $1 ]] || return 0
-			[[ $(readlink -m "/etc/systemd/system/$1.service") == '/dev/null' ]] && G_EXEC systemctl --no-load unmask "$1"
+			[[ $(readlink -m "/etc/systemd/system/$1.service") == '/dev/null' ]] && G_EXEC systemctl --no-reload unmask "$1"
 			aENABLE_SERVICES+=("$@")
 		}
 
@@ -3121,7 +3122,7 @@ Signed-By: /etc/apt/keyrings/dietpi-adoptium.asc"
 			# ARMv6/7 Bullseye: node: /usr/lib/arm-linux-gnueabihf/libstdc++.so.6: version `GLIBCXX_3.4.30'/`GLIBCXX_3.4.29' not found (required by node)
 			if (( $G_HW_ARCH < 3 && $G_DISTRO < 7 ))
 			then
-				local version=22 fallback='v22.18.0'
+				local version=22 fallback='v22.19.0'
 				(( $G_HW_ARCH == 1 )) && version=20 fallback='v20.19.4'
 				version=$(./node-install.sh -l | mawk "/^v$version/{print \$1;exit}")
 				[[ $version ]] || version=$fallback
@@ -3188,7 +3189,7 @@ Signed-By: /etc/apt/keyrings/dietpi-adoptium.asc"
 
 			# Get latest version
 			local file=$(curl -sSfL 'https://go.dev/dl/?mode=json' | grep -o "go[0-9.]*\.linux-$arch\.tar\.gz" | head -1)
-			[[ $file ]] || { file="go1.25.0.linux-$arch.tar.gz"; G_DIETPI-NOTIFY 1 "Automatic latest ${aSOFTWARE_NAME[$software_id]} version detection failed. \"$file\" will be installed as fallback, but a newer version might be available. Please report this at: https://github.com/MichaIng/DietPi/issues"; }
+			[[ $file ]] || { file="go1.25.1.linux-$arch.tar.gz"; G_DIETPI-NOTIFY 1 "Automatic latest ${aSOFTWARE_NAME[$software_id]} version detection failed. \"$file\" will be installed as fallback, but a newer version might be available. Please report this at: https://github.com/MichaIng/DietPi/issues"; }
 
 			# Reinstall: Remove previous instance
 			[[ -d '/usr/local/go' ]] && G_EXEC rm -R /usr/local/go
@@ -4173,8 +4174,9 @@ _EOF_
  - If you need to reinstall (e.g. broken instance), please manually backup your config files+data, remove the install dir and rerun \"dietpi-software (re)install $software_id\"."
 
 			else
-				Download_Install 'https://download.phpbb.com/pub/release/3.3/3.3.15/phpBB-3.3.15.tar.bz2'
-				# Files are shipped with strange UID:GID 1000:1000 while for security reasons it should be root:root.
+				local fallback_url='https://download.phpbb.com/pub/release/3.3/3.3.15/phpBB-3.3.15.tar.bz2'
+				Download_Install "$(curl -sSf 'https://version.phpbb.com/phpbb/versions.json' | sed -En '/"stable":/,/"unstable":/s/.*"current": "(.+)",.*/\1/p' | sort -Vr | head -1)"
+				# Files are shipped with UID:GID 1000:1000 while for security reasons it should be root:root.
 				G_EXEC chown -R root:root phpBB3
 				G_EXEC mv phpBB3 /var/www/phpbb
 			fi
@@ -4233,7 +4235,7 @@ _EOF_
 			else
 				# Find latest version
 				version=$(curl -sSfL 'https://dist.ipfs.tech/kubo/versions' | sed '/-rc[0-9]*$/d' | tail -1)
-				[[ $version ]] || { version='v0.36.0'; G_DIETPI-NOTIFY 1 "Automatic latest ${aSOFTWARE_NAME[$software_id]} version detection failed. Version \"$version\" will be installed as fallback, but a newer version might be available. Please report this at: https://github.com/MichaIng/DietPi/issues"; }
+				[[ $version ]] || { version='v0.37.0'; G_DIETPI-NOTIFY 1 "Automatic latest ${aSOFTWARE_NAME[$software_id]} version detection failed. Version \"$version\" will be installed as fallback, but a newer version might be available. Please report this at: https://github.com/MichaIng/DietPi/issues"; }
 			fi
 			Download_Install "https://dist.ipfs.tech/kubo/$version/kubo_${version}_linux-$arch.tar.gz"
 
@@ -5102,26 +5104,20 @@ audio_output {
 _EOF_
 		fi
 
-		if To_Install 118 mopidy # Mopidy
+		if To_Install 118 mopidy # Mopidy: https://docs.mopidy.com/stable/installation/debian/
 		then
 			# Install our config file only if not yet existent, to preserve manual user config.
 			# - This needs to be done prior to APT install, since this would otherwise install a default config file as well.
 			[[ -f '/etc/mopidy/mopidy.conf' ]] || dps_index=$software_id Download_Install 'mopidy.conf' /etc/mopidy/mopidy.conf
 
-			# Install official APT repo where available
-			if (( $G_HW_ARCH != 11 ))
-			then
-				# APT key
-				local url='https://apt.mopidy.com/mopidy.gpg'
-				G_CHECK_URL "$url"
-				G_EXEC eval "curl -sSfL '$url' | gpg --dearmor -o /etc/apt/trusted.gpg.d/dietpi-mopidy.gpg --yes"
+			# APT key
+			local url='https://apt.mopidy.com/mopidy.gpg'
+			G_CHECK_URL "$url"
+			G_EXEC eval "curl -sSfL '$url' | gpg --dearmor -o /etc/apt/trusted.gpg.d/dietpi-mopidy.gpg --yes"
 
-				# APT list
-				local dist=$G_DISTRO_NAME
-				(( $G_DISTRO > 7 )) && dist='bookworm' # https://apt.mopidy.com/dists/trixie/InRelease
-				G_EXEC eval "echo 'deb https://apt.mopidy.com $dist main contrib non-free' > /etc/apt/sources.list.d/dietpi-mopidy.list"
-				G_AGUP
-			fi
+			# APT list: https://apt.mopidy.com/dists/
+			G_EXEC eval "echo 'deb https://apt.mopidy.com ${G_DISTRO_NAME/forky/trixie} main' > /etc/apt/sources.list.d/dietpi-mopidy.list"
+			G_AGUP
 
 			# APT package
 			G_AGI mopidy gstreamer1.0-alsa mopidy-local
@@ -5139,7 +5135,7 @@ _EOF_
 				G_EXEC mv /var/lib/mopidy /mnt/dietpi_userdata/mopidy
 				# Workaround error about moving data dir into itself
 				G_EXEC mkdir -p /mnt/dietpi_userdata/mopidy/.hidden_data
-				# Non-hidden files/folders are data
+				# Non-hidden files/dirs are data
 				G_EXEC mv /mnt/dietpi_userdata/mopidy/* /mnt/dietpi_userdata/mopidy/.hidden_data
 				G_EXEC mv /mnt/dietpi_userdata/mopidy/.hidden_data /mnt/dietpi_userdata/mopidy/data
 			else
@@ -5606,9 +5602,12 @@ _EOF_
 
 			# Icecast
 			# - Config: Set passwords if not yet done (default found)
-			sed --follow-symlinks -i "/<source-password>hackme/c\        <source-password>$GLOBAL_PW</source-password>" /etc/icecast2/icecast.xml
-			sed --follow-symlinks -i "/<relay-password>hackme/c\        <relay-password>$GLOBAL_PW</relay-password>" /etc/icecast2/icecast.xml
-			sed --follow-symlinks -i "/<admin-password>hackme/c\        <admin-password>$GLOBAL_PW</admin-password>" /etc/icecast2/icecast.xml
+			# - HTML-encode characters with special meaning in XML. Icecast treats those correctly for authentication.
+			local password=${GLOBAL_PW//&/\&amp;}; password=${password//</\&lt;}
+			sed --follow-symlinks -i "/<source-password>hackme/c\        <source-password>$password</source-password>" /etc/icecast2/icecast.xml
+			sed --follow-symlinks -i "/<relay-password>hackme/c\        <relay-password>$password</relay-password>" /etc/icecast2/icecast.xml
+			sed --follow-symlinks -i "/<admin-password>hackme/c\        <admin-password>$password</admin-password>" /etc/icecast2/icecast.xml
+			unset -v password
 			# - Service: Replace init.d service with native systemd service
 			Remove_SysV icecast2 1
 			cat << _EOF_ > /etc/systemd/system/icecast2.service
@@ -5986,14 +5985,12 @@ _EOF_
 			# - Workaround "dialog" issues with "xterm" by faking "linux" terminal
 			local retry TERM_old=
 			[[ $TERM == 'xterm' ]] && { TERM_old=$TERM; export TERM=linux; }
-			# - Skip supported OS check. We do not fully support Debian testing either but we are testing it already now.
-			export PIHOLE_SKIP_OS_CHECK=true
 			# - Skip query logging dialogue and set to "false", which affects file logging only, not database>web UI.
 			G_EXEC sed --follow-symlinks -i '/^[[:blank:]]*setLogging$/d' install.sh
 			G_EXEC sed --follow-symlinks -i '/^QUERY_LOGGING=$/c\QUERY_LOGGING=false' install.sh
 			# - Skip final completion dialogue since we show our own
 			# shellcheck disable=SC2016
-			G_EXEC sed --follow-symlinks -i '/^[[:blank:]]*displayFinalMessage "${pw}"/d' install.sh
+			G_EXEC sed --follow-symlinks -i '/^[[:blank:]]*pihole setpassword "${pw}"/,/^[[:blank:]]*dialog --no-shadow --keep-tite/s/dialog --no-shadow --keep-tite/true/' install.sh
 			until ./install.sh
 			do
 				(( $G_INTERACTIVE )) && read -rp 'The Pi-hole installer failed. Do you want to retry? [yN]: ' retry
@@ -6197,7 +6194,6 @@ EnableLogRedacting = 'true'
 Scanner.Extractor = 'taglib'
 
 CoverJpegQuality = '75'
-CoverArtPriority = 'embedded'
 _EOF_
 			# Service: https://www.navidrome.org/docs/installation/linux/#create-a-systemd-unit
 			cat << '_EOF_' > /etc/systemd/system/navidrome.service
@@ -7032,7 +7028,7 @@ _EOF_
 				local fallback_url='https://downloads.lms-community.org/nightly/lyrionmusicserver_9.1.0~1752577284_arm.deb'
 				Download_Install "$(curl -sSfL 'https://raw.githubusercontent.com/LMS-Community/lms-server-repository/master/dev.xml' | grep -om1 'https://[^"]*_arm.deb')"
 			else
-				local fallback_url="https://downloads.lms-community.org/nightly/lyrionmusicserver_9.0.3~1754981228_$arch.deb"
+				local fallback_url="https://downloads.lms-community.org/nightly/lyrionmusicserver_9.0.3~1758288340_$arch.deb"
 				Download_Install "$(curl -sSfL 'https://raw.githubusercontent.com/LMS-Community/lms-server-repository/master/stable.xml' | grep -om1 "https://[^\"]*_$arch.deb")"
 			fi
 			G_EXEC systemctl stop lyrionmusicserver
@@ -7487,7 +7483,7 @@ _EOF_
 
 		if To_Install 179 komga # Komga
 		then
-			local fallback_url='https://github.com/gotson/komga/releases/download/1.23.1/komga-1.23.1.jar'
+			local fallback_url='https://github.com/gotson/komga/releases/download/1.23.4/komga-1.23.4.jar'
 			Download_Install "$(curl -sSfL 'https://api.github.com/repos/gotson/komga/releases/latest' | mawk -F\" '/^ *"browser_download_url": ".*\/komga-[^"\/]*\.jar"$/{print $4}')" /mnt/dietpi_userdata/komga/komga.jar
 
 			# User
@@ -7819,8 +7815,7 @@ _EOF_
 			G_DIETPI-NOTIFY 2 'Preventing install of unattended-upgrades'
 			G_EXEC sed --follow-symlinks -i '/^[[:blank:]]*askUnattendedUpgrades$/c\UNATTUPG=0' install.bash
 			G_DIETPI-NOTIFY 2 'Prevent dhcpcd from being installed'
-			G_EXEC sed --follow-symlinks -i '/^checkStaticIpSupported() {$/,/^}$/d' install.bash
-			G_EXEC sed --follow-symlinks -i '/^####### FUNCTIONS ##########$/a\checkStaticIpSupported(){ return 1; }' install.bash
+			G_EXEC sed --follow-symlinks -i '/^checkStaticIpSupported() {$/a\return 1' install.bash
 
 			# Unattended install
 			local options=()
@@ -7831,7 +7826,7 @@ _EOF_
 			fi
 
 			# APT deps
-			G_AGI dnsutils grepcidr net-tools bsdmainutils iptables-persistent # https://github.com/pivpn/pivpn/blob/master/auto_install/install.sh#L37
+			G_AGI bind9-dnsutils grepcidr net-tools bsdmainutils iptables-persistent # https://github.com/pivpn/pivpn/blob/master/auto_install/install.sh#L39
 			Configure_iptables
 
 			G_EXEC_OUTPUT=1 G_EXEC_NOEXIT=1 G_EXEC ./install.bash "${options[@]}" || aSOFTWARE_INSTALL_STATE[$software_id]=0
@@ -8989,7 +8984,7 @@ _EOF_
 					*) local arch='arm';;
 				esac
 
-				local fallback_url="https://github.com/syncthing/syncthing/releases/download/v2.0.3/syncthing-linux-$arch-v2.0.3.tar.gz"
+				local fallback_url="https://github.com/syncthing/syncthing/releases/download/v2.0.9/syncthing-linux-$arch-v2.0.9.tar.gz"
 				Download_Install "$(curl -sSfL 'https://api.github.com/repos/syncthing/syncthing/releases/latest' | mawk -F\" "/^ *\"browser_download_url\": \".*\/syncthing-linux-$arch-[^\"\/]*\.tar\.gz\"$/{print \$4}")"
 				G_EXEC mv syncthing-* /opt/syncthing
 			fi
@@ -9431,7 +9426,7 @@ _EOF_
 			if (( ${PHP_VERSION::1} > 7 ))
 			then
 				aDEPS+=("php$PHP_VERSION-curl")
-				local fallback_url='https://github.com/koel/koel/releases/download/v7.13.0/koel-v7.13.0.tar.gz' aphp_deps=('curl' 'dom')
+				local fallback_url='https://github.com/koel/koel/releases/download/v7.15.1/koel-v7.15.1.tar.gz' aphp_deps=('curl' 'dom')
 				Download_Install "$(curl -sSfL 'https://api.github.com/repos/koel/koel/releases/latest' | mawk -F\" '/^ *"browser_download_url": ".*\/koel-[^"\/]*\.tar\.gz"$/{print $4}')"
 			else
 				aDEPS+=("php$PHP_VERSION-json")
@@ -9656,7 +9651,7 @@ _EOF_
 				esac
 
 				url=$(curl -sSfL 'https://api.github.com/repos/Radarr/Radarr/releases/latest' | mawk -F\" "/^ *\"browser_download_url\": \".*linux-core-$arch\.tar\.gz\"$/{print \$4}")
-				local fallback_url="https://github.com/Radarr/Radarr/releases/download/v5.26.2.10099/Radarr.master.5.26.2.10099.linux-core-$arch.tar.gz"
+				local fallback_url="https://github.com/Radarr/Radarr/releases/download/v5.27.5.10198/Radarr.master.5.27.5.10198.linux-core-$arch.tar.gz"
 			fi
 			Download_Install "$url"
 
@@ -9747,7 +9742,7 @@ _EOF_
 				esac
 
 				url=$(curl -sSfL 'https://api.github.com/repos/Lidarr/Lidarr/releases/latest' | mawk -F\" "/^ *\"browser_download_url\": \".*linux-core-$arch\.tar\.gz\"$/{print \$4}")
-				local fallback_url="https://github.com/Lidarr/Lidarr/releases/download/v2.12.4.4658/Lidarr.master.2.12.4.4658.linux-core-$arch.tar.gz"
+				local fallback_url="https://github.com/Lidarr/Lidarr/releases/download/v2.13.3.4711/Lidarr.master.2.13.3.4711.linux-core-$arch.tar.gz"
 			fi
 			Download_Install "$url"
 
@@ -9953,7 +9948,7 @@ _EOF_
 				3) local arch='LinuxARM64';;
 				*) local arch='LinuxAMDx64';;
 			esac
-			local fallback_url="https://github.com/Jackett/Jackett/releases/download/v0.22.2325/Jackett.Binaries.$arch.tar.gz"
+			local fallback_url="https://github.com/Jackett/Jackett/releases/download/v0.23.43/Jackett.Binaries.$arch.tar.gz"
 			Download_Install "$(curl -sSfL 'https://api.github.com/repos/Jackett/Jackett/releases/latest' | mawk -F\" "/^ *\"browser_download_url\": \".*\/Jackett\.Binaries\.$arch\.tar\.gz\"$/{print \$4}")"
 
 			# Move existing configs to unpacked install dir
@@ -10012,7 +10007,7 @@ _EOF_
 			local reinstall=0
 			[[ -f '/mnt/dietpi_userdata/nzbget/nzbget.conf' ]] && reinstall=1
 
-			local fallback_url='https://github.com/nzbgetcom/nzbget/releases/download/v25.2/nzbget-25.2-bin-linux.run'
+			local fallback_url='https://github.com/nzbgetcom/nzbget/releases/download/v25.3/nzbget-25.3-bin-linux.run'
 			Download_Install "$(curl -sSfL 'https://api.github.com/repos/nzbgetcom/nzbget/releases/latest' | mawk -F\" '/^ *"browser_download_url": ".*\/nzbget-[^"/]*-bin-linux.run"$/{print $4}')" nzbget.run
 			G_EXEC mkdir -p /mnt/dietpi_userdata/nzbget
 			G_EXEC_OUTPUT=1 G_EXEC dash nzbget.run --destdir /mnt/dietpi_userdata/nzbget
@@ -10038,7 +10033,6 @@ _EOF_
 				G_CONFIG_INJECT 'UMask=' 'UMask=0002' /mnt/dietpi_userdata/nzbget/nzbget.conf
 
 				# Optimisations
-				G_CONFIG_INJECT 'Server1.Cipher=' 'Server1.Cipher=RC4-MD5' /mnt/dietpi_userdata/nzbget/nzbget.conf # RC4-MD5 is fastest: https://nzbget.com/documentation/choosing-cipher/
 				G_CONFIG_INJECT 'CrcCheck=' 'CrcCheck=no' /mnt/dietpi_userdata/nzbget/nzbget.conf
 				G_CONFIG_INJECT 'ParScan=' 'ParScan=limited' /mnt/dietpi_userdata/nzbget/nzbget.conf
 				G_CONFIG_INJECT 'ParThreads=' "ParThreads=$G_HW_CPU_CORES" /mnt/dietpi_userdata/nzbget/nzbget.conf
@@ -10316,9 +10310,8 @@ _EOF_
 			G_EXEC chown root:lp /etc/cups/ /etc/cups/ppd/ /etc/cups/ssl/
 		fi
 
-		if To_Install 154 roonserver # Roon Server
+		if To_Install 154 roonserver # Roon Server: https://help.roonlabs.com/portal/en/kb/articles/linux-install#Manual_Install
 		then
-			# https://help.roonlabs.com/portal/en/kb/articles/linux-install#Manual_Install
 			# .NET dependency: https://github.com/dotnet/docs/blob/main/docs/core/install/linux-debian.md#dependencies
 			case $G_DISTRO in
 				6) aDEPS=('libicu67');;
@@ -10326,19 +10319,23 @@ _EOF_
 				*) aDEPS=('libicu76');;
 			esac
 
-			# Reinstall: Skip download and install, advice to use internal updater
-			if [[ -d '/opt/roonserver' ]]
+			G_WHIP_BUTTON_OK_TEXT='Early Access' G_WHIP_BUTTON_CANCEL_TEXT='Stable'
+			G_WHIP_DEFAULT_ITEM=$(grep -cm1 '^[[:blank:]]*SOFTWARE_ROONSERVER_EARLYACCESS=1' /boot/dietpi.txt)
+			if G_WHIP_YESNO 'Do you want to install regular stable Roon Server builds, or early access builds?
+\nOfficial info about the Roon Early Access Program can be found here:
+ - https://help.roonlabs.com/portal/en/kb/articles/roon-early-access-program
+\nNB: Early access builds have a higher chance to contain bugs, and you may need to restore a database backup when reverting from early access to stable builds.'
 			then
-				G_DIETPI-NOTIFY 2 "${aSOFTWARE_NAME[$software_id]} install dir \"/opt/roonserver\" already exists. Download and install steps will be skipped.
- - If you want to update ${aSOFTWARE_NAME[$software_id]}, please use the internal updater.
- - If you need to reinstall (e.g. broken instance), please manually remove the install dir and rerun \"dietpi-software (re)install $software_id\"."
-
-				G_AGI "${aDEPS[@]}"
-				aDEPS=()
+				Download_Install 'https://download.roonlabs.net/builds/earlyaccess/RoonServer_linuxx64.tar.bz2'
+				G_CONFIG_INJECT 'SOFTWARE_ROONSERVER_EARLYACCESS=' 'SOFTWARE_ROONSERVER_EARLYACCESS=1' /boot/dietpi.txt
 			else
 				Download_Install 'https://download.roonlabs.net/builds/RoonServer_linuxx64.tar.bz2'
-				G_EXEC mv RoonServer /opt/roonserver
+				G_CONFIG_INJECT 'SOFTWARE_ROONSERVER_EARLYACCESS=' 'SOFTWARE_ROONSERVER_EARLYACCESS=0' /boot/dietpi.txt
 			fi
+
+			# Reinstall: Replace old instance
+			[[ -d '/opt/roonserver' ]] && G_EXEC rm -R /opt/roonserver
+			G_EXEC mv RoonServer /opt/roonserver
 
 			# Log to /var/log/roonserver
 			G_EXEC mkdir -p /mnt/dietpi_userdata/roonserver/{RoonServer,RAATServer}
@@ -10699,7 +10696,7 @@ _EOF_
 				*) local arch='arm-6';;
 			esac
 
-			local fallback_url="https://github.com/go-gitea/gitea/releases/download/v1.24.5/gitea-1.24.5-linux-$arch.xz"
+			local fallback_url="https://github.com/go-gitea/gitea/releases/download/v1.24.6/gitea-1.24.6-linux-$arch.xz"
 			Download_Install "$(curl -sSfL 'https://api.github.com/repos/go-gitea/gitea/releases/latest' | mawk -F\" "/^ *\"browser_download_url\": \".*\/gitea-[^\"\/]*-linux-$arch\.xz\"$/{print \$4}")" /mnt/dietpi_userdata/gitea/gitea
 
 			# User
@@ -10747,7 +10744,7 @@ _EOF_
 				*) local arch='arm-6';;
 			esac
 
-			local fallback_url="https://codeberg.org/forgejo/forgejo/releases/download/v12.0.1/forgejo-12.0.1-linux-$arch.xz"
+			local fallback_url="https://codeberg.org/forgejo/forgejo/releases/download/v12.0.3/forgejo-12.0.3-linux-$arch.xz"
 			Download_Install "$(curl -sSfL 'https://codeberg.org/api/v1/repos/forgejo/forgejo/releases/latest' | mawk -v RS=, -F\" "/^\"browser_download_url\":\".*-linux-$arch\.xz\"/{print \$4;exit}")" /mnt/dietpi_userdata/forgejo/forgejo
 
 			# User
@@ -10895,9 +10892,8 @@ _EOF_
 			#G_CONFIG_INJECT 'dtoverlay=gpio-poweroff' 'dtoverlay=gpio-poweroff,gpiopin=22,active_low' /boot/config.txt
 		fi
 
-		if To_Install 167 raspotify # Raspotify
+		if To_Install 167 raspotify # Raspotify: https://github.com/dtcooper/raspotify/blob/master/install.sh
 		then
-			# https://dtcooper.github.io/raspotify/#hard-installation
 			# ARMv6: 0.31.8.1 is the last version supporting ARMv6: https://github.com/dtcooper/raspotify/wiki/Raspotify-on-Pi-v1's-and-Pi-Zero-v1.x, https://github.com/dtcooper/raspotify/commit/345f15c
 			if (( $G_HW_ARCH == 1 ))
 			then
@@ -10913,12 +10909,6 @@ _EOF_
 				# APT package
 				G_AGI raspotify
 			fi
-
-			# Apply systemd unit fixes to prevent an endless failure loop on shutdown: https://github.com/dtcooper/raspotify/pull/735
-			G_EXEC mkdir -p /etc//systemd/system/raspotify-crash-report-generator.service.d
-			G_EXEC eval 'echo -e '\''[Unit]\nConditionPathExists=!/run/systemd/shutdown/scheduled'\'' > /etc//systemd/system/raspotify-crash-report-generator.service.d/dietpi.conf'
-			G_EXEC mkdir -p /etc//systemd/system/raspotify.service.d
-			G_EXEC eval 'echo -e '\''[Unit]\nAfter=avahi-daemon.service dbus.service dbus-broker.service'\'' > /etc//systemd/system/raspotify.service.d/dietpi.conf'
 
 			# Stop service
 			G_EXEC systemctl stop raspotify
@@ -11318,7 +11308,7 @@ _EOF_'
 			G_EXEC chown "$ha_user:$ha_user" "$ha_home"
 
 			# Dependencies
-			PYTHON_VERSION=$ha_python_version Python_Deps -u "$ha_user" av bcrypt cryptography numpy pyenv pillow
+			PYTHON_VERSION=$ha_python_version Python_Deps -u "$ha_user" av bcrypt cryptography numpy pillow pyenv pymicro-vad
 			# - Custom dependencies, e.g. MariaDB support: G_AGI libmariadb-dev; pip3 install mysqlclient|PyMySQL
 			local custom_apt_deps=$(sed -n '/^[[:blank:]]*SOFTWARE_HOMEASSISTANT_APT_DEPS=/{s/^[^=]*=//p;q}' /boot/dietpi.txt)
 			mapfile -t -d' ' -O "${#aDEPS[@]}" aDEPS < <(echo -n "$custom_apt_deps")
@@ -11666,7 +11656,7 @@ _EOF_
 				*) local arch='amd64';;
 			esac
 
-			local fallback_url="https://github.com/filebrowser/filebrowser/releases/download/v2.42.5/linux-$arch-filebrowser.tar.gz"
+			local fallback_url="https://github.com/filebrowser/filebrowser/releases/download/v2.43.0/linux-$arch-filebrowser.tar.gz"
 			Download_Install "$(curl -sSfL 'https://api.github.com/repos/filebrowser/filebrowser/releases/latest' | mawk -F\" "/^ *\"browser_download_url\": \".*\/linux-$arch-filebrowser\.tar\.gz\"$/{print \$4}")" ./filebrowser/
 
 			# Reinstall
@@ -11774,7 +11764,7 @@ _EOF_
 
 			# Deploy the Portainer container
 			G_DIETPI-NOTIFY 2 'Portainer will be deployed now. This could take a while...'
-			G_EXEC_OUTPUT=1 G_EXEC docker run -d -p '9002:9000' -p '9442:9443' --name=portainer --restart=always -v '/run/docker.sock:/run/docker.sock' -v '/etc/ssl/certs/ca-certificates.crt:/etc/ssl/certs/ca-certificates.crt:ro' -v 'portainer_data:/data' 'portainer/portainer-ce'
+			G_EXEC_OUTPUT=1 G_EXEC docker run -d -p '9002:9000' -p '9442:9443' --name=portainer --restart=always -v '/run/docker.sock:/var/run/docker.sock' -v '/etc/ssl/certs/ca-certificates.crt:/etc/ssl/certs/ca-certificates.crt:ro' -v 'portainer_data:/data' 'portainer/portainer-ce'
 		fi
 
 		if To_Install 141 adsb-setup adsb-docker # ADS-B Feeder

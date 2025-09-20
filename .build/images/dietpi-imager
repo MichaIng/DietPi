@@ -397,14 +397,17 @@
 		# - resize2fs: "Please run 'e2fsck -f /dev/loop0p1' first."
 		Run_fsck
 		# - Use sfdisk to detect last partition, as lsblk with "-r" option on Bullseye does not sort partitions well: https://github.com/MichaIng/DietPi/issues/7527
-		local last_part_dev=$(sfdisk -qlo Device "$FP_SOURCE" | tail -1)
+		local last_part_dev=$(sfdisk -lqo Device "$FP_SOURCE" | tail -1)
 		local last_fs_type=$(lsblk -no FSTYPE "$last_part_dev")
-		if [[ $last_fs_type == 'ext4' ]]
+		if [[ $last_fs_type == 'ext'[234] ]]
 		then
-			# Disable (and later re-enable) journal to clear it and allow further size reduction
-			G_EXEC tune2fs -O '^has_journal' "$last_part_dev"
-			G_EXEC sync
-			G_SLEEP 1
+			if [[ $last_fs_type == 'ext'[34] ]]
+			then
+				# Disable journal to allow further image size reduction and allow dietpi-fs_partition_resize to re-create it with proper size based final filesystem size
+				G_EXEC tune2fs -O '^has_journal' "$last_part_dev"
+				G_EXEC sync
+				G_SLEEP 1
+			fi
 
 			# Run multiple times until no change is done any more
 			G_DIETPI-NOTIFY 2 'Shrinking last filesystem to minimum size...'
@@ -487,32 +490,8 @@
 			[[ $type ]] || continue
 			if [[ $type == 'ext'[234] ]]
 			then
-				# Disable (and later re-enable) journal on ext3 and ext4 to clear it if not last partition (where it was done already)
-				if [[ $type != 'ext2' && $path != "$last_part_dev" ]]
-				then
-					G_EXEC tune2fs -O '^has_journal' "$path"
-					G_EXEC sync
-					G_SLEEP 1
-				fi
 				[[ ( -t 0 || -t 1 ) && $TERM != 'dumb' ]] && G_EXEC_OUTPUT=1
 				G_EXEC zerofree -v "$path"
-				local redo=0 out
-				until out=$(tune2fs -O 'has_journal' "$path" 2>&1)
-				do
-					[[ $out =~ 'tune2fs: Could not allocate block' ]] || Error_Exit "$out"
-					G_DIETPI-NOTIFY 2 'Raising filesystem size by 4 MiB until the journal fits'
-					((FS_SIZE+=8192))
-					G_EXEC resize2fs "$last_part_dev" "${FS_SIZE}s"
-					redo=1
-				done
-				G_DIETPI-NOTIFY 0 "tune2fs -O has_journal $path"
-				G_EXEC sync
-				G_SLEEP 1
-				if (( $redo ))
-				then
-					[[ ( -t 0 || -t 1 ) && $TERM != 'dumb' ]] && G_EXEC_OUTPUT=1
-					G_EXEC zerofree -v "$path"
-				fi
 			else
 				G_EXEC mount "$path" "$FP_MNT_TMP"
 				G_EXEC_NOHALT=1 G_EXEC_OUTPUT=1 G_EXEC fstrim -v --quiet-unsupported "$FP_MNT_TMP"
@@ -556,7 +535,7 @@
 			local root_mountpoint=$(mktemp -d)
 			G_EXEC mount "${FP_ROOT_DEV::-1}1" "$fat_mountpoint"
 			G_EXEC mount "$FP_ROOT_DEV" "$root_mountpoint"
-			G_DIETPI-NOTIFY 2 'Copying dietpi.txt and other config files to the DIETPISETUP partition'
+			G_DIETPI-NOTIFY 2 'Copying dietpi.txt and other config files to the boot partition'
 			for f in 'dietpi.txt' 'dietpi-wifi.txt' 'Automation_Custom_PreScript.sh' 'Automation_Custom_Script.sh' 'unattended_pivpn.conf'
 			do
 				[[ -f $root_mountpoint/boot/$f ]] || continue

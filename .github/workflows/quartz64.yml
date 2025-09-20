@@ -6,12 +6,9 @@ concurrency:
 permissions: {}
 jobs:
   build:
-    runs-on: ubuntu-24.04
-    env:
-      CROSS_COMPILE: 'aarch64-linux-gnu-'
-      ARCH: 'arm64'
+    runs-on: ubuntu-24.04-arm
     steps:
-    - uses: actions/setup-python@v5
+    - uses: actions/setup-python@v6
       with:
         python-version: '3.x'
         check-latest: true
@@ -20,7 +17,7 @@ jobs:
         # Workaround for runner provider restart: https://github.com/actions/runner-images/pull/9956
         sudo apt-get -qq autopurge needrestart
         { python3 -m pip install --no-cache-dir -U pip setuptools wheel; python3 -m pip install --no-cache-dir -U pyelftools; } &
-        { sudo apt-get -q update; sudo DEBIAN_FRONTEND=noninteractive apt-get --no-install-recommends -qq install make gcc libc6-dev flex bison gcc-aarch64-linux-gnu bc libssl-dev swig libgnutls28-dev; } &
+        { sudo apt-get -q update; sudo DEBIAN_FRONTEND=noninteractive apt-get --no-install-recommends -qq install make gcc libc6-dev flex bison bc libssl-dev swig libgnutls28-dev; } &
         { curl -fO 'https://git.kernel.org/pub/scm/linux/kernel/git/stable/linux.git/snapshot/linux-rolling-stable.tar.gz'; tar xf linux-rolling-stable.tar.gz; rm linux-rolling-stable.tar.gz; } &
         uboot_version=$(curl -sSf 'https://api.github.com/repos/u-boot/u-boot/tags' | mawk -F\" '/^ *"name": "v[0-9.]*",$/{print $4;exit}')
         [ "$uboot_version" ] || { echo 'ERROR: Failed to obtain latest U-Boot version'; exit 1; }
@@ -43,16 +40,22 @@ jobs:
         export ROCKCHIP_TPL='ddr.bin'
         export BL31='bl31.elf'
         cd "u-boot-$uboot_version"
-        # Patch kernel_comp_addr_r being too narrow for our kernel image
-        sed --follow-symlinks -i 's/kernel_comp_addr_r=0x08000000/kernel_comp_addr_r=0x10000000/' include/configs/rk3568_common.h
+        # Disable UEFI boot manager, which causes issues in some circumstances: https://github.com/MichaIng/DietPi/issues/7709
+        echo 'CONFIG_BOOTMETH_EFI_BOOTMGR=n' >> configs/quartz64-a-rk3566_defconfig
+        # Add Btrfs support to U-Boot incl. btrsubvol command
+        echo 'CONFIG_CMD_BTRFS=y' >> configs/quartz64-a-rk3566_defconfig
         make quartz64-a-rk3566_defconfig
         make -j$(nproc)
         mv u-boot-rockchip.bin ../firmware-quartz64a/boot/u-boot.bin
+        echo 'CONFIG_BOOTMETH_EFI_BOOTMGR=n' >> configs/quartz64-b-rk3566_defconfig
+        echo 'CONFIG_CMD_BTRFS=y' >> configs/quartz64-b-rk3566_defconfig
         make quartz64-b-rk3566_defconfig
         make -j$(nproc)
         mv u-boot-rockchip.bin ../firmware-quartz64b/boot/u-boot.bin
         # Use CM4 config but add poweroff command. Currently, the 3 available (base board) configs differ in default (kernel) device tree only, and the model A base board config additionally has CONFIG_CMD_POWEROFF=y, since it has a power button, so poweroff can be used without the need for a power cycle.
         echo 'CONFIG_CMD_POWEROFF=y' >> configs/soquartz-cm4-rk3566_defconfig
+        echo 'CONFIG_BOOTMETH_EFI_BOOTMGR=n' >> configs/soquartz-cm4-rk3566_defconfig
+        echo 'CONFIG_CMD_BTRFS=y' >> configs/soquartz-cm4-rk3566_defconfig
         make soquartz-cm4-rk3566_defconfig
         make -j$(nproc)
         mv u-boot-rockchip.bin ../firmware-soquartz/boot/u-boot.bin
@@ -108,7 +111,7 @@ jobs:
         cat << '_EOF_' > firmware-quartz64a/DEBIAN/postinst
         #!/bin/dash
         echo 'Flashing U-Boot'
-        BOOT_DRIVE=$(lsblk -npo PKNAME "$(findmnt -Ufnro SOURCE -T /boot)")
+        BOOT_DRIVE=$(lsblk -npo PKNAME "$(findmnt -Ufvnro SOURCE -T /boot)")
         if [ $BOOT_DRIVE ]
         then
         	echo "Flashing to detected boot drive: $BOOT_DRIVE"
@@ -153,7 +156,6 @@ jobs:
         Architecture: arm64
         Maintainer: MichaIng <micha@dietpi.com>
         Date: $(date -u '+%a, %d %b %Y %T %z')
-        Standards-Version: 4.6.2.0
         Installed-Size: $(du -sk 'firmware-quartz64a' | mawk '{print $1}')
         Section: kernel
         Priority: optional
