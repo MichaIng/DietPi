@@ -2347,8 +2347,7 @@ Patch_9_17()
 	if (( $G_HW_MODEL == 59 )) && [[ -f '/boot/dietpiEnv.txt' ]]
 	then
 		G_DIETPI-NOTIFY 2 'Removing device tree overlays for unwired USB controllers on ZeroPi'
-		G_EXEC sed --follow-symlinks -i '/^[[:blank:]]*overlays=/s/usbhost1[[:blank:]]*//' /boot/dietpiEnv.txt
-		G_EXEC sed --follow-symlinks -i '/^[[:blank:]]*overlays=/s/usbhost2[[:blank:]]*//' /boot/dietpiEnv.txt
+		G_EXEC sed --follow-symlinks -i '/^[[:blank:]]*overlays=/s/usbhost[12][[:blank:]]*//g' /boot/dietpiEnv.txt
 	fi
 
 	if [[ -f '/etc/apt/trusted.gpg.d/raspbian-archive-keyring.gpg.dpkg-new' ]]
@@ -2450,7 +2449,7 @@ Patch_9_17()
 	# RK3588 migration to vendor kernel
 	elif (( $G_HW_CPUID == 11 || $G_HW_MODEL == 90 )) && dpkg-query -s 'linux-image-legacy-rk35xx' &> /dev/null && ! dpkg-query -s 'linux-image-vendor-rk35xx' &> /dev/null && ! dpkg-query -s 'linux-image-current-rockchip64' &> /dev/null && ! dpkg-query -s 'linux-image-edge-rockchip64' &> /dev/null
 	then
-		G_DIETPI-NOTIFY 2 'Migrating from Linux 5.10 legacy kernel to Linux 6.1 vendor kernel'
+		G_DIETPI-NOTIFY 2 'Migrating from legacy Linux 5.10 kernel to Linux 6.1 vendor kernel'
 		G_AGI linux-{image,dtb}-vendor-rk35xx
 		dpkg-query -s 'linux-headers-legacy-rk35xx' &> /dev/null && G_AGI linux-headers-vendor-rk35xx
 		dpkg-query -s 'linux-libc-dev-legacy-rk35xx' &> /dev/null && G_AGI linux-libc-dev-vendor-rk35xx
@@ -2490,80 +2489,73 @@ Patch_9_17()
 		case $model in
 			*R5S*) HW_VARIANT=1 /boot/dietpi/func/dietpi-set_software apt-mirror dietpi; model='nanopi-r5s';;
 			*R5C*) HW_VARIANT=2 /boot/dietpi/func/dietpi-set_software apt-mirror dietpi; model='nanopi-r5c';;
-			*) G_DIETPI-NOTIFY 1 'Unknown SBC model detected'; exit 1;;
+			*) G_DIETPI-NOTIFY 1 "Unknown SBC model \"$model\" detected. Aborting, please report at: https://github.com/MichaIng/DietPi/issues"; exit 1;;
 		esac
 		G_AGUP
-		if G_WHIP_DEFAULT_ITEM='yes' G_WHIP_YESNO '[ INFO ] Major kernel and bootloader upgrade available
-\nFor the NanoPi R5S/R5C, we offer a major kernel upgrade to Linux 6.12, based on mainline kernel sources which should provide not only new kernel features, but higher quality as well, compared to the old Rockchip Linux 5.10 legacy kernel.
-\nAdditionally, compared to the previously hidden kernel image and boot config on the first 7 partitions, the new image and configs will stored and available within the /boot partition, so that kernel command-line parameters can be adjusted. Also kernel headers are available to compile new kernel modules.
-\nThis implies flashing a new bootloader image, which reads boot scripts from the root partition.
-\nHowever, while we are not aware of any left issues, it is still good to have a backup in place, and we do not enforce the upgrade. You can do it any time later.
-\nDo you want to migrate to the new Linux 6.12 kernel now?'
+		G_DIETPI-NOTIFY 2 'Migrating from legacy Linux 5.10 kernel to Linux 6.12 mainline kernel'
+		# Safety checks
+		if [[ $G_ROOTFS_DEV != *'8' ]]
 		then
-			# Safety checks
-			if [[ $G_ROOTFS_DEV != *'8' ]]
-			then
-				G_DIETPI-NOTIFY 1 "Root filesystem is not located on partition 8 as expected, but \"$G_ROOTFS_DEV\" instead. Aborting, please report at: https://github.com/MichaIng/DietPi/issues"
-				exit 1
+			G_DIETPI-NOTIFY 1 "Root filesystem is not located on partition 8 as expected, but \"$G_ROOTFS_DEV\" instead. Aborting, please report at: https://github.com/MichaIng/DietPi/issues"
+			exit 1
 
-			elif [[ $(partx -rgo START "$G_ROOTFS_DEV") != 286720 ]]
-			then
-				G_DIETPI-NOTIFY 1 "Root partition does not start at sector 286720 as expected, but \"$(lsblk -no START "$G_ROOTFS_DEV")\" instead. Aborting, please report at: https://github.com/MichaIng/DietPi/issues"
-				exit 1
-			fi
-			# Install boot scripts and configs
-			local dir="../DietPi-Update/DietPi-${G_GITBRANCH//\//-}" # GitHub translates forward slashes into dashes
-			G_EXEC mv "$dir/.build/images/U-Boot/boot.cmd" /boot/boot.cmd
-			G_EXEC mv "$dir/.build/images/U-Boot/dietpiEnv.txt" /boot/dietpiEnv.txt
-			G_CONFIG_INJECT 'rootdev=' "rootdev=UUID=$(findmnt -Ufnro UUID -M /)" /boot/dietpiEnv.txt
-			G_CONFIG_INJECT 'rootfstype=' "rootfstype=$(findmnt -Ufnro FSTYPE -M /)" /boot/dietpiEnv.txt
-			G_EXEC mkdir -p /etc/kernel/post{inst,rm}.d /etc/initramfs/post-update.d
-			G_EXEC mv "$dir/.build/images/U-Boot/dietpi-initramfs_cleanup" /etc/kernel/postinst.d/dietpi-initramfs_cleanup
-			G_EXEC ln -sf /etc/kernel/post{inst,rm}.d/dietpi-initramfs_cleanup
-			G_EXEC mv "$dir/.build/images/U-Boot/99-dietpi-uboot" /etc/initramfs/post-update.d/99-dietpi-uboot
-			G_EXEC sed --follow-symlinks -Ei '/^setenv (kernel|fdt)_addr_r/d' /boot/boot.cmd
-			G_CONFIG_INJECT 'setenv scriptaddr ' 'setenv scriptaddr "0x9000000"' /boot/boot.cmd
-			G_CONFIG_INJECT 'overlay_path=' 'overlay_path=rockchip' /boot/dietpiEnv.txt
-			# Overlay prefix
-			G_CONFIG_INJECT 'overlay_prefix=' 'overlay_prefix=rockchip' /boot/dietpiEnv.txt
-			# Console args
-			G_EXEC sed --follow-symlinks -i 's/ttyAML0,115200/ttyS2,1500000/' /boot/dietpiEnv.txt
-			# Packages
-			G_EXEC eval 'echo '\''do_symlinks=0'\'' > /etc/kernel-img.conf'
-			G_AGI armbian-firmware initramfs-tools u-boot-tools zstd
-			G_AGI linux-{image,dtb}-current-rockchip64 "linux-u-boot-$model-current"
-			# Build boot script
-			G_EXEC_OUTPUT=1 G_EXEC mkimage -C none -A arm64 -T script -d /boot/boot.cmd /boot/boot.scr
-			# Flash bootloader
-			/boot/dietpi/func/dietpi-set_hardware flash-u-boot-mmc
-			G_EXEC apt-mark auto firmware-nanopi5
-			# Redo partitioning
-			G_DIETPI-NOTIFY 2 'Rewriting partition table to have root filesystem in partition 1'
-			local rootdrive=$(lsblk -npo PKNAME "$G_ROOTFS_DEV")
-			G_EXEC_OUTPUT=1 G_EXEC sfdisk --no-reread --delete "$rootdrive" 1 2 3 4 5 6 7 8
-			G_EXEC_OUTPUT=1 G_EXEC sfdisk --no-reread -N1 "$rootdrive" <<< '286720'
-			G_EXEC_OUTPUT=1 G_EXEC sfdisk --no-reread -N1 "$rootdrive" <<< ',+' # Needed, since above command and '286720,+' somehow create the partition 2015 sectors smaller, resulting in too large filesystem size. Only a subsequent ',+' expands it to the true end of the drive.
-			# LAN interface migration
-			for i in /etc/network/interfaces{,.d/*} /etc/default/isc-dhcp-server /etc/iptables.ipv[46].nat /etc/wireguard/wg0.conf
-			do
-				[[ -f $i ]] || continue
-				G_EXEC sed --follow-symlinks -i -e 's/eth0/ethto1/g' -e 's/eth1/ethto0/g' "$i"
-				G_EXEC sed --follow-symlinks -i -e 's/ethto1/eth1/g' -e 's/ethto0/eth0/g' "$i"
-			done
-			# Adjust Ethernet port LEDs
-			if [[ $model == 'nanopi-r5s' ]]
-			then
-				G_DIETPI-NOTIFY 2 'Move from netdev to native Ethernet driver LED triggers'
-				G_EXEC rm -f /etc/udev/rules.d/dietpi-eth-leds.rules /etc/modules-load.d/dietpi-eth-leds.conf
-			else
-				G_DIETPI-NOTIFY 2 'Updating udev rule for NanoPi R5C Ethernet LEDs'
-				G_EXEC eval 'echo '\''ledtrig-netdev'\'' > /etc/modules-load.d/dietpi-eth-leds.conf'
-				cat << '_EOF_' > /etc/udev/rules.d/dietpi-eth-leds.rules
+		elif [[ $(partx -rgo START "$G_ROOTFS_DEV") != 286720 ]]
+		then
+			G_DIETPI-NOTIFY 1 "Root partition does not start at sector 286720 as expected, but \"$(partx -rgo START "$G_ROOTFS_DEV")\" instead. Aborting, please report at: https://github.com/MichaIng/DietPi/issues"
+			exit 1
+		fi
+		# Install boot scripts and configs
+		local dir="../DietPi-Update/DietPi-${G_GITBRANCH//\//-}" # GitHub translates forward slashes into dashes
+		G_EXEC mv "$dir/.build/images/U-Boot/boot.cmd" /boot/boot.cmd
+		G_EXEC mv "$dir/.build/images/U-Boot/dietpiEnv.txt" /boot/dietpiEnv.txt
+		G_CONFIG_INJECT 'rootdev=' "rootdev=UUID=$(findmnt -Ufnro UUID -M /)" /boot/dietpiEnv.txt
+		G_CONFIG_INJECT 'rootfstype=' "rootfstype=$(findmnt -Ufnro FSTYPE -M /)" /boot/dietpiEnv.txt
+		G_EXEC mkdir -p /etc/kernel/post{inst,rm}.d /etc/initramfs/post-update.d
+		G_EXEC mv "$dir/.build/images/U-Boot/dietpi-initramfs_cleanup" /etc/kernel/postinst.d/dietpi-initramfs_cleanup
+		G_EXEC ln -sf /etc/kernel/post{inst,rm}.d/dietpi-initramfs_cleanup
+		G_EXEC mv "$dir/.build/images/U-Boot/99-dietpi-uboot" /etc/initramfs/post-update.d/99-dietpi-uboot
+		G_EXEC sed --follow-symlinks -Ei '/^setenv (kernel|fdt)_addr_r/d' /boot/boot.cmd
+		G_CONFIG_INJECT 'setenv scriptaddr ' 'setenv scriptaddr "0x9000000"' /boot/boot.cmd
+		G_CONFIG_INJECT 'overlay_path=' 'overlay_path=rockchip' /boot/dietpiEnv.txt
+		# Overlay prefix
+		G_CONFIG_INJECT 'overlay_prefix=' 'overlay_prefix=rockchip' /boot/dietpiEnv.txt
+		# Console args
+		G_EXEC sed --follow-symlinks -i 's/ttyAML0,115200/ttyS2,1500000/' /boot/dietpiEnv.txt
+		# Packages
+		G_EXEC eval 'echo '\''do_symlinks=0'\'' > /etc/kernel-img.conf'
+		G_AGI armbian-firmware initramfs-tools u-boot-tools zstd
+		G_AGI linux-{image,dtb}-current-rockchip64 "linux-u-boot-$model-current"
+		# Build boot script
+		G_EXEC_OUTPUT=1 G_EXEC mkimage -C none -A arm64 -T script -d /boot/boot.cmd /boot/boot.scr
+		# Flash bootloader
+		/boot/dietpi/func/dietpi-set_hardware flash-u-boot-mmc
+		G_EXEC apt-mark auto firmware-nanopi5
+		# Redo partitioning
+		G_DIETPI-NOTIFY 2 'Rewriting partition table to have root filesystem in partition 1'
+		local rootdrive=$(lsblk -npo PKNAME "$G_ROOTFS_DEV")
+		G_EXEC_OUTPUT=1 G_EXEC sfdisk --no-reread --delete "$rootdrive" 1 2 3 4 5 6 7 8
+		G_EXEC_OUTPUT=1 G_EXEC sfdisk --no-reread -N1 "$rootdrive" <<< '286720'
+		G_EXEC_OUTPUT=1 G_EXEC sfdisk --no-reread -N1 "$rootdrive" <<< ',+' # Needed, since above command and '286720,+' somehow create the partition 2015 sectors smaller, resulting in too large filesystem size. Only a subsequent ',+' expands it to the true end of the drive.
+		# LAN interface migration
+		for i in /etc/network/interfaces{,.d/*} /etc/default/isc-dhcp-server /etc/iptables.ipv[46].nat /etc/wireguard/wg0.conf
+		do
+			[[ -f $i ]] || continue
+			G_EXEC sed --follow-symlinks -i -e 's/eth0/ethto1/g' -e 's/eth1/ethto0/g' "$i"
+			G_EXEC sed --follow-symlinks -i -e 's/ethto1/eth1/g' -e 's/ethto0/eth0/g' "$i"
+		done
+		# Adjust Ethernet port LEDs
+		if [[ $model == 'nanopi-r5s' ]]
+		then
+			G_DIETPI-NOTIFY 2 'Move from netdev to native Ethernet driver LED triggers'
+			G_EXEC rm -f /etc/udev/rules.d/dietpi-eth-leds.rules /etc/modules-load.d/dietpi-eth-leds.conf
+		else
+			G_DIETPI-NOTIFY 2 'Updating udev rule for NanoPi R5C Ethernet LEDs'
+			G_EXEC eval 'echo '\''ledtrig-netdev'\'' > /etc/modules-load.d/dietpi-eth-leds.conf'
+			cat << '_EOF_' > /etc/udev/rules.d/dietpi-eth-leds.rules
 SUBSYSTEM=="leds", KERNEL=="green:lan", ACTION=="add", ATTR{trigger}="netdev", ATTR{device_name}="eth0", ATTR{link}="1", ATTR{rx}="1", ATTR{tx}="1", RUN+="/bin/ip l s eth0 up", RUN+="/bin/ip l s eth0 down"
 SUBSYSTEM=="leds", KERNEL=="green:wan", ACTION=="add", ATTR{trigger}="netdev", ATTR{device_name}="eth1", ATTR{link}="1", ATTR{rx}="1", ATTR{tx}="1", RUN+="/bin/ip l s eth1 up", RUN+="/bin/ip l s eth1 down"
 SUBSYSTEM=="leds", KERNEL=="green:wlan", ACTION=="add", ATTR{trigger}="netdev", ATTR{device_name}="wlan0", ATTR{link}="1", ATTR{rx}="1", ATTR{tx}="1", RUN+="/bin/ip l s wlan0 up", RUN+="/bin/ip l s wlan0 down"
 _EOF_
-			fi
 		fi
 
 	# NanoPi 6 series migration from legacy image with 8 partitions to Armbian-based kernel and bootloader
@@ -2575,96 +2567,89 @@ _EOF_
 			*R6S*) HW_VARIANT=1 /boot/dietpi/func/dietpi-set_software apt-mirror dietpi; model='nanopi-r6s';;
 			*R6C*) HW_VARIANT=2 /boot/dietpi/func/dietpi-set_software apt-mirror dietpi; model='nanopi-r6c';;
 			*T6*) HW_VARIANT=3 /boot/dietpi/func/dietpi-set_software apt-mirror dietpi; model='nanopct6';;
-			*) G_DIETPI-NOTIFY 1 'No known SBC model detected'; exit 1;;
+			*) G_DIETPI-NOTIFY 1 "Unknown SBC model \"$model\" detected. Aborting, please report at: https://github.com/MichaIng/DietPi/issues"; exit 1;;
 		esac
 		G_AGUP
-		if G_WHIP_DEFAULT_ITEM='yes' G_WHIP_YESNO '[ INFO ] Major kernel and bootloader upgrade available
-\nFor the NanoPi 6 series, we offer a major kernel upgrade to Linux 6.1, based on new Rockchip kernel sources which should provide not only new kernel features, but higher quality as well, compared to the old Rockchip Linux 5.10 legacy kernel.
-\nAdditionally, compared to the previously hidden kernel image and boot config on the first 7 partitions, the new image and configs will stored and available within the /boot partition, so that kernel command-line parameters can be adjusted. Also kernel headers are available to compile new kernel modules.
-\nThis implies flashing a new bootloader image, which reads boot scripts from the root partition.
-\nHowever, while we are not aware of any left issues, it is still good to have a backup in place, and we do not enforce the upgrade. You can do it any time later.
-\nDo you want to migrate to the new Linux 6.1 kernel now?'
+		G_DIETPI-NOTIFY 2 'Migrating from legacy Linux 5.10 kernel to Linux 6.1 vendor kernel'
+		# Safety checks
+		if [[ $G_ROOTFS_DEV != *'8' ]]
 		then
-			# Safety checks
-			if [[ $G_ROOTFS_DEV != *'8' ]]
-			then
-				G_DIETPI-NOTIFY 1 "Root filesystem is not located on partition 8 as expected, but \"$G_ROOTFS_DEV\" instead. Aborting, please report at: https://github.com/MichaIng/DietPi/issues"
-				exit 1
+			G_DIETPI-NOTIFY 1 "Root filesystem is not located on partition 8 as expected, but \"$G_ROOTFS_DEV\" instead. Aborting, please report at: https://github.com/MichaIng/DietPi/issues"
+			exit 1
 
-			elif [[ $(partx -rgo START "$G_ROOTFS_DEV") != 286720 ]]
-			then
-				G_DIETPI-NOTIFY 1 "Root partition does not start at sector 286720 as expected, but \"$(lsblk -no START "$G_ROOTFS_DEV")\" instead. Aborting, please report at: https://github.com/MichaIng/DietPi/issues"
-				exit 1
-			fi
-			# Install boot scripts and configs
-			local dir="../DietPi-Update/DietPi-${G_GITBRANCH//\//-}" # GitHub translates forward slashes into dashes
-			G_EXEC mv "$dir/.build/images/U-Boot/boot.cmd" /boot/boot.cmd
-			G_EXEC mv "$dir/.build/images/U-Boot/dietpiEnv.txt" /boot/dietpiEnv.txt
-			G_CONFIG_INJECT 'rootdev=' "rootdev=UUID=$(findmnt -Ufnro UUID -M /)" /boot/dietpiEnv.txt
-			G_CONFIG_INJECT 'rootfstype=' "rootfstype=$(findmnt -Ufnro FSTYPE -M /)" /boot/dietpiEnv.txt
-			G_EXEC mkdir -p /etc/kernel/post{inst,rm}.d /etc/initramfs/post-update.d
-			G_EXEC mv "$dir/.build/images/U-Boot/dietpi-initramfs_cleanup" /etc/kernel/postinst.d/dietpi-initramfs_cleanup
-			G_EXEC ln -sf /etc/kernel/post{inst,rm}.d/dietpi-initramfs_cleanup
-			G_EXEC mv "$dir/.build/images/U-Boot/99-dietpi-uboot" /etc/initramfs/post-update.d/99-dietpi-uboot
-			G_EXEC sed --follow-symlinks -Ei '/^setenv (kernel|fdt)_addr_r/d' /boot/boot.cmd
-			G_CONFIG_INJECT 'setenv scriptaddr ' 'setenv scriptaddr "0x9000000"' /boot/boot.cmd
-			G_CONFIG_INJECT 'overlay_path=' 'overlay_path=rockchip' /boot/dietpiEnv.txt
-			# Device tree
-			case $model in
-				'nanopi-r6s') G_CONFIG_INJECT 'fdtfile=' 'fdtfile=rockchip/rk3588s-nanopi-r6s.dtb' /boot/dietpiEnv.txt;;
-				'nanopi-r6c') G_CONFIG_INJECT 'fdtfile=' 'fdtfile=rockchip/rk3588s-nanopi-r6c.dtb' /boot/dietpiEnv.txt;;
-				*) :;;
-			esac
-			# Overlay prefix
-			G_CONFIG_INJECT 'overlay_prefix=' 'overlay_prefix=rockchip-rk3588 rk3588' /boot/dietpiEnv.txt
-			# Console args
-			G_EXEC sed --follow-symlinks -i 's/ttyAML0,115200/ttyFIQ0,1500000/' /boot/dietpiEnv.txt
-			# Packages
-			G_EXEC eval 'echo '\''do_symlinks=0'\'' > /etc/kernel-img.conf'
-			G_AGI armbian-firmware initramfs-tools u-boot-tools zstd
-			G_AGI linux-{image,dtb}-vendor-rk35xx "linux-u-boot-$model-vendor"
-			# Build boot script
-			G_EXEC_OUTPUT=1 G_EXEC mkimage -C none -A arm64 -T script -d /boot/boot.cmd /boot/boot.scr
-			# Flash bootloader
-			/boot/dietpi/func/dietpi-set_hardware flash-u-boot-mmc
-			G_EXEC apt-mark auto firmware-nanopi6
-			# Redo partitioning
-			G_DIETPI-NOTIFY 2 'Rewriting partition table to have root filesystem in partition 1'
-			local rootdrive=$(lsblk -npo PKNAME "$G_ROOTFS_DEV")
-			G_EXEC_OUTPUT=1 G_EXEC sfdisk --no-reread --delete "$rootdrive" 1 2 3 4 5 6 7 8
-			G_EXEC_OUTPUT=1 G_EXEC sfdisk --no-reread -N1 "$rootdrive" <<< '286720'
-			G_EXEC_OUTPUT=1 G_EXEC sfdisk --no-reread -N1 "$rootdrive" <<< ',+' # Needed, since above command and '286720,+' somehow create the partition 2015 sectors smaller, resulting in too large filesystem size. Only a subsequent ',+' expands it to the true end of the drive.
-			# LAN interface migration
-			if [[ $model == 'nanopi-r6s' ]]
-			then
-				G_DIETPI-NOTIFY 2 'Migrating LAN interface configs'
-				for i in /etc/network/interfaces{,.d/*} /etc/default/isc-dhcp-server /etc/iptables.ipv[46].nat /etc/wireguard/wg0.conf
-				do
-					[[ -f $i ]] || continue
-					G_EXEC sed --follow-symlinks -i -e 's/eth1/ethto2/g' -e 's/eth2/ethto1/g' "$i"
-					G_EXEC sed --follow-symlinks -i -e 's/ethto2/eth2/g' -e 's/ethto1/eth1/g' "$i"
-				done
-			fi
-			# Adjust Ethernet port LEDs
-			if [[ $model == 'nanopi-r6s' ]]
-			then
-				G_DIETPI-NOTIFY 2 'Updating udev rule for NanoPi R6S Ethernet LEDs'
-				G_EXEC eval 'echo '\''ledtrig-netdev'\'' > /etc/modules-load.d/dietpi-eth-leds.conf'
-				cat << '_EOF_' > /etc/udev/rules.d/dietpi-eth-leds.rules
+		elif [[ $(partx -rgo START "$G_ROOTFS_DEV") != 286720 ]]
+		then
+			G_DIETPI-NOTIFY 1 "Root partition does not start at sector 286720 as expected, but \"$(partx -rgo START "$G_ROOTFS_DEV")\" instead. Aborting, please report at: https://github.com/MichaIng/DietPi/issues"
+			exit 1
+		fi
+		# Install boot scripts and configs
+		local dir="../DietPi-Update/DietPi-${G_GITBRANCH//\//-}" # GitHub translates forward slashes into dashes
+		G_EXEC mv "$dir/.build/images/U-Boot/boot.cmd" /boot/boot.cmd
+		G_EXEC mv "$dir/.build/images/U-Boot/dietpiEnv.txt" /boot/dietpiEnv.txt
+		G_CONFIG_INJECT 'rootdev=' "rootdev=UUID=$(findmnt -Ufnro UUID -M /)" /boot/dietpiEnv.txt
+		G_CONFIG_INJECT 'rootfstype=' "rootfstype=$(findmnt -Ufnro FSTYPE -M /)" /boot/dietpiEnv.txt
+		G_EXEC mkdir -p /etc/kernel/post{inst,rm}.d /etc/initramfs/post-update.d
+		G_EXEC mv "$dir/.build/images/U-Boot/dietpi-initramfs_cleanup" /etc/kernel/postinst.d/dietpi-initramfs_cleanup
+		G_EXEC ln -sf /etc/kernel/post{inst,rm}.d/dietpi-initramfs_cleanup
+		G_EXEC mv "$dir/.build/images/U-Boot/99-dietpi-uboot" /etc/initramfs/post-update.d/99-dietpi-uboot
+		G_EXEC sed --follow-symlinks -Ei '/^setenv (kernel|fdt)_addr_r/d' /boot/boot.cmd
+		G_CONFIG_INJECT 'setenv scriptaddr ' 'setenv scriptaddr "0x9000000"' /boot/boot.cmd
+		G_CONFIG_INJECT 'overlay_path=' 'overlay_path=rockchip' /boot/dietpiEnv.txt
+		# Device tree
+		case $model in
+			'nanopi-r6s') G_CONFIG_INJECT 'fdtfile=' 'fdtfile=rockchip/rk3588s-nanopi-r6s.dtb' /boot/dietpiEnv.txt;;
+			'nanopi-r6c') G_CONFIG_INJECT 'fdtfile=' 'fdtfile=rockchip/rk3588s-nanopi-r6c.dtb' /boot/dietpiEnv.txt;;
+			*) :;;
+		esac
+		# Overlay prefix
+		G_CONFIG_INJECT 'overlay_prefix=' 'overlay_prefix=rockchip-rk3588 rk3588' /boot/dietpiEnv.txt
+		# Console args
+		G_EXEC sed --follow-symlinks -i 's/ttyAML0,115200/ttyFIQ0,1500000/' /boot/dietpiEnv.txt
+		# Packages
+		G_EXEC eval 'echo '\''do_symlinks=0'\'' > /etc/kernel-img.conf'
+		G_AGI armbian-firmware initramfs-tools u-boot-tools zstd
+		G_AGI linux-{image,dtb}-vendor-rk35xx "linux-u-boot-$model-vendor"
+		# Build boot script
+		G_EXEC_OUTPUT=1 G_EXEC mkimage -C none -A arm64 -T script -d /boot/boot.cmd /boot/boot.scr
+		# Flash bootloader
+		/boot/dietpi/func/dietpi-set_hardware flash-u-boot-mmc
+		G_EXEC apt-mark auto firmware-nanopi6
+		# Redo partitioning
+		G_DIETPI-NOTIFY 2 'Rewriting partition table to have root filesystem in partition 1'
+		local rootdrive=$(lsblk -npo PKNAME "$G_ROOTFS_DEV")
+		G_EXEC_OUTPUT=1 G_EXEC sfdisk --no-reread --delete "$rootdrive" 1 2 3 4 5 6 7 8
+		G_EXEC_OUTPUT=1 G_EXEC sfdisk --no-reread -N1 "$rootdrive" <<< '286720'
+		G_EXEC_OUTPUT=1 G_EXEC sfdisk --no-reread -N1 "$rootdrive" <<< ',+' # Needed, since above command and '286720,+' somehow create the partition 2015 sectors smaller, resulting in too large filesystem size. Only a subsequent ',+' expands it to the true end of the drive.
+		# LAN interface migration
+		if [[ $model == 'nanopi-r6s' ]]
+		then
+			G_DIETPI-NOTIFY 2 'Migrating LAN interface configs'
+			for i in /etc/network/interfaces{,.d/*} /etc/default/isc-dhcp-server /etc/iptables.ipv[46].nat /etc/wireguard/wg0.conf
+			do
+				[[ -f $i ]] || continue
+				G_EXEC sed --follow-symlinks -i -e 's/eth1/ethto2/g' -e 's/eth2/ethto1/g' "$i"
+				G_EXEC sed --follow-symlinks -i -e 's/ethto2/eth2/g' -e 's/ethto1/eth1/g' "$i"
+			done
+		fi
+		# Adjust Ethernet port LEDs
+		if [[ $model == 'nanopi-r6s' ]]
+		then
+			G_DIETPI-NOTIFY 2 'Updating udev rule for NanoPi R6S Ethernet LEDs'
+			G_EXEC eval 'echo '\''ledtrig-netdev'\'' > /etc/modules-load.d/dietpi-eth-leds.conf'
+			cat << '_EOF_' > /etc/udev/rules.d/dietpi-eth-leds.rules
 SUBSYSTEM=="leds", KERNEL=="lan2_led", ACTION=="add", ATTR{trigger}="netdev", ATTR{device_name}="eth0", ATTR{link}="1", ATTR{rx}="1", ATTR{tx}="1", RUN+="/bin/ip l s eth0 up", RUN+="/bin/ip l s eth0 down"
 SUBSYSTEM=="leds", KERNEL=="wan_led", ACTION=="add", ATTR{trigger}="netdev", ATTR{device_name}="eth1", ATTR{link}="1", ATTR{rx}="1", ATTR{tx}="1", RUN+="/bin/ip l s eth1 up", RUN+="/bin/ip l s eth1 down"
 SUBSYSTEM=="leds", KERNEL=="lan1_led", ACTION=="add", ATTR{trigger}="netdev", ATTR{device_name}="eth2", ATTR{link}="1", ATTR{rx}="1", ATTR{tx}="1", RUN+="/bin/ip l s eth2 up", RUN+="/bin/ip l s eth2 down"
 _EOF_
-			elif [[ $model == 'nanopi-r6c' ]]
-			then
-				G_DIETPI-NOTIFY 2 'Updating udev rule for NanoPi R6C Ethernet LEDs'
-				G_EXEC eval 'echo '\''ledtrig-netdev'\'' > /etc/modules-load.d/dietpi-eth-leds.conf'
-				cat << '_EOF_' > /etc/udev/rules.d/dietpi-eth-leds.rules
+		elif [[ $model == 'nanopi-r6c' ]]
+		then
+			G_DIETPI-NOTIFY 2 'Updating udev rule for NanoPi R6C Ethernet LEDs'
+			G_EXEC eval 'echo '\''ledtrig-netdev'\'' > /etc/modules-load.d/dietpi-eth-leds.conf'
+			cat << '_EOF_' > /etc/udev/rules.d/dietpi-eth-leds.rules
 SUBSYSTEM=="leds", KERNEL=="wan_led", ACTION=="add", ATTR{trigger}="netdev", ATTR{device_name}="eth0", ATTR{link}="1", ATTR{rx}="1", ATTR{tx}="1", RUN+="/bin/ip l s eth0 up", RUN+="/bin/ip l s eth0 down"
 SUBSYSTEM=="leds", KERNEL=="lan1_led", ACTION=="add", ATTR{trigger}="netdev", ATTR{device_name}="eth1", ATTR{link}="1", ATTR{rx}="1", ATTR{tx}="1", RUN+="/bin/ip l s eth1 up", RUN+="/bin/ip l s eth1 down"
 SUBSYSTEM=="leds", KERNEL=="user_led", ACTION=="add", ATTR{trigger}="netdev", ATTR{device_name}="wlan0", ATTR{link}="1", ATTR{rx}="1", ATTR{tx}="1", RUN+="/bin/ip l s wlan0 up", RUN+="/bin/ip l s wlan0 down"
 _EOF_
-			fi
 		fi
 	fi
 }
