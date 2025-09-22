@@ -73,6 +73,10 @@
 	if [[ -f '/dietpi_skip_partition_resize' ]]
 	then
 		rm -v /dietpi_skip_partition_resize
+
+	elif [[ ! -e $ROOT_DRIVE ]]
+	then
+		echo '[ INFO ] Skipping partition expansion since detected root drive device node does not exist, assuming container system'
 	else
 		echo '[ INFO ] Checking if the last partition contains a filesystem with DIETPISETUP label'
 		# - Use sfdisk to detect last partition, as lsblk with "-r" option on Bullseye does not sort partitions well: https://github.com/MichaIng/DietPi/issues/7527
