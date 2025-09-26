@@ -51,7 +51,8 @@
 	# - eMMC:	/dev/mmcblk[0-9]p[1-9]
 	# - NVMe:	/dev/nvme[0-9]n[0-9]p[1-9]
 	# - loop:	/dev/loop[0-9]p[1-9]
-	if [[ $ROOT_DEV == /dev/[shv]d[a-z][1-9] ]]
+	# - Xen/XCP-ng: /dev/xvd[a-z][1-9]
+	if [[ $ROOT_DEV == /dev/[shvx]d[a-z][1-9] ]]
 	then
 		ROOT_PART=${ROOT_DEV: -1}	# /dev/sda1 => 1
 		ROOT_DRIVE=${ROOT_DEV::-1}	# /dev/sda1 => /dev/sda
