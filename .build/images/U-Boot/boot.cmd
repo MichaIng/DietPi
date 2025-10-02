@@ -17,7 +17,7 @@ setenv kernel_addr_r "0x34000000"
 setenv fdt_addr_r "0x4080000"
 
 # If this script was loaded from SD/eMMC, get PARTUUID of its first partition for later detection from userland
-if test "${devtype}" = "mmc"; then part uuid mmc "${devnum}:1" partuuid; fi
+if test "${devtype}" = "mmc"; then part uuid mmc "${devnum}:1" ubootpart; fi
 
 # Load environment file
 if load "${devtype}" "${devnum}" "${scriptaddr}" "${prefix}dietpiEnv.txt"; then
@@ -25,7 +25,7 @@ if load "${devtype}" "${devnum}" "${scriptaddr}" "${prefix}dietpiEnv.txt"; then
 fi
 
 # Define kernel command-line arguments
-setenv bootargs "root=${rootdev} rootfstype=${rootfstype} rootwait ${consoleargs} consoleblank=0 coherent_pool=2M partuuid=${partuuid} ${extraargs}"
+setenv bootargs "root=${rootdev} rootfstype=${rootfstype} rootwait ${consoleargs} consoleblank=0 coherent_pool=2M ubootpart=${ubootpart} ${extraargs}"
 
 # Add bootargs for Docker
 if test "${docker_optimizations}" = "on"; then setenv bootargs "${bootargs} cgroup_enable=memory"; fi
