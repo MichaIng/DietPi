@@ -269,6 +269,7 @@ Process_Software()
 			#166) aSERVICES[i]='pi-spc';; Service cannot reasonably start in container as WirinPi's gpio command fails reading /proc/cpuinfo
 			167) aSERVICES[i]='raspotify';;
 			168) aSERVICES[i]='coturn' aTCP[i]=3478 aUDP[i]=3478;;
+			169) aSERVICES[i]='lazylibrarian' aTCP[i]=5299; (( $emulation )) && aDELAY[i]=60;;
 			170) aCOMMANDS[i]='unrar -V';;
 			171) aSERVICES[i]='frps frpc' aTCP[i]='7000 7400 7500';;
 			172) aCOMMANDS[i]='wg' aSERVICES[i]='wg-quick@wg0' aUDP[i]='51820' CAPABILITIES+=',CAP_NET_ADMIN';;
