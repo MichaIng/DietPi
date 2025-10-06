@@ -20,7 +20,7 @@ case $G_DISTRO in
 	6) adeps+=('libxml2' 'libflac8' 'libpng16-16' 'libmpg123-0' 'libasound2' 'libportmidi0');;
 	7) adeps+=('libxml2' 'libflac12' 'libpng16-16' 'libmpg123-0' 'libasound2' 'libportmidi0');;
 	8) adeps+=('libxml2' 'libflac14' 'libpng16-16t64' 'libmpg123-0t64' 'libasound2t64' 'libportmidi0');;
-	9) adeps+=('libxml2-16' 'libflac14' 'libpng16-16t64' 'libmpg123-0t64' 'libasound2t64' 'libserialport2');;
+	9) adeps+=('libxml2-16' 'libflac14' 'libpng16-16t64' 'libmpg123-0t64' 'libasound2t64' 'libportmidi2');;
 	*) Error_Exit "Unsupported distro version: $G_DISTRO_NAME (ID=$G_DISTRO)";;
 esac
 # - Deps for RPi DispmanX builds
