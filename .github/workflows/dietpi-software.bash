@@ -299,7 +299,7 @@ Process_Software()
 			197) aCOMMANDS[i]='box64 -v';;
 			198) aSERVICES[i]='filebrowser' aTCP[i]='8084';;
 			199) aSERVICES[i]='spotifyd' aUDP[i]='5353';; # + random high TCP port
-			#200) aSERVICES[i]='dietpi-dashboard' aTCP[i]='5252';; "dietpi-dashboard.service: Failed to set up standard input: No such file or directory"; "dietpi-dashboard.service: Failed at step STDIN spawning /opt/dietpi-dashboard/dietpi-dashboard: No such file or directory"
+			200) aSERVICES[i]='dietpi-dashboard-frontend dietpi-dashboard-backend' aTCP[i]='5252 5353';;
 			201) aSERVICES[i]='zerotier-one' aTCP[i]='9993';;
 			202) aCOMMANDS[i]='rclone version';;
 			203) aSERVICES[i]='readarr' aTCP[i]='8787';;
