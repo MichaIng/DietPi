@@ -175,7 +175,7 @@ _EOF_
 			cat << '_EOF_' > /etc/systemd/system/console-getty.service.d/dietpi-autologin.conf
 [Service]
 ExecStart=
-ExecStart=-/sbin/agetty -a root -J -s console 115200,38400,9600 $TERM
+ExecStart=-/sbin/agetty -a root -J -s console 115200,57600,38400,9600 $TERM
 _EOF_
 		fi
 
