@@ -45,21 +45,22 @@
 	ROOT_DEV=$(findmnt -Ufvnro SOURCE -M /)
 
 	echo '[ INFO ] Detecting root partition and parent drive for supported naming schemes'
-	# - SCSI/SATA:	/dev/sd[a-z][1-9]
-	# - IDE:	/dev/hd[a-z][1-9]
-	# - VirtIO:	/dev/vd[a-z][1-9]
-	# - eMMC:	/dev/mmcblk[0-9]p[1-9]
-	# - NVMe:	/dev/nvme[0-9]n[0-9]p[1-9]
-	# - loop:	/dev/loop[0-9]p[1-9]
-	if [[ $ROOT_DEV == /dev/[shv]d[a-z][1-9] ]]
+	# - SCSI/SATA:   /dev/sd[a-z][1-9]
+	# - IDE:         /dev/hd[a-z][1-9]
+	# - VirtIO:      /dev/vd[a-z][1-9]
+	# - Xen/XCP-ng:  /dev/xvd[a-z][1-9]
+	# - eMMC:        /dev/mmcblk[0-9]p[1-9]
+	# - NVMe:        /dev/nvme[0-9]n[0-9]p[1-9]
+	# - loop:        /dev/loop[0-9]p[1-9]
+	if [[ $ROOT_DEV =~ ^/dev/(sd|hd|vd|xvd)[a-z][1-9]$ ]]
 	then
-		ROOT_PART=${ROOT_DEV: -1}	# /dev/sda1 => 1
-		ROOT_DRIVE=${ROOT_DEV::-1}	# /dev/sda1 => /dev/sda
+		ROOT_PART=${ROOT_DEV: -1}   # /dev/sda1 => 1
+		ROOT_DRIVE=${ROOT_DEV::-1}  # /dev/sda1 => /dev/sda
 
 	elif [[ $ROOT_DEV =~ ^/dev/(mmcblk|nvme[0-9]n|loop)[0-9]p[1-9]$ ]]
 	then
-		ROOT_PART=${ROOT_DEV: -1}	# /dev/mmcblk0p1 => 1
-		ROOT_DRIVE=${ROOT_DEV::-2}	# /dev/mmcblk0p1 => /dev/mmcblk0
+		ROOT_PART=${ROOT_DEV: -1}   # /dev/mmcblk0p1 => 1
+		ROOT_DRIVE=${ROOT_DEV::-2}  # /dev/mmcblk0p1 => /dev/mmcblk0
 	else
 		echo "[FAILED] Unsupported root device naming scheme ($ROOT_DEV). Aborting ..."
 		exit 1
@@ -73,6 +74,10 @@
 	if [[ -f '/dietpi_skip_partition_resize' ]]
 	then
 		rm -v /dietpi_skip_partition_resize
+
+	elif [[ ! -e $ROOT_DRIVE ]]
+	then
+		echo '[ INFO ] Skipping partition expansion since detected root drive device node does not exist, assuming container system'
 	else
 		echo '[ INFO ] Checking if the last partition contains a filesystem with DIETPISETUP label'
 		# - Use sfdisk to detect last partition, as lsblk with "-r" option on Bullseye does not sort partitions well: https://github.com/MichaIng/DietPi/issues/7527

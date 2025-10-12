@@ -15,12 +15,12 @@ header=()
 # - wget: Used for WHDLoad database update: https://github.com/BlitterStudio/amiberry/commit/d6c103e
 # - kbd: For "chvt" used in systemd service
 adeps_build=('autoconf' 'make' 'cmake' 'g++' 'pkg-config' 'libdrm-dev' 'libgbm-dev' 'libudev-dev' 'libxml2-dev' 'libpng-dev' 'libfreetype6-dev' 'libflac-dev' 'libmpg123-dev' 'libmpeg2-4-dev' 'libasound2-dev' 'libserialport-dev' 'libportmidi-dev' 'wget' 'kbd')
-adeps=('libdrm2' 'libgl1-mesa-dri' 'libgbm1' 'libegl1' 'libudev1' 'libfreetype6' 'libmpeg2-4' 'libserialport0' 'libportmidi0' 'wget' 'kbd')
+adeps=('libdrm2' 'libgl1-mesa-dri' 'libgbm1' 'libegl1' 'libudev1' 'libfreetype6' 'libmpeg2-4' 'libserialport0' 'wget' 'kbd')
 case $G_DISTRO in
-	6) adeps+=('libxml2' 'libflac8' 'libpng16-16' 'libmpg123-0' 'libasound2');;
-	7) adeps+=('libxml2' 'libflac12' 'libpng16-16' 'libmpg123-0' 'libasound2');;
-	8) adeps+=('libxml2' 'libflac14' 'libpng16-16t64' 'libmpg123-0t64' 'libasound2t64');;
-	9) adeps+=('libxml2-16' 'libflac14' 'libpng16-16t64' 'libmpg123-0t64' 'libasound2t64');;
+	6) adeps+=('libxml2' 'libflac8' 'libpng16-16' 'libmpg123-0' 'libasound2' 'libportmidi0');;
+	7) adeps+=('libxml2' 'libflac12' 'libpng16-16' 'libmpg123-0' 'libasound2' 'libportmidi0');;
+	8) adeps+=('libxml2' 'libflac14' 'libpng16-16t64' 'libmpg123-0t64' 'libasound2t64' 'libportmidi0');;
+	9) adeps+=('libxml2-16' 'libflac14' 'libpng16-16t64' 'libmpg123-0t64' 'libasound2t64' 'libportmidi2');;
 	*) Error_Exit "Unsupported distro version: $G_DISTRO_NAME (ID=$G_DISTRO)";;
 esac
 # - Deps for RPi DispmanX builds
