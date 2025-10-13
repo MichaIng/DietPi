@@ -156,12 +156,17 @@
 	# Maximise root filesystem if type is supported
 	case $ROOT_FSTYPE in
 		'ext'[234])
-			echo "[ INFO ] Maximising $ROOT_FSTYPE root filesystem size"
-			resize2fs "$ROOT_DEV" || REBOOT=1 # Reboot if resizing fails: https://github.com/MichaIng/DietPi/issues/6149
-			if [[ $ROOT_FSTYPE == 'ext'[34] ]]
+			if [[ -b $ROOT_DEV ]]
 			then
-				echo '[ INFO ] Re-enabling filesystem journal if disabled by dietpi-imager on image generation'
-				tune2fs -O 'has_journal' "$ROOT_DEV"
+				echo "[ INFO ] Maximising $ROOT_FSTYPE root filesystem size"
+				resize2fs "$ROOT_DEV" || REBOOT=1 # Reboot if resizing fails: https://github.com/MichaIng/DietPi/issues/6149
+				if [[ $ROOT_FSTYPE == 'ext'[34] ]]
+				then
+					echo '[ INFO ] Re-enabling filesystem journal if disabled by dietpi-imager on image generation'
+					tune2fs -O 'has_journal' "$ROOT_DEV"
+				fi
+			else
+				echo '[ INFO ] Skipping root filesystem expansion since detected root partition device node does not exist, assuming container system'
 			fi
 		;;
 		'f2fs') echo '[ INFO ] F2FS online expansion is not possible. Please do that from another Linux system if needed.';;
