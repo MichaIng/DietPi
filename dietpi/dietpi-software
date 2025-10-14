@@ -744,6 +744,8 @@ Available commands:
 		aSOFTWARE_CATX[$software_id]=3
 		aSOFTWARE_DOCS[$software_id]='https://dietpi.com/docs/software/bittorrent/#lazylibrarian'
 		aSOFTWARE_DEPS[$software_id]='130'
+		# - ARMv6/7 Bullseye: https://github.com/piwheels/packages/issues/210#issuecomment-3401251677
+		(( $G_HW_ARCH < 3 && $G_DISTRO < 7 )) && aSOFTWARE_AVAIL_G_DISTRO[$software_id,$G_DISTRO]=0
 
 		# Cloud & Backup
 		#--------------------------------------------------------------------------------
@@ -2615,8 +2617,16 @@ sudo sysctl -p /etc/sysctl.d/dietpi-$1.conf"
 			fi
 			PYTHON_VERSION=${PYTHON_VERSION/.} # so we can check in bash arithmetic
 
-			# Can piwheels be used?
-			(( $G_HW_ARCH < 3 && ( $PYTHON_VERSION == 39 || $PYTHON_VERSION == 311 || $PYTHON_VERSION == 313 ) )) && piwheels=1
+			# Can piwheels be used? The Python version needs to match the Debian version, else dynamically linked shared libraries may not match!
+			if (( $G_HW_ARCH < 3 ))
+			then
+				if (( ( $G_DISTRO == 6 && $PYTHON_VERSION == 39 ) ||
+				      ( $G_DISTRO == 7 && $PYTHON_VERSION == 311 ) ||
+				      ( $G_DISTRO > 7 && $PYTHON_VERSION == 313 ) ))
+				then
+					piwheels=1
+				fi
+			fi
 
 			# Process arguments
 			while (( $# ))
@@ -2643,10 +2653,13 @@ sudo sysctl -p /etc/sysctl.d/dietpi-$1.conf"
 					'matrix-synapse') (( $PYTHON_VERSION > 311 || $G_HW_ARCH == 11 || ( $G_HW_ARCH < 3 && ! $piwheels ) )) && rust=1;;
 					'netifaces') (( $piwheels || ( $G_HW_ARCH == 10 && $PYTHON_VERSION <= 39 ) )) || aDEPS+=('gcc');;
 					'numpy')
-						(( ( $G_HW_ARCH < 3 && ( ! $piwheels || $PYTHON_VERSION == 39 ) ) || $G_HW_ARCH == 11 )) && aDEPS+=('g++' 'pkg-config' 'libopenblas-pthread-dev')
-						# cmake + make + automake > patchelf > meson-python > numpy
-						# cmake > ninja > meson-python > numpy
-						(( $G_HW_ARCH == 1 || $G_HW_ARCH == 11 )) && aDEPS+=('cmake' 'make' 'automake')
+						if (( ( $G_HW_ARCH < 3 && ( ! $piwheels || $PYTHON_VERSION == 39 ) ) || $G_HW_ARCH == 11 ))
+						then
+							aDEPS+=('g++' 'pkg-config' 'libopenblas-pthread-dev')
+							# cmake + make + automake > patchelf > meson-python > numpy
+							# cmake > ninja > meson-python > numpy
+							(( $G_HW_ARCH == 1 )) && aDEPS+=('cmake' 'make' 'automake')
+						fi
 					;;
 					'pillow')
 						(( $G_HW_ARCH == 11 || ( $G_HW_ARCH < 3 && ( ! $piwheels || $PYTHON_VERSION == 39 ) ) )) && aDEPS+=('gcc' 'libjpeg62-turbo-dev')
@@ -4425,23 +4438,25 @@ sudo sysctl -p /etc/sysctl.d/dietpi-ipfs.conf
 				# Enable remote access on port 8007
 				G_EXEC sed --follow-symlinks -i 's/uvicorn app/uvicorn --host 0.0.0.0 --port 8007 app/' "$micro_data_dir/misc/supervisord.conf"
 				G_EXEC sed --follow-symlinks -i 's/8000/8007/' "$micro_data_dir/data/tests.toml"
-				# Disable package mode to prevent: "Error: The current project could not be installed: No file/folder found for package microblogpub"
-				G_CONFIG_INJECT 'package-mode[[:blank:]]' 'package-mode = false' "$micro_data_dir/pyproject.toml" '\[tool.poetry\]'
-				# ARMv6/7: Add piwheels
-				(( $G_HW_ARCH < 3 )) && G_EXEC eval "cat << '_EOF_' >> '$micro_data_dir/pyproject.toml'
+			fi
+
+			# Configure pip
+			# - Disable cache
+			G_EXEC mkdir -p "$micro_data_dir/.pip"
+			G_EXEC eval "echo -e '[global]\nno-cache-dir=true' > '$micro_data_dir/.pip/pip.conf'"
+			# - ARMv6/7 Bookworm: Add piwheels: The Python version needs to match the Debian version, else dynamically linked shared libraries may not match
+			(( $G_HW_ARCH < 3 && $G_DISTRO == 7 )) && G_CONFIG_INJECT 'extra-index-url[[:blank:]]*=' 'extra-index-url=https://www.piwheels.org/simple/' "$micro_data_dir/.pip/pip.conf" '\[global\]'
+
+			# Configure Poetry
+			# - Disable package mode to prevent: "Error: The current project could not be installed: No file/folder found for package microblogpub"
+			G_CONFIG_INJECT 'package-mode[[:blank:]]' 'package-mode = false' "$micro_data_dir/pyproject.toml" '\[tool.poetry\]'
+			# - ARMv6/7 Bookworm: Add piwheels: The Python version needs to match the Debian version, else dynamically linked shared libraries may not match
+			(( $G_HW_ARCH < 3 && $G_DISTRO == 7 )) && ! grep -q 'piwheels' "$micro_data_dir/pyproject.toml" && G_EXEC eval "cat << '_EOF_' >> '$micro_data_dir/pyproject.toml'
 [[tool.poetry.source]]
 name = \"piwheels.org\"
 url = \"https://www.piwheels.org/simple/\"
 priority = \"supplemental\"
 _EOF_"
-			fi
-
-			# Disable pip cache
-			G_EXEC mkdir -p "$micro_data_dir/.pip"
-			G_EXEC eval "echo -e '[global]\nno-cache-dir=true' > '$micro_data_dir/.pip/pip.conf'"
-			# ARMv6/7: Add piwheels
-			(( $G_HW_ARCH < 3 )) && G_CONFIG_INJECT 'extra-index-url[[:blank:]]*=' 'extra-index-url=https://www.piwheels.org/simple/' "$micro_data_dir/.pip/pip.conf" '\[global\]'
-
 			# User
 			Create_User -d "$micro_data_dir" "$micro_name"
 			G_EXEC chown -R "$micro_name:$micro_name" "$micro_data_dir"
@@ -11460,11 +11475,12 @@ _EOF_'
 			[[ -d '/mnt/dietpi_userdata/homeassistant/deps' ]] && G_EXEC rm -R /mnt/dietpi_userdata/homeassistant/deps
 			G_EXEC ln -sf "$ha_home/.pyenv/versions/$ha_python_version/lib/python${ha_python_version%.*}/site-packages" /mnt/dietpi_userdata/homeassistant/deps
 
-			# Disable pip cache
+			# Configure pip
+			# - Disable cache
 			G_EXEC mkdir -p "$ha_home/.pip"
 			G_EXEC eval "echo -e '[global]\nno-cache-dir=true' > '$ha_home/.pip/pip.conf'"
-			# ARMv6/7: Add piwheels
-			(( $G_HW_ARCH < 3 )) && G_CONFIG_INJECT 'extra-index-url[[:blank:]]*=' 'extra-index-url=https://www.piwheels.org/simple/' "$ha_home/.pip/pip.conf" '\[global\]'
+			# - ARMv6/7 Trixie/Forky: Add piwheels: The Python version needs to match the Debian version, else dynamically linked shared libraries may not match
+			(( $G_HW_ARCH < 3 && $G_DISTRO > 7 )) && G_CONFIG_INJECT 'extra-index-url[[:blank:]]*=' 'extra-index-url=https://www.piwheels.org/simple/' "$ha_home/.pip/pip.conf" '\[global\]'
 
 			# Generate script to activate pyenv: This must be sourced from the originating shell, hence it does not require execute permissions.
 			echo "#!/bin/dash
