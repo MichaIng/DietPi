@@ -129,14 +129,6 @@
 			lsblk -po NAME,LABEL,SIZE,TYPE,FSTYPE,MOUNTPOINT "$ROOT_DRIVE"
 		fi
 
-		# GPT partition table: Move GPT backup partition table to end of drive
-		# - lsblk -ndo PTTYPE "$ROOT_DRIVE" does not work inside systemd-nspawn containers.
-		if [[ $(blkid -s PTTYPE -o value "$ROOT_DRIVE") == 'gpt' ]]
-		then
-			echo '[ INFO ] GPT partition table detected: moving GPT backup partition table to end of drive'
-			sgdisk -e "$ROOT_DRIVE"
-		fi
-
 		echo '[ INFO ] Maximising root partition size'
 		sfdisk --no-reread --no-tell-kernel -fN"$ROOT_PART" "$ROOT_DRIVE" <<< ',+'
 
