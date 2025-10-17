@@ -2,9 +2,10 @@
 {
 	# Error out on command failures
 	set -e
-	REBOOT=0
+	REBOOT=
 	EXIT_CODE=0
 	TMP_MOUNT=
+	EXT_JOURNAL=0
 
 	# Exit trap to remove temporary mounts and perform reboot on failure
 	# shellcheck disable=SC2329
@@ -12,9 +13,9 @@
 	{
 		[[ $TMP_MOUNT ]] && umount -lv "$TMP_MOUNT" && rmdir -v "$TMP_MOUNT" || :
 
-		if (( $REBOOT ))
+		if [[ $REBOOT ]]
 		then
-			echo '[ INFO ] Performing a reboot to apply either new boot configs imported from the setup partition or a failed ext filesystem expansion'
+			echo "[ INFO ] Performing final reboot $REBOOT"
 			systemctl start reboot.target
 		fi
 	}
@@ -22,7 +23,7 @@
 
 	Reboot_to_load_Partition_table()
 	{
-		echo '[ INFO ] Performing intermediate reboot to load new partition tables'
+		echo '[ INFO ] Performing intermediate reboot to load new partition table'
 		echo '[ INFO ] Re-enabling this service to continue with filesystem expansion on next boot'
 		> /dietpi_skip_partition_resize
 		mkdir -pv /etc/systemd/system/local-fs.target.wants
@@ -97,11 +98,11 @@
 					mkdir -pv /boot/extlinux
 					[[ -f '/boot/extlinux/extlinux.conf' ]] && mtime=$(date -r '/boot/extlinux/extlinux.conf' '+%s') || mtime=0
 					cp -uv "$TMP_MOUNT/$f" /boot/extlinux/
-					(( $(date -r '/boot/extlinux/extlinux.conf' '+%s') > $mtime )) && REBOOT=1
+					(( $(date -r '/boot/extlinux/extlinux.conf' '+%s') > $mtime )) && REBOOT='to apply the extlinux.conf change'
 				else
 					[[ ( $f == 'dietpiEnv.txt' || $f == 'boot.ini' ) && -f /boot/$f ]] && mtime=$(date -r "/boot/$f" '+%s') || mtime=0
 					cp -uv "$TMP_MOUNT/$f" /boot/
-					[[ $f == 'dietpiEnv.txt' || $f == 'boot.ini' ]] && (( $(date -r "/boot/$f" '+%s') > $mtime )) && REBOOT=1
+					[[ $f == 'dietpiEnv.txt' || $f == 'boot.ini' ]] && (( $(date -r "/boot/$f" '+%s') > $mtime )) && REBOOT='to apply the dietpiEnv.txt change'
 				fi
 			done
 			umount -v "$SETUP_PART"
@@ -140,9 +141,6 @@
 		echo '[ INFO ] Maximising root partition size'
 		sfdisk --no-reread --no-tell-kernel -fN"$ROOT_PART" "$ROOT_DRIVE" <<< ',+'
 
-		# At least in some cases, partx fails with "updating partition #X failed: Device or resource busy". Give it a little time to settle ...
-		sleep 0.5
-
 		echo '[ INFO ] Informing kernel about changed partition table, rebooting in case of failure'
 		partx -uv "$ROOT_DEV" || Reboot_to_load_Partition_table
 
@@ -159,11 +157,11 @@
 			if [[ -b $ROOT_DEV ]]
 			then
 				echo "[ INFO ] Maximising $ROOT_FSTYPE root filesystem size"
-				resize2fs "$ROOT_DEV" || REBOOT=1 # Reboot if resizing fails: https://github.com/MichaIng/DietPi/issues/6149
-				if [[ $ROOT_FSTYPE == 'ext'[34] ]]
+				resize2fs "$ROOT_DEV" || REBOOT='since the root filesystem resize failed' # https://github.com/MichaIng/DietPi/issues/6149
+				if [[ $ROOT_FSTYPE == 'ext'[34] ]] && ! tune2fs -l "$ROOT_DEV" | grep -q 'has_journal'
 				then
-					echo '[ INFO ] Re-enabling filesystem journal if disabled by dietpi-imager on image generation'
-					tune2fs -O 'has_journal' "$ROOT_DEV"
+					EXT_JOURNAL=1
+					echo '[ INFO ] Remounting root filesystem R/O before adding filesystem journal and performing a reboot, file logging hence ends here'
 				fi
 			else
 				echo '[ INFO ] Skipping root filesystem expansion since detected root partition device node does not exist, assuming container system'
@@ -181,6 +179,15 @@
 	esac
 	# ---------------------------------------------------------
 	} &> >(tee -a /var/tmp/dietpi/logs/fs_partition_resize.log); wait $! # Method from dietpi-update to avoid commands running in a subshell, breaking script exits and implying variable changes remaining local
+
+	if (( $EXT_JOURNAL ))
+	then
+		mount -vo remount,ro /
+		REBOOT='to apply the new root filesystem journal'
+		tune2fs -O 'has_journal' "$ROOT_DEV"
+		sync
+		sleep 1
+	fi
 
 	exit "$EXIT_CODE"
 }
