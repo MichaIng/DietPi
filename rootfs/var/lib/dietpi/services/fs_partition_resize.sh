@@ -5,7 +5,6 @@
 	REBOOT=
 	EXIT_CODE=0
 	TMP_MOUNT=
-	EXT_JOURNAL=0
 
 	# Exit trap to remove temporary mounts and perform reboot on failure
 	# shellcheck disable=SC2329
@@ -160,8 +159,12 @@
 				resize2fs "$ROOT_DEV" || REBOOT='since the root filesystem resize failed' # https://github.com/MichaIng/DietPi/issues/6149
 				if [[ $ROOT_FSTYPE == 'ext'[34] ]] && ! tune2fs -l "$ROOT_DEV" | grep -q 'has_journal'
 				then
-					EXT_JOURNAL=1
-					echo '[ INFO ] Remounting root filesystem R/O before adding filesystem journal and performing a reboot, file logging hence ends here'
+					echo '[ INFO ] Adding filesystem journal and performing a reboot with forced fsck'
+					REBOOT='to apply the new root filesystem journal'
+					tune2fs -O 'has_journal' "$ROOT_DEV"
+					debugfs -w -R dirty "$ROOT_DEV"
+					sync
+					sleep 1
 				fi
 			else
 				echo '[ INFO ] Skipping root filesystem expansion since detected root partition device node does not exist, assuming container system'
@@ -179,15 +182,6 @@
 	esac
 	# ---------------------------------------------------------
 	} &> >(tee -a /var/tmp/dietpi/logs/fs_partition_resize.log); wait $! # Method from dietpi-update to avoid commands running in a subshell, breaking script exits and implying variable changes remaining local
-
-	if (( $EXT_JOURNAL ))
-	then
-		mount -vo remount,ro /
-		REBOOT='to apply the new root filesystem journal'
-		tune2fs -O 'has_journal' "$ROOT_DEV"
-		sync
-		sleep 1
-	fi
 
 	exit "$EXIT_CODE"
 }
