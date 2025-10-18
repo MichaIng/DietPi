@@ -132,7 +132,7 @@
 		echo '[ INFO ] Maximising root partition size'
 		sfdisk --no-reread --no-tell-kernel -fN"$ROOT_PART" "$ROOT_DRIVE" <<< ',+'
 
-		echo '[ INFO ] Informing kernel about changed partition table, rebooting in case of failure'
+		echo '[ INFO ] Informing kernel about changed partition table, rebooting in case of failure (expected in case of GPT partition table)'
 		partx -uv "$ROOT_DEV" || Reboot_to_load_Partition_table
 
 		# Give the kernel some time to read partition changes: https://github.com/MichaIng/DietPi/issues/5006
@@ -153,8 +153,8 @@
 				then
 					echo '[ INFO ] Adding filesystem journal and performing a reboot with forced fsck'
 					REBOOT='to apply the new root filesystem journal'
-					tune2fs -O 'has_journal' "$ROOT_DEV"
-					debugfs -w -R dirty "$ROOT_DEV"
+					echo 'tune2fs -c 0 "$G_ROOTFS_DEV" && rm /etc/bashrc.d/zz-dietpi-reset_max_mount_count.bash' > /etc/bashrc.d/zz-dietpi-reset_max_mount_count.bash
+					tune2fs -O 'has_journal' -c 1 -C 2 "$ROOT_DEV"
 					sync
 					sleep 1
 				fi
