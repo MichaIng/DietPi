@@ -153,6 +153,7 @@
 				then
 					echo '[ INFO ] Adding filesystem journal and performing a reboot with forced fsck'
 					REBOOT='to apply the new root filesystem journal'
+					# shellcheck disable=SC2016
 					echo 'tune2fs -c 0 "$G_ROOTFS_DEV" && rm /etc/bashrc.d/zz-dietpi-reset_max_mount_count.bash' > /etc/bashrc.d/zz-dietpi-reset_max_mount_count.bash
 					tune2fs -O 'has_journal' -c 1 -C 2 "$ROOT_DEV"
 					sync
