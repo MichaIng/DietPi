@@ -151,12 +151,17 @@
 				resize2fs "$ROOT_DEV" || REBOOT='since the root filesystem resize failed' # https://github.com/MichaIng/DietPi/issues/6149
 				if [[ $ROOT_FSTYPE == 'ext'[34] ]] && ! tune2fs -l "$ROOT_DEV" | grep -q 'has_journal'
 				then
-					echo '[ INFO ] Adding filesystem journal and performing a reboot with forced fsck'
-					REBOOT='to apply the new root filesystem journal'
-					echo -e '#!/bin/dash\ntune2fs -c 0 '"'$ROOT_DEV' && rm /var/lib/dietpi/postboot.d/dietpi-reset_max_mount_count" > /var/lib/dietpi/postboot.d/dietpi-reset_max_mount_count
-					tune2fs -O 'has_journal' -c 1 -C 2 "$ROOT_DEV"
-					sync
-					sleep 1
+					echo '[ INFO ] Adding root filesystem journal'
+					if [[ -e '/run/initramfs/fsck-root' ]]
+					then
+						REBOOT=' with forced fsck to apply the new root filesystem journal'
+						echo -e '#!/bin/dash\ntune2fs -c 0 '"'$ROOT_DEV' && rm /var/lib/dietpi/postboot.d/dietpi-reset_max_mount_count" > /var/lib/dietpi/postboot.d/dietpi-reset_max_mount_count
+						tune2fs -O 'has_journal' -c 1 -C 2 "$ROOT_DEV"
+						sync
+						sleep 1
+					else
+						tune2fs -O 'has_journal' "$ROOT_DEV"
+					fi
 				fi
 			else
 				echo '[ INFO ] Skipping root filesystem expansion since detected root partition device node does not exist, assuming container system'
