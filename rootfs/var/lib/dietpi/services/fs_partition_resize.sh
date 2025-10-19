@@ -153,7 +153,7 @@
 				then
 					echo '[ INFO ] Adding filesystem journal and performing a reboot with forced fsck'
 					REBOOT='to apply the new root filesystem journal'
-					echo -e "#!/bin/dash\ntune2fs -c 0 '$ROOT_DEV' && rm /var/lib/dietpi/postboot.d/dietpi-reset_max_mount_count" > /var/lib/dietpi/postboot.d/dietpi-reset_max_mount_count
+					echo -e '#!/bin/dash\ntune2fs -c 0 '"'$ROOT_DEV' && rm /var/lib/dietpi/postboot.d/dietpi-reset_max_mount_count" > /var/lib/dietpi/postboot.d/dietpi-reset_max_mount_count
 					tune2fs -O 'has_journal' -c 1 -C 2 "$ROOT_DEV"
 					sync
 					sleep 1
