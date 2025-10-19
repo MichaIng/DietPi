@@ -1,7 +1,6 @@
 
 function make_whitespace_offset(clean_line){
-    ## Generate leading spaces based on global INDENT_TYPE and
-    ## a tokenized list of words.
+    ## Generate leading spaces based on global INDENT_TYPE
     if (INDENT_TYPE == "min"){
         return sprintf("%*s", INDENT_MIN, "")
     }
