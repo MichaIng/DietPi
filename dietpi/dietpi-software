@@ -744,6 +744,8 @@ Available commands:
 		aSOFTWARE_CATX[$software_id]=3
 		aSOFTWARE_DOCS[$software_id]='https://dietpi.com/docs/software/bittorrent/#lazylibrarian'
 		aSOFTWARE_DEPS[$software_id]='130'
+		# - ARMv6/7 Bullseye: https://github.com/piwheels/packages/issues/210#issuecomment-3401251677
+		(( $G_HW_ARCH < 3 && $G_DISTRO < 7 )) && aSOFTWARE_AVAIL_G_DISTRO[$software_id,$G_DISTRO]=0
 
 		# Cloud & Backup
 		#--------------------------------------------------------------------------------
@@ -2592,28 +2594,40 @@ sudo sysctl -p /etc/sysctl.d/dietpi-$1.conf"
 
 		# Store APT dependencies for Python modules in aDEPS array, or optionally install them directly
 		# Arguments:
-		#   --install, -i   Install APT packages directly
-		#   --user, -u      User to install Rust with
-		#   --rust, -r      Install Rust in any case
-		#   pyenv           Add APT dependencies needed to compile Python for pyenv
-		#   <module>        Add APT dependencies needed to compile and in case run the named module
+		#   --install, -i      Install APT packages directly
+		#   --user, -u         User to install Rust with
+		#   --rust, -r         Install Rust in any case
+		#   --no-piwheels, -P  Declare that piwheels is not used
+		#   pyenv              Add APT dependencies needed to compile Python for pyenv
+		#   <module>           Add APT dependencies needed to compile and in case run the named module
 		# Environment variables:
 		#   PYTHON_VERSION  Python version in case e.g. pyenv is used
 		Python_Deps()
 		{
 			local install=0 user rust=0 piwheels=0
 
-			# Can piwheels be used?
+			if [[ $PYTHON_VERSION ]]
+			then
+				until [[ $PYTHON_VERSION =~ ^3\.[0-9]+$ ]]; do PYTHON_VERSION=${PYTHON_VERSION%\.*}; done
+			else
+				case $G_DISTRO in
+					6) PYTHON_VERSION='3.9';;
+					7) PYTHON_VERSION='3.11';;
+					*) PYTHON_VERSION='3.13';;
+				esac
+			fi
+			PYTHON_VERSION=${PYTHON_VERSION/.} # so we can check in bash arithmetic
+
+			# Can piwheels be used? The Python version needs to match the Debian version, else dynamically linked shared libraries may not match!
 			if (( $G_HW_ARCH < 3 ))
 			then
-				if [[ $PYTHON_VERSION ]]
+				if (( ( $G_DISTRO == 6 && $PYTHON_VERSION == 39 ) ||
+				      ( $G_DISTRO == 7 && $PYTHON_VERSION == 311 ) ||
+				      ( $G_DISTRO > 7 && $PYTHON_VERSION == 313 ) ))
 				then
-					dpkg --compare-version "$PYTHON_VERSION" lt '3.14' && piwheels=1
-				else
 					piwheels=1
 				fi
 			fi
-			unset -v PYTHON_VERSION
 
 			# Process arguments
 			while (( $# ))
@@ -2622,31 +2636,40 @@ sudo sysctl -p /etc/sysctl.d/dietpi-$1.conf"
 					'--install'|'-i') install=1;;
 					'--user'|'-u') shift; user=$1;;
 					'--rust'|'-r') rust=1;;
-					'av') (( $G_HW_ARCH < 3 || $G_HW_ARCH == 11 )) && aDEPS+=('libavdevice-dev');;
-					'bcrypt') (( $G_HW_ARCH == 11 )) && rust=1;;
+					'--no-piwheels'|'-P') piwheels=0;;
+					'av') (( $G_HW_ARCH == 11 || ( $G_HW_ARCH < 3 && $PYTHON_VERSION != 313 ) )) && aDEPS+=('libavdevice-dev');;
+					'bcrypt') (( $G_HW_ARCH == 11 || ( $G_HW_ARCH == 1 && ! $piwheels ) )) && rust=1;;
 					'brotli'|'sabctools'|'ujson') (( $G_HW_ARCH == 11 || ( $G_HW_ARCH < 3 && ! $piwheels ) )) && aDEPS+=('g++');;
-					'cffi') (( $G_HW_ARCH == 11 || ( $G_HW_ARCH < 3 && ( ! $piwheels || $G_DISTRO > 7 ) ) )) && aDEPS+=('gcc' 'libffi-dev');; # piwheels Trixie build failed
+					'cffi') (( $G_HW_ARCH == 11 || ( $G_HW_ARCH < 3 && $PYTHON_VERSION != 311 ) )) && aDEPS+=('gcc' 'libffi-dev');;
 					'cryptography')
-						if (( ( $G_HW_ARCH == 1 && ! $piwheels ) || $G_HW_ARCH == 11 ))
+						if (( $G_HW_ARCH == 11 || ( $G_HW_ARCH == 1 && ! $piwheels ) ))
 						then
 							aDEPS+=('pkg-config' 'libssl-dev')
 							rust=1
 						fi
 						set -- "$@" cffi
 					;;
+					'greenlet113') (( $PYTHON_VERSION > 311 || $G_HW_ARCH == 11 || ( $G_HW_ARCH < 3 && ! $piwheels ) )) && aDEPS+=('g++');;
 					'libsass') (( $G_HW_ARCH == 10 || $piwheels )) || aDEPS+=('g++');;
-					'lxml') (( $G_HW_ARCH == 1 || $G_HW_ARCH == 11 )) && aDEPS+=('libxslt1-dev');;
-					'matrix-synapse') (( $G_DISTRO > 7 || $G_HW_ARCH < 3 || $G_HW_ARCH == 11 )) && rust=1;;
-					'netifaces') (( $piwheels || ( $G_HW_ARCH == 10 && $G_DISTRO == 6 ) )) || aDEPS+=('gcc');;
+					'lxml') (( $G_HW_ARCH == 1 && ( ! $piwheels || $PYTHON_VERSION == 313 ) )) && aDEPS+=('libxslt1-dev');;
+					'matrix-synapse') (( $PYTHON_VERSION > 311 || $G_HW_ARCH == 11 || ( $G_HW_ARCH < 3 && ! $piwheels ) )) && rust=1;;
+					'netifaces') (( $piwheels || ( $G_HW_ARCH == 10 && $PYTHON_VERSION <= 39 ) )) || aDEPS+=('gcc');;
 					'numpy')
-						(( $G_HW_ARCH < 3 || $G_HW_ARCH == 11 )) && aDEPS+=('g++' 'pkg-config' 'libopenblas-pthread-dev')
-						# cmake + make + automake > patchelf > meson-python > numpy
-						# cmake > ninja > meson-python > numpy
-						(( $G_HW_ARCH == 1 || $G_HW_ARCH == 11 )) && aDEPS+=('cmake' 'make' 'automake')
+						if (( $G_HW_ARCH == 11 || ( $G_HW_ARCH == 1 && ! $piwheels ) ))
+						then
+							aDEPS+=('g++' 'pkg-config' 'libopenblas-pthread-dev')
+							# cmake + make + automake > patchelf > meson-python > numpy
+							# cmake > ninja > meson-python > numpy
+							(( $G_HW_ARCH == 1 )) && aDEPS+=('cmake' 'make' 'automake')
+						fi
+						if (( $piwheels ))
+						then
+							aDEPS+=('libgfortran5' 'libopenblas0-pthread')
+						fi
 					;;
 					'pillow')
-						(( $G_HW_ARCH == 11 || ( $G_HW_ARCH < 3 && ! $piwheels ) )) && aDEPS+=('gcc' 'libjpeg62-turbo-dev')
-						if (( $piwheels ))
+						(( $G_HW_ARCH == 11 || ( $G_HW_ARCH < 3 && ( ! $piwheels || $PYTHON_VERSION == 39 ) ) )) && aDEPS+=('gcc' 'libjpeg62-turbo-dev')
+						if (( $piwheels && $PYTHON_VERSION != 39 ))
 						then
 							aDEPS+=('libopenjp2-7' 'libxcb1')
 							(( $G_DISTRO > 6 )) && aDEPS+=('libtiff6') || aDEPS+=('libtiff5')
@@ -2657,11 +2680,11 @@ sudo sysctl -p /etc/sysctl.d/dietpi-$1.conf"
 						set -- "$@" cryptography
 					;;
 					'psutil') (( $G_HW_ARCH < 3 || $G_HW_ARCH == 11 )) && aDEPS+=('gcc');;
-					'psycopg2') (( $G_HW_ARCH < 2 && $piwheels )) || aDEPS+=('gcc' 'libpq-dev');;
+					'psycopg2') (( $piwheels && $PYTHON_VERSION != 39 )) || aDEPS+=('gcc' 'libpq-dev');;
 					'pycurl') (( $G_HW_ARCH == 11 || ( $G_HW_ARCH < 3 && ! $piwheels ) )) && aDEPS+=('gcc' 'libcurl4-openssl-dev' 'libssl-dev');;
 					'pydantic')
 						# pydantic_core > pydantic
-						(( ( $G_HW_ARCH == 1 && ! $piwheels ) || $G_HW_ARCH == 11 )) && rust=1
+						(( $G_HW_ARCH == 1 || $G_HW_ARCH == 11 )) && rust=1
 					;;
 					'pyenv')
 						# Required: gcc libc6-dev make libssl-dev zlib1g-dev
@@ -2678,6 +2701,7 @@ sudo sysctl -p /etc/sysctl.d/dietpi-$1.conf"
 				esac
 				shift
 			done
+			unset -v PYTHON_VERSION
 
 			# Install Rust if needed
 			if (( $rust ))
@@ -2822,7 +2846,7 @@ _EOF_
 				G_AGI snapserver
 
 				# Install and enable snapweb web UI, not included in Debian's snapserver package: https://github.com/MichaIng/DietPi/issues/7073
-				local fallback_url='https://github.com/badaix/snapweb/releases/download/v0.9.1/snapweb_0.9.1-1_all.deb'
+				local fallback_url='https://github.com/badaix/snapweb/releases/download/v0.9.2/snapweb_0.9.2-1_all.deb'
 				Download_Install "$(curl -sSfL 'https://api.github.com/repos/badaix/snapweb/releases/latest' | mawk -F\" '/^ *"browser_download_url": ".*\/snapweb_[^"\/]*_all.deb"$/{print $4}')"
 				G_CONFIG_INJECT 'doc_root[[:blank:]=]' 'doc_root = /usr/share/snapweb' /etc/snapserver.conf '\[http\]'
 
@@ -2831,7 +2855,7 @@ _EOF_
 				getent passwd snapserver > /dev/null && G_EXEC userdel snapserver
 			else
 				local arch=$(dpkg --print-architecture)
-				local fallback_url="https://github.com/badaix/snapcast/releases/download/v0.32.3/snapserver_0.32.3-1_${arch}_$G_DISTRO_NAME.deb"
+				local fallback_url="https://github.com/badaix/snapcast/releases/download/v0.34.0/snapserver_0.34.0-1_${arch}_$G_DISTRO_NAME.deb"
 				Download_Install "$(curl -sSfL 'https://api.github.com/repos/badaix/snapcast/releases/latest' | mawk -F\" "/^ *\"browser_download_url\": \".*\/snapserver_[^\"\/]*_${arch}_$G_DISTRO_NAME.deb\"$/{print \$4}")"
 
 				# Fix /var/lib/snapserver permissions, just in case Debian's package was previously used, which uses the "_snapserver" user, instead of "snapserver"
@@ -2852,7 +2876,7 @@ _EOF_
 				G_AGI snapclient
 			else
 				local arch=$(dpkg --print-architecture)
-				local fallback_url="https://github.com/badaix/snapcast/releases/download/v0.32.3/snapclient_0.32.3-1_${arch}_$G_DISTRO_NAME.deb"
+				local fallback_url="https://github.com/badaix/snapcast/releases/download/v0.34.0/snapclient_0.34.0-1_${arch}_$G_DISTRO_NAME.deb"
 				Download_Install "$(curl -sSfL 'https://api.github.com/repos/badaix/snapcast/releases/latest' | mawk -F\" "/^ *\"browser_download_url\": \".*\/snapclient_[^\"\/]*_${arch}_$G_DISTRO_NAME.deb\"$/{print \$4}")"
 			fi
 			G_EXEC systemctl stop snapclient
@@ -3203,7 +3227,7 @@ Signed-By: /etc/apt/keyrings/dietpi-adoptium.asc"
 
 			# Get latest version
 			local file=$(curl -sSfL 'https://go.dev/dl/?mode=json' | grep -o "go[0-9.]*\.linux-$arch\.tar\.gz" | head -1)
-			[[ $file ]] || { file="go1.25.1.linux-$arch.tar.gz"; G_DIETPI-NOTIFY 1 "Automatic latest ${aSOFTWARE_NAME[$software_id]} version detection failed. \"$file\" will be installed as fallback, but a newer version might be available. Please report this at: https://github.com/MichaIng/DietPi/issues"; }
+			[[ $file ]] || { file="go1.25.3.linux-$arch.tar.gz"; G_DIETPI-NOTIFY 1 "Automatic latest ${aSOFTWARE_NAME[$software_id]} version detection failed. \"$file\" will be installed as fallback, but a newer version might be available. Please report this at: https://github.com/MichaIng/DietPi/issues"; }
 
 			# Reinstall: Remove previous instance
 			[[ -d '/usr/local/go' ]] && G_EXEC rm -R /usr/local/go
@@ -4026,7 +4050,7 @@ sudo sysctl -p /etc/sysctl.d/98-dietpi-redis.conf'
 			# Quick install: https://docs.phpmyadmin.net/en/latest/setup.html#quick-install
 			# - Get latest version name
 			local version=$(curl -sSfL 'https://api.github.com/repos/phpmyadmin/phpmyadmin/releases' | mawk -F\" '/^ *"name": "/ && $4!~/rc/ {print $4}' | sort -rV | head -1)
-			[[ $version ]] || { version='5.2.2'; G_DIETPI-NOTIFY 1 "Automatic latest ${aSOFTWARE_NAME[$software_id]} version detection failed. Version \"$version\" will be installed as fallback, but a newer version might be available. Please report this at: https://github.com/MichaIng/DietPi/issues"; }
+			[[ $version ]] || { version='5.2.3'; G_DIETPI-NOTIFY 1 "Automatic latest ${aSOFTWARE_NAME[$software_id]} version detection failed. Version \"$version\" will be installed as fallback, but a newer version might be available. Please report this at: https://github.com/MichaIng/DietPi/issues"; }
 			Download_Install "https://files.phpmyadmin.net/phpMyAdmin/$version/phpMyAdmin-$version-english.tar.xz"
 			# - Reinstall: Clean install but preserve existing config file
 			[[ -f '/var/www/phpmyadmin/config.inc.php' ]] && G_EXEC mv /var/www/phpmyadmin/config.inc.php "phpMyAdmin-$version-english/"
@@ -4340,7 +4364,7 @@ _EOF_
 			else
 				# Find latest version
 				version=$(curl -sSfL 'https://dist.ipfs.tech/kubo/versions' | sed '/-rc[0-9]*$/d' | tail -1)
-				[[ $version ]] || { version='v0.37.0'; G_DIETPI-NOTIFY 1 "Automatic latest ${aSOFTWARE_NAME[$software_id]} version detection failed. Version \"$version\" will be installed as fallback, but a newer version might be available. Please report this at: https://github.com/MichaIng/DietPi/issues"; }
+				[[ $version ]] || { version='v0.38.1'; G_DIETPI-NOTIFY 1 "Automatic latest ${aSOFTWARE_NAME[$software_id]} version detection failed. Version \"$version\" will be installed as fallback, but a newer version might be available. Please report this at: https://github.com/MichaIng/DietPi/issues"; }
 			fi
 			Download_Install "https://dist.ipfs.tech/kubo/$version/kubo_${version}_linux-$arch.tar.gz"
 
@@ -4405,7 +4429,7 @@ sudo sysctl -p /etc/sysctl.d/dietpi-ipfs.conf
 			local micro_name='microblog-pub'
 			# Obtain latest Python 3.11.y version supported by pyenv
 			local micro_python_version=$(curl -sSfL 'https://api.github.com/repos/pyenv/pyenv/contents/plugins/python-build/share/python-build?ref=master' | mawk -F\" '/^ *"name": "3\.11\.[0-9]*",$/{print $4}' | sort -Vr | head -1)
-			[[ $micro_python_version ]] || { micro_python_version='3.11.13'; G_DIETPI-NOTIFY 1 "Automatic latest Python version detection failed. Version \"$micro_python_version\" will be installed as fallback, but a newer version might be available. Please report this at: https://github.com/MichaIng/DietPi/issues"; }
+			[[ $micro_python_version ]] || { micro_python_version='3.11.14'; G_DIETPI-NOTIFY 1 "Automatic latest Python version detection failed. Version \"$micro_python_version\" will be installed as fallback, but a newer version might be available. Please report this at: https://github.com/MichaIng/DietPi/issues"; }
 			local micro_pyenv_dir="/opt/$micro_name"
 			local micro_pyenv_activate_file="$micro_pyenv_dir/pyenv-activate.sh"
 			local micro_virtualenv="$micro_pyenv_dir/.virtual_path"
@@ -4420,20 +4444,25 @@ sudo sysctl -p /etc/sysctl.d/dietpi-ipfs.conf
 				# Enable remote access on port 8007
 				G_EXEC sed --follow-symlinks -i 's/uvicorn app/uvicorn --host 0.0.0.0 --port 8007 app/' "$micro_data_dir/misc/supervisord.conf"
 				G_EXEC sed --follow-symlinks -i 's/8000/8007/' "$micro_data_dir/data/tests.toml"
-				# Disable package mode to prevent: "Error: The current project could not be installed: No file/folder found for package microblogpub"
-				G_CONFIG_INJECT 'package-mode[[:blank:]]' 'package-mode = false' "$micro_data_dir/pyproject.toml" '\[tool.poetry\]'
 			fi
 
-			# Disable pip cache
+			# Configure pip
+			# - Disable cache
 			G_EXEC mkdir -p "$micro_data_dir/.pip"
 			G_EXEC eval "echo -e '[global]\nno-cache-dir=true' > '$micro_data_dir/.pip/pip.conf'"
+
+			# Configure Poetry
+			# - > The "poetry.dev-dependencies" section is deprecated and will be removed in a future version. Use "poetry.group.dev.dependencies" instead.
+			G_EXEC sed --follow-symlinks -i '/^\[poetry.dev-dependencies\]$/c\[poetry.group.dev.dependencies]' "$micro_data_dir/pyproject.toml"
+			# - Disable package mode to prevent: "Error: The current project could not be installed: No file/folder found for package microblogpub"
+			G_CONFIG_INJECT 'package-mode[[:blank:]]' 'package-mode = false' "$micro_data_dir/pyproject.toml" '\[tool.poetry\]'
 
 			# User
 			Create_User -d "$micro_data_dir" "$micro_name"
 			G_EXEC chown -R "$micro_name:$micro_name" "$micro_data_dir"
 
-			# Dependencies
-			PYTHON_VERSION=$micro_python_version Python_Deps -u "$micro_name" pyenv poetry bcrypt brotli libsass lxml pillow
+			# Dependencies: https://git.sr.ht/~tsileo/microblog.pub/tree/v2/item/pyproject.toml
+			PYTHON_VERSION=$micro_python_version Python_Deps -u "$micro_name" -P pyenv poetry bcrypt brotli greenlet113 libsass lxml pillow
 
 			# Create a Python environment via pyenv
 			# - https://python-poetry.org/docs/managing-environments/
@@ -4464,6 +4493,8 @@ PS1=\"(microblog.pub) \$PS1\"" > "$micro_pyenv_activate_file"
 			G_EXEC_OUTPUT=1 G_EXEC runuser -u "$micro_name" -- dash -c ". $micro_pyenv_activate_file; exec pip3 install poetry"
 			G_EXEC_DESC='Updating dependency locks'
 			G_EXEC_OUTPUT=1 G_EXEC runuser -u "$micro_name" -- dash -c ". $micro_pyenv_activate_file; exec poetry update --lock"
+			G_EXEC_DESC='Adding setuptools dependency for Poetry needed for config wizard' # <81: /mnt/dietpi_userdata/microblog-pub/.cache/pypoetry/virtualenvs/microblogpub-qTlMHCqJ-py3.11/lib/python3.11/site-packages/boussole/__init__.py:7: UserWarning: pkg_resources is deprecated as an API. See https://setuptools.pypa.io/en/latest/pkg_resources.html. The pkg_resources package is slated for removal as early as 2025-11-30. Refrain from using this package or pin to Setuptools<81.
+			G_EXEC_OUTPUT=1 G_EXEC runuser -u "$micro_name" -- dash -c ". $micro_pyenv_activate_file; exec poetry add --lock 'setuptools<81'"
 			G_EXEC_DESC='Installing microblog.pub'
 			G_EXEC_OUTPUT=1 G_EXEC runuser -u "$micro_name" -- dash -c ". $micro_pyenv_activate_file; exec poetry install"
 			G_EXEC_DESC='Storing Poetry virtualenv path'
@@ -4501,6 +4532,7 @@ _EOF_
 Description=microblog.pub (DietPi)
 Wants=network-online.target
 After=network-online.target
+ConditionPathExists=$micro_data_dir/data/profile.toml
 
 [Service]
 User=$micro_name
@@ -6624,7 +6656,7 @@ _EOF_
 			esac
 
 			# Download
-			local fallback_url="https://github.com/fatedier/frp/releases/download/v0.64.0/frp_0.64.0_linux_$arch.tar.gz"
+			local fallback_url="https://github.com/fatedier/frp/releases/download/v0.65.0/frp_0.65.0_linux_$arch.tar.gz"
 			Download_Install "$(curl -sSfL 'https://api.github.com/repos/fatedier/frp/releases/latest' | mawk -F\" "/^ *\"browser_download_url\": \".*\/frp_[0-9.]*_linux_$arch\.tar\.gz\"$/{print \$4}")"
 
 			G_EXEC cd frp_*
@@ -7027,7 +7059,7 @@ _EOF_
 
 			# Obtain latest version: Stick with v3. Once v4 is released, we will surely need to adjust below code.
 			local url=$(curl -sSfL 'https://www.haproxy.org/' | grep -Po '(?<=href=")/download/3\..*/src/haproxy-.*\.tar\.gz(?=")' | head -1)
-			local fallback_url='https://www.haproxy.org/download/3.2/src/haproxy-3.2.4.tar.gz'
+			local fallback_url='https://www.haproxy.org/download/3.2/src/haproxy-3.2.6.tar.gz'
 			Download_Install "${url:+https://www.haproxy.org$url}"
 
 			# Compile
@@ -7134,7 +7166,7 @@ _EOF_
 				local fallback_url='https://downloads.lms-community.org/nightly/lyrionmusicserver_9.1.0~1752577284_arm.deb'
 				Download_Install "$(curl -sSfL 'https://raw.githubusercontent.com/LMS-Community/lms-server-repository/master/dev.xml' | grep -om1 'https://[^"]*_arm.deb')"
 			else
-				local fallback_url="https://downloads.lms-community.org/nightly/lyrionmusicserver_9.0.3~1758288340_$arch.deb"
+				local fallback_url="https://downloads.lms-community.org/nightly/lyrionmusicserver_9.0.4~1759678152_$arch.deb"
 				Download_Install "$(curl -sSfL 'https://raw.githubusercontent.com/LMS-Community/lms-server-repository/master/stable.xml' | grep -om1 "https://[^\"]*_$arch.deb")"
 			fi
 			G_EXEC systemctl stop lyrionmusicserver
@@ -7180,7 +7212,7 @@ _EOF_
 				if (( $G_DISTRO > 6 ))
 				then
 					version=$(curl -sSfL 'https://api.github.com/repos/FreshRSS/FreshRSS/releases/latest' | mawk -F\" '/^ *"tag_name": "[^"]*",$/{print $4}')
-					[[ $version ]] || { version='1.27.0'; G_DIETPI-NOTIFY 1 "Automatic latest FreshRSS version detection failed. Version \"$version\" will be installed as fallback, but a newer version might be available. Please report this at: https://github.com/MichaIng/DietPi/issues"; }
+					[[ $version ]] || { version='1.27.1'; G_DIETPI-NOTIFY 1 "Automatic latest FreshRSS version detection failed. Version \"$version\" will be installed as fallback, but a newer version might be available. Please report this at: https://github.com/MichaIng/DietPi/issues"; }
 				fi
 				Download_Install "https://github.com/FreshRSS/FreshRSS/archive/$version.tar.gz"
 				G_EXEC mv "FreshRSS-$version" /opt/FreshRSS
@@ -7589,7 +7621,7 @@ _EOF_
 
 		if To_Install 179 komga # Komga
 		then
-			local fallback_url='https://github.com/gotson/komga/releases/download/1.23.4/komga-1.23.4.jar'
+			local fallback_url='https://github.com/gotson/komga/releases/download/1.23.5/komga-1.23.5.jar'
 			Download_Install "$(curl -sSfL 'https://api.github.com/repos/gotson/komga/releases/latest' | mawk -F\" '/^ *"browser_download_url": ".*\/komga-[^"\/]*\.jar"$/{print $4}')" /mnt/dietpi_userdata/komga/komga.jar
 
 			# User
@@ -8433,7 +8465,7 @@ location = /.well-known/caldav  { return 301 /baikal/html/dav.php; }' > /etc/ngi
 				*) local arch='amd64';;
 			esac
 
-			local fallback_url="https://github.com/MediaBrowser/Emby.Releases/releases/download/4.8.11.0/emby-server-deb_4.8.11.0_$arch.deb"
+			local fallback_url="https://github.com/MediaBrowser/Emby.Releases/releases/download/4.9.1.80/emby-server-deb_4.9.1.80_$arch.deb"
 			Download_Install "$(curl -sSfL 'https://api.github.com/repos/MediaBrowser/Emby.Releases/releases/latest' | mawk -F\" "/^ *\"browser_download_url\": \".*\/emby-server-deb_[^\"\/]*_$arch\.deb\"$/{print \$4}")"
 			G_EXEC systemctl stop emby-server
 
@@ -9089,7 +9121,7 @@ _EOF_
 					*) local arch='arm';;
 				esac
 
-				local fallback_url="https://github.com/syncthing/syncthing/releases/download/v2.0.9/syncthing-linux-$arch-v2.0.9.tar.gz"
+				local fallback_url="https://github.com/syncthing/syncthing/releases/download/v2.0.10/syncthing-linux-$arch-v2.0.10.tar.gz"
 				Download_Install "$(curl -sSfL 'https://api.github.com/repos/syncthing/syncthing/releases/latest' | mawk -F\" "/^ *\"browser_download_url\": \".*\/syncthing-linux-$arch-[^\"\/]*\.tar\.gz\"$/{print \$4}")"
 				G_EXEC mv syncthing-* /opt/syncthing
 			fi
@@ -9756,7 +9788,7 @@ _EOF_
 				esac
 
 				url=$(curl -sSfL 'https://api.github.com/repos/Radarr/Radarr/releases/latest' | mawk -F\" "/^ *\"browser_download_url\": \".*linux-core-$arch\.tar\.gz\"$/{print \$4}")
-				local fallback_url="https://github.com/Radarr/Radarr/releases/download/v5.27.5.10198/Radarr.master.5.27.5.10198.linux-core-$arch.tar.gz"
+				local fallback_url="https://github.com/Radarr/Radarr/releases/download/v5.28.0.10274/Radarr.master.5.28.0.10274.linux-core-$arch.tar.gz"
 			fi
 			Download_Install "$url"
 
@@ -9847,7 +9879,7 @@ _EOF_
 				esac
 
 				url=$(curl -sSfL 'https://api.github.com/repos/Lidarr/Lidarr/releases/latest' | mawk -F\" "/^ *\"browser_download_url\": \".*linux-core-$arch\.tar\.gz\"$/{print \$4}")
-				local fallback_url="https://github.com/Lidarr/Lidarr/releases/download/v2.13.3.4711/Lidarr.master.2.13.3.4711.linux-core-$arch.tar.gz"
+				local fallback_url="https://github.com/Lidarr/Lidarr/releases/download/v2.14.5.4836/Lidarr.master.2.14.5.4836.linux-core-$arch.tar.gz"
 			fi
 			Download_Install "$url"
 
@@ -10053,7 +10085,7 @@ _EOF_
 				3) local arch='LinuxARM64';;
 				*) local arch='LinuxAMDx64';;
 			esac
-			local fallback_url="https://github.com/Jackett/Jackett/releases/download/v0.23.43/Jackett.Binaries.$arch.tar.gz"
+			local fallback_url="https://github.com/Jackett/Jackett/releases/download/v0.24.156/Jackett.Binaries.$arch.tar.gz"
 			Download_Install "$(curl -sSfL 'https://api.github.com/repos/Jackett/Jackett/releases/latest' | mawk -F\" "/^ *\"browser_download_url\": \".*\/Jackett\.Binaries\.$arch\.tar\.gz\"$/{print \$4}")"
 
 			# Move existing configs to unpacked install dir
@@ -10112,7 +10144,7 @@ _EOF_
 			local reinstall=0
 			[[ -f '/mnt/dietpi_userdata/nzbget/nzbget.conf' ]] && reinstall=1
 
-			local fallback_url='https://github.com/nzbgetcom/nzbget/releases/download/v25.3/nzbget-25.3-bin-linux.run'
+			local fallback_url='https://github.com/nzbgetcom/nzbget/releases/download/v25.4/nzbget-25.4-bin-linux.run'
 			Download_Install "$(curl -sSfL 'https://api.github.com/repos/nzbgetcom/nzbget/releases/latest' | mawk -F\" '/^ *"browser_download_url": ".*\/nzbget-[^"/]*-bin-linux.run"$/{print $4}')" nzbget.run
 			G_EXEC mkdir -p /mnt/dietpi_userdata/nzbget
 			G_EXEC_OUTPUT=1 G_EXEC dash nzbget.run --destdir /mnt/dietpi_userdata/nzbget
@@ -10849,8 +10881,15 @@ _EOF_
 				*) local arch='arm-6';;
 			esac
 
-			local fallback_url="https://codeberg.org/forgejo/forgejo/releases/download/v12.0.3/forgejo-12.0.3-linux-$arch.xz"
-			Download_Install "$(curl -sSfL 'https://codeberg.org/api/v1/repos/forgejo/forgejo/releases/latest' | mawk -v RS=, -F\" "/^\"browser_download_url\":\".*-linux-$arch\.xz\"/{print \$4;exit}")" /mnt/dietpi_userdata/forgejo/forgejo
+			# Bullseye: Forgejo 13 requires Git >=2.34.1: https://codeberg.org/forgejo/forgejo/pulls/8328. This is also practically true, the daemon fails right after initial web UI setup steps.
+			if (( $G_DISTRO > 6 ))
+			then
+				local fallback_url="https://codeberg.org/forgejo/forgejo/releases/download/v13.0.1/forgejo-13.0.1-linux-$arch.xz"
+				Download_Install "$(curl -sSfL 'https://codeberg.org/api/v1/repos/forgejo/forgejo/releases/latest' | mawk -v RS=, -F\" "/^\"browser_download_url\":\".*-linux-$arch\.xz\"$/{print \$4;exit}")" /mnt/dietpi_userdata/forgejo/forgejo
+			else
+				local fallback_url="https://codeberg.org/forgejo/forgejo/releases/download/v12.0.4/forgejo-12.0.4-linux-$arch.xz"
+				Download_Install "$(curl -sSfL 'https://codeberg.org/api/v1/repos/forgejo/forgejo/releases' | mawk -v RS=, -F\" "/^\"browser_download_url\":\".*-12\..*-linux-$arch\.xz\"$/{print \$4}" | head -1)" /mnt/dietpi_userdata/forgejo/forgejo
+			fi
 
 			# User
 			Create_User -d /mnt/dietpi_userdata/forgejo -s /bin/dash forgejo
@@ -11165,7 +11204,7 @@ _EOF_
 
 			# Download
 			local version=$(curl -sSfL 'https://api.github.com/repos/ptitSeb/box64/releases/latest' | mawk -F\" '/^ *"tag_name": "[^"]*",$/{print $4}')
-			[[ $version ]] || { version='v0.3.6'; G_DIETPI-NOTIFY 1 "Automatic latest ${aSOFTWARE_NAME[$software_id]} version detection failed. Version \"$version\" will be installed as fallback, but a newer version might be available. Please report this at: https://github.com/MichaIng/DietPi/issues"; }
+			[[ $version ]] || { version='v0.3.8'; G_DIETPI-NOTIFY 1 "Automatic latest ${aSOFTWARE_NAME[$software_id]} version detection failed. Version \"$version\" will be installed as fallback, but a newer version might be available. Please report this at: https://github.com/MichaIng/DietPi/issues"; }
 			Download_Install "https://github.com/ptitSeb/box64/archive/$version.tar.gz"
 
 			# Build for targets: https://github.com/ptitSeb/box64/blob/main/CMakeLists.txt
@@ -11295,7 +11334,7 @@ _EOF_
 				# v3 drops PHP 7.4 support: https://github.com/TasmoAdmin/TasmoAdmin/releases/tag/v3.0.0
 				if (( $G_DISTRO > 6 ))
 				then
-					local fallback_url='https://github.com/TasmoAdmin/TasmoAdmin/releases/download/v4.3.1/tasmoadmin_v4.3.1.tar.gz'
+					local fallback_url='https://github.com/TasmoAdmin/TasmoAdmin/releases/download/v4.3.2/tasmoadmin_v4.3.2.tar.gz'
 					Download_Install "$(curl -sSfL 'https://api.github.com/repos/TasmoAdmin/TasmoAdmin/releases/latest' | mawk -F\" '/^ *"browser_download_url": ".*\/tasmoadmin_v[^"\/]*\.tar\.gz"$/{print $4}')"
 				else
 					Download_Install 'https://github.com/TasmoAdmin/TasmoAdmin/releases/download/v2.4.2/tasmoadmin_v2.4.2.tar.gz'
@@ -11397,7 +11436,7 @@ _EOF_'
 			local ha_pyenv_activation=". $ha_home/pyenv-activate.sh"
 			# Obtain latest Python 3.13.y version supported by pyenv
 			local ha_python_version=$(curl -sSfL 'https://api.github.com/repos/pyenv/pyenv/contents/plugins/python-build/share/python-build?ref=master' | mawk -F\" '/^ *"name": "3\.13\.[0-9]*",$/{print $4}' | sort -Vr | head -1)
-			[[ $ha_python_version ]] || { ha_python_version='3.13.7'; G_DIETPI-NOTIFY 1 "Automatic latest Python version detection failed. Version \"$ha_python_version\" will be installed as fallback, but a newer version might be available. Please report this at: https://github.com/MichaIng/DietPi/issues"; }
+			[[ $ha_python_version ]] || { ha_python_version='3.13.9'; G_DIETPI-NOTIFY 1 "Automatic latest Python version detection failed. Version \"$ha_python_version\" will be installed as fallback, but a newer version might be available. Please report this at: https://github.com/MichaIng/DietPi/issues"; }
 
 			G_DIETPI-NOTIFY 2 "Home Assistant user:  $ha_user"
 			G_DIETPI-NOTIFY 2 "Home Assistant home:  $ha_home"
@@ -11410,7 +11449,10 @@ _EOF_'
 			G_EXEC chown "$ha_user:$ha_user" "$ha_home"
 
 			# Dependencies
-			PYTHON_VERSION=$ha_python_version Python_Deps -u "$ha_user" av bcrypt cryptography numpy pillow pyenv pymicro-vad
+			# - Bullseye ARMv6/7: Depends on old bcrypt and cryptography versions which have no AMMv7 wheels yet, hence add dependency manually
+			local rust=()
+			(( $G_DISTRO < 7 && $G_HW_ARCH < 3 )) && rust=('-r') aDEPS=('pkg-config' 'libssl-dev')
+			PYTHON_VERSION=$ha_python_version Python_Deps -u "$ha_user" "${rust[@]}" av bcrypt cryptography numpy pillow pyenv pymicro-vad
 			# - Custom dependencies, e.g. MariaDB support: G_AGI libmariadb-dev; pip3 install mysqlclient|PyMySQL
 			local custom_apt_deps=$(sed -n '/^[[:blank:]]*SOFTWARE_HOMEASSISTANT_APT_DEPS=/{s/^[^=]*=//p;q}' /boot/dietpi.txt)
 			mapfile -t -d' ' -O "${#aDEPS[@]}" aDEPS < <(echo -n "$custom_apt_deps")
@@ -11443,9 +11485,12 @@ _EOF_'
 			[[ -d '/mnt/dietpi_userdata/homeassistant/deps' ]] && G_EXEC rm -R /mnt/dietpi_userdata/homeassistant/deps
 			G_EXEC ln -sf "$ha_home/.pyenv/versions/$ha_python_version/lib/python${ha_python_version%.*}/site-packages" /mnt/dietpi_userdata/homeassistant/deps
 
-			# Disable pip cache
+			# Configure pip
+			# - Disable cache
 			G_EXEC mkdir -p "$ha_home/.pip"
 			G_EXEC eval "echo -e '[global]\nno-cache-dir=true' > '$ha_home/.pip/pip.conf'"
+			# - ARMv6/7 Trixie/Forky: Add piwheels: The Python version needs to match the Debian version, else dynamically linked shared libraries may not match
+			(( $G_HW_ARCH < 3 && $G_DISTRO > 7 )) && G_CONFIG_INJECT 'extra-index-url[[:blank:]]*=' 'extra-index-url=https://www.piwheels.org/simple/' "$ha_home/.pip/pip.conf" '\[global\]'
 
 			# Generate script to activate pyenv: This must be sourced from the originating shell, hence it does not require execute permissions.
 			echo "#!/bin/dash
@@ -11627,7 +11672,7 @@ _EOF_
 					*) local arch='amd64';;
 				esac
 
-				local fallback_url="https://github.com/rclone/rclone/releases/download/v1.71.0/rclone-v1.71.0-linux-$arch.deb"
+				local fallback_url="https://github.com/rclone/rclone/releases/download/v1.71.1/rclone-v1.71.1-linux-$arch.deb"
 				Download_Install "$(curl -sSfL 'https://api.github.com/repos/rclone/rclone/releases/latest' | mawk -F\" "/^ *\"browser_download_url\": \".*\/rclone-v[^\"\/]*-linux-$arch.deb\"$/{print \$4}")"
 			fi
 		fi
@@ -11641,7 +11686,7 @@ _EOF_
 				*) local arch='arm';;
 			esac
 
-			local fallback_url="https://github.com/restic/restic/releases/download/v0.18.0/restic_0.18.0_linux_$arch.bz2"
+			local fallback_url="https://github.com/restic/restic/releases/download/v0.18.1/restic_0.18.1_linux_$arch.bz2"
 			Download_Install "$(curl -sSfL 'https://api.github.com/repos/restic/restic/releases/latest' | mawk -F\" "/^ *\"browser_download_url\": \".*\/restic_[^\"\/]*_linux_$arch\.bz2\"$/{print \$4}")" /usr/local/bin/restic
 			G_EXEC chmod +x /usr/local/bin/restic
 		fi
@@ -11663,7 +11708,7 @@ _EOF_
 			fi
 
 			# Get latest version
-			local fallback_url='https://releases.wikimedia.org/mediawiki/1.44/mediawiki-1.44.0.tar.gz'
+			local fallback_url='https://releases.wikimedia.org/mediawiki/1.44/mediawiki-1.44.2.tar.gz'
 			Download_Install "$(curl -sSfL 'https://www.mediawiki.org/wiki/Download' | grep -o 'https://releases\.wikimedia\.org/mediawiki/[^/"]*/mediawiki-[^"]*\.tar\.gz' | head -1)"
 
 			# Enable required PHP modules
@@ -11758,7 +11803,7 @@ _EOF_
 				*) local arch='amd64';;
 			esac
 
-			local fallback_url="https://github.com/filebrowser/filebrowser/releases/download/v2.43.0/linux-$arch-filebrowser.tar.gz"
+			local fallback_url="https://github.com/filebrowser/filebrowser/releases/download/v2.44.1/linux-$arch-filebrowser.tar.gz"
 			Download_Install "$(curl -sSfL 'https://api.github.com/repos/filebrowser/filebrowser/releases/latest' | mawk -F\" "/^ *\"browser_download_url\": \".*\/linux-$arch-filebrowser\.tar\.gz\"$/{print \$4}")" ./filebrowser/
 
 			# Reinstall

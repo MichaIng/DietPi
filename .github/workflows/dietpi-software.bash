@@ -299,7 +299,7 @@ Process_Software()
 			197) aCOMMANDS[i]='box64 -v';;
 			198) aSERVICES[i]='filebrowser' aTCP[i]='8084';;
 			199) aSERVICES[i]='spotifyd' aUDP[i]='5353';; # + random high TCP port
-			200) aSERVICES[i]='dietpi-dashboard-frontend dietpi-dashboard-backend' aTCP[i]='5252 5353';;
+			200) aSERVICES[i]='dietpi-dashboard-frontend dietpi-dashboard-backend' aTCP[i]='5252 5253';;
 			201) aSERVICES[i]='zerotier-one' aTCP[i]='9993';;
 			202) aCOMMANDS[i]='rclone version';;
 			203) aSERVICES[i]='readarr' aTCP[i]='8787';;
@@ -517,8 +517,8 @@ fi
 # ARMv6: Workaround for ARMv7 Rust toolchain selected in containers with newer host/emulated ARM version
 (( $arch == 1 )) && G_EXEC sed --follow-symlinks -i '/# Start DietPi-Software/a\sed -i '\''s/--profile minimal .*$/--profile minimal --default-host arm-unknown-linux-gnueabihf/'\'' /boot/dietpi/dietpi-software' rootfs/boot/dietpi/dietpi-login
 
-# ARMv6: Workaround for hanging Rust tools chain on ARMv8 host: https://github.com/MichaIng/DietPi/issues/6306#issuecomment-1515303702
-(( $arch == 1 && $G_HW_ARCH == 3 )) && G_EXEC sysctl -w 'abi.cp15_barrier=2'
+# ARMv6/7: Workaround for "deprecated CP15 Barrier instruction" on ARMv8 host: https://github.com/MichaIng/DietPi/issues/6306#issuecomment-1515303702
+(( $arch < 3 && $G_HW_ARCH == 3 )) && G_EXEC sysctl -w 'abi.cp15_barrier=2'
 
 # WiFi Hotspot
 if (( ${aINSTALL[60]} ))
