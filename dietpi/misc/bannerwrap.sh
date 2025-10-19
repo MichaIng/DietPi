@@ -1,3 +1,4 @@
+#!/bin/sh
 BW_INDENT_TYPE=dashcolon
 BW_INDENT_MIN=3
 BW_MIN_USEABLE_SPACE=8
