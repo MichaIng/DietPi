@@ -97,7 +97,11 @@
 		fi
 	}
 
-	Apply_DietPi_FirstRun_Settings(){
+	Apply_DietPi_FirstRun_Settings()
+	{
+		# Failsafe: https://github.com/MichaIng/DietPi/issues/3646#issuecomment-653739919
+		chown 0:0 /
+		chmod 0755 /
 
 		# RPi: Apply safe overclocking values or update comments to show model-specific defaults
 		if (( $G_HW_MODEL < 10 ))
@@ -175,7 +179,7 @@ _EOF_
 			cat << '_EOF_' > /etc/systemd/system/console-getty.service.d/dietpi-autologin.conf
 [Service]
 ExecStart=
-ExecStart=-/sbin/agetty -a root -J -s console 115200,38400,9600 $TERM
+ExecStart=-/sbin/agetty -a root -J -s console 115200,57600,38400,9600 $TERM
 _EOF_
 		fi
 
@@ -202,23 +206,21 @@ _EOF_
 		local autoinstall_timezone=$(sed -n '/^[[:blank:]]*AUTO_SETUP_TIMEZONE=/{s/^[^=]*=//p;q}' /boot/dietpi.txt)
 		local current_timezone=$(readlink /etc/localtime)
 		[[ $current_timezone ]] && current_timezone=${current_timezone#/usr/share/zoneinfo/} || current_timezone='UTC'
-		if [[ -f /usr/share/zoneinfo/$autoinstall_timezone && $autoinstall_timezone != "$current_timezone" ]]; then
-
+		if [[ -f /usr/share/zoneinfo/$autoinstall_timezone && $autoinstall_timezone != "$current_timezone" ]]
+		then
 			G_DIETPI-NOTIFY 2 "Setting time zone $autoinstall_timezone. Please wait..."
 			rm -fv /etc/{localtime,timezone}
 			ln -s "/usr/share/zoneinfo/$autoinstall_timezone" /etc/localtime
 			dpkg-reconfigure -f noninteractive tzdata
-
 		fi
 
 		# Apply language (locale)
 		local autoinstall_language=$(sed -n '/^[[:blank:]]*AUTO_SETUP_LOCALE=/{s/^[^=]*=//p;q}' /boot/dietpi.txt)
 		grep -q "^$autoinstall_language UTF-8$" /usr/share/i18n/SUPPORTED || autoinstall_language='C.UTF-8'
-		if ! locale | grep -qE "(LANG|LC_ALL)=[\'\"]?${autoinstall_language}[\'\"]?" || ! locale -a | grep -qiE 'C\.UTF-?8'; then
-
+		if ! locale | grep -qE "(LANG|LC_ALL)=[\'\"]?${autoinstall_language}[\'\"]?" || ! locale -a | grep -qiE 'C\.UTF-?8'
+		then
 			G_DIETPI-NOTIFY 2 "Setting locale $autoinstall_language. Please wait..."
 			/boot/dietpi/func/dietpi-set_software locale "$autoinstall_language"
-
 		fi
 
 		# Skip keyboard, SSH, serial console and network setup on container systems
@@ -270,8 +272,8 @@ _EOF_
 		local static_dns=$(sed -n '/^[[:blank:]]*AUTO_SETUP_NET_STATIC_DNS=/{s/^[^=]*=//p;q}' /boot/dietpi.txt)
 
 		# - WiFi
-		if (( $wifi_enabled )); then
-
+		if (( $wifi_enabled ))
+		then
 			# Enable WiFi, disable Ethernet
 			ethernet_enabled=0
 			sed --follow-symlinks -Ei "/(allow-hotplug|auto)[[:blank:]]+wlan/c\allow-hotplug $iface_wlan" /etc/network/interfaces
@@ -284,8 +286,8 @@ _EOF_
 			/boot/dietpi/func/dietpi-set_hardware wificountrycode
 
 		# - Ethernet
-		elif (( $ethernet_enabled )); then
-
+		elif (( $ethernet_enabled ))
+		then
 			# Enable Ethernet, disable WiFi
 			wifi_enabled=0
 			sed --follow-symlinks -Ei "/(allow-hotplug|auto)[[:blank:]]+eth/c\allow-hotplug $iface_eth" /etc/network/interfaces
@@ -296,36 +298,30 @@ _EOF_
 
 			# RPi: Keep onboard WiFi enabled until end of first run installs: https://github.com/MichaIng/DietPi/issues/5391
 			(( $G_HW_MODEL > 9 )) || /boot/dietpi/func/dietpi-set_hardware wifimodules onboard_enable
-
 		fi
 
 		# - Static IP
-		if (( $use_static )); then
-
-			if (( $wifi_enabled )); then
-
+		if (( $use_static ))
+		then
+			if (( $wifi_enabled ))
+			then
 				sed --follow-symlinks -i "/iface wlan/c\iface $iface_wlan inet static" /etc/network/interfaces
 
-			elif (( $ethernet_enabled )); then
-
+			elif (( $ethernet_enabled ))
+			then
 				sed --follow-symlinks -i "/iface eth/c\iface $iface_eth inet static" /etc/network/interfaces
-
 			fi
 			sed --follow-symlinks -i "/address/c\address $static_ip" /etc/network/interfaces
 			sed --follow-symlinks -i "/netmask/c\netmask $static_mask" /etc/network/interfaces
 			sed --follow-symlinks -i "/gateway/c\gateway $static_gateway" /etc/network/interfaces
-			if command -v resolvconf > /dev/null; then
-
+			if command -v resolvconf > /dev/null
+			then
 				sed --follow-symlinks -i "/dns-nameservers/c\dns-nameservers $static_dns" /etc/network/interfaces
-
 			else
-
 				> /etc/resolv.conf
 				for i in $static_dns; do echo "nameserver $i" >> /etc/resolv.conf; done
 				sed --follow-symlinks -i "/dns-nameservers/c\#dns-nameservers $static_dns" /etc/network/interfaces
-
 			fi
-
 		fi
 
 		# - IPv6
@@ -349,17 +345,11 @@ _EOF_
 			local root_drive=$(lsblk -npo PKNAME "$(findmnt -Ufvnro SOURCE -M /)")
 			[[ $root_drive == '/dev/'* ]] && debconf-set-selections <<< "grub-pc grub-pc/install_devices multiselect $root_drive"
 		fi
-
 	}
 
 	#/////////////////////////////////////////////////////////////////////////////////////
 	# Main Loop
 	#/////////////////////////////////////////////////////////////////////////////////////
-
-	# Failsafe: https://github.com/MichaIng/DietPi/issues/3646#issuecomment-653739919
-	chown root:root /
-	chmod 0755 /
-
 	# Apply dietpi.txt settings and reset hardware ID + SSH host keys
 	Apply_DietPi_FirstRun_Settings
 

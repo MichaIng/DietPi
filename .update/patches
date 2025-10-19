@@ -2078,11 +2078,11 @@ _EOF_
 	# Add U-Boot PARTUUID indicator to cmdline via boot script. That way we can know from userland which device the boot script was loaded from, in case rootfs was moved elsewhere but /boot left on MMC.
 	# It is better than assuming U-Boot was loaded from the rootfs device, but theoretically it could boot from MMC and load the boot script from another device. This is actually a preferred setup we aim to support in the future, for USB and NVMe boot without SPI storage.
 	# However, this aligns it with how Armbian does it, and how their setup_write_uboot_platform obtains the U-Boot device.
-	if [[ -f '/boot/boot.cmd' ]] && ! grep -q 'partuuid' /boot/boot.cmd
+	if [[ -f '/boot/boot.cmd' ]] && ! grep -Eq '^setenv bootargs .* (partuuid|ubootpart)=' /boot/boot.cmd
 	then
-		G_DIETPI-NOTIFY 2 'Adding U-Boot partition indicator to boot script'
+		G_DIETPI-NOTIFY 2 'Adding U-Boot partition cmdline parameter to boot script'
 		# shellcheck disable=SC2016
-		G_EXEC sed --follow-symlinks -i -e '1i\if test "${devtype}" = "mmc"; then part uuid mmc "${devnum}:1" partuuid; fi' -e '/^setenv bootargs/s/"$/ partuuid=${partuuid}"/' /boot/boot.cmd
+		G_EXEC sed --follow-symlinks -i -e '1i\if test "${devtype}" = "mmc"; then part uuid mmc "${devnum}:1" ubootpart; fi' -e '/^setenv bootargs /s/"$/ ubootpart=${ubootpart}"/' /boot/boot.cmd
 		local arch='arm'
 		(( $G_HW_ARCH == 3 )) && arch='arm64'
 		G_EXEC mkimage -C none -A "$arch" -T script -d /boot/boot.cmd /boot/boot.scr
@@ -2241,9 +2241,6 @@ Patch_9_16()
 			G_DIETPI-NOTIFY 2 'Disabling serial console on /dev/serial0 device node'
 			/boot/dietpi/func/dietpi-set_hardware serialconsole disable serial0
 		fi
-
-		# Remove obsolete rpi[2-5] component
-		[[ -f '/etc/apt/sources.list.d/dietpi.list' ]] && grep -q ' rpi[2-5]$' /etc/apt/sources.list.d/dietpi.list && G_EXEC sed --follow-symlinks -i '1s/ rpi[2-5]$//' /etc/apt/sources.list.d/dietpi.list
 	fi
 
 	# Remove obsolete configs from pre-patches
@@ -2389,75 +2386,10 @@ Patch_9_17()
 			G_DIETPI-NOTIFY 2 'Removing deprecated setting from ProFTPD config'
 			G_EXEC sed --follow-symlinks -i '/^[[:blank:]]*MultilineRFC2228[[:blank:]]/d' /etc/proftpd/proftpd.conf
 		fi
-
-		# Pi-hole v6 migration
-		# - /etc/pihole/pihole.toml indicates that Pi-hole has been upgraded to v6 already.
-		# - The /var/www/pihole symlink indicates that an instance installed via dietpi-software has not been migrated yet.
-		if [[ -f '/etc/pihole/pihole.toml' && -L '/var/www/pihole' ]] && grep -q '^[[:blank:]]*aSOFTWARE_INSTALL_STATE\[93\]=2' /boot/dietpi/.installed
-		then
-			# Remove DietPi specific v5 files
-			# - Symlinks
-			G_EXEC rm /var/www/pihole
-			[[ -L '/var/www/admin' ]] && G_EXEC rm /var/www/admin
-			# - Webserver configs
-			[[ -d '/etc/apache2/sites-available' ]] && G_EXEC rm -f /etc/apache2/sites-{available,enabled}/dietpi-pihole*
-			[[ -d '/etc/lighttpd/conf-available' ]] && G_EXEC rm -f /etc/lighttpd/conf-{available,enabled}/99-dietpi-pihole*
-			[[ -d '/etc/nginx/sites-dietpi' ]] && G_EXEC rm -f /etc/nginx/sites-dietpi/dietpi-pihole*
-
-			# Remove www-data user from pihole group
-			getent group pihole | grep -Eq '(:|,)www-data(,|$)' && G_EXEC gpasswd -d www-data pihole
-
-			# Change web UI port to 8089 and 8489 (HTTPS) to avoid conflict with webservers and other web applications
-			G_EXEC pihole-FTL --config webserver.port 8089,8489s
-
-			# Inform user about differences to stock Pi-hole installation
-			G_WHIP_MSG "[ INFO ] Pi-hole network ports changed to 8089 and 8489
-\nTo align migrated Pi-hole v6 instances with fresh installs, and avoid possible conflicts with dedicated webservers, the network ports have been changed to 8089 and 8489 (HTTPS). Your Pi-hole instance will hence be available at:
-- http://$(G_GET_NET ip):8089/admin/
-- https://$(G_GET_NET ip):8489/admin/
-\nThis can be changed via web UI or following console command, e.g. for ports 80 and 443 (HTTPS):
-- sudo pihole-FTL --config webserver.port 80,443s"
-
-			# Offer to uninstall webserver and PHP if no dependant is installed
-			# - If only PHP or only a webserver is installed, one has been uninstalled already, and the other is assumed to be still needed for something else.
-			if grep -q '^[[:blank:]]*aSOFTWARE_INSTALL_STATE\[89\]=2' /boot/dietpi/.installed && grep -Eq '^[[:blank:]]*aSOFTWARE_INSTALL_STATE\[(83|84|85)\]=2' /boot/dietpi/.installed
-			then
-				G_WHIP_CHECKLIST_ARRAY=()
-				# - webserver
-				if ! /boot/dietpi/dietpi-software list | grep -q '| =2 |.*+webserver'
-				then
-					grep -q '^[[:blank:]]*aSOFTWARE_INSTALL_STATE\[83\]=2' /boot/dietpi/.installed && G_WHIP_CHECKLIST_ARRAY+=(83 'Apache webserver' off)
-					grep -q '^[[:blank:]]*aSOFTWARE_INSTALL_STATE\[84\]=2' /boot/dietpi/.installed && G_WHIP_CHECKLIST_ARRAY+=(84 'Lighttpd webserver' off)
-					grep -q '^[[:blank:]]*aSOFTWARE_INSTALL_STATE\[85\]=2' /boot/dietpi/.installed && G_WHIP_CHECKLIST_ARRAY+=(85 'Nginx webserver' off)
-				fi
-				# - PHP: Exclude webserver stacks which are meta selections only
-				/boot/dietpi/dietpi-software list | grep '| =2 |.*+PHP' | grep -vEq '^.\[32mID (75|76|78|79|81|82)' || G_WHIP_CHECKLIST_ARRAY+=(89 'PHP server' off)
-				if (( ${#G_WHIP_CHECKLIST_ARRAY[@]} ))
-				then
-					G_WHIP_BUTTON_CANCEL_TEXT='Skip'
-					# shellcheck disable=SC2086
-					G_WHIP_CHECKLIST '[ INFO ] Possibly obsolete webserver and/or PHP installation detected
-\nYou recently updated Pi-hole to v6, which now does not require any webserver or PHP anymore.
-\nWe detected a webserver and/or PHP installation on your system, but no dependant among installed dietpi-software options.
-\nIf you are sure that you do not require the webserver and/or PHP anymore, you can select them for uninstall below. Use the space bar to (de)select the ones which shall be uninstalled:' && /boot/dietpi/dietpi-software uninstall $G_WHIP_RETURNED_VALUE
-				fi
-			fi
-		fi
 	fi
 
-	# RPi firmware migration: Do after all other patches
-	if (( $G_HW_MODEL < 10 && $G_DISTRO > 6 )) && ! dpkg-query -s 'raspi-firmware' &> /dev/null
-	then
-		G_WHIP_BUTTON_CANCEL_TEXT='Later'
-		G_WHIP_YESNO '[ INFO ] Raspberry Pi kernel/firmware migration available
-\nWith Raspberry Pi OS Bookworm, a new Linux 6.12+ kernel and firmware stack is available for Raspberry Pi systems, which as well enables support for the Raspberry Pi 5.
-\nWe created a migration script which has been tested for over a year to move from the old Linux 6.1 stack to the new one, and are now certain it is stable to be rolled out for all Raspberry Pi users.
-\nThere are some minor limitations, like the removal of display settings for the legacy RPi display driver. We created a new tool "dietpi-display" to change display mode and rotation with the KMS/DRM display driver, to address this limitation, and make the same options available to all other hardware models at the same time.
-\nDo you want to perform the RPi kernel/firmware migration now?
-\nThis can be done any time later via dietpi-config > Advanced Options > RPi firmware migration.' && /boot/dietpi/func/dietpi-set_software rpi_firmware_migration
-
 	# RK3588 migration to vendor kernel
-	elif (( $G_HW_CPUID == 11 || $G_HW_MODEL == 90 )) && dpkg-query -s 'linux-image-legacy-rk35xx' &> /dev/null && ! dpkg-query -s 'linux-image-vendor-rk35xx' &> /dev/null && ! dpkg-query -s 'linux-image-current-rockchip64' &> /dev/null && ! dpkg-query -s 'linux-image-edge-rockchip64' &> /dev/null
+	if (( $G_HW_CPUID == 11 || $G_HW_MODEL == 90 )) && dpkg-query -s 'linux-image-legacy-rk35xx' &> /dev/null && ! dpkg-query -s 'linux-image-vendor-rk35xx' &> /dev/null && ! dpkg-query -s 'linux-image-current-rockchip64' &> /dev/null && ! dpkg-query -s 'linux-image-edge-rockchip64' &> /dev/null
 	then
 		G_DIETPI-NOTIFY 2 'Migrating from legacy Linux 5.10 kernel to Linux 6.1 vendor kernel'
 		G_AGI linux-{image,dtb}-vendor-rk35xx
@@ -2661,6 +2593,99 @@ SUBSYSTEM=="leds", KERNEL=="lan1_led", ACTION=="add", ATTR{trigger}="netdev", AT
 SUBSYSTEM=="leds", KERNEL=="user_led", ACTION=="add", ATTR{trigger}="netdev", ATTR{device_name}="wlan0", ATTR{link}="1", ATTR{rx}="1", ATTR{tx}="1", RUN+="/bin/ip l s wlan0 up", RUN+="/bin/ip l s wlan0 down"
 _EOF_
 		fi
+	fi
+}
+
+Patch_9_18()
+{
+	# Raspberry Pi
+	if (( $G_HW_MODEL < 10 ))
+	then
+		G_DIETPI-NOTIFY 2 'Revert now obsolete workaround for hanging task vchiq-keep errors and (visual-only) +1.0 load average' # https://github.com/MichaIng/DietPi/issues/7610
+		[[ -f '/etc/modprobe.d/dietpi-disable_vcsm.conf' ]] && ! grep -vq '^vc_sm_cma$' /etc/modprobe.d/dietpi-disable_vcsm.conf && G_EXEC rm /etc/modprobe.d/dietpi-disable_vcsm.conf
+		# Get current memory split
+		# - Get override setting: gpu_mem_1024 is effective for all models with >= 1 GiB RAM
+		local size=1024 default=76
+		(( $G_HW_MEMORY_SIZE < 1024 )) && size=$G_HW_MEMORY_SIZE default=64
+		local gpu_mem_current=$(sed -n "/^[[:blank:]]*gpu_mem_$size=/{s/^[^=]*=//p;q}" /boot/config.txt) # override setting
+		[[ $gpu_mem_current ]] || gpu_mem_current=$(sed -n '/^[[:blank:]]*gpu_mem=/{s/^[^=]*=//p;q}' /boot/config.txt) # base setting
+		[[ $gpu_mem_current ]] || gpu_mem_current=$default # default value
+		(( $gpu_mem_current < 32 )) && G_EXEC eval 'echo '\''blacklist vc_sm_cma'\'' > /etc/modprobe.d/dietpi-disable_vcsm.conf'
+
+	elif [[ -f '/boot/boot.cmd' ]] && ! grep -q ' ubootpart=' /boot/boot.cmd
+	then
+		G_DIETPI-NOTIFY 2 'Aligning U-Boot partition cmdline parameter in boot script'
+		G_EXEC sed --follow-symlinks -i '/^setenv bootargs /s/ partuuid=/ ubootpart=/' /boot/boot.cmd
+		local arch='arm'
+		(( $G_HW_ARCH == 3 )) && arch='arm64'
+		G_EXEC mkimage -C none -A "$arch" -T script -d /boot/boot.cmd /boot/boot.scr
+	fi
+
+	# Software updates, migrations and patches
+	if [[ -f '/boot/dietpi/.installed' ]]
+	then
+		# Pi-hole v6 migration
+		# - /etc/pihole/pihole.toml indicates that Pi-hole has been upgraded to v6 already.
+		# - The /var/www/pihole symlink indicates that an instance installed via dietpi-software has not been migrated yet.
+		if [[ -f '/etc/pihole/pihole.toml' && -L '/var/www/pihole' ]] && grep -q '^[[:blank:]]*aSOFTWARE_INSTALL_STATE\[93\]=2' /boot/dietpi/.installed
+		then
+			# Remove DietPi specific v5 files
+			# - Symlinks
+			G_EXEC rm /var/www/pihole
+			[[ -L '/var/www/admin' ]] && G_EXEC rm /var/www/admin
+			# - Webserver configs
+			[[ -d '/etc/apache2/sites-available' ]] && G_EXEC rm -f /etc/apache2/sites-{available,enabled}/dietpi-pihole*
+			[[ -d '/etc/lighttpd/conf-available' ]] && G_EXEC rm -f /etc/lighttpd/conf-{available,enabled}/99-dietpi-pihole*
+			[[ -d '/etc/nginx/sites-dietpi' ]] && G_EXEC rm -f /etc/nginx/sites-dietpi/dietpi-pihole*
+
+			# Remove www-data user from pihole group
+			getent group pihole | grep -Eq '(:|,)www-data(,|$)' && G_EXEC gpasswd -d www-data pihole
+
+			# Change web UI port to 8089 and 8489 (HTTPS) to avoid conflict with webservers and other web applications
+			G_EXEC pihole-FTL --config webserver.port 8089,8489s
+
+			# Inform user about differences to stock Pi-hole installation
+			G_WHIP_MSG "[ INFO ] Pi-hole network ports changed to 8089 and 8489
+\nTo align migrated Pi-hole v6 instances with fresh installs, and avoid possible conflicts with dedicated webservers, the network ports have been changed to 8089 and 8489 (HTTPS). Your Pi-hole instance will hence be available at:
+- http://$(G_GET_NET ip):8089/admin/
+- https://$(G_GET_NET ip):8489/admin/
+\nThis can be changed via web UI or following console command, e.g. for ports 80 and 443 (HTTPS):
+- sudo pihole-FTL --config webserver.port 80,443s"
+
+			# Offer to uninstall webserver and PHP if no dependant is installed
+			# - If only PHP or only a webserver is installed, one has been uninstalled already, and the other is assumed to be still needed for something else.
+			if grep -q '^[[:blank:]]*aSOFTWARE_INSTALL_STATE\[89\]=2' /boot/dietpi/.installed && grep -Eq '^[[:blank:]]*aSOFTWARE_INSTALL_STATE\[(83|84|85)\]=2' /boot/dietpi/.installed
+			then
+				G_WHIP_CHECKLIST_ARRAY=()
+				# - webserver
+				if ! /boot/dietpi/dietpi-software list | grep -q '| =2 |.*+webserver'
+				then
+					grep -q '^[[:blank:]]*aSOFTWARE_INSTALL_STATE\[83\]=2' /boot/dietpi/.installed && G_WHIP_CHECKLIST_ARRAY+=(83 'Apache webserver' off)
+					grep -q '^[[:blank:]]*aSOFTWARE_INSTALL_STATE\[84\]=2' /boot/dietpi/.installed && G_WHIP_CHECKLIST_ARRAY+=(84 'Lighttpd webserver' off)
+					grep -q '^[[:blank:]]*aSOFTWARE_INSTALL_STATE\[85\]=2' /boot/dietpi/.installed && G_WHIP_CHECKLIST_ARRAY+=(85 'Nginx webserver' off)
+				fi
+				# - PHP: Exclude webserver stacks which are meta selections only
+				/boot/dietpi/dietpi-software list | grep '| =2 |.*+PHP' | grep -vEq '^.\[32mID (75|76|78|79|81|82)' || G_WHIP_CHECKLIST_ARRAY+=(89 'PHP server' off)
+				if (( ${#G_WHIP_CHECKLIST_ARRAY[@]} ))
+				then
+					G_WHIP_BUTTON_CANCEL_TEXT='Skip'
+					# shellcheck disable=SC2086
+					G_WHIP_CHECKLIST '[ INFO ] Possibly obsolete webserver and/or PHP installation detected
+\nYou recently updated Pi-hole to v6, which now does not require any webserver or PHP anymore.
+\nWe detected a webserver and/or PHP installation on your system, but no dependant among installed dietpi-software options.
+\nIf you are sure that you do not require the webserver and/or PHP anymore, you can select them for uninstall below. Use the space bar to (de)select the ones which shall be uninstalled:' && /boot/dietpi/dietpi-software uninstall $G_WHIP_RETURNED_VALUE
+				fi
+			fi
+		fi
+	fi
+
+	# RPi firmware migration: Do after all other patches
+	if (( $G_HW_MODEL < 10 && $G_DISTRO > 6 )) && ! dpkg-query -s 'raspi-firmware' &> /dev/null
+	then
+		G_WHIP_MSG '[ INFO ] Raspberry Pi kernel/firmware migration will be applied
+\nA migration to the new RPi Linux 6.12+ kernel and firmware stack will be applied. Please report any error at our forum or GitHub. The DietPi update will finish in any case, and you can retry the migration with:
+$ /boot/dietpi/func/dietpi-set_software rpi_firmware_migration'
+		/boot/dietpi/func/dietpi-set_software rpi_firmware_migration
 	fi
 }
 

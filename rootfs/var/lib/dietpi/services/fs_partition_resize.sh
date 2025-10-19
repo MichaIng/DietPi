@@ -2,7 +2,7 @@
 {
 	# Error out on command failures
 	set -e
-	REBOOT=0
+	REBOOT=
 	EXIT_CODE=0
 	TMP_MOUNT=
 
@@ -12,9 +12,9 @@
 	{
 		[[ $TMP_MOUNT ]] && umount -lv "$TMP_MOUNT" && rmdir -v "$TMP_MOUNT" || :
 
-		if (( $REBOOT ))
+		if [[ $REBOOT ]]
 		then
-			echo '[ INFO ] Performing a reboot to apply either new boot configs imported from the setup partition or a failed ext filesystem expansion'
+			echo "[ INFO ] Performing final reboot $REBOOT"
 			systemctl start reboot.target
 		fi
 	}
@@ -22,7 +22,7 @@
 
 	Reboot_to_load_Partition_table()
 	{
-		echo '[ INFO ] Performing intermediate reboot to load new partition tables'
+		echo '[ INFO ] Performing intermediate reboot to load new partition table'
 		echo '[ INFO ] Re-enabling this service to continue with filesystem expansion on next boot'
 		> /dietpi_skip_partition_resize
 		mkdir -pv /etc/systemd/system/local-fs.target.wants
@@ -45,21 +45,22 @@
 	ROOT_DEV=$(findmnt -Ufvnro SOURCE -M /)
 
 	echo '[ INFO ] Detecting root partition and parent drive for supported naming schemes'
-	# - SCSI/SATA:	/dev/sd[a-z][1-9]
-	# - IDE:	/dev/hd[a-z][1-9]
-	# - VirtIO:	/dev/vd[a-z][1-9]
-	# - eMMC:	/dev/mmcblk[0-9]p[1-9]
-	# - NVMe:	/dev/nvme[0-9]n[0-9]p[1-9]
-	# - loop:	/dev/loop[0-9]p[1-9]
-	if [[ $ROOT_DEV == /dev/[shv]d[a-z][1-9] ]]
+	# - SCSI/SATA:   /dev/sd[a-z][1-9]
+	# - IDE:         /dev/hd[a-z][1-9]
+	# - VirtIO:      /dev/vd[a-z][1-9]
+	# - Xen/XCP-ng:  /dev/xvd[a-z][1-9]
+	# - eMMC:        /dev/mmcblk[0-9]p[1-9]
+	# - NVMe:        /dev/nvme[0-9]n[0-9]p[1-9]
+	# - loop:        /dev/loop[0-9]p[1-9]
+	if [[ $ROOT_DEV =~ ^/dev/(sd|hd|vd|xvd)[a-z][1-9]$ ]]
 	then
-		ROOT_PART=${ROOT_DEV: -1}	# /dev/sda1 => 1
-		ROOT_DRIVE=${ROOT_DEV::-1}	# /dev/sda1 => /dev/sda
+		ROOT_PART=${ROOT_DEV: -1}   # /dev/sda1 => 1
+		ROOT_DRIVE=${ROOT_DEV::-1}  # /dev/sda1 => /dev/sda
 
 	elif [[ $ROOT_DEV =~ ^/dev/(mmcblk|nvme[0-9]n|loop)[0-9]p[1-9]$ ]]
 	then
-		ROOT_PART=${ROOT_DEV: -1}	# /dev/mmcblk0p1 => 1
-		ROOT_DRIVE=${ROOT_DEV::-2}	# /dev/mmcblk0p1 => /dev/mmcblk0
+		ROOT_PART=${ROOT_DEV: -1}   # /dev/mmcblk0p1 => 1
+		ROOT_DRIVE=${ROOT_DEV::-2}  # /dev/mmcblk0p1 => /dev/mmcblk0
 	else
 		echo "[FAILED] Unsupported root device naming scheme ($ROOT_DEV). Aborting ..."
 		exit 1
@@ -73,6 +74,10 @@
 	if [[ -f '/dietpi_skip_partition_resize' ]]
 	then
 		rm -v /dietpi_skip_partition_resize
+
+	elif [[ ! -e $ROOT_DRIVE ]]
+	then
+		echo '[ INFO ] Skipping partition expansion since detected root drive device node does not exist, assuming container system'
 	else
 		echo '[ INFO ] Checking if the last partition contains a filesystem with DIETPISETUP label'
 		# - Use sfdisk to detect last partition, as lsblk with "-r" option on Bullseye does not sort partitions well: https://github.com/MichaIng/DietPi/issues/7527
@@ -92,11 +97,11 @@
 					mkdir -pv /boot/extlinux
 					[[ -f '/boot/extlinux/extlinux.conf' ]] && mtime=$(date -r '/boot/extlinux/extlinux.conf' '+%s') || mtime=0
 					cp -uv "$TMP_MOUNT/$f" /boot/extlinux/
-					(( $(date -r '/boot/extlinux/extlinux.conf' '+%s') > $mtime )) && REBOOT=1
+					(( $(date -r '/boot/extlinux/extlinux.conf' '+%s') > $mtime )) && REBOOT='to apply the extlinux.conf change'
 				else
 					[[ ( $f == 'dietpiEnv.txt' || $f == 'boot.ini' ) && -f /boot/$f ]] && mtime=$(date -r "/boot/$f" '+%s') || mtime=0
 					cp -uv "$TMP_MOUNT/$f" /boot/
-					[[ $f == 'dietpiEnv.txt' || $f == 'boot.ini' ]] && (( $(date -r "/boot/$f" '+%s') > $mtime )) && REBOOT=1
+					[[ $f == 'dietpiEnv.txt' || $f == 'boot.ini' ]] && (( $(date -r "/boot/$f" '+%s') > $mtime )) && REBOOT='to apply the dietpiEnv.txt change'
 				fi
 			done
 			umount -v "$SETUP_PART"
@@ -124,21 +129,10 @@
 			lsblk -po NAME,LABEL,SIZE,TYPE,FSTYPE,MOUNTPOINT "$ROOT_DRIVE"
 		fi
 
-		# GPT partition table: Move GPT backup partition table to end of drive
-		# - lsblk -ndo PTTYPE "$ROOT_DRIVE" does not work inside systemd-nspawn containers.
-		if [[ $(blkid -s PTTYPE -o value "$ROOT_DRIVE") == 'gpt' ]]
-		then
-			echo '[ INFO ] GPT partition table detected: moving GPT backup partition table to end of drive'
-			sgdisk -e "$ROOT_DRIVE"
-		fi
-
 		echo '[ INFO ] Maximising root partition size'
 		sfdisk --no-reread --no-tell-kernel -fN"$ROOT_PART" "$ROOT_DRIVE" <<< ',+'
 
-		# At least in some cases, partx fails with "updating partition #X failed: Device or resource busy". Give it a little time to settle ...
-		sleep 0.5
-
-		echo '[ INFO ] Informing kernel about changed partition table, rebooting in case of failure'
+		echo '[ INFO ] Informing kernel about changed partition table, rebooting in case of failure (expected in case of GPT partition table)'
 		partx -uv "$ROOT_DEV" || Reboot_to_load_Partition_table
 
 		# Give the kernel some time to read partition changes: https://github.com/MichaIng/DietPi/issues/5006
@@ -151,12 +145,26 @@
 	# Maximise root filesystem if type is supported
 	case $ROOT_FSTYPE in
 		'ext'[234])
-			echo "[ INFO ] Maximising $ROOT_FSTYPE root filesystem size"
-			resize2fs "$ROOT_DEV" || REBOOT=1 # Reboot if resizing fails: https://github.com/MichaIng/DietPi/issues/6149
-			if [[ $ROOT_FSTYPE == 'ext'[34] ]]
+			if [[ -b $ROOT_DEV ]]
 			then
-				echo '[ INFO ] Re-enabling filesystem journal if disabled by dietpi-imager on image generation'
-				tune2fs -O 'has_journal' "$ROOT_DEV"
+				echo "[ INFO ] Maximising $ROOT_FSTYPE root filesystem size"
+				resize2fs "$ROOT_DEV" || REBOOT='since the root filesystem resize failed' # https://github.com/MichaIng/DietPi/issues/6149
+				if [[ $ROOT_FSTYPE == 'ext'[34] ]] && ! tune2fs -l "$ROOT_DEV" | grep -q 'has_journal'
+				then
+					echo '[ INFO ] Adding root filesystem journal'
+					if [[ -e '/run/initramfs/fsck-root' ]]
+					then
+						REBOOT=' with forced fsck to apply the new root filesystem journal'
+						echo -e '#!/bin/dash\ntune2fs -c 0 '"'$ROOT_DEV' && rm /var/lib/dietpi/postboot.d/dietpi-reset_max_mount_count" > /var/lib/dietpi/postboot.d/dietpi-reset_max_mount_count
+						tune2fs -O 'has_journal' -c 1 -C 2 "$ROOT_DEV"
+						sync
+						sleep 1
+					else
+						tune2fs -O 'has_journal' "$ROOT_DEV"
+					fi
+				fi
+			else
+				echo '[ INFO ] Skipping root filesystem expansion since detected root partition device node does not exist, assuming container system'
 			fi
 		;;
 		'f2fs') echo '[ INFO ] F2FS online expansion is not possible. Please do that from another Linux system if needed.';;

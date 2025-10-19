@@ -37,11 +37,10 @@ ORGA='domoticz'
 PRETTY='Domoticz'
 version=$(curl -sSf "${header[@]}" "https://api.github.com/repos/$ORGA/$NAME/releases/latest" | mawk -F\" '/^  "tag_name"/{print $4}')
 [[ $version ]] || Error_Exit "No latest $PRETTY version found"
-branch='development' # Temporary
 G_DIETPI-NOTIFY 2 "Building $PRETTY version \e[33m$version"
 G_EXEC cd /tmp
 [[ -d $NAME ]] && G_EXEC rm -R "$NAME"
-G_EXEC_OUTPUT=1 G_EXEC git clone --depth=1 --recurse-submodules --shallow-submodules -b "$branch" "https://github.com/$ORGA/$NAME"
+G_EXEC_OUTPUT=1 G_EXEC git clone --depth=1 --recurse-submodules --shallow-submodules -b "$version" "https://github.com/$ORGA/$NAME"
 [[ -d 'build' ]] && G_EXEC rm -R build
 G_EXEC cd "$NAME"
 DIR="/tmp/${NAME}_$G_HW_ARCH_NAME"

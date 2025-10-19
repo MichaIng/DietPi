@@ -627,7 +627,7 @@ A long (or insufficiently manufactured) cable may required a higher boost settin
  - Disable the framebuffer
  - Lower energy consumption by 0.1+ Watts
  - Improve RAM performance by 1-5% (VideoCore shares RAM bandwidth)
-   Source: https://www.raspberrypi.org/forums/viewtopic.php?p=105008#p105008\n
+   Source: https://forums.raspberrypi.com/viewtopic.php?p=105008#p105008\n
 Re-enabling HDMI requires a reboot. If you need emergency HDMI output, edit the following files on first partition of the SDcard from external system:
  - In config.txt, set "hdmi_ignore_hotplug=0" and comment/remove the "max_framebuffers=0" line.
  - In dietpi.txt, set "AUTO_SETUP_HEADLESS=0".' || { REBOOT_REQUIRED=0; return; }
@@ -892,10 +892,13 @@ Re-enabling HDMI requires a reboot. If you need emergency HDMI output, edit the 
 		fi
 		G_WHIP_MENU_ARRAY+=('Time sync mode' ": [$ntpd_mode_text]")
 
-		# RTC clock
-		local rtc_text='Hardware'
-		command -v fake-hwclock > /dev/null && rtc_text='Emulated'
-		G_WHIP_MENU_ARRAY+=('RTC mode' ": [$rtc_text]")
+		# RTC clock: Only show if an RTC device node exists
+		if [[ -f '/dev/rtc0' || -f '/dev/rtc' || -f '/dev/misc/rtc' ]]
+		then
+			local rtc_text='Hardware'
+			command -v fake-hwclock > /dev/null && rtc_text='Emulated'
+			G_WHIP_MENU_ARRAY+=('RTC mode' ": [$rtc_text]")
+		fi
 
 		# Armbian U-Boot update
 		if [[ -f '/usr/lib/u-boot/platform_install.sh' ]]
@@ -904,7 +907,7 @@ Re-enabling HDMI requires a reboot. If you need emergency HDMI output, edit the 
 			G_WHIP_MENU_ARRAY+=('Update MMC bootloader' ": Flash current U-Boot to $bootdev")
 		fi
 
-		# RPi 4/5 EEPROM update: https://www.raspberrypi.org/documentation/hardware/raspberrypi/booteeprom.md
+		# RPi 4/5 EEPROM update: https://www.raspberrypi.com/documentation/computers/raspberry-pi.html#raspberry-pi-boot-eeprom
 		if [[ $G_HW_MODEL == [45] ]]
 		then
 			if command -v rpi-eeprom-update &> /dev/null
@@ -918,15 +921,11 @@ Re-enabling HDMI requires a reboot. If you need emergency HDMI output, edit the 
 				G_WHIP_MENU_ARRAY+=('Update RPi EEPROM firmware' ': Install rpi-eeprom APT package')
 			fi
 
-		# Odroid N2, Odroid HC4, ROCKPro64, ROCK64, ROCK 4, ROCK 5B, Orange Pi 5 (Plus/Pro/Ultra) and Orange Pi 3B: https://dietpi.com/forum/t/orange-pi-5-boot-from-nvme/16457
-		elif [[ $G_HW_MODEL =~ ^(15|17|42|43|72|78|80|82|87|93|94)$ && -f '/usr/lib/u-boot/platform_install.sh' ]]
+		# Armbian-based U-Boot package with function to flash SPI bootloader
+		elif [[ -f '/usr/lib/u-boot/platform_install.sh' ]] && grep -q 'write_uboot_platform_mtd' /usr/lib/u-boot/platform_install.sh
 		then
-			# Odroid N2/ROCK 4: Device tree overlay required
-			local spidev='/dev/mtdblock0'
-			(( $G_HW_MODEL == 15 || $G_HW_MODEL == 72 )) || {
-				{ [[ -e '/dev/mtd0' ]] && grep -q 'flashcp' /usr/lib/u-boot/platform_install.sh && spidev='/dev/mtd0'; } ||
-				{ [[ -b '/dev/mtdblock0' ]] && ! grep -q 'flashcp' /usr/lib/u-boot/platform_install.sh; }
-			} && G_WHIP_MENU_ARRAY+=('Update SPI bootloader' ": Flash current U-Boot to $spidev")
+			# Odroid N2/ROCK 4: Device tree overlay required, else check whether SPI device exists
+			(( $G_HW_MODEL == 15 || $G_HW_MODEL == 72 )) || [[ -e '/dev/mtd0' || -b '/dev/mtdblock0' ]] && G_WHIP_MENU_ARRAY+=('Update SPI bootloader' ': Flash current U-Boot to SPI storage')
 
 		# VisionFive 2/Star64: https://doc-en.rvspace.org/VisionFive2/PDF/VisionFive2_QSG.pdf
 		elif (( $G_HW_MODEL == 81 || $G_HW_MODEL == 84 ))
@@ -972,7 +971,7 @@ Re-enabling HDMI requires a reboot. If you need emergency HDMI output, edit the 
 			(( $spi_enabled )) && spi_text='On'
 			G_WHIP_MENU_ARRAY+=('SPI state' ": [$spi_text]")
 
-			# USB boot option: RPi3 only and not required for RPi3+: https://www.raspberrypi.org/documentation/hardware/raspberrypi/bootmodes/msd.md
+			# USB boot option: RPi3 only and not required for RPi3+: https://www.raspberrypi.com/documentation/computers/raspberry-pi.html#raspberry-pi-2b-3a-3b-cm3-cm3-zero-2-w
 			if [[ $G_HW_MODEL == 3 && $G_HW_MODEL_NAME != *'+'* ]]
 			then
 				local rpi3_usb_boot_bit_enabled=$(vcgencmd otp_dump | grep -cm1 '17:3020000a')
@@ -1003,7 +1002,7 @@ Re-enabling HDMI requires a reboot. If you need emergency HDMI output, edit the 
 
 			G_WHIP_MENU_ARRAY=(
 
-				'Emulated' ': Use "fake-hwclock" to apply system clock on early boot'
+				'Emulated' ': Use "fake-hwclock" to update system clock on early boot'
 				'Hardware' ': Device has an active hardware RTC, purge "fake-hwclock"'
 			)
 
@@ -1013,22 +1012,15 @@ RTC hardware clock:
  - Most x86 PCs and some SBCs have a hardware clock with battery attached, or, have a socket where it can optionally be attached to.
  - If active, this hardware clock will apply the correct system time during kernel boot stage.\n
 fake-hwclock:
- - If no hardware RTC is available, the "fake-hwclock" package provides a service that saves the current system time on shutdown to a file, and, re-applies this stored time on early boot.
- - This means that the time is outdated if the system was shut down for a while, but without this implementation the system time would be 01/01/1970 until network time sync corrects it.\n
-Please choose whether your device have an active RTC or requires "fake-hwclock":' || return 0
+ - If no hardware RTC is available, the "fake-hwclock" package provides a service that saves the current system time to a file hourly and on shutdown, and re-applies this stored time on early boot.
+ - This means that the time is outdated if the system was off for a while, but without this implementation the system time would be 01/01/1970 until network time sync corrects it.
+ - NB: fake-hwlock never turns back the block. So even if an RTC is available, it does not hurt to leave this option at "Emulated", aside of a tiny disk write every hour and a small additional package.\n
+Please choose whether your device has an active RTC or requires "fake-hwclock":' || return 0
 
 			if [[ $G_WHIP_RETURNED_VALUE == 'Emulated' ]]
 			then
 				G_AGI fake-hwclock
 			else
-				(( $G_DISTRO > 6 )) && G_AGI util-linux-extra # ships hwclock since Bookworm
-				if ! hwclock > /dev/null
-				then
-					G_WHIP_MSG '[FAILED] hwclock fails
-\nThe hwclock command does not succeed. Either your system does not have a hwclock attached, or there is some issue with it. As long as this is the case, fake-hwclock will not be uninstalled.
-\nPlease debug hwclock and redo this switch once the issue has been solved.'
-					return 1
-				fi
 				G_AGP fake-hwclock
 			fi
 
@@ -1059,8 +1051,8 @@ Please choose whether your device have an active RTC or requires "fake-hwclock":
 		elif [[ $G_WHIP_RETURNED_VALUE == 'Update RPi EEPROM firmware' ]]; then
 
 			G_WHIP_YESNO '[ INFO ] EEPROM firmware update
-\nThis will, if required, install or upgrade the rpi-eeprom APT package and update bootloader and VL805 USB firmware on the RPi4 EEPROM.
-Further information: https://www.raspberrypi.org/documentation/hardware/raspberrypi/booteeprom.md
+\nThis will, if required, install or upgrade the rpi-eeprom APT package and update bootloader and VL805 USB firmware on the RPi EEPROM.
+Further information: https://www.raspberrypi.com/documentation/computers/raspberry-pi.html#raspberry-pi-boot-eeprom
 \nDo you want to continue?' || return 0
 			/boot/dietpi/func/dietpi-set_hardware rpi-eeprom
 
@@ -1115,26 +1107,23 @@ Further information: https://www.raspberrypi.org/documentation/hardware/raspberr
 					REBOOT_REQUIRED=1
 					return 0
 				fi
-
-			elif [[ $spidev == '/dev/mtd0' ]]
-			then
-				G_WHIP_YESNO '[ INFO ] SPI bootloader update
-\nThis will flash the U-Boot image of the installed linux-u-boot-* package to the SPI device /dev/mtd0.
-\nDo you want to continue?' || return 0
-				G_AG_CHECK_INSTALL_PREREQ mtd-utils
 			else
 				G_WHIP_YESNO '[ INFO ] SPI bootloader update
-\nThis will flash the U-Boot image of the installed linux-u-boot-* package to the SPI device /dev/mtdblock0.
+\nThis will flash the U-Boot image of the installed linux-u-boot-* package to the SPI storage.
 \nDo you want to continue?' || return 0
 			fi
 
+			[[ -e '/dev/mtd0' ]] && grep -Eq 'flashcp|mtd_debug' /usr/lib/u-boot/platform_install.sh && G_AG_CHECK_INSTALL_PREREQ mtd-utils
+
 			# shellcheck disable=SC1091
 			. /usr/lib/u-boot/platform_install.sh
+			# Increase verbosity and use whiptail instead of dialog
 			eval "$(declare -f write_uboot_platform_mtd | sed -e 's| > /dev/null 2>&1||g' -e 's|status=none|status=progress|g' -e 's/dd /dd oflag=direct conv=notrunc status=progress /' -e 's/exit/return/' -e 's/dialog --no-collapse/whiptail/')"
 			# Bullseye: Remove flashcp "-p" flag
 			(( $G_DISTRO < 7 )) && eval "$(declare -f write_uboot_platform_mtd | sed 's/flashcp -v -p/flashcp -v/')"
+			# Pass hardcoded /dev/mtdblock0 as 2nd argument, as flashcp never uses but dd requires it
 			# shellcheck disable=SC2154
-			write_uboot_platform_mtd "$DIR" "$spidev"
+			write_uboot_platform_mtd "$DIR" '/dev/mtdblock0'
 
 		elif [[ $G_WHIP_RETURNED_VALUE == 'Update bootloader' ]]; then
 
@@ -1599,7 +1588,7 @@ If unsure, set any value, 'Ondemand Down Factor' option on the next screen will 
 		local size=1024 default=76
 		(( $G_HW_MEMORY_SIZE < 1024 )) && size=$G_HW_MEMORY_SIZE default=64
 		local gpu_mem_current=$(sed -n "/^[[:blank:]]*gpu_mem_$size=/{s/^[^=]*=//p;q}" /boot/config.txt) # override setting
-		[[ $gpu_mem_current ]] || gpu_mem_current=$(sed -n "/^[[:blank:]]*gpu_mem=/{s/^[^=]*=//p;q}" /boot/config.txt) # base setting
+		[[ $gpu_mem_current ]] || gpu_mem_current=$(sed -n '/^[[:blank:]]*gpu_mem=/{s/^[^=]*=//p;q}' /boot/config.txt) # base setting
 		[[ $gpu_mem_current ]] || gpu_mem_current=$default # default value
 		local ram_mem_current=$((G_HW_MEMORY_SIZE-gpu_mem_current))
 
@@ -3714,7 +3703,7 @@ Additional benchmarks:
 					if (( $G_RASPBIAN ))
 					then
 						local mirror_list='https://www.raspbian.org/RaspbianMirrors/'
-						G_WHIP_MENU_ARRAY+=('http://raspbian.raspberrypi.org/raspbian' ': Global mirror director (default)')
+						G_WHIP_MENU_ARRAY+=('http://raspbian.raspberrypi.com/raspbian' ': Global mirror director (default)')
 						G_WHIP_MENU_ARRAY+=('https://mirror.ox.ac.uk/sites/archive.raspbian.org/archive/raspbian' ': UK')
 						G_WHIP_MENU_ARRAY+=('https://mirror.netcologne.de/raspbian/raspbian' ': Germany')
 						G_WHIP_MENU_ARRAY+=('https://mirror.umd.edu/raspbian/raspbian' ': USA')

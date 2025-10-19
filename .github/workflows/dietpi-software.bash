@@ -269,6 +269,7 @@ Process_Software()
 			#166) aSERVICES[i]='pi-spc';; Service cannot reasonably start in container as WirinPi's gpio command fails reading /proc/cpuinfo
 			167) aSERVICES[i]='raspotify';;
 			168) aSERVICES[i]='coturn' aTCP[i]=3478 aUDP[i]=3478;;
+			169) aSERVICES[i]='lazylibrarian' aTCP[i]=5299; (( $emulation )) && aDELAY[i]=60;;
 			170) aCOMMANDS[i]='unrar -V';;
 			171) aSERVICES[i]='frps frpc' aTCP[i]='7000 7400 7500';;
 			172) aCOMMANDS[i]='wg' aSERVICES[i]='wg-quick@wg0' aUDP[i]='51820' CAPABILITIES+=',CAP_NET_ADMIN';;
@@ -298,7 +299,7 @@ Process_Software()
 			197) aCOMMANDS[i]='box64 -v';;
 			198) aSERVICES[i]='filebrowser' aTCP[i]='8084';;
 			199) aSERVICES[i]='spotifyd' aUDP[i]='5353';; # + random high TCP port
-			#200) aSERVICES[i]='dietpi-dashboard' aTCP[i]='5252';; "dietpi-dashboard.service: Failed to set up standard input: No such file or directory"; "dietpi-dashboard.service: Failed at step STDIN spawning /opt/dietpi-dashboard/dietpi-dashboard: No such file or directory"
+			200) aSERVICES[i]='dietpi-dashboard-frontend dietpi-dashboard-backend' aTCP[i]='5252 5253';;
 			201) aSERVICES[i]='zerotier-one' aTCP[i]='9993';;
 			202) aCOMMANDS[i]='rclone version';;
 			203) aSERVICES[i]='readarr' aTCP[i]='8787';;
@@ -516,8 +517,8 @@ fi
 # ARMv6: Workaround for ARMv7 Rust toolchain selected in containers with newer host/emulated ARM version
 (( $arch == 1 )) && G_EXEC sed --follow-symlinks -i '/# Start DietPi-Software/a\sed -i '\''s/--profile minimal .*$/--profile minimal --default-host arm-unknown-linux-gnueabihf/'\'' /boot/dietpi/dietpi-software' rootfs/boot/dietpi/dietpi-login
 
-# ARMv6: Workaround for hanging Rust tools chain on ARMv8 host: https://github.com/MichaIng/DietPi/issues/6306#issuecomment-1515303702
-(( $arch == 1 && $G_HW_ARCH == 3 )) && G_EXEC sysctl -w 'abi.cp15_barrier=2'
+# ARMv6/7: Workaround for "deprecated CP15 Barrier instruction" on ARMv8 host: https://github.com/MichaIng/DietPi/issues/6306#issuecomment-1515303702
+(( $arch < 3 && $G_HW_ARCH == 3 )) && G_EXEC sysctl -w 'abi.cp15_barrier=2'
 
 # WiFi Hotspot
 if (( ${aINSTALL[60]} ))

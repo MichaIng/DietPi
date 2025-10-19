@@ -208,12 +208,18 @@ aCHECK[$software_id]='curl -sSf '\''https://api.github.com/repos/fatedier/frp/re
 aARCH[$software_id]='arm arm_hf arm64 amd64 riscv64'
 aREGEX[$software_id]='https://github.com/fatedier/frp/releases/download/.*/frp_.*_linux_\$arch.tar.gz'
 
-# Forgejo
+# Forgejo v13+
 software_id=177
-aCHECK[$software_id]='curl -sSf '\''https://codeberg.org/api/v1/repos/forgejo/forgejo/releases/latest'\'' | mawk -v RS=, -F\" "/^\"browser_download_url\":\".*-linux-$arch\.xz\"/{print \$4;exit}"'
+aCHECK[$software_id]='curl -sSf '\''https://codeberg.org/api/v1/repos/forgejo/forgejo/releases/latest'\'' | mawk -v RS=, -F\" "/^\"browser_download_url\":\".*-linux-$arch\.xz\"$/{print \$4;exit}"'
 aARCH[$software_id]='arm-6 arm64 amd64'
 aARCH_CHECK[$software_id]='arm-7 riscv64'
-aREGEX[$software_id]='https://codeberg.org/forgejo/forgejo/releases/download/.*/forgejo-.*-linux-\$arch.xz'
+aREGEX[$software_id]='https://codeberg.org/forgejo/forgejo/releases/download/v1[^2]\..*/forgejo-.*-linux-\$arch.xz'
+
+# Forgejo v12
+software_id=177000
+aCHECK[$software_id]='curl -sSfL '\''https://codeberg.org/api/v1/repos/forgejo/forgejo/releases'\'' | mawk -v RS=, -F\" "/^\"browser_download_url\":\".*-12\..*-linux-$arch\.xz\"$/{print \$4}" | head -1'
+aARCH[$software_id]='arm-6 arm64 amd64'
+aREGEX[$software_id]='https://codeberg.org/forgejo/forgejo/releases/download/v12\..*/forgejo-.*-linux-\$arch.xz'
 
 # Komga
 software_id=179
