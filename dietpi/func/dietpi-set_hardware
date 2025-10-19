@@ -644,6 +644,7 @@ _EOF_
 
 		# Reset all LCDs
 		Lcd_Panel_Waveshare32_Disable
+		Lcd_Panel_Waveshare35c_Disable
 		Lcd_Panel_Odroidcloudshell_Disable
 		Lcd_Panel_Odroidcloudshell2_Disable
 		Lcd_Panel_OdroidLCD35_Disable
@@ -653,6 +654,7 @@ _EOF_
 		case $INPUT_DEVICE_VALUE in
 			'odroid-lcd35') Lcd_Panel_OdroidLCD35_Enable || return 1;;
 			'waveshare32') Lcd_Panel_Waveshare32_Enable || return 1;;
+			'waveshare35c') Lcd_Panel_Waveshare35c_Enable || return 1;;
 			'odroid-cloudshell') Lcd_Panel_Odroidcloudshell_Enable || return 1;;
 			'odroid-cloudshell2') Lcd_Panel_Odroidcloudshell2_Enable || return 1;;
 			'esp01215e') Lcd_Panel_ESP01215E_Enable || return 1;;
@@ -831,6 +833,142 @@ _EOF_
 			fi
 			[[ -d '/etc/systemd/system/con2fbmap.service.d' ]] && G_EXEC rm -R /etc/systemd/system/con2fbmap.service.d
 			[[ -f '/etc/modprobe.d/waveshare32.conf' ]] && G_EXEC rm /etc/modprobe.d/waveshare32.conf
+			G_EXEC sed --follow-symlinks -i '/^[[:blank:]]*spicc/d' /etc/modules
+			G_EXEC sed --follow-symlinks -i '/^[[:blank:]]*fbtft_device/d' /etc/modules
+
+		fi
+
+	}
+
+	# Waveshare35c
+	Lcd_Panel_Waveshare35c_Enable_X11(){
+
+		cat << '_EOF_' > /etc/X11/xorg.conf.d/99-waveshare35c_calibration.conf
+Section "InputClass"
+	Identifier	"calibration"
+	MatchProduct	"ADS7846 Touchscreen"
+	Option		"Calibration" "219 3835 3984 219"
+	Option		"SwapAxes" "1"
+	Driver		"evdev"
+EndSection
+_EOF_
+	}
+
+	Lcd_Panel_Waveshare35c_Enable(){
+
+		# Disable 1st to reset any existing installations
+		Lcd_Panel_Waveshare35c_Disable
+
+		# X11
+		Lcd_Panel_Xorg_All_Enable
+		Lcd_Panel_Waveshare35c_Enable_X11
+
+		# RPi
+		if (( $G_HW_MODEL < 10 )); then
+
+			# Download overlay to correct dir based on legacy vs modern firmware
+			local fp_overlays='/boot/firmware/overlays'
+			dpkg-query -s 'raspi-firmware' &> /dev/null || fp_overlays='/boot/overlays'
+			G_EXEC curl -sSfL 'https://raw.githubusercontent.com/waveshare/LCD-show/master/waveshare35c-overlay.dtb' -o "$fp_overlays/waveshare35c.dtbo"
+
+			#consoleblank=0 no effect
+			G_EXEC sed --follow-symlinks -i 's/rootwait/rootwait fbcon=map:10 fbcon=font:ProFont6x11 logo.nologo/' /boot/cmdline.txt
+
+			G_CONFIG_INJECT 'dtparam=i2c_arm=' 'dtparam=i2c_arm=on' /boot/config.txt
+			G_CONFIG_INJECT 'dtparam=spi=' 'dtparam=spi=on' /boot/config.txt
+
+			# Set FB to match res
+			G_CONFIG_INJECT 'framebuffer_width=' 'framebuffer_width=480' /boot/config.txt
+			G_CONFIG_INJECT 'framebuffer_height=' 'framebuffer_height=320' /boot/config.txt
+			G_CONFIG_INJECT 'SOFTWARE_CHROMIUM_RES_X=' "SOFTWARE_CHROMIUM_RES_X=480" /boot/dietpi.txt
+			G_CONFIG_INJECT 'SOFTWARE_CHROMIUM_RES_Y=' "SOFTWARE_CHROMIUM_RES_Y=320" /boot/dietpi.txt
+
+			G_CONFIG_INJECT 'dtoverlay=waveshare35c' 'dtoverlay=waveshare35c:rotate=270' /boot/config.txt
+
+			# Move fb0 xorg.conf out the way: https://github.com/MichaIng/DietPi/issues/767
+			[[ -f '/usr/share/X11/xorg.conf.d/99-fbturbo.conf' ]] && G_EXEC mv /usr/share/X11/xorg.conf.d/99-fbturbo.conf /usr/share/X11/99-fbturbo.conf
+
+			# X11
+			cat << '_EOF_' > /etc/X11/xorg.conf.d/99-waveshare35c_xorg.conf
+Section "Device"
+	Identifier	"Allwinner A10/A13 FBDEV"
+	Driver		"fbdev"
+	Option		"fbdev" "/dev/fb0"
+	Option		"SwapbuffersWait" "true"
+EndSection
+_EOF_
+		# Odroids
+		else
+
+			# con2fbmap, maps console (1) to panel(2). Run during boot.
+			cat << _EOF_ > /etc/systemd/system/con2fbmap.service
+[Unit]
+Description=con2fbmap
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=$(command -v con2fbmap) 1 2
+ExecStop=$(command -v con2fbmap) 1 0
+
+[Install]
+WantedBy=multi-user.target
+_EOF_
+			G_EXEC systemctl daemon-reload
+			G_EXEC systemctl enable con2fbmap
+
+			G_CONFIG_INJECT 'spicc' 'spicc' /etc/modules
+			G_CONFIG_INJECT 'fbtft_device' 'fbtft_device' /etc/modules
+
+			echo 'options fbtft_device name=odroidc_tft35 rotate=270 gpios=reset:116,dc:115 speed=32000000 cs=0' > /etc/modprobe.d/waveshare35c.conf
+
+			# X11
+			cat << '_EOF_' > /etc/X11/xorg.conf.d/99-waveshare35c_xorg.conf
+Section "Device"
+	Identifier	"FBDEV"
+	Driver		"fbdev"
+	Option		"fbdev" "/dev/fb2"
+EndSection
+_EOF_
+		fi
+
+	}
+
+	Lcd_Panel_Waveshare35c_Disable(){
+
+		# All
+		[[ -f '/etc/X11/xorg.conf.d/99-waveshare35c_calibration.conf' ]] && G_EXEC rm /etc/X11/xorg.conf.d/99-waveshare35c_calibration.conf
+		[[ -f '/etc/X11/xorg.conf.d/99-waveshare35c_xorg.conf' ]] && G_EXEC rm /etc/X11/xorg.conf.d/99-waveshare35c_xorg.conf
+		[[ -f '/usr/share/applications/xinput_calibrator.desktop' ]] && G_EXEC rm /usr/share/applications/xinput_calibrator.desktop
+
+		# RPi
+		if (( $G_HW_MODEL < 10 )); then
+
+			[[ -f '/boot/overlays/waveshare35c.dtbo' ]] && G_EXEC rm /boot/overlays/waveshare35c.dtbo
+			[[ -f '/boot/firmware/overlays/waveshare35c.dtbo' ]] && G_EXEC rm /boot/firmware/overlays/waveshare35c.dtbo
+			G_EXEC sed --follow-symlinks -i 's/ fbcon=map:10 fbcon=font:ProFont6x11 logo.nologo//' /boot/cmdline.txt
+
+			G_EXEC sed --follow-symlinks -i '/^[[:blank:]]*dtoverlay=waveshare35c/d' /boot/config.txt
+			G_EXEC sed --follow-symlinks -i '/^[[:blank:]]*dtoverlay=ads7846,cs=1,penirq=17/d' /boot/config.txt
+			G_EXEC sed --follow-symlinks -i '/^[[:blank:]]*dtoverlay=w1-gpio-pullup,gpiopin=4,extpullup=1/d' /boot/config.txt
+
+			# Leave these enabled, just in case the user has other hardware that may use them.
+			#G_EXEC sed --follow-symlinks -i '/^[[:blank:]]*dtparam=i2c_arm=/c\dtparam=i2c_arm=on' /boot/config.txt
+			#G_EXEC sed --follow-symlinks -i '/^[[:blank:]]*dtparam=spi=/c\dtparam=spi=on' /boot/config.txt
+
+			# Move fb0 xorg.conf back: https://github.com/MichaIng/DietPi/issues/767
+			[[ -f '/usr/share/X11/99-fbturbo.conf' && ! -f '/usr/share/X11/xorg.conf.d/99-fbturbo.conf' ]] && G_EXEC mv /usr/share/X11/99-fbturbo.conf /usr/share/X11/xorg.conf.d/99-fbturbo.conf
+
+		# Odroids
+		elif (( $G_HW_MODEL < 20 )); then
+
+			if [[ -f '/etc/systemd/system/con2fbmap.service' ]]
+			then
+				G_EXEC systemctl disable --now con2fbmap
+				G_EXEC rm /etc/systemd/system/con2fbmap.service
+			fi
+			[[ -d '/etc/systemd/system/con2fbmap.service.d' ]] && G_EXEC rm -R /etc/systemd/system/con2fbmap.service.d
+			[[ -f '/etc/modprobe.d/waveshare35c.conf' ]] && G_EXEC rm /etc/modprobe.d/waveshare35c.conf
 			G_EXEC sed --follow-symlinks -i '/^[[:blank:]]*spicc/d' /etc/modules
 			G_EXEC sed --follow-symlinks -i '/^[[:blank:]]*fbtft_device/d' /etc/modules
 
