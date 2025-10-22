@@ -326,7 +326,9 @@ do
 		38|40|48|54|55|57|59|90|160|210) Process_Software 88 89 webserver;;
 		159) Process_Software 36 37 65 88 89 96 121 124 128 129 152 160 163 webserver;;
 		47|114|168) Process_Software 88 89 91 webserver;;
-		8|33|53|80|131|133|164|179|181|206) Process_Software 196;;
+		8|33|80|133|164|179|181|206) Process_Software 196;;
+		122) Process_Software 9;;
+		53|131) Process_Software 9 196;;
 		32|148|119) Process_Software 128;;
 		129) Process_Software 88 89 128 webserver;;
 		49|165|177) Process_Software 0 17 88;;
