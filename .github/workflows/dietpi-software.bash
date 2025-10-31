@@ -340,7 +340,7 @@ do
 		180) (( $arch == 10 || $arch == 3 )) || Process_Software 170;;
 		188) Process_Software 17;;
 		213) Process_Software 17 188;;
-		106|144|145|151|183|203) Process_Software 87;;
+		183) Process_Software 87;;
 		31|37|128|138|163|167|187) Process_Software 152;;
 		75) Process_Software 83 87 89;;
 		76) Process_Software 83 88 89;;
