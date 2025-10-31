@@ -441,10 +441,6 @@ then
 	done
 fi
 
-# Do not attempt to change kernel parameters via sysctl, but do dry runs. Those fail in case of invalid syntax or settings which do not exist, but do not fail on missing container capabilities.
-G_EXEC eval 'echo -e '\''#!/bin/dash\n/sbin/sysctl --dry-run "$@"'\'' > rootfs/usr/local/bin/sysctl'
-G_EXEC chmod +x rootfs/usr/local/bin/sysctl
-
 # ARMv6/7 Trixie: Workaround failing chpasswd, which tries to access /proc/sys/vm/mmap_min_addr, but fails as of AppArmor on the host
 if (( $arch < 3 && $dist > 7 )) && systemctl -q is-active apparmor
 then
