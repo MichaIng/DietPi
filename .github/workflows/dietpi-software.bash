@@ -131,7 +131,7 @@ Process_Software()
 			32) aSERVICES[i]='ympd' aTCP[i]='1337';;
 			33) (( $emulation )) || aSERVICES[i]='airsonic' aTCP[i]='8080' aDELAY[i]=60;; # Fails in QEMU-emulated containers, probably due to missing device access
 			34) aCOMMANDS[i]='COMPOSER_ALLOW_SUPERUSER=1 composer -n -V';;
-			35) (( $dist < 8 || $arch > 2 )) && aSERVICES[i]='lyrionmusicserver' aTCP[i]='9000';; # disable check on 32-bit ARM Trixie for now: https://github.com/LMS-Community/slimserver/tree/public/9.1/CPAN/arch/5.40
+			35) aSERVICES[i]='lyrionmusicserver' aTCP[i]='9000';;
 			36) aCOMMANDS[i]='squeezelite -t';; # Service listens on random high UDP port and exits if no audio device has been found, which does not exist on GitHub Actions runners, respectively within the containers
 			37) aSERVICES[i]='shairport-sync' aTCP[i]='5000';; # AirPlay 2 would be TCP port 7000
 			38) aCOMMANDS[i]='/opt/FreshRSS/cli/user-info.php';;
