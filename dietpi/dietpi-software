@@ -1097,7 +1097,9 @@ Available commands:
 		aSOFTWARE_DESC[$software_id]='Continuous avian monitoring and identification'
 		aSOFTWARE_CATX[$software_id]=7
 		aSOFTWARE_DOCS[$software_id]='https://dietpi.com/docs/software/camera/#birdnet-go'
-		aSOFTWARE_DEPS[$software_id]='7 87' ## ffmpeg sqlite3
+		aSOFTWARE_DEPS[$software_id]='7 87'
+		# - ARMv6/7/RISC-V: https://github.com/tphakala/birdnet-go/releases
+		(( $G_HW_ARCH == 3 || $G_HW_ARCH == 10 )) || aSOFTWARE_AVAIL_G_HW_ARCH[$software_id,$G_HW_ARCH]=0
 
 		# System Stats & Management
 		#--------------------------------------------------------------------------------
@@ -9352,78 +9354,91 @@ _EOF_
 			fi
 		fi
 
-		if To_Install 127 birdnet-go # BirdNET-Go
+		if To_Install 127 birdnet # BirdNET-Go: https://github.com/tphakala/birdnet-go/blob/main/install.sh
 		then
-			local bnet_release="nightly-20251012"
-			local bnet_http_port=8127
-			local bnet_install=/opt/birdnet
-			local bnet_log=/var/log/birdnet
-			local bnet_data=/mnt/dietpi_userdata/birdnet
-			local bnet_user=birdnet
+			local bnet_vers='nightly-20251028'
+			local bnet_inst='/opt/birdnet'
+			local bnet_data='/mnt/dietpi_userdata/birdnet'
+			local bnet_conf="$bnet_data/.config/birdnet-go/config.yaml"
+			local bnet_logs='/var/log/birdnet'
+			local bnet_user='birdnet'
+			local bnet_port=8127
+
+			# Dependencies
+			aDEPS=('sox' 'patchelf' 'yq')
 
 			case $G_HW_ARCH in
 				3) local arch='arm64';;
 				*) local arch='amd64';;
 			esac
-			aDEPS=("sox")
 
-			# Download binary and library
-			Download_Install "https://github.com/tphakala/birdnet-go/releases/download/${bnet_release}/birdnet-go-linux-${arch}.tar.gz"	 birdnet
+			# Download
+			Download_Install "https://github.com/tphakala/birdnet-go/releases/download/$bnet_vers/birdnet-go-linux-$arch.tar.gz" birdnet
+
+			# Change rpath for birdnet-go to make use of libtensorflowlite_c.so in its own dir
+			G_EXEC patchelf --set-rpath "$bnet_inst" birdnet/birdnet-go
+
+			# Install: Remove old dir on reinstall
+			[[ -d $bnet_inst ]] && G_EXEC rm -R "$bnet_inst"
+			G_EXEC mv birdnet "$bnet_inst"
 
 			# User
-			G_EXEC mkdir "${bnet_data}"
-			## Move binaries to final destination
-			G_EXEC mkdir "${bnet_install}"
-			G_EXEC mv birdnet/birdnet-go "${bnet_install}"/birdnet-go
-			G_EXEC mv birdnet/libtensorflowlite_c.so "${bnet_install}"/libtensorflowlite_c.so
-			G_EXEC rmdir birdnet # cleanup
+			Create_User -d "$bnet_data" "$bnet_user"
 
-			Create_User -g "${bnet_user}" -d "${bnet_data}" "${bnet_user}"
-			G_EXEC chown -R "${bnet_user}":"${bnet_user}" "${bnet_data}"
+			# Data dir
+			G_EXEC mkdir -p "$bnet_data"
+			G_EXEC chown -R "$bnet_user:$bnet_user" "$bnet_data"
 
-			# Initialise config: hard-coded to check only
-			# - $HOME/.config/birdnet-go/config.yaml (default)
-			# - /etc/birdnet-go/config.yaml
-			## initial call to generate config
-			LD_LIBRARY_PATH="${bnet_install}:$LD_LIBRARY_PATH" G_EXEC sudo -u "${bnet_user}" "${bnet_install}"/birdnet-go
+			# Config
+			# - Checks hard-coded paths in this order: ~/.config/birdnet-go/config.yaml > /etc/birdnet-go/config.yaml
+			if [[ ! -f $config ]]
+			then
+				# - Initial call to generate ~/.config/birdnet-go/config.yaml
+				G_EXEC_OUTPUT=1 G_EXEC runuser -u "$bnet_user" -- "$bnet_inst/birdnet-go"
+				# - Replace paths, otherwise default to the working directory at $bnet_inst
+				# - Disable MQTT and CPU/memory/disk monitoring
+				# - Enable new web UI at $bnet_port
+				G_EXEC yq -i -y "
+					.main.log.path = \"$bnet_logs/birdnet.log\" |
+					.realtime.log.path = \"$bnet_logs/birdnet.txt\" |
+					.realtime.audio.export.path = \"$bnet_data/clips\" |
+					.realtime.output.file.path = \"$bnet_data/output\" |
+					.realtime.mqtt.enabled = false |
+					.realtime.monitoring.enabled = false |
+					.realtime.webserver.enabled = true |
+					.realtime.dashboard.newui = true |
+					.webserver.port = $bnet_port" "$bnet_conf"
+			fi
 
-			local config="${bnet_data}"/.config/birdnet-go/config.yaml
-			# Replace paths
-			# - Paths otherwise default to the working directory at ${bnet_install}
-			G_AGI yq
-			yq -i -y ".main.log.path = \"${bnet_log}/birdnet.log\"" "${config}" &&
-			yq -i -y ".realtime.log.path = \"${bnet_log}/birdnet.txt\"" "${config}" &&
-			yq -i -y ".realtime.audio.export.path = \"${bnet_data}/clips/\"" "${config}" &&
-			yq -i -y ".realtime.output.file.path = \"${bnet_data}/output/\"" "${config}" &&
-			## Set services
-			yq -i -y '.realtime.mqtt.enabled = false' "${config}" &&
-			yq -i -y '.realtime.monitoring.enabled = false' "${config}" &&	# cpu/memory/disk
-			yq -i -y '.realtime.webserver.enabled = true' "${config}" &&
-            yq -i -y '.realtime.dashboard.newui = true' "${config}" &&
-			yq -i -y ".webserver.port = \"${bnet_http_port}\"" "${config}" ## replace port
-			G_AGP yq
-
-			G_EXEC chown -R "${bnet_user}":"${bnet_user}" "${bnet_install}"
-
-			## Generate systemd file
-			cat <<EOF > /etc/systemd/system/birdnet.service
+			# Service
+			cat << _EOF_ > /etc/systemd/system/birdnet.service
 [Unit]
-Description=BirdNet-Go Realtime Bird Sound Analyzer
-After=network.target
+Description=BirdNet-Go
+Wants=network-online.target
+After=network-online.target
+StartLimitIntervalSec=60
+StartLimitBurst=3
 
 [Service]
-ExecStart=${bnet_install}/birdnet-go realtime
+User=$bnet_user
+WorkingDirectory=$bnet_data
+LogsDirectory=birdnet
+ExecStart=$bnet_inst/birdnet-go realtime
 Restart=on-failure
 RestartSec=5
-User=${bnet_user}
-WorkingDirectory=${bnet_install}
-Environment="LD_LIBRARY_PATH=${bnet_install}:\$LD_LIBRARY_PATH"
-SyslogIdentifier=birdnet
+
+# Hardening
+ProtectSystem=strict
+ProtectHome=1
+PrivateTmp=1
+PrivateDevices=1
+ProtectKernelTunables=1
+ProtectControlGroups=1
+ReadWritePaths=-$bnet_inst -$bnet_data -$bnet_logs
 
 [Install]
 WantedBy=multi-user.target
-
-EOF
+_EOF_
 		fi
 
 		if To_Install 138 virtualhere # VirtualHere
@@ -12910,10 +12925,9 @@ _EOF_
 		then
 			Remove_Service birdnet
 			G_AGP sox
-			[[ -d '/opt/birdnet' ]] && G_EXEC rm -R '/opt/birdnet'
-			[[ -f '/var/log/birdnet.txt' ]] && G_EXEC rm '/var/log/birdnet.txt'
-			[[ -f '/var/log/birdnet.log' ]] && G_EXEC rm '/var/log/birdnet.log'
-			[[ -d '/mnt/dietpi_userdata/birdnet' ]] && G_EXEC rm -R '/mnt/dietpi_userdata/birdnet'
+			G_EXEC rm -Rf /opt/birdnet
+			G_EXEC rm -Rf /var/log/birdnet
+			G_EXEC rm -Rf /mnt/dietpi_userdata/birdnet
 		fi
 
 		if To_Uninstall 138 # VirtualHere
