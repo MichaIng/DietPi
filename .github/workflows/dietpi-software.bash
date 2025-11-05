@@ -227,6 +227,7 @@ Process_Software()
 			124) aSERVICES[i]='networkaudiod';; # aUDP[i]='????';;
 			125) aSERVICES[i]='synapse' aTCP[i]='8008';;
 			126) aSERVICES[i]='adguardhome' aUDP[i]='53' aTCP[i]='8083'; [[ ${aSERVICES[182]} ]] && aUDP[i]+=' 5335';; # Unbound uses port 5335 if AdGuard Home is installed
+			127) aSERVICES[i]='birdnet' aTCP[i]='8127';;
 			128) aSERVICES[i]='mpd' aTCP[i]='6600';;
 			#129) O!MPD
 			130) aCOMMANDS[i]='python3 -V';;

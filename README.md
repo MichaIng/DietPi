@@ -348,6 +348,7 @@ Links to hardware and software manufacturers, sources and build instructions use
 - [UrBackup](https://github.com/uroni/urbackup_backend)
 - [PiJuice](https://github.com/PiSupply/PiJuice)
 - [LazyLibrarian](https://gitlab.com/LazyLibrarian/LazyLibrarian)
+- [BirdNET-Go](https://github.com/tphakala/birdnet-go)
 
 ---
 
