@@ -147,7 +147,7 @@ software_id=124
 
 # BirdNET-Go
 software_id=127
-aCHECK[$software_id]='curl -sSf '\''https://api.github.com/repos/tphakala/birdnet-go/releases'\'' | mawk -F\" '\''/^ *"tag_name": "[^"]*",$/{print $4} | head -1'
+aCHECK[$software_id]='curl -sSf '\''https://api.github.com/repos/tphakala/birdnet-go/releases'\'' | mawk -F\" '\''/^ *"tag_name": "[^"]*",$/{print $4}'\'' | head -1'
 aARCH[$software_id]='arm64 amd64'
 aARCH_CHECK[$software_id]='armhf riscv64'
 aREGEX[$software_id]='bnet_vers='\''[^'\'']*'\'
