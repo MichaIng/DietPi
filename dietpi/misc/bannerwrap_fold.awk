@@ -1,4 +1,3 @@
-
 function make_whitespace_offset(clean_line){
     ## Generate leading spaces based on global INDENT_TYPE
     if (INDENT_TYPE == "min"){
@@ -25,7 +24,7 @@ BEGIN {
     color_regex = "[[:cntrl:]][[0-9;?]*[A-Za-z]"  # all color codes
     ## Init from CLI, or use defaults here
     if (MIN_USEABLE_SPACE == ""){MIN_USEABLE_SPACE = 8} ## min space on the right to keep
-    if (MAX_COL == ""){MAX_COL = 30}                    ## Wrap to column number
+    if (MAXCOL == ""){MAXCOL = 30}                      ## Wrap to column number
     if (INDENT_MIN == ""){INDENT_MIN = 1}               ## min offset seen in dietpi banner
     if (INDENT_TYPE == ""){INDENT_TYPE = "dashcolon"}   ## Indent modes:
     ## min - use minimum
@@ -63,8 +62,8 @@ BEGIN {
     sn = split(clean_line, stripped_words, /[[:space:]]+/)
 
     if (sn > 0 && wn != sn){
-        print "[ERROR] Word ordering does not match stripped word ordering"
-        exit 1
+        print "[WARN] Color word order does not match stripped word order"
+        next
     }
 
     ## Determine leading spaces based on INDENT_TYPE
