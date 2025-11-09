@@ -85,7 +85,7 @@ BEGIN {
                 lead_spaces = sprintf("%*s", INDENT_MIN, "")
                 ## Word might simply be too long to pad, use the minimum
                 ## e.g. URLs can't be easily split
-                line = lead_spaces words[i]
+                line = lead_spaces""words[i]
             }
             charcount = length(lead_spaces) + word_len
         } else {                             # Otherwise append word to current line
