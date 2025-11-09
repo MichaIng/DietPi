@@ -5,10 +5,10 @@ function make_whitespace_offset(clean_line){
     }
     lead_spaces = ""
     if ((INDENT_TYPE == "dash" || INDENT_TYPE == "dashcolon") && match(clean_line, green_dash)){
-        lead_spaces = sprintf("%*s", RSTART + RLENGTH - 2, "")
+        lead_spaces = sprintf("%*s", RSTART + RLENGTH - 1, "")
     }
     if ((INDENT_TYPE == "colon" || INDENT_TYPE == "dashcolon") && match(clean_line, green_colon)){
-        lead_spaces = sprintf("%*s", RSTART + RLENGTH - 2, "")
+        lead_spaces = sprintf("%*s", RSTART + RLENGTH - 1, "")
     }
     # Useable space check
     # - "Let's Encrypt cert status" would be squashed otherwise
@@ -80,7 +80,7 @@ BEGIN {
         if (new_count >= MAXCOL) {
             print line                       # Flush current line if longer than cols
 
-            line = lead_spaces" "words[i]    # Make new line with leading spaces
+            line = lead_spaces""words[i]     # Make new line with leading spaces
             if (length(line) >= MAXCOL) {
                 lead_spaces = sprintf("%*s", INDENT_MIN, "")
                 ## Word might simply be too long to pad, use the minimum
