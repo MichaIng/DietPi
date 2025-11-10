@@ -41,10 +41,9 @@ BEGIN {
     }
     ## Green Lines: Truncate to MAXCOL
     if (match($0, /────/)){
-        new_grn_line = sprintf("%*s", MAXCOL - 2, "")    ## new line: of spaces
-        gsub(/ /, "─", new_grn_line)                     ## new line: change spaces to line char
-        gsub(/─/, "W", $0)  # hack:mawk cant handle /─*/ ## old line: change all line chars to W
-        sub(/W+/, new_grn_line, $0)                      ## old line: change longest W to new line
+        new_grn_line = sprintf("%*s", MAXCOL - 2, "") ## new line: of spaces
+        gsub(/ /, "─", new_grn_line)                  ## new line: change spaces to line char
+        sub(/[─]+/, new_grn_line, $0)                 ## old line: replace line with new line
         print; next;
     }
     ## Begin word-wrapping
