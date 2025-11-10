@@ -22,7 +22,7 @@
 		. /boot/dietpi/func/dietpi-globals
 	else
 		[[ $G_GITOWNER && $G_GITBRANCH ]] || { echo '[FAILED] You must export or pass G_GITOWNER and G_GITBRANCH to the script'; exit 1; }
-		curl -sSf "https://raw.githubusercontent.com/$G_GITOWNER/DietPi/$G_GITBRANCH/dietpi/func/dietpi-globals" -o /tmp/dietpi-globals || exit 1
+		curl -sSfo /tmp/dietpi-globals "https://raw.githubusercontent.com/$G_GITOWNER/DietPi/$G_GITBRANCH/dietpi/func/dietpi-globals" || exit 1
 		# shellcheck disable=SC1091
 		. /tmp/dietpi-globals
 		G_EXEC rm /tmp/dietpi-globals
@@ -52,7 +52,7 @@
 
 	Error_Exit()
 	{
-		G_DIETPI-NOTIFY 1 "$1"
+		G_DIETPI-NOTIFY 1 "$1, aborting ..."
 		exit 1
 	}
 
@@ -72,7 +72,7 @@
 	[[ $SHRINK_ONLY == 1 ]] || SHRINK_ONLY=0
 	[[ $SKIP_ARCHIVE == 1 ]] || SKIP_ARCHIVE=0
 	UPLOAD_SCRIPT=
-	ADD_DOS_PART=0 # trailing FAT partition for first boot config files, automatically imported and partition removed on first boot
+	ADD_FAT_PART=0 # trailing FAT partition for first boot config files, automatically imported and partition removed on first boot
 	CONFIGS_TO_BOOT=0 # for new RPi kernel/firmware stack where a boot FAT partition exists, but is mounted to /boot/firmware instead of /boot
 	SIGN_PASS=
 	RAW_HASH_SIZE=0 # store SHA256 and size for the uncompressed image, mainly used for Raspberry Pi Imager JSON
@@ -81,7 +81,7 @@
 		case $1 in
 			'--skip-archive') SKIP_ARCHIVE=1;;
 			'--upload-script') shift; UPLOAD_SCRIPT=$1;;
-			'--add-dos-part') ADD_DOS_PART=1;;
+			'--add-fat-part') ADD_FAT_PART=1;;
 			'--configs-to-boot') CONFIGS_TO_BOOT=1;;
 			'--sign') shift; SIGN_PASS=$1;;
 			'--raw-hash-size') RAW_HASH_SIZE=1;;
@@ -97,7 +97,7 @@
 
 				elif [[ $1 ]]
 				then
-					Error_Exit "Input source $1 does not exist, aborting..."
+					Error_Exit "Input source $1 does not exist"
 				fi
 			;;
 		esac
@@ -106,8 +106,6 @@
 
 	Unmount_tmp()
 	{
-		G_EXEC sync
-		G_SLEEP 1 # Give the system 1 second to avoid "mount is busy"
 		G_EXEC umount -R "$FP_MNT_TMP"
 	}
 
@@ -136,7 +134,7 @@
 		then
 			G_EXEC_OUTPUT=1 G_EXEC btrfs check --repair "$FP_ROOT_DEV"
 		else
-			Error_Exit "Unsupported root filesystem type ($ROOT_FS_TYPE), aborting..."
+			Error_Exit "Unsupported root filesystem type ($ROOT_FS_TYPE)"
 		fi
 	}
 
@@ -170,10 +168,10 @@
 
 			if [[ ! ${G_WHIP_MENU_ARRAY[0]} ]]
 			then
-				G_DIETPI-NOTIFY 1 'No drive with an ext4, F2FS or Btrfs formatted partition found, aborting...'
+				G_DIETPI-NOTIFY 1 'No drive with an ext4, F2FS or Btrfs formatted partition found, please retry ...'
 				G_DIETPI-NOTIFY 2 'NB: This is the list of available block devices:'
 				lsblk -npo NAME,SIZE,MAJ:MIN,FSTYPE,MOUNTPOINT,MODEL
-				read -rp 'Press any key to return to menu...'
+				read -rp 'Press Enter or Return to return to menu...'
 				return 1
 			fi
 
@@ -195,19 +193,18 @@
 			done
 		else
 			# Open DietPi-Explorer for image file selection
-			/boot/dietpi/dietpi-explorer 1 || { G_DIETPI-NOTIFY 1 'No image file selected, aborting...'; read -rp 'Press any key to return to menu...'; return 1; }
+			/boot/dietpi/dietpi-explorer 1 || { G_DIETPI-NOTIFY 1 'No image file selected, please retry ...'; read -rp 'Press Enter or Return to return to menu ...'; return 1; }
 			FP_SOURCE_IMG=$(</tmp/.dietpi-explorer_selected_location)
 			FP_ROOT_DEV=
 			rm /tmp/.dietpi-explorer_selected_location
-			[[ -f $FP_SOURCE_IMG ]] || { G_DIETPI-NOTIFY 1 "Selected image file ($FP_SOURCE_IMG) does not exist, aborting..."; read -rp 'Press any key to return to menu...'; return 1; }
+			[[ -f $FP_SOURCE_IMG ]] || { G_DIETPI-NOTIFY 1 "Selected image file ($FP_SOURCE_IMG) does not exist, please retry ..."; read -rp 'Press Enter or Return to return to menu ...'; return 1; }
 
-			# Create loopback device from .img file
-			G_EXEC modprobe loop
+			# Create loop device from .img file
 			Delete_Loopback # Prevent doubled loop device
 			FP_SOURCE=$(losetup -f)
 			G_EXEC_NOEXIT=1 G_EXEC losetup -P "$FP_SOURCE" "$FP_SOURCE_IMG" || return 1
-			G_DIETPI-NOTIFY 0 "Attached the image ($FP_SOURCE_IMG) as loopback device: $FP_SOURCE"
-			G_SLEEP 0.5 # Give the root filesystem a little time to be detected
+			G_EXEC udevadm settle
+			G_DIETPI-NOTIFY 0 "Attached the image ($FP_SOURCE_IMG) as loop device: $FP_SOURCE"
 		fi
 
 		Menu_Source_RootFS # Directly open this menu next
@@ -304,22 +301,18 @@
 		esac
 	}
 
-	Main(){
-
-		# Dependencies
-		G_AG_CHECK_INSTALL_PREREQ parted fdisk zerofree xz-utils
-
+	Main()
+	{
 		# Skip menu if all inputs are provided via environment variables
 		if [[ ( $SOURCE_TYPE$FP_SOURCE == 'Drive'?* || $SOURCE_TYPE$FP_SOURCE_IMG == 'Image'?* ) && $FP_ROOT_DEV && $CLONING_TOOL =~ ^(dd|Clonezilla)$ && $OUTPUT_IMG_NAME ]]
 		then
 			if [[ $SOURCE_TYPE == 'Image' ]]
 			then
-				# Create loopback device from .img file
-				G_EXEC modprobe loop
+				# Create loop device from .img file
 				Delete_Loopback # Prevent doubled loop device
 				FP_SOURCE=$(losetup -f)
 				G_EXEC losetup -P "$FP_SOURCE" "$FP_SOURCE_IMG"
-				G_DIETPI-NOTIFY 0 "Mounted the image ($FP_SOURCE_IMG) as loopback device: $FP_SOURCE"
+				G_DIETPI-NOTIFY 0 "Attached the image ($FP_SOURCE_IMG) as loop device: $FP_SOURCE"
 				FP_ROOT_DEV="${FP_SOURCE}p${FP_ROOT_DEV: -1}"
 			fi
 			[[ $CLONING_TOOL == 'dd' ]] && OUTPUT_IMG_EXT='img' || OUTPUT_IMG_EXT='iso'
@@ -328,7 +321,6 @@
 - Root device: $FP_ROOT_DEV
 - Via $CLONING_TOOL to $OUTPUT_IMG_NAME.$OUTPUT_IMG_EXT
 - With intermediate mounting turned $MOUNT_IT"
-			G_SLEEP 0.5 # Give the root filesystem a little time to be detected
 		else
 			local main_menu_choice
 			Menu_Source_Type
@@ -344,22 +336,24 @@
 		# Flashing tools do not support xz-compressed ISOs
 		[[ $OUTPUT_IMG_EXT == 'iso' ]] && SKIP_ARCHIVE=1
 
+		# A trailing FAT partition does not make sense for Clonezilla embedded images
+		[[ $CLONING_TOOL == 'Clonezilla' ]] && ADD_FAT_PART=0
+
 		# Detect partition table type, failsafe detection of MBR to debug possibly other/unknown wording/partition table types
-		PART_TABLE_TYPE=$(lsblk -no PTTYPE "$FP_ROOT_DEV")
+		PART_TABLE_TYPE=$(blkid -s PTTYPE -o value "$FP_SOURCE")
 		if [[ $PART_TABLE_TYPE == 'dos' ]]
 		then
 			G_DIETPI-NOTIFY 2 'MBR partition table detected'
 
-		# Move GPT backup partition table to end of drive
 		elif [[ $PART_TABLE_TYPE == 'gpt' ]]
 		then
 			G_DIETPI-NOTIFY 2 'GPT partition table detected'
 		else
-			Error_Exit "Unknown partition table type ($PART_TABLE_TYPE), aborting..."
+			Error_Exit "Unknown partition table type ($PART_TABLE_TYPE)"
 		fi
 
 		# Detect root filesystem type
-		ROOT_FS_TYPE=$(lsblk -no FSTYPE "$FP_ROOT_DEV")
+		ROOT_FS_TYPE=$(blkid -s TYPE -o value "$FP_ROOT_DEV")
 
 		Run_fsck
 
@@ -389,19 +383,44 @@
 			(( $reallow_dietpi_login )) && unset -v G_DIETPI_LOGIN
 		fi
 		Unmount_tmp
-		# Failsafe
-		G_EXEC partprobe "$FP_SOURCE"
-		G_EXEC partx -u "$FP_SOURCE"
+
+		# Dependencies
+		local deps=('fdisk' 'zerofree')
+		(( $SKIP_ARCHIVE )) || deps+=('xz-utils')
+		if [[ $CLONING_TOOL == 'Clonezilla' ]]
+		then
+			deps+=('unzip' 'parted' 'partclone' 'syslinux-common' 'xorriso' 'isolinux')
+			# - Bullseye/Focal: We need Clonezilla 5.x for loop device support
+			if (( $G_DISTRO < 7 ))
+			then
+				G_EXEC curl -sSfo clonezilla.deb 'https://deb.debian.org/debian/pool/main/c/clonezilla/clonezilla_5.3.17-2_all.deb'
+				deps+=('./clonezilla')
+			else
+				deps+=('clonezilla')
+			fi
+
+		elif [[ $PART_TABLE_TYPE == 'gpt' ]]
+		then
+			deps+=('gdisk')
+		fi
+		G_AGI "${deps[@]}"
+		[[ -f 'clonezilla.deb' ]] && G_EXEC rm clonezilla.deb
 
 		# Shrink last filesystem to minimum
 		# - resize2fs: "Please run 'e2fsck -f /dev/loop0p1' first."
 		Run_fsck
 		# - Use sfdisk to detect last partition, as lsblk with "-r" option on Bullseye does not sort partitions well: https://github.com/MichaIng/DietPi/issues/7527
 		local last_part_dev=$(sfdisk -lqo Device "$FP_SOURCE" | tail -1)
-		local last_fs_type=$(lsblk -no FSTYPE "$last_part_dev")
+		# - If this is a tailing DietPi setup partition, remove it and let it be recreated freshly in case. This makes it easier for dietpi-build to reuse the same image for multiple variants.
+		if [[ $(blkid -s LABEL -o value "$last_part_dev") == 'DIETPISETUP' ]]
+		then
+			G_EXEC_OUTPUT=1 G_EXEC sfdisk --delete "$FP_SOURCE" "${last_part_dev: -1}"
+			last_part_dev=$(sfdisk -lqo Device "$FP_SOURCE" | tail -1)
+		fi
+		local last_fs_type=$(blkid -s TYPE -o value "$last_part_dev")
 		if [[ $last_fs_type == 'ext'[234] ]]
 		then
-			if [[ $last_fs_type == 'ext'[34] ]]
+			if [[ $last_fs_type == 'ext'[34] ]] && tune2fs -l "$last_part_dev" | grep -q 'has_journal'
 			then
 				# Disable journal to allow further image size reduction and allow dietpi-fs_partition_resize to re-create it with proper size based final filesystem size
 				G_EXEC tune2fs -O '^has_journal' "$last_part_dev"
@@ -435,7 +454,7 @@
 
 				elif out=$(grep -im1 'no such file or directory' /tmp/resize2fs_out)
 				then
-					Error_Exit 'Partition not found, aborting...'
+					Error_Exit 'Partition not found'
 				fi
 			done
 
@@ -508,8 +527,6 @@
 		then
 			G_DIETPI-NOTIFY 2 "Shrinking last partition to: $(( $FS_SIZE / 2048 + 1 )) MiB"
 			G_EXEC_OUTPUT=1 G_EXEC eval "sfdisk -N${last_part_dev: -1} '$FP_SOURCE' <<< ',$FS_SIZE'"
-			G_EXEC partprobe "$FP_SOURCE"
-			G_EXEC partx -u "$FP_SOURCE"
 		fi
 
 		# Derive target image size from last partition end
@@ -547,25 +564,23 @@
 			G_EXEC rmdir "$root_mountpoint" "$fat_mountpoint"
 
 		# Add trailing FAT partition to simplify first run setup if requested
-		elif (( $ADD_DOS_PART ))
+		elif (( $ADD_FAT_PART ))
 		then
 			G_DIETPI-NOTIFY 2 'Adding a 1 MiB FAT partition to simplify first run setup'
 			((IMAGE_SIZE+=1048576))
 			# Increase source image size if required
 			[[ $SOURCE_TYPE == 'Image' ]] && (( $(stat -c '%s' "$FP_SOURCE_IMG") < $IMAGE_SIZE )) && G_EXEC truncate -s "$IMAGE_SIZE" "$FP_SOURCE_IMG" && G_EXEC losetup -c "$FP_SOURCE"
-			# Add new DOS partition
+			# Add new MBR partition
 			local start=$(( $last_part_end + 1 ))
 			local type='EBD0A0A2-B9E5-4433-87C0-68B6B72699C7' # https://en.wikipedia.org/wiki/GUID_Partition_Table#Partition_type_GUIDs
 			[[ $PART_TABLE_TYPE == 'dos' ]] && type='c'
 			G_EXEC eval "sfdisk -a '$FP_SOURCE' <<< 'start=$start,size=2048,type=$type'" # size in sectors
-			G_EXEC partprobe "$FP_SOURCE"
-			G_EXEC partx -u "$FP_SOURCE"
-			# create a FAT filesystem and add config files to it
-			local new_dos_part=$(sfdisk -l "$FP_SOURCE" | mawk "/ $start /{print \$1;exit}")
-			G_EXE_OUTPUT=1 G_EXEC mkfs.fat -n DIETPISETUP "$new_dos_part"
+			# Create a FAT filesystem and add config files to it
+			local new_fat_part=$(sfdisk -l "$FP_SOURCE" | mawk "/ $start /{print \$1;exit}")
+			G_EXEC_OUTPUT=1 G_EXEC mkfs.fat -n DIETPISETUP "$new_fat_part"
 			local fat_mountpoint=$(mktemp -d)
 			local root_mountpoint=$(mktemp -d)
-			G_EXEC mount "$new_dos_part" "$fat_mountpoint"
+			G_EXEC mount "$new_fat_part" "$fat_mountpoint"
 			G_EXEC mount "$FP_ROOT_DEV" "$root_mountpoint"
 			G_DIETPI-NOTIFY 2 'Copying dietpi.txt and other config files to the DIETPISETUP partition'
 			for f in 'dietpi.txt' 'dietpi-wifi.txt' 'dietpiEnv.txt' 'boot.ini' 'extlinux/extlinux.conf' 'Automation_Custom_PreScript.sh' 'Automation_Custom_Script.sh' 'unattended_pivpn.conf'
@@ -606,7 +621,7 @@ _EOF_
 			G_EXEC truncate -s "$IMAGE_SIZE" "$FP_SOURCE_IMG"
 
 			# Rename if source image != output image yet
-			[[ $(readlink -f "$FP_FINAL") != "$(readlink -f "$FP_SOURCE_IMG")" ]] && G_EXEC mv "$FP_SOURCE_IMG" "$FP_FINAL"
+			[[ $(realpath "$FP_FINAL") != "$(realpath "$FP_SOURCE_IMG")" ]] && G_EXEC mv "$FP_SOURCE_IMG" "$FP_FINAL"
 
 			# Check for sufficient free disk space to store the xz archive with 100 MiB buffer
 			(( $SKIP_ARCHIVE )) || G_CHECK_FREESPACE . $(( $IMAGE_SIZE * 15/100 / 1024**2 + 100 )) || exit 1
@@ -626,31 +641,21 @@ _EOF_
 		else
 			G_DIETPI-NOTIFY 2 'Creating final image with Clonezilla'
 
-			# Install required packages
-			G_AG_CHECK_INSTALL_PREREQ unzip clonezilla partclone xz-utils syslinux-common xorriso isolinux
-			# - Bullseye/Focal: We need Clonezilla 5.x for loop device support
-			if dpkg --compare-versions "$(dpkg-query -Wf '${Version}' clonezilla 2> /dev/null)" lt 5
-			then
-				G_EXEC curl -sSf 'https://deb.debian.org/debian/pool/main/c/clonezilla/clonezilla_5.3.17-2_all.deb' -o clonezilla.deb
-				G_EXEC dpkg -i ./clonezilla.deb
-				G_EXEC rm clonezilla.deb
-			fi
-
 			# Get latest version of Clonezilla Live
 			CLONEZILLA_VERSION=$(curl -sSf "$CLONEZILLA_REPO/" | mawk -F\" '/class="folder "/{print $2}' | head -1)
-			[[ $CLONEZILLA_VERSION ]] || Error_Exit 'Could not retrieve latest Clonezilla Live version string, aborting...'
+			[[ $CLONEZILLA_VERSION ]] || Error_Exit 'Could not retrieve latest Clonezilla Live version string'
 			CLONEZILLA_URL="$CLONEZILLA_REPO/$CLONEZILLA_VERSION/clonezilla-live-$CLONEZILLA_VERSION-amd64.zip/download"
 
-			# Check for sufficient free disk space to store the bundled Clonezille Live + DietPi directory and ISO with 100 MiB buffer
+			# Check for sufficient free disk space to store the bundled Clonezilla Live + DietPi directory and ISO with 100 MiB buffer
 			# - Get Clonezilla Live ISO size, which matches sufficiently well the unpacked archive: Remove trailing carriage return
 			CLONEZILLA_SIZE=$(curl -sSfIL "${CLONEZILLA_URL/amd64.zip/amd64.iso}" | mawk '/^[Cc]ontent-[Ll]ength:/{print $2}' | tail -1); CLONEZILLA_SIZE=${CLONEZILLA_SIZE%$'\r'}
-			(( $CLONEZILLA_SIZE )) || Error_Exit 'Could not retrieve Clonezilla Live size, aborting...'
+			(( $CLONEZILLA_SIZE )) || Error_Exit 'Could not retrieve Clonezilla Live size'
 			NEEDED_FREE_SPACE=$(( ( $CLONEZILLA_SIZE + $IMAGE_SIZE * 20/100 ) * 2 / 1024**2 + 100 )) REMOVE_IMG=0
 			# If free space is insufficient and the source is an image on the same filesystem, check whether it fits when we remove the source image before generating the ISO
 			if ! G_CHECK_FREESPACE . "$NEEDED_FREE_SPACE"
 			then
 				[[ $FP_SOURCE_IMG && $(findmnt -Ufnro TARGET -T "$FP_SOURCE_IMG") == $(findmnt -Ufnro TARGET -T .) ]] || exit 1
-				G_DIETPI-NOTIFY 2 'Insufficient free space for ISO directory + file, checking whether it would be sufficient after removing source image file...'
+				G_DIETPI-NOTIFY 2 'Insufficient free space for ISO directory + file, checking whether it would be sufficient after removing source image file ...'
 				G_CHECK_FREESPACE . $(( $NEEDED_FREE_SPACE - $IMAGE_SIZE / 1024**2 )) || exit 1
 				REMOVE_IMG=1
 			fi
@@ -749,40 +754,36 @@ _EOF_
 		fi
 
 		# Move GPT backup partition table to end of drive
-		if [[ $CLONING_TOOL != 'Clonezilla' && $PART_TABLE_TYPE == 'gpt' ]]
-		then
-			G_EXEC_DESC='Re-creating GPT backup partition table and header at end of image' G_EXEC_OUTPUT=1 G_EXEC sfdisk --relocate gpt-bak-std "$FP_FINAL"
-			G_EXEC sync
-		fi
+		[[ $CLONING_TOOL != 'Clonezilla' && $PART_TABLE_TYPE == 'gpt' ]] && G_EXEC_DESC='Re-creating GPT backup partition table and header at end of image' G_EXEC_OUTPUT=1 G_EXEC sgdisk -e "$FP_FINAL"
 
 		# Generate hashes, size info and compress image if requested
-		local result_test="\nImage file:  $FP_FINAL"
+		local result_text="\nImage file:  $FP_FINAL"
 		local upload_list=()
 		if (( $RAW_HASH_SIZE ))
 		then
 			G_EXEC_DESC='Generating image size file' G_EXEC eval "stat -c '%s' '$FP_FINAL' > '$FP_FINAL.size'"
-			result_test+="\nImage size:  $FP_FINAL.size"
+			result_text+="\nImage size:  $FP_FINAL.size"
 			upload_list+=("$FP_FINAL.size")
 		fi
 		if (( $SKIP_ARCHIVE ))
 		then
 			G_EXEC_DESC='Generating image hash' G_EXEC eval "sha256sum '$OUTPUT_IMG_NAME.$OUTPUT_IMG_EXT' > '$FP_FINAL.sha256'"
-			result_test+="\nImage hash:  $FP_FINAL.sha256"
+			result_text+="\nImage hash:  $FP_FINAL.sha256"
 			upload_list+=("$FP_FINAL" "$FP_FINAL.sha256")
 		else
 			if (( $RAW_HASH_SIZE ))
 			then
 				G_EXEC_DESC='Generating image hash' G_EXEC eval "sha256sum '$OUTPUT_IMG_NAME.$OUTPUT_IMG_EXT' > '$FP_FINAL.sha256'"
-				result_test+="\nImage hash:  $FP_FINAL.sha256"
+				result_text+="\nImage hash:  $FP_FINAL.sha256"
 				upload_list+=("$FP_FINAL.sha256")
 			fi
 			[[ -f $FP_FINAL.xz ]] && G_EXEC rm "$FP_FINAL.xz"
 			G_EXEC_DESC='Generating xz-compressed image' G_EXEC xz -9e -T0 -M75% -k "$FP_FINAL"
-			result_test+="\nxz file:     $FP_FINAL.xz"
+			result_text+="\nxz file:     $FP_FINAL.xz"
 			upload_list+=("$FP_FINAL.xz")
 
 			G_EXEC_DESC='Generating xz hash' G_EXEC eval "sha256sum '$OUTPUT_IMG_NAME.$OUTPUT_IMG_EXT.xz' > '$FP_FINAL.xz.sha256'"
-			result_test+="\nxz hash:     $FP_FINAL.xz.sha256"
+			result_text+="\nxz hash:     $FP_FINAL.xz.sha256\n$(<"$FP_FINAL.xz.sha256")"
 			upload_list+=("$FP_FINAL.xz.sha256")
 			FP_FINAL+='.xz'
 		fi
@@ -791,17 +792,17 @@ _EOF_
 		if [[ $SIGN_PASS ]]
 		then
 			G_DIETPI-NOTIFY 2 "Signing $FP_FINAL ..."
-			gpg --batch --pinentry-mode loopback --passphrase "$SIGN_PASS" -b --armor "$FP_FINAL" || exit 1
-			result_test+="\nSignature:   $FP_FINAL.asc"
+			gpg --batch --pinentry-mode loopback --passphrase "$SIGN_PASS" -b --armor "$FP_FINAL" || Exit_Error 'Signing failed, please check your signing key and passphase'
+			result_text+="\nSignature:   $FP_FINAL.asc\n$(<"$FP_FINAL.asc")"
 			upload_list+=("$FP_FINAL.asc")
 		fi
 
-		G_DIETPI-NOTIFY 0 "DietPi-Imager has successfully finished.$result_test"
+		G_DIETPI-NOTIFY 0 "DietPi-Imager has successfully finished.$result_text"
 
 		# Upload if requested
 		if [[ $UPLOAD_SCRIPT ]]
 		then
-			[[ -x "$UPLOAD_SCRIPT" ]] || { G_DIETPI-NOTIFY 1 "Upload script $UPLOAD_SCRIPT does not exist or is not executable. Aborting ..."; exit 1; }
+			[[ -x "$UPLOAD_SCRIPT" ]] || Error_Exit "Upload script $UPLOAD_SCRIPT does not exist or is not executable"
 			G_EXEC_OUTPUT=1 G_EXEC ./upload.sh "${upload_list[@]}"
 		fi
 	}

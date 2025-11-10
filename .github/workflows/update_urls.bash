@@ -145,6 +145,12 @@ aREGEX[$software_id]='https://hndl.urbackup.org/Server/.*/urbackup-server_.*_\$a
 # NAA Daemon: Currently has no fallback URL/version
 software_id=124
 
+# BirdNET-Go
+software_id=127
+aCHECK[$software_id]='curl -sSf '\''https://api.github.com/repos/tphakala/birdnet-go/releases'\'' | mawk -F\" '\''/^ *"tag_name": "[^"]*",$/{print $4}'\'' | head -1'
+aREGEX[$software_id]='bnet_vers='\''[^'\'']*'\'
+aREPLACE[$software_id]='bnet_vers='\''$release'\'
+
 # YaCy
 software_id=133
 aCHECK[$software_id]='curl -sSf '\''https://download.yacy.net/?C=N;O=D'\'' | grep -o '\''yacy_v[0-9._a-f]*\.tar\.gz'\'' | head -1'
@@ -344,29 +350,31 @@ do
 	[[ $arch ]] && release=${release/${arch}_/\$\{arch\}_} release=${release/$arch/\$arch}
 	echo "Found release \"$release\""
 
-	# Apply replacement string if given, else unmodified release string is used
-	if [[ ${aREPLACE[i]} ]]
+	# Replace regex with new release if given
+	if [[ ${aREGEX[i]} ]]
 	then
-		eval "release=\"${aREPLACE[i]}\""
-		echo "Replacing \"${aREGEX[i]}\" with \"$release\""
+		# Apply replacement string if given, else unmodified release string is used
+		[[ ${aREPLACE[i]} ]] && eval "release=\"${aREPLACE[i]}\""
+
+		echo "Replacing \"${aREGEX[i]}\" with \"$release\" ..."
+
+		# Check whether regex exists in related code block
+		sed -n "/^\t\tif To_Install ${i%000} /,/^\t\tfi$/p" dietpi/dietpi-software | grep -q "${aREGEX[i]}" || Exit_Error "Regex \"${aREGEX[i]}\" does not exist"
+
+		# Replace URL/version in dietpi-software
+		sed -i "/^\t\tif To_Install ${i%000} /,/^\t\tfi$/s|${aREGEX[i]}|$release|" dietpi/dietpi-software
+
+		# Verify that release has been added
+		sed -n "/^\t\tif To_Install ${i%000} /,/^\t\tfi$/p" dietpi/dietpi-software | grep -q "$release" || Exit_Error "Release \"$release\" failed to be added"
 	fi
-
-	# Check whether regex exists in related code block
-	sed -n "/^\t\tif To_Install ${i%000} /,/^\t\tfi$/p" dietpi/dietpi-software | grep -q "${aREGEX[i]}" || Exit_Error "Regex \"${aREGEX[i]}\" does not exist"
-
-	# Replace URL/version in dietpi-software
-	sed -i "/^\t\tif To_Install ${i%000} /,/^\t\tfi$/s|${aREGEX[i]}|$release|" dietpi/dietpi-software
 
 	# Check for possibly newly supported architectures
-	if [[ ${aARCH_CHECK[i]} ]]
-	then
-		for arch in ${aARCH_CHECK[i]}
-		do
-			echo "Checking for possibly newly supported architecture $arch ..."
-			release=$(eval "${aCHECK[i]}") || :
-			[[ $release ]] && Exit_Error "New architecture $arch is now supported"
-		done
-	fi
+	for arch in ${aARCH_CHECK[i]}
+	do
+		echo "Checking for possibly newly supported architecture $arch ..."
+		release=$(eval "${aCHECK[i]}") || :
+		[[ $release ]] && Exit_Error "New architecture $arch is now supported"
+	done
 done
 
 exit 0

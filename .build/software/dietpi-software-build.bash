@@ -121,9 +121,7 @@ G_EXEC truncate -s 8G "$image"
 FP_LOOP=$(losetup -f)
 G_EXEC losetup -P "$FP_LOOP" "$image"
 G_EXEC_OUTPUT=1 G_EXEC e2fsck -fp "${FP_LOOP}p1"
-G_EXEC_OUTPUT=1 G_EXEC eval "sfdisk -fN1 '$FP_LOOP' <<< ',+'"
-G_EXEC partprobe "$FP_LOOP"
-G_EXEC partx -u "$FP_LOOP"
+G_EXEC_OUTPUT=1 G_EXEC eval "sfdisk -N1 '$FP_LOOP' <<< ',+'"
 G_EXEC_OUTPUT=1 G_EXEC resize2fs "${FP_LOOP}p1"
 G_EXEC_OUTPUT=1 G_EXEC e2fsck -fp "${FP_LOOP}p1"
 G_EXEC mkdir rootfs

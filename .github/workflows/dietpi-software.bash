@@ -131,7 +131,7 @@ Process_Software()
 			32) aSERVICES[i]='ympd' aTCP[i]='1337';;
 			33) (( $emulation )) || aSERVICES[i]='airsonic' aTCP[i]='8080' aDELAY[i]=60;; # Fails in QEMU-emulated containers, probably due to missing device access
 			34) aCOMMANDS[i]='COMPOSER_ALLOW_SUPERUSER=1 composer -n -V';;
-			35) (( $dist < 8 || $arch > 2 )) && aSERVICES[i]='lyrionmusicserver' aTCP[i]='9000';; # disable check on 32-bit ARM Trixie for now: https://github.com/LMS-Community/slimserver/tree/public/9.1/CPAN/arch/5.40
+			35) aSERVICES[i]='lyrionmusicserver' aTCP[i]='9000';;
 			36) aCOMMANDS[i]='squeezelite -t';; # Service listens on random high UDP port and exits if no audio device has been found, which does not exist on GitHub Actions runners, respectively within the containers
 			37) aSERVICES[i]='shairport-sync' aTCP[i]='5000';; # AirPlay 2 would be TCP port 7000
 			38) aCOMMANDS[i]='/opt/FreshRSS/cli/user-info.php';;
@@ -227,6 +227,7 @@ Process_Software()
 			124) aSERVICES[i]='networkaudiod';; # aUDP[i]='????';;
 			125) aSERVICES[i]='synapse' aTCP[i]='8008';;
 			126) aSERVICES[i]='adguardhome' aUDP[i]='53' aTCP[i]='8083'; [[ ${aSERVICES[182]} ]] && aUDP[i]+=' 5335';; # Unbound uses port 5335 if AdGuard Home is installed
+			127) aSERVICES[i]='birdnet' aTCP[i]='8127';;
 			128) aSERVICES[i]='mpd' aTCP[i]='6600';;
 			#129) O!MPD
 			130) aCOMMANDS[i]='python3 -V';;
@@ -326,7 +327,9 @@ do
 		38|40|48|54|55|57|59|90|160|210) Process_Software 88 89 webserver;;
 		159) Process_Software 36 37 65 88 89 96 121 124 128 129 152 160 163 webserver;;
 		47|114|168) Process_Software 88 89 91 webserver;;
-		8|33|53|80|131|133|164|179|181|206) Process_Software 196;;
+		8|33|80|133|164|179|181|206) Process_Software 196;;
+		122) Process_Software 9;;
+		53|131) Process_Software 9 196;;
 		32|148|119) Process_Software 128;;
 		129) Process_Software 88 89 128 webserver;;
 		49|165|177) Process_Software 0 17 88;;
@@ -338,7 +341,7 @@ do
 		180) (( $arch == 10 || $arch == 3 )) || Process_Software 170;;
 		188) Process_Software 17;;
 		213) Process_Software 17 188;;
-		106|144|145|151|183|203) Process_Software 87;;
+		183) Process_Software 87;;
 		31|37|128|138|163|167|187) Process_Software 152;;
 		75) Process_Software 83 87 89;;
 		76) Process_Software 83 88 89;;
@@ -375,9 +378,7 @@ G_EXEC truncate -s 8G "$image"
 FP_LOOP=$(losetup -f)
 G_EXEC losetup -P "$FP_LOOP" "$image"
 G_EXEC_OUTPUT=1 G_EXEC e2fsck -fp "${FP_LOOP}p1"
-G_EXEC_OUTPUT=1 G_EXEC eval "sfdisk -fN1 '$FP_LOOP' <<< ',+'"
-G_EXEC partprobe "$FP_LOOP"
-G_EXEC partx -u "$FP_LOOP"
+G_EXEC_OUTPUT=1 G_EXEC eval "sfdisk -N1 '$FP_LOOP' <<< ',+'"
 G_EXEC_OUTPUT=1 G_EXEC resize2fs "${FP_LOOP}p1"
 G_EXEC_OUTPUT=1 G_EXEC e2fsck -fp "${FP_LOOP}p1"
 G_EXEC mkdir rootfs
@@ -440,10 +441,6 @@ then
 		fi
 	done
 fi
-
-# Do not attempt to change kernel parameters via sysctl, but do dry runs. Those fail in case of invalid syntax or settings which do not exist, but do not fail on missing container capabilities.
-G_EXEC eval 'echo -e '\''#!/bin/dash\n/sbin/sysctl --dry-run "$@"'\'' > rootfs/usr/local/bin/sysctl'
-G_EXEC chmod +x rootfs/usr/local/bin/sysctl
 
 # ARMv6/7 Trixie: Workaround failing chpasswd, which tries to access /proc/sys/vm/mmap_min_addr, but fails as of AppArmor on the host
 if (( $arch < 3 && $dist > 7 )) && systemctl -q is-active apparmor
