@@ -135,13 +135,6 @@ aCHECK[$software_id]='curl -sSf '\''https://api.github.com/repos/Novik/ruTorrent
 aREGEX[$software_id]='version='\''[^'\'']*'\'
 aREPLACE[$software_id]='version='\''$release'\'
 
-# UrBackup Server
-software_id=111
-aCHECK[$software_id]='version=$(curl -sSf '\''https://hndl.urbackup.org/Server/'\'' | grep -Po '\''(?<=href=")[0-9.]+(?=/")'\'' | sort -Vr | head -1); file=$(curl -sSf "https://hndl.urbackup.org/Server/$version/" | grep -Pom1 "(?<=href=\")urbackup-server_${version}_$arch\.deb(?=\")"); echo "${file:+https://hndl.urbackup.org/Server/$version/$file}"'
-aARCH[$software_id]='armhf arm64 amd64'
-aARCH_CHECK[$software_id]='riscv64'
-aREGEX[$software_id]='https://hndl.urbackup.org/Server/.*/urbackup-server_.*_\$arch.deb'
-
 # NAA Daemon: Currently has no fallback URL/version
 software_id=124
 
