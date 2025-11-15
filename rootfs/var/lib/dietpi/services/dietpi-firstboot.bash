@@ -209,9 +209,8 @@ _EOF_
 		if [[ -f /usr/share/zoneinfo/$autoinstall_timezone && $autoinstall_timezone != "$current_timezone" ]]
 		then
 			G_DIETPI-NOTIFY 2 "Setting time zone $autoinstall_timezone. Please wait..."
-			rm -fv /etc/{localtime,timezone}
-			ln -s "/usr/share/zoneinfo/$autoinstall_timezone" /etc/localtime
-			dpkg-reconfigure -f noninteractive tzdata
+			ln -snf "/usr/share/zoneinfo/$autoinstall_timezone" /etc/localtime
+			[[ -f '/etc/timezone' ]] && echo "$autoinstall_timezone" > /etc/timezone
 		fi
 
 		# Apply language (locale)
