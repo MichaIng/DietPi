@@ -1238,7 +1238,7 @@ Patch_8_20()
 		[[ -f '/etc/nginx/sites-dietpi/dietpi-pihole.conf' ]] && G_EXEC sed --follow-symlinks -i 's/add_header X-XSS-Protection "1; mode=block";/add_header X-XSS-Protection "0";/' /etc/nginx/sites-dietpi/dietpi-pihole.conf
 		[[ -f '/etc/lighttpd/conf-available/99-dietpi-pihole.conf' ]] && G_EXEC sed --follow-symlinks -i 's/"X-XSS-Protection" => "1; mode=block"/"X-XSS-Protection" => "0"/' /etc/lighttpd/conf-available/99-dietpi-pihole.conf
 
-		# DietPi-Dashboard: https://github.com/ravenclaw900/DietPi-Dashboard/releases/tag/v0.6.2
+		# DietPi-Dashboard: https://github.com/nonnorm/DietPi-Dashboard/releases/tag/v0.6.2
 		if grep -q '^[[:blank:]]*aSOFTWARE_INSTALL_STATE\[200\]=2' /boot/dietpi/.installed
 		then
 			G_DIETPI-NOTIFY 2 'Preparing DietPi-Dashboard update to fix CVE-2023-38505 DoS vulnerability ...'
@@ -1907,7 +1907,9 @@ sudo sysctl -p /etc/sysctl.d/98-dietpi-redis.conf'
 			else
 				G_DIETPI-NOTIFY 2 'Enabling memory overcomit for Redis server'
 				G_EXEC eval 'echo '\''vm.overcommit_memory=1'\'' > /etc/sysctl.d/98-dietpi-redis.conf'
-				G_EXEC sysctl -p /etc/sysctl.d/98-dietpi-redis.conf
+				local dryrun=()
+				[[ ! -w '/proc/sys/vm/overcommit_memory' ]] && systemd-detect-virt -cq && dryrun=('--dry-run')
+				G_EXEC sysctl -p "${dryrun[@]}" /etc/sysctl.d/98-dietpi-redis.conf
 			fi
 		fi
 
@@ -2325,7 +2327,9 @@ sudo sysctl -p /etc/sysctl.d/dietpi-syncthing.confs
 - https://github.com/quic-go/quic-go/wiki/UDP-Buffer-Size'
 			else
 				G_EXEC eval 'echo -e '\''fs.inotify.max_user_watches=204800\nnet.core.rmem_max=7500000\nnet.core.wmem_max=7500000'\'' > /etc/sysctl.d/dietpi-syncthing.conf'
-				G_EXEC sysctl -p /etc/sysctl.d/dietpi-syncthing.conf
+				local dryrun=()
+				[[ ! -w '/proc/sys/net/core/rmem_max' ]] && systemd-detect-virt -cq && dryrun=('--dry-run')
+				G_EXEC sysctl -p "${dryrun[@]}" /etc/sysctl.d/dietpi-syncthing.conf
 			fi
 		fi
 
@@ -2620,10 +2624,31 @@ Patch_9_18()
 		(( $G_HW_ARCH == 3 )) && arch='arm64'
 		G_EXEC mkimage -C none -A "$arch" -T script -d /boot/boot.cmd /boot/boot.scr
 	fi
+}
+
+Patch_9_19()
+{
+	# Raspberry Pi with new kernel stack
+	if (( $G_HW_MODEL < 10 && $G_DISTRO > 6 )) && dpkg-query -s 'raspi-firmware' &> /dev/null &&
+		! grep '^[[:blank:]]*SKIP_INITRAMFS_GEN=yes' /etc/default/raspi-firmware &&
+		! grep -q '^[[:blank:]]*auto_initramfs=' /boot/config.txt &&
+		! grep -q '^[[:blank:]]*initramfs[[:blank:]]' /boot/config.txt
+	then
+		G_DIETPI-NOTIFY 2 'Disabling initramfs generation, since it is not explicitly enabled in config.txt'
+		G_CONFIG_INJECT 'SKIP_INITRAMFS_GEN=' 'SKIP_INITRAMFS_GEN=yes' /etc/default/raspi-firmware
+		G_EXEC rm -f /boot/initrd.img-* /boot/firmware/initramfs*
+	fi
 
 	# Software updates, migrations and patches
 	if [[ -f '/boot/dietpi/.installed' ]]
 	then
+		# ProFTPD
+		if [[ -f '/etc/ftpusers' ]] && grep -q '^[[:blank:]]*aSOFTWARE_INSTALL_STATE\[94\]=2' /boot/dietpi/.installed
+		then
+			G_DIETPI-NOTIFY 2 'Do not allow root user to use ProFTPD'
+			G_CONFIG_INJECT 'root' 'root' /etc/ftpusers
+		fi
+
 		# Pi-hole v6 migration
 		# - /etc/pihole/pihole.toml indicates that Pi-hole has been upgraded to v6 already.
 		# - The /var/www/pihole symlink indicates that an instance installed via dietpi-software has not been migrated yet.

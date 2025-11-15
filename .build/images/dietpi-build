@@ -55,7 +55,7 @@ EDITION=
 SUFFIX=
 SKIP_ARCHIVE=0
 UPLOAD_SCRIPT=
-ADD_DOS_PART=1
+ADD_FAT_PART=1
 SIGN_PASS=
 TEST_KERNEL=0
 TEST_UBOOT=0
@@ -78,7 +78,7 @@ do
 		'-s'|'--suffix') shift; SUFFIX=$1;;
 		'--skip-archive') SKIP_ARCHIVE=1;;
 		'--upload-script') shift; UPLOAD_SCRIPT=$1;;
-		'--no-dos-part') ADD_DOS_PART=0;;
+		'--no-fat-part') ADD_FAT_PART=0;;
 		'--sign') shift; SIGN_PASS=$1;;
 		'--test-kernel') TEST_KERNEL=1;;
 		'--test-uboot') TEST_UBOOT=1;;
@@ -231,7 +231,7 @@ G_CHECK_URL "https://github.com/$GITOWNER/DietPi/tree/$GITBRANCH" || Error_Exit 
 
 # Generate image name and define CLONING_TOOL for dietpi-installer
 OUTPUT_IMG_NAME="DietPi_$iname-$iarch-${distro^}"
-[[ $RK35XX_MAINLINE == 1 && $HW_MODEL =~ ^(78|79'.'[1-3]|80|82|85|90|91|92|93|94|95)$ ]] && OUTPUT_IMG_NAME+='_mainline'
+[[ $RK35XX_MAINLINE == 1 && $HW_MODEL =~ ^(78|79'.'[1-3]|80|82|85|90|91|92|93|94|95|102|103)$ ]] && OUTPUT_IMG_NAME+='_mainline'
 [[ $fsname ]] && OUTPUT_IMG_NAME+="_$fsname"
 CLONING_TOOL='dd'
 if [[ $VARIANT == 'iso' ]]
@@ -504,8 +504,6 @@ done
 [[ -f 'rootfs/success' ]] || { G_DIETPI-NOTIFY 1 'The container setup did not finish successfully, aborting ...'; journalctl -n 25; ss -tlpn; df -h; free -h; exit 1; }
 G_EXEC rm rootfs/success
 G_EXEC rm -Rf rootfs/{dev,proc,run,sys,tmp,var/log}/{,.??,.[^.]}* # Failsafe: /var/log/journal was found despite tmpfs mount!
-G_EXEC sync
-G_EXEC sleep 1
 G_EXEC umount -R rootfs
 G_EXEC rmdir rootfs
 G_EXEC losetup -d "$FP_LOOP"
@@ -516,12 +514,12 @@ G_EXEC losetup -d "$FP_LOOP"
 # Do not pack and upload raw VM image if not explicitly requested
 [[ $VARIANT =~ ^(|iso|all)$ ]] || SKIP_ARCHIVE=1 UPLOAD_SCRIPT=''
 # Do not add trailing FAT partition for VM, container and ISO installer images, and if there is a boot FAT partition already
-[[ $HW_MODEL =~ ^(20|75)$ || $VARIANT == 'iso' || ( $boot_size -gt 0 && $boot_fstype == 'vfat' ) ]] && ADD_DOS_PART=0
+[[ $HW_MODEL =~ ^(20|75)$ || $VARIANT == 'iso' || ( $boot_size -gt 0 && $boot_fstype == 'vfat' ) ]] && ADD_FAT_PART=0
 export FP_ROOT_DEV CLONING_TOOL OUTPUT_IMG_NAME MOUNT_IT='Off' SKIP_FIRSTBOOT_RESIZE=1
 IMAGER_ARGS=("$OUTPUT_IMG_NAME.img")
 (( $SKIP_ARCHIVE )) && IMAGER_ARGS+=('--skip-archive')
 [[ $UPLOAD_SCRIPT ]] && IMAGER_ARGS+=('--upload-script' "$UPLOAD_SCRIPT")
-(( $ADD_DOS_PART )) && IMAGER_ARGS+=('--add-dos-part')
+(( $ADD_FAT_PART )) && IMAGER_ARGS+=('--add-fat-part')
 (( $HW_MODEL < 10 && $G_DISTRO > 6 )) && IMAGER_ARGS+=('--configs-to-boot')
 [[ $SIGN_PASS ]] && IMAGER_ARGS+=('--sign' "$SIGN_PASS")
 
@@ -532,7 +530,7 @@ then
 	# Raspberry Pi Imager info
 	[[ $HW_MODEL == [1-5] && $DISTRO == 8 && $OUTPUT_IMG_NAME == *'-Trixie' ]] && IMAGER_ARGS+=('--raw-hash-size')
 	G_DIETPI-NOTIFY 2 "Running DietPi-Imager from $G_GITOWNER/$G_GITBRANCH to generate $OUTPUT_IMG_NAME.$ext"
-	bash -c "$(curl -sSf "https://raw.githubusercontent.com/$G_GITOWNER/DietPi/$G_GITBRANCH/.build/images/dietpi-imager")" 'DietPi-Imager' "${IMAGER_ARGS[@]}" || exit 1
+	bash -c "$(curl -sSf "https://raw.githubusercontent.com/$G_GITOWNER/DietPi/$G_GITBRANCH/.build/images/dietpi-imager")" 'DietPi-Imager' "${IMAGER_ARGS[@]}" || { journalctl -n 25; exit 1; }
 	# Raspberry Pi Imager info: add for standard image only
 	[[ ${IMAGER_ARGS[-1]} == '--raw-hash-size' ]] && unset 'IMAGER_ARGS[-1]'
 fi
@@ -542,7 +540,7 @@ if [[ $HW_ARCH == 10 && $VARIANT == 'all' ]]
 then
 	CLONING_TOOL='Clonezilla' OUTPUT_IMG_NAME="${OUTPUT_IMG_NAME}_Installer"
 	G_DIETPI-NOTIFY 2 "Running DietPi-Imager from $G_GITOWNER/$G_GITBRANCH to generate $OUTPUT_IMG_NAME.iso"
-	bash -c "$(curl -sSf "https://raw.githubusercontent.com/$G_GITOWNER/DietPi/$G_GITBRANCH/.build/images/dietpi-imager")" 'DietPi-Imager' "${IMAGER_ARGS[@]}" || exit 1
+	bash -c "$(curl -sSf "https://raw.githubusercontent.com/$G_GITOWNER/DietPi/$G_GITBRANCH/.build/images/dietpi-imager")" 'DietPi-Imager' "${IMAGER_ARGS[@]}" || { journalctl -n 25; exit 1; }
 	CLONING_TOOL='dd' OUTPUT_IMG_NAME=${OUTPUT_IMG_NAME%_Installer}
 fi
 
@@ -557,15 +555,6 @@ then
 	# Create loop device
 	FP_LOOP=$(losetup -f)
 	G_EXEC losetup -P "$FP_LOOP" "$OUTPUT_IMG_NAME.img"
-
-	# Remove added DOS partition, it will be re-added by DietPi-Imager
-	if (( $ADD_DOS_PART )) && [[ $(lsblk -nrbo FSTYPE,LABEL "$FP_LOOP" | tail -1) == 'vfat DIETPISETUP' ]]
-	then
-		SETUP_PART=$(sfdisk -lqo DEVICE "$FP_LOOP" | tail -1)
-		G_EXEC_OUTPUT=1 G_EXEC sfdisk --no-reread --no-tell-kernel --delete "$FP_LOOP" "${SETUP_PART: -1}"
-		G_EXEC partprobe "$FP_LOOP"
-		G_EXEC partx -u "$FP_LOOP"
-	fi
 
 	# Mount filesystems
 	G_EXEC mkdir rootfs
@@ -590,14 +579,12 @@ then
 	# RPi: Enable onboard audio so that it can be detected and configured on first boot
 	[[ -f 'rootfs/boot/config.txt' ]] && G_CONFIG_INJECT 'dtparam=audio=' 'dtparam=audio=on' rootfs/boot/config.txt
 
-	G_EXEC sync
-	G_EXEC sleep 1
 	G_EXEC umount -R rootfs
 	G_EXEC rmdir rootfs
 	G_EXEC losetup -d "$FP_LOOP"
 
 	G_DIETPI-NOTIFY 2 "Running DietPi-Imager from $G_GITOWNER/$G_GITBRANCH to generate $OUTPUT_IMG_NAME.img"
-	bash -c "$(curl -sSf "https://raw.githubusercontent.com/$G_GITOWNER/DietPi/$G_GITBRANCH/.build/images/dietpi-imager")" 'DietPi-Imager' "${IMAGER_ARGS[@]}" || exit 1
+	bash -c "$(curl -sSf "https://raw.githubusercontent.com/$G_GITOWNER/DietPi/$G_GITBRANCH/.build/images/dietpi-imager")" 'DietPi-Imager' "${IMAGER_ARGS[@]}" || { journalctl -n 25; exit 1; }
 fi
 
 ####### AlloGUI ##########################
@@ -613,19 +600,12 @@ then
 	FP_LOOP=$(losetup -f)
 	G_EXEC losetup -P "$FP_LOOP" "$OUTPUT_IMG_NAME.img"
 
-	# Remove added DOS partition, it will be re-added by DietPi-Imager
-	if (( $ADD_DOS_PART )) && [[ $(lsblk -nrbo FSTYPE,LABEL "$FP_LOOP" | tail -1) == 'vfat DIETPISETUP' ]]
-	then
-		SETUP_PART=$(sfdisk -lqo DEVICE "$FP_LOOP" | tail -1)
-		G_EXEC_OUTPUT=1 G_EXEC sfdisk --no-reread --no-tell-kernel --delete "$FP_LOOP" "${SETUP_PART: -1}"
-		G_EXEC partprobe "$FP_LOOP"
-		G_EXEC partx -u "$FP_LOOP"
-	fi
+	# Remove added FAT partition, it will be re-added by DietPi-Imager
+	SETUP_PART=$(sfdisk -lqo Device "$FP_LOOP" | tail -1)
+	[[ $(blkid -s LABEL -o value "$SETUP_PART") == 'DIETPISETUP' ]] && G_EXEC_OUTPUT=1 G_EXEC sfdisk --delete "$FP_LOOP" "${SETUP_PART: -1}"
 
 	# Raise partition and filesystem sizes as well, since partprobe cannot inform the host kernel about the changed size from within the container
-	G_EXEC_OUTPUT=1 G_EXEC eval "sfdisk -fN2 '$FP_LOOP' <<< ',+'"
-	G_EXEC partprobe "$FP_LOOP"
-	G_EXEC partx -u "$FP_LOOP"
+	G_EXEC_OUTPUT=1 G_EXEC eval "sfdisk -N2 '$FP_LOOP' <<< ',+'"
 	G_EXEC_OUTPUT=1 G_EXEC "${afsck[@]}" "${FP_LOOP}p2"
 	G_EXEC_OUTPUT=1 G_EXEC "${aresize[@]}" "${FP_LOOP}p2"
 
@@ -735,15 +715,9 @@ _EOF_
 	G_EXEC sed --follow-symlinks -i 's|Prompt_on_Failure$|{ journalctl -n 50; ss -tulpn; df -h; free -h; systemctl start poweroff.target; }|' rootfs/boot/dietpi/dietpi-login
 
 	# Start container
-	# - Bind mounts required to allow container reading its own drive info, /dev/disk for GRUB and probably other tools to detect UUIDs
-	# - Skip for container images
-	abind=()
-	if [[ $HW_MODEL != 75 ]]
-	then
-		abind=("--bind=$FP_LOOP" '--bind=/dev/disk')
-		for i in "${FP_LOOP}p"*; do abind+=("--bind=$i"); done
-	fi
-	systemd-nspawn -bD rootfs "${abind[@]}" || { G_DIETPI-NOTIFY 1 'systemd-nspawn failed, aborting ...'; journalctl -n 25; ss -tlpn; df -h; free -h; exit 1; }
+	systemd-nspawn -bD rootfs || { G_DIETPI-NOTIFY 1 'systemd-nspawn failed, aborting ...'; journalctl -n 25; ss -tlpn; df -h; free -h; exit 1; }
+	[[ -f 'rootfs/success' ]] || { G_DIETPI-NOTIFY 1 'The container setup did not finish successfully, aborting ...'; journalctl -n 25; ss -tlpn; df -h; free -h; exit 1; }
+	G_EXEC rm rootfs/success
 
 	# Reset IPv4 network connectivity check setting
 	G_CONFIG_INJECT 'CONFIG_CHECK_CONNECTION_IP=' 'CONFIG_CHECK_CONNECTION_IP=9.9.9.9' rootfs/boot/dietpi.txt
@@ -756,17 +730,14 @@ _EOF_
 		G_EXEC rm "$i"
 		G_EXEC rmdir --ignore-fail-on-non-empty "${i%/dietpi-no-credentials.conf}"
 	done
+	G_EXEC sed --follow-symlinks -i 's|{ journalctl -n 50; ss -tulpn; df -h; free -h; systemctl start poweroff.target; }|Prompt_on_Failure|' rootfs/boot/dietpi/dietpi-login
 
-	[[ -f 'rootfs/success' ]] || { G_DIETPI-NOTIFY 1 'The container setup did not finish successfully, aborting ...'; journalctl -n 25; ss -tlpn; df -h; free -h; exit 1; }
-	G_EXEC rm rootfs/success
-	G_EXEC sync
-	G_EXEC sleep 1
 	G_EXEC umount -R rootfs
 	G_EXEC rmdir rootfs
 	G_EXEC losetup -d "$FP_LOOP"
 
 	G_DIETPI-NOTIFY 2 "Running DietPi-Imager from $G_GITOWNER/$G_GITBRANCH to generate $OUTPUT_IMG_NAME.img"
-	bash -c "$(curl -sSf "https://raw.githubusercontent.com/$G_GITOWNER/DietPi/$G_GITBRANCH/.build/images/dietpi-imager")" 'DietPi-Imager' "${IMAGER_ARGS[@]}" || exit 1
+	bash -c "$(curl -sSf "https://raw.githubusercontent.com/$G_GITOWNER/DietPi/$G_GITBRANCH/.build/images/dietpi-imager")" 'DietPi-Imager' "${IMAGER_ARGS[@]}" || { journalctl -n 25; exit 1; }
 fi
 
 [[ $HW_MODEL == 20 && ! $VARIANT =~ ^(|iso)$ ]] || exit 0

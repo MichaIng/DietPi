@@ -134,9 +134,6 @@
 
 		echo '[ INFO ] Informing kernel about changed partition table, rebooting in case of failure (expected in case of GPT partition table)'
 		partx -uv "$ROOT_DEV" || Reboot_to_load_Partition_table
-
-		# Give the kernel some time to read partition changes: https://github.com/MichaIng/DietPi/issues/5006
-		sleep 1
 	fi
 
 	echo '[ INFO ] Detecting root filesystem type'
