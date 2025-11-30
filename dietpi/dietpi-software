@@ -304,6 +304,16 @@ Available commands:
 		aSOFTWARE_CONFLICTS[$software_id]='28'
 		# RPi only (archive.raspberrypi.com repo, libraspberrypi0 dependency, license)
 		(( $G_HW_MODEL > 9 )) && aSOFTWARE_AVAIL_G_HW_MODEL[$software_id,$G_HW_MODEL]=0
+    #------------------
+    software_id=12
+		aSOFTWARE_NAME[$software_id]='Rustdesk Server'
+		aSOFTWARE_DESC[$software_id]='open-source remote desktop server, written in Rust'
+		aSOFTWARE_CATX[$software_id]=1
+		aSOFTWARE_DOCS[$software_id]='https://dietpi.com/docs/software/remote_desktop/#TBD'
+		aSOFTWARE_DEPS[$software_id]='desktop'
+    # RISC-V & ARMv6: https://github.com/rustdesk/rustdesk-server/releases
+    aSOFTWARE_AVAIL_G_HW_ARCH[$software_id,1]=0
+    aSOFTWARE_AVAIL_G_HW_ARCH[$software_id,11]=0
 
 		# Media Systems
 		#--------------------------------------------------------------------------------
@@ -12306,6 +12316,82 @@ _EOF_
 			# Install: Remove old dir on reinstall
 			[[ -d $bnet_inst ]] && G_EXEC rm -R "$bnet_inst"
 			G_EXEC mv birdnet "$bnet_inst"
+
+			# User
+			Create_User -G audio -d "$bnet_data" "$bnet_user"
+
+			# Data dir
+			G_EXEC mkdir -p "$bnet_data"
+			G_EXEC chown -R "$bnet_user:$bnet_user" "$bnet_data"
+
+			# Config
+			# - Checks hard-coded paths in this order: ~/.config/birdnet-go/config.yaml > /etc/birdnet-go/config.yaml
+			if [[ ! -f $bnet_conf ]]
+			then
+				# Initial call to generate ~/.config/birdnet-go/config.yaml
+				G_EXEC runuser -u "$bnet_user" -- "$bnet_inst/birdnet-go"
+				# Replace paths, otherwise defaults to the working directory
+				# Disable MQTT and CPU/memory/disk monitoring
+				# Enable new web UI at $bnet_port
+				G_EXEC yq -yi "
+					.output.sqlite.path = \"$bnet_data/birdnet.db\" |
+					.main.log.path = \"$bnet_data/logs/birdnet.log\" |
+					.realtime.log.path = \"$bnet_data/logs/birdnet.txt\" |
+					.realtime.audio.export.path = \"$bnet_data/clips\" |
+					.realtime.output.file.path = \"$bnet_data/output\" |
+					.realtime.mqtt.enabled = false |
+					.realtime.monitoring.enabled = false |
+					.realtime.webserver.enabled = true |
+					.realtime.dashboard.newui = true |
+					.webserver.port = $bnet_port" "$bnet_conf"
+				# Purge yq if it was installed for BirdNET-Go only
+				(( $install_yq )) && G_AGP yq
+			fi
+
+			# Service
+			cat << _EOF_ > /etc/systemd/system/birdnet.service || exit 1
+[Unit]
+Description=BirdNet-Go
+Wants=network-online.target
+After=network-online.target
+StartLimitIntervalSec=60
+StartLimitBurst=3
+
+[Service]
+User=$bnet_user
+WorkingDirectory=$bnet_data
+ExecStart=$bnet_inst/birdnet-go realtime
+Restart=on-failure
+RestartSec=5
+
+# Hardening
+ProtectSystem=strict
+ProtectHome=1
+PrivateTmp=1
+ProtectKernelTunables=1
+ProtectControlGroups=1
+ReadWritePaths=-$bnet_data -/tmp
+
+[Install]
+WantedBy=multi-user.target
+_EOF_
+		fi
+
+		if To_Install 12 # rustdesk
+
+		then
+			local rd_inst='/opt/rustdesk'
+			local rd_user='rustdesk'
+      local rd_latest=$(curl -s https://api.github.com/repos/rustdesk/rustdesk-server/releases/latest | grep tag_name | cut -d '"' -f 4)
+
+			case $G_HW_ARCH in
+				2) local rd_arch='armv7';;
+				3) local rd_arch='arm64v8';;
+				10) local rd_arch='amd64';;
+			esac
+
+			# Download
+      Download_Install "https://github.com/rustdesk/rustdesk-server/releases/download/${rd_latest}/rustdesk-server-linux-${rd_arch}.zip" 
 
 			# User
 			Create_User -G audio -d "$bnet_data" "$bnet_user"
