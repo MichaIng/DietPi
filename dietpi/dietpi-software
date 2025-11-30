@@ -310,7 +310,6 @@ Available commands:
 		aSOFTWARE_DESC[$software_id]='open-source remote desktop server, written in Rust'
 		aSOFTWARE_CATX[$software_id]=1
 		aSOFTWARE_DOCS[$software_id]='https://dietpi.com/docs/software/remote_desktop/#TBD'
-		aSOFTWARE_DEPS[$software_id]='desktop'
     # RISC-V & ARMv6: https://github.com/rustdesk/rustdesk-server/releases
     aSOFTWARE_AVAIL_G_HW_ARCH[$software_id,1]=0
     aSOFTWARE_AVAIL_G_HW_ARCH[$software_id,11]=0
@@ -12381,8 +12380,8 @@ _EOF_
 		if To_Install 12 # rustdesk
 
 		then
-			local rd_inst='/opt/rustdesk'
-			local rd_user='rustdesk'
+      local rd_user='rustdesk'
+			local rd_work="/opt/$rd_user"
       local rd_latest=$(curl -s https://api.github.com/repos/rustdesk/rustdesk-server/releases/latest | grep tag_name | cut -d '"' -f 4)
 
 			case $G_HW_ARCH in
@@ -12391,68 +12390,60 @@ _EOF_
 				10) local rd_arch='amd64';;
 			esac
 
+      # User
+			Create_User $rd_user
+
 			# Download
-      Download_Install "https://github.com/rustdesk/rustdesk-server/releases/download/${rd_latest}/rustdesk-server-linux-${rd_arch}.zip" 
+      Download_Install "https://github.com/rustdesk/rustdesk-server/releases/download/$rd_latest/rustdesk-server-linux-$rd_arch.zip" $rd_user
 
-			# User
-			Create_User -G audio -d "$bnet_data" "$bnet_user"
+      G_EXEC mkdir -p $rd_work
+      G_EXEC mv rustdesk/$rd_arch/* $rd_work
+      # Permissions
+      G_EXEC chown -R $rd_user $rd_work
+      G_EXEC chmod +x $rd_work/*
+      # Clean
+      G_EXEC rm -r $rd_user
 
-			# Data dir
-			G_EXEC mkdir -p "$bnet_data"
-			G_EXEC chown -R "$bnet_user:$bnet_user" "$bnet_data"
-
-			# Config
-			# - Checks hard-coded paths in this order: ~/.config/birdnet-go/config.yaml > /etc/birdnet-go/config.yaml
-			if [[ ! -f $bnet_conf ]]
-			then
-				# Initial call to generate ~/.config/birdnet-go/config.yaml
-				G_EXEC runuser -u "$bnet_user" -- "$bnet_inst/birdnet-go"
-				# Replace paths, otherwise defaults to the working directory
-				# Disable MQTT and CPU/memory/disk monitoring
-				# Enable new web UI at $bnet_port
-				G_EXEC yq -yi "
-					.output.sqlite.path = \"$bnet_data/birdnet.db\" |
-					.main.log.path = \"$bnet_data/logs/birdnet.log\" |
-					.realtime.log.path = \"$bnet_data/logs/birdnet.txt\" |
-					.realtime.audio.export.path = \"$bnet_data/clips\" |
-					.realtime.output.file.path = \"$bnet_data/output\" |
-					.realtime.mqtt.enabled = false |
-					.realtime.monitoring.enabled = false |
-					.realtime.webserver.enabled = true |
-					.realtime.dashboard.newui = true |
-					.webserver.port = $bnet_port" "$bnet_conf"
-				# Purge yq if it was installed for BirdNET-Go only
-				(( $install_yq )) && G_AGP yq
-			fi
-
-			# Service
-			cat << _EOF_ > /etc/systemd/system/birdnet.service || exit 1
+			# Service hbbs
+      cat << _EOF_ > /etc/systemd/system/rustdesksignal.service
 [Unit]
-Description=BirdNet-Go
+Description=Rustdesk Signal Server
 Wants=network-online.target
 After=network-online.target
-StartLimitIntervalSec=60
-StartLimitBurst=3
 
 [Service]
-User=$bnet_user
-WorkingDirectory=$bnet_data
-ExecStart=$bnet_inst/birdnet-go realtime
+User=$rd_user
+WorkingDirectory=$rd_work
+ExecStart=$rd_work/hbbs
 Restart=on-failure
 RestartSec=5
-
-# Hardening
-ProtectSystem=strict
-ProtectHome=1
-PrivateTmp=1
-ProtectKernelTunables=1
-ProtectControlGroups=1
-ReadWritePaths=-$bnet_data -/tmp
 
 [Install]
 WantedBy=multi-user.target
 _EOF_
-		fi
+      # Service hbbs
+      cat << _EOF_ > /etc/systemd/system/rustdeskrelay.service
+[Unit]
+Description=Rustdesk Relay Server
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+User=$rd_user
+WorkingDirectory=$rd_work
+ExecStart=$rd_work/hbbr
+Restart=on-failure
+RestartSec=5
+LimitNOFILE=4096
+
+[Install]
+WantedBy=multi-user.target
+_EOF_
+
+    aSTART_SERVICES+=('rustdeskrelay')
+    aSTART_SERVICES+=('rustdesksignal')
+    fi
+
 	}
 
 	# $1: 0=None -1=Dropbear -2=OpenSSH
@@ -14597,6 +14588,13 @@ _EOF_
 			G_EXEC rm -Rf /var/log/lazylibrarian
 			G_EXEC rm -Rf /mnt/dietpi_userdata/lazylibrarian
 		fi
+
+    if To_Uninstall 12 # rustdesk
+    then
+      Remove_Service rustdeskrelay
+      Remove_Service rustdesksignal rustdesk
+      G_EXEC rm -Rf /opt/rustdesk
+    fi
 
 		G_DIETPI-NOTIFY 3 "$G_PROGRAM_NAME" 'Finalising uninstall'
 
