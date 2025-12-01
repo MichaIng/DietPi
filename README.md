@@ -349,6 +349,7 @@ Links to hardware and software manufacturers, sources and build instructions use
 - [PiJuice](https://github.com/PiSupply/PiJuice)
 - [LazyLibrarian](https://gitlab.com/LazyLibrarian/LazyLibrarian)
 - [BirdNET-Go](https://github.com/tphakala/birdnet-go)
+- [RustDesk](https://github.com/rustdesk/rustdesk-server)
 
 ---
 

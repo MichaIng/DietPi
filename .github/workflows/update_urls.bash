@@ -12,6 +12,13 @@ Exit_Error()
 
 ### Software definitions ###
 
+# RustDesk Server
+software_id=12
+aCHECK[$software_id]='curl -sSfL '\''https://api.github.com/repos/rustdesk/rustdesk-server/releases/latest'\'' | mawk -F\" "/^ *\"browser_download_url\": \".*\/rustdesk-server-linux-$arch\.zip\"$/{print \$4}"'
+aARCH[$software_id]='armv7 arm64v8 amd64'
+aARCH_CHECK[$software_id]='riscv64'
+aREGEX[$software_id]='https://github.com/rustdesk/rustdesk-server/releases/download/.*/rustdesk-server-linux-\$arch\.zip'
+
 # microblog.pub: Update Python version
 software_id=16
 aCHECK[$software_id]='curl -sSf '\''https://api.github.com/repos/pyenv/pyenv/contents/plugins/python-build/share/python-build?ref=master'\'' | mawk -F\" '\''/^ *"name": "3\.11\.[0-9]*",$/{print $4}'\'' | sort -Vr | head -1'
