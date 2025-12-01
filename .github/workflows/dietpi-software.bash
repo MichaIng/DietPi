@@ -425,23 +425,6 @@ G_EXEC eval 'echo '\''infocmp "$TERM" > /dev/null 2>&1 || { echo "[ INFO ] Unsup
 # Enable automated setup
 G_CONFIG_INJECT 'AUTO_SETUP_AUTOMATED=' 'AUTO_SETUP_AUTOMATED=1' rootfs/boot/dietpi.txt
 
-# Workaround for failing systemd services in emulated container: https://gitlab.com/qemu-project/qemu/-/issues/1962, https://github.com/systemd/systemd/issues/31219
-if (( $emulation ))
-then
-	for i in rootfs/lib/systemd/system/*.service
-	do
-		[[ -f $i ]] || continue
-		grep -Eq '^(Load|Import)Credential=' "$i" || continue
-		G_EXEC mkdir "${i/lib/etc}.d"
-		if [[ $DISTRO == 'bullseye' || $DISTRO == 'bookworm' ]]
-		then
-			G_EXEC eval "echo -e '[Service]\nLoadCredential=' > \"${i/lib/etc}.d/dietpi-no-credentials.conf\""
-		else
-			G_EXEC eval "echo -e '[Service]\nImportCredential=' > \"${i/lib/etc}.d/dietpi-no-credentials.conf\""
-		fi
-	done
-fi
-
 # ARMv6/7 Trixie: Workaround failing chpasswd, which tries to access /proc/sys/vm/mmap_min_addr, but fails as of AppArmor on the host
 if (( $arch < 3 && $dist > 7 )) && systemctl -q is-active apparmor
 then
@@ -484,17 +467,34 @@ then
 	G_EXEC touch rootfs/mnt/dietpi_userdata/papermc/plugins/Geyser-Spigot.jar
 fi
 
-# Workarounds for QEMU-emulated RISC-V and 32-bit ARM containers
-if (( ( $arch < 3 || $arch == 11 ) && $emulation ))
+# Workarounds for QEMU-emulated containers
+if (( $emulation ))
 then
-	# Failing services as PrivateUsers=true leads to "Failed to set up user namespacing", and AmbientCapabilities to "Failed to apply ambient capabilities (before UID change): Operation not permitted"
-	G_EXEC mkdir rootfs/etc/systemd/system/{redis-server,raspotify,navidrome,homebridge}.service.d
+	# Failing systemd services: https://gitlab.com/qemu-project/qemu/-/issues/1962, https://github.com/systemd/systemd/issues/31219
+	for i in rootfs/lib/systemd/system/*.service
+	do
+		[[ -f $i ]] || continue
+		grep -Eq '^(Import|Load)Credential=' "$i" || continue
+		G_EXEC mkdir "${i/lib/etc}.d"
+		G_EXEC eval "echo -e '[Service]\nImportCredential=\nLoadCredential=' > \"${i/lib/etc}.d/dietpi-no-credentials.conf\""
+	done
+
+	# Failing services as PrivateUsers leads to "Failed to set up user namespacing", and AmbientCapabilities to "Failed to apply ambient capabilities (before UID change): Operation not permitted"
+	G_EXEC mkdir rootfs/etc/systemd/system/{redis-server,raspotify,navidrome,homebridge,mariadb,systemd-logind,apache2,mpd}.service.d
 	G_EXEC eval 'echo -e '\''[Service]\nPrivateUsers=0'\'' > rootfs/etc/systemd/system/redis-server.service.d/dietpi-container.conf'
 	G_EXEC eval 'echo -e '\''[Service]\nPrivateUsers=0'\'' > rootfs/etc/systemd/system/raspotify.service.d/dietpi-container.conf'
 	G_EXEC eval 'echo -e '\''[Service]\nPrivateUsers=0'\'' > rootfs/etc/systemd/system/navidrome.service.d/dietpi-container.conf'
 	G_EXEC eval 'echo -e '\''[Service]\nAmbientCapabilities='\'' > rootfs/etc/systemd/system/homebridge.service.d/dietpi-container.conf'
+	# Forky: ProtectHome/ProtectSystem/PrivateTmp/...: "Failed to set up mount namespacing: Invalid argument": https://github.com/systemd/systemd/issues/39951
+	if (( $dist > 8 ))
+	then
+		G_EXEC eval 'echo -e '\''[Service]\nProtectHome=0\nProtectSystem=0'\'' > rootfs/etc/systemd/system/mariadb.service.d/dietpi-container.conf'
+		G_EXEC eval 'echo -e '\''[Service]\nProtectHome=0\nProtectSystem=0\nPrivateTmp=0\nReadWritePaths=\nProtectKernelModules=0\nProtectControlGroups=0\nProtectKernelLogs=0'\'' > rootfs/etc/systemd/system/systemd-logind.service.d/dietpi-container.conf'
+		G_EXEC eval 'echo -e '\''[Service]\nPrivateTmp=0'\'' > rootfs/etc/systemd/system/apache2.service.d/dietpi-container.conf'
+		G_EXEC eval 'echo -e '\''[Service]\nProtectSystem=0\nProtectKernelTunables=0\nProtectControlGroups=0\nProtectKernelModules=0'\'' > rootfs/etc/systemd/system/mpd.service.d/dietpi-container.conf'
+	fi
 
-	# Failing 32-bit ARM Rust builds on ext4 in QEMU emulated container on 64-bit host: https://github.com/rust-lang/cargo/issues/9545
+	# Failing 32-bit ARM Rust builds on ext4 with 64-bit host: https://github.com/rust-lang/cargo/issues/9545
 	if (( $arch < 3 ))
 	then
 		G_EXEC eval 'echo -e '\''tmpfs /mnt/dietpi_userdata tmpfs size=3G,noatime,lazytime\ntmpfs /root tmpfs size=3G,noatime,lazytime'\'' >> rootfs/etc/fstab'
@@ -529,7 +529,7 @@ then
 	G_EXEC sed --follow-symlinks -i "/# Start DietPi-Software/i\sed -i 's/192\.168\.42\./$(G_GET_NET ip | sed 's/[0-9]*$//')/g' /boot/dietpi/dietpi-software" rootfs/boot/dietpi/dietpi-login
 fi
 
-# Workaround for Apache2 on emulated RISC-V system
+# Workaround for Apache on emulated RISC-V system
 if (( ${aINSTALL[83]} )) && (( $emulation && $arch == 11 ))
 then
 	G_EXEC sed --follow-symlinks -i '/# Start DietPi-Software/i\sed -i '\''/^DocumentRoot/a\Mutex posixsem'\'' /boot/dietpi/dietpi-software' rootfs/boot/dietpi/dietpi-login
