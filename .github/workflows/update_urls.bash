@@ -240,24 +240,24 @@ aREGEX[$software_id]='go[0-9.]*\.linux-\$arch\.tar\.gz'
 
 # Snapcast Server: Implement distro loop?
 software_id=191
-aCHECK[$software_id]='curl -sSf '\''https://api.github.com/repos/badaix/snapcast/releases/latest'\'' | mawk -F\" "/^ *\"browser_download_url\": \".*\/snapserver_[^\"\/]*_${arch}_bookworm.deb\"$/{print \$4}"'
+aCHECK[$software_id]='curl -sSf '\''https://api.github.com/repos/snapcast/snapcast/releases/latest'\'' | mawk -F\" "/^ *\"browser_download_url\": \".*\/snapserver_[^\"\/]*_${arch}_bookworm.deb\"$/{print \$4}"'
 aARCH[$software_id]='armhf arm64 amd64'
 aARCH_CHECK[$software_id]='riscv64'
-aREGEX[$software_id]='https://github.com/badaix/snapcast/releases/download/.*/snapserver_.*_\${arch}_\$G_DISTRO_NAME.deb'
-aREPLACE[$software_id]='${release/bookworm/\$G_DISTRO_NAME}'
+aREGEX[$software_id]='https://github.com/snapcast/snapcast/releases/download/.*/snapserver_.*_\${arch}_\$dist.deb'
+aREPLACE[$software_id]='${release/bookworm/\$dist}'
 
 # Snapcast Server: snapweb
 software_id=191000 # 000 appended as little hack to support multiple updates for the same software ID
-aCHECK[$software_id]='curl -sSf '\''https://api.github.com/repos/badaix/snapweb/releases/latest'\'' | mawk -F\" '\''/^ *"browser_download_url": ".*\/snapweb_[^"\/]*_all.deb"$/{print $4}'\'
-aREGEX[$software_id]='https://github.com/badaix/snapweb/releases/download/.*/snapweb_.*_all\.deb'
+aCHECK[$software_id]='curl -sSf '\''https://api.github.com/repos/snapcast/snapweb/releases/latest'\'' | mawk -F\" '\''/^ *"browser_download_url": ".*\/snapweb_[^"\/]*_all.deb"$/{print $4}'\'
+aREGEX[$software_id]='https://github.com/snapcast/snapweb/releases/download/.*/snapweb_.*_all\.deb'
 
 # Snapcast Client: Implement distro loop?
 software_id=192
-aCHECK[$software_id]='curl -sSf '\''https://api.github.com/repos/badaix/snapcast/releases/latest'\'' | mawk -F\" "/^ *\"browser_download_url\": \".*\/snapclient_0[^\"\/]*_${arch}_bookworm.deb\"$/{print \$4}"'
+aCHECK[$software_id]='curl -sSf '\''https://api.github.com/repos/snapcast/snapcast/releases/latest'\'' | mawk -F\" "/^ *\"browser_download_url\": \".*\/snapclient_[^\"\/]*_${arch}_bookworm.deb\"$/{print \$4}"'
 aARCH[$software_id]='armhf arm64 amd64'
 aARCH_CHECK[$software_id]='riscv64'
-aREGEX[$software_id]='https://github.com/badaix/snapcast/releases/download/.*/snapclient_0.*_\${arch}_\$G_DISTRO_NAME.deb'
-aREPLACE[$software_id]='${release/bookworm/\$G_DISTRO_NAME}'
+aREGEX[$software_id]='https://github.com/snapcast/snapcast/releases/download/.*/snapclient_.*_\${arch}_\$dist.deb'
+aREPLACE[$software_id]='${release/bookworm/\$dist}'
 
 # Box64
 software_id=197

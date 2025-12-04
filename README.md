@@ -302,7 +302,7 @@ Links to hardware and software manufacturers, sources and build instructions use
 - [Beets](https://github.com/beetbox/beets)
 - [frp](https://github.com/fatedier/frp)
 - [AdGuard Home](https://github.com/AdguardTeam/AdGuardHome)
-- [Snapcast](https://github.com/badaix/snapcast)
+- [Snapcast](https://github.com/snapcast/snapcast)
 - [K3s](https://github.com/k3s-io/k3s)
 - [Synapse](https://github.com/matrix-org/synapse)
 - [youtube-dl](https://github.com/ytdl-org/youtube-dl)
