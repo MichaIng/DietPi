@@ -61,7 +61,6 @@ do
 	shift
 done
 case $DISTRO in
-	'bullseye') dist=6;;
 	'bookworm') dist=7;;
 	'trixie') dist=8;;
 	'forky') dist=9;;
@@ -156,7 +155,6 @@ Process_Software()
 			#56) Single File PHP Gallery
 			#57) Baïkal
 			58) aCOMMANDS[i]='tailscale version';; # aSERVICES[i]='tailscaled' aUDP[i]='41641' GitHub Actions runners do not support the TUN module
-			59) aSERVICES[i]='raspimjpeg';;
 			60) aCOMMANDS[i]='iptables -V' aSERVICES[i]='isc-dhcp-server' aUDP[i]='67';; # aSERVICES[i]='hostapd' fails without actual WiFi interface
 			61) aSERVICES[i]='tor' aTCP[i]='9040' aUDP[i]='53';;
 			62) aCOMMANDS[i]='box86 -v';;
@@ -187,7 +185,6 @@ Process_Software()
 			87) aCOMMANDS[i]='sqlite3 -version';;
 			88) aSERVICES[i]='mariadb' aTCP[i]='3306';;
 			89) case $DISTRO in
-				'bullseye') aSERVICES[i]='php7.4-fpm';;
 				'bookworm') aSERVICES[i]='php8.2-fpm';;
 				*) aSERVICES[i]='php8.4-fpm';;
 			esac;;
@@ -214,7 +211,7 @@ Process_Software()
 			110) aCOMMANDS[i]='mount.nfs -V';;
 			111) aSERVICES[i]='urbackupsrv' aTCP[i]='55414';;
 			112) aCOMMANDS[i]='/mnt/dietpi_userdata/dxx-rebirth/d1x-rebirth_rpigl -h';;
-			113) aCOMMANDS[i]='chromium --version'; [[ $DISTRO == 'bullseye' && $RPI == 'true' ]] && (( $arch < 10 )) && aCOMMANDS[i]='chromium-browser --version';;
+			113) aCOMMANDS[i]='chromium --version';;
 			114) aCOMMANDS[i]='sudo -u www-data php /var/www/nextcloud/occ status';;
 			115) aSERVICES[i]='webmin' aTCP[i]='10000';;
 			116) aSERVICES[i]='medusa' aTCP[i]='8081'; (( $emulation )) && aDELAY[i]=30;;
@@ -243,8 +240,8 @@ Process_Software()
 			139) aSERVICES[i]='sabnzbd' aTCP[i]='8080'; (( $arch == 10 )) || aDELAY[i]=30;; # ToDo: Solve conflict with Airsonic
 			140) aSERVICES[i]='domoticz' aTCP[i]='8424';;
 			141) aSERVICES[i]='adsb-setup' aTCP[i]='1099' SYSCALLS+=' add_key keyctl bpf'; (( $emulation )) || aSERVICES[i]+=' adsb-docker';; # Container cannot start in QEMU-emulated container. Else, depending on container startup race condition, the Dozzle port can be 9999 (default) or 1094 (changed by internal setup step). I remains 1094 on subsequent restarts, and other ports join depending on manual init setup selections.
-			# MicroK8s: /run/udev and on Bullseye /sys/devices required for snapd update to succeed on first attempt doing a udev trigger; ~@mount + loop devices for snapd snaps=squashfs mounts; /dev/kmsg mount + CAP_SYSLOG: "Error: failed to run Kubelet: failed to create kubelet: open /dev/kmsg: no such file or directory"
-			142) aCOMMANDS[i]='/snap/bin/microk8s status' aSERVICES[i]='snapd snap.microk8s.daemon-containerd' aDELAY[i]=30 CAPABILITIES+=',CAP_NET_ADMIN,CAP_MAC_ADMIN,CAP_SYSLOG' SYSCALLS+=' add_key keyctl bpf ~@mount' aOPTIONS+=('--bind-ro=/run/udev' '--bind=/dev/loop-control' '--bind=/dev/loop'{1,2,3,4,5,6,7} '--bind=/dev/kmsg'); [[ $DISTRO == 'bullseye' ]] && aOPTIONS+=('--bind=/sys/devices') ;;
+			# MicroK8s: /run/udev required for snapd update to succeed on first attempt doing a udev trigger; ~@mount + loop devices for snapd snaps=squashfs mounts; /dev/kmsg mount + CAP_SYSLOG: "Error: failed to run Kubelet: failed to create kubelet: open /dev/kmsg: no such file or directory"
+			142) aCOMMANDS[i]='/snap/bin/microk8s status' aSERVICES[i]='snapd snap.microk8s.daemon-containerd' aDELAY[i]=30 CAPABILITIES+=',CAP_NET_ADMIN,CAP_MAC_ADMIN,CAP_SYSLOG' SYSCALLS+=' add_key keyctl bpf ~@mount' aOPTIONS+=('--bind-ro=/run/udev' '--bind=/dev/loop-control' '--bind=/dev/loop'{1,2,3,4,5,6,7} '--bind=/dev/kmsg');;
 			143) aSERVICES[i]='koel' aTCP[i]='8003'; (( $emulation )) && aDELAY[i]=30;;
 			144) (( $arch == 1 )) || aSERVICES[i]='sonarr' aTCP[i]='8989';; # Skip on ARMv6 failing in container with "If you're reading this, the MonoMod.RuntimeDetour selftest failed."
 			145) aSERVICES[i]='radarr' aTCP[i]='7878';;

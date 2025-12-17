@@ -4,8 +4,7 @@
 
 # APT dependencies: https://github.com/dani-garcia/vaultwarden/wiki/Building-binary#dependencies
 adeps_build=('gcc' 'libc6-dev' 'pkg-config' 'libssl-dev')
-adeps=('libc6' 'openssl')
-(( $G_DISTRO > 6 )) && adeps+=('libssl3') || adeps+=('libssl1.1')
+adeps=('libc6' 'libssl3' 'openssl')
 G_AGUP
 G_AGDUG "${adeps_build[@]}"
 for i in "${adeps[@]}"
@@ -158,7 +157,7 @@ then
 		ip=$(ip -br a s dev "$(ip r l 0/0 | mawk '{print $5;exit}')" | mawk '{print $3;exit}') ip=${ip%/*}
 		openssl req -reqexts SAN -subj '/CN=DietPi vaultwarden' -config <(cat /etc/ssl/openssl.cnf <(echo -ne "[SAN]\nsubjectAltName=DNS:$(</etc/hostname),IP:$ip\nbasicConstraints=CA:TRUE,pathlen:0"))\
 			-x509 -days 7200 -sha256 -extensions SAN -out /mnt/dietpi_userdata/vaultwarden/cert.pem\
-			-newkey rsa:4096 -nodes -keyout /mnt/dietpi_userdata/vaultwarden/privkey.pem
+			-newkey ec:<(openssl ecparam -name prime256v1) -noenc -keyout /mnt/dietpi_userdata/vaultwarden/privkey.pem
 	fi
 
 	echo 'Setting vaultwarden userdata owner ...'
