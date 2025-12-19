@@ -59,7 +59,6 @@ done
 [[ $NAME =~ ^('amiberry'|'amiberry'[-+]'lite'|'domoticz'|'gzdoom'|'gmediarender'|'gogs'|'shairport-sync'|'squeezelite'|'unbound'|'vaultwarden'|'ympd')$ ]] || Error_Exit "Invalid software title \"$NAME\" passed"
 [[ $NAME == 'gogs' ]] && EXT='7z' || EXT='deb'
 case $DISTRO in
-	'bullseye') dist=6;;
 	'bookworm') dist=7;;
 	'trixie') dist=8;;
 	'forky') dist=9;;
@@ -145,7 +144,7 @@ then
 		[[ -f $i ]] || continue
 		grep -Eq '^(Load|Import)Credential=' "$i" || continue
 		G_EXEC mkdir "${i/lib/etc}.d"
-		if [[ $DISTRO == 'bullseye' || $DISTRO == 'bookworm' ]]
+		if [[ $DISTRO == 'bookworm' ]]
 		then
 			G_EXEC eval "echo -e '[Service]\nLoadCredential=' > \"${i/lib/etc}.d/dietpi-no-credentials.conf\""
 		else

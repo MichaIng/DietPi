@@ -25,10 +25,10 @@ aCHECK[$software_id]='curl -sSf '\''https://api.github.com/repos/pyenv/pyenv/con
 aREGEX[$software_id]='micro_python_version='\''[^'\'']*'\'
 aREPLACE[$software_id]='micro_python_version='\''$release'\'
 
-# TasmoAdmin (only latest/v4 for now)
+# TasmoAdmin
 software_id=27
 aCHECK[$software_id]='curl -sSf '\''https://api.github.com/repos/TasmoAdmin/TasmoAdmin/releases/latest'\'' | mawk -F\" '\''/^ *"browser_download_url": ".*\/tasmoadmin_v[^"\/]*\.tar\.gz"$/{print $4}'\'
-aREGEX[$software_id]='https://github.com/TasmoAdmin/TasmoAdmin/releases/download/v[^2].*/tasmoadmin_.*\.tar\.gz'
+aREGEX[$software_id]='https://github.com/TasmoAdmin/TasmoAdmin/releases/download/.*/tasmoadmin_.*\.tar\.gz'
 
 # NoMachine: Check for riscv64?
 software_id=30
@@ -51,17 +51,11 @@ aCHECK[$software_id]='curl -sSf '\''https://api.github.com/repos/FreshRSS/FreshR
 aREGEX[$software_id]='version='\''[^'\'']*'\''\;'
 aREPLACE[$software_id]='version='\''$release'\''\;'
 
-# Ampache v7+
+# Ampache
 software_id=40
 aCHECK[$software_id]='curl -sSf '\''https://api.github.com/repos/ampache/ampache/releases/latest'\'' | mawk -F\" "/^ *\"browser_download_url\": \".*\/ampache-[0-9\.]*_all_php8.2.zip\"$/{print \$4}"'
-aREGEX[$software_id]='https://github.com/ampache/ampache/releases/download/[^6].*/ampache-.*_all_php\$PHP_VERSION.zip'
+aREGEX[$software_id]='https://github.com/ampache/ampache/releases/download/.*/ampache-.*_all_php\$PHP_VERSION.zip'
 aREPLACE[$software_id]='${release/8.2/\$PHP_VERSION}'
-
-# Ampache v6
-software_id=40000
-aCHECK[$software_id]='curl -sSf '\''https://api.github.com/repos/ampache/ampache/releases'\'' | mawk -F\" "/^ *\"browser_download_url\": \".*\/ampache-[0-9\.]*_all_php7.4.zip\"$/{print \$4}" | head -1'
-aREGEX[$software_id]='https://github.com/ampache/ampache/releases/download/6\..*/ampache-.*_all_php\$PHP_VERSION.zip'
-aREPLACE[$software_id]='${release/7.4/\$PHP_VERSION}'
 
 # Emby
 software_id=41
@@ -95,10 +89,10 @@ aCHECK[$software_id]='curl -sSf '\''https://sye.dk/sfpg/?latest'\'' || { sleep 5
 aREGEX[$software_id]='file='\''[^'\'']*'\'
 aREPLACE[$software_id]='file='\''$release'\'
 
-# Baïkal (only latest/v0.10 for now)
+# Baïkal
 software_id=57
 aCHECK[$software_id]='curl -sSf '\''https://api.github.com/repos/sabre-io/Baikal/releases/latest'\'' | mawk -F\" '\''/^ *"browser_download_url": ".*\/baikal-[^"\/]*\.zip"$/{print $4}'\'
-aREGEX[$software_id]='https://github.com/sabre-io/Baikal/releases/download/0\.[^9].*/baikal-0\.[^9].*\.zip'
+aREGEX[$software_id]='https://github.com/sabre-io/Baikal/releases/download/.*/baikal-.*\.zip'
 
 # Box86
 software_id=62
@@ -214,18 +208,12 @@ aCHECK[$software_id]='curl -sSf '\''https://api.github.com/repos/fatedier/frp/re
 aARCH[$software_id]='arm arm_hf arm64 amd64 riscv64'
 aREGEX[$software_id]='https://github.com/fatedier/frp/releases/download/.*/frp_.*_linux_\$arch.tar.gz'
 
-# Forgejo v13+
+# Forgejo
 software_id=177
 aCHECK[$software_id]='curl -sSf '\''https://codeberg.org/api/v1/repos/forgejo/forgejo/releases/latest'\'' | mawk -v RS=, -F\" "/^\"browser_download_url\":\".*-linux-$arch\.xz\"$/{print \$4;exit}"'
 aARCH[$software_id]='arm-6 arm64 amd64'
 aARCH_CHECK[$software_id]='arm-7 riscv64'
-aREGEX[$software_id]='https://codeberg.org/forgejo/forgejo/releases/download/v1[^2]\..*/forgejo-.*-linux-\$arch.xz'
-
-# Forgejo v12
-software_id=177000
-aCHECK[$software_id]='curl -sSfL '\''https://codeberg.org/api/v1/repos/forgejo/forgejo/releases'\'' | mawk -v RS=, -F\" "/^\"browser_download_url\":\".*-12\..*-linux-$arch\.xz\"$/{print \$4}" | head -1'
-aARCH[$software_id]='arm-6 arm64 amd64'
-aREGEX[$software_id]='https://codeberg.org/forgejo/forgejo/releases/download/v12\..*/forgejo-.*-linux-\$arch.xz'
+aREGEX[$software_id]='https://codeberg.org/forgejo/forgejo/releases/download/.*/forgejo-.*-linux-\$arch.xz'
 
 # Komga
 software_id=179
