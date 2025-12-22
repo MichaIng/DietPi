@@ -8,8 +8,7 @@ header=()
 
 # APT dependencies
 adeps_build=('make' 'gcc' 'bison' 'flex' 'file' 'pkg-config' 'libc6-dev' 'libsystemd-dev' 'libssl-dev' 'libevent-dev' 'libexpat1-dev' 'libhiredis-dev' 'libnghttp2-dev' 'protobuf-c-compiler' 'libprotobuf-c-dev' 'dns-root-data')
-adeps=('libc6' 'libsystemd0' 'libevent-2.1-7' 'libnghttp2-14' 'libprotobuf-c1' 'dns-root-data')
-(( $G_DISTRO > 6 )) && adeps+=('libssl3') || adeps+=('libssl1.1')
+adeps=('libc6' 'libsystemd0' 'libssl3' 'libevent-2.1-7' 'libnghttp2-14' 'libprotobuf-c1' 'dns-root-data')
 (( $G_DISTRO > 7 )) && adeps+=('libhiredis1.1.0') || adeps+=('libhiredis0.14')
 
 G_AGUP

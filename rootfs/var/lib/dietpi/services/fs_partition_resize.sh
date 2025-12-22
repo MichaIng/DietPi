@@ -80,7 +80,6 @@
 		echo '[ INFO ] Skipping partition expansion since detected root drive device node does not exist, assuming container system'
 	else
 		echo '[ INFO ] Checking if the last partition contains a filesystem with DIETPISETUP label'
-		# - Use sfdisk to detect last partition, as lsblk with "-r" option on Bullseye does not sort partitions well: https://github.com/MichaIng/DietPi/issues/7527
 		SETUP_PART=$(sfdisk -lqo Device "$ROOT_DRIVE" | tail -1)
 		# - Probe via blkid instead of lsblk=udev, since systemd-udevd does not run yet at this boot stage. From Trixie on, "lsblk --properties-by blkid" can be used.
 		if [[ $(blkid -s LABEL -o value "$SETUP_PART") == 'DIETPISETUP' ]]
