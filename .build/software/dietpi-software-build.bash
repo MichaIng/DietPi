@@ -136,20 +136,16 @@ fi
 # Enable automated setup
 G_CONFIG_INJECT 'AUTO_SETUP_AUTOMATED=' 'AUTO_SETUP_AUTOMATED=1' rootfs/boot/dietpi.txt
 
-# Workaround for failing systemd services in emulated container: https://gitlab.com/qemu-project/qemu/-/issues/1962, https://github.com/systemd/systemd/issues/31219
+# Workarounds for QEMU-emulated containers
 if (( $emulation ))
 then
+	# Failing systemd services: https://gitlab.com/qemu-project/qemu/-/issues/1962, https://github.com/systemd/systemd/issues/31219
 	for i in rootfs/lib/systemd/system/*.service
 	do
 		[[ -f $i ]] || continue
-		grep -Eq '^(Load|Import)Credential=' "$i" || continue
+		grep -Eq '^(Import|Load)Credential=' "$i" || continue
 		G_EXEC mkdir "${i/lib/etc}.d"
-		if [[ $DISTRO == 'bookworm' ]]
-		then
-			G_EXEC eval "echo -e '[Service]\nLoadCredential=' > \"${i/lib/etc}.d/dietpi-no-credentials.conf\""
-		else
-			G_EXEC eval "echo -e '[Service]\nImportCredential=' > \"${i/lib/etc}.d/dietpi-no-credentials.conf\""
-		fi
+		G_EXEC eval "echo -e '[Service]\nImportCredential=\nLoadCredential=' > '${i/lib/etc}.d/dietpi-no-credentials.conf'"
 	done
 fi
 
@@ -171,7 +167,7 @@ G_EXEC eval 'echo '\''infocmp "$TERM" > /dev/null 2>&1 || { echo "[ WARN ] Unsup
 G_CONFIG_INJECT 'CONFIG_CHECK_CONNECTION_IP=' 'CONFIG_CHECK_CONNECTION_IP=127.0.0.1' rootfs/boot/dietpi.txt
 
 # vaultwarden for ARMv6 on ARMv8 host: https://github.com/rust-lang/rust/issues/60605
-[[ $NAME == 'vaultwarden' ]] && (( $arch == 1 && $G_HW_ARCH == 3 )) && G_EXEC sysctl -w 'abi.cp15_barrier=2'
+[[ $NAME == 'vaultwarden' && $arch == 1 && $G_HW_ARCH == 3 ]] && G_EXEC sysctl -w 'abi.cp15_barrier=2'
 
 # Shutdown on failures before the custom script is executed
 G_EXEC sed --follow-symlinks -i 's|Prompt_on_Failure$|{ journalctl -n 50; ss -tulpn; df -h; free -h; systemctl start poweroff.target; }|' rootfs/boot/dietpi/dietpi-login

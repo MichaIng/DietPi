@@ -474,7 +474,7 @@ then
 		[[ -f $i ]] || continue
 		grep -Eq '^(Import|Load)Credential=' "$i" || continue
 		G_EXEC mkdir "${i/lib/etc}.d"
-		G_EXEC eval "echo -e '[Service]\nImportCredential=\nLoadCredential=' > \"${i/lib/etc}.d/dietpi-no-credentials.conf\""
+		G_EXEC eval "echo -e '[Service]\nImportCredential=\nLoadCredential=' > '${i/lib/etc}.d/dietpi-no-credentials.conf'"
 	done
 
 	# Failing services as PrivateUsers leads to "Failed to set up user namespacing", and AmbientCapabilities to "Failed to apply ambient capabilities (before UID change): Operation not permitted"
