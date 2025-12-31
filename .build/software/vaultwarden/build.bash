@@ -28,7 +28,8 @@ G_EXEC curl -sSfo rustup-init.sh 'https://sh.rustup.rs'
 G_EXEC chmod +x rustup-init.sh
 G_EXEC_OUTPUT=1 G_EXEC ./rustup-init.sh -y --profile minimal --default-toolchain none "${host[@]}"
 G_EXEC rm rustup-init.sh
-export PATH="$HOME/.cargo/bin:$PATH"
+# - Fallback to /root if $HOME is undefined when called e.g. from systemd unit
+export PATH="${HOME:-/root}/.cargo/bin:$PATH"
 
 # Obtain latest versions
 # - vaultwarden
@@ -131,7 +132,7 @@ echo '/mnt/dietpi_userdata/vaultwarden/vaultwarden.env' > "$DIR/DEBIAN/conffiles
 
 # - postinst
 cat << '_EOF_' > "$DIR/DEBIAN/postinst"
-#!/bin/bash
+#!/bin/bash -e
 
 # Enable web vault remote access for fresh package installs onto existing pre-v1.25 vaultwarden installs
 if [[ ! $2 ]] && grep -q '^# ROCKET_ADDRESS=0.0.0.0$' /mnt/dietpi_userdata/vaultwarden/vaultwarden.env
@@ -164,25 +165,26 @@ then
 	chown -R vaultwarden:vaultwarden /mnt/dietpi_userdata/vaultwarden
 
 	echo 'Configuring vaultwarden systemd service ...'
-	systemctl unmask vaultwarden
-	systemctl enable --now vaultwarden
+	systemctl --no-reload unmask vaultwarden
+	systemctl enable vaultwarden
+	pgrep -x 'dietpi-software' || systemctl restart vaultwarden
 fi
 _EOF_
 
 # - prerm
 cat << '_EOF_' > "$DIR/DEBIAN/prerm"
-#!/bin/sh
+#!/bin/dash -e
 if [ "$1" = 'remove' ] && [ -d '/run/systemd/system' ] && [ -f '/lib/systemd/system/vaultwarden.service' ]
 then
 	echo 'Deconfiguring vaultwarden systemd service ...'
-	systemctl unmask vaultwarden
-	systemctl disable --now vaultwarden
+	systemctl --no-reload unmask vaultwarden
+	systemctl --no-reload disable --now vaultwarden
 fi
 _EOF_
 
 # - postrm
 cat << '_EOF_' > "$DIR/DEBIAN/postrm"
-#!/bin/sh
+#!/bin/dash -e
 if [ "$1" = 'purge' ]
 then
 	if [ -d '/etc/systemd/system/vaultwarden.service.d' ]
