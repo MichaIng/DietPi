@@ -87,7 +87,7 @@ G_CONFIG_INJECT 'ROCKET_TLS=' 'ROCKET_TLS={certs="./cert.pem",key="./privkey.pem
 G_CONFIG_INJECT 'WEB_VAULT_ENABLED=' 'WEB_VAULT_ENABLED=true' "$DIR/mnt/dietpi_userdata/vaultwarden/vaultwarden.env"
 
 # - systemd service: https://github.com/dani-garcia/vaultwarden/wiki/Setup-as-a-systemd-service
-cat << '_EOF_' > "$DIR/lib/systemd/system/vaultwarden.service"
+cat << '_EOF_' > "$DIR/lib/systemd/system/vaultwarden.service" || exit 1
 [Unit]
 Description=vaultwarden (DietPi)
 Documentation=https://github.com/dani-garcia/vaultwarden
@@ -102,7 +102,7 @@ AmbientCapabilities=CAP_NET_BIND_SERVICE
 LimitNOFILE=1048576
 LimitNPROC=64
 WorkingDirectory=/mnt/dietpi_userdata/vaultwarden
-# Workaround for failing systemd.automount since Bookworm: https://dietpi.com/forum/t/automount-option-in-fstab-prevents-automatically-mounting-a-partition-in-due-time-on-bookworm/17463/22
+# Workaround for failing systemd.automount since Bookworm: https://dietpi.com/forum/t/17463/22
 EnvironmentFile=-/mnt/dietpi_userdata/vaultwarden/vaultwarden.env
 ExecStartPre=/bin/touch /mnt/dietpi_userdata/vaultwarden/vaultwarden.env
 ExecStart=/opt/vaultwarden/vaultwarden
@@ -110,9 +110,9 @@ Restart=on-failure
 RestartSec=5s
 
 # Hardening
-PrivateTmp=true
-PrivateDevices=true
-ProtectHome=true
+PrivateTmp=1
+PrivateDevices=1
+ProtectHome=1
 ProtectSystem=strict
 ReadWritePaths=-/mnt/dietpi_userdata/vaultwarden
 
@@ -128,10 +128,10 @@ G_EXEC chmod +x "$DIR/opt/vaultwarden/vaultwarden"
 # Control files
 
 # - conffiles
-echo '/mnt/dietpi_userdata/vaultwarden/vaultwarden.env' > "$DIR/DEBIAN/conffiles"
+G_EXEC eval "echo '/mnt/dietpi_userdata/vaultwarden/vaultwarden.env' > '$DIR/DEBIAN/conffiles'"
 
 # - postinst
-cat << '_EOF_' > "$DIR/DEBIAN/postinst"
+cat << '_EOF_' > "$DIR/DEBIAN/postinst" || exit 1
 #!/bin/bash -e
 
 # Enable web vault remote access for fresh package installs onto existing pre-v1.25 vaultwarden installs
@@ -172,7 +172,7 @@ fi
 _EOF_
 
 # - prerm
-cat << '_EOF_' > "$DIR/DEBIAN/prerm"
+cat << '_EOF_' > "$DIR/DEBIAN/prerm" || exit 1
 #!/bin/dash -e
 if [ "$1" = 'remove' ] && [ -d '/run/systemd/system' ] && [ -f '/lib/systemd/system/vaultwarden.service' ]
 then
@@ -183,7 +183,7 @@ fi
 _EOF_
 
 # - postrm
-cat << '_EOF_' > "$DIR/DEBIAN/postrm"
+cat << '_EOF_' > "$DIR/DEBIAN/postrm" || exit 1
 #!/bin/dash -e
 if [ "$1" = 'purge' ]
 then
@@ -225,7 +225,7 @@ DEPS_APT_VERSIONED=${DEPS_APT_VERSIONED%,}
 [[ $G_HW_ARCH_NAME == 'armv6l' ]] && DEPS_APT_VERSIONED=$(sed 's/+rp[it][0-9]\+[^)]*)/)/g' <<< "$DEPS_APT_VERSIONED") || DEPS_APT_VERSIONED=$(sed 's/+b[0-9]\+)/)/g' <<< "$DEPS_APT_VERSIONED")
 
 # - control
-cat << _EOF_ > "$DIR/DEBIAN/control"
+cat << _EOF_ > "$DIR/DEBIAN/control" || exit 1
 Package: vaultwarden
 Version: $pkg_version
 Architecture: $(dpkg --print-architecture)
@@ -245,10 +245,6 @@ G_CONFIG_INJECT 'Installed-Size: ' "Installed-Size: $(du -sk "$DIR" | mawk '{pri
 # Build DEB package
 G_EXEC_OUTPUT=1 G_EXEC dpkg-deb -b "$DIR"
 G_EXEC mv "$DIR.deb" /tmp/
-
-# Cleanup
-G_EXEC cd ..
-G_EXEC rm -R "$HOME"
 
 exit 0
 }
