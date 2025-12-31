@@ -167,7 +167,7 @@ then
 	echo 'Configuring vaultwarden systemd service ...'
 	systemctl --no-reload unmask vaultwarden
 	systemctl enable vaultwarden
-	pgrep -x 'dietpi-software' || systemctl restart vaultwarden
+	pgrep -x 'dietpi-software' > /dev/null || systemctl restart vaultwarden
 fi
 _EOF_
 
