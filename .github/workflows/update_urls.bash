@@ -64,6 +64,13 @@ aARCH[$software_id]='armhf arm64 amd64'
 aARCH_CHECK[$software_id]='riscv64'
 aREGEX[$software_id]='https://github.com/MediaBrowser/Emby.Releases/releases/download/.*/emby-server-deb_.*_\$arch.deb'
 
+# ownCloud Infinite Scale
+software_id=47
+aCHECK[$software_id]='curl -sSfL '\''https://api.github.com/repos/owncloud/ocis/releases/latest'\'' | mawk -F\" "/^ *\"browser_download_url\": \".*\/ocis-[^\"\/]*-linux-$arch\"$/{print \$4}"'
+aARCH[$software_id]='arm arm64 amd64'
+aARCH_CHECK[$software_id]='riscv64'
+aREGEX[$software_id]='https://github.com/owncloud/ocis/releases/download/.*/ocis-.*-linux-\$arch'
+
 # Gogs
 software_id=49
 aCHECK[$software_id]='curl -sSf '\''https://api.github.com/repos/gogs/gogs/releases/latest'\'' | mawk -F\" "/^ *\"browser_download_url\": \".*\/gogs_[^\"\/]*_linux_$arch.tar.gz\"$/{print \$4}"'
