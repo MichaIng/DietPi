@@ -229,9 +229,9 @@ Process_Software()
 			128) aSERVICES[i]='mpd' aTCP[i]='6600';;
 			#129) O!MPD
 			130) aCOMMANDS[i]='python3 -V';;
-			131) aSERVICES[i]='blynkserver' aTCP[i]='9443'; (( $emulation )) && aDELAY[i]=30;;
+			131) aSERVICES[i]='blynkserver' aTCP[i]='9443'; (( $emulation )) && aDELAY[i]=60;;
 			132) aSERVICES[i]='aria2' aTCP[i]='6800';; # aTCP[i]+=' 6881-6999';; # Listens on random port
-			133) aSERVICES[i]='yacy' aTCP[i]='8090'; (( $emulation )) && aDELAY[i]=30;;
+			133) aSERVICES[i]='yacy' aTCP[i]='8090'; (( $emulation )) && aDELAY[i]=60;;
 			134) aCOMMANDS[i]='docker compose version';;
 			135) aSERVICES[i]='icecast2' aTCP[i]='8000' aCOMMANDS[i]='darkice -h | grep '\''^DarkIce'\';; # darkice service cannot start in container as is requires audio recording device access
 			136) aSERVICES[i]='motioneye' aTCP[i]='8765';;
@@ -486,13 +486,14 @@ then
 	# Forky
 	if (( $dist > 8 ))
 	then
-		G_EXEC mkdir rootfs/etc/systemd/system/{mariadb,systemd-logind,apache2,mpd,vaultwarden}.service.d
+		G_EXEC mkdir rootfs/etc/systemd/system/{mariadb,systemd-logind,apache2,mpd,vaultwarden,blynkserver}.service.d
 		# ProtectHome/ProtectSystem/PrivateTmp/...: "Failed to set up mount namespacing: Invalid argument": https://github.com/systemd/systemd/issues/39951
 		G_EXEC eval 'echo -e '\''[Service]\nProtectHome=0\nProtectSystem=0'\'' > rootfs/etc/systemd/system/mariadb.service.d/dietpi-container.conf'
 		G_EXEC eval 'echo -e '\''[Service]\nProtectHome=0\nProtectSystem=0\nPrivateTmp=0\nReadWritePaths=\nProtectKernelModules=0\nProtectControlGroups=0\nProtectKernelLogs=0'\'' > rootfs/etc/systemd/system/systemd-logind.service.d/dietpi-container.conf'
 		G_EXEC eval 'echo -e '\''[Service]\nPrivateTmp=0'\'' > rootfs/etc/systemd/system/apache2.service.d/dietpi-container.conf'
 		G_EXEC eval 'echo -e '\''[Service]\nProtectSystem=0\nProtectKernelTunables=0\nProtectControlGroups=0\nProtectKernelModules=0'\'' > rootfs/etc/systemd/system/mpd.service.d/dietpi-container.conf'
 		G_EXEC eval 'echo -e '\''[Service]\nProtectHome=0\nProtectSystem=0\nPrivateTmp=0\nReadWritePaths=\nPrivateDevices=0'\'' > rootfs/etc/systemd/system/vaultwarden.service.d/dietpi-container.conf'
+		G_EXEC eval 'echo -e '\''[Service]\nPrivateTmp=0'\'' > rootfs/etc/systemd/system/blynkserver.service.d/dietpi-container.conf'
 		# /dev/console == /dev/pts/0 seen as "Inappropriate ioctl for device" leading to failing console-getty.service and StandardOutput=tty
 		G_EXEC eval 'echo -e '\''#!/bin/dash\nexec /boot/dietpi/dietpi-login > /dev/console 2>&1'\'' > rootfs/var/lib/dietpi/postboot.d/dietpi-login'
 		G_EXEC sed --follow-symlinks -i '/^StandardOutput=/c\StandardOutput=journal+console' rootfs/etc/systemd/system/dietpi-{first,post}boot.service
