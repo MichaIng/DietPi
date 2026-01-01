@@ -194,7 +194,7 @@ Process_Software()
 			93) aSERVICES[i]='pihole-FTL' aUDP[i]='53';;
 			94) aSERVICES[i]='proftpd' aTCP[i]='21';;
 			95) aSERVICES[i]='vsftpd' aTCP[i]='21';;
-			96) aSERVICES[i]='smbd' aTCP[i]='139 445';;
+			96) aSERVICES[i]='smbd' aTCP[i]='139 445' aUDP[i]='137 138';;
 			97) aCOMMANDS[i]='openvpn --version';; # aSERVICES[i]='openvpn' aUDP[i]='1194' GitHub Actions runners do not support the TUN module
 			98) aSERVICES[i]='haproxy' aTCP[i]='80 1338';;
 			99) aSERVICES[i]='node_exporter' aTCP[i]='9100';;
@@ -222,16 +222,16 @@ Process_Software()
 			121) aSERVICES[i]='roonbridge' aUDP[i]='9003';;
 			122) aSERVICES[i]='node-red' aTCP[i]='1880'; (( $emulation )) && aDELAY[i]=30;;
 			123) aSERVICES[i]='mosquitto' aTCP[i]='1883';;
-			124) aSERVICES[i]='networkaudiod';; # aUDP[i]='????';;
+			124) aSERVICES[i]='networkaudiod' aTCP[i]='43210' aUDP[i]='43210';;
 			125) aSERVICES[i]='synapse' aTCP[i]='8008';;
 			126) aSERVICES[i]='adguardhome' aUDP[i]='53' aTCP[i]='8083'; [[ ${aSERVICES[182]} ]] && aUDP[i]+=' 5335';; # Unbound uses port 5335 if AdGuard Home is installed
 			127) aSERVICES[i]='birdnet' aTCP[i]='8127';;
 			128) aSERVICES[i]='mpd' aTCP[i]='6600';;
 			#129) O!MPD
 			130) aCOMMANDS[i]='python3 -V';;
-			131) (( $arch < 3 || $arch == 11 )) || aSERVICES[i]='blynkserver' aTCP[i]='9443'; (( $arch == 10 || $arch == 2 || $arch == 11 )) || aDELAY[i]=60;;
+			131) aSERVICES[i]='blynkserver' aTCP[i]='9443';;
 			132) aSERVICES[i]='aria2' aTCP[i]='6800';; # aTCP[i]+=' 6881-6999';; # Listens on random port
-			133) (( $arch < 3 || $arch == 11 )) || aSERVICES[i]='yacy' aTCP[i]='8090'; (( $arch == 10 )) && aDELAY[i]=30; (( $arch == 10 || $arch == 2 || $arch == 11)) || aDELAY[i]=90;;
+			133) aSERVICES[i]='yacy' aTCP[i]='8090';;
 			134) aCOMMANDS[i]='docker compose version';;
 			135) aSERVICES[i]='icecast2' aTCP[i]='8000' aCOMMANDS[i]='darkice -h | grep '\''^DarkIce'\';; # darkice service cannot start in container as is requires audio recording device access
 			136) aSERVICES[i]='motioneye' aTCP[i]='8765';;
