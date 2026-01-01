@@ -229,9 +229,9 @@ Process_Software()
 			128) aSERVICES[i]='mpd' aTCP[i]='6600';;
 			#129) O!MPD
 			130) aCOMMANDS[i]='python3 -V';;
-			131) aSERVICES[i]='blynkserver' aTCP[i]='9443';;
+			131) aSERVICES[i]='blynkserver' aTCP[i]='9443'; (( $emulation )) && aDELAY=30;;
 			132) aSERVICES[i]='aria2' aTCP[i]='6800';; # aTCP[i]+=' 6881-6999';; # Listens on random port
-			133) aSERVICES[i]='yacy' aTCP[i]='8090';;
+			133) aSERVICES[i]='yacy' aTCP[i]='8090'; (( $emulation )) && aDELAY=30;;
 			134) aCOMMANDS[i]='docker compose version';;
 			135) aSERVICES[i]='icecast2' aTCP[i]='8000' aCOMMANDS[i]='darkice -h | grep '\''^DarkIce'\';; # darkice service cannot start in container as is requires audio recording device access
 			136) aSERVICES[i]='motioneye' aTCP[i]='8765';;
@@ -423,8 +423,8 @@ G_EXEC eval 'echo '\''infocmp "$TERM" > /dev/null 2>&1 || { echo "[ INFO ] Unsup
 # Enable automated setup
 G_CONFIG_INJECT 'AUTO_SETUP_AUTOMATED=' 'AUTO_SETUP_AUTOMATED=1' rootfs/boot/dietpi.txt
 
-# ARMv6/7 Trixie: Workaround failing chpasswd, which tries to access /proc/sys/vm/mmap_min_addr, but fails as of AppArmor on the host
-if (( $arch < 3 && $dist > 7 )) && systemctl -q is-active apparmor
+# ARMv6/7/RISC-V Trixie: Workaround failing chpasswd, which tries to access /proc/sys/vm/mmap_min_addr, but fails as of AppArmor on the host
+if (( ( $arch < 3 || $arch == 11 ) && $dist > 7 )) && systemctl -q is-active apparmor
 then
 	G_EXEC eval 'echo '\''/proc/sys/vm/mmap_min_addr r,'\'' > /etc/apparmor.d/local/unix-chkpwd'
 	G_EXEC_OUTPUT=1 G_EXEC apparmor_parser -r /etc/apparmor.d/unix-chkpwd

@@ -156,11 +156,11 @@ then
 	fi
 fi
 
-# ARMv6/7 Trixie: Workaround failing chpasswd, which tries to access /proc/sys/vm/mmap_min_addr, but fails as of AppArmor on the host
-if (( $arch < 3 && $dist > 7 )) && systemctl -q is-active apparmor
+# ARMv6/7/RISC-V Trixie: Workaround failing chpasswd, which tries to access /proc/sys/vm/mmap_min_addr, but fails as of AppArmor on the host
+if (( ( $arch < 3 || $arch == 11 ) && $dist > 7 )) && systemctl -q is-active apparmor
 then
 	G_EXEC eval 'echo '\''/proc/sys/vm/mmap_min_addr r,'\'' > /etc/apparmor.d/local/unix-chkpwd'
-	G_EXEC_NOHALT=1 G_EXEC_OUTPUT=1 systemctl restart apparmor || { journalctl -n 25; exit 1; }
+	G_EXEC_OUTPUT=1 G_EXEC apparmor_parser -r /etc/apparmor.d/unix-chkpwd
 fi
 
 # Install Go for Gogs
