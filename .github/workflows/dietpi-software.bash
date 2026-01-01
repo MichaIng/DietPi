@@ -229,9 +229,9 @@ Process_Software()
 			128) aSERVICES[i]='mpd' aTCP[i]='6600';;
 			#129) O!MPD
 			130) aCOMMANDS[i]='python3 -V';;
-			131) aSERVICES[i]='blynkserver' aTCP[i]='9443'; (( $emulation )) && aDELAY[i]=60;;
+			131) aSERVICES[i]='blynkserver' aTCP[i]='9443'; (( $emulation )) && aDELAY[i]=120;;
 			132) aSERVICES[i]='aria2' aTCP[i]='6800';; # aTCP[i]+=' 6881-6999';; # Listens on random port
-			133) aSERVICES[i]='yacy' aTCP[i]='8090'; (( $emulation )) && aDELAY[i]=60;;
+			133) aSERVICES[i]='yacy' aTCP[i]='8090'; (( $emulation )) && aDELAY[i]=120;;
 			134) aCOMMANDS[i]='docker compose version';;
 			135) aSERVICES[i]='icecast2' aTCP[i]='8000' aCOMMANDS[i]='darkice -h | grep '\''^DarkIce'\';; # darkice service cannot start in container as is requires audio recording device access
 			136) aSERVICES[i]='motioneye' aTCP[i]='8765';;
