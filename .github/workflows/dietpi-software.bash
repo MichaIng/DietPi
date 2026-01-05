@@ -143,7 +143,7 @@ Process_Software()
 			44) aSERVICES[i]='transmission-daemon' aTCP[i]='9091 51413' aUDP[i]='51413';;
 			45) aSERVICES[i]='deluged deluge-web' aTCP[i]='8112 58846 6882';;
 			46) aSERVICES[i]='qbittorrent' aTCP[i]='1340 6881';;
-			47) aCOMMANDS[i]='sudo -u www-data php /var/www/owncloud/occ status';;
+			47) aSERVICES[i]='ocis' aTCP[i]='9200';;
 			#48) Pydio
 			49) aSERVICES[i]='gogs' aTCP[i]='3000';;
 			50) aSERVICES[i]='syncthing' aTCP[i]='8384';;

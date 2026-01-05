@@ -227,7 +227,7 @@ Links to hardware and software manufacturers, sources and build instructions use
 - [ruTorrent](https://github.com/Novik/ruTorrent)
 - [qBittorrent](https://github.com/qbittorrent/qBittorrent)
 - [Nextcloud](https://github.com/nextcloud/server)
-- [ownCloud](https://github.com/owncloud/core)
+- [ownCloud Infinite Scale](https://github.com/owncloud/ocis)
 - [Syncthing](https://github.com/syncthing/syncthing)
 - [ReadyMedia](https://sourceforge.net/p/minidlna/git/ci/master/tree/)
 - [MPD](https://github.com/MusicPlayerDaemon/MPD)

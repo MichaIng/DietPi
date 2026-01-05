@@ -747,24 +747,23 @@ Available commands:
 		# Cloud & Backup
 		#--------------------------------------------------------------------------------
 		software_id=47
-		aSOFTWARE_NAME[$software_id]='ownCloud'
-		aSOFTWARE_DESC[$software_id]='File sync, sharing and collaboration platform'
+		aSOFTWARE_NAME[$software_id]='ownCloud Infinite Scale'
+		aSOFTWARE_DESC[$software_id]='File sync & share platform (Go)'
 		aSOFTWARE_CATX[$software_id]=4
-		aSOFTWARE_DOCS[$software_id]='https://dietpi.com/docs/software/cloud/#owncloud'
-		aSOFTWARE_DEPS[$software_id]='88 89 91 webserver'
-		# - Disabled: No PHP 8.x support
-		aSOFTWARE_AVAIL_G_DISTRO[$software_id,$G_DISTRO]=0
+		aSOFTWARE_DOCS[$software_id]='https://dietpi.com/docs/software/cloud/#owncloud-infinite-scale'
+		# - RISC-V: https://github.com/owncloud/ocis/releases
+		aSOFTWARE_AVAIL_G_HW_ARCH[$software_id,11]=0
 		#------------------
 		software_id=114
 		aSOFTWARE_NAME[$software_id]='Nextcloud'
-		aSOFTWARE_DESC[$software_id]='File sync, sharing and collaboration platform'
+		aSOFTWARE_DESC[$software_id]='File sync, sharing and collaboration platform (PHP)'
 		aSOFTWARE_CATX[$software_id]=4
 		aSOFTWARE_DOCS[$software_id]='https://dietpi.com/docs/software/cloud/#nextcloud'
 		aSOFTWARE_DEPS[$software_id]='88 89 91 webserver'
 		#------------------
 		software_id=168
 		aSOFTWARE_NAME[$software_id]='Nextcloud Talk'
-		aSOFTWARE_DESC[$software_id]='Video calls with configured Coturn server'
+		aSOFTWARE_DESC[$software_id]='Video calls with configured Coturn server (PHP)'
 		aSOFTWARE_CATX[$software_id]=4
 		aSOFTWARE_DOCS[$software_id]='https://dietpi.com/docs/software/cloud/#nextcloud-talk'
 		aSOFTWARE_DEPS[$software_id]='114'
@@ -3964,10 +3963,10 @@ sudo sysctl -p /etc/sysctl.d/98-dietpi-redis.conf'
 			G_CONFIG_INJECT 'session.save_path[[:blank:]=]' 'session.save_path="/run/php_sessions"' "$target_php_ini"
 
 			# File uploads: https://github.com/MichaIng/DietPi/issues/546
-			# - This is especially relevant for cloud software like ownCloud/Nextcloud.
+			# - This is especially relevant for cloud software like Nextcloud.
 			# - Generally we want to hold tmp upload files in RAM to reduce disk (especially SD card) writes for performance and disk wear reasons.
 			# - By default only max 2 MiB file uploads are allowed, hold in /tmp tmpfs, which is safe but not usable for usual cloud usage.
-			# - ownCloud/Nextcloud do/did override this limit to 512 MiB, a reasonable limit which can usually still be hold in RAM without issues.
+			# - Nextcloud overrides this limit to 512 MiB, a reasonable limit which can usually still be hold in RAM without issues.
 			# - Low RAM devices (RPi1 256 MiB model) require a swap file for this, however, it is still better to cause disk writes through swap file during large file uploads only, then doing this for each and every uploaded file.
 			# - When larger file uploads are required, it depends on the system total RAM, rootfs disk and available external drives if/where to move tmp file uploads, resize or move swap file. This should be then left to user.
 			G_CONFIG_INJECT 'upload_tmp_dir[[:blank:]=]' 'upload_tmp_dir="/tmp"' "$target_php_ini"
@@ -4561,205 +4560,89 @@ _EOF_
 			G_EXEC chown -R fahclient /mnt/dietpi_userdata/fahclient
 		fi
 
-		if To_Install 47 # ownCloud
+		if To_Install 47 ocis # ownCloud Infinite Scale
 		then
-			aDEPS=("php$PHP_VERSION-intl") # https://doc.owncloud.com/server/next/admin_manual/installation/manual_installation/manual_installation_prerequisites.html#php-extensions
+			# Download
+			case $G_HW_ARCH in
+				3) local arch='arm64';;
+				10) local arch='amd64';;
+				*) local arch='arm';;
+			esac
+			local fallback_url="https://github.com/owncloud/ocis/releases/download/v7.3.1/ocis-7.3.1-linux-$arch"
+			Download_Install "$(curl -sSfL 'https://api.github.com/repos/owncloud/ocis/releases/latest' | mawk -F\" "/^ *\"browser_download_url\": \".*\/ocis-[^\"\/]*-linux-$arch\"$/{print \$4}")" ocis
+			G_EXEC chmod +x ocis
 
-			if [[ -f '/var/www/owncloud/occ' ]]
+			# Install
+			[[ -d '/opt/ocis' ]] && G_EXEC rm -R /opt/ocis
+			G_EXEC mkdir /opt/ocis
+			G_EXEC mv ocis /opt/ocis/
+
+			# User
+			Create_User ocis
+
+			# Config/data dir
+			G_EXEC mkdir -p /mnt/dietpi_userdata/ocis
+			G_EXEC chown -R 'ocis:ocis' /mnt/dietpi_userdata/ocis
+
+			# Config
+			if [[ ! -f '/mnt/dietpi_userdata/ocis/ocis.yaml' ]]
 			then
-				G_DIETPI-NOTIFY 2 'Existing ownCloud installation found, will NOT overwrite...'
-			else
-				local datadir=$(sed -n '/^[[:blank:]]*SOFTWARE_OWNCLOUD_DATADIR=/{s/^[^=]*=//;s|/$||;p;q}' /boot/dietpi.txt)
-				[[ $datadir ]] || datadir='/mnt/dietpi_userdata/owncloud_data'
-				if [[ -f $datadir/dietpi-owncloud-installation-backup/occ ]]
-				then
-					G_DIETPI-NOTIFY 2 'ownCloud installation backup found, starting recovery...'
-					G_EXEC cp -a "$datadir/dietpi-owncloud-installation-backup/." /var/www/owncloud/
-					# Correct config.php data directory entry, in case it changed due to server migration:
-					G_CONFIG_INJECT "'datadirectory'" "'datadirectory' => '$datadir'," /var/www/owncloud/config/config.php "'dbtype'"
-				else
-					Download_Install 'https://download.owncloud.com/server/stable/owncloud-latest.tar.bz2' /var/www
-				fi
+				# Replace password strings internally to avoid printing it to console
+				G_EXEC_PRE_FUNC(){ acommand[11]="$GLOBAL_PW"; }
+				G_EXEC_POST_FUNC(){ sed --follow-symlinks -i "/^ *password/s/:.*/: ${GLOBAL_PW//?/X}/" "$fp_log"; cat "$fp_log"; }
+				G_EXEC runuser -u ocis -- /opt/ocis/ocis init --config-path /mnt/dietpi_userdata/ocis --insecure yes --ap "${GLOBAL_PW//?/X}"
 			fi
 
-			[[ ${aDEPS[0]} ]] && { G_DIETPI-NOTIFY 2 'Installing required PHP modules'; G_AGI "${aDEPS[@]}"; aDEPS=(); }
-
-			G_DIETPI-NOTIFY 2 'Enabling required PHP modules'
-			# - Add JSON module for PHP7, as it does not exist (embedded in core package) on PHP8
-			local json=()
-			[[ $PHP_VERSION == 8* ]] || json=('json')
-			G_EXEC phpenmod ctype curl dom gd iconv intl mbstring pdo_mysql posix simplexml xmlreader xmlwriter zip fileinfo opcache apcu redis exif "${json[@]}"
-			G_DIETPI-NOTIFY 2 'Enabling APCu memory cache for PHP command line usage (CLI) as well, including ownCloud occ command and cron jobs.'
-			echo -e '; ownCloud PHP settings\n; priority=98\napc.enable_cli=1' > "/etc/php/$PHP_VERSION/mods-available/dietpi-owncloud.ini"
-			G_EXEC phpenmod dietpi-owncloud
-
-			if (( ${aSOFTWARE_INSTALL_STATE[83]} > 0 ))
+			# Env file
+			if [[ ! -f '/mnt/dietpi_userdata/ocis/ocis.env' ]]
 			then
-				G_DIETPI-NOTIFY 2 'Apache webserver found, enabling ownCloud specific configuration.' # https://doc.owncloud.com/server/next/admin_manual/installation/manual_installation/manual_installation_apache.html
-				a2enmod rewrite headers env dir mime 1> /dev/null
-				local owncloud_conf='/etc/apache2/sites-available/dietpi-owncloud.conf'
-				[[ -f $owncloud_conf ]] && G_EXEC mv "$owncloud_conf" "$owncloud_conf.dietpi-old"
-				dps_index=$software_id Download_Install 'apache.owncloud.conf' "$owncloud_conf"
-				a2ensite dietpi-owncloud 1> /dev/null
-				# Cal/CardDAV redirects to ownCloud DAV endpoint
-				echo '# Redirect Cal/CardDAV requests to ownCloud endpoint:
-Redirect 301 /.well-known/carddav /owncloud/remote.php/dav
-Redirect 301 /.well-known/caldav  /owncloud/remote.php/dav' > /etc/apache2/conf-available/dietpi-dav_redirect.conf
-				a2enconf dietpi-dav_redirect
+				cat << _EOF_ > /mnt/dietpi_userdata/ocis/ocis.env || exit 1
+# https://doc.owncloud.com/ocis/next/deployment/general/general-info.html#default-paths
+OCIS_CONFIG_DIR=/mnt/dietpi_userdata/ocis
+OCIS_BASE_DATA_PATH=/mnt/dietpi_userdata/ocis
 
-			elif (( ${aSOFTWARE_INSTALL_STATE[84]} > 0 ))
-			then
-				G_DIETPI-NOTIFY 2 'Lighttpd webserver found, enabling ownCloud specific configuration.'
+# URL to access the web UI and for internal links, must be accessible from clients
+OCIS_URL=https://$(G_GET_NET ip):9200
 
-				# Enable required modules
-				G_CONFIG_INJECT '"mod_access",' '	"mod_access",' /etc/lighttpd/lighttpd.conf '"mod_.+",'
-				[[ -f '/etc/lighttpd/conf-enabled/05-setenv.conf' ]] || G_EXEC lighty-enable-mod setenv
+# To change the web UI network port, uncomment below and align port in OCIS_URL
+#PROXY_HTTP_ADDR=0.0.0.0:9200
 
-				# Move ownCloud configuration file in place and activate it
-				owncloud_conf='/etc/lighttpd/conf-available/99-dietpi-owncloud.conf'
-				[[ -f $owncloud_conf ]] && G_EXEC mv "$owncloud_conf" "$owncloud_conf.dietpi-old"
-				dps_index=$software_id Download_Install 'lighttpd.owncloud.conf' "$owncloud_conf"
-				G_EXEC_POST_FUNC(){ [[ $exit_code == 2 ]] && exit_code=0; } # Do not fail if modules are enabled already
-				G_EXEC lighty-enable-mod rewrite dietpi-owncloud
-
-				# Cal/CardDAV redirects to ownCloud DAV endpoint
-				echo '# Redirect Cal/CardDAV requests to ownCloud endpoint:
-url.redirect += (
-	"^/.well-known/caldav"  => "/owncloud/remote.php/dav",
-	"^/.well-known/carddav" => "/owncloud/remote.php/dav"
-)' > /etc/lighttpd/conf-available/99-dietpi-dav_redirect.conf
-				[[ -f '/etc/lighttpd/conf-enabled/99-dietpi-dav_redirect.conf' ]] || G_EXEC lighty-enable-mod dietpi-dav_redirect
-
-			elif (( ${aSOFTWARE_INSTALL_STATE[85]} > 0 ))
-			then
-				G_DIETPI-NOTIFY 2 'Nginx webserver found, enabling ownCloud specific configuration.' # https://github.com/owncloud/docs/blob/deda107/modules/admin_manual/examples/installation/nginx/subdirectory-configuration.conf
-				local owncloud_conf='/etc/nginx/sites-dietpi/dietpi-owncloud.conf'
-				[[ -f $owncloud_conf ]] && G_EXEC mv "$owncloud_conf" "$owncloud_conf.dietpi-old"
-				dps_index=$software_id Download_Install 'nginx.owncloud.conf' "$owncloud_conf"
-
-				# Cal/CardDAV redirects to ownCloud DAV endpoint
-				echo '# Redirect Cal/CardDAV requests to ownCloud endpoint:
-location = /.well-known/carddav { return 301 /owncloud/remote.php/dav/; }
-location = /.well-known/caldav  { return 301 /owncloud/remote.php/dav/; }' > /etc/nginx/sites-dietpi/dietpi-dav_redirect.conf
+# To enable access with trusted CA cert, copy cert+key to data dir and uncomment below
+# - https://doc.owncloud.com/ocis/next/deployment/general/general-info.html#certificates-signed-by-a-trusted-ca
+#OCIS_INSECURE=false
+#PROXY_TRANSPORT_TLS_KEY=/mnt/dietpi_userdata/ocis/host.key
+#PROXY_TRANSPORT_TLS_CERT=/mnt/dietpi_userdata/ocis/host.crt
+_EOF_
 			fi
 
-			# Start MariaDB and Redis (for reinstalls) for database creation and occ command
-			G_EXEC systemctl restart mariadb
-			G_EXEC systemctl restart redis-server
+			# Service
+			cat << '_EOF_' > /etc/systemd/system/ocis.service || exit 1
+[Unit]
+Description=ownCloud Infinite Scale
+Wants=network-online.target
+After=network-online.target
 
-			# Initially add occ command shortcut, will be added as alias by /etc/bashrc.d/dietpi.bash if occ file exist:
-			occ(){ runuser -u www-data -- php /var/www/owncloud/occ "$@"; }
+[Service]
+User=ocis
+EnvironmentFile=/mnt/dietpi_userdata/ocis/ocis.env
+ExecStart=/opt/ocis/ocis server
 
-			# Adjusting config file:
-			local config_php='/var/www/owncloud/config/config.php'
+# Hardening
+ProtectSystem=strict
+ProtectHome=1
+PrivateUsers=1
+PrivateTmp=1
+PrivateDevices=1
+ProtectKernelTunables=1
+ProtectControlGroups=1
+ProtectKernelModules=1
+ProtectKernelLogs=1
+ProtectClock=1
+ReadWritePaths=-/mnt/dietpi_userdata/ocis
 
-			local datadir=$(sed -n '/^[[:blank:]]*SOFTWARE_OWNCLOUD_DATADIR=/{s/^[^=]*=//p;q}' /boot/dietpi.txt)
-			[[ $datadir ]] || datadir='/mnt/dietpi_userdata/owncloud_data'
-			G_EXEC mkdir -p "$datadir"
-			G_EXEC chown -R www-data:www-data /var/www/owncloud "$datadir"
-
-			if [[ -d '/mnt/dietpi_userdata/mysql/owncloud' ]]; then
-
-				G_DIETPI-NOTIFY 2 'ownCloud database found, will NOT overwrite.'
-				if [[ ! -f $config_php ]]; then
-
-					G_WHIP_MSG '[WARNING] Existing ownCloud database was found, but no related install directory\n
-A remaining MariaDB "owncloud" database from an earlier installed instance was found. But the related install directory "/var/www/owncloud/config/config.php" does not exist.
-Since running a fresh install with an existing database can produce data corruption if the versions do not exactly match, you either need to remove the database or find and place the related install directory.\n
-We cannot predict your aim and do not want to mess or break your data, so please do this manually.\n
-To remove the existing database (including e.g. contacts, calendar, file tags etc.):
-	# mysqladmin drop owncloud
-Otherwise to copy an existing instance in place:
-	# rm -R /var/www/owncloud
-	# mkdir /var/www/owncloud
-	# cp -a /path/to/existing/owncloud/. /var/www/owncloud/
-The install script will now exit. After applying one of the the above, rerun dietpi-software, e.g.:
-	# dietpi-software install 47'
-					/boot/dietpi/dietpi-services start
-					exit 1
-
-				fi
-
-			elif [[ -f $datadir/dietpi-owncloud-database-backup.sql ]]; then
-
-				G_DIETPI-NOTIFY 2 'ownCloud database backup found, starting recovery...'
-				local dbuser=$(grep -m1 "^[[:blank:]]*'dbuser'" "$config_php" | mawk -F\' '{print $4}')
-				local dbpass=$(grep -m1 "^[[:blank:]]*'dbpassword'" "$config_php" | mawk -F\' '{print $4}')
-				/boot/dietpi/func/create_mysql_db owncloud "$dbuser" "$dbpass"
-				mysql owncloud < "$datadir/dietpi-owncloud-database-backup.sql"
-				# Adjust database data directory entry, in case it changed due to server migration
-				local datadir_old=$(grep -m1 "^[[:blank:]]*'datadirectory'" "$config_php" | mawk -F\' '{print $4}')
-				G_EXEC mysql -e "update owncloud.oc_storages set id='local::$datadir/' where id rlike 'local::$datadir_old';"
-
-			elif ! grep -q "'installed' => true," "$config_php" 2>/dev/null; then
-
-				local username=$(sed -n '/^[[:blank:]]*SOFTWARE_OWNCLOUD_NEXTCLOUD_USERNAME=/{s/^[^=]*=//p;q}' /boot/dietpi.txt)
-				[[ $username ]] || username='admin'
-
-				# For MariaDB, temporary database admin user needs to be created, as 'root' uses unix_socket login, which cannot be accessed by sudo -u www-data.
-				# - Create random temporary alphanumeric 30 characters password
-				local oc_password=$(tr -dc '[:alnum:]' < /dev/random | head -c30)
-				G_EXEC mysql -e "grant all privileges on *.* to tmp_root@localhost identified by '$oc_password' with grant option;"
-
-				G_EXEC_DESC='ownCloud occ install'
-				# - Replace password strings internally to avoid printing it to console
-				G_EXEC_PRE_FUNC(){ acommand[6]="--database-pass=$oc_password" acommand[8]="--admin-pass=$GLOBAL_PW"; }
-				# - Checking output for stack trace to handle internal errors that do not lead to php error exit code
-				G_EXEC_POST_FUNC(){ grep -qi 'Stack trace' "$fp_log" && exit_code=255; }
-				G_EXEC occ maintenance:install --no-interaction --database='mysql' --database-name='owncloud' --database-user='tmp_root' --database-pass="${oc_password//?/X}" --admin-user="$username" --admin-pass="${GLOBAL_PW//?/X}" --data-dir="$datadir"
-				G_EXEC mysql -e 'drop user tmp_root@localhost;'
-				unset -v oc_password
-
-				# Remove obsolete default data dir
-				[[ $(readlink -f "$datadir") != $(readlink -f /var/www/owncloud/data) ]] && G_EXEC rm -R /var/www/owncloud/data
-
-			fi
-
-			# Enable ownCloud to use 4-byte database
-			G_CONFIG_INJECT "'mysql.utf8mb4'" "'mysql.utf8mb4' => true," "$config_php" "'dbpassword'"
-
-			# Add local IP and hostname to trusted domains.
-			# If "1 => '" does not exist, the config.php is not copied e.g. from older instance, so we add entries.
-			if ! grep -q "1 => '" "$config_php"; then
-
-				sed --follow-symlinks -i "/0 => 'localhost'/a     1 => '$(G_GET_NET ip)'," "$config_php"
-				sed --follow-symlinks -i "/1 => '/a     2 => '$HOSTNAME'," "$config_php"
-
-			fi
-
-			# Set CLI URL to ownCloud sub directory:
-			G_EXEC sed --follow-symlinks -i "s|'http://localhost'|'http://localhost/owncloud'|" "$config_php"
-
-			# Set pretty URLs (without /index.php/) on Apache:
-			if (( ${aSOFTWARE_INSTALL_STATE[83]} > 0 )); then
-
-				GCI_PRESERVE=1 G_CONFIG_INJECT "'htaccess.RewriteBase'" "'htaccess.RewriteBase' => '/owncloud'," "$config_php" "'overwrite.cli.url'"
-				occ maintenance:update:htaccess
-
-			fi
-
-			# APCu Memcache
-			GCI_PRESERVE=1 G_CONFIG_INJECT "'memcache.local'" "'memcache.local' => '\\\\OC\\\\Memcache\\\\APCu'," "$config_php" "'version'"
-
-			# Redis for transactional file locking:
-			G_DIETPI-NOTIFY 2 'Enabling Redis for transactional file locking.' # https://doc.owncloud.org/server/administration_manual/configuration/server/caching_configuration.html#configuring-transactional-file-locking
-			local redis_conf='/etc/redis/redis.conf'
-			# - Enable Redis socket and grant www-data access to it
-			GCI_PRESERVE=1 G_CONFIG_INJECT 'unixsocket[[:blank:]]' 'unixsocket /run/redis/redis-server.sock' "$redis_conf"
-			G_CONFIG_INJECT 'unixsocketperm[[:blank:]]' 'unixsocketperm 770' "$redis_conf"
-			G_EXEC usermod -aG redis www-data
-			G_EXEC systemctl restart redis-server
-			# - Enable ownCloud to use Redis socket for transactional file locking:
-			G_CONFIG_INJECT "'filelocking.enabled'" "'filelocking.enabled' => true," "$config_php" "'memcache.local'"
-			local redis_sock=$(grep -m1 '^[[:blank:]]*unixsocket[[:blank:]]' "$redis_conf" | mawk '{print $2}') # Re-estimate in case of existing custom path
-			GCI_PRESERVE=1 GCI_NEWLINE=1 G_CONFIG_INJECT "'memcache.locking'" "'memcache.locking' => '\\\\OC\\\\Memcache\\\\Redis',\n'redis' => array ('host' => '$redis_sock', 'port' => 0,)," "$config_php" "'filelocking.enabled'"
-
-			# Enable ownCloud background cron job:
-			crontab -u www-data -l | grep -q '/var/www/owncloud/.*cron' || { crontab -u www-data -l; echo '*/15 * * * * php /var/www/owncloud/occ system:cron'; } | crontab -u www-data -
-			occ background:cron
-
-			# On <1 GiB devices assure at least 512 MiB swap space are available to stand 512 MiB file uploads + increased PHP cache and session file usage: https://github.com/MichaIng/DietPi/issues/2293
-			(( $RAM_PHYS < 924 && $(free -m | mawk '/^Swap:/{print $2;exit}') < 512 )) && /boot/dietpi/func/dietpi-set_swapfile 512
+[Install]
+WantedBy=multi-user.target
+_EOF_
 		fi
 
 		if To_Install 114 # Nextcloud
@@ -4768,15 +4651,15 @@ The install script will now exit. After applying one of the the above, rerun die
 
 			if [[ -f '/var/www/nextcloud/occ' ]]
 			then
-				G_DIETPI-NOTIFY 2 'Existing Nextcloud installation found, will NOT overwrite...'
+				G_DIETPI-NOTIFY 2 'Existing Nextcloud installation found, will NOT overwrite'
 			else
 				local datadir=$(sed -n '/^[[:blank:]]*SOFTWARE_NEXTCLOUD_DATADIR=/{s/^[^=]*=//;s|/$||;p;q}' /boot/dietpi.txt)
 				[[ $datadir ]] || datadir='/mnt/dietpi_userdata/nextcloud_data'
 				if [[ -f $datadir/dietpi-nextcloud-installation-backup/occ ]]
 				then
-					G_DIETPI-NOTIFY 2 'Nextcloud installation backup found, starting recovery...'
+					G_DIETPI-NOTIFY 2 'Nextcloud installation backup found, starting recovery'
 					G_EXEC cp -a "$datadir/dietpi-nextcloud-installation-backup/." /var/www/nextcloud/
-					# Correct config.php data directory entry, in case it changed due to server migration:
+					# Correct config.php data directory entry, in case it changed due to server migration
 					G_CONFIG_INJECT "'datadirectory'" "'datadirectory' => '$datadir'," /var/www/nextcloud/config/config.php "'dbtype'"
 				else
 					Download_Install 'https://download.nextcloud.com/server/releases/latest.tar.bz2' /var/www
@@ -4786,95 +4669,107 @@ The install script will now exit. After applying one of the the above, rerun die
 			[[ ${aDEPS[0]} ]] && { G_DIETPI-NOTIFY 2 'Installing required PHP modules'; G_AGI "${aDEPS[@]}"; aDEPS=(); }
 
 			G_DIETPI-NOTIFY 2 'Enabling required PHP modules'
-			# - Add JSON module for PHP7, as it does not exist (embedded in core package) on PHP8
-			local json=()
-			[[ $PHP_VERSION == 8* ]] || json=('json')
-			G_EXEC phpenmod ctype curl dom gd intl mbstring pdo_mysql posix simplexml xmlreader xmlwriter zip fileinfo opcache apcu redis exif "${json[@]}"
+			G_EXEC phpenmod ctype curl dom gd intl mbstring pdo_mysql posix simplexml xmlreader xmlwriter zip fileinfo opcache apcu redis exif
 
-			G_DIETPI-NOTIFY 2 'Apply PHP override settings for Nextcloud.' # https://docs.nextcloud.com/server/stable/admin_manual/installation/server_tuning.html#enable-php-opcache
+			G_DIETPI-NOTIFY 2 'Applying PHP override settings for Nextcloud' # https://docs.nextcloud.com/server/stable/admin_manual/installation/server_tuning.html#enable-php-opcache
 			local memory_consumption=$(sed -n '/^[[:blank:]]*opcache.memory_consumption=/{s/^[^=]*=//p;q}' "/etc/php/$PHP_VERSION/mods-available/dietpi.ini")
 			(( $memory_consumption < 64 )) && memory_consumption='\nopcache.memory_consumption=64' || memory_consumption=
 			echo -e "; Nextcloud PHP settings\n; priority=98\nmemory_limit=512M$memory_consumption\nopcache.revalidate_freq=5" > "/etc/php/$PHP_VERSION/mods-available/dietpi-nextcloud.ini"
-			# Enable APCu for CLI only for Nextcloud 30 and lower: https://github.com/nextcloud/server/pull/46151
+			# Enable APCu for CLI for Nextcloud 30 and lower: https://github.com/nextcloud/server/pull/46151
 			(( $(mawk -F[\'.] '/^\$OC_VersionString/{print $2}' /var/www/nextcloud/version.php) < 31 )) && G_EXEC eval "echo 'apc.enable_cli=1' >> '/etc/php/$PHP_VERSION/mods-available/dietpi-nextcloud.ini'"
 			G_EXEC phpenmod dietpi-nextcloud
 
 			if (( ${aSOFTWARE_INSTALL_STATE[83]} > 0 ))
 			then
-				G_DIETPI-NOTIFY 2 'Apache webserver found, enabling Nextcloud specific configuration.' # https://docs.nextcloud.com/server/stable/admin_manual/installation/source_installation.html#apache-web-server-configuration
-				a2enmod rewrite headers env dir mime 1> /dev/null
+				G_DIETPI-NOTIFY 2 'Apache webserver found, enabling Nextcloud specific configuration' # https://docs.nextcloud.com/server/stable/admin_manual/installation/source_installation.html#apache-web-server-configuration
+
+				# Enable required modules
+				G_EXEC a2enmod rewrite headers env dir mime
+
+				# Install config
 				local nextcloud_conf='/etc/apache2/sites-available/dietpi-nextcloud.conf'
 				[[ -f $nextcloud_conf ]] && G_EXEC mv "$nextcloud_conf" "$nextcloud_conf.dietpi-old"
 				dps_index=$software_id Download_Install 'apache.nextcloud.conf' "$nextcloud_conf"
-				a2ensite dietpi-nextcloud 1> /dev/null
+				G_EXEC a2ensite dietpi-nextcloud
+
 				# Cal/CardDAV redirects to Nextcloud DAV endpoint
-				echo '# Redirect Cal/CardDAV requests to Nextcloud endpoint:
+				echo '# Redirect Cal/CardDAV requests to Nextcloud endpoint
 Redirect 301 /.well-known/carddav /nextcloud/remote.php/dav
-Redirect 301 /.well-known/caldav  /nextcloud/remote.php/dav' > /etc/apache2/conf-available/dietpi-dav_redirect.conf
-				a2enconf dietpi-dav_redirect
+Redirect 301 /.well-known/caldav  /nextcloud/remote.php/dav' > /etc/apache2/conf-available/dietpi-dav_redirect.conf || exit 1
+				G_EXEC a2enconf dietpi-dav_redirect
 
 			elif (( ${aSOFTWARE_INSTALL_STATE[84]} > 0 ))
 			then
-				G_DIETPI-NOTIFY 2 'Lighttpd webserver found, enabling Nextcloud specific configuration.'
+				G_DIETPI-NOTIFY 2 'Lighttpd webserver found, enabling Nextcloud specific configuration'
 
 				# Enable required modules
 				G_CONFIG_INJECT '"mod_access",' '	"mod_access",' /etc/lighttpd/lighttpd.conf '"mod_.+",'
 				[[ -f '/etc/lighttpd/conf-enabled/05-setenv.conf' ]] || G_EXEC lighty-enable-mod setenv
+				[[ -f '/etc/lighttpd/conf-enabled/10-rewrite.conf' ]] || G_EXEC lighty-enable-mod rewrite
 
-				# Move Nextcloud configuration file in place and activate it
+				# Install config
 				nextcloud_conf='/etc/lighttpd/conf-available/99-dietpi-nextcloud.conf'
 				[[ -f $nextcloud_conf ]] && G_EXEC mv "$nextcloud_conf" "$nextcloud_conf.dietpi-old"
 				dps_index=$software_id Download_Install 'lighttpd.nextcloud.conf' "$nextcloud_conf"
-				G_EXEC_POST_FUNC(){ [[ $exit_code == 2 ]] && exit_code=0; } # Do not fail if modules are enabled already
-				G_EXEC lighty-enable-mod rewrite dietpi-nextcloud
+				[[ -f '/etc/lighttpd/conf-enabled/99-dietpi-nextcloud.conf' ]] || G_EXEC lighty-enable-mod dietpi-nextcloud
 
 				# Cal/CardDAV redirects to Nextcloud DAV endpoint
-				echo '# Redirect Cal/CardDAV requests to Nextcloud endpoint:
+				echo '# Redirect Cal/CardDAV requests to Nextcloud endpoint
 url.redirect += (
 	"^/.well-known/caldav"  => "/nextcloud/remote.php/dav",
 	"^/.well-known/carddav" => "/nextcloud/remote.php/dav"
-)' > /etc/lighttpd/conf-available/99-dietpi-dav_redirect.conf
+)' > /etc/lighttpd/conf-available/99-dietpi-dav_redirect.conf || exit 1
 				[[ -f '/etc/lighttpd/conf-enabled/99-dietpi-dav_redirect.conf' ]] || G_EXEC lighty-enable-mod dietpi-dav_redirect
 
 			elif (( ${aSOFTWARE_INSTALL_STATE[85]} > 0 ))
 			then
-				G_DIETPI-NOTIFY 2 'Nginx webserver found, enabling Nextcloud specific configuration.' # https://docs.nextcloud.com/server/stable/admin_manual/installation/nginx.html
+				G_DIETPI-NOTIFY 2 'Nginx webserver found, enabling Nextcloud specific configuration' # https://docs.nextcloud.com/server/stable/admin_manual/installation/nginx.html
+
+				# Install config
 				# shellcheck disable=SC2016
 				echo '# Set the "immutable" cache control option for assets with a cache busting "v=" argument
 map $arg_v $asset_immutable {
 	"" "";
 	default ", immutable";
-}' > /etc/nginx/conf.d/dietpi-nextcloud.conf
+}' > /etc/nginx/conf.d/dietpi-nextcloud.conf || exit 1
 				local nextcloud_conf='/etc/nginx/sites-dietpi/dietpi-nextcloud.conf'
 				[[ -f $nextcloud_conf ]] && G_EXEC mv "$nextcloud_conf" "$nextcloud_conf.dietpi-old"
 				dps_index=$software_id Download_Install 'nginx.nextcloud.conf' "$nextcloud_conf"
 
 				# Cal/CardDAV redirects to Nextcloud DAV endpoint
-				echo '# Redirect Cal/CardDAV requests to Nextcloud endpoint:
+				echo '# Redirect Cal/CardDAV requests to Nextcloud endpoint
 location = /.well-known/carddav { return 301 /nextcloud/remote.php/dav/; }
-location = /.well-known/caldav  { return 301 /nextcloud/remote.php/dav/; }' > /etc/nginx/sites-dietpi/dietpi-dav_redirect.conf
+location = /.well-known/caldav  { return 301 /nextcloud/remote.php/dav/; }' > /etc/nginx/sites-dietpi/dietpi-dav_redirect.conf || exit 1
 			fi
 
-			# Start MariaDB and Redis (for reinstalls) for database creation and ncc command
+			# Configure Redis for transactional file locking
+			G_DIETPI-NOTIFY 2 'Enabling Redis for transactional file locking' # https://docs.nextcloud.com/server/stable/admin_manual/configuration_files/files_locking_transactional.html
+			# - Enable Redis socket and grant www-data access to it
+			GCI_PRESERVE=1 G_CONFIG_INJECT 'unixsocket[[:blank:]]' 'unixsocket /run/redis/redis-server.sock' /etc/redis/redis.conf
+			G_CONFIG_INJECT 'unixsocketperm[[:blank:]]' 'unixsocketperm 770' /etc/redis/redis.conf
+			G_EXEC usermod -aG redis www-data
+
+			# Start MariaDB and Redis for database creation and occ command
 			G_EXEC systemctl restart mariadb
 			G_EXEC systemctl restart redis-server
 
-			# Initially add occ command shortcut, will be added as alias by /etc/bashrc.d/dietpi.bash if occ file exist:
-			ncc(){ runuser -u www-data -- php /var/www/nextcloud/occ "$@"; }
-
-			# Adjusting config file:
-			local config_php='/var/www/nextcloud/config/config.php'
-
+			# Create data dir and grant R/W access for PHP
 			local datadir=$(sed -n '/^[[:blank:]]*SOFTWARE_NEXTCLOUD_DATADIR=/{s/^[^=]*=//p;q}' /boot/dietpi.txt)
 			[[ $datadir ]] || datadir='/mnt/dietpi_userdata/nextcloud_data'
 			G_EXEC mkdir -p "$datadir"
 			G_EXEC chown -R www-data:www-data /var/www/nextcloud "$datadir"
 
-			if [[ -d '/mnt/dietpi_userdata/mysql/nextcloud' ]]; then
+			# Add occ command shortcut, added to interactive bash sessions as alias by /etc/bashrc.d/dietpi.bash if /var/www/nextcloud/occ exist
+			occ(){ runuser -u www-data -- php /var/www/nextcloud/occ "$@"; }
 
+			# Adjusting config file
+			local config_php='/var/www/nextcloud/config/config.php'
+
+			if [[ -d '/mnt/dietpi_userdata/mysql/nextcloud' ]]
+			then
 				G_DIETPI-NOTIFY 2 'Nextcloud database found, will NOT overwrite.'
-				if [[ ! -f $config_php ]]; then
-
+				if [[ ! -f $config_php ]]
+				then
 					G_WHIP_MSG '[WARNING] Existing Nextcloud database was found, but no related install directory\n
 A remaining MariaDB "nextcloud" database from an earlier installed instance was found. But the related install directory "/var/www/nextcloud/config/config.php" does not exist.
 Since running a fresh install with an existing database can produce data corruption if the versions do not exactly match, you either need to remove the database or find and place the related install directory.\n
@@ -4885,27 +4780,43 @@ Otherwise to copy an existing instance in place:
 	# rm -R /var/www/nextcloud
 	# mkdir /var/www/nextcloud
 	# cp -a /path/to/existing/nextcloud/. /var/www/nextcloud/
-The install script will now exit. After applying one of the the above, rerun dietpi-software, e.g.:
+The install script will now exit. After applying one of the above, rerun dietpi-software, e.g.:
 	# dietpi-software install 114'
 					/boot/dietpi/dietpi-services start
 					exit 1
-
 				fi
 
-			elif [[ -f $datadir/dietpi-nextcloud-database-backup.sql ]]; then
-
-				G_DIETPI-NOTIFY 2 'Nextcloud database backup found, starting recovery...'
+			elif [[ -f $datadir/dietpi-nextcloud-database-backup.sql ]]
+			then
+				G_DIETPI-NOTIFY 2 'Nextcloud database backup found, starting recovery'
 				local dbuser=$(grep -m1 "^[[:blank:]]*'dbuser'" "$config_php" | mawk -F\' '{print $4}')
 				local dbpass=$(grep -m1 "^[[:blank:]]*'dbpassword'" "$config_php" | mawk -F\' '{print $4}')
 				/boot/dietpi/func/create_mysql_db nextcloud "$dbuser" "$dbpass"
 				mysql nextcloud < "$datadir/dietpi-nextcloud-database-backup.sql"
 				# Adjust database data directory entry, in case it changed due to server migration
 				local datadir_old=$(grep -m1 "^[[:blank:]]*'datadirectory'" "$config_php" | mawk -F\' '{print $4}')
-				G_EXEC mysql -e "update nextcloud.oc_storages set id='local::$datadir/' where id rlike 'local::$datadir_old';"
+				G_EXEC mysql -e "update nextcloud.oc_storages set id = replace(id, 'local::${datadir_old%/}/', 'local::${datadir%/}/')"
+				G_CONFIG_INJECT "'datadirectory'" "'datadirectory' => '$datadir'," "$config_php" "'dbtype'"
+				# ownCloud migration
+				if (( $(mawk -F[\'.] '/^[[:blank:]]*'\''version'\''/{print $4}' /var/www/nextcloud/config/config.php) == 10 ))
+				then
+					G_EXEC sed --follow-symlinks -i 's/owncloud/nextcloud/g' /var/www/nextcloud/config/config.php
+					G_EXEC sed --follow-symlinks -i '/^  '\''apps_paths'\''/,/^  ),$/d' /var/www/nextcloud/config/config.php
+					# Workaround: https://github.com/nextcloud/server/issues/57340
+					G_EXEC mysql -e 'ALTER TABLE nextcloud.oc_appconfig ADD type INT UNSIGNED NOT NULL DEFAULT 2;'
+					G_EXEC mysql -e 'ALTER TABLE nextcloud.oc_appconfig ADD lazy SMALLINT UNSIGNED NOT NULL DEFAULT 0;'
+					G_EXEC mysql -e 'ALTER TABLE nextcloud.oc_preferences ADD lazy SMALLINT UNSIGNED NOT NULL DEFAULT 0;'
+					G_EXEC mysql -e 'ALTER TABLE nextcloud.oc_preferences ADD type SMALLINT UNSIGNED NOT NULL DEFAULT 0;'
+					G_EXEC mysql -e 'ALTER TABLE nextcloud.oc_preferences ADD flags INT UNSIGNED NOT NULL DEFAULT 0;'
+					G_EXEC mysql -e 'ALTER TABLE nextcloud.oc_preferences ADD indexed VARCHAR(64);'
+					G_EXEC_NOFAIL=1 G_EXEC_OUTPUT=1 G_EXEC occ upgrade # expected to fail once
+					G_EXEC mysql -e 'ALTER TABLE nextcloud.oc_preferences DROP COLUMN lazy, DROP COLUMN type, DROP COLUMN flags, DROP COLUMN indexed;'
+				fi
+				G_EXEC_OUTPUT=1 G_EXEC occ upgrade # in case may need to run before other occ db:* calls below
 
-			elif ! grep -q "'installed' => true," "$config_php" 2>/dev/null; then
-
-				local username=$(sed -n '/^[[:blank:]]*SOFTWARE_OWNCLOUD_NEXTCLOUD_USERNAME=/{s/^[^=]*=//p;q}' /boot/dietpi.txt)
+			elif ! grep -q "'installed' => true," "$config_php" 2>/dev/null
+			then
+				local username=$(sed -n '/^[[:blank:]]*SOFTWARE_NEXTCLOUD_USERNAME=/{s/^[^=]*=//p;q}' /boot/dietpi.txt)
 				[[ $username ]] || username='admin'
 
 				# For MariaDB, temporary database admin user needs to be created, as 'root' uses unix_socket login, which cannot be accessed by sudo -u www-data.
@@ -4913,31 +4824,26 @@ The install script will now exit. After applying one of the the above, rerun die
 				local nc_password=$(tr -dc '[:alnum:]' < /dev/random | head -c30)
 				G_EXEC mysql -e "grant all privileges on *.* to tmp_root@localhost identified by '$nc_password' with grant option;"
 
-				G_EXEC_DESC='Nextcloud ncc install'
+				G_EXEC_DESC='Nextcloud occ install'
 				# - Replace password strings internally to avoid printing it to console
 				G_EXEC_PRE_FUNC(){ acommand[6]="--database-pass=$nc_password" acommand[8]="--admin-pass=$GLOBAL_PW"; }
 				# - Checking output for stack trace to handle internal errors that do not lead to php error exit code
 				# - Workaround Nextcloud 14.0.3 throwing an error, when data dir path contains a symlink: https://github.com/nextcloud/server/issues/12247
-				G_EXEC_POST_FUNC(){
-
-					if (( $exit_code )); then
-
+				G_EXEC_POST_FUNC()
+				{
+					if (( $exit_code ))
+					then
 						grep -q 'Following symlinks is not allowed' "$fp_log" && { cp -a /var/www/nextcloud/core/skeleton/. "$datadir/$username/files/"; exit_code=0; }
-
 					else
-
 						grep -qi 'Stack trace' "$fp_log" && exit_code=255
-
 					fi
-
 				}
-				G_EXEC ncc maintenance:install --no-interaction --database='mysql' --database-name='nextcloud' --database-user='tmp_root' --database-pass="${nc_password//?/X}" --admin-user="$username" --admin-pass="${GLOBAL_PW//?/X}" --data-dir="$datadir"
+				G_EXEC occ maintenance:install --no-interaction --database='mysql' --database-name='nextcloud' --database-user='tmp_root' --database-pass="${nc_password//?/X}" --admin-user="$username" --admin-pass="${GLOBAL_PW//?/X}" --data-dir="$datadir"
 				G_EXEC mysql -e 'drop user tmp_root@localhost;'
 				unset -v nc_password
 
 				# Remove obsolete default data dir
 				[[ $(readlink -f "$datadir") != $(readlink -f /var/www/nextcloud/data) ]] && G_EXEC rm -R /var/www/nextcloud/data
-
 			fi
 
 			# Enable Nextcloud to use 4-byte database
@@ -4950,27 +4856,18 @@ The install script will now exit. After applying one of the the above, rerun die
 			G_EXEC sed --follow-symlinks -i "s|'http://localhost'|'http://localhost/nextcloud'|" "$config_php"
 
 			# Set pretty URLs (without /index.php/) on Apache:
-			if (( ${aSOFTWARE_INSTALL_STATE[83]} > 0 )); then
-
+			if (( ${aSOFTWARE_INSTALL_STATE[83]} > 0 ))
+			then
 				GCI_PRESERVE=1 G_CONFIG_INJECT "'htaccess.RewriteBase'" "'htaccess.RewriteBase' => '/nextcloud'," "$config_php" "'overwrite.cli.url'"
-				ncc maintenance:update:htaccess
-
+				occ maintenance:update:htaccess
 			fi
 
 			# APCu Memcache
 			GCI_PRESERVE=1 G_CONFIG_INJECT "'memcache.local'" "'memcache.local' => '\\\\OC\\\\Memcache\\\\APCu'," "$config_php" "'version'"
 
-			# Redis for transactional file locking:
-			G_DIETPI-NOTIFY 2 'Enabling Redis for transactional file locking.' # https://docs.nextcloud.com/server/stable/admin_manual/configuration_files/files_locking_transactional.html
-			local redis_conf='/etc/redis/redis.conf'
-			# - Enable Redis socket and grant www-data access to it
-			GCI_PRESERVE=1 G_CONFIG_INJECT 'unixsocket[[:blank:]]' 'unixsocket /run/redis/redis-server.sock' "$redis_conf"
-			G_CONFIG_INJECT 'unixsocketperm[[:blank:]]' 'unixsocketperm 770' "$redis_conf"
-			G_EXEC usermod -aG redis www-data
-			G_EXEC systemctl restart redis-server
-			# - Enable Nextcloud to use Redis socket:
+			# Enable Nextcloud to use Redis socket
 			G_CONFIG_INJECT "'filelocking.enabled'" "'filelocking.enabled' => true," "$config_php" "'memcache.local'"
-			local redis_sock=$(grep -m1 '^[[:blank:]]*unixsocket[[:blank:]]' "$redis_conf" | mawk '{print $2}') # Re-estimate in case of existing custom path
+			local redis_sock=$(grep -m1 '^[[:blank:]]*unixsocket[[:blank:]]' /etc/redis/redis.conf | mawk '{print $2}') # Re-estimate in case of existing custom path
 			GCI_PRESERVE=1 GCI_NEWLINE=1 G_CONFIG_INJECT "'memcache.locking'" "'memcache.locking' => '\\\\OC\\\\Memcache\\\\Redis',\n'redis' => array ('host' => '$redis_sock', 'port' => 0,)," "$config_php" "'filelocking.enabled'"
 
 			# Tweak Argon2 hashing
@@ -4980,20 +4877,22 @@ The install script will now exit. After applying one of the the above, rerun die
 			#GCI_PRESERVE=1 G_CONFIG_INJECT "'hashingMemoryCost'" "'hashingMemoryCost' => 65536," $config_php "'hashingThreads'"
 			#GCI_PRESERVE=1 G_CONFIG_INJECT "'hashingTimeCost'" "'hashingTimeCost' => 4," $config_php "'hashingMemoryCost'"
 
-			# Enable Nextcloud background cron job: https://docs.nextcloud.com/server/17/admin_manual/configuration_server/background_jobs_configuration.html#cron
-			crontab -u www-data -l | grep -q '/var/www/nextcloud/cron.php' || { crontab -u www-data -l; echo '*/5 * * * * php /var/www/nextcloud/cron.php'; } | crontab -u www-data -
-			ncc background:cron
-
 			# Convert filecache table to bigint, which is not done automatically by Nextcloud since v15
-			ncc db:convert-filecache-bigint -n
+			occ db:convert-filecache-bigint -n
 
 			# Add missing database columns and indices, which is not done automatically by Nextcloud
-			ncc db:add-missing-columns
-			ncc db:add-missing-indices
-			ncc db:add-missing-primary-keys
+			occ db:add-missing-columns
+			occ db:add-missing-indices
+			occ db:add-missing-primary-keys
 
 			# On <1 GiB devices assure at least 512 MiB swap space are available to stand 512 MiB file uploads + increased PHP cache and session file usage: https://github.com/MichaIng/DietPi/issues/2293
 			(( $RAM_PHYS < 924 && $(free -m | mawk '/^Swap:/{print $2;exit}') < 512 )) && /boot/dietpi/func/dietpi-set_swapfile 512
+
+			G_EXEC occ maintenance:mode --off
+
+			# Enable Nextcloud background cron job: https://docs.nextcloud.com/server/17/admin_manual/configuration_server/background_jobs_configuration.html#cron
+			crontab -u www-data -l | grep -q '/var/www/nextcloud/cron.php' || { crontab -u www-data -l; echo '*/5 * * * * php /var/www/nextcloud/cron.php'; } | crontab -u www-data -
+			occ background:cron
 		fi
 
 		if To_Install 168 coturn # Nextcloud Talk
@@ -5040,23 +4939,23 @@ The install script will now exit. After applying one of the the above, rerun die
 			# Install Nextcloud Talk app
 			G_EXEC systemctl start mariadb
 			G_EXEC systemctl start redis-server
-			G_EXEC ncc maintenance:mode --off
+			G_EXEC occ maintenance:mode --off
 			if [[ ! -d '/var/www/nextcloud/apps/spreed' ]]
 			then
 				# Succeed if app is already installed and on "Cannot declare class" bug: https://github.com/MichaIng/DietPi/issues/3499#issuecomment-622955490
 				G_EXEC_POST_FUNC(){ [[ $exit_code != 0 && $(<"$fp_log") =~ (' already installed'$|' Cannot declare class ') ]] && exit_code=0; }
-				G_EXEC ncc app:install spreed
+				G_EXEC occ app:install spreed
 			fi
-			ncc app:enable spreed
+			occ app:enable spreed
 
 			# Adjust Nextcloud Talk settings to use Coturn
-			ncc talk:stun:add "$domain:$port"
+			occ talk:stun:add "$domain:$port"
 			# - Generate random secret to secure TURN server access
 			local secret=$(openssl rand -hex 32)
 			GCI_PASSWORD=1 GCI_PRESERVE=1 G_CONFIG_INJECT 'static-auth-secret=' "static-auth-secret=$secret" /etc/turnserver.conf
 			# - Scrape existing secret, in case user manually chose/edited it
 			secret=$(sed -n '/^[[:blank:]]*static-auth-secret=/{s/^[^=]*=//p;q}' /etc/turnserver.conf)
-			ncc talk:turn:add --secret "$secret" -- 'turn' "$domain:$port" 'udp,tcp'
+			occ talk:turn:add --secret "$secret" -- 'turn' "$domain:$port" 'udp,tcp'
 			unset -v secret domain port
 		fi
 
@@ -7097,7 +6996,7 @@ _EOF_
 			if (( ${aSOFTWARE_INSTALL_STATE[83]} > 0 ))
 			then
 				# Required modules: https://github.com/FreshRSS/FreshRSS/blob/edge/p/.htaccess, https://github.com/FreshRSS/FreshRSS/blob/edge/p/api/.htaccess, https://github.com/FreshRSS/FreshRSS/blob/edge/p/themes/.htaccess
-				# - Do not enable mod_deflate since it may cause issues with concurrent ownCloud and Nextcloud installs: https://docs.nextcloud.com/server/latest/admin_manual/issues/general_troubleshooting.html#web-server-and-php-modules
+				# - Do not enable mod_deflate since it may cause issues with concurrent Nextcloud installs: https://docs.nextcloud.com/server/latest/admin_manual/issues/general_troubleshooting.html#web-server-and-php-modules
 				G_EXEC a2enmod dir mime expires headers setenvif
 
 				# Better compatibility with mobile clients
@@ -12480,53 +12379,11 @@ _EOF_
 			G_AGP transmission-daemon
 		fi
 
-		if To_Uninstall 47 # ownCloud
+		if To_Uninstall 47 # ownCloud Infinite Scale
 		then
-			# Remove background cron job
-			crontab -u www-data -l | grep -v '/var/www/owncloud/.*cron' | crontab -u www-data -
-			# Disable and remove PHP modules
-			command -v phpdismod > /dev/null && G_EXEC phpdismod dietpi-owncloud
-			G_EXEC rm -f /etc/php/*/mods-available/dietpi-owncloud.ini
-			# Disable and remove webserver configs
-			command -v a2dissite > /dev/null && a2dissite dietpi-owncloud
-			[[ -f '/etc/apache2/sites-available/dietpi-owncloud.conf' ]] && G_EXEC rm /etc/apache2/sites-available/dietpi-owncloud.conf
-			[[ -f '/etc/nginx/sites-dietpi/dietpi-owncloud.conf' ]] && G_EXEC rm /etc/nginx/sites-dietpi/dietpi-owncloud.conf
-			command -v lighty-disable-mod > /dev/null && lighty-disable-mod dietpi-owncloud
-			[[ -f '/etc/lighttpd/conf-available/99-dietpi-owncloud.conf' ]] && G_EXEC rm /etc/lighttpd/conf-available/99-dietpi-owncloud.conf
-			G_WHIP_MSG "DietPi will perform an automated backup of your ownCloud database and installation directory, which will be stored inside your ownCloud data directory.\n\nThe data directory won't be removed. So you can recover your whole ownCloud instance any time later.\n\nRemove the data directory manually if you don't need it anymore."
-			# Find datadir for backups
-			local datadir=$(grep -m1 "^[[:blank:]]*'datadirectory'" /var/www/owncloud/config/config.php | mawk '{print $3}' | sed "s/[',]//g")
-			[[ $datadir ]] || datadir='/mnt/dietpi_userdata/owncloud_data'
-			# Drop MariaDB users and database
-			if systemctl start mariadb
-			then
-				local dbuser=$(grep -m1 "^[[:blank:]]*'dbuser'" /var/www/owncloud/config/config.php | mawk '{print $3}' | sed 's/,//')
-				local dbhost=$(grep -m1 "^[[:blank:]]*'dbhost'" /var/www/owncloud/config/config.php | mawk '{print $3}' | sed 's/,//')
-				mysql -e "drop user $dbuser@$dbhost;"
-				mysql -e "drop user $dbuser;" 2> /dev/null
-				# Perform database backup if existent, otherwise skip to not overwrite existing one
-				[[ -d '/mnt/dietpi_userdata/mysql/owncloud' ]] && mysqldump owncloud > "$datadir/dietpi-owncloud-database-backup.sql"
-				mysqladmin drop owncloud -f
-			fi
-			if [[ -d '/var/www/owncloud' ]]
-			then
-				# Backup ownCloud installation dir
-				G_EXEC cp -a /var/www/owncloud/. "$datadir/dietpi-owncloud-installation-backup/"
-				# Remove ownCloud installation dir
-				G_EXEC rm -R /var/www/owncloud
-			fi
-			# Remove redirect configs
-			if grep -q 'owncloud' /etc/lighttpd/conf-available/99-dietpi-dav_redirect.conf 2> /dev/null
-			then
-				command -v lighty-disable-mod > /dev/null && lighty-disable-mod dietpi-dav_redirect
-				G_EXEC rm /etc/lighttpd/conf-available/99-dietpi-dav_redirect.conf
-			fi
-			if grep -q 'owncloud' /etc/apache2/conf-available/dietpi-dav_redirect.conf 2> /dev/null
-			then
-				command -v a2disconf > /dev/null && a2disconf dietpi-dav_redirect
-				G_EXEC rm /etc/apache2/conf-available/dietpi-dav_redirect.conf
-			fi
-			grep -q 'owncloud' /etc/nginx/sites-dietpi/dietpi-dav_redirect.conf 2> /dev/null && G_EXEC rm /etc/nginx/sites-dietpi/dietpi-dav_redirect.conf
+			Remove_Service ocis 1 1
+			G_EXEC rm -Rf /opt/ocis
+			G_EXEC rm -Rf /mnt/dietpi_userdata/ocis
 		fi
 
 		if To_Uninstall 168 # Nextcloud Talk + Coturn server
@@ -15529,7 +15386,7 @@ We allow it to take up to 30 minutes, it's process can be followed, please be pa
 					)
 
 					G_WHIP_BUTTON_CANCEL_TEXT='Back'
-					G_WHIP_MENU 'Choose where to store your user data. User data includes software such as ownCloud data store, BitTorrent downloads etc.
+					G_WHIP_MENU 'Choose where to store your user data. User data includes software such as Nextcloud data store, BitTorrent downloads etc.
 \nMore information on user data in DietPi:\n- https://dietpi.com/docs/dietpi_tools/#quick-selections
 \n- DietPi-Drive_Manager: Launch DietPi-Drive_Manager to setup external drives, and, move user data to different locations.' || return 0
 
