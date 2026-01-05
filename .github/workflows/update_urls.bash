@@ -158,10 +158,10 @@ aCHECK[$software_id]='curl -sSf '\''https://download.yacy.net/?C=N;O=D'\'' | gre
 aREGEX[$software_id]='file='\''[^'\'']*'\'
 aREPLACE[$software_id]='file='\''$release'\'
 
-# Koel (only latest/v7 for now)
+# Koel
 software_id=143
 aCHECK[$software_id]='curl -sSf '\''https://api.github.com/repos/koel/koel/releases/latest'\'' | mawk -F\" '\''/^ *"browser_download_url": ".*\/koel-[^"\/]*\.tar\.gz"$/{print $4}'\'
-aREGEX[$software_id]='https://github.com/koel/koel/releases/download/.*/koel-v[^5].*\.tar\.gz'
+aREGEX[$software_id]='https://github.com/koel/koel/releases/download/.*/koel-.*\.tar\.gz'
 
 # Sonarr
 software_id=144
