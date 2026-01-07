@@ -148,9 +148,10 @@ software_id=124
 
 # BirdNET-Go
 software_id=127
-aCHECK[$software_id]='curl -sSf '\''https://api.github.com/repos/tphakala/birdnet-go/releases'\'' | mawk -F\" '\''/^ *"tag_name": "[^"]*",$/{print $4}'\'' | head -1'
-aREGEX[$software_id]='bnet_vers='\''[^'\'']*'\'
-aREPLACE[$software_id]='bnet_vers='\''$release'\'
+aCHECK[$software_id]='curl -sSf '\''https://api.github.com/repos/tphakala/birdnet-go/releases'\'' | mawk -F\" "/^ *\"browser_download_url\": \"[^\"]*-linux-$arch\.tar\.gz\"$/{print \$4}" | head -1'
+aARCH[$software_id]='arm64 amd64'
+aARCH_CHECK[$software_id]='riscv64'
+aREGEX[$software_id]='https://github.com/tphakala/birdnet-go/releases/download/.*-linux-\$arch\.tar\.gz'
 
 # YaCy
 software_id=133
