@@ -275,6 +275,7 @@ Process_Software()
 			#173 LXQt: all executables strictly require a Qt session, no help or version output possible
 			174) aCOMMANDS[i]='gimp -v';;
 			175) aCOMMANDS[i]='xfce4-power-manager -V';;
+			176) aSERVICES[i]='uptime-kuma' aTCP[i]='3002';;
 			177) aSERVICES[i]='forgejo' aTCP[i]='3000';;
 			178) aSERVICES[i]='jellyfin' aTCP[i]='8097';;
 			179) aSERVICES[i]='komga' aTCP[i]='2037'; (( $emulation )) && aDELAY[i]=300 || aDELAY[i]=30;;
