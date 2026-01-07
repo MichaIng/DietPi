@@ -1184,6 +1184,15 @@ Available commands:
 		aSOFTWARE_CATX[$software_id]=8
 		aSOFTWARE_DOCS[$software_id]='https://dietpi.com/docs/software/system_stats/#homer'
 		aSOFTWARE_DEPS[$software_id]='webserver'
+		#------------------
+		software_id=176
+		aSOFTWARE_NAME[$software_id]='Uptime Kuma'
+		aSOFTWARE_DESC[$software_id]='A fancy self-hosted monitoring tool'
+		aSOFTWARE_CATX[$software_id]=8
+		aSOFTWARE_DOCS[$software_id]='https://dietpi.com/docs/software/system_stats/#uptime-kuma'
+		aSOFTWARE_DEPS[$software_id]='9' # Node.js
+		# - RISC-V: https://github.com/louislam/node-sqlite3/releases
+		aSOFTWARE_AVAIL_G_HW_ARCH[$software_id,11]=0
 
 		# Remote Access
 		#--------------------------------------------------------------------------------
@@ -12154,6 +12163,72 @@ _EOF_
 			aSTART_SERVICES+=('rustdesksignal' 'rustdeskrelay')
 			unset -v rd_inst rd_data
 		fi
+
+		if To_Install 176 uptime-kuma # Uptime Kuma: https://github.com/louislam/uptime-kuma/wiki/🔧-How-to-Install#-non-docker
+		then
+			local opt='/opt/uptime-kuma' mnt='/mnt/dietpi_userdata/uptime-kuma'
+
+			# Download
+			local version=$(curl -sSfL 'https://api.github.com/repos/louislam/uptime-kuma/releases/latest' | mawk -F\" '/^ *"tag_name": "[^"]*",$/{print $4}')
+			[[ $version ]] || { version='2.0.2'; G_DIETPI-NOTIFY 1 "Automatic latest ${aSOFTWARE_NAME[$software_id]} version detection failed. Version \"$version\" will be installed as fallback, but a newer version might be available. Please report this at: https://github.com/MichaIng/DietPi/issues"; }
+			Download_Install "https://github.com/louislam/uptime-kuma/archive/$version.tar.gz"
+
+			# Install
+			G_EXEC cd "uptime-kuma-$version"
+			# - Temporary workaround for false v2.0.1 string in 2.0.2 code
+			[[ $version == '2.0.2' ]] && G_EXEC sed --follow-symlinks -i '1,/"version": "2.0.1"/s/"version": "2.0.1"/"version": "2.0.2"/' package.json
+			G_EXEC_OUTPUT=1 G_EXEC npm ci --omit dev --no-audit
+			G_EXEC_OUTPUT=1 G_EXEC npm run download-dist
+			G_EXEC cd "$G_WORKING_DIR"
+			[[ -d $opt ]] && G_EXEC rm -R "$opt"
+			G_EXEC mv "uptime-kuma-$version" "$opt"
+
+			# Data dir
+			G_EXEC mkdir -p "$mnt"
+
+			# Create db-config to pre-select usage of SQLite. Else, first access gives a choice between MariaDB and SQLite.
+			[[ -f "$mnt/db-config.json" ]] || G_EXEC eval "echo '{\"type\":\"sqlite\"}' > '$mnt/db-config.json'"
+
+			# User
+			Create_User -d "$mnt" uptime-kuma
+			G_EXEC chown -R uptime-kuma:uptime-kuma "$mnt"
+
+			# Service (instead of PM2 as suggested by their wiki)
+			cat << _EOF_ > /etc/systemd/system/uptime-kuma.service
+# /etc/systemd/system/uptime-kuma.service
+[Unit]
+Description=Uptime Kuma
+Wants=network-online.target
+After=network-online.target
+StartLimitIntervalSec=60
+StartLimitBurst=3
+
+[Service]
+SyslogIdentifier=Uptime Kuma
+User=uptime-kuma
+WorkingDirectory=$opt
+ExecStart=/usr/local/bin/node server/server.js --data-dir=$mnt --port=3002
+Restart=on-failure
+RestartSec=10
+
+# Hardening
+ProtectSystem=strict
+ProtectHome=1
+PrivateUsers=1
+PrivateTmp=1
+PrivateDevices=1
+ProtectKernelTunables=1
+ProtectControlGroups=1
+ProtectKernelModules=1
+ProtectKernelLogs=1
+ProtectClock=1
+ReadWritePaths=-$mnt
+
+[Install]
+WantedBy=multi-user.target
+_EOF_
+			unset -v mnt opt
+		fi
 	}
 
 	# $1: 0=None -1=Dropbear -2=OpenSSH
@@ -14251,6 +14326,13 @@ _EOF_
 			Remove_Service rustdesksignal rustdesk rustdesk
 			G_EXEC rm -Rf /opt/rustdesk
 			G_EXEC rm -Rf /mnt/dietpi_userdata/rustdesk
+		fi
+
+		if To_Uninstall 176 # Uptime Kuma
+		then
+			Remove_Service uptime-kuma 1 1
+			G_EXEC rm -Rf /opt/uptime-kuma
+			G_WHIP_BUTTON_CANCEL_TEXT='Skip' G_WHIP_YESNO "Shall all ${aSOFTWARE_NAME[$software_id]} data at /mnt/dietpi_userdata/uptime-kuma be removed as well?" && G_EXEC rm -Rf /mnt/dietpi_userdata/uptime-kuma
 		fi
 
 		G_DIETPI-NOTIFY 3 "$G_PROGRAM_NAME" 'Finalising uninstall'

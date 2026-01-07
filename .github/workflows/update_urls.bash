@@ -66,7 +66,7 @@ aREGEX[$software_id]='https://github.com/MediaBrowser/Emby.Releases/releases/dow
 
 # ownCloud Infinite Scale
 software_id=47
-aCHECK[$software_id]='curl -sSfL '\''https://api.github.com/repos/owncloud/ocis/releases/latest'\'' | mawk -F\" "/^ *\"browser_download_url\": \".*\/ocis-[^\"\/]*-linux-$arch\"$/{print \$4}"'
+aCHECK[$software_id]='curl -sSf '\''https://api.github.com/repos/owncloud/ocis/releases/latest'\'' | mawk -F\" "/^ *\"browser_download_url\": \".*\/ocis-[^\"\/]*-linux-$arch\"$/{print \$4}"'
 aARCH[$software_id]='arm arm64 amd64'
 aARCH_CHECK[$software_id]='riscv64'
 aREGEX[$software_id]='https://github.com/owncloud/ocis/releases/download/.*/ocis-.*-linux-\$arch'
@@ -214,6 +214,12 @@ software_id=171
 aCHECK[$software_id]='curl -sSf '\''https://api.github.com/repos/fatedier/frp/releases/latest'\'' | mawk -F\" "/^ *\"browser_download_url\": \".*\/frp_[0-9.]*_linux_$arch\.tar\.gz\"$/{print \$4}"'
 aARCH[$software_id]='arm arm_hf arm64 amd64 riscv64'
 aREGEX[$software_id]='https://github.com/fatedier/frp/releases/download/.*/frp_.*_linux_\$arch.tar.gz'
+
+# Uptime Kuma
+software_id=176
+aCHECK[$software_id]='curl -sSf '\''https://api.github.com/repos/louislam/uptime-kuma/releases/latest'\'' | mawk -F\" '\''/^ *"tag_name": "[^"]*",$/{print $4}'\'
+aREGEX[$software_id]='version='\''[^'\'']*'\''; '
+aREPLACE[$software_id]='version='\''$release'\''; '
 
 # Forgejo
 software_id=177
