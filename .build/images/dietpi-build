@@ -45,7 +45,7 @@ G_EXEC cd "$FP_ORIGIN" # Process everything in origin dir instead of /tmp/$G_PRO
 ##########################################
 HW_MODEL=
 HW_ARCH=
-DISTRO=8 # 6=Bullseye, 7=Bookworm, 8=Trixie, 9=Forky
+DISTRO=8 # 7=Bookworm, 8=Trixie, 9=Forky
 PTTYPE='msdos'
 FSTYPE='ext4'
 VARIANT=
@@ -128,9 +128,6 @@ case $HW_MODEL in
 	58) iname='NanoPiM4V2' HW_ARCH=3 partition_start=16 root_size=1200;;
 	59) iname='ZeroPi' HW_ARCH=2 partition_start=4 root_size=1000;;
 	60) iname='NanoPiNEO' HW_ARCH=2 partition_start=4 root_size=1000;;
-	61) iname='NanoPiM2' HW_ARCH=2 partition_start=4 boot_size=64 root_size=700 boot_fstype='ext4';;
-	'62.1') iname='NanoPiM3' HW_ARCH=3 partition_start=4 root_size=1000;;
-	'62.2') iname='NanoPiFire3' HW_ARCH=3 partition_start=4 root_size=1000;;
 	63) iname='NanoPiM1' HW_ARCH=2 partition_start=4 root_size=1000;;
 	64) iname='NanoPiNEOAir' HW_ARCH=2 partition_start=4 root_size=1000;;
 	'65.1') iname='NanoPiNEO2' HW_ARCH=3 partition_start=4 root_size=1020;;
@@ -140,7 +137,6 @@ case $HW_MODEL in
 	'68.1') iname='NanoPiM4' HW_ARCH=3 partition_start=16 root_size=1200;;
 	'68.2') iname='NanoPCT4' HW_ARCH=3 partition_start=16 root_size=1200;;
 	'68.3') iname='NanoPiNEO4' HW_ARCH=3 partition_start=16 root_size=1200;;
-	70) iname='SparkySBC' HW_ARCH=2 partition_start=8 boot_size=48 root_size=712 boot_fstype='fat16';;
 	'72.1') iname='ROCKPi4' HW_ARCH=3 partition_start=16 root_size=1200;;
 	'72.2') iname='ROCK4SE' HW_ARCH=3 partition_start=16 root_size=1200;;
 	'72.3') iname='ROCK4CPlus' HW_ARCH=3 partition_start=16 root_size=1200;;
@@ -199,7 +195,6 @@ esac
 
 # Check for valid target distro version
 case $DISTRO in
-	6) distro='bullseye';;
 	7) distro='bookworm';;
 	8) distro='trixie';;
 	9) distro='forky';;
@@ -381,8 +376,8 @@ then
 	G_EXEC "mkfs.$FSTYPE" "${afs_opts[@]}" "${FP_LOOP}p2"
 	G_EXEC mount "${FP_LOOP}p2" rootfs
 	fp_boot='boot'
-	# RPi Bookworm: Expects /boot/firmware as mount point
-	(( $HW_MODEL < 10 && $G_DISTRO > 6 )) && fp_boot+='/firmware'
+	# RPi: Expects /boot/firmware as mount point
+	(( $HW_MODEL < 10 )) && fp_boot+='/firmware'
 	G_EXEC mkdir -p "rootfs/$fp_boot"
 	G_EXEC mount "${FP_LOOP}p1" "rootfs/$fp_boot"
 	G_EXEC mkdir rootfs/etc
@@ -431,20 +426,16 @@ G_EXEC umount rootfs/dev rootfs/run rootfs/var/cache/apt rootfs/var/lib/apt/list
 ##########################################
 # Workarounds
 ##########################################
-# Workaround for failing systemd services in emulated container: https://gitlab.com/qemu-project/qemu/-/issues/1962, https://github.com/systemd/systemd/issues/31219
+# Workarounds for QEMU-emulated containers
 if (( $emulation ))
 then
+	# Failing systemd services: https://gitlab.com/qemu-project/qemu/-/issues/1962, https://github.com/systemd/systemd/issues/31219
 	for i in rootfs/lib/systemd/system/*.service
 	do
 		[[ -f $i ]] || continue
-		grep -Eq '^(Load|Import)Credential=' "$i" || continue
+		grep -Eq '^(Import|Load)Credential=' "$i" || continue
 		G_EXEC mkdir "${i/lib/etc}.d"
-		if (( $DISTRO < 8 ))
-		then
-			G_EXEC eval "echo -e '[Service]\nLoadCredential=' > \"${i/lib/etc}.d/dietpi-no-credentials.conf\""
-		else
-			G_EXEC eval "echo -e '[Service]\nImportCredential=' > \"${i/lib/etc}.d/dietpi-no-credentials.conf\""
-		fi
+		G_EXEC eval "echo -e '[Service]\nImportCredential=\nLoadCredential=' > '${i/lib/etc}.d/dietpi-no-credentials.conf'"
 	done
 fi
 
@@ -455,11 +446,11 @@ then
 	echo -e "#/bin/dash\n[ \"\$*\" = -m ] && echo $arch || /bin/uname \"\$@\"" > rootfs/usr/local/bin/uname && G_EXEC chmod +x rootfs/usr/local/bin/uname || Error_Exit "Failed to generate /usr/local/bin/uname for $arch"
 fi
 
-# ARMv6/7 Trixie: Workaround failing chpasswd, which tries to access /proc/sys/vm/mmap_min_addr, but fails as of AppArmor on the host
-if (( $HW_ARCH < 3 && $DISTRO == 8 )) && systemctl -q is-active apparmor
+# ARMv6/7/RISC-V Trixie: Workaround failing chpasswd, which tries to access /proc/sys/vm/mmap_min_addr, but fails as of AppArmor on the host
+if (( ( $HW_ARCH < 3 || $HW_ARCH == 11 ) && $DISTRO == 8 )) && systemctl -q is-active apparmor
 then
 	G_EXEC eval 'echo '\''/proc/sys/vm/mmap_min_addr r,'\'' > /etc/apparmor.d/local/unix-chkpwd'
-	G_EXEC_NOHALT=1 G_EXEC_OUTPUT=1 systemctl restart apparmor || { journalctl -n 25; exit 1; }
+	G_EXEC_OUTPUT=1 G_EXEC apparmor_parser -r /etc/apparmor.d/unix-chkpwd
 fi
 
 ##########################################
@@ -520,7 +511,7 @@ IMAGER_ARGS=("$OUTPUT_IMG_NAME.img")
 (( $SKIP_ARCHIVE )) && IMAGER_ARGS+=('--skip-archive')
 [[ $UPLOAD_SCRIPT ]] && IMAGER_ARGS+=('--upload-script' "$UPLOAD_SCRIPT")
 (( $ADD_FAT_PART )) && IMAGER_ARGS+=('--add-fat-part')
-(( $HW_MODEL < 10 && $G_DISTRO > 6 )) && IMAGER_ARGS+=('--configs-to-boot')
+(( $HW_MODEL < 10 )) && IMAGER_ARGS+=('--configs-to-boot')
 [[ $SIGN_PASS ]] && IMAGER_ARGS+=('--sign' "$SIGN_PASS")
 
 ####### IMG/ISO ##########################
@@ -558,7 +549,7 @@ then
 
 	# Mount filesystems
 	G_EXEC mkdir rootfs
-	if (( $HW_MODEL < 10 && $G_DISTRO > 6 ))
+	if (( $HW_MODEL < 10 ))
 	then
 		G_EXEC mount "${FP_LOOP}p2" rootfs
 		G_EXEC mount "${FP_LOOP}p1" rootfs/boot/firmware
@@ -589,7 +580,7 @@ fi
 
 ####### AlloGUI ##########################
 # - Pre-install Allo GUI with all managed audiophile software
-if [[ $EDITION == 'AlloGUI' || ( $EDITION == 'all' && $HW_MODEL =~ ^([1-5]|70)$ ) ]]
+if [[ $EDITION == 'AlloGUI' || ( $EDITION == 'all' && $HW_MODEL == [1-5] ) ]]
 then
 	G_EXEC mv "$OUTPUT_IMG_NAME.img" "${OUTPUT_IMG_NAME%_Amiberry}_AlloGUI.img"
 	OUTPUT_IMG_NAME="${OUTPUT_IMG_NAME%_Amiberry}_AlloGUI"
@@ -611,7 +602,7 @@ then
 
 	# Mount filesystems
 	G_EXEC mkdir rootfs
-	if (( $HW_MODEL < 10 && $G_DISTRO > 6 ))
+	if (( $HW_MODEL < 10 ))
 	then
 		G_EXEC mount "${FP_LOOP}p2" rootfs
 		G_EXEC mount "${FP_LOOP}p1" rootfs/boot/firmware

@@ -2,12 +2,9 @@
 {
 . /boot/dietpi/func/dietpi-globals
 
-# Build deps
-(( $G_DISTRO < 7 )) && deps=('p7zip') || deps=('7zip')
-(( $G_DISTRO == 7 )) && c7zip='7zz' || c7zip='7zr' # Since Trixie, the 7zip package provides again (only) the 7z/7zr commands, not 7zz
-
 G_AGUP
-G_AGDUG gcc libc6-dev "${deps[@]}"
+G_AGDUG gcc libc6-dev 7zip
+(( $G_DISTRO == 7 )) && c7zip='7zz' || c7zip='7zr' # Since Trixie, the 7zip package provides again (only) the 7z/7zr commands, not 7zz
 
 # Download & Build
 # shellcheck disable=SC1091
