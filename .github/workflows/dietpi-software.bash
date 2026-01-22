@@ -144,7 +144,6 @@ Process_Software()
 			45) aSERVICES[i]='deluged deluge-web' aTCP[i]='8112 58846 6882';;
 			46) aSERVICES[i]='qbittorrent' aTCP[i]='1340 6881';;
 			47) aSERVICES[i]='ocis' aTCP[i]='9200';;
-			#48) Pydio
 			49) aSERVICES[i]='gogs' aTCP[i]='3000';;
 			50) aSERVICES[i]='syncthing' aTCP[i]='8384';;
 			51) aCOMMANDS[i]='/usr/games/opentyrian/opentyrian -h';;
