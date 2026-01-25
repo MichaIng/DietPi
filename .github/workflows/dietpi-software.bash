@@ -61,7 +61,6 @@ do
 	shift
 done
 case $DISTRO in
-	'bullseye') dist=6;;
 	'bookworm') dist=7;;
 	'trixie') dist=8;;
 	'forky') dist=9;;
@@ -118,7 +117,7 @@ Process_Software()
 			11) aCOMMANDS[i]='gzdoom -norun | grep '\''^GZDoom version '\';;
 			12) aSERVICES[i]='rustdesksignal rustdeskrelay' aTCP[i]='21115 21116 21117 21118 21119' aUDP[i]='21116';;
 			#16) aSERVICES[i]='microblog-pub' aTCP[i]='8007';; Service enters a CPU-intense internal error loop until it has been configured interactively via "microblog-pub configure", hence it is not enabled and started anymore after install but instead as part of "microblog-pub configure"
-			17) aCOMMANDS[i]='git --version';; # from Bookworm on, the shorthand "-v" is supported
+			17) aCOMMANDS[i]='git -v';;
 			#22) QuiteRSS: has no CLI
 			23) aCOMMANDS[i]='lxsession -h';;
 			24) aCOMMANDS[i]='mate-session -h';;
@@ -133,7 +132,7 @@ Process_Software()
 			33) (( $emulation )) || aSERVICES[i]='airsonic' aTCP[i]='8080' aDELAY[i]=60;; # Fails in QEMU-emulated containers, probably due to missing device access
 			34) aCOMMANDS[i]='COMPOSER_ALLOW_SUPERUSER=1 composer -n -V';;
 			35) aSERVICES[i]='lyrionmusicserver' aTCP[i]='9000';;
-			36) aCOMMANDS[i]='squeezelite -t';; # Service listens on random high UDP port and exits if no audio device has been found, which does not exist on GitHub Actions runners, respectively within the containers
+			36) aSERVICES[i]='squeezelite';; # Service listens on random high UDP port
 			37) aSERVICES[i]='shairport-sync' aTCP[i]='5000';; # AirPlay 2 would be TCP port 7000
 			38) aCOMMANDS[i]='/opt/FreshRSS/cli/user-info.php';;
 			39) aSERVICES[i]='minidlna' aTCP[i]='8200';;
@@ -144,8 +143,7 @@ Process_Software()
 			44) aSERVICES[i]='transmission-daemon' aTCP[i]='9091 51413' aUDP[i]='51413';;
 			45) aSERVICES[i]='deluged deluge-web' aTCP[i]='8112 58846 6882';;
 			46) aSERVICES[i]='qbittorrent' aTCP[i]='1340 6881';;
-			47) aCOMMANDS[i]='sudo -u www-data php /var/www/owncloud/occ status';;
-			#48) Pydio
+			47) aSERVICES[i]='ocis' aTCP[i]='9200';;
 			49) aSERVICES[i]='gogs' aTCP[i]='3000';;
 			50) aSERVICES[i]='syncthing' aTCP[i]='8384';;
 			51) aCOMMANDS[i]='/usr/games/opentyrian/opentyrian -h';;
@@ -156,7 +154,6 @@ Process_Software()
 			#56) Single File PHP Gallery
 			#57) Baïkal
 			58) aCOMMANDS[i]='tailscale version';; # aSERVICES[i]='tailscaled' aUDP[i]='41641' GitHub Actions runners do not support the TUN module
-			59) aSERVICES[i]='raspimjpeg';;
 			60) aCOMMANDS[i]='iptables -V' aSERVICES[i]='isc-dhcp-server' aUDP[i]='67';; # aSERVICES[i]='hostapd' fails without actual WiFi interface
 			61) aSERVICES[i]='tor' aTCP[i]='9040' aUDP[i]='53';;
 			62) aCOMMANDS[i]='box86 -v';;
@@ -187,7 +184,6 @@ Process_Software()
 			87) aCOMMANDS[i]='sqlite3 -version';;
 			88) aSERVICES[i]='mariadb' aTCP[i]='3306';;
 			89) case $DISTRO in
-				'bullseye') aSERVICES[i]='php7.4-fpm';;
 				'bookworm') aSERVICES[i]='php8.2-fpm';;
 				*) aSERVICES[i]='php8.4-fpm';;
 			esac;;
@@ -197,7 +193,7 @@ Process_Software()
 			93) aSERVICES[i]='pihole-FTL' aUDP[i]='53';;
 			94) aSERVICES[i]='proftpd' aTCP[i]='21';;
 			95) aSERVICES[i]='vsftpd' aTCP[i]='21';;
-			96) aSERVICES[i]='smbd' aTCP[i]='139 445';;
+			96) aSERVICES[i]='smbd' aTCP[i]='139 445' aUDP[i]='137 138';;
 			97) aCOMMANDS[i]='openvpn --version';; # aSERVICES[i]='openvpn' aUDP[i]='1194' GitHub Actions runners do not support the TUN module
 			98) aSERVICES[i]='haproxy' aTCP[i]='80 1338';;
 			99) aSERVICES[i]='node_exporter' aTCP[i]='9100';;
@@ -214,7 +210,7 @@ Process_Software()
 			110) aCOMMANDS[i]='mount.nfs -V';;
 			111) aSERVICES[i]='urbackupsrv' aTCP[i]='55414';;
 			112) aCOMMANDS[i]='/mnt/dietpi_userdata/dxx-rebirth/d1x-rebirth_rpigl -h';;
-			113) aCOMMANDS[i]='chromium --version'; [[ $DISTRO == 'bullseye' && $RPI == 'true' ]] && (( $arch < 10 )) && aCOMMANDS[i]='chromium-browser --version';;
+			113) aCOMMANDS[i]='chromium --version';;
 			114) aCOMMANDS[i]='sudo -u www-data php /var/www/nextcloud/occ status';;
 			115) aSERVICES[i]='webmin' aTCP[i]='10000';;
 			116) aSERVICES[i]='medusa' aTCP[i]='8081'; (( $emulation )) && aDELAY[i]=30;;
@@ -225,26 +221,26 @@ Process_Software()
 			121) aSERVICES[i]='roonbridge' aUDP[i]='9003';;
 			122) aSERVICES[i]='node-red' aTCP[i]='1880'; (( $emulation )) && aDELAY[i]=30;;
 			123) aSERVICES[i]='mosquitto' aTCP[i]='1883';;
-			124) aSERVICES[i]='networkaudiod';; # aUDP[i]='????';;
+			124) aSERVICES[i]='networkaudiod' aTCP[i]='43210' aUDP[i]='43210';;
 			125) aSERVICES[i]='synapse' aTCP[i]='8008';;
 			126) aSERVICES[i]='adguardhome' aUDP[i]='53' aTCP[i]='8083'; [[ ${aSERVICES[182]} ]] && aUDP[i]+=' 5335';; # Unbound uses port 5335 if AdGuard Home is installed
 			127) aSERVICES[i]='birdnet' aTCP[i]='8127';;
 			128) aSERVICES[i]='mpd' aTCP[i]='6600';;
 			#129) O!MPD
 			130) aCOMMANDS[i]='python3 -V';;
-			131) (( $arch < 3 || $arch == 11 )) || aSERVICES[i]='blynkserver' aTCP[i]='9443'; (( $arch == 10 || $arch == 2 || $arch == 11 )) || aDELAY[i]=60;;
+			131) aSERVICES[i]='blynkserver' aTCP[i]='9443'; (( $emulation )) && aDELAY[i]=120;;
 			132) aSERVICES[i]='aria2' aTCP[i]='6800';; # aTCP[i]+=' 6881-6999';; # Listens on random port
-			133) (( $arch < 3 || $arch == 11 )) || aSERVICES[i]='yacy' aTCP[i]='8090'; (( $arch == 10 )) && aDELAY[i]=30; (( $arch == 10 || $arch == 2 || $arch == 11)) || aDELAY[i]=90;;
+			133) aSERVICES[i]='yacy' aTCP[i]='8090'; (( $emulation )) && aDELAY[i]=120;;
 			134) aCOMMANDS[i]='docker compose version';;
-			135) aSERVICES[i]='icecast2' aTCP[i]='8000' aCOMMANDS[i]='darkice -h | grep '\''^DarkIce'\';; # darkice service cannot start in container as is requires audio recording device access
+			135) aSERVICES[i]='icecast2' aTCP[i]='8000' aCOMMANDS[i]='darkice -h | grep '\''^DarkIce'\';; # darkice service cannot start on GitHub runner as it requires a hardware capture device, and those runners do not provide the dummy audio kernel module
 			136) aSERVICES[i]='motioneye' aTCP[i]='8765';;
 			137) aCOMMANDS[i]='/opt/mjpg-streamer/mjpg_streamer -v';; # aSERVICES[i]='mjpg-streamer' aTCP[i]='8082' Service does not start without an actual video device
 			138) aSERVICES[i]='virtualhere' aTCP[i]='7575';;
 			139) aSERVICES[i]='sabnzbd' aTCP[i]='8080'; (( $arch == 10 )) || aDELAY[i]=30;; # ToDo: Solve conflict with Airsonic
 			140) aSERVICES[i]='domoticz' aTCP[i]='8424';;
 			141) aSERVICES[i]='adsb-setup' aTCP[i]='1099' SYSCALLS+=' add_key keyctl bpf'; (( $emulation )) || aSERVICES[i]+=' adsb-docker';; # Container cannot start in QEMU-emulated container. Else, depending on container startup race condition, the Dozzle port can be 9999 (default) or 1094 (changed by internal setup step). I remains 1094 on subsequent restarts, and other ports join depending on manual init setup selections.
-			# MicroK8s: /run/udev and on Bullseye /sys/devices required for snapd update to succeed on first attempt doing a udev trigger; ~@mount + loop devices for snapd snaps=squashfs mounts; /dev/kmsg mount + CAP_SYSLOG: "Error: failed to run Kubelet: failed to create kubelet: open /dev/kmsg: no such file or directory"
-			142) aCOMMANDS[i]='/snap/bin/microk8s status' aSERVICES[i]='snapd snap.microk8s.daemon-containerd' aDELAY[i]=30 CAPABILITIES+=',CAP_NET_ADMIN,CAP_MAC_ADMIN,CAP_SYSLOG' SYSCALLS+=' add_key keyctl bpf ~@mount' aOPTIONS+=('--bind-ro=/run/udev' '--bind=/dev/loop-control' '--bind=/dev/loop'{1,2,3,4,5,6,7} '--bind=/dev/kmsg'); [[ $DISTRO == 'bullseye' ]] && aOPTIONS+=('--bind=/sys/devices') ;;
+			# MicroK8s: /run/udev required for snapd update to succeed on first attempt doing a udev trigger; ~@mount + loop devices for snapd snaps=squashfs mounts; /dev/kmsg mount + CAP_SYSLOG: "Error: failed to run Kubelet: failed to create kubelet: open /dev/kmsg: no such file or directory"
+			142) aCOMMANDS[i]='/snap/bin/microk8s status' aSERVICES[i]='snapd snap.microk8s.daemon-containerd' aDELAY[i]=30 CAPABILITIES+=',CAP_NET_ADMIN,CAP_MAC_ADMIN,CAP_SYSLOG' SYSCALLS+=' add_key keyctl bpf ~@mount' aOPTIONS+=('--bind-ro=/run/udev' '--bind=/dev/loop-control' '--bind=/dev/loop'{1,2,3,4,5,6,7} '--bind=/dev/kmsg');;
 			143) aSERVICES[i]='koel' aTCP[i]='8003'; (( $emulation )) && aDELAY[i]=30;;
 			144) (( $arch == 1 )) || aSERVICES[i]='sonarr' aTCP[i]='8989';; # Skip on ARMv6 failing in container with "If you're reading this, the MonoMod.RuntimeDetour selftest failed."
 			145) aSERVICES[i]='radarr' aTCP[i]='7878';;
@@ -278,6 +274,7 @@ Process_Software()
 			#173 LXQt: all executables strictly require a Qt session, no help or version output possible
 			174) aCOMMANDS[i]='gimp -v';;
 			175) aCOMMANDS[i]='xfce4-power-manager -V';;
+			176) aSERVICES[i]='uptime-kuma' aTCP[i]='3002';;
 			177) aSERVICES[i]='forgejo' aTCP[i]='3000';;
 			178) aSERVICES[i]='jellyfin' aTCP[i]='8097';;
 			179) aSERVICES[i]='komga' aTCP[i]='2037'; (( $emulation )) && aDELAY[i]=300 || aDELAY[i]=30;;
@@ -325,10 +322,10 @@ do
 	case $i in
 		205) Process_Software webserver;;
 		27|56|63|64|107|132) Process_Software 89 webserver;;
-		38|40|48|54|55|57|59|90|160|210) Process_Software 88 89 webserver;;
+		38|48|54|55|57|59|90|160|210) Process_Software 88 89 webserver;;
 		159) Process_Software 36 37 65 88 89 96 121 124 128 129 152 160 163 webserver;;
 		47|114|168) Process_Software 88 89 91 webserver;;
-		8|33|80|133|164|179|181|206) Process_Software 196;;
+		8|80|133|164|179|181|206) Process_Software 196;;
 		122) Process_Software 9;;
 		53|131) Process_Software 9 196;;
 		32|148|119) Process_Software 128;;
@@ -343,13 +340,17 @@ do
 		188) Process_Software 17;;
 		213) Process_Software 17 188;;
 		183) Process_Software 87;;
-		31|37|128|138|163|167|187) Process_Software 152;;
+		138|187) Process_Software 152;;
 		75) Process_Software 83 87 89;;
 		76) Process_Software 83 88 89;;
 		78) Process_Software 85 87 89;;
 		79) Process_Software 85 88 89;;
 		81) Process_Software 84 87 89;;
 		82) Process_Software 84 88 89;;
+		23|24|25|26|173|36|118|121|124|135|154|191|192|199|204|108|10|51|112|156|11|189|113|67) Process_Software 5;;
+		31|37|128|163|167) Process_Software 5 152;;
+		33) Process_Software 5 196;;
+		40) Process_Software 5 88 89 webserver;;
 		*) :;;
 	esac
 	Process_Software "$i"
@@ -426,8 +427,11 @@ G_EXEC eval 'echo '\''infocmp "$TERM" > /dev/null 2>&1 || { echo "[ INFO ] Unsup
 # Enable automated setup
 G_CONFIG_INJECT 'AUTO_SETUP_AUTOMATED=' 'AUTO_SETUP_AUTOMATED=1' rootfs/boot/dietpi.txt
 
-# ARMv6/7 Trixie: Workaround failing chpasswd, which tries to access /proc/sys/vm/mmap_min_addr, but fails as of AppArmor on the host
-if (( $arch < 3 && $dist > 7 )) && systemctl -q is-active apparmor
+# Apply dummy ALSA device
+G_CONFIG_INJECT 'CONFIG_SOUNDCARD=' 'CONFIG_SOUNDCARD=dummy' rootfs/boot/dietpi.txt
+
+# ARMv6/7/RISC-V Trixie: Workaround failing chpasswd, which tries to access /proc/sys/vm/mmap_min_addr, but fails as of AppArmor on the host
+if (( ( $arch < 3 || $arch == 11 ) && $dist > 7 )) && systemctl -q is-active apparmor
 then
 	G_EXEC eval 'echo '\''/proc/sys/vm/mmap_min_addr r,'\'' > /etc/apparmor.d/local/unix-chkpwd'
 	G_EXEC_OUTPUT=1 G_EXEC apparmor_parser -r /etc/apparmor.d/unix-chkpwd
@@ -477,22 +481,30 @@ then
 		[[ -f $i ]] || continue
 		grep -Eq '^(Import|Load)Credential=' "$i" || continue
 		G_EXEC mkdir "${i/lib/etc}.d"
-		G_EXEC eval "echo -e '[Service]\nImportCredential=\nLoadCredential=' > \"${i/lib/etc}.d/dietpi-no-credentials.conf\""
+		G_EXEC eval "echo -e '[Service]\nImportCredential=\nLoadCredential=' > '${i/lib/etc}.d/dietpi-no-credentials.conf'"
 	done
 
 	# Failing services as PrivateUsers leads to "Failed to set up user namespacing", and AmbientCapabilities to "Failed to apply ambient capabilities (before UID change): Operation not permitted"
-	G_EXEC mkdir rootfs/etc/systemd/system/{redis-server,raspotify,navidrome,homebridge,mariadb,systemd-logind,apache2,mpd}.service.d
+	G_EXEC mkdir rootfs/etc/systemd/system/{redis-server,raspotify,navidrome,homebridge}.service.d
 	G_EXEC eval 'echo -e '\''[Service]\nPrivateUsers=0'\'' > rootfs/etc/systemd/system/redis-server.service.d/dietpi-container.conf'
 	G_EXEC eval 'echo -e '\''[Service]\nPrivateUsers=0'\'' > rootfs/etc/systemd/system/raspotify.service.d/dietpi-container.conf'
 	G_EXEC eval 'echo -e '\''[Service]\nPrivateUsers=0'\'' > rootfs/etc/systemd/system/navidrome.service.d/dietpi-container.conf'
 	G_EXEC eval 'echo -e '\''[Service]\nAmbientCapabilities='\'' > rootfs/etc/systemd/system/homebridge.service.d/dietpi-container.conf'
-	# Forky: ProtectHome/ProtectSystem/PrivateTmp/...: "Failed to set up mount namespacing: Invalid argument": https://github.com/systemd/systemd/issues/39951
+	# Forky
 	if (( $dist > 8 ))
 	then
+		G_EXEC mkdir rootfs/etc/systemd/system/{mariadb,systemd-logind,apache2,mpd,vaultwarden,blynkserver,gogs}.service.d
+		# ProtectHome/ProtectSystem/PrivateTmp/...: "Failed to set up mount namespacing: Invalid argument": https://github.com/systemd/systemd/issues/39951
 		G_EXEC eval 'echo -e '\''[Service]\nProtectHome=0\nProtectSystem=0'\'' > rootfs/etc/systemd/system/mariadb.service.d/dietpi-container.conf'
 		G_EXEC eval 'echo -e '\''[Service]\nProtectHome=0\nProtectSystem=0\nPrivateTmp=0\nReadWritePaths=\nProtectKernelModules=0\nProtectControlGroups=0\nProtectKernelLogs=0'\'' > rootfs/etc/systemd/system/systemd-logind.service.d/dietpi-container.conf'
 		G_EXEC eval 'echo -e '\''[Service]\nPrivateTmp=0'\'' > rootfs/etc/systemd/system/apache2.service.d/dietpi-container.conf'
 		G_EXEC eval 'echo -e '\''[Service]\nProtectSystem=0\nProtectKernelTunables=0\nProtectControlGroups=0\nProtectKernelModules=0'\'' > rootfs/etc/systemd/system/mpd.service.d/dietpi-container.conf'
+		G_EXEC eval 'echo -e '\''[Service]\nProtectHome=0\nProtectSystem=0\nPrivateTmp=0\nReadWritePaths=\nPrivateDevices=0'\'' > rootfs/etc/systemd/system/vaultwarden.service.d/dietpi-container.conf'
+		G_EXEC eval 'echo -e '\''[Service]\nPrivateTmp=0'\'' > rootfs/etc/systemd/system/blynkserver.service.d/dietpi-container.conf'
+		G_EXEC eval 'echo -e '\''[Service]\nProtectSystem=0\nPrivateTmp=0\nPrivateDevices=0\nReadWritePaths='\'' > rootfs/etc/systemd/system/gogs.service.d/dietpi-container.conf'
+		# /dev/console == /dev/pts/0 seen as "Inappropriate ioctl for device" leading to failing console-getty.service and StandardOutput=tty
+		G_EXEC eval 'echo -e '\''#!/bin/dash\nexec /boot/dietpi/dietpi-login > /dev/console 2>&1'\'' > rootfs/var/lib/dietpi/postboot.d/dietpi-login'
+		G_EXEC sed --follow-symlinks -i '/^StandardOutput=/c\StandardOutput=journal+console' rootfs/etc/systemd/system/dietpi-{first,post}boot.service
 	fi
 
 	# Failing 32-bit ARM Rust builds on ext4 with 64-bit host: https://github.com/rust-lang/cargo/issues/9545

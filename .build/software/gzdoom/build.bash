@@ -30,7 +30,6 @@ adeps_build+=('unzip')
 adeps_build+=('git' 'libvpx-dev' 'libbz2-dev')
 adeps+=('libbz2-1.0')
 case $G_DISTRO in
-	6) adeps+=('libvpx6');;
 	7) adeps+=('libvpx7');;
 	8) adeps+=('libvpx9');;
 	9) adeps+=('libvpx11');;

@@ -209,7 +209,6 @@ Links to hardware and software manufacturers, sources and build instructions use
 - [Raspberry](https://github.com/raspberrypi) [Pi](https://github.com/RPi-Distro)
 - [Hardkernel/Odroid](https://github.com/hardkernel?tab=repositories)
 - [Xunlong/Orange Pi](https://github.com/orangepi-xunlong?tab=repositories)
-- [Sparky](https://github.com/sparkysbc?tab=repositories) [SBC](https://github.com/sparky-sbc/sparky-test)
 - [PINE64](https://www.pine64.org/)
 - [FriendlyARM/NanoPi](https://github.com/friendlyarm?tab=repositories)
 - [Radxa](https://github.com/radxa/apt)
@@ -228,7 +227,7 @@ Links to hardware and software manufacturers, sources and build instructions use
 - [ruTorrent](https://github.com/Novik/ruTorrent)
 - [qBittorrent](https://github.com/qbittorrent/qBittorrent)
 - [Nextcloud](https://github.com/nextcloud/server)
-- [ownCloud](https://github.com/owncloud/core)
+- [ownCloud Infinite Scale](https://github.com/owncloud/ocis)
 - [Syncthing](https://github.com/syncthing/syncthing)
 - [ReadyMedia](https://sourceforge.net/p/minidlna/git/ci/master/tree/)
 - [MPD](https://github.com/MusicPlayerDaemon/MPD)
@@ -257,7 +256,6 @@ Links to hardware and software manufacturers, sources and build instructions use
 - [Amiberry](https://github.com/BlitterStudio/amiberry)
 - [Amiberry-Lite](https://github.com/BlitterStudio/amiberry-lite)
 - [OpenTyrian](https://bitbucket.org/opentyrian/opentyrian/wiki/Home)
-- [RPi Cam Web Interface](https://github.com/silvanmelchior/RPi_Cam_Web_Interface)
 - [Deluge](https://dev.deluge-torrent.org/wiki/Development#SourceCode)
 - [Airsonic-Advanced](https://github.com/airsonic-advanced/airsonic-advanced)
 - [Logitech Media Server](https://github.com/Logitech/slimserver)
@@ -350,6 +348,7 @@ Links to hardware and software manufacturers, sources and build instructions use
 - [LazyLibrarian](https://gitlab.com/LazyLibrarian/LazyLibrarian)
 - [BirdNET-Go](https://github.com/tphakala/birdnet-go)
 - [RustDesk](https://github.com/rustdesk/rustdesk-server)
+- [Uptime Kuma](https://github.com/louislam/uptime-kuma)
 
 ---
 

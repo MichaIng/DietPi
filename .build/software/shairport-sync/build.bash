@@ -9,12 +9,11 @@
 # Build deps
 G_AGUP
 G_AGDUG automake pkg-config make g++ libpopt-dev libconfig-dev libssl-dev libsoxr-dev libavahi-client-dev libasound2-dev libglib2.0-dev libmosquitto-dev avahi-daemon git libplist-dev libsodium-dev libgcrypt20-dev libavformat-dev xxd
-adeps=('libc6' 'libasound2' 'libavahi-client3' 'libsoxr0' 'libpopt0' 'libglib2.0-0' 'libmosquitto1' 'avahi-daemon')
+adeps=('libc6' 'libasound2' 'libssl3' 'libavahi-client3' 'libsoxr0' 'libpopt0' 'libglib2.0-0' 'libmosquitto1' 'avahi-daemon')
 adeps2=('libsodium23' 'libgcrypt20')
 case $G_DISTRO in
-	6) adeps+=('libssl1.1' 'libconfig9'); adeps2+=('libavcodec58' 'libplist3');;
-	7) adeps+=('libssl3' 'libconfig9'); adeps2+=('libavcodec59' 'libplist3');;
-	8|9) adeps+=('libssl3' 'libconfig11'); adeps2+=('libavcodec61' 'libplist-2.0-4');;
+	7) adeps+=('libconfig9'); adeps2+=('libavcodec59' 'libplist3');;
+	8|9) adeps+=('libconfig11'); adeps2+=('libavcodec61' 'libplist-2.0-4');;
 	*) G_DIETPI-NOTIFY 1 "Unsupported distro version: $G_DISTRO_NAME (ID=$G_DISTRO)"; exit 1;;
 esac
 for i in "${adeps[@]}" "${adeps2[@]}"

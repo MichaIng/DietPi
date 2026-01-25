@@ -4,8 +4,7 @@
 
 # APT dependencies: https://github.com/dani-garcia/vaultwarden/wiki/Building-binary#dependencies
 adeps_build=('gcc' 'libc6-dev' 'pkg-config' 'libssl-dev')
-adeps=('libc6' 'openssl')
-(( $G_DISTRO > 6 )) && adeps+=('libssl3') || adeps+=('libssl1.1')
+adeps=('libc6' 'libssl3' 'openssl')
 G_AGUP
 G_AGDUG "${adeps_build[@]}"
 for i in "${adeps[@]}"
@@ -29,7 +28,8 @@ G_EXEC curl -sSfo rustup-init.sh 'https://sh.rustup.rs'
 G_EXEC chmod +x rustup-init.sh
 G_EXEC_OUTPUT=1 G_EXEC ./rustup-init.sh -y --profile minimal --default-toolchain none "${host[@]}"
 G_EXEC rm rustup-init.sh
-export PATH="$HOME/.cargo/bin:$PATH"
+# - Fallback to /root if $HOME is undefined when called e.g. from systemd unit
+export PATH="${HOME:-/root}/.cargo/bin:$PATH"
 
 # Obtain latest versions
 # - vaultwarden
@@ -87,7 +87,7 @@ G_CONFIG_INJECT 'ROCKET_TLS=' 'ROCKET_TLS={certs="./cert.pem",key="./privkey.pem
 G_CONFIG_INJECT 'WEB_VAULT_ENABLED=' 'WEB_VAULT_ENABLED=true' "$DIR/mnt/dietpi_userdata/vaultwarden/vaultwarden.env"
 
 # - systemd service: https://github.com/dani-garcia/vaultwarden/wiki/Setup-as-a-systemd-service
-cat << '_EOF_' > "$DIR/lib/systemd/system/vaultwarden.service"
+cat << '_EOF_' > "$DIR/lib/systemd/system/vaultwarden.service" || exit 1
 [Unit]
 Description=vaultwarden (DietPi)
 Documentation=https://github.com/dani-garcia/vaultwarden
@@ -102,7 +102,7 @@ AmbientCapabilities=CAP_NET_BIND_SERVICE
 LimitNOFILE=1048576
 LimitNPROC=64
 WorkingDirectory=/mnt/dietpi_userdata/vaultwarden
-# Workaround for failing systemd.automount since Bookworm: https://dietpi.com/forum/t/automount-option-in-fstab-prevents-automatically-mounting-a-partition-in-due-time-on-bookworm/17463/22
+# Workaround for failing systemd.automount since Bookworm: https://dietpi.com/forum/t/17463/22
 EnvironmentFile=-/mnt/dietpi_userdata/vaultwarden/vaultwarden.env
 ExecStartPre=/bin/touch /mnt/dietpi_userdata/vaultwarden/vaultwarden.env
 ExecStart=/opt/vaultwarden/vaultwarden
@@ -110,9 +110,9 @@ Restart=on-failure
 RestartSec=5s
 
 # Hardening
-PrivateTmp=true
-PrivateDevices=true
-ProtectHome=true
+PrivateTmp=1
+PrivateDevices=1
+ProtectHome=1
 ProtectSystem=strict
 ReadWritePaths=-/mnt/dietpi_userdata/vaultwarden
 
@@ -128,11 +128,11 @@ G_EXEC chmod +x "$DIR/opt/vaultwarden/vaultwarden"
 # Control files
 
 # - conffiles
-echo '/mnt/dietpi_userdata/vaultwarden/vaultwarden.env' > "$DIR/DEBIAN/conffiles"
+G_EXEC eval "echo '/mnt/dietpi_userdata/vaultwarden/vaultwarden.env' > '$DIR/DEBIAN/conffiles'"
 
 # - postinst
-cat << '_EOF_' > "$DIR/DEBIAN/postinst"
-#!/bin/bash
+cat << '_EOF_' > "$DIR/DEBIAN/postinst" || exit 1
+#!/bin/bash -e
 
 # Enable web vault remote access for fresh package installs onto existing pre-v1.25 vaultwarden installs
 if [[ ! $2 ]] && grep -q '^# ROCKET_ADDRESS=0.0.0.0$' /mnt/dietpi_userdata/vaultwarden/vaultwarden.env
@@ -158,32 +158,33 @@ then
 		ip=$(ip -br a s dev "$(ip r l 0/0 | mawk '{print $5;exit}')" | mawk '{print $3;exit}') ip=${ip%/*}
 		openssl req -reqexts SAN -subj '/CN=DietPi vaultwarden' -config <(cat /etc/ssl/openssl.cnf <(echo -ne "[SAN]\nsubjectAltName=DNS:$(</etc/hostname),IP:$ip\nbasicConstraints=CA:TRUE,pathlen:0"))\
 			-x509 -days 7200 -sha256 -extensions SAN -out /mnt/dietpi_userdata/vaultwarden/cert.pem\
-			-newkey rsa:4096 -nodes -keyout /mnt/dietpi_userdata/vaultwarden/privkey.pem
+			-newkey ec:<(openssl ecparam -name prime256v1) -noenc -keyout /mnt/dietpi_userdata/vaultwarden/privkey.pem
 	fi
 
 	echo 'Setting vaultwarden userdata owner ...'
 	chown -R vaultwarden:vaultwarden /mnt/dietpi_userdata/vaultwarden
 
 	echo 'Configuring vaultwarden systemd service ...'
-	systemctl unmask vaultwarden
-	systemctl enable --now vaultwarden
+	systemctl --no-reload unmask vaultwarden
+	systemctl enable vaultwarden
+	pgrep -x 'dietpi-software' > /dev/null || systemctl restart vaultwarden
 fi
 _EOF_
 
 # - prerm
-cat << '_EOF_' > "$DIR/DEBIAN/prerm"
-#!/bin/sh
+cat << '_EOF_' > "$DIR/DEBIAN/prerm" || exit 1
+#!/bin/dash -e
 if [ "$1" = 'remove' ] && [ -d '/run/systemd/system' ] && [ -f '/lib/systemd/system/vaultwarden.service' ]
 then
 	echo 'Deconfiguring vaultwarden systemd service ...'
-	systemctl unmask vaultwarden
-	systemctl disable --now vaultwarden
+	systemctl --no-reload unmask vaultwarden
+	systemctl --no-reload disable --now vaultwarden
 fi
 _EOF_
 
 # - postrm
-cat << '_EOF_' > "$DIR/DEBIAN/postrm"
-#!/bin/sh
+cat << '_EOF_' > "$DIR/DEBIAN/postrm" || exit 1
+#!/bin/dash -e
 if [ "$1" = 'purge' ]
 then
 	if [ -d '/etc/systemd/system/vaultwarden.service.d' ]
@@ -224,7 +225,7 @@ DEPS_APT_VERSIONED=${DEPS_APT_VERSIONED%,}
 [[ $G_HW_ARCH_NAME == 'armv6l' ]] && DEPS_APT_VERSIONED=$(sed 's/+rp[it][0-9]\+[^)]*)/)/g' <<< "$DEPS_APT_VERSIONED") || DEPS_APT_VERSIONED=$(sed 's/+b[0-9]\+)/)/g' <<< "$DEPS_APT_VERSIONED")
 
 # - control
-cat << _EOF_ > "$DIR/DEBIAN/control"
+cat << _EOF_ > "$DIR/DEBIAN/control" || exit 1
 Package: vaultwarden
 Version: $pkg_version
 Architecture: $(dpkg --print-architecture)
@@ -244,10 +245,6 @@ G_CONFIG_INJECT 'Installed-Size: ' "Installed-Size: $(du -sk "$DIR" | mawk '{pri
 # Build DEB package
 G_EXEC_OUTPUT=1 G_EXEC dpkg-deb -b "$DIR"
 G_EXEC mv "$DIR.deb" /tmp/
-
-# Cleanup
-G_EXEC cd ..
-G_EXEC rm -R "$HOME"
 
 exit 0
 }

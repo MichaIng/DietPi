@@ -11,7 +11,6 @@ header=()
 adeps_build=('git' 'cmake' 'make' 'g++' 'libssl-dev' 'liblua5.3-dev' 'python3-dev' 'libsqlite3-dev' 'libboost-system-dev' 'libboost-thread-dev' 'libcurl4-openssl-dev' 'libusb-dev')
 adeps=('libc6' 'libsqlite3-0' 'libusb-0.1-4')
 case $G_DISTRO in
-	6) adeps+=('libssl1.1' 'libcurl4');;
 	7) adeps+=('libssl3' 'libcurl4');;
 	8|9) adeps+=('libssl3t64' 'libcurl4t64');;
 	*) Error_Exit "Unsupported distro version: $G_DISTRO_NAME (ID=$G_DISTRO)";;
@@ -122,7 +121,7 @@ then
 	echo 'Configuring $PRETTY systemd service ...'
 	systemctl --no-reload unmask $NAME
 	systemctl enable $NAME
-	pgrep -x 'dietpi-software' || systemctl restart $NAME
+	pgrep -x 'dietpi-software' > /dev/null || systemctl restart $NAME
 fi
 _EOF_
 
