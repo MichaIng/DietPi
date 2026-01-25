@@ -117,7 +117,7 @@ Process_Software()
 			11) aCOMMANDS[i]='gzdoom -norun | grep '\''^GZDoom version '\';;
 			12) aSERVICES[i]='rustdesksignal rustdeskrelay' aTCP[i]='21115 21116 21117 21118 21119' aUDP[i]='21116';;
 			#16) aSERVICES[i]='microblog-pub' aTCP[i]='8007';; Service enters a CPU-intense internal error loop until it has been configured interactively via "microblog-pub configure", hence it is not enabled and started anymore after install but instead as part of "microblog-pub configure"
-			17) aCOMMANDS[i]='git --version';; # from Bookworm on, the shorthand "-v" is supported
+			17) aCOMMANDS[i]='git -v';;
 			#22) QuiteRSS: has no CLI
 			23) aCOMMANDS[i]='lxsession -h';;
 			24) aCOMMANDS[i]='mate-session -h';;
@@ -132,7 +132,7 @@ Process_Software()
 			33) (( $emulation )) || aSERVICES[i]='airsonic' aTCP[i]='8080' aDELAY[i]=60;; # Fails in QEMU-emulated containers, probably due to missing device access
 			34) aCOMMANDS[i]='COMPOSER_ALLOW_SUPERUSER=1 composer -n -V';;
 			35) aSERVICES[i]='lyrionmusicserver' aTCP[i]='9000';;
-			36) aCOMMANDS[i]='squeezelite -t';; # Service listens on random high UDP port and exits if no audio device has been found, which does not exist on GitHub Actions runners, respectively within the containers
+			36) aSERVICES[i]='squeezelite';; # Service listens on random high UDP port
 			37) aSERVICES[i]='shairport-sync' aTCP[i]='5000';; # AirPlay 2 would be TCP port 7000
 			38) aCOMMANDS[i]='/opt/FreshRSS/cli/user-info.php';;
 			39) aSERVICES[i]='minidlna' aTCP[i]='8200';;
@@ -144,7 +144,6 @@ Process_Software()
 			45) aSERVICES[i]='deluged deluge-web' aTCP[i]='8112 58846 6882';;
 			46) aSERVICES[i]='qbittorrent' aTCP[i]='1340 6881';;
 			47) aSERVICES[i]='ocis' aTCP[i]='9200';;
-			#48) Pydio
 			49) aSERVICES[i]='gogs' aTCP[i]='3000';;
 			50) aSERVICES[i]='syncthing' aTCP[i]='8384';;
 			51) aCOMMANDS[i]='/usr/games/opentyrian/opentyrian -h';;
@@ -233,7 +232,7 @@ Process_Software()
 			132) aSERVICES[i]='aria2' aTCP[i]='6800';; # aTCP[i]+=' 6881-6999';; # Listens on random port
 			133) aSERVICES[i]='yacy' aTCP[i]='8090'; (( $emulation )) && aDELAY[i]=120;;
 			134) aCOMMANDS[i]='docker compose version';;
-			135) aSERVICES[i]='icecast2' aTCP[i]='8000' aCOMMANDS[i]='darkice -h | grep '\''^DarkIce'\';; # darkice service cannot start in container as is requires audio recording device access
+			135) aSERVICES[i]='icecast2' aTCP[i]='8000' aCOMMANDS[i]='darkice -h | grep '\''^DarkIce'\';; # darkice service cannot start on GitHub runner as it requires a hardware capture device, and those runners do not provide the dummy audio kernel module
 			136) aSERVICES[i]='motioneye' aTCP[i]='8765';;
 			137) aCOMMANDS[i]='/opt/mjpg-streamer/mjpg_streamer -v';; # aSERVICES[i]='mjpg-streamer' aTCP[i]='8082' Service does not start without an actual video device
 			138) aSERVICES[i]='virtualhere' aTCP[i]='7575';;
@@ -323,10 +322,10 @@ do
 	case $i in
 		205) Process_Software webserver;;
 		27|56|63|64|107|132) Process_Software 89 webserver;;
-		38|40|48|54|55|57|59|90|160|210) Process_Software 88 89 webserver;;
+		38|48|54|55|57|59|90|160|210) Process_Software 88 89 webserver;;
 		159) Process_Software 36 37 65 88 89 96 121 124 128 129 152 160 163 webserver;;
 		47|114|168) Process_Software 88 89 91 webserver;;
-		8|33|80|133|164|179|181|206) Process_Software 196;;
+		8|80|133|164|179|181|206) Process_Software 196;;
 		122) Process_Software 9;;
 		53|131) Process_Software 9 196;;
 		32|148|119) Process_Software 128;;
@@ -341,13 +340,17 @@ do
 		188) Process_Software 17;;
 		213) Process_Software 17 188;;
 		183) Process_Software 87;;
-		31|37|128|138|163|167|187) Process_Software 152;;
+		138|187) Process_Software 152;;
 		75) Process_Software 83 87 89;;
 		76) Process_Software 83 88 89;;
 		78) Process_Software 85 87 89;;
 		79) Process_Software 85 88 89;;
 		81) Process_Software 84 87 89;;
 		82) Process_Software 84 88 89;;
+		23|24|25|26|173|36|118|121|124|135|154|191|192|199|204|108|10|51|112|156|11|189|113|67) Process_Software 5;;
+		31|37|128|163|167) Process_Software 5 152;;
+		33) Process_Software 5 196;;
+		40) Process_Software 5 88 89 webserver;;
 		*) :;;
 	esac
 	Process_Software "$i"
@@ -424,6 +427,9 @@ G_EXEC eval 'echo '\''infocmp "$TERM" > /dev/null 2>&1 || { echo "[ INFO ] Unsup
 # Enable automated setup
 G_CONFIG_INJECT 'AUTO_SETUP_AUTOMATED=' 'AUTO_SETUP_AUTOMATED=1' rootfs/boot/dietpi.txt
 
+# Apply dummy ALSA device
+G_CONFIG_INJECT 'CONFIG_SOUNDCARD=' 'CONFIG_SOUNDCARD=dummy' rootfs/boot/dietpi.txt
+
 # ARMv6/7/RISC-V Trixie: Workaround failing chpasswd, which tries to access /proc/sys/vm/mmap_min_addr, but fails as of AppArmor on the host
 if (( ( $arch < 3 || $arch == 11 ) && $dist > 7 )) && systemctl -q is-active apparmor
 then
@@ -487,7 +493,7 @@ then
 	# Forky
 	if (( $dist > 8 ))
 	then
-		G_EXEC mkdir rootfs/etc/systemd/system/{mariadb,systemd-logind,apache2,mpd,vaultwarden,blynkserver}.service.d
+		G_EXEC mkdir rootfs/etc/systemd/system/{mariadb,systemd-logind,apache2,mpd,vaultwarden,blynkserver,gogs}.service.d
 		# ProtectHome/ProtectSystem/PrivateTmp/...: "Failed to set up mount namespacing: Invalid argument": https://github.com/systemd/systemd/issues/39951
 		G_EXEC eval 'echo -e '\''[Service]\nProtectHome=0\nProtectSystem=0'\'' > rootfs/etc/systemd/system/mariadb.service.d/dietpi-container.conf'
 		G_EXEC eval 'echo -e '\''[Service]\nProtectHome=0\nProtectSystem=0\nPrivateTmp=0\nReadWritePaths=\nProtectKernelModules=0\nProtectControlGroups=0\nProtectKernelLogs=0'\'' > rootfs/etc/systemd/system/systemd-logind.service.d/dietpi-container.conf'
@@ -495,6 +501,7 @@ then
 		G_EXEC eval 'echo -e '\''[Service]\nProtectSystem=0\nProtectKernelTunables=0\nProtectControlGroups=0\nProtectKernelModules=0'\'' > rootfs/etc/systemd/system/mpd.service.d/dietpi-container.conf'
 		G_EXEC eval 'echo -e '\''[Service]\nProtectHome=0\nProtectSystem=0\nPrivateTmp=0\nReadWritePaths=\nPrivateDevices=0'\'' > rootfs/etc/systemd/system/vaultwarden.service.d/dietpi-container.conf'
 		G_EXEC eval 'echo -e '\''[Service]\nPrivateTmp=0'\'' > rootfs/etc/systemd/system/blynkserver.service.d/dietpi-container.conf'
+		G_EXEC eval 'echo -e '\''[Service]\nProtectSystem=0\nPrivateTmp=0\nPrivateDevices=0\nReadWritePaths='\'' > rootfs/etc/systemd/system/gogs.service.d/dietpi-container.conf'
 		# /dev/console == /dev/pts/0 seen as "Inappropriate ioctl for device" leading to failing console-getty.service and StandardOutput=tty
 		G_EXEC eval 'echo -e '\''#!/bin/dash\nexec /boot/dietpi/dietpi-login > /dev/console 2>&1'\'' > rootfs/var/lib/dietpi/postboot.d/dietpi-login'
 		G_EXEC sed --follow-symlinks -i '/^StandardOutput=/c\StandardOutput=journal+console' rootfs/etc/systemd/system/dietpi-{first,post}boot.service
