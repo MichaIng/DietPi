@@ -305,8 +305,7 @@ aREGEX[$software_id]='https://github.com/Readarr/Readarr/releases/download/.*/Re
 # Navidrome
 software_id=204
 aCHECK[$software_id]='curl -sSf '\''https://api.github.com/repos/navidrome/navidrome/releases/latest'\'' | mawk -F\" "/^ *\"browser_download_url\": \".*\/navidrome_[0-9.]*_linux_$arch\.tar\.gz\"$/{print \$4}"'
-aARCH[$software_id]='armv6 armv7 arm64 amd64'
-aARCH_CHECK[$software_id]='riscv64'
+aARCH[$software_id]='armv6 armv7 arm64 amd64 riscv64'
 aREGEX[$software_id]='https://github.com/navidrome/navidrome/releases/download/.*/navidrome_.*_linux_\$arch.tar.gz'
 
 # Restic
