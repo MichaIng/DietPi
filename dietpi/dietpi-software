@@ -10220,7 +10220,7 @@ _EOF_
 			Create_Desktop_Shortcut steam
 		fi
 
-		if To_Install 158 minio # MinIO
+		if To_Install 158 minio # MinIO: https://minio.community/community/minio-object-store/index.html
 		then
 			case $G_HW_ARCH in
 				3) local arch='arm64';;
@@ -10228,30 +10228,73 @@ _EOF_
 				*) local arch='arm';;
 			esac
 
+			# Server
 			G_EXEC curl -sSfLo /usr/local/bin/minio "https://dl.minio.io/server/minio/release/linux-$arch/minio"
 			G_EXEC chmod +x /usr/local/bin/minio
 
+			# Console client
+			G_EXEC curl -sSfLo /usr/local/bin/mc "https://dl.min.io/client/mc/release/linux-$arch/mc"
+			G_EXEC chmod +x /usr/local/bin/mc
+
 			# Service
-			G_EXEC curl -sSfLo /etc/systemd/system/minio.service 'https://github.com/minio/minio-service/raw/master/linux-systemd/minio.service'
+			G_EXEC curl -sSfLo /etc/systemd/system/minio.service 'https://raw.githubusercontent.com/minio/minio-service/master/linux-systemd/minio.service'
 
 			# User
 			Create_User -d /mnt/dietpi_userdata/minio-data minio-user
 
 			# Data dir
-			G_EXEC mkdir -p /mnt/dietpi_userdata/minio-data
+			G_EXEC mkdir -p /mnt/dietpi_userdata/minio-data/.mc
 			G_EXEC chown -R minio-user:minio-user /mnt/dietpi_userdata/minio-data
 
 			# Config
-			[[ -f '/etc/default/minio' ]] || cat << '_EOF_' > /etc/default/minio
-# Default file path
-MINIO_VOLUMES="/mnt/dietpi_userdata/minio-data"
-# Use if you want to run MinIO on a custom port.
-MINIO_OPTS="--address :9004 --console-address :9001"
-# Access key of the server.
-#MINIO_ACCESS_KEY=Server-Access-Key
-# Secret key of the server.
-#MINIO_SECRET_KEY=Server-Secret-Key
+			if [[ ! -f '/etc/default/minio' ]]
+			then
+				G_DIETPI-NOTIFY 2 'Generating MinIO server config'
+				# Password needs to be >=8 characters long
+				local minio_pw=$GLOBAL_PW
+				until (( ${#minio_pw} >= 8 )); do minio_pw+=$GLOBAL_PW; done
+				G_EXEC install -g minio-user -m 0640 /dev/null /etc/default/minio
+				cat << _EOF_ > /etc/default/minio || exit 1
+# Docs: https://minio.community/community/minio-object-store/reference/minio-server/settings.html
+
+# Path(s) to storage volume(s)
+MINIO_VOLUMES='/mnt/dietpi_userdata/minio-data'
+
+# CLI options
+MINIO_OPTS='--address :9004 --console-address :9001'
+
+# Admin username
+MINIO_ROOT_USER='dietpi'
+
+# Admin password
+MINIO_ROOT_PASSWORD='$minio_pw'
 _EOF_
+				unset -v minio_pw
+			fi
+
+			# Console client config and alias
+			if [[ ! -f '/mnt/dietpi_userdata/minio-data/.mc/config.json' ]]
+			then
+				G_DIETPI-NOTIFY 2 'Generating MinIO console client "mc" config'
+				G_EXEC install -o minio-user -g minio-user -m 0640 /dev/null /mnt/dietpi_userdata/minio-data/.mc/config.json
+				# shellcheck disable=SC1091
+				. /etc/default/minio
+				cat << _EOF_ > /mnt/dietpi_userdata/minio-data/.mc/config.json || exit 1
+{
+        "aliases": {
+                "local": {
+                        "url": "http://127.0.0.1:9004",
+                        "accessKey": "${MINIO_ROOT_USER:-${MINIO_ACCESS_KEY:-dietpi}}",
+                        "secretKey": "${MINIO_ROOT_PASSWORD:-${MINIO_SECRET_KEY:-$GLOBAL_PW}}",
+                        "api": "S3v4",
+                        "path": "auto"
+                }
+        }
+}
+_EOF_
+				unset -v MINIO_ROOT_PASSWORD MINIO_SECRET_KEY
+			fi
+			G_EXEC eval "echo 'alias mc='\''sudo -u minio-user /usr/local/bin/mc --dp'\' > /etc/bashrc.d/dietpi-minio.sh"
 		fi
 
 		if To_Install 162 docker # Docker
@@ -13741,11 +13784,14 @@ _EOF_
 			Remove_Service minio minio-user minio-user
 
 			# Files
-			[[ -f '/usr/local/bin/minio' ]] && G_EXEC rm /usr/local/bin/minio
-			[[ -f '/etc/default/minio' ]] && G_EXEC rm /etc/default/minio
+			G_EXEC rm -f /etc/bashrc.d/dietpi-minio.sh
+			G_EXEC rm -f /usr/local/bin/mc
+			G_EXEC rm -Rf /{root,home/*}/.mc
+			G_EXEC rm -f /usr/local/bin/minio
+			G_EXEC rm -f /etc/default/minio
 
 			# Certbot hook
-			[[ -f '/etc/letsencrypt/renewal-hooks/deploy/dietpi-minio.sh' ]] && G_EXEC rm /etc/letsencrypt/renewal-hooks/deploy/dietpi-minio.sh
+			G_EXEC rm -f /etc/letsencrypt/renewal-hooks/deploy/dietpi-minio.sh
 			# - Pre-v8.0
 			[[ -f '/etc/systemd/system/certbot.service.d/dietpi-minio.conf' ]] && G_EXEC rm /etc/systemd/system/certbot.service.d/dietpi-minio.conf
 			[[ -d '/etc/systemd/system/certbot.service.d' ]] && G_EXEC rmdir --ignore-fail-on-non-empty /etc/systemd/system/certbot.service.d
