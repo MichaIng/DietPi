@@ -256,7 +256,7 @@ Process_Software()
 			155) aSERVICES[i]='htpc-manager' aTCP[i]='8085'; (( $emulation )) && aDELAY[i]=30;;
 			#156) Steam
 			157) aSERVICES[i]='home-assistant' aTCP[i]='8123'; (( $emulation )) && aDELAY[i]=900 || aDELAY[i]=60;;
-			158) aSERVICES[i]='minio' aTCP[i]='9001 9004';;
+			158) aSERVICES[i]='minio' aTCP[i]='9001 9004' aCOMMANDS[i]='bash -ic '\''mc mb local/test'\';;
 			#159) Allo GUI full
 			#160) Allo GUI without dependencies
 			161) aSERVICES[i]='bdd' aTCP[i]='80 443';;
