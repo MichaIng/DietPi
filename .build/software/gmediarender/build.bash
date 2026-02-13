@@ -88,7 +88,7 @@ echo "/etc/default/$name" > "$DIR/DEBIAN/conffiles"
 
 # - postinst
 cat << '_EOF_' > "$DIR/DEBIAN/postinst"
-#!/bin/sh
+#!/bin/dash -e
 if [ -d '/run/systemd/system' ]
 then
 	if [ -f '/etc/default/gmediarender' ] && grep -q '\-u UUID -f HOSTNAME -I eth0' /etc/default/gmediarender
@@ -114,25 +114,26 @@ then
 	fi
 
 	echo 'Configuring GMediaRender systemd service ...'
-	systemctl unmask gmediarender
-	systemctl enable --now gmediarender
+	systemctl --no-reload unmask gmediarender
+	systemctl enable gmediarender
+	pgrep -x 'dietpi-software' > /dev/null || systemctl restart gmediarender
 fi
 _EOF_
 
 # - prerm
 cat << _EOF_ > "$DIR/DEBIAN/prerm"
-#!/bin/sh
+#!/bin/dash -e
 if [ "\$1" = 'remove' ] && [ -d '/run/systemd/system' ] && [ -f '/lib/systemd/system/$name.service' ]
 then
 	echo 'Deconfiguring $name_pretty systemd service ...'
-	systemctl unmask $name
-	systemctl disable --now $name
+	systemctl --no-reload unmask $name
+	systemctl --no-reload disable --now $name
 fi
 _EOF_
 
 # - postrm
 cat << _EOF_ > "$DIR/DEBIAN/postrm"
-#!/bin/sh
+#!/bin/dash -e
 if [ "\$1" = 'purge' ]
 then
 	if [ -d '/etc/systemd/system/$name.service.d' ]
@@ -174,15 +175,17 @@ DEPS_APT_VERSIONED=${DEPS_APT_VERSIONED%,}
 
 # - Obtain version suffix
 G_EXEC curl -sSfo package.deb "https://dietpi.com/downloads/binaries/$G_DISTRO_NAME/${name}_$G_HW_ARCH_NAME.deb"
-old_version=$(dpkg-deb -f package.deb Version)
+old_version=$(dpkg-deb -f package.deb Version) || exit 1
 G_EXEC rm package.deb
 suffix=${old_version#*-dietpi}
-[[ $old_version == "$version-"* ]] && suffix="dietpi$((suffix+1))" || suffix="dietpi1"
+[[ $old_version == "$version-"* ]] && version+="-dietpi$((suffix+1))" || version+='-dietpi1'
+G_DIETPI-NOTIFY 2 "Old package version is:       \e[33m${old_version:-N/A}"
+G_DIETPI-NOTIFY 2 "Building new package version: \e[33m$version"
 
 # control
 cat << _EOF_ > "$DIR/DEBIAN/control"
 Package: $name
-Version: $version-$suffix
+Version: $version
 Architecture: $(dpkg --print-architecture)
 Maintainer: MichaIng <micha@dietpi.com>
 Date: $(date -uR)
@@ -203,9 +206,6 @@ G_CONFIG_INJECT 'Installed-Size: ' "Installed-Size: $(du -sk "$DIR" | mawk '{pri
 
 # Build DEB package
 G_EXEC_OUTPUT=1 G_EXEC dpkg-deb -b "$DIR"
-
-# Cleanup
-G_EXEC rm -R "gmrender-resurrect-$version" "$DIR"
 
 exit 0
 }
