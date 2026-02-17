@@ -40,7 +40,9 @@ G_EXEC curl -sSfo package.deb "https://dietpi.com/downloads/binaries/$G_DISTRO_N
 old_version=$(dpkg-deb -f package.deb Version) || exit 1
 G_EXEC rm package.deb
 suffix=${old_version#*-dietpi}
-[[ $old_version == "$version-"* ]] && pkg_version="$version-dietpi$((suffix+1))" || pkg_version+="$version-dietpi1"
+[[ $old_version == "$version-"* ]] && pkg_version="$version-dietpi$((suffix+1))" || pkg_version="$version-dietpi1"
+G_DIETPI-NOTIFY 2 "Old package version is:       \e[33m${old_version:-N/A}"
+G_DIETPI-NOTIFY 2 "Building new package version: \e[33m$pkg_version"
 # - Env var to show version in web UI: https://github.com/MichaIng/DietPi/issues/7364
 # - Skip suffix to avoid latest main commit to be shown as latest server version in web UI: https://github.com/dani-garcia/vaultwarden/discussions/4936#discussioncomment-12211305
 export VW_VERSION=$version

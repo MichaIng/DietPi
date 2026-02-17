@@ -1857,7 +1857,7 @@ Patch_9_17()
 			*) G_DIETPI-NOTIFY 1 "Unknown SBC model \"$model\" detected. Aborting, please report at: https://github.com/MichaIng/DietPi/issues"; exit 1;;
 		esac
 		G_AGUP
-		G_DIETPI-NOTIFY 2 'Migrating from legacy Linux 5.10 kernel to Linux 6.12 mainline kernel'
+		G_DIETPI-NOTIFY 2 'Migrating from legacy Linux 5.10 kernel to Linux 6.18 mainline kernel'
 		# Safety checks
 		if [[ $G_ROOTFS_DEV != *'8' ]]
 		then
@@ -2079,7 +2079,7 @@ Patch_9_20()
 	# Radxa ZERO 3
 	if (( $G_HW_MODEL == 90 )) && dpkg-query -l | grep -Eq '^ii[[:blank:]]*linux-image-(legacy|vendor)-rk35xx[[:blank:]:]' && ! dpkg-query -l | grep -Eq '^ii[[:blank:]]*linux-image-(current|edge)-rockchip64[[:blank:]:]'
 	then
-		G_DIETPI-NOTIFY 2 'Migrating to "current" kernel branch with Linux 6.12'
+		G_DIETPI-NOTIFY 2 'Migrating to "current" kernel branch with Linux 6.18'
 		local packages=()
 		dpkg-query -l | grep -Eq '^ii[[:blank:]]*linux-headers-(legacy|vendor)-rk35xx[[:blank:]:]' && packages+=('linux-headers-current-rockchip64')
 		dpkg-query -l | grep -Eq '^ii[[:blank:]]*linux-libc-dev-(legacy|vendor)-rk35xx[[:blank:]:]' && packages+=('linux-libc-dev-current-rockchip64')
@@ -2087,7 +2087,7 @@ Patch_9_20()
 		G_EXEC_OUTPUT=1 G_EXEC /boot/dietpi/func/dietpi-set_hardware flash-u-boot-mmc
 		G_AGP linux-{image,dtb,headers,libc-dev}-{legacy,vendor}-rk35xx
 		# The /boot/dtb symlink has been found to be missing after kernel removed, despite a newer kernel being installed already. Assure it is present and correct.
-		[[ -d '/boot/dtb' ]] || G_EXEC ln -snf /boot/dtb-6.12.* /boot/dtb
+		[[ -d '/boot/dtb' ]] || G_EXEC ln -snf /boot/dtb-6.1?.* /boot/dtb
 	fi
 
 	G_DIETPI-NOTIFY 2 'Masking unnecessary systemd-firstboot service'
@@ -2207,7 +2207,57 @@ Patch_10_0()
 
 		# Pydio
 		grep -q '^[[:blank:]]*aSOFTWARE_INSTALL_STATE\[48\]=' /boot/dietpi/.installed && G_EXEC sed --follow-symlinks -i '/^[[:blank:]]*aSOFTWARE_INSTALL_STATE\[48\]=/d' /boot/dietpi/.installed
+	fi
 
+	# RPi firmware migration: Do after all other patches
+	if (( $G_HW_MODEL < 10 )) && ! dpkg-query -s 'raspi-firmware' &> /dev/null
+	then
+		G_WHIP_MSG '[ INFO ] Raspberry Pi kernel/firmware migration will be applied
+\nA migration to the new RPi Linux 6.12+ kernel and firmware stack will be applied. Please report any error at our forum or GitHub. The DietPi update will finish in any case, and you can retry the migration with:
+$ /boot/dietpi/func/dietpi-set_software rpi_firmware_migration'
+		G_EXEC_OUTPUT=1 G_EXEC /boot/dietpi/func/dietpi-set_software rpi_firmware_migration
+	fi
+}
+
+Patch_10_1()
+{
+	G_DIETPI-NOTIFY 2 'Removing obsolete ProFTPD debconf entries'
+	G_EXEC eval 'echo PURGE | debconf-communicate proftpd-basic'
+
+	if [[ -f '/var/lib/dietpi/dietpi-software/installed/chromium-autostart.sh' ]]
+	then
+		G_DIETPI-NOTIFY 2 'Fixing Chromium kiosk mode'
+		# shellcheck disable=SC2016
+		G_EXEC sed --follow-symlink -i 's|"\$STARTX" chromium|"$STARTX" /usr/bin/chromium|' /var/lib/dietpi/dietpi-software/installed/chromium-autostart.sh
+	fi
+
+	# Orange Pi 3B
+	if (( $G_HW_MODEL == 87 )) && dpkg-query -l | grep -Eq '^ii[[:blank:]]*linux-image-(legacy|vendor)-rk35xx[[:blank:]:]' && ! dpkg-query -l | grep -Eq '^ii[[:blank:]]*linux-image-(current|edge)-rockchip64[[:blank:]:]'
+	then
+		G_DIETPI-NOTIFY 2 'Migrating to "current" kernel branch with Linux 6.18'
+		local packages=()
+		dpkg-query -l | grep -Eq '^ii[[:blank:]]*linux-headers-(legacy|vendor)-rk35xx[[:blank:]:]' && packages+=('linux-headers-current-rockchip64')
+		dpkg-query -l | grep -Eq '^ii[[:blank:]]*linux-libc-dev-(legacy|vendor)-rk35xx[[:blank:]:]' && packages+=('linux-libc-dev-current-rockchip64')
+		G_AGI linux-{image,dtb}-current-rockchip64 "${packages[@]}" linux-u-boot-orangepi3b-current
+		G_EXEC_OUTPUT=1 G_EXEC /boot/dietpi/func/dietpi-set_hardware flash-u-boot-mmc
+		G_AGP linux-{image,dtb,headers,libc-dev}-{legacy,vendor}-rk35xx
+		# The /boot/dtb symlink has been found to be missing after kernel removed, despite a newer kernel being installed already. Assure it is present and correct.
+		[[ -d '/boot/dtb' ]] || G_EXEC ln -snf /boot/dtb-6.1?.* /boot/dtb
+
+ 	# NanoPi R5C
+	elif (( $G_HW_MODEL == 76 )) && grep -q 'R5C' /proc/device-tree/model
+	then
+		G_DIETPI-NOTIFY 2 'Assuring persistent classic Ethernet interface names'
+		G_EXEC eval 'cat << '\''_EOF_'\'' > /etc/udev/rules.d/99-dietpi-nanopir5c.rules
+SUBSYSTEM=="net", KERNEL=="eth0", KERNELS=="0002:21:00.0", RUN:="/bin/true"
+SUBSYSTEM=="net", KERNEL=="eth1", KERNELS=="0001:11:00.0", NAME="to_eth0", RUN:="/bin/true"
+SUBSYSTEM=="net", KERNEL=="to_eth0", RUN="/bin/ip l s dev eth0 name eth1", RUN+="/bin/ip l s dev to_eth0 name eth0", RUN+="/bin/udevadm trigger -c add /sys/class/net/eth0 /sys/class/net/eth1"
+_EOF_'
+	fi
+
+	# Software updates, migrations and patches
+	if [[ -f '/boot/dietpi/.installed' ]]
+	then
 		# Pi-hole v6 migration
 		# - /etc/pihole/pihole.toml indicates that Pi-hole has been upgraded to v6 already.
 		# - The /var/www/pihole symlink indicates that an instance installed via dietpi-software has not been migrated yet.
@@ -2261,15 +2311,6 @@ Patch_10_0()
 				fi
 			fi
 		fi
-	fi
-
-	# RPi firmware migration: Do after all other patches
-	if (( $G_HW_MODEL < 10 )) && ! dpkg-query -s 'raspi-firmware' &> /dev/null
-	then
-		G_WHIP_MSG '[ INFO ] Raspberry Pi kernel/firmware migration will be applied
-\nA migration to the new RPi Linux 6.12+ kernel and firmware stack will be applied. Please report any error at our forum or GitHub. The DietPi update will finish in any case, and you can retry the migration with:
-$ /boot/dietpi/func/dietpi-set_software rpi_firmware_migration'
-		G_EXEC_OUTPUT=1 G_EXEC /boot/dietpi/func/dietpi-set_software rpi_firmware_migration
 	fi
 }
 

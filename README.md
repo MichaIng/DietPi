@@ -192,7 +192,7 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>
   - `/var/tmp/dietpi/`
   - `/boot/dietpi/`
 - `/boot/dietpi.txt`
-- `/boot/config.txt` (RPi)
+- `/boot/firmware/config.txt` (RPi)
 - `/boot/boot.ini` (Odroid)
 - All files prefixed with: `dietpi-`
 

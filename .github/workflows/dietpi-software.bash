@@ -256,7 +256,7 @@ Process_Software()
 			155) aSERVICES[i]='htpc-manager' aTCP[i]='8085'; (( $emulation )) && aDELAY[i]=30;;
 			#156) Steam
 			157) aSERVICES[i]='home-assistant' aTCP[i]='8123'; (( $emulation )) && aDELAY[i]=900 || aDELAY[i]=60;;
-			158) aSERVICES[i]='minio' aTCP[i]='9001 9004';;
+			158) aSERVICES[i]='minio' aTCP[i]='9001 9004' aCOMMANDS[i]='bash -ic '\''mc mb local/test'\';;
 			#159) Allo GUI full
 			#160) Allo GUI without dependencies
 			161) aSERVICES[i]='bdd' aTCP[i]='80 443';;
@@ -502,6 +502,8 @@ then
 		G_EXEC eval 'echo -e '\''[Service]\nProtectHome=0\nProtectSystem=0\nPrivateTmp=0\nReadWritePaths=\nPrivateDevices=0'\'' > rootfs/etc/systemd/system/vaultwarden.service.d/dietpi-container.conf'
 		G_EXEC eval 'echo -e '\''[Service]\nPrivateTmp=0'\'' > rootfs/etc/systemd/system/blynkserver.service.d/dietpi-container.conf'
 		G_EXEC eval 'echo -e '\''[Service]\nProtectSystem=0\nPrivateTmp=0\nPrivateDevices=0\nReadWritePaths='\'' > rootfs/etc/systemd/system/gogs.service.d/dietpi-container.conf'
+		G_EXEC eval 'echo -e '\''[Service]\nProtectSystem=0\nPrivateTmp=0\nPrivateUsers=0\nProtectKernelModules=0\nProtectControlGroups=0\nProtectKernelTunables=0\nReadWritePaths='\'' > rootfs/etc/systemd/system/navidrome.service.d/dietpi-container.conf'
+
 		# /dev/console == /dev/pts/0 seen as "Inappropriate ioctl for device" leading to failing console-getty.service and StandardOutput=tty
 		G_EXEC eval 'echo -e '\''#!/bin/dash\nexec /boot/dietpi/dietpi-login > /dev/console 2>&1'\'' > rootfs/var/lib/dietpi/postboot.d/dietpi-login'
 		G_EXEC sed --follow-symlinks -i '/^StandardOutput=/c\StandardOutput=journal+console' rootfs/etc/systemd/system/dietpi-{first,post}boot.service
