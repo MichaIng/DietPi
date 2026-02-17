@@ -3149,10 +3149,9 @@ _EOF_"
 
 		if To_Install 130 # Python 3
 		then
-			# Allow pip to install modules on system level, and mute the warning when doing so as root (which is needed, of course)
+			# Mute pip warning when running as root (which is needed to create venvs owned by specific users)
 			>> /etc/pip.conf
 			G_CONFIG_INJECT '\[global\]' '[global]' /etc/pip.conf
-			G_CONFIG_INJECT 'break-system-packages[[:blank:]]*=' 'break-system-packages=true' /etc/pip.conf '\[global\]'
 			G_CONFIG_INJECT 'root-user-action[[:blank:]]*=' 'root-user-action=ignore' /etc/pip.conf '\[global\]'
 
 			# Disable cache: It is rarely ever needed to install the very same module and version twice, hence this usually only causes unnecessary disk writes and usage.
@@ -3161,11 +3160,8 @@ _EOF_"
 			# ARMv6/7: Add piwheels
 			(( $G_HW_ARCH < 3 )) && G_CONFIG_INJECT 'extra-index-url[[:blank:]]*=' 'extra-index-url=https://www.piwheels.org/simple/' /etc/pip.conf '\[global\]'
 
-			# Perform pip3 install (which includes setuptools and wheel modules)
-			aDEPS=('python3-dev')
-			Download_Install 'https://bootstrap.pypa.io/get-pip.py'
-			G_EXEC_OUTPUT=1 G_EXEC python3 get-pip.py
-			G_EXEC rm get-pip.py
+			# Install python3-venv for virtual environment support
+			aDEPS=('python3-dev' 'python3-venv')
 		fi
 
 		if To_Install 150 # Mono: https://www.mono-project.com/download/stable/#download-lin-debian
@@ -4088,11 +4084,23 @@ sudo sysctl -p /etc/sysctl.d/98-dietpi-redis.conf'
 			# Dependencies
 			Python_Deps -i bcrypt cryptography pillow psycopg2 pynacl matrix-synapse
 
-			# Install
-			G_EXEC_OUTPUT=1 G_EXEC pip3 install -U matrix-synapse psycopg2
-
 			# User
 			Create_User -d /mnt/dietpi_userdata/synapse synapse
+
+			# Create or recreate venv if Python version changed
+			local python_version=$(python3 -c 'import sys; print(f"{sys.version_info.major}.{sys.version_info.minor}")')
+			if [[ -f '/opt/synapse/bin/python3' ]]
+			then
+				local venv_version=$(/opt/synapse/bin/python3 -c 'import sys; print(f"{sys.version_info.major}.{sys.version_info.minor}")' 2> /dev/null)
+				[[ $venv_version == "$python_version" ]] || { G_DIETPI-NOTIFY 2 "Recreating venv due to Python version change: $venv_version -> $python_version"; G_EXEC rm -R /opt/synapse; }
+			fi
+			if [[ ! -d '/opt/synapse' ]]
+			then
+				G_EXEC python3 -m venv --system-site-packages /opt/synapse
+			fi
+
+			# Install into venv
+			G_EXEC_OUTPUT=1 G_EXEC /opt/synapse/bin/pip3 install -U matrix-synapse psycopg2
 
 			# Service
 			cat << '_EOF_' > /etc/systemd/system/synapse.service
@@ -4106,7 +4114,7 @@ Type=notify
 SyslogIdentifier=Synapse
 User=synapse
 WorkingDirectory=/mnt/dietpi_userdata/synapse
-ExecStart=/usr/bin/python3 -m synapse.app.homeserver -c homeserver.yaml -c homeserver.yaml.d
+ExecStart=/opt/synapse/bin/python3 -m synapse.app.homeserver -c homeserver.yaml -c homeserver.yaml.d
 ExecReload=/bin/kill -HUP $MAINPID
 
 [Install]
@@ -4162,7 +4170,7 @@ _EOF_
 				G_EXEC cd /mnt/dietpi_userdata/synapse
 
 				# Create initial config
-				G_EXEC python3 -m synapse.app.homeserver -H "$servername" -c homeserver.yaml --generate-config --report-stats 'no'
+				G_EXEC /opt/synapse/bin/python3 -m synapse.app.homeserver -H "$servername" -c homeserver.yaml --generate-config --report-stats 'no'
 
 				# Enable registrations via random shared secret
 				GCI_PASSWORD=1 G_CONFIG_INJECT 'registration_shared_secret:[[:blank:]]' "registration_shared_secret: $(openssl rand -hex 16)" homeserver.yaml
@@ -4183,7 +4191,7 @@ _EOF_
 				G_EXEC systemctl daemon-reload
 				G_EXEC systemctl start synapse
 				G_EXEC_PRE_FUNC(){ acommand[4]="$GLOBAL_PW"; } # Mask password in console output
-				G_EXEC_OUTPUT=1 G_EXEC register_new_matrix_user -u "$username" -p "${GLOBAL_PW//?/X}" -a -c homeserver.yaml 'http://127.0.0.1:8008'
+				G_EXEC_OUTPUT=1 G_EXEC /opt/synapse/bin/register_new_matrix_user -u "$username" -p "${GLOBAL_PW//?/X}" -a -c homeserver.yaml 'http://127.0.0.1:8008'
 
 				G_EXEC cd "$G_WORKING_DIR"
 				unset -v servername username
@@ -5148,7 +5156,8 @@ _EOF_
              raise exceptions.ScannerError(str(error))
          elif msg.type == Gst.MessageType.EOS:
 _EOF_
-			G_EXEC_OUTPUT=1 G_EXEC pip3 install -U Mopidy-MusicBox-Webclient
+			# Install additional Python modules with --break-system-packages as Mopidy itself is an APT package
+			G_EXEC_OUTPUT=1 G_EXEC pip3 install --break-system-packages -U Mopidy-MusicBox-Webclient
 
 			# Assure user home, data and cache dir as well on custom configs
 			G_CONFIG_INJECT 'data_dir[[:blank:]]*=' 'data_dir = /mnt/dietpi_userdata/mopidy/data' /etc/mopidy/mopidy.conf '\[core\]'
@@ -8997,10 +9006,25 @@ _EOF_
 			# RPi: Enable camera module
 			(( $G_HW_MODEL > 9 )) || /boot/dietpi/func/dietpi-set_hardware rpi-camera 1
 
-			# motionEye
-			G_EXEC_OUTPUT=1 G_EXEC pip3 install -U motioneye
-			G_EXEC_OUTPUT=1 G_EXEC motioneye_init --skip-apt-update
+			# Create or recreate venv if Python version changed
+			local python_version=$(python3 -c 'import sys; print(f"{sys.version_info.major}.{sys.version_info.minor}")')
+			if [[ -f '/opt/motioneye/bin/python3' ]]
+			then
+				local venv_version=$(/opt/motioneye/bin/python3 -c 'import sys; print(f"{sys.version_info.major}.{sys.version_info.minor}")' 2> /dev/null)
+				[[ $venv_version == "$python_version" ]] || { G_DIETPI-NOTIFY 2 "Recreating venv due to Python version change: $venv_version -> $python_version"; G_EXEC rm -R /opt/motioneye; }
+			fi
+			if [[ ! -d '/opt/motioneye' ]]
+			then
+				G_EXEC python3 -m venv --system-site-packages /opt/motioneye
+			fi
+
+			# Install into venv
+			G_EXEC_OUTPUT=1 G_EXEC /opt/motioneye/bin/pip3 install -U motioneye
+			G_EXEC_OUTPUT=1 G_EXEC /opt/motioneye/bin/motioneye_init --skip-apt-update
 			G_EXEC systemctl stop motioneye
+
+			# Update systemd service to use venv
+			G_EXEC sed -i 's|ExecStart=/usr/local/bin/meyectl|ExecStart=/opt/motioneye/bin/meyectl|' /etc/systemd/system/motioneye.service
 
 			# Prevent the conflicting motion daemon from starting
 			G_EXEC systemctl --no-reload disable --now motion
@@ -9136,9 +9160,21 @@ _EOF_
 			# Install
 			G_EXEC mv sabnzbd-master /etc/sabnzbd
 
+			# Create or recreate venv if Python version changed
+			local python_version=$(python3 -c 'import sys; print(f"{sys.version_info.major}.{sys.version_info.minor}")')
+			if [[ -f '/opt/sabnzbd/bin/python3' ]]
+			then
+				local venv_version=$(/opt/sabnzbd/bin/python3 -c 'import sys; print(f"{sys.version_info.major}.{sys.version_info.minor}")' 2> /dev/null)
+				[[ $venv_version == "$python_version" ]] || { G_DIETPI-NOTIFY 2 "Recreating venv due to Python version change: $venv_version -> $python_version"; G_EXEC rm -R /opt/sabnzbd; }
+			fi
+			if [[ ! -d '/opt/sabnzbd' ]]
+			then
+				G_EXEC python3 -m venv --system-site-packages /opt/sabnzbd
+			fi
+
 			# Python deps
 			G_EXEC cd /etc/sabnzbd
-			G_EXEC_OUTPUT=1 G_EXEC pip3 install -Ur requirements.txt
+			G_EXEC_OUTPUT=1 G_EXEC /opt/sabnzbd/bin/pip3 install -Ur requirements.txt
 
 			# User
 			Create_User -g dietpi -d /etc/sabnzbd sabnzbd
@@ -9164,7 +9200,7 @@ StartLimitBurst=3
 [Service]
 SyslogIdentifier=SABnzbd
 User=sabnzbd
-ExecStart=/usr/bin/python3 -OO /etc/sabnzbd/SABnzbd.py -f /etc/sabnzbd/sabnzbd.ini -n --disable-file-log
+ExecStart=/opt/sabnzbd/bin/python3 -OO /etc/sabnzbd/SABnzbd.py -f /etc/sabnzbd/sabnzbd.ini -n --disable-file-log
 Restart=on-failure
 
 [Install]
@@ -9647,14 +9683,26 @@ _EOF_
 			# Download
 			Download_Install 'https://github.com/morpheus65535/bazarr/releases/latest/download/bazarr.zip' bazarr
 
-			# Python deps
-			# - Allow Pillow to be compiled
-			G_EXEC sed --follow-symlinks -i 's/ --only-binary=Pillow$//' bazarr/requirements.txt
-			G_EXEC_OUTPUT=1 G_EXEC pip3 install -Ur bazarr/requirements.txt
-
 			# Install: Remove previous instance on reinstall
 			[[ -d '/opt/bazarr' ]] && G_EXEC rm -R /opt/bazarr
 			G_EXEC mv bazarr /opt
+
+			# Create or recreate venv if Python version changed
+			local python_version=$(python3 -c 'import sys; print(f"{sys.version_info.major}.{sys.version_info.minor}")')
+			if [[ -f '/opt/bazarr/venv/bin/python3' ]]
+			then
+				local venv_version=$(/opt/bazarr/venv/bin/python3 -c 'import sys; print(f"{sys.version_info.major}.{sys.version_info.minor}")' 2> /dev/null)
+				[[ $venv_version == "$python_version" ]] || { G_DIETPI-NOTIFY 2 "Recreating venv due to Python version change: $venv_version -> $python_version"; G_EXEC rm -R /opt/bazarr/venv; }
+			fi
+			if [[ ! -d '/opt/bazarr/venv' ]]
+			then
+				G_EXEC python3 -m venv --system-site-packages /opt/bazarr/venv
+			fi
+
+			# Python deps
+			# - Allow Pillow to be compiled
+			G_EXEC sed --follow-symlinks -i 's/ --only-binary=Pillow$//' /opt/bazarr/requirements.txt
+			G_EXEC_OUTPUT=1 G_EXEC /opt/bazarr/venv/bin/pip3 install -Ur /opt/bazarr/requirements.txt
 
 			# Data dir
 			G_EXEC mkdir -p /mnt/dietpi_userdata/bazarr
@@ -9682,7 +9730,7 @@ User=bazarr
 UMask=002
 LogsDirectory=bazarr
 WorkingDirectory=/mnt/dietpi_userdata/bazarr
-ExecStart=/usr/bin/python3 /opt/bazarr/bazarr.py -c /mnt/dietpi_userdata/bazarr
+ExecStart=/opt/bazarr/venv/bin/python3 /opt/bazarr/bazarr.py -c /mnt/dietpi_userdata/bazarr
 KillSignal=SIGINT
 TimeoutStopSec=20
 
@@ -10058,7 +10106,18 @@ _EOF_
 			fi
 
 			# Python deps
-			G_EXEC_OUTPUT=1 G_EXEC pip3 install -Ur requirements.txt
+			# Create or recreate venv if Python version changed
+			local python_version=$(python3 -c 'import sys; print(f"{sys.version_info.major}.{sys.version_info.minor}")')
+			if [[ -f '/opt/htpc-manager/bin/python3' ]]
+			then
+				local venv_version=$(/opt/htpc-manager/bin/python3 -c 'import sys; print(f"{sys.version_info.major}.{sys.version_info.minor}")' 2> /dev/null)
+				[[ $venv_version == "$python_version" ]] || { G_DIETPI-NOTIFY 2 "Recreating venv due to Python version change: $venv_version -> $python_version"; G_EXEC rm -R /opt/htpc-manager; }
+			fi
+			if [[ ! -d '/opt/htpc-manager' ]]
+			then
+				G_EXEC python3 -m venv --system-site-packages /opt/htpc-manager
+			fi
+			G_EXEC_OUTPUT=1 G_EXEC /opt/htpc-manager/bin/pip3 install -Ur requirements.txt
 
 			# Service
 			cat << '_EOF_' > /etc/systemd/system/htpc-manager.service
@@ -10069,7 +10128,7 @@ After=network-online.target
 
 [Service]
 SyslogIdentifier=HTPC Manager
-ExecStart=/usr/bin/python3 -OO /mnt/dietpi_userdata/htpc-manager/Htpc.py
+ExecStart=/opt/htpc-manager/bin/python3 -OO /mnt/dietpi_userdata/htpc-manager/Htpc.py
 
 [Install]
 WantedBy=multi-user.target
@@ -10089,9 +10148,21 @@ _EOF_
 			# Clear pip cache in case it got somehow created
 			[[ -d '/mnt/dietpi_userdata/octoprint/.cache' ]] && G_EXEC rm -R /mnt/dietpi_userdata/octoprint/.cache
 
+			# Create or recreate venv if Python version changed, owned by octoprint user
+			local python_version=$(python3 -c 'import sys; print(f"{sys.version_info.major}.{sys.version_info.minor}")')
+			if [[ -f '/mnt/dietpi_userdata/octoprint/venv/bin/python3' ]]
+			then
+				local venv_version=$(/mnt/dietpi_userdata/octoprint/venv/bin/python3 -c 'import sys; print(f"{sys.version_info.major}.{sys.version_info.minor}")' 2> /dev/null)
+				[[ $venv_version == "$python_version" ]] || { G_DIETPI-NOTIFY 2 "Recreating venv due to Python version change: $venv_version -> $python_version"; G_EXEC rm -R /mnt/dietpi_userdata/octoprint/venv; }
+			fi
+			if [[ ! -d '/mnt/dietpi_userdata/octoprint/venv' ]]
+			then
+				G_EXEC runuser -u octoprint -- python3 -m venv --system-site-packages /mnt/dietpi_userdata/octoprint/venv
+			fi
+
 			# Install OctoPrint
 			# shellcheck disable=SC2016
-			G_EXEC_OUTPUT=1 G_EXEC runuser -u octoprint -- dash -c 'PATH="$HOME/.cargo/bin:$PATH" pip3 install -U --user --no-warn-script-location octoprint'
+			G_EXEC_OUTPUT=1 G_EXEC runuser -u octoprint -- dash -c 'PATH="$HOME/.cargo/bin:$PATH" /mnt/dietpi_userdata/octoprint/venv/bin/pip3 install -U octoprint'
 
 			# Service: https://github.com/OctoPrint/OctoPrint/blob/master/scripts/octoprint.service
 			cat << '_EOF_' > /etc/systemd/system/octoprint.service
@@ -10104,16 +10175,16 @@ After=network-online.target mjpg-streamer.service
 [Service]
 Environment="LC_ALL=C.UTF-8" "LANG=C.UTF-8"
 User=octoprint
-ExecStart=/mnt/dietpi_userdata/octoprint/.local/bin/octoprint serve
+ExecStart=/mnt/dietpi_userdata/octoprint/venv/bin/octoprint serve
 
 [Install]
 WantedBy=multi-user.target
 _EOF_
 			# CLI alias
-			echo "alias octoprint='sudo -u octoprint /mnt/dietpi_userdata/octoprint/.local/bin/octoprint'" > /etc/bashrc.d/dietpi-octoprint.sh
+			echo "alias octoprint='sudo -u octoprint /mnt/dietpi_userdata/octoprint/venv/bin/octoprint'" > /etc/bashrc.d/dietpi-octoprint.sh
 
 			# On fresh installs, change listening port to 5001 to avoid conflict with Shairport Sync.
-			[[ -f '/mnt/dietpi_userdata/octoprint/.octoprint/config.yaml' ]] || G_EXEC runuser -u octoprint -- /mnt/dietpi_userdata/octoprint/.local/bin/octoprint config set server.port '5001'
+			[[ -f '/mnt/dietpi_userdata/octoprint/.octoprint/config.yaml' ]] || G_EXEC runuser -u octoprint -- /mnt/dietpi_userdata/octoprint/venv/bin/octoprint config set server.port '5001'
 
 			# Apply service and system commands: Allow execution via specific sudoers config, use "which" for "reboot" and "poweroff", since we create shell functions in dietpi-globals to bypass logind calls if logind is not running.
 			# shellcheck disable=SC2230
@@ -11655,8 +11726,8 @@ _EOF_
 			G_EXEC rm -f os.adsb.feeder.image
 			G_EXEC touch app.adsb.feeder.image
 
-			# get the Python modules
-			G_EXEC_OUTPUT=1 G_EXEC pip3 install -U flask requests
+			# get the Python modules with --break-system-packages as ADS-B services control their own Python environment
+			G_EXEC_OUTPUT=1 G_EXEC pip3 install --break-system-packages -U flask requests
 
 			# finally ensure that /run allows executables (this is needed for the containers to be able to not do excessive
 			# writes to physical storage - which might be an SD card)
