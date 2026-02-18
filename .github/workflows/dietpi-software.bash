@@ -334,7 +334,7 @@ do
 		61) Process_Software 60;;
 		125) Process_Software 194;;
 		86|134|185) Process_Software 162;;
-		141) Process_Software 17 130 134 162;;
+		141) Process_Software 17 134 162;;
 		166) Process_Software 70;;
 		180) (( $arch == 10 || $arch == 3 )) || Process_Software 170;;
 		188) Process_Software 17;;
