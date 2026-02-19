@@ -312,7 +312,7 @@ Process_Software()
 			211) aCOMMANDS[i]='hb-service status' aSERVICES[i]='homebridge' aTCP[i]='8581';;
 			212) aSERVICES[i]='kavita' aTCP[i]='2036' aDELAY[i]=30;;
 			213) aSERVICES[i]='soju' aTCP[i]='6667';;
-			214) aSERVICES[i]='whodb' aTCP[i]='8091' aDELAY[i]=30;;
+			214) aSERVICES[i]='whodb' aTCP[i]='8091';;
 			*) :;;
 		esac
 		aINSTALL[i]=1
