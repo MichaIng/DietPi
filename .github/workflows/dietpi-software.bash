@@ -504,8 +504,8 @@ then
 		G_EXEC eval 'echo -e '\''[Service]\nPrivateTmp=0'\'' > rootfs/etc/systemd/system/blynkserver.service.d/dietpi-container.conf'
 		G_EXEC eval 'echo -e '\''[Service]\nProtectSystem=0\nPrivateTmp=0\nPrivateDevices=0\nReadWritePaths='\'' > rootfs/etc/systemd/system/gogs.service.d/dietpi-container.conf'
 		G_EXEC eval 'echo -e '\''[Service]\nProtectSystem=0\nPrivateTmp=0\nPrivateUsers=0\nProtectKernelModules=0\nProtectControlGroups=0\nProtectKernelTunables=0\nReadWritePaths='\'' > rootfs/etc/systemd/system/navidrome.service.d/dietpi-container.conf'
-		G_EXEC eval 'echo -e '\''[Service]\nProtectSystem=0\nProtectHome=0\nPrivateTmp=0\nPrivateDevices=0\nProtectKernelModules=0\nProtectControlGroups=0\nProtectKernelTunables=0\nReadWritePaths='\'' > rootfs/etc/systemd/system/whodb.service.d/dietpi-container.conf'
-		G_EXEC eval 'echo -e '\''[Service]\nProtectSystem=0\nProtectHome=0\nPrivateTmp=0\nPrivateDevices=0\nProtectKernelModules=0\nProtectControlGroups=0\nProtectKernelTunables=0\nReadWritePaths='\'' > rootfs/etc/systemd/system/lazylibrarian.service.d/dietpi-container.conf'
+		G_EXEC eval 'echo -e '\''[Service]\nProtectSystem=0\nProtectHome=0\nPrivateTmp=0\nPrivateDevices=0\nProtectKernelModules=0\nProtectControlGroups=0\nProtectKernelTunables=0\nProtectKernelLogs=0\nReadWritePaths='\'' > rootfs/etc/systemd/system/whodb.service.d/dietpi-container.conf'
+		G_EXEC eval 'echo -e '\''[Service]\nProtectSystem=0\nProtectHome=0\nPrivateTmp=0\nPrivateDevices=0\nProtectKernelModules=0\nProtectControlGroups=0\nProtectKernelTunables=0\nProtectKernelLogs=0\nReadWritePaths='\'' > rootfs/etc/systemd/system/lazylibrarian.service.d/dietpi-container.conf'
 		G_EXEC eval 'echo -e '\''[Service]\nProtectSystem=0\nProtectHome=0\nPrivateTmp=0\nPrivateDevices=0\nProtectControlGroups=0\nProtectKernelTunables=0\nReadWritePaths='\'' > rootfs/etc/systemd/system/bazarr.service.d/dietpi-container.conf'
 
 		# /dev/console == /dev/pts/0 seen as "Inappropriate ioctl for device" leading to failing console-getty.service and StandardOutput=tty
