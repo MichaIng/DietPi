@@ -74,7 +74,7 @@ aREGEX[$software_id]='https://github.com/owncloud/ocis/releases/download/.*/ocis
 # Gogs
 software_id=49
 aCHECK[$software_id]='curl -sSf '\''https://api.github.com/repos/gogs/gogs/releases/latest'\'' | mawk -F\" "/^ *\"browser_download_url\": \".*\/gogs_[^\"\/]*_linux_$arch.tar.gz\"$/{print \$4}"'
-aARCH[$software_id]='armv8 amd64'
+aARCH[$software_id]='arm64 amd64'
 aARCH_CHECK[$software_id]='riscv64'
 aREGEX[$software_id]='https://github.com/gogs/gogs/releases/download/.*/gogs_.*_linux_\$arch.tar.gz'
 
@@ -305,8 +305,7 @@ aREGEX[$software_id]='https://github.com/Readarr/Readarr/releases/download/.*/Re
 # Navidrome
 software_id=204
 aCHECK[$software_id]='curl -sSf '\''https://api.github.com/repos/navidrome/navidrome/releases/latest'\'' | mawk -F\" "/^ *\"browser_download_url\": \".*\/navidrome_[0-9.]*_linux_$arch\.tar\.gz\"$/{print \$4}"'
-aARCH[$software_id]='armv6 armv7 arm64 amd64'
-aARCH_CHECK[$software_id]='riscv64'
+aARCH[$software_id]='armv6 armv7 arm64 amd64 riscv64'
 aREGEX[$software_id]='https://github.com/navidrome/navidrome/releases/download/.*/navidrome_.*_linux_\$arch.tar.gz'
 
 # Restic
@@ -331,6 +330,12 @@ aREGEX[$software_id]='https://github.com/Kareadita/Kavita/releases/download/.*/k
 software_id=213
 aCHECK[$software_id]='curl -sSf '\''https://api.github.com/repos/emersion/soju/releases/latest'\'' | mawk -F\" '\''/^ *"browser_download_url": ".*\/soju-[^"\/]*\.tar\.gz"$/{print $4}'\'
 aREGEX[$software_id]='https://github.com/emersion/soju/releases/download/.*/soju-.*\.tar\.gz'
+
+# WhoDB
+software_id=214
+aCHECK[$software_id]='curl -sSf '\''https://api.github.com/repos/clidey/whodb/releases/latest'\'' | mawk -F\" "/^ *\"browser_download_url\": \".*\/whodb-[0-9][^\"\/]*-linux-$arch\"$/{print \$4}"'
+aARCH[$software_id]='armv6 armv7 arm64 amd64 riscv64'
+aREGEX[$software_id]='https://github.com/clidey/whodb/releases/download/.*/whodb-[0-9].*-linux-\$arch'
 
 ### URL check loop ###
 

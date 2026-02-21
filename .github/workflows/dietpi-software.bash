@@ -256,7 +256,7 @@ Process_Software()
 			155) aSERVICES[i]='htpc-manager' aTCP[i]='8085'; (( $emulation )) && aDELAY[i]=30;;
 			#156) Steam
 			157) aSERVICES[i]='home-assistant' aTCP[i]='8123'; (( $emulation )) && aDELAY[i]=900 || aDELAY[i]=60;;
-			158) aSERVICES[i]='minio' aTCP[i]='9001 9004';;
+			158) aSERVICES[i]='minio' aTCP[i]='9001 9004' aCOMMANDS[i]='bash -ic '\''mc mb local/test'\';;
 			#159) Allo GUI full
 			#160) Allo GUI without dependencies
 			161) aSERVICES[i]='bdd' aTCP[i]='80 443';;
@@ -312,6 +312,7 @@ Process_Software()
 			211) aCOMMANDS[i]='hb-service status' aSERVICES[i]='homebridge' aTCP[i]='8581';;
 			212) aSERVICES[i]='kavita' aTCP[i]='2036' aDELAY[i]=30;;
 			213) aSERVICES[i]='soju' aTCP[i]='6667';;
+			214) aSERVICES[i]='whodb' aTCP[i]='8091';;
 			*) :;;
 		esac
 		aINSTALL[i]=1
@@ -334,7 +335,7 @@ do
 		61) Process_Software 60;;
 		125) Process_Software 194;;
 		86|134|185) Process_Software 162;;
-		141) Process_Software 17 130 134 162;;
+		141) Process_Software 17 134 162;;
 		166) Process_Software 70;;
 		180) (( $arch == 10 || $arch == 3 )) || Process_Software 170;;
 		188) Process_Software 17;;
@@ -493,7 +494,7 @@ then
 	# Forky
 	if (( $dist > 8 ))
 	then
-		G_EXEC mkdir rootfs/etc/systemd/system/{mariadb,systemd-logind,apache2,mpd,vaultwarden,blynkserver,gogs}.service.d
+		G_EXEC mkdir rootfs/etc/systemd/system/{mariadb,systemd-logind,apache2,mpd,vaultwarden,blynkserver,gogs,whodb,lazylibrarian,bazarr}.service.d
 		# ProtectHome/ProtectSystem/PrivateTmp/...: "Failed to set up mount namespacing: Invalid argument": https://github.com/systemd/systemd/issues/39951
 		G_EXEC eval 'echo -e '\''[Service]\nProtectHome=0\nProtectSystem=0'\'' > rootfs/etc/systemd/system/mariadb.service.d/dietpi-container.conf'
 		G_EXEC eval 'echo -e '\''[Service]\nProtectHome=0\nProtectSystem=0\nPrivateTmp=0\nReadWritePaths=\nProtectKernelModules=0\nProtectControlGroups=0\nProtectKernelLogs=0'\'' > rootfs/etc/systemd/system/systemd-logind.service.d/dietpi-container.conf'
@@ -502,6 +503,11 @@ then
 		G_EXEC eval 'echo -e '\''[Service]\nProtectHome=0\nProtectSystem=0\nPrivateTmp=0\nReadWritePaths=\nPrivateDevices=0'\'' > rootfs/etc/systemd/system/vaultwarden.service.d/dietpi-container.conf'
 		G_EXEC eval 'echo -e '\''[Service]\nPrivateTmp=0'\'' > rootfs/etc/systemd/system/blynkserver.service.d/dietpi-container.conf'
 		G_EXEC eval 'echo -e '\''[Service]\nProtectSystem=0\nPrivateTmp=0\nPrivateDevices=0\nReadWritePaths='\'' > rootfs/etc/systemd/system/gogs.service.d/dietpi-container.conf'
+		G_EXEC eval 'echo -e '\''[Service]\nProtectSystem=0\nPrivateTmp=0\nPrivateUsers=0\nProtectKernelModules=0\nProtectControlGroups=0\nProtectKernelTunables=0\nReadWritePaths='\'' > rootfs/etc/systemd/system/navidrome.service.d/dietpi-container.conf'
+		G_EXEC eval 'echo -e '\''[Service]\nProtectSystem=0\nProtectHome=0\nPrivateTmp=0\nPrivateDevices=0\nProtectKernelModules=0\nProtectControlGroups=0\nProtectKernelTunables=0\nProtectKernelLogs=0\nReadWritePaths='\'' > rootfs/etc/systemd/system/whodb.service.d/dietpi-container.conf'
+		G_EXEC eval 'echo -e '\''[Service]\nProtectSystem=0\nProtectHome=0\nPrivateTmp=0\nPrivateDevices=0\nProtectKernelModules=0\nProtectControlGroups=0\nProtectKernelTunables=0\nProtectKernelLogs=0\nReadWritePaths='\'' > rootfs/etc/systemd/system/lazylibrarian.service.d/dietpi-container.conf'
+		G_EXEC eval 'echo -e '\''[Service]\nProtectSystem=0\nProtectHome=0\nPrivateTmp=0\nPrivateDevices=0\nProtectControlGroups=0\nProtectKernelTunables=0\nReadWritePaths='\'' > rootfs/etc/systemd/system/bazarr.service.d/dietpi-container.conf'
+
 		# /dev/console == /dev/pts/0 seen as "Inappropriate ioctl for device" leading to failing console-getty.service and StandardOutput=tty
 		G_EXEC eval 'echo -e '\''#!/bin/dash\nexec /boot/dietpi/dietpi-login > /dev/console 2>&1'\'' > rootfs/var/lib/dietpi/postboot.d/dietpi-login'
 		G_EXEC sed --follow-symlinks -i '/^StandardOutput=/c\StandardOutput=journal+console' rootfs/etc/systemd/system/dietpi-{first,post}boot.service

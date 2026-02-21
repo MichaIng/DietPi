@@ -192,7 +192,7 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>
   - `/var/tmp/dietpi/`
   - `/boot/dietpi/`
 - `/boot/dietpi.txt`
-- `/boot/config.txt` (RPi)
+- `/boot/firmware/config.txt` (RPi)
 - `/boot/boot.ini` (Odroid)
 - All files prefixed with: `dietpi-`
 
@@ -349,6 +349,7 @@ Links to hardware and software manufacturers, sources and build instructions use
 - [BirdNET-Go](https://github.com/tphakala/birdnet-go)
 - [RustDesk](https://github.com/rustdesk/rustdesk-server)
 - [Uptime Kuma](https://github.com/louislam/uptime-kuma)
+- [WhoDB](https://github.com/clidey/whodb)
 
 ---
 
