@@ -494,7 +494,7 @@ then
 	# Forky
 	if (( $dist > 8 ))
 	then
-		G_EXEC mkdir rootfs/etc/systemd/system/{mariadb,systemd-logind,apache2,mpd,vaultwarden,blynkserver,gogs,whodb,lazylibrarian}.service.d
+		G_EXEC mkdir rootfs/etc/systemd/system/{mariadb,systemd-logind,apache2,mpd,vaultwarden,blynkserver,gogs,whodb,lazylibrarian,bazarr}.service.d
 		# ProtectHome/ProtectSystem/PrivateTmp/...: "Failed to set up mount namespacing: Invalid argument": https://github.com/systemd/systemd/issues/39951
 		G_EXEC eval 'echo -e '\''[Service]\nProtectHome=0\nProtectSystem=0'\'' > rootfs/etc/systemd/system/mariadb.service.d/dietpi-container.conf'
 		G_EXEC eval 'echo -e '\''[Service]\nProtectHome=0\nProtectSystem=0\nPrivateTmp=0\nReadWritePaths=\nProtectKernelModules=0\nProtectControlGroups=0\nProtectKernelLogs=0'\'' > rootfs/etc/systemd/system/systemd-logind.service.d/dietpi-container.conf'
@@ -505,7 +505,8 @@ then
 		G_EXEC eval 'echo -e '\''[Service]\nProtectSystem=0\nPrivateTmp=0\nPrivateDevices=0\nReadWritePaths='\'' > rootfs/etc/systemd/system/gogs.service.d/dietpi-container.conf'
 		G_EXEC eval 'echo -e '\''[Service]\nProtectSystem=0\nPrivateTmp=0\nPrivateUsers=0\nProtectKernelModules=0\nProtectControlGroups=0\nProtectKernelTunables=0\nReadWritePaths='\'' > rootfs/etc/systemd/system/navidrome.service.d/dietpi-container.conf'
 		G_EXEC eval 'echo -e '\''[Service]\nProtectSystem=0\nProtectHome=0\nPrivateTmp=0\nPrivateDevices=0\nProtectKernelModules=0\nProtectControlGroups=0\nProtectKernelTunables=0\nReadWritePaths='\'' > rootfs/etc/systemd/system/whodb.service.d/dietpi-container.conf'
-		G_EXEC eval 'echo -e '\''[Service]\nProtectSystem=0\nProtectHome=0\nPrivateTmp=0\nPrivateDevices=0\nProtectKernelModules=0\nProtectControlGroups=0\nProtectKernelTunables=0\nReadWritePaths='\'' > rootfs/etc/systemd/system/whodb.service.d/dietpi-container.conf'
+		G_EXEC eval 'echo -e '\''[Service]\nProtectSystem=0\nProtectHome=0\nPrivateTmp=0\nPrivateDevices=0\nProtectKernelModules=0\nProtectControlGroups=0\nProtectKernelTunables=0\nReadWritePaths='\'' > rootfs/etc/systemd/system/lazylibrarian.service.d/dietpi-container.conf'
+		G_EXEC eval 'echo -e '\''[Service]\nProtectSystem=0\nProtectHome=0\nPrivateTmp=0\nPrivateDevices=0\nProtectControlGroups=0\nProtectKernelTunables=0\nReadWritePaths='\'' > rootfs/etc/systemd/system/bazarr.service.d/dietpi-container.conf'
 
 		# /dev/console == /dev/pts/0 seen as "Inappropriate ioctl for device" leading to failing console-getty.service and StandardOutput=tty
 		G_EXEC eval 'echo -e '\''#!/bin/dash\nexec /boot/dietpi/dietpi-login > /dev/console 2>&1'\'' > rootfs/var/lib/dietpi/postboot.d/dietpi-login'
