@@ -12,6 +12,7 @@
 	# Location: /boot/dietpi/func/dietpi-benchmark
 	#
 	# Usage:
+	# /boot/dietpi/func/dietpi-benchmark								= Interactive menu
 	# /boot/dietpi/func/dietpi-benchmark 0								= init vars for sourcing /var/lib/dietpi/dietpi-benchmark/results
 	# FP_BENCHFILE=/location BENCH_FILESIZE=optional_size_MiB /boot/dietpi/func/dietpi-benchmark 1	= Benchmark $FP_BENCHFILE filesystem read/write.
 	# /boot/dietpi/func/dietpi-benchmark 2								= Run all benchmarks and upload to dietpi.com
@@ -27,8 +28,7 @@
 	G_INIT
 	# Import DietPi-Globals --------------------------------------------------------------
 
-	[[ $1 ]] || { G_DIETPI-NOTIFY 1 'Invalid command, please see source code'; exit 1; }
-	INPUT=$1
+	INPUT=${1-}
 
 	#/////////////////////////////////////////////////////////////////////////////////////
 	# Global
@@ -227,7 +227,7 @@ _EOF_
 \nThe test duration depends on hardware specs, ranging from a few seconds up to a few minutes on slower hardware like Raspberry Pi 1 and Zero (1) models.
 \nIf you are opted in to the DietPi-Survey, your scores will uploaded automatically.
 You can compare results against other users and hardware using the following link:\n - https://dietpi.com/survey#benchmark
-\nPlease select 'Ok' to begin the benchmark tests." || { G_DIETPI-NOTIFY 2 'Benchmark aborted'; exit 0; }
+\nPlease select 'Ok' to begin the benchmark tests." || { G_DIETPI-NOTIFY 2 'Benchmark aborted'; [[ $INPUT ]] && exit 0 || return 1; }
 
 		fi
 
@@ -311,6 +311,94 @@ Compare these results online with other users, using the link below:
 
 	}
 
+	Main_Menu(){
+
+		Load_Results
+
+		G_WHIP_MENU_ARRAY=(
+
+			'' '●─ DietPi-Benchmark '
+			'DietPi-Benchmark' ': Starts CPU, RAM and IO benchmark suite. Scores can be viewed online.'
+			'' '●─ Additional benchmarks '
+			'Custom Filesystem' ': Benchmark IO performance from a selection of mounted devices.'
+			'Network LAN' ': Benchmark LAN performance using 2 DietPi systems.'
+		)
+
+		G_WHIP_DEFAULT_ITEM='DietPi-Benchmark'
+		G_WHIP_BUTTON_CANCEL_TEXT='Exit'
+		# shellcheck disable=SC2154
+		G_WHIP_MENU "\
+DietPi-Benchmark | https://dietpi.com/survey#benchmark :
+ - CPU Performance   : Duration = $BENCH_CPU seconds (lower is faster)
+ - CPU Temp          : Idle = ${BENCH_CPU_TEMP_START} °C | Full load = ${BENCH_CPU_TEMP_END} °C
+ - RootFS            : Write = $BENCH_ROOTFS_WRITE MiB/s | Read = $BENCH_ROOTFS_READ MiB/s
+ - RAM               : Write = $BENCH_RAM_WRITE MiB/s | Read = $BENCH_RAM_READ MiB/s
+
+Additional benchmarks:
+ - Custom Filesystem : Write = $BENCH_CUSTOMFS_WRITE MiB/s | Read = $BENCH_CUSTOMFS_READ MiB/s
+ - Network LAN       : Transfer rate = $BENCH_NET_LAN_SPEED MiB/s" || return 1
+
+		case "$G_WHIP_RETURNED_VALUE" in
+
+			'DietPi-Benchmark')
+
+				/boot/dietpi/dietpi-services stop
+				if Benchmark_Survey
+				then
+					Save_Results
+					Upload_Survey
+				fi
+				/boot/dietpi/dietpi-services start
+			;;
+
+			'Network LAN')
+
+				G_WHIP_MENU_ARRAY=(
+
+					'Server' ': Run this device as the server'
+					'Client' ': Connect to an existing server, to begin the test'
+				)
+
+				G_WHIP_MENU 'Please select an option:\n\n - Server: Run a server on the current device. Another system can then use the "Client" option to connect and begin the test.\n\n - Client: Connect to an existing server and begin the test.' || return 0
+				if [[ $G_WHIP_RETURNED_VALUE == 'Server' ]]
+				then
+					Benchmark_Lan_Server
+
+				elif [[ $G_WHIP_RETURNED_VALUE == 'Client' ]]
+				then
+					/boot/dietpi/dietpi-services stop
+					Load_Results
+					Benchmark_Lan_Client
+					Save_Results
+					Upload_Survey
+					/boot/dietpi/dietpi-services start
+				fi
+			;;
+
+			'Custom Filesystem')
+
+				/boot/dietpi/dietpi-drive_manager 1
+				local fp_fsbench_custom_mount
+				fp_fsbench_custom_mount=$(</tmp/dietpi-drive_manager_selmnt)
+				if [[ $fp_fsbench_custom_mount ]]
+				then
+					/boot/dietpi/dietpi-services stop
+					Load_Results
+					FP_BENCHFILE=$fp_fsbench_custom_mount
+					BENCH_FILESIZE=0
+					Filesystem_Benchmark
+					Save_Results
+					Upload_Survey
+					/boot/dietpi/dietpi-services start
+				fi
+			;;
+
+			*) :;;
+		esac
+
+		return 0
+	}
+
 	#/////////////////////////////////////////////////////////////////////////////////////
 	# Main Loop
 	#/////////////////////////////////////////////////////////////////////////////////////
@@ -320,7 +408,13 @@ Compare these results online with other users, using the link below:
 	ionice -p $$ -c 1 -n 0
 	#-----------------------------------------------------------------------------------
 	# Init vars for sourcing
-	if (( $INPUT == 0 ))
+	if [[ ! $INPUT ]]
+	then
+		[[ -f '/var/lib/dietpi/dietpi-benchmark/results' ]] || Save_Results
+		while Main_Menu; do :; done
+
+	# Init vars for sourcing
+	elif (( $INPUT == 0 ))
 	then
 		Save_Results
 
@@ -343,7 +437,7 @@ Compare these results online with other users, using the link below:
 
 		elif (( $INPUT == 2 ))
 		then
-			Benchmark_Survey
+			Benchmark_Survey || { /boot/dietpi/dietpi-services start; exit 0; }
 
 		elif (( $INPUT == 4 ))
 		then
