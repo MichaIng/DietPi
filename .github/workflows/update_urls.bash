@@ -349,6 +349,12 @@ aCHECK[$software_id]='curl -sSf '\''https://api.github.com/repos/tensorchord/Vec
 aREGEX[$software_id]='vchord_version='\''[^'\'']*'\'
 aREPLACE[$software_id]='vchord_version='\''$release'\'
 
+# extism-js (for Immich corePlugin build)
+software_id=215001
+aCHECK[$software_id]='curl -sSf '\''https://api.github.com/repos/extism/js-pdk/releases/latest'\'' | mawk -F\" '\''/^ *"tag_name": "[^"]*",$/{print $4}'\'
+aREGEX[$software_id]='extism_js_version='\''[^'\'']*'\'
+aREPLACE[$software_id]='extism_js_version='\''$release'\'
+
 ### URL check loop ###
 
 for i in "${!aCHECK[@]}"
