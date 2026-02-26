@@ -340,14 +340,14 @@ aREGEX[$software_id]='https://github.com/clidey/whodb/releases/download/.*/whodb
 # Immich
 software_id=215
 aCHECK[$software_id]='curl -sSf '\''https://api.github.com/repos/immich-app/immich/releases/latest'\'' | mawk -F\" '\''/^ *"tag_name": "[^"]*",$/{print $4}'\'
-aREGEX[$software_id]='version='\''[^'\'']*'\''; '
-aREPLACE[$software_id]='version='\''$release'\''; '
+aREGEX[$software_id]='https://github.com/immich-app/immich/archive/v[^'\'']*\.tar\.gz'
+aREPLACE[$software_id]='https://github.com/immich-app/immich/archive/$release.tar.gz'
 
 # VectorChord (for Immich)
 software_id=215000
 aCHECK[$software_id]='curl -sSf '\''https://api.github.com/repos/tensorchord/VectorChord/releases/latest'\'' | mawk -F\" '\''/^ *"tag_name": "[^"]*",$/{print $4}'\'
-aREGEX[$software_id]='vchord_version='\''[^'\'']*'\'
-aREPLACE[$software_id]='vchord_version='\''$release'\'
+aREGEX[$software_id]='https://github.com/tensorchord/VectorChord/releases/download/[0-9.]*/postgresql-\${pg_version}-vchord_[0-9.]*-1_\${vchord_arch}\.deb'
+aREPLACE[$software_id]='https://github.com/tensorchord/VectorChord/releases/download/$release/postgresql-\${pg_version}-vchord_$release-1_\${vchord_arch}.deb'
 
 ### URL check loop ###
 
