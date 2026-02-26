@@ -355,6 +355,12 @@ aCHECK[$software_id]='curl -sSf '\''https://api.github.com/repos/extism/js-pdk/r
 aREGEX[$software_id]='extism_js_version='\''[^'\'']*'\'
 aREPLACE[$software_id]='extism_js_version='\''$release'\'
 
+# binaryen wasm-merge (for Immich corePlugin build)
+software_id=215002
+aCHECK[$software_id]='curl -sSf '\''https://api.github.com/repos/WebAssembly/binaryen/releases/latest'\'' | mawk -F\" '\''/^ *"tag_name": "[^"]*",$/{print $4}'\'
+aREGEX[$software_id]='binaryen_version='\''[^'\'']*'\'
+aREPLACE[$software_id]='binaryen_version='\''$release'\'
+
 ### URL check loop ###
 
 for i in "${!aCHECK[@]}"
