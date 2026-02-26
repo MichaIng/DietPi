@@ -53,8 +53,7 @@ G_EXEC eval 'gzip -c ympd-master/ympd.1 > $DIR/usr/share/man/man1/ympd.1.gz'
 cat << '_EOF_' > "$DIR/lib/systemd/system/ympd.service"
 [Unit]
 Description=ympd (DietPi)
-After=mpd.socket
-#After=mpd.service
+After=mpd.service mpd.socket
 
 [Service]
 User=ympd
