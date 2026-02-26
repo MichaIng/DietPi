@@ -350,6 +350,7 @@ Links to hardware and software manufacturers, sources and build instructions use
 - [RustDesk](https://github.com/rustdesk/rustdesk-server)
 - [Uptime Kuma](https://github.com/louislam/uptime-kuma)
 - [WhoDB](https://github.com/clidey/whodb)
+- [Immich](https://github.com/immich-app/immich)
 
 ---
 
