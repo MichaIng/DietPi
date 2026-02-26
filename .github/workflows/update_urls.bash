@@ -337,6 +337,18 @@ aCHECK[$software_id]='curl -sSf '\''https://api.github.com/repos/clidey/whodb/re
 aARCH[$software_id]='armv6 armv7 arm64 amd64 riscv64'
 aREGEX[$software_id]='https://github.com/clidey/whodb/releases/download/.*/whodb-[0-9].*-linux-\$arch'
 
+# Immich
+software_id=215
+aCHECK[$software_id]='curl -sSf '\''https://api.github.com/repos/immich-app/immich/releases/latest'\'' | mawk -F\" '\''/^ *"tag_name": "[^"]*",$/{print $4}'\'
+aREGEX[$software_id]='version='\''[^'\'']*'\''; '
+aREPLACE[$software_id]='version='\''$release'\''; '
+
+# VectorChord (for Immich)
+software_id=215000
+aCHECK[$software_id]='curl -sSf '\''https://api.github.com/repos/tensorchord/VectorChord/releases/latest'\'' | mawk -F\" '\''/^ *"tag_name": "[^"]*",$/{print $4}'\'
+aREGEX[$software_id]='vchord_version='\''[^'\'']*'\'
+aREPLACE[$software_id]='vchord_version='\''$release'\'
+
 ### URL check loop ###
 
 for i in "${!aCHECK[@]}"
