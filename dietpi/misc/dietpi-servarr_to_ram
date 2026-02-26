@@ -1,0 +1,343 @@
+#!/bin/bash
+{
+	#////////////////////////////////////
+	# DietPi Link Arr to RAM
+	#
+	#////////////////////////////////////
+	# Created by Daniel Knight / daniel.knight@dietpi.com / dietpi.com
+	#
+	#////////////////////////////////////
+	#
+	# Info:
+	# - Moves Sonarr, Radarr, Lidarr and Prowlarr database files to RAM, leaving symlinks on disk
+	# - Reduces disk I/O and enhances database I/O performance
+	# - Creates a backup first and automatically restores from backup on next start in case of system crash
+	# NB: Not supported on Jessie: https://github.com/MichaIng/DietPi/issues/2689#issuecomment-487306241
+	#
+	readonly USAGE='
+Usage: dietpi-servarr_to_ram <command> [<program>]
+Available commands:
+  1 [<program>]		Link (program) database(s) to RAM
+  2 [<program>]		Update (program) database backup(s)
+  0 [<program>]		Store (program) database(s) back to disk
+  enable		Enable Link to RAM on boot
+  disable		Disable Link to RAM on boot
+Supported programs:
+  <empty>		Apply to all supported and installed programs
+  sonarr		Apply to Sonarr database only
+  radarr		Apply to Radarr database only
+  lidarr		Apply to Lidarr database only
+  prowlarr		Apply to Prowlarr database only
+'	#////////////////////////////////////
+
+	# Import DietPi-Globals --------------------------------------------------------------
+	#. /boot/dietpi/func/dietpi-globals	# Skip globals for faster execution on early boot stage
+	readonly PROGRAM_NAME='DietPi-servarr_to_ram'
+	# Import DietPi-Globals --------------------------------------------------------------
+
+	# Grab input
+	INPUT=$1
+	INPUT_PROG=$2
+
+	EXIT_CODE=0
+
+	# Print output
+	# - In case of error, sets EXIT_CODE as well
+	unset -v error
+	Print(){
+
+		local message=$*
+		# shellcheck disable=SC2154
+		[[ $error ]] && { message="[ERROR] $message"; EXIT_CODE=$error; }
+		unset -v error
+		echo "$(date '+%Y-%m-%d %T') | $PROGRAM_NAME: $message"
+
+	}
+
+	# Check for required root or program specific permissions permissions
+	# - Handling systemd service always requires root permissions
+	# - Database backup updates can be done as program user when defined via $2
+	(( $UID )) && [[ $INPUT != 2 || $USER != "$INPUT_PROG" ]] && { error=1 Print 'This script must run as root user. Please use: "sudo"'; exit 1; }
+
+	# Boot service log file
+	FP_LOG='/var/tmp/dietpi/logs/dietpi-servarr_to_ram.log'
+
+	# Program database name array
+	declare -A aFILE=()
+	# - Sonarr
+	if [[ ${INPUT_PROG:-sonarr} == 'sonarr' ]]
+	then
+		# v3
+		if [[ -f '/mnt/dietpi_userdata/sonarr/sonarr.db' || -f '/mnt/dietpi_userdata/sonarr/sonarr.db.bak' ]]
+		then
+			aFILE[sonarr]='sonarr.db'
+		# v2
+		else
+			aFILE[sonarr]='nzbdrone.db'
+		fi
+	fi
+	# - Radarr
+	if [[ ${INPUT_PROG:-radarr} == 'radarr' ]]
+	then
+		# v3
+		if [[ -f '/mnt/dietpi_userdata/radarr/radarr.db' || -f '/mnt/dietpi_userdata/radarr/radarr.db.bak' ]]
+		then
+			aFILE[radarr]='radarr.db'
+		# v2
+		else
+			aFILE[radarr]='nzbdrone.db'
+		fi
+	fi
+	# - Prowlarr
+	if [[ ${INPUT_PROG:-prowlarr} == 'prowlarr' ]]
+	then
+		# v3
+		if [[ -f '/mnt/dietpi_userdata/prowlarr/prowlarr.db' || -f '/mnt/dietpi_userdata/prowlarr/prowlarr.db.bak' ]]
+		then
+			aFILE[prowlarr]='prowlarr.db'
+		# v2
+		else
+			aFILE[prowlarr]='nzbdrone.db'
+		fi
+	fi
+	# - Lidarr
+	[[ ${INPUT_PROG:-lidarr} == 'lidarr' ]] && aFILE[lidarr]='lidarr.db'
+
+	# Check for valid input program
+	(( ${#aFILE[@]} )) || { error=1 Print "Invalid input program ($INPUT_PROG). Aborting...
+$USAGE"; exit 1; }
+
+	FP_DISK=
+	FP_RAM=
+
+	Link_To_Ram(){
+
+		Print "Linking $FP_DISK to RAM ($FP_RAM)..."
+
+		# Remove orphaned symlinks before creating backup, else sqlite3 will fail to open the database
+		[[ -L "$FP_DISK-shm" && ! -f "$FP_DISK-shm" ]] && rm "$FP_DISK-shm"
+		[[ -L "$FP_DISK-wal" && ! -f "$FP_DISK-wal" ]] && rm "$FP_DISK-wal"
+
+		# Create a backup first, which includes -shm and -wal, then copy that to RAM. If it fails, skip that program.
+		sqlite3 "$FP_DISK" ".save ${FP_DISK}.bak" || { error=$? Print "Creating ${i^} database backup failed. Skipping this program..."; return 1; }
+		chown "$i" "${FP_DISK}.bak" || { error=$? Print "Setting ${i^} database backup ownership failed. Skipping this program..."; return 1; }
+		cp -aL --no-preserve=timestamps "${FP_DISK}.bak" "$FP_RAM" || { error=$? Print "Copying ${i^} database to RAM failed. Skipping this program..."; return 1; }
+
+		# Create all symlinks and chown them in case created by root but program user wants to store back to disk
+		local j
+		for j in '' '-shm' '-wal'
+		do
+			ln -sf "$FP_RAM$j" "$FP_DISK$j" || EXIT_CODE=$?
+			chown -h "$i" "$FP_DISK$j" || EXIT_CODE=$?
+		done
+
+		Print "Linked ${i^} database to RAM."
+
+	}
+
+	Toggle_Link_To_Ram(){
+
+		local astart_services=()
+
+		# Loop through programs
+		local i
+		for i in "${!aFILE[@]}"
+		do
+
+			FP_DISK="/mnt/dietpi_userdata/$i"
+			FP_RAM="/tmp/${i}_db_link"
+
+			# Skip non-installed program
+			[[ -d $FP_DISK ]] || continue
+
+			Print "${i^} detected"
+
+			# Create update backup script
+			if [[ ! -f $FP_DISK/dietpi-servarr_to_ram.sh ]]
+			then
+				Print "Creating $FP_DISK/dietpi-servarr_to_ram.sh to be used as ${i^} custom script"
+				# shellcheck disable=SC2320
+				echo -e '#!/bin/dash\n/boot/dietpi/misc/dietpi-servarr_to_ram 2 '"$i" > "$FP_DISK/dietpi-servarr_to_ram.sh" || { error=$? Print "Creating $FP_DISK/dietpi-servarr_to_ram.sh failed."; }
+				chmod +x "$FP_DISK/dietpi-servarr_to_ram.sh" || { error=$? Print "Applying $FP_DISK/dietpi-servarr_to_ram.sh execute permissions failed."; }
+				chown "$i:dietpi" "$FP_DISK/dietpi-servarr_to_ram.sh" || { error=$? Print "Applying $FP_DISK/dietpi-servarr_to_ram.sh ownership failed."; }
+			fi
+
+			# Update backup
+			if (( $INPUT == 2 )); then
+
+				if [[ -f $FP_RAM/${aFILE[$i]} ]]; then
+
+					Print "Updating ${i^} database backup..."
+					sqlite3 "$FP_RAM/${aFILE[$i]}" ".save $FP_DISK/${aFILE[$i]}.bak" || { error=$? Print "Updating ${i^} database backup failed."; continue; }
+					Print "Updated ${i^} database backup."
+
+				else
+
+					Print "${i^} database is not in RAM. Skipping this program..."
+
+				fi
+				continue
+
+			fi
+
+			# If active, stop program before handling database and restart afterwards
+			if pgrep -f "$i" > /dev/null; then
+
+				Print "Stopping ${i^} service..."
+				astart_services+=("$i")
+				systemctl stop "$i" || { error=$? Print "Stopping ${i^} service failed. Skipping this program..."; continue; }
+
+			fi
+
+			# Link to RAM + backup
+			if (( $INPUT == 1 )); then
+
+				Print "Linking ${i^} database to RAM..."
+				# - Pre-create RAM dir
+				[[ -d $FP_RAM ]] || mkdir -p "$FP_RAM" || { error=$? Print "Pre-creating RAM directory for ${i^} failed ($FP_RAM). Skipping this program..."; continue; }
+				# - chown dir in case created by root but program user wants to store back to disk
+				chown "$i" "$FP_RAM" || EXIT_CODE=$?
+
+				# Process database file
+				FP_DISK+="/${aFILE[$i]}"
+				FP_RAM+="/${aFILE[$i]}"
+
+				# Source exists
+				local fp_target
+				if fp_target=$(readlink -e "$FP_DISK"); then
+
+					# Link to target exists, should only happen when running the script two times in same session
+					if [[ $fp_target == "$FP_RAM" ]]; then
+
+						Print "$FP_DISK already linked to RAM ($FP_RAM). Skipping this program..."
+
+					# Source exist, but is not linked to RAM yet
+					else
+
+						Link_To_Ram || continue
+
+					fi
+
+				# Source does not exist or is orphaned link, but backup exists, which is expected after system crash
+				elif [[ -f ${FP_DISK}.bak ]]; then
+
+					Print "$FP_DISK not found. Recovering from backup first (${FP_DISK}.bak)..."
+
+					# Remove possible orphaned symlink
+					[[ ! -L $FP_DISK ]] || rm "$FP_DISK" || { error=$? Print "Removing orphaned database symlink failed ($FP_DISK). Skipping this program..."; continue; }
+
+					# Recover from backup
+					mv "${FP_DISK}.bak" "$FP_DISK" || { error=$? Print "Recovering database from backup failed (${FP_DISK}.bak). Skipping this program..."; continue; }
+
+					Link_To_Ram || continue
+
+				else
+
+					Print "$FP_DISK not found. Skipping this program..."
+
+				fi
+
+			# Store back to disk
+			elif (( $INPUT == 0 )); then
+
+				if [[ -d $FP_RAM ]]; then
+
+					Print "Storing database from RAM ($FP_RAM) back to disk ($FP_DISK)..."
+					# "-u" will only copy newer files, thus actually used by program.
+					# "--remove-destination" will remove expected existing symlinks.
+					cp -au --remove-destination "$FP_RAM/." "$FP_DISK" || { error=$? Print "Storing ${i^} database from RAM back to disk failed."; continue; }
+					rm -R "$FP_RAM"
+					# Remove orphaned symlinks, possible when -shm and -wal do currently not exist
+					local j
+					for j in "$FP_DISK/${aFILE[$i]}"{,-shm,-wal}
+					do
+						[[ ! -L $j || -f $j ]] || rm "$j" || EXIT_CODE=$?
+					done
+					Print "Stored ${i^} database from RAM back to disk."
+
+				else
+
+					Print "${i^} database is not in RAM. Skipping this program..."
+
+				fi
+
+			fi
+
+		done
+
+		# Failsafe: When restoring to disk, "sync" now to prevent async issues!
+		(( $INPUT == 0 )) && sync
+
+		# Start programs we stopped before
+		# - NB: Due to Before=, *arr.service waits for dietpi-arr_to_RAM.service to finish, timing it out.
+		# - "--no-block" allows dietpi-arr_to_RAM.service to only enqueue *arr.service starts and finish, to allow them starting afterwards.
+		if [[ ${astart_services[0]} ]]; then
+
+			Print "Enqueuing ${astart_services[*]} service start(s)..."
+			systemctl --no-block start "${astart_services[@]}"
+
+		fi
+
+	}
+
+	# shellcheck disable=SC2329
+	Enable_On_Boot(){
+
+		cat << _EOF_ > /etc/systemd/system/dietpi-servarr_to_ram.service
+[Unit]
+Description=DietPi-Servarr_to_RAM
+Requisite=tmp.mount
+After=tmp.mount
+Before=dietpi-preboot.service sonarr.service radarr.service lidarr.service prowlarr.service
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=-/bin/dash -c '/boot/dietpi/misc/dietpi-servarr_to_ram 1 2>&1 >> $FP_LOG'
+ExecStop=/bin/dash -c '/boot/dietpi/misc/dietpi-servarr_to_ram 0 2>&1 > $FP_LOG'
+
+[Install]
+WantedBy=multi-user.target
+_EOF_
+		systemctl daemon-reload
+		systemctl enable --now dietpi-servarr_to_ram || EXIT_CODE=$?
+
+	}
+
+	# shellcheck disable=SC2329
+	Disable_On_Boot(){
+
+		if [[ -f '/etc/systemd/system/dietpi-servarr_to_ram.service' ]]
+		then
+			systemctl disable --now dietpi-servarr_to_ram || EXIT_CODE=$?
+			rm /etc/systemd/system/dietpi-servarr_to_ram.service
+		fi
+
+	}
+
+	#/////////////////////////////////////////////////////////////////////////////////////
+	# Main Loop
+	#/////////////////////////////////////////////////////////////////////////////////////
+	# Toggle Link to RAM
+	if [[ $INPUT == [012] ]]; then
+
+		Toggle_Link_To_Ram
+		(( $EXIT_CODE )) && Print '[ERROR] An issue has occurred. Please check the above output for details.'
+
+	# Enable/Disable Link to RAM on boot
+	elif [[ $INPUT == 'enable' || $INPUT == 'disable' ]]; then
+
+		"${INPUT^}_On_Boot"
+		(( $EXIT_CODE )) && Print "[ERROR] An issue has occurred. Please check the log for details: $FP_LOG"
+
+	else
+
+		error=1 Print "Invalid input command (${INPUT:-<empty>}). Aborting...
+$USAGE"
+
+	fi
+
+	#-----------------------------------------------------------------------------------
+	exit "$EXIT_CODE"
+	#-----------------------------------------------------------------------------------
+}
