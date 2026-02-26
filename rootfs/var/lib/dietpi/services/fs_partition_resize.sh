@@ -88,7 +88,7 @@
 			echo '[ INFO ] Mounting it and importing files if present and newer'
 			TMP_MOUNT=$(mktemp -d)
 			mount -v "$SETUP_PART" "$TMP_MOUNT"
-			for f in 'dietpi.txt' 'dietpi-wifi.txt' 'dietpiEnv.txt' 'boot.ini' 'extlinux.conf' 'Automation_Custom_PreScript.sh' 'Automation_Custom_Script.sh' 'unattended_pivpn.conf'
+			for f in 'dietpi.txt' 'dietpi-wifi.txt' 'dietpiEnv.txt' 'boot.ini' 'extlinux.conf' 'Automation_Custom_PreScript.sh' 'Automation_Custom_Script.sh' 'unattended_pivpn.conf' 'dietpi-k3s.yaml'
 			do
 				[[ -f $TMP_MOUNT/$f ]] || continue
 				if [[ $f == 'extlinux.conf' ]]
@@ -116,7 +116,7 @@
 			echo '[ INFO ] Mounting it and importing files if present and newer'
 			TMP_MOUNT=$(mktemp -d)
 			mount -v "$BOOT_PART" "$TMP_MOUNT"
-			for f in 'dietpi.txt' 'dietpi-wifi.txt' 'Automation_Custom_PreScript.sh' 'Automation_Custom_Script.sh' 'unattended_pivpn.conf'
+			for f in 'dietpi.txt' 'dietpi-wifi.txt' 'Automation_Custom_PreScript.sh' 'Automation_Custom_Script.sh' 'unattended_pivpn.conf' 'dietpi-k3s.yaml'
 			do
 				[[ -f $TMP_MOUNT/$f ]] && cp -uv "$TMP_MOUNT/$f" /boot/
 			done

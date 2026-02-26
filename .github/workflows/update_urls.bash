@@ -87,8 +87,8 @@ aREGEX[$software_id]='https://github.com/syncthing/syncthing/releases/download/.
 # phpBB
 software_id=54
 aCHECK[$software_id]='curl -sSf '\''https://version.phpbb.com/phpbb/versions.json'\'' | sed -En '\''/"stable":/,/"unstable":/s/.*"current": "(.+)",.*/\1/p'\'' | sort -Vr | head -1'
-aREGEX[$software_id]='https://download\.phpbb\.com/pub/release/.*/.*/phpBB-.*\.tar\.bz2'
-aREPLACE[$software_id]='https://download\.phpbb\.com/pub/release/${release%.*}/$release/phpBB-$release\.tar\.bz2'
+aREGEX[$software_id]='version='\''[^'\'']*'\'
+aREPLACE[$software_id]='version='\''$release'\'
 
 # Single File PHP Gallery
 software_id=56

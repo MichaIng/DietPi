@@ -50,6 +50,7 @@
 	alias dietpi-vpn='/boot/dietpi/dietpi-vpn'
 	alias dietpi-ddns='/boot/dietpi/dietpi-ddns'
 	alias dietpi-display='/boot/dietpi/dietpi-display'
+	alias dietpi-benchmark='/boot/dietpi/dietpi-benchmark'
 	alias cpu='/boot/dietpi/dietpi-cpuinfo'
 	# - Optional DietPi software aliases
 	[[ -d '/mnt/dietpi_userdata/sonarr' || -d '/mnt/dietpi_userdata/radarr' || -d '/mnt/dietpi_userdata/lidarr' ]] && alias dietpi-arr_to_RAM='/boot/dietpi/misc/dietpi-arr_to_RAM'
