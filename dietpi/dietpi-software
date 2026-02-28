@@ -11995,13 +11995,96 @@ _EOF_
 
 		if To_Install 215 immich # Immich
 		then
-			# pgvector and VectorChord extensions: https://immich.app/docs/administration/postgres-standalone
+			# Install pgvector and VectorChord extensions: https://immich.app/docs/administration/postgres-standalone
 			local pg_version=$(find /etc/postgresql -mindepth 1 -maxdepth 1 -type d -name '[1-9][0-9]' -printf '%f\n' | sort -Vr | head -1)
-			aDEPS=('python3' "postgresql-$pg_version-pgvector")
+			aDEPS=('libvips42t64' "postgresql-$pg_version-pgvector")
 			local arch='amd64'
 			(( $G_HW_ARCH == 3 )) && local arch='arm64'
 			local fallback_url="https://github.com/tensorchord/VectorChord/releases/download/1.1.0/postgresql-$pg_version-vchord_1.1.0-1_$arch.deb"
 			Download_Install "$(curl -sSfL 'https://api.github.com/repos/tensorchord/VectorChord/releases/latest' | mawk -F\" "/^ *\"browser_download_url\": \"[^\"]*-$pg_version-vchord_[^\"\/]*_$arch.deb\"$/{print \$4}")"
+
+			# Install pnpm
+			G_EXEC_OUTPUT=1 G_EXEC npm i -g --no-audit pnpm@latest
+			G_EXEC rm -R /tmp/node-compile-cache
+
+			# Download Immich source
+			local version=$(curl -sSfL 'https://api.github.com/repos/immich-app/immich/releases/latest' | mawk -F\" '/^ *"tag_name": "[^"]*",$/{print $4}')
+			[[ $version ]] || { version='v2.5.6'; G_DIETPI-NOTIFY 1 "Automatic latest ${aSOFTWARE_NAME[$software_id]} version detection failed. Version \"$version\" will be installed as fallback, but a newer version might be available. Please report this at: https://github.com/MichaIng/DietPi/issues"; }
+			Download_Install "https://github.com/immich-app/immich/archive/$version.tar.gz"
+			local build_dir='/mnt/dietpi_userdata/immich_build'
+			[[ -d $build_dir ]] && G_EXEC rm -R "$build_dir"
+			G_EXEC mv "immich-${version#v}" "$build_dir"
+
+			# Prevent JavaScript OOM during build
+			export NODE_OPTIONS='--max-old-space-size=4096'
+
+			# Use temporary store and cache dir
+			export PNPM_HOME="$build_dir/.pnpm"
+			G_EXEC cd "$build_dir"
+			G_EXEC pnpm c set --location=project storeDir "$build_dir/.pnpm"
+			G_EXEC pnpm c set --location=project cacheDir "$build_dir/.pnpm"
+
+			# Assure at least 8 GiB total memory (RAM + swap) for the build, saving original swap size first
+			local orig_swap_size=$(sed -n '/^[[:blank:]]*AUTO_SETUP_SWAPFILE_SIZE=/{s/^[^=]*=//p;q}' /boot/dietpi.txt)
+			[[ $orig_swap_size =~ ^[0-9]+$ ]] || orig_swap_size=0
+			(( $RAM_TOTAL < 8192 )) && { G_DIETPI-NOTIFY 2 'Immich build requires at least 8 GiB of total memory. We will temporarily increase the swap size to satisfy this requirement.'; /boot/dietpi/func/dietpi-set_swapfile $(( 8192 - $RAM_PHYS )); }
+
+			# Install Node dependencies
+			G_EXEC_OUTPUT=1 G_EXEC pnpm i --filter @immich/sdk --filter immich-web --no-optional
+
+			# Install build-time tools
+			local arch='x86_64'
+			(( $G_HW_ARCH == 3 )) && local arch='aarch64'
+			local fallback_url="https://github.com/extism/js-pdk/releases/download/v1.5.1/extism-js-$arch-linux-v1.5.1.gz"
+			Download_Install "$(curl -sSfL 'https://api.github.com/repos/extism/js-pdk/releases/latest' | mawk -F\" "/^ *\"browser_download_url\": \".*\/extism-js-$arch-linux-[^\"\/]*\.gz\"$/{print \$4}")" /usr/local/bin/extism-js
+			G_EXEC chmod +x /usr/local/bin/extism-js
+			local fallback_url="https://github.com/WebAssembly/binaryen/releases/download/version_124/binaryen-version_124-$arch-linux.tar.gz"
+			Download_Install "$(curl -sSfL 'https://api.github.com/repos/WebAssembly/binaryen/releases/latest' | mawk -F\" "/^ *\"browser_download_url\": \".*\/binaryen-[^\"\/]*-$arch-linux\.tar\.gz\"$/{print \$4}")"
+			G_EXEC mv binaryen-*/bin/wasm-merge binaryen-*/bin/wasm-opt /usr/local/bin/
+			G_EXEC rm -R binaryen-version_*
+
+			# Build Immich server, web UI (requires Immich SDK), and WebAssembly workflow plugin
+			G_EXEC_OUTPUT=1 G_EXEC pnpm --filter immich --filter @immich/sdk --filter immich-web --filter plugins build
+
+			# Remove build-time tools
+			G_EXEC rm /usr/local/bin/extism-js /usr/local/bin/wasm-merge /usr/local/bin/wasm-opt
+
+			# Deploy server
+			[[ -d '/opt/immich' ]] && G_EXEC rm -R /opt/immich
+			G_EXEC_OUTPUT=1 G_EXEC pnpm --filter immich -P --no-optional deploy /opt/immich
+
+			G_EXEC cd "$G_WORKING_DIR"
+			unset -v NODE_OPTIONS PNPM_HOME
+
+			# Restore original swap size, ensuring a minimum of 2 GiB total memory (RAM + swap) for smaller SBCs
+			if (( $RAM_TOTAL < 8192 ))
+			then
+				(( $RAM_PHYS + $orig_swap_size < 2048 )) && orig_swap_size=$(( 2048 - $RAM_PHYS ))
+				/boot/dietpi/func/dietpi-set_swapfile "$orig_swap_size"
+			fi
+
+			# Install web frontend and WebAssembly workflow plugin
+			G_EXEC mv "$build_dir/web/build" /opt/immich/www
+			G_EXEC mkdir /opt/immich/corePlugin
+			G_EXEC mv "$build_dir/plugins/dist" /opt/immich/corePlugin/
+			G_EXEC mv "$build_dir/plugins/manifest.json" /opt/immich/corePlugin/
+
+			# Install GeoNames data for reverse geocoding
+			Download_Install 'https://download.geonames.org/export/dump/cities500.zip' /opt/immich/geodata
+			G_EXEC curl -sSfLo /opt/immich/geodata/admin1CodesASCII.txt 'https://download.geonames.org/export/dump/admin1CodesASCII.txt'
+			G_EXEC curl -sSfLo /opt/immich/geodata/admin2Codes.txt 'https://download.geonames.org/export/dump/admin2Codes.txt'
+			G_EXEC curl -sSfLo /opt/immich/geodata/ne_10m_admin_0_countries.geojson 'https://raw.githubusercontent.com/nvkelso/natural-earth-vector/v5.1.2/geojson/ne_10m_admin_0_countries.geojson'
+			date --iso-8601=seconds | tr -d '\n' > /opt/immich/geodata/geodata-date.txt || exit 1
+
+			# Remove build directory
+			G_EXEC rm -R "$build_dir"
+
+			# User
+			Create_User -G redis -d /mnt/dietpi_userdata/immich immich
+
+			# Data directory
+			G_EXEC mkdir -p /mnt/dietpi_userdata/immich/upload
+			G_EXEC chown -R immich:immich /mnt/dietpi_userdata/immich
 
 			# Configure PostgreSQL: load VectorChord and enable localhost TCP for the Node.js database driver
 			for i in /etc/postgresql/*/main/conf.d
@@ -12029,98 +12112,6 @@ _EOF_
 			then
 				G_EXEC runuser -u postgres -- createdb --owner=immich immich
 			fi
-
-			# pnpm (required for Immich's build)
-			G_EXEC_OUTPUT=1 G_EXEC npm i -g --no-audit pnpm@latest
-
-			# Download Immich source
-			local version=$(curl -sSfL 'https://api.github.com/repos/immich-app/immich/releases/latest' | mawk -F\" '/^ *"tag_name": "[^"]*",$/{print $4}')
-			[[ $version ]] || { version='v2.5.6'; G_DIETPI-NOTIFY 1 "Automatic latest ${aSOFTWARE_NAME[$software_id]} version detection failed. Version \"$version\" will be installed as fallback, but a newer version might be available. Please report this at: https://github.com/MichaIng/DietPi/issues"; }
-			Download_Install "https://github.com/immich-app/immich/archive/$version.tar.gz"
-			local build_dir='/mnt/dietpi_userdata/immich_build'
-			[[ -d $build_dir ]] && G_EXEC rm -R "$build_dir"
-			G_EXEC mv "immich-${version#v}" "$build_dir"
-
-			# Prevent JavaScript OOM during build
-			export NODE_OPTIONS='--max-old-space-size=4096'
-
-			# Assure at least 8 GiB total memory (RAM + swap) for the build, saving original swap size first
-			local orig_swap_size=$(sed -n '/^[[:blank:]]*AUTO_SETUP_SWAPFILE_SIZE=/{s/^[^=]*=//p;q}' /boot/dietpi.txt)
-			[[ $orig_swap_size =~ ^[0-9]+$ ]] || orig_swap_size=0
-			(( $RAM_TOTAL < 8192 )) && { G_DIETPI-NOTIFY 2 'Immich build requires at least 8 GiB of total memory. We will temporarily increase the swap size to satisfy this requirement.'; /boot/dietpi/func/dietpi-set_swapfile $(( 8192 - $RAM_PHYS )); }
-
-			# Install all dependencies from workspace root to ensure pnpm-workspace.yaml packageExtensions are applied (e.g. tslib added to nestjs-kysely/nestjs-otel deps)
-			G_EXEC cd "$build_dir"
-			G_EXEC_OUTPUT=1 SHARP_IGNORE_GLOBAL_LIBVIPS=1 G_EXEC pnpm install --frozen-lockfile --force
-
-			# Download extism-js and binaryen wasm-merge to compile the corePlugin WASM (build-time tools, removed after build)
-			local arch='x86_64'
-			(( $G_HW_ARCH == 3 )) && local arch='aarch64'
-			local fallback_url="https://github.com/extism/js-pdk/releases/download/v1.5.1/extism-js-$arch-linux-v1.5.1.gz"
-			Download_Install "$(curl -sSfL 'https://api.github.com/repos/extism/js-pdk/releases/latest' | mawk -F\" "/^ *\"browser_download_url\": \".*\/extism-js-$arch-linux-[^\"\/]*\.gz\"$/{print \$4}")" /usr/local/bin/extism-js
-			G_EXEC chmod +x /usr/local/bin/extism-js
-			local fallback_url="https://github.com/WebAssembly/binaryen/releases/download/version_124/binaryen-version_124-$arch-linux.tar.gz"
-			Download_Install "$(curl -sSfL 'https://api.github.com/repos/WebAssembly/binaryen/releases/latest' | mawk -F\" "/^ *\"browser_download_url\": \".*\/binaryen-[^\"\/]*-$arch-linux\.tar\.gz\"$/{print \$4}")"
-			G_EXEC mv binaryen-*/bin/wasm-merge binaryen-*/bin/wasm-opt /usr/local/bin/
-
-			# Build server
-			G_EXEC cd "$build_dir/server"
-			G_EXEC_OUTPUT=1 G_EXEC pnpm run build
-
-			# Build open-api/typescript-sdk (required by the web frontend)
-			G_EXEC cd "$build_dir/open-api/typescript-sdk"
-			G_EXEC_OUTPUT=1 G_EXEC pnpm run build
-
-			# Build web frontend
-			G_EXEC cd "$build_dir/web"
-			G_EXEC_OUTPUT=1 G_EXEC pnpm run build
-
-			# Build corePlugin (WebAssembly workflow plugin, requires extism-js)
-			G_EXEC cd "$build_dir/plugins"
-			G_EXEC_OUTPUT=1 G_EXEC pnpm run build
-
-			# Remove build-time tools (extism-js, wasm-merge, wasm-opt)
-			G_EXEC rm /usr/local/bin/extism-js /usr/local/bin/wasm-merge /usr/local/bin/wasm-opt
-
-			# Deploy server to /opt/immich/app: pnpm deploy creates a standalone node_modules with all
-			# production deps (direct + transitive) in a flat structure, fixing tslib resolution issues
-			G_EXEC cd "$build_dir"
-			[[ -d '/opt/immich' ]] && G_EXEC rm -R /opt/immich
-			G_EXEC_OUTPUT=1 G_EXEC pnpm --filter immich --prod deploy /opt/immich
-
-			G_EXEC cd "$G_WORKING_DIR"
-			unset -v NODE_OPTIONS
-
-			# Restore original swap size, ensuring a minimum of 2 GiB total memory (RAM + swap) for smaller SBCs
-			if (( $RAM_TOTAL < 8192 ))
-			then
-				(( $RAM_PHYS + $orig_swap_size < 2048 )) && orig_swap_size=$(( 2048 - $RAM_PHYS ))
-				/boot/dietpi/func/dietpi-set_swapfile "$orig_swap_size"
-			fi
-
-			# Install web frontend and WebAssembly workflow plugin
-			G_EXEC mv "$build_dir/web/build" /opt/immich/www
-			G_EXEC mkdir /opt/immich/corePlugin
-			G_EXEC mv "$build_dir/plugins/dist" /opt/immich/corePlugin/
-			G_EXEC mv "$build_dir/plugins/manifest.json" /opt/immich/corePlugin/
-
-			# GeoNames data for reverse geocoding
-			Download_Install 'https://download.geonames.org/export/dump/cities500.zip' /opt/immich/geodata
-			G_EXEC curl -sSfLo /opt/immich/geodata/admin1CodesASCII.txt 'https://download.geonames.org/export/dump/admin1CodesASCII.txt'
-			G_EXEC curl -sSfLo /opt/immich/geodata/admin2Codes.txt 'https://download.geonames.org/export/dump/admin2Codes.txt'
-			G_EXEC curl -sSfLo /opt/immich/geodata/ne_10m_admin_0_countries.geojson 'https://raw.githubusercontent.com/nvkelso/natural-earth-vector/v5.1.2/geojson/ne_10m_admin_0_countries.geojson'
-			date --iso-8601=seconds | tr -d '\n' > /opt/immich/geodata/geodata-date.txt || exit 1
-
-			# Cleanup build directory and pnpm store
-			G_EXEC rm -R "$build_dir"
-			G_EXEC_OUTPUT=1 G_EXEC pnpm store prune
-
-			# User
-			Create_User -G redis -d /mnt/dietpi_userdata/immich immich
-
-			# Data directory
-			G_EXEC mkdir -p /mnt/dietpi_userdata/immich/upload
-			G_EXEC chown -R immich:immich /mnt/dietpi_userdata/immich
 
 			# Env file
 			if [[ ! -f '/mnt/dietpi_userdata/immich/immich.env' ]]
@@ -14654,9 +14645,8 @@ _EOF_
 		then
 			Remove_Service immich 1 1
 			G_EXEC rm -Rf /opt/immich
-			# Remove VectorChord package (installed specifically for Immich)
-			G_AGP 'postgresql-*-vchord'
 			G_EXEC rm -f /etc/postgresql/*/main/conf.d/dietpi-immich.conf
+			G_EXEC apt-mark auto libvips42t64 'postgresql-*-vchord'
 			G_EXEC_NOHALT=1 G_EXEC systemctl restart postgresql
 			command -v dropdb > /dev/null && runuser -u postgres -- dropdb immich 2> /dev/null
 			command -v dropuser > /dev/null && runuser -u postgres -- dropuser immich 2> /dev/null
