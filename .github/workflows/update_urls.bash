@@ -337,6 +337,32 @@ aCHECK[$software_id]='curl -sSf '\''https://api.github.com/repos/clidey/whodb/re
 aARCH[$software_id]='armv6 armv7 arm64 amd64 riscv64'
 aREGEX[$software_id]='https://github.com/clidey/whodb/releases/download/.*/whodb-[0-9].*-linux-\$arch'
 
+# Immich
+software_id=215
+aCHECK[$software_id]='curl -sSf '\''https://api.github.com/repos/immich-app/immich/releases/latest'\'' | mawk -F\" '\''/^ *"tag_name": "[^"]*",$/{print $4}'\'
+aREGEX[$software_id]='version='\''[^'\'']*'\'
+aREPLACE[$software_id]='version='\''$release'\'
+
+# VectorChord (for Immich)
+software_id=215000
+aCHECK[$software_id]='curl -sSf '\''https://api.github.com/repos/tensorchord/VectorChord/releases/latest'\'' | mawk -F\" "/^ *\"browser_download_url\": \"[^\"]*-17-vchord_[^\"\/]*_$arch.deb\"$/{print \$4}"'
+aARCH[$software_id]='arm64 amd64'
+aARCH_CHECK[$software_id]='riscv64'
+aREGEX[$software_id]='https://github.com/tensorchord/VectorChord/releases/download/.*/postgresql-.*-vchord_.*_$arch.deb'
+aREPLACE[$software_id]='${release/-17-vchord_/-\$pg_version-vchord_}'
+
+# extism-js (for Immich corePlugin build)
+software_id=215001
+aCHECK[$software_id]='curl -sSf '\''https://api.github.com/repos/extism/js-pdk/releases/latest'\'' | mawk -F\" "/^ *\"browser_download_url\": \".*\/extism-js-$arch-linux-[^\"\/]*\.gz\"$/{print \$4}"'
+aARCH[$software_id]='aarch64 x86_64'
+aREGEX[$software_id]='https://github.com/extism/js-pdk/releases/download/.*/extism-js-$arch-linux-.*.gz'
+
+# binaryen wasm-merge (for Immich corePlugin build)
+software_id=215002
+aCHECK[$software_id]='curl -sSf '\''https://api.github.com/repos/WebAssembly/binaryen/releases/latest'\'' | mawk -F\" "/^ *\"browser_download_url\": \".*\/binaryen-[^\"\/]*-$arch-linux\.tar\.gz\"$/{print \$4}"'
+aARCH[$software_id]='aarch64 x86_64'
+aREGEX[$software_id]='https://github.com/WebAssembly/binaryen/releases/download/.*/binaryen-.*-$arch-linux.tar.gz'
+
 ### URL check loop ###
 
 for i in "${!aCHECK[@]}"
@@ -366,13 +392,13 @@ do
 		echo "Replacing \"${aREGEX[i]}\" with \"$release\" ..."
 
 		# Check whether regex exists in related code block
-		sed -n "/^\t\tif To_Install ${i%000} /,/^\t\tfi$/p" dietpi/dietpi-software | grep -q "${aREGEX[i]}" || Exit_Error "Regex \"${aREGEX[i]}\" does not exist"
+		sed -n "/^\t\tif To_Install ${i%00?} /,/^\t\tfi$/p" dietpi/dietpi-software | grep -q "${aREGEX[i]}" || Exit_Error "Regex \"${aREGEX[i]}\" does not exist"
 
 		# Replace URL/version in dietpi-software
-		sed -i "/^\t\tif To_Install ${i%000} /,/^\t\tfi$/s|${aREGEX[i]}|$release|" dietpi/dietpi-software
+		sed -i "/^\t\tif To_Install ${i%00?} /,/^\t\tfi$/s|${aREGEX[i]}|$release|" dietpi/dietpi-software
 
 		# Verify that release has been added
-		sed -n "/^\t\tif To_Install ${i%000} /,/^\t\tfi$/p" dietpi/dietpi-software | grep -q "$release" || Exit_Error "Release \"$release\" failed to be added"
+		sed -n "/^\t\tif To_Install ${i%00?} /,/^\t\tfi$/p" dietpi/dietpi-software | grep -q "$release" || Exit_Error "Release \"$release\" failed to be added"
 	fi
 
 	# Check for possibly newly supported architectures
