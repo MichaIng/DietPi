@@ -3911,6 +3911,10 @@ _EOF_
 			G_CONFIG_INJECT 'syslog-enabled[[:blank:]]' 'syslog-enabled yes' /etc/redis/redis.conf
 			G_CONFIG_INJECT 'always-show-logo[[:blank:]]' 'always-show-logo no' /etc/redis/redis.conf
 
+			# Enable UNIX socket
+			GCI_PRESERVE=1 G_CONFIG_INJECT 'unixsocket[[:blank:]]' 'unixsocket /run/redis/redis-server.sock' /etc/redis/redis.conf
+			G_CONFIG_INJECT 'unixsocketperm[[:blank:]]' 'unixsocketperm 770' /etc/redis/redis.conf
+
 			# Force service to start before cron
 			G_EXEC mkdir -p /etc/systemd/system/redis-server.service.d
 			G_EXEC eval 'echo -e '\''[Unit]\nBefore=cron.service'\'' > /etc/systemd/system/redis-server.service.d/dietpi.conf'
@@ -4774,13 +4778,6 @@ location = /.well-known/carddav { return 301 /nextcloud/remote.php/dav/; }
 location = /.well-known/caldav  { return 301 /nextcloud/remote.php/dav/; }' > /etc/nginx/sites-dietpi/dietpi-dav_redirect.conf || exit 1
 			fi
 
-			# Configure Redis for transactional file locking
-			G_DIETPI-NOTIFY 2 'Enabling Redis for transactional file locking' # https://docs.nextcloud.com/server/stable/admin_manual/configuration_files/files_locking_transactional.html
-			# - Enable Redis socket and grant www-data access to it
-			GCI_PRESERVE=1 G_CONFIG_INJECT 'unixsocket[[:blank:]]' 'unixsocket /run/redis/redis-server.sock' /etc/redis/redis.conf
-			G_CONFIG_INJECT 'unixsocketperm[[:blank:]]' 'unixsocketperm 770' /etc/redis/redis.conf
-			G_EXEC usermod -aG redis www-data
-
 			# Start MariaDB and Redis for database creation and occ command
 			G_EXEC systemctl restart mariadb
 			G_EXEC systemctl restart redis-server
@@ -4897,9 +4894,10 @@ The install script will now exit. After applying one of the above, rerun dietpi-
 			# APCu Memcache
 			GCI_PRESERVE=1 G_CONFIG_INJECT "'memcache.local'" "'memcache.local' => '\\\\OC\\\\Memcache\\\\APCu'," "$config_php" "'version'"
 
-			# Enable Nextcloud to use Redis socket
+			# Enable Nextcloud to use Redis socket for transactional file locking: https://docs.nextcloud.com/server/stable/admin_manual/configuration_files/files_locking_transactional.html
+			G_EXEC usermod -aG redis www-data
 			G_CONFIG_INJECT "'filelocking.enabled'" "'filelocking.enabled' => true," "$config_php" "'memcache.local'"
-			local redis_sock=$(grep -m1 '^[[:blank:]]*unixsocket[[:blank:]]' /etc/redis/redis.conf | mawk '{print $2}') # Re-estimate in case of existing custom path
+			local redis_sock=$(grep -m1 '^[[:blank:]]*unixsocket[[:blank:]]' /etc/redis/redis.conf | mawk '{print $2}')
 			GCI_PRESERVE=1 GCI_NEWLINE=1 G_CONFIG_INJECT "'memcache.locking'" "'memcache.locking' => '\\\\OC\\\\Memcache\\\\Redis',\n'redis' => array ('host' => '$redis_sock', 'port' => 0,)," "$config_php" "'filelocking.enabled'"
 
 			# Tweak Argon2 hashing
@@ -11997,12 +11995,9 @@ _EOF_
 
 		if To_Install 215 immich # Immich
 		then
-			# System dependencies
-			aDEPS=('python3' 'build-essential')
-
 			# pgvector and VectorChord extensions: https://immich.app/docs/administration/postgres-standalone
 			local pg_version=$(find /etc/postgresql -mindepth 1 -maxdepth 1 -type d -name '[1-9][0-9]' -printf '%f\n' | sort -Vr | head -1)
-			aDEPS+=("postgresql-$pg_version-pgvector")
+			aDEPS=('python3' "postgresql-$pg_version-pgvector")
 			local arch='amd64'
 			(( $G_HW_ARCH == 3 )) && local arch='arm64'
 			local fallback_url="https://github.com/tensorchord/VectorChord/releases/download/1.1.0/postgresql-$pg_version-vchord_1.1.0-1_$arch.deb"
@@ -12073,16 +12068,16 @@ _EOF_
 			Download_Install "https://github.com/WebAssembly/binaryen/releases/download/$binaryen_version/binaryen-$binaryen_version-$arch-linux.tar.gz"
 			G_EXEC mv binaryen-version_*/bin/wasm-{merge,opt} /usr/local/bin/
 
+			# Build server
+			G_EXEC cd "$build_dir/server"
+			G_EXEC_OUTPUT=1 G_EXEC pnpm run build
+
 			# Build open-api/typescript-sdk (required by the web frontend)
 			G_EXEC cd "$build_dir/open-api/typescript-sdk"
 			G_EXEC_OUTPUT=1 G_EXEC pnpm run build
 
-			# Build web frontend (before server prune to preserve shared virtual store)
+			# Build web frontend
 			G_EXEC cd "$build_dir/web"
-			G_EXEC_OUTPUT=1 G_EXEC pnpm run build
-
-			# Build and prune server
-			G_EXEC cd "$build_dir/server"
 			G_EXEC_OUTPUT=1 G_EXEC pnpm run build
 
 			# Build corePlugin (WebAssembly workflow plugin, requires extism-js)
@@ -12127,59 +12122,54 @@ _EOF_
 			G_EXEC_OUTPUT=1 G_EXEC pnpm store prune
 
 			# User
-			Create_User -d /mnt/dietpi_userdata/immich immich
+			Create_User -G redis -d /mnt/dietpi_userdata/immich immich
 
-			# Data directories
+			# Data directory
 			G_EXEC mkdir -p /mnt/dietpi_userdata/immich/upload
-			G_EXEC ln -s /mnt/dietpi_userdata/immich/upload /opt/immich/app/upload
 			G_EXEC chown -R immich:immich /mnt/dietpi_userdata/immich
 
 			# Env file
 			if [[ ! -f '/mnt/dietpi_userdata/immich/immich.env' ]]
 			then
+				local redis_sock=$(grep -m1 '^[[:blank:]]*unixsocket[[:blank:]]' /etc/redis/redis.conf | mawk '{print $2}')
+
 				G_EXEC install -g immich -m 0640 /dev/null /mnt/dietpi_userdata/immich/immich.env
 				cat << _EOF_ > /mnt/dietpi_userdata/immich/immich.env || exit 1
 # Immich server port (default: 2283)
-PORT=2283
+IMMICH_PORT=2283
 
 # Database connection (PostgreSQL)
-DB_URL=postgresql://immich:$immich_pass@localhost/immich
+DB_URL='postgresql://immich:$immich_pass@localhost/immich'
 
 # Redis connection
-REDIS_HOSTNAME=localhost
-REDIS_PORT=6379
+REDIS_SOCKET='$redis_sock'
 
 # Upload location for photos and videos
-UPLOAD_LOCATION=/mnt/dietpi_userdata/immich/upload
+IMMICH_MEDIA_LOCATION=/mnt/dietpi_userdata/immich/upload
 
 # Log level: verbose, debug, log, warn, error, fatal
-LOG_LEVEL=log
+IMMICH_LOG_LEVEL=warn
 
 # Immich data path (do not change)
-IMMICH_BUILD_DATA=/opt/immich
+IMMICH_BUILD_DATA='/opt/immich'
 _EOF_
 			else
 				# Always update DB password in case of reinstall
-				GCI_PASSWORD=1 G_CONFIG_INJECT 'DB_URL=postgresql://immich:' "DB_URL=postgresql://immich:$immich_pass@localhost/immich" /mnt/dietpi_userdata/immich/immich.env
+				GCI_PASSWORD=1 G_CONFIG_INJECT 'DB_URL=postgresql://immich:' "DB_URL='postgresql://immich:$immich_pass@localhost/immich'" /mnt/dietpi_userdata/immich/immich.env
 			fi
 
 			# Service
 			cat << '_EOF_' > /etc/systemd/system/immich.service || exit 1
 [Unit]
 Description=Immich (DietPi)
-Wants=network-online.target postgresql.service redis-server.service
+Wants=network-online.target
 After=network-online.target postgresql.service redis-server.service
-StartLimitIntervalSec=60
-StartLimitBurst=3
 
 [Service]
 SyslogIdentifier=Immich
 User=immich
-WorkingDirectory=/opt/immich/app
 EnvironmentFile=/mnt/dietpi_userdata/immich/immich.env
 ExecStart=/usr/local/bin/node /opt/immich/app/dist/main
-Restart=on-failure
-RestartSec=10
 
 # Hardening
 ProtectSystem=strict

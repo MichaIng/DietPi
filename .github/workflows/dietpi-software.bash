@@ -313,7 +313,7 @@ Process_Software()
 			212) aSERVICES[i]='kavita' aTCP[i]='2036' aDELAY[i]=30;;
 			213) aSERVICES[i]='soju' aTCP[i]='6667';;
 			214) aSERVICES[i]='whodb' aTCP[i]='8091';;
-			215) aSERVICES[i]='immich' aTCP[i]='2283' aDELAY[i]=60;;
+			215) aSERVICES[i]='immich' aTCP[i]='2283';;
 			*) :;;
 		esac
 		aINSTALL[i]=1
@@ -342,7 +342,7 @@ do
 		188) Process_Software 17;;
 		213) Process_Software 17 188;;
 		183) Process_Software 87;;
-		215) Process_Software 9 91 194;;
+		215) Process_Software 7 9 91 194;;
 		138|187) Process_Software 152;;
 		75) Process_Software 83 87 89;;
 		76) Process_Software 83 88 89;;
