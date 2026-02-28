@@ -353,15 +353,15 @@ aREPLACE[$software_id]='${release/-17-vchord_/-\$pg_version-vchord_}'
 
 # extism-js (for Immich corePlugin build)
 software_id=215001
-aCHECK[$software_id]='curl -sSf '\''https://api.github.com/repos/extism/js-pdk/releases/latest'\'' | mawk -F\" '\''/^ *"tag_name": "[^"]*",$/{print $4}'\'
-aREGEX[$software_id]='extism_js_version='\''[^'\'']*'\'
-aREPLACE[$software_id]='extism_js_version='\''$release'\'
+aCHECK[$software_id]='curl -sSf '\''https://api.github.com/repos/extism/js-pdk/releases/latest'\'' | mawk -F\" "/^ *\"browser_download_url\": \".*\/extism-js-$arch-linux-[^\"\/]*\.gz\"$/{print \$4}"'
+aARCH[$software_id]='aarch64 x86_64'
+aREGEX[$software_id]='https://github.com/extism/js-pdk/releases/download/.*/extism-js-$arch-linux-.*.gz'
 
 # binaryen wasm-merge (for Immich corePlugin build)
 software_id=215002
-aCHECK[$software_id]='curl -sSf '\''https://api.github.com/repos/WebAssembly/binaryen/releases/latest'\'' | mawk -F\" '\''/^ *"tag_name": "[^"]*",$/{print $4}'\'
-aREGEX[$software_id]='binaryen_version='\''[^'\'']*'\'
-aREPLACE[$software_id]='binaryen_version='\''$release'\'
+aCHECK[$software_id]='curl -sSf '\''https://api.github.com/repos/WebAssembly/binaryen/releases/latest'\'' | mawk -F\" "/^ *\"browser_download_url\": \".*\/binaryen-[^\"\/]*-$arch-linux\.tar\.gz\"$/{print \$4}"'
+aARCH[$software_id]='aarch64 x86_64'
+aREGEX[$software_id]='https://github.com/WebAssembly/binaryen/releases/download/.*/binaryen-.*-$arch-linux.tar.gz'
 
 ### URL check loop ###
 
