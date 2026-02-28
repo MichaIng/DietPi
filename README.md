@@ -347,10 +347,11 @@ Links to hardware and software manufacturers, sources and build instructions use
 - [PiJuice](https://github.com/PiSupply/PiJuice)
 - [LazyLibrarian](https://gitlab.com/LazyLibrarian/LazyLibrarian)
 - [BirdNET-Go](https://github.com/tphakala/birdnet-go)
-- [RustDesk](https://github.com/rustdesk/rustdesk-server)
+- [RustDesk Server](https://github.com/rustdesk/rustdesk-server)
 - [Uptime Kuma](https://github.com/louislam/uptime-kuma)
 - [WhoDB](https://github.com/clidey/whodb)
 - [Immich](https://github.com/immich-app/immich)
+- [RustDesk Client](https://github.com/rustdesk/rustdesk)
 
 ---
 
