@@ -19,6 +19,13 @@ aARCH[$software_id]='armv7 arm64v8 amd64'
 aARCH_CHECK[$software_id]='riscv64'
 aREGEX[$software_id]='https://github.com/rustdesk/rustdesk-server/releases/download/.*/rustdesk-server-linux-\$arch\.zip'
 
+# RustDesk Client
+software_id=13
+aCHECK[$software_id]='curl -sSf '\''https://api.github.com/repos/rustdesk/rustdesk/releases/latest'\'' | mawk -F\" "/^ *\"browser_download_url\": \".*\/rustdesk-[^\"\/]*-$arch\.deb\"$/{print \$4}"'
+aARCH[$software_id]='armv7-sciter aarch64 x86_64'
+aARCH_CHECK[$software_id]='riscv64'
+aREGEX[$software_id]='https://github.com/rustdesk/rustdesk/releases/download/.*/rustdesk-.*-\$arch\.deb'
+
 # microblog.pub: Update Python version
 software_id=16
 aCHECK[$software_id]='curl -sSf '\''https://api.github.com/repos/pyenv/pyenv/contents/plugins/python-build/share/python-build?ref=master'\'' | mawk -F\" '\''/^ *"name": "3\.11\.[0-9]*",$/{print $4}'\'' | sort -Vr | head -1'

@@ -116,6 +116,7 @@ Process_Software()
 			10) aCOMMANDS[i]='amiberry-lite -h | grep '\''^\$VER: Amiberry-Lite '\';;
 			11) aCOMMANDS[i]='gzdoom -norun | grep '\''^GZDoom version '\';;
 			12) aSERVICES[i]='rustdesksignal rustdeskrelay' aTCP[i]='21115 21116 21117 21118 21119' aUDP[i]='21116';;
+			13) aCOMMANDS[i]='rustdesk --version';;
 			#16) aSERVICES[i]='microblog-pub' aTCP[i]='8007';; Service enters a CPU-intense internal error loop until it has been configured interactively via "microblog-pub configure", hence it is not enabled and started anymore after install but instead as part of "microblog-pub configure"
 			17) aCOMMANDS[i]='git -v';;
 			#22) QuiteRSS: has no CLI
