@@ -312,6 +312,16 @@ Available commands:
 		# - RISC-V & ARMv6: https://github.com/rustdesk/rustdesk-server/releases
 		aSOFTWARE_AVAIL_G_HW_ARCH[$software_id,1]=0
 		aSOFTWARE_AVAIL_G_HW_ARCH[$software_id,11]=0
+		#------------------
+		software_id=13
+		aSOFTWARE_NAME[$software_id]='RustDesk Client'
+		aSOFTWARE_DESC[$software_id]='open-source remote desktop client, written in Rust'
+		aSOFTWARE_CATX[$software_id]=1
+		aSOFTWARE_DOCS[$software_id]='https://dietpi.com/docs/software/remote_desktop/#rustdesk-client'
+		aSOFTWARE_DEPS[$software_id]='6'
+		# - RISC-V & ARMv6: https://github.com/rustdesk/rustdesk/releases
+		# - ARMv7 since packages depend on non-t64 libraries
+		(( $G_HW_ARCH == 3 || $G_HW_ARCH == 10 )) || aSOFTWARE_AVAIL_G_HW_ARCH[$software_id,$G_HW_ARCH]=0
 
 		# Media Systems
 		#--------------------------------------------------------------------------------
@@ -850,6 +860,17 @@ Available commands:
 		aSOFTWARE_DESC[$software_id]='Fast, efficient and secure command-line backup program'
 		aSOFTWARE_CATX[$software_id]=4
 		aSOFTWARE_DOCS[$software_id]='https://dietpi.com/docs/software/cloud/#restic'
+		#------------------
+		software_id=215
+		aSOFTWARE_NAME[$software_id]='Immich'
+		aSOFTWARE_DESC[$software_id]='High performance self-hosted photo and video management solution'
+		aSOFTWARE_CATX[$software_id]=4
+		aSOFTWARE_DOCS[$software_id]='https://dietpi.com/docs/software/cloud/#immich'
+		aSOFTWARE_DEPS[$software_id]='7 9 91 194'
+		# pgvector only available from Trixie on
+		(( $G_DISTRO < 8 )) && aSOFTWARE_AVAIL_G_DISTRO[$software_id,$G_DISTRO]=0
+		# VectorChord only provides packages for amd64 and arm64
+		(( $G_HW_ARCH == 3 || $G_HW_ARCH == 10 )) || aSOFTWARE_AVAIL_G_HW_ARCH[$software_id,$G_HW_ARCH]=0
 
 		# Gaming & Emulation
 		#--------------------------------------------------------------------------------
@@ -3900,6 +3921,10 @@ _EOF_
 			G_CONFIG_INJECT 'syslog-enabled[[:blank:]]' 'syslog-enabled yes' /etc/redis/redis.conf
 			G_CONFIG_INJECT 'always-show-logo[[:blank:]]' 'always-show-logo no' /etc/redis/redis.conf
 
+			# Enable UNIX socket
+			GCI_PRESERVE=1 G_CONFIG_INJECT 'unixsocket[[:blank:]]' 'unixsocket /run/redis/redis-server.sock' /etc/redis/redis.conf
+			G_CONFIG_INJECT 'unixsocketperm[[:blank:]]' 'unixsocketperm 770' /etc/redis/redis.conf
+
 			# Force service to start before cron
 			G_EXEC mkdir -p /etc/systemd/system/redis-server.service.d
 			G_EXEC eval 'echo -e '\''[Unit]\nBefore=cron.service'\'' > /etc/systemd/system/redis-server.service.d/dietpi.conf'
@@ -4201,9 +4226,6 @@ _EOF_
 
 		if To_Install 128 mpd # MPD
 		then
-			G_AGI mpd
-			G_EXEC systemctl stop mpd
-
 			# Service
 			# - Run systemd unit as "mpd" user instead of using config file based user change, to preserve supplementary group permissions (i.e. "dietpi")
 			# - Skip environment file so that usage of our config file is assured
@@ -4216,7 +4238,15 @@ EnvironmentFile=
 ExecStart=
 ExecStart=/usr/bin/mpd --systemd
 _EOF_
+			# Install
+			G_AGI mpd
+			G_EXEC systemctl stop mpd
 			Remove_SysV mpd 1
+
+			# Mask activation socket: It is unnecessary if mpd.service is enabled, and prevents it from recreating the UNIX socket /run/mpd/socket on service restart, so that "systemctl restart mpd" breaks local client/frontend access.
+			# - A mask is needed: Adding Also= via override does not clear After=mpd.socket from the service, hence "systemctl enable mpd" would re-enable mpd.socket.
+			G_EXEC systemctl --no-reload disable --now mpd.socket
+			G_EXEC systemctl --no-reload mask mpd.socket
 
 			# Config
 			G_CONFIG_INJECT 'music_directory[[:blank:]]' 'music_directory "/mnt/dietpi_userdata/Music"' /etc/mpd.conf
@@ -4265,7 +4295,7 @@ _EOF_
 			Download_Test_Media
 
 			# Permissions
-			G_EXEC chown -R mpd:root /mnt/dietpi_userdata/.mpd_cache /etc/mpd.conf
+			G_EXEC chown -R mpd:0 /mnt/dietpi_userdata/.mpd_cache /etc/mpd.conf
 		fi
 
 		if To_Install 54 # phpBB
@@ -4282,10 +4312,11 @@ _EOF_
  - If you need to reinstall (e.g. broken instance), please manually backup your config files+data, remove the install dir and rerun \"dietpi-software (re)install $software_id\"."
 
 			else
-				local fallback_url='https://download.phpbb.com/pub/release/3.3/3.3.15/phpBB-3.3.15.tar.bz2'
-				Download_Install "$(curl -sSf 'https://version.phpbb.com/phpbb/versions.json' | sed -En '/"stable":/,/"unstable":/s/.*"current": "(.+)",.*/\1/p' | sort -Vr | head -1)"
+				local version=$(curl -sSf 'https://version.phpbb.com/phpbb/versions.json' | sed -En '/"stable":/,/"unstable":/s/.*"current": "(.+)",.*/\1/p' | sort -Vr | head -1)
+				[[ $version ]] || { version='3.3.15'; G_DIETPI-NOTIFY 1 "Automatic latest ${aSOFTWARE_NAME[$software_id]} version detection failed. Version \"$version\" will be installed as fallback, but a newer version might be available. Please report this at: https://github.com/MichaIng/DietPi/issues"; }
+				Download_Install "https://download.phpbb.com/pub/release/${version%.*}/$version/phpBB-$version.tar.bz2"
 				# Files are shipped with UID:GID 1000:1000 while for security reasons it should be root:root.
-				G_EXEC chown -R root:root phpBB3
+				G_EXEC chown -R 0:0 phpBB3
 				G_EXEC mv phpBB3 /var/www/phpbb
 			fi
 
@@ -4757,13 +4788,6 @@ location = /.well-known/carddav { return 301 /nextcloud/remote.php/dav/; }
 location = /.well-known/caldav  { return 301 /nextcloud/remote.php/dav/; }' > /etc/nginx/sites-dietpi/dietpi-dav_redirect.conf || exit 1
 			fi
 
-			# Configure Redis for transactional file locking
-			G_DIETPI-NOTIFY 2 'Enabling Redis for transactional file locking' # https://docs.nextcloud.com/server/stable/admin_manual/configuration_files/files_locking_transactional.html
-			# - Enable Redis socket and grant www-data access to it
-			GCI_PRESERVE=1 G_CONFIG_INJECT 'unixsocket[[:blank:]]' 'unixsocket /run/redis/redis-server.sock' /etc/redis/redis.conf
-			G_CONFIG_INJECT 'unixsocketperm[[:blank:]]' 'unixsocketperm 770' /etc/redis/redis.conf
-			G_EXEC usermod -aG redis www-data
-
 			# Start MariaDB and Redis for database creation and occ command
 			G_EXEC systemctl restart mariadb
 			G_EXEC systemctl restart redis-server
@@ -4880,9 +4904,10 @@ The install script will now exit. After applying one of the above, rerun dietpi-
 			# APCu Memcache
 			GCI_PRESERVE=1 G_CONFIG_INJECT "'memcache.local'" "'memcache.local' => '\\\\OC\\\\Memcache\\\\APCu'," "$config_php" "'version'"
 
-			# Enable Nextcloud to use Redis socket
+			# Enable Nextcloud to use Redis socket for transactional file locking: https://docs.nextcloud.com/server/stable/admin_manual/configuration_files/files_locking_transactional.html
+			G_EXEC usermod -aG redis www-data
 			G_CONFIG_INJECT "'filelocking.enabled'" "'filelocking.enabled' => true," "$config_php" "'memcache.local'"
-			local redis_sock=$(grep -m1 '^[[:blank:]]*unixsocket[[:blank:]]' /etc/redis/redis.conf | mawk '{print $2}') # Re-estimate in case of existing custom path
+			local redis_sock=$(grep -m1 '^[[:blank:]]*unixsocket[[:blank:]]' /etc/redis/redis.conf | mawk '{print $2}')
 			GCI_PRESERVE=1 GCI_NEWLINE=1 G_CONFIG_INJECT "'memcache.locking'" "'memcache.locking' => '\\\\OC\\\\Memcache\\\\Redis',\n'redis' => array ('host' => '$redis_sock', 'port' => 0,)," "$config_php" "'filelocking.enabled'"
 
 			# Tweak Argon2 hashing
@@ -11978,6 +12003,190 @@ WantedBy=multi-user.target
 _EOF_
 		fi
 
+		if To_Install 215 immich # Immich
+		then
+			# Install pgvector and VectorChord extensions: https://immich.app/docs/administration/postgres-standalone
+			local pg_version=$(find /etc/postgresql -mindepth 1 -maxdepth 1 -type d -name '[1-9][0-9]' -printf '%f\n' | sort -Vr | head -1)
+			aDEPS=("postgresql-$pg_version-pgvector")
+			local arch='amd64'
+			(( $G_HW_ARCH == 3 )) && local arch='arm64'
+			local fallback_url="https://github.com/tensorchord/VectorChord/releases/download/1.1.0/postgresql-$pg_version-vchord_1.1.0-1_$arch.deb"
+			Download_Install "$(curl -sSfL 'https://api.github.com/repos/tensorchord/VectorChord/releases/latest' | mawk -F\" "/^ *\"browser_download_url\": \"[^\"]*-$pg_version-vchord_[^\"\/]*_$arch.deb\"$/{print \$4}")"
+
+			# Download Immich source
+			local version=$(curl -sSfL 'https://api.github.com/repos/immich-app/immich/releases/latest' | mawk -F\" '/^ *"tag_name": "[^"]*",$/{print $4}')
+			[[ $version ]] || { version='v2.5.6'; G_DIETPI-NOTIFY 1 "Automatic latest ${aSOFTWARE_NAME[$software_id]} version detection failed. Version \"$version\" will be installed as fallback, but a newer version might be available. Please report this at: https://github.com/MichaIng/DietPi/issues"; }
+			Download_Install "https://github.com/immich-app/immich/archive/$version.tar.gz"
+			local build_dir='/mnt/dietpi_userdata/immich_build'
+			[[ -d $build_dir ]] && G_EXEC rm -R "$build_dir"
+			G_EXEC mv "immich-${version#v}" "$build_dir"
+
+			# Install build-time tools
+			local arch='x86_64'
+			(( $G_HW_ARCH == 3 )) && local arch='aarch64'
+			local fallback_url="https://github.com/extism/js-pdk/releases/download/v1.5.1/extism-js-$arch-linux-v1.5.1.gz"
+			Download_Install "$(curl -sSfL 'https://api.github.com/repos/extism/js-pdk/releases/latest' | mawk -F\" "/^ *\"browser_download_url\": \".*\/extism-js-$arch-linux-[^\"\/]*\.gz\"$/{print \$4}")" /usr/local/bin/extism-js
+			G_EXEC chmod +x /usr/local/bin/extism-js
+			local fallback_url="https://github.com/WebAssembly/binaryen/releases/download/version_124/binaryen-version_124-$arch-linux.tar.gz"
+			Download_Install "$(curl -sSfL 'https://api.github.com/repos/WebAssembly/binaryen/releases/latest' | mawk -F\" "/^ *\"browser_download_url\": \".*\/binaryen-[^\"\/]*-$arch-linux\.tar\.gz\"$/{print \$4}")"
+			G_EXEC mv binaryen-*/bin/wasm-merge binaryen-*/bin/wasm-opt /usr/local/bin/
+			G_EXEC rm -R binaryen-version_*
+
+			# Install pnpm
+			G_EXEC_OUTPUT=1 G_EXEC npm i -g --no-audit pnpm@latest
+			G_EXEC rm -R /tmp/node-compile-cache
+
+			# Use temporary store, cache, and state dirs
+			G_EXEC cd "$build_dir"
+			G_EXEC pnpm c set --location=project storeDir "$build_dir/.pnpmStore"
+			G_EXEC pnpm c set --location=project cacheDir "$build_dir/.pnpmCache"
+			G_EXEC pnpm c set --location=project stateDir "$build_dir/.pnpmState"
+
+			# Assure at least 6 GiB total memory (RAM + swap) for the build, saving original swap size first
+			if (( $RAM_TOTAL < 6*1024 ))
+			then
+				local orig_swap_size=$(( $RAM_TOTAL - $RAM_PHYS ))
+				G_DIETPI-NOTIFY 2 'Immich build requires at least 6 GiB of total memory. We will temporarily increase the swap size to satisfy this requirement.'
+				/boot/dietpi/func/dietpi-set_swapfile $(( 6*1024 - $RAM_PHYS ))
+			fi
+
+			# Prevent JavaScript OOM during build
+			export NODE_OPTIONS='--max-old-space-size=4096'
+
+			# Install Node dependencies
+			G_EXEC_OUTPUT=1 G_EXEC pnpm --filter immich --filter @immich/sdk --filter immich-web --filter plugins i
+
+			# Build Immich server, web UI (requires Immich SDK), and WebAssembly workflow plugin
+			G_EXEC_OUTPUT=1 G_EXEC pnpm --filter immich --filter @immich/sdk --filter immich-web --filter plugins build
+
+			# Remove build-time tools
+			G_EXEC rm /usr/local/bin/extism-js /usr/local/bin/wasm-merge /usr/local/bin/wasm-opt
+
+			# Deploy server
+			[[ -d '/opt/immich' ]] && G_EXEC rm -R /opt/immich
+			G_EXEC_OUTPUT=1 G_EXEC pnpm --filter immich -P deploy /opt/immich
+			unset -v NODE_OPTIONS
+
+			# Install web frontend and WebAssembly workflow plugin
+			G_EXEC mv web/build /opt/immich/www
+			G_EXEC mkdir /opt/immich/corePlugin
+			G_EXEC mv plugins/dist /opt/immich/corePlugin/
+			G_EXEC mv plugins/manifest.json /opt/immich/corePlugin/
+
+			# Remove build directory
+			G_EXEC cd "$G_WORKING_DIR"
+			G_EXEC rm -R "$build_dir"
+
+			# Restore original swap size, ensuring a minimum of 2 GiB total memory (RAM + swap) for smaller SBCs
+			if (( $RAM_TOTAL < 6*1024 ))
+			then
+				(( $RAM_TOTAL < 2048 )) && orig_swap_size=1 # dietpi-set_swapfile internally translates "1" to assure 2 GiB total memory
+				/boot/dietpi/func/dietpi-set_swapfile "$orig_swap_size"
+				unset -v orig_swap_size
+			fi
+
+			# Install GeoNames data for reverse geocoding
+			Download_Install 'https://download.geonames.org/export/dump/cities500.zip' /opt/immich/geodata
+			G_EXEC curl -sSfLo /opt/immich/geodata/admin1CodesASCII.txt 'https://download.geonames.org/export/dump/admin1CodesASCII.txt'
+			G_EXEC curl -sSfLo /opt/immich/geodata/admin2Codes.txt 'https://download.geonames.org/export/dump/admin2Codes.txt'
+			G_EXEC curl -sSfLo /opt/immich/geodata/ne_10m_admin_0_countries.geojson 'https://raw.githubusercontent.com/nvkelso/natural-earth-vector/v5.1.2/geojson/ne_10m_admin_0_countries.geojson'
+			date --iso-8601=seconds | tr -d '\n' > /opt/immich/geodata/geodata-date.txt || exit 1
+
+			# User
+			Create_User -G redis -d /mnt/dietpi_userdata/immich immich
+
+			# Data directory
+			G_EXEC mkdir -p /mnt/dietpi_userdata/immich/upload
+			G_EXEC chown -R immich:immich /mnt/dietpi_userdata/immich
+
+			# Configure PostgreSQL: load VectorChord and enable localhost TCP for the Node.js database driver
+			for i in /etc/postgresql/*/main/conf.d
+			do
+				[[ -d $i ]] || continue
+				cat << '_EOF_' > "$i/dietpi-immich.conf" || exit 1
+# Load VectorChord extension
+shared_preload_libraries = 'vchord.so'
+_EOF_
+			done
+			G_EXEC systemctl restart postgresql
+
+			# Database
+			local immich_pass=$(tr -dc '[:alnum:]' < /dev/random | head -c30)
+			if [[ $(runuser -u postgres -- psql -tAc "SELECT 1 FROM pg_roles WHERE rolname='immich'") != 1 ]]
+			then
+				G_EXEC runuser -u postgres -- psql -c "CREATE ROLE immich WITH LOGIN PASSWORD '$immich_pass';"
+				G_EXEC runuser -u postgres -- psql -c "ALTER ROLE immich SUPERUSER;"
+			else
+				G_EXEC runuser -u postgres -- psql -c "ALTER ROLE immich WITH PASSWORD '$immich_pass' SUPERUSER;"
+			fi
+			if [[ $(runuser -u postgres -- psql -tAc "SELECT 1 FROM pg_database WHERE datname='immich'") != 1 ]]
+			then
+				G_EXEC runuser -u postgres -- createdb --owner=immich immich
+			fi
+
+			# Env file
+			if [[ ! -f '/mnt/dietpi_userdata/immich/immich.env' ]]
+			then
+				local redis_sock=$(grep -m1 '^[[:blank:]]*unixsocket[[:blank:]]' /etc/redis/redis.conf | mawk '{print $2}')
+
+				G_EXEC install -g immich -m 0640 /dev/null /mnt/dietpi_userdata/immich/immich.env
+				cat << _EOF_ > /mnt/dietpi_userdata/immich/immich.env || exit 1
+# Immich web UI port and bind host
+IMMICH_PORT=2283
+IMMICH_HOST=0.0.0.0
+
+# Upload location for photos and videos
+IMMICH_MEDIA_LOCATION=/mnt/dietpi_userdata/immich/upload
+
+# Log level: verbose, debug, log, warn, error, fatal
+IMMICH_LOG_LEVEL=warn
+
+# Enable machine learning (needs to be installed separately)
+IMMICH_MACHINE_LEARNING_ENABLED=false
+
+# Database connection (PostgreSQL)
+DB_URL='postgresql://immich:$immich_pass@/immich?host=/run/postgresql'
+
+# Redis connection
+REDIS_SOCKET='$redis_sock'
+_EOF_
+			else
+				# Always update DB password in case of reinstall
+				GCI_PASSWORD=1 G_CONFIG_INJECT 'DB_URL=' "DB_URL='postgresql://immich:$immich_pass@/immich?host=/run/postgresql'" /mnt/dietpi_userdata/immich/immich.env
+			fi
+
+			# Service
+			cat << '_EOF_' > /etc/systemd/system/immich.service || exit 1
+[Unit]
+Description=Immich (DietPi)
+Wants=network-online.target
+After=network-online.target postgresql.service redis-server.service
+
+[Service]
+SyslogIdentifier=Immich
+User=immich
+Environment=NO_COLOR=true IMMICH_BUILD_DATA='/opt/immich'
+EnvironmentFile=/mnt/dietpi_userdata/immich/immich.env
+ExecStart=/usr/local/bin/node /opt/immich/dist/main
+
+# Hardening
+ProtectSystem=strict
+ProtectHome=1
+PrivateDevices=1
+PrivateTmp=1
+ProtectKernelTunables=1
+ProtectKernelModules=1
+ProtectControlGroups=1
+ProtectKernelLogs=1
+ProtectClock=1
+NoNewPrivileges=1
+ReadWritePaths=-/mnt/dietpi_userdata/immich
+
+[Install]
+WantedBy=multi-user.target
+_EOF_
+		fi
+
 		if To_Install 169 lazylibrarian # LazyLibrarian
 		then
 			# Dependencies
@@ -12296,6 +12505,32 @@ WantedBy=multi-user.target
 _EOF_
 			aSTART_SERVICES+=('rustdesksignal' 'rustdeskrelay')
 			unset -v rd_inst rd_data
+		fi
+
+		if To_Install 13 # RustDesk Client
+		then
+			case $G_HW_ARCH in
+				2) local arch='armv7-sciter';;
+				3) local arch='aarch64';;
+				*) local arch='x86_64';;
+			esac
+
+			# Workaround: https://github.com/rustdesk/rustdesk/pull/14429
+			local workaround=0
+			if [[ ! -f '/usr/bin/python3' ]]
+			then
+				G_DIETPI-NOTIFY 2 'Applying workaround for faulty Python check in package postinst'
+				G_EXEC eval 'echo -e '\''#!/bin/dash\necho Python 3.4.5'\'' > /usr/bin/python3'
+				G_EXEC chmod +x /usr/bin/python3
+				workaround=1
+			fi
+
+			local fallback_url="https://github.com/rustdesk/rustdesk/releases/download/1.4.5/rustdesk-1.4.5-$arch.deb"
+			Download_Install "$(curl -sSfL 'https://api.github.com/repos/rustdesk/rustdesk/releases/latest' | mawk -F\" "/^ *\"browser_download_url\": \".*\/rustdesk-[^\"\/]*-$arch\.deb\"$/{print \$4}")"
+
+			# Revert workaround
+			(( $workaround )) && G_EXEC rm /usr/bin/python3
+			unset -v arch workaround
 		fi
 
 		if To_Install 176 uptime-kuma # Uptime Kuma: https://github.com/louislam/uptime-kuma/wiki/🔧-How-to-Install#-non-docker
@@ -14443,6 +14678,18 @@ _EOF_
 			[[ -d '/mnt/dietpi_userdata/whodb' ]] && G_EXEC rm -Rf /mnt/dietpi_userdata/whodb
 		fi
 
+		if To_Uninstall 215 # Immich
+		then
+			Remove_Service immich 1 1
+			G_EXEC rm -Rf /opt/immich
+			G_EXEC rm -f /etc/postgresql/*/main/conf.d/dietpi-immich.conf
+			G_AGP 'postgresql-*-vchord' 'postgresql-*-pgvector'
+			G_EXEC_NOHALT=1 G_EXEC systemctl restart postgresql
+			command -v dropdb > /dev/null && runuser -u postgres -- dropdb immich 2> /dev/null
+			command -v dropuser > /dev/null && runuser -u postgres -- dropuser immich 2> /dev/null
+			[[ -d '/mnt/dietpi_userdata/immich' ]] && G_WHIP_BUTTON_CANCEL_TEXT='Skip' G_WHIP_YESNO "Shall all ${aSOFTWARE_NAME[$software_id]} data at /mnt/dietpi_userdata/immich be removed as well?" && G_EXEC rm -R /mnt/dietpi_userdata/immich
+		fi
+
 		if To_Uninstall 169 # LazyLibrarian
 		then
 			Remove_Service lazylibrarian 1 1
@@ -14457,6 +14704,11 @@ _EOF_
 			Remove_Service rustdesksignal rustdesk rustdesk
 			G_EXEC rm -Rf /opt/rustdesk
 			G_EXEC rm -Rf /mnt/dietpi_userdata/rustdesk
+		fi
+
+		if To_Uninstall 13 # RustDesk Client
+		then
+			G_AGP rustdesk
 		fi
 
 		if To_Uninstall 176 # Uptime Kuma
