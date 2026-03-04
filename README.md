@@ -351,6 +351,7 @@ Links to hardware and software manufacturers, sources and build instructions use
 - [Uptime Kuma](https://github.com/louislam/uptime-kuma)
 - [WhoDB](https://github.com/clidey/whodb)
 - [Immich](https://github.com/immich-app/immich)
+- [Immich Machine Learning](https://github.com/immich-app/immich)
 - [RustDesk Client](https://github.com/rustdesk/rustdesk)
 
 ---
