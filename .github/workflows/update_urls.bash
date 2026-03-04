@@ -378,9 +378,9 @@ aREPLACE[$software_id]='version='\''$release'\'
 
 # uv
 software_id=217
-aCHECK[$software_id]='curl -sSf '\''https://api.github.com/repos/astral-sh/uv/releases/latest'\'' | mawk -F\" "/^ *\"browser_download_url\": \".*\/uv-$arch-unknown-linux-gnu\.tar\.gz\"$/{print \$4}"'
-aARCH[$software_id]='aarch64 x86_64'
-aREGEX[$software_id]='https://github.com/astral-sh/uv/releases/download/.*/uv-$arch-unknown-linux-gnu.tar.gz'
+aCHECK[$software_id]='curl -sSf '\''https://api.github.com/repos/astral-sh/uv/releases/latest'\'' | mawk -F\" "/^ *\"browser_download_url\": \".*\/uv-$arch\.tar\.gz\"$/{print \$4}"'
+aARCH[$software_id]='aarch64-unknown-linux-gnu x86_64-unknown-linux-gnu'
+aREGEX[$software_id]='https://github.com/astral-sh/uv/releases/download/.*/uv-$arch.tar.gz'
 
 ### URL check loop ###
 
