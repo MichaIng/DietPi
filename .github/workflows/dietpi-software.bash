@@ -316,6 +316,7 @@ Process_Software()
 			214) aSERVICES[i]='whodb' aTCP[i]='8091';;
 			215) aSERVICES[i]='immich' aTCP[i]='2283';;
 			216) aSERVICES[i]='immich-ml' aTCP[i]='3003';;
+			217) aCOMMANDS[i]='uv --version';;
 			*) :;;
 		esac
 		aINSTALL[i]=1
@@ -345,7 +346,8 @@ do
 		213) Process_Software 17 188;;
 		183) Process_Software 87;;
 		215) Process_Software 7 9 91 194;;
-		216) Process_Software 130;;
+		216) Process_Software 130 217;;
+		217) :;;
 		138|187) Process_Software 152;;
 		75) Process_Software 83 87 89;;
 		76) Process_Software 83 88 89;;

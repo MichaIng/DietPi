@@ -877,7 +877,7 @@ Available commands:
 		aSOFTWARE_DESC[$software_id]='Machine learning server for Immich facial recognition and smart search'
 		aSOFTWARE_CATX[$software_id]=4
 		aSOFTWARE_DOCS[$software_id]='https://dietpi.com/docs/software/cloud/#immich'
-		aSOFTWARE_DEPS[$software_id]='130'
+		aSOFTWARE_DEPS[$software_id]='130 217'
 		# onnxruntime only provides packages for amd64 and arm64
 		(( $G_HW_ARCH == 3 || $G_HW_ARCH == 10 )) || aSOFTWARE_AVAIL_G_HW_ARCH[$software_id,$G_HW_ARCH]=0
 
@@ -1728,6 +1728,14 @@ Available commands:
 		aSOFTWARE_DESC[$software_id]='Runtime system, venv, and development headers'
 		aSOFTWARE_CATX[$software_id]=24
 		aSOFTWARE_DOCS[$software_id]='https://dietpi.com/docs/software/programming/#python-3'
+		#------------------
+		software_id=217
+		aSOFTWARE_NAME[$software_id]='uv'
+		aSOFTWARE_DESC[$software_id]='Extremely fast Python package and project manager'
+		aSOFTWARE_CATX[$software_id]=24
+		aSOFTWARE_DOCS[$software_id]='https://docs.astral.sh/uv/'
+		# uv only provides binaries for amd64 and arm64
+		(( $G_HW_ARCH == 3 || $G_HW_ARCH == 10 )) || aSOFTWARE_AVAIL_G_HW_ARCH[$software_id,$G_HW_ARCH]=0
 		#------------------
 		software_id=189
 		aSOFTWARE_NAME[$software_id]='VSCodium'
@@ -3251,6 +3259,17 @@ _EOF_"
 
 			# RISC-V pre-v8.24 and general failsafe action: Purge Go APT Package
 			dpkg-query -s 'golang-go' &> /dev/null && G_AGP golang-go
+		fi
+
+		if To_Install 217 # uv
+		then
+			# https://github.com/astral-sh/uv
+			local arch='x86_64'
+			(( $G_HW_ARCH == 3 )) && arch='aarch64'
+			local fallback_url="https://github.com/astral-sh/uv/releases/download/0.8.15/uv-$arch-unknown-linux-gnu.tar.gz"
+			Download_Install "$(curl -sSfL 'https://api.github.com/repos/astral-sh/uv/releases/latest' | mawk -F\" "/^ *\"browser_download_url\": \".*\/uv-$arch-unknown-linux-gnu\.tar\.gz\"$/{print \$4}")"
+			G_EXEC mv "uv-$arch-unknown-linux-gnu/uv" /usr/local/bin/uv
+			G_EXEC rm -Rf "uv-$arch-unknown-linux-gnu"
 		fi
 
 		if To_Install 170 # UnRAR
@@ -12082,8 +12101,13 @@ _EOF_
 			G_EXEC mv plugins/dist /opt/immich/corePlugin/
 			G_EXEC mv plugins/manifest.json /opt/immich/corePlugin/
 
-			# Remove build directory
+			# Remove build directory, keeping ML source if Immich Machine Learning will be co-installed
 			G_EXEC cd "$G_WORKING_DIR"
+			if (( ${aSOFTWARE_INSTALL_STATE[216]} == 1 ))
+			then
+				G_EXEC rm -Rf /opt/immich-ml_src
+				G_EXEC mv "$build_dir/machine-learning" /opt/immich-ml_src
+			fi
 			G_EXEC rm -R "$build_dir"
 
 			# Restore original swap size, ensuring a minimum of 2 GiB total memory (RAM + swap) for smaller SBCs
@@ -12206,24 +12230,21 @@ _EOF_
 
 		if To_Install 216 immich-ml # Immich Machine Learning
 		then
-			# Download Immich source (machine-learning directory only)
-			local version=$(curl -sSfL 'https://api.github.com/repos/immich-app/immich/releases/latest' | mawk -F\" '/^ *"tag_name": "[^"]*",$/{print $4}')
-			[[ $version ]] || { version='v2.5.6'; G_DIETPI-NOTIFY 1 "Automatic latest ${aSOFTWARE_NAME[$software_id]} version detection failed. Version \"$version\" will be installed as fallback, but a newer version might be available. Please report this at: https://github.com/MichaIng/DietPi/issues"; }
-			aDEPS=('libgl1' 'libglib2.0-0' 'libgomp1')
-			Download_Install "https://github.com/immich-app/immich/archive/$version.tar.gz"
-			[[ -d '/opt/immich-ml' ]] && G_EXEC rm -R /opt/immich-ml
-			G_EXEC mv "immich-${version#v}/machine-learning" /opt/immich-ml
-			G_EXEC rm -R "immich-${version#v}"
-
-			# Install uv: https://github.com/astral-sh/uv
-			# NB: fallback_url is used by Download_Install when the dynamic URL detection fails
-			local arch='x86_64'
-			(( $G_HW_ARCH == 3 )) && arch='aarch64'
-			local fallback_url="https://github.com/astral-sh/uv/releases/download/0.8.15/uv-$arch-unknown-linux-gnu.tar.gz"
-			aDEPS=('g++')
-			Download_Install "$(curl -sSfL 'https://api.github.com/repos/astral-sh/uv/releases/latest' | mawk -F\" "/^ *\"browser_download_url\": \".*\/uv-$arch-unknown-linux-gnu\.tar\.gz\"$/{print \$4}")"
-			G_EXEC mv "uv-$arch-unknown-linux-gnu/uv" /usr/local/bin/uv
-			G_EXEC rm -Rf "uv-$arch-unknown-linux-gnu"
+			# Reuse ML source left by Immich (215) install if co-installed, otherwise download it
+			if [[ -d '/opt/immich-ml_src' ]]
+			then
+				G_AGI libgl1 libglib2.0-0 libgomp1 g++
+				G_EXEC rm -Rf /opt/immich-ml
+				G_EXEC mv /opt/immich-ml_src /opt/immich-ml
+			else
+				local version=$(curl -sSfL 'https://api.github.com/repos/immich-app/immich/releases/latest' | mawk -F\" '/^ *"tag_name": "[^"]*",$/{print $4}')
+				[[ $version ]] || { version='v2.5.6'; G_DIETPI-NOTIFY 1 "Automatic latest ${aSOFTWARE_NAME[$software_id]} version detection failed. Version \"$version\" will be installed as fallback, but a newer version might be available. Please report this at: https://github.com/MichaIng/DietPi/issues"; }
+				aDEPS=('libgl1' 'libglib2.0-0' 'libgomp1' 'g++')
+				Download_Install "https://github.com/immich-app/immich/archive/$version.tar.gz"
+				G_EXEC rm -Rf /opt/immich-ml
+				G_EXEC mv "immich-${version#v}/machine-learning" /opt/immich-ml
+				G_EXEC rm -R "immich-${version#v}"
+			fi
 
 			# Install Python dependencies into a virtual environment
 			# NB: Python 3 (dep 130) provides Python >= 3.11 on Bookworm and Trixie, satisfying the ML requirement
@@ -12232,18 +12253,18 @@ _EOF_
 			G_EXEC_OUTPUT=1 G_EXEC uv sync --frozen --extra cpu --no-dev --compile-bytecode --no-progress --no-python-downloads
 			G_EXEC cd "$G_WORKING_DIR"
 
-			# User: Reuse immich user if available, else create it
-			Create_User -d /mnt/dietpi_userdata/immich immich
+			# User
+			Create_User -d /mnt/dietpi_userdata/immich-ml immich-ml
 
 			# Data directory
-			G_EXEC mkdir -p /mnt/dietpi_userdata/immich/model-cache
-			G_EXEC chown -R immich:immich /mnt/dietpi_userdata/immich
+			G_EXEC mkdir -p /mnt/dietpi_userdata/immich-ml/model-cache
+			G_EXEC chown -R immich-ml:immich-ml /mnt/dietpi_userdata/immich-ml
 
 			# Env file
-			if [[ ! -f '/mnt/dietpi_userdata/immich/immich-ml.env' ]]
+			if [[ ! -f '/mnt/dietpi_userdata/immich-ml/immich-ml.env' ]]
 			then
-				G_EXEC install -g immich -m 0640 /dev/null /mnt/dietpi_userdata/immich/immich-ml.env
-				cat << '_EOF_' > /mnt/dietpi_userdata/immich/immich-ml.env || exit 1
+				G_EXEC install -o immich-ml -g immich-ml -m 0640 /dev/null /mnt/dietpi_userdata/immich-ml/immich-ml.env
+				cat << '_EOF_' > /mnt/dietpi_userdata/immich-ml/immich-ml.env || exit 1
 # Immich Machine Learning port and bind host (use 127.0.0.1 for local, 0.0.0.0 for remote ML)
 IMMICH_PORT=3003
 IMMICH_HOST=127.0.0.1
@@ -12252,7 +12273,7 @@ IMMICH_HOST=127.0.0.1
 IMMICH_LOG_LEVEL=warn
 
 # Cache directory for downloaded AI model files
-MACHINE_LEARNING_CACHE_FOLDER=/mnt/dietpi_userdata/immich/model-cache
+MACHINE_LEARNING_CACHE_FOLDER=/mnt/dietpi_userdata/immich-ml/model-cache
 _EOF_
 			fi
 
@@ -12272,11 +12293,10 @@ After=network-online.target
 
 [Service]
 SyslogIdentifier=Immich-ML
-User=immich
-WorkingDirectory=/opt/immich-ml
+User=immich-ml
 Environment=NO_COLOR=true
 Environment=PATH=/opt/immich-ml/.venv/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
-EnvironmentFile=/mnt/dietpi_userdata/immich/immich-ml.env
+EnvironmentFile=/mnt/dietpi_userdata/immich-ml/immich-ml.env
 ExecStart=/opt/immich-ml/.venv/bin/python -m immich_ml
 
 # Hardening
@@ -12290,7 +12310,7 @@ ProtectControlGroups=1
 ProtectKernelLogs=1
 ProtectClock=1
 NoNewPrivileges=1
-ReadWritePaths=-/mnt/dietpi_userdata/immich
+ReadWritePaths=-/mnt/dietpi_userdata/immich-ml
 
 [Install]
 WantedBy=multi-user.target
@@ -14684,6 +14704,11 @@ _EOF_
 			[[ -d '/usr/local/go' ]] && G_EXEC rm -R /usr/local/go
 		fi
 
+		if To_Uninstall 217 # uv
+		then
+			G_EXEC rm -f /usr/local/bin/uv
+		fi
+
 		if To_Uninstall 191 # Snapcast Server
 		then
 			G_AGP snapserver
@@ -14788,13 +14813,11 @@ _EOF_
 
 		if To_Uninstall 216 # Immich Machine Learning
 		then
-			Remove_Service immich-ml
-			[[ -d '/opt/immich-ml' ]] && G_EXEC rm -Rf /opt/immich-ml
+			Remove_Service immich-ml 1 1
+			G_EXEC rm -Rf /opt/immich-ml
 			# Disable machine learning in Immich server config if still installed
 			[[ -f '/mnt/dietpi_userdata/immich/immich.env' ]] && G_CONFIG_INJECT 'IMMICH_MACHINE_LEARNING_ENABLED=' 'IMMICH_MACHINE_LEARNING_ENABLED=false' /mnt/dietpi_userdata/immich/immich.env
-			# Remove immich user and group only if main Immich is not installed
-			(( ${aSOFTWARE_INSTALL_STATE[215]} > 0 )) || { getent passwd immich > /dev/null && G_EXEC userdel immich; getent group immich > /dev/null && G_EXEC groupdel immich; }
-			[[ -d '/mnt/dietpi_userdata/immich' ]] && G_WHIP_BUTTON_CANCEL_TEXT='Skip' G_WHIP_YESNO "Shall all ${aSOFTWARE_NAME[$software_id]} data at /mnt/dietpi_userdata/immich be removed as well?" && G_EXEC rm -R /mnt/dietpi_userdata/immich
+			[[ -d '/mnt/dietpi_userdata/immich-ml' ]] && G_WHIP_BUTTON_CANCEL_TEXT='Skip' G_WHIP_YESNO "Shall all ${aSOFTWARE_NAME[$software_id]} data at /mnt/dietpi_userdata/immich-ml be removed as well?" && G_EXEC rm -R /mnt/dietpi_userdata/immich-ml
 		fi
 
 		if To_Uninstall 169 # LazyLibrarian
