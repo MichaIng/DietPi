@@ -158,8 +158,8 @@ Process_Software()
 			60) aCOMMANDS[i]='iptables -V' aSERVICES[i]='isc-dhcp-server' aUDP[i]='67';; # aSERVICES[i]='hostapd' fails without actual WiFi interface
 			61) aSERVICES[i]='tor' aTCP[i]='9040' aUDP[i]='53';;
 			62) aCOMMANDS[i]='box86 -v';;
-			#63 LinuxDash
-			#64 phpSysInfo
+			#63) LinuxDash
+			#64) phpSysInfo
 			65) aSERVICES[i]='netdata' aTCP[i]='19999';;
 			66) aSERVICES[i]='rpimonitor' aTCP[i]='8888';;
 			67) aCOMMANDS[i]='firefox-esr -v';;
@@ -188,7 +188,7 @@ Process_Software()
 				'bookworm') aSERVICES[i]='php8.2-fpm';;
 				*) aSERVICES[i]='php8.4-fpm';;
 			esac;;
-			#90 phpMyAdmin
+			#90) phpMyAdmin
 			91) aSERVICES[i]='redis-server' aTCP[i]='6379';;
 			92) aCOMMANDS[i]='certbot --version';;
 			93) aSERVICES[i]='pihole-FTL' aUDP[i]='53';;
@@ -272,7 +272,7 @@ Process_Software()
 			170) aCOMMANDS[i]='unrar -V';;
 			171) aSERVICES[i]='frps frpc' aTCP[i]='7000 7400 7500';;
 			172) aCOMMANDS[i]='wg' aSERVICES[i]='wg-quick@wg0' aUDP[i]='51820' CAPABILITIES+=',CAP_NET_ADMIN';;
-			#173 LXQt: all executables strictly require a Qt session, no help or version output possible
+			#173) LXQt: all executables strictly require a Qt session, no help or version output possible
 			174) aCOMMANDS[i]='gimp -v';;
 			175) aCOMMANDS[i]='xfce4-power-manager -V';;
 			176) aSERVICES[i]='uptime-kuma' aTCP[i]='3002';;
@@ -304,7 +304,7 @@ Process_Software()
 			202) aCOMMANDS[i]='rclone version';;
 			203) aSERVICES[i]='readarr' aTCP[i]='8787';;
 			204) aSERVICES[i]='navidrome' aTCP[i]='4533';;
-			#205 Homer
+			#205) Homer
 			206) aSERVICES[i]='openhab' aTCP[i]='8444'; (( $emulation )) && aDELAY[i]=600;;
 			#207) Moonlight (CLI), "moonlight" command
 			#208) Moonlight (GUI), "moonlight-qt" command
@@ -346,7 +346,6 @@ do
 		213) Process_Software 17 188;;
 		183) Process_Software 87;;
 		215) Process_Software 7 9 91 194;;
-		216) Process_Software 130;;
 		138|187) Process_Software 152;;
 		75) Process_Software 83 87 89;;
 		76) Process_Software 83 88 89;;
