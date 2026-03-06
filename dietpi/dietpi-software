@@ -12048,9 +12048,11 @@ _EOF_
 			local version=$(curl -sSfL 'https://api.github.com/repos/immich-app/immich/releases/latest' | mawk -F\" '/^ *"tag_name": "[^"]*",$/{print $4}')
 			[[ $version ]] || { version='v2.5.6'; G_DIETPI-NOTIFY 1 "Automatic latest ${aSOFTWARE_NAME[$software_id]} version detection failed. Version \"$version\" will be installed as fallback, but a newer version might be available. Please report this at: https://github.com/MichaIng/DietPi/issues"; }
 			Download_Install "https://github.com/immich-app/immich/archive/$version.tar.gz"
-			local build_dir='/mnt/dietpi_userdata/immich_build'
-			[[ -d $build_dir ]] && G_EXEC rm -R "$build_dir"
-			G_EXEC mv "immich-${version#v}" "$build_dir"
+
+			# Move source to disk to reduce RAM usage during heavy build
+			local immich_src='/mnt/dietpi_userdata/immich_src'
+			[[ -d $immich_src ]] && G_EXEC rm -R "$immich_src"
+			G_EXEC mv "immich-${version#v}" "$immich_src"
 
 			# Install build-time tools
 			local arch='x86_64'
@@ -12068,10 +12070,10 @@ _EOF_
 			G_EXEC rm -R /tmp/node-compile-cache
 
 			# Use temporary store, cache, and state dirs
-			G_EXEC cd "$build_dir"
-			G_EXEC pnpm c set --location=project storeDir "$build_dir/.pnpmStore"
-			G_EXEC pnpm c set --location=project cacheDir "$build_dir/.pnpmCache"
-			G_EXEC pnpm c set --location=project stateDir "$build_dir/.pnpmState"
+			G_EXEC cd "$immich_src"
+			G_EXEC pnpm c set --location=project storeDir "$immich_src/.pnpmStore"
+			G_EXEC pnpm c set --location=project cacheDir "$immich_src/.pnpmCache"
+			G_EXEC pnpm c set --location=project stateDir "$immich_src/.pnpmState"
 
 			# Assure at least 6 GiB total memory (RAM + swap) for the build, saving original swap size first
 			if (( $RAM_TOTAL < 6*1024 ))
@@ -12104,14 +12106,10 @@ _EOF_
 			G_EXEC mv plugins/dist /opt/immich/corePlugin/
 			G_EXEC mv plugins/manifest.json /opt/immich/corePlugin/
 
-			# Remove build directory, keeping ML source if Immich Machine Learning will be co-installed
+			# Remove source directory if Immich Machine Learning won't be co-installed
 			G_EXEC cd "$G_WORKING_DIR"
-			if (( ${aSOFTWARE_INSTALL_STATE[216]} == 1 ))
-			then
-				[[ -d '/opt/immich-ml_src' ]] && G_EXEC rm -R /opt/immich-ml_src
-				G_EXEC mv "$build_dir/machine-learning" /opt/immich-ml_src
-			fi
-			G_EXEC rm -R "$build_dir"
+			(( ${aSOFTWARE_INSTALL_STATE[216]} == 1 )) || G_EXEC rm -R "$immich_src"
+			
 
 			# Restore original swap size, ensuring a minimum of 2 GiB total memory (RAM + swap) for smaller SBCs
 			if (( $RAM_TOTAL < 6*1024 ))
@@ -12238,7 +12236,19 @@ _EOF_
 			# - g++ for kiwisolver v1.4.5, can be removed once Immich bumps it to a recent version: https://github.com/immich-app/immich/blob/main/machine-learning/uv.lock
 			aDEPS=('libgl1' 'g++')
 
-			# RKNPU support: check for RK3588 SoCs with Rockchip vendor kernel (which ships the RK NPU driver)
+			# Download Immich source if it was not co-installed
+			if (( ${aSOFTWARE_INSTALL_STATE[215]} == 1 ))
+			then
+				G_AGI "${aDEPS[@]}"
+				unset -v aDEPS
+			else
+				local version=$(curl -sSfL 'https://api.github.com/repos/immich-app/immich/releases/latest' | mawk -F\" '/^ *"tag_name": "[^"]*",$/{print $4}')
+				[[ $version ]] || { version='v2.5.6'; G_DIETPI-NOTIFY 1 "Automatic latest ${aSOFTWARE_NAME[$software_id]} version detection failed. Version \"$version\" will be installed as fallback, but a newer version might be available. Please report this at: https://github.com/MichaIng/DietPi/issues"; }
+				Download_Install "https://github.com/immich-app/immich/archive/$version.tar.gz"
+				immich_src="immich-${version#v}"
+			fi
+
+			# RKNPU support: check for RK3588 SoCs with Rockchip vendor kernel (which ships the RKNPU driver)
 			local uv_extra='cpu'
 			(( $G_HW_CPUID == 11 )) && dpkg-query -s 'linux-image-vendor-rk35xx' &> /dev/null && uv_extra='rknn'
 
@@ -12246,26 +12256,13 @@ _EOF_
 			# - UV_PROJECT_ENVIRONMENT=/opt/immich-ml: install venv at /opt/immich-ml instead of <src>/.venv
 			# - --no-editable: install immich_ml as a wheel (only immich_ml/ is included per pyproject.toml), so the source can be removed
 			# - --no-python-downloads: use system Python 3 (dep 130) only, satisfying the >=3.11 requirement
+			G_EXEC cd "$immich_src/machine-learning"
 			[[ -d '/opt/immich-ml' ]] && G_EXEC rm -R /opt/immich-ml
-			if [[ -d '/opt/immich-ml_src' ]]
-			then
-				G_AGI "${aDEPS[@]}"
-				unset -v aDEPS
-				G_EXEC cd /opt/immich-ml_src
-				G_EXEC_OUTPUT=1 G_EXEC env UV_PROJECT_ENVIRONMENT=/opt/immich-ml uv sync --frozen --extra "$uv_extra" --no-dev --no-editable --compile-bytecode --no-progress --no-python-downloads
-				G_EXEC cd "$G_WORKING_DIR"
-				G_EXEC rm -R /opt/immich-ml_src
-			else
-				local version=$(curl -sSfL 'https://api.github.com/repos/immich-app/immich/releases/latest' | mawk -F\" '/^ *"tag_name": "[^"]*",$/{print $4}')
-				[[ $version ]] || { version='v2.5.6'; G_DIETPI-NOTIFY 1 "Automatic latest ${aSOFTWARE_NAME[$software_id]} version detection failed. Version \"$version\" will be installed as fallback, but a newer version might be available. Please report this at: https://github.com/MichaIng/DietPi/issues"; }
-				Download_Install "https://github.com/immich-app/immich/archive/$version.tar.gz"
-				G_EXEC cd "immich-${version#v}/machine-learning"
-				G_EXEC_OUTPUT=1 G_EXEC env UV_PROJECT_ENVIRONMENT=/opt/immich-ml uv sync --frozen --extra "$uv_extra" --no-dev --no-editable --compile-bytecode --no-progress --no-python-downloads
-				G_EXEC cd "$G_WORKING_DIR"
-				G_EXEC rm -R "immich-${version#v}"
-			fi
+			G_EXEC_OUTPUT=1 G_EXEC env UV_PROJECT_ENVIRONMENT=/opt/immich-ml uv sync --frozen --extra "$uv_extra" --no-dev --no-editable --compile-bytecode --no-progress --no-python-downloads
+			G_EXEC cd "$G_WORKING_DIR"
+			G_EXEC rm -R "$immich_src/machine-learning"
 
-			# RKNPU: download librknnrt.so into the venv directory for LD_PRELOAD
+			# RKNPU support: download librknnrt.so into the venv directory for LD_PRELOAD
 			[[ $uv_extra == 'rknn' ]] && G_EXEC curl -sSfLo /opt/immich-ml/librknnrt.so 'https://raw.githubusercontent.com/airockchip/rknn-toolkit2/master/rknpu2/runtime/Linux/librknn_api/aarch64/librknnrt.so'
 
 			# User
@@ -12304,13 +12301,8 @@ After=network-online.target
 [Service]
 SyslogIdentifier=Immich-ML
 User=immich-ml
-Environment=NO_COLOR=true
-Environment=PATH=/opt/immich-ml/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+Environment=NO_COLOR=true PATH='/opt/immich-ml/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin'
 EnvironmentFile=/mnt/dietpi_userdata/immich-ml/immich-ml.env
-_EOF_
-			# Inject RKNPU preload into service unit if applicable
-			[[ $uv_extra == 'rknn' ]] && { echo 'Environment=LD_PRELOAD=/opt/immich-ml/librknnrt.so' >> /etc/systemd/system/immich-ml.service || exit 1; }
-			cat << '_EOF_' >> /etc/systemd/system/immich-ml.service || exit 1
 ExecStart=/opt/immich-ml/bin/python -m immich_ml
 
 # Hardening
@@ -12329,6 +12321,8 @@ ReadWritePaths=-/mnt/dietpi_userdata/immich-ml
 [Install]
 WantedBy=multi-user.target
 _EOF_
+			# RKNPU support: Inject librknnrt.so preload into service unit if applicable
+			[[ $uv_extra == 'rknn' ]] && G_CONFIG_INJECT 'Environment=LD_PRELOAD=' 'Environment=LD_PRELOAD=/opt/immich-ml/librknnrt.so' /etc/systemd/system/immich-ml.service 'Environment='
 		fi
 
 		if To_Install 169 lazylibrarian # LazyLibrarian
