@@ -12238,37 +12238,35 @@ _EOF_
 			# - g++ for kiwisolver v1.4.5, can be removed once Immich bumps it to a recent version: https://github.com/immich-app/immich/blob/main/machine-learning/uv.lock
 			aDEPS=('libgl1' 'g++')
 
-			# Reuse ML source left by Immich (215) install if co-installed, otherwise download it
+			# RKNPU support: check for RK3588 SoCs with Rockchip vendor kernel (which ships the RK NPU driver)
+			local uv_extra='cpu'
+			(( $G_HW_CPUID == 11 )) && dpkg-query -s 'linux-image-vendor-rk35xx' &> /dev/null && uv_extra='rknn'
+
+			# Install the immich_ml Python package and its dependencies into a virtual environment at /opt/immich-ml
+			# - UV_PROJECT_ENVIRONMENT=/opt/immich-ml: install venv at /opt/immich-ml instead of <src>/.venv
+			# - --no-editable: install immich_ml as a wheel (only immich_ml/ is included per pyproject.toml), so the source can be removed
+			# - --no-python-downloads: use system Python 3 (dep 130) only, satisfying the >=3.11 requirement
+			[[ -d '/opt/immich-ml' ]] && G_EXEC rm -R /opt/immich-ml
 			if [[ -d '/opt/immich-ml_src' ]]
 			then
 				G_AGI "${aDEPS[@]}"
 				unset -v aDEPS
-				[[ -d '/opt/immich-ml' ]] && G_EXEC rm -R /opt/immich-ml
-				G_EXEC mv /opt/immich-ml_src /opt/immich-ml
+				G_EXEC cd /opt/immich-ml_src
+				G_EXEC_OUTPUT=1 G_EXEC env UV_PROJECT_ENVIRONMENT=/opt/immich-ml uv sync --frozen --extra "$uv_extra" --no-dev --no-editable --compile-bytecode --no-progress --no-python-downloads
+				G_EXEC cd "$G_WORKING_DIR"
+				G_EXEC rm -R /opt/immich-ml_src
 			else
 				local version=$(curl -sSfL 'https://api.github.com/repos/immich-app/immich/releases/latest' | mawk -F\" '/^ *"tag_name": "[^"]*",$/{print $4}')
 				[[ $version ]] || { version='v2.5.6'; G_DIETPI-NOTIFY 1 "Automatic latest ${aSOFTWARE_NAME[$software_id]} version detection failed. Version \"$version\" will be installed as fallback, but a newer version might be available. Please report this at: https://github.com/MichaIng/DietPi/issues"; }
 				Download_Install "https://github.com/immich-app/immich/archive/$version.tar.gz"
-				[[ -d '/opt/immich-ml' ]] && G_EXEC rm -R /opt/immich-ml
-				G_EXEC mv "immich-${version#v}/machine-learning" /opt/immich-ml
+				G_EXEC cd "immich-${version#v}/machine-learning"
+				G_EXEC_OUTPUT=1 G_EXEC env UV_PROJECT_ENVIRONMENT=/opt/immich-ml uv sync --frozen --extra "$uv_extra" --no-dev --no-editable --compile-bytecode --no-progress --no-python-downloads
+				G_EXEC cd "$G_WORKING_DIR"
 				G_EXEC rm -R "immich-${version#v}"
 			fi
 
-			# RKNPU support: download librknnrt.so for RK3588 SoCs with vendor kernel
-			local uv_extra='cpu'
-			# - RK3588 with Rockchip vendor kernel (which ships the RK NPU driver)
-			if (( $G_HW_CPUID == 11 )) && dpkg-query -s 'linux-image-vendor-rk35xx' &> /dev/null
-			then
-				uv_extra='rknn'
-				G_EXEC curl -sSfLo /opt/immich-ml/librknnrt.so 'https://raw.githubusercontent.com/airockchip/rknn-toolkit2/master/rknpu2/runtime/Linux/librknn_api/aarch64/librknnrt.so'
-			fi
-
-			# Install Python dependencies into a virtual environment
-			# NB: Python 3 (dep 130) provides Python >= 3.11 on Bookworm and Trixie, satisfying the ML requirement
-			# NB: --no-python-downloads prevents uv from fetching a Python runtime; uses system Python only
-			G_EXEC cd /opt/immich-ml
-			G_EXEC_OUTPUT=1 G_EXEC uv sync --frozen --extra "$uv_extra" --no-dev --compile-bytecode --no-progress --no-python-downloads
-			G_EXEC cd "$G_WORKING_DIR"
+			# RKNPU: download librknnrt.so into the venv directory for LD_PRELOAD
+			[[ $uv_extra == 'rknn' ]] && G_EXEC curl -sSfLo /opt/immich-ml/librknnrt.so 'https://raw.githubusercontent.com/airockchip/rknn-toolkit2/master/rknpu2/runtime/Linux/librknn_api/aarch64/librknnrt.so'
 
 			# User
 			Create_User -d /mnt/dietpi_userdata/immich-ml immich-ml
@@ -12307,9 +12305,13 @@ After=network-online.target
 SyslogIdentifier=Immich-ML
 User=immich-ml
 Environment=NO_COLOR=true
-Environment=PATH=/opt/immich-ml/.venv/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+Environment=PATH=/opt/immich-ml/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
 EnvironmentFile=/mnt/dietpi_userdata/immich-ml/immich-ml.env
-ExecStart=/opt/immich-ml/.venv/bin/python -m immich_ml
+_EOF_
+			# Inject RKNPU preload into service unit if applicable
+			[[ $uv_extra == 'rknn' ]] && { echo 'Environment=LD_PRELOAD=/opt/immich-ml/librknnrt.so' >> /etc/systemd/system/immich-ml.service || exit 1; }
+			cat << '_EOF_' >> /etc/systemd/system/immich-ml.service || exit 1
+ExecStart=/opt/immich-ml/bin/python -m immich_ml
 
 # Hardening
 ProtectSystem=strict
@@ -12327,8 +12329,6 @@ ReadWritePaths=-/mnt/dietpi_userdata/immich-ml
 [Install]
 WantedBy=multi-user.target
 _EOF_
-			# Inject RKNPU preload into service unit if applicable
-			[[ -f '/opt/immich-ml/librknnrt.so' ]] && G_CONFIG_INJECT 'Environment=LD_PRELOAD=' 'Environment=LD_PRELOAD=/opt/immich-ml/librknnrt.so' /etc/systemd/system/immich-ml.service 'Environment='
 		fi
 
 		if To_Install 169 lazylibrarian # LazyLibrarian
