@@ -370,6 +370,18 @@ aCHECK[$software_id]='curl -sSf '\''https://api.github.com/repos/WebAssembly/bin
 aARCH[$software_id]='aarch64 x86_64'
 aREGEX[$software_id]='https://github.com/WebAssembly/binaryen/releases/download/.*/binaryen-.*-$arch-linux.tar.gz'
 
+# Immich Machine Learning (same Immich release)
+software_id=216
+aCHECK[$software_id]='curl -sSf '\''https://api.github.com/repos/immich-app/immich/releases/latest'\'' | mawk -F\" '\''/^ *"tag_name": "[^"]*",$/{print $4}'\'
+aREGEX[$software_id]='version='\''[^'\'']*'\'
+aREPLACE[$software_id]='version='\''$release'\'
+
+# uv
+software_id=217
+aCHECK[$software_id]='curl -sSf '\''https://api.github.com/repos/astral-sh/uv/releases/latest'\'' | mawk -F\" "/^ *\"browser_download_url\": \".*\/uv-$arch\.tar\.gz\"$/{print \$4}"'
+aARCH[$software_id]='arm-unknown-linux-musleabihf armv7-unknown-linux-gnueabihf aarch64-unknown-linux-gnu x86_64-unknown-linux-gnu riscv64gc-unknown-linux-gnu'
+aREGEX[$software_id]='https://github.com/astral-sh/uv/releases/download/.*/uv-$arch.tar.gz'
+
 ### URL check loop ###
 
 for i in "${!aCHECK[@]}"

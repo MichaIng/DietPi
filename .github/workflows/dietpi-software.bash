@@ -158,8 +158,8 @@ Process_Software()
 			60) aCOMMANDS[i]='iptables -V' aSERVICES[i]='isc-dhcp-server' aUDP[i]='67';; # aSERVICES[i]='hostapd' fails without actual WiFi interface
 			61) aSERVICES[i]='tor' aTCP[i]='9040' aUDP[i]='53';;
 			62) aCOMMANDS[i]='box86 -v';;
-			#63 LinuxDash
-			#64 phpSysInfo
+			#63) LinuxDash
+			#64) phpSysInfo
 			65) aSERVICES[i]='netdata' aTCP[i]='19999';;
 			66) aSERVICES[i]='rpimonitor' aTCP[i]='8888';;
 			67) aCOMMANDS[i]='firefox-esr -v';;
@@ -188,7 +188,7 @@ Process_Software()
 				'bookworm') aSERVICES[i]='php8.2-fpm';;
 				*) aSERVICES[i]='php8.4-fpm';;
 			esac;;
-			#90 phpMyAdmin
+			#90) phpMyAdmin
 			91) aSERVICES[i]='redis-server' aTCP[i]='6379';;
 			92) aCOMMANDS[i]='certbot --version';;
 			93) aSERVICES[i]='pihole-FTL' aUDP[i]='53';;
@@ -272,7 +272,7 @@ Process_Software()
 			170) aCOMMANDS[i]='unrar -V';;
 			171) aSERVICES[i]='frps frpc' aTCP[i]='7000 7400 7500';;
 			172) aCOMMANDS[i]='wg' aSERVICES[i]='wg-quick@wg0' aUDP[i]='51820' CAPABILITIES+=',CAP_NET_ADMIN';;
-			#173 LXQt: all executables strictly require a Qt session, no help or version output possible
+			#173) LXQt: all executables strictly require a Qt session, no help or version output possible
 			174) aCOMMANDS[i]='gimp -v';;
 			175) aCOMMANDS[i]='xfce4-power-manager -V';;
 			176) aSERVICES[i]='uptime-kuma' aTCP[i]='3002';;
@@ -304,7 +304,7 @@ Process_Software()
 			202) aCOMMANDS[i]='rclone version';;
 			203) aSERVICES[i]='readarr' aTCP[i]='8787';;
 			204) aSERVICES[i]='navidrome' aTCP[i]='4533';;
-			#205 Homer
+			#205) Homer
 			206) aSERVICES[i]='openhab' aTCP[i]='8444'; (( $emulation )) && aDELAY[i]=600;;
 			#207) Moonlight (CLI), "moonlight" command
 			#208) Moonlight (GUI), "moonlight-qt" command
@@ -315,6 +315,8 @@ Process_Software()
 			213) aSERVICES[i]='soju' aTCP[i]='6667';;
 			214) aSERVICES[i]='whodb' aTCP[i]='8091';;
 			215) aSERVICES[i]='immich' aTCP[i]='2283';;
+			216) aSERVICES[i]='immich-ml' aTCP[i]='3003';;
+			217) aCOMMANDS[i]='uv --version';;
 			*) :;;
 		esac
 		aINSTALL[i]=1
@@ -497,7 +499,7 @@ then
 	# Forky
 	if (( $dist > 8 ))
 	then
-		G_EXEC mkdir rootfs/etc/systemd/system/{mariadb,systemd-logind,apache2,mpd,vaultwarden,blynkserver,gogs,whodb,lazylibrarian,bazarr,immich}.service.d
+		G_EXEC mkdir rootfs/etc/systemd/system/{mariadb,systemd-logind,apache2,mpd,vaultwarden,blynkserver,gogs,whodb,lazylibrarian,bazarr,immich,immich-ml}.service.d
 		# ProtectHome/ProtectSystem/PrivateTmp/...: "Failed to set up mount namespacing: Invalid argument": https://github.com/systemd/systemd/issues/39951
 		G_EXEC eval 'echo -e '\''[Service]\nProtectHome=0\nProtectSystem=0'\'' > rootfs/etc/systemd/system/mariadb.service.d/dietpi-container.conf'
 		G_EXEC eval 'echo -e '\''[Service]\nProtectHome=0\nProtectSystem=0\nPrivateTmp=0\nReadWritePaths=\nProtectKernelModules=0\nProtectControlGroups=0\nProtectKernelLogs=0'\'' > rootfs/etc/systemd/system/systemd-logind.service.d/dietpi-container.conf'
@@ -511,6 +513,7 @@ then
 		G_EXEC eval 'echo -e '\''[Service]\nProtectSystem=0\nProtectHome=0\nPrivateTmp=0\nPrivateDevices=0\nProtectKernelModules=0\nProtectControlGroups=0\nProtectKernelTunables=0\nProtectKernelLogs=0\nReadWritePaths='\'' > rootfs/etc/systemd/system/lazylibrarian.service.d/dietpi-container.conf'
 		G_EXEC eval 'echo -e '\''[Service]\nProtectSystem=0\nProtectHome=0\nPrivateTmp=0\nPrivateDevices=0\nProtectControlGroups=0\nProtectKernelTunables=0\nReadWritePaths='\'' > rootfs/etc/systemd/system/bazarr.service.d/dietpi-container.conf'
 		G_EXEC eval 'echo -e '\''[Service]\nProtectSystem=0\nProtectHome=0\nPrivateTmp=0\nPrivateDevices=0\nProtectKernelModules=0\nProtectControlGroups=0\nProtectKernelTunables=0\nProtectKernelLogs=0\nReadWritePaths='\'' > rootfs/etc/systemd/system/immich.service.d/dietpi-container.conf'
+		G_EXEC eval 'echo -e '\''[Service]\nProtectSystem=0\nProtectHome=0\nPrivateTmp=0\nPrivateDevices=0\nProtectKernelModules=0\nProtectControlGroups=0\nProtectKernelTunables=0\nProtectKernelLogs=0\nReadWritePaths='\'' > rootfs/etc/systemd/system/immich-ml.service.d/dietpi-container.conf'
 
 		# /dev/console == /dev/pts/0 seen as "Inappropriate ioctl for device" leading to failing console-getty.service and StandardOutput=tty
 		G_EXEC eval 'echo -e '\''#!/bin/dash\nexec /boot/dietpi/dietpi-login > /dev/console 2>&1'\'' > rootfs/var/lib/dietpi/postboot.d/dietpi-login'
