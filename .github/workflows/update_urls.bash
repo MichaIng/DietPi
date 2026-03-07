@@ -206,7 +206,7 @@ aREGEX[$software_id]='https://github.com/Prowlarr/Prowlarr/releases/download/.*/
 
 # Home Assistant: Update Python version
 software_id=157
-aCHECK[$software_id]='curl -sSf '\''https://api.github.com/repos/pyenv/pyenv/contents/plugins/python-build/share/python-build?ref=master'\'' | mawk -F\" '\''/^ *"name": "3\.13\.[0-9]*",$/{print $4}'\'' | sort -Vr | head -1'
+aCHECK[$software_id]='curl -sSf '\''https://api.github.com/repos/pyenv/pyenv/contents/plugins/python-build/share/python-build?ref=master'\'' | mawk -F\" '\''/^ *"name": "3\.14\.[0-9]*",$/{print $4}'\'' | sort -Vr | head -1'
 aREGEX[$software_id]='ha_python_version='\''[^'\'']*'\'
 aREPLACE[$software_id]='ha_python_version='\''$release'\'
 
