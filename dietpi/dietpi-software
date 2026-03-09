@@ -158,10 +158,12 @@ Available commands:
 		done
 	}
 
-	# Total physical system RAM: Used to calculate percentage based value for software cache limits, e.g.: OPcache/APCu
+	# Total physical system RAM: Used to calculate percentage based value for software cache limits, like OPcache/APCu.
 	readonly RAM_PHYS=$(free -m | mawk '/^Mem:/{print $2;exit}')
 	# Total RAM + swap space: Used to estimate whether the swap file size needs to be increased.
-	readonly RAM_TOTAL=$(free -tm | mawk '/^Total:/{print $2;exit}')
+	RAM_TOTAL=$(free -tm | mawk '/^Total:/{print $2;exit}')
+	# Swap space
+	RAM_SWAP=$(( $RAM_TOTAL - $RAM_PHYS ))
 
 	# Whether to restart Deluge web UI once, required on fresh installs for auto-connection to work, more precisely a little delay between daemon and web UI is required
 	RESTART_DELUGE_WEB=0
@@ -2560,10 +2562,11 @@ sudo sysctl -p /etc/sysctl.d/dietpi-$1.conf"
 			# Can piwheels be used? The Python version needs to match the Debian version, else dynamically linked shared libraries may not match!
 			if (( $G_HW_ARCH < 3 ))
 			then
-				if (( ( $G_DISTRO == 7 && $python_version == 311 ) || ( $G_DISTRO > 7 && $python_version == 313 ) ))
-				then
-					piwheels=1
-				fi
+				case $G_DISTRO in
+					7) (( $python_version == 311 )) && piwheels=1;;
+					8) (( $python_version == 313 )) && piwheels=1;;
+					*) (( $python_version == 314 )) && piwheels=1;;
+				esac
 			fi
 
 			# Process arguments
@@ -2673,6 +2676,29 @@ sudo sysctl -p /etc/sysctl.d/dietpi-$1.conf"
 			[[ $venv_version == "$PYTHON_VERSION" ]] && return 0
 			G_DIETPI-NOTIFY 2 "Recreating venv due to Python version change: $venv_version -> $PYTHON_VERSION"
 			G_EXEC rm -R "$1"
+		}
+
+		# Raise swap space to assure min $1 MiB total memory
+		RAM_SWAP_OLD=$RAM_SWAP
+		Min_Total_Memory()
+		{
+			# Assure input is an integer >= 512, treat anything below that as typo
+			G_CHECK_VALIDINT "$1" 512
+
+			# Check whether requirement is met already
+			(( $1 > $RAM_TOTAL )) || return 0
+
+			# Avoid very small swap files, assume a margin of 10%
+			(( $1 > $RAM_PHYS*11/10 )) || return 0
+
+			G_DIETPI-NOTIFY 2 "Raising swap size to meet requirement of $1 MiB memory for ${aSOFTWARE_NAME[$software_id]}"
+
+			# Apply swap size
+			/boot/dietpi/func/dietpi-set_swapfile $(( $1 - $RAM_PHYS ))
+
+			RAM_TOTAL=$1
+			RAM_SWAP_OLD=$RAM_SWAP
+			RAM_SWAP=$(( $RAM_TOTAL - $RAM_PHYS ))
 		}
 
 		To_Install()
@@ -4874,8 +4900,8 @@ The install script will now exit. After applying one of the above, rerun dietpi-
 			occ db:add-missing-indices
 			occ db:add-missing-primary-keys
 
-			# On <1 GiB devices assure at least 512 MiB swap space are available to stand 512 MiB file uploads + increased PHP cache and session file usage: https://github.com/MichaIng/DietPi/issues/2293
-			(( $RAM_PHYS < 924 && $(free -m | mawk '/^Swap:/{print $2;exit}') < 512 )) && /boot/dietpi/func/dietpi-set_swapfile 512
+			# Assure 1.5 GiB RAM to stand 512 MiB file uploads + increased PHP cache and session file usage: https://github.com/MichaIng/DietPi/issues/2293
+			Min_Total_Memory 1536
 
 			G_EXEC occ maintenance:mode --off
 
@@ -5920,12 +5946,8 @@ _EOF_
 			G_EXEC curl -sSfLo install.sh 'https://raw.githubusercontent.com/pi-hole/pi-hole/master/automated%20install/basic-install.sh'
 			G_EXEC chmod +x install.sh
 
-			# Check free available memory. Increase swap size to prevent gravity running out of memory.
-			if (( $(free -m | mawk '/^Mem:/{print $7;exit}') < 512 && $(free -m | mawk '/^Swap:/{print $2;exit}') < 512 ))
-			then
-				G_DIETPI-NOTIFY 2 'Increasing swap size to 512 MiB for running gravity.sh, please wait...\n'
-				/boot/dietpi/func/dietpi-set_swapfile 512
-			fi
+			# Assure 1 GiB memory to prevent gravity running out of memory
+			Min_Total_Memory 1024
 
 			# Unbound: Switch port to 5335 if it was installed before, else it got just configured within its install step above
 			if (( ${aSOFTWARE_INSTALL_STATE[182]} == 2 )) && grep -q '^[[:blank:]]*port:[[:blank:]][[:blank:]]*53$' /etc/unbound/unbound.conf.d/dietpi.conf
@@ -11305,20 +11327,18 @@ _EOF_
 			# Permissions
 			G_EXEC chown -R papermc:papermc /mnt/dietpi_userdata/papermc
 
-			# Assure 512 MiB heap size and 1.5 GiB overall memory (-100 MiB to avoid tiny swap space)
+			# Adjust heap size
 			local memory_limit=$JAVA_MAX_HEAP_SIZE
 			if (( $memory_limit < 1024 ))
 			then
-				memory_limit=512
-				if (( $RAM_TOTAL < 1436 ))
+				if (( $RAM_PHYS > 1848 ))
 				then
-					G_DIETPI-NOTIFY 2 'Stable PaperMC operation requires at least 1.5 GiB system memory. We will now increase your swap size to satisfy this requirement.'
-					/boot/dietpi/func/dietpi-set_swapfile $(( 1536 - $RAM_PHYS ))
-
-				# Apply 1 GiB heap size on 2 GiB+ physical RAM devices
-				elif (( $RAM_PHYS > 1848 ))
-				then
+					# 1 GiB on >=2 GB physical RAM devices
 					memory_limit=1024
+				else
+					# 512 MiB as absolute minimum
+					memory_limit=512
+					Min_Total_Memory 1536
 				fi
 			fi
 
@@ -12003,13 +12023,8 @@ _EOF_
 			G_EXEC pnpm c set --location=project cacheDir "$immich_src/.pnpmCache"
 			G_EXEC pnpm c set --location=project stateDir "$immich_src/.pnpmState"
 
-			# Assure at least 6 GiB total memory (RAM + swap) for the build, saving original swap size first
-			if (( $RAM_TOTAL < 6*1024 ))
-			then
-				local orig_swap_size=$(( $RAM_TOTAL - $RAM_PHYS ))
-				G_DIETPI-NOTIFY 2 'Immich build requires at least 6 GiB of total memory. We will temporarily increase the swap size to satisfy this requirement.'
-				/boot/dietpi/func/dietpi-set_swapfile $(( 6*1024 - $RAM_PHYS ))
-			fi
+			# Assure at least 5 GiB total memory (RAM + swap) for the build
+			Min_Total_Memory 5120
 
 			# Prevent JavaScript OOM during build
 			export NODE_OPTIONS='--max-old-space-size=4096'
@@ -12038,12 +12053,11 @@ _EOF_
 			G_EXEC cd "$G_WORKING_DIR"
 			(( ${aSOFTWARE_INSTALL_STATE[216]} == 1 )) || G_EXEC rm -R "$immich_src"
 
-			# Restore original swap size, ensuring a minimum of 2 GiB total memory (RAM + swap) for smaller SBCs
-			if (( $RAM_TOTAL < 6*1024 ))
+			# If Immich Machine Learning is not installed, restore original swap size, but ensuring a minimum of 2 GiB total memory (RAM + swap) for smaller SBCs
+			if (( ${aSOFTWARE_INSTALL_STATE[216]} < 1 && $RAM_SWAP_OLD < $RAM_SWAP ))
 			then
-				(( $RAM_TOTAL < 2048 )) && orig_swap_size=1 # dietpi-set_swapfile internally translates "1" to assure 2 GiB total memory
-				/boot/dietpi/func/dietpi-set_swapfile "$orig_swap_size"
-				unset -v orig_swap_size
+				(( $RAM_SWAP_OLD + $RAM_PHYS < 2048 )) && RAM_SWAP_OLD=1 # "1" => 2 GiB total memory
+				/boot/dietpi/func/dietpi-set_swapfile "$RAM_SWAP_OLD"
 			fi
 
 			# Install GeoNames data for reverse geocoding
@@ -12173,6 +12187,14 @@ _EOF_
 				[[ $version ]] || { version='v2.5.6'; G_DIETPI-NOTIFY 1 "Automatic latest ${aSOFTWARE_NAME[$software_id]} version detection failed. Version \"$version\" will be installed as fallback, but a newer version might be available. Please report this at: https://github.com/MichaIng/DietPi/issues"; }
 				Download_Install "https://github.com/immich-app/immich/archive/$version.tar.gz"
 				immich_src="immich-${version#v}"
+			fi
+
+			# Assure at least 3 GiB total memory (RAM + swap), and 5 GiB if co-installed with Immich core
+			if (( ${aSOFTWARE_INSTALL_STATE[215]} > 0 ))
+			then
+				Min_Total_Memory 5120
+			else
+				Min_Total_Memory 3072
 			fi
 
 			# Install the immich_ml Python package and its dependencies into a virtual environment at /opt/immich-ml
