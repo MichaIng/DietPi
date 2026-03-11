@@ -241,6 +241,11 @@ software_id=179
 aCHECK[$software_id]='curl -sSf '\''https://api.github.com/repos/gotson/komga/releases/latest'\'' | mawk -F\" '\''/^ *"browser_download_url": ".*\/komga-[^"\/]*\.jar"$/{print $4}'\'
 aREGEX[$software_id]='https://github.com/gotson/komga/releases/download/.*/komga-.*\.jar'
 
+# PaperMC
+software_id=181
+aCHECK[$software_id]='url='\''https://fill.papermc.io/v3/projects/paper'\''; version=$(curl -sSf "$url"); version=${version#*:\[\"} version=${version%%\"*}; build=$(curl -sSf "$url/versions/$version"); build=${build##*\":\[} build=${build%%,*}; url=$(curl -sSf "$url/versions/$version/builds/$build"); url=${url##*\"url\":\"} url=${url%%\"*}; echo "$url"'
+aREGEX[$software_id]='https://fill-data.papermc.io/v1/objects/.*/paper-.*.jar'
+
 # Kubo
 software_id=186
 aCHECK[$software_id]='curl -sSf '\''https://dist.ipfs.tech/kubo/versions'\'' | sed '\''/-rc[0-9]*$/d'\'' | tail -1'
