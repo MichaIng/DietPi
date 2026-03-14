@@ -221,7 +221,7 @@ aREPLACE[$software_id]='ha_python_version='\''$release'\'
 # Gitea
 software_id=165
 aURL[$software_id]='https://api.github.com/repos/go-gitea/gitea/releases/latest'
-aCHECK[$software_id]='echo "$response" | grep -Po "\"browser_download_url\": *\"\K[^\"]*\/gitea-[^\"\/]*-linux-$arch\.xz"'
+aCHECK[$software_id]='echo "$response" | grep -Po "\"browser_download_url\": *\"\K[^\"]*\/gitea-[^\"\/]*-linux-$arch\.xz(?=\")"'
 aARCH[$software_id]='arm-6 arm64 amd64 riscv64'
 aARCH_CHECK[$software_id]='arm-7'
 aREGEX[$software_id]='https://github.com/go-gitea/gitea/releases/download/.*/gitea-.*-linux-\$arch.xz'
