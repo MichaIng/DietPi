@@ -134,11 +134,6 @@
 		# Brightness
 		G_WHIP_MENU_ARRAY+=('16' ': Display Brightness')
 
-		# CPU Temp Sensor
-		local cpu_temp_sensor_current=$(sed -n 's/^CONFIG_CPU_TEMP_PATH=//p' /boot/dietpi.txt)
-		[[ -z "$cpu_temp_sensor_current" || "$cpu_temp_sensor_current" == 'auto' ]] && cpu_temp_sensor_current='auto'
-		G_WHIP_MENU_ARRAY+=('19' ": CPU Temp Sensor     : [$cpu_temp_sensor_current]")
-
 		# X11 DPI
 		local xorg_dpi_current=$(sed -n '/^[[:blank:]]*SOFTWARE_XORG_DPI=/{s/^[^=]*=//p;q}' /boot/dietpi.txt)
 		G_WHIP_MENU_ARRAY+=('17' ": X.Org DPI: [${xorg_dpi_current:-N/A}]")
@@ -505,49 +500,6 @@ A long (or insufficiently manufactured) cable may required a higher boost settin
 				echo "xrandr --dpi $G_WHIP_RETURNED_VALUE" > /etc/X11/Xsession.d/99-dietpi-dpi
 				REBOOT_REQUIRED=1
 			fi
-		elif (( $G_WHIP_RETURNED_VALUE == 19 ))
-		then
-			local current_sensor=$(sed -n 's/^CONFIG_CPU_TEMP_PATH=//p' /boot/dietpi.txt)
-			[[ $current_sensor == 'auto' ]] && current_sensor=''
-
-			G_WHIP_MENU_ARRAY=()
-			local apaths=() aidx=0
-			local sfile stemp smark
-
-			for sfile in /sys/class/thermal/thermal_zone*/temp /sys/class/hwmon/hwmon*/temp*_input
-			do
-				[[ -f "$sfile" ]] || continue
-				stemp=$(cat "$sfile" 2>/dev/null)
-				[[ "$stemp" =~ ^[0-9]+$ && "$stemp" -gt 0 ]] || continue
-				(( stemp > 1000 )) && stemp=$((stemp/1000))
-
-				smark=""
-				[[ "$sfile" == "$current_sensor" ]] && smark=" [*]"
-
-				G_WHIP_MENU_ARRAY+=("$aidx" "${sfile##/sys/class/} = ${stemp}C${smark}")
-				apaths+=("$sfile")
-				((aidx++))
-			done
-
-			G_WHIP_MENU_ARRAY+=('auto' 'Auto-detect (default)')
-			G_WHIP_MENU_ARRAY+=('custom' 'Enter custom path')
-
-			G_WHIP_DEFAULT_ITEM=${current_sensor:-auto}
-			G_WHIP_MENU "Select CPU temperature sensor:\n\nCurrent: ${current_sensor:-auto}" || return 0
-
-			if [[ $G_WHIP_RETURNED_VALUE == 'custom' ]]
-			then
-				G_WHIP_DEFAULT_ITEM=$current_sensor
-				G_WHIP_INPUTBOX 'Enter full sensor path:\n\nExample: /sys/class/hwmon/hwmon1/temp1_input' || return 0
-				[[ -f "$G_WHIP_RETURNED_VALUE" ]] || { G_WHIP_MSG "Path not found:\n\n$G_WHIP_RETURNED_VALUE"; return 0; }
-
-			elif [[ $G_WHIP_RETURNED_VALUE =~ ^[0-9]+$ ]]
-			then
-				G_WHIP_RETURNED_VALUE=${apaths[$G_WHIP_RETURNED_VALUE]}
-			fi
-
-			G_CONFIG_INJECT 'CONFIG_CPU_TEMP_PATH=' "CONFIG_CPU_TEMP_PATH=$G_WHIP_RETURNED_VALUE" /boot/dietpi.txt
-			unset -v G_HW_CPU_TEMP_PATH
 		fi
 	}
 
@@ -1334,6 +1286,10 @@ Latest release notes: https://github.com/starfive-tech/VisionFive2/releases
 			G_WHIP_MENU_ARRAY+=('CPU Frequency Limits' ": Max = [$user_frequency_max_text] | Min = [$user_frequency_min_text]")
 		fi
 
+		# CPU Temp Sensor
+		local cpu_temp_sensor=$(sed -n '/^[[:blank:]]*CONFIG_CPU_TEMP_PATH=/{s/^[^=]*=//p;q}' /boot/dietpi.txt)
+		G_WHIP_MENU_ARRAY+=('CPU Temp Sensor' ": [${cpu_temp_sensor:=auto}]")
+
 		# RPi extras
 		if (( $G_HW_MODEL < 10 ))
 		then
@@ -1576,6 +1532,41 @@ If unsure, set any value, 'Ondemand Down Factor' option on the next screen will 
 					REBOOT_REQUIRED=1
 
 				fi
+			;;
+
+			'CPU Temp Sensor')
+
+				G_WHIP_MENU_ARRAY=(
+					'auto' 'Auto-detect (default)'
+					'custom' 'Enter custom path'
+					'' '●─ Detected sensors '
+				)
+
+				local sfile stemp smark
+				for sfile in /sys/devices/platform/coretemp.*/hwmon/hwmon*/temp*_input /sys/class/hwmon/hwmon*/temp*_input /sys/class/thermal/thermal_zone*/temp
+				do
+					[[ -f $sfile ]] || continue
+					read -r stemp < "$sfile" || continue
+					disable_error=1 G_CHECK_VALIDINT "$stemp" 1 || continue # trust only positive temperatures
+					(( $stemp > 200 )) && stemp=$(( $stemp / 1000 )) # m°C => °C
+
+					# Mark currently selected sensor node
+					[[ $sfile == "$cpu_temp_sensor" ]] && smark=' [*]' || smark=''
+
+					G_WHIP_MENU_ARRAY+=("$sfile" "$stemp °C$smark")
+				done
+
+				G_WHIP_DEFAULT_ITEM=$cpu_temp_sensor
+				G_WHIP_MENU "Select CPU temperature sensor:\n\nCurrent: $cpu_temp_sensor" || return 0
+
+				if [[ $G_WHIP_RETURNED_VALUE == 'custom' ]]
+				then
+					G_WHIP_DEFAULT_ITEM=$cpu_temp_sensor
+					G_WHIP_INPUTBOX 'Enter full sensor path:\n\nExample: /sys/class/hwmon/hwmon1/temp1_input' || return 0
+					[[ -f $G_WHIP_RETURNED_VALUE ]] || { G_WHIP_MSG "Path not found:\n\n$G_WHIP_RETURNED_VALUE"; return 0; }
+				fi
+
+				G_CONFIG_INJECT 'CONFIG_CPU_TEMP_PATH=' "CONFIG_CPU_TEMP_PATH=$G_WHIP_RETURNED_VALUE" /boot/dietpi.txt
 			;;
 
 			*) :;;
