@@ -389,14 +389,14 @@ aREPLACE[$software_id]='${release/-17-vchord_/-\$pg_version-vchord_}'
 # extism-js (for Immich corePlugin build)
 software_id=215001
 aURL[$software_id]='https://api.github.com/repos/extism/js-pdk/releases/latest'
-aCHECK[$software_id]='echo "$response" | grep -Po "\"browser_download_url\": *\"\K[^\"]*\/extism-js-$arch-linux-[^\"\/]*\.gz"'
+aCHECK[$software_id]='echo "$response" | grep -Po "\"browser_download_url\": *\"\K[^\"]*\/extism-js-$arch-linux-[^\"\/]*\.gz(?=\")"'
 aARCH[$software_id]='aarch64 x86_64'
 aREGEX[$software_id]='https://github.com/extism/js-pdk/releases/download/.*/extism-js-$arch-linux-.*.gz'
 
 # binaryen wasm-merge (for Immich corePlugin build)
 software_id=215002
 aURL[$software_id]='https://api.github.com/repos/WebAssembly/binaryen/releases/latest'
-aCHECK[$software_id]='echo "$response" | grep -Po "\"browser_download_url\": *\"\K[^\"]*\/binaryen-[^\"\/]*-$arch-linux\.tar\.gz"'
+aCHECK[$software_id]='echo "$response" | grep -Po "\"browser_download_url\": *\"\K[^\"]*\/binaryen-[^\"\/]*-$arch-linux\.tar\.gz(?=\")"'
 aARCH[$software_id]='aarch64 x86_64'
 aREGEX[$software_id]='https://github.com/WebAssembly/binaryen/releases/download/.*/binaryen-.*-$arch-linux.tar.gz'
 
