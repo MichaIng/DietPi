@@ -50,9 +50,10 @@
 	alias dietpi-vpn='/boot/dietpi/dietpi-vpn'
 	alias dietpi-ddns='/boot/dietpi/dietpi-ddns'
 	alias dietpi-display='/boot/dietpi/dietpi-display'
+	alias dietpi-benchmark='/boot/dietpi/dietpi-benchmark'
 	alias cpu='/boot/dietpi/dietpi-cpuinfo'
 	# - Optional DietPi software aliases
-	[[ -d '/mnt/dietpi_userdata/sonarr' || -d '/mnt/dietpi_userdata/radarr' || -d '/mnt/dietpi_userdata/lidarr' ]] && alias dietpi-arr_to_RAM='/boot/dietpi/misc/dietpi-arr_to_RAM'
+	[[ -d '/mnt/dietpi_userdata/sonarr' || -d '/mnt/dietpi_userdata/radarr' || -d '/mnt/dietpi_userdata/lidarr' || -d '/mnt/dietpi_userdata/prowlarr' ]] && alias dietpi-servarr_to_ram='/boot/dietpi/dietpi-servarr_to_ram'
 	command -v kodi > /dev/null && alias startkodi='kodi --standalone'
 	[[ -f '/usr/games/opentyrian/run' ]] && alias opentyrian='/usr/games/opentyrian/run'
 	[[ -f '/mnt/dietpi_userdata/dxx-rebirth/run.sh' ]] && alias dxx-rebirth='/mnt/dietpi_userdata/dxx-rebirth/run.sh'
