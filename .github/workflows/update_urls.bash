@@ -30,7 +30,7 @@ aREGEX[$software_id]='https://github.com/rustdesk/rustdesk/releases/download/.*/
 
 # microblog.pub: Update Python version
 software_id=16
-aCHECK[$software_id]='curl -sSf '\''https://api.github.com/repos/pyenv/pyenv/contents/plugins/python-build/share/python-build?ref=master'\'' | mawk -F\" '\''/^ *"name": "3\.11\.[0-9]*",$/{print $4}'\'' | sort -Vr | head -1'
+aCHECK[$software_id]='curl -sSf '\''https://api.github.com/repos/pyenv/pyenv/contents/plugins/python-build/share/python-build?ref=master'\'' | grep -Po '\''"name": *"\K3\.11\.[0-9]*(?=")'\'' | sort -Vr | head -1'
 aREGEX[$software_id]='micro_python_version='\''[^'\'']*'\'
 aREPLACE[$software_id]='micro_python_version='\''$release'\'
 
@@ -121,15 +121,9 @@ aCHECK[$software_id]='curl -sSf '\''https://api.github.com/repos/ptitSeb/box86/r
 aREGEX[$software_id]='version='\''[^'\'']*'\'
 aREPLACE[$software_id]='version='\''$release'\'
 
-# Grafana ARMv6: Currently distributed from our APT repository
-software_id=77
-#aCHECK[$software_id]='curl -sSf '\''https://api.github.com/repos/grafana/grafana/releases/latest'\'' | mawk -F\" '\''/^ *"name": "[^"]*",$/{print $4}'\'
-#aREGEX[$software_id]='version='\''[^'\'']*'\'
-#aREPLACE[$software_id]='version='\''$release'\'
-
 # phpMyAdmin
 software_id=90
-aCHECK[$software_id]='curl -sSf '\''https://api.github.com/repos/phpmyadmin/phpmyadmin/releases'\'' | mawk -F\" '\''/^ *"name": "/ && $4!~/rc/ {print $4}'\'' | sort -rV | head -1'
+aCHECK[$software_id]='curl -sSf '\''https://api.github.com/repos/phpmyadmin/phpmyadmin/releases'\'' | grep -Po '\''"name": *"\K[0-9.]+(?=")'\'' | sort -rV | head -1'
 aREGEX[$software_id]='version='\''[^'\'']*'\'
 aREPLACE[$software_id]='version='\''$release'\'
 
@@ -220,7 +214,7 @@ aREGEX[$software_id]='https://github.com/Prowlarr/Prowlarr/releases/download/.*/
 
 # Home Assistant: Update Python version
 software_id=157
-aCHECK[$software_id]='curl -sSf '\''https://api.github.com/repos/pyenv/pyenv/contents/plugins/python-build/share/python-build?ref=master'\'' | mawk -F\" '\''/^ *"name": "3\.14\.[0-9]*",$/{print $4}'\'' | sort -Vr | head -1'
+aCHECK[$software_id]='curl -sSf '\''https://api.github.com/repos/pyenv/pyenv/contents/plugins/python-build/share/python-build?ref=master'\'' | grep -Po '\''"name": *"\K3\.14\.[0-9]*(?=")'\'' | sort -Vr | head -1'
 aREGEX[$software_id]='ha_python_version='\''[^'\'']*'\'
 aREPLACE[$software_id]='ha_python_version='\''$release'\'
 
