@@ -361,7 +361,7 @@ aREGEX[$software_id]='https://github.com/Kareadita/Kavita/releases/download/.*/k
 
 # soju
 software_id=213
-aCHECK[$software_id]='curl -sSf '\''https://api.github.com/repos/emersion/soju/releases/latest'\'' | grep -Po '\''"browser_download_url": *"\K[^"]*\/soju-[^"\/]*\.tar\.gz'\'
+aCHECK[$software_id]='curl -sSf '\''https://api.github.com/repos/emersion/soju/releases/latest'\'' | grep -Po '\''"browser_download_url": *"\K[^"]*\/soju-[^"\/]*\.tar\.gz(?=")'\'
 aREGEX[$software_id]='https://github.com/emersion/soju/releases/download/.*/soju-.*\.tar\.gz'
 
 # WhoDB
