@@ -367,7 +367,7 @@ aREGEX[$software_id]='https://github.com/emersion/soju/releases/download/.*/soju
 # WhoDB
 software_id=214
 aURL[$software_id]='https://api.github.com/repos/clidey/whodb/releases/latest'
-aCHECK[$software_id]='echo "$response" | grep -Po "\"browser_download_url\": *\"\K[^\"]*\/whodb-[0-9][^\"\/]*-linux-$arch"'
+aCHECK[$software_id]='echo "$response" | grep -Po "\"browser_download_url\": *\"\K[^\"]*\/whodb-[0-9][^\"\/]*-linux-$arch(?=\")"'
 aARCH[$software_id]='armv6 armv7 arm64 amd64 riscv64'
 aREGEX[$software_id]='https://github.com/clidey/whodb/releases/download/.*/whodb-[0-9].*-linux-\$arch'
 
@@ -409,7 +409,7 @@ aREPLACE[$software_id]='version='\''$release'\'
 # uv
 software_id=217
 aURL[$software_id]='https://api.github.com/repos/astral-sh/uv/releases/latest'
-aCHECK[$software_id]='echo "$response" | grep -Po "\"browser_download_url\": *\"\K[^\"]*\/uv-$arch\.tar\.gz"'
+aCHECK[$software_id]='echo "$response" | grep -Po "\"browser_download_url\": *\"\K[^\"]*\/uv-$arch\.tar\.gz(?=\")"'
 aARCH[$software_id]='arm-unknown-linux-musleabihf armv7-unknown-linux-gnueabihf aarch64-unknown-linux-gnu x86_64-unknown-linux-gnu riscv64gc-unknown-linux-gnu'
 aREGEX[$software_id]='https://github.com/astral-sh/uv/releases/download/.*/uv-$arch.tar.gz'
 
