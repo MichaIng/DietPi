@@ -423,10 +423,11 @@ do
 	response=
 	if [[ ${aURL[i]} ]]
 	then
-		if [[ ${GH_TOKEN} && ${aURL[i]} == 'https://api.github.com/'* ]]
+		if [[ $GH_TOKEN && ${aURL[i]} == 'https://api.github.com/'* ]]
 		then
 			response=$(curl -sSf -H "Authorization: token $GH_TOKEN" "${aURL[i]}")
 		else
+			# shellcheck disable=SC2034
 			response=$(curl -sSf "${aURL[i]}")
 		fi
 	fi
