@@ -78,7 +78,7 @@ aREGEX[$software_id]='https://github.com/MediaBrowser/Emby.Releases/releases/dow
 # ownCloud Infinite Scale
 software_id=47
 aURL[$software_id]='https://api.github.com/repos/owncloud/ocis/releases/latest'
-aCHECK[$software_id]='echo "$response" | grep -Po "\"browser_download_url\": *\"\K[^\"]*\/ocis-[^\"\/]*-linux-$arch"'
+aCHECK[$software_id]='echo "$response" | grep -Po "\"browser_download_url\": *\"\K[^\"]*\/ocis-[^\"\/]*-linux-$arch(?=\")"'
 aARCH[$software_id]='arm arm64 amd64'
 aARCH_CHECK[$software_id]='riscv64'
 aREGEX[$software_id]='https://github.com/owncloud/ocis/releases/download/.*/ocis-.*-linux-\$arch'
