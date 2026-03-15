@@ -1531,6 +1531,9 @@ Available commands:
 		aSOFTWARE_DESC[$software_id]='Open source home automation platform'
 		aSOFTWARE_CATX[$software_id]=17
 		aSOFTWARE_DOCS[$software_id]='https://dietpi.com/docs/software/home_automation/#home-assistant'
+		aSOFTWARE_DEPS[$software_id]='217'
+		# - ARMv6: https://github.com/astral-sh/python-build-standalone/releases
+		aSOFTWARE_AVAIL_G_HW_ARCH[$software_id,1]=0
 		#------------------
 		software_id=140
 		aSOFTWARE_NAME[$software_id]='Domoticz'
@@ -11153,53 +11156,59 @@ _EOF_'
 		if To_Install 157 home-assistant # Home Assistant
 		then
 			local ha_user='homeassistant'
-			local ha_home="/home/$ha_user"
-			local ha_pyenv_activation=". $ha_home/pyenv-activate.sh"
-			# Obtain latest Python 3.14.y version supported by pyenv
-			local ha_python_version=$(curl -sSfL 'https://api.github.com/repos/pyenv/pyenv/contents/plugins/python-build/share/python-build?ref=master' | grep -Po '"name": *"\K3\.14\.[0-9]*(?=")' | sort -Vr | head -1)
-			[[ $ha_python_version ]] || { ha_python_version='3.14.3'; G_DIETPI-NOTIFY 1 "Automatic latest Python version detection failed. Version \"$ha_python_version\" will be installed as fallback, but a newer version might be available. Please report this at: https://github.com/MichaIng/DietPi/issues"; }
+			local ha_home="/opt/$ha_user"
+			local ha_python_version='3.14'
 
-			G_DIETPI-NOTIFY 2 "Home Assistant user:  $ha_user"
-			G_DIETPI-NOTIFY 2 "Home Assistant home:  $ha_home"
-			G_DIETPI-NOTIFY 2 "pyenv activation:     $ha_pyenv_activation"
-			G_DIETPI-NOTIFY 2 "pyenv Python version: $ha_python_version"
+			G_DIETPI-NOTIFY 2 "Home Assistant user: $ha_user"
+			G_DIETPI-NOTIFY 2 "Home Assistant home: $ha_home"
+			G_DIETPI-NOTIFY 2 "HA Python version:   $ha_python_version"
 
 			# User
 			Create_User -G dialout,gpio,i2c -d "$ha_home" "$ha_user"
 			G_EXEC mkdir -p "$ha_home"
 			G_EXEC chown "$ha_user:$ha_user" "$ha_home"
+			G_EXEC cd "$ha_home"
 
 			# Dependencies
 			# - Custom dependencies, e.g. MariaDB support: G_AGI libmariadb-dev; pip3 install mysqlclient|PyMySQL
-			read -ra aDEPS < <(sed -n '/^[[:blank:]]*SOFTWARE_HOMEASSISTANT_APT_DEPS=/{s/^[^=]*=//p;q}' /boot/dietpi.txt)
+			# - gcc and libc6-dev for lru-dict==1.3.0 which provides wheels up to Python 3.12 only
+			read -ra aDEPS < <(echo -n 'gcc libc6-dev '; sed -n '/^[[:blank:]]*SOFTWARE_HOMEASSISTANT_APT_DEPS=/{s/^[^=]*=//p;q}' /boot/dietpi.txt)
 			# - Install isal compression library as faster drop-in replacement for zlib, to address a warning by aiohttp_fast_zlib: https://github.com/MichaIng/DietPi/issues/7525
-			local custom_pip_deps="isal $(sed -n '/^[[:blank:]]*SOFTWARE_HOMEASSISTANT_PIP_DEPS=/{s/^[^=]*=//p;q}' /boot/dietpi.txt)"
-			PYTHON_VERSION=$ha_python_version Python_Deps -u "$ha_user" av bcrypt cryptography isal numpy pillow pycares pyenv pymicro-vad
+			local custom_pip_deps=()
+			read -ra custom_pip_deps < <(echo -n 'isal '; sed -n '/^[[:blank:]]*SOFTWARE_HOMEASSISTANT_PIP_DEPS=/{s/^[^=]*=//p;q}' /boot/dietpi.txt)
+			PYTHON_VERSION=$ha_python_version Python_Deps -u "$ha_user" -i av bcrypt cryptography isal numpy pillow pycares pymicro-vad
 
-			# Install pyenv to $ha_home
-			Download_Install 'https://github.com/pyenv/pyenv/archive/master.tar.gz'
-			G_EXEC chown -R "$ha_user:$ha_user" pyenv-master
-			# - Start with fresh instance, to allow clean pyenv and Python updates and fix broken instances. All userdata and configs are preserved in: /mnt/dietpi_userdata/homeassistant
-			[[ -d $ha_home/.pyenv ]] && G_EXEC rm -R "$ha_home/.pyenv"
-			[[ -f $ha_home/.python-version ]] && G_EXEC rm "$ha_home/.python-version" # pre-v9.13: remove "pyenv local" info as we use "pyenv global" now, stored to $ha_home/.python/version instead
-			G_EXEC mv pyenv-master "$ha_home/.pyenv"
-
-			# Configure pip
+			# Configure uv
 			# - Disable cache
-			G_EXEC mkdir -p "$ha_home/.pip"
-			G_EXEC eval "echo -e '[global]\nno-cache-dir=true' > '$ha_home/.pip/pip.conf'"
+			G_EXEC mkdir -p "$ha_home/.config/uv"
+			G_EXEC eval "echo 'no-cache = true' > '$ha_home/.config/uv/uv.toml'"
 
-			G_DIETPI-NOTIFY 2 'Generating pyenv activation script'
-			echo "#!/bin/dash
-if [ \$(whoami) != '$ha_user' ]; then
-	echo '[FAILED] This pyenv must be activated as user \"$ha_user\". Aborting...'
-	kill -INT \$\$
-fi
-cd $ha_home
-# Permit uv to install into system Python: https://github.com/astral-sh/uv/issues/7907
-export PATH=\"$ha_home/.pyenv/bin:\$PATH\" UV_SYSTEM_PYTHON=1
-eval \"\$(pyenv init -)\"
-[ -f '.cargo/env' ] && . .cargo/env" > "$ha_home/pyenv-activate.sh"
+			# Remove old Python if present
+			for i in .local/bin/python3.*
+			do
+				[[ $i == .local/bin/python$ha_python_version || ! -f $i ]] && break
+				G_EXEC_DESC='Removing old Python'
+				G_EXEC_OUTPUT=1 G_EXEC runuser -u "$ha_user" -- uv python uninstall --all
+			done
+
+			G_EXEC_DESC='Installing Python'
+			G_EXEC_OUTPUT=1 G_EXEC runuser -u "$ha_user" -- uv python install -U "$ha_python_version"
+
+			# Remove old venv if Python version differs
+			if [[ -d '.venv' && ! -d .venv/lib/python$ha_python_version ]]
+			then
+				G_DIETPI-NOTIFY 2 'Removing old incompatible venv'
+				G_EXEC rm -R .venv
+			fi
+
+			G_EXEC_DESC='Setting up venv'
+			G_EXEC_OUTPUT=1 G_EXEC runuser -u "$ha_user" -- uv venv --allow-existing
+
+			# Add Rust compiler to PATH if present
+			[[ -d '.cargo/bin' ]] && export PATH="$ha_home/.cargo/bin:$PATH"
+
+			G_EXEC_DESC="Installing additional dependencies: ${custom_pip_deps[*]}"
+			G_EXEC_OUTPUT=1 G_EXEC runuser -u "$ha_user" -- uv pip install -U "${custom_pip_deps[@]}"
 
 			# ARMv6/RISC-V: Prevent full /tmp, OOM, and extensive swap usage caused mainly by grpcio build
 			if (( $G_HW_ARCH == 1 || $G_HW_ARCH == 11 ))
@@ -11210,46 +11219,35 @@ eval \"\$(pyenv init -)\"
 				Min_Total_Memory 2048
 			fi
 
-			G_EXEC_DESC="Compiling and installing Python $ha_python_version into pyenv, which will take a while ..."
-			G_EXEC_OUTPUT=1 G_EXEC runuser -u "$ha_user" -- dash -c "$ha_pyenv_activation; exec pyenv install $ha_python_version"
-			G_EXEC_DESC="Set Python $ha_pyenv_activation as global version for this pyenv instance"
-			G_EXEC_OUTPUT=1 G_EXEC runuser -u "$ha_user" -- dash -c "$ha_pyenv_activation; exec pyenv global $ha_python_version"
-			G_EXEC_DESC='Upgrading base modules: pip setuptools wheel'
-			G_EXEC_OUTPUT=1 G_EXEC runuser -u "$ha_user" -- dash -c "$ha_pyenv_activation; exec pip3 install -U pip setuptools wheel"
-			G_EXEC_DESC="Installing additional dependencies: $custom_pip_deps"
-			G_EXEC_OUTPUT=1 G_EXEC runuser -u "$ha_user" -- dash -c "$ha_pyenv_activation; exec pip3 install $custom_pip_deps"
 			G_EXEC_DESC='Installing Home Assistant core module'
-			G_EXEC_PRE_FUNC() { find /tmp /var/tmp -mindepth 1 -maxdepth 1 -user "$ha_user" -exec rm -R {} +; }
-			G_EXEC_OUTPUT=1 G_EXEC runuser -u "$ha_user" -- dash -c "$ha_pyenv_activation; exec pip3 install homeassistant"
+			G_EXEC_OUTPUT=1 G_EXEC runuser -u "$ha_user" -- uv pip install -U homeassistant
+
+			# Clean env
+			[[ -d '.cargo/bin' ]] && PATH=${PATH#"$ha_home/.cargo/bin:"}
 			(( $G_HW_ARCH == 1 || $G_HW_ARCH == 11 )) && unset -v GRPC_PYTHON_BUILD_EXT_COMPILER_JOBS TMPDIR
 
 			G_DIETPI-NOTIFY 2 'Linking config and data to /mnt/dietpi_userdata/homeassistant'
 			if [[ ! -d '/mnt/dietpi_userdata/homeassistant' ]]
 			then
-				if [[ -d $ha_home/.homeassistant ]]
+				if [[ -d '.homeassistant' ]]
 				then
-					G_EXEC mv "$ha_home/.homeassistant" /mnt/dietpi_userdata/homeassistant
+					G_EXEC mv .homeassistant /mnt/dietpi_userdata/homeassistant
 				else
 					G_EXEC mkdir /mnt/dietpi_userdata/homeassistant
 				fi
 			fi
-			[[ -d $ha_home/.homeassistant ]] && G_EXEC rm -R "$ha_home/.homeassistant"
-			G_EXEC ln -sf /mnt/dietpi_userdata/homeassistant "$ha_home/.homeassistant"
+			[[ -d '.homeassistant' ]] && G_EXEC rm -R .homeassistant
+			G_EXEC ln -sf /mnt/dietpi_userdata/homeassistant .homeassistant
 
 			G_DIETPI-NOTIFY 2 'Merging parent and HA-internal Python environments' # https://github.com/MichaIng/DietPi/issues/6117
 			[[ -d '/mnt/dietpi_userdata/homeassistant/deps' ]] && G_EXEC rm -R /mnt/dietpi_userdata/homeassistant/deps
-			G_EXEC ln -sf "$ha_home/.pyenv/versions/$ha_python_version/lib/python${ha_python_version%.*}/site-packages" /mnt/dietpi_userdata/homeassistant/deps
-
-			G_DIETPI-NOTIFY 2 'Generating Home Assistant startup script'
-			echo "#!/bin/dash
-$ha_pyenv_activation
-exec hass -c '/mnt/dietpi_userdata/homeassistant'" > "$ha_home/homeassistant-start.sh"
-			G_EXEC chmod +x "$ha_home/homeassistant-start.sh"
+			G_EXEC ln -sf "$ha_home/.venv/lib/python$ha_python_version/site-packages" /mnt/dietpi_userdata/homeassistant/deps
 
 			G_DIETPI-NOTIFY 2 'Generating Home Assistant update script'
-			echo "#!/bin/dash
-exec sudo -u $ha_user dash -c '$ha_pyenv_activation; exec pip3 install -U homeassistant'" > "$ha_home/homeassistant-update.sh"
-			G_EXEC chmod +x "$ha_home/homeassistant-update.sh"
+			local ha_env=''
+			[[ -d '.cargo/bin' ]] && ha_env=" PATH=\"$ha_home/.cargo/bin:\$PATH\""
+			G_EXEC eval "echo -e '#!/bin/dash\nexec sudo -u $ha_user$ha_env uv pip install --directory '$ha_home' -U homeassistant' > homeassistant-update.sh"
+			G_EXEC chmod +x homeassistant-update.sh
 
 			# Service
 			cat << _EOF_ > /etc/systemd/system/home-assistant.service || exit 1
@@ -11261,12 +11259,15 @@ After=network-online.target mariadb.service
 [Service]
 SyslogIdentifier=Home Assistant
 User=$ha_user
-ExecStart=$ha_home/homeassistant-start.sh
+ExecStart=$ha_home/.venv/bin/hass -c /mnt/dietpi_userdata/homeassistant
 RestartForceExitStatus=100
 
 [Install]
 WantedBy=multi-user.target
 _EOF_
+			[[ -d '.cargo/bin' ]] && G_CONFIG_INJECT 'Environment=' "Environment=$ha_home/.cargo/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin" /etc/systemd/system/home-assistant.service 'User='
+			G_EXEC cd "$G_WORKING_DIR"
+
 			# Download HACS
 			Download_Install 'https://github.com/hacs/integration/releases/latest/download/hacs.zip' hacs
 			[[ -d '/mnt/dietpi_userdata/homeassistant/custom_components/hacs' ]] && G_EXEC rm -R /mnt/dietpi_userdata/homeassistant/custom_components/hacs
@@ -11275,6 +11276,7 @@ _EOF_
 			G_EXEC chown -R "$ha_user:$ha_user" /mnt/dietpi_userdata/homeassistant
 			G_DIETPI-NOTIFY 2 "Home Assistant Community Store (HACS) has been installed in addition. To activate it, follow this guide: https://hacs.xyz/docs/configuration/basic/"
 
+			[[ -d '/home/homeassistant' ]] && G_EXEC rm -R /home/homeassistant # pre-v10.2
 			[[ -d '/srv/homeassistant' ]] && G_EXEC rm -R /srv/homeassistant # pre-v6.27
 		fi
 
@@ -14160,7 +14162,8 @@ _EOF_
 		if To_Uninstall 157 # Home Assistant
 		then
 			Remove_Service home-assistant homeassistant homeassistant
-			G_EXEC rm -Rf /home/homeassistant
+			G_EXEC rm -Rf /opt/homeassistant
+			[[ -d '/home/homeassistant' ]] && G_EXEC rm -R /home/homeassistant # pre-v10.2
 			[[ -d '/srv/homeassistant' ]] && G_EXEC rm -R /srv/homeassistant # pre-v6.27
 			[[ -d '/mnt/dietpi_userdata/homeassistant' ]] && G_WHIP_BUTTON_CANCEL_TEXT='Skip' G_WHIP_YESNO "Shall all ${aSOFTWARE_NAME[$software_id]} data at /mnt/dietpi_userdata/homeassistant be removed as well?" && G_EXEC rm -R /mnt/dietpi_userdata/homeassistant
 		fi
