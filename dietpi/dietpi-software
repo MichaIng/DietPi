@@ -2591,6 +2591,7 @@ sudo sysctl -p /etc/sysctl.d/dietpi-$1.conf"
 					;;
 					'greenlet113') (( $python_version > 311 || $G_HW_ARCH == 11 || ( $G_HW_ARCH < 3 && ! $piwheels ) )) && aDEPS+=('g++');;
 					'libsass') (( $G_HW_ARCH == 10 || $piwheels )) || aDEPS+=('g++');;
+					'isal') (( $G_HW_ARCH < 3 || $G_HW_ARCH == 11 )) && aDEPS+=('make');;
 					'lxml') (( $G_HW_ARCH == 1 && ( ! $piwheels || $python_version == 313 ) )) && aDEPS+=('libxslt1-dev');;
 					'matrix-synapse') (( $python_version > 311 || $G_HW_ARCH == 11 || ( $G_HW_ARCH < 3 && ! $piwheels ) )) && rust=1;;
 					'netifaces') (( $piwheels )) || aDEPS+=('gcc');;
@@ -2608,7 +2609,7 @@ sudo sysctl -p /etc/sysctl.d/dietpi-$1.conf"
 						fi
 					;;
 					'pillow')
-						(( $G_HW_ARCH == 11 || ( $G_HW_ARCH < 3 && ( ! $piwheels || $python_version != 311 ) ) )) && aDEPS+=('gcc' 'libjpeg62-turbo-dev')
+						(( $G_HW_ARCH == 11 || ( $G_HW_ARCH < 3 && ( ! $piwheels || $python_version != 311 ) ) )) && aDEPS+=('gcc' 'libjpeg62-turbo-dev' 'zlib1g-dev'))
 						if (( $piwheels && $python_version == 311 ))
 						then
 							aDEPS+=('libopenjp2-7' 'libtiff6' 'libxcb1')
@@ -2639,7 +2640,6 @@ sudo sysctl -p /etc/sysctl.d/dietpi-$1.conf"
 						(( $G_HW_ARCH == 11 || ( $G_HW_ARCH < 3 && ! $piwheels ) )) && aDEPS+=('make')
 						set -- "$@" cffi
 					;;
-					'tiktoken') (( $G_HW_ARCH == 11 || ( $G_HW_ARCH < 3 && ! $piwheels ) )) && rust=1;;
 					*) G_DIETPI-NOTIFY 1 "Unknown argument \"$1\" for Python_Deps(). This should never happen unless you are developing a software implementation. Otherwise, please report this at https://github.com/MichaIng/DietPi/issues. Aborting ..."; exit 1;;
 				esac
 				shift
@@ -11170,7 +11170,7 @@ _EOF_'
 
 			G_DIETPI-NOTIFY 2 "Home Assistant user:  $ha_user"
 			G_DIETPI-NOTIFY 2 "Home Assistant home:  $ha_home"
-			G_DIETPI-NOTIFY 2 "pyenv activation:     \"$ha_pyenv_activation\""
+			G_DIETPI-NOTIFY 2 "pyenv activation:     $ha_pyenv_activation"
 			G_DIETPI-NOTIFY 2 "pyenv Python version: $ha_python_version"
 
 			# User
@@ -11179,10 +11179,9 @@ _EOF_'
 			G_EXEC chown "$ha_user:$ha_user" "$ha_home"
 
 			# Dependencies
-			PYTHON_VERSION=$ha_python_version Python_Deps -P -u "$ha_user" av bcrypt cryptography numpy pillow pycares pyenv pymicro-vad tiktoken
+			PYTHON_VERSION=$ha_python_version Python_Deps -u "$ha_user" av bcrypt cryptography isal numpy pillow pycares pyenv pymicro-vad
 			# - Custom dependencies, e.g. MariaDB support: G_AGI libmariadb-dev; pip3 install mysqlclient|PyMySQL
-			local custom_apt_deps=$(sed -n '/^[[:blank:]]*SOFTWARE_HOMEASSISTANT_APT_DEPS=/{s/^[^=]*=//p;q}' /boot/dietpi.txt)
-			mapfile -t -d' ' -O "${#aDEPS[@]}" aDEPS < <(echo -n "$custom_apt_deps")
+			mapfile -t -d' ' -O "${#aDEPS[@]}" aDEPS < <(sed -n '/^[[:blank:]]*SOFTWARE_HOMEASSISTANT_APT_DEPS=/{s/^[^=]*=//p;q}' /boot/dietpi.txt)
 			# - Install isal compression library as faster drop-in replacement for zlib, to address a warning by aiohttp_fast_zlib: https://github.com/MichaIng/DietPi/issues/7525
 			local custom_pip_deps="isal $(sed -n '/^[[:blank:]]*SOFTWARE_HOMEASSISTANT_PIP_DEPS=/{s/^[^=]*=//p;q}' /boot/dietpi.txt)"
 
@@ -11192,32 +11191,14 @@ _EOF_'
 			# - Start with fresh instance, to allow clean pyenv and Python updates and fix broken instances. All userdata and configs are preserved in: /mnt/dietpi_userdata/homeassistant
 			[[ -d $ha_home/.pyenv ]] && G_EXEC rm -R "$ha_home/.pyenv"
 			[[ -f $ha_home/.python-version ]] && G_EXEC rm "$ha_home/.python-version" # pre-v9.13: remove "pyenv local" info as we use "pyenv global" now, stored to $ha_home/.python/version instead
-			[[ -d '/srv/homeassistant' ]] && G_EXEC rm -R /srv/homeassistant # pre-v6-27
 			G_EXEC mv pyenv-master "$ha_home/.pyenv"
-
-			# Link config and data to DietPi userdata
-			if [[ ! -d '/mnt/dietpi_userdata/homeassistant' ]]
-			then
-				if [[ -d $ha_home/.homeassistant ]]
-				then
-					G_EXEC mv "$ha_home/.homeassistant" /mnt/dietpi_userdata/homeassistant
-				else
-					G_EXEC mkdir /mnt/dietpi_userdata/homeassistant
-				fi
-			fi
-			[[ -d $ha_home/.homeassistant ]] && G_EXEC rm -R "$ha_home/.homeassistant"
-			G_EXEC ln -sf /mnt/dietpi_userdata/homeassistant "$ha_home/.homeassistant"
-
-			# Reset and merge pyenv and HA Python environment to avoid version mismatches on Python upgrades: https://github.com/MichaIng/DietPi/issues/6117
-			[[ -d '/mnt/dietpi_userdata/homeassistant/deps' ]] && G_EXEC rm -R /mnt/dietpi_userdata/homeassistant/deps
-			G_EXEC ln -sf "$ha_home/.pyenv/versions/$ha_python_version/lib/python${ha_python_version%.*}/site-packages" /mnt/dietpi_userdata/homeassistant/deps
 
 			# Configure pip
 			# - Disable cache
 			G_EXEC mkdir -p "$ha_home/.pip"
 			G_EXEC eval "echo -e '[global]\nno-cache-dir=true' > '$ha_home/.pip/pip.conf'"
 
-			# Generate script to activate pyenv: This must be sourced from the originating shell, hence it does not require execute permissions.
+			G_DIETPI-NOTIFY 2 'Generating pyenv activation script'
 			echo "#!/bin/dash
 if [ \$(whoami) != '$ha_user' ]; then
 	echo '[FAILED] This pyenv must be activated as user \"$ha_user\". Aborting...'
@@ -11237,23 +11218,40 @@ eval \"\$(pyenv init -)\"
 			G_EXEC_OUTPUT=1 G_EXEC runuser -u "$ha_user" -- dash -c "$ha_pyenv_activation; exec pip3 install -U pip setuptools wheel"
 			G_EXEC_DESC="Installing additional dependencies: $custom_pip_deps"
 			G_EXEC_OUTPUT=1 G_EXEC runuser -u "$ha_user" -- dash -c "$ha_pyenv_activation; exec pip3 install $custom_pip_deps"
-			find /tmp -mindepth 1 -maxdepth 1 -user "$ha_user" -exec rm -R {} +
 			G_EXEC_DESC='Installing Home Assistant core module'
+			G_EXEC_PRE_FUNC() { find /tmp -mindepth 1 -maxdepth 1 -user "$ha_user" -exec rm -R {} +; }
 			G_EXEC_OUTPUT=1 G_EXEC runuser -u "$ha_user" -- dash -c "$ha_pyenv_activation; exec pip3 install homeassistant"
 
-			# Generate script to launch HA using pyenv
+			G_DIETPI-NOTIFY 2 'Linking config and data to /mnt/dietpi_userdata/homeassistant'
+			if [[ ! -d '/mnt/dietpi_userdata/homeassistant' ]]
+			then
+				if [[ -d $ha_home/.homeassistant ]]
+				then
+					G_EXEC mv "$ha_home/.homeassistant" /mnt/dietpi_userdata/homeassistant
+				else
+					G_EXEC mkdir /mnt/dietpi_userdata/homeassistant
+				fi
+			fi
+			[[ -d $ha_home/.homeassistant ]] && G_EXEC rm -R "$ha_home/.homeassistant"
+			G_EXEC ln -sf /mnt/dietpi_userdata/homeassistant "$ha_home/.homeassistant"
+
+			G_DIETPI-NOTIFY 2 'Merging parent and HA-internal Python environments' # https://github.com/MichaIng/DietPi/issues/6117
+			[[ -d '/mnt/dietpi_userdata/homeassistant/deps' ]] && G_EXEC rm -R /mnt/dietpi_userdata/homeassistant/deps
+			G_EXEC ln -sf "$ha_home/.pyenv/versions/$ha_python_version/lib/python${ha_python_version%.*}/site-packages" /mnt/dietpi_userdata/homeassistant/deps
+
+			G_DIETPI-NOTIFY 2 'Generating Home Assistant startup script'
 			echo "#!/bin/dash
 $ha_pyenv_activation
 exec hass -c '/mnt/dietpi_userdata/homeassistant'" > "$ha_home/homeassistant-start.sh"
 			G_EXEC chmod +x "$ha_home/homeassistant-start.sh"
 
-			# Generate script to update HA within pyenv
+			G_DIETPI-NOTIFY 2 'Generating Home Assistant update script'
 			echo "#!/bin/dash
 exec sudo -u $ha_user dash -c '$ha_pyenv_activation; exec pip3 install -U homeassistant'" > "$ha_home/homeassistant-update.sh"
 			G_EXEC chmod +x "$ha_home/homeassistant-update.sh"
 
 			# Service
-			cat << _EOF_ > /etc/systemd/system/home-assistant.service
+			cat << _EOF_ > /etc/systemd/system/home-assistant.service || exit 1
 [Unit]
 Description=Home Assistant (DietPi)
 Wants=network-online.target
@@ -11275,6 +11273,8 @@ _EOF_
 			G_EXEC mv hacs /mnt/dietpi_userdata/homeassistant/custom_components/
 			G_EXEC chown -R "$ha_user:$ha_user" /mnt/dietpi_userdata/homeassistant
 			G_DIETPI-NOTIFY 2 "Home Assistant Community Store (HACS) has been installed in addition. To activate it, follow this guide: https://hacs.xyz/docs/configuration/basic/"
+
+			[[ -d '/srv/homeassistant' ]] && G_EXEC rm -R /srv/homeassistant # pre-v6-27
 		fi
 
 		if To_Install 181 papermc # PaperMC
@@ -14165,10 +14165,9 @@ _EOF_
 		if To_Uninstall 157 # Home Assistant
 		then
 			Remove_Service home-assistant homeassistant homeassistant
-			[[ -d '/home/homeassistant' ]] && G_EXEC rm -R /home/homeassistant
+			G_EXEC rm -Rf /home/homeassistant
 			[[ -d '/srv/homeassistant' ]] && G_EXEC rm -R /srv/homeassistant # pre-v6-27
-
-			G_DIETPI-NOTIFY 2 'Home Assistant data and settings are not removed. You may want to do this manually:\n$ sudo rm -R /mnt/dietpi_userdata/homeassistant'
+			[[ -d '/mnt/dietpi_userdata/homeassistant' ]] && G_WHIP_BUTTON_CANCEL_TEXT='Skip' G_WHIP_YESNO "Shall all ${aSOFTWARE_NAME[$software_id]} data at /mnt/dietpi_userdata/homeassistant be removed as well?" && G_EXEC rm -R /mnt/dietpi_userdata/homeassistant
 		fi
 
 		if To_Uninstall 140 # Domoticz
@@ -14946,18 +14945,6 @@ _EOF_
 			G_WHIP_YESNO 'Would you like to configure the DietPi-AutoStart option?
 \nThis will allow you to choose which program loads automatically, after the system has booted up, e.g.:
  - Console\n - Desktop\n - Kodi' && /boot/dietpi/dietpi-autostart
-		fi
-
-		# Final user info
-		# - Home Assistant: https://dietpi.com/forum/t/home-assistant-finally-integrates-python-3-11/17033/40
-		if (( ${aSOFTWARE_INSTALL_STATE[157]} == 1 ))
-		then
-			G_WHIP_MSG '[ INFO ] Home Assistant may require a manual restart
-\nOn first service start, Home Assistant installs and in case compiles a bunch of required Python module. This can take another while.
-\nThe compilation of those modules can fail on first attempt for unknown reasons, but succeeds after restarting the service:
-- sudo systemctl restart home-assistant
-\nAlso check our documentation about this matter:
-- https://dietpi.com/docs/software/home_automation/#home-assistant'
 		fi
 
 		# Install finished, set all installed software to state 2 (installed)
@@ -15763,8 +15750,9 @@ We allow it to take up to 30 minutes, it's process can be followed, please be pa
 		(( ${aSOFTWARE_INSTALL_STATE[156]} == 1 && $G_HW_ARCH == 2 )) && G_WHIP_MSG '[WARNING] Steam natively only runs on the x86 systems.\n\nBox86 will be used to run it on ARM, however there may be performance and compatibility issues.'
 
 		# Home Assistant: Inform about long install/build time: https://github.com/MichaIng/DietPi/issues/2897
-		(( ${aSOFTWARE_INSTALL_STATE[157]} == 1 )) && G_WHIP_MSG '[ INFO ] Home Assistant: Grab yourself a coffee
-\nThe install process of Home Assistant within the virtual environment, especially the Python build, can take more than one hour, especially on slower SBCs like RPi Zero and similar.
+		(( ${aSOFTWARE_INSTALL_STATE[157]} == 1 )) && G_WHIP_MSG '[ INFO ] Home Assistant installation: Grab yourself a coffee
+\nThe install process of Home Assistant, especially the pyenv Python build, can take more than one hour, especially on slower SBCs like RPi Zero and similar.
+\nAlso after the installation finished, on first service start, it will install and in case compile some more Python modules, which can take another longer time. Watch "htop" and wait until CPU usage for the related "hass" process goes down, before accessing the web interface.
 \nPlease be patient. In the meantime you may study the documentation:
  - https://dietpi.com/docs/software/home_automation/#home-assistant'
 	}
