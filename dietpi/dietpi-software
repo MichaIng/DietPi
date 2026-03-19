@@ -11972,10 +11972,8 @@ _EOF_
 		then
 			# Install pgvector and VectorChord extensions: https://immich.app/docs/administration/postgres-standalone
 			local pg_version=$(find /etc/postgresql -mindepth 1 -maxdepth 1 -type d -name '[1-9][0-9]' -printf '%f\n' | sort -Vr | head -1)
-			# Install build dependencies for Sharp with HEIC support via system libvips
-			# libvips-dev and libheif-dev are needed to compile Sharp against system libvips
-			# Runtime: libvips42t64 (includes libheif1 dependency) provides HEIC support
-			aDEPS=("postgresql-$pg_version-pgvector" 'libvips-dev' 'libheif-dev')
+			# Build dependencies for libvips with HEIC support
+			aDEPS=("postgresql-$pg_version-pgvector" 'git' 'meson' 'ninja-build' 'pkg-config' 'libglib2.0-dev' 'libexpat1-dev' 'libexif-dev' 'libjpeg-dev' 'libpng-dev' 'libwebp-dev' 'libheif-dev' 'libde265-dev')
 			local arch='amd64'
 			(( $G_HW_ARCH == 3 )) && local arch='arm64'
 			local fallback_url="https://github.com/tensorchord/VectorChord/releases/download/1.1.0/postgresql-$pg_version-vchord_1.1.0-1_$arch.deb"
@@ -12018,8 +12016,20 @@ _EOF_
 			# Prevent JavaScript OOM during build
 			export NODE_OPTIONS='--max-old-space-size=4096'
 
-			# Force Sharp to use system libvips for HEIC support
-			# This ensures Sharp uses the system's libvips (with HEIC/libde265 support) instead of prebuilt binaries
+			# Build libvips 8.17.3 from source for full HEIC support
+			# Sharp 0.34.5+ requires libvips 8.17.3+, but system packages only provide 8.15.1
+			G_DIETPI-NOTIFY 2 'Building libvips 8.17.3 from source for HEIC support...'
+			G_EXEC cd /tmp
+			G_EXEC git clone https://github.com/libvips/libvips.git
+			G_EXEC cd libvips
+			G_EXEC git reset --hard 0c9151a4f416d2f8ae20a755db218f6637050eec # v8.17.3
+			G_EXEC meson setup build --buildtype=release --libdir=lib -Dintrospection=disabled
+			G_EXEC ninja -C build install
+			G_EXEC cd /tmp
+			G_EXEC rm -rf libvips
+			G_EXEC ldconfig /usr/local/lib
+
+			# Force Sharp to use system libvips with HEIC support
 			export SHARP_FORCE_GLOBAL_LIBVIPS=true
 
 			# Install Node dependencies
@@ -12028,16 +12038,14 @@ _EOF_
 			# Build Immich server, web UI (requires Immich SDK), and WebAssembly workflow plugin
 			G_EXEC_OUTPUT=1 G_EXEC pnpm --filter immich --filter @immich/sdk --filter immich-web --filter plugins build
 
-			# Remove build-time tools
+			# Remove build-time tools and dependencies
 			G_EXEC rm /usr/local/bin/extism-js /usr/local/bin/wasm-merge /usr/local/bin/wasm-opt
+			G_AGP git meson ninja-build pkg-config libglib2.0-dev libexpat1-dev libexif-dev libjpeg-dev libpng-dev libwebp-dev libheif-dev libde265-dev
 
 			# Deploy server
 			[[ -d '/opt/immich' ]] && G_EXEC rm -R /opt/immich
 			G_EXEC_OUTPUT=1 G_EXEC pnpm --filter immich -P deploy /opt/immich
 			unset -v NODE_OPTIONS SHARP_FORCE_GLOBAL_LIBVIPS
-
-			# Remove development packages, keep runtime libraries (libvips42t64, libheif1, libde265-0)
-			G_AGP libvips-dev libheif-dev
 
 			# Install web frontend and WebAssembly workflow plugin
 			G_EXEC mv web/build /opt/immich/www
