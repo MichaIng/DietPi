@@ -88,7 +88,7 @@ emulation=0
 # Removals for QEMU-emulated tests:
 # - PostgreSQL and dependants (Synapse): https://gitlab.com/qemu-project/qemu/-/issues/3068
 # - WireGuard: "Unable to modify/access interface: Protocol not supported"
-# - Docker containers (Roon Extension Manager and Synapse): Docker daemon fails with "iptables: Failed to initialize nft: Protocol not supported" and similar error with iptables-legacy
+# - Docker containers (Roon Extension Manager and Portainer): Docker daemon fails with "iptables: Failed to initialize nft: Protocol not supported" and similar error with iptables-legacy
 [[ $arch == 11 && $emulation == 1 && $SOFTWARE =~ (^| )(86|125|172|185|194)( |$) ]] && { echo '[ WARN ] Removing Roon Extension Manager, PostgreSQL, WireGuard, Portainer, and Synapse from test installs as they fail in emulated RISC-V containers'; SOFTWARE=$(sed -E 's/(^| )(86|125|172|185|194)( |$)/\1\3/g' <<< "$SOFTWARE"); }
 
 ##########################################
