@@ -380,11 +380,11 @@ aREPLACE[$software_id]='version='\''$release'\'
 # VectorChord (for Immich)
 software_id=215000
 aURL[$software_id]='https://api.github.com/repos/tensorchord/VectorChord/releases/latest'
-aCHECK[$software_id]='echo "$response" | grep -Po "\"browser_download_url\": *\"\K[^\"]*-17-vchord_[^\"\/]*_$arch.deb"'
+aCHECK[$software_id]='echo "$response" | grep -Po "\"browser_download_url\": *\"\K[^\"]*-15-vchord_[^\"\/]*_$arch.deb"'
 aARCH[$software_id]='arm64 amd64'
 aARCH_CHECK[$software_id]='riscv64'
 aREGEX[$software_id]='https://github.com/tensorchord/VectorChord/releases/download/.*/postgresql-.*-vchord_.*_$arch.deb'
-aREPLACE[$software_id]='${release/-17-vchord_/-\$pg_version-vchord_}'
+aREPLACE[$software_id]='${release/-15-vchord_/-\$version-vchord_}'
 
 # extism-js (for Immich corePlugin build)
 software_id=215001
