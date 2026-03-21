@@ -14,7 +14,8 @@ header=()
 # APT dependencies
 # - wget: Used for WHDLoad database update: https://github.com/BlitterStudio/amiberry/commit/d6c103e
 # - kbd: For "chvt" used in systemd service
-adeps_build=('autoconf' 'make' 'cmake' 'g++' 'pkg-config' 'libdrm-dev' 'libgbm-dev' 'libudev-dev' 'libxml2-dev' 'libpng-dev' 'libfreetype6-dev' 'libflac-dev' 'libmpg123-dev' 'libmpeg2-4-dev' 'libasound2-dev' 'libserialport-dev' 'libportmidi-dev' 'wget' 'kbd')
+# - patch: https://github.com/BlitterStudio/amiberry/issues/1673
+adeps_build=('autoconf' 'make' 'cmake' 'g++' 'pkg-config' 'libdrm-dev' 'libgbm-dev' 'libudev-dev' 'libxml2-dev' 'libpng-dev' 'libfreetype6-dev' 'libflac-dev' 'libmpg123-dev' 'libmpeg2-4-dev' 'libasound2-dev' 'libserialport-dev' 'libportmidi-dev' 'wget' 'kbd' 'patch')
 adeps=('libdrm2' 'libgl1-mesa-dri' 'libgbm1' 'libegl1' 'libudev1' 'libfreetype6' 'libmpeg2-4' 'libserialport0' 'wget' 'kbd')
 case $G_DISTRO in
 	7) adeps+=('libxml2' 'libflac12' 'libpng16-16' 'libmpg123-0' 'libasound2' 'libportmidi0');;
@@ -110,6 +111,8 @@ G_EXEC curl -sSfLO "https://github.com/BlitterStudio/amiberry/archive/v$v_ami.ta
 G_EXEC tar xf "v$v_ami.tar.gz"
 G_EXEC rm "v$v_ami.tar.gz"
 G_EXEC cd "amiberry-$v_ami"
+# - Patch for latest C++
+curl -sSf 'https://github.com/BlitterStudio/amiberry/commit/d32a798.patch' | patch -p1 || Error_Exit 'Failed to apply patch to fix build with latest C++'
 # - Add lib to rpath
 G_EXEC sed --follow-symlinks -i '/^LDFLAGS = /s|$| -Wl,-rpath,/mnt/dietpi_userdata/amiberry/lib|' Makefile
 G_EXEC_OUTPUT=1 G_EXEC make "-j$(nproc)" "PLATFORM=$PLATFORM" # Passing compiler flags here overrides some mandatory ones in the Makefile, where -O3 is set as well.
