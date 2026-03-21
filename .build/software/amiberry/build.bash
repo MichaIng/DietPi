@@ -141,7 +141,8 @@ G_EXEC cd "$NAME-$version"
 # Fix RISC-V builds and some issues with GLES: https://github.com/BlitterStudio/amiberry/pull/1838
 curl -sSf 'https://github.com/BlitterStudio/amiberry/commit/98547b9.patch' | patch -p1 || Error_Exit 'Patching Amiberry to fix RISC-V builds failed'
 # Fix Custom controls:
-curl -sSf 'https://github.com/BlitterStudio/amiberry/commit/5c50982' | patch -p1 || Error_Exit 'Patching Custom controls crash failed'
+curl -sSf 'https://github.com/BlitterStudio/amiberry/commit/d71a344.patch' | patch -p1 || Error_Exit 'Patching Custom controls crash failed'
+curl -sSf 'https://github.com/BlitterStudio/amiberry/commit/5c50982.patch' | patch -p1 || Error_Exit 'Patching Custom controls crash failed'
 # - Add SDL3 to rpath
 # shellcheck disable=SC2015
 grep -q '^include(GNUInstallDirs)$' CMakeLists.txt && G_EXEC sed --follow-symlinks -i "/^include(GNUInstallDirs)$/a\set(CMAKE_INSTALL_RPATH \"\${CMAKE_INSTALL_FULL_LIBDIR}/$NAME\")" CMakeLists.txt || Error_Exit 'CMakeLists.txt does not contain "include(GNUInstallDirs)" line anymore'
