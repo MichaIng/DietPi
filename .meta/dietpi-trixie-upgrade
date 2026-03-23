@@ -17,12 +17,9 @@ do
 	case $id in
 		22) alist+=('QuiteRSS');;
 		65) alist+=('Netdata');;
-		111) (( $G_HW_ARCH == 1 )) && alist+=('UrBackup');;
 		114) grep -q '>= 80[34]00' /var/www/nextcloud/lib/versioncheck.php && { G_DIETPI-NOTIFY 1 'Incompatible Nextcloud version: Please upgrade your Nextcloud to at least version 31 to support PHP 8.4. Aborting ...'; exit 1; };;
-		148) (( $G_HW_ARCH == 1 )) && alist+=('myMPD');;
 		178) (( $G_HW_ARCH < 3 )) && alist+=('Jellyfin');;
 		194) (( $G_HW_ARCH < 3 )) && alist+=('PostgreSQL');;
-		207) (( $G_HW_ARCH < 3 )) && alist+=('Moonlight (CLI)');;
 		*) :;;
 	esac
 done < <(sed -nE 's/^aSOFTWARE_INSTALL_STATE\[([0-9]+)\]=2$/\1/p' /boot/dietpi/.installed)
@@ -72,6 +69,13 @@ mapfile -t apackages < <(apt-mark showhold)
 unset -v apackages
 
 G_DIETPI-NOTIFY 2 'Migrating package lists to Trixie suite'
+# Update Microsoft list properly: https://dietpi.com/blog/?p=3128#comment-6199
+if dpkg-query -s 'packages-microsoft-prod' 2> /dev/null | grep -q '^Status: install ok installed$'
+then
+	G_EXEC curl -sSf 'https://packages.microsoft.com/config/debian/13/packages-microsoft-prod.deb'
+	G_EXEC dpkg -i --force-confnew packages-microsoft-prod.deb
+	G_EXEC rm packages-microsoft-prod.deb
+fi
 G_EXEC sed --follow-symlinks -i 's/bookworm/trixie/g' /etc/apt/sources.list
 # Remove obsolete lists, including those obsoleted with Bookworm
 G_EXEC rm -f /etc/apt/sources.list.d/dietpi-{mono,wsdd}.list /etc/apt/trusted.gpg.d/dietpi-{mono,wsdd}.gpg
@@ -80,7 +84,7 @@ do
 	[[ $i == '/etc/apt/sources.list.d/*.list' ]] && break
 	G_EXEC sed --follow-symlinks -i 's/bookworm/trixie/g' "$i"
 	G_EXEC sed --follow-symlinks -i '/download\.opensuse\.org/s/Debian_12/Debian_13/' "$i"
-	#G_EXEC sed --follow-symlinks -i '/download\.opensuse\.org/s/Raspbian_12/Raspbian_13/' "$i"
+	G_EXEC sed --follow-symlinks -i '/download\.opensuse\.org/s/Raspbian_12/Raspbian_13/' "$i"
 done
 
 G_DIETPI-NOTIFY 2 'Reverting some package lists to Bookworm which have no Trixie suite (yet)'
@@ -253,7 +257,7 @@ then
 fi
 
 # PostgreSQL migration
-if dpkg-query -s 'postgresql' &> /dev/null
+if dpkg-query -s 'postgresql' 2> /dev/null | grep -q '^Status: install ok installed$'
 then
 	G_DIETPI-NOTIFY 2 'Migrating PostgreSQL 15 clusters to v17'
 	mapfile -t clusters < <(pg_lsclusters | mawk '$1 == "15" {print $2}')
@@ -276,6 +280,27 @@ sudo apt autopurge'
 	else
 		G_EXEC rm /etc/apt/apt.conf.d/02autoremove-postgresql
 	fi
+fi
+
+# LXQt: Adwaita is not accepted as icon theme anymore and the default start menu is a "fancymenu" so that a "mainmenu" base definition is missing
+if dpkg-query -s 'lxqt' 2> /dev/null | grep -q '^Status: install ok installed$'
+then
+	G_DIETPI-NOTIFY 2 'Migrating LXQt configuration'
+	(( $(dpkg -l | mawk '$2~/-icon-theme$/' | wc -l) < 3 )) && G_AGI tango-icon-theme
+	for i in /etc/xdg /{root,home/*}/.config
+	do
+		[[ -d $i ]] || continue
+		[[ -f $i/lxqt/lxqt.conf ]] && G_EXEC sed --follow-symlinks -i '/^icon_theme=Adwaita/c\icon_theme=Tango' "$i/lxqt/lxqt.conf"
+		if [[ -f $i/lxqt/panel.conf ]]
+		then
+			G_EXEC sed --follow-symlinks -i '/^iconTheme=Adwaita/c\iconTheme=' "$i/lxqt/panel.conf"
+			[[ $(sed -n '/\[mainmenu\]/,/^$/s/^type=/1/p' "$i/lxqt/panel.conf") ]] || G_EXEC sed --follow-symlinks -i '/\[mainmenu\]/a\type=mainmenu' "$i/lxqt/panel.conf"
+			[[ $(sed -n '/\[mainmenu\]/,/^$/s/^ownIcon=/1/p' "$i/lxqt/panel.conf") ]] || G_EXEC sed --follow-symlinks -i '/\[mainmenu\]/a\ownIcon=true' "$i/lxqt/panel.conf"
+			[[ $(sed -n '/\[mainmenu\]/,/^$/s/^icon=/1/p' "$i/lxqt/panel.conf") ]] || G_EXEC sed --follow-symlinks -i '/\[mainmenu\]/a\icon=/usr/share/lxqt/graphics/helix_60.png' "$i/lxqt/panel.conf"
+			[[ $(sed -n '/\[mainmenu\]/,/^$/s/^showText=/1/p' "$i/lxqt/panel.conf") ]] || G_EXEC sed --follow-symlinks -i '/\[mainmenu\]/a\showText=true' "$i/lxqt/panel.conf"
+		fi
+		[[ -f $i/lxqt/session.conf ]] && G_EXEC sed --follow-symlinks -i '/^cursor_theme=Adwaita/d' "$i/lxqt/session.conf"
+	done
 fi
 
 # Reinstalls:
@@ -301,9 +326,8 @@ G_AGP "${packages[@]}"
 
 cat << '_EOF_' > /etc/bashrc.d/zz-dietpi-autopurge.bash
 {
-(( $UID )) && return 0
 G_DIETPI-NOTIFY 2 'Autoremoving leftover packages from Trixie upgrade...'
-G_EXEC_NOHALT=1 G_EXEC rm /etc/bashrc.d/zz-dietpi-autopurge.bash
+G_EXEC_NOHALT=1 G_SUDO G_EXEC rm /etc/bashrc.d/zz-dietpi-autopurge.bash
 G_AGA
 }
 _EOF_

@@ -23,17 +23,36 @@ done
 (( ${#VARIANTS[@]} )) || VARIANTS['amiberry']=1
 
 # APT dependencies
-# - kbd: For "chvt" used in systemd service
-adeps_build=('autoconf' 'make' 'cmake' 'g++' 'pkg-config' 'libdrm-dev' 'libgbm-dev' 'libudev-dev' 'libxml2-dev' 'libpng-dev' 'libfreetype6-dev' 'libflac-dev' 'libmpg123-dev' 'libmpeg2-4-dev' 'libasound2-dev' 'libserialport-dev' 'libportmidi-dev' 'libenet-dev' 'libpcap0.8-dev' 'libzstd-dev' 'kbd')
-adeps=('libdrm2' 'libgl1-mesa-dri' 'libgbm1' 'libegl1' 'libudev1' 'libfreetype6' 'libmpeg2-4' 'libserialport0' 'libenet7' 'libzstd1' 'kbd')
+# - SDL3
+adeps_build=('cmake' 'make' 'gcc' 'libc6-dev' 'pkg-config' 'libasound2-dev' 'libusb-1.0-0-dev' 'libdrm-dev' 'libgbm-dev' 'libegl-dev' 'libudev-dev')
+adeps=('libc6' 'libusb-1.0-0' 'libdrm2' 'libgbm1' 'libegl1' 'libgl1-mesa-dri' 'libudev1')
+# - GL or GLES
+if (( $G_HW_ARCH == 10 ))
+then
+	sdl_flags=('-DSDL_OPENGLES=0' '-DSDL_OPENGL=1') amiberry_flags=('-DUSE_GLES=0')
+	adeps_build+=('libgl-dev') adeps+=('libgl1')
+else
+	sdl_flags=('-DSDL_OPENGLES=1' '-DSDL_OPENGL=0') amiberry_flags=('-DUSE_GLES=1')
+	adeps_build+=('libgles-dev') adeps+=('libgles2')
+fi
+# - SDL3_image
+adeps_build+=('libpng-dev') adeps+=()
+# - SDL3_ttf
+adeps_build+=('libfreetype-dev') adeps+=('libfreetype6')
+# - Amiberry
+adeps_build+=('g++' 'libflac-dev' 'libmpg123-dev' 'libcurl4-openssl-dev' 'nlohmann-json3-dev' 'libpcap0.8-dev' 'libserialport-dev' 'libportmidi-dev' 'libmpeg2-4-dev' 'libenet-dev' 'libzstd-dev')
+adeps+=('libserialport0' 'libmpeg2-4' 'libenet7' 'libzstd1')
+# - Distro-specific package names
 case $G_DISTRO in
-	7) adeps+=('libxml2' 'libflac12' 'libpng16-16' 'libmpg123-0' 'libasound2' 'libpcap0.8' 'libportmidi0');;
-	8) adeps+=('libxml2' 'libflac14' 'libpng16-16t64' 'libmpg123-0t64' 'libasound2t64' 'libpcap0.8t64' 'libportmidi0');;
-	9) adeps+=('libxml2-16' 'libflac14' 'libpng16-16t64' 'libmpg123-0t64' 'libasound2t64' 'libpcap0.8t64' 'libportmidi2');;
+	7) adeps+=('libasound2' 'libpng16-16' 'libflac12' 'libmpg123-0' 'libcurl4' 'libpcap0.8' 'libportmidi0');;
+	8) adeps+=('libasound2t64' 'libpng16-16t64' 'libflac14' 'libmpg123-0t64' 'libcurl4t64' 'libpcap0.8t64' 'libportmidi0');;
+	9) adeps+=('libasound2t64' 'libpng16-16t64' 'libflac14' 'libmpg123-0t64' 'libcurl4t64' 'libpcap0.8t64' 'libportmidi2');;
 	*) Error_Exit "Unsupported distro version: $G_DISTRO_NAME (ID=$G_DISTRO)";;
 esac
-# - Graphics rendering flags and deps
-(( $G_HW_ARCH == 10 )) && opengl_flags=('--disable-video-opengles2' '--enable-video-opengl') adeps_build+=('libgl-dev' 'libegl1') adeps+=('libgl1') || opengl_flags=('--enable-video-opengles2' '--disable-video-opengl') adeps_build+=('libgles-dev') adeps+=('libgles2')
+# - kbd: For "chvt" used in systemd service
+adeps_build+=('kbd') adeps+=('kbd')
+# - patch: https://github.com/libsdl-org/SDL_image/issues/683, https://github.com/BlitterStudio/amiberry/pull/1838
+adeps_build+=('patch')
 
 G_AGUP
 G_AGDUG "${adeps_build[@]}"
@@ -43,60 +62,73 @@ do
 	Error_Exit "Expected dependency package was not installed: $i"
 done
 
-# Build libSDL2
-version=$(curl -sSf "${header[@]}" 'https://api.github.com/repos/libsdl-org/SDL/releases' | mawk -F\" '/^ *"name": "2./{print $4}' | head -1)
-[[ $version ]] || Error_Exit 'No latest LibSDL2 version found'
-G_DIETPI-NOTIFY 2 "Building libSDL2 version \e[33m$version"
+# Build SDL3
+NAME='SDL3'
+PRETTY=$NAME
+version=$(curl -sSf "${header[@]}" 'https://api.github.com/repos/libsdl-org/SDL/releases/latest' | grep -Po '"name": *"\K[0-9.]+(?=")')
+[[ $version ]] || Error_Exit "No latest $PRETTY version found"
+G_DIETPI-NOTIFY 2 "Building $PRETTY version \e[33m$version"
 G_EXEC cd /tmp
-G_EXEC curl -sSfLO "https://github.com/libsdl-org/SDL/releases/download/release-$version/SDL2-$version.tar.gz"
-[[ -d /tmp/SDL2-$version ]] && G_EXEC rm -R "/tmp/SDL2-$version"
-G_EXEC tar xf "SDL2-$version.tar.gz"
-G_EXEC rm "SDL2-$version.tar.gz"
-G_EXEC cd "SDL2-$version"
-G_EXEC_OUTPUT=1 G_EXEC ./configure C{,XX}FLAGS='-g0 -O3' --enable-{alsa,video-kmsdrm,libudev,sdl2-config,joystick,hidapi,hidapi-joystick} "${opengl_flags[@]}" --disable-{video-{rpi,x11,wayland,opengles1,vulkan,offscreen,dummy},pipewire,jack,diskaudio,sndio,dummyaudio,oss,dbus,ime}
-G_EXEC_OUTPUT=1 G_EXEC make "-j$(nproc)"
-find . -type f \( -name '*.so' -o -name '*.so.*' \) -exec strip --strip-unneeded --remove-section=.comment --remove-section=.note -v {} +
-G_EXEC rm -f /usr/local/lib/libSDL2[.-]*
-G_EXEC_OUTPUT=1 G_EXEC make install
+G_EXEC curl -sSfLO "https://github.com/libsdl-org/SDL/releases/download/release-$version/$NAME-$version.tar.gz"
+[[ -d $NAME-$version ]] && G_EXEC rm -R "$NAME-$version"
+G_EXEC tar xf "$NAME-$version.tar.gz"
+G_EXEC rm "$NAME-$version.tar.gz"
+G_EXEC cd "$NAME-$version"
+export CFLAGS='-g0 -O3' CXXFLAGS='-g0 -O3'
+G_EXEC_OUTPUT=1 G_EXEC cmake -B build -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_PREFIX='/tmp/deps' "${sdl_flags[@]}" \
+	-DSDL_{UNIX_CONSOLE_BUILD,PTHREADS,PTHREADS_SEM,ALSA,KMSDRM,HIDAPI,HIDAPI_LIBUSB,HIDAPI_JOYSTICK,LIBUDEV,DEPS_SHARED,SHARED}=1 \
+	-DSDL_{CAMERA,DLOPEN_NOTES,DBUS,LIBURING,DISKAUDIO,DUMMYAUDIO,DUMMYVIDEO,IBUS,OSS,JACK,PIPEWIRE,PULSEAUDIO,SNDIO,X11,WAYLAND,RPI,ROCKCHIP,VULKAN,OPENVR,OFFSCREEN,DUMMYCAMERA,VIRTUAL_JOYSTICK,TEST_LIBRARY,STATIC}=0
+G_EXEC_OUTPUT=1 G_EXEC cmake --build build --config Release
+find build -type f \( -name '*.so' -o -name '*.so.*' \) -exec strip --strip-unneeded --remove-section=.comment --remove-section=.note -v {} +
+[[ -d '/tmp/deps' ]] && G_EXEC rm -R /tmp/deps
+G_EXEC_OUTPUT=1 G_EXEC cmake --install build
 
-# Build libSDL2_image
-version=$(curl -sSf "${header[@]}" 'https://api.github.com/repos/libsdl-org/SDL_image/releases' | mawk -F\" '/^ *"name": "2./{print $4}' | head -1)
-[[ $version ]] || Error_Exit 'No latest libSDL2_image version found'
-G_DIETPI-NOTIFY 2 "Building libSDL2_image version \e[33m$version"
+# Build SDL3_image
+NAME='SDL3_image'
+PRETTY=$NAME
+version=$(curl -sSf "${header[@]}" 'https://api.github.com/repos/libsdl-org/SDL_image/releases/latest' | grep -Po '"name": *"\K[0-9.]+(?=")')
+[[ $version ]] || Error_Exit "No latest $PRETTY version found"
+G_DIETPI-NOTIFY 2 "Building $PRETTY version \e[33m$version"
 G_EXEC cd /tmp
-G_EXEC curl -sSfLO "https://github.com/libsdl-org/SDL_image/releases/download/release-$version/SDL2_image-$version.tar.gz"
-[[ -d /tmp/SDL2_image-$version ]] && G_EXEC rm -R "/tmp/SDL2_image-$version"
-G_EXEC tar xf "SDL2_image-$version.tar.gz"
-G_EXEC rm "SDL2_image-$version.tar.gz"
-G_EXEC cd "SDL2_image-$version"
-G_EXEC_OUTPUT=1 G_EXEC ./configure C{,XX}FLAGS='-g0 -O3'
-G_EXEC_OUTPUT=1 G_EXEC make "-j$(nproc)"
-find . -type f \( -name '*.so' -o -name '*.so.*' \) -exec strip --strip-unneeded --remove-section=.comment --remove-section=.note -v {} +
-G_EXEC rm -f /usr/local/lib/libSDL2_image[.-]*
-G_EXEC_OUTPUT=1 G_EXEC make install
+G_EXEC curl -sSfLO "https://github.com/libsdl-org/SDL_image/releases/download/release-$version/$NAME-$version.tar.gz"
+[[ -d $NAME-$version ]] && G_EXEC rm -R "$NAME-$version"
+G_EXEC tar xf "$NAME-$version.tar.gz"
+G_EXEC rm "$NAME-$version.tar.gz"
+G_EXEC cd "$NAME-$version"
+# Fix dynamic libpng detection: https://github.com/libsdl-org/SDL_image/issues/683
+curl -sSf 'https://github.com/libsdl-org/SDL_image/commit/84c6a74.patch' | patch -p1 || Error_Exit 'Patching SDL3_image to fix dynamic libpng detection failed'
+curl -sSf 'https://github.com/libsdl-org/SDL_image/commit/0add2cd.patch' | patch -p1 || Error_Exit 'Patching SDL3_image to fix dynamic libpng detection failed'
+curl -sSf 'https://github.com/libsdl-org/SDL_image/commit/495a220.patch' | patch -p1 || Error_Exit 'Patching SDL3_image to fix dynamic libpng detection failed'
+curl -sSf 'https://github.com/libsdl-org/SDL_image/commit/8bab27f.patch' | patch -p1 || Error_Exit 'Patching SDL3_image to fix dynamic libpng detection failed'
+G_EXEC_OUTPUT=1 G_EXEC cmake -B build -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_PREFIX='/tmp/deps'
+G_EXEC_OUTPUT=1 G_EXEC cmake --build build --config Release
+find build -type f \( -name '*.so' -o -name '*.so.*' \) -exec strip --strip-unneeded --remove-section=.comment --remove-section=.note -v {} +
+G_EXEC_OUTPUT=1 G_EXEC cmake --install build
 
-# Build libSDL2_ttf
-version=$(curl -sSf "${header[@]}" 'https://api.github.com/repos/libsdl-org/SDL_ttf/releases' | mawk -F\" '/^ *"name": "2./{print $4}' | head -1)
-G_DIETPI-NOTIFY 2 "Building libSDL2_ttf version \e[33m$version"
+# Build SDL3_ttf
+NAME='SDL3_ttf'
+PRETTY=$NAME
+version=$(curl -sSf "${header[@]}" 'https://api.github.com/repos/libsdl-org/SDL_ttf/releases/latest' | grep -Po '"name": *"\K[0-9.]+(?=")')
+[[ $version ]] || Error_Exit "No latest $PRETTY version found"
+G_DIETPI-NOTIFY 2 "Building $PRETTY version \e[33m$version"
 G_EXEC cd /tmp
-G_EXEC curl -sSfLO "https://github.com/libsdl-org/SDL_ttf/releases/download/release-$version/SDL2_ttf-$version.tar.gz"
-[[ -d /tmp/SDL2_ttf-$version ]] && G_EXEC rm -R "/tmp/SDL2_ttf-$version"
-G_EXEC tar xf "SDL2_ttf-$version.tar.gz"
-G_EXEC rm "SDL2_ttf-$version.tar.gz"
-G_EXEC cd "SDL2_ttf-$version"
-G_EXEC_OUTPUT=1 G_EXEC ./configure C{,XX}FLAGS='-g0 -O3'
-G_EXEC_OUTPUT=1 G_EXEC make "-j$(nproc)"
-find . -type f \( -name '*.so' -o -name '*.so.*' \) -exec strip --strip-unneeded --remove-section=.comment --remove-section=.note -v {} +
-G_EXEC rm -f /usr/local/lib/libSDL2_ttf[.-]*
-G_EXEC_OUTPUT=1 G_EXEC make install
+G_EXEC curl -sSfLO "https://github.com/libsdl-org/SDL_ttf/releases/download/release-$version/$NAME-$version.tar.gz"
+[[ -d $NAME-$version ]] && G_EXEC rm -R "$NAME-$version"
+G_EXEC tar xf "$NAME-$version.tar.gz"
+G_EXEC rm "$NAME-$version.tar.gz"
+G_EXEC cd "$NAME-$version"
+G_EXEC_OUTPUT=1 G_EXEC cmake -B build -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_PREFIX='/tmp/deps'
+G_EXEC_OUTPUT=1 G_EXEC cmake --build build --config Release
+find build -type f \( -name '*.so' -o -name '*.so.*' \) -exec strip --strip-unneeded --remove-section=.comment --remove-section=.note -v {} +
+G_EXEC_OUTPUT=1 G_EXEC cmake --install build
 
-# Build
+# Build Amiberry
 for NAME in "${!VARIANTS[@]}"
 do
 ORGA='BlitterStudio'
-[[ $NAME == 'amiberry' ]] && PRETTY='Amiberry' DESC='Optimised Amiga emulator for multiple platforms' || PRETTY='Amiberry-Lite' DESC='Optimised Amiga emulator recommended for smaller ARM and RISC-V SBCs'
+[[ $NAME == 'amiberry' ]] && PRETTY='Amiberry' DESC='Optimised Amiga emulator' || PRETTY='Amiberry-Lite' DESC='Optimised Amiga emulator for older/slower ARM SBCs'
 
-version=$(curl -sSf "${header[@]}" "https://api.github.com/repos/$ORGA/$NAME/releases/latest" | mawk -F\" '/^  "tag_name"/{print $4}')
+version=$(curl -sSf "${header[@]}" "https://api.github.com/repos/$ORGA/$NAME/releases/latest" | grep -Po '"tag_name": *"\K[^"]+(?=")')
 [[ $version ]] || Error_Exit "No latest $PRETTY version found"
 version=${version#v}
 G_DIETPI-NOTIFY 2 "Building $PRETTY version \e[33m$version"
@@ -106,10 +138,15 @@ G_EXEC curl -sSfLO "https://github.com/$ORGA/$NAME/archive/v$version.tar.gz"
 G_EXEC tar xf "v$version.tar.gz"
 G_EXEC rm "v$version.tar.gz"
 G_EXEC cd "$NAME-$version"
-# - Add SDL2 to rpath
+# Fix RISC-V builds and some issues with GLES: https://github.com/BlitterStudio/amiberry/pull/1838
+curl -sSf 'https://github.com/BlitterStudio/amiberry/commit/98547b9.patch' | patch -p1 || Error_Exit 'Patching Amiberry to fix RISC-V builds failed'
+# Fix Custom controls:
+curl -sSf 'https://github.com/BlitterStudio/amiberry/commit/d71a344.patch' | patch -p1 || Error_Exit 'Patching Custom controls crash failed'
+curl -sSf 'https://github.com/BlitterStudio/amiberry/commit/5c50982.patch' | patch -p1 || Error_Exit 'Patching Custom controls crash failed'
+# - Add SDL3 to rpath
 # shellcheck disable=SC2015
 grep -q '^include(GNUInstallDirs)$' CMakeLists.txt && G_EXEC sed --follow-symlinks -i "/^include(GNUInstallDirs)$/a\set(CMAKE_INSTALL_RPATH \"\${CMAKE_INSTALL_FULL_LIBDIR}/$NAME\")" CMakeLists.txt || Error_Exit 'CMakeLists.txt does not contain "include(GNUInstallDirs)" line anymore'
-G_EXEC_OUTPUT=1 G_EXEC cmake -B build -DCMAKE_INSTALL_PREFIX=/usr
+G_EXEC_OUTPUT=1 G_EXEC cmake -B build -DCMAKE_BUILD_TYPE=Release -DCMAKE_PREFIX_PATH='/tmp/deps' -DCMAKE_INSTALL_PREFIX='/usr' "${amiberry_flags[@]}" -DUSE_IPC_SOCKET=0
 G_EXEC_OUTPUT=1 G_EXEC cmake --build build
 G_EXEC strip --remove-section=.comment --remove-section=.note "build/$NAME"
 
@@ -124,10 +161,10 @@ G_EXEC mkdir -p "$DIR/"{DEBIAN,"mnt/dietpi_userdata/$NAME",lib/systemd/system}
 G_EXEC_OUTPUT=1 G_EXEC cmake --install "$NAME-$version/build" --prefix "$DIR/usr"
 # - Obtain library dir
 LIB_DIR=$(find "$DIR/usr/lib/"*"/$NAME" -maxdepth 0)
-G_EXEC cp -aL /usr/local/lib/libSDL2{,_image,_ttf}-2.0.so.0 "$LIB_DIR/"
+G_EXEC cp -aL /tmp/deps/lib/libSDL3{,_image,_ttf}.so.0 "$LIB_DIR/"
 
-# - systemd service
-cat << _EOF_ > "$DIR/lib/systemd/system/$NAME.service"
+# - systemd service: Workaround invisible cursor: https://github.com/libsdl-org/SDL/issues/15242
+cat << _EOF_ > "$DIR/lib/systemd/system/$NAME.service" || exit 1
 [Unit]
 Description=$PRETTY Amiga Emulator (DietPi)
 Documentation=https://github.com/BlitterStudio/amiberry/wiki
@@ -138,6 +175,7 @@ Environment=XDG_DATA_HOME=/mnt/dietpi_userdata
 Environment=XDG_CONFIG_HOME=/mnt/dietpi_userdata
 Environment=AMIBERRY_HOME_DIR=/mnt/dietpi_userdata/$NAME
 Environment=AMIBERRY_CONFIG_DIR=/mnt/dietpi_userdata/$NAME/conf
+Environment=SDL_KMSDRM_ATOMIC=0
 WorkingDirectory=/mnt/dietpi_userdata/$NAME
 StandardInput=tty
 TTYPath=/dev/tty3
@@ -152,9 +190,9 @@ _EOF_
 # - preinst
 if [[ $NAME == 'amiberry' ]]
 then
-	cat << '_EOF_' > "$DIR/DEBIAN/preinst"
-#!/bin/sh
-if [ -d '/mnt/dietpi_userdata/amiberry' ] && [ ! -d '/mnt/dietpi_userdata/amiberry_v5_bak' ] && dpkg --compare-versions "$2" lt '5.7.5'
+	cat << '_EOF_' > "$DIR/DEBIAN/preinst" || exit 1
+#!/bin/dash -e
+if [ -d '/mnt/dietpi_userdata/amiberry' ] && [ ! -d '/mnt/dietpi_userdata/amiberry_v5_bak' ] && dpkg --compare-versions "$2" lt-nl '5.7.5'
 then
 	echo 'Backing up Amiberry v5 config/data dir to /mnt/dietpi_userdata/amiberry_v5_bak ...'
 	rm -Rf /mnt/dietpi_userdata/amiberry/amiberry /mnt/dietpi_userdata/amiberry/data /mnt/dietpi_userdata/amiberry/lib
@@ -167,8 +205,8 @@ then
 fi
 _EOF_
 else
-	cat << '_EOF_' > "$DIR/DEBIAN/preinst"
-#!/bin/sh
+	cat << '_EOF_' > "$DIR/DEBIAN/preinst" || exit 1
+#!/bin/dash -e
 if [ -d '/mnt/dietpi_userdata/amiberry_v5_bak' ] && [ ! -d '/mnt/dietpi_userdata/amiberry-lite' ]
 then
 	echo 'Using Amiberry v5 config/data backup for Amiberry-Lite ...'
@@ -184,8 +222,8 @@ _EOF_
 fi
 
 # - prerm
-cat << _EOF_ > "$DIR/DEBIAN/prerm"
-#!/bin/sh
+cat << _EOF_ > "$DIR/DEBIAN/prerm" || exit 1
+#!/bin/dash -e
 if [ "\$1" = 'remove' ] && [ -d '/run/systemd/system' ] && [ -f '/lib/systemd/system/$NAME.service' ]
 then
 	echo 'Deconfiguring $PRETTY systemd service ...'
@@ -195,8 +233,8 @@ fi
 _EOF_
 
 # - postrm
-cat << _EOF_ > "$DIR/DEBIAN/postrm"
-#!/bin/sh
+cat << _EOF_ > "$DIR/DEBIAN/postrm" || exit 1
+#!/bin/dash -e
 if [ "\$1" = 'purge' ] && [ -d '/etc/systemd/system/$NAME.service.d' ]
 then
 	echo 'Removing $PRETTY systemd service overrides ...'
@@ -205,7 +243,7 @@ fi
 _EOF_
 
 # - md5sums
-find "$DIR" ! \( -path "$DIR/DEBIAN" -prune \) -type f -exec md5sum {} + | sed "s|$DIR/||" > "$DIR/DEBIAN/md5sums"
+find "$DIR" ! \( -path "$DIR/DEBIAN" -prune \) -type f -exec md5sum {} + | sed "s|$DIR/||" > "$DIR/DEBIAN/md5sums" || exit 1
 
 # - Obtain DEB dependency versions
 DEPS_APT_VERSIONED=
@@ -220,12 +258,12 @@ G_EXEC curl -sSfo package.deb "https://dietpi.com/downloads/binaries/$G_DISTRO_N
 old_version=$(dpkg-deb -f package.deb Version)
 G_EXEC rm package.deb
 suffix=${old_version#*-dietpi}
-[[ $old_version == "$version-"* ]] && version+="-dietpi$((suffix+1))" || version+="-dietpi1"
+[[ $old_version == "$version-"* ]] && version+="-dietpi$((suffix+1))" || version+='-dietpi1'
 G_DIETPI-NOTIFY 2 "Old package version is:       \e[33m${old_version:-N/A}"
 G_DIETPI-NOTIFY 2 "Building new package version: \e[33m$version"
 
 # - control
-cat << _EOF_ > "$DIR/DEBIAN/control"
+cat << _EOF_ > "$DIR/DEBIAN/control" || exit 1
 Package: $NAME
 Version: $version
 Architecture: $(dpkg --print-architecture)
@@ -237,7 +275,7 @@ Section: games
 Priority: optional
 Homepage: https://amiberry.com/
 Description: $DESC
- This package ships with optimised libSDL2 builds.
+ This package ships with optimised SDL3 builds.
 _EOF_
 G_CONFIG_INJECT 'Installed-Size: ' "Installed-Size: $(du -sk "$DIR" | mawk '{print $1}')" "$DIR/DEBIAN/control"
 

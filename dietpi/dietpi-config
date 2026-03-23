@@ -1286,6 +1286,10 @@ Latest release notes: https://github.com/starfive-tech/VisionFive2/releases
 			G_WHIP_MENU_ARRAY+=('CPU Frequency Limits' ": Max = [$user_frequency_max_text] | Min = [$user_frequency_min_text]")
 		fi
 
+		# CPU Temp Sensor
+		local cpu_temp_sensor=$(sed -n '/^[[:blank:]]*CONFIG_CPU_TEMP_PATH=/{s/^[^=]*=//p;q}' /boot/dietpi.txt)
+		G_WHIP_MENU_ARRAY+=('CPU Temp Sensor' ": [${cpu_temp_sensor:=auto}]")
+
 		# RPi extras
 		if (( $G_HW_MODEL < 10 ))
 		then
@@ -1528,6 +1532,41 @@ If unsure, set any value, 'Ondemand Down Factor' option on the next screen will 
 					REBOOT_REQUIRED=1
 
 				fi
+			;;
+
+			'CPU Temp Sensor')
+
+				G_WHIP_MENU_ARRAY=(
+					'auto' 'Auto-detect (default)'
+					'custom' 'Enter custom path'
+					'' '●─ Detected sensors '
+				)
+
+				local sfile stemp smark
+				for sfile in /sys/devices/platform/coretemp.*/hwmon/hwmon*/temp*_input /sys/class/hwmon/hwmon*/temp*_input /sys/class/thermal/thermal_zone*/temp
+				do
+					[[ -f $sfile ]] || continue
+					read -r stemp < "$sfile" || continue
+					disable_error=1 G_CHECK_VALIDINT "$stemp" 1 || continue # trust only positive temperatures
+					(( $stemp > 200 )) && stemp=$(( $stemp / 1000 )) # m°C => °C
+
+					# Mark currently selected sensor node
+					[[ $sfile == "$cpu_temp_sensor" ]] && smark=' [*]' || smark=''
+
+					G_WHIP_MENU_ARRAY+=("$sfile" "$stemp °C$smark")
+				done
+
+				G_WHIP_DEFAULT_ITEM=$cpu_temp_sensor
+				G_WHIP_MENU "Select CPU temperature sensor:\n\nCurrent: $cpu_temp_sensor" || return 0
+
+				if [[ $G_WHIP_RETURNED_VALUE == 'custom' ]]
+				then
+					G_WHIP_DEFAULT_ITEM=$cpu_temp_sensor
+					G_WHIP_INPUTBOX 'Enter full sensor path:\n\nExample: /sys/class/hwmon/hwmon1/temp1_input' || return 0
+					[[ -f $G_WHIP_RETURNED_VALUE ]] || { G_WHIP_MSG "Path not found:\n\n$G_WHIP_RETURNED_VALUE"; return 0; }
+				fi
+
+				G_CONFIG_INJECT 'CONFIG_CPU_TEMP_PATH=' "CONFIG_CPU_TEMP_PATH=$G_WHIP_RETURNED_VALUE" /boot/dietpi.txt
 			;;
 
 			*) :;;
@@ -2745,85 +2784,8 @@ This is mainly aimed at PINE A64 which may have a hardware issue that causes uns
 
 		case "$G_WHIP_RETURNED_VALUE" in
 
-			'Benchmarks') TARGETMENUID=12;;
+			'Benchmarks') /boot/dietpi/dietpi-benchmark;;
 			'Stress Test') TARGETMENUID=15;;
-			*) :;;
-		esac
-	}
-
-	# TARGETMENUID=12
-	Menu_FilesystemBenchmark()
-	{
-		# Init/load previous bench results
-		[[ -f '/var/lib/dietpi/dietpi-benchmark/results' ]] || /boot/dietpi/func/dietpi-benchmark 0
-		# shellcheck disable=SC1091
-		. /var/lib/dietpi/dietpi-benchmark/results
-
-		# Sanity for beta testing. As this value won't exist until re-save of /var/lib/dietpi/dietpi-benchmark/results
-		[[ $BENCH_NET_LAN_SPEED ]] || BENCH_NET_LAN_SPEED='Not Tested'
-
-		G_WHIP_MENU_ARRAY=(
-
-			'' '●─ DietPi-Benchmark '
-			'DietPi-Benchmark' ': Starts CPU, RAM and IO benchmark suite. Scores can be viewed online.'
-			'' '●─ Additional benchmarks '
-			'Custom Filesystem' ': Benchmark IO performance from a selection of mounted devices.'
-			'Network LAN' ': Benchmark LAN performance using 2 DietPi systems.'
-		)
-
-		G_WHIP_DEFAULT_ITEM='DietPi-Benchmark'
-		# shellcheck disable=SC2154
-		G_WHIP_MENU "\
-DietPi-Benchmark | https://dietpi.com/survey#benchmark :
- - CPU Performance   : Duration = $BENCH_CPU seconds (lower is faster)
- - CPU Temp          : Idle = ${BENCH_CPU_TEMP_START}'c | Full load = ${BENCH_CPU_TEMP_END}'c
- - RootFS            : Write = $BENCH_ROOTFS_WRITE MB/s | Read = $BENCH_ROOTFS_READ MB/s
- - RAM               : Write = $BENCH_RAM_WRITE MB/s | Read = $BENCH_RAM_READ MB/s
-
-Additional benchmarks:
- - Custom Filesystem : Write = $BENCH_CUSTOMFS_WRITE MB/s | Read = $BENCH_CUSTOMFS_READ MB/s
- - Network LAN       : Transfer rate = $BENCH_NET_LAN_SPEED MB/s" || { Back_or_Exit 11; return 0; } # Tools menu
-
-		case "$G_WHIP_RETURNED_VALUE" in
-
-			'DietPi-Benchmark') /boot/dietpi/func/dietpi-benchmark 2;;
-
-			'Network LAN')
-
-				G_WHIP_MENU_ARRAY=(
-
-					'Server' ': Run this device as the server'
-					'Client' ': Connect to an existing server, to begin the test'
-
-				)
-
-				if G_WHIP_MENU 'Please select an option:\n\n - Server: Run a server on the current device. Another system can then use the "Client" option to connect and begin the test.\n\n - Client: Connect to an existing server and begin the test.'; then
-
-					if [[ $G_WHIP_RETURNED_VALUE == 'Server' ]]; then
-
-						/boot/dietpi/func/dietpi-benchmark 3
-
-					elif [[ $G_WHIP_RETURNED_VALUE == 'Client' ]]; then
-
-						/boot/dietpi/func/dietpi-benchmark 4
-
-					fi
-
-				fi
-			;;
-
-			'Custom Filesystem')
-
-				/boot/dietpi/dietpi-drive_manager 1
-				local fp_fsbench_custom_mount=$(</tmp/dietpi-drive_manager_selmnt)
-
-				if [[ $fp_fsbench_custom_mount ]]; then
-
-					FP_BENCHFILE=$fp_fsbench_custom_mount /boot/dietpi/func/dietpi-benchmark 1
-
-				fi
-			;;
-
 			*) :;;
 		esac
 	}
@@ -3889,7 +3851,6 @@ NB: If you need to use *.pool.ntp.org servers, enter the base domain only. The s
 			9) Menu_NetworkAdapters_Ethernet;;
 			10) Menu_NetworkAdapters_Wifi;;
 			11) Menu_Tools;;
-			12) Menu_FilesystemBenchmark;;
 			13) Menu_Overclock;;
 			14) Menu_AudioOptions;;
 			15) Menu_StressTest;;

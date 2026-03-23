@@ -706,6 +706,7 @@ setenv rootuuid "true"' /boot/boot.cmd
 				esac
 				G_CONFIG_INJECT 'overlay_path=' 'overlay_path=rockchip' /boot/dietpiEnv.txt
 				# Device tree
+				# shellcheck disable=SC2015
 				case $G_HW_MODEL in
 					46) G_CONFIG_INJECT 'fdtfile=' 'fdtfile=rockchip/rk3399-pinebook-pro.dtb' /boot/dietpiEnv.txt;;
 					55) G_CONFIG_INJECT 'fdtfile=' 'fdtfile=rockchip/rk3328-nanopi-r2-rev00.dtb' /boot/dietpiEnv.txt;; # Includes and extends the U-Boot default rk3328-nanopi-r2s.dtb
@@ -728,7 +729,7 @@ setenv rootuuid "true"' /boot/boot.cmd
 						esac
 					;;
 					85) G_CONFIG_INJECT 'fdtfile=' 'fdtfile=rockchip/rk3588s-rock-5a.dtb' /boot/dietpiEnv.txt;;
-					104) G_CONFIG_INJECT 'fdtfile=' 'fdtfile=rockchip/rk3528-nanopi-rev01.dtb' /boot/dietpiEnv.txt;;
+					104) [[ $RK35XX_MAINLINE == 1 ]] && G_CONFIG_INJECT 'fdtfile=' 'fdtfile=rockchip/rk3528-nanopi-zero2.dtb' /boot/dietpiEnv.txt || G_CONFIG_INJECT 'fdtfile=' 'fdtfile=rockchip/rk3528-nanopi-rev01.dtb' /boot/dietpiEnv.txt;;
 					*) :;;
 				esac
 				# Overlay prefix
@@ -813,12 +814,8 @@ setenv rootuuid "true"' /boot/boot.cmd
 				# Console args
 				case $G_HW_MODEL in
 					57|65) G_CONFIG_INJECT 'consoleargs=' 'consoleargs=console=ttyS0,115200' /boot/dietpiEnv.txt;; # headless
-					96) G_EXEC sed --follow-symlinks -i 's/ttyAML0/ttyAS0/' /boot/dietpiEnv.txt;;
 					*) G_EXEC sed --follow-symlinks -i 's/ttyAML0/ttyS0/' /boot/dietpiEnv.txt;;
 				esac
-				# Orange Pi 4A
-				# shellcheck disable=SC2016
-				(( $G_HW_MODEL == 96 )) && G_EXEC sed --follow-symlinks -i -e 's|\${prefix}Image|${prefix}zImage|' -e 's/booti/bootz/' /boot/boot.cmd && G_CONFIG_INJECT 'setenv scriptaddr ' 'setenv scriptaddr "0x43100000"' /boot/boot.cmd
 
 			# Allwinner H3 (32-bit)
 			elif [[ $G_HW_MODEL =~ ^(48|59|60|63|64|66)$ ]]
@@ -1031,10 +1028,9 @@ _EOF_'
 				'kmod'			# "modprobe", "lsmod", used by several DietPi scripts
 				'rfkill' 		# Block/unblock WiFi and Bluetooth adapters, only installed once to unblock everything, purged afterwards!
 				'systemd-timesyncd'	# Network time sync daemon
+				'udhcpc'		# DHCP client
 				'usbutils'		# "lsusb", used by DietPi-Software + DietPi-BugReport
 			)
-			# DHCP client: isc-dhcp-client has been removed from Forky, and we move to BusyBox's udhcpc.
-			(( $G_DISTRO < 9 )) && aPACKAGES_REQUIRED_INSTALL+=('isc-dhcp-client') || aPACKAGES_REQUIRED_INSTALL+=('udhcpc')
 
 			# All but VMs: Drive power management control
 			(( $G_HW_MODEL == 20 )) || aPACKAGES_REQUIRED_INSTALL+=('hdparm')
@@ -1053,7 +1049,7 @@ _EOF_'
 			G_EXEC eval 'echo '\''do_symlinks=0'\'' > /etc/kernel-img.conf'
 			G_EXEC rm -f /{,boot/}{initrd.img,vmlinuz}{,.old}
 
-			# Install initramfs-tools first to have an initramfs generated on kernel install, and configure it to use zstd if supported for better compression and faster decompression
+			# Install initramfs-tools first to have an initramfs generated on kernel install, and configure it to use zstd for better compression and faster decompression
 			G_AGI initramfs-tools zstd
 			G_CONFIG_INJECT 'COMPRESS=' 'COMPRESS=zstd' /etc/initramfs-tools/initramfs.conf
 
@@ -1105,7 +1101,7 @@ _EOF_
 			fi
 
 			# Select kernel, device tree and U-Boot packages
-			local model='odroidn2' kernel='meson64' arch='arm64' branch='current' zstd=()
+			local model='odroidn2' kernel='meson64' arch='arm64' branch='current'
 			case $G_HW_MODEL in
 				10) model='odroidc1' kernel='meson' arch='arm';;
 				11) model='odroidxu4' kernel='odroidxu4' arch='arm';;
@@ -1178,7 +1174,7 @@ _EOF_
 				93) model='orangepi5pro' kernel='rk35xx' branch='vendor';;
 				94) model='orangepi5-ultra' kernel='rk35xx' branch='vendor';;
 				95) model='orangepicm5' kernel='rk35xx' branch='vendor';;
-				96) model='orangepi4a' kernel='sun55iw3' branch='legacy';;
+				96) model='orangepi-4a' kernel='sunxi64' branch='edge';;
 				99) model='orangepi3' kernel='sunxi64';;
 				100) model='nanopi-r3s' kernel='rockchip64';;
 				101) model='nanopi-r3s-lts' kernel='rockchip64';;
@@ -1189,7 +1185,12 @@ _EOF_
 			esac
 
 			# Override with mainline kernel if wanted
-			[[ $RK35XX_MAINLINE == 1 && $kernel == 'rk35xx' ]] && kernel='rockchip64' branch='edge'
+			if [[ $RK35XX_MAINLINE == 1 && $kernel == 'rk35xx' ]]
+			then
+				kernel='rockchip64'
+				# NanoPi M5/R76S: Stay with edge for now since R76S lacks dts in 6.18 and M5 some features like HDMI audio
+				[[ $G_HW_MODEL == 10[23] ]] && branch='edge' || branch='current'
+			fi
 
 			# NanoPi R2S/NEO3
 			if [[ $G_HW_MODEL =~ ^(55|56)$ ]]
@@ -1208,6 +1209,16 @@ _EOF_
 				G_DIETPI-NOTIFY 2 'Limiting CMA size to 16 MiB to free more system memory'
 				G_EXEC sed --follow-symlinks -i '/^extraargs=/s/$/ cma=16M/' /boot/dietpiEnv.txt
 
+			# Orange Pi 4A
+			elif (( $G_HW_MODEL == 96 ))
+			then
+				G_DIETPI-NOTIFY 2 'Blacklisting mainline brcmfmac WiFi driver for Orange Pi 4A which does not work with onboard WiFi and crashes the board at random occasions'
+				cat << '_EOF_' > /etc/modprobe.d/dietpi-orangepi4a.conf || exit 1
+blacklist brcmfmac_wcc
+blacklist brcmfmac
+blacklist btsdio
+blacklist hci_uart
+_EOF_
 			# Orange Pi CM5: Select Tablet Base Board device tree automatically if second USB-C port seems functional
 			# - Better would be to read the model from EEPROM, but for that we would need to know the hardware ID range of that base board: https://github.com/radxa/u-boot/blob/next-dev-v2024.10/board/rockchip/evb_rk3588/evb_rk3588.c#L101
 			elif (( $G_HW_MODEL == 95 ))
@@ -1225,10 +1236,9 @@ fi' /boot/boot.cmd
 			/boot/dietpi/func/dietpi-set_software apt clean
 			G_AGUP
 
-			# Install initramfs-tools first to have an initramfs generated on kernel install, and configure it to use zstd if supported for better compression and faster decompression
-			[[ $kernel == 's5p6818' ]] || zstd=('zstd')
-			G_AGI initramfs-tools u-boot-tools armbian-firmware "${zstd[@]}"
-			[[ ${zstd[0]} ]] && G_CONFIG_INJECT 'COMPRESS=' 'COMPRESS=zstd' /etc/initramfs-tools/initramfs.conf
+			# Install initramfs-tools first to have an initramfs generated on kernel install, and configure it to use zstd for better compression and faster decompression
+			G_AGI initramfs-tools zstd armbian-firmware u-boot-tools
+			G_CONFIG_INJECT 'COMPRESS=' 'COMPRESS=zstd' /etc/initramfs-tools/initramfs.conf
 
 			# Install testing kernel build if requested
 			if (( $TEST_KERNEL ))
@@ -1662,7 +1672,7 @@ _EOF_
 		[[ -d '/var/cache/apparmor' ]] && G_EXEC rm -R /var/cache/apparmor
 		[[ -d '/var/lib/udisks2' ]] && G_EXEC rm -R /var/lib/udisks2
 		[[ -d '/var/lib/bluetooth' ]] && G_EXEC rm -R /var/lib/bluetooth
-		G_EXEC rm -Rf /var/lib/dhcp/{,.??,.[^.]}*
+		G_EXEC rm -Rf /var/lib/dhcp
 		G_EXEC rm -f /var/lib/misc/*.leases
 		G_EXEC rm -Rf /var/backups/{,.??,.[^.]}*
 		G_EXEC rm -f /etc/*.org
@@ -2319,7 +2329,7 @@ _EOF_
 		fi
 
 		G_DIETPI-NOTIFY 2 'Running general cleanup of misc files'
-		rm -Rfv /{root,home/*}/.{bash_history,nano_history,wget-hsts,cache,local,config,gnupg,viminfo,dbus,gconf,nano,vim,zshrc,oh-my-zsh} /etc/*- /var/{cache/debconf,lib/dpkg}/*-old /var/lib/dhcp/{,.??,.[^.]}*
+		rm -Rfv /{root,home/*}/.{bash_history,nano_history,wget-hsts,cache,local,config,gnupg,viminfo,dbus,gconf,nano,vim,zshrc,oh-my-zsh} /etc/*- /var/{cache/debconf,lib/dpkg}/*-old
 		find /usr -type d -name '__pycache__' -exec rm -Rv {} +
 
 		# Remove installer script
