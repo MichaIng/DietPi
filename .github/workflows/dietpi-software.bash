@@ -380,7 +380,7 @@ G_AG_CHECK_INSTALL_PREREQ "${apackages[@]}"
 # Download
 G_EXEC curl -sSfO "https://dietpi.com/downloads/images/$image.xz"
 G_EXEC xz -d "$image.xz"
-G_EXEC truncate -s 8G "$image"
+G_EXEC truncate -s 16G "$image"
 
 # Loop device
 FP_LOOP=$(losetup -f)
