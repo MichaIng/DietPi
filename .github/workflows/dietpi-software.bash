@@ -385,10 +385,10 @@ G_EXEC truncate -s 16G "$image"
 # Loop device
 FP_LOOP=$(losetup -f)
 G_EXEC losetup -P "$FP_LOOP" "$image"
-G_EXEC_OUTPUT=1 G_EXEC e2fsck -fp "${FP_LOOP}p1"
+G_EXEC_OUTPUT=1 G_EXEC e2fsck -f "${FP_LOOP}p1"
 G_EXEC_OUTPUT=1 G_EXEC eval "sfdisk -N1 '$FP_LOOP' <<< ',+'"
 G_EXEC_OUTPUT=1 G_EXEC resize2fs "${FP_LOOP}p1"
-G_EXEC_OUTPUT=1 G_EXEC e2fsck -fp "${FP_LOOP}p1"
+G_EXEC_OUTPUT=1 G_EXEC e2fsck -f "${FP_LOOP}p1"
 G_EXEC mkdir rootfs
 G_EXEC mount "${FP_LOOP}p1" rootfs
 
@@ -396,7 +396,7 @@ G_EXEC mount "${FP_LOOP}p1" rootfs
 if (( $arch < 3 && $G_HW_ARCH != $arch ))
 then
 	# shellcheck disable=SC2015
-	echo -e "#/bin/dash\n[ \"\$*\" = -m ] && echo $ARCH || /bin/uname \"\$@\"" > rootfs/usr/local/bin/uname && G_EXEC chmod +x rootfs/usr/local/bin/uname || Error_Exit "Failed to generate /usr/local/bin/uname for $ARCH"
+	echo -e "#!/bin/dash\n[ \"\$*\" = '-m' ] && echo '$ARCH' || /bin/uname \"\$@\" | sed -E 's/armv[67]l|aarch64|x86_64|riscv64/$ARCH/g'" > rootfs/usr/local/bin/uname && G_EXEC chmod +x rootfs/usr/local/bin/uname || Error_Exit "Failed to generate /usr/local/bin/uname for $ARCH"
 fi
 
 # Force RPi on ARM systems if requested
@@ -490,36 +490,26 @@ then
 		G_EXEC eval "echo -e '[Service]\nImportCredential=\nLoadCredential=' > '${i/lib/etc}.d/dietpi-no-credentials.conf'"
 	done
 
-	# Failing services as PrivateUsers leads to "Failed to set up user namespacing", and AmbientCapabilities to "Failed to apply ambient capabilities (before UID change): Operation not permitted"
-	G_EXEC mkdir rootfs/etc/systemd/system/{redis-server,raspotify,navidrome,homebridge}.service.d
-	G_EXEC eval 'echo -e '\''[Service]\nPrivateUsers=0'\'' > rootfs/etc/systemd/system/redis-server.service.d/dietpi-container.conf'
-	G_EXEC eval 'echo -e '\''[Service]\nPrivateUsers=0'\'' > rootfs/etc/systemd/system/raspotify.service.d/dietpi-container.conf'
-	G_EXEC eval 'echo -e '\''[Service]\nPrivateUsers=0'\'' > rootfs/etc/systemd/system/navidrome.service.d/dietpi-container.conf'
-	G_EXEC eval 'echo -e '\''[Service]\nAmbientCapabilities='\'' > rootfs/etc/systemd/system/homebridge.service.d/dietpi-container.conf'
 	# Forky
 	if (( $dist > 8 ))
 	then
-		G_EXEC mkdir rootfs/etc/systemd/system/{mariadb,systemd-logind,apache2,mpd,vaultwarden,blynkserver,gogs,whodb,lazylibrarian,bazarr,immich,immich-ml,mumble-server,dietpi-dashboard-frontend}.service.d
-		# ProtectHome/ProtectSystem/PrivateTmp/...: "Failed to set up mount namespacing: Invalid argument": https://github.com/systemd/systemd/issues/39951
-		G_EXEC eval 'echo -e '\''[Service]\nProtectHome=0\nProtectSystem=0'\'' > rootfs/etc/systemd/system/mariadb.service.d/dietpi-container.conf'
-		G_EXEC eval 'echo -e '\''[Service]\nProtectHome=0\nProtectSystem=0\nPrivateTmp=0\nReadWritePaths=\nProtectKernelModules=0\nProtectControlGroups=0\nProtectKernelLogs=0'\'' > rootfs/etc/systemd/system/systemd-logind.service.d/dietpi-container.conf'
-		G_EXEC eval 'echo -e '\''[Service]\nPrivateTmp=0'\'' > rootfs/etc/systemd/system/apache2.service.d/dietpi-container.conf'
-		G_EXEC eval 'echo -e '\''[Service]\nProtectSystem=0\nProtectKernelTunables=0\nProtectControlGroups=0\nProtectKernelModules=0'\'' > rootfs/etc/systemd/system/mpd.service.d/dietpi-container.conf'
-		G_EXEC eval 'echo -e '\''[Service]\nProtectHome=0\nProtectSystem=0\nPrivateTmp=0\nReadWritePaths=\nPrivateDevices=0'\'' > rootfs/etc/systemd/system/vaultwarden.service.d/dietpi-container.conf'
-		G_EXEC eval 'echo -e '\''[Service]\nPrivateTmp=0'\'' > rootfs/etc/systemd/system/blynkserver.service.d/dietpi-container.conf'
-		G_EXEC eval 'echo -e '\''[Service]\nProtectSystem=0\nPrivateTmp=0\nPrivateDevices=0\nReadWritePaths='\'' > rootfs/etc/systemd/system/gogs.service.d/dietpi-container.conf'
-		G_EXEC eval 'echo -e '\''[Service]\nProtectSystem=0\nPrivateTmp=0\nPrivateUsers=0\nProtectKernelModules=0\nProtectControlGroups=0\nProtectKernelTunables=0\nReadWritePaths='\'' > rootfs/etc/systemd/system/navidrome.service.d/dietpi-container.conf'
-		G_EXEC eval 'echo -e '\''[Service]\nProtectSystem=0\nProtectHome=0\nPrivateTmp=0\nPrivateDevices=0\nProtectKernelModules=0\nProtectControlGroups=0\nProtectKernelTunables=0\nProtectKernelLogs=0\nReadWritePaths='\'' > rootfs/etc/systemd/system/whodb.service.d/dietpi-container.conf'
-		G_EXEC eval 'echo -e '\''[Service]\nProtectSystem=0\nProtectHome=0\nPrivateTmp=0\nPrivateDevices=0\nProtectKernelModules=0\nProtectControlGroups=0\nProtectKernelTunables=0\nProtectKernelLogs=0\nReadWritePaths='\'' > rootfs/etc/systemd/system/lazylibrarian.service.d/dietpi-container.conf'
-		G_EXEC eval 'echo -e '\''[Service]\nProtectSystem=0\nProtectHome=0\nPrivateTmp=0\nPrivateDevices=0\nProtectControlGroups=0\nProtectKernelTunables=0\nReadWritePaths='\'' > rootfs/etc/systemd/system/bazarr.service.d/dietpi-container.conf'
-		G_EXEC eval 'echo -e '\''[Service]\nProtectSystem=0\nProtectHome=0\nPrivateTmp=0\nPrivateDevices=0\nProtectKernelModules=0\nProtectControlGroups=0\nProtectKernelTunables=0\nProtectKernelLogs=0\nReadWritePaths='\'' > rootfs/etc/systemd/system/immich.service.d/dietpi-container.conf'
-		G_EXEC eval 'echo -e '\''[Service]\nProtectSystem=0\nProtectHome=0\nPrivateTmp=0\nPrivateDevices=0\nProtectKernelModules=0\nProtectControlGroups=0\nProtectKernelTunables=0\nProtectKernelLogs=0\nReadWritePaths='\'' > rootfs/etc/systemd/system/immich-ml.service.d/dietpi-container.conf'
-		G_EXEC eval 'echo -e '\''[Service]\nProtectSystem=0\nProtectHome=0\nPrivateTmp=0\nPrivateDevices=0\nProtectKernelModules=0\nProtectControlGroups=0\nProtectKernelTunables=0\nProtectKernelLogs=0'\'' > rootfs/etc/systemd/system/mumble-server.service.d/dietpi-container.conf'
-		G_EXEC eval 'echo -e '\''[Service]\nProtectSystem=0\nProtectHome=0\nPrivateTmp=0\nPrivateDevices=0\nProtectKernelModules=0\nProtectControlGroups=0\nProtectKernelTunables=0\nProtectKernelLogs=0\nReadWritePaths='\'' > rootfs/etc/systemd/system/dietpi-dashboard-frontend.service.d/dietpi-container.conf'
+		# ProtectHome/ProtectSystem/PrivateTmp/... cause "Failed to set up mount namespacing: Invalid argument": https://github.com/systemd/systemd/issues/39951
+		for i in "${aSERVICES[@]}"
+		do
+			G_EXEC mkdir "rootfs/etc/systemd/system/${aSERVICES[i]}.service.d"
+			G_EXEC eval 'echo -e '\''[Service]\nPrivateUsers=0\nProtectSystem=0\nProtectHome=0\nPrivateTmp=0\nPrivateDevices=0\nProtectKernelModules=0\nProtectControlGroups=0\nProtectKernelTunables=0\nProtectKernelLogs=0\nReadWritePaths='\'' > '\''rootfs/etc/systemd/system/${aSERVICES[i]}.service.d/dietpi-container.conf'\'
+		done
 
 		# /dev/console == /dev/pts/0 seen as "Inappropriate ioctl for device" leading to failing console-getty.service and StandardOutput=tty
 		G_EXEC eval 'echo -e '\''#!/bin/dash\nexec /boot/dietpi/dietpi-login > /dev/console 2>&1'\'' > rootfs/var/lib/dietpi/postboot.d/dietpi-login'
 		G_EXEC sed --follow-symlinks -i '/^StandardOutput=/c\StandardOutput=journal+console' rootfs/etc/systemd/system/dietpi-{first,post}boot.service
+	else
+		# PrivateUsers causes "Failed to set up user namespacing"
+		for i in "${aSERVICES[@]}"
+		do
+			G_EXEC mkdir "rootfs/etc/systemd/system/${aSERVICES[i]}.service.d"
+			G_EXEC eval 'echo -e '\''[Service]\nPrivateUsers=0'\'' > '\''rootfs/etc/systemd/system/${aSERVICES[i]}.service.d/dietpi-container.conf'\'
+		done
 	fi
 
 	# Failing 32-bit ARM Rust builds on ext4 with 64-bit host: https://github.com/rust-lang/cargo/issues/9545
@@ -603,8 +593,8 @@ _EOF_'
 fi
 
 # Check for service status, ports and commands
-# shellcheck disable=SC2016
 # - Start all services
+# shellcheck disable=SC2016
 G_EXEC sed --follow-symlinks -i '/# Start DietPi-Software/a\sed -i '\''/# Custom 1st run script/a\\for i in "${aSTART_SERVICES[@]}"; do G_EXEC_NOHALT=1 G_EXEC systemctl start "$i"; done'\'' /boot/dietpi/dietpi-software' rootfs/boot/dietpi/dietpi-login
 delay=10
 for i in "${aDELAY[@]}"; do (( $i > $delay )) && delay=$i; done

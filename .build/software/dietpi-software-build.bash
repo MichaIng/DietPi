@@ -130,7 +130,7 @@ G_EXEC mount "${FP_LOOP}p1" rootfs
 if (( $arch < 3 && $G_HW_ARCH != $arch ))
 then
 	# shellcheck disable=SC2015
-	echo -e "#/bin/dash\n[ \"\$*\" = -m ] && echo $ARCH || /bin/uname \"\$@\"" > rootfs/usr/local/bin/uname && G_EXEC chmod +x rootfs/usr/local/bin/uname || Error_Exit "Failed to generate /usr/local/bin/uname for $ARCH"
+	echo -e "#!/bin/dash\n[ \"\$*\" = '-m' ] && echo '$ARCH' || /bin/uname \"\$@\" | sed -E 's/armv[67]l|aarch64|x86_64|riscv64/$ARCH/g'" > rootfs/usr/local/bin/uname && G_EXEC chmod +x rootfs/usr/local/bin/uname || Error_Exit "Failed to generate /usr/local/bin/uname for $ARCH"
 fi
 
 # Enable automated setup
