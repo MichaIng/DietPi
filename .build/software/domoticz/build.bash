@@ -8,8 +8,8 @@ header=()
 [[ $GH_TOKEN ]] && header=('-H' "Authorization: token $GH_TOKEN")
 
 # APT dependencies
-adeps_build=('git' 'cmake' 'make' 'g++' 'libssl-dev' 'liblua5.3-dev' 'python3-dev' 'libsqlite3-dev' 'libboost-system-dev' 'libboost-thread-dev' 'libcurl4-openssl-dev' 'libusb-dev')
-adeps=('libc6' 'libsqlite3-0' 'libusb-0.1-4')
+adeps_build=('git' 'cmake' 'make' 'g++' 'libssl-dev' 'liblua5.3-dev' 'python3-dev' 'libsqlite3-dev' 'libboost-system-dev' 'libboost-thread-dev' 'libcurl4-openssl-dev' 'libusb-dev' 'libmosquitto-dev')
+adeps=('libc6' 'libsqlite3-0' 'libusb-0.1-4' 'libmosquitto1')
 case $G_DISTRO in
 	7) adeps+=('libssl3' 'libcurl4');;
 	8|9) adeps+=('libssl3t64' 'libcurl4t64');;
