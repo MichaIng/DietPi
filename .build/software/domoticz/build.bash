@@ -52,7 +52,7 @@ G_EXEC_OUTPUT=1 G_EXEC make -C ../build install
 G_EXEC strip --remove-section=.comment --remove-section=.note "$DIR/opt/$NAME/$NAME"
 
 # Cleanup
-G_EXEC rm "$DIR/opt/$NAME/scripts/"{_domoticz_main.bat,download_update.sh,install.sh,restart_domoticz,update_domoticz}
+G_EXEC rm "$DIR/opt/$NAME/scripts/"{_domoticz_main.bat,install.sh,restart_domoticz}
 
 # Prepare DEB package
 G_DIETPI-NOTIFY 2 "Building $PRETTY DEB package"
