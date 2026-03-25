@@ -123,13 +123,13 @@ aREPLACE[$software_id]='version='\''$release'\'
 
 # phpMyAdmin
 software_id=90
-aCHECK[$software_id]='curl -sSf '\''https://api.github.com/repos/phpmyadmin/phpmyadmin/releases'\'' | grep -Po '\''"name": *"\K[0-9.]+(?=\")'\'' | sort -rV | head -1'
+aCHECK[$software_id]='curl -sSf '\''https://api.github.com/repos/phpmyadmin/phpmyadmin/releases'\'' | grep -Po '\''"name": *"\K[0-9.]+(?=")'\'' | sort -rV | head -1'
 aREGEX[$software_id]='version='\''[^'\'']*'\'
 aREPLACE[$software_id]='version='\''$release'\'
 
 # HAProxy
 software_id=98
-aCHECK[$software_id]='url=$(curl -sSf '\''https://www.haproxy.org/'\'' | grep -Po '\''(?<=href=")/download/.*/src/haproxy-.*\.tar\.gz(?=\")'\'' | head -1); echo "${url:+https://www.haproxy.org$url}"'
+aCHECK[$software_id]='url=$(curl -sSf '\''https://www.haproxy.org/'\'' | grep -Po '\''(?<=href=")/download/.*/src/haproxy-.*\.tar\.gz(?=")'\'' | head -1); echo "${url:+https://www.haproxy.org$url}"'
 aREGEX[$software_id]='https://www.haproxy.org/download/.*/src/haproxy-.*.tar.gz'
 
 # Prometheus Node Exporter
@@ -214,7 +214,7 @@ aREGEX[$software_id]='https://github.com/Prowlarr/Prowlarr/releases/download/.*/
 
 # Home Assistant: Update Python version
 software_id=157
-aCHECK[$software_id]='curl -sSf '\''https://api.github.com/repos/pyenv/pyenv/contents/plugins/python-build/share/python-build?ref=master'\'' | grep -Po '\''"name": *"\K3\.14\.[0-9]*(?=\")'\'' | sort -Vr | head -1'
+aCHECK[$software_id]='curl -sSf '\''https://api.github.com/repos/pyenv/pyenv/contents/plugins/python-build/share/python-build?ref=master'\'' | grep -Po '\''"name": *"\K3\.14\.[0-9]*(?=")'\'' | sort -Vr | head -1'
 aREGEX[$software_id]='ha_python_version='\''[^'\'']*'\'
 aREPLACE[$software_id]='ha_python_version='\''$release'\'
 
