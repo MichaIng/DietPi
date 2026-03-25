@@ -25,7 +25,7 @@ done
 NAME='unbound'
 ORGA='NLnetLabs'
 PRETTY='Unbound'
-version=$(curl -sSf "${header[@]}" "https://api.github.com/repos/$ORGA/$NAME/releases/latest" | mawk -F\" '/^  "tag_name"/{print $4}')
+version=$(curl -sSf "${header[@]}" "https://api.github.com/repos/$ORGA/$NAME/releases/latest" | grep -Po '"tag_name": *"\K[^"]+(?=")')
 [[ $version ]] || { G_DIETPI-NOTIFY 1 "No latest $PRETTY version found, aborting ..."; exit 1; }
 G_DIETPI-NOTIFY 2 "Building $PRETTY version \e[33m${version#release-}"
 G_EXEC cd /tmp

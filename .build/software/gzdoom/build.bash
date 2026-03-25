@@ -49,7 +49,7 @@ done
 # Build SDL2
 NAME='SDL2'
 PRETTY='SDL2'
-version=$(curl -sSf 'https://api.github.com/repos/libsdl-org/SDL/releases' | mawk -F\" '/^ *"name": "2./{print $4}' | head -1)
+version=$(curl -sSf 'https://api.github.com/repos/libsdl-org/SDL/releases' | grep -Po '"name": *"\K2\.[^"]+(?=")' | head -1)
 [[ $version ]] || { G_DIETPI-NOTIFY 1 "No latest $PRETTY version found, aborting ..."; exit 1; }
 G_DIETPI-NOTIFY 2 "Building $PRETTY version \e[33m$version"
 G_EXEC cd /tmp
@@ -67,7 +67,7 @@ G_EXEC_OUTPUT=1 G_EXEC make install
 # Build ZMusic
 NAME='ZMusic'
 PRETTY='ZMusic'
-version=$(curl -sSf 'https://api.github.com/repos/ZDoom/ZMusic/releases/latest' | mawk -F\" '/^  "tag_name"/{print $4}')
+version=$(curl -sSf 'https://api.github.com/repos/ZDoom/ZMusic/releases/latest' | grep -Po '"tag_name": *"\K[^"]+(?=")')
 [[ $version ]] || { G_DIETPI-NOTIFY 1 "No latest $PRETTY version found, aborting ..."; exit 1; }
 G_DIETPI-NOTIFY 2 "Building $PRETTY version \e[33m$version"
 G_EXEC cd /tmp
@@ -85,7 +85,7 @@ G_EXEC_OUTPUT=1 G_EXEC make -C build install
 # Download Freedoom
 NAME='freedoom'
 PRETTY='Freedoom'
-version=$(curl -sSf 'https://api.github.com/repos/freedoom/freedoom/releases/latest' | mawk -F\" '/^  "tag_name"/{print $4}')
+version=$(curl -sSf 'https://api.github.com/repos/freedoom/freedoom/releases/latest' | grep -Po '"tag_name": *"\K[^"]+(?=")')
 [[ $version ]] || { G_DIETPI-NOTIFY 1 "No latest $PRETTY version found, aborting ..."; exit 1; }
 version=${version#v}
 G_DIETPI-NOTIFY 2 "Downloading $PRETTY version \e[33m$version"
@@ -100,7 +100,7 @@ G_EXEC rm {"$NAME",freedm}"-$version.zip"
 # Build GZDoom
 NAME='gzdoom'
 PRETTY='GZDoom'
-version=$(curl -sSf 'https://api.github.com/repos/ZDoom/gzdoom/releases/latest' | mawk -F\" '/^  "tag_name"/{print $4}')
+version=$(curl -sSf 'https://api.github.com/repos/ZDoom/gzdoom/releases/latest' | grep -Po '"tag_name": *"\K[^"]+(?=")')
 [[ $version ]] || { G_DIETPI-NOTIFY 1 "No latest $PRETTY version found, aborting ..."; exit 1; }
 version=${version#g}
 G_DIETPI-NOTIFY 2 "Building $PRETTY version \e[33m$version"
