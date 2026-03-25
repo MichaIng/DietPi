@@ -495,6 +495,7 @@ then
 	if (( $dist > 8 ))
 	then
 		# ProtectHome/ProtectSystem/PrivateTmp/... cause "Failed to set up mount namespacing: Invalid argument": https://github.com/systemd/systemd/issues/39951
+		# shellcheck disable=SC2068
 		for i in ${aSERVICES[@]}
 		do
 			G_EXEC mkdir "rootfs/etc/systemd/system/$i.service.d"
@@ -506,6 +507,7 @@ then
 		G_EXEC sed --follow-symlinks -i '/^StandardOutput=/c\StandardOutput=journal+console' rootfs/etc/systemd/system/dietpi-{first,post}boot.service
 	else
 		# PrivateUsers causes "Failed to set up user namespacing"
+		# shellcheck disable=SC2068
 		for i in ${aSERVICES[@]}
 		do
 			G_EXEC mkdir "rootfs/etc/systemd/system/$i.service.d"
