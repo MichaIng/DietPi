@@ -385,10 +385,11 @@ G_EXEC truncate -s 16G "$image"
 # Loop device
 FP_LOOP=$(losetup -f)
 G_EXEC losetup -P "$FP_LOOP" "$image"
-G_EXEC_OUTPUT=1 G_EXEC e2fsck -f "${FP_LOOP}p1"
 G_EXEC_OUTPUT=1 G_EXEC eval "sfdisk -N1 '$FP_LOOP' <<< ',+'"
+# - resize2fs: "Please run 'e2fsck -f /dev/loop0p1' first."
+# - e2fsck "-p": "need terminal for interactive repairs"
+G_EXEC_OUTPUT=1 G_EXEC e2fsck -fp "${FP_LOOP}p1"
 G_EXEC_OUTPUT=1 G_EXEC resize2fs "${FP_LOOP}p1"
-G_EXEC_OUTPUT=1 G_EXEC e2fsck -f "${FP_LOOP}p1"
 G_EXEC mkdir rootfs
 G_EXEC mount "${FP_LOOP}p1" rootfs
 
@@ -494,10 +495,10 @@ then
 	if (( $dist > 8 ))
 	then
 		# ProtectHome/ProtectSystem/PrivateTmp/... cause "Failed to set up mount namespacing: Invalid argument": https://github.com/systemd/systemd/issues/39951
-		for i in "${aSERVICES[@]}"
+		for i in ${aSERVICES[@]}
 		do
-			G_EXEC mkdir "rootfs/etc/systemd/system/${aSERVICES[i]}.service.d"
-			G_EXEC eval 'echo -e '\''[Service]\nPrivateUsers=0\nProtectSystem=0\nProtectHome=0\nPrivateTmp=0\nPrivateDevices=0\nProtectKernelModules=0\nProtectControlGroups=0\nProtectKernelTunables=0\nProtectKernelLogs=0\nReadWritePaths='\'' > '\''rootfs/etc/systemd/system/${aSERVICES[i]}.service.d/dietpi-container.conf'\'
+			G_EXEC mkdir "rootfs/etc/systemd/system/$i.service.d"
+			G_EXEC eval "echo -e '[Service]\nPrivateUsers=0\nProtectSystem=0\nProtectHome=0\nPrivateTmp=0\nPrivateDevices=0\nProtectKernelModules=0\nProtectControlGroups=0\nProtectKernelTunables=0\nProtectKernelLogs=0\nReadWritePaths=' > 'rootfs/etc/systemd/system/$i.service.d/dietpi-container.conf'"
 		done
 
 		# /dev/console == /dev/pts/0 seen as "Inappropriate ioctl for device" leading to failing console-getty.service and StandardOutput=tty
@@ -505,10 +506,10 @@ then
 		G_EXEC sed --follow-symlinks -i '/^StandardOutput=/c\StandardOutput=journal+console' rootfs/etc/systemd/system/dietpi-{first,post}boot.service
 	else
 		# PrivateUsers causes "Failed to set up user namespacing"
-		for i in "${aSERVICES[@]}"
+		for i in ${aSERVICES[@]}
 		do
-			G_EXEC mkdir "rootfs/etc/systemd/system/${aSERVICES[i]}.service.d"
-			G_EXEC eval 'echo -e '\''[Service]\nPrivateUsers=0'\'' > '\''rootfs/etc/systemd/system/${aSERVICES[i]}.service.d/dietpi-container.conf'\'
+			G_EXEC mkdir "rootfs/etc/systemd/system/$i.service.d"
+			G_EXEC eval "echo -e '[Service]\nPrivateUsers=0' > 'rootfs/etc/systemd/system/$i.service.d/dietpi-container.conf'"
 		done
 	fi
 
