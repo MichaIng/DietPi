@@ -19,7 +19,7 @@ done
 name='gmediarender'
 name_pretty='GMediaRender'
 repo='https://github.com/hzeller/gmrender-resurrect'
-version=$(curl -sSf 'https://api.github.com/repos/hzeller/gmrender-resurrect/releases/latest' | mawk -F\" '/^  "tag_name"/{print $4}')
+version=$(curl -sSf 'https://api.github.com/repos/hzeller/gmrender-resurrect/releases/latest' | grep -Po '"tag_name": *"\K[^"]+(?=")')
 [[ $version ]] || { G_DIETPI-NOTIFY 1 "No latest $name_pretty version found, aborting ..."; exit 1; }
 
 # Download

@@ -28,7 +28,7 @@ done
 NAME='shairport-sync'
 PRETTY='Shairport Sync'
 repo='https://github.com/mikebrady/shairport-sync'
-version=$(curl -sSf 'https://api.github.com/repos/mikebrady/shairport-sync/releases/latest' | mawk -F\" '/^  "tag_name"/{print $4;exit}')
+version=$(curl -sSf 'https://api.github.com/repos/mikebrady/shairport-sync/releases/latest' | grep -Po '"tag_name": *"\K[^"]+(?=")')
 [[ $version ]] || { G_DIETPI-NOTIFY 1 "No latest $PRETTY version found, aborting ..."; exit 1; }
 
 # Download
