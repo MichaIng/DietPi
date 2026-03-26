@@ -212,12 +212,6 @@ aARCH[$software_id]='arm arm64 x64'
 aARCH_CHECK[$software_id]='riscv64'
 aREGEX[$software_id]='https://github.com/Prowlarr/Prowlarr/releases/download/.*/Prowlarr.master\..*\.linux-core-\$arch\.tar\.gz'
 
-# Home Assistant: Update Python version
-software_id=157
-aCHECK[$software_id]='curl -sSf '\''https://api.github.com/repos/pyenv/pyenv/contents/plugins/python-build/share/python-build?ref=master'\'' | grep -Po '\''"name": *"\K3\.14\.[0-9]*(?=")'\'' | sort -Vr | head -1'
-aREGEX[$software_id]='ha_python_version='\''[^'\'']*'\'
-aREPLACE[$software_id]='ha_python_version='\''$release'\'
-
 # Gitea
 software_id=165
 aURL[$software_id]='https://api.github.com/repos/go-gitea/gitea/releases/latest'
