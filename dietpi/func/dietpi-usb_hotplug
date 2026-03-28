@@ -1,0 +1,135 @@
+#!/bin/bash
+{
+	#////////////////////////////////////
+	# DietPi Function: USB drive hotplug
+	#
+	#////////////////////////////////////
+	# Created by MichaIng / micha@dietpi.com / dietpi.com
+	#
+	#////////////////////////////////////
+	#
+	# Info:
+	# - Location: /boot/dietpi/func/dietpi-usb_hotplug
+	# - Handles USB drive hotplug events: auto-mount on plug-in, auto-unmount on unplug
+	# - Called by udev rule: /etc/udev/rules.d/99-dietpi-usb_drive_hotplug.rules
+	# - Enable/disable the udev rule via dietpi-drive_manager
+	#
+	# Usage:
+	# - add DEVNAME    = Mount drive and add /etc/fstab entry
+	# - remove DEVNAME = Unmount drive and remove /etc/fstab entry
+	#////////////////////////////////////
+
+	readonly action=$1
+	readonly devname=$2
+
+	# Logging
+	readonly G_LOG='/var/tmp/dietpi/logs/dietpi-usb_hotplug.log'
+	mkdir -p "${G_LOG%/*}"
+	exec >> "$G_LOG" 2>&1
+
+	Timestamp(){ date '+%Y-%m-%d %H:%M:%S'; }
+
+	[[ $action && $devname ]] || { echo "$(Timestamp) [FAILED] Missing arguments: action=$action devname=$devname"; exit 1; }
+
+	# Use a lock to avoid concurrent fstab edits when multiple devices are attached/detached at once
+	exec 9>/run/dietpi-usb_hotplug.lock
+	flock -x 9
+
+	case $action in
+
+		add)
+			# Get filesystem UUID: required for stable mount point and fstab entry
+			uuid=$(blkid -s UUID -o value "$devname")
+			[[ $uuid ]] || { echo "$(Timestamp) [INFO] $devname: no filesystem UUID found, skipping"; exit 0; }
+
+			# Get filesystem type
+			fs_type=$(blkid -s TYPE -o value "$devname")
+			[[ $fs_type ]] || { echo "$(Timestamp) [INFO] $devname: no filesystem type found, skipping"; exit 0; }
+
+			# Define mount target using UUID (consistent with dietpi-drive_manager convention)
+			mount_target="/mnt/$uuid"
+
+			# Skip if already mounted (e.g. via systemd automount or a prior hotplug event)
+			if findmnt -S "$devname" > /dev/null 2>&1
+			then
+				echo "$(Timestamp) [INFO] $devname is already mounted, skipping"
+				exit 0
+			fi
+
+			# Skip if already in fstab to avoid overriding a user-configured entry
+			if grep -qE "^(UUID=$uuid|$devname)[[:blank:]]" /etc/fstab 2>/dev/null
+			then
+				echo "$(Timestamp) [INFO] $devname (UUID=$uuid) already present in /etc/fstab, skipping"
+				exit 0
+			fi
+
+			# FS-specific mount options, matching dietpi-drive_manager
+			options='noatime,lazytime,rw'
+			if [[ $fs_type == 'ntfs' ]]
+			then
+				options+=',permissions,big_writes'
+			elif [[ $fs_type == 'exfat' ]]
+			then
+				getent group dietpi > /dev/null && options+=',gid=dietpi,fmask=0002,dmask=0002'
+			fi
+
+			# Create mount point
+			mkdir -p "$mount_target" || exit 1
+
+			# Mount the drive
+			if mount -o "$options" "$devname" "$mount_target"
+			then
+				echo "$(Timestamp) [OK] Mounted $devname (UUID=$uuid, $fs_type) at $mount_target"
+
+				# Add fstab entry for persistence across reboots
+				# Use x-systemd.automount when autofs4 module is available (kernel supports it)
+				if modprobe -nq autofs4 2>/dev/null
+				then
+					echo "UUID=$uuid $mount_target $fs_type ${options},nofail,x-systemd.automount" >> /etc/fstab
+				else
+					echo "UUID=$uuid $mount_target $fs_type ${options},nofail" >> /etc/fstab
+				fi
+				systemctl daemon-reload
+				echo "$(Timestamp) [OK] Added /etc/fstab entry for $devname (UUID=$uuid)"
+			else
+				echo "$(Timestamp) [FAILED] Could not mount $devname at $mount_target"
+				rmdir "$mount_target" 2>/dev/null
+				exit 1
+			fi
+		;;
+
+		remove)
+			# Find current mount point from active mounts (device may already be removed from /dev)
+			mount_target=$(awk -v dev="$devname" '$1==dev{print $2;exit}' /proc/mounts 2>/dev/null)
+
+			# Only handle mounts under /mnt/ to avoid interfering with system mounts
+			[[ $mount_target == '/mnt/'* ]] || exit 0
+
+			echo "$(Timestamp) [INFO] Unmounting $devname from $mount_target"
+
+			# Lazy unmount handles busy state on sudden/unclean removal
+			umount -l "$mount_target" 2>/dev/null
+
+			# Remove fstab entry
+			sed --follow-symlinks -i "\#[[:blank:]]${mount_target}[[:blank:]]#d" /etc/fstab
+
+			# Stop systemd automount unit if one was generated
+			automount_unit=${mount_target#/}
+			automount_unit=${automount_unit//-/\\x2d}
+			automount_unit=${automount_unit//\//-}
+			[[ -f /run/systemd/generator/$automount_unit.automount ]] && systemctl stop "$automount_unit.automount"
+			systemctl daemon-reload
+
+			# Remove now-empty mount directory
+			rmdir "$mount_target" 2>/dev/null
+
+			echo "$(Timestamp) [OK] Unmounted $devname and removed /etc/fstab entry ($mount_target)"
+		;;
+
+		*)
+			echo "$(Timestamp) [FAILED] Unknown action: $action"
+			exit 1
+		;;
+
+	esac
+}
