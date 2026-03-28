@@ -14,7 +14,7 @@
 	# Usage:
 	# - <empty>	= Interactive menu
 	# - 1		= Select an available drive mount which is then saved to: /tmp/dietpi-drive_manager_selmnt
-	# - 3		= Scan for new drives and re-create fstab non-interactively, then exit
+	# - 3		= Scan for new drives and update fstab non-interactively, then exit
 	# - 4		= Reset /etc/fstab with currently attached local drives and /tmp + /var/log tmpfs mount. Used by: DietPi-Installer
 	#
 	#////////////////////////////////////
@@ -87,55 +87,35 @@
 		# Swap file location
 		FP_SWAPFILE_CURRENT=$(sed -n '/^[[:blank:]]*AUTO_SETUP_SWAPFILE_LOCATION=/{s/^[^=]*=//p;q}' /boot/dietpi.txt)
 
-		# Create tmp fstab
-		local fp_fstab_tmp='.fstab'
-		cp -a /etc/fstab "$fp_fstab_tmp"
-
-		# Special mounts
-		local swap_mounts tmpfs_mounts misc_mounts net_mounts
-
-		# Mode 4: Force reset/clean fstab (DietPi-Installer)
+		# Mode 4: Force reset/clean fstab (DietPi-Installer) with a fresh template
+		local fp_fstab_tmp=
 		if (( $INPUT == 4 ))
 		then
+			fp_fstab_tmp='.fstab'
 			local var_log_size=$(sed -n '/^[[:blank:]]*AUTO_SETUP_RAMLOG_MAXSIZE=/{s/^[^=]*=//p;q}' /boot/dietpi.txt)
-			tmpfs_mounts="tmpfs /tmp tmpfs noatime,lazytime,nodev,nosuid,mode=1777
-tmpfs /var/log tmpfs size=${var_log_size:-50}M,noatime,lazytime,nodev,nosuid"
-
-		# Else: Grab current mounts
-		else
-			swap_mounts=$(grep '^[[:blank:]]*[^#].*[[:blank:]]swap[[:blank:]]' "$fp_fstab_tmp")
-			tmpfs_mounts=$(grep '^[[:blank:]]*tmpfs[[:blank:]]' "$fp_fstab_tmp")
-			# ecryptfs, vboxsf, glusterfs, mergerfs, bind, Btrfs subvolume mounts
-			misc_mounts=$(grep -E '^[[:blank:]]*[^#].*([[:blank:]](ecryptfs|vboxsf|glusterfs|(fuse\.)?mergerfs)[[:blank:]]|[[:blank:],]bind[[:blank:],]|[[:blank:]]btrfs[[:blank:]]+(.+,)?subvol=)' "$fp_fstab_tmp")
-			# CurlFtpFS, CIFS/SMB/Samba, NFS, SSHFS
-			net_mounts=$(grep -E '^[[:blank:]]*(curlftpfs|sshfs#|[^#].*[[:blank:]](cifs|nfs4?|fuse.sshfs)[[:blank:]])' "$fp_fstab_tmp")
-		fi
-
-		echo "# You can use \"dietpi-drive_manager\" to setup mounts.
-# NB: It overwrites and re-creates physical drive mount entries on use.
+			echo "# You can use \"dietpi-drive_manager\" to setup mounts.
 #----------------------------------------------------------------
 # NETWORK
 #----------------------------------------------------------------
-$net_mounts
 
 #----------------------------------------------------------------
 # TMPFS
 #----------------------------------------------------------------
-$tmpfs_mounts
+tmpfs /tmp tmpfs noatime,lazytime,nodev,nosuid,mode=1777
+tmpfs /var/log tmpfs size=${var_log_size:-50}M,noatime,lazytime,nodev,nosuid
 
 #----------------------------------------------------------------
 # MISC: ecryptfs, vboxsf, glusterfs, mergerfs, bind, Btrfs subvolume
 #----------------------------------------------------------------
-$misc_mounts
 
 #----------------------------------------------------------------
 # SWAP SPACE
 #----------------------------------------------------------------
-$swap_mounts
 
 #----------------------------------------------------------------
 # PHYSICAL DRIVES
 #----------------------------------------------------------------" > "$fp_fstab_tmp"
+		fi
 
 		G_DIETPI-NOTIFY 2 'Detecting drives, please wait...'
 
@@ -244,7 +224,16 @@ $swap_mounts
 					options+=',noauto,x-systemd.automount'
 				fi
 
-				echo "$dev_entry ${aDRIVE_MOUNT_TARGET[$source]} ${aDRIVE_FSTYPE[$source]:-auto} noatime,lazytime$options" >> "$fp_fstab_tmp"
+				local fstab_line="$dev_entry ${aDRIVE_MOUNT_TARGET[$source]} ${aDRIVE_FSTYPE[$source]:-auto} noatime,lazytime$options"
+				if [[ $fp_fstab_tmp ]]
+				then
+					echo "$fstab_line" >> "$fp_fstab_tmp"
+				elif grep -q "^[[:blank:]]*${dev_entry}[[:blank:]]" /etc/fstab
+				then
+					sed --follow-symlinks -i "\@^[[:blank:]]*${dev_entry}[[:blank:]]@c$fstab_line" /etc/fstab
+				else
+					echo "$fstab_line" >> /etc/fstab
+				fi
 			fi
 
 		done < <(df -a --output=source --exclude-type=tmpfs --exclude-type=ecryptfs --exclude-type=vboxsf --exclude-type=glusterfs --exclude-type=mergerfs --exclude-type=fuse.mergerfs | sed "\|^/dev/root$|c$G_ROOTFS_DEV" | mawk '/\// && !x[$0]++')
@@ -341,12 +330,13 @@ $swap_mounts
 		# - Container: Assume host supports it (relevant for network drives)
 		if (( $G_HW_MODEL != 75 )) && ! modprobe -nq autofs4
 		then
-			sed --follow-symlinks -i -e '/,x-systemd\.automount/s/noauto/nofail/' -e 's/,x-systemd\.automount//' "$fp_fstab_tmp"
+			sed --follow-symlinks -i -e '/,x-systemd\.automount/s/noauto/nofail/' -e 's/,x-systemd\.automount//' "${fp_fstab_tmp:-/etc/fstab}"
 			G_DIETPI-NOTIFY 2 'autofs4 module not available in kernel, x-systemd.automount has been disabled, all drives will be mounted at boot instead'
 		fi
 
-		# Move new fstab in place and reload systemd generators
-		G_EXEC mv "$fp_fstab_tmp" /etc/fstab
+		# Mode 4: Move new fstab in place
+		[[ $fp_fstab_tmp ]] && G_EXEC mv "$fp_fstab_tmp" /etc/fstab
+		# Reload systemd generators
 		G_EXEC systemctl daemon-reload
 
 		# Install required APT packages for FS R/W access
@@ -435,7 +425,7 @@ Do you wish to ignore this warning, and, mount the drive regardless?" || return 
 		local target=$1
 
 		G_EXEC_NOEXIT=1 G_EXEC umount "$target" || return 1
-		sed --follow-symlinks -i "\#[[:blank:]]${target}[[:blank:]]#d" /etc/fstab # Only needed for network drives currently, as unmounted physical drives won't be re-added via Init_Drives_and_Refresh
+		sed --follow-symlinks -i "\#[[:blank:]]${target}[[:blank:]]#d" /etc/fstab
 		# Stop automount to unlock mount point
 		local automount=${target#/}
 		[[ $automount ]] && { automount=${automount//-/\\x2d}; automount=${automount//\//-}; }
@@ -1696,10 +1686,10 @@ _EOF_
 \nDo you want to reboot now?" && { reboot; exit 0; }
 	fi
 	#-----------------------------------------------------------------------------------
-	# Init drives, generate /etc/fstab based on current drive mounts
+	# Init drives, update /etc/fstab for current physical drive mounts
 	Init_Drives_and_Refresh
 	#-----------------------------------------------------------------------------------
-	# Mode 3: Scan for new drives, re-create fstab and exit
+	# Mode 3: Scan for new drives, update fstab and exit
 	# Mode 4: Force fstab reset and exit (DietPi-Installer)
 	# Else  : Run menus
 	[[ $INPUT == [34] ]] || until (( $TARGETMENUID < 0 ))
