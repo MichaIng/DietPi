@@ -32,7 +32,8 @@
 	G_EXIT_CUSTOM(){ (( $SERVICES_STOPPED )) && /boot/dietpi/dietpi-services start; }
 
 	# Grab input
-	[[ $1 == [134] ]] && INPUT=$1 || INPUT=0
+	# shellcheck disable=SC2015
+	[[ $1 == [134] ]] && readonly INPUT=$1 || readonly INPUT=0
 
 	EXIT_CODE=0
 
@@ -89,14 +90,14 @@
 	AUTOMOUNT_AVAILABLE=
 	Has_Automount()
 	{
-		if [[ -z $AUTOMOUNT_AVAILABLE ]]
+		if [[ ! $AUTOMOUNT_AVAILABLE ]]
 		then
 			# Container: Assume host supports it
 			if (( $G_HW_MODEL == 75 )) || modprobe -nq autofs4
 			then
-				AUTOMOUNT_AVAILABLE=1
+				readonly AUTOMOUNT_AVAILABLE=1
 			else
-				AUTOMOUNT_AVAILABLE=0
+				readonly AUTOMOUNT_AVAILABLE=0
 			fi
 		fi
 		(( $AUTOMOUNT_AVAILABLE ))
@@ -116,6 +117,7 @@
 		if [[ $mount_target =~ ^/(boot(/efi|/firmware)?)?$ ]]
 		then
 			[[ $mount_target == '/' ]] && options+=' 0 1' || options+=' 0 2' # dump + fsck flag
+
 		elif Has_Automount
 		then
 			options+=',noauto,x-systemd.automount'
@@ -147,27 +149,8 @@
 			fp_fstab_tmp='.fstab'
 			local var_log_size=$(sed -n '/^[[:blank:]]*AUTO_SETUP_RAMLOG_MAXSIZE=/{s/^[^=]*=//p;q}' /boot/dietpi.txt)
 			echo "# You can use \"dietpi-drive_manager\" to setup mounts.
-#----------------------------------------------------------------
-# NETWORK
-#----------------------------------------------------------------
-
-#----------------------------------------------------------------
-# TMPFS
-#----------------------------------------------------------------
 tmpfs /tmp tmpfs noatime,lazytime,nodev,nosuid,mode=1777
-tmpfs /var/log tmpfs size=${var_log_size:-50}M,noatime,lazytime,nodev,nosuid
-
-#----------------------------------------------------------------
-# MISC: ecryptfs, vboxsf, glusterfs, mergerfs, bind, Btrfs subvolume
-#----------------------------------------------------------------
-
-#----------------------------------------------------------------
-# SWAP SPACE
-#----------------------------------------------------------------
-
-#----------------------------------------------------------------
-# PHYSICAL DRIVES
-#----------------------------------------------------------------" > "$fp_fstab_tmp"
+tmpfs /var/log tmpfs size=${var_log_size:-50}M,noatime,lazytime,nodev,nosuid" > "$fp_fstab_tmp"
 		fi
 
 		G_DIETPI-NOTIFY 2 'Detecting drives, please wait...'
@@ -236,7 +219,7 @@ tmpfs /var/log tmpfs size=${var_log_size:-50}M,noatime,lazytime,nodev,nosuid
 			fi
 
 			# Mode 4: Add physical drive entries to fstab template
-			if [[ $fp_fstab_tmp && ${aDRIVE_ISNETWORKED[$source]} == 0 ]]
+			if [[ $INPUT == 4 && ${aDRIVE_ISNETWORKED[$source]} == 0 ]]
 			then
 				# Skip if block device path does not exist, e.g. rootfs within a container
 				(( ${aDRIVE_ISACCESS[$source]} )) || { G_DIETPI-NOTIFY 2 " - Skipping /etc/fstab entry as system has no access to $source"; continue; }
@@ -341,7 +324,7 @@ tmpfs /var/log tmpfs size=${var_log_size:-50}M,noatime,lazytime,nodev,nosuid
 		done
 
 		# Mode 4: Move new fstab in place
-		[[ $fp_fstab_tmp ]] && G_EXEC mv "$fp_fstab_tmp" /etc/fstab
+		(( $INPUT == 4 )) && G_EXEC mv "$fp_fstab_tmp" /etc/fstab
 		# Reload systemd generators
 		G_EXEC systemctl daemon-reload
 
@@ -420,7 +403,7 @@ Do you wish to ignore this warning, and, mount the drive regardless?" || return 
 		if [[ $uuid ]]
 		then
 			# Remove any existing entry for this mount target, then add new one
-			sed --follow-symlinks -i "\#[[:blank:]]${target}[[:blank:]]#d" /etc/fstab
+			G_EXEC sed --follow-symlinks -i "\#[[:blank:]]${target}[[:blank:]]#d" /etc/fstab
 			Get_Fstab_Entry "$uuid" "$target" "$fs_type" >> /etc/fstab
 		else
 			G_DIETPI-NOTIFY 1 "Could not add /etc/fstab entry for $source as it has no UUID"
@@ -433,7 +416,7 @@ Do you wish to ignore this warning, and, mount the drive regardless?" || return 
 		local target=$1
 
 		G_EXEC_NOEXIT=1 G_EXEC umount "$target" || return 1
-		sed --follow-symlinks -i "\#[[:blank:]]${target}[[:blank:]]#d" /etc/fstab
+		G_EXEC sed --follow-symlinks -i "\#[[:blank:]]${target}[[:blank:]]#d" /etc/fstab
 		# Stop automount to unlock mount point
 		local automount=${target#/}
 		[[ $automount ]] && { automount=${automount//-/\\x2d}; automount=${automount//\//-}; }
@@ -647,31 +630,24 @@ Do you wish to ignore this warning, and, mount the drive regardless?" || return 
 
 	Toggle_WriteMode()
 	{
-		local exit_status=0
-		local message_result=0
-
 		if (( ${aDRIVE_ISREADONLY[$MENU_DRIVE_SELECTED]} ))
 		then
-			message_result=$(mount -v -o remount,rw "$MENU_DRIVE_SELECTED" 2>&1)
-			exit_status=$?
 			# Update fstab: ,ro -> ,rw
-			if (( ! $exit_status ))
+			if G_EXEC_NOEXIT=1 G_EXEC mount -v -o remount,rw "$MENU_DRIVE_SELECTED"
 			then
-				local line_number=$(grep -n "[[:blank:]]${aDRIVE_MOUNT_TARGET[$MENU_DRIVE_SELECTED]}[[:blank:]].*,ro" /etc/fstab | cut -d : -f 1)
-				[[ $line_number ]] && sed --follow-symlinks -i "${line_number}s/,ro/,rw/" /etc/fstab
+				local line_number=$(grep -nm1 "[[:blank:]]${aDRIVE_MOUNT_TARGET[$MENU_DRIVE_SELECTED]}[[:blank:]].*,ro" /etc/fstab | cut -d : -f 1)
+				(( $line_number )) && G_EXEC sed --follow-symlinks -i "${line_number}s/,ro/,rw/" /etc/fstab
 			fi
 		else
 			(( $SERVICES_STOPPED )) || { /boot/dietpi/dietpi-services stop; SERVICES_STOPPED=1; }
 
 			# Update fstab: ,rw -> ,ro (must be done before remounting, as rootfs remount to RO makes fstab read-only): https://github.com/MichaIng/DietPi/issues/2604
-			local line_number=$(grep -n "[[:blank:]]${aDRIVE_MOUNT_TARGET[$MENU_DRIVE_SELECTED]}[[:blank:]].*,rw" /etc/fstab | cut -d : -f 1)
-			[[ $line_number ]] && sed --follow-symlinks -i "${line_number}s/,rw/,ro/" /etc/fstab
+			local line_number=$(grep -nm1 "[[:blank:]]${aDRIVE_MOUNT_TARGET[$MENU_DRIVE_SELECTED]}[[:blank:]].*,rw" /etc/fstab | cut -d : -f 1)
+			(( $line_number )) && G_EXEC sed --follow-symlinks -i "${line_number}s/,rw/,ro/" /etc/fstab
 
-			message_result=$(mount -v -o remount,ro "$MENU_DRIVE_SELECTED" 2>&1)
-			exit_status=$?
+			G_EXEC_NOEXIT=1 G_EXEC mount -v -o remount,ro "$MENU_DRIVE_SELECTED"
 		fi
 
-		(( $exit_status )) && G_WHIP_MSG "[FAILED] Could not apply\n\nError log:\n - $message_result"
 		Init_Drives_and_Refresh
 	}
 
@@ -1312,7 +1288,7 @@ Read more about I/O scheduling: https://wiki.archlinux.org/index.php/Improving_p
 
 			if [[ $G_WHIP_RETURNED_VALUE == 'Reset' ]]
 			then
-				sed --follow-symlinks -i "/KERNEL==\"${aDRIVE_SOURCE_DEVICE[$MENU_DRIVE_SELECTED]}\"/d" "$udev_rules"
+				G_EXEC sed --follow-symlinks -i "/KERNEL==\"${aDRIVE_SOURCE_DEVICE[$MENU_DRIVE_SELECTED]}\"/d" "$udev_rules"
 				grep -q '^ACTION' "$udev_rules" || rm "$udev_rules"
 				G_WHIP_YESNO '[ INFO ] A reboot is required to reset the I/O scheduler to default.\n\nDo you wish to reboot now?' && { reboot; exit 0; }
 			else
@@ -1492,8 +1468,7 @@ NB: If you are planning to dedicate the drive to this system, it is recommended 
 
 		# Mount now
 		G_EXEC mkdir -p "$samba_fp_mount_target"
-		> "$fp_tmp"
-
+		echo -e '[FAILED] Samba mount failed with the following error output:\n' > "$fp_tmp"
 		# - Mount attempts from highest CIFS version to lowest, until one succeeds: https://manpages.debian.org/bookworm/cifs-utils/mount.cifs.8.en.html#vers=arg
 		local i
 		for i in '3.1.1' '3.0.2' '3.0' '2.1' '2.0' '1.0'
@@ -1513,7 +1488,7 @@ username=$samba_clientuser
 password=$samba_clientpassword
 _EOF_
 				# Apply to fstab
-				sed --follow-symlinks -i "\#[[:blank:]]${samba_fp_mount_target}[[:blank:]]#d" /etc/fstab
+				G_EXEC sed --follow-symlinks -i "\#[[:blank:]]${samba_fp_mount_target}[[:blank:]]#d" /etc/fstab
 				# - NB: Convert spaces to '\040': https://github.com/MichaIng/DietPi/issues/1201#issuecomment-339720271
 				local source="//$samba_clientname/${samba_clientshare//[[:blank:]]/\\040}"
 				echo "$source $samba_fp_mount_target cifs cred=$cred,iocharset=utf8,gid=dietpi,file_mode=0770,dir_mode=0770,vers=$i,noauto,x-systemd.automount" >> /etc/fstab
@@ -1529,7 +1504,6 @@ _EOF_
 		done
 
 		# Failure
-		sed --follow-symlinks -i '1i\[FAILED] Samba mount failed with the following error output:\n' "$fp_tmp"
 		G_WHIP_VIEWFILE "$fp_tmp"
 		rm "$fp_tmp"
 		rmdir --ignore-fail-on-non-empty "$samba_fp_mount_target"
@@ -1624,10 +1598,11 @@ _EOF_
 
 		# Mount now
 		[[ -d $nfs_fp_mount_target ]] || G_EXEC mkdir "$nfs_fp_mount_target"
-		if mount -vt nfs -o port=2049 "$nfs_server_ip:$nfs_fp_server_share" "$nfs_fp_mount_target" &> "$fp_tmp"
+		echo -e '[FAILED] NFS mount failed with the following error output:\n' > "$fp_tmp"
+		if mount -vt nfs -o port=2049 "$nfs_server_ip:$nfs_fp_server_share" "$nfs_fp_mount_target" &>> "$fp_tmp"
 		then
 			# Apply to fstab
-			sed --follow-symlinks -i "\#[[:blank:]]${nfs_fp_mount_target}[[:blank:]]#d" /etc/fstab
+			G_EXEC sed --follow-symlinks -i "\#[[:blank:]]${nfs_fp_mount_target}[[:blank:]]#d" /etc/fstab
 			local source="$nfs_server_ip:$nfs_fp_server_share"
 			echo "$source $nfs_fp_mount_target nfs noauto,x-systemd.automount" >> /etc/fstab
 
@@ -1641,7 +1616,6 @@ _EOF_
 		fi
 
 		# Failure
-		sed --follow-symlinks -i '1i\[FAILED] NFS mount failed with the following error output:\n' "$fp_tmp"
 		G_WHIP_VIEWFILE "$fp_tmp"
 		rm "$fp_tmp"
 		rmdir --ignore-fail-on-non-empty "$nfs_fp_mount_target"
