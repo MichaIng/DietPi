@@ -56,7 +56,7 @@
 	Init_New_Device()
 	{
 		aDRIVE_MOUNT_TARGET[$source]='' aDRIVE_SOURCE_DEVICE[$source]=''
-		aDRIVE_FSTYPE[$source]='' aDRIVE_UUID[$source]='' aDRIVE_PART_UUID[$source]=''
+		aDRIVE_FSTYPE[$source]='' aDRIVE_UUID[$source]=''
 		aDRIVE_SIZE_TOTAL[$source]='' aDRIVE_SIZE_USED[$source]='' aDRIVE_SIZE_USED_PCT[$source]=''
 		aDRIVE_ISFILESYSTEM[$source]=0 aDRIVE_ISMOUNTED[$source]=0
 		aDRIVE_ISREADONLY[$source]=0 aDRIVE_ISACCESS[$source]=1 aDRIVE_ISPARTITION[$source]=0
@@ -66,11 +66,70 @@
 	Init_Arrays()
 	{
 		declare -Ag aDRIVE_MOUNT_TARGET=() aDRIVE_SOURCE_DEVICE=()
-		declare -Ag aDRIVE_FSTYPE=() aDRIVE_UUID=() aDRIVE_PART_UUID=()
+		declare -Ag aDRIVE_FSTYPE=() aDRIVE_UUID=()
 		declare -Ag aDRIVE_SIZE_TOTAL=() aDRIVE_SIZE_USED=() aDRIVE_SIZE_USED_PCT=()
 		declare -Ag aDRIVE_ISFILESYSTEM=() aDRIVE_ISMOUNTED=()
 		declare -Ag aDRIVE_ISREADONLY=() aDRIVE_ISACCESS=() aDRIVE_ISPARTITION=()
 		declare -Ag aDRIVE_ISNETWORKED=() aDRIVE_ISROM=()
+	}
+
+	# Return FS-specific mount options based on filesystem type
+	# $1=fstype
+	# stdout: FS-specific options string (e.g. ',permissions,big_writes'), empty if none
+	Get_FS_Mount_Options()
+	{
+		local fstype=$1
+		# NTFS: Enable POSIX permissions and prevent splitting write buffers into 4k chunks: https://manpages.debian.org/ntfs-3g#OPTIONS
+		if [[ $fstype == 'ntfs' ]]
+		then
+			echo ',permissions,big_writes'
+
+		# exFAT: Grant (only) "dietpi" group R/W access: https://github.com/MichaIng/DietPi/issues/4680
+		elif [[ $fstype == 'exfat' ]]
+		then
+			getent group dietpi > /dev/null && echo ',gid=dietpi,fmask=0002,dmask=0002'
+		fi
+	}
+
+	# Cached result for autofs4/x-systemd.automount availability
+	AUTOMOUNT_AVAILABLE=
+	Has_Automount()
+	{
+		if [[ -z $AUTOMOUNT_AVAILABLE ]]
+		then
+			# Container: Assume host supports it
+			if (( $G_HW_MODEL == 75 )) || modprobe -nq autofs4
+			then
+				AUTOMOUNT_AVAILABLE=1
+			else
+				AUTOMOUNT_AVAILABLE=0
+			fi
+		fi
+		(( $AUTOMOUNT_AVAILABLE ))
+	}
+
+	# Return a complete /etc/fstab entry line
+	# $1=uuid $2=mount_target $3=fstype $4=rw_mode ('rw' or 'ro', default: 'rw')
+	# stdout: fstab entry line
+	Get_Fstab_Entry()
+	{
+		local uuid=$1 mount_target=$2 fstype=${3:-auto} rw_mode=${4:-rw}
+		local options=",${rw_mode}$(Get_FS_Mount_Options "$fstype")"
+
+		# Root/BootFS dependant flags
+		# - fsck flag for RootFS, to allow check on reboot and for BootFS, since corruption here is most critical and fsck finishes in no time
+		# - nofail/x-systemd.automount: The rootfs is logically mounted anyway and we want the bootfs to be available ASAP as well
+		if [[ $mount_target =~ ^/(boot(/efi|/firmware)?)?$ ]]
+		then
+			[[ $mount_target == '/' ]] && options+=' 0 1' || options+=' 0 2' # dump + fsck flag
+		elif Has_Automount
+		then
+			options+=',noauto,x-systemd.automount'
+		else
+			options+=',nofail'
+		fi
+
+		echo "UUID=${uuid} ${mount_target} ${fstype} noatime,lazytime${options}"
 	}
 
 	Init_Drives_and_Refresh()
@@ -145,7 +204,6 @@ tmpfs /var/log tmpfs size=${var_log_size:-50}M,noatime,lazytime,nodev,nosuid
 				[[ $source == /dev/${aDRIVE_SOURCE_DEVICE[$source]} ]] || aDRIVE_ISPARTITION[$source]=1
 				[[ -b $source ]] || aDRIVE_ISACCESS[$source]=0 # continue
 				aDRIVE_UUID[$source]=$(findmnt -Ufnro UUID -M "${aDRIVE_MOUNT_TARGET[$source]}")
-				(( ${aDRIVE_ISPARTITION[$source]} )) && aDRIVE_PART_UUID[$source]=$(findmnt -Ufnro PARTUUID -M "${aDRIVE_MOUNT_TARGET[$source]}")
 				# blkid is required here, as findmnt will show "fuseblk" for NTFS filesytems, which is a correct result but cannot be used in fstab or for mounting the drive.
 				aDRIVE_FSTYPE[$source]=$(blkid -s TYPE -o value "$source")
 
@@ -192,39 +250,11 @@ tmpfs /var/log tmpfs size=${var_log_size:-50}M,noatime,lazytime,nodev,nosuid
 				# Print error when physical drive has no UUID, as we cannot add it to fstab then
 				[[ ${aDRIVE_UUID[$source]} ]] || { G_DIETPI-NOTIFY 1 " - Skipping /etc/fstab entry as $source has no UUID"; continue; }
 
-				# R/W or R/O?
-				# - Add rw flag to mount options. This should be default but seems to be not in rare cases: https://github.com/MichaIng/DietPi/issues/3268
-				local options=',rw'
-				(( ${aDRIVE_ISREADONLY[$source]} )) && options=',ro'
+				# R/W or R/O?: https://github.com/MichaIng/DietPi/issues/3268
+				local rw_mode='rw'
+				(( ${aDRIVE_ISREADONLY[$source]} )) && rw_mode='ro'
 
-				# Additional FS-specific options
-				# - NTFS: Enable POSIX permissions and prevent splitting write buffers into 4k chunks: https://manpages.debian.org/ntfs-3g#OPTIONS
-				if [[ ${aDRIVE_FSTYPE[$source]} == 'ntfs' ]]
-				then
-					options+=',permissions,big_writes'
-
-				# - exFAT: Grant (only) "dietpi" group R/W access: https://github.com/MichaIng/DietPi/issues/4680
-				elif [[ ${aDRIVE_FSTYPE[$source]} == 'exfat' ]]
-				then
-					getent group dietpi > /dev/null && options+=',gid=dietpi,fmask=0002,dmask=0002'
-				fi
-
-				# Root/BootFS dependant flags
-				# - fsck flag for RootFS, to allow check on reboot and for BootFS, since corruption here is most critical and fsck finishes in no time
-				# - nofail: Allow boot to continue, if mount fails, not wanted for Root/BootFS
-				# - x-systemd.automount: The rootfs is logically mounted anyway and we want the bootfs to be available ASAP as well
-				# Source device entry
-				local dev_entry="UUID=${aDRIVE_UUID[$source]}"
-				if [[ ${aDRIVE_MOUNT_TARGET[$source]} =~ ^/(boot(/efi|/firmware)?)?$ ]]
-				then
-					# On RPi we need to use PARTUUID for Root/BootFS
-					(( $G_HW_MODEL > 9 )) || dev_entry="PARTUUID=${aDRIVE_PART_UUID[$source]}"
-					[[ ${aDRIVE_MOUNT_TARGET[$source]} == '/' ]] && options+=' 0 1' || options+=' 0 2' # dump + fsck flag
-				else
-					options+=',noauto,x-systemd.automount'
-				fi
-
-				echo "$dev_entry ${aDRIVE_MOUNT_TARGET[$source]} ${aDRIVE_FSTYPE[$source]:-auto} noatime,lazytime$options" >> "$fp_fstab_tmp"
+				Get_Fstab_Entry "${aDRIVE_UUID[$source]}" "${aDRIVE_MOUNT_TARGET[$source]}" "${aDRIVE_FSTYPE[$source]}" "$rw_mode" >> "$fp_fstab_tmp"
 			fi
 
 		done < <(df -a --output=source --exclude-type=tmpfs --exclude-type=ecryptfs --exclude-type=vboxsf --exclude-type=glusterfs --exclude-type=mergerfs --exclude-type=fuse.mergerfs | sed "\|^/dev/root$|c$G_ROOTFS_DEV" | mawk '/\// && !x[$0]++')
@@ -253,7 +283,6 @@ tmpfs /var/log tmpfs size=${var_log_size:-50}M,noatime,lazytime,nodev,nosuid
 			aDRIVE_MOUNT_TARGET[$source]="/mnt/${aDRIVE_UUID[$source]}"
 			aDRIVE_SOURCE_DEVICE[$source]=$(Return_Drive_Without_Partitions "$source")
 			[[ $source == /dev/${aDRIVE_SOURCE_DEVICE[$source]} ]] || aDRIVE_ISPARTITION[$source]=1
-			(( ${aDRIVE_ISPARTITION[$source]} )) && aDRIVE_PART_UUID[$source]=$(blkid -s PARTUUID -o value "$source")
 			aDRIVE_FSTYPE[$source]=$(blkid -s TYPE -o value "$source")
 			[[ ${aDRIVE_FSTYPE[$source]} ]] && aDRIVE_ISFILESYSTEM[$source]=1
 			aDRIVE_SIZE_TOTAL[$source]=$(lsblk -nro SIZE "$source")
@@ -316,14 +345,6 @@ tmpfs /var/log tmpfs size=${var_log_size:-50}M,noatime,lazytime,nodev,nosuid
 				fi
 			fi
 		done
-
-		# Remove x-systemd.automount if not supported by kernel: https://github.com/MichaIng/DietPi/issues/1607#issuecomment-372030565
-		# - Container: Assume host supports it (relevant for network drives)
-		if [[ $fp_fstab_tmp ]] && (( $G_HW_MODEL != 75 )) && ! modprobe -nq autofs4
-		then
-			sed --follow-symlinks -i -e '/,x-systemd\.automount/s/noauto/nofail/' -e 's/,x-systemd\.automount//' "$fp_fstab_tmp"
-			G_DIETPI-NOTIFY 2 'autofs4 module not available in kernel, x-systemd.automount has been disabled, all drives will be mounted at boot instead'
-		fi
 
 		# Mode 4: Move new fstab in place
 		[[ $fp_fstab_tmp ]] && G_EXEC mv "$fp_fstab_tmp" /etc/fstab
@@ -394,17 +415,8 @@ Do you wish to ignore this warning, and, mount the drive regardless?" || return 
 		fi
 
 		# FS-specific mount options
-		local fs_type=$(blkid -s TYPE -o value "$source") options='noatime,lazytime,rw'
-		# - NTFS: Enable POSIX permissions and prevent splitting write buffers into 4k chunks: https://manpages.debian.org/ntfs-3g#OPTIONS
-		if [[ $fs_type == 'ntfs' ]]
-		then
-			options+=',permissions,big_writes'
-
-		# - exFAT: Grant (only) "dietpi" group R/W access: https://github.com/MichaIng/DietPi/issues/4680
-		elif [[ $fs_type == 'exfat' ]]
-		then
-			getent group dietpi > /dev/null && options+=',gid=dietpi,fmask=0002,dmask=0002'
-		fi
+		local fs_type=$(blkid -s TYPE -o value "$source")
+		local options="noatime,lazytime,rw$(Get_FS_Mount_Options "$fs_type")"
 
 		G_EXEC_NOEXIT=1 G_EXEC mkdir -p "$target" || return 1
 		G_EXEC_NOEXIT=1 G_EXEC mount -o "$options" "$source" "$target" || return 1
@@ -413,17 +425,9 @@ Do you wish to ignore this warning, and, mount the drive regardless?" || return 
 		local uuid=$(blkid -s UUID -o value "$source")
 		if [[ $uuid ]]
 		then
-			local dev_entry="UUID=$uuid"
-			# Add automount if supported, else nofail: https://github.com/MichaIng/DietPi/issues/1607#issuecomment-372030565
-			if (( $G_HW_MODEL == 75 )) || modprobe -nq autofs4
-			then
-				options+=',noauto,x-systemd.automount'
-			else
-				options+=',nofail'
-			fi
 			# Remove any existing entry for this mount target, then add new one
 			sed --follow-symlinks -i "\#[[:blank:]]${target}[[:blank:]]#d" /etc/fstab
-			echo "$dev_entry $target ${fs_type:-auto} $options" >> /etc/fstab
+			Get_Fstab_Entry "$uuid" "$target" "$fs_type" >> /etc/fstab
 		else
 			G_DIETPI-NOTIFY 1 "Could not add /etc/fstab entry for $source as it has no UUID"
 		fi
@@ -618,8 +622,7 @@ Do you wish to ignore this warning, and, mount the drive regardless?" || return 
 		G_EXEC sed --follow-symlinks -i "\@[[:blank:]]${aDRIVE_MOUNT_TARGET[$MENU_DRIVE_SELECTED]}[[:blank:]]@d" "${aDRIVE_MOUNT_TARGET[$MENU_DRIVE_SELECTED]}/etc/fstab"
 		# - Replace old with new rootfs entry
 		local dev_entry="UUID=${aDRIVE_UUID[$MENU_DRIVE_SELECTED]}"
-		(( $G_HW_MODEL < 10 )) && dev_entry="PARTUUID=${aDRIVE_PART_UUID[$MENU_DRIVE_SELECTED]}"
-		G_EXEC sed --follow-symlinks -i "\@[[:blank:]]/[[:blank:]]@c$dev_entry / ${aDRIVE_FSTYPE[$MENU_DRIVE_SELECTED]} noatime,lazytime,rw 0 1" "${aDRIVE_MOUNT_TARGET[$MENU_DRIVE_SELECTED]}/etc/fstab"
+		G_EXEC sed --follow-symlinks -i "\@[[:blank:]]/[[:blank:]]@c$(Get_Fstab_Entry "${aDRIVE_UUID[$MENU_DRIVE_SELECTED]}" '/' "${aDRIVE_FSTYPE[$MENU_DRIVE_SELECTED]}")" "${aDRIVE_MOUNT_TARGET[$MENU_DRIVE_SELECTED]}/etc/fstab"
 
 		# Find and replace current root and rootfstype kernel command line entries
 		# - RPi: /boot/firmware/cmdline.txt
