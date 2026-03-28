@@ -111,6 +111,10 @@
 						printf '\n#----------------------------------------------------------------\n# USB AUTOMOUNTS\n#----------------------------------------------------------------\n%s\n' "$fstab_entry" >> /etc/fstab
 					fi
 				fi
+				# Save UUID mapping so the remove handler can find the fstab entry even if
+				# the device node is already gone from /proc/mounts by the time it runs
+				mkdir -p /run/dietpi-usb_hotplug
+				printf '%s' "$uuid" > "/run/dietpi-usb_hotplug/${devname##*/}"
 				systemctl daemon-reload
 				echo "$(Timestamp) [OK] Added /etc/fstab entry for $devname (UUID=$uuid)"
 			else
@@ -121,19 +125,35 @@
 		;;
 
 		remove)
-			# Find current mount point from active mounts (device may already be removed from /dev)
+			# Try to get UUID from saved state (most reliable) or blkid (device briefly accessible)
+			uuid_file="/run/dietpi-usb_hotplug/${devname##*/}"
+			uuid=$(cat "$uuid_file" 2>/dev/null)
+			[[ $uuid ]] || uuid=$(blkid -s UUID -o value "$devname" 2>/dev/null)
+
+			# Find current mount point from active mounts or derive from UUID-based path convention
 			mount_target=$(awk -v dev="$devname" '$1==dev{print $2;exit}' /proc/mounts)
+			# Device may already be unmounted (e.g. by systemd); derive target from UUID
+			[[ ! $mount_target && $uuid ]] && mount_target="/mnt/$uuid"
 
 			# Only handle mounts under /mnt/ to avoid interfering with system mounts
-			[[ $mount_target == '/mnt/'* ]] || exit 0
+			if [[ $mount_target != '/mnt/'* ]]
+			then
+				echo "$(Timestamp) [INFO] $devname: no managed mount point found, skipping"
+				exit 0
+			fi
 
 			echo "$(Timestamp) [INFO] Unmounting $devname from $mount_target"
 
 			# Lazy unmount handles busy state on sudden/unclean removal
 			umount -l "$mount_target" 2>/dev/null
 
-			# Remove fstab entry
-			sed --follow-symlinks -i "\#[[:blank:]]${mount_target}[[:blank:]]#d" /etc/fstab
+			# Remove fstab entry - prefer UUID match for reliability, fall back to mount target
+			if [[ $uuid ]]
+			then
+				sed --follow-symlinks -i "/^UUID=${uuid}[[:blank:]]/d" /etc/fstab
+			else
+				sed --follow-symlinks -i "\#[[:blank:]]${mount_target}[[:blank:]]#d" /etc/fstab
+			fi
 
 			# Stop systemd automount unit if one was generated
 			automount_unit=${mount_target#/}
@@ -144,6 +164,9 @@
 
 			# Remove now-empty mount directory
 			rmdir "$mount_target" 2>/dev/null
+
+			# Clean up saved UUID mapping
+			rm -f "$uuid_file"
 
 			echo "$(Timestamp) [OK] Unmounted $devname and removed /etc/fstab entry ($mount_target)"
 		;;
