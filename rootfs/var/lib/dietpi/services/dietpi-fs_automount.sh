@@ -41,6 +41,14 @@
 				exit 0
 			fi
 
+			# auto (default) fstab entry: systemd mounts these at boot before local-fs.target.
+			# Only mount ourselves if local-fs.target is already active, i.e. this is a post-boot hotplug event.
+			if ! systemctl is-active --quiet local-fs.target
+			then
+				logger -t dietpi-automount "Skipping $device ($uuid): fstab entry at $fstab_target uses auto-mount, systemd will handle it at boot (local-fs.target not yet reached)"
+				exit 0
+			fi
+
 			# Mount via fstab (applies configured options and mount point)
 			logger -t dietpi-automount "Mounting $device ($uuid) via fstab entry at $fstab_target"
 			if mount_out=$(mount "$fstab_target" 2>&1)
