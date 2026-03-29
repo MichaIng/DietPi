@@ -23,7 +23,7 @@
 		then
 			# fstab entry exists: check mount options for noauto
 			fstab_options=$(mawk -v uuid="UUID=$uuid" '$1 == uuid {print $4; exit}' /etc/fstab)
-			if [[ $fstab_options == *'noauto'* ]]
+			if [[ $fstab_options =~ (^|,)noauto(,|$) ]]
 			then
 				# noauto entries (e.g. x-systemd.automount) are handled lazily by systemd on first access
 				logger -t dietpi-automount "Skipping $device ($uuid): fstab entry at $fstab_target uses noauto, systemd automount will handle it on access"
