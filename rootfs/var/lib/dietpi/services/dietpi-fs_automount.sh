@@ -21,7 +21,16 @@
 		fstab_target=$(mawk -v uuid="UUID=$uuid" '$1 == uuid {print $2; exit}' /etc/fstab)
 		if [[ $fstab_target ]]
 		then
-			# fstab entry exists: mount via fstab (applies configured options and mount point)
+			# fstab entry exists: check mount options for noauto
+			fstab_options=$(mawk -v uuid="UUID=$uuid" '$1 == uuid {print $4; exit}' /etc/fstab)
+			if [[ $fstab_options == *'noauto'* ]]
+			then
+				# noauto entries (e.g. x-systemd.automount) are handled lazily by systemd on first access
+				logger -t dietpi-automount "Skipping $device ($uuid): fstab entry at $fstab_target uses noauto, systemd automount will handle it on access"
+				exit 0
+			fi
+
+			# Mount via fstab (applies configured options and mount point)
 			logger -t dietpi-automount "Mounting $device ($uuid) via fstab entry at $fstab_target"
 			if mount_out=$(mount "$fstab_target" 2>&1)
 			then
