@@ -9,7 +9,11 @@
 	if [[ $action == 'add' ]]
 	then
 		# Skip if already mounted
-		findmnt -nro TARGET "$device" &> /dev/null && exit 0
+		if findmnt -nro TARGET "$device" &> /dev/null
+		then
+			logger -t dietpi-automount "Skipping $device: already mounted at $(findmnt -nro TARGET "$device")"
+			exit 0
+		fi
 
 		# Get UUID and filesystem type
 		uuid=$(blkid -s UUID -o value "$device")
@@ -27,6 +31,13 @@
 			then
 				# x-systemd.automount entries are handled lazily by systemd on first access
 				logger -t dietpi-automount "Skipping $device ($uuid): fstab entry at $fstab_target uses x-systemd.automount, systemd will handle it on access"
+				exit 0
+			fi
+
+			# noauto without x-systemd.automount means the user wants manual control
+			if [[ $fstab_options =~ (^|,)noauto(,|$) ]]
+			then
+				logger -t dietpi-automount "Skipping $device ($uuid): fstab entry at $fstab_target uses noauto, manual mount only"
 				exit 0
 			fi
 
@@ -70,8 +81,14 @@
 
 		logger -t dietpi-automount "Unmounting auto-mounted $device from $mount_point"
 		# Lazy unmount in case files are still in use
-		umount -l "$mount_point"
-		rmdir "$mount_point" 2> /dev/null || true
+		if umount_out=$(umount -l "$mount_point" 2>&1)
+		then
+			logger -t dietpi-automount "Successfully unmounted $device from $mount_point"
+			rmdir "$mount_point" 2> /dev/null || true
+		else
+			logger -t dietpi-automount "[FAILED] Could not unmount $device from $mount_point: $umount_out"
+			exit 1
+		fi
 	fi
 
 	exit 0
