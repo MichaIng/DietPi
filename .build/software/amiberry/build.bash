@@ -51,8 +51,6 @@ case $G_DISTRO in
 esac
 # - kbd: For "chvt" used in systemd service
 adeps_build+=('kbd') adeps+=('kbd')
-# - patch: https://github.com/libsdl-org/SDL_image/issues/683
-adeps_build+=('patch')
 
 G_AGUP
 G_AGDUG "${adeps_build[@]}"
@@ -95,11 +93,6 @@ G_EXEC curl -sSfLO "https://github.com/libsdl-org/SDL_image/releases/download/re
 G_EXEC tar xf "$NAME-$version.tar.gz"
 G_EXEC rm "$NAME-$version.tar.gz"
 G_EXEC cd "$NAME-$version"
-# Fix dynamic libpng detection: https://github.com/libsdl-org/SDL_image/issues/683
-curl -sSf 'https://github.com/libsdl-org/SDL_image/commit/84c6a74.patch' | patch -p1 || Error_Exit 'Patching SDL3_image to fix dynamic libpng detection failed'
-curl -sSf 'https://github.com/libsdl-org/SDL_image/commit/0add2cd.patch' | patch -p1 || Error_Exit 'Patching SDL3_image to fix dynamic libpng detection failed'
-curl -sSf 'https://github.com/libsdl-org/SDL_image/commit/495a220.patch' | patch -p1 || Error_Exit 'Patching SDL3_image to fix dynamic libpng detection failed'
-curl -sSf 'https://github.com/libsdl-org/SDL_image/commit/8bab27f.patch' | patch -p1 || Error_Exit 'Patching SDL3_image to fix dynamic libpng detection failed'
 G_EXEC_OUTPUT=1 G_EXEC cmake -B build -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_PREFIX='/tmp/deps'
 G_EXEC_OUTPUT=1 G_EXEC cmake --build build --config Release
 find build -type f \( -name '*.so' -o -name '*.so.*' \) -exec strip --strip-unneeded --remove-section=.comment --remove-section=.note -v {} +
