@@ -119,7 +119,6 @@ Process_Software()
 			13) aCOMMANDS[i]='rustdesk --version';;
 			#16) aSERVICES[i]='microblog-pub' aTCP[i]='8007';; Service enters a CPU-intense internal error loop until it has been configured interactively via "microblog-pub configure", hence it is not enabled and started anymore after install but instead as part of "microblog-pub configure"
 			17) aCOMMANDS[i]='git -v';;
-			#22) QuiteRSS: has no CLI
 			23) aCOMMANDS[i]='lxsession -h';;
 			24) aCOMMANDS[i]='mate-session -h';;
 			25) aCOMMANDS[i]='xfce4-session -h';;
