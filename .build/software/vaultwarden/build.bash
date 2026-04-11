@@ -33,7 +33,7 @@ export PATH="${HOME:-/root}/.cargo/bin:$PATH"
 
 # Obtain latest versions
 # - vaultwarden
-version=$(curl -sSf 'https://api.github.com/repos/dani-garcia/vaultwarden/releases/latest' | mawk -F\" '/^ *"tag_name": "[^"]*",$/{print $4}')
+version=$(curl -sSf 'https://api.github.com/repos/dani-garcia/vaultwarden/releases/latest' | grep -Po '"tag_name": *"\K[^"]+(?=")')
 [[ $version ]] || { G_DIETPI-NOTIFY 1 'No latest vaultwarden version found, aborting ...'; exit 1; }
 # - Obtain version suffix
 G_EXEC curl -sSfo package.deb "https://dietpi.com/downloads/binaries/$G_DISTRO_NAME/vaultwarden_$G_HW_ARCH_NAME.deb"

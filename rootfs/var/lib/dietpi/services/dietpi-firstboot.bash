@@ -339,7 +339,7 @@ _EOF_
 		systemctl restart systemd-timesyncd
 
 		# x86_64 BIOS: Set GRUB install device: https://github.com/MichaIng/DietPi/issues/4542
-		if (( $G_HW_MODEL == 10 )) && dpkg-query -s grub-pc &> /dev/null
+		if (( $G_HW_ARCH == 10 )) && dpkg-query -s grub-pc &> /dev/null
 		then
 			local root_drive=$(lsblk -npo PKNAME "$(findmnt -Ufvnro SOURCE -M /)")
 			[[ $root_drive == '/dev/'* ]] && debconf-set-selections <<< "grub-pc grub-pc/install_devices multiselect $root_drive"

@@ -8,8 +8,8 @@ header=()
 [[ $GH_TOKEN ]] && header=('-H' "Authorization: token $GH_TOKEN")
 
 # APT dependencies
-adeps_build=('git' 'cmake' 'make' 'g++' 'libssl-dev' 'liblua5.3-dev' 'python3-dev' 'libsqlite3-dev' 'libboost-system-dev' 'libboost-thread-dev' 'libcurl4-openssl-dev' 'libusb-dev')
-adeps=('libc6' 'libsqlite3-0' 'libusb-0.1-4')
+adeps_build=('git' 'cmake' 'make' 'g++' 'libssl-dev' 'liblua5.3-dev' 'python3-dev' 'libsqlite3-dev' 'libboost-system-dev' 'libboost-thread-dev' 'libcurl4-openssl-dev' 'libusb-dev' 'libmosquitto-dev')
+adeps=('libc6' 'libsqlite3-0' 'libusb-0.1-4' 'libmosquitto1')
 case $G_DISTRO in
 	7) adeps+=('libssl3' 'libcurl4');;
 	8|9) adeps+=('libssl3t64' 'libcurl4t64');;
@@ -34,7 +34,8 @@ G_EXEC_OUTPUT=1 G_EXEC make
 NAME='domoticz'
 ORGA='domoticz'
 PRETTY='Domoticz'
-version=$(curl -sSf "${header[@]}" "https://api.github.com/repos/$ORGA/$NAME/releases/latest" | mawk -F\" '/^  "tag_name"/{print $4}')
+#version=$(curl -sSf "${header[@]}" "https://api.github.com/repos/$ORGA/$NAME/releases/latest" | grep -Po '"tag_name": *"\K[^"]+(?=")')
+version='2026.1'
 [[ $version ]] || Error_Exit "No latest $PRETTY version found"
 G_DIETPI-NOTIFY 2 "Building $PRETTY version \e[33m$version"
 G_EXEC cd /tmp
@@ -51,7 +52,7 @@ G_EXEC_OUTPUT=1 G_EXEC make -C ../build install
 G_EXEC strip --remove-section=.comment --remove-section=.note "$DIR/opt/$NAME/$NAME"
 
 # Cleanup
-G_EXEC rm "$DIR/opt/$NAME/scripts/"{_domoticz_main.bat,download_update.sh,install.sh,restart_domoticz,update_domoticz}
+G_EXEC rm "$DIR/opt/$NAME/scripts/"{_domoticz_main.bat,install.sh,restart_domoticz}
 
 # Prepare DEB package
 G_DIETPI-NOTIFY 2 "Building $PRETTY DEB package"
@@ -185,7 +186,7 @@ G_EXEC curl -sSfo package.deb "https://dietpi.com/downloads/binaries/$G_DISTRO_N
 old_version=$(dpkg-deb -f package.deb Version)
 G_EXEC rm package.deb
 suffix=${old_version#*-dietpi}
-[[ $old_version == "$version-"* ]] && version+="-dietpi$((suffix+1))" || version+="-dietpi1"
+[[ $old_version == "$version-"* ]] && version+="-dietpi$((suffix+1))" || version+='-dietpi1'
 G_DIETPI-NOTIFY 2 "Old package version is:       \e[33m${old_version:-N/A}"
 G_DIETPI-NOTIFY 2 "Building new package version: \e[33m$version"
 

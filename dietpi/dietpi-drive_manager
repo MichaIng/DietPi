@@ -14,15 +14,19 @@
 	# Usage:
 	# - <empty>	= Interactive menu
 	# - 1		= Select an available drive mount which is then saved to: /tmp/dietpi-drive_manager_selmnt
-	# - 3		= Scan for new drives and re-create fstab non-interactively, then exit
 	# - 4		= Reset /etc/fstab with currently attached local drives and /tmp + /var/log tmpfs mount. Used by: DietPi-Installer
 	#
 	#////////////////////////////////////
+
+	# Grab input
+	# shellcheck disable=SC2015
+	[[ $1 == [14] ]] && readonly INPUT=$1 || readonly INPUT=0
 
 	# Import DietPi-Globals --------------------------------------------------------------
 	. /boot/dietpi/func/dietpi-globals
 	readonly G_PROGRAM_NAME='DietPi-Drive_Manager'
 	G_CHECK_ROOT_USER "$@"
+	[[ $INPUT == 1 ]] && G_INIT_ALLOW_CONCURRENT=1
 	G_INIT
 	# Import DietPi-Globals --------------------------------------------------------------
 
@@ -30,9 +34,6 @@
 	SERVICES_STOPPED=0
 	# shellcheck disable=SC2329
 	G_EXIT_CUSTOM(){ (( $SERVICES_STOPPED )) && /boot/dietpi/dietpi-services start; }
-
-	# Grab input
-	[[ $1 == [134] ]] && INPUT=$1 || INPUT=0
 
 	EXIT_CODE=0
 
@@ -56,7 +57,7 @@
 	Init_New_Device()
 	{
 		aDRIVE_MOUNT_TARGET[$source]='' aDRIVE_SOURCE_DEVICE[$source]=''
-		aDRIVE_FSTYPE[$source]='' aDRIVE_UUID[$source]='' aDRIVE_PART_UUID[$source]=''
+		aDRIVE_FSTYPE[$source]='' aDRIVE_UUID[$source]=''
 		aDRIVE_SIZE_TOTAL[$source]='' aDRIVE_SIZE_USED[$source]='' aDRIVE_SIZE_USED_PCT[$source]=''
 		aDRIVE_ISFILESYSTEM[$source]=0 aDRIVE_ISMOUNTED[$source]=0
 		aDRIVE_ISREADONLY[$source]=0 aDRIVE_ISACCESS[$source]=1 aDRIVE_ISPARTITION[$source]=0
@@ -66,11 +67,65 @@
 	Init_Arrays()
 	{
 		declare -Ag aDRIVE_MOUNT_TARGET=() aDRIVE_SOURCE_DEVICE=()
-		declare -Ag aDRIVE_FSTYPE=() aDRIVE_UUID=() aDRIVE_PART_UUID=()
+		declare -Ag aDRIVE_FSTYPE=() aDRIVE_UUID=()
 		declare -Ag aDRIVE_SIZE_TOTAL=() aDRIVE_SIZE_USED=() aDRIVE_SIZE_USED_PCT=()
 		declare -Ag aDRIVE_ISFILESYSTEM=() aDRIVE_ISMOUNTED=()
 		declare -Ag aDRIVE_ISREADONLY=() aDRIVE_ISACCESS=() aDRIVE_ISPARTITION=()
 		declare -Ag aDRIVE_ISNETWORKED=() aDRIVE_ISROM=()
+	}
+
+	# Return FS-specific mount options based on filesystem type
+	# $1=fstype
+	# stdout: FS-specific options string (e.g. ',permissions,big_writes'), empty if none
+	Get_FS_Mount_Options()
+	{
+		case $1 in
+			'ntfs') echo ',permissions,big_writes';; # Enable POSIX permissions and avoid splitting write buffers into 4k chunks: https://manpages.debian.org/ntfs-3g#OPTIONS
+			'exfat') getent group dietpi > /dev/null && echo ',gid=dietpi,fmask=0002,dmask=0002';; # Grant (only) "dietpi" group R/W access: https://github.com/MichaIng/DietPi/issues/4680
+			*) :;;
+		esac
+	}
+
+	# Cached result for autofs4/x-systemd.automount availability
+	AUTOMOUNT_AVAILABLE=
+	Has_Automount()
+	{
+		if [[ ! $AUTOMOUNT_AVAILABLE ]]
+		then
+			# Container: Assume host supports it
+			if (( $G_HW_MODEL == 75 )) || modprobe -nq autofs4
+			then
+				readonly AUTOMOUNT_AVAILABLE=1
+			else
+				readonly AUTOMOUNT_AVAILABLE=0
+			fi
+		fi
+		(( $AUTOMOUNT_AVAILABLE ))
+	}
+
+	# Return a complete /etc/fstab entry line
+	# $1=uuid $2=mount_target $3=fstype $4=rw_mode ('rw' or 'ro', default: 'rw')
+	# stdout: fstab entry line
+	Get_Fstab_Entry()
+	{
+		local uuid=$1 mount_target=$2 fstype=${3:-auto} rw_mode=${4:-rw}
+		local options=",${rw_mode}$(Get_FS_Mount_Options "$fstype")"
+
+		# Root/BootFS dependant flags
+		# - fsck flag for RootFS, to allow check on reboot and for BootFS, since corruption here is most critical and fsck finishes in no time
+		# - nofail/x-systemd.automount: The rootfs is logically mounted anyway and we want the bootfs to be available ASAP as well
+		if [[ $mount_target =~ ^/(boot(/efi|/firmware)?)?$ ]]
+		then
+			[[ $mount_target == '/' ]] && options+=' 0 1' || options+=' 0 2' # dump + fsck flag
+
+		elif Has_Automount
+		then
+			options+=',noauto,x-systemd.automount'
+		else
+			options+=',nofail'
+		fi
+
+		echo "UUID=${uuid} ${mount_target} ${fstype} noatime,lazytime${options}"
 	}
 
 	Init_Drives_and_Refresh()
@@ -87,55 +142,16 @@
 		# Swap file location
 		FP_SWAPFILE_CURRENT=$(sed -n '/^[[:blank:]]*AUTO_SETUP_SWAPFILE_LOCATION=/{s/^[^=]*=//p;q}' /boot/dietpi.txt)
 
-		# Create tmp fstab
-		local fp_fstab_tmp='.fstab'
-		cp -a /etc/fstab "$fp_fstab_tmp"
-
-		# Special mounts
-		local swap_mounts tmpfs_mounts misc_mounts net_mounts
-
-		# Mode 4: Force reset/clean fstab (DietPi-Installer)
+		# Mode 4: Force reset/clean fstab (DietPi-Installer) with a fresh template
+		local fp_fstab_tmp=
 		if (( $INPUT == 4 ))
 		then
+			fp_fstab_tmp='.fstab'
 			local var_log_size=$(sed -n '/^[[:blank:]]*AUTO_SETUP_RAMLOG_MAXSIZE=/{s/^[^=]*=//p;q}' /boot/dietpi.txt)
-			tmpfs_mounts="tmpfs /tmp tmpfs noatime,lazytime,nodev,nosuid,mode=1777
-tmpfs /var/log tmpfs size=${var_log_size:-50}M,noatime,lazytime,nodev,nosuid"
-
-		# Else: Grab current mounts
-		else
-			swap_mounts=$(grep '^[[:blank:]]*[^#].*[[:blank:]]swap[[:blank:]]' "$fp_fstab_tmp")
-			tmpfs_mounts=$(grep '^[[:blank:]]*tmpfs[[:blank:]]' "$fp_fstab_tmp")
-			# ecryptfs, vboxsf, glusterfs, mergerfs, bind, Btrfs subvolume mounts
-			misc_mounts=$(grep -E '^[[:blank:]]*[^#].*([[:blank:]](ecryptfs|vboxsf|glusterfs|(fuse\.)?mergerfs)[[:blank:]]|[[:blank:],]bind[[:blank:],]|[[:blank:]]btrfs[[:blank:]]+(.+,)?subvol=)' "$fp_fstab_tmp")
-			# CurlFtpFS, CIFS/SMB/Samba, NFS, SSHFS
-			net_mounts=$(grep -E '^[[:blank:]]*(curlftpfs|sshfs#|[^#].*[[:blank:]](cifs|nfs4?|fuse.sshfs)[[:blank:]])' "$fp_fstab_tmp")
+			echo "# You can use \"dietpi-drive_manager\" to setup mounts.
+tmpfs /tmp tmpfs noatime,lazytime,nodev,nosuid,mode=1777
+tmpfs /var/log tmpfs size=${var_log_size:-50}M,noatime,lazytime,nodev,nosuid" > "$fp_fstab_tmp"
 		fi
-
-		echo "# You can use \"dietpi-drive_manager\" to setup mounts.
-# NB: It overwrites and re-creates physical drive mount entries on use.
-#----------------------------------------------------------------
-# NETWORK
-#----------------------------------------------------------------
-$net_mounts
-
-#----------------------------------------------------------------
-# TMPFS
-#----------------------------------------------------------------
-$tmpfs_mounts
-
-#----------------------------------------------------------------
-# MISC: ecryptfs, vboxsf, glusterfs, mergerfs, bind, Btrfs subvolume
-#----------------------------------------------------------------
-$misc_mounts
-
-#----------------------------------------------------------------
-# SWAP SPACE
-#----------------------------------------------------------------
-$swap_mounts
-
-#----------------------------------------------------------------
-# PHYSICAL DRIVES
-#----------------------------------------------------------------" > "$fp_fstab_tmp"
 
 		G_DIETPI-NOTIFY 2 'Detecting drives, please wait...'
 
@@ -165,7 +181,6 @@ $swap_mounts
 				[[ $source == /dev/${aDRIVE_SOURCE_DEVICE[$source]} ]] || aDRIVE_ISPARTITION[$source]=1
 				[[ -b $source ]] || aDRIVE_ISACCESS[$source]=0 # continue
 				aDRIVE_UUID[$source]=$(findmnt -Ufnro UUID -M "${aDRIVE_MOUNT_TARGET[$source]}")
-				(( ${aDRIVE_ISPARTITION[$source]} )) && aDRIVE_PART_UUID[$source]=$(findmnt -Ufnro PARTUUID -M "${aDRIVE_MOUNT_TARGET[$source]}")
 				# blkid is required here, as findmnt will show "fuseblk" for NTFS filesytems, which is a correct result but cannot be used in fstab or for mounting the drive.
 				aDRIVE_FSTYPE[$source]=$(blkid -s TYPE -o value "$source")
 
@@ -203,48 +218,20 @@ $swap_mounts
 				fi
 			fi
 
-			# Add only physical drives to fstab, network drives are handled outside of this loop
-			if [[ ${aDRIVE_ISNETWORKED[$source]} == 0 ]]
+			# Mode 4: Add physical drive entries to fstab template
+			if [[ $INPUT == 4 && ${aDRIVE_ISNETWORKED[$source]} == 0 ]]
 			then
 				# Skip if block device path does not exist, e.g. rootfs within a container
-				(( ${aDRIVE_ISACCESS[$source]} )) || { G_DIETPI-NOTIFY 2 " - Skipping /etc/fstab entry as system as no access to $source"; continue; }
+				(( ${aDRIVE_ISACCESS[$source]} )) || { G_DIETPI-NOTIFY 2 " - Skipping /etc/fstab entry as system has no access to $source"; continue; }
 
-				# Print error when physical drive has not UUID, as we cannot add it to fstab then
-				[[ ${aDRIVE_UUID[$source]} ]] || { G_DIETPI-NOTIFY 1 " - Skipping /etc/fstab entry as $source has not UUID"; continue; }
+				# Print error when physical drive has no UUID, as we cannot add it to fstab then
+				[[ ${aDRIVE_UUID[$source]} ]] || { G_DIETPI-NOTIFY 1 " - Skipping /etc/fstab entry as $source has no UUID"; continue; }
 
-				# R/W or R/O?
-				# - Add rw flag to mount options. This should be default but seems to be not in rare cases: https://github.com/MichaIng/DietPi/issues/3268
-				local options=',rw'
-				(( ${aDRIVE_ISREADONLY[$source]} )) && options=',ro'
+				# R/W or R/O?: https://github.com/MichaIng/DietPi/issues/3268
+				local rw_mode='rw'
+				(( ${aDRIVE_ISREADONLY[$source]} )) && rw_mode='ro'
 
-				# Additional FS-specific options
-				# - NTFS: Enable POSIX permissions and prevent splitting write buffers into 4k chunks: https://manpages.debian.org/ntfs-3g#OPTIONS
-				if [[ ${aDRIVE_FSTYPE[$source]} == 'ntfs' ]]
-				then
-					options+=',permissions,big_writes'
-
-				# - exFAT: Grant (only) "dietpi" group R/W access: https://github.com/MichaIng/DietPi/issues/4680
-				elif [[ ${aDRIVE_FSTYPE[$source]} == 'exfat' ]]
-				then
-					getent group dietpi > /dev/null && options+=',gid=dietpi,fmask=0002,dmask=0002'
-				fi
-
-				# Root/BootFS dependant flags
-				# - fsck flag for RootFS, to allow check on reboot and for BootFS, since corruption here is most critical and fsck finishes in no time
-				# - nofail: Allow boot to continue, if mount fails, not wanted for Root/BootFS
-				# - x-systemd.automount: The rootfs is logically mounted anyway and we want the bootfs to be available ASAP as well
-				# Source device entry
-				local dev_entry="UUID=${aDRIVE_UUID[$source]}"
-				if [[ ${aDRIVE_MOUNT_TARGET[$source]} =~ ^/(boot(/efi|/firmware)?)?$ ]]
-				then
-					# On RPi we need to use PARTUUID for Root/BootFS
-					(( $G_HW_MODEL > 9 )) || dev_entry="PARTUUID=${aDRIVE_PART_UUID[$source]}"
-					[[ ${aDRIVE_MOUNT_TARGET[$source]} == '/' ]] && options+=' 0 1' || options+=' 0 2' # dump + fsck flag
-				else
-					options+=',noauto,x-systemd.automount'
-				fi
-
-				echo "$dev_entry ${aDRIVE_MOUNT_TARGET[$source]} ${aDRIVE_FSTYPE[$source]:-auto} noatime,lazytime$options" >> "$fp_fstab_tmp"
+				Get_Fstab_Entry "${aDRIVE_UUID[$source]}" "${aDRIVE_MOUNT_TARGET[$source]}" "${aDRIVE_FSTYPE[$source]}" "$rw_mode" >> "$fp_fstab_tmp"
 			fi
 
 		done < <(df -a --output=source --exclude-type=tmpfs --exclude-type=ecryptfs --exclude-type=vboxsf --exclude-type=glusterfs --exclude-type=mergerfs --exclude-type=fuse.mergerfs | sed "\|^/dev/root$|c$G_ROOTFS_DEV" | mawk '/\// && !x[$0]++')
@@ -273,7 +260,6 @@ $swap_mounts
 			aDRIVE_MOUNT_TARGET[$source]="/mnt/${aDRIVE_UUID[$source]}"
 			aDRIVE_SOURCE_DEVICE[$source]=$(Return_Drive_Without_Partitions "$source")
 			[[ $source == /dev/${aDRIVE_SOURCE_DEVICE[$source]} ]] || aDRIVE_ISPARTITION[$source]=1
-			(( ${aDRIVE_ISPARTITION[$source]} )) && aDRIVE_PART_UUID[$source]=$(blkid -s PARTUUID -o value "$source")
 			aDRIVE_FSTYPE[$source]=$(blkid -s TYPE -o value "$source")
 			[[ ${aDRIVE_FSTYPE[$source]} ]] && aDRIVE_ISFILESYSTEM[$source]=1
 			aDRIVE_SIZE_TOTAL[$source]=$(lsblk -nro SIZE "$source")
@@ -337,16 +323,9 @@ $swap_mounts
 			fi
 		done
 
-		# Remove x-systemd.automount if not supported by kernel: https://github.com/MichaIng/DietPi/issues/1607#issuecomment-372030565
-		# - Container: Assume host supports it (relevant for network drives)
-		if (( $G_HW_MODEL != 75 )) && ! modprobe -nq autofs4
-		then
-			sed --follow-symlinks -i -e '/,x-systemd\.automount/s/noauto/nofail/' -e 's/,x-systemd\.automount//' "$fp_fstab_tmp"
-			G_DIETPI-NOTIFY 2 'autofs4 module not available in kernel, x-systemd.automount has been disabled, all drives will be mounted at boot instead'
-		fi
-
-		# Move new fstab in place and reload systemd generators
-		G_EXEC mv "$fp_fstab_tmp" /etc/fstab
+		# Mode 4: Move new fstab in place
+		(( $INPUT == 4 )) && G_EXEC mv "$fp_fstab_tmp" /etc/fstab
+		# Reload systemd generators
 		G_EXEC systemctl daemon-reload
 
 		# Install required APT packages for FS R/W access
@@ -388,7 +367,7 @@ $swap_mounts
 			G_WHIP_RETURNED_VALUE=$target
 		else
 			G_WHIP_DEFAULT_ITEM=$target
-			G_WHIP_INPUTBOX "Please enter the desired mount point.\n - Default and recommended = $target\n
+			G_WHIP_INPUTBOX "Please enter the desired persistent mount point.\n - Default and recommended = $target\n
 NB: The path must start with /mnt/ and be unique. Spaces will be converted automatically to underscores (_)." || return 1
 		fi
 
@@ -413,20 +392,22 @@ Do you wish to ignore this warning, and, mount the drive regardless?" || return 
 		fi
 
 		# FS-specific mount options
-		local fs_type=$(blkid -s TYPE -o value "$source") options='noatime,lazytime,rw'
-		# - NTFS: Enable POSIX permissions and prevent splitting write buffers into 4k chunks: https://manpages.debian.org/ntfs-3g#OPTIONS
-		if [[ $fs_type == 'ntfs' ]]
-		then
-			options+=',permissions,big_writes'
-
-		# - exFAT: Grant (only) "dietpi" group R/W access: https://github.com/MichaIng/DietPi/issues/4680
-		elif [[ $fs_type == 'exfat' ]]
-		then
-			getent group dietpi > /dev/null && options+=',gid=dietpi,fmask=0002,dmask=0002'
-		fi
+		local fs_type=$(blkid -s TYPE -o value "$source")
+		local options="noatime,lazytime,rw$(Get_FS_Mount_Options "$fs_type")"
 
 		G_EXEC_NOEXIT=1 G_EXEC mkdir -p "$target" || return 1
 		G_EXEC_NOEXIT=1 G_EXEC mount -o "$options" "$source" "$target" || return 1
+
+		# Add fstab entry for the newly mounted drive
+		local uuid=$(blkid -s UUID -o value "$source")
+		if [[ $uuid ]]
+		then
+			# Remove any existing entry for this mount target, then add new one
+			G_EXEC sed --follow-symlinks -i "\#[[:blank:]]${target}[[:blank:]]#d" /etc/fstab
+			Get_Fstab_Entry "$uuid" "$target" "$fs_type" >> /etc/fstab
+		else
+			G_DIETPI-NOTIFY 1 "Could not add /etc/fstab entry for $source as it has no UUID"
+		fi
 	}
 
 	# $1=target
@@ -435,12 +416,33 @@ Do you wish to ignore this warning, and, mount the drive regardless?" || return 
 		local target=$1
 
 		G_EXEC_NOEXIT=1 G_EXEC umount "$target" || return 1
-		sed --follow-symlinks -i "\#[[:blank:]]${target}[[:blank:]]#d" /etc/fstab # Only needed for network drives currently, as unmounted physical drives won't be re-added via Init_Drives_and_Refresh
+		G_EXEC sed --follow-symlinks -i "\#[[:blank:]]${target}[[:blank:]]#d" /etc/fstab
 		# Stop automount to unlock mount point
 		local automount=${target#/}
 		[[ $automount ]] && { automount=${automount//-/\\x2d}; automount=${automount//\//-}; }
 		[[ -f /run/systemd/generator/$automount.automount ]] && G_EXEC systemctl stop "$automount.automount"
 		G_EXEC_NOEXIT=1 G_EXEC rmdir "$target"
+	}
+
+	# Toggle USB auto-mount via udev rule
+	Toggle_USB_Automount()
+	{
+		local udev_rules='/etc/udev/rules.d/99-dietpi-automount.rules'
+		if [[ -f $udev_rules ]]
+		then
+			G_EXEC rm "$udev_rules"
+			G_EXEC udevadm control --reload
+			G_DIETPI-NOTIFY 0 'USB auto-mount disabled. USB drives will no longer be automatically mounted to /media when connected.'
+		else
+			cat << '_EOF_' > "$udev_rules" || exit 1
+# DietPi USB auto-mount: Automatically mounts USB drives to /media when connected.
+# Managed by dietpi-drive_manager - do not edit manually.
+ACTION=="add", SUBSYSTEM=="block", ENV{ID_BUS}=="usb", ENV{ID_FS_UUID}!="", ENV{ID_FS_TYPE}!="", RUN{program}+="/bin/systemd-run --no-block /var/lib/dietpi/services/dietpi-fs_automount.sh add /dev/%k"
+ACTION=="remove", SUBSYSTEM=="block", ENV{ID_BUS}=="usb", RUN{program}+="/bin/systemd-run --no-block /var/lib/dietpi/services/dietpi-fs_automount.sh remove /dev/%k"
+_EOF_
+			G_EXEC udevadm control --reload
+			G_DIETPI-NOTIFY 0 'USB auto-mount enabled. USB drives will be automatically mounted to /media when connected.'
+		fi
 	}
 
 	Resize_FS()
@@ -618,8 +620,7 @@ Do you wish to ignore this warning, and, mount the drive regardless?" || return 
 		G_EXEC sed --follow-symlinks -i "\@[[:blank:]]${aDRIVE_MOUNT_TARGET[$MENU_DRIVE_SELECTED]}[[:blank:]]@d" "${aDRIVE_MOUNT_TARGET[$MENU_DRIVE_SELECTED]}/etc/fstab"
 		# - Replace old with new rootfs entry
 		local dev_entry="UUID=${aDRIVE_UUID[$MENU_DRIVE_SELECTED]}"
-		(( $G_HW_MODEL < 10 )) && dev_entry="PARTUUID=${aDRIVE_PART_UUID[$MENU_DRIVE_SELECTED]}"
-		G_EXEC sed --follow-symlinks -i "\@[[:blank:]]/[[:blank:]]@c$dev_entry / ${aDRIVE_FSTYPE[$MENU_DRIVE_SELECTED]} noatime,lazytime,rw 0 1" "${aDRIVE_MOUNT_TARGET[$MENU_DRIVE_SELECTED]}/etc/fstab"
+		G_EXEC sed --follow-symlinks -i "\@[[:blank:]]/[[:blank:]]@c$(Get_Fstab_Entry "${aDRIVE_UUID[$MENU_DRIVE_SELECTED]}" '/' "${aDRIVE_FSTYPE[$MENU_DRIVE_SELECTED]}")" "${aDRIVE_MOUNT_TARGET[$MENU_DRIVE_SELECTED]}/etc/fstab"
 
 		# Find and replace current root and rootfstype kernel command line entries
 		# - RPi: /boot/firmware/cmdline.txt
@@ -650,27 +651,24 @@ Do you wish to ignore this warning, and, mount the drive regardless?" || return 
 
 	Toggle_WriteMode()
 	{
-		local exit_status=0
-		local message_result=0
-
 		if (( ${aDRIVE_ISREADONLY[$MENU_DRIVE_SELECTED]} ))
 		then
-			message_result=$(mount -v -o remount,rw "$MENU_DRIVE_SELECTED" 2>&1)
-			exit_status=$?
+			# Update fstab: ,ro -> ,rw
+			if G_EXEC_NOEXIT=1 G_EXEC mount -v -o remount,rw "$MENU_DRIVE_SELECTED"
+			then
+				local line_number=$(grep -nm1 "[[:blank:]]${aDRIVE_MOUNT_TARGET[$MENU_DRIVE_SELECTED]}[[:blank:]].*,ro" /etc/fstab | cut -d : -f 1)
+				(( $line_number )) && G_EXEC sed --follow-symlinks -i "${line_number}s/,ro/,rw/" /etc/fstab
+			fi
 		else
 			(( $SERVICES_STOPPED )) || { /boot/dietpi/dietpi-services stop; SERVICES_STOPPED=1; }
 
-			# RootFS, set fstab now, else, will not be applied to /etc/fstab during Init as already RO: https://github.com/MichaIng/DietPi/issues/2604
-			if [[ ${aDRIVE_MOUNT_TARGET[$MENU_DRIVE_SELECTED]} == '/' ]]
-			then
-				local line_number=$(grep -n "[[:blank:]]${aDRIVE_MOUNT_TARGET[$MENU_DRIVE_SELECTED]}[[:blank:]].*,rw" /etc/fstab | cut -d : -f 1)
-				sed --follow-symlinks -i "${line_number}s/,rw/,ro/" /etc/fstab
-			fi
-			message_result=$(mount -v -o remount,ro "$MENU_DRIVE_SELECTED" 2>&1)
-			exit_status=$?
+			# Update fstab: ,rw -> ,ro (must be done before remounting, as rootfs remount to RO makes fstab read-only): https://github.com/MichaIng/DietPi/issues/2604
+			local line_number=$(grep -nm1 "[[:blank:]]${aDRIVE_MOUNT_TARGET[$MENU_DRIVE_SELECTED]}[[:blank:]].*,rw" /etc/fstab | cut -d : -f 1)
+			(( $line_number )) && G_EXEC sed --follow-symlinks -i "${line_number}s/,rw/,ro/" /etc/fstab
+
+			G_EXEC_NOEXIT=1 G_EXEC mount -v -o remount,ro "$MENU_DRIVE_SELECTED"
 		fi
 
-		(( $exit_status )) && G_WHIP_MSG "[FAILED] Could not apply\n\nError log:\n - $message_result"
 		Init_Drives_and_Refresh
 	}
 
@@ -734,6 +732,9 @@ Do you wish to ignore this warning, and, mount the drive regardless?" || return 
 
 		G_WHIP_MENU_ARRAY+=('' '●─ Global Options ')
 		G_WHIP_MENU_ARRAY+=('Idle Spindown' ': Set a global idle duration, before drives power down')
+		local automount_state='[ ]'
+		[[ -f '/etc/udev/rules.d/99-dietpi-automount.rules' ]] && automount_state='[X]'
+		G_WHIP_MENU_ARRAY+=('USB Auto-Mount' ": $automount_state | Automatically mount USB drives to /media when connected")
 		G_WHIP_MENU_ARRAY+=('' '●─ Add / Refresh Drives ')
 		G_WHIP_MENU_ARRAY+=('Add network drive' ': Select to mount networked drives')
 		if (( $drive_available ))
@@ -799,6 +800,10 @@ Do you wish to ignore this warning, and, mount the drive regardless?" || return 
 				G_DIETPI-NOTIFY 2 'Applying spindown timeout to /etc/hdparm.conf as default from next boot on ...'
 				G_CONFIG_INJECT 'force_spindown_time[[:blank:]=]' "force_spindown_time = $G_WHIP_RETURNED_VALUE" /etc/hdparm.conf
 			fi
+
+		elif [[ $G_WHIP_RETURNED_VALUE == 'USB Auto-Mount' ]]
+		then
+			Toggle_USB_Automount
 
 		# Edit drive
 		elif [[ $G_WHIP_RETURNED_VALUE ]]
@@ -876,6 +881,7 @@ Do you wish to ignore this warning, and, mount the drive regardless?" || return 
 						G_WHIP_MENU_ARRAY+=('Remove' ': Unmount networked drive and remove it from database')
 					else
 						G_WHIP_MENU_ARRAY+=('Unmount' ': Allows you to physically remove the drive')
+						[[ ${aDRIVE_MOUNT_TARGET[$MENU_DRIVE_SELECTED]} == '/media/'* ]] && G_WHIP_MENU_ARRAY+=('Make Persistent' ': Move to /mnt and add to /etc/fstab for permanent mounting')
 					fi
 				fi
 
@@ -1028,6 +1034,15 @@ Do you wish to ignore this warning, and, mount the drive regardless?" || return 
 				Unmount_Drive "${aDRIVE_MOUNT_TARGET[$MENU_DRIVE_SELECTED]}"
 				Init_Drives_and_Refresh
 			fi
+
+		elif [[ $G_WHIP_RETURNED_VALUE == 'Make Persistent' ]]
+		then
+			if Mount_Drive "$MENU_DRIVE_SELECTED" "/mnt/${aDRIVE_UUID[$MENU_DRIVE_SELECTED]}"
+			then
+				# Unmount from current auto-mount location
+				G_EXEC_NOEXIT=1 G_EXEC umount "${aDRIVE_MOUNT_TARGET[$MENU_DRIVE_SELECTED]}" && G_EXEC_NOEXIT=1 G_EXEC rmdir "${aDRIVE_MOUNT_TARGET[$MENU_DRIVE_SELECTED]}"
+			fi
+			Init_Drives_and_Refresh
 
 		elif [[ $G_WHIP_RETURNED_VALUE == 'Swap file' ]]
 		then
@@ -1311,7 +1326,7 @@ Read more about I/O scheduling: https://wiki.archlinux.org/index.php/Improving_p
 
 			if [[ $G_WHIP_RETURNED_VALUE == 'Reset' ]]
 			then
-				sed --follow-symlinks -i "/KERNEL==\"${aDRIVE_SOURCE_DEVICE[$MENU_DRIVE_SELECTED]}\"/d" "$udev_rules"
+				G_EXEC sed --follow-symlinks -i "/KERNEL==\"${aDRIVE_SOURCE_DEVICE[$MENU_DRIVE_SELECTED]}\"/d" "$udev_rules"
 				grep -q '^ACTION' "$udev_rules" || rm "$udev_rules"
 				G_WHIP_YESNO '[ INFO ] A reboot is required to reset the I/O scheduler to default.\n\nDo you wish to reboot now?' && { reboot; exit 0; }
 			else
@@ -1491,8 +1506,7 @@ NB: If you are planning to dedicate the drive to this system, it is recommended 
 
 		# Mount now
 		G_EXEC mkdir -p "$samba_fp_mount_target"
-		> "$fp_tmp"
-
+		echo -e '[FAILED] Samba mount failed with the following error output:\n' > "$fp_tmp"
 		# - Mount attempts from highest CIFS version to lowest, until one succeeds: https://manpages.debian.org/bookworm/cifs-utils/mount.cifs.8.en.html#vers=arg
 		local i
 		for i in '3.1.1' '3.0.2' '3.0' '2.1' '2.0' '1.0'
@@ -1512,7 +1526,7 @@ username=$samba_clientuser
 password=$samba_clientpassword
 _EOF_
 				# Apply to fstab
-				sed --follow-symlinks -i "\#[[:blank:]]${samba_fp_mount_target}[[:blank:]]#d" /etc/fstab
+				G_EXEC sed --follow-symlinks -i "\#[[:blank:]]${samba_fp_mount_target}[[:blank:]]#d" /etc/fstab
 				# - NB: Convert spaces to '\040': https://github.com/MichaIng/DietPi/issues/1201#issuecomment-339720271
 				local source="//$samba_clientname/${samba_clientshare//[[:blank:]]/\\040}"
 				echo "$source $samba_fp_mount_target cifs cred=$cred,iocharset=utf8,gid=dietpi,file_mode=0770,dir_mode=0770,vers=$i,noauto,x-systemd.automount" >> /etc/fstab
@@ -1528,7 +1542,6 @@ _EOF_
 		done
 
 		# Failure
-		sed --follow-symlinks -i '1i\[FAILED] Samba mount failed with the following error output:\n' "$fp_tmp"
 		G_WHIP_VIEWFILE "$fp_tmp"
 		rm "$fp_tmp"
 		rmdir --ignore-fail-on-non-empty "$samba_fp_mount_target"
@@ -1623,10 +1636,11 @@ _EOF_
 
 		# Mount now
 		[[ -d $nfs_fp_mount_target ]] || G_EXEC mkdir "$nfs_fp_mount_target"
-		if mount -vt nfs -o port=2049 "$nfs_server_ip:$nfs_fp_server_share" "$nfs_fp_mount_target" &> "$fp_tmp"
+		echo -e '[FAILED] NFS mount failed with the following error output:\n' > "$fp_tmp"
+		if mount -vt nfs -o port=2049 "$nfs_server_ip:$nfs_fp_server_share" "$nfs_fp_mount_target" &>> "$fp_tmp"
 		then
 			# Apply to fstab
-			sed --follow-symlinks -i "\#[[:blank:]]${nfs_fp_mount_target}[[:blank:]]#d" /etc/fstab
+			G_EXEC sed --follow-symlinks -i "\#[[:blank:]]${nfs_fp_mount_target}[[:blank:]]#d" /etc/fstab
 			local source="$nfs_server_ip:$nfs_fp_server_share"
 			echo "$source $nfs_fp_mount_target nfs noauto,x-systemd.automount" >> /etc/fstab
 
@@ -1640,7 +1654,6 @@ _EOF_
 		fi
 
 		# Failure
-		sed --follow-symlinks -i '1i\[FAILED] NFS mount failed with the following error output:\n' "$fp_tmp"
 		G_WHIP_VIEWFILE "$fp_tmp"
 		rm "$fp_tmp"
 		rmdir --ignore-fail-on-non-empty "$nfs_fp_mount_target"
@@ -1678,40 +1691,40 @@ _EOF_
 
 		G_DIETPI-NOTIFY 0 "Drive mount selected: $G_WHIP_RETURNED_VALUE"
 		echo "$G_WHIP_RETURNED_VALUE" > "$fp_mount_selection"
-		exit 0
 	}
 
 	#/////////////////////////////////////////////////////////////////////////////////////
 	# Main Loop
 	#/////////////////////////////////////////////////////////////////////////////////////
-	# Mode 1: Select an active mount and return value, exits from within function
-	(( $INPUT == 1 )) && Menu_Select_Mount_Location
-	#-----------------------------------------------------------------------------------
-	# Offer to do a reboot if required as of missing kernel modules and not called for resetting fstab from DietPi-Installer
-	if (( $INPUT != 4 )) && ! G_CHECK_KERNEL
-	then
-		G_WHIP_BUTTON_CANCEL_TEXT='Skip' G_WHIP_YESNO "[ INFO ] A reboot is recommended
+	case $INPUT in
+		1) Menu_Select_Mount_Location;; # Select an active mount and return value
+		4) Init_Drives_and_Refresh;; # Force fstab reset and exit (DietPi-Installer)
+		*)
+			# Offer to do a reboot if required as of missing kernel modules and not called for resetting fstab from DietPi-Installer
+			if ! G_CHECK_KERNEL
+			then
+				G_WHIP_BUTTON_CANCEL_TEXT='Skip' G_WHIP_YESNO "[ INFO ] A reboot is recommended
 \nKernel modules for the loaded kernel at /lib/modules/$(uname -r) are missing. This is most likely the case as of a recently applied kernel upgrade where a reboot is required to load the new kernel.
 \nWe recommend to perform a reboot now for the system to be able to load kernel modules, like filesystem drivers, ondemand. If your kernel does not use dedicated modules, please create the mentioned directory manually to mute this info in the future.
 \nDo you want to reboot now?" && { reboot; exit 0; }
-	fi
-	#-----------------------------------------------------------------------------------
-	# Init drives, generate /etc/fstab based on current drive mounts
-	Init_Drives_and_Refresh
-	#-----------------------------------------------------------------------------------
-	# Mode 3: Scan for new drives, re-create fstab and exit
-	# Mode 4: Force fstab reset and exit (DietPi-Installer)
-	# Else  : Run menus
-	[[ $INPUT == [34] ]] || until (( $TARGETMENUID < 0 ))
-	do
-		case $TARGETMENUID in
-			1) Menu_Drive;;
-			2) Menu_Format;;
-			3) Menu_Add_Network_Drive;;
-			*) Menu_Main;;
-		esac
-	done
-	#-----------------------------------------------------------------------------------
+			fi
+
+			# Init drives, update /etc/fstab for current physical drive mounts
+			Init_Drives_and_Refresh
+
+			# Run menus
+			until (( $TARGETMENUID < 0 ))
+			do
+				case $TARGETMENUID in
+					1) Menu_Drive;;
+					2) Menu_Format;;
+					3) Menu_Add_Network_Drive;;
+					*) Menu_Main;;
+				esac
+			done
+		;;
+	esac
+	#-------------------------------------------------------------------------------------
 	exit "$EXIT_CODE"
-	#-----------------------------------------------------------------------------------
+	#-------------------------------------------------------------------------------------
 }

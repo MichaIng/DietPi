@@ -37,7 +37,7 @@ do
 done
 
 # Build libSDL2
-v_sdl=$(curl -sSf "${header[@]}" 'https://api.github.com/repos/libsdl-org/SDL/releases' | mawk -F\" '/^ *"name": "2./{print $4}' | head -1)
+v_sdl=$(curl -sSf "${header[@]}" 'https://api.github.com/repos/libsdl-org/SDL/releases' | grep -Po '"name": *"\K2\.[^"]+(?=")' | head -1)
 [[ $v_sdl ]] || Error_Exit 'No latest LibSDL2 version found'
 G_DIETPI-NOTIFY 2 "Building libSDL2 version \e[33m$v_sdl"
 G_EXEC cd /tmp
@@ -53,7 +53,7 @@ G_EXEC rm -f /usr/local/lib/libSDL2[.-]*
 G_EXEC_OUTPUT=1 G_EXEC make install
 
 # Build libSDL2_image
-v_img=$(curl -sSf "${header[@]}" 'https://api.github.com/repos/libsdl-org/SDL_image/releases' | mawk -F\" '/^ *"name": "2./{print $4}' | head -1)
+v_img=$(curl -sSf "${header[@]}" 'https://api.github.com/repos/libsdl-org/SDL_image/releases' | grep -Po '"name": *"\K2\.[^"]+(?=")' | head -1)
 [[ $v_img ]] || Error_Exit 'No latest libSDL2_image version found'
 G_DIETPI-NOTIFY 2 "Building libSDL2_image version \e[33m$v_img"
 G_EXEC cd /tmp
@@ -69,7 +69,7 @@ G_EXEC rm -f /usr/local/lib/libSDL2_image[.-]*
 G_EXEC_OUTPUT=1 G_EXEC make install
 
 # Build libSDL2_ttf
-v_ttf=$(curl -sSf "${header[@]}" 'https://api.github.com/repos/libsdl-org/SDL_ttf/releases' | mawk -F\" '/^ *"name": "2./{print $4}' | head -1)
+v_ttf=$(curl -sSf "${header[@]}" 'https://api.github.com/repos/libsdl-org/SDL_ttf/releases' | grep -Po '"name": *"\K2\.[^"]+(?=")' | head -1)
 [[ $v_ttf ]] || Error_Exit 'No latest libSDL2_ttf version found'
 G_DIETPI-NOTIFY 2 "Building libSDL2_ttf version \e[33m$v_ttf"
 G_EXEC cd /tmp

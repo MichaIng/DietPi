@@ -175,13 +175,14 @@ case $HW_MODEL in
 	102) iname='NanoPiR76S' HW_ARCH=3 PTTYPE='gpt' partition_start=16 root_size='rk35xx';;
 	103) iname='NanoPiM5' HW_ARCH=3 PTTYPE='gpt' partition_start=16 root_size='rk35xx';;
 	104) iname='NanoPiZero2' HW_ARCH=3 PTTYPE='gpt' partition_start=16 root_size='rk35xx';;
+	105) iname='OrangePi4LTS' HW_ARCH=3 partition_start=16 root_size='rockchip64';;
 	*) Error_Exit "Invalid hardware model \"$HW_MODEL\" passed";;
 esac
 case $root_size in
-	'riscv') root_size=650; (( $DISTRO > 8 )) && ((root_size+=50));;
+	'riscv') root_size=650; (( $DISTRO > 8 )) && ((root_size+=100));;
 	'meson') root_size=650; (( $DISTRO > 7 && ! $boot_size )) && ((root_size+=50));;
 	'rockchip') root_size=700;;
-	'quartz64') root_size=700; (( $DISTRO > 8 )) && ((root_size+=50));;
+	'quartz64') root_size=700; (( $DISTRO > 8 )) && ((root_size+=100));;
 	'sunxi') root_size=700; (( $DISTRO > 7 )) && ((root_size+=50));;
 	'sunxi64') root_size=800;;
 	'meson64') root_size=850;;
@@ -422,7 +423,9 @@ _EOF_
 # login is not "essential" anymore since Trixie, hence "mmdebstrap --variant apt" (essential + apt) does not install it. It is still "required", hence cannot be commonly removed, but we need to install it actively once.
 packages='apt,bash-completion,ca-certificates,cron,curl,fdisk,gpg,htop,iputils-ping,locales,login,mawk,nano,parted,procps,psmisc,sudo,systemd-sysv,tzdata,udev,wget,whiptail,'
 IFS=, packages+=${afspackages[*]}; unset -v IFS
-[[ $HW_MODEL == 75 ]] && packages+=',iproute2' || packages+=',console-setup,dropbear,ethtool,fake-hwclock,ifupdown,kmod,rfkill,systemd-timesyncd,udhcpc,usbutils'
+[[ $HW_MODEL == 75 ]] && packages+=',iproute2' || packages+=',console-setup,dropbear,ethtool,fake-hwclock,ifupdown,kmod,rfkill,systemd-timesyncd,usbutils'
+# DHCP client: isc-dhcp-client has been removed from Forky, so we use dhcpcd for now, like BusyBox's udhcpc after https://salsa.debian.org/debian/ifupdown/-/merge_requests/29.
+(( $DISTRO < 9 )) && packages+=',isc-dhcp-client' || packages+=',dhcpcd-base'
 [[ $HW_MODEL =~ ^(20|75)$ ]] || packages+=',iw,wpasupplicant,wireless-regdb'
 # Add temporary tmpfs mounts to prevent certain files created by debootstrap being written to disk
 # - tmpfs mounts have 1777 mode by default.
@@ -456,7 +459,7 @@ fi
 if (( $HW_ARCH < 3 && $G_HW_ARCH != $HW_ARCH ))
 then
 	# shellcheck disable=SC2015
-	echo -e "#/bin/dash\n[ \"\$*\" = -m ] && echo $arch || /bin/uname \"\$@\"" > rootfs/usr/local/bin/uname && G_EXEC chmod +x rootfs/usr/local/bin/uname || Error_Exit "Failed to generate /usr/local/bin/uname for $arch"
+	echo -e "#!/bin/dash\n[ \"\$*\" = '-m' ] && echo '$arch' || /bin/uname \"\$@\" | sed -E 's/armv[67]l|aarch64|x86_64|riscv64/$arch/g'" > rootfs/usr/local/bin/uname && G_EXEC chmod +x rootfs/usr/local/bin/uname || Error_Exit "Failed to generate /usr/local/bin/uname for $arch"
 fi
 
 # ARMv6/7/RISC-V Trixie: Workaround failing chpasswd, which tries to access /proc/sys/vm/mmap_min_addr, but fails as of AppArmor on the host
@@ -469,21 +472,32 @@ fi
 ##########################################
 # DietPi-Installer
 ##########################################
-# Create rc.local to automate DietPi-Installer
+# Create boot script and systemd unit to automate DietPi-Installer
 # - NB: WIFI_REQUIRED=1 is always passed here, but ignored by DietPi-Installer for VMs and containers.
-cat << _EOF_ > rootfs/etc/rc.local
-#!/bin/dash
+# - Prevent console-getty.service from stealing the controlling terminal
+G_EXEC ln -s /dev/null rootfs/etc/systemd/system/console-getty.service
+cat << _EOF_ > rootfs/dietpi-build.sh || exit 1
+#!/bin/dash -e
 {
 infocmp "\$TERM" > /dev/null 2>&1 || { echo "[ WARN ] Unsupported TERM=\"\$TERM\", switching to TERM=\"dumb\""; export TERM=dumb; }
 export GITOWNER='$GITOWNER' GITBRANCH='$GITBRANCH' HW_MODEL='$HW_MODEL' IMAGE_CREATOR=0 PREIMAGE_INFO=0 WIFI_REQUIRED=1 DISTRO_TARGET=$DISTRO TEST_KERNEL=$TEST_KERNEL TEST_UBOOT=$TEST_UBOOT RK35XX_MAINLINE=$RK35XX_MAINLINE TMPDIR='/tmp'
 echo '[ INFO ] Running DietPi-Installer for $G_GITOWNER/$G_GITBRANCH'
-bash -c "\$(curl -sSf 'https://raw.githubusercontent.com/$G_GITOWNER/DietPi/$G_GITBRANCH/.build/images/dietpi-installer')" || { echo '[FAILED] DietPi-Installer failed, shutting down ...'; journalctl -n 25; df -h; free -h; systemctl start poweroff.target; exit 1; }
+bash -c "\$(curl -sSf 'https://raw.githubusercontent.com/$G_GITOWNER/DietPi/$G_GITBRANCH/.build/images/dietpi-installer' || echo false)" || { echo '[FAILED] DietPi-Installer failed, shutting down ...'; journalctl -n 25; df -h; free -h; exit 1; }
+rm -v /etc/systemd/system/multi-user.target.wants/dietpi-build.service /etc/systemd/system/dietpi-build.service /dietpi-build.sh /etc/systemd/system/console-getty.service
 > /success
-systemctl start poweroff.target
 exit 0
-} > /dev/console 2>&1 < /dev/console
+} > /dev/console 2>&1
 _EOF_
-G_EXEC chmod +x rootfs/etc/rc.local
+G_EXEC chmod +x rootfs/dietpi-build.sh
+cat << '_EOF_' > rootfs/etc/systemd/system/dietpi-build.service || exit 1
+[Service]
+Type=idle
+# StandardOutput=tty fails in emulated containers
+StandardOutput=journal+console
+ExecStart=-/dietpi-build.sh
+ExecStopPost=/usr/bin/systemctl --no-block start poweroff.target
+_EOF_
+G_EXEC ln -s /etc/systemd/system/dietpi-build.service rootfs/etc/systemd/system/multi-user.target.wants/dietpi-build.service
 
 # Start container
 # - Bind mounts required to allow container reading its own drive info, /dev/disk for GRUB and probably other tools to detect UUIDs
@@ -630,20 +644,16 @@ then
 
 	# Install Allo GUI via automated first run setup right here
 	G_CONFIG_INJECT 'AUTO_SETUP_AUTOMATED=' 'AUTO_SETUP_AUTOMATED=1' rootfs/boot/dietpi.txt
-	# Workaround for failing systemd services in emulated container: https://gitlab.com/qemu-project/qemu/-/issues/1962, https://github.com/systemd/systemd/issues/31219
+	# Workarounds for QEMU-emulated containers
 	if (( $emulation ))
 	then
+		# Failing systemd services: https://gitlab.com/qemu-project/qemu/-/issues/1962, https://github.com/systemd/systemd/issues/31219
 		for i in rootfs/lib/systemd/system/*.service
 		do
 			[[ -f $i ]] || continue
-			grep -Eq '^(Load|Import)Credential=' "$i" || continue
+			grep -Eq '^(Import|Load)Credential=' "$i" || continue
 			G_EXEC mkdir "${i/lib/etc}.d"
-			if (( $DISTRO < 8 ))
-			then
-				G_EXEC eval "echo -e '[Service]\nLoadCredential=' > \"${i/lib/etc}.d/dietpi-no-credentials.conf\""
-			else
-				G_EXEC eval "echo -e '[Service]\nImportCredential=' > \"${i/lib/etc}.d/dietpi-no-credentials.conf\""
-			fi
+			G_EXEC eval "echo -e '[Service]\nImportCredential=\nLoadCredential=' > '${i/lib/etc}.d/dietpi-no-credentials.conf'"
 		done
 	fi
 	G_CONFIG_INJECT 'AUTO_SETUP_INSTALL_SOFTWARE_ID=' 'AUTO_SETUP_INSTALL_SOFTWARE_ID=159' rootfs/boot/dietpi.txt
@@ -654,7 +664,7 @@ then
 	if (( $HW_ARCH < 3 && $G_HW_ARCH != $HW_ARCH ))
 	then
 		# shellcheck disable=SC2015
-		echo -e "#/bin/dash\n[ \"\$*\" = -m ] && echo $arch || /bin/uname \"\$@\"" > rootfs/usr/local/bin/uname && G_EXEC chmod +x rootfs/usr/local/bin/uname || Error_Exit "Failed to generate /usr/local/bin/uname for $arch"
+		echo -e "#!/bin/dash\n[ \"\$*\" = '-m' ] && echo '$arch' || /bin/uname \"\$@\" | sed -E 's/armv[67]l|aarch64|x86_64|riscv64/$arch/g'" > rootfs/usr/local/bin/uname && G_EXEC chmod +x rootfs/usr/local/bin/uname || Error_Exit "Failed to generate /usr/local/bin/uname for $arch"
 	fi
 
 	# Skip filesystem expansion
@@ -698,7 +708,7 @@ G_EXEC systemctl stop dietpi-ramlog
 G_EXEC rm -R /var/tmp/dietpi/logs
 /boot/dietpi/func/dietpi-set_software apt-cache clean
 G_EXEC rm /boot/dietpi/.{hw_model,dietpi-services_include_exclude} /boot/dietpi-wifi.txt
-G_EXEC rm -Rf /{root,home/*}/.{bash_history,nano_history,wget-hsts,cache,local,config,gnupg,viminfo,dbus,gconf,nano,vim,zshrc,oh-my-zsh} /etc/*- /var/{cache/debconf,lib/dpkg}/*-old
+G_EXEC rm -Rf /{root,home/*}/.{bash_history,nano_history,wget-hsts,cache,local,config,gnupg,viminfo,dbus,gconf,nano,vim,zshrc,oh-my-zsh} /etc/*- /var/{cache/debconf,lib/dpkg}/*-old /var/lib/dhcp{,cd}/{,.}*
 # Remove unique Roon IDs: https://community.roonlabs.com/t/32563/18
 G_EXEC rm -f /mnt/dietpi_userdata/roon/{RoonBridge,RAATServer}/Settings/unique_id
 
