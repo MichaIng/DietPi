@@ -3,11 +3,11 @@
 # - Called by udev rule (99-dietpi-automount.rules) on USB block device add and remove events
 # Usage: dietpi-fs_automount.sh <add|remove> <device>
 {
-	action=$1
-	device=$2
+action=$1
+device=$2
 
-	if [[ $action == 'add' ]]
-	then
+case $action in
+	'add')
 		# Skip if already mounted
 		if findmnt -nro TARGET "$device" &> /dev/null
 		then
@@ -64,6 +64,7 @@
 			case $fstype in
 				'ntfs') options+=',permissions,big_writes';;
 				'exfat') getent group dietpi > /dev/null && options+=',gid=dietpi,fmask=0002,dmask=0002';;
+				*) :;;
 			esac
 
 			mount_point="/media/$uuid"
@@ -78,9 +79,8 @@
 				exit 1
 			fi
 		fi
-
-	elif [[ $action == 'remove' ]]
-	then
+	;;
+	'remove')
 		# Find auto-mount point in /media/ for this device
 		# NB: Mounts triggered via fstab entry are intentionally not unmounted here;
 		#     those are explicitly user-configured and the OS surfaces I/O errors naturally.
@@ -97,7 +97,9 @@
 			logger -t dietpi-automount "[FAILED] Could not unmount $device from $mount_point: $umount_out"
 			exit 1
 		fi
-	fi
+	;;
+	*) logger -t dietpi-automount "[FAILED] Invalid action \"$action\" for device \"$device\"";;
+esac
 
-	exit 0
+exit 0
 }
