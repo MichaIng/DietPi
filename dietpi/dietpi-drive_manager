@@ -367,7 +367,7 @@ tmpfs /var/log tmpfs size=${var_log_size:-50}M,noatime,lazytime,nodev,nosuid" > 
 			G_WHIP_RETURNED_VALUE=$target
 		else
 			G_WHIP_DEFAULT_ITEM=$target
-			G_WHIP_INPUTBOX "Please enter the desired mount point.\n - Default and recommended = $target\n
+			G_WHIP_INPUTBOX "Please enter the desired persistent mount point.\n - Default and recommended = $target\n
 NB: The path must start with /mnt/ and be unique. Spaces will be converted automatically to underscores (_)." || return 1
 		fi
 
@@ -422,6 +422,27 @@ Do you wish to ignore this warning, and, mount the drive regardless?" || return 
 		[[ $automount ]] && { automount=${automount//-/\\x2d}; automount=${automount//\//-}; }
 		[[ -f /run/systemd/generator/$automount.automount ]] && G_EXEC systemctl stop "$automount.automount"
 		G_EXEC_NOEXIT=1 G_EXEC rmdir "$target"
+	}
+
+	# Toggle USB auto-mount via udev rule
+	Toggle_USB_Automount()
+	{
+		local udev_rules='/etc/udev/rules.d/99-dietpi-automount.rules'
+		if [[ -f $udev_rules ]]
+		then
+			G_EXEC rm "$udev_rules"
+			G_EXEC udevadm control --reload
+			G_DIETPI-NOTIFY 0 'USB auto-mount disabled. USB drives will no longer be automatically mounted to /media when connected.'
+		else
+			cat << '_EOF_' > "$udev_rules" || exit 1
+# DietPi USB auto-mount: Automatically mounts USB drives to /media when connected.
+# Managed by dietpi-drive_manager - do not edit manually.
+ACTION=="add", SUBSYSTEM=="block", ENV{ID_BUS}=="usb", ENV{ID_FS_UUID}!="", ENV{ID_FS_TYPE}!="", RUN{program}+="/bin/systemd-run --no-block /var/lib/dietpi/services/dietpi-fs_automount.sh add /dev/%k"
+ACTION=="remove", SUBSYSTEM=="block", ENV{ID_BUS}=="usb", RUN{program}+="/bin/systemd-run --no-block /var/lib/dietpi/services/dietpi-fs_automount.sh remove /dev/%k"
+_EOF_
+			G_EXEC udevadm control --reload
+			G_DIETPI-NOTIFY 0 'USB auto-mount enabled. USB drives will be automatically mounted to /media when connected.'
+		fi
 	}
 
 	Resize_FS()
@@ -711,6 +732,9 @@ Do you wish to ignore this warning, and, mount the drive regardless?" || return 
 
 		G_WHIP_MENU_ARRAY+=('' '●─ Global Options ')
 		G_WHIP_MENU_ARRAY+=('Idle Spindown' ': Set a global idle duration, before drives power down')
+		local automount_state='[ ]'
+		[[ -f '/etc/udev/rules.d/99-dietpi-automount.rules' ]] && automount_state='[X]'
+		G_WHIP_MENU_ARRAY+=('USB Auto-Mount' ": $automount_state | Automatically mount USB drives to /media when connected")
 		G_WHIP_MENU_ARRAY+=('' '●─ Add / Refresh Drives ')
 		G_WHIP_MENU_ARRAY+=('Add network drive' ': Select to mount networked drives')
 		if (( $drive_available ))
@@ -776,6 +800,10 @@ Do you wish to ignore this warning, and, mount the drive regardless?" || return 
 				G_DIETPI-NOTIFY 2 'Applying spindown timeout to /etc/hdparm.conf as default from next boot on ...'
 				G_CONFIG_INJECT 'force_spindown_time[[:blank:]=]' "force_spindown_time = $G_WHIP_RETURNED_VALUE" /etc/hdparm.conf
 			fi
+
+		elif [[ $G_WHIP_RETURNED_VALUE == 'USB Auto-Mount' ]]
+		then
+			Toggle_USB_Automount
 
 		# Edit drive
 		elif [[ $G_WHIP_RETURNED_VALUE ]]
@@ -853,6 +881,7 @@ Do you wish to ignore this warning, and, mount the drive regardless?" || return 
 						G_WHIP_MENU_ARRAY+=('Remove' ': Unmount networked drive and remove it from database')
 					else
 						G_WHIP_MENU_ARRAY+=('Unmount' ': Allows you to physically remove the drive')
+						[[ ${aDRIVE_MOUNT_TARGET[$MENU_DRIVE_SELECTED]} == '/media/'* ]] && G_WHIP_MENU_ARRAY+=('Make Persistent' ': Move to /mnt and add to /etc/fstab for permanent mounting')
 					fi
 				fi
 
@@ -1005,6 +1034,15 @@ Do you wish to ignore this warning, and, mount the drive regardless?" || return 
 				Unmount_Drive "${aDRIVE_MOUNT_TARGET[$MENU_DRIVE_SELECTED]}"
 				Init_Drives_and_Refresh
 			fi
+
+		elif [[ $G_WHIP_RETURNED_VALUE == 'Make Persistent' ]]
+		then
+			if Mount_Drive "$MENU_DRIVE_SELECTED" "/mnt/${aDRIVE_UUID[$MENU_DRIVE_SELECTED]}"
+			then
+				# Unmount from current auto-mount location
+				G_EXEC_NOEXIT=1 G_EXEC umount "${aDRIVE_MOUNT_TARGET[$MENU_DRIVE_SELECTED]}" && G_EXEC_NOEXIT=1 G_EXEC rmdir "${aDRIVE_MOUNT_TARGET[$MENU_DRIVE_SELECTED]}"
+			fi
+			Init_Drives_and_Refresh
 
 		elif [[ $G_WHIP_RETURNED_VALUE == 'Swap file' ]]
 		then
