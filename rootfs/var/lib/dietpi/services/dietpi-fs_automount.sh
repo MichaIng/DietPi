@@ -9,7 +9,7 @@ device=$2
 case $action in
 	'add')
 		# Skip if already mounted
-		if findmnt -nro TARGET "$device" &> /dev/null
+		if findmnt -nro TARGET "$device" > /dev/null
 		then
 			logger -t dietpi-automount "Skipping $device: already mounted at $(findmnt -nro TARGET "$device")"
 			exit 0
@@ -55,7 +55,7 @@ case $action in
 			then
 				logger -t dietpi-automount "Successfully mounted $device at $fstab_target"
 			else
-				logger -t dietpi-automount "[FAILED] Could not mount $device at $fstab_target: $mount_out"
+				logger -t dietpi-automount -p 4 "[FAILED] Could not mount $device at $fstab_target: $mount_out"
 				exit 1
 			fi
 		else
@@ -74,8 +74,8 @@ case $action in
 			then
 				logger -t dietpi-automount "Successfully auto-mounted $device at $mount_point"
 			else
-				logger -t dietpi-automount "[FAILED] Could not auto-mount $device at $mount_point: $mount_out"
-				rmdir "$mount_point" 2> /dev/null
+				logger -t dietpi-automount -p 4 "[FAILED] Could not auto-mount $device at $mount_point: $mount_out"
+				rmdir "$mount_point"
 				exit 1
 			fi
 		fi
@@ -84,7 +84,7 @@ case $action in
 		# Find auto-mount point in /media/ for this device
 		# NB: Mounts triggered via fstab entry are intentionally not unmounted here;
 		#     those are explicitly user-configured and the OS surfaces I/O errors naturally.
-		mount_point=$(findmnt -nro TARGET "$device" 2>/dev/null | grep '^/media/')
+		mount_point=$(findmnt -nro TARGET "$device" | grep '^/media/')
 		[[ $mount_point ]] || exit 0
 
 		logger -t dietpi-automount "Unmounting auto-mounted $device from $mount_point"
@@ -92,9 +92,9 @@ case $action in
 		if umount_out=$(umount -l "$mount_point" 2>&1)
 		then
 			logger -t dietpi-automount "Successfully unmounted $device from $mount_point"
-			rmdir "$mount_point" 2> /dev/null || true
+			rmdir --ignore-fail-on-non-empty "$mount_point"
 		else
-			logger -t dietpi-automount "[FAILED] Could not unmount $device from $mount_point: $umount_out"
+			logger -t dietpi-automount -p 4 "[FAILED] Could not unmount $device from $mount_point: $umount_out"
 			exit 1
 		fi
 	;;
