@@ -1198,6 +1198,12 @@ Available commands:
 		aSOFTWARE_CATX[$software_id]=8
 		aSOFTWARE_DOCS[$software_id]='https://dietpi.com/docs/software/system_stats/#prometheus_node_exporter'
 		#------------------
+		software_id=218
+		aSOFTWARE_NAME[$software_id]='Prometheus'
+		aSOFTWARE_DESC[$software_id]='Prometheus monitoring system and time series database'
+		aSOFTWARE_CATX[$software_id]=8
+		aSOFTWARE_DOCS[$software_id]='https://dietpi.com/docs/software/system_stats/#prometheus'
+		#------------------
 		software_id=205
 		aSOFTWARE_NAME[$software_id]='Homer'
 		aSOFTWARE_DESC[$software_id]='Simple HOMepage for your servER to keep your services on hand'
@@ -3550,8 +3556,10 @@ _EOF_'
 			G_EXEC cp --preserve=mode node_exporter*/node_exporter /opt/node_exporter/
 			G_EXEC rm -R node_exporter*
 
-			# User
-			Create_User node_exporter
+			# User: use shared prometheus user; migrate old node_exporter user if present
+			Create_User prometheus
+			getent passwd node_exporter > /dev/null && G_EXEC userdel node_exporter
+			getent group node_exporter > /dev/null && G_EXEC groupdel node_exporter
 
 			# Services
 			cat << '_EOF_' > /etc/systemd/system/node_exporter.service
@@ -3560,7 +3568,7 @@ Description=Prometheus Node Exporter (DietPi)
 Documentation=https://prometheus.io/docs/guides/node-exporter/
 
 [Service]
-User=node_exporter
+User=prometheus
 RuntimeDirectory=node_exporter
 ExecStart=/opt/node_exporter/node_exporter --log.level=warn --collector.textfile.directory=/run/node_exporter
 
@@ -3581,6 +3589,58 @@ _EOF_
 				G_EXEC rm -R raspberrypi_exporter-master
 				aENABLE_SERVICES+=('raspberrypi_exporter')
 			fi
+		fi
+
+		if To_Install 218 prometheus # Prometheus
+		then
+			case $G_HW_ARCH in
+				1) local arch='armv6';;
+				2) local arch='armv7';;
+				3) local arch='arm64';;
+				11) local arch='riscv64';;
+				*) local arch='amd64';;
+			esac
+
+			# Download binary
+			local fallback_url="https://github.com/prometheus/prometheus/releases/download/v3.2.1/prometheus-3.2.1.linux-$arch.tar.gz"
+			Download_Install "$(curl -sSfL 'https://api.github.com/repos/prometheus/prometheus/releases/latest' | grep -Po "\"browser_download_url\": *\"\K[^\"]*\/prometheus-[0-9][^\"\/]*\.linux-$arch\.tar\.gz(?=\")")"
+			G_EXEC mkdir -p /opt/prometheus
+			G_EXEC cp --preserve=mode prometheus*/prometheus prometheus*/promtool /opt/prometheus/
+			G_EXEC rm -R prometheus*
+
+			# User: use shared prometheus user
+			Create_User prometheus
+
+			# Config
+			G_EXEC mkdir -p /etc/prometheus
+			[[ -f '/etc/prometheus/prometheus.yml' ]] || cat << '_EOF_' > /etc/prometheus/prometheus.yml
+global:
+  scrape_interval: 15s
+
+scrape_configs:
+  - job_name: 'prometheus'
+    static_configs:
+      - targets: ['localhost:9090']
+_EOF_
+			G_EXEC chown -R prometheus:prometheus /etc/prometheus
+
+			# Data directory
+			G_EXEC mkdir -p /mnt/dietpi_userdata/prometheus
+			G_EXEC chown prometheus:prometheus /mnt/dietpi_userdata/prometheus
+
+			# Service
+			cat << '_EOF_' > /etc/systemd/system/prometheus.service
+[Unit]
+Description=Prometheus (DietPi)
+Documentation=https://prometheus.io/docs/introduction/overview/
+
+[Service]
+User=prometheus
+ExecStart=/opt/prometheus/prometheus --config.file=/etc/prometheus/prometheus.yml --storage.tsdb.path=/mnt/dietpi_userdata/prometheus --log.level=warn
+
+[Install]
+WantedBy=multi-user.target
+_EOF_
 		fi
 
 		if To_Install 44 transmission-daemon # Transmission
@@ -13381,8 +13441,19 @@ _EOF_
 			fi
 			[[ -d '/etc/systemd/system/raspberrypi_exporter.timer.d' ]] && G_EXEC rm -R /etc/systemd/system/raspberrypi_exporter.timer.d
 			Remove_Service raspberrypi_exporter
-			Remove_Service node_exporter 1 1
+			Remove_Service node_exporter
 			[[ -d '/opt/node_exporter' ]] && G_EXEC rm -R /opt/node_exporter
+			# Remove shared prometheus user/group only if Prometheus Server is not installed
+			(( ${aSOFTWARE_INSTALL_STATE[218]} == 2 )) || { getent passwd prometheus > /dev/null && G_EXEC userdel prometheus; getent group prometheus > /dev/null && G_EXEC groupdel prometheus; }
+		fi
+
+		if To_Uninstall 218 # Prometheus
+		then
+			Remove_Service prometheus
+			[[ -d '/opt/prometheus' ]] && G_EXEC rm -R /opt/prometheus
+			[[ -d '/etc/prometheus' ]] && G_EXEC rm -R /etc/prometheus
+			# Remove shared prometheus user/group only if Prometheus Node Exporter is not installed
+			(( ${aSOFTWARE_INSTALL_STATE[99]} == 2 )) || { getent passwd prometheus > /dev/null && G_EXEC userdel prometheus; getent group prometheus > /dev/null && G_EXEC groupdel prometheus; }
 		fi
 
 		if To_Uninstall 146 # Tautulli
