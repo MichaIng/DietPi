@@ -316,6 +316,7 @@ Process_Software()
 			215) aSERVICES[i]='immich' aTCP[i]='2283';;
 			216) aSERVICES[i]='immich-ml' aTCP[i]='3003';;
 			217) aCOMMANDS[i]='uv --version';;
+			218) aSERVICES[i]='prometheus' aTCP[i]='9090';;
 			*) :;;
 		esac
 		aINSTALL[i]=1
