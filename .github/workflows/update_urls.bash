@@ -407,6 +407,13 @@ aCHECK[$software_id]='echo "$response" | grep -Po "\"browser_download_url\": *\"
 aARCH[$software_id]='arm-unknown-linux-musleabihf armv7-unknown-linux-gnueabihf aarch64-unknown-linux-gnu x86_64-unknown-linux-gnu riscv64gc-unknown-linux-gnu'
 aREGEX[$software_id]='https://github.com/astral-sh/uv/releases/download/.*/uv-$arch.tar.gz'
 
+# Prometheus
+software_id=218
+aURL[$software_id]='https://api.github.com/repos/prometheus/prometheus/releases/latest'
+aCHECK[$software_id]='echo "$response" | grep -Po "\"browser_download_url\": *\"\K[^\"]*\/prometheus-[0-9][^\"\/]*\.linux-$arch\.tar\.gz(?=\")"'
+aARCH[$software_id]='armv6 armv7 arm64 amd64 riscv64'
+aREGEX[$software_id]='https://github\.com/prometheus/prometheus/releases/download/.*/prometheus-[0-9][^/]*\.linux-\$arch\.tar\.gz'
+
 ### URL check loop ###
 
 for i in "${!aCHECK[@]}"
