@@ -151,7 +151,7 @@ G_EXEC_OUTPUT=1 G_EXEC cmake --install "$NAME-$version/build" --prefix "$DIR/usr
 LIB_DIR=$(find "$DIR/usr/lib/"*"/$NAME" -maxdepth 0)
 G_EXEC cp -aL /tmp/deps/lib/libSDL3{,_image,_ttf}.so.0 "$LIB_DIR/"
 
-# - systemd service: Workaround invisible cursor: https://github.com/libsdl-org/SDL/issues/15242
+# - systemd service
 cat << _EOF_ > "$DIR/lib/systemd/system/$NAME.service" || exit 1
 [Unit]
 Description=$PRETTY Amiga Emulator (DietPi)
@@ -163,7 +163,6 @@ Environment=XDG_DATA_HOME=/mnt/dietpi_userdata
 Environment=XDG_CONFIG_HOME=/mnt/dietpi_userdata
 Environment=AMIBERRY_HOME_DIR=/mnt/dietpi_userdata/$NAME
 Environment=AMIBERRY_CONFIG_DIR=/mnt/dietpi_userdata/$NAME/conf
-Environment=SDL_KMSDRM_ATOMIC=0
 WorkingDirectory=/mnt/dietpi_userdata/$NAME
 StandardInput=tty
 TTYPath=/dev/tty3
