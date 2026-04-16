@@ -104,7 +104,7 @@ AmbientCapabilities=CAP_NET_BIND_SERVICE
 LimitNOFILE=1048576
 LimitNPROC=64
 WorkingDirectory=/mnt/dietpi_userdata/vaultwarden
-# Workaround for failing systemd.automount since Bookworm: https://dietpi.com/forum/t/17463/22
+# Workaround for failing systemd.automount: https://dietpi.com/forum/t/17463/22
 EnvironmentFile=-/mnt/dietpi_userdata/vaultwarden/vaultwarden.env
 ExecStartPre=/bin/touch /mnt/dietpi_userdata/vaultwarden/vaultwarden.env
 ExecStart=/opt/vaultwarden/vaultwarden
