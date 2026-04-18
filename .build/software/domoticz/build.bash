@@ -34,8 +34,7 @@ G_EXEC_OUTPUT=1 G_EXEC make
 NAME='domoticz'
 ORGA='domoticz'
 PRETTY='Domoticz'
-#version=$(curl -sSf "${header[@]}" "https://api.github.com/repos/$ORGA/$NAME/releases/latest" | grep -Po '"tag_name": *"\K[^"]+(?=")')
-version='2026.1'
+version=$(curl -sSf "${header[@]}" "https://api.github.com/repos/$ORGA/$NAME/releases/latest" | grep -Po '"tag_name": *"\K[^"]+(?=")')
 [[ $version ]] || Error_Exit "No latest $PRETTY version found"
 G_DIETPI-NOTIFY 2 "Building $PRETTY version \e[33m$version"
 G_EXEC cd /tmp
