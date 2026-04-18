@@ -173,7 +173,7 @@ aREPLACE[$software_id]='file='\''$release'\'
 # Koel
 software_id=143
 aCHECK[$software_id]='curl -sSf '\''https://api.github.com/repos/koel/koel/releases/latest'\'' | grep -Po '\''"browser_download_url": *"\K[^"]*\/koel-[^"\/]*\.tar\.gz(?=")'\'
-aREGEX[$software_id]='https://github.com/koel/koel/releases/download/.*/koel-.*\.tar\.gz'
+aREGEX[$software_id]='https://github.com/koel/koel/releases/download/v[^8].*/koel-.*\.tar\.gz'
 
 # Sonarr
 software_id=144
