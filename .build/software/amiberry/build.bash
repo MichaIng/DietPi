@@ -51,8 +51,6 @@ case $G_DISTRO in
 esac
 # - kbd: For "chvt" used in systemd service
 adeps_build+=('kbd') adeps+=('kbd')
-# - patch: https://github.com/libsdl-org/SDL_image/issues/683, https://github.com/BlitterStudio/amiberry/pull/1838
-adeps_build+=('patch')
 
 G_AGUP
 G_AGDUG "${adeps_build[@]}"
@@ -95,11 +93,6 @@ G_EXEC curl -sSfLO "https://github.com/libsdl-org/SDL_image/releases/download/re
 G_EXEC tar xf "$NAME-$version.tar.gz"
 G_EXEC rm "$NAME-$version.tar.gz"
 G_EXEC cd "$NAME-$version"
-# Fix dynamic libpng detection: https://github.com/libsdl-org/SDL_image/issues/683
-curl -sSf 'https://github.com/libsdl-org/SDL_image/commit/84c6a74.patch' | patch -p1 || Error_Exit 'Patching SDL3_image to fix dynamic libpng detection failed'
-curl -sSf 'https://github.com/libsdl-org/SDL_image/commit/0add2cd.patch' | patch -p1 || Error_Exit 'Patching SDL3_image to fix dynamic libpng detection failed'
-curl -sSf 'https://github.com/libsdl-org/SDL_image/commit/495a220.patch' | patch -p1 || Error_Exit 'Patching SDL3_image to fix dynamic libpng detection failed'
-curl -sSf 'https://github.com/libsdl-org/SDL_image/commit/8bab27f.patch' | patch -p1 || Error_Exit 'Patching SDL3_image to fix dynamic libpng detection failed'
 G_EXEC_OUTPUT=1 G_EXEC cmake -B build -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_PREFIX='/tmp/deps'
 G_EXEC_OUTPUT=1 G_EXEC cmake --build build --config Release
 find build -type f \( -name '*.so' -o -name '*.so.*' \) -exec strip --strip-unneeded --remove-section=.comment --remove-section=.note -v {} +
@@ -138,11 +131,6 @@ G_EXEC curl -sSfLO "https://github.com/$ORGA/$NAME/archive/v$version.tar.gz"
 G_EXEC tar xf "v$version.tar.gz"
 G_EXEC rm "v$version.tar.gz"
 G_EXEC cd "$NAME-$version"
-# Fix RISC-V builds and some issues with GLES: https://github.com/BlitterStudio/amiberry/pull/1838
-curl -sSf 'https://github.com/BlitterStudio/amiberry/commit/98547b9.patch' | patch -p1 || Error_Exit 'Patching Amiberry to fix RISC-V builds failed'
-# Fix Custom controls:
-curl -sSf 'https://github.com/BlitterStudio/amiberry/commit/d71a344.patch' | patch -p1 || Error_Exit 'Patching Custom controls crash failed'
-curl -sSf 'https://github.com/BlitterStudio/amiberry/commit/5c50982.patch' | patch -p1 || Error_Exit 'Patching Custom controls crash failed'
 # - Add SDL3 to rpath
 # shellcheck disable=SC2015
 grep -q '^include(GNUInstallDirs)$' CMakeLists.txt && G_EXEC sed --follow-symlinks -i "/^include(GNUInstallDirs)$/a\set(CMAKE_INSTALL_RPATH \"\${CMAKE_INSTALL_FULL_LIBDIR}/$NAME\")" CMakeLists.txt || Error_Exit 'CMakeLists.txt does not contain "include(GNUInstallDirs)" line anymore'
@@ -163,7 +151,7 @@ G_EXEC_OUTPUT=1 G_EXEC cmake --install "$NAME-$version/build" --prefix "$DIR/usr
 LIB_DIR=$(find "$DIR/usr/lib/"*"/$NAME" -maxdepth 0)
 G_EXEC cp -aL /tmp/deps/lib/libSDL3{,_image,_ttf}.so.0 "$LIB_DIR/"
 
-# - systemd service: Workaround invisible cursor: https://github.com/libsdl-org/SDL/issues/15242
+# - systemd service
 cat << _EOF_ > "$DIR/lib/systemd/system/$NAME.service" || exit 1
 [Unit]
 Description=$PRETTY Amiga Emulator (DietPi)
@@ -175,7 +163,6 @@ Environment=XDG_DATA_HOME=/mnt/dietpi_userdata
 Environment=XDG_CONFIG_HOME=/mnt/dietpi_userdata
 Environment=AMIBERRY_HOME_DIR=/mnt/dietpi_userdata/$NAME
 Environment=AMIBERRY_CONFIG_DIR=/mnt/dietpi_userdata/$NAME/conf
-Environment=SDL_KMSDRM_ATOMIC=0
 WorkingDirectory=/mnt/dietpi_userdata/$NAME
 StandardInput=tty
 TTYPath=/dev/tty3

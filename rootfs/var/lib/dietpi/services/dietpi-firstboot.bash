@@ -273,16 +273,19 @@ _EOF_
 		# - WiFi
 		if (( $wifi_enabled ))
 		then
+			# Enable WiFi kernel modules
+			/boot/dietpi/func/dietpi-set_hardware wifimodules enable
+
+			# Apply SSIDs/keys from /boot/dietpi-wifi.txt to /etc/wpa_supplicant/wpa_supplicant.conf
+			/boot/dietpi/func/dietpi-wifidb 1
+
+			# Apply WiFi country code from /boot/dietpi.txt
+			/boot/dietpi/func/dietpi-set_hardware wificountrycode
+
 			# Enable WiFi, disable Ethernet
 			ethernet_enabled=0
 			sed --follow-symlinks -Ei "/(allow-hotplug|auto)[[:blank:]]+wlan/c\allow-hotplug $iface_wlan" /etc/network/interfaces
 			sed --follow-symlinks -Ei "/(allow-hotplug|auto)[[:blank:]]+eth/c\#allow-hotplug $iface_eth" /etc/network/interfaces
-
-			# Apply global SSID/keys from dietpi.txt to wpa_supplicant
-			/boot/dietpi/func/dietpi-wifidb 1
-
-			# Set WiFi country code
-			/boot/dietpi/func/dietpi-set_hardware wificountrycode
 
 		# - Ethernet
 		elif (( $ethernet_enabled ))
@@ -291,12 +294,6 @@ _EOF_
 			wifi_enabled=0
 			sed --follow-symlinks -Ei "/(allow-hotplug|auto)[[:blank:]]+eth/c\allow-hotplug $iface_eth" /etc/network/interfaces
 			sed --follow-symlinks -Ei "/(allow-hotplug|auto)[[:blank:]]+wlan/c\#allow-hotplug $iface_wlan" /etc/network/interfaces
-
-			# Disable WiFi kernel modules
-			/boot/dietpi/func/dietpi-set_hardware wifimodules disable
-
-			# RPi: Keep onboard WiFi enabled until end of first run installs: https://github.com/MichaIng/DietPi/issues/5391
-			(( $G_HW_MODEL > 9 )) || /boot/dietpi/func/dietpi-set_hardware wifimodules onboard_enable
 		fi
 
 		# - Static IP
@@ -339,7 +336,7 @@ _EOF_
 		systemctl restart systemd-timesyncd
 
 		# x86_64 BIOS: Set GRUB install device: https://github.com/MichaIng/DietPi/issues/4542
-		if (( $G_HW_MODEL == 10 )) && dpkg-query -s grub-pc &> /dev/null
+		if (( $G_HW_ARCH == 10 )) && dpkg-query -s grub-pc &> /dev/null
 		then
 			local root_drive=$(lsblk -npo PKNAME "$(findmnt -Ufvnro SOURCE -M /)")
 			[[ $root_drive == '/dev/'* ]] && debconf-set-selections <<< "grub-pc grub-pc/install_devices multiselect $root_drive"
