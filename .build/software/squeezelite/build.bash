@@ -89,8 +89,9 @@ then
 	fi
 
 	echo 'Configuring Squeezelite systemd service ...'
-	systemctl unmask squeezelite
-	systemctl enable --now squeezelite
+	systemctl --no-reload unmask squeezelite
+	systemctl enable squeezelite
+	pgrep -x 'dietpi-software' > /dev/null || systemctl restart squeezelite
 fi
 _EOF_
 
@@ -100,8 +101,8 @@ cat << '_EOF_' > "$DIR/DEBIAN/prerm"
 if [ "$1" = 'remove' ] && [ -d '/run/systemd/system' ] && [ -f '/lib/systemd/system/squeezelite.service' ]
 then
 	echo 'Deconfiguring Squeezelite systemd service ...'
-	systemctl unmask squeezelite
-	systemctl disable --now squeezelite
+	systemctl --no-reload unmask squeezelite
+	systemctl --no-reload disable --now squeezelite
 fi
 _EOF_
 
