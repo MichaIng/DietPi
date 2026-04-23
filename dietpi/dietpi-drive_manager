@@ -168,9 +168,9 @@ tmpfs /var/log tmpfs size=${var_log_size:-50}M,noatime,lazytime,nodev,nosuid" > 
 			aDRIVE_ISMOUNTED[$source]=1
 			aDRIVE_ISFILESYSTEM[$source]=1
 			aDRIVE_MOUNT_TARGET[$source]=$(findmnt -Ufnro TARGET -S "$source") # Use only first result since bind mounts lead to multiple matches
-			aDRIVE_SIZE_TOTAL[$source]=$(findmnt -Ufnro SIZE -M "${aDRIVE_MOUNT_TARGET[$source]}")
-			aDRIVE_SIZE_USED[$source]=$(findmnt -Ufnro USED -M "${aDRIVE_MOUNT_TARGET[$source]}")
-			aDRIVE_SIZE_USED_PCT[$source]=$(findmnt -Ufnro USE% -M "${aDRIVE_MOUNT_TARGET[$source]}")
+			aDRIVE_SIZE_TOTAL[$source]=$(findmnt -Ufnro SIZE "${aDRIVE_MOUNT_TARGET[$source]}")
+			aDRIVE_SIZE_USED[$source]=$(findmnt -Ufnro USED "${aDRIVE_MOUNT_TARGET[$source]}")
+			aDRIVE_SIZE_USED_PCT[$source]=$(findmnt -Ufnro USE% "${aDRIVE_MOUNT_TARGET[$source]}")
 
 			# Physical
 			if [[ $source == '/dev/'* ]]
@@ -180,7 +180,7 @@ tmpfs /var/log tmpfs size=${var_log_size:-50}M,noatime,lazytime,nodev,nosuid" > 
 				aDRIVE_SOURCE_DEVICE[$source]=$(Return_Drive_Without_Partitions "$source")
 				[[ $source == /dev/${aDRIVE_SOURCE_DEVICE[$source]} ]] || aDRIVE_ISPARTITION[$source]=1
 				[[ -b $source ]] || aDRIVE_ISACCESS[$source]=0 # continue
-				aDRIVE_UUID[$source]=$(findmnt -Ufnro UUID -M "${aDRIVE_MOUNT_TARGET[$source]}")
+				aDRIVE_UUID[$source]=$(findmnt -Ufnro UUID "${aDRIVE_MOUNT_TARGET[$source]}")
 				# blkid is required here, as findmnt will show "fuseblk" for NTFS filesytems, which is a correct result but cannot be used in fstab or for mounting the drive.
 				aDRIVE_FSTYPE[$source]=$(blkid -s TYPE -o value "$source")
 
@@ -190,7 +190,7 @@ tmpfs /var/log tmpfs size=${var_log_size:-50}M,noatime,lazytime,nodev,nosuid" > 
 
 				aDRIVE_ISNETWORKED[$source]=1
 				# findmnt is required here, as blkid works only for physical block devices
-				aDRIVE_FSTYPE[$source]=$(findmnt -Ufnro FSTYPE -M "${aDRIVE_MOUNT_TARGET[$source]}")
+				aDRIVE_FSTYPE[$source]=$(findmnt -Ufnro FSTYPE "${aDRIVE_MOUNT_TARGET[$source]}")
 			fi
 
 			# R/O mounted?
@@ -621,7 +621,6 @@ _EOF_
 		# - Remove automatic entry for target drive
 		G_EXEC sed --follow-symlinks -i "\@[[:blank:]]${aDRIVE_MOUNT_TARGET[$MENU_DRIVE_SELECTED]}[[:blank:]]@d" "${aDRIVE_MOUNT_TARGET[$MENU_DRIVE_SELECTED]}/etc/fstab"
 		# - Replace old with new rootfs entry
-		local dev_entry="UUID=${aDRIVE_UUID[$MENU_DRIVE_SELECTED]}"
 		G_EXEC sed --follow-symlinks -i "\@[[:blank:]]/[[:blank:]]@c$(Get_Fstab_Entry "${aDRIVE_UUID[$MENU_DRIVE_SELECTED]}" '/' "${aDRIVE_FSTYPE[$MENU_DRIVE_SELECTED]}")" "${aDRIVE_MOUNT_TARGET[$MENU_DRIVE_SELECTED]}/etc/fstab"
 
 		# Find and replace current root and rootfstype kernel command line entries
@@ -629,7 +628,7 @@ _EOF_
 		if (( $G_HW_MODEL < 10 ))
 		then
 			local rootfs_current=$(mawk '{for(i=1;i<=NF;i++) if($i~/^root=/) {print $i;exit}}' /boot/firmware/cmdline.txt)
-			G_EXEC sed --follow-symlinks -i "s#$rootfs_current#root=$dev_entry#g" /boot/firmware/cmdline.txt
+			G_EXEC sed --follow-symlinks -i "s#$rootfs_current#root=PARTUUID=$(findmnt -Ufnro PARTUUID /)#g" /boot/firmware/cmdline.txt
 
 			local rootfstype_current=$(mawk '{for(i=1;i<=NF;i++) if($i~/^rootfstype=/) {print $i;exit}}' /boot/firmware/cmdline.txt)
 			[[ $rootfstype_current ]] && G_EXEC sed --follow-symlinks -i "s#$rootfstype_current#rootfstype=${aDRIVE_FSTYPE[$MENU_DRIVE_SELECTED]}#g" /boot/firmware/cmdline.txt
@@ -637,7 +636,7 @@ _EOF_
 		# - Odroids: /boot/boot.ini
 		else
 			local rootfs_current=$(mawk '-F[" ]' '{for(i=1;i<=NF;i++) if($i~/^root=/) {print $i;exit}}' /boot/boot.ini)
-			G_EXEC sed --follow-symlinks -i "s#$rootfs_current#root=$dev_entry#g" /boot/boot.ini
+			G_EXEC sed --follow-symlinks -i "s#$rootfs_current#root=UUID=${aDRIVE_UUID[$MENU_DRIVE_SELECTED]}#g" /boot/boot.ini
 
 			local rootfstype_current=$(mawk '-F[" ]' '{for(i=1;i<=NF;i++) if($i~/^rootfstype=/) {print $i;exit}}' /boot/boot.ini)
 			[[ $rootfstype_current ]] && G_EXEC sed --follow-symlinks -i "s#$rootfstype_current#rootfstype=${aDRIVE_FSTYPE[$MENU_DRIVE_SELECTED]}#g" /boot/boot.ini
@@ -967,7 +966,7 @@ _EOF_
 		if (( ${aDRIVE_ISACCESS[$MENU_DRIVE_SELECTED]} && ! ${aDRIVE_ISROM[$MENU_DRIVE_SELECTED]} && ! ${aDRIVE_ISNETWORKED[$MENU_DRIVE_SELECTED]} ))
 		then
 			# Transfer RootFS: Supported on RPi and Odroids C2/XU4/N2/C4 if there is a dedicated boot mount
-			if [[ $MENU_DRIVE_SELECTED != "$G_ROOTFS_DEV" ]] && { (( $G_HW_MODEL < 10 )) || { (( $G_HW_MODEL < 20 )) && findmnt -M /boot > /dev/null; }; }
+			if [[ $MENU_DRIVE_SELECTED != "$G_ROOTFS_DEV" ]] && { (( $G_HW_MODEL < 10 )) || { (( $G_HW_MODEL < 20 )) && findmnt /boot > /dev/null; }; }
 			then
 				G_WHIP_MENU_ARRAY+=('Transfer RootFS' ': Transfer RootFS to this drive')
 			fi
