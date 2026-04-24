@@ -28,8 +28,7 @@ G_EXEC curl -sSfo rustup-init.sh 'https://sh.rustup.rs'
 G_EXEC chmod +x rustup-init.sh
 G_EXEC_OUTPUT=1 G_EXEC ./rustup-init.sh -y --profile minimal --default-toolchain none "${host[@]}"
 G_EXEC rm rustup-init.sh
-# - Fallback to /root if $HOME is undefined when called e.g. from systemd unit
-export PATH="${HOME:-/root}/.cargo/bin:$PATH"
+export PATH="$HOME/.cargo/bin:$PATH"
 
 # Obtain latest versions
 # - vaultwarden
