@@ -504,7 +504,7 @@ then
 		for i in ${aSERVICES[@]}
 		do
 			G_EXEC mkdir "rootfs/etc/systemd/system/$i.service.d"
-			G_EXEC eval "echo -e '[Service]\nPrivateUsers=0\nProtectSystem=0\nProtectHome=0\nPrivateTmp=0\nPrivateDevices=0\nProtectKernelModules=0\nProtectControlGroups=0\nProtectKernelTunables=0\nProtectKernelLogs=0\nReadWritePaths=\nProtectProc=default\nProcSubset=all\nNoExecPaths=\nExecPaths=' > 'rootfs/etc/systemd/system/$i.service.d/dietpi-container.conf'"
+			G_EXEC eval "echo -e '[Service]\nPrivateUsers=0\nProtectSystem=0\nProtectHome=0\nPrivateTmp=0\nPrivateDevices=0\nProtectKernelModules=0\nProtectControlGroups=0\nProtectKernelTunables=0\nProtectKernelLogs=0\nReadWritePaths=\nProtectProc=default\nProcSubset=all\nNoExecPaths=\nExecPaths=\nInaccessiblePaths=' > 'rootfs/etc/systemd/system/$i.service.d/dietpi-container.conf'"
 		done
 
 		# /dev/console == /dev/pts/0 seen as "Inappropriate ioctl for device" leading to failing console-getty.service and StandardOutput=tty
