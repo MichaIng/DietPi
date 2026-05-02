@@ -9,7 +9,6 @@
 setenv rootdev "/dev/mmcblk0p1"
 setenv rootfstype "ext4"
 setenv consoleargs "console=tty1"
-setenv docker_optimizations "off"
 
 # Load addresses
 setenv scriptaddr "0x32000000"
@@ -26,9 +25,6 @@ fi
 
 # Define kernel command-line arguments
 setenv bootargs "root=${rootdev} rootfstype=${rootfstype} rootwait ${consoleargs} consoleblank=0 coherent_pool=2M ubootpart=${ubootpart} ${extraargs}"
-
-# Add bootargs for Docker
-if test "${docker_optimizations}" = "on"; then setenv bootargs "${bootargs} cgroup_enable=memory"; fi
 
 # Load device tree and apply overlays
 load "${devtype}" "${devnum}" "${fdt_addr_r}" "${prefix}dtb/${fdtfile}"
