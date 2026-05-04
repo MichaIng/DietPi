@@ -303,7 +303,7 @@ Links to hardware and software manufacturers, sources and build instructions use
 - [Snapcast](https://github.com/snapcast/snapcast)
 - [K3s](https://github.com/k3s-io/k3s)
 - [Synapse](https://github.com/matrix-org/synapse)
-- [youtube-dl](https://github.com/ytdl-org/youtube-dl)
+- [yt-dlp](https://github.com/yt-dlp/yt-dlp)
 - [PostgreSQL](https://git.postgresql.org/gitweb/?p=postgresql.git)
 - [OpenJDK](https://github.com/openjdk)
 - [Blynk Server](https://github.com/Peterkn2001/blynk-server)
