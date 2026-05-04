@@ -239,9 +239,9 @@ then
 	fi
 
 	echo 'Configuring $PRETTY systemd service ...'
-	systemctl unmask $NAME
-	systemctl --no-reload enable $NAME
-	systemctl restart $NAME
+	systemctl --no-reload unmask $NAME
+	systemctl enable $NAME
+	pgrep -x 'dietpi-software' > /dev/null || systemctl restart $NAME
 fi
 _EOF_
 
@@ -251,7 +251,7 @@ cat << _EOF_ > "$DIR/DEBIAN/prerm" || exit 1
 if [ "$1" = 'remove' ] && [ -d '/run/systemd/system' ] && [ -f '/lib/systemd/system/$NAME.service' ]
 then
 	echo 'Deconfiguring $PRETTY systemd service ...'
-	systemctl unmask $NAME
+	systemctl --no-reload unmask $NAME
 	systemctl --no-reload disable --now $NAME
 fi
 _EOF_

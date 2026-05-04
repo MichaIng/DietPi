@@ -372,7 +372,12 @@ apackages=('xz-utils' 'parted' 'fdisk' 'systemd-container')
 G_AG_CHECK_INSTALL_PREREQ "${apackages[@]}"
 
 # Register QEMU binfmt configs
-(( $emulation )) && G_EXEC systemctl restart systemd-binfmt
+if (( $emulation ))
+then
+	# Add credentials flag to allow setuid/setgid flags to function, e.g. used by Koel to add its crontab
+	G_EXEC sed --follow-symlinks -i '1s|$|C|' /usr/lib/binfmt.d/qemu-*.conf
+	G_EXEC systemctl restart systemd-binfmt
+fi
 
 ##########################################
 # Prepare container
@@ -499,11 +504,12 @@ then
 		for i in ${aSERVICES[@]}
 		do
 			G_EXEC mkdir "rootfs/etc/systemd/system/$i.service.d"
-			G_EXEC eval "echo -e '[Service]\nPrivateUsers=0\nProtectSystem=0\nProtectHome=0\nPrivateTmp=0\nPrivateDevices=0\nProtectKernelModules=0\nProtectControlGroups=0\nProtectKernelTunables=0\nProtectKernelLogs=0\nReadWritePaths=' > 'rootfs/etc/systemd/system/$i.service.d/dietpi-container.conf'"
+			G_EXEC eval "echo -e '[Service]\nPrivateUsers=0\nProtectSystem=0\nProtectHome=0\nPrivateTmp=0\nPrivateDevices=0\nProtectKernelModules=0\nProtectControlGroups=0\nProtectKernelTunables=0\nProtectKernelLogs=0\nReadWritePaths=\nProtectProc=default\nProcSubset=all\nNoExecPaths=\nExecPaths=\nInaccessiblePaths=' > 'rootfs/etc/systemd/system/$i.service.d/dietpi-container.conf'"
 		done
 
 		# /dev/console == /dev/pts/0 seen as "Inappropriate ioctl for device" leading to failing console-getty.service and StandardOutput=tty
-		G_EXEC eval 'echo -e '\''#!/bin/dash\nexec /boot/dietpi/dietpi-login > /dev/console 2>&1'\'' > rootfs/var/lib/dietpi/postboot.d/dietpi-login'
+		# - Define HOME, as it is not set in systemd unit, and needed for go to obtain a default GOPATH: "go: module cache not found: neither GOMODCACHE nor GOPATH is set"
+		G_EXEC eval 'echo -e '\''#!/bin/dash\nHOME=/root exec /boot/dietpi/dietpi-login > /dev/console 2>&1'\'' > rootfs/var/lib/dietpi/postboot.d/dietpi-login'
 		G_EXEC sed --follow-symlinks -i '/^StandardOutput=/c\StandardOutput=journal+console' rootfs/etc/systemd/system/dietpi-{first,post}boot.service
 	else
 		# PrivateUsers causes "Failed to set up user namespacing"
