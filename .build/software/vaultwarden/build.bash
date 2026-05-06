@@ -105,7 +105,7 @@ LimitNPROC=64
 WorkingDirectory=/mnt/dietpi_userdata/vaultwarden
 # Workaround for failing systemd.automount: https://dietpi.com/forum/t/17463/22
 EnvironmentFile=-/mnt/dietpi_userdata/vaultwarden/vaultwarden.env
-ExecStartPre=/bin/touch /mnt/dietpi_userdata/vaultwarden/vaultwarden.env
+ExecStartPre=/bin/test -e /mnt/dietpi_userdata/vaultwarden/vaultwarden.env
 ExecStart=/opt/vaultwarden/vaultwarden
 Restart=on-failure
 RestartSec=5s
