@@ -79,27 +79,25 @@ server:
 _EOF_
 
 cat << '_EOF_' > "$DIR/etc/unbound/unbound.conf.d/dietpi.conf" || exit 1
-# https://nlnetlabs.nl/documentation/unbound/unbound.conf/
+# https://unbound.docs.nlnetlabs.nl/en/latest/manpages/unbound.conf.html
+# At best, apply changes with an own config file like /etc/unbound/unbound.conf.d/local.conf.
 server:
-	# Do not daemonize, to allow proper systemd service control and status estimation.
-	do-daemonize: no
-
 	# A single thread is pretty sufficient for home or small office instances.
-	num-threads: 1
+	#num-threads: 1
 
 	# Logging: For the sake of privacy and performance, keep logging at a minimum!
 	# - Verbosity 2 and up practically contains query and reply logs.
 	verbosity: 0
-	log-queries: no
-	log-replies: no
-	# - If required, uncomment to log to a file, else logs are available via "journalctl -u unbound".
-	#logfile: "/var/log/unbound.log"
+	#log-queries: no
+	#log-replies: no
 
-	# Set interface to "0.0.0.0" to make Unbound listen on all network interfaces.
-	# Set it to "127.0.0.1" to listen on requests from the same machine only, useful in combination with Pi-hole.
-	interface: 0.0.0.0
-	# Default DNS port is "53". When used with Pi-hole, set this to e.g. "5335", since "5353" is used by mDNS already.
-	port: 53
+	# Set "interface: 0.0.0.0" to make Unbound listen on all network interfaces.
+	# Set "interface: 127.0.0.1" to listen on requests from the same machine only, useful in combination with Pi-hole/AdGuard Home.
+	# Add an additional "interface: ::0" or "interface: ::1" respectively to listen on IPv6 requests.
+	# The default is "interface: 127.0.0.1" and "interface: ::1" both.
+	#interface: 127.0.0.1
+	# Default DNS port is "53". When used with Pi-hole/AdGuard Home, set this to e.g. "5335", since "5353" is used by mDNS already.
+	#port: 53
 
 	# Control IP ranges which should be able to use this Unbound instance.
 	# The DietPi defaults permit access from official local network IP ranges only, hence requests from www are denied.
@@ -124,22 +122,16 @@ server:
 
 	# Define protocols for connections to and from Unbound.
 	# NB: Disabling IPv6 does not disable IPv6 IP resolving, which depends on the clients request.
-	do-udp: yes
-	do-tcp: yes
-	do-ip4: yes
-	do-ip6: yes
+	#do-udp: yes
+	#do-tcp: yes
+	#do-ip4: yes
+	#do-ip6: yes
 
 	# Maximum number of queries per second
 	ratelimit: 1000
 
 	# Defend against and print warning when reaching unwanted reply limit.
 	unwanted-reply-threshold: 10000
-
-	# Set EDNS reassembly buffer size to match new upstream default, as of DNS Flag Day 2020 recommendation.
-	edns-buffer-size: 1232
-
-	# Disable ECS module, matching new Unbound defaults, and mute 2 warnings: https://github.com/NLnetLabs/unbound/commit/35dbbcb, https://github.com/MichaIng/DietPi/issues/7539#issuecomment-2906900497
-	module-config: "validator iterator"
 
 	# Increase incoming and outgoing query buffer size to cover traffic peaks.
 	so-rcvbuf: 4m
@@ -153,19 +145,21 @@ server:
 	harden-short-bufsize: yes
 
 	# Privacy
-	use-caps-for-id: yes # Spoof protection by randomising capitalisation
+	# - Spoof protection by randomising capitalisation
+	use-caps-for-id: yes
 	rrset-roundrobin: yes
 	qname-minimisation: yes
 	minimal-responses: yes
 	hide-identity: yes
-	identity: "Server" # Purposefully a dummy identity name
+	# - Purposefully a dummy identity name
+	identity: "Server"
 	hide-version: yes
 
 	# Caching
 	cache-min-ttl: 300
 	cache-max-ttl: 86400
 	serve-expired: yes
-	neg-cache-size: 4M
+	neg-cache-size: 4m
 	prefetch: yes
 	prefetch-key: yes
 	msg-cache-size: 50m
@@ -204,10 +198,10 @@ _EOF_
 # - postinst
 cat << _EOF_ > "$DIR/DEBIAN/postinst" || exit 1
 #!/bin/dash -e
-if ! ip -6 r l ::/0 > /dev/null && [ -f '/etc/unbound/unbound.conf.d/dietpi.conf' ] && grep -q '^	do-ip6: yes$' /etc/unbound/unbound.conf.d/dietpi.conf
+if ! ip -6 r l ::/0 > /dev/null && [ -f '/etc/unbound/unbound.conf.d/dietpi.conf' ] && grep -q '^	#do-ip6: yes$' /etc/unbound/unbound.conf.d/dietpi.conf
 then
 	echo 'Disabling $PRETTY IPv6 usage since no IPv6 default route is assigned'
-	sed --follow-symlinks -i 's/^	do-ip6: yes$/	do-ip6: no/' /etc/unbound/unbound.conf.d/dietpi.conf
+	sed --follow-symlinks -i 's/^	#do-ip6: yes$/	do-ip6: no/' /etc/unbound/unbound.conf.d/dietpi.conf
 fi
 
 if [ -d '/run/systemd/system' ]
@@ -215,6 +209,7 @@ then
 	if getent passwd $NAME > /dev/null
 	then
 		echo 'Configuring $PRETTY service user ...'
+		[ ~$NAME = '/var/lib/$NAME' ] || systemctl stop $NAME
 		usermod -d /var/lib/$NAME -s /usr/sbin/nologin $NAME
 	else
 		echo 'Creating $PRETTY service user ...'
@@ -241,7 +236,7 @@ then
 	echo 'Configuring $PRETTY systemd service ...'
 	systemctl --no-reload unmask $NAME
 	systemctl enable $NAME
-	pgrep -x 'dietpi-software' > /dev/null || systemctl restart $NAME
+	systemctl restart $NAME
 fi
 _EOF_
 
@@ -264,7 +259,7 @@ then
 	if [ -d '/etc/systemd/system/$NAME.service.d' ]
 	then
 		echo 'Removing $PRETTY systemd service overrides ...'
-		rm -rv /etc/systemd/system/$NAME.service.d
+		rm -Rv /etc/systemd/system/$NAME.service.d
 	fi
 
 	if [ -d '/etc/$NAME' ]
@@ -277,7 +272,7 @@ then
 	if [ -d '/var/lib/$NAME' ]
 	then
 		echo 'Removing $PRETTY data dir ...'
-		rm -rv /var/lib/$NAME
+		rm -Rv /var/lib/$NAME
 	fi
 
 	if getent passwd $NAME > /dev/null
@@ -310,11 +305,11 @@ DEPS_APT_VERSIONED=${DEPS_APT_VERSIONED%,}
 [[ $G_HW_ARCH_NAME == 'armv6l' ]] && DEPS_APT_VERSIONED=$(sed 's/+rp[it][0-9]\+[^)]*)/)/g' <<< "$DEPS_APT_VERSIONED") || DEPS_APT_VERSIONED=$(sed 's/+b[0-9]\+)/)/g' <<< "$DEPS_APT_VERSIONED")
 
 # - Obtain version suffix
-G_EXEC_NOHALT=1 G_EXEC curl -sSfo package.deb "https://dietpi.com/downloads/binaries/$G_DISTRO_NAME/${NAME}_$G_HW_ARCH_NAME.deb"
+G_EXEC curl -sSfo package.deb "https://dietpi.com/downloads/binaries/$G_DISTRO_NAME/${NAME}_$G_HW_ARCH_NAME.deb"
 old_version=$(dpkg-deb -f package.deb Version)
-G_EXEC_NOHALT=1 G_EXEC rm package.deb
+G_EXEC rm package.deb
 suffix=${old_version#*-dietpi}
-[[ $old_version == "$version-"* ]] && version+="-dietpi$((suffix+1))" || version+="-dietpi1"
+[[ $old_version == "$version-dietpi"[1-9]* ]] && version+="-dietpi$((suffix+1))" || version+='-dietpi1'
 G_DIETPI-NOTIFY 2 "Old package version is:       \e[33m$old_version"
 G_DIETPI-NOTIFY 2 "Building new package version: \e[33m$version"
 
