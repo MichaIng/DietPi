@@ -593,8 +593,8 @@ _EOF_
 		# Get overlay params
 		local params=$(sed -En '/^[[:blank:]]*dtoverlay=vc4-f?kms-v3d(-pi4)?,/{s/^[^,]*//p;q}' /boot/firmware/config.txt)
 
-		# Always remove previous VC4 overlay entry
-		G_EXEC sed --follow-symlinks -Ei '/^[[:blank:]]*dtoverlay=vc4-f?kms-v3d/d' /boot/firmware/config.txt
+		# Whether to reconfigure onboard HDMI audio
+		local reconfigure_hdmi_audio=0
 
 		if [[ $INPUT_DEVICE_VALUE == 'vc4-kms-v3d' || $INPUT_DEVICE_VALUE == 'vc4-fkms-v3d' ]]
 		then
@@ -602,9 +602,16 @@ _EOF_
 			then
 				# Fake KMS supports CMA params only
 				[[ $params ]] && params=$(mawk -F, '{for(i=1; i<=NF; i++) {if($i~/^cma-*/){print $i;exit}}}' <<< "$params")
-			else
-				# Disable VC4 HDMI audio if onboard HDMI is disabled
-				[[ $params != *',noaudio'* ]] && { ! grep -q '^[[:blank:]]*dtparam=audio=on' /boot/firmware/config.txt || grep -Eq '(^|[[:blank:]])snd_bcm2835.enable_hdmi=0([[:blank:]]|$)' /boot/firmware/cmdline.txt; } && params+=',noaudio'
+
+			elif [[ $params != *',noaudio'* ]] && ! grep -Eq '^[[:blank:]]*dtoverlay=vc4-kms-v3d(-pi4)?(,|$)' /boot/firmware/config.txt
+			then
+				# Reconfigure onboard HDMI audio if snd_bcm2835 HDMI audio is currently enabled
+				if grep -q '^[[:blank:]]*dtparam=audio=on' /boot/firmware/config.txt && ! grep -Eq '(^|[[:blank:]])snd_bcm2835.enable_hdmi=0([[:blank:]]|$)' /boot/firmware/cmdline.txt
+				then
+					reconfigure_hdmi_audio=1
+				else
+					params+=',noaudio'
+				fi
 			fi
 
 			# Use additional argument for CMA size
@@ -618,11 +625,33 @@ _EOF_
 				fi
 			fi
 
-			G_CONFIG_INJECT "dtoverlay=$INPUT_DEVICE_VALUE" "dtoverlay=$INPUT_DEVICE_VALUE$params" /boot/firmware/config.txt
+			G_CONFIG_INJECT 'dtoverlay=vc4-f?kms-v3d' "dtoverlay=$INPUT_DEVICE_VALUE$params" /boot/firmware/config.txt
 
-		elif [[ $INPUT_DEVICE_VALUE != 'disable' ]]
+		elif [[ $INPUT_DEVICE_VALUE == 'disable' ]]
 		then
+			# Reconfigure onboard HDMI audio if VC4 HDMI audio is currently enabled
+			[[ $params != *',noaudio'* ]] && grep -Eq '^[[:blank:]]*dtoverlay=vc4-kms-v3d(-pi4)?(,|$)' /boot/firmware/config.txt && reconfigure_hdmi_audio=1
+
+			# Remove all KMS/DRM overlay entries
+			G_EXEC sed --follow-symlinks -Ei '/^[[:blank:]]*dtoverlay=vc4-f?kms-v3d/d' /boot/firmware/config.txt
+		else
 			Unknown_Input_Mode
+		fi
+
+		# Reconfigure onboard HDMI audio if enabled
+		(( $reconfigure_hdmi_audio )) || return 0
+		local soundcard=$(sed -n '/^[[:blank:]]*CONFIG_SOUNDCARD=/{s/^[^=]*=//p;q}' /boot/dietpi.txt)
+		if [[ $soundcard == 'rpi-bcm2835-hdmi' ]]
+		then
+			# RPi 5: Disable onboard HDMI audio, which cannot work without VC4 HDMI audio => KMS/DRM
+			if [[ $G_HW_MODEL == 5 && $INPUT_DEVICE_VALUE == 'disable' ]]
+			then
+				G_DIETPI-NOTIFY 2 'Disabling onboard HDMI audio on Raspberry Pi 5, which cannot work without KMS/DRM'
+				INPUT_DEVICE_VALUE='none' Soundcard_Main
+			else
+				G_DIETPI-NOTIFY 2 'Reconfiguring onboard HDMI audio to apply the needed switch between snd_bcm2835 and VC4 audio driver'
+				INPUT_DEVICE_VALUE=$soundcard Soundcard_Main
+			fi
 		fi
 	}
 
@@ -1865,7 +1894,7 @@ _EOF_
 			'rpi-bcm2835-'*)
 
 				# RPi 5: Enable KMS as the snd_bcm2835 driver does not work on Raspberry Pi 5. It has no 3.5mm jack, hence the only supported onboard audio is HDMI.
-				(( $G_HW_MODEL == 5 )) && INPUT_DEVICE_VALUE='vc4-kms-v3d' RPi_OpenGL_Main
+				(( $G_HW_MODEL == 5 )) && ! grep -Eq '^[[:blank:]]*dtoverlay=vc4-kms-v3d(-pi4)?(,|$)' /boot/firmware/config.txt && INPUT_DEVICE_VALUE='vc4-kms-v3d' RPi_OpenGL_Main
 
 				# Enable VC4 HDMI audio if onboard HDMI is enabled and KMS used, as the bcm2835 HDMI audio driver and KMS conflict: https://dietpi.com/forum/t/19568, https://github.com/raspberrypi/linux/issues/4651
 				if [[ $INPUT_DEVICE_VALUE != *'3.5mm' ]] && grep -Eq '^[[:blank:]]*dtoverlay=vc4-kms-v3d(-pi4)?,(noaudio|.+,noaudio)(,|$)' /boot/firmware/config.txt
