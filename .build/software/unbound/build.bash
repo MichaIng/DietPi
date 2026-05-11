@@ -46,7 +46,7 @@ G_EXEC_OUTPUT=1 G_EXEC make DESTDIR="$DIR" install
 G_DIETPI-NOTIFY 2 "Building $PRETTY DEB package"
 # shellcheck disable=SC2046
 G_EXEC rm -R $(find "$DIR" -name '*unbound-anchor*' -o -name '*unbound-host*') "$DIR/usr/"{share/man/man[13],include,lib}
-G_EXEC mkdir -p "$DIR/"{DEBIAN,etc/unbound/unbound.conf.d,share/doc/unbound/examples,lib/systemd/system}
+G_EXEC mkdir -p "$DIR/"{DEBIAN,etc/{apparmor.d,unbound/unbound.conf.d},share/doc/unbound/examples,lib/systemd/system}
 
 # - configs
 G_EXEC mv "$DIR/"{etc/unbound/unbound.conf,share/doc/unbound/examples/}
@@ -166,6 +166,56 @@ server:
 	rrset-cache-size: 100m
 _EOF_
 
+# - AppArmor profile, based on https://salsa.debian.org/dns-team/unbound/-/blob/master/debian/apparmor-profile minus some legacy stuff
+cat << '_EOF_' > "$DIR/etc/apparmor.d/usr.sbin.unbound" || exit 1
+# Author: Simon Deziel
+# vim:syntax=apparmor
+#include <tunables/global>
+
+profile unbound /usr/sbin/unbound flags=(attach_disconnected) {
+  #include <abstractions/base>
+  #include <abstractions/nameservice>
+  #include <abstractions/openssl>
+
+  # chown (chgrp) the Unix control socket
+  capability chown,
+  # chmod the Unix control socket
+  capability fowner,
+  capability fsetid,
+
+  capability net_bind_service,
+  capability setgid,
+  capability setuid,
+  capability sys_chroot,
+  capability sys_resource,
+
+  # root hints from dns-data-root
+  /usr/share/dns/root.* r,
+
+  # non-chrooted paths
+  /etc/unbound/** r,
+
+  # chrooted paths
+  # unbound can be chrooted into /etc/unbound (upstream default) with
+  #  /var/lib/unbound/ bind-mounted to /etc/unbound/var/lib/unbound/,
+  # or it can be chrooted into /var/lib/unbound/ with /etc/unbound/ copied
+  # into there (previous debian package default).
+  /{,etc/unbound/}var/lib/unbound/** r,
+  owner /{,etc/unbound/}var/lib/unbound/** rw,
+  audit deny /{,etc/unbound/}var/lib/unbound/**/unbound_control.{key,pem} rw,
+  audit deny /{,etc/unbound/}var/lib/unbound/**/unbound_server.key w,
+
+  /usr/sbin/unbound mr,
+
+  /run/systemd/notify w,
+
+  # Unix control socket
+  /run/unbound.ctl rw,
+
+  #include <local/usr.sbin.unbound>
+}
+_EOF_
+
 # - conffiles
 cat << '_EOF_' > "$DIR/DEBIAN/conffiles" || exit 1
 /etc/unbound/unbound.conf
@@ -231,6 +281,18 @@ then
 		echo 'Removing obsolete $PRETTY SysV service'
 		rm /etc/init.d/$NAME
 		update-rc.d $NAME remove
+	fi
+
+	if [ -f '/etc/resolvconf/update.d/unbound' ]
+	then
+		echo 'Removing obsolete resolvconf hook'
+		rm -v /etc/resolvconf/update.d/unbound
+	fi
+
+	if [ -L '/etc/systemd/system/unbound-resolvconf.service' ]
+	then
+		echo 'Removing obsolete unbound-resolvconf.service mask'
+		rm -v /etc/systemd/system/unbound-resolvconf.service
 	fi
 
 	echo 'Configuring $PRETTY systemd service ...'
