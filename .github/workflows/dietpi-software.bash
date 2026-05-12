@@ -129,7 +129,7 @@ Process_Software()
 			30) aSERVICES[i]='nxserver' aTCP[i]='4000';;
 			31) [[ $arch == 1 && $DISTRO == 'bookworm' ]] || aCOMMANDS[i]='kodi -v';; # Bookworm RPi repo "kodi" calls fgconsole and chvt which both fails in non-interactive container: "Couldn't get a file descriptor referring to the console."
 			32) aSERVICES[i]='ympd' aTCP[i]='1337';;
-			33) (( $emulation )) || aSERVICES[i]='airsonic' aTCP[i]='8080' aDELAY[i]=60;; # Fails in QEMU-emulated containers, probably due to missing device access
+			33) (( $emulation )) || { aSERVICES[i]='airsonic' aTCP[i]='8080' aDELAY[i]=60; (( $arch == 2 && $dist > 7 )) && aDELAY[i]=600; };; # Fails in QEMU-emulated containers, probably due to missing device access
 			34) aCOMMANDS[i]='COMPOSER_ALLOW_SUPERUSER=1 composer -n -V';;
 			35) aSERVICES[i]='lyrionmusicserver' aTCP[i]='9000';;
 			36) aSERVICES[i]='squeezelite';; # Service listens on random high UDP port
@@ -174,7 +174,7 @@ Process_Software()
 			77) aSERVICES[i]='grafana-server' aTCP[i]='3001' aDELAY[i]=30;;
 			#78) LESP
 			#79) LEMP
-			80) aSERVICES[i]='ubooquity' aTCP[i]='2038 2039'; (( $emulation )) && aDELAY[i]=30;;
+			80) aSERVICES[i]='ubooquity' aTCP[i]='2038 2039'; (( $emulation )) && aDELAY[i]=60;;
 			#81) LLSP
 			#82) LLMP
 			83) aSERVICES[i]='apache2' aTCP[i]='80';;
@@ -230,7 +230,7 @@ Process_Software()
 			130) aCOMMANDS[i]='python3 -V';;
 			131) aSERVICES[i]='blynkserver' aTCP[i]='9443'; (( $emulation )) && aDELAY[i]=120;;
 			132) aSERVICES[i]='aria2' aTCP[i]='6800';; # aTCP[i]+=' 6881-6999';; # Listens on random port
-			133) aSERVICES[i]='yacy' aTCP[i]='8090'; (( $emulation )) && aDELAY[i]=120;;
+			133) aSERVICES[i]='yacy' aTCP[i]='8090' aDELAY[i]=30; (( $arch == 2 && $dist > 7 )) && aDELAY[i]=90; (( $emulation )) && aDELAY[i]=120;;
 			134) aCOMMANDS[i]='docker compose version';;
 			135) aSERVICES[i]='icecast2' aTCP[i]='8000' aCOMMANDS[i]='darkice -h | grep '\''^DarkIce'\';; # darkice service cannot start on GitHub runner as it requires a hardware capture device, and those runners do not provide the dummy audio kernel module
 			136) aSERVICES[i]='motioneye' aTCP[i]='8765';;
@@ -277,9 +277,9 @@ Process_Software()
 			176) aSERVICES[i]='uptime-kuma' aTCP[i]='3002';;
 			177) aSERVICES[i]='forgejo' aTCP[i]='3000';;
 			178) aSERVICES[i]='jellyfin' aTCP[i]='8097';;
-			179) aSERVICES[i]='komga' aTCP[i]='2037'; (( $emulation )) && aDELAY[i]=300 || aDELAY[i]=30;;
+			179) aSERVICES[i]='komga' aTCP[i]='2037' aDELAY[i]=30; (( $arch == 2 && $dist > 7 )) && aDELAY[i]=300; (( $emulation )) && aDELAY[i]=420;;
 			180) aSERVICES[i]='bazarr' aTCP[i]='6767'; (( $emulation )) && aDELAY[i]=120 || aDELAY[i]=30;;
-			181) aSERVICES[i]='papermc' aTCP[i]='25565 25575'; (( $emulation )) && aDELAY[i]=900 || aDELAY[i]=60;;
+			181) aSERVICES[i]='papermc' aTCP[i]='25565 25575' aDELAY[i]=60; (( $emulation )) && aDELAY[i]=900; (( $arch == 2 && $dist > 7 )) && aDELAY[i]=1800;;
 			182) aSERVICES[i]='unbound' aUDP[i]='53' aTCP[i]='53'; [[ ${aSERVICES[126]} ]] && aUDP[i]='5335' aTCP[i]='5335';; # Uses port 5335 if Pi-hole or AdGuard Home is installed
 			183) aSERVICES[i]='vaultwarden' aTCP[i]='8001';;
 			184) aSERVICES[i]='tor' aTCP[i]='80 443 9051';;
