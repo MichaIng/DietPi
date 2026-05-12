@@ -5912,45 +5912,25 @@ _EOF_
 
 		if To_Install 182 unbound # Unbound
 		then
-			G_DIETPI-NOTIFY 2 'Pre-configuring Unbound to avoid port binding conflicts'
-
-			# Download base configuration if it does not exist yet
-			[[ -f '/etc/unbound/unbound.conf.d/dietpi.conf' ]] || dps_index=$software_id Download_Install 'unbound.conf' /etc/unbound/unbound.conf.d/dietpi.conf
-
-			# Toggle IPv6 preference based whether there is an IPv6 default route
-			if G_GET_NET -6 -q gateway > /dev/null
-			then
-				G_CONFIG_INJECT 'do-ip6:[[:blank:]]' '	do-ip6: yes' /etc/unbound/unbound.conf.d/dietpi.conf 'server:'
-			else
-				G_CONFIG_INJECT 'do-ip6:[[:blank:]]' '	do-ip6: no' /etc/unbound/unbound.conf.d/dietpi.conf 'server:'
-			fi
-
-			# Since IP binding might be used, start after network interfaces have been configured, not when they just start to be configured
-			G_EXEC mkdir -p /etc/systemd/system/unbound.service.d
-			G_EXEC eval "echo -e '[Unit]\nWants=network-online.target\nAfter=network-online.target' > /etc/systemd/system/unbound.service.d/dietpi.conf"
-
 			# Pi-hole + AdGuard Home part 1
-			if (( ${aSOFTWARE_INSTALL_STATE[93]} > 0 || ${aSOFTWARE_INSTALL_STATE[126]} > 0 )) && grep -q '^[[:blank:]]*port:[[:blank:]][[:blank:]]*53$' /etc/unbound/unbound.conf.d/dietpi.conf
+			if (( ${aSOFTWARE_INSTALL_STATE[93]} > 0 || ${aSOFTWARE_INSTALL_STATE[126]} > 0 )) && { ! command -v unbound-checkconf > /dev/null || [[ $(unbound-checkconf -o port) == 53 ]]; }
 			then
-				G_DIETPI-NOTIFY 2 'Configuring Unbound to work for your selected AdBlocker'
+				G_DIETPI-NOTIFY 2 'Configuring Unbound to work for Pi-hole/AdGuard Home'
 				grep '^[[:blank:]]*nameserver[[:blank:]]' /etc/resolv.conf | grep -qvE '[[:blank:]]127.0.0.1(:53)?$' || echo 'nameserver 9.9.9.9' >> /etc/resolv.conf # Failsafe
-				G_CONFIG_INJECT 'port:[[:blank:]]' '	port: 5335' /etc/unbound/unbound.conf.d/dietpi.conf 'server:'
-				G_CONFIG_INJECT 'interface:[[:blank:]]' '	interface: 127.0.0.1' /etc/unbound/unbound.conf.d/dietpi.conf 'server:'
+				G_EXEC mkdir -p /etc/unbound/unbound.conf.d
+				G_EXEC eval 'echo -e '\''server:\n\tport: 5335'\'' > /etc/unbound/unbound.conf.d/dietpi-port.conf'
+				[[ -f '/lib/systemd/system/unbound.service' ]] && G_EXEC systemctl restart unbound # restart since service dropped privileges already, hence cannot claim 4 MiB SO_RCVBUF/SO_SNDBUF on changed port => new socket
 			fi
 
-			# Reinstall: Restart to apply possible config changes
-			[[ -f '/lib/systemd/system/unbound.service' ]] && G_EXEC systemctl restart unbound
+			# Plex Media Server: Fix secure remote access: https://dietpi.com/forum/t/cant-connect-to-plex-directly-due-to-unbound/5199
+			if (( ${aSOFTWARE_INSTALL_STATE[42]} > 0 )) && [[ ! -f '/etc/unbound/unbound.conf.d/dietpi-plex.conf' ]]
+			then
+				G_EXEC mkdir -p /etc/unbound/unbound.conf.d
+				G_EXEC eval 'echo -e '\''server:\n\tprivate-domain: "plex.direct"'\'' > /etc/unbound/unbound.conf.d/dietpi-plex.conf'
+				[[ -f '/lib/systemd/system/unbound.service' ]] && G_EXEC systemctl restart unbound # restart since service dropped privileges already, hence cannot claim 4 MiB SO_RCVBUF/SO_SNDBUF on changed port => new socket
+			fi
 
-			# Disable and mask unbound-resolvconf.service: https://github.com/MichaIng/DietPi/issues/5133
-			[[ -f '/lib/systemd/system/unbound-resolvconf.service' ]] && G_EXEC systemctl --no-reload disable --now unbound-resolvconf
-			G_EXEC systemctl --no-reload mask unbound-resolvconf
-
-			G_AGI unbound dns-root-data
-			Remove_SysV unbound
-			G_EXEC systemctl enable --now unbound # Failsafe
-
-			# Prevent resolvconf from disabling Unbound's exclusive recursive resolving or DoT by adding upstream resolvers of the host to Unbound's forward zone: https://salsa.debian.org/dns-team/unbound/-/blob/master/debian/resolvconf-forwards
-			[[ -f '/etc/resolvconf/update.d/unbound' ]] && G_EXEC chmod -x /etc/resolvconf/update.d/unbound
+			G_AGI unbound
 
 			# Pi-hole part 2
 			if (( ${aSOFTWARE_INSTALL_STATE[93]} == 2 ))
@@ -5986,9 +5966,6 @@ _EOF_
 					systemctl -q is-active adguardhome && G_EXEC systemctl restart adguardhome
 				fi
 			fi
-
-			# Plex Media Server: Fix secure remote access: https://dietpi.com/forum/t/cant-connect-to-plex-directly-due-to-unbound/5199
-			(( ${aSOFTWARE_INSTALL_STATE[42]} > 0 )) && echo -e 'server:\n\tprivate-domain: "plex.direct"' > /etc/unbound/unbound.conf.d/dietpi-plex.conf
 		fi
 
 		if To_Install 93 pihole-FTL # Pi-hole
@@ -6001,13 +5978,12 @@ _EOF_
 			Min_Total_Memory 1024
 
 			# Unbound: Switch port to 5335 if it was installed before, else it got just configured within its install step above
-			if (( ${aSOFTWARE_INSTALL_STATE[182]} == 2 )) && grep -q '^[[:blank:]]*port:[[:blank:]][[:blank:]]*53$' /etc/unbound/unbound.conf.d/dietpi.conf
+			if [[ ${aSOFTWARE_INSTALL_STATE[182]} == 2 && $(unbound-checkconf -o port) == 53 ]]
 			then
 				G_DIETPI-NOTIFY 2 'Configuring Unbound to work for Pi-hole'
 				grep '^[[:blank:]]*nameserver[[:blank:]]' /etc/resolv.conf | grep -qvE '[[:blank:]]127.0.0.1(:53)?$' || echo 'nameserver 9.9.9.9' >> /etc/resolv.conf # Failsafe
-				G_CONFIG_INJECT 'port:[[:blank:]]' '	port: 5335' /etc/unbound/unbound.conf.d/dietpi.conf
-				G_CONFIG_INJECT 'interface:[[:blank:]]' '	interface: 127.0.0.1' /etc/unbound/unbound.conf.d/dietpi.conf
-				G_EXEC systemctl restart unbound
+				G_EXEC eval 'echo -e '\''server:\n\tport: 5335'\'' > /etc/unbound/unbound.conf.d/dietpi-port.conf'
+				G_EXEC systemctl restart unbound # restart since service dropped privileges already, hence cannot claim 4 MiB SO_RCVBUF/SO_SNDBUF on changed port => new socket
 			fi
 
 			# Install
@@ -6102,13 +6078,12 @@ _EOF_
 			fi
 
 			# Unbound: Switch port to 5335 if it was installed before, else it got just configured within its install step above
-			if (( ${aSOFTWARE_INSTALL_STATE[182]} == 2 )) && grep -q '^[[:blank:]]*port:[[:blank:]][[:blank:]]*53$' /etc/unbound/unbound.conf.d/dietpi.conf
+			if [[ ${aSOFTWARE_INSTALL_STATE[182]} == 2 && $(unbound-checkconf -o port) == 53 ]]
 			then
 				G_DIETPI-NOTIFY 2 'Configuring Unbound to work for AdGuard Home'
 				grep '^[[:blank:]]*nameserver[[:blank:]]' /etc/resolv.conf | grep -qvE '[[:blank:]]127.0.0.1(:53)?$' || echo 'nameserver 9.9.9.9' >> /etc/resolv.conf # Failsafe
-				G_CONFIG_INJECT 'port:[[:blank:]]' '	port: 5335' /etc/unbound/unbound.conf.d/dietpi.conf
-				G_CONFIG_INJECT 'interface:[[:blank:]]' '	interface: 127.0.0.1' /etc/unbound/unbound.conf.d/dietpi.conf
-				G_EXEC systemctl restart unbound
+				G_EXEC eval 'echo -e '\''server:\n\tport: 5335'\'' > /etc/unbound/unbound.conf.d/dietpi-port.conf'
+				G_EXEC systemctl restart unbound # restart since service dropped privileges already, hence cannot claim 4 MiB SO_RCVBUF/SO_SNDBUF on changed port => new socket
 			fi
 
 			# User
@@ -6119,7 +6094,7 @@ _EOF_
 			then
 				dps_index=$software_id Download_Install 'AdGuardHome.yaml' /mnt/dietpi_userdata/adguardhome/AdGuardHome.yaml
 				# shellcheck disable=SC2016
-				G_CONFIG_INJECT 'password:[[:blank:]]' "  password: $(htpasswd -bnBC 10 '' "$GLOBAL_PW" | tr -d ':\n' | sed 's/\$2y/\$2a/')" /mnt/dietpi_userdata/adguardhome/AdGuardHome.yaml
+				GCI_PASSWORD=1 G_CONFIG_INJECT 'password:[[:blank:]]' "  password: $(htpasswd -bnBC 10 '' "$GLOBAL_PW" | tr -d ':\n' | sed 's/\$2y/\$2a/')" /mnt/dietpi_userdata/adguardhome/AdGuardHome.yaml
 			fi
 
 			# Unbound: Configure AdGuard Home to use it
@@ -13386,12 +13361,14 @@ _EOF_
 				systemctl -q is-active adguardhome && G_EXEC_NOEXIT=1 G_EXEC systemctl restart adguardhome
 			fi
 
-			# Failsafe: Add Quad9 to system resolver if only Unbound was used
-			if [[ -f '/etc/unbound/unbound.conf.d/dietpi.conf' ]] && grep -Eq '^[[:blank:]]*port:[[:blank:]]+53$' /etc/unbound/unbound.conf.d/dietpi.conf
+			# Failsafe: Add Quad9 to system resolver if only Unbound is used
+			if [[ $(unbound-checkconf -o port) == 53 ]]
 			then
 				grep '^[[:blank:]]*nameserver[[:blank:]]' /etc/resolv.conf | grep -qvE '[[:blank:]]127.0.0.1(:53)?$' || echo 'nameserver 9.9.9.9' >> /etc/resolv.conf # Failsafe
 			fi
 
+			[[ -f '/etc/unbound/unbound.conf.d/dietpi-port.conf' ]] && G_EXEC rm /etc/unbound/unbound.conf.d/dietpi-port.conf
+			[[ -f '/etc/unbound/unbound.conf.d/dietpi-plex.conf' ]] && G_EXEC rm /etc/unbound/unbound.conf.d/dietpi-plex.conf
 			G_AGP unbound
 			dpkg-query -s 'dns-root-data' &> /dev/null && G_EXEC apt-mark auto dns-root-data
 			[[ -d '/etc/unbound' ]] && G_EXEC rm -R /etc/unbound
@@ -13725,13 +13702,13 @@ _EOF_
 			[[ -d '/etc/nginx/sites-dietpi' ]] && G_EXEC rm -f /etc/nginx/sites-dietpi/dietpi-pihole*
 
 			# Unbound: Switch port to 53 if it is still installed
-			if (( ${aSOFTWARE_INSTALL_STATE[182]} == 2 )) && grep -Eq '^[[:blank:]]*port:[[:blank:]]+5335$' /etc/unbound/unbound.conf.d/dietpi.conf
+			if [[ ${aSOFTWARE_INSTALL_STATE[182]} == 2 && ( -f '/etc/unbound/unbound.conf.d/dietpi-port.conf' || $(unbound-checkconf -o port) == 5335 ) ]]
 			then
 				G_DIETPI-NOTIFY 2 'Reconfiguring Unbound to work on its own'
-				G_CONFIG_INJECT 'port:[[:blank:]]' '	port: 53' /etc/unbound/unbound.conf.d/dietpi.conf
-				G_CONFIG_INJECT 'interface:[[:blank:]]' '	interface: 0.0.0.0' /etc/unbound/unbound.conf.d/dietpi.conf
+				[[ -f '/etc/unbound/unbound.conf.d/dietpi-port.conf' ]] && G_EXEC rm /etc/unbound/unbound.conf.d/dietpi-port.conf
+				[[ $(unbound-checkconf -o port) == 5335 ]] && G_CONFIG_INJECT 'port:[[:blank:]]' '	port: 53' /etc/unbound/unbound.conf.d/dietpi.conf
 				grep -E '^[[:blank:]]*nameserver[[:blank:]]+127.0.0.1:5335$' /etc/resolv.conf && sed --follow-symlinks -Ei '/^[[:blank:]]*nameserver[[:blank:]]+127.0.0.1:5335$/c\nameserver 127.0.0.1' /etc/resolv.conf # Failsafe
-				G_EXEC_NOEXIT=1 G_EXEC systemctl restart unbound
+				G_EXEC_NOEXIT=1 G_EXEC systemctl restart unbound # restart since service dropped privileges already, hence cannot bind to port 53 via reload
 			else
 				grep '^[[:blank:]]*nameserver[[:blank:]]' /etc/resolv.conf | grep -qvE '[[:blank:]]127.0.0.1(:53)?$' || echo 'nameserver 9.9.9.9' >> /etc/resolv.conf # Failsafe
 			fi
@@ -13745,13 +13722,13 @@ _EOF_
 			[[ -d '/mnt/dietpi_userdata/adguardhome' ]] && G_EXEC rm -R /mnt/dietpi_userdata/adguardhome
 
 			# Unbound: Switch port to 53 if it is still installed
-			if (( ${aSOFTWARE_INSTALL_STATE[182]} == 2 )) && grep -Eq '^[[:blank:]]*port:[[:blank:]]+5335$' /etc/unbound/unbound.conf.d/dietpi.conf
+			if [[ ${aSOFTWARE_INSTALL_STATE[182]} == 2 && ( -f '/etc/unbound/unbound.conf.d/dietpi-port.conf' || $(unbound-checkconf -o port) == 5335 ) ]]
 			then
 				G_DIETPI-NOTIFY 2 'Reconfiguring Unbound to work on its own'
-				G_CONFIG_INJECT 'port:[[:blank:]]' '	port: 53' /etc/unbound/unbound.conf.d/dietpi.conf
-				G_CONFIG_INJECT 'interface:[[:blank:]]' '	interface: 0.0.0.0' /etc/unbound/unbound.conf.d/dietpi.conf
+				[[ -f '/etc/unbound/unbound.conf.d/dietpi-port.conf' ]] && G_EXEC rm /etc/unbound/unbound.conf.d/dietpi-port.conf
+				[[ $(unbound-checkconf -o port) == 5335 ]] && G_CONFIG_INJECT 'port:[[:blank:]]' '	port: 53' /etc/unbound/unbound.conf.d/dietpi.conf
 				grep -E '^[[:blank:]]*nameserver[[:blank:]]+127.0.0.1:5335$' /etc/resolv.conf && sed --follow-symlinks -Ei '/^[[:blank:]]*nameserver[[:blank:]]+127.0.0.1:5335$/c\nameserver 127.0.0.1' /etc/resolv.conf # Failsafe
-				G_EXEC_NOEXIT=1 G_EXEC systemctl restart unbound
+				G_EXEC_NOEXIT=1 G_EXEC systemctl restart unbound # restart since service dropped privileges already, hence cannot bind to port 53 via reload
 			else
 				grep '^[[:blank:]]*nameserver[[:blank:]]' /etc/resolv.conf | grep -qvE '[[:blank:]]127.0.0.1(:53)?$' || echo 'nameserver 9.9.9.9' >> /etc/resolv.conf # Failsafe
 			fi
