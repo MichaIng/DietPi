@@ -3073,8 +3073,12 @@ unix_socket_directories = '/run/postgresql'" > "$i/00dietpi.conf"
 					esac
 				fi
 
+				# Limit Java version for specific applications. Multiple Java versions can be installed concurrently, and we use explicit executable paths in systemd units, hence this won't affect applications already installed, just those which are to be installed now.
+				(( ${aSOFTWARE_INSTALL_STATE[131]} == 1 && $JAVA_VERSION > 21 )) && JAVA_VERSION=21 # Blynk Server
+				(( ${aSOFTWARE_INSTALL_STATE[206]} == 1 && $JAVA_VERSION > 21 )) && JAVA_VERSION=21 # openHAB
+
 				G_AGI "openjdk-$JAVA_VERSION-jre-headless"
-				JAVA_PATH="/usr/lib/jvm/java-$JAVA_VERSION-openjdk-$(dpkg --print-architecture)/bin/java"
+				local JAVA_PATH="/usr/lib/jvm/java-$JAVA_VERSION-openjdk-$(dpkg --print-architecture)/bin/java"
 			else
 				# APT key: https://adoptium.net/installation/linux
 				G_EXEC mkdir -p /etc/apt/keyrings
@@ -3093,15 +3097,24 @@ _EOF_"
 				# Allow Debian's OpenJDK to be autopurged
 				G_EXEC apt-mark auto 'openjdk-*-jre-headless'
 
+				# Limit Java version for specific applications. Multiple Java versions can be installed concurrently, and we use explicit executable paths in systemd units, hence this won't affect applications already installed, just those which are to be installed now.
+				(( ${aSOFTWARE_INSTALL_STATE[131]} == 1 && $JAVA_VERSION > 21 )) && JAVA_VERSION=21 # Blynk Server
+				(( ${aSOFTWARE_INSTALL_STATE[206]} == 1 && $JAVA_VERSION > 21 )) && JAVA_VERSION=21 # openHAB
+
 				G_AGI "temurin-$JAVA_VERSION-jre"
-				JAVA_PATH="/usr/lib/jvm/temurin-$JAVA_VERSION-jre-$(dpkg --print-architecture)/bin/java"
+				local JAVA_PATH="/usr/lib/jvm/temurin-$JAVA_VERSION-jre-$(dpkg --print-architecture)/bin/java"
 			fi
 
 			# Define some default max heap size here
 			local JAVA_MAX_HEAP_SIZE=$(( $RAM_PHYS / 5 ))
 			(( $JAVA_MAX_HEAP_SIZE < 200 )) && JAVA_MAX_HEAP_SIZE=200
-			# - On 32-bit systems the heap size cannot be above 3 GiB
-			(( $G_HW_ARCH < 3 && $JAVA_MAX_HEAP_SIZE > 3072 )) && JAVA_MAX_HEAP_SIZE=3072
+			# - On 32-bit systems the heap size cannot be above 3 GiB, and assure it fits below 4 GiB with HeapBaseMinAddress
+			local JAVA_HEAP_BASE_ADDR=0
+			if (( $G_HW_ARCH < 3 ))
+			then
+				(( $JAVA_MAX_HEAP_SIZE > 3072 )) && JAVA_MAX_HEAP_SIZE=3072
+				(( $JAVA_MAX_HEAP_SIZE > 2048 )) && JAVA_HEAP_BASE_ADDR=$(( 4095 - $JAVA_MAX_HEAP_SIZE ))
+			fi
 		fi
 
 		if To_Install 8 # Java JDK
@@ -6155,7 +6168,7 @@ _EOF_
 			Create_User -g dietpi -G audio -d /mnt/dietpi_userdata/airsonic airsonic
 
 			# Service
-			cat << _EOF_ > /etc/systemd/system/airsonic.service
+			cat << _EOF_ > /etc/systemd/system/airsonic.service || exit 1
 [Unit]
 Description=Airsonic-Advanced (DietPi)
 Wants=network-online.target
@@ -6171,6 +6184,8 @@ SuccessExitStatus=143
 [Install]
 WantedBy=multi-user.target
 _EOF_
+			(( $JAVA_HEAP_BASE_ADDR )) && G_EXEC sed --follow-symlinks -i "/^ExecStart=/s/-Xmx/-XX:HeapBaseMinAddress=${JAVA_HEAP_BASE_ADDR}m -Xmx/" /etc/systemd/system/airsonic.service
+
 			# Enable FFmpeg transcode
 			G_EXEC mkdir -p /mnt/dietpi_userdata/airsonic/transcode
 			[[ -f '/mnt/dietpi_userdata/airsonic/transcode/ffmpeg' ]] || G_EXEC ln -sf "$(command -v ffmpeg)" /mnt/dietpi_userdata/airsonic/transcode
@@ -6833,7 +6848,7 @@ _EOF_
 			Create_User -d /mnt/dietpi_userdata/blynk blynk
 
 			# Service
-			cat << _EOF_ > /etc/systemd/system/blynkserver.service
+			cat << _EOF_ > /etc/systemd/system/blynkserver.service || exit 1
 [Unit]
 Description=Blynk Server (DietPi)
 Wants=network-online.target
@@ -6853,6 +6868,8 @@ PrivateTmp=true
 [Install]
 WantedBy=multi-user.target
 _EOF_
+			(( $JAVA_HEAP_BASE_ADDR )) && G_EXEC sed --follow-symlinks -i "/^ExecStart=/s/-Xmx/-XX:HeapBaseMinAddress=${JAVA_HEAP_BASE_ADDR}m -Xmx/" /etc/systemd/system/blynkserver.service
+
 			# Permissions
 			G_EXEC chown -R blynk:blynk /mnt/dietpi_userdata/blynk
 		fi
@@ -7448,7 +7465,7 @@ _EOF_'
 
 			# Service
 			G_DIETPI-NOTIFY 2 "Generating systemd service to start ${aSOFTWARE_NAME[$software_id]} on boot"
-			cat << _EOF_ > /etc/systemd/system/ubooquity.service
+			cat << _EOF_ > /etc/systemd/system/ubooquity.service || exit 1
 [Unit]
 Description=Ubooquity (DietPi)
 Wants=network-online.target
@@ -7465,6 +7482,8 @@ SuccessExitStatus=143
 [Install]
 WantedBy=multi-user.target
 _EOF_
+			(( $JAVA_HEAP_BASE_ADDR )) && G_EXEC sed --follow-symlinks -i "/^ExecStart=/s/-Xmx/-XX:HeapBaseMinAddress=${JAVA_HEAP_BASE_ADDR}m -Xmx/" /etc/systemd/system/ubooquity.service
+
 			# Permissions
 			G_EXEC chmod +x /mnt/dietpi_userdata/ubooquity/Ubooquity.jar
 			G_EXEC chown -R ubooquity /mnt/dietpi_userdata/ubooquity
@@ -7501,7 +7520,7 @@ server:
   port: 2037
 _EOF_
 			# Service
-			cat << _EOF_ > /etc/systemd/system/komga.service
+			cat << _EOF_ > /etc/systemd/system/komga.service || exit 1
 [Unit]
 Description=Komga (DietPi)
 Wants=network-online.target
@@ -7517,6 +7536,8 @@ SuccessExitStatus=143
 [Install]
 WantedBy=multi-user.target
 _EOF_
+			(( $JAVA_HEAP_BASE_ADDR )) && G_EXEC sed --follow-symlinks -i "/^ExecStart=/s/-Xmx/-XX:HeapBaseMinAddress=${JAVA_HEAP_BASE_ADDR}m -Xmx/" /etc/systemd/system/komga.service
+
 			# Permissions
 			G_EXEC chmod +x /mnt/dietpi_userdata/komga/komga.jar
 			G_EXEC chown -R komga /mnt/dietpi_userdata/komga
@@ -11400,6 +11421,8 @@ SuccessExitStatus=143
 [Install]
 WantedBy=multi-user.target
 _EOF_
+			(( $JAVA_HEAP_BASE_ADDR )) && G_EXEC sed --follow-symlinks -i "/^ExecStart=/s/-Xmx/-XX:HeapBaseMinAddress=${JAVA_HEAP_BASE_ADDR}m -Xmx/" /etc/systemd/system/papermc.service
+
 			# Config
 			if [[ -f '/mnt/dietpi_userdata/papermc/plugins/Geyser-Spigot.jar' ]]
 			then
