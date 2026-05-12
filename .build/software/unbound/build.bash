@@ -348,6 +348,16 @@ then
 		echo 'Removing $PRETTY service group ...'
 		groupdel $NAME
 	fi
+
+	if [ -d '/etc/apparmor.d' ]
+	then
+		echo 'Removing Unbound AppArmor profile'
+		rm -fv /etc/apparmor.d/disable/usr.sbin.unbound /etc/apparmor.d/force-complain/usr.sbin.unbound /etc/apparmor.d/local/usr.sbin.unbound /var/cache/apparmor/*/usr.sbin.unbound
+		[ ! -d '/etc/apparmor.d/disable' ] || rmdir --ignore-fail-on-non-empty -v /etc/apparmor.d/disable
+		[ ! -d '/etc/apparmor.d/force-complain' ] || rmdir --ignore-fail-on-non-empty -v /etc/apparmor.d/force-complain
+		[ ! -d '/etc/apparmor.d/local' ] || rmdir --ignore-fail-on-non-empty -v /etc/apparmor.d/local
+		rmdir --ignore-fail-on-non-empty -v /etc/apparmor.d
+	fi
 fi
 _EOF_
 
