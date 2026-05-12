@@ -35,7 +35,7 @@ G_EXEC tar xf "$version.tar.gz"
 G_EXEC rm "$version.tar.gz"
 G_EXEC cd "$NAME-$version"
 version=${version#release-}
-CFLAGS='-g0 -O3' G_EXEC_OUTPUT=1 G_EXEC ./configure --enable-checking --prefix='/usr' --sysconfdir='/etc' --localstatedir='/var' --runstatedir='/run' --without-{pyunbound,pythonmodule} --enable-{systemd,subnet,cachedb,dnstap,tfo-client,tfo-server} --with-{libhiredis,libnghttp2,chroot-dir='',dnstap-socket-path='/run/dnstap.sock',libevent,pthreads,rootkey-file='/usr/share/dns/root.key'} --disable-rpath
+CFLAGS='-g0 -O3' G_EXEC_OUTPUT=1 G_EXEC ./configure --enable-checking --prefix='/usr' --sysconfdir='/etc' --localstatedir='/var' --runstatedir='/run' --without-{pyunbound,pythonmodule} --enable-{systemd,subnet,cachedb,dnstap,tfo-client,tfo-server} --with-{libhiredis,libnghttp2,chroot-dir='',dnstap-socket-path='/run/dnstap.sock',libevent,pthreads,rootkey-file="/var/lib/$NAME/root.key"} --disable-rpath
 G_EXEC_OUTPUT=1 G_EXEC make
 G_EXEC strip --remove-section=.comment --remove-section=.note "$NAME"{,-checkconf,-control}
 DIR="/tmp/${NAME}_$G_HW_ARCH_NAME"
@@ -305,7 +305,7 @@ _EOF_
 # - prerm
 cat << _EOF_ > "$DIR/DEBIAN/prerm" || exit 1
 #!/bin/dash -e
-if [ "$1" = 'remove' ] && [ -d '/run/systemd/system' ] && [ -f '/lib/systemd/system/$NAME.service' ]
+if [ "\$1" = 'remove' ] && [ -d '/run/systemd/system' ] && [ -f '/lib/systemd/system/$NAME.service' ]
 then
 	echo 'Deconfiguring $PRETTY systemd service ...'
 	systemctl --no-reload unmask $NAME
@@ -316,7 +316,7 @@ _EOF_
 # - postrm
 cat << _EOF_ > "$DIR/DEBIAN/postrm" || exit 1
 #!/bin/dash -e
-if [ "$1" = 'purge' ]
+if [ "\$1" = 'purge' ]
 then
 	if [ -d '/etc/systemd/system/$NAME.service.d' ]
 	then
