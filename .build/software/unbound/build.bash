@@ -279,7 +279,7 @@ then
 	if [ -f '/etc/init.d/$NAME' ]
 	then
 		echo 'Removing obsolete $PRETTY SysV service'
-		rm /etc/init.d/$NAME
+		rm -v /etc/init.d/$NAME
 		update-rc.d $NAME remove
 	fi
 
@@ -293,6 +293,12 @@ then
 	then
 		echo 'Removing obsolete unbound-resolvconf.service mask'
 		rm -v /etc/systemd/system/unbound-resolvconf.service
+	fi
+
+	if [ -d '/etc/systemd/system/unbound.service.wants' ]
+	then
+		rm -fv /etc/systemd/system/unbound.service.wants/unbound-resolvconf.service
+		rmdir --ignore-fail-on-non-empty -v /etc/systemd/system/unbound.service.wants
 	fi
 
 	echo 'Configuring $PRETTY systemd service ...'
