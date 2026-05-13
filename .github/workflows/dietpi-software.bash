@@ -129,7 +129,7 @@ Process_Software()
 			30) aSERVICES[i]='nxserver' aTCP[i]='4000';;
 			31) [[ $arch == 1 && $DISTRO == 'bookworm' ]] || aCOMMANDS[i]='kodi -v';; # Bookworm RPi repo "kodi" calls fgconsole and chvt which both fails in non-interactive container: "Couldn't get a file descriptor referring to the console."
 			32) aSERVICES[i]='ympd' aTCP[i]='1337';;
-			33) (( $emulation )) || aSERVICES[i]='airsonic' aTCP[i]='8080' aDELAY[i]=60;; # Fails in QEMU-emulated containers, probably due to missing device access
+			33) (( $emulation )) || { aSERVICES[i]='airsonic' aTCP[i]='8080' aDELAY[i]=60; (( $arch == 2 && $dist > 7 )) && aDELAY[i]=600; };; # Fails in QEMU-emulated containers, probably due to missing device access
 			34) aCOMMANDS[i]='COMPOSER_ALLOW_SUPERUSER=1 composer -n -V';;
 			35) aSERVICES[i]='lyrionmusicserver' aTCP[i]='9000';;
 			36) aSERVICES[i]='squeezelite';; # Service listens on random high UDP port
@@ -174,7 +174,7 @@ Process_Software()
 			77) aSERVICES[i]='grafana-server' aTCP[i]='3001' aDELAY[i]=30;;
 			#78) LESP
 			#79) LEMP
-			80) aSERVICES[i]='ubooquity' aTCP[i]='2038 2039'; (( $emulation )) && aDELAY[i]=30;;
+			80) aSERVICES[i]='ubooquity' aTCP[i]='2038 2039'; (( $emulation )) && aDELAY[i]=60;;
 			#81) LLSP
 			#82) LLMP
 			83) aSERVICES[i]='apache2' aTCP[i]='80';;
@@ -223,14 +223,14 @@ Process_Software()
 			123) aSERVICES[i]='mosquitto' aTCP[i]='1883';;
 			124) aSERVICES[i]='networkaudiod' aTCP[i]='43210' aUDP[i]='43210';;
 			125) aSERVICES[i]='synapse' aTCP[i]='8008';;
-			126) aSERVICES[i]='adguardhome' aUDP[i]='53' aTCP[i]='8083'; [[ ${aSERVICES[182]} ]] && aUDP[i]+=' 5335';; # Unbound uses port 5335 if AdGuard Home is installed
+			126) aSERVICES[i]='adguardhome' aUDP[i]='53' aTCP[i]='8083'; [[ ${aSERVICES[182]} ]] && aUDP[182]='5335' aTCP[182]='5335';; # Unbound uses port 5335 if AdGuard Home is installed
 			127) aSERVICES[i]='birdnet' aTCP[i]='8127';;
 			128) aSERVICES[i]='mpd' aTCP[i]='6600';;
 			#129) O!MPD
 			130) aCOMMANDS[i]='python3 -V';;
 			131) aSERVICES[i]='blynkserver' aTCP[i]='9443'; (( $emulation )) && aDELAY[i]=120;;
 			132) aSERVICES[i]='aria2' aTCP[i]='6800';; # aTCP[i]+=' 6881-6999';; # Listens on random port
-			133) aSERVICES[i]='yacy' aTCP[i]='8090'; (( $emulation )) && aDELAY[i]=120;;
+			133) aSERVICES[i]='yacy' aTCP[i]='8090' aDELAY[i]=30; (( $arch == 2 && $dist > 7 )) && aDELAY[i]=90; (( $emulation )) && aDELAY[i]=120;;
 			134) aCOMMANDS[i]='docker compose version';;
 			135) aSERVICES[i]='icecast2' aTCP[i]='8000' aCOMMANDS[i]='darkice -h | grep '\''^DarkIce'\';; # darkice service cannot start on GitHub runner as it requires a hardware capture device, and those runners do not provide the dummy audio kernel module
 			136) aSERVICES[i]='motioneye' aTCP[i]='8765';;
@@ -277,10 +277,10 @@ Process_Software()
 			176) aSERVICES[i]='uptime-kuma' aTCP[i]='3002';;
 			177) aSERVICES[i]='forgejo' aTCP[i]='3000';;
 			178) aSERVICES[i]='jellyfin' aTCP[i]='8097';;
-			179) aSERVICES[i]='komga' aTCP[i]='2037'; (( $emulation )) && aDELAY[i]=300 || aDELAY[i]=30;;
+			179) aSERVICES[i]='komga' aTCP[i]='2037' aDELAY[i]=30; (( $arch == 2 && $dist > 7 )) && aDELAY[i]=300; (( $emulation )) && aDELAY[i]=420;;
 			180) aSERVICES[i]='bazarr' aTCP[i]='6767'; (( $emulation )) && aDELAY[i]=120 || aDELAY[i]=30;;
-			181) aSERVICES[i]='papermc' aTCP[i]='25565 25575'; (( $emulation )) && aDELAY[i]=900 || aDELAY[i]=60;;
-			182) aSERVICES[i]='unbound' aUDP[i]='53'; [[ ${aSERVICES[126]} ]] && aUDP[i]+=' 5335';; # Uses port 5335 if Pi-hole or AdGuard Home is installed, but those do listen on port 53 instead
+			181) aSERVICES[i]='papermc' aTCP[i]='25565 25575' aDELAY[i]=60; (( $emulation )) && aDELAY[i]=900; (( $arch == 2 && $dist > 7 )) && aDELAY[i]=1800;;
+			182) aSERVICES[i]='unbound' aUDP[i]='53' aTCP[i]='53'; [[ ${aSERVICES[126]} ]] && aUDP[i]='5335' aTCP[i]='5335';; # Uses port 5335 if Pi-hole or AdGuard Home is installed
 			183) aSERVICES[i]='vaultwarden' aTCP[i]='8001';;
 			184) aSERVICES[i]='tor' aTCP[i]='80 443 9051';;
 			185) aTCP[i]='9002 9442' SYSCALLS+=' add_key keyctl bpf';;
@@ -372,7 +372,12 @@ apackages=('xz-utils' 'parted' 'fdisk' 'systemd-container')
 G_AG_CHECK_INSTALL_PREREQ "${apackages[@]}"
 
 # Register QEMU binfmt configs
-(( $emulation )) && G_EXEC systemctl restart systemd-binfmt
+if (( $emulation ))
+then
+	# Add credentials flag to allow setuid/setgid flags to function, e.g. used by Koel to add its crontab
+	G_EXEC sed --follow-symlinks -i '1s|$|C|' /usr/lib/binfmt.d/qemu-*.conf
+	G_EXEC systemctl restart systemd-binfmt
+fi
 
 ##########################################
 # Prepare container
@@ -499,11 +504,12 @@ then
 		for i in ${aSERVICES[@]}
 		do
 			G_EXEC mkdir "rootfs/etc/systemd/system/$i.service.d"
-			G_EXEC eval "echo -e '[Service]\nPrivateUsers=0\nProtectSystem=0\nProtectHome=0\nPrivateTmp=0\nPrivateDevices=0\nProtectKernelModules=0\nProtectControlGroups=0\nProtectKernelTunables=0\nProtectKernelLogs=0\nReadWritePaths=' > 'rootfs/etc/systemd/system/$i.service.d/dietpi-container.conf'"
+			G_EXEC eval "echo -e '[Service]\nPrivateUsers=0\nProtectSystem=0\nProtectHome=0\nPrivateTmp=0\nPrivateDevices=0\nProtectKernelModules=0\nProtectControlGroups=0\nProtectKernelTunables=0\nProtectKernelLogs=0\nReadWritePaths=\nProtectProc=default\nProcSubset=all\nNoExecPaths=\nExecPaths=\nInaccessiblePaths=' > 'rootfs/etc/systemd/system/$i.service.d/dietpi-container.conf'"
 		done
 
 		# /dev/console == /dev/pts/0 seen as "Inappropriate ioctl for device" leading to failing console-getty.service and StandardOutput=tty
-		G_EXEC eval 'echo -e '\''#!/bin/dash\nexec /boot/dietpi/dietpi-login > /dev/console 2>&1'\'' > rootfs/var/lib/dietpi/postboot.d/dietpi-login'
+		# - Define HOME, as it is not set in systemd unit, and needed for go to obtain a default GOPATH: "go: module cache not found: neither GOMODCACHE nor GOPATH is set"
+		G_EXEC eval 'echo -e '\''#!/bin/dash\nHOME=/root exec /boot/dietpi/dietpi-login > /dev/console 2>&1'\'' > rootfs/var/lib/dietpi/postboot.d/dietpi-login'
 		G_EXEC sed --follow-symlinks -i '/^StandardOutput=/c\StandardOutput=journal+console' rootfs/etc/systemd/system/dietpi-{first,post}boot.service
 	else
 		# PrivateUsers causes "Failed to set up user namespacing"

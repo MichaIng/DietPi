@@ -236,7 +236,7 @@ aREPLACE[$software_id]='version='\''$release'\''; '
 # Forgejo
 software_id=177
 aURL[$software_id]='https://codeberg.org/api/v1/repos/forgejo/forgejo/releases/latest'
-aCHECK[$software_id]='echo "$response" | grep -Po "\"browser_download_url\": *\"\K[^\"]*-linux-$arch\.xz(?=\")" | head -1'
+aCHECK[$software_id]='echo "$response" | grep -Po "\"browser_download_url\": *\"\K[^\"]*-linux-$arch\.xz(?=\")"'
 aARCH[$software_id]='arm-6 arm64 amd64'
 aARCH_CHECK[$software_id]='arm-7 riscv64'
 aREGEX[$software_id]='https://codeberg.org/forgejo/forgejo/releases/download/.*/forgejo-.*-linux-\$arch.xz'
@@ -249,7 +249,12 @@ aREGEX[$software_id]='https://github.com/gotson/komga/releases/download/.*/komga
 # PaperMC
 software_id=181
 aCHECK[$software_id]='url='\''https://fill.papermc.io/v3/projects/paper'\''; version=$(curl -sSf "$url"); version=${version#*:\[\"} version=${version%%\"*}; build=$(curl -sSf "$url/versions/$version"); build=${build##*\":\[} build=${build%%,*}; url=$(curl -sSf "$url/versions/$version/builds/$build"); url=${url##*\"url\":\"} url=${url%%\"*}; echo "$url"'
-aREGEX[$software_id]='https://fill-data.papermc.io/v1/objects/.*/paper-.*.jar'
+aREGEX[$software_id]='https://fill-data.papermc.io/v1/objects/.*/paper-[^1].*\.jar'
+
+# PaperMC v1.21
+software_id=181000
+aCHECK[$software_id]='url='\''https://fill.papermc.io/v3/projects/paper'\''; version=$(curl -sSf "$url"); version=${version#*\"1.21\":\[\"} version=${version%%\"*}; build=$(curl -sSf "$url/versions/$version"); build=${build##*\":\[} build=${build%%,*}; url=$(curl -sSf "$url/versions/$version/builds/$build"); url=${url##*\"url\":\"} url=${url%%\"*}; echo "$url"'
+aREGEX[$software_id]='https://fill-data.papermc.io/v1/objects/.*/paper-1\.21\..*\.jar'
 
 # Kubo
 software_id=186
@@ -355,8 +360,8 @@ aREGEX[$software_id]='https://github.com/Kareadita/Kavita/releases/download/.*/k
 
 # soju
 software_id=213
-aCHECK[$software_id]='curl -sSf '\''https://api.github.com/repos/emersion/soju/releases/latest'\'' | grep -Po '\''"browser_download_url": *"\K[^"]*\/soju-[^"\/]*\.tar\.gz(?=")'\'
-aREGEX[$software_id]='https://github.com/emersion/soju/releases/download/.*/soju-.*\.tar\.gz'
+aCHECK[$software_id]='curl -sSf '\''https://codeberg.org/api/v1/repos/emersion/soju/releases/latest'\'' | grep -Po '\''"browser_download_url": *"\K[^"]*\/soju-[^"\/]*\.tar\.gz(?=")'\'
+aREGEX[$software_id]='https://codeberg.org/emersion/soju/releases/download/.*/soju-.*\.tar\.gz'
 
 # WhoDB
 software_id=214
