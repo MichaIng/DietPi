@@ -3056,16 +3056,29 @@ unix_socket_directories = '/run/postgresql'" > "$i/00dietpi.conf"
 
 		if To_Install 196 # Java JRE
 		then
-			local JAVA_VERSION=21
+			local JAVA_VERSION=26
 
 			# ARMv6/7: Install Debian's OpenJDK packages since Adoptium does not support it
 			if (( $G_HW_ARCH < 3 ))
 			then
-				# ARMv6/Bookworm: Java 17 is the latest available one
-				(( $G_DISTRO < 8 || $G_HW_ARCH == 1 )) && JAVA_VERSION=17
+				# ARMv6: Java 17 is the latest available version
+				if (( $G_HW_ARCH == 1 ))
+				then
+					JAVA_VERSION=17
+				else
+					case $G_DISTRO in
+						7) JAVA_VERSION=17;;
+						8) JAVA_VERSION=25;;
+						*) JAVA_VERSION=26;;
+					esac
+				fi
+
+				# Limit Java version for specific applications. Multiple Java versions can be installed concurrently, and we use explicit executable paths in systemd units, hence this won't affect applications already installed, just those which are to be installed now.
+				(( ${aSOFTWARE_INSTALL_STATE[131]} == 1 && $JAVA_VERSION > 21 )) && JAVA_VERSION=21 # Blynk Server
+				(( ${aSOFTWARE_INSTALL_STATE[206]} == 1 && $JAVA_VERSION > 21 )) && JAVA_VERSION=21 # openHAB
 
 				G_AGI "openjdk-$JAVA_VERSION-jre-headless"
-				JAVA_PATH="/usr/lib/jvm/java-$JAVA_VERSION-openjdk-$(dpkg --print-architecture)/bin/java"
+				local JAVA_PATH="/usr/lib/jvm/java-$JAVA_VERSION-openjdk-$(dpkg --print-architecture)/bin/java"
 			else
 				# APT key: https://adoptium.net/installation/linux
 				G_EXEC mkdir -p /etc/apt/keyrings
@@ -3084,15 +3097,20 @@ _EOF_"
 				# Allow Debian's OpenJDK to be autopurged
 				G_EXEC apt-mark auto 'openjdk-*-jre-headless'
 
+				# Limit Java version for specific applications. Multiple Java versions can be installed concurrently, and we use explicit executable paths in systemd units, hence this won't affect applications already installed, just those which are to be installed now.
+				(( ${aSOFTWARE_INSTALL_STATE[131]} == 1 && $JAVA_VERSION > 21 )) && JAVA_VERSION=21 # Blynk Server
+				(( ${aSOFTWARE_INSTALL_STATE[206]} == 1 && $JAVA_VERSION > 21 )) && JAVA_VERSION=21 # openHAB
+
 				G_AGI "temurin-$JAVA_VERSION-jre"
-				JAVA_PATH="/usr/lib/jvm/temurin-$JAVA_VERSION-jre-$(dpkg --print-architecture)/bin/java"
+				local JAVA_PATH="/usr/lib/jvm/temurin-$JAVA_VERSION-jre-$(dpkg --print-architecture)/bin/java"
 			fi
 
 			# Define some default max heap size here
 			local JAVA_MAX_HEAP_SIZE=$(( $RAM_PHYS / 5 ))
 			(( $JAVA_MAX_HEAP_SIZE < 200 )) && JAVA_MAX_HEAP_SIZE=200
-			# - On 32-bit systems the head size cannot be above 3 GiB
-			(( $G_HW_ARCH < 3 && $JAVA_MAX_HEAP_SIZE > 3072 )) && JAVA_MAX_HEAP_SIZE=3072
+			# - On 32-bit systems, memory address space cannot exceed 4 GiB, heap size cannot exceed 3 GiB and needs to fit between HeapBaseMinAddress (default 2 GiB) and 4 GiB, and MaxMetaspaceSize is unlimited by default, so that needs to fit into the 4 GiB address space as well.
+			# - => limit heap size to 2 GiB, so heap space sits right at the end of the address space, and leaves enough for metadata as well.
+			(( $G_HW_ARCH < 3 && $JAVA_MAX_HEAP_SIZE > 2047 )) && JAVA_MAX_HEAP_SIZE=2047
 		fi
 
 		if To_Install 8 # Java JDK
@@ -4360,27 +4378,29 @@ _EOF_
 			Download_Install "https://download.yacy.net/$file" /etc
 
 			# Service
-			cat << '_EOF_' > /etc/systemd/system/yacy.service
+			cat << '_EOF_' > /etc/systemd/system/yacy.service || exit 1
 [Unit]
 Description=YaCy (DietPi)
-Documentation=https://wiki.yacy.net/index.php/En:Start
+Documentation=https://yacy.net/docs/#operation
 Wants=network-online.target
 After=network-online.target
 
 [Service]
-Type=forking
-ExecStart=/etc/yacy/startYACY.sh
+ExecStart=/etc/yacy/startYACY.sh -f
 ExecStop=/etc/yacy/stopYACY.sh
 
 [Install]
 WantedBy=multi-user.target
 _EOF_
-			# Set admin interface passwd:
+			# Set admin interface passwd
 			if [[ ! -f '/etc/yacy/DATA/SETTINGS/yacy.conf' ]]
 			then
 				Create_Config /etc/yacy/DATA/SETTINGS/yacy.conf yacy
 				/etc/yacy/bin/passwd.sh "$GLOBAL_PW"
 			fi
+
+			G_DIETPI-NOTIFY 2 'Limiting journal log level to WARNING'
+			G_CONFIG_INJECT 'net.yacy.kelondro.logging.ConsoleOutErrHandler.level[[:blank:]=]' 'net.yacy.kelondro.logging.ConsoleOutErrHandler.level = WARNING' /etc/yacy/DATA/LOG/yacy.logging
 		fi
 
 		if To_Install 186 ipfs # Kubo
@@ -6146,7 +6166,7 @@ _EOF_
 			Create_User -g dietpi -G audio -d /mnt/dietpi_userdata/airsonic airsonic
 
 			# Service
-			cat << _EOF_ > /etc/systemd/system/airsonic.service
+			cat << _EOF_ > /etc/systemd/system/airsonic.service || exit 1
 [Unit]
 Description=Airsonic-Advanced (DietPi)
 Wants=network-online.target
@@ -6156,7 +6176,7 @@ After=network-online.target remote-fs.target
 SyslogIdentifier=Airsonic
 User=airsonic
 WorkingDirectory=/mnt/dietpi_userdata/airsonic
-ExecStart=$JAVA_PATH -mx${JAVA_MAX_HEAP_SIZE}m -Dairsonic.home=/mnt/dietpi_userdata/airsonic -Dserver.servlet.context-path=/airsonic -Dserver.port=8080 -jar /mnt/dietpi_userdata/airsonic/airsonic.war
+ExecStart=$JAVA_PATH -Xmx${JAVA_MAX_HEAP_SIZE}m -Dairsonic.home=/mnt/dietpi_userdata/airsonic -Dserver.servlet.context-path=/airsonic -Dserver.port=8080 -jar /mnt/dietpi_userdata/airsonic/airsonic.war
 SuccessExitStatus=143
 
 [Install]
@@ -6824,7 +6844,7 @@ _EOF_
 			Create_User -d /mnt/dietpi_userdata/blynk blynk
 
 			# Service
-			cat << _EOF_ > /etc/systemd/system/blynkserver.service
+			cat << _EOF_ > /etc/systemd/system/blynkserver.service || exit 1
 [Unit]
 Description=Blynk Server (DietPi)
 Wants=network-online.target
@@ -6835,7 +6855,7 @@ SyslogIdentifier=Blynk
 User=blynk
 LogsDirectory=blynk
 WorkingDirectory=/mnt/dietpi_userdata/blynk
-ExecStart=$JAVA_PATH -mx${JAVA_MAX_HEAP_SIZE}m -jar /mnt/dietpi_userdata/blynk/blynkserver.jar
+ExecStart=$JAVA_PATH -Xmx${JAVA_MAX_HEAP_SIZE}m -jar /mnt/dietpi_userdata/blynk/blynkserver.jar
 SuccessExitStatus=143
 
 # Hardening
@@ -7439,7 +7459,7 @@ _EOF_'
 
 			# Service
 			G_DIETPI-NOTIFY 2 "Generating systemd service to start ${aSOFTWARE_NAME[$software_id]} on boot"
-			cat << _EOF_ > /etc/systemd/system/ubooquity.service
+			cat << _EOF_ > /etc/systemd/system/ubooquity.service || exit 1
 [Unit]
 Description=Ubooquity (DietPi)
 Wants=network-online.target
@@ -7450,7 +7470,7 @@ SyslogIdentifier=Ubooquity
 User=ubooquity
 LogsDirectory=ubooquity
 WorkingDirectory=/mnt/dietpi_userdata/ubooquity
-ExecStart=$JAVA_PATH -mx${JAVA_MAX_HEAP_SIZE}m -jar /mnt/dietpi_userdata/ubooquity/Ubooquity.jar --headless --remoteadmin --adminport 2038 --libraryport 2039
+ExecStart=$JAVA_PATH -Xmx${JAVA_MAX_HEAP_SIZE}m -jar /mnt/dietpi_userdata/ubooquity/Ubooquity.jar --headless --remoteadmin --adminport 2038 --libraryport 2039
 SuccessExitStatus=143
 
 [Install]
@@ -7492,7 +7512,7 @@ server:
   port: 2037
 _EOF_
 			# Service
-			cat << _EOF_ > /etc/systemd/system/komga.service
+			cat << _EOF_ > /etc/systemd/system/komga.service || exit 1
 [Unit]
 Description=Komga (DietPi)
 Wants=network-online.target
@@ -7502,7 +7522,7 @@ After=network-online.target remote-fs.target
 SyslogIdentifier=Komga
 User=komga
 WorkingDirectory=/mnt/dietpi_userdata/komga
-ExecStart=$JAVA_PATH -mx${JAVA_MAX_HEAP_SIZE}m -jar komga.jar
+ExecStart=$JAVA_PATH -Xmx${JAVA_MAX_HEAP_SIZE}m -jar komga.jar
 SuccessExitStatus=143
 
 [Install]
@@ -11322,10 +11342,13 @@ _EOF_
 				if (( $JAVA_VERSION >= 21 ))
 				then
 					url='https://fill.papermc.io/v3/projects/paper'
-					local version=$(curl -sSfL "$url"); version=${version#*:\[\"} version=${version%%\"*}
+					local version=$(curl -sSfL "$url")
+					(( $JAVA_VERSION < 25 )) && version=${version#*\"1.21\":\[\"} || version=${version#*:\[\"}
+					version=${version%%\"*}
 					local build=$(curl -sSfL "$url/versions/$version"); build=${build##*\":\[} build=${build%%,*}
 					url=$(curl -sSfL "$url/versions/$version/builds/$build"); url=${url##*\"url\":\"} url=${url%%\"*}
 					local fallback_url='https://fill-data.papermc.io/v1/objects/bcf7d5a399428d252e0710de9e305935e0af0ce8b4d50fd4651bc3d6f6a320fb/paper-26.1.2-7.jar'
+					(( $JAVA_VERSION < 25 )) && fallback_url='https://fill-data.papermc.io/v1/objects/5ffef465eeeb5f2a3c23a24419d97c51afd7dbb4923ff42df9a3f58bba1ccfba/paper-1.21.11-132.jar'
 				fi
 				Download_Install "$url" /opt/papermc/paperclip.jar
 				G_EXEC mkdir -p /mnt/dietpi_userdata/papermc
@@ -11382,7 +11405,7 @@ SyslogIdentifier=PaperMC
 User=papermc
 LogsDirectory=papermc
 WorkingDirectory=/mnt/dietpi_userdata/papermc
-ExecStart=$JAVA_PATH -mx${memory_limit}m -jar /opt/papermc/paperclip.jar --nogui --noconsole
+ExecStart=$JAVA_PATH -Xmx${memory_limit}m -jar /opt/papermc/paperclip.jar --nogui --noconsole
 SuccessExitStatus=143
 
 [Install]

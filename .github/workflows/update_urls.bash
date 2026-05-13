@@ -249,7 +249,12 @@ aREGEX[$software_id]='https://github.com/gotson/komga/releases/download/.*/komga
 # PaperMC
 software_id=181
 aCHECK[$software_id]='url='\''https://fill.papermc.io/v3/projects/paper'\''; version=$(curl -sSf "$url"); version=${version#*:\[\"} version=${version%%\"*}; build=$(curl -sSf "$url/versions/$version"); build=${build##*\":\[} build=${build%%,*}; url=$(curl -sSf "$url/versions/$version/builds/$build"); url=${url##*\"url\":\"} url=${url%%\"*}; echo "$url"'
-aREGEX[$software_id]='https://fill-data.papermc.io/v1/objects/.*/paper-.*.jar'
+aREGEX[$software_id]='https://fill-data.papermc.io/v1/objects/.*/paper-[^1].*\.jar'
+
+# PaperMC v1.21
+software_id=181000
+aCHECK[$software_id]='url='\''https://fill.papermc.io/v3/projects/paper'\''; version=$(curl -sSf "$url"); version=${version#*\"1.21\":\[\"} version=${version%%\"*}; build=$(curl -sSf "$url/versions/$version"); build=${build##*\":\[} build=${build%%,*}; url=$(curl -sSf "$url/versions/$version/builds/$build"); url=${url##*\"url\":\"} url=${url%%\"*}; echo "$url"'
+aREGEX[$software_id]='https://fill-data.papermc.io/v1/objects/.*/paper-1\.21\..*\.jar'
 
 # Kubo
 software_id=186
