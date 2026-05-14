@@ -34,8 +34,8 @@
 	echo '[ INFO ] Remounting root filesystem R/W'
 	mount -vo remount,rw /
 
-	echo '[ INFO ] Splitting output to /var/tmp/dietpi/logs/fs_partition_resize.log'
-	mkdir -pv /var/tmp/dietpi/logs
+	echo '[ INFO ] Splitting output to /var/lib/dietpi/logs/fs_partition_resize.log'
+	mkdir -pv /var/lib/dietpi/logs
 	{
 	# ---------------------------------------------------------
 	echo '[ INFO ] Disabling this service to prevent possible endless loop in case of failure'
@@ -174,7 +174,7 @@
 		;;
 	esac
 	# ---------------------------------------------------------
-	} &> >(tee -a /var/tmp/dietpi/logs/fs_partition_resize.log); wait $! # Method from dietpi-update to avoid commands running in a subshell, breaking script exits and implying variable changes remaining local
+	} &> >(tee -a /var/lib/dietpi/logs/fs_partition_resize.log); wait $! # Method from dietpi-update to avoid commands running in a subshell, breaking script exits and implying variable changes remaining local
 
 	exit "$EXIT_CODE"
 }

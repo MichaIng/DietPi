@@ -189,7 +189,6 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>
 
 - All files located in (recursively):
   - `/var/lib/dietpi/`
-  - `/var/tmp/dietpi/`
   - `/boot/dietpi/`
 - `/boot/dietpi.txt`
 - `/boot/firmware/config.txt` (RPi)
