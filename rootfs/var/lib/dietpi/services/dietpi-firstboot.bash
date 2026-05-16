@@ -149,12 +149,12 @@
 		then
 			G_DIETPI-NOTIFY 2 'Running custom script, please wait ...'
 			chmod +x /boot/Automation_Custom_PreScript.sh
-			if /boot/Automation_Custom_PreScript.sh 2>&1 | tee /var/tmp/dietpi/logs/dietpi-automation_custom_prescript.log
+			if /boot/Automation_Custom_PreScript.sh 2>&1 | tee /var/lib/dietpi/logs/dietpi-automation_custom_prescript.log
 			then
 				G_DIETPI-NOTIFY 0 'Custom script'
 			else
 				G_DIETPI-NOTIFY 1 'Custom script: Please see the log file for more information:
-         - /var/tmp/dietpi/logs/dietpi-automation_custom_prescript.log'
+         - /var/lib/dietpi/logs/dietpi-automation_custom_prescript.log'
 			fi
 		fi
 

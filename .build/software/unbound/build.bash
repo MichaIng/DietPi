@@ -248,7 +248,7 @@ _EOF_
 # - postinst
 cat << _EOF_ > "$DIR/DEBIAN/postinst" || exit 1
 #!/bin/dash -e
-if ! ip -6 r l ::/0 > /dev/null && [ -f '/etc/unbound/unbound.conf.d/dietpi.conf' ] && grep -q '^	#do-ip6: yes$' /etc/unbound/unbound.conf.d/dietpi.conf
+if [ -z "\$(ip -6 r l ::/0)" ] && [ -f '/etc/unbound/unbound.conf.d/dietpi.conf' ] && grep -q '^	#do-ip6: yes$' /etc/unbound/unbound.conf.d/dietpi.conf
 then
 	echo 'Disabling $PRETTY IPv6 usage since no IPv6 default route is assigned'
 	sed --follow-symlinks -i 's/^	#do-ip6: yes$/	do-ip6: no/' /etc/unbound/unbound.conf.d/dietpi.conf
