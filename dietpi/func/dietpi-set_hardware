@@ -593,18 +593,25 @@ _EOF_
 		# Get overlay params
 		local params=$(sed -En '/^[[:blank:]]*dtoverlay=vc4-f?kms-v3d(-pi4)?,/{s/^[^,]*//p;q}' /boot/firmware/config.txt)
 
-		# Always remove previous VC4 overlay entry
-		G_EXEC sed --follow-symlinks -Ei '/^[[:blank:]]*dtoverlay=vc4-f?kms-v3d/d' /boot/firmware/config.txt
+		# Whether to reconfigure onboard HDMI audio
+		local reconfigure_hdmi_audio=0
 
 		if [[ $INPUT_DEVICE_VALUE == 'vc4-kms-v3d' || $INPUT_DEVICE_VALUE == 'vc4-fkms-v3d' ]]
 		then
 			if [[ $INPUT_DEVICE_VALUE == 'vc4-fkms-v3d' ]]
 			then
 				# Fake KMS supports CMA params only
-				[[ $params ]] && params=$(mawk -F, '{for(i=1; i<=NF; i++) {if($i~/^cma-*/){print $i;exit}}}' <<< "$params")
-			else
-				# Disable VC4 HDMI audio if onboard HDMI is disabled
-				[[ $params != *',noaudio'* ]] && { ! grep -q '^[[:blank:]]*dtparam=audio=on' /boot/firmware/config.txt || grep -Eq '(^|[[:blank:]])snd_bcm2835.enable_hdmi=0([[:blank:]]|$)' /boot/firmware/cmdline.txt; } && params+=',noaudio'
+				[[ $params ]] && params=$(mawk -F, '{for(i=1; i<=NF; i++) {if($i~/^cma-*/){print ","$i;exit}}}' <<< "$params")
+
+			elif [[ $params != *',noaudio'* ]] && ! grep -Eq '^[[:blank:]]*dtoverlay=vc4-kms-v3d(-pi4)?(,|$)' /boot/firmware/config.txt
+			then
+				# Reconfigure onboard HDMI audio if snd_bcm2835 HDMI audio is currently enabled
+				if grep -q '^[[:blank:]]*dtparam=audio=on' /boot/firmware/config.txt && ! grep -Eq '(^|[[:blank:]])snd_bcm2835.enable_hdmi=0([[:blank:]]|$)' /boot/firmware/cmdline.txt
+				then
+					reconfigure_hdmi_audio=1
+				else
+					params+=',noaudio'
+				fi
 			fi
 
 			# Use additional argument for CMA size
@@ -618,11 +625,33 @@ _EOF_
 				fi
 			fi
 
-			G_CONFIG_INJECT "dtoverlay=$INPUT_DEVICE_VALUE" "dtoverlay=$INPUT_DEVICE_VALUE$params" /boot/firmware/config.txt
+			G_CONFIG_INJECT 'dtoverlay=vc4-f?kms-v3d' "dtoverlay=$INPUT_DEVICE_VALUE$params" /boot/firmware/config.txt
 
-		elif [[ $INPUT_DEVICE_VALUE != 'disable' ]]
+		elif [[ $INPUT_DEVICE_VALUE == 'disable' ]]
 		then
+			# Reconfigure onboard HDMI audio if VC4 HDMI audio is currently enabled
+			[[ $params != *',noaudio'* ]] && grep -Eq '^[[:blank:]]*dtoverlay=vc4-kms-v3d(-pi4)?(,|$)' /boot/firmware/config.txt && reconfigure_hdmi_audio=1
+
+			# Remove all KMS/DRM overlay entries
+			G_EXEC sed --follow-symlinks -Ei '/^[[:blank:]]*dtoverlay=vc4-f?kms-v3d/d' /boot/firmware/config.txt
+		else
 			Unknown_Input_Mode
+		fi
+
+		# Reconfigure onboard HDMI audio if enabled
+		(( $reconfigure_hdmi_audio )) || return 0
+		local soundcard=$(sed -n '/^[[:blank:]]*CONFIG_SOUNDCARD=/{s/^[^=]*=//p;q}' /boot/dietpi.txt)
+		if [[ $soundcard == 'rpi-bcm2835-hdmi' ]]
+		then
+			# RPi 5: Disable onboard HDMI audio, which cannot work without VC4 HDMI audio => KMS/DRM
+			if [[ $G_HW_MODEL == 5 && $INPUT_DEVICE_VALUE == 'disable' ]]
+			then
+				G_DIETPI-NOTIFY 2 'Disabling onboard HDMI audio on Raspberry Pi 5, which cannot work without KMS/DRM'
+				INPUT_DEVICE_VALUE='none' Soundcard_Main
+			else
+				G_DIETPI-NOTIFY 2 'Reconfiguring onboard HDMI audio to apply the needed switch between snd_bcm2835 and VC4 audio driver'
+				INPUT_DEVICE_VALUE=$soundcard Soundcard_Main
+			fi
 		fi
 	}
 
@@ -1157,6 +1186,7 @@ _EOF_
 
 		case $G_HW_MODEL in
 			[0-9]) (( $G_HW_ONBOARD_WIFI )) && aBLUETOOTH_MODULES+=('hci_uart');; # RPi. This kernel module is used by other SBCs, but e.g. on ROCK 4 SE it is needed as well for WiFi: https://github.com/MichaIng/DietPi/issues/6943
+			103) aBLUETOOTH_MODULES+=('hci_uart');; # NanoPi M5 official M.2 WiFi card
 			83|88|89|99|105) aBLUETOOTH_MODULES+=('sprdbt_tty');; # Orange Pi Zero 3/Zero 2W/3 LTS/3/4 LTS
 			87) [[ $G_HW_REVISION == '1.1' ]] && aBLUETOOTH_MODULES+=('sprdbt_tty');; # Orange Pi 3B v1.1
 			*) :;;
@@ -1502,7 +1532,7 @@ _EOF_
 				elif (( $DIETPIENV || $G_HW_MODEL == 49 ))
 				then
 					local baudrate='115200'
-					if [[ $G_HW_MODEL =~ ^(42|43|46|47|49|55|56|58|68|72|76|77|78|79|80|82|85|87|90|91|92|93|94|95|100|101|102|103|104|105)$ && $INPUT_ADDITIONAL =~ ^('ttyS2'|'ttyFIQ0')$ ]] || [[ $G_HW_MODEL =~ ^(73|104)$ && $INPUT_ADDITIONAL == 'ttyS'[012] ]]
+					if [[ $G_HW_MODEL =~ ^(42|43|46|47|49|55|56|58|68|72|76|77|78|79|80|82|85|87|90|91|92|93|94|95|100|101|105|106)$ && $INPUT_ADDITIONAL =~ ^('ttyS2'|'ttyFIQ0')$ ]] || [[ $G_HW_MODEL =~ ^(73|102|103|104)$ && $INPUT_ADDITIONAL =~ ^('ttyS0'|'ttyFIQ0')$ ]]
 					then
 						baudrate='1500000'
 						[[ -d /etc/systemd/system/serial-getty@$INPUT_ADDITIONAL.service.d ]] || G_EXEC mkdir "/etc/systemd/system/serial-getty@$INPUT_ADDITIONAL.service.d"
@@ -1864,7 +1894,7 @@ _EOF_
 			'rpi-bcm2835-'*)
 
 				# RPi 5: Enable KMS as the snd_bcm2835 driver does not work on Raspberry Pi 5. It has no 3.5mm jack, hence the only supported onboard audio is HDMI.
-				(( $G_HW_MODEL == 5 )) && INPUT_DEVICE_VALUE='vc4-kms-v3d' RPi_OpenGL_Main
+				(( $G_HW_MODEL == 5 )) && ! grep -Eq '^[[:blank:]]*dtoverlay=vc4-kms-v3d(-pi4)?(,|$)' /boot/firmware/config.txt && INPUT_DEVICE_VALUE='vc4-kms-v3d' RPi_OpenGL_Main
 
 				# Enable VC4 HDMI audio if onboard HDMI is enabled and KMS used, as the bcm2835 HDMI audio driver and KMS conflict: https://dietpi.com/forum/t/19568, https://github.com/raspberrypi/linux/issues/4651
 				if [[ $INPUT_DEVICE_VALUE != *'3.5mm' ]] && grep -Eq '^[[:blank:]]*dtoverlay=vc4-kms-v3d(-pi4)?,(noaudio|.+,noaudio)(,|$)' /boot/firmware/config.txt
@@ -1914,10 +1944,9 @@ _EOF_
 				then
 					G_EXEC curl -sSfL 'https://github.com/allocom/piano-firmware/archive/master.tar.gz' -o package.tar.gz
 					G_EXEC tar -xf package.tar.gz
-					G_EXEC_NOHALT=1 G_EXEC rm package.tar.gz
-					[[ -d '/lib/firmware' ]] || G_EXEC mkdir /lib/firmware
+					G_EXEC rm package.tar.gz
 					G_EXEC mv piano-firmware-master/lib/firmware/allo /lib/firmware/
-					G_EXEC_NOHALT=1 G_EXEC rm -R piano-firmware-master
+					G_EXEC rm -R piano-firmware-master
 				fi
 
 				G_CONFIG_INJECT "dtoverlay=$INPUT_DEVICE_VALUE" "dtoverlay=$INPUT_DEVICE_VALUE" /boot/firmware/config.txt
@@ -1925,17 +1954,18 @@ _EOF_
 
 			# dtoverlay
 			#	hifiberry-*
-			#	JustBoom-[dac|digi|both]
+			#	justboom-[dac|digi|both]
 			#	allo-boss-dac-pcm512x-audio
 			#	allo-boss2-dac-audio
 			#	allo-digione
 			#	allo-katana-dac-audio
-			#	rpi-dac
+			#	rpi-*
 			#	i-sabre-q2m
+			#	i2c-dac
 			#	applepi-dac
 			#	iqaudio-*
 			#	dionaudio-loco(-v2)
-			'hifiberry-'*|'justboom-'*|'allo-'*|'rpi-dac'|'i-sabre-q2m'|'applepi'*|'iqaudio-'*|'dionaudio-loco'*)
+			'hifiberry-'*|'justboom-'*|'allo-'*|'rpi-'*|'i-sabre-q2m'|'i2c-dac'|'applepi'*|'iqaudio-'*|'dionaudio-loco'*)
 
 				# Enable dtoverlay
 				G_CONFIG_INJECT "dtoverlay=$INPUT_DEVICE_VALUE" "dtoverlay=$INPUT_DEVICE_VALUE" /boot/firmware/config.txt
